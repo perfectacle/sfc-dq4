@@ -1,15 +1,15 @@
 # DQ4(FC) 장면 이동(워프) 도구
 
-세이브스테이트 하나에서 시작해 원하는 맵·필드 자리로 옮기고, 화면·인물·출구가 정상으로 실린 「조작 가능한」 상태를 세이브스테이트로 남기는 도구입니다. 게임 진행이 많이 필요한 장면(다른 장의 마을, 깊은 동굴)을 실험할 때 씁니다. 스크립트는 [tools/lua/fc/warp.lua](../tools/lua/fc/warp.lua), 감싼 셸은 [tools/dq4warp.sh](../tools/dq4warp.sh) 이고, 만든 과정은 [2026-10-25-08 일지](journal/dq4/2026-10-25-08-warp.md) 에 있습니다. 주소 표기는 [dq4-ram-format.md](dq4-ram-format.md) 를 따릅니다.
+세이브스테이트 하나에서 시작해 원하는 맵·필드 자리로 옮기고, 화면·인물·출구가 정상으로 실린 「조작 가능한」 상태를 세이브스테이트로 남기는 도구입니다. 게임 진행이 많이 필요한 장면(다른 장의 마을, 깊은 동굴)을 실험할 때 씁니다. 스크립트는 [fc/dq4/tools/lua/warp.lua](../tools/lua/warp.lua), 감싼 셸은 [fc/dq4/tools/dq4warp.sh](../tools/dq4warp.sh) 이고, 만든 과정은 [2026-10-25-08 일지](../journal/2026-10-25-08-warp.md) 에 있습니다. 주소 표기는 [dq4-ram-format.md](dq4-ram-format.md) 를 따릅니다.
 
 ## 쓰는 법
 
 ```sh
 export MESENCE=/path/to/Mesen
-tools/dq4warp.sh work/w1 0E/00                # 맵 0E/00. 좌표를 빼면 그 맵으로 들어오는 첫 출구의 도착 자리
-tools/dq4warp.sh work/w2 0E/00 15 0E 0        # 좌표 (15,0E), 위를 보고 섬
-tools/dq4warp.sh work/w3 field 0 67 67        # 필드 0 의 (67,67)
-SET="6157=E803" SEQ="up:16,a:6,wait:40,a:6,wait:150" tools/dq4warp.sh work/w4 04/00
+fc/dq4/tools/dq4warp.sh work/w1 0E/00                # 맵 0E/00. 좌표를 빼면 그 맵으로 들어오는 첫 출구의 도착 자리
+fc/dq4/tools/dq4warp.sh work/w2 0E/00 15 0E 0        # 좌표 (15,0E), 위를 보고 섬
+fc/dq4/tools/dq4warp.sh work/w3 field 0 67 67        # 필드 0 의 (67,67)
+SET="6157=E803" SEQ="up:16,a:6,wait:40,a:6,wait:150" fc/dq4/tools/dq4warp.sh work/w4 04/00
 ```
 
 결과 폴더에 `warp.mss`(도착 직후 세이브스테이트)·`warp.png`·`warp.txt`(출발·도착·끝의 `$63 $64 $65 $42 $43 $44 $45 $28`)가 생기고, `SEQ` 를 재생한 뒤의 `end.png`·`end.mss`·`end.ram`·`end.sram` 등이 생깁니다. `warp.mss` 는 다른 실험의 `STATE` 로 그대로 쓸 수 있습니다.
@@ -17,7 +17,7 @@ SET="6157=E803" SEQ="up:16,a:6,wait:40,a:6,wait:150" tools/dq4warp.sh work/w4 04
 `warp.lua` 는 툴킷 `seq.lua` 처럼 입력 드라이버이기도 해서, 프로브의 `DRIVER` 로 주면 워프 → `SEQ` 재생 동안 프로브가 돕니다. 이때는 프로브의 `MAXF` 까지 기다렸다가 멈춥니다.
 
 ```sh
-LIBDIR=$(uv run krpatch fc lua) DRIVER=$PWD/tools/lua/fc/warp.lua MAP=0E/00 X=15 Y=0E DIR=0 \
+LIBDIR=$(uv run krpatch fc lua) DRIVER=$PWD/fc/dq4/tools/lua/warp.lua MAP=0E/00 X=15 Y=0E DIR=0 \
   SEQ="a:6,wait:40,a:6,wait:150" TAIL=60 MAXF=600 TRACE=8656 SHOT_DIR=$PWD/work/talk \
   "$MESENCE" --testrunner --nes.ramPowerOnState=AllZeros "$PWD/rom/dq4.nes" "$LIBDIR/probe/trace.lua"
 ```
@@ -55,7 +55,7 @@ LIBDIR=$(uv run krpatch fc lua) DRIVER=$PWD/tools/lua/fc/warp.lua MAP=0E/00 X=15
 
 ## 확인
 
-출발은 모두 `dq4-ch1-throne.mss`(1장, `$615A`=`00`)입니다. 인물 표는 `tools/lua/fc/atpc.lua` 로 로드 직후(`1C:$9890`) 덤프해 비교했습니다.
+출발은 모두 `dq4-ch1-throne.mss`(1장, `$615A`=`00`)입니다. 인물 표는 `fc/dq4/tools/lua/atpc.lua` 로 로드 직후(`1C:$9890`) 덤프해 비교했습니다.
 
 | 목적지 | 도착 `$63/$64/$44/$45` | `dq4map.py npcs --compare` | `exits --compare`(`$05A0`) | 걷기·말하기 |
 | --- | --- | --- | --- | --- |

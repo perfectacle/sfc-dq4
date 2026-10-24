@@ -1,14 +1,14 @@
-"""DQ4(FC) 대사 텍스트 풀기. 형식은 docs/dq4-text-format.md.
+"""DQ4(FC) 대사 텍스트 풀기. 형식은 fc/dq4/docs/dq4-text-format.md.
 
 사용:
-  python tools/dq4text.py rom/dq4.nes all              실제로 있는 메시지 전부
-  python tools/dq4text.py rom/dq4.nes MSG [개수]      메시지 번호(16진)부터 글자로
-  python tools/dq4text.py rom/dq4.nes MSG --bytes     글자 바이트(화면 타일 번호)로
-  python tools/dq4text.py rom/dq4.nes MSG[,MSG…] --compare end.ram ...  seq.lua 의 RAM 덤프(창 줄 버퍼 $06AA,
+  python fc/dq4/tools/dq4text.py rom/dq4.nes all              실제로 있는 메시지 전부
+  python fc/dq4/tools/dq4text.py rom/dq4.nes MSG [개수]      메시지 번호(16진)부터 글자로
+  python fc/dq4/tools/dq4text.py rom/dq4.nes MSG --bytes     글자 바이트(화면 타일 번호)로
+  python fc/dq4/tools/dq4text.py rom/dq4.nes MSG[,MSG…] --compare end.ram ...  seq.lua 의 RAM 덤프(창 줄 버퍼 $06AA,
       전투 창이면 옆의 end.nt)가 차례로 찍은 메시지들과 맞는지. 치환 제어(F6 이름 등)는 아무 글자와 맞춤
-  python tools/dq4text.py rom/dq4.nes controls        제어 바이트 ED~FF 의 처리기 주소·뜻·쓰는 메시지 수
-  python tools/dq4text.py rom/dq4.nes windows         창 문자열 표 16:$A572(그룹, 항목, 루틴/문자열, 글자)
-  python tools/dq4text.py rom/dq4.nes export [DIR]    메시지·창 문자열·이름 목록을 기호 텍스트 JSON·TSV 로(기본 work/text).
+  python fc/dq4/tools/dq4text.py rom/dq4.nes controls        제어 바이트 ED~FF 의 처리기 주소·뜻·쓰는 메시지 수
+  python fc/dq4/tools/dq4text.py rom/dq4.nes windows         창 문자열 표 16:$A572(그룹, 항목, 루틴/문자열, 글자)
+  python fc/dq4/tools/dq4text.py rom/dq4.nes export [DIR]    메시지·창 문자열·이름 목록을 기호 텍스트 JSON·TSV 로(기본 work/text).
       --check 면 쓰지 않고 기호 → 바이트 왕복과 부호 → 롬 비트열만 검사. 출력은 저작권 텍스트라 커밋하지 않는다
 
 근거 루틴: 0F:$DF99(6비트 부호 읽기), 0F:$DFD5(뱅크 넘김), 16:$8656(메시지 번호 → 시작),

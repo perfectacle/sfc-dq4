@@ -1,13 +1,13 @@
 # DQ4(FC) 이름·아이템·몬스터·주문·성장 표
 
-메뉴와 전투에 나오는 이름 목록, 아이템·몬스터·주문 표, 레벨업 성장 곡선입니다. 디코더는 [tools/dq4data.py](../tools/dq4data.py), 실험 과정은 [2026-10-25-04 일지](journal/dq4/2026-10-25-04-data.md)(이름·아이템·몬스터 첫 확인)와 [2026-10-25-15 일지](journal/dq4/2026-10-25-15-stats.md)(주문·레벨업·몬스터 나머지·아이템 플래그), [2026-10-25-27 일지](journal/dq4/2026-10-25-27-stats2.md)(전투 행동·위력·내성·몬스터 AI·아이템 플래그의 실측)에 있습니다. 글자 바이트는 [dq4-text-format.md](dq4-text-format.md#글자-바이트) 와 같습니다. 근거가 실측이 아니라 코드 읽기인 줄에는 「코드 읽기」라고 적었습니다.
+메뉴와 전투에 나오는 이름 목록, 아이템·몬스터·주문 표, 레벨업 성장 곡선입니다. 디코더는 [fc/dq4/tools/dq4data.py](../tools/dq4data.py), 실험 과정은 [2026-10-25-04 일지](../journal/2026-10-25-04-data.md)(이름·아이템·몬스터 첫 확인)와 [2026-10-25-15 일지](../journal/2026-10-25-15-stats.md)(주문·레벨업·몬스터 나머지·아이템 플래그), [2026-10-25-27 일지](../journal/2026-10-25-27-stats2.md)(전투 행동·위력·내성·몬스터 AI·아이템 플래그의 실측)에 있습니다. 글자 바이트는 [dq4-text-format.md](dq4-text-format.md#글자-바이트) 와 같습니다. 근거가 실측이 아니라 코드 읽기인 줄에는 「코드 읽기」라고 적었습니다.
 
 ```sh
-uv run python tools/dq4data.py rom/dq4.nes spells      # 주문 60개: MP, 대상, 배우는 인물·레벨
-uv run python tools/dq4data.py rom/dq4.nes levels 6    # ライアン 1~99레벨 경험치·능력치 기준값
-uv run python tools/dq4data.py rom/dq4.nes items       # 아이템 종류·강도·가격·장비 인물·플래그
-uv run python tools/dq4data.py rom/dq4.nes monsters    # 몬스터 능력치·드롭·행동 ID·행동 수·AI·내성
-uv run python tools/dq4data.py rom/dq4.nes actions     # 전투 행동 ID 256개: 처리 루틴·위력·양·성공률
+uv run python fc/dq4/tools/dq4data.py rom/dq4.nes spells      # 주문 60개: MP, 대상, 배우는 인물·레벨
+uv run python fc/dq4/tools/dq4data.py rom/dq4.nes levels 6    # ライアン 1~99레벨 경험치·능력치 기준값
+uv run python fc/dq4/tools/dq4data.py rom/dq4.nes items       # 아이템 종류·강도·가격·장비 인물·플래그
+uv run python fc/dq4/tools/dq4data.py rom/dq4.nes monsters    # 몬스터 능력치·드롭·행동 ID·행동 수·AI·내성
+uv run python fc/dq4/tools/dq4data.py rom/dq4.nes actions     # 전투 행동 ID 256개: 처리 루틴·위력·양·성공률
 ```
 
 ## 이름 목록
@@ -269,7 +269,7 @@ uv run python tools/dq4data.py rom/dq4.nes actions     # 전투 행동 ID 256개
 | --- | --- | --- |
 | `$9E17` | 강도 1바이트. 무기는 공격력, 갑옷·방패·투구는 수비력 | 「つよさ」 화면: ライアン 힘 7 + どうのつるぎ 12 = こうげき力 19, 속도 4 / 2 + かわのよろい 12 = しゅび力 14 |
 | `$8E19` | bit6-0 가격의 앞자리, bit7 플래그. 전투 사용 루틴 `11:$85A1` 이 `$7354` bit7 로 옮김(뜻은 모름) | 코드 읽기 |
-| `$8D1B` | bit1-0 가격의 자릿수. 가격 = (`$8E19` & 7F) × 10^(`$8D1B` & 3)(`10:$8BED`). bit7-2 는 플래그(아래) | 가게 창 5곳 27품목의 화면 가격과 같음([dq4-shop-format.md](dq4-shop-format.md#가격), `tools/dq4shop.py G K --compare`) |
+| `$8D1B` | bit1-0 가격의 자릿수. 가격 = (`$8E19` & 7F) × 10^(`$8D1B` & 3)(`10:$8BED`). bit7-2 는 플래그(아래) | 가게 창 5곳 27품목의 화면 가격과 같음([dq4-shop-format.md](dq4-shop-format.md#가격), `fc/dq4/tools/dq4shop.py G K --compare`) |
 | `$8D9A` | bit7·bit6 플래그(`10[15]`·`10[14]`), bit5-0 번호(`10[12]`, 장비 대부분 `1B`). 전투 사용 루틴 `11:$859C` 가 bit7, `$85AC` 가 bit6 을 봄. 전투에서 쓰는 아이템 40개는 모두 bit7 이 섬 | 코드 읽기 |
 | `$8C9C` | 아이템 `00`~`52` 의 장비 인물 비트(bit = 인물 번호) | 「そうび」 화면(아래) |
 | `$8B37` | 종류 경계 `24 3D 46 50`: 0 무기(`00`~`23`), 1 갑옷(`24`~`3C`), 2 방패(`3D`~`45`), 3 투구(`46`~`4F`), 4 그 밖(`50`~). `7F` 는 빈칸 | 코드 읽기(`10:$8B1E`) |
@@ -322,9 +322,9 @@ uv run python tools/dq4data.py rom/dq4.nes actions     # 전투 행동 ID 256개
 
 ## 확인
 
-- 1장 세이브스테이트(`work/state/dq4-ch1-field.mss`, `dq4-ch1-battle.mss`)에서 [tools/lua/fc/statspoke.lua](../tools/lua/fc/statspoke.lua) 로 RAM(레코드, `$616A`, 경험치)이나 롬 바이트를 한 번 바꾸고 전투를 만들어 이김.
-- 레벨업: 인물마다 레코드를 1레벨 값으로 써 넣고 경험치 5000 으로 싸워 10~13레벨까지 올리며 [tools/lua/fc/statsstack.lua](../tools/lua/fc/statsstack.lua) 로 `12:$9DE7`·`$9E09`·`$9E23`·`$9D64`·`$9E8C`·`$9F06` 을 기록. 0~5·7번은 레코드를 바꿔서, ライアン 은 경험치 20000 으로 17레벨까지 올려 목표값 626, 기준 증가분 626, 증가량 626, 다음 레벨 경험치 143, 지혜 보정 56, 주문 습득 56 건이 계산과 모두 같았고, 끝 레코드의 능력치가 처음 값 + 기록한 증가량과 같았음.
-- 전투 행동·위력·내성·몬스터 AI·아이템(2026-10-25-27 일지): 필드 세이브스테이트(`stats-cristo-field.mss`)에서 `18:$9D09` 의 조우 비교를 메모리에서 `CLC; NOP` 으로 바꿔 걸음마다 전투를 내고, [tools/lua/fc/statspc.lua](../tools/lua/fc/statspc.lua) 로 전투 시작 `18:$A11A` 에서 무리(`$6E45`~)를 원하는 몬스터로 바꿈. 인물 레코드를 써 넣어 ブライ·マーニャ·クリフト 혼자 또는 둘로 싸우며 `statsstack.lua` 로 `13:$B599`·`$B5A1`·`$B71D`, `11:$8C78`, 메시지 `16:$8656` 을 기록.
+- 1장 세이브스테이트(`work/state/dq4-ch1-field.mss`, `dq4-ch1-battle.mss`)에서 [fc/dq4/tools/lua/statspoke.lua](../tools/lua/statspoke.lua) 로 RAM(레코드, `$616A`, 경험치)이나 롬 바이트를 한 번 바꾸고 전투를 만들어 이김.
+- 레벨업: 인물마다 레코드를 1레벨 값으로 써 넣고 경험치 5000 으로 싸워 10~13레벨까지 올리며 [fc/dq4/tools/lua/statsstack.lua](../tools/lua/statsstack.lua) 로 `12:$9DE7`·`$9E09`·`$9E23`·`$9D64`·`$9E8C`·`$9F06` 을 기록. 0~5·7번은 레코드를 바꿔서, ライアン 은 경험치 20000 으로 17레벨까지 올려 목표값 626, 기준 증가분 626, 증가량 626, 다음 레벨 경험치 143, 지혜 보정 56, 주문 습득 56 건이 계산과 모두 같았고, 끝 레코드의 능력치가 처음 값 + 기록한 증가량과 같았음.
+- 전투 행동·위력·내성·몬스터 AI·아이템(2026-10-25-27 일지): 필드 세이브스테이트(`stats-cristo-field.mss`)에서 `18:$9D09` 의 조우 비교를 메모리에서 `CLC; NOP` 으로 바꿔 걸음마다 전투를 내고, [fc/dq4/tools/lua/statspc.lua](../tools/lua/statspc.lua) 로 전투 시작 `18:$A11A` 에서 무리(`$6E45`~)를 원하는 몬스터로 바꿈. 인물 레코드를 써 넣어 ブライ·マーニャ·クリフト 혼자 또는 둘로 싸우며 `statsstack.lua` 로 `13:$B599`·`$B5A1`·`$B71D`, `11:$8C78`, 메시지 `16:$8656` 을 기록.
 
 ## 남은 것
 

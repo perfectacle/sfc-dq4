@@ -1,16 +1,16 @@
 # DQ4(FC) 필드 인물·탈것 그림과 전투 몬스터 그림
 
-FC 원작의 필드 인물(일행·마을 사람·탈것)과 전투 몬스터 그림을 롬에서 그대로 뽑는 방법입니다. SFC DQ5 규격으로 스프라이트를 새로 그릴 때 원작을 옆에 놓고 보는 참조용입니다. 디코더·열람 도구는 [tools/dq4fcsprite.py](../tools/dq4fcsprite.py), 전투 덤프용 프로브는 [tools/lua/fc/spritebattle.lua](../tools/lua/fc/spritebattle.lua) 이고, 찾아낸 과정은 [2026-10-25-29 일지](journal/dq4/2026-10-25-29-fcsprite.md) 에 있습니다.
+FC 원작의 필드 인물(일행·마을 사람·탈것)과 전투 몬스터 그림을 롬에서 그대로 뽑는 방법입니다. SFC DQ5 규격으로 스프라이트를 새로 그릴 때 원작을 옆에 놓고 보는 참조용입니다. 디코더·열람 도구는 [fc/dq4/tools/dq4fcsprite.py](../tools/dq4fcsprite.py), 전투 덤프용 프로브는 [fc/dq4/tools/lua/spritebattle.lua](../tools/lua/spritebattle.lua) 이고, 찾아낸 과정은 [2026-10-25-29 일지](../journal/2026-10-25-29-fcsprite.md) 에 있습니다.
 
 주소 표기는 `뱅크:$주소` 입니다. 근거 표시가 없는 것은 MesenCE 덤프와 디코더 결과가 같음을 확인한 것이고, 「코드 읽기」 는 리스팅만 읽은 것입니다. 롬에서 뽑은 그림은 저작권 데이터라 `work/` 에만 두고 커밋하지 않습니다.
 
 ## 쓰는 법
 
 ```sh
-uv run --locked python tools/dq4fcsprite.py rom/dq4.nes sheet          # 전부 만들고 work/dq4-fcsprite/index.html 로 묶음
-uv run --locked python tools/dq4fcsprite.py rom/dq4.nes field 11       # 그림 번호 11(병사)의 PNG·색 번호 행렬
-uv run --locked python tools/dq4fcsprite.py rom/dq4.nes monster 30     # 몬스터 ID 30(キングスライム)
-uv run --locked python tools/dq4fcsprite.py rom/dq4.nes who 11         # 그림 번호 11 을 쓰는 맵·인물(슬롯, 자리, 대화 번호)
+uv run --locked python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes sheet          # 전부 만들고 work/dq4-fcsprite/index.html 로 묶음
+uv run --locked python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes field 11       # 그림 번호 11(병사)의 PNG·색 번호 행렬
+uv run --locked python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes monster 30     # 몬스터 ID 30(キングスライム)
+uv run --locked python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes who 11         # 그림 번호 11 을 쓰는 맵·인물(슬롯, 자리, 대화 번호)
 ```
 
 | 출력(`work/dq4-fcsprite/`) | 내용 |
@@ -21,7 +21,7 @@ uv run --locked python tools/dq4fcsprite.py rom/dq4.nes who 11         # 그림 
 | `monster/II.png`, `II-x8.png`, `II.txt` | 몬스터 ID II 의 그림(그림 크기 그대로), 8배, 색 번호 행렬(색 번호 → NES 색, BG·OBJ 팔레트) |
 | `index.html`, `sheet-field.png`, `sheet-monster.png` | 필드 그림 143개와 몬스터 195종을 이름·번호와 한 페이지로. 로컬 파일만 참조 |
 
-PNG 는 팔레트 모드이고 색 번호 0 이 투명입니다. 같은 NES 색은 한 번호로 합칩니다. RGB 는 [tools/dq4block.py](../tools/dq4block.py) 의 `nes_rgb` 근사라 에뮬레이터 화면과 조금 다릅니다. 정확한 색은 `.txt` 의 NES 색 번호로 봅니다. 8배 PNG 는 [sprites 스킬](../.agents/skills/sprites/SKILL.md)의 「같은 배율로 견주기」에 그대로 씁니다.
+PNG 는 팔레트 모드이고 색 번호 0 이 투명입니다. 같은 NES 색은 한 번호로 합칩니다. RGB 는 [fc/dq4/tools/dq4block.py](../tools/dq4block.py) 의 `nes_rgb` 근사라 에뮬레이터 화면과 조금 다릅니다. 정확한 색은 `.txt` 의 NES 색 번호로 봅니다. 8배 PNG 는 [sprites 스킬](../../../.agents/skills/sprites/SKILL.md)의 「같은 배율로 견주기」에 그대로 씁니다.
 
 ## 필드 그림
 
@@ -58,7 +58,7 @@ PNG 는 팔레트 모드이고 색 번호 0 이 투명입니다. 같은 NES 색�
 
 그림 번호 bit7(인물 레코드 바이트 1 bit6, 밤은 bit5)이 켜져 있으면 레코드 4(아래쪽 걸음 0) 하나로 8블록을 모두 만듭니다(`08:$8618`). 방향 k 의 두 블록은 같고, 레코드 4 를 시계 방향으로 k × 90° 돌린 그림입니다.
 
-- 4타일 자리: 새 [0, 1, 2, 3] = 옛 [2, 0, 3, 1](`08:$8981`), 반전 비트도 같이 옮김(`08:$82D2`).
+- 4타일 자리: 새 [0, 1, 2, 3] = 옛 [2, 0, 3, 1](../../../docs/`08:$8981`), 반전 비트도 같이 옮김(`08:$82D2`).
 - 타일 그림: 8×8 을 시계 방향으로 돌림(`08:$89C9`).
 - k 가 홀수면 옮긴 반전 비트가 상하 반전으로, 짝수면 좌우 반전으로 들어감(`08:$82F6`).
 - 방향마다 같은 주소 목록을 비우고 새 타일을 받음(`$79`·`$04` 를 되돌림).
@@ -111,7 +111,7 @@ PNG 는 팔레트 모드이고 색 번호 0 이 투명입니다. 같은 NES 색�
 
 | 항목 | FC 원작 | 참고 |
 | --- | --- | --- |
-| 필드 인물 크기 | 16×16(8×8 OBJ 2×2). DQ5 는 16×24 상자에 실제 14×17 | 비율이 다르므로 복장·색 배치만 옮긴다([dq4-sprite-format.md](dq4-sprite-format.md)) |
+| 필드 인물 크기 | 16×16(8×8 OBJ 2×2). DQ5 는 16×24 상자에 실제 14×17 | 비율이 다르므로 복장·색 배치만 옮긴다([dq4-sprite-format.md](../../../sfc/dq4/docs/dq4-sprite-format.md)) |
 | 필드 인물 색 | OBJ 팔레트 하나의 3색 + 투명. 팔레트 4개를 모든 인물이 함께 씀(`08:$8703`) | 윤곽 전용 색이 없다. DQ5 는 투명 빼고 8~12색 |
 | 걸음 | 방향마다 2프레임, 블록 전체가 바뀜. 모든 인물이 `$0526` bit7 에 맞춰 같이 걷는다 | DQ5 는 머리 고정, 몸만 바뀜 |
 | 좌우 | 정면·뒷면은 왼쪽 반을 반전한 타일이 많고, 서쪽은 동쪽을 반전한 그림이 많다(레코드의 반전 비트) | 반전이 아닌 그림도 있으니 표 그대로 본다 |
@@ -133,12 +133,12 @@ PNG 는 팔레트 모드이고 색 번호 0 이 투명입니다. 같은 NES 색�
 
 ```sh
 export MESENCE=/path/to/MesenCE LIBDIR=$(uv run --locked krpatch fc lua)
-tools/dq4warp.sh work/dq4-fcsprite/w-0E-00 0E/00                    # 맵 덤프(end.*)
-uv run --locked python tools/dq4fcsprite.py rom/dq4.nes check-field work/dq4-fcsprite/w-0E-00
+fc/dq4/tools/dq4warp.sh work/dq4-fcsprite/w-0E-00 0E/00                    # 맵 덤프(end.*)
+uv run --locked python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes check-field work/dq4-fcsprite/w-0E-00
 d=$PWD/work/dq4-fcsprite/bt-67; mkdir -p $d
 STATE=$PWD/work/state/dq4-ch1-field.mss MON="67:1" WAIT=360 SHOT_DIR=$d \
-  "$MESENCE" --testrunner --nes.ramPowerOnState=AllZeros "$PWD/rom/dq4.nes" "$PWD/tools/lua/fc/spritebattle.lua"
-uv run --locked python tools/dq4fcsprite.py rom/dq4.nes check-monster $d
+  "$MESENCE" --testrunner --nes.ramPowerOnState=AllZeros "$PWD/rom/dq4.nes" "$PWD/fc/dq4/tools/lua/spritebattle.lua"
+uv run --locked python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes check-monster $d
 ```
 
 ## 남은 것

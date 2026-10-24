@@ -1,8 +1,8 @@
 #!/bin/sh
-# DQ4 장면 이동: tools/lua/fc/warp.lua 를 돌려 목적지에서 조작 가능한 세이브스테이트를 만든다.
+# DQ4 장면 이동: fc/dq4/tools/lua/warp.lua 를 돌려 목적지에서 조작 가능한 세이브스테이트를 만든다.
 # 저장소 최상위에서 실행한다. MESENCE 필요.
-#   tools/dq4warp.sh OUT GG/KK [X Y [DIR]]   맵. X Y 를 빼면 그 맵으로 들어오는 첫 출구·입구의 도착 자리
-#   tools/dq4warp.sh OUT field F X Y          필드
+#   fc/dq4/tools/dq4warp.sh OUT GG/KK [X Y [DIR]]   맵. X Y 를 빼면 그 맵으로 들어오는 첫 출구·입구의 도착 자리
+#   fc/dq4/tools/dq4warp.sh OUT field F X Y          필드
 # OUT 은 결과 폴더(work/ 아래 상대 경로도 됨). OUT/warp.mss, warp.png, warp.txt, end.* 가 생긴다.
 # STATE, KEY, WAIT, SET, AFTER, SEQ, TAIL, STATE_OUT 은 환경 변수로 그대로 넘어간다(warp.lua 머리 주석).
 set -e
@@ -29,7 +29,7 @@ else
     # 연결 표(dq4map.exits 와 같은 도착 자리 계산)와 필드 입구의 도착 레코드에서 첫 자리
     set -- $(uv run --locked python - "${2%/*}" "${2#*/}" <<'EOF'
 import sys
-sys.path.insert(0, 'tools')
+sys.path.insert(0, 'fc/dq4/tools')
 from kr_patch.fc import ines
 import dq4field
 import dq4map
@@ -52,5 +52,5 @@ EOF
   fi
 fi
 SHOT_DIR=$out "$MESENCE" --testrunner --nes.ramPowerOnState=AllZeros "$root/rom/dq4.nes" \
-  "$root/tools/lua/fc/warp.lua" >/dev/null 2>&1 || true
+  "$root/fc/dq4/tools/lua/warp.lua" >/dev/null 2>&1 || true
 cat "$out/warp.txt"

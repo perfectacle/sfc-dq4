@@ -1,13 +1,13 @@
-"""DQ4(FC) 적 조우 표. 형식은 docs/dq4-encounter-format.md.
+"""DQ4(FC) 적 조우 표. 형식은 fc/dq4/docs/dq4-encounter-format.md.
 
 사용:
-  python tools/dq4encounter.py rom/dq4.nes maps [--png out.png]   필드 조우 구역 지도(장마다 16×16)
-  python tools/dq4encounter.py rom/dq4.nes zones [Z]               구역 101개: 조우율·무게 줄·칸 14개
-  python tools/dq4encounter.py rom/dq4.nes odds Z [--night|--dungeon]  칸별 확률과 마릿수 범위
-  python tools/dq4encounter.py rom/dq4.nes dungeons                던전 그룹 → 층(순번)마다 구역
-  python tools/dq4encounter.py rom/dq4.nes formations              고정 편성 16개(칸 12·13)
-  python tools/dq4encounter.py rom/dq4.nes bosses                  특수 전투 34개와 부르는 곳
-  python tools/dq4encounter.py rom/dq4.nes check [enc.txt ...]     표 경계 검사, tools/lua/fc/enc.lua 기록 대조
+  python fc/dq4/tools/dq4encounter.py rom/dq4.nes maps [--png out.png]   필드 조우 구역 지도(장마다 16×16)
+  python fc/dq4/tools/dq4encounter.py rom/dq4.nes zones [Z]               구역 101개: 조우율·무게 줄·칸 14개
+  python fc/dq4/tools/dq4encounter.py rom/dq4.nes odds Z [--night|--dungeon]  칸별 확률과 마릿수 범위
+  python fc/dq4/tools/dq4encounter.py rom/dq4.nes dungeons                던전 그룹 → 층(순번)마다 구역
+  python fc/dq4/tools/dq4encounter.py rom/dq4.nes formations              고정 편성 16개(칸 12·13)
+  python fc/dq4/tools/dq4encounter.py rom/dq4.nes bosses                  특수 전투 34개와 부르는 곳
+  python fc/dq4/tools/dq4encounter.py rom/dq4.nes check [enc.txt ...]     표 경계 검사, fc/dq4/tools/lua/enc.lua 기록 대조
 
 근거 루틴(뱅크 18): $9BE6(걸음마다 조우 판정), $9C19(필드 구역), $9F79·$A069(던전 구역),
 $9C88(구역 레코드), $9CB2·$9CCC·$9CF6(조우율), $9D0E~$9F5D(무리 고르기), $A1AD(특수 전투).

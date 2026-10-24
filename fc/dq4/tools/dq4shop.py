@@ -1,11 +1,11 @@
-"""DQ4(FC) 상점 품목·여관 값·가게 종류. 형식은 docs/dq4-shop-format.md.
+"""DQ4(FC) 상점 품목·여관 값·가게 종류. 형식은 fc/dq4/docs/dq4-shop-format.md.
 
 사용:
-  python tools/dq4shop.py rom/dq4.nes              무기·방어구·도구 가게 목록 전부와 여관 표
-  python tools/dq4shop.py rom/dq4.nes G K          맵(그룹 $63/순번 $64)의 가게 목록, 여관 값, 가게 인물(스크립트로 여는 가게 포함)
-  python tools/dq4shop.py rom/dq4.nes G K --compare end.ram [end.sram]   seq.lua 의 RAM 덤프로 가게 창 목록($07BD) 비교.
+  python fc/dq4/tools/dq4shop.py rom/dq4.nes              무기·방어구·도구 가게 목록 전부와 여관 표
+  python fc/dq4/tools/dq4shop.py rom/dq4.nes G K          맵(그룹 $63/순번 $64)의 가게 목록, 여관 값, 가게 인물(스크립트로 여는 가게 포함)
+  python fc/dq4/tools/dq4shop.py rom/dq4.nes G K --compare end.ram [end.sram]   seq.lua 의 RAM 덤프로 가게 창 목록($07BD) 비교.
                                                   SRAM 덤프를 주면 그 플래그·시간으로 덧붙임까지 계산해 비교
-  python tools/dq4shop.py rom/dq4.nes people       롬 전체의 「인물 → 가게(종류·품목 줄·여관 값)」 표
+  python fc/dq4/tools/dq4shop.py rom/dq4.nes people       롬 전체의 「인물 → 가게(종류·품목 줄·여관 값)」 표
 
 근거 루틴(코드 읽기와 실측):
   15:$9962  대화 결과 $00:$01 이 7 미만이면 가게 처리 15:$9CBF 로 간다.

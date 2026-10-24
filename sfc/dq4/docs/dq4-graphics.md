@@ -1,40 +1,40 @@
 # DQ4 포팅용 그래픽 제작물
 
-타이틀과 모험 일러스트는 사용자가 높게 평가했으며 원본과 프롬프트를 보존합니다. 첫 스프라이트는 여러 차례 수정 후에도 거절됐고([그래픽 핸드오프](dq4-graphics-handoff.md)), 지금의 `tools/dq4sprites.py` 는 SFC DQ5 인물을 실측한 규칙으로 다시 그린 2차 시안입니다. 규격·실측·MesenCE 표시 실험은 [DQ4 포팅용 인물 스프라이트 규격](dq4-sprite-format.md)에 있습니다. 샘플 맵은 채택되지 않은 시안입니다.
+타이틀과 모험 일러스트는 사용자가 높게 평가했으며 원본과 프롬프트를 보존합니다. 첫 스프라이트는 여러 차례 수정 후에도 거절됐고([그래픽 핸드오프](../handoff.md)), 지금의 `sfc/dq4/tools/dq4sprites.py` 는 SFC DQ5 인물을 실측한 규칙으로 다시 그린 2차 시안입니다. 규격·실측·MesenCE 표시 실험은 [DQ4 포팅용 인물 스프라이트 규격](dq4-sprite-format.md)에 있습니다. 샘플 맵은 채택되지 않은 시안입니다.
 
 이 문서는 변환 도구의 출력 규격을 기록합니다. 변환 도구 출력의 `engine_ready` 는 계속 `false` 이며, Lua 로 필드에 띄우는 실험은 엔진 삽입이나 영구 패치가 아닙니다.
 
 ## 초기 시안과 보존할 그림
 
-![성·마을 샘플 맵 위에서 두 인물의 프레임을 합성한 애니메이션](images/dq4-graphics-walk.webp)
+![성·마을 샘플 맵 위에서 두 인물의 프레임을 합성한 애니메이션](../images/dq4-graphics-walk.webp)
 
 위 그림은 Python 으로 합성한 프레임 미리보기입니다. 게임 실행 화면이나 통행 검사 결과가 아닙니다.
 
-![DQ4 인물 9명의 정지·보행·측면·후면](images/dq4-sprites-gallery.webp)
+![DQ4 인물 9명의 정지·보행·측면·후면](../images/dq4-sprites-gallery.webp)
 
-![성·마을용 49종 블록](images/dq4-graphics-tileset.webp)
+![성·마을용 49종 블록](../images/dq4-graphics-tileset.webp)
 
-![성 안뜰과 마을을 이어 그린 샘플 맵](images/dq4-graphics-map.webp)
+![성 안뜰과 마을을 이어 그린 샘플 맵](../images/dq4-graphics-map.webp)
 
-![256×224, 타일별 팔레트로 변환한 한글 타이틀](images/dq4-graphics-title.webp)
+![256×224, 타일별 팔레트로 변환한 한글 타이틀](../images/dq4-graphics-title.webp)
 
-![라이안과 호이미 슬라임의 모험 일러스트](images/dq4-graphics-journey.webp)
+![라이안과 호이미 슬라임의 모험 일러스트](../images/dq4-graphics-journey.webp)
 
 ## 원본과 수정 위치
 
 | 파일 | 역할 |
 | --- | --- |
-| `tools/dq4pixels.py` | 스프라이트와 지형 제작물을 모으는 모듈 |
-| `tools/dq4sprites.py` | 인물 9명의 색 번호 문자 행렬과 팔레트([규격](dq4-sprite-format.md)) |
-| `tools/dq4terrain.py` | 블록 무늬·팔레트·블록 이름 격자 `MAP_LAYOUT` 의 편집 원본 |
-| `tools/dq4art/title.png` | 이미지 생성 도구로 새로 제작한 타이틀 원본, 1341×1173 |
-| `tools/dq4art/journey.png` | 이미지 생성 도구로 새로 제작한 일러스트 원본, 1536×1024 |
-| `tools/dq4art/prompts.json` | 이미지 생성과 타이틀 부제 수정에 사용한 프롬프트 |
-| `tools/dq4title.py` | 타이틀 축소·8개 BG 팔레트 선택 |
-| `tools/dq4graphics.py` | PNG·CHR·팔레트·BG 맵 출력과 검증 |
-| `tools/dq4figures.py` | 문서용 WebP 그림과 합성 애니메이션 생성 |
+| `sfc/dq4/tools/dq4pixels.py` | 스프라이트와 지형 제작물을 모으는 모듈 |
+| `sfc/dq4/tools/dq4sprites.py` | 인물 9명의 색 번호 문자 행렬과 팔레트([규격](dq4-sprite-format.md)) |
+| `sfc/dq4/tools/dq4terrain.py` | 블록 무늬·팔레트·블록 이름 격자 `MAP_LAYOUT` 의 편집 원본 |
+| `sfc/dq4/tools/dq4art/title.png` | 이미지 생성 도구로 새로 제작한 타이틀 원본, 1341×1173 |
+| `sfc/dq4/tools/dq4art/journey.png` | 이미지 생성 도구로 새로 제작한 일러스트 원본, 1536×1024 |
+| `sfc/dq4/tools/dq4art/prompts.json` | 이미지 생성과 타이틀 부제 수정에 사용한 프롬프트 |
+| `sfc/dq4/tools/dq4title.py` | 타이틀 축소·8개 BG 팔레트 선택 |
+| `sfc/dq4/tools/dq4graphics.py` | PNG·CHR·팔레트·BG 맵 출력과 검증 |
+| `sfc/dq4/tools/dq4figures.py` | 문서용 WebP 그림과 합성 애니메이션 생성 |
 
-롬이나 다른 팬 해킹에서 추출한 그림은 사용하지 않았습니다. 스프라이트와 지형은 [원작 참고 자료](references.md#dq4-포팅용-그래픽)를 보고, 인물의 비율·윤곽과 벽돌·돌바닥·나무의 표현을 직접 작성했습니다. 타이틀은 사용자가 제공한 Nintendo DS DQ4 화면을 구도·색감 참고로 삼아 OpenAI 내장 `image_gen` 으로 새로 구성했습니다. 하늘·용·적금색 한글 로고를 그린 생성 원본이며, 참고 화면은 배포하지 않습니다. 모험 일러스트는 외부 참조 이미지 없이 생성했습니다. 같은 프롬프트로 같은 그림을 다시 얻을 수 없으므로 생성 원본을 저장소에 보관합니다. 고정된 원본과 `uv.lock` 의 의존성으로 만드는 변환 결과는 반복 생성해 비교합니다.
+롬이나 다른 팬 해킹에서 추출한 그림은 사용하지 않았습니다. 스프라이트와 지형은 [원작 참고 자료](../references.md#dq4-포팅용-그래픽)를 보고, 인물의 비율·윤곽과 벽돌·돌바닥·나무의 표현을 직접 작성했습니다. 타이틀은 사용자가 제공한 Nintendo DS DQ4 화면을 구도·색감 참고로 삼아 OpenAI 내장 `image_gen` 으로 새로 구성했습니다. 하늘·용·적금색 한글 로고를 그린 생성 원본이며, 참고 화면은 배포하지 않습니다. 모험 일러스트는 외부 참조 이미지 없이 생성했습니다. 같은 프롬프트로 같은 그림을 다시 얻을 수 없으므로 생성 원본을 저장소에 보관합니다. 고정된 원본과 `uv.lock` 의 의존성으로 만드는 변환 결과는 반복 생성해 비교합니다.
 
 ## 규격과 출력
 
@@ -66,16 +66,16 @@
 
 ```sh
 uv sync --locked
-uv run --locked python tools/dq4graphics.py
-uv run --locked python tools/dq4graphics.py --check
-uv run --locked python tools/dq4figures.py
+uv run --locked python sfc/dq4/tools/dq4graphics.py
+uv run --locked python sfc/dq4/tools/dq4graphics.py --check
+uv run --locked python sfc/dq4/tools/dq4figures.py
 ```
 
 `--check` 는 파일을 쓰지 않고 메모리에서 두 번 생성한 결과를 비교합니다. 알려진 비트플레인 패턴, 타일 인코딩·디코딩의 색 번호 일치, 5비트 정밀도의 팔레트 왕복, BG 타일맵 재조립을 검사합니다. 이는 출력 형식 검사이며 에뮬레이터 검증을 대신하지 않습니다.
 
 ## 남은 것
 
-- 스프라이트 제작 방법을 다시 정합니다. 현재 시안을 채택하거나 고해상도 B3의 축소·명암 수정만 반복하지 않습니다. 16×24 원본 크기에서 원작과 비교한 뒤 사용자 확인을 받는 작업 순서는 [핸드오프](dq4-graphics-handoff.md)에 있습니다. 로컬 Lua 실험의 OBJ 조합은 재사용 후보이며 영구 삽입 경로는 미완성입니다.
+- 스프라이트 제작 방법을 다시 정합니다. 현재 시안을 채택하거나 고해상도 B3의 축소·명암 수정만 반복하지 않습니다. 16×24 원본 크기에서 원작과 비교한 뒤 사용자 확인을 받는 작업 순서는 [핸드오프](../handoff.md)에 있습니다. 로컬 Lua 실험의 OBJ 조합은 재사용 후보이며 영구 삽입 경로는 미완성입니다.
 - 맵 BG 는 팔레트 0, 타이틀 BG 는 0–7 을 가정합니다. 각 팔레트의 색 번호 0 은 투명하게 처리됩니다. PNG 와 같은 결과를 내려면 CGRAM 0 을 해당 `.pal` 의 첫 색으로 맞추고 아래쪽 BG 가 비쳐 나오지 않게 해야 합니다. 타이틀의 모든 팔레트는 같은 배경색을 공유합니다. BG·OBJ 팔레트 위치와 다른 화면 요소의 색 사용을 정해야 합니다.
 - DQ5 그래픽 압축·포인터·VRAM 배치와 연결하고 MesenCE 에서 타이틀·네 방향 보행·팔레트·겹침을 확인해야 합니다.
 - 샘플 배치를 원작 맵 데이터와 연결하고 통행·출구·이벤트를 붙여야 합니다.

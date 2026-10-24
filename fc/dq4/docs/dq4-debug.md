@@ -1,6 +1,6 @@
 # DQ4(FC) 디버그 스위치와 숨은 개발 기능
 
-FC DQ4(일본판 Rev A)에 남은 개발용 기능과, 그것을 찾은 방법(실행 커버리지로 미실행 코드 모으기)을 정리합니다. 도구는 [tools/dq4debug.py](../tools/dq4debug.py)(미실행 코드·후보 찾기), [tools/lua/fc/debugpad.lua](../tools/lua/fc/debugpad.lua)(롬 바이트 덮어쓰기·패드 2 흉내), [tools/lua/fc/debugreads.lua](../tools/lua/fc/debugreads.lua)(`$C000` 을 읽는 명령 모으기), [tools/lua/fc/debugtrap.lua](../tools/lua/fc/debugtrap.lua)(PRG 오프셋으로 실행 잡기), [tools/lua/fc/debugsram.lua](../tools/lua/fc/debugsram.lua)(전원을 켜기 전 SRAM 고정)이고, 과정은 [2026-10-25-14 일지](journal/dq4/2026-10-25-14-debug.md) 와 [2026-10-25-20 일지](journal/dq4/2026-10-25-20-debug2.md) 에 있습니다. 주소 표기는 [dq4-ram-format.md](dq4-ram-format.md), BRK 형식은 [dq4-bank-format.md](dq4-bank-format.md) 를 따릅니다.
+FC DQ4(일본판 Rev A)에 남은 개발용 기능과, 그것을 찾은 방법(실행 커버리지로 미실행 코드 모으기)을 정리합니다. 도구는 [fc/dq4/tools/dq4debug.py](../tools/dq4debug.py)(미실행 코드·후보 찾기), [fc/dq4/tools/lua/debugpad.lua](../tools/lua/debugpad.lua)(롬 바이트 덮어쓰기·패드 2 흉내), [fc/dq4/tools/lua/debugreads.lua](../tools/lua/debugreads.lua)(`$C000` 을 읽는 명령 모으기), [fc/dq4/tools/lua/debugtrap.lua](../tools/lua/debugtrap.lua)(PRG 오프셋으로 실행 잡기), [fc/dq4/tools/lua/debugsram.lua](../tools/lua/debugsram.lua)(전원을 켜기 전 SRAM 고정)이고, 과정은 [2026-10-25-14 일지](../journal/2026-10-25-14-debug.md) 와 [2026-10-25-20 일지](../journal/2026-10-25-20-debug2.md) 에 있습니다. 주소 표기는 [dq4-ram-format.md](dq4-ram-format.md), BRK 형식은 [dq4-bank-format.md](dq4-bank-format.md) 를 따릅니다.
 
 이 문서의 「켜는 법」은 모두 테스트러너 안에서 PRG ROM **메모리**를 바꾸는 것입니다. 롬 파일은 고치지 않습니다.
 
@@ -44,9 +44,9 @@ FC DQ4(일본판 Rev A)에 남은 개발용 기능과, 그것을 찾은 방법(�
 `debugpad.lua` 는 입력 드라이버 앞에 끼우는 스크립트라 `DRIVER` 를 바꾸면 무엇이든 묶을 수 있습니다. 다른 프로브(`cover`·`trace` 등)와 묶으려면 그 프로브의 `DRIVER` 로 `debugpad.lua` 를 주고 실제 드라이버는 `PAD_DRIVER` 로 줍니다. 워프와 묶으면 이렇습니다(실측: 제품판은 (11,09) 그대로, `7F` 는 x=`06` 까지).
 
 ```sh
-DRIVER=$PWD/tools/lua/fc/warp.lua MAP=04/00 X=11 Y=09 SEQ="left+b:200" TAIL=30 \
+DRIVER=$PWD/fc/dq4/tools/lua/warp.lua MAP=04/00 X=11 Y=09 SEQ="left+b:200" TAIL=30 \
   ROMPATCH="3C000=7F;7C000=7F" SHOT_DIR=$PWD/work/wp \
-  "$MESENCE" --testrunner --nes.ramPowerOnState=AllZeros "$PWD/rom/dq4.nes" "$PWD/tools/lua/fc/debugpad.lua"
+  "$MESENCE" --testrunner --nes.ramPowerOnState=AllZeros "$PWD/rom/dq4.nes" "$PWD/fc/dq4/tools/lua/debugpad.lua"
 cat work/wp/warp.txt    # 「끝」 줄의 44= 가 도착 x 에서 줄어 있음
 ```
 
@@ -66,11 +66,11 @@ MesenCE 테스트러너는 롬 파일 이름으로 설정 폴더의 `Saves/<롬 
 
 ```sh
 SRAM_DRIVER=$LIBDIR/mkstate.lua SAVEAT=750 MAXF=760 SEQ="..." SHOT_DIR=$d \
-  "$MESENCE" --testrunner --nes.ramPowerOnState=AllZeros "$PWD/rom/dq4.nes" "$PWD/tools/lua/fc/debugsram.lua"
+  "$MESENCE" --testrunner --nes.ramPowerOnState=AllZeros "$PWD/rom/dq4.nes" "$PWD/fc/dq4/tools/lua/debugsram.lua"
 # SRAM=파일 을 주면 00 대신 그 8KB 를 채움
 ```
 
-`tools/dq4state.sh` 는 첫 단계를 이렇게 돌립니다. 바뀐 스크립트로 두 번 다시 만들었을 때(그 사이 `Saves/dq4.sav` 는 다른 실험이 바꿈) 세이브스테이트 4개와 그림 3장이 바이트까지 같았습니다. `STATE_DIR` 로 출력 폴더를 바꿀 수 있어 기존 `work/state` 를 덮지 않고 시험할 수 있습니다. 다만 지금 `work/state` 에 있는 1장 세이브스테이트는 이전 `.sav` 로 만든 것이라 새로 만든 것과 다릅니다. 이름이 「あああ」(새로는 「ああ」)이고, SRAM `$6D8C`~ 에 `FF` 가 남아 있으며(새로는 `00`), 첫 전투가 「おおみみず 둘」(새로는 おおみみず 하나·スライム 하나)입니다. 이름 입력에 A 를 하나 더 넣어 「あああ」로 맞추면 대사 타이밍이 밀려 필드 단계에서 성 앞을 벗어나지 못했습니다.
+`fc/dq4/tools/dq4state.sh` 는 첫 단계를 이렇게 돌립니다. 바뀐 스크립트로 두 번 다시 만들었을 때(그 사이 `Saves/dq4.sav` 는 다른 실험이 바꿈) 세이브스테이트 4개와 그림 3장이 바이트까지 같았습니다. `STATE_DIR` 로 출력 폴더를 바꿀 수 있어 기존 `work/state` 를 덮지 않고 시험할 수 있습니다. 다만 지금 `work/state` 에 있는 1장 세이브스테이트는 이전 `.sav` 로 만든 것이라 새로 만든 것과 다릅니다. 이름이 「あああ」(새로는 「ああ」)이고, SRAM `$6D8C`~ 에 `FF` 가 남아 있으며(새로는 `00`), 첫 전투가 「おおみみず 둘」(새로는 おおみみず 하나·スライム 하나)입니다. 이름 입력에 A 를 하나 더 넣어 「あああ」로 맞추면 대사 타이밍이 밀려 필드 단계에서 성 앞을 벗어나지 못했습니다.
 
 ### 켜는 법
 
@@ -81,7 +81,7 @@ export MESENCE=/path/to/Mesen LIBDIR=$(uv run krpatch fc lua)
 d=$PWD/work/wallpass; mkdir -p $d
 DRIVER=$LIBDIR/seq.lua STATE=$PWD/work/state/dq4-ch1-courtyard.mss SEQ="left+b:300" TAIL=2000 EVERY=0 MAXF=400 \
   ROMPATCH="3C000=7F;7C000=7F" LOGW=0044,0045 SHOT_DIR=$d \
-  "$MESENCE" --testrunner --nes.ramPowerOnState=AllZeros "$PWD/rom/dq4.nes" "$PWD/tools/lua/fc/debugpad.lua"
+  "$MESENCE" --testrunner --nes.ramPowerOnState=AllZeros "$PWD/rom/dq4.nes" "$PWD/fc/dq4/tools/lua/debugpad.lua"
 cat $d/debugpad.txt     # 값이 바뀐 프레임마다 "프레임 0044=.. 0045=.."
 ```
 
@@ -111,10 +111,10 @@ cat $d/debugpad.txt     # 값이 바뀐 프레임마다 "프레임 0044=.. 0045=
 실측은 1장 왕좌의 방 세이브스테이트에서 `warp.lua` 로 `04/01` (08,0B) 에 들어가 코인을 넣고(`SET="62AD=E80300"`, 1000) 말을 걸었습니다. `debugtrap.lua` 로 `18:$ABA9`(PRG `62BA9`)와 그 뒤 `$ABB1`(`62BB1`)을 잡았습니다.
 
 ```sh
-TRAP=62BA9,62BB1 LOG=6E45,6E46,6E47,6E48,6E49 TRAP_DRIVER=$PWD/tools/lua/fc/debugpad.lua \
-  PAD_DRIVER=$PWD/tools/lua/fc/warp.lua ROMPATCH="3C000=00;7C000=00" STATE=$PWD/work/state/dq4-ch1-throne.mss \
+TRAP=62BA9,62BB1 LOG=6E45,6E46,6E47,6E48,6E49 TRAP_DRIVER=$PWD/fc/dq4/tools/lua/debugpad.lua \
+  PAD_DRIVER=$PWD/fc/dq4/tools/lua/warp.lua ROMPATCH="3C000=00;7C000=00" STATE=$PWD/work/state/dq4-ch1-throne.mss \
   MAP=04/01 X=08 Y=0B DIR=0 SET="62AD=E80300" SEQ="a:4,wait:30,a:4,wait:120" TAIL=60 SHOT_DIR=$d \
-  "$MESENCE" --testrunner --nes.ramPowerOnState=AllZeros "$PWD/rom/dq4.nes" "$PWD/tools/lua/fc/debugtrap.lua"
+  "$MESENCE" --testrunner --nes.ramPowerOnState=AllZeros "$PWD/rom/dq4.nes" "$PWD/fc/dq4/tools/lua/debugtrap.lua"
 ```
 
 | 경우 | 결과 |
@@ -183,7 +183,7 @@ MesenCE 테스트러너에서 `emu.setInput(입력, 1)` 은 포트 번호와 상
 | 빈 함수 | `16[02]` = `16:$8A02`(`RTS` 한 바이트) | 표에 남은 지워진 함수 |
 | 아무도 부르지 않는 BRK 함수 | `08[0E]` `$B70E`(`$07BA`=2 검사), `08[15]` `$84C2`, `14[04]` `$8414`(`$2001`=`98` 화면 효과), `1D[14]` `$BD7C` | 롬 전체 바이트에서 `00 f b2` 꼴도, 같은 뱅크의 `JSR`/`JMP`/주소 워드도 없음. 넷 다 쓰이는 진입점 바로 옆의 형제 진입점이라 디버그 기능으로 보이지는 않음 |
 
-대사 2633개(`tools/dq4text.py all`)에는 「テスト」·「デバッグ」·「マップ」·「サウンド」 같은 디버그 메뉴 문구가 없습니다. 전투 테스트 창의 글자(「ひき」·「おわり」)는 창 정의 쪽에 있습니다.
+대사 2633개(`fc/dq4/tools/dq4text.py all`)에는 「テスト」·「デバッグ」·「マップ」·「サウンド」 같은 디버그 메뉴 문구가 없습니다. 전투 테스트 창의 글자(「ひき」·「おわり」)는 창 정의 쪽에 있습니다.
 
 ## 미실행 코드 찾기
 
@@ -191,9 +191,9 @@ MesenCE 테스트러너에서 `emu.setInput(입력, 1)` 은 포트 번호와 상
 
 ```sh
 C=$(ls work/cov/*/cover.txt)
-uv run python tools/dq4debug.py rom/dq4.nes unrun $C   # 덩어리: 시작, 바이트, 명령 수, ?(따라가다 잘못된 명령), 들어오는 곳
-uv run python tools/dq4debug.py rom/dq4.nes find $C    # 패드 2·$4017·$C000 읽기, 패드와 여러 비트 비교
-uv run python tools/dq4debug.py rom/dq4.nes brk $C     # BRK 함수 표에서 닿는 코드의 BRK 가 부르지 않고 실행도 안 된 항목
+uv run python fc/dq4/tools/dq4debug.py rom/dq4.nes unrun $C   # 덩어리: 시작, 바이트, 명령 수, ?(따라가다 잘못된 명령), 들어오는 곳
+uv run python fc/dq4/tools/dq4debug.py rom/dq4.nes find $C    # 패드 2·$4017·$C000 읽기, 패드와 여러 비트 비교
+uv run python fc/dq4/tools/dq4debug.py rom/dq4.nes brk $C     # BRK 함수 표에서 닿는 코드의 BRK 가 부르지 않고 실행도 안 된 항목
 ```
 
 18장면에서 모았습니다: 전원 켜기 3000프레임(타이틀), 이름 입력, 오프닝 대사, 왕좌의 방 명령 창 8칸 전부·대화·무작위 걷기, 성 앞 → 필드, 필드 걷기, 전투(싸우기·다른 명령), 필드에서 조우 → 전투, 워프로 맵 6곳(`04/00`·`0B/00`·`0E/00`·`1B/00`·`2B/00`·`45/00`)·필드 2곳의 무작위 걷기와 말 걸기.

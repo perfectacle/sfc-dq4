@@ -1,10 +1,10 @@
-"""DQ4(FC) 필드(세계 지도) 풀기. 형식은 docs/dq4-field-format.md.
+"""DQ4(FC) 필드(세계 지도) 풀기. 형식은 fc/dq4/docs/dq4-field-format.md.
 
 사용:
-  python tools/dq4field.py rom/dq4.nes check            필드 3개의 줄마다 X=80·끝 기준점이 맞는지
-  python tools/dq4field.py rom/dq4.nes F [--png out.png] 필드 F 를 글자 격자(또는 회색조 그림)로
-  python tools/dq4field.py rom/dq4.nes compare lk.txt     tools/lua/fc/fieldlookup.lua 기록과 비교
-  python tools/dq4field.py rom/dq4.nes entrances          필드 → 마을 입구 74개
+  python fc/dq4/tools/dq4field.py rom/dq4.nes check            필드 3개의 줄마다 X=80·끝 기준점이 맞는지
+  python fc/dq4/tools/dq4field.py rom/dq4.nes F [--png out.png] 필드 F 를 글자 격자(또는 회색조 그림)로
+  python fc/dq4/tools/dq4field.py rom/dq4.nes compare lk.txt     fc/dq4/tools/lua/fieldlookup.lua 기록과 비교
+  python fc/dq4/tools/dq4field.py rom/dq4.nes entrances          필드 → 마을 입구 74개
 
 근거 루틴(뱅크 0F): $D259(좌표 → 타일), $D2AA(좌표 −3, 범위 밖은 0), $D2DC(줄 레코드),
 $D326·$D37E(줄 RLE 앞·뒤로 읽기), $D516(이벤트로 바뀌는 한 칸). 데이터는 뱅크 0B.
@@ -78,7 +78,7 @@ def lookup(grid, w, h, x, y):
 
 
 def compare(prg, path):
-    """tools/lua/fc/fieldlookup.lua 의 lk.txt(X Y 결과 필드) 와 비교."""
+    """fc/dq4/tools/lua/fieldlookup.lua 의 lk.txt(X Y 결과 필드) 와 비교."""
     grids = {}
     n = bad = 0
     for ln in open(path):

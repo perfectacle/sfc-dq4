@@ -1,6 +1,6 @@
 # DQ4(FC) 필드(세계 지도)
 
-필드 3개의 타일 배치입니다. 디코더는 [tools/dq4field.py](../tools/dq4field.py), 실험 과정은 [2026-10-25-05 일지](journal/dq4/2026-10-25-05-field.md) 에 있습니다. 필드에 있을 때 맵 종류 `$0028` 은 `00` 입니다([dq4-ram-format.md](dq4-ram-format.md#필드-상태)).
+필드 3개의 타일 배치입니다. 디코더는 [fc/dq4/tools/dq4field.py](../tools/dq4field.py), 실험 과정은 [2026-10-25-05 일지](../journal/2026-10-25-05-field.md) 에 있습니다. 필드에 있을 때 맵 종류 `$0028` 은 `00` 입니다([dq4-ram-format.md](dq4-ram-format.md#필드-상태)).
 
 ## 필드
 
@@ -41,9 +41,9 @@ RAM `$65` 가 필드 번호입니다. 크기는 `0F:$D2D6`(폭)·`$D2D9`(높이)
 
 ## 확인
 
-- `tools/dq4field.py check`: 필드 0 의 250줄 모두, 앞에서부터 푼 위치가 X=80 기준점·줄 끝 바이트 위치와 표 값이 같음.
-- 필드 (A3,2E)에서 오른쪽으로 걸어 (A4,2E)에 닿자 `$63`/`$64`/`$44`/`$45` 가 `02`/`00`/`00`/`1D` 가 됨. 입구 표 `02 A4 2E` 와 도착 레코드 `02 00 00 1D 01` 그대로(`tools/dq4field.py entrances`).
-- `tools/lua/fc/fieldlookup.lua` 로 필드를 걸을 때 게임이 `$D259` 를 부른 147번의 (X, Y, 결과)를 기록해 `tools/dq4field.py compare` 로 비교: 0 차이.
+- `fc/dq4/tools/dq4field.py check`: 필드 0 의 250줄 모두, 앞에서부터 푼 위치가 X=80 기준점·줄 끝 바이트 위치와 표 값이 같음.
+- 필드 (A3,2E)에서 오른쪽으로 걸어 (A4,2E)에 닿자 `$63`/`$64`/`$44`/`$45` 가 `02`/`00`/`00`/`1D` 가 됨. 입구 표 `02 A4 2E` 와 도착 레코드 `02 00 00 1D 01` 그대로(`fc/dq4/tools/dq4field.py entrances`).
+- `fc/dq4/tools/lua/fieldlookup.lua` 로 필드를 걸을 때 게임이 `$D259` 를 부른 147번의 (X, Y, 결과)를 기록해 `fc/dq4/tools/dq4field.py compare` 로 비교: 0 차이.
 
 ## 남은 것
 

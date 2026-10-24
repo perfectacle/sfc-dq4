@@ -4,7 +4,7 @@
 #   work/state/dq4-ch1-courtyard.mss  왕좌의 방에서 걸어 나온 성 앞(맵 $0028=0A)
 #   work/state/dq4-ch1-field.mss      성 아래 마을 서쪽 끝으로 나온 필드($0028=00)
 #   work/state/dq4-ch1-battle.mss     필드에서 오가다 만난 전투(おおみみず 하나·スライム 하나)
-# 사용: MESENCE=/path/to/Mesen tools/dq4state.sh
+# 사용: MESENCE=/path/to/Mesen fc/dq4/tools/dq4state.sh
 #   STATE_DIR 를 주면 work/state 대신 그곳에 둔다(기존 세이브스테이트를 덮지 않고 다시 만들어 볼 때).
 # 단계마다 앞 단계의 세이브스테이트에서 seq.lua 로 입력을 재생한다. 오프닝은 입력 시점에 따라
 # 장면이 앞뒤로 밀리므로 한 번에 긴 입력을 주지 않고 장면마다 끊는다.
@@ -32,7 +32,7 @@ step() {
 mkdir -p "$tmp/name"
 SHOT_DIR=$tmp/name MAXF=760 EVERY=0 SAVEAT=750 STATE_OUT=name.mss SRAM_DRIVER=$LIBDIR/mkstate.lua \
   SEQ="a@300:4,a@320:4,a@340:4,a@360:4,start@400:4,a@440:4,a@560:4,a@700:4" \
-  "$MESENCE" --testrunner --nes.ramPowerOnState=AllZeros "$rom" "$root/tools/lua/fc/debugsram.lua" >/dev/null 2>&1
+  "$MESENCE" --testrunner --nes.ramPowerOnState=AllZeros "$rom" "$root/fc/dq4/tools/lua/debugsram.lua" >/dev/null 2>&1
 
 # 커서를 「おわり」로: 아래 5칸, 오른쪽 9칸
 d="down:10,wait:10,"; r="right:10,wait:10,"

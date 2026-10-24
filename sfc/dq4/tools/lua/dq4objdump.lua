@@ -1,5 +1,5 @@
 -- DQ5 필드 세이브스테이트에서 주인공을 아래·왼쪽·위·오른쪽으로 걷게 한 뒤 멈춘 순간의
--- VRAM·OAM·CGRAM 을 덤프한다(tools/dq4spritelab.py hero 가 읽음). 주인공 OBJ 를 숨긴 화면(nohero.png)도 찍는다.
+-- VRAM·OAM·CGRAM 을 덤프한다(sfc/dq4/tools/dq4spritelab.py hero 가 읽음). 주인공 OBJ 를 숨긴 화면(nohero.png)도 찍는다.
 -- 환경 변수: STATE(필드 세이브스테이트 절대 경로), OUT(출력 폴더 절대 경로)
 local out = assert(os.getenv("OUT"), "OUT")
 local f = assert(io.open(assert(os.getenv("STATE"), "STATE"), "rb"))

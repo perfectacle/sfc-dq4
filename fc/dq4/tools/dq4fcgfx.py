@@ -1,17 +1,17 @@
-"""DQ4(FC) 원작 그래픽 렌더러: 마을·던전 맵 279개, 필드, 블록·CHR·폰트 시트, MesenCE 덤프 화면. 쓰는 법은 docs/dq4-fcgfx.md.
+"""DQ4(FC) 원작 그래픽 렌더러: 마을·던전 맵 279개, 필드, 블록·CHR·폰트 시트, MesenCE 덤프 화면. 쓰는 법은 fc/dq4/docs/dq4-fcgfx.md.
 
 사용:
-  python tools/dq4fcgfx.py rom/dq4.nes all OUT                맵·필드·gfx 를 OUT/{maps,field,gfx} 에, 갤러리를 OUT/gallery 에
-  python tools/dq4fcgfx.py rom/dq4.nes maps|field|gfx OUT     하나만
-  python tools/dq4fcgfx.py rom/dq4.nes map G K OUT.png [--night|--annot]  맵 하나
-  python tools/dq4fcgfx.py rom/dq4.nes screen DIR OUT.png     seq.lua·warp.lua 의 end.nt·chr·pal 로 nametable 두 장(512×240)
-  python tools/dq4fcgfx.py rom/dq4.nes scenes OUT SPEC.json    fcgfxscene.lua 덤프 목록([{name, title, prefix}])을 OUT/gfx/screens 에
-  python tools/dq4fcgfx.py rom/dq4.nes verify DIR... [--mask-sprites]  롬만으로 그린 화면과 end.png 를 픽셀로 비교
-  python tools/dq4fcgfx.py rom/dq4.nes gallery OUT            OUT/gallery/index.html 만 다시
+  python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes all OUT                맵·필드·gfx 를 OUT/{maps,field,gfx} 에, 갤러리를 OUT/gallery 에
+  python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes maps|field|gfx OUT     하나만
+  python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes map G K OUT.png [--night|--annot]  맵 하나
+  python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes screen DIR OUT.png     seq.lua·warp.lua 의 end.nt·chr·pal 로 nametable 두 장(512×240)
+  python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes scenes OUT SPEC.json    fcgfxscene.lua 덤프 목록([{name, title, prefix}])을 OUT/gfx/screens 에
+  python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes verify DIR... [--mask-sprites]  롬만으로 그린 화면과 end.png 를 픽셀로 비교
+  python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes gallery OUT            OUT/gallery/index.html 만 다시
 
 출력은 롬 그래픽이라 공개 저장소에 커밋하지 않는다(비공개 에셋 저장소나 work/ 에만).
 맵은 칸마다 제 블록으로 그린다(게임은 주인공과 다른 구역을 블록 20·21 로 가리지만 참고용 그림에서는 다 보이게).
-색은 MesenCE 화면에서 잰 값(MESEN_RGB, tools/lua/fc/fcgfxpal.lua)이다.
+색은 MesenCE 화면에서 잰 값(MESEN_RGB, fc/dq4/tools/lua/fcgfxpal.lua)이다.
 """
 import hashlib
 import html
@@ -39,7 +39,7 @@ import dq4text  # noqa: E402
 dq4map.load = dq4chest.load
 all_maps = dq4chest.all_maps
 
-# NES 색 번호 00~3F → MesenCE 기본 팔레트의 화면 RGB. tools/lua/fc/fcgfxpal.lua 로 색마다 화면 전체를 칠해 잰 값.
+# NES 색 번호 00~3F → MesenCE 기본 팔레트의 화면 RGB. fc/dq4/tools/lua/fcgfxpal.lua 로 색마다 화면 전체를 칠해 잰 값.
 MESEN_RGB = [
     (102, 102, 102), (0, 42, 136), (20, 18, 167), (59, 0, 164), (92, 0, 126), (110, 0, 64), (108, 6, 0), (86, 29, 0),
     (51, 53, 0), (11, 72, 0), (0, 82, 0), (0, 79, 8), (0, 64, 77), (0, 0, 0), (0, 0, 0), (0, 0, 0),
@@ -54,9 +54,9 @@ GRAY = [(0, 0, 0), (85, 85, 85), (170, 170, 170), (255, 255, 255)]
 NIGHT = 0x78                 # 맵: $62ED 가 이 값 이상이면 밤(0E:$BB55)
 FIELD_NIGHT = 0x84           # 필드: 1E:$A2DB 경계 8개 중 가장 어두운 단계(84~BF)
 FIELDS = (0, 1, 2, 3)        # $65. 크기는 0F:$D2D6/$D2D9
-# 필드 2 는 입구 표에 없고, 워프로 들어간 화면이 이 렌더링과 다르다(docs/dq4-fcgfx.md 「남은 것」).
+# 필드 2 는 입구 표에 없고, 워프로 들어간 화면이 이 렌더링과 다르다(fc/dq4/docs/dq4-fcgfx.md 「남은 것」).
 FIELD_NOTE = {2: '입구 없음. 워프 화면과 다름(확인 안 됨)', 3: '용암·물 팔레트가 돌아감. 그림은 롬의 첫 팔레트'}
-FONT_AT, FONT_N = (0x18, 0xB840), 141   # 글자 바이트 00~8C 의 1비트 타일(docs/dq4-text-format.md)
+FONT_AT, FONT_N = (0x18, 0xB840), 141   # 글자 바이트 00~8C 의 1비트 타일(fc/dq4/docs/dq4-text-format.md)
 
 
 def tile(data, colors):
@@ -680,7 +680,7 @@ def gallery(out):
 
 
 def scene_files(prefix):
-    """tools/lua/fc/fcgfxscene.lua 의 <prefix>.nt·chr·pal·oam·ppu·png, 또는 seq.lua 의 end.*(prefix = DIR/end)."""
+    """fc/dq4/tools/lua/fcgfxscene.lua 의 <prefix>.nt·chr·pal·oam·ppu·png, 또는 seq.lua 의 end.*(prefix = DIR/end)."""
     rd = {x: open(f'{prefix}.{x}', 'rb').read() for x in ('nt', 'chr', 'pal', 'oam', 'oam2') if os.path.exists(f'{prefix}.{x}')}
     rd['ppu'] = open(f'{prefix}.ppu', 'rb').read()[0] if os.path.exists(f'{prefix}.ppu') else 0x10
     return rd
@@ -773,8 +773,8 @@ def main():
     if cmd == 'scenes':
         spec = json.loads(Path(a[4]).read_text())
         screens_from_dumps(a[3], [(x['name'], x['title'], x['prefix']) for x in spec])
-        source_txt(a[3], 'gfx/screens', 'uv run --locked python tools/dq4fcgfx.py rom/dq4.nes scenes $OUT ' + a[4], data,
-                   note='MesenCE 덤프(tools/lua/fc/fcgfxscene.lua)를 렌더링한 것. 롬에서 직접 푼 것이 아님')
+        source_txt(a[3], 'gfx/screens', 'uv run --locked python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes scenes $OUT ' + a[4], data,
+                   note='MesenCE 덤프(fc/dq4/tools/lua/fcgfxscene.lua)를 렌더링한 것. 롬에서 직접 푼 것이 아님')
         return
     if cmd == 'map':
         m = dq4block.Map(prg, int(a[3], 16), int(a[4], 16))
@@ -785,11 +785,11 @@ def main():
         return
     if cmd == 'gallery':
         gallery(a[3])
-        source_txt(a[3], 'gallery', 'uv run --locked python tools/dq4fcgfx.py rom/dq4.nes gallery $OUT', data)
+        source_txt(a[3], 'gallery', 'uv run --locked python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes gallery $OUT', data)
         return
     out = a[3]
     names = place_names(prg, data) if cmd in ('all', 'maps', 'field') else {}
-    line = 'uv run --locked python tools/dq4fcgfx.py rom/dq4.nes ' + ' '.join(['$OUT' if x == out else x for x in a[2:]])
+    line = 'uv run --locked python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes ' + ' '.join(['$OUT' if x == out else x for x in a[2:]])
     idx = None
     if cmd in ('all', 'maps'):
         idx = do_maps(prg, out, names)

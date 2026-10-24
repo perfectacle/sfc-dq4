@@ -1,12 +1,12 @@
-"""DQ4(FC) 미실행 코드 찾기. 형식과 결과는 docs/dq4-debug.md.
+"""DQ4(FC) 미실행 코드 찾기. 형식과 결과는 fc/dq4/docs/dq4-debug.md.
 
 probe/cover.lua 기록 여러 개를 합쳐, 실행된 명령에서 갈 수 있는데(분기·JMP·JSR·BRK 뱅크 호출의
 대상, 조건 분기의 다른 쪽) 한 번도 실행되지 않은 코드를 따라가 덩어리로 모은다.
 
 사용:
-  python tools/dq4debug.py rom/dq4.nes unrun COVER...        미실행 코드 덩어리(시작, 크기, 들어오는 곳)
-  python tools/dq4debug.py rom/dq4.nes find COVER...         닿는 코드(실행·미실행) 중 디버그 흔적 후보
-  python tools/dq4debug.py rom/dq4.nes brk COVER...          BRK 함수 표에서 아무도 부르지 않는 항목
+  python fc/dq4/tools/dq4debug.py rom/dq4.nes unrun COVER...        미실행 코드 덩어리(시작, 크기, 들어오는 곳)
+  python fc/dq4/tools/dq4debug.py rom/dq4.nes find COVER...         닿는 코드(실행·미실행) 중 디버그 흔적 후보
+  python fc/dq4/tools/dq4debug.py rom/dq4.nes brk COVER...          BRK 함수 표에서 아무도 부르지 않는 항목
 
 근거: 고정 영역 $C000- 는 $0507 의 256KB 절반의 마지막 뱅크(0F/1F), BRK 형식은 dq4bank.py.
 패드 읽기 0F:$C8EC 가 패드 1 을 $14, 패드 2 를 $15 에 둔다(bit0 A … bit7 오른쪽).

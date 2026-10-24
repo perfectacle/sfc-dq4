@@ -1,6 +1,6 @@
 # DQ4(FC) 뱅크 호출
 
-FC DQ4 는 다른 PRG 뱅크의 루틴을 `BRK` 명령 뒤에 2바이트를 붙여 부릅니다. 이 문서는 그 형식과 뱅크 배치입니다. 주소 표기와 롬 기본 정보는 [dq4-ram-format.md](dq4-ram-format.md) 를 따릅니다. 디코더는 [tools/dq4bank.py](../tools/dq4bank.py), 실험 과정은 [2026-10-24-02 일지](journal/dq4/2026-10-24-02-bankcall.md) 와 [2026-10-25-22 일지](journal/dq4/2026-10-25-22-textrest2.md) 에 있습니다.
+FC DQ4 는 다른 PRG 뱅크의 루틴을 `BRK` 명령 뒤에 2바이트를 붙여 부릅니다. 이 문서는 그 형식과 뱅크 배치입니다. 주소 표기와 롬 기본 정보는 [dq4-ram-format.md](dq4-ram-format.md) 를 따릅니다. 디코더는 [fc/dq4/tools/dq4bank.py](../tools/dq4bank.py), 실험 과정은 [2026-10-24-02 일지](../journal/2026-10-24-02-bankcall.md) 와 [2026-10-25-22 일지](../journal/2026-10-25-22-textrest2.md) 에 있습니다.
 
 ## 뱅크 전환과 현재 뱅크
 
@@ -30,7 +30,7 @@ IRQ/BRK 벡터가 가리키는 `$C408` 이 처리합니다. 복귀는 `BRK` 다�
 
 ### 확인
 
-부팅(전원~이름 입력 1500프레임)과 왕좌의 방 → 성 밖 보행(700프레임)에서 `probe/trace.lua` 로 처리기 안 `$C446`·`$C455`(뱅크·함수 번호 확정)와 `$C3CD`(함수 주소 확정)를 기록하고 `tools/dq4bank.py compare` 로 롬만 읽은 결과와 비교했습니다.
+부팅(전원~이름 입력 1500프레임)과 왕좌의 방 → 성 밖 보행(700프레임)에서 `probe/trace.lua` 로 처리기 안 `$C446`·`$C455`(뱅크·함수 번호 확정)와 `$C3CD`(함수 주소 확정)를 기록하고 `fc/dq4/tools/dq4bank.py compare` 로 롬만 읽은 결과와 비교했습니다.
 
 | 장면 | 호출 | 다름 | 호출 위치 |
 | --- | --- | --- | --- |
@@ -70,7 +70,7 @@ IRQ/BRK 벡터가 가리키는 `$C408` 이 처리합니다. 복귀는 `BRK` 다�
 
 앞 판에서 「`n` 이 홀수면 BRK+3」 이라 한 규칙은 `93` 에서 틀립니다. 함수 `08`·`09` 는 `$77` 이 `93` 일 때 한 바이트, 아니면 두 바이트를 더 읽습니다. 함수 `22`~`24` 는 `b1` 을 `$6E59` 에 두고 전투 쪽 명령 해석기 `10:$A34D` 로 갑니다. 대사 제어 `F6` 이 부르는 `BRK 29 C3 0C` 가 이 경로로, 명령 `29` 인자 `0C` 가 몬스터 전투 레코드의 비트 하나를 검사합니다([dq4-text-format.md](dq4-text-format.md#제어-바이트)).
 
-`tools/dq4bank.py rom call 주소` 가 이 형식들도 풉니다(`x3`, `message`, `flag-set`/`flag-clear`/`flag-test`, `sound`). `x3` 는 위 표대로 길이(`len=`)도 찍습니다. `tools/lua/fc/textbrk.lua` 는 실행 중의 BRK 를 모두 잡아 호출 위치마다 실제 복귀 자리와 메시지·플래그 값을 적습니다.
+`fc/dq4/tools/dq4bank.py rom call 주소` 가 이 형식들도 풉니다(`x3`, `message`, `flag-set`/`flag-clear`/`flag-test`, `sound`). `x3` 는 위 표대로 길이(`len=`)도 찍습니다. `fc/dq4/tools/lua/textbrk.lua` 는 실행 중의 BRK 를 모두 잡아 호출 위치마다 실제 복귀 자리와 메시지·플래그 값을 적습니다.
 
 ## 뱅크 배치
 

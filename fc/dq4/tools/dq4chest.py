@@ -1,10 +1,10 @@
-"""DQ4(FC) 보물상자와 발밑 숨은 아이템. 형식은 docs/dq4-shop-format.md.
+"""DQ4(FC) 보물상자와 발밑 숨은 아이템. 형식은 fc/dq4/docs/dq4-shop-format.md.
 
 사용:
-  python tools/dq4chest.py rom/dq4.nes G K        맵(그룹 $63/순번 $64)의 상자와 발밑 아이템
-  python tools/dq4chest.py rom/dq4.nes all        상자 개수 표에 있는 맵 전부와 발밑 표 전부
-  python tools/dq4chest.py rom/dq4.nes check      맵마다 상자 블록 칸 수가 개수 표와 같은지 전수 검사
-  python tools/dq4chest.py rom/dq4.nes G K --compare end.sram   seq.lua 의 SRAM 덤프($6000~)로 열었음 플래그 비교
+  python fc/dq4/tools/dq4chest.py rom/dq4.nes G K        맵(그룹 $63/순번 $64)의 상자와 발밑 아이템
+  python fc/dq4/tools/dq4chest.py rom/dq4.nes all        상자 개수 표에 있는 맵 전부와 발밑 표 전부
+  python fc/dq4/tools/dq4chest.py rom/dq4.nes check      맵마다 상자 블록 칸 수가 개수 표와 같은지 전수 검사
+  python fc/dq4/tools/dq4chest.py rom/dq4.nes G K --compare end.sram   seq.lua 의 SRAM 덤프($6000~)로 열었음 플래그 비교
 
 근거 루틴(코드 읽기와 실측):
   1E:$B3FE  しらべる. 발밑 블록 종류($6F40[블록])가 04 이면 상자(1E:$B447), 아니면 발밑 표(1E:$B4DB, 표 1E:$BF59).
@@ -13,7 +13,7 @@
   1E:$B7B2  내용물 표(포인터 1E:$BDC0)[전체 순번]. 1E:$B791 열었음 플래그 $625D + 순번 >> 3, 비트 80 >> (순번 & 7).
   08:$8710  맵 종류가 00·1E 가 아니면 맵에 안 쓰인 첫 블록($0568)에 정의 18 11(종류 04, 타일 FC~FF)을 올린다.
             열린 상자 칸은 $7800 에서 이 블록으로 바뀐다(1E:$B7CA, 로드 때 1E:$A1F3).
-  블록 종류  로드 뒤 $6F40 은 dq4block 의 블록 표(08:$84E9)와 장소별 고침(08:$8A2A)으로 계산한다(docs/dq4-block-format.md).
+  블록 종류  로드 뒤 $6F40 은 dq4block 의 블록 표(08:$84E9)와 장소별 고침(08:$8A2A)으로 계산한다(fc/dq4/docs/dq4-block-format.md).
 """
 import sys
 

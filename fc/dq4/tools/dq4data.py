@@ -1,12 +1,12 @@
-"""DQ4(FC) 이름 목록·아이템·몬스터 표. 형식은 docs/dq4-data-format.md.
+"""DQ4(FC) 이름 목록·아이템·몬스터 표. 형식은 fc/dq4/docs/dq4-data-format.md.
 
 사용:
-  python tools/dq4data.py rom/dq4.nes names [목록]     spell class sex item place tactic monster
-  python tools/dq4data.py rom/dq4.nes items            아이템 ID, 이름, 종류, 강도, 가격, 장비할 수 있는 인물, 플래그, 전투 사용 행동
-  python tools/dq4data.py rom/dq4.nes monsters         몬스터 ID, 이름, 능력치, 드롭, 레코드 22바이트, 행동 ID·행동 수·AI·내성
-  python tools/dq4data.py rom/dq4.nes spells           주문 ID, 이름, 소비 MP, 대상, 배우는 인물과 레벨
-  python tools/dq4data.py rom/dq4.nes levels [인물]    레벨별 경험치와 능력치 기준값(인물 0-7, 생략하면 모두)
-  python tools/dq4data.py rom/dq4.nes actions          전투 행동 ID 00-FF: 처리 루틴, 위력, 양(회복·흡수·상승), 성공률
+  python fc/dq4/tools/dq4data.py rom/dq4.nes names [목록]     spell class sex item place tactic monster
+  python fc/dq4/tools/dq4data.py rom/dq4.nes items            아이템 ID, 이름, 종류, 강도, 가격, 장비할 수 있는 인물, 플래그, 전투 사용 행동
+  python fc/dq4/tools/dq4data.py rom/dq4.nes monsters         몬스터 ID, 이름, 능력치, 드롭, 레코드 22바이트, 행동 ID·행동 수·AI·내성
+  python fc/dq4/tools/dq4data.py rom/dq4.nes spells           주문 ID, 이름, 소비 MP, 대상, 배우는 인물과 레벨
+  python fc/dq4/tools/dq4data.py rom/dq4.nes levels [인물]    레벨별 경험치와 능력치 기준값(인물 0-7, 생략하면 모두)
+  python fc/dq4/tools/dq4data.py rom/dq4.nes actions          전투 행동 ID 00-FF: 처리 루틴, 위력, 양(회복·흡수·상승), 성공률
 
 근거: 0B:$B006(이름 목록 포인터), 10:$8BED(가격), 10:$8C3B(강도 $9E17), 10:$8B1E·$8B3B(종류·장비),
 18:$8046(몬스터 레코드, 10:$A67C 필드 표), 13:$B953(주문 MP), 12:$9D36(레벨업), 12:$9FC6(성장 곡선),

@@ -1,6 +1,6 @@
 # DQ4(FC) 맵 블록·타일·팔레트·통행
 
-마을·던전 맵과 필드는 16×16 픽셀 블록 32개(맵 종류마다 다름)로 그립니다. 이 문서는 블록 번호가 8×8 타일 4개·팔레트·통행 속성으로 바뀌는 과정, 타일 그림을 어디서 CHR-RAM 으로 올리는지, 걸을 때 통행과 지형 효과를 어떻게 정하는지 정리합니다. 디코더는 [tools/dq4block.py](../tools/dq4block.py), 실험 과정은 [2026-10-25-16 일지](journal/dq4/2026-10-25-16-block.md) 에 있습니다. 맵 해제(`$7800`)는 [dq4-map-format.md](dq4-map-format.md), 필드 타일 번호는 [dq4-field-format.md](dq4-field-format.md) 를 따릅니다.
+마을·던전 맵과 필드는 16×16 픽셀 블록 32개(맵 종류마다 다름)로 그립니다. 이 문서는 블록 번호가 8×8 타일 4개·팔레트·통행 속성으로 바뀌는 과정, 타일 그림을 어디서 CHR-RAM 으로 올리는지, 걸을 때 통행과 지형 효과를 어떻게 정하는지 정리합니다. 디코더는 [fc/dq4/tools/dq4block.py](../tools/dq4block.py), 실험 과정은 [2026-10-25-16 일지](../journal/2026-10-25-16-block.md) 에 있습니다. 맵 해제(`$7800`)는 [dq4-map-format.md](dq4-map-format.md), 필드 타일 번호는 [dq4-field-format.md](dq4-field-format.md) 를 따릅니다.
 
 주소 표기는 `뱅크:$주소` 이고, 근거 표시가 없는 것은 MesenCE 덤프와 디코더 결과가 같음을 확인한 것입니다. 「코드 읽기」 는 리스팅만 읽고 실험으로 확인하지 않은 것입니다.
 
@@ -219,7 +219,7 @@ BG 팔레트 4개의 색 0 은 모두 `0F`(`$05FC`)이고, 색 1~3 의 12바이�
 
 ## 속성 값
 
-SFC 쪽 블록 속성에 대응시키기 위한 표입니다. 맵·칸 수는 롬의 맵 269개와 필드 3개에서 실제 칸에 쓰인 것만 센 값입니다(`tools/dq4block.py props`, 맵마다는 `props --maps`). 바깥 블록은 세지 않았습니다.
+SFC 쪽 블록 속성에 대응시키기 위한 표입니다. 맵·칸 수는 롬의 맵 269개와 필드 3개에서 실제 칸에 쓰인 것만 센 값입니다(`fc/dq4/tools/dq4block.py props`, 맵마다는 `props --maps`). 바깥 블록은 세지 않았습니다.
 
 | 속성 | 뜻 | 맵 수 | 근거 |
 | --- | --- | --- | --- |
@@ -264,16 +264,16 @@ SFC 쪽 블록 속성에 대응시키기 위한 표입니다. 맵·칸 수는 �
 ## 디코더
 
 ```sh
-uv run python tools/dq4block.py rom/dq4.nes defs 0D          # 맵 종류 0D 의 블록 정의·애니메이션·낮 팔레트
-uv run python tools/dq4block.py rom/dq4.nes 02 01            # 맵 02/01 의 통행 지도(텍스트)
-uv run python tools/dq4block.py rom/dq4.nes 02 01 --nt       # 맵 전체의 nametable 타일 번호
-uv run python tools/dq4block.py rom/dq4.nes 02 01 --png      # work/dq4block-02_01.png (확인용, 커밋 금지)
-uv run python tools/dq4block.py rom/dq4.nes field 0 --png    # 필드 0
-uv run python tools/dq4block.py rom/dq4.nes props            # 속성 값별 뜻·맵 수·칸 수(--maps 는 맵마다)
-uv run python tools/dq4block.py rom/dq4.nes compare work/x   # seq.lua·warp.lua 의 end.* 덤프와 비교
-uv run python tools/dq4block.py rom/dq4.nes effects 3C 01    # 맵의 속성 값마다 뜻·칸 수, 떨어지는 칸의 목적지
-uv run python tools/dq4block.py rom/dq4.nes tables           # 속성 값마다 terrain(), 떨어지기·리프트·タンス/つぼ·팻말 표
-uv run python tools/dq4block.py rom/dq4.nes json             # work/dq4block.json
+uv run python fc/dq4/tools/dq4block.py rom/dq4.nes defs 0D          # 맵 종류 0D 의 블록 정의·애니메이션·낮 팔레트
+uv run python fc/dq4/tools/dq4block.py rom/dq4.nes 02 01            # 맵 02/01 의 통행 지도(텍스트)
+uv run python fc/dq4/tools/dq4block.py rom/dq4.nes 02 01 --nt       # 맵 전체의 nametable 타일 번호
+uv run python fc/dq4/tools/dq4block.py rom/dq4.nes 02 01 --png      # work/dq4block-02_01.png (확인용, 커밋 금지)
+uv run python fc/dq4/tools/dq4block.py rom/dq4.nes field 0 --png    # 필드 0
+uv run python fc/dq4/tools/dq4block.py rom/dq4.nes props            # 속성 값별 뜻·맵 수·칸 수(--maps 는 맵마다)
+uv run python fc/dq4/tools/dq4block.py rom/dq4.nes compare work/x   # seq.lua·warp.lua 의 end.* 덤프와 비교
+uv run python fc/dq4/tools/dq4block.py rom/dq4.nes effects 3C 01    # 맵의 속성 값마다 뜻·칸 수, 떨어지는 칸의 목적지
+uv run python fc/dq4/tools/dq4block.py rom/dq4.nes tables           # 속성 값마다 terrain(), 떨어지기·리프트·タンス/つぼ·팻말 표
+uv run python fc/dq4/tools/dq4block.py rom/dq4.nes json             # work/dq4block.json
 ```
 
 통행 지도 글자: `.` 속성 `00`, `#` `80`, `~` `83`, 그 밖의 막힌 값은 소문자(맵마다 작은 값부터 `a`, `b`…), 지나가는 값은 `1`~`F`·`10` 부터 `G`…. 끝 줄에 글자마다 속성 값과 뜻을 적습니다. PNG 의 색은 NES 색을 근사한 것입니다.

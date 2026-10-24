@@ -1,4 +1,4 @@
-"""Convert the original title to eight SFC BG palettes; docs/dq4-graphics.md."""
+"""Convert the original title to eight SFC BG palettes; sfc/dq4/docs/dq4-graphics.md."""
 
 from pathlib import Path
 

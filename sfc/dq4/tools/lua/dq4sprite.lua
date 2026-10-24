@@ -1,6 +1,6 @@
 -- DQ5 필드에서 주인공 그림을 DQ4 인물 스프라이트로 바꿔 보여 준다. 영구 삽입이 아니라 Lua 가
 -- 프레임마다 VRAM D000~D0BF(OBJ 타일 80~85)·OAM 0~7·OBJ 팔레트 3 을 덮어쓰는 실험이다.
--- 환경 변수: DATA(tools/dq4spritelab.py data 가 만든 .lua 절대 경로), STATE(메뉴가 닫힌 필드
+-- 환경 변수: DATA(sfc/dq4/tools/dq4spritelab.py data 가 만든 .lua 절대 경로), STATE(메뉴가 닫힌 필드
 -- 세이브스테이트 절대 경로), OUT(스크린샷 폴더), TEST=1 이면 180프레임 동안 4방향 자동 보행 후 종료.
 local out = assert(os.getenv("OUT"), "OUT")
 local f = assert(io.open(assert(os.getenv("STATE"), "STATE"), "rb"))

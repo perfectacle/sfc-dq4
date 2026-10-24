@@ -7,7 +7,7 @@
 --   STACK=8            스택 맨 위에서 적을 바이트 수(누가 불렀는지 볼 때)
 --   LIMIT=200          적을 줄 수 상한
 --   SHOTS_AFTER=60     처음 걸린 뒤 이 프레임마다 shot-N.png 를 4장까지
---   TRAP_DRIVER=path   이어서 돌릴 Lua(예: tools/lua/fc/debugpad.lua). 없으면 입력 드라이버(DRIVER)
+--   TRAP_DRIVER=path   이어서 돌릴 Lua(예: fc/dq4/tools/lua/debugpad.lua). 없으면 입력 드라이버(DRIVER)
 package.path = os.getenv("LIBDIR") .. "/?.lua;" .. package.path
 local L = require("lib")
 local logs, lines, n, first, shots, written = {}, {}, 0, nil, 0, 0

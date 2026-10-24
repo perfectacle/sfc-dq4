@@ -1,18 +1,18 @@
-"""DQ4(FC) 저장 데이터(SRAM)·이벤트 플래그·장 시작 표. 형식은 docs/dq4-save-format.md.
+"""DQ4(FC) 저장 데이터(SRAM)·이벤트 플래그·장 시작 표. 형식은 fc/dq4/docs/dq4-save-format.md.
 
 사용:
-  python tools/dq4event.py rom/dq4.nes sram end.sram       작업 영역과 모험의 서 3칸: 체크섬, 장, 골드, 일행, 인물 8명
-  python tools/dq4event.py rom/dq4.nes flags end.sram      이벤트 플래그 영역 $627B~$62EE 의 0 아닌 바이트
-  python tools/dq4event.py rom/dq4.nes chapters            장(1~5) 시작 표: 자리, 선두, 골드, 귀환 자리
-  python tools/dq4event.py rom/dq4.nes chars [--compare end.sram]   인물 8명의 첫 레코드(장 시작 루틴이 쓰는 값).
+  python fc/dq4/tools/dq4event.py rom/dq4.nes sram end.sram       작업 영역과 모험의 서 3칸: 체크섬, 장, 골드, 일행, 인물 8명
+  python fc/dq4/tools/dq4event.py rom/dq4.nes flags end.sram      이벤트 플래그 영역 $627B~$62EE 의 0 아닌 바이트
+  python fc/dq4/tools/dq4event.py rom/dq4.nes chapters            장(1~5) 시작 표: 자리, 선두, 골드, 귀환 자리
+  python fc/dq4/tools/dq4event.py rom/dq4.nes chars [--compare end.sram]   인물 8명의 첫 레코드(장 시작 루틴이 쓰는 값).
                                                    --compare 는 덤프의 장($615A)에서 초기화되는 인물만 대조
-  python tools/dq4event.py rom/dq4.nes places              귀환 자리 표($6290 번호 → 장소·좌표), ルーラ 행선지($6165 비트
+  python fc/dq4/tools/dq4event.py rom/dq4.nes places              귀환 자리 표($6290 번호 → 장소·좌표), ルーラ 행선지($6165 비트
                                                    → 마을 레코드 → 도착 자리)
-  python tools/dq4event.py rom/dq4.nes flags --xref [NN] [--all]   플래그 바이트·비트마다 쓰는 곳·검사하는 곳(BRK 플래그
+  python fc/dq4/tools/dq4event.py rom/dq4.nes flags --xref [NN] [--all]   플래그 바이트·비트마다 쓰는 곳·검사하는 곳(BRK 플래그
                                                    명령, 절대 주소 명령, 대화 스크립트, 인물 블록, 맵 인물 목록 표).
                                                    --all 은 데이터로 보이는 모양도 같이
-  python tools/dq4event.py rom/dq4.nes events              인물 블록의 이벤트 명령(88~8A n → 1D:$B639)과 맵 이벤트 표
-  python tools/dq4event.py rom/dq4.nes ops [--flag NN]      롬에서 BRK 플래그 명령(00 NN CB/DB/EB MM) 모양 찾기.
+  python fc/dq4/tools/dq4event.py rom/dq4.nes events              인물 블록의 이벤트 명령(88~8A n → 1D:$B639)과 맵 이벤트 표
+  python fc/dq4/tools/dq4event.py rom/dq4.nes ops [--flag NN]      롬에서 BRK 플래그 명령(00 NN CB/DB/EB MM) 모양 찾기.
                                                    바이트 모양만 보므로 데이터가 섞인다
 
 근거 루틴: 12:$ACA2(체크섬), 1F:$C8AD(CRC 한 바이트), 12:$ACF8(빈 칸 검사), 12:$8EAE(장 시작 초기화,

@@ -1,6 +1,6 @@
 # DQ4 포팅 그래픽 핸드오프
 
-> 2026-10-25 후속: 스프라이트 제작 방법을 정했습니다. SFC DQ5 인물을 실측한 격자 규칙으로 다시 그린 라이안 정면이 확인됐고, 같은 규칙으로 9명을 그렸습니다. [DQ4 포팅용 인물 스프라이트 규격](dq4-sprite-format.md)과 [sprites 스킬](../.agents/skills/sprites/SKILL.md)을 보세요. 아래는 그 전 상태의 기록입니다.
+> 2026-10-25 후속: 스프라이트 제작 방법을 정했습니다. SFC DQ5 인물을 실측한 격자 규칙으로 다시 그린 라이안 정면이 확인됐고, 같은 규칙으로 9명을 그렸습니다. [DQ4 포팅용 인물 스프라이트 규격](docs/dq4-sprite-format.md)과 [sprites 스킬](../../.agents/skills/sprites/SKILL.md)을 보세요. 아래는 그 전 상태의 기록입니다.
 
 2026-10-25 사용자 피드백을 기준으로 정리합니다. **타이틀과 일러스트는 보존합니다. 스프라이트는 최종 16×24 수정본까지 반려됐으며, 제작 방법부터 다시 정해야 합니다.** 이번 정리는 새 그림 제작이나 기존 스프라이트 채택을 뜻하지 않습니다.
 
@@ -21,16 +21,16 @@ B와 B3를 선호한다는 피드백은 **비교 시안의 방향 선택**이었
 
 | 경로 | 내용과 한계 |
 | --- | --- |
-| `tools/dq4art/title.png` | 사용자가 제공한 Nintendo DS DQ4 타이틀의 하늘·용·로고 분위기를 참고한 제작 원본 |
-| `tools/dq4art/journey.png` | 긍정 평가를 받은 일러스트 원본 |
-| `tools/dq4art/prompts.json` | 생성 지시문과 참고 이미지 사용 기록 |
-| `tools/dq4title.py` | 타이틀을 256×224, 8개 팔레트 뱅크로 변환 |
-| `tools/dq4graphics.py` | PNG·4bpp CHR·BGR555 팔레트·맵 출력과 검증 |
-| `tools/dq4figures.py` | 문서용 그림 재생성 |
-| `tools/dq4sprites.py` | 초기 스프라이트 제작 코드. 인물 오인에 따른 형태가 남은 반려 시안이며, 최신 로컬 실험과 다름 |
-| `tools/dq4terrain.py` | 채택 미확인인 수정 샘플 맵·타일 제작 코드 |
+| `sfc/dq4/tools/dq4art/title.png` | 사용자가 제공한 Nintendo DS DQ4 타이틀의 하늘·용·로고 분위기를 참고한 제작 원본 |
+| `sfc/dq4/tools/dq4art/journey.png` | 긍정 평가를 받은 일러스트 원본 |
+| `sfc/dq4/tools/dq4art/prompts.json` | 생성 지시문과 참고 이미지 사용 기록 |
+| `sfc/dq4/tools/dq4title.py` | 타이틀을 256×224, 8개 팔레트 뱅크로 변환 |
+| `sfc/dq4/tools/dq4graphics.py` | PNG·4bpp CHR·BGR555 팔레트·맵 출력과 검증 |
+| `sfc/dq4/tools/dq4figures.py` | 문서용 그림 재생성 |
+| `sfc/dq4/tools/dq4sprites.py` | 초기 스프라이트 제작 코드. 인물 오인에 따른 형태가 남은 반려 시안이며, 최신 로컬 실험과 다름 |
+| `sfc/dq4/tools/dq4terrain.py` | 채택 미확인인 수정 샘플 맵·타일 제작 코드 |
 
-재생성 명령과 파일 규격은 [dq4-graphics.md](dq4-graphics.md)에 있습니다. 기존 도구가 정상 실행되고 출력이 일치해도 스프라이트의 시각적 품질이 승인된 것은 아닙니다. 특히 `tools/dq4sprites.py`를 실행해 나오는 그림을 B3나 최종 에뮬레이터 수정본으로 설명하면 안 됩니다.
+재생성 명령과 파일 규격은 [dq4-graphics.md](docs/dq4-graphics.md)에 있습니다. 기존 도구가 정상 실행되고 출력이 일치해도 스프라이트의 시각적 품질이 승인된 것은 아닙니다. 특히 `sfc/dq4/tools/dq4sprites.py`를 실행해 나오는 그림을 B3나 최종 에뮬레이터 수정본으로 설명하면 안 됩니다.
 
 ## 스프라이트 참고 자료
 

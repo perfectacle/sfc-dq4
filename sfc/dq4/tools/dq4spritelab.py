@@ -1,9 +1,9 @@
-"""DQ4 스프라이트를 DQ5 원작 인물과 같은 배율로 견주고 MesenCE 로 띄우는 실험 도구; docs/dq4-sprite-format.md.
+"""DQ4 스프라이트를 DQ5 원작 인물과 같은 배율로 견주고 MesenCE 로 띄우는 실험 도구; sfc/dq4/docs/dq4-sprite-format.md.
 
 하위 명령:
-  hero     tools/lua/dq4objdump.lua 덤프(방향별 vram/oam/cgram)에서 DQ5 주인공 16×24 를 복원해
+  hero     sfc/dq4/tools/lua/dq4objdump.lua 덤프(방향별 vram/oam/cgram)에서 DQ5 주인공 16×24 를 복원해
            PNG 와 색 번호 행렬을 찍는다.
-  data     인물 이름을 받아 tools/lua/dq4sprite.lua 가 읽는 4bpp 타일·팔레트 Lua 파일을 쓴다.
+  data     인물 이름을 받아 sfc/dq4/tools/lua/dq4sprite.lua 가 읽는 4bpp 타일·팔레트 Lua 파일을 쓴다.
   compare  DQ5 주인공 4방향과 인물의 정지·보행 자세를 같은 배경·같은 배율(8배)로 나란히 그린다.
 
 덤프와 결과는 모두 work/ 아래에만 둔다(기본 work/dq4-sprites/).
@@ -18,7 +18,7 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dq4sprites import HEIGHT, WIDTH, SPRITE_NAMES, build_sheet  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
 OBJ_BASE = 0xC000  # OBJ 이름 표 워드 $6000 = 바이트 C000
 DIRECTIONS = ("down", "left", "right", "up")
 GRASS = (66, 156, 74)

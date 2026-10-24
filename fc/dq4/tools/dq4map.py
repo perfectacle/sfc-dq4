@@ -1,14 +1,14 @@
-"""DQ4(FC) 맵 블록 배치 풀기. 형식은 docs/dq4-map-format.md.
+"""DQ4(FC) 맵 블록 배치 풀기. 형식은 fc/dq4/docs/dq4-map-format.md.
 
 사용:
-  python tools/dq4map.py rom/dq4.nes list                  맵 269개: (그룹 $63/순번 $64), 맵 번호, 위치, 크기
-  python tools/dq4map.py rom/dq4.nes check                 해제 끝이 다음 맵 시작과 같은지 전수 검사
-  python tools/dq4map.py rom/dq4.nes exits G K [--compare end.ram]   출구($05A0 에 들어가는 것)
-  python tools/dq4map.py rom/dq4.nes npcs G K [--ram D | --set 6283=80,6282=10] [--night] [--compare D]
+  python fc/dq4/tools/dq4map.py rom/dq4.nes list                  맵 269개: (그룹 $63/순번 $64), 맵 번호, 위치, 크기
+  python fc/dq4/tools/dq4map.py rom/dq4.nes check                 해제 끝이 다음 맵 시작과 같은지 전수 검사
+  python fc/dq4/tools/dq4map.py rom/dq4.nes exits G K [--compare end.ram]   출구($05A0 에 들어가는 것)
+  python fc/dq4/tools/dq4map.py rom/dq4.nes npcs G K [--ram D | --set 6283=80,6282=10] [--night] [--compare D]
                                                            인물(진행 플래그로 고른 목록, D 는 덤프 파일이나 end.* 폴더)
-  python tools/dq4map.py rom/dq4.nes lists [G K]           진행 플래그로 고르는 인물 목록 표(1C:$9D0E)
-  python tools/dq4map.py rom/dq4.nes G K                   해제한 블록 배치를 16진 격자로
-  python tools/dq4map.py rom/dq4.nes G K --compare at.bin  tools/lua/fc/atpc.lua 덤프($7800)와 비교
+  python fc/dq4/tools/dq4map.py rom/dq4.nes lists [G K]           진행 플래그로 고르는 인물 목록 표(1C:$9D0E)
+  python fc/dq4/tools/dq4map.py rom/dq4.nes G K                   해제한 블록 배치를 16진 격자로
+  python fc/dq4/tools/dq4map.py rom/dq4.nes G K --compare at.bin  fc/dq4/tools/lua/atpc.lua 덤프($7800)와 비교
 
 근거 루틴: 0F:$E549(해제 진입), $E5BF(바탕 채우기), $E588(명령 고르기), $E672(블록 값 정하기),
 $E6A1(사각형), $E793(길 그리기), $E86D(점), $E5A3(위 3비트 두 번째 패스), $E618(비트 읽기).

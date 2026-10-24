@@ -1,10 +1,10 @@
 # DQ4 포팅용 인물 스프라이트 규격
 
-SFC DQ5 필드 인물 그림을 실측해 얻은 격자 규칙과, 그 규칙으로 그린 DQ4 인물 9명의 스프라이트 규격입니다. 그린 원본은 `tools/dq4sprites.py`, 원작과 견주고 MesenCE 에 띄우는 도구는 `tools/dq4spritelab.py` 입니다. 찾아낸 과정은 [일지](journal/dq4/2026-10-25-18-sprites2.md)에 있습니다.
+SFC DQ5 필드 인물 그림을 실측해 얻은 격자 규칙과, 그 규칙으로 그린 DQ4 인물 9명의 스프라이트 규격입니다. 그린 원본은 `sfc/dq4/tools/dq4sprites.py`, 원작과 견주고 MesenCE 에 띄우는 도구는 `sfc/dq4/tools/dq4spritelab.py` 입니다. 찾아낸 과정은 [일지](../journal/2026-10-25-18-sprites2.md)에 있습니다.
 
 ## DQ5 필드 인물의 실측
 
-필드 세이브스테이트에서 주인공을 네 방향으로 걷게 하고 멈춘 순간의 VRAM·OAM·CGRAM 을 덤프해(`tools/lua/dq4objdump.lua`), OAM 슬롯 0~7 의 8×8 OBJ 를 16×24 상자로 되돌렸습니다(`tools/dq4spritelab.py hero`). OAM 은 **낮은 슬롯이 위에** 그려지므로 슬롯을 역순으로 겹쳐야 얼굴이 나옵니다(슬롯 2·3 이 같은 자리에 겹쳐 있고 2 가 얼굴, 3 이 몸).
+필드 세이브스테이트에서 주인공을 네 방향으로 걷게 하고 멈춘 순간의 VRAM·OAM·CGRAM 을 덤프해(`sfc/dq4/tools/lua/dq4objdump.lua`), OAM 슬롯 0~7 의 8×8 OBJ 를 16×24 상자로 되돌렸습니다(`sfc/dq4/tools/dq4spritelab.py hero`). OAM 은 **낮은 슬롯이 위에** 그려지므로 슬롯을 역순으로 겹쳐야 얼굴이 나옵니다(슬롯 2·3 이 같은 자리에 겹쳐 있고 2 가 얼굴, 3 이 몸).
 
 | 항목 | 실측값 |
 | --- | --- |
@@ -66,7 +66,7 @@ SFC DQ5 필드 인물 그림을 실측해 얻은 격자 규칙과, 그 규칙으
 | `nara` | 4 | 7 | 긴 검보라 머리에 분홍 띠, 흰 옷 |
 | `hero` | 5 | 8 | 초록 모자(깃털)·옷, 갈색 허리띠·장화 |
 
-![DQ4 인물 9명의 정지·보행·측면·후면](images/dq4-sprites-gallery.webp)
+![DQ4 인물 9명의 정지·보행·측면·후면](../images/dq4-sprites-gallery.webp)
 
 ## 원작과 견주기와 MesenCE 표시
 
@@ -74,18 +74,18 @@ SFC DQ5 필드 인물 그림을 실측해 얻은 격자 규칙과, 그 규칙으
 export MESENCE=/path/to/MesenCE
 mkdir -p work/dq4-sprites/dump work/dq4-sprites/play
 STATE=$PWD/work/state/field-free.mss OUT=$PWD/work/dq4-sprites/dump \
-  "$MESENCE" --testrunner "$PWD/rom/dq5.sfc" "$PWD/tools/lua/dq4objdump.lua"
-uv run --locked python tools/dq4spritelab.py hero             # work/dq4-sprites/dq5-hero.png
-uv run --locked python tools/dq4spritelab.py compare ragnar   # compare-ragnar.png (8배)
-uv run --locked python tools/dq4spritelab.py data ragnar      # ragnar.lua
+  "$MESENCE" --testrunner "$PWD/rom/dq5.sfc" "$PWD/sfc/dq4/tools/lua/dq4objdump.lua"
+uv run --locked python sfc/dq4/tools/dq4spritelab.py hero             # work/dq4-sprites/dq5-hero.png
+uv run --locked python sfc/dq4/tools/dq4spritelab.py compare ragnar   # compare-ragnar.png (8배)
+uv run --locked python sfc/dq4/tools/dq4spritelab.py data ragnar      # ragnar.lua
 DATA=$PWD/work/dq4-sprites/ragnar.lua STATE=$PWD/work/dq4-sprites/play/start.mss \
   OUT=$PWD/work/dq4-sprites/play TEST=1 \
-  "$MESENCE" --testrunner "$PWD/rom/dq5.sfc" "$PWD/tools/lua/dq4sprite.lua"
+  "$MESENCE" --testrunner "$PWD/rom/dq5.sfc" "$PWD/sfc/dq4/tools/lua/dq4sprite.lua"
 ```
 
 `dq4sprite.lua` 는 필드 `01/00` 에서 주인공의 원래 머리 타일 쌍(`000`·`001`)이 OAM 슬롯 0·1 에 있을 때만, 프레임마다 VRAM `D000`~`D0BF`(OBJ 타일 `80`~`85`)·OAM 0~5·OBJ 팔레트 3 을 덮어씁니다. 방향은 WRAM `7E:31E0` 의 위 4비트(`40` 남, `20` 서, `10` 동, `80` 북), 자세는 좌표 변화로 정합니다. 걷는 동안 전투가 나지 않게 런타임 롬의 파일 오프셋 `11EA44` 부터 8바이트를 0 으로 씁니다. `TEST` 를 빼고 MesenCE 를 GUI 로 열면 패드로 직접 걷습니다. `start.mss` 는 메뉴를 닫은 필드 세이브스테이트이며 커밋하지 않습니다.
 
-![DQ5 주인공과 라이안을 같은 배경·같은 배율로, 아래는 자동 보행 화면](images/dq4-sprites-field.webp)
+![DQ5 주인공과 라이안을 같은 배경·같은 배율로, 아래는 자동 보행 화면](../images/dq4-sprites-field.webp)
 
 이 표시는 Lua 가 PPU 메모리를 바꾸는 실험이지 롬에 넣은 것이 아닙니다. IPS 패치로 옮기려면 DQ5 의 인물 그래픽 압축·포인터·VRAM 배치를 먼저 풀어야 합니다.
 

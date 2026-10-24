@@ -1,16 +1,16 @@
 # DQ4(FC) 저장 데이터·이벤트 플래그·장 시작
 
-FC 「드래곤 퀘스트 IV」 일본판 Rev A(`rom/dq4.nes`)의 배터리 백업 SRAM(`$6000`~`$7FFF`) 구조, 이벤트 플래그 영역, 장(章)을 시작할 때 롬에서 읽는 표입니다. 주소 표기는 [dq4-handoff.md](dq4-handoff.md#조심할-것) 를 따르고, 필드 RAM 은 [dq4-ram-format.md](dq4-ram-format.md) 에 있습니다. 실험 과정은 [2026-10-25-11 일지](journal/dq4/2026-10-25-11-event.md)·[2026-10-25-23 일지](journal/dq4/2026-10-25-23-event2.md) 에 있습니다.
+FC 「드래곤 퀘스트 IV」 일본판 Rev A(`rom/dq4.nes`)의 배터리 백업 SRAM(`$6000`~`$7FFF`) 구조, 이벤트 플래그 영역, 장(章)을 시작할 때 롬에서 읽는 표입니다. 주소 표기는 [dq4-handoff.md](../handoff.md#조심할-것) 를 따르고, 필드 RAM 은 [dq4-ram-format.md](dq4-ram-format.md) 에 있습니다. 실험 과정은 [2026-10-25-11 일지](../journal/2026-10-25-11-event.md)·[2026-10-25-23 일지](../journal/2026-10-25-23-event2.md) 에 있습니다.
 
-근거가 실측이 아니라 코드 읽기인 줄에는 「코드 읽기」라고 적었습니다. 덤프를 푸는 도구는 `tools/dq4event.py` 입니다.
+근거가 실측이 아니라 코드 읽기인 줄에는 「코드 읽기」라고 적었습니다. 덤프를 푸는 도구는 `fc/dq4/tools/dq4event.py` 입니다.
 
 ```sh
-uv run python tools/dq4event.py rom/dq4.nes sram work/x/end.sram     # 작업 영역·모험의 서 3칸, CRC 검사
-uv run python tools/dq4event.py rom/dq4.nes chapters                 # 1~5장 시작 표
-uv run python tools/dq4event.py rom/dq4.nes chars --compare work/x/end.sram
-uv run python tools/dq4event.py rom/dq4.nes flags --xref [NN]          # 플래그 바이트·비트마다 쓰는 곳과 검사하는 곳
-uv run python tools/dq4event.py rom/dq4.nes places                   # 귀환 자리 표, ルーラ 행선지와 마을 레코드
-uv run python tools/dq4event.py rom/dq4.nes events                   # 인물 블록의 이벤트 명령과 맵 이벤트 표
+uv run python fc/dq4/tools/dq4event.py rom/dq4.nes sram work/x/end.sram     # 작업 영역·모험의 서 3칸, CRC 검사
+uv run python fc/dq4/tools/dq4event.py rom/dq4.nes chapters                 # 1~5장 시작 표
+uv run python fc/dq4/tools/dq4event.py rom/dq4.nes chars --compare work/x/end.sram
+uv run python fc/dq4/tools/dq4event.py rom/dq4.nes flags --xref [NN]          # 플래그 바이트·비트마다 쓰는 곳과 검사하는 곳
+uv run python fc/dq4/tools/dq4event.py rom/dq4.nes places                   # 귀환 자리 표, ルーラ 행선지와 마을 레코드
+uv run python fc/dq4/tools/dq4event.py rom/dq4.nes events                   # 인물 블록의 이벤트 명령과 맵 이벤트 표
 ```
 
 ## SRAM 배치
@@ -89,7 +89,7 @@ uv run python tools/dq4event.py rom/dq4.nes events                   # 인물 �
 | `DB` | `$627B+n` &= m | `1F:$C4E1` | `1E:$A41B` `00 0D DB BF` → `$6288` `40`→`00`, `1E:$A3D8` `00 10 DB 00` → `$628B` `FF`→`00` |
 | `EB` | `$627B+n` & m 을 계산해 Z 플래그로 돌려줌(쓰지 않음) | `1F:$C4B6` | `16:$87F1` `00 16 EB 10` 이 매 프레임 실행됨(`probe/trace.lua`, X=`16`) |
 
-실측은 2장 시작을 `tools/lua/fc/eventflags.lua` 로 기록한 것입니다. 이 영역을 직접 읽고 쓰는 코드도 있습니다: 불러오기 때 `12:$AC47` 이 칸에서 영역 전체를 복사하고, 대화 스크립트의 명령 `17`·`18`·`19` 와 조건 `1A`~`1C` 도 같은 (n, m) 을 씁니다([dq4-script-format.md](dq4-script-format.md)). `0F:$DC0E` 는 인물 블록 명령 `27`(아래)의 처리기라 맵에 들어갈 때만 쓰는 곳이 아닙니다.
+실측은 2장 시작을 `fc/dq4/tools/lua/eventflags.lua` 로 기록한 것입니다. 이 영역을 직접 읽고 쓰는 코드도 있습니다: 불러오기 때 `12:$AC47` 이 칸에서 영역 전체를 복사하고, 대화 스크립트의 명령 `17`·`18`·`19` 와 조건 `1A`~`1C` 도 같은 (n, m) 을 씁니다([dq4-script-format.md](dq4-script-format.md)). `0F:$DC0E` 는 인물 블록 명령 `27`(아래)의 처리기라 맵에 들어갈 때만 쓰는 곳이 아닙니다.
 
 `dq4event.py ops` 는 롬에서 `00 n CB/DB/EB m`(n ≤ `73`) 모양을 모두 찾습니다(435곳). 바이트 모양만 보므로 데이터가 섞일 수 있습니다. 예를 들어 `--flag 16` 은 장 시작(`1E:$A354` 켜기 `80`)과 장 끝(`1A:$B92C` 끄기 `7F`)을 함께 보여 줍니다.
 
@@ -101,7 +101,7 @@ uv run python tools/dq4event.py rom/dq4.nes events                   # 인물 �
 | --- | --- | --- | --- |
 | BRK 특수 형식 `00 n CB/DB/EB m` | `set`·`clear`·`test` | 바이트 모양. 데이터 뱅크(`00`~`07`, `09`~`0B`)에 있거나, 켜기·검사인데 비트가 하나가 아니거나, 끄기인데 한 비트만 뺀 마스크(또는 `00`)가 아니면 「모양만」으로 거름(`--all` 로 같이 보임) | 394(거른 것 41) |
 | 절대 주소 명령(`LDA $62xx` 등 21가지) | `read`·`write` | 바이트 모양. 비트는 모름 | 445(거른 것 19) |
-| 대화 스크립트 | `set`·`clear`·`store`, 조건 `talk&`·`talk!=`·`talk\|`(`!` 는 뒤집힌 조건) | 맵의 낮·밤 인물 목록과 [이벤트 목록](dq4-script-format.md#이벤트-목록)의 대화 번호를 `tools/dq4talk.py` 로 풀어 나무를 따라감. 같은 대화 번호는 처음 인물에만 적고 「외 n명」 | 274 |
+| 대화 스크립트 | `set`·`clear`·`store`, 조건 `talk&`·`talk!=`·`talk\|`(`!` 는 뒤집힌 조건) | 맵의 낮·밤 인물 목록과 [이벤트 목록](dq4-script-format.md#이벤트-목록)의 대화 번호를 `fc/dq4/tools/dq4talk.py` 로 풀어 나무를 따라감. 같은 대화 번호는 처음 인물에만 적고 「외 n명」 | 274 |
 | 인물 블록 명령 `27`·`28`·`29` | `set`·`clear`·`store` | 블록 바이트에서 `27~29 m lo 62` 모양(주소가 플래그 영역). 명령 길이를 다 몰라 모양으로 찾음(낮 목록과 이벤트 목록) | 48 |
 | 맵 인물 목록 표 | `test` | [아래](#맵에-들어갈-때-인물-목록을-바꾸는-표) 두 표 | 73 |
 
@@ -204,7 +204,7 @@ T="reset:1,wait:600,start:4,wait:60,a:4,wait:60,a:4,wait:60,a:4,wait:60,a:4,wait
 A=""; for i in $(seq 45); do A="${A}a:6,wait:44,"; done                # 장 머리말 넘기기
 STATE=$PWD/work/state/dq4-ch1-courtyard.mss SEQ="$W,$S,$T,right:2,wait:20,right:2,wait:20,a:4,wait:60,${A}wait:60" \
   TAIL=30 POKEAT="5:6291=00" PRGPOKE="3C000=F7;7C000=F7" SHOT_DIR=$d \
-  "$MESENCE" --testrunner --nes.ramPowerOnState=AllZeros $PWD/rom/dq4.nes $PWD/tools/lua/fc/eventwalk.lua
+  "$MESENCE" --testrunner --nes.ramPowerOnState=AllZeros $PWD/rom/dq4.nes $PWD/fc/dq4/tools/lua/eventwalk.lua
 cat $d/walk.txt    # end ... at 1B,05 map 16/01
 ```
 

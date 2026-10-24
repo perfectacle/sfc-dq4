@@ -5,7 +5,7 @@
 --   SHOT_DIR           결과 폴더. 프레임마다 fNNNNN.png(화면), .nt(2KB), .chr(8KB), .pal(32B), .oam, .ram, .ppu($2000 쓰기 값),
 --                      .oam2(화면을 찍은 프레임의 OAM. 화면이 어느 프레임 것인지 모호해 스프라이트 자리를 두 OAM 으로 가린다)
 --   STOP               이 프레임에서 멈춤(기본 AT 의 마지막 + 5)
--- 화면 덤프는 한 프레임 늦게 바뀌므로(tools/lua/fc/fcgfxpal.lua) PPU 메모리는 AT 앞 프레임, 화면은 AT 프레임에 찍는다.
+-- 화면 덤프는 한 프레임 늦게 바뀌므로(fc/dq4/tools/lua/fcgfxpal.lua) PPU 메모리는 AT 앞 프레임, 화면은 AT 프레임에 찍는다.
 package.path = os.getenv("LIBDIR") .. "/?.lua;" .. package.path
 local L = require("lib")
 local at, last = {}, 0

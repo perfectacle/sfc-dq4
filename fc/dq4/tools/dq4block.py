@@ -1,15 +1,15 @@
-"""DQ4(FC) 맵 블록 → 8×8 타일 4개·팔레트·통행. 형식은 docs/dq4-block-format.md.
+"""DQ4(FC) 맵 블록 → 8×8 타일 4개·팔레트·통행. 형식은 fc/dq4/docs/dq4-block-format.md.
 
 사용:
-  python tools/dq4block.py rom/dq4.nes defs T              맵 종류 T($0028)의 블록 정의·애니메이션·낮 팔레트
-  python tools/dq4block.py rom/dq4.nes G K [--png]         맵의 통행 지도(텍스트). --png 는 work/ 에 렌더링
-  python tools/dq4block.py rom/dq4.nes G K --nt            맵 전체의 nametable 타일 번호 배열
-  python tools/dq4block.py rom/dq4.nes field [F] [--png]   필드 F(기본 0)의 통행 지도
-  python tools/dq4block.py rom/dq4.nes props [--maps]      롬 전체 맵·필드의 속성 값별 뜻·맵 수·칸 수(--maps 는 맵마다)
-  python tools/dq4block.py rom/dq4.nes compare DIR [PREFIX] seq.lua 의 end.* (또는 blockload.lua 의 PREFIX.*) 덤프와 비교
-  python tools/dq4block.py rom/dq4.nes effects G K          맵에서 지형 효과가 있는 칸(떨어지면 가는 곳 포함)
-  python tools/dq4block.py rom/dq4.nes tables               떨어지는 칸·리프트·タンス/つぼ·팻말 표와 속성 값의 뜻
-  python tools/dq4block.py rom/dq4.nes json [OUT]           맵·필드 전부의 속성·칸·표를 JSON 으로(기본 work/dq4block.json)
+  python fc/dq4/tools/dq4block.py rom/dq4.nes defs T              맵 종류 T($0028)의 블록 정의·애니메이션·낮 팔레트
+  python fc/dq4/tools/dq4block.py rom/dq4.nes G K [--png]         맵의 통행 지도(텍스트). --png 는 work/ 에 렌더링
+  python fc/dq4/tools/dq4block.py rom/dq4.nes G K --nt            맵 전체의 nametable 타일 번호 배열
+  python fc/dq4/tools/dq4block.py rom/dq4.nes field [F] [--png]   필드 F(기본 0)의 통행 지도
+  python fc/dq4/tools/dq4block.py rom/dq4.nes props [--maps]      롬 전체 맵·필드의 속성 값별 뜻·맵 수·칸 수(--maps 는 맵마다)
+  python fc/dq4/tools/dq4block.py rom/dq4.nes compare DIR [PREFIX] seq.lua 의 end.* (또는 blockload.lua 의 PREFIX.*) 덤프와 비교
+  python fc/dq4/tools/dq4block.py rom/dq4.nes effects G K          맵에서 지형 효과가 있는 칸(떨어지면 가는 곳 포함)
+  python fc/dq4/tools/dq4block.py rom/dq4.nes tables               떨어지는 칸·리프트·タンス/つぼ·팻말 표와 속성 값의 뜻
+  python fc/dq4/tools/dq4block.py rom/dq4.nes json [OUT]           맵·필드 전부의 속성·칸·표를 JSON 으로(기본 work/dq4block.json)
 
 
 근거 루틴: 08:$84E9(블록 표 올리기), $8055(맵 종류 → 블록 표), $8473(블록 하나), $80D5(타일 모양 레코드),
@@ -401,7 +401,7 @@ FACING = {0x2B: 'dresser', 0x2A: 'pot', 0x28: 'sign', 0x30: 'push_door', 0x2C: '
 
 
 def terrain(prg, prop):
-    """블록 속성 하나가 걷기·명령에서 뜻하는 것(docs/dq4-block-format.md 「지형 효과」).
+    """블록 속성 하나가 걷기·명령에서 뜻하는 것(fc/dq4/docs/dq4-block-format.md 「지형 효과」).
     walk: 걸어서 들어감, ship: 배로 들어감, effect: 걸음을 마친 뒤(0F:$CEB1) 하는 일,
     door·talk_over·facing: 앞 칸으로 쓰일 때(「とびら」·「はなす」·「しらべる」)."""
     v = prop & 0x7F
@@ -593,7 +593,7 @@ def export(prg, path):
 MARKS = 'GHIJKLMNOPQRSTUVWXYZ'
 BLOCKED = 'abcdefghijklmnopqrstuvwxyz'
 
-# 속성($6F40) 값 → 사람이 읽는 뜻. 기계가 읽는 뜻은 terrain(). 근거는 docs/dq4-block-format.md 의 「속성 값」 표.
+# 속성($6F40) 값 → 사람이 읽는 뜻. 기계가 읽는 뜻은 terrain(). 근거는 fc/dq4/docs/dq4-block-format.md 의 「속성 값」 표.
 KINDS = {
     0x00: '바닥',
     0x01: '독늪(걸음마다 HP 1)',

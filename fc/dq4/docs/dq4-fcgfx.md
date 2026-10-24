@@ -1,16 +1,16 @@
 # DQ4(FC) 원작 그래픽 렌더링
 
-SFC 로 다시 그릴 때 참고하려고 FC 원작의 마을·던전 맵 279개, 필드, 블록·CHR·폰트 시트, 타이틀·창·전투 화면을 PNG 로 뽑는 도구 [tools/dq4fcgfx.py](../tools/dq4fcgfx.py) 의 쓰는 법과, 그리면서 새로 확인한 것(MesenCE 색, 필드 물가 블록)입니다. 블록·타일·팔레트 해석은 [dq4-block-format.md](dq4-block-format.md), 맵·출구·인물은 [dq4-map-format.md](dq4-map-format.md), 필드는 [dq4-field-format.md](dq4-field-format.md) 를 따릅니다. 실험 과정은 [2026-10-25-30 일지](journal/dq4/2026-10-25-30-fcgfx.md) 에 있습니다.
+SFC 로 다시 그릴 때 참고하려고 FC 원작의 마을·던전 맵 279개, 필드, 블록·CHR·폰트 시트, 타이틀·창·전투 화면을 PNG 로 뽑는 도구 [fc/dq4/tools/dq4fcgfx.py](../tools/dq4fcgfx.py) 의 쓰는 법과, 그리면서 새로 확인한 것(MesenCE 색, 필드 물가 블록)입니다. 블록·타일·팔레트 해석은 [dq4-block-format.md](dq4-block-format.md), 맵·출구·인물은 [dq4-map-format.md](dq4-map-format.md), 필드는 [dq4-field-format.md](dq4-field-format.md) 를 따릅니다. 실험 과정은 [2026-10-25-30 일지](../journal/2026-10-25-30-fcgfx.md) 에 있습니다.
 
 뽑은 그림은 롬 그래픽이라 이 저장소에 커밋하지 않습니다. 비공개 저장소 `perfectacle/sfc-dq4-assets` 의 `fc/dq4/` 아래에 두고, 폴더마다 `SOURCE.txt` 에 만든 커밋·명령·롬 SHA-1 을 적습니다.
 
 ## 출력
 
 ```sh
-uv run --locked python tools/dq4fcgfx.py rom/dq4.nes all OUT          # OUT/{maps,field,gfx,gallery}
-uv run --locked python tools/dq4fcgfx.py rom/dq4.nes scenes OUT SPEC.json   # MesenCE 덤프 장면 → OUT/gfx/screens
-uv run --locked python tools/dq4fcgfx.py rom/dq4.nes gallery OUT      # 장면을 넣은 뒤 갤러리만 다시
-uv run --locked python tools/dq4fcgfx.py rom/dq4.nes map 02 01 work/x.png [--night|--annot]
+uv run --locked python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes all OUT          # OUT/{maps,field,gfx,gallery}
+uv run --locked python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes scenes OUT SPEC.json   # MesenCE 덤프 장면 → OUT/gfx/screens
+uv run --locked python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes gallery OUT      # 장면을 넣은 뒤 갤러리만 다시
+uv run --locked python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes map 02 01 work/x.png [--night|--annot]
 ```
 
 맵 목록은 `dq4chest.all_maps`(279개)입니다. `dq4map.maps` 는 마지막 그룹 `48`(맵 10개, 맵 종류 `1B`·`1C`)을 빼므로, 렌더러는 자기 프로세스 안에서만 `dq4map.load` 를 `dq4chest.load` 로 바꿔 씁니다.
@@ -32,12 +32,12 @@ uv run --locked python tools/dq4fcgfx.py rom/dq4.nes map 02 01 work/x.png [--nig
 
 ## 색
 
-NES 색 번호 → RGB 는 MesenCE 기본 팔레트를 화면에서 잰 값(`MESEN_RGB`)입니다. [tools/lua/fc/fcgfxpal.lua](../tools/lua/fc/fcgfxpal.lua) 가 세이브스테이트를 불러 nametable 을 빈 타일로, OAM 을 화면 밖으로 치운 뒤 BG 팔레트 색 0 을 `00`~`3F` 로 바꿔 가며 화면을 찍습니다. MesenCE 화면 덤프는 메모리를 바꾼 프레임보다 한 프레임 늦게 바뀌어서, 색마다 4프레임을 두고 마지막에 찍었습니다(처음 한 프레임씩 찍었을 때는 색이 하나씩 밀리고, 한 곳에서는 둘이 겹쳤음).
+NES 색 번호 → RGB 는 MesenCE 기본 팔레트를 화면에서 잰 값(`MESEN_RGB`)입니다. [fc/dq4/tools/lua/fcgfxpal.lua](../tools/lua/fcgfxpal.lua) 가 세이브스테이트를 불러 nametable 을 빈 타일로, OAM 을 화면 밖으로 치운 뒤 BG 팔레트 색 0 을 `00`~`3F` 로 바꿔 가며 화면을 찍습니다. MesenCE 화면 덤프는 메모리를 바꾼 프레임보다 한 프레임 늦게 바뀌어서, 색마다 4프레임을 두고 마지막에 찍었습니다(처음 한 프레임씩 찍었을 때는 색이 하나씩 밀리고, 한 곳에서는 둘이 겹쳤음).
 
 ```sh
 export LIBDIR=$(uv run krpatch fc lua)
 STATE=$PWD/work/state/dq4-ch1-throne.mss SHOT_DIR=$PWD/work/pal \
-  "$MESENCE" --testrunner --nes.ramPowerOnState=AllZeros $PWD/rom/dq4.nes $PWD/tools/lua/fc/fcgfxpal.lua
+  "$MESENCE" --testrunner --nes.ramPowerOnState=AllZeros $PWD/rom/dq4.nes $PWD/fc/dq4/tools/lua/fcgfxpal.lua
 ```
 
 ## 필드의 물가 블록
@@ -60,11 +60,11 @@ STATE=$PWD/work/state/dq4-ch1-throne.mss SHOT_DIR=$PWD/work/pal \
 
 ```sh
 # 워프로 맵에 들어간 상태를 만들고, 그 상태에서 스프라이트를 끈 화면을 덤프
-WAIT=100 TAIL=10 sh tools/dq4warp.sh work/w/0E-00 0E/00
+WAIT=100 TAIL=10 sh fc/dq4/tools/dq4warp.sh work/w/0E-00 0E/00
 DRIVER=$LIBDIR/seq.lua STATE=$PWD/work/w/0E-00/warp.mss SEQ="wait:2" TAIL=3 EVERY=0 SHOT_DIR=$PWD/work/v/0E-00 \
   "$MESENCE" --testrunner --nes.ramPowerOnState=AllZeros --nes.disableSprites=true --nes.forceBackgroundFirstColumn=true \
   $PWD/rom/dq4.nes $LIBDIR/seq.lua
-uv run --locked python tools/dq4fcgfx.py rom/dq4.nes verify work/v/*/
+uv run --locked python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes verify work/v/*/
 ```
 
 | 덤프 | 결과 |
@@ -76,12 +76,12 @@ uv run --locked python tools/dq4fcgfx.py rom/dq4.nes verify work/v/*/
 | 필드 3 | 4796 픽셀 다름. 덤프의 BG 팔레트로 그리면 114. 용암·물 팔레트가 프레임마다 돌아감 |
 | 필드 2 | 거의 모두 다름(「남은 것」) |
 
-장면 화면(`scenes`)은 [tools/lua/fc/fcgfxscene.lua](../tools/lua/fc/fcgfxscene.lua) 로 뜬 nametable·CHR·팔레트 덤프를 그린 것이고 롬에서 직접 푼 것이 아닙니다. 화면과 견주면 제작진 화면·IV 로고·모험의 서 창·이름 입력·전투 두 장면은 스프라이트 자리를 빼고 0 다름, 타이틀은 IV 글자(스프라이트)와 아래 물결이 다르고, 필드의 상태 창·명령 창 장면은 걷는 인물(스프라이트가 OAM 덤프 자리와 달라 다 가려지지 않음)과 게임이 BG 를 가리는 왼쪽 8픽셀만 다릅니다(장면 덤프는 `forceBackgroundFirstColumn` 없이 떴음). 장면 목록은 `[{"name", "title", "prefix"}]` 꼴 JSON 이고 `prefix` 는 덤프 파일 앞부분(`work/scene/boot/f02440`)입니다.
+장면 화면(`scenes`)은 [fc/dq4/tools/lua/fcgfxscene.lua](../tools/lua/fcgfxscene.lua) 로 뜬 nametable·CHR·팔레트 덤프를 그린 것이고 롬에서 직접 푼 것이 아닙니다. 화면과 견주면 제작진 화면·IV 로고·모험의 서 창·이름 입력·전투 두 장면은 스프라이트 자리를 빼고 0 다름, 타이틀은 IV 글자(스프라이트)와 아래 물결이 다르고, 필드의 상태 창·명령 창 장면은 걷는 인물(스프라이트가 OAM 덤프 자리와 달라 다 가려지지 않음)과 게임이 BG 를 가리는 왼쪽 8픽셀만 다릅니다(장면 덤프는 `forceBackgroundFirstColumn` 없이 떴음). 장면 목록은 `[{"name", "title", "prefix"}]` 꼴 JSON 이고 `prefix` 는 덤프 파일 앞부분(`work/scene/boot/f02440`)입니다.
 
 ```sh
 # 전원을 켜서 2440프레임(타이틀)까지. 세이브스테이트에서는 DRIVER=$LIBDIR/seq.lua 와 STATE, SEQ 를 주고 이 Lua 를 그대로
-SHOT_DIR=$PWD/work/scene/boot MAXF=2500 EVERY=0 AT=760,1040,2440 SRAM_DRIVER=$PWD/tools/lua/fc/fcgfxscene.lua \
-  "$MESENCE" --testrunner --nes.ramPowerOnState=AllZeros $PWD/rom/dq4.nes $PWD/tools/lua/fc/debugsram.lua
+SHOT_DIR=$PWD/work/scene/boot MAXF=2500 EVERY=0 AT=760,1040,2440 SRAM_DRIVER=$PWD/fc/dq4/tools/lua/fcgfxscene.lua \
+  "$MESENCE" --testrunner --nes.ramPowerOnState=AllZeros $PWD/rom/dq4.nes $PWD/fc/dq4/tools/lua/debugsram.lua
 ```
 
 폰트 141자(`18:$B840`)는 이름 입력·모험의 서·전투·5장 명령 창의 CHR 덤프(`$1000`+글자×16 앞 8바이트, 뒤 8바이트 0)와 모두 같았습니다. 전투 화면 BG 는 검은 바탕에 창뿐이라 따로 그린 전투 배경은 없습니다.

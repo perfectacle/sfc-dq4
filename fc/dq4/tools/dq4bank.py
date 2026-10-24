@@ -1,11 +1,11 @@
-"""DQ4(FC) BRK 뱅크 호출 풀기. 형식은 docs/dq4-bank-format.md.
+"""DQ4(FC) BRK 뱅크 호출 풀기. 형식은 fc/dq4/docs/dq4-bank-format.md.
 
 사용:
-  python tools/dq4bank.py rom/dq4.nes call C9FC [--bank 1D]   BRK 한 곳 풀기(--bank: 그때 $0507)
-  python tools/dq4bank.py rom/dq4.nes table 1D [N]            뱅크의 $8000 함수 표 앞 N 개
-  python tools/dq4bank.py rom/dq4.nes compare trace.txt       probe/trace.lua 기록과 비교
-  python tools/dq4bank.py rom/dq4.nes free [최소 길이]         뱅크마다 FF·00 연속 구간(빈 자리 후보)
-  python tools/dq4bank.py rom/dq4.nes cover cover.txt ...      probe/cover.lua 결과의 뱅크별 실행 오프셋 수
+  python fc/dq4/tools/dq4bank.py rom/dq4.nes call C9FC [--bank 1D]   BRK 한 곳 풀기(--bank: 그때 $0507)
+  python fc/dq4/tools/dq4bank.py rom/dq4.nes table 1D [N]            뱅크의 $8000 함수 표 앞 N 개
+  python fc/dq4/tools/dq4bank.py rom/dq4.nes compare trace.txt       probe/trace.lua 기록과 비교
+  python fc/dq4/tools/dq4bank.py rom/dq4.nes free [최소 길이]         뱅크마다 FF·00 연속 구간(빈 자리 후보)
+  python fc/dq4/tools/dq4bank.py rom/dq4.nes cover cover.txt ...      probe/cover.lua 결과의 뱅크별 실행 오프셋 수
 
 근거 루틴(뱅크 0F): BRK 처리기 $C408, 호출 $C38B, 포인터 꺼내기 $C3CE, 표 읽기 $C3BA,
 뱅크 전환 $FF91. compare 용 기록은 TRACE=C446,C455,C3CD LOG=0023,0024,0025,0026,0027,0507.

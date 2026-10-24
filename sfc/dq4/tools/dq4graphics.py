@@ -1,4 +1,4 @@
-"""Build the original DQ4 graphics study kit; see docs/dq4-graphics.md.
+"""Build the original DQ4 graphics study kit; see sfc/dq4/docs/dq4-graphics.md.
 
 The output uses SFC planar tiles, not the DQ5 engine's compressed asset format.
 """

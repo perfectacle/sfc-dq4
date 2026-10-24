@@ -1,17 +1,17 @@
-"""DQ4(FC) 인물 대화 → 메시지 번호. 형식은 docs/dq4-script-format.md.
+"""DQ4(FC) 인물 대화 → 메시지 번호. 형식은 fc/dq4/docs/dq4-script-format.md.
 
 사용:
-  python tools/dq4talk.py rom/dq4.nes G K [--ram end.ram] [--night]
+  python fc/dq4/tools/dq4talk.py rom/dq4.nes G K [--ram end.ram] [--night]
                                                             맵 (그룹, 순번) 의 인물마다 대화 번호·스크립트·대사(--night: 밤 목록)
-  python tools/dq4talk.py rom/dq4.nes id N                   대화 번호 N(16진) 하나
-  python tools/dq4talk.py rom/dq4.nes all                    모든 맵 인물·스크립트를 풀어 못 읽은 명령 수를 셈
-  python tools/dq4talk.py rom/dq4.nes calls                  호출 문장(00·01)이 부르는 뱅크 15 루틴을 하는 일로 나눈 표
-  python tools/dq4talk.py rom/dq4.nes compare DIR [--no]    lua/fc/talk.lua 기록(DIR/talk.txt)의 메시지 번호와 예측 비교
+  python fc/dq4/tools/dq4talk.py rom/dq4.nes id N                   대화 번호 N(16진) 하나
+  python fc/dq4/tools/dq4talk.py rom/dq4.nes all                    모든 맵 인물·스크립트를 풀어 못 읽은 명령 수를 셈
+  python fc/dq4/tools/dq4talk.py rom/dq4.nes calls                  호출 문장(00·01)이 부르는 뱅크 15 루틴을 하는 일로 나눈 표
+  python fc/dq4/tools/dq4talk.py rom/dq4.nes compare DIR [--no]    lua/talk.lua 기록(DIR/talk.txt)의 메시지 번호와 예측 비교
                                                             (--no: 예/아니오에서 「いいえ」 를 골랐을 때)
-  python tools/dq4talk.py rom/dq4.nes events [--compare DIR...]
+  python fc/dq4/tools/dq4talk.py rom/dq4.nes events [--compare DIR...]
                                                             이벤트 표 1C:$BF74 의 번호마다 전투·플래그·메시지·장소·부르는 곳
                                                             (--compare: EV 로 돌린 talk.lua 기록과 대조)
-  python tools/dq4talk.py rom/dq4.nes looks                  그림 번호마다 쓰는 인물 수·장소·첫 대사
+  python fc/dq4/tools/dq4talk.py rom/dq4.nes looks                  그림 번호마다 쓰는 인물 수·장소·첫 대사
 
 --ram 을 주면 RAM 덤프의 플래그($627B~)·장($615A)·시간($62ED)·일행($616A~)·인물 레코드로 조건을 풀어
 실제로 나올 메시지만 낸다. 덤프가 밤이면 밤 목록을 쓴다.
@@ -416,7 +416,7 @@ def check_all(prg):
 # 호출 문장이 부르는 루틴 안에서 알아보는 곳. 주소는 뱅크 15(와 $C000- 고정 뱅크 1F).
 LEAF = {0xB0FF: 'event', 0xB0F6: 'event', 0x9919: 'msg', 0x9914: 'msg', 0xA695: 'msg', 0xB7DD: 'window',
         0xB84A: 'service', 0xB851: 'service', 0xB858: 'service', 0xBBF0: 'service', 0xBF28: 'service', 0xB550: 'service'}
-CALL_TAGS = {   # 태그 → 표에 쓰는 이름. 앞에 있는 것이 그 루틴의 갈래(뜻은 docs/dq4-script-format.md 「호출 문장」)
+CALL_TAGS = {   # 태그 → 표에 쓰는 이름. 앞에 있는 것이 그 루틴의 갈래(뜻은 fc/dq4/docs/dq4-script-format.md 「호출 문장」)
     'move': '잠·자리 옮김', 'service': '서비스', 'event': '이벤트(1C:$BF74 표)', 'mapevent': '맵 이벤트(1D:$B74D)',
     'item': '아이템', 'npc': '인물 움직임($7040)', 'window': '창', 'msg': '메시지'}
 ITEM_CODES = {0x2E, 0x30, 0x66}   # 뱅크 10 일행 루틴(BRK n 73): 2E 주기, 30 빼기, 66 찾기
@@ -733,7 +733,7 @@ def fmt(m):
 
 
 def compare(prg, d, yes=True):
-    """lua/fc/talk.lua 의 기록(d/talk.txt, d/talk_N.bin)과 비교. 맵은 덤프의 $63/$64, 조건은 그 덤프로 푼다."""
+    """lua/talk.lua 의 기록(d/talk.txt, d/talk_N.bin)과 비교. 맵은 덤프의 $63/$64, 조건은 그 덤프로 푼다."""
     talks = []
     for ln in Path(f'{d}/talk.txt').read_text().splitlines():
         p = ln.split()

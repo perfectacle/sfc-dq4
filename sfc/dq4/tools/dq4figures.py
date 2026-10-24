@@ -1,4 +1,4 @@
-"""Rebuild original graphics previews without a ROM; docs/dq4-graphics.md."""
+"""Rebuild original graphics previews without a ROM; sfc/dq4/docs/dq4-graphics.md."""
 
 from pathlib import Path
 
@@ -7,7 +7,7 @@ from dq4spritelab import field_figure
 from dq4sprites import SPRITE_NAMES
 from PIL import Image
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
 
 
 def sprite_gallery(images):
@@ -23,7 +23,7 @@ def sprite_gallery(images):
 
 def main():
     images = assets()
-    output = ROOT / "docs" / "images"
+    output = ROOT / "sfc" / "dq4" / "images"
     output.mkdir(parents=True, exist_ok=True)
     for name, image in images.items():
         scale = 1 if name == "map" else 3
@@ -37,7 +37,7 @@ def main():
         print("work/dq4-sprites 에 DQ5 덤프·보행 화면이 없어 dq4-sprites-field.webp 는 건너뜀")
     else:
         field.save(output / "dq4-sprites-field.webp", lossless=True)
-    with Image.open(ROOT / "tools" / "dq4art" / "journey.png") as source:
+    with Image.open(ROOT / "sfc" / "dq4" / "tools" / "dq4art" / "journey.png") as source:
         source.save(output / "dq4-graphics-journey.webp", lossless=True)
     frames = []
     for step in (0, 1, 2, 1):
@@ -60,7 +60,7 @@ def main():
         loop=0,
         lossless=True,
     )
-    print("Rebuilt graphics previews and walking animation in docs/images")
+    print("Rebuilt graphics previews and walking animation in sfc/dq4/images")
 
 
 if __name__ == "__main__":

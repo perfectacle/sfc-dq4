@@ -1,14 +1,14 @@
-"""DQ4(FC) 필드 인물·탈것 스프라이트와 전투 몬스터 그림을 롬에서 뽑는다. 형식은 docs/dq4-fcsprite-format.md.
+"""DQ4(FC) 필드 인물·탈것 스프라이트와 전투 몬스터 그림을 롬에서 뽑는다. 형식은 fc/dq4/docs/dq4-fcsprite-format.md.
 
 사용:
-  python tools/dq4fcsprite.py rom/dq4.nes field [N ...]     필드 그림(그림 번호, 없으면 표 00~6B 와 쓰이는 돌려 그리기 전부)
+  python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes field [N ...]     필드 그림(그림 번호, 없으면 표 00~6B 와 쓰이는 돌려 그리기 전부)
                                                              → work/dq4-fcsprite/field/
-  python tools/dq4fcsprite.py rom/dq4.nes monster [ID ...]  몬스터 그림(몬스터 ID, 없으면 전부) → work/dq4-fcsprite/monster/
-  python tools/dq4fcsprite.py rom/dq4.nes sheet              위 둘을 모두 만들고 index.html·sheet-*.png 로 묶음
-  python tools/dq4fcsprite.py rom/dq4.nes who N              그림 번호 N(인물 레코드 값, 16진)을 쓰는 맵·인물
-  python tools/dq4fcsprite.py rom/dq4.nes check-rom          몬스터 데이터 경계 검사(끝 = 다음 시작)
-  python tools/dq4fcsprite.py rom/dq4.nes check-field DIR...    seq.lua·warp.lua 덤프(end.sram/chr/oam)와 비교
-  python tools/dq4fcsprite.py rom/dq4.nes check-monster DIR...  lua/fc/spritebattle.lua 덤프(end.sram/nt/chr/pal/oam)와 비교
+  python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes monster [ID ...]  몬스터 그림(몬스터 ID, 없으면 전부) → work/dq4-fcsprite/monster/
+  python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes sheet              위 둘을 모두 만들고 index.html·sheet-*.png 로 묶음
+  python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes who N              그림 번호 N(인물 레코드 값, 16진)을 쓰는 맵·인물
+  python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes check-rom          몬스터 데이터 경계 검사(끝 = 다음 시작)
+  python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes check-field DIR...    seq.lua·warp.lua 덤프(end.sram/chr/oam)와 비교
+  python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes check-monster DIR...  lua/spritebattle.lua 덤프(end.sram/nt/chr/pal/oam)와 비교
   --out 폴더 로 출력 위치를 바꾼다(기본 work/dq4-fcsprite). 롬 그림이므로 work/ 밖에 두지 않는다.
 
 필드 근거 루틴: 08:$85D3(BRK 04 87, 그림 하나 올리기), $859B(번호 → 표 번호), $80D5·$8132(레코드 → 타일 주소 4개),
@@ -38,7 +38,7 @@ OBJ_PAL = 0x8703         # 08:$86F2 가 $0609 에 복사(FF 로 끝)
 FIELD_COUNT = 108        # 표는 08:$A1BB(블록 모양 표) 앞에서 끝난다
 VEHICLES = (0x1E, 0x97AE, 10)   # 1E:$9799 가 필드에서 칸 4~D 에 올리는 그림 번호 10개
 DIRS = ('북', '동', '남', '서')  # 블록 = 방향 × 2 + 걸음. 방향은 $7000(0 위 1 오른쪽 2 아래 3 왼쪽)
-SHEET_ROWS = (2, 3, 1, 0)        # 시트 행 순서: 남·서·동·북(docs/dq4-sprite-format.md 시트와 같은 순서)
+SHEET_ROWS = (2, 3, 1, 0)        # 시트 행 순서: 남·서·동·북(sfc/dq4/docs/dq4-sprite-format.md 시트와 같은 순서)
 B14 = 0x14
 MON_PIC = 0xB2D5         # 14:$9F0C: 몬스터 ID → 그림 번호
 MON_REC = 0xA019         # 14:$9FA9 의 워드 → 그림마다 5바이트(타일 수, 데이터 주소, 팔레트 주소)
