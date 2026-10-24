@@ -179,16 +179,17 @@ def set_cgram(rom, s, alt=False):
     return bytes(cg)
 
 
-def decode_map(rom, bc, bd):
+def decode_map(rom, bc, bd, flags=False):
+    """flags 면 이야기 플래그를 모두 켠 상태: 맵 위 물체는 열린 모양, 맵별 루틴의 셀 지우기도 켜진 쪽."""
     high = bc >= 0x50
     dec = Decoder(rom, SLOT, high)
     trace = []
     w, h, buf, _ = dec.decode(map_pointer(rom, bc, bd), trace=trace)
     buf = bytearray(buf)
     apply_hook(rom, bc, bd, buf, w)
-    hook_clears(rom, bc, bd, buf)
+    hook_clears(rom, bc, bd, buf, flags)
     if bc < 0x50:
-        dec.doors = apply_doors(rom, bc, bd, buf, w, h)
+        dec.doors = apply_doors(rom, bc, bd, buf, w, h, opened=flags)
     dec.common = common_tiles(rom, bc, bd)
     blocks = sorted({args[0] for *_, op, args in trace if op == 'block'}
                     | ({(rom.u8(map_pointer(rom, bc, bd) + 7) & 7) << 8 | rom.u8(map_pointer(rom, bc, bd) + 8)}
@@ -277,23 +278,154 @@ def door_shape(rom, kind):
     return out
 
 
-def apply_doors(rom, bc, bd, buf, w, h, doors=None):
-    """01:D2FC 의 물체를 닫힌 상태로 셀 위층(+5·+6)에 그린다. 그린 물체 [(X, Y, 종류)]."""
+def apply_doors(rom, bc, bd, buf, w, h, doors=None, opened=False):
+    """01:D2FC 의 물체를 셀 위층(+5·+6)에 그린다. opened 면 열린 모양(01:F8AB). 그린 물체 [(X, Y, 종류)]."""
     placed = []
     for x, y, kind, _, _ in (doors if doors is not None else door_entries(rom)).get((bc, bd), []):
+        placed.append((x, y, kind))
+        if opened:
+            open_door(rom, buf, w, bc, bd, x, y, kind)
+            continue
         for dx, dy, word in door_shape(rom, kind):
             if x + dx < w and y + dy < h:
                 o = ((y + dy) * w + x + dx) * 8
                 buf[o + 5], buf[o + 6] = word & 0xFF, word >> 8
-        placed.append((x, y, kind))
     return placed
 
 
-def hook_clears(rom, bc, bd, buf):
+class Mini65:
+    """맵 위 물체의 열린 모양 루틴(01:F8AB 아래)만 셀 버퍼 위에서 돌리는 작은 65816 해석기. 그 루틴들이 쓰는 명령만 있다.
+    7E:C000 이후를 셀 버퍼로, 직접 페이지를 따로 두고, 01:EFED(다음 줄)와 25:FA15(셀 주소)는 결과만 옮겼다."""
+    def __init__(self, rom, buf, w, bc, bd):
+        self.rom, self.buf, self.w = rom, buf, w
+        self.dp = bytearray(0x100)
+        self.bc, self.bd = bc, bd
+        self.a = self.x = self.y = 0; self.m8 = self.x8 = True; self.z = False; self.c = False
+        self.stack = []
+    def rd(self, addr, n):
+        if 0x7EC000 <= addr < 0x800000:
+            o = addr - 0x7EC000
+            return sum(self.buf[o + i] << (8 * i) for i in range(n) if o + i < len(self.buf))
+        if addr < 0x100:
+            return sum(self.dp[(addr + i) & 0xFF] << (8 * i) for i in range(n))
+        return sum(self.rom.u8(addr + i) << (8 * i) for i in range(n))
+    def wr(self, addr, v, n):
+        if 0x7EC000 <= addr < 0x800000:
+            o = addr - 0x7EC000
+            for i in range(n):
+                if o + i < len(self.buf): self.buf[o + i] = (v >> (8 * i)) & 0xFF
+        else:
+            for i in range(n): self.dp[(addr + i) & 0xFF] = (v >> (8 * i)) & 0xFF
+    def ptr(self, d): return self.dp[d] | self.dp[d+1] << 8 | self.dp[d+2] << 16
+    def setz(self, v, n): self.z = (v & ((1 << (8*n)) - 1)) == 0
+    def run(self, pc, limit=3000):
+        from kr_patch.sfc.dis65816 import decode
+        from kr_patch.sfc.mapper import LoROM
+        rom = self.rom
+        for _ in range(limit):
+            op = rom.u8(pc); _, n, _, _ = decode(rom.d, pc, m8=self.m8, x8=self.x8, mapper=LoROM())
+            na = 1 if self.m8 else 2; nx = 1 if self.x8 else 2
+            nxt = (pc & 0xFF0000) | ((pc + n) & 0xFFFF)
+            imm8 = rom.u8(pc + 1); imm = rom.u8(pc+1) if n == 2 else rom.u16(pc+1)
+            if op == 0xC2 or op == 0xE2:
+                if imm8 & 0x20: self.m8 = op == 0xE2
+                if imm8 & 0x10: self.x8 = op == 0xE2
+                if self.m8: self.a &= 0xFF  # keep B separately ignored
+            elif op == 0xA6: self.x = self.rd(imm8, nx); self.setz(self.x, nx)
+            elif op == 0xA4: self.y = self.rd(imm8, nx); self.setz(self.y, nx)
+            elif op == 0xA5: self.a = self.rd(imm8, na); self.setz(self.a, na)
+            elif op == 0x85: self.wr(imm8, self.a, na)
+            elif op == 0x86: self.wr(imm8, self.x, nx)
+            elif op == 0x84: self.wr(imm8, self.y, nx)
+            elif op == 0x64: self.wr(imm8, 0, na)
+            elif op == 0xA2: self.x = imm; self.setz(self.x, nx)
+            elif op == 0xA0: self.y = imm; self.setz(self.y, nx)
+            elif op == 0xA9: self.a = imm; self.setz(self.a, na)
+            elif op == 0xCA: self.x = (self.x - 1) & 0xFFFF; self.setz(self.x, nx)
+            elif op == 0x88: self.y = (self.y - 1) & 0xFFFF; self.setz(self.y, nx)
+            elif op == 0xE8: self.x = (self.x + 1) & 0xFFFF; self.setz(self.x, nx)
+            elif op == 0xC8: self.y = (self.y + 1) & 0xFFFF; self.setz(self.y, nx)
+            elif op == 0xB7: self.a = self.rd(self.ptr(imm8) + self.y, na); self.setz(self.a, na)
+            elif op == 0x97: self.wr(self.ptr(imm8) + self.y, self.a, na)
+            elif op == 0xB2: self.a = self.rd((0x01 << 16) | (self.ptr(imm8) & 0xFFFF), na); self.setz(self.a, na)
+            elif op == 0xB1: self.a = self.rd((0x01 << 16) | ((self.ptr(imm8) + self.y) & 0xFFFF), na); self.setz(self.a, na)
+            elif op == 0x29: self.a &= imm; self.setz(self.a, na)
+            elif op == 0x09: self.a |= imm; self.setz(self.a, na)
+            elif op == 0x05: self.a |= self.rd(imm8, na); self.setz(self.a, na)
+            elif op == 0x25: self.a &= self.rd(imm8, na); self.setz(self.a, na)
+            elif op == 0x3A: self.a = (self.a - 1) & ((1 << (8*na))-1); self.setz(self.a, na)
+            elif op == 0x1A: self.a = (self.a + 1) & ((1 << (8*na))-1); self.setz(self.a, na)
+            elif op == 0x0A: self.c = bool(self.a >> (8*na-1) & 1); self.a = (self.a << 1) & ((1 << (8*na))-1); self.setz(self.a, na)
+            elif op == 0x4A: self.c = bool(self.a & 1); self.a >>= 1; self.setz(self.a, na)
+            elif op == 0x18: self.c = False
+            elif op == 0x38: self.c = True
+            elif op == 0x69: s = self.a + imm + self.c; self.c = s >= (1 << (8*na)); self.a = s & ((1 << (8*na))-1); self.setz(self.a, na)
+            elif op in (0xC9, 0xE0, 0xC0):
+                reg = self.a if op == 0xC9 else self.x if op == 0xE0 else self.y
+                nn = na if op == 0xC9 else nx
+                self.z = (reg & ((1<<(8*nn))-1)) == imm; self.c = (reg & ((1<<(8*nn))-1)) >= imm
+            elif op == 0xC6: v = (self.rd(imm8, na) - 1) & 0xFFFF; self.wr(imm8, v, na); self.setz(v, na)
+            elif op == 0x48: self.stack.append(self.a)
+            elif op == 0x68: self.a = self.stack.pop(); self.setz(self.a, na)
+            elif op == 0xDA: self.stack.append(self.x)
+            elif op == 0xFA: self.x = self.stack.pop()
+            elif op == 0x5A: self.stack.append(self.y)
+            elif op == 0x7A: self.y = self.stack.pop()
+            elif op == 0x08: self.stack.append((self.m8, self.x8))
+            elif op == 0x28: self.m8, self.x8 = self.stack.pop()
+            elif op == 0xAA: self.x = self.a
+            elif op == 0x8A: self.a = self.x
+            elif op == 0x98: self.a = self.y
+            elif op == 0xA8: self.y = self.a
+            elif op == 0xD0:
+                if not self.z: nxt = (pc & 0xFF0000) | ((pc + 2 + (imm8 - 256 if imm8 & 0x80 else imm8)) & 0xFFFF)
+            elif op == 0xF0:
+                if self.z: nxt = (pc & 0xFF0000) | ((pc + 2 + (imm8 - 256 if imm8 & 0x80 else imm8)) & 0xFFFF)
+            elif op == 0x90:
+                if not self.c: nxt = (pc & 0xFF0000) | ((pc + 2 + (imm8 - 256 if imm8 & 0x80 else imm8)) & 0xFFFF)
+            elif op == 0xB0:
+                if self.c: nxt = (pc & 0xFF0000) | ((pc + 2 + (imm8 - 256 if imm8 & 0x80 else imm8)) & 0xFFFF)
+            elif op == 0x80: nxt = (pc & 0xFF0000) | ((pc + 2 + (imm8 - 256 if imm8 & 0x80 else imm8)) & 0xFFFF)
+            elif op == 0x82: nxt = (pc & 0xFF0000) | ((pc + 3 + rom.u16(pc+1)) & 0xFFFF)
+            elif op == 0x22:
+                t = rom.u24(pc + 1)
+                if t == 0x25FA15:
+                    a = 0xC000 + ((self.y & 0xFF) * self.w + (self.x & 0xFF)) * 8
+                    a += 0x7E0000
+                    self.dp[0], self.dp[1], self.dp[2] = a & 0xFF, (a >> 8) & 0xFF, a >> 16
+                else: raise RuntimeError(f'JSL {t:06X} at {pc:06X}')
+            elif op == 0x20:
+                t = rom.u16(pc + 1)
+                if t == 0xEFED:
+                    a = (self.ptr(0) + self.w * 8) & 0xFFFFFF
+                    self.dp[0], self.dp[1], self.dp[2] = a & 0xFF, (a >> 8) & 0xFF, a >> 16
+                else:
+                    self.stack.append(('ret', nxt)); nxt = (pc & 0xFF0000) | t
+            elif op == 0x60:
+                r = self.stack.pop()
+                if r == 'top': return
+                nxt = r[1]
+            else:
+                raise RuntimeError(f'op {op:02X} at {pc:06X}')
+            if op == 0xA6 and imm8 == 0xBC: self.x = self.bc
+            if op == 0xA6 and imm8 == 0xBD: self.x = self.bd
+            pc = nxt
+        raise RuntimeError('limit')
+
+
+def open_door(rom, buf, w, bc, bd, x, y, kind):
+    """01:F8AB: 플래그가 켜진(열린) 물체를 그린다. 종류 44·43·49·48 은 아무것도 그리지 않음."""
+    m = Mini65(rom, buf, w, bc, bd)
+    m.dp[0x0B], m.dp[0x0C], m.dp[0x08] = x, y, 1
+    m.stack = ['top', kind]
+    m.run(0x01F8AB)
+
+
+def hook_clears(rom, bc, bd, buf, flags=False):
     """맵별 루틴(15:F907)이 `LDA #$7E / PHA / PLB` 뒤 STZ abs·TRB abs 로 셀 버퍼를 지우는 것을 buf 에 반영한다
     (dq5exit.apply_hook 은 LDA #즉값 / STA 만 본다). 35/03 의 1E:F39F 는 플래그(BRK #$0B 08 30)가 꺼져 있으면
     보물상자 하나의 위층을 지우고 가구 비트를 내린다. 플래그는 모두 꺼진 것으로 본다: BRK #$0B(00:93BA) 바로 뒤의 BEQ 는 건너뛰고
-    BNE 는 지나간다. 그 밖의 분기는 따지지 않고 처음 RTL 까지 순서대로 읽는다."""
+    BNE 는 지나간다(flags 면 반대로 모두 켜진 것으로). 그 밖의 분기는 따지지 않고 처음 RTL 까지 순서대로 읽는다."""
     from dq5exit import HOOK_NONE, map_hook
     from kr_patch.sfc.dis65816 import decode
     from kr_patch.sfc.mapper import LoROM
@@ -306,7 +438,7 @@ def hook_clears(rom, bc, bd, buf):
     for _ in range(HOOK_SCAN):
         op = rom.u8(pc)
         _, n, _, _ = decode(rom.d, pc, m8=m8, x8=x8, mapper=LoROM())
-        if after_flag and op == 0xF0:
+        if after_flag and op == (0xD0 if flags else 0xF0):
             off = rom.u8(pc + 1)
             pc = (pc & 0xFF0000) | ((pc + 2 + (off - 256 if off & 0x80 else off)) & 0xFFFF)
             after_flag = False
@@ -713,6 +845,10 @@ def export_maps(rom, out, only=None):
                              variant=f'세트 {pset:02X}' + (' 밤' if alt else ''), **meta,
                              note=f'{cond} 이면 01:9771 이 바꾸는 팔레트')
                 break
+        fdec, _, _, fbuf, _ = decode_map(rom, bc, bd, flags=True)
+        if fbuf != buf:
+            out.save(draw_cells(rom, fdec, w, h, fbuf, day_cg), f'maps/{stem}-flags.png', 'maps', title, group,
+                     variant='플래그 켬', **meta, note='이야기 플래그를 모두 켠 상태: 문이 열리고(01:F8AB) 맵별 루틴의 셀 지우기도 켜진 쪽')
         colors = cgram_colors(day_cg)
         tc = TileCache(rom, dec.high, colors)
         imgs = [block_image(rom, dec, n, colors, tc) for n in blocks]
