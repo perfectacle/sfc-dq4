@@ -188,6 +188,33 @@ def fig_day_night(rom):
     save(out, 'dq5-map-0206-day-night.webp')
 
 
+def fig_exits(rom):
+    """17/00(배)과 17/02 를 나란히 그리고 출구 셀(빨간 틀)·번호·목적지, 실제로 밟은 사다리와 도착 자리를 표시."""
+    from dq5exit import exit_attrs, exit_cells, map_exits, describe
+    attrs = exit_attrs(rom)
+    panels = []
+    for bc, bd in ((0x17, 0), (0x17, 2)):
+        dec = Decoder(rom, SLOT)
+        w, h, buf, _ = dec.decode(map_pointer(rom, bc, bd))
+        render(rom, dec, w, h, buf, map_cgram(rom, bc, bd), TMP)
+        img = Image.open(TMP).convert('RGB').resize((w * 16, h * 16), Image.NEAREST)
+        d = ImageDraw.Draw(img)
+        exits = map_exits(rom, bc, bd)
+        for k, (x, y) in enumerate(exit_cells(buf, w, h, attrs)):
+            d.rectangle(((x - 1) * 16, (y - 1) * 16, x * 16 + 15, y * 16 + 15), outline=(255, 64, 64), width=2)
+            text = f'{k}: {describe(bc, exits[k][1])}' if k < len(exits) else str(k)
+            label(img, text.replace('의 출구', 'exit').replace(' 의', ''), ((x + 1) * 16, (y - 1) * 16))
+        label(img, f'{bc:02X}/{bd:02X}')
+        panels.append(img)
+    # 실제로 걸어 본 것: 17/00 (7,23) 을 밟으니 17/02 (10,41) 에 섰다(walk.lua).
+    ImageDraw.Draw(panels[0]).rectangle((7 * 16, 23 * 16, 7 * 16 + 15, 23 * 16 + 15), outline=(0, 255, 0), width=2)
+    ImageDraw.Draw(panels[1]).rectangle((10 * 16, 41 * 16, 10 * 16 + 15, 41 * 16 + 15), outline=(0, 255, 0), width=2)
+    out = Image.new('RGB', (sum(p.width for p in panels) + 16, max(p.height for p in panels)), (24, 24, 24))
+    out.paste(panels[0], (0, 0))
+    out.paste(panels[1], (panels[0].width + 16, 0))
+    save(out, 'dq5-exits-ship.webp')
+
+
 def fig_transition():
     """맵 전환 전후 30프레임 간격 화면(wsnap.lua, 1560~1770)."""
     files = [f for f in sorted(glob.glob('work/wdump/s[0-9]*.png')) if 1560 <= int(f[-9:-4]) <= 1770]
@@ -208,6 +235,7 @@ def main():
     fig_attributes(rom)
     fig_record(rom)
     fig_day_night(rom)
+    fig_exits(rom)
     fig_transition()
     os.remove(TMP)
 
