@@ -27,8 +27,8 @@ description: 세션을 시작할 때, 무엇을 할지 고를 때, 다른 트랙
 
 | 트랙  | 하는 일                                                 | 소유 파일                                                                                     |
 | ----- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `dq5` | SFC DQ5 엔진 분석: 실내 맵, 필드, 인물, 출구, 스크립트 | `docs/dq5-*.md`, `tools/dq5*.py`, `docs/journal/*-dq5-*.md`, `docs/images/dq5-*`              |
-| `dq4` | FC DQ4 원작 데이터 분석: 맵, 대사, 몬스터, 이벤트       | `docs/dq4-*.md`, `tools/dq4*`, `docs/journal/*-dq4-*.md`, `docs/images/dq4-*`, `tools/lua/fc/` |
+| `dq5` | SFC DQ5 엔진 분석: 실내 맵, 필드, 인물, 출구, 스크립트 | `docs/dq5-*.md`, `tools/dq5*.py`, `docs/journal/dq5/`, `docs/images/dq5-*`              |
+| `dq4` | FC DQ4 원작 데이터 분석: 맵, 대사, 몬스터, 이벤트       | `docs/dq4-*.md`, `tools/dq4*`, `docs/journal/dq4/`, `docs/images/dq4-*`, `tools/lua/fc/` |
 
 세션은 자기 트랙의 소유 파일만 만들고 고친다. 다른 트랙의 파일을 바꿔야 하면 고치지 않고 [docs/todo.md](../../../docs/todo.md) 의 그 트랙 절에 항목으로 남기거나 사용자에게 알린다.
 
@@ -41,10 +41,10 @@ description: 세션을 시작할 때, 무엇을 할지 고를 때, 다른 트랙
 
 | 파일                  | 트랙 몫                                                                    |
 | --------------------- | -------------------------------------------------------------------------- |
-| `README.md`           | 「문서」 목록의 자기 트랙 줄, 「해킹 일지」 목록의 자기 일지 줄            |
+| `README.md`           | 「문서」 의 자기 트랙 목록, 「해킹 일지」 의 자기 트랙 소목록(`#### <트랙>`) |
 | `docs/todo.md`        | `## dq5`·`## dq4` 절                                                       |
 | `docs/references.md`  | 표의 자기 트랙 줄. 두 트랙이 함께 쓰는 자료는 「공통」 절                  |
-| `tools/figures.py`    | 자기 트랙 그림을 만드는 함수와 `main` 의 그 호출 한 줄                     |
+| `tools/README.md`     | Python 표의 자기 트랙 절(`### <트랙>`), 자기 트랙 도구 절                 |
 | `tools/lua/*.lua`     | 기존 프로브는 출력·환경 변수를 바꾸지 않는다. 바꿔야 하면 새 파일로        |
 | `tools/listing.py`    | 기존 옵션의 출력을 바꾸지 않는다                                           |
 | `pyproject.toml`·`uv.lock` | [dependencies](../dependencies/SKILL.md) 절차로만                    |

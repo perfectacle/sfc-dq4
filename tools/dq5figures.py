@@ -1,9 +1,9 @@
-"""분석 문서(docs/)에 넣는 그림을 다시 만든다. 원본 롬과 MesenCE 덤프(work/)가 필요하다.
+"""dq5 트랙이 분석 문서(docs/)에 넣는 그림을 다시 만든다. 원본 롬과 MesenCE 덤프(work/)가 필요하다.
 
-사용: python tools/figures.py   (Pillow 필요, 저장소 최상위에서)
+사용: python tools/dq5figures.py   (Pillow 필요, 저장소 최상위에서)
 
 맵은 롬만으로 그린다(팔레트도 롬). 게임 화면 비교에만 MesenCE 스크린샷이 필요하고,
-그 덤프를 만드는 명령은 docs/journal/ 의 해당 날짜 일지에 있다.
+그 덤프를 만드는 명령은 docs/journal/dq5/ 의 해당 날짜 일지에 있다.
 """
 import glob
 import os

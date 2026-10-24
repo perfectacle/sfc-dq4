@@ -42,26 +42,39 @@ uv sync --locked
 코딩 에이전트로 작업할 때는 [AGENTS.md](AGENTS.md) 부터 읽습니다. 여러 세션이 트랙을 나눠 동시에 작업하는 규칙이 있습니다.
 
 
-- [docs/dq5-map-format.md](docs/dq5-map-format.md): DQ5 실내 맵 형식(지형·팔레트·인물·출구·영역 이동)
-- [docs/dq5-field-format.md](docs/dq5-field-format.md): DQ5 필드(세계 지도) 형식
-- [docs/dq4-ram-format.md](docs/dq4-ram-format.md): DQ4(FC) 필드 RAM(좌표·맵 번호·출구 표)과 뱅크 전환
 - [docs/references.md](docs/references.md): 참고 자료
 - [docs/todo.md](docs/todo.md): 트랙(dq5·dq4)마다 남은 일
+
+dq5(SFC DQ5 엔진):
+
 - [docs/dq5-handoff.md](docs/dq5-handoff.md): dq5 트랙 시작점(지금 상태, 실험 출발점, 다음 할 일)
+- [docs/dq5-map-format.md](docs/dq5-map-format.md): DQ5 실내 맵 형식(지형·팔레트·인물·출구·영역 이동)
+- [docs/dq5-field-format.md](docs/dq5-field-format.md): DQ5 필드(세계 지도) 형식
+
+dq4(FC DQ4 원작):
+
 - [docs/dq4-handoff.md](docs/dq4-handoff.md): dq4 트랙 시작점(목표, 도구 현황, 다음 할 일)
+- [docs/dq4-ram-format.md](docs/dq4-ram-format.md): DQ4(FC) 필드 RAM(좌표·맵 번호·출구 표)과 뱅크 전환
 
 ### 해킹 일지
 
-- [2026-10-24-01: DQ5 실내 맵 풀기](docs/journal/2026-10-24-01-dq5-map.md)
-- [2026-10-24-02: 팔레트와 셀 속성](docs/journal/2026-10-24-02-dq5-map-attributes.md)
-- [2026-10-24-03: 인물과 낮·밤](docs/journal/2026-10-24-03-dq5-npc.md)
-- [2026-10-24-04: 출구](docs/journal/2026-10-24-04-dq5-exits.md)
-- [2026-10-24-05: 가장자리 출구와 필드로 나가기](docs/journal/2026-10-24-05-dq5-edge-exit.md)
-- [2026-10-24-06: 영역 이동(트리거)](docs/journal/2026-10-24-06-dq5-triggers.md)
-- [2026-10-24-07: 셀 속성과 맵 머리 확인](docs/journal/2026-10-24-07-dq5-cells-header.md)
-- [2026-10-24-08: 이벤트 플래그로 바뀌는 인물](docs/journal/2026-10-24-08-dq5-npc-flags.md)
-- [2026-10-24-09: 필드(세계 지도)](docs/journal/2026-10-24-09-dq5-field.md)
-- [2026-10-24-10: 필드 걷기 실험(입장은 아직)](docs/journal/2026-10-24-10-dq5-field-walk.md)
-- [2026-10-24-11: 필드에서 마을로 들어가기](docs/journal/2026-10-24-11-dq5-field-entrance.md)
-- [2026-10-24-12: FC DQ4 실험 환경과 첫 RAM](docs/journal/2026-10-24-12-dq4-fc-env.md)
-- [2026-10-24-13: 맵별 루틴과 출구 번호](docs/journal/2026-10-24-13-dq5-exit-hook.md)
+순번은 트랙마다 따로 매깁니다. 같은 날짜에 두 트랙의 같은 번호가 있을 수 있습니다.
+
+#### dq5
+
+- [2026-10-24-01: DQ5 실내 맵 풀기](docs/journal/dq5/2026-10-24-01-map.md)
+- [2026-10-24-02: 팔레트와 셀 속성](docs/journal/dq5/2026-10-24-02-map-attributes.md)
+- [2026-10-24-03: 인물과 낮·밤](docs/journal/dq5/2026-10-24-03-npc.md)
+- [2026-10-24-04: 출구](docs/journal/dq5/2026-10-24-04-exits.md)
+- [2026-10-24-05: 가장자리 출구와 필드로 나가기](docs/journal/dq5/2026-10-24-05-edge-exit.md)
+- [2026-10-24-06: 영역 이동(트리거)](docs/journal/dq5/2026-10-24-06-triggers.md)
+- [2026-10-24-07: 셀 속성과 맵 머리 확인](docs/journal/dq5/2026-10-24-07-cells-header.md)
+- [2026-10-24-08: 이벤트 플래그로 바뀌는 인물](docs/journal/dq5/2026-10-24-08-npc-flags.md)
+- [2026-10-24-09: 필드(세계 지도)](docs/journal/dq5/2026-10-24-09-field.md)
+- [2026-10-24-10: 필드 걷기 실험(입장은 아직)](docs/journal/dq5/2026-10-24-10-field-walk.md)
+- [2026-10-24-11: 필드에서 마을로 들어가기](docs/journal/dq5/2026-10-24-11-field-entrance.md)
+- [2026-10-24-12: 맵별 루틴과 출구 번호](docs/journal/dq5/2026-10-24-12-exit-hook.md)
+
+#### dq4
+
+- [2026-10-24-01: FC DQ4 실험 환경과 첫 RAM](docs/journal/dq4/2026-10-24-01-fc-env.md)

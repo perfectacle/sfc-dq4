@@ -33,5 +33,5 @@ PR 은 `ci-ok` 가 초록일 때만 머지한다. `ci-ok` 는 모든 잡을 모�
 
 ## 참고
 
-- **`docs` 잡**(`tools/check_docs.py`): 일지 이름 형식, 제목과 파일 이름의 날짜·순번 일치, 순번 중복, README 일지 목록 누락, 문서 안 상대 링크 대상, 개인 경로를 검사한다.
+- **`docs` 잡**(`tools/check_docs.py`): 일지 이름 형식, 제목과 파일 이름의 날짜·순번 일치, 같은 트랙 안의 순번 중복, README 일지 목록 누락·트랙별 순서, 문서 안 상대 링크 대상, 개인 경로를 검사한다.
 - **보안 점검**: `zizmor` 가 워크플로를, `actionlint` 가 문법을 본다. checkout 에는 `persist-credentials: false`(이 워크플로는 push 하지 않는다). 액션은 커밋 SHA 로 고정한다([DEP-01](../dependencies/SKILL.md#dep-01--7일-쿨다운)).

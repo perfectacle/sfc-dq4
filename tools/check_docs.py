@@ -1,8 +1,8 @@
 """문서 검사. 규칙은 .agents/skills/journal/SKILL.md (JOURNAL-01, DOC-01).
 
-- 일지 파일 이름이 YYYY-MM-DD-NN-<트랙>-<주제>.md 이고, 제목의 날짜·순번이 파일 이름과 같다.
-- 같은 날짜·순번의 일지가 둘 이상 없다(두 세션이 같은 번호를 잡은 경우).
-- README 의 「해킹 일지」 목록에 모든 일지가 순번 순서대로 있다.
+- 일지는 docs/journal/<트랙>/YYYY-MM-DD-NN-<주제>.md 이고, 제목의 날짜·순번이 파일 이름과 같다. 순번은 트랙마다 따로다.
+- 한 트랙 안에 같은 날짜·순번의 일지가 둘 이상 없다(같은 트랙의 두 세션이 같은 번호를 잡은 경우).
+- README 의 「해킹 일지」 목록에 모든 일지가 있고, 트랙마다 날짜·순번 순서다.
 - 문서 안 상대 링크가 가리키는 파일이 있다.
 - 추적 대상 텍스트 파일에 개인 경로가 없다.
 
@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 JOURNAL = ROOT / 'docs' / 'journal'
 TRACKS = ('dq5', 'dq4')
-NAME = re.compile(r'^(\d{4}-\d{2}-\d{2})-(\d{2})-(' + '|'.join(TRACKS) + r')-[a-z0-9]+(?:-[a-z0-9]+)*\.md$')
+NAME = re.compile(r'^(\d{4}-\d{2}-\d{2})-(\d{2})-[a-z0-9]+(?:-[a-z0-9]+)*\.md$')
 TITLE = re.compile(r'^# (\d{4}-\d{2}-\d{2})-(\d{2}): \S')
 LINK = re.compile(r'\]\(([^)\s]+)\)')
 TEXT_SUFFIXES = {'.md', '.py', '.lua', '.sh', '.toml', '.yml', '.yaml', '.json'}
@@ -32,30 +32,33 @@ def files():
 
 
 def check_journal(errors):
-    seen = {}
-    names = []
-    for p in sorted(JOURNAL.glob('*.md')):
-        m = NAME.match(p.name)
-        if not m:
-            errors.append(f'{p.relative_to(ROOT)}: 이름이 YYYY-MM-DD-NN-<{"|".join(TRACKS)}>-<주제>.md 가 아님')
-            continue
-        key = (m.group(1), m.group(2))
-        if key in seen:
-            errors.append(f'{p.relative_to(ROOT)}: {key[0]}-{key[1]} 이 {seen[key]} 와 겹침')
-        seen[key] = p.name
-        first = p.read_text(encoding='utf-8').splitlines()[0] if p.stat().st_size else ''
-        t = TITLE.match(first)
-        if not t or (t.group(1), t.group(2)) != key:
-            errors.append(f'{p.relative_to(ROOT)}: 제목이 「# {key[0]}-{key[1]}: 주제」 가 아님')
-        names.append(p.name)
     readme = (ROOT / 'README.md').read_text(encoding='utf-8')
     listed = re.findall(r'\(docs/journal/([^)]+)\)', readme)
-    for n in names:
-        if n not in listed:
-            errors.append(f'README.md: 일지 목록에 {n} 이 없음')
-    ordered = [n for n in listed if n in names]
-    if ordered != sorted(ordered):
-        errors.append('README.md: 일지 목록이 날짜·순번 순서가 아님')
+    for p in sorted(JOURNAL.rglob('*.md')):
+        if p.parent.parent != JOURNAL or p.parent.name not in TRACKS:
+            errors.append(f'{p.relative_to(ROOT)}: 일지는 docs/journal/<{"|".join(TRACKS)}>/ 아래에 둠')
+    for track in TRACKS:
+        seen, names = {}, []
+        for p in sorted((JOURNAL / track).glob('*.md')):
+            m = NAME.match(p.name)
+            if not m:
+                errors.append(f'{p.relative_to(ROOT)}: 이름이 YYYY-MM-DD-NN-<주제>.md 가 아님')
+                continue
+            key = (m.group(1), m.group(2))
+            if key in seen:
+                errors.append(f'{p.relative_to(ROOT)}: {key[0]}-{key[1]} 이 {seen[key]} 와 겹침')
+            seen[key] = p.name
+            first = p.read_text(encoding='utf-8').splitlines()[0] if p.stat().st_size else ''
+            t = TITLE.match(first)
+            if not t or (t.group(1), t.group(2)) != key:
+                errors.append(f'{p.relative_to(ROOT)}: 제목이 「# {key[0]}-{key[1]}: 주제」 가 아님')
+            names.append(f'{track}/{p.name}')
+        for n in names:
+            if n not in listed:
+                errors.append(f'README.md: 일지 목록에 {n} 이 없음')
+        ordered = [n for n in listed if n in names]
+        if ordered != sorted(ordered):
+            errors.append(f'README.md: {track} 일지 목록이 날짜·순번 순서가 아님')
 
 
 def check_links(paths, errors):
