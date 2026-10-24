@@ -518,6 +518,32 @@ def fig_high_maps(rom):
         out.paste(img, (x, 0))
         x += img.width + 8
     save(out, 'dq5-map-high.webp')
+def fig_gfx_diff(rom):
+    """게임 BG 화면, dq5gfx 맵 그림, 다른 픽셀(빨강)을 맵마다 한 줄로. 화면은 dq5warp.lua 로 들어가 SAVE 한 세이브스테이트에서
+    sfc/dq5/tools/lua/dq5gfxdump.lua 로 5프레임 뒤를 덤프한 work/d/d<BCBD>/f00005.* 다(명령은 sfc/dq5/journal/ 의 그래픽 내보내기 일지 3절)."""
+    from PIL import ImageChops
+    from dq5gfx import decode_map, draw_cells, dump_screen, match_screen
+    rows = []
+    for bc, bd in ((0x01, 0x01), (0x33, 0x00)):
+        dec, w, h, buf, _ = decode_map(rom, bc, bd)
+        full = draw_cells(rom, dec, w, h, buf, map_cgram(rom, bc, bd))
+        scr = dump_screen(f'work/d/d{bc:02X}{bd:02X}/f00005')
+        x, y, _, _ = match_screen(full, scr)
+        pad = Image.new('RGB', (full.width + 512, full.height + 448))
+        pad.paste(full, (256, 224))
+        ours = pad.crop((x + 256, y + 224, x + 512, y + 448))
+        mask = ImageChops.difference(ours, scr).convert('L').point(lambda v: 255 if v else 0)
+        diff = scr.copy()
+        diff.paste((255, 0, 0), (0, 0), mask)
+        row = Image.new('RGB', (256 * 3 + 16, 224), (24, 24, 24))
+        for k, (im, name) in enumerate(((scr, 'MesenCE BG'), (ours, 'dq5gfx.py'), (diff, 'diff'))):
+            row.paste(im, (k * 264, 0))
+            label(row, f'{bc:02X}/{bd:02X} {name}' if k == 0 else name, (k * 264, 0))
+        rows.append(row)
+    out = Image.new('RGB', (rows[0].width, len(rows) * 232 - 8), (24, 24, 24))
+    for k, r in enumerate(rows):
+        out.paste(r, (0, k * 232))
+    save(out, 'dq5-gfx-diff.webp')
 
 
 def main():
@@ -542,6 +568,7 @@ def main():
     fig_high_maps(rom)
     fig_mongfx_layout(rom)
     fig_battlebg(rom)
+    fig_gfx_diff(rom)
     os.remove(TMP)
 
 
