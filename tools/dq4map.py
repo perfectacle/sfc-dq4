@@ -1,7 +1,7 @@
 """DQ4(FC) 맵 블록 배치 풀기. 형식은 docs/dq4-map-format.md.
 
 사용:
-  python tools/dq4map.py rom/dq4.nes list                  맵 269개: (그룹 $63/순번 $64), 맵 번호, 위치, 크기
+  python tools/dq4map.py rom/dq4.nes list                  맵 279개: (그룹 $63/순번 $64), 맵 번호, 위치, 크기
   python tools/dq4map.py rom/dq4.nes check                 해제 끝이 다음 맵 시작과 같은지 전수 검사
   python tools/dq4map.py rom/dq4.nes exits G K [--compare end.ram]   출구($05A0 에 들어가는 것)
   python tools/dq4map.py rom/dq4.nes npcs G K [--ram D | --set 6283=80,6282=10] [--night] [--compare D]
@@ -165,16 +165,20 @@ def data_bank(g, k):
 
 
 def maps(prg):
-    """(그룹 $63, 순번 $64, 맵 번호, 데이터 뱅크, 포인터) 목록. 그룹 표는 FFFF 로 끝난다."""
+    """(그룹 $63, 순번 $64, 맵 번호, 데이터 뱅크, 포인터) 목록. 그룹 표는 FFFF 로 끝난다.
+    그룹의 맵 수는 다음 그룹 포인터까지의 레코드 수이고, 다음 그룹이 없는 마지막 그룹(48)은 맵 번호 FF 앞까지다."""
     gp = []
     while (p := rd(prg, *GROUPS[:1], GROUPS[1] + 2 * len(gp)) | rd(prg, GROUPS[0], GROUPS[1] + 2 * len(gp) + 1) << 8) != 0xFFFF:
         gp.append(p)
     out = []
-    for g in range(len(gp) - 1):
-        for k in range((gp[g + 1] - gp[g]) // 3):
+    for g in range(len(gp)):
+        n = (gp[g + 1] - gp[g]) // 3 if g + 1 < len(gp) else None
+        k = 0
+        while (k < n) if n is not None else rd(prg, 0x17, gp[g] + 3 * k) != 0xFF:
             a = gp[g] + 3 * k
             out.append((g, k, rd(prg, 0x17, a), data_bank(g, k),
                         rd(prg, 0x17, a + 1) | rd(prg, 0x17, a + 2) << 8))
+            k += 1
     return out
 
 
