@@ -6,6 +6,8 @@
 --                            7E:2194 bit7 을 켠다(필드 루틴 15:F907 의 FE 항목)
 --   BATTLE="00:3,0C:2"       FIELD 와 함께. 첫 필드 이벤트를 켠 채 그 이벤트 전투 무리(23:D757 의 1번)를 몬스터:마릿수(16진:10진,
 --                            최대 4종)로 바꿔 전투를 붙인다
+--   GROUP="2C"               FIELD 와 함께. 첫 필드 이벤트가 거는 무리 번호(02:A780 의 LDA #$01)를 바꿔 이벤트 전투 무리
+--                            표 23:D757 의 그 번호(16진)와 전투를 붙인다. BATTLE 과 함께 주면 그 번호의 무리를 덮는다
 --   SET="2194|80;1949=01"    시작할 때 한 번 WRAM(7E 뱅크 하위 16비트 주소)을 고친다. =는 값, |는 OR, &는 AND
 --   POKE, ROMPATCH           walk.lua 와 같다(POKE 는 매 프레임 고정, ROMPATCH 는 파일 오프셋=바이트)
 --   TEST="left:40,up:40"     도착 후 이 입력을 눌러 조작되는지 본다(좌표가 바뀌면 moved=yes). 세이브는 TEST 전에 한다
@@ -39,6 +41,8 @@ if field then
   fx, fy = tonumber(fx), tonumber(fy)
   -- 04:FD97 의 열한째 항목(그룹 01)의 X, Y
   hexbytes(0x27DCA, string.format("%02X%02X%02X%02X", fx & 255, fx >> 8, fy & 255, fy >> 8), patches)
+  local group = os.getenv("GROUP")
+  if group then hexbytes(0x12781, string.format("%02X", tonumber(group, 16)), patches) end
   if battle then
     local e = {0xD0, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0}
     local i = 0
@@ -47,8 +51,8 @@ if field then
     end
     local t = {}
     for _, b in ipairs(e) do t[#t + 1] = string.format("%02X", b) end
-    hexbytes(0x11D757 + 13, table.concat(t), patches)
-  else
+    hexbytes(0x11D757 + (group and tonumber(group, 16) or 1) * 13, table.concat(t), patches)
+  elseif not group then
     sets[#sets + 1] = {0x7E2194, "|", 0x80}
   end
 else
