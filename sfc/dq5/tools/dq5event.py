@@ -150,6 +150,30 @@ def code_starts(rom):
     return out
 
 
+RUNNER = 0x02B705
+
+
+def runner_calls(rom):
+    """JSL $02B705 바로 앞에서 LDA #/STA $00·$01(목표)·$02·$03·$04(스크립트)를 찾는다. [(부르는 곳, 주소, X, Y)].
+    23:E2BB(이벤트 표)와 주소를 계산해 넘기는 곳(1E:E86B)은 즉값이 없어 빠진다."""
+    out = []
+    pat = re.compile(re.escape(bytes((0x22, RUNNER & 0xFF, RUNNER >> 8 & 0xFF, RUNNER >> 16))))
+    for m in pat.finditer(rom.d):
+        i = m.start()
+        back = rom.d[max(0, i - 40):i]
+        v = {}
+        for k in range(len(back) - 3):
+            if back[k] == 0xA9 and back[k + 2] == 0x85 and back[k + 3] in (0, 1, 2, 3, 4):
+                v[back[k + 3]] = back[k + 1]
+            if k + 4 < len(back) and back[k] == 0xA9 and back[k + 3] == 0x85 and back[k + 4] == 2 and \
+                    back[k - 2:k] == b'\xc2\x20':        # REP #$20 / LDA #$hilo / STA $02
+                v[2], v[3] = back[k + 1], back[k + 2]
+        if all(k in v for k in (2, 3, 4)):
+            a = v[4] << 16 | v[3] << 8 | v[2]
+            out.append((f'{i // 0x8000:02X}:{0x8000 + i % 0x8000:04X}', a, v.get(0), v.get(1)))
+    return out
+
+
 def all_starts(rom):
     """(이름, 주소, 부르는 곳) 목록. 같은 주소는 한 번만."""
     starts, seen = [], set()
@@ -161,13 +185,23 @@ def all_starts(rom):
         if a == EMPTY:
             continue
         starts.append((f'번호 {k:02X}', a, ', '.join(ev_callers.get(k, [])) or '부르는 곳 못 찾음'))
+    for caller, a, x, y in runner_calls(rom):
+        where = f'({x},{y})' if x is not None and y is not None else '(지금 자리)'
+        starts.append((f'02:B705 {caller} {where}', a, caller))
     for caller, a in code_starts(rom):
         if a >> 16 != 0x00:      # 7E:1A0D 버퍼(02:B705)는 뺀다
             starts.append((f'코드 {caller}', a, caller))
+    # 같은 주소를 여러 길로 부르면 부르는 곳을 합친다
+    extra = {}
+    for name, a, by in starts:
+        if not by.startswith('부르는 곳 못 찾음'):
+            extra.setdefault(a, []).append(by if by == name.split()[-1] else f'{by}({name.split()[0]})')
     out = []
     todo = list(starts)
     while todo:
         name, a, by = todo.pop(0)
+        if by.startswith('부르는 곳 못 찾음') and a in extra:
+            by = ', '.join(extra[a])
         if a in seen:
             continue
         seen.add(a)
