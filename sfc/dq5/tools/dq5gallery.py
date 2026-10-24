@@ -80,7 +80,7 @@ def maps_cards(items):
         note = next((i['note'] for i in its if i.get('note')), '')
         cards.append(card(rel(day['path']), day['title'],
                           [f'{day["size"]} 셀 · 블록 {day["blocks"]} · 인물 {day["npcs"]} · 출구 {day["exits"]} · '
-                           f'상자 {day["chests"]} · 레코드 {day["addr"]}', note], links))
+                           f'상자 {day["chests"]} · 물체 {day.get("doors", 0)} · 레코드 {day["addr"]}', note], links))
     return cards
 
 
@@ -105,7 +105,7 @@ def write_pages(items, root, sprite_items):
     nav = [('맵', '#maps'), ('필드', '#field'), ('블록', '#blocks'), ('CHR·폰트', '#chr'), ('창·메뉴', '#screens'),
            ('움직이는 타일', '#anim'), ('스프라이트·몬스터', 'sprites.html')]
     intro = ('썸네일을 누르면 원본이 열립니다(맵·지도는 1배). 주석판: 노랑 인물(번호, 낮 기본 목록), 하늘색 출구, '
-             '빨강 T 보물상자, 분홍 S タンス·ツボ·タル, 분홍 F 발밑 숨은 물건. 맵 이름은 ルーラ 목적지 이름이 있는 그룹만 붙입니다.')
+             '빨강 T 보물상자, 분홍 S タンス·ツボ·タル, 분홍 F 발밑 숨은 물건, 주황 D 맵 위 물체(닫힌 문 등). 맵은 이야기 플래그가 모두 꺼진 상태. 맵 이름은 ルーラ 목적지 이름이 있는 그룹만 붙입니다.')
     with open(os.path.join(gallery, 'index.html'), 'w') as f:
         f.write(page('DQ5(SFC) 그래픽', nav, intro, sections))
     spr = [card(rel('sprites/' + i['path']), i.get('title', i['path']), [i.get('group', ''), i.get('note', '')])
