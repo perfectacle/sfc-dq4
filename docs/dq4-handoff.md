@@ -20,6 +20,7 @@ DQ4 의 내용(맵, 인물과 대사, 이벤트 흐름, 몬스터·아이템·�
 | 세이브스테이트 | `work/state/dq4-ch1-throne.mss`(1장 왕좌의 방), `dq4-ch1-courtyard.mss`(성 밖), `dq4-ch1-field.mss`(필드), `dq4-ch1-battle.mss`(첫 전투). `tools/dq4state.sh` 가 롬에서 다시 만듦(`--nes.ramPowerOnState=AllZeros` 로 결정적) | 두 번 돌려 RAM md5 같음 |
 | 필드 RAM | 좌표 `$0044`/`$0045`, 장소 `$63`/`$64`, 맵 종류 `$0028`(=`$0550`), 출구 표 `$05A0`(7바이트) | 걸어서 맵 두 번 전환 |
 | 맵 | 마을·던전 269개, 비트열 압축(사각형·길·점). [dq4-map-format.md](dq4-map-format.md), `tools/dq4map.py` | RAM 두 맵 0 차이, 경계 268곳 전수 |
+| 필드 | 3개(250×250 등), 줄 RLE(`0B:$8000`). [dq4-field-format.md](dq4-field-format.md), `tools/dq4field.py` | 게임 조회 147번 0 차이, 기준점 250줄 |
 | 이름·표 | 이름 목록 7종(`0B:$B006`), 아이템 강도·가격(뱅크 10), 몬스터 22바이트(`18:$8046`). [dq4-data-format.md](dq4-data-format.md), `tools/dq4data.py` | 전투 두 번의 경험치·골드·HP |
 | 출구·인물 | 연결 표 125개(`1B:$8223`), 인물 목록(뱅크 05, 레코드 944개). `dq4map.py exits`·`npcs` | 두 맵 RAM 과 같음, 그룹 경계 71곳 전수 |
 | 뱅크 전환 | `$FF91`(A=뱅크, `$0507` 이 현재 뱅크), `$C3EA` 다른 뱅크 바이트 읽기 | 쓰기·읽기 프로브 |
@@ -53,7 +54,7 @@ uv run krpatch fc listing rom/dq4.nes work/cov/cover.txt --range 3C000-3FFFF
 
 [todo.md](todo.md) 의 `## dq4` 순서대로 합니다.
 
-1. **맵 나머지** — 블록 번호 → 그래픽·통행(맵 종류별 블록 정의, `$7800` 을 읽어 nametable 을 쓰는 코드부터), 인물 레코드 나머지 바이트와 블록(움직임·대화 스크립트, 대화 → 메시지 번호), 필드 지도. dq5 트랙의 [dq5-map-format.md](dq5-map-format.md) 와 같은 항목으로 정리합니다.
+1. **맵 나머지** — 블록 번호 → 그래픽·통행(맵 종류별 블록 정의, `$7800` 을 읽어 nametable 을 쓰는 코드부터), 인물 레코드 나머지 바이트와 블록(움직임·대화 스크립트, 대화 → 메시지 번호), 필드 타일 → 그래픽·통행, 필드 위 입구 표. dq5 트랙의 [dq5-map-format.md](dq5-map-format.md) 와 같은 항목으로 정리합니다.
 2. **표 나머지와 이벤트** — [dq4-data-format.md 「남은 것」](dq4-data-format.md#남은-것), 이벤트 플래그와 장(章) 전환. 플래그는 `BRK` 특수 형식이 쓰는 `$627B` 영역부터 봅니다.
 3. **롬 구조 나머지** — [dq4-bank-format.md 「남은 것」](dq4-bank-format.md#남은-것).
 4. **대사 나머지** — [dq4-text-format.md 「남은 것」](dq4-text-format.md#남은-것).
