@@ -36,6 +36,7 @@ SET_COUNT = 0xA3
 OBJ_PALETTES = 0x0496D6
 MAP_OBJECTS = 0x1FD59A
 FRAME_W, FRAME_H = 16, 24
+LYING_W, LYING_H = 24, 16
 DIRS = ('down', 'left', 'right', 'up')
 # 00:EE5C(6타일)·00:EE8C(8타일)를 방향별 칸 번호로 옮겼다.
 SIMPLE_BASE = {'up': 0, 'right': 12, 'down': 24, 'left': 36}
@@ -43,6 +44,8 @@ HEAD_BASE = {'up': 0, 'right': 4, 'down': 8, 'left': 12}
 BODY_BASE = {'up': 16, 'right': 24, 'down': 32, 'left': 40}
 SIMPLE_POS = ((0, 0), (8, 0), (0, 8), (8, 8), (0, 16), (8, 16))
 QUAD_POS = ((0, 0), (8, 0), (0, 8), (8, 8))
+LYING_SIMPLE = bytes.fromhex('2426282527292a2c2e2b2d2f181a1c191b1d1e20221f21230c0e100d0f111214161315179c9a989d9b99a2a09ea3a19f')  # 1F:D0AC
+LYING_OVERLAP = bytes.fromhex('0c0e0d0f080a090b040605078a888b89282a292b2c2e2d2f2022212324262527181a191b1c1e1d1fa2a0a3a1a6a4a7a5')  # 1F:D1B3
 
 
 def gfx_set(rom, g):
@@ -132,11 +135,16 @@ def frame_cells(rec, d, f):
         [(head + i, x, y) for i, (x, y) in enumerate(QUAD_POS)]
 
 
-def frame(rec, tiles, d, f):
-    """16x24 색 번호 격자(0 = 투명)."""
+def mixed_frame(rec, head_dir, body_dir, f):
+    """8타일 배치에서 머리와 몸의 방향이 다른 프레임. 몸을 먼저, 머리를 위에 그린다."""
+    cells = frame_cells(rec, body_dir, f)[:4] + frame_cells(rec, head_dir, f)[4:]
+    return render_cells(rec, rec['tile_data'], cells)
+
+
+def render_cells(rec, tiles, cells):
     img = [[0] * FRAME_W for _ in range(FRAME_H)]
     pix = [pixels(t) for t in tiles]
-    for c, x0, y0 in frame_cells(rec, d, f):
+    for c, x0, y0 in cells:
         v = rec['cells'][c]
         p = pix[v & 0x7F]
         for y in range(8):
@@ -145,6 +153,11 @@ def frame(rec, tiles, d, f):
                 if ci:
                     img[y0 + y][x0 + x] = ci
     return img
+
+
+def frame(rec, tiles, d, f):
+    """16x24 색 번호 격자(0 = 투명)."""
+    return render_cells(rec, tiles, frame_cells(rec, d, f))
 
 
 def obj_palettes(rom):
@@ -170,6 +183,55 @@ def bbox(img):
     return min(xs), min(ys), max(xs), max(ys)
 
 
+def rotate_tile(t):
+    """1F:D413. 비트 평면마다 8x8 을 전치해 타일을 시계 방향으로 90도 돌린다. 새 (x, y) = 옛 (y, 7-x)."""
+    out = bytearray(32)
+    for half in (0, 16):
+        for k in (0, 1):
+            rows = [t[half + y * 2 + k] for y in range(8)]
+            for y in range(8):
+                out[half + y * 2 + k] = sum(((rows[7 - x] >> (7 - y)) & 1) << (7 - x) for x in range(8))
+    return bytes(out)
+
+
+def lying_cells(rec):
+    """1F:D066(6타일, 표 1F:D0AC)·1F:D16D(8타일, 표 1F:D1B3). 누운 모양의 칸 48개 (타일, 좌우 반전, 상하 반전).
+    표 값 bit0-6 = 원래 칸 번호, bit7 = 좌우 반전을 더함. 원래 칸의 좌우 반전은 돌린 뒤 상하 반전이 된다."""
+    table = LYING_SIMPLE if rec['layout'] == 'simple' else LYING_OVERLAP
+    out = []
+    for t in table:
+        v = rec['cells'][t & 0x7F]
+        out.append((v & 0x7F, bool(t & 0x80), bool(v & 0x80)))
+    return out
+
+
+def lying_frame_cells(rec, d):
+    """00:EC9B(6타일)·00:F3CE(8타일). 24x16 상자에서 (칸 번호, x, y), 아래에 깔리는 것부터.
+    걸음 프레임은 없다. 8타일은 머리 16x16 과 몸 16x16 을 가로로 8픽셀 겹치고, 왼쪽(7E:31E0 bit5)을 볼 때만 머리가 왼쪽."""
+    if rec['layout'] == 'simple':
+        b = SIMPLE_BASE[d]
+        return [(b + i, x, y) for i, (x, y) in enumerate(((16, 0), (8, 0), (0, 0), (16, 8), (8, 8), (0, 8)))]
+    head, body = HEAD_BASE[d], BODY_BASE[d]
+    hx, bx = (0, 8) if d == 'left' else (8, 0)
+    quad = ((8, 0), (0, 0), (8, 8), (0, 8))
+    return [(body + i, bx + x, y) for i, (x, y) in enumerate(quad)] + \
+        [(head + i, hx + x, y) for i, (x, y) in enumerate(quad)]
+
+
+def lying_frame(rec, d):
+    img = [[0] * LYING_W for _ in range(LYING_H)]
+    pix = [pixels(t) for t in rec['lying_tiles']]
+    for c, x0, y0 in lying_frame_cells(rec, d):
+        tile, hf, vf = rec['lying_cells'][c]
+        p = pix[tile]
+        for y in range(8):
+            for x in range(8):
+                ci = p[7 - y if vf else y][7 - x if hf else x]
+                if ci:
+                    img[y0 + y][x0 + x] = ci
+    return img
+
+
 def decode_set(rom, s):
     rec = set_record(rom, s)
     if rec is None:
@@ -178,6 +240,9 @@ def decode_set(rom, s):
     rec['end'] = end
     rec['tile_data'] = tiles
     rec['frames'] = {(d, f): frame(rec, tiles, d, f) for d in DIRS for f in (0, 1)}
+    rec['lying_tiles'] = [rotate_tile(t) for t in tiles]
+    rec['lying_cells'] = lying_cells(rec)
+    rec['lying'] = {d: lying_frame(rec, d) for d in DIRS}
     return rec
 
 
@@ -194,28 +259,29 @@ def npc_users(rom):
     return users
 
 
-def sheet(rec, pal, scale=1, grid=False, index=False):
-    """행 아래·왼쪽·오른쪽·위, 열 프레임 0·1 시트. 투명 배경."""
+def sheet(rec, pal, scale=1, grid=False, index=False, lying=False):
+    """행 아래·왼쪽·오른쪽·위, 열 프레임 0·1 시트(누운 모양은 24x16 한 열). 투명 배경."""
     from PIL import Image, ImageDraw
 
     colors = INDEX_COLORS if index else [rgb(c) for c in pal]
-    W, H = FRAME_W * 2, FRAME_H * len(DIRS)
+    fw, fh, cols = (LYING_W, LYING_H, (None,)) if lying else (FRAME_W, FRAME_H, (0, 1))
+    W, H = fw * len(cols), fh * len(DIRS)
     img = Image.new('RGBA', (W, H), (0, 0, 0, 0))
     for r, d in enumerate(DIRS):
-        for f in (0, 1):
-            for y, row in enumerate(rec['frames'][(d, f)]):
+        for k, f in enumerate(cols):
+            for y, row in enumerate(rec['lying'][d] if lying else rec['frames'][(d, f)]):
                 for x, v in enumerate(row):
                     if v:
-                        img.putpixel((f * FRAME_W + x, r * FRAME_H + y), colors[v] + (255,))
+                        img.putpixel((k * fw + x, r * fh + y), colors[v] + (255,))
     if scale > 1:
         img = img.resize((W * scale, H * scale), Image.NEAREST)
     if grid:
         dr = ImageDraw.Draw(img)
         k = max(scale, 1)
         for x in range(0, W + 1, 8):
-            dr.line([(x * k, 0), (x * k, H * k)], fill=(128, 128, 128, 160) if x % FRAME_W else (255, 0, 0, 200))
+            dr.line([(x * k, 0), (x * k, H * k)], fill=(128, 128, 128, 160) if x % fw else (255, 0, 0, 200))
         for y in range(0, H + 1, 8):
-            dr.line([(0, y * k), (W * k, y * k)], fill=(128, 128, 128, 160) if y % FRAME_H else (255, 0, 0, 200))
+            dr.line([(0, y * k), (W * k, y * k)], fill=(128, 128, 128, 160) if y % fh else (255, 0, 0, 200))
     return img
 
 
@@ -225,8 +291,36 @@ def matrix(rec):
             for d in DIRS for f in (0, 1)}
 
 
-# 일행 표(7E:196F)에서 실측한 그림 번호. 배 선실 세이브스테이트의 주인공 = 2E(세트 82).
-PARTY_NAMES = {0x82: ('パパスのむすこ', '7E:196F = 2E(배 선실의 주인공), 이름 표 1 의 0번')}
+# 05:D98F: 일행 순서마다의 그림 번호(7E:196F). 사람은 05:D9D5[인물 번호], 몬스터(인물 번호 bit7)는
+# 05:D9E1[동료 종류]. 사람 인물 번호 n 의 이름은 이름 표 0 의 n-3 번째(파파스·サンチョ·フローラ·ヘンリー·ビアンカ 다섯이
+# 대화 화자 이름과 같다). 1·2 번(그림 90·91)은 짝이 맞는 이름이 없어 붙이지 않는다.
+PARTY_PEOPLE = 0x05D9D5
+PARTY_PEOPLE_COUNT = 12
+COMPANION_GFX = 0x05D9E1
+COMPANION_KINDS = 0x2A
+HERO_CHILD = (0x82, ('パパスのむすこ', '7E:196F = 2E(배 선실의 주인공), 이름 표 1 의 0번'))
+
+
+def party_names(rom):
+    """세트 → (이름, 근거). 일행 표에서 사람과 동료 몬스터의 그림을 이름과 잇는다."""
+    from dq5text import string, string_codes, text
+    import dq5monster
+    names = dict([HERO_CHILD])
+    for n in range(3, PARTY_PEOPLE_COUNT):
+        g = rom.u8(PARTY_PEOPLE + n)
+        nm = text(string_codes(rom, string(rom, 0, n - 3)))
+        names.setdefault(gfx_set(rom, g), (nm, f'일행 표 05:D9D5[{n}] = 그림 {g:02X}, 이름 표 0 의 {n - 3}번'))
+    kind = {}
+    for m in range(dq5monster.COUNT):
+        kind.setdefault(dq5monster.record(rom, m)[0x18] & 0x7F,
+                        text(string_codes(rom, string(rom, dq5monster.NAMES, m))))
+    for k in range(1, COMPANION_KINDS):
+        g = rom.u8(COMPANION_GFX + k)
+        if k in kind:
+            names.setdefault(gfx_set(rom, g), (kind[k], f'동료 표 05:D9E1[{k:02X}] = 그림 {g:02X}'))
+    return names
+
+
 SPEAKER = re.compile(r'\{1003\}([^「{}\s]{1,12})「')
 
 
@@ -255,7 +349,7 @@ def set_names(rom):
                 said[s]['*'] += bool(cache[t])
                 for n in cache[t]:
                     said[s][n] += 1
-    names = dict(PARTY_NAMES)
+    names = party_names(rom)
     shared = collections.Counter(gfx_set(rom, g) for g in range(GFX_COUNT))
     for s, c in said.items():
         if shared[s] > 3:
@@ -325,9 +419,16 @@ def export_all(rom, outdir, scale=1, grid=False, index=True):
         e['maps'] = sorted(set(m for g in gl for m in users.get(g, ())))
         e['matrix'] = matrix(rec)
         entries.append(e)
+        le = save(sheet(rec, pals[rec['palette']], scale, grid, lying=True), stem + '-lying.png')
+        le.update({'group': '누운 모양', 'title': title + ' 누운 모양', 'set': s,
+                   'note': '행 아래·왼쪽·오른쪽·위, 24x16, 걸음 프레임 없음(7E:31C0 bit0)'})
+        entries.append(le)
         if index:
             ie = save(sheet(rec, pals[rec['palette']], scale, True, True), stem + '-index.png')
             ie.update({'group': '색 번호 보기', 'title': title + ' 색 번호', 'set': s})
+            entries.append(ie)
+            ie = save(sheet(rec, pals[rec['palette']], scale, True, True, True), stem + '-lying-index.png')
+            ie.update({'group': '색 번호 보기', 'title': title + ' 누운 모양 색 번호', 'set': s})
             entries.append(ie)
     seen = set()
     for k, m in enumerate(map_objects(rom)):
@@ -416,44 +517,78 @@ def compare(rom, wram, vram, oam, cgram, stats, verbose=True):
         cells = [w16(lst + i * 2) for i in range(48)]
         s = gfx_set(rom, g)
         rec = decode_set(rom, s)
-        base = (cells[0] & 0x1FF) - (rec['cells'][0] & 0x7F)
-        if (s, base) in seen or base < 0:
+        lying = bool(wram[0x31C0 + slot] & 1)
+        base = (cells[0] & 0x1FF) - (rec['lying_cells'][0][0] if lying else rec['cells'][0] & 0x7F)
+        if (s, base, lying) in seen or base < 0:
             continue
-        seen.add((s, base))
-        tiles = rec['tile_data']
+        seen.add((s, base, lying))
+        tiles = rec['lying_tiles'] if lying else rec['tile_data']
         vt = sum(1 for i, t in enumerate(tiles) if vram[0xC000 + (base + i) * 32:][:32] == t)
-        cell_ok = sum(1 for i in range(48) if (cells[i] & 0x1FF) == base + (rec['cells'][i] & 0x7F)
-                      and bool(cells[i] & 0x4000) == bool(rec['cells'][i] & 0x80))
+        if lying:
+            want_cells = [base + t | (0x4000 if hf else 0) | (0x8000 if vf else 0) for t, hf, vf in rec['lying_cells']]
+            cell_ok = sum(1 for i in range(48) if cells[i] & 0xC1FF == want_cells[i])
+            frames = {(d, 'lying'): img for d, img in rec['lying'].items()}
+        else:
+            cell_ok = sum(1 for i in range(48) if (cells[i] & 0x1FF) == base + (rec['cells'][i] & 0x7F)
+                          and bool(cells[i] & 0x4000) == bool(rec['cells'][i] & 0x80))
+            frames = dict(rec['frames'])
+            if rec['layout'] == 'overlap':
+                # 머리는 7E:3260, 몸은 7E:3240 의 방향을 따로 본다(00:F7E4·F808). 대화 몸짓에서 둘이 갈린다.
+                for hd in DIRS:
+                    for bd in DIRS:
+                        if hd != bd:
+                            for f in (0, 1):
+                                frames[(f'{hd}/{bd}', f)] = mixed_frame(rec, hd, bd, f)
         if cell_ok < 48:
             continue  # 쓰지 않는 슬롯(지난 맵의 칸 목록이 남아 있음)
         n = 6 if rec['layout'] == 'simple' else 8
         inset = lambda it: it and base <= it[2] < base + len(tiles)
         shown = []
         i = 0
+        pending = None
         while i < 128:
             if inset(items[i]) and all(inset(items[j]) for j in range(i, min(i + n, 128))):
                 x0, y0, box = oam_box(items[i:i + n], vram)
                 hit = None
-                for (d, f), img in rec['frames'].items():
-                    want = {(x, y): (rec['palette'], v) for y, row in enumerate(img) for x, v in enumerate(row) if v}
+                got = {(x - min(k[0] for k in box), y - min(k[1] for k in box)): pv for (x, y), pv in box.items()}
+                pals_seen = set(pv[0] for pv in got.values())
+                for (d, f), img in frames.items():
+                    want = {(x, y): v for y, row in enumerate(img) for x, v in enumerate(row) if v}
                     b = bbox(img)
-                    if b and {(x - b[0], y - b[1]): pv for (x, y), pv in want.items()} == \
-                            {(x - min(k[0] for k in box), y - min(k[1] for k in box)): pv for (x, y), pv in box.items()}:
+                    if b and {(x - b[0], y - b[1]): v for (x, y), v in want.items()} == \
+                            {k: pv[1] for k, pv in got.items()}:
                         hit = f'{d}{f} {len(want)}px'
+                        if pals_seen != {rec['palette']}:
+                            hit += f' 팔레트 {"·".join(map(str, sorted(pals_seen)))}'
+                            stats['other_palette'] = stats.get('other_palette', 0) + 1
                         stats.setdefault('frames', set()).add((s, d, f))
                         break
-                shown.append(f'({x0},{y0}) {hit or "다름"}')
+                if hit is None:
+                    # 화면 가장자리에서 OBJ 몇 개가 빠진 인물이 앞에 있으면 묶음이 어긋난다. 한 칸씩 밀어 다시 본다.
+                    if pending is None:
+                        pending = (i, x0, y0)
+                    elif i - pending[0] >= n:
+                        shown.append(f'({pending[1]},{pending[2]}) 다름')
+                        stats['groups'] = stats.get('groups', 0) + 1
+                        pending = (i, x0, y0)
+                    i += 1
+                    continue
+                pending = None
+                shown.append(f'({x0},{y0}) {hit}')
                 stats['groups'] = stats.get('groups', 0) + 1
-                stats['hits'] = stats.get('hits', 0) + (hit is not None)
+                stats['hits'] = stats.get('hits', 0) + 1
                 i += n
             else:
                 i += 1
+        if pending is not None:
+            shown.append(f'({pending[1]},{pending[2]}) 다름')
+            stats['groups'] = stats.get('groups', 0) + 1
         st = stats.setdefault('sets', {}).setdefault(s, [0, 0])
         st[0] += vt
         st[1] += len(tiles)
         if verbose:
             print(f'슬롯 {slot:02X} 그림 {g:02X} 세트 {s:02X} 타일 {base:03X}~: VRAM {vt}/{len(tiles)}, 칸 {cell_ok}/48, '
-                  f'OAM {"; ".join(shown) if shown else "화면 밖"}')
+                  f'OAM {"; ".join(shown) if shown else "화면 밖"}' + (' (누운 모양)' if lying else ''))
 
 
 def main():
@@ -485,10 +620,14 @@ def main():
         print(f'덤프 {len(pl)}개, OBJ 팔레트 0~2 가 ROM 과 같은 덤프 {sum(1 for p in pl if all(p[:3]))}개, '
               f'팔레트 3 까지 같은 덤프 {sum(1 for p in pl if all(p))}개')
         print(f'세트 {len(sets)}개, VRAM 타일 {sum(v[0] for v in sets.values())}/{sum(v[1] for v in sets.values())} 같음')
-        print(f'OAM 묶음 {stats.get("groups", 0)}개 중 {stats.get("hits", 0)}개가 디코더 프레임과 픽셀째로 같음, '
+        print(f'OAM 묶음 {stats.get("groups", 0)}개 중 {stats.get("hits", 0)}개가 디코더 프레임과 색 번호까지 픽셀째로 같음'
+              f'(그중 레코드와 다른 OBJ 팔레트로 그린 것 {stats.get("other_palette", 0)}개), '
               f'서로 다른 (세트, 방향, 프레임) {len(frames)}개')
         for s in sorted(set(f[0] for f in frames)):
             print(f'  세트 {s:02X}: ' + ' '.join(sorted(f'{d}{f}' for t, d, f in frames if t == s)))
+        print('VRAM 확인 세트: ' + ' '.join(f'{s:02X}' for s in sorted(sets)))
+        lying = sorted(f for f in frames if f[2] == 'lying')
+        print(f'누운 모양 (세트, 방향) {len(lying)}개: ' + ' '.join(f'{t:02X}{d}' for t, d, _ in lying))
     if args.list:
         gfx_of = {}
         for g in range(GFX_COUNT):
