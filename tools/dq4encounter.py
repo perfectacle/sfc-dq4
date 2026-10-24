@@ -60,7 +60,7 @@ def zone_at(prg, chapter, x, y):
 
 
 def zone(prg, z):
-    """구역 레코드 16바이트: 0 = bit7-5 기본 조우율, bit4-2 무게 줄, bit1-0 선제 판정, 1 = $6E01(구역 레벨로 보임), 2~15 = 칸 14개."""
+    """구역 레코드 16바이트: 0 = bit7-5 기본 조우율, bit4-2 무게 줄, bit1-0 기습·선제 문턱, 1 = $6E01(구역 레벨), 2~15 = 칸 14개."""
     a = rw(prg, ZONE_REC) + 16 * z
     r = [rd(prg, a + i) for i in range(16)]
     return {'addr': a, 'b0': r[0], 'b1': r[1], 'rate': rd(prg, BASE_RATE + (r[0] >> 5)),
@@ -173,6 +173,19 @@ def boss_callers(prg):
     return out
 
 
+ARENA = (0x1C, 0xB024)      # 1C:$AF04: LDA $B024,X (X = $6287 & 7) ; BRK 01 8F. 투기장 상대 5명(07~0B)
+
+
+def arena_list(prg):
+    """1C:$B024 의 특수 전투 번호. 다음 바이트가 코드(20 0B D2 = JSR $D20B)라 07~0B 다섯 개."""
+    o = ARENA[0] * 0x4000 + (ARENA[1] & 0x3FFF)
+    out = []
+    while prg[o] < N_BOSSES and len(out) < 8:
+        out.append(prg[o])
+        o += 1
+    return out
+
+
 def names(prg):
     return [n for _, n, *_ in dq4data.monsters(prg)]
 
@@ -226,8 +239,9 @@ def show_zones(prg, which):
     for z in which:
         r = zone(prg, z)
         w = weights(prg, r['row'])
+        a = ambush_odds(prg, r['b0'] & 3)
         print(f"구역 {z:02X} 18:{r['addr']:04X} 바이트0={r['b0']:02X} 기본율 {r['rate']:02X} 무게줄 {r['row']} "
-              f"선제 {r['b0'] & 3} 레벨 {r['b1']:02X} 셋째·넷째 무리 {w[14]}/256·{w[15]}/256")
+              f"기습·선제 {a[1]}/256·{a[2]}/256 레벨 {r['b1']:02X} 셋째·넷째 무리 {w[14]}/256·{w[15]}/256")
         for y, m in enumerate(r['slots']):
             if m != 0xFF:
                 what = f'편성 {m:02X}' if y >= 12 else mname(nm, m)
@@ -285,51 +299,188 @@ def check_tables(prg):
     return ok
 
 
-def check_log(prg, path, chapter=0):
-    """enc.lua 기록: chk 줄은 조우율 $0E 예측, enc 줄은 구역·칸·몬스터·마릿수가 표 안에 있는지."""
-    bad = n_chk = n_enc = n_hit = 0
+MERCHANT = 0xAD             # たびのしょうにん
+HOLY = 0xA348               # 성수: 선두 레벨 − 구역 레벨(1~4) → 조우율 배수(/256). 5 이상이면 조우 없음
+
+
+def expected_zone(prg, lists, ext, x, y):
+    """chk·enc 줄의 덧붙은 칸($41 $63 $64 $615A $0515 … $65)으로 구역을 셈. 배($0515=1)면 None(지도 값을 안 씀)."""
+    m41, g, k, ch, ship = ext[:5]
+    field = ext[9] if len(ext) > 9 else 0
+    if m41 & 0x80:
+        recs = dict(lists[1 if ch == 4 else 0][2])
+        zs = recs.get(g)
+        return zs[k] if zs and k < len(zs) else 0xFF
+    if ship == 1:
+        return None
+    if ch == 4 and field == 1:
+        return FIELD_FIXED[(1, 'y<0C' if y < 0x0C else 'y>=0C')]
+    if ch == 4 and field == 2:
+        return FIELD_FIXED[(2, '')]
+    return zone_at(prg, ch, x, y)
+
+
+def expected_rate(prg, z, terr, clock, steps, ext):
+    """18:$9CCC·$9CB2(맵 안은 0F)·$A0BA(성수, 필드만)·$9CF6($6BEB ×4). ext 가 없으면 옛 기록(필드, 성수 없음)."""
+    mult = rd(prg, AFTER_BATTLE + steps) if steps < 3 else 0x10
+    dungeon = bool(ext) and ext[0] & 0x80
+    t = 0x0F if dungeon else rd(prg, (TERRAIN_NIGHT if clock >= 0x78 else TERRAIN_DAY) + terr)
+    rate = (zone(prg, z)['rate'] * mult * t >> 8) & 0xFF
+    if ext and not dungeon and ext[6] & 0x7F:
+        lead, lv = ext[10], zone(prg, z)['b1']
+        if lead > lv:
+            rate = rate * rd(prg, HOLY + lead - lv - 1) >> 8
+    if ext and ext[5]:
+        rate = rate << 2
+    return rate
+
+
+TOGGLE = 0xA247             # 그룹 3A 순번 0·3 의 조우 켬/끔 칸 표(18:$9FB8)
+
+
+def toggles(prg, k):
+    """그룹 3A 순번 k(0 또는 3)의 칸 표: 2바이트씩 FF 까지. (X, Y) 둘레 네 칸 → 켬(True)/끔."""
+    a = TOGGLE + {0: 0, 3: 7}[k]
+    out = {}
+    while (b0 := rd(prg, a)) != 0xFF:
+        b1 = rd(prg, a + 1)
+        x, y = b0 & 0x3F, b1 & 0x3F
+        for (dx, dy), on in (((0, 0), b0 & 0x80), ((1, 0), b0 & 0x40), ((0, 1), b1 & 0x80), ((1, 1), b1 & 0x40)):
+            out.setdefault((x + dx, y + dy), bool(on))
+        a += 2
+    return out
+
+
+def toggle_after(prg, k, x, y, bit):
+    """18:$9FB8: 순번 0·3 에서 표의 칸을 밟으면 $6E05 bit7 을 그 칸 값으로. 처음 맞는 칸(표 순서)이 이긴다."""
+    if k in (0, 3):
+        t = toggles(prg, k)
+        if (x, y) in t:
+            return t[(x, y)]
+    return bit
+
+
+AMBUSH = 0xA45C             # 구역 바이트 0 bit1-0 = k → 문턱 2개(k×2, k×2+1)
+
+
+def ambush_odds(prg, k):
+    """18:$A20E: r = rand(33), r ≤ T0 이면 0(보통), ≤ T1 이면 1(기습: 01DB/01DC), 그 위는 2(선제: 01DF/01E0). 256 경우 중 몇 번."""
+    t0, t1 = rd(prg, AMBUSH + 2 * k), rd(prg, AMBUSH + 2 * k + 1)
+    out = [0, 0, 0]
+    for v, n in rand_values(0x21).items():
+        out[0 if v <= t0 else 1 if v <= t1 else 2] += n
+    return out
+
+
+def check_log(prg, path):
+    """enc.lua 기록: chk 줄은 구역과 조우율 $0E 예측, enc 줄은 구역·칸·몬스터·마릿수가 표 안에 있는지."""
+    bad = n_chk = n_enc = n_hit = n_c55 = n_merchant = n_boss = 0
     seen = {}
+    lists = dungeon_lists(prg)
+    prev, judged, n_3a = None, False, 0
+    tally, last_enc = {}, None
     for line in open(path):
         p = line.split()
-        if p[0] == 'chk':
-            x, y, z, terr, clock, steps, rate, _ = (int(v, 16) for v in p[1:])
-            n_chk += 1
-            n_hit += int(p[8], 16) < rate
-            mult = rd(prg, AFTER_BATTLE + steps) if steps < 3 else 0x10
-            want_zone = zone_at(prg, chapter, x, y)
-            t = rd(prg, (TERRAIN_NIGHT if clock >= 0x78 else TERRAIN_DAY) + terr)
-            want = (zone(prg, z)['rate'] * mult * t >> 8) & 0xFF
-            if z != want_zone or rate != want:
+        if p[0] == 'stp':
+            m41, g, k, x, y, e05 = (int(v, 16) for v in p[1:7])
+            if prev:
+                # 앞 걸음에서 $6E05 bit7 이 어떻게 됐어야 하는지, 그리고 켜져 있을 때만 판정이 났는지
+                want = toggle_after(prg, prev[2], prev[3], prev[4], prev[5] >> 7)
+                zs = dict(lists[0][2]).get(0x3A)
+                live = zs and zs[prev[2]] != 0xFF
+                n_3a += 1
+                if (g, m41 & 0x80) == (0x3A, 0x80) and bool(e05 & 0x80) != bool(want) or judged != bool(want and live):
+                    bad += 1
+                    print(f'다름 그룹 3A 걸음 {prev} → {line.strip()}: bit7 {int(bool(want))}, 판정 {judged}')
+            prev = (m41, g, k, x, y, e05) if g == 0x3A and m41 & 0x80 else None
+            judged = False
+            continue
+        if p[0] in ('chk', 'c55'):
+            judged = True
+        if p[0] in ('enc', 'none', 'boss'):
+            prev = None
+        if p[0] == 'boss':
+            # BOSS=NN 으로 18:$A1AD 를 부른 전투: 무리·마릿수가 특수 전투 표와 같은지, $6E44 bit7·6 이 켜졌는지
+            i = int(p[2], 16)
+            v = [int(x, 16) for x in p[3:12]]
+            table = {n: raw[:4] + [c & 0x0F for c in raw[4:8]] for n, _, raw in bosses(prg)}
+            n_boss += 1
+            if i == 0xFF:
+                # 이벤트가 스스로 부른 특수 전투(BOSS 없이): 같은 무리를 가진 번호
+                hits = [f'{n:02X}' for n, t in table.items() if t == v[:8]]
+                print(f'이벤트 특수 전투 {line.strip()}: 번호 {"·".join(hits) or "없음"}')
+                want = v[:8] if hits else None
+            else:
+                want = table[i]
+            if v[:8] != want or v[8] & 0xC0 != 0xC0:
                 bad += 1
-                print(f'다름 {line.strip()}: 구역 {want_zone:02X} 조우율 {want:02X}')
+                print(f'다름 {line.strip()}: 표 {want}')
+            continue
+        if p[0] == 'e44' and last_enc is not None:
+            v, k = int(p[2], 16), int(p[3], 16) & 3
+            tally.setdefault(k, [0, 0, 0])
+            if v > 2:
+                bad += 1
+                print(f'다름 {line.strip()}: $6E44 는 0~2')
+            else:
+                tally[k][v] += 1
+            last_enc = None
+            continue
+        if p[0] == 'chk':
+            x, y, z, terr, clock, steps, rate, rnd = (int(v, 16) for v in p[1:9])
+            ext = [int(v, 16) for v in p[9:]]
+            n_chk += 1
+            n_hit += rnd < rate
+            want_zone = expected_zone(prg, lists, ext, x, y) if ext else zone_at(prg, 0, x, y)
+            want = expected_rate(prg, z, terr, clock, steps, ext)
+            if (want_zone is not None and z != want_zone) or rate != want:
+                bad += 1
+                print(f'다름 {line.strip()}: 구역 {want_zone if want_zone is None else f"{want_zone:02X}"} 조우율 {want:02X}')
+        elif p[0] == 'c55':
+            # 18:$9FA0: 맵 안에서 $627D bit4(0F:$CF52 가 지형 종류 $7140 bit7-5 가 바뀐 걸음에 켬)면 난수 < 55
+            n_c55 += 1
+            n_hit += int(p[3], 16) < 0x55
         elif p[0] == 'enc':
             x, y, z, terr, clock = (int(v, 16) for v in p[2:7])
             slot = int(p[7])
             ids = [int(v, 16) for v in p[8:12]]
             cnt = [int(v, 16) for v in p[12:16]]
+            ext = [int(v, 16) for v in p[16:]]
+            ch = ext[3] if ext else 0
             n_enc += 1
-            mode = 'night' if clock >= 0x78 else 'day'
+            mode = 'dungeon' if ext and ext[0] & 0x80 else 'night' if clock >= 0x78 else 'day'
+            if slot == -1 and ch == 2 and mode != 'dungeon' and ids == [MERCHANT, 0xFF, 0xFF, 0xFF] and cnt[0] == 1:
+                n_merchant += 1        # 18:$9D12: 3장 필드는 rand(10) = 0 이면 무리 고르기 없이 たびのしょうにん 한 마리
+                continue
             r = zone(prg, z)
             first = pick(prg, r['slots'], r['row'], MASK_FIRST[mode])
             kind, groups = outcomes(prg, z, mode).get(slot, ('', []))
-            fail = z != zone_at(prg, chapter, x, y) or slot not in first
+            want_zone = expected_zone(prg, lists, ext[:5] + [0] * 4 + ext[8:9], x, y) if ext else zone_at(prg, 0, x, y)
+            fail = (want_zone is not None and z != want_zone) or slot not in first
+            if ext and ext[5] != r['b1']:
+                fail = True                 # 18:$9D58: $6E01 = 구역 레코드 바이트 1
             got = [(m, c) for m, c in zip(ids, cnt) if m != 0xFF]
             if len(got) > len(groups) or not got:
                 fail = True
             for (m, c), (ms, lo, hi) in zip(got, groups):
                 if m not in ms or not (max(lo, 1) <= c <= hi):
                     fail = True
-            if slot < 5 and sum(c for _, c in got) > max(rd(prg, EXTRA_MAX + chapter), len(got)):
+            # 5장의 k 는 BRK 62 33 값(4~8, 코드 읽기)이라 그 범위의 가장 큰 상한으로 본다
+            cap = max(rd(prg, EXTRA_MAX + i) for i in range(4, 8)) if ch == 4 else rd(prg, EXTRA_MAX + ch)
+            if slot < 5 and sum(c for _, c in got) > max(cap, len(got)):
                 fail = True
             seen.setdefault(z, set()).update(m for m, _ in got)
+            last_enc = z
             if fail:
                 bad += 1
                 print(f'다름 {line.strip()}: 칸 {slot} {kind} {groups}')
+    for k, n in sorted(tally.items()):
+        print(f'$6E44(k={k}): 보통 {n[0]} 기습 {n[1]} 선제 {n[2]}  (기대 /256: {ambush_odds(prg, k)})')
     nm = names(prg)
     for z, ms in sorted(seen.items()):
         print(f'구역 {z:02X}: 나온 몬스터 ' + ', '.join(mname(nm, m) for m in sorted(ms)))
-    print(f'{path}: 판정 {n_chk}번(난수 < 조우율 {n_hit}번), 전투 {n_enc}번, 다름 {bad}')
-    return bad == 0 and n_hit == n_enc
+    print(f'{path}: 판정 {n_chk}번' + (f'과 $627D 판정 {n_c55}번' if n_c55 else '') + f'(전투 조건이 맞은 것 {n_hit}번), 전투 {n_enc}번' + (f'(たびのしょうにん {n_merchant}번)' if n_merchant else '') + (f', 그룹 3A 걸음 {n_3a}번' if n_3a else '') + (f', 특수 전투 {n_boss}번' if n_boss else '') + f', 다름 {bad}')
+    return bad == 0 and (n_hit == n_enc or n_boss > 0)
 
 
 def main():
@@ -352,10 +503,14 @@ def main():
             print(f'편성 {i:02X}: ' + ', '.join(f'{mname(nm, m)} {lo}~{hi}' for m, lo, hi in formation(prg, i) if m != 0xFF))
     elif cmd == 'bosses':
         calls = boss_callers(prg)
+        arena = arena_list(prg)
         for i, groups, raw in bosses(prg):
             where = ' '.join(f'{b:02X}:{a:04X}' for n, b, a in calls if n == i)
+            if i in arena:
+                where += f' 1C:{ARENA[1] + arena.index(i):04X}(표, $6287 & 7 = {arena.index(i)})'.lstrip()
             print(f'{i:02X} ' + ', '.join(f'{mname(nm, m)}×{c}' for m, c in groups)
                   + f'  [{" ".join(f"{v:02X}" for v in raw)}]' + (f'  ← {where}' if where else ''))
+        print('# 그 밖에 0F:$DA8A(스크립트 명령: 다음 바이트 = 번호 → BRK 01 8F)가 부름')
     elif cmd == 'check':
         ok = check_tables(prg)
         for path in args:
