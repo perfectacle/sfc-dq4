@@ -29,7 +29,7 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `lua/dq5battledump.lua` | 전투 그림 실험: `AT` 실행 때 WRAM(`at.bin`), `DUMPF` 프레임에 WRAM·VRAM·CGRAM·OAM·화면, `FROM`~`TO` DMA 기록. `boot.lua`(walk.lua) 뒤에 붙여 씀 |
 | `lua/dq5hdma.lua` | `DUMPF` 프레임에 `$420C`·DMA 채널 레지스터(`hNNNNN.txt`), WRAM, 화면. `boot.lua`(walk.lua) 뒤에 붙여 씀 |
 | `dq5sprite.py rom` | DQ5 필드 인물 스프라이트 세트 147개(그림 번호 → 세트 `25:86D0`, 레코드 `1F:D63D`, 런 길이 타일)와 맵 OBJ 타일 27개(`1F:D59A`). `--out work/sprites` 로 sfc-dq4-assets 규칙의 1배 그림: 세트마다 `<세트>[-<대화 화자 이름>].png`(행 아래·왼쪽·오른쪽·위 × 걸음 프레임 0·1, 투명 배경)·색 번호 보기(`-index.png`)·맵 OBJ 타일 `obj-<BC>-<BD>.png`·`index.json`(색 번호 행렬 포함). `--scale`·`--grid` 로 확대·격자, `--list` 목록, `--compare 덤프폴더…` 로 `lua/dq5sprdump.lua` 덤프의 VRAM·칸 목록·OAM 과 비교. 갤러리는 `export_all(rom, outdir)` 를 import. 뽑은 결과는 비공개 `sfc-dq4-assets` 의 `sfc/dq5/sprites/` |
-| `dq5flags.py rom [2192.7]` | DQ5 이야기 플래그(`7E:2190`~`220F`) 비트·바이트마다 켜는 곳·끄는 곳·보는 곳(대화·인물 스크립트·인물 목록 표·맵별 루틴·네이티브 `BRK 0B`·`0C`·`0D`·롱 주소)과 문맥 메시지. `--source` 출처 고르기, `--check flagtrace.txt` 로 게임 기록과 대조 |
+| `dq5flags.py rom [2192.7]` | DQ5 이야기 플래그(`7E:2190`~`220F`) 비트·바이트마다 켜는 곳·끄는 곳·보는 곳(대화·인물 스크립트·인물 목록 표·맵별 루틴·맵 조건 표·이벤트 스크립트·네이티브 `BRK 0B`·`0C`·`0D`·롱 주소)과 문맥 메시지. `--source` 출처 고르기, `--check flagtrace.txt` 로 게임 기록과 대조 |
 | `dq5figures.py` | `sfc/dq5/images/` 의 그림을 다시 만듦(롬 필요, 게임 화면 비교 그림만 `work/` 덤프 필요) |
 
 ## lua/: MesenCE 분석 스크립트
