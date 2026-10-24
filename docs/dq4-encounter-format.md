@@ -1,6 +1,6 @@
 # DQ4(FC) 적 조우 표
 
-필드·던전에서 걸을 때 전투가 날지, 나면 어떤 무리가 나올지 정하는 표입니다. 디코더는 [tools/dq4encounter.py](../tools/dq4encounter.py), 실험 과정은 [2026-10-25-07 일지](journal/dq4/2026-10-25-07-encounter.md) 에 있습니다. 코드와 표는 모두 뱅크 `18` 에 있고, 주소는 그 뱅크의 CPU 주소입니다. 몬스터 ID 는 [dq4-data-format.md](dq4-data-format.md#몬스터) 와 같습니다.
+필드·던전에서 걸을 때 전투가 날지, 나면 어떤 무리가 나올지 정하는 표입니다. 디코더는 [tools/dq4encounter.py](../tools/dq4encounter.py), 실험 과정은 [2026-10-25-08 일지](journal/dq4/2026-10-25-07-encounter.md) 에 있습니다. 코드와 표는 모두 뱅크 `18` 에 있고, 주소는 그 뱅크의 CPU 주소입니다. 몬스터 ID 는 [dq4-data-format.md](dq4-data-format.md#몬스터) 와 같습니다.
 
 근거를 「실측」과 「코드 읽기」로 나눴습니다. 실측은 `tools/lua/fc/enc.lua` 로 1장 필드의 7구역에서 전투 240번을 일으켜 게임 기록과 디코더 예측을 맞춘 것입니다([확인](#확인)).
 
