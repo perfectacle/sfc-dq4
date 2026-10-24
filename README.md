@@ -72,6 +72,7 @@ dq4(FC DQ4 원작):
 - [docs/dq4-graphics.md](docs/dq4-graphics.md): 포팅용 스프라이트·샘플 맵·한글 타이틀·일러스트와 SFC 변환 규격
 - [docs/dq4-rom-map.md](docs/dq4-rom-map.md): DQ4(FC) 롬 뱅크 지도(뱅크 32개의 내용, 실행 장면, 빈 자리)
 - [docs/dq4-debug.md](docs/dq4-debug.md): DQ4(FC) 디버그 스위치 `$C000`(벽 통과·인카운트 끄기·전투 테스트), 패드 2 흔적, 미실행 코드 찾기
+- [docs/dq4-block-format.md](docs/dq4-block-format.md): DQ4(FC) 맵 블록 → 8×8 타일·팔레트·통행 속성, CHR 올리기, 타일 애니메이션, 지형 효과
 
 ### 해킹 일지
 
@@ -125,3 +126,4 @@ dq4(FC DQ4 원작):
 - [2026-10-25-13: 대사 제어 바이트와 롬 뱅크 지도](docs/journal/dq4/2026-10-25-13-textrest.md)
 - [2026-10-25-14: 디버그 스위치와 숨은 개발 기능](docs/journal/dq4/2026-10-25-14-debug.md)
 - [2026-10-25-15: 주문·레벨업·몬스터·아이템 표](docs/journal/dq4/2026-10-25-15-stats.md)
+- [2026-10-25-16: 맵 블록·타일·팔레트·통행](docs/journal/dq4/2026-10-25-16-block.md)
