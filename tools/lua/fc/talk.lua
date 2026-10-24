@@ -7,6 +7,8 @@
 -- TID="00B,01A"(16진)를 주면 N번째 말 걸기의 대화 번호를 N번째 값으로 바꾼다(15:$9942, 갈래 직전의 $00/$01).
 -- 대화 번호는 바꾸든 안 바꾸든 tid 줄로 남긴다.
 -- SET="616A=8687;60D3=80"(16진 주소=바이트들)을 주면 첫 말 걸기의 RAM 덤프 전에 한 번 써서 일행·소지품·장 등을 만든다.
+-- EV="14,15"(16진)를 주면 N번째 이벤트 진입(1C:$AD5F)의 A 를 N번째 값으로 바꿔 1C:$BF74 표의 아무 이벤트나 돌린다.
+-- 이벤트 플래그($627B-$62AF)·장소($63/$64)·일행 자리($616A-$6179)·시간($62ED)에 쓰면 w 줄(주소, 값, 쓴 PC)로 남긴다.
 -- 툴킷 FC 프로브와 같이 끝에서 입력 드라이버(DRIVER)를 돌리고, MAXF-1 프레임에 talk.txt 를 쓴다.
 package.path = os.getenv("LIBDIR") .. "/?.lua;" .. package.path
 local L = require("lib")
@@ -53,13 +55,30 @@ emu.addMemoryCallback(function()
 end, emu.callbackType.exec, 0x9CBF, 0x9CBF)
 
 -- 호출 문장이 넘어가는 곳: 이벤트 1C:$AD5F(A = 1C:$BF74 표 번호), 맵별 이벤트 1D:$B74D, 특수 전투 18:$A1AD(A = 번호).
+local evs, nev = {}, 0
+for t in string.gmatch(os.getenv("EV") or "", "%x+") do evs[#evs + 1] = tonumber(t, 16) end
 local hooks = {{0xAD5F, 0x72D5F, "ev1C"}, {0xB74D, 0x7774D, "ev1D"}, {0xA1AD, 0x621AD, "battle"}}
 for _, h in ipairs(hooks) do
   emu.addMemoryCallback(function()
     if L.prgOffset(h[1]) ~= h[2] then return end
+    if h[3] == "ev1C" then
+      nev = nev + 1
+      if evs[nev] then emu.setState({["cpu.a"] = evs[nev]}) end
+    end
     log[#log + 1] = string.format("%d %s %02X", f, h[3], emu.getState()["cpu.a"])
   end, emu.callbackType.exec, h[1], h[1])
 end
+
+local function watch(lo, hi)
+  emu.addMemoryCallback(function(a, v)
+    if n == 0 then return end
+    log[#log + 1] = string.format("%d w %04X %02X %04X", f, a, v, emu.getState()["cpu.pc"])
+  end, emu.callbackType.write, lo, hi)
+end
+watch(0x627B, 0x62AF)
+watch(0x0063, 0x0064)
+watch(0x616A, 0x6179)
+watch(0x62ED, 0x62ED)
 
 -- 조건 결과(15:$9A4C): A=0 이면 then 갈래, $DC=FF(뒤집힌 조건)면 반대. then 갈래를 타면 1.
 emu.addMemoryCallback(function()
