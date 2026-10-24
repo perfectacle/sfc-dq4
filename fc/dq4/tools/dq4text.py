@@ -8,6 +8,10 @@
       전투 창이면 옆의 end.nt)가 차례로 찍은 메시지들과 맞는지. 치환 제어(F6 이름 등)는 아무 글자와 맞춤
   python fc/dq4/tools/dq4text.py rom/dq4.nes controls        제어 바이트 ED~FF 의 처리기 주소·뜻·쓰는 메시지 수
   python fc/dq4/tools/dq4text.py rom/dq4.nes windows         창 문자열 표 16:$A572(그룹, 항목, 루틴/문자열, 글자)
+  python fc/dq4/tools/dq4text.py rom/dq4.nes windows --layout [--meaning]   창 레코드(자리·크기·본문), --meaning 은 갈래마다 뜻
+  python fc/dq4/tools/dq4text.py rom/dq4.nes windows --items  본문 바이트의 뜻 표(루틴 항목·항목 루틴·목록·C1·자리 루틴)
+  python fc/dq4/tools/dq4text.py rom/dq4.nes windows --trace item.txt ...   lua/textitem.lua 기록을 창 열기마다 한 줄로
+  python fc/dq4/tools/dq4text.py rom/dq4.nes windows --compare DIR ...      lua/textlayout.lua 기록의 틀 자리와 레코드 견주기
   python fc/dq4/tools/dq4text.py rom/dq4.nes export [DIR]    메시지·창 문자열·이름 목록을 기호 텍스트 JSON·TSV 로(기본 work/text).
       --check 면 쓰지 않고 기호 → 바이트 왕복과 부호 → 롬 비트열만 검사. 출력은 저작권 텍스트라 커밋하지 않는다
 
@@ -404,6 +408,102 @@ WINDOW_COUNT = 0x73               # 16:$A572(창 문자열 표) 앞까지 116개
 LIST_KINDS = {0x6: '16:$9EC3', 0x7: '16:$9ED5', 0x8: '16:$9C18', 0x9: '16:$9E28', 0xA: '16:$9E99',
               0xB: '16:$9EE7', 0xC: '16:$A328', 0xD: '16:$A083', 0xE: '16:$A022', 0xF: '16:$9EFC'}
 
+# 아래 뜻 표의 근거는 fc/dq4/docs/dq4-text-format.md 의 「창 레코드」 절.
+LIST_MEANING = {
+    0x0: '고르지 않는 창(표시만)', 0x1: '고르는 창', 0x2: '고르는 창', 0x3: '고르는 창', 0x4: '고르는 창',
+    0x5: '고르는 창', 0x6: '동료 $F7 의 소지품 8칸', 0x7: '동료 $F7 의 필드 주문', 0x8: '전투 주문 한 쪽(별칭 번호가 쪽)',
+    0x9: '전투 도구', 0xA: '장비 칸에 넣을 수 있는 소지품', 0xB: '표시 속도 1~8', 0xC: '(쓰는 창 없음)',
+    0xD: '이름 입력 글자판', 0xE: '카지노 코인', 0xF: '수 입력 칸',
+}
+# 창 문자열 표의 루틴 항목 (그룹, 번호) → 찍는 것.
+ITEM_MEANING = {
+    (0, 0x00): '동료 이름($F7)', (0, 0x01): '주문 이름(줄 $F3, 모르는 주문은 ？)', (0, 0x02): '골드($6157, 5자리)',
+    (0, 0x03): '직업 이름', (0, 0x04): '성별', (0, 0x05): '레벨', (0, 0x06): '금액 입력 칸 0000',
+    (0, 0x07): '장비 칸 이름(ぶき·よろい·たて·かぶと, 별칭 번호로)', (0, 0x08): '소지품 이름(줄 $F3)',
+    (0, 0x09): '장비 후보 이름(E 표시)', (0, 0x0A): '장비 칸마다 장비한 아이템(앞에 E)', (0, 0x0B): '상점 품목 이름($07BD)',
+    (0, 0x0C): '맡긴 아이템 이름($61DB)', (0, 0x0D): 'ちから', (0, 0x0E): '앞 수 항목의 다음 능력치',
+    (0, 0x0F): '일행 HP·MP 표(이름, H 지금·최대, M 지금·최대)', (0, 0x10): 'こうげき力',
+    (0, 0x11): '커서·화살표 기호', (0, 0x12): 'ルーラ 행선지 이름', (0, 0x13): '동료 이름 + 그 품목을 장비할 수 있으면 Ｅ',
+    (0, 0x14): '전투 몬스터 무리 이름', (0, 0x15): '전투 몬스터 무리 마릿수', (0, 0x16): '번호 + 동료 이름(대열 바꾸기)',
+    (0, 0x17): '대열 칸 번호 + 이름(빈 칸 ····)', (0, 0x18): '전투 상태 창 한 줄(H, M, 직업 첫 글자：레벨)',
+    (0, 0x19): '지금 작전 이름', (0, 0x1A): '작전 고르기 항목', (0, 0x1B): '번호 + 동료 이름', (0, 0x1C): '동료 이름(전투 대상)',
+    (0, 0x1D): 'H 값', (0, 0x1E): 'M 값', (0, 0x1F): '직업 첫 글자：레벨', (0, 0x20): '대열 자리 이름',
+    (0, 0x21): '값(E00 사는 값, E01 파는 값)', (0, 0x22): '동료 이름($07B0 목록)', (0, 0x23): '번호 + 동료 이름',
+    (0, 0x24): '전투 상태 창 머리(╴ + 이름)', (0, 0x25): '$F7 을 수로', (0, 0x26): '장비 표시 E',
+    (0, 0x27): '전투 도구 이름', (0, 0x28): '제목 앞 ╴', (0, 0x29): '필드 메시지 창 줄', (0, 0x2A): '전투 메시지 창 줄',
+    (0, 0x2B): '작전 이름 앞쪽', (0, 0x2C): '작전 이름 뒤쪽', (0, 0x2D): '몬스터 무리 이름(전투 시험)',
+    (0, 0x2E): '몬스터 무리 마릿수(전투 시험)', (0, 0x2F): '몬스터 이름 목록(전투 시험)', (0, 0x30): '이름 입력 칸',
+    (0, 0x31): '이름 입력 글자판 한 줄', (0, 0x32): '번호 + 커서 + 동료 이름', (0, 0x33): '동료 이름(마차)',
+    (0, 0x34): '최대 HP', (0, 0x35): '장비를 바꾼 뒤 こうげき力', (0, 0x36): '장비를 바꾼 뒤 しゅび力',
+    (0, 0x37): '작전 창 いれかえをする',
+    (1, 0x00): '전투 상태 한 명분(H, M, 직업：레벨)', (1, 0x01): '타이틀 메뉴 항목', (1, 0x02): '모험의 서 칸(E01 이면 이름까지)',
+    (1, 0x03): '성별 고르기', (1, 0x04): '주문 이름', (1, 0x05): '＊．．', (1, 0x06): '전투 몬스터 이름($6E45)',
+    (1, 0x07): '전투 몬스터 값', (1, 0x08): '장 + 주인공 이름(모험의 서)', (1, 0x09): '레벨(모험의 서)',
+}
+# 수 항목이 $03DC 로 고르는 값. 표 16:$BAFE 의 바이트가 전투 쪽 해석기(BRK 00 03)의 값 번호.
+STAT_TABLE = (0x16, 0xBAFE)
+STAT_NAMES = ['ちから', 'すばやさ', 'たいりょく', 'かしこさ', 'うんのよさ', '최대 HP', '최대 MP', 'こうげき力', 'しゅび力',
+              '경험치', '레벨', 'HP', 'MP', '?']
+# 항목 루틴 80~9F: (표 $03D7, b & 1F) → 하는 일. 표 0 은 1A 까지, 표 1 은 06 까지가 줄 수를 돌려주는 루틴이고
+# 목록을 셀 때($F5 bit7)만 돈다. 나머지는 항목마다 돈다(16:$96E2, 한계 16:$A6DC).
+ROUTINE_TABLES = (0x16, 0xA6D8)
+ROUTINE_LIMITS = (0x16, 0xA6DC)
+ROUTINE_MEANING = {
+    (0, 0x00): '줄 수 = 동료 전원(걸러내기 00)', (0, 0x01): '줄 수 = 동료(걸러내기 08)',
+    (0, 0x02): '줄 수 = 동료(걸러내기 80)', (0, 0x03): '줄 수 = 전투에 나가는 동료(걸러내기 40)',
+    (0, 0x04): '줄 수 = 전투 동료 중 $F7 을 뺀 사람, $07B0 에 목록', (0, 0x05): '줄 수 7(필드 주문)',
+    (0, 0x06): '줄 수 4(장비 칸)', (0, 0x07): '줄 수 = 주문이 있는 쪽 수 × 3(전투 주문 2열)', (0, 0x08): '줄 수 5(HP·MP 표)',
+    (0, 0x09): '줄 수 8(소지품)', (0, 0x0A): '줄 수 = ルーラ 행선지 수', (0, 0x0B): '줄 수 = 장비 칸에 넣을 수 있는 소지품 수',
+    (0, 0x0C): '줄 수 = 대열에서 아직 안 고른 칸', (0, 0x0D): '줄 수 4(대열 칸, $07B0 채움)',
+    (0, 0x0E): '줄 수 6 또는 3(작전, 열 수로)', (0, 0x0F): '줄 수 3(전투 상태, 몬스터 AE·BC 와 싸울 때는 2)',
+    (0, 0x10): '줄 수 = 몬스터 무리 수, $07B0 에 무리', (0, 0x11): '줄 수 0/1(いれかえ 를 보일지)',
+    (0, 0x12): '줄 수 4(전투 도구)', (0, 0x13): '줄 수 = 상점 품목 수($07C4)', (0, 0x14): '줄 수 = 맡긴 아이템 수',
+    (0, 0x15): '줄 수 = $F7 의 주문 수', (0, 0x16): '줄 수 1 = $F7 이 ぶきや(トルネコ)일 때만(どうする 의 みる)',
+    (0, 0x17): '줄 수 4(메시지 창)', (0, 0x18): '줄 수 117(몬스터 목록, 전투 시험)', (0, 0x19): '줄 수 4(전투 시험 무리)',
+    (0, 0x1A): '줄 수 = 이름 입력 글자판 줄', (0, 0x1B): '$F5 bit5 를 켬', (0, 0x1C): '예/아니오 소리(BRK 86 FB)',
+    (0, 0x1D): '$03DB = $07B0', (0, 0x1E): '$07B4 bit2 를 끔',
+    (1, 0x00): '줄 수 = 타이틀 메뉴 항목(쓴 모험의 서에 따라)', (1, 0x01): '줄 수 = 글자판($07B7)',
+    (1, 0x02): '줄 수 0/1', (1, 0x03): '줄 수 = 모험의 서 칸', (1, 0x04): '줄 수 2', (1, 0x05): '줄 수 3',
+    (1, 0x06): '줄 수 = 전투 몬스터 무리', (1, 0x07): '$F5 bit1 을 켬(전투 명령 창)',
+}
+# C1 nn(표 16:$A734): 고른 줄($F8)을 결과로 바꾸는 루틴. 머리 바이트 1 bit3 이면 열 때 같은 표의 0번을 부른다.
+C1_MEANING = {
+    0x00: '$F8 → 동료 번호(걸러내기 $03DD)', 0x01: '$F8 → 동료 번호(걸러내기 80)', 0x02: '$F8 = $07B0[$F8]',
+    0x03: '대열 바꾸기: 고른 동료를 $07B0 에 더함', 0x04: 'おわり 줄이면 $F8 += F0', 0x05: '$07B0~$07B3 → $6E~$71(새 대열)',
+    0x06: '타이틀 메뉴: 줄 → 할 일 번호', 0x07: '모험의 서: 줄 → 칸 번호', 0x08: '장비: 고른 줄 → 아이템($07B1)',
+    0x09: '$07B5~$07B8 을 0 으로', 0x0A: '$07B4 |= 50, $F5 |= 08',
+}
+# 자리 루틴(머리 바이트 0 위 니블이 0, 표 16:$A72C). v = 별칭 번호($03D5 >> 4).
+PLACE_MEANING = {
+    0: 'HP·MP 표: 사람 수 n(1~5)으로 x·폭 = 16:$B875[n−1], y = v 0 → 4, 1 → 16. 6명 이상이면 둘로 나눠 둘째 몫을 곁 창 0F 에',
+    1: '전투 상태 창: 전투 동료 n(1~4)으로 x·폭 = 16:$B89F[2n+v], y = v 0 → 2, 1 → 20',
+    2: '작전 이름 창: 폭 12, x = v 0 → 16, 1 → 4',
+    3: '작전 두 줄 창: x24 폭 6, y = 몬스터 $6E45 가 AE·BC 면 2, 아니면 4',
+}
+FLAG_MEANING = {0x0: '$F5 |= 41', 0xF: '커서를 옮길 때마다 곁 창을 다시 그림($F5 bit4)'}
+FLAG_PAGE = '목록을 쪽으로 자름($03D2 = min($03D1 + ($03D5 & 0F), 줄 수), 넘치면 $F5 bit6). 값은 보지 않음'
+MODE_MEANING = '$03C6 = n: 상점 값 0 사는 값·1 파는 값, 모험의 서 0 빈 칸·1 이름, 이름 입력 8 글자판'
+
+
+def token_meaning(t):
+    """본문 갈래 하나의 뜻(위 표에서). 모르는 것은 빈 문자열."""
+    kind = t[0]
+    if kind == 'item':
+        return ITEM_MEANING.get((t[1], t[2]), '') if t[3].startswith('〈') else ''
+    if kind == 'cond':
+        return ROUTINE_MEANING.get((t[2], t[1]), '')
+    if kind == 'list':
+        return LIST_MEANING.get(t[1], '')
+    if kind == 'call':
+        return C1_MEANING.get(t[1], '')
+    if kind == 'flag':
+        return FLAG_MEANING.get(t[1], FLAG_PAGE)
+    if kind == 'mode':
+        return MODE_MEANING
+    if kind == 'side':
+        return f'곁 창 {t[1]:02X} 을 함께 엶'
+    return ''
+
 
 def window_record(rom, n):
     """창 n 의 레코드: (주소, 바이트, 별칭). 첫 바이트의 위 니블이 1 인 레코드는 다음 창의 레코드를 쓰고
@@ -458,11 +558,112 @@ def window_layout(rom, n):
         else:
             toks.append(('mode', b & 0x1F))
         i += 1
+    # 80~BF 가 이어진 묶음은 다음 항목을 그리기 전에 뒤에서부터 읽힌다(16:$96B0). 그래서 묶음 안의 A0~A3(표 고르기)는
+    # 그 앞에 있는 루틴에 걸리고, 고른 표($03D7)는 다음 묶음까지 남는다.
+    table, run = 0, []
+    for k, t in enumerate(toks + [('end',)]):
+        if t[0] in ('cond', 'condtable', 'group', 'indent', 'flag'):
+            run.append(k)
+            continue
+        for j in reversed(run):
+            if toks[j][0] == 'condtable':
+                table = toks[j][1]
+            elif toks[j][0] == 'cond':
+                toks[j] = ('cond', toks[j][1], table)
+        run = []
     lay['tokens'] = toks
     # $03CB(셋째 바이트, 없으면 3)의 bit7-6 이 1 이면 틀을 영역 안쪽 한 칸에 그림(전투 메시지 창 3D·62).
     lay['inset'] = head == 3 and bs[2] >> 6 == 1 and lay['w'] is not None
     lay['frame'] = (lay['x'] + 1, lay['y'], lay['w'] - 2) if lay['inset'] else (lay['x'], lay['y'], lay['w'])
     return lay
+
+
+def routine_address(rom, table, idx):
+    """항목 루틴 (표, 번호)의 주소와 줄 수 루틴인지. 표의 값은 RTS 로 뛰는 주소 − 1."""
+    base = rom.word(ROUTINE_TABLES[0], ROUTINE_TABLES[1] + 2 * table)
+    counting = 2 * idx < rom.byte(ROUTINE_LIMITS[0], ROUTINE_LIMITS[1] + table)
+    return rom.word(0x16, base + 2 * idx) + 1, counting
+
+
+def meaning_lines(rom):
+    """창 본문 바이트의 뜻 표(--items)."""
+    out = ['# 루틴 항목(창 문자열 표의 앞쪽 항목, 그룹:번호 주소 뜻)']
+    for g, count in enumerate(WINDOW_COUNTS):
+        for n in range(count):
+            e = window_entry(rom, g, n)
+            if e[0] == 'code':
+                out.append(f'{g}:{n:02X} 16:${e[1]:04X}  {ITEM_MEANING.get((g, n), "")}')
+    stats = [rom.byte(STAT_TABLE[0], STAT_TABLE[1] + i) for i in range(len(STAT_NAMES))]
+    out.append('# 수 항목의 값 번호($03DC → 16:$BAFE)')
+    out += [f'{i:X} {v:02X}  {name}' for i, (v, name) in enumerate(zip(stats, STAT_NAMES))]
+    out.append('# 항목 루틴 80~9F(표:바이트 주소 갈래 뜻)')
+    for (table, idx), desc in sorted(ROUTINE_MEANING.items()):
+        a, counting = routine_address(rom, table, idx)
+        out.append(f'{table}:{0x80 | idx:02X} 16:${a:04X} {"줄 수" if counting else "늘 돎"}  {desc}')
+    out.append('# 목록 Dn')
+    out += [f'D{n:X} {LIST_KINDS.get(n, "16:$9919"):9s} {LIST_MEANING[n]}' for n in range(16)]
+    out.append('# C1 nn(16:$A734)')
+    for n, desc in C1_MEANING.items():
+        out.append(f'C1 {n:02X} 16:${rom.word(0x16, 0xA734 + 2 * n) + 1:04X}  {desc}')
+    out.append('# 자리 루틴(16:$A72C)')
+    for n, desc in PLACE_MEANING.items():
+        out.append(f'{n} 16:${rom.word(0x16, 0xA72C + 2 * n) + 1:04X}  {desc}')
+    out.append(f'# B0~BF: B0 {FLAG_MEANING[0]}, BF {FLAG_MEANING[0xF]}, B1~BE {FLAG_PAGE}')
+    out.append(f'# E0~FF: {MODE_MEANING}')
+    return out
+
+
+_PUT = re.compile(r'(\d+)([:m])([0-9A-F]{2})')
+
+
+def _put_text(cells):
+    """textitem.lua 의 put 줄(열:바이트, 열m탁점)을 열 순서로 글자로. FF(빈 칸 채움)는 ·, 80 이상은 {XX}."""
+    by = {}
+    for t in cells:
+        m = _PUT.fullmatch(t)
+        by.setdefault(int(m[1]), [None, None])[0 if m[2] == 'm' else 1] = int(m[3], 16)
+    out = ''
+    for c in sorted(by):
+        mark, ch = by[c]
+        s = '' if ch is None else '·' if ch == 0xFF else text([ch]) if ch < GLYPH_END else f'{{{ch:02X}}}'
+        out += s + ({0x3D: '\u3099', 0x3E: '\u309a'}.get(mark, '') if mark is not None else '')
+    return unicodedata.normalize('NFC', out.rstrip('·'))
+
+
+def trace_lines(path):
+    """textitem.lua 의 item.txt 를 창 열기마다 한 줄로: 항목(그룹:번호)「찍은 글」, ?표:루틴→줄 수, 목록·C1·자리."""
+    rows, cur, toks, last_cond = [], None, [], None
+    for line in open(path):
+        line = line.rstrip('\n')
+        if line.startswith('  put '):
+            if toks:
+                toks[-1] += '「' + _put_text(line[6:].split()) + '」'
+            continue
+        p = line.split()
+        if len(p) < 2:
+            continue
+        f = dict(x.split('=', 1) for x in p[2:] if '=' in x)
+        kind = p[1]
+        if kind == 'open':
+            if cur is not None and toks:
+                rows.append(f'{cur} ' + ' '.join(toks))
+            cur, toks = f['W'], []
+        elif kind == 'top':
+            toks.append(f['n'] if f['g'] == '0' else f'{f["g"]}:{f["n"]}')
+        elif kind == 'sub':
+            toks.append(f'<{f["n"]}>')
+        elif kind == 'cond':
+            last_cond = (int(f['b'], 16), int(f['T']), int(f['F5'], 16) & 0x80)
+        elif kind == '=>' and last_cond:
+            b, table, counting = last_cond
+            if counting:
+                toks.append(f'?{table}:{b:02X}→{f["3D2"]}')
+            last_cond = None
+        elif kind in ('list', 'place', 'c1', 'mode', 'init'):
+            toks.append(f'{kind}{f["n"]}')
+    if cur is not None and toks:
+        rows.append(f'{cur} ' + ' '.join(toks))
+    return rows
 
 
 def window_callers(rom):
@@ -484,6 +685,8 @@ def token_str(t):
         return f'[D{t[1]:X}' + (f' {LIST_KINDS[t[1]]}' if t[1] in LIST_KINDS else '') + ']'
     if kind == 'newline':
         return '/'
+    if kind == 'cond' and t[2]:
+        return f'?{t[2]}:{t[1]:02X}'
     return {'cond': '?{:02X}', 'condtable': '?표{}', 'group': '그룹{}', 'indent': '+{}', 'flag': 'B{:X}',
             'side': '곁창{:02X}', 'call': 'C1({:02X})', 'raw': '{{{:02X}}}', 'mode': 'E{:02X}'}[kind].format(t[1])
 
@@ -704,14 +907,20 @@ def export_layouts(rom):
                 op.update(kind=t[1], routine=LIST_KINDS.get(t[1]))
             elif t[0] in ('side', 'call'):
                 op.update(arg=f'{t[1]:02X}')
+            elif t[0] == 'cond':
+                op.update(arg=t[1], table=t[2])
             elif t[0] != 'newline':
                 op.update(arg=t[1])
+            if token_meaning(t):
+                op['meaning'] = token_meaning(t)
             body.append(op)
         out.append({
             'window': f'{n:02X}', 'record': _where(0x16, lay['record']), 'head': _hex(lay['head']),
             'alias': ' '.join(f'{m:02X}:{c}' for m, c in lay['alias']),
             'x': lay['x'], 'y': lay['y'], 'w': lay['w'], 'inset': lay['inset'],
-            'place_routine': lay['width_routine'], 'cols': lay['cols'], 'cursor': lay['cursor'],
+            'place_routine': lay['width_routine'],
+            'place': PLACE_MEANING.get(lay['width_routine'], '') if lay['w'] is None else '',
+            'cols': lay['cols'], 'cursor': lay['cursor'],
             'callers': ' '.join(_where(b, a) for b, a in callers.get(n, [])),
             'tokens': ' '.join(token_str(t) for t in lay['tokens']), 'body': body,
         })
@@ -801,7 +1010,8 @@ def write_export(out_dir, msgs, windows, names, layouts):
         'auto_period': 'true 면 화면에서 끝 {END} 앞에 。 가 붙음(16:$805A)',
         'layout': 'x·y·w 는 화면 칸(8화소). inset 이면 틀을 x+1 에 w−2 로 그림. place_routine 이면 자리·폭을 표 16:$A72C '
                   '의 루틴이 정함. tokens: 글 = 창 문자열 항목, [Dn] 목록 시작(n ≥ 6 은 루틴이 항목을 만듦), +n 들여쓰기, '
-                  '?nn 항목 루틴, 곁창nn 커서를 따라 함께 여는 창, C1(nn) 루틴, / 줄바꿈, Bn·En·?표n·그룹n 은 docs 참고',
+                  '?nn 항목 루틴(?1:nn 은 표 1), 곁창nn 커서를 따라 함께 여는 창, C1(nn) 루틴, / 줄바꿈, Bn·En·?표n·그룹n 은 '
+                  'docs 참고. place 는 자리 루틴의 규칙, body 의 meaning 은 갈래마다 뜻(dq4text.py windows --items 와 같은 표)',
     }
     files = {'dq4-messages': msgs, 'dq4-windows': windows, 'dq4-names': names, 'dq4-window-layouts': layouts}
     for name, rows in files.items():
@@ -828,11 +1038,26 @@ def main():
             total = [total[0] + s, total[1] + b]
         print(f'같음 {total[0]}, 다름 {total[1]}')
         sys.exit(0 if total[1] == 0 else 1)
+    if sys.argv[2] == 'windows' and '--items' in sys.argv:
+        print('\n'.join(meaning_lines(rom)))
+        return
+    if sys.argv[2] == 'windows' and '--trace' in sys.argv:
+        for path in sys.argv[sys.argv.index('--trace') + 1:]:
+            for row in trace_lines(path):
+                print(row)
+        return
     if sys.argv[2] == 'windows' and '--layout' in sys.argv:
         callers = window_callers(rom)
         for n in range(WINDOW_COUNT):
             at = ' '.join(_where(b, a) for b, a in callers.get(n, []))
-            print(layout_line(window_layout(rom, n)) + (f'  ← {at}' if at else ''))
+            lay = window_layout(rom, n)
+            print(layout_line(lay) + (f'  ← {at}' if at else ''))
+            if '--meaning' in sys.argv:
+                if lay['w'] is None:
+                    print(f'     자리: {PLACE_MEANING.get(lay["width_routine"], "")}')
+                for t in lay['tokens']:
+                    if token_meaning(t):
+                        print(f'     {token_str(t)}: {token_meaning(t)}')
         return
     if sys.argv[2] == 'windows':
         for g, count in enumerate(WINDOW_COUNTS):
