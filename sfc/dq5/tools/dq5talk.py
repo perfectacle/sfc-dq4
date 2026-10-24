@@ -12,6 +12,7 @@
   python sfc/dq5/tools/dq5talk.py rom/dq5.sfc 17 00       # 맵 17/00 인물(낮)의 대화
   python sfc/dq5/tools/dq5talk.py rom/dq5.sfc --check     # 스크립트 경계 검사
   python sfc/dq5/tools/dq5talk.py rom/dq5.sfc --calls     # 스크립트의 네이티브 호출 대상과 횟수
+  python sfc/dq5/tools/dq5talk.py rom/dq5.sfc --field 3E 90 DB 45   # BRK 80~93 이 읽는 필드의 묶음·오프셋·후처리
 """
 import argparse
 import os
@@ -70,22 +71,34 @@ COND_SIZE = {0x02: 1, 0x05: 1, 0x14: 1, 0x1E: 1, 0x1F: 1, 0x20: 1,
 OP_SIZE = {0x00: 3, 0x01: 5, 0x12: 2, 0x17: 3, 0x18: 3, 0x19: 3}
 OP_NAME = {0x00: 'call', 0x01: 'call', 0x12: 'special', 0x17: 'flag-off', 0x18: 'flag-on', 0x19: 'flag-set'}
 # 06:B15B 가 고르는 조건 처리기의 뜻. 처리기가 A = 0 을 돌려주면 참이다(조건 바이트 bit7 이 켜져 있으면 뒤집음).
-# 「실측」 은 선실 파파스의 스크립트를 07 <조건> 61 6B 0B 61 29 3F 로 덮어 어느 메시지가 나오는지 본 것.
+# 「실측」 은 선실 파파스의 스크립트를 07 <조건> 61 6B 0B 61 29 3F 로 덮어 어느 메시지가 나오는지 본 것이고,
+# 03·11·13·20 은 일행 레코드 둘째(7E:206A)와 일행 순서(7E:2020~, 수 7E:201D·201E)를 SET 으로 만들어 갈랐다.
 COND_NAME = {
     0x02: '7E:0F1D != 0',
-    0x03: 'BRK 8B 의 $49 == 0(인자 04 는 7E:2190 & 40 이면 03 으로 바꿈)',
+    0x03: '인물 번호 인자가 마차 밖 일행에 살아 있음(BRK 8B 48 DB). 인자 04 는 7E:2190 & 40 이면 03 으로 바꿈',
     0x05: 'はい/いいえ 창에서 はい',
-    0x11: 'BRK 88 90 의 $46 bit7 이 꺼짐',
-    0x13: 'BRK 88 3E 의 $46 bit7 이 꺼짐($42 = 인자)',
-    0x14: '21:8000 이 C=0',
+    0x11: '일행 누군가가 물건 인자를 가짐(BRK 88 90)',
+    0x13: '일행 레코드 인자 번째의 +1 bit7(살아 있음)이 켜짐(BRK 88 3E)',
+    0x14: '낮: 시간대 7E:075E < F0(21:8000)',
     0x16: '7E:2190+idx & mask(1B 와 같은 처리기)',
     0x1A: '7E:2190+idx != 값',
     0x1B: '7E:2190+idx & mask',
     0x1C: '7E:2190+idx | mask != 0',
     0x1E: '신부가 ビアンカ(7E:21B3 & 08)',
     0x1F: '신부가 ビアンカ(7E:21B3 & 08)',
-    0x20: 'BRK 89 4C 45 의 $49 == 0',
+    0x20: '마차 밖 일행에 살아 있는 인물 번호 02 가 없음(BRK 89 4C 45)',
 }
+# 일행 레코드 +0 의 인물 번호와 이름(1008 로 띄워 본 것). 01·02 의 이름은 7E:2009·7E:2011, 80~ 은 동료 몬스터.
+PARTY_IDS = {0x00: '주인공', 0x01: '아들', 0x02: '딸', 0x03: 'ビアンカ', 0x04: 'ビアンカ', 0x05: 'サンチョ',
+             0x06: 'ピピン', 0x07: 'フローラ', 0x08: 'パパス', 0x09: 'ヘンリー', 0x0A: 'ベラ',
+             0x0B: 'パパスのむすこ', 0x0C: 'やどやのむすめ', 0x80: 'ボロンゴ(1013)', 0x81: 'ボロンゴ',
+             0x82: 'スラリン', 0x83: 'ドラきち'}
+# 21:8AF8 필드 읽기. BRK 80~93 이 부른다(00:9197). 필드 f → 21:8D96[f] = 설명자 d → 21:8C86 + d*2.
+FIELD_DESC = 0x218D96
+FIELD_KIND = 0x218C86
+FIELD_GROUPS = 0x218D6A
+FIELD_SIZES = 0x218D8B
+FIELD_POST = 0x218E8C
 
 
 def parse_branch(rom, a, depth, ops):
@@ -197,6 +210,15 @@ def native_calls(rom):
     return out
 
 
+def field_info(rom, f):
+    """21:8B31·8B82. 필드 f 의 (묶음, 묶음 기준 주소, 레코드 크기, 레코드 안 오프셋, 길이, 간접, 후처리 주소)."""
+    d = rom.u8(FIELD_DESC + f)
+    b0, b1 = rom.u8(FIELD_KIND + d * 2), rom.u8(FIELD_KIND + d * 2 + 1)
+    k = (b0 >> 3) & 0xF
+    return (k, rom.u24(FIELD_GROUPS + k * 3), rom.u8(FIELD_SIZES + k), b1, b0 & 7, b0 >> 7,
+            0x210000 | rom.u16(FIELD_POST + f * 2))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('rom')
@@ -204,8 +226,15 @@ def main():
     ap.add_argument('--check', action='store_true')
     ap.add_argument('--night', action='store_true')
     ap.add_argument('--calls', action='store_true')
+    ap.add_argument('--field', action='store_true', help='인자를 필드 번호로 보고 21:8AF8 설명자를 찍음')
     a = ap.parse_args()
     rom = Rom(open(a.rom, 'rb').read())
+    if a.field:
+        for f in a.args:
+            k, base, size, off, n, ind, post = field_info(rom, f)
+            print(f'field {f:02X}: 묶음 {k} ({base:06X}, {size}바이트) +{off} 길이 {n}{" 간접" if ind else ""} '
+                  f'후처리 {post >> 16:02X}:{post & 0xFFFF:04X}')
+        return 0
     if a.check:
         return 1 if check(rom) else 0
     if a.calls:
