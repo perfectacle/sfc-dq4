@@ -11,7 +11,7 @@
   python sfc/dq5/tools/dq5talk.py rom/dq5.sfc 012         # 대화 번호 012 의 스크립트와 메시지
   python sfc/dq5/tools/dq5talk.py rom/dq5.sfc 17 00       # 맵 17/00 인물(낮)의 대화
   python sfc/dq5/tools/dq5talk.py rom/dq5.sfc --check     # 스크립트 경계 검사
-  python sfc/dq5/tools/dq5talk.py rom/dq5.sfc --calls     # 스크립트의 네이티브 호출 대상과 횟수
+  python sfc/dq5/tools/dq5talk.py rom/dq5.sfc --calls     # 스크립트의 네이티브 호출 대상과 횟수, 갈래, 하는 일 요약
   python sfc/dq5/tools/dq5talk.py rom/dq5.sfc --field 3E 90 DB 45   # BRK 80~93 이 읽는 필드의 묶음·오프셋·후처리
 """
 import argparse
@@ -20,6 +20,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 import dq5npc  # noqa: E402
+from kr_patch.sfc.dis65816 import decode  # noqa: E402
 from dq5map import Rom  # noqa: E402
 from dq5text import message, text  # noqa: E402
 
@@ -75,7 +76,7 @@ OP_NAME = {0x00: 'call', 0x01: 'call', 0x12: 'special', 0x17: 'flag-off', 0x18: 
 # 03·11·13·20 은 일행 레코드 둘째(7E:206A)와 일행 순서(7E:2020~, 수 7E:201D·201E)를 SET 으로 만들어 갈랐다.
 COND_NAME = {
     0x02: '7E:0F1D != 0',
-    0x03: '인물 번호 인자가 마차 밖 일행에 살아 있음(BRK 8B 48 DB). 인자 04 는 7E:2190 & 40 이면 03 으로 바꿈',
+    0x03: '인물 번호 인자(PARTY_IDS)가 마차 밖 일행에 살아 있음(BRK 8B 48 DB). 인자 04 는 7E:2190 & 40 이면 03 으로 바꿈',
     0x05: 'はい/いいえ 창에서 はい',
     0x11: '일행 누군가가 물건 인자를 가짐(BRK 88 90)',
     0x13: '일행 레코드 인자 번째의 +1 bit7(살아 있음)이 켜짐(BRK 88 3E)',
@@ -91,7 +92,9 @@ COND_NAME = {
 # 일행 레코드 +0 의 인물 번호와 이름(1008 로 띄워 본 것). 01·02 의 이름은 7E:2009·7E:2011, 80~ 은 동료 몬스터.
 PARTY_IDS = {0x00: '주인공', 0x01: '아들', 0x02: '딸', 0x03: 'ビアンカ', 0x04: 'ビアンカ', 0x05: 'サンチョ',
              0x06: 'ピピン', 0x07: 'フローラ', 0x08: 'パパス', 0x09: 'ヘンリー', 0x0A: 'ベラ',
-             0x0B: 'パパスのむすこ', 0x0C: 'やどやのむすめ', 0x80: 'ボロンゴ(1013)', 0x81: 'ボロンゴ',
+             0x0B: 'パパスのむすこ', 0x0C: 'やどやのむすめ', 0x0D: 'ラインハットおうじ', 0x0E: '주인공のつま',
+             0x10: '주인공のむすこ', 0x46: 'ピピン', 0x47: 'フローラ(결혼 뒤)', 0x48: 'パパス',
+             0x80: 'ボロンゴ(1013)', 0x81: 'ボロンゴ',
              0x82: 'スラリン', 0x83: 'ドラきち'}
 # 21:8AF8 필드 읽기. BRK 80~93 이 부른다(00:9197). 필드 f → 21:8D96[f] = 설명자 d → 21:8C86 + d*2.
 FIELD_DESC = 0x218D96
@@ -219,6 +222,85 @@ def field_info(rom, f):
             0x210000 | rom.u16(FIELD_POST + f * 2))
 
 
+# BRK 서비스(00:8F80)가 명령 뒤에서 읽는 바이트 수. 01~1A 는 처리기(00:921B 표)가 00:8FAC 를 부르는 횟수,
+# 80~93 은 번호 bit0($3F) + 00:920A 표의 bit7($38)·bit4($43)·bit1($44), 94 이상은 1.
+BRK_LOW_ARGS = {0x04: 3, 0x05: 3, 0x06: 1, 0x07: 1, 0x0B: 2, 0x0C: 2, 0x0D: 2, **{n: 2 for n in range(0x0F, 0x1A)}}
+BRK_QUERY_BITS = 0x00920A
+
+
+def brk_args(rom, n):
+    if n < 0x80:
+        return BRK_LOW_ARGS.get(n, 0)
+    if n < 0x94:
+        t = rom.u8(BRK_QUERY_BITS + ((n >> 1) & 0x3F))
+        return (n & 1) + (t >> 7 & 1) + (t >> 4 & 1) + (t >> 1 & 1)
+    return 1
+
+
+# 이 루틴들을 부르면 맵을 다시 그리는 장면 처리로 본다(BRK 0E 프레임 기다림과 함께 쓰임).
+SCENE_CALLS = {0x00C6D8, 0x00C71F, 0x00954A, 0x00954E, 0x0185EC, 0x0186C3, 0x00CE51}
+SHOP_ENTRY = 0x04D977
+
+
+def native_summary(rom, a, limit=80):
+    """네이티브 호출 대상 a 를 첫 RTS·RTL·JMP 까지 곧게 읽어 (갈래, 사건 목록). 분기는 따라가지 않는다(코드 읽기)."""
+    data = rom.d
+    m8 = x8 = True
+    ev, kinds = [], set()
+    for _ in range(limit):
+        op = rom.u8(a)
+        if op == 0x00:
+            n = rom.u8(a + 1)
+            args = bytes(rom.u8(a + 2 + i) for i in range(brk_args(rom, n)))
+            if 0x97 <= n <= 0xA3:
+                ev.append(f'msg {n - 0x97:X}{args[0]:02X}')
+                kinds.add('msg')
+            elif n == 0x95:
+                ev.append(f'win {args[0]:02X}')
+                kinds.add('msg')
+            elif n == 0x0B:
+                ev.append(f'flag? {args[1]:02X}&{args[0]:02X}')
+            elif n == 0x0C:
+                ev.append(f'flag {args[1]:02X}|{args[0]:02X}')
+                kinds.add('flag')
+            elif n == 0x0D:
+                ev.append(f'flag {args[1]:02X}&{args[0]:02X}')
+                kinds.add('flag')
+            elif n == 0x0E:
+                kinds.add('wait')
+            elif 0x80 <= n < 0x94:
+                ev.append(f'query {n:02X} {args.hex()}')
+            a = (a & 0xFF0000) | ((a + 2 + len(args)) & 0xFFFF)
+            continue
+        text, size, m8, x8 = decode(data, a, m8, x8)
+        arg = text.split()[-1]
+        if op == 0x22:
+            t = int(arg[1:], 16)
+            ev.append(f'JSL {t >> 16:02X}:{t & 0xFFFF:04X}')
+            kinds.add('shop' if t == SHOP_ENTRY else 'scene' if t in SCENE_CALLS else 'call')
+        elif op == 0x20:
+            ev.append(f'JSR {arg[1:]}')
+        elif op in (0x8D, 0x8F, 0x9C, 0x9D, 0x9F, 0xEE):
+            ev.append(f'{text.split()[-2]} {arg}')
+            kinds.add('store')
+        if op in (0x60, 0x6B, 0x4C, 0x5C, 0x82):
+            break
+        a = (a & 0xFF0000) | ((a + size) & 0xFFFF)
+    if 'shop' in kinds and len(ev) <= 3:
+        kind = '가게'
+    elif 'scene' in kinds:
+        kind = '장면'
+    elif 'msg' in kinds:
+        kind = '메시지'
+    elif kinds & {'flag', 'store'} and not kinds & {'call'}:
+        kind = '값 쓰기'
+    elif not ev:
+        kind = '빈 루틴'
+    else:
+        kind = '호출'
+    return kind, ev
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('rom')
@@ -240,7 +322,8 @@ def main():
     if a.calls:
         calls = native_calls(rom)
         for addr in sorted(calls):
-            print(f'{addr >> 16:02X}:{addr & 0xFFFF:04X} {calls[addr]}')
+            kind, ev = native_summary(rom, addr)
+            print(f'{addr >> 16:02X}:{addr & 0xFFFF:04X} {calls[addr]} {kind} ' + ', '.join(ev))
         print(f'targets {len(calls)}, calls {sum(calls.values())}')
         return 0
     if len(a.args) == 1:
