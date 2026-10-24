@@ -16,5 +16,5 @@ DQ4 디스어셈블리는 북미판 기준이다. 일본판은 텍스트·폰트
 ## 도구
 
 - 어셈블러: asar(https://github.com/RPGHacker/asar) 소스 빌드
-- 에뮬레이터: Mesen2(디버거·트레이스 로그)
+- 에뮬레이터: MesenCE(https://github.com/nesdev-org/MesenCE, Mesen 2 후속판). 디버거·트레이스 로그, `--testrunner` 로 Lua 프로브 실행(`tools/README.md`)
 - 공통 도구: kr-patch-toolkit(65c816 디스어셈블러, 타일 렌더링, 헤드리스 테스트)
