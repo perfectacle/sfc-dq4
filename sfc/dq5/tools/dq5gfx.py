@@ -405,6 +405,7 @@ class Out:
 
     def __init__(self, root, rom_sha=''):
         self.root, self.items, self.rom_sha = root, [], rom_sha
+        self.index = {}  # 분류 폴더 → index.json 내용(기본은 항목 목록)
 
     def save(self, img, rel, cat, title, group='', **meta):
         path = os.path.join(self.root, rel)
@@ -427,7 +428,7 @@ class Out:
         for top, items in dirs.items():
             folder = os.path.join(self.root, top)
             with open(os.path.join(folder, 'index.json'), 'w') as f:
-                json.dump(items, f, ensure_ascii=False, indent=0)
+                json.dump(self.index.get(top, items), f, ensure_ascii=False, indent=0)
             with open(os.path.join(folder, 'SOURCE.txt'), 'w') as f:
                 f.write(source_text(command, self.rom_sha))
 
@@ -663,16 +664,35 @@ def export_anim(rom, out):
     print('anim')
 
 
+MATRIX_CHARS = '.123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+# 몬스터 EA·EB 는 ミルドラース 최종 모습의 윗몸·아랫몸이라 둘을 같은 원점에 겹쳐 그린다(dq5-graphics-format.md).
+MONSTER_NOTES = {0xEA: '윗몸. 게임은 EB(아랫몸)를 같은 원점에 겹쳐 그림', 0xEB: '아랫몸. EA 와 겹쳐 그림'}
+
+
 def export_monsters(rom, out):
-    from dq5mongfx import COUNT, monster
+    from dq5mongfx import COUNT, RECORDS, decode, index_image, monster
     from dq5mongfx import render as render_monster
     from dq5monster import NAMES
     from dq5text import string, string_codes, text
+    records = []
     for m in range(COUNT):
         g, colors = monster(rom, m)
         name = text(string_codes(rom, string(rom, NAMES, m)))
-        out.save(render_monster(rom, m, None), f'monsters/{m:02X}-{name}.png', 'monsters', f'{m:02X} {name}',
-                 '몬스터', monster=f'{m:02X}', name=name, pic=f'{g:02X}', colors=len(colors))
+        d = decode(rom, g)
+        grid = index_image(d)
+        img = render_monster(rom, m, None)
+        file = f'{m:02X}-{name}.png'
+        out.save(img, f'monsters/{file}', 'monsters', f'{m:02X} {name}', '몬스터', monster=f'{m:02X}', name=name,
+                 pic=f'{g:02X}')
+        records.append({'file': file, 'id': m, 'name': name, 'picture': g,
+                        'record': f'27:{rom.u16(RECORDS + m * 2):04X}', 'head': f'{d["head"] >> 16:02X}:{d["head"] & 0xFFFF:04X}',
+                        'cells': [d['w'], d['h']], 'pieces': len(d['pieces']), 'size': [img.width, img.height],
+                        'colors': [f'{c:04X}' for c in colors], 'usable': True, 'note': MONSTER_NOTES.get(m, ''),
+                        'matrix': [''.join(MATRIX_CHARS[v] for v in row) for row in grid]})
+    out.index['monsters'] = {
+        'note': '그림은 1배, 투명 배경. 왼쪽 1픽셀은 반전 조각이 한 픽셀 왼쪽으로 나갈 자리. colors 는 OBJ 팔레트 1번 색부터의 '
+                '15비트 BGR, matrix 문자는 색 번호(. 투명, 1~9·A~). record 는 27 뱅크 몬스터 레코드, head 는 그림 머리',
+        'monsters': records}
     print('monsters')
 
 
