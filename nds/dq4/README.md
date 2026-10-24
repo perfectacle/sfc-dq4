@@ -38,3 +38,4 @@ uv run --locked krpatch nds unpack rom/dq4ds-kr.nds work/nds/kr
 
 - [2026-10-25-01: 대사 파일과 한글 팬패치 글꼴 읽기](journal/2026-10-25-01-text.md)
 - [2026-10-25-02: NDS 그래픽 형식 풀기와 참고용 추출](journal/2026-10-25-02-graphics.md)
+- [2026-10-25-03: 동료 대화 표](journal/2026-10-25-03-talk.md)
