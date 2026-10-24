@@ -248,6 +248,30 @@ def fig_exit_hook(rom):
     save(out, 'dq5-exit-hook-0105.webp')
 
 
+def fig_text(rom):
+    """배 선실에서 빈 쪽에 말을 건 화면(work/text1/end.png)과, 롬의 메시지 129 를 dq5text.py 로 풀어 폰트로 그린 것.
+    덤프는 docs/journal/dq5/2026-10-25-01-text.md 의 1절 명령으로 만든다."""
+    from dq5text import font_groups, glyph, message
+    groups = font_groups(rom)
+    codes = [c for c in message(rom, 0x129) if c < 0x1000]
+    img = Image.new('RGB', (12 * len(codes) + 8, 30), (0, 0, 0))
+    for k, c in enumerate(codes):
+        w, h, rows = glyph(rom, c, groups)
+        for y in range(h):
+            for x in range(w):
+                if rows[y][x]:
+                    # 24:A6DA: 글자 높이가 h 면 13 - h 줄 내려서 그린다(아래를 맞춤).
+                    img.putpixel((4 + 12 * k + x, 4 + 13 - h + y), (255, 255, 255))
+    img = img.resize((img.width * 2, img.height * 2), Image.NEAREST)
+    label(img, 'dq5text.py 129', (0, img.height - 14))
+    shot = Image.open('work/text1/end.png').convert('RGB')
+    label(shot, 'MesenCE')
+    out = Image.new('RGB', (max(shot.width, img.width), shot.height + 8 + img.height), (24, 24, 24))
+    out.paste(shot, (0, 0))
+    out.paste(img, (0, shot.height + 8))
+    save(out, 'dq5-text-0129.webp')
+
+
 def fig_edge_exit(rom):
     """03/00 아래 가장자리로 걸어 나간 실험: 걸은 길(초록)과 나간 뒤 화면(work/edge1/end.png, 필드 전투)."""
     img, w, h, _, _ = decoded(rom, 3, 0)
@@ -326,6 +350,7 @@ def main():
     fig_day_night(rom)
     fig_exits(rom)
     fig_exit_hook(rom)
+    fig_text(rom)
     fig_edge_exit(rom)
     fig_field(rom)
     fig_transition()
