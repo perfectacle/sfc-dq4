@@ -355,7 +355,7 @@ def fig_field(rom):
 
 def fig_mongfx(rom):
     """전투 화면에서 잘라 낸 몬스터와 dq5mongfx.py 로 롬에서 그린 그림. 오른쪽 상자는 조각(빨강 16x16, 노랑 8x8, 파랑 반전 복사).
-    화면은 이벤트 전투의 몬스터 번호를 바꿔 tools/lua/battledump.lua 로 1000프레임에 찍은 work/all/t<번호>/s01000.png
+    화면은 이벤트 전투의 몬스터 번호를 바꿔 tools/lua/dq5battledump.lua 로 1000프레임에 찍은 work/all/t<번호>/s01000.png
     (docs/journal/dq5/ 의 「전투 몬스터 그림」 일지 3절 명령, m = 00·60·A0·E8)."""
     from dq5mongfx import decode, match_screen, monster
     from dq5mongfx import render as render_monster
@@ -385,6 +385,51 @@ def fig_mongfx(rom):
         out.paste(r, (0, y))
         y += r.height + 8
     save(out, 'dq5-mongfx-compare.webp')
+
+
+def fig_mongfx_layout(rom):
+    """무리 조합 두 가지의 전투 화면에 dq5mongfx.layout() 이 예상한 그림 상자를 겹친다(색은 줄 0·1·2).
+    화면은 tools/lua/dq5battledump.lua 로 1000프레임에 찍은 work/p/<이름>/s01000.png
+    (docs/journal/dq5/ 의 「전투 몬스터 배치와 그림자」 일지 2절 명령, 이름 e8·e18)."""
+    from dq5mongfx import header, layout, monster
+    cases = [('e8', [(0x00, 1, 0), (0x0F, 1, 0), (0x77, 1, 0), (0xB4, 1, 0)]),
+             ('e18', [(0xB4, 2, 1), (0x25, 1, 0), (0x8A, 2, 0)])]
+    colors = {0xA0: (255, 64, 64), 0x88: (64, 160, 255), 0x58: (255, 220, 0)}
+    out = Image.new('RGB', (256 * 2 * 2 + 8, 224 * 2), (24, 24, 24))
+    for i, (name, groups) in enumerate(cases):
+        shot = Image.open(f'work/p/{name}/s01000.png').convert('RGB').resize((512, 448), Image.NEAREST)
+        d = ImageDraw.Draw(shot)
+        for m, x, y in layout(rom, groups):
+            hd = header(rom, monster(rom, m)[0])
+            row = 0x58 if hd['float'] else 0x88 if dict((g[0], g[2]) for g in groups)[m] == 1 else 0xA0
+            top = y - 7
+            d.rectangle((x * 2, top * 2, (x + hd['w'] * 8) * 2 - 1, (top + hd['h'] * 8) * 2 - 1), outline=colors[row], width=2)
+        label(shot, name)
+        out.paste(shot, (i * (512 + 8), 0))
+    save(out, 'dq5-mongfx-layout.webp')
+
+
+def fig_battlebg(rom):
+    """전투 배경: 이벤트 전투 화면(왼쪽 위)과 dq5battlebg.py 로 롬에서 그린 06번(오른쪽 위), 그 아래 0~30 번 49개.
+    화면과 레코드 밖 팔레트 색은 tools/lua/dq5battledump.lua 로 이벤트 전투를 찍은 work/bg/ev/s01000.png·c00890.cgram
+    (docs/journal/dq5/ 의 「전투 배경」 일지 4절 명령)."""
+    from dq5battlebg import COUNT
+    from dq5battlebg import render as render_bg
+    base = open('work/bg/ev/c00890.cgram', 'rb').read()
+    shot = Image.open('work/bg/ev/s01000.png').convert('RGB')
+    cols = 7
+    rows = (COUNT + cols - 1) // cols
+    out = Image.new('RGB', (cols * 136, 240 + rows * 72), (24, 24, 24))
+    out.paste(shot, (0, 16))
+    label(out, 'MesenCE')
+    out.paste(render_bg(rom, 6, base=base), (272, 16 + 48))
+    label(out, 'dq5battlebg.py 06', (272, 0))
+    for n in range(COUNT):
+        img = render_bg(rom, n, base=base).resize((128, 64), Image.NEAREST)
+        x, y = n % cols * 136, 240 + n // cols * 72
+        out.paste(img, (x, y + 8))
+        label(out, f'{n:02X}', (x, y))
+    save(out, 'dq5-battlebg.webp')
 
 
 def fig_transition():
@@ -471,6 +516,8 @@ def main():
     fig_textctl()
     fig_mongfx(rom)
     fig_worlds(rom)
+    fig_mongfx_layout(rom)
+    fig_battlebg(rom)
     os.remove(TMP)
 
 

@@ -218,6 +218,80 @@ def match_oam(rom, m, oam, vram):
     return sum(grid[oy + y][ox + x] == v for x, y, v in opaque), len(opaque), ox, oy
 
 
+def header(rom, g):
+    """머리 +0~+5. 그림자 모양(22:B4FE 표 번호)·띄움·높임과 그림자·타격 효과 기준점."""
+    b = [rom.u8(head(rom, g) + i) for i in range(6)]
+    sb = lambda v: v - 256 if v & 0x80 else v  # noqa: E731
+    return {'float': bool(b[0] & 0x80), 'raise': b[0] >> 5 & 3, 'shadow': b[0] & 0x1F,
+            'shadow_dx': sb(b[1]), 'shadow_dy': sb(b[2]), 'hit_x': b[3], 'hit_y': b[4],
+            'w': 0x13 if b[5] >> 4 == 0xF else (b[5] >> 4) + 1, 'h': (b[5] & 15) + 1}
+
+
+def band_counts(d):
+    """그림의 8픽셀 줄마다 OBJ 타일 수(22:9822 가 7E:5B60 에 적는 값). 16x16 조각은 두 줄에 2씩 센다."""
+    counts = [0] * d['h']
+    for _, y, big, _, _ in d['pieces']:
+        for r in range(y // 8, y // 8 + (2 if big else 1)):
+            if r < d['h']:
+                counts[r] += 2 if big else 1
+    return counts
+
+
+def layout(rom, groups):
+    """무리 [(몬스터, 마릿수, 7E:1009 값)] → 그림 상자 [(몬스터, x, y)]. x·y 는 OAM 좌표(왼쪽 위).
+
+    줄은 셋이다(22:B00F): 머리 +0 bit7(띄움) 또는 무리 값 bit7 → 2, 무리 값 1 → 1, 그 밖 → 0.
+    y(22:A084·A09C): 줄 0 은 $A0 - 8h - 8·높임, 줄 1 은 $88 - 8h - 8·높임, 줄 2 는 $58 - min(4h, 24) - 8·높임.
+    마릿수 제한: 줄마다 가로 칸 수 합이 28 미만(22:9284), 조각 수 합이 100 미만(22:91DC),
+    화면 8픽셀 줄마다 모든 몬스터의 OBJ 타일 수 합이 28 미만(22:A119, 줄당 OBJ 한도를 넘지 않게). 넘치는 몬스터부터 그 무리는 그만 놓는다.
+    한 줄에서 무리는 차례로 왼쪽부터, 무리 안 몬스터는 가로 칸 수 × 8 간격, 무리 사이는 8픽셀,
+    줄 전체 폭 T 에 대해 첫 무리의 x = (256 - T) / 2 (22:AF22).
+    ミルドラース처럼 22:89E5 가 무리를 더하는 몬스터는 셈하지 않는다.
+    """
+    used = {0: 0, 1: 0, 2: 0}
+    pieces = 0
+    placed = []
+    for m, n, flag in groups:
+        g = monster(rom, m)[0]
+        hd, d = header(rom, g), decode(rom, g)
+        row = 2 if hd['float'] or flag & 0x80 else 1 if flag == 1 else 0
+        k = 0
+        while k < n and used[row] + hd['w'] < 0x1C and pieces + len(d['pieces']) < 100:
+            used[row] += hd['w']
+            pieces += len(d['pieces'])
+            k += 1
+        if row == 2:
+            y = 0x58 - min(hd['h'] * 4, 0x18) - hd['raise'] * 8
+        else:
+            y = (0x88 if row == 1 else 0xA0) - hd['h'] * 8 - hd['raise'] * 8
+        placed.append((m, k, hd, row, y, band_counts(d)))
+    bands = [0] * 32
+    rows = {0: [], 1: [], 2: []}
+    for m, k, hd, row, y, cnt in placed:
+        j = 0
+        while j < k:
+            b = (y >> 3) - 7
+            if any(bands[b + r] + c >= 0x1C for r, c in enumerate(cnt)):
+                break
+            for r, c in enumerate(cnt):
+                bands[b + r] += c
+            j += 1
+        if j:
+            rows[row].append((m, j, hd, y))
+    out = []
+    for row, gs in rows.items():
+        if not gs:
+            continue
+        total = sum(k * hd['w'] * 8 for _, k, hd, _ in gs) + 8 * (len(gs) - 1)
+        x = (256 - total) // 2
+        for m, k, hd, y in gs:
+            for _ in range(k):
+                out.append((m, x, y))
+                x += hd['w'] * 8
+            x += 8
+    return out
+
+
 def compare_wram(rom, m, wram):
     """풀어 낸 타일이 7E:4000-7E:5FFF 버퍼(게임이 실제로 푼 결과)에 32바이트째로 있는지."""
     g, _ = monster(rom, m)
@@ -236,8 +310,16 @@ def main():
     ap.add_argument('--compare', help='전투 중 WRAM 덤프(128KB): 풀어 낸 타일이 버퍼에 있는지')
     ap.add_argument('--shot', help='전투 화면 PNG: 그림이 화면과 픽셀째로 맞는지')
     ap.add_argument('--oam', nargs=2, metavar=('OAM', 'VRAM'), help='OAM·VRAM 덤프: 그림이 OBJ 색 번호와 맞는지')
+    ap.add_argument('--layout', help='무리 배치: "몬스터:마릿수[:7E1009 값],…"(16진:10진:16진) → 그림 상자 OAM 좌표')
     args = ap.parse_args()
     rom = Rom(open(args.rom, 'rb').read())
+    if args.layout:
+        groups = [(int(a, 16), int(b), int(c or '0', 16))
+                  for a, b, c in (f'{t}::'.split(':')[:3] for t in args.layout.split(','))]
+        for m, x, y in layout(rom, groups):
+            hd = header(rom, monster(rom, m)[0])
+            print(f'{m:02X} x={x} y={y} {hd["w"]}x{hd["h"]}칸')
+        return 0
     ms = [int(x, 16) for x in args.monsters] or range(COUNT)
     for m in ms:
         g, colors = monster(rom, m)
