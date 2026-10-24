@@ -4,6 +4,8 @@
   python tools/dq4bank.py rom/dq4.nes call C9FC [--bank 1D]   BRK 한 곳 풀기(--bank: 그때 $0507)
   python tools/dq4bank.py rom/dq4.nes table 1D [N]            뱅크의 $8000 함수 표 앞 N 개
   python tools/dq4bank.py rom/dq4.nes compare trace.txt       probe/trace.lua 기록과 비교
+  python tools/dq4bank.py rom/dq4.nes free [최소 길이]         뱅크마다 FF·00 연속 구간(빈 자리 후보)
+  python tools/dq4bank.py rom/dq4.nes cover cover.txt ...      probe/cover.lua 결과의 뱅크별 실행 오프셋 수
 
 근거 루틴(뱅크 0F): BRK 처리기 $C408, 호출 $C38B, 포인터 꺼내기 $C3CE, 표 읽기 $C3BA,
 뱅크 전환 $FF91. compare 용 기록은 TRACE=C446,C455,C3CD LOG=0023,0024,0025,0026,0027,0507.
@@ -32,22 +34,69 @@ def call(prg, site, cur):
     o = prg_offset(mapped(cur, site), site)
     assert prg[o] == 0x00, f'{site:04X} 는 BRK 가 아님'
     b1, b2 = prg[o + 1], prg[o + 2]
-    if b2 & 0x07 == 0x03:
-        return {'site': site, 'b1': b1, 'b2': b2, 'kind': 'special'}
+    c = {'site': site, 'b1': b1, 'b2': b2}
+    if b2 & 0x0F == 0x03:
+        # $C4F8: b1·b2·셋째 바이트를 $76·$77·$78 에 두고 뱅크 10(·12) 함수로 간다.
+        n = b2 >> 4
+        bank, func = (0x10, n) if n < 0x0A else (0x10, n + 0x18) if n < 0x0D else (0x12, n - 0x0C)
+        return c | {'kind': 'x3', 'bank': bank, 'func': func, 'target': entry(prg, bank, func)}
+    if b2 & 0x0F == 0x0B:
+        if b2 < 0xCB:
+            return c | {'kind': 'message', 'msg': (b2 >> 4) << 8 | b1, 'bank': 0x16, 'func': 0x04,
+                        'target': entry(prg, 0x16, 0x04)}
+        if b2 == 0xFB:
+            return c | {'kind': 'sound', 'sound': b1, 'bank': 0x19, 'func': 0x03, 'target': entry(prg, 0x19, 0x03)}
+        kind = {0xCB: 'flag-set', 0xDB: 'flag-clear'}.get(b2, 'flag-test')
+        return c | {'kind': kind, 'flag': 0x627B + b1, 'mask': prg[o + 3]}
     bank = (b2 >> 4) | (b2 & 0x08) << 1
     if b1 & 0x80:
         func, kind = b1 & 0x3F, 'pointer'
     else:
         func, kind = b1, 'call'
-    return {'site': site, 'b1': b1, 'b2': b2, 'kind': kind, 'bank': bank, 'func': func,
-            'target': entry(prg, bank, func)}
+    return c | {'kind': kind, 'bank': bank, 'func': func, 'target': entry(prg, bank, func)}
 
 
 def fmt(c):
     s = f"{c['site']:04X}: 00 {c['b1']:02X} {c['b2']:02X} {c['kind']}"
-    if 'bank' in c:
+    if 'msg' in c:
+        s += f" msg={c['msg']:04X}"
+    if 'sound' in c:
+        s += f" sound={c['sound']:02X}"
+    if 'flag' in c:
+        s += f" ${c['flag']:04X} mask={c['mask']:02X}"
+    elif 'bank' in c:
         s += f" bank={c['bank']:02X} func={c['func']:02X} -> {c['bank']:02X}:{c['target']:04X}"
     return s
+
+
+STUB = 0xBFD8   # 바꿔 끼우는 뱅크마다 $BFD8- 에 리셋 조각·「 DRAGON QUEST IV」·벡터가 있다
+
+
+def free_runs(prg, bank, minlen=16):
+    """뱅크 안 같은 값(FF 또는 00)이 minlen 이상 이어진 구간 (CPU 주소, 길이, 값)."""
+    base = 0xC000 if bank in (0x0F, 0x1F) else 0x8000
+    d = prg[bank * 0x4000:(bank + 1) * 0x4000]
+    out, i = [], 0
+    while i < len(d):
+        j = i
+        while j < len(d) and d[j] == d[i]:
+            j += 1
+        if j - i >= minlen and d[i] in (0x00, 0xFF):
+            out.append((base + i, j - i, d[i]))
+        i = j
+    return out
+
+
+def cover_counts(paths):
+    """cover.txt 들의 실행 오프셋을 합쳐 뱅크별 개수로."""
+    seen = set()
+    for p in paths:
+        for ln in open(p):
+            seen.add(int(ln.split()[0], 16))
+    counts = [0] * 32
+    for o in seen:
+        counts[o >> 14] += 1
+    return counts
 
 
 def compare(prg, path):
@@ -89,6 +138,18 @@ def main():
             print(f'{bank:02X}[{f:02X}] = {entry(prg, bank, f):04X}')
     elif cmd == 'compare':
         sys.exit(0 if compare(prg, sys.argv[3]) else 1)
+    elif cmd == 'free':
+        minlen = int(sys.argv[3]) if len(sys.argv) > 3 else 16
+        total = 0
+        for bank in range(32):
+            rs = free_runs(prg, bank, minlen)
+            n = sum(r[1] for r in rs)
+            total += n
+            print(f'{bank:02X} {n:5d}', ' '.join(f'{a:04X}+{ln}({v:02X})' for a, ln, v in rs))
+        print(f'# {minlen}바이트 이상 연속 구간 합 {total}')
+    elif cmd == 'cover':
+        for bank, n in enumerate(cover_counts(sys.argv[3:])):
+            print(f'{bank:02X} {n}')
 
 
 if __name__ == '__main__':

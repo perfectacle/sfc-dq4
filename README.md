@@ -70,6 +70,7 @@ dq4(FC DQ4 원작):
 - [docs/dq4-save-format.md](docs/dq4-save-format.md): DQ4(FC) 저장 데이터(모험의 서·체크섬·인물 레코드), 이벤트 플래그, 장 시작 표
 - [docs/dq4-graphics-handoff.md](docs/dq4-graphics-handoff.md): 타이틀·일러스트 보존, 스프라이트 거절 사유·참고 사이트·후속 제작 방향
 - [docs/dq4-graphics.md](docs/dq4-graphics.md): 포팅용 스프라이트·샘플 맵·한글 타이틀·일러스트와 SFC 변환 규격
+- [docs/dq4-rom-map.md](docs/dq4-rom-map.md): DQ4(FC) 롬 뱅크 지도(뱅크 32개의 내용, 실행 장면, 빈 자리)
 
 ### 해킹 일지
 
@@ -116,3 +117,4 @@ dq4(FC DQ4 원작):
 - [2026-10-25-10: 상점·여관·보물상자](docs/journal/dq4/2026-10-25-10-shop.md)
 - [2026-10-25-11: 저장 데이터·이벤트 플래그·장 시작](docs/journal/dq4/2026-10-25-11-event.md)
 - [2026-10-25-12: 그래픽 시안 평가와 작업 인계](docs/journal/dq4/2026-10-25-12-graphics.md)
+- [2026-10-25-13: 대사 제어 바이트와 롬 뱅크 지도](docs/journal/dq4/2026-10-25-13-textrest.md)

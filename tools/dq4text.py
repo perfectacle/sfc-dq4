@@ -5,6 +5,7 @@
   python tools/dq4text.py rom/dq4.nes MSG [개수]      메시지 번호(16진)부터 글자로
   python tools/dq4text.py rom/dq4.nes MSG --bytes     글자 바이트(화면 타일 번호)로
   python tools/dq4text.py rom/dq4.nes MSG --compare end.ram ...  seq.lua 의 RAM 덤프(창 줄 버퍼 $06AA)와 비교
+  python tools/dq4text.py rom/dq4.nes controls        제어 바이트 ED~FF 의 처리기 주소·뜻·쓰는 메시지 수
 
 근거 루틴: 0F:$DF99(6비트 부호 읽기), 0F:$DFD5(뱅크 넘김), 16:$8656(메시지 번호 → 시작),
 16:$86BA(부호 → 글자, 가나 전환, 사전 단어).
@@ -54,6 +55,30 @@ def text(bs):
 
 LINE_BUF, LINE_W, LINES = 0x06AA, 22, 3   # 창 줄 버퍼: 줄마다 탁점 행 22바이트 + 글자 행 22바이트(16:$830F)
 CONTROL_MIN = 0xED                          # 이 값 이상은 16:$80AF 표의 제어 처리기로 감
+HANDLERS = (0x16, 0x80AF)                   # 제어 처리기 표, 첨자 = (~바이트) × 2
+
+# 제어 바이트의 뜻. 치환(F5~F8·F2·F3)은 인자 목록 $F9- 에서 하나씩 꺼내 쓰고, 글자는 $0554 에 만든다.
+CONTROLS = {
+    0xED: '몬스터 깜빡임(1E:$8D0D, 몬스터 칸 $0592)',
+    0xEE: '다음 바이트 n 으로 소리: n<40 음악·효과음 n(끝날 때까지 기다림, 0E 제외), n≥40 효과음 n+40',
+    0xEF: '$0554 에 준비된 글자열을 그대로(호출한 쪽이 채움)',
+    0xF0: 'FC 와 같음',
+    0xF1: '이어지는 줄 들여쓰기 0. 메시지 첫 바이트면 자동 「＊「」 를 붙이지 않음',
+    0xF2: '$00 포인터의 길이 붙은 이름(뱅크 0B). 인자 하나를 건너뜀',
+    0xF3: '주문 이름에서 마지막 글자를 뺌',
+    0xF4: '30프레임 쉼',
+    0xF5: '주문 이름(인자 = 주문 ID)',
+    0xF6: '이름: 인자 n < 80 이면 동료 n&0F, 아니면 몬스터 칸 n&07 의 이름 + (n>>3)&0F 가 0~7 일 때 「Ａ」~「Ｈ」',
+    0xF7: '아이템 이름(인자 = 아이템 ID)',
+    0xF8: '숫자($FD-$FF 24비트, 앞 0 뺌)',
+    0xF9: '메시지 끝(줄이 시작 칸이 아니면 줄바꿈)',
+    0xFA: '줄바꿈 뒤 끝',
+    0xFB: '줄바꿈(시작 칸이면 안 함) 뒤 ▼ 버튼 기다림',
+    0xFC: '줄바꿈(시작 칸이면 안 함)',
+    0xFD: '줄바꿈 뒤 ▼ 버튼 기다림',
+    0xFE: '줄바꿈(언제나)',
+    0xFF: '끝(줄바꿈·。 없이)',
+}
 
 
 def buffer_lines(ram):
@@ -215,8 +240,23 @@ def compare(rom, msg, ram_path):
     return bool(lines)
 
 
+def control_table(rom):
+    """제어 바이트마다 (처리기 주소, 그 바이트를 쓰는 메시지 수, 뜻)."""
+    used = {}
+    for m in valid_messages(rom):
+        for b in set(message_bytes(rom, m)):
+            if b >= CONTROL_MIN:
+                used[b] = used.get(b, 0) + 1
+    return [(b, rom.word(HANDLERS[0], HANDLERS[1] + 2 * (~b & 0xFF)), used.get(b, 0), CONTROLS[b])
+            for b in range(CONTROL_MIN, 0x100)]
+
+
 def main():
     rom = Rom(open(sys.argv[1], 'rb').read())
+    if sys.argv[2] == 'controls':
+        for b, h, n, desc in control_table(rom):
+            print(f'{b:02X} 16:${h:04X} 메시지 {n:4d}  {desc}')
+        return
     if sys.argv[2] == 'all':
         ms = valid_messages(rom)
         for m in ms:
