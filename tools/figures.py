@@ -233,11 +233,12 @@ def fig_edge_exit(rom):
 
 
 def fig_field(rom):
-    """세계 지도 전체(256x256 블록, 1/4 축소)와 필드 화면 비교. 타일 그래픽·팔레트는 필드에 선 순간의 덤프(work/fieldref/)."""
-    from dq5field import BLOCK_LOWER, BLOCK_UPPER, FIELD_E000, WORLD, block_number, render, rle
+    """세계 지도 전체(256x256 블록, 1/4 축소)와 필드 화면 비교. 타일 그래픽은 롬, 팔레트는 필드에 선 순간의 CGRAM 덤프(work/fieldref/)."""
+    from dq5field import FIELD_E000, WORLD, block_number, field_chr, render, rle
     world, _ = rle(rom, WORLD)
     hib, _ = rle(rom, FIELD_E000)
-    vram = open('work/fieldref/field.vram', 'rb').read()
+    # 타일 그래픽은 롬(12:B1A8)에서. VRAM 과 같은 자리(0x4000-)에 둔다.
+    vram = bytes(0x4000) + field_chr(rom)
     cg = open('work/fieldref/field.cgram', 'rb').read()
     cache = {}
     full = Image.new('RGB', (256 * 4, 256 * 4))

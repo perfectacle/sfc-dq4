@@ -7,7 +7,7 @@
 RLE: 제어 바이트 c. bit7=0 이면 다음 c+1 바이트를 그대로, bit7=1 이면 n=c&7F 가 0 이면 끝, 아니면 다음 한 바이트를 n+1 번.
 
 사용:
-  python tools/dq5field.py rom/dq5.sfc [--compare wram.bin] [--png out.png]
+  python tools/dq5field.py rom/dq5.sfc [--compare wram.bin] [--vram vram.bin] [--png out.png]
 """
 import argparse
 import os
@@ -18,6 +18,9 @@ from dq5map import Rom  # noqa: E402
 
 WORLD = 0x179A59
 FIELD_E000 = 0x2A8D3E
+# 필드 BG 타일 512개(4bpp). RLE 를 7E:C000-FFFF 에 풀면 비트플레인 0·1·2·3 이 4KB 씩(C000/D000/E000/F000),
+# 01:A4CE 가 타일마다 섞어 VRAM 워드 2000- 에 올린다.
+FIELD_CHR = 0x12B1A8
 # 블록(16x16) 정의: 블록마다 5바이트 = 타일 번호 하위 바이트 4개(왼위·오위·왼아래·오아래) + 상위 비트(bit 0x80>>칸, 00:BC9C).
 BLOCK_LOWER = 0x2AA32C
 BLOCK_UPPER = 0x2AAD27
@@ -41,6 +44,19 @@ def rle(rom, a):
         else:
             out += bytes(rom.u8(a + i) for i in range(c + 1))
             a += c + 1
+
+
+def field_chr(rom):
+    """VRAM 0x4000- 에 올라가는 순서의 4bpp 타일 16KB."""
+    planes, _ = rle(rom, FIELD_CHR)
+    c, d, e, f = (planes[i * 0x1000:(i + 1) * 0x1000] for i in range(4))
+    out = bytearray()
+    for i in range(512):
+        for r in range(8):
+            out += bytes([c[i * 8 + r], d[i * 8 + r]])
+        for r in range(8):
+            out += bytes([e[i * 8 + r], f[i * 8 + r]])
+    return bytes(out)
 
 
 def block_number(world, hibits, x, y):
@@ -100,6 +116,7 @@ def main():
     ap.add_argument('rom')
     ap.add_argument('--compare')
     ap.add_argument('--png')
+    ap.add_argument('--vram', help='필드에 선 순간의 VRAM 덤프(64KB)와 타일 그래픽 비교')
     args = ap.parse_args()
     rom = Rom(open(args.rom, 'rb').read())
     world, end_w = rle(rom, WORLD)
@@ -109,6 +126,9 @@ def main():
     if args.compare:
         w = open(args.compare, 'rb').read()
         print('world == 7F:0000:', world == w[0x10000:0x20000], '/ e000 == 7E:E000:', e000 == w[0xE000:0x10000])
+    if args.vram:
+        v = open(args.vram, 'rb').read()
+        print('field chr == VRAM 4000-7FFF:', field_chr(rom) == v[0x4000:0x8000])
     if args.png:
         from PIL import Image
         Image.frombytes('L', (256, 256), world).resize((512, 512), Image.NEAREST).save(args.png)
