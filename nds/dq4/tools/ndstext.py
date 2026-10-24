@@ -12,6 +12,7 @@ nds/dq4/tables/kr-font.tsv(일본어 코드 → 한글 음절)로 바꿔 읽는�
   python nds/dq4/tools/ndstext.py names JPROOT KRROOT          이름 표(b1000000~b1007000)를 일본어·영어·한글로
   python nds/dq4/tools/ndstext.py stats ROOT                   언어별 파일·문자열 수, 표지 통계
   python nds/dq4/tools/ndstext.py glossary JPROOT KRROOT FCROM  명칭 대조표(마크다운). FC 이름은 dq4 트랙의 dq4data.py 로 읽는다
+  python nds/dq4/tools/ndstext.py talk JPROOT [장] [--kr KRROOT] 동료 대화 표(PARAM/param_player_talk<장>.dat) 레코드와 문장
 JPROOT/KRROOT 는 `krpatch nds unpack` 으로 푼 폴더(그 아래 data/data/MESS/).
 """
 import collections
@@ -131,6 +132,41 @@ def cmd_glossary(jp_root, kr_root, rom):
             print(f'| {num} | {j} | {mark} | {e} | {k} |  |')
 
 
+TALK_HEAD, TALK_SIZE = 4, 44
+
+
+def talk_records(root, chapter):
+    """동료 대화 표: 머리 4바이트 뒤 44바이트 레코드. +16 u32 가 메시지 번호, 나머지 u16 의 뜻은 text-format.md 「동료 대화 표」."""
+    d = open(os.path.join(root, 'data', 'data', 'PARAM', f'param_player_talk{chapter}.dat'), 'rb').read()
+    out = []
+    for o in range(TALK_HEAD, len(d) - TALK_SIZE + 1, TALK_SIZE):
+        r = d[o:o + TALK_SIZE]
+        out.append((struct.unpack_from('<I', r, 16)[0], struct.unpack_from('<22H', r)))
+    return out
+
+
+def messages(root, lang='ja'):
+    out = {}
+    base_dir = mess(root, lang)
+    for f in os.listdir(base_dir):
+        if f.endswith('.mpt'):
+            base = int(f[1:5]) * 1000
+            for n, t in read(os.path.join(base_dir, f)):
+                out[base + n] = t
+    return out
+
+
+def cmd_talk(root, chapters, kr_root=None):
+    msgs = messages(root)
+    kr = messages(kr_root) if kr_root else {}
+    table = kr_table() if kr_root else {}
+    for ch in chapters:
+        for mid, h in talk_records(root, ch):
+            fields = ' '.join(f'{v:04X}' for k, v in enumerate(h) if k not in (8, 9))
+            text = kr.get(mid) and decode_kr(kr[mid], table) or msgs.get(mid, '-')
+            print(f'{ch}\t{mid}\t{fields}\t' + text.replace('\n', '/'))
+
+
 def cmd_stats(root):
     base = os.path.join(root, 'data', 'data', 'MESS')
     for lang in sorted(os.listdir(base)):
@@ -155,6 +191,11 @@ def main(argv):
             print(f'{num}\t' + text.replace('\n', '\\n'))
     elif argv[0] == 'names':
         cmd_names(argv[1], argv[2])
+    elif argv[0] == 'talk':
+        rest = [a for a in argv[2:] if not a.startswith('--')]
+        kr_root = argv[argv.index('--kr') + 1] if '--kr' in argv else None
+        rest = [a for a in rest if a != kr_root]
+        cmd_talk(argv[1], [int(a) for a in rest] or range(1, 7), kr_root)
     elif argv[0] == 'glossary':
         cmd_glossary(argv[1], argv[2], argv[3])
     elif argv[0] == 'stats':

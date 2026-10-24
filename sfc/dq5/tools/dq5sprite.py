@@ -12,16 +12,18 @@ OBJ 팔레트 0~3 은 04:96D6 의 16색 4줄이다. 팔레트 3 은 맵 OBJ 타�
 맵 OBJ 타일(1F:D59A, 1F:D4AF)은 맵마다 더 올리는 OBJ 타일로, 배치를 몰라 타일을 늘어놓기만 한다.
 
 사용:
-  python sfc/dq5/tools/dq5sprite.py rom/dq5.sfc --out work/sprites [--scale 4] [--grid] [--no-index]
+  python sfc/dq5/tools/dq5sprite.py rom/dq5.sfc --out work/sprites [--scale N] [--grid] [--no-index]
   python sfc/dq5/tools/dq5sprite.py rom/dq5.sfc --list
   python sfc/dq5/tools/dq5sprite.py rom/dq5.sfc --compare DIR   # wNNNN.bin vNNNN.vram oNNNN.oam cNNNN.cgram 덤프와 비교
---out 은 세트마다 시트(행: 아래·왼쪽·오른쪽·위, 열: 프레임 0·1), 색 번호 보기 시트(-index.png, 8픽셀 격자),
-색 번호 행렬(.txt), 맵 OBJ 타일 시트(mapobjNN.png)와 index.json 을 쓴다. 롬에서 나온 그림이므로
-work/ 아래에만 쓴다(커밋 금지).
+--out 은 sfc-dq4-assets 의 폴더·파일 규칙대로 1배 그림을 쓴다. 세트마다 `<세트>[-<이름>].png`(행 아래·왼쪽·
+오른쪽·위, 열 걸음 프레임 0·1), 색 번호 보기 `-index.png`(8픽셀 격자), 맵 OBJ 타일 `obj-<BC>-<BD>.png`, 그리고
+index.json(색 번호 행렬 포함). 이름은 그 세트 인물의 대화 화자 이름으로 붙인다(set_names). 롬에서 나온 그림이므로
+이 저장소에는 커밋하지 않는다.
 """
 import argparse
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -217,32 +219,77 @@ def sheet(rec, pal, scale=1, grid=False, index=False):
     return img
 
 
-def matrix_text(rec):
-    """프레임마다 색 번호 행렬(. 투명, 16진 한 글자)."""
-    out = []
-    for d in DIRS:
-        for f in (0, 1):
-            out.append(f'# {d} {f}')
-            for row in rec['frames'][(d, f)]:
-                out.append(''.join('%X' % v if v else '.' for v in row))
-    return '\n'.join(out) + '\n'
+def matrix(rec):
+    """프레임마다 색 번호 행렬(. 투명, 16진 한 글자). {'down0': [줄…], …}."""
+    return {f'{d}{f}': [''.join('%X' % v if v else '.' for v in row) for row in rec['frames'][(d, f)]]
+            for d in DIRS for f in (0, 1)}
+
+
+# 일행 표(7E:196F)에서 실측한 그림 번호. 배 선실 세이브스테이트의 주인공 = 2E(세트 82).
+PARTY_NAMES = {0x82: ('パパスのむすこ', '7E:196F = 2E(배 선실의 주인공), 이름 표 1 의 0번')}
+SPEAKER = re.compile(r'\{1003\}([^「{}\s]{1,12})「')
+
+
+def set_names(rom):
+    """세트 → (일본어 이름, 근거). 그 세트를 쓰는 인물 엔트리의 대화에서 「이름「…」 꼴로 말하는 이름을 센다.
+    이름이 나온 엔트리의 60% 이상, 그 세트를 쓰는 엔트리 전체의 20% 이상인 이름만 붙인다. 그림 번호 넷 이상이
+    나눠 쓰는 세트(00 은 14개)는 여러 장면의 대역이라 이름을 붙이지 않는다. 대화로 고른 추정이므로 근거를 함께 준다."""
+    import collections
+    import dq5npc
+    import dq5talk
+    said, total, cache = collections.defaultdict(collections.Counter), collections.Counter(), {}
+    for la, _ in dq5npc.all_lists(rom):
+        for a, _ in dq5npc.list_entries(rom, la):
+            for night in (False, True):
+                f = dq5npc.parse(rom, a, night)
+                if not f or f['gfx'] >= GFX_COUNT:
+                    continue
+                t = f['talk']
+                if t not in cache:
+                    try:
+                        cache[t] = set(SPEAKER.findall('\n'.join(dq5talk.talk(rom, t))))
+                    except (ValueError, KeyError, IndexError):
+                        cache[t] = set()
+                s = gfx_set(rom, f['gfx'])
+                total[s] += 1
+                said[s]['*'] += bool(cache[t])
+                for n in cache[t]:
+                    said[s][n] += 1
+    names = dict(PARTY_NAMES)
+    shared = collections.Counter(gfx_set(rom, g) for g in range(GFX_COUNT))
+    for s, c in said.items():
+        if shared[s] > 3:
+            continue
+        top = [(n, k) for n, k in c.most_common() if n != '*']
+        if top and top[0][1] >= 0.6 * c['*'] and top[0][1] >= 0.2 * total[s] and \
+                (len(top) == 1 or top[1][1] < top[0][1]):
+            names.setdefault(s, (top[0][0], f'대화 화자 {top[0][1]}/{total[s]} 엔트리'))
+    return names
+
+
+def obj_stem(m):
+    if m['bc'] == 0x7E:
+        return f'obj-field{m["bd"] & 0x7F}'
+    return f'obj-{m["bc"]:02X}-' + ('xx' if m['bd'] & 0x7F == 0x7F else f'{m["bd"] & 0x7F:02X}')
 
 
 LAYOUT_GROUP = {'overlap': '8타일(머리+몸, 세트 80~)', 'simple': '6타일(세트 00~6F)'}
 
 
-def export_all(rom, outdir, scale=4, grid=False, index=True):
+def export_all(rom, outdir, scale=1, grid=False, index=True):
     """모든 세트·맵 OBJ 타일의 그림을 outdir 에 쓰고 index.json 과 같은 항목 목록을 돌려준다.
 
+    파일 이름은 sfc-dq4-assets 의 규칙 `<번호>[-<이름>][-<변형>].png`: 세트는 `82-パパスのむすこ.png`,
+    색 번호 보기는 `-index`, 맵 OBJ 타일은 `obj-<BC>-<BD>`(필드는 `obj-field<세계>`). 기본은 1배.
     항목마다 cat('sprites')·group·title·path(outdir 기준 상대 경로)·w·h 가 있다(dq5gallery.py 가 그대로 쓴다).
-    세트 시트 항목에는 set·gfx·layout·palette·tiles·colors·size·down_size·bbox·record·data·maps 가 더 붙고,
-    색 번호 보기는 group '색 번호 보기' 인 따로 된 항목이다. 맵 OBJ 타일 항목에는 map_object·where 가 붙는다.
+    세트 항목에는 set·name·gfx·layout·palette·tiles·colors·size·down_size·bbox·record·data·maps·matrix 가 붙는다.
     """
     if isinstance(rom, (bytes, bytearray)):
         rom = Rom(rom)
     os.makedirs(outdir, exist_ok=True)
     pals = obj_palettes(rom)
     users = npc_users(rom)
+    names = set_names(rom)
     gfx_of = {}
     for g in range(GFX_COUNT):
         gfx_of.setdefault(gfx_set(rom, g), []).append(g)
@@ -256,14 +303,15 @@ def export_all(rom, outdir, scale=4, grid=False, index=True):
         rec = decode_set(rom, s)
         if rec is None:
             continue
-        name = f'set{s:02X}'
+        nm, why = names.get(s, (None, None))
+        stem = f'{s:02X}' + (f'-{nm}' if nm else '')
         gl = gfx_of.get(s, [])
-        title = f'세트 {s:02X}' + (' · 그림 ' + ' '.join(f'{g:02X}' for g in gl) if gl else ' · 그림 없음')
-        e = save(sheet(rec, pals[rec['palette']], scale, grid), name + '.png')
-        e.update({'group': LAYOUT_GROUP[rec['layout']], 'title': title, 'set': s, 'gfx': gl,
-                  'layout': rec['layout'], 'palette': rec['palette'], 'tiles': rec['tiles'],
+        title = f'{s:02X}' + (f' {nm}' if nm else '') + (' · 그림 ' + ' '.join(f'{g:02X}' for g in gl) if gl else ' · 그림 없음')
+        e = save(sheet(rec, pals[rec['palette']], scale, grid), stem + '.png')
+        e.update({'group': LAYOUT_GROUP[rec['layout']], 'title': title, 'set': s, 'name': nm, 'name_from': why,
+                  'gfx': gl, 'layout': rec['layout'], 'palette': rec['palette'], 'tiles': rec['tiles'],
                   'record': f'{rec["record"]:06X}', 'data': f'{rec["data"]:06X}', 'data_end': f'{rec["end"]:06X}',
-                  'frame': [FRAME_W, FRAME_H], 'scale': scale, 'note': '행 아래·왼쪽·오른쪽·위, 열 프레임 0·1'})
+                  'frame': [FRAME_W, FRAME_H], 'scale': scale, 'note': '행 아래·왼쪽·오른쪽·위, 열 걸음 프레임 0·1'})
         used = set(v for img in rec['frames'].values() for row in img for v in row if v)
         e['colors'] = len(used)
         boxes = [b for b in (bbox(img) for img in rec['frames'].values()) if b]
@@ -275,18 +323,20 @@ def export_all(rom, outdir, scale=4, grid=False, index=True):
             if down:
                 e['down_size'] = [down[2] - down[0] + 1, down[3] - down[1] + 1]
         e['maps'] = sorted(set(m for g in gl for m in users.get(g, ())))
+        e['matrix'] = matrix(rec)
         entries.append(e)
         if index:
-            with open(os.path.join(outdir, name + '.txt'), 'w') as fp:
-                fp.write(matrix_text(rec))
-            e['matrix'] = name + '.txt'
-            ie = save(sheet(rec, pals[rec['palette']], scale, True, True), name + '-index.png')
-            ie.update({'group': '색 번호 보기', 'title': title + ' 색 번호', 'set': s, 'matrix': name + '.txt'})
+            ie = save(sheet(rec, pals[rec['palette']], scale, True, True), stem + '-index.png')
+            ie.update({'group': '색 번호 보기', 'title': title + ' 색 번호', 'set': s})
             entries.append(ie)
+    seen = set()
     for k, m in enumerate(map_objects(rom)):
-        name = f'mapobj{k:02X}'
+        stem = obj_stem(m)
+        if stem in seen:
+            stem += f'-{k:02X}'
+        seen.add(stem)
         for idx in ((False, True) if index else (False,)):
-            e = save(tile_sheet(m['tiles'], pals[0], scale, idx), name + ('-index' if idx else '') + '.png')
+            e = save(tile_sheet(m['tiles'], pals[0], scale, idx), stem + ('-index' if idx else '') + '.png')
             e.update({'group': '맵 OBJ 타일' + (' 색 번호' if idx else ''), 'title': f'{m["where"]} {m["data"]:06X}',
                       'map_object': k, 'where': m['where'], 'entry': f'{m["entry"]:06X}', 'data': f'{m["data"]:06X}',
                       'data_end': f'{m["end"]:06X}', 'tiles': len(m['tiles']), 'reserve': m['reserve'],
@@ -410,7 +460,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('rom')
     ap.add_argument('--out', help='시트·index.json 을 쓸 폴더(work/ 아래)')
-    ap.add_argument('--scale', type=int, default=4)
+    ap.add_argument('--scale', type=int, default=1)
     ap.add_argument('--grid', action='store_true', help='보통 시트에도 8픽셀 격자')
     ap.add_argument('--no-index', action='store_true', help='색 번호 보기 시트와 행렬 txt 를 쓰지 않음')
     ap.add_argument('--list', action='store_true', help='세트 목록')
