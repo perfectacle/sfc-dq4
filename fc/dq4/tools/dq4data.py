@@ -7,10 +7,12 @@
   python fc/dq4/tools/dq4data.py rom/dq4.nes spells           주문 ID, 이름, 소비 MP, 대상, 배우는 인물과 레벨
   python fc/dq4/tools/dq4data.py rom/dq4.nes levels [인물]    레벨별 경험치와 능력치 기준값(인물 0-7, 생략하면 모두)
   python fc/dq4/tools/dq4data.py rom/dq4.nes actions          전투 행동 ID 00-FF: 처리 루틴, 위력, 양(회복·흡수·상승), 성공률
+  python fc/dq4/tools/dq4data.py rom/dq4.nes ai               몬스터 행동 가중치·재생·시작 상태 표, 동료 AI 의 인물별 주문 칸
 
 근거: 0B:$B006(이름 목록 포인터), 10:$8BED(가격), 10:$8C3B(강도 $9E17), 10:$8B1E·$8B3B(종류·장비),
 18:$8046(몬스터 레코드, 10:$A67C 필드 표), 13:$B953(주문 MP), 12:$9D36(레벨업), 12:$9FC6(성장 곡선),
-11:$A3FA(행동 처리 루틴), 13:$B573·$B5E4·$B66B(위력·양·성공률), 10:$A2D7(몬스터 행동 번호), 11:$9069(아이템 사용).
+11:$A3FA(행동 처리 루틴), 13:$B573·$B5E4·$B66B(위력·양·성공률), 10:$A2D7(몬스터 행동 번호), 11:$9069(아이템 사용),
+18:$9A21(행동 가중치), 11:$AAF6(HP 재생), 12:$8540(시작 상태), 11:$A62E(회심), 13:$8038(동료 AI).
 """
 import sys
 
@@ -45,7 +47,15 @@ SUCCESS, RESIST_SLOT, RESIST_RATE = 0xB80B, 0xB736, 0xB803
 RESIST_NAMES = ('イオ', 'ギラ', 'メラ', 'デイン', 'バギ', 'ヒャド', 'マヌーサ', 'ラリホー', 'ザキ', 'ニフラム',
                 'マホトラ', 'マホトーン', 'メダパニ', 'ルカニ', 'メガンテ')   # 13:$B80B bit4-0 의 내성 칸 0-E
 ITEM_FLAG_NAMES = ('쓰면 없어짐', '저주', '못 버림', '못 팖', '하나만 떨어뜨림', 'bit7')   # $8D1B bit2-7
-SELECT = ('확률', '확률', '확률', '차례')            # 몬스터 바이트 9·10 bit7(필드 1F)
+SELECT = ('고르게', '앞 칸 많이', '첫 칸 대부분', '차례')   # 몬스터 바이트 9·10 bit7(필드 1F)
+WEIGHTS = (0x18, 0x9AA9)                         # 고르는 법 0-2 마다 여섯 칸의 가중치(합 255), 3 은 차례
+REGEN = (0x11, 0xAB31)                           # 바이트 13·14 bit7 → 턴마다 HP + rand(폭) + 기본 (폭, 기본) 쌍
+START_STATUS = (0x12, 0x85BD)                    # 바이트 21 bit5-3 → 시작 상태 확률 (값+1)/256, 7 은 없음
+STATUS_NAMES = ('잠', '마비', '혼란', '없음')       # 바이트 21 bit7-6(메시지 001F + 값)
+AI_BANK, AI_SPELLS = 0x13, 0xA68A                # 동료 AI 가 평가하는 주문 칸: クリフト·ミネア·マーニャ·ブライ 12개씩
+AI_ORDER = {1: ((0, 1, 2, 3, 6, 7, 8, 9, 10, 11), (4, 5)), 2: ((0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11), (5,)),
+            3: ((0, 1, 2, 3, 4, 5, 6, 7, 8), (9, 10)), 4: ((0, 1, 2, 3, 4, 6), (7, 8, 9, 10))}
+# 13:$AFF0·$AF97·$AF10·$AF48 이 평가하는 칸 순서와 13:$9135 를 통과할 때만 보는 칸. マーニャ 는 끝에 칸 11 도 봄
 COUNT = ('1', '1~2', '2', '3')                    # 바이트 11·12 bit7(필드 20): 한 턴 행동 수
 PARTY = ('勇者', 'クリフト', 'ミネア', 'マーニャ', 'ブライ', 'トルネコ', 'ライアン', 'アリーナ')
 STATS = ('exp', 'str', 'agi', 'vit', 'int', 'luck', 'hp', 'mp')   # 12:$9F89 의 $0B 번호
@@ -194,6 +204,30 @@ def item_action(prg, i):
     return 0x7F
 
 
+def weights(prg, sel):
+    """고르는 법 0-2 의 여섯 칸 가중치(18:$9A21). 같은 행동이 여러 칸이면 18:$9A72 가 가중치를 더해 한 칸으로 합친다."""
+    return [rd(prg, WEIGHTS[0], WEIGHTS[1] + 6 * sel + k) for k in range(6)]
+
+
+def regen(prg, v):
+    """바이트 13·14 bit7 값 0-3 → 턴 시작마다 회복하는 HP 범위(11:$AAF6). 0 은 없음."""
+    w, base = rd(prg, REGEN[0], REGEN[1] + 2 * v), rd(prg, REGEN[0], REGEN[1] + 2 * v + 1)
+    return (base, base + w - 1) if w else None
+
+
+def start_status(prg, r):
+    """바이트 21 → (상태 이름, 확률/256) 또는 None. 12:$855D 가 rand(256) ≤ 표 값이면 건다."""
+    chance, kind = r[21] >> 3 & 7, r[21] >> 6
+    if chance == 7 or kind == 3:
+        return None
+    return STATUS_NAMES[kind], rd(prg, START_STATUS[0], START_STATUS[1] + chance) + 1
+
+
+def ai_spells(prg, who):
+    """인물 1-4 의 동료 AI 주문 칸 12개(13:$A68A + 12 × 번호, 0번 자리는 쓰지 않음)."""
+    return [rd(prg, AI_BANK, AI_SPELLS + 12 * who + k) for k in range(12)]
+
+
 def drop_chance(prg, rate):
     """떨어뜨릴 확률(분수 문자열). 12:$922D."""
     if rate == 0:
@@ -309,8 +343,10 @@ def main():
             res = ' '.join(f'{RESIST_NAMES[c]}{v}' for c, v in enumerate(resists(prg, r)) if v)
             print(f'{i:02X} {nm:<12} 경험치 {m["exp"]:5d} 골드 {m["gold"]:4d} HP {m["hp"]:4d} MP {m["mp"]:3d} '
                   f'공 {m["atk"]:3d} 수 {m["def"]:3d} 속 {m["agi"]:3d} 드롭 {drop}  {r.hex(" ")}')
-            print(f'   행동 {acts} | {SELECT[m["select"]]} {COUNT[m["count"]]}회 AI {m["ai"]} '
-                  f'f21={m["f21"]} f24={m["f24"]} f26={m["f26"]} f27={m["f27"]} f28={m["f28"]} | 내성 {res or "-"}')
+            rg, st = regen(prg, m['f21']), start_status(prg, r)
+            extra = (f' 재생 {rg[0]}~{rg[1]}' if rg else '') + (f' 회심 {4 * m["f24"]}/256' if m['f24'] else '') \
+                + (f' 시작 {st[0]} {st[1]}/256' if st else '') + (f' f28={m["f28"]}' if m['f28'] != 7 else '')
+            print(f'   행동 {acts} | {SELECT[m["select"]]} {COUNT[m["count"]]}회 AI {m["ai"]}{extra} | 내성 {res or "-"}')
     elif cmd == 'spells':
         names = [dq4text.text(n) for n in name_list(prg, 'spell')[1:]]
         sets = [learnset(prg, k) for k in range(5)]
@@ -344,6 +380,18 @@ def main():
             elif party != 256 or v != 255:
                 out += f' 성공 편 {party}/256 몬스터 {v}/256'
             print(out)
+    elif cmd == 'ai':
+        spells = [dq4text.text(n) for n in name_list(prg, 'spell')[1:]]
+        for sel in range(3):
+            print(f'가중치 {sel} {SELECT[sel]}: ' + ' '.join(str(w) for w in weights(prg, sel)))
+        print('재생: ' + ' '.join(f'{v}={regen(prg, v)}' for v in range(4)))
+        print('시작 상태 확률: ' + ' '.join(f'{c}={rd(prg, *START_STATUS[:1], START_STATUS[1] + c) + 1}/256'
+                                       for c in range(7)))
+        for who in range(1, 5):
+            sp = ai_spells(prg, who)
+            first, gated = AI_ORDER[who]
+            print(f'{PARTY[who]}: ' + ' '.join(spells[sp[k]] for k in first) + ' / 9135 통과 때 '
+                  + ' '.join(spells[sp[k]] for k in gated))
     elif cmd == 'levels':
         for who in ([int(sys.argv[3])] if len(sys.argv) > 3 else range(8)):
             print(f'# {who} {PARTY[who]}  Lv ' + ' '.join(STATS))
