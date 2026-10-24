@@ -51,7 +51,7 @@ dq5(SFC DQ5 엔진):
 - [docs/dq5-map-format.md](docs/dq5-map-format.md): DQ5 실내 맵 형식(지형·팔레트·인물·출구·영역 이동·보물상자)
 - [docs/dq5-field-format.md](docs/dq5-field-format.md): DQ5 필드(세계 지도) 형식
 - [docs/dq5-text-format.md](docs/dq5-text-format.md): DQ5 메시지(허프만 부호)·폰트·대화 스크립트·이름 문자열
-- [docs/dq5-data-format.md](docs/dq5-data-format.md): DQ5 게임 데이터(상점 품목·물건 가격·물건 표)
+- [docs/dq5-data-format.md](docs/dq5-data-format.md): DQ5 게임 데이터(상점 품목·물건 가격·물건 표·몬스터)
 
 dq4(FC DQ4 원작):
 
@@ -84,6 +84,7 @@ dq4(FC DQ4 원작):
 - [2026-10-25-02: 보물상자와 이름 문자열](docs/journal/dq5/2026-10-25-02-treasure.md)
 - [2026-10-25-03: 상점과 물건 가격](docs/journal/dq5/2026-10-25-03-shop.md)
 - [2026-10-25-04: 물건 표](docs/journal/dq5/2026-10-25-04-items.md)
+- [2026-10-25-05: 몬스터 레코드](docs/journal/dq5/2026-10-25-05-monster.md)
 
 #### dq4
 
