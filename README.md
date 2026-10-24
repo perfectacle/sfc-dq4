@@ -1,6 +1,6 @@
 # sfc-dq4
 
-FC판 「드래곤 퀘스트 IV 인도받은 자들」(일본판)을 슈퍼패미컴 「드래곤 퀘스트 V
+FC판 「드래곤 퀘스트 IV 인도받은 자들」(일본판)을 슈퍼 패미콤 「드래곤 퀘스트 V
 천공의 신부」(일본판) 엔진 위에 옮기는 한글 해킹롬 프로젝트입니다. PC 포트나
 Unity 리메이크가 아니라, 실제 SFC 롬에 덧대는 IPS 패치를 만듭니다.
 
@@ -38,9 +38,13 @@ uv sync --locked
 
 ## 문서
 
+코딩 에이전트로 작업할 때는 [AGENTS.md](AGENTS.md) 부터 읽습니다. 여러 세션이 트랙을 나눠 동시에 작업하는 규칙이 있습니다.
+
+
 - [docs/dq5-map-format.md](docs/dq5-map-format.md): DQ5 실내 맵 형식(지형·팔레트·인물·출구·영역 이동)
 - [docs/dq5-field-format.md](docs/dq5-field-format.md): DQ5 필드(세계 지도) 형식
 - [docs/references.md](docs/references.md): 참고 자료
+- [docs/todo.md](docs/todo.md): 트랙(dq5·dq4)마다 남은 일
 
 ### 해킹 일지
 
