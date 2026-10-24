@@ -10,6 +10,11 @@
 --   GROUP="2C"               FIELD 와 함께. 첫 필드 이벤트가 거는 무리 번호(02:A780 의 LDA #$01)를 바꿔 이벤트 전투 무리
 --                            표 23:D757 의 그 번호(16진)와 전투를 붙인다. BATTLE 과 함께 주면 그 번호의 무리를 덮는다
 --   SET="2194|80;1949=01"    시작할 때 한 번 WRAM(7E 뱅크 하위 16비트 주소)을 고친다. =는 값, |는 OR, &는 AND
+--   PARTY="02,05"            시작할 때 동료 몬스터(23:AED1 의 종류 번호, 16진)를 주인공 뒤 일행 레코드(7E:2040 + n*42)에 넣는다.
+--                            레코드는 동료가 된 スライム 의 실측 레코드를 틀로, 종류·레벨·능력치·HP·MP 만 동료 레코드에서 채운다.
+--                            일행 수 7E:201D~201F, 순서 7E:2020~·7E:2028~ 도 고친다
+--   ADULT=1                  이야기 단계 플래그 7E:2190 bit6·5 를 켜고 $1948 = 2 로 둔다(00:A72A 가 플래그로 정하는 값과 같게).
+--                            주인공 그림이 노예 시절 차림으로 바뀌고, 필드 조우는 $1948 = 2 격자를 쓴다
 --   POKE, ROMPATCH           walk.lua 와 같다(POKE 는 매 프레임 고정, ROMPATCH 는 파일 오프셋=바이트)
 --   TEST="left:40,up:40"     도착 후 이 입력을 눌러 조작되는지 본다(좌표가 바뀌면 moved=yes). 세이브는 TEST 전에 한다
 --   SAVE="town.mss"          도착하고 SETTLE(기본 150) 프레임 뒤 SHOT_DIR 에 세이브스테이트와 그림(.png)을 저장
@@ -28,6 +33,39 @@ for off, hex in string.gmatch(os.getenv("ROMPATCH") or "", "(%x+)=(%x+)") do hex
 local sets = {}
 for a, op, v in string.gmatch(os.getenv("SET") or "", "(%x+)([=|&])(%x+)") do
   sets[#sets + 1] = {0x7E0000 + tonumber(a, 16), op, tonumber(v, 16)}
+end
+-- 동료가 된 スライム 의 일행 레코드(42바이트). +6·+26~+29 는 동료 레코드에서 오지 않아 그대로 둔다
+local PARTY_TEMPLATE = {
+  0x82, 0x80, 0x08, 0x00, 0x00, 0x00, 0x03, 0x08, 0x05, 0x01, 0x03, 0x00, 0x00, 0x00, 0x08, 0x00,
+  0x00, 0x00, 0x01, 0x63, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+  0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x4B, 0x00, 0x00, 0x02,
+}
+local function buildParty()
+  local kinds = {}
+  for k in string.gmatch(os.getenv("PARTY") or "", "%x+") do kinds[#kinds + 1] = tonumber(k, 16) end
+  if #kinds == 0 then return end
+  local m = emu.memType.snesMemory
+  for i, k in ipairs(kinds) do
+    local c = {}
+    for j = 0, 8 do c[j] = emu.read(0x23AED1 + k * 9 + j, m) end
+    local r = {}
+    for j = 1, 42 do r[j - 1] = PARTY_TEMPLATE[j] end
+    r[0] = 0x80 | k
+    r[0x12], r[0x13] = c[0], c[1]
+    for j = 0, 3 do r[7 + j] = c[2 + j] end
+    r[2], r[0xE] = c[6], c[6]
+    r[4], r[0x10] = c[7], c[7]
+    for j = 0, 41 do emu.write(0x7E2040 + i * 42 + j, r[j], m) end
+  end
+  for j = 0, 2 do emu.write(0x7E201D + j, 1 + #kinds, m) end
+  for i = 0, #kinds do
+    emu.write(0x7E2020 + i, i, m)
+    emu.write(0x7E2028 + i, i, m)
+  end
+end
+if os.getenv("ADULT") == "1" then
+  sets[#sets + 1] = {0x7E2190, "|", 0x60}
+  sets[#sets + 1] = {0x7E1948, "=", 0x02}
 end
 local pokes = {}
 for a, v in string.gmatch(os.getenv("POKE") or "", "(%x+)=(%x+)") do pokes[#pokes + 1] = {tonumber(a, 16), tonumber(v, 16)} end
@@ -117,6 +155,7 @@ emu.addEventCallback(function()
     end
   end
   if n == 2 then
+    buildParty()
     for _, s in ipairs(sets) do
       local v = rd(s[1])
       if s[2] == "=" then v = s[3] elseif s[2] == "|" then v = v | s[3] else v = v & s[3] end

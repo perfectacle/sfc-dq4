@@ -21,6 +21,8 @@ NDS 판은 **참고 자료**입니다. 패치는 계속 SFC DQ5 롬 위에 FC DQ
 | 한글 대응표 | 1400자([tables/kr-font.tsv](tables/kr-font.tsv)), KS 순서 위반 0, 확인 단어 18개 일치, 전수 눈 대조 | `ndskr.py check` |
 | 대조표 | 이름 표 8개, 813줄 | [glossary.md](docs/glossary.md) |
 | 늘어난 것 | 6장 805줄, 동료 대화 7,796줄, 이민 마을 796줄 등 | [extras.md](docs/extras.md) |
+| 그래픽 | 인물 187팩, 몬스터 303(조립 277), 맵·전투 배경 675(텍스처와 위에서 본 렌더링), 효과 188, 아이콘 424 등 4,204파일. 세계 지도 배치는 못 풂. 결과는 비공개 저장소 `nds/dq4/` | [graphics-format.md](docs/graphics-format.md), `ndsgfx.py export` |
+| 동료 대화 표 | `PARAM/param_player_talk1`~`6.dat`, 44바이트 레코드 7,209개, 메시지 번호만 확정 | `ndstext.py talk` |
 | 툴킷 | v0.5.0 의 `krpatch nds`. 패치 적용은 `xdelta3`(LZMA 2차 압축) | |
 | 에뮬레이터 | desmume libretro 코어([EMU-01](../../.agents/skills/analysis/SKILL.md#emu-01--에뮬레이터는-mesence)) | |
 
@@ -31,7 +33,7 @@ NDS 판은 **참고 자료**입니다. 패치는 계속 SFC DQ5 롬 위에 FC DQ
 [todo.md](todo.md) 의 순서대로 합니다.
 
 1. **채택 이름** — 대조표를 사용자에게 보여 채택 열을 채웁니다.
-2. **그래픽 추출** — 인물부터. 결과 PNG 는 비공개 에셋 저장소에만.
+2. **그래픽 남은 것** — 세계 지도 배치(`FIELD/bin/worldmap*.bin`)부터. 추출 자체는 끝났고 결과는 비공개 에셋 저장소에만([graphics-format.md](docs/graphics-format.md#남은-것)).
 3. **디버그·워프 도구** — 6장·이민 마을 같은 늘어난 장면을 바로 열어 보려면 필요합니다.
 4. **늘어난 내용의 조건** — 동료 대화가 문장을 고르는 표(`SCRIPT`·`PARAM`)를 찾아 이식 설계의 근거로.
 

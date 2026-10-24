@@ -7,8 +7,11 @@
   field    세계 지도 셋 전체(세계 0 은 시간대 8벌), 필드 블록 512개, 필드 타일 512개
   monsters 전투 몬스터 236마리(dq5mongfx)
   font     폰트 글자 0x3DB 개(dq5text)
+  ui       창·메뉴 BG3 타일 149개(04:E528)와 BG3 팔레트(04:98D7), 그 타일로 짠 창 견본
+  anim     필드의 움직이는 타일: 타일 454~459 8벌(1E:D0FF RLE), 물 타일 4·5·20·21 을 한 픽셀씩 돌린 16단계
 
-결과는 OUT(기본 work/gfx)에 쓰고, 항목 목록을 OUT/manifest.json 에 남긴다(tools/dq5gallery.py 가 읽는다).
+결과는 OUT(기본 work/gfx)에 쓰고, 항목 목록(파일마다 분류·제목·크기·롬 주소)을 OUT/index.json 에 남긴다.
+파일 이름은 맵이면 <BC>-<BD>[-변형].png(변형: night 밤 팔레트, setNN 플래그 팔레트 세트, annot 속성 겹침, blocks 블록 모음).
 롬에서 뽑은 그림이므로 저장소에 커밋하지 않는다.
 
 사용:
@@ -45,6 +48,14 @@ FIELD_WORLD_ROWS = (None, 0x01A199, 0x01A3B5)
 FIELD_ROW4 = PALETTES + 0x34 * 32
 FIELD_WAVE = 0x01A0F6
 WAVE_STEPS = 10
+# 04:E17D: BG3 창·메뉴 타일. 04:E528 에서 1bpp 138개(둘째 평면은 FF)를 타일 1 부터, 이어서 2bpp 11개를 올린다.
+UI_TILES = 0x04E528
+UI_1BPP, UI_2BPP = 0x8A, 0x0B
+# 04:9870: CGRAM 0번 줄(BG3 2bpp 팔레트 넷) 32바이트.
+UI_PALETTE = 0x0498D7
+# 2B:8000: 필드 타일 454~459(VRAM 워드 3C60)의 8벌을 1E:D0FF 의 RLE(01:A64F 와 같은 꼴)로 7E:C800 에 푼다.
+FIELD_ANIM = 0x1ED0FF
+FIELD_ANIM_TILE, FIELD_ANIM_COUNT, FIELD_ANIM_SETS = 0x1C6, 6, 8
 
 
 def rgb(c):
@@ -239,7 +250,7 @@ def export_maps(rom, out, only=None):
                     blocks=len(blocks), chrs=len(dec.chr_map))
         day_cg = map_cgram(rom, bc, bd)
         day = draw_cells(rom, dec, w, h, buf, day_cg)
-        out.save(day, f'maps/{name}-day.png', 'maps', f'{bc:02X}/{bd:02X} 낮', group, **meta)
+        out.save(day, f'maps/{name}.png', 'maps', f'{bc:02X}/{bd:02X} 낮', group, **meta)
         night_cg = map_cgram(rom, bc, bd, alt=True)
         if night_cg != day_cg:
             out.save(draw_cells(rom, dec, w, h, buf, night_cg), f'maps/{name}-night.png', 'maps',
@@ -254,7 +265,7 @@ def export_maps(rom, out, only=None):
                              f'maps/{name}-set{pset:02X}{"-night" if alt else ""}.png', 'maps',
                              f'{bc:02X}/{bd:02X} {when} 세트 {pset:02X}', group, **meta, note=f'{cond} 이면 01:9771 이 바꾸는 팔레트')
                 break
-        out.save(attr_overlay(day, w, h, buf, exits), f'maps/{name}-attr.png', 'maps-attr',
+        out.save(attr_overlay(day, w, h, buf, exits), f'maps/{name}-annot.png', 'maps-attr',
                  f'{bc:02X}/{bd:02X} 속성', group, **meta)
         colors = cgram_colors(day_cg)
         tc = TileCache(rom, dec.high, colors)
@@ -461,6 +472,115 @@ def export_font(rom, out):
 
 
 
+# ---------------------------------------------------------------- 창·움직이는 타일
+
+def ui_tiles(rom):
+    """BG3 타일 0~149 의 2bpp 바이트(VRAM 워드 $1000 또는 $4000 부터 올라가는 그대로). 타일 0 은 0."""
+    out = bytearray(16)
+    o = lorom(UI_TILES)
+    for t in range(UI_1BPP):
+        for r in range(8):
+            out += bytes([rom.d[o + t * 8 + r], 0xFF])
+    o += UI_1BPP * 8
+    for t in range(UI_2BPP):
+        for r in range(8):
+            out += bytes([rom.d[o + t * 16 + r], rom.d[o + t * 16 + 8 + r]])
+    return bytes(out)
+
+
+# 화면에서 본 창 타일맵(배 선실 덤프의 BG3): 8C 모서리, 8D 위 테두리, 8E 옆 테두리, 8F·90 가로줄, 01 빈칸. 40 = 좌우, 80 = 상하 반전.
+UI_SAMPLE = (
+    (0x08C, 0x08D, 0x08D, 0x08D, 0x08D, 0x08D, 0x08D, 0x48C),
+    (0x08E, 0x010, 0x010, 0x010, 0x010, 0x001, 0x001, 0x48E),
+    (0x08F, 0x090, 0x090, 0x090, 0x090, 0x090, 0x090, 0x48F),
+    (0x08E, 0x00C, 0x001, 0x004, 0x006, 0x001, 0x001, 0x48E),
+    (0x08E, 0x00D, 0x001, 0x001, 0x002, 0x001, 0x001, 0x48E),
+    (0x08E, 0x087, 0x085, 0x001, 0x003, 0x001, 0x001, 0x48E),
+    (0x88C, 0x88D, 0x88D, 0x88D, 0x88D, 0x88D, 0x88D, 0xC8C),
+)
+
+
+def export_ui(rom, out):
+    o = lorom(UI_PALETTE)
+    cg = rom.d[o:o + 32]
+    colors = cgram_colors(cg)
+    data = ui_tiles(rom)
+    tiles = [chr_2bpp(data[t * 16:t * 16 + 16]) for t in range(len(data) // 16)]
+    for pal in range(4):
+        cs = colors[pal * 4:pal * 4 + 4]
+        cells = [scaled(tile_image(px, cs), 3) for px in tiles]
+        out.save(sheet(cells, 16, 24, 24, [f'{t:02X}' for t in range(len(tiles))], label_h=10),
+                 f'ui/tiles-pal{pal}.png', 'ui', f'창·메뉴 타일 {len(tiles)}개 (팔레트 {pal})', '타일',
+                 note='04:E528, 3배. 01~8A 는 1bpp(색 2·3), 8B~95 는 2bpp. 96 부터는 글자를 그때그때 그려 넣는 칸')
+    win = Image.new('RGBA', (len(UI_SAMPLE[0]) * 8, len(UI_SAMPLE) * 8), colors[0] + (255,))
+    for y, row in enumerate(UI_SAMPLE):
+        for x, w in enumerate(row):
+            t = tile_image(tiles[w & 0xFF], colors[0:4], bool(w & 0x400), bool(w & 0x800))
+            win.paste(t, (x * 8, y * 8), t)
+    out.save(scaled(win, 4), 'ui/window-sample.png', 'ui', '창 견본(배 선실의 상태 창)', '견본',
+             note='타일 8C~90 으로 짠 테두리와 글자 타일, 4배')
+    print(f'ui {len(tiles)} tiles')
+
+
+def field_anim_sets(rom):
+    """타일 454~459 의 8벌: [벌][타일] = 32바이트."""
+    from dq5field import rle
+    data, _ = rle(rom, FIELD_ANIM)
+    n = FIELD_ANIM_COUNT * 32
+    return [[data[k * n + t * 32:k * n + t * 32 + 32] for t in range(FIELD_ANIM_COUNT)] for k in range(FIELD_ANIM_SETS)]
+
+
+def rotate_pair(a, b, k):
+    """01:C790 이 하는 일: 이웃한 두 타일의 줄마다(평면마다) 16비트를 k 픽셀 오른쪽으로 돌린다. 세계 1·2 는 왼쪽."""
+    oa, ob = bytearray(32), bytearray(32)
+    for i in range(32):
+        v = a[i] << 8 | b[i]
+        v = (v >> k | v << (16 - k)) & 0xFFFF
+        oa[i], ob[i] = v >> 8, v & 0xFF
+    return bytes(oa), bytes(ob)
+
+
+def export_anim(rom, out):
+    from dq5field import field_chr, tile_word
+    cg = field_cgram(rom, 0, next(p for p, los in field_time_sets(rom) if 2 in los))
+    colors = cgram_colors(cg)
+
+    def img(t, raw):
+        p = (tile_word(rom, t, False) >> 10) & 7
+        return tile_image(planar(raw), colors[p * 16:p * 16 + 16])
+
+    frames = []
+    for k, tiles in enumerate(field_anim_sets(rom)):
+        strip = Image.new('RGBA', (FIELD_ANIM_COUNT * 8, 8), colors[0] + (255,))
+        for i, raw in enumerate(tiles):
+            strip.paste(img(FIELD_ANIM_TILE + i, raw), (i * 8, 0))
+        frames.append(scaled(strip, 4).convert('RGB'))
+    out.save(sheet(frames, 1, frames[0].width, frames[0].height, [f'벌 {k}' for k in range(len(frames))], label_h=10),
+             'anim/field-454.png', 'anim', '필드 타일 454~459 8벌', '필드',
+             note='1E:D0FF RLE → 7E:C800, DMA 로 VRAM 워드 3C60 에. 4배')
+    frames[0].save(os.path.join(out.root, 'anim/field-454.gif'), save_all=True, append_images=frames[1:],
+                   duration=150, loop=0)
+    out.items.append({'cat': 'anim', 'group': '필드', 'title': '필드 타일 454~459 (GIF)', 'path': 'anim/field-454.gif',
+                      'w': frames[0].width, 'h': frames[0].height})
+    chrs = field_chr(rom)
+    frames = []
+    for k in range(16):
+        strip = Image.new('RGBA', (32, 8), colors[0] + (255,))
+        for j, (t1, t2) in enumerate(((0x04, 0x05), (0x14, 0x15))):
+            a, b = rotate_pair(chrs[t1 * 32:t1 * 32 + 32], chrs[t2 * 32:t2 * 32 + 32], k)
+            strip.paste(img(t1, a), (j * 16, 0))
+            strip.paste(img(t2, b), (j * 16 + 8, 0))
+        frames.append(scaled(strip, 4).convert('RGB'))
+    out.save(sheet(frames, 4, frames[0].width, frames[0].height, [f'{k}' for k in range(16)], label_h=10),
+             'anim/field-water.png', 'anim', '필드 물 타일 4·5·20·21 16단계', '필드',
+             note='두 타일을 한 줄 16픽셀로 보고 k 픽셀 돌림(세계 0 은 오른쪽). 4배')
+    frames[0].save(os.path.join(out.root, 'anim/field-water.gif'), save_all=True, append_images=frames[1:],
+                   duration=120, loop=0)
+    out.items.append({'cat': 'anim', 'group': '필드', 'title': '필드 물 타일 (GIF)', 'path': 'anim/field-water.gif',
+                      'w': frames[0].width, 'h': frames[0].height})
+    print('anim')
+
+
 # ---------------------------------------------------------------- 덤프한 VRAM 에서 BG 그리기
 
 def read_ppu(path):
@@ -546,7 +666,7 @@ def check(rom, prefix, bc, bd, pset=None, night=False):
     return match_screen(draw_cells(rom, dec, w, h, buf, cg), dump_screen(prefix))
 
 EXPORTS = {'maps': export_maps, 'chr': export_chr, 'field': export_field,
-           'monsters': export_monsters, 'font': export_font}
+           'monsters': export_monsters, 'font': export_font, 'ui': export_ui, 'anim': export_anim}
 
 
 def export_all(rom, outdir, only=None, maps=None):
@@ -559,6 +679,11 @@ def export_all(rom, outdir, only=None, maps=None):
         else:
             fn(rom, out)
     return out.items
+
+
+def write_index(items, outdir):
+    with open(os.path.join(outdir, 'index.json'), 'w') as f:
+        json.dump(items, f, ensure_ascii=False, indent=0)
 
 
 def main():
@@ -581,8 +706,7 @@ def main():
     only = set(args.only.split(',')) if args.only else None
     maps = {tuple(int(v, 16) for v in m.split('/')) for m in args.maps.split(',')} if args.maps else None
     items = export_all(rom, args.out, only, maps)
-    with open(os.path.join(args.out, 'manifest.json'), 'w') as f:
-        json.dump(items, f, ensure_ascii=False, indent=0)
+    write_index(items, args.out)
     print(f'{len(items)} items -> {args.out}')
     return 0
 

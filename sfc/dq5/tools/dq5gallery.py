@@ -1,7 +1,7 @@
 """DQ5(SFC) 그래픽 갤러리. 롬에서 그림을 뽑아 work/gallery/index.html 하나로 훑어보게 한다.
 
 스프라이트를 새로 그릴 때 원작 그림을 찾아보는 용도다. 그림은 다른 도구의 내보내기 함수가 만든다.
-  dq5gfx.export_all      맵·CHR·필드·전투 몬스터·폰트 (+ 창·UI 같은 나머지 그림)
+  dq5gfx.export_all      맵·CHR·필드·전투 몬스터·폰트·창 타일·움직이는 타일
   dq5battlebg            전투 배경(있으면)
   dq5sprite.export_all   필드 인물 스프라이트(있으면)
 없는 모듈은 건너뛴다. index.html 은 상대 경로로만 그림을 가리키므로 폴더째 옮겨도 열린다.
@@ -9,6 +9,11 @@
 
 사용:
   python sfc/dq5/tools/dq5gallery.py rom/dq5.sfc [--out work/gallery] [--only maps,field]
+      [--gfx 폴더] [--sprites 폴더]
+--gfx 는 dq5gfx·전투 배경 그림을 쓸 곳(기본 OUT/gfx), --sprites 는 인물 스프라이트 폴더(기본 OUT/sprites).
+--sprites 폴더에 index.json 이 이미 있으면 다시 뽑지 않고 그 목록을 그대로 링크한다.
+index.html 은 이 폴더들을 OUT 기준 상대 경로로 가리킨다. 예: 에셋 저장소에서 --out sfc/dq5/gallery --gfx sfc/dq5/gfx
+--sprites sfc/dq5/sprites 로 돌리면 ../gfx/·../sprites/ 로 링크한다.
 """
 import argparse
 import glob
@@ -26,7 +31,7 @@ CATEGORIES = (
     ('maps', '실내 맵'), ('maps-attr', '맵 속성'), ('map-blocks', '맵 블록'), ('chr', '실내 CHR'),
     ('field', '필드'), ('field-blocks', '필드 블록·타일'), ('anim', '움직이는 타일'),
     ('sprites', '인물 스프라이트'), ('monsters', '전투 몬스터'), ('battlebg', '전투 배경'),
-    ('font', '폰트'), ('ui', '창·UI'), ('title', '타이틀·기타 BG'),
+    ('font', '폰트'), ('ui', '창·메뉴'),
 )
 
 
@@ -58,35 +63,48 @@ def battle_backgrounds(mod, rom, outdir):
     for n in range(mod.COUNT):
         for era in (0, 1, 2):
             img = mod.render(rom, n, era)
-            rel = f'bg{n:02X}-era{era}.png'
+            rel = f'{n:02X}-era{era}.png'
             img.save(os.path.join(outdir, rel))
             items.append({'cat': 'battlebg', 'group': f'시대 {era}', 'title': f'{n:02X} ($1949={era})', 'path': rel,
                           'w': img.width, 'h': img.height, 'note': '레코드 밖 팔레트 색은 자홍'})
     return items
 
 
-def collect(rom, out, only):
+def collect(rom, out, only, gfx_dir=None, sprite_dir=None):
     items = []
     gfx = importlib.import_module('dq5gfx')
-    sub = os.path.join(out, 'gfx')
-    items += [dict(i, path='gfx/' + i['path']) for i in gfx.export_all(rom, sub, only)]
+    gfx_dir = gfx_dir or os.path.join(out, 'gfx')
+    rel = os.path.relpath(gfx_dir, out)
+    got = gfx.export_all(rom, gfx_dir, only)
+    items += [dict(i, path=f'{rel}/' + i['path']) for i in got]
+    dirs = {'battlebg': os.path.join(gfx_dir, 'battlebg'), 'sprites': sprite_dir or os.path.join(out, 'sprites')}
     for name, cat in (('dq5battlebg', 'battlebg'), ('dq5sprite', 'sprites')):
         if only and cat not in only:
             continue
-        mod = optional(name)
-        if mod is None:
-            print(f'{name}: 모듈 없음, 건너뜀')
-            continue
-        sub = os.path.join(out, cat)
-        if hasattr(mod, 'export_all'):
-            got = run_module(mod, rom, sub, cat)
-        elif cat == 'battlebg' and hasattr(mod, 'render'):
-            got = battle_backgrounds(mod, rom, sub)
+        sub = dirs[cat]
+        index = os.path.join(sub, 'index.json')
+        if cat == 'sprites' and sprite_dir and os.path.exists(index):
+            with open(index) as f:
+                part = json.load(f)
+            print(f'{name}: {index} 의 {len(part)}개를 링크')
         else:
-            print(f'{name}: export_all 없음, 건너뜀')
-            continue
-        items += [dict(i, cat=i.get('cat', cat), path=f'{cat}/' + i['path']) for i in got]
-        print(f'{name}: {len(got)}')
+            mod = optional(name)
+            if mod is None:
+                print(f'{name}: 모듈 없음, 건너뜀')
+                continue
+            if hasattr(mod, 'export_all'):
+                part = run_module(mod, rom, sub, cat)
+            elif cat == 'battlebg' and hasattr(mod, 'render'):
+                part = battle_backgrounds(mod, rom, sub)
+            else:
+                print(f'{name}: export_all 없음, 건너뜀')
+                continue
+            print(f'{name}: {len(part)}')
+        if cat == 'battlebg':
+            got += [dict(i, path='battlebg/' + i['path']) for i in part]
+        rel = os.path.relpath(sub, out)
+        items += [dict(i, cat=i.get('cat', cat), path=f'{rel}/' + i['path']) for i in part]
+    gfx.write_index(got, gfx_dir)
     return items
 
 
@@ -216,11 +234,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('rom')
     ap.add_argument('--out', default='work/gallery')
-    ap.add_argument('--only', help='쉼표로 내보낼 묶음만(dq5gfx 의 maps,chr,field,monsters,font,ui,title, battlebg, sprites)')
+    ap.add_argument('--only', help='쉼표로 내보낼 묶음만(dq5gfx 의 maps,chr,field,monsters,font,ui,anim, battlebg, sprites)')
+    ap.add_argument('--gfx', help='dq5gfx·전투 배경 그림 폴더(기본 OUT/gfx)')
+    ap.add_argument('--sprites', help='인물 스프라이트 폴더(기본 OUT/sprites). index.json 이 있으면 그대로 링크')
     args = ap.parse_args()
     rom = Rom(open(args.rom, 'rb').read())
     only = set(args.only.split(',')) if args.only else None
-    items = collect(rom, args.out, only)
+    os.makedirs(args.out, exist_ok=True)
+    items = collect(rom, args.out, only, args.gfx, args.sprites)
     path = write_page(items, args.out)
     print(f'{len(items)} items -> {html.escape(path)}')
     return 0
