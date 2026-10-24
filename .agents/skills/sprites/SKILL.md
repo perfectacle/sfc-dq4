@@ -5,16 +5,16 @@ description: 포팅용 인물·몬스터 스프라이트를 그리거나 고칠 
 
 # 스프라이트
 
-이 스킬이 SPRITE-01, SPRITE-02 의 정본이다. 규격 수치의 정본은 [docs/dq4-sprite-format.md](../../../docs/dq4-sprite-format.md), 도구 사용법은 [tools/README.md](../../../tools/README.md) 다.
+이 스킬이 SPRITE-01, SPRITE-02 의 정본이다. 규격 수치의 정본은 [sfc/dq4/docs/dq4-sprite-format.md](../../../sfc/dq4/docs/dq4-sprite-format.md), 도구 사용법은 [sfc/dq4/tools/README.md](../../../sfc/dq4/tools/README.md) 다.
 
 ## 절차
 
-1. **원작을 먼저 잰다** — 바꾸려는 자리에 DQ5 가 무엇을 그리는지 VRAM·OAM·CGRAM 덤프로 꺼내 색 번호 행렬로 본다(`tools/lua/dq4objdump.lua` → `tools/dq4spritelab.py hero`). 크기·색 수·윤곽 색·눈 위치·프레임 수를 표로 적는다. 외부 사이트의 시트는 보조 참고일 뿐 치수의 근거가 아니다.
+1. **원작을 먼저 잰다** — 바꾸려는 자리에 DQ5 가 무엇을 그리는지 VRAM·OAM·CGRAM 덤프로 꺼내 색 번호 행렬로 본다(`sfc/dq4/tools/lua/dq4objdump.lua` → `sfc/dq4/tools/dq4spritelab.py hero`). 크기·색 수·윤곽 색·눈 위치·프레임 수를 표로 적는다. 외부 사이트의 시트는 보조 참고일 뿐 치수의 근거가 아니다.
    완료: 실측 표가 형식 문서에 있다.
-2. **정면 한 장을 격자에서 그린다** — `tools/dq4sprites.py` 의 문자 행렬에 직접 그린다. 실측 규칙(폭·높이·윤곽 1색·눈 1×2·바닥 윤곽 없음) 안에서 복장만 바꾼다.
-   완료: `uv run --locked python tools/dq4sprites.py` 가 색 수를 찍고 행 폭 검사를 통과한다.
-3. **같은 배경·같은 배율로 견준다** — `tools/dq4spritelab.py compare <이름>` 으로 원작 인물 옆에 놓고 8배 그림을 본다. 머리·몸 비율, 눈·콧수염이 분리되는지, 발이 땅에 붙는지를 본다.
-4. **MesenCE 에 띄운다** — `tools/dq4spritelab.py data <이름>` 뒤 `tools/lua/dq4sprite.lua` 로 실제 필드에서 걷게 한다. `TEST=1` 자동 보행 결과(`walk-test.txt`)와 화면을 확인하고, GUI 로 열어 사용자가 직접 보게 한다.
+2. **정면 한 장을 격자에서 그린다** — `sfc/dq4/tools/dq4sprites.py` 의 문자 행렬에 직접 그린다. 실측 규칙(폭·높이·윤곽 1색·눈 1×2·바닥 윤곽 없음) 안에서 복장만 바꾼다.
+   완료: `uv run --locked python sfc/dq4/tools/dq4sprites.py` 가 색 수를 찍고 행 폭 검사를 통과한다.
+3. **같은 배경·같은 배율로 견준다** — `sfc/dq4/tools/dq4spritelab.py compare <이름>` 으로 원작 인물 옆에 놓고 8배 그림을 본다. 머리·몸 비율, 눈·콧수염이 분리되는지, 발이 땅에 붙는지를 본다.
+4. **MesenCE 에 띄운다** — `sfc/dq4/tools/dq4spritelab.py data <이름>` 뒤 `sfc/dq4/tools/lua/dq4sprite.lua` 로 실제 필드에서 걷게 한다. `TEST=1` 자동 보행 결과(`walk-test.txt`)와 화면을 확인하고, GUI 로 열어 사용자가 직접 보게 한다.
 5. **사용자 확인 뒤에 넓힌다** — 정면이 확인되기 전에는 측면·후면·보행·다른 인물로 넓히지 않는다. 확인된 뒤 같은 규칙으로 나머지를 그리고 일지에 「채택 확인」 과 「1차 시안」 을 나눠 적는다.
 
 ## 규칙
