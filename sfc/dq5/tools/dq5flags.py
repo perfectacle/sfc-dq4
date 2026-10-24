@@ -5,7 +5,9 @@
   그 대화 번호를 쓰는 인물의 맵을 함께 적는다.
 - 인물 인라인 스크립트(01:C800): 06(뛰기)·09(기다림) 시험, 10(켜기)·11(AND)·55(바이트 쓰기).
 - 인물 목록 표: 12:839C(인물을 놓지 않음)·12:8449(목록 바꿈). 번호 bit7 이면 「꺼졌을 때」.
-- 맵별 루틴 표(15:F907) +2·+3.
+- 이벤트 스크립트(00:BEC3, 포인터 $19B3~$19B5): 10 idx mask(켜기)·20 idx mask(AND)·B0 idx mask(켜질 때까지 기다림).
+  롬에서 LDA #/STA $19B3·$19B4·$19B5 로 시작 주소를 찾아 아는 길이의 명령만 따라간다(모르는 명령에서 멈춤).
+- 맵별 루틴 표(15:F907) +2·+3, 맵 조건 표 01:9A12(35바이트 항목)·02:CAF6(6바이트 항목, 루틴 포인터).
 - 네이티브 코드의 7E:2190~220F 롱 주소 읽기·쓰기(LDA·STA·CMP·AND·ORA 등 long). 바이트 변수로 쓰는 칸이 많다.
 - 네이티브 코드의 BRK 0B(시험)·0C(켜기)·0D(끄기) mask idx(00:93BA). 롬 전체를 훑으므로 그림 뱅크 등 데이터를 빼려고
   코드 뱅크만 보고, 0B 는 바로 뒤가 BEQ·BNE 인 것, 0C·0D 는 바로 뒤가 흔한 명령인 것만 센다(놓치는 것이 있을 수 있음).
@@ -14,7 +16,7 @@
   python sfc/dq5/tools/dq5flags.py rom/dq5.sfc                 # 플래그 비트마다 켜는 곳·끄는 곳·보는 곳 개수와 첫 문맥
   python sfc/dq5/tools/dq5flags.py rom/dq5.sfc 2192.7          # 그 비트의 모든 참조
   python sfc/dq5/tools/dq5flags.py rom/dq5.sfc 2192            # 그 바이트의 모든 비트
-  python sfc/dq5/tools/dq5flags.py rom/dq5.sfc --source talk   # 출처 하나만(talk·npc·list·hook·code·long)
+  python sfc/dq5/tools/dq5flags.py rom/dq5.sfc --source talk   # 출처 하나만(talk·npc·list·hook·event·code·long)
   python sfc/dq5/tools/dq5flags.py rom/dq5.sfc --check flagtrace.txt ...
       # sfc/dq5/tools/lua/dq5flagtrace.lua 가 게임에서 잡은 BRK 0B·0C·0D 자리가 이 목록(코드 출처)에 있는지
 """
@@ -157,6 +159,74 @@ def refs_hooks(rom):
     return out
 
 
+# 00:BEC3 이벤트 스크립트 명령 길이(00:BFBB 로 넘기는 값). 00~0F 는 2(이동, 00:BEE3). 모르는 명령에서 멈춘다.
+EVENT_LEN = {0x10: 3, 0x20: 3, 0x60: 3, 0x90: 7, 0x91: 2, 0xA0: 4, 0xB0: 3, 0xC1: 2, 0xC2: 1, 0xC4: 4,
+             0xC6: 1, 0xC7: 2, 0xC8: 2, 0xC9: 1}
+
+
+def event_script_starts(rom):
+    """LDA #lo / STA $19B3 / LDA #hi / STA $19B4 / LDA #bank / STA $19B5 를 찾는다. [(부르는 곳, 스크립트 주소)]."""
+    out = []
+    pat = re.compile(rb'\xa9(.)\x8d\xb3\x19\xa9(.)\x8d\xb4\x19\xa9(.)\x8d\xb5\x19', re.S)
+    for m in pat.finditer(rom.d):
+        i = m.start()
+        lo, hi, bank = m.group(1)[0], m.group(2)[0], m.group(3)[0]
+        out.append((i // 0x8000 << 16 | 0x8000 + i % 0x8000, bank << 16 | hi << 8 | lo))
+    return out
+
+
+def refs_event(rom):
+    out, seen = [], set()
+    todo = [(f'{c >> 16:02X}:{c & 0xFFFF:04X}', a) for c, a in event_script_starts(rom)]
+    while todo:
+        caller, a = todo.pop()
+        if a in seen:
+            continue
+        seen.add(a)
+        last_msg = None
+        for _ in range(400):
+            op = rom.u8(a)
+            if op == 0xFF:
+                break
+            if op == 0xC3:            # 다음 3바이트 주소로 뛴다(00:C122)
+                todo.append((caller, rom.u24(a + 1)))
+                break
+            if op == 0x60:
+                last_msg = rom.u16(a + 1)
+            if op in (0x10, 0x20, 0xB0):
+                idx, mask = rom.u8(a + 1), rom.u8(a + 2)
+                kind = {0x10: 'set', 0x20: 'clear', 0xB0: 'test'}[op]
+                if kind == 'clear':
+                    mask ^= 0xFF
+                note = ' 기다림' if op == 0xB0 else ''
+                out.append(('event', idx, mask, kind, f'이벤트 스크립트 {a:06X} (시작 {caller}){note}', last_msg))
+            n = 2 if op < 0x10 else EVENT_LEN.get(op)
+            if n is None:
+                break
+            a += n
+    return out
+
+
+# [BC][BD][f][m] 로 시작하는 맵 조건 표: (주소, 항목 크기, 이름, BC 특수값)
+COND_TABLES = ((0x019A12, 0x23, '01:9A12 표', {0xFE: '필드'}),
+               (0x02CAF6, 6, '02:CAF6 표', {0xFE: '필드', 0xFD: '어디서나'}))
+
+
+def refs_tables(rom):
+    out = []
+    for base, size, name, special in COND_TABLES:
+        a = base
+        while rom.u8(a) != 0xFF:
+            bc, bd, n, m = (rom.u8(a + i) for i in range(4))
+            if n != 0xFF:
+                where = special.get(bc) or f'{bc:02X}/' + ('**' if bd in (0xFF, 0xFC) else f'{bd:02X}')
+                extra = f' → {base >> 16:02X}:{rom.u16(a + 4):04X}' if size == 6 else ''
+                out.append(('hook', n & 0x7F, m, 'test',
+                            f'{name} {where}{extra} ({"꺼짐" if n & 0x80 else "켜짐"}일 때)', None))
+            a += size
+    return out
+
+
 def refs_code(rom):
     out = []
     data = rom.d
@@ -197,10 +267,18 @@ def refs_long(rom):
     return out
 
 
+# 번호를 X 로 받아 7E:2190,X 에 쓰는 공용 자리. 쓰기 기록의 PC 로 어느 길로 바뀌었는지 가른다.
+GENERIC_WRITERS = {0x0093EF: 'BRK 0C', 0x009406: 'BRK 0D', 0x06B0C6: '대화 18', 0x06B0DB: '대화 17',
+                   0x06B0EC: '대화 19', 0x01D2EE: '인물 55', 0x00BFAF: '이벤트 스크립트(00:BEC3) 켜기',
+                   0x00BFE5: '이벤트 스크립트(00:BEC3) 끄기', 0x12F843: '상자 사건(12:F83C)',
+                   0x01CB19: '인물 10', 0x01CB31: '인물 11'}   # 이 둘은 STA $2190,X(3바이트)
+
+
 def check(rom, paths):
-    """게임에서 잡은 BRK 0B·0C·0D 자리와 롱 주소 쓰기(쓴 뒤 PC - 4 가 STA long)가 정적 훑기에 있는지."""
+    """게임에서 잡은 BRK 0B·0C·0D 자리와 롱 주소 쓰기를 정적 목록과 맞춘다.
+    쓰기는 PC - 4 가 공용 자리면 그 길로 세고, 아니면 그 STA long 이 목록에 있어야 한다."""
     static = {where.split()[1] for _, _, _, _, where, _ in refs_code(rom) + refs_long(rom)}
-    sites, writes, other = {}, {}, 0
+    sites, direct, via, other = {}, {}, {}, 0
     for p in paths:
         for line in open(p):
             f = line.split()
@@ -209,21 +287,26 @@ def check(rom, paths):
             elif len(f) >= 4 and f[1] == 'write':
                 bank, pc = (int(x, 16) for x in f[3][3:].split(':'))
                 a = bank << 16 | (pc - 4)
-                if rom.u8(a) in (0x8F, 0x9F):
-                    writes[f'{bank:02X}:{pc - 4:04X}'] = f'{f[2]} (STA long)'
+                g = GENERIC_WRITERS.get(a) or GENERIC_WRITERS.get(a + 1)
+                if g:
+                    via[g] = via.get(g, 0) + 1
+                elif rom.u8(a) in (0x8F, 0x9F):
+                    direct[f'{bank:02X}:{pc - 4:04X}'] = f'{f[2]} (STA long)'
                 else:
                     other += 1
-    found = {**sites, **writes}
+                    print(f'모르는 쓰기 {f[2]} pc={f[3][3:]}')
+    found = {**sites, **direct}
     missing = sorted(k for k in found if k not in static)
     for k in missing:
         print(f'없음 {k} {found[k]}')
-    print(f'BRK 자리 {len(sites)}개, 롱 쓰기 {len(writes)}개 중 {len(found) - len(missing)}개가 목록에 있음'
-          f'(그 밖의 쓰기 {other}개는 BRK 처리기·스크립트 명령·간접 쓰기)')
-    return 1 if missing else 0
+    print(f'BRK 자리 {len(sites)}개, 직접 롱 쓰기 {len(direct)}개 중 {len(found) - len(missing)}개가 목록에 있음')
+    print('공용 자리로 쓴 것: ' + (', '.join(f'{k} {n}' for k, n in sorted(via.items())) or '없음') + f', 모르는 쓰기 {other}')
+    return 1 if missing or other else 0
 
 
 def collect(rom, sources):
-    fns = {'talk': refs_talk, 'npc': refs_npc, 'list': refs_lists, 'hook': refs_hooks, 'code': refs_code,
+    fns = {'talk': refs_talk, 'npc': refs_npc, 'list': refs_lists, 'hook': lambda r: refs_hooks(r) + refs_tables(r),
+           'code': refs_code, 'event': refs_event,
            'long': refs_long}
     refs = []
     for s in sources:
@@ -239,7 +322,8 @@ def by_bit(refs):
         if kind in ('write', 'compare', 'read'):
             out[(addr, -1)].append((src, kind, val, where, ctx))
             continue
-        bits = bits_of(val ^ 0xFF if kind == 'clear' else val)
+        # 끄기는 출처마다 AND 마스크를 뒤집어 「끄는 비트」로 넘긴다
+        bits = bits_of(val)
         for b in bits:
             out[(addr, b)].append((src, kind, val, where, ctx))
     return out
@@ -253,13 +337,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('rom')
     ap.add_argument('flag', nargs='?')
-    ap.add_argument('--source', action='append', choices=['talk', 'npc', 'list', 'hook', 'code', 'long'])
+    ap.add_argument('--source', action='append', choices=['talk', 'npc', 'list', 'hook', 'code', 'long', 'event'])
     ap.add_argument('--check', nargs='+')
     args = ap.parse_args()
     rom = Rom(open(args.rom, 'rb').read())
     if args.check:
         return check(rom, args.check)
-    refs = by_bit(collect(rom, args.source or ['talk', 'npc', 'list', 'hook', 'code', 'long']))
+    refs = by_bit(collect(rom, args.source or ['talk', 'npc', 'list', 'hook', 'event', 'code', 'long']))
 
     if args.flag:
         m = re.fullmatch(r'(?:7E:?)?([0-9A-Fa-f]{4})(?:\.([0-7]))?', args.flag)

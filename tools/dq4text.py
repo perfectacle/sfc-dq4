@@ -288,10 +288,16 @@ def valid_messages(rom):
     return out
 
 
-TALK_KIND = 0x058B          # 5 이상이면 메시지 앞에 「＊「」 를 저절로 넣음(16:$85C5), 첫 바이트가 F1 이면 빼고
+AUTO_QUOTE_FROM = 0x0500    # 이 번호부터 메시지 앞에 「＊「」 를 저절로 넣음(첫 바이트가 F1 이면 빼고). 16:$85C5 가 보는
+                            # $058B 는 16:$8672 만 쓰고 값은 언제나 메시지 번호 위 바이트라 부르는 쪽과 상관없다
 AUTO_PREFIX = [0x70, 0x6F]
 SUBST = {0xEF, 0xF2, 0xF3, 0xF5, 0xF6, 0xF7, 0xF8}   # 메시지 밖 인자로 글자를 넣는 제어
 SUBST_MAX = 12                                       # 치환 하나가 넣는 글자 바이트 수의 상한(이름 + もどき 등)
+
+
+def auto_quote(m, bs):
+    """메시지 m(글자 바이트 bs)을 찍을 때 앞에 「＊「」 가 붙는지. 대화·이벤트·전투 어느 쪽에서 불러도 같다."""
+    return m >= AUTO_QUOTE_FROM and bs[0] != 0xF1
 
 
 def _match(line, stream, i, j):
@@ -313,12 +319,12 @@ def _match(line, stream, i, j):
 
 def compare(rom, msgs, ram_path):
     """덤프의 창 줄들이 메시지 글자열(차례로 찍은 메시지들, 치환 밖의 제어 바이트는 뺌)에 그 순서대로 들어 있는지.
-    덤프의 $058B 가 5 이상이면 자동 「＊「」 도 넣어 비교한다."""
+    0500 이상 메시지는 자동 「＊「」 도 넣어 비교한다."""
     lines, where, ram = dump_lines(ram_path)
     stream = []
     for m in msgs:
         bs = shown(message_bytes(rom, m))
-        if ram[TALK_KIND] >= 5 and bs[0] != 0xF1:
+        if auto_quote(m, bs):
             bs = AUTO_PREFIX + bs
         stream += [b for b in bs if b < CONTROL_MIN or b in SUBST]
     pos = 0
@@ -390,6 +396,165 @@ def window_text(rom, g, n):
             run.append(b)
     parts.append(text(run))
     return ''.join(parts)
+
+
+WINDOW_RECORDS = (0x16, 0xA48A)   # 창 번호 × 2 → 창 레코드 주소(16:$94B5 가 16:$A488 에서 이 주소를 읽음)
+WINDOW_COUNT = 0x73               # 16:$A572(창 문자열 표) 앞까지 116개. 마지막 73 은 끝을 정할 다음 포인터가 없어 뺌
+# 목록 바이트 Dn 의 n(16:$98EE). 0~5 는 레코드의 항목을 그대로, 6 이상은 표 16:$9905 의 루틴이 항목을 만든다.
+LIST_KINDS = {0x6: '16:$9EC3', 0x7: '16:$9ED5', 0x8: '16:$9C18', 0x9: '16:$9E28', 0xA: '16:$9E99',
+              0xB: '16:$9EE7', 0xC: '16:$A328', 0xD: '16:$A083', 0xE: '16:$A022', 0xF: '16:$9EFC'}
+
+
+def window_record(rom, n):
+    """창 n 의 레코드: (주소, 바이트, 별칭). 첫 바이트의 위 니블이 1 인 레코드는 다음 창의 레코드를 쓰고
+    처음 것만 $03D5 = 낮은 니블 × 16 + 1 로 둔다(16:$94DB). 길이는 다음 포인터까지(16:$94F9)."""
+    alias = []
+    while True:
+        addr = rom.word(WINDOW_RECORDS[0], WINDOW_RECORDS[1] + 2 * n)
+        end = rom.word(WINDOW_RECORDS[0], WINDOW_RECORDS[1] + 2 * n + 2)
+        bs = [rom.byte(0x16, a) for a in range(addr, end)]
+        if bs[0] & 0xF0 != 0x10:
+            return addr, bs, alias
+        alias.append((n, bs[0] & 0x0F))
+        n += 1
+
+
+def window_layout(rom, n):
+    """창 n 의 위치·크기·본문(머리 16:$9505, 본문 바이트 갈래 16:$9304·$96B0). x·y·w 는 화면 칸(8화소)."""
+    addr, bs, alias = window_record(rom, n)
+    b0, b1 = bs[0], bs[1]
+    head = 3 if b1 & 0x04 else 2
+    lay = {'window': n, 'record': addr, 'alias': alias, 'head': bs[:head],
+           'x': 2 * (b0 & 0x0F) if b0 >> 4 else None, 'y': 2 * (b1 >> 4) if b0 >> 4 else None,
+           'w': 2 * (b0 >> 4) or None,
+           'width_routine': None if b0 >> 4 else b0 & 0x0F, 'cols': b1 & 0x03,
+           'init_routine': bool(b1 & 0x08), 'cursor': bs[2] if head == 3 else None, 'body': bs[head:]}
+    toks, group, i, body = [], 0, 0, lay['body']
+    while i < len(body):
+        b = body[i]
+        if b < 0x80:
+            e = window_entry(rom, group, b)
+            toks.append(('item', group, b, window_text(rom, group, b) if e[0] == 'str' else f'〈{b:02X}〉'))
+        elif b < 0xA0:
+            toks.append(('cond', b & 0x1F))
+        elif b < 0xA4:
+            toks.append(('condtable', b & 0x03))
+        elif b < 0xA8:
+            group = b & 0x03
+            toks.append(('group', group))
+        elif b < 0xB0:
+            toks.append(('indent', b - 0xA8))
+        elif b < 0xC0:
+            toks.append(('flag', b & 0x0F))
+        elif b in (0xC0, 0xC1) and i + 1 < len(body):
+            toks.append(('side' if b == 0xC0 else 'call', body[i + 1]))
+            i += 1
+        elif b == 0xC6:
+            toks.append(('newline',))
+        elif b < 0xD0:
+            toks.append(('raw', b))
+        elif b < 0xE0:
+            toks.append(('list', b & 0x0F))
+        else:
+            toks.append(('mode', b & 0x1F))
+        i += 1
+    lay['tokens'] = toks
+    # $03CB(셋째 바이트, 없으면 3)의 bit7-6 이 1 이면 틀을 영역 안쪽 한 칸에 그림(전투 메시지 창 3D·62).
+    lay['inset'] = head == 3 and bs[2] >> 6 == 1 and lay['w'] is not None
+    lay['frame'] = (lay['x'] + 1, lay['y'], lay['w'] - 2) if lay['inset'] else (lay['x'], lay['y'], lay['w'])
+    return lay
+
+
+def window_callers(rom):
+    """롬에서 창을 여는 BRK(뱅크 16 함수 07·09, `00 07 6F nn`·`00 09 6F nn`)를 찾아 창 번호 → [(뱅크, 주소)].
+    함수 09 는 $F7 = $07B9 로 두고 연다(16:$89D0). 바이트열로 찾으므로 데이터가 우연히 같은 꼴이면 섞일 수 있다."""
+    out = {}
+    for m in re.finditer(rb'\x00[\x07\x09]\x6f', rom.prg):
+        o = m.start()
+        if o + 3 < len(rom.prg):
+            out.setdefault(rom.prg[o + 3], []).append((o // 0x4000, 0x8000 + o % 0x4000))
+    return out
+
+
+def token_str(t):
+    kind = t[0]
+    if kind == 'item':
+        return t[3] if t[1] == 0 else f'{t[1]}:{t[3]}'
+    if kind == 'list':
+        return f'[D{t[1]:X}' + (f' {LIST_KINDS[t[1]]}' if t[1] in LIST_KINDS else '') + ']'
+    if kind == 'newline':
+        return '/'
+    return {'cond': '?{:02X}', 'condtable': '?표{}', 'group': '그룹{}', 'indent': '+{}', 'flag': 'B{:X}',
+            'side': '곁창{:02X}', 'call': 'C1({:02X})', 'raw': '{{{:02X}}}', 'mode': 'E{:02X}'}[kind].format(t[1])
+
+
+def layout_line(lay):
+    if lay['w']:
+        pos = f'x{lay["x"]:2d} y{lay["y"]:2d} w{lay["w"]:2d}' + (' 틀안쪽' if lay['inset'] else '')
+    else:
+        pos = f'자리 루틴 {lay["width_routine"]}  '
+    alias = ''.join(f' ={m:02X}({c})' for m, c in lay['alias'])
+    head = ' '.join(f'{b:02X}' for b in lay['head'])
+    body = ' '.join(token_str(t) for t in lay['tokens'])
+    return f'{lay["window"]:02X} 16:${lay["record"]:04X} {pos} 열{lay["cols"]} [{head}]{alias}  {body}'
+
+
+def _ppu_cells(path):
+    """textlayout.lua 의 ppu.txt 를 열기 순번 → {nametable 주소: 그 열기 뒤 처음 쓴 값} 으로.
+    창을 닫을 때 같은 칸에 배경을 되돌려 쓰므로 틀은 처음 값에서 찾는다."""
+    cells = {}
+    for line in open(path):
+        if line.strip():
+            k, a, first, _ = line.split()
+            cells.setdefault(int(k), {})[int(a, 16)] = int(first, 16)
+    return cells
+
+
+def measure_window(cells, scroll_x, scroll_y, at=None):
+    """한 진입에서 nametable 에 쓴 ┌(86)와, 그 오른쪽 ┐(89)·아래 └(87)로 화면 칸 (x, y, w, h).
+    at=(x, y) 의 ┌ 가 있으면 그것을, 없으면 처음 쓴 ┌ 를 쓴다(같은 진입에서 다른 창을 다시 그리기도 함).
+    화면 칸 = (nametable 화소 − 스크롤) / 8 을 64×60 칸으로 감음."""
+    def screen(a):
+        t, off = (a - 0x2000) >> 10, (a - 0x2000) & 0x3FF
+        return ((((t & 1) * 256 + (off & 0x1F) * 8 - scroll_x) // 8) % 64,
+                ((((t >> 1) & 1) * 240 + (off >> 5) * 8 - scroll_y) // 8) % 60)
+    grid = {screen(a): v for a, v in cells.items() if (a - 0x2000) & 0x3FF < 0x3C0}
+    tl = next((screen(a) for a, v in cells.items() if v == 0x86 and (a - 0x2000) & 0x3FF < 0x3C0), None)
+    if at in grid and grid[at] == 0x86:
+        tl = at
+    if not tl:
+        return None
+    x, y = tl
+    w = next((k + 1 for k in range(1, 64) if grid.get((x + k, y)) == 0x89), None)
+    h = next((k + 1 for k in range(1, 60) if grid.get((x, y + k)) == 0x87), None)
+    return x, y, w, h
+
+
+def compare_layouts(rom, d):
+    """textlayout.lua 결과 폴더 d 의 창 열기마다 레코드의 x·y·w 와 nametable 의 틀 자리를 견준다. (같음, 다름) 수."""
+    cells = _ppu_cells(os.path.join(d, 'ppu.txt'))
+    opens = [ln.split() for ln in open(os.path.join(d, 'open.txt')) if ' open' in ln]
+    same_n = diff_n = 0
+    for k, row in enumerate(opens, 1):
+        f = dict(p.split('=', 1) for p in row[2:] if '=' in p)
+        n = int(f['F6'], 16)
+        if n >= WINDOW_COUNT:
+            continue
+        lay = window_layout(rom, n)
+        # 틀은 NMI 가 나중 프레임에 옮기므로 다음 창을 연 뒤에 쓰이기도 한다. 이 열기 뒤의 쓰기를 모두 본다.
+        later = {}
+        for j in sorted(c for c in cells if c >= k):
+            later.update({a: v for a, v in cells[j].items() if a not in later})
+        got = measure_window(later, *(int(v) for v in f['scroll'].split(',')), at=(lay['x'], lay['y']))
+        want = lay['frame']
+        if not got:
+            print(f'{d}: 열기 {k} 창 {n:02X} 틀을 못 찾음')
+            continue
+        same = all(w is None or w == g for w, g in zip(want, got))
+        same_n, diff_n = same_n + same, diff_n + (not same)
+        print(f'{d}: 열기 {k} 창 {n:02X} 레코드 x{want[0]} y{want[1]} w{want[2]} / nametable x{got[0]} y{got[1]} '
+              f'w{got[2]} h{got[3]} {"같음" if same else "다름"}')
+    return same_n, diff_n
 
 
 # 포팅용 기호 텍스트. 글자는 유니코드로, 제어 바이트는 {이름} 이나 {이름:인자} 로, 그 밖은 {XX}(16진 한 바이트).
@@ -491,7 +656,7 @@ def export_messages(rom):
         out.append({
             'id': f'{m:04X}', 'bank': f'{bank:02X}', 'addr': f'${addr:04X}', 'phase': phase,
             'codes': _hex(codes), 'bytes': _hex(bs), 'sym': symbolize(bs),
-            'auto_quote': bs[0] != 0xF1, 'auto_period': shown(bs) != bs,
+            'auto_quote': auto_quote(m, bs), 'auto_period': shown(bs) != bs,
             'text': text(shown(bs)),
         })
     return out
@@ -522,6 +687,34 @@ def export_windows(rom):
             if e[0] == 'str':
                 row.update(bytes=_hex(e[2]), sym=symbolize(e[2], _window_ref(rom, g)), text=window_text(rom, g, n))
             out.append(row)
+    return out
+
+
+def export_layouts(rom):
+    """창 레코드마다 자리·크기와 본문 바이트의 갈래. 항목 글은 dq4-windows 의 (group, entry) 로 찾는다."""
+    callers, out = window_callers(rom), []
+    for n in range(WINDOW_COUNT):
+        lay = window_layout(rom, n)
+        body = []
+        for t in lay['tokens']:
+            op = {'op': t[0]}
+            if t[0] == 'item':
+                op.update(group=t[1], entry=f'{t[2]:02X}', text=t[3])
+            elif t[0] == 'list':
+                op.update(kind=t[1], routine=LIST_KINDS.get(t[1]))
+            elif t[0] in ('side', 'call'):
+                op.update(arg=f'{t[1]:02X}')
+            elif t[0] != 'newline':
+                op.update(arg=t[1])
+            body.append(op)
+        out.append({
+            'window': f'{n:02X}', 'record': _where(0x16, lay['record']), 'head': _hex(lay['head']),
+            'alias': ' '.join(f'{m:02X}:{c}' for m, c in lay['alias']),
+            'x': lay['x'], 'y': lay['y'], 'w': lay['w'], 'inset': lay['inset'],
+            'place_routine': lay['width_routine'], 'cols': lay['cols'], 'cursor': lay['cursor'],
+            'callers': ' '.join(_where(b, a) for b, a in callers.get(n, [])),
+            'tokens': ' '.join(token_str(t) for t in lay['tokens']), 'body': body,
+        })
     return out
 
 
@@ -595,7 +788,7 @@ def check_export(rom, msgs, windows, names):
     return bad == 0
 
 
-def write_export(out_dir, msgs, windows, names):
+def write_export(out_dir, msgs, windows, names, layouts):
     os.makedirs(out_dir, exist_ok=True)
     legend = {
         'controls': {SYMBOLS[b]: {'byte': f'{b:02X}', 'meaning': CONTROLS[b],
@@ -604,14 +797,17 @@ def write_export(out_dir, msgs, windows, names):
         'escape': '{XX} = 글자 바이트 XX(16진). ド 는 타일 65, 탁점 3D+ト 는 {3D}ト, 타일 66~69(じだどぶ)는 {66}~{69}',
         'slot': '{NAME:k} 등의 k = 인자 목록 $F9+k(메시지를 부르는 쪽이 채움)',
         'window': '{CALL:nn} = 같은 그룹의 루틴 항목 nn(값 찍기), {INS:nn} = 문자열 항목 nn 끼워 넣기',
-        'auto_quote': 'true 면 $058B ≥ 5 인 대화에서 앞에 ＊「 가 붙음(첫 바이트가 F1 이면 false)',
+        'auto_quote': 'true 면 화면에서 앞에 ＊「 가 붙음. 번호 0500 이상이고 첫 바이트가 F1 이 아닌 메시지(16:$85C5)',
         'auto_period': 'true 면 화면에서 끝 {END} 앞에 。 가 붙음(16:$805A)',
+        'layout': 'x·y·w 는 화면 칸(8화소). inset 이면 틀을 x+1 에 w−2 로 그림. place_routine 이면 자리·폭을 표 16:$A72C '
+                  '의 루틴이 정함. tokens: 글 = 창 문자열 항목, [Dn] 목록 시작(n ≥ 6 은 루틴이 항목을 만듦), +n 들여쓰기, '
+                  '?nn 항목 루틴, 곁창nn 커서를 따라 함께 여는 창, C1(nn) 루틴, / 줄바꿈, Bn·En·?표n·그룹n 은 docs 참고',
     }
-    files = {'dq4-messages': msgs, 'dq4-windows': windows, 'dq4-names': names}
+    files = {'dq4-messages': msgs, 'dq4-windows': windows, 'dq4-names': names, 'dq4-window-layouts': layouts}
     for name, rows in files.items():
         with open(os.path.join(out_dir, name + '.json'), 'w', encoding='utf-8') as f:
             json.dump({'legend': legend, 'rows': rows}, f, ensure_ascii=False, indent=1)
-        cols = list(dict.fromkeys(k for r in rows for k in r if k not in ('codes', 'bytes', 'text')))
+        cols = list(dict.fromkeys(k for r in rows for k in r if k not in ('codes', 'bytes', 'text', 'body')))
         with open(os.path.join(out_dir, name + '.tsv'), 'w', encoding='utf-8') as f:
             f.write('\t'.join(cols) + '\n')
             for r in rows:
@@ -625,6 +821,19 @@ def main():
         for b, h, n, desc in control_table(rom):
             print(f'{b:02X} 16:${h:04X} 메시지 {n:4d}  {desc}')
         return
+    if sys.argv[2] == 'windows' and '--compare' in sys.argv:
+        total = [0, 0]
+        for d in sys.argv[sys.argv.index('--compare') + 1:]:
+            s, b = compare_layouts(rom, d)
+            total = [total[0] + s, total[1] + b]
+        print(f'같음 {total[0]}, 다름 {total[1]}')
+        sys.exit(0 if total[1] == 0 else 1)
+    if sys.argv[2] == 'windows' and '--layout' in sys.argv:
+        callers = window_callers(rom)
+        for n in range(WINDOW_COUNT):
+            at = ' '.join(_where(b, a) for b, a in callers.get(n, []))
+            print(layout_line(window_layout(rom, n)) + (f'  ← {at}' if at else ''))
+        return
     if sys.argv[2] == 'windows':
         for g, count in enumerate(WINDOW_COUNTS):
             for n in range(count):
@@ -636,7 +845,7 @@ def main():
         args = [a for a in sys.argv[3:] if not a.startswith('--')]
         msgs, windows, names = export_messages(rom), export_windows(rom), export_names(rom)
         if '--check' not in sys.argv:
-            write_export(args[0] if args else 'work/text', msgs, windows, names)
+            write_export(args[0] if args else 'work/text', msgs, windows, names, export_layouts(rom))
         sys.exit(0 if check_export(rom, msgs, windows, names) else 1)
     if sys.argv[2] == 'all':
         ms = valid_messages(rom)
