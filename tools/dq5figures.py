@@ -328,6 +328,40 @@ def fig_field(rom):
     save(out, 'dq5-field-compare.webp')
 
 
+def fig_mongfx(rom):
+    """전투 화면에서 잘라 낸 몬스터와 dq5mongfx.py 로 롬에서 그린 그림. 오른쪽 상자는 조각(빨강 16x16, 노랑 8x8, 파랑 반전 복사).
+    화면은 이벤트 전투의 몬스터 번호를 바꿔 tools/lua/battledump.lua 로 1000프레임에 찍은 work/all/t<번호>/s01000.png
+    (docs/journal/dq5/ 의 「전투 몬스터 그림」 일지 3절 명령, m = 00·60·A0·E8)."""
+    from dq5mongfx import decode, match_screen, monster
+    from dq5mongfx import render as render_monster
+    rows = []
+    for m in (0x00, 0x60, 0xA0, 0xE8):
+        _, _, ox, oy = match_screen(rom, m, f'work/all/t{m:02X}/s01000.png')
+        spr = render_monster(rom, m, None, 2)
+        shot = Image.open(f'work/all/t{m:02X}/s01000.png').convert('RGB')
+        crop = shot.crop((ox, oy, ox + spr.width // 2, oy + spr.height // 2)).resize(spr.size, Image.NEAREST)
+        right = Image.new('RGB', spr.size, (40, 40, 56))
+        right.paste(spr, (0, 0), spr)
+        d = ImageDraw.Draw(right)
+        for x, y, big, _, flip in decode(rom, monster(rom, m)[0])['pieces']:
+            n = 16 if big else 8
+            color = (64, 160, 255) if flip else (255, 64, 64) if big else (255, 220, 0)
+            d.rectangle(((x + 1) * 2, y * 2, (x + 1 + n) * 2 - 1, (y + n) * 2 - 1), outline=color)
+        col = max(spr.width, 112)
+        row = Image.new('RGB', (col * 2 + 16, spr.height + 16), (24, 24, 24))
+        row.paste(crop, (0, 16))
+        row.paste(right, (col + 16, 16))
+        label(row, f'MesenCE #{m:02X}')
+        label(row, 'dq5mongfx.py', (col + 16, 0))
+        rows.append(row)
+    out = Image.new('RGB', (max(r.width for r in rows), sum(r.height + 8 for r in rows)), (24, 24, 24))
+    y = 0
+    for r in rows:
+        out.paste(r, (0, y))
+        y += r.height + 8
+    save(out, 'dq5-mongfx-compare.webp')
+
+
 def fig_transition():
     """맵 전환 전후 30프레임 간격 화면(wsnap.lua, 1560~1770)."""
     files = [f for f in sorted(glob.glob('work/wdump/s[0-9]*.png')) if 1560 <= int(f[-9:-4]) <= 1770]
@@ -373,6 +407,7 @@ def main():
     fig_field(rom)
     fig_transition()
     fig_textctl()
+    fig_mongfx(rom)
     os.remove(TMP)
 
 

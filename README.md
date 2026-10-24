@@ -52,6 +52,7 @@ dq5(SFC DQ5 엔진):
 - [docs/dq5-field-format.md](docs/dq5-field-format.md): DQ5 필드(세계 지도) 형식
 - [docs/dq5-text-format.md](docs/dq5-text-format.md): DQ5 메시지(허프만 부호)·제어 코드·폰트·대화 스크립트·이름 문자열·메뉴 창 문자열
 - [docs/dq5-data-format.md](docs/dq5-data-format.md): DQ5 게임 데이터(상점 품목·물건 가격·물건 표·몬스터·전투 조우)
+- [docs/dq5-graphics-format.md](docs/dq5-graphics-format.md): DQ5 전투 몬스터 그림(레코드·머리·조각·타일 압축·팔레트)
 
 dq4(FC DQ4 원작):
 
@@ -91,6 +92,7 @@ dq4(FC DQ4 원작):
 - [2026-10-25-06: 전투 조우 표](docs/journal/dq5/2026-10-25-06-encounter.md)
 - [2026-10-25-07: 메시지 제어 코드, 대화 조건, 메뉴 문자열](docs/journal/dq5/2026-10-25-07-textctl.md)
 - [2026-10-25-08: 디버그 모드 찾기와 장면 이동 도구](docs/journal/dq5/2026-10-25-08-warp.md)
+- [2026-10-25-09: 전투 몬스터 그림](docs/journal/dq5/2026-10-25-09-mongfx.md)
 
 #### dq4
 
