@@ -10,7 +10,8 @@
   ui       창·메뉴 BG3 타일 149개(04:E528)와 BG3 팔레트(04:98D7), 그 타일로 짠 창 견본
   anim     필드의 움직이는 타일: 타일 454~459 8벌(1E:D0FF RLE), 물 타일 4·5·20·21 을 한 픽셀씩 돌린 16단계
 
-결과는 OUT(기본 work/gfx)에 쓰고, 항목 목록을 OUT/manifest.json 에 남긴다(tools/dq5gallery.py 가 읽는다).
+결과는 OUT(기본 work/gfx)에 쓰고, 항목 목록(파일마다 분류·제목·크기·롬 주소)을 OUT/index.json 에 남긴다.
+파일 이름은 맵이면 <BC>-<BD>[-변형].png(변형: night 밤 팔레트, setNN 플래그 팔레트 세트, annot 속성 겹침, blocks 블록 모음).
 롬에서 뽑은 그림이므로 저장소에 커밋하지 않는다.
 
 사용:
@@ -249,7 +250,7 @@ def export_maps(rom, out, only=None):
                     blocks=len(blocks), chrs=len(dec.chr_map))
         day_cg = map_cgram(rom, bc, bd)
         day = draw_cells(rom, dec, w, h, buf, day_cg)
-        out.save(day, f'maps/{name}-day.png', 'maps', f'{bc:02X}/{bd:02X} 낮', group, **meta)
+        out.save(day, f'maps/{name}.png', 'maps', f'{bc:02X}/{bd:02X} 낮', group, **meta)
         night_cg = map_cgram(rom, bc, bd, alt=True)
         if night_cg != day_cg:
             out.save(draw_cells(rom, dec, w, h, buf, night_cg), f'maps/{name}-night.png', 'maps',
@@ -264,7 +265,7 @@ def export_maps(rom, out, only=None):
                              f'maps/{name}-set{pset:02X}{"-night" if alt else ""}.png', 'maps',
                              f'{bc:02X}/{bd:02X} {when} 세트 {pset:02X}', group, **meta, note=f'{cond} 이면 01:9771 이 바꾸는 팔레트')
                 break
-        out.save(attr_overlay(day, w, h, buf, exits), f'maps/{name}-attr.png', 'maps-attr',
+        out.save(attr_overlay(day, w, h, buf, exits), f'maps/{name}-annot.png', 'maps-attr',
                  f'{bc:02X}/{bd:02X} 속성', group, **meta)
         colors = cgram_colors(day_cg)
         tc = TileCache(rom, dec.high, colors)
@@ -680,6 +681,11 @@ def export_all(rom, outdir, only=None, maps=None):
     return out.items
 
 
+def write_index(items, outdir):
+    with open(os.path.join(outdir, 'index.json'), 'w') as f:
+        json.dump(items, f, ensure_ascii=False, indent=0)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('rom')
@@ -700,8 +706,7 @@ def main():
     only = set(args.only.split(',')) if args.only else None
     maps = {tuple(int(v, 16) for v in m.split('/')) for m in args.maps.split(',')} if args.maps else None
     items = export_all(rom, args.out, only, maps)
-    with open(os.path.join(args.out, 'manifest.json'), 'w') as f:
-        json.dump(items, f, ensure_ascii=False, indent=0)
+    write_index(items, args.out)
     print(f'{len(items)} items -> {args.out}')
     return 0
 
