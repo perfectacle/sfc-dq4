@@ -107,7 +107,7 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 
 | 스크립트 | 하는 일 |
 | --- | --- |
-| `dq5map.py rom BC BD` | DQ5 실내 맵 디코더. `--compare` 로 게임 셀 버퍼(속성 패스 끝)와 비교, `--png` 로 그림(팔레트도 롬에서). BC `50`~`54` 맵은 따로 된 포인터·블록·CHR 을 씀(VRAM 슬롯 시작은 `--slot` 으로) |
+| `dq5map.py rom BC BD` | DQ5 실내 맵 디코더. `--compare` 로 게임 셀 버퍼(속성 패스 끝)와 비교, `--png` 로 그림(팔레트도 롬에서). BC `50`~`54` 맵은 따로 된 포인터·블록·CHR 과 맵 전후 처리(슬롯 건너뛰기·블록 먼저 올리기·`+4` 찍기)를 따름 |
 | `dq5field.py rom` | DQ5 필드 세계 지도 풀기. `--world 0~2` 로 `$1949` 세계 고르기, `--compare` 로 WRAM 과 비교, `--png` 회색조 지도, `--entrances` 로 입구 47개와 도착 자리 |
 | `dq5trigger.py rom [BC BD]` | DQ5 실내 맵 영역 이동 레코드(맵을 빼면 전체 통계) |
 | `attrgrid.py rom BC BD` | 통행 격자를 글자로 찍기(경로 잡기용) |
