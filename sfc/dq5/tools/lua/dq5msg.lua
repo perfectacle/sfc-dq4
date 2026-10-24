@@ -5,10 +5,10 @@
 --   WWRANGE="7E3000-7E37FF:1F=0B"  범위 안에서 (주소 & 마스크) = 값 인 곳(인물 표의 한 슬롯)에 쓸 때 기록
 --   SHOTS="300,400"         그 프레임 화면을 sNNNNN.png 로
 --   DUMP="300:7E2000:64"    그 프레임에 메모리(CPU 주소부터 길이)를 16진으로 기록
--- MAXF 프레임에 SHOT_DIR/msg.txt 와 end.png 를 쓰고 멈춘다.
+-- STATE 가 없으면 전원을 켠 상태에서 시작한다. MAXF 프레임에 SHOT_DIR/msg.txt 와 end.png 를 쓰고 멈춘다.
 package.path = os.getenv("LIBDIR") .. "/?.lua;" .. package.path
 local L = require("lib")
-L.loadState(os.getenv("STATE"))
+if os.getenv("STATE") then L.loadState(os.getenv("STATE")) end
 local m = emu.memType.snesMemory
 local seq = {}
 for tok in string.gmatch(os.getenv("PRE") or "", "[^,]+") do

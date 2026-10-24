@@ -97,7 +97,7 @@ STATE=… FIELD=341,56 GROUP=2C SETTLE=300 SAVE=battle-2c.mss …
    - 전투 재현: `STATE=…/ship.mss PRE="b:4,wait:40,b:4,wait:40" ROMPATCH="156FF5=E0253C0103" WAYPOINTS="3,11;3,24;7,24;7,22;37,66;37,72;down:90" CHANGES=2 AFTER=400 MAXF=2500` 이면 2,500프레임에 슬라임 셋과의 전투 명령 창이 뜹니다(이벤트 전투).
 2. **전투** — 몬스터 그림은 [dq5-graphics-format.md](docs/dq5-graphics-format.md)(아무 몬스터와 싸우기: 위 전투 재현에 `POKE="7E1001=<번호>;7E1005=1"`, 덤프는 `sfc/dq5/tools/lua/dq5battledump.lua`). 남은 것은 전투 모드 메시지(`24:8C39`, 색인 `24:AECD`, 디코더 `24:9E47`). 조우 표는 [dq5-data-format.md 「전투 조우」](docs/dq5-data-format.md#전투-조우-23e7c2). 걸음마다의 구역·조우율은 `sfc/dq5/tools/lua/dq5warptrace.lua`(`dq5warp.lua` + 기록)로 `00:82AF` 를 찍어 `dq5encounter.py --steps` 로 대조합니다([일지 2026-10-25-14](journal/2026-10-25-14-encounter2.md)). 남은 것은 todo 의 「조우의 남은 것」.
 3. **인물 스크립트의 남은 명령** — [dq5-map-format.md 「인라인 스크립트」](docs/dq5-map-format.md#인라인-스크립트-01c800). 걷는 길은 `tools/lua/slottrack.lua`, 네이티브 호출이 매 프레임 도는지는 `tools/lua/execcount.lua` 로 봅니다.
-4. **맵별 루틴의 남은 것**, **필드의 남은 것**(`04:FE83` 의 `16`·`1E`·`2E`), **나머지**(셀 `+1` bit6 단독), **텍스트의 남은 것**(대화 번호 `000`, 창 레코드 머리 일부, 한글 넣기 자리 정하기).
+4. **맵별 루틴의 남은 것**, **필드의 남은 것**(`04:FE83` 의 `16`·`1E`·`2E`), **나머지**(셀 `+1` bit6 단독), **텍스트의 남은 것**(창 레코드 머리 일부, 한글 넣기: 전투·창 글자를 그리는 길).
 
 조사 실험 요령: 앞 칸을 보려면 몸을 돌리는 입력을 `right:8` 처럼 길게 주고, 명령 창은 `a:8;wait:60;down:6;wait:25;down:6;wait:25;down:6;wait:25;right:6;wait:25;a:8`(しらべる)로 엽니다.
 상자 내용물을 바꿔 보려면 `ROMPATCH` 에 `F6E4E + 번호*2` 오프셋을 파일 바이트 순서로 줍니다.

@@ -11,6 +11,7 @@ SFC 「드래곤 퀘스트 V」(일본판) 엔진을 분석하는 트랙입니�
 - [docs/dq5-data-format.md](docs/dq5-data-format.md): DQ5 게임 데이터(상점 품목·물건 가격·물건 표·몬스터·전투 조우)
 - [docs/dq5-flags.md](docs/dq5-flags.md): DQ5 이야기 플래그(`7E:2190`~)를 켜고 끄고 보는 곳
 - [docs/dq5-graphics-format.md](docs/dq5-graphics-format.md): DQ5 전투 몬스터 그림(레코드·머리·조각·타일 압축·팔레트·배치·그림자)과 전투 배경, 필드 인물 스프라이트(세트·레코드·타일 압축·프레임 배치·맵 OBJ 타일)
+- [docs/dq5-hangul-format.md](docs/dq5-hangul-format.md): 한글 넣기 실현성(롬 확장, 메시지 옮기기와 트리 다시 만들기, 새 글자, 1바이트 부호)
 - [docs/dq5-event-format.md](docs/dq5-event-format.md): DQ5 이벤트 스크립트(주인공을 조종하는 표와 명령)
 - [todo.md](todo.md): 남은 일
 - [references.md](references.md): 참고 자료
@@ -97,3 +98,4 @@ SFC 「드래곤 퀘스트 V」(일본판) 엔진을 분석하는 트랙입니�
 - [2026-10-25-63: 몬스터가 고르지 않던 행동과 맡긴 동료 수](journal/2026-10-25-63-ai-filter.md)
 - [2026-10-25-64: 이벤트 스크립트 부르는 곳과 명령, 청년기 단계 실측](journal/2026-10-25-64-event3.md)
 - [2026-10-25-65: 누운 인물, 동료 그림 번호, 세트 124개 확인](journal/2026-10-25-65-sprite2.md)
+- [2026-10-25-66: 롬 확장, 트리 다시 만들기, 한글 메시지](journal/2026-10-25-66-hangul.md)
