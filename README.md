@@ -38,8 +38,8 @@ Unity 리메이크가 아니라, 실제 SFC 롬에 덧대는 IPS 패치를 만�
 
 ### 해킹 일지
 
-- [2026-10-24 (1): DQ5 실내 맵 풀기](docs/journal/2026-10-24-dq5-map.md)
-- [2026-10-24 (2): 팔레트와 셀 속성](docs/journal/2026-10-24-dq5-map-attributes.md)
-- [2026-10-24 (3): 인물과 낮·밤](docs/journal/2026-10-24-dq5-npc.md)
-- [2026-10-24 (4): 출구](docs/journal/2026-10-24-dq5-exits.md)
-- [2026-10-24 (5): 가장자리 출구와 필드로 나가기](docs/journal/2026-10-24-dq5-edge-exit.md)
+- [2026-10-24-01: DQ5 실내 맵 풀기](docs/journal/2026-10-24-01-dq5-map.md)
+- [2026-10-24-02: 팔레트와 셀 속성](docs/journal/2026-10-24-02-dq5-map-attributes.md)
+- [2026-10-24-03: 인물과 낮·밤](docs/journal/2026-10-24-03-dq5-npc.md)
+- [2026-10-24-04: 출구](docs/journal/2026-10-24-04-dq5-exits.md)
+- [2026-10-24-05: 가장자리 출구와 필드로 나가기](docs/journal/2026-10-24-05-dq5-edge-exit.md)
