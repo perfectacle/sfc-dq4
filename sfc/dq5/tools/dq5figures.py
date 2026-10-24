@@ -432,6 +432,18 @@ def fig_battlebg(rom):
     save(out, 'dq5-battlebg.webp')
 
 
+def fig_mongfx_e9(rom):
+    """「なかまを よんだ！」 전후의 ミルドラース(E7). 왼쪽 1230프레임은 E8(팔을 모은 손), 오른쪽 1240프레임은 E9(팔을 벌린 손).
+    화면은 E7 의 행동을 모두 B6 으로 덮은 전투를 dq5battledump.lua 로 찍은 work/p/aB6/s01230.png·s01240.png
+    (sfc/dq5/journal/ 의 「E9 는 なかまを よんだ」 일지 1절 명령)."""
+    out = Image.new('RGB', (2 * 256 + 8, 168), (24, 24, 24))
+    for i, f in enumerate((1230, 1240)):
+        shot = Image.open(f'work/p/aB6/s{f:05d}.png').convert('RGB').crop((0, 40, 256, 208))
+        out.paste(shot, (i * (256 + 8), 0))
+        label(out, f'#{f}', (i * (256 + 8), 0))
+    save(out, 'dq5-mongfx-e9.webp')
+
+
 def fig_transition():
     """맵 전환 전후 30프레임 간격 화면(wsnap.lua, 1560~1770)."""
     files = [f for f in sorted(glob.glob('work/wdump/s[0-9]*.png')) if 1560 <= int(f[-9:-4]) <= 1770]
@@ -581,6 +593,7 @@ def main():
     fig_high_maps(rom)
     fig_mongfx_layout(rom)
     fig_battlebg(rom)
+    fig_mongfx_e9(rom)
     fig_gfx_diff(rom)
     os.remove(TMP)
 
