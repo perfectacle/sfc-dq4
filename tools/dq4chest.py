@@ -11,6 +11,8 @@
   08:$B4E5  상자의 맵 안 순번 = 맵 버퍼 $7800 에서 지금 칸 앞(가로 순서)에 있는 종류 04 칸의 수.
   1E:$B72E  전체 순번 = 상자 개수 표(포인터 1E:$BDBE)에서 앞선 맵들의 개수 합 + 맵 안 순번 → $6278/$6279.
   1E:$B7B2  내용물 표(포인터 1E:$BDC0)[전체 순번]. 1E:$B791 열었음 플래그 $625D + 순번 >> 3, 비트 80 >> (순번 & 7).
+  08:$8710  맵 종류가 00·1E 가 아니면 맵에 안 쓰인 첫 블록($0568)에 정의 18 11(종류 04, 타일 FC~FF)을 올린다.
+            열린 상자 칸은 $7800 에서 이 블록으로 바뀐다(1E:$B7CA, 로드 때 1E:$A1F3).
   08:$8055  블록 종류: 08:$8ADB + 맵 번호($0028 = 맵 레코드 첫 바이트 & 3F, 08:$B70B) × 64 의 2바이트 기술자 32개,
             기술자 (b0 & 7) << 8 | b1 → 08:$8235 의 표(08:$A80D) + 3 × 그 값, 셋째 바이트가 종류(08:$80FF → $8464).
 """
@@ -74,26 +76,67 @@ def chest_base(prg, g, k):
     return n
 
 
-def chest_cells(prg, g, k):
-    """맵 버퍼를 가로 순서로 읽어 종류 04 칸의 (X, Y). dq4map 의 맵 목록에 없는 장소는 None."""
-    if not any(m[:2] == (g, k) for m in dq4map.maps(prg)):
+def all_maps(prg):
+    """dq4map.maps 에 마지막 그룹을 더한 목록. maps 는 다음 그룹의 포인터로 맵 수를 세어 마지막 그룹(48)이 빠진다.
+    마지막 그룹은 맵 번호 FF 앞까지(48/00~48/09, 뱅크 0B 에서 앞 맵의 끝에 이어짐)."""
+    out = dq4map.maps(prg)
+    bank, base = dq4map.GROUPS
+    n = 0
+    while rd(prg, bank, base + 2 * n) | rd(prg, bank, base + 2 * n + 1) << 8 != 0xFFFF:
+        n += 1
+    g = n - 1
+    a = rw(prg, bank, base + 2 * g)
+    k = 0
+    while (mid := rd(prg, bank, a + 3 * k)) != 0xFF:
+        out.append((g, k, mid, dq4map.data_bank(g, k), rw(prg, bank, a + 3 * k + 1)))
+        k += 1
+    return out
+
+
+def load(prg, g, k):
+    """dq4map.load 와 같되 all_maps 의 장소도 푼다. (맵 레코드, 폭, 높이, $7800 버퍼) 또는 None."""
+    m = next((x for x in all_maps(prg) if x[:2] == (g, k)), None)
+    if m is None:
         return None
-    m, w, h, buf = dq4map.load(prg, g, k)
+    w, h, pb, tb, _ = dq4map.header(prg, m[3], m[4])
+    return m, w, h, dq4map.decode(prg, m[3], m[4] + 3, w, h, pb, tb)
+
+
+def chest_cells(prg, g, k):
+    """맵 버퍼를 가로 순서로 읽어 종류 04 칸의 (X, Y). 맵이 없는 장소는 None."""
+    if (got := load(prg, g, k)) is None:
+        return None
+    m, w, h, buf = got
     kinds = block_kinds(prg, m[2])
     return [(i % w, i // w) for i, b in enumerate(buf)
             if kinds[b & 0x1F] is not None and kinds[b & 0x1F] & 0x7F == CHEST_KIND]
 
 
-# 1E:$BC35 특수 내용과 처리 루틴(1E:$BC3D)이 주는 것(코드 읽기). 아이템은 루틴이 A 에 싣는 ID.
+# 1E:$BC35 특수 내용과 처리 루틴(1E:$BC3D)이 주는 것. 아이템은 루틴이 A 에 싣는 ID. 모두 워프로 열어 확인.
 CHEST_SPECIAL = {
     0xFF: '빈 상자(메시지 0297, 1E:$B4CE)',
     0xFE: 'ミミック(메시지 0299, 1E:$B868)',
     0xFD: 'ひとくいばこ(메시지 029A, 1E:$B86F)',
-    0xEF: 'バロンのつのぶえ(1E:$B807)',
-    0xEE: 'てつのきんこ(1E:$B81B)',
+    0xEF: 'バロンのつのぶえ, 다음 순번 상자도 열었음으로(1E:$B807)',
+    0xEE: 'てつのきんこ, $627D bit3, 칸을 블록 19 로(1E:$B81B)',
     0xE3: 'やみのランプ(1E:$B9ED)',
     0xE2: 'パデキアのたね(1E:$B8F7)',
     0xE0: 'しんじるこころ(1E:$B90A)',
+}
+# 1E:$BC55 발밑 특수 내용과 처리 루틴(1E:$BC62). 조건은 코드 읽기, 「확인」 은 1장 세이브스테이트에서 워프로 실측.
+FEET_SPECIAL = {
+    0xE1: 'かわきのいし, $6277 bit4 (1E:$B930)',
+    0xE4: '$628A bit1 일 때 이벤트(1E:$B9B1)',
+    0xE5: '위를 보면 50G, $6277 bit0 (1E:$B97D)',
+    0xE6: '위를 보면 やくそう, $6277 bit1 (1E:$B964)',
+    0xE7: '위를 보면 かわのよろい, $6277 bit2 (1E:$B94B)',
+    0xE8: '$6286 bit1 일 때 さえずりのみつ(1E:$B8DD)',
+    0xE9: '위를 보면 すばやさのたね, $6277 bit3 (1E:$B917)',
+    0xEA: '메시지 02A7(1E:$B8D5, 표에 쓰는 곳 없음)',
+    0xEC: '오른쪽을 보고 이벤트(1E:$B8AD)',
+    0xED: '위를 보고 $627D bit2 일 때 이벤트(1E:$B87C)',
+    0xEE: 'てつのきんこ 이벤트(예·아니오, $627D bit3 을 끄고 칸을 블록 03 으로, 1E:$B830)',
+    0xF1: '5장이면 ふしぎなきのみ, $6277 bit5 (1E:$B9D1)',
 }
 
 
@@ -145,7 +188,7 @@ def feet_items(prg):
             desc = f'{(it & 0x7F) * 40}G' if it & 0x80 else names[it][1]
             flag = (FEET_FLAGS + (n >> 3), 0x80 >> (n & 7))
         elif c in special:
-            desc = f'특수 {c:02X}'
+            desc = FEET_SPECIAL.get(c, f'특수 {c:02X}')
         else:
             desc = f'모름 {c:02X}'
         out.append((g, kb & 0x1F, x, y, c, desc, flag))
@@ -161,15 +204,15 @@ def opened(sram, n):
 def check(prg):
     counts = {(g, k): c for g, k, c in chest_counts(prg)}
     bad = 0
-    for m in dq4map.maps(prg):
+    for m in all_maps(prg):
         g, k = m[:2]
-        n = len(chest_cells(prg, g, k))   # dq4map.maps 의 장소만 돈다
+        n = len(chest_cells(prg, g, k))
         if n != counts.get((g, k), 0):
             bad += 1
             nxt = next(((cg, ck) for cg, ck in counts if (cg, ck) > (g, k)), None)
             print(f'{g:02X}/{k:02X}: 상자 칸 {n}, 표 {counts.get((g, k), 0)}'
                   + (f' — 표에 없어 {nxt[0]:02X}/{nxt[1]:02X} 와 같은 순번' if (g, k) not in counts and nxt else ''))
-    ms = {m[:2] for m in dq4map.maps(prg)}
+    ms = {m[:2] for m in all_maps(prg)}
     missing = [f'{g:02X}/{k:02X}' for g, k in counts if (g, k) not in ms]
     print(f'맵 {len(ms)}개, 개수 표 {len(counts)}줄(상자 {sum(counts.values())}개), 다름 {bad}'
           + (f', 맵 목록에 없는 장소 {" ".join(missing)}' if missing else ''))
