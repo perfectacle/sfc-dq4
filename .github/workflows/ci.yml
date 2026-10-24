@@ -1,0 +1,79 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # PR runs are superseded by newer pushes; main runs always finish.
+  group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.ref) || format('main-{0}', github.sha) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # No ROM in CI: only checks that need none (journal names, links, personal paths, syntax).
+  docs:
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: 0.13.1
+          enable-cache: true
+
+      - name: Install Lua 5.4
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends lua5.4
+
+      - name: Check Lua syntax
+        run: find tools/lua -name '*.lua' -print0 | xargs -0 -n1 luac5.4 -p
+
+      - run: uv sync --locked
+
+      - run: uv run --frozen python -m compileall -q tools
+
+      - run: uv run --frozen python tools/check_docs.py
+
+  actionlint:
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # 1.7.12
+        with:
+          args: -color
+
+  zizmor:
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 5
+    env:
+      ZIZMOR: zizmor==1.31.1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - run: pipx run --python "$(command -v python3)" "$ZIZMOR" --format github .github
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  # The one required status check on main: passes only when every job above passed.
+  ci-ok:
+    if: always()
+    needs: [docs, actionlint, zizmor]
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 2
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: exit 1
+      - run: echo ok

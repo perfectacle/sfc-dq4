@@ -66,6 +66,7 @@ STATE=$PWD/work/state/ship.mss PRE="b:4,wait:40" WAYPOINTS="3,11;3,24;7,24;7,22"
 | `dq5exit.py rom BC BD` | DQ5 실내 맵 출구 셀·목적지·도착 자리 |
 | `dq5npc.py rom BC BD` | DQ5 실내 맵 인물 목록. `--night` 밤 목록, `--flags 21AD=10` 이벤트 플래그, `--compare` 로 인물 표(`7E:3000-`)와 비교 |
 | `figures.py` | `docs/images/` 의 그림을 다시 만듦(롬 필요, 게임 화면 비교 그림만 `work/` 덤프 필요) |
+| `check_docs.py` | 일지 이름·제목·순번 중복, README 일지 목록, 상대 링크, 개인 경로 검사(CI `docs` 잡과 같음) |
 
 툴킷에도 같은 방식의 스크립트가 있습니다(`$LIBDIR/probe/`): 특정 PC 실행 시 레지스터
 기록(`trace.lua`), 호출자 기록(`calls.lua`) 등.
