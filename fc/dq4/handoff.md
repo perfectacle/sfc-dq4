@@ -4,31 +4,47 @@ FC DQ4 원작을 분석하는 세션이 처음 읽는 문서입니다. 이 트�
 
 ## 목표
 
-DQ4 의 내용(맵, 인물과 대사, 이벤트 흐름, 몬스터·아이템·주문·상점 표)을 DQ5 엔진에 옮기려면, 원작에서 그 데이터를 **롬만으로** 뽑아낼 수 있어야 합니다. 이 트랙은 FC DQ4(일본판 Rev A)의 데이터 형식을 풀고 `tools/dq4*.py` 추출기와 `docs/dq4-*-format.md` 명세를 만듭니다(이 폴더 기준). DQ5 쪽에 어떻게 넣을지는 dq5 트랙의 결과([dq5-handoff.md](../../sfc/dq5/handoff.md))와 맞춰 나중에 정합니다.
+DQ4 의 내용(맵, 인물과 대사, 이벤트 흐름, 몬스터·아이템·주문·상점 표)을 DQ5 엔진에 옮기려면, 원작에서 그 데이터를 **롬만으로** 뽑아낼 수 있어야 합니다. 이 트랙은 FC DQ4(일본판 Rev A)의 데이터 형식을 풀고 이 폴더의 `tools/dq4*.py` 추출기와 `docs/dq4-*.md` 명세를 만듭니다. DQ5 쪽에 어떻게 넣을지는 dq5 트랙의 결과([dq5-handoff.md](../../sfc/dq5/handoff.md))와 맞춰 나중에 정합니다.
 
 그래픽은 원작 데이터를 옮기지 않고 직접 그립니다. 원작 그래픽은 무엇을 그려야 하는지 확인하는 용도로만 봅니다.
 
 ## 지금 상태
 
-실험 환경을 갖췄고, 필드 RAM·뱅크 전환·BRK 뱅크 호출·대사 텍스트·마을/던전 맵 배치를 풀었습니다. 정리는 [dq4-ram-format.md](docs/dq4-ram-format.md)·[dq4-bank-format.md](docs/dq4-bank-format.md)·[dq4-text-format.md](docs/dq4-text-format.md)·[dq4-map-format.md](docs/dq4-map-format.md), 과정은 `fc/dq4/journal/` 일지에 있습니다.
+SFC 로 옮길 데이터는 거의 모두 롬만으로 뽑을 수 있게 됐습니다. 영역마다 형식 문서와 디코더가 있고, 실제 화면·RAM 과 대조했습니다. 자세한 검증 숫자는 각 형식 문서의 「확인」 절, 과정은 [README](README.md#해킹-일지) 의 일지에 있습니다.
 
-| 항목 | 값 | 근거 |
+| 영역 | 문서 · 도구 | 실측으로 맞춘 것(대표) |
 | --- | --- | --- |
-| 롬 | `rom/dq4.nes`, Rev A. SHA-1 은 [README](../../README.md#원본-롬). 초판(Rev 0)은 쓰지 않음 | README |
-| iNES 헤더 | 매퍼 1(MMC1, SUROM: CHR 0 레지스터 bit4 로 256KB 절반 선택), PRG 512KB, CHR-RAM, 배터리 | `krpatch fc info`, 쓰기 프로브 |
-| 도구 | 툴킷 v0.5.0 의 `krpatch fc info\|dis\|listing\|lua`. 프로브 `cover`·`reads`·`writes`·`trace`·`watch` | [tools/README.md](tools/README.md#mesence-툴킷의-fc-스크립트) |
-| 세이브스테이트 | `work/state/dq4-ch1-throne.mss`(1장 왕좌의 방), `dq4-ch1-courtyard.mss`(성 밖), `dq4-ch1-field.mss`(필드), `dq4-ch1-battle.mss`(첫 전투). `fc/dq4/tools/dq4state.sh` 가 롬에서 다시 만듦(`--nes.ramPowerOnState=AllZeros` 로 결정적) | 두 번 돌려 RAM md5 같음 |
-| 필드 RAM | 좌표 `$0044`/`$0045`, 장소 `$63`/`$64`, 맵 종류 `$0028`(=`$0550`), 출구 표 `$05A0`(7바이트) | 걸어서 맵 두 번 전환 |
-| 맵 | 마을·던전 269개, 비트열 압축(사각형·길·점). [dq4-map-format.md](docs/dq4-map-format.md), `fc/dq4/tools/dq4map.py` | RAM 두 맵 0 차이, 경계 268곳 전수 |
-| 필드 | 3개(250×250 등), 줄 RLE(`0B:$8000`). [dq4-field-format.md](docs/dq4-field-format.md), `fc/dq4/tools/dq4field.py` | 게임 조회 147번 0 차이, 기준점 250줄 |
-| 이름·표 | 이름 목록 7종(`0B:$B006`), 아이템 강도·가격(뱅크 10), 몬스터 22바이트(`18:$8046`). [dq4-data-format.md](docs/dq4-data-format.md), `fc/dq4/tools/dq4data.py` | 전투 두 번의 경험치·골드·HP |
-| 출구·인물 | 연결 표 125개(`1B:$8223`), 인물 목록(뱅크 05, 레코드 944개). `dq4map.py exits`·`npcs` | 두 맵 RAM 과 같음, 그룹 경계 71곳 전수 |
-| 뱅크 전환 | `$FF91`(A=뱅크, `$0507` 이 현재 뱅크), `$C3EA` 다른 뱅크 바이트 읽기 | 쓰기·읽기 프로브 |
-| 뱅크 호출 | `BRK b1 b2`: 뱅크 = `b2` 상위 4비트+bit3, 함수 = `b1`, 주소 = 그 뱅크 `$8000` 표. [dq4-bank-format.md](docs/dq4-bank-format.md), `fc/dq4/tools/dq4bank.py` | 실행 기록 1019건과 디코더 0 차이 |
-| 데이터 뱅크 | `00`~`04`: 대사 본문, `1B`: 대사 끝부분과 사전 | 디코더 |
-| 대사 | 메시지 2633개, 6비트 압축 + 사전 192단어. [dq4-text-format.md](docs/dq4-text-format.md), `fc/dq4/tools/dq4text.py all` | 창 줄 버퍼 덤프 10장과 비교 |
+| 롬·뱅크 | [dq4-rom-map.md](docs/dq4-rom-map.md), [dq4-bank-format.md](docs/dq4-bank-format.md) · `dq4bank.py` | BRK 뱅크 호출 1019건, x3 형식 길이 191곳 |
+| 대사 | [dq4-text-format.md](docs/dq4-text-format.md) · `dq4text.py`(`export` 가 메시지 2633·창 문자열 109·이름 434 를 기호화 JSON/TSV 로) | 왕복 검사 차이 0, 전투·필드 창 덤프 170개 |
+| 창 | 같은 문서 「창 레코드」 · `dq4text.py windows --layout --meaning` | 창 115개 중 테두리 111개, 실제 장면 66번, 항목 루틴 66개 뜻 |
+| 맵 | [dq4-map-format.md](docs/dq4-map-format.md) · `dq4map.py` | 맵 **279개**(그룹 48 포함), 경계 278곳 0 다름 |
+| 필드 | [dq4-field-format.md](docs/dq4-field-format.md) · `dq4field.py` | 필드 0(세계 250×250)·1(ゴットサイド 섬)·3(闇の世界 62×54). 2 는 빈 자리 |
+| 블록·통행·출구 | [dq4-block-format.md](docs/dq4-block-format.md) · `dq4block.py`(`props`·`links`·`json`) | 맵 종류 50가지 블록·CHR 0 다름, 출구 칸 555개(걸어서 47곳), 지형 효과·문·열쇠 |
+| 인물·대화 | [dq4-script-format.md](docs/dq4-script-format.md) · `dq4talk.py` | 스크립트 346개 못 읽은 명령 0, 말 걸기 2658+337번 0 다름, 이벤트 표 50개 |
+| 인물 블록(움직임·자동 이벤트) | [dq4-npcblock-format.md](docs/dq4-npcblock-format.md) · `dq4npcblock.py` | 블록 2131개·명령 5010개, 실행 2027개 0 다름 |
+| 저장·플래그·장 | [dq4-save-format.md](docs/dq4-save-format.md) · `dq4event.py` | CRC, 1~5장 시작·끝·엔딩, 귀환·ルーラ 37곳, 플래그 뜻(장별 진행 순서) |
+| 표 | [dq4-data-format.md](docs/dq4-data-format.md) · `dq4data.py` | 레벨업 626건, 주문·행동 256개, 몬스터 레코드 전 바이트, 몬스터·동료 AI |
+| 상점·얻는 것 | [dq4-shop-format.md](docs/dq4-shop-format.md) · `dq4shop.py`·`dq4chest.py`(`loot`) | 가게 창, 여관·교회 요금, 상자 160개, 얻는 물건 238줄, 숨는 인물 |
+| 조우 | [dq4-encounter-format.md](docs/dq4-encounter-format.md) · `dq4encounter.py` | 필드·던전 21층 전투 158번, 특수 전투 34개, 기습·선제 비율 |
+| 원작 그림 | [dq4-fcgfx.md](docs/dq4-fcgfx.md)·[dq4-fcsprite-format.md](docs/dq4-fcsprite-format.md) · `dq4fcgfx.py`·`dq4fcsprite.py` | 맵·필드·장면 화면 픽셀 0 다름, 스프라이트·몬스터 픽셀 대조 |
+| 디버그 | [dq4-debug.md](docs/dq4-debug.md) | `$C000` 스위치(장 고르기·벽 통과·인카운트 끄기·전투 테스트) |
 
-포팅용 그래픽의 현재 판단은 [그래픽 핸드오프](../../sfc/dq4/handoff.md)에 있습니다. 사용자가 긍정 평가한 타이틀·일러스트는 보존합니다. 스프라이트는 마지막 16×24 얼굴 수정본까지 반려됐으며 제작 방법을 다시 정해야 합니다. 맵 수정본도 채택 확인이 없습니다. [dq4-graphics.md](../../sfc/dq4/docs/dq4-graphics.md)는 제작물과 변환 규격을 설명합니다. 로컬 MesenCE Lua 실험에서 실제 DQ5 필드의 보행·표시는 확인했지만 영구 패치는 아니며, 실험 파일은 저장소 복제만으로 재현되지 않습니다.
+뽑은 원작 그림(맵 279·필드·블록·CHR·폰트·장면, 인물 스프라이트·몬스터)은 저작권 데이터라 비공개 저장소 `perfectacle/sfc-dq4-assets` 의 `fc/dq4/` 에 있습니다(`gallery/index.html`). 공개 저장소에는 다시 만드는 도구만 둡니다.
+
+포팅용 그래픽의 현재 판단은 [그래픽 핸드오프](../../sfc/dq4/handoff.md)에 있습니다.
+
+### 실험 출발점
+
+| 세이브스테이트(`work/state/`) | 장면 |
+| --- | --- |
+| `dq4-ch1-throne`·`courtyard`·`field`·`battle` | 1장 왕좌의 방·성 앞·필드·첫 전투. 지금까지의 실측 숫자 다수가 이것 기준 |
+| `dq4-ch{1..5}-start`, `dq4-debugB-start` | 장 시작(디버그 장 고르기로 만듦), 디버그 B(8명 일행) |
+| `dq4-ch2-b3` | 2장 시작에서 B 세 번 — 바로 조작 가능, 워프 출발점 |
+| `dq4-ch1-casino` | 1장 일행, 카지노 04/01 포커 딜러 앞, 코인 100 |
+
+- 1장 상태 넷은 테스트러너가 MesenCE `Saves/dq4.sav` 를 읽던 시절에 만든 것이라, 지금 `fc/dq4/tools/dq4state.sh`(SRAM 을 00 으로 채움)로 다시 만들면 이름이 「ああ」, 첫 전투가 おおみみず·スライム 로 달라집니다. 문서 숫자가 기존 파일 기준이므로 덮어쓰지 않았습니다.
+- `dq4-ch3-start` 는 머리 장면이 약 2000프레임 돌아 그동안 워프가 안 됩니다. `dq4-ch4-start` 는 A 로 대사를 넘기면 15/00 (1A,02) 에서 조작됩니다. `dq4-ch5-start` 는 명령 창이 떠 있어 B 세 번 뒤 걷습니다.
+- 원하는 맵으로 가기는 [dq4-warp.md](docs/dq4-warp.md)(`STATE` 는 절대 경로, `end.mss` 에서 이으면 SEQ 를 `wait:30` 으로 시작, 일행 `$616A` 는 `SET` 이 아니라 `AFTER` 로).
 
 ## 도구
 
@@ -54,18 +70,11 @@ uv run krpatch fc listing rom/dq4.nes work/cov/cover.txt --range 3C000-3FFFF
 
 ## 다음에 할 일
 
-[todo.md](todo.md) 순서대로 합니다. 각 형식 문서의 「남은 것」이 세부 목록입니다.
+분석은 남은 세부만 있습니다([todo.md](todo.md)). 다음 큰 일은 이 데이터를 SFC DQ5 엔진에 넣는 쪽입니다.
 
-1. **인물 대화 → 메시지 번호** — 대화는 뱅크 15 의 스크립트 해석기(`15:$B7E8`~ 부근이 BRK 로 뱅크 16 함수 00·05 를 부름)가 인물 레코드 블록(바이트코드)을 실행해 메시지를 고릅니다. 메시지 출력은 `16[07]`(`16:$89A3`) → `16:$8656`(X:A = 메시지 번호)입니다. 실측: 왕좌의 방에서 왕((10,0D), 레코드 `17 08 10 02 6b 90 8d` + 블록 `82 0c 01 81 26 …`)에게 말 걸면 `060A`(「そなたの かつやくを きたいしているぞ。」), 아무도 없는 방향은 `02F0`. 해석기 명령표를 풀어 `dq4map.py npcs` 가 인물마다 메시지 번호를 내게 하는 것이 목표입니다.
-   완료: 인물 몇 명의 대화 메시지 번호를 디코더가 내고 `probe/trace.lua TRACE=8656` 기록과 같음.
-2. **블록 → 그래픽·통행** — 맵 블록 번호(5비트)·필드 타일 번호 → 타일 4개·팔레트·통행. `$7800` 을 읽어 nametable 을 쓰는 코드부터. 다른 dq4 세션이 그래픽 쪽(`feat/dq4-graphics-kit`)을 하고 있으면 겹치지 않게 나눕니다.
-3. **표 나머지** — 주문(MP·효과), 레벨별 능력치·경험치, 상점 목록, 보물상자, 조우 표, 몬스터 레코드 나머지 바이트.
-4. **이벤트 플래그와 장(章) 전환** — `BRK` 특수 형식이 쓰는 `$627B` 영역, `$62A1`·`$62AA` 처럼 맵·입구를 바꾸는 플래그.
-5. **대사 나머지·롬 구조 나머지** — [dq4-text-format.md](docs/dq4-text-format.md#남은-것), [dq4-bank-format.md](docs/dq4-bank-format.md#남은-것).
-
-실험 출발점은 `fc/dq4/tools/dq4state.sh` 가 만드는 세이브스테이트 5개(이름 입력 → 왕좌의 방 → 앞마당 → 필드 → 첫 전투)이고, MesenCE 를 돌릴 때는 `--nes.ramPowerOnState=AllZeros` 를 줘야 같은 입력에 같은 결과가 나옵니다.
-
-6. **그래픽 제작 방법 재검토** — [그래픽 핸드오프](../../sfc/dq4/handoff.md)의 반려 이유와 원작 참고 사이트부터 읽습니다. 타이틀·일러스트는 보존하고, 라이안 정면 한 장을 실제 16×24 크기로 비교해 채택한 뒤 보행 시트를 만듭니다. 기존 반려 시안을 그대로 엔진에 연결하지 않습니다. 영구 삽입과 맵 연결은 별도 남은 일입니다.
+1. **DQ5 쪽 대응 정하기** — dq5 트랙 결과([sfc/dq5/handoff.md](../../sfc/dq5/handoff.md))와 맞춰, 맵(블록 속성 → DQ5 블록), 인물·대화 스크립트·이벤트(→ DQ5 스크립트), 대사 기호(`dq4text.py export` 의 `{NAME:k}` 등 → DQ5 제어 코드), 창(`dq4-window-layouts` → DQ5 창), 표(몬스터·아이템·주문)를 어떤 형식으로 옮길지 정합니다.
+2. **변환기** — 위 디코더들의 JSON 출력을 DQ5 형식으로 바꾸는 도구. 결과물은 `sfc/dq4/` 에 둡니다.
+3. **분석 세부** — [todo.md](todo.md) 의 항목. 변환하다 막히는 것부터 합니다.
 
 ## 조심할 것
 
