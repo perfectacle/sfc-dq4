@@ -1,13 +1,13 @@
-"""DQ4(FC) 인물 블록(움직임·자동 이벤트 스크립트) 디코더. 형식은 docs/dq4-npcblock-format.md.
+"""DQ4(FC) 인물 블록(움직임·자동 이벤트 스크립트) 디코더. 형식은 fc/dq4/docs/dq4-npcblock-format.md.
 
 사용:
-  python tools/dq4npcblock.py rom/dq4.nes G K [--night]   맵 (그룹, 순번) 의 인물마다 블록을 명령 단위로
-  python tools/dq4npcblock.py rom/dq4.nes alt              이벤트 목록(1C:$9D0E 표)의 인물 블록
-  python tools/dq4npcblock.py rom/dq4.nes check            롬 전체 블록(맵 목록·이벤트 목록, 블록1·2)을 풀어
+  python fc/dq4/tools/dq4npcblock.py rom/dq4.nes G K [--night]   맵 (그룹, 순번) 의 인물마다 블록을 명령 단위로
+  python fc/dq4/tools/dq4npcblock.py rom/dq4.nes alt              이벤트 목록(1C:$9D0E 표)의 인물 블록
+  python fc/dq4/tools/dq4npcblock.py rom/dq4.nes check            롬 전체 블록(맵 목록·이벤트 목록, 블록1·2)을 풀어
                                                    명령 수·못 읽은 명령·블록 밖으로 넘친 명령·점프 대상을 센다
-  python tools/dq4npcblock.py rom/dq4.nes stats            명령마다 쓰인 수
-  python tools/dq4npcblock.py rom/dq4.nes patterns         명령 22 의 일행 움직임 패턴(1C:$8014 표)
-  python tools/dq4npcblock.py rom/dq4.nes trace npcblock.txt   fc/dq4/tools/lua/npcblock.lua 기록을 디코더와 대조
+  python fc/dq4/tools/dq4npcblock.py rom/dq4.nes stats            명령마다 쓰인 수
+  python fc/dq4/tools/dq4npcblock.py rom/dq4.nes patterns         명령 22 의 일행 움직임 패턴(1C:$8014 표)
+  python fc/dq4/tools/dq4npcblock.py rom/dq4.nes trace npcblock.txt   fc/dq4/tools/lua/npcblock.lua 기록을 디코더와 대조
 
 근거 루틴: 1F:$D884(한 명령 실행), 1F:$DEF5(명령 00~30 처리기 표), 1F:$DF57(80~8A), 1F:$DDCD~$DDD6(포인터
 4·3·2·1 바이트 넘김), 1F:$DDE3(이 프레임 끝), 1F:$D5F1·$D5FA(슬롯마다 부름), 1C:$9B71(레코드 길이).

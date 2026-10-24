@@ -1,16 +1,16 @@
 # DQ4(FC) 인물 블록(움직임·자동 이벤트 스크립트)
 
-맵 인물 레코드에 붙은 블록([dq4-map-format.md](dq4-map-format.md#인물))은 인물마다 도는 작은 스크립트입니다. 걷기·방향 돌기·숨기, 메시지 띄우기, 플래그 쓰기, 일행을 움직이는 자동 장면이 모두 이 블록 명령으로 되어 있습니다. 디코더는 [tools/dq4npcblock.py](../tools/dq4npcblock.py), 실측 프로브는 [fc/dq4/tools/lua/npcblock.lua](../tools/lua/npcblock.lua) 이고, 실험 과정은 [2026-10-25-36 일지](../journal/2026-10-25-36-event3.md) 에 있습니다. 플래그·이벤트 쪽 교차 참조는 [dq4-save-format.md](dq4-save-format.md#인물-블록의-이벤트-명령) 에 있습니다.
+맵 인물 레코드에 붙은 블록([dq4-map-format.md](dq4-map-format.md#인물))은 인물마다 도는 작은 스크립트입니다. 걷기·방향 돌기·숨기, 메시지 띄우기, 플래그 쓰기, 일행을 움직이는 자동 장면이 모두 이 블록 명령으로 되어 있습니다. 디코더는 [fc/dq4/tools/dq4npcblock.py](../tools/dq4npcblock.py), 실측 프로브는 [fc/dq4/tools/lua/npcblock.lua](../tools/lua/npcblock.lua) 이고, 실험 과정은 [2026-10-25-36 일지](../journal/2026-10-25-36-event3.md) 에 있습니다. 플래그·이벤트 쪽 교차 참조는 [dq4-save-format.md](dq4-save-format.md#인물-블록의-이벤트-명령) 에 있습니다.
 
 근거가 실측이 아니라 코드 읽기인 줄에는 「코드 읽기」라고 적었습니다. 주소는 고정 뱅크(`1F`)의 CPU 주소입니다.
 
 ```sh
-uv run python tools/dq4npcblock.py rom/dq4.nes 02 01        # 맵 02/01 인물마다 블록1·2 를 명령 단위로
-uv run python tools/dq4npcblock.py rom/dq4.nes alt          # 이벤트 목록(1C:$9D0E 표)의 인물 블록
-uv run python tools/dq4npcblock.py rom/dq4.nes check        # 롬 전체: 못 읽은 명령·넘친 명령·점프 대상
-uv run python tools/dq4npcblock.py rom/dq4.nes stats        # 명령마다 쓰인 수
-uv run python tools/dq4npcblock.py rom/dq4.nes patterns     # 명령 22 의 일행 움직임 패턴
-uv run python tools/dq4npcblock.py rom/dq4.nes trace work/x/npcblock.txt   # 프로브 기록과 대조
+uv run python fc/dq4/tools/dq4npcblock.py rom/dq4.nes 02 01        # 맵 02/01 인물마다 블록1·2 를 명령 단위로
+uv run python fc/dq4/tools/dq4npcblock.py rom/dq4.nes alt          # 이벤트 목록(1C:$9D0E 표)의 인물 블록
+uv run python fc/dq4/tools/dq4npcblock.py rom/dq4.nes check        # 롬 전체: 못 읽은 명령·넘친 명령·점프 대상
+uv run python fc/dq4/tools/dq4npcblock.py rom/dq4.nes stats        # 명령마다 쓰인 수
+uv run python fc/dq4/tools/dq4npcblock.py rom/dq4.nes patterns     # 명령 22 의 일행 움직임 패턴
+uv run python fc/dq4/tools/dq4npcblock.py rom/dq4.nes trace work/x/npcblock.txt   # 프로브 기록과 대조
 ```
 
 ## 블록과 실행

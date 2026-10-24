@@ -322,7 +322,7 @@ def code_uses(prg):
 
 
 # 인물 블록(움직임 스크립트, 1F:$D884 가 한 명령씩 실행) 중 플래그·이벤트를 다루는 명령. 명령 단위로 푸는 것은
-# tools/dq4npcblock.py(docs/dq4-npcblock-format.md).
+# fc/dq4/tools/dq4npcblock.py(fc/dq4/docs/dq4-npcblock-format.md).
 BLOCK_FLAG_OPS = {0x27: 'npc|=', 0x28: 'npc&=', 0x29: 'npc='}
 BLOCK_EVENT_OPS = (0x88, 0x89, 0x8A)
 EVENTS = dq4npcblock.EVENTS           # 이벤트 n → 루틴 주소 워드(1D:$989F)
