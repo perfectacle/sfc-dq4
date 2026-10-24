@@ -9,6 +9,7 @@
   python tools/dq4block.py rom/dq4.nes compare DIR [PREFIX] seq.lua 의 end.* (또는 blockload.lua 의 PREFIX.*) 덤프와 비교
   python tools/dq4block.py rom/dq4.nes effects G K          맵에서 지형 효과가 있는 칸(떨어지면 가는 곳 포함)
   python tools/dq4block.py rom/dq4.nes tables               떨어지는 칸·리프트·タンス/つぼ·팻말 표와 속성 값의 뜻
+  python tools/dq4block.py rom/dq4.nes links [G K]          계단·旅の扉 등 출구 칸마다 목적지(08:$B22E)
   python tools/dq4block.py rom/dq4.nes json [OUT]           맵·필드 전부의 속성·칸·표를 JSON 으로(기본 work/dq4block.json)
 
 
@@ -18,13 +19,15 @@ $853E(블록 20·21), $8710(빈 칸에 FC~FF), 1E:$A046(맵에 쓰인 블록 표
 0F:$D4E6(다른 구역은 블록 20·21 로), $D44C(맵 밖 블록), $EB23(블록 → 타일 4개), 0F:$D088(통행).
 지형 효과: 0F:$CEB1(걸음 뒤 분기), $CA77(밀리는 바닥), $E9E4(느린 칸), 1E:$9ACA(바닥 피해), 1E:$8676·12:$B6DD(떨어지기),
 1E:$8700·$894A(리프트), 1E:$B2A6·$B36E·$B3B7(「とびら」와 열쇠), 1E:$80D8(카운터 너머 「はなす」),
-1E:$BB10·$BC7A·$BB52(タンス·つぼ·팻말).
+1E:$BB10·$BC7A·$BB52(タンス·つぼ·팻말), 08:$B22E·$B246·$B554(출구 칸 순번으로 목적지), 08:$8796(연 문 블록),
+1E:$8A0D·$8A48(리프트 사각형 구역).
 """
 import os
 import sys
 
 from kr_patch.fc import ines
 
+import dq4chest
 import dq4field
 import dq4map
 
@@ -277,7 +280,7 @@ class Map:
             patch_props(prg, self.blocks['prop'], field=field)
             self.buf = None
             return
-        m, self.w, self.h, raw = dq4map.load(prg, g, k)
+        m, self.w, self.h, raw = dq4chest.load(prg, g, k)
         self.code, self.t = m[2], m[2] & 0x3F              # 08:$B708: $0550 = 레코드 첫 바이트, $0028 = 아래 6비트
         bank, ptr = m[3], m[4]
         self.outside = dq4map.header(prg, bank, ptr)[4]      # $0520
@@ -527,6 +530,22 @@ def lifts(prg):
     return out
 
 
+LIFT_RECTS = 0x8A24               # 1E:$8A68: 리프트 넷째 바이트($7F)마다 5바이트 = 구역, 폭, 높이, $7800 주소
+LIFT_AREA = 0x8A42                # 1E:$8A48: 내린 뒤 그 사각형과 주인공($46)의 구역
+
+
+def lift_rects(prg):
+    """1E:$8A0D·$8A48: 리프트의 넷째 바이트 n(FF 가 아니면)이 고르는 사각형. 떠날 때 사각형의 칸 위 3비트를
+    구역(80)으로, 내리면 LIFT_AREA[n] 으로 바꾼다(1E:$8A9A). 돌려주는 것: n 마다 {'w', 'h', 'offset', 'ride', 'land'}.
+    offset 은 $7800 에서 떨어진 바이트 수(맵 폭으로 나누면 왼쪽 위 칸)."""
+    out = []
+    for n in range(6):
+        a = LIFT_RECTS + 5 * n
+        out.append({'ride': rd(prg, 0x1E, a), 'w': rd(prg, 0x1E, a + 1), 'h': rd(prg, 0x1E, a + 2),
+                    'offset': wd(prg, 0x1E, a + 3) - 0x7800, 'land': rd(prg, 0x1E, LIFT_AREA + n)})
+    return out
+
+
 def pots(prg):
     """1E:$BC7A: タンス·つぼ(앞 칸 속성 AB·AA). 7바이트 = 그룹, 순번, x, y, 아이템, 플래그 $6273+n, 비트."""
     out, a = [], POTS
@@ -551,8 +570,183 @@ def signs(prg):
     return out
 
 
+EXIT_BUF = 0xB671                 # 08:$B4ED: 칸 세기의 시작 주소($7800)
+EXIT_KINDS = 0xB673               # 08:$B4ED·$B554: 세는 속성 값 목록의 포인터(00 끝)
+EXIT_FIXED = 0xB681               # 08:$B323: 9바이트 = 그룹, 순번, x, y → 그룹, 순번, x, y, 방향. FF 끝
+EXIT_TABLE = 0xB974               # 08:$B246: 그룹마다 순번별 출구 레코드 목록의 포인터
+
+
+def exit_kinds(prg):
+    a, out = wd(prg, B08, EXIT_KINDS), []
+    while v := rd(prg, B08, a):
+        out.append(v)
+        a += 1
+    return out
+
+
+def exit_cells(prg, m):
+    """맵에서 08:$B4ED 가 세는 칸(속성 아래 7비트가 exit_kinds 에 있는 칸)을 $7800 순서(줄마다 왼쪽부터)로 (x, y, 속성)."""
+    kinds = exit_kinds(prg)
+    out = []
+    for i, v in enumerate(m.buf):
+        p = m.blocks['prop'].get(v & 0x1F, 0)
+        if p & 0x7F in kinds:
+            out.append((i % m.w, i // m.w, p))
+    return out
+
+
+def exit_fixed(prg):
+    out, a = [], EXIT_FIXED
+    while rd(prg, B08, a) != 0xFF:
+        e = [rd(prg, B08, a + i) for i in range(9)]
+        out.append({'group': e[0], 'index': e[1], 'x': e[2], 'y': e[3],
+                    'to': {'group': e[4], 'index': e[5], 'x': e[6], 'y': e[7], 'dir': e[8]}})
+        a += 9
+    return out
+
+
+def exit_table(prg):
+    """08:$B246 의 표: {그룹: [순번마다 레코드 목록]}. 레코드 첫 바이트 bit7 이 그 순번의 마지막,
+    bit6-5 가 종류, bit4-0 이 목적지 순번. 종류 0 = 1바이트(필드로), 1 = 3바이트(순번, n, 그룹),
+    2 = 2바이트(그룹, 필드에서 들어갈 때의 자리로), 3 = 2바이트(같은 그룹의 순번, n). n 은 목적지 맵에서 센 칸 순번."""
+    a, out = wd(prg, B08, EXIT_TABLE), {}
+    while (g := rd(prg, B08, a)) != 0xFF:
+        a += 1
+        subs = [[]]
+        while (b := rd(prg, B08, a)) != 0xFF:
+            t = b >> 5 & 3
+            e = {'kind': ['field', 'map', 'enter', 'same'][t]}
+            if t == 1:
+                e.update(group=rd(prg, B08, a + 2), index=b & 0x1F, n=rd(prg, B08, a + 1))
+            elif t == 2:
+                e.update(group=rd(prg, B08, a + 1))
+            elif t == 3:
+                e.update(group=g, index=b & 0x1F, n=rd(prg, B08, a + 1))
+            subs[-1].append(e)
+            a += [1, 3, 2, 2][t]
+            if b & 0x80:
+                subs.append([])
+        a += 1
+        if not subs[-1]:
+            subs.pop()
+        out[g] = subs
+    return out
+
+
+def exit_special(g, k, n, flags=0, night=False, flag6295=0):
+    """08:$B397: 목적지 그룹·순번에 따라 이벤트 플래그($62AA)·밤·$6295 로 순번(과 n)을 바꾼다(코드 읽기)."""
+    if g == 0x3D and k == 1 and flags & 0x80:
+        return 2, n + 1 if 1 <= n < 4 else n
+    if g == 0x40 and k == 1 and n == 0 and flags & 0x20:
+        return 2, n
+    if g == 0x45 and k == 4 and n in (0, 4) and flags & 0x10:
+        return 6, 5 if n == 4 else n
+    if g == 0x45 and k == 5 and n == 2 and flags & 0x02:
+        return 7, n
+    if g == 0x42 and k == 1 and flags & 0x08:
+        return 0, n
+    if g == 0x19 and k == 0 and night:
+        return 1, n
+    if g == 0x15 and k == 3 and not night:
+        return 2, n
+    if g == 0x34 and k == 3 and not flag6295 & 1:
+        return 2, 0
+    if g == 0x14 and k == 0 and flags & 1:
+        return 2, 0
+    return k, n
+
+
+def exit_arrive_dir(prop):
+    """08:$B59F: 도착 칸의 속성으로 방향(bit1-0, 0 위 1 오른쪽 2 아래 3 왼쪽)을 정한다. 정하지 않으면 None."""
+    return {0x08: 0x83, 0x09: 0x81, 0x25: 0x80, 0x26: 0x80, 0x0F: 0x82, 0x0A: 0x82}.get(prop & 0x7F)
+
+
+EXIT_FIELD_SPECIAL = {(0x41, 0x0E, 0x30): (0x8D, 0x1F), (0x42, 0x1F, 0x02): (0x84, 0x5A)}   # 08:$B2EC
+
+
+def exit_to_field(prg, g, x, y):
+    """08:$B2E5 → $B06A: 그룹의 필드 입구(0E:$BE69 의 첫 항목) 좌표로, 필드 번호는 도착 표(08:$B7F9)의 bit6-5.
+    그룹 0E·0B 는 B06A 가 걷던 방향($3D)에 따라 좌표를 한 칸 옮긴다(코드 읽기, 여기서는 옮기지 않음)."""
+    for eg, fx, fy, *rest in dq4field.entrances(prg):
+        if eg == g:
+            fx, fy = EXIT_FIELD_SPECIAL.get((g, x, y), (fx, fy))
+            return {'field': rest[4], 'group': g, 'x': fx, 'y': fy}
+    return {'field': None, 'group': g}
+
+
+def exit_links(prg, g, k, maps=None, **flags):
+    """(g, k) 의 출구 칸마다 08:$B22E 가 정하는 목적지. maps 는 {(그룹, 순번): Map} 캐시.
+    돌려주는 것: [{'x', 'y', 'prop', 'ord', 'to'}]. to 는 {'group', 'index', 'n', 'x', 'y', 'dir'}(맵, n 은 도착 맵의 칸 순번),
+    {'field', 'group', 'x', 'y'}(필드 번호와 좌표), {'enter': 그룹}(필드에서 들어갈 때의 도착 자리 08:$B7F9 로), None(레코드 없음)."""
+    maps = {} if maps is None else maps
+
+    def get(gg, kk):
+        if (gg, kk) not in maps:
+            maps[gg, kk] = Map(prg, gg, kk)
+        return maps[gg, kk]
+
+    fixed = {(e['group'], e['index'], e['x'], e['y']): e['to'] for e in exit_fixed(prg)}
+    # 08:$B285: 순번 k 의 목록까지 건너뛴 뒤 칸 순번만큼 레코드를 건너뛴다. 목록 끝을 보지 않으므로
+    # 레코드보다 칸이 많은 맵은 다음 순번의 레코드를 읽는다.
+    subs = exit_table(prg).get(g, [])
+    recs = [r for s in subs[k:] for r in s]
+    out = []
+    for i, (x, y, p) in enumerate(exit_cells(prg, get(g, k))):
+        e = {'x': x, 'y': y, 'prop': p, 'ord': i}
+        if (g, k, x, y) in fixed:
+            e['to'] = dict(fixed[g, k, x, y], fixed=True)
+        elif i >= len(recs):
+            e['to'] = None
+        else:
+            r = recs[i]
+            if r['kind'] == 'field':
+                e['to'] = exit_to_field(prg, g, x, y)
+            elif r['kind'] == 'enter':
+                e['to'] = {'enter': r['group']}
+            else:
+                dk, n = exit_special(r['group'], r['index'], r['n'], **flags)
+                try:
+                    cells = exit_cells(prg, get(r['group'], dk))
+                except (KeyError, IndexError, ValueError):
+                    cells = []
+                to = {'group': r['group'], 'index': dk, 'n': n}
+                if n < len(cells):
+                    to.update(x=cells[n][0], y=cells[n][1], dir=exit_arrive_dir(cells[n][2]))
+                e['to'] = to
+        out.append(e)
+    return out
+
+
+DOOR_FLOORS = 0x882A              # 08:$880E: 문을 연 뒤 바닥으로 고를 모양 레코드 번호(2바이트씩, FF FF 끝). 앞일수록 먼저
+
+
+def door_floor_rank(prg, rec):
+    a, i = DOOR_FLOORS, 0
+    while (lo := rd(prg, B08, a)) != 0xFF or rd(prg, B08, a + 1) != 0xFF:
+        if (rd(prg, B08, a + 1), lo) == (rec >> 8, rec & 0xFF):
+            return i
+        a, i = a + 2, i + 1
+    return 0xFF
+
+
+def door_open(prg, m, x, y, d):
+    """08:$8796(문 모양 0, 값 14~17): (x, y) 에 서서 d 방향(0 위 1 오른쪽 2 아래 3 왼쪽)의 문을 열면 문 칸에 쓰는 블록.
+    선 칸과 문 너머 칸의 블록 모양 레코드(블록 정의 a&3, b)를 DOOR_FLOORS 에서 찾아 앞쪽에 있는 것을 고른다(같으면 선 칸).
+    돌려주는 것: (문 x, 문 y, 블록)."""
+    dx, dy = STEP_XY[d & 3]
+    here = m.cell(x, y) & 0x1F
+    there = m.cell(x + 2 * dx, y + 2 * dy) & 0x1F
+
+    blocks = defs(prg, m.t)
+
+    def rank(b):
+        e = blocks.get(b)
+        return door_floor_rank(prg, (e['a'] & 3) << 8 | e['b']) if e else 0xFF
+    return x + dx, y + dy, there if rank(there) < rank(here) else here
+
+
 def export(prg, path):
-    """맵 269개·필드 3개의 블록 속성과 칸, 지형 효과에 딸린 표를 JSON 하나로. 칸은 줄마다 16진 문자열
+    """맵 279개·필드 3개의 블록 속성과 칸, 지형 효과에 딸린 표를 JSON 하나로. 칸은 줄마다 16진 문자열
     (맵은 그늘 바꾸기 뒤 $7800 의 값: 위 3비트 구역 + 블록, 필드는 블록 번호)."""
     import json
     effects = {}
@@ -562,14 +756,14 @@ def export(prg, path):
             effects.setdefault(f'{p:02X}', terrain(prg, p))
         return [f'{prop[b]:02X}' if b in prop else None for b in range(0x20)]
 
-    maps = []
-    for g, k, *_ in dq4map.maps(prg):
-        m = Map(prg, g, k)
+    maps, cache = [], {}
+    for g, k, *_ in map_list(prg):
+        m = cache.setdefault((g, k), Map(prg, g, k))
         fl = [{'x': x, 'y': y, 'to': fall(prg, g, k, x, y)} for y in range(m.h) for x in range(m.w)
               if m.blocks['prop'].get(m.buf[y * m.w + x] & 0x1F, 0) in (0x05, 0x0B)]
         maps.append({'group': g, 'index': k, 'type': m.t, 'w': m.w, 'h': m.h, 'outside': m.outside,
                      'props': props(m.blocks['prop']), 'cells': [m.buf[y * m.w:(y + 1) * m.w].hex() for y in range(m.h)],
-                     'falls': fl})
+                     'falls': fl, 'exits': exit_links(prg, g, k, cache)})
     fields = []
     for f in range(3):
         m = Map(prg, field=f)
@@ -577,7 +771,9 @@ def export(prg, path):
                        'cells': [bytes(r).hex() for r in m.field]})
     data = {'effects': dict(sorted(effects.items())), 'keys': [rd(prg, 0x1E, KEYS + i) for i in range(3)],
             'maps': maps, 'fields': fields, 'fall_table': fall_table(prg), 'lifts': lifts(prg),
-            'pots': pots(prg), 'signs': signs(prg)}
+            'pots': pots(prg), 'signs': signs(prg), 'lift_rects': lift_rects(prg),
+            'exit_kinds': exit_kinds(prg), 'exit_fixed': exit_fixed(prg),
+            'exit_table': {f'{g:02X}': v for g, v in exit_table(prg).items()}}
     for e in data['signs']:      # 팻말 표는 그룹을 보지 않으므로 그 좌표에 A8 칸이 있는 곳을 붙인다
         if e['table']:
             e['at'] = [f'field{f["field"]}' for f in fields if (row := f['cells'][e['y']] if e['y'] < f['h'] else '')
@@ -670,9 +866,14 @@ def show_pass(m):
     print('# 속성:', ', '.join(f'{c}={p:02X} {kind_name(p)}' for p, c in mk.items()))
 
 
+def map_list(prg):
+    """맵 279개(그룹 48 까지). dq4map.maps 는 마지막 그룹을 세지 못해 dq4chest.all_maps 를 쓴다."""
+    return dq4chest.all_maps(prg)
+
+
 def all_maps(prg):
-    """롬의 맵 269개와 필드 3개를 (이름, Map) 으로."""
-    for g, k, *_ in dq4map.maps(prg):
+    """롬의 맵 279개와 필드 3개를 (이름, Map) 으로."""
+    for g, k, *_ in map_list(prg):
         yield f'{g:02X}/{k:02X}', Map(prg, g, k)
     for f in range(3):
         yield f'field{f}', Map(prg, field=f)
@@ -738,7 +939,7 @@ def show_effects(prg, g, k):
 
 def show_tables(prg):
     used = {}
-    for g, k, *_ in dq4map.maps(prg):
+    for g, k, *_ in map_list(prg):
         for p in Map(prg, g, k).blocks['prop'].values():
             used.setdefault(p, terrain(prg, p))
     for f in range(3):
@@ -753,12 +954,35 @@ def show_tables(prg):
     print('# 리프트(1E:$894A)')
     for e in lifts(prg):
         print(hx(e))
+    print('# 리프트 사각형(1E:$8A24)')
+    for e in lift_rects(prg):
+        print(hx(e))
     print('# タンス·つぼ(1E:$BC7A)')
     for e in pots(prg):
         print(hx(e))
     print('# 팻말(1E:$BB52)')
     for e in signs(prg):
         print(hx(e))
+
+
+def show_links(prg, g=None, k=None):
+    """출구 칸(08:$B22E)마다 목적지. 맵을 주지 않으면 모든 맵."""
+    cache = {}
+    for gg, kk, *_ in map_list(prg):
+        if g is not None and (gg, kk) != (g, k):
+            continue
+        for e in exit_links(prg, gg, kk, cache):
+            t = e['to']
+            if t is None:
+                dest = '레코드 없음'
+            elif 'enter' in t:
+                dest = f"그룹 {t['enter']:02X} 의 필드 도착 자리"
+            elif 'field' in t:
+                dest = f"필드 {t['field']} ({t.get('x', 0):02X},{t.get('y', 0):02X})"
+            else:
+                dest = (f"{t['group']:02X}/{t['index']:02X} ({t.get('x', 0):02X},{t.get('y', 0):02X})"
+                        + (' 고정 표' if t.get('fixed') else f" n={t['n']}"))
+            print(f"{gg:02X}/{kk:02X} ({e['x']:02X},{e['y']:02X}) {e['prop']:02X} #{e['ord']} → {dest}")
 
 
 def show_nt(m):
@@ -832,6 +1056,9 @@ def main():
         return
     if a[2] == 'tables':
         show_tables(prg)
+        return
+    if a[2] == 'links':
+        show_links(prg, int(a[3], 16), int(a[4], 16)) if len(a) > 4 else show_links(prg)
         return
     if a[2] == 'effects':
         show_effects(prg, int(a[3], 16), int(a[4], 16))

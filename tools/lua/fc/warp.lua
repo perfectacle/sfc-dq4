@@ -46,7 +46,10 @@ for tok in string.gmatch(os.getenv("SEQ") or "", "[^,]+") do
   steps[#steps + 1] = {b, tonumber(f)}
 end
 
-L.loadState(os.getenv("STATE") or (os.getenv("PWD") .. "/work/state/dq4-ch1-throne.mss"))
+-- 테스트러너의 작업 폴더는 셸의 현재 폴더가 아니라서 상대 경로는 열리지 않는다. PWD 를 앞에 붙인다.
+local state = os.getenv("STATE") or "work/state/dq4-ch1-throne.mss"
+if state:sub(1, 1) ~= "/" then state = os.getenv("PWD") .. "/" .. state end
+L.loadState(state)
 
 -- 필드 쪽 갈고리. armed 동안만 값을 바꾼다.
 local armed, savedW, entered = false, nil, nil
@@ -98,10 +101,13 @@ emu.addEventCallback(function()
     armed = true; phase = "walk"; mark = n
   elseif phase == "walk" then
     if entered then phase = "settle"; mark = n
-    elseif n - mark < 16 then L.press({[key] = true})
     elseif n - mark > 240 then
       log[#log + 1] = report(string.format("f%d 실패: 진입 루틴이 돌지 않음", n))
-      L.write("warp.txt", table.concat(log, "\n") .. "\n"); emu.stop(1)
+      L.write("warp.txt", table.concat(log, "\n") .. "\n"); phase = "failed"; emu.stop(1)
+    else
+      -- 멈춰 선 지 약 200프레임이면 상태 창이 열리고, 그리는 동안(약 20프레임) 패드를 보지 않는다.
+      -- 그 직전에 저장된 STATE 에서도 걸음이 시작되도록 들어갈 때까지 누르고 있는다.
+      L.press({[key] = true})
     end
   elseif phase == "settle" then
     if n - mark >= waitF then
