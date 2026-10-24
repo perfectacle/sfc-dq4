@@ -62,6 +62,7 @@ dq4(FC DQ4 원작):
 - [docs/dq4-map-format.md](docs/dq4-map-format.md): DQ4(FC) 마을·던전 맵 269개(장소 번호, 비트열 압축, 연결·출구, 인물 목록)
 - [docs/dq4-data-format.md](docs/dq4-data-format.md): DQ4(FC) 이름 목록·아이템·몬스터 표
 - [docs/dq4-text-format.md](docs/dq4-text-format.md): DQ4(FC) 대사 텍스트(6비트 압축, 사전, 글자표, 메시지 번호)
+- [docs/dq4-encounter-format.md](docs/dq4-encounter-format.md): DQ4(FC) 적 조우 표(필드 구역 지도, 구역별 무리 후보, 조우율, 던전 층, 특수 전투)
 
 ### 해킹 일지
 
@@ -98,3 +99,4 @@ dq4(FC DQ4 원작):
 - [2026-10-25-04: 이름·아이템·몬스터 표](docs/journal/dq4/2026-10-25-04-data.md)
 - [2026-10-25-05: 필드(세계 지도)](docs/journal/dq4/2026-10-25-05-field.md)
 - [2026-10-25-06: 필드에서 마을로 들어가기](docs/journal/dq4/2026-10-25-06-entrances.md)
+- [2026-10-25-07: 적 조우 표](docs/journal/dq4/2026-10-25-07-encounter.md)

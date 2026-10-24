@@ -124,3 +124,5 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 | `dq4data.py rom names\|items\|monsters` | DQ4 이름 목록(주문·직업·아이템·몬스터…), 아이템 강도·가격, 몬스터 경험치·HP·골드 |
 | `dq4text.py rom all\|MSG` | DQ4 대사 풀기. `all` 은 메시지 2633개 전부, `--bytes` 글자 바이트, `--compare end.ram` 으로 창 줄 버퍼(`$06AA`)와 비교 |
 | `dq4bank.py rom call\|table\|compare` | DQ4 BRK 뱅크 호출 풀기. `compare trace.txt` 로 `probe/trace.lua` 기록(`TRACE=C446,C455,C3CD LOG=0023,0024,0025,0026,0027,0507`)과 비교 |
+| `dq4encounter.py rom maps\|zones\|odds\|dungeons\|formations\|bosses\|check` | DQ4 적 조우 표. `maps` 필드 구역 지도(`--png` 는 `work/` 에만), `zones [Z]` 구역별 칸·몬스터, `odds Z [--night\|--dungeon]` 칸 확률, `dungeons` 던전 층별 구역, `bosses` 특수 전투, `check [enc.txt…]` 표 경계 검사와 `lua/fc/enc.lua` 기록 대조 |
+| `lua/fc/enc.lua` | FC: 필드에서 시행마다 세이브스테이트를 다시 불러 기다림을 바꿔 걷고, 조우 판정(조우율·난수)과 고른 무리를 `enc.txt` 로. `STATE`, `TRIALS`(30 이하), `WAIT0`, `WAITSTEP`, `POS`(필드 좌표 한 번 쓰기), `POKE1`, `LIMIT` |
