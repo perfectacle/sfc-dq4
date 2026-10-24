@@ -20,7 +20,7 @@ FC 「드래곤 퀘스트 IV」(일본판 Rev A) 원작 데이터를 분석하�
 - [docs/dq4-debug.md](docs/dq4-debug.md): DQ4(FC) 디버그 스위치 `$C000`(벽 통과·인카운트 끄기·전투 테스트), 패드 2 흔적, 미실행 코드 찾기
 - [docs/dq4-block-format.md](docs/dq4-block-format.md): DQ4(FC) 맵 블록 → 8×8 타일·팔레트·통행 속성, CHR 올리기, 타일 애니메이션, 지형 효과
 - [docs/dq4-fcgfx.md](docs/dq4-fcgfx.md): DQ4(FC) 원작 맵·필드·블록·CHR·폰트·장면(장 제목·엔딩) 그림 뽑기(비공개 에셋용), MesenCE 색, 필드 물가 블록, 필드·폭포 팔레트 순환
-- [docs/dq4-fcsprite-format.md](docs/dq4-fcsprite-format.md): DQ4(FC) 필드 인물·일행·탈것 그림 표(4방향 × 걸음 2, 돌려 그리기)와 전투 몬스터 그림(압축·배치·팔레트), 롬에서 뽑아 열람하기
+- [docs/dq4-fcsprite-format.md](docs/dq4-fcsprite-format.md): DQ4(FC) 필드 인물·일행·탈것 그림 표(4방향 × 걸음 2, 돌려 그리기)와 전투 몬스터 그림(압축·배치·팔레트)·デスピサロ 형태 8가지·이벤트가 바꾸는 그림, 롬에서 뽑아 열람하기
 - [docs/dq4-npcblock-format.md](docs/dq4-npcblock-format.md): DQ4(FC) 인물 블록(움직임·자동 이벤트 스크립트) 명령 60가지, 일행 움직임 패턴
 - [todo.md](todo.md): 남은 일
 - [references.md](references.md): 참고 자료
@@ -74,3 +74,4 @@ FC 「드래곤 퀘스트 IV」(일본판 Rev A) 원작 데이터를 분석하�
 - [2026-10-25-42: 적 조우의 남은 것 3](journal/2026-10-25-42-encounter4.md)
 - [2026-10-25-43: 창 본문 항목의 뜻과 폰트를 다시 올리는 두 장면](journal/2026-10-25-43-textrest5.md)
 - [2026-10-25-44: 이긴 전투 뒤의 이벤트, 말 걸기 앞 검사, 맵 번호의 위 2비트, `$62A5`](journal/2026-10-25-44-talk5.md)
+- [2026-10-25-45: デスピサロ 형태와 남은 필드 그림](journal/2026-10-25-45-fcsprite2.md)

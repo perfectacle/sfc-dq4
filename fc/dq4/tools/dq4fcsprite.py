@@ -10,6 +10,9 @@
   python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes check-rom          몬스터 데이터 경계 검사(끝 = 다음 시작)
   python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes check-field DIR...    seq.lua·warp.lua 덤프(end.sram/chr/oam)와 비교
   python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes check-monster DIR...  lua/spritebattle.lua 덤프(end.sram/nt/chr/pal/oam)와 비교
+  python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes changes            이벤트가 칸 그림을 바꾸는 곳(BRK 0D 87)과 へんげのつえ 그림 표
+  python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes boss               デスピサロ 형태 0~7 → work/dq4-fcsprite/monster/AE-k.*
+  python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes check-boss DIR...   lua/spriteboss.lua 덤프(f0~f7.nt/chr/pal/oam)와 비교
   --out 폴더 로 출력 위치를 바꾼다(기본 work/dq4-fcsprite). 롬 그림이므로 work/ 밖에 두지 않는다.
 
 필드 근거 루틴: 08:$85D3(BRK 04 87, 그림 하나 올리기), $859B(번호 → 표 번호), $80D5·$8132(레코드 → 타일 주소 4개),
@@ -17,6 +20,7 @@ $8254(같은 주소 다시 안 올림, $7700), $82B0(타일 번호·속성 → $
 OBJ 팔레트 08:$86F2(08:$8703 12바이트 → $0609). 일행 1E:$9648, 필드 탈것 1E:$9799.
 몬스터 근거 루틴: 14:$812F(전투 그림 올리기), $9F0C(몬스터 ID → 그림 번호 14:$B2D5), $9FA9(그림 레코드 14:$A019, 5바이트),
 $9F26(데이터 뱅크), $9712(타일 16바이트 풀기), $9783(BG·OBJ 패턴으로 올리기), $98F5(배치), $9557·$9593(팔레트).
+デスピサロ 형태: 14:$A3F4($6E7E → $A40D 의 형태 루틴), 부품 $B100(CHR)·$AA43(BG)·$AC1A(OBJ)·$AE7C(지우기)·$AECD(옮기기).
 """
 import argparse
 import html
@@ -46,8 +50,10 @@ MON_REC = 0xA019         # 14:$9FA9 의 워드 → 그림마다 5바이트(타�
 MON_BANKBITS = 0xB398    # 14:$9F4A: 그림 번호 비트가 1 이면 뱅크 07, 0 이면 06
 MON_BANK_SPECIAL = {0x14: 0x14, 0x2E: 0x14, 0x3F: 0x14, 0xB2: 0x14, 0xC0: 0x14, 0xB1: 0x10}
 MON_ROW0 = 10            # 그림 BG 0행이 화면 nametable 10행(실측)
-MON_ROW0_BIG = {0xAE: 8, 0xBC: 8}   # デスピサロ·エスターク 는 8행(실측: エスターク)
-GREY = (0x00, 0x10, 0x20)    # 팔레트를 모를 때 대신 쓰는 회색 세 단계
+MON_ROW0_BIG = {0xAE: 8, 0xBC: 8}   # デスピサロ·エスターク 는 8행(실측)
+BOSS = 0xAE              # デスピサロ 그림 번호(= 몬스터 ID)
+BOSS_NOPOS = 0x6A        # 14:$96DD: 남은 타일 수가 이보다 작으면 자리 바이트 없음
+BOSS_PLACED = 0x36       # 14:$9852: 처음 화면에 놓는 타일 수(뒤는 형태 부품)
 MON_OBJ_Y = 0x4F         # OBJ y = 바이트 2 + 4F(14:$9963). 화면에는 한 줄 아래에 그려진다
 
 
@@ -221,54 +227,62 @@ def mon_stream(prg, p):
     타일 = (배치 목록, 16바이트). 배치 = (머리 바이트 H, 자리 바이트들). H bit7 = 이 타일의 마지막 배치,
     bit6 = BG(자리 1바이트 = 행 << 4 | 열) / 0 이면 OBJ(자리 2바이트 = x, y), bit5-4 팔레트, bit2 상하·bit1 좌우 반전.
     마지막 배치의 bit3 이면 타일이 압축: bit0 이면 채움 바이트, 그다음 16비트 마스크(둘째 바이트가 위),
-    마스크 1 인 자리만 바이트가 있음(14:$9734). bit3 이 0 이면 16바이트 그대로."""
+    마스크 1 인 자리만 바이트가 있음(14:$9734). bit3 이 0 이면 16바이트 그대로.
+    デスピサロ(그림 AE)는 남은 타일 수 $D1 이 6A 보다 작으면(타일 56~) 자리 바이트가 없다(14:$96D5 가 $29 를 켬)."""
     n, a, pa = mon_record(prg, p)
     b, start = mon_bank(prg, p), a
     tiles = []
-    for _ in range(n):
-        pls = []
-        while True:
-            h = rd(prg, b, a)
-            k = 1 if h & 0x40 else 2
-            pls.append((h, tuple(rd(prg, b, a + 1 + i) for i in range(k))))
-            a += 1 + k
-            if h & 0x80:
-                break
-        if h & 0x08:
-            fill = 0
-            if h & 1:
-                fill, a = rd(prg, b, a), a + 1
-            mask, a = rd(prg, b, a + 1) << 8 | rd(prg, b, a), a + 2
-            data = bytearray()
-            for i in range(16):
-                if mask & 0x8000 >> i:
-                    data.append(rd(prg, b, a))
-                    a += 1
-                else:
-                    data.append(fill)
-        else:
-            data = bytearray(rd(prg, b, a + i) for i in range(16))
-            a += 16
-        tiles.append((pls, bytes(data)))
+    for i in range(n):
+        a, pls, data = mon_tile(prg, b, a, p == BOSS and n - i < BOSS_NOPOS)
+        tiles.append((pls, data))
     c = rd(prg, B14, pa)
     tri = [[rd(prg, B14, pa + 1 + 3 * i + j) for j in range(3)] for i in range((c >> 4) + (c & 15))]
     return tiles, tri[:c & 15], tri[c & 15:], b, start, a
 
 
+def mon_tile(prg, b, a, nopos=False):
+    """14:$9712: 타일 하나 → (다음 주소, 배치 목록, 16바이트). nopos($29 ≠ 0)면 머리 바이트 뒤에 자리 바이트가 없다."""
+    pls = []
+    while True:
+        h = rd(prg, b, a)
+        k = 0 if nopos else 1 if h & 0x40 else 2
+        pls.append((h, tuple(rd(prg, b, a + 1 + i) for i in range(k))))
+        a += 1 + k
+        if h & 0x80:
+            break
+    if h & 0x08:
+        fill = 0
+        if h & 1:
+            fill, a = rd(prg, b, a), a + 1
+        mask, a = rd(prg, b, a + 1) << 8 | rd(prg, b, a), a + 2
+        data = bytearray()
+        for i in range(16):
+            if mask & 0x8000 >> i:
+                data.append(rd(prg, b, a))
+                a += 1
+            else:
+                data.append(fill)
+    else:
+        data = bytearray(rd(prg, b, a + i) for i in range(16))
+        a += 16
+    return a, pls, bytes(data)
+
+
 def mon_pixels(prg, mid):
     """몬스터 그림의 픽셀: {(x, y): NES 색 번호}. 좌표는 그림 BG 0행·0열 기준(OBJ 는 화면에 그려지는 자리).
-    BG 가 먼저, OBJ 가 위에 그린다(OBJ 우선순위 비트는 0)."""
+    BG 가 먼저, OBJ 가 위에 그린다(OBJ 우선순위 비트는 0). デスピサロ 는 형태 0 과 같다(boss_forms)."""
     p = mon_pic(prg, mid)
     tiles, opal, bpal, *_ = mon_stream(prg, p)
     row0 = MON_ROW0_BIG.get(p, MON_ROW0)
     bg, obj = {}, {}
-    for pls, data in tiles:
+    for i, (pls, data) in enumerate(tiles):
+        if p == BOSS and i >= BOSS_PLACED:   # 뒤 타일은 CHR 에만 올리는 형태 부품(14:$9852)
+            break
         px = planes(data)
         for h, pos in pls:
             t = flip(px, h & 2, h & 4)
             pals = bpal if h & 0x40 else opal
-            # デスピサロ(그림 AE)는 팔레트를 그림 레코드가 아닌 곳에서 받는다(14:$815A 가 팔레트 맞추기를 건너뜀)
-            pal = pals[h >> 4 & 3] if (h >> 4 & 3) < len(pals) else GREY
+            pal = pals[h >> 4 & 3]
             if h & 0x40:
                 ox, oy, dst = (pos[0] & 15) * 8, (pos[0] >> 4) * 8, bg
             else:
@@ -277,10 +291,264 @@ def mon_pixels(prg, mid):
                 ox, oy, dst = sx, sy + MON_OBJ_Y + 1 - row0 * 8, obj
             for y in range(8):
                 for x in range(8):
-                    if t[y][x]:
+                    # OBJ 는 먼저 놓은 것(낮은 OAM 칸)이 위
+                    if t[y][x] and not (dst is obj and (ox + x, oy + y) in obj):
                         dst[(ox + x, oy + y)] = pal[t[y][x] - 1]
     bg.update(obj)
     return bg
+
+
+# --- デスピサロ 형태 -------------------------------------------------------
+# 형태 번호 $6E7E(0~7)는 전투 시작 때 0(12:$8092)이고, 쓰러질 때마다 14:$A3F4 가 $A40D 의 루틴으로 다음 형태를 그린 뒤
+# 11:$9202·$9228 이 하나 올린다. 형태 루틴은 아래 부품 함수를 부른다. BOSS_STEPS 는 형태 k → k+1 루틴이 부르는 순서를
+# 전투에서 기록해 반복을 묶은 것(lua/spriteboss.lua CALLS)이고, 각 기호의 뜻·표는 롬에서 읽는다.
+#   Bxx  14:$B100 CHR 부품 xx: 타일 $B169&0F 개(bit4 면 BG, 좌우 반전 짝으로 2장씩)를 07:$B1BA 워드에서 풀어
+#        PPU (($B169&10 | $B25C&0F) << 8 | $B25C&F0) 로. xx ≥ 2 는 자리 바이트 없음. 마지막 부품 데이터는 $7600 에도 남는다
+#   Nxx  14:$AA43 BG 부품: $AA66 개 칸(자리 $AB23 워드, 행 << 4 | 열)에 타일 $AAE4 + 2i(반전이면 +1), $AAE4 가 0 이면 0.
+#        $AAA5 가 0 이 아닌 짝수면 그대로·좌우 대칭 두 번, 홀수면 대칭만(14:$AFEA)
+#   Oxx  14:$AC1A OBJ 부품: OAM 칸 $AC66 부터 $AC99 개, 타일 $ACFF + i, 속성 $ACCC, 자리 $AD65 워드
+#        ($AD32 가 0 이면 행 << 4 | 열, 아니면 y, x 바이트 쌍). 대칭은 BG 부품과 같은 규칙(14:$AFA8)
+#   Wk/Rk 14:$AE7C/$AE80 지우기·드러내기: $AEC2/$AEB7 의 k 번째 타일 범위를 끝에 빈 타일 또는 $7600 의 그림으로
+#   Mss.dd.n.a.cc 14:$AECD OAM 칸 cc 부터 옮기기: 단계 ss~ss+n-1 마다 칸 cc~$AF1D 의 좌표 a(0 y, 3 x)를 dd 씩, 끝 칸이 $AF2F 가 될 때까지
+#   Hyy.nn 14:$9C1D OAM 칸 yy 부터 nn 개 숨김. Syy.tt 14:$A44B OAM 칸 yy 의 타일을 tt 로. Vk 14:$A9FD OAM 칸 8·9 를 $AA3B 의 k 번째 만큼
+#   Z0/Z1 14:$A07C/$A080 OBJ 타일 0 을 빈 타일/색 1 로. Ck 14:$A609 BG 팔레트 1 의 색 2·3 = $A648 의 k 번째
+#   P 14:$A546 팔레트 $A650 15바이트(BG 3, OBJ 0~3). Qcc 14:$A77D·$A882 OBJ 팔레트 0 색 1 = cc. K 14:$A5DA $A667 의 한 바이트 쓰기 8개
+#   Accdd.rree.p 14:$A8BF 칸 열 cc~dd·행 rr~ee 의 BG 팔레트 p. T 14:$A42A 속성 $23D0~$23DF = 55, $23E0~$23E7 = 05
+BOSS_STEPS = (
+    'T B00 S1.EE S3.EF S5.F0 S7.F1 S9.F2 SB.F3 B00 Z0 O00 W0 N00 H0D.12',
+    'B00 Z0 O01 W1 N01 H01.1E',
+    'O02 Z0 O03 W2 N03 B01 N04 H00.14',
+    'Z0 (H00.14 O05 H00.14 O04)*4 H00.14 O05 N05 (H00.14 O06 H00.14 O05)*4 H00.14 O06 N06 '
+    '(H00.14 O07 H00.14 O06)*4 H00.14 O07 N07 (H00.14 O08 H00.14 O07)*6 H00.14 O08 N08 '
+    '(H00.14 O09 H00.14 O08)*8 (H00.14 O09 H00.14 O0A)*21 N09 (H00.14 O0B H00.14 O0A)*36 H00.14 O0B N0A H00.10 '
+    '(C0 C1 C2 C3)*3 C0 C1 C2 P B02 B03 B04 B05 B06 B07 B08 N0B N0C N0D N0E N0F N10 B09 B0A N11 N12 B0B B0C B0D N13 '
+    'B0E O0C B0F O0C B10 O0C B0F B0E B0B B0C B0D B0E B0F B10 B0F B0E B0B B0C B0D B0E B0F B10 K',
+    'B12 B13 B14 B15 B16 B17 B18 B19 B1A B1B O0D O0E O0F M00.FF.4.3.09 O13 Z1 O14 N14 N15 N16 N17 N18 N19 N1A N1B R3 '
+    'H02.18 O10 O11 O12 M04.01.4.3.09 H02.07 O15 O16 Z1 N1C N1D N1E N1F N20 N21 N22 N23 R4 H09.18',
+    'B1C B1D B1E O17 N24 B1F B20 B21 B22 B23 B24 B25 B26 B27 B28 O18 N25 B1C Z0 O19 W5 N26 Q26 O1A M08.FF.3.3.06 '
+    'O1B O1C O1D O1E N27 N28 N29 N2A N2B N2C N2D N2E B1D Z1 R6 H06.10 O1F O20 B1E Z1 R7 O21 N2F B1C Z0 O22 W8 N30 O23 '
+    'M0B.01.3.3.06 O24 O25 O26 O27 N31 N32 N33 N34 N35 N36 N37 N38 B1D Z1 R9 H06.10 O28 O29 B1E Z1 RA H16.02 Q30',
+    'B29 B2A B2B B2C B2D B2E B2F B30 B31 B32 B33 B34 B35 O2A O2B A0E13.0A0D.3 B36 B37 B38 B39 O2C O2D O2E O2F '
+    'M0E.FF.4.0.1E B3A N39 B3B B3C N3A N3B B3D B3E B3F B40 O30 N3C V0 B41 B42 B43 B44 V1 N3D V2 B45 B46 V3 B47 B48 B49 '
+    'N3E B4A B4B B4C B4D B4E O31 O32 B4F B50',
+)
+BOSS_FORMS = len(BOSS_STEPS) + 1
+BOSS_COL0 = 0x0A         # 14:$9C84: 한 마리일 때 그림 왼쪽 열
+BOSS_PART_BANK = 0x07
+
+
+def hflip_tile(d):
+    return bytes(int(f'{v:08b}'[::-1], 2) for v in d)
+
+
+def vflip_tile(d):
+    return d[7::-1] + d[15:7:-1]
+
+
+def boss_steps(k):
+    """형태 k → k+1 루틴의 기호 목록(괄호 묶음 풀기)."""
+    out, toks = [], BOSS_STEPS[k].replace('(', ' ( ').replace(')', ' ) ').split()
+    i = 0
+    while i < len(toks):
+        if toks[i] == '(':
+            j = toks.index(')', i)
+            n = int(toks[j + 1][1:])
+            out += toks[i + 1:j] * n
+            i = j + 2
+        elif '*' in toks[i]:
+            t, n = toks[i].split('*')
+            out += [t] * int(n)
+            i += 1
+        else:
+            out.append(toks[i])
+            i += 1
+    return out
+
+
+class BossScreen:
+    """전투 화면 중 デスピサロ 가 쓰는 것만: CHR(0~FF OBJ, 100~1FF BG), nametable 칸, 속성(2×2 칸), OAM 64칸, 팔레트."""
+
+    def __init__(self, prg):
+        self.prg, self.chr, self.nt, self.attr, self.oam, self.pal = prg, {}, {}, {}, [None] * 64, {}
+        self.buf = bytes(256)
+        self.first_draw()
+
+    def rd(self, a):
+        return rd(self.prg, B14, a)
+
+    def first_draw(self):
+        """14:$969C·$9783·$9822 의 첫 그림. BG 타일은 반전 종류마다 $1000 + 8D 부터, OBJ 타일은 1 부터 처음 쓰는 차례로
+        한 장씩. 화면에 놓는 것은 앞 BOSS_PLACED 타일. 팔레트는 BG 목록 i → BG 칸 1+i, OBJ 목록 i → OBJ 칸 (수−1−i)."""
+        prg = self.prg
+        tiles, opal, bpal, *_ = mon_stream(prg, BOSS)
+        row0 = MON_ROW0_BIG[BOSS]
+        for i, t in enumerate(opal):
+            self.pal[('O', len(opal) - 1 - i)] = list(t)
+        for i, t in enumerate(bpal):
+            self.pal[('B', 1 + i)] = list(t)
+        nb, no, slot = 0x8D, 1, 0
+        for i, (pls, data) in enumerate(tiles):
+            var, got = [data, hflip_tile(data), vflip_tile(data), hflip_tile(vflip_tile(data))], {}
+            for h, pos in pls:
+                if h & 0x40:
+                    v = h >> 1 & 3
+                    if v not in got:
+                        got[v], self.chr[0x100 + nb], nb = nb, var[v], nb + 1
+                    if pos and i < BOSS_PLACED:
+                        r, c = row0 + (pos[0] >> 4), BOSS_COL0 + (pos[0] & 15)
+                        self.nt[(r, c)] = got[v]
+                        self.attr[(r // 2, c // 2)] = 1 + (h >> 4 & 3)
+                else:
+                    if 'O' not in got:
+                        got['O'], self.chr[no], no = no, data, no + 1
+                    if pos and i < BOSS_PLACED:
+                        a = (len(opal) - 1 - (h >> 4 & 3)) | (0x40 if h & 2 else 0) | (0x80 if h & 4 else 0)
+                        self.oam[slot] = [(pos[1] + MON_OBJ_Y) & 0xFF, got['O'], a, (pos[0] + BOSS_COL0 * 8) & 0xFF]
+                        slot += 1
+
+    def chr_part(self, x):
+        v1, v2 = self.rd(0xB169 + x), self.rd(0xB25C + x)
+        t = ((v1 & 0x10 | v2 & 0x0F) << 8 | v2 & 0xF0) // 16
+        a, buf = wd(self.prg, B14, 0xB1BA + 2 * x), bytearray()
+        for _ in range(v1 & 15):
+            a, _, data = mon_tile(self.prg, BOSS_PART_BANK, a, x >= 2)
+            for d in ([data, hflip_tile(data)] if v1 & 0x10 else [data]):
+                self.chr[t], t = d, t + 1
+                buf += d
+        self.buf = bytes(buf)
+
+    @staticmethod
+    def mirror_runs(m):
+        return [0, 1] if m and not m & 1 else [m]
+
+    def bg_part(self, x):
+        n, m, base = self.rd(0xAA66 + x), self.rd(0xAAA5 + x), self.rd(0xAAE4 + x)
+        p = wd(self.prg, B14, 0xAB23 + 2 * x)
+        for mm in self.mirror_runs(m):
+            for i in range(n):
+                v = self.rd(p + i)
+                c = 13 - (v & 15) if mm else v & 15
+                self.nt[((v >> 4) + 8, c + 10)] = (base + 2 * i + mm) & 0xFF if base else 0
+
+    def obj_part(self, x):
+        grid = self.rd(0xAD32 + x) == 0
+        slot, n, at, base = self.rd(0xAC66 + x), self.rd(0xAC99 + x), self.rd(0xACCC + x), self.rd(0xACFF + x)
+        p = wd(self.prg, B14, 0xAD65 + 2 * x)
+        a0 = (at >> 4 | (at & 0x80) >> 2 | (at & 8) << 4) & 0xFF
+        for mm in self.mirror_runs(at & 3):
+            for i in range(n):
+                if grid:
+                    v = self.rd(p + i)
+                    c = 13 - (v & 15) if mm else v & 15
+                    y, xx = (v >> 4) * 8 + 0x3F, (c + 10) * 8
+                else:
+                    y, b = (self.rd(p + 2 * i) + 0x3F) & 0xFF, self.rd(p + 2 * i + 1)
+                    xx = ((0x68 - b if mm else b) + 0x50) & 0xFF
+                self.oam[slot & 63] = [y, (base + i) & 0xFF if base else 0, a0 | (0x40 if mm else 0), xx]
+                slot += 1
+
+    def wipe(self, k, reveal_mask):
+        hi, cnt = self.rd(0xAEC2 + k), self.rd(0xAEB7 + k)
+        t = ((hi & 15) << 8 | hi & 0xF0) // 16
+        show = reveal_mask == bool(cnt & 0x80)   # 끝 마스크(AE7C FF, AE80 00)를 $AEB7 bit7 이 0 이면 뒤집어 씀(14:$B0B9)
+        for i in range(cnt & 15):
+            self.chr[t + i] = self.buf[16 * i:16 * i + 16] if show else bytes(16)
+
+    def move(self, st, d, n, axis, s0):
+        for k in range(n):
+            end, tgt = self.rd(0xAF1D + st + k), self.rd(0xAF2F + st + k)
+            while True:
+                for y in range(s0, end):
+                    self.oam[y][axis] = (self.oam[y][axis] + d) & 0xFF
+                if self.oam[end - 1][axis] == tgt:
+                    break
+
+    def step(self, op):
+        c, arg = op[0], op[1:]
+        h = [int(v, 16) for v in arg.split('.')] if arg else []
+        if c == 'B':
+            self.chr_part(h[0])
+        elif c == 'N':
+            self.bg_part(h[0])
+        elif c == 'O':
+            self.obj_part(h[0])
+        elif c in 'WR':
+            self.wipe(h[0], c == 'W')
+        elif c == 'M':
+            self.move(*h)
+        elif c == 'H':
+            for i in range(h[1]):
+                self.oam[(h[0] + i) & 63] = [0xF7] * 4
+        elif c == 'S':
+            self.oam[h[0]][1] = h[1]
+        elif c == 'V':
+            dy, dx = self.rd(0xAA3B + 2 * h[0]), self.rd(0xAA3C + 2 * h[0])
+            for y, sx in ((8, -dx), (9, dx)):
+                self.oam[y][0] = (self.oam[y][0] - dy) & 0xFF
+                self.oam[y][3] = (self.oam[y][3] + sx) & 0xFF
+        elif c == 'Z':
+            self.chr[0] = bytes([0xFF] * 8 + [0] * 8) if h[0] else bytes(16)
+        elif c == 'C':
+            self.pal[('B', 1)][1:] = [self.rd(0xA648 + 2 * h[0]), self.rd(0xA649 + 2 * h[0])]
+        elif c == 'P':
+            v = [self.rd(0xA650 + i) for i in range(15)]
+            self.pal[('B', 3)] = v[:3]
+            for i in range(4):
+                self.pal[('O', i)] = v[3 + 3 * i:6 + 3 * i]
+        elif c == 'Q':
+            self.pal[('O', 0)][0] = h[0]
+        elif c == 'K':
+            for i in range(8):
+                hi, lo, v = (self.rd(0xA667 + 3 * i + j) for j in range(3))
+                t = bytearray(self.chr.get((hi << 8 | lo) // 16, bytes(16)))
+                t[lo & 15] = v
+                self.chr[(hi << 8 | lo) // 16] = bytes(t)
+        elif c == 'A':
+            for r in range(h[1] >> 8, (h[1] & 0xFF) + 1):
+                for cc in range(h[0] >> 8, (h[0] & 0xFF) + 1):
+                    self.attr[(r // 2, cc // 2)] = h[2]
+        elif c == 'T':
+            for qr in range(4, 10):   # $23D0~$23E7 = nametable 행 8~19. 05 는 행 16·17 만 팔레트 1
+                for qc in range(16):
+                    self.attr[(qr, qc)] = 1 if qr < 9 else 0
+        else:
+            raise ValueError(op)
+
+    def pixels(self):
+        """{(x, y): NES 색}. 화면 좌표. BG(행 8~17) 위에 OAM 을 낮은 칸이 위로, 속성 bit5 는 BG 뒤."""
+        out, bgpx = {}, set()
+        for (r, c), t in self.nt.items():
+            d = self.chr.get(0x100 + t)
+            if d is None or not 8 <= r < 18:
+                continue
+            pal = self.pal[('B', self.attr.get((r // 2, c // 2), 1))]
+            for y, row in enumerate(planes(d)):
+                for x, v in enumerate(row):
+                    if v:
+                        out[(c * 8 + x, r * 8 + y)] = pal[v - 1]
+                        bgpx.add((c * 8 + x, r * 8 + y))
+        for e in reversed(self.oam):
+            if e is None or e[0] >= 0xEF:
+                continue
+            y, t, a, x = e
+            pal = self.pal[('O', a & 3)]
+            for yy, row in enumerate(flip(planes(self.chr[t]), a & 0x40, a & 0x80)):
+                for xx, v in enumerate(row):
+                    q = (x + xx, y + 1 + yy)
+                    if v and x + xx < 256 and not (a & 0x20 and q in bgpx):
+                        out[q] = pal[v - 1]
+        return out
+
+
+def boss_forms(prg):
+    """형태 0~7 의 화면 픽셀 {(x, y): NES 색} 목록."""
+    sc, out = BossScreen(prg), []
+    out.append(sc.pixels())
+    for k in range(len(BOSS_STEPS)):
+        for op in boss_steps(k):
+            sc.step(op)
+        out.append(sc.pixels())
+    return out
 
 
 # --- 그림 파일 ----------------------------------------------------------
@@ -357,6 +625,15 @@ def mon_box(px):
     return min(xs), min(ys), max(xs) + 1, max(ys) + 1
 
 
+def boss_images(prg):
+    """형태마다 (색 번호 행렬, 색 목록)과 모든 형태를 담는 공통 상자(그림 BG 0행·0열 기준 x0, y0, x1, y1)."""
+    ox, oy = BOSS_COL0 * 8, MON_ROW0_BIG[BOSS] * 8
+    fs = [{(x - ox, y - oy): c for (x, y), c in f.items()} for f in boss_forms(prg)]
+    boxes = [mon_box(f) for f in fs]
+    box = (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
+    return box, [indexed(f, box[2] - box[0], box[3] - box[1], box[0], box[1]) for f in fs]
+
+
 def write_monster(prg, mid, folder, names):
     px = mon_pixels(prg, mid)
     x0, y0, x1, y1 = mon_box(px)
@@ -374,6 +651,22 @@ def write_monster(prg, mid, folder, names):
     with open(stem + '.txt', 'w') as f:
         f.write('\n'.join(head) + '\n' + matrix_text(grid) + '\n')
     return grid, colors
+
+
+def write_boss(prg, folder, names):
+    """デスピサロ 형태 0~7 을 같은 상자로 folder/AE-k.png·-x8.png·.txt 에."""
+    (x0, y0, x1, y1), ims = boss_images(prg)
+    for k, (grid, colors) in enumerate(ims):
+        stem = os.path.join(folder, f'{BOSS:02X}-{k}')
+        save_png(stem + '.png', grid, colors)
+        save_png(stem + '-x8.png', grid, colors, 8)
+        head = [f'# 몬스터 {BOSS:02X} {names[BOSS]} 형태 {k}($6E7E = {k}). 형태 {k - 1} → {k} 루틴: {BOSS_STEPS[k - 1]}'
+                if k else f'# 몬스터 {BOSS:02X} {names[BOSS]} 형태 0(첫 그림)',
+                f'# {x1 - x0}×{y1 - y0}, 왼위 = 그림 BG 0행 기준 ({x0},{y0}). 색 번호 = NES 색 ' +
+                ' '.join(f'{B36[i + 1]}={c:02X}' for i, c in enumerate(colors))]
+        with open(stem + '.txt', 'w') as f:
+            f.write('\n'.join(head) + '\n' + matrix_text(grid) + '\n')
+    return ims
 
 
 def monster_names(prg):
@@ -417,6 +710,46 @@ def cmd_who(prg, n):
         print(f'  {place} {kind} 슬롯 {6 + i:2d} ({x:02X},{y:02X}) 그림 {s:02X} 대화 {tid:03X}')
 
 
+# --- 이벤트가 바꾸는 그림 ------------------------------------------------------
+
+DISGUISE = (0x1E, 0xB079, 0x25, 0x10)   # 1E:$B02F: へんげのつえ 그림 표. 앞 25개 또는 뒤 10개 중 난수로 → $6297
+
+
+def event_changes(prg):
+    """BRK 0D 87(08:$8668: 칸 X 에 표 A 를 번호 바꿈 없이 올림)을 부르는 곳마다 (뱅크, 주소, X, A). 바로 앞 두 명령이
+    LDX #·LDA # 가 아니면 None(레지스터 값은 코드가 계산)."""
+    out = []
+    for b in range(len(prg) // 0x4000):
+        base = 0xC000 if b in (0x0F, 0x1F) else 0x8000
+        seg = prg[b * 0x4000:(b + 1) * 0x4000]
+        for o in range(4, 0x4000 - 2):
+            if seg[o:o + 3] != bytes([0x00, 0x0D, 0x87]):
+                continue
+            x = a = None
+            for k in (2, 4):   # LDA #a / LDX #x 두 개가 어느 순서로든 바로 앞
+                op, v = seg[o - k], seg[o - k + 1]
+                if op == 0xA9 and a is None:
+                    a = v
+                elif op == 0xA2 and x is None:
+                    x = v
+                else:
+                    break
+            out.append((b, base + o, x, a))
+    return out
+
+
+def cmd_changes(prg):
+    for b, a, x, t in event_changes(prg):
+        xs = '?' if x is None else f'{x:X}'
+        ts = '?' if t is None else f'{t:02X}' + (' 돌려 그리기' if t & 0x80 else '')
+        lab = '' if t is None else field_label(prg, raw_number(t & 0x7F))
+        print(f'{b:02X}:{a:04X} 칸 {xs} 표 {ts} {lab}'.rstrip())
+    bank, addr, n1, n2 = DISGUISE
+    v = [rd(prg, bank, addr + i) for i in range(n1 + n2)]
+    print(f'へんげのつえ {bank:02X}:${addr:04X} 앞 {n1}개: ' + ' '.join(f'{t:02X}' for t in v[:n1]))
+    print(f'  뒤 {n2}개(bit7 이 켜진 채 $6297 에): ' + ' '.join(f'{t:02X}' for t in v[n1:]))
+
+
 # --- 묶음 ---------------------------------------------------------------
 
 def cmd_sheet(prg, out):
@@ -438,6 +771,9 @@ def cmd_sheet(prg, out):
     for mid in range(len(names)):
         write_monster(prg, mid, md, names)
         mcells.append((f'monster/{mid:02X}', f'{mid:02X} {names[mid]}', f'그림 {mon_pic(prg, mid):02X}', ''))
+    write_boss(prg, md, names)
+    for k in range(BOSS_FORMS):
+        mcells.append((f'monster/{BOSS:02X}-{k}', f'{BOSS:02X} {names[BOSS]} 형태 {k}', f'$6E7E = {k}', ''))
 
     def contact(items, path, cell_w, cell_h, cols):
         rows = (len(items) + cols - 1) // cols
@@ -472,7 +808,6 @@ def cmd_sheet(prg, out):
 # --- 에셋 저장소용 --------------------------------------------------------
 
 ASSET_ROWS = ('아래', '왼쪽', '오른쪽', '위')    # SHEET_ROWS 순서(남·서·동·북)
-UNUSABLE = {0xAE: 'デスピサロ: 형태별 부품이 한 레코드에 이어져 있고 팔레트를 다른 곳에서 받아, 부품을 모두 겹치고 모르는 색은 회색으로 그림'}
 
 
 def asset_sprite_name(n):
@@ -535,17 +870,27 @@ def cmd_assets(prg, rom, out):
         x0, y0, x1, y1 = mon_box(px)
         grid, colors = indexed(px, x1 - x0, y1 - y0, x0, y0)
         p = mon_pic(prg, mid)
-        fname = f'{mid:02X}-{nm.replace(chr(0x3000), "")}.png'
-        if p in UNUSABLE:   # 쓸 수 없는 그림은 PNG 를 두지 않고 index.json 에만 적는다
-            fname = None
-        else:
-            save_png(os.path.join(md, fname), grid, colors)
+        short = nm.replace(chr(0x3000), '')
+        fname = f'{mid:02X}-{short}.png'
+        save_png(os.path.join(md, fname), grid, colors)
         tiles, opal, bpal, b, start, _ = mon_stream(prg, p)
-        mons.append({'file': fname, 'id': mid, 'name': nm, 'picture': p, 'data': f'{b:02X}:${start:04X}',
-                     'record': f'14:${wd(prg, B14, MON_REC) + 5 * p:04X}', 'tiles': len(tiles), 'size': [x1 - x0, y1 - y0],
-                     'origin': [x0, y0], 'colors': [f'{c:02X}' for c in colors],
-                     'bg_palettes': [[f'{c:02X}' for c in t] for t in bpal], 'obj_palettes': [[f'{c:02X}' for c in t] for t in opal],
-                     'usable': p not in UNUSABLE, 'note': UNUSABLE.get(p, ''), 'matrix': matrix_text(grid).split('\n')})
+        e = {'file': fname, 'id': mid, 'name': nm, 'picture': p, 'data': f'{b:02X}:${start:04X}',
+             'record': f'14:${wd(prg, B14, MON_REC) + 5 * p:04X}', 'tiles': len(tiles), 'size': [x1 - x0, y1 - y0],
+             'origin': [x0, y0], 'colors': [f'{c:02X}' for c in colors],
+             'bg_palettes': [[f'{c:02X}' for c in t] for t in bpal], 'obj_palettes': [[f'{c:02X}' for c in t] for t in opal],
+             'matrix': matrix_text(grid).split('\n')}
+        if p == BOSS:
+            (bx0, by0, bx1, by1), ims = boss_images(prg)
+            e['forms'] = []
+            for k, (g, cs) in enumerate(ims):
+                ff = f'{mid:02X}-{k}-{short}.png'
+                save_png(os.path.join(md, ff), g, cs)
+                e['forms'].append({'file': ff, 'form': k, 'size': [bx1 - bx0, by1 - by0], 'origin': [bx0, by0],
+                                   'colors': [f'{c:02X}' for c in cs], 'steps': BOSS_STEPS[k - 1] if k else '',
+                                   'matrix': matrix_text(g).split('\n')})
+            e['note'] = ('form 은 형태 번호 $6E7E. 형태마다 같은 상자로 자른 화면 그림(BG + OBJ). steps 는 앞 형태에서 이 형태로 바꾸는 '
+                         '루틴의 부품 호출(기호는 sfc-dq4 fc/dq4/docs/dq4-fcsprite-format.md). file 은 형태 0 과 같은 첫 그림')
+        mons.append(e)
     with open(os.path.join(md, 'index.json'), 'w') as f:
         json.dump({'note': 'origin 은 그림 BG 0행·0열 기준 왼위 자리. 색 번호 0 투명(전투 화면에서는 검정 바탕), colors 는 색 번호 1~ 의 NES 색. '
                    'matrix 문자는 색 번호(0-9A-Z, . 투명)', 'monsters': mons}, f, ensure_ascii=False, indent=1)
@@ -555,10 +900,11 @@ def cmd_assets(prg, rom, out):
         cards.append(('../sprites/' + e['file'], e['file'][:-4], (e['label'] + ' · ' if e['label'] else '') +
                       f'인물 {e["records"]} · 맵 {len(e["places"])}곳', 'spr'))
     for e in mons:
-        if not e['file']:
-            continue
         cards.append(('../monsters/' + e['file'], f'{e["id"]:02X} {e["name"]}',
                       f'그림 {e["picture"]:02X} · {e["size"][0]}×{e["size"][1]}', 'mon'))
+        for fm in e.get('forms', []):
+            cards.append(('../monsters/' + fm['file'], f'{e["id"]:02X} {e["name"]} 형태 {fm["form"]}',
+                          f'$6E7E = {fm["form"]} · {fm["size"][0]}×{fm["size"][1]}', 'mon'))
 
     def grid_html(kind):
         return '\n'.join(f'<div class="card {kind}"><a href="{html.escape(src)}"><img src="{html.escape(src)}" loading="lazy" '
@@ -579,7 +925,7 @@ nav a {{ margin-right: 12px; }}
 .card .t {{ font-weight: 600; word-break: break-all; }} .card .s {{ color: var(--mut); font-size: 12px; }}
 </style></head><body>
 <h1>DQ4(FC) 원작 스프라이트·몬스터</h1>
-<nav><a href="index.html">← 그래픽 갤러리</a><a href="#sprites">필드 스프라이트 {len(sprites)}</a><a href="#monsters">몬스터 {sum(1 for e in mons if e['file'])}</a></nav>
+<nav><a href="index.html">← 그래픽 갤러리</a><a href="#sprites">필드 스프라이트 {len(sprites)}</a><a href="#monsters">몬스터 {len(mons)}</a></nav>
 <p>필드 스프라이트는 32×64(행 아래·왼쪽·오른쪽·위, 열 걸음 0·1, 16×16 씩). 이름의 두 번째 번호는 돌려 그리기 그림 번호입니다.
 몬스터는 그림 크기 그대로, 검정 바탕이 게임 화면의 색 0 입니다. 메타데이터는 각 폴더의 index.json.</p>
 <h2 id="sprites">필드 스프라이트</h2><div class="grid">
@@ -615,6 +961,8 @@ def check_field(prg, d):
     for sl in range(4):
         got = s[0x1200 + sl * 64:0x1240 + sl * 64]
         hits = [m for m in range(FIELD_COUNT) if field_load(prg, m, got[0])[0] == got]
+        # 여자 勇者(표 08)는 표 00 과 배치가 같고 CHR 만 다르다: CHR 까지 맞는 표를 고른다
+        hits.sort(key=lambda m: -sum(chr_[t * 16:t * 16 + 16] == v for t, v in field_load(prg, m, got[0])[1].items()))
         if hits:
             slots[sl] = hits[0]
     tiles_ok = tiles_n = 0
@@ -622,6 +970,16 @@ def check_field(prg, d):
         got = s[0x1200 + sl * 64:0x1240 + sl * 64]
         table, ch = field_load(prg, n, got[0])
         ok = table == got
+        if not ok and sl >= 4:
+            # 이벤트가 BRK 0D 87 로 칸 그림을 바꾸면 $6E5E 는 그대로다: 같은 64바이트를 만드는 표를 찾는다
+            alt = [m for m in range(FIELD_COUNT) if field_load(prg, raw_number(m), got[0])[0] == got]
+            alt.sort(key=lambda m: -sum(chr_[t * 16:t * 16 + 16] == v
+                                        for t, v in field_load(prg, raw_number(m), got[0])[1].items()))
+            if alt:
+                print(f'  칸 {sl:X} 는 $6E5E 의 그림 {n:02X} 이 아니라 표 {alt[0]:02X} 로 바뀌어 있음')
+                n = slots[sl] = raw_number(alt[0])
+                table, ch = field_load(prg, n, got[0])
+                ok = True
         cb = sum(chr_[t * 16:t * 16 + 16] != v for t, v in ch.items())
         tiles_n += len(ch)
         tiles_ok += len(ch) - cb
@@ -718,6 +1076,45 @@ def check_monster(prg, d):
     return ok
 
 
+def check_boss(prg, d):
+    """lua/spriteboss.lua 덤프 f0~f7(형태 0~7)의 화면 행 8~17 BG 와 OAM 을 그려 boss_forms 와 픽셀 비교.
+    OAM 은 낮은 칸이 위, 속성 bit5 는 BG 뒤."""
+    ok = True
+    for k, want in enumerate(boss_forms(prg)):
+        f = os.path.join(d, f'f{k}')
+        if not os.path.exists(f + '.nt'):
+            print(f'  형태 {k}: 덤프 없음')
+            ok = False
+            continue
+        nt, chr_ = open(f + '.nt', 'rb').read(), open(f + '.chr', 'rb').read()
+        oam = open(f + '.oam', 'rb').read()
+        pal = [c & 0x3F for c in open(f + '.pal', 'rb').read()]
+        got, bgpx = {}, set()
+        for r in range(8, 18):
+            for c in range(32):
+                t = nt[r * 32 + c]
+                a = nt[0x3C0 + (r // 4) * 8 + c // 4] >> ((r & 2) * 2 + (c & 2)) & 3
+                for y, row in enumerate(planes(chr_[0x1000 + t * 16:0x1010 + t * 16])):
+                    for x, v in enumerate(row):
+                        if v:
+                            got[(c * 8 + x, r * 8 + y)] = pal[a * 4 + v]
+                            bgpx.add((c * 8 + x, r * 8 + y))
+        for j in range(63, -1, -1):
+            y, t, a, x = oam[4 * j:4 * j + 4]
+            if y >= 0xEF:
+                continue
+            for yy, row in enumerate(flip(planes(chr_[t * 16:t * 16 + 16]), a & 0x40, a & 0x80)):
+                for xx, v in enumerate(row):
+                    q = (x + xx, y + 1 + yy)
+                    if v and x + xx < 256 and not (a & 0x20 and q in bgpx):
+                        got[q] = pal[16 + (a & 3) * 4 + v]
+        keys = set(got) | set(want)
+        same = sum(got.get(q) == want.get(q) for q in keys)
+        ok &= same == len(keys)
+        print(f'  형태 {k}: 픽셀 {same}/{len(keys)} 같음(화면 {len(got)}, 디코더 {len(want)})')
+    return ok
+
+
 def check_rom(prg):
     """몬스터 데이터마다 다 읽은 끝이 같은 뱅크의 다음 데이터 시작과 같은지."""
     ends = {}
@@ -765,10 +1162,18 @@ def main():
         cmd_sheet(prg, a.out)
     elif a.cmd == 'check-rom':
         check_rom(prg)
+    elif a.cmd == 'boss':
+        md = os.path.join(a.out, 'monster')
+        os.makedirs(md, exist_ok=True)
+        write_boss(prg, md, monster_names(prg))
+        for k in range(BOSS_FORMS):
+            print(f'{md}/{BOSS:02X}-{k}.png')
+    elif a.cmd == 'changes':
+        cmd_changes(prg)
     elif a.cmd == 'who':
         cmd_who(prg, int(a.args[0], 16))
-    elif a.cmd in ('check-field', 'check-monster'):
-        fn = check_field if a.cmd == 'check-field' else check_monster
+    elif a.cmd in ('check-field', 'check-monster', 'check-boss'):
+        fn = {'check-field': check_field, 'check-monster': check_monster, 'check-boss': check_boss}[a.cmd]
         res = []
         for d in a.args:
             print(d)
