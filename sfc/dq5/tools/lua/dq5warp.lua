@@ -15,6 +15,10 @@
 --                            일행 수 7E:201D~201F, 순서 7E:2020~·7E:2028~ 도 고친다
 --   ADULT=1                  이야기 단계 플래그 7E:2190 bit6·5 를 켜고 $1948 = 2 로 둔다(00:A72A 가 플래그로 정하는 값과 같게).
 --                            주인공 그림이 노예 시절 차림으로 바뀌고, 필드 조우는 $1948 = 2 격자를 쓴다
+--   ADULT=2                  ADULT=1 에 7E:21BE bit5 를 더해 망토 차림 어른 주인공(그림 2D, 05:D998)으로 한다
+--   WAGON=1                  마차(7E:201C bit7, BRK 88 91). 동료 둘까지 마차 옆을 걷는다
+--   LATESET="1954=80"         SET 과 같은 꼴로, 도착해 조작할 수 있게 된 첫 프레임에 한 번 고친다(사다리를 내려가기 전에 바꾸면
+--                            안 되는 탈것 값 등)
 --   POKE, ROMPATCH           walk.lua 와 같다(POKE 는 매 프레임 고정, ROMPATCH 는 파일 오프셋=바이트)
 --   TEST="left:40,up:40"     도착 후 이 입력을 눌러 조작되는지 본다(좌표가 바뀌면 moved=yes). 세이브는 TEST 전에 한다
 --   SAVE="town.mss"          도착하고 SETTLE(기본 150) 프레임 뒤 SHOT_DIR 에 세이브스테이트와 그림(.png)을 저장
@@ -34,7 +38,7 @@ local sets = {}
 for a, op, v in string.gmatch(os.getenv("SET") or "", "(%x+)([=|&])(%x+)") do
   sets[#sets + 1] = {0x7E0000 + tonumber(a, 16), op, tonumber(v, 16)}
 end
--- 동료가 된 スライム 의 일행 레코드(42바이트). +6·+26~+29 는 동료 레코드에서 오지 않아 그대로 둔다
+-- 동료가 된 スライム 의 일행 레코드(42바이트). +6(すばやさ)·+26~+29 는 동료 레코드에서 오지 않아 그대로 둔다
 local PARTY_TEMPLATE = {
   0x82, 0x80, 0x08, 0x00, 0x00, 0x00, 0x03, 0x08, 0x05, 0x01, 0x03, 0x00, 0x00, 0x00, 0x08, 0x00,
   0x00, 0x00, 0x01, 0x63, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
@@ -63,9 +67,16 @@ local function buildParty()
     emu.write(0x7E2028 + i, i, m)
   end
 end
-if os.getenv("ADULT") == "1" then
+local adult = os.getenv("ADULT")
+if adult == "1" or adult == "2" then
   sets[#sets + 1] = {0x7E2190, "|", 0x60}
   sets[#sets + 1] = {0x7E1948, "=", 0x02}
+end
+if adult == "2" then sets[#sets + 1] = {0x7E21BE, "|", 0x20} end
+if os.getenv("WAGON") == "1" then sets[#sets + 1] = {0x7E201C, "|", 0x80} end
+local latesets = {}
+for a, op, v in string.gmatch(os.getenv("LATESET") or "", "(%x+)([=|&])(%x+)") do
+  latesets[#latesets + 1] = {0x7E0000 + tonumber(a, 16), op, tonumber(v, 16)}
 end
 local pokes = {}
 for a, v in string.gmatch(os.getenv("POKE") or "", "(%x+)=(%x+)") do pokes[#pokes + 1] = {tonumber(a, 16), tonumber(v, 16)} end
@@ -145,6 +156,14 @@ local function finish()
   emu.stop(0)
 end
 
+local function applySets(list)
+  for _, s in ipairs(list) do
+    local v = rd(s[1])
+    if s[2] == "=" then v = s[3] elseif s[2] == "|" then v = v | s[3] else v = v & s[3] end
+    emu.write(s[1], v, m)
+  end
+end
+
 emu.addEventCallback(function()
   n = n + 1
   if n == 1 then
@@ -156,11 +175,7 @@ emu.addEventCallback(function()
   end
   if n == 2 then
     buildParty()
-    for _, s in ipairs(sets) do
-      local v = rd(s[1])
-      if s[2] == "=" then v = s[3] elseif s[2] == "|" then v = v | s[3] else v = v & s[3] end
-      emu.write(s[1], v, m)
-    end
+    applySets(sets)
   end
   for _, p in ipairs(pokes) do emu.write(p[1], p[2], m) end
   L.release()
@@ -189,6 +204,7 @@ emu.addEventCallback(function()
         L.press({down = true})
       else
         phase = "settle"; arrived = n
+        applySets(latesets)
         log[#log + 1] = string.format("f%05d arrived map %02X/%02X %s", n, rd(0x7E00BC), rd(0x7E00BD), pos())
       end
     end

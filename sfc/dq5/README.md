@@ -11,6 +11,7 @@ SFC 「드래곤 퀘스트 V」(일본판) 엔진을 분석하는 트랙입니�
 - [docs/dq5-data-format.md](docs/dq5-data-format.md): DQ5 게임 데이터(상점 품목·물건 가격·물건 표·몬스터·전투 조우)
 - [docs/dq5-flags.md](docs/dq5-flags.md): DQ5 이야기 플래그(`7E:2190`~)를 켜고 끄고 보는 곳
 - [docs/dq5-graphics-format.md](docs/dq5-graphics-format.md): DQ5 전투 몬스터 그림(레코드·머리·조각·타일 압축·팔레트·배치·그림자)과 전투 배경, 필드 인물 스프라이트(세트·레코드·타일 압축·프레임 배치·맵 OBJ 타일)
+- [docs/dq5-event-format.md](docs/dq5-event-format.md): DQ5 이벤트 스크립트(주인공을 조종하는 표와 명령)
 - [todo.md](todo.md): 남은 일
 - [references.md](references.md): 참고 자료
 - [tools/README.md](tools/README.md): 도구 사용법
@@ -76,3 +77,7 @@ SFC 「드래곤 퀘스트 V」(일본판) 엔진을 분석하는 트랙입니�
 - [2026-10-25-43: 세계 2 로 들어가는 석상 이벤트](journal/2026-10-25-43-field5.md)
 - [2026-10-25-44: 이야기 플래그 2](journal/2026-10-25-44-flags2.md)
 - [2026-10-25-45: 끝 코드, 이름 변수, 몸짓, 일행 조회와 대화 조건](journal/2026-10-25-45-text2.md)
+- [2026-10-25-46: 몬스터 필드 6D·68 과 시작 상태 39, 저주 효과음](journal/2026-10-25-46-monster3.md)
+- [2026-10-25-47: 이벤트 스크립트](journal/2026-10-25-47-event.md)
+- [2026-10-25-48: 슬롯머신, 배, 마차와 망토 차림 어른 주인공](journal/2026-10-25-48-slot-ship.md)
+- [2026-10-25-49: 필드 68 실측, AI 의 되살리기 대상, 피하기의 앞 조건](journal/2026-10-25-49-monster4.md)

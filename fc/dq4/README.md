@@ -21,6 +21,7 @@ FC 「드래곤 퀘스트 IV」(일본판 Rev A) 원작 데이터를 분석하�
 - [docs/dq4-block-format.md](docs/dq4-block-format.md): DQ4(FC) 맵 블록 → 8×8 타일·팔레트·통행 속성, CHR 올리기, 타일 애니메이션, 지형 효과
 - [docs/dq4-fcgfx.md](docs/dq4-fcgfx.md): DQ4(FC) 원작 맵·필드·블록·CHR·폰트·장면 그림 뽑기(비공개 에셋용), MesenCE 색, 필드 물가 블록
 - [docs/dq4-fcsprite-format.md](docs/dq4-fcsprite-format.md): DQ4(FC) 필드 인물·일행·탈것 그림 표(4방향 × 걸음 2, 돌려 그리기)와 전투 몬스터 그림(압축·배치·팔레트), 롬에서 뽑아 열람하기
+- [docs/dq4-npcblock-format.md](docs/dq4-npcblock-format.md): DQ4(FC) 인물 블록(움직임·자동 이벤트 스크립트) 명령 60가지, 일행 움직임 패턴
 - [todo.md](todo.md): 남은 일
 - [references.md](references.md): 참고 자료
 - [tools/README.md](tools/README.md): 도구 사용법
@@ -63,3 +64,5 @@ FC 「드래곤 퀘스트 IV」(일본판 Rev A) 원작 데이터를 분석하�
 - [2026-10-25-32: 적 조우의 남은 것 2](journal/2026-10-25-32-encounter3.md)
 - [2026-10-25-33: 창 레코드(자리·크기·항목)와 자동 ＊「 의 규칙](journal/2026-10-25-33-textrest4.md)
 - [2026-10-25-34: 출구 칸 연결 표·리프트 사각형·연 문 목록](journal/2026-10-25-34-block4.md)
+- [2026-10-25-35: 장 시작 상태의 일행 조건, 맵 목록의 마지막 그룹, 자동 입력](journal/2026-10-25-35-talk4.md)
+- [2026-10-25-36: 인물 블록 명령 해석기, 마차·배·열기구, 5장 끝과 엔딩](journal/2026-10-25-36-event3.md)
