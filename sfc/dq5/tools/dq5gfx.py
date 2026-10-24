@@ -74,6 +74,15 @@ DOOR_ROUTINES = {0x44: 0x01F6B1, 0x43: 0x01F5CA, 0x3F: 0x01F727, 0x40: 0x01F727,
 DOOR_TABLE_SELECT = {0xF7F7: ({0x3E: 0xFD9F, 0x3C: 0xFDAB, 0x3B: 0xFDB7, 0x3D: 0xFDC3, 0x4D: 0xFDCF}, 0xFDE7),
                      0xF7D6: ({0x48: 0xFE8F, 0x49: 0xFE2F, 0x42: 0xFE4F}, 0xFE6F),
                      0xF7C8: ({0x3F: 0xFDFF}, 0xFE17)}
+# 03:C8B3: たびびとのちず 를 쓰면 모드 7 로 띄우는 세계 지도. 03:CAC2 가 VRAM 워드마다 타일맵 바이트와 점 하나를 만든다.
+# 점은 필드 좌표($CE,$D0, 처음 0·10)의 블록 번호 → 03:CC48 의 니블 + 20(색 번호), 좌표는 03:CD48·03:CD58 표만큼 나아간다.
+# 색 20~2F 는 03:CC2C. 타일맵은 16x15 타일(128x120 점)만 쓴다.
+WORLD_SCREEN_COLORS = 0x03CC2C
+WORLD_SCREEN_BLOCK_COLOR = 0x03CC48
+WORLD_SCREEN_STEP_X, WORLD_SCREEN_STEP_Y = 0x03CD48, 0x03CD58
+# 1E:D7E3: 타이틀 화면 글자(ENIX PRESENTS ~ DRAGON QUEST V)의 2bpp 타일. 필드 RLE(01:A64F)와 같은 꼴이고,
+# 앞 16바이트(빈 타일 하나)를 더해 위·아래로 짝지으면 대부분 8x16 글자 하나지만, 타일을 나눠 쓰는 글자(D·E·M·W 등)도 있다.
+CREDITS_FONT = 0x1ED7E3
 # 25:85D5: ルーラ 목적지의 맵 그룹 22개. 이름은 이름 표 0B(23:D5F3) 의 같은 순번.
 RURA_GROUPS, RURA_COUNT, TOWN_NAMES = 0x2585D5, 22, 0x0B
 
@@ -137,8 +146,10 @@ def map_ids(rom):
 class TileCache:
     """(CHR, 팔레트 줄, 반전) → 8x8 RGBA. 맵 하나의 팔레트 안에서만 쓴다."""
 
-    def __init__(self, rom, high, colors):
+    def __init__(self, rom, high, colors, override=None):
         self.rom, self.high, self.colors, self.px, self.img = rom, high, colors, {}, {}
+        for chr_id, raw in (override or {}).items():
+            self.px[chr_id] = planar(raw)
 
     def get(self, chr_id, pal, fh, fv):
         k = (chr_id, pal, fh, fv)
@@ -173,16 +184,17 @@ def set_cgram(rom, s, alt=False):
     return bytes(cg)
 
 
-def decode_map(rom, bc, bd):
+def decode_map(rom, bc, bd, flags=False):
+    """flags 면 이야기 플래그를 모두 켠 상태: 맵 위 물체는 열린 모양, 맵별 루틴의 셀 지우기도 켜진 쪽."""
     high = bc >= 0x50
     dec = Decoder(rom, SLOT, high)
     trace = []
     w, h, buf, _ = dec.decode(map_pointer(rom, bc, bd), trace=trace)
     buf = bytearray(buf)
     apply_hook(rom, bc, bd, buf, w)
-    hook_clears(rom, bc, bd, buf)
+    hook_clears(rom, bc, bd, buf, flags)
     if bc < 0x50:
-        dec.doors = apply_doors(rom, bc, bd, buf, w, h)
+        dec.doors = apply_doors(rom, bc, bd, buf, w, h, opened=flags)
     dec.common = common_tiles(rom, bc, bd)
     blocks = sorted({args[0] for *_, op, args in trace if op == 'block'}
                     | ({(rom.u8(map_pointer(rom, bc, bd) + 7) & 7) << 8 | rom.u8(map_pointer(rom, bc, bd) + 8)}
@@ -271,23 +283,154 @@ def door_shape(rom, kind):
     return out
 
 
-def apply_doors(rom, bc, bd, buf, w, h, doors=None):
-    """01:D2FC 의 물체를 닫힌 상태로 셀 위층(+5·+6)에 그린다. 그린 물체 [(X, Y, 종류)]."""
+def apply_doors(rom, bc, bd, buf, w, h, doors=None, opened=False):
+    """01:D2FC 의 물체를 셀 위층(+5·+6)에 그린다. opened 면 열린 모양(01:F8AB). 그린 물체 [(X, Y, 종류)]."""
     placed = []
     for x, y, kind, _, _ in (doors if doors is not None else door_entries(rom)).get((bc, bd), []):
+        placed.append((x, y, kind))
+        if opened:
+            open_door(rom, buf, w, bc, bd, x, y, kind)
+            continue
         for dx, dy, word in door_shape(rom, kind):
             if x + dx < w and y + dy < h:
                 o = ((y + dy) * w + x + dx) * 8
                 buf[o + 5], buf[o + 6] = word & 0xFF, word >> 8
-        placed.append((x, y, kind))
     return placed
 
 
-def hook_clears(rom, bc, bd, buf):
+class Mini65:
+    """맵 위 물체의 열린 모양 루틴(01:F8AB 아래)만 셀 버퍼 위에서 돌리는 작은 65816 해석기. 그 루틴들이 쓰는 명령만 있다.
+    7E:C000 이후를 셀 버퍼로, 직접 페이지를 따로 두고, 01:EFED(다음 줄)와 25:FA15(셀 주소)는 결과만 옮겼다."""
+    def __init__(self, rom, buf, w, bc, bd):
+        self.rom, self.buf, self.w = rom, buf, w
+        self.dp = bytearray(0x100)
+        self.bc, self.bd = bc, bd
+        self.a = self.x = self.y = 0; self.m8 = self.x8 = True; self.z = False; self.c = False
+        self.stack = []
+    def rd(self, addr, n):
+        if 0x7EC000 <= addr < 0x800000:
+            o = addr - 0x7EC000
+            return sum(self.buf[o + i] << (8 * i) for i in range(n) if o + i < len(self.buf))
+        if addr < 0x100:
+            return sum(self.dp[(addr + i) & 0xFF] << (8 * i) for i in range(n))
+        return sum(self.rom.u8(addr + i) << (8 * i) for i in range(n))
+    def wr(self, addr, v, n):
+        if 0x7EC000 <= addr < 0x800000:
+            o = addr - 0x7EC000
+            for i in range(n):
+                if o + i < len(self.buf): self.buf[o + i] = (v >> (8 * i)) & 0xFF
+        else:
+            for i in range(n): self.dp[(addr + i) & 0xFF] = (v >> (8 * i)) & 0xFF
+    def ptr(self, d): return self.dp[d] | self.dp[d+1] << 8 | self.dp[d+2] << 16
+    def setz(self, v, n): self.z = (v & ((1 << (8*n)) - 1)) == 0
+    def run(self, pc, limit=3000):
+        from kr_patch.sfc.dis65816 import decode
+        from kr_patch.sfc.mapper import LoROM
+        rom = self.rom
+        for _ in range(limit):
+            op = rom.u8(pc); _, n, _, _ = decode(rom.d, pc, m8=self.m8, x8=self.x8, mapper=LoROM())
+            na = 1 if self.m8 else 2; nx = 1 if self.x8 else 2
+            nxt = (pc & 0xFF0000) | ((pc + n) & 0xFFFF)
+            imm8 = rom.u8(pc + 1); imm = rom.u8(pc+1) if n == 2 else rom.u16(pc+1)
+            if op == 0xC2 or op == 0xE2:
+                if imm8 & 0x20: self.m8 = op == 0xE2
+                if imm8 & 0x10: self.x8 = op == 0xE2
+                if self.m8: self.a &= 0xFF  # keep B separately ignored
+            elif op == 0xA6: self.x = self.rd(imm8, nx); self.setz(self.x, nx)
+            elif op == 0xA4: self.y = self.rd(imm8, nx); self.setz(self.y, nx)
+            elif op == 0xA5: self.a = self.rd(imm8, na); self.setz(self.a, na)
+            elif op == 0x85: self.wr(imm8, self.a, na)
+            elif op == 0x86: self.wr(imm8, self.x, nx)
+            elif op == 0x84: self.wr(imm8, self.y, nx)
+            elif op == 0x64: self.wr(imm8, 0, na)
+            elif op == 0xA2: self.x = imm; self.setz(self.x, nx)
+            elif op == 0xA0: self.y = imm; self.setz(self.y, nx)
+            elif op == 0xA9: self.a = imm; self.setz(self.a, na)
+            elif op == 0xCA: self.x = (self.x - 1) & 0xFFFF; self.setz(self.x, nx)
+            elif op == 0x88: self.y = (self.y - 1) & 0xFFFF; self.setz(self.y, nx)
+            elif op == 0xE8: self.x = (self.x + 1) & 0xFFFF; self.setz(self.x, nx)
+            elif op == 0xC8: self.y = (self.y + 1) & 0xFFFF; self.setz(self.y, nx)
+            elif op == 0xB7: self.a = self.rd(self.ptr(imm8) + self.y, na); self.setz(self.a, na)
+            elif op == 0x97: self.wr(self.ptr(imm8) + self.y, self.a, na)
+            elif op == 0xB2: self.a = self.rd((0x01 << 16) | (self.ptr(imm8) & 0xFFFF), na); self.setz(self.a, na)
+            elif op == 0xB1: self.a = self.rd((0x01 << 16) | ((self.ptr(imm8) + self.y) & 0xFFFF), na); self.setz(self.a, na)
+            elif op == 0x29: self.a &= imm; self.setz(self.a, na)
+            elif op == 0x09: self.a |= imm; self.setz(self.a, na)
+            elif op == 0x05: self.a |= self.rd(imm8, na); self.setz(self.a, na)
+            elif op == 0x25: self.a &= self.rd(imm8, na); self.setz(self.a, na)
+            elif op == 0x3A: self.a = (self.a - 1) & ((1 << (8*na))-1); self.setz(self.a, na)
+            elif op == 0x1A: self.a = (self.a + 1) & ((1 << (8*na))-1); self.setz(self.a, na)
+            elif op == 0x0A: self.c = bool(self.a >> (8*na-1) & 1); self.a = (self.a << 1) & ((1 << (8*na))-1); self.setz(self.a, na)
+            elif op == 0x4A: self.c = bool(self.a & 1); self.a >>= 1; self.setz(self.a, na)
+            elif op == 0x18: self.c = False
+            elif op == 0x38: self.c = True
+            elif op == 0x69: s = self.a + imm + self.c; self.c = s >= (1 << (8*na)); self.a = s & ((1 << (8*na))-1); self.setz(self.a, na)
+            elif op in (0xC9, 0xE0, 0xC0):
+                reg = self.a if op == 0xC9 else self.x if op == 0xE0 else self.y
+                nn = na if op == 0xC9 else nx
+                self.z = (reg & ((1<<(8*nn))-1)) == imm; self.c = (reg & ((1<<(8*nn))-1)) >= imm
+            elif op == 0xC6: v = (self.rd(imm8, na) - 1) & 0xFFFF; self.wr(imm8, v, na); self.setz(v, na)
+            elif op == 0x48: self.stack.append(self.a)
+            elif op == 0x68: self.a = self.stack.pop(); self.setz(self.a, na)
+            elif op == 0xDA: self.stack.append(self.x)
+            elif op == 0xFA: self.x = self.stack.pop()
+            elif op == 0x5A: self.stack.append(self.y)
+            elif op == 0x7A: self.y = self.stack.pop()
+            elif op == 0x08: self.stack.append((self.m8, self.x8))
+            elif op == 0x28: self.m8, self.x8 = self.stack.pop()
+            elif op == 0xAA: self.x = self.a
+            elif op == 0x8A: self.a = self.x
+            elif op == 0x98: self.a = self.y
+            elif op == 0xA8: self.y = self.a
+            elif op == 0xD0:
+                if not self.z: nxt = (pc & 0xFF0000) | ((pc + 2 + (imm8 - 256 if imm8 & 0x80 else imm8)) & 0xFFFF)
+            elif op == 0xF0:
+                if self.z: nxt = (pc & 0xFF0000) | ((pc + 2 + (imm8 - 256 if imm8 & 0x80 else imm8)) & 0xFFFF)
+            elif op == 0x90:
+                if not self.c: nxt = (pc & 0xFF0000) | ((pc + 2 + (imm8 - 256 if imm8 & 0x80 else imm8)) & 0xFFFF)
+            elif op == 0xB0:
+                if self.c: nxt = (pc & 0xFF0000) | ((pc + 2 + (imm8 - 256 if imm8 & 0x80 else imm8)) & 0xFFFF)
+            elif op == 0x80: nxt = (pc & 0xFF0000) | ((pc + 2 + (imm8 - 256 if imm8 & 0x80 else imm8)) & 0xFFFF)
+            elif op == 0x82: nxt = (pc & 0xFF0000) | ((pc + 3 + rom.u16(pc+1)) & 0xFFFF)
+            elif op == 0x22:
+                t = rom.u24(pc + 1)
+                if t == 0x25FA15:
+                    a = 0xC000 + ((self.y & 0xFF) * self.w + (self.x & 0xFF)) * 8
+                    a += 0x7E0000
+                    self.dp[0], self.dp[1], self.dp[2] = a & 0xFF, (a >> 8) & 0xFF, a >> 16
+                else: raise RuntimeError(f'JSL {t:06X} at {pc:06X}')
+            elif op == 0x20:
+                t = rom.u16(pc + 1)
+                if t == 0xEFED:
+                    a = (self.ptr(0) + self.w * 8) & 0xFFFFFF
+                    self.dp[0], self.dp[1], self.dp[2] = a & 0xFF, (a >> 8) & 0xFF, a >> 16
+                else:
+                    self.stack.append(('ret', nxt)); nxt = (pc & 0xFF0000) | t
+            elif op == 0x60:
+                r = self.stack.pop()
+                if r == 'top': return
+                nxt = r[1]
+            else:
+                raise RuntimeError(f'op {op:02X} at {pc:06X}')
+            if op == 0xA6 and imm8 == 0xBC: self.x = self.bc
+            if op == 0xA6 and imm8 == 0xBD: self.x = self.bd
+            pc = nxt
+        raise RuntimeError('limit')
+
+
+def open_door(rom, buf, w, bc, bd, x, y, kind):
+    """01:F8AB: 플래그가 켜진(열린) 물체를 그린다. 종류 44·43·49·48 은 아무것도 그리지 않음."""
+    m = Mini65(rom, buf, w, bc, bd)
+    m.dp[0x0B], m.dp[0x0C], m.dp[0x08] = x, y, 1
+    m.stack = ['top', kind]
+    m.run(0x01F8AB)
+
+
+def hook_clears(rom, bc, bd, buf, flags=False):
     """맵별 루틴(15:F907)이 `LDA #$7E / PHA / PLB` 뒤 STZ abs·TRB abs 로 셀 버퍼를 지우는 것을 buf 에 반영한다
     (dq5exit.apply_hook 은 LDA #즉값 / STA 만 본다). 35/03 의 1E:F39F 는 플래그(BRK #$0B 08 30)가 꺼져 있으면
     보물상자 하나의 위층을 지우고 가구 비트를 내린다. 플래그는 모두 꺼진 것으로 본다: BRK #$0B(00:93BA) 바로 뒤의 BEQ 는 건너뛰고
-    BNE 는 지나간다. 그 밖의 분기는 따지지 않고 처음 RTL 까지 순서대로 읽는다."""
+    BNE 는 지나간다(flags 면 반대로 모두 켜진 것으로). 그 밖의 분기는 따지지 않고 처음 RTL 까지 순서대로 읽는다."""
     from dq5exit import HOOK_NONE, map_hook
     from kr_patch.sfc.dis65816 import decode
     from kr_patch.sfc.mapper import LoROM
@@ -300,7 +443,7 @@ def hook_clears(rom, bc, bd, buf):
     for _ in range(HOOK_SCAN):
         op = rom.u8(pc)
         _, n, _, _ = decode(rom.d, pc, m8=m8, x8=x8, mapper=LoROM())
-        if after_flag and op == 0xF0:
+        if after_flag and op == (0xD0 if flags else 0xF0):
             off = rom.u8(pc + 1)
             pc = (pc & 0xFF0000) | ((pc + 2 + (off - 256 if off & 0x80 else off)) & 0xFFFF)
             after_flag = False
@@ -337,10 +480,38 @@ def hook_clears(rom, bc, bd, buf):
     return n_written
 
 
-def draw_cells(rom, dec, w, h, buf, cgram, layers=(2, 5)):
+def anim_override(rom, bc, bd, counter):
+    """카운터 7E:1ECE = counter 인 순간의 움직이는 타일 {CHR 번호: 32바이트}(dq5anim). 종류 14(걸을 때만)는 그대로."""
+    import dq5anim
+    high = bc >= 0x50
+    moving, _ = dq5anim.map_types(rom, bc, bd)
+    out = {}
+    for t in moving:
+        k = dq5anim.kind(rom, t)
+        chrs = dq5anim.block_chrs(rom, k['blocks'], high)
+        if t < 6:
+            raw = dq5anim.frame_bytes(rom, t, dq5anim.frame_index(rom, t, counter))
+            for i, c in enumerate(chrs[:k['tiles']]):
+                out[c] = raw[i * 32:i * 32 + 32]
+        elif t == 7:
+            tiles = b''.join(dq5anim.chr_raw(rom, c, high) for c in chrs[:k['tiles']])
+            for n in range(counter + 1):
+                if n % k['period'] == 0 and n:
+                    tiles = dq5anim.slide7(tiles, n)
+            for i, c in enumerate(chrs[:k['tiles']]):
+                out[c] = tiles[i * 32:i * 32 + 32]
+        elif t != 14:
+            shift = (counter // k['period']) % 8
+            for c in chrs[:k['tiles']]:
+                out[c] = dq5anim.roll(dq5anim.chr_raw(rom, c, high), shift)
+    return out
+
+
+def draw_cells(rom, dec, w, h, buf, cgram, layers=(2, 5), override=None):
+    """override = {CHR 번호: 32바이트} 면 그 CHR 을 대신 그린다(움직이는 타일의 한 순간)."""
     colors = cgram_colors(cgram)
     slot_chr = {v & 0x3FF: k for k, v in dec.chr_map.items()}
-    tc = TileCache(rom, dec.high, colors)
+    tc = TileCache(rom, dec.high, colors, override)
     img = Image.new('RGB', (w * 8, h * 8), colors[0])
     for layer in layers:
         for cell in range(w * h):
@@ -707,6 +878,10 @@ def export_maps(rom, out, only=None):
                              variant=f'세트 {pset:02X}' + (' 밤' if alt else ''), **meta,
                              note=f'{cond} 이면 01:9771 이 바꾸는 팔레트')
                 break
+        fdec, _, _, fbuf, _ = decode_map(rom, bc, bd, flags=True)
+        if fbuf != buf:
+            out.save(draw_cells(rom, fdec, w, h, fbuf, day_cg), f'maps/{stem}-flags.png', 'maps', title, group,
+                     variant='플래그 켬', **meta, note='이야기 플래그를 모두 켠 상태: 문이 열리고(01:F8AB) 맵별 루틴의 셀 지우기도 켜진 쪽')
         colors = cgram_colors(day_cg)
         tc = TileCache(rom, dec.high, colors)
         imgs = [block_image(rom, dec, n, colors, tc) for n in blocks]
@@ -792,12 +967,12 @@ def export_field(rom, out):
     print('field')
 
 
-def frames_out(out, frames, stem, title, note, duration):
+def frames_out(out, frames, stem, title, note, duration, group='필드'):
     sheet_img = sheet(frames, 1, frames[0].width, frames[0].height, [f'{k}' for k in range(len(frames))], label_h=10)
-    out.save(sheet_img, f'gfx/anim/{stem}.png', 'anim', title, '필드', note=note, frames=len(frames))
+    out.save(sheet_img, f'gfx/anim/{stem}.png', 'anim', title, group, note=note, frames=len(frames))
     path = os.path.join(out.root, f'gfx/anim/{stem}.gif')
     frames[0].save(path, save_all=True, append_images=frames[1:], duration=duration, loop=0)
-    out.add(f'gfx/anim/{stem}.gif', 'anim', title + ' (GIF)', '필드', w=frames[0].width, h=frames[0].height)
+    out.add(f'gfx/anim/{stem}.gif', 'anim', title + ' (GIF)', group, w=frames[0].width, h=frames[0].height)
 
 
 def export_anim(rom, out):
@@ -839,12 +1014,75 @@ def export_anim(rom, out):
         frames.append(strip)
     frames_out(out, frames, 'field-wave', '필드 물결 팔레트 10단계(블록 000~007)',
                '4번 줄 색 1~3 을 01:A0F6 + $1961*6 으로(01:A0CF)', 120)
+    export_indoor_anim(rom, out)
     print('anim')
 
 
 MATRIX_CHARS = '.123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 # 몬스터 EA·EB 는 ミルドラース 최종 모습의 윗몸·아랫몸이라 둘을 같은 원점에 겹쳐 그린다(dq5-graphics-format.md).
 MONSTER_NOTES = {0xEA: '윗몸. 게임은 EB(아랫몸)를 같은 원점에 겹쳐 그림', 0xEB: '아랫몸. EA 와 겹쳐 그림'}
+
+
+def anim_counters(rom, bc, bd):
+    """GIF 로 찍을 카운터 값들: 가장 짧은 주기(4 이상)마다 한 장, 192프레임 한 바퀴."""
+    import dq5anim
+    moving, _ = dq5anim.map_types(rom, bc, bd)
+    moving = [t for t in moving if t != 14]
+    if not moving:
+        return []
+    step = max(4, min(dq5anim.kind(rom, t)['period'] for t in moving))
+    return list(range(0, 192, step))
+
+
+def export_indoor_anim(rom, out):
+    """움직이는 타일이 있는 실내 맵마다 맵 전체 GIF(gfx/anim/maps/), 종류마다 타일 띠 시트·GIF(gfx/anim/indoor-NN)."""
+    import dq5anim
+    names = group_names(rom)
+    first_map = {}
+    for bc, bd, _ in dq5anim.map_list(rom):
+        moving, _ = dq5anim.map_types(rom, bc, bd)
+        for t in moving:
+            first_map.setdefault(t, (bc, bd))
+        counters = anim_counters(rom, bc, bd)
+        if not counters:
+            continue
+        dec, w, h, buf, _ = decode_map(rom, bc, bd)
+        cg = map_cgram(rom, bc, bd)
+        frames = [draw_cells(rom, dec, w, h, buf, cg, override=anim_override(rom, bc, bd, c)) for c in counters]
+        stem = map_stem(bc, bd, names)
+        path = os.path.join(out.root, f'gfx/anim/maps/{stem}.gif')
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        step = counters[1] - counters[0] if len(counters) > 1 else 8
+        frames[0].save(path, save_all=True, append_images=frames[1:], duration=max(20, step * 50 // 3), loop=0)
+        out.add(f'gfx/anim/maps/{stem}.gif', 'anim', f'{bc:02X}/{bd:02X} 움직이는 맵', '실내 맵', map=f'{bc:02X}/{bd:02X}',
+                stem=stem, w=w * 8, h=h * 8, frames=len(frames),
+                note=f'종류 {",".join(str(t) for t in moving)}, 카운터 7E:1ECE 를 {step} 씩(03:D4B5)')
+    for t in sorted(first_map):
+        if t == 14:
+            continue
+        bc, bd = first_map[t]
+        colors = cgram_colors(map_cgram(rom, bc, bd))
+        k = dq5anim.kind(rom, t)
+        chrs = dq5anim.block_chrs(rom, k['blocks'], bc >= 0x50)[:k['tiles']]
+        pal_table = HIGH_CHR_PALETTE if bc >= 0x50 else CHR_PALETTE
+        frames = []
+        for c in range(0, 192, max(2, k['period'])):
+            ov = anim_override(rom, bc, bd, c)
+            strip = Image.new('RGB', (len(chrs) * 8, 8), colors[0])
+            for i, chr_id in enumerate(chrs):
+                nib = rom.u8(pal_table + (chr_id >> 1))
+                pal = (((nib & 0x0F) + 1) * 4 if chr_id & 1 else ((nib & 0xF0) >> 2) + 4) >> 2 & 7
+                raw = ov.get(chr_id) or dq5anim.chr_raw(rom, chr_id, bc >= 0x50)
+                ti = tile_image(planar(raw), colors[pal * 16:pal * 16 + 16])
+                strip.paste(ti, (i * 8, 0), ti)
+            if not frames or frames[-1].tobytes() != strip.tobytes() or len(frames) < 2:
+                frames.append(strip)
+        while len(frames) > 1 and frames[-1].tobytes() == frames[0].tobytes():
+            frames.pop()
+        title = f'실내 움직이는 타일 종류 {t}'
+        note = f'블록 {" ".join(f"{b:03X}" for b in k["blocks"])}, 주기 {k["period"]}, {bc:02X}/{bd:02X} 팔레트'
+        frames_out(out, frames, f'indoor-{t:02d}', title, note, max(20, k['period'] * 50 // 3), group='실내')
+    print('indoor anim')
 
 
 def export_monsters(rom, out):
@@ -922,8 +1160,155 @@ def export_ui(rom, out):
     print('ui')
 
 
+def world_screen(rom, world=0):
+    """たびびとのちず 화면의 128x120 색 번호 격자. 03:CAC2 를 옮긴 것. 블록은 그때 풀려 있는 세계($1949) 지도에서 읽는다."""
+    from dq5field import WORLDS, block_number, rle
+    wmap, _ = rle(rom, WORLDS[world][0])
+    hib, _ = rle(rom, WORLDS[world][1])
+    ce, d0 = 0, 0x10
+    chars = bytearray(0x4000)
+    for y in range(0x4000):
+        b = block_number(wmap, hib, (ce >> 1) & 255, (d0 >> 1) & 255)
+        nib = rom.u8(WORLD_SCREEN_BLOCK_COLOR + (b >> 1))
+        chars[y] = (nib & 15 if b & 1 else nib >> 4) + 0x20
+        x, z = 0, y + 1
+        if z & 0x3FF:
+            x += 2
+            if z & 0x3F:
+                x += 2
+                if z & 7:
+                    x += 2
+        ce = (ce + rom.u16(WORLD_SCREEN_STEP_X + x)) & 0x1FF
+        d0 = (d0 + rom.u16(WORLD_SCREEN_STEP_Y + x)) & 0x1FF
+    grid = [[0] * 128 for _ in range(120)]
+    for t in range(240):
+        for k in range(64):
+            grid[t // 16 * 8 + k // 8][t % 16 * 8 + k % 8] = chars[t * 64 + k]
+    return grid
+
+
+def export_world_screen(rom, out):
+    o = lorom(WORLD_SCREEN_COLORS)
+    colors = cgram_colors(rom.d[o:o + 32])
+    grid = world_screen(rom)
+    img = Image.new('RGB', (128, 120))
+    p = img.load()
+    for y, row in enumerate(grid):
+        for x, v in enumerate(row):
+            p[x, y] = colors[v - 0x20]
+    out.save(img, 'gfx/screens/world-map.png', 'screens', 'たびびとのちず 세계 지도(모드 7, $1949=0)', '세계 지도',
+             note='03:CAC2 가 필드 블록마다 03:CC48 의 색으로 찍는 128x120, 색 03:CC2C')
+    from dq5field import WORLDS, block_number, rle
+    for world in (1, 2):
+        wmap, _ = rle(rom, WORLDS[world][0])
+        hib, _ = rle(rom, WORLDS[world][1])
+        img = Image.new('RGB', (256, 256))
+        p = img.load()
+        for v in range(256):
+            for u in range(256):
+                b = block_number(wmap, hib, u >> 1, v >> 1)
+                nib = rom.u8(WORLD_SCREEN_BLOCK_COLOR + (b >> 1))
+                p[u, v] = colors[(nib & 15 if b & 1 else nib >> 4)]
+        out.save(img, f'gfx/screens/world-map-{world}.png', 'screens', f'たびびとのちず 세계 지도($1949={world}, 전체)',
+                 '세계 지도', note='$1EBE bit7 갈래: 게임은 주인공 필드 좌표($1EC4,$1EC6)를 가운데로 이 그림의 128x120 만 '
+                 '보여 줌(1점 = 필드 좌표 1, 03:CD50 걸음 표)')
+
+
+def credits_tiles(rom):
+    from dq5field import rle
+    data, _ = rle(rom, CREDITS_FONT)
+    data = bytes(16) + data
+    return [data[i * 16:i * 16 + 16] for i in range(len(data) // 16)]
+
+
+def export_credits(rom, out):
+    o = lorom(UI_PALETTE)
+    colors = cgram_colors(rom.d[o:o + 8])
+    tiles = credits_tiles(rom)
+    n = len(tiles) // 2
+    img = Image.new('RGB', (n * 8, 16), colors[0])
+    for g in range(n):
+        for half in (0, 1):
+            t = tile_image(chr_2bpp(tiles[g * 2 + half]), colors[0:4])
+            img.paste(t, (g * 8, half * 8), t)
+    out.save(img, 'gfx/screens/credits-font.png', 'screens', f'타이틀 화면 글자 칸 {n}개(8x16)', '타이틀',
+             note='1E:D7E3 RLE 타일을 위·아래 짝으로 늘어놓음(글자표 아님, 타일을 나눠 쓰는 글자가 있음). 색은 BG3 팔레트 0(04:98D7)')
+
+
+def window_grid(rom, n):
+    """창 레코드 n(04:EB48)을 BG3 타일 번호 격자로. 머리 +4 아래 니블이 0 인 목록 창만(그 밖은 None).
+    +0·+1 위치, +2 너비, +3 아래 4비트 높이·bit7 줄 간격 16점(sfc/dq5/docs/dq5-text-format.md 「창 레코드 머리」).
+    항목: FE = 커서 칸 하나 뒤 글자, FF = 다음 줄, 바이트는 BG3 타일 번호 그대로. 84·83 xx 는 글자 xx 위 칸에
+    탁점 84·반탁점 83(위 칸이 테두리면 92·93, 04:B258)."""
+    from dq5text import window
+    _, data = window(rom, n)
+    if len(data) < 7 or data[4] & 0x0F or data[2] >= 0x20 or 0xFE not in data[5:8]:
+        return None
+    w, h, step = data[2], data[3] & 0x0F, 2 if data[3] & 0x80 else 1
+    if w < 3 or h < 3:
+        return None
+    grid = [[0x001] * w for _ in range(h)]
+    for x in range(w):
+        grid[0][x], grid[h - 1][x] = 0x08D, 0x88D
+    for y in range(h):
+        grid[y][0], grid[y][w - 1] = 0x08E, 0x48E
+    grid[0][0], grid[0][w - 1], grid[h - 1][0], grid[h - 1][w - 1] = 0x08C, 0x48C, 0x88C, 0xC8C
+    x, y, i = 1, 1, data.index(0xFE)
+    while i < len(data):
+        b = data[i]
+        if b == 0xFE:
+            x += 1
+        elif b == 0xFF:
+            x, y = 1, y + step
+        elif b in (0x83, 0x84) and i + 1 < len(data):
+            if 0 < x < w - 1 and 0 < y < h - 1:
+                grid[y][x] = data[i + 1]
+                grid[y - 1][x] = (0x093 if b == 0x83 else 0x092) if y - 1 == 0 else b
+            x, i = x + 1, i + 1
+        elif b < 0x80:
+            if 0 < x < w - 1 and 0 < y < h - 1:
+                grid[y][x] = b
+            x += 1
+        else:
+            x += 1
+        if y >= h - 1:
+            break
+        i += 1
+    return grid, data[0], data[1] & 0x7F
+
+
+def export_windows(rom, out):
+    from dq5text import WINDOWS
+    o = lorom(UI_PALETTE)
+    colors = cgram_colors(rom.d[o:o + 8])
+    tiles = [chr_2bpp(t) for t in (ui_tiles(rom)[i * 16:i * 16 + 16] for i in range(150))]
+    count = 0
+    for n in range(0x100):
+        try:
+            got = window_grid(rom, n)
+        except (IndexError, ValueError):
+            got = None
+        if not got:
+            continue
+        grid, wx, wy = got
+        img = Image.new('RGB', (len(grid[0]) * 8, len(grid) * 8), colors[0])
+        for y, row in enumerate(grid):
+            for x, word in enumerate(row):
+                t = word & 0xFF
+                if t < len(tiles):
+                    ti = tile_image(tiles[t], colors[0:4], bool(word & 0x400), bool(word & 0x800))
+                    img.paste(ti, (x * 8, y * 8), ti)
+        out.save(img, f'gfx/screens/windows/{n:02X}.png', 'screens', f'창 {n:02X}', '창 레코드',
+                 window=f'{n:02X}', pos=f'{wx},{wy}', record=f'{WINDOWS >> 16:02X}:{rom.u16(WINDOWS + n * 2):04X}',
+                 note='04:EB48 레코드의 너비·높이·항목으로 그림(글자 바이트 = BG3 타일). 머리 +4 가 0 인 목록 창만')
+        count += 1
+    print(f'windows {count}')
+
+
 EXPORTS = {'maps': export_maps, 'chr': export_chr, 'field': export_field, 'anim': export_anim,
-           'monsters': export_monsters, 'battlebg': export_battlebg, 'font': export_font, 'ui': export_ui}
+           'monsters': export_monsters, 'battlebg': export_battlebg, 'font': export_font, 'ui': export_ui,
+           'worldmap': export_world_screen, 'credits': export_credits,
+           'windows': export_windows}
 COMMAND = 'uv run --locked python sfc/dq5/tools/dq5gallery.py rom/dq5.sfc --out $OUT'
 
 
