@@ -530,7 +530,7 @@ def fig_worlds(rom):
 
 
 def fig_high_maps(rom):
-    """그룹 $50 이상 맵 넷을 롬만으로 그린 것(dq5map.py 의 high_preload·high_marks 를 거침, 팔레트도 롬)."""
+    """그룹 $50 이상 맵 넷을 롬만으로 그린 것(dq5map.py 의 map_preload·high_marks 를 거침, 팔레트도 롬)."""
     from dq5map import high_marks
     imgs = []
     for bc, bd in ((0x51, 0x52), (0x52, 0x50), (0x53, 0x50), (0x54, 0x50)):
