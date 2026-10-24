@@ -697,6 +697,7 @@ def main():
         return
     if cmd == 'gallery':
         gallery(a[3])
+        source_txt(a[3], 'gallery', 'uv run --locked python tools/dq4fcgfx.py rom/dq4.nes gallery $OUT', data)
         return
     out = a[3]
     names = place_names(prg, data) if cmd in ('all', 'maps', 'field') else {}
@@ -713,6 +714,7 @@ def main():
         source_txt(out, 'gfx', line, data)
     if cmd == 'all':
         gallery(out)
+        source_txt(out, 'gallery', line, data)
 
 
 if __name__ == '__main__':
