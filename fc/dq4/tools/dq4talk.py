@@ -12,7 +12,6 @@
                                                             이벤트 표 1C:$BF74 의 번호마다 전투·플래그·메시지·장소·부르는 곳
                                                             (--compare: EV 로 돌린 talk.lua 기록과 대조)
   python fc/dq4/tools/dq4talk.py rom/dq4.nes looks                  그림 번호마다 쓰는 인물 수·장소·첫 대사
-  python fc/dq4/tools/dq4talk.py rom/dq4.nes fixups                 맵을 실을 때 장소별로 인물을 숨기거나 옮기는 루틴(1C:$A010)
 
 --ram 을 주면 RAM 덤프의 플래그($627B~)·장($615A)·시간($62ED)·일행($616A~)·인물 레코드로 조건을 풀어
 실제로 나올 메시지만 낸다. 덤프가 밤이면 밤 목록을 쓴다.
@@ -720,61 +719,6 @@ def show_events(prg, rom, dirs=()):
     return bad == 0
 
 
-FIXUPS = (0x1C, 0xABF5, 0xAC8A)   # 1C:$A010: (그룹, 순번) 쌍 표(bit7 로 끝)와 같은 순번의 루틴 주소 표
-FIXUP_HIDE = 0xA035                # 슬롯 X+6 을 (80,80) 으로(1C:$A035, $6F66·$6F86·$6FA6·$6FC6)
-
-
-def fixups(prg):
-    """맵을 실을 때 1C[08]($9EA6)이 부르는 장소별 인물 손질 루틴. [(그룹, 순번, 주소, 끝)]. 끝은 다음 루틴 머리."""
-    b, places, addrs = FIXUPS
-    base = b * 0x4000 - 0x8000
-    out, i = [], 0
-    while prg[base + places + i] < 0x80:
-        a = prg[base + addrs + i] | prg[base + addrs + i + 1] << 8
-        out.append((prg[base + places + i], prg[base + places + i + 1], a))
-        i += 2
-    heads = sorted({a for *_, a in out} | {FIXUPS[1]})
-    return [(g, k, a, heads[heads.index(a) + 1]) for g, k, a in out]
-
-
-def fixup_ops(prg, a, end):
-    """루틴 몸통을 줄줄이 읽어 플래그 시험·켜기·끄기와 숨기는 슬롯(LDX #n 뒤 JSR $A035, LDY #c 되풀이)을 모은다."""
-    b = FIXUPS[0]
-    rd = lambda x: prg[b * 0x4000 + (x & 0x3FFF)]
-    ops, x, y = [], None, None
-    while a < end:
-        op = rd(a)
-        if op == 0x00:
-            c = dq4bank.call(prg, a, b)
-            if c['kind'].startswith('flag'):
-                ops.append(f"{ {'flag-set': '켬', 'flag-clear': '끔', 'flag-test': '봄'}[c['kind']]} ${c['flag']:04X}&{c['mask']:02X}")
-            a += brk_len(c['b1'], c['b2'])
-            continue
-        if op not in OPS:
-            a += 1
-            continue
-        mn, md = OPS[op]
-        n = 1 + SIZE[md]
-        arg = rd(a + 1) | (rd(a + 2) << 8 if n == 3 else 0) if n > 1 else 0
-        if mn == 'LDX':
-            x = arg if md == 'imm' else None
-        elif mn == 'LDY':
-            y = arg if md == 'imm' else None
-        elif mn in ('JSR', 'JMP') and arg == FIXUP_HIDE and x is not None:
-            cnt = y if (y and rd(a + 3) == 0xE8 and rd(a + 4) == 0x88) else 1   # INX DEY BNE 로 y 칸
-            ops.append('숨김 ' + ' '.join(f'{x + 6 + j:02X}' for j in range(cnt)))
-            x = y = None if mn == 'JMP' else x
-        a += n
-    return ops
-
-
-def show_fixups(prg):
-    rows = fixups(prg)
-    for g, k, a, end in rows:
-        print(f'{g:02X}/{k:02X} 1C:{a:04X}  ' + ('; '.join(fixup_ops(prg, a, end)) or '-'))
-    print(f'장소 {len(rows)}곳')
-
-
 def sprite(rec, night=False):
     """맵에 들어갈 때 1C:$99B3 이 08[04] 에 넘기는 그림 번호: (look 의 아래 7비트) + 0F, 바이트 1 bit6(밤 bit5) 이면 | 80."""
     hi = rec[1] & (0x20 if night else 0x40)
@@ -877,9 +821,6 @@ def main():
         sys.exit(0 if show_events(prg, rom, dirs) else 1)
     if a[2] == 'looks':
         show_looks(prg, rom)
-        return
-    if a[2] == 'fixups':
-        show_fixups(prg)
         return
     g, k = int(a[2], 16), int(a[3], 16)
     night = '--night' in a or (ram is not None and is_night(ram))

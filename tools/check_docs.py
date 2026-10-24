@@ -6,6 +6,7 @@
 - 트랙 README(옮기지 않은 트랙은 저장소 README)의 일지 목록에 모든 일지가 있고, 날짜·순번 순서다.
 - 문서 안 상대 링크가 가리키는 파일이 있다.
 - 추적 대상 텍스트 파일에 개인 경로가 없다.
+- 추적 대상 텍스트 파일에 rebase·merge 충돌 표시가 남아 있지 않다.
 
 사용:
   python tools/check_docs.py
@@ -27,6 +28,7 @@ LINK = re.compile(r'\]\(([^)\s]+)\)')
 TEXT_SUFFIXES = {'.md', '.py', '.lua', '.sh', '.toml', '.yml', '.yaml', '.json'}
 # 홈 폴더 절대 경로와 "~/" 로 시작하는 경로. 이 파일 자체는 검사하지 않는다.
 PERSONAL = re.compile(r'(/Users/[^/\s]+|/home/[^/\s]+|(?<![\w.])~/)')
+CONFLICT = re.compile(r'^(<{7}|={7}|>{7})( |$)')
 
 
 def files():
@@ -103,12 +105,22 @@ def check_personal(paths, errors):
                 errors.append(f'{p.relative_to(ROOT)}:{i}: 개인 경로 {PERSONAL.search(line).group(0)}')
 
 
+def check_conflicts(paths, errors):
+    for p in paths:
+        if p.suffix not in TEXT_SUFFIXES:
+            continue
+        for i, line in enumerate(p.read_text(encoding='utf-8').splitlines(), 1):
+            if CONFLICT.match(line):
+                errors.append(f'{p.relative_to(ROOT)}:{i}: 충돌 표시 {line[:7]}')
+
+
 def main():
     errors = []
     paths = files()
     check_journal(errors)
     check_links(paths, errors)
     check_personal(paths, errors)
+    check_conflicts(paths, errors)
     for e in errors:
         print(e)
     print(f'{len(errors)} errors')

@@ -339,7 +339,6 @@ uv run python fc/dq4/tools/dq4talk.py rom/dq4.nes 02 01 --night       # 밤 목�
 uv run python fc/dq4/tools/dq4talk.py rom/dq4.nes calls               # 호출 문장이 부르는 루틴의 갈래
 uv run python fc/dq4/tools/dq4talk.py rom/dq4.nes events              # 이벤트 표 50개(--compare DIR… 로 EV 실행 기록과 대조)
 uv run python fc/dq4/tools/dq4talk.py rom/dq4.nes looks               # 그림 번호마다 쓰는 인물
-uv run python fc/dq4/tools/dq4talk.py rom/dq4.nes fixups              # 장소별 인물 손질 루틴(1C:$A010)
 ```
 
 실측은 `fc/dq4/tools/lua/talk.lua` 를 프로브로 돌립니다. `talk.txt` 에 대화 진입(슬롯·Y), 대화 번호, 조건 결과, 서비스, 이벤트(`1C:$AD5F`·`1D:$B74D`)·특수 전투(`18:$A1AD`), 메시지 번호를 찍고 진입 때 RAM(`talk_N.bin`)을 남깁니다. 환경 변수:
