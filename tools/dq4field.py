@@ -4,6 +4,7 @@
   python tools/dq4field.py rom/dq4.nes check            필드 3개의 줄마다 X=80·끝 기준점이 맞는지
   python tools/dq4field.py rom/dq4.nes F [--png out.png] 필드 F 를 글자 격자(또는 회색조 그림)로
   python tools/dq4field.py rom/dq4.nes compare lk.txt     tools/lua/fc/fieldlookup.lua 기록과 비교
+  python tools/dq4field.py rom/dq4.nes entrances          필드 → 마을 입구 74개
 
 근거 루틴(뱅크 0F): $D259(좌표 → 타일), $D2AA(좌표 −3, 범위 밖은 0), $D2DC(줄 레코드),
 $D326·$D37E(줄 RLE 앞·뒤로 읽기), $D516(이벤트로 바뀌는 한 칸). 데이터는 뱅크 0B.
@@ -91,10 +92,40 @@ def compare(prg, path):
     return bad == 0
 
 
+ENTRANCE_PTR = (0x0E, 0x8004)   # BRK 82 E7 = 뱅크 0E 함수 2 의 주소(08:$AEE2)
+ARRIVE_PTR = (0x08, 0xB7F7)
+
+
+def entrances(prg):
+    """필드 → 마을 입구. 08:$AEE8 이 필드 좌표($42, $43)와 같은 3바이트 레코드(그룹, X, Y)를 찾고,
+    08:$B037 이 같은 그룹의 5바이트 도착 레코드(그룹, bit6-5 필드·bit4-0 순번, X, Y, 방향)를 고른다."""
+    def ptr(bank, at):
+        return rd(prg, bank, at) | rd(prg, bank, at + 1) << 8
+    arrive = {}
+    a = ptr(*ARRIVE_PTR)
+    while (g := rd(prg, 0x08, a)) != 0xFF:
+        r = [rd(prg, 0x08, a + i) for i in range(5)]
+        arrive.setdefault(g, r)
+        a += 5
+    out = []
+    a = ptr(*ENTRANCE_PTR)
+    while (g := rd(prg, 0x0E, a)) != 0xFF:
+        fx, fy = rd(prg, 0x0E, a + 1), rd(prg, 0x0E, a + 2)
+        r = arrive.get(g)
+        out.append((g, fx, fy) + ((r[1] & 0x1F, r[2], r[3], r[4], r[1] >> 5 & 3) if r else (None,) * 5))
+        a += 3
+    return out
+
+
 def main():
     prg = ines.prg(open(sys.argv[1], 'rb').read())
     if sys.argv[2] == 'check':
         sys.exit(0 if check(prg) else 1)
+    if sys.argv[2] == 'entrances':
+        for g, fx, fy, k, x, y, d, f in entrances(prg):
+            print(f'필드 ({fx:02X},{fy:02X}) → {g:02X}/{k:02X} ({x:02X},{y:02X}) 방향 {d} 필드 {f}' if k is not None
+                  else f'필드 ({fx:02X},{fy:02X}) → 그룹 {g:02X} (도착 레코드 없음)')
+        return
     if sys.argv[2] == 'compare':
         sys.exit(0 if compare(prg, sys.argv[3]) else 1)
     f = int(sys.argv[2])

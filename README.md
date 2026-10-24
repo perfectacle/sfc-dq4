@@ -96,3 +96,4 @@ dq4(FC DQ4 원작):
 - [2026-10-25-03: 출구와 인물](docs/journal/dq4/2026-10-25-03-exits-npcs.md)
 - [2026-10-25-04: 이름·아이템·몬스터 표](docs/journal/dq4/2026-10-25-04-data.md)
 - [2026-10-25-05: 필드(세계 지도)](docs/journal/dq4/2026-10-25-05-field.md)
+- [2026-10-25-06: 필드에서 마을로 들어가기](docs/journal/dq4/2026-10-25-06-entrances.md)
