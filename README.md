@@ -77,9 +77,7 @@ dq4(FC DQ4 원작):
 - [docs/dq4-debug.md](docs/dq4-debug.md): DQ4(FC) 디버그 스위치 `$C000`(벽 통과·인카운트 끄기·전투 테스트), 패드 2 흔적, 미실행 코드 찾기
 - [docs/dq4-block-format.md](docs/dq4-block-format.md): DQ4(FC) 맵 블록 → 8×8 타일·팔레트·통행 속성, CHR 올리기, 타일 애니메이션, 지형 효과
 
-nds(NDS DQ4 리메이크 참고):
-
-- [docs/nds-handoff.md](docs/nds-handoff.md): nds 트랙 시작점(목표, 롬, 다음 할 일)
+nds(NDS DQ4 리메이크·한글 팬패치 참고): [nds/dq4/README.md](nds/dq4/README.md)
 
 ### 해킹 일지
 
@@ -121,7 +119,3 @@ nds(NDS DQ4 리메이크 참고):
 - [2026-10-25-26: 포팅용 기호 텍스트 내보내기와 モシャス](docs/journal/dq4/2026-10-25-26-textrest3.md)
 - [2026-10-25-27: 전투 행동·주문 위력·내성·몬스터 AI·아이템 플래그](docs/journal/dq4/2026-10-25-27-stats2.md)
 - [2026-10-25-28: 이벤트 표와 진행 목록·마차·손님·움직임](docs/journal/dq4/2026-10-25-28-talk3.md)
-
-#### nds
-
-아직 없습니다.
