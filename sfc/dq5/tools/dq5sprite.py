@@ -444,8 +444,48 @@ def export_all(rom, outdir, scale=1, grid=False, index=True):
                       'packed': m['packed'], 'scale': scale, 'note': '배치 모름, 팔레트 0 으로 칠함'})
             entries.append(e)
     with open(os.path.join(outdir, 'index.json'), 'w') as fp:
-        json.dump(entries, fp, ensure_ascii=False, indent=1)
+        json.dump(index_document(entries, pals), fp, ensure_ascii=False, indent=1)
     return entries
+
+
+def cpu(a):
+    return f'{a >> 16:02X}:${a & 0xFFFF:04X}'
+
+
+def index_document(entries, pals):
+    """sfc-dq4-assets 의 index.json 꼴(fc/dq4/sprites 와 같은 키): note·obj_palettes·sprites."""
+    hexc = lambda c: f'{c:04X}'  # noqa: E731
+    sprites = []
+    for e in entries:
+        if e.get('group') in ('색 번호 보기', '맵 OBJ 타일 색 번호'):
+            continue
+        if 'layout' in e:
+            sprites.append({
+                'file': e['path'], 'set': e['set'], 'label': e['name'], 'label_from': e['name_from'], 'gfx': e['gfx'],
+                'rotated': False, 'size': [e['w'], e['h']], 'frame': e['frame'],
+                'rows': ['아래', '왼쪽', '오른쪽', '위'], 'cols': ['걸음 0', '걸음 1'],
+                'rom': cpu(int(e['record'], 16)), 'data': cpu(int(e['data'], 16)), 'data_end': cpu(int(e['data_end'], 16)),
+                'layout': e['layout'], 'obj_palette': e['palette'], 'colors': [hexc(c) for c in pals[e['palette']]],
+                'tiles': e['tiles'], 'used_colors': e['colors'], 'bbox': e.get('bbox'), 'opaque_size': e.get('size'),
+                'places': e['maps'], 'index_file': e['path'][:-4] + '-index.png',
+                'frames': [{'row': r, 'step': int(k[-1]), 'matrix': m}
+                           for k, m in e['matrix'].items()
+                           for r in [{'down': '아래', 'left': '왼쪽', 'right': '오른쪽', 'up': '위'}[k[:-1]]]]})
+        elif e.get('group') == '누운 모양':
+            sprites.append({'file': e['path'], 'set': e['set'], 'rotated': True, 'size': [e['w'], e['h']],
+                            'frame': [LYING_W, LYING_H], 'rows': ['아래', '왼쪽', '오른쪽', '위'], 'cols': ['누움'],
+                            'index_file': e['path'][:-4] + '-index.png'})
+        elif 'map_object' in e:
+            sprites.append({'file': e['path'], 'map_object': e['map_object'], 'where': e['where'],
+                            'rom': cpu(int(e['entry'], 16)), 'data': cpu(int(e['data'], 16)),
+                            'data_end': cpu(int(e['data_end'], 16)), 'tiles': e['tiles'], 'reserve': e['reserve'],
+                            'packed': e['packed'], 'size': [e['w'], e['h']], 'obj_palette': None,
+                            'index_file': e['path'][:-4] + '-index.png'})
+    return {'note': '세트 그림은 32x96: 행 아래·왼쪽·오른쪽·위, 열 걸음 0·1(프레임 16x24). -lying 은 누운 모양 24x16 한 열. '
+                    '색 번호 0 투명, colors 는 OBJ 팔레트의 15비트 BGR 색 16개(0번은 투명 자리). matrix 는 프레임마다 색 번호(. 투명). '
+                    'obj-*.png 는 맵 OBJ 타일을 한 줄 16개로 늘어놓은 것(배치·팔레트 모름, 팔레트 0 으로 칠함). '
+                    'rom 은 세트 레코드(맵 OBJ 는 1F:D59A 항목) 주소, data 는 타일 자료.',
+            'obj_palettes': [[hexc(c) for c in p] for p in pals], 'sprites': sprites}
 
 
 def tile_sheet(tiles, pal, scale=1, index=False):
