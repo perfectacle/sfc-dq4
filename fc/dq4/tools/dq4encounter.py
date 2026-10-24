@@ -34,7 +34,8 @@ FORM_CNT, FORM_ADD = 0xA31D, 0xA325     # 고정 편성 마릿수 = ADD[c] + ran
 SOLO_CNT, SOLO_ADD = 0xA32D, 0xA335     # 칸 6~10 마릿수 = ADD[c] + rand(CNT[c])
 EXTRA_MAX, EXTRA_P = 0xA464, 0xA46C     # 칸 0~4 덧붙는 마리: 합계 상한, 한 마리 더 붙을 확률(/256)
 N_ZONES, N_FORMATIONS, N_BOSSES = 0x65, 16, 34
-FIELD_FIXED = {(1, 'y<0C'): 0x35, (1, 'y>=0C'): 0x34, (2, ''): 0x36}   # 5장 필드 1·2 는 지도 없이 고정(18:$9C3F)
+# 5장 필드 1 과 그 밖($65 가 0·1 이 아님 — 쓰이는 값은 3 闇の世界, dq4field.FIELDS)은 지도 없이 고정(18:$9C3F)
+FIELD_FIXED = {(1, 'y<0C'): 0x35, (1, 'y>=0C'): 0x34, (3, ''): 0x36}
 # 무리 고르기 칸 마스크(18:$9D6B, $9F34). 낮/밤은 걸음 시계 $62ED < 78 / ≥ 78
 MASK_FIRST = {'day': 0x1BEF, 'night': 0x3FBE, 'dungeon': 0x3FFF}
 MASK_SECOND = {'day': 0x000F, 'night': 0x001E, 'dungeon': 0x001F}
@@ -238,7 +239,7 @@ def show_maps(prg, png):
         print('    ' + ' '.join(f'{x:X}0' for x in range(16)))
         for y, row in enumerate(grid):
             print(f'{y:X}0  ' + ' '.join(f'{v & 0x3F:02X}' for v in row) + ('   bit7-6: ' + ''.join(str(v >> 6) for v in row) if ch == 4 else ''))
-    print('# 5장 필드 1: Y < 0C 이면 구역 35, 아니면 34. 필드 2: 구역 36')
+    print('# 5장 필드 1: Y < 0C 이면 구역 35, 아니면 34. 필드 3(闇の世界): 구역 36')
     if png:
         draw_png(prg, png)
 
@@ -248,12 +249,12 @@ def draw_png(prg, path):
     from PIL import Image, ImageDraw
     import dq4field
     w, h = dq4field.size(prg, 0)
-    grid = dq4field.decode(prg, 0)
+    grid = dq4field.decode(prg, 0)     # 가장자리까지 (폭+3)×(높이+3), 256 을 넘지 않음
     scale = 4
     im = Image.new('RGB', (256 * scale, 256 * scale))
     px = im.load()
-    for y in range(h):
-        for x in range(w):
+    for y in range(len(grid)):
+        for x in range(len(grid[0])):
             v = dq4field.lookup(grid, w, h, x, y) * 8
             for dy in range(scale):
                 for dx in range(scale):
@@ -352,8 +353,8 @@ def expected_zone(prg, lists, ext, x, y):
         return None
     if ch == 4 and field == 1:
         return FIELD_FIXED[(1, 'y<0C' if y < 0x0C else 'y>=0C')]
-    if ch == 4 and field == 2:
-        return FIELD_FIXED[(2, '')]
+    if ch == 4 and field not in (0, 1):
+        return FIELD_FIXED[(3, '')]
     return zone_at(prg, ch, x, y)
 
 
