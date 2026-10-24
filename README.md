@@ -64,3 +64,4 @@ uv sync --locked
 - [2026-10-24-10: 필드 걷기 실험(입장은 아직)](docs/journal/2026-10-24-10-dq5-field-walk.md)
 - [2026-10-24-11: 필드에서 마을로 들어가기](docs/journal/2026-10-24-11-dq5-field-entrance.md)
 - [2026-10-24-12: FC DQ4 실험 환경과 첫 RAM](docs/journal/2026-10-24-12-dq4-fc-env.md)
+- [2026-10-24-13: 맵별 루틴과 출구 번호](docs/journal/2026-10-24-13-dq5-exit-hook.md)

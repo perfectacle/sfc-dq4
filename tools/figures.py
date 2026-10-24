@@ -215,6 +215,39 @@ def fig_exits(rom):
     save(out, 'dq5-exits-ship.webp')
 
 
+def fig_exit_hook(rom):
+    """01/04 와 01/05. 출구 셀(빨간 틀)에 맵별 루틴까지 반영한 번호·목적지를 달고, 루틴이 만든 출구 셀은 노란 틀로 표시.
+    초록은 계단을 밟을 때 선 자리(01/04 (13,46))와 도착 자리(01/05 (12,47))."""
+    from dq5exit import apply_hook, describe, exit_attrs, exit_cells, map_exits
+    attrs = exit_attrs(rom)
+    panels = []
+    for bc, bd in ((1, 4), (1, 5)):
+        dec = Decoder(rom, SLOT)
+        w, h, buf, _ = dec.decode(map_pointer(rom, bc, bd))
+        render(rom, dec, w, h, buf, map_cgram(rom, bc, bd), TMP)
+        img = Image.open(TMP).convert('RGB')
+        d = ImageDraw.Draw(img)
+        buf = bytearray(buf)
+        hooked = {(x, y) for x, y, added in apply_hook(rom, bc, bd, buf, w) if added}
+        exits = map_exits(rom, bc, bd)
+        for k, (x, y) in enumerate(exit_cells(buf, w, h, attrs)):
+            color = (255, 224, 0) if (x, y) in hooked else (255, 64, 64)
+            d.rectangle(((x - 1) * 8, (y - 1) * 8, x * 8 + 7, y * 8 + 7), outline=color, width=2)
+            text = f'{k}: {describe(bc, exits[k][1])}' if k < len(exits) else str(k)
+            text = text.replace('의 출구', 'exit').replace(' 방향', ' dir')
+            width = 8 + 6 * len(text)
+            lx = (x + 1) * 8 if (x + 1) * 8 + width <= w * 8 else (x - 1) * 8 - width - 2
+            label(img, text, (lx, (y - 1) * 8))
+        label(img, f'{bc:02X}/{bd:02X}')
+        panels.append(img)
+    ImageDraw.Draw(panels[0]).rectangle((13 * 8, 46 * 8, 13 * 8 + 7, 46 * 8 + 7), outline=(0, 255, 0), width=2)
+    ImageDraw.Draw(panels[1]).rectangle((12 * 8, 47 * 8, 12 * 8 + 7, 47 * 8 + 7), outline=(0, 255, 0), width=2)
+    out = Image.new('RGB', (sum(p.width for p in panels) + 16, max(p.height for p in panels)), (24, 24, 24))
+    out.paste(panels[0], (0, 0))
+    out.paste(panels[1], (panels[0].width + 16, 0))
+    save(out, 'dq5-exit-hook-0105.webp')
+
+
 def fig_edge_exit(rom):
     """03/00 아래 가장자리로 걸어 나간 실험: 걸은 길(초록)과 나간 뒤 화면(work/edge1/end.png, 필드 전투)."""
     img, w, h, _, _ = decoded(rom, 3, 0)
@@ -292,6 +325,7 @@ def main():
     fig_record(rom)
     fig_day_night(rom)
     fig_exits(rom)
+    fig_exit_hook(rom)
     fig_edge_exit(rom)
     fig_field(rom)
     fig_transition()
