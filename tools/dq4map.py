@@ -3,6 +3,7 @@
 사용:
   python tools/dq4map.py rom/dq4.nes list                  맵 269개: (그룹 $63/순번 $64), 맵 번호, 위치, 크기
   python tools/dq4map.py rom/dq4.nes check                 해제 끝이 다음 맵 시작과 같은지 전수 검사
+  python tools/dq4map.py rom/dq4.nes exits G K [--compare end.ram]   출구($05A0 에 들어가는 것)
   python tools/dq4map.py rom/dq4.nes G K                   해제한 블록 배치를 16진 격자로
   python tools/dq4map.py rom/dq4.nes G K --compare at.bin  tools/lua/fc/atpc.lua 덤프($7800)와 비교
 
@@ -179,6 +180,84 @@ def header(prg, bank, ptr):
     return w, h, (w * h - 1).bit_length(), (f >> 6) + 2, f & 0x1F
 
 
+LINKS_PTR = (0x1B, 0x8221)        # 연결 표 포인터(1B:$8101 이 읽음)
+STEP = [(0, -1), (1, 0), (0, 1), (-1, 0)]   # 0F:$D22C: 위·오른쪽·아래·왼쪽
+
+
+def links(prg):
+    """연결 표: 10바이트 = 끝점 둘, 끝점마다 (그룹, 순번, X, Y, 플래그). 그룹 FF 로 끝난다."""
+    a = rd(prg, *LINKS_PTR) | rd(prg, LINKS_PTR[0], LINKS_PTR[1] + 1) << 8
+    out = []
+    while rd(prg, 0x1B, a) != 0xFF:
+        e = [rd(prg, 0x1B, a + i) for i in range(10)]
+        out.append((tuple(e[:5]), tuple(e[5:])))
+        a += 10
+    return out
+
+
+def special_group(g, k, flags):
+    """1B:$8151: 목적지 그룹 45·40·32 는 이벤트 플래그 $62AA 등으로 순번이 바뀐다(코드 읽기)."""
+    if g == 0x45 and k == 5:
+        return 7 if flags & 0x02 else 5
+    if g == 0x45 and k == 4:
+        return 6 if flags & 0x10 else 4
+    if g == 0x40:
+        return 4 if flags & 0x20 else 3
+    return k
+
+
+def exits(prg, g, k, flags=0):
+    """1B:$8101 이 $05A0 에 채우는 출구: (출구 X, Y, 목적지 그룹, 순번, 도착 X, Y, 플래그)."""
+    out = []
+    for a, b in links(prg):
+        for here, there in ((a, b), (b, a)):
+            hk = special_group(here[0], here[1], flags) if here[0] == 0x45 else here[1]
+            if (here[0], hk) != (g, k):
+                continue
+            dk = special_group(there[0], there[1], flags)
+            ax, ay, f = there[2], there[3], there[4]
+            if f & 0x04:
+                dx, dy = STEP[f & 3]
+                ax, ay = (ax + dx) & 0xFF, (ay + dy) & 0xFF
+            out.append((here[2], here[3], there[0], dk, ax, ay, f & 0xC3))
+    return out
+
+
+NPC_BANK = 0x05     # 인물 목록: 05:$8000 + 그룹 × 2 의 포인터부터 순번마다 목록(1C:$9B08)
+
+
+def npc_records(prg, g, k):
+    """(그룹, 순번) 의 인물 레코드 바이트 목록. 레코드 = 머리 + [F bit4: 블록] + [F bit3: 블록],
+    블록은 길이 바이트 + 본문(1C:$9B71). 목록은 첫 바이트 00 으로 끝난다."""
+    a = rd(prg, NPC_BANK, 0x8000 + 2 * g) | rd(prg, NPC_BANK, 0x8001 + 2 * g) << 8
+    lists = []
+    for _ in range(k + 1):
+        recs = []
+        while (f := rd(prg, NPC_BANK, a)) != 0:
+            n = 7
+            if f & 0x10 and f & 0x08:
+                n += (0 if f & 1 else 1) + (0 if f & 2 else 1) + (0 if f & 4 else 2)
+            size = n
+            for bit in (0x10, 0x08):
+                if f & bit:
+                    size += 1 + rd(prg, NPC_BANK, a + size)
+            recs.append(bytes(rd(prg, NPC_BANK, a + i) for i in range(size)))
+            a += size
+        lists.append(recs)
+        a += 1
+    return lists[k]
+
+
+def npcs(prg, g, k):
+    """인물 표에 들어가는 것(낮, 기본 경로 1C:$98ED): F bit4 인 레코드마다
+    (X, Y, 방향, 머리 바이트 1~4). X·Y 는 머리 5·6번째 바이트 bit6-0, 방향은 3번째 바이트 bit1-0."""
+    out = []
+    for r in npc_records(prg, g, k):
+        if r[0] & 0x10:
+            out.append({'x': r[5] & 0x7F, 'y': r[6] & 0x7F, 'dir': r[3] & 3, 'head': r[:7].hex(' '), 'size': len(r)})
+    return out
+
+
 def load(prg, g, k):
     m = next(x for x in maps(prg) if x[:2] == (g, k))
     w, h, pb, tb, _ = header(prg, m[3], m[4])
@@ -206,6 +285,31 @@ def main():
         for g, k, mid, b, ptr in maps(prg):
             w, h, pb, tb, f = header(prg, b, ptr)
             print(f'{g:02X}/{k:02X} 맵번호 {mid:02X} {b:02X}:{ptr:04X} {w:3d}x{h:<3d} 블록 {tb}비트 0520={f:02X}')
+        return
+    if a[2] == 'exits':
+        g, k = int(a[3], 16), int(a[4], 16)
+        for e in exits(prg, g, k):
+            print('출구 (%02X,%02X) → %02X/%02X 도착 (%02X,%02X) 플래그 %02X' % e)
+        if '--compare' in a:
+            ram = open(a[a.index('--compare') + 1], 'rb').read()
+            got = [tuple(ram[0x5A0 + 7 * i:0x5A7 + 7 * i]) for i in range(len(exits(prg, g, k)) + 1)]
+            want = [tuple(e) for e in exits(prg, g, k)] + [got[-1]]
+            ok = got[:-1] == want[:-1] and got[-1][0] == 0xFF
+            print('RAM $05A0 과', '같음' if ok else '다름')
+            sys.exit(0 if ok else 1)
+        return
+    if a[2] == 'npcs':
+        g, k = int(a[3], 16), int(a[4], 16)
+        ns = npcs(prg, g, k)
+        for i, n in enumerate(ns):
+            print(f"{i:2d}: ({n['x']:02X},{n['y']:02X}) 방향 {n['dir']}  머리 {n['head']}  {n['size']}바이트")
+        if '--compare' in a:
+            ram = open(a[a.index('--compare') + 1], 'rb').read()
+            got = [(ram[0x6F66 + i], ram[0x6F86 + i], ram[0x7006 + i]) for i in range(len(ns))]
+            want = [(n['x'], n['y'], n['dir']) for n in ns]
+            bad = sum(x != y for x, y in zip(got, want)) + (ram[0x6F66 + len(ns)] != 0xFF and len(ns) < 26)
+            print(f'인물 표(슬롯 6~) 와 {len(ns)}명 중 {bad} 다름')
+            sys.exit(1 if bad else 0)
         return
     if a[2] == 'check':
         sys.exit(0 if check(prg) else 1)
