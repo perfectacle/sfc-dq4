@@ -74,6 +74,12 @@ DOOR_ROUTINES = {0x44: 0x01F6B1, 0x43: 0x01F5CA, 0x3F: 0x01F727, 0x40: 0x01F727,
 DOOR_TABLE_SELECT = {0xF7F7: ({0x3E: 0xFD9F, 0x3C: 0xFDAB, 0x3B: 0xFDB7, 0x3D: 0xFDC3, 0x4D: 0xFDCF}, 0xFDE7),
                      0xF7D6: ({0x48: 0xFE8F, 0x49: 0xFE2F, 0x42: 0xFE4F}, 0xFE6F),
                      0xF7C8: ({0x3F: 0xFDFF}, 0xFE17)}
+# 03:C8B3: たびびとのちず 를 쓰면 모드 7 로 띄우는 세계 지도. 03:CAC2 가 VRAM 워드마다 타일맵 바이트와 점 하나를 만든다.
+# 점은 필드 좌표($CE,$D0, 처음 0·10)의 블록 번호 → 03:CC48 의 니블 + 20(색 번호), 좌표는 03:CD48·03:CD58 표만큼 나아간다.
+# 색 20~2F 는 03:CC2C. 타일맵은 16x15 타일(128x120 점)만 쓴다.
+WORLD_SCREEN_COLORS = 0x03CC2C
+WORLD_SCREEN_BLOCK_COLOR = 0x03CC48
+WORLD_SCREEN_STEP_X, WORLD_SCREEN_STEP_Y = 0x03CD48, 0x03CD58
 # 25:85D5: ルーラ 목적지의 맵 그룹 22개. 이름은 이름 표 0B(23:D5F3) 의 같은 순번.
 RURA_GROUPS, RURA_COUNT, TOWN_NAMES = 0x2585D5, 22, 0x0B
 
@@ -922,8 +928,49 @@ def export_ui(rom, out):
     print('ui')
 
 
+def world_screen(rom):
+    """たびびとのちず 화면(세계 0)의 128x120 색 번호 격자. 03:CAC2 를 옮긴 것."""
+    from dq5field import WORLDS, block_number, rle
+    wmap, _ = rle(rom, WORLDS[0][0])
+    hib, _ = rle(rom, WORLDS[0][1])
+    ce, d0 = 0, 0x10
+    chars = bytearray(0x4000)
+    for y in range(0x4000):
+        b = block_number(wmap, hib, (ce >> 1) & 255, (d0 >> 1) & 255)
+        nib = rom.u8(WORLD_SCREEN_BLOCK_COLOR + (b >> 1))
+        chars[y] = (nib & 15 if b & 1 else nib >> 4) + 0x20
+        x, z = 0, y + 1
+        if z & 0x3FF:
+            x += 2
+            if z & 0x3F:
+                x += 2
+                if z & 7:
+                    x += 2
+        ce = (ce + rom.u16(WORLD_SCREEN_STEP_X + x)) & 0x1FF
+        d0 = (d0 + rom.u16(WORLD_SCREEN_STEP_Y + x)) & 0x1FF
+    grid = [[0] * 128 for _ in range(120)]
+    for t in range(240):
+        for k in range(64):
+            grid[t // 16 * 8 + k // 8][t % 16 * 8 + k % 8] = chars[t * 64 + k]
+    return grid
+
+
+def export_world_screen(rom, out):
+    o = lorom(WORLD_SCREEN_COLORS)
+    colors = cgram_colors(rom.d[o:o + 32])
+    grid = world_screen(rom)
+    img = Image.new('RGB', (128, 120))
+    p = img.load()
+    for y, row in enumerate(grid):
+        for x, v in enumerate(row):
+            p[x, y] = colors[v - 0x20]
+    out.save(img, 'gfx/screens/world-map.png', 'screens', 'たびびとのちず 세계 지도(모드 7)', '세계 지도',
+             note='03:CAC2 가 필드 블록마다 03:CC48 의 색으로 찍는 128x120, 색 03:CC2C')
+
+
 EXPORTS = {'maps': export_maps, 'chr': export_chr, 'field': export_field, 'anim': export_anim,
-           'monsters': export_monsters, 'battlebg': export_battlebg, 'font': export_font, 'ui': export_ui}
+           'monsters': export_monsters, 'battlebg': export_battlebg, 'font': export_font, 'ui': export_ui,
+           'worldmap': export_world_screen}
 COMMAND = 'uv run --locked python sfc/dq5/tools/dq5gallery.py rom/dq5.sfc --out $OUT'
 
 
