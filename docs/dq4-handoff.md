@@ -10,22 +10,34 @@ DQ4 의 내용(맵, 인물과 대사, 이벤트 흐름, 몬스터·아이템·�
 
 ## 지금 상태
 
-아직 분석한 것이 없습니다. 확인된 사실은 아래뿐입니다.
+실험 환경을 갖췄고, 필드 RAM 과 뱅크 전환 루틴을 찾았습니다. 정리는 [dq4-ram-format.md](dq4-ram-format.md), 과정은 [2026-10-24-12 일지](journal/2026-10-24-12-dq4-fc-env.md) 에 있습니다.
 
 | 항목 | 값 | 근거 |
 | --- | --- | --- |
 | 롬 | `rom/dq4.nes`, Rev A. SHA-1 은 [README](../README.md#원본-롬). 초판(Rev 0)은 쓰지 않음 | README |
-| iNES 헤더 | `4E 45 53 1A 20 00 12 00 …`: PRG 16KB×32 = 512KB, CHR-ROM 없음(CHR-RAM), 매퍼 1(MMC1), 배터리 백업 | 헤더 바이트 |
-| 에뮬레이터 | MesenCE `--testrunner` 가 dq4.nes 를 돌린다. 600프레임에 오프닝 크레디트 화면. Lua 메모리 타입 `nesMemory`(CPU 주소), `nesPrgRom`(512KB), `nesInternalRam`, `nesWorkRam`, `nesSaveRam`, `nesChrRam`, `nesPpuMemory`, `nesNametableRam`, `nesPaletteRam`, `nesSpriteRam` | 실행해 확인 |
+| iNES 헤더 | 매퍼 1(MMC1, SUROM: CHR 0 레지스터 bit4 로 256KB 절반 선택), PRG 512KB, CHR-RAM, 배터리 | `krpatch fc info`, 쓰기 프로브 |
+| 도구 | 툴킷 v0.5.0 의 `krpatch fc info\|dis\|listing\|lua`. 프로브 `cover`·`reads`·`writes`·`trace`·`watch` | [tools/README.md](../tools/README.md#fc-dq4-툴킷의-fc-스크립트) |
+| 세이브스테이트 | `work/state/dq4-ch1-throne.mss`(1장 왕좌의 방, (10,15), 맵 `0D`), `dq4-ch1-courtyard.mss`(성 밖, (12,0A), 맵 `0A`). `tools/dq4state.sh` 가 롬에서 다시 만듦 | 스크립트 끝에 찍는 좌표·맵 번호 |
+| 필드 RAM | 좌표 `$0044`/`$0045`, 맵 번호 `$0028`(=`$0550`), 출구 표 `$05A0`(7바이트) | 걸어서 맵 두 번 전환 |
+| 뱅크 전환 | `$FFAC` PRG 뱅크, `$FFBF` 256KB 절반, `BRK`+2바이트 뱅크 호출(코드 읽기), `JSR $C3EA` 뱅크 읽기(코드 읽기) | 쓰기 프로브 |
 
-## 도구 — 없는 것부터
+## 도구
 
-[kr-patch-toolkit](https://github.com/perfectacle/kr-patch-toolkit) v0.4.0 에는 NES 지원이 없습니다(`krpatch sfc`, `krpatch nds` 만 있음). 6502 디스어셈블러도, NES 용 `boot.lua`·프로브도 없습니다. 툴킷의 Lua 라이브러리(`krpatch sfc lua`)는 SFC 메모리 타입을 쓰므로 그대로는 안 됩니다.
+FC 도구는 툴킷에 `krpatch fc` 로 들어갔습니다(v0.5.0). 게임과 무관한 것은 툴킷에, DQ4 에만 해당하는 것은 `tools/dq4*`(`dq4state.sh` 등)에 둡니다. 툴킷에 기능이 더 필요하면 툴킷 저장소에 PR 을 내고 릴리스한 뒤 태그를 올립니다([DEP-03](../.agents/skills/dependencies/SKILL.md#dep-03--툴킷은-릴리스-태그로)). 툴킷 규칙은 그 저장소의 [AGENTS.md](https://github.com/perfectacle/kr-patch-toolkit/blob/main/AGENTS.md)(게임 무관, 출력 호환, 합성 롬 테스트)입니다.
 
-정할 것: 게임과 무관한 NES 도구(부팅·입력·스크린샷 Lua, 메모리 감시 프로브, 6502 디스어셈블러, 커버리지 리스팅)는 툴킷에 `krpatch nes` 로 넣는 것이 맞습니다([DEP-03](../.agents/skills/dependencies/SKILL.md#dep-03--툴킷은-릴리스-태그로)). 툴킷은 별도 저장소라 PR → 릴리스 → 이 저장소의 태그 올리기를 거쳐야 하므로, 시작 전에 사용자와 정합니다.
+자주 쓰는 형태:
 
-- 툴킷에 넣기로 하면: 툴킷 저장소의 [AGENTS.md](https://github.com/perfectacle/kr-patch-toolkit/blob/main/AGENTS.md) 규칙(게임 무관, 출력 호환, 합성 롬 테스트)을 따릅니다.
-- 그 전까지 임시로 쓸 것은 이 저장소의 `tools/lua/nes/`(dq4 트랙 소유)에 둡니다. SFC 프로브(`tools/lua/*.lua`)를 고쳐 NES 를 지원하게 하지 않습니다([TRACK-02](../.agents/skills/tracks/SKILL.md#track-02--공유-파일)).
+```sh
+export LIBDIR=$(uv run krpatch fc lua)
+DRIVER=$LIBDIR/seq.lua STATE=$PWD/work/state/dq4-ch1-throne.mss SEQ="down:64" TAIL=200 \
+  EVERY=0 FROM=1 TO=200 MAXF=240 SHOT_DIR=$PWD/work/cov \
+  "$MESENCE" --testrunner "$PWD/rom/dq4.nes" "$LIBDIR/probe/cover.lua"
+uv run krpatch fc listing rom/dq4.nes work/cov/cover.txt --range 3C000-3FFFF
+```
+
+- MesenCE 는 콜백마다 「Uninitialized memory read」 경고를 많이 찍습니다(세이브스테이트를 불러오기 전 몇 프레임). 출력은 `>/dev/null 2>&1` 로 버립니다.
+- 오프닝은 입력 시점에 따라 장면이 수백 프레임씩 밀립니다. 새 출발점이 필요하면 기존 세이브스테이트에서 이어 `dq4state.sh` 에 단계로 더합니다.
+- FC DQ4 의 문은 「とびら」 명령이 있지만, 성 밖 → 왕좌의 방 문은 열린 문이라 걸어 들어갑니다(문 바로 아래 칸에서 위로).
 
 ## 참고 자료
 
@@ -35,15 +47,14 @@ DQ4 의 내용(맵, 인물과 대사, 이벤트 흐름, 몬스터·아이템·�
 
 [todo.md](todo.md) 의 `## dq4` 순서대로 합니다.
 
-1. **NES 실험 환경** — 도구 위치를 사용자와 정한 뒤, 부팅·입력 재생·스크린샷·RAM 덤프 Lua 를 만들고 조작 가능한 장면(1장 시작 마을 등)의 세이브스테이트를 `work/state/dq4-*.mss` 로 만듭니다. 세이브스테이트 이름에 `dq4-` 를 붙여 dq5 트랙 것과 섞이지 않게 합니다.
-   완료: 세이브스테이트에서 주인공을 걸려 맵 번호·좌표 RAM 이 바뀌는 것을 기록으로 확인.
-2. **롬 구조** — MMC1 뱅크 전환 루틴(레지스터 `$8000`~`$FFFF` 쓰기), 고정 뱅크(`$C000`~`$FFFF`, 마지막 뱅크로 보임)의 공통 루틴, 뱅크마다 무엇이 있는지 표. 실행 커버리지로 확인합니다.
-3. **대사 텍스트** — 문자 표, 압축 방식, 대사 번호에서 본문을 찾는 표. 이식에서 가장 양이 많고, 한글패치의 번역 원문이 됩니다.
-4. **맵과 인물** — 마을·던전 맵 형식, 인물 배치, 출구. dq5 트랙의 [dq5-map-format.md](dq5-map-format.md) 와 같은 항목으로 정리하면 옮길 때 대응이 쉽습니다.
-5. **몬스터·아이템·주문·경험치 표, 이벤트 플래그와 장(章) 전환**.
+1. **롬 구조** — 부팅부터 1장 시작, 맵 전환까지 `probe/cover.lua` 를 모아 뱅크별 실행 범위를 표로 만들고, `BRK` 처리기(`$C408`)와 `$C3EA` 를 읽어 뱅크 호출·뱅크 읽기의 인자 형식을 확인합니다. `probe/trace.lua` 로 `$C408` 진입 때 스택의 복귀 주소와 그 뒤 2바이트를 찍으면 실측이 됩니다.
+   완료: 뱅크 호출 몇 개의 (호출 위치, 대상 뱅크·주소)를 실행 기록으로 확인.
+2. **대사 텍스트** — 왕의 대사(왕좌의 방 출발 직전)가 화면에 찍힐 때 `probe/reads.lua` 로 PRG 읽기를 잡아 문자 표와 압축 방식을 찾습니다. 이식에서 가장 양이 많고, 한글패치의 번역 원문이 됩니다.
+3. **출구 표와 맵** — `$05A0` 을 채우는 롬 데이터(`writes.lua` 로 `05A0-05BF`)와 맵 데이터 형식, 인물 배치. dq5 트랙의 [dq5-map-format.md](dq5-map-format.md) 와 같은 항목으로 정리합니다.
+4. **몬스터·아이템·주문·경험치 표, 이벤트 플래그와 장(章) 전환**.
 
 ## 조심할 것
 
 - [analysis 스킬](../.agents/skills/analysis/SKILL.md) 의 「자주 밟는 함정」은 대부분 NES 에도 해당합니다(macOS `timeout` 부재, `SHOT_DIR` 절대 경로, zsh 단어 분리).
 - 주소 표기: CPU 주소는 `$8000`, PRG 위치는 「PRG 뱅크 `05`:`$8123`」 또는 「파일 오프셋 `0x14133`」(iNES 헤더 16바이트 포함 여부를 밝힘)처럼 어느 것인지 적습니다.
-- 소유 파일은 `docs/dq4-*`, `tools/dq4*.py`, `tools/lua/nes/`, 일지·그림의 `dq4-*` 입니다. 공유 파일(README, `docs/todo.md`, `docs/references.md`)은 자기 줄·절만 고칩니다.
+- 소유 파일은 `docs/dq4-*`, `tools/dq4*`, `tools/lua/fc/`, 일지·그림의 `dq4-*` 입니다. 공유 파일(README, `docs/todo.md`, `docs/references.md`)은 자기 줄·절만 고칩니다.

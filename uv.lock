@@ -3,13 +3,13 @@ revision = 3
 requires-python = ">=3.15"
 
 [options]
-exclude-newer = "2026-10-17T13:27:39.956497Z"
+exclude-newer = "2026-10-17T14:51:13.968461Z"
 exclude-newer-span = "P7D"
 
 [[package]]
 name = "kr-patch-toolkit"
-version = "0.4.0"
-source = { git = "https://github.com/perfectacle/kr-patch-toolkit?rev=v0.4.0#a9bbab62b454c39bb604a8911df8a551b371f07a" }
+version = "0.5.0"
+source = { git = "https://github.com/perfectacle/kr-patch-toolkit?rev=v0.5.0#f26cdf04c816c37f7fff18538e02ef6ab6460d91" }
 dependencies = [
     { name = "numpy" },
     { name = "pillow" },
@@ -85,6 +85,6 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "kr-patch-toolkit", git = "https://github.com/perfectacle/kr-patch-toolkit?rev=v0.4.0" },
+    { name = "kr-patch-toolkit", git = "https://github.com/perfectacle/kr-patch-toolkit?rev=v0.5.0" },
     { name = "pillow" },
 ]

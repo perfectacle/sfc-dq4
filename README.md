@@ -29,8 +29,9 @@ Unity 리메이크가 아니라, 실제 SFC 롬에 덧대는 IPS 패치를 만�
 uv sync --locked
 ```
 
-- [kr-patch-toolkit](https://github.com/perfectacle/kr-patch-toolkit) v0.4.0:
-  65c816 디스어셈블러(`krpatch sfc dis`), MesenCE 용 Lua 라이브러리(`krpatch sfc lua`)
+- [kr-patch-toolkit](https://github.com/perfectacle/kr-patch-toolkit) v0.5.0:
+  65c816 디스어셈블러(`krpatch sfc dis`), MesenCE 용 Lua 라이브러리(`krpatch sfc lua`),
+  FC 용 iNES 헤더·6502 디스어셈블러·Lua 프로브(`krpatch fc`)
 - [Pillow](https://python-pillow.org/): 맵·그림 렌더링
 - [MesenCE](https://github.com/nesdev-org/MesenCE) 2.2.1: 디버거와
   `--testrunner` 로 분석 스크립트를 돌립니다. 사용법은 [tools/README.md](tools/README.md).
@@ -43,6 +44,7 @@ uv sync --locked
 
 - [docs/dq5-map-format.md](docs/dq5-map-format.md): DQ5 실내 맵 형식(지형·팔레트·인물·출구·영역 이동)
 - [docs/dq5-field-format.md](docs/dq5-field-format.md): DQ5 필드(세계 지도) 형식
+- [docs/dq4-ram-format.md](docs/dq4-ram-format.md): DQ4(FC) 필드 RAM(좌표·맵 번호·출구 표)과 뱅크 전환
 - [docs/references.md](docs/references.md): 참고 자료
 - [docs/todo.md](docs/todo.md): 트랙(dq5·dq4)마다 남은 일
 - [docs/dq5-handoff.md](docs/dq5-handoff.md): dq5 트랙 시작점(지금 상태, 실험 출발점, 다음 할 일)
@@ -61,3 +63,4 @@ uv sync --locked
 - [2026-10-24-09: 필드(세계 지도)](docs/journal/2026-10-24-09-dq5-field.md)
 - [2026-10-24-10: 필드 걷기 실험(입장은 아직)](docs/journal/2026-10-24-10-dq5-field-walk.md)
 - [2026-10-24-11: 필드에서 마을로 들어가기](docs/journal/2026-10-24-11-dq5-field-entrance.md)
+- [2026-10-24-12: FC DQ4 실험 환경과 첫 RAM](docs/journal/2026-10-24-12-dq4-fc-env.md)
