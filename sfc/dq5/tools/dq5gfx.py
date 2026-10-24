@@ -146,8 +146,10 @@ def map_ids(rom):
 class TileCache:
     """(CHR, 팔레트 줄, 반전) → 8x8 RGBA. 맵 하나의 팔레트 안에서만 쓴다."""
 
-    def __init__(self, rom, high, colors):
+    def __init__(self, rom, high, colors, override=None):
         self.rom, self.high, self.colors, self.px, self.img = rom, high, colors, {}, {}
+        for chr_id, raw in (override or {}).items():
+            self.px[chr_id] = planar(raw)
 
     def get(self, chr_id, pal, fh, fv):
         k = (chr_id, pal, fh, fv)
@@ -478,10 +480,38 @@ def hook_clears(rom, bc, bd, buf, flags=False):
     return n_written
 
 
-def draw_cells(rom, dec, w, h, buf, cgram, layers=(2, 5)):
+def anim_override(rom, bc, bd, counter):
+    """카운터 7E:1ECE = counter 인 순간의 움직이는 타일 {CHR 번호: 32바이트}(dq5anim). 종류 14(걸을 때만)는 그대로."""
+    import dq5anim
+    high = bc >= 0x50
+    moving, _ = dq5anim.map_types(rom, bc, bd)
+    out = {}
+    for t in moving:
+        k = dq5anim.kind(rom, t)
+        chrs = dq5anim.block_chrs(rom, k['blocks'], high)
+        if t < 6:
+            raw = dq5anim.frame_bytes(rom, t, dq5anim.frame_index(rom, t, counter))
+            for i, c in enumerate(chrs[:k['tiles']]):
+                out[c] = raw[i * 32:i * 32 + 32]
+        elif t == 7:
+            tiles = b''.join(dq5anim.chr_raw(rom, c, high) for c in chrs[:k['tiles']])
+            for n in range(counter + 1):
+                if n % k['period'] == 0 and n:
+                    tiles = dq5anim.slide7(tiles, n)
+            for i, c in enumerate(chrs[:k['tiles']]):
+                out[c] = tiles[i * 32:i * 32 + 32]
+        elif t != 14:
+            shift = (counter // k['period']) % 8
+            for c in chrs[:k['tiles']]:
+                out[c] = dq5anim.roll(dq5anim.chr_raw(rom, c, high), shift)
+    return out
+
+
+def draw_cells(rom, dec, w, h, buf, cgram, layers=(2, 5), override=None):
+    """override = {CHR 번호: 32바이트} 면 그 CHR 을 대신 그린다(움직이는 타일의 한 순간)."""
     colors = cgram_colors(cgram)
     slot_chr = {v & 0x3FF: k for k, v in dec.chr_map.items()}
-    tc = TileCache(rom, dec.high, colors)
+    tc = TileCache(rom, dec.high, colors, override)
     img = Image.new('RGB', (w * 8, h * 8), colors[0])
     for layer in layers:
         for cell in range(w * h):
@@ -937,12 +967,12 @@ def export_field(rom, out):
     print('field')
 
 
-def frames_out(out, frames, stem, title, note, duration):
+def frames_out(out, frames, stem, title, note, duration, group='필드'):
     sheet_img = sheet(frames, 1, frames[0].width, frames[0].height, [f'{k}' for k in range(len(frames))], label_h=10)
-    out.save(sheet_img, f'gfx/anim/{stem}.png', 'anim', title, '필드', note=note, frames=len(frames))
+    out.save(sheet_img, f'gfx/anim/{stem}.png', 'anim', title, group, note=note, frames=len(frames))
     path = os.path.join(out.root, f'gfx/anim/{stem}.gif')
     frames[0].save(path, save_all=True, append_images=frames[1:], duration=duration, loop=0)
-    out.add(f'gfx/anim/{stem}.gif', 'anim', title + ' (GIF)', '필드', w=frames[0].width, h=frames[0].height)
+    out.add(f'gfx/anim/{stem}.gif', 'anim', title + ' (GIF)', group, w=frames[0].width, h=frames[0].height)
 
 
 def export_anim(rom, out):
@@ -984,12 +1014,75 @@ def export_anim(rom, out):
         frames.append(strip)
     frames_out(out, frames, 'field-wave', '필드 물결 팔레트 10단계(블록 000~007)',
                '4번 줄 색 1~3 을 01:A0F6 + $1961*6 으로(01:A0CF)', 120)
+    export_indoor_anim(rom, out)
     print('anim')
 
 
 MATRIX_CHARS = '.123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 # 몬스터 EA·EB 는 ミルドラース 최종 모습의 윗몸·아랫몸이라 둘을 같은 원점에 겹쳐 그린다(dq5-graphics-format.md).
 MONSTER_NOTES = {0xEA: '윗몸. 게임은 EB(아랫몸)를 같은 원점에 겹쳐 그림', 0xEB: '아랫몸. EA 와 겹쳐 그림'}
+
+
+def anim_counters(rom, bc, bd):
+    """GIF 로 찍을 카운터 값들: 가장 짧은 주기(4 이상)마다 한 장, 192프레임 한 바퀴."""
+    import dq5anim
+    moving, _ = dq5anim.map_types(rom, bc, bd)
+    moving = [t for t in moving if t != 14]
+    if not moving:
+        return []
+    step = max(4, min(dq5anim.kind(rom, t)['period'] for t in moving))
+    return list(range(0, 192, step))
+
+
+def export_indoor_anim(rom, out):
+    """움직이는 타일이 있는 실내 맵마다 맵 전체 GIF(gfx/anim/maps/), 종류마다 타일 띠 시트·GIF(gfx/anim/indoor-NN)."""
+    import dq5anim
+    names = group_names(rom)
+    first_map = {}
+    for bc, bd, _ in dq5anim.map_list(rom):
+        moving, _ = dq5anim.map_types(rom, bc, bd)
+        for t in moving:
+            first_map.setdefault(t, (bc, bd))
+        counters = anim_counters(rom, bc, bd)
+        if not counters:
+            continue
+        dec, w, h, buf, _ = decode_map(rom, bc, bd)
+        cg = map_cgram(rom, bc, bd)
+        frames = [draw_cells(rom, dec, w, h, buf, cg, override=anim_override(rom, bc, bd, c)) for c in counters]
+        stem = map_stem(bc, bd, names)
+        path = os.path.join(out.root, f'gfx/anim/maps/{stem}.gif')
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        step = counters[1] - counters[0] if len(counters) > 1 else 8
+        frames[0].save(path, save_all=True, append_images=frames[1:], duration=max(20, step * 50 // 3), loop=0)
+        out.add(f'gfx/anim/maps/{stem}.gif', 'anim', f'{bc:02X}/{bd:02X} 움직이는 맵', '실내 맵', map=f'{bc:02X}/{bd:02X}',
+                stem=stem, w=w * 8, h=h * 8, frames=len(frames),
+                note=f'종류 {",".join(str(t) for t in moving)}, 카운터 7E:1ECE 를 {step} 씩(03:D4B5)')
+    for t in sorted(first_map):
+        if t == 14:
+            continue
+        bc, bd = first_map[t]
+        colors = cgram_colors(map_cgram(rom, bc, bd))
+        k = dq5anim.kind(rom, t)
+        chrs = dq5anim.block_chrs(rom, k['blocks'], bc >= 0x50)[:k['tiles']]
+        pal_table = HIGH_CHR_PALETTE if bc >= 0x50 else CHR_PALETTE
+        frames = []
+        for c in range(0, 192, max(2, k['period'])):
+            ov = anim_override(rom, bc, bd, c)
+            strip = Image.new('RGB', (len(chrs) * 8, 8), colors[0])
+            for i, chr_id in enumerate(chrs):
+                nib = rom.u8(pal_table + (chr_id >> 1))
+                pal = (((nib & 0x0F) + 1) * 4 if chr_id & 1 else ((nib & 0xF0) >> 2) + 4) >> 2 & 7
+                raw = ov.get(chr_id) or dq5anim.chr_raw(rom, chr_id, bc >= 0x50)
+                ti = tile_image(planar(raw), colors[pal * 16:pal * 16 + 16])
+                strip.paste(ti, (i * 8, 0), ti)
+            if not frames or frames[-1].tobytes() != strip.tobytes() or len(frames) < 2:
+                frames.append(strip)
+        while len(frames) > 1 and frames[-1].tobytes() == frames[0].tobytes():
+            frames.pop()
+        title = f'실내 움직이는 타일 종류 {t}'
+        note = f'블록 {" ".join(f"{b:03X}" for b in k["blocks"])}, 주기 {k["period"]}, {bc:02X}/{bd:02X} 팔레트'
+        frames_out(out, frames, f'indoor-{t:02d}', title, note, max(20, k['period'] * 50 // 3), group='실내')
+    print('indoor anim')
 
 
 def export_monsters(rom, out):
@@ -1142,9 +1235,80 @@ def export_credits(rom, out):
              note='1E:D7E3 RLE 타일을 위·아래 짝으로 늘어놓음(글자표 아님, 타일을 나눠 쓰는 글자가 있음). 색은 BG3 팔레트 0(04:98D7)')
 
 
+def window_grid(rom, n):
+    """창 레코드 n(04:EB48)을 BG3 타일 번호 격자로. 머리 +4 아래 니블이 0 인 목록 창만(그 밖은 None).
+    +0·+1 위치, +2 너비, +3 아래 4비트 높이·bit7 줄 간격 16점(sfc/dq5/docs/dq5-text-format.md 「창 레코드 머리」).
+    항목: FE = 커서 칸 하나 뒤 글자, FF = 다음 줄, 바이트는 BG3 타일 번호 그대로. 84·83 xx 는 글자 xx 위 칸에
+    탁점 84·반탁점 83(위 칸이 테두리면 92·93, 04:B258)."""
+    from dq5text import window
+    _, data = window(rom, n)
+    if len(data) < 7 or data[4] & 0x0F or data[2] >= 0x20 or 0xFE not in data[5:8]:
+        return None
+    w, h, step = data[2], data[3] & 0x0F, 2 if data[3] & 0x80 else 1
+    if w < 3 or h < 3:
+        return None
+    grid = [[0x001] * w for _ in range(h)]
+    for x in range(w):
+        grid[0][x], grid[h - 1][x] = 0x08D, 0x88D
+    for y in range(h):
+        grid[y][0], grid[y][w - 1] = 0x08E, 0x48E
+    grid[0][0], grid[0][w - 1], grid[h - 1][0], grid[h - 1][w - 1] = 0x08C, 0x48C, 0x88C, 0xC8C
+    x, y, i = 1, 1, data.index(0xFE)
+    while i < len(data):
+        b = data[i]
+        if b == 0xFE:
+            x += 1
+        elif b == 0xFF:
+            x, y = 1, y + step
+        elif b in (0x83, 0x84) and i + 1 < len(data):
+            if 0 < x < w - 1 and 0 < y < h - 1:
+                grid[y][x] = data[i + 1]
+                grid[y - 1][x] = (0x093 if b == 0x83 else 0x092) if y - 1 == 0 else b
+            x, i = x + 1, i + 1
+        elif b < 0x80:
+            if 0 < x < w - 1 and 0 < y < h - 1:
+                grid[y][x] = b
+            x += 1
+        else:
+            x += 1
+        if y >= h - 1:
+            break
+        i += 1
+    return grid, data[0], data[1] & 0x7F
+
+
+def export_windows(rom, out):
+    from dq5text import WINDOWS
+    o = lorom(UI_PALETTE)
+    colors = cgram_colors(rom.d[o:o + 8])
+    tiles = [chr_2bpp(t) for t in (ui_tiles(rom)[i * 16:i * 16 + 16] for i in range(150))]
+    count = 0
+    for n in range(0x100):
+        try:
+            got = window_grid(rom, n)
+        except (IndexError, ValueError):
+            got = None
+        if not got:
+            continue
+        grid, wx, wy = got
+        img = Image.new('RGB', (len(grid[0]) * 8, len(grid) * 8), colors[0])
+        for y, row in enumerate(grid):
+            for x, word in enumerate(row):
+                t = word & 0xFF
+                if t < len(tiles):
+                    ti = tile_image(tiles[t], colors[0:4], bool(word & 0x400), bool(word & 0x800))
+                    img.paste(ti, (x * 8, y * 8), ti)
+        out.save(img, f'gfx/screens/windows/{n:02X}.png', 'screens', f'창 {n:02X}', '창 레코드',
+                 window=f'{n:02X}', pos=f'{wx},{wy}', record=f'{WINDOWS >> 16:02X}:{rom.u16(WINDOWS + n * 2):04X}',
+                 note='04:EB48 레코드의 너비·높이·항목으로 그림(글자 바이트 = BG3 타일). 머리 +4 가 0 인 목록 창만')
+        count += 1
+    print(f'windows {count}')
+
+
 EXPORTS = {'maps': export_maps, 'chr': export_chr, 'field': export_field, 'anim': export_anim,
            'monsters': export_monsters, 'battlebg': export_battlebg, 'font': export_font, 'ui': export_ui,
-           'worldmap': export_world_screen, 'credits': export_credits}
+           'worldmap': export_world_screen, 'credits': export_credits,
+           'windows': export_windows}
 COMMAND = 'uv run --locked python sfc/dq5/tools/dq5gallery.py rom/dq5.sfc --out $OUT'
 
 
