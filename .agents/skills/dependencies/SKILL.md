@@ -11,14 +11,14 @@ description: Python 의존성·Python·uv·kr-patch-toolkit·GitHub Actions 버�
 
 1. **추가한다** — `uv add <pkg>`. `pyproject.toml` 의 `exclude-newer` 가 7일 안 된 버전을 알아서 건너뛴다.
    완료: `pyproject.toml` 과 `uv.lock` 이 함께 바뀌었다.
-2. **검증한다** — `uv sync --locked` 후 영향받는 도구를 다시 돌려, 이전과 같은 결과가 나오는지 본다(예: `tools/dq5map.py --compare`, `tools/dq5figures.py` 가 만든 그림이 바이트까지 같은지).
+2. **검증한다** — `uv sync --locked` 후 영향받는 도구를 다시 돌려, 이전과 같은 결과가 나오는지 본다(예: `sfc/dq5/tools/dq5map.py --compare`, `sfc/dq5/tools/dq5figures.py` 가 만든 그림이 바이트까지 같은지).
    완료: 출력이 같거나, 달라진 이유를 PR 에 적었다.
 
 ## 절차 — 툴킷 올리기
 
 1. [kr-patch-toolkit 릴리스](https://github.com/perfectacle/kr-patch-toolkit/releases)의 CHANGELOG 에서 바뀐 명령·모듈 이름을 확인한다(예: 0.4.0 에서 `kr_patch.snes` → `kr_patch.sfc`, `krpatch snes` → `krpatch sfc`).
 2. `pyproject.toml` 의 `@vX.Y.Z` 를 바꾸고 `uv lock`.
-3. 코드·문서에서 옛 이름을 모두 고친다: `README.md` 의 버전 줄과 링크, `tools/README.md`, `tools/*.py` 의 import.
+3. 코드·문서에서 옛 이름을 모두 고친다: `README.md` 의 버전 줄과 링크, `tools/README.md`·트랙의 `tools/README.md`, 도구(`tools/*.py`, `<플랫폼>/<게임>/tools/*.py`)의 import.
 4. 위 「검증한다」를 돌린다. 출력이 바뀌면 툴킷 쪽 변경 때문인지 확인하고 PR 에 적는다.
    완료: `git grep -n 'v0\.'` 에 옛 버전이 남지 않았다.
 

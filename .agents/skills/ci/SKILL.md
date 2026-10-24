@@ -13,7 +13,7 @@ description: GitHub Actions 워크플로를 바꾸거나 CI 가 실패했을 때
 
 1. **실패한 잡과 로그를 본다** — `gh run view <run-id> --log-failed`.
    완료: 실패 원인을 한 문장으로 말할 수 있다.
-2. **로컬에서 재현한다** — `uv sync --locked && uv run --locked python tools/check_docs.py && uv run --locked python -m compileall -q tools`.
+2. **로컬에서 재현한다** — `uv sync --locked && uv run --locked python tools/check_docs.py && git ls-files -z '*.py' | xargs -0 uv run --locked python -m compileall -q`. Lua 를 고쳤으면 `git ls-files -z '*.lua' | xargs -0 -n1 luac -p`.
    완료: 재현되거나, 로컬에서는 통과한다.
 3. **원인을 고치고 같은 PR 에 push 한다**(CI-02). 일지 순번 중복이면 [journal 절차 5](../journal/SKILL.md#절차--한-항목을-끝냈을-때)로 번호를 다시 매긴다.
    완료: 새 커밋의 `ci-ok` 가 초록.
@@ -33,5 +33,5 @@ PR 은 `ci-ok` 가 초록일 때만 머지한다. `ci-ok` 는 모든 잡을 모�
 
 ## 참고
 
-- **`docs` 잡**(`tools/check_docs.py`): 일지 이름 형식, 제목과 파일 이름의 날짜·순번 일치, 같은 트랙 안의 순번 중복, README 일지 목록 누락·트랙별 순서, 문서 안 상대 링크 대상, 개인 경로를 검사한다.
+- **`docs` 잡**(`tools/check_docs.py`): 일지 이름 형식, 제목과 파일 이름의 날짜·순번 일치, 같은 트랙 안의 순번 중복, 일지 목록(트랙 폴더 `<플랫폼>/<게임>/README.md`, 옮기기 전 트랙은 저장소 README) 누락·순서, 문서 안 상대 링크 대상, 개인 경로를 검사한다. Lua 문법(`luac`)과 Python 컴파일은 추적 파일 전체(`git ls-files`)를 본다.
 - **보안 점검**: `zizmor` 가 워크플로를, `actionlint` 가 문법을 본다. checkout 에는 `persist-credentials: false`(이 워크플로는 push 하지 않는다). 액션은 커밋 SHA 로 고정한다([DEP-01](../dependencies/SKILL.md#dep-01--7일-쿨다운)).

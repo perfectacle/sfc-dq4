@@ -54,14 +54,7 @@ uv sync --locked
 - [docs/references.md](docs/references.md): 참고 자료
 - [docs/todo.md](docs/todo.md): 트랙(dq5·dq4)마다 남은 일
 
-dq5(SFC DQ5 엔진):
-
-- [docs/dq5-handoff.md](docs/dq5-handoff.md): dq5 트랙 시작점(지금 상태, 실험 출발점, 다음 할 일)
-- [docs/dq5-map-format.md](docs/dq5-map-format.md): DQ5 실내 맵 형식(지형·팔레트·인물·출구·영역 이동·보물상자)
-- [docs/dq5-field-format.md](docs/dq5-field-format.md): DQ5 필드(세계 지도) 형식
-- [docs/dq5-text-format.md](docs/dq5-text-format.md): DQ5 메시지(허프만 부호)·제어 코드·폰트·대화 스크립트·이름 문자열·메뉴 창 문자열
-- [docs/dq5-data-format.md](docs/dq5-data-format.md): DQ5 게임 데이터(상점 품목·물건 가격·물건 표·몬스터·전투 조우)
-- [docs/dq5-graphics-format.md](docs/dq5-graphics-format.md): DQ5 전투 몬스터 그림(레코드·머리·조각·타일 압축·팔레트·배치·그림자)과 전투 배경
+dq5(SFC DQ5 엔진): [sfc/dq5/README.md](sfc/dq5/README.md)
 
 dq4(FC DQ4 원작):
 
@@ -94,44 +87,7 @@ nds(NDS DQ4 리메이크 참고):
 
 #### dq5
 
-- [2026-10-24-01: DQ5 실내 맵 풀기](docs/journal/dq5/2026-10-24-01-map.md)
-- [2026-10-24-02: 팔레트와 셀 속성](docs/journal/dq5/2026-10-24-02-map-attributes.md)
-- [2026-10-24-03: 인물과 낮·밤](docs/journal/dq5/2026-10-24-03-npc.md)
-- [2026-10-24-04: 출구](docs/journal/dq5/2026-10-24-04-exits.md)
-- [2026-10-24-05: 가장자리 출구와 필드로 나가기](docs/journal/dq5/2026-10-24-05-edge-exit.md)
-- [2026-10-24-06: 영역 이동(트리거)](docs/journal/dq5/2026-10-24-06-triggers.md)
-- [2026-10-24-07: 셀 속성과 맵 머리 확인](docs/journal/dq5/2026-10-24-07-cells-header.md)
-- [2026-10-24-08: 이벤트 플래그로 바뀌는 인물](docs/journal/dq5/2026-10-24-08-npc-flags.md)
-- [2026-10-24-09: 필드(세계 지도)](docs/journal/dq5/2026-10-24-09-field.md)
-- [2026-10-24-10: 필드 걷기 실험(입장은 아직)](docs/journal/dq5/2026-10-24-10-field-walk.md)
-- [2026-10-24-11: 필드에서 마을로 들어가기](docs/journal/dq5/2026-10-24-11-field-entrance.md)
-- [2026-10-24-12: 맵별 루틴과 출구 번호](docs/journal/dq5/2026-10-24-12-exit-hook.md)
-- [2026-10-25-01: 메시지, 폰트, 대화 스크립트](docs/journal/dq5/2026-10-25-01-text.md)
-- [2026-10-25-02: 보물상자와 이름 문자열](docs/journal/dq5/2026-10-25-02-treasure.md)
-- [2026-10-25-03: 상점과 물건 가격](docs/journal/dq5/2026-10-25-03-shop.md)
-- [2026-10-25-04: 물건 표](docs/journal/dq5/2026-10-25-04-items.md)
-- [2026-10-25-05: 몬스터 레코드](docs/journal/dq5/2026-10-25-05-monster.md)
-- [2026-10-25-06: 전투 조우 표](docs/journal/dq5/2026-10-25-06-encounter.md)
-- [2026-10-25-07: 메시지 제어 코드, 대화 조건, 메뉴 문자열](docs/journal/dq5/2026-10-25-07-textctl.md)
-- [2026-10-25-08: 디버그 모드 찾기와 장면 이동 도구](docs/journal/dq5/2026-10-25-08-warp.md)
-- [2026-10-25-09: 전투 몬스터 그림](docs/journal/dq5/2026-10-25-09-mongfx.md)
-- [2026-10-25-10: 주문 표와 몬스터 필드](docs/journal/dq5/2026-10-25-10-spell.md)
-- [2026-10-25-11: 메달·코인 교환·여관 값과 상자 내용물의 남은 것](docs/journal/dq5/2026-10-25-11-shop2.md)
-- [2026-10-25-12: 이벤트 전투 무리 표와 롬 밖 뱅크 실행 감시](docs/journal/dq5/2026-10-25-12-event-battle.md)
-- [2026-10-25-13: 인물 표와 인라인 스크립트](docs/journal/dq5/2026-10-25-13-npc-script.md)
-- [2026-10-25-14: 조우의 남은 것](docs/journal/dq5/2026-10-25-14-encounter2.md)
-- [2026-10-25-15: 마을 입장 실측과 세계 지도 셋](docs/journal/dq5/2026-10-25-15-field.md)
-- [2026-10-25-16: 내성·상태 주문·동료가 되는 몬스터](docs/journal/dq5/2026-10-25-16-recruit.md)
-- [2026-10-25-17: 조우의 남은 것 2](docs/journal/dq5/2026-10-25-17-encounter3.md)
-- [2026-10-25-18: 개발용 스위치 01:8000, 이벤트 무리 플래그, 작전 창](docs/journal/dq5/2026-10-25-18-debug-switch.md)
-- [2026-10-25-19: 주문 대상 표와 물건 플래그](docs/journal/dq5/2026-10-25-19-target.md)
-- [2026-10-25-20: 실행 루틴 표와 저주 장비](docs/journal/dq5/2026-10-25-20-exec.md)
-- [2026-10-25-21: 전투 몬스터 배치와 그림자](docs/journal/dq5/2026-10-25-21-mongfx-layout.md)
-- [2026-10-25-22: 전투 배경](docs/journal/dq5/2026-10-25-22-battlebg.md)
-- [2026-10-25-23: 01:8001 목적지 목록, 전투 곡, 무리 플래그 bit4·6, 미니게임 감시](docs/journal/dq5/2026-10-25-23-dev-lists.md)
-- [2026-10-25-24: 조우의 남은 것 3](docs/journal/dq5/2026-10-25-24-encounter4.md)
-- [2026-10-25-25: 주인공이 주문·도구를 쓰는 전투](docs/journal/dq5/2026-10-25-25-player.md)
-- [2026-10-25-26: 필드의 남은 것과 그룹 $50 이상 맵 마무리](docs/journal/dq5/2026-10-25-26-field2.md)
+[sfc/dq5/README.md](sfc/dq5/README.md#해킹-일지) 에 있습니다.
 
 #### dq4
 
