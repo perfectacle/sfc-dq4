@@ -5,7 +5,7 @@
   python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes maps|field|gfx OUT     하나만
   python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes map G K OUT.png [--night|--annot]  맵 하나
   python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes screen DIR OUT.png     seq.lua·warp.lua 의 end.nt·chr·pal 로 nametable 두 장(512×240)
-  python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes scenes OUT SPEC.json    fcgfxscene.lua 덤프 목록([{name, title, prefix}])을 OUT/gfx/screens 에
+  python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes scenes OUT SPEC.json    fcgfxscene.lua 덤프 목록([{name, title, prefix}])을 OUT/gfx/screens 에(있는 목록에 더함)
   python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes verify DIR... [--mask-sprites]  롬만으로 그린 화면과 end.png 를 픽셀로 비교
   python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes gallery OUT            OUT/gallery/index.html 만 다시
 
@@ -53,9 +53,8 @@ MESEN_RGB = [
 GRAY = [(0, 0, 0), (85, 85, 85), (170, 170, 170), (255, 255, 255)]
 NIGHT = 0x78                 # 맵: $62ED 가 이 값 이상이면 밤(0E:$BB55)
 FIELD_NIGHT = 0x84           # 필드: 1E:$A2DB 경계 8개 중 가장 어두운 단계(84~BF)
-FIELDS = (0, 1, 2, 3)        # $65. 크기는 0F:$D2D6/$D2D9
-# 필드 2 는 입구 표에 없고, 워프로 들어간 화면이 이 렌더링과 다르다(fc/dq4/docs/dq4-fcgfx.md 「남은 것」).
-FIELD_NOTE = {2: '입구 없음. 워프 화면과 다름(확인 안 됨)', 3: '용암·물 팔레트가 돌아감. 그림은 롬의 첫 팔레트'}
+FIELDS = dq4field.FIELDS     # $65 에 쓰이는 필드. 2 는 줄 포인터가 롬 밖을 가리키는 빈 자리
+FIELD_NOTE = {3: '용암·물 팔레트가 돌아감. 그림은 롬의 첫 팔레트'}
 FONT_AT, FONT_N = (0x18, 0xB840), 141   # 글자 바이트 00~8C 의 1비트 타일(fc/dq4/docs/dq4-text-format.md)
 
 
@@ -107,7 +106,7 @@ def shore_defs(prg):
             for i in range(16)}
 
 
-def field_block(m, x, y):
+def field_block(m, x, y, sparkle=False):
     """0F:$D478: 필드 블록 00(물)은 네 이웃이 물(WATERY)인지로 블록 20~2F 를 고른다(0F:$D4A8: 왼쪽·아래·오른쪽·위 순서로
     물이 아니면 1 을 밀어 넣어 bit3 왼쪽, bit2 아래, bit1 오른쪽, bit0 위). 필드 3 의 블록 01 은 난수가 FA 미만이면 18,
     아니면 19(반짝임)라 그림에는 18 을 쓴다."""
@@ -118,16 +117,8 @@ def field_block(m, x, y):
             n = n << 1 | (m.cell((x + dx) & 0xFF, (y + dy) & 0xFF) & 0x1F not in WATERY)
         return 0x20 + n
     if b == 1 and m.f == 3:
-        return 0x18
+        return 0x19 if sparkle else 0x18
     return b
-
-
-def field_map(prg, f):
-    """dq4block.Map(필드)에 줄 끝까지(256칸)·아래로 세 줄 더 푼 격자를 넣는다. 0F:$D2AA 는 폭·높이 +2 칸까지 원래 좌표로
-    찾으므로, 가장자리 칸의 물가를 고를 때 맵 밖 세 칸도 롬의 줄 데이터를 그대로 읽는다."""
-    m = dq4block.Map(prg, field=f)
-    m.field = [dq4field.decode_row(prg, f, y)[0] for y in range(m.h + 3)]
-    return m
 
 
 def cell_block(m, x, y):
@@ -142,21 +133,33 @@ def map_palette(m, night=False):
 
 
 def render(m, night=False):
-    """맵·필드 전체(칸마다 제 블록, 구역 가리기 없음) 1배 그림."""
+    """맵·필드 전체(칸마다 제 블록, 구역 가리기 없음) 1배 그림. 필드는 좌표 (0,0)부터 줄 데이터가 있는 데까지
+    (dq4field.extent: 폭·높이 +3, 필드 3 은 62×54)라 그림의 칸 자리가 곧 $42/$43 이다."""
     p = Painter(m, map_palette(m, night))
-    im = Image.new('RGB', (m.w * 16, m.h * 16))
-    for y in range(m.h):
-        for x in range(m.w):
+    w, h = dq4field.extent(m.prg, m.f) if m.buf is None else (m.w, m.h)
+    im = Image.new('RGB', (w * 16, h * 16))
+    for y in range(h):
+        for x in range(w):
             im.paste(p.block(cell_block(m, x, y)), (x * 16, y * 16))
     return im
 
 
 # ---- 장소 이름 ----
 
-def place_names(prg, data):
-    """그룹마다 이름. 롬에 그룹 → 이름 표가 없어서, 그 그룹 인물 대사에서 「ここは」「ようこそ」 뒤 30글자 안에
-    장소 이름표(0B:$B634, ルーラ 목적지로 보이는 28개)의 이름이 처음 나온 것을 쓴다. 그 뒤에 「ほこら」「どうくつ」가
-    이어지면 붙인다(예: 「ここは エンドールに つうじる たびのほこら」). 못 찾은 그룹은 빈 문자열."""
+PLACE_NOUN = r'(むら|まち|おしろ|しろ|ほこら|どうくつ|とう|さと|いえ|しま|くに|ドック|みやこ)'
+COPULA = r'(なるぞ|だよ|です|だ|じゃ|よ|ね)$'
+
+
+def place_table(prg, data):
+    """그룹마다 {'name', 'src'}. 롬에 그룹 → 이름 표는 없어서 세 군데서 차례로 찾는다.
+    1. 'rula': ルーラ 목적지 레코드(dq4field.places)가 이름표(0B:$B634)의 순번과 같은 순서이고, 필드 자리가 입구 표의
+       한 그룹과 2칸 안에 있거나 맵 레코드가 그룹을 바로 적는다.
+    2. 'talk': 그 그룹 인물 대사(낮·밤, 조건 갈래 전부)에서 「ここは」「ようこそ」 뒤 30글자 안에 이름표의 이름이 처음
+       나온 것. 뒤에 「ほこら」「どうくつ」가 이어지면 붙인다(예: 「ここは エンドールに つうじる たびのほこら」).
+    3. 'talk-phrase': 「ここは X」의 X(끝의 だ·です 따위를 떼고)가 장소 이름씨(PLACE_NOUN)로 끝나거나 가타카나가 든
+       8글자 이하이면 그중 가장 짧은 것(예: 13 「サラン」, 20 「きこりのいえ」).
+    4. 'talk-kind': 「この とう」「この どうくつ」처럼 그 장소를 가리키는 말만 있으면 그 말(이름이 아니라 갈래).
+    못 찾은 그룹은 넣지 않는다."""
     rom = dq4text.Rom(data)
     names = place_list(prg)
     text = {}
@@ -164,22 +167,39 @@ def place_names(prg, data):
         for night in (False, True):
             for r in dq4talk.npc_list(prg, g, k, night):
                 for msg in talk_msgs(prg, dq4talk.talk_id(r, night)):
-                    text.setdefault(g, []).append(msg_text(rom, msg))
+                    text.setdefault(g, []).append(msg_text(rom, msg).replace('　', '').replace(' ', '').replace('\n', ''))
     out = {}
+    for e in dq4field.places(prg):
+        if e['name'] and e['group'] is not None:
+            out.setdefault(e['group'], {'name': e['name'], 'src': 'rula'})
     for g in sorted(text):
-        out[g] = ''
+        if g in out:
+            continue
         for t in text[g]:
-            t = t.replace('　', '').replace(' ', '').replace('\n', '')
             for m in re.finditer(r'(ここは|ようこそ)([^。！？]{0,30})', t):
                 hit = [(m.group(2).find(n), n) for n in names if n in m.group(2)]
                 if hit:
                     pos, n = min(hit)
                     rest = m.group(2)[pos + len(n):]
                     sub = next((s for s in ('ほこら', 'どうくつ') if s in rest), '')
-                    out[g] = n + ('の' + sub if sub else '')
+                    out[g] = {'name': n + ('の' + sub if sub else ''), 'src': 'talk'}
                     break
-            if out[g]:
+            if g in out:
                 break
+        if g in out:
+            continue
+        phrases = set()
+        for t in text[g]:
+            for m in re.finditer(r'ここは([^。！？…]{1,24})', t):
+                x = re.sub(COPULA, '', m.group(1))
+                if re.search(PLACE_NOUN + '$', x) or (re.search(r'[ァ-ヴ]', x) and len(x) <= 8):
+                    phrases.add(x)
+        if phrases:
+            out[g] = {'name': min(phrases, key=lambda x: (len(x), x)), 'src': 'talk-phrase'}
+            continue
+        kinds = {m.group(1) for t in text[g] for m in re.finditer(r'この(とうだい|とう|どうくつ|ほこら)', t)}
+        if kinds:
+            out[g] = {'name': min(kinds, key=lambda x: (len(x), x)), 'src': 'talk-kind'}
     return out
 
 
@@ -212,9 +232,9 @@ def safe(name):
 def map_records(prg, names):
     out = []
     for g, k, mid, bank, ptr in all_maps(prg):
-        name = names.get(g, '')
+        name, src = names.get(g, {}).get('name', ''), names.get(g, {}).get('src', '')
         stem = f'{g:02X}-{k:02X}' + (f'-{safe(name)}' if name else '')
-        out.append({'g': g, 'k': k, 'type': mid & 0x3F, 'code': mid, 'name': name, 'stem': stem})
+        out.append({'g': g, 'k': k, 'type': mid & 0x3F, 'code': mid, 'name': name, 'name_src': src, 'stem': stem})
     return out
 
 
@@ -375,7 +395,7 @@ def do_field(prg, out, names):
     ents = dq4field.entrances(prg)
     index = []
     for f in FIELDS:
-        m = field_map(prg, f)
+        m = dq4block.Map(prg, field=f)
         im = render(m)
         im.save(d / f'field{f}.png')
         night = map_palette(m, True) != map_palette(m)
@@ -387,8 +407,8 @@ def do_field(prg, out, names):
         for g, fx, fy, *_ in here:
             mark(dr, fx, fy, (255, 230, 0), f'{g:02X}', 0)
         im.save(d / f'field{f}-annot.png')
-        index.append({'field': f, 'w': m.w, 'h': m.h, 'night': night, 'note': FIELD_NOTE.get(f, ''),
-                      'entrances': [{'group': g, 'name': names.get(g, ''), 'x': fx, 'y': fy,
+        index.append({'field': f, 'w': m.w, 'h': m.h, 'image_cells': list(dq4field.extent(prg, f)), 'night': night, 'note': FIELD_NOTE.get(f, ''),
+                      'entrances': [{'group': g, 'name': names.get(g, {}).get('name', ''), 'x': fx, 'y': fy,
                                      'to': None if k is None else f'{g:02X}/{k:02X}', 'at': None if k is None else [x, y]}
                                     for g, fx, fy, k, x, y, _, _ in here]})
     (d / 'index.json').write_text(json.dumps(index, ensure_ascii=False, indent=1))
@@ -501,14 +521,49 @@ def nt_image(nt, chr_, pal, base=0x1000):
     return im
 
 
-def rom_screen(prg, ram, wram, ppal=None):
+def field_cycle(pal12, f, n):
+    """1D:$8B1E(1D 함수 0)가 필드에서 $3C(프레임 수)&0F 가 0F 일 때마다, 곧 16프레임마다 한 번 바꾸는 BG 팔레트를 n 번 돌린
+    화면 쪽(PPU) 12바이트. 모든 필드에서 팔레트 0 의 색 2·3($05FE·$05FF, 물결)을 맞바꾸고, 필드 3 은 팔레트 3 의 색 1~3
+    ($0606~$0608, 용암)을 $0606←$0608, $0608←$0607, $0607←$0606 으로 돌린다($8B87). 주기는 32·48프레임.
+    $8B87 은 PPU $3F0D~$3F0F 에 $0606, $0608, $0607 순서로 써서, 한 번이라도 돌린 뒤의 화면 색은 RAM 순서와 다르다."""
+    p = bytearray(pal12)
+    for _ in range(n):
+        p[1], p[2] = p[2], p[1]
+        if f == 3:
+            p[9], p[10], p[11] = p[11], p[9], p[10]
+    if n and f == 3:
+        p[10], p[11] = p[11], p[10]
+    return bytes(p)
+
+
+def falls_cycle(pal12, n):
+    """맵 종류 18(폭포, 3B/00): 같은 1D:$8B1E 가 4프레임마다 팔레트 2 의 색 1~3($0603~$0605)을 $0605←$0604←$0603←$0605
+    로 돌리고($8C18, 폭포가 흐르는 것), 16프레임마다 팔레트 1 의 색 1·2($0600·$0601)를 맞바꾼다($8BF3). 둘은 따로 돌므로
+    n 을 (돌린 수 n%3, 맞바꿈 n//3) 조합으로 센다. 타일 그림·nametable 은 그대로다."""
+    p = bytearray(pal12)
+    for _ in range(n % 3):
+        p[6], p[7], p[8] = p[8], p[6], p[7]
+    if n // 3 % 2:
+        p[3], p[4] = p[4], p[3]
+    return bytes(p)
+
+
+FIELD_PHASES = 6   # 필드: 물결 2단계 × 용암 3단계, 폭포: 흐름 3단계 × 물결 2단계
+CYCLED = (0x00, 0x18)
+
+
+def rom_screen(prg, ram, wram, ppal=None, cycle=0, sparkle=False):
     """RAM 의 장소·좌표·스크롤·구역·시각만 보고 롬에서 화면을 그린다(256×240). 0F:$EB23 처럼 화면의 (i, j) 번째 블록을
     nametable 의 (X/8 + 2i, Y/8 + 2j) 에 놓고 스크롤만큼 돌려 자른다. 돌려주는 것: 그림, 애니메이션 블록 자리 표시."""
     t = ram[0x28]
-    m = field_map(prg, ram[0x65]) if t == 0 else dq4block.Map(prg, ram[0x63], ram[0x64])
+    m = dq4block.Map(prg, field=ram[0x65]) if t == 0 else dq4block.Map(prg, ram[0x63], ram[0x64])
     area = wram[0x1140] & 0xE0 if t else 0
     sx, sy = (ram[0x505] & 1) * 256 + ram[0x508], ram[0x509]
     pal12 = dq4block.palette(prg, t, ram[0x63], ram[0x64], wram[0x2ED], ram[0x65], wram[0x293])
+    if t == 0:
+        pal12 = field_cycle(pal12, ram[0x65], cycle)
+    elif t == 0x18:
+        pal12 = falls_cycle(pal12, cycle)
     if ppal is not None:                 # 팔레트 순환(롬 팔레트와 덤프가 다른 맵)을 가려 보려고 덤프의 BG 팔레트를 씀
         pal12 = bytes(ppal[i] for i in range(16) if i & 3)
     p = Painter(m, pal12)
@@ -518,8 +573,8 @@ def rom_screen(prg, ram, wram, ppal=None):
     for j in range(15):
         for i in range(16):
             x, y = (ram[0x7C] + i) & 0xFF, (ram[0x7B] + j) & 0xFF
-            blk = field_block(m, x, y) if t == 0 else m.block(x, y, area, ram[0x7BA])
-            c, r = (sx // 8 + 2 * i) % 64, (sy // 8 + 2 * j) % 30
+            blk = field_block(m, x, y, sparkle) if t == 0 else m.block(x, y, area, ram[0x7BA])
+            c, r = (sx // 16 * 2 + 2 * i) % 64, (sy // 16 * 2 + 2 * j) % 30
             im = p.block(blk)
             for q in range(4):
                 cc, rr = (c + (q & 1)) % 64, (r + (q >> 1)) % 30
@@ -558,8 +613,9 @@ def verify(prg, d, mask_sprites=False):
     shot = Image.open(os.path.join(d, 'end.png')).convert('RGB')
     smask = sprite_mask(oam) if mask_sprites else Image.new('L', (256, 240), 0)
 
-    def count(mine, amask):
+    def count(mine, amask, alt=None):
         sp, mp, ap, mk = shot.load(), mine.load(), amask.load(), smask.load()
+        bp = alt.load() if alt else mp
         total = diff = skipped = 0
         first = None
         for y in range(240):
@@ -568,13 +624,23 @@ def verify(prg, d, mask_sprites=False):
                     skipped += 1
                     continue
                 total += 1
-                if sp[x, y] != mp[x, y]:
+                if sp[x, y] != mp[x, y] and sp[x, y] != bp[x, y]:
                     diff += 1
                     first = first or (x, y)
         return total, diff, skipped, first
-    mine, amask = rom_screen(prg, ram, wram)
-    total, diff, skipped, first = count(mine, amask)
+    # 필드·폭포는 팔레트가 몇 프레임마다 돌아가므로(field_cycle·falls_cycle) 롬 팔레트를 돌린 6단계 중 가장 잘 맞는 것을 쓴다.
+    # 필드 3 의 블록 01 은 칸을 그릴 때마다 난수로 18·19 가 갈리므로(field_block) 둘 중 하나와 같으면 같은 것으로 친다.
+    best = None
+    f3 = ram[0x28] == 0 and ram[0x65] == 3
+    for n in range(FIELD_PHASES if ram[0x28] in CYCLED else 1):
+        mine, amask = rom_screen(prg, ram, wram, cycle=n)
+        r = count(mine, amask, rom_screen(prg, ram, wram, cycle=n, sparkle=True)[0] if f3 else None)
+        if best is None or r[1] < best[1][1]:
+            best = (n, r, mine)
+    phase, (total, diff, skipped, first), mine = best
     where = f'{ram[0x63]:02X}/{ram[0x64]:02X}' if ram[0x28] else f'필드 {ram[0x65]}'
+    if ram[0x28] in CYCLED:
+        where += f'(팔레트 {phase}단계)'
     msg = f'{d}: {where} 맵 종류 {ram[0x28]:02X}  비교 {total} 픽셀 중 {diff} 다름(뺀 것 {skipped})'
     if diff:
         mine.save(os.path.join(d, 'fcgfx-rom.png'))
@@ -731,8 +797,12 @@ def screens_from_dumps(out, dumps):
         idx.append({'name': name, 'title': title, 'nt': f'{name}-nt.png', 'bgchr': f'{name}-bgchr.png', 'shot': f'{name}-shot.png',
                     'source': 'MesenCE 덤프(fc/dq4/tools/lua/fcgfxscene.lua) 렌더링, 롬에서 직접 푼 것이 아님', 'dump': prefix,
                     'scroll': [sx, sy], 'diff': n, 'masked': masked})
+    # 이미 있는 장면 목록에 더한다(같은 이름은 바꿈). 장면마다 덤프를 뜬 방법이 달라 한 번에 다시 뜨기 어렵다.
+    old = json.loads((d / 'index.json').read_text()) if (d / 'index.json').exists() else []
+    names = {x['name'] for x in idx}
+    idx = [x for x in old if x['name'] not in names] + idx
     (d / 'index.json').write_text(json.dumps(idx, ensure_ascii=False, indent=1))
-    print(f'장면 {len(idx)}개 → {d}')
+    print(f'장면 {len(names)}개 넣음, 모두 {len(idx)}개 → {d}')
 
 
 def source_txt(out, sub, cmd, rom):
@@ -783,7 +853,7 @@ def main():
         source_txt(a[3], 'gallery', 'uv run --locked python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes gallery $OUT', data)
         return
     out = a[3]
-    names = place_names(prg, data) if cmd in ('all', 'maps', 'field') else {}
+    names = place_table(prg, data) if cmd in ('all', 'maps', 'field') else {}
     line = 'uv run --locked python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes ' + ' '.join(['$OUT' if x == out else x for x in a[2:]])
     idx = None
     if cmd in ('all', 'maps'):
