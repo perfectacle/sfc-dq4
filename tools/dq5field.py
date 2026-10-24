@@ -25,7 +25,7 @@ FIELD_E000 = 0x2A8D3E
 # $1949 = 0, 1, 2 일 때의 (세계 지도 7F:0000, 9번째 비트 7E:E000).
 WORLDS = ((WORLD, FIELD_E000), (0x2AB722, 0x2AC310), (0x2AC51A, 0x2AD299))
 ENTRANCES = 0x04FD97
-# 그룹마다 5바이트. +0 bit0-4 $BD, bit5-6 세계+1, bit7 → $194A bit7 / +1 X / +2 Y / +3 방향($C3) / +4 bit0·1·7 → $198E, bit2-6 → $194A
+# 그룹마다 5바이트. +0 bit0-4 $BD, bit5-6 세계+1, bit7 → $194A bit7 / +1 X / +2 Y / +3 도착 층($C3 → 7E:31A0) / +4 bit0·1·7 → $198E, bit2-6 → $194A
 GROUP_ARRIVAL = 0x0FEA97
 # 필드 BG 타일 512개(4bpp). RLE 를 7E:C000-FFFF 에 풀면 비트플레인 0·1·2·3 이 4KB 씩(C000/D000/E000/F000),
 # 01:A4CE 가 타일마다 섞어 VRAM 워드 2000- 에 올린다.
@@ -69,7 +69,7 @@ def field_chr(rom):
 
 
 def entrances(rom):
-    """04:FD97 입구마다 (그룹, X, Y, 세계, (도착 $BD, X, Y, 방향)). 그룹 $50 이상과 2A:F28D 의 예외는 표를 따르지 않는다."""
+    """04:FD97 입구마다 (그룹, X, Y, 세계, (도착 $BD, X, Y, 층)). 그룹 $50 이상과 2A:F28D 의 예외는 표를 따르지 않는다."""
     out, a = [], ENTRANCES
     while rom.u8(a) != 0xFF:
         g = rom.u8(a)
@@ -145,7 +145,7 @@ def main():
     rom = Rom(open(args.rom, 'rb').read())
     if args.entrances:
         for i, (g, x, y, w, (bd, ax, ay, d)) in enumerate(entrances(rom)):
-            print(f'{i:2d} ({x},{y}) world {w} -> {g:02X}/{bd:02X} ({ax},{ay}) dir {d}')
+            print(f'{i:2d} ({x},{y}) world {w} -> {g:02X}/{bd:02X} ({ax},{ay}) layer {d}')
         return 0
     src_w, src_e = WORLDS[args.world]
     world, end_w = rle(rom, src_w)

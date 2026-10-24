@@ -497,6 +497,29 @@ def fig_worlds(rom):
     save(out, 'dq5-field-worlds.webp')
 
 
+def fig_high_maps(rom):
+    """그룹 $50 이상 맵 넷을 롬만으로 그린 것(dq5map.py 의 high_preload·high_marks 를 거침, 팔레트도 롬)."""
+    from dq5map import high_marks
+    imgs = []
+    for bc, bd in ((0x51, 0x52), (0x52, 0x50), (0x53, 0x50), (0x54, 0x50)):
+        dec = Decoder(rom, SLOT, True)
+        dec.preload(bc, bd)
+        w, h, buf, _ = dec.decode(map_pointer(rom, bc, bd))
+        buf = bytearray(buf)
+        high_marks(rom, bc, bd, buf)
+        render(rom, dec, w, h, buf, map_cgram(rom, bc, bd), TMP)
+        img = Image.open(TMP).convert('RGB')
+        img = img.resize((img.width // 2, img.height // 2), Image.BOX)
+        label(img, f'{bc:02X}/{bd:02X}')
+        imgs.append(img)
+    out = Image.new('RGB', (sum(i.width for i in imgs) + 8 * (len(imgs) - 1), max(i.height for i in imgs)), (24, 24, 24))
+    x = 0
+    for img in imgs:
+        out.paste(img, (x, 0))
+        x += img.width + 8
+    save(out, 'dq5-map-high.webp')
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     rom = Rom(open('rom/dq5.sfc', 'rb').read())
@@ -516,6 +539,7 @@ def main():
     fig_textctl()
     fig_mongfx(rom)
     fig_worlds(rom)
+    fig_high_maps(rom)
     fig_mongfx_layout(rom)
     fig_battlebg(rom)
     os.remove(TMP)

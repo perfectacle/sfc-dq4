@@ -8,7 +8,7 @@
 --compare 는 01:BA4C(속성 패스 끝)에서 덤프한 WRAM 128KB 와 셀 버퍼를 비교한다.
 --png 는 셀 버퍼의 아래층·위층 타일맵을 그린다(Pillow 필요). 팔레트는 10:DE0B 와 같은 방법으로
 ROM 에서 만든다. --alt 는 7E:075E >= $F0 일 때의 두 번째 팔레트 목록, --cgram 은 덤프한 CGRAM 을 대신 쓴다.
-BC 가 50 이상이면 그 맵들의 따로 된 포인터·블록·CHR 을 쓴다. VRAM 슬롯 시작(--slot)은 맵마다 달라 아직 규칙을 모른다.
+BC 가 50 이상이면 그 맵들의 따로 된 포인터·블록·CHR 을 쓰고, 맵보다 먼저 슬롯을 받는 것들(high_preload)을 거친다.
 """
 import argparse
 import sys
@@ -30,6 +30,18 @@ HIGH_GROUPS = 0x1FCEB6
 HIGH_BLOCKS = 0x178369
 HIGH_CHR_BANK = 0x1F
 HIGH_CHR_PALETTE = 0x0FCF83
+# 맵을 풀기 전에 CHR 슬롯을 먼저 쓰는 것들. 이 셋을 거친 뒤 맵 블록의 CHR 이 이어서 슬롯을 받는다.
+#   04:8131  [BC][BD(bit7 무시, 7F 는 그룹 전체)][..][..][24비트][슬롯 수] 8바이트 항목, FF 로 끝. 맞으면 슬롯을 그만큼 건너뜀
+#   01:8F06  $BC = 51 이면 02:88A5 의 블록 목록(0 으로 끝)을 먼저 올림(02:8883)
+#   03:D3E9  03:D82E [BC][BD][색인] 표에서 맞으면 03:D806+색인 의 15비트 마스크, bit j 마다 03:D786+j*8 의 블록 4개(FFFF 로 끝)
+SLOT_SKIP = 0x04822D
+PRELOAD_51 = 0x0288A5
+ANIM_MAPS = 0x03D82E
+ANIM_MASKS = 0x03D806
+ANIM_BLOCKS = 0x03D786
+# 01:8F93: 맵을 푼 뒤 셀 +4 에 즉값을 찍는 표. [BC][BD][16비트 목록] 항목(bit7 바이트로 끝),
+# 목록은 [셀 주소 24비트(7E:C000-)][칸 수] 를 FF 까지. 2B:BAB5 가 따로 보는 속성이다.
+CELL_MARKS = ((0x32, 0x019017), (0x5A, 0x0192A9))
 
 
 def lorom(addr):
@@ -90,6 +102,52 @@ def high_block_table(rom):
         a += 3 + 2 * (((b0 >> 3) & 7) + 1) * ((b0 & 7) + 1)
         if rom.u8(a + 2) == 0xFF:
             return ptrs
+
+
+def high_preload(rom, bc, bd):
+    """$BC >= $50 맵을 풀기 전에 쓰는 (건너뛸 슬롯 수, 먼저 올리는 블록 목록)."""
+    skip, a = 0, SLOT_SKIP
+    while rom.u8(a) != 0xFF:
+        mbd = rom.u8(a + 1) & 0x7F
+        if rom.u8(a) == bc and mbd in (bd, 0x7F):
+            skip = rom.u8(a + 7)
+            break
+        a += 8
+    blocks = []
+    if bc == 0x51:
+        a = PRELOAD_51
+        while rom.u8(a):
+            blocks.append(rom.u8(a))
+            a += 1
+    a = ANIM_MAPS
+    while rom.u8(a) != 0xFF:
+        if rom.u8(a) == bc and rom.u8(a + 1) == bd:
+            mask = rom.u16(ANIM_MASKS + rom.u8(a + 2)) & 0x7FFF
+            for j in range(17):
+                if mask >> j & 1:
+                    for k in range(4):
+                        n = rom.u16(ANIM_BLOCKS + j * 8 + k * 2)
+                        if n == 0xFFFF:
+                            break
+                        blocks.append(n)
+            break
+        a += 3
+    return skip, blocks
+
+
+def high_marks(rom, bc, bd, buf):
+    """01:8F93 을 buf(7E:C000- 셀 버퍼)에 적용한다."""
+    for value, a in CELL_MARKS:
+        while not rom.u8(a) & 0x80:
+            if rom.u8(a) == bc and rom.u8(a + 1) == bd:
+                p = a & 0xFF0000 | rom.u16(a + 2)
+                while rom.u8(p) != 0xFF:
+                    cell, n = rom.u24(p) - 0x7EC000, rom.u8(p + 3)
+                    for i in range(n):
+                        buf[cell + 4 + i * 8] = value
+                    p += 4
+                break
+            a += 4
 
 
 class Bits:
@@ -210,6 +268,13 @@ class Decoder:
             self.chr_map[chr_id] = (self.slot | pal << 8) & 0xFFFF
             self.slot += 1
         return self.chr_map[chr_id]
+
+    def preload(self, bc, bd):
+        """그룹 $50 이상: 맵 블록보다 먼저 슬롯을 받는 것들을 게임 순서대로 거친다."""
+        skip, blocks = high_preload(self.rom, bc, bd)
+        self.slot += skip
+        for n in blocks:
+            self.load_block(n)
 
     def load_block(self, n):
         """01:8ACB. 블록 정의를 (높이, 폭, 위층 줄 수, 속성, [줄별 [(플래그, 타일맵 워드)]]) 로 편다."""
@@ -406,7 +471,12 @@ def main():
     rom = Rom(open(args.rom, 'rb').read())
     addr = map_pointer(rom, args.bc, args.bd)
     dec = Decoder(rom, args.slot, args.bc >= 0x50)
+    if dec.high:
+        dec.preload(args.bc, args.bd)
     width, height, buf, stream = dec.decode(addr)
+    if dec.high:
+        buf = bytearray(buf)
+        high_marks(rom, args.bc, args.bd, buf)
     print(f'map {args.bc:02X}/{args.bd:02X} at {addr:06X}: {width}x{height}, '
           f'stream ends {stream.a:06X} bit {stream.pos}, slots {args.slot:X}-{dec.slot:X}')
     if args.png:
