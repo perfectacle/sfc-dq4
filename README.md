@@ -125,3 +125,4 @@ nds(NDS DQ4 리메이크·한글 팬패치 참고): [nds/dq4/README.md](nds/dq4/
 - [2026-10-25-30: 원작 맵·필드·타일 그림 뽑기](docs/journal/dq4/2026-10-25-30-fcgfx.md)
 - [2026-10-25-31: 얻는 물건 통합 표·장소별 값·숨는 가게 인물](docs/journal/dq4/2026-10-25-31-shop3.md)
 - [2026-10-25-32: 적 조우의 남은 것 2](docs/journal/dq4/2026-10-25-32-encounter3.md)
+- [2026-10-25-33: 창 레코드(자리·크기·항목)와 자동 ＊「 의 규칙](docs/journal/dq4/2026-10-25-33-textrest4.md)
