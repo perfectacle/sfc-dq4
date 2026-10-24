@@ -232,6 +232,35 @@ def fig_edge_exit(rom):
     save(out, 'dq5-exit-edge-0300.webp')
 
 
+def fig_field(rom):
+    """세계 지도 전체(256x256 블록, 1/4 축소)와 필드 화면 비교. 타일 그래픽·팔레트는 필드에 선 순간의 덤프(work/fieldref/)."""
+    from dq5field import BLOCK_LOWER, BLOCK_UPPER, FIELD_E000, WORLD, block_number, render, rle
+    world, _ = rle(rom, WORLD)
+    hib, _ = rle(rom, FIELD_E000)
+    vram = open('work/fieldref/field.vram', 'rb').read()
+    cg = open('work/fieldref/field.cgram', 'rb').read()
+    cache = {}
+    full = Image.new('RGB', (256 * 4, 256 * 4))
+    for by in range(256):
+        for bx in range(256):
+            m = block_number(world, hib, bx, by)
+            if m not in cache:
+                render(rom, bytes([m & 0xFF]), bytes([(m >> 8) << 7]), vram, cg, 0, 0, 1, 1, TMP)
+                cache[m] = Image.open(TMP).convert('RGB').resize((4, 4), Image.BOX)
+            full.paste(cache[m], (bx * 4, by * 4))
+    ImageDraw.Draw(full).rectangle((125 * 4 - 6, 108 * 4 - 6, 125 * 4 + 6, 108 * 4 + 6), outline=(255, 0, 0), width=2)
+    save(full, 'dq5-field-world.webp')
+    render(rom, world, hib, vram, cg, 116, 105, 24, 20, TMP)
+    near = Image.open(TMP).convert('RGB').crop((32, 0, 32 + 256, 224))
+    shot = Image.open('work/fieldref/field.png').convert('RGB')
+    out = Image.new('RGB', (256 * 2 + 16, 224), (24, 24, 24))
+    out.paste(shot, (0, 0))
+    out.paste(near, (256 + 16, 0))
+    label(out, 'MesenCE')
+    label(out, 'dq5field.py', (256 + 16, 0))
+    save(out, 'dq5-field-compare.webp')
+
+
 def fig_transition():
     """맵 전환 전후 30프레임 간격 화면(wsnap.lua, 1560~1770)."""
     files = [f for f in sorted(glob.glob('work/wdump/s[0-9]*.png')) if 1560 <= int(f[-9:-4]) <= 1770]
@@ -254,6 +283,7 @@ def main():
     fig_day_night(rom)
     fig_exits(rom)
     fig_edge_exit(rom)
+    fig_field(rom)
     fig_transition()
     os.remove(TMP)
 

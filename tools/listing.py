@@ -14,6 +14,8 @@ def main():
     lo, hi = (int(sys.argv[3], 16), int(sys.argv[4], 16)) if len(sys.argv) > 4 else (0, 0xFFFFFF)
     rows = []
     for line in open(sys.argv[2]):
+        if not line.strip():
+            continue
         pc, p, cnt = line.split()
         pc, p = int(pc, 16), int(p, 16)
         if lo <= pc <= hi:
