@@ -1,7 +1,7 @@
 """DQ5(SFC) 그래픽 갤러리. 롬에서 그림을 뽑아 work/gallery/index.html 하나로 훑어보게 한다.
 
 스프라이트를 새로 그릴 때 원작 그림을 찾아보는 용도다. 그림은 다른 도구의 내보내기 함수가 만든다.
-  dq5gfx.export_all      맵·CHR·필드·전투 몬스터·폰트 (+ 창·UI 같은 나머지 그림)
+  dq5gfx.export_all      맵·CHR·필드·전투 몬스터·폰트·창 타일·움직이는 타일
   dq5battlebg            전투 배경(있으면)
   dq5sprite.export_all   필드 인물 스프라이트(있으면)
 없는 모듈은 건너뛴다. index.html 은 상대 경로로만 그림을 가리키므로 폴더째 옮겨도 열린다.
@@ -26,7 +26,7 @@ CATEGORIES = (
     ('maps', '실내 맵'), ('maps-attr', '맵 속성'), ('map-blocks', '맵 블록'), ('chr', '실내 CHR'),
     ('field', '필드'), ('field-blocks', '필드 블록·타일'), ('anim', '움직이는 타일'),
     ('sprites', '인물 스프라이트'), ('monsters', '전투 몬스터'), ('battlebg', '전투 배경'),
-    ('font', '폰트'), ('ui', '창·UI'), ('title', '타이틀·기타 BG'),
+    ('font', '폰트'), ('ui', '창·메뉴'),
 )
 
 
@@ -216,7 +216,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('rom')
     ap.add_argument('--out', default='work/gallery')
-    ap.add_argument('--only', help='쉼표로 내보낼 묶음만(dq5gfx 의 maps,chr,field,monsters,font,ui,title, battlebg, sprites)')
+    ap.add_argument('--only', help='쉼표로 내보낼 묶음만(dq5gfx 의 maps,chr,field,monsters,font,ui,anim, battlebg, sprites)')
     args = ap.parse_args()
     rom = Rom(open(args.rom, 'rb').read())
     only = set(args.only.split(',')) if args.only else None
