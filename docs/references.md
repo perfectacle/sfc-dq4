@@ -27,11 +27,14 @@ RAM 페이지의 「`7EFC00-` マップデータ」는 실제와 다릅니다([d
 
 | 자료 | 참고한 것 |
 | --- | --- |
-| [Realm of Darkness: NES DQ4 sprites](https://www.realmofdarkness.net/dq/nes-dw4-sprites/) | 원작 인물의 윤곽·비율과 타일의 조밀한 무늬 |
-| [Realm of Darkness: Nintendo DS DQ4 sprites](https://www.realmofdarkness.net/dq/ds-dq4-sprites/) | 라이안·호이미 슬라임의 색 구분과 특징 |
-| [Realm of Darkness: SFC DQ5 sprites](https://www.realmofdarkness.net/dq/snes-dq5-sprites/) | 이식 대상 엔진의 인물 표현 참고 |
+| [Realm of Darkness: SFC DQ5 sprites](https://www.realmofdarkness.net/dq/snes-dq5-sprites/) | 실제 크기의 얼굴·윤곽·색 덩어리·몸 비율·보행. 스프라이트 제작의 우선 비교 기준 |
+| [Realm of Darkness: NES DQ4 sprites](https://www.realmofdarkness.net/dq/nes-dw4-sprites/) | 원작 인물의 정체성과 복장·색 구분 |
+| [Realm of Darkness: Nintendo DS DQ4 sprites](https://www.realmofdarkness.net/dq/ds-dq4-sprites/) | 라이안의 복장과 방향별 실루엣. 초기 인물 오인 기록은 핸드오프 참고 |
+| [The Spriters Resource: SNES Dragon Quest V](https://www.spriters-resource.com/snes/dragonq5/) | 추가 원작 시트 출처. 이번 세션의 자동 접근은 HTTP 403으로 열람하지 못함 |
 
-사용자가 제공한 Nintendo DS DQ4 타이틀 화면은 하늘·용·로고의 색감 참고로 사용했습니다. 지형 표현은 저장소의 [DQ5 맵 비교 그림](images/dq5-map-0206-compare.webp)과 [낮·밤 그림](images/dq5-map-0206-day-night.webp)도 참고했습니다. 자료의 픽셀 데이터를 제작물에 복사하지 않았으며, 외부 참고 이미지 사본은 배포하지 않습니다. 제작 원본과 변환 규격은 [dq4-graphics.md](dq4-graphics.md)에 있습니다.
+사용자가 제공한 Nintendo DS DQ4 타이틀 화면은 하늘·용·로고의 색감 참고로 사용했습니다. 지형 표현은 저장소의 [DQ5 맵 비교 그림](images/dq5-map-0206-compare.webp)과 [낮·밤 그림](images/dq5-map-0206-day-night.webp)도 참고했습니다. 외부 시트의 픽셀 데이터를 제작물에 복사하지 않았으며, 외부 참고 이미지 사본은 배포하지 않습니다.
+
+타이틀·일러스트는 사용자에게 긍정 평가를 받았지만, 스프라이트는 최종 수정본까지 반려됐습니다. 자료별 참고 목적·인물 식별 오류·제작 시도·다음 작업은 [그래픽 핸드오프](dq4-graphics-handoff.md), 제작 원본과 변환 규격은 [dq4-graphics.md](dq4-graphics.md)에 있습니다.
 
 ## 다른 이식 시도
 
