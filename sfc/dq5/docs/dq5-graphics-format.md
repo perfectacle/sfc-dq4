@@ -292,6 +292,15 @@ uv run --locked python sfc/dq5/tools/dq5gallery.py rom/dq5.sfc     # work/galler
 uv run --locked python sfc/dq5/tools/dq5gfx.py rom/dq5.sfc --only maps --maps 02/06   # 일부만 work/gfx/
 ```
 
+뽑아 둔 결과는 비공개 저장소 `sfc-dq4-assets` 의 `sfc/dq5/gfx/`·`sfc/dq5/gallery/` 에 있습니다(만든 커밋과 명령은 각 폴더의 `SOURCE.txt`). 그 저장소에서는 아래처럼 돌려 갤러리가 `../gfx/`·`../sprites/` 를 상대 경로로 가리키게 합니다.
+
+```sh
+A=<sfc-dq4-assets 체크아웃>/sfc/dq5
+uv run --locked python sfc/dq5/tools/dq5gallery.py rom/dq5.sfc --out $A/gallery --gfx $A/gfx --sprites $A/sprites
+```
+
+`--sprites` 폴더에 `index.json` 이 있으면 스프라이트는 다시 뽑지 않고 그 목록을 링크합니다. 맵 파일 이름은 `<BC>-<BD>.png` 에 변형(`-night`, `-setNN`, `-annot` 속성 겹침, `-blocks`)을 붙이고, 폴더마다 `index.json` 에 항목 목록을 남깁니다.
+
 [tools/dq5gfx.py](../tools/dq5gfx.py) 가 묶음마다 그림을 만들고 [tools/dq5gallery.py](../tools/dq5gallery.py) 가 그것을 한 쪽짜리 HTML 로 묶습니다.
 갤러리는 분류·그룹·제목으로 거르고, 누르면 1~8배·맞춤으로 픽셀 그대로(`image-rendering: pixelated`) 키워 봅니다. 그림을 상대 경로로만 가리키므로 폴더째 옮겨도 열립니다.
 전투 배경(`sfc/dq5/tools/dq5battlebg.py`)과 필드 인물 스프라이트(`sfc/dq5/tools/dq5sprite.py` 의 `export_all(rom, outdir)`)는 모듈이 있으면 함께 뽑고, 없으면 건너뜁니다.
