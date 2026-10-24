@@ -109,6 +109,7 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 | `dq5talk.py rom 대화번호` | 대화 번호의 갈래·스크립트·메시지. `BC BD` 를 주면 그 맵 인물 전부, `--check` 로 스크립트 574개 경계 검사 |
 | `dq5chest.py rom [BC BD]` | DQ5 보물상자(번호·칸·열림 플래그·내용물)와 タンス·ツボ·タル 항목. 물건 이름까지 |
 | `dq5shop.py rom` | DQ5 상점 품목 목록(종류·마을 그룹 키)과 물건 가격 |
+| `dq5item.py rom` | DQ5 물건 216개의 장비 칸·공격력/수비력·장비 비트·가격과 표 9개 원값 |
 | `dq5figures.py` | `docs/images/` 의 그림을 다시 만듦(롬 필요, 게임 화면 비교 그림만 `work/` 덤프 필요) |
 
 ### dq4
