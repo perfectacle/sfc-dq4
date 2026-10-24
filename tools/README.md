@@ -80,7 +80,7 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 
 | 스크립트 | 하는 일 |
 | --- | --- |
-| `dq4state.sh` | 전원 켜기부터 1장 왕좌의 방, 성 밖까지 단계별로 입력을 재생해 세이브스테이트를 만들고 장면마다 좌표·맵 번호를 찍음. `MESENCE` 필요 |
+| `dq4state.sh` | 전원 켜기부터 1장 왕좌의 방, 성 밖, 필드, 첫 전투까지 단계별로 입력을 재생해 세이브스테이트를 만들고 장면마다 좌표·맵 번호를 찍음. 같은 결과가 나오도록 MesenCE 에 `--nes.ramPowerOnState=AllZeros` 를 줌. `MESENCE` 필요 |
 
 ## Python
 
@@ -118,5 +118,6 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 | --- | --- |
 | `dq4map.py rom list\|check\|G K` | DQ4 마을·던전 맵 풀기. `list` 맵 269개, `check` 해제 경계 전수 검사, `G K --compare at.bin` 으로 `lua/fc/atpc.lua` 덤프(`$7800`)와 비교. `exits G K` 출구(`--compare end.ram` 은 `$05A0`), `npcs G K` 인물(`--compare` 는 인물 표 `$6F60`~) |
 | `lua/fc/atpc.lua` | FC: PC 가 `AT` 에 닿을 때 CPU 메모리(`RANGE`, 기본 `0000-7FFF`)를 `at_PPPP_N.bin` 으로. `DRIVER` 로 입력 드라이버 |
+| `dq4data.py rom names\|items\|monsters` | DQ4 이름 목록(주문·직업·아이템·몬스터…), 아이템 강도·가격, 몬스터 경험치·HP·골드 |
 | `dq4text.py rom all\|MSG` | DQ4 대사 풀기. `all` 은 메시지 2633개 전부, `--bytes` 글자 바이트, `--compare end.ram` 으로 창 줄 버퍼(`$06AA`)와 비교 |
 | `dq4bank.py rom call\|table\|compare` | DQ4 BRK 뱅크 호출 풀기. `compare trace.txt` 로 `probe/trace.lua` 기록(`TRACE=C446,C455,C3CD LOG=0023,0024,0025,0026,0027,0507`)과 비교 |
