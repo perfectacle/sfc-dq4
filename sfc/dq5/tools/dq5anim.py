@@ -8,7 +8,7 @@
 D965 = 수 c, 03:D982[t*2] = 타일 수 n, 03:D9A0[t*2] = 자료 주소 a 를 쓴다. 1ECE % p == 0 인 프레임에만 움직인다.
   t < 6 : 미리 그린 벌을 바꿔 낀다. 벌 = (1ECE / p) % c (t = 4 는 3 → 1, 왕복), 원본 03:(a + 벌 * n * 32).
   t >= 6: 7E:a 의 CHR 사본을 03:D751 로 한 줄씩 아래로 돌린다(타일 c 개). t = 14 는 7E:$C4(걷는 방향) bit0·bit1 일 때
-          가로로 민다(03:D5CC), t = 7 은 03:D5EC(코드 읽기).
+          가로로 민다(03:D5CC), t = 7 은 가로로 1픽셀씩 돌린다(03:D5EC, slide7).
 돌린 결과는 다음 프레임에 VRAM 7E:1ED2[t] 로 n 타일 DMA 된다.
 
 사용:
@@ -22,7 +22,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from dq5map import CHR_BANK, Rom, block_table, lorom  # noqa: E402
+from dq5map import CHR_BANK, HIGH_CHR_BANK, Rom, block_table, high_block_table, lorom  # noqa: E402
 
 MAPS = 0x03D82E
 MASKS = 0x03D806
@@ -69,9 +69,9 @@ def frame_bytes(rom, t, f):
     return rom.d[o:o + k['tiles'] * 32]
 
 
-def block_chrs(rom, blocks):
-    """블록들의 CHR 번호를 처음 나온 순서대로(01:8C15 가 슬롯을 주는 순서)."""
-    table, out = block_table(rom), []
+def block_chrs(rom, blocks, high=False):
+    """블록들의 CHR 번호를 처음 나온 순서대로(01:8C15 가 슬롯을 주는 순서). BC 50 이상 맵은 high."""
+    table, out = (high_block_table(rom) if high else block_table(rom)), []
     for n in blocks:
         a = table[n]
         b0 = rom.u8(a)
@@ -82,8 +82,8 @@ def block_chrs(rom, blocks):
     return out
 
 
-def chr_raw(rom, c):
-    o = lorom((CHR_BANK + (c >> 10)) << 16 | 0x8000 + (c & 0x3FF) * 32)
+def chr_raw(rom, c, high=False):
+    o = lorom(((HIGH_CHR_BANK if high else CHR_BANK) + (c >> 10)) << 16 | 0x8000 + (c & 0x3FF) * 32)
     return rom.d[o:o + 32]
 
 
@@ -92,6 +92,25 @@ def roll(tile, n):
     a = [tile[i * 2:i * 2 + 2] for i in range(8)]
     b = [tile[16 + i * 2:16 + i * 2 + 2] for i in range(8)]
     return b''.join(a[-n:] + a[:-n]) + b''.join(b[-n:] + b[:-n])
+
+
+def _ror(b):
+    return (b >> 1 | (b & 1) << 7) & 0xFF
+
+
+def slide7(tiles, counter):
+    """종류 7(03:D5EC): 1ECE % 4 == 0 이면 첫 타일의 줄을 1픽셀 오른쪽으로 돌리고, 늘 타일 1·2, 3·4 를 16픽셀 줄로
+    묶어 1픽셀 오른쪽으로 돌린다(바이트마다 ROR, 비트평면마다 따로)."""
+    t = bytearray(tiles)
+    if counter % 4 == 0:
+        for x in range(0x20):
+            t[x] = _ror(t[x])
+    for base in (0x20, 0x60):
+        for x in range(0x20):
+            a, b = t[base + x], t[base + 0x20 + x]
+            t[base + x] = (a >> 1 | (b & 1) << 7) & 0xFF
+            t[base + 0x20 + x] = (b >> 1 | (a & 1) << 7) & 0xFF
+    return bytes(t)
 
 
 def check(rom, d, first, last):
@@ -120,15 +139,19 @@ def check(rom, d, first, last):
             elif got != prev:
                 total += 1
                 steps.append(counter)
-                same += t == 14 or got == b''.join(roll(prev[i:i + 32], 1) for i in range(0, n, 32))
+                if t == 7:
+                    same += got == slide7(prev, counter)
+                else:
+                    same += t == 14 or got == b''.join(roll(prev[i:i + 32], 1) for i in range(0, n, 32))
         line = '종류 %d: 주기 %d, 수 %d, 타일 %d, VRAM %04X → %d/%d 맞음' % (
             t, k['period'], k['count'], k['tiles'], dest // 2, same, total)
         if t >= 6:
             line += ', 바뀐 프레임의 1ECE %s' % steps[:8]
-        if t >= 6 and t != 14:
-            chrs = block_chrs(rom, k['blocks'])
+        if t >= 6 and t not in (7, 14):
+            high = w0[0xBC] >= 0x50
+            chrs = block_chrs(rom, k['blocks'], high)
             tiles = [v[dest + i * 32:dest + i * 32 + 32] for i in range(k['tiles'])]
-            rows = {r for i, c in enumerate(chrs[:len(tiles)]) for r in range(8) if roll(chr_raw(rom, c), r) == tiles[i]}
+            rows = {r for i, c in enumerate(chrs[:len(tiles)]) for r in range(8) if roll(chr_raw(rom, c, high), r) == tiles[i]}
             line += ', 블록 CHR %d개와 %s줄 돌린 꼴로 같음' % (len(chrs), sorted(rows))
         out.append(line)
     return out
