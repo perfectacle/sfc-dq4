@@ -5,8 +5,7 @@
   그 대화 번호를 쓰는 인물의 맵을 함께 적는다.
 - 인물 인라인 스크립트(01:C800): 06(뛰기)·09(기다림) 시험, 10(켜기)·11(AND)·55(바이트 쓰기).
 - 인물 목록 표: 12:839C(인물을 놓지 않음)·12:8449(목록 바꿈). 번호 bit7 이면 「꺼졌을 때」.
-- 이벤트 스크립트(00:BEC3, 포인터 $19B3~$19B5): 10 idx mask(켜기)·20 idx mask(AND)·B0 idx mask(켜질 때까지 기다림).
-  롬에서 LDA #/STA $19B3·$19B4·$19B5 로 시작 주소를 찾아 아는 길이의 명령만 따라간다(모르는 명령에서 멈춤).
+- 이벤트 스크립트(00:BEC3): 10 idx mask(켜기)·20 idx mask(AND)·B0 idx mask(켜질 때까지 기다림). 시작 주소와 해석은 dq5event.py.
 - 맵별 루틴 표(15:F907) +2·+3, 맵 조건 표 01:9A12(35바이트 항목)·02:CAF6(6바이트 항목, 루틴 포인터).
 - 네이티브 코드의 7E:2190~220F 롱 주소 읽기·쓰기(LDA·STA·CMP·AND·ORA 등 long). 바이트 변수로 쓰는 칸이 많다.
 - 네이티브 코드의 BRK 0B(시험)·0C(켜기)·0D(끄기) mask idx(00:93BA). 롬 전체를 훑으므로 그림 뱅크 등 데이터를 빼려고
@@ -159,52 +158,9 @@ def refs_hooks(rom):
     return out
 
 
-# 00:BEC3 이벤트 스크립트 명령 길이(00:BFBB 로 넘기는 값). 00~0F 는 2(이동, 00:BEE3). 모르는 명령에서 멈춘다.
-EVENT_LEN = {0x10: 3, 0x20: 3, 0x60: 3, 0x90: 7, 0x91: 2, 0xA0: 4, 0xB0: 3, 0xC1: 2, 0xC2: 1, 0xC4: 4,
-             0xC6: 1, 0xC7: 2, 0xC8: 2, 0xC9: 1}
-
-
-def event_script_starts(rom):
-    """LDA #lo / STA $19B3 / LDA #hi / STA $19B4 / LDA #bank / STA $19B5 를 찾는다. [(부르는 곳, 스크립트 주소)]."""
-    out = []
-    pat = re.compile(rb'\xa9(.)\x8d\xb3\x19\xa9(.)\x8d\xb4\x19\xa9(.)\x8d\xb5\x19', re.S)
-    for m in pat.finditer(rom.d):
-        i = m.start()
-        lo, hi, bank = m.group(1)[0], m.group(2)[0], m.group(3)[0]
-        out.append((i // 0x8000 << 16 | 0x8000 + i % 0x8000, bank << 16 | hi << 8 | lo))
-    return out
-
-
 def refs_event(rom):
-    out, seen = [], set()
-    todo = [(f'{c >> 16:02X}:{c & 0xFFFF:04X}', a) for c, a in event_script_starts(rom)]
-    while todo:
-        caller, a = todo.pop()
-        if a in seen:
-            continue
-        seen.add(a)
-        last_msg = None
-        for _ in range(400):
-            op = rom.u8(a)
-            if op == 0xFF:
-                break
-            if op == 0xC3:            # 다음 3바이트 주소로 뛴다(00:C122)
-                todo.append((caller, rom.u24(a + 1)))
-                break
-            if op == 0x60:
-                last_msg = rom.u16(a + 1)
-            if op in (0x10, 0x20, 0xB0):
-                idx, mask = rom.u8(a + 1), rom.u8(a + 2)
-                kind = {0x10: 'set', 0x20: 'clear', 0xB0: 'test'}[op]
-                if kind == 'clear':
-                    mask ^= 0xFF
-                note = ' 기다림' if op == 0xB0 else ''
-                out.append(('event', idx, mask, kind, f'이벤트 스크립트 {a:06X} (시작 {caller}){note}', last_msg))
-            n = 2 if op < 0x10 else EVENT_LEN.get(op)
-            if n is None:
-                break
-            a += n
-    return out
+    import dq5event
+    return [('event', idx, mask, kind, where, ctx) for idx, mask, kind, where, ctx in dq5event.flag_refs(rom)]
 
 
 # [BC][BD][f][m] 로 시작하는 맵 조건 표: (주소, 항목 크기, 이름, BC 특수값)
