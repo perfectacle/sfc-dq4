@@ -76,6 +76,7 @@ dq4(FC DQ4 원작):
 - [docs/dq4-rom-map.md](docs/dq4-rom-map.md): DQ4(FC) 롬 뱅크 지도(뱅크 32개의 내용, 실행 장면, 빈 자리)
 - [docs/dq4-debug.md](docs/dq4-debug.md): DQ4(FC) 디버그 스위치 `$C000`(벽 통과·인카운트 끄기·전투 테스트), 패드 2 흔적, 미실행 코드 찾기
 - [docs/dq4-block-format.md](docs/dq4-block-format.md): DQ4(FC) 맵 블록 → 8×8 타일·팔레트·통행 속성, CHR 올리기, 타일 애니메이션, 지형 효과
+- [docs/dq4-fcsprite-format.md](docs/dq4-fcsprite-format.md): DQ4(FC) 필드 인물·일행·탈것 그림 표(4방향 × 걸음 2, 돌려 그리기)와 전투 몬스터 그림(압축·배치·팔레트), 롬에서 뽑아 열람하기
 
 nds(NDS DQ4 리메이크 참고):
 
@@ -121,6 +122,7 @@ nds(NDS DQ4 리메이크 참고):
 - [2026-10-25-26: 포팅용 기호 텍스트 내보내기와 モシャス](docs/journal/dq4/2026-10-25-26-textrest3.md)
 - [2026-10-25-27: 전투 행동·주문 위력·내성·몬스터 AI·아이템 플래그](docs/journal/dq4/2026-10-25-27-stats2.md)
 - [2026-10-25-28: 이벤트 표와 진행 목록·마차·손님·움직임](docs/journal/dq4/2026-10-25-28-talk3.md)
+- [2026-10-25-29: 원작 필드 인물·몬스터 그림 뽑기](docs/journal/dq4/2026-10-25-29-fcsprite.md)
 
 #### nds
 
