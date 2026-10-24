@@ -248,6 +248,31 @@ def fig_exit_hook(rom):
     save(out, 'dq5-exit-hook-0105.webp')
 
 
+def fig_npc_stairs(rom):
+    """01/05 대체 목록(플래그 7E:21A7 & 40)의 파파스 인라인 스크립트가 걷는 길(초록, 13 명령의 목표)과,
+    끝에서 부르는 06:CCEB(→ 1F:FA9B)가 지우는 빈 곳 출구 셀(노란 틀)·새로 놓는 계단의 출구 셀(빨간 틀).
+    오른쪽은 그 스크립트가 끝난 뒤 화면(work/npcstair/end.png). 배 선실 세이브스테이트에서 사다리 목적지를
+    01/05 (44,8) 로 바꾸고 7E:21A7 을 $40 으로 고정해 A 를 눌러 가며 기다린 walk.lua 결과다(인물 스크립트 일지 4절)."""
+    from dq5npc import parse, script_bytes, script_ops
+    img, w, h, _, _ = decoded(rom, 1, 5)
+    f = parse(rom, 0x108994)
+    path = [(f['x'] & 0x7F, f['y'] & 0x7F)]
+    path += [(raw[1], raw[2]) for _, raw, _ in script_ops(script_bytes(rom, f['script'])) if raw[0] == 0x13]
+    d = ImageDraw.Draw(img)
+    d.line([(x * 8 + 8, y * 8 + 4) for x, y in path], fill=(0, 255, 0), width=3)
+    for x, y in path:
+        d.rectangle((x * 8, y * 8, x * 8 + 15, y * 8 + 7), outline=(0, 255, 0), width=1)
+    d.rectangle((50 * 8, 19 * 8, 52 * 8 - 1, 21 * 8 - 1), outline=(255, 224, 0), width=2)
+    d.rectangle((63 * 8 - 3, 18 * 8 - 3, 65 * 8 + 2, 20 * 8 + 2), outline=(255, 64, 64), width=3)
+    label(img, '01/05')
+    shot = Image.open('work/npcstair/end.png').convert('RGB')
+    label(shot, 'MesenCE')
+    out = Image.new('RGB', (img.width + 16 + shot.width, max(img.height, shot.height)), (24, 24, 24))
+    out.paste(img, (0, 0))
+    out.paste(shot, (img.width + 16, 0))
+    save(out, 'dq5-npc-script-0105.webp')
+
+
 def fig_text(rom):
     """배 선실에서 빈 쪽에 말을 건 화면(work/text1/end.png)과, 롬의 메시지 129 를 dq5text.py 로 풀어 폰트로 그린 것.
     덤프는 docs/journal/dq5/2026-10-25-01-text.md 의 1절 명령으로 만든다."""
@@ -402,6 +427,7 @@ def main():
     fig_day_night(rom)
     fig_exits(rom)
     fig_exit_hook(rom)
+    fig_npc_stairs(rom)
     fig_text(rom)
     fig_edge_exit(rom)
     fig_field(rom)
