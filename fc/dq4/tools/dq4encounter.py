@@ -7,7 +7,7 @@
   python fc/dq4/tools/dq4encounter.py rom/dq4.nes dungeons                던전 그룹 → 층(순번)마다 구역
   python fc/dq4/tools/dq4encounter.py rom/dq4.nes formations              고정 편성 16개(칸 12·13)
   python fc/dq4/tools/dq4encounter.py rom/dq4.nes bosses                  특수 전투 34개와 부르는 곳
-  python fc/dq4/tools/dq4encounter.py rom/dq4.nes scripts                 인물 블록에서 명령 21(0F:$DA8A, 특수 전투)을 찾음
+  python fc/dq4/tools/dq4encounter.py rom/dq4.nes scripts                 인물 블록(맵·이벤트 목록)에서 명령 21(1F:$DA8A, 특수 전투)을 찾음
   python fc/dq4/tools/dq4encounter.py rom/dq4.nes check [enc.txt ...]     표 경계 검사, fc/dq4/tools/lua/enc.lua 기록 대조
 
 근거 루틴(뱅크 18): $9BE6(걸음마다 조우 판정), $9C19(필드 구역), $9F79·$A069(던전 구역),
@@ -20,6 +20,7 @@ from kr_patch.fc import ines
 
 import dq4data
 import dq4map
+import dq4npcblock
 
 BANK = 0x18
 ZONE_MAPS = {0: 0xA241, 2: 0xA243, 4: 0xA245}   # $615A(장 − 1) → 구역 지도 포인터. 0·1·3 장은 0 의 것
@@ -33,7 +34,8 @@ FORM_CNT, FORM_ADD = 0xA31D, 0xA325     # 고정 편성 마릿수 = ADD[c] + ran
 SOLO_CNT, SOLO_ADD = 0xA32D, 0xA335     # 칸 6~10 마릿수 = ADD[c] + rand(CNT[c])
 EXTRA_MAX, EXTRA_P = 0xA464, 0xA46C     # 칸 0~4 덧붙는 마리: 합계 상한, 한 마리 더 붙을 확률(/256)
 N_ZONES, N_FORMATIONS, N_BOSSES = 0x65, 16, 34
-FIELD_FIXED = {(1, 'y<0C'): 0x35, (1, 'y>=0C'): 0x34, (2, ''): 0x36}   # 5장 필드 1·2 는 지도 없이 고정(18:$9C3F)
+# 5장 필드 1 과 그 밖($65 가 0·1 이 아님 — 쓰이는 값은 3 闇の世界, dq4field.FIELDS)은 지도 없이 고정(18:$9C3F)
+FIELD_FIXED = {(1, 'y<0C'): 0x35, (1, 'y>=0C'): 0x34, (3, ''): 0x36}
 # 무리 고르기 칸 마스크(18:$9D6B, $9F34). 낮/밤은 걸음 시계 $62ED < 78 / ≥ 78
 MASK_FIRST = {'day': 0x1BEF, 'night': 0x3FBE, 'dungeon': 0x3FFF}
 MASK_SECOND = {'day': 0x000F, 'night': 0x001E, 'dungeon': 0x001F}
@@ -205,67 +207,21 @@ def arena_list(prg):
     return list(prg[o:o + 5])
 
 
-# 인물 블록(0F:$D884 가 한 명령씩 실행) 명령 길이. 처리기 표 0F:$DEF5(00~30)·$DF57(80~8A)를 코드 읽기로 센 것.
-# 80·81 은 부르기에서 되돌아감, 83 상대 점프, 84 절대 점프, 85 부르기(돌아올 자리 $70A0/$70C0).
-BLOCK_LEN = {**{op: 1 for op in range(0x21)}, 0x21: 2, 0x22: 2, 0x23: 2, 0x24: 3, 0x25: 3, 0x26: 3,
-             0x27: 4, 0x28: 4, 0x29: 4, 0x2A: 1, 0x2B: 1, 0x2C: 4, 0x2D: 2, 0x2E: 4, 0x2F: 1, 0x30: 2,
-             0x82: 2, 0x83: 2, 0x84: 3, 0x85: 3, 0x86: 3, 0x87: 3, 0x88: 2, 0x89: 2, 0x8A: 2}
-NPC_BANK = 0x05
-
-
-def block_starts(prg):
-    """맵 인물 목록(뱅크 05)의 블록마다 (본문 시작, 끝, 이름). 본문은 뱅크 05 주소 그대로 실행된다."""
-    r = lambda a: prg[NPC_BANK * 0x4000 + (a & 0x3FFF)]
-    counts = {}
-    for g, *_ in dq4map.maps(prg):
-        counts[g] = counts.get(g, 0) + 1
-    out = []
-    for g in sorted(counts):
-        a = r(0x8000 + 2 * g) | r(0x8001 + 2 * g) << 8
-        for k in range(counts[g]):
-            i = 0
-            while (f := r(a)) != 0:
-                off = 7
-                if f & 0x10 and f & 0x08:
-                    off += (0 if f & 1 else 1) + (0 if f & 2 else 1) + (0 if f & 4 else 2)
-                for bit, name in ((0x10, 1), (0x08, 2)):
-                    if f & bit:
-                        n = r(a + off)
-                        out.append((a + off + 1, a + off + 1 + n, f'{g:02X}/{k:02X} 레코드 {i} 블록{name}'))
-                        off += 1 + n
-                a += off
-                i += 1
-            a += 1
-    return out
-
-
 def scan_blocks(prg):
-    """블록을 길이 표로 풀며 점프·부르기 대상까지 따라간다. 블록 본문은 길이 안에서만, 점프 대상은 끝 명령까지.
-    돌려주는 것: (푼 바이트 수, 모르는 명령 {명령: 수}, 명령 21 [(주소, 번호, 이름)])."""
-    r = lambda a: prg[NPC_BANK * 0x4000 + (a & 0x3FFF)]
-    seen, unknown, hits = set(), {}, []
-    todo = list(block_starts(prg))
-    while todo:
-        a, end, name = todo.pop()
-        while a not in seen and 0x8000 <= a < end:
-            seen.add(a)
-            op = r(a)
-            if op == 0x21:
-                hits.append((a, r(a + 1), name))
-            if op == 0x83:
-                a += r(a + 1) - 256 if r(a + 1) & 0x80 else r(a + 1)
-                continue
-            if op in (0x84, 0x85):
-                todo.append((r(a + 1) | r(a + 2) << 8, 0xC000, f'{name} → {r(a + 2):02X}{r(a + 1):02X}'))
-                if op == 0x84:
-                    break
-            if op in (0x80, 0x81):
-                break
-            if op not in BLOCK_LEN:
-                unknown[op] = unknown.get(op, 0) + 1
-                break
-            a += BLOCK_LEN[op]
-    return len(seen), unknown, hits
+    """맵 목록(뱅크 05)과 이벤트 목록(뱅크 1C)의 인물 블록을 dq4npcblock 으로 명령 단위로 푼다. 본문 주소가 같은
+    블록은 한 번만 센다(점프·부름 대상은 모두 어떤 블록의 명령 머리라 블록만 풀면 된다, dq4npcblock check).
+    돌려주는 것: (블록 수, 명령 수, 못 읽은 명령 수, 명령 21 [(뱅크, 주소, 번호, 이름)])."""
+    seen, n_cmds, bad, hits = set(), 0, 0, []
+    for name, bank, i, blk, a, ln, _ in dq4npcblock.all_blocks(prg):
+        if (bank, a) in seen:
+            continue
+        seen.add((bank, a))
+        for p, bs, _, problem in dq4npcblock.decode(prg, bank, a, ln):
+            n_cmds += 1
+            bad += problem is not None
+            if bs[0] == 0x21:
+                hits.append((bank, p, bs[1], f'{name} 레코드 {i} 블록{blk}'))
+    return len(seen), n_cmds, bad, hits
 
 
 def names(prg):
@@ -283,7 +239,7 @@ def show_maps(prg, png):
         print('    ' + ' '.join(f'{x:X}0' for x in range(16)))
         for y, row in enumerate(grid):
             print(f'{y:X}0  ' + ' '.join(f'{v & 0x3F:02X}' for v in row) + ('   bit7-6: ' + ''.join(str(v >> 6) for v in row) if ch == 4 else ''))
-    print('# 5장 필드 1: Y < 0C 이면 구역 35, 아니면 34. 필드 2: 구역 36')
+    print('# 5장 필드 1: Y < 0C 이면 구역 35, 아니면 34. 필드 3(闇の世界): 구역 36')
     if png:
         draw_png(prg, png)
 
@@ -293,12 +249,12 @@ def draw_png(prg, path):
     from PIL import Image, ImageDraw
     import dq4field
     w, h = dq4field.size(prg, 0)
-    grid = dq4field.decode(prg, 0)
+    grid = dq4field.decode(prg, 0)     # 가장자리까지 (폭+3)×(높이+3), 256 을 넘지 않음
     scale = 4
     im = Image.new('RGB', (256 * scale, 256 * scale))
     px = im.load()
-    for y in range(h):
-        for x in range(w):
+    for y in range(len(grid)):
+        for x in range(len(grid[0])):
             v = dq4field.lookup(grid, w, h, x, y) * 8
             for dy in range(scale):
                 for dx in range(scale):
@@ -397,8 +353,8 @@ def expected_zone(prg, lists, ext, x, y):
         return None
     if ch == 4 and field == 1:
         return FIELD_FIXED[(1, 'y<0C' if y < 0x0C else 'y>=0C')]
-    if ch == 4 and field == 2:
-        return FIELD_FIXED[(2, '')]
+    if ch == 4 and field not in (0, 1):
+        return FIELD_FIXED[(3, '')]
     return zone_at(prg, ch, x, y)
 
 
@@ -595,14 +551,14 @@ def main():
         for look, i in despalace_list(prg):
             print(f'# {i:02X}: 08:{DESPALACE[1]:04X} 표 — デスパレス(그룹 03)에서 겉모습 {look:02X} 인 인물에게 말 걸면'
                   ' (15:$B10E → 이벤트 20 = 1C:$B968)')
-        print('# 그 밖에 0F:$DA8A(인물 블록 명령 21 NN)가 부를 수 있으나 롬의 블록에는 없음(scripts)')
+        print('# 그 밖에 1F:$DA8A(인물 블록 명령 21 NN)가 부를 수 있으나 롬의 블록(맵·이벤트 목록)에는 없음(scripts)')
+        print('# 01: 부르는 곳 없음 — BRK 01/81 88~8F 전부, $A1AD 를 뛰는 JSR·JMP, BRK 자리로 뛰는 분기, 계산한 A'
+              '(투기장 표 밖 20 0B D2, デスパレス 1C~21)에 01 이 없음')
     elif cmd == 'scripts':
-        n, unknown, hits = scan_blocks(prg)
-        print(f'블록 {len(block_starts(prg))}개, 푼 바이트 {n}, 모르는 명령 {sum(unknown.values())}, 명령 21 {len(hits)}번')
-        for a, i, name in hits:
-            print(f'05:{a:04X} 21 {i:02X}  {name}')
-        if unknown:
-            print('모르는 명령: ' + ' '.join(f'{k:02X}×{v}' for k, v in sorted(unknown.items())))
+        n_blocks, n_cmds, bad, hits = scan_blocks(prg)
+        print(f'블록 {n_blocks}개(본문 주소가 다른 것), 명령 {n_cmds}개, 못 읽은·넘친 명령 {bad}, 명령 21 {len(hits)}번')
+        for bank, a, i, name in hits:
+            print(f'{bank:02X}:{a:04X} 21 {i:02X}  {name}')
     elif cmd == 'check':
         ok = check_tables(prg)
         for path in args:

@@ -5,7 +5,11 @@
   python fc/dq4/tools/dq4shop.py rom/dq4.nes G K          맵(그룹 $63/순번 $64)의 가게 목록, 여관 값, 가게 인물(스크립트로 여는 가게 포함)
   python fc/dq4/tools/dq4shop.py rom/dq4.nes G K --compare end.ram [end.sram]   seq.lua 의 RAM 덤프로 가게 창 목록($07BD) 비교.
                                                   SRAM 덤프를 주면 그 플래그·시간으로 덧붙임까지 계산해 비교
-  python fc/dq4/tools/dq4shop.py rom/dq4.nes people       롬 전체의 「인물 → 가게(종류·품목 줄·여관 값)」 표
+  python fc/dq4/tools/dq4shop.py rom/dq4.nes people       롬 전체의 「인물 → 가게(종류·품목 줄·여관 값)」 표.
+                                                  들어갈 때 숨거나 옮겨지는 조건(1C:$A010)도 붙인다
+  python fc/dq4/tools/dq4shop.py rom/dq4.nes hidden [--json]   들어갈 때 장소 루틴(1C:$A010·$AD32)이 인물마다 숨기거나
+                                                  옮기는 조건 전부
+  python fc/dq4/tools/dq4shop.py rom/dq4.nes hidden G K --compare DIR   seq.lua·warp.lua 덤프 폴더의 인물 표와 비교
 
 근거 루틴(코드 읽기와 실측):
   15:$9962  대화 결과 $00:$01 이 7 미만이면 가게 처리 15:$9CBF 로 간다.
@@ -21,6 +25,8 @@
             A 는 걷는 일행 $616A~$616D(와 $618E bit5 면 마차 $6172~) 가운데 레코드 +00 bit7(살아 있음)이 켜진 사람 수.
   가게 인물  대화 번호 0~6 은 바로 서비스(15:$9962), 7 이상은 dq4talk 가 푼 스크립트의 문장 12 n(서비스 n)과
             호출 문장(00/01)이 부르는 15:$9D2A(방어구점)·$ADB7(인물 X·Y 로 고름)·$B558·$B847·$BF30·$A6B0 을 따라간다.
+  1C:$A010  맵에 들어갈 때 장소 표 1C:$ABF5(그룹, 순번) → 포인터 1C:$AC8A 의 루틴. 1C:$A035 로 슬롯 X+6 을 숨기고
+            1C:$A04A 로 (A, Y) 에 옮긴다. 루틴을 기호로 돌려(갈래 양쪽) 인물마다 조건을 원자의 곱의 합으로 줄인다.
   교회      15:$B550. 메뉴 0 저장 1 おつげ 2 되살리기 3 해독 4 저주 풀기. 그룹 46·0E 와 04/0E 는 2~4 만(창 70).
             되살리기 (L² + 10) // 10 × 10(레코드 0~8), 해독 5, 저주 풀기 L × 30(L = 레벨 +05).
 """
@@ -217,15 +223,43 @@ def offer(prg, g, k, kind, y=None):
     return '골드 1000G 단위·물건 맡기기'
 
 
+def hide_notes(prg, g, k, x, y, t, cond, acts):
+    """가게 인물이 들어갈 때의 장소 루틴(1C:$A010)에서 숨거나 옮겨지는 조건. acts 는 hide_table 의 결과.
+    인물 번호는 그 목록에서 낮·밤 모습이 있는 레코드의 순번이라, 자리·대화 번호가 같은 레코드를 찾아 맞춘다."""
+    nights = [n for n in (False, True) if ('밤' if n else '낮') in cond] or [False, True]
+    notes = []
+    for src, recs in npc_lists(prg, g, k):
+        if src and src[0] not in cond:
+            continue
+        fixed = {NIGHT_ATOM: None}
+        if src:
+            n, m = (int(v, 16) for v in src[0].split()[-1].split('&'))
+            fixed.update({('bit', f'${dq4map.FLAGS + n:04X}', 1 << b): True for b in range(8) if m >> b & 1})
+        for night in nights:
+            fixed[NIGHT_ATOM] = night
+            people = [r for r in recs if r[0] & (0x08 if night else 0x10)]
+            for i, r in enumerate(people):
+                if dq4talk.pos(r, night) != (x, y) or dq4talk.talk_id(r, night) != t:
+                    continue
+                for j, what, terms in acts:
+                    ts = [c for c in terms if all(dict(c).get(a, v) == v for a, v in fixed.items())]
+                    if j == i and ts:
+                        notes.append(f'{what} {terms_text(ts)}')
+    return list(dict.fromkeys(notes))
+
+
 def show_people(prg):
     n = 0
+    acts = {(g, k): a for g, k, _, a in hidden(prg)}
     for m in dq4chest.all_maps(prg):
         g, k = m[:2]
         for x, y, t, kind, cond, how in merchants(prg, g, k):
             n += 1
             when = ' & '.join(cond)
+            notes = hide_notes(prg, g, k, x, y, t, cond, acts.get((g, k), []))
             print(f'{g:02X}/{k:02X} ({x:02X},{y:02X}) 대화 {t:03X} {how}{" [" + when + "]" if when else ""}'
-                  f' → {TALK_KINDS[kind]}: {offer(prg, g, k, kind, y)}')
+                  f' → {TALK_KINDS[kind]}: {offer(prg, g, k, kind, y)}'
+                  + ''.join(f' / 들어갈 때 {note}' for note in notes))
     print(f'가게 인물 {n}곳')
 
 
@@ -307,6 +341,458 @@ def show(prg, g, k, ram=None, sram=None):
               f' — 표 {"같음" if same else "다름: " + str(want)}')
 
 
+# 1C:$A010: 인물 표를 채운 뒤 장소 표 1C:$ABF5(그룹, 순번; 첫 바이트 bit7 로 끝)에서 지금 장소를 찾아
+# 같은 자리의 포인터 1C:$AC8A 로 뛴다. 루틴은 장·플래그·시간·자리를 보고 1C:$A035 로 슬롯 X+6 의 자리 네 바이트를
+# 80 으로 써서 숨기거나, 1C:$A04A 로 (A, Y) 에 옮긴다. 1C:$9EA6 은 $62A5 bit7 이 꺼져 있을 때만 이것과 1C:$AD32 를 부른다.
+HIDE_BANK = 0x1C
+HIDE_PLACES, HIDE_PTRS = 0xABF5, 0xAC8A
+HIDE_SLOT, PLACE_SLOT, IS_NIGHT = 0xA035, 0xA04A, 0xA044
+CHAPTER_HIDE = 0xAD5A          # 1C:$AD32: (그룹, 순번, 장, 인물) 4바이트 줄, bit7 로 끝. 장 $615A 가 다르면 숨김
+SLOT_COLS = {0x6F66: 'X', 0x6F86: 'Y', 0x6FA6: 'X2', 0x6FC6: 'Y2', 0x6FE6: '그림', 0x7006: '방향',
+             0x7046: '간격', 0x70E6: '상태'}
+SYMBOLS = {0x44: '주인공 X', 0x45: '주인공 Y', 0x615A: '장', 0x62ED: '시간'}
+
+
+def hide_routines(prg):
+    """[(그룹, 순번, 루틴 주소)]."""
+    out, i = [], 0
+    while not (g := rd(prg, HIDE_BANK, HIDE_PLACES + i)) & 0x80:
+        p = rd(prg, HIDE_BANK, HIDE_PTRS + i) | rd(prg, HIDE_BANK, HIDE_PTRS + i + 1) << 8
+        out.append((g, rd(prg, HIDE_BANK, HIDE_PLACES + i + 1), p))
+        i += 2
+    return out
+
+
+def chapter_hides(prg):
+    """1C:$AD32 의 줄: [(그룹, 순번, 장 $615A, 인물 번호)]."""
+    out, a = [], CHAPTER_HIDE
+    while not (g := rd(prg, HIDE_BANK, a)) & 0x80:
+        out.append((g, *(rd(prg, HIDE_BANK, a + i) for i in (1, 2, 3))))
+        a += 4
+    return out
+
+
+NEG = {'=': '≠', '≠': '=', '≥': '<', '<': '≥', 'bit7': '!bit7', '!bit7': 'bit7', 'bit6': '!bit6', '!bit6': 'bit6'}
+
+
+def holds(op, v, x):
+    return {'=': x == v, '≠': x != v, '≥': x >= v, '<': x < v, 'bit7': bool(x & 0x80), '!bit7': not x & 0x80,
+            'bit6': bool(x & 0x40), '!bit6': not x & 0x40}[op]
+
+
+def add_cond(path, c):
+    """조건 (값, 연산, 수) 를 길에 더한 새 길. 이미 참이면 그대로, 어긋나면 None."""
+    sym, op, v = c
+    if c in path:
+        return path
+    if (sym, NEG[op], v) in path:
+        return None
+    eq = [w for s, o, w in path if s == sym and o == '=']
+    if eq:
+        return path if holds(op, v, eq[0]) else None
+    if op == '=' and not all(holds(o, w, v) for s, o, w in path if s == sym):
+        return None
+    return path + (c,)
+
+
+def cond_text(c):
+    sym, op, v = c
+    if sym == '시간' and op in ('≥', '<') and v == dq4map.NIGHT:
+        return '밤' if op == '≥' else '낮'
+    if sym == '장' and op in ('=', '≠'):
+        return f'{v + 1}장' if op == '=' else f'{v + 1}장 아님'
+    if '&' in sym and v == 0 and op in ('=', '≠'):
+        return f'{sym} {"꺼짐" if op == "=" else "켜짐"}'
+    if op.endswith(('bit7', 'bit6')):
+        return f'{sym} {op[-4:]} {"꺼짐" if op[0] == "!" else "켜짐"}'
+    if sym.startswith('아이템'):
+        return f'{sym} {"있음" if op == "=" else "없음"}'
+    return f'{sym} {op} {v:02X}'
+
+
+def sym_name(a):
+    return SYMBOLS.get(a, f'${a:04X}' if a >= 0x100 else f'${a:02X}')
+
+
+def hide_paths(prg, start, limit=4096):
+    """루틴을 기호로 돌려 [(조건 길, 효과들)] 을 낸다. 레지스터는 수 또는 기호(문자열),
+    플래그는 bool 또는 (참 조건, 거짓 조건). 효과: ('hide', i) · ('pos', i, 열, 값) · ('flag', 주소, |= 또는 &=, 값) ·
+    ('call', 설명)."""
+    from kr_patch.fc.dis6502 import OPS, SIZE
+    out = []
+    todo = [(start, None, None, None, {}, (), (), ())]   # pc, a, x, y, 플래그, 길, 효과, 복귀 스택
+    steps = 0
+    while todo:
+        pc, a, x, y, fl, path, eff, stack = todo.pop()
+        while True:
+            steps += 1
+            if steps > limit:
+                raise RuntimeError(f'{start:04X}: 길이 너무 많음')
+            op = rd(prg, HIDE_BANK, pc)
+            b1, b2 = rd(prg, HIDE_BANK, pc + 1), rd(prg, HIDE_BANK, pc + 2)
+            if op == 0x00:
+                n = dq4talk.brk_len(b1, b2)
+                m = rd(prg, HIDE_BANK, pc + 3)
+                if b2 == 0xEB:
+                    c = (f'${dq4map.FLAGS + b1:04X}&{m:02X}', '=', 0)
+                    fl = dict(fl, Z=(c, (c[0], '≠', 0)))
+                elif b2 in (0xCB, 0xDB):
+                    eff += (('flag', dq4map.FLAGS + b1, '|=' if b2 == 0xCB else '&=', m),)
+                elif (b1, b2) == (0x66, 0x73):
+                    item = f'{a:02X}' if isinstance(a, int) else a
+                    c = (f'아이템 {item}', '≠', 1)
+                    fl = dict(fl, C=(c, (c[0], '=', 1)))
+                else:
+                    eff += (('call', f'BRK {b1:02X} {b2:02X}(A={a if isinstance(a, str) else f"{a:02X}"}'
+                                     f' X={x if isinstance(x, str) else f"{x:02X}"})'),)
+                pc += n
+                continue
+            mn, md = OPS[op]
+            n = 1 + SIZE[md]
+            arg = b1 | b2 << 8 if n == 3 else b1
+            nxt = pc + n
+            if mn == 'JSR' or (mn == 'JMP' and md == 'abs' and arg in (HIDE_SLOT, PLACE_SLOT)):
+                ret = stack + (nxt,) if mn == 'JSR' else stack
+                if arg == HIDE_SLOT:
+                    eff += (('hide', x),)
+                elif arg == PLACE_SLOT:
+                    eff += (('pos', x, 'X', a), ('pos', x, 'Y', y))
+                elif arg == IS_NIGHT:
+                    a = '시간'
+                    c = ('시간', '≥', dq4map.NIGHT)
+                    fl = dict(fl, C=(c, ('시간', '<', dq4map.NIGHT)))
+                elif arg < 0xC000 and arg != 0xAD1E:
+                    pc, stack = arg, ret
+                    continue
+                else:
+                    a = f'{arg:04X}()'
+                    eff += (('call', f'JSR ${arg:04X}'),)
+                if mn == 'JMP' or not ret:
+                    if mn == 'JMP' and stack:
+                        pc, stack = stack[-1], stack[:-1]
+                        continue
+                    if mn == 'JMP':
+                        break
+                pc = nxt
+                continue
+            if mn == 'RTS':
+                if stack:
+                    pc, stack = stack[-1], stack[:-1]
+                    continue
+                break
+            if mn == 'JMP':
+                pc = arg
+                continue
+            if md == 'rel':
+                flag = {'BEQ': ('Z', True), 'BNE': ('Z', False), 'BCS': ('C', True), 'BCC': ('C', False),
+                        'BMI': ('N', True), 'BPL': ('N', False), 'BVS': ('V', True), 'BVC': ('V', False)}[mn]
+                dest = (pc + 2 + (b1 - 256 if b1 & 0x80 else b1)) & 0xFFFF
+                f = fl.get(flag[0])
+                if isinstance(f, bool):
+                    pc = dest if f == flag[1] else nxt
+                    continue
+                if f is None:
+                    raise RuntimeError(f'{pc:04X}: 플래그 {flag[0]} 모름')
+                on, off = f if flag[1] else (f[1], f[0])
+                p2 = add_cond(path, off)
+                if p2 is not None:
+                    todo.append((nxt, a, x, y, fl, p2, eff, stack))
+                path = add_cond(path, on)
+                if path is None:
+                    break
+                pc = dest
+                continue
+            val = arg if md == 'imm' else None
+            if mn in ('LDA', 'LDX', 'LDY'):
+                if md == 'imm':
+                    v = arg
+                else:
+                    r = x if md == 'abx' else y if md == 'aby' else 0
+                    v = sym_name(arg + r) if isinstance(r, int) else f'${arg:04X}+{r}'
+                if mn == 'LDA':
+                    a = v
+                elif mn == 'LDX':
+                    x = v
+                else:
+                    y = v
+                fl = nz(fl, v)
+            elif mn == 'STA':
+                if md == 'abx':
+                    col = SLOT_COLS.get(arg)
+                    eff += (('pos', x, col, a),) if col else (('write', arg + x, a),)
+                else:
+                    eff += (('write', arg, a),)
+            elif mn == 'INC':
+                eff += (('write', arg, '+1'),)
+            elif mn in ('INX', 'DEY'):
+                if mn == 'INX':
+                    x = (x + 1) & 0xFF
+                    fl = nz(fl, x)
+                else:
+                    y = (y - 1) & 0xFF
+                    fl = nz(fl, y)
+            elif mn in ('TAX', 'TAY', 'TYA'):
+                if mn == 'TAX':
+                    x = a
+                elif mn == 'TAY':
+                    y = a
+                else:
+                    a = y
+                fl = nz(fl, a)
+            elif mn in ('AND', 'ORA'):
+                if isinstance(a, int):
+                    a = a & val if mn == 'AND' else a | val
+                else:
+                    a = f'{a}{"&" if mn == "AND" else "|"}{val:02X}'
+                fl = nz(fl, a)
+            elif mn == 'LSR' and md == 'acc':
+                if isinstance(a, int):
+                    fl, a = dict(fl, C=bool(a & 1)), a >> 1
+                else:
+                    c = (f'{a}&01', '≠', 0)
+                    fl, a = dict(fl, C=(c, (c[0], '=', 0))), f'{a}>>1'
+                fl = nz(fl, a)
+            elif mn in ('CMP', 'CPX'):
+                r = a if mn == 'CMP' else x
+                if isinstance(r, int):
+                    fl = dict(fl, Z=r == val, C=r >= val, N=bool((r - val) & 0x80))
+                else:
+                    fl = dict(fl, Z=((r, '=', val), (r, '≠', val)), C=((r, '≥', val), (r, '<', val)), N=None)
+            elif mn == 'BIT':
+                s = sym_name(arg)
+                fl = dict(fl, N=((s, 'bit7', 0), (s, '!bit7', 0)), V=((s, 'bit6', 0), (s, '!bit6', 0)), Z=None)
+            else:
+                raise RuntimeError(f'{pc:04X}: {mn} 못 다룸')
+            pc = nxt
+        if path is not None:
+            out.append((path, eff))
+    return out
+
+
+def nz(fl, v):
+    if isinstance(v, int):
+        return dict(fl, Z=v == 0, N=bool(v & 0x80))
+    return dict(fl, Z=((v, '=', 0), (v, '≠', 0)), N=((v, 'bit7', 0), (v, '!bit7', 0)))
+
+
+def atoms_of(c):
+    """조건 하나를 원자(참·거짓 하나로 정해지는 것)의 곱의 합 [[(원자, 참?)]] 으로 바꾼다. 원자는 ('bit', 주소, 비트) 나
+    ('num', 값 이름, '=' 또는 '≥', 수). $X&M 의 같음 비교는 비트마다 나누고, BIT·BMI 의 bit7·bit6 도 비트 원자로 둔다."""
+    sym, op, v = c
+    if op.endswith(('bit7', 'bit6')):
+        return [[(('bit', sym, 0x80 if op.endswith('7') else 0x40), op[0] != '!')]]
+    if '&' in sym and sym.startswith('$') and op in ('=', '≠'):
+        base, m = sym.split('&')
+        bits = [1 << i for i in range(8) if int(m, 16) >> i & 1]
+        if op == '=':
+            return [[(('bit', base, b), bool(v & b)) for b in bits]]
+        return [[(('bit', base, b), not v & b)] for b in bits]
+    if op in ('≠', '<'):
+        return [[(('num', sym, '=' if op == '≠' else '≥', v), False)]]
+    return [[(('num', sym, op, v), True)]]
+
+
+def path_dnf(path):
+    out = [[]]
+    for c in path:
+        out = [t + alt for t in out for alt in atoms_of(c)]
+    return out
+
+
+def consistent(atoms, bits):
+    """수 원자들이 값 하나로 함께 설 수 있는지(값마다 0~FF 를 다 해 봄)."""
+    by = {}
+    for (kind, sym, *rest), on in zip(atoms, bits):
+        if kind == 'num':
+            by.setdefault(sym, []).append((rest[0], rest[1], on))
+    return all(any(all(holds(op, v, w) == on for op, v, on in cs) for w in range(256)) for cs in by.values())
+
+
+def primes_cover(n, on, dc):
+    """Quine–McCluskey: on 을 덮는 주항들을 [(값, 빈칸 마스크)] 로. dc 는 상관없는 칸."""
+    terms, primes = {(m, 0) for m in on | dc}, set()
+    while terms:
+        nxt, used = set(), set()
+        for v, mk in terms:
+            for i in range(n):
+                b = 1 << i
+                if not (mk | v) & b and (v | b, mk) in terms:
+                    nxt.add((v, mk | b))
+                    used |= {(v, mk), (v | b, mk)}
+        primes |= terms - used
+        terms = nxt
+    cover, rest = [], set(on)
+    while rest:
+        best = max(sorted(primes), key=lambda p: (sum(m & ~p[1] == p[0] for m in rest), bin(p[1]).count('1')))
+        cover.append(best)
+        rest = {m for m in rest if m & ~best[1] != best[0]}
+    return cover
+
+
+def minimize(paths, keys_of):
+    """길마다의 효과 키(keys_of(효과들) → 집합)로 키마다 조건을 원자의 곱의 합으로 줄인다. {키: [[(원자, 참?)]]}."""
+    dnfs = [(path_dnf(path), keys_of(eff)) for path, eff in paths]
+    atoms = sorted({a for d, _ in dnfs for t in d for a, _ in t}, key=str)
+    n = len(atoms)
+    idx = {a: i for i, a in enumerate(atoms)}
+    keys = sorted({k for _, ks in dnfs for k in ks}, key=str)
+    on, off = {k: set() for k in keys}, {k: set() for k in keys}
+    for m in range(1 << n):
+        bits = [bool(m >> i & 1) for i in range(n)]
+        if not consistent(atoms, bits):
+            continue
+        hit = next((ks for d, ks in dnfs if any(all(bits[idx[a]] == t for a, t in conj) for conj in d)), None)
+        if hit is None:
+            continue
+        for k in keys:
+            (on if k in hit else off)[k].add(m)
+    out = {}
+    for k in keys:
+        dc = set(range(1 << n)) - on[k] - off[k]
+        out[k] = [[(atoms[i], bool(v >> i & 1)) for i in range(n) if not mk >> i & 1]
+                  for v, mk in primes_cover(n, on[k], dc)]
+    return out
+
+
+def atom_text(a, on):
+    if a[0] == 'bit':
+        return f'{a[1]}&{a[2]:02X} {"켜짐" if on else "꺼짐"}'
+    _, sym, op, v = a
+    return cond_text((sym, op if on else NEG[op], v))
+
+
+def terms_text(terms):
+    if terms == [[]]:
+        return '늘'
+    return ' 또는 '.join('[' + ' & '.join(atom_text(a, t) for a, t in conj) + ']' for conj in terms)
+
+
+def value_text(v):
+    return f'{v:02X}' if isinstance(v, int) else str(v)
+
+
+def hide_keys(eff):
+    """한 길의 효과를 (인물 번호 또는 None, 하는 일) 집합으로. 자리 네 바이트가 모두 80 이면 숨김."""
+    keys, moves = set(), {}
+    for e in eff:
+        if e[0] == 'hide':
+            keys.add((e[1], '숨김'))
+        elif e[0] == 'pos':
+            moves.setdefault(e[1], {})[e[2]] = e[3]
+        elif e[0] == 'flag':
+            keys.add((None, f'${e[1]:04X} {e[2]} {e[3]:02X}'))
+        elif e[0] == 'write':
+            keys.add((None, f'${e[1]:04X} = {value_text(e[2])}'))
+        else:
+            keys.add((None, e[1]))
+    for i, cols in moves.items():
+        if 'X' in cols and all(v == 0x80 for c, v in cols.items() if c in ('X', 'Y', 'X2', 'Y2')):
+            keys.add((i, '숨김'))
+        else:
+            keys.add((i, ' '.join(f'{c}={value_text(v)}' for c, v in cols.items() if c not in ('X2', 'Y2'))))
+    return keys
+
+
+def hide_table(prg, start):
+    """루틴이 하는 일마다 [(인물 번호 또는 None, 하는 일, 조건 합)]."""
+    got = minimize(hide_paths(prg, start), hide_keys)
+    return [(i, what, terms) for (i, what), terms in sorted(got.items(), key=lambda t: (t[0][0] is None,
+                                                                                      t[0][0] or 0, t[0][1]))]
+
+
+NIGHT_ATOM = ('num', '시간', '≥', dq4map.NIGHT)
+
+
+def slot_people(prg, g, k, night):
+    """보통 목록에서 낮(F bit4)·밤(F bit3) 모습이 있는 레코드를 차례로: 인물 번호 i 는 슬롯 i+6(1C:$98ED)."""
+    return [r for r in dq4map.npc_records(prg, g, k) if r[0] & (0x08 if night else 0x10)]
+
+
+def person_text(prg, g, k, i, terms):
+    """인물 번호 i 의 자리·대화 번호. 조건이 모두 낮이나 밤이면 그쪽 목록만 보인다. 진행 플래그로 바뀐 목록은 보지 않는다."""
+    if not isinstance(i, int):
+        return f'인물 {i}'
+    when = {dict(conj).get(NIGHT_ATOM) for conj in terms}
+    out = []
+    for night in (False, True):
+        if when in ({True}, {False}) and when != {night}:
+            continue
+        recs = slot_people(prg, g, k, night)
+        if i < len(recs):
+            x, y = dq4talk.pos(recs[i], night)
+            out.append(f'{"밤" if night else "낮"} ({x:02X},{y:02X}) 대화 {dq4talk.talk_id(recs[i], night):03X}')
+    if len(out) == 2 and out[0][1:] == out[1][1:]:
+        out = [out[0][2:]]
+    return f'인물 {i}(' + (', '.join(out) or '보통 목록에 없음') + ')'
+
+
+def hidden(prg):
+    """[(그룹, 순번, 루틴, [(인물 번호, 하는 일, 조건 합)])]: 1C:$A010 장소 루틴 전부와 1C:$AD32 의 장 줄."""
+    out = [(g, k, p, hide_table(prg, p)) for g, k, p in hide_routines(prg)]
+    for g, k, c, i in chapter_hides(prg):
+        out.append((g, k, CHAPTER_HIDE, [(i, '숨김', [[(('num', '장', '=', c), False)]])]))
+    return out
+
+
+SYM_ADDRS = {v: k for k, v in SYMBOLS.items()}
+
+
+def sym_value(sym, mem):
+    """조건의 값 이름을 메모리 덤프로 셈. 셀 수 없으면(아이템 소지 등) None."""
+    base, _, mask = sym.partition('&')
+    a = SYM_ADDRS.get(base)
+    if a is None and base.startswith('$') and all(ch in '0123456789ABCDEF' for ch in base[1:]):
+        a = int(base[1:], 16)
+    if a is None:
+        return None
+    return mem[a] & (int(mask, 16) if mask else 0xFF)
+
+
+def predict_hidden(prg, start, mem):
+    """덤프의 플래그·장·시간·자리로 맞는 길을 골라 (숨기는 인물 번호들, 맞는 길 수)."""
+    hits = []
+    for path, eff in hide_paths(prg, start):
+        vals = [(c, sym_value(c[0], mem)) for c in path]
+        if all(v is None or holds(c[1], c[2], v) for c, v in vals):
+            hits.append({i for i, what in hide_keys(eff) if what == '숨김'})
+    return (hits[0] if len(hits) == 1 else set.intersection(*hits) if hits else set()), len(hits)
+
+
+def compare_hidden(prg, g, k, path):
+    """seq.lua·warp.lua 덤프(폴더)의 인물 표에서 자리가 (80,80) 인 슬롯과 장소 루틴의 예측을 비교."""
+    mem = dq4map.cpu_dump(path)
+    night = mem[TIME] >= dq4map.NIGHT
+    recs = [r for r in dq4map.place_records(prg, g, k, dq4map.ram_flags(mem)) if r[0] & (0x08 if night else 0x10)]
+    got = {i for i in range(len(recs)) if mem[0x6F66 + i] == 0x80 and mem[0x6F86 + i] == 0x80}
+    want, n = set(), 0
+    for rg, rk, p in hide_routines(prg):
+        if (rg, rk) == (g, k):
+            want, n = predict_hidden(prg, p, mem)
+    for cg, ck, c, i in chapter_hides(prg):
+        if (cg, ck) == (g, k) and mem[0x615A] != c:
+            want.add(i)
+    want = {i for i in want if i < len(recs)}
+    print(f'{g:02X}/{k:02X} {"밤" if night else "낮"} 인물 {len(recs)}명, 맞는 길 {n}개')
+    print(f'덤프 (80,80): {sorted(got)}  예측 숨김: {sorted(want)} — {"같음" if got == want else "다름"}')
+
+
+def show_hidden(prg, as_json=False):
+    rows = hidden(prg)
+    if as_json:
+        import json
+        print(json.dumps([{'group': g, 'index': k, 'routine': f'1C:{p:04X}',
+                           'acts': [{'person': i, 'act': what, 'when': [[atom_text(a, t) for a, t in conj] for conj in terms]}
+                                    for i, what, terms in acts]} for g, k, p, acts in rows],
+                         ensure_ascii=False, indent=1))
+        return
+    for g, k, p, acts in rows:
+        print(f'{g:02X}/{k:02X} 1C:{p:04X}')
+        for i, what, terms in acts:
+            who = person_text(prg, g, k, i, terms) if i is not None else '그 밖'
+            print(f'  {who} {what}: {terms_text(terms)}')
+    print(f'장소 {len(rows)}곳')
+
+
 def main():
     prg = ines.prg(open(sys.argv[1], 'rb').read())
     a = sys.argv[2:]
@@ -314,6 +800,10 @@ def main():
         show_all(prg)
     elif a[0] == 'people':
         show_people(prg)
+    elif a[0] == 'hidden' and '--compare' in a:
+        compare_hidden(prg, int(a[1], 16), int(a[2], 16), a[a.index('--compare') + 1])
+    elif a[0] == 'hidden':
+        show_hidden(prg, '--json' in a)
     else:
         g, k = int(a[0], 16), int(a[1], 16)
         ram = open(a[3], 'rb').read() if len(a) > 3 and a[2] == '--compare' else None

@@ -11,7 +11,7 @@ FC 「드래곤 퀘스트 IV」(일본판 Rev A) 원작 데이터를 분석하�
 - [docs/dq4-map-format.md](docs/dq4-map-format.md): DQ4(FC) 마을·던전 맵 279개(장소 번호, 비트열 압축, 연결·출구, 인물 목록)
 - [docs/dq4-data-format.md](docs/dq4-data-format.md): DQ4(FC) 이름 목록·아이템·몬스터·주문 표, 레벨업 성장 곡선
 - [docs/dq4-text-format.md](docs/dq4-text-format.md): DQ4(FC) 대사 텍스트(6비트 압축, 사전, 글자표, 메시지 번호)
-- [docs/dq4-encounter-format.md](docs/dq4-encounter-format.md): DQ4(FC) 적 조우 표(필드 구역 지도, 구역별 무리 후보, 조우율, 던전 층, 특수 전투, 배, 성수, 기습·선제)
+- [docs/dq4-encounter-format.md](docs/dq4-encounter-format.md): DQ4(FC) 적 조우 표(필드 구역 지도, 구역별 무리 후보, 조우율, 던전 층, 특수 전투, 배, 성수, 기습·선제, へんげのつえ, 3장 터널)
 - [docs/dq4-warp.md](docs/dq4-warp.md): DQ4(FC) 장면 이동 도구(원하는 맵·필드 자리의 세이브스테이트 만들기)
 - [docs/dq4-script-format.md](docs/dq4-script-format.md): DQ4(FC) 인물 대화 스크립트(대화 번호, 조건·플래그·서비스 문장, 메시지 번호)
 - [docs/dq4-shop-format.md](docs/dq4-shop-format.md): DQ4(FC) 상점 품목·장소별 값·여관 값·가게 종류, 보물상자·발밑 숨은 물건과 열었음 플래그, 얻는 물건 통합 표
@@ -19,7 +19,7 @@ FC 「드래곤 퀘스트 IV」(일본판 Rev A) 원작 데이터를 분석하�
 - [docs/dq4-rom-map.md](docs/dq4-rom-map.md): DQ4(FC) 롬 뱅크 지도(뱅크 32개의 내용, 실행 장면, 빈 자리)
 - [docs/dq4-debug.md](docs/dq4-debug.md): DQ4(FC) 디버그 스위치 `$C000`(벽 통과·인카운트 끄기·전투 테스트), 패드 2 흔적, 미실행 코드 찾기
 - [docs/dq4-block-format.md](docs/dq4-block-format.md): DQ4(FC) 맵 블록 → 8×8 타일·팔레트·통행 속성, CHR 올리기, 타일 애니메이션, 지형 효과
-- [docs/dq4-fcgfx.md](docs/dq4-fcgfx.md): DQ4(FC) 원작 맵·필드·블록·CHR·폰트·장면 그림 뽑기(비공개 에셋용), MesenCE 색, 필드 물가 블록
+- [docs/dq4-fcgfx.md](docs/dq4-fcgfx.md): DQ4(FC) 원작 맵·필드·블록·CHR·폰트·장면(장 제목·엔딩) 그림 뽑기(비공개 에셋용), MesenCE 색, 필드 물가 블록, 필드·폭포 팔레트 순환
 - [docs/dq4-fcsprite-format.md](docs/dq4-fcsprite-format.md): DQ4(FC) 필드 인물·일행·탈것 그림 표(4방향 × 걸음 2, 돌려 그리기)와 전투 몬스터 그림(압축·배치·팔레트), 롬에서 뽑아 열람하기
 - [docs/dq4-npcblock-format.md](docs/dq4-npcblock-format.md): DQ4(FC) 인물 블록(움직임·자동 이벤트 스크립트) 명령 60가지, 일행 움직임 패턴
 - [todo.md](todo.md): 남은 일
@@ -67,3 +67,10 @@ FC 「드래곤 퀘스트 IV」(일본판 Rev A) 원작 데이터를 분석하�
 - [2026-10-25-35: 장 시작 상태의 일행 조건, 맵 목록의 마지막 그룹, 자동 입력](journal/2026-10-25-35-talk4.md)
 - [2026-10-25-36: 인물 블록 명령 해석기, 마차·배·열기구, 5장 끝과 엔딩](journal/2026-10-25-36-event3.md)
 - [2026-10-25-37: 호출 분석의 BRK 길이 고치기](journal/2026-10-25-37-brklen.md)
+- [2026-10-25-38: 몬스터 AI 네 갈래와 가중치, 남은 몬스터 바이트, 동료 작전 AI](journal/2026-10-25-38-stats3.md)
+- [2026-10-25-39: 2×2 문·성문, せかいじゅのは, 天空 장비 검사, 모양 E 타일](journal/2026-10-25-39-block5.md)
+- [2026-10-25-40: 들어갈 때 숨는 인물 전부·맡기는 곳 찾기·무료 숙박](journal/2026-10-25-40-shop4.md)
+- [2026-10-25-41: 원작 그림 2차 — 필드 가장자리, 팔레트 순환, 장 제목·엔딩, 장소 이름](journal/2026-10-25-41-fcgfx2.md)
+- [2026-10-25-42: 적 조우의 남은 것 3](journal/2026-10-25-42-encounter4.md)
+- [2026-10-25-43: 창 본문 항목의 뜻과 폰트를 다시 올리는 두 장면](journal/2026-10-25-43-textrest5.md)
+- [2026-10-25-44: 이긴 전투 뒤의 이벤트, 말 걸기 앞 검사, 맵 번호의 위 2비트, `$62A5`](journal/2026-10-25-44-talk5.md)

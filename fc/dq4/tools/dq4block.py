@@ -14,12 +14,13 @@
 
 
 근거 루틴: 08:$84E9(블록 표 올리기), $8055(맵 종류 → 블록 표), $8473(블록 하나), $80D5(타일 모양 레코드),
-$823D(CHR 타일 번호 나누기, $7700 중복 목록), $83BD·0F:$C7E1(CHR 뱅크 0C·0D 에서 16바이트 복사),
-$853E(블록 20·21), $8710(빈 칸에 FC~FF), 1E:$A046(맵에 쓰인 블록 표시), 1E:$9F47(벽 아래 그늘 블록 바꾸기),
+$823D(CHR 타일 번호 나누기, $7700 중복 목록), $83BD·0F:$C7E1(CHR 뱅크 0C·0D·1D 에서 16바이트 복사),
+$81E8(모양 E: 뱅크 1D 의 이어진 4타일), $853E(블록 20·21), $8710(빈 칸에 FC~FF),
+1E:$A046(맵에 쓰인 블록 표시), 1E:$9F47(벽 아래 그늘 블록 바꾸기),
 0F:$D4E6(다른 구역은 블록 20·21 로), $D44C(맵 밖 블록), $EB23(블록 → 타일 4개), 0F:$D088(통행).
 지형 효과: 0F:$CEB1(걸음 뒤 분기), $CA77(밀리는 바닥), $E9E4(느린 칸), 1E:$9ACA(바닥 피해), 1E:$8676·12:$B6DD(떨어지기),
 1E:$8700·$894A(리프트), 1E:$B2A6·$B36E·$B3B7(「とびら」와 열쇠), 1E:$80D8(카운터 너머 「はなす」),
-1E:$BB10·$BC7A·$BB52(タンス·つぼ·팻말), 08:$B22E·$B246·$B554(출구 칸 순번으로 목적지), 08:$8796(연 문 블록),
+1E:$BB10·$BC7A·$BB52(タンス·つぼ·팻말), 08:$B22E·$B246·$B554(출구 칸 순번으로 목적지), 08:$8796·$8855(연 문 블록),
 1E:$8A0D·$8A48(리프트 사각형 구역).
 """
 import os
@@ -61,9 +62,12 @@ def shape(prg, a, b):
     r0, r1, prop = rd(prg, B08, r), rd(prg, B08, r + 1), rd(prg, B08, r + 2)
     form, hb = r1 >> 4, (r1 >> 2) & 1
     chr_ = (r1 & 3) << 8 | r0
-    if form in (0x0E, 0x0F):            # $81C6: 타일 주소 4개를 표(08:$A28D)에서 그대로
+    if form == 0x0F:                    # $81C6: 타일 주소 4개를 표(08:$A28D)에서 그대로
         p = wd(prg, B08, 0x8225) + (chr_ * 8 & 0xFFFF)
         return 0x0C + hb, [wd(prg, B08, p + 2 * i) for i in range(4)], prop
+    if form == 0x0E:                    # $81E8: 표(08:$AEB7)의 주소부터 이어진 4타일, 뱅크는 0C + $76(11) = 1D
+        a0 = wd(prg, B08, wd(prg, B08, 0x8227) + (chr_ * 2 & 0xFFFF))
+        return 0x1D, [(a0 + 16 * i) & 0xFFFF for i in range(4)], prop
     base = (wd(prg, B08, 0x8229 + 2 * hb) + (chr_ << 4)) & 0xFFFF
     d = wd(prg, B08, 0x8237) + form * 3  # 앞 타일에서 몇 타일 떨어졌는지(부호 있는 바이트) 3개
     addrs = [base]
@@ -190,7 +194,6 @@ def load(prg, t, used=None):
     """08:$84E9 를 따라 블록 표를 올린다. used 가 None 이면(필드) 모두 올린다.
     돌려주는 것: tiles[블록] = 타일 번호 4개(왼위, 오른위, 왼아래, 오른아래), pal, kind, prop, chr{타일 번호: (뱅크, 주소)}."""
     ds = defs(prg, t)
-    anim = anim_blocks(prg, t) if t else {}
     tiles, pal, kind, prop = {}, {}, {}, {}
     chr_, seen, nxt = {}, [], TILE0
     for blk in sorted(ds):
@@ -206,12 +209,7 @@ def load(prg, t, used=None):
             continue
         ts = []
         for addr in d['addrs']:
-            if blk in anim:                        # 애니메이션 블록은 찾지 않고 새 타일 4개를 받는다(1D:$8C52 가 이어진 4개를 덮어씀)
-                seen.append(addr)
-                chr_[nxt] = (d['bank'], addr)
-                ts.append(nxt)
-                nxt += 1
-            elif addr in seen:                     # $823D: 같은 주소의 타일은 다시 올리지 않는다
+            if addr in seen:                       # $823D: 같은 주소의 타일은 다시 올리지 않는다(뱅크는 보지 않음)
                 ts.append(TILE0 + seen.index(addr))   # 같은 주소가 여럿이면 처음 것
             else:
                 seen.append(addr)
@@ -400,6 +398,10 @@ SIGNS = 0xBBB6                    # 1E:$BB52: 팻말 표 포인터 2개
 SIGN_CHAPTER = 0xBBE6             # 1E:$BB8C: 팻말 메시지 바이트가 00 이면 장($615A)마다 셋 중 하나
 
 STEP_XY = [(0, -1), (1, 0), (0, 1), (-1, 0)]
+LEAF_ITEM = 0x57                  # せかいじゅのは
+# 08:$8796 의 갈래: 모양 0 은 한 칸을 바닥으로($6C0C), 2 는 2×2 를 너머 칸의 블록으로($6C0C), 3 은 성문 연출(1B:$8706).
+# 모양 1(18~1B)은 롬의 맵에 쓰이지 않는다.
+DOOR_OPENS = ['cell', None, 'beyond_2x2', 'gate']
 FACING = {0x2B: 'dresser', 0x2A: 'pot', 0x28: 'sign', 0x30: 'push_door', 0x2C: 'stuck_door'}
 
 
@@ -430,14 +432,15 @@ def terrain(prg, prop):
         elif v == 0x31:
             out['effect'] = 'slow_vertical'     # 0F:$E9E4
         elif v == 0x33:
-            out['effect'] = 'search'            # 1E:$B41C
+            # 1E:$B41C: 「しらべる」로 せかいじゅのは. 일행 앞 칸(10:$A312)이나 ふくろ(1E:$BC20)에 있으면 못 얻음
+            out.update(effect='search', item=LEAF_ITEM)
         elif v in [rd(prg, 0x0F, TERRAIN_VALUES + i) for i in range(11)]:
             out['effect'] = 'exit'              # 1E:$9100
     locks = [rd(prg, 0x1E, DOOR_LOCKS + i) for i in range(16)]
     if prop & 0x80 and v in locks:
         i = locks.index(v)
         # lock 0 은 열쇠 없이 열림, 1~3 은 KEYS[lock-1] 이상의 열쇠
-        out['door'] = {'lock': i >> 2, 'shape': i & 3}
+        out['door'] = {'lock': i >> 2, 'shape': i & 3, 'opens': DOOR_OPENS[i & 3]}
     if prop & 0x80 and v in (0x17, 0x27):
         out['talk_over'] = True                 # 1E:$80D8
     if prop & 0x80 and v in FACING:
@@ -677,7 +680,8 @@ def exit_to_field(prg, g, x, y):
 def exit_links(prg, g, k, maps=None, **flags):
     """(g, k) 의 출구 칸마다 08:$B22E 가 정하는 목적지. maps 는 {(그룹, 순번): Map} 캐시.
     돌려주는 것: [{'x', 'y', 'prop', 'ord', 'to'}]. to 는 {'group', 'index', 'n', 'x', 'y', 'dir'}(맵, n 은 도착 맵의 칸 순번),
-    {'field', 'group', 'x', 'y'}(필드 번호와 좌표), {'enter': 그룹}(필드에서 들어갈 때의 도착 자리 08:$B7F9 로), None(레코드 없음)."""
+    {'field', 'group', 'x', 'y'}(필드 번호와 좌표), {'enter': 그룹}(필드에서 들어갈 때의 도착 자리 08:$B7F9 로),
+    레코드가 모자란 첫 칸은 {'group', 'index': 1F, 'n': 다음 그룹 바이트, 'invalid': True}, 그 뒤는 None."""
     maps = {} if maps is None else maps
 
     def get(gg, kk):
@@ -688,14 +692,20 @@ def exit_links(prg, g, k, maps=None, **flags):
     fixed = {(e['group'], e['index'], e['x'], e['y']): e['to'] for e in exit_fixed(prg)}
     # 08:$B285: 순번 k 의 목록까지 건너뛴 뒤 칸 순번만큼 레코드를 건너뛴다. 목록 끝을 보지 않으므로
     # 레코드보다 칸이 많은 맵은 다음 순번의 레코드를 읽는다.
-    subs = exit_table(prg).get(g, [])
+    table = exit_table(prg)
+    subs = table.get(g, [])
     recs = [r for s in subs[k:] for r in s]
+    # 레코드가 모자라면 그룹 끝 FF 를 종류 3(같은 그룹, 순번 1F)으로, 다음 그룹 바이트를 n 으로 읽는다(없는 맵)
+    groups = list(table)
+    nxt = groups[groups.index(g) + 1] if g in table and groups.index(g) + 1 < len(groups) else 0xFF
     out = []
     for i, (x, y, p) in enumerate(exit_cells(prg, get(g, k))):
         e = {'x': x, 'y': y, 'prop': p, 'ord': i}
         if (g, k, x, y) in fixed:
             e['to'] = dict(fixed[g, k, x, y], fixed=True)
-        elif i >= len(recs):
+        elif i == len(recs):
+            e['to'] = {'group': g, 'index': 0x1F, 'n': nxt, 'invalid': True}
+        elif i > len(recs):
             e['to'] = None
         else:
             r = recs[i]
@@ -730,7 +740,8 @@ def door_floor_rank(prg, rec):
 
 
 def door_open(prg, m, x, y, d):
-    """08:$8796(문 모양 0, 값 14~17): (x, y) 에 서서 d 방향(0 위 1 오른쪽 2 아래 3 왼쪽)의 문을 열면 문 칸에 쓰는 블록.
+    """08:$8796(문 모양 0, 값 14~17. 모양 2 는 door_open_2x2, 모양 3 은 성문 연출):
+    (x, y) 에 서서 d 방향(0 위 1 오른쪽 2 아래 3 왼쪽)의 문을 열면 문 칸에 쓰는 블록.
     선 칸과 문 너머 칸의 블록 모양 레코드(블록 정의 a&3, b)를 DOOR_FLOORS 에서 찾아 앞쪽에 있는 것을 고른다(같으면 선 칸).
     돌려주는 것: (문 x, 문 y, 블록)."""
     dx, dy = STEP_XY[d & 3]
@@ -743,6 +754,29 @@ def door_open(prg, m, x, y, d):
         e = blocks.get(b)
         return door_floor_rank(prg, (e['a'] & 3) << 8 | e['b']) if e else 0xFF
     return x + dx, y + dy, there if rank(there) < rank(here) else here
+
+
+def door_open_2x2(prg, m, x, y, d):
+    """08:$8855(문 모양 2, 값 1C~1F): (x, y) 에서 d 방향의 2×2 문을 열면 네 칸에 쓰는 블록.
+    문 왼쪽 위 칸을 찾은 뒤, 문 너머(문을 지나 한 칸 더) 칸 하나의 값을 고른다. 위·왼쪽·오른쪽으로 열면 왼쪽 열(위)·위 줄,
+    아래로 열면 오른쪽 열이다(08:$88E5 가 $04 에 두 번 써서). 1E:$9E92 가 칸의 구역(위 3비트)은 두고 블록만 바꾸고,
+    $6C0C 항목에는 이 값을 구역째, 주소는 오른쪽 아래 칸으로 적는다.
+    돌려주는 것: (왼쪽 위 x, 왼쪽 위 y, 고른 칸 값)."""
+    prop = m.blocks['prop']
+
+    def same(cx, cy):
+        return prop.get(m.cell(cx, cy) & 0x1F) == prop.get(m.cell(x + STEP_XY[d][0], y + STEP_XY[d][1]) & 0x1F)
+    if d == 0:
+        lx = x - 1 if same(x - 1, y - 2) else x
+        return lx, y - 2, m.cell(lx, y - 3)
+    if d == 2:
+        lx = x - 1 if same(x - 1, y + 1) else x
+        return lx, y + 1, m.cell(lx + 1, y + 3)
+    if d == 1:
+        ty = y - 1 if same(x + 1, y - 1) else y
+        return x + 1, ty, m.cell(x + 3, ty)
+    ty = y - 1 if same(x - 2, y - 1) else y
+    return x - 2, ty, m.cell(x - 3, ty)
 
 
 def export(prg, path):
@@ -975,6 +1009,8 @@ def show_links(prg, g=None, k=None):
             t = e['to']
             if t is None:
                 dest = '레코드 없음'
+            elif t.get('invalid'):
+                dest = f"레코드 없음(그룹 끝 FF 를 읽어 없는 맵 {t['group']:02X}/{t['index']:02X} n={t['n']:02X})"
             elif 'enter' in t:
                 dest = f"그룹 {t['enter']:02X} 의 필드 도착 자리"
             elif 'field' in t:
