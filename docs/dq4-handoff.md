@@ -28,6 +28,8 @@ DQ4 의 내용(맵, 인물과 대사, 이벤트 흐름, 몬스터·아이템·�
 | 데이터 뱅크 | `00`~`04`: 대사 본문, `1B`: 대사 끝부분과 사전 | 디코더 |
 | 대사 | 메시지 2633개, 6비트 압축 + 사전 192단어. [dq4-text-format.md](dq4-text-format.md), `tools/dq4text.py all` | 창 줄 버퍼 덤프 10장과 비교 |
 
+포팅용 그래픽의 현재 판단은 [그래픽 핸드오프](dq4-graphics-handoff.md)에 있습니다. 사용자가 긍정 평가한 타이틀·일러스트는 보존합니다. 스프라이트는 마지막 16×24 얼굴 수정본까지 반려됐으며 제작 방법을 다시 정해야 합니다. 맵 수정본도 채택 확인이 없습니다. [dq4-graphics.md](dq4-graphics.md)는 제작물과 변환 규격을 설명합니다. 로컬 MesenCE Lua 실험에서 실제 DQ5 필드의 보행·표시는 확인했지만 영구 패치는 아니며, 실험 파일은 저장소 복제만으로 재현되지 않습니다.
+
 ## 도구
 
 FC 도구는 툴킷에 `krpatch fc` 로 들어갔습니다(v0.5.0). 게임과 무관한 것은 툴킷에, DQ4 에만 해당하는 것은 `tools/dq4*`(`dq4state.sh` 등)에 둡니다. 툴킷에 기능이 더 필요하면 툴킷 저장소에 PR 을 내고 릴리스한 뒤 태그를 올립니다([DEP-03](../.agents/skills/dependencies/SKILL.md#dep-03--툴킷은-릴리스-태그로)). 툴킷 규칙은 그 저장소의 [AGENTS.md](https://github.com/perfectacle/kr-patch-toolkit/blob/main/AGENTS.md)(게임 무관, 출력 호환, 합성 롬 테스트)입니다.
@@ -62,6 +64,8 @@ uv run krpatch fc listing rom/dq4.nes work/cov/cover.txt --range 3C000-3FFFF
 5. **대사 나머지·롬 구조 나머지** — [dq4-text-format.md](dq4-text-format.md#남은-것), [dq4-bank-format.md](dq4-bank-format.md#남은-것).
 
 실험 출발점은 `tools/dq4state.sh` 가 만드는 세이브스테이트 5개(이름 입력 → 왕좌의 방 → 앞마당 → 필드 → 첫 전투)이고, MesenCE 를 돌릴 때는 `--nes.ramPowerOnState=AllZeros` 를 줘야 같은 입력에 같은 결과가 나옵니다.
+
+6. **그래픽 제작 방법 재검토** — [그래픽 핸드오프](dq4-graphics-handoff.md)의 반려 이유와 원작 참고 사이트부터 읽습니다. 타이틀·일러스트는 보존하고, 라이안 정면 한 장을 실제 16×24 크기로 비교해 채택한 뒤 보행 시트를 만듭니다. 기존 반려 시안을 그대로 엔진에 연결하지 않습니다. 영구 삽입과 맵 연결은 별도 남은 일입니다.
 
 ## 조심할 것
 

@@ -142,3 +142,11 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 | `dq4event.py rom sram\|flags\|chapters\|chars\|places\|ops` | DQ4 저장 데이터. `sram end.sram` 작업 영역·모험의 서 3칸(CRC 검사)·인물 레코드, `flags` 이벤트 플래그 영역, `chapters` 1~5장 시작 표, `chars [--compare end.sram]` 장 시작 인물 레코드, `places` 귀환 자리 표, `ops [--flag NN]` 롬의 BRK 플래그 명령 모양 |
 | `lua/fc/eventwalk.lua` | FC: 세이브스테이트에서 좌표 목표(`x=NN`/`y=NN`)와 버튼으로 걷고 `reset:1` 로 리셋. `POKEAT` 프레임별 RAM 쓰기, `PRGPOKE` 메모리의 PRG ROM 바꾸기(롬 파일은 그대로). 프로브의 `DRIVER` 로도 씀. 끝나면 `walk.txt`·`end.*` |
 | `lua/fc/eventflags.lua` | FC: 이벤트 플래그 영역(`$627B`~`$62EE`, `RANGE`) 읽기·쓰기를 PC·뱅크·BRK 주소와 함께 `flags.txt` 로. `FROM`, `MAXF` |
+| `dq4graphics.py [--check] [--output 폴더]` | 롬 없이 스프라이트·블록·샘플 맵·타이틀을 PNG·SFC 4bpp·팔레트로 출력. `--check` 는 파일을 쓰지 않고 반복 생성·왕복 검사 |
+| `dq4pixels.py` | 스프라이트·지형 제작물을 모으는 모듈 |
+| `dq4sprites.py` | 인물별 팔레트와 색 번호 문자 행렬로 편집하는 스프라이트 |
+| `dq4terrain.py` | 성·마을 블록 49종과 이름 격자 맵의 편집 원본 |
+| `dq4title.py` | 보관한 생성 원본을 256×224, 타일별 8개 BG 팔레트 타이틀로 변환하는 모듈 |
+| `dq4figures.py` | 제작 원본으로 그래픽 문서의 WebP·합성 보행 애니메이션 재생성(롬 불필요) |
+
+스프라이트·맵 출력은 채택되지 않은 초기 시안입니다. 타이틀·일러스트만 보존 대상으로 평가됐으며, 후속 작업은 [그래픽 핸드오프](../docs/dq4-graphics-handoff.md)를 먼저 읽습니다. 그래픽 출력의 배치·제약은 [dq4-graphics.md](../docs/dq4-graphics.md)에 있습니다. 생성 원본과 프롬프트는 `tools/dq4art/` 에 보관합니다. `uv run --locked python tools/dq4graphics.py` 로 기본 출력 `work/dq4-graphics/` 를 만들고, `uv run --locked python tools/dq4figures.py` 로 문서 그림을 다시 만듭니다.
