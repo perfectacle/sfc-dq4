@@ -11,6 +11,9 @@
   python tools/dq4event.py rom/dq4.nes flags --xref [NN] [--all]   플래그 바이트·비트마다 쓰는 곳·검사하는 곳(BRK 플래그
                                                    명령, 절대 주소 명령, 대화 스크립트, 인물 블록, 맵 인물 목록 표).
                                                    --all 은 데이터로 보이는 모양도 같이
+  python tools/dq4event.py rom/dq4.nes flags --meaning      한 비트 플래그마다 뜻: 확인한 것은 [확인], 나머지는 쓰는 곳의
+                                                   맵·장소 이름과 대사 첫 줄로 [추정]
+  python tools/dq4event.py rom/dq4.nes ending              5장 끝(1A:$B8C2)에서 도는 엔딩 장면 목록(1A:$9E76)
   python tools/dq4event.py rom/dq4.nes events              인물 블록의 이벤트 명령(88~8A n → 1D:$B639)과 맵 이벤트 표
   python tools/dq4event.py rom/dq4.nes ops [--flag NN]      롬에서 BRK 플래그 명령(00 NN CB/DB/EB MM) 모양 찾기.
                                                    바이트 모양만 보므로 데이터가 섞인다
@@ -25,6 +28,7 @@ from kr_patch.fc import ines
 
 import dq4data
 import dq4map
+import dq4npcblock
 import dq4talk
 import dq4text
 
@@ -317,12 +321,12 @@ def code_uses(prg):
     return out
 
 
-# 인물 블록(움직임 스크립트, 1F:$D884 가 한 명령씩 실행) 중 플래그·이벤트를 다루는 명령.
-# 27/28/29 m lo hi: [hi:lo] |= m / &= m / = m (1F:$DC09·$DC16·$DC23), 88~8A n: 이벤트 n(1F:$DED8 → BRK 1D 함수 04)
+# 인물 블록(움직임 스크립트, 1F:$D884 가 한 명령씩 실행) 중 플래그·이벤트를 다루는 명령. 명령 단위로 푸는 것은
+# tools/dq4npcblock.py(docs/dq4-npcblock-format.md).
 BLOCK_FLAG_OPS = {0x27: 'npc|=', 0x28: 'npc&=', 0x29: 'npc='}
 BLOCK_EVENT_OPS = (0x88, 0x89, 0x8A)
-EVENTS = (0x1D, 0xB639)               # 이벤트 n → 루틴 주소 워드(1D:$989F: n ≥ 80 이면 $B739 + 2(n − 80), 같은 줄의 이어짐)
-EVENT_COUNT = 0x8A                    # 표가 $B74D(BRK 1D 함수 07) 바로 앞에서 끝남
+EVENTS = dq4npcblock.EVENTS           # 이벤트 n → 루틴 주소 워드(1D:$989F)
+EVENT_COUNT = dq4npcblock.EVENT_COUNT
 
 
 def npc_lists(prg):
@@ -330,40 +334,30 @@ def npc_lists(prg):
     for g, k, *_ in dq4map.maps(prg):
         yield '', g, k, False, dq4talk.npc_list(prg, g, k)
         yield '밤 ', g, k, True, dq4talk.npc_list(prg, g, k, night=True)
-    for g, k, _, _, a in dq4talk.alt_entries(prg):
-        yield f'목록 1C:${a:04X} ', g, k, False, [r for r in dq4talk.alt_records(prg, a) if r[0] & 0x10]
-
-
-def npc_blocks(prg):
-    """낮 목록과 이벤트 목록 인물의 첫 블록 바이트: (이름, 그룹, 순번, 슬롯, 블록)."""
-    for name, g, k, night, recs in npc_lists(prg):
-        if night:
-            continue
-        for i, r in enumerate(recs):
-            a, f = 7, r[0]
-            if f & 0x10 and f & 0x08:
-                a += (0 if f & 1 else 1) + (0 if f & 2 else 1) + (0 if f & 4 else 2)
-            if a < len(r):
-                yield name, g, k, i + 6, r[a + 1:a + 1 + r[a]]
+    for g, k, _, _, a in dq4map.event_entries(prg):
+        yield f'목록 1C:${a:04X} ', g, k, False, [r for r in dq4map.records_at(prg, 0x1C, a)[0] if r[0] & 0x10]
 
 
 def block_uses(prg):
-    """인물 블록에서 (종류, 목록 이름, 그룹, 순번, 슬롯, 값, 블록 안 자리). 명령 길이를 다 알지 못해 바이트 모양으로 찾는다:
-    플래그는 27~29 m lo 62(주소가 플래그 영역), 이벤트는 88~8A n(n < EVENT_COUNT)."""
+    """인물 블록(맵 목록·이벤트 목록, 낮 블록1·밤 블록2)을 명령 단위로 풀어 (종류, 목록 이름, 그룹, 순번, 슬롯, 값,
+    블록 안 자리, 메시지). 플래그는 27~29 중 주소가 플래그 영역인 것, 이벤트는 88~8A n. 메시지는 같은 블록에서
+    그 명령 앞의 가장 가까운 26 명령(없으면 뒤의 첫 26)."""
     out = []
-    for name, g, k, slot, blk in npc_blocks(prg):
-        j = 0
-        while j < len(blk) - 1:
-            b, step = blk[j], 1
-            if b in BLOCK_FLAG_OPS and j + 3 < len(blk):
-                a = blk[j + 2] | blk[j + 3] << 8
-                if FLAGS <= a <= FLAGS_END:
-                    out.append((BLOCK_FLAG_OPS[b], name, g, k, slot, (a - FLAGS, blk[j + 1]), j))
-                    step = 4
-            elif b in BLOCK_EVENT_OPS and blk[j + 1] < EVENT_COUNT:
-                out.append(('event', name, g, k, slot, blk[j + 1], j))
-                step = 2               # 찾은 명령의 인자를 다음 명령으로 다시 읽지 않게
-            j += step
+    for name, bank, i, j, a, ln, slot in dq4npcblock.all_blocks(prg):
+        g, k = (int(x, 16) for x in name[:5].split('/'))
+        label = ('' if ' 목록 ' not in name else name[6:] + ' ') + ('밤 ' if j == 2 else '')
+        cmds = dq4npcblock.decode(prg, bank, a, ln)
+        msgs = [(p, bs[2] << 8 | bs[1]) for p, bs, *_ in cmds if bs[0] == 0x26]
+        for p, bs, *_ in cmds:
+            before = [m for q, m in msgs if q < p]
+            after = [m for q, m in msgs if q > p]
+            msg = before[-1] if before else (after[0] if after else None)
+            if bs[0] in BLOCK_FLAG_OPS:
+                at = bs[2] | bs[3] << 8
+                if FLAGS <= at <= FLAGS_END:
+                    out.append((BLOCK_FLAG_OPS[bs[0]], label, g, k, slot, (at - FLAGS, bs[1]), p - a, msg))
+            elif bs[0] in BLOCK_EVENT_OPS and bs[1] < EVENT_COUNT:
+                out.append(('event', label, g, k, slot, bs[1], p - a, msg))
     return out
 
 
@@ -446,9 +440,9 @@ def flag_xref(prg, all_shapes=False):
     for kind, g, k, n, m, ptr in npc_tables(prg):
         what = '인물 목록 비움' if kind == 'clear' else f'인물 목록 1C:${ptr:04X} 로 바꿈'
         add(n, (m, 'test', f'맵 표 {g:02X}/{k:02X} {what}', None))
-    for kind, name, g, k, slot, (n, m), _ in (u for u in block_uses(prg) if u[0] != 'event'):
+    for kind, name, g, k, slot, (n, m), _, msg in (u for u in block_uses(prg) if u[0] != 'event'):
         add(n, (m, {'npc|=': 'set', 'npc&=': 'clear', 'npc=': 'store'}[kind],
-                f'인물 블록 {name}{g:02X}/{k:02X} 슬롯 {slot:02X}', None))
+                f'인물 블록 {name}{g:02X}/{k:02X} 슬롯 {slot:02X}', msg))
     return rows
 
 
@@ -486,6 +480,88 @@ def cmd_xref(prg, rom, only, all_shapes):
     return 0
 
 
+# 화면·RAM 으로 확인한 비트의 뜻. (번호, 비트) → 뜻. 근거는 docs/dq4-save-format.md 「플래그 비트의 뜻」.
+KNOWN = {
+    (0x00, 0x02): 'サントハイム 왕과 이야기함(2장). 성문 병사 대사가 바뀜',
+    (0x07, 0x80): '1장을 끝냄',
+    (0x08, 0x80): '1장 끝 조건의 하나($6283 & A0 = 80)', (0x0A, 0x04): '1장 끝 조건의 하나(02/00 에서)',
+    (0x0D, 0x80): '엔딩 장면 중(1A:$9DC9 가 켬)',
+    (0x2A, 0x80): '엔딩 장면 중(1A:$9DF3 가 켬). 켜져 있으면 인물 목록을 비우는 표 1C:$9E61 을 보지 않음', (0x07, 0x40): '2장을 끝냄', (0x07, 0x20): '3장을 끝냄', (0x07, 0x10): '4장을 끝냄',
+    (0x09, 0x40): 'エンドール 무술 대회 뒤(2장). サントハイム 성 사람들이 사라짐',
+    (0x0C, 0x08): '빈 サントハイム 성 왕좌의 방(01/01)에서 ブライ 대사를 봄(2장 끝 조건)',
+    (0x0F, 0x10): '4장 끝 조건(그룹 04 에 들어가면 장 끝)',
+    (0x16, 0x80): '이 장의 시작 처리를 했음',
+    (0x26, 0x20): '5장 끝 조건(그룹 2D 에 들어가면 엔딩)',
+}
+
+
+def place_names(prg):
+    """맵 그룹 → 장소 이름. ルーラ 목록의 마을 레코드 번호가 장소 이름 목록(0B:$B006)의 번호와 같다."""
+    names = [dq4text.text(n) for n in dq4data.name_list(prg, 'place')[1:]]
+    out = {}
+    for ch5 in (False, True):
+        for _, g, r, _ in towns(prg, ch5):
+            if r < len(names):
+                out.setdefault(g, names[r])
+    return out
+
+
+def cmd_meaning(prg, rom):
+    """한 비트 플래그마다 뜻. KNOWN 에 있으면 그 뜻, 없으면 쓰는 곳(맵·장소 이름)과 그 대사 첫 줄로 짐작."""
+    rows, place = flag_xref(prg), place_names(prg)
+    bits = {}
+    for n in rows:
+        for m, kind, where, msg in rows[n]:
+            b = bit_of(m, kind)
+            if b is None or b.bit_count() != 1:
+                continue
+            e = bits.setdefault((n, b), {'w': [], 'r': []})
+            e['w' if kind in WRITERS else 'r'].append((where, msg))
+    print('번호 비트 주소     쓰기 검사  뜻')
+    for (n, b), e in sorted(bits.items()):
+        head = f'{n:02X}   {b:02X}   ${FLAGS + n:04X}  {len(e["w"]):3d}  {len(e["r"]):3d}  '
+        if (n, b) in KNOWN:
+            print(head + '[확인] ' + KNOWN[(n, b)])
+            continue
+        pick = sorted(e['w'] or e['r'], key=lambda x: x[1] is None)[0]
+        where, msg = pick
+        g = next((int(t[:2], 16) for t in where.split() if len(t) == 5 and t[2] == '/'), None)
+        town = f' {place[g]}' if g in place else ''
+        line = '' if msg is None else f' 「{dq4talk.first_line(rom, msg)[:24]}」'
+        print(head + f'[추정] {"쓰는 곳" if e["w"] else "검사하는 곳"} {where}{town}{line}')
+    return 0
+
+
+ENDING = (0x1A, 0x9E74)               # 엔딩 장면 목록의 포인터(1A:$9DE4 가 $69/$6A 에 넣음, 1A:$9E17 이 읽음)
+def ending_list(prg):
+    """1A:$9E17: 바이트 bit7 이 꺼져 있으면 5바이트 장면(그룹, 순번, X, Y, 시간), 켜져 있으면 4바이트 일행 움직임
+    (값 → $0530, 주소 lo·hi, 길이: 그 바이트들을 $7E00 에 복사해 패드 입력으로 씀). FF 로 끝."""
+    a, out = rd(prg, *ENDING) | rd(prg, ENDING[0], ENDING[1] + 1) << 8, []
+    while (b := rd(prg, ENDING[0], a)) != 0xFF:
+        if b & 0x80:
+            src, ln = rd(prg, ENDING[0], a + 1) | rd(prg, ENDING[0], a + 2) << 8, rd(prg, ENDING[0], a + 3)
+            out.append(('pad', b, src, [rd(prg, ENDING[0], src + i) for i in range(ln)]))
+            a += 4
+        else:
+            out.append(('scene', *(rd(prg, ENDING[0], a + i) for i in range(5))))
+            a += 5
+    return out
+
+
+def cmd_ending(prg):
+    place = place_names(prg)
+    print('== 엔딩 장면 1A:$9E76 (5장 끝: $62A1 bit5 가 켜진 채 그룹 2D 에 들어가면 1A:$B8C2 → 1A:$9BFC)')
+    for e in ending_list(prg):
+        if e[0] == 'scene':
+            _, g, k, x, y, t = e
+            when = '밤' if t >= 0x78 else '낮'
+            print(f'  맵 {g:02X}/{k:02X} ({x:02X},{y:02X}) {place.get(g, "")}  $62ED={t:02X}({when}) 머묾 {t & 0x7F:02X}')
+        else:
+            _, b, src, bs = e
+            print(f'    일행 움직임 1A:${src:04X} $0530={b:02X}: ' + ' '.join(dq4npcblock.pad_text(x) for x in bs))
+    return 0
+
+
 ENTRY = (0x1D, 0xB8CA)                # 맵 이벤트 표(1D:$B74D = BRK 1D 함수 07): 6바이트, 그룹 FF 로 끝
 
 
@@ -501,7 +577,7 @@ def entry_table(prg):
 
 def cmd_events(prg, rom):
     print('== 인물 블록의 이벤트 명령(88~8A n) → 1D:$B639 표의 루틴')
-    for _, name, g, k, slot, n, j in (u for u in block_uses(prg) if u[0] == 'event'):
+    for _, name, g, k, slot, n, j, _ in (u for u in block_uses(prg) if u[0] == 'event'):
         a = event_addr(prg, n)
         msg = near_msg(prg, 0x1D * 0x4000 + (a & 0x3FFF) - 4)
         line = '' if msg is None else f'  {msg:04X} {dq4talk.first_line(rom, msg)[:30]}'
@@ -527,6 +603,8 @@ def main():
     cmd = sys.argv[2]
     if cmd == 'sram':
         return cmd_sram(prg, open(sys.argv[3], 'rb').read())
+    if cmd == 'flags' and '--meaning' in sys.argv:
+        return cmd_meaning(prg, dq4text.Rom(rom))
     if cmd == 'flags' and '--xref' in sys.argv:
         rest = [a for a in sys.argv[3:] if not a.startswith('--')]
         return cmd_xref(prg, dq4text.Rom(rom), int(rest[0], 16) if rest else None, '--all' in sys.argv)
@@ -534,6 +612,8 @@ def main():
         return cmd_flags(open(sys.argv[3], 'rb').read())
     if cmd == 'events':
         return cmd_events(prg, dq4text.Rom(rom))
+    if cmd == 'ending':
+        return cmd_ending(prg)
     if cmd == 'chapters':
         return cmd_chapters(prg)
     if cmd == 'chars':
