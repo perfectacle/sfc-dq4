@@ -13,7 +13,7 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5trigger.py rom [BC BD]` | DQ5 실내 맵 영역 이동 레코드(맵을 빼면 전체 통계) |
 | `attrgrid.py rom BC BD` | 통행 격자를 글자로 찍기(경로 잡기용) |
 | `dq5exit.py rom BC BD` | DQ5 실내 맵 출구 셀·목적지·도착 자리. 맵을 푼 뒤 도는 맵별 루틴(`15:F907`)이 바꾸는 출구 셀도 반영 |
-| `dq5npc.py rom BC BD` | DQ5 실내 맵 인물 목록과 인물 표 값·인라인 스크립트 명령. `--night` 밤 목록, `--flags 21AD=10` 이벤트 플래그, `--compare` 로 인물 표(`7E:3000-`) 22칸 비교, `--list 108BBD` 목록 주소로 보기, `--check-scripts` 모든 스크립트 길이 검사 |
+| `dq5npc.py rom BC BD` | DQ5 실내 맵 인물 목록과 인물 표 값·인라인 스크립트 명령. `--night` 밤 목록, `--flags 21AD=10` 이벤트 플래그, `--compare` 로 인물 표(`7E:3000-`) 23칸 비교, `--list 108BBD` 목록 주소로 보기, `--check-scripts` 모든 스크립트 길이 검사 |
 | `dq5text.py rom 번호` | DQ5 보행 모드 메시지를 글자로(`--codes` 로 코드). `--controls` 제어 코드 처리기와 뜻, `--window N` 메뉴 창 레코드와 항목 문자열. 폰트 그리기(`glyph`), 글자표(`CHARS`), 이름 문자열(`string`·`string_codes`)도 이 모듈 |
 | `dq5talk.py rom 대화번호` | 대화 번호의 갈래·스크립트·메시지(조건 코드 뜻, 특수 기능 처리기, 묻기 갈래 포함). `BC BD` 를 주면 그 맵 인물 전부, `--check` 로 스크립트 574개 경계 검사, `--calls` 로 네이티브 호출 대상 |
 | `dq5chest.py rom [BC BD]` | DQ5 보물상자(번호·칸·열림 플래그·내용물), タンス·ツボ·タル 항목, 발밑 표(`1E:F08B`), 두 칸 앞 표(`1E:F435`). 물건 이름과 `D000`~`D009` 의 뜻까지 |
