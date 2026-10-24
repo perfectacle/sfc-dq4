@@ -485,6 +485,14 @@ def fig_hangul():
     save(out, 'dq5-hangul.webp')
 
 
+def fig_hangul_retree():
+    """dq5hangul.py retree 로 만든 2MB 롬에서 메시지 129({1006}한글{1001})를 띄운 화면(work/hangul/retree/end.png)의 메시지 창.
+    롬과 덤프는 sfc/dq5/journal/ 의 hangul 일지 3절 명령으로 만든다."""
+    img = Image.open('work/hangul/retree/end.png').convert('RGB').crop((0, 126, 256, 162)).resize((512, 72), Image.NEAREST)
+    label(img, 'retree 2MB', (img.width - 8 - 6 * 10 - 4, img.height - 14))
+    save(img, 'dq5-hangul-retree.webp')
+
+
 def fig_worlds(rom):
     """$1949 로 고르는 세계 지도 셋(블록 1개를 2x2 로 축소)과 그 세계의 04:FD97 입구(노란 틀). 세계 1·2 는 땅이 있는 왼쪽 위
     128x128 블록만 2배로 키웠다. 타일은 롬, 팔레트는 세계마다
@@ -588,6 +596,7 @@ def main():
     fig_transition()
     fig_textctl()
     fig_hangul()
+    fig_hangul_retree()
     fig_mongfx(rom)
     fig_worlds(rom)
     fig_high_maps(rom)
