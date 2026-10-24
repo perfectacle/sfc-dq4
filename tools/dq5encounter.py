@@ -63,7 +63,7 @@ NAMES = 4
 # [+0 플래그][+1~+4 몬스터, 빈 자리 FF][+5~+8 마릿수][+9~+C → $1009~$100C]
 EVENT_GROUPS = 0x23D757
 EVENT_SIZE = 13
-EVENT_COUNT = 0x40         # 40 부터는 마릿수 자리에 FF 가 나와 이 표가 아닌 것으로 보인다
+EVENT_COUNT = 0x40         # 26:8F5B 가 40 이상이면 표를 읽지 않는다
 
 
 def monster_name(rom, n):
