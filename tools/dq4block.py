@@ -5,6 +5,7 @@
   python tools/dq4block.py rom/dq4.nes G K [--png]         맵의 통행 지도(텍스트). --png 는 work/ 에 렌더링
   python tools/dq4block.py rom/dq4.nes G K --nt            맵 전체의 nametable 타일 번호 배열
   python tools/dq4block.py rom/dq4.nes field [F] [--png]   필드 F(기본 0)의 통행 지도
+  python tools/dq4block.py rom/dq4.nes props [--maps]      롬 전체 맵·필드의 속성 값별 뜻·맵 수·칸 수(--maps 는 맵마다)
   python tools/dq4block.py rom/dq4.nes compare DIR [PREFIX] seq.lua 의 end.* (또는 blockload.lua 의 PREFIX.*) 덤프와 비교
 
 근거 루틴: 08:$84E9(블록 표 올리기), $8055(맵 종류 → 블록 표), $8473(블록 하나), $80D5(타일 모양 레코드),
@@ -377,30 +378,112 @@ def compare(prg, d, prefix=None):
     return not bad and not cbad and want_p == got_p and not nd and not pd
 
 
-MARKS = 'GHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+MARKS = 'GHIJKLMNOPQRSTUVWXYZ'
+BLOCKED = 'abcdefghijklmnopqrstuvwxyz'
+
+# 속성($6F40) 값 → 뜻. 근거는 docs/dq4-block-format.md 의 「속성 값」 표.
+KINDS = {
+    0x00: '바닥',
+    0x01: '독늪(걸음마다 HP 1)',
+    0x02: '독늪류(1E:$9956 이 01 과 함께 봄)',
+    0x04: '보물상자',
+    0x05: '1E:$8676 로 감(뜻 모름)',
+    0x06: '입구·출구 검사',
+    0x07: '입구·출구 검사',
+    0x08: '계단',
+    0x09: '계단',
+    0x0A: '1B:$A10F',
+    0x0B: '1E:$8676 로 감(뜻 모름)',
+    0x0C: '입구·출구 검사',
+    0x0F: '스위치(1E:$8700)',
+    0x10: '미끄러지는 바닥',
+    0x11: '미끄러지는 바닥',
+    0x12: '미끄러지는 바닥',
+    0x13: '미끄러지는 바닥',
+    0x24: '걸어서·배로 감',
+    0x25: '입구·출구 검사',
+    0x26: '입구·출구 검사',
+    0x80: '벽',
+    0x83: '물(배로만)',
+    0xA0: '문',
+    0xA7: '카운터(너머로 말 걸기)',
+    0xB0: '막힘(그룹 3F 특수)',
+}
 
 
-def mark(prop):
-    """통행 지도 글자: . 맨땅(00), # 못 감(bit7), ~ 배로만(83), 그 밖은 속성 값(01~0F 는 16진 한 자리, 10~ 는 G 부터)."""
-    if prop == 0:
-        return '.'
-    if prop == 0x83:
-        return '~'
-    if prop & 0x80:
-        return '#'
-    return f'{prop:X}' if prop < 0x10 else MARKS[prop - 0x10]
+def kind_name(prop):
+    if prop in KINDS:
+        return KINDS[prop]
+    return '막힘(뜻 모름)' if prop & 0x80 else '지나감(뜻 모름)'
+
+
+def marks(used):
+    """통행 지도 글자: . 바닥(00), # 벽(80), ~ 물(83), 그 밖의 막힌 값은 작은 값부터 a, b, …(맵마다 다름),
+    지나가는 값은 01~0F 이면 16진 한 자리, 10~ 이면 G 부터."""
+    out, nb = {}, 0
+    for p in sorted(used):
+        if p in (0x00, 0x80, 0x83):
+            out[p] = {0x00: '.', 0x80: '#', 0x83: '~'}[p]
+        elif p & 0x80:
+            out[p] = BLOCKED[nb % len(BLOCKED)]
+            nb += 1
+        else:
+            out[p] = f'{p:X}' if p < 0x10 else MARKS[(p - 0x10) % len(MARKS)]
+    return out
 
 
 def show_pass(m):
     """맵 전체의 통행 지도(블록 속성 $6F40 기준). 인물·이벤트로 막히는 칸은 들어 있지 않다."""
     props = m.blocks['prop']
+    grid = [[props.get(m.cell(x, y) & 0x1F, 0) for x in range(m.w)] for y in range(m.h)]
+    mk = marks({p for row in grid for p in row})
     print(f'# 크기 {m.w}x{m.h}, 맵 종류 {m.t:02X}' + (f', 바깥 블록 {m.outside:02X}' if m.buf is not None else ''))
     print('    ' + ''.join(f'{x >> 4:X}' for x in range(m.w)))
     print('    ' + ''.join(f'{x & 15:X}' for x in range(m.w)))
+    for y, row in enumerate(grid):
+        print(f'{y:02X}  ' + ''.join(mk[p] for p in row))
+    print('# 속성:', ', '.join(f'{c}={p:02X} {kind_name(p)}' for p, c in mk.items()))
+
+
+def all_maps(prg):
+    """롬의 맵 269개와 필드 3개를 (이름, Map) 으로."""
+    for g, k, *_ in dq4map.maps(prg):
+        yield f'{g:02X}/{k:02X}', Map(prg, g, k)
+    for f in range(3):
+        yield f'field{f}', Map(prg, field=f)
+
+
+def map_props(m):
+    """맵에 실제로 그려지는 칸의 {속성: [블록…]}과 칸 수."""
+    props, cells = m.blocks['prop'], {}
     for y in range(m.h):
-        print(f'{y:02X}  ' + ''.join(mark(props.get(m.cell(x, y) & 0x1F, 0)) for x in range(m.w)))
-    used = sorted({props.get(m.cell(x, y) & 0x1F, 0) for y in range(m.h) for x in range(m.w)})
-    print('# 속성:', ' '.join(f'{mark(p)}={p:02X}' for p in used))
+        for x in range(m.w):
+            b = m.cell(x, y) & 0x1F
+            cells.setdefault(props.get(b, 0), {}).setdefault(b, 0)
+            cells[props.get(b, 0)][b] += 1
+    return cells
+
+
+def show_props(prg, per_map=False):
+    """속성 값마다 뜻·쓰는 맵 수·칸 수와 예. per_map 이면 맵마다 한 줄(속성=블록들)."""
+    total = {}
+    for name, m in all_maps(prg):
+        cells = map_props(m)
+        if per_map:
+            print(f'{name} 종류 {m.t:02X}: ' + ' '.join(
+                f'{p:02X}=' + ','.join(f'{b:02X}' for b in sorted(bs)) for p, bs in sorted(cells.items())))
+        for p, bs in cells.items():
+            t = total.setdefault(p, [0, 0, []])
+            t[0] += 1
+            t[1] += sum(bs.values())
+            if len(t[2]) < 3:
+                t[2].append(f'{name}:{min(bs):02X}')
+    if per_map:
+        return
+    print('속성 | 뜻 | 맵 수 | 칸 수 | 예(맵:블록)')
+    for p in sorted(total):
+        n, c, ex = total[p]
+        print(f'{p:02X} | {kind_name(p)} | {n} | {c} | {" ".join(ex)}')
 
 
 def show_nt(m):
@@ -478,6 +561,9 @@ def main():
                   + (' 애니메이션 1D:' + ','.join(f'{s:04X}' for s in anim[blk]) if blk in anim else ''))
         pal = palette(prg, t)
         print('팔레트(낮):', ' / '.join(pal[3 * i:3 * i + 3].hex(' ') for i in range(4)))
+        return
+    if a[2] == 'props':
+        show_props(prg, '--maps' in a)
         return
     rest = [x for x in a[3:] if not x.startswith('--')]
     if a[2] == 'field':
