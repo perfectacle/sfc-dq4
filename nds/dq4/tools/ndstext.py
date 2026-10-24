@@ -83,7 +83,7 @@ def fc_names(rom):
     """FC 판 이름 목록(dq4 트랙의 dq4data.py, 읽기만)."""
     import importlib
     root = os.path.abspath(os.path.join(HERE, '..', '..', '..'))
-    for sub in (('fc', 'dq4', 'tools'), ('tools',)):
+    for sub in (('fc', 'dq4', 'tools'),):
         d = os.path.join(root, *sub)
         if os.path.exists(os.path.join(d, 'dq4data.py')):
             sys.path.insert(0, d)
