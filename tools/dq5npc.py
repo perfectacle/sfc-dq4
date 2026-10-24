@@ -1,10 +1,11 @@
 """DQ5(SFC) 실내 맵 인물 목록. 형식은 docs/dq5-map-format.md 의 「인물」.
 
-12:803F(맵 목록 찾기)·12:8093(엔트리 크기)·12:8161/8227(낮·밤 엔트리 해석)을 옮겼다.
-이벤트 플래그에 따른 덮어쓰기 표(12:8449, 12:839C)는 아직 옮기지 않았다.
+12:803F(맵 목록 찾기)·12:8093(엔트리 크기)·12:8161/8227(낮·밤 엔트리 해석)과
+이벤트 플래그(7E:2190-)에 따른 덮어쓰기 표 둘(12:82FB 의 12:8449, 12:8357 의 12:839C)을 옮겼다.
 
 사용:
-  python tools/dq5npc.py rom/dq5.sfc BC BD [--night] [--compare wram.bin]
+  python tools/dq5npc.py rom/dq5.sfc BC BD [--night] [--flags 21AD=10,...] [--compare wram.bin]
+--flags 는 7E:xxxx 이벤트 플래그 바이트 값. 주지 않으면 모두 0 으로 보고, 걸린 덮어쓰기 항목을 함께 보여 준다.
 --compare 는 인물을 다 놓은 뒤의 WRAM 128KB 에서 인물 표(7E:3000-, 슬롯 08~)와 X·Y·그림을 비교한다.
 """
 import argparse
@@ -96,6 +97,65 @@ def parse(rom, a, night=False):
     return f
 
 
+OVERRIDE_LISTS = 0x128449
+NO_NPC = 0x12839C
+FLAGS = 0x7E2190
+
+
+def flag_on(flags, num, mask):
+    """플래그 번호 bit7 이 0 이면 그 비트가 켜졌을 때, 1 이면 꺼졌을 때 참."""
+    on = bool(flags.get(FLAGS + (num & 0x7F), 0) & mask)
+    return on != bool(num & 0x80)
+
+
+def overrides(rom, bc, bd):
+    """12:8449 에서 이 맵에 걸린 (플래그 번호, 마스크, 목록 주소) 를 표 순서대로."""
+    out, a = [], OVERRIDE_LISTS
+    while rom.u8(a) != 0xFF:
+        if (rom.u8(a), rom.u8(a + 1)) == (bc, bd):
+            out.append((rom.u8(a + 2), rom.u8(a + 3), 0x100000 | rom.u16(a + 4)))
+        a += 6
+    return out
+
+
+def no_npc_rules(rom, bc, bd):
+    """12:839C 에서 이 맵에 걸린 (플래그 번호, 마스크). 하나라도 참이면 인물을 놓지 않는다."""
+    out, a = [], NO_NPC
+    while rom.u8(a) != 0xFF:
+        if (rom.u8(a), rom.u8(a + 1)) == (bc, bd):
+            out.append((rom.u8(a + 2), rom.u8(a + 3)))
+        a += 4
+    return out
+
+
+def list_address(rom, bc, bd, flags):
+    """12:8009 순서: 덮어쓰기 표 → (실내면) 기본 목록. 인물을 놓지 않으면 None."""
+    if any(flag_on(flags, n, m) for n, m in no_npc_rules(rom, bc, bd)):
+        return None
+    for n, m, a in overrides(rom, bc, bd):
+        if flag_on(flags, n, m):
+            return a
+    return map_list(rom, bc, bd)
+
+
+def map_list(rom, bc, bd):
+    a = NPC_BANK << 16 | rom.u16(NPC_GROUPS + bc * 2)
+    for _ in range(bd):
+        while rom.u8(a):
+            a += entry_size(rom, a)
+        a += 1
+    return a
+
+
+def list_entries(rom, a):
+    out = []
+    while rom.u8(a):
+        n = entry_size(rom, a)
+        out.append((a, n))
+        a += n
+    return out
+
+
 def map_entries(rom, bc, bd):
     """(주소, 크기) 목록. 12:803F: 그룹 포인터에서 맵마다 00 으로 끝나는 목록을 bd 개 건너뛴다."""
     a = NPC_BANK << 16 | rom.u16(NPC_GROUPS + bc * 2)
@@ -118,10 +178,21 @@ def main():
     ap.add_argument('bd', type=lambda s: int(s, 16))
     ap.add_argument('--compare')
     ap.add_argument('--night', action='store_true', help='7E:075E >= $F0 일 때의 목록')
+    ap.add_argument('--flags', default='')
     args = ap.parse_args()
     rom = Rom(open(args.rom, 'rb').read())
+    flags = {0x7E0000 | int(k, 16): int(v, 16) for k, v in (t.split('=') for t in args.flags.split(',') if t)}
+    for n, m in no_npc_rules(rom, args.bc, args.bd):
+        print(f'no-NPC rule: flag {n & 0x7F:02X} mask {m:02X}{" (꺼졌을 때)" if n & 0x80 else ""}')
+    for n, m, a in overrides(rom, args.bc, args.bd):
+        print(f'override: flag {n & 0x7F:02X} mask {m:02X}{" (꺼졌을 때)" if n & 0x80 else ""} -> {a:06X}')
+    base = list_address(rom, args.bc, args.bd, flags)
+    if base is None:
+        print('인물을 놓지 않음')
+        return 0
+    print(f'list at {base:06X}')
     day = []
-    for a, n in map_entries(rom, args.bc, args.bd):
+    for a, n in list_entries(rom, base):
         f = parse(rom, a, args.night)
         raw = ' '.join(f'{rom.u8(a + i):02X}' for i in range(n))
         if f:

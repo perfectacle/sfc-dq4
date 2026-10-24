@@ -50,3 +50,4 @@ uv sync --locked
 - [2026-10-24-05: 가장자리 출구와 필드로 나가기](docs/journal/2026-10-24-05-dq5-edge-exit.md)
 - [2026-10-24-06: 영역 이동(트리거)](docs/journal/2026-10-24-06-dq5-triggers.md)
 - [2026-10-24-07: 셀 속성과 맵 머리 확인](docs/journal/2026-10-24-07-dq5-cells-header.md)
+- [2026-10-24-08: 이벤트 플래그로 바뀌는 인물](docs/journal/2026-10-24-08-dq5-npc-flags.md)

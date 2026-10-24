@@ -5,6 +5,7 @@
 -- 시작 전 PRE 입력(seq 형식, 예 "b:4,wait:40")을 먼저 재생한다. 맵 번호($BC/$BD)가 바뀔 때마다 walk.txt 에 기록하고,
 -- CHANGES 번 바뀐 뒤 AFTER 프레임이 지나거나 MAXF 에 이르면 멈춘다.
 -- ROMPATCH="156FF5=E0253C0103;..." 는 시작할 때 ROM(파일 오프셋)을 덮어쓴다. 실험용이며 원본 롬 파일은 바뀌지 않는다.
+-- POKE="7E2192=80;..." 는 매 프레임 그 값을 써서 고정한다(이벤트 플래그 같은 조건 실험). WATCH="이름=7E3228:1;..." 는 끝날 때 값을 walk.txt 에 적는다.
 -- 다른 프로브에 끼울 수 있게 LIBDIR/boot.lua 로도 쓸 수 있다(seqlib.sh 참고).
 package.path = os.getenv("LIBDIR") .. "/?.lua;" .. package.path
 local L = require("lib")
@@ -25,6 +26,10 @@ for tok in string.gmatch(os.getenv("WAYPOINTS") or "", "[^;]+") do
     pts[#pts + 1] = {b, tonumber(f)}
   end
 end
+local pokes = {}
+for a, v in string.gmatch(os.getenv("POKE") or "", "(%x+)=(%x+)") do pokes[#pokes + 1] = {tonumber(a, 16), tonumber(v, 16)} end
+local watches = {}
+for name, a, len in string.gmatch(os.getenv("WATCH") or "", "([%w_]+)=(%x+):?(%d*)") do watches[#watches + 1] = {name, tonumber(a, 16), tonumber(len) or 1} end
 local patches = {}
 for off, hex in string.gmatch(os.getenv("ROMPATCH") or "", "(%x+)=(%x+)") do patches[#patches + 1] = {tonumber(off, 16), hex} end
 local maxf = tonumber(os.getenv("MAXF") or "3000")
@@ -42,6 +47,7 @@ emu.addEventCallback(function()
       end
     end
   end
+  for _, p in ipairs(pokes) do emu.write(p[1], p[2], m) end
   L.release()
   local bc, bd = emu.read(0x7E00BC, m), emu.read(0x7E00BD, m)
   local x, y = emu.read(0x7E3020, m), emu.read(0x7E3080, m)
@@ -84,6 +90,11 @@ emu.addEventCallback(function()
   end
   if (changes >= changesWanted and n >= lastChange + after) or n >= maxf then
     log[#log + 1] = string.format("f%05d end map %02X/%02X x=%d y=%d", n, bc, bd, x, y)
+    for _, w in ipairs(watches) do
+      local v = 0
+      for k = w[3] - 1, 0, -1 do v = v * 256 + emu.read(w[2] + k, m) end
+      log[#log + 1] = string.format("%s=%0" .. (w[3] * 2) .. "X", w[1], v)
+    end
     L.write("walk.txt", table.concat(log, "\n") .. "\n")
     L.shot("end.png")
     emu.stop(0)
