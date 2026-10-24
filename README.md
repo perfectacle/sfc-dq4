@@ -54,3 +54,4 @@ uv sync --locked
 - [2026-10-24-08: 이벤트 플래그로 바뀌는 인물](docs/journal/2026-10-24-08-dq5-npc-flags.md)
 - [2026-10-24-09: 필드(세계 지도)](docs/journal/2026-10-24-09-dq5-field.md)
 - [2026-10-24-10: 필드 걷기 실험(입장은 아직)](docs/journal/2026-10-24-10-dq5-field-walk.md)
+- [2026-10-24-11: 필드에서 마을로 들어가기](docs/journal/2026-10-24-11-dq5-field-entrance.md)

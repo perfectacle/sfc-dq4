@@ -251,6 +251,15 @@ def fig_field(rom):
             full.paste(cache[m], (bx * 4, by * 4))
     ImageDraw.Draw(full).rectangle((125 * 4 - 6, 108 * 4 - 6, 125 * 4 + 6, 108 * 4 + 6), outline=(255, 0, 0), width=2)
     save(full, 'dq5-field-world.webp')
+    # 04:FD97 마을 입구 좌표(8픽셀 단위)를 노란 틀로. 입구는 블록 (x/2, y/2).
+    marked = full.copy()
+    d = ImageDraw.Draw(marked)
+    a = 0x04FD97
+    while rom.u8(a) != 0xFF:
+        x, y = rom.u16(a + 1) // 2 * 4, rom.u16(a + 3) // 2 * 4
+        d.rectangle((x - 3, y - 3, x + 6, y + 6), outline=(255, 255, 0), width=1)
+        a += 5
+    save(marked, 'dq5-field-entrances.webp')
     render(rom, world, hib, vram, cg, 116, 105, 24, 20, TMP)
     near = Image.open(TMP).convert('RGB').crop((32, 0, 32 + 256, 224))
     shot = Image.open('work/fieldref/field.png').convert('RGB')
