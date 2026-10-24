@@ -4,8 +4,10 @@
   k0 가격 바탕, k1 bit0-1 가격 배수(21:A447) / 나머지 플래그
   k2 bit0-2 장비 칸(0 무기, 1 갑옷, 2 방패, 3 투구, 4 도구, 5~7 うでわ·リング 같은 장신구)
   k5 공격력(무기) 또는 수비력(갑옷·방패·투구)
-  k6 장비할 수 있는 인물 비트. bit7 = 주인공
-  k3·k4·k7·k8 은 미확인
+  k6 장비할 수 있는 인물 비트. 인물 번호 → 비트는 21:A632(bit7 = 주인공)
+  k7·k8 은 따로 된 표가 아니라 물건마다 16비트 하나(23:B669 + 물건*2): 동료 몬스터가 장비할 수 있는 갈래 비트.
+     갈래 = 23:AED1 + 몬스터*9 + 8 의 하위 4비트, 비트 = 8000 >> 갈래 (21:A53B, 코드 읽기)
+  k1·k2·k3·k4 의 나머지 비트는 21:A49D~A61F 의 비트 하나씩 읽는 루틴이 있지만 뜻은 미확인
 
 사용:
   python tools/dq5item.py rom/dq5.sfc
@@ -27,6 +29,11 @@ def field(rom, k, item):
     return rom.u8(TABLES + k * ITEMS + item)
 
 
+def monster_equip(rom, item):
+    """k7·k8 자리의 16비트. bit15 = 갈래 0."""
+    return rom.u16(TABLES + 7 * ITEMS + item * 2)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('rom')
@@ -35,8 +42,9 @@ def main():
     for i in range(ITEMS):
         slot = field(rom, 2, i) & 7
         kind = SLOTS[slot]
-        print(f'{i:02X} {item_name(rom, i)} {kind} 힘{field(rom, 5, i)} 장비{field(rom, 6, i):08b} {price(rom, i)}G'
-              f' [{" ".join(f"{field(rom, k, i):02X}" for k in range(9))}]')
+        print(f'{i:02X} {item_name(rom, i)} {kind} 힘{field(rom, 5, i)} 장비{field(rom, 6, i):08b}'
+              f' 몬스터{monster_equip(rom, i):016b} {price(rom, i)}G'
+              f' [{" ".join(f"{field(rom, k, i):02X}" for k in range(5))}]')
     return 0
 
 
