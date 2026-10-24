@@ -41,6 +41,7 @@ SHOT_DIR=$PWD/work/wprof MAXF=1720 EVERY=0 PERIOD=40 TAP=a FROM=1625 TO=1710 \
 | `walk.lua` | 세이브스테이트에서 주인공을 셀 좌표 경유점으로 자동 보행, 맵 번호가 바뀔 때마다 기록. `down:90` 처럼 방향:프레임도 됨. `ROMPATCH` 로 실험용 ROM 덮어쓰기, `POKE` 로 RAM 값 고정 | `STATE`, `PRE`, `WAYPOINTS`(`x,y;down:90`), `CHANGES`, `HOLD`, `AFTER`, `MAXF`, `ROMPATCH`(`오프셋=바이트`), `POKE`, `WATCH` | `walk.txt`, `end.png` |
 | `shots.lua` | 드라이버(`boot.lua`) 입력을 재생하면서 정한 프레임마다 화면 저장. 메시지 창 여러 쪽을 볼 때 | `SHOTS`(`300,420,...`) | `sNNNNN.png` |
 | `seqboot.lua` | 세이브스테이트에서 `SEQ` 입력을 재생하는 드라이버 | `STATE`, `SEQ`, `MAXF`, `EVERY` | |
+| `dq5warp.lua` | DQ5: 배 선실 세이브스테이트에서 조작 가능한 필드(`FIELD`), 아무 실내 맵(`TO`), 고른 무리와의 전투(`BATTLE`)로 가서 세이브스테이트 저장. 사용법은 [dq5-handoff.md 「장면 이동 도구」](../docs/dq5-handoff.md#장면-이동-도구) | `STATE`, `FIELD`(`X,Y`)·`TO`(`BC/BD,X,Y[,방향]`)·`BATTLE`(`몬스터:마릿수,…`), `SET`(`2194\|80`), `POKE`, `ROMPATCH`, `TEST`, `SETTLE`, `SAVE`, `MAXF` | `warp.txt`, `end.png`, `<SAVE>` |
 
 세이브스테이트에서 시작하는 상황에 다른 프로브를 쓰려면, 드라이버를 `boot.lua` 로 둔 Lua 폴더를 만들어 `LIBDIR` 로 줍니다.
 
