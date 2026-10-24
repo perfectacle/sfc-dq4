@@ -339,6 +339,24 @@ def fig_transition():
     save(out, 'dq5-map-transition.webp')
 
 
+def fig_textctl():
+    """메시지 1DB 두 쪽과 3CE 첫 쪽의 메시지 창. 선실 파파스 스크립트의 메시지(파일 오프셋 30139)를 61DB·63CE 로 덮어 말을 걸고
+    A 를 200프레임마다 누르며 찍은 화면(work/textctl/<번호>/s00345.png, s00549.png)이다.
+    명령은 docs/journal/dq5/ 의 제어 코드 일지 1절에 있다."""
+    shots = [('work/textctl/1DB/s00345.png', '1DB'), ('work/textctl/1DB/s00549.png', '1DB p2'),
+             ('work/textctl/3CE/s00345.png', '3CE')]
+    crops = []
+    for path, name in shots:
+        img = Image.open(path).convert('RGB').crop((0, 124, 256, 194))
+        label(img, name, (256 - 8 - 6 * len(name) - 4, 0))
+        crops.append(img)
+    out = Image.new('RGB', (256, len(crops) * 74 - 4), (24, 24, 24))
+    for k, img in enumerate(crops):
+        out.paste(img, (0, k * 74))
+    out = out.resize((out.width * 2, out.height * 2), Image.NEAREST)
+    save(out, 'dq5-textctl.webp')
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     rom = Rom(open('rom/dq5.sfc', 'rb').read())
@@ -354,6 +372,7 @@ def main():
     fig_edge_exit(rom)
     fig_field(rom)
     fig_transition()
+    fig_textctl()
     os.remove(TMP)
 
 
