@@ -535,6 +535,7 @@ def event_ops(prg, start):
 
     def walk(a, depth):
         todo = [(a, None, None)]
+        rmw = None
         while todo:
             a, acc, x = todo.pop()
             while (a, acc, x) not in seen and 0x8000 <= a < 0xC000:
@@ -550,7 +551,7 @@ def event_ops(prg, start):
                     elif k == 'message':
                         out.append(('msg', c['msg']))
                     elif c.get('target') == 0x8028 and c.get('bank') == 0x16 and acc is not None:
-                        out.append(('msg', acc))   # BRK 04 6F: X:A = 메시지 번호(X 를 모르면 A 만)
+                        out.append(('msg', (x << 8 | acc) if x is not None else acc))   # BRK 04 6F: X:A = 메시지 번호(X 를 모르면 A 만)
                     a += brk_len(c['b1'], c['b2'])
                     acc = None
                     continue
@@ -559,6 +560,15 @@ def event_ops(prg, start):
                 mn, md = OPS[op]
                 n = 1 + SIZE[md]
                 arg = r1c(a + 1) | (r1c(a + 2) << 8 if n == 3 else 0) if n > 1 else 0
+                if mn == 'LDA' and md == 'abs' and 0x627B <= arg < 0x62B0:
+                    rmw = (arg, None)   # LDA 플래그 / ORA·AND #m / STA 같은 자리 = BRK CB·DB 없이 켜고 끄기
+                elif mn in ('ORA', 'AND') and md == 'imm' and rmw and rmw[1] is None:
+                    rmw = (rmw[0], (mn, arg))
+                elif mn == 'STA' and md == 'abs' and rmw and rmw[1] and rmw[0] == arg:
+                    out.append(('flag+' if rmw[1][0] == 'ORA' else 'flag-', (arg, rmw[1][1])))
+                    rmw = None
+                elif mn not in ('ORA', 'AND'):
+                    rmw = None
                 if mn == 'LDA':
                     acc = arg if md == 'imm' else None
                 elif mn == 'LDX':
@@ -576,7 +586,7 @@ def event_ops(prg, start):
                     if mn == 'JMP':
                         break
                     acc = x = None
-                elif mn == 'STA' and md in ('zp', 'abs') and arg in (0x63, 0x64, 0x65, 0x44, 0x45, 0x62ED):
+                elif mn == 'STA' and md in ('zp', 'abs') and arg in (0x63, 0x64, 0x65, 0x42, 0x43, 0x44, 0x45, 0x62ED):
                     out.append(('place', (arg, acc)))
                 if mn in ('RTS', 'RTI') or (mn == 'JMP' and md == 'ind'):
                     break
@@ -609,10 +619,22 @@ def event_callers(prg):
         if bank != BANK and prg[o:o + 3] == bytes([0, 0x07, 0xCF]) and prg[o - 2] == 0xA9:
             base = 0xC000 if bank in (0x0F, 0x1F) else 0x8000
             out.setdefault(prg[o - 1], set()).add(f'{bank:02X}:{base + (o & 0x3FFF):04X}')
+    # BRK 07 CF 를 거치지 않는 길: 뱅크 1C 안의 JMP/JSR $AD5F(이벤트 끝에서 다음 이벤트로)와, 뱅크 15 의 이벤트
+    # 입구 $B0F6·$B0FF(말 걸기 앞 루틴 15:$B10E 처럼 스크립트가 부르지 않는 곳). 뱅크 15 쪽은 호출 문장 루틴과
+    # 겹치므로 다른 부르는 곳이 없는 번호에만 붙인다.
+    for bank, targets, only_new in ((0x1C, (0xAD5F,), False), (BANK, (0xB0F6, 0xB0FF), True)):
+        base = bank * 0x4000
+        for o in range(base + 2, base + 0x4000 - 3):
+            if prg[o - 2] != 0xA9 or prg[o] not in (0x20, 0x4C) or (prg[o + 1] | prg[o + 2] << 8) not in targets:
+                continue
+            n = prg[o - 1]
+            if only_new and out.get(n):
+                continue
+            out.setdefault(n, set()).add(f'{bank:02X}:{0x8000 + (o & 0x3FFF):04X}')
     return out
 
 
-PLACE_NAMES = {0x63: '$63', 0x64: '$64', 0x65: '$65', 0x44: '$44', 0x45: '$45', 0x62ED: '$62ED'}
+PLACE_NAMES = {0x63: '$63', 0x64: '$64', 0x65: '$65', 0x42: '$42', 0x43: '$43', 0x44: '$44', 0x45: '$45', 0x62ED: '$62ED'}
 
 
 def event_summary(ops):
