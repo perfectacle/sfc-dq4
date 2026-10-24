@@ -28,6 +28,7 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5gallery.py rom` | `dq5gfx.py`(와 있으면 `dq5battlebg.py`·`dq5sprite.py`)로 그림을 뽑아 `work/gallery/index.html` 갤러리 하나로 묶음. 분류·그룹·찾기, 1~8배 픽셀 확대 |
 | `lua/dq5battledump.lua` | 전투 그림 실험: `AT` 실행 때 WRAM(`at.bin`), `DUMPF` 프레임에 WRAM·VRAM·CGRAM·OAM·화면, `FROM`~`TO` DMA 기록. `boot.lua`(walk.lua) 뒤에 붙여 씀 |
 | `lua/dq5hdma.lua` | `DUMPF` 프레임에 `$420C`·DMA 채널 레지스터(`hNNNNN.txt`), WRAM, 화면. `boot.lua`(walk.lua) 뒤에 붙여 씀 |
+| `dq5sprite.py rom` | DQ5 필드 인물 스프라이트 세트 147개(그림 번호 → 세트 `25:86D0`, 레코드 `1F:D63D`, 런 길이 타일)와 맵 OBJ 타일 27개(`1F:D59A`). `--out work/sprites` 로 세트마다 시트(행 아래·왼쪽·오른쪽·위 × 프레임 0·1, 투명 배경, `--scale` 배, `--grid` 격자)·색 번호 보기(`-index.png`)·행렬(`.txt`)·`index.json`, `--list` 목록, `--compare 덤프폴더…` 로 `lua/dq5sprdump.lua` 덤프의 VRAM·칸 목록·OAM 과 비교. 갤러리는 `export_all(rom, outdir)` 를 import |
 | `dq5figures.py` | `sfc/dq5/images/` 의 그림을 다시 만듦(롬 필요, 게임 화면 비교 그림만 `work/` 덤프 필요) |
 
 ## lua/: MesenCE 분석 스크립트
@@ -37,5 +38,6 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `lua/dq5savestate.lua` | 드라이버(`boot.lua`) 입력을 재생하다가 `SAVEAT` 프레임에 세이브스테이트와 화면 저장. `seqlib.sh` 로 `dq5warp.lua` 를 드라이버로 두면 장면 이동 뒤 걸어 들어간 곳을 남길 수 있음 | `SAVEAT`, `SAVENAME` | `<SAVENAME>`, `.png` |
 | `lua/dq5warp.lua` | DQ5: 배 선실 세이브스테이트에서 조작 가능한 필드(`FIELD`), 아무 실내 맵(`TO`), 고른 무리와의 전투(`BATTLE`, `GROUP`)로 가서 세이브스테이트 저장. 사용법은 [dq5-handoff.md 「장면 이동 도구」](../handoff.md#장면-이동-도구) | `STATE`, `FIELD`(`X,Y`)·`TO`(`BC/BD,X,Y[,방향]`)·`BATTLE`(`몬스터:마릿수,…`)·`GROUP`(이벤트 무리 번호), `SET`(`2194\|80`), `POKE`, `ROMPATCH`, `TEST`, `SETTLE`, `SAVE`, `MAXF` | `warp.txt`, `end.png`, `<SAVE>` |
 | `lua/dq5battle.lua` | DQ5: `walk.lua` 처럼 걸은 뒤 `LOOP` 입력(기본 A 연타)으로 싸우면서 전투 메시지(`24:8C39`) 번호와 `PEEK` 주소 값을 메시지마다 기록. 쓰는 예는 [dq5-data-format.md 「주문과 행동」](../docs/dq5-data-format.md#주문과-행동-268765) | `STATE`, `PRE`, `WAYPOINTS`, `LOOP`, `ROMPATCH`, `POKE`, `PEEK`(`7E07C0:64,…`), `SHOTMSG`, `SHOTDELAY`, `MAXF` | `battle.txt`, `sNNNNN.png`, `end.png` |
+| `lua/dq5sprdump.lua` | DQ5: 세이브스테이트에서 `SEQ` 대로 걸으며 정한 프레임마다 WRAM·VRAM·OAM·CGRAM·화면 덤프(걷는 동안 조우 끔). `dq5sprite.py --compare` 가 읽음 | `STATE`, `OUT`, `SEQ`(`down@20:30,…`), `DUMPF`(`5,60`), `EVERY`·`FROM`, `MAXF` | `wNNNN.bin`, `vNNNN.vram`, `oNNNN.oam`, `cNNNN.cgram`, `sNNNN.png` |
 | `lua/dq5warptrace.lua` | DQ5: `dq5warp.lua` 를 그대로 돌리면서 PC 실행·WRAM 읽기·쓰기를 기록하고, 도착한 뒤 정한 프레임에 WRAM 을 고치거나 화면을 찍음 | `dq5warp.lua` 의 변수, `TRACE`, `LOG`, `RWATCH`·`WWATCH`(`1000-1000`), `WFROM`, `LATE`(`600:7E21C9=01`), `SHOTS` | `trace.txt`, `rwatch.txt`, `wwatch.txt`, `sNNNNN.png` |
 | `lua/dq5gfxdump.lua` | DQ5: 드라이버 입력을 재생하며 정한 프레임에 WRAM·CGRAM·VRAM·OAM·화면과 PPU 상태(`emu.getState()` 의 `ppu.*`)를 덤프. `tools/lua/seqlib.sh` 로 `seqboot.lua` 를 드라이버로 두고 세이브스테이트에서 씀. `dq5gfx.py --check` 가 읽음 | `STATE`, `SEQ`, `DUMPF`(쉼표로 여럿) 또는 `EVERY`·`FROM`·`TO` | `fNNNNN.wram`·`.cgram`·`.vram`·`.oam`·`.png`·`.ppu.txt` |
