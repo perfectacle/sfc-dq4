@@ -60,6 +60,8 @@ STATE=$PWD/work/state/ship.mss FIELD=341,56 SAVE=field-free.mss TEST="left:40,up
 STATE=… TO=04/00,27,75 SET="2194|80" SAVE=0400.mss …
 # (c) 전투: 첫 필드 이벤트 전투(23:D757 의 1번)의 무리를 몬스터:마릿수(16진:10진, 최대 4종)로 바꿈
 STATE=… FIELD=341,56 BATTLE="0C:2,00:1" SETTLE=300 SAVE=battle.mss …
+# (d) 이벤트 전투 무리 표(23:D757, dq5encounter.py --events)의 번호로 전투. 2C = エスターク
+STATE=… FIELD=341,56 GROUP=2C SETTLE=300 SAVE=battle-2c.mss …
 ```
 
 - 결과는 `warp.txt`(도착 맵, 셀 또는 필드 좌표, `$BE`, `7E:2190`~`21AF`)와 `end.png`. `TEST` 입력으로 좌표가 바뀌면 `moved=yes` 입니다.
@@ -68,6 +70,8 @@ STATE=… FIELD=341,56 BATTLE="0C:2,00:1" SETTLE=300 SAVE=battle.mss …
 - 필드에서 조작이 막히던 까닭: `7E:2194` bit7 이 꺼져 있으면 필드 루틴(`15:F907` 의 `FE` 항목)이 `02:A94C` 를 골라 파파스와 슬라임 전투 이벤트(`02:A775` → `01:86A7`, 무리 1번)를 돌립니다. 이 bit 를 켜면 이벤트 없이 바로 조작됩니다([일지](journal/dq5/2026-10-25-08-warp.md)).
 - 시대(`$1949`)가 다른 그룹(`0F:EA97` 첫 바이트 bit5-6 이 `40` 인 곳)에 들어가려면 `SET="1949=01"` 처럼 바꿉니다. 시대를 바꾼 장면은 아직 실측하지 않았습니다.
 - 01/04 처럼 어두운 맵은 도착 화면이 검게 나옵니다(조작은 됨).
+- `GROUP` 은 첫 필드 이벤트가 거는 무리 번호(`02:A780 LDA #$01`, 파일 오프셋 `12781`)를 바꿉니다. `BATTLE` 과 함께 주면 그 번호의 무리를 덮습니다.
+- 다른 프로브를 이 도구 뒤에 붙이려면 `tools/lua/seqlib.sh … work/warplib dq5warp.lua` 로 `LIBDIR` 를 만듭니다. 프로브 결과는 `TO` 에 쓰이므로 도구가 끝나기 전(`SETTLE` + `TEST` 안)으로 맞춥니다.
 
 ## 다음에 할 일
 

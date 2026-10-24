@@ -12,6 +12,7 @@
   python tools/dq5encounter.py rom/dq5.sfc 21 02      # 그 맵의 구역과 무리
   python tools/dq5encounter.py rom/dq5.sfc --maps     # 조우가 있는 실내 맵 목록
   python tools/dq5encounter.py rom/dq5.sfc --field    # 필드 구역 격자
+  python tools/dq5encounter.py rom/dq5.sfc --events   # 이벤트 전투 무리 표(23:D757)
   python tools/dq5encounter.py rom/dq5.sfc --trace trace.txt
       # 툴킷 probe/trace.lua 기록(TRACE=23E7C2,23E9B0,23EA40,23E98F LOG=7E1001,7E1003,7E1005,7E1007)의
       # 무리가 표에서 나올 수 있는 것인지 검사
@@ -50,6 +51,11 @@ FIELD_GRIDS = [
 SHIP_RECTS = 0x0185D8      # 01:858D. $1948 == 2 이면 +A 부터. [X0][X1][Y0][Y1](16비트) [안][밖]
 INDOOR_RATE = 7            # 01:8522. X 가 음수면 20(01:8526)
 NAMES = 4
+# 01:86A7·01:86C3(A = 무리 번호) → 26:8E0A 가 23:D757 + 무리*13 을 $1000~$100C 로 옮긴다(+0 은 & FC).
+# [+0 플래그][+1~+4 몬스터, 빈 자리 FF][+5~+8 마릿수][+9~+C → $1009~$100C]
+EVENT_GROUPS = 0x23D757
+EVENT_SIZE = 13
+EVENT_COUNT = 0x40         # 40 부터는 마릿수 자리에 FF 가 나와 이 표가 아닌 것으로 보인다
 
 
 def monster_name(rom, n):
@@ -108,6 +114,11 @@ def groups(rom, ar):
         else:
             out.append((s, p, 'fixed', [(m, c) for m, c, _ in fixed_group(rom, ar['fixed_group'])]))
     return out
+
+
+def event_group(rom, g):
+    raw = [rom.u8(EVENT_GROUPS + g * EVENT_SIZE + i) for i in range(EVENT_SIZE)]
+    return raw[0], [(raw[1 + i], raw[5 + i]) for i in range(4) if raw[1 + i] != 0xFF], raw[9:]
 
 
 def map_entry(rom, bc, bd):
@@ -197,12 +208,19 @@ def main():
     ap.add_argument('--maps', action='store_true')
     ap.add_argument('--field', action='store_true')
     ap.add_argument('--trace')
+    ap.add_argument('--events', action='store_true')
     args = ap.parse_args()
     rom = Rom(open(args.rom, 'rb').read())
 
     if args.trace:
         return check_trace(rom, args.trace)
 
+    if args.events:
+        for g in range(EVENT_COUNT):
+            flags, mons, tail = event_group(rom, g)
+            desc = ', '.join(f'{monster_name(rom, m)}({m:02X}) {c}' for m, c in mons)
+            print(f'{g:02X} 플래그 {flags:02X}  +9~+C ' + ' '.join(f'{x:02X}' for x in tail) + f'  {desc}')
+        return 0
     if args.maps:
         for bc, bd, e in map_entries(rom):
             if e[0] != 0xFF or e[1] != 0xFF or e[2] != 0xFF:
