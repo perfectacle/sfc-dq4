@@ -35,5 +35,5 @@ RAM 페이지의 「`7EFC00-` マップデータ」는 실제와 다릅니다([d
 | 도구 | 쓰는 곳 |
 | --- | --- |
 | [MesenCE](https://github.com/nesdev-org/MesenCE) | Mesen 2 후속판. 디버거, `--testrunner` 로 Lua 분석 스크립트 실행([tools/README.md](../tools/README.md)) |
-| [kr-patch-toolkit](https://github.com/perfectacle/kr-patch-toolkit) | 65c816 디스어셈블(`krpatch snes dis`), 타일 렌더링, MesenCE 용 Lua 라이브러리 |
+| [kr-patch-toolkit](https://github.com/perfectacle/kr-patch-toolkit) | 65c816 디스어셈블(`krpatch sfc dis`), 타일 렌더링, MesenCE 용 Lua 라이브러리 |
 | [asar](https://github.com/RPGHacker/asar) | 65c816 어셈블러 |

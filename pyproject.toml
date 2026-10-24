@@ -1,0 +1,16 @@
+[project]
+name = "sfc-dq4"
+version = "0"
+description = "Analysis and build tools for the DQ4-on-DQ5 SFC hack"
+requires-python = ">=3.15"
+dependencies = [
+  # 릴리스 태그로 고정해 툴킷이 바뀌어도 분석 결과와 빌드가 그대로이게 한다.
+  "kr-patch-toolkit @ git+https://github.com/perfectacle/kr-patch-toolkit@v0.4.0",
+  "pillow",
+]
+
+[tool.uv]
+# 패키지가 아니다: `uv sync` 는 tools/ 스크립트가 쓰는 .venv 만 만든다.
+package = false
+# 공급망 쿨다운: 나온 지 7일 넘은 릴리스만 받는다(git 태그로 고정한 툴킷은 해당 없음).
+exclude-newer = "7 days"

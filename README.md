@@ -22,11 +22,16 @@ Unity 리메이크가 아니라, 실제 SFC 롬에 덧대는 IPS 패치를 만�
 
 ## 준비
 
-- [kr-patch-toolkit](https://github.com/perfectacle/kr-patch-toolkit) v0.3.0:
-  65c816 디스어셈블러, 타일 렌더링, MesenCE 용 Lua 라이브러리
-  ```sh
-  pip install git+https://github.com/perfectacle/kr-patch-toolkit@v0.3.0
-  ```
+[uv](https://docs.astral.sh/uv/) 로 Python 3.15 환경과 도구를 맞춥니다. 툴킷은 릴리스 태그로,
+나머지는 `uv.lock` 으로 고정되어 있습니다.
+
+```sh
+uv sync --locked
+```
+
+- [kr-patch-toolkit](https://github.com/perfectacle/kr-patch-toolkit) v0.4.0:
+  65c816 디스어셈블러(`krpatch sfc dis`), MesenCE 용 Lua 라이브러리(`krpatch sfc lua`)
+- [Pillow](https://python-pillow.org/): 맵·그림 렌더링
 - [MesenCE](https://github.com/nesdev-org/MesenCE) 2.2.1: 디버거와
   `--testrunner` 로 분석 스크립트를 돌립니다. 사용법은 [tools/README.md](tools/README.md).
 - [asar](https://github.com/RPGHacker/asar) 1.91: 패치 어셈블(빌드 단계부터).

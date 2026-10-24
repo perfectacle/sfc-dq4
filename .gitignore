@@ -10,3 +10,4 @@ build/
 refs/
 work/
 __pycache__/
+.venv/

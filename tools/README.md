@@ -9,7 +9,7 @@
 넘깁니다.
 
 ```sh
-export LIBDIR=$(krpatch snes lua)     # 툴킷 Lua 폴더
+export LIBDIR=$(uv run krpatch sfc lua)   # 툴킷 Lua 폴더
 export MESENCE=/path/to/MesenCE       # macOS: .../MesenCE.app/Contents/MacOS/Mesen
 
 mkdir -p work/wprof
@@ -44,7 +44,7 @@ SHOT_DIR=$PWD/work/wprof MAXF=1720 EVERY=0 PERIOD=40 TAP=a FROM=1625 TO=1710 \
 세이브스테이트에서 시작하는 상황에 다른 프로브를 쓰려면, 드라이버를 `boot.lua` 로 둔 Lua 폴더를 만들어 `LIBDIR` 로 줍니다.
 
 ```sh
-export LIBDIR=$(tools/lua/seqlib.sh "$(krpatch snes lua)" work/walklib walk.lua)
+export LIBDIR=$(tools/lua/seqlib.sh "$(uv run krpatch sfc lua)" work/walklib walk.lua)
 STATE=$PWD/work/state/ship.mss PRE="b:4,wait:40" WAYPOINTS="3,11;3,24;7,24;7,22" \
   SHOT_DIR=$PWD/work/x FROM=340 TO=398 MAXF=400 LO=2AE000 HI=2AFFFF \
   "$MESENCE" --testrunner "$PWD/rom/dq5.sfc" "$PWD/tools/lua/cover.lua"
@@ -54,7 +54,7 @@ STATE=$PWD/work/state/ship.mss PRE="b:4,wait:40" WAYPOINTS="3,11;3,24;7,24;7,22"
 
 ## Python
 
-저장소 최상위에서 실행합니다. `listing.py` 는 kr-patch-toolkit, 그림은 Pillow 가 필요합니다.
+저장소 최상위에서 `uv run python tools/<스크립트>` 로 실행합니다(`uv sync` 가 툴킷 v0.4.0 과 Pillow 를 설치).
 
 | 스크립트 | 하는 일 |
 | --- | --- |

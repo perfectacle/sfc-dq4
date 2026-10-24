@@ -5,8 +5,8 @@
 """
 import sys
 
-from kr_patch.snes.dis65816 import decode
-from kr_patch.snes.mapper import LoROM
+from kr_patch.sfc.dis65816 import decode
+from kr_patch.sfc.mapper import LoROM
 
 
 def main():
