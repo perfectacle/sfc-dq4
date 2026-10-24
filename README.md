@@ -72,7 +72,7 @@ dq4(FC DQ4 원작):
 - [docs/dq4-map-format.md](docs/dq4-map-format.md): DQ4(FC) 마을·던전 맵 269개(장소 번호, 비트열 압축, 연결·출구, 인물 목록)
 - [docs/dq4-data-format.md](docs/dq4-data-format.md): DQ4(FC) 이름 목록·아이템·몬스터·주문 표, 레벨업 성장 곡선
 - [docs/dq4-text-format.md](docs/dq4-text-format.md): DQ4(FC) 대사 텍스트(6비트 압축, 사전, 글자표, 메시지 번호)
-- [docs/dq4-encounter-format.md](docs/dq4-encounter-format.md): DQ4(FC) 적 조우 표(필드 구역 지도, 구역별 무리 후보, 조우율, 던전 층, 특수 전투)
+- [docs/dq4-encounter-format.md](docs/dq4-encounter-format.md): DQ4(FC) 적 조우 표(필드 구역 지도, 구역별 무리 후보, 조우율, 던전 층, 특수 전투, 배, 성수, 기습·선제)
 - [docs/dq4-warp.md](docs/dq4-warp.md): DQ4(FC) 장면 이동 도구(원하는 맵·필드 자리의 세이브스테이트 만들기)
 - [docs/dq4-script-format.md](docs/dq4-script-format.md): DQ4(FC) 인물 대화 스크립트(대화 번호, 조건·플래그·서비스 문장, 메시지 번호)
 - [docs/dq4-shop-format.md](docs/dq4-shop-format.md): DQ4(FC) 상점 품목·여관 값·가게 종류, 보물상자·발밑 숨은 물건과 열었음 플래그
@@ -150,6 +150,7 @@ nds(NDS DQ4 리메이크 참고):
 - [2026-10-25-18: DQ5 실측 규격으로 다시 그린 인물 스프라이트](docs/journal/dq4/2026-10-25-18-sprites2.md)
 - [2026-10-25-19: 대화 조건·밤 인물·호출 문장](docs/journal/dq4/2026-10-25-19-talk2.md)
 - [2026-10-25-20: 투기장 전투 테스트·효과 오류 보고와 SRAM 재현성](docs/journal/dq4/2026-10-25-20-debug2.md)
+- [2026-10-25-21: 적 조우의 남은 것](docs/journal/dq4/2026-10-25-21-encounter2.md)
 
 #### nds
 
