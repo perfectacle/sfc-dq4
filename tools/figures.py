@@ -161,6 +161,33 @@ def fig_record(rom):
     save(out, 'dq5-map-0207-record.webp')
 
 
+def fig_day_night(rom):
+    """02/06 을 낮·밤 팔레트로 그리고 그 시간대 인물 자리(8x8 셀 좌표)에 그림 번호를 표시."""
+    from dq5npc import map_entries, parse
+    panels = []
+    for night in (False, True):
+        dec = Decoder(rom, SLOT)
+        w, h, buf, _ = dec.decode(map_pointer(rom, 2, 6))
+        render(rom, dec, w, h, buf, map_cgram(rom, 2, 6, night), TMP)
+        img = Image.open(TMP).convert('RGB')
+        d = ImageDraw.Draw(img)
+        for a, _ in map_entries(rom, 2, 6):
+            f = parse(rom, a, night)
+            if not f:
+                continue
+            x, y = (f['x'] & 0x7F) * 8, (f['y'] & 0x7F) * 8
+            if x >= img.width:
+                continue
+            d.rectangle((x, y - 8, x + 15, y + 15), outline=(255, 255, 0), width=2)
+            label(img, f'{f["gfx"]:02X}', (x + 16, y))
+        label(img, 'night (7E:075E >= F0)' if night else 'day')
+        panels.append(img)
+    out = Image.new('RGB', (panels[0].width * 2 + 8, panels[0].height), (24, 24, 24))
+    out.paste(panels[0], (0, 0))
+    out.paste(panels[1], (panels[0].width + 8, 0))
+    save(out, 'dq5-map-0206-day-night.webp')
+
+
 def fig_transition():
     """맵 전환 전후 30프레임 간격 화면(wsnap.lua, 1560~1770)."""
     files = [f for f in sorted(glob.glob('work/wdump/s[0-9]*.png')) if 1560 <= int(f[-9:-4]) <= 1770]
@@ -180,6 +207,7 @@ def main():
     fig_commands(rom)
     fig_attributes(rom)
     fig_record(rom)
+    fig_day_night(rom)
     fig_transition()
     os.remove(TMP)
 
