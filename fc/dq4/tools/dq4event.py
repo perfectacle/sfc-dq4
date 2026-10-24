@@ -27,6 +27,7 @@ import sys
 from kr_patch.fc import ines
 
 import dq4data
+import dq4flags
 import dq4map
 import dq4npcblock
 import dq4talk
@@ -481,6 +482,7 @@ def cmd_xref(prg, rom, only, all_shapes):
 
 
 # 화면·RAM 으로 확인한 비트의 뜻. (번호, 비트) → 뜻. 근거는 fc/dq4/docs/dq4-save-format.md 「플래그 비트의 뜻」.
+# 장면을 돌려 켜지는 것을 본 비트는 dq4flags.CONFIRMED(fc/dq4/docs/dq4-story-format.md)에 있다.
 KNOWN = {
     (0x00, 0x02): 'サントハイム 왕과 이야기함(2장). 성문 병사 대사가 바뀜',
     (0x07, 0x80): '1장을 끝냄',
@@ -520,8 +522,9 @@ def cmd_meaning(prg, rom):
     print('번호 비트 주소     쓰기 검사  뜻')
     for (n, b), e in sorted(bits.items()):
         head = f'{n:02X}   {b:02X}   ${FLAGS + n:04X}  {len(e["w"]):3d}  {len(e["r"]):3d}  '
-        if (n, b) in KNOWN:
-            print(head + '[확인] ' + KNOWN[(n, b)])
+        known = KNOWN.get((n, b)) or dq4flags.CONFIRMED.get((n, b))
+        if known:
+            print(head + '[확인] ' + known)
             continue
         pick = sorted(e['w'] or e['r'], key=lambda x: x[1] is None)[0]
         where, msg = pick
