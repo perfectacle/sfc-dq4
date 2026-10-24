@@ -11,3 +11,5 @@ refs/
 work/
 __pycache__/
 .venv/
+# 에이전트 도구가 저장소 안에 두는 상태 파일
+.omc/
