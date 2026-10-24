@@ -9,7 +9,7 @@ SFC 「드래곤 퀘스트 V」(일본판) 엔진을 분석하는 트랙입니�
 - [docs/dq5-field-format.md](docs/dq5-field-format.md): DQ5 필드(세계 지도) 형식
 - [docs/dq5-text-format.md](docs/dq5-text-format.md): DQ5 메시지(허프만 부호)·제어 코드·폰트·대화 스크립트·이름 문자열·메뉴 창 문자열
 - [docs/dq5-data-format.md](docs/dq5-data-format.md): DQ5 게임 데이터(상점 품목·물건 가격·물건 표·몬스터·전투 조우)
-- [docs/dq5-graphics-format.md](docs/dq5-graphics-format.md): DQ5 전투 몬스터 그림(레코드·머리·조각·타일 압축·팔레트·배치·그림자)과 전투 배경
+- [docs/dq5-graphics-format.md](docs/dq5-graphics-format.md): DQ5 전투 몬스터 그림(레코드·머리·조각·타일 압축·팔레트·배치·그림자)과 전투 배경, 필드 인물 스프라이트(세트·레코드·타일 압축·프레임 배치·맵 OBJ 타일)
 - [todo.md](todo.md): 남은 일
 - [references.md](references.md): 참고 자료
 - [tools/README.md](tools/README.md): 도구 사용법
@@ -61,3 +61,4 @@ SFC 「드래곤 퀘스트 V」(일본판) 엔진을 분석하는 트랙입니�
 - [2026-10-25-29: 행동 전용 실행 루틴 66개](journal/2026-10-25-29-exec2.md)
 - [2026-10-25-30: ルーラ 목적지 플래그, 무리 플래그 bit7·무리 1E, 마법 융단과 코인](journal/2026-10-25-30-rura-carpet.md)
 - [2026-10-25-31: 그림자 칠하기와 전투 배경의 남은 것](journal/2026-10-25-31-battlebg2.md)
+- [2026-10-25-32: 필드 인물 스프라이트](journal/2026-10-25-32-sprite.md)
