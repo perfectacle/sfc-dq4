@@ -1,4 +1,4 @@
-"""DQ4(FC) 원작 그래픽 렌더러: 마을·던전 맵 269개, 필드, 블록·CHR·폰트 시트, MesenCE 덤프 화면. 쓰는 법은 docs/dq4-fcgfx.md.
+"""DQ4(FC) 원작 그래픽 렌더러: 마을·던전 맵 279개, 필드, 블록·CHR·폰트 시트, MesenCE 덤프 화면. 쓰는 법은 docs/dq4-fcgfx.md.
 
 사용:
   python tools/dq4fcgfx.py rom/dq4.nes all OUT                맵·필드·gfx 를 OUT/{maps,field,gfx} 에, 갤러리를 OUT/gallery 에
@@ -33,6 +33,11 @@ import dq4field  # noqa: E402
 import dq4map  # noqa: E402
 import dq4talk  # noqa: E402
 import dq4text  # noqa: E402
+
+# dq4map.maps 는 마지막 그룹 48(맵 10개)을 빼먹는다. dq4block.Map 이 쓰는 dq4map.load 를 이 프로세스 안에서만
+# dq4chest.load(마지막 그룹까지 푸는 판)로 바꾸고, 맵 목록은 dq4chest.all_maps(279개)를 쓴다.
+dq4map.load = dq4chest.load
+all_maps = dq4chest.all_maps
 
 # NES 색 번호 00~3F → MesenCE 기본 팔레트의 화면 RGB. tools/lua/fc/fcgfxpal.lua 로 색마다 화면 전체를 칠해 잰 값.
 MESEN_RGB = [
@@ -155,7 +160,7 @@ def place_names(prg, data):
     rom = dq4text.Rom(data)
     names = place_list(prg)
     text = {}
-    for g, k, *_ in dq4map.maps(prg):
+    for g, k, *_ in all_maps(prg):
         for night in (False, True):
             for r in dq4talk.npc_list(prg, g, k, night):
                 for msg in talk_msgs(prg, dq4talk.talk_id(r, night)):
@@ -206,7 +211,7 @@ def safe(name):
 
 def map_records(prg, names):
     out = []
-    for g, k, mid, bank, ptr in dq4map.maps(prg):
+    for g, k, mid, bank, ptr in all_maps(prg):
         name = names.get(g, '')
         stem = f'{g:02X}-{k:02X}' + (f'-{safe(name)}' if name else '')
         out.append({'g': g, 'k': k, 'type': mid & 0x3F, 'code': mid, 'name': name, 'stem': stem})
@@ -230,8 +235,59 @@ def mark(dr, x, y, color, label, inset=1):
         dr.text((x0 + 3, y0 + 2), label, fill=color, font=font(), stroke_width=1, stroke_fill=(0, 0, 0))
 
 
-def annotations(prg, g, k):
-    """주석판에 그리는 것: 인물(낮·밤), 출구, 보물상자, 발밑 숨은 물건."""
+def cell_features(prg, m):
+    """칸마다 블록 속성의 뜻(dq4block.terrain)에서 주석판에 그릴 것: 문(잠금 단계), 계단·출구 검사, 떨어지는 칸(목적지),
+    리프트, 旅の扉, 움직이는 바닥, 데미지 바닥, タンス·つぼ(dq4block.pots 의 내용물), 팻말(dq4block.signs 의 메시지)."""
+    g, k = m.g, m.k
+    pots = {(p['x'], p['y']): p for p in dq4block.pots(prg) if (p['group'], p['index']) == (g, k)}
+    signs = {}
+    for sg in dq4block.signs(prg):
+        signs.setdefault((sg['x'], sg['y']), []).append(sg)
+    lifts = {}
+    for lf in dq4block.lifts(prg):
+        if lf['group'] != g:
+            continue
+        for here, there in ((lf['a'], lf['b']), (lf['b'], lf['a'])):
+            if here['index'] == k:
+                lifts[(here['x'], here['y'])] = there
+    out, cache = [], {}
+    for y in range(m.h):
+        for x in range(m.w):
+            prop = m.blocks['prop'].get(m.cell(x, y) & 0x1F, 0)
+            if prop not in cache:
+                cache[prop] = dq4block.terrain(prg, prop)
+            t = cache[prop]
+            f = {'x': x, 'y': y, 'prop': prop}
+            eff = t.get('effect')
+            if 'door' in t:
+                f.update(kind='door', lock=t['door']['lock'])
+            elif eff == 'exit':
+                f['kind'] = 'exit'
+            elif eff == 'fall':
+                f.update(kind='fall', to=dq4block.fall(prg, g, k, x, y))
+            elif eff == 'lift':
+                f.update(kind='lift', to=lifts.get((x, y)))
+            elif eff == 'travel_door':
+                f['kind'] = 'travel_door'
+            elif eff == 'conveyor':
+                f.update(kind='conveyor', dir=t['dir'])
+            elif eff == 'damage':
+                f.update(kind='damage', hp=t['hp'])
+            elif t.get('facing') in ('dresser', 'pot'):
+                p = pots.get((x, y))
+                f.update(kind=t['facing'], item=None if p is None else p['item'],
+                         item_name=None if p is None else dq4chest.content_name(prg, p['item'], set()))
+            elif t.get('facing') == 'sign':
+                f.update(kind='sign', msg=[mm for sg in signs.get((x, y), []) for mm in sg['msg']])
+            else:
+                continue
+            out.append(f)
+    return out
+
+
+def annotations(prg, g, k, m=None):
+    """주석판에 그리는 것: 인물(낮·밤), 출구, 보물상자, 발밑 숨은 물건, 칸 속성으로 정해지는 것(cell_features)."""
+    m = m or dq4block.Map(prg, g, k)
     day = [{'n': i, 'x': x, 'y': y, 'look': dq4talk.look(r), 'talk': dq4talk.talk_id(r)}
            for i, r in enumerate(dq4talk.npc_list(prg, g, k)) for x, y in [dq4talk.pos(r)]]
     night = [{'n': i, 'x': x, 'y': y, 'look': dq4talk.look(r, True), 'talk': dq4talk.talk_id(r, True)}
@@ -240,13 +296,43 @@ def annotations(prg, g, k):
              for e in dq4map.exits(prg, g, k)]
     chests = [{'n': n, 'x': x, 'y': y, 'content': c, 'desc': d} for n, x, y, c, d in dq4chest.chests(prg, g, k) if x is not None]
     feet = [{'x': x, 'y': y, 'content': c, 'desc': d} for fg, fk, x, y, c, d, _ in dq4chest.feet_items(prg) if (fg, fk) == (g, k)]
-    return {'npcs': day, 'npcs_night': night, 'exits': exits, 'chests': chests, 'feet': feet}
+    cells, falls = [], {}
+    for c in cell_features(prg, m):
+        if c['kind'] == 'fall':        # 탑 바깥처럼 넓게 깔리는 일이 많아 목적지마다 칸을 묶는다
+            falls.setdefault(json.dumps(c['to'], sort_keys=True), []).append([c['x'], c['y']])
+        else:
+            cells.append(c)
+    falls = [{'to': json.loads(t), 'cells': xy} for t, xy in falls.items()]
+    return {'npcs': day, 'npcs_night': night, 'exits': exits, 'chests': chests, 'feet': feet, 'cells': cells, 'falls': falls}
+
+
+# 칸 속성 주석: (색, 글자). 문은 D 뒤에 잠금 단계(0 열쇠 없음, 1~3 은 とうぞく·まほう·さいご の かぎ 이상)
+CELL_MARK = {
+    'door': ((255, 150, 0), 'D'), 'exit': ((0, 255, 120), 'S'), 'fall': ((255, 60, 160), 'H'), 'lift': ((120, 255, 255), 'L'),
+    'travel_door': ((255, 255, 255), 'W'), 'damage': ((200, 255, 0), '!'), 'dresser': ((255, 200, 120), 'P'),
+    'pot': ((255, 200, 120), 'P'), 'sign': ((220, 220, 255), 'N'), 'conveyor': ((150, 200, 255), ''),
+}
+ARROW = {'up': '^', 'right': '>', 'down': 'v', 'left': '<'}
 
 
 def annotate(im, ann):
-    """인물 노랑(번호), 밤 인물 보라, 출구 하늘색(목적지 그룹), 상자 빨강, 발밑 분홍."""
+    """인물 노랑(번호), 밤 인물 보라, 출구 하늘색(목적지 그룹), 상자 빨강 T, 발밑 분홍 F, 칸 속성은 CELL_MARK.
+    떨어지는 칸은 글자 없이 가는 분홍 테두리만."""
     im = im.copy()
     dr = ImageDraw.Draw(im)
+    exits = {(e['x'], e['y']) for e in ann['exits']}
+    for fl in ann.get('falls', []):
+        for x, y in fl['cells']:
+            dr.rectangle([x * 16 + 2, y * 16 + 2, x * 16 + 13, y * 16 + 13], outline=CELL_MARK['fall'][0], width=1)
+    for c in ann.get('cells', []):
+        if c['kind'] == 'exit' and (c['x'], c['y']) in exits:
+            continue
+        color, label = CELL_MARK[c['kind']]
+        if c['kind'] == 'door':
+            label += str(c['lock'])
+        elif c['kind'] == 'conveyor':
+            label = ARROW[c['dir']]
+        mark(dr, c['x'], c['y'], color, label, 2)
     for e in ann['exits']:
         mark(dr, e['x'], e['y'], (0, 230, 255), e['to'][:2], 0)
     for c in ann['chests']:
@@ -274,7 +360,7 @@ def do_maps(prg, out, names):
         rec['night'] = map_palette(m, True) != map_palette(m)
         if rec['night']:
             render(m, True).save(d / f"{rec['stem']}-night.png")
-        ann = annotations(prg, g, k)
+        ann = annotations(prg, g, k, m)
         annotate(day, ann).save(d / f"{rec['stem']}-annot.png")
         rec['annot'] = ann
         index.append(rec)
@@ -350,13 +436,13 @@ def bank_palette(prg, bank):
     """블록 정의에서 그 뱅크 그림을 가장 많이 쓰는 (맵 종류, 팔레트)의 색."""
     from collections import Counter
     cnt = Counter()
-    types = sorted({m[2] & 0x3F for m in dq4map.maps(prg)} | {0})
+    types = sorted({m[2] & 0x3F for m in all_maps(prg)} | {0})
     for t in types:
         for d in dq4block.defs(prg, t).values():
             if d and d['bank'] == bank:
                 cnt[(t, d['pal'])] += 1
     (t, p), _ = cnt.most_common(1)[0]
-    rec = next((m for m in dq4map.maps(prg) if m[2] & 0x3F == t), None)
+    rec = next((m for m in all_maps(prg) if m[2] & 0x3F == t), None)
     pal12 = dq4block.palette(prg, t, rec[0], rec[1]) if t and rec else dq4block.palette(prg, 0)
     return t, p, pal_rgb(pal12)[p]
 
@@ -374,7 +460,7 @@ def font_sheet(prg):
 def do_gfx(prg, out, maps_index=None):
     d = Path(out) / 'gfx'
     (d / 'blocks').mkdir(parents=True, exist_ok=True)
-    maps_index = maps_index or [{'g': g, 'k': k, 'type': mid & 0x3F} for g, k, mid, *_ in dq4map.maps(prg)]
+    maps_index = maps_index or [{'g': g, 'k': k, 'type': mid & 0x3F} for g, k, mid, *_ in all_maps(prg)]
     first = {}
     for r in maps_index:
         first.setdefault(r['type'], (r['g'], r['k']))
@@ -537,7 +623,9 @@ def gallery(out):
          '<nav><a href="#maps">맵</a><a href="#field">필드</a><a href="#blocks">블록</a><a href="#chr">CHR·폰트</a>'
          '<a href="#screens">화면</a><a href="sprites.html">스프라이트·몬스터</a></nav>',
          '<p>썸네일을 누르면 1배 원본이 열립니다. 주석판: 노랑 인물(번호), 보라 밤에만 있는 인물, 하늘색 출구(목적지 그룹), '
-         '빨강 T 보물상자, 분홍 F 발밑 숨은 물건.</p>',
+         '빨강 T 보물상자, 분홍 F 발밑 숨은 물건, 주황 D0~D3 문(잠금 단계: 0 열쇠 없음, 1 とうぞく, 2 まほう, 3 さいご), '
+         '초록 S 계단·출구 검사 칸, 가는 분홍 테두리 떨어지는 칸, L 리프트, W 旅の扉, ! 데미지 바닥, ^&gt;v&lt; 움직이는 바닥, '
+         'P タンス·つぼ, N 팻말. 목적지·내용물·메시지는 <a href="../maps/index.json">maps/index.json</a>.</p>',
          f'<h2 id="maps">마을·던전 맵 {len(maps)}개</h2><div class="grid">']
     for r in maps:
         base = f"../maps/{r['stem']}"
