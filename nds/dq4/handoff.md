@@ -22,6 +22,7 @@ NDS 판은 **참고 자료**입니다. 패치는 계속 SFC DQ5 롬 위에 FC DQ
 | 대조표 | 이름 표 8개, 813줄 | [glossary.md](docs/glossary.md) |
 | 늘어난 것 | 6장 805줄, 동료 대화 7,796줄, 이민 마을 796줄 등 | [extras.md](docs/extras.md) |
 | 그래픽 | 인물 187팩, 몬스터 303(조립 277), 맵·전투 배경 675(텍스처와 위에서 본 렌더링), 효과 188, 아이콘 424 등 4,204파일. 세계 지도 배치는 못 풂. 결과는 비공개 저장소 `nds/dq4/` | [graphics-format.md](docs/graphics-format.md), `ndsgfx.py export` |
+| 동료 대화 표 | `PARAM/param_player_talk1`~`6.dat`, 44바이트 레코드 7,209개, 메시지 번호만 확정 | `ndstext.py talk` |
 | 툴킷 | v0.5.0 의 `krpatch nds`. 패치 적용은 `xdelta3`(LZMA 2차 압축) | |
 | 에뮬레이터 | desmume libretro 코어([EMU-01](../../.agents/skills/analysis/SKILL.md#emu-01--에뮬레이터는-mesence)) | |
 
