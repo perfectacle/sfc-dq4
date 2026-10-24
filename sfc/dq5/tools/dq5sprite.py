@@ -367,6 +367,134 @@ def obj_stem(m):
     return f'obj-{m["bc"]:02X}-' + ('xx' if m['bd'] & 0x7F == 0x7F else f'{m["bd"] & 0x7F:02X}')
 
 
+# 탈것($1954 = 80 마법의 양탄자, 81 天空城, 82 マスタードラゴン). 배는 탈것이 아니라 주인공 그림 98(세트 64)이다. 타일은 01:C4BE(A 뱅크, X 주소, Y 타일 수, $00 VRAM 워드 주소)가 같은 런 길이 압축(1F:D28B 꼴,
+# 7F 도 그대로)을 4bpp 그대로 풀어 VRAM 타일 180 부터 올리고, 칸은 16:F7DD 가 04 뱅크의 바이트(bit7 좌우 반전,
+# bit0-6 + 7E:1997(=180))로 만든다. 그리는 것은 00:FC08: 가로 cols × 세로 rows 칸, 프레임 오프셋 = 프레임 × 37E0,
+# 방향 오프셋 = 00:EE7C[방향] × 37C0(바이트). 칸 값의 팔레트는 $00(attr). 상하 반전 칸은 01:C42D·01:C160 표가
+# 칸 바이트 오프셋으로 더한다. 팔레트 5 는 색이 모두 0 인 그림자(색 연산)다.
+VEHICLES = (
+    {'id': 0x80, 'name': 'まほうのじゅうたん', 'what': '마법의 양탄자', 'tiles': ((0x16E7BD, 0x2F, 0x180),), 'parts': (
+        {'rom': 0x04952A, 'cols': 3, 'rows': 2, 'dir': 0x18, 'frame': 0x0C, 'attr': 0x0000, 'vflip': ()},
+        {'rom': 0x0494CF, 'cols': 3, 'rows': 3, 'dir': 0x24, 'frame': 0x12, 'attr': 0x0000, 'vflip': ()},
+        {'rom': 0x04955B, 'cols': 3, 'rows': 1, 'dir': 0x0C, 'frame': 0x06, 'attr': 0x0A00, 'vflip': ()})},
+    {'id': 0x81, 'name': '天空城', 'what': '天空城', 'tiles': ((0x2B84F0, 0x14, 0x180),), 'parts': (
+        {'rom': 0x049634, 'cols': 4, 'rows': 4, 'dir': 0, 'frame': 0, 'attr': 0x0600, 'vflip': ()},
+        {'rom': 0x0496C6, 'cols': 4, 'rows': 2, 'dir': 0, 'frame': 0, 'attr': 0x0A00,
+         'vflip': (0x08, 0x0A, 0x0C, 0x0E, 0x18, 0x1A, 0x1C, 0x1E)})},  # 01:C42D
+    {'id': 0x82, 'name': 'マスタードラゴン', 'what': 'マスタードラゴン',
+     'tiles': ((0x16EAF2, 0x40, 0x180), (0x16F115, 0x39, 0x1C0)), 'parts': (
+        {'rom': 0x049574, 'cols': 4, 'rows': 4, 'dir': 0x60, 'frame': 0x20, 'attr': 0x0000, 'vflip': ()},
+        {'rom': 0x049685, 'cols': 2, 'rows': 2, 'dir': 0x18, 'frame': 0x08, 'attr': 0x0A00,
+         'vflip': bytes.fromhex('1c1e24262c2e30323436383a3c3e404244464c4e54565c5e')})},  # 01:C160
+)
+MAP_PALETTES = 0x019A12
+
+
+def map_palettes(rom):
+    """01:996A. 맵마다 덮는 16색 줄. 0x23바이트 항목 [BC(FE 면 필드)][BD(FF 면 그룹 전부, 필드면 세계)]
+    [플래그 번호(FF 면 늘)][마스크][CGRAM 16색 줄 번호][색 1~15], FF 로 끝. 0 번 색은 0. 줄 0B 가 OBJ 팔레트 3."""
+    out, a = [], MAP_PALETTES
+    while rom.u8(a) != 0xFF:
+        out.append({'entry': a, 'bc': rom.u8(a), 'bd': rom.u8(a + 1), 'flag': rom.u8(a + 2), 'mask': rom.u8(a + 3),
+                    'line': rom.u8(a + 4), 'colors': [0] + [rom.u16(a + 5 + i * 2) for i in range(15)]})
+        a += 0x23
+    return out
+
+
+def map_obj_palette3(rom, bc, bd):
+    """맵(BC, BD)에서 OBJ 팔레트 3(줄 0B)을 덮는 첫 항목. 플래그 조건은 보지 않는다."""
+    for e in map_palettes(rom):
+        if e['line'] == 0x0B and e['bc'] == bc and e['bd'] in (bd, 0xFF):
+            return e
+    return None
+
+
+DIR_INDEX = {'up': 0, 'right': 1, 'down': 2, 'left': 3}  # 00:EE7C
+FIELD_OBJ_PALETTE3 = 0x019BFF  # 필드의 OBJ 팔레트 3(덤프 CGRAM 과 같음)
+
+
+def vehicle_tiles(rom, v):
+    tiles = {}
+    for a, n, t0 in v['tiles']:
+        data, _ = unpack(rom, a, False)
+        for i in range(n):
+            tiles[t0 + i] = bytes(data[i * 32:i * 32 + 32])
+    return tiles
+
+
+def vehicle_part_cells(rom, part):
+    """칸 값 목록(OAM 이름+속성 16비트). 상하 반전 표를 반영."""
+    frames = max(1, part['dir'] // part['frame']) if part['frame'] else 1
+    n = part['cols'] * part['rows'] * frames * (4 if part['dir'] else 1)
+    out = []
+    for i in range(n):
+        b = rom.u8(part['rom'] + i)
+        out.append(0x180 + (b & 0x7F) | (0x4000 if b & 0x80 else 0) | part['attr'])
+    for off in part['vflip']:
+        if off // 2 < len(out):
+            out[off // 2] |= 0x8000
+    return out, frames
+
+
+def vehicle_frames(rom, v):
+    """부분마다 {(방향, 프레임): (팔레트, 색 번호) 격자}."""
+    tiles = vehicle_tiles(rom, v)
+    pix = {t: pixels(b) for t, b in tiles.items()}
+    out = []
+    for part in v['parts']:
+        cells, frames = vehicle_part_cells(rom, part)
+        W, H = part['cols'] * 8, part['rows'] * 8
+        fr = {}
+        for d in DIRS:
+            for f in range(frames):
+                base = (DIR_INDEX[d] * part['dir'] + f * part['frame']) // 2 if part['dir'] else 0
+                img = [[None] * W for _ in range(H)]
+                for k in range(part['cols'] * part['rows']):
+                    c = cells[base + k]
+                    p = pix.get(c & 0x1FF)
+                    if p is None:
+                        continue
+                    x0, y0 = (k % part['cols']) * 8, (k // part['cols']) * 8
+                    for y in range(8):
+                        for x in range(8):
+                            ci = p[7 - y if c & 0x8000 else y][7 - x if c & 0x4000 else x]
+                            if ci:
+                                img[y0 + y][x0 + x] = ((c >> 9) & 7, ci)
+                fr[(d, f)] = img
+                if not part['dir']:
+                    break
+            if not part['dir']:
+                break
+        out.append({'part': part, 'frames': fr, 'cells': cells, 'nframes': frames})
+    return out
+
+
+def vehicle_sheet(fr, pals, scale=1, index=False):
+    """행 아래·왼쪽·오른쪽·위, 열 프레임. 방향이 없는 부분은 한 장."""
+    from PIL import Image
+
+    keys = sorted(fr['frames'])
+    dirs = [d for d in DIRS if any(k[0] == d for k in keys)]
+    nf = max(k[1] for k in keys) + 1
+    img0 = next(iter(fr['frames'].values()))
+    W, H = len(img0[0]), len(img0)
+    im = Image.new('RGBA', (W * nf, H * len(dirs)), (0, 0, 0, 0))
+    for r, d in enumerate(dirs):
+        for f in range(nf):
+            g = fr['frames'].get((d, f))
+            if not g:
+                continue
+            for y, row in enumerate(g):
+                for x, pv in enumerate(row):
+                    if pv:
+                        pal, ci = pv
+                        col = INDEX_COLORS[ci] if index else ((48, 48, 48) if pal == 5 else rgb(pals[pal][ci]))
+                        im.putpixel((f * W + x, r * H + y), col + ((160 if pal == 5 and not index else 255),))
+    if scale > 1:
+        im = im.resize((im.width * scale, im.height * scale), Image.NEAREST)
+    return im
+
+
 LAYOUT_GROUP = {'overlap': '8타일(머리+몸, 세트 80~)', 'simple': '6타일(세트 00~6F)'}
 
 
@@ -430,18 +558,38 @@ def export_all(rom, outdir, scale=1, grid=False, index=True):
             ie = save(sheet(rec, pals[rec['palette']], scale, True, True, True), stem + '-lying-index.png')
             ie.update({'group': '색 번호 보기', 'title': title + ' 누운 모양 색 번호', 'set': s})
             entries.append(ie)
+    vpals = [list(p) for p in pals] + [[0] * 16 for _ in range(4)]
+    vpals[3] = [rom.u16(FIELD_OBJ_PALETTE3 + i * 2) for i in range(16)]
+    for v in VEHICLES:
+        for k, fr in enumerate(vehicle_frames(rom, v)):
+            part = fr['part']
+            stem = f'v{v["id"]:02X}' + (f'-{v["name"]}' if v['name'] else '') + f'-{k + 1}'
+            for idx in ((False, True) if index else (False,)):
+                e = save(vehicle_sheet(fr, vpals, scale, idx), stem + ('-index' if idx else '') + '.png')
+                e.update({'group': '탈것' + (' 색 번호' if idx else ''), 'title': f'{v["what"]} 부분 {k + 1}',
+                          'vehicle': v['id'], 'vehicle_name': v['name'], 'part': k + 1,
+                          'rom': f'{part["rom"]:06X}', 'tile_data': [f'{a:06X}' for a, _, _ in v['tiles']],
+                          'cols': part['cols'], 'rows': part['rows'], 'frames_per_dir': fr['nframes'],
+                          'directional': bool(part['dir']), 'obj_palette': (part['attr'] >> 9) & 7, 'scale': scale,
+                          'note': '행 아래·왼쪽·오른쪽·위, 열 프레임. 팔레트 5 는 그림자(반투명 회색으로 칠함)'})
+                entries.append(e)
     seen = set()
     for k, m in enumerate(map_objects(rom)):
         stem = obj_stem(m)
         if stem in seen:
             stem += f'-{k:02X}'
         seen.add(stem)
+        bd = m['bd'] & 0x7F
+        mp = map_obj_palette3(rom, m['bc'], 0xFF if bd == 0x7F else bd) if m['bc'] != 0x7E else None
+        pal = mp['colors'] if mp else vpals[3] if m['bc'] == 0x7E else pals[0]
         for idx in ((False, True) if index else (False,)):
-            e = save(tile_sheet(m['tiles'], pals[0], scale, idx), stem + ('-index' if idx else '') + '.png')
+            e = save(tile_sheet(m['tiles'], pal, scale, idx), stem + ('-index' if idx else '') + '.png')
             e.update({'group': '맵 OBJ 타일' + (' 색 번호' if idx else ''), 'title': f'{m["where"]} {m["data"]:06X}',
                       'map_object': k, 'where': m['where'], 'entry': f'{m["entry"]:06X}', 'data': f'{m["data"]:06X}',
                       'data_end': f'{m["end"]:06X}', 'tiles': len(m['tiles']), 'reserve': m['reserve'],
-                      'packed': m['packed'], 'scale': scale, 'note': '배치 모름, 팔레트 0 으로 칠함'})
+                      'packed': m['packed'], 'scale': scale,
+                      'palette_from': (f'01:{mp["entry"] & 0xFFFF:04X}' if mp else '필드 OBJ 팔레트 3' if m['bc'] == 0x7E else '모름(팔레트 0)'),
+                      'note': '배치 모름. 팔레트는 그 맵의 OBJ 팔레트 3(01:9A12 표)'})
             entries.append(e)
     with open(os.path.join(outdir, 'index.json'), 'w') as fp:
         json.dump(index_document(entries, pals), fp, ensure_ascii=False, indent=1)
@@ -457,7 +605,7 @@ def index_document(entries, pals):
     hexc = lambda c: f'{c:04X}'  # noqa: E731
     sprites = []
     for e in entries:
-        if e.get('group') in ('색 번호 보기', '맵 OBJ 타일 색 번호'):
+        if e.get('group') in ('색 번호 보기', '맵 OBJ 타일 색 번호', '탈것 색 번호'):
             continue
         if 'layout' in e:
             sprites.append({
@@ -474,6 +622,13 @@ def index_document(entries, pals):
         elif e.get('group') == '누운 모양':
             sprites.append({'file': e['path'], 'set': e['set'], 'rotated': True, 'size': [e['w'], e['h']],
                             'frame': [LYING_W, LYING_H], 'rows': ['아래', '왼쪽', '오른쪽', '위'], 'cols': ['누움'],
+                            'index_file': e['path'][:-4] + '-index.png'})
+        elif 'vehicle' in e and not e['group'].endswith('색 번호'):
+            sprites.append({'file': e['path'], 'vehicle': e['vehicle'], 'label': e['vehicle_name'], 'part': e['part'],
+                            'rom': cpu(int(e['rom'], 16)), 'data': [cpu(int(a, 16)) for a in e['tile_data']],
+                            'cols': e['cols'], 'rows': e['rows'], 'frames_per_dir': e['frames_per_dir'],
+                            'rows_dirs': ['아래', '왼쪽', '오른쪽', '위'] if e['directional'] else [],
+                            'obj_palette': e['obj_palette'], 'size': [e['w'], e['h']],
                             'index_file': e['path'][:-4] + '-index.png'})
         elif 'map_object' in e:
             sprites.append({'file': e['path'], 'map_object': e['map_object'], 'where': e['where'],
@@ -539,6 +694,44 @@ def oam_box(items, vram):
     return x0, y0, box
 
 
+def compare_vehicles(rom, wram, vram, items, stats, verbose):
+    """탈것 슬롯(7E:3220 = FE): 타일이 VRAM 180~ 과, 칸 목록이 04 뱅크 표와, OAM 묶음이 부분 프레임과 같은지."""
+    w16 = lambda a: wram[a] | wram[a + 1] << 8  # noqa: E731
+    for v in VEHICLES:
+        tiles = vehicle_tiles(rom, v)
+        for k, fr in enumerate(vehicle_frames(rom, v)):
+            part, cells = fr['part'], fr['cells']
+            n = part['cols'] * part['rows']
+            for slot in range(0x20):
+                if wram[0x3220 + slot] != 0xFE:
+                    continue
+                lst = w16(0x8000 + wram[0x3200 + slot])
+                got = [w16(lst + i * 2) for i in range(n)]
+                if [c & 0xC1FF for c in got] != [c & 0xC1FF for c in cells[:n]]:
+                    continue
+                key = (v['id'], k)
+                vt = sum(1 for t, b in tiles.items() if vram[0xC000 + t * 32:][:32] == b)
+                stats.setdefault('vehicle_tiles', {})[v['id']] = (vt, len(tiles))
+                want = [{(x, y): pv[1] for y, row in enumerate(img) for x, pv in enumerate(row) if pv}
+                        for img in fr['frames'].values()]
+                hits = 0
+                for i in range(128 - n + 1):
+                    grp = items[i:i + n]
+                    if not all(grp) or not all(0x180 <= it[2] < 0x200 for it in grp):
+                        continue
+                    x0, y0, box = oam_box(grp, vram)
+                    norm = {(x - min(p[0] for p in box), y - min(p[1] for p in box)): pv[1] for (x, y), pv in box.items()}
+                    for wm in want:
+                        if wm and {(x - min(p[0] for p in wm), y - min(p[1] for p in wm)): c for (x, y), c in wm.items()} == norm:
+                            hits += 1
+                            break
+                st = stats.setdefault('vehicles', {}).setdefault(key, [0, 0])
+                st[0] += 1
+                st[1] += hits
+                if verbose:
+                    print(f'탈것 {v["id"]:02X} 부분 {k + 1} 슬롯 {slot:02X}: 타일 {vt}/{len(tiles)}, 칸 {n}/{n}, OAM 묶음 {hits}')
+
+
 def compare(rom, wram, vram, oam, cgram, stats, verbose=True):
     """인물 슬롯마다: 세트 타일이 VRAM 에 그대로 있는지, 칸 목록(7E:8060-)이 레코드와 같은지,
     그 세트 타일을 쓰는 OAM 묶음이 디코더 프레임 하나와 픽셀째로 같은지. 결과는 stats 에 더한다."""
@@ -548,6 +741,7 @@ def compare(rom, wram, vram, oam, cgram, stats, verbose=True):
     pal_ok = [all(cg[p * 16 + i] == pals[p][i] for i in range(1, 16)) for p in range(4)]
     stats['palette'] = stats.get('palette', []) + [pal_ok]
     items = oam_groups(oam)
+    compare_vehicles(rom, wram, vram, items, stats, verbose)
     seen = set()
     for slot in range(0x20):
         g = wram[0x3220 + slot]
@@ -665,6 +859,9 @@ def main():
               f'서로 다른 (세트, 방향, 프레임) {len(frames)}개')
         for s in sorted(set(f[0] for f in frames)):
             print(f'  세트 {s:02X}: ' + ' '.join(sorted(f'{d}{f}' for t, d, f in frames if t == s)))
+        for (vid, k), (seen_n, hits) in sorted(stats.get('vehicles', {}).items()):
+            vt = stats['vehicle_tiles'][vid]
+            print(f'탈것 {vid:02X} 부분 {k + 1}: 덤프 {seen_n}개에서 칸 목록 같음, 타일 {vt[0]}/{vt[1]}, OAM 묶음 {hits}개가 프레임과 같음')
         print('VRAM 확인 세트: ' + ' '.join(f'{s:02X}' for s in sorted(sets)))
         lying = sorted(f for f in frames if f[2] == 'lying')
         print(f'누운 모양 (세트, 방향) {len(lying)}개: ' + ' '.join(f'{t:02X}{d}' for t, d, _ in lying))
