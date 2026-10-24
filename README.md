@@ -128,6 +128,7 @@ nds(NDS DQ4 리메이크 참고):
 - [2026-10-25-20: 실행 루틴 표와 저주 장비](docs/journal/dq5/2026-10-25-20-exec.md)
 - [2026-10-25-21: 전투 몬스터 배치와 그림자](docs/journal/dq5/2026-10-25-21-mongfx-layout.md)
 - [2026-10-25-22: 전투 배경](docs/journal/dq5/2026-10-25-22-battlebg.md)
+- [2026-10-25-23: 01:8001 목적지 목록, 전투 곡, 무리 플래그 bit4·6, 미니게임 감시](docs/journal/dq5/2026-10-25-23-dev-lists.md)
 
 #### dq4
 
