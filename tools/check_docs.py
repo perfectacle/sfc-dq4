@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 JOURNAL = ROOT / 'docs' / 'journal'
-TRACKS = ('dq5', 'dq4')
+TRACKS = ('dq5', 'dq4', 'nds')
 NAME = re.compile(r'^(\d{4}-\d{2}-\d{2})-(\d{2})-[a-z0-9]+(?:-[a-z0-9]+)*\.md$')
 TITLE = re.compile(r'^# (\d{4}-\d{2}-\d{2})-(\d{2}): \S')
 LINK = re.compile(r'\]\(([^)\s]+)\)')

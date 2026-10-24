@@ -12,6 +12,7 @@
 | ----- | ------------------------------------------- | -------------------------------------------------------------- |
 | `dq5` | SFC DQ5 엔진(맵·필드·인물·스크립트) 분석    | `docs/dq5-*`, `tools/dq5*.py`, `docs/journal/dq5/`, 그림의 `dq5-*` |
 | `dq4` | FC DQ4 원작 데이터(맵·대사·몬스터 등) 분석 | `docs/dq4-*`, `tools/dq4*`, `docs/journal/dq4/`, 그림의 `dq4-*`     |
+| `nds` | NDS DQ4 리메이크·한글 팬패치 참고 분석(명칭 대조, 늘어난 내용, 맵·스프라이트 참고) | `docs/nds-*`, `tools/nds*`, `docs/journal/nds/`, 그림의 `nds-*` |
 
 공유 파일(`README.md`, `docs/todo.md`, `docs/references.md`, `tools/README.md`, `tools/lua/`, `tools/listing.py`)은 자기 트랙 몫의 줄·절만 고친다. 목록·표·순번은 트랙마다 나눠 두어, 두 트랙이 동시에 PR 을 올려도 충돌하지 않게 한다.
 
@@ -20,7 +21,7 @@
 어떤 도구를 쓰든 지킨다. 각 줄의 링크가 정본이다.
 
 - **롬·덤프·세이브스테이트를 커밋하지 않는다** — 저작권 데이터다. 롬은 사용자가 직접 준비해 `rom/` 에 둔다. [ROM-01](.agents/skills/analysis/SKILL.md#rom-01--롬-데이터-금지)
-- **다른 팬 해킹의 데이터를 쓰지 않는다** — 아이디어만 참고하고 그래픽은 직접 그린다. [ORIG-01](.agents/skills/analysis/SKILL.md#orig-01--남의-데이터-금지)
+- **다른 팬 해킹의 데이터를 쓰지 않는다** — 아이디어만 참고하고 그래픽은 직접 그린다. NDS DQ4 한글패치는 참고 허락을 받았다. [ORIG-01](.agents/skills/analysis/SKILL.md#orig-01--남의-데이터-금지)
 - **가설은 실측으로 확인한 뒤에 사실로 적는다** — 확인 못 한 것은 「남은 것」으로 남긴다. [VERIFY-01](.agents/skills/analysis/SKILL.md#verify-01--실측으로-확인)
 - **문서에 개인 경로를 쓰지 않는다** — 환경 변수와 저장소 상대 경로만. [DOC-01](.agents/skills/journal/SKILL.md#doc-01--개인-경로-금지)
 - **일지 순번은 트랙마다 PR 직전 `origin/main` 기준으로 매긴다** — 같은 트랙의 세션끼리 번호가 겹치지 않게. 다른 트랙과는 겹쳐도 된다. [JOURNAL-01](.agents/skills/journal/SKILL.md#journal-01--일지-이름과-순번)

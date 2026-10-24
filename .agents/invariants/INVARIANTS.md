@@ -7,9 +7,9 @@
 | ID        | 요지                                                                 | 소유자                                                                          |
 | --------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | ROM-01    | 롬·덤프·세이브스테이트를 커밋하지 않는다. 롬은 사용자가 준비한다    | [analysis §ROM-01](../skills/analysis/SKILL.md#rom-01--롬-데이터-금지)          |
-| ORIG-01   | 다른 팬 해킹의 데이터·그래픽을 쓰지 않는다. 아이디어만 참고         | [analysis §ORIG-01](../skills/analysis/SKILL.md#orig-01--남의-데이터-금지)      |
+| ORIG-01   | 다른 팬 해킹의 데이터·그래픽을 쓰지 않는다. 아이디어만 참고(NDS DQ4 한글패치는 참고 허락) | [analysis §ORIG-01](../skills/analysis/SKILL.md#orig-01--남의-데이터-금지)      |
 | VERIFY-01 | 사실로 적는 것은 실측으로 확인한 것뿐. 나머지는 「남은 것」         | [analysis §VERIFY-01](../skills/analysis/SKILL.md#verify-01--실측으로-확인)     |
-| EMU-01    | 분석·문서의 에뮬레이터는 MesenCE                                    | [analysis §EMU-01](../skills/analysis/SKILL.md#emu-01--에뮬레이터는-mesence)    |
+| EMU-01    | 분석·문서의 에뮬레이터는 MesenCE(NDS 는 desmume libretro)           | [analysis §EMU-01](../skills/analysis/SKILL.md#emu-01--에뮬레이터는-mesence)    |
 
 ## 동시 작업 — 세션끼리 부딪히지 않게
 

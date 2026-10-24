@@ -45,6 +45,7 @@ description: 롬을 분석할 때. MesenCE 프로브·자동 보행 실험, 커�
 다른 팬 해킹(DQ4 이식 시도 등)의 패치·그래픽·데이터를 받아 쓰지 않는다. 그들의 글·문서에서 아이디어와 주소 힌트만 참고하고 [docs/references.md](../../../docs/references.md) 에 링크한다. 그래픽은 직접 그린다.
 
 - 이유: 원저작자의 허락이 없다.
+- 예외: NDS DQ4 한글 팬패치(v1.1, [references.md 「DQ4(NDS)」](../../../docs/references.md#dq4nds))는 사용자가 참고 자료로 허락했다. 명칭·번역 대조와 늘어난 내용 확인에 쓰고, 출처를 문서에 밝힌다. 롬에서 뽑은 대사 본문·그래픽은 ROM-01 에 따라 커밋하지 않는다.
 
 ### VERIFY-01 — 실측으로 확인
 
@@ -58,6 +59,7 @@ description: 롬을 분석할 때. MesenCE 프로브·자동 보행 실험, 커�
 분석·실험은 [MesenCE](https://github.com/nesdev-org/MesenCE) 로 한다(`--testrunner` + Lua). 문서에도 MesenCE 로 적는다. Mesen 2 는 호환 비교가 필요할 때만 쓴다.
 
 - 이유: 툴킷의 Lua 라이브러리와 기존 프로브가 MesenCE 기준이다. 에뮬레이터가 다르면 같은 세이브스테이트가 다른 결과를 낸다.
+- NDS(`nds` 트랙)는 MesenCE 가 돌리지 못한다. kr-patches 의 고스트 트릭 패치와 같이 desmume libretro 코어로 실측하고, 문서에 코어 커밋을 적는다.
 
 ## 참고 — 자주 밟는 함정
 
