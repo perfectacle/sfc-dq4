@@ -295,37 +295,29 @@ bit7 이 꺼져 있으면 번호 n = `$1AA0`, 켜져 있으면 n = `$1AA0 - 72`(
 
 ## 그래픽 내보내기와 갤러리
 
-스프라이트를 새로 그릴 때 원작 그림을 같은 배율로 찾아보려고, 지금까지 푼 형식을 모두 PNG 로 뽑는 도구를 두었습니다. 그림은 롬에서 뽑은 것이라 `work/` 에만 쓰고 커밋하지 않습니다.
+스프라이트를 새로 그릴 때 원작 그림을 같은 배율로 찾아보려고, 지금까지 푼 형식을 모두 PNG 로 뽑는 도구를 두었습니다. 그림은 롬에서 뽑은 것이라 공개 저장소에는 커밋하지 않습니다.
 
 ```sh
-uv run --locked python sfc/dq5/tools/dq5gallery.py rom/dq5.sfc     # work/gallery/index.html
-uv run --locked python sfc/dq5/tools/dq5gfx.py rom/dq5.sfc --only maps --maps 02/06   # 일부만 work/gfx/
+uv run --locked python sfc/dq5/tools/dq5gallery.py rom/dq5.sfc --out work/dq5gfx   # 분류 폴더 + gallery/index.html
+uv run --locked python sfc/dq5/tools/dq5gfx.py rom/dq5.sfc --only maps --maps 02/06  # 일부만
 ```
 
-뽑아 둔 결과는 비공개 저장소 `sfc-dq4-assets` 의 `sfc/dq5/gfx/`·`sfc/dq5/gallery/` 에 있습니다(만든 커밋과 명령은 각 폴더의 `SOURCE.txt`). 그 저장소에서는 아래처럼 돌려 갤러리가 `../gfx/`·`../sprites/` 를 상대 경로로 가리키게 합니다.
+[dq5gfx.py](../tools/dq5gfx.py) 가 `--out` 아래 분류 폴더에 그림을 쓰고, [dq5gallery.py](../tools/dq5gallery.py) 가 `gallery/index.html`(맵·필드·블록·CHR·창·움직이는 타일)과 `gallery/sprites.html`(인물 스프라이트·몬스터·전투 배경)을 만듭니다.
+뽑아 둔 결과는 비공개 저장소 `sfc-dq4-assets` 의 `sfc/dq5/` 에 있고(`--out <체크아웃>/sfc/dq5`), 폴더 구성과 파일 이름은 그 저장소 README 의 「폴더·파일 규칙」(`fc/dq4/` 와 같은 꼴)을 따릅니다.
+인물 스프라이트는 `sprites/index.json` 이 있으면 그 목록을 링크하고, 없으면 `dq5sprite.export_all` 로 뽑습니다. 분류 폴더마다 `index.json`(항목·크기·롬 주소)과 `SOURCE.txt`(만든 커밋·명령·롬 SHA-1)를 남깁니다.
 
-```sh
-A=<sfc-dq4-assets 체크아웃>/sfc/dq5
-uv run --locked python sfc/dq5/tools/dq5gallery.py rom/dq5.sfc --out $A/gallery --gfx $A/gfx --sprites $A/sprites
-```
-
-`--sprites` 폴더에 `index.json` 이 있으면 스프라이트는 다시 뽑지 않고 그 목록을 링크합니다. 맵 파일 이름은 `<BC>-<BD>.png` 에 변형(`-night`, `-setNN`, `-annot` 속성 겹침, `-blocks`)을 붙이고, 폴더마다 `index.json` 에 항목 목록을 남깁니다.
-
-[tools/dq5gfx.py](../tools/dq5gfx.py) 가 묶음마다 그림을 만들고 [tools/dq5gallery.py](../tools/dq5gallery.py) 가 그것을 한 쪽짜리 HTML 로 묶습니다.
-갤러리는 분류·그룹·제목으로 거르고, 누르면 1~8배·맞춤으로 픽셀 그대로(`image-rendering: pixelated`) 키워 봅니다. 그림을 상대 경로로만 가리키므로 폴더째 옮겨도 열립니다.
-전투 배경(`sfc/dq5/tools/dq5battlebg.py`)과 필드 인물 스프라이트(`sfc/dq5/tools/dq5sprite.py` 의 `export_all(rom, outdir)`)는 모듈이 있으면 함께 뽑고, 없으면 건너뜁니다.
-
-| 묶음 | 내용 | 근거 |
+| 폴더 | 내용 | 근거 |
 | --- | --- | --- |
-| `maps` | 실내 맵 346개와 그룹 `$50` 이상 18개 전체 그림(낮, 밤 팔레트가 다르면 밤도), [플래그로 바꾸는 팔레트 세트](dq5-map-format.md#플래그로-바꾸는-팔레트-세트-019771)가 걸린 맵은 그 세트로도. 맵별 루틴(`15:F907`)이 셀 버퍼에 쓰는 값까지 반영 | `dq5map.Decoder`, `dq5exit.apply_hook` |
-| `maps` 속성 | 셀 `+1` 아래 니블(걸을 수 있는 층마다 색), 빨강 = 층 없음(벽), 주황 = 가구(`+1` bit7), 자홍 = 출구 셀. 16셀마다 좌표 격자 | [셀 버퍼](dq5-map-format.md#셀-버퍼-7ec000-) |
-| `maps` 블록 | 맵이 쓰는 블록(배경 블록 포함)을 번호와 함께 2배로 | [블록](dq5-map-format.md#블록-018acb) |
-| `chr` | 실내 CHR 4,096개(`13:8000`~)와 그룹 `$50` 이상 CHR 512개(`1F:8000`~)를 CHR 팔레트 번호대로. 색은 02/06·51/50 의 낮 팔레트 | [CHR 과 VRAM 슬롯](dq5-map-format.md#chr-과-vram-슬롯-018c15) |
-| `field` | 세계 0 을 2·3번 줄 8벌(`01:A189`)마다, 세계 1·2, 입구 표시, 블록 512개(아래·위층), 타일 512개, 4번 줄 물결 색 10단계(GIF) | [dq5-field-format.md](dq5-field-format.md) |
-| `monsters` | 몬스터 236마리 각각과 모음 | 이 문서 위쪽 |
-| `font` | 폰트 글자 `3DB` 개(글자 코드 표시) | [dq5-text-format.md 「폰트」](dq5-text-format.md#폰트-24a609) |
-| `ui` | 창·메뉴 BG3 타일 149개를 팔레트 넷으로, 그 타일로 짠 창 견본 | 아래 [창·메뉴 타일](#창메뉴-타일-04e17d) |
-| `anim` | 필드 타일 454~459 8벌, 물 타일 4·5·20·21 을 돌린 16단계(GIF 포함) | [dq5-field-format.md 「타일 그래픽과 팔레트」](dq5-field-format.md#타일-그래픽과-팔레트) |
+| `maps/` | 실내 맵 346개와 그룹 `$50` 이상 18개, `<BC>-<BD>[-마을 이름].png`(1배). 맵별 루틴(`15:F907`)이 셀 버퍼에 쓰는 값까지 반영. 변형 `-night`(밤 팔레트가 다를 때), `-setNN`([플래그로 바꾸는 팔레트 세트](dq5-map-format.md#플래그로-바꾸는-팔레트-세트-019771)), `-annot`(노랑 인물 번호, 하늘색 출구, 빨강 T 보물상자, 분홍 S タンス·ツボ·タル, 분홍 F 발밑) | `dq5map`, `dq5exit`, `dq5npc`, `dq5chest` |
+| `field/` | `field0`(낮 `01:A24D`), `field0-night`(`01:A379`), `field0-<포인터>`(나머지 시간대 벌), `field1`·`field2`, `fieldN-annot`(입구 그룹·이름) | [dq5-field-format.md](dq5-field-format.md) |
+| `monsters/` | 몬스터 236마리 `<번호>-<이름>.png` | 이 문서 위쪽 |
+| `battlebg/` | 배경 49개 `<번호>.png`(세계 0)·`<번호>-1`·`-2`(`$1949`) | 이 문서 「전투 배경」 |
+| `gfx/blocks/` | `chrNN-color`·`-gray`(CHR 뱅크마다 1,024개, 2배), `maps/<맵>.png`(맵이 쓰는 블록과 번호), `field`·`field-lower`·`field-upper`(필드 블록 512개), `field-tiles`(필드 타일 512개) | [블록](dq5-map-format.md#블록-018acb) |
+| `gfx/screens/` | 창·메뉴 BG3 타일 149개(팔레트 넷), 창 견본 | 아래 [창·메뉴 타일](#창메뉴-타일-04e17d) |
+| `gfx/anim/` | 필드 타일 454~459 8벌, 물 타일 4·5·20·21 16단계, 물결 팔레트 10단계(시트와 GIF) | [dq5-field-format.md 「타일 그래픽과 팔레트」](dq5-field-format.md#타일-그래픽과-팔레트) |
+| `gfx/font.png` | 폰트 글자 `3DB` 개(n 번째 칸 = 글자 코드 n, 2배) | [dq5-text-format.md 「폰트」](dq5-text-format.md#폰트-24a609) |
+
+맵 이름은 ルーラ 목적지 목록 `25:85D5` 의 그룹 22개에 이름 표 `0B`(`23:D5F3`)의 같은 순번 이름을 붙인 것입니다. 그룹마다 인물 대사의 「ここは ○○」가 이 이름과 맞습니다(01 ラインハット, 1A アルカパ, 1B カボチ, 1C ジャハンナ, 1F サラボナ, 21 サンタローズ, 2D ネッドのやどや 등). 이름이 없는 그룹(던전 등)은 번호만 씁니다.
 
 필드 팔레트는 롬만으로 만듭니다(`field_cgram`). 1·5~7번 줄은 마지막 맵(01/00)의 세트, 2·3번 줄 색 1~15 는 `01:A189` 의 벌(세계 1·2 는 `01:A199`·`01:A3B5`), 4번 줄은 세트 목록 `$34` 번(`10:EC48`)에 세계 0 이면 색 1~3 을 `01:A0F6 + $1961*6` 으로 바꿉니다.
 `01:A189` 의 8벌 중 `A1D5`·`A211` 은 시간대 표(`01:A16B`)가 고르지 않지만 함께 뽑습니다.

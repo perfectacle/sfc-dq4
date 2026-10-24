@@ -1,27 +1,31 @@
 """DQ5(SFC) 그래픽을 롬에서 PNG 로 뽑는다. 형식은 sfc/dq5/docs/dq5-graphics-format.md 의 「그래픽 내보내기와 갤러리」.
 
 스프라이트를 새로 그릴 때 원작 그림을 같은 배율로 찾아보려는 용도다. 디코더는 다른 도구의 것을 그대로 쓴다.
+OUT 아래 분류 폴더는 에셋 저장소(sfc-dq4-assets)의 공통 규칙을 따른다.
 
-  maps     실내 맵 346개와 그룹 $50 이상 18개 전체 그림(낮·밤, 맵별 루틴 15:F907 반영), 속성 겹침, 맵이 쓰는 블록 모음
-  chr      실내 CHR(13:8000-, 1F:8000-)을 CHR 팔레트 번호(2A:8781, 0F:CF83)대로 칠한 모음
-  field    세계 지도 셋 전체(세계 0 은 시간대 8벌), 필드 블록 512개, 필드 타일 512개
-  monsters 전투 몬스터 236마리(dq5mongfx)
-  font     폰트 글자 0x3DB 개(dq5text)
-  ui       창·메뉴 BG3 타일 149개(04:E528)와 BG3 팔레트(04:98D7), 그 타일로 짠 창 견본
-  anim     필드의 움직이는 타일: 타일 454~459 8벌(1E:D0FF RLE), 물 타일 4·5·20·21 을 한 픽셀씩 돌린 16단계
+  maps/          실내 맵 346개와 그룹 $50 이상 18개(맵별 루틴 15:F907 반영). <BC>-<BD>[-마을 이름][-변형].png,
+                 변형 annot(인물·출구·상자·タンス·발밑 표시), night(밤 팔레트), setNN(플래그 팔레트 세트 01:9771)
+  field/         세계 지도 셋. field0(낮)·field0-night·field0-<포인터>(다른 시간대 팔레트)·field1·field2·fieldN-annot(입구)
+  monsters/      전투 몬스터 236마리 <번호>-<이름>.png (dq5mongfx)
+  battlebg/      전투 배경 49개 × 세계($1949) 셋 <번호>[-<세계>].png (dq5battlebg)
+  gfx/blocks/    CHR 뱅크(chrNN-color·-gray), 맵마다 쓰는 블록(maps/), 필드 블록·타일
+  gfx/screens/   창·메뉴 BG3 타일(04:E528)과 창 견본
+  gfx/anim/      필드의 움직이는 타일(타일 454~459 8벌, 물 타일 돌리기, 물결 팔레트) 시트와 GIF
+  gfx/font.png   폰트 글자 0x3DB 개
 
-결과는 OUT(기본 work/gfx)에 쓰고, 항목 목록(파일마다 분류·제목·크기·롬 주소)을 OUT/index.json 에 남긴다.
-파일 이름은 맵이면 <BC>-<BD>[-변형].png(변형: night 밤 팔레트, setNN 플래그 팔레트 세트, annot 속성 겹침, blocks 블록 모음).
-롬에서 뽑은 그림이므로 저장소에 커밋하지 않는다.
+맵·지도·몬스터·배경은 1배, 타일 시트만 2배다. 분류 폴더마다 index.json(항목 목록)과 SOURCE.txt(만든 커밋·명령·롬)를 남긴다.
+롬에서 뽑은 그림이므로 공개 저장소에 커밋하지 않는다.
 
 사용:
-  python sfc/dq5/tools/dq5gfx.py rom/dq5.sfc [--out work/gfx] [--only maps,field] [--maps 02/06,51/50]
+  python sfc/dq5/tools/dq5gfx.py rom/dq5.sfc [--out work/dq5gfx] [--only maps,field] [--maps 02/06,51/50]
   python sfc/dq5/tools/dq5gfx.py rom/dq5.sfc --check work/d/f00005 06/03 [--set 26] [--night]
 --check 는 sfc/dq5/tools/lua/dq5gfxdump.lua 로 그 맵에서 덤프한 VRAM·CGRAM 으로 BG2 위에 BG1 을 겹친 화면을 맵 그림과 비교한다.
 """
 import argparse
+import hashlib
 import json
 import os
+import subprocess
 import sys
 
 from PIL import Image, ImageDraw
@@ -56,6 +60,8 @@ UI_PALETTE = 0x0498D7
 # 2B:8000: 필드 타일 454~459(VRAM 워드 3C60)의 8벌을 1E:D0FF 의 RLE(01:A64F 와 같은 꼴)로 7E:C800 에 푼다.
 FIELD_ANIM = 0x1ED0FF
 FIELD_ANIM_TILE, FIELD_ANIM_COUNT, FIELD_ANIM_SETS = 0x1C6, 6, 8
+# 25:85D5: ルーラ 목적지의 맵 그룹 22개. 이름은 이름 표 0B(23:D5F3) 의 같은 순번.
+RURA_GROUPS, RURA_COUNT, TOWN_NAMES = 0x2585D5, 22, 0x0B
 
 
 def rgb(c):
@@ -90,8 +96,8 @@ def scaled(img, scale):
     return img.resize((img.width * scale, img.height * scale), Image.NEAREST) if scale > 1 else img
 
 
-def sheet(cells, cols, cell_w, cell_h, labels=None, bg=(32, 32, 40), pad=1, label_h=0):
-    """같은 크기 그림을 격자로. labels 를 주면 칸 위에 작은 글씨."""
+def sheet(cells, cols, cell_w, cell_h, labels=None, bg=(32, 32, 40), pad=1, label_h=0, below=False):
+    """같은 크기 그림을 격자로. labels 를 주면 칸 위(below 면 아래)에 작은 글씨."""
     rows = (len(cells) + cols - 1) // cols
     W, H = cols * (cell_w + pad) + pad, rows * (cell_h + label_h + pad) + pad
     out = Image.new('RGB', (W, H), bg)
@@ -99,22 +105,10 @@ def sheet(cells, cols, cell_w, cell_h, labels=None, bg=(32, 32, 40), pad=1, labe
     for i, c in enumerate(cells):
         x, y = pad + i % cols * (cell_w + pad), pad + i // cols * (cell_h + label_h + pad)
         if labels:
-            d.text((x, y), labels[i], fill=(200, 200, 120))
+            d.text((x, y + (cell_h if below else 0)), labels[i], fill=(200, 200, 120))
         if c is not None:
-            out.paste(c, (x, y + label_h), c if c.mode == 'RGBA' else None)
+            out.paste(c, (x, y + (0 if below else label_h)), c if c.mode == 'RGBA' else None)
     return out
-
-
-class Out:
-    def __init__(self, root):
-        self.root, self.items = root, []
-
-    def save(self, img, rel, cat, title, group='', **meta):
-        path = os.path.join(self.root, rel)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        img.save(path)
-        self.items.append({'cat': cat, 'group': group, 'title': title, 'path': rel,
-                           'w': img.width, 'h': img.height, **meta})
 
 
 # ---------------------------------------------------------------- 실내 맵
@@ -195,36 +189,6 @@ def draw_cells(rom, dec, w, h, buf, cgram, layers=(2, 5)):
     return img
 
 
-def attr_overlay(base, w, h, buf, exits):
-    """셀 +1 아래 니블(걸을 수 있는 층)과 가구·출구를 반투명으로. 16칸마다 굵은 격자."""
-    img = base.convert('RGBA')
-    ov = Image.new('RGBA', img.size, (0, 0, 0, 0))
-    d = ImageDraw.Draw(ov)
-    for cell in range(w * h):
-        x, y = cell % w * 8, cell // w * 8
-        b1, a4, a7 = buf[cell * 8 + 1], buf[cell * 8 + 4], buf[cell * 8 + 7]
-        if a4 in exits or a7 in exits:
-            c = (255, 0, 255, 150)
-        elif b1 & 0x80:
-            c = (255, 140, 0, 110)
-        elif b1 & 7:
-            c = ((0, 255, 0, 70), (0, 200, 255, 90), (0, 255, 200, 90), (80, 80, 255, 90),
-                 (160, 255, 80, 90), (200, 120, 255, 90), (255, 255, 0, 90))[(b1 & 7) - 1]
-        else:
-            c = (255, 0, 0, 90)
-        d.rectangle((x, y, x + 7, y + 7), fill=c)
-    img = Image.alpha_composite(img, ov)
-    d = ImageDraw.Draw(img)
-    for x in range(0, w * 8, 16):
-        d.line((x, 0, x, h * 8), fill=(0, 0, 0, 255) if x % 128 == 0 else (0, 0, 0, 90))
-    for y in range(0, h * 8, 16):
-        d.line((0, y, w * 8, y), fill=(0, 0, 0, 255) if y % 128 == 0 else (0, 0, 0, 90))
-    for y in range(0, h, 16):
-        for x in range(0, w, 16):
-            d.text((x * 8 + 2, y * 8 + 1), f'{x},{y}', fill=(255, 255, 255, 255))
-    return img.convert('RGB')
-
-
 def block_image(rom, dec, n, colors, tc):
     """블록 하나를 그 자리 그대로(위층 줄도 한 그림에)."""
     h, w, upper, attr, rows = dec.load_block(n)
@@ -235,69 +199,6 @@ def block_image(rom, dec, n, colors, tc):
             t = tc.get(slot_chr[word & 0x3FF], (word >> 10) & 7, bool(word & 0x4000), bool(word & 0x8000))
             img.paste(t, (c * 8, r * 8), t)
     return img
-
-
-def export_maps(rom, out, only=None):
-    exits = set(exit_attrs(rom))
-    ids = map_ids(rom)
-    if only:
-        ids = [m for m in ids if m in only]
-    for bc, bd in ids:
-        name = f'{bc:02X}-{bd:02X}'
-        group = f'그룹 {bc:02X}'
-        dec, w, h, buf, blocks = decode_map(rom, bc, bd)
-        meta = dict(map=f'{bc:02X}/{bd:02X}', size=f'{w}x{h} 셀', addr=f'{map_pointer(rom, bc, bd):06X}',
-                    blocks=len(blocks), chrs=len(dec.chr_map))
-        day_cg = map_cgram(rom, bc, bd)
-        day = draw_cells(rom, dec, w, h, buf, day_cg)
-        out.save(day, f'maps/{name}.png', 'maps', f'{bc:02X}/{bd:02X} 낮', group, **meta)
-        night_cg = map_cgram(rom, bc, bd, alt=True)
-        if night_cg != day_cg:
-            out.save(draw_cells(rom, dec, w, h, buf, night_cg), f'maps/{name}-night.png', 'maps',
-                     f'{bc:02X}/{bd:02X} 밤', group, **meta)
-        for obc, obd, flag, mask, pset in palette_overrides(rom):
-            if obc == bc and obd in (None, bd):
-                cond = f'7E:{0x2190 + (flag & 0x7F):04X} & {mask:02X} {"= 0" if flag & 0x80 else "≠ 0"}'
-                for alt, when in ((False, '낮'), (True, '밤')):
-                    if alt and set_cgram(rom, pset, True) == set_cgram(rom, pset):
-                        continue
-                    out.save(draw_cells(rom, dec, w, h, buf, set_cgram(rom, pset, alt)),
-                             f'maps/{name}-set{pset:02X}{"-night" if alt else ""}.png', 'maps',
-                             f'{bc:02X}/{bd:02X} {when} 세트 {pset:02X}', group, **meta, note=f'{cond} 이면 01:9771 이 바꾸는 팔레트')
-                break
-        out.save(attr_overlay(day, w, h, buf, exits), f'maps/{name}-annot.png', 'maps-attr',
-                 f'{bc:02X}/{bd:02X} 속성', group, **meta)
-        colors = cgram_colors(day_cg)
-        tc = TileCache(rom, dec.high, colors)
-        imgs = [scaled(block_image(rom, dec, n, colors, tc), 2) for n in blocks]
-        cw = max(24, max(i.width for i in imgs))
-        ch = max(i.height for i in imgs)
-        out.save(sheet(imgs, max(1, min(16, 1024 // (cw + 1))), cw, ch, [f'{n:03X}' for n in blocks], label_h=10),
-                 f'maps/{name}-blocks.png', 'map-blocks', f'{bc:02X}/{bd:02X} 블록 {len(blocks)}개', group, **meta)
-        print(f'map {bc:02X}/{bd:02X} {w}x{h} blocks {len(blocks)}')
-
-
-def export_chr(rom, out):
-    """실내 CHR 을 팔레트 번호대로. 색은 오프닝 02/06 의 낮 팔레트(줄마다 뜻이 맵에 따라 다르다)."""
-    for high, bank, pal_table, cg_map, count, title in (
-            (False, 0x13, CHR_PALETTE, (0x02, 0x06), 0x1000, '실내 CHR 13:8000-'),
-            (True, 0x1F, HIGH_CHR_PALETTE, (0x51, 0x50), 0x200, '그룹 $50 이상 CHR 1F:8000-')):
-        colors = cgram_colors(map_cgram(rom, *cg_map))
-        tc = TileCache(rom, high, colors)
-        cells = []
-        for chr_id in range(count):
-            a = (bank + (chr_id >> 10)) << 16 | 0x8000 + (chr_id & 0x3FF) * 32
-            if lorom(a) + 32 > len(rom.d):
-                break
-            nib = rom.u8(pal_table + (chr_id >> 1))
-            pal = ((nib & 0x0F) + 1) * 4 if chr_id & 1 else ((nib & 0xF0) >> 2) + 4
-            cells.append(scaled(tc.get(chr_id, (pal >> 2) & 7, False, False), 2))
-        for part in range(0, len(cells), 0x400):
-            img = sheet(cells[part:part + 0x400], 32, 16, 16)
-            out.save(img, f'chr/{"high" if high else "indoor"}-{part:03X}.png', 'chr',
-                     f'{title} {part:03X}-{part + len(cells[part:part + 0x400]) - 1:03X}',
-                     note=f'2배, 32개씩 한 줄, 색은 {cg_map[0]:02X}/{cg_map[1]:02X} 팔레트')
-        print(f'chr {title}: {len(cells)}')
 
 
 # ---------------------------------------------------------------- 필드
@@ -364,113 +265,7 @@ def world_image(rom, world, blocks):
     return img
 
 
-def export_field(rom, out):
-    from dq5field import entrances
-    tiles = field_tiles(rom)
-    sets = field_time_sets(rom)
-    ents = entrances(rom)
-    for k, (ptr, los) in enumerate(sets):
-        cg = field_cgram(rom, 0, ptr)
-        blocks = field_block_images(rom, cg, tiles)
-        img = world_image(rom, 0, blocks)
-        when = ', '.join(f'{v:04X}' for v in los) or '없음(표가 고르지 않음)'
-        out.save(img, f'field/world0-{ptr:04X}.png', 'field', f'세계 0 (팔레트 01:{ptr:04X})', '세계 지도',
-                 note=f'$075E 하한 {when} 에서 고르는 2·3번 줄. 블록 256x256(16픽셀)', big=True)
-        if 2 in los:  # $075E 0002~00ED, 낮
-            first = (cg, blocks)
-        print(f'field world0 {ptr:04X}')
-    for world in (1, 2):
-        cg = field_cgram(rom, world)
-        img = world_image(rom, world, field_block_images(rom, cg, tiles))
-        out.save(img, f'field/world{world}.png', 'field', f'세계 {world}', '세계 지도',
-                 note='$1949 = %d. 땅이 있는 왼쪽 위 128x128 블록' % world, big=True)
-    # 입구 표시: 첫 벌 위에 04:FD97 입구(블록 좌표)를 노란 틀로, 1/4 축소.
-    cg, blocks = first
-    day_ptr = next(p for p, los in sets if 2 in los)
-    small = world_image(rom, 0, blocks).resize((1024, 1024), Image.BOX)
-    d = ImageDraw.Draw(small)
-    for g, x, y, w, _ in ents:
-        if w == 0:
-            d.rectangle((x * 2 - 4, y * 2 - 4, x * 2 + 6, y * 2 + 6), outline=(255, 255, 0))
-            d.text((x * 2 + 8, y * 2 - 4), f'{g:02X}', fill=(255, 255, 0))
-    out.save(small, 'field/world0-entrances.png', 'field', '세계 0 입구(1/4)', '세계 지도',
-             note='노란 틀과 숫자 = 04:FD97 입구의 그룹 $BC')
-    labels = [f'{m:03X}' for m in range(512)]
-    for layers, name in ((('lower', 'upper'), '아래+위층'), (('lower',), '아래층'), (('upper',), '위층')):
-        imgs = [scaled(i, 2) for i in field_block_images(rom, cg, tiles, layers)]
-        out.save(sheet(imgs, 16, 32, 32, labels, label_h=10), f'field/blocks-{"-".join(layers)}.png', 'field-blocks',
-                 f'필드 블록 512개 {name}', '블록', note='블록 번호(9비트), 2배. 정의 2A:A32C·2A:AD27')
-    from dq5field import tile_word
-    colors = cgram_colors(cg)
-    cells = []
-    for t in range(512):
-        word = tile_word(rom, t, True)
-        p = (word >> 10) & 7
-        cells.append(scaled(tile_image(tiles[t], colors[p * 16:p * 16 + 16]), 2))
-    out.save(sheet(cells, 32, 16, 16), 'field/tiles.png', 'field-blocks', '필드 타일 512개', '타일',
-             note='12:B1A8 (VRAM 워드 2000-), 2배, 위층 표의 팔레트로 칠함')
-    # 4번 줄 물결 색 10단계: 물이 들어간 블록 000 을 단계마다.
-    frames = []
-    for wave in range(WAVE_STEPS):
-        cgw = field_cgram(rom, 0, day_ptr, wave)
-        b = field_block_images(rom, cgw, tiles)
-        strip = Image.new('RGB', (16 * 8, 16))
-        for i, m in enumerate((0x000, 0x001, 0x002, 0x003, 0x004, 0x005, 0x006, 0x007)):
-            strip.paste(b[m], (i * 16, 0))
-        frames.append(scaled(strip, 3))
-    out.save(sheet(frames, 1, frames[0].width, frames[0].height,
-                   [f'$1961={k}' for k in range(WAVE_STEPS)], label_h=10),
-             'field/wave.png', 'anim', '필드 물결 팔레트 10단계(블록 000~007)', '필드',
-             note='4번 줄 색 1~3 을 01:A0F6 + $1961*6 으로 바꿈(매 프레임 01:A0CF)')
-    frames[0].save(os.path.join(out.root, 'field/wave.gif'), save_all=True,
-                   append_images=frames[1:], duration=120, loop=0)
-    out.items.append({'cat': 'anim', 'group': '필드', 'title': '필드 물결(GIF)', 'path': 'field/wave.gif',
-                      'w': frames[0].width, 'h': frames[0].height})
-
-
 # ---------------------------------------------------------------- 몬스터·폰트
-
-def export_monsters(rom, out):
-    from dq5mongfx import COUNT, monster
-    from dq5mongfx import render as render_monster
-    try:
-        from dq5monster import NAMES
-        from dq5text import string, string_codes, text
-        name = lambda m: text(string_codes(rom, string(rom, NAMES, m)))  # noqa: E731
-    except Exception:  # 이름 표를 못 읽어도 그림은 뽑는다
-        name = lambda m: ''  # noqa: E731
-    thumbs = []
-    for m in range(COUNT):
-        g, colors = monster(rom, m)
-        img = render_monster(rom, m, None)
-        out.save(img, f'monsters/{m:02X}.png', 'monsters', f'{m:02X} {name(m)}', '몬스터',
-                 pic=f'{g:02X}', colors=len(colors))
-        thumbs.append(img)
-    cw, ch = max(i.width for i in thumbs), max(i.height for i in thumbs)
-    out.save(sheet(thumbs, 12, cw, ch, [f'{m:02X}' for m in range(COUNT)], label_h=10),
-             'monsters/sheet.png', 'monsters', '몬스터 236마리 모음', '모음')
-    print(f'monsters {COUNT}')
-
-
-def export_font(rom, out):
-    from dq5text import GLYPHS, font_groups, glyph
-    groups = font_groups(rom)
-    cells, labels = [], []
-    for code in range(GLYPHS):
-        w, h, rows = glyph(rom, code, groups)
-        img = Image.new('RGBA', (16, 16), (0, 0, 0, 255))
-        p = img.load()
-        for y, row in enumerate(rows):
-            for x, v in enumerate(row):
-                if v and x < 16 and y < 16:
-                    p[x, y] = (255, 255, 255, 255)
-        cells.append(scaled(img, 2))
-        labels.append(f'{code:03X}')
-    out.save(sheet(cells, 16, 32, 32, labels, label_h=10), 'font/glyphs.png', 'font', f'폰트 글자 {GLYPHS}개', '폰트',
-             note='24:A609 묶음 표, 1bpp, 2배. 글자 코드 = 칸 위 숫자')
-    print(f'font {GLYPHS}')
-
-
 
 # ---------------------------------------------------------------- 창·움직이는 타일
 
@@ -500,28 +295,6 @@ UI_SAMPLE = (
 )
 
 
-def export_ui(rom, out):
-    o = lorom(UI_PALETTE)
-    cg = rom.d[o:o + 32]
-    colors = cgram_colors(cg)
-    data = ui_tiles(rom)
-    tiles = [chr_2bpp(data[t * 16:t * 16 + 16]) for t in range(len(data) // 16)]
-    for pal in range(4):
-        cs = colors[pal * 4:pal * 4 + 4]
-        cells = [scaled(tile_image(px, cs), 3) for px in tiles]
-        out.save(sheet(cells, 16, 24, 24, [f'{t:02X}' for t in range(len(tiles))], label_h=10),
-                 f'ui/tiles-pal{pal}.png', 'ui', f'창·메뉴 타일 {len(tiles)}개 (팔레트 {pal})', '타일',
-                 note='04:E528, 3배. 01~8A 는 1bpp(색 2·3), 8B~95 는 2bpp. 96 부터는 글자를 그때그때 그려 넣는 칸')
-    win = Image.new('RGBA', (len(UI_SAMPLE[0]) * 8, len(UI_SAMPLE) * 8), colors[0] + (255,))
-    for y, row in enumerate(UI_SAMPLE):
-        for x, w in enumerate(row):
-            t = tile_image(tiles[w & 0xFF], colors[0:4], bool(w & 0x400), bool(w & 0x800))
-            win.paste(t, (x * 8, y * 8), t)
-    out.save(scaled(win, 4), 'ui/window-sample.png', 'ui', '창 견본(배 선실의 상태 창)', '견본',
-             note='타일 8C~90 으로 짠 테두리와 글자 타일, 4배')
-    print(f'ui {len(tiles)} tiles')
-
-
 def field_anim_sets(rom):
     """타일 454~459 의 8벌: [벌][타일] = 32바이트."""
     from dq5field import rle
@@ -538,47 +311,6 @@ def rotate_pair(a, b, k):
         v = (v >> k | v << (16 - k)) & 0xFFFF
         oa[i], ob[i] = v >> 8, v & 0xFF
     return bytes(oa), bytes(ob)
-
-
-def export_anim(rom, out):
-    from dq5field import field_chr, tile_word
-    cg = field_cgram(rom, 0, next(p for p, los in field_time_sets(rom) if 2 in los))
-    colors = cgram_colors(cg)
-
-    def img(t, raw):
-        p = (tile_word(rom, t, False) >> 10) & 7
-        return tile_image(planar(raw), colors[p * 16:p * 16 + 16])
-
-    frames = []
-    for k, tiles in enumerate(field_anim_sets(rom)):
-        strip = Image.new('RGBA', (FIELD_ANIM_COUNT * 8, 8), colors[0] + (255,))
-        for i, raw in enumerate(tiles):
-            strip.paste(img(FIELD_ANIM_TILE + i, raw), (i * 8, 0))
-        frames.append(scaled(strip, 4).convert('RGB'))
-    out.save(sheet(frames, 1, frames[0].width, frames[0].height, [f'벌 {k}' for k in range(len(frames))], label_h=10),
-             'anim/field-454.png', 'anim', '필드 타일 454~459 8벌', '필드',
-             note='1E:D0FF RLE → 7E:C800, DMA 로 VRAM 워드 3C60 에. 4배')
-    frames[0].save(os.path.join(out.root, 'anim/field-454.gif'), save_all=True, append_images=frames[1:],
-                   duration=150, loop=0)
-    out.items.append({'cat': 'anim', 'group': '필드', 'title': '필드 타일 454~459 (GIF)', 'path': 'anim/field-454.gif',
-                      'w': frames[0].width, 'h': frames[0].height})
-    chrs = field_chr(rom)
-    frames = []
-    for k in range(16):
-        strip = Image.new('RGBA', (32, 8), colors[0] + (255,))
-        for j, (t1, t2) in enumerate(((0x04, 0x05), (0x14, 0x15))):
-            a, b = rotate_pair(chrs[t1 * 32:t1 * 32 + 32], chrs[t2 * 32:t2 * 32 + 32], k)
-            strip.paste(img(t1, a), (j * 16, 0))
-            strip.paste(img(t2, b), (j * 16 + 8, 0))
-        frames.append(scaled(strip, 4).convert('RGB'))
-    out.save(sheet(frames, 4, frames[0].width, frames[0].height, [f'{k}' for k in range(16)], label_h=10),
-             'anim/field-water.png', 'anim', '필드 물 타일 4·5·20·21 16단계', '필드',
-             note='두 타일을 한 줄 16픽셀로 보고 k 픽셀 돌림(세계 0 은 오른쪽). 4배')
-    frames[0].save(os.path.join(out.root, 'anim/field-water.gif'), save_all=True, append_images=frames[1:],
-                   duration=120, loop=0)
-    out.items.append({'cat': 'anim', 'group': '필드', 'title': '필드 물 타일 (GIF)', 'path': 'anim/field-water.gif',
-                      'w': frames[0].width, 'h': frames[0].height})
-    print('anim')
 
 
 # ---------------------------------------------------------------- 덤프한 VRAM 에서 BG 그리기
@@ -665,12 +397,340 @@ def check(rom, prefix, bc, bd, pset=None, night=False):
     cg = set_cgram(rom, pset, night) if pset is not None else map_cgram(rom, bc, bd, night)
     return match_screen(draw_cells(rom, dec, w, h, buf, cg), dump_screen(prefix))
 
-EXPORTS = {'maps': export_maps, 'chr': export_chr, 'field': export_field,
-           'monsters': export_monsters, 'font': export_font, 'ui': export_ui, 'anim': export_anim}
+
+# ---------------------------------------------------------------- 내보내기
+
+class Out:
+    """그림을 ROOT 아래 분류 폴더에 쓰고, 분류 폴더마다 index.json·SOURCE.txt 를 남긴다."""
+
+    def __init__(self, root, rom_sha=''):
+        self.root, self.items, self.rom_sha = root, [], rom_sha
+
+    def save(self, img, rel, cat, title, group='', **meta):
+        path = os.path.join(self.root, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        img.save(path)
+        self.items.append({'cat': cat, 'group': group, 'title': title, 'path': rel,
+                           'w': img.width, 'h': img.height, **meta})
+
+    def add(self, rel, cat, title, group='', **meta):
+        self.items.append({'cat': cat, 'group': group, 'title': title, 'path': rel, **meta})
+
+    def finish(self, command):
+        dirs = {}
+        for it in self.items:
+            d = os.path.dirname(it['path'])
+            top = d if d.startswith('gfx/') else d.split('/')[0]
+            if top.startswith('gfx/blocks'):
+                top = 'gfx/blocks'
+            dirs.setdefault(top, []).append(dict(it, path=os.path.relpath(it['path'], top)))
+        for top, items in dirs.items():
+            folder = os.path.join(self.root, top)
+            with open(os.path.join(folder, 'index.json'), 'w') as f:
+                json.dump(items, f, ensure_ascii=False, indent=0)
+            with open(os.path.join(folder, 'SOURCE.txt'), 'w') as f:
+                f.write(source_text(command, self.rom_sha))
 
 
-def export_all(rom, outdir, only=None, maps=None):
-    out = Out(outdir)
+def source_text(command, rom_sha):
+    try:
+        commit = subprocess.run(['git', '-C', os.path.dirname(os.path.abspath(__file__)), 'rev-parse', 'HEAD'],
+                                capture_output=True, text=True, check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        commit = '알 수 없음'
+    return (f'sfc-dq4 커밋: {commit}\n명령: {command}\n'
+            f'롬: SFC 「ドラゴンクエストV」 일본판, SHA-1 {rom_sha}\n')
+
+
+def group_names(rom):
+    """ルーラ 목적지 목록 25:85D5 의 맵 그룹 22개와 이름 표 0B(마을 이름)를 짝지은 {그룹: 이름}.
+    그룹마다 「ここは ○○」 대사가 이 이름과 맞는다(01 ラインハット, 1A アルカパ, 21 サンタローズ 등)."""
+    from dq5text import string, string_codes, text
+    return {rom.u8(RURA_GROUPS + i): text(string_codes(rom, string(rom, TOWN_NAMES, i))) for i in range(RURA_COUNT)}
+
+
+def map_stem(bc, bd, names):
+    name = names.get(bc) if bc < 0x50 else None
+    return f'{bc:02X}-{bd:02X}' + (f'-{name}' if name else '')
+
+
+def map_marks(rom, bc, bd, buf, w, h):
+    """주석판에 그릴 것: 출구 셀, 인물(낮 기본 목록), 보물상자, タンス·ツボ·タル, 발밑."""
+    from dq5chest import chest_maps, chests, foot_entries, search_entries
+    from dq5exit import exit_cells
+    marks = {'exits': exit_cells(buf, w, h, exit_attrs(rom)), 'npcs': [], 'chests': [], 'search': [], 'foot': []}
+    if bc < 0x50:
+        from dq5npc import map_entries, parse
+        for k, (a, _) in enumerate(map_entries(rom, bc, bd)):
+            f = parse(rom, a)
+            if f:
+                marks['npcs'].append((k, f['x'] & 0x7F, f['y'] & 0x7F, f['gfx'], f['talk']))
+    for cbc, cbd, start, _ in chest_maps(rom):
+        if (cbc, cbd) == (bc, bd):
+            marks['chests'] = [(n, x, y) for n, (x, y), _ in chests(rom, bc, bd, start)]
+    marks['search'] = [(x, y) for sbc, sbd, x, y, *_ in search_entries(rom) if (sbc, sbd) == (bc, bd)]
+    marks['foot'] = [(x, y) for sbc, sbd, x, y, *_ in foot_entries(rom) if (sbc, sbd) == (bc, bd)]
+    return marks
+
+
+def annotate(base, marks):
+    """노랑 인물(번호, 왼쪽 칸 기준 16x16), 하늘색 출구, 빨강 T 보물상자, 분홍 S タンス·ツボ·タル, 분홍 F 발밑."""
+    img = base.convert('RGB')
+    d = ImageDraw.Draw(img)
+    for x, y in marks['exits']:
+        d.rectangle((x * 8, y * 8, x * 8 + 7, y * 8 + 7), outline=(0, 200, 255))
+    for x, y in marks['search']:
+        d.rectangle((x * 8, y * 8, x * 8 + 7, y * 8 + 7), outline=(255, 120, 200))
+        d.text((x * 8 + 1, y * 8 - 2), 'S', fill=(255, 120, 200))
+    for x, y in marks['foot']:
+        d.rectangle((x * 8, y * 8, x * 8 + 7, y * 8 + 7), outline=(255, 120, 200))
+        d.text((x * 8 + 1, y * 8 - 2), 'F', fill=(255, 120, 200))
+    for _, x, y in marks['chests']:
+        d.rectangle((x * 8, y * 8, x * 8 + 7, y * 8 + 7), outline=(255, 40, 40))
+        d.text((x * 8 + 1, y * 8 - 2), 'T', fill=(255, 40, 40))
+    for k, x, y, _, _ in marks['npcs']:
+        d.rectangle((x * 8, y * 8, x * 8 + 15, y * 8 + 15), outline=(255, 230, 0))
+        d.text((x * 8 + 1, y * 8 + 3), f'{k}', fill=(255, 230, 0))
+    return img
+
+
+def export_maps(rom, out, only=None):
+    names = group_names(rom)
+    ids = map_ids(rom)
+    if only:
+        ids = [m for m in ids if m in only]
+    for bc, bd in ids:
+        stem = map_stem(bc, bd, names)
+        dec, w, h, buf, blocks = decode_map(rom, bc, bd)
+        marks = map_marks(rom, bc, bd, buf, w, h)
+        meta = dict(map=f'{bc:02X}/{bd:02X}', name=names.get(bc, '') if bc < 0x50 else '', stem=stem,
+                    size=f'{w}x{h}', addr=f'{map_pointer(rom, bc, bd):06X}', blocks=len(blocks), chrs=len(dec.chr_map),
+                    npcs=len(marks['npcs']), exits=len(marks['exits']), chests=len(marks['chests']))
+        title = f'{bc:02X}/{bd:02X}' + (f' {meta["name"]}' if meta['name'] else '')
+        group = f'그룹 {bc:02X}'
+        day_cg = map_cgram(rom, bc, bd)
+        day = draw_cells(rom, dec, w, h, buf, day_cg)
+        out.save(day, f'maps/{stem}.png', 'maps', title, group, variant='낮', **meta)
+        out.save(annotate(day, marks), f'maps/{stem}-annot.png', 'maps', title, group, variant='주석', **meta,
+                 annot={k: v for k, v in marks.items()})
+        night_cg = map_cgram(rom, bc, bd, alt=True)
+        if night_cg != day_cg:
+            out.save(draw_cells(rom, dec, w, h, buf, night_cg), f'maps/{stem}-night.png', 'maps', title, group,
+                     variant='밤', **meta)
+        for obc, obd, flag, mask, pset in palette_overrides(rom):
+            if obc == bc and obd in (None, bd):
+                cond = f'7E:{0x2190 + (flag & 0x7F):04X} & {mask:02X} {"= 0" if flag & 0x80 else "≠ 0"}'
+                for alt in (False, True):
+                    if alt and set_cgram(rom, pset, True) == set_cgram(rom, pset):
+                        continue
+                    out.save(draw_cells(rom, dec, w, h, buf, set_cgram(rom, pset, alt)),
+                             f'maps/{stem}-set{pset:02X}{"-night" if alt else ""}.png', 'maps', title, group,
+                             variant=f'세트 {pset:02X}' + (' 밤' if alt else ''), **meta,
+                             note=f'{cond} 이면 01:9771 이 바꾸는 팔레트')
+                break
+        colors = cgram_colors(day_cg)
+        tc = TileCache(rom, dec.high, colors)
+        imgs = [block_image(rom, dec, n, colors, tc) for n in blocks]
+        cw = max(20, max(i.width for i in imgs))
+        ch = max(i.height for i in imgs)
+        out.save(sheet(imgs, max(1, min(16, 512 // (cw + 1))), cw, ch, [f'{n:03X}' for n in blocks], label_h=10,
+                       below=True),
+                 f'gfx/blocks/maps/{stem}.png', 'blocks', title, group, variant='블록', **meta)
+        print(f'map {bc:02X}/{bd:02X} {w}x{h} blocks {len(blocks)}')
+
+
+def export_chr(rom, out):
+    """CHR 뱅크마다 1,024개(32개씩 32줄, 2배). -color 는 CHR 팔레트 번호대로 02/06(51/50) 낮 팔레트, -gray 는 색 번호."""
+    gray = [(0, 0, 0)] + [(v * 17, v * 17, v * 17) for v in range(1, 16)]
+    for high, base, pal_table, cg_map, count in ((False, 0x13, CHR_PALETTE, (0x02, 0x06), 0x1000),
+                                                 (True, 0x1F, HIGH_CHR_PALETTE, (0x51, 0x50), 0x200)):
+        colors = cgram_colors(map_cgram(rom, *cg_map))
+        tc = TileCache(rom, high, colors)
+        for part in range(0, count, 0x400):
+            col, gr = [], []
+            for chr_id in range(part, min(count, part + 0x400)):
+                nib = rom.u8(pal_table + (chr_id >> 1))
+                pal = ((nib & 0x0F) + 1) * 4 if chr_id & 1 else ((nib & 0xF0) >> 2) + 4
+                col.append(scaled(tc.get(chr_id, (pal >> 2) & 7, False, False), 2))
+                gr.append(scaled(tile_image(chr_pixels(rom, chr_id, high), gray), 2))
+            bank = base + (part >> 10)
+            for img, kind in ((col, 'color'), (gr, 'gray')):
+                out.save(sheet(img, 32, 16, 16, pad=0, bg=(0, 0, 0)), f'gfx/blocks/chr{bank:02X}-{kind}.png', 'chr',
+                         f'CHR {bank:02X}:8000 ({kind})', 'CHR', bank=f'{bank:02X}',
+                         first=f'{part:03X}', palette=f'{cg_map[0]:02X}/{cg_map[1]:02X} 낮' if kind == 'color' else '색 번호')
+    print('chr')
+
+
+def export_field(rom, out):
+    from dq5field import entrances, tile_word
+    names = group_names(rom)
+    tiles = field_tiles(rom)
+    ents = entrances(rom)
+    sets = field_time_sets(rom)
+    day = next(p for p, los in sets if 2 in los)
+    night = next(p for p, los in sets if 0xF2 in los)
+    blocks_by = {}
+    for ptr, los in sets:
+        blocks = field_block_images(rom, field_cgram(rom, 0, ptr), tiles)
+        blocks_by[ptr] = blocks
+        stem = 'field0' if ptr == day else 'field0-night' if ptr == night else f'field0-{ptr:04X}'
+        when = ', '.join(f'{v:04X}' for v in los) or '없음(시간대 표가 고르지 않음)'
+        out.save(world_image(rom, 0, blocks), f'field/{stem}.png', 'field', '세계 0', '세계 지도',
+                 variant='낮' if ptr == day else '밤' if ptr == night else f'01:{ptr:04X}', palette=f'01:{ptr:04X}',
+                 note=f'$075E 하한 {when}')
+    worlds = {0: blocks_by[day]}
+    for world in (1, 2):
+        worlds[world] = field_block_images(rom, field_cgram(rom, world), tiles)
+        out.save(world_image(rom, world, worlds[world]), f'field/field{world}.png', 'field', f'세계 {world}',
+                 '세계 지도', variant='낮', note=f'$1949 = {world}. 땅이 있는 왼쪽 위 128x128 블록')
+    for world, blocks in worlds.items():
+        img = world_image(rom, world, blocks)
+        d = ImageDraw.Draw(img)
+        el = []
+        for g, x, y, w, (bd, ax, ay, _) in ents:
+            if w != world:
+                continue
+            d.rectangle((x * 8 - 2, y * 8 - 2, x * 8 + 9, y * 8 + 9), outline=(255, 255, 0), width=2)
+            d.text((x * 8 + 12, y * 8 - 2), f'{g:02X} {names.get(g, "")}', fill=(255, 255, 0))
+            el.append({'group': f'{g:02X}', 'name': names.get(g, ''), 'x': x, 'y': y, 'to': f'{g:02X}/{bd:02X}',
+                       'at': [ax, ay]})
+        out.save(img, f'field/field{world}-annot.png', 'field', f'세계 {world}', '세계 지도', variant='주석',
+                 entrances=el, note='노랑 = 04:FD97 입구(그룹 번호와 이름)')
+    cg = field_cgram(rom, 0, day)
+    labels = [f'{m:03X}' for m in range(512)]
+    for layers, stem in ((('lower', 'upper'), 'field'), (('lower',), 'field-lower'), (('upper',), 'field-upper')):
+        imgs = field_block_images(rom, cg, tiles, layers)
+        out.save(sheet(imgs, 16, 20, 16, labels, label_h=10, below=True), f'gfx/blocks/{stem}.png', 'blocks',
+                 f'필드 블록 512개 ({"·".join({"lower": "아래층", "upper": "위층"}[k] for k in layers)})', '필드',
+                 note='블록 번호(9비트). 정의 2A:A32C·2A:AD27')
+    colors = cgram_colors(cg)
+    cells = []
+    for t in range(512):
+        p = (tile_word(rom, t, True) >> 10) & 7
+        cells.append(scaled(tile_image(tiles[t], colors[p * 16:p * 16 + 16]), 2))
+    out.save(sheet(cells, 32, 16, 16, pad=0, bg=(0, 0, 0)), 'gfx/blocks/field-tiles.png', 'chr',
+             '필드 타일 512개 12:B1A8', 'CHR', note='VRAM 워드 2000-, 2배, 위층 표의 팔레트')
+    print('field')
+
+
+def frames_out(out, frames, stem, title, note, duration):
+    sheet_img = sheet(frames, 1, frames[0].width, frames[0].height, [f'{k}' for k in range(len(frames))], label_h=10)
+    out.save(sheet_img, f'gfx/anim/{stem}.png', 'anim', title, '필드', note=note, frames=len(frames))
+    path = os.path.join(out.root, f'gfx/anim/{stem}.gif')
+    frames[0].save(path, save_all=True, append_images=frames[1:], duration=duration, loop=0)
+    out.add(f'gfx/anim/{stem}.gif', 'anim', title + ' (GIF)', '필드', w=frames[0].width, h=frames[0].height)
+
+
+def export_anim(rom, out):
+    from dq5field import field_chr, tile_word
+    sets = field_time_sets(rom)
+    day = next(p for p, los in sets if 2 in los)
+    colors = cgram_colors(field_cgram(rom, 0, day))
+
+    def img(t, raw):
+        p = (tile_word(rom, t, False) >> 10) & 7
+        return tile_image(planar(raw), colors[p * 16:p * 16 + 16])
+
+    frames = []
+    for tiles in field_anim_sets(rom):
+        strip = Image.new('RGB', (FIELD_ANIM_COUNT * 8, 8), colors[0])
+        for i, raw in enumerate(tiles):
+            t = img(FIELD_ANIM_TILE + i, raw)
+            strip.paste(t, (i * 8, 0), t)
+        frames.append(strip)
+    frames_out(out, frames, 'field-454', '필드 타일 454~459 8벌', '1E:D0FF RLE → 7E:C800 → VRAM 워드 3C60', 150)
+    chrs = field_chr(rom)
+    frames = []
+    for k in range(16):
+        strip = Image.new('RGB', (32, 8), colors[0])
+        for j, (t1, t2) in enumerate(((0x04, 0x05), (0x14, 0x15))):
+            a, b = rotate_pair(chrs[t1 * 32:t1 * 32 + 32], chrs[t2 * 32:t2 * 32 + 32], k)
+            for q, (t, raw) in enumerate(((t1, a), (t2, b))):
+                ti = img(t, raw)
+                strip.paste(ti, (j * 16 + q * 8, 0), ti)
+        frames.append(strip)
+    frames_out(out, frames, 'field-water', '필드 물 타일 4·5·20·21 16단계',
+               '두 타일을 줄마다 16비트로 보고 k 픽셀 돌림(01:C790, 세계 0 은 오른쪽)', 120)
+    frames = []
+    for wave in range(WAVE_STEPS):
+        b = field_block_images(rom, field_cgram(rom, 0, day, wave), field_tiles(rom))
+        strip = Image.new('RGB', (16 * 8, 16))
+        for i in range(8):
+            strip.paste(b[i], (i * 16, 0))
+        frames.append(strip)
+    frames_out(out, frames, 'field-wave', '필드 물결 팔레트 10단계(블록 000~007)',
+               '4번 줄 색 1~3 을 01:A0F6 + $1961*6 으로(01:A0CF)', 120)
+    print('anim')
+
+
+def export_monsters(rom, out):
+    from dq5mongfx import COUNT, monster
+    from dq5mongfx import render as render_monster
+    from dq5monster import NAMES
+    from dq5text import string, string_codes, text
+    for m in range(COUNT):
+        g, colors = monster(rom, m)
+        name = text(string_codes(rom, string(rom, NAMES, m)))
+        out.save(render_monster(rom, m, None), f'monsters/{m:02X}-{name}.png', 'monsters', f'{m:02X} {name}',
+                 '몬스터', monster=f'{m:02X}', name=name, pic=f'{g:02X}', colors=len(colors))
+    print('monsters')
+
+
+def export_battlebg(rom, out):
+    import dq5battlebg as bb
+    for n in range(bb.COUNT):
+        for era in (0, 1, 2):
+            stem = f'{n:02X}' + (f'-{era}' if era else '')
+            out.save(bb.render(rom, n, era), f'battlebg/{stem}.png', 'battlebg', f'{n:02X} ($1949={era})',
+                     f'세계 {era}', number=f'{n:02X}', era=era, note='레코드 밖 팔레트 색은 자홍')
+    print('battlebg')
+
+
+def export_font(rom, out):
+    from dq5text import GLYPHS, font_groups, glyph
+    groups = font_groups(rom)
+    cells = []
+    for code in range(GLYPHS):
+        w, h, rows = glyph(rom, code, groups)
+        img = Image.new('RGB', (16, 16))
+        p = img.load()
+        for y, row in enumerate(rows):
+            for x, v in enumerate(row):
+                if v and x < 16 and y < 16:
+                    p[x, y] = (255, 255, 255)
+        cells.append(scaled(img, 2))
+    out.save(sheet(cells, 16, 32, 32, pad=0, bg=(0, 0, 0)), 'gfx/font.png', 'font', f'폰트 글자 {GLYPHS}개', '폰트',
+             note='24:A609, 16자씩 한 줄, 2배. n 번째 칸 = 글자 코드 n')
+    print('font')
+
+
+def export_ui(rom, out):
+    o = lorom(UI_PALETTE)
+    colors = cgram_colors(rom.d[o:o + 32])
+    data = ui_tiles(rom)
+    tiles = [chr_2bpp(data[t * 16:t * 16 + 16]) for t in range(len(data) // 16)]
+    for pal in range(4):
+        cells = [scaled(tile_image(px, colors[pal * 4:pal * 4 + 4]), 2) for px in tiles]
+        stem = 'window-tiles' + (f'-pal{pal}' if pal else '')
+        out.save(sheet(cells, 16, 16, 16, pad=0, bg=colors[0]), f'gfx/screens/{stem}.png', 'screens',
+                 f'창·메뉴 타일 {len(tiles)}개 (BG3 팔레트 {pal})', '창', note='04:E528, 2배, n 번째 칸 = 타일 n')
+    win = Image.new('RGBA', (len(UI_SAMPLE[0]) * 8, len(UI_SAMPLE) * 8), colors[0] + (255,))
+    for y, row in enumerate(UI_SAMPLE):
+        for x, w in enumerate(row):
+            t = tile_image(tiles[w & 0xFF], colors[0:4], bool(w & 0x400), bool(w & 0x800))
+            win.paste(t, (x * 8, y * 8), t)
+    out.save(win.convert('RGB'), 'gfx/screens/window.png', 'screens', '창 견본(배 선실의 상태 창)', '창',
+             note='타일 8C~90 테두리와 글자 타일')
+    print('ui')
+
+
+EXPORTS = {'maps': export_maps, 'chr': export_chr, 'field': export_field, 'anim': export_anim,
+           'monsters': export_monsters, 'battlebg': export_battlebg, 'font': export_font, 'ui': export_ui}
+COMMAND = 'uv run --locked python sfc/dq5/tools/dq5gallery.py rom/dq5.sfc --out $OUT'
+
+
+def export_all(rom, root, only=None, maps=None, rom_sha='', command=COMMAND):
+    out = Out(root, rom_sha)
     for k, fn in EXPORTS.items():
         if only and k not in only:
             continue
@@ -678,18 +738,14 @@ def export_all(rom, outdir, only=None, maps=None):
             fn(rom, out, maps)
         else:
             fn(rom, out)
+    out.finish(command)
     return out.items
-
-
-def write_index(items, outdir):
-    with open(os.path.join(outdir, 'index.json'), 'w') as f:
-        json.dump(items, f, ensure_ascii=False, indent=0)
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('rom')
-    ap.add_argument('--out', default='work/gfx')
+    ap.add_argument('--out', default='work/dq5gfx', help='분류 폴더(maps/ field/ …)를 만들 곳')
     ap.add_argument('--only', help='쉼표로: ' + ','.join(EXPORTS))
     ap.add_argument('--maps', help='쉼표로 맵만 골라서: 02/06,51/50')
     ap.add_argument('--check', nargs=2, metavar=('DUMP', 'BC/BD'),
@@ -697,7 +753,8 @@ def main():
     ap.add_argument('--set', type=lambda v: int(v, 16), help='--check 에서 팔레트 세트를 직접(16진)')
     ap.add_argument('--night', action='store_true', help='--check 에서 밤 팔레트')
     args = ap.parse_args()
-    rom = Rom(open(args.rom, 'rb').read())
+    data = open(args.rom, 'rb').read()
+    rom = Rom(data)
     if args.check:
         bc, bd = (int(v, 16) for v in args.check[1].split('/'))
         x, y, hit, n = check(rom, args.check[0], bc, bd, args.set, args.night)
@@ -705,8 +762,8 @@ def main():
         return 0 if hit == n else 1
     only = set(args.only.split(',')) if args.only else None
     maps = {tuple(int(v, 16) for v in m.split('/')) for m in args.maps.split(',')} if args.maps else None
-    items = export_all(rom, args.out, only, maps)
-    write_index(items, args.out)
+    items = export_all(rom, args.out, only, maps, hashlib.sha1(data).hexdigest(),
+                       'uv run --locked python sfc/dq5/tools/dq5gfx.py rom/dq5.sfc --out $OUT')
     print(f'{len(items)} items -> {args.out}')
     return 0
 
