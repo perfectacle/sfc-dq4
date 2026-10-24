@@ -12,6 +12,7 @@
                                                             이벤트 표 1C:$BF74 의 번호마다 전투·플래그·메시지·장소·부르는 곳
                                                             (--compare: EV 로 돌린 talk.lua 기록과 대조)
   python fc/dq4/tools/dq4talk.py rom/dq4.nes looks                  그림 번호마다 쓰는 인물 수·장소·첫 대사
+  python fc/dq4/tools/dq4talk.py rom/dq4.nes fixups                 맵을 실을 때 장소별로 인물을 숨기거나 옮기는 루틴(1C:$A010)
 
 --ram 을 주면 RAM 덤프의 플래그($627B~)·장($615A)·시간($62ED)·일행($616A~)·인물 레코드로 조건을 풀어
 실제로 나올 메시지만 낸다. 덤프가 밤이면 밤 목록을 쓴다.
@@ -535,6 +536,7 @@ def event_ops(prg, start):
 
     def walk(a, depth):
         todo = [(a, None, None)]
+        rmw = None
         while todo:
             a, acc, x = todo.pop()
             while (a, acc, x) not in seen and 0x8000 <= a < 0xC000:
@@ -550,7 +552,7 @@ def event_ops(prg, start):
                     elif k == 'message':
                         out.append(('msg', c['msg']))
                     elif c.get('target') == 0x8028 and c.get('bank') == 0x16 and acc is not None:
-                        out.append(('msg', acc))   # BRK 04 6F: X:A = 메시지 번호(X 를 모르면 A 만)
+                        out.append(('msg', (x << 8 | acc) if x is not None else acc))   # BRK 04 6F: X:A = 메시지 번호(X 를 모르면 A 만)
                     a += brk_len(c['b1'], c['b2'])
                     acc = None
                     continue
@@ -559,6 +561,15 @@ def event_ops(prg, start):
                 mn, md = OPS[op]
                 n = 1 + SIZE[md]
                 arg = r1c(a + 1) | (r1c(a + 2) << 8 if n == 3 else 0) if n > 1 else 0
+                if mn == 'LDA' and md == 'abs' and 0x627B <= arg < 0x62B0:
+                    rmw = (arg, None)   # LDA 플래그 / ORA·AND #m / STA 같은 자리 = BRK CB·DB 없이 켜고 끄기
+                elif mn in ('ORA', 'AND') and md == 'imm' and rmw and rmw[1] is None:
+                    rmw = (rmw[0], (mn, arg))
+                elif mn == 'STA' and md == 'abs' and rmw and rmw[1] and rmw[0] == arg:
+                    out.append(('flag+' if rmw[1][0] == 'ORA' else 'flag-', (arg, rmw[1][1])))
+                    rmw = None
+                elif mn not in ('ORA', 'AND'):
+                    rmw = None
                 if mn == 'LDA':
                     acc = arg if md == 'imm' else None
                 elif mn == 'LDX':
@@ -576,7 +587,7 @@ def event_ops(prg, start):
                     if mn == 'JMP':
                         break
                     acc = x = None
-                elif mn == 'STA' and md in ('zp', 'abs') and arg in (0x63, 0x64, 0x65, 0x44, 0x45, 0x62ED):
+                elif mn == 'STA' and md in ('zp', 'abs') and arg in (0x63, 0x64, 0x65, 0x42, 0x43, 0x44, 0x45, 0x62ED):
                     out.append(('place', (arg, acc)))
                 if mn in ('RTS', 'RTI') or (mn == 'JMP' and md == 'ind'):
                     break
@@ -609,10 +620,22 @@ def event_callers(prg):
         if bank != BANK and prg[o:o + 3] == bytes([0, 0x07, 0xCF]) and prg[o - 2] == 0xA9:
             base = 0xC000 if bank in (0x0F, 0x1F) else 0x8000
             out.setdefault(prg[o - 1], set()).add(f'{bank:02X}:{base + (o & 0x3FFF):04X}')
+    # BRK 07 CF 를 거치지 않는 길: 뱅크 1C 안의 JMP/JSR $AD5F(이벤트 끝에서 다음 이벤트로)와, 뱅크 15 의 이벤트
+    # 입구 $B0F6·$B0FF(말 걸기 앞 루틴 15:$B10E 처럼 스크립트가 부르지 않는 곳). 뱅크 15 쪽은 호출 문장 루틴과
+    # 겹치므로 다른 부르는 곳이 없는 번호에만 붙인다.
+    for bank, targets, only_new in ((0x1C, (0xAD5F,), False), (BANK, (0xB0F6, 0xB0FF), True)):
+        base = bank * 0x4000
+        for o in range(base + 2, base + 0x4000 - 3):
+            if prg[o - 2] != 0xA9 or prg[o] not in (0x20, 0x4C) or (prg[o + 1] | prg[o + 2] << 8) not in targets:
+                continue
+            n = prg[o - 1]
+            if only_new and out.get(n):
+                continue
+            out.setdefault(n, set()).add(f'{bank:02X}:{0x8000 + (o & 0x3FFF):04X}')
     return out
 
 
-PLACE_NAMES = {0x63: '$63', 0x64: '$64', 0x65: '$65', 0x44: '$44', 0x45: '$45', 0x62ED: '$62ED'}
+PLACE_NAMES = {0x63: '$63', 0x64: '$64', 0x65: '$65', 0x42: '$42', 0x43: '$43', 0x44: '$44', 0x45: '$45', 0x62ED: '$62ED'}
 
 
 def event_summary(ops):
@@ -695,6 +718,61 @@ def show_events(prg, rom, dirs=()):
     if dirs:
         print(f'기록 {len(logs)}개, 전투 번호 다름 {bad}')
     return bad == 0
+
+
+FIXUPS = (0x1C, 0xABF5, 0xAC8A)   # 1C:$A010: (그룹, 순번) 쌍 표(bit7 로 끝)와 같은 순번의 루틴 주소 표
+FIXUP_HIDE = 0xA035                # 슬롯 X+6 을 (80,80) 으로(1C:$A035, $6F66·$6F86·$6FA6·$6FC6)
+
+
+def fixups(prg):
+    """맵을 실을 때 1C[08]($9EA6)이 부르는 장소별 인물 손질 루틴. [(그룹, 순번, 주소, 끝)]. 끝은 다음 루틴 머리."""
+    b, places, addrs = FIXUPS
+    base = b * 0x4000 - 0x8000
+    out, i = [], 0
+    while prg[base + places + i] < 0x80:
+        a = prg[base + addrs + i] | prg[base + addrs + i + 1] << 8
+        out.append((prg[base + places + i], prg[base + places + i + 1], a))
+        i += 2
+    heads = sorted({a for *_, a in out} | {FIXUPS[1]})
+    return [(g, k, a, heads[heads.index(a) + 1]) for g, k, a in out]
+
+
+def fixup_ops(prg, a, end):
+    """루틴 몸통을 줄줄이 읽어 플래그 시험·켜기·끄기와 숨기는 슬롯(LDX #n 뒤 JSR $A035, LDY #c 되풀이)을 모은다."""
+    b = FIXUPS[0]
+    rd = lambda x: prg[b * 0x4000 + (x & 0x3FFF)]
+    ops, x, y = [], None, None
+    while a < end:
+        op = rd(a)
+        if op == 0x00:
+            c = dq4bank.call(prg, a, b)
+            if c['kind'].startswith('flag'):
+                ops.append(f"{ {'flag-set': '켬', 'flag-clear': '끔', 'flag-test': '봄'}[c['kind']]} ${c['flag']:04X}&{c['mask']:02X}")
+            a += brk_len(c['b1'], c['b2'])
+            continue
+        if op not in OPS:
+            a += 1
+            continue
+        mn, md = OPS[op]
+        n = 1 + SIZE[md]
+        arg = rd(a + 1) | (rd(a + 2) << 8 if n == 3 else 0) if n > 1 else 0
+        if mn == 'LDX':
+            x = arg if md == 'imm' else None
+        elif mn == 'LDY':
+            y = arg if md == 'imm' else None
+        elif mn in ('JSR', 'JMP') and arg == FIXUP_HIDE and x is not None:
+            cnt = y if (y and rd(a + 3) == 0xE8 and rd(a + 4) == 0x88) else 1   # INX DEY BNE 로 y 칸
+            ops.append('숨김 ' + ' '.join(f'{x + 6 + j:02X}' for j in range(cnt)))
+            x = y = None if mn == 'JMP' else x
+        a += n
+    return ops
+
+
+def show_fixups(prg):
+    rows = fixups(prg)
+    for g, k, a, end in rows:
+        print(f'{g:02X}/{k:02X} 1C:{a:04X}  ' + ('; '.join(fixup_ops(prg, a, end)) or '-'))
+    print(f'장소 {len(rows)}곳')
 
 
 def sprite(rec, night=False):
@@ -799,6 +877,9 @@ def main():
         sys.exit(0 if show_events(prg, rom, dirs) else 1)
     if a[2] == 'looks':
         show_looks(prg, rom)
+        return
+    if a[2] == 'fixups':
+        show_fixups(prg)
         return
     g, k = int(a[2], 16), int(a[3], 16)
     night = '--night' in a or (ram is not None and is_night(ram))
