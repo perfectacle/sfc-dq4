@@ -272,6 +272,9 @@ class Map:
         if g is None:
             self.t, self.f, self.field = 0, field, dq4field.decode(prg, field)
             self.w, self.h = dq4field.size(prg, field)
+            # 필드 3 은 폭·높이 자리가 코드 바이트(250×164)라 데이터가 있는 62×54 만 센다(dq4field.extent)
+            ew, eh = dq4field.extent(prg, field)
+            self.dw, self.dh = (self.w, self.h) if (ew, eh) == (self.w + 3, self.h + 3) else (ew, eh)
             self.outside = self.alt = 0
             self.code = 0
             self.blocks = load(prg, 0)
@@ -279,6 +282,7 @@ class Map:
             self.buf = None
             return
         m, self.w, self.h, raw = dq4chest.load(prg, g, k)
+        self.dw, self.dh = self.w, self.h
         self.code, self.t = m[2], m[2] & 0x3F              # 08:$B708: $0550 = 레코드 첫 바이트, $0028 = 아래 6비트
         bank, ptr = m[3], m[4]
         self.outside = dq4map.header(prg, bank, ptr)[4]      # $0520
@@ -799,10 +803,10 @@ def export(prg, path):
                      'props': props(m.blocks['prop']), 'cells': [m.buf[y * m.w:(y + 1) * m.w].hex() for y in range(m.h)],
                      'falls': fl, 'exits': exit_links(prg, g, k, cache)})
     fields = []
-    for f in range(3):
+    for f in dq4field.FIELDS:
         m = Map(prg, field=f)
-        fields.append({'field': f, 'w': m.w, 'h': m.h, 'props': props(m.blocks['prop']),
-                       'cells': [bytes(r).hex() for r in m.field]})
+        fields.append({'field': f, 'w': m.dw, 'h': m.dh, 'props': props(m.blocks['prop']),
+                       'cells': [bytes(r[:m.dw]).hex() for r in m.field[:m.dh]]})
     data = {'effects': dict(sorted(effects.items())), 'keys': [rd(prg, 0x1E, KEYS + i) for i in range(3)],
             'maps': maps, 'fields': fields, 'fall_table': fall_table(prg), 'lifts': lifts(prg),
             'pots': pots(prg), 'signs': signs(prg), 'lift_rects': lift_rects(prg),
@@ -906,18 +910,18 @@ def map_list(prg):
 
 
 def all_maps(prg):
-    """롬의 맵 279개와 필드 3개를 (이름, Map) 으로."""
+    """롬의 맵 279개와 필드 3개(0·1·3)를 (이름, Map) 으로."""
     for g, k, *_ in map_list(prg):
         yield f'{g:02X}/{k:02X}', Map(prg, g, k)
-    for f in range(3):
+    for f in dq4field.FIELDS:
         yield f'field{f}', Map(prg, field=f)
 
 
 def map_props(m):
     """맵에 실제로 그려지는 칸의 {속성: [블록…]}과 칸 수."""
     props, cells = m.blocks['prop'], {}
-    for y in range(m.h):
-        for x in range(m.w):
+    for y in range(m.dh):
+        for x in range(m.dw):
             b = m.cell(x, y) & 0x1F
             cells.setdefault(props.get(b, 0), {}).setdefault(b, 0)
             cells[props.get(b, 0)][b] += 1
@@ -976,7 +980,7 @@ def show_tables(prg):
     for g, k, *_ in map_list(prg):
         for p in Map(prg, g, k).blocks['prop'].values():
             used.setdefault(p, terrain(prg, p))
-    for f in range(3):
+    for f in dq4field.FIELDS:
         for p in Map(prg, field=f).blocks['prop'].values():
             used.setdefault(p, terrain(prg, p))
     print('# 속성 값')

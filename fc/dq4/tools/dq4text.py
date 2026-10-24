@@ -656,8 +656,9 @@ def trace_lines(path):
             last_cond = (int(f['b'], 16), int(f['T']), int(f['F5'], 16) & 0x80)
         elif kind == '=>' and last_cond:
             b, table, counting = last_cond
-            if counting:
-                toks.append(f'?{table}:{b:02X}→{f["3D2"]}')
+            tok = f'?{table}:{b:02X}→{f["3D2"]}'
+            if counting and (not toks or toks[-1] != tok):  # 같은 조건을 두 프레임에 걸쳐 세면 한 번만
+                toks.append(tok)
             last_cond = None
         elif kind in ('list', 'place', 'c1', 'mode', 'init'):
             toks.append(f'{kind}{f["n"]}')
