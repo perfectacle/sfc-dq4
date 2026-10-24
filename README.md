@@ -62,7 +62,7 @@ dq4(FC DQ4 원작):
 - [docs/dq4-ram-format.md](docs/dq4-ram-format.md): DQ4(FC) 필드 RAM(좌표·맵 번호·출구 표)과 뱅크 전환
 - [docs/dq4-bank-format.md](docs/dq4-bank-format.md): DQ4(FC) BRK 뱅크 호출과 뱅크 배치
 - [docs/dq4-field-format.md](docs/dq4-field-format.md): DQ4(FC) 필드 3개(세계 지도 250×250, 줄 RLE)
-- [docs/dq4-map-format.md](docs/dq4-map-format.md): DQ4(FC) 마을·던전 맵 269개(장소 번호, 비트열 압축, 연결·출구, 인물 목록)
+- [docs/dq4-map-format.md](docs/dq4-map-format.md): DQ4(FC) 마을·던전 맵 279개(장소 번호, 비트열 압축, 연결·출구, 인물 목록)
 - [docs/dq4-data-format.md](docs/dq4-data-format.md): DQ4(FC) 이름 목록·아이템·몬스터·주문 표, 레벨업 성장 곡선
 - [docs/dq4-text-format.md](docs/dq4-text-format.md): DQ4(FC) 대사 텍스트(6비트 압축, 사전, 글자표, 메시지 번호)
 - [docs/dq4-encounter-format.md](docs/dq4-encounter-format.md): DQ4(FC) 적 조우 표(필드 구역 지도, 구역별 무리 후보, 조우율, 던전 층, 특수 전투, 배, 성수, 기습·선제)

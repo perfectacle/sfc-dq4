@@ -79,20 +79,8 @@ def chest_base(prg, g, k):
 
 
 def all_maps(prg):
-    """dq4map.maps 에 마지막 그룹을 더한 목록. maps 는 다음 그룹의 포인터로 맵 수를 세어 마지막 그룹(48)이 빠진다.
-    마지막 그룹은 맵 번호 FF 앞까지(48/00~48/09, 뱅크 0B 에서 앞 맵의 끝에 이어짐)."""
-    out = dq4map.maps(prg)
-    bank, base = dq4map.GROUPS
-    n = 0
-    while rd(prg, bank, base + 2 * n) | rd(prg, bank, base + 2 * n + 1) << 8 != 0xFFFF:
-        n += 1
-    g = n - 1
-    a = rw(prg, bank, base + 2 * g)
-    k = 0
-    while (mid := rd(prg, bank, a + 3 * k)) != 0xFF:
-        out.append((g, k, mid, dq4map.data_bank(g, k), rw(prg, bank, a + 3 * k + 1)))
-        k += 1
-    return out
+    """dq4map.maps 와 같다(마지막 그룹 48 포함)."""
+    return dq4map.maps(prg)
 
 
 def load(prg, g, k):
