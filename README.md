@@ -108,6 +108,7 @@ dq4(FC DQ4 원작):
 - [2026-10-25-14: 조우의 남은 것](docs/journal/dq5/2026-10-25-14-encounter2.md)
 - [2026-10-25-15: 마을 입장 실측과 세계 지도 셋](docs/journal/dq5/2026-10-25-15-field.md)
 - [2026-10-25-16: 내성·상태 주문·동료가 되는 몬스터](docs/journal/dq5/2026-10-25-16-recruit.md)
+- [2026-10-25-17: 조우의 남은 것 2](docs/journal/dq5/2026-10-25-17-encounter3.md)
 
 #### dq4
 
