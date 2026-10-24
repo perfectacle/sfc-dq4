@@ -144,6 +144,9 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 | `lua/fc/enc.lua` | FC: 필드에서 시행마다 세이브스테이트를 다시 불러 기다림을 바꿔 걷고, 조우 판정(조우율·난수)과 고른 무리를 `enc.txt` 로. `STATE`, `TRIALS`(30 이하), `WAIT0`, `WAITSTEP`, `POS`(필드 좌표 한 번 쓰기), `POKE1`, `LIMIT` |
 | `dq4shop.py rom [G K]` | DQ4 무기·방어구·도구 가게 목록 전부와 여관 1인 값. `G K` 는 그 장소의 목록·여관·대화 번호 0~6 인 가게 인물, `--compare end.ram` 으로 가게 창 목록 `$07BD` 와 비교 |
 | `dq4chest.py rom G K\|all\|check` | DQ4 보물상자(칸·내용물·열었음 플래그 `$625D`~)와 발밑 숨은 물건. `check` 맵마다 상자 칸 수와 개수 표 비교, `G K --compare end.sram` 으로 열었음 비트 |
+| `dq4block.py rom defs T\|G K\|field F\|compare DIR` | DQ4 맵 블록 → 타일 4개·팔레트·통행 속성. `defs T` 맵 종류 T 의 블록 정의·애니메이션·낮 팔레트, `G K` 통행 지도(`--nt` nametable 타일 번호, `--png` 는 `work/` 에만), `compare DIR [PREFIX]` 은 `seq.lua`·`warp.lua` 의 `end.*`(또는 `blockload.lua` 덤프)와 블록 표·CHR·팔레트·`$7800`·화면 nametable 비교 |
+| `lua/fc/blockload.lua` | FC: PRG 오프셋 `AT`(쉼표로 여럿)의 명령이 실행될 때 CPU 메모리·CHR-RAM·nametable·팔레트를 `ld_OOOOO_N.*` 로(`LIMIT` 번). `DRIVER` 로 입력 드라이버 |
+| `lua/fc/blockreads.lua` | FC: CPU 메모리 `RANGE`(예 `6F20-6F5F`)를 읽는 명령을 PC 마다 모아 `ramreads.txt` 로(`MAXF`, `FROM`) |
 | `lua/fc/shopwalk.lua` | FC: 맵 좌표 `$44/$45` 를 보며 `WAY`(`"12,1C 0D,1C"`) 칸들로 걷고 `end.mss` 등 덤프. `STATE`, `TAIL`, `MAXF` |
 | `lua/fc/shopcall.lua` | FC: PC 가 `AT`(쉼표로 여럿)에 닿을 때 A·X·Y·복귀 주소·`($X)` 포인터·`$0507` 을 `calls.txt` 로. `ONLYA`, `LIMIT`, `MAXF`, `DRIVER` |
 | `lua/fc/shoppoke.lua` | FC: PC 가 `AT` 에 닿을 때 `POKE`(`3D=03;…`)를 RAM 에 씀. `BANK`(`$0507` 일치 때만), `ONCE`, `DRIVER` |
