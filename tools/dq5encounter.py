@@ -1,9 +1,11 @@
 """DQ5(SFC) 전투 조우 표. 형식은 docs/dq5-data-format.md 의 「전투 조우」.
 
 조우 판정과 무리 고르기는 23:E7C2(00:82B4 가 부름)이고, 그 앞의 01:84CF 가 조우 구역 번호(A)와 조우율(Y)을 정한다.
-- 실내 맵: 23:FD6A[BC] 가 가리키는 맵마다 6바이트 [구역 x3 ($1948 로 고름)][배경][+4][+5]. FF 는 조우 없음(01:83E6).
+- 실내 맵: 23:FD6A[BC] 가 가리키는 맵마다 6바이트 [구역 x3 ($1948 로 고름)][전투 배경][+4][소리 명령 1A 인자].
+  FF 는 조우 없음(01:83E6). 조우율 7, 셀 구역이 바뀐 걸음만 20.
 - 필드: 17칸 너비 구역 격자(01:A6D9 가 $1949·$1948 로 고름)를 (Y>>5)*17 + (X>>5) 로 찾고(01:854F),
-  조우율은 지형별 23:F1E0(낮)·23:F1EE($075E >= F0)에서 온다. 배($1954 == 3)는 01:85D8 직사각형 표.
+  조우율은 지형(03:CB1B)별 23:F1E0(낮)·23:F1EE($075E >= F0)에서 온다. 배($1954 == 3)는 01:85D8 직사각형 표.
+- $7E21C9: 1(トヘロス)·2(물건) 이면 구역 레벨 <= 주인공 레벨($7E2052)일 때 조우 없음, 3·4(においぶくろ·まもののエサ)는 조우율 x8.
 - 구역 레코드 23:96F3 + n*22: [+0 레벨][+1~+B 칸 11개의 무게·마릿수][+C~+15 몬스터 10마리].
   칸 0~4 를 뽑으면 여러 종 무리(23:E9B4), 칸 5~9 는 한 종(23:E99B), 칸 10 은 23:B04B 의 고정 무리(23:E953).
 
@@ -16,12 +18,15 @@
   python tools/dq5encounter.py rom/dq5.sfc --trace trace.txt
       # 툴킷 probe/trace.lua 기록(TRACE=23E7C2,23E9B0,23EA40,23E98F LOG=7E1001,7E1003,7E1005,7E1007)의
       # 무리가 표에서 나올 수 있는 것인지 검사
+  python tools/dq5encounter.py rom/dq5.sfc --steps trace.txt
+      # TRACE=0082AF LOG=7E00BC,7E00BE,7E00B6,7E00B8,7E1948,7E075E,7E21C9 기록의 구역·조우율을 표로 계산한 값과 맞춤
 """
 import argparse
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
+from dq5field import FIELD_E000, WORLD, block_number, rle  # noqa: E402
 from dq5map import Rom  # noqa: E402
 from dq5text import string, string_codes, text  # noqa: E402
 
@@ -30,11 +35,12 @@ AREA_SIZE = 22
 AREA_COUNT = 0x55          # 실내 표·필드 격자·배 표가 쓰는 가장 큰 번호가 54
 SLOTS = 11
 MONSTERS = 10
-FIXED = 0x23B04B           # 칸 10 의 고정 무리, 6바이트 [몬스터 x3][마릿수<<4 | 미확인 x3]
+FIXED = 0x23B04B           # 칸 10 의 고정 무리, 6바이트 [몬스터 x3][마릿수<<4 | 줄 x3]. 줄은 $1009 → $0D1B(22:86D5)
 FIXED_COUNT = 9            # FF 없이 끝나는 앞 9개만 몬스터 번호로 맞는다
 RATE_COEF = 0x23EA44       # 8개. 계수 번호는 칸 4·5·6 바이트의 bit7
 COUNT_BASE = 0x23EA63      # 마릿수 = 기본 + rand(폭), 폭이 1 이면 기본
 COUNT_RANGE = 0x23EA73
+SURPRISE = 0x278043        # 4쌍 [선제][기습], 32분의 확률
 MAP_TABLE = 0x23FD6A       # 맵 그룹 54개의 포인터(뱅크 23), 맵마다 6바이트
 GROUPS = 54
 FIELD_RATE_DAY = 0x23F1E0  # 지형 14종
@@ -49,7 +55,9 @@ FIELD_GRIDS = [
     ('$1949=2~', 0x23F50A, 4),
 ]
 SHIP_RECTS = 0x0185D8      # 01:858D. $1948 == 2 이면 +A 부터. [X0][X1][Y0][Y1](16비트) [안][밖]
-INDOOR_RATE = 7            # 01:8522. X 가 음수면 20(01:8526)
+INDOOR_RATE = 7            # 01:8522
+INDOOR_RATE_REGION = 0x20  # 01:8526. 주인공이 선 두 셀이 모두 다른 셀 구역(7E:3720)으로 넘어간 걸음(00:CAFD 가 X=80)
+TERRAIN = 0x03CC48         # 03:CB1B. 블록 2개당 1바이트, 짝수 블록이 위 니블
 NAMES = 4
 # 01:86A7·01:86C3(A = 무리 번호) → 26:8E0A 가 23:D757 + 무리*13 을 $1000~$100C 로 옮긴다(+0 은 & FC).
 # [+0 플래그][+1~+4 몬스터, 빈 자리 FF][+5~+8 마릿수][+9~+C → $1009~$100C]
@@ -77,14 +85,16 @@ def area(rom, n):
     return {
         'n': n,
         'raw': raw,
-        'level': raw[0],                                   # $100F, $1A99(せいすい 류 비교로 보임)
+        # $100F(주인공 레벨 > 이 값 + 4 면 몬스터 행동 17 「にげだした」, 21:B9A1), $1A99($7E21C9 가 1·2 일 때 비교)
+        'level': raw[0],
         'weights': [s & 7 for s in slots],
         'count_codes': [(s >> 3) & 7 for s in slots],
         'monsters': mons,
         # 칸 0~2 의 bit6-7: 여러 종 무리의 종 수가 2·3·4 일 무게
         'species_weights': [slots[0] >> 6, slots[1] >> 6, slots[2] >> 6],
         'coef': rom.u8(RATE_COEF + coef_idx),
-        'flag_1000': slots[3] >> 6,                        # $1000 bit0-1
+        # $1000 bit0-1. 26:8329 가 27:8043 + 이 값*2 의 (선제, 기습) 확률(32분의)로 $1000 bit1(선제)·bit0(기습)을 정함
+        'flag_1000': slots[3] >> 6,
         'flag_1010': slots[7] >> 7,                        # $1010
         'fixed_night_only': slots[8] >> 7,                 # 칸 10 은 21:8000 이 carry 일 때만
         'fixed_group': slots[10] >> 3,
@@ -147,9 +157,70 @@ def field_area(rom, grid_index, x, y):
     return rom.u8(addr + (y >> 5) * FIELD_WIDTH + (x >> 5))
 
 
+def field_terrain(rom, world, hibits, x, y):
+    """필드 좌표(8픽셀 단위)의 지형 번호. 03:CB1B 가 00:BDC1 로 블록을 읽어 니블을 고른다."""
+    b = block_number(world, hibits, (x >> 1) & 255, (y >> 1) & 255)
+    v = rom.u8(TERRAIN + (b >> 1))
+    return v & 15 if b & 1 else v >> 4
+
+
+def field_grid_index(v1948, v1949):
+    if v1949:
+        return 3 if v1949 == 1 else 4
+    return min(v1948, 2)
+
+
+def check_steps(rom, path):
+    """00:82AF(01:84CF 에서 돌아온 곳) 기록의 A(구역)·Y(조우율)를 표로 계산한 값과 맞춘다.
+    LOG=7E00BC,7E00BE,7E00B6,7E00B8,7E1948,7E075E,7E21C9 가 있어야 한다. 실내는 구역만 본다."""
+    world, _ = rle(rom, WORLD)
+    hibits, _ = rle(rom, FIELD_E000)
+    bad = total = 0
+    seen = {}
+    for line in open(path):
+        f = line.split()
+        if len(f) < 3 or f[1] != '0082AF':
+            continue
+        kv = {k: int(v, 16) for k, v in (x.split('=') for x in f[2:] if '=' in x)}
+        a, y = kv['A'] & 0xFF, kv['Y'] & 0xFF
+        bc, bd = kv['7E00BC'] & 0xFF, kv['7E00BC'] >> 8
+        v1948, v1949 = kv['7E1948'] & 0xFF, kv['7E1948'] >> 8
+        if kv['7E00BE'] & 0x80:
+            e = map_entry(rom, bc, bd)
+            want_a = e[min(v1948, 2)] if e else None
+            ok = a == want_a and (a == 0xFF or y in (INDOOR_RATE, INDOOR_RATE_REGION))
+            key = (f'실내 {bc:02X}/{bd:02X}', a, y)
+        else:
+            x, yy = kv['7E00B6'], kv['7E00B8']
+            g = field_grid_index(v1948, v1949)
+            want_a = field_area(rom, g, x, yy)
+            if v1949:
+                # 다른 세계의 지도는 아직 풀지 않아 지형을 모른다. 구역만 본다
+                ok = a == want_a
+                key = (f'필드 격자 {FIELD_GRIDS[g][0]} 칸 ({x >> 5},{yy >> 5})', a, y)
+            else:
+                t = field_terrain(rom, world, hibits, x, yy)
+                night = kv['7E075E'] >= 0xF0
+                rate = rom.u8((FIELD_RATE_NIGHT if night else FIELD_RATE_DAY) + t)
+                if kv['7E21C9'] >= 3:
+                    rate = rate * 8 & 0xFF
+                ok = a == want_a and y == rate
+                key = (f'필드 격자 {FIELD_GRIDS[g][0]} 칸 ({x >> 5},{yy >> 5}) 지형 {t}', a, y)
+        total += 1
+        bad += not ok
+        if not ok:
+            print(f'NG  {key[0]}: 구역 {a:02X}(표 {want_a:02X}) 조우율 {y:02X}')
+        seen[key] = seen.get(key, 0) + 1
+    for (where, a, y), n in sorted(seen.items()):
+        print(f'{n:4d}번  {where}: 구역 {a:02X} 조우율 {y:02X}')
+    print(f'{total}번 중 {bad}번 어긋남')
+    return 1 if bad else 0
+
+
 def format_area(rom, ar):
+    sp = SURPRISE + ar['flag_1000'] * 2
     lines = [f'구역 {ar["n"]:02X}  레벨 {ar["level"]}  계수 {ar["coef"]:02X}  종 수 무게(2/3/4) {ar["species_weights"]}'
-             f'  $1000={ar["flag_1000"]} $1010={ar["flag_1010"]} 칸10밤만={ar["fixed_night_only"]}']
+             f'  선제/기습 {rom.u8(sp)}/{rom.u8(sp + 1)} (32분의)  $1010={ar["flag_1010"]} 칸10밤만={ar["fixed_night_only"]}']
     for s, p, kind, mons in groups(rom, ar):
         desc = ', '.join(f'{monster_name(rom, m)}({m:02X}) {lo}~{hi}' if lo != hi else
                          f'{monster_name(rom, m)}({m:02X}) {lo}' for m, (lo, hi) in mons)
@@ -209,11 +280,14 @@ def main():
     ap.add_argument('--field', action='store_true')
     ap.add_argument('--trace')
     ap.add_argument('--events', action='store_true')
+    ap.add_argument('--steps')
     args = ap.parse_args()
     rom = Rom(open(args.rom, 'rb').read())
 
     if args.trace:
         return check_trace(rom, args.trace)
+    if args.steps:
+        return check_steps(rom, args.steps)
 
     if args.events:
         for g in range(EVENT_COUNT):
