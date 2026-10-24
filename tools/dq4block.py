@@ -7,11 +7,18 @@
   python tools/dq4block.py rom/dq4.nes field [F] [--png]   필드 F(기본 0)의 통행 지도
   python tools/dq4block.py rom/dq4.nes props [--maps]      롬 전체 맵·필드의 속성 값별 뜻·맵 수·칸 수(--maps 는 맵마다)
   python tools/dq4block.py rom/dq4.nes compare DIR [PREFIX] seq.lua 의 end.* (또는 blockload.lua 의 PREFIX.*) 덤프와 비교
+  python tools/dq4block.py rom/dq4.nes effects G K          맵에서 지형 효과가 있는 칸(떨어지면 가는 곳 포함)
+  python tools/dq4block.py rom/dq4.nes tables               떨어지는 칸·리프트·タンス/つぼ·팻말 표와 속성 값의 뜻
+  python tools/dq4block.py rom/dq4.nes json [OUT]           맵·필드 전부의 속성·칸·표를 JSON 으로(기본 work/dq4block.json)
+
 
 근거 루틴: 08:$84E9(블록 표 올리기), $8055(맵 종류 → 블록 표), $8473(블록 하나), $80D5(타일 모양 레코드),
 $823D(CHR 타일 번호 나누기, $7700 중복 목록), $83BD·0F:$C7E1(CHR 뱅크 0C·0D 에서 16바이트 복사),
 $853E(블록 20·21), $8710(빈 칸에 FC~FF), 1E:$A046(맵에 쓰인 블록 표시), 1E:$9F47(벽 아래 그늘 블록 바꾸기),
 0F:$D4E6(다른 구역은 블록 20·21 로), $D44C(맵 밖 블록), $EB23(블록 → 타일 4개), 0F:$D088(통행).
+지형 효과: 0F:$CEB1(걸음 뒤 분기), $CA77(밀리는 바닥), $E9E4(느린 칸), 1E:$9ACA(바닥 피해), 1E:$8676·12:$B6DD(떨어지기),
+1E:$8700·$894A(리프트), 1E:$B2A6·$B36E·$B3B7(「とびら」와 열쇠), 1E:$80D8(카운터 너머 「はなす」),
+1E:$BB10·$BC7A·$BB52(タンス·つぼ·팻말).
 """
 import os
 import sys
@@ -378,36 +385,254 @@ def compare(prg, d, prefix=None):
     return not bad and not cbad and want_p == got_p and not nd and not pd
 
 
+TERRAIN_VALUES = 0xCEEB           # 0F:$CEB1: 걸음을 마친 칸의 속성 아래 7비트와 비교하는 값 11개
+CONVEYOR_PAD = 0xCB1A             # 0F:$CA77: 속성 10~13 의 아래 2비트 → 패드 $14 (위·오른쪽·아래·왼쪽)
+DOOR_LOCKS = 0xB3C8               # 1E:$B36E: 문 값 16개를 잠금 단계(행)마다 4개씩
+KEYS = 0xB3D8                     # 1E:$B3B7: 열쇠 아이템 3개(とうぞく·まほう·さいご), 뒤일수록 센 열쇠
+LIFTS = 0x89C8                    # 1E:$894A: 속성 0F 칸의 (그룹, 포인터) 표
+FALLS = 0xB96F                    # 12:$B6DD: 떨어지는 칸(05·0B)의 목적지 표 포인터
+FALL_FIELD1 = 0xB8C5              # 12:$B8A5: 그룹 2D·46 은 필드 1 의 방향별 좌표
+POTS = 0xBCED                     # 1E:$BC7A: タンス·つぼ 7바이트 항목
+SIGNS = 0xBBB6                    # 1E:$BB52: 팻말 표 포인터 2개
+SIGN_CHAPTER = 0xBBE6             # 1E:$BB8C: 팻말 메시지 바이트가 00 이면 장($615A)마다 셋 중 하나
+
+STEP_XY = [(0, -1), (1, 0), (0, 1), (-1, 0)]
+FACING = {0x2B: 'dresser', 0x2A: 'pot', 0x28: 'sign', 0x30: 'push_door', 0x2C: 'stuck_door'}
+
+
+def terrain(prg, prop):
+    """블록 속성 하나가 걷기·명령에서 뜻하는 것(docs/dq4-block-format.md 「지형 효과」).
+    walk: 걸어서 들어감, ship: 배로 들어감, effect: 걸음을 마친 뒤(0F:$CEB1) 하는 일,
+    door·talk_over·facing: 앞 칸으로 쓰일 때(「とびら」·「はなす」·「しらべる」)."""
+    v = prop & 0x7F
+    out = {'walk': not prop & 0x80, 'ship': prop in (0x83, 0x24)}
+    if prop == 0x83:
+        out['effect'] = 'water'
+    elif prop == 0x24:
+        out['effect'] = 'dock'                  # 0F:$D00D: 배를 탄 채로 지나감
+    elif not prop & 0x80:
+        if v in (0x01, 0x02):
+            out.update(effect='damage', hp=1 if v == 1 else 15)     # 1E:$9ACA
+        elif v == 0x04:
+            out['effect'] = 'chest'
+        elif v in (0x05, 0x0B):
+            out['effect'] = 'fall'              # 1E:$8676 → 12:$B6DD
+        elif v == 0x0A:
+            out['effect'] = 'travel_door'       # 1B:$A10F
+        elif v == 0x0F:
+            out['effect'] = 'lift'              # 1E:$8700 → 1E:$894A
+        elif 0x10 <= v <= 0x13:
+            pad = rd(prg, 0x0F, CONVEYOR_PAD + (v & 3))
+            out.update(effect='conveyor', dir=['up', 'right', 'down', 'left'][[0x10, 0x80, 0x20, 0x40].index(pad)])
+        elif v == 0x31:
+            out['effect'] = 'slow_vertical'     # 0F:$E9E4
+        elif v == 0x33:
+            out['effect'] = 'search'            # 1E:$B41C
+        elif v in [rd(prg, 0x0F, TERRAIN_VALUES + i) for i in range(11)]:
+            out['effect'] = 'exit'              # 1E:$9100
+    locks = [rd(prg, 0x1E, DOOR_LOCKS + i) for i in range(16)]
+    if prop & 0x80 and v in locks:
+        i = locks.index(v)
+        # lock 0 은 열쇠 없이 열림, 1~3 은 KEYS[lock-1] 이상의 열쇠
+        out['door'] = {'lock': i >> 2, 'shape': i & 3}
+    if prop & 0x80 and v in (0x17, 0x27):
+        out['talk_over'] = True                 # 1E:$80D8
+    if prop & 0x80 and v in FACING:
+        out['facing'] = FACING[v]
+    return out
+
+
+def fall_table(prg):
+    """12:$B6DD 의 표. 항목 = 그룹, 순번(bit7 이면 조건이 붙음), [조건, 목적지]….
+    조건: x|80 y 크기(아래 4비트 폭−1, 위 4비트 높이−1)인 사각형, 또는 x y 한 칸. 조건 첫 바이트 bit6 이면 다음 조건이 이어짐.
+    목적지: 순번|80(좌표 그대로) 또는 순번 x y(x 는 아래 6비트)."""
+    p = wd(prg, 0x12, FALLS)
+    out = []
+
+    def dest(p):
+        d = rd(prg, 0x12, p)
+        if d & 0x80:
+            return {'index': d & 0x7F}, p + 1
+        return {'index': d, 'x': rd(prg, 0x12, p + 1) & 0x3F, 'y': rd(prg, 0x12, p + 2)}, p + 3
+
+    while (g := rd(prg, 0x12, p)) != 0xFF:
+        k = rd(prg, 0x12, p + 1)
+        p += 2
+        if not k & 0x80:
+            to, p = dest(p)
+            out.append({'group': g, 'index': k, 'when': None, 'to': to})
+            continue
+        while True:
+            c = rd(prg, 0x12, p)
+            if c & 0x80:
+                s = rd(prg, 0x12, p + 2)
+                when = {'x': c & 0x3F, 'y': rd(prg, 0x12, p + 1) & 0x3F, 'w': (s & 15) + 1, 'h': (s >> 4) + 1}
+                p += 3
+            else:
+                when = {'x': c & 0x3F, 'y': rd(prg, 0x12, p + 1), 'w': 1, 'h': 1}
+                p += 2
+            to, p = dest(p)
+            out.append({'group': g, 'index': k & 0x7F, 'when': when, 'to': to})
+            if not c & 0x40:
+                break
+    return out
+
+
+def fall(prg, g, k, x, y, d=2, mode=0, chapter=0):
+    """12:$B6DD: (g, k) 의 (x, y) 에서 떨어졌을 때 가는 곳. d 는 걷던 방향($3D), mode 는 $07BA, chapter 는 $615A.
+    돌려주는 것: {'group', 'index', 'x', 'y'}(맵), {'field': n, 'x', 'y'}(필드 n 의 좌표),
+    {'field': None, 'dx', 'dy'}(들어온 필드 자리 $42/$43 에서 그만큼 옮긴 곳)."""
+    if g == 0x1C:
+        return {'group': 0x3A, 'index': 0, 'x': 0x17, 'y': 0x03}
+    if g == 0x46 and (x, y) == (0x23, 0x1D):
+        return {'field': 1, 'x': 0x13, 'y': 0x11}
+    if g in (0x2D, 0x46):
+        return {'field': 1, 'x': rd(prg, 0x12, FALL_FIELD1 + 2 * d), 'y': rd(prg, 0x12, FALL_FIELD1 + 2 * d + 1)}
+    if g == 0x30:
+        return {'field': None, 'dx': 0, 'dy': 3 if chapter == 0 else 2}
+    if g == 0x2E and k == 1:
+        if x >= 0x0B and y < 0x06:
+            return {'group': g, 'index': 2, 'x': 0x0A, 'y': 0x06}
+        if x >= 0x03 and y < 0x07:
+            return {'group': g, 'index': 2, 'x': 0x05, 'y': 0x06}
+        if y < 0x11:
+            return {'group': g, 'index': 2, 'x': 0x06, 'y': 0x0A}
+    elif g == 0x3D and k == 1:
+        return {'group': g, 'index': 3, 'x': 0x08, 'y': 0x0F}      # $62AA bit7 도 켬
+    elif g != 0x2E:
+        for e in fall_table(prg):
+            w = e['when']
+            if (e['group'], e['index']) != (g, k):
+                continue
+            if w and not (w['x'] <= x < w['x'] + w['w'] and w['y'] <= y < w['y'] + w['h']):
+                continue
+            return {'group': g, 'index': e['to']['index'], 'x': e['to'].get('x', x), 'y': e['to'].get('y', y)}
+    dx, dy = STEP_XY[d & 3]
+    if d == 0 and mode in (0, 4, 5) or d == 1 and mode == 0:
+        dx, dy = 2 * dx, 2 * dy
+    return {'field': None, 'dx': dx, 'dy': dy}
+
+
+def lifts(prg):
+    """1E:$894A: 속성 0F 칸. 그룹마다 8바이트 레코드 = (순번, x, y, 값) 두 개가 서로 오가는 짝. 값은 $7F 로 간다."""
+    out, a = [], LIFTS
+    while (g := rd(prg, 0x1E, a)) != 0xFF:
+        p = wd(prg, 0x1E, a + 1)
+        while rd(prg, 0x1E, p) != 0xFF:
+            e = [rd(prg, 0x1E, p + i) for i in range(8)]
+            out.append({'group': g, 'a': dict(zip(('index', 'x', 'y', 'arg'), e[:4])),
+                        'b': dict(zip(('index', 'x', 'y', 'arg'), e[4:]))})
+            p += 8
+        a += 3
+    return out
+
+
+def pots(prg):
+    """1E:$BC7A: タンス·つぼ(앞 칸 속성 AB·AA). 7바이트 = 그룹, 순번, x, y, 아이템, 플래그 $6273+n, 비트."""
+    out, a = [], POTS
+    while rd(prg, 0x1E, a) != 0xFF:
+        e = [rd(prg, 0x1E, a + i) for i in range(7)]
+        out.append({'group': e[0], 'index': e[1], 'x': e[2], 'y': e[3], 'item': e[4], 'flag': 0x6273 + e[5], 'bit': e[6]})
+        a += 7
+    return out
+
+
+def signs(prg):
+    """1E:$BB52: 팻말(앞 칸 속성 A8). 그룹은 보지 않고 좌표만 본다. 표 0 은 $41 bit7 이 켜졌을 때, 표 1 은 꺼졌을 때.
+    항목 = x, y, 메시지 하위 바이트(상위는 03). 00 이면 장에 따라 SIGN_CHAPTER 의 셋 중 하나(1·2장, 3장, 4장부터)."""
+    out = []
+    for t in range(2):
+        a = wd(prg, 0x1E, SIGNS + 2 * t)
+        while (x := rd(prg, 0x1E, a)) != 0xFF:
+            lo = rd(prg, 0x1E, a + 2)
+            msgs = [0x300 | rd(prg, 0x1E, SIGN_CHAPTER + i) for i in range(3)] if lo == 0 else [0x300 | lo]
+            out.append({'table': t, 'x': x, 'y': rd(prg, 0x1E, a + 1), 'msg': msgs})
+            a += 3
+    return out
+
+
+def export(prg, path):
+    """맵 269개·필드 3개의 블록 속성과 칸, 지형 효과에 딸린 표를 JSON 하나로. 칸은 줄마다 16진 문자열
+    (맵은 그늘 바꾸기 뒤 $7800 의 값: 위 3비트 구역 + 블록, 필드는 블록 번호)."""
+    import json
+    effects = {}
+
+    def props(prop):
+        for p in prop.values():
+            effects.setdefault(f'{p:02X}', terrain(prg, p))
+        return [f'{prop[b]:02X}' if b in prop else None for b in range(0x20)]
+
+    maps = []
+    for g, k, *_ in dq4map.maps(prg):
+        m = Map(prg, g, k)
+        fl = [{'x': x, 'y': y, 'to': fall(prg, g, k, x, y)} for y in range(m.h) for x in range(m.w)
+              if m.blocks['prop'].get(m.buf[y * m.w + x] & 0x1F, 0) in (0x05, 0x0B)]
+        maps.append({'group': g, 'index': k, 'type': m.t, 'w': m.w, 'h': m.h, 'outside': m.outside,
+                     'props': props(m.blocks['prop']), 'cells': [m.buf[y * m.w:(y + 1) * m.w].hex() for y in range(m.h)],
+                     'falls': fl})
+    fields = []
+    for f in range(3):
+        m = Map(prg, field=f)
+        fields.append({'field': f, 'w': m.w, 'h': m.h, 'props': props(m.blocks['prop']),
+                       'cells': [bytes(r).hex() for r in m.field]})
+    data = {'effects': dict(sorted(effects.items())), 'keys': [rd(prg, 0x1E, KEYS + i) for i in range(3)],
+            'maps': maps, 'fields': fields, 'fall_table': fall_table(prg), 'lifts': lifts(prg),
+            'pots': pots(prg), 'signs': signs(prg)}
+    for e in data['signs']:      # 팻말 표는 그룹을 보지 않으므로 그 좌표에 A8 칸이 있는 곳을 붙인다
+        if e['table']:
+            e['at'] = [f'field{f["field"]}' for f in fields if (row := f['cells'][e['y']] if e['y'] < f['h'] else '')
+                       and e['x'] < f['w'] and f['props'][int(row[2 * e['x']:2 * e['x'] + 2], 16)] == 'A8']
+        else:
+            e['at'] = [f'{m["group"]:02X}/{m["index"]:02X}' for m in maps if e['x'] < m['w'] and e['y'] < m['h']
+                       and m['props'][int(m['cells'][e['y']][2 * e['x']:2 * e['x'] + 2], 16) & 0x1F] == 'A8']
+    with open(path, 'w') as fp:
+        json.dump(data, fp, ensure_ascii=False, separators=(',', ':'))
+    return data
+
+
 MARKS = 'GHIJKLMNOPQRSTUVWXYZ'
 BLOCKED = 'abcdefghijklmnopqrstuvwxyz'
 
-# 속성($6F40) 값 → 뜻. 근거는 docs/dq4-block-format.md 의 「속성 값」 표.
+# 속성($6F40) 값 → 사람이 읽는 뜻. 기계가 읽는 뜻은 terrain(). 근거는 docs/dq4-block-format.md 의 「속성 값」 표.
 KINDS = {
     0x00: '바닥',
     0x01: '독늪(걸음마다 HP 1)',
-    0x02: '독늪류(1E:$9956 이 01 과 함께 봄)',
+    0x02: '데미지 바닥(걸음마다 HP 15)',
     0x04: '보물상자',
-    0x05: '1E:$8676 로 감(뜻 모름)',
+    0x05: '떨어지는 칸(12:$B6DD)',
     0x06: '입구·출구 검사',
     0x07: '입구·출구 검사',
     0x08: '계단',
     0x09: '계단',
-    0x0A: '1B:$A10F',
-    0x0B: '1E:$8676 로 감(뜻 모름)',
+    0x0A: '旅の扉',
+    0x0B: '떨어지는 칸(12:$B6DD)',
     0x0C: '입구·출구 검사',
-    0x0F: '스위치(1E:$8700)',
-    0x10: '미끄러지는 바닥',
-    0x11: '미끄러지는 바닥',
-    0x12: '미끄러지는 바닥',
-    0x13: '미끄러지는 바닥',
+    0x0F: '리프트(1E:$894A)',
+    0x10: '밀리는 바닥(위)',
+    0x11: '밀리는 바닥(오른쪽)',
+    0x12: '밀리는 바닥(아래)',
+    0x13: '밀리는 바닥(왼쪽)',
     0x24: '걸어서·배로 감',
     0x25: '입구·출구 검사',
     0x26: '입구·출구 검사',
+    0x31: '세로로 느린 칸',
+    0x33: '「しらべる」 칸(1E:$B41C)',
     0x80: '벽',
     0x83: '물(배로만)',
-    0xA0: '문',
+    0x94: '문(열쇠 없이)',
+    0x95: '문(とうぞくのカギ)',
+    0x96: '문(まほうのカギ)',
+    0x97: '문(さいごのカギ)·카운터',
+    0x9C: '문(열쇠 없이)',
+    0x9D: '문(とうぞくのカギ)',
+    0xA0: '문(열쇠 없이)',
+    0xA2: '문(まほうのカギ)',
     0xA7: '카운터(너머로 말 걸기)',
-    0xB0: '막힘(그룹 3F 특수)',
+    0xA8: '팻말',
+    0xAA: 'つぼ',
+    0xAB: 'タンス',
+    0xAC: '열리지 않는 문',
+    0xB0: '막힘(그룹 3F 는 부술 수 있는 문)',
 }
 
 
@@ -486,6 +711,56 @@ def show_props(prg, per_map=False):
         print(f'{p:02X} | {kind_name(p)} | {n} | {c} | {" ".join(ex)}')
 
 
+def hx(o):
+    """출력용: dict·list 안의 정수를 두 자리 16진 문자열로."""
+    if isinstance(o, dict):
+        return '{' + ', '.join(f'{k}: {hx(v)}' for k, v in o.items()) + '}'
+    if isinstance(o, list):
+        return '[' + ', '.join(hx(v) for v in o) + ']'
+    if isinstance(o, bool) or o is None:
+        return str(o)
+    return f'{o:02X}' if isinstance(o, int) else str(o)
+
+
+def show_effects(prg, g, k):
+    """맵의 속성마다 terrain() 의 뜻과 칸 수, 떨어지는 칸이면 가는 곳."""
+    m = Map(prg, g, k)
+    cells = {}
+    for y in range(m.h):
+        for x in range(m.w):
+            cells.setdefault(m.blocks['prop'].get(m.buf[y * m.w + x] & 0x1F, 0), []).append((x, y))
+    for p, xs in sorted(cells.items()):
+        print(f'{p:02X} {len(xs):4d}칸', hx(terrain(prg, p)))
+        if p in (0x05, 0x0B):
+            for x, y in xs:
+                print(f'   ({x:02X},{y:02X}) →', hx(fall(prg, g, k, x, y)))
+
+
+def show_tables(prg):
+    used = {}
+    for g, k, *_ in dq4map.maps(prg):
+        for p in Map(prg, g, k).blocks['prop'].values():
+            used.setdefault(p, terrain(prg, p))
+    for f in range(3):
+        for p in Map(prg, field=f).blocks['prop'].values():
+            used.setdefault(p, terrain(prg, p))
+    print('# 속성 값')
+    for p, t in sorted(used.items()):
+        print(f'{p:02X}', hx(t))
+    print('# 떨어지는 칸 표(12:$B6DD)')
+    for e in fall_table(prg):
+        print(hx(e))
+    print('# 리프트(1E:$894A)')
+    for e in lifts(prg):
+        print(hx(e))
+    print('# タンス·つぼ(1E:$BC7A)')
+    for e in pots(prg):
+        print(hx(e))
+    print('# 팻말(1E:$BB52)')
+    for e in signs(prg):
+        print(hx(e))
+
+
 def show_nt(m):
     """맵 전체를 nametable 타일 번호(블록마다 2×2)로. 구역은 주인공이 구역 0 에 있을 때처럼 그린다."""
     for y in range(m.h):
@@ -549,6 +824,18 @@ def main():
     prg = ines.prg(open(a[1], 'rb').read())
     if a[2] == 'compare':
         sys.exit(0 if compare(prg, a[3], a[4] if len(a) > 4 else None) else 1)
+    if a[2] == 'json':
+        out = a[3] if len(a) > 3 else os.path.join('work', 'dq4block.json')
+        os.makedirs(os.path.dirname(out) or '.', exist_ok=True)
+        d = export(prg, out)
+        print(f"{out}: 맵 {len(d['maps'])}, 필드 {len(d['fields'])}, 속성 값 {len(d['effects'])}가지")
+        return
+    if a[2] == 'tables':
+        show_tables(prg)
+        return
+    if a[2] == 'effects':
+        show_effects(prg, int(a[3], 16), int(a[4], 16))
+        return
     if a[2] == 'defs':
         t = int(a[3], 16)
         anim = anim_blocks(prg, t)
