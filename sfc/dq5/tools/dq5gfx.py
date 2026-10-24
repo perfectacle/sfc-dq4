@@ -1064,11 +1064,11 @@ def export_ui(rom, out):
     print('ui')
 
 
-def world_screen(rom):
-    """たびびとのちず 화면(세계 0)의 128x120 색 번호 격자. 03:CAC2 를 옮긴 것."""
+def world_screen(rom, world=0):
+    """たびびとのちず 화면의 128x120 색 번호 격자. 03:CAC2 를 옮긴 것. 블록은 그때 풀려 있는 세계($1949) 지도에서 읽는다."""
     from dq5field import WORLDS, block_number, rle
-    wmap, _ = rle(rom, WORLDS[0][0])
-    hib, _ = rle(rom, WORLDS[0][1])
+    wmap, _ = rle(rom, WORLDS[world][0])
+    hib, _ = rle(rom, WORLDS[world][1])
     ce, d0 = 0, 0x10
     chars = bytearray(0x4000)
     for y in range(0x4000):
@@ -1100,8 +1100,22 @@ def export_world_screen(rom, out):
     for y, row in enumerate(grid):
         for x, v in enumerate(row):
             p[x, y] = colors[v - 0x20]
-    out.save(img, 'gfx/screens/world-map.png', 'screens', 'たびびとのちず 세계 지도(모드 7)', '세계 지도',
+    out.save(img, 'gfx/screens/world-map.png', 'screens', 'たびびとのちず 세계 지도(모드 7, $1949=0)', '세계 지도',
              note='03:CAC2 가 필드 블록마다 03:CC48 의 색으로 찍는 128x120, 색 03:CC2C')
+    from dq5field import WORLDS, block_number, rle
+    for world in (1, 2):
+        wmap, _ = rle(rom, WORLDS[world][0])
+        hib, _ = rle(rom, WORLDS[world][1])
+        img = Image.new('RGB', (256, 256))
+        p = img.load()
+        for v in range(256):
+            for u in range(256):
+                b = block_number(wmap, hib, u >> 1, v >> 1)
+                nib = rom.u8(WORLD_SCREEN_BLOCK_COLOR + (b >> 1))
+                p[u, v] = colors[(nib & 15 if b & 1 else nib >> 4)]
+        out.save(img, f'gfx/screens/world-map-{world}.png', 'screens', f'たびびとのちず 세계 지도($1949={world}, 전체)',
+                 '세계 지도', note='$1EBE bit7 갈래: 게임은 주인공 필드 좌표($1EC4,$1EC6)를 가운데로 이 그림의 128x120 만 '
+                 '보여 줌(1점 = 필드 좌표 1, 03:CD50 걸음 표)')
 
 
 EXPORTS = {'maps': export_maps, 'chr': export_chr, 'field': export_field, 'anim': export_anim,
