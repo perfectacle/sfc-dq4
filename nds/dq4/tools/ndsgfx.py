@@ -932,7 +932,12 @@ def main(argv=None):
             ex.kr(a.kr)
         mpath = Path(a.out) / "manifest.json"
         old = json.loads(mpath.read_text()) if mpath.exists() and only else {"items": {}, "stats": {}, "fail": {}}
-        old["items"].update({k: v for k, v in ex.items.items()})
+        for k, v in ex.items.items():
+            # A partial run may write only part of a category (e.g. the banner into
+            # title/); keep the entries other steps wrote there.
+            merged = {p: lbl for p, lbl in old["items"].get(k, [])}
+            merged.update({p: lbl for p, lbl in v})
+            old["items"][k] = sorted(merged.items())
         old["stats"].update({k: v for k, v in stats.items()})
         old["fail"].update({k: v for k, v in ex.fail.items()})
         mpath.write_text(json.dumps(old, ensure_ascii=False, indent=1, sort_keys=True), encoding="utf-8")
