@@ -41,12 +41,8 @@ SHOT_DIR=$PWD/work/wprof MAXF=1720 EVERY=0 PERIOD=40 TAP=a FROM=1625 TO=1710 \
 | `walk.lua` | 세이브스테이트에서 주인공을 셀 좌표 경유점으로 자동 보행, 맵 번호가 바뀔 때마다 기록. `down:90` 처럼 방향:프레임도 됨. `ROMPATCH` 로 실험용 ROM 덮어쓰기, `POKE` 로 RAM 값 고정 | `STATE`, `PRE`, `WAYPOINTS`(`x,y;down:90`), `CHANGES`, `HOLD`, `AFTER`, `MAXF`, `ROMPATCH`(`오프셋=바이트`), `POKE`, `WATCH` | `walk.txt`, `end.png` |
 | `shots.lua` | 드라이버(`boot.lua`) 입력을 재생하면서 정한 프레임마다 화면 저장. 메시지 창 여러 쪽을 볼 때 | `SHOTS`(`300,420,...`) | `sNNNNN.png` |
 | `seqboot.lua` | 세이브스테이트에서 `SEQ` 입력을 재생하는 드라이버 | `STATE`, `SEQ`, `MAXF`, `EVERY` | |
-| `dq5savestate.lua` | 드라이버(`boot.lua`) 입력을 재생하다가 `SAVEAT` 프레임에 세이브스테이트와 화면 저장. `seqlib.sh` 로 `dq5warp.lua` 를 드라이버로 두면 장면 이동 뒤 걸어 들어간 곳을 남길 수 있음 | `SAVEAT`, `SAVENAME` | `<SAVENAME>`, `.png` |
-| `dq5warp.lua` | DQ5: 배 선실 세이브스테이트에서 조작 가능한 필드(`FIELD`), 아무 실내 맵(`TO`), 고른 무리와의 전투(`BATTLE`, `GROUP`)로 가서 세이브스테이트 저장. 사용법은 [dq5-handoff.md 「장면 이동 도구」](../docs/dq5-handoff.md#장면-이동-도구) | `STATE`, `FIELD`(`X,Y`)·`TO`(`BC/BD,X,Y[,방향]`)·`BATTLE`(`몬스터:마릿수,…`)·`GROUP`(이벤트 무리 번호), `SET`(`2194\|80`), `POKE`, `ROMPATCH`, `TEST`, `SETTLE`, `SAVE`, `MAXF` | `warp.txt`, `end.png`, `<SAVE>` |
-| `dq5battle.lua` | DQ5: `walk.lua` 처럼 걸은 뒤 `LOOP` 입력(기본 A 연타)으로 싸우면서 전투 메시지(`24:8C39`) 번호와 `PEEK` 주소 값을 메시지마다 기록. 쓰는 예는 [dq5-data-format.md 「주문과 행동」](../docs/dq5-data-format.md#주문과-행동-268765) | `STATE`, `PRE`, `WAYPOINTS`, `LOOP`, `ROMPATCH`, `POKE`, `PEEK`(`7E07C0:64,…`), `SHOTMSG`, `SHOTDELAY`, `MAXF` | `battle.txt`, `sNNNNN.png`, `end.png` |
 | `execcount.lua` | 드라이버(`boot.lua`) 입력을 재생하면서 PC 가 실행된 횟수를 맵(`$BC/$BD`)별로 셈. 매 프레임 도는 루틴인지 볼 때 | `EXEC`(`02AE55,0080B1`), `MAXF` | `exec.txt` |
 | `slottrack.lua` | 드라이버 입력을 재생하면서 슬롯 인물의 셀 좌표(`7E:3020`·`3080`)가 바뀔 때마다 프레임과 함께 기록. 인물 스크립트의 걷는 길을 볼 때 | `SLOT`(16진), `MAXF` | `track.txt` |
-| `dq5warptrace.lua` | DQ5: `dq5warp.lua` 를 그대로 돌리면서 PC 실행·WRAM 읽기·쓰기를 기록하고, 도착한 뒤 정한 프레임에 WRAM 을 고치거나 화면을 찍음 | `dq5warp.lua` 의 변수, `TRACE`, `LOG`, `RWATCH`·`WWATCH`(`1000-1000`), `WFROM`, `LATE`(`600:7E21C9=01`), `SHOTS` | `trace.txt`, `rwatch.txt`, `wwatch.txt`, `sNNNNN.png` |
 
 세이브스테이트에서 시작하는 상황에 다른 프로브를 쓰려면, 드라이버를 `boot.lua` 로 둔 Lua 폴더를 만들어 `LIBDIR` 로 줍니다.
 
@@ -105,50 +101,36 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 
 ### dq5
 
-| 스크립트 | 하는 일 |
-| --- | --- |
-| `dq5map.py rom BC BD` | DQ5 실내 맵 디코더. `--compare` 로 게임 셀 버퍼(속성 패스 끝)와 비교, `--png` 로 그림(팔레트도 롬에서). BC `50`~`54` 맵은 따로 된 포인터·블록·CHR 을 씀(VRAM 슬롯 시작은 `--slot` 으로) |
-| `dq5field.py rom` | DQ5 필드 세계 지도 풀기. `--world 0~2` 로 `$1949` 세계 고르기, `--compare` 로 WRAM 과 비교, `--png` 회색조 지도, `--entrances` 로 입구 47개와 도착 자리 |
-| `dq5trigger.py rom [BC BD]` | DQ5 실내 맵 영역 이동 레코드(맵을 빼면 전체 통계) |
-| `attrgrid.py rom BC BD` | 통행 격자를 글자로 찍기(경로 잡기용) |
-| `dq5exit.py rom BC BD` | DQ5 실내 맵 출구 셀·목적지·도착 자리. 맵을 푼 뒤 도는 맵별 루틴(`15:F907`)이 바꾸는 출구 셀도 반영 |
-| `dq5npc.py rom BC BD` | DQ5 실내 맵 인물 목록과 인물 표 값·인라인 스크립트 명령. `--night` 밤 목록, `--flags 21AD=10` 이벤트 플래그, `--compare` 로 인물 표(`7E:3000-`) 22칸 비교, `--list 108BBD` 목록 주소로 보기, `--check-scripts` 모든 스크립트 길이 검사 |
-| `dq5text.py rom 번호` | DQ5 보행 모드 메시지를 글자로(`--codes` 로 코드). `--controls` 제어 코드 처리기와 뜻, `--window N` 메뉴 창 레코드와 항목 문자열. 폰트 그리기(`glyph`), 글자표(`CHARS`), 이름 문자열(`string`·`string_codes`)도 이 모듈 |
-| `dq5talk.py rom 대화번호` | 대화 번호의 갈래·스크립트·메시지(조건 코드 뜻, 특수 기능 처리기, 묻기 갈래 포함). `BC BD` 를 주면 그 맵 인물 전부, `--check` 로 스크립트 574개 경계 검사, `--calls` 로 네이티브 호출 대상 |
-| `dq5chest.py rom [BC BD]` | DQ5 보물상자(번호·칸·열림 플래그·내용물), タンス·ツボ·タル 항목, 발밑 표(`1E:F08B`). 물건 이름과 `D000`~`D009` 의 뜻까지 |
-| `dq5shop.py rom` | DQ5 상점 품목 목록(종류·마을 그룹 키)과 물건 가격, 작은 메달·코인 교환 값, 여관 1인 값 |
-| `dq5item.py rom` | DQ5 물건 216개의 장비 칸·공격력/수비력·사람 장비 비트·동료 몬스터 장비 비트(16비트)·가격과 표 k0~k4 원값 |
-| `dq5monster.py rom` | DQ5 몬스터 236개의 필드(HP·MP·민첩·공격·수비·경험치·금화·행동 수·재생·떨어뜨리는 물건·동료 확률과 종류 등), 행동 6개, 내성 18칸. `--companions` 동료 레코드(`23:AED1`) 41개 |
-| `dq5spell.py rom` | DQ5 전투 행동 171개(주문·몬스터 행동)의 이름·MP·범위 비트·처리 루틴·피해/회복량·내성 종류 |
-| `dq5encounter.py rom [BC BD]` | DQ5 전투 조우 구역 85개의 칸별 무리·확률·마릿수. `BC BD` 는 그 실내 맵의 구역, `--maps` 조우가 있는 실내 맵, `--field` 필드 구역 격자, `--events` 이벤트 전투 무리 표(`23:D757`), `--trace trace.txt` 로 `probe/trace.lua` 기록(`TRACE=23E7C2,23E9B0,23EA40,23E98F LOG=7E1001,7E1003,7E1005,7E1007`)의 무리를 표와 대조, `--steps trace.txt` 로 걸음마다의 구역·조우율(`TRACE=0082AF LOG=7E00BC,7E00BE,7E00B6,7E00B8,7E1948,7E075E,7E21C9`)을 격자·지형으로 계산한 값과 대조 |
-| `dq5mongfx.py rom [몬스터…]` | DQ5 전투 몬스터 그림(그림 번호·머리·조각·색). `--png` 그림, `--compare at.bin` 게임 버퍼(`7E:4000`)와 타일 비교, `--shot` 전투 화면과 RGB 비교, `--oam o.oam v.vram` OBJ 색 번호 비교, `--layout "몬스터:마릿수[:무리 값],…"` 무리 배치(그림 상자 OAM 좌표) |
-| `dq5battlebg.py rom [번호]` | DQ5 전투 배경 49개(번호 `$1AA0 & 7F`, 그림·목록·팔레트 주소). `--png` 256x128 띠, `--cgram` 레코드 밖 색, `--alt` 밤 팔레트, `--compare 덤프폴더 프레임` 으로 `dq5battledump.lua` 덤프와 비교 |
-| `lua/dq5battledump.lua` | 전투 그림 실험: `AT` 실행 때 WRAM(`at.bin`), `DUMPF` 프레임에 WRAM·VRAM·CGRAM·OAM·화면, `FROM`~`TO` DMA 기록. `boot.lua`(walk.lua) 뒤에 붙여 씀 |
-| `dq5figures.py` | `docs/images/` 의 그림을 다시 만듦(롬 필요, 게임 화면 비교 그림만 `work/` 덤프 필요) |
+[sfc/dq5/tools/README.md](../sfc/dq5/tools/README.md) 에 있습니다.
 
 ### dq4
 
 | 스크립트 | 하는 일 |
 | --- | --- |
-| `dq4map.py rom list\|check\|G K` | DQ4 마을·던전 맵 풀기. `list` 맵 269개, `check` 해제 경계 전수 검사, `G K --compare at.bin` 으로 `lua/fc/atpc.lua` 덤프(`$7800`)와 비교. `exits G K` 출구(`--compare end.ram` 은 `$05A0`), `npcs G K` 인물(`--compare` 는 인물 표 `$6F60`~) |
+| `dq4map.py rom list\|check\|G K` | DQ4 마을·던전 맵 풀기. `list` 맵 269개, `check` 해제 경계 전수 검사, `G K --compare at.bin` 으로 `lua/fc/atpc.lua` 덤프(`$7800`)와 비교. `exits G K` 출구(`--compare end.ram` 은 `$05A0`), `npcs G K` 인물(진행 플래그로 고른 목록. `--ram`·`--set` 으로 플래그, `--compare` 는 인물 표 `$6F60`~, 덤프 파일이나 `end.*` 폴더), `lists [G K]` 진행 목록 표 `1C:$9D0E` |
 | `lua/fc/atpc.lua` | FC: PC 가 `AT` 에 닿을 때 CPU 메모리(`RANGE`, 기본 `0000-7FFF`)를 `at_PPPP_N.bin` 으로. `DRIVER` 로 입력 드라이버 |
 | `dq4field.py rom check\|F\|compare lk.txt` | DQ4 필드 풀기. `F --png` 회색조 그림, `compare` 는 `lua/fc/fieldlookup.lua`(게임의 좌표 → 타일 조회 기록)와 비교, `entrances` 필드 → 마을 입구 74개 |
-| `dq4data.py rom names\|items\|monsters\|spells\|levels [인물]` | DQ4 이름 목록(주문·직업·아이템·몬스터…), 아이템 종류·강도·가격·장비 인물·플래그, 몬스터 능력치·드롭, 주문 MP·대상·배우는 레벨, 인물별 레벨 1~99 경험치·능력치 기준값 |
+| `dq4data.py rom names\|items\|monsters\|spells\|levels [인물]\|actions` | DQ4 이름 목록(주문·직업·아이템·몬스터…), 아이템 종류·강도·가격·장비 인물·플래그·전투 사용 행동, 몬스터 능력치·드롭·행동 ID·행동 수·AI·내성, 주문 MP·대상·배우는 레벨, 인물별 레벨 1~99 경험치·능력치 기준값, 전투 행동 ID 256개의 처리 루틴·위력·양·성공률 |
 | `lua/fc/statspoke.lua` | FC: 세이브스테이트를 불러온 뒤 `ONCEAT` 프레임에 한 번 RAM(`ONCE="60C5=E8,03,00;…"`)이나 PRG ROM(`ROMONCE`, 메모리 위만)에 쓰고 `NEXT`(기본 `seq.lua`)를 돌림. 프로브의 `DRIVER` 로 씀 |
 | `lua/fc/statsstack.lua` | FC: PC 가 `AT`(쉼표로 여럿)에 닿을 때마다 뱅크·A X Y·`LOG` 주소 값·스택 `STACK` 바이트를 `stack.txt` 로 |
 | `lua/fc/statsreads.lua` | FC: PRG 오프셋 `LO`-`HI` 를 읽을 때마다 읽은 명령의 PC·오프셋·A X Y(`STACK=n` 이면 스택도)를 `rd.txt` 로 |
-| `dq4text.py rom all\|MSG\|controls\|windows` | DQ4 대사 풀기. `all` 은 메시지 2633개 전부, `--bytes` 글자 바이트, `MSG[,MSG…] --compare end.ram` 으로 창 줄 버퍼(`$06AA`, 전투 창이면 옆의 `end.nt`)와 비교(치환은 아무 글자와 맞춤, 자동 `＊「` 포함), `controls` 제어 바이트 처리기·뜻·쓰는 메시지 수, `windows` 창 문자열 표 `16:$A572` |
+| `lua/fc/statspc.lua` | FC: PC 가 `PCPOKE`(`주소[@뱅크]:주소=바이트들;…`)의 주소에 닿을 때 RAM 에 쓰고 `PCNEXT`(기본 `seq.lua`)를 돌림. 전투 시작 `18:$A11A` 에서 무리 바꾸기, 몬스터 행동 ID 바꾸기에 씀 |
+| `dq4text.py rom all\|MSG\|controls\|windows\|export` | DQ4 대사 풀기. `all` 은 메시지 2633개 전부, `--bytes` 글자 바이트, `MSG[,MSG…] --compare end.ram` 으로 창 줄 버퍼(`$06AA`, 전투 창이면 옆의 `end.nt`)와 비교(치환은 아무 글자와 맞춤, 자동 `＊「` 포함), `controls` 제어 바이트 처리기·뜻·쓰는 메시지 수, `windows` 창 문자열 표 `16:$A572`, `export [DIR]` 메시지·창 문자열·이름 목록을 기호 텍스트 JSON·TSV 로 `work/text/` 에(커밋 금지), `export --check` 기호 → 바이트 왕복과 부호 → 롬 비트열 검사 |
 | `lua/fc/textforce.lua` | FC: 메시지 출력 `16:$8656` 진입 때 X:A 를 `MSG` 로 바꾸고 `ARGS`(`F9=01,0554=10` 꼴)로 RAM 을 써서 아무 메시지나 띄움. `FAKE`(글자 바이트)로 메시지 첫 바이트들을 바꾸고, `AT` 로 처리기 들머리에서 RAM 을 씀. 창 줄 버퍼 변화를 `buf.txt`(`BUFLEN`), 진입을 `enter.txt`, `HOOK` 주소 실행을 `hook.txt`, `DUMPEVERY` 프레임마다 RAM·nametable 을 `fNNNNN.ram/.nt` 로. `DRIVER` 로 입력 드라이버 |
 | `lua/fc/textbrk.lua` | FC: BRK 뱅크 호출(`$C408`)을 모두 잡아 호출 위치마다 바이트·횟수·실제 복귀 자리를 `brk.txt`, 메시지·플래그 형식의 번호·값을 `events.txt` 로 |
 | `lua/fc/textwin.lua` | FC: 창 문자열 표 항목 찍기(`16:$9783`)와 `80` 이상 바이트(`16:$97B0`, 루틴·문자열 갈래)를 `win.txt` 로 |
 | `lua/fc/textfont.lua` | FC: CHR-RAM 오프셋 `PPU`(기본 `10B0-10B7`) 쓰기마다 프레임·PC·값·`$0507` 을 `font.txt` 로 |
+| `lua/fc/textmodoki.lua` | FC: 전투 행동 분기 `11:$8C85` 의 행동 번호를 기록하고 `FORCE` 로 바꿈. 몬스터 칸 레코드(`RANGE`, 기본 `7274-72FF`) 쓰기, `HOOK`(뱅크 `11` 주소) 실행, 메시지 진입을 `modoki.txt` 로 |
 | `dq4bank.py rom call\|table\|compare\|free\|cover` | DQ4 BRK 뱅크 호출 풀기(특수 형식 `x3`(길이 `len=`)·메시지·플래그·소리 포함). `free` 뱅크별 FF·00 연속 구간, `cover cover.txt…` 뱅크별 실행 오프셋 수. `compare trace.txt` 로 `probe/trace.lua` 기록(`TRACE=C446,C455,C3CD LOG=0023,0024,0025,0026,0027,0507`)과 비교 |
 | `dq4encounter.py rom maps\|zones\|odds\|dungeons\|formations\|bosses\|check` | DQ4 적 조우 표. `maps` 필드 구역 지도(`--png` 는 `work/` 에만), `zones [Z]` 구역별 칸·몬스터, `odds Z [--night\|--dungeon]` 칸 확률, `dungeons` 던전 층별 구역, `bosses` 특수 전투, `check [enc.txt…]` 표 경계 검사와 `lua/fc/enc.lua` 기록 대조(필드·던전·그룹 3A 칸·성수·`$6BEB`·특수 전투, 기습·선제 횟수) |
-| `dq4talk.py rom G K\|id N\|all\|calls\|compare DIR` | DQ4 인물 대화 스크립트 풀기. `G K` 맵의 인물마다 자리·겉모습·대화 번호·스크립트·대사(`--ram` 으로 플래그·장·시간·일행·소지품을 풀어 나올 메시지만, 이벤트 목록과 밤도 덤프대로, `--night` 은 밤 목록), `all` 낮·밤·이벤트 목록 전수 검사, `calls` 호출 문장이 부르는 루틴의 갈래, `compare` 는 `lua/fc/talk.lua` 기록(진입 슬롯·대화 번호·조건 결과·서비스·이벤트·전투·메시지)과 대조(`--no` 는 「いいえ」). `lua/fc/talk.lua` 의 `SLOT`(여럿 가능)으로 아무 인물에게나, `TID` 로 아무 대화 번호나 돌리고 `SET` 으로 첫 말 걸기 전에 RAM 을 씀. `lua/fc/talkseek.lua` 는 인물에게 걸어가 말 거는 입력 드라이버 |
+| `dq4talk.py rom G K\|id N\|all\|calls\|events\|looks\|compare DIR` | DQ4 인물 대화 스크립트 풀기. `G K` 맵의 인물마다 자리·겉모습·대화 번호·스크립트·대사(`--ram` 으로 플래그·장·시간·일행·소지품을 풀어 나올 메시지만, 이벤트 목록과 밤도 덤프대로, `--night` 은 밤 목록), `all` 낮·밤·이벤트 목록 전수 검사, `calls` 호출 문장이 부르는 루틴의 갈래, `events [--compare DIR…]` 이벤트 표 `1C:$BF74` 50개의 전투·플래그·메시지·장소·부르는 곳(`EV` 실행 기록과 대조), `looks` 그림 번호마다 쓰는 인물, `compare` 는 `lua/fc/talk.lua` 기록(진입 슬롯·대화 번호·조건 결과·서비스·이벤트·전투·메시지)과 대조(`--no` 는 「いいえ」). `lua/fc/talk.lua` 의 `SLOT`(여럿 가능)으로 아무 인물에게나, `TID` 로 아무 대화 번호나, `EV` 로 아무 이벤트나 돌리고 `SET` 으로 첫 말 걸기 전에 RAM 을 씀. `lua/fc/talkseek.lua` 는 인물에게 걸어가 말 거는 입력 드라이버 |
 | `lua/fc/enc.lua` | FC: 필드·맵 안에서 시행마다 세이브스테이트를 다시 불러 기다림을 바꿔 걷고, 걸음·조우 판정(조우율·난수)·고른 무리·`$6E44`·메시지 번호를 `enc.txt` 로. `STATE`, `TRIALS`, `WAIT0`, `WAITSTEP`, `POS`(필드 좌표 한 번 쓰기), `POKE1`, `LIMIT`, `WALK=random`(네 방향), `CONT`(전투 뒤 더 돌며 메시지), `FORCE44`, `BOSS=NN`(메모리상 PRG 를 덮어 특수 전투 NN), `SHOT` |
 | `dq4block.py rom defs T\|G K\|field F\|props\|compare DIR\|effects G K\|tables\|links [G K]\|json [OUT]` | DQ4 맵 블록 → 타일 4개·팔레트·통행 속성. `defs T` 맵 종류 T 의 블록 정의·애니메이션·낮 팔레트, `props [--maps]` 롬 전체 맵·필드의 속성 값별 뜻·맵 수, `G K` 통행 지도(`--nt` nametable 타일 번호, `--png` 는 `work/` 에만), `compare DIR [PREFIX]` 은 `seq.lua`·`warp.lua` 의 `end.*`(또는 `blockload.lua` 덤프)와 블록 표·CHR·팔레트·`$7800`·화면 nametable 비교. `effects G K` 맵의 속성 값마다 지형 효과·떨어지는 칸 목적지, `tables` 속성 값마다 `terrain()` 과 떨어지기·리프트(사각형 포함)·タンス/つぼ·팻말 표, `links [G K]` 계단·旅の扉 등 출구 칸마다 목적지(`08:$B22E`), `json` 맵 279개·필드 전부의 속성·칸·출구 연결·표를 `work/dq4block.json` 으로 |
-| `dq4shop.py rom [G K\|people]` | DQ4 무기·방어구·도구 가게 목록 전부와 여관 1인 값. `G K` 는 그 장소의 목록·여관·가게 인물(스크립트·호출로 여는 가게 포함), `--compare end.ram [end.sram]` 으로 가게 창 목록 `$07BD` 와 비교(SRAM 을 주면 덧붙임까지). `people` 은 롬 전체의 「인물 → 가게(종류·품목·여관 값)」 표 |
-| `dq4chest.py rom G K\|all\|check` | DQ4 보물상자(칸·내용물·열었음 플래그 `$625D`~)와 발밑 숨은 물건(특수 내용 설명 포함). `check` 맵마다(마지막 그룹 `48` 포함) 상자 칸 수와 개수 표 비교, `G K --compare end.sram` 으로 열었음 비트 |
+| `dq4fcgfx.py rom all\|maps\|field\|gfx OUT`, `scenes OUT SPEC.json`, `verify DIR…` | DQ4 원작 그림 뽑기: 맵 279개(낮·밤, 인물·출구·상자·문·계단·떨어지는 칸·리프트·タンス·팻말 주석판), 필드 4개(입구 주석판), 맵 종류별 블록 시트, CHR 뱅크 `0C`·`0D`, 폰트, `lua/fc/fcgfxscene.lua` 덤프 장면, 갤러리 HTML. 출력은 커밋하지 않음(비공개 에셋 저장소). `verify` 는 스프라이트를 끈 MesenCE 화면과 롬만으로 그린 화면을 픽셀로 비교. [docs/dq4-fcgfx.md](../docs/dq4-fcgfx.md) |
+| `lua/fc/fcgfxpal.lua` | FC: NES 색 번호 `00`~`3F` 마다 화면 전체를 그 색으로 칠해 `pal-XX.png` 로(MesenCE 색 재기). `STATE` |
+| `lua/fc/fcgfxscene.lua` | FC: `AT` 프레임마다 화면과 nametable·CHR·팔레트·OAM·RAM·`$2000` 값을 `fNNNNN.*` 로. 입력은 `DRIVER`(전원부터는 `debugsram.lua` 의 `SRAM_DRIVER`) |
+| `dq4shop.py rom [G K\|people]` | DQ4 무기·방어구·도구 가게 목록 전부(장소별 값 `15:$B2F7`: 메달·코인 포함)와 여관 1인 값. `G K` 는 그 장소의 목록·여관·가게 인물(스크립트·호출로 여는 가게 포함), `--compare end.ram [end.sram]` 으로 가게 창 목록 `$07BD` 와 비교(SRAM 을 주면 덧붙임까지). `people` 은 롬 전체의 「인물 → 가게(종류·품목·여관 값)」 표 |
+| `dq4chest.py rom G K\|all\|check\|loot` | DQ4 보물상자(칸·내용물·열었음 플래그 `$625D`~)와 발밑 숨은 물건(특수 내용 설명 포함). `check` 맵마다(마지막 그룹 `48` 포함) 상자 칸 수와 개수 표 비교, `G K --compare end.sram` 으로 열었음 비트. `loot [--json]` 은 상자·발밑·タンス·つぼ·대화로 받는 물건을 합친 「맵·자리 → 얻는 것·플래그」 롬 전체 표 |
 | `lua/fc/blockload.lua` | FC: PRG 오프셋 `AT`(쉼표로 여럿)의 명령이 실행될 때 CPU 메모리·CHR-RAM·nametable·팔레트를 `ld_OOOOO_N.*` 로(`LIMIT` 번). `DRIVER` 로 입력 드라이버 |
 | `lua/fc/blockreads.lua` | FC: CPU 메모리 `RANGE`(예 `6F20-6F5F`)를 읽는 명령을 PC 마다 모아 `ramreads.txt` 로(`MAXF`, `FROM`) |
 | `lua/fc/shopwalk.lua` | FC: 맵 좌표 `$44/$45` 를 보며 `WAY`(`"12,1C 0D,1C"`) 칸들로 걷고 `end.mss` 등 덤프. `STATE`, `TAIL`, `MAXF` |
@@ -156,6 +138,7 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 | `lua/fc/shoppoke.lua` | FC: PC 가 `AT` 에 닿을 때 `POKE`(`3D=03;…`)를 RAM 에 씀. `BANK`(`$0507` 일치 때만), `ONCE`, `DRIVER` |
 | `lua/fc/shopreads.lua` | FC: `RANGE`(기본 `6000-62FF`)를 읽는 명령을 「뱅크:PC 주소 값 횟수 첫프레임」으로 `reads.txt` 에. `FROM`, `BANK`, `PCLO`/`PCHI`, `MAXF`, `DRIVER` |
 | `lua/fc/shopprg.lua` | FC: 첫 프레임에 메모리의 PRG ROM 을 `PRG`(`55CCA=4CF4BE;…`, PRG 오프셋)대로 바꿈(롬 파일은 그대로). `DRIVER` |
+| `lua/fc/shopprice.lua` | FC: 가격 함수 `15:$B2F7` 에 들어갈 때의 아이템과 나올 때의 값을 「프레임 장소 아이템 값」으로 `price.txt` 에. `MAXF`, `DRIVER` |
 | `dq4event.py rom sram\|flags\|chapters\|chars\|places\|events\|ops` | DQ4 저장 데이터. `sram end.sram` 작업 영역·모험의 서 3칸(CRC 검사)·인물 레코드, `flags` 이벤트 플래그 영역, `flags --xref [NN]` 플래그 비트마다 쓰는 곳·검사하는 곳(BRK·절대 주소·대화 스크립트·인물 블록·맵 인물 목록 표), `chapters` 1~5장 시작 표, `chars [--compare end.sram]` 장 시작 인물 레코드, `places` 귀환 자리 표와 ルーラ 행선지, `events` 인물 블록의 이벤트 명령과 맵 이벤트 표, `ops [--flag NN]` 롬의 BRK 플래그 명령 모양 |
 | `lua/fc/eventwalk.lua` | FC: 세이브스테이트에서 좌표 목표(`x=NN`/`y=NN`)와 버튼으로 걷고 `reset:1` 로 리셋. `POKEAT` 프레임별 RAM 쓰기, `PRGPOKE` 메모리의 PRG ROM 바꾸기(롬 파일은 그대로). 프로브의 `DRIVER` 로도 씀. 끝나면 `walk.txt`·`end.*` |
 | `lua/fc/eventflags.lua` | FC: 이벤트 플래그 영역(`$627B`~`$62EE`, `RANGE`) 읽기·쓰기를 PC·뱅크·BRK 주소와 함께 `flags.txt` 로. `FROM`, `MAXF` |
@@ -173,5 +156,7 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 | `lua/fc/debugreads.lua` | FC: 디버그 스위치 `$C000`(PRG `3C000`·`7C000`)을 읽는 명령을 모아 `debugreads.txt`(PRG 오프셋, 주소, 횟수, 첫 프레임). `DRIVER`, `MAXF` |
 | `lua/fc/debugtrap.lua` | FC: PRG 롬 오프셋(`TRAP`, 예: `401B9`)의 명령이 실행될 때만 프레임·레지스터·`LOG` 주소·스택을 `debugtrap.txt` 로(다른 뱅크의 같은 CPU 주소는 거름). 처음 걸린 뒤 `SHOTS_AFTER` 프레임마다 화면 4장. 드라이버는 `TRAP_DRIVER` |
 | `lua/fc/debugsram.lua` | FC: 전원을 켜기 전에 SRAM 8KB 를 `00`(또는 `SRAM` 파일)으로 채우고 `SRAM_DRIVER`(없으면 `DRIVER`)를 돌림. 테스트러너가 불러오는 `Saves/<롬 이름>.sav` 와 상관없이 같은 결과를 내려고 씀 |
+| `dq4fcsprite.py rom field\|monster\|sheet\|who N\|check-rom\|check-field DIR\|check-monster DIR` | DQ4(FC) 원작 그림 뽑기. `field [N]` 필드 인물·일행·탈것(그림 번호마다 32×64 시트: 행 남·서·동·북, 열 걸음 0·1), `monster [ID]` 전투 몬스터, PNG 1배·8배(색 번호 0 투명)와 색 번호 행렬 `.txt`. `sheet` 전부 만들어 `work/dq4-fcsprite/index.html` 로 묶음, `assets OUT` 은 비공개 에셋 저장소 규칙(1배 PNG·`index.json`·`SOURCE.txt`·`gallery/sprites.html`)으로, `who N` 그 그림을 쓰는 맵·인물. `check-field` 는 `seq.lua`·`warp.lua` 덤프의 `$7200`·CHR·OAM·OBJ 팔레트, `check-monster` 는 `lua/fc/spritebattle.lua` 덤프의 화면 픽셀과 비교. [docs/dq4-fcsprite-format.md](../docs/dq4-fcsprite-format.md) |
+| `lua/fc/spritebattle.lua` | FC: 필드 세이브스테이트(`STATE`)에서 위아래로 걸으며 조우 판정 `18:$9D06` 을 메모리상 `CLC`/`RTS` 로 바꿔 전투를 일으키고, 전투 시작 `18:$A11A` 에서 무리 칸을 `MON`(`"67:1,03:2"`, ID:마릿수)으로 덮음. `WAIT` 프레임 뒤 `end.*` 덤프, `COVER=1` 이면 그동안의 `cover.txt`(`krpatch fc listing` 형식), `READS=1` 이면 PRG 읽기 쪽별 `reads.txt` |
 
 스프라이트·맵 출력은 채택되지 않은 초기 시안입니다. 타이틀·일러스트만 보존 대상으로 평가됐으며, 후속 작업은 [그래픽 핸드오프](../docs/dq4-graphics-handoff.md)를 먼저 읽습니다. 그래픽 출력의 배치·제약은 [dq4-graphics.md](../docs/dq4-graphics.md)에 있습니다. 생성 원본과 프롬프트는 `tools/dq4art/` 에 보관합니다. `uv run --locked python tools/dq4graphics.py` 로 기본 출력 `work/dq4-graphics/` 를 만들고, `uv run --locked python tools/dq4figures.py` 로 문서 그림을 다시 만듭니다.

@@ -4,14 +4,7 @@
 
 ## DQ5(SFC)
 
-| 자료 | 다루는 것 |
-| --- | --- |
-| [「ドラクエ命」 SFC 版ドラクエ 5](https://showa-yojyo.github.io/dqbook/dq5.html) ([소스](https://github.com/showa-yojyo/dqbook)) | 구조체, 텍스트(허프만 부호), 인카운트, 몬스터, 상점 |
-| [DQバイナリ改造 @Wiki: 圧縮 - SFC-DQ5](https://w.atwiki.jp/dq_binary/pages/29.html) | 스프라이트·몬스터 그래픽 압축 |
-| [DQバイナリ改造 @Wiki: 解析（RAM） - SFC-DQ5](https://w.atwiki.jp/dq_binary/pages/23.html) | RAM 주소(파티, 이벤트 플래그, 인물 데이터) |
-
-atwiki 는 스크립트 접근을 막을 때가 있어 [Wayback Machine](https://web.archive.org/web/2024/https://w.atwiki.jp/dq_binary/pages/29.html) 사본으로 읽었습니다.
-RAM 페이지의 「`7EFC00-` マップデータ」는 실제와 다릅니다([dq5-map-format.md](dq5-map-format.md#위키와-다른-점)).
+[sfc/dq5/references.md](../sfc/dq5/references.md) 에 있습니다.
 
 ## DQ4(FC)
 
@@ -32,15 +25,13 @@ RAM 페이지의 「`7EFC00-` マップデータ」는 실제와 다릅니다([d
 | [Realm of Darkness: Nintendo DS DQ4 sprites](https://www.realmofdarkness.net/dq/ds-dq4-sprites/) | 라이안의 복장과 방향별 실루엣. 초기 인물 오인 기록은 핸드오프 참고 |
 | [The Spriters Resource: SNES Dragon Quest V](https://www.spriters-resource.com/snes/dragonq5/) | 추가 원작 시트 출처. 이번 세션의 자동 접근은 HTTP 403으로 열람하지 못함 |
 
-사용자가 제공한 Nintendo DS DQ4 타이틀 화면은 하늘·용·로고의 색감 참고로 사용했습니다. 지형 표현은 저장소의 [DQ5 맵 비교 그림](images/dq5-map-0206-compare.webp)과 [낮·밤 그림](images/dq5-map-0206-day-night.webp)도 참고했습니다. 외부 시트의 픽셀 데이터를 제작물에 복사하지 않았으며, 외부 참고 이미지 사본은 배포하지 않습니다.
+사용자가 제공한 Nintendo DS DQ4 타이틀 화면은 하늘·용·로고의 색감 참고로 사용했습니다. 지형 표현은 저장소의 [DQ5 맵 비교 그림](../sfc/dq5/images/dq5-map-0206-compare.webp)과 [낮·밤 그림](../sfc/dq5/images/dq5-map-0206-day-night.webp)도 참고했습니다. 외부 시트의 픽셀 데이터를 제작물에 복사하지 않았으며, 외부 참고 이미지 사본은 배포하지 않습니다.
 
 타이틀·일러스트는 사용자에게 긍정 평가를 받았지만, 스프라이트는 최종 수정본까지 반려됐습니다. 자료별 참고 목적·인물 식별 오류·제작 시도·다음 작업은 [그래픽 핸드오프](dq4-graphics-handoff.md), 제작 원본과 변환 규격은 [dq4-graphics.md](dq4-graphics.md)에 있습니다.
 
 ## DQ4(NDS)
 
-| 자료 | 다루는 것 |
-| --- | --- |
-| [NDS 드래곤 퀘스트 4 한글패치 v1.1](https://blog.naver.com/lovlince/224424163573) | 팬 한글화(`NDS_DQ4_v1.1.xdelta`, 내부 판 `DQ4_v036`). 사용자 허락 아래 명칭·번역 대조와 늘어난 내용 확인에 참고([ORIG-01](../.agents/skills/analysis/SKILL.md#orig-01--남의-데이터-금지)) |
+[nds/dq4/references.md](../nds/dq4/references.md) 에 있습니다.
 
 ## 다른 이식 시도
 

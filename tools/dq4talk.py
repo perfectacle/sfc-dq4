@@ -8,6 +8,10 @@
   python tools/dq4talk.py rom/dq4.nes calls                  호출 문장(00·01)이 부르는 뱅크 15 루틴을 하는 일로 나눈 표
   python tools/dq4talk.py rom/dq4.nes compare DIR [--no]    lua/fc/talk.lua 기록(DIR/talk.txt)의 메시지 번호와 예측 비교
                                                             (--no: 예/아니오에서 「いいえ」 를 골랐을 때)
+  python tools/dq4talk.py rom/dq4.nes events [--compare DIR...]
+                                                            이벤트 표 1C:$BF74 의 번호마다 전투·플래그·메시지·장소·부르는 곳
+                                                            (--compare: EV 로 돌린 talk.lua 기록과 대조)
+  python tools/dq4talk.py rom/dq4.nes looks                  그림 번호마다 쓰는 인물 수·장소·첫 대사
 
 --ram 을 주면 RAM 덤프의 플래그($627B~)·장($615A)·시간($62ED)·일행($616A~)·인물 레코드로 조건을 풀어
 실제로 나올 메시지만 낸다. 덤프가 밤이면 밤 목록을 쓴다.
@@ -23,6 +27,7 @@ from kr_patch.fc import ines
 from kr_patch.fc.dis6502 import OPS, SIZE
 
 sys.path.insert(0, __file__.rsplit('/', 1)[0])
+import dq4bank
 import dq4map
 import dq4text
 
@@ -31,8 +36,7 @@ SCRIPTS = 0x9642          # $98F6 의 워드. 대화 번호 7~160 의 스크립�
 SCRIPT_FIRST, YESNO_FIRST, MSG_FIRST = 0x007, 0x161, 0x179
 MSG_BASE = 0x500          # 대화 번호 161 이상: 메시지 = 번호 - 161 + 500
 SERVICE = 0x10000         # 예측 목록에서 메시지 번호 대신 서비스(15:$9CBF, A=n)를 나타내는 표시
-NIGHT = 0x78              # $62ED 가 이 값 이상이면 밤(1C:$9BD9, 15:$9CE5)
-ALT = 0x9D0E              # 뱅크 1C: 이벤트 플래그로 바뀌는 인물 목록 표의 포인터
+NIGHT = dq4map.NIGHT     # $62ED 가 이 값 이상이면 밤(1C:$9BD9, 15:$9CE5)
 WALK = range(0x616A, 0x616E)    # 걷는 일행 4자리
 WAGON = range(0x6172, 0x6178)   # 마차 자리
 
@@ -183,8 +187,7 @@ class State:
                 return not self.alive(m)
             if r[0x615A] >= 4 or self.member(WAGON, args[0]) is None:
                 return False     # 5장($615A ≥ 4)은 BRK 6A 73 이 마차 자리를 빼낸다
-            w = self.wagon()
-            return None if w is None else w and not self.alive(self.member(WAGON, args[0]))
+            return self.wagon() and not self.alive(self.member(WAGON, args[0]))
         if op == 0x11:
             if any(args[0] in self.items(e) for e in self.party(WALK)):
                 return True
@@ -197,12 +200,20 @@ class State:
         return None
 
     def wagon(self):
-        """10:$8498: 마차 자리를 셀지. $618E bit5(마차 있음)가 꺼졌거나 bit7 이면 안 세고,
-        아래 3비트가 0 이면 센다. 그 밖(마차가 다른 맵에 있는 등)은 롬만으로 정하지 않는다(None)."""
-        v = self.ram[0x618E]
+        """10:$8498: 마차 자리를 셀지. $618E bit5(마차 있음)가 꺼졌거나 bit7 이면 안 세고, 아래 3비트가 0 이면 센다.
+        1·2 는 $41 bit7 이 켜져 있고 마차가 지금 그룹($63)에 있을 때만 센다: 1 은 $618F(그리고 $07BA 가 4·5 가 아닐 때),
+        2 는 $6193 을 그룹과 견준다. 3 이상은 세지 않는다."""
+        r = self.ram
+        v = r[0x618E]
         if not v & 0x20 or v & 0x80:
             return False
-        return True if not v & 7 else None
+        if not v & 7:
+            return True
+        if not r[0x41] & 0x80:
+            return False
+        if v & 7 == 1:
+            return r[0x07BA] not in (4, 5) and r[0x618F] == r[0x63]
+        return v & 7 == 2 and r[0x6193] == r[0x63]
 
     def party(self, slots):
         """일행 자리($616A~ 걷는 4, $6172~ 마차)에서 bit7 이 켜진 자리의 값(아래 5비트 = 레코드 번호)."""
@@ -335,55 +346,10 @@ def is_night(ram):
     return ram[0x62ED] >= NIGHT
 
 
-def rd1c(prg, a):
-    return prg[0x1C * 0x4000 + (a & 0x3FFF)]
-
-
-def alt_entries(prg):
-    """1C:$9D0E 가 가리키는 6바이트 표(FF 로 끝): (그룹, 순번, 마스크, 플래그 번호, 목록 주소)."""
-    a, out = rd1c(prg, ALT) | rd1c(prg, ALT + 1) << 8, []
-    while rd1c(prg, a) != 0xFF:
-        e = [rd1c(prg, a + i) for i in range(6)]
-        out.append((e[0], e[1], e[2], e[3], e[4] | e[5] << 8))
-        a += 6
-    return out
-
-
-def alt_records(prg, a):
-    """뱅크 1C 의 a 부터 인물 레코드(dq4map.npc_records 와 같은 길이 규칙, 첫 바이트 00 으로 끝)."""
-    out = []
-    while (f := rd1c(prg, a)) != 0:
-        n = 7
-        if f & 0x10 and f & 0x08:
-            n += (0 if f & 1 else 1) + (0 if f & 2 else 1) + (0 if f & 4 else 2)
-        for bit in (0x10, 0x08):
-            if f & bit:
-                n += 1 + rd1c(prg, a + n)
-        out.append(bytes(rd1c(prg, a + i) for i in range(n)))
-        a += n
-    return out
-
-
-def alt_list(prg, g, k, ram):
-    """1C:$9CC1: 표에서 (g, k) 이고 플래그가 켜진 첫 줄의 목록. 1C:$9C6F 가 무르는 경우는 None."""
-    flag = lambda i, m: ram[0x627B + i] & m
-    for eg, ek, m, i, a in alt_entries(prg):
-        if (eg, ek) != (g, k) or not flag(i, m):
-            continue
-        if not ram[0x62A5] & 0x80 and (flag(0x07, 0x10) or flag(0x0C, 0x80)):
-            if (g, k) == (0x04, 0x01) or (g, k) == (0x12, 0x02) or (g == 0x02 and k != 0x03) \
-                    or ((g, k) == (0x15, 0x02) and flag(0x1A, 0x02)):
-                return None
-        return alt_records(prg, a)
-    return None
-
-
 def npc_list(prg, g, k, night=False, ram=None):
     """인물 표 순서(슬롯 6~) 의 레코드. 낮은 F bit4, 밤은 F bit3 인 레코드만 차례로(1C:$9798).
-    ram 을 주면 이벤트 플래그로 바뀐 목록(1C:$9D0E 표)을 쓴다."""
-    recs = alt_list(prg, g, k, ram) if ram is not None else None
-    if recs is None:
-        recs = dq4map.npc_records(prg, g, k)
+    ram 을 주면 진행 플래그로 고른 목록(dq4map.place_records)을 쓴다."""
+    recs = dq4map.place_records(prg, g, k, dq4map.ram_flags(ram) if ram is not None else None)
     return [r for r in recs if r[0] & (0x08 if night else 0x10)]
 
 
@@ -429,8 +395,8 @@ def check_all(prg):
             nights += 1
             ids.add(talk_id(r, night=True))
     alts = 0
-    for *_, a in alt_entries(prg):
-        for r in alt_records(prg, a):
+    for *_, a in dq4map.event_entries(prg):
+        for r in dq4map.records_at(prg, 0x1C, a)[0]:
             alts += 1
             for night in (False, True):
                 if r[0] & (0x08 if night else 0x10):
@@ -440,7 +406,7 @@ def check_all(prg):
         classify(prg, t, parser)
     for t in ids:
         kinds[classify(prg, t)[0]] = kinds.get(classify(prg, t)[0], 0) + 1
-    print(f'인물 낮 {recs}명·밤 {nights}명, 이벤트 목록 {len(alt_entries(prg))}개 {alts}명, 대화 번호 {len(ids)}가지: ' + ', '.join(f'{k} {v}' for k, v in sorted(kinds.items())))
+    print(f'인물 낮 {recs}명·밤 {nights}명, 이벤트 목록 {len(dq4map.event_entries(prg))}개 {alts}명, 대화 번호 {len(ids)}가지: ' + ', '.join(f'{k} {v}' for k, v in sorted(kinds.items())))
     print(f'스크립트 {YESNO_FIRST - SCRIPT_FIRST}개를 풀어 못 읽은 명령 {len(parser.unknown)}개')
     for kind, a, b in parser.unknown:
         print(f'  {kind} {b:02X} @15:{a:04X}')
@@ -448,12 +414,15 @@ def check_all(prg):
 
 
 # 호출 문장이 부르는 루틴 안에서 알아보는 곳. 주소는 뱅크 15(와 $C000- 고정 뱅크 1F).
-LEAF = {0xB0FF: 'event', 0x9919: 'msg', 0x9914: 'msg', 0xA695: 'msg', 0xB7DD: 'window',
+LEAF = {0xB0FF: 'event', 0xB0F6: 'event', 0x9919: 'msg', 0x9914: 'msg', 0xA695: 'msg', 0xB7DD: 'window',
         0xB84A: 'service', 0xB851: 'service', 0xB858: 'service', 0xBBF0: 'service', 0xBF28: 'service', 0xB550: 'service'}
 CALL_TAGS = {   # 태그 → 표에 쓰는 이름. 앞에 있는 것이 그 루틴의 갈래(뜻은 docs/dq4-script-format.md 「호출 문장」)
     'move': '잠·자리 옮김', 'service': '서비스', 'event': '이벤트(1C:$BF74 표)', 'mapevent': '맵 이벤트(1D:$B74D)',
     'item': '아이템', 'npc': '인물 움직임($7040)', 'window': '창', 'msg': '메시지'}
 ITEM_CODES = {0x2E, 0x30, 0x66}   # 뱅크 10 일행 루틴(BRK n 73): 2E 주기, 30 빼기, 66 찾기
+
+
+A_WRITERS = {'ADC', 'SBC', 'AND', 'ORA', 'EOR', 'ASL', 'LSR', 'ROL', 'ROR', 'PLA', 'TXA', 'TYA'}   # A 를 바꾸는 명령(LDA 빼고)
 
 
 def brk_len(b1, b2):
@@ -466,13 +435,12 @@ def brk_len(b1, b2):
 def call_tags(prg, start, seen=None, depth=0):
     """루틴 start 를 갈래까지 따라가며 (태그, 이벤트 번호) 를 모은다. JSR 은 뱅크 15 안이면 3단까지 들어간다."""
     seen = set() if seen is None else seen
-    tags, todo = [], [start]
+    tags, todo = [], [(start, None)]
     while todo:
-        a = todo.pop()
-        while a not in seen and 0x8000 <= a < 0xC000:
-            seen.add(a)
+        a, imm = todo.pop()
+        while (a, imm) not in seen and 0x8000 <= a < 0xC000:
+            seen.add((a, imm))
             op = rd(prg, a)
-            imm = rd(prg, a - 1) if rd(prg, a - 2) == 0xA9 else None
             if op == 0x00:
                 b1, b2 = rd(prg, a + 1), rd(prg, a + 2)
                 if (b1, b2) == (0x07, 0xCF):
@@ -488,6 +456,10 @@ def call_tags(prg, start, seen=None, depth=0):
             mn, md = OPS[op]
             n = 1 + SIZE[md]
             arg = rd(prg, a + 1) | (rd(prg, a + 2) << 8 if n == 3 else 0) if n > 1 else 0
+            if mn == 'LDA':
+                imm = arg if md == 'imm' else None
+            elif mn in A_WRITERS:
+                imm = None
             if mn in ('JSR', 'JMP') and md == 'abs':
                 if arg in LEAF:
                     tags.append((LEAF[arg], imm))
@@ -496,6 +468,8 @@ def call_tags(prg, start, seen=None, depth=0):
                     continue
                 elif arg < 0xC000 and depth < 3:
                     tags += call_tags(prg, arg, seen, depth + 1)
+                if mn == 'JSR':
+                    imm = None
                 if mn == 'JMP':
                     break
             elif mn.startswith('ST') and md in ('zp', 'abs', 'abx'):
@@ -506,7 +480,11 @@ def call_tags(prg, start, seen=None, depth=0):
             if mn in ('RTS', 'RTI') or (mn == 'JMP' and md == 'ind'):
                 break
             if md == 'rel':
-                todo.append((a + 2 + (arg - 256 if arg & 0x80 else arg)) & 0xFFFF)
+                to = (a + 2 + (arg - 256 if arg & 0x80 else arg)) & 0xFFFF
+                if imm is not None and (mn, imm == 0) in (('BNE', False), ('BEQ', True)):
+                    a = to   # LDA #n 바로 뒤의 BNE/BEQ 는 늘 같은 쪽으로 간다
+                    continue
+                todo.append((to, imm))
             a += n
     return tags
 
@@ -542,6 +520,212 @@ def show_calls(prg):
         print(f'15:{a:04X}  {names}{" 이벤트 " + " ".join(f"{v:02X}" for v in evs) if evs else ""}  ← {tids}')
     print(f'호출 {len(sites)}곳, 루틴 {len(targets)}개: '
           + ', '.join(f'{CALL_TAGS[k] if k else "그 밖"} {v}' for k, v in count.items()))
+
+
+EVENTS = (0x1C, 0xBF74, 0x32)   # 1C:$AD5F 가 A 번째 워드로 점프하는 표와 항목 수(그 뒤 $BFD8 부터는 다른 뱅크와 같은 조각)
+EVENT_HELPERS = {0xBF4E: 'put', 0xBF5C: 'hide', 0xBF60: 'hide'}   # 슬롯 X+6 을 (A,Y)·(80,80)·(81,81) 자리에
+
+
+def event_ops(prg, start):
+    """이벤트 루틴을 갈래까지 따라가며 BRK·자리 쓰기를 모은다. 뱅크 1C 안의 JSR 은 2단까지 들어간다.
+    돌려주는 것: [(종류, 값)] — battle(번호 또는 None), flag+/flag-/flag?(주소, 마스크), msg(번호), place(주소, 값), hide(슬롯)."""
+    b = EVENTS[0]
+    r1c = lambda a: prg[(0x1F if a >= 0xC000 else b) * 0x4000 + (a & 0x3FFF)]
+    out, seen = [], set()
+
+    def walk(a, depth):
+        todo = [(a, None, None)]
+        while todo:
+            a, acc, x = todo.pop()
+            while (a, acc, x) not in seen and 0x8000 <= a < 0xC000:
+                seen.add((a, acc, x))
+                op = r1c(a)
+                if op == 0x00:
+                    c = dq4bank.call(prg, a, b)
+                    k = c['kind']
+                    if (c['b1'], c['b2']) == (0x01, 0x8F):
+                        out.append(('battle', acc))
+                    elif k in ('flag-set', 'flag-clear', 'flag-test'):
+                        out.append(({'flag-set': 'flag+', 'flag-clear': 'flag-', 'flag-test': 'flag?'}[k], (c['flag'], c['mask'])))
+                    elif k == 'message':
+                        out.append(('msg', c['msg']))
+                    elif c.get('target') == 0x8028 and c.get('bank') == 0x16 and acc is not None:
+                        out.append(('msg', acc))   # BRK 04 6F: X:A = 메시지 번호(X 를 모르면 A 만)
+                    a += brk_len(c['b1'], c['b2'])
+                    acc = None
+                    continue
+                if op not in OPS:
+                    break
+                mn, md = OPS[op]
+                n = 1 + SIZE[md]
+                arg = r1c(a + 1) | (r1c(a + 2) << 8 if n == 3 else 0) if n > 1 else 0
+                if mn == 'LDA':
+                    acc = arg if md == 'imm' else None
+                elif mn == 'LDX':
+                    x = arg if md == 'imm' else None
+                elif mn in A_WRITERS:
+                    acc = None
+                if mn in ('JSR', 'JMP') and md == 'abs':
+                    if arg in EVENT_HELPERS and EVENT_HELPERS[arg] == 'hide' and x is not None:
+                        out.append(('hide', x + 6))
+                    elif arg < 0xC000 and mn == 'JMP':
+                        a = arg
+                        continue
+                    elif arg < 0xC000 and depth < 2 and arg not in EVENT_HELPERS:
+                        walk(arg, depth + 1)
+                    if mn == 'JMP':
+                        break
+                    acc = x = None
+                elif mn == 'STA' and md in ('zp', 'abs') and arg in (0x63, 0x64, 0x65, 0x44, 0x45, 0x62ED):
+                    out.append(('place', (arg, acc)))
+                if mn in ('RTS', 'RTI') or (mn == 'JMP' and md == 'ind'):
+                    break
+                if md == 'rel':
+                    to = (a + 2 + (arg - 256 if arg & 0x80 else arg)) & 0xFFFF
+                    if acc is not None and (mn, acc == 0) in (('BNE', False), ('BEQ', True)):
+                        a = to
+                        continue
+                    todo.append((to, acc, x))
+                a += n
+    walk(start, 0)
+    return out
+
+
+def event_table(prg):
+    b, t, n = EVENTS
+    return [prg[b * 0x4000 + (t & 0x3FFF) + 2 * i] | prg[b * 0x4000 + (t & 0x3FFF) + 2 * i + 1] << 8 for i in range(n)]
+
+
+def event_callers(prg):
+    """이벤트 번호 → 부르는 곳. 대화 스크립트는 「대화 번호」, 다른 뱅크는 BRK 07 CF 앞의 LDA #n 으로 찾은 「뱅크:주소」."""
+    out = {}
+    sites = call_sites(prg)
+    for a in sorted({a for a, *_ in sites}):
+        for k, v in call_tags(prg, a):
+            if k == 'event' and v is not None:
+                out.setdefault(v, set()).update(f'{t:03X}' for b, t, _ in sites if b == a)
+    for o in range(len(prg) - 3):
+        bank = o // 0x4000
+        if bank != BANK and prg[o:o + 3] == bytes([0, 0x07, 0xCF]) and prg[o - 2] == 0xA9:
+            base = 0xC000 if bank in (0x0F, 0x1F) else 0x8000
+            out.setdefault(prg[o - 1], set()).add(f'{bank:02X}:{base + (o & 0x3FFF):04X}')
+    return out
+
+
+PLACE_NAMES = {0x63: '$63', 0x64: '$64', 0x65: '$65', 0x44: '$44', 0x45: '$45', 0x62ED: '$62ED'}
+
+
+def event_summary(ops):
+    battles = [v for k, v in ops if k == 'battle']
+    parts = []
+    if battles:
+        parts.append('전투 ' + ' '.join('?' if v is None else f'{v:02X}' for v in battles))
+    for k, label in (('flag+', '켬'), ('flag-', '끔(&)'), ('flag?', '봄')):
+        fs = [v for kk, v in ops if kk == k]
+        if fs:
+            parts.append(f'플래그 {label} ' + ' '.join(f'${a:04X}&{m:02X}' for a, m in fs))
+    ms = [v for k, v in ops if k == 'msg']
+    if ms:
+        parts.append('메시지 ' + ' '.join(f'{m:04X}' for m in ms))
+    pl = [v for k, v in ops if k == 'place']
+    if pl:
+        parts.append('자리 ' + ' '.join(f'{PLACE_NAMES[a]}={"?" if v is None else f"{v:02X}"}' for a, v in pl))
+    hs = sorted({v for k, v in ops if k == 'hide'})
+    if hs:
+        parts.append('인물 숨김 ' + ' '.join(f'{v:02X}' for v in hs))
+    return parts
+
+
+def events_log(d):
+    """talk.lua 기록에서 (이벤트 번호, 전투들, 바뀐 플래그 {주소: 값}, 메시지들, 바뀐 일행 자리 {주소: 값}).
+    바뀐 것은 첫 말 걸기의 덤프(talk_1.bin)와 마지막으로 쓴 값이 다른 것."""
+    before = (Path(d) / 'talk_1.bin').read_bytes()
+    ev, battles, flags, msgs, party = None, [], [], [], []
+    for line in (Path(d) / 'talk.txt').read_text().splitlines():
+        p = line.split()
+        if p[1] == 'ev1C':
+            if ev is not None:
+                break   # 그 뒤는 다음 이벤트(예: 2F 가 옮긴 맵에서 일어난 30)
+            ev = int(p[2], 16)
+        elif ev is None:
+            continue
+        elif p[1] == 'battle':
+            battles.append(int(p[2], 16))
+        elif p[1] == 'msg':
+            msgs.append(int(p[2], 16))
+        elif p[1] == 'w':
+            a = int(p[2], 16)
+            (party if 0x616A <= a < 0x617A else flags).append((a, int(p[3], 16)))
+    changed = lambda ws: {a: v for a, v in dict(ws).items() if before[a] != v}
+    return ev, battles, changed(flags), msgs, changed(party)
+
+
+def show_events(prg, rom, dirs=()):
+    table, callers = event_table(prg), event_callers(prg)
+    logs = {}
+    for d in dirs:
+        lg = events_log(d)
+        if lg[0] is not None:
+            logs[lg[0]] = lg
+    bad = 0
+    for i, a in enumerate(table):
+        ops = event_ops(prg, a)
+        parts = event_summary(ops)
+        who = ' '.join(sorted(callers.get(i, ()))) or '-'
+        print(f'{i:02X} 1C:{a:04X}  ' + ('; '.join(parts) or '-') + f'  ← {who}')
+        if i in logs:
+            _, battles, flags, msgs, party = logs[i]
+            want = [v for k, v in ops if k == 'battle' and v is not None]
+            ok = not want or (battles and battles[0] == want[0])
+            bad += not ok
+            got = []
+            if battles:
+                got.append('전투 ' + ' '.join(f'{v:02X}' for v in battles))
+            fl = {a: v for a, v in flags.items() if 0x627B <= a < 0x62B0}
+            if fl:
+                got.append('플래그 ' + ' '.join(f'${a:04X}={v:02X}' for a, v in sorted(fl.items())))
+            pl = {a: v for a, v in flags.items() if a < 0x627B or a >= 0x62B0}
+            if pl:
+                got.append('자리 ' + ' '.join(f'${a:04X}={v:02X}' for a, v in sorted(pl.items())))
+            if party:
+                got.append('일행 ' + ' '.join(f'${a:04X}={v:02X}' for a, v in sorted(party.items())))
+            if msgs:
+                got.append('메시지 ' + ' '.join(f'{m:04X}' for m in dict.fromkeys(msgs)))
+            print(f'   실행: ' + ('; '.join(got) or '바뀐 것 없음') + ('' if ok else '  (전투 번호 다름)'))
+    if dirs:
+        print(f'기록 {len(logs)}개, 전투 번호 다름 {bad}')
+    return bad == 0
+
+
+def sprite(rec, night=False):
+    """맵에 들어갈 때 1C:$99B3 이 08[04] 에 넘기는 그림 번호: (look 의 아래 7비트) + 0F, 바이트 1 bit6(밤 bit5) 이면 | 80."""
+    hi = rec[1] & (0x20 if night else 0x40)
+    return ((look(rec, night) & 0x7F) + 0x0F) & 0xFF | (0x80 if hi else 0)
+
+
+def show_looks(prg, rom):
+    """롬의 모든 인물 레코드(보통 목록 낮·밤, 진행 목록)를 그림 번호로 모은다."""
+    use = {}
+
+    def add(rec, night, where):
+        if rec[0] & (0x08 if night else 0x10):
+            use.setdefault(sprite(rec, night), []).append((where, talk_id(rec, night)))
+    for g, k, *_ in dq4map.maps(prg):
+        for r in dq4map.npc_records(prg, g, k):
+            add(r, False, f'{g:02X}/{k:02X}')
+            add(r, True, f'{g:02X}/{k:02X}밤')
+    for g, k, m, i, a in dq4map.event_entries(prg):
+        for r in dq4map.records_at(prg, 0x1C, a)[0]:
+            add(r, False, f'{g:02X}/{k:02X}*')
+            add(r, True, f'{g:02X}/{k:02X}*밤')
+    for n in sorted(use):
+        places = list(dict.fromkeys(w for w, _ in use[n]))
+        tid = next((t for _, t in use[n] if MSG_FIRST <= t), None)
+        sample = ''
+        if tid is not None:
+            c = classify(prg, tid)
+            sample = first_line(rom, c[1])[:30] if c[0] in ('msg', 'yesno') else ''
+        print(f'그림 {n:02X}: 인물 {len(use[n]):3d}  장소 {len(places):2d} ({" ".join(places[:6])}{" …" if len(places) > 6 else ""})  {sample}')
 
 
 def fmt(m):
@@ -610,6 +794,12 @@ def main():
         return
     if a[2] == 'compare':
         sys.exit(0 if compare(prg, a[3], '--no' not in a) else 1)
+    if a[2] == 'events':
+        dirs = a[a.index('--compare') + 1:] if '--compare' in a else []
+        sys.exit(0 if show_events(prg, rom, dirs) else 1)
+    if a[2] == 'looks':
+        show_looks(prg, rom)
+        return
     g, k = int(a[2], 16), int(a[3], 16)
     night = '--night' in a or (ram is not None and is_night(ram))
     for i, r in enumerate(npc_list(prg, g, k, night, ram)):

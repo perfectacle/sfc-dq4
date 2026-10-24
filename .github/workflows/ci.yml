@@ -33,11 +33,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends lua5.4
 
       - name: Check Lua syntax
-        run: find tools/lua -name '*.lua' -print0 | xargs -0 -n1 luac5.4 -p
+        run: git ls-files -z '*.lua' | xargs -0 -n1 luac5.4 -p
 
       - run: uv sync --locked
 
-      - run: uv run --frozen python -m compileall -q tools
+      - run: git ls-files -z '*.py' | xargs -0 uv run --frozen python -m compileall -q
 
       - run: uv run --frozen python tools/check_docs.py
 
