@@ -1,4 +1,4 @@
-"""DQ5(SFC) 보행 모드 메시지 디코더. 형식은 docs/dq5-text-format.md.
+"""DQ5(SFC) 보행 모드 메시지 디코더. 형식은 sfc/dq5/docs/dq5-text-format.md.
 
 24:8BAF 가 메시지 번호를 받아 24:AF1E 색인(16개마다 3바이트)으로 시작 비트를 찾고, 24:9E02 허프만 디코더로
 문자 코드(13비트)를 하나씩 꺼낸다. 번호 하위 4비트만큼은 끝 코드(1001·1010·1018)까지 읽어 건너뛴다.
@@ -7,10 +7,10 @@
 $F5~$F8 대기열에서 꺼낸다(24:889F). 메뉴 창 문자열은 04:EB48 창 표가 가리키는 레코드 안에 1바이트 부호로 있다.
 
 사용:
-  python tools/dq5text.py rom/dq5.sfc 129                 # 메시지 0x129 를 글자로
-  python tools/dq5text.py rom/dq5.sfc 129 --codes --n 64  # 끝 코드와 상관없이 코드 64개(24:8B98 처럼)
-  python tools/dq5text.py rom/dq5.sfc --controls          # 제어 코드 처리기 주소와 뜻
-  python tools/dq5text.py rom/dq5.sfc --window 1          # 창 1(명령 창) 레코드와 항목 문자열
+  python sfc/dq5/tools/dq5text.py rom/dq5.sfc 129                 # 메시지 0x129 를 글자로
+  python sfc/dq5/tools/dq5text.py rom/dq5.sfc 129 --codes --n 64  # 끝 코드와 상관없이 코드 64개(24:8B98 처럼)
+  python sfc/dq5/tools/dq5text.py rom/dq5.sfc --controls          # 제어 코드 처리기 주소와 뜻
+  python sfc/dq5/tools/dq5text.py rom/dq5.sfc --window 1          # 창 1(명령 창) 레코드와 항목 문자열
 """
 import argparse
 import os
@@ -102,11 +102,11 @@ MARK_KEYS = 0x24AE9A
 MARK_CODES = 0x24B36E
 # 21:955D. 이름 표 번호($43)마다 [길이][바이트…] 가 이어진 문자열 목록의 시작.
 STRING_TABLES = 0x21959B
-# 끝 코드와 줄바꿈. 나머지 제어 코드는 {XXXX} 로 둔다(docs/dq5-text-format.md 의 「제어 코드」).
+# 끝 코드와 줄바꿈. 나머지 제어 코드는 {XXXX} 로 둔다(sfc/dq5/docs/dq5-text-format.md 의 「제어 코드」).
 CONTROL = {0x1000: '\n', 0x1001: '{end}', 0x1010: '{end}', 0x1018: '{end}'}
 # 24:819D. 코드 & FF 를 색인으로 1000~101D 는 24:8204, 1100~1118 은 24:8240 의 처리기로 간다(16비트 주소, 뱅크 24).
 CONTROL_TABLES = ((0x1000, 0x248204, 0x1E), (0x1100, 0x248240, 0x19))
-# 뜻. 「실측」 은 docs/dq5-text-format.md 의 「제어 코드」 에 적은 실험으로 확인한 것, 나머지는 코드 읽기.
+# 뜻. 「실측」 은 sfc/dq5/docs/dq5-text-format.md 의 「제어 코드」 에 적은 실험으로 확인한 것, 나머지는 코드 읽기.
 CONTROL_MEANING = {
     0x1000: '줄바꿈(실측)',
     0x1001: '메시지 끝',

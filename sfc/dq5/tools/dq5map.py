@@ -1,10 +1,10 @@
-"""DQ5(SFC) 실내 맵 디코더. 형식은 docs/dq5-map-format.md.
+"""DQ5(SFC) 실내 맵 디코더. 형식은 sfc/dq5/docs/dq5-map-format.md.
 
 게임의 01:A79A(배치 비트스트림)·01:8ACB(블록 전개)·01:8C15(CHR 슬롯 할당)를 그대로 옮겨,
 맵 전환 직후 7EC000- 에 생기는 셀 버퍼(셀당 8바이트)를 만든다.
 
 사용:
-  python tools/dq5map.py rom/dq5.sfc BC BD [--slot BE] [--compare wram.bin] [--png out.png [--alt] [--cgram cgram.bin]]
+  python sfc/dq5/tools/dq5map.py rom/dq5.sfc BC BD [--slot BE] [--compare wram.bin] [--png out.png [--alt] [--cgram cgram.bin]]
 --compare 는 01:BA4C(속성 패스 끝)에서 덤프한 WRAM 128KB 와 셀 버퍼를 비교한다.
 --png 는 셀 버퍼의 아래층·위층 타일맵을 그린다(Pillow 필요). 팔레트는 10:DE0B 와 같은 방법으로
 ROM 에서 만든다. --alt 는 7E:075E >= $F0 일 때의 두 번째 팔레트 목록, --cgram 은 덤프한 CGRAM 을 대신 쓴다.

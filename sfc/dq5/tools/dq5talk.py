@@ -1,4 +1,4 @@
-"""DQ5(SFC) 인물 대화 번호 → 대화 스크립트 → 메시지. 형식은 docs/dq5-text-format.md 의 「대화」.
+"""DQ5(SFC) 인물 대화 번호 → 대화 스크립트 → 메시지. 형식은 sfc/dq5/docs/dq5-text-format.md 의 「대화」.
 
 말을 걸면 06:AF62 가 인물 표의 대화 번호(7E:36E0 하위, 7E:3700 상위)를 읽어 갈래를 고른다(06:AFF4).
   T < 011          06:DBD2 특수 기능. 06:DBDB 점프 표의 T 번째 처리기(000 은 메시지 1CC, 001~010 은 가게·여관·교회 등)
@@ -8,10 +8,10 @@
 스크립트 명령은 06:B065 가 실행한다.
 
 사용:
-  python tools/dq5talk.py rom/dq5.sfc 012         # 대화 번호 012 의 스크립트와 메시지
-  python tools/dq5talk.py rom/dq5.sfc 17 00       # 맵 17/00 인물(낮)의 대화
-  python tools/dq5talk.py rom/dq5.sfc --check     # 스크립트 경계 검사
-  python tools/dq5talk.py rom/dq5.sfc --calls     # 스크립트의 네이티브 호출 대상과 횟수
+  python sfc/dq5/tools/dq5talk.py rom/dq5.sfc 012         # 대화 번호 012 의 스크립트와 메시지
+  python sfc/dq5/tools/dq5talk.py rom/dq5.sfc 17 00       # 맵 17/00 인물(낮)의 대화
+  python sfc/dq5/tools/dq5talk.py rom/dq5.sfc --check     # 스크립트 경계 검사
+  python sfc/dq5/tools/dq5talk.py rom/dq5.sfc --calls     # 스크립트의 네이티브 호출 대상과 횟수
 """
 import argparse
 import os

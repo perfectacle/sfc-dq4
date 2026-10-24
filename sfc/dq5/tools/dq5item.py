@@ -1,4 +1,4 @@
-"""DQ5(SFC) 물건 표. 형식은 docs/dq5-data-format.md 의 「물건 표」.
+"""DQ5(SFC) 물건 표. 형식은 sfc/dq5/docs/dq5-data-format.md 의 「물건 표」.
 
 23:B081 부터 물건 216개(D8)짜리 1바이트 표 9개가 이어진다(23:B081 + k*D8).
   k0 가격 바탕, k1 bit0-1 가격 배수(21:A447) / 나머지 플래그
@@ -12,7 +12,7 @@
   k2 bit3 저주받은 장비(장비할 때 25:FD00)
 
 사용:
-  python tools/dq5item.py rom/dq5.sfc
+  python sfc/dq5/tools/dq5item.py rom/dq5.sfc
 """
 import argparse
 import os

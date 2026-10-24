@@ -1,14 +1,14 @@
-"""DQ5(SFC) 몬스터 레코드. 형식은 docs/dq5-data-format.md 의 「몬스터」.
+"""DQ5(SFC) 몬스터 레코드. 형식은 sfc/dq5/docs/dq5-data-format.md 의 「몬스터」.
 
 몬스터 레코드는 23:8000 부터 25바이트씩이고 이름 표 4번(21:959B) 과 순서가 같다. 게임은 필드 읽기(21:8B00)의
 묶음 2 로 읽는데, 필드마다 레코드 안 오프셋·길이(21:8D96·21:8C86)와 후처리(21:8E8C)가 정해져 있다.
 후처리가 덧붙이는 위 비트는 그 필드 오프셋에서 X+1 바이트 뒤를 읽는다(21:A333).
-행동 6개(필드 6A, +11~+16)는 tools/dq5spell.py 의 행동 번호다.
+행동 6개(필드 6A, +11~+16)는 sfc/dq5/tools/dq5spell.py 의 행동 번호다.
 동료가 되는 몬스터는 필드 77(+18 bit0-6)이 동료 종류 번호이고, 동료 레코드는 23:AED1 + 종류*9 다.
 
 사용:
-  python tools/dq5monster.py rom/dq5.sfc
-  python tools/dq5monster.py rom/dq5.sfc --companions   동료 레코드 41개
+  python sfc/dq5/tools/dq5monster.py rom/dq5.sfc
+  python sfc/dq5/tools/dq5monster.py rom/dq5.sfc --companions   동료 레코드 41개
 """
 import argparse
 import os

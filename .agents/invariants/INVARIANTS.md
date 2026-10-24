@@ -15,7 +15,7 @@
 
 | ID       | 요지                                                                  | 소유자                                                                       |
 | -------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| TRACK-01 | 세션은 트랙(dq5·dq4)을 정하고 그 트랙의 소유 파일만 고친다            | [tracks §TRACK-01](../skills/tracks/SKILL.md#track-01--트랙과-소유-파일)     |
+| TRACK-01 | 세션은 트랙을 정하고 그 트랙의 소유 파일만 고친다. 트랙마다 자기 `<플랫폼>/<게임>/` 폴더에 살고, 공유 파일에는 트랙마다 가리키는 한 줄만 둔다 | [tracks §TRACK-01](../skills/tracks/SKILL.md#track-01--트랙과-소유-파일)     |
 | TRACK-02 | 공유 파일은 자기 트랙 몫의 줄·절만, 공유 도구는 새 파일·옵션으로 넓힌다 | [tracks §TRACK-02](../skills/tracks/SKILL.md#track-02--공유-파일)            |
 | GIT-01   | 모든 변경은 브랜치 → PR. main 에 직접 push 하지 않는다                | [git-workflow §GIT-01](../skills/git-workflow/SKILL.md#git-01--브랜치와-pr)  |
 | GIT-02   | 작업마다 최신 `origin/main` 에서 워크트리, 롬은 링크, 머지 후 지운다  | [git-workflow §GIT-02](../skills/git-workflow/SKILL.md#git-02--작업마다-워크트리) |
@@ -26,10 +26,10 @@
 
 | ID         | 요지                                                                  | 소유자                                                                          |
 | ---------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| JOURNAL-01 | 일지는 `docs/journal/<트랙>/YYYY-MM-DD-NN-<주제>.md`, 순번은 트랙마다 PR 직전 `origin/main` 기준 | [journal §JOURNAL-01](../skills/journal/SKILL.md#journal-01--일지-이름과-순번) |
+| JOURNAL-01 | 일지는 `<플랫폼>/<게임>/journal/YYYY-MM-DD-NN-<주제>.md`(옮기기 전 트랙은 `docs/journal/<트랙>/`), 순번은 트랙마다 PR 직전 `origin/main` 기준 | [journal §JOURNAL-01](../skills/journal/SKILL.md#journal-01--일지-이름과-순번) |
 | JOURNAL-02 | 일지는 한 항목, 한 순서대로·틀렸던 것들·남은 것                       | [journal §JOURNAL-02](../skills/journal/SKILL.md#journal-02--일지-구성)        |
 | DOC-01     | 개인 경로를 쓰지 않고, 외부 자료는 링크                               | [journal §DOC-01](../skills/journal/SKILL.md#doc-01--개인-경로-금지)           |
-| FIG-01     | 그림은 WebP, 트랙의 `tools/<트랙>figures.py` 가 롬에서 다시 만든다    | [journal §FIG-01](../skills/journal/SKILL.md#fig-01--그림)                     |
+| FIG-01     | 그림은 WebP, 트랙의 `<트랙>figures.py` 가 롬에서 다시 만든다          | [journal §FIG-01](../skills/journal/SKILL.md#fig-01--그림)                     |
 | COPY-01    | 한국어 문서는 합니다체, 번역투 없이, 용어집을 따른다                  | [korean-copy](../skills/korean-copy/SKILL.md)                                  |
 
 ## 스프라이트

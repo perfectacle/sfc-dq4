@@ -1,13 +1,13 @@
-"""DQ5(SFC) 실내 맵 인물 목록. 형식은 docs/dq5-map-format.md 의 「인물」.
+"""DQ5(SFC) 실내 맵 인물 목록. 형식은 sfc/dq5/docs/dq5-map-format.md 의 「인물」.
 
 12:803F(맵 목록 찾기)·12:8093(엔트리 크기)·12:8161/8227(낮·밤 엔트리 해석)과
 이벤트 플래그(7E:2190-)에 따른 덮어쓰기 표 둘(12:82FB 의 12:8449, 12:8357 의 12:839C),
 엔트리 값을 인물 표에 넣는 1E:DB44, 인라인 스크립트 해석기 01:C800(명령 표 01:C827)을 옮겼다.
 
 사용:
-  python tools/dq5npc.py rom/dq5.sfc BC BD [--night] [--flags 21AD=10,...] [--compare wram.bin]
-  python tools/dq5npc.py rom/dq5.sfc --list 108BBD      # 맵 대신 목록 주소(숨은 목록 등)
-  python tools/dq5npc.py rom/dq5.sfc --check-scripts    # 모든 목록의 스크립트 길이 검사
+  python sfc/dq5/tools/dq5npc.py rom/dq5.sfc BC BD [--night] [--flags 21AD=10,...] [--compare wram.bin]
+  python sfc/dq5/tools/dq5npc.py rom/dq5.sfc --list 108BBD      # 맵 대신 목록 주소(숨은 목록 등)
+  python sfc/dq5/tools/dq5npc.py rom/dq5.sfc --check-scripts    # 모든 목록의 스크립트 길이 검사
 --flags 는 7E:xxxx 이벤트 플래그 바이트 값. 주지 않으면 모두 0 으로 보고, 걸린 덮어쓰기 항목을 함께 보여 준다.
 --compare 는 인물을 다 놓은 뒤(12:803C)의 WRAM 128KB 에서 인물 표(7E:3000-, 슬롯 08~) 22칸을 비교한다.
 --flags 를 주지 않으면 덤프의 이벤트 플래그와 시간대로 목록을 고른다.

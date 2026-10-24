@@ -23,7 +23,7 @@ description: 분석·코드·문서를 바꾸기 전에(워크트리·브랜치)
    완료: `git worktree list` 에 새 워크트리가 있고, 그 안에서 `git log -1 origin/main` 이 HEAD 와 같고, `ls rom/` 에 롬이 보인다.
 2. **커밋한다** — 작성자는 저장소 주인(`perfectacle <perfectacle@gmail.com>`)이고 커밋은 그 계정에 등록된 키로 서명한다. 메시지는 Conventional Commits 형식(`feat: …`)에 한국어로, 첫 줄은 무엇을 확인·바꿨는지, 본문은 근거(실측 결과)와 이전에 틀렸던 것을 쓴다.
    완료: `git log -1 --format='%an <%ae> %G?'` 가 주인 정보와 `G` 다.
-3. **로컬 검증을 끝낸다** — [ci](../ci/SKILL.md) 의 검사를 로컬에서 돌린다: `uv run --locked python tools/check_docs.py`, `uv run --locked python -m compileall -q tools`. 일지가 있으면 [journal 절차 5](../journal/SKILL.md#절차--한-항목을-끝냈을-때)로 순번을 매긴 뒤에 돌린다.
+3. **로컬 검증을 끝낸다** — [ci](../ci/SKILL.md) 의 검사를 로컬에서 돌린다: `uv run --locked python tools/check_docs.py`, `git ls-files -z '*.py' | xargs -0 uv run --locked python -m compileall -q`. 일지가 있으면 [journal 절차 5](../journal/SKILL.md#절차--한-항목을-끝냈을-때)로 순번을 매긴 뒤에 돌린다.
    완료: 전부 통과.
 4. **PR 을 올린다** — push 와 `gh` 는 저장소 주인 계정으로 한다. 여러 계정이 로그인돼 있으면 `gh auth switch` 로 전역 계정을 바꾸지 말고 명령마다 토큰을 넘긴다(`GH_TOKEN=$(gh auth token -u perfectacle) gh …`). `gh pr create --base main` 후 `gh pr merge --auto --merge`. 본문에는 무엇을 확인했는지, 어떻게 검증했는지(실측 숫자), 다른 트랙이 알아야 할 것(공유 파일 변경)을 쓴다.
    자동 머지가 저장소 설정으로 막혀 있으면 `ci-ok` 가 초록이 된 뒤 `gh pr merge --merge` 한다. 에이전트 권한 설정이 머지를 막으면 우회하지 말고 사용자가 실행할 명령을 넘긴다.

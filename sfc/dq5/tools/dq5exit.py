@@ -1,11 +1,11 @@
-"""DQ5(SFC) 실내 맵 출구. 형식은 docs/dq5-map-format.md 의 「출구」.
+"""DQ5(SFC) 실내 맵 출구. 형식은 sfc/dq5/docs/dq5-map-format.md 의 「출구」.
 
 출구는 좌표를 저장하지 않는다. 셀 버퍼에서 속성(+4 또는 +7)이 EXIT_ATTRS 인 셀을 앞에서부터 센 순서가 출구 번호이고(2A:FC16),
 그 번호로 2A:ED61 목적지 표의 항목을 고른다(2A:F6FD). 도착할 때도 새 맵에서 N 번째 출구 셀을 찾아 그 왼쪽에 선다(2A:FC93).
 셀 버퍼는 맵을 푼 뒤 15:F7D0 이 부르는 맵별 루틴(15:F907 표)이 고치기도 하므로, 출구 속성을 쓰는 곳을 그 루틴에서 찾아 반영한다.
 
 사용:
-  python tools/dq5exit.py rom/dq5.sfc BC BD
+  python sfc/dq5/tools/dq5exit.py rom/dq5.sfc BC BD
 """
 import argparse
 import os

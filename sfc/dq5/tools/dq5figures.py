@@ -1,9 +1,9 @@
-"""dq5 트랙이 분석 문서(docs/)에 넣는 그림을 다시 만든다. 원본 롬과 MesenCE 덤프(work/)가 필요하다.
+"""dq5 트랙이 분석 문서(sfc/dq5/)에 넣는 그림을 다시 만든다. 원본 롬과 MesenCE 덤프(work/)가 필요하다.
 
-사용: python tools/dq5figures.py   (Pillow 필요, 저장소 최상위에서)
+사용: python sfc/dq5/tools/dq5figures.py   (Pillow 필요, 저장소 최상위에서)
 
 맵은 롬만으로 그린다(팔레트도 롬). 게임 화면 비교에만 MesenCE 스크린샷이 필요하고,
-그 덤프를 만드는 명령은 docs/journal/dq5/ 의 해당 날짜 일지에 있다.
+그 덤프를 만드는 명령은 sfc/dq5/journal/ 의 해당 날짜 일지에 있다.
 """
 import glob
 import os
@@ -14,7 +14,7 @@ from PIL import Image, ImageDraw
 sys.path.insert(0, os.path.dirname(__file__))
 from dq5map import Decoder, Rom, map_cgram, map_pointer, render  # noqa: E402
 
-OUT = 'docs/images'
+OUT = 'sfc/dq5/images'
 SLOT = 0xBE
 TMP = 'work/_fig.png'
 
@@ -275,7 +275,7 @@ def fig_npc_stairs(rom):
 
 def fig_text(rom):
     """배 선실에서 빈 쪽에 말을 건 화면(work/text1/end.png)과, 롬의 메시지 129 를 dq5text.py 로 풀어 폰트로 그린 것.
-    덤프는 docs/journal/dq5/2026-10-25-01-text.md 의 1절 명령으로 만든다."""
+    덤프는 sfc/dq5/journal/2026-10-25-01-text.md 의 1절 명령으로 만든다."""
     from dq5text import font_groups, glyph, message
     groups = font_groups(rom)
     codes = [c for c in message(rom, 0x129) if c < 0x1000]
@@ -355,8 +355,8 @@ def fig_field(rom):
 
 def fig_mongfx(rom):
     """전투 화면에서 잘라 낸 몬스터와 dq5mongfx.py 로 롬에서 그린 그림. 오른쪽 상자는 조각(빨강 16x16, 노랑 8x8, 파랑 반전 복사).
-    화면은 이벤트 전투의 몬스터 번호를 바꿔 tools/lua/dq5battledump.lua 로 1000프레임에 찍은 work/all/t<번호>/s01000.png
-    (docs/journal/dq5/ 의 「전투 몬스터 그림」 일지 3절 명령, m = 00·60·A0·E8)."""
+    화면은 이벤트 전투의 몬스터 번호를 바꿔 sfc/dq5/tools/lua/dq5battledump.lua 로 1000프레임에 찍은 work/all/t<번호>/s01000.png
+    (sfc/dq5/journal/ 의 「전투 몬스터 그림」 일지 3절 명령, m = 00·60·A0·E8)."""
     from dq5mongfx import decode, match_screen, monster
     from dq5mongfx import render as render_monster
     rows = []
@@ -389,8 +389,8 @@ def fig_mongfx(rom):
 
 def fig_mongfx_layout(rom):
     """무리 조합 두 가지의 전투 화면에 dq5mongfx.layout() 이 예상한 그림 상자를 겹친다(색은 줄 0·1·2).
-    화면은 tools/lua/dq5battledump.lua 로 1000프레임에 찍은 work/p/<이름>/s01000.png
-    (docs/journal/dq5/ 의 「전투 몬스터 배치와 그림자」 일지 2절 명령, 이름 e8·e18)."""
+    화면은 sfc/dq5/tools/lua/dq5battledump.lua 로 1000프레임에 찍은 work/p/<이름>/s01000.png
+    (sfc/dq5/journal/ 의 「전투 몬스터 배치와 그림자」 일지 2절 명령, 이름 e8·e18)."""
     from dq5mongfx import header, layout, monster
     cases = [('e8', [(0x00, 1, 0), (0x0F, 1, 0), (0x77, 1, 0), (0xB4, 1, 0)]),
              ('e18', [(0xB4, 2, 1), (0x25, 1, 0), (0x8A, 2, 0)])]
@@ -411,8 +411,8 @@ def fig_mongfx_layout(rom):
 
 def fig_battlebg(rom):
     """전투 배경: 이벤트 전투 화면(왼쪽 위)과 dq5battlebg.py 로 롬에서 그린 06번(오른쪽 위), 그 아래 0~30 번 49개.
-    화면과 레코드 밖 팔레트 색은 tools/lua/dq5battledump.lua 로 이벤트 전투를 찍은 work/bg/ev/s01000.png·c00890.cgram
-    (docs/journal/dq5/ 의 「전투 배경」 일지 4절 명령)."""
+    화면과 레코드 밖 팔레트 색은 sfc/dq5/tools/lua/dq5battledump.lua 로 이벤트 전투를 찍은 work/bg/ev/s01000.png·c00890.cgram
+    (sfc/dq5/journal/ 의 「전투 배경」 일지 4절 명령)."""
     from dq5battlebg import COUNT
     from dq5battlebg import render as render_bg
     base = open('work/bg/ev/c00890.cgram', 'rb').read()
@@ -446,7 +446,7 @@ def fig_transition():
 def fig_textctl():
     """메시지 1DB 두 쪽과 3CE 첫 쪽의 메시지 창. 선실 파파스 스크립트의 메시지(파일 오프셋 30139)를 61DB·63CE 로 덮어 말을 걸고
     A 를 200프레임마다 누르며 찍은 화면(work/textctl/<번호>/s00345.png, s00549.png)이다.
-    명령은 docs/journal/dq5/ 의 제어 코드 일지 1절에 있다."""
+    명령은 sfc/dq5/journal/ 의 제어 코드 일지 1절에 있다."""
     shots = [('work/textctl/1DB/s00345.png', '1DB'), ('work/textctl/1DB/s00549.png', '1DB p2'),
              ('work/textctl/3CE/s00345.png', '3CE')]
     crops = []
@@ -464,7 +464,7 @@ def fig_textctl():
 def fig_worlds(rom):
     """$1949 로 고르는 세계 지도 셋(블록 1개를 2x2 로 축소)과 그 세계의 04:FD97 입구(노란 틀). 세계 1·2 는 땅이 있는 왼쪽 위
     128x128 블록만 2배로 키웠다. 타일은 롬, 팔레트는 세계마다
-    필드에 선 뒤의 CGRAM 덤프(work/fd/f<세계>/at_008090.cgram)다. 덤프 명령은 docs/journal/dq5/ 의 세계 지도 일지 3절에 있다."""
+    필드에 선 뒤의 CGRAM 덤프(work/fd/f<세계>/at_008090.cgram)다. 덤프 명령은 sfc/dq5/journal/ 의 세계 지도 일지 3절에 있다."""
     from dq5field import WORLDS, block_number, entrances, field_chr, rle
     from dq5field import render as frender
     vram = bytes(0x4000) + field_chr(rom)

@@ -1,6 +1,6 @@
 # 2026-10-25-21: 전투 몬스터 배치와 그림자
 
-[앞 일지](2026-10-25-09-mongfx.md)에서 그림 자체는 풀었지만, 그림 머리 +0~+4 의 뜻과 여러 마리를 어디에 놓는지는 남겨 두었습니다. 이번에는 이것들과 그림 번호에 얽힌 나머지 수수께끼를 풀었습니다. 결과는 [dq5-graphics-format.md 「배치와 그림자」](../../dq5-graphics-format.md#배치와-그림자) 에 있습니다.
+[앞 일지](2026-10-25-09-mongfx.md)에서 그림 자체는 풀었지만, 그림 머리 +0~+4 의 뜻과 여러 마리를 어디에 놓는지는 남겨 두었습니다. 이번에는 이것들과 그림 번호에 얽힌 나머지 수수께끼를 풀었습니다. 결과는 [dq5-graphics-format.md 「배치와 그림자」](../docs/dq5-graphics-format.md#배치와-그림자) 에 있습니다.
 
 ## 1. 머리 값이 가는 곳
 
@@ -33,7 +33,7 @@ uv run --locked python tools/listing.py rom/dq5.sfc work/cov2/cover.txt > work/c
 mkdir -p work/p/e8
 battle dq5battledump.lua SHOT_DIR=$PWD/work/p/e8 MAXF=1020 DUMPF=1000 FROM=850 TO=0 AT=2290DC \
   POKE="7E1001=00;7E1005=1;7E1002=0F;7E1006=1;7E1003=77;7E1007=1;7E1004=B4;7E1008=1"
-uv run --locked python tools/dq5mongfx.py rom/dq5.sfc --layout "00:1,0F:1,77:1,B4:1"
+uv run --locked python sfc/dq5/tools/dq5mongfx.py rom/dq5.sfc --layout "00:1,0F:1,77:1,B4:1"
 ```
 
 OAM 과 VRAM 으로 OBJ 를 팔레트별로 따로 다시 그리고(무리마다 팔레트가 달라 겹친 몬스터도 나뉨), 그림이 색 번호·RGB 모두 맞는 자리를 찾아 예상과 견줬습니다.
@@ -44,7 +44,7 @@ e7 OK 3   e8 OK 4   e9 OK 3   e10 OK 2  e11 OK 5  e12 OK 2  e13 OK 3
 e14 OK 3  e15 OK 2  e16 OK 4  e17 OK 4  e18 OK 4  e19 OK 4
 ```
 
-![무리 조합 두 가지의 전투 화면에 layout() 이 예상한 그림 상자를 겹친 그림. 빨강은 줄 0, 파랑은 줄 1, 노랑은 띄운 줄 2. 왼쪽은 スライム·マッドプラント·ダックカイト·エビルスピリッツ, 오른쪽은 エビルスピリッツ 2(줄 1)·ダークアイ·シャドーサタン 2 중 1마리만 놓인 경우](../../images/dq5-mongfx-layout.webp)
+![무리 조합 두 가지의 전투 화면에 layout() 이 예상한 그림 상자를 겹친 그림. 빨강은 줄 0, 파랑은 줄 1, 노랑은 띄운 줄 2. 왼쪽은 スライム·マッドプラント·ダックカイト·エビルスピリッツ, 오른쪽은 エビルスピリッツ 2(줄 1)·ダークアイ·シャドーサタン 2 중 1마리만 놓인 경우](../images/dq5-mongfx-layout.webp)
 
 - 한 무리: スライム 8마리는 x = 64, 80, …, 176(16 간격, 가운데 128), シャドーサタン(9칸) 3마리는 20·92·164.
 - 여러 무리: スライム 2 + マッドプラント 1 은 84·100·124. 무리 사이에 8픽셀이 빕니다.

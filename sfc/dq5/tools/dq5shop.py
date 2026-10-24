@@ -1,4 +1,4 @@
-"""DQ5(SFC) 상점 품목과 물건 가격. 형식은 docs/dq5-data-format.md 의 「상점」.
+"""DQ5(SFC) 상점 품목과 물건 가격. 형식은 sfc/dq5/docs/dq5-data-format.md 의 「상점」.
 
 대화 번호 000~010 은 06:DBD2 가 06:DBDB 점프 표로 처리한다(01 무기점, 02 도구점, 03 방어구점, 08 よろず屋 …).
 가게 처리기가 목록 종류를 7E:0F20 에, 찾을 키를 7E:0F25 에 두면 06:F49C 가 04:FBD5[종류] 에서
@@ -9,7 +9,7 @@
 목록 안 순번으로 읽는다(06:EC8D, 06:F06A). 여관(06·10)은 04:FD6D 의 [BC][1인 값] 에서 맵 그룹을 찾는다(06:F563).
 
 사용:
-  python tools/dq5shop.py rom/dq5.sfc
+  python sfc/dq5/tools/dq5shop.py rom/dq5.sfc
 """
 import argparse
 import os

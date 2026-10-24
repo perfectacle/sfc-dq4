@@ -1,4 +1,4 @@
-"""DQ5(SFC) 보물상자와 タンス·ツボ 류. 형식은 docs/dq5-map-format.md 의 「보물상자」.
+"""DQ5(SFC) 보물상자와 タンス·ツボ 류. 형식은 sfc/dq5/docs/dq5-map-format.md 의 「보물상자」.
 
 말을 걸거나 しらべる 로 앞 칸을 보면 12:E4C9 가 앞 칸 종류를 차례로 검사한다.
   보물상자: 셀 +4 또는 +7 이 $84(2A:FF3E). 25:FAB0 이 1E:EF90 표의 맵 시작 번호에, 셀 버퍼에서 그 칸 앞에 있는 상자 셀 수를
@@ -9,8 +9,8 @@
 FFFC 잠김, FFFD 人くい箱(상자 밖은 あくまのツボ), FFFE ミミック(상자 밖은 ツボック), FFFF 빈 상자.
 
 사용:
-  python tools/dq5chest.py rom/dq5.sfc            # 전체
-  python tools/dq5chest.py rom/dq5.sfc 01 02      # 맵 하나
+  python sfc/dq5/tools/dq5chest.py rom/dq5.sfc            # 전체
+  python sfc/dq5/tools/dq5chest.py rom/dq5.sfc 01 02      # 맵 하나
 """
 import argparse
 import os

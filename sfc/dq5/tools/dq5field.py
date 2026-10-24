@@ -1,4 +1,4 @@
-"""DQ5(SFC) 필드(세계 지도). 형식은 docs/dq5-field-format.md.
+"""DQ5(SFC) 필드(세계 지도). 형식은 sfc/dq5/docs/dq5-field-format.md.
 
 필드에 나갈 때 01:A5C2 가 RLE(01:A64F) 두 덩어리를 WRAM 포트로 푼다.
   2A:8D3E → 7E:E000-FFFF (8KB)
@@ -10,8 +10,8 @@ RLE: 제어 바이트 c. bit7=0 이면 다음 c+1 바이트를 그대로, bit7=1
 마을 입장은 2A:F247: 필드 좌표가 04:FD97 [그룹][X][Y] 와 같고 그룹의 세계가 $1949 와 같으면 0F:EA97 항목으로 들어간다.
 
 사용:
-  python tools/dq5field.py rom/dq5.sfc [--world N] [--compare wram.bin] [--vram vram.bin] [--png out.png]
-  python tools/dq5field.py rom/dq5.sfc --entrances
+  python sfc/dq5/tools/dq5field.py rom/dq5.sfc [--world N] [--compare wram.bin] [--vram vram.bin] [--png out.png]
+  python sfc/dq5/tools/dq5field.py rom/dq5.sfc --entrances
 """
 import argparse
 import os

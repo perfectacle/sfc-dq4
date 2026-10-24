@@ -4,7 +4,7 @@
 --   POKE="CPU주소=값,…"           매 프레임 RAM 에 쓴다
 --   PEEK="7E07C0:64,7E206C:4"      메시지마다 적을 주소:길이
 --   SHOTMSG="0B4,069" 또는 all     그 메시지가 뜬 뒤 SHOTDELAY(기본 34)프레임에 화면을 찍는다
--- 쓰는 예는 docs/dq5-data-format.md 의 「주문과 행동」 과 그 일지.
+-- 쓰는 예는 sfc/dq5/docs/dq5-data-format.md 의 「주문과 행동」 과 그 일지.
 package.path = os.getenv("LIBDIR") .. "/?.lua;" .. package.path
 local L = require("lib")
 L.loadState(os.getenv("STATE"))

@@ -1,4 +1,4 @@
-"""DQ5(SFC) 전투 조우 표. 형식은 docs/dq5-data-format.md 의 「전투 조우」.
+"""DQ5(SFC) 전투 조우 표. 형식은 sfc/dq5/docs/dq5-data-format.md 의 「전투 조우」.
 
 조우 판정과 무리 고르기는 23:E7C2(00:82B4 가 부름)이고, 그 앞의 01:84CF 가 조우 구역 번호(A)와 조우율(Y)을 정한다.
 - 실내 맵: 23:FD6A[BC] 가 가리키는 맵마다 6바이트 [구역 x3 ($1948 로 고름)][전투 배경][+4][소리 명령 1A 인자].
@@ -10,15 +10,15 @@
   칸 0~4 를 뽑으면 여러 종 무리(23:E9B4), 칸 5~9 는 한 종(23:E99B), 칸 10 은 23:B04B 의 고정 무리(23:E953).
 
 사용:
-  python tools/dq5encounter.py rom/dq5.sfc            # 구역 85개
-  python tools/dq5encounter.py rom/dq5.sfc 21 02      # 그 맵의 구역과 무리
-  python tools/dq5encounter.py rom/dq5.sfc --maps     # 조우가 있는 실내 맵 목록
-  python tools/dq5encounter.py rom/dq5.sfc --field    # 필드 구역 격자
-  python tools/dq5encounter.py rom/dq5.sfc --events   # 이벤트 전투 무리 표(23:D757)
-  python tools/dq5encounter.py rom/dq5.sfc --trace trace.txt
+  python sfc/dq5/tools/dq5encounter.py rom/dq5.sfc            # 구역 85개
+  python sfc/dq5/tools/dq5encounter.py rom/dq5.sfc 21 02      # 그 맵의 구역과 무리
+  python sfc/dq5/tools/dq5encounter.py rom/dq5.sfc --maps     # 조우가 있는 실내 맵 목록
+  python sfc/dq5/tools/dq5encounter.py rom/dq5.sfc --field    # 필드 구역 격자
+  python sfc/dq5/tools/dq5encounter.py rom/dq5.sfc --events   # 이벤트 전투 무리 표(23:D757)
+  python sfc/dq5/tools/dq5encounter.py rom/dq5.sfc --trace trace.txt
       # 툴킷 probe/trace.lua 기록(TRACE=23E7C2,23E9B0,23EA40,23E98F LOG=7E1001,7E1003,7E1005,7E1007)의
       # 무리가 표에서 나올 수 있는 것인지 검사
-  python tools/dq5encounter.py rom/dq5.sfc --steps trace.txt
+  python sfc/dq5/tools/dq5encounter.py rom/dq5.sfc --steps trace.txt
       # TRACE=0082AF LOG=7E00BC,7E00BE,7E00B6,7E00B8,7E1948,7E075E,7E21C9 기록의 구역·조우율을 표로 계산한 값과 맞춤
 """
 import argparse

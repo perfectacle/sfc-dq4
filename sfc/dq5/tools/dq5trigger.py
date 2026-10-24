@@ -1,10 +1,10 @@
-"""DQ5(SFC) 실내 맵 영역 이동(트리거). 형식은 docs/dq5-map-format.md 의 「영역 이동」.
+"""DQ5(SFC) 실내 맵 영역 이동(트리거). 형식은 sfc/dq5/docs/dq5-map-format.md 의 「영역 이동」.
 
 맵을 불러올 때 01:9430 이 2A:EB0E 색인([$BC][$BD][개수], bit7 바이트로 끝)에서 그 맵의 레코드 위치를 정하고,
 걸을 때마다 00:CDEC 가 12바이트 레코드의 사각형·방향을 검사해 2A:F47D 로 맵을 옮긴다.
 
 사용:
-  python tools/dq5trigger.py rom/dq5.sfc [BC BD]   (맵을 주지 않으면 전체 통계)
+  python sfc/dq5/tools/dq5trigger.py rom/dq5.sfc [BC BD]   (맵을 주지 않으면 전체 통계)
 """
 import argparse
 import os

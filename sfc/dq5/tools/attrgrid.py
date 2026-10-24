@@ -1,6 +1,6 @@
 """맵 통행 격자를 글자로 찍는다(경로 잡기용). . 바닥(1) # 벽(8) ^ 가려진 바닥(9) o 가구(+1 bit7) E 출구 셀.
 
-사용: python tools/attrgrid.py rom/dq5.sfc BC BD
+사용: python sfc/dq5/tools/attrgrid.py rom/dq5.sfc BC BD
 """
 import os
 import sys

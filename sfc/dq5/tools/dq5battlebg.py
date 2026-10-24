@@ -1,4 +1,4 @@
-"""DQ5(SFC) 전투 배경(몬스터 뒤의 그림 띠). 형식은 docs/dq5-graphics-format.md.
+"""DQ5(SFC) 전투 배경(몬스터 뒤의 그림 띠). 형식은 sfc/dq5/docs/dq5-graphics-format.md.
 
 $1AA0 을 정하는 곳: 필드는 걸음마다 01:84CF 가 지형(03:CB1B, 0~D)을 그대로 쓰고, 실내 맵은 들어갈 때 01:83E6 이
   맵 표(23:FD6A[BC] + BD*6)의 +3 에 80 을 OR 해 쓴다. 이벤트 전투는 따로 쓴다(첫 필드 이벤트 02:A77B 는 06).
