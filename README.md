@@ -61,7 +61,7 @@ dq5(SFC DQ5 엔진):
 - [docs/dq5-field-format.md](docs/dq5-field-format.md): DQ5 필드(세계 지도) 형식
 - [docs/dq5-text-format.md](docs/dq5-text-format.md): DQ5 메시지(허프만 부호)·제어 코드·폰트·대화 스크립트·이름 문자열·메뉴 창 문자열
 - [docs/dq5-data-format.md](docs/dq5-data-format.md): DQ5 게임 데이터(상점 품목·물건 가격·물건 표·몬스터·전투 조우)
-- [docs/dq5-graphics-format.md](docs/dq5-graphics-format.md): DQ5 전투 몬스터 그림(레코드·머리·조각·타일 압축·팔레트)
+- [docs/dq5-graphics-format.md](docs/dq5-graphics-format.md): DQ5 전투 몬스터 그림(레코드·머리·조각·타일 압축·팔레트·배치·그림자)과 전투 배경
 
 dq4(FC DQ4 원작):
 
@@ -126,6 +126,8 @@ nds(NDS DQ4 리메이크 참고):
 - [2026-10-25-18: 개발용 스위치 01:8000, 이벤트 무리 플래그, 작전 창](docs/journal/dq5/2026-10-25-18-debug-switch.md)
 - [2026-10-25-19: 주문 대상 표와 물건 플래그](docs/journal/dq5/2026-10-25-19-target.md)
 - [2026-10-25-20: 실행 루틴 표와 저주 장비](docs/journal/dq5/2026-10-25-20-exec.md)
+- [2026-10-25-21: 전투 몬스터 배치와 그림자](docs/journal/dq5/2026-10-25-21-mongfx-layout.md)
+- [2026-10-25-22: 전투 배경](docs/journal/dq5/2026-10-25-22-battlebg.md)
 
 #### dq4
 
