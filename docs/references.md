@@ -31,9 +31,7 @@
 
 ## DQ4(NDS)
 
-| 자료 | 다루는 것 |
-| --- | --- |
-| [NDS 드래곤 퀘스트 4 한글패치 v1.1](https://blog.naver.com/lovlince/224424163573) | 팬 한글화(`NDS_DQ4_v1.1.xdelta`, 내부 판 `DQ4_v036`). 사용자 허락 아래 명칭·번역 대조와 늘어난 내용 확인에 참고([ORIG-01](../.agents/skills/analysis/SKILL.md#orig-01--남의-데이터-금지)) |
+[nds/dq4/references.md](../nds/dq4/references.md) 에 있습니다.
 
 ## 다른 이식 시도
 

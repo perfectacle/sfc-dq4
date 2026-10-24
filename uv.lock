@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.15"
 
 [options]
-exclude-newer = "2026-10-17T14:51:13.968461Z"
+exclude-newer = "2026-10-17T18:41:00.039625Z"
 exclude-newer-span = "P7D"
 
 [[package]]
@@ -80,11 +80,13 @@ version = "0"
 source = { virtual = "." }
 dependencies = [
     { name = "kr-patch-toolkit" },
+    { name = "numpy" },
     { name = "pillow" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "kr-patch-toolkit", git = "https://github.com/perfectacle/kr-patch-toolkit?rev=v0.5.0" },
+    { name = "numpy" },
     { name = "pillow" },
 ]
