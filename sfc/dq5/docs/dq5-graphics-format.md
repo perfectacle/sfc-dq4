@@ -353,7 +353,7 @@ uv run --locked python sfc/dq5/tools/dq5sprite.py rom/dq5.sfc --list            
 uv run --locked python sfc/dq5/tools/dq5sprite.py rom/dq5.sfc --compare work/v/* -q       # 덤프와 비교
 ```
 
-`--out` 이 쓰는 그림은 롬에서 나온 것이라 `work/` 아래에만 둡니다(ROM-01). 세트마다 `setNN.png`(행 아래·왼쪽·오른쪽·위, 열 프레임 0·1, 투명 배경, `--scale` 배), `setNN-index.png`(색 번호를 고정 색으로 칠하고 8픽셀 격자를 그은 것), `setNN.txt`(프레임마다 색 번호 행렬, `.` 투명), 맵 OBJ 타일 `mapobjNN.png` 를 씁니다.
+`--out` 이 쓰는 그림은 롬에서 나온 것이라 이 저장소에는 커밋하지 않고 `work/` 아래에만 둡니다(ROM-01). 뽑아 둔 결과는 비공개 저장소 `sfc-dq4-assets` 의 `sfc/dq5/sprites/` 에 있습니다(만든 커밋과 명령은 그 폴더의 `SOURCE.txt`). 세트마다 `setNN.png`(행 아래·왼쪽·오른쪽·위, 열 프레임 0·1, 투명 배경, `--scale` 배), `setNN-index.png`(색 번호를 고정 색으로 칠하고 8픽셀 격자를 그은 것), `setNN.txt`(프레임마다 색 번호 행렬, `.` 투명), 맵 OBJ 타일 `mapobjNN.png` 를 씁니다.
 `index.json` 은 세트 번호·그림 번호·배치·팔레트·타일 수·색 수·크기·자료 주소·그 그림을 쓰는 맵 목록을 담고, 같은 내용을 `export_all(rom, outdir)` 가 돌려줍니다. [dq5gallery.py](../tools/dq5gallery.py) 가 이 함수를 불러 갤러리의 「인물 스프라이트」 분류로 보여 줍니다(`--only sprites`).
 
 ```mermaid
