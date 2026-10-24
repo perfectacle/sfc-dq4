@@ -11,7 +11,7 @@
 | [DQバイナリ改造 @Wiki: 解析（RAM） - SFC-DQ5](https://w.atwiki.jp/dq_binary/pages/23.html) | RAM 주소(파티, 이벤트 플래그, 인물 데이터) |
 
 atwiki 는 스크립트 접근을 막을 때가 있어 [Wayback Machine](https://web.archive.org/web/2024/https://w.atwiki.jp/dq_binary/pages/29.html) 사본으로 읽었습니다.
-RAM 페이지의 「`7EFC00-` マップデータ」는 실제와 다릅니다([dq5-map-format.md](dq5-map-format.md#참고와-다른-점)).
+RAM 페이지의 「`7EFC00-` マップデータ」는 실제와 다릅니다([dq5-map-format.md](dq5-map-format.md#위키와-다른-점)).
 
 ## DQ4(FC)
 

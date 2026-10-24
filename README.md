@@ -45,6 +45,8 @@ uv sync --locked
 - [docs/dq5-field-format.md](docs/dq5-field-format.md): DQ5 필드(세계 지도) 형식
 - [docs/references.md](docs/references.md): 참고 자료
 - [docs/todo.md](docs/todo.md): 트랙(dq5·dq4)마다 남은 일
+- [docs/dq5-handoff.md](docs/dq5-handoff.md): dq5 트랙 시작점(지금 상태, 실험 출발점, 다음 할 일)
+- [docs/dq4-handoff.md](docs/dq4-handoff.md): dq4 트랙 시작점(목표, 도구 현황, 다음 할 일)
 
 ### 해킹 일지
 
