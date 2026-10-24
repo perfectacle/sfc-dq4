@@ -2,6 +2,7 @@
 
 행동 번호(주문 01~38, 몬스터용 주문 39~65, 몬스터 행동 66~AA)는 이름 표 3번(21:959B)과 순서가 같다.
   MP·범위   26:8765[행동] (26:839A·26:83D0). bit0-4 MP(1F 없음, 1E = 36, 1D = 남은 MP 전부), bit5-6 범위, bit7 적 쪽
+  대상 펼치기 26:8865 + 행동*2 (뱅크 20 루틴). 975F 하나, 9771 그룹, 97BC 적 전체. 대상 수는 이 표가 정한다
   처리 루틴 20:B7F9 + 행동*2. 루틴 첫머리가 LDX #내성 종류 / LDA #표 번호 를 넣고 공통 루틴으로 뛴다
   피해·회복량 27:8071 + (표 번호 & 3F)*2 = [바탕][폭]. 값 = 바탕(FE 이면 300) + 난수(0 ~ 폭-1) (20:AB70)
 내성 종류(50~61)는 몬스터 레코드 +0C~+10 의 2비트 칸이다(21:91F9 + 종류*2, tools/dq5monster.py).
@@ -23,6 +24,8 @@ NAMES = 3
 COUNT = 0xAB
 COSTS = 0x268765
 HANDLERS = 0x20B7F9
+TARGETS = 0x268865
+TARGET_KINDS = {0x975F: '하나', 0x9771: '그룹', 0x97BC: '전체'}
 AMOUNTS = 0x278071
 RANGES = ('자신', '하나', '그룹', '전체')
 # 20:B307(주문)·20:B657(숨)·20:AB70 은 27:8071 의 양을 쓰고, 20:AE41·AEC6·AEFF 는 내성으로 성공을 가른다.
@@ -63,6 +66,12 @@ def handler(rom, n):
     return a & 0xFFFF, lda, ldx, None
 
 
+def spread(rom, n):
+    """26:8865. 대상을 펼치는 루틴 주소와 이름(모르면 주소만)."""
+    a = rom.u16(TARGETS + n * 2)
+    return a, TARGET_KINDS.get(a, f'{a:04X}')
+
+
 def amount(rom, k):
     """27:8071. 표 번호 k 의 (바탕, 폭)."""
     a = AMOUNTS + (k & 0x3F) * 2
@@ -76,6 +85,7 @@ def describe(rom, n):
     out = [f'{n:02X}', name(rom, n)]
     out.append('MP-' if mp is None else f'MP{mp}')
     out.append(('적 ' if enemy else '편 ') + RANGES[rng])
+    out.append('대상' + spread(rom, n)[1])
     out.append(f'루틴{addr:04X}')
     if target in AMOUNT_ROUTINES and lda is not None:
         base, width = amount(rom, lda)
