@@ -3,10 +3,13 @@
 #   work/state/dq4-ch1-throne.mss     1장 시작, 바트랜드 성 왕좌의 방, 라이안이 조작 가능
 #   work/state/dq4-ch1-courtyard.mss  왕좌의 방에서 걸어 나온 성 앞(맵 $0028=0A)
 #   work/state/dq4-ch1-field.mss      성 아래 마을 서쪽 끝으로 나온 필드($0028=00)
-#   work/state/dq4-ch1-battle.mss     필드에서 오가다 만난 전투(おおみみず 둘, $6E49=07 07)
+#   work/state/dq4-ch1-battle.mss     필드에서 오가다 만난 전투(おおみみず 하나·スライム 하나)
 # 사용: MESENCE=/path/to/Mesen tools/dq4state.sh
+#   STATE_DIR 를 주면 work/state 대신 그곳에 둔다(기존 세이브스테이트를 덮지 않고 다시 만들어 볼 때).
 # 단계마다 앞 단계의 세이브스테이트에서 seq.lua 로 입력을 재생한다. 오프닝은 입력 시점에 따라
 # 장면이 앞뒤로 밀리므로 한 번에 긴 입력을 주지 않고 장면마다 끊는다.
+# 전원을 켜는 첫 단계만 MesenCE 의 Saves/dq4.sav 를 불러오므로 debugsram.lua 로 SRAM 을 00 으로 채운다.
+# 모험의 서가 남은 .sav 로 켜면 같은 입력이 이름 입력 대신 이어하기로 간다.
 set -e
 : "${MESENCE:?MESENCE 에 MesenCE 실행 파일 경로를 주세요}"
 root=$(pwd)
@@ -14,7 +17,8 @@ rom=$root/rom/dq4.nes
 tmp=$root/work/dq4state
 LIBDIR=${LIBDIR:-$(uv run --locked krpatch fc lua)}
 export LIBDIR
-mkdir -p "$tmp" "$root/work/state"
+out=${STATE_DIR:-$root/work/state}
+mkdir -p "$tmp" "$out"
 
 # step 이름 시작상태 SEQ TAIL
 step() {
@@ -24,11 +28,11 @@ step() {
   echo "$1: $(tail -1 "$tmp/$1/watch.txt")"
 }
 
-# 이름 입력 화면(이름은 「あああ」까지 들어간 상태)
+# 이름 입력 화면(이름은 「ああ」까지 들어간 상태)
 mkdir -p "$tmp/name"
-SHOT_DIR=$tmp/name MAXF=760 EVERY=0 SAVEAT=750 STATE_OUT=name.mss \
+SHOT_DIR=$tmp/name MAXF=760 EVERY=0 SAVEAT=750 STATE_OUT=name.mss SRAM_DRIVER=$LIBDIR/mkstate.lua \
   SEQ="a@300:4,a@320:4,a@340:4,a@360:4,start@400:4,a@440:4,a@560:4,a@700:4" \
-  "$MESENCE" --testrunner --nes.ramPowerOnState=AllZeros "$rom" "$LIBDIR/mkstate.lua" >/dev/null 2>&1
+  "$MESENCE" --testrunner --nes.ramPowerOnState=AllZeros "$rom" "$root/tools/lua/fc/debugsram.lua" >/dev/null 2>&1
 
 # 커서를 「おわり」로: 아래 5칸, 오른쪽 9칸
 d="down:10,wait:10,"; r="right:10,wait:10,"
@@ -51,10 +55,10 @@ while [ $i -lt 15 ]; do s="${s}up:48,down:48,"; i=$((i + 1)); done
 step battle "$tmp/field/end.mss" "${s}wait:10" 10
 echo "battle: 몬스터 무리 $(od -An -tx1 -j $((0x0E49)) -N2 "$tmp/battle/end.sram")"
 
-cp "$tmp/throne/end.mss" "$root/work/state/dq4-ch1-throne.mss"
-cp "$tmp/throne/end.png" "$root/work/state/dq4-ch1-throne.png"
-cp "$tmp/courtyard/end.mss" "$root/work/state/dq4-ch1-courtyard.mss"
-cp "$tmp/courtyard/end.png" "$root/work/state/dq4-ch1-courtyard.png"
-cp "$tmp/field/end.mss" "$root/work/state/dq4-ch1-field.mss"
-cp "$tmp/battle/end.mss" "$root/work/state/dq4-ch1-battle.mss"
-cp "$tmp/battle/end.png" "$root/work/state/dq4-ch1-battle.png"
+cp "$tmp/throne/end.mss" "$out/dq4-ch1-throne.mss"
+cp "$tmp/throne/end.png" "$out/dq4-ch1-throne.png"
+cp "$tmp/courtyard/end.mss" "$out/dq4-ch1-courtyard.mss"
+cp "$tmp/courtyard/end.png" "$out/dq4-ch1-courtyard.png"
+cp "$tmp/field/end.mss" "$out/dq4-ch1-field.mss"
+cp "$tmp/battle/end.mss" "$out/dq4-ch1-battle.mss"
+cp "$tmp/battle/end.png" "$out/dq4-ch1-battle.png"

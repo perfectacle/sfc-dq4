@@ -87,7 +87,7 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 
 | 스크립트 | 하는 일 |
 | --- | --- |
-| `dq4state.sh` | 전원 켜기부터 1장 왕좌의 방, 성 밖, 필드, 첫 전투까지 단계별로 입력을 재생해 세이브스테이트를 만들고 장면마다 좌표·맵 번호를 찍음. 같은 결과가 나오도록 MesenCE 에 `--nes.ramPowerOnState=AllZeros` 를 줌. `MESENCE` 필요 |
+| `dq4state.sh` | 전원 켜기부터 1장 왕좌의 방, 성 밖, 필드, 첫 전투까지 단계별로 입력을 재생해 세이브스테이트를 만들고 장면마다 좌표·맵 번호를 찍음. 같은 결과가 나오도록 MesenCE 에 `--nes.ramPowerOnState=AllZeros` 를 주고, 전원을 켜는 첫 단계는 `lua/fc/debugsram.lua` 로 SRAM 을 `00` 으로 채움(MesenCE 의 `Saves/dq4.sav` 를 따르지 않게). `STATE_DIR` 로 출력 폴더. `MESENCE` 필요 |
 | `dq4warp.sh OUT GG/KK [X Y [DIR]]\|field F X Y` | DQ4 장면 이동. 1장 세이브스테이트에서 게임의 출구·맵 가장자리 루틴을 타고 목적지로 옮겨 `OUT/warp.mss`(조작 가능)를 만듦. 좌표를 빼면 그 맵으로 들어오는 출구의 도착 자리. `lua/fc/warp.lua` 는 프로브의 `DRIVER` 로도 씀. [docs/dq4-warp.md](../docs/dq4-warp.md) |
 
 ## Python
@@ -166,5 +166,7 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 | `dq4debug.py rom unrun\|find\|brk COVER...` | DQ4 미실행 코드 찾기. `cover.lua` 기록 여러 개를 합쳐 실행된 명령에서 닿는데 안 돈 코드 덩어리(`unrun`), 패드 2·`$4017`·디버그 스위치 `$C000` 읽기(`find`), 부르는 곳 없는 BRK 함수(`brk`). [docs/dq4-debug.md](../docs/dq4-debug.md) |
 | `lua/fc/debugpad.lua` | FC: 입력 드라이버 앞에 끼워 PRG 롬 메모리를 덮어쓰고(`ROMPATCH`, 예: `3C000=7F;7C000=7F`), 패드 2 를 흉내 내고(`PAD2`, `$15` 값), 바뀐 RAM 을 프레임마다 `debugpad.txt` 로(`LOGW`). 다른 프로브의 `DRIVER` 로 쓸 때는 `PAD_DRIVER` |
 | `lua/fc/debugreads.lua` | FC: 디버그 스위치 `$C000`(PRG `3C000`·`7C000`)을 읽는 명령을 모아 `debugreads.txt`(PRG 오프셋, 주소, 횟수, 첫 프레임). `DRIVER`, `MAXF` |
+| `lua/fc/debugtrap.lua` | FC: PRG 롬 오프셋(`TRAP`, 예: `401B9`)의 명령이 실행될 때만 프레임·레지스터·`LOG` 주소·스택을 `debugtrap.txt` 로(다른 뱅크의 같은 CPU 주소는 거름). 처음 걸린 뒤 `SHOTS_AFTER` 프레임마다 화면 4장. 드라이버는 `TRAP_DRIVER` |
+| `lua/fc/debugsram.lua` | FC: 전원을 켜기 전에 SRAM 8KB 를 `00`(또는 `SRAM` 파일)으로 채우고 `SRAM_DRIVER`(없으면 `DRIVER`)를 돌림. 테스트러너가 불러오는 `Saves/<롬 이름>.sav` 와 상관없이 같은 결과를 내려고 씀 |
 
 스프라이트·맵 출력은 채택되지 않은 초기 시안입니다. 타이틀·일러스트만 보존 대상으로 평가됐으며, 후속 작업은 [그래픽 핸드오프](../docs/dq4-graphics-handoff.md)를 먼저 읽습니다. 그래픽 출력의 배치·제약은 [dq4-graphics.md](../docs/dq4-graphics.md)에 있습니다. 생성 원본과 프롬프트는 `tools/dq4art/` 에 보관합니다. `uv run --locked python tools/dq4graphics.py` 로 기본 출력 `work/dq4-graphics/` 를 만들고, `uv run --locked python tools/dq4figures.py` 로 문서 그림을 다시 만듭니다.
