@@ -7,6 +7,7 @@
   python tools/dq4encounter.py rom/dq4.nes dungeons                던전 그룹 → 층(순번)마다 구역
   python tools/dq4encounter.py rom/dq4.nes formations              고정 편성 16개(칸 12·13)
   python tools/dq4encounter.py rom/dq4.nes bosses                  특수 전투 34개와 부르는 곳
+  python tools/dq4encounter.py rom/dq4.nes scripts                 인물 블록에서 명령 21(0F:$DA8A, 특수 전투)을 찾음
   python tools/dq4encounter.py rom/dq4.nes check [enc.txt ...]     표 경계 검사, tools/lua/fc/enc.lua 기록 대조
 
 근거 루틴(뱅크 18): $9BE6(걸음마다 조우 판정), $9C19(필드 구역), $9F79·$A069(던전 구역),
@@ -162,14 +163,36 @@ def bosses(prg):
     return out
 
 
+BRANCHES = (0x10, 0x30, 0x90, 0xB0, 0xD0, 0xF0)
+
+
 def boss_callers(prg):
-    """LDA #번호 ; BRK 01 8F(뱅크 18 함수 1 = $A1AD) 꼴로 부르는 곳(정적 검색)."""
+    """LDA #번호 ; BRK 01 8F(뱅크 18 함수 1 = $A1AD) 꼴로 부르는 곳(정적 검색). LDA #번호 뒤 분기가
+    BRK 로 뛰는 꼴(1E:$B868 상자 ミミック: LDA #00 ; BEQ)도 센다."""
     out = []
-    for m in re.finditer(rb'\xA9(.)\x00\x01\x8F', prg, re.DOTALL):
+    for m in re.finditer(rb'\x00\x01\x8F', prg):
         o = m.start()
         bank = o // 0x4000
         cpu = (0xC000 if bank in (0x0F, 0x1F) else 0x8000) + o % 0x4000
-        out.append((prg[o + 1], bank, cpu))
+        if prg[o - 2] == 0xA9:
+            out.append((prg[o - 1], bank, cpu - 2))
+        for p in range(max(o - 0x80, bank * 0x4000), o - 3):
+            if prg[p] == 0xA9 and prg[p + 2] in BRANCHES:
+                rel = prg[p + 3] - 256 if prg[p + 3] & 0x80 else prg[p + 3]
+                if p + 4 + rel == o:
+                    out.append((prg[p + 1], bank, cpu - (o - p)))
+    return out
+
+
+DESPALACE = (0x08, 0xB756)  # 08:$B725: 그룹 03(デスパレス)에서 말 건 인물의 겉모습 $DA 를 이 표(FF 끝)에서 찾아 1C + 순번(없으면 1C)
+
+
+def despalace_list(prg):
+    """(겉모습, 특수 전투 번호). 15:$B10E 가 그룹 03 대화 앞에 08:$B725 를 불러 Y 를 받고 이벤트 20(1C:$B968: TYA ; BRK 01 8F)."""
+    o = DESPALACE[0] * 0x4000 + (DESPALACE[1] & 0x3FFF)
+    out = []
+    while prg[o + len(out)] != 0xFF:
+        out.append((prg[o + len(out)], 0x1C + len(out)))
     return out
 
 
@@ -177,13 +200,72 @@ ARENA = (0x1C, 0xB024)      # 1C:$AF04: LDA $B024,X (X = $6287 & 7) ; BRK 01 8F.
 
 
 def arena_list(prg):
-    """1C:$B024 의 특수 전투 번호. 다음 바이트가 코드(20 0B D2 = JSR $D20B)라 07~0B 다섯 개."""
+    """1C:$B024 의 특수 전투 번호 07~0B 다섯 개. 바로 뒤는 코드(20 0B D2 = JSR $D20B)다."""
     o = ARENA[0] * 0x4000 + (ARENA[1] & 0x3FFF)
+    return list(prg[o:o + 5])
+
+
+# 인물 블록(0F:$D884 가 한 명령씩 실행) 명령 길이. 처리기 표 0F:$DEF5(00~30)·$DF57(80~8A)를 코드 읽기로 센 것.
+# 80·81 은 부르기에서 되돌아감, 83 상대 점프, 84 절대 점프, 85 부르기(돌아올 자리 $70A0/$70C0).
+BLOCK_LEN = {**{op: 1 for op in range(0x21)}, 0x21: 2, 0x22: 2, 0x23: 2, 0x24: 3, 0x25: 3, 0x26: 3,
+             0x27: 4, 0x28: 4, 0x29: 4, 0x2A: 1, 0x2B: 1, 0x2C: 4, 0x2D: 2, 0x2E: 4, 0x2F: 1, 0x30: 2,
+             0x82: 2, 0x83: 2, 0x84: 3, 0x85: 3, 0x86: 3, 0x87: 3, 0x88: 2, 0x89: 2, 0x8A: 2}
+NPC_BANK = 0x05
+
+
+def block_starts(prg):
+    """맵 인물 목록(뱅크 05)의 블록마다 (본문 시작, 끝, 이름). 본문은 뱅크 05 주소 그대로 실행된다."""
+    r = lambda a: prg[NPC_BANK * 0x4000 + (a & 0x3FFF)]
+    counts = {}
+    for g, *_ in dq4map.maps(prg):
+        counts[g] = counts.get(g, 0) + 1
     out = []
-    while prg[o] < N_BOSSES and len(out) < 8:
-        out.append(prg[o])
-        o += 1
+    for g in sorted(counts):
+        a = r(0x8000 + 2 * g) | r(0x8001 + 2 * g) << 8
+        for k in range(counts[g]):
+            i = 0
+            while (f := r(a)) != 0:
+                off = 7
+                if f & 0x10 and f & 0x08:
+                    off += (0 if f & 1 else 1) + (0 if f & 2 else 1) + (0 if f & 4 else 2)
+                for bit, name in ((0x10, 1), (0x08, 2)):
+                    if f & bit:
+                        n = r(a + off)
+                        out.append((a + off + 1, a + off + 1 + n, f'{g:02X}/{k:02X} 레코드 {i} 블록{name}'))
+                        off += 1 + n
+                a += off
+                i += 1
+            a += 1
     return out
+
+
+def scan_blocks(prg):
+    """블록을 길이 표로 풀며 점프·부르기 대상까지 따라간다. 블록 본문은 길이 안에서만, 점프 대상은 끝 명령까지.
+    돌려주는 것: (푼 바이트 수, 모르는 명령 {명령: 수}, 명령 21 [(주소, 번호, 이름)])."""
+    r = lambda a: prg[NPC_BANK * 0x4000 + (a & 0x3FFF)]
+    seen, unknown, hits = set(), {}, []
+    todo = list(block_starts(prg))
+    while todo:
+        a, end, name = todo.pop()
+        while a not in seen and 0x8000 <= a < end:
+            seen.add(a)
+            op = r(a)
+            if op == 0x21:
+                hits.append((a, r(a + 1), name))
+            if op == 0x83:
+                a += r(a + 1) - 256 if r(a + 1) & 0x80 else r(a + 1)
+                continue
+            if op in (0x84, 0x85):
+                todo.append((r(a + 1) | r(a + 2) << 8, 0xC000, f'{name} → {r(a + 2):02X}{r(a + 1):02X}'))
+                if op == 0x84:
+                    break
+            if op in (0x80, 0x81):
+                break
+            if op not in BLOCK_LEN:
+                unknown[op] = unknown.get(op, 0) + 1
+                break
+            a += BLOCK_LEN[op]
+    return len(seen), unknown, hits
 
 
 def names(prg):
@@ -510,7 +592,17 @@ def main():
                 where += f' 1C:{ARENA[1] + arena.index(i):04X}(표, $6287 & 7 = {arena.index(i)})'.lstrip()
             print(f'{i:02X} ' + ', '.join(f'{mname(nm, m)}×{c}' for m, c in groups)
                   + f'  [{" ".join(f"{v:02X}" for v in raw)}]' + (f'  ← {where}' if where else ''))
-        print('# 그 밖에 0F:$DA8A(스크립트 명령: 다음 바이트 = 번호 → BRK 01 8F)가 부름')
+        for look, i in despalace_list(prg):
+            print(f'# {i:02X}: 08:{DESPALACE[1]:04X} 표 — デスパレス(그룹 03)에서 겉모습 {look:02X} 인 인물에게 말 걸면'
+                  ' (15:$B10E → 이벤트 20 = 1C:$B968)')
+        print('# 그 밖에 0F:$DA8A(인물 블록 명령 21 NN)가 부를 수 있으나 롬의 블록에는 없음(scripts)')
+    elif cmd == 'scripts':
+        n, unknown, hits = scan_blocks(prg)
+        print(f'블록 {len(block_starts(prg))}개, 푼 바이트 {n}, 모르는 명령 {sum(unknown.values())}, 명령 21 {len(hits)}번')
+        for a, i, name in hits:
+            print(f'05:{a:04X} 21 {i:02X}  {name}')
+        if unknown:
+            print('모르는 명령: ' + ' '.join(f'{k:02X}×{v}' for k, v in sorted(unknown.items())))
     elif cmd == 'check':
         ok = check_tables(prg)
         for path in args:
