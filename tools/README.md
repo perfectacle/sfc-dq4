@@ -109,4 +109,6 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 
 ### dq4
 
-아직 없습니다.
+| 스크립트 | 하는 일 |
+| --- | --- |
+| `dq4bank.py rom call\|table\|compare` | DQ4 BRK 뱅크 호출 풀기. `compare trace.txt` 로 `probe/trace.lua` 기록(`TRACE=C446,C455,C3CD LOG=0023,0024,0025,0026,0027,0507`)과 비교 |
