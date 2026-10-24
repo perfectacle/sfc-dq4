@@ -13,19 +13,16 @@
   1E:$B7B2  내용물 표(포인터 1E:$BDC0)[전체 순번]. 1E:$B791 열었음 플래그 $625D + 순번 >> 3, 비트 80 >> (순번 & 7).
   08:$8710  맵 종류가 00·1E 가 아니면 맵에 안 쓰인 첫 블록($0568)에 정의 18 11(종류 04, 타일 FC~FF)을 올린다.
             열린 상자 칸은 $7800 에서 이 블록으로 바뀐다(1E:$B7CA, 로드 때 1E:$A1F3).
-  08:$8055  블록 종류: 08:$8ADB + 맵 번호($0028 = 맵 레코드 첫 바이트 & 3F, 08:$B70B) × 64 의 2바이트 기술자 32개,
-            기술자 (b0 & 7) << 8 | b1 → 08:$8235 의 표(08:$A80D) + 3 × 그 값, 셋째 바이트가 종류(08:$80FF → $8464).
+  블록 종류  로드 뒤 $6F40 은 dq4block 의 블록 표(08:$84E9)와 장소별 고침(08:$8A2A)으로 계산한다(docs/dq4-block-format.md).
 """
 import sys
 
 from kr_patch.fc import ines
 
+import dq4block
 import dq4data
 import dq4map
 
-BLOCK_BANK = 0x08
-BLOCK_DESC = 0x8ADB            # 08:$80B3 의 첫 포인터. 맵 번호마다 64바이트(블록 32개 × 2)
-BLOCK_REC_PTR = 0x8235         # 3바이트 블록 레코드 표의 포인터
 CHEST_KIND = 0x04              # 08:$B67F 목록(04 00)
 CHEST_BANK = 0x1E
 COUNT_PTR, CONTENT_PTR = 0xBDBE, 0xBDC0
@@ -45,15 +42,14 @@ def rw(prg, bank, addr):
     return rd(prg, bank, addr) | rd(prg, bank, addr + 1) << 8
 
 
-def block_kinds(prg, map_no):
-    """맵 번호(6비트)의 블록 32개 종류 바이트($6F40 에 들어가는 값). 기술자 b0 & 7 == 7 인 블록은 None(08:$847A 가 따로 처리)."""
-    base = rw(prg, BLOCK_BANK, BLOCK_REC_PTR)
-    out = []
-    for b in range(32):
-        a = BLOCK_DESC + (map_no & 0x3F) * 64 + 2 * b
-        b0, b1 = rd(prg, BLOCK_BANK, a), rd(prg, BLOCK_BANK, a + 1)
-        out.append(None if b0 & 7 == 7 else rd(prg, BLOCK_BANK, base + 3 * ((b0 & 7) << 8 | b1) + 2))
-    return out
+def block_props(prg, m, buf, g, k):
+    """로드 뒤의 블록 속성 $6F40(dq4block: 08:$84E9 블록 표, 08:$8710 열린 상자 블록, 08:$8A2A 장소별 고침).
+    m 은 all_maps 의 맵 레코드, buf 는 해제한 $7800. 올리지 않는 블록은 빠진다."""
+    t = m[2] & 0x3F
+    outside = dq4map.header(prg, m[3], m[4])[4]
+    blocks = dq4block.load(prg, t, dq4block.used_blocks(buf, outside))
+    dq4block.patch_props(prg, blocks['prop'], g, k)
+    return blocks['prop']
 
 
 def chest_counts(prg):
@@ -107,9 +103,8 @@ def chest_cells(prg, g, k):
     if (got := load(prg, g, k)) is None:
         return None
     m, w, h, buf = got
-    kinds = block_kinds(prg, m[2])
-    return [(i % w, i // w) for i, b in enumerate(buf)
-            if kinds[b & 0x1F] is not None and kinds[b & 0x1F] & 0x7F == CHEST_KIND]
+    props = block_props(prg, m, buf, g, k)
+    return [(i % w, i // w) for i, b in enumerate(buf) if props.get(b & 0x1F, 0) & 0x7F == CHEST_KIND]
 
 
 # 1E:$BC35 특수 내용과 처리 루틴(1E:$BC3D)이 주는 것. 아이템은 루틴이 A 에 싣는 ID. 모두 워프로 열어 확인.
