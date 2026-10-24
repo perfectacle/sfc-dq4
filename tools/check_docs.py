@@ -18,7 +18,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 JOURNAL = ROOT / 'docs' / 'journal'
 # 아직 <플랫폼>/<게임>/ 폴더로 옮기지 않은 트랙. 옮기면 여기서 뺀다.
-TRACKS = ('dq4',)
+TRACKS = ()
+# 한 트랙이 폴더 여럿에 걸치면 일지 순번을 함께 쓴다(같은 날짜·순번이 두 폴더에 있으면 안 됨).
+SHARED_NUMBERS = {'sfc/dq4': 'dq4', 'fc/dq4': 'dq4'}
 NAME = re.compile(r'^(\d{4}-\d{2}-\d{2})-(\d{2})-[a-z0-9]+(?:-[a-z0-9]+)*\.md$')
 TITLE = re.compile(r'^# (\d{4}-\d{2}-\d{2})-(\d{2}): \S')
 LINK = re.compile(r'\]\(([^)\s]+)\)')
@@ -46,10 +48,12 @@ def check_journal(errors):
     for p in sorted(JOURNAL.rglob('*.md')):
         if p.parent.parent != JOURNAL or p.parent.name not in TRACKS:
             errors.append(f'{p.relative_to(ROOT)}: 일지는 <플랫폼>/<게임>/journal/ 아래에 둠')
+    shared = {}
     for folder, readme, prefix in journal_dirs():
         text = readme.read_text(encoding='utf-8') if readme.is_file() else ''
         listed = re.findall(r'\(' + re.escape(prefix) + r'([^)/]+)\)', text)
-        seen, names = {}, []
+        group = SHARED_NUMBERS.get(folder.parent.relative_to(ROOT).as_posix(), folder)
+        seen, names = shared.setdefault(group, {}), []
         for p in sorted(folder.glob('*.md')):
             m = NAME.match(p.name)
             if not m:
@@ -58,7 +62,7 @@ def check_journal(errors):
             key = (m.group(1), m.group(2))
             if key in seen:
                 errors.append(f'{p.relative_to(ROOT)}: {key[0]}-{key[1]} 이 {seen[key]} 와 겹침')
-            seen[key] = p.name
+            seen[key] = p.relative_to(ROOT).as_posix()
             first = p.read_text(encoding='utf-8').splitlines()[0] if p.stat().st_size else ''
             t = TITLE.match(first)
             if not t or (t.group(1), t.group(2)) != key:
