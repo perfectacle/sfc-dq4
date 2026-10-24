@@ -215,6 +215,23 @@ def fig_exits(rom):
     save(out, 'dq5-exits-ship.webp')
 
 
+def fig_edge_exit(rom):
+    """03/00 아래 가장자리로 걸어 나간 실험: 걸은 길(초록)과 나간 뒤 화면(work/edge1/end.png, 필드 전투)."""
+    img, w, h, _, _ = decoded(rom, 3, 0)
+    d = ImageDraw.Draw(img)
+    # walk.lua 기록: (34,60) 에 도착해 (37,66)·(37,72) 를 거쳐 아래로 더 걸었다.
+    path = [(34, 60), (37, 60), (37, 66), (37, 72), (37, 73)]
+    d.line([(x * 8 + 4, y * 8 + 4) for x, y in path], fill=(0, 255, 0), width=3)
+    d.rectangle((22 * 8, 72 * 8, 54 * 8 - 1, 73 * 8 - 1), outline=(255, 64, 64), width=2)
+    label(img, '03/00')
+    shot = Image.open('work/edge1/end.png').convert('RGB')
+    label(shot, 'after: field (04:FE83 -> 251,215)')
+    out = Image.new('RGB', (img.width + 16 + shot.width, max(img.height, shot.height)), (24, 24, 24))
+    out.paste(img, (0, 0))
+    out.paste(shot, (img.width + 16, img.height - shot.height))
+    save(out, 'dq5-exit-edge-0300.webp')
+
+
 def fig_transition():
     """맵 전환 전후 30프레임 간격 화면(wsnap.lua, 1560~1770)."""
     files = [f for f in sorted(glob.glob('work/wdump/s[0-9]*.png')) if 1560 <= int(f[-9:-4]) <= 1770]
@@ -236,6 +253,7 @@ def main():
     fig_record(rom)
     fig_day_night(rom)
     fig_exits(rom)
+    fig_edge_exit(rom)
     fig_transition()
     os.remove(TMP)
 
