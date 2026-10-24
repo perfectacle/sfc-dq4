@@ -118,7 +118,7 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 | `dq5chest.py rom [BC BD]` | DQ5 보물상자(번호·칸·열림 플래그·내용물), タンス·ツボ·タル 항목, 발밑 표(`1E:F08B`). 물건 이름과 `D000`~`D009` 의 뜻까지 |
 | `dq5shop.py rom` | DQ5 상점 품목 목록(종류·마을 그룹 키)과 물건 가격, 작은 메달·코인 교환 값, 여관 1인 값 |
 | `dq5item.py rom` | DQ5 물건 216개의 장비 칸·공격력/수비력·사람 장비 비트·동료 몬스터 장비 비트(16비트)·가격과 표 k0~k4 원값 |
-| `dq5monster.py rom` | DQ5 몬스터 236개의 필드(HP·MP·민첩·공격·수비·경험치·금화·행동 수·재생·떨어뜨리는 물건 등), 행동 6개, 내성 18칸 |
+| `dq5monster.py rom` | DQ5 몬스터 236개의 필드(HP·MP·민첩·공격·수비·경험치·금화·행동 수·재생·떨어뜨리는 물건·동료 확률과 종류 등), 행동 6개, 내성 18칸. `--companions` 동료 레코드(`23:AED1`) 41개 |
 | `dq5spell.py rom` | DQ5 전투 행동 171개(주문·몬스터 행동)의 이름·MP·범위 비트·처리 루틴·피해/회복량·내성 종류 |
 | `dq5encounter.py rom [BC BD]` | DQ5 전투 조우 구역 85개의 칸별 무리·확률·마릿수. `BC BD` 는 그 실내 맵의 구역, `--maps` 조우가 있는 실내 맵, `--field` 필드 구역 격자, `--events` 이벤트 전투 무리 표(`23:D757`), `--trace trace.txt` 로 `probe/trace.lua` 기록(`TRACE=23E7C2,23E9B0,23EA40,23E98F LOG=7E1001,7E1003,7E1005,7E1007`)의 무리를 표와 대조, `--steps trace.txt` 로 걸음마다의 구역·조우율(`TRACE=0082AF LOG=7E00BC,7E00BE,7E00B6,7E00B8,7E1948,7E075E,7E21C9`)을 격자·지형으로 계산한 값과 대조 |
 | `dq5mongfx.py rom [몬스터…]` | DQ5 전투 몬스터 그림(그림 번호·머리·조각·색). `--png` 그림, `--compare at.bin` 게임 버퍼(`7E:4000`)와 타일 비교, `--shot` 전투 화면과 RGB 비교, `--oam o.oam v.vram` OBJ 색 번호 비교 |

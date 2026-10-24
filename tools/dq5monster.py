@@ -4,9 +4,11 @@
 묶음 2 로 읽는데, 필드마다 레코드 안 오프셋·길이(21:8D96·21:8C86)와 후처리(21:8E8C)가 정해져 있다.
 후처리가 덧붙이는 위 비트는 그 필드 오프셋에서 X+1 바이트 뒤를 읽는다(21:A333).
 행동 6개(필드 6A, +11~+16)는 tools/dq5spell.py 의 행동 번호다.
+동료가 되는 몬스터는 필드 77(+18 bit0-6)이 동료 종류 번호이고, 동료 레코드는 23:AED1 + 종류*9 다.
 
 사용:
   python tools/dq5monster.py rom/dq5.sfc
+  python tools/dq5monster.py rom/dq5.sfc --companions   동료 레코드 41개
 """
 import argparse
 import os
@@ -26,6 +28,9 @@ def record(rom, n):
     return [rom.u8(RECORDS + n * SIZE + i) for i in range(SIZE)]
 
 
+COMPANIONS = 0x23AED1
+COMPANION_SIZE = 9
+COMPANION_KINDS = 0x2A  # 종류 01~29. 00 은 동료 몬스터가 아님
 RESISTS = 18  # 내성 종류 50~61. 21:91F9 + 종류*2 = [+0C 부터의 바이트][2비트 마스크]
 
 
@@ -55,16 +60,32 @@ def fields(r):
         'f6D': (r[12] >> 6) & 1,
         'f6E': (r[8] >> 4) & 3,
         'f70': r[12] >> 7,
-        'f76': r[9] & 7,
-        'f77': r[0x18] & 0x7F,
+        '동료확률(76)': r[9] & 7,
+        '동료종류(77)': r[0x18] & 0x7F,
     }
+
+
+def companion(rom, k):
+    """23:AED1 + k*9. 동료가 될 때 처음 레벨·최대 레벨·능력치·HP·MP 와 장비 갈래."""
+    b = [rom.u8(COMPANIONS + k * COMPANION_SIZE + i) for i in range(COMPANION_SIZE)]
+    return {'레벨': b[0], '최대레벨': b[1], '+7~+A': ' '.join(f'{x:02X}' for x in b[2:6]),
+            'HP': b[6], 'MP': b[7], '장비갈래': b[8] & 0x0F, '+8위': b[8] >> 4}
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('rom')
+    ap.add_argument('--companions', action='store_true')
     args = ap.parse_args()
     rom = Rom(open(args.rom, 'rb').read())
+    if args.companions:
+        names = {}
+        for n in range(COUNT):
+            names.setdefault(record(rom, n)[0x18] & 0x7F, text(string_codes(rom, string(rom, NAMES, n))))
+        for k in range(1, COMPANION_KINDS):
+            c = companion(rom, k)
+            print(f'{k:02X} {names.get(k, "?")} ' + ' '.join(f'{x}={v}' for x, v in c.items()))
+        return 0
     for n in range(COUNT):
         name = text(string_codes(rom, string(rom, NAMES, n)))
         r = record(rom, n)
