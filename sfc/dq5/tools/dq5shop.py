@@ -18,6 +18,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 from dq5chest import item_name  # noqa: E402
 from dq5map import Rom  # noqa: E402
+from dq5text import string, string_codes, text  # noqa: E402
 
 LISTS = 0x04FBD5
 # 21:A447. 가격 = 23:B081[물건] × 21:A47B[23:B159[물건] & 3](1, 10, 100, 1000). 물건은 216개(23:B081~B158).
@@ -34,6 +35,12 @@ COIN_KEY, COIN_PRICES = 0x15, 0x04FD5B
 # 21 은 & 20 도)가 켜지면 둘째 항목을 쓴다. 값 bit7 은 $0F36 으로 가는 미확인 플래그다.
 INNS = 0x04FD6D
 INN_COUNT = 21
+# 26:8E5A. 시합 = 23:DC27 문턱 50개 중 주인공 레벨 이하인 것의 수 - 1 까지에서 난수, 23:DA97 + 시합*8 = [몬스터][倍率] x4.
+ARENA_MATCHES, ARENA_LEVELS, ARENA_COUNT = 0x23DA97, 0x23DC27, 50
+
+
+def monster_name(rom, n):
+    return text(string_codes(rom, string(rom, 4, n)))
 
 
 def price(rom, item):
@@ -72,6 +79,16 @@ def inns(rom):
             for k in range(INN_COUNT)]
 
 
+def arena(rom):
+    """[(문턱 레벨, [(몬스터, 倍率)])]. 몬스터 FF 는 빈 자리라 뺀다."""
+    out = []
+    for k in range(ARENA_COUNT):
+        a = ARENA_MATCHES + k * 8
+        fighters = [(rom.u8(a + 2 * i), rom.u8(a + 2 * i + 1)) for i in range(4) if rom.u8(a + 2 * i) != 0xFF]
+        out.append((rom.u8(ARENA_LEVELS + k), fighters))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('rom')
@@ -81,6 +98,8 @@ def main():
         print(f'{KINDS[kind]} {key:02X}: ' + ', '.join(f'{item_name(rom, i)} {price(rom, i)}G' for i in items))
     for name, items in prize_lists(rom):
         print(f'{name}: ' + ', '.join(f'{item_name(rom, i)} {v}' for i, v in items))
+    for k, (level, fighters) in enumerate(arena(rom)):
+        print(f'격투장 {k:2d} (레벨 {level}~): ' + ', '.join(f'{monster_name(rom, m)} {odds}' for m, odds in fighters))
     print('여관(1인): ' + ', '.join(f'{bc:02X} {v}G' + ('*' if flag else '') for bc, v, flag in inns(rom)))
     return 0
 

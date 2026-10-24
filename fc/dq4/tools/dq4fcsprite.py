@@ -5,6 +5,7 @@
                                                              → work/dq4-fcsprite/field/
   python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes monster [ID ...]  몬스터 그림(몬스터 ID, 없으면 전부) → work/dq4-fcsprite/monster/
   python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes sheet              위 둘을 모두 만들고 index.html·sheet-*.png 로 묶음
+  python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes assets OUT          비공개 에셋 저장소 규칙으로 OUT/sprites·monsters·gallery/sprites.html
   python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes who N              그림 번호 N(인물 레코드 값, 16진)을 쓰는 맵·인물
   python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes check-rom          몬스터 데이터 경계 검사(끝 = 다음 시작)
   python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes check-field DIR...    seq.lua·warp.lua 덤프(end.sram/chr/oam)와 비교
@@ -468,6 +469,132 @@ def cmd_sheet(prg, out):
     print(f'필드 {len(cells)}개, 몬스터 {len(mcells)}개 → {os.path.join(out, "index.html")}')
 
 
+# --- 에셋 저장소용 --------------------------------------------------------
+
+ASSET_ROWS = ('아래', '왼쪽', '오른쪽', '위')    # SHEET_ROWS 순서(남·서·동·북)
+UNUSABLE = {0xAE: 'デスピサロ: 형태별 부품이 한 레코드에 이어져 있고 팔레트를 다른 곳에서 받아, 부품을 모두 겹치고 모르는 색은 회색으로 그림'}
+
+
+def asset_sprite_name(n):
+    m, rot = field_index(n)
+    if rot:
+        return f'{m:02X}-{n:02X}'
+    return f'{m:02X}-{dq4data.PARTY[m]}' if m < 8 else f'{m:02X}'
+
+
+def cmd_assets(prg, rom, out):
+    """비공개 에셋 저장소의 규칙(1배 PNG, `<번호>[-<번호2>][-<이름>].png`, 폴더마다 index.json·SOURCE.txt)으로
+    out/sprites, out/monsters, out/gallery/sprites.html 을 쓴다."""
+    import hashlib
+    import json
+    import subprocess
+    sd, md, gd = (os.path.join(out, x) for x in ('sprites', 'monsters', 'gallery'))
+    for x in (sd, md, gd):
+        os.makedirs(x, exist_ok=True)
+    try:
+        commit = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True,
+                                cwd=os.path.dirname(os.path.abspath(__file__))).stdout.strip()
+    except OSError:
+        commit = ''
+    sha = hashlib.sha1(rom).hexdigest()
+
+    def source(folder):
+        with open(os.path.join(folder, 'SOURCE.txt'), 'w') as f:
+            f.write(f'sfc-dq4 커밋: {commit}\n명령: uv run --locked python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes assets $OUT\n'
+                    f'롬: FC 「ドラゴンクエストIV」 일본판 Rev A, SHA-1 {sha}\n')
+    use = {}
+    for num, place, *_ in users(prg):
+        use.setdefault(field_index(num), []).append(place)
+    base = wd(prg, B08, FIELD_TABLE)
+    sprites = []
+    for n in field_numbers(prg):
+        m, rot = field_index(n)
+        grid, colors = indexed(field_sheet(prg, n), 32, 64)
+        name = asset_sprite_name(n)
+        save_png(os.path.join(sd, name + '.png'), grid, colors)
+        frames = []
+        for d in SHEET_ROWS:
+            for col in range(2):
+                px, pal = field_frame(prg, n, d * 2 + col)
+                frames.append({'row': ASSET_ROWS[SHEET_ROWS.index(d)], 'step': col, 'block': d * 2 + col,
+                               'obj_palette': pal, 'matrix': matrix_text(px).split('\n')})
+        places = list(dict.fromkeys(use.get((m, rot), [])))
+        sprites.append({'file': name + '.png', 'table': m, 'number': n, 'rotated': rot, 'label': field_label(prg, n),
+                        'size': [32, 64], 'frame': [16, 16], 'rows': list(ASSET_ROWS), 'cols': ['걸음 0', '걸음 1'],
+                        'rom': f'08:${base + 24 * m:04X}', 'colors': [f'{c:02X}' for c in colors],
+                        'records': len(use.get((m, rot), [])), 'places': places, 'frames': frames})
+    with open(os.path.join(sd, 'index.json'), 'w') as f:
+        json.dump({'note': '그림 PNG 는 32×64: 행 아래·왼쪽·오른쪽·위, 열 걸음 0·1. 색 번호 0 투명, colors 는 색 번호 1~ 의 NES 색. '
+                   'matrix 는 블록마다 OBJ 팔레트 안 색 번호(. 투명)', 'obj_palettes': [[f'{c:02X}' for c in t] for t in obj_palettes(prg)],
+                   'sprites': sprites}, f, ensure_ascii=False, indent=1)
+    source(sd)
+    names = monster_names(prg)
+    mons = []
+    for mid, nm in enumerate(names):
+        px = mon_pixels(prg, mid)
+        x0, y0, x1, y1 = mon_box(px)
+        grid, colors = indexed(px, x1 - x0, y1 - y0, x0, y0)
+        p = mon_pic(prg, mid)
+        fname = f'{mid:02X}-{nm.replace(chr(0x3000), "")}.png'
+        if p in UNUSABLE:   # 쓸 수 없는 그림은 PNG 를 두지 않고 index.json 에만 적는다
+            fname = None
+        else:
+            save_png(os.path.join(md, fname), grid, colors)
+        tiles, opal, bpal, b, start, _ = mon_stream(prg, p)
+        mons.append({'file': fname, 'id': mid, 'name': nm, 'picture': p, 'data': f'{b:02X}:${start:04X}',
+                     'record': f'14:${wd(prg, B14, MON_REC) + 5 * p:04X}', 'tiles': len(tiles), 'size': [x1 - x0, y1 - y0],
+                     'origin': [x0, y0], 'colors': [f'{c:02X}' for c in colors],
+                     'bg_palettes': [[f'{c:02X}' for c in t] for t in bpal], 'obj_palettes': [[f'{c:02X}' for c in t] for t in opal],
+                     'usable': p not in UNUSABLE, 'note': UNUSABLE.get(p, ''), 'matrix': matrix_text(grid).split('\n')})
+    with open(os.path.join(md, 'index.json'), 'w') as f:
+        json.dump({'note': 'origin 은 그림 BG 0행·0열 기준 왼위 자리. 색 번호 0 투명(전투 화면에서는 검정 바탕), colors 는 색 번호 1~ 의 NES 색. '
+                   'matrix 문자는 색 번호(0-9A-Z, . 투명)', 'monsters': mons}, f, ensure_ascii=False, indent=1)
+    source(md)
+    cards = []
+    for e in sprites:
+        cards.append(('../sprites/' + e['file'], e['file'][:-4], (e['label'] + ' · ' if e['label'] else '') +
+                      f'인물 {e["records"]} · 맵 {len(e["places"])}곳', 'spr'))
+    for e in mons:
+        if not e['file']:
+            continue
+        cards.append(('../monsters/' + e['file'], f'{e["id"]:02X} {e["name"]}',
+                      f'그림 {e["picture"]:02X} · {e["size"][0]}×{e["size"][1]}', 'mon'))
+
+    def grid_html(kind):
+        return '\n'.join(f'<div class="card {kind}"><a href="{html.escape(src)}"><img src="{html.escape(src)}" loading="lazy" '
+                         f'alt="{html.escape(t)}"></a><div class="t">{html.escape(t)}</div><div class="s">{html.escape(sub)}</div></div>'
+                         for src, t, sub, k in cards if k == kind)
+    page = f"""<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DQ4 FC 스프라이트</title><style>
+:root {{ color-scheme: light dark; --bg: #f6f6f4; --fg: #1d1d1b; --mut: #6b6b66; --card: #ffffff; --line: #ddd; }}
+@media (prefers-color-scheme: dark) {{ :root {{ --bg: #161615; --fg: #e8e8e4; --mut: #9a9a94; --card: #22221f; --line: #3a3a36; }} }}
+body {{ margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, sans-serif; }}
+h1 {{ font-size: 20px; }} h2 {{ font-size: 17px; margin-top: 28px; border-bottom: 1px solid var(--line); }}
+nav a {{ margin-right: 12px; }}
+.grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }}
+.card {{ background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 6px; }}
+.card img {{ width: 100%; height: 180px; object-fit: contain; image-rendering: pixelated; background: #3a3a36; }}
+.mon img {{ background: #000; height: 140px; }}
+.card .t {{ font-weight: 600; word-break: break-all; }} .card .s {{ color: var(--mut); font-size: 12px; }}
+</style></head><body>
+<h1>DQ4(FC) 원작 스프라이트·몬스터</h1>
+<nav><a href="index.html">← 그래픽 갤러리</a><a href="#sprites">필드 스프라이트 {len(sprites)}</a><a href="#monsters">몬스터 {sum(1 for e in mons if e['file'])}</a></nav>
+<p>필드 스프라이트는 32×64(행 아래·왼쪽·오른쪽·위, 열 걸음 0·1, 16×16 씩). 이름의 두 번째 번호는 돌려 그리기 그림 번호입니다.
+몬스터는 그림 크기 그대로, 검정 바탕이 게임 화면의 색 0 입니다. 메타데이터는 각 폴더의 index.json.</p>
+<h2 id="sprites">필드 스프라이트</h2><div class="grid">
+{grid_html('spr')}
+</div>
+<h2 id="monsters">몬스터</h2><div class="grid">
+{grid_html('mon')}
+</div></body></html>
+"""
+    with open(os.path.join(gd, 'sprites.html'), 'w') as f:
+        f.write(page)
+    print(f'스프라이트 {len(sprites)}개 → {sd}, 몬스터 {len(mons)}개 → {md}, 갤러리 {os.path.join(gd, "sprites.html")}')
+
+
+
 # --- 덤프와 비교 ----------------------------------------------------------
 
 def check_field(prg, d):
@@ -632,6 +759,8 @@ def main():
             write_monster(prg, mid, md, names)
             print(open(os.path.join(md, f'{mid:02X}.txt')).read() if a.args else f'{md}/{mid:02X}.png',
                   end='' if a.args else '\n')
+    elif a.cmd == 'assets':
+        cmd_assets(prg, open(a.rom, 'rb').read(), a.args[0])
     elif a.cmd == 'sheet':
         cmd_sheet(prg, a.out)
     elif a.cmd == 'check-rom':

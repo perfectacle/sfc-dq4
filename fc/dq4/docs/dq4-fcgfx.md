@@ -2,7 +2,7 @@
 
 SFC 로 다시 그릴 때 참고하려고 FC 원작의 마을·던전 맵 279개, 필드, 블록·CHR·폰트 시트, 타이틀·창·전투 화면을 PNG 로 뽑는 도구 [fc/dq4/tools/dq4fcgfx.py](../tools/dq4fcgfx.py) 의 쓰는 법과, 그리면서 새로 확인한 것(MesenCE 색, 필드 물가 블록)입니다. 블록·타일·팔레트 해석은 [dq4-block-format.md](dq4-block-format.md), 맵·출구·인물은 [dq4-map-format.md](dq4-map-format.md), 필드는 [dq4-field-format.md](dq4-field-format.md) 를 따릅니다. 실험 과정은 [2026-10-25-30 일지](../journal/2026-10-25-30-fcgfx.md) 에 있습니다.
 
-뽑은 그림은 롬 그래픽이라 이 저장소에 커밋하지 않습니다. 비공개 저장소 `perfectacle/sfc-dq4-assets` 의 `fc/dq4/` 아래에 두고, 폴더마다 `SOURCE.txt` 에 만든 커밋·명령·롬 SHA-1 을 적습니다.
+뽑은 그림은 롬 그래픽이라 이 저장소에 커밋하지 않습니다. 비공개 저장소 `perfectacle/sfc-dq4-assets` 의 `fc/dq4/` 아래에 그 저장소의 「폴더·파일 규칙」(1배, `<번호>-<이름>-<변형>.png`)대로 두고, 폴더마다 `SOURCE.txt` 세 줄(커밋·명령·롬 SHA-1)을 적습니다. 확대는 갤러리가 `image-rendering: pixelated` 로 합니다.
 
 ## 출력
 
@@ -22,10 +22,10 @@ uv run --locked python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes map 02 01 work/x.png
 | | `…-annot.png` | 주석판: 노랑 인물(낮 목록 순번), 보라 밤에만 있는 인물, 하늘색 출구(목적지 그룹), 빨강 `T` 보물상자, 분홍 `F` 발밑 숨은 물건. 칸 속성(`dq4block.terrain`)으로: 주황 `D0`~`D3` 문(잠금 단계), 초록 `S` 계단·출구 검사 칸(출구 표에 없는 것), 가는 분홍 테두리 떨어지는 칸, `L` 리프트, `W` 旅の扉, `!` 데미지 바닥, `^>v<` 움직이는 바닥, `P` タンス·つぼ, `N` 팻말 |
 | | `index.json` | 맵마다 그룹·순번·맵 종류·크기·이름, 인물(자리·겉모습·대화 번호)·출구·상자·발밑 물건, 칸 속성 표시(문 잠금 단계, 리프트 짝, タンス·つぼ 내용물 `dq4block.pots`, 팻말 메시지 `dq4block.signs`), 떨어지는 칸(목적지 `dq4block.fall` 마다 칸 묶음) |
 | `field/` | `field0.png`~`field3.png`, `-night`, `-annot` | 필드 4개 1배. 밤은 필드 팔레트의 가장 어두운 단계(`$62ED` `84`~`BF`). 주석판은 입구 칸에 그룹 번호 |
-| `gfx/blocks/` | `typeTT.png`, `index.json` | 맵 종류 51가지(필드 `00` 포함)의 블록 `00`~`21` 2배, 칸 아래에 블록 번호·속성 값. `index.json` 에 속성 이름(`dq4block.kind_name`) |
-| `gfx/` | `chr0C-gray.png`, `chr0C-color.png`, `chr0D-…` | PRG 뱅크 `0C`·`0D` 전체(타일 1024개) 2배. 색은 그 뱅크를 가장 많이 쓰는 (맵 종류, 팔레트) |
-| | `font.png` | `18:$B840` 의 글자 141개 4배. 창 테두리와 커서 ▶ 도 이 안에 있음 |
-| `gfx/screens/` | `<장면>-nt.png`, `-bgchr.png`, `-shot.png` | MesenCE 덤프의 nametable 두 장(512×240)·BG 패턴 표·화면 |
+| `gfx/blocks/` | `TT.png`, `index.json` | 맵 종류 51가지(`00` 은 필드)의 블록 `00`~`21` 을 1배 8열로(128×80). `index.json` 에 블록마다 시트 안 자리·속성 값·속성 이름(`dq4block.kind_name`)·팔레트 |
+| | `chr-0C.png`, `chr-0C-gray.png`, `chr-0D…` | PRG 뱅크 `0C`·`0D` 전체(타일 1024개) 1배 32열. 색은 그 뱅크를 가장 많이 쓰는 (맵 종류, 팔레트) |
+| `gfx/` | `font.png` | `18:$B840` 의 글자 141개 1배 16열. 창 테두리와 커서 ▶ 도 이 안에 있음 |
+| `gfx/screens/` | `<장면>-nt.png`, `-bgchr.png`, `-shot.png`, `index.json` | MesenCE 덤프의 nametable 두 장(512×240)·BG 패턴 표(1배)·화면. `index.json` 에 덤프 위치·찾은 스크롤·화면과 다른 픽셀 수 |
 | `gallery/` | `index.html` | 위 전부의 썸네일. 상대 경로만 쓰고 외부 리소스가 없음. `sprites.html` 은 스프라이트 쪽이 만듦 |
 
 이름은 롬에 그룹 → 이름 표가 없어서 대사로 정합니다. 그룹마다 인물 대사(낮·밤, 조건 갈래 전부)에서 「ここは」「ようこそ」 뒤 30글자 안에 장소 이름표(`0B:$B634`, 28개)의 이름이 처음 나오는 것을 쓰고, 뒤에 「ほこら」「どうくつ」가 이어지면 붙입니다. 73개 그룹(`00`~`48`) 중 24개에 이름이 붙고, 나머지는 `GG-KK.png` 입니다. 글자는 롬의 글자표 그대로라 가타카나가 없는 글자는 히라가나입니다(예: `りバーサイド`).

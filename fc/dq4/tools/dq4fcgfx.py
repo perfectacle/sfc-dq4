@@ -398,27 +398,21 @@ def do_field(prg, out, names):
 
 # ---- gfx ----
 
-def scaled(im, n):
-    return im.resize((im.width * n, im.height * n), Image.NEAREST)
-
-
 def block_sheet(prg, t, g=None, k=None):
-    """맵 종류 t 의 블록 00~21 을 2배로, 칸마다 블록 번호와 속성 값. 블록 표는 맵에 안 쓰인 것까지 다 올린다."""
+    """맵 종류 t 의 블록 00~21 을 1배로 8열(128×80). 블록 번호·속성 값은 그림에 쓰지 않고 rows 로 돌려준다.
+    블록 표는 맵에 안 쓰인 것까지 다 올린다."""
     m = dq4block.Map(prg, g, k) if g is not None else dq4block.Map(prg, field=0)
     if g is not None:
         m.blocks = dq4block.load(prg, t)
         dq4block.patch_props(prg, m.blocks['prop'], g, k)
     p = Painter(m, map_palette(m))
-    cols, cw, ch = 8, 40, 52
-    im = Image.new('RGB', (cols * cw, 5 * ch), (32, 32, 32))
-    dr = ImageDraw.Draw(im)
+    im = Image.new('RGB', (8 * 16, 5 * 16), MESEN_RGB[0x0F])
     rows = []
     for b in range(0x22):
-        x, y = b % cols * cw, b // cols * ch
-        im.paste(scaled(p.block(b), 2), (x + 4, y + 2))
+        im.paste(p.block(b), (b % 8 * 16, b // 8 * 16))
         prop = m.blocks['prop'].get(b) if b < 0x20 else None
-        dr.text((x + 4, y + 35), f'{b:02X}' + ('' if prop is None else f' {prop:02X}'), fill=(230, 230, 230), font=font())
-        rows.append({'block': b, 'prop': prop, 'name': '' if prop is None else dq4block.kind_name(prop),
+        rows.append({'block': b, 'x': b % 8 * 16, 'y': b // 8 * 16, 'prop': prop,
+                     'name': '' if prop is None else dq4block.kind_name(prop),
                      'pal': m.blocks['pal'].get(b), 'kind': m.blocks['kind'].get(b)})
     return im, rows
 
@@ -466,23 +460,23 @@ def do_gfx(prg, out, maps_index=None):
         first.setdefault(r['type'], (r['g'], r['k']))
     sheets = {}
     im, rows = block_sheet(prg, 0)
-    im.save(d / 'blocks' / 'type00-field.png')
-    sheets['00'] = {'file': 'blocks/type00-field.png', 'map': 'field0', 'blocks': rows}
+    im.save(d / 'blocks' / '00.png')
+    sheets['00'] = {'file': 'blocks/00.png', 'map': 'field0', 'blocks': rows}
     for t in sorted(first):
         g, k = first[t]
         im, rows = block_sheet(prg, t, g, k)
-        name = f'type{t:02X}.png'
+        name = f'{t:02X}.png'
         im.save(d / 'blocks' / name)
         sheets[f'{t:02X}'] = {'file': f'blocks/{name}', 'map': f'{g:02X}/{k:02X}', 'blocks': rows}
     (d / 'blocks' / 'index.json').write_text(json.dumps(sheets, ensure_ascii=False, indent=1))
     chrs = []
     for bank in (0x0C, 0x0D):
-        scaled(chr_sheet(prg, bank, GRAY), 2).save(d / f'chr{bank:02X}-gray.png')
+        chr_sheet(prg, bank, GRAY).save(d / 'blocks' / f'chr-{bank:02X}-gray.png')
         t, p, cs = bank_palette(prg, bank)
-        scaled(chr_sheet(prg, bank, cs), 2).save(d / f'chr{bank:02X}-color.png')
-        chrs.append({'bank': f'{bank:02X}', 'gray': f'chr{bank:02X}-gray.png', 'color': f'chr{bank:02X}-color.png',
-                     'palette': f'맵 종류 {t:02X} 팔레트 {p}'})
-    scaled(font_sheet(prg), 4).save(d / 'font.png')
+        chr_sheet(prg, bank, cs).save(d / 'blocks' / f'chr-{bank:02X}.png')
+        chrs.append({'bank': f'{bank:02X}', 'gray': f'blocks/chr-{bank:02X}-gray.png', 'color': f'blocks/chr-{bank:02X}.png',
+                     'palette': f'맵 종류 {t:02X} 팔레트 {p}', 'rom': f'{bank:02X}:$8000-$BFFF'})
+    font_sheet(prg).save(d / 'font.png')
     (d / 'index.json').write_text(json.dumps({'chr': chrs, 'font': 'font.png'}, ensure_ascii=False, indent=1))
     print(f'블록 시트 {len(sheets)}장, CHR 뱅크 0C·0D, 폰트 {FONT_N}자 → {d}')
 
@@ -723,7 +717,7 @@ def screens_from_dumps(out, dumps):
         colors = [MESEN_RGB[f['pal'][j] & 0x3F] for j in range(4)]
         for i in range(256):
             sheet.paste(tile(f['chr'][base + 16 * i:base + 16 * i + 16], colors), (i % 16 * 8, i // 16 * 8))
-        scaled(sheet, 2).save(d / f'{name}-bgchr.png')
+        sheet.save(d / f'{name}-bgchr.png')
         shot = Image.open(f'{prefix}.png').convert('RGB')
         shot.save(d / f'{name}-shot.png')
         mask = None
@@ -735,12 +729,14 @@ def screens_from_dumps(out, dumps):
         masked = 0 if mask is None else mask.histogram()[255]
         print(f'{name}: 화면 {256 * 240 - masked} 픽셀(스프라이트 자리 {masked} 뺌) 중 {n} 다름, 스크롤 ({sx},{sy})')
         idx.append({'name': name, 'title': title, 'nt': f'{name}-nt.png', 'bgchr': f'{name}-bgchr.png', 'shot': f'{name}-shot.png',
+                    'source': 'MesenCE 덤프(fc/dq4/tools/lua/fcgfxscene.lua) 렌더링, 롬에서 직접 푼 것이 아님', 'dump': prefix,
                     'scroll': [sx, sy], 'diff': n, 'masked': masked})
     (d / 'index.json').write_text(json.dumps(idx, ensure_ascii=False, indent=1))
     print(f'장면 {len(idx)}개 → {d}')
 
 
-def source_txt(out, sub, cmd, rom, note=''):
+def source_txt(out, sub, cmd, rom):
+    """비공개 에셋 저장소 규칙의 세 줄: 커밋, 명령, 롬."""
     try:
         rev = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True, check=True).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
@@ -748,7 +744,7 @@ def source_txt(out, sub, cmd, rom, note=''):
     sha = hashlib.sha1(rom).hexdigest()
     (Path(out) / sub).mkdir(parents=True, exist_ok=True)
     (Path(out) / sub / 'SOURCE.txt').write_text(
-        f'sfc-dq4 커밋: {rev}\n명령: {cmd}\n롬: FC 「ドラゴンクエストIV」 일본판 Rev A, SHA-1 {sha}\n' + (f'비고: {note}\n' if note else ''))
+        f'sfc-dq4 커밋: {rev}\n명령: {cmd}\n롬: FC 「ドラゴンクエストIV」 일본판 Rev A, SHA-1 {sha}\n')
 
 
 def main():
@@ -773,8 +769,7 @@ def main():
     if cmd == 'scenes':
         spec = json.loads(Path(a[4]).read_text())
         screens_from_dumps(a[3], [(x['name'], x['title'], x['prefix']) for x in spec])
-        source_txt(a[3], 'gfx/screens', 'uv run --locked python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes scenes $OUT ' + a[4], data,
-                   note='MesenCE 덤프(fc/dq4/tools/lua/fcgfxscene.lua)를 렌더링한 것. 롬에서 직접 푼 것이 아님')
+        source_txt(a[3], 'gfx/screens', 'uv run --locked python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes scenes $OUT ' + a[4], data)
         return
     if cmd == 'map':
         m = dq4block.Map(prg, int(a[3], 16), int(a[4], 16))

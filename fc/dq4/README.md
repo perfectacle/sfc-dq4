@@ -8,13 +8,13 @@ FC 「드래곤 퀘스트 IV」(일본판 Rev A) 원작 데이터를 분석하�
 - [docs/dq4-ram-format.md](docs/dq4-ram-format.md): DQ4(FC) 필드 RAM(좌표·맵 번호·출구 표)과 뱅크 전환
 - [docs/dq4-bank-format.md](docs/dq4-bank-format.md): DQ4(FC) BRK 뱅크 호출과 뱅크 배치
 - [docs/dq4-field-format.md](docs/dq4-field-format.md): DQ4(FC) 필드 3개(세계 지도 250×250, 줄 RLE)
-- [docs/dq4-map-format.md](docs/dq4-map-format.md): DQ4(FC) 마을·던전 맵 269개(장소 번호, 비트열 압축, 연결·출구, 인물 목록)
+- [docs/dq4-map-format.md](docs/dq4-map-format.md): DQ4(FC) 마을·던전 맵 279개(장소 번호, 비트열 압축, 연결·출구, 인물 목록)
 - [docs/dq4-data-format.md](docs/dq4-data-format.md): DQ4(FC) 이름 목록·아이템·몬스터·주문 표, 레벨업 성장 곡선
 - [docs/dq4-text-format.md](docs/dq4-text-format.md): DQ4(FC) 대사 텍스트(6비트 압축, 사전, 글자표, 메시지 번호)
 - [docs/dq4-encounter-format.md](docs/dq4-encounter-format.md): DQ4(FC) 적 조우 표(필드 구역 지도, 구역별 무리 후보, 조우율, 던전 층, 특수 전투, 배, 성수, 기습·선제)
 - [docs/dq4-warp.md](docs/dq4-warp.md): DQ4(FC) 장면 이동 도구(원하는 맵·필드 자리의 세이브스테이트 만들기)
 - [docs/dq4-script-format.md](docs/dq4-script-format.md): DQ4(FC) 인물 대화 스크립트(대화 번호, 조건·플래그·서비스 문장, 메시지 번호)
-- [docs/dq4-shop-format.md](docs/dq4-shop-format.md): DQ4(FC) 상점 품목·여관 값·가게 종류, 보물상자·발밑 숨은 물건과 열었음 플래그
+- [docs/dq4-shop-format.md](docs/dq4-shop-format.md): DQ4(FC) 상점 품목·장소별 값·여관 값·가게 종류, 보물상자·발밑 숨은 물건과 열었음 플래그, 얻는 물건 통합 표
 - [docs/dq4-save-format.md](docs/dq4-save-format.md): DQ4(FC) 저장 데이터(모험의 서·체크섬·인물 레코드), 이벤트 플래그, 장 시작 표
 - [docs/dq4-rom-map.md](docs/dq4-rom-map.md): DQ4(FC) 롬 뱅크 지도(뱅크 32개의 내용, 실행 장면, 빈 자리)
 - [docs/dq4-debug.md](docs/dq4-debug.md): DQ4(FC) 디버그 스위치 `$C000`(벽 통과·인카운트 끄기·전투 테스트), 패드 2 흔적, 미실행 코드 찾기
@@ -59,3 +59,7 @@ FC 「드래곤 퀘스트 IV」(일본판 Rev A) 원작 데이터를 분석하�
 - [2026-10-25-28: 이벤트 표와 진행 목록·마차·손님·움직임](journal/2026-10-25-28-talk3.md)
 - [2026-10-25-29: 원작 필드 인물·몬스터 그림 뽑기](journal/2026-10-25-29-fcsprite.md)
 - [2026-10-25-30: 원작 맵·필드·타일 그림 뽑기](journal/2026-10-25-30-fcgfx.md)
+- [2026-10-25-31: 얻는 물건 통합 표·장소별 값·숨는 가게 인물](journal/2026-10-25-31-shop3.md)
+- [2026-10-25-32: 적 조우의 남은 것 2](journal/2026-10-25-32-encounter3.md)
+- [2026-10-25-33: 창 레코드(자리·크기·항목)와 자동 ＊「 의 규칙](journal/2026-10-25-33-textrest4.md)
+- [2026-10-25-34: 출구 칸 연결 표·리프트 사각형·연 문 목록](journal/2026-10-25-34-block4.md)
