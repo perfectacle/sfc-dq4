@@ -5,6 +5,8 @@
   처리 루틴 20:B7F9 + 행동*2. 루틴 첫머리가 LDX #내성 종류 / LDA #표 번호 를 넣고 공통 루틴으로 뛴다
   피해·회복량 27:8071 + (표 번호 & 3F)*2 = [바탕][폭]. 값 = 바탕(FE 이면 300) + 난수(0 ~ 폭-1) (20:AB70)
 내성 종류(50~61)는 몬스터 레코드 +0C~+10 의 2비트 칸이다(21:91F9 + 종류*2, tools/dq5monster.py).
+상태 주문 20:AE41 은 몬스터에게는 내성 0 이면 반드시, 1~3 이면 난수 < 27:8065[내성](128 89 38 0)일 때 걸리고,
+우리 쪽에게는 난수(0~7) < LDA # 값일 때 걸린다(출력의 「아군n/8」).
 
 사용:
   python tools/dq5spell.py rom/dq5.sfc
@@ -78,6 +80,8 @@ def describe(rom, n):
     if target in AMOUNT_ROUTINES and lda is not None:
         base, width = amount(rom, lda)
         out.append(f'양{lda:02X}={base}~{base + max(width, 1) - 1}')
+    elif target == 0xAE41 and lda is not None:
+        out.append(f'아군{lda}/8')
     elif target in STATUS_ROUTINES and lda is not None:
         out.append(f'값{lda:02X}')
     if ldx is not None and ldx >= 0x50 and target is not None:
