@@ -10,7 +10,7 @@ DQ4 의 내용(맵, 인물과 대사, 이벤트 흐름, 몬스터·아이템·�
 
 ## 지금 상태
 
-실험 환경을 갖췄고, 필드 RAM·뱅크 전환·BRK 뱅크 호출을 풀었습니다. 정리는 [dq4-ram-format.md](dq4-ram-format.md)·[dq4-bank-format.md](dq4-bank-format.md), 과정은 [01](journal/dq4/2026-10-24-01-fc-env.md)·[02](journal/dq4/2026-10-24-02-bankcall.md) 일지에 있습니다.
+실험 환경을 갖췄고, 필드 RAM·뱅크 전환·BRK 뱅크 호출·대사 텍스트를 풀었습니다. 정리는 [dq4-ram-format.md](dq4-ram-format.md)·[dq4-bank-format.md](dq4-bank-format.md)·[dq4-text-format.md](dq4-text-format.md), 과정은 `docs/journal/dq4/` 일지에 있습니다.
 
 | 항목 | 값 | 근거 |
 | --- | --- | --- |
@@ -21,7 +21,8 @@ DQ4 의 내용(맵, 인물과 대사, 이벤트 흐름, 몬스터·아이템·�
 | 필드 RAM | 좌표 `$0044`/`$0045`, 맵 번호 `$0028`(=`$0550`), 출구 표 `$05A0`(7바이트) | 걸어서 맵 두 번 전환 |
 | 뱅크 전환 | `$FF91`(A=뱅크, `$0507` 이 현재 뱅크), `$C3EA` 다른 뱅크 바이트 읽기 | 쓰기·읽기 프로브 |
 | 뱅크 호출 | `BRK b1 b2`: 뱅크 = `b2` 상위 4비트+bit3, 함수 = `b1`, 주소 = 그 뱅크 `$8000` 표. [dq4-bank-format.md](dq4-bank-format.md), `tools/dq4bank.py` | 실행 기록 1019건과 디코더 0 차이 |
-| 데이터 뱅크 후보 | `00`~`07`: 부팅·보행에서 한 번도 실행 안 됨 | cover |
+| 데이터 뱅크 | `00`~`04`: 대사 본문, `1B`: 대사 끝부분과 사전 | 디코더 |
+| 대사 | 메시지 2633개, 6비트 압축 + 사전 192단어. [dq4-text-format.md](dq4-text-format.md), `tools/dq4text.py all` | 창 줄 버퍼 덤프 10장과 비교 |
 
 ## 도구
 
@@ -49,11 +50,10 @@ uv run krpatch fc listing rom/dq4.nes work/cov/cover.txt --range 3C000-3FFFF
 
 [todo.md](todo.md) 의 `## dq4` 순서대로 합니다.
 
-1. **대사 텍스트** — 왕의 대사가 화면에 찍히는 구간(`tools/dq4state.sh` 의 `owari` 단계 뒤, A 를 누르기 전후)에 `probe/reads.lua` 로 PRG 읽기를 잡습니다. 실행 안 되는 뱅크 `00`~`07` 을 읽는 명령이 대사 디코더 후보이고, `$C3EA` 를 거쳐 읽을 수도 있습니다. 문자 표, 압축 방식, 대사 번호에서 본문을 찾는 표를 풉니다. 이식에서 가장 양이 많고, 한글패치의 번역 원문이 됩니다.
-   완료: 롬만 읽는 디코더가 화면에 나온 대사 몇 줄과 같은 글자를 냄.
-2. **출구 표와 맵** — `$05A0` 을 채우는 롬 데이터(`writes.lua` 로 `05A0-05BF`)와 맵 데이터 형식, 인물 배치. dq5 트랙의 [dq5-map-format.md](dq5-map-format.md) 와 같은 항목으로 정리합니다.
-3. **몬스터·아이템·주문·경험치 표, 이벤트 플래그와 장(章) 전환**. 플래그는 `BRK` 특수 형식이 쓰는 `$627B` 영역부터 봅니다.
-4. **롬 구조 나머지** — [dq4-bank-format.md 「남은 것」](dq4-bank-format.md#남은-것).
+1. **출구 표와 맵** — `$05A0` 을 채우는 롬 데이터(`writes.lua` 로 `05A0-05BF`)와 맵 데이터 형식, 인물 배치. dq5 트랙의 [dq5-map-format.md](dq5-map-format.md) 와 같은 항목으로 정리합니다.
+2. **몬스터·아이템·주문·경험치 표, 이벤트 플래그와 장(章) 전환**. 플래그는 `BRK` 특수 형식이 쓰는 `$627B` 영역부터 봅니다.
+3. **롬 구조 나머지** — [dq4-bank-format.md 「남은 것」](dq4-bank-format.md#남은-것).
+4. **대사 나머지** — [dq4-text-format.md 「남은 것」](dq4-text-format.md#남은-것).
 
 ## 조심할 것
 

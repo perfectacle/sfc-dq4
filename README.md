@@ -57,6 +57,7 @@ dq4(FC DQ4 원작):
 - [docs/dq4-handoff.md](docs/dq4-handoff.md): dq4 트랙 시작점(목표, 도구 현황, 다음 할 일)
 - [docs/dq4-ram-format.md](docs/dq4-ram-format.md): DQ4(FC) 필드 RAM(좌표·맵 번호·출구 표)과 뱅크 전환
 - [docs/dq4-bank-format.md](docs/dq4-bank-format.md): DQ4(FC) BRK 뱅크 호출과 뱅크 배치
+- [docs/dq4-text-format.md](docs/dq4-text-format.md): DQ4(FC) 대사 텍스트(6비트 압축, 사전, 글자표, 메시지 번호)
 
 ### 해킹 일지
 
@@ -82,3 +83,4 @@ dq4(FC DQ4 원작):
 
 - [2026-10-24-01: FC DQ4 실험 환경과 첫 RAM](docs/journal/dq4/2026-10-24-01-fc-env.md)
 - [2026-10-24-02: BRK 뱅크 호출](docs/journal/dq4/2026-10-24-02-bankcall.md)
+- [2026-10-25-01: 대사 텍스트](docs/journal/dq4/2026-10-25-01-text.md)
