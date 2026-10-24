@@ -8,6 +8,7 @@
 --compare 는 01:BA4C(속성 패스 끝)에서 덤프한 WRAM 128KB 와 셀 버퍼를 비교한다.
 --png 는 셀 버퍼의 아래층·위층 타일맵을 그린다(Pillow 필요). 팔레트는 10:DE0B 와 같은 방법으로
 ROM 에서 만든다. --alt 는 7E:075E >= $F0 일 때의 두 번째 팔레트 목록, --cgram 은 덤프한 CGRAM 을 대신 쓴다.
+BC 가 50 이상이면 그 맵들의 따로 된 포인터·블록·CHR 을 쓴다. VRAM 슬롯 시작(--slot)은 맵마다 달라 아직 규칙을 모른다.
 """
 import argparse
 import sys
@@ -23,6 +24,12 @@ CHR_BANK = 0x13
 PALSET_TABLE = 0x10DEBC
 PALSET_LISTS = 0x10DFE4
 PALETTES = 0x10E5C8
+# $BC >= $50 인 맵(01:933D): 그룹 목록 1F:CEB6 + ($BC-$50)*2 → 24비트 포인터 ($BD-$50 번째, 레코드는 뱅크 0F),
+# 블록은 17:8369 부터(7E:A000 표, 01:8C72), CHR 은 1F:8000, CHR 팔레트 표는 0F:CF83.
+HIGH_GROUPS = 0x1FCEB6
+HIGH_BLOCKS = 0x178369
+HIGH_CHR_BANK = 0x1F
+HIGH_CHR_PALETTE = 0x0FCF83
 
 
 def lorom(addr):
@@ -53,6 +60,9 @@ def next_addr(a):
 
 
 def map_pointer(rom, bc, bd):
+    if bc >= 0x50:
+        group = rom.u16(HIGH_GROUPS + (bc - 0x50) * 2)
+        return rom.u24(HIGH_GROUPS & 0xFF0000 | (group + (bd - 0x50) * 3))
     group = rom.u16(GROUP_TABLE + bc * 2)
     return rom.u24(0x0F0000 | (group + bd * 3))
 
@@ -69,6 +79,17 @@ def block_table(rom, count=0x800):
         if a & 0xFFFF < 0x8000:
             break
     return ptrs
+
+
+def high_block_table(rom):
+    """01:8C72. $BC >= $50 맵의 7EA000 표: 다음 블록의 +2 가 FF 이면 끝."""
+    ptrs, a = [], HIGH_BLOCKS
+    while True:
+        ptrs.append(a)
+        b0 = rom.u8(a)
+        a += 3 + 2 * (((b0 >> 3) & 7) + 1) * ((b0 & 7) + 1)
+        if rom.u8(a + 2) == 0xFF:
+            return ptrs
 
 
 class Bits:
@@ -172,9 +193,11 @@ def attribute_passes(rom, addr, width, buf, trace=None):
 
 
 class Decoder:
-    def __init__(self, rom, slot):
+    def __init__(self, rom, slot, high=False):
         self.rom = rom
-        self.blocks = block_table(rom)
+        self.high = high
+        self.blocks = high_block_table(rom) if high else block_table(rom)
+        self.chr_palette = HIGH_CHR_PALETTE if high else CHR_PALETTE
         self.slot = slot
         self.chr_map = {}
         self.pass_trace = []
@@ -182,7 +205,7 @@ class Decoder:
     def chr_entry(self, chr_id):
         """01:8C15: CHR 이 처음 쓰일 때 VRAM 슬롯을 순서대로 주고 팔레트를 붙인다."""
         if chr_id not in self.chr_map:
-            nib = self.rom.u8(CHR_PALETTE + (chr_id >> 1))
+            nib = self.rom.u8(self.chr_palette + (chr_id >> 1))
             pal = ((nib & 0x0F) + 1) * 4 if chr_id & 1 else ((nib & 0xF0) >> 2) + 4
             self.chr_map[chr_id] = (self.slot | pal << 8) & 0xFFFF
             self.slot += 1
@@ -327,9 +350,9 @@ def map_cgram(rom, bc, bd, alt=False):
     return cg
 
 
-def chr_pixels(rom, chr_id):
+def chr_pixels(rom, chr_id, high=False):
     """CHR 하나(4bpp 8x8, 32바이트)를 8x8 색 번호로. 01:8C15 가 DMA 하는 원본 위치."""
-    a = (CHR_BANK + (chr_id >> 10)) << 16 | 0x8000 + (chr_id & 0x3FF) * 32
+    a = ((HIGH_CHR_BANK if high else CHR_BANK) + (chr_id >> 10)) << 16 | 0x8000 + (chr_id & 0x3FF) * 32
     o = lorom(a)
     t = rom.d[o:o + 32]
     return [[((t[y * 2] >> (7 - x)) & 1) | ((t[y * 2 + 1] >> (7 - x)) & 1) << 1
@@ -358,7 +381,7 @@ def render(rom, dec, width, height, buf, cgram, path):
             if chr_id is None:
                 continue
             if chr_id not in cache:
-                cache[chr_id] = chr_pixels(rom, chr_id)
+                cache[chr_id] = chr_pixels(rom, chr_id, dec.high)
             pal = (word >> 10) & 7
             cx, cy = cell % width * 8, cell // width * 8
             for y in range(8):
@@ -382,7 +405,7 @@ def main():
     args = ap.parse_args()
     rom = Rom(open(args.rom, 'rb').read())
     addr = map_pointer(rom, args.bc, args.bd)
-    dec = Decoder(rom, args.slot)
+    dec = Decoder(rom, args.slot, args.bc >= 0x50)
     width, height, buf, stream = dec.decode(addr)
     print(f'map {args.bc:02X}/{args.bd:02X} at {addr:06X}: {width}x{height}, '
           f'stream ends {stream.a:06X} bit {stream.pos}, slots {args.slot:X}-{dec.slot:X}')

@@ -416,6 +416,42 @@ def fig_textctl():
     save(out, 'dq5-textctl.webp')
 
 
+def fig_worlds(rom):
+    """$1949 로 고르는 세계 지도 셋(블록 1개를 2x2 로 축소)과 그 세계의 04:FD97 입구(노란 틀). 세계 1·2 는 땅이 있는 왼쪽 위
+    128x128 블록만 2배로 키웠다. 타일은 롬, 팔레트는 세계마다
+    필드에 선 뒤의 CGRAM 덤프(work/fd/f<세계>/at_008090.cgram)다. 덤프 명령은 docs/journal/dq5/ 의 세계 지도 일지 3절에 있다."""
+    from dq5field import WORLDS, block_number, entrances, field_chr, rle
+    from dq5field import render as frender
+    vram = bytes(0x4000) + field_chr(rom)
+    ents = entrances(rom)
+    maps = []
+    for k, (src_w, src_e) in enumerate(WORLDS):
+        world, _ = rle(rom, src_w)
+        hib, _ = rle(rom, src_e)
+        cg = open(f'work/fd/f{k}/at_008090.cgram', 'rb').read()
+        cache = {}
+        img = Image.new('RGB', (512, 512))
+        for by in range(256):
+            for bx in range(256):
+                m = block_number(world, hib, bx, by)
+                if m not in cache:
+                    frender(rom, bytes([m & 0xFF]), bytes([(m >> 8) << 7]), vram, cg, 0, 0, 1, 1, TMP)
+                    cache[m] = Image.open(TMP).convert('RGB').resize((2, 2), Image.BOX)
+                img.paste(cache[m], (bx * 2, by * 2))
+        d = ImageDraw.Draw(img)
+        for g, x, y, w, _ in ents:
+            if w == k:
+                d.rectangle((x - 4, y - 4, x + 5, y + 5), outline=(255, 255, 0), width=2)
+        if k:
+            img = img.crop((0, 0, 256, 256)).resize((512, 512), Image.NEAREST)
+        label(img, f'$1949={k}' + (' (0-127, x2)' if k else ''))
+        maps.append(img)
+    out = Image.new('RGB', (512 * 3 + 16, 512), (24, 24, 24))
+    for k, img in enumerate(maps):
+        out.paste(img, (k * 520, 0))
+    save(out, 'dq5-field-worlds.webp')
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     rom = Rom(open('rom/dq5.sfc', 'rb').read())
@@ -434,6 +470,7 @@ def main():
     fig_transition()
     fig_textctl()
     fig_mongfx(rom)
+    fig_worlds(rom)
     os.remove(TMP)
 
 
