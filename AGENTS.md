@@ -37,6 +37,7 @@
 | 세션을 시작한다(트랙 정하기, 남은 항목 고르기)                    | [tracks](.agents/skills/tracks/SKILL.md)             |
 | 롬을 분석한다(MesenCE 프로브, 자동 보행, 리스팅, 디코더 작성)     | [analysis](.agents/skills/analysis/SKILL.md)         |
 | 해킹 일지·형식 문서·그림을 쓴다                                   | [journal](.agents/skills/journal/SKILL.md)           |
+| 포팅용 스프라이트를 그리거나 고친다(DQ5 실측 규격, 원작과 견주기)  | [sprites](.agents/skills/sprites/SKILL.md)           |
 | 워크트리·브랜치·커밋·PR 을 만들거나 정리한다                      | [git-workflow](.agents/skills/git-workflow/SKILL.md) |
 | 워크플로를 바꾸거나 CI 실패를 고친다                              | [ci](.agents/skills/ci/SKILL.md)                     |
 | 의존성·Python·uv·툴킷 버전을 바꾼다                               | [dependencies](.agents/skills/dependencies/SKILL.md) |

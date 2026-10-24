@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 
 from dq4pixels import build_assets
+from dq4sprites import SPRITE_NAMES
 from dq4title import build_title
 from kr_patch.sfc import bg, tiles
 from PIL import Image
@@ -34,7 +35,7 @@ def validate_image(name, image):
         raise ValueError(f"{name}: dimensions must be multiples of 8")
     if max(image.tobytes()) > (127 if name == "title" else 15):
         raise ValueError(f"{name}: palette indices exceed the supported bank count")
-    if name in ("ragnar", "healie") and (
+    if name in SPRITE_NAMES and (
         image.size != (48, 96) or image.info.get("transparency") != 0
     ):
         raise ValueError(f"{name}: expected 48x96 sprite sheet, transparent index 0")
@@ -159,7 +160,7 @@ def verify_tilemap(image, chr_data, map_data, map_width):
 
 def build():
     images = assets()
-    required = {"ragnar", "healie", "tileset", "map", "title"}
+    required = {*SPRITE_NAMES, "tileset", "map", "title"}
     if set(images) != required:
         raise ValueError(f"expected assets {sorted(required)}, got {sorted(images)}")
     outputs, manifest = {}, {}
