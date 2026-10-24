@@ -1,6 +1,6 @@
 # DQ4(FC) 필드(세계 지도)
 
-필드의 타일 배치와 필드로 가는 목적지 표입니다. 디코더는 [fc/dq4/tools/dq4field.py](../tools/dq4field.py), 실험 과정은 [2026-10-25-05 일지](../journal/2026-10-25-05-field.md) 와 [2026-10-25-39 일지](../journal/2026-10-25-39-fcgfx2.md) 에 있습니다. 필드에 있을 때 맵 종류 `$0028` 은 `00` 입니다([dq4-ram-format.md](dq4-ram-format.md#필드-상태)).
+필드의 타일 배치와 필드로 가는 목적지 표입니다. 디코더는 [fc/dq4/tools/dq4field.py](../tools/dq4field.py), 실험 과정은 [2026-10-25-05 일지](../journal/2026-10-25-05-field.md) 와 [2026-10-25-41 일지](../journal/2026-10-25-41-fcgfx2.md) 에 있습니다. 필드에 있을 때 맵 종류 `$0028` 은 `00` 입니다([dq4-ram-format.md](dq4-ram-format.md#필드-상태)).
 
 ## 필드
 

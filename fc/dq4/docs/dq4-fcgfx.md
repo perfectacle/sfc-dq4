@@ -1,6 +1,6 @@
 # DQ4(FC) 원작 그래픽 렌더링
 
-SFC 로 다시 그릴 때 참고하려고 FC 원작의 마을·던전 맵 279개, 필드, 블록·CHR·폰트 시트, 타이틀·창·전투·장 제목·엔딩 화면을 PNG 로 뽑는 도구 [fc/dq4/tools/dq4fcgfx.py](../tools/dq4fcgfx.py) 의 쓰는 법과, 그리면서 새로 확인한 것(MesenCE 색, 필드 물가 블록, 필드·폭포 팔레트 순환)입니다. 블록·타일·팔레트 해석은 [dq4-block-format.md](dq4-block-format.md), 맵·출구·인물은 [dq4-map-format.md](dq4-map-format.md), 필드는 [dq4-field-format.md](dq4-field-format.md) 를 따릅니다. 실험 과정은 [2026-10-25-30 일지](../journal/2026-10-25-30-fcgfx.md) 와 [2026-10-25-39 일지](../journal/2026-10-25-39-fcgfx2.md) 에 있습니다.
+SFC 로 다시 그릴 때 참고하려고 FC 원작의 마을·던전 맵 279개, 필드, 블록·CHR·폰트 시트, 타이틀·창·전투·장 제목·엔딩 화면을 PNG 로 뽑는 도구 [fc/dq4/tools/dq4fcgfx.py](../tools/dq4fcgfx.py) 의 쓰는 법과, 그리면서 새로 확인한 것(MesenCE 색, 필드 물가 블록, 필드·폭포 팔레트 순환)입니다. 블록·타일·팔레트 해석은 [dq4-block-format.md](dq4-block-format.md), 맵·출구·인물은 [dq4-map-format.md](dq4-map-format.md), 필드는 [dq4-field-format.md](dq4-field-format.md) 를 따릅니다. 실험 과정은 [2026-10-25-30 일지](../journal/2026-10-25-30-fcgfx.md) 와 [2026-10-25-41 일지](../journal/2026-10-25-41-fcgfx2.md) 에 있습니다.
 
 뽑은 그림은 롬 그래픽이라 이 저장소에 커밋하지 않습니다. 비공개 저장소 `perfectacle/sfc-dq4-assets` 의 `fc/dq4/` 아래에 그 저장소의 「폴더·파일 규칙」(1배, `<번호>-<이름>-<변형>.png`)대로 두고, 폴더마다 `SOURCE.txt` 세 줄(커밋·명령·롬 SHA-1)을 적습니다. 확대는 갤러리가 `image-rendering: pixelated` 로 합니다.
 
