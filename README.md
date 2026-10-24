@@ -33,7 +33,7 @@ Unity 리메이크가 아니라, 실제 SFC 롬에 덧대는 IPS 패치를 만�
 
 ## 문서
 
-- [docs/dq5-map-format.md](docs/dq5-map-format.md): DQ5 실내 맵 형식(지형·팔레트·인물·출구)
+- [docs/dq5-map-format.md](docs/dq5-map-format.md): DQ5 실내 맵 형식(지형·팔레트·인물·출구·영역 이동)
 - [docs/references.md](docs/references.md): 참고 자료
 
 ### 해킹 일지
@@ -43,3 +43,4 @@ Unity 리메이크가 아니라, 실제 SFC 롬에 덧대는 IPS 패치를 만�
 - [2026-10-24-03: 인물과 낮·밤](docs/journal/2026-10-24-03-dq5-npc.md)
 - [2026-10-24-04: 출구](docs/journal/2026-10-24-04-dq5-exits.md)
 - [2026-10-24-05: 가장자리 출구와 필드로 나가기](docs/journal/2026-10-24-05-dq5-edge-exit.md)
+- [2026-10-24-06: 영역 이동(트리거)](docs/journal/2026-10-24-06-dq5-triggers.md)
