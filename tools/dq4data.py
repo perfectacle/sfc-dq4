@@ -31,6 +31,7 @@ TARGETS = ('고정', '하나', '그룹', '모두')
 GROW_BANK = 0x12
 GROW_PTR, GROW_RATE = 0xA108, 0xA266             # 인물마다 경험치 5바이트, 능력치 6바이트 레코드
 LEARN_MASK, LEARN_LEVEL = 0xA118, 0xA124         # 인물 0-4: 주문 64비트 마스크, 배우는 레벨 바이트들
+MENU_BATTLE, MENU_FIELD = 0x9150, 0x9192         # 뱅크 10: 인물별 주문 목록. 자리 = 레코드 +1B~ 의 비트 번호
 PARTY = ('勇者', 'クリフト', 'ミネア', 'マーニャ', 'ブライ', 'トルネコ', 'ライアン', 'アリーナ')
 STATS = ('exp', 'str', 'agi', 'vit', 'int', 'luck', 'hp', 'mp')   # 12:$9F89 의 $0B 번호
 
@@ -125,6 +126,16 @@ def learnset(prg, who):
     return out
 
 
+def spell_menus(prg, who):
+    """(전투 목록, 필드 목록) 주문 ID. 레코드 비트 번호는 전투 자리, 필드는 자리 + 16(10:$9123)."""
+    if who >= 5:
+        return [], []
+    a, n = (0, 18) if who == 0 else (6 + 12 * who, 12)
+    battle = [rd(prg, ITEM_BANK, MENU_BATTLE + a + i) for i in range(n)]
+    field = [rd(prg, ITEM_BANK, MENU_FIELD + 8 * who + i) for i in range(8)]
+    return battle, field
+
+
 def curve(prg, who, stat, level):
     """성장 곡선 값과 그 레벨의 증가분 (값, 증가분). stat 은 STATS 번호.
 
@@ -199,10 +210,18 @@ def main():
     elif cmd == 'spells':
         names = [dq4text.text(n) for n in name_list(prg, 'spell')[1:]]
         sets = [learnset(prg, k) for k in range(5)]
+        menus = [spell_menus(prg, k) for k in range(5)]
         for i, nm in enumerate(names):
             mp, tgt, foe = spell_mp(prg, i)
-            who = ' '.join(f'{PARTY[k]} {v & 0x7F}{"*" if v & 0x80 else ""}' for k in range(5)
-                           for sp, v in sets[k].items() if sp == i)
+            who = []
+            for k in range(5):
+                if i not in sets[k]:
+                    continue
+                v = sets[k][i]
+                bits = [f'전{menus[k][0].index(i)}'] if i in menus[k][0] else []
+                bits += [f'필{16 + menus[k][1].index(i)}'] if i in menus[k][1] else []
+                who.append(f'{PARTY[k]} {v & 0x7F}{"*" if v & 0x80 else ""}({",".join(bits)})')
+            who = ' '.join(who)
             print(f'{i:02X} {nm:<8} MP {mp:2d} {"적" if foe else "편"} {TARGETS[tgt]}  {who}')
     elif cmd == 'levels':
         for who in ([int(sys.argv[3])] if len(sys.argv) > 3 else range(8)):
