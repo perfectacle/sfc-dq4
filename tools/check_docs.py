@@ -18,7 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 JOURNAL = ROOT / 'docs' / 'journal'
 # 아직 <플랫폼>/<게임>/ 폴더로 옮기지 않은 트랙. 옮기면 여기서 뺀다.
-TRACKS = ('dq4', 'nds')
+TRACKS = ('dq4',)
 NAME = re.compile(r'^(\d{4}-\d{2}-\d{2})-(\d{2})-[a-z0-9]+(?:-[a-z0-9]+)*\.md$')
 TITLE = re.compile(r'^# (\d{4}-\d{2}-\d{2})-(\d{2}): \S')
 LINK = re.compile(r'\]\(([^)\s]+)\)')

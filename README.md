@@ -78,9 +78,7 @@ dq4(FC DQ4 원작):
 - [docs/dq4-block-format.md](docs/dq4-block-format.md): DQ4(FC) 맵 블록 → 8×8 타일·팔레트·통행 속성, CHR 올리기, 타일 애니메이션, 지형 효과
 - [docs/dq4-fcsprite-format.md](docs/dq4-fcsprite-format.md): DQ4(FC) 필드 인물·일행·탈것 그림 표(4방향 × 걸음 2, 돌려 그리기)와 전투 몬스터 그림(압축·배치·팔레트), 롬에서 뽑아 열람하기
 
-nds(NDS DQ4 리메이크 참고):
-
-- [docs/nds-handoff.md](docs/nds-handoff.md): nds 트랙 시작점(목표, 롬, 다음 할 일)
+nds(NDS DQ4 리메이크·한글 팬패치 참고): [nds/dq4/README.md](nds/dq4/README.md)
 
 ### 해킹 일지
 
@@ -123,7 +121,3 @@ nds(NDS DQ4 리메이크 참고):
 - [2026-10-25-27: 전투 행동·주문 위력·내성·몬스터 AI·아이템 플래그](docs/journal/dq4/2026-10-25-27-stats2.md)
 - [2026-10-25-28: 이벤트 표와 진행 목록·마차·손님·움직임](docs/journal/dq4/2026-10-25-28-talk3.md)
 - [2026-10-25-29: 원작 필드 인물·몬스터 그림 뽑기](docs/journal/dq4/2026-10-25-29-fcsprite.md)
-
-#### nds
-
-아직 없습니다.
