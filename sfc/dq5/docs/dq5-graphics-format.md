@@ -390,13 +390,15 @@ CHR 자체는 맵마다 디코더가 쓰는 CHR 이 덤프한 VRAM 에 32바이�
 디코더는 [sfc/dq5/tools/dq5sprite.py](../tools/dq5sprite.py) 입니다.
 
 ```sh
-uv run --locked python sfc/dq5/tools/dq5sprite.py rom/dq5.sfc --out work/sprites          # 시트·색 번호 보기·행렬·index.json
+uv run --locked python sfc/dq5/tools/dq5sprite.py rom/dq5.sfc --out work/sprites          # 1배 시트·색 번호 보기·index.json
 uv run --locked python sfc/dq5/tools/dq5sprite.py rom/dq5.sfc --list                      # 세트 147개 목록
 uv run --locked python sfc/dq5/tools/dq5sprite.py rom/dq5.sfc --compare work/v/* -q       # 덤프와 비교
 ```
 
-`--out` 이 쓰는 그림은 롬에서 나온 것이라 이 저장소에는 커밋하지 않고 `work/` 아래에만 둡니다(ROM-01). 뽑아 둔 결과는 비공개 저장소 `sfc-dq4-assets` 의 `sfc/dq5/sprites/` 에 있습니다(만든 커밋과 명령은 그 폴더의 `SOURCE.txt`). 세트마다 `setNN.png`(행 아래·왼쪽·오른쪽·위, 열 프레임 0·1, 투명 배경, `--scale` 배), `setNN-index.png`(색 번호를 고정 색으로 칠하고 8픽셀 격자를 그은 것), `setNN.txt`(프레임마다 색 번호 행렬, `.` 투명), 맵 OBJ 타일 `mapobjNN.png` 를 씁니다.
-`index.json` 은 세트 번호·그림 번호·배치·팔레트·타일 수·색 수·크기·자료 주소·그 그림을 쓰는 맵 목록을 담고, 같은 내용을 `export_all(rom, outdir)` 가 돌려줍니다. [dq5gallery.py](../tools/dq5gallery.py) 가 이 함수를 불러 갤러리의 「인물 스프라이트」 분류로 보여 줍니다(`--only sprites`).
+`--out` 이 쓰는 그림은 롬에서 나온 것이라 이 저장소에는 커밋하지 않고 `work/` 아래에만 둡니다(ROM-01). 뽑아 둔 결과는 비공개 저장소 `sfc-dq4-assets` 의 `sfc/dq5/sprites/` 에 있고, 그 저장소 README 의 「폴더·파일 규칙」을 따릅니다(만든 커밋·명령·롬은 그 폴더의 `SOURCE.txt`).
+그림은 1배이고(확대는 갤러리가 함, `--scale` 로 바꿀 수 있음) 이름은 `<세트>[-<이름>][-<변형>].png` 입니다. 세트마다 `82-パパスのむすこ.png`(행 아래·왼쪽·오른쪽·위, 열 걸음 프레임 0·1, 투명 배경)와 `82-パパスのむすこ-index.png`(색 번호를 고정 색으로 칠하고 8픽셀 격자를 그은 것), 맵 OBJ 타일 `obj-<BC>-<BD>.png`(그룹 모든 맵이면 `xx`, 필드는 `obj-field<세계>`)를 씁니다. 맵 OBJ 타일은 배치를 모르는 타일 묶음이지만 맵 위 물체로 쓰는 OBJ 라 `gfx/blocks/` 가 아니라 `sprites/` 에 둡니다.
+이름은 그 세트를 쓰는 인물 엔트리의 대화에서 `{1003}이름「` 꼴로 말하는 화자를 세어 붙인 추정입니다(`set_names`). 이름이 나온 엔트리의 60% 이상이면서 그 세트 엔트리 전체의 20% 이상인 이름만 쓰고, 그림 번호 넷 이상이 나눠 쓰는 세트(`00`)는 뺍니다. 어린 주인공 `82` 만 일행 표(`7E:196F` = `2E`)와 이름 표 1 의 `パパスのむすこ` 로 붙였습니다. 147개 중 21개에 이름이 붙고 나머지는 번호만입니다.
+`index.json` 은 세트 번호·이름과 그 근거·그림 번호·배치·팔레트·타일 수·색 수·크기·자료 주소·그 그림을 쓰는 맵 목록·프레임마다 색 번호 행렬(`matrix`, `.` 투명)을 담고, 같은 내용을 `export_all(rom, outdir)` 가 돌려줍니다. [dq5gallery.py](../tools/dq5gallery.py) 가 이 함수를 불러 갤러리의 「인물 스프라이트」 분류로 보여 줍니다(`--only sprites`).
 
 ```mermaid
 flowchart LR
