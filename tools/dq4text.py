@@ -4,12 +4,15 @@
   python tools/dq4text.py rom/dq4.nes all              실제로 있는 메시지 전부
   python tools/dq4text.py rom/dq4.nes MSG [개수]      메시지 번호(16진)부터 글자로
   python tools/dq4text.py rom/dq4.nes MSG --bytes     글자 바이트(화면 타일 번호)로
-  python tools/dq4text.py rom/dq4.nes MSG --compare end.ram ...  seq.lua 의 RAM 덤프(창 줄 버퍼 $06AA)와 비교
+  python tools/dq4text.py rom/dq4.nes MSG[,MSG…] --compare end.ram ...  seq.lua 의 RAM 덤프(창 줄 버퍼 $06AA,
+      전투 창이면 옆의 end.nt)가 차례로 찍은 메시지들과 맞는지. 치환 제어(F6 이름 등)는 아무 글자와 맞춤
   python tools/dq4text.py rom/dq4.nes controls        제어 바이트 ED~FF 의 처리기 주소·뜻·쓰는 메시지 수
+  python tools/dq4text.py rom/dq4.nes windows         창 문자열 표 16:$A572(그룹, 항목, 루틴/문자열, 글자)
 
 근거 루틴: 0F:$DF99(6비트 부호 읽기), 0F:$DFD5(뱅크 넘김), 16:$8656(메시지 번호 → 시작),
-16:$86BA(부호 → 글자, 가나 전환, 사전 단어).
+16:$86BA(부호 → 글자, 가나 전환, 사전 단어), 16:$9783·$97B0(창 문자열과 80 이상 바이트).
 """
+import os
 import sys
 import unicodedata
 
@@ -53,7 +56,13 @@ def text(bs):
     return unicodedata.normalize('NFC', ''.join(out))
 
 
-LINE_BUF, LINE_W, LINES = 0x06AA, 22, 3   # 창 줄 버퍼: 줄마다 탁점 행 22바이트 + 글자 행 22바이트(16:$830F)
+# 창 줄 버퍼 $06AA: 줄마다 탁점 행·글자 행이 창 폭($54)바이트씩, 4줄(16:$85B3, 16:$830F, 16:$862B).
+# 창 폭은 필드 16(22칸), 전투 18(24칸). 줄 번호 $0552 는 1·3·5·7(글자 행 순번).
+LINE_BUF, LINES = 0x06AA, 4
+WIDTH, LINE_NO, ORIGIN_X = 0x54, 0x0552, 0x53
+FIELD_W, BATTLE_W = 0x16, 0x18
+GLYPH_END = 0x80   # 메시지 글자 바이트는 이 아래. 80~8C 는 창 틀 등
+SCREEN_ROW = 0x13   # 글자를 화면에 찍는 행 = $0552 + $13, 탁점은 그 윗행(16:$8335, 16:$8362)
 CONTROL_MIN = 0xED                          # 이 값 이상은 16:$80AF 표의 제어 처리기로 감
 HANDLERS = (0x16, 0x80AF)                   # 제어 처리기 표, 첨자 = (~바이트) × 2
 
@@ -68,7 +77,8 @@ CONTROLS = {
     0xF3: '주문 이름에서 마지막 글자를 뺌',
     0xF4: '30프레임 쉼',
     0xF5: '주문 이름(인자 = 주문 ID)',
-    0xF6: '이름: 인자 n < 80 이면 동료 n&0F, 아니면 몬스터 칸 n&07 의 이름 + (n>>3)&0F 가 0~7 일 때 「Ａ」~「Ｈ」',
+    0xF6: '이름: 인자 n < 80 이면 동료 n&0F, 아니면 몬스터 칸 n&07 의 이름 + (n>>3)&0F 가 0~7 일 때 「Ａ」~「Ｈ」'
+          '(몬스터가 동료로 변신했으면 「동료 이름もどき」)',
     0xF7: '아이템 이름(인자 = 아이템 ID)',
     0xF8: '숫자($FD-$FF 24비트, 앞 0 뺌)',
     0xF9: '메시지 끝(줄이 시작 칸이 아니면 줄바꿈)',
@@ -81,12 +91,10 @@ CONTROLS = {
 }
 
 
-def buffer_lines(ram):
-    """RAM 덤프의 창 줄 버퍼를 메시지 바이트 순서(탁점·반탁점이 글자 앞)로. 빈 줄과 앞 공백은 뺀다."""
+def _rows_to_lines(rows):
+    """(탁점 행, 글자 행) 쌍들을 메시지 바이트 순서(탁점·반탁점이 글자 앞)로. 빈 줄과 앞뒤 공백은 뺀다."""
     out = []
-    for i in range(LINES):
-        marks = ram[LINE_BUF + i * 2 * LINE_W:][:LINE_W]
-        chars = ram[LINE_BUF + (i * 2 + 1) * LINE_W:][:LINE_W]
+    for marks, chars in rows:
         bs = []
         for m, c in zip(marks, chars):
             if m in (0x3D, 0x3E):
@@ -99,6 +107,43 @@ def buffer_lines(ram):
         if bs:
             out.append(bs)
     return out
+
+
+def line_width(ram):
+    """$54 가 전투 창 폭(18)이면 24칸, 아니면 22칸. 대사가 끝나 다른 창(명령 창 등)이 열리면 $54 가
+    그 창 값으로 바뀌므로, 필드 쪽은 $54 를 그대로 믿지 않는다."""
+    return BATTLE_W if ram[WIDTH] == BATTLE_W else FIELD_W
+
+
+def buffer_lines(ram):
+    """RAM 덤프의 창 줄 버퍼에서 지금 찍는 줄까지.
+    전투 창은 메시지마다 버퍼를 지우지 않고 앞 칸부터 덮어써서 지난 메시지의 탁점이 남는다."""
+    w = line_width(ram)
+    n = min((ram[LINE_NO] - 1) // 2 + 1, LINES)
+    return _rows_to_lines([(ram[LINE_BUF + 2 * i * w:][:w], ram[LINE_BUF + (2 * i + 1) * w:][:w])
+                           for i in range(n)])
+
+
+def screen_lines(ram, nt):
+    """전투 창은 nametable 에 바로 찍으므로 화면 쪽에서 읽는다: 줄 i 의 글자 행은 $13 + 2i + 1, 열은 $53 부터."""
+    w, x = ram[WIDTH], ram[ORIGIN_X]
+    n = min((ram[LINE_NO] - 1) // 2 + 1, LINES)
+    rows = []
+    for i in range(n):
+        y = SCREEN_ROW + 2 * i + 1
+        rows.append((nt[(y - 1) * 32 + x:][:w], nt[y * 32 + x:][:w]))
+    if any(b >= GLYPH_END for r in rows for b in r[1]):
+        return []   # 창 틀 타일이 보이면 명령 창 등이 그 자리를 덮은 것
+    return _rows_to_lines(rows)
+
+
+def dump_lines(ram_path):
+    """덤프 하나의 창 줄. 전투 창($54 = 18)이고 옆에 .nt 덤프가 있으면 화면에서 읽는다."""
+    ram = open(ram_path, 'rb').read()
+    nt_path = ram_path[:-4] + '.nt' if ram_path.endswith('.ram') else None
+    if ram[WIDTH] == BATTLE_W and nt_path and os.path.exists(nt_path):
+        return screen_lines(ram, open(nt_path, 'rb').read()), 'nametable', ram
+    return buffer_lines(ram), '창 줄 버퍼', ram
 
 
 def off(bank, addr):
@@ -225,18 +270,48 @@ def valid_messages(rom):
     return out
 
 
-def compare(rom, msg, ram_path):
-    """RAM 덤프의 창 줄들이 메시지 글자열(제어 바이트를 뺀 것)에 그 순서대로 이어서 들어 있는지."""
-    lines = buffer_lines(open(ram_path, 'rb').read())
-    stream = [b for b in shown(message_bytes(rom, msg)) if b < CONTROL_MIN]
+TALK_KIND = 0x058B          # 5 이상이면 메시지 앞에 「＊「」 를 저절로 넣음(16:$85C5), 첫 바이트가 F1 이면 빼고
+AUTO_PREFIX = [0x70, 0x6F]
+SUBST = {0xEF, 0xF2, 0xF3, 0xF5, 0xF6, 0xF7, 0xF8}   # 메시지 밖 인자로 글자를 넣는 제어
+SUBST_MAX = 12                                       # 치환 하나가 넣는 글자 바이트 수의 상한(이름 + もどき 등)
+
+
+def _match(line, stream, i, j):
+    """line[i:] 이 stream[j:] 의 앞부분과 맞으면 다 맞은 뒤의 stream 위치. 치환 제어는 글자 0~SUBST_MAX 개와 맞는다."""
+    if i == len(line):
+        return j
+    if j == len(stream):
+        return None
+    if stream[j] in SUBST:
+        for k in range(min(SUBST_MAX, len(line) - i), -1, -1):
+            r = _match(line, stream, i + k, j + 1)
+            if r is not None:
+                return r
+        return None
+    if stream[j] != line[i]:
+        return None
+    return _match(line, stream, i + 1, j + 1)
+
+
+def compare(rom, msgs, ram_path):
+    """덤프의 창 줄들이 메시지 글자열(차례로 찍은 메시지들, 치환 밖의 제어 바이트는 뺌)에 그 순서대로 들어 있는지.
+    덤프의 $058B 가 5 이상이면 자동 「＊「」 도 넣어 비교한다."""
+    lines, where, ram = dump_lines(ram_path)
+    stream = []
+    for m in msgs:
+        bs = shown(message_bytes(rom, m))
+        if ram[TALK_KIND] >= 5 and bs[0] != 0xF1:
+            bs = AUTO_PREFIX + bs
+        stream += [b for b in bs if b < CONTROL_MIN or b in SUBST]
     pos = 0
     for ln in lines:
-        at = next((i for i in range(pos, len(stream) - len(ln) + 1) if stream[i:i + len(ln)] == ln), None)
+        at = next((r for j in range(pos, len(stream)) if (r := _match(ln, stream, 0, j)) is not None), None)
         if at is None:
             print(f'{ram_path}: 다름 — 화면 「{text(ln)}」')
             return False
-        pos = at + len(ln)
-    print(f'{ram_path}: 창 {len(lines)}줄 모두 메시지 {msg:04X} 에 순서대로 있음')
+        pos = at
+    names = ','.join(f'{m:04X}' for m in msgs)
+    print(f'{ram_path}: {where} {len(lines)}줄 모두 메시지 {names} 에 순서대로 있음')
     return bool(lines)
 
 
@@ -251,11 +326,66 @@ def control_table(rom):
             for b in range(CONTROL_MIN, 0x100)]
 
 
+WINDOW_GROUPS = (0x16, 0xA572)   # 그룹마다 항목 포인터 표 주소(그룹 0 = $A578, 1 = $A674)
+WINDOW_LIMITS = (0x16, 0xA576)   # 그룹마다 「항목 번호 × 2」 가 이 값보다 작으면 루틴, 아니면 문자열
+WINDOW_COUNTS = (0x7E, 0x31)     # 그룹마다 항목 수(다음 표 시작·포인터가 줄어드는 곳까지)
+
+
+def window_entry(rom, g, n):
+    """창 문자열 표 그룹 g 의 항목 n: ('code', 주소) 또는 ('str', 주소, 바이트). 길이는 다음 항목 주소까지."""
+    table = rom.word(WINDOW_GROUPS[0], WINDOW_GROUPS[1] + 2 * g)
+    addr = rom.word(0x16, table + 2 * n)
+    if 2 * n < rom.byte(WINDOW_LIMITS[0], WINDOW_LIMITS[1] + g):
+        return ('code', addr)
+    end = rom.word(0x16, table + 2 * n + 2)
+    return ('str', addr, [rom.byte(0x16, a) for a in range(addr, end)])
+
+
+def window_bytes(rom, g, n):
+    """항목 n 을 찍히는 글자 바이트로(16:$9783). 80 이상 바이트 b 는 같은 그룹 항목 b & 7F:
+    루틴이면 그 자리에 (‘code’, 번호), 문자열이면 그 바이트를 넣되 그 안의 80 이상은 건너뜀(16:$97B0)."""
+    e = window_entry(rom, g, n)
+    if e[0] == 'code':
+        return [('code', n)]
+    out = []
+    for b in e[2]:
+        if b < 0x80:
+            out.append(b)
+            continue
+        sub = window_entry(rom, g, b & 0x7F)
+        if sub[0] == 'code':
+            out.append(('code', b & 0x7F))
+        else:
+            out += [c for c in sub[2] if c < 0x80]
+    return out
+
+
+def window_text(rom, g, n):
+    parts, run = [], []
+    for b in window_bytes(rom, g, n):
+        if isinstance(b, tuple):
+            parts.append(text(run))
+            run = []
+            e = window_entry(rom, g, b[1])
+            parts.append(f'〈{b[1]:02X} 16:${e[1]:04X}〉')
+        else:
+            run.append(b)
+    parts.append(text(run))
+    return ''.join(parts)
+
+
 def main():
     rom = Rom(open(sys.argv[1], 'rb').read())
     if sys.argv[2] == 'controls':
         for b, h, n, desc in control_table(rom):
             print(f'{b:02X} 16:${h:04X} 메시지 {n:4d}  {desc}')
+        return
+    if sys.argv[2] == 'windows':
+        for g, count in enumerate(WINDOW_COUNTS):
+            for n in range(count):
+                e = window_entry(rom, g, n)
+                body = window_text(rom, g, n) if e[0] == 'str' else ''
+                print(f'{g} {n:02X} {e[0]:4s} 16:${e[1]:04X}  {body}')
         return
     if sys.argv[2] == 'all':
         ms = valid_messages(rom)
@@ -264,10 +394,11 @@ def main():
             print(text(shown(message_bytes(rom, m))))
         print(f'# 메시지 {len(ms)}개', file=sys.stderr)
         return
-    msg = int(sys.argv[2], 16)
     if '--compare' in sys.argv:
-        ok = all([compare(rom, msg, p) for p in sys.argv[sys.argv.index('--compare') + 1:]])
+        msgs = [int(m, 16) for m in sys.argv[2].split(',')]
+        ok = all([compare(rom, msgs, p) for p in sys.argv[sys.argv.index('--compare') + 1:]])
         sys.exit(0 if ok else 1)
+    msg = int(sys.argv[2], 16)
     args = [a for a in sys.argv[3:] if not a.startswith('--')]
     for m in range(msg, msg + (int(args[0]) if args else 1)):
         b = message_bytes(rom, m)

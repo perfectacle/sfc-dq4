@@ -29,6 +29,18 @@ def entry(prg, bank, func):
     return prg[o] | prg[o + 1] << 8
 
 
+def x3_length(b2):
+    """x3 형식의 BRK 부터 복귀 자리까지 바이트 수(불린 함수가 복귀 주소를 고침). 모르면 None.
+    뱅크 10 함수 02~07 은 둘씩 같은 코드로 b2 가 33·53·73 이면 BRK+3, 23·43·63 이면 셋째까지 읽어 BRK+4.
+    함수 08·09 는 93 이면 셋째까지(BRK+4), 83 이면 넷째까지(BRK+5) 읽는다(10:$812B)."""
+    n = b2 >> 4
+    if n == 8:
+        return 5
+    if 2 <= n <= 9:
+        return 4 if n == 9 or not n & 1 else 3
+    return {0x0: 3, 0x1: 3, 0xA: 3, 0xB: 3, 0xC: 4, 0xD: 4, 0xE: 3}.get(n)
+
+
 def call(prg, site, cur):
     """BRK 가 있는 CPU 주소 site 를 ($0507=cur 에서) 풀어 dict 로. 특수 경로는 kind 만."""
     o = prg_offset(mapped(cur, site), site)
@@ -39,7 +51,8 @@ def call(prg, site, cur):
         # $C4F8: b1·b2·셋째 바이트를 $76·$77·$78 에 두고 뱅크 10(·12) 함수로 간다.
         n = b2 >> 4
         bank, func = (0x10, n) if n < 0x0A else (0x10, n + 0x18) if n < 0x0D else (0x12, n - 0x0C)
-        return c | {'kind': 'x3', 'bank': bank, 'func': func, 'target': entry(prg, bank, func)}
+        return c | {'kind': 'x3', 'bank': bank, 'func': func, 'target': entry(prg, bank, func),
+                    'length': x3_length(b2)}
     if b2 & 0x0F == 0x0B:
         if b2 < 0xCB:
             return c | {'kind': 'message', 'msg': (b2 >> 4) << 8 | b1, 'bank': 0x16, 'func': 0x04,
@@ -66,6 +79,8 @@ def fmt(c):
         s += f" ${c['flag']:04X} mask={c['mask']:02X}"
     elif 'bank' in c:
         s += f" bank={c['bank']:02X} func={c['func']:02X} -> {c['bank']:02X}:{c['target']:04X}"
+    if c['kind'] == 'x3':
+        s += f" len={c['length'] or '?'}"
     return s
 
 
