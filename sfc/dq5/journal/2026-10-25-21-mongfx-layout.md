@@ -12,9 +12,9 @@
 export LIBDIR=$(tools/lua/seqlib.sh "$(uv run --locked krpatch sfc lua)" work/walklib walk.lua)
 battle() { probe=$1; shift; env STATE=$PWD/work/state/ship.mss PRE="b:4,wait:40,b:4,wait:40" \
   ROMPATCH="156FF5=E0253C0103${RP:+;$RP}" WAYPOINTS="3,11;3,24;7,24;7,22;37,66;37,72;down:90" \
-  CHANGES=2 AFTER=400 "$@" "$MESENCE" --testrunner "$PWD/rom/dq5.sfc" "$PWD/tools/lua/$probe"; }
+  CHANGES=2 AFTER=400 "$@" "$MESENCE" --testrunner "$PWD/rom/dq5.sfc" "$PWD/$probe"; }
 mkdir -p work/cov2
-battle cover.lua SHOT_DIR=$PWD/work/cov2 LO=220000 HI=24FFFF FROM=840 TO=2400 MAXF=2410
+battle tools/lua/cover.lua SHOT_DIR=$PWD/work/cov2 LO=220000 HI=24FFFF FROM=840 TO=2400 MAXF=2410
 uv run --locked python tools/listing.py rom/dq5.sfc work/cov2/cover.txt > work/cov2/list.txt
 ```
 
@@ -31,7 +31,7 @@ uv run --locked python tools/listing.py rom/dq5.sfc work/cov2/cover.txt > work/c
 
 ```sh
 mkdir -p work/p/e8
-battle dq5battledump.lua SHOT_DIR=$PWD/work/p/e8 MAXF=1020 DUMPF=1000 FROM=850 TO=0 AT=2290DC \
+battle sfc/dq5/tools/lua/dq5battledump.lua SHOT_DIR=$PWD/work/p/e8 MAXF=1020 DUMPF=1000 FROM=850 TO=0 AT=2290DC \
   POKE="7E1001=00;7E1005=1;7E1002=0F;7E1006=1;7E1003=77;7E1007=1;7E1004=B4;7E1008=1"
 uv run --locked python sfc/dq5/tools/dq5mongfx.py rom/dq5.sfc --layout "00:1,0F:1,77:1,B4:1"
 ```

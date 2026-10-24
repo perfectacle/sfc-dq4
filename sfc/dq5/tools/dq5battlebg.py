@@ -38,11 +38,25 @@ from dq5map import Rom  # noqa: E402
 from dq5mongfx import Stream, pixels, rgb, tile  # noqa: E402
 
 NUMBERS = 0x228983
+TERRAIN = 0x03CC48
 COUNT = 0x31
 PICS = 0x2882F9
 LISTS = 0x28C9C2
 PALS = 0x28BDFC
 ALT_LIST2 = 0x28FD64
+
+
+def terrain(rom, block):
+    """03:CB1B. 필드 블록 번호(9비트) → 지형 값 = 필드 배경 번호. 03:CC48 의 니블(짝수 블록은 상위)."""
+    v = rom.u8(TERRAIN + (block >> 1))
+    return v >> 4 if block % 2 == 0 else v & 15
+
+
+def field_terrain(rom, x, y, world=0):
+    """필드 좌표($B6, $B8)의 지형 값. 01:84CF 가 걸음마다 이 값을 $1AA0 에 쓴다."""
+    from dq5field import WORLDS, block_number, rle
+    w, e = (rle(rom, a)[0] for a in WORLDS[world])
+    return terrain(rom, block_number(w, e, x >> 1, y >> 1))
 
 
 def entry(rom, n):
@@ -169,11 +183,11 @@ def to_image(grid, color):
     return img
 
 
-def render(rom, n, era=0, alt=False, base=None):
+def render(rom, n, era=0, alt=False, base=None, indoor=False):
     """배경 n 의 256x128 PIL 그림. 투명(뒤 색)은 검정.
     팔레트 레코드가 채우지 않는 색은 전투 직전 CGRAM(22:8811 이 7E:3914 사본을 그대로 깔고 시작한다)의 몫이라
     롬만으로는 정할 수 없다. base(CGRAM 512바이트)를 주면 그 색을 쓰고, 없으면 자홍으로 칠한다."""
-    d = build(rom, n, era, alt)
+    d = build(rom, n, era, alt, indoor)
 
     def color(v):
         if v is None:
@@ -189,13 +203,13 @@ def render(rom, n, era=0, alt=False, base=None):
     return to_image(compose(d['tiles'], d['bg1'], d['bg2'], color), color)
 
 
-def compare(rom, n, dump, frame, era=0, alt=False):
+def compare(rom, n, dump, frame, era=0, alt=False, indoor=False):
     """MesenCE 덤프(dq5battledump.lua 의 v/c/w<프레임>)와 맞춘다. 결과 문자열 목록."""
     def rd(p):
         return open(os.path.join(dump, p % frame), 'rb').read()
 
     vram, cg = rd('v%05d.vram'), rd('c%05d.cgram')
-    d = build(rom, n, era, alt)
+    d = build(rom, n, era, alt, indoor)
     out = []
     used = {v & 0x3FF for v in d['bg1'] + d['bg2'] if v}
     for lo, name in ((0x200, '타일 $200~$2FF (VRAM $4000)'), (0x300, '타일 $300~$3FF (VRAM $5000)')):
@@ -217,7 +231,7 @@ def compare(rom, n, dump, frame, era=0, alt=False):
         pass
     shot = os.path.join(dump, 's%05d.png' % frame)
     if os.path.exists(shot):
-        out.append(match_screen(render(rom, n, era, alt, cg), shot))
+        out.append(match_screen(render(rom, n, era, alt, cg, indoor), shot))
     return out
 
 
@@ -268,27 +282,33 @@ def main():
     ap.add_argument('--png', help='그림 파일(하나) 또는 폴더(여럿)')
     ap.add_argument('--era', type=int, default=0, help='$1949 값(0·1·2)')
     ap.add_argument('--alt', action='store_true', help='$1AA1 ≠ 0 (시대 0 에서 팔레트 두 번째 벌)')
+    ap.add_argument('--terrain', help='필드 좌표 "X,Y"($B6,$B8, 10진)의 지형 값(= 배경 번호)')
+    ap.add_argument('--indoor', action='store_true', help='$1AA0 bit7 이 켜진 실내 배경(28:FD64 로 바꾸지 않음)')
     ap.add_argument('--cgram', help='레코드 밖 팔레트 색을 가져올 CGRAM 덤프(전투 직전 맵의 색)')
     ap.add_argument('--compare', nargs=2, metavar=('DUMPDIR', 'FRAME'), help='dq5battledump.lua 덤프와 맞춘다')
     args = ap.parse_args()
     rom = Rom(open(args.rom, 'rb').read())
+    if args.terrain:
+        x, y = (int(v) for v in args.terrain.split(','))
+        print('%02X' % field_terrain(rom, x, y, args.era))
+        return
     base = open(args.cgram, 'rb').read() if args.cgram else None
     nums = [int(a, 16) for a in args.numbers] or list(range(COUNT))
     if not args.numbers:
         print('번호 종류 상위  그림A  그림B  목록1  목록2  목록3 팔레트')
     for n in nums:
-        d = build(rom, n, args.era, args.alt)
+        d = build(rom, n, args.era, args.alt, args.indoor)
         print('%02X   %02X   %02X  %06X %06X %06X %06X %06X 칸%d~%s' % (
             n, d['k'] // 4, d['hi'], *d['pics'], *d['lists'], d['slot'], ','.join(str(p) for p in sorted(d['pals']))))
         if args.png:
-            img = render(rom, n, args.era, args.alt, base)
+            img = render(rom, n, args.era, args.alt, base, args.indoor)
             if len(nums) > 1 or os.path.isdir(args.png):
                 os.makedirs(args.png, exist_ok=True)
                 img.save(os.path.join(args.png, 'bg%02X.png' % n))
             else:
                 img.save(args.png)
         if args.compare:
-            for line in compare(rom, n, args.compare[0], int(args.compare[1]), args.era, args.alt):
+            for line in compare(rom, n, args.compare[0], int(args.compare[1]), args.era, args.alt, args.indoor):
                 print('  ' + line)
 
 
