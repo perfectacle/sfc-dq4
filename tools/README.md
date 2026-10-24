@@ -130,4 +130,5 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 | `dq4text.py rom all\|MSG` | DQ4 대사 풀기. `all` 은 메시지 2633개 전부, `--bytes` 글자 바이트, `--compare end.ram` 으로 창 줄 버퍼(`$06AA`)와 비교 |
 | `dq4bank.py rom call\|table\|compare` | DQ4 BRK 뱅크 호출 풀기. `compare trace.txt` 로 `probe/trace.lua` 기록(`TRACE=C446,C455,C3CD LOG=0023,0024,0025,0026,0027,0507`)과 비교 |
 | `dq4encounter.py rom maps\|zones\|odds\|dungeons\|formations\|bosses\|check` | DQ4 적 조우 표. `maps` 필드 구역 지도(`--png` 는 `work/` 에만), `zones [Z]` 구역별 칸·몬스터, `odds Z [--night\|--dungeon]` 칸 확률, `dungeons` 던전 층별 구역, `bosses` 특수 전투, `check [enc.txt…]` 표 경계 검사와 `lua/fc/enc.lua` 기록 대조 |
+| `dq4talk.py rom G K\|id N\|all\|compare DIR` | DQ4 인물 대화 스크립트 풀기. `G K` 맵의 인물마다 대화 번호·스크립트·대사(`--ram` 으로 조건을 풀어 나올 메시지만), `all` 스크립트 346개 전수 검사, `compare` 는 `lua/fc/talk.lua` 기록(진입 슬롯·조건 결과·서비스·메시지)과 대조(`--no` 는 「いいえ」). `lua/fc/talk.lua` 의 `SLOT` 으로 아무 인물에게나 말 건 것처럼 돌리고, `lua/fc/talkseek.lua` 는 인물에게 걸어가 말 거는 입력 드라이버 |
 | `lua/fc/enc.lua` | FC: 필드에서 시행마다 세이브스테이트를 다시 불러 기다림을 바꿔 걷고, 조우 판정(조우율·난수)과 고른 무리를 `enc.txt` 로. `STATE`, `TRIALS`(30 이하), `WAIT0`, `WAITSTEP`, `POS`(필드 좌표 한 번 쓰기), `POKE1`, `LIMIT` |
