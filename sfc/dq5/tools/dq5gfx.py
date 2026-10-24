@@ -81,7 +81,7 @@ WORLD_SCREEN_COLORS = 0x03CC2C
 WORLD_SCREEN_BLOCK_COLOR = 0x03CC48
 WORLD_SCREEN_STEP_X, WORLD_SCREEN_STEP_Y = 0x03CD48, 0x03CD58
 # 1E:D7E3: 타이틀 화면 글자(ENIX PRESENTS ~ DRAGON QUEST V)의 2bpp 타일. 필드 RLE(01:A64F)와 같은 꼴이고,
-# 앞 16바이트(빈 타일 하나)를 더하면 8x16 글자 칸마다 위 타일·아래 타일 순서다.
+# 앞 16바이트(빈 타일 하나)를 더해 위·아래로 짝지으면 대부분 8x16 글자 하나지만, 타일을 나눠 쓰는 글자(D·E·M·W 등)도 있다.
 CREDITS_FONT = 0x1ED7E3
 # 25:85D5: ルーラ 목적지의 맵 그룹 22개. 이름은 이름 표 0B(23:D5F3) 의 같은 순번.
 RURA_GROUPS, RURA_COUNT, TOWN_NAMES = 0x2585D5, 22, 0x0B
@@ -1139,7 +1139,7 @@ def export_credits(rom, out):
             t = tile_image(chr_2bpp(tiles[g * 2 + half]), colors[0:4])
             img.paste(t, (g * 8, half * 8), t)
     out.save(img, 'gfx/screens/credits-font.png', 'screens', f'타이틀 화면 글자 칸 {n}개(8x16)', '타이틀',
-             note='1E:D7E3 RLE, 칸마다 위·아래 타일. 넓은 글자는 칸 둘. 색은 BG3 팔레트 0(04:98D7)으로 칠함')
+             note='1E:D7E3 RLE 타일을 위·아래 짝으로 늘어놓음(글자표 아님, 타일을 나눠 쓰는 글자가 있음). 색은 BG3 팔레트 0(04:98D7)')
 
 
 EXPORTS = {'maps': export_maps, 'chr': export_chr, 'field': export_field, 'anim': export_anim,
