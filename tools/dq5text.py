@@ -3,9 +3,14 @@
 24:8BAF 가 메시지 번호를 받아 24:AF1E 색인(16개마다 3바이트)으로 시작 비트를 찾고, 24:9E02 허프만 디코더로
 문자 코드(13비트)를 하나씩 꺼낸다. 번호 하위 4비트만큼은 끝 코드(1001·1010·1018)까지 읽어 건너뛴다.
 
+제어 코드(1000~101D, 1100~1118)는 24:819D 가 24:8204·24:8240 점프 표로 처리한다. 이름·숫자 변수의 인자는 메시지가 아니라
+$F5~$F8 대기열에서 꺼낸다(24:889F). 메뉴 창 문자열은 04:EB48 창 표가 가리키는 레코드 안에 1바이트 부호로 있다.
+
 사용:
   python tools/dq5text.py rom/dq5.sfc 129                 # 메시지 0x129 를 글자로
   python tools/dq5text.py rom/dq5.sfc 129 --codes --n 64  # 끝 코드와 상관없이 코드 64개(24:8B98 처럼)
+  python tools/dq5text.py rom/dq5.sfc --controls          # 제어 코드 처리기 주소와 뜻
+  python tools/dq5text.py rom/dq5.sfc --window 1          # 창 1(명령 창) 레코드와 항목 문자열
 """
 import argparse
 import os
@@ -99,6 +104,54 @@ MARK_CODES = 0x24B36E
 STRING_TABLES = 0x21959B
 # 끝 코드와 줄바꿈. 나머지 제어 코드는 {XXXX} 로 둔다(docs/dq5-text-format.md 의 「제어 코드」).
 CONTROL = {0x1000: '\n', 0x1001: '{end}', 0x1010: '{end}', 0x1018: '{end}'}
+# 24:819D. 코드 & FF 를 색인으로 1000~101D 는 24:8204, 1100~1118 은 24:8240 의 처리기로 간다(16비트 주소, 뱅크 24).
+CONTROL_TABLES = ((0x1000, 0x248204, 0x1E), (0x1100, 0x248240, 0x19))
+# 뜻. 「실측」 은 docs/dq5-text-format.md 의 「제어 코드」 에 적은 실험으로 확인한 것, 나머지는 코드 읽기.
+CONTROL_MEANING = {
+    0x1000: '줄바꿈(실측)',
+    0x1001: '메시지 끝',
+    0x1002: '▼ 버튼 대기 뒤 앞 줄들을 밀어 올려 새 쪽(실측)',
+    0x1003: '말하는 사람 대사: ＊「 를 붙이지 않고 다음 줄부터 들여 씀. 24:8AF9 가 줄 첫머리에서 먹음(실측)',
+    0x1004: '숫자: $F5~$F7 24비트(실측)',
+    0x1005: '일행이 둘 이상이면 「たち」',
+    0x1006: '서술문: ＊「 도 들여쓰기도 없음. 24:8AF9 가 먹음(실측)',
+    0x1007: '들여쓰기 끄기(실측)',
+    0x1008: '이름: $F5 한 바이트. bit7=0 일행 슬롯 & 0F(bit6 이면 「たち」), FF「まもののむれ」, 그 밖 bit7 은 전투 몬스터(실측 일부)',
+    0x1009: '몬스터 이름(이름 표 4, $F5)',
+    0x100A: '물건 이름(이름 표 5, $F5, 실측)',
+    0x100B: '주문 이름(이름 표 3, $F5, 실측)',
+    0x100C: '이름 표 7($F5)',
+    0x100D: '31프레임 멈춤(실측)',
+    0x100E: '아무것도 하지 않음',
+    0x100F: '몬스터 이름(이름 표 4, $F5) + 7E:1005,[0F23] 이 양수면 글자 하나 덧붙임',
+    0x1010: '메시지 끝(쪽 넘김 없이)',
+    0x1011: '일행 슬롯 0 의 이름(실측: 주인공)',
+    0x1012: '주인공 이름 7E:2001(실측)',
+    0x1013: '일행 레코드(7E:2040 + 2A*i) 첫 바이트가 80 인 동료의 이름',
+    0x1014: '이름 표 6(작전·마을, $F5)',
+    0x1015: '신부 이름: 7E:21B3 & 08 이면 ビアンカ, 아니면 フローラ(실측)',
+    0x1016: '아들 이름 7E:2009(실측)',
+    0x1017: '딸 이름 7E:2011(실측)',
+    0x1018: '메시지 끝(줄을 하나 내림)',
+    0x1019: '101A 까지 글자를 기다림 없이 한 번에 찍음(실측)',
+    0x101A: '1019·101C 를 끔',
+    0x101B: '조건에 따라 1012 또는 1011',
+    0x101C: '느리게: 글자마다 3프레임, 밀어 올리기 1점씩(실측)',
+    0x101D: '스크립트가 7E:0F13 에 넣어 둔 루틴 호출',
+}
+# 1100~1118 은 말하는 인물(7E:0F1E 슬롯)의 동작과 창·화면 효과. 하나하나의 모양은 아직 화면으로 확인하지 않았다.
+for _c in range(0x1100, 0x1119):
+    CONTROL_MEANING[_c] = '말하는 인물 동작(7E:3060·3080·31E0·3260·33A0)'
+CONTROL_MEANING.update({
+    0x1100: '창 테두리 효과(7E:0A43~0A46)',
+    0x1105: '화면 흔들기(7E:0750·0752)',
+    0x1106: '7E:31E0+슬롯 = 88', 0x1107: '7E:31E0+슬롯 = 44(실측)', 0x1108: '7E:31E0+슬롯 = 22', 0x1109: '7E:31E0+슬롯 = 11',
+    0x110A: '7E:3260+슬롯 = 88', 0x110B: '7E:3260+슬롯 = 84', 0x110C: '7E:3260+슬롯 = 82', 0x110D: '7E:3260+슬롯 = 81',
+    0x110E: '7E:31E0+슬롯 = 주인공 값 & F0', 0x110F: '7E:3260+슬롯 되돌림',
+    0x1116: '03:A6CB 호출(화면 효과로 보임)', 0x1117: '03:A73D 호출(화면 효과로 보임)',
+})
+# 04:9C40. 창 번호 * 2 → 뱅크 04 의 창 레코드. 레코드의 항목 문자열은 FE 로 시작하고 FF 가 줄 끝.
+WINDOWS = 0x04EB48
 
 
 class BitReader:
@@ -212,14 +265,65 @@ def text(codes):
     return ''.join(out)
 
 
+def controls(rom):
+    """(코드, 처리기 주소) 목록. 24:81AD~81DB."""
+    out = []
+    for base, table, count in CONTROL_TABLES:
+        for i in range(count):
+            out.append((base + i, 0x240000 | rom.u16(table + i * 2)))
+    return out
+
+
+def window(rom, n):
+    """04:9C40. 창 n 레코드의 주소와, 다음 레코드 시작까지의 바이트(창 레코드는 주소 순으로 이어져 있다)."""
+    first = rom.u16(WINDOWS)
+    starts = sorted({rom.u16(WINDOWS + i * 2) for i in range((first - (WINDOWS & 0xFFFF)) // 2)})
+    a = rom.u16(WINDOWS + n * 2)
+    end = next((s for s in starts if s > a), a + 0x40)
+    return 0x040000 | a, bytes(rom.u8(0x040000 | a + i) for i in range(end - a))
+
+
+def window_items(rom, data):
+    """창 레코드의 첫 FE 부터를 항목 문자열로. FE = 항목 시작, FF = 줄 끝."""
+    k = data.find(b'\xfe')
+    if k < 0:
+        return ''
+    out, i = [], k
+    while i < len(data):
+        b = data[i]
+        if i > k and data[i - 1] == 0xFF and b != 0xFE:
+            break
+        if b == 0xFE:
+            out.append('|')
+        elif b == 0xFF:
+            out.append('\n')
+        else:
+            n = 2 if b in (0x83, 0x84) else 1
+            out.append(text(string_codes(rom, data[i:i + n])))
+            i += n - 1
+        i += 1
+    return ''.join(out)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('rom')
-    ap.add_argument('msg', type=lambda s: int(s, 16))
+    ap.add_argument('msg', nargs='?', type=lambda s: int(s, 16))
     ap.add_argument('--n', type=int)
     ap.add_argument('--codes', action='store_true', help='글자 대신 코드를 찍음')
+    ap.add_argument('--controls', action='store_true', help='제어 코드 처리기와 뜻')
+    ap.add_argument('--window', type=lambda s: int(s, 16), help='창 레코드(04:EB48)')
     args = ap.parse_args()
     rom = Rom(open(args.rom, 'rb').read())
+    if args.controls:
+        for c, a in controls(rom):
+            print(f'{c:04X} {a >> 16:02X}:{a & 0xFFFF:04X} {CONTROL_MEANING.get(c, "")}')
+        return 0
+    if args.window is not None:
+        a, data = window(rom, args.window)
+        print(f'window {args.window:02X} at {a >> 16:02X}:{a & 0xFFFF:04X}: {data.hex(" ")}')
+        print(window_items(rom, data))
+        return 0
     codes = message(rom, args.msg, args.n)
     print(' '.join(f'{c:04X}' for c in codes) if args.codes else text(codes))
     return 0

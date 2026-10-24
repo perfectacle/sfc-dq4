@@ -50,7 +50,7 @@ dq5(SFC DQ5 엔진):
 - [docs/dq5-handoff.md](docs/dq5-handoff.md): dq5 트랙 시작점(지금 상태, 실험 출발점, 다음 할 일)
 - [docs/dq5-map-format.md](docs/dq5-map-format.md): DQ5 실내 맵 형식(지형·팔레트·인물·출구·영역 이동·보물상자)
 - [docs/dq5-field-format.md](docs/dq5-field-format.md): DQ5 필드(세계 지도) 형식
-- [docs/dq5-text-format.md](docs/dq5-text-format.md): DQ5 메시지(허프만 부호)·폰트·대화 스크립트·이름 문자열
+- [docs/dq5-text-format.md](docs/dq5-text-format.md): DQ5 메시지(허프만 부호)·제어 코드·폰트·대화 스크립트·이름 문자열·메뉴 창 문자열
 - [docs/dq5-data-format.md](docs/dq5-data-format.md): DQ5 게임 데이터(상점 품목·물건 가격·물건 표·몬스터·전투 조우)
 
 dq4(FC DQ4 원작):
@@ -88,6 +88,7 @@ dq4(FC DQ4 원작):
 - [2026-10-25-04: 물건 표](docs/journal/dq5/2026-10-25-04-items.md)
 - [2026-10-25-05: 몬스터 레코드](docs/journal/dq5/2026-10-25-05-monster.md)
 - [2026-10-25-06: 전투 조우 표](docs/journal/dq5/2026-10-25-06-encounter.md)
+- [2026-10-25-07: 메시지 제어 코드, 대화 조건, 메뉴 문자열](docs/journal/dq5/2026-10-25-07-textctl.md)
 
 #### dq4
 
