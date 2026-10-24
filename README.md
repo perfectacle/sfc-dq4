@@ -67,6 +67,7 @@ dq4(FC DQ4 원작):
 - [docs/dq4-warp.md](docs/dq4-warp.md): DQ4(FC) 장면 이동 도구(원하는 맵·필드 자리의 세이브스테이트 만들기)
 - [docs/dq4-script-format.md](docs/dq4-script-format.md): DQ4(FC) 인물 대화 스크립트(대화 번호, 조건·플래그·서비스 문장, 메시지 번호)
 - [docs/dq4-shop-format.md](docs/dq4-shop-format.md): DQ4(FC) 상점 품목·여관 값·가게 종류, 보물상자·발밑 숨은 물건과 열었음 플래그
+- [docs/dq4-save-format.md](docs/dq4-save-format.md): DQ4(FC) 저장 데이터(모험의 서·체크섬·인물 레코드), 이벤트 플래그, 장 시작 표
 
 ### 해킹 일지
 
@@ -110,3 +111,4 @@ dq4(FC DQ4 원작):
 - [2026-10-25-08: 장면 이동(워프) 도구](docs/journal/dq4/2026-10-25-08-warp.md)
 - [2026-10-25-09: 인물 대화 스크립트](docs/journal/dq4/2026-10-25-09-talk.md)
 - [2026-10-25-10: 상점·여관·보물상자](docs/journal/dq4/2026-10-25-10-shop.md)
+- [2026-10-25-11: 저장 데이터·이벤트 플래그·장 시작](docs/journal/dq4/2026-10-25-11-event.md)
