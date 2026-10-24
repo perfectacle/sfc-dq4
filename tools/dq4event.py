@@ -6,18 +6,26 @@
   python tools/dq4event.py rom/dq4.nes chapters            장(1~5) 시작 표: 자리, 선두, 골드, 귀환 자리
   python tools/dq4event.py rom/dq4.nes chars [--compare end.sram]   인물 8명의 첫 레코드(장 시작 루틴이 쓰는 값).
                                                    --compare 는 덤프의 장($615A)에서 초기화되는 인물만 대조
-  python tools/dq4event.py rom/dq4.nes places              귀환 자리 표($6290 번호 → 장소·좌표)
+  python tools/dq4event.py rom/dq4.nes places              귀환 자리 표($6290 번호 → 장소·좌표), ルーラ 행선지($6165 비트
+                                                   → 마을 레코드 → 도착 자리)
+  python tools/dq4event.py rom/dq4.nes flags --xref [NN] [--all]   플래그 바이트·비트마다 쓰는 곳·검사하는 곳(BRK 플래그
+                                                   명령, 절대 주소 명령, 대화 스크립트, 인물 블록, 맵 인물 목록 표).
+                                                   --all 은 데이터로 보이는 모양도 같이
+  python tools/dq4event.py rom/dq4.nes events              인물 블록의 이벤트 명령(88~8A n → 1D:$B639)과 맵 이벤트 표
   python tools/dq4event.py rom/dq4.nes ops [--flag NN]      롬에서 BRK 플래그 명령(00 NN CB/DB/EB MM) 모양 찾기.
                                                    바이트 모양만 보므로 데이터가 섞인다
 
 근거 루틴: 12:$ACA2(체크섬), 1F:$C8AD(CRC 한 바이트), 12:$ACF8(빈 칸 검사), 12:$8EAE(장 시작 초기화,
-BRK 12 함수 17), 1E:$A578(시작 자리), 1E:$A73F(귀환 자리 번호 정하기).
+BRK 12 함수 17), 1E:$A578(시작 자리), 1E:$A73F(귀환 자리 번호 정하기), 10:$9513(ルーラ 목록), 1F:$D884(인물 블록 실행),
+1C:$987F(맵 인물 목록 고르기), 1A:$B815(장 끝 검사).
 """
 import sys
 
 from kr_patch.fc import ines
 
 import dq4data
+import dq4map
+import dq4talk
 import dq4text
 
 WORK, WORK_LEN = 0x6001, 0x2EE        # 게임이 쓰는 저장 대상 영역. 칸에는 이 영역이 그대로 복사된다
@@ -41,6 +49,11 @@ START = (0x1E, 0xA599)                 # 장마다 시작 (그룹, 순번, X, Y)
 CHAPTER_PLACE = (0x1E, 0xA75E)         # 장마다 처음 $6290
 PLACES = (0x1E, 0xA76D)                # 귀환 자리 5바이트: 그룹, 순번, X, Y, 방향(아래 2비트)·$AEFE 레코드 번호(위 6비트)
 PLACE_COUNT = 22
+TOWN_PTR = (0x1E, 0xAEFE)              # 마을 레코드 7바이트 표의 포인터($AF00): 필드(bit7 = 맵), X, Y, 바이트 3~6
+TOWN_BANK = 0x10                       # ルーラ·キメラのつばさ 행선지(10:$9513 목록, 10:$95C1 가 본 마을 비트 켜기)
+TOWN_GROUPS = (0x95EB, 0x95FA)         # $6165~ 비트 순번 → 맵 그룹. 1~4장 / 5장($615A ≥ 4), FF 로 끝
+TOWN_RECORD = 0x9612                   # 비트 순번 → 마을 레코드 번호. 5장은 +0F 부터
+VISITED = 0x6165
 
 FIELDS = (('HP', 0x01, 2), ('MP', 0x03, 2), ('레벨', 0x05, 1), ('ちから', 0x06, 1), ('すばやさ', 0x07, 1),
           ('たいりょく', 0x08, 1), ('かしこさ', 0x09, 1), ('うんのよさ', 0x0A, 1), ('최대HP', 0x0C, 2),
@@ -191,10 +204,37 @@ def cmd_chars(prg, compare):
     return 1 if bad else 0
 
 
+def town_record(prg, r):
+    base = rd(prg, *TOWN_PTR) | rd(prg, TOWN_PTR[0], TOWN_PTR[1] + 1) << 8
+    return [rd(prg, TOWN_PTR[0], base + 7 * r + j) for j in range(7)]
+
+
+def towns(prg, ch5):
+    """ルーラ 행선지: (비트 순번, 맵 그룹, 마을 레코드 번호, 레코드 7바이트)."""
+    out, lst = [], TOWN_GROUPS[1 if ch5 else 0]
+    while (g := rd(prg, TOWN_BANK, lst + len(out))) != 0xFF:
+        r = rd(prg, TOWN_BANK, TOWN_RECORD + (0x0F if ch5 else 0) + len(out))
+        out.append((len(out), g, r, town_record(prg, r)))
+    return out
+
+
+def town_dest(rec):
+    """레코드 0~2 바이트: 필드 f 의 (X, Y). f bit7 이면 맵 (바이트 3, 4) 의 (X, Y)."""
+    f, x, y = rec[:3]
+    return f'맵 {rec[3]:02X}/{rec[4]:02X} ({x:02X},{y:02X})' if f & 0x80 else f'필드 {f} ({x:02X},{y:02X})'
+
+
 def cmd_places(prg):
+    print(f'== 귀환 자리 {PLACES[0]:02X}:${PLACES[1]:04X} ($6290 번호)')
     for i in range(PLACE_COUNT):
         g, k, x, y, d = (rd(prg, PLACES[0], PLACES[1] + 5 * i + j) for j in range(5))
-        print(f'{i:02X} {g:02X}/{k:02X} ({x:02X},{y:02X}) 방향 {d & 3}  $AEFE 레코드 {d >> 2:02X}')
+        rec = town_record(prg, d >> 2)
+        print(f'{i:02X} {g:02X}/{k:02X} ({x:02X},{y:02X}) 방향 {d & 3}  마을 레코드 {d >> 2:02X} '
+              f'→ $6195~$6198 = {bytes(rec[3:]).hex(" ")}')
+    for ch5 in (False, True):
+        print(f'== ルーラ 행선지 {"5장" if ch5 else "1~4장"} (${VISITED:04X} 비트 → 맵 그룹 → 마을 레코드 → 도착)')
+        for i, g, r, rec in towns(prg, ch5):
+            print(f'  비트 {i:02X} (${VISITED + i // 8:04X} {1 << i % 8:02X})  그룹 {g:02X}  레코드 {r:02X}  {town_dest(rec)}')
     return 0
 
 
@@ -210,6 +250,268 @@ def flag_ops(prg):
     return out
 
 
+def cpu_addr(p):
+    bank = p // 0x4000
+    return bank, (0xC000 if bank in (0x0F, 0x1F) else 0x8000) + p % 0x4000
+
+
+# 대사(00~04)·인물 목록(05)·맵(09~0B) 등 실행된 적이 없는 데이터 뱅크(dq4-bank-format.md)
+DATA_BANKS = set(range(0x08)) | {0x09, 0x0A, 0x0B}
+
+
+def likely_code(p, op=None, m=None):
+    """모양만 맞는 데이터를 거르는 기준: 데이터 뱅크가 아니고, 켜기·검사는 한 비트, 끄기는 한 비트를 뺀
+    마스크나 00."""
+    if p // 0x4000 in DATA_BANKS:
+        return False
+    if op is None:
+        return True
+    ones = m.bit_count()
+    return ones == 1 if op in (0xCB, 0xEB) else ones == 7 or m == 0
+
+
+# $627B~ 를 절대 주소로 읽고 쓰는 명령(3바이트). 값은 (이름, 쓰기인지)
+ABS_OPS = {0xAD: ('LDA', 0), 0xAE: ('LDX', 0), 0xAC: ('LDY', 0), 0x2D: ('AND', 0), 0x0D: ('ORA', 0),
+           0x4D: ('EOR', 0), 0xCD: ('CMP', 0), 0xEC: ('CPX', 0), 0xCC: ('CPY', 0), 0x2C: ('BIT', 0),
+           0x6D: ('ADC', 0), 0xED: ('SBC', 0), 0x8D: ('STA', 1), 0x8E: ('STX', 1), 0x8C: ('STY', 1),
+           0xEE: ('INC', 1), 0xCE: ('DEC', 1), 0x0E: ('ASL', 1), 0x4E: ('LSR', 1), 0x2E: ('ROL', 1),
+           0x6E: ('ROR', 1)}
+NEAR = 0x30                           # 플래그 명령 앞뒤로 맵 비교·메시지를 찾을 바이트 수
+
+
+def near_map(prg, p):
+    """명령 앞 NEAR 바이트 안의 LDA $63 / CMP #g, LDA $64 / CMP #k(코드 근처에서 맵을 고르는 모양)."""
+    g = k = None
+    for q in range(max(0, p - NEAR), p - 3):
+        if prg[q] == 0xA5 and prg[q + 2] == 0xC9:
+            if prg[q + 1] == 0x63:
+                g = prg[q + 3]
+            elif prg[q + 1] == 0x64:
+                k = prg[q + 3]
+    return g, k
+
+
+def near_msg(prg, p):
+    """명령 뒤 NEAR 바이트 안의 첫 메시지 BRK(00 lo hB, hB < CB: 16[04] X=h, A=lo)."""
+    for q in range(p + 4, min(len(prg) - 2, p + 4 + NEAR)):
+        if prg[q] == 0 and prg[q + 2] & 0x0F == 0x0B and prg[q + 2] < 0xCB:
+            return (prg[q + 2] >> 4) << 8 | prg[q + 1]
+    return None
+
+
+def code_uses(prg):
+    """롬 코드 쪽: (번호, 마스크, 종류, 위치, 근처 맵, 근처 메시지, 한 비트 모양인지)."""
+    out = []
+    for p, n, op, m in flag_ops(prg):
+        kind = {0xCB: 'set', 0xDB: 'clear', 0xEB: 'test'}[op]
+        bank, addr = cpu_addr(p)
+        out.append((n, m, kind, f'BRK {bank:02X}:${addr:04X}', near_map(prg, p), near_msg(prg, p),
+                    likely_code(p, op, m)))
+    for p in range(len(prg) - 2):
+        a = prg[p + 1] | prg[p + 2] << 8
+        if prg[p] in ABS_OPS and FLAGS <= a <= FLAGS_END:
+            name, w = ABS_OPS[prg[p]]
+            bank, addr = cpu_addr(p)
+            out.append((a - FLAGS, None, 'write' if w else 'read', f'{name} {bank:02X}:${addr:04X}',
+                        near_map(prg, p), None, likely_code(p)))
+    return out
+
+
+# 인물 블록(움직임 스크립트, 1F:$D884 가 한 명령씩 실행) 중 플래그·이벤트를 다루는 명령.
+# 27/28/29 m lo hi: [hi:lo] |= m / &= m / = m (1F:$DC09·$DC16·$DC23), 88~8A n: 이벤트 n(1F:$DED8 → BRK 1D 함수 04)
+BLOCK_FLAG_OPS = {0x27: 'npc|=', 0x28: 'npc&=', 0x29: 'npc='}
+BLOCK_EVENT_OPS = (0x88, 0x89, 0x8A)
+EVENTS = (0x1D, 0xB639)               # 이벤트 n → 루틴 주소 워드(1D:$989F: n ≥ 80 이면 $B739 + 2(n − 80), 같은 줄의 이어짐)
+EVENT_COUNT = 0x8A                    # 표가 $B74D(BRK 1D 함수 07) 바로 앞에서 끝남
+
+
+def npc_lists(prg):
+    """인물 목록마다 (이름, 그룹, 순번, 밤인지, 슬롯 6~ 순서의 레코드): 맵의 낮·밤 목록과 이벤트 목록(1C:$9D0E 표)."""
+    for g, k, *_ in dq4map.maps(prg):
+        yield '', g, k, False, dq4talk.npc_list(prg, g, k)
+        yield '밤 ', g, k, True, dq4talk.npc_list(prg, g, k, night=True)
+    for g, k, _, _, a in dq4talk.alt_entries(prg):
+        yield f'목록 1C:${a:04X} ', g, k, False, [r for r in dq4talk.alt_records(prg, a) if r[0] & 0x10]
+
+
+def npc_blocks(prg):
+    """낮 목록과 이벤트 목록 인물의 첫 블록 바이트: (이름, 그룹, 순번, 슬롯, 블록)."""
+    for name, g, k, night, recs in npc_lists(prg):
+        if night:
+            continue
+        for i, r in enumerate(recs):
+            a, f = 7, r[0]
+            if f & 0x10 and f & 0x08:
+                a += (0 if f & 1 else 1) + (0 if f & 2 else 1) + (0 if f & 4 else 2)
+            if a < len(r):
+                yield name, g, k, i + 6, r[a + 1:a + 1 + r[a]]
+
+
+def block_uses(prg):
+    """인물 블록에서 (종류, 목록 이름, 그룹, 순번, 슬롯, 값, 블록 안 자리). 명령 길이를 다 알지 못해 바이트 모양으로 찾는다:
+    플래그는 27~29 m lo 62(주소가 플래그 영역), 이벤트는 88~8A n(n < EVENT_COUNT)."""
+    out = []
+    for name, g, k, slot, blk in npc_blocks(prg):
+        j = 0
+        while j < len(blk) - 1:
+            b, step = blk[j], 1
+            if b in BLOCK_FLAG_OPS and j + 3 < len(blk):
+                a = blk[j + 2] | blk[j + 3] << 8
+                if FLAGS <= a <= FLAGS_END:
+                    out.append((BLOCK_FLAG_OPS[b], name, g, k, slot, (a - FLAGS, blk[j + 1]), j))
+                    step = 4
+            elif b in BLOCK_EVENT_OPS and blk[j + 1] < EVENT_COUNT:
+                out.append(('event', name, g, k, slot, blk[j + 1], j))
+                step = 2               # 찾은 명령의 인자를 다음 명령으로 다시 읽지 않게
+            j += step
+    return out
+
+
+def event_addr(prg, n):
+    return rd(prg, EVENTS[0], EVENTS[1] + 2 * n) | rd(prg, EVENTS[0], EVENTS[1] + 2 * n + 1) << 8
+
+
+# 맵을 실을 때(1C:$987F) 인물 목록을 고르는 표 두 개. 둘 다 (그룹, 순번) 이 같고 $627B+n & m 이 0 이 아니면 쓰인다.
+NPC_CLEAR = (0x1C, 0x9E61)            # 4바이트 (그룹, 순번, m, n): 인물 목록을 싣지 않음(1C:$9C28 이 C 를 세움)
+NPC_ALT_PTR = (0x1C, 0x9D0E)          # 6바이트 표의 포인터: (그룹, 순번, m, n, 목록 주소): 그 주소의 인물 목록(1C:$9CC1)
+
+
+def npc_tables(prg):
+    """(종류, 그룹, 순번, n, m, 대체 목록 주소)."""
+    out, a = [], NPC_CLEAR[1]
+    while (g := rd(prg, NPC_CLEAR[0], a)) != 0xFF:
+        k, m, n = (rd(prg, NPC_CLEAR[0], a + i) for i in (1, 2, 3))
+        out.append(('clear', g, k, n, m, None))
+        a += 4
+    a = rd(prg, *NPC_ALT_PTR) | rd(prg, NPC_ALT_PTR[0], NPC_ALT_PTR[1] + 1) << 8
+    while (g := rd(prg, NPC_ALT_PTR[0], a)) != 0xFF:
+        k, m, n, lo, hi = (rd(prg, NPC_ALT_PTR[0], a + i) for i in range(1, 6))
+        out.append(('alt', g, k, n, m, hi << 8 | lo))
+        a += 6
+    return out
+
+
+def talk_uses(prg):
+    """대화 스크립트 쪽: 맵의 낮·밤 목록과 이벤트 목록 인물(슬롯 순서)의 대화 번호를 풀어 17/18/19 문장과 1A/1B/1C 조건을 모은다.
+    대사는 켜기·끄기면 같은 블록의 첫 메시지, 조건이면 then 갈래의 첫 메시지.
+    돌려주는 것: (번호, 마스크, 종류, 대화 번호, 대사) 목록과 대화 번호 → 그 대화를 쓰는 (맵, 슬롯) 목록."""
+    who, out = {}, []
+
+    def walk(tree, tid):
+        msgs = dq4talk.messages(tree)
+        for s in tree:
+            if s[0] in ('flag|=', 'flag&=', 'flag='):
+                kind = {'flag|=': 'set', 'flag&=': 'clear', 'flag=': 'store'}[s[0]]
+                out.append((s[1][0], s[1][1], kind, tid, msgs[0] if msgs else None))
+            elif s[0] == 'if':
+                _, neg, op, args, then, other = s
+                if op in (0x1A, 0x1B, 0x1C):
+                    sub = dq4talk.messages(then)
+                    kind = {0x1A: 'talk!=', 0x1B: 'talk&', 0x1C: 'talk|'}[op] + ('!' if neg else '')
+                    out.append((args[0], args[1], kind, tid, sub[0] if sub else None))
+                walk(then, tid)
+                if other:
+                    walk(other, tid)
+
+    for name, g, k, night, recs in npc_lists(prg):
+        for i, r in enumerate(recs):
+            tid = dq4talk.talk_id(r, night)
+            c = dq4talk.classify(prg, tid)
+            if c[0] != 'script':
+                continue
+            if tid not in who:
+                walk(c[2], tid)
+            who.setdefault(tid, []).append((name, g, k, i + 6))
+    return out, who
+
+
+def flag_xref(prg, all_shapes=False):
+    """번호 → [(마스크, 종류, 어디, 메시지)]. 종류: set/clear/test(BRK), read/write(절대 주소), talk…(대화)."""
+    rows = {}
+
+    def add(n, row):
+        if row not in rows.setdefault(n, []):
+            rows[n].append(row)
+
+    for n, m, kind, where, (g, k), msg, ok in code_uses(prg):
+        if not ok and not all_shapes:
+            continue
+        mp = '' if g is None else f' 맵 {g:02X}/' + ('??' if k is None else f'{k:02X}')
+        add(n, (m, kind, where + mp + ('' if ok else ' (모양만)'), msg))
+    talk, who = talk_uses(prg)
+    for n, m, kind, tid, msg in talk:
+        name, g, k, slot = who[tid][0]
+        more = f' 외 {len(who[tid]) - 1}명' if len(who[tid]) > 1 else ''
+        add(n, (m, kind, f'대화 {tid:03X} {name}{g:02X}/{k:02X} 슬롯 {slot:02X}{more}', msg))
+    for kind, g, k, n, m, ptr in npc_tables(prg):
+        what = '인물 목록 비움' if kind == 'clear' else f'인물 목록 1C:${ptr:04X} 로 바꿈'
+        add(n, (m, 'test', f'맵 표 {g:02X}/{k:02X} {what}', None))
+    for kind, name, g, k, slot, (n, m), _ in (u for u in block_uses(prg) if u[0] != 'event'):
+        add(n, (m, {'npc|=': 'set', 'npc&=': 'clear', 'npc=': 'store'}[kind],
+                f'인물 블록 {name}{g:02X}/{k:02X} 슬롯 {slot:02X}', None))
+    return rows
+
+
+def bit_of(m, kind):
+    """끄기(&=)는 마스크를 뒤집어 다루는 비트로 바꾼다. 절대 주소 접근은 비트를 모르므로 None."""
+    if m is None:
+        return None
+    return ~m & 0xFF if kind == 'clear' else m
+
+
+WRITERS = ('set', 'store', 'clear', 'write')
+
+
+def cmd_xref(prg, rom, only, all_shapes):
+    rows = flag_xref(prg, all_shapes)
+    order = {'set': 0, 'store': 0, 'clear': 1, 'write': 2}
+    bits = {}
+    for n in sorted(rows):
+        for m, kind, *_ in rows[n]:
+            b = bit_of(m, kind)
+            if b is not None and b.bit_count() == 1:
+                bits.setdefault((n, b), set()).add('w' if kind in WRITERS else 'r')
+        if only is not None and n != only:
+            continue
+        print(f'== ${FLAGS + n:04X} 번호 {n:02X}')
+        for m, kind, where, msg in sorted(rows[n], key=lambda r: (r[0] is None, bit_of(r[0], r[1]) or 0,
+                                                                  order.get(r[1], 3), r[2])):
+            mask = '  ' if m is None else f'{m:02X}'
+            line = '' if msg is None else f'  {msg:04X} {dq4talk.first_line(rom, msg)[:30]}'
+            print(f'  {mask} {kind:<7} {where}{line}')
+    if only is None:
+        both = sum(v == {'w', 'r'} for v in bits.values())
+        w = sum(v == {'w'} for v in bits.values())
+        print(f'한 비트 {len(bits)}개: 쓰고 검사하는 곳이 다 있음 {both}, 쓰기만 {w}, 검사만 {len(bits) - both - w}')
+    return 0
+
+
+ENTRY = (0x1D, 0xB8CA)                # 맵 이벤트 표(1D:$B74D = BRK 1D 함수 07): 6바이트, 그룹 FF 로 끝
+
+
+def entry_table(prg):
+    """(그룹, 순번, 셋째 바이트, 장, 넷째 바이트 아래 4비트, 다섯째, 여섯째)."""
+    out, a = [], ENTRY[1]
+    while (g := rd(prg, ENTRY[0], a)) != 0xFF:
+        b = [rd(prg, ENTRY[0], a + i) for i in range(6)]
+        out.append((g, b[1], b[2], b[3] >> 4, b[3] & 0x0F, b[4], b[5]))
+        a += 6
+    return out
+
+
+def cmd_events(prg, rom):
+    print('== 인물 블록의 이벤트 명령(88~8A n) → 1D:$B639 표의 루틴')
+    for _, name, g, k, slot, n, j in (u for u in block_uses(prg) if u[0] == 'event'):
+        a = event_addr(prg, n)
+        msg = near_msg(prg, 0x1D * 0x4000 + (a & 0x3FFF) - 4)
+        line = '' if msg is None else f'  {msg:04X} {dq4talk.first_line(rom, msg)[:30]}'
+        print(f'{name}{g:02X}/{k:02X} 슬롯 {slot:02X} 블록+{j:02X}  이벤트 {n:02X} → 1D:${a:04X}{line}')
+    print('== 맵 이벤트 표 1D:$B8CA (그룹/순번, 장, 셋째 바이트, 넷째 아래 4비트, 다섯째, 여섯째)')
+    for g, k, c, ch, lo, x, y in entry_table(prg):
+        print(f'{g:02X}/{k:02X} {ch + 1}장  셋째 {c:02X}  넷째 아래 {lo:X}  {x:02X} {y:02X}')
+    return 0
+
+
 def cmd_ops(prg, only):
     for p, n, op, m in flag_ops(prg):
         if only is not None and n != only:
@@ -220,12 +522,18 @@ def cmd_ops(prg, only):
 
 
 def main():
-    prg = ines.prg(open(sys.argv[1], 'rb').read())
+    rom = open(sys.argv[1], 'rb').read()
+    prg = ines.prg(rom)
     cmd = sys.argv[2]
     if cmd == 'sram':
         return cmd_sram(prg, open(sys.argv[3], 'rb').read())
+    if cmd == 'flags' and '--xref' in sys.argv:
+        rest = [a for a in sys.argv[3:] if not a.startswith('--')]
+        return cmd_xref(prg, dq4text.Rom(rom), int(rest[0], 16) if rest else None, '--all' in sys.argv)
     if cmd == 'flags':
         return cmd_flags(open(sys.argv[3], 'rb').read())
+    if cmd == 'events':
+        return cmd_events(prg, dq4text.Rom(rom))
     if cmd == 'chapters':
         return cmd_chapters(prg)
     if cmd == 'chars':
