@@ -33,5 +33,9 @@ Unity 리메이크가 아니라, 실제 SFC 롬에 덧대는 IPS 패치를 만�
 
 ## 문서
 
-- [docs/dq5-map-format.md](docs/dq5-map-format.md): DQ5 맵 구조 분석
+- [docs/dq5-map-format.md](docs/dq5-map-format.md): DQ5 실내 맵 형식
 - [docs/references.md](docs/references.md): 참고 자료
+
+### 해킹 일지
+
+- [2026-10-24: DQ5 실내 맵 풀기](docs/journal/2026-10-24-dq5-map.md)

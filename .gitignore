@@ -9,3 +9,4 @@ build/
 # 외부 참고 저장소는 각자 받는다(docs/references.md)
 refs/
 work/
+__pycache__/
