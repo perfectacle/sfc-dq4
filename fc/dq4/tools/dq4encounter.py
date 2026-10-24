@@ -238,7 +238,7 @@ def show_maps(prg, png):
         print('    ' + ' '.join(f'{x:X}0' for x in range(16)))
         for y, row in enumerate(grid):
             print(f'{y:X}0  ' + ' '.join(f'{v & 0x3F:02X}' for v in row) + ('   bit7-6: ' + ''.join(str(v >> 6) for v in row) if ch == 4 else ''))
-    print('# 5장 필드 1: Y < 0C 이면 구역 35, 아니면 34. 필드 2: 구역 36')
+    print('# 5장 필드 1: Y < 0C 이면 구역 35, 아니면 34. 필드 3(闇の世界): 구역 36')
     if png:
         draw_png(prg, png)
 
