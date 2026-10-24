@@ -2,7 +2,8 @@
 
 사용: python tools/figures.py   (Pillow 필요, 저장소 최상위에서)
 
-입력 덤프를 만드는 명령은 docs/journal/ 의 해당 날짜 일지에 있다.
+맵은 롬만으로 그린다(팔레트도 롬). 게임 화면 비교에만 MesenCE 스크린샷이 필요하고,
+그 덤프를 만드는 명령은 docs/journal/ 의 해당 날짜 일지에 있다.
 """
 import glob
 import os
@@ -11,10 +12,11 @@ import sys
 from PIL import Image, ImageDraw
 
 sys.path.insert(0, os.path.dirname(__file__))
-from dq5map import Decoder, Rom, map_pointer, render  # noqa: E402
+from dq5map import Decoder, Rom, map_cgram, map_pointer, render  # noqa: E402
 
 OUT = 'docs/images'
 SLOT = 0xBE
+TMP = 'work/_fig.png'
 
 
 def save(img, name):
@@ -23,12 +25,11 @@ def save(img, name):
     print(path, img.size)
 
 
-def decoded(rom, bc, bd, cgram, stop_after=None, trace=None):
+def decoded(rom, bc, bd, stop_after=None, trace=None):
     dec = Decoder(rom, SLOT)
     w, h, buf, _ = dec.decode(map_pointer(rom, bc, bd), trace=trace, stop_after=stop_after)
-    tmp = 'work/_fig.png'
-    render(rom, dec, w, h, buf, cgram, tmp)
-    return Image.open(tmp).convert('RGB'), w, h
+    render(rom, dec, w, h, buf, map_cgram(rom, bc, bd), TMP)
+    return Image.open(TMP).convert('RGB'), w, h, buf, dec
 
 
 def find_view(full, shot):
@@ -49,16 +50,15 @@ def find_view(full, shot):
     return hit, ox, oy, len(range(3, 224, 4)) * len(range(3, 256, 4))
 
 
-def label(img, text):
+def label(img, text, xy=(0, 0)):
     d = ImageDraw.Draw(img)
-    d.rectangle((0, 0, 8 + 6 * len(text), 14), fill=(0, 0, 0))
-    d.text((4, 2), text, fill=(255, 255, 0))
+    d.rectangle((xy[0], xy[1], xy[0] + 8 + 6 * len(text), xy[1] + 14), fill=(0, 0, 0))
+    d.text((xy[0] + 4, xy[1] + 2), text, fill=(255, 255, 0))
 
 
 def fig_compare(rom):
     """게임 화면과 디코더로 그린 맵 전체를 나란히 놓고, 화면이 맵의 어디인지 표시한다."""
-    cg = open('work/snap2/c00600.bin', 'rb').read()
-    full, _, _ = decoded(rom, 2, 6, cg)
+    full, *_ = decoded(rom, 2, 6)
     shot = Image.open('work/snap2/s00600.png').convert('RGB')
     hit, ox, oy, n = find_view(full, shot)
     print(f'  view at ({ox},{oy}), {hit}/{n} sample pixels match')
@@ -68,20 +68,18 @@ def fig_compare(rom):
     out.paste(shot, (0, 0))
     out.paste(marked, (shot.width + 16, 0))
     label(out, 'MesenCE')
-    ImageDraw.Draw(out).text((shot.width + 20, 2), 'dq5map.py 02/06', fill=(255, 255, 0))
+    label(out, 'dq5map.py 02/06', (shot.width + 16, 0))
     save(out, 'dq5-map-0206-compare.webp')
 
 
 def fig_progress(rom):
     """배경 채우기 직후부터 끝까지, 명령을 처리하며 맵이 채워지는 과정."""
-    cg = open('work/snap2/c00600.bin', 'rb').read()
     trace = []
-    decoded(rom, 2, 6, cg, trace=trace)
+    decoded(rom, 2, 6, trace=trace)
     total = len(trace)
-    stages = [0, total // 4, total // 2, total * 3 // 4, total]
     frames = []
-    for n in stages:
-        img, _, _ = decoded(rom, 2, 6, cg, stop_after=n)
+    for n in [0, total // 4, total // 2, total * 3 // 4, total]:
+        img, *_ = decoded(rom, 2, 6, stop_after=n)
         img = img.resize((img.width // 2, img.height // 2), Image.NEAREST)
         label(img, f'{n}/{total}')
         frames.append(img)
@@ -94,12 +92,10 @@ def fig_progress(rom):
 
 def fig_commands(rom):
     """02/07 에서 명령별로 찍힌 자리를 색으로 표시: put(초록), fill(파랑)."""
-    cg = open('work/snap2/c01710.bin', 'rb').read()
     trace = []
-    img, w, _ = decoded(rom, 2, 7, cg, trace=trace)
+    img, w, _, _, dec = decoded(rom, 2, 7, trace=trace)
     over = Image.new('RGBA', img.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(over)
-    dec = Decoder(rom, SLOT)
     size = (1, 1)
     for _, _, op, args in trace:
         if op == 'block':
@@ -115,6 +111,54 @@ def fig_commands(rom):
     out = Image.alpha_composite(img.convert('RGBA'), over).convert('RGB')
     out = out.resize((out.width * 2, out.height * 2), Image.NEAREST)
     save(out, 'dq5-map-0207-commands.webp')
+
+
+def fig_attributes(rom):
+    """02/07 셀 +1 아래 니블(1 초록, 8 빨강, 9 노랑)과 +0 bit3(파란 점)."""
+    img, w, h, buf, _ = decoded(rom, 2, 7)
+    over = Image.new('RGBA', img.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(over)
+    colors = {1: (0, 255, 0, 70), 8: (255, 0, 0, 110), 9: (255, 200, 0, 120)}
+    for i in range(w * h):
+        x, y = i % w * 8, i // w * 8
+        v = buf[i * 8 + 1] & 0x0F
+        if v in colors:
+            d.rectangle((x, y, x + 7, y + 7), fill=colors[v])
+        if buf[i * 8] & 0x08:
+            d.rectangle((x + 2, y + 2, x + 5, y + 5), fill=(0, 128, 255, 255))
+    out = Image.alpha_composite(img.convert('RGBA'), over).convert('RGB')
+    out = out.resize((out.width * 2, out.height * 2), Image.NEAREST)
+    legend = [('1', colors[1]), ('8', colors[8]), ('9', colors[9]), ('+0 bit3', (0, 128, 255, 255))]
+    d = ImageDraw.Draw(out)
+    for k, (t, c) in enumerate(legend):
+        y = out.height - 18 * (len(legend) - k)
+        d.rectangle((4, y, 18, y + 14), fill=c[:3], outline=(0, 0, 0))
+        label(out, t, (22, y))
+    save(out, 'dq5-map-0207-attributes.webp')
+
+
+def fig_record(rom):
+    """맵 레코드 한 개(02/07)의 바이트 구성: 머리, 비트스트림, 속성 패스 1~3."""
+    p = map_pointer(rom, 2, 7)
+    dec = Decoder(rom, SLOT)
+    dec.decode(p)
+    starts = [t[2] for t in dec.pass_trace if t[0] == 'start']
+    parts = [('header', p, p + 9, (200, 200, 200)), ('bitstream', p + 9, dec.attr_start, (90, 140, 255)),
+             ('pass 1', starts[0], starts[1], (90, 200, 90)), ('pass 2', starts[1], starts[2], (240, 190, 60)),
+             ('pass 3', starts[2], dec.end + 1, (230, 90, 90))]
+    total = dec.end + 1 - p
+    scale = 2
+    out = Image.new('RGB', (total * scale + 120, 92), (24, 24, 24))
+    d = ImageDraw.Draw(out)
+    for k, (name, a, b, c) in enumerate(parts):
+        x0, x1 = (a - p) * scale + 1, (b - p) * scale
+        d.rectangle((x0, 4, max(x0 + 1, x1), 30), fill=c)
+        # 머리처럼 좁은 칸의 글자가 겹치지 않게 줄을 엇갈린다.
+        ty = 36 if k % 2 == 0 else 62
+        d.line((x0, 30, x0, ty), fill=c)
+        d.text((x0 + 3, ty), name, fill=c)
+        d.text((x0 + 3, ty + 12), f'{a & 0xFFFF:04X}, {b - a} bytes', fill=(220, 220, 220))
+    save(out, 'dq5-map-0207-record.webp')
 
 
 def fig_transition():
@@ -134,8 +178,10 @@ def main():
     fig_compare(rom)
     fig_progress(rom)
     fig_commands(rom)
+    fig_attributes(rom)
+    fig_record(rom)
     fig_transition()
-    os.remove('work/_fig.png')
+    os.remove(TMP)
 
 
 if __name__ == '__main__':

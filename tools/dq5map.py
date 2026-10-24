@@ -4,10 +4,10 @@
 맵 전환 직후 7EC000- 에 생기는 셀 버퍼(셀당 8바이트)를 만든다.
 
 사용:
-  python tools/dq5map.py rom/dq5.sfc BC BD [--slot BE] [--compare wram.bin] [--png out.png --cgram cgram.bin]
---compare 는 01:A833(디코더 끝)에서 덤프한 WRAM 128KB 와 셀 버퍼를 비교한다.
---png 는 셀 버퍼의 아래층·위층 타일맵을 그린다(Pillow 필요). 팔레트는 아직 ROM 위치를 몰라
-그 맵을 띄운 상태의 CGRAM 덤프(512바이트)를 받는다.
+  python tools/dq5map.py rom/dq5.sfc BC BD [--slot BE] [--compare wram.bin] [--png out.png [--alt] [--cgram cgram.bin]]
+--compare 는 01:BA4C(속성 패스 끝)에서 덤프한 WRAM 128KB 와 셀 버퍼를 비교한다.
+--png 는 셀 버퍼의 아래층·위층 타일맵을 그린다(Pillow 필요). 팔레트는 10:DE0B 와 같은 방법으로
+ROM 에서 만든다. --alt 는 7E:075E >= $F0 일 때의 두 번째 팔레트 목록, --cgram 은 덤프한 CGRAM 을 대신 쓴다.
 """
 import argparse
 import sys
@@ -19,6 +19,10 @@ BLOCK_BITS = 11
 # CHR 2개당 1바이트, 니블마다 그 CHR 의 팔레트·우선순위(01:8C43).
 CHR_PALETTE = 0x2A8781
 CHR_BANK = 0x13
+# 10:DE0B 팔레트 로더: [$BC, 기본 세트, ($BD, 세트)..., FF] 표 → 세트마다 목록 2개 → 16색 팔레트 번호 7개.
+PALSET_TABLE = 0x10DEBC
+PALSET_LISTS = 0x10DFE4
+PALETTES = 0x10E5C8
 
 
 def lorom(addr):
@@ -88,12 +92,92 @@ class Bits:
         return v
 
 
+class Nibbles:
+    """셀 속성 패스의 리더. 01:B8A8·01:B8DD 를 상태($03 의 bit7 = half)까지 그대로 옮겼다."""
+
+    def __init__(self, rom, addr):
+        self.rom, self.a, self.half = rom, addr, False
+
+    def nib(self):
+        """01:B8A8. 호출한 쪽이 필요한 비트만 골라 쓴다."""
+        if not self.half:
+            self.half = True
+            return self.rom.u8(self.a)
+        nxt = next_addr(self.a)
+        v = ((self.rom.u8(self.a) << 8 | self.rom.u8(nxt)) >> 4) & 0xFF
+        self.a, self.half = nxt, False
+        return v
+
+    def byte(self):
+        """01:B8DD."""
+        if self.half:
+            self.a, self.half = next_addr(self.a), False
+        else:
+            self.half = True
+        return self.nib()
+
+
+def attribute_passes(rom, addr, width, buf, trace=None):
+    """비트스트림 뒤의 셀 속성 패스 셋(01:B7AC, 01:B8FE, 01:B9EA). buf 를 고치고 끝 위치를 돌려준다.
+
+    엔트리 첫 바이트 위 2비트: 00 셀 하나, 1x 같은 값을 n+2 칸 반복(bit6=1 이면 n 은 니블, 0 이면 바이트), 01 끝.
+    위치는 첫 바이트 아래 6비트와 둘째 바이트로 x 7비트·y 7비트(01:B846).
+    """
+    n = Nibbles(rom, addr)
+    has_pass3 = False
+    for kind in (1, 2, 3):
+        if trace is not None:
+            trace.append(('start', kind, n.a, n.half))
+        stride = width * 8 if n.nib() & 0x80 else 8
+        first = True
+        while True:
+            b = n.byte()
+            if b & 0xC0 == 0x40:
+                # 01:B83D·01:B938: 반 바이트에서 끝났으면 한 니블 더 읽어 맞춘다. 패스 3(01:BA4C)은 하지 않는다.
+                if kind != 3 and n.half:
+                    n.nib()
+                break
+            lo = n.byte()
+            x = ((b << 8 | lo) << 1 >> 8) & 0x7F
+            pos = (lo & 0x7F) * width + x
+            if b & 0x80:
+                # LDX 횟수 / INX / ... / DEX / BPL 이라 반복은 횟수+2 칸을 칠한다.
+                cells = ((n.nib() & 0x0F) if b & 0x40 else n.byte()) + 2
+            else:
+                cells = 1
+            val = n.nib() & 0x0F
+            if kind == 3 and first:
+                has_pass3 = True
+            first = False
+            if trace is not None:
+                trace.append((kind, x, lo & 0x7F, cells, 'v' if stride != 8 else 'h', val))
+            for k in range(cells):
+                o = pos * 8 + k * stride
+                if kind == 1:
+                    buf[o + 1] = buf[o + 1] & 0xF0 | val
+                elif kind == 2:
+                    if val & 1:
+                        if not (buf[o + 5] | buf[o + 6]) and (buf[o + 2] | buf[o + 3]):
+                            buf[o + 5:o + 8] = buf[o + 2:o + 5]
+                        buf[o] |= 0x08
+                    if val & 2:
+                        buf[o + 1] |= 0x40
+                    if val & 8:
+                        buf[o + 4] = 0x61 if val & 4 else 0x62
+                    elif val & 4:
+                        buf[o + 1] |= 0x80
+                else:
+                    buf[o] = buf[o] & 0x0F | val << 4
+    return n.a, n.half, has_pass3
+
+
 class Decoder:
     def __init__(self, rom, slot):
         self.rom = rom
         self.blocks = block_table(rom)
         self.slot = slot
         self.chr_map = {}
+        self.pass_trace = []
 
     def chr_entry(self, chr_id):
         """01:8C15: CHR 이 처음 쓰일 때 VRAM 슬롯을 순서대로 주고 팔레트를 붙인다."""
@@ -195,7 +279,52 @@ class Decoder:
                 if trace is not None:
                     trace.append((*at, 'end', ()))
                 break
+        else:
+            return width, height, bytes(buf[:size]), stream
+
+        # 01:93D8: 머리 +5 위 니블이 있으면 +0 에, 아래 니블은 +1 에 OR. 폭×높이+1 칸(DEX/BPL 이라 한 칸 더).
+        b5 = rom.u8(addr + 5)
+        for c in range(width * height + 1):
+            if b5 & 0xF0:
+                buf[c * 8] = b5 & 0xF0
+            buf[c * 8 + 1] |= b5 & 0x0F
+        # 01:A7B3: 비트스트림이 바이트 중간에서 끝났으면 다음 바이트부터 속성 패스.
+        start = next_addr(stream.a) if stream.pos else stream.a
+        self.attr_start = start
+        self.end, self.end_half, self.has_pass3 = attribute_passes(rom, start, width, buf, self.pass_trace)
         return width, height, bytes(buf[:size]), stream
+
+
+def palette_set(rom, bc, bd):
+    a = PALSET_TABLE
+    while rom.u8(a) != 0xFF:
+        if rom.u8(a) == bc:
+            default, a = rom.u8(a + 1), a + 2
+            while rom.u8(a) != 0xFF:
+                if rom.u8(a) == bd:
+                    return rom.u8(a + 1)
+                a += 2
+            return default
+        while rom.u8(a) != 0xFF:
+            a += 1
+        a += 1
+    raise KeyError(f'no palette set for $BC={bc:02X}')
+
+
+def map_cgram(rom, bc, bd, alt=False):
+    """BG 팔레트 1~7번 줄과 배경색(0번 줄 색 0)을 채운 CGRAM 앞 256바이트. 나머지 줄은 0."""
+    s = palette_set(rom, bc, bd)
+    lst = 0x100000 | rom.u16(PALSET_LISTS + s * 4 + (2 if alt else 0))
+    cg = bytearray(0x200)
+    for r in range(7):
+        o = lorom(PALETTES + (rom.u16(lst + r * 2) & 0x7FF) * 32)
+        cg[0x20 + r * 32:0x40 + r * 32] = rom.d[o:o + 32]
+    # 10:DE9C: 7번 줄부터 2번 줄까지 내려가며 색 0 이 0 이 아닌 첫 줄의 색 0 을 배경색으로.
+    for r in range(7, 1, -1):
+        if cg[r * 32] | cg[r * 32 + 1]:
+            cg[0:2] = cg[r * 32:r * 32 + 2]
+            break
+    return cg
 
 
 def chr_pixels(rom, chr_id):
@@ -249,6 +378,7 @@ def main():
     ap.add_argument('--compare')
     ap.add_argument('--png')
     ap.add_argument('--cgram')
+    ap.add_argument('--alt', action='store_true')
     args = ap.parse_args()
     rom = Rom(open(args.rom, 'rb').read())
     addr = map_pointer(rom, args.bc, args.bd)
@@ -257,7 +387,8 @@ def main():
     print(f'map {args.bc:02X}/{args.bd:02X} at {addr:06X}: {width}x{height}, '
           f'stream ends {stream.a:06X} bit {stream.pos}, slots {args.slot:X}-{dec.slot:X}')
     if args.png:
-        render(rom, dec, width, height, buf, open(args.cgram, 'rb').read(), args.png)
+        cgram = open(args.cgram, 'rb').read() if args.cgram else map_cgram(rom, args.bc, args.bd, args.alt)
+        render(rom, dec, width, height, buf, cgram, args.png)
     if args.compare:
         wram = open(args.compare, 'rb').read()
         ref = wram[0xC000:0xC000 + len(buf)]
