@@ -1,0 +1,10 @@
+# 롬·세이브·빌드 산출물은 커밋하지 않는다(저작권 데이터)
+rom/
+build/
+*.sfc
+*.smc
+*.nes
+*.srm
+*.mss
+# 외부 참고 저장소는 각자 받는다(docs/references.md)
+refs/
