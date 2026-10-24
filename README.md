@@ -20,6 +20,15 @@ Unity 리메이크가 아니라, 실제 SFC 롬에 덧대는 IPS 패치를 만�
 `dq4.nes` 는 16바이트 iNES 헤더 뒤 PRG 512KB 의 CRC32 가 `0794F2A5` 입니다.
 초판(Rev 0, PRG CRC32 `2DD71ACB`)은 쓰지 않습니다.
 
+`nds` 트랙은 분석 참고용으로 아래 두 롬을 씁니다. 패치의 바탕이 아닙니다.
+
+| 파일 | 원본 | SHA-1 |
+| --- | --- | --- |
+| `rom/dq4ds.nds` | Dragon Quest IV - Michibikareshi Mono-tachi (Japan), NDS. 헤더 `DRAGONQUEST4` / `YIVJ`, CRC32 `3257B207` | `84baf75d79b842fa5ecfdc66c112f1d19bf228ae` |
+| `rom/dq4ds-kr.nds` | 위 롬에 한글 팬패치 `NDS_DQ4_v1.1.xdelta` 를 적용한 것. CRC32 `4DA617AF` | `a2ee52765cd54715e777b2993277e752e3ec276d` |
+
+한글판은 `xdelta3 -d -s rom/dq4ds.nds NDS_DQ4_v1.1.xdelta rom/dq4ds-kr.nds` 로 만듭니다. 이 패치는 LZMA 2차 압축이라 툴킷 v0.5.0 의 `krpatch xdelta apply` 로는 풀리지 않습니다.
+
 ## 준비
 
 [uv](https://docs.astral.sh/uv/) 로 Python 3.15 환경과 도구를 맞춥니다. 툴킷은 릴리스 태그로,
@@ -74,6 +83,10 @@ dq4(FC DQ4 원작):
 - [docs/dq4-rom-map.md](docs/dq4-rom-map.md): DQ4(FC) 롬 뱅크 지도(뱅크 32개의 내용, 실행 장면, 빈 자리)
 - [docs/dq4-debug.md](docs/dq4-debug.md): DQ4(FC) 디버그 스위치 `$C000`(벽 통과·인카운트 끄기·전투 테스트), 패드 2 흔적, 미실행 코드 찾기
 - [docs/dq4-block-format.md](docs/dq4-block-format.md): DQ4(FC) 맵 블록 → 8×8 타일·팔레트·통행 속성, CHR 올리기, 타일 애니메이션, 지형 효과
+
+nds(NDS DQ4 리메이크 참고):
+
+- [docs/nds-handoff.md](docs/nds-handoff.md): nds 트랙 시작점(목표, 롬, 다음 할 일)
 
 ### 해킹 일지
 
@@ -137,3 +150,7 @@ dq4(FC DQ4 원작):
 - [2026-10-25-18: DQ5 실측 규격으로 다시 그린 인물 스프라이트](docs/journal/dq4/2026-10-25-18-sprites2.md)
 - [2026-10-25-19: 대화 조건·밤 인물·호출 문장](docs/journal/dq4/2026-10-25-19-talk2.md)
 - [2026-10-25-20: 투기장 전투 테스트·효과 오류 보고와 SRAM 재현성](docs/journal/dq4/2026-10-25-20-debug2.md)
+
+#### nds
+
+아직 없습니다.
