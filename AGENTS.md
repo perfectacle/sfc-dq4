@@ -19,7 +19,7 @@
 
 어떤 도구를 쓰든 지킨다. 각 줄의 링크가 정본이다.
 
-- **롬·덤프·세이브스테이트를 커밋하지 않는다** — 저작권 데이터다. 롬은 사용자가 직접 준비해 `rom/` 에 둔다. [ROM-01](.agents/skills/analysis/SKILL.md#rom-01--롬-데이터-금지)
+- **롬·덤프·세이브스테이트를 커밋하지 않는다** — 저작권 데이터다. 롬은 사용자가 직접 준비해 `rom/` 에 둔다. 예외는 FC DQ4 원작 그래픽 참조본(`docs/images/dq4-fc/`)뿐이다. [ROM-01](.agents/skills/analysis/SKILL.md#rom-01--롬-데이터-금지)
 - **다른 팬 해킹의 데이터를 쓰지 않는다** — 아이디어만 참고하고 그래픽은 직접 그린다. [ORIG-01](.agents/skills/analysis/SKILL.md#orig-01--남의-데이터-금지)
 - **가설은 실측으로 확인한 뒤에 사실로 적는다** — 확인 못 한 것은 「남은 것」으로 남긴다. [VERIFY-01](.agents/skills/analysis/SKILL.md#verify-01--실측으로-확인)
 - **문서에 개인 경로를 쓰지 않는다** — 환경 변수와 저장소 상대 경로만. [DOC-01](.agents/skills/journal/SKILL.md#doc-01--개인-경로-금지)
