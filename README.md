@@ -65,6 +65,7 @@ dq4(FC DQ4 원작):
 - [docs/dq4-text-format.md](docs/dq4-text-format.md): DQ4(FC) 대사 텍스트(6비트 압축, 사전, 글자표, 메시지 번호)
 - [docs/dq4-encounter-format.md](docs/dq4-encounter-format.md): DQ4(FC) 적 조우 표(필드 구역 지도, 구역별 무리 후보, 조우율, 던전 층, 특수 전투)
 - [docs/dq4-warp.md](docs/dq4-warp.md): DQ4(FC) 장면 이동 도구(원하는 맵·필드 자리의 세이브스테이트 만들기)
+- [docs/dq4-script-format.md](docs/dq4-script-format.md): DQ4(FC) 인물 대화 스크립트(대화 번호, 조건·플래그·서비스 문장, 메시지 번호)
 
 ### 해킹 일지
 
@@ -106,3 +107,4 @@ dq4(FC DQ4 원작):
 - [2026-10-25-06: 필드에서 마을로 들어가기](docs/journal/dq4/2026-10-25-06-entrances.md)
 - [2026-10-25-07: 적 조우 표](docs/journal/dq4/2026-10-25-07-encounter.md)
 - [2026-10-25-08: 장면 이동(워프) 도구](docs/journal/dq4/2026-10-25-08-warp.md)
+- [2026-10-25-09: 인물 대화 스크립트](docs/journal/dq4/2026-10-25-09-talk.md)
