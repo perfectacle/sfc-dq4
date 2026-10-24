@@ -10,10 +10,10 @@
 
 | 트랙  | 하는 일                                     | 소유 파일(접두어)                                              |
 | ----- | ------------------------------------------- | -------------------------------------------------------------- |
-| `dq5` | SFC DQ5 엔진(맵·필드·인물·스크립트) 분석    | `docs/dq5-*`, `tools/dq5*.py`, 일지·그림의 `dq5-*`             |
-| `dq4` | FC DQ4 원작 데이터(맵·대사·몬스터 등) 분석 | `docs/dq4-*`, `tools/dq4*`, 일지·그림의 `dq4-*`                |
+| `dq5` | SFC DQ5 엔진(맵·필드·인물·스크립트) 분석    | `docs/dq5-*`, `tools/dq5*.py`, `docs/journal/dq5/`, 그림의 `dq5-*` |
+| `dq4` | FC DQ4 원작 데이터(맵·대사·몬스터 등) 분석 | `docs/dq4-*`, `tools/dq4*`, `docs/journal/dq4/`, 그림의 `dq4-*`     |
 
-공유 파일(`README.md`, `docs/todo.md`, `docs/references.md`, `tools/lua/`, `tools/figures.py`, `tools/listing.py`)은 자기 트랙 몫의 줄·절만 고친다.
+공유 파일(`README.md`, `docs/todo.md`, `docs/references.md`, `tools/README.md`, `tools/lua/`, `tools/listing.py`)은 자기 트랙 몫의 줄·절만 고친다. 목록·표·순번은 트랙마다 나눠 두어, 두 트랙이 동시에 PR 을 올려도 충돌하지 않게 한다.
 
 ## 절대 규칙
 
@@ -23,7 +23,7 @@
 - **다른 팬 해킹의 데이터를 쓰지 않는다** — 아이디어만 참고하고 그래픽은 직접 그린다. [ORIG-01](.agents/skills/analysis/SKILL.md#orig-01--남의-데이터-금지)
 - **가설은 실측으로 확인한 뒤에 사실로 적는다** — 확인 못 한 것은 「남은 것」으로 남긴다. [VERIFY-01](.agents/skills/analysis/SKILL.md#verify-01--실측으로-확인)
 - **문서에 개인 경로를 쓰지 않는다** — 환경 변수와 저장소 상대 경로만. [DOC-01](.agents/skills/journal/SKILL.md#doc-01--개인-경로-금지)
-- **일지 순번은 PR 직전 `origin/main` 기준으로 매긴다** — 동시에 쓰는 세션끼리 번호가 겹치지 않게. [JOURNAL-01](.agents/skills/journal/SKILL.md#journal-01--일지-이름과-순번)
+- **일지 순번은 트랙마다 PR 직전 `origin/main` 기준으로 매긴다** — 같은 트랙의 세션끼리 번호가 겹치지 않게. 다른 트랙과는 겹쳐도 된다. [JOURNAL-01](.agents/skills/journal/SKILL.md#journal-01--일지-이름과-순번)
 - **작업마다 최신 `origin/main` 에서 워크트리를 파고, 머지가 끝나면 지운다** — [GIT-02](.agents/skills/git-workflow/SKILL.md#git-02--작업마다-워크트리)
 - **모든 변경은 브랜치 → PR, `ci-ok` 를 통과시킨다** — [GIT-01](.agents/skills/git-workflow/SKILL.md#git-01--브랜치와-pr), [CI-01](.agents/skills/ci/SKILL.md#ci-01--ci-ok)
 - **검사가 실패하면 기준을 낮추지 말고 원인을 고친다** — [CI-02](.agents/skills/ci/SKILL.md#ci-02--실패는-원인을-고친다)

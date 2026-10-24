@@ -1,6 +1,6 @@
 ---
 name: journal
-description: 해킹 일지(docs/journal), 형식 문서(docs/<트랙>-*.md), 그림(docs/images, tools/figures.py)을 쓰거나 고칠 때. 일지 이름·순번, 구성, 그림, 개인 경로 금지.
+description: 해킹 일지(docs/journal), 형식 문서(docs/<트랙>-*.md), 그림(docs/images, tools/<트랙>figures.py)을 쓰거나 고칠 때. 일지 이름·순번, 구성, 그림, 개인 경로 금지.
 ---
 
 # 일지와 형식 문서
@@ -10,22 +10,22 @@ description: 해킹 일지(docs/journal), 형식 문서(docs/<트랙>-*.md), 그
 ## 절차 — 한 항목을 끝냈을 때
 
 1. **형식 문서를 고친다** — 그 트랙의 형식 문서(`docs/dq5-map-format.md` 등)에 새로 확인한 구조를 절로 넣는다. 표·주소·근거 루틴을 쓰고 「남은 것」 절을 갱신한다. 새 주제면 `docs/<트랙>-<주제>-format.md` 를 만든다.
-2. **일지를 쓴다** — `docs/journal/YYYY-MM-DD-NN-<트랙>-<주제>.md`. 순번은 아직 정하지 않고 `NN` 을 임시로 둔다([JOURNAL-01](#journal-01--일지-이름과-순번)).
-3. **그림을 만든다** — `tools/figures.py` 에 함수를 더해 `docs/images/<트랙>-<주제>.webp` 를 만든다([FIG-01](#fig-01--그림)).
-   완료: `uv run --locked python tools/figures.py` 가 새 그림을 만든다.
-4. **README 를 고친다** — 「해킹 일지」 목록 끝에 일지 한 줄, 새 형식 문서면 「문서」 목록에 한 줄.
-5. **순번을 매긴다** — PR 을 올리기 직전에 `git fetch origin main && git rebase origin/main` 하고, `origin/main` 의 같은 날짜 일지 최대 순번 + 1 로 파일 이름·제목·README 줄을 맞춘다.
+2. **일지를 쓴다** — `docs/journal/<트랙>/YYYY-MM-DD-NN-<주제>.md`. 순번은 아직 정하지 않고 `NN` 을 임시로 둔다([JOURNAL-01](#journal-01--일지-이름과-순번)).
+3. **그림을 만든다** — 자기 트랙의 `tools/<트랙>figures.py`(예: `tools/dq5figures.py`)에 함수를 더해 `docs/images/<트랙>-<주제>.webp` 를 만든다([FIG-01](#fig-01--그림)).
+   완료: `uv run --locked python tools/<트랙>figures.py` 가 새 그림을 만든다.
+4. **README 를 고친다** — 「해킹 일지」 의 자기 트랙 소목록(`#### <트랙>`) 끝에 일지 한 줄, 새 형식 문서면 「문서」 의 자기 트랙 목록에 한 줄.
+5. **순번을 매긴다** — PR 을 올리기 직전에 `git fetch origin main && git rebase origin/main` 하고, `origin/main` 에서 **같은 날짜·같은 트랙** 일지의 최대 순번 + 1 로 파일 이름·제목·README 줄을 맞춘다.
    완료: `uv run --locked python tools/check_docs.py` 통과.
 
 ## 규칙
 
 ### JOURNAL-01 — 일지 이름과 순번
 
-- 파일 이름: `docs/journal/YYYY-MM-DD-NN-<트랙>-<주제>.md`. `NN` 은 그 날짜 안에서 저장소 전체(모든 트랙)의 두 자리 순번이다.
+- 파일 이름: `docs/journal/<트랙>/YYYY-MM-DD-NN-<주제>.md`(예: `docs/journal/dq5/2026-10-24-12-exit-hook.md`). 트랙은 디렉터리가 나타내므로 파일 이름에 다시 쓰지 않는다. `NN` 은 **그 트랙 안에서** 그 날짜의 두 자리 순번이다. 다른 트랙과는 번호가 겹쳐도 된다.
 - 제목(첫 줄): `# YYYY-MM-DD-NN: <주제를 한국어로>`. 날짜·순번이 파일 이름과 같다.
-- README 「해킹 일지」 목록에 `[YYYY-MM-DD-NN: 주제](docs/journal/파일)` 로 순번 순서대로 넣는다.
-- 순번은 PR 직전에 `origin/main` 을 기준으로 정한다. 머지 전에 다른 PR 이 같은 번호로 먼저 머지되면, rebase 하고 다음 번호로 바꿔 다시 push 한다.
-- 이유: 날짜와 순번만으로 읽는 순서가 정해져야 블로그로 옮길 때 헷갈리지 않는다. 두 세션이 각자 번호를 미리 잡으면 같은 번호가 생긴다. `tools/check_docs.py`(CI `docs` 잡)가 중복·불일치를 막는다.
+- README 「해킹 일지」 의 자기 트랙 소목록에 `[YYYY-MM-DD-NN: 주제](docs/journal/<트랙>/파일)` 로 순번 순서대로 넣는다.
+- 순번은 PR 직전에 `origin/main` 을 기준으로 정한다. 같은 트랙의 다른 PR 이 같은 번호로 먼저 머지되면, rebase 하고 다음 번호로 바꿔 다시 push 한다.
+- 이유: 날짜와 순번만으로 읽는 순서가 정해져야 블로그로 옮길 때 헷갈리지 않는다. 트랙마다 번호와 README 목록을 따로 두면 dq5·dq4 세션이 동시에 일지를 올려도 번호도 README 줄도 겹치지 않는다. `tools/check_docs.py`(CI `docs` 잡)가 같은 트랙 안의 중복·불일치를 막는다.
 - 이미 머지된 일지의 이름을 바꾸지 않는다. 링크가 끊긴다.
 
 ### JOURNAL-02 — 일지 구성
@@ -49,6 +49,6 @@ description: 해킹 일지(docs/journal), 형식 문서(docs/<트랙>-*.md), 그
 ### FIG-01 — 그림
 
 - 형식은 WebP, 위치는 `docs/images/<트랙>-<주제>.webp`.
-- `tools/figures.py` 가 롬(과 필요하면 `work/` 의 덤프)에서 다시 만든다. 손으로 편집한 그림을 커밋하지 않는다. 덤프가 필요한 그림은 함수 docstring 에 어떤 덤프를 어떻게 만드는지 적는다.
+- 그 트랙의 `tools/<트랙>figures.py` 가 롬(과 필요하면 `work/` 의 덤프)에서 다시 만든다. 그림 스크립트를 트랙마다 따로 두는 것은 두 트랙이 같은 파일의 `main` 에 줄을 더하다 충돌하지 않게 하려는 것이다. 손으로 편집한 그림을 커밋하지 않는다. 덤프가 필요한 그림은 함수 docstring 에 어떤 덤프를 어떻게 만드는지 적는다.
 - 일지에서는 `../images/<파일>` 로 링크하고, 대체 텍스트에 무엇을 보여 주는지 쓴다.
 - 이유: 롬에서 다시 만들 수 있어야 ROM-01 을 지키면서 그림이 디코더 결과와 어긋나지 않는다.
