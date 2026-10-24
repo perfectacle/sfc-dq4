@@ -129,8 +129,8 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 | `dq4fcgfx.py rom all\|maps\|field\|gfx OUT`, `scenes OUT SPEC.json`, `verify DIR…` | DQ4 원작 그림 뽑기: 맵 279개(낮·밤, 인물·출구·상자·문·계단·떨어지는 칸·리프트·タンス·팻말 주석판), 필드 4개(입구 주석판), 맵 종류별 블록 시트, CHR 뱅크 `0C`·`0D`, 폰트, `lua/fc/fcgfxscene.lua` 덤프 장면, 갤러리 HTML. 출력은 커밋하지 않음(비공개 에셋 저장소). `verify` 는 스프라이트를 끈 MesenCE 화면과 롬만으로 그린 화면을 픽셀로 비교. [docs/dq4-fcgfx.md](../docs/dq4-fcgfx.md) |
 | `lua/fc/fcgfxpal.lua` | FC: NES 색 번호 `00`~`3F` 마다 화면 전체를 그 색으로 칠해 `pal-XX.png` 로(MesenCE 색 재기). `STATE` |
 | `lua/fc/fcgfxscene.lua` | FC: `AT` 프레임마다 화면과 nametable·CHR·팔레트·OAM·RAM·`$2000` 값을 `fNNNNN.*` 로. 입력은 `DRIVER`(전원부터는 `debugsram.lua` 의 `SRAM_DRIVER`) |
-| `dq4shop.py rom [G K\|people]` | DQ4 무기·방어구·도구 가게 목록 전부와 여관 1인 값. `G K` 는 그 장소의 목록·여관·가게 인물(스크립트·호출로 여는 가게 포함), `--compare end.ram [end.sram]` 으로 가게 창 목록 `$07BD` 와 비교(SRAM 을 주면 덧붙임까지). `people` 은 롬 전체의 「인물 → 가게(종류·품목·여관 값)」 표 |
-| `dq4chest.py rom G K\|all\|check` | DQ4 보물상자(칸·내용물·열었음 플래그 `$625D`~)와 발밑 숨은 물건(특수 내용 설명 포함). `check` 맵마다(마지막 그룹 `48` 포함) 상자 칸 수와 개수 표 비교, `G K --compare end.sram` 으로 열었음 비트 |
+| `dq4shop.py rom [G K\|people]` | DQ4 무기·방어구·도구 가게 목록 전부(장소별 값 `15:$B2F7`: 메달·코인 포함)와 여관 1인 값. `G K` 는 그 장소의 목록·여관·가게 인물(스크립트·호출로 여는 가게 포함), `--compare end.ram [end.sram]` 으로 가게 창 목록 `$07BD` 와 비교(SRAM 을 주면 덧붙임까지). `people` 은 롬 전체의 「인물 → 가게(종류·품목·여관 값)」 표 |
+| `dq4chest.py rom G K\|all\|check\|loot` | DQ4 보물상자(칸·내용물·열었음 플래그 `$625D`~)와 발밑 숨은 물건(특수 내용 설명 포함). `check` 맵마다(마지막 그룹 `48` 포함) 상자 칸 수와 개수 표 비교, `G K --compare end.sram` 으로 열었음 비트. `loot [--json]` 은 상자·발밑·タンス·つぼ·대화로 받는 물건을 합친 「맵·자리 → 얻는 것·플래그」 롬 전체 표 |
 | `lua/fc/blockload.lua` | FC: PRG 오프셋 `AT`(쉼표로 여럿)의 명령이 실행될 때 CPU 메모리·CHR-RAM·nametable·팔레트를 `ld_OOOOO_N.*` 로(`LIMIT` 번). `DRIVER` 로 입력 드라이버 |
 | `lua/fc/blockreads.lua` | FC: CPU 메모리 `RANGE`(예 `6F20-6F5F`)를 읽는 명령을 PC 마다 모아 `ramreads.txt` 로(`MAXF`, `FROM`) |
 | `lua/fc/shopwalk.lua` | FC: 맵 좌표 `$44/$45` 를 보며 `WAY`(`"12,1C 0D,1C"`) 칸들로 걷고 `end.mss` 등 덤프. `STATE`, `TAIL`, `MAXF` |
@@ -138,6 +138,7 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 | `lua/fc/shoppoke.lua` | FC: PC 가 `AT` 에 닿을 때 `POKE`(`3D=03;…`)를 RAM 에 씀. `BANK`(`$0507` 일치 때만), `ONCE`, `DRIVER` |
 | `lua/fc/shopreads.lua` | FC: `RANGE`(기본 `6000-62FF`)를 읽는 명령을 「뱅크:PC 주소 값 횟수 첫프레임」으로 `reads.txt` 에. `FROM`, `BANK`, `PCLO`/`PCHI`, `MAXF`, `DRIVER` |
 | `lua/fc/shopprg.lua` | FC: 첫 프레임에 메모리의 PRG ROM 을 `PRG`(`55CCA=4CF4BE;…`, PRG 오프셋)대로 바꿈(롬 파일은 그대로). `DRIVER` |
+| `lua/fc/shopprice.lua` | FC: 가격 함수 `15:$B2F7` 에 들어갈 때의 아이템과 나올 때의 값을 「프레임 장소 아이템 값」으로 `price.txt` 에. `MAXF`, `DRIVER` |
 | `dq4event.py rom sram\|flags\|chapters\|chars\|places\|events\|ops` | DQ4 저장 데이터. `sram end.sram` 작업 영역·모험의 서 3칸(CRC 검사)·인물 레코드, `flags` 이벤트 플래그 영역, `flags --xref [NN]` 플래그 비트마다 쓰는 곳·검사하는 곳(BRK·절대 주소·대화 스크립트·인물 블록·맵 인물 목록 표), `chapters` 1~5장 시작 표, `chars [--compare end.sram]` 장 시작 인물 레코드, `places` 귀환 자리 표와 ルーラ 행선지, `events` 인물 블록의 이벤트 명령과 맵 이벤트 표, `ops [--flag NN]` 롬의 BRK 플래그 명령 모양 |
 | `lua/fc/eventwalk.lua` | FC: 세이브스테이트에서 좌표 목표(`x=NN`/`y=NN`)와 버튼으로 걷고 `reset:1` 로 리셋. `POKEAT` 프레임별 RAM 쓰기, `PRGPOKE` 메모리의 PRG ROM 바꾸기(롬 파일은 그대로). 프로브의 `DRIVER` 로도 씀. 끝나면 `walk.txt`·`end.*` |
 | `lua/fc/eventflags.lua` | FC: 이벤트 플래그 영역(`$627B`~`$62EE`, `RANGE`) 읽기·쓰기를 PC·뱅크·BRK 주소와 함께 `flags.txt` 로. `FROM`, `MAXF` |

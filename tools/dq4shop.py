@@ -14,9 +14,11 @@
             켜진 바이트까지 $07BD 에 담는다(개수 $07C4). FF 는 어느 맵에나 맞는 기본 줄(그룹만, 순번 없음).
   15:$B26B  덧붙임: 16/00 무기점은 $62E7~$62E9 가 0 이 아닌 것마다 15:$A4A4 의 품목을 뒤에 붙이고,
             09/00 무기점은 $62ED < $78(낮) 일 때 목록을 06 23 07 10 으로 바꾼다. 표의 09/00 줄은 밤 목록.
+  15:$B2F7  가게 창의 값. 그룹 18(はがねのつるぎ 10, うまのふん 2)·22(メダル 수)·04/01(카지노 코인 표 15:$B375)만
+            정한 값, 그 밖은 아이템 가격.
   15:$BF71  여관 표 18:$B5CD(BRK 87 8F 가 꺼내는 18 함수 07 의 주소): 그룹, 순번, 1인 값. FF 로 끝남.
-            그룹 10 에서 $45 < $14 이면 표 대신 10. 값 × (BRK 62 23 01 이 돌려준 A) 가 요금(0F:$C827).
-            A 는 걷는 일행 $616A~$616D 가운데 레코드 +00 bit7(살아 있음)이 켜진 사람 수.
+            그룹 10 에서 주인공 Y $45 < $14 이면 표 대신 10. 값 × (BRK 62 23 01 이 돌려준 A) 가 요금(0F:$C827).
+            A 는 걷는 일행 $616A~$616D(와 $618E bit5 면 마차 $6172~) 가운데 레코드 +00 bit7(살아 있음)이 켜진 사람 수.
   가게 인물  대화 번호 0~6 은 바로 서비스(15:$9962), 7 이상은 dq4talk 가 푼 스크립트의 문장 12 n(서비스 n)과
             호출 문장(00/01)이 부르는 15:$9D2A(방어구점)·$ADB7(인물 X·Y 로 고름)·$B558·$B847·$BF30·$A6B0 을 따라간다.
   교회      15:$B550. 메뉴 0 저장 1 おつげ 2 되살리기 3 해독 4 저주 풀기. 그룹 46·0E 와 04/0E 는 2~4 만(창 70).
@@ -42,6 +44,7 @@ EXTRA_16 = 0xA4A4              # 16/00 무기점 덧붙임 품목 3개($62E7~$62
 DAY_09 = (0x06, 0x23, 0x07, 0x10)
 FLAGS_16, TIME = 0x62E7, 0x62ED
 INN_10_PRICE = 0x0A
+INN_10_GROUP, INN_10_Y = 0x10, 0x14   # 15:$BF71: 그룹 10 에서 $45 < $14 이면 10
 SHOP_RAM, COUNT_RAM, KIND_RAM = 0x07BD, 0x07C4, 0x07C5
 
 
@@ -152,14 +155,19 @@ def possible(cond, night):
     return all(DAY_CONDS.get(c, night) == night for c in cond)
 
 
+def npc_lists(prg, g, k):
+    """[(덧붙일 조건, 레코드들)]: 보통 목록과, 진행 플래그로 바뀌는 목록(1C:$9D0E 줄)마다 「목록 플래그 n&m」."""
+    lists = [([], dq4map.npc_records(prg, g, k))]
+    lists += [([f'목록 플래그 {i:02X}&{m:02X}'], dq4map.records_at(prg, dq4map.EVENT_LISTS[0], a)[0])
+              for eg, ek, m, i, a in dq4map.event_entries(prg) if (eg, ek) == (g, k)]
+    return lists
+
+
 def merchants(prg, g, k):
     """가게를 여는 인물: [(X, Y, 대화 번호, 종류, 조건 목록, 경로)]. 레코드마다 낮(F bit4)·밤(F bit3) 모습을 따로 풀고
     (dq4talk.talk_id·pos 의 night), 이벤트 플래그로 바뀌는 목록(1C:$9D0E)도 돈다. 낮·밤이 같으면 한 줄로 합친다."""
-    lists = [([], dq4map.npc_records(prg, g, k))]
-    lists += [([f'목록 플래그 {i:02X}&{m:02X}'], dq4talk.alt_records(prg, a))
-              for eg, ek, m, i, a in dq4talk.alt_entries(prg) if (eg, ek) == (g, k)]
     out = []
-    for src, recs in lists:
+    for src, recs in npc_lists(prg, g, k):
         for r in recs:
             got = {}
             for night in (False, True):
@@ -191,14 +199,16 @@ def church_menu(g, k):
     return '되살리기·해독·저주' if g in (0x46, 0x0E) or (g, k) == (0x04, 0x0E) else '저장·おつげ·되살리기·해독·저주'
 
 
-def offer(prg, g, k, kind):
-    """가게 종류가 이 장소에서 내놓는 것(덧붙임 전)."""
+def offer(prg, g, k, kind, y=None):
+    """가게 종류가 이 장소에서 내놓는 것(덧붙임 전). y 는 인물 Y: 그룹 10 여관은 말을 거는 주인공 Y 가 14 미만이면 10."""
     if kind in KINDS:
         items = lookup(prg, kind, g, k)
         names, _ = item_names(prg)
         return ' '.join(names.get(i, f'{i:02X}') for i in items)
     if kind == 6:
         p = inn_price(prg, g, k)
+        if g == INN_10_GROUP and y is not None and y + 1 < INN_10_Y:
+            return f'1인 {INN_10_PRICE}G(주인공 Y < {INN_10_Y:02X}, 표 값 {p}G)'
         return '표에 없음' if p is None else f'1인 {p}G'
     if kind in (0, 5):
         return church_menu(g, k)
@@ -215,8 +225,32 @@ def show_people(prg):
             n += 1
             when = ' & '.join(cond)
             print(f'{g:02X}/{k:02X} ({x:02X},{y:02X}) 대화 {t:03X} {how}{" [" + when + "]" if when else ""}'
-                  f' → {TALK_KINDS[kind]}: {offer(prg, g, k, kind)}')
+                  f' → {TALK_KINDS[kind]}: {offer(prg, g, k, kind, y)}')
     print(f'가게 인물 {n}곳')
+
+
+# 15:$B2F7(뱅크 15 함수 3): 가게 창·카지노·メダル 왕이 쓰는 값. 장소에 따라 아이템 가격 대신 정한 값을 쓴다.
+PRICE_18 = {0x06: 10, 0x79: 2}                 # 그룹 18: はがねのつるぎ 10, うまのふん 2 (15:$B302~)
+PRICE_22 = {0x17: 1, 0x4E: 4, 0x1C: 6}         # 그룹 22(メダル 왕): 메달 수. 그 밖은 20 (15:$B320~)
+PRICE_22_OTHER = 20
+CASINO_TABLE = 0xB375                          # 장소 04/01: (아이템, 값 2바이트) 6줄, 카지노 코인
+CASINO_ROWS = 6
+
+
+def price(prg, g, k, item):
+    """15:$B2F7 의 값. 그룹 18 에서 06·79 가 아니면 A 가 아이템인 채로 아래 비교로 떨어지는 것까지 그대로 따른다."""
+    a = g
+    if g == 0x18:
+        if item in PRICE_18:
+            return PRICE_18[item]
+        a = item
+    if a == 0x22:
+        return PRICE_22.get(item, PRICE_22_OTHER)
+    if a == 0x04 and k == 0x01:
+        rows = [(rd(prg, CODE_BANK, CASINO_TABLE + 3 * i), rd(prg, CODE_BANK, CASINO_TABLE + 3 * i + 1)
+                 | rd(prg, CODE_BANK, CASINO_TABLE + 3 * i + 2) << 8) for i in range(CASINO_ROWS + 1)]
+        return next((v for it, v in rows[:CASINO_ROWS] if it == item), rows[CASINO_ROWS][1])
+    return item_names(prg)[1].get(item, 0)
 
 
 def item_names(prg):
@@ -225,9 +259,11 @@ def item_names(prg):
     return names, prices
 
 
-def fmt_items(prg, items):
+def fmt_items(prg, items, g=None, k=None):
     names, prices = item_names(prg)
-    return ', '.join(f'{i:02X} {names.get(i, "?")} {prices.get(i, 0)}G' for i in items)
+    cost = (lambda i: prices.get(i, 0)) if g is None else (lambda i: price(prg, g, k, i))
+    unit = '메달' if g == 0x22 else '코인' if (g, k) == (0x04, 0x01) else 'G'
+    return ', '.join(f'{i:02X} {names.get(i, "?")} {cost(i)}{unit}' for i in items)
 
 
 def place(g, k):
@@ -238,7 +274,7 @@ def show_all(prg):
     for kind, label in KINDS.items():
         print(f'# {label} (18:${list_start(prg, kind):04X})')
         for g, k, items in shop_lists(prg, kind):
-            print(f'{place(g, k)}  {fmt_items(prg, items)}')
+            print(f'{place(g, k)}  {fmt_items(prg, items, g, k)}')
     print('# 덧붙임(15:$B26B)')
     extra = [rd(prg, CODE_BANK, EXTRA_16 + i) for i in range(3)]
     print(f'16/00 무기  $62E7~$62E9 가 0 이 아니면 차례로 {fmt_items(prg, extra)}')
@@ -252,7 +288,7 @@ def show(prg, g, k, ram=None, sram=None):
     for kind, label in KINDS.items():
         rows = [items for rg, rk, items in shop_lists(prg, kind) if (rg, rk) == (g, k)]
         if rows:
-            print(f'{label}  {fmt_items(prg, rows[0])}')
+            print(f'{label}  {fmt_items(prg, rows[0], g, k)}')
     for ig, ik, p in inns(prg):
         if (ig, ik) == (g, k):
             print(f'여관  1인 {p}G')

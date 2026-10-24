@@ -68,7 +68,7 @@ dq4(FC DQ4 원작):
 - [docs/dq4-encounter-format.md](docs/dq4-encounter-format.md): DQ4(FC) 적 조우 표(필드 구역 지도, 구역별 무리 후보, 조우율, 던전 층, 특수 전투, 배, 성수, 기습·선제)
 - [docs/dq4-warp.md](docs/dq4-warp.md): DQ4(FC) 장면 이동 도구(원하는 맵·필드 자리의 세이브스테이트 만들기)
 - [docs/dq4-script-format.md](docs/dq4-script-format.md): DQ4(FC) 인물 대화 스크립트(대화 번호, 조건·플래그·서비스 문장, 메시지 번호)
-- [docs/dq4-shop-format.md](docs/dq4-shop-format.md): DQ4(FC) 상점 품목·여관 값·가게 종류, 보물상자·발밑 숨은 물건과 열었음 플래그
+- [docs/dq4-shop-format.md](docs/dq4-shop-format.md): DQ4(FC) 상점 품목·장소별 값·여관 값·가게 종류, 보물상자·발밑 숨은 물건과 열었음 플래그, 얻는 물건 통합 표
 - [docs/dq4-save-format.md](docs/dq4-save-format.md): DQ4(FC) 저장 데이터(모험의 서·체크섬·인물 레코드), 이벤트 플래그, 장 시작 표
 - [docs/dq4-graphics-handoff.md](docs/dq4-graphics-handoff.md): 타이틀·일러스트 보존, 스프라이트 거절 사유·참고 사이트·후속 제작 방향
 - [docs/dq4-graphics.md](docs/dq4-graphics.md): 포팅용 스프라이트·샘플 맵·한글 타이틀·일러스트와 SFC 변환 규격
@@ -123,3 +123,4 @@ nds(NDS DQ4 리메이크·한글 팬패치 참고): [nds/dq4/README.md](nds/dq4/
 - [2026-10-25-28: 이벤트 표와 진행 목록·마차·손님·움직임](docs/journal/dq4/2026-10-25-28-talk3.md)
 - [2026-10-25-29: 원작 필드 인물·몬스터 그림 뽑기](docs/journal/dq4/2026-10-25-29-fcsprite.md)
 - [2026-10-25-30: 원작 맵·필드·타일 그림 뽑기](docs/journal/dq4/2026-10-25-30-fcgfx.md)
+- [2026-10-25-31: 얻는 물건 통합 표·장소별 값·숨는 가게 인물](docs/journal/dq4/2026-10-25-31-shop3.md)
