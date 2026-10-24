@@ -24,6 +24,8 @@ NDS 판은 **참고 자료**입니다. 패치는 계속 SFC DQ5 롬 위에 FC DQ
 | 그래픽 | 인물 187팩, 몬스터 303(조립 277), 맵·전투 배경 675(텍스처와 위에서 본 렌더링), 효과 188, 아이콘 424 등 4,204파일. 세계 지도 배치는 못 풂. 결과는 비공개 저장소 `nds/dq4/` | [graphics-format.md](docs/graphics-format.md), `ndsgfx.py export` |
 | 동료 대화 표 | `PARAM/param_player_talk1`~`6.dat`, 44바이트 레코드 7,209개, 메시지 번호만 확정 | `ndstext.py talk` |
 | 툴킷 | v0.5.0 의 `krpatch nds`. 패치 적용은 `xdelta3`(LZMA 2차 압축) | |
+| 디버그·워프 | 부팅 디버그 메뉴(장면 `0x01`)·전투 테스트(`0x11`)·메시지 디버그(`0x16`), 진행도 프리셋 347개 적용, 맵 워프, 장 시작 세이브스테이트 `work/state/dq4ds-{boot,ch0..ch6,ch6-psaro}.state` | [debug.md](docs/debug.md), `ndswarp.py chapters` |
+| RAM | 장면 `0x021080AC`/요청 `0x021080B4`, 맵 이름 `0x020C4F44`, 주인공 자리 `0x020EC524`, 돈 `0x020C55F0`, 프리셋 대기 `0x020B970C` | [debug.md](docs/debug.md#ram-지도) |
 | 에뮬레이터 | desmume libretro 코어([EMU-01](../../.agents/skills/analysis/SKILL.md#emu-01--에뮬레이터는-mesence)) | |
 
 실험 출력은 원래 체크아웃의 `work/nds/`(풀어 둔 두 롬 `jp`·`kr`)에 둡니다. 워크트리에서는 `ln -s "$MAIN/work/nds" work/nds` 로 링크해 씁니다(롬 하나가 100MB 넘음).
@@ -34,7 +36,7 @@ NDS 판은 **참고 자료**입니다. 패치는 계속 SFC DQ5 롬 위에 FC DQ
 
 1. **채택 이름** — 대조표를 사용자에게 보여 채택 열을 채웁니다.
 2. **그래픽 남은 것** — 세계 지도 배치(`FIELD/bin/worldmap*.bin`)부터. 추출 자체는 끝났고 결과는 비공개 에셋 저장소에만([graphics-format.md](docs/graphics-format.md#남은-것)).
-3. **디버그·워프 도구** — 6장·이민 마을 같은 늘어난 장면을 바로 열어 보려면 필요합니다.
+3. **늘어난 장면 확인** — `ndswarp.py preset`·`map` 으로 6장·이민 마을·동료 대화 장면을 바로 엽니다([debug.md](docs/debug.md)). 디버그 남은 것은 todo.
 4. **늘어난 내용의 조건** — 동료 대화가 문장을 고르는 표(`SCRIPT`·`PARAM`)를 찾아 이식 설계의 근거로.
 
 ## 조심할 것
