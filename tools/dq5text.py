@@ -90,6 +90,13 @@ CHARS = (
 # 묶음 안 글자는 폭×높이 비트씩 이어 붙은 1bpp 그림이고, 줄마다 폭 비트를 LSB 쪽부터 읽어 높은 비트가 왼쪽 점이다.
 FONT_GROUPS = 0x24B176
 GLYPHS = 0x3DB
+# 24:A7B6. 이름 문자열(1바이트 부호)을 글자 코드로. 보통 바이트 b 는 24:B270 + b*2, 84 xx 는 24:AE9A 에서 xx 를 찾은 순번 i 로
+# 24:B36E + i*2(탁점 글자), 83 xx 는 같은 표의 28 번째부터 찾는다(반탁점 글자). 01 은 공백.
+STRING_CODES = 0x24B270
+MARK_KEYS = 0x24AE9A
+MARK_CODES = 0x24B36E
+# 21:955D. 이름 표 번호($43)마다 [길이][바이트…] 가 이어진 문자열 목록의 시작.
+STRING_TABLES = 0x21959B
 # 끝 코드와 줄바꿈. 나머지 제어 코드는 {XXXX} 로 둔다(docs/dq5-text-format.md 의 「제어 코드」).
 CONTROL = {0x1000: '\n', 0x1001: '{end}', 0x1010: '{end}', 0x1018: '{end}'}
 
@@ -165,6 +172,32 @@ def glyph(rom, code, groups=None):
         v = (rom.u8(a) | rom.u8(a + 1) << 8 | rom.u8(a + 2) << 16) >> (bit & 7)
         rows.append([(v >> (w - 1 - x)) & 1 for x in range(w)])
     return w, h, rows
+
+
+def string_codes(rom, data):
+    out, i = [], 0
+    while i < len(data):
+        b = data[i]
+        if b in (0x83, 0x84):
+            i += 1
+            k = 0x28 if b == 0x83 else 0
+            while rom.u8(MARK_KEYS + k) != data[i]:
+                k += 1
+            out.append(rom.u16(MARK_CODES + k * 2))
+        elif b == 0x01:
+            out.append(0)
+        else:
+            out.append(rom.u16(STRING_CODES + b * 2))
+        i += 1
+    return out
+
+
+def string(rom, table, n):
+    """21:955D. 이름 표 table 의 n 번째 문자열 바이트."""
+    a = rom.u24(STRING_TABLES + table * 3)
+    for _ in range(n):
+        a += rom.u8(a) + 1
+    return bytes(rom.u8(a + 1 + i) for i in range(rom.u8(a)))
 
 
 def text(codes):
