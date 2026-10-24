@@ -10,7 +10,7 @@ DQ4 의 내용(맵, 인물과 대사, 이벤트 흐름, 몬스터·아이템·�
 
 ## 지금 상태
 
-실험 환경을 갖췄고, 필드 RAM·뱅크 전환·BRK 뱅크 호출·대사 텍스트를 풀었습니다. 정리는 [dq4-ram-format.md](dq4-ram-format.md)·[dq4-bank-format.md](dq4-bank-format.md)·[dq4-text-format.md](dq4-text-format.md), 과정은 `docs/journal/dq4/` 일지에 있습니다.
+실험 환경을 갖췄고, 필드 RAM·뱅크 전환·BRK 뱅크 호출·대사 텍스트·마을/던전 맵 배치를 풀었습니다. 정리는 [dq4-ram-format.md](dq4-ram-format.md)·[dq4-bank-format.md](dq4-bank-format.md)·[dq4-text-format.md](dq4-text-format.md)·[dq4-map-format.md](dq4-map-format.md), 과정은 `docs/journal/dq4/` 일지에 있습니다.
 
 | 항목 | 값 | 근거 |
 | --- | --- | --- |
@@ -18,7 +18,8 @@ DQ4 의 내용(맵, 인물과 대사, 이벤트 흐름, 몬스터·아이템·�
 | iNES 헤더 | 매퍼 1(MMC1, SUROM: CHR 0 레지스터 bit4 로 256KB 절반 선택), PRG 512KB, CHR-RAM, 배터리 | `krpatch fc info`, 쓰기 프로브 |
 | 도구 | 툴킷 v0.5.0 의 `krpatch fc info\|dis\|listing\|lua`. 프로브 `cover`·`reads`·`writes`·`trace`·`watch` | [tools/README.md](../tools/README.md#fc-dq4-툴킷의-fc-스크립트) |
 | 세이브스테이트 | `work/state/dq4-ch1-throne.mss`(1장 왕좌의 방, (10,15), 맵 `0D`), `dq4-ch1-courtyard.mss`(성 밖, (12,0A), 맵 `0A`). `tools/dq4state.sh` 가 롬에서 다시 만듦 | 스크립트 끝에 찍는 좌표·맵 번호 |
-| 필드 RAM | 좌표 `$0044`/`$0045`, 맵 번호 `$0028`(=`$0550`), 출구 표 `$05A0`(7바이트) | 걸어서 맵 두 번 전환 |
+| 필드 RAM | 좌표 `$0044`/`$0045`, 장소 `$63`/`$64`, 맵 종류 `$0028`(=`$0550`), 출구 표 `$05A0`(7바이트) | 걸어서 맵 두 번 전환 |
+| 맵 | 마을·던전 269개, 비트열 압축(사각형·길·점). [dq4-map-format.md](dq4-map-format.md), `tools/dq4map.py` | RAM 두 맵 0 차이, 경계 268곳 전수 |
 | 뱅크 전환 | `$FF91`(A=뱅크, `$0507` 이 현재 뱅크), `$C3EA` 다른 뱅크 바이트 읽기 | 쓰기·읽기 프로브 |
 | 뱅크 호출 | `BRK b1 b2`: 뱅크 = `b2` 상위 4비트+bit3, 함수 = `b1`, 주소 = 그 뱅크 `$8000` 표. [dq4-bank-format.md](dq4-bank-format.md), `tools/dq4bank.py` | 실행 기록 1019건과 디코더 0 차이 |
 | 데이터 뱅크 | `00`~`04`: 대사 본문, `1B`: 대사 끝부분과 사전 | 디코더 |
@@ -50,7 +51,7 @@ uv run krpatch fc listing rom/dq4.nes work/cov/cover.txt --range 3C000-3FFFF
 
 [todo.md](todo.md) 의 `## dq4` 순서대로 합니다.
 
-1. **출구 표와 맵** — `$05A0` 을 채우는 롬 데이터(`writes.lua` 로 `05A0-05BF`)와 맵 데이터 형식, 인물 배치. dq5 트랙의 [dq5-map-format.md](dq5-map-format.md) 와 같은 항목으로 정리합니다.
+1. **맵 나머지** — 블록 번호 → 그래픽·통행(맵 종류별 블록 정의, `$7800` 을 읽어 nametable 을 쓰는 코드부터), 출구 표 `$05A0` 을 채우는 롬 데이터(`writes.lua` 로 `05A0-05BF`), 인물 배치, 필드 지도. dq5 트랙의 [dq5-map-format.md](dq5-map-format.md) 와 같은 항목으로 정리합니다.
 2. **몬스터·아이템·주문·경험치 표, 이벤트 플래그와 장(章) 전환**. 플래그는 `BRK` 특수 형식이 쓰는 `$627B` 영역부터 봅니다.
 3. **롬 구조 나머지** — [dq4-bank-format.md 「남은 것」](dq4-bank-format.md#남은-것).
 4. **대사 나머지** — [dq4-text-format.md 「남은 것」](dq4-text-format.md#남은-것).
