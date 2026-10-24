@@ -41,6 +41,7 @@ SLOT = 0xBE
 PALSET_FLAGS = 0x2A8690
 # 0F:8ED7 그룹 포인터 54개. 마지막 그룹은 표 바로 앞에서 끝난다.
 GROUPS = 0x36
+HOOK_SCAN = 400
 # 그룹 $50 이상: ($BC, $BD 개수). docs/dq5-map-format.md 「그룹 $50 이상」.
 HIGH_MAPS = ((0x50, 2), (0x51, 8), (0x52, 1), (0x53, 3), (0x54, 4))
 # 01:A16B: [하한 16비트][포인터 색인] 10개를 뒤에서부터 보아 $075E 이상인 첫 항목. 01:A189 포인터 → 2·3번 줄 색 1~15.
@@ -60,6 +61,19 @@ UI_PALETTE = 0x0498D7
 # 2B:8000: 필드 타일 454~459(VRAM 워드 3C60)의 8벌을 1E:D0FF 의 RLE(01:A64F 와 같은 꼴)로 7E:C800 에 푼다.
 FIELD_ANIM = 0x1ED0FF
 FIELD_ANIM_TILE, FIELD_ANIM_COUNT, FIELD_ANIM_SETS = 0x1C6, 6, 8
+# 04:8000: 맵마다 VRAM BG 슬롯 001~ 에 올리는 공통 타일(문·보물상자 등 맵 위 물체가 씀).
+# (슬롯, 자료, 형식): rle = 1F:D28B 런 길이 압축(낮은 바이트 줄기 뒤 높은 바이트 줄기), raw = 4bpp 그대로 6개.
+COMMON_TILES = ((0x001, 0x04826E, 'rle'), (0x09E, 0x049287, 'rle'), (0x0A0, 0x049302, 'rle'), (0x0AE, 0x04940F, 'raw'))
+COMMON_TILES_5352 = 0x0492C7  # 53/52 만 슬롯 09E 를 이것으로
+# 01:F3C9: 맵을 푼 뒤 01:D2FC 표의 물체(닫힌 문 등)를 셀 위층에 그린다. 그룹마다·맵마다 [X][Y][종류][플래그][…] 5바이트,
+# 항목 끝 바이트가 80 이상이면 그 맵 끝, C0 이상이면 그룹 끝(빈 맵은 그 바이트 하나).
+DOOR_TABLE = 0x01D2FC
+# 종류 → 그리는 루틴(01:F4AF). 없는 종류는 01:F635. 루틴이 쓰는 타일 워드 표(01 뱅크)는 아래 둘이 종류로 고른다.
+DOOR_ROUTINES = {0x44: 0x01F6B1, 0x43: 0x01F5CA, 0x3F: 0x01F727, 0x40: 0x01F727, 0x49: 0x01F4E6, 0x42: 0x01F4E6,
+                 0x41: 0x01F4E6, 0x48: 0x01F4E6, 0x46: 0x01F69E}
+DOOR_TABLE_SELECT = {0xF7F7: ({0x3E: 0xFD9F, 0x3C: 0xFDAB, 0x3B: 0xFDB7, 0x3D: 0xFDC3, 0x4D: 0xFDCF}, 0xFDE7),
+                     0xF7D6: ({0x48: 0xFE8F, 0x49: 0xFE2F, 0x42: 0xFE4F}, 0xFE6F),
+                     0xF7C8: ({0x3F: 0xFDFF}, 0xFE17)}
 # 25:85D5: ルーラ 목적지의 맵 그룹 22개. 이름은 이름 표 0B(23:D5F3) 의 같은 순번.
 RURA_GROUPS, RURA_COUNT, TOWN_NAMES = 0x2585D5, 22, 0x0B
 
@@ -166,10 +180,161 @@ def decode_map(rom, bc, bd):
     w, h, buf, _ = dec.decode(map_pointer(rom, bc, bd), trace=trace)
     buf = bytearray(buf)
     apply_hook(rom, bc, bd, buf, w)
+    hook_clears(rom, bc, bd, buf)
+    if bc < 0x50:
+        dec.doors = apply_doors(rom, bc, bd, buf, w, h)
+    dec.common = common_tiles(rom, bc, bd)
     blocks = sorted({args[0] for *_, op, args in trace if op == 'block'}
                     | ({(rom.u8(map_pointer(rom, bc, bd) + 7) & 7) << 8 | rom.u8(map_pointer(rom, bc, bd) + 8)}
                        if rom.u8(map_pointer(rom, bc, bd) + 7) & 0x80 else set()))
     return dec, w, h, buf, blocks
+
+
+def common_tiles(rom, bc, bd):
+    """04:8000 이 맵마다 BG 슬롯 001~0B3 에 올리는 공통 타일 {슬롯: 32바이트}."""
+    from dq5sprite import split_tiles
+    out = {}
+    for slot, a, kind in COMMON_TILES:
+        if slot == 0x09E and (bc, bd) == (0x53, 0x52):
+            a = COMMON_TILES_5352
+        if kind == 'rle':
+            tiles, _ = split_tiles(rom, a, False)
+        else:
+            o = lorom(a)
+            tiles = [rom.d[o + i * 32:o + i * 32 + 32] for i in range(6)]
+        for i, t in enumerate(tiles):
+            out[slot + i] = bytes(t)
+    return out
+
+
+def door_entries(rom):
+    """01:D2FC 표: {(BC, BD): [[X, Y, 종류, 플래그, 끝 바이트]]}."""
+    out, a, y, g, m = {}, DOOR_TABLE, 0, 0, 0
+    while g < GROUPS:
+        b = rom.u8(a + y)
+        if b < 0x80:
+            e = [rom.u8(a + y + i) for i in range(5)]
+            y += 5
+            out.setdefault((g, m), []).append(e)
+            b = e[4]
+        else:
+            y += 1
+        if b >= 0xC0:
+            g, m = g + 1, 0
+        elif b >= 0x80:
+            m += 1
+    return out
+
+
+def door_shape(rom, kind):
+    """닫힌 상태 그리기 루틴을 따라 읽어 [(dx, dy, 위층 타일 워드)]. STA [$00],Y 의 Y 가 5·0D·15·1D 면 같은 줄의 0~3번째 셀,
+    JSR 01:EFED 는 다음 줄(코드 읽기를 기계로 옮긴 것)."""
+    from kr_patch.sfc.dis65816 import decode
+    from kr_patch.sfc.mapper import LoROM
+    pc, m8, x8, tab, y, src, row, out = DOOR_ROUTINES.get(kind, 0x01F635), True, True, None, 0, None, 0, []
+    for _ in range(HOOK_SCAN):
+        op = rom.u8(pc)
+        _, n, _, _ = decode(rom.d, pc, m8=m8, x8=x8, mapper=LoROM())
+        nxt = (pc & 0xFF0000) | ((pc + n) & 0xFFFF)
+        if op in (0xC2, 0xE2):
+            v = rom.u8(pc + 1)
+            if v & 0x10:
+                x8 = op == 0xE2
+            if v & 0x20:
+                m8 = op == 0xE2
+        elif op == 0xA2 and n == 3:
+            tab = rom.u16(pc + 1)
+        elif op == 0xA0:
+            y = rom.u8(pc + 1) if n == 2 else rom.u16(pc + 1)
+        elif op == 0xC8:
+            y += 1
+        elif op == 0x88:
+            y -= 1
+        elif op == 0xB1:
+            src = y
+        elif op == 0xB2:
+            src = 0
+        elif op == 0x97 and not m8 and y in (0x05, 0x0D, 0x15, 0x1D) and src is not None:
+            out.append(((y - 5) // 8, row, rom.u16(0x010000 | (tab + src))))
+        elif op == 0x20:
+            target = rom.u16(pc + 1)
+            if target == 0xEFED:
+                row += 1
+            elif target in DOOR_TABLE_SELECT:
+                table, default = DOOR_TABLE_SELECT[target]
+                tab = table.get(kind, default)
+        elif op == 0x82:
+            nxt = (pc & 0xFF0000) | ((pc + 3 + rom.u16(pc + 1)) & 0xFFFF)
+        elif op == 0x60:
+            break
+        pc = nxt
+    return out
+
+
+def apply_doors(rom, bc, bd, buf, w, h, doors=None):
+    """01:D2FC 의 물체를 닫힌 상태로 셀 위층(+5·+6)에 그린다. 그린 물체 [(X, Y, 종류)]."""
+    placed = []
+    for x, y, kind, _, _ in (doors if doors is not None else door_entries(rom)).get((bc, bd), []):
+        for dx, dy, word in door_shape(rom, kind):
+            if x + dx < w and y + dy < h:
+                o = ((y + dy) * w + x + dx) * 8
+                buf[o + 5], buf[o + 6] = word & 0xFF, word >> 8
+        placed.append((x, y, kind))
+    return placed
+
+
+def hook_clears(rom, bc, bd, buf):
+    """맵별 루틴(15:F907)이 `LDA #$7E / PHA / PLB` 뒤 STZ abs·TRB abs 로 셀 버퍼를 지우는 것을 buf 에 반영한다
+    (dq5exit.apply_hook 은 LDA #즉값 / STA 만 본다). 35/03 의 1E:F39F 는 플래그(BRK #$0B 08 30)가 꺼져 있으면
+    보물상자 하나의 위층을 지우고 가구 비트를 내린다. 플래그는 모두 꺼진 것으로 본다: BRK #$0B(00:93BA) 바로 뒤의 BEQ 는 건너뛰고
+    BNE 는 지나간다. 그 밖의 분기는 따지지 않고 처음 RTL 까지 순서대로 읽는다."""
+    from dq5exit import HOOK_NONE, map_hook
+    from kr_patch.sfc.dis65816 import decode
+    from kr_patch.sfc.mapper import LoROM
+    pc = map_hook(rom, bc, bd)
+    if pc == HOOK_NONE:
+        return 0
+    m8 = x8 = True
+    imm = db = pushed = None
+    n_written, after_flag = 0, False
+    for _ in range(HOOK_SCAN):
+        op = rom.u8(pc)
+        _, n, _, _ = decode(rom.d, pc, m8=m8, x8=x8, mapper=LoROM())
+        if after_flag and op == 0xF0:
+            off = rom.u8(pc + 1)
+            pc = (pc & 0xFF0000) | ((pc + 2 + (off - 256 if off & 0x80 else off)) & 0xFFFF)
+            after_flag = False
+            continue
+        after_flag = False
+        if op in (0xC2, 0xE2):
+            v = rom.u8(pc + 1)
+            if v & 0x20:
+                m8 = op == 0xE2
+            if v & 0x10:
+                x8 = op == 0xE2
+        elif op == 0xA9:
+            imm = rom.u8(pc + 1) if m8 else rom.u16(pc + 1)
+        elif op == 0x48:
+            pushed = imm
+        elif op == 0xAB:
+            db = pushed
+        elif op in (0x9C, 0x1C) and db == 0x7E:
+            a = rom.u16(pc + 1) - 0xC000
+            for k in range(1 if m8 else 2):
+                if 0 <= a + k < len(buf):
+                    buf[a + k] = 0 if op == 0x9C else buf[a + k] & ~((imm >> (8 * k)) & 0xFF) & 0xFF
+                    n_written += 1
+        elif op == 0x00:
+            if rom.u8(pc + 1) != 0x0B:
+                break
+            n = 4
+            after_flag = True
+        elif op == 0x22:
+            db = None
+        if op in (0x6B, 0x60, 0x40):
+            break
+        pc = (pc & 0xFF0000) | ((pc + n) & 0xFFFF)
+    return n_written
 
 
 def draw_cells(rom, dec, w, h, buf, cgram, layers=(2, 5)):
@@ -181,10 +346,17 @@ def draw_cells(rom, dec, w, h, buf, cgram, layers=(2, 5)):
         for cell in range(w * h):
             o = cell * 8 + layer
             word = buf[o] | buf[o + 1] << 8
-            chr_id = slot_chr.get(word & 0x3FF) if word else None
-            if chr_id is None:
+            if not word:
                 continue
-            t = tc.get(chr_id, (word >> 10) & 7, bool(word & 0x4000), bool(word & 0x8000))
+            chr_id = slot_chr.get(word & 0x3FF)
+            if chr_id is not None:
+                t = tc.get(chr_id, (word >> 10) & 7, bool(word & 0x4000), bool(word & 0x8000))
+            elif word & 0x3FF in getattr(dec, 'common', {}):
+                pal = (word >> 10) & 7
+                t = tile_image(planar(dec.common[word & 0x3FF]), colors[pal * 16:pal * 16 + 16],
+                               bool(word & 0x4000), bool(word & 0x8000))
+            else:
+                continue
             img.paste(t, (cell % w * 8, cell // w * 8), t)
     return img
 
@@ -475,9 +647,13 @@ def map_marks(rom, bc, bd, buf, w, h):
 
 
 def annotate(base, marks):
-    """노랑 인물(번호, 왼쪽 칸 기준 16x16), 하늘색 출구, 빨강 T 보물상자, 분홍 S タンス·ツボ·タル, 분홍 F 발밑."""
+    """노랑 인물(번호, 왼쪽 칸 기준 16x16), 하늘색 출구, 빨강 T 보물상자, 분홍 S タンス·ツボ·タル, 분홍 F 발밑,
+    주황 D 맵 위 물체(01:D2FC, 닫힌 문 등. 왼쪽 위 칸에 종류 번호)."""
     img = base.convert('RGB')
     d = ImageDraw.Draw(img)
+    for x, y, kind in marks.get('doors', []):
+        d.rectangle((x * 8, y * 8, x * 8 + 7, y * 8 + 7), outline=(255, 150, 0))
+        d.text((x * 8 + 1, y * 8 - 2), f'D{kind:02X}', fill=(255, 150, 0))
     for x, y in marks['exits']:
         d.rectangle((x * 8, y * 8, x * 8 + 7, y * 8 + 7), outline=(0, 200, 255))
     for x, y in marks['search']:
@@ -504,9 +680,11 @@ def export_maps(rom, out, only=None):
         stem = map_stem(bc, bd, names)
         dec, w, h, buf, blocks = decode_map(rom, bc, bd)
         marks = map_marks(rom, bc, bd, buf, w, h)
+        marks['doors'] = getattr(dec, 'doors', [])
         meta = dict(map=f'{bc:02X}/{bd:02X}', name=names.get(bc, '') if bc < 0x50 else '', stem=stem,
                     size=f'{w}x{h}', addr=f'{map_pointer(rom, bc, bd):06X}', blocks=len(blocks), chrs=len(dec.chr_map),
-                    npcs=len(marks['npcs']), exits=len(marks['exits']), chests=len(marks['chests']))
+                    npcs=len(marks['npcs']), exits=len(marks['exits']), chests=len(marks['chests']),
+                    doors=len(marks['doors']))
         title = f'{bc:02X}/{bd:02X}' + (f' {meta["name"]}' if meta['name'] else '')
         group = f'그룹 {bc:02X}'
         day_cg = map_cgram(rom, bc, bd)
