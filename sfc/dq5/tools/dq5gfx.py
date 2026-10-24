@@ -80,6 +80,9 @@ DOOR_TABLE_SELECT = {0xF7F7: ({0x3E: 0xFD9F, 0x3C: 0xFDAB, 0x3B: 0xFDB7, 0x3D: 0
 WORLD_SCREEN_COLORS = 0x03CC2C
 WORLD_SCREEN_BLOCK_COLOR = 0x03CC48
 WORLD_SCREEN_STEP_X, WORLD_SCREEN_STEP_Y = 0x03CD48, 0x03CD58
+# 1E:D7E3: 타이틀 화면 글자(ENIX PRESENTS ~ DRAGON QUEST V)의 2bpp 타일. 필드 RLE(01:A64F)와 같은 꼴이고,
+# 앞 16바이트(빈 타일 하나)를 더하면 8x16 글자 칸마다 위 타일·아래 타일 순서다.
+CREDITS_FONT = 0x1ED7E3
 # 25:85D5: ルーラ 목적지의 맵 그룹 22개. 이름은 이름 표 0B(23:D5F3) 의 같은 순번.
 RURA_GROUPS, RURA_COUNT, TOWN_NAMES = 0x2585D5, 22, 0x0B
 
@@ -1118,9 +1121,30 @@ def export_world_screen(rom, out):
                  '보여 줌(1점 = 필드 좌표 1, 03:CD50 걸음 표)')
 
 
+def credits_tiles(rom):
+    from dq5field import rle
+    data, _ = rle(rom, CREDITS_FONT)
+    data = bytes(16) + data
+    return [data[i * 16:i * 16 + 16] for i in range(len(data) // 16)]
+
+
+def export_credits(rom, out):
+    o = lorom(UI_PALETTE)
+    colors = cgram_colors(rom.d[o:o + 8])
+    tiles = credits_tiles(rom)
+    n = len(tiles) // 2
+    img = Image.new('RGB', (n * 8, 16), colors[0])
+    for g in range(n):
+        for half in (0, 1):
+            t = tile_image(chr_2bpp(tiles[g * 2 + half]), colors[0:4])
+            img.paste(t, (g * 8, half * 8), t)
+    out.save(img, 'gfx/screens/credits-font.png', 'screens', f'타이틀 화면 글자 칸 {n}개(8x16)', '타이틀',
+             note='1E:D7E3 RLE, 칸마다 위·아래 타일. 넓은 글자는 칸 둘. 색은 BG3 팔레트 0(04:98D7)으로 칠함')
+
+
 EXPORTS = {'maps': export_maps, 'chr': export_chr, 'field': export_field, 'anim': export_anim,
            'monsters': export_monsters, 'battlebg': export_battlebg, 'font': export_font, 'ui': export_ui,
-           'worldmap': export_world_screen}
+           'worldmap': export_world_screen, 'credits': export_credits}
 COMMAND = 'uv run --locked python sfc/dq5/tools/dq5gallery.py rom/dq5.sfc --out $OUT'
 
 
