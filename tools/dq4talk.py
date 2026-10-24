@@ -426,9 +426,9 @@ A_WRITERS = {'ADC', 'SBC', 'AND', 'ORA', 'EOR', 'ASL', 'LSR', 'ROL', 'ROR', 'PLA
 
 
 def brk_len(b1, b2):
-    """BRK 문장 길이(복귀 = BRK + 길이). dq4-bank-format.md 의 x3 형식(10:$808A~)과 플래그 형식."""
+    """BRK 문장 길이(복귀 = BRK + 길이). dq4-bank-format.md 의 x3 형식(dq4bank.x3_length, 모르면 3)과 플래그 형식."""
     if b2 & 0x0F == 0x03:
-        return 4 if b2 >> 4 in (2, 4, 6, 8) else 3
+        return dq4bank.x3_length(b2) or 3
     return 4 if b2 & 0x0F == 0x0B and 0xCB <= b2 < 0xFB else 3
 
 

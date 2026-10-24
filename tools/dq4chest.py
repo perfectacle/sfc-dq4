@@ -252,14 +252,7 @@ SHOP_ENTRIES = {0x9CBF, 0xB550, 0xB558, 0xB84A, 0xB847, 0xB84D, 0xB851, 0xB858, 
 ROUTINE_CHECKS = {0x9AC9: 'yes', 0xA794: 'item {:02X}', 0x9AF8: 'party {:02X}'}
 # 카지노·メダル 왕 경품: 값을 무엇으로 치르는지(15:$A8CE·$AA2F)
 PRIZE_COST = {0xA898: '카지노 코인 $62AD~$62AF', 0xA9C2: 'ちいさなメダル 맡긴 수 $62A2'}
-# BRK 특수 형식 x3 의 복귀 자리(docs/dq4-bank-format.md). 표에 없는 x3 은 BRK+3
-X3_LEN = {0x23: 4, 0x43: 4, 0x63: 4, 0x83: 5, 0x93: 4, 0xC3: 4, 0xD3: 4}
-
-
-def brk_len(b1, b2):
-    if b2 & 0x0F == 0x03:
-        return X3_LEN.get(b2, 3)
-    return 4 if b2 & 0x0F == 0x0B and 0xCB <= b2 < 0xFB else 3
+brk_len = dq4talk.brk_len
 
 
 def gift_scan(prg, start, seen=None, depth=0):
