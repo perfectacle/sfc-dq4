@@ -6,8 +6,12 @@
 
 RLE: 제어 바이트 c. bit7=0 이면 다음 c+1 바이트를 그대로, bit7=1 이면 n=c&7F 가 0 이면 끝, 아니면 다음 한 바이트를 n+1 번.
 
+세계는 셋이고 01:9F40 이 $1949 로 고른다(0 지상 01:A5C2, 1 01:A5F1, 2 01:A620). 블록·타일 표는 셋이 같다.
+마을 입장은 2A:F247: 필드 좌표가 04:FD97 [그룹][X][Y] 와 같고 그룹의 세계가 $1949 와 같으면 0F:EA97 항목으로 들어간다.
+
 사용:
-  python tools/dq5field.py rom/dq5.sfc [--compare wram.bin] [--vram vram.bin] [--png out.png]
+  python tools/dq5field.py rom/dq5.sfc [--world N] [--compare wram.bin] [--vram vram.bin] [--png out.png]
+  python tools/dq5field.py rom/dq5.sfc --entrances
 """
 import argparse
 import os
@@ -18,6 +22,11 @@ from dq5map import Rom  # noqa: E402
 
 WORLD = 0x179A59
 FIELD_E000 = 0x2A8D3E
+# $1949 = 0, 1, 2 일 때의 (세계 지도 7F:0000, 9번째 비트 7E:E000).
+WORLDS = ((WORLD, FIELD_E000), (0x2AB722, 0x2AC310), (0x2AC51A, 0x2AD299))
+ENTRANCES = 0x04FD97
+# 그룹마다 5바이트. +0 bit0-4 $BD, bit5-6 세계+1, bit7 → $194A bit7 / +1 X / +2 Y / +3 방향($C3) / +4 bit0·1·7 → $198E, bit2-6 → $194A
+GROUP_ARRIVAL = 0x0FEA97
 # 필드 BG 타일 512개(4bpp). RLE 를 7E:C000-FFFF 에 풀면 비트플레인 0·1·2·3 이 4KB 씩(C000/D000/E000/F000),
 # 01:A4CE 가 타일마다 섞어 VRAM 워드 2000- 에 올린다.
 FIELD_CHR = 0x12B1A8
@@ -57,6 +66,19 @@ def field_chr(rom):
         for r in range(8):
             out += bytes([e[i * 8 + r], f[i * 8 + r]])
     return bytes(out)
+
+
+def entrances(rom):
+    """04:FD97 입구마다 (그룹, X, Y, 세계, (도착 $BD, X, Y, 방향)). 그룹 $50 이상과 2A:F28D 의 예외는 표를 따르지 않는다."""
+    out, a = [], ENTRANCES
+    while rom.u8(a) != 0xFF:
+        g = rom.u8(a)
+        e = [rom.u8(GROUP_ARRIVAL + g * 5 + i) for i in range(5)]
+        # 2A:FEF5: $50 이상은 $54 를 빼고 세계 0. 05 도 세계 0 으로 본다.
+        world = 0 if g >= 0x50 or g == 0x05 else ((e[0] >> 5) & 3) - 1
+        out.append((g, rom.u16(a + 1), rom.u16(a + 3), world, (e[0] & 0x1F, e[1], e[2], e[3])))
+        a += 5
+    return out
 
 
 def block_number(world, hibits, x, y):
@@ -114,15 +136,22 @@ def render(rom, world, hibits, vram, cgram, x0, y0, w, h, path, char_base=0x4000
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('rom')
+    ap.add_argument('--world', type=int, default=0, choices=(0, 1, 2), help='$1949')
+    ap.add_argument('--entrances', action='store_true', help='04:FD97 입구와 0F:EA97 도착 자리')
     ap.add_argument('--compare')
     ap.add_argument('--png')
     ap.add_argument('--vram', help='필드에 선 순간의 VRAM 덤프(64KB)와 타일 그래픽 비교')
     args = ap.parse_args()
     rom = Rom(open(args.rom, 'rb').read())
-    world, end_w = rle(rom, WORLD)
-    e000, end_e = rle(rom, FIELD_E000)
-    print(f'world {len(world)} bytes ({WORLD:06X}-{end_w - 1:06X}), distinct {len(set(world))}')
-    print(f'7E:E000 {len(e000)} bytes ({FIELD_E000:06X}-{end_e - 1:06X})')
+    if args.entrances:
+        for i, (g, x, y, w, (bd, ax, ay, d)) in enumerate(entrances(rom)):
+            print(f'{i:2d} ({x},{y}) world {w} -> {g:02X}/{bd:02X} ({ax},{ay}) dir {d}')
+        return 0
+    src_w, src_e = WORLDS[args.world]
+    world, end_w = rle(rom, src_w)
+    e000, end_e = rle(rom, src_e)
+    print(f'world {len(world)} bytes ({src_w:06X}-{end_w - 1:06X}), distinct {len(set(world))}')
+    print(f'7E:E000 {len(e000)} bytes ({src_e:06X}-{end_e - 1:06X})')
     if args.compare:
         w = open(args.compare, 'rb').read()
         print('world == 7F:0000:', world == w[0x10000:0x20000], '/ e000 == 7E:E000:', e000 == w[0xE000:0x10000])

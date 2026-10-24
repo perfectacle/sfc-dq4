@@ -105,6 +105,7 @@ dq4(FC DQ4 원작):
 - [2026-10-25-12: 이벤트 전투 무리 표와 롬 밖 뱅크 실행 감시](docs/journal/dq5/2026-10-25-12-event-battle.md)
 - [2026-10-25-13: 인물 표와 인라인 스크립트](docs/journal/dq5/2026-10-25-13-npc-script.md)
 - [2026-10-25-14: 조우의 남은 것](docs/journal/dq5/2026-10-25-14-encounter2.md)
+- [2026-10-25-15: 마을 입장 실측과 세계 지도 셋](docs/journal/dq5/2026-10-25-15-field.md)
 
 #### dq4
 
