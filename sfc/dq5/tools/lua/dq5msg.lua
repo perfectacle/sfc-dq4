@@ -2,6 +2,7 @@
 -- 7E 뱅크 주소 =값 |OR &AND)·POKE(매 프레임 고정, CPU 주소=값)를 걸고 PRE 입력(walk.lua 와 같은 "a:4,wait:30" 꼴)을 재생한다.
 --   CALLS="248BAF,2481A4"   그 PC 를 지날 때 프레임·A·X·Y(와 LOG 에 적은 주소의 16비트 값)를 기록
 --   WW="0000F5,7E31EB"      그 주소에 쓸 때 프레임·값·PC 를 기록
+--   WWRANGE="7E3000-7E37FF:1F=0B"  범위 안에서 (주소 & 마스크) = 값 인 곳(인물 표의 한 슬롯)에 쓸 때 기록
 --   SHOTS="300,400"         그 프레임 화면을 sNNNNN.png 로
 --   DUMP="300:7E2000:64"    그 프레임에 메모리(CPU 주소부터 길이)를 16진으로 기록
 -- MAXF 프레임에 SHOT_DIR/msg.txt 와 end.png 를 쓰고 멈춘다.
@@ -39,6 +40,16 @@ for a in string.gmatch(os.getenv("WW") or "", "[^,]+") do
     local s = emu.getState()
     log[#log + 1] = string.format("%d W %06X=%02X pc=%02X:%04X", n, adr, val or 0, s["cpu.k"], s["cpu.pc"])
   end, emu.callbackType.write, addr, addr)
+end
+local wr = os.getenv("WWRANGE")
+if wr then
+  local a, b, mask, val = wr:match("(%x+)-(%x+):(%x+)=(%x+)")
+  a, b, mask, val = tonumber(a, 16), tonumber(b, 16), tonumber(mask, 16), tonumber(val, 16)
+  emu.addMemoryCallback(function(adr, v)
+    if (adr & mask) ~= val or #log > 20000 then return end
+    local s = emu.getState()
+    log[#log + 1] = string.format("%d W %06X=%02X pc=%02X:%04X", n, adr, v or 0, s["cpu.k"], s["cpu.pc"])
+  end, emu.callbackType.write, a, b)
 end
 local maxf = tonumber(os.getenv("MAXF") or "1000")
 emu.addEventCallback(function()
