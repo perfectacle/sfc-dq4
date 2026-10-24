@@ -8,11 +8,15 @@
       전투 창이면 옆의 end.nt)가 차례로 찍은 메시지들과 맞는지. 치환 제어(F6 이름 등)는 아무 글자와 맞춤
   python tools/dq4text.py rom/dq4.nes controls        제어 바이트 ED~FF 의 처리기 주소·뜻·쓰는 메시지 수
   python tools/dq4text.py rom/dq4.nes windows         창 문자열 표 16:$A572(그룹, 항목, 루틴/문자열, 글자)
+  python tools/dq4text.py rom/dq4.nes export [DIR]    메시지·창 문자열·이름 목록을 기호 텍스트 JSON·TSV 로(기본 work/text).
+      --check 면 쓰지 않고 기호 → 바이트 왕복과 부호 → 롬 비트열만 검사. 출력은 저작권 텍스트라 커밋하지 않는다
 
 근거 루틴: 0F:$DF99(6비트 부호 읽기), 0F:$DFD5(뱅크 넘김), 16:$8656(메시지 번호 → 시작),
 16:$86BA(부호 → 글자, 가나 전환, 사전 단어), 16:$9783·$97B0(창 문자열과 80 이상 바이트).
 """
+import json
 import os
+import re
 import sys
 import unicodedata
 
@@ -221,27 +225,41 @@ def shown(bs):
     return bs
 
 
-def message_bytes(rom, msg):
-    """메시지 하나를 글자 바이트 목록으로(끝 부호의 글자 바이트까지 포함)."""
+def message_codes(rom, msg):
+    """메시지 하나의 시작 (뱅크, 주소, 단계 0~3) 과 6비트 부호 목록(끝 부호 39 까지).
+    첫 부호는 그 주소 바이트의 bit7·1·3·5(단계 0·1·2·3)에서 시작한다."""
     codes = Codes(rom, *rom.start(msg))
     for _ in range(msg & 0x1F):
         while codes.next() != END:
             pass
-    kana, out = 0, []
+    at = (codes.bank, codes.ptr, codes.phase & 3)
+    out = []
     while True:
         c = codes.next()
+        out.append(c)
+        if c > 0x3C:
+            out.append(codes.next())
+        elif c == END:
+            return at, out
+
+
+def decode(rom, codes):
+    """6비트 부호 목록을 글자 바이트로(16:$86BA). 3C 는 가나 모드, 3D~3F 는 다음 부호와 함께 사전 단어."""
+    kana, out, it = 0, [], iter(codes)
+    for c in it:
         if c == 0x3C:
             kana ^= 1
         elif c > 0x3C:
-            out += rom.dict_word(c - 0x3D, codes.next())
+            out += rom.dict_word(c - 0x3D, next(it))
         else:
             b = rom.byte(CHARS[0], CHARS[1] + kana * 64 + c)
-            if b == 0xF0:
-                out += rom.dict_word(0, 0)
-            else:
-                out.append(b)
-            if c == END:
-                return out
+            out += rom.dict_word(0, 0) if b == 0xF0 else [b]
+    return out
+
+
+def message_bytes(rom, msg):
+    """메시지 하나를 글자 바이트 목록으로(끝 부호의 글자 바이트까지 포함)."""
+    return decode(rom, message_codes(rom, msg)[1])
 
 
 def block_count():
@@ -374,6 +392,233 @@ def window_text(rom, g, n):
     return ''.join(parts)
 
 
+# 포팅용 기호 텍스트. 글자는 유니코드로, 제어 바이트는 {이름} 이나 {이름:인자} 로, 그 밖은 {XX}(16진 한 바이트).
+# 탁점·반탁점(3D·3E) + 글자는 합친 글자 하나로 쓴다. 탁점 글자 타일 65~69(ドじだどぶ)와 겹치므로 하나만 맨 글자로:
+# 롬은 ド 를 대개 타일 65 로, じだどぶ 는 언제나 탁점으로 쓰니 ド 는 타일, 3D+ト 는 {3D}ト, 타일 66~69 는 {66} 처럼.
+SYMBOLS = {
+    0xED: 'FLASH', 0xEE: 'SOUND', 0xEF: 'STR', 0xF0: 'LINE_F0', 0xF1: 'NOINDENT', 0xF2: 'NAMEPTR',
+    0xF3: 'SPELLSTEM', 0xF4: 'PAUSE', 0xF5: 'SPELL', 0xF6: 'NAME', 0xF7: 'ITEM', 0xF8: 'NUM',
+    0xF9: 'END', 0xFA: 'ENDLINE', 0xFB: 'WAIT', 0xFC: 'LINE', 0xFD: 'WAITLINE', 0xFE: 'BR', 0xFF: 'STOP',
+}
+SYMBOL_BYTES = {v: k for k, v in SYMBOLS.items()}
+INLINE_ARG = {0xEE}                          # 다음 글자 바이트가 인자(16:$8198 이 16:$803F 로 읽음)
+SLOT_ARG = {0xF2, 0xF3, 0xF5, 0xF6, 0xF7}    # 인자 목록 $F9+칸 에서 하나씩. 칸 $5B 는 메시지마다 0(16:$8596)
+MARKS = (0x3D, 0x3E)
+CHAR_OF = {b: c for b, c in GLYPHS.items() if b not in MARKS and b not in (0x66, 0x67, 0x68, 0x69)}
+BYTE_OF = {c: b for b, c in CHAR_OF.items()}
+TOKEN = re.compile(r'\{([^{}]*)\}|Ex|.', re.S)
+
+
+def symbolize(bs, ref=None):
+    """글자 바이트를 기호 텍스트로. ref 가 있으면 80 이상 바이트를 ref(b) 로(창 문자열의 항목 부르기)."""
+    out, i, slot = [], 0, 0
+    while i < len(bs):
+        b = bs[i]
+        if ref and b >= 0x80:
+            out.append(ref(b))
+        elif b in MARKS and i + 1 < len(bs) and bs[i + 1] in CHAR_OF:
+            c = unicodedata.normalize('NFC', CHAR_OF[bs[i + 1]] + GLYPHS[b])
+            if len(c) == 1 and c not in BYTE_OF:
+                out.append(c)
+                i += 2
+                continue
+            out.append(f'{{{b:02X}}}')
+        elif b in INLINE_ARG and i + 1 < len(bs):
+            out.append(f'{{{SYMBOLS[b]}:{bs[i + 1]:02X}}}')
+            i += 1
+        elif b in SLOT_ARG:
+            out.append(f'{{{SYMBOLS[b]}:{slot}}}')
+            slot += 1
+        elif b in SYMBOLS:
+            out.append(f'{{{SYMBOLS[b]}}}')
+        elif b in CHAR_OF:
+            out.append(CHAR_OF[b])
+        else:
+            out.append(f'{{{b:02X}}}')
+        i += 1
+    return ''.join(out)
+
+
+def unsymbolize(s, ref=None):
+    """symbolize 의 반대. ref 가 있으면 {CALL:nn}·{STR:nn} 같은 이름을 ref(이름, 인자) 로 바이트로 바꾼다."""
+    out, slot = [], 0
+    for m in TOKEN.finditer(s):
+        tok, inner = m.group(0), m.group(1)
+        if inner is None:
+            if tok in BYTE_OF:
+                out.append(BYTE_OF[tok])
+                continue
+            d = unicodedata.normalize('NFD', tok)
+            mark = {'゙': 0x3D, '゚': 0x3E}.get(d[1:])
+            if len(d) != 2 or mark is None or d[0] not in BYTE_OF:
+                raise ValueError(f'글자 바이트로 못 바꿈: {tok!r}')
+            out += [mark, BYTE_OF[d[0]]]
+            continue
+        name, _, arg = inner.partition(':')
+        if not arg and len(name) == 2 and all(ch in '0123456789ABCDEF' for ch in name):
+            out.append(int(name, 16))
+        elif name in SYMBOL_BYTES:
+            b = SYMBOL_BYTES[name]
+            out.append(b)
+            if b in INLINE_ARG:
+                out.append(int(arg, 16))
+            elif b in SLOT_ARG:
+                if int(arg) != slot:
+                    raise ValueError(f'{tok} 의 칸이 {slot} 이어야 함')
+                slot += 1
+            elif arg:
+                raise ValueError(f'인자가 없는 기호: {tok}')
+        elif ref:
+            out.append(ref(name, arg))
+        else:
+            raise ValueError(f'모르는 기호: {tok}')
+    return out
+
+
+def _hex(bs):
+    return ' '.join(f'{b:02X}' for b in bs)
+
+
+def _where(bank, addr):
+    return f'{bank:02X}:${addr:04X}'
+
+
+def export_messages(rom):
+    out = []
+    for m in valid_messages(rom):
+        (bank, addr, phase), codes = message_codes(rom, m)
+        bs = decode(rom, codes)
+        out.append({
+            'id': f'{m:04X}', 'bank': f'{bank:02X}', 'addr': f'${addr:04X}', 'phase': phase,
+            'codes': _hex(codes), 'bytes': _hex(bs), 'sym': symbolize(bs),
+            'auto_quote': bs[0] != 0xF1, 'auto_period': shown(bs) != bs,
+            'text': text(shown(bs)),
+        })
+    return out
+
+
+def _window_ref(rom, g):
+    def ref(b):
+        e = window_entry(rom, g, b & 0x7F)
+        return f'{{{"CALL" if e[0] == "code" else "INS"}:{b & 0x7F:02X}}}'
+    return ref
+
+
+def _window_unref(rom, g):
+    def unref(name, arg):
+        n = int(arg, 16)
+        if name not in ('CALL', 'INS') or (window_entry(rom, g, n)[0] == 'code') != (name == 'CALL'):
+            raise ValueError(f'창 항목 기호가 틀림: {{{name}:{arg}}}')
+        return 0x80 | n
+    return unref
+
+
+def export_windows(rom):
+    out = []
+    for g, count in enumerate(WINDOW_COUNTS):
+        for n in range(count):
+            e = window_entry(rom, g, n)
+            row = {'group': g, 'entry': f'{n:02X}', 'kind': e[0], 'addr': _where(0x16, e[1])}
+            if e[0] == 'str':
+                row.update(bytes=_hex(e[2]), sym=symbolize(e[2], _window_ref(rom, g)), text=window_text(rom, g, n))
+            out.append(row)
+    return out
+
+
+def name_lists(rom):
+    """dq4data.name_list 의 이름마다 (목록, ID, 길이 바이트 주소, 글자 바이트). 0번 빈 이름은 뺀다."""
+    import dq4data   # dq4data 가 이 모듈을 import 하므로 함수 안에서
+    out = []
+    for which in dq4data.LISTS:
+        j = dq4data.LISTS.index(which)
+        a = rom.word(dq4data.NAMES_BANK, dq4data.NAMES_PTR + 2 * j)
+        for k, bs in enumerate(dq4data.name_list(rom.prg, which)):
+            if k:
+                out.append((which, k - 1, a, bs))
+            a += 1 + len(bs)
+    return out
+
+
+def export_names(rom):
+    return [{'list': w, 'id': i, 'addr': _where(0x0B, a), 'bytes': _hex(bs), 'sym': symbolize(bs),
+             'text': text(bs)} for w, i, a, bs in name_lists(rom)]
+
+
+def _pack(codes, phase):
+    """6비트 부호를 롬과 같은 순서(앞 부호가 높은 비트)로 이어 붙인 바이트와, 바이트마다 부호가 차지한 비트 마스크.
+    단계 p 의 첫 부호는 시작 바이트에서 앞 (6p mod 8) 비트 뒤부터 시작한다."""
+    pad = 6 * phase % 8
+    bits = '0' * pad + ''.join(f'{c:06b}' for c in codes)
+    used = '0' * pad + '1' * (len(bits) - pad)
+    tail = -len(bits) % 8
+    bits, used = bits + '0' * tail, used + '0' * tail
+    return [(int(bits[i:i + 8], 2), int(used[i:i + 8], 2)) for i in range(0, len(bits), 8)]
+
+
+def _back(sym, ref=None):
+    try:
+        return unsymbolize(sym, ref)
+    except ValueError as e:
+        print(e)
+        return None
+
+
+def check_export(rom, msgs, windows, names):
+    """기호 텍스트 → 바이트가 원래 글자 바이트와 같은지, 메시지는 부호 → 글자 바이트와 부호 → 롬 비트열도."""
+    bad = 0
+    for r in msgs:
+        bs = [int(x, 16) for x in r['bytes'].split()]
+        codes = [int(x, 16) for x in r['codes'].split()]
+        if _back(r['sym']) != bs or decode(rom, codes) != bs:
+            print(f'메시지 {r["id"]}: 되돌린 바이트가 다름')
+            bad += 1
+            continue
+        c = Codes(rom, int(r['bank'], 16), int(r['addr'][1:], 16))
+        for p, keep in _pack(codes, r['phase']):
+            if (rom.byte(c.bank, c.ptr) ^ p) & keep:
+                print(f'메시지 {r["id"]}: 롬 비트열과 다름({c.bank:02X}:${c.ptr:04X})')
+                bad += 1
+                break
+            c._advance()
+    for r in windows:
+        if r['kind'] == 'str':
+            bs = [int(x, 16) for x in r['bytes'].split()]
+            if _back(r['sym'], _window_unref(rom, r['group'])) != bs:
+                print(f'창 {r["group"]} {r["entry"]}: 되돌린 바이트가 다름')
+                bad += 1
+    for r in names:
+        if _back(r['sym']) != [int(x, 16) for x in r['bytes'].split()]:
+            print(f'이름 {r["list"]} {r["id"]}: 되돌린 바이트가 다름')
+            bad += 1
+    print(f'메시지 {len(msgs)}개, 창 문자열 {sum(r["kind"] == "str" for r in windows)}개, '
+          f'이름 {len(names)}개: 다른 것 {bad}개')
+    return bad == 0
+
+
+def write_export(out_dir, msgs, windows, names):
+    os.makedirs(out_dir, exist_ok=True)
+    legend = {
+        'controls': {SYMBOLS[b]: {'byte': f'{b:02X}', 'meaning': CONTROLS[b],
+                                  'arg': 'inline' if b in INLINE_ARG else 'slot' if b in SLOT_ARG else None}
+                     for b in SYMBOLS},
+        'escape': '{XX} = 글자 바이트 XX(16진). ド 는 타일 65, 탁점 3D+ト 는 {3D}ト, 타일 66~69(じだどぶ)는 {66}~{69}',
+        'slot': '{NAME:k} 등의 k = 인자 목록 $F9+k(메시지를 부르는 쪽이 채움)',
+        'window': '{CALL:nn} = 같은 그룹의 루틴 항목 nn(값 찍기), {INS:nn} = 문자열 항목 nn 끼워 넣기',
+        'auto_quote': 'true 면 $058B ≥ 5 인 대화에서 앞에 ＊「 가 붙음(첫 바이트가 F1 이면 false)',
+        'auto_period': 'true 면 화면에서 끝 {END} 앞에 。 가 붙음(16:$805A)',
+    }
+    files = {'dq4-messages': msgs, 'dq4-windows': windows, 'dq4-names': names}
+    for name, rows in files.items():
+        with open(os.path.join(out_dir, name + '.json'), 'w', encoding='utf-8') as f:
+            json.dump({'legend': legend, 'rows': rows}, f, ensure_ascii=False, indent=1)
+        cols = list(dict.fromkeys(k for r in rows for k in r if k not in ('codes', 'bytes', 'text')))
+        with open(os.path.join(out_dir, name + '.tsv'), 'w', encoding='utf-8') as f:
+            f.write('\t'.join(cols) + '\n')
+            for r in rows:
+                f.write('\t'.join(str(r.get(k, '')) for k in cols) + '\n')
+    print(f'{out_dir}: ' + ', '.join(f'{n}.json/.tsv' for n in files))
+
+
 def main():
     rom = Rom(open(sys.argv[1], 'rb').read())
     if sys.argv[2] == 'controls':
@@ -387,6 +632,12 @@ def main():
                 body = window_text(rom, g, n) if e[0] == 'str' else ''
                 print(f'{g} {n:02X} {e[0]:4s} 16:${e[1]:04X}  {body}')
         return
+    if sys.argv[2] == 'export':
+        args = [a for a in sys.argv[3:] if not a.startswith('--')]
+        msgs, windows, names = export_messages(rom), export_windows(rom), export_names(rom)
+        if '--check' not in sys.argv:
+            write_export(args[0] if args else 'work/text', msgs, windows, names)
+        sys.exit(0 if check_export(rom, msgs, windows, names) else 1)
     if sys.argv[2] == 'all':
         ms = valid_messages(rom)
         for m in ms:
