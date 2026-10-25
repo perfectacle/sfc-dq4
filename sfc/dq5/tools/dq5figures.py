@@ -522,6 +522,12 @@ def fig_hangul_poweron():
     save(out, 'dq5-hangul-poweron.webp')
 
 
+def fig_hangul_wintest():
+    """dq5hangul.py wintest 롬에서 명령 창을 연 화면(work/hangul/wintest/end.png)의 왼쪽 위. 명령은 hangul4 일지 2절."""
+    img = Image.open('work/hangul/wintest/end.png').convert('RGB').crop((0, 16, 128, 112))
+    save(img.resize((img.width * 3, img.height * 3), Image.NEAREST), 'dq5-hangul-wintest.webp')
+
+
 def fig_worlds(rom):
     """$1949 로 고르는 세계 지도 셋(블록 1개를 2x2 로 축소)과 그 세계의 04:FD97 입구(노란 틀). 세계 1·2 는 땅이 있는 왼쪽 위
     128x128 블록만 2배로 키웠다. 타일은 롬, 팔레트는 세계마다
@@ -679,6 +685,7 @@ def main():
     fig_hangul_retree()
     fig_hangul_proto()
     fig_hangul_poweron()
+    fig_hangul_wintest()
     fig_mongfx(rom)
     fig_worlds(rom)
     fig_high_maps(rom)
