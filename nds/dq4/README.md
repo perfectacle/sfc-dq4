@@ -12,6 +12,7 @@ NDS 「ドラゴンクエストIV 導かれし者たち」(일본판)과 그 한
 - [docs/extras.md](docs/extras.md): DS 판에서 늘어난 것과 이식 판단
 - [docs/param-format.md](docs/param-format.md): `PARAM` 표(동료 대화 조건·몬스터·가게·メダル·카지노·얻는 물건)
 - [docs/graphics-format.md](docs/graphics-format.md): 그래픽 형식(텍스처·인물 팩·DSSA 조립 애니메이션·3D 맵과 배치표·2D 아이콘·글꼴), 참고용 추출과 갤러리
+- [docs/sound-format.md](docs/sound-format.md): 소리 묶음(SDAT·SSEQ·SBNK·SWAR·STRM), 게임이 곡을 고르는 함수, 곡 목록과 장면·FC·DQ5 대응, 효과음, 참고용 추출과 갤러리
 - [docs/debug.md](docs/debug.md): 남은 디버그 기능(부팅 디버그 메뉴·전투 테스트·진행도 프리셋), RAM 지도, 장면 이동과 장 시작 세이브스테이트
 - [todo.md](todo.md): 남은 일
 - [references.md](references.md): 참고 자료
@@ -39,6 +40,7 @@ uv run --locked krpatch nds unpack rom/dq4ds-kr.nds work/nds/kr
 | `ndswarp.py` | 장면 이동(`map`, `--time` 시간대·`--no-encounter`), 필드 워프(`field`), 진행도 프리셋(`presets`·`preset`), 전투 테스트로 몬스터 고르기(`battle`), 부팅 디버그 메뉴로 시작(`boot`), 장 시작 세이브스테이트(`chapters`). [docs/debug.md](docs/debug.md) |
 | `ndsvram.py` | 세이브스테이트에서 VRAM·레이어 레지스터·팔레트를 꺼내 레이어 설정(`info`)과 BG 화면(`bg`)을 그림 |
 | `ndsgfxfig.py` | `images/nds-gfx-*` 그림을 롬에서 다시 만듦 |
+| `ndssound.py` | 소리 묶음 읽기. `info` SDAT 목록, `export OUT` 으로 곡(원본 SSEQ·MIDI·합성 WAV)·효과음·샘플과 폴더별 `index.json`, `maps` 맵 곡 표, `scenes` 에뮬레이터로 장면마다 곡·효과음 요청 기록, `summary`·`gallery`. 결과는 비공개 에셋 저장소에만. [docs/sound-format.md](docs/sound-format.md) |
 | `ndsfigures.py` | `images/` 의 일지 그림을 다시 만듦 |
 
 표는 [tables/](tables/) 에 있습니다. `kr-font.tsv` 는 한글 팬패치의 「일본어 코드 → 한글 음절」 표, `hangul-freq.json` 은 `draft` 가 쓰는 음절 빈도입니다.
@@ -60,6 +62,7 @@ uv run --locked krpatch nds unpack rom/dq4ds-kr.nds work/nds/kr
 - [2026-10-25-13: 필드 기호·WTEX, ubtl, DSSA 플래그, LOCN, 3D 효과 재생](journal/2026-10-25-13-graphics3.md)
 - [2026-10-25-14: 주문 배우는 표, ドラン 의 고정 능력치, 상태 이상 칸](journal/2026-10-25-14-debug5.md)
 - [2026-10-25-15: 장비 인물 비트, 몬스터 내성, 동료 대화 줄 수와 조건 값](journal/2026-10-25-15-param3.md)
+- [2026-10-25-16: 소리 묶음(SDAT) 풀기와 곡이 울리는 장면](journal/2026-10-25-16-sound.md)
 - [2026-10-25-17: 이민 마을 단계 전환, 얻는 물건 자리와 종류](journal/2026-10-25-17-param4.md)
 - [2026-10-25-18: 가게 여는 명령과 가게 레코드 고르기, 스크립트 명령 다시 시험](journal/2026-10-25-18-script2.md)
 - [2026-10-25-19: 이민자 수, 가게 표 자리, 맵 안 임시 플래그](journal/2026-10-25-19-param5.md)
