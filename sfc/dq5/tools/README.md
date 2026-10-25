@@ -47,6 +47,7 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5gfx.py rom` | DQ5 그래픽을 `--out` 아래 분류 폴더에 PNG 로(sfc-dq4-assets 의 폴더·파일 규칙): `maps/`(맵 364개, `-night`·`-setNN`·`-annot`), `field/`, `monsters/`, `battlebg/`, `gfx/blocks/`(CHR·블록), `gfx/screens/`(창·창 레코드 목록 창·세계 지도·타이틀 글자), `gfx/anim/`(실내 움직이는 타일과 맵 GIF 포함), `gfx/font.png`. 폴더마다 `index.json`·`SOURCE.txt`. `--only`·`--maps` 로 일부만, `--check 덤프 BC/BD` 로 `lua/dq5gfxdump.lua` 덤프의 BG 화면과 픽셀 비교 |
 | `dq5gallery.py rom` | `dq5gfx.export_all` 을 돌리고 `--out` 의 `gallery/index.html`·`sprites.html` 을 만듦(에셋 저장소 `fc/dq4/gallery` 와 같은 꼴, `../<분류>/` 상대 링크). 인물 스프라이트는 `sprites/index.json` 이 있으면 링크, 없으면 `dq5sprite.export_all` 로 뽑음 |
 | `dq5effectgif.py rom --state work/state/ship.mss` | DQ5 전투 주문·특기 연출을 MesenCE 로 띄워 `--out` 의 `gfx/effects/anim/` 에 GIF 로. 슬라임 셋 이벤트 전투에서 행동을 파파스(00~38)나 슬라임(39~)에 넣고, 메시지 사이를 `lua/dq5shots.lua` 로 찍음. `--only 01,0A` 로 일부만. 몬스터 줄이 바뀌지 않은 행동은 건너뜀 |
+| `dq5titlegif.py rom` | DQ5 오프닝 타이틀 연출을 MesenCE 로 전원부터 입력을 재생해 찍어 `--out` 의 `gfx/screens/anim/title-opening.gif` 로. 앞뒤 검은 화면 사이만 묶음 |
 | `lua/dq5battledump.lua` | 전투 그림 실험: `AT` 실행 때 WRAM(`at.bin`), `DUMPF` 프레임에 WRAM·VRAM·CGRAM·OAM·화면, `FROM`~`TO` DMA 기록. `boot.lua`(walk.lua) 뒤에 붙여 씀 |
 | `lua/dq5hdma.lua` | `DUMPF` 프레임에 `$420C`·DMA 채널 레지스터(`hNNNNN.txt`), WRAM, 화면. `boot.lua`(walk.lua) 뒤에 붙여 씀 |
 | `lua/dq5msgswap.lua` | 전투 메시지 루틴 `24:8C39` 에 들어올 때 A 가 `FROMMSG` 이면 `TOMSG` 를 차례로 넣어 아무 메시지나 전투 창에 띄우고 `SHOTS` 프레임에 화면을 찍음. 메시지 번호 기록 `msg.txt` |
