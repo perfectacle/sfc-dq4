@@ -96,4 +96,4 @@ uv run --locked python nds/dq4/tools/ndstext.py sjis work/nds/jp work/nds/kr
 ## 남은 것
 
 - 한자만으로 된 실행 파일 문자열(가나 없는 것) 목록.
-- `DEBUG/*.dat`, `PARAM/*.dat`(아이템·맵·몬스터·인물 매개변수 450개)의 형식. `SCRIPT/*.bin` 은 블록 구조와 메시지 명령까지([text-format.md](text-format.md#이벤트-스크립트)), 나머지 명령의 뜻은 남음.
+- `DEBUG/*.dat` 형식. `PARAM/*.dat` 는 동료 대화·몬스터·가게·メダル·얻는 물건 표까지([param-format.md](param-format.md)), 나머지 파일은 남음. `SCRIPT/*.bin` 은 블록 구조와 메시지 명령까지([text-format.md](text-format.md#이벤트-스크립트)), 나머지 명령의 뜻은 남음.

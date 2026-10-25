@@ -211,17 +211,33 @@ PROTO_LINE = ('이름은 ', '입니다')            # 메시지 129 = {1006}이�
 PROTO_NAME = '용사'                           # 주인공 이름. 바이트는 아래 창 타일 번호와 같게 둔다
 PROTO_MENU = (('대화', '주문'), ('강함', '도구'), ('장비', '작전'), ('문', '조사'))
 PROTO_TILE0 = 0x50                            # 창 글자 BG3 타일(04:E528 의 1bpp)을 이 번호부터 한글 8×8 로 바꾼다
+# --long: 원래 레코드(56바이트)에 들어가지 않는 긴 항목. 레코드를 뱅크 36 에 두고 창을 열 때 낮은 WRAM 으로 복사한다.
+PROTO_MENU_LONG = (('이야기하기', '주문외우기'), ('강함', '도구'), ('장비', '작전'), ('문열기', '조사하기'))
+PROTO_TILE0_LONG = 0x4B
+# 창 레코드를 읽는 코드는 데이터 뱅크 04 의 16비트 주소로 읽으므로(04:9C4F 등) 레코드는 뱅크 04 안이나, 뱅크 00~3F 의
+# $0000~$1FFF(낮은 WRAM 거울)에만 둘 수 있다. 7E:119F~ 610바이트는 선실·필드·전투 덤프 27개에서 모두 0 이었던 자리.
+LOW_WRAM_RECORD = 0x11A0
+WINDOW_POINTER_LOAD = 0x049C46                # LDA $EB48,X / STA $DA (5바이트)
+LONG_BANK = 0x36
+# --twobyte: 이름 문자열(24:A7B6)에 접두 85 를 두어 「85 xx」 = 글자 코드 3DB + xx - 10 으로 읽게 한다. 이름 8바이트에 넉 자.
+# xx 를 10 부터 쓰는 것은 01(이름 끝, 24:8A0F)·00 과 겹치지 않게 하려는 것이다.
+NAME_PREFIX = 0x85
+PROTO_NAME_2BYTE = '한글이름'
+NAME_CODE_CALL = 0x24A7D5                     # JSR $A81E(보통 바이트 → 24:B270)
+NAME_PREFIX_ROUTINE = 0x249E11                # retree 가 비운 디코더 자리(24:9E07~ 의 색인 루틴 뒤)
 STRING_CODES = 0x24B270
 COMMAND_WINDOW = 0x04ED0C
+WINDOWS_TABLE = 0x04EB48
 WINDOW_FONT = 0x04E528
 PERIOD = 0x356                               # 「。」
 
 
-def proto(data):
-    """retree 위에 한글 시제품을 얹은 2MB 롬과 설명 줄, 이름 바이트."""
+def proto(data, long=False, twobyte=False):
+    """retree 위에 한글 시제품을 얹은 2MB 롬과 설명 줄, 이름 바이트. long 이면 명령 창 항목을 PROTO_MENU_LONG 으로."""
+    menu, tile0 = (PROTO_MENU_LONG, PROTO_TILE0_LONG) if long else (PROTO_MENU, PROTO_TILE0)
     from dq5hangulfont import render
     syll = []
-    for ch in ''.join(PROTO_LINE) + PROTO_NAME:
+    for ch in ''.join(PROTO_LINE) + PROTO_NAME + (PROTO_NAME_2BYTE if twobyte else ''):
         if ch != ' ' and ch not in syll:
             syll.append(ch)
     vwf = {ch: GLYPHS + i for i, ch in enumerate(syll)}
@@ -236,7 +252,7 @@ def proto(data):
     d, info = retree(data, glyphs, {0x129: msg})
     # 창 글자: 메뉴·이름의 음절마다 BG3 타일 하나(8×8 1bpp).
     tiles = []
-    for pair in PROTO_MENU:
+    for pair in menu:
         for word in pair:
             for ch in word:
                 if ch not in tiles:
@@ -244,7 +260,7 @@ def proto(data):
     for ch in PROTO_NAME:
         if ch not in tiles:
             tiles.append(ch)
-    tile = {ch: PROTO_TILE0 + i for i, ch in enumerate(tiles)}
+    tile = {ch: tile0 + i for i, ch in enumerate(tiles)}
     for ch, t in tile.items():
         bits = bytes(int(''.join('1' if v else '0' for v in r), 2) for r in render(ch, 8, 8))
         o = lorom(WINDOW_FONT + (t - 1) * 8)
@@ -259,19 +275,48 @@ def proto(data):
     old_len = len(bytes(d[o:o + 0x38]).split(b'\xff\x80')[0])
     body = bytearray()
     width = 0
-    for a, b in PROTO_MENU:
-        row = b'\xfe' + bytes(tile[c] for c in a) + b'\x01' * (max(len(x) for x, _ in PROTO_MENU) - len(a) + 1) \
+    for a, b in menu:
+        row = b'\xfe' + bytes(tile[c] for c in a) + b'\x01' * (max(len(x) for x, _ in menu) - len(a) + 1) \
             + b'\xfe' + bytes(tile[c] for c in b) + b'\xff'
         width = max(width, len(row) - 1)                         # FF 를 뺀 칸 수(FE 는 커서 칸)
         body += row
     head = bytearray(d[o:o + 6])
     head[2] = width + 2
     rec = bytes(head) + bytes(body) + b'\x80'                      # 80 = 레코드 끝. 빼면 남은 옛 바이트를 이어 읽어 엉뚱한 창이 뜬다
-    assert len(rec) <= old_len + 1, (len(rec), old_len)
-    d[o:o + len(rec)] = rec
+    if twobyte:
+        # CMP #$85 / BNE 원래 / INX / DEC $00 / LDA $01,X / REP #$20 / AND #$00FF / CLC / ADC #$03CB / JSR $A832 / SEP #$20 / RTS
+        r = bytes((0xC9, NAME_PREFIX, 0xD0, 0x14, 0xE8, 0xC6, 0x00, 0xB5, 0x01, 0xC2, 0x20, 0x29, 0xFF, 0x00, 0x18,
+                   0x69, (GLYPHS - 0x10) & 0xFF, (GLYPHS - 0x10) >> 8, 0x20, 0x32, 0xA8, 0xE2, 0x20, 0x60, 0x4C, 0x1E, 0xA8))
+        ro = lorom(NAME_PREFIX_ROUTINE)
+        d[ro:ro + len(r)] = r
+        co = lorom(NAME_CODE_CALL)
+        d[co:co + 3] = bytes((0x20, NAME_PREFIX_ROUTINE & 0xFF, NAME_PREFIX_ROUTINE >> 8 & 0xFF))
+        name = b''.join(bytes((NAME_PREFIX, vwf[ch] - GLYPHS + 0x10)) for ch in PROTO_NAME_2BYTE)
+    if len(rec) <= old_len + 1:
+        d[o:o + len(rec)] = rec
+        where = '04:ED0C'
+    else:
+        # 레코드를 뱅크 36 에 두고, 창 표의 창 01 칸을 낮은 WRAM 주소로 바꾼 뒤 04:9C46 에 훅을 건다.
+        # 훅은 원래 명령(LDA $EB48,X / STA $DA)을 하고, 주소가 LOW_WRAM_RECORD 이면 MVN 으로 레코드를 7E 에 복사한다.
+        src = LONG_BANK << 16 | 0x8000
+        hook = src + 0x100
+        so = lorom(src)
+        d[so:so + len(rec)] = rec
+        n = len(rec) - 1
+        code = bytes((0xBF, 0x48, 0xEB, 0x04, 0x85, 0xDA, 0xC9, LOW_WRAM_RECORD & 0xFF, LOW_WRAM_RECORD >> 8, 0xD0, 0x18,
+                      0x08, 0x8B, 0xC2, 0x30, 0xDA, 0x5A, 0xA2, src & 0xFF, src >> 8 & 0xFF,
+                      0xA0, LOW_WRAM_RECORD & 0xFF, LOW_WRAM_RECORD >> 8, 0xA9, n & 0xFF, n >> 8,
+                      0x54, 0x7E, LONG_BANK, 0x7A, 0xFA, 0xAB, 0x28, 0xA5, 0xDA, 0x6B))
+        ho = lorom(hook)
+        d[ho:ho + len(code)] = code
+        po = lorom(WINDOW_POINTER_LOAD)
+        d[po:po + 5] = bytes((0x22, hook & 0xFF, hook >> 8 & 0xFF, hook >> 16, 0xEA))
+        to = lorom(WINDOWS_TABLE + 1 * 2)
+        d[to:to + 2] = LOW_WRAM_RECORD.to_bytes(2, 'little')
+        where = f'{LONG_BANK:02X}:8000 → 7E:{LOW_WRAM_RECORD:04X}'
     d = checksum(d)
-    info.append(f'한글 VWF {len(syll)}자 {GLYPHS:03X}~, 창 타일 {len(tiles)}개 {PROTO_TILE0:02X}~, 이름 바이트 {name.hex(" ")}, '
-                f'명령 창 너비 {width + 2}(원래 12)')
+    info.append(f'한글 VWF {len(syll)}자 {GLYPHS:03X}~, 창 타일 {len(tiles)}개 {tile0:02X}~, 이름 바이트 {name.hex(" ")}, '
+                f'명령 창 레코드 {len(rec)}바이트 {where}, 너비 {width + 2}(원래 12)')
     return d, info, name
 
 
@@ -315,15 +360,18 @@ def main():
     ap.add_argument('cmd', choices=('expand', 'retree', 'proto'))
     ap.add_argument('--size', type=int, default=2, choices=(2, 3, 4))
     ap.add_argument('-o', '--out', required=True)
+    ap.add_argument('--twobyte', action='store_true', help='proto: 이름 문자열 2바이트 접두 85(24:A7B6)')
+    ap.add_argument('--long', action='store_true', help='proto: 레코드에 안 들어가는 긴 명령 창 항목(뱅크 36 → 낮은 WRAM)')
     a = ap.parse_args()
     data = open(a.rom, 'rb').read()
     if a.cmd == 'expand':
         out = expand(data, a.size)
         print(f'{len(out):#x} 바이트, 머리 크기 {out[HEADER + 0x17]:02X}')
     elif a.cmd == 'proto':
-        out, info, name = proto(data)
+        out, info, name = proto(data, a.long, a.twobyte)
         print('\n'.join(info))
-        print(f'이름을 넣으려면 POKE="7E2001={name[0]:02X};7E2002={name[1]:02X};7E2003=01"')
+        poke = ';'.join(f'7E{0x2001 + i:04X}={b:02X}' for i, b in enumerate(name))
+        print(f'이름을 넣으려면 POKE="{poke}' + (';7E{:04X}=01"'.format(0x2001 + len(name)) if len(name) < 8 else '"'))
     else:
         out, info = retree(data)
         print('\n'.join(info))

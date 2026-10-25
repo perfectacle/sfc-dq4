@@ -10,7 +10,6 @@ import sys
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import ndsfont  # noqa: E402
 import ndsgfx  # noqa: E402
 import ndskr  # noqa: E402
 

@@ -5,7 +5,7 @@
 ## MesenCE: 툴킷의 FC 스크립트
 
 DQ4(FC)는 툴킷의 FC 용 Lua(`krpatch fc lua`)를 씁니다. 스크립트 목록과 환경 변수는
-[툴킷 README 의 `fc lua`](https://github.com/perfectacle/kr-patch-toolkit/blob/v0.5.0/README.md#fc-lua-mesence-scripts)
+[툴킷 README 의 `fc lua`](https://github.com/perfectacle/kr-patch-toolkit/blob/v0.8.0/README.md#fc-lua-mesence-scripts)
 가 정본입니다. 프로브에 `DRIVER=$LIBDIR/seq.lua` 를 주면 세이브스테이트에서 시작하므로
 [공통 도구](../../../tools/README.md) 의 `seqlib.sh` 가 필요 없습니다.
 
