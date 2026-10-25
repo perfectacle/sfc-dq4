@@ -24,7 +24,7 @@ NDS 판은 **참고 자료**입니다. 패치는 계속 SFC DQ5 롬 위에 FC DQ
 | 그래픽 | 인물 187팩, 몬스터 303 전부 조립(빈 `.anm` 24 제외), 맵·전투 배경 675, 효과 188, 아이콘 424, 세계 지도 4096×4096 4장(칸 값 → 칩 대응), 인물·모델 애니메이션(BCA0) 등 4,268파일. 필드 주인공은 화면과 471픽셀 중 469 일치. 결과는 비공개 저장소 `nds/dq4/` | [graphics-format.md](docs/graphics-format.md), `ndsgfx.py export`, `ndsvram.py` |
 | 동료 대화 표 | `PARAM/param_player_talk1`~`6.dat`, 44바이트 레코드 7,209개 전부 대사와 맞음. 조건 필드(켜짐·꺼짐 플래그, 맵, 말하는 인물)는 프리셋 346개 실측 514줄로 확인, 일행·밤 조건은 남음 | `ndsparam.py talk`, [param-format.md](docs/param-format.md) |
 | PARAM·스크립트 | 몬스터(60바이트)·가게(208바이트)·メダル·카지노·얻는 물건 표, FC 대조로 「표기만 다른 것」 가름. `SCRIPT` 396개 블록 구조, 명령 `0x05` = 메시지 | [param-format.md](docs/param-format.md), `ndsscript.py` |
-| 툴킷 | v0.5.0 의 `krpatch nds`. 패치 적용은 `xdelta3`(LZMA 2차 압축 지원은 툴킷 다음 릴리스) | |
+| 툴킷 | v0.7.0 의 `krpatch nds`·`krpatch xdelta apply`(LZMA 2차 압축 포함, 한글판 SHA-1 일치). NFTR 읽기는 툴킷 main 에 들어갔고 다음 릴리스 뒤 `ndsfont.py` 를 옮김 | `krpatch xdelta apply` |
 | 디버그·워프 | 부팅 디버그 메뉴(장면 `0x01`)·전투 테스트(`0x11`, Select 모드로 몬스터 지정)·메시지 디버그(`0x16`), 진행도 프리셋 347개 적용, 맵·필드 좌표 워프, 조우 끄기, 장 시작 세이브스테이트 `work/state/dq4ds-{boot,ch0..ch6,ch6-psaro}.state`, 맵 화면 544장(비공개 저장소 `nds/dq4/screens/`) | [debug.md](docs/debug.md), `ndswarp.py` |
 | RAM | 장면 `0x021080AC`/요청 `0x021080B4`, 맵 이름 `0x020C4F44`, 필드 좌표 `[[0x020EC4F0]+0x70]`, 조우 비트 `0x020CE100 & 0x200`, 장 번호 `0x020EB9A8`, 이야기 플래그 `0x020CE7DC`, 일행 `0x020C5614`, 인물 레코드 `0x020C5B74 + id×0x50C`, 돈 `0x020C55F0` | [debug.md](docs/debug.md#ram-지도) |
 | 에뮬레이터 | desmume libretro 코어([EMU-01](../../.agents/skills/analysis/SKILL.md#emu-01--에뮬레이터는-mesence)) | |

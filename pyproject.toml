@@ -5,7 +5,7 @@ description = "Analysis and build tools for the DQ4-on-DQ5 SFC hack"
 requires-python = ">=3.15"
 dependencies = [
   # 릴리스 태그로 고정해 툴킷이 바뀌어도 분석 결과와 빌드가 그대로이게 한다.
-  "kr-patch-toolkit @ git+https://github.com/perfectacle/kr-patch-toolkit@v0.5.0",
+  "kr-patch-toolkit @ git+https://github.com/perfectacle/kr-patch-toolkit@v0.7.0",
   # nds/dq4/tools/ndskr.py draft 의 행렬 계산(툴킷이 이미 끌어오는 버전과 같다).
   "numpy",
   "pillow",
