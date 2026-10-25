@@ -26,6 +26,15 @@
     "sky.png": {
       "purpose": "scrolling cloud sky without solid landmarks",
       "prompt_summary": "Remove castle and mountains from background plate, replace with matching sunset clouds. Preserve mood and pixel art; horizontally repeating sky."
+    },
+    "front-cloud.png": {
+      "purpose": "rounded foreground cloud that partially occludes the castle",
+      "prompt_summary": "Single broad rounded purple-peach sunset cloud on true alpha, designed for native64x32, organic top and bottom, no thin ribbon, no waterlike lines; reference approved title colors.",
+      "generator": "built-in image_gen"
+    },
+    "title-glyph-mask.png": {
+      "purpose": "binary silhouette of original logo, IV and subtitle; source RGB unchanged",
+      "method": "contour mask checked against original native pixels, excluding sky gaps and isolated background fragments"
     }
   },
   "invariants": [

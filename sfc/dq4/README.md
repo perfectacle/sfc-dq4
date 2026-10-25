@@ -29,3 +29,5 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 용의 날갯짓과 구름 이동은 [타이틀 애니메이션](docs/dq4-title-animation.md)을 봅니다.
 
 - [52: 용의 날갯짓과 구름 이동](journal/2026-10-25-52-title-animation.md)
+
+- [64: 타이틀 그림과 레이어의 연결](journal/2026-10-25-64-title-cohesion.md)
