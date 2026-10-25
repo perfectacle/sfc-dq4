@@ -61,3 +61,4 @@ uv run --locked krpatch nds unpack rom/dq4ds-kr.nds work/nds/kr
 - [2026-10-25-18: 가게 여는 명령과 가게 레코드 고르기, 스크립트 명령 다시 시험](journal/2026-10-25-18-script2.md)
 - [2026-10-25-19: 이민자 수, 가게 표 자리, 맵 안 임시 플래그](journal/2026-10-25-19-param5.md)
 - [2026-10-25-20: 상태 이상 번호와 ドラン 고정 블록](journal/2026-10-25-20-debug6.md)
+- [2026-10-25-21: 가게 표는 ARM9 안, 레코드 고르기, 몬스터 내성 칸 바로잡기](journal/2026-10-25-21-param6.md)
