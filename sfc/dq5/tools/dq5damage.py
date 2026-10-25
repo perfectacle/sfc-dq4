@@ -8,6 +8,8 @@
   h < 8                  → h - 1 + 난수 0~2 (음수면 0)
   그 밖                  → h*7/8 + 난수(0~255) * (h/4 + 1) / 256
 회심(일행이 공격할 때 20:C697, 1/32): 수비력을 보지 않고 공격력 * (55~65) * 4 / 256 (20:AB04)
+방어 상태(20:AF85): 1 이면 절반, 2·3 이면 1/5. 주문이 몬스터에게: 양 × 27:8055[내성] / 256(255 면 그대로),
+주인공 레벨 - 10 ≥ 무리 레벨이면 27:8059(20:AB9E).
 
 사용:
   python sfc/dq5/tools/dq5damage.py 200 5            # 공격력 200, 수비력 5: 피해 범위와 회심 범위
@@ -36,6 +38,22 @@ def normal_range(attack, defense, target_party=False):
 def critical_range(attack):
     """20:AB04. 회심 피해(수비력 무시)."""
     return attack * 55 * 4 >> 8, attack * 65 * 4 >> 8
+
+
+RESIST = (255, 205, 84, 0)
+RESIST_HIGH = (255, 255, 169, 0)
+
+
+def spell_on_monster(amount, resist, hero_level=1, group_level=0):
+    """20:AB9E. 주문 양을 몬스터 내성 0~3 으로 줄인 값."""
+    table = RESIST_HIGH if hero_level >= 10 and hero_level - 10 >= group_level else RESIST
+    m = table[resist]
+    return amount if m == 255 else amount * m >> 8
+
+
+def guarded(damage, state):
+    """20:AF85. 방어 상태 1 은 절반, 2·3 은 1/5."""
+    return damage if state == 0 else damage >> 1 if state == 1 else damage // 5
 
 
 def main():
