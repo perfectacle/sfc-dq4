@@ -444,6 +444,13 @@ def fig_mongfx_e9(rom):
     save(out, 'dq5-mongfx-e9.webp')
 
 
+def fig_seabattle(rom):
+    """배로 바다를 저어 자연 조우로 붙은 전투(배경 00). 화면은 dq5warp.lua 로 (328,27)에 배를 띄워(LATESET="1954=03;21BE|01")
+    저으며 dq5gfxdump.lua 로 찍은 work/sea/nat40/f01600.png(sfc/dq5/journal/ 의 「바다 전투」 일지 2절 명령)."""
+    shot = Image.open('work/sea/nat40/f01600.png').convert('RGB')
+    save(shot.resize((512, 448), Image.NEAREST), 'dq5-seabattle.webp')
+
+
 def fig_transition():
     """맵 전환 전후 30프레임 간격 화면(wsnap.lua, 1560~1770)."""
     files = [f for f in sorted(glob.glob('work/wdump/s[0-9]*.png')) if 1560 <= int(f[-9:-4]) <= 1770]
@@ -603,6 +610,7 @@ def main():
     fig_mongfx_layout(rom)
     fig_battlebg(rom)
     fig_mongfx_e9(rom)
+    fig_seabattle(rom)
     fig_gfx_diff(rom)
     os.remove(TMP)
 

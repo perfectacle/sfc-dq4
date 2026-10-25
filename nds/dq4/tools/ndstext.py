@@ -1,22 +1,25 @@
 """NDS DQ4 대사 파일(MESS/<언어>/bNNNN000.mpt)을 읽는다. 형식은 nds/dq4/docs/text-format.md.
 
-MPT0 머리(32바이트, 리틀 엔디언 u32 8개): 'MPT0', 파일 크기, ?, ?, 항목 수, 색인 위치(0x20),
-색인 크기+2, 본문 크기. 색인은 항목마다 6바이트(u16 번호, u16 바이트 길이, u16 위치/4)이고,
+MPT0 머리(32바이트, 리틀 엔디언 u32 8개): 'MPT0', 파일 크기, 첫 메시지 번호, 마지막 메시지 번호,
+항목 수, 색인 위치(0x20), 색인 크기+2, 본문 크기. 색인은 항목마다 6바이트(u16 번호, u16 바이트 길이,
+u16 위치/4)이고, 메시지 번호는 머리의 첫 번호 + 색인 번호다(파일 이름 NNNN×1000 과 다를 수 있음).
 본문은 파일 끝에서 본문 크기만큼 앞(= 파일 크기 - 본문 크기)부터다. 문자열은 UTF-8.
 
 한글 팬패치는 문자 코드를 그대로 두고 폰트 글리프만 한글로 바꿨다. --kr 을 주면
 nds/dq4/tables/kr-font.tsv(일본어 코드 → 한글 음절)로 바꿔 읽는다.
 
 사용:
-  python nds/dq4/tools/ndstext.py dump FILE.mpt [--kr]          번호와 문자열
+  python nds/dq4/tools/ndstext.py dump FILE.mpt [--kr]          메시지 번호와 문자열
   python nds/dq4/tools/ndstext.py names JPROOT KRROOT          이름 표(b1000000~b1007000)를 일본어·영어·한글로
   python nds/dq4/tools/ndstext.py stats ROOT                   언어별 파일·문자열 수, 표지 통계
   python nds/dq4/tools/ndstext.py glossary JPROOT KRROOT FCROM  명칭 대조표(마크다운). FC 이름은 dq4 트랙의 dq4data.py 로 읽는다
   python nds/dq4/tools/ndstext.py talk JPROOT [장] [--kr KRROOT] 동료 대화 표(PARAM/param_player_talk<장>.dat) 레코드와 문장
+  python nds/dq4/tools/ndstext.py sjis JPROOT [KRROOT]          arm9.bin·오버레이의 Shift_JIS 문자열과 그것을 가리키는 포인터
 JPROOT/KRROOT 는 `krpatch nds unpack` 으로 푼 폴더(그 아래 data/data/MESS/).
 """
 import collections
 import os
+import pathlib
 import re
 import struct
 import sys
@@ -29,17 +32,17 @@ NAME_FILES = {
 }
 
 
-def read(path):
-    """[(번호, 문자열)] — 번호는 파일 안 번호. 전체 번호는 파일 이름의 NNNN×1000 + 번호."""
+def read(path, full=False):
+    """[(번호, 문자열)] — 번호는 파일 안(색인) 번호. full 이면 메시지 번호(머리 +08 + 색인 번호)."""
     d = open(path, 'rb').read()
-    magic, size, _a, _b, count, table, _tsize, dsize = struct.unpack_from('<8I', d, 0)
+    magic, size, first, _last, count, table, _tsize, dsize = struct.unpack_from('<8I', d, 0)
     if magic != 0x3054504D or size != len(d) or table != 0x20:
         raise ValueError(f'{path}: MPT0 가 아님')
     base = size - dsize
     out = []
     for k in range(count):
         num, length, off = struct.unpack_from('<3H', d, table + 6 * k)
-        out.append((num, d[base + off * 4:base + off * 4 + length].decode('utf-8')))
+        out.append((first + num if full else num, d[base + off * 4:base + off * 4 + length].decode('utf-8')))
     return out
 
 
@@ -150,9 +153,7 @@ def messages(root, lang='ja'):
     base_dir = mess(root, lang)
     for f in os.listdir(base_dir):
         if f.endswith('.mpt'):
-            base = int(f[1:5]) * 1000
-            for n, t in read(os.path.join(base_dir, f)):
-                out[base + n] = t
+            out.update(read(os.path.join(base_dir, f), full=True))
     return out
 
 
@@ -180,12 +181,74 @@ def cmd_stats(root):
     print(' '.join(f'{k}:{v}' for k, v in tags.most_common(20)))
 
 
+KANA = re.compile('[\u3040-\u30ff]')
+
+
+def modules(root):
+    """(이름, 적재 주소, 바이트) — arm9.bin 과 크기가 있는 오버레이. 주소는 y9.bin(오버레이 표 32바이트씩)의 +04."""
+    yield 'arm9', 0x02000000, pathlib.Path(root, 'arm9.bin').read_bytes()
+    y9 = pathlib.Path(root, 'y9.bin').read_bytes()
+    for i in range(len(y9) // 32):
+        ram = struct.unpack_from('<I', y9, 32 * i + 4)[0]
+        d = pathlib.Path(root, 'overlay9', f'overlay_{i:04d}.bin').read_bytes()
+        if len(d) > 32:
+            yield f'overlay_{i:04d}', ram, d
+
+
+def sjis_strings(d):
+    """4바이트 맞춘 자리에서 시작해 0 으로 끝나는 Shift_JIS 문자열(가나가 하나 이상, 반각 가나·사용자 정의 문자 없음, 줄바꿈 빼고 두 글자 이상)."""
+    out = []
+    for o in range(0, len(d), 4):
+        if o and d[o - 1]:
+            continue
+        e = d.find(b'\0', o)
+        if e - o < 2:
+            continue
+        try:
+            s = d[o:e].decode('cp932')
+        except UnicodeDecodeError:
+            continue
+        if len(s.replace('\n', '')) >= 2 and KANA.search(s) and not any(c < ' ' and c != '\n' or '\uff61' <= c <= '\uff9f' or '\ue000' <= c <= '\uf8ff' for c in s):
+            out.append((o, s))
+    return out
+
+
+def cmd_sjis(jp_root, kr_root=None):
+    """모듈, 파일 오프셋, 주소, 가리키는 곳(표면 「표 시작+순번/개수」), 일본어, 한글패치에서 바뀌었으면 한글."""
+    mods = list(modules(jp_root))
+    kr = {n: d for n, _a, d in modules(kr_root)} if kr_root else {}
+    table = kr_table() if kr_root else {}
+    found = {}
+    for name, ram, d in mods:
+        for o, s in sjis_strings(d):
+            found[ram + o] = (name, o, s)
+    refs = collections.defaultdict(list)
+    for name, ram, d in mods:
+        words = struct.unpack_from(f'<{len(d) // 4}I', d)
+        k = 0
+        while k < len(words):
+            j = k
+            while j < len(words) and words[j] in found:
+                j += 1
+            for i in range(k, j):
+                where = f'{name}:{4 * k:x}+{i - k}/{j - k}' if j - k > 1 else f'{name}:{4 * i:x}'
+                refs[words[i]].append(where)
+            k = j + 1 if j == k else j
+    for addr, (name, o, s) in sorted(found.items(), key=lambda x: (x[1][0], x[0])):
+        ko = ''
+        if name in kr:
+            raw = kr[name][o:kr[name].index(b'\0', o)]
+            if raw != s.encode('cp932'):
+                ko = decode_kr(raw.decode('cp932', 'replace'), table)
+        print(f'{name}\t{o:06X}\t{addr:08X}\t{",".join(refs[addr]) or "-"}\t{s}\t{ko}'.replace('\n', '/'))
+
+
 def main(argv):
     if not argv:
         raise SystemExit(__doc__)
     if argv[0] == 'dump':
         table = kr_table() if '--kr' in argv else None
-        for num, text in read(argv[1]):
+        for num, text in read(argv[1], full=True):
             if table:
                 text = decode_kr(text, table)
             print(f'{num}\t' + text.replace('\n', '\\n'))
@@ -198,6 +261,8 @@ def main(argv):
         cmd_talk(argv[1], [int(a) for a in rest] or range(1, 7), kr_root)
     elif argv[0] == 'glossary':
         cmd_glossary(argv[1], argv[2], argv[3])
+    elif argv[0] == 'sjis':
+        cmd_sjis(argv[1], argv[2] if len(argv) > 2 else None)
     elif argv[0] == 'stats':
         cmd_stats(argv[1])
     else:

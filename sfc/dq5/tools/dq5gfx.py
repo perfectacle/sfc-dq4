@@ -83,6 +83,13 @@ WORLD_SCREEN_STEP_X, WORLD_SCREEN_STEP_Y = 0x03CD48, 0x03CD58
 # 1E:D7E3: 타이틀 화면 글자(ENIX PRESENTS ~ DRAGON QUEST V)의 2bpp 타일. 필드 RLE(01:A64F)와 같은 꼴이고,
 # 앞 16바이트(빈 타일 하나)를 더해 위·아래로 짝지으면 대부분 8x16 글자 하나지만, 타일을 나눠 쓰는 글자(D·E·M·W 등)도 있다.
 CREDITS_FONT = 0x1ED7E3
+# 02:FB2B: 글자 문자열(02:FF3B 의 24비트 포인터 둘: 0 = 엔딩 스태프 롤 1E:F5B8, 1 = 타이틀 1E:FEEC).
+# 00~3F 는 글자 번호 → 1E:F539 + 번호*3 = [위 타일][아래 타일][너비(0 이면 8점)]. 그 밖은 제어:
+# FC n 은 n*8점 띄움, FE 줄 끝, FD 빈 줄, F9 한 프레임 쉼, F8 VRAM 칸 하나 되돌림(점 자리는 그대로), FB·F7·F6 n 은 인자 하나, F5 끝.
+CREDITS_SCRIPTS = 0x02FF3B
+CREDITS_GLYPHS = 0x1EF539
+CREDITS_TEXT = 'ABCDEFGHIJKLNOPQRSTUVXYZ921'
+CREDITS_PAIRS = {(0x1B, 0x1C): '&', (0x1E, 0x1F): 'M', (0x20, 0x21): 'W', (0x23, 0x24): '©'}
 # 25:85D5: ルーラ 목적지의 맵 그룹 22개. 이름은 이름 표 0B(23:D5F3) 의 같은 순번.
 RURA_GROUPS, RURA_COUNT, TOWN_NAMES = 0x2585D5, 22, 0x0B
 
@@ -1221,6 +1228,70 @@ def credits_tiles(rom):
     return [data[i * 16:i * 16 + 16] for i in range(len(data) // 16)]
 
 
+def credits_rows(rom, script):
+    """글자 문자열을 줄마다 [(x 점, 글자 번호)] 와 글자로 푼 문자열로."""
+    p = rom.u24(CREDITS_SCRIPTS + script * 3)
+    rows, cur, x, k = [], None, 0, 0
+    while k < 0x4000:
+        b = rom.u8(p + k)
+        k += 1
+        if b == 0xF5 or (b == 0x00 and cur is None and script == 1 and rows):
+            break
+        if b == 0xFC:
+            if cur is None:
+                cur, x = [], 0
+                rows.append(cur)
+            elif cur:
+                cur.append((x, None))
+            x += rom.u8(p + k) * 8
+            k += 1
+        elif b in (0xFB, 0xF7, 0xF6):
+            k += 1
+        elif b == 0xFE:
+            cur = None
+        elif b == 0xFD:
+            rows.append([])
+        elif b < 0x40:
+            if cur is None:
+                cur, x = [], 0
+                rows.append(cur)
+            cur.append((x, b))
+            width = rom.u8(CREDITS_GLYPHS + b * 3 + 2)
+            x += width or 8
+    texts = []
+    for r in rows:
+        t, i = '', 0
+        codes = [c for _, c in r]
+        while i < len(codes):
+            if codes[i] is None:
+                t, i = t + ' ', i + 1
+                continue
+            pair = tuple(codes[i:i + 2])
+            if pair in CREDITS_PAIRS:
+                t, i = t + CREDITS_PAIRS[pair], i + 2
+                continue
+            c = codes[i]
+            t += CREDITS_TEXT[c] if c < len(CREDITS_TEXT) else {0x1D: '.', 0x22: '-'}.get(c, '?')
+            i += 1
+        texts.append(t)
+    return rows, texts
+
+
+def credits_image(rom, rows, colors):
+    tiles = credits_tiles(rom)[1:]
+    img = Image.new('RGB', (256, len(rows) * 16), colors[0])
+    for y, r in enumerate(rows):
+        for x, c in r:
+            if c is None:
+                continue
+            for half in (0, 1):
+                t = rom.u8(CREDITS_GLYPHS + c * 3 + half)
+                if t < len(tiles):
+                    ti = tile_image(chr_2bpp(tiles[t]), colors[0:4])
+                    img.paste(ti, (x, y * 16 + half * 8), ti)
+    return img
+
+
 def export_credits(rom, out):
     o = lorom(UI_PALETTE)
     colors = cgram_colors(rom.d[o:o + 8])
@@ -1231,21 +1302,32 @@ def export_credits(rom, out):
         for half in (0, 1):
             t = tile_image(chr_2bpp(tiles[g * 2 + half]), colors[0:4])
             img.paste(t, (g * 8, half * 8), t)
+    for script, stem, title in ((1, 'title-credits', '타이틀 화면 글자(ENIX PRESENTS ~ DRAGON QUEST V)'),
+                                (0, 'staff-roll', '엔딩 스태프 롤')):
+        rows, texts = credits_rows(rom, script)
+        out.save(credits_image(rom, rows, colors), f'gfx/screens/{stem}.png', 'screens', title, '타이틀·엔딩',
+                 script=f'{rom.u24(CREDITS_SCRIPTS + script * 3):06X}', lines=[t for t in texts if t],
+                 note='02:FB2B 의 글자 문자열을 줄마다 16점으로 늘어놓음(게임은 화면에 몇 줄씩 띄우거나 올림)')
     out.save(img, 'gfx/screens/credits-font.png', 'screens', f'타이틀 화면 글자 칸 {n}개(8x16)', '타이틀',
              note='1E:D7E3 RLE 타일을 위·아래 짝으로 늘어놓음(글자표 아님, 타일을 나눠 쓰는 글자가 있음). 색은 BG3 팔레트 0(04:98D7)')
 
 
+# 창 문자열의 자리 표시(B0~) 너비: HP·MP 3칸, 레벨 2칸(상태 창 실측). 나머지는 1칸으로 둔다.
+WINDOW_FIELDS = {0xB0: 3, 0xB1: 3, 0xC6: 2, 0xBD: 2}
+
+
 def window_grid(rom, n):
-    """창 레코드 n(04:EB48)을 BG3 타일 번호 격자로. 머리 +4 아래 니블이 0 인 목록 창만(그 밖은 None).
-    +0·+1 위치, +2 너비, +3 아래 4비트 높이·bit7 줄 간격 16점(sfc/dq5/docs/dq5-text-format.md 「창 레코드 머리」).
-    항목: FE = 커서 칸 하나 뒤 글자, FF = 다음 줄, 바이트는 BG3 타일 번호 그대로. 84·83 xx 는 글자 xx 위 칸에
-    탁점 84·반탁점 83(위 칸이 테두리면 92·93, 04:B258)."""
+    """창 레코드 n(04:EB48)을 BG3 타일 번호 격자로. (격자, X, Y) 또는 못 그리는 창이면 None.
+    머리 +0·+1 위치, +2 아래 5비트 너비, +3 아래 4비트 높이·bit7 줄 간격 16점(sfc/dq5/docs/dq5-text-format.md 「창 레코드 머리」).
+    목록 창: 첫 FE 부터. FE = 커서 칸 하나 뒤 글자, FF = 다음 줄, 바이트는 BG3 타일 번호 그대로. 84·83 xx 는 글자 xx 위 칸에
+    탁점 84·반탁점 83(위 칸이 테두리면 92·93, 04:B258).
+    상태 창 꼴(+4 가 D0~D3): 뒤 4바이트 자리에 이름, 다음 8x 는 가로줄 하나와 그 뒤 x 줄. 자리 표시 B0 이상은 빈칸(WINDOW_FIELDS 너비)."""
     from dq5text import window
     _, data = window(rom, n)
-    if len(data) < 7 or data[4] & 0x0F or data[2] >= 0x20 or 0xFE not in data[5:8]:
+    if len(data) < 6:
         return None
-    w, h, step = data[2], data[3] & 0x0F, 2 if data[3] & 0x80 else 1
-    if w < 3 or h < 3:
+    w, h, step = data[2] & 0x1F, data[3] & 0x0F, 2 if data[3] & 0x80 else 1
+    if w < 3 or h < 3 or data[0] & 0x80:
         return None
     grid = [[0x001] * w for _ in range(h)]
     for x in range(w):
@@ -1253,7 +1335,48 @@ def window_grid(rom, n):
     for y in range(h):
         grid[y][0], grid[y][w - 1] = 0x08E, 0x48E
     grid[0][0], grid[0][w - 1], grid[h - 1][0], grid[h - 1][w - 1] = 0x08C, 0x48C, 0x88C, 0xC8C
-    x, y, i = 1, 1, data.index(0xFE)
+
+    def put(x, y, t):
+        if 0 < x < w - 1 and 0 < y < h - 1:
+            grid[y][x] = t
+
+    x, y = 1, 1
+    if 0xD0 <= data[4] <= 0xD3:
+        step = 2  # 상태 창은 +3 bit7 이 꺼져 있어도 16점 간격(배 선실 덤프)
+        for k in range(4):
+            put(1 + k, 1, data[5 + k])
+        i, y = 9, 2
+        if i < len(data) and data[i] & 0x80 and data[i] < 0x84:
+            for xx in range(1, w - 1):
+                put(xx, y, 0x090)
+            grid[y][0], grid[y][w - 1] = 0x08F, 0x48F
+            i, y = i + 1, y + 1
+        elif i < len(data) and data[i] >= 0x80:
+            i += 1
+    elif data[4] & 0x0F == 0 and 0xFE in data[5:8]:
+        i = data.index(0xFE)
+    elif data[4] & 0x0F and 0xFE in data[7:10]:
+        # 제목 있는 창(dq5text.window_header): +5 제목 번호(04:AD78), 둘째 줄에 제목, 셋째 줄에 가로줄, 넷째 줄부터 항목.
+        from dq5text import window_title
+        tx, title, j = 3, window_title(rom, data[5]), 0
+        while j < len(title):
+            if title[j] in (0x92, 0x93) and j + 1 < len(title):
+                put(tx, 1, title[j + 1])
+                if 0 < tx < w - 1:
+                    grid[0][tx] = title[j]
+                tx, j = tx + 1, j + 2
+                continue
+            if title[j] < 0x89:
+                put(tx, 1, title[j])
+            tx, j = tx + 1, j + 1
+        for xx in range(1, w - 1):
+            put(xx, 2, 0x090)
+        grid[2][0], grid[2][w - 1] = 0x08F, 0x48F
+        i, y = data.index(0xFE, 7), 3
+        rows = data[6] & 0x7F
+        step = 2 if rows and rows * 2 - 1 <= h - 4 else 1
+    else:
+        return None
     while i < len(data):
         b = data[i]
         if b == 0xFE:
@@ -1261,20 +1384,29 @@ def window_grid(rom, n):
         elif b == 0xFF:
             x, y = 1, y + step
         elif b in (0x83, 0x84) and i + 1 < len(data):
+            put(x, y, data[i + 1])
             if 0 < x < w - 1 and 0 < y < h - 1:
-                grid[y][x] = data[i + 1]
-                grid[y - 1][x] = (0x093 if b == 0x83 else 0x092) if y - 1 == 0 else b
+                above = grid[y - 1][x]
+                if y - 1 == 0:
+                    grid[y - 1][x] = 0x093 if b == 0x83 else 0x092
+                elif above == 0x090:
+                    grid[y - 1][x] = 0x095 if b == 0x83 else 0x094
+                else:
+                    grid[y - 1][x] = b
             x, i = x + 1, i + 1
-        elif b < 0x80:
-            if 0 < x < w - 1 and 0 < y < h - 1:
-                grid[y][x] = b
+        elif b < 0x89:
+            put(x, y, b)
             x += 1
+        elif b in WINDOW_FIELDS:
+            x += WINDOW_FIELDS[b]
         else:
             x += 1
+        if x > w:
+            return None  # 줄이 창보다 길면 항목 꼴이 아니다(창 레코드 뒤의 다른 자료로 보임)
         if y >= h - 1:
             break
         i += 1
-    return grid, data[0], data[1] & 0x7F
+    return grid, data[0] & 0x1F, data[1] & 0x1F
 
 
 def export_windows(rom, out):
@@ -1300,7 +1432,7 @@ def export_windows(rom, out):
                     img.paste(ti, (x * 8, y * 8), ti)
         out.save(img, f'gfx/screens/windows/{n:02X}.png', 'screens', f'창 {n:02X}', '창 레코드',
                  window=f'{n:02X}', pos=f'{wx},{wy}', record=f'{WINDOWS >> 16:02X}:{rom.u16(WINDOWS + n * 2):04X}',
-                 note='04:EB48 레코드의 너비·높이·항목으로 그림(글자 바이트 = BG3 타일). 머리 +4 가 0 인 목록 창만')
+                 note='04:EB48 레코드의 너비·높이·항목으로 그림(글자 바이트 = BG3 타일). 자리 표시(HP·이름 등)는 빈칸')
         count += 1
     print(f'windows {count}')
 
