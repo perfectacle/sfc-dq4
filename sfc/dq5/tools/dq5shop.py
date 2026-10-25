@@ -93,14 +93,15 @@ def arena(rom):
 
 
 def slime_odds(rom, weights):
-    """다섯 값 → 쌍 10개의 倍率. 화면 값 10개에 맞춘 11:DF49·11:DD7B 의 식."""
+    """다섯 값 → 쌍 10개의 倍率(11:DF49, 11:DD7B)."""
     out = []
     for k in range(10):
         i, j = rom.u8(SLIME_PAIRS + 2 * k), rom.u8(SLIME_PAIRS + 2 * k + 1)
-        a, b = weights[i] * 16 // 14, weights[j] * 16 // 14
-        s = a * b / (256 - a) + a * b / (256 - b)
-        # 8비트로 다루므로 256 이상이면 넘친다(2-5 = 312 → 56 → 39 를 화면에서 확인).
-        odds = int(-(-256 // s)) & 0xFF
+        a, b = weights[i] * 16 // 14 & 0xFF, weights[j] * 16 // 14 & 0xFF
+        ra, rb = -a & 0xFF, -b & 0xFF
+        # 256·(256-a)(256-b) 을 a·b·((256-a)+(256-b)) 로 나눈 몫 + 1, 몫이 2 미만이면 2. 8비트로 넘친다.
+        q = ra * rb * 256 // (a * b * (ra + rb))
+        odds = (2 if q < 2 else q + 1) & 0xFF
         if odds >= 31:
             odds = odds * 7 // 10
         elif odds >= 11:
