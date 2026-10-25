@@ -54,6 +54,11 @@ START_STATUS = (0x12, 0x85BD)                    # 바이트 21 bit5-3 → 시�
 STATUS_NAMES = ('잠', '마비', '혼란', '없음')       # 바이트 21 bit7-6(메시지 001F + 값)
 AI_BANK, AI_SPELLS = 0x13, 0xA68A                # 동료 AI 가 평가하는 주문 칸: クリフト·ミネア·マーニャ·ブライ 12개씩
 AI_TACTIC = {0xBA74: '피해×/16', 0xBAD5: '피해×/256', 0xBAA5: '회복 목표 /16'}  # 작전 × 인물 표(13:$938B)
+AI_SLOT_FN, AI_ITEM_GROUPS = 0xA626, 0xA747      # 칸마다의 평가 루틴 표(인물별 포인터), 아이템 후보 묶음 4개
+AI_TACTIC7 = {0xBB53: '13:$A2DF フバーハ 문턱', 0xBB5A: '13:$A22D ドラゴラム', 0xBB61: '13:$A234 ドラゴラム',
+              0xBB68: '13:$A10F バイキルト', 0xBB6F: '13:$A0A1 スカラ', 0xBB76: '13:$A07F スクルト',
+              0xBB7D: '13:$A170 バイキルト', 0xBB84: '13:$AADA', 0xBB8B: '13:$AAA9', 0xBB92: '13:$AB8C'}
+# 작전 번호($6E80, 0~6)로만 찾는 7바이트 표들과 읽는 곳(코드 읽기). 주문 이름은 그 루틴을 부르는 칸의 주문
 AI_ORDER = {1: ((0, 1, 2, 3, 6, 7, 8, 9, 10, 11), (4, 5)), 2: ((0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11), (5,)),
             3: ((0, 1, 2, 3, 4, 5, 6, 7, 8), (9, 10)), 4: ((0, 1, 2, 3, 4, 6), (7, 8, 9, 10))}
 # 13:$AFF0·$AF97·$AF10·$AF48 이 평가하는 칸 순서와 13:$9135 를 통과할 때만 보는 칸. マーニャ 는 끝에 칸 11 도 봄
@@ -229,6 +234,31 @@ def ai_spells(prg, who):
     return [rd(prg, AI_BANK, AI_SPELLS + 12 * who + k) for k in range(12)]
 
 
+def ai_slot_fn(prg, who):
+    """인물 1-4 의 칸 12개마다 13:$A54D 가 뛰는 평가 루틴 주소(13:$A626 + 2 × 번호 의 포인터가 가리키는 표)."""
+    p = rd(prg, AI_BANK, AI_SLOT_FN + 2 * who) | rd(prg, AI_BANK, AI_SLOT_FN + 2 * who + 1) << 8
+    return [rd(prg, AI_BANK, p + 2 * k) | rd(prg, AI_BANK, p + 2 * k + 1) << 8 for k in range(12)]
+
+
+def ai_item_groups(prg):
+    """13:$A6D4 가 묶음(0~3)마다 보는 (아이템 ID, 행동 ID, 평가 루틴) 목록. 13:$A747 의 포인터, 4바이트씩, FF 로 끝."""
+    out = []
+    for g in range(4):
+        p, rows = rd(prg, AI_BANK, AI_ITEM_GROUPS + 2 * g) | rd(prg, AI_BANK, AI_ITEM_GROUPS + 2 * g + 1) << 8, []
+        while rd(prg, AI_BANK, p) != 0xFF:
+            rows.append((rd(prg, AI_BANK, p), rd(prg, AI_BANK, p + 1),
+                         rd(prg, AI_BANK, p + 2) | rd(prg, AI_BANK, p + 3) << 8))
+            p += 4
+        out.append(rows)
+    return out
+
+
+def k_used(who, k):
+    """그 인물의 루틴이 칸 k 를 평가하는지(マーニャ 는 칸 11 도 봄)."""
+    first, gated = AI_ORDER[who]
+    return k in first or k in gated or (who == 3 and k == 11)
+
+
 def tactic_value(prg, table, tactic, who):
     """작전 × 인물 표의 값. 13:$938B 의 SEC·SBC 뒤 ADC 가 자리올림을 더해 칸은 7 × 작전 + 인물 + 1."""
     return rd(prg, AI_BANK, table + 7 * tactic + who + 1)
@@ -398,6 +428,14 @@ def main():
             first, gated = AI_ORDER[who]
             print(f'{PARTY[who]}: ' + ' '.join(spells[sp[k]] for k in first) + ' / 9135 통과 때 '
                   + ' '.join(spells[sp[k]] for k in gated))
+            print('  평가 루틴: ' + ' '.join(f'{spells[s]}={a:04X}' for s, a in zip(sp, ai_slot_fn(prg, who))
+                                            if k_used(who, sp.index(s))))
+        item_names = [dq4text.text(n) for n in name_list(prg, 'item')[1:]]
+        for g, rows in enumerate(ai_item_groups(prg)):
+            print(f'아이템 후보 {g}: ' + ' '.join(f'{item_names[i]}>{a:02X}@{f:04X}' for i, a, f in rows))
+        for table, what in AI_TACTIC7.items():
+            print(f'13:${table:04X} {what}  작전 0-6: '
+                  + ' '.join(f'{rd(prg, AI_BANK, table + t):02X}' for t in range(7)))
         for table, what in AI_TACTIC.items():
             print(f'13:${table:04X} {what}  작전 0-6 × 인물 1-7')
             for t in range(7):
