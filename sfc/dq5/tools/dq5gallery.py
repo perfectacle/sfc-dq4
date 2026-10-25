@@ -63,6 +63,9 @@ def page(title, nav, intro, sections):
     return '\n'.join(body) + '\n</body></html>\n'
 
 
+TITLE_GROUPS = ('타이틀', '모험의 서·이름 입력')
+
+
 def rel(p):
     return '../' + p
 
@@ -102,11 +105,13 @@ def write_pages(items, root, sprite_items):
         ('blocks', '필드 블록 시트', [card(rel(i['path']), i['title'], [i.get('note', '')]) for i in items
                                      if i['cat'] == 'blocks' and not i['path'].startswith('gfx/blocks/maps/')]),
         ('chr', 'CHR·폰트', simple_cards(items, 'chr') + simple_cards(items, 'font')),
-        ('screens', '창·메뉴', simple_cards(items, 'screens')),
+        ('title', '타이틀·모험의 서', simple_cards([i for i in items if i.get('group') in TITLE_GROUPS], 'screens')),
+        ('screens', '창·메뉴', simple_cards([i for i in items if i.get('group') not in TITLE_GROUPS], 'screens')),
         ('anim', '움직이는 타일', simple_cards([i for i in items if not i.get('stem')], 'anim')),
         ('animmaps', '움직이는 맵(GIF)', simple_cards([i for i in items if i.get('stem')], 'anim')),
     ]
-    nav = [('맵', '#maps'), ('필드', '#field'), ('블록', '#blocks'), ('CHR·폰트', '#chr'), ('창·메뉴', '#screens'),
+    nav = [('맵', '#maps'), ('필드', '#field'), ('블록', '#blocks'), ('CHR·폰트', '#chr'), ('타이틀', '#title'),
+           ('창·메뉴', '#screens'),
            ('움직이는 타일', '#anim'), ('움직이는 맵', '#animmaps'), ('스프라이트·몬스터', 'sprites.html')]
     intro = ('썸네일을 누르면 원본이 열립니다(맵·지도는 1배). 주석판: 노랑 인물(번호, 낮 기본 목록), 하늘색 출구, '
              '빨강 T 보물상자, 분홍 S タンス·ツボ·タル, 분홍 F 발밑 숨은 물건, 주황 D 맵 위 물체(닫힌 문 등). 맵은 이야기 플래그가 모두 꺼진 상태. 맵 이름은 ルーラ 목적지 이름이 있는 그룹만 붙입니다.')
