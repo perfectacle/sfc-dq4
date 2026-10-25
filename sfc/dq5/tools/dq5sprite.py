@@ -48,7 +48,11 @@ LYING_SIMPLE = bytes.fromhex('2426282527292a2c2e2b2d2f181a1c191b1d1e20221f21230c
 LYING_OVERLAP = bytes.fromhex('0c0e0d0f080a090b040605078a888b89282a292b2c2e2d2f2022212324262527181a191b1c1e1d1fa2a0a3a1a6a4a7a5')  # 1F:D1B3
 
 
-def gfx_set(rom, g):
+def gfx_set(rom, g, flags_21b3=None):
+    """그림 번호 → 세트(25:86D0). 그림 9A(아내)는 1F:CF32 가 7E:21B3 bit3(ビアンカ와 결혼)에 따라 2F, 아니면 97 칸을 읽는다.
+    flags_21b3 를 주지 않으면 표의 9A 칸 그대로."""
+    if g == 0x9A and flags_21b3 is not None:
+        g = 0x2F if flags_21b3 & 0x08 else 0x97
     return rom.u8(GFX_SETS + g)
 
 
@@ -930,7 +934,7 @@ def compare(rom, wram, vram, oam, cgram, stats, verbose=True):
             continue
         lst = w16(0x8000 + wram[0x3200 + slot])
         cells = [w16(lst + i * 2) for i in range(48)]
-        s = gfx_set(rom, g)
+        s = gfx_set(rom, g, wram[0x21B3])
         rec = decode_set(rom, s)
         lying = bool(wram[0x31C0 + slot] & 1)
         base = (cells[0] & 0x1FF) - (rec['lying_cells'][0][0] if lying else rec['cells'][0] & 0x7F)
