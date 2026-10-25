@@ -300,10 +300,10 @@ def window(rom, n):
 
 
 def window_header(data):
-    """창 레코드 머리. +0 X, +1 Y, +2 너비, +3 아래 4비트 높이(타일)·bit7 줄 간격 16점·bit5(명령 창에서 끄면 안 뜸, 상태 창은 꺼진 채 뜸).
+    """창 레코드 머리. +0 아래 5비트 X(bit6 을 끄면 일행 창이 한 줄만, bit7 을 켜면 안 뜸), +1 Y, +2 너비, +3 아래 4비트 높이(타일)·bit7 줄 간격 16점·bit5(명령 창에서 끄면 안 뜸, 상태 창은 꺼진 채 뜸).
     +4 아래 4비트가 0 이면 +5 가 줄 수. 0 이 아니면 그 값이 제목의 가로 자리(타일), +5 가 제목 번호(WINDOW_TITLES),
     +6 이 줄 수이고, +6 bit7 이면 일행 수만큼 되풀이(아래 비트 = 사람마다 줄 수)하며 +7 이 줄 앞 칸 타일."""
-    h = {'x': data[0], 'y': data[1], 'w': data[2], 'h': data[3] & 0x0F, 'tall_rows': bool(data[3] & 0x80),
+    h = {'x': data[0] & 0x1F, 'x_flags': data[0] & 0xE0, 'y': data[1], 'w': data[2], 'h': data[3] & 0x0F, 'tall_rows': bool(data[3] & 0x80),
          'bit5': bool(data[3] & 0x20)}
     if data[4] & 0x0F:
         h.update(title=data[5], title_x=data[4] & 0x0F, rows=data[6] & 0x7F, per_member=bool(data[6] & 0x80))
