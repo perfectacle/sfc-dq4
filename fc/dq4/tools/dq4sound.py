@@ -169,7 +169,8 @@ class Run:
             c.ram[0x0646 + y] = 0xFF
         c.apu.clear()
         self.tick = 0
-        self.events = []       # (틱, 채널 Y, 음 번호 A2, 길이, 게이트, 엔벨로프, 이조, 고정 음량, 주소)
+        self.events = []       # (틱, 채널 Y, 음 번호 A2, 길이, 게이트, 엔벨로프, 이조, 고정 음량, 주소, 프레임)
+        self.extra = []        # 음 사건마다 채널 음량·미세 음높이·비브라토·주 음량
         self.tempos = [(0, None)]
         self.frames = []       # 프레임마다 [(주소, 값)…]
         self.ticks_at = []     # 프레임 끝의 틱 수
@@ -250,6 +251,10 @@ class Run:
         t = self.tick
         self.events.append((t, y, r[0xA2], r[0x0620 + x], r[0x062B + x], r[0x063D + x], tr, fixed, ptr,
                             len(self.frames)))
+        self.extra.append({'ch_vol': r[0xB1 + y] >> 4 if y < 3 else None,
+                           'detune': r[0xB1 + y] & 0x0F if y < 3 else None,
+                           'vibrato': r[0xB5 + y] if y < 3 and r[0xB5 + y] != 0xFF else None,
+                           'master_vol': r[0xB0] & 0x0F, 'bank': cpu.bank})
 
 
 def notes(run):
@@ -290,7 +295,7 @@ def decode_stream(prg, bank, start, stops=()):
         a = addr
         while a not in seen:
             if a in stops:
-                lines[a] = (a, 0, f'(다른 채널 시작 ${a:04X} 로 이어 읽음)')
+                lines[a] = (a, 0, f'(다른 채널 시작 ${a:04X} 로 이어 읽음)', {'op': 'falls-into', 'target': a})
                 return False
             seen.add(a)
             b = rd(prg, bank, a)
@@ -299,49 +304,61 @@ def decode_stream(prg, bank, start, stops=()):
                 args = [rd(prg, bank, a + 1 + i) for i in range(n)]
                 size = 1 + n
                 text = name
+                item = {'op': name, 'args': args}
                 if b == 0xFE:
                     tgt = args[0] | args[1] << 8
                     text = f'jump ${tgt:04X}'
-                    lines[a] = (a, size, text)
+                    lines[a] = (a, size, text, {'op': 'jump', 'target': tgt})
                     ret = depth < 4 and tgt not in seen and block(tgt, depth + 1)
                     if ret is not True:
                         return False
                     a += size
                     continue
                 if b == 0xFD:
-                    lines[a] = (a, size, 'return')
+                    lines[a] = (a, size, 'return', {'op': 'return'})
                     return True
                 if b == 0xFA:
                     tgt = a + 3 + args[1] - 0x100
                     text = f'loop x{args[0]} → ${tgt:04X}'
+                    item = {'op': 'loop', 'count': args[0], 'target': tgt}
                 elif b == 0xF9:
                     tgt = a + 2 + args[0] - 0x100
                     text = f'loop x2 → ${tgt:04X}'
+                    item = {'op': 'loop', 'count': 2, 'target': tgt}
                 elif b == 0xF3:
                     text = f'rhythm ${args[0] | args[1] << 8:04X}'
+                    item = {'op': 'rhythm', 'target': args[0] | args[1] << 8,
+                            'pattern': rhythm_pattern(prg, bank, args[0] | args[1] << 8)}
                 elif b == 0xE1:
                     text = f'envelope {args[0]:02X}'
                 elif b == 0xFF:
                     text = f'tempo {args[0]} ({tick_rate(args[0]) * FPS:.1f} 틱/초)'
                 elif n:
                     text = name + ' ' + ' '.join(f'{v:02X}' for v in args)
-                lines[a] = (a, size, text)
+                lines[a] = (a, size, text, item)
                 a += size
                 continue
             grp, n = divmod(b, 75)
             size, extra = 1, ''
+            item = {'op': 'rest' if n == 0x49 else 'tie' if n == 0x4A else 'note'}
+            if n < 0x49:
+                item['note'] = n
             if grp == 1:
                 d = rd(prg, bank, a + 1)
                 size = 2
                 extra = f' len={d & 0x7F}'
+                item['len'] = d & 0x7F
                 if d & 0x80:
-                    extra += f' gate={rd(prg, bank, a + 2) & 0x7F}'
+                    item['gate'] = rd(prg, bank, a + 2) & 0x7F
+                    extra += f' gate={item["gate"]}'
                     size = 3
                 if d & 0x7F == 0:
-                    lines[a] = (a, size, ('rest' if n == 0x49 else f'note {n:02X}') + extra + ' (끝)')
+                    item['end'] = True
+                    lines[a] = (a, size, ('rest' if n == 0x49 else f'note {n:02X}') + extra + ' (끝)', item)
                     return False
             elif grp >= 2:
-                extra = f' gate={rd(prg, bank, a + 1) & 0x7F}'
+                item['gate'] = rd(prg, bank, a + 1) & 0x7F
+                extra = f' gate={item["gate"]}'
                 size = 2
             if n == 0x49:
                 text = 'rest'
@@ -349,17 +366,30 @@ def decode_stream(prg, bank, start, stops=()):
                 text = 'tie'
             else:
                 text = f'note {n:02X}'
-            lines[a] = (a, size, text + extra)
+            lines[a] = (a, size, text + extra, item)
             a += size
-        lines.setdefault(a, (a, 0, f'(→ ${a:04X} 로 되돌아감)'))
+        lines.setdefault(a, (a, 0, f'(→ ${a:04X} 로 되돌아감)', {'op': 'goes-back', 'target': a}))
         return False
 
     block(start)
     out = []
     for a in sorted(lines):
-        a, size, text = lines[a]
+        a, size, text, item = lines[a]
         raw = ' '.join(f'{rd(prg, bank, a + i):02X}' for i in range(size))
-        out.append((a, raw, text))
+        out.append((a, raw, text, item))
+    return out
+
+
+def rhythm_pattern(prg, bank, addr):
+    """리듬 꼴 (길이, 게이트 또는 None) 쌍. 길이 00 에서 처음으로 돌아간다($E9EF)."""
+    out, a = [], addr
+    while len(out) < 64:
+        d = rd(prg, bank, a)
+        if d == 0:
+            break
+        g = rd(prg, bank, a + 1)
+        out.append([d, None if g & 0x80 else g])
+        a += 2
     return out
 
 
@@ -385,9 +415,135 @@ def score_text(prg, n):
             t = rd(prg, bank, p)
             lines.append(f'  {p:04X}  {t:02X}        tempo {t} ({tick_rate(t) * FPS:.1f} 틱/초)')
             start = p + 1
-        for a, raw, text in decode_stream(prg, bank, start, stops):
+        for a, raw, text, _ in decode_stream(prg, bank, start, stops):
             lines.append(f'  {a:04X}  {raw:<9} {text}')
     return '\n'.join(lines)
+
+
+# --- 엔벨로프·비브라토 ---------------------------------------------------------------
+
+DUTY = ['12.5%', '25%', '50%', '75%']
+
+
+def envelope_steps(prg, k, start=0):
+    """엔벨로프 k(짝수 오프셋)를 자리 start 부터 따라가 [(값, 프레임 수)] 와 되돌아가는 자리(없으면 None)를 낸다.
+    값 바이트는 한 프레임, 머묾 바이트 n 은 앞 값을 n 프레임 더 둔다($EE28·$EE3D), C0 이상은 건너뜀."""
+    base = rd16(prg, 0x19, ENV_TABLE + k)
+    steps, pos, seen = [], start, set()
+    while len(steps) < 256:
+        if pos in seen:
+            return steps, pos
+        seen.add(pos)
+        b = rd(prg, 0x19, base + pos)
+        if b >= 0xC0:
+            pos = b & 0x3F
+            continue
+        if b < 0x10:
+            if steps:
+                steps[-1] = (steps[-1][0], steps[-1][1] + b)
+        else:
+            steps.append((b, 1))
+        pos += 1
+    return steps, None
+
+
+def steps_text(steps, limit=40):
+    out = []
+    if len(steps) > limit:
+        return steps_text(steps[:limit]) + ' …'
+    for v, n in steps:
+        t = f'{v & 0x0F:X}'
+        out.append(t if n == 1 else f'{t}×{n}')
+    return ' '.join(out)
+
+
+def envelope_info(prg, k):
+    base = rd16(prg, 0x19, ENV_TABLE + k)
+    attack, loop = envelope_steps(prg, k)
+    # 떼기 자리는 바이트 1. 첫 바이트가 건너뜀(C0 이상)인 엔벨로프만 그 자리를 떼기로 비워 둔다
+    rel = rd(prg, 0x19, base + 1) if rd(prg, 0x19, base) >= 0xC0 else None
+    release, rloop = envelope_steps(prg, k, rel) if rel is not None else ([], None)
+    duties = sorted({DUTY[v >> 6] for v, _ in attack + release})
+    flags = sorted({f'{v & 0x30:02X}' for v, _ in attack + release})
+    return {'id': f'{k:02X}', 'addr': f'19:{base:04X}', 'duty': duties, 'flags': flags,
+            'attack': [[v, n] for v, n in attack], 'attack_loop': loop,
+            'release_at': rel, 'release': [[v, n] for v, n in release], 'release_loop': rloop}
+
+
+def used_envelopes(prg):
+    """곡·효과음 악보에서 명령 E1 로 쓰는 엔벨로프 번호 → 쓰는 곡 번호들."""
+    used = {}
+    for n, chans in all_streams(prg):
+        for bank, start, stops in chans:
+            for _, _, _, item in decode_stream(prg, bank, start, stops):
+                if item.get('op') == 'envelope':
+                    used.setdefault(item['args'][0], set()).add(n)
+    return used
+
+
+def all_streams(prg):
+    for n in range(NSONGS):
+        if song_unused(prg, n):
+            continue
+        bank, ptrs, _ = song_entry(prg, n)
+        chans = [(chan_bank(bank, y), p + (1 if y == 0 else 0)) for y, p in enumerate(ptrs)
+                 if not (p == EMPTY and chan_bank(bank, y) == 0x19)]
+        yield n, [(b, p, {q for b2, q in chans if b2 == b and q != p}) for b, p in chans]
+    for i in range(NSFX):
+        if not sfx_unused(prg, i):
+            yield 0x80 + i, [(0x19, sfx_entry(prg, i)[1], set())]
+
+
+def cmd_envelopes(prg, args):
+    used = used_envelopes(prg)
+    print('| 번호 | 주소 | 듀티 | 음량(×프레임, ↺ 마지막 값 유지·되풀이) | 떼기(게이트 뒤) | 쓰는 곡·효과음 |')
+    print('| --- | --- | --- | --- | --- | --- |')
+    for k in sorted(used):
+        e = envelope_info(prg, k)
+        att = steps_text(e['attack']) + (' ↺' if e['attack_loop'] is not None else '')
+        if e['release_at'] is None:
+            rel = '없음'
+        else:
+            rel = f'@{e["release_at"]}: ' + steps_text(e['release']) + (' ↺' if e['release_loop'] is not None else '')
+        songs = ' '.join(f'{n:02X}' for n in sorted(used[k]))
+        print(f'| `{k:02X}` | `{e["addr"]}` | {" ".join(e["duty"])} | {att} | {rel} | {songs} |')
+    print('\n| 비브라토 | 주소 | 바이트(XX 더함, wn 기다림, →n 건너뜀) |')
+    print('| --- | --- | --- |')
+    for k in sorted(used_vibratos(prg)):
+        print(f'| `{k:02X}` | `19:{rd16(prg, 0x19, VIB_TABLE + k):04X}` | {vibrato_text(prg, k)} |')
+
+
+def used_vibratos(prg):
+    used = set()
+    for n, chans in all_streams(prg):
+        for bank, start, stops in chans:
+            for _, _, _, item in decode_stream(prg, bank, start, stops):
+                if item.get('op') == 'vibrato' and not item['args'][0] & 1:
+                    used.add(item['args'][0])
+    return used
+
+
+def vibrato_text(prg, k):
+    """비브라토 바이트($EB53): 아래 두 비트 00 더함, 11 기다림, 01 건너뜀, 10 끝."""
+    base, pos, out, seen = rd16(prg, 0x19, VIB_TABLE + k), 0, [], set()
+    while pos not in seen and len(out) < 64:
+        seen.add(pos)
+        b = rd(prg, 0x19, base + pos)
+        kind = b & 3
+        if kind == 0:
+            # 더하는 값: bit7 이 부호, 아래 4비트가 크기인 보정 값 A 에 그대로 더함
+            out.append(f'{(b >> 2) | (0xC0 if b & 0x80 else 0):02X}')
+            pos += 1
+        elif kind == 3:
+            out.append(f'w{(b >> 2) & 0x0F}')
+            pos += 1
+        elif kind == 1:
+            out.append(f'→{b >> 2}')
+            pos = b >> 2
+        else:
+            out.append('끝')
+            break
+    return ' '.join(out)
 
 
 # --- MIDI --------------------------------------------------------------------------
@@ -596,6 +752,58 @@ def check_notes(run, groups, chans):
     return ok, miss
 
 
+def song_json(prg, r):
+    """곡·효과음 하나의 중간 형식: 채널별 악보 명령(주소 순, 건너뜀·되풀이 목적지 포함)과 드라이버를 돌린 음 시간표."""
+    n = r.n
+    if n >= 0x80:
+        ch, addr = sfx_entry(prg, n - 0x80)
+        chans = [(ch, 0x19, addr, addr)]
+    else:
+        bank, ptrs, _ = song_entry(prg, n)
+        chans = [(CH_NAMES[y], chan_bank(bank, y), p, p + (1 if y == 0 else 0)) for y, p in enumerate(ptrs)]
+    channels = []
+    for name, bank, p, start in chans:
+        if p == EMPTY and bank == 0x19:
+            channels.append({'name': name, 'bank': f'{bank:02X}', 'start': f'{p:04X}', 'items': []})
+            continue
+        stops = {q for _, b, q, _ in chans if b == bank and q != p}
+        items = [{'addr': f'{a:04X}', 'bytes': raw, **item}
+                 for a, raw, _, item in decode_stream(prg, bank, start, stops)]
+        channels.append({'name': name, 'bank': f'{bank:02X}', 'start': f'{p:04X}', 'items': items})
+    sfx_ch = (3 if sfx_entry(prg, n - 0x80)[0] == 'noise' else 1) if n >= 0x80 else None
+    timeline, envs = [], set()
+    for (t, y, nn, dur, gate, env, tr, fixed, ptr, frame), ex in zip(r.events, r.extra):
+        ch = sfx_ch if n >= 0x80 else y
+        e = {'tick': t, 'frame': frame, 'ch': CH_NAMES[ch], 'op': 'rest' if nn == 0x49 else 'tie' if nn == 0x4A else 'note',
+             'len': dur, 'gate': gate, 'envelope': env, 'transpose': tr - 256 if tr & 0x80 else tr,
+             'fixed_vol': None if fixed == 0xFF else fixed, 'ch_vol': ex['ch_vol'], 'detune': ex['detune'],
+             'vibrato': ex['vibrato'], 'master_vol': ex['master_vol']}
+        if dur == 0:
+            e['op'] = 'end'
+        if nn < 0x49:
+            e['note'] = nn
+            if ch == 3:
+                e['noise_period'] = nn & 0x0F
+            else:
+                e['midi'] = round(midi_of_period(period(prg, pitch_index(nn, tr if n < 0x80 else 0, ch == 2 and n < 0x80)),
+                                                 ch == 2 and n < 0x80), 2)
+            if ch < 2 or n >= 0x80:
+                envs.add(env)
+        timeline.append(e)
+    return {'id': f'{n:02X}', 'kind': 'sfx' if n >= 0x80 else 'song',
+            'tempo': r.tempos[0][1], 'ticks_per_second': round(tick_rate(r.tempos[0][1]) * FPS, 4),
+            'tempo_changes': [[t, v] for t, v in r.tempos[1:]],
+            'loop_start': r.loop_start, 'loop_len': r.loop_len, 'end_tick': r.tick,
+            'channels': channels, 'timeline': timeline,
+            'envelopes': {f'{k:02X}': envelope_info(prg, k) for k in sorted(envs) if k != 0xFF},
+            'note_ref': '음 번호 n: 주기 표 번호 = n + 3 + 이조, 펄스 n=00 이 C2. midi 는 주기에서 계산한 음높이(실수)'}
+
+
+def cmd_json(prg, args):
+    r = Run(prg, args.n, max_frames=args.frames if args.n < 0x80 else 2000)
+    print(json.dumps(song_json(prg, r), ensure_ascii=False, indent=1))
+
+
 def cmd_score(prg, args):
     print(score_text(prg, args.n))
 
@@ -615,13 +823,15 @@ def cmd_export(prg, args):
             f.write(midi_bytes(r, f'DQ4 {"sfx" if n >= 0x80 else "song"} {n:02X}'))
         with open(base + '.txt', 'w') as f:
             f.write(score_text(prg, n) + '\n\n' + notes_text(r) + '\n')
+        with open(base + '.json', 'w') as f:
+            json.dump(song_json(prg, r), f, ensure_ascii=False, separators=(',', ':'))
         if n < 0x80:
             bank, ptrs, _ = song_entry(prg, n)
             where = [f'{chan_bank(bank, y):02X}:{p:04X}' for y, p in enumerate(ptrs)]
         else:
             ch, addr = sfx_entry(prg, n - 0x80)
             where = [f'19:{addr:04X} {ch}']
-        index[sub].append({'id': f'{n:02X}', 'files': [f'{n:02X}.mid', f'{n:02X}.txt'], 'channels': where,
+        index[sub].append({'id': f'{n:02X}', 'files': [f'{n:02X}.mid', f'{n:02X}.txt', f'{n:02X}.json'], 'channels': where,
                            'tempo': r.tempos[0][1], 'notes': len(notes(r)), 'ticks': r.tick,
                            'loop_start': r.loop_start, 'loop_len': r.loop_len,
                            'seconds': round(len(r.frames) / FPS, 1)})
@@ -648,13 +858,18 @@ def main():
     s.add_argument('--channels', default='0,1,2,3')
     sub.add_parser('maps')
     sub.add_parser('calls')
+    sub.add_parser('envelopes')
+    s = sub.add_parser('json')
+    s.add_argument('n', type=lambda v: int(v, 16))
+    s.add_argument('--frames', type=int, default=40000)
     s = sub.add_parser('export')
     s.add_argument('out', nargs='?', default='work/dq4-sound')
     s.add_argument('--frames', type=int, default=40000)
     args = ap.parse_args()
     prg = load(args.rom)
     {'songs': cmd_songs, 'sfx': cmd_sfx, 'score': cmd_score, 'notes': cmd_notes, 'apu': cmd_apu,
-     'compare': cmd_compare, 'export': cmd_export, 'maps': cmd_maps, 'calls': cmd_calls}[args.cmd](prg, args)
+     'compare': cmd_compare, 'export': cmd_export, 'maps': cmd_maps, 'calls': cmd_calls,
+     'envelopes': cmd_envelopes, 'json': cmd_json}[args.cmd](prg, args)
 
 
 # 19:$803B(맵 곡 고르기)가 읽는 표
