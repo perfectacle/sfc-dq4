@@ -321,6 +321,14 @@ def party_names(rom):
     return names
 
 
+# 자기를 가리키는 말 뒤에 오는 역할 단어(사람을 뜻하는 것만).
+SELF_ROLE = re.compile(r'(?:わたし|わたくし|おれ|オレ|ぼく|ボク|わし|ワシ|あたし|アタシ|おいら)(?:は|が|も)[^。！？\n]{0,14}?'
+                       r'(兵士|神父|シスター|商人|大臣|学者|船乗り|船長|町長|村長|戦士|踊り子|旅人|門番|大工|漁師|木こり|'
+                       r'占い師|司祭|父さん|母さん|じいさん|ばあさん)')
+# 일행 표 사람 1·2 번(그림 90·91 → 세트 63·6C). 짝이 되는 이름 표 0 항목이 없다. 세트 63·6C 만 7E:21B3 bit3
+# (결혼 상대)에 따라 팔레트를 바꾸는 것(1F:D051)과 이름 표 1 의 「！のむすこ」「！のむすめ」로 보아 아이들로 추정.
+CHILDREN = {0x63: ('むすこ', '추정: 일행 표 05:D9D5[1] = 그림 90, 1F:D051 결혼 상대에 따른 팔레트, 이름 표 1 「！のむすこ」'),
+            0x6C: ('むすめ', '추정: 일행 표 05:D9D5[2] = 그림 91, 1F:D051 결혼 상대에 따른 팔레트, 이름 표 1 「！のむすめ」')}
 SPEAKER = re.compile(r'\{1003\}([^「{}\s]{1,12})「')
 
 
@@ -332,6 +340,7 @@ def set_names(rom):
     import dq5npc
     import dq5talk
     said, total, cache = collections.defaultdict(collections.Counter), collections.Counter(), {}
+    roles = collections.defaultdict(collections.Counter)
     for la, _ in dq5npc.all_lists(rom):
         for a, _ in dq5npc.list_entries(rom, la):
             for night in (False, True):
@@ -341,14 +350,17 @@ def set_names(rom):
                 t = f['talk']
                 if t not in cache:
                     try:
-                        cache[t] = set(SPEAKER.findall('\n'.join(dq5talk.talk(rom, t))))
+                        txt = '\n'.join(dq5talk.talk(rom, t))
                     except (ValueError, KeyError, IndexError):
-                        cache[t] = set()
+                        txt = ''
+                    cache[t] = (set(SPEAKER.findall(txt)), set(SELF_ROLE.findall(txt)))
                 s = gfx_set(rom, f['gfx'])
                 total[s] += 1
-                said[s]['*'] += bool(cache[t])
-                for n in cache[t]:
+                said[s]['*'] += bool(cache[t][0])
+                for n in cache[t][0]:
                     said[s][n] += 1
+                for n in cache[t][1]:
+                    roles[s][n] += 1
     names = party_names(rom)
     shared = collections.Counter(gfx_set(rom, g) for g in range(GFX_COUNT))
     for s, c in said.items():
@@ -358,6 +370,12 @@ def set_names(rom):
         if top and top[0][1] >= 0.6 * c['*'] and top[0][1] >= 0.2 * total[s] and \
                 (len(top) == 1 or top[1][1] < top[0][1]):
             names.setdefault(s, (top[0][0], f'대화 화자 {top[0][1]}/{total[s]} 엔트리'))
+    for s, c in roles.items():
+        top = c.most_common()
+        if s not in names and shared[s] <= 3 and len(top) == 1 and top[0][1] >= 4 and top[0][1] >= 0.05 * total[s]:
+            names[s] = (top[0][0], f'역할: 자기 대사 「わたしは…{top[0][0]}」 {top[0][1]}/{total[s]} 엔트리(다른 역할 말 없음)')
+    for s, nm in CHILDREN.items():
+        names.setdefault(s, nm)
     return names
 
 
@@ -374,18 +392,18 @@ def obj_stem(m):
 # 칸 바이트 오프셋으로 더한다. 팔레트 5 는 색이 모두 0 인 그림자(색 연산)다.
 VEHICLES = (
     {'id': 0x80, 'name': 'まほうのじゅうたん', 'what': '마법의 양탄자', 'tiles': ((0x16E7BD, 0x2F, 0x180),), 'parts': (
-        {'rom': 0x04952A, 'cols': 3, 'rows': 2, 'dir': 0x18, 'frame': 0x0C, 'attr': 0x0000, 'vflip': ()},
-        {'rom': 0x0494CF, 'cols': 3, 'rows': 3, 'dir': 0x24, 'frame': 0x12, 'attr': 0x0000, 'vflip': ()},
-        {'rom': 0x04955B, 'cols': 3, 'rows': 1, 'dir': 0x0C, 'frame': 0x06, 'attr': 0x0A00, 'vflip': ()})},
+        {'rom': 0x04952A, 'cols': 3, 'rows': 2, 'dir': 0x18, 'frame': 0x0C, 'attr': 0x0000, 'vflip': (), 'at': (0, 8)},
+        {'rom': 0x0494CF, 'cols': 3, 'rows': 3, 'dir': 0x24, 'frame': 0x12, 'attr': 0x0000, 'vflip': (), 'at': (0, 0)},
+        {'rom': 0x04955B, 'cols': 3, 'rows': 1, 'dir': 0x0C, 'frame': 0x06, 'attr': 0x0A00, 'vflip': (), 'at': (0, 24)})},
     {'id': 0x81, 'name': '天空城', 'what': '天空城', 'tiles': ((0x2B84F0, 0x14, 0x180),), 'parts': (
-        {'rom': 0x049634, 'cols': 4, 'rows': 4, 'dir': 0, 'frame': 0, 'attr': 0x0600, 'vflip': ()},
+        {'rom': 0x049634, 'cols': 4, 'rows': 4, 'dir': 0, 'frame': 0, 'attr': 0x0600, 'vflip': (), 'at': (0, 0)},
         {'rom': 0x0496C6, 'cols': 4, 'rows': 2, 'dir': 0, 'frame': 0, 'attr': 0x0A00,
-         'vflip': (0x08, 0x0A, 0x0C, 0x0E, 0x18, 0x1A, 0x1C, 0x1E)})},  # 01:C42D
+         'vflip': (0x08, 0x0A, 0x0C, 0x0E, 0x18, 0x1A, 0x1C, 0x1E), 'at': (0, 48)})},  # 01:C42D
     {'id': 0x82, 'name': 'マスタードラゴン', 'what': 'マスタードラゴン',
      'tiles': ((0x16EAF2, 0x40, 0x180), (0x16F115, 0x39, 0x1C0)), 'parts': (
-        {'rom': 0x049574, 'cols': 4, 'rows': 4, 'dir': 0x60, 'frame': 0x20, 'attr': 0x0000, 'vflip': ()},
+        {'rom': 0x049574, 'cols': 4, 'rows': 4, 'dir': 0x60, 'frame': 0x20, 'attr': 0x0000, 'vflip': (), 'at': (0, 0)},
         {'rom': 0x049685, 'cols': 2, 'rows': 2, 'dir': 0x18, 'frame': 0x08, 'attr': 0x0A00,
-         'vflip': bytes.fromhex('1c1e24262c2e30323436383a3c3e404244464c4e54565c5e')})},  # 01:C160
+         'vflip': bytes.fromhex('1c1e24262c2e30323436383a3c3e404244464c4e54565c5e'), 'at': (8, 56)})},  # 01:C160
 )
 MAP_PALETTES = 0x019A12
 
@@ -407,6 +425,38 @@ def map_obj_palette3(rom, bc, bd):
         if e['line'] == 0x0B and e['bc'] == bc and e['bd'] in (bd, 0xFF):
             return e
     return None
+
+
+# 'at' 은 부분들의 상자 왼쪽 위를 한 장에 놓는 자리(px). 탈것 장면 덤프의 OAM 에서 방향·프레임과 상관없이 같았다.
+# 앞 부분일수록 OAM 앞 슬롯(위에 그려짐): 양탄자는 부분 1, 天空城·マスタードラゴン 은 부분 1(그림자 아래).
+
+
+def vehicle_composite(frs, pals, scale=1, index=False):
+    """부분을 'at' 자리에 겹친 한 장. 행 아래·왼쪽·오른쪽·위, 열 프레임(부분마다 프레임 수가 같다)."""
+    from PIL import Image
+
+    W = max(fr['part']['at'][0] + fr['part']['cols'] * 8 for fr in frs)
+    H = max(fr['part']['at'][1] + fr['part']['rows'] * 8 for fr in frs)
+    directional = frs[0]['part']['dir'] != 0
+    dirs = DIRS if directional else (None,)
+    nf = frs[0]['nframes'] if directional else 1
+    im = Image.new('RGBA', (W * nf, H * len(dirs)), (0, 0, 0, 0))
+    for r, d in enumerate(dirs):
+        for f in range(nf):
+            for fr in reversed(frs):
+                g = fr['frames'].get((d, f)) if d else next(iter(fr['frames'].values()))
+                if not g:
+                    continue
+                ax, ay = fr['part']['at']
+                for y, row in enumerate(g):
+                    for x, pv in enumerate(row):
+                        if pv:
+                            pal, ci = pv
+                            col = INDEX_COLORS[ci] if index else ((48, 48, 48) if pal == 5 else rgb(pals[pal][ci]))
+                            im.putpixel((f * W + ax + x, r * H + ay + y), col + ((160 if pal == 5 and not index else 255),))
+    if scale > 1:
+        im = im.resize((im.width * scale, im.height * scale), Image.NEAREST)
+    return im
 
 
 DIR_INDEX = {'up': 0, 'right': 1, 'down': 2, 'left': 3}  # 00:EE7C
@@ -561,7 +611,18 @@ def export_all(rom, outdir, scale=1, grid=False, index=True):
     vpals = [list(p) for p in pals] + [[0] * 16 for _ in range(4)]
     vpals[3] = [rom.u16(FIELD_OBJ_PALETTE3 + i * 2) for i in range(16)]
     for v in VEHICLES:
-        for k, fr in enumerate(vehicle_frames(rom, v)):
+        frs = vehicle_frames(rom, v)
+        stem = f'v{v["id"]:02X}' + (f'-{v["name"]}' if v['name'] else '')
+        for idx in ((False, True) if index else (False,)):
+            e = save(vehicle_composite(frs, vpals, scale, idx), stem + ('-index' if idx else '') + '.png')
+            e.update({'group': '탈것' + (' 색 번호' if idx else ''), 'title': f'{v["what"]} 전체', 'vehicle': v['id'],
+                      'vehicle_name': v['name'], 'part': 0, 'rom': f'{v["parts"][0]["rom"]:06X}',
+                      'tile_data': [f'{a:06X}' for a, _, _ in v['tiles']], 'cols': None, 'rows': None,
+                      'frames_per_dir': frs[0]['nframes'], 'directional': bool(v['parts'][0]['dir']),
+                      'obj_palette': None, 'scale': scale,
+                      'note': '부분을 덤프에서 잰 자리에 겹친 한 장. 행 아래·왼쪽·오른쪽·위, 열 프레임'})
+            entries.append(e)
+        for k, fr in enumerate(frs):
             part = fr['part']
             stem = f'v{v["id"]:02X}' + (f'-{v["name"]}' if v['name'] else '') + f'-{k + 1}'
             for idx in ((False, True) if index else (False,)):
@@ -789,10 +850,10 @@ def compare(rom, wram, vram, oam, cgram, stats, verbose=True):
                 for (d, f), img in frames.items():
                     want = {(x, y): v for y, row in enumerate(img) for x, v in enumerate(row) if v}
                     b = bbox(img)
-                    if b and {(x - b[0], y - b[1]): v for (x, y), v in want.items()} == \
+                    if (not b and not got) or b and {(x - b[0], y - b[1]): v for (x, y), v in want.items()} == \
                             {k: pv[1] for k, pv in got.items()}:
                         hit = f'{d}{f} {len(want)}px'
-                        if pals_seen != {rec['palette']}:
+                        if pals_seen and pals_seen != {rec['palette']}:
                             hit += f' 팔레트 {"·".join(map(str, sorted(pals_seen)))}'
                             stats['other_palette'] = stats.get('other_palette', 0) + 1
                         stats.setdefault('frames', set()).add((s, d, f))
