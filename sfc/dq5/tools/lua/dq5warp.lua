@@ -1,5 +1,11 @@
 -- DQ5: 배 선실 세이브스테이트(STATE)에서 원하는 장면으로 순간이동해, 조작할 수 있는 상태로 세이브스테이트(SAVE)를 남긴다.
 -- 배의 사다리 출구 항목(2A:EFF5)을 목적지 표 종류 60 항목으로 덮고 사다리를 밟아, 게임의 맵 불러오기를 그대로 탄다.
+-- 시작 세이브스테이트가 배 선실(17/00)이 아니면(또는 ANYWHERE=1) 「어디서나」 방식으로 간다.
+--   실내: 영역 이동 레코드 하나(12바이트, 2A:D812 자리)를 주인공 아래 칸·목적지로 쓰고 지금 맵의 레코드 위치·개수
+--         (7E:183A~183D)를 그것으로 바꾼 뒤 아래로 한 걸음.
+--         아래가 막혀 있으면 위로 한 칸 간 뒤 원래 칸을 덮고 아래로 걷는다.
+--   필드: 04:FD97 의 첫 입구를 [목적지 BC][주인공 아래 칸] 으로, 0F:EA97 의 그 그룹 도착 자리를 목적지로 덮고 아래로 한 걸음.
+--   도착은 맵 번호($BC·$BD)가 목적지와 같아진 것으로 본다. FIELD 는 01/00 으로 간 뒤 위와 같이 아래로 걸어 나간다.
 --   TO="01/04,12,44[,층]"    실내 맵 $BC/$BD(16진)와 셀 좌표(10진). 층은 도착 뒤 주인공 층 마스크($C3 → 7E:31A0), 기본 1.
 --                            그 맵 바닥의 층과 다르면 주인공이 움직이지 못한다(01/00 은 2).
 --                            $BD 가 1F 를 넘는 그룹 50 이상 맵이면 2A:F769 의 LDA $01 을 LDA #$BD 로 덮는다(종류 60 은 $BD 를 5비트에만 담음)
@@ -139,6 +145,29 @@ local function rd(a) return emu.read(a, m) end
 local function rd16(a) return rd(a) | rd(a + 1) << 8 end
 local log = {}
 local n, phase, si, left, wi, arrived, startPos = 0, "pre", 1, nil, 1, nil, nil
+local prg = emu.memType.snesPrgRom
+local anywhere = os.getenv("ANYWHERE") == "1"
+local gstep, gstart, gtry, gmap = nil, nil, 0, nil
+
+local function prgWrite(off, bytes)
+  for i, b in ipairs(bytes) do emu.write(off + i - 1, b, prg) end
+end
+
+-- 영역 이동 레코드 하나를 (x,y) 칸·목적지로 써서 2A:D812(첫 레코드 자리)에 두고, 지금 맵의 레코드 위치·개수
+-- (01:9430 이 맵을 불러올 때 두는 7E:183A~183C·183D)를 그 한 개로 바꾼다. 레코드가 없는 맵(선실 등)에서도 된다.
+local function patchTrigger(x, y)
+  -- [x0][y0][x1][y1][보는 방향 01=아래][플래그 C0: 조건 검사 없음][BC][BD][X][Y][층][01]
+  prgWrite(0x155812, {x, y, x + 1, y + 1, 0x01, 0xC0, bc, bd, tx, ty, dir, 0x01})
+  emu.write(0x7E183A, 0x12, m); emu.write(0x7E183B, 0xD8, m); emu.write(0x7E183C, 0x2A, m); emu.write(0x7E183D, 0x01, m)
+  return true
+end
+
+-- 필드: 첫 입구(04:FD97)를 [BC][주인공 아래 칸] 으로, 그 그룹의 도착 자리(0F:EA97)를 목적지로.
+local function patchEntrance(fx, fy)
+  local world = emu.read(0x7E1949, m)
+  prgWrite(0x27D97, {bc, fx & 255, fx >> 8, fy & 255, fy >> 8})
+  prgWrite(0x7EA97 + bc * 5, {((world + 1) << 5) | (bd & 0x1F), tx, ty, dir, 0x00})
+end
 local function play(seq)
   if si > #seq then return true end
   local s = seq[si]
@@ -188,7 +217,37 @@ emu.addEventCallback(function()
   if n < 2 then return end
   local x, y = rd(0x7E3020), rd(0x7E3080)
   local inField = rd(0x7E00BE) & 0x80 == 0
-  if phase == "pre" then
+  if phase == "pre" and n == 2 and (anywhere or rd(0x7E00BC) ~= 0x17 or rd(0x7E00BD) ~= 0x00) then
+    phase = "any"; gstart = n; gmap = rd(0x7E00BC) * 256 + rd(0x7E00BD)
+    log[#log + 1] = string.format("f%05d anywhere from map %02X/%02X %s", n, rd(0x7E00BC), rd(0x7E00BD), pos())
+  end
+  if phase == "any" then
+    -- 주인공 아래 칸을 덮은 뒤 아래로 걷는다. 맵이 바뀌면 불러오기 단계로.
+    local here = rd(0x7E00BC) * 256 + rd(0x7E00BD)
+    if gstep and here == bc * 256 + bd and rd(0x7E00BE) & 0x80 ~= 0 and (here ~= gmap or (x == tx and y == ty)) then
+      phase = "load"; arrived = n
+      log[#log + 1] = string.format("f%05d left %s", n, "by anywhere")
+    elseif n < gstart + 20 then
+      -- 배 선실 세이브스테이트는 대화 창이 열린 채라 B 로 닫는다. 다른 곳에서 B 는 명령 창을 열어 걷지 못하게 하므로 누르지 않는다
+      if n < gstart + 4 and gmap == 0x1700 then L.press({b = true}) end
+    elseif not gstep then
+      gstep = pos()
+      if inField then patchEntrance(rd16(0x7E00B6), rd16(0x7E00B8) + 1)
+      elseif not patchTrigger(x, y + 1) then log[#log + 1] = string.format("f%05d no trigger record", n) end
+      gtry = n
+    elseif here ~= gmap then
+      -- 맵을 불러오는 중: 누르지 않는다
+    elseif n < gtry + 40 then
+      L.press({down = true})
+    elseif n < gtry + 41 then
+      -- 아래가 막혔으면 위로 한 칸 간 뒤 원래 칸을 덮고 다시 아래로
+      if inField then patchEntrance(rd16(0x7E00B6), rd16(0x7E00B8)) else patchTrigger(x, y) end
+    elseif n < gtry + 50 then
+      L.press({up = true})
+    elseif n < gtry + 100 then
+      L.press({down = true})
+    end
+  elseif phase == "pre" then
     if play(route) then phase = "ladder"; si = 1 end
   elseif phase == "ladder" then
     local p = ladder[wi]
