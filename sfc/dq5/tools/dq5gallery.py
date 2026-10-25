@@ -131,9 +131,9 @@ def write_pages(items, root, sprite_items):
 
 
 def captured(root):
-    """게임을 돌려 찍은 GIF(dq5effectgif.py·dq5titlegif.py 의 anim/ 폴더)가 있으면 그 목록을 갤러리에 붙인다."""
+    """게임을 돌려 찍은 그림(dq5effectgif.py·dq5titlegif.py 의 anim/, dq5fx.py 의 effects/frames/)이 있으면 그 목록을 갤러리에 붙인다."""
     out = []
-    for folder in ('gfx/effects/anim', 'gfx/screens/anim'):
+    for folder in ('gfx/effects/anim', 'gfx/effects/frames', 'gfx/screens/anim'):
         index = os.path.join(root, folder, 'index.json')
         if os.path.exists(index):
             with open(index) as f:
