@@ -5,7 +5,7 @@
 SFC DQ5 엔진 분석. 시작점은 [handoff.md](handoff.md). 결과 문서: [dq5-map-format.md](docs/dq5-map-format.md), [dq5-field-format.md](docs/dq5-field-format.md), [dq5-text-format.md](docs/dq5-text-format.md), [dq5-data-format.md](docs/dq5-data-format.md), [dq5-graphics-format.md](docs/dq5-graphics-format.md).
 
 - **패치 빌드**: 곡 자료 뱅크(`22`·`29`·`2F` 등) 끝 빈 자리를 들어 보지 않은 곡이 읽는지, 첫 장면 뒤(필드·전투·메뉴)까지 보는 시험([dq5-build-format.md](docs/dq5-build-format.md)).
-- **소리**: `$0F1B` bit6 을 켜는 장면(`06:BDC8`·`06:C29C`)과 `02`·`03`·`04` 의 나머지 부르는 곳, SPC 쪽 `01`·`05`~`08`·`0C`·`11`·`12`·`14` 처리기와 시퀀스 형식, 곡 묶음 둘째 바이트, 장면으로 안 정해진 곡의 이름.
+- **소리**: `$0F1B` bit6 장면(`06:BD99`·`06:BDB5`·`06:C297`)에서의 실측과 `02`·`03`·`04` 의 나머지 부르는 곳, 시퀀스 명령 `E2`·`E6` 의 뜻과 `E5`·`E7`·`E8`·`FB` 세부, 스크립트 연산 `03`·`04`·`11`~`17`, 장면으로 안 정해진 곡의 이름.
 - **이야기 플래그·이벤트 스크립트**: 「문맥」 사건 이름 실측, 1A/02 의 パパス 에게 말을 걸어 `06:BD94` 걸기, パルプンテ `1D` 의 조건([docs/dq5-event-format.md](docs/dq5-event-format.md)).
 - **그래픽 내보내기의 남은 것**: 스태프 롤의 지운 줄 무늬와 줄 올리기(`FB`·`F7`·`F6`), 「THE END」 타일맵을 만드는 곳, 전투 창.
 - **텍스트의 남은 것**: 네이티브 호출 「장면」 갈래 중 대화의 조건 갈래 안에서 부르는 9곳(`FB8F`·`BFB7`·`F729`·`F8DF`·`F9E2`·`F792`·`FB41`·`FBB3`·`FBC5`)과 부르는 인물이 없는 `C027`, 한글 넣기([dq5-hangul-format.md](docs/dq5-hangul-format.md)): 창 2바이트 부호를 여러 글자로(캔버스 빌리기 또는 BG3 타일 칸 넓히기, 두 길의 근거는 문서), 옮긴 레코드 자리 `7E:1C33`~ 가 비어 있는지.
