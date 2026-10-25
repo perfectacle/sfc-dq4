@@ -5,7 +5,7 @@
 SFC DQ5 엔진 분석. 시작점은 [handoff.md](handoff.md). 결과 문서: [dq5-map-format.md](docs/dq5-map-format.md), [dq5-field-format.md](docs/dq5-field-format.md), [dq5-text-format.md](docs/dq5-text-format.md), [dq5-data-format.md](docs/dq5-data-format.md), [dq5-graphics-format.md](docs/dq5-graphics-format.md).
 
 - **패치 빌드**: 곡 자료 뱅크(`22`·`29`·`2F` 등) 끝 빈 자리를 들어 보지 않은 곡이 읽는지, 첫 장면 뒤(필드·전투·메뉴)까지 보는 시험([dq5-build-format.md](docs/dq5-build-format.md)).
-- **소리**: `02`·`03`·`04` 를 부르는 실제 장면에서의 기록, `0D`·`0E`·`94`·`95`·`96`·`8B`·`93`·`09` 의 뜻(DSP 에 안 드러남, SPC 프로그램 읽기), 명령 `1A` 인자의 뜻, 天空城에서 내릴 때의 곡, 효과음·곡 번호의 이름.
+- **소리**: `$0F1B` bit6 을 켜는 장면(`06:BDC8`·`06:C29C`)과 `02`·`03`·`04` 의 나머지 부르는 곳, SPC 쪽 `01`·`05`~`08`·`0C`·`11`·`12`·`14` 처리기와 시퀀스 형식, 곡 묶음 둘째 바이트, 장면으로 안 정해진 곡의 이름.
 - **이야기 플래그·이벤트 스크립트**: 「문맥」 사건 이름 실측, 켜는 곳이 없는 비트 6개, 이벤트 9·`02:F84F`(그룹 `54`)·`02:A3D8`(배)·`02:E57B`(15/01 `E3` 칸)·`06:BD94`(1A/02 パパス)를 원래 맵에서 걸기, `C4`·`C5` 셋째 바이트(23/00·18/00), パルプンテ `1D` 의 조건([docs/dq5-event-format.md](docs/dq5-event-format.md)).
 - **그래픽 내보내기의 남은 것**: 스태프 롤의 지운 줄 무늬와 줄 올리기(`FB`·`F7`·`F6`), 「THE END」 타일맵을 만드는 곳, 전투 창.
 - **텍스트의 남은 것**: 네이티브 호출 「장면」 갈래 나머지 23곳을 저마다의 인물로 실행하기, 한글 넣기([dq5-hangul-format.md](docs/dq5-hangul-format.md)): 창(`04:B0F0`)의 2바이트 부호, 레코드를 복사하는 `7E:11A0`~ 가 비어 있는지.
