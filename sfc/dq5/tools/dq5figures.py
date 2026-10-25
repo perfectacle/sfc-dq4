@@ -676,6 +676,18 @@ def fig_exflags2():
     save(out, 'dq5-exflags2.webp')
 
 
+def fig_exflags3():
+    """예외 표 플래그를 원래 장면으로 켠 화면. 21/00 이벤트 00 뒤 걷기 중 전투의 キメラのつばさ(2195.5)와 22/00 의 ポワン 장면 끝(2199.3).
+    work/exflag3/ 의 b55.png·p2.png 이고 명령은 sfc/dq5/journal/ 의 exflag3 일지."""
+    shots = [('b55.png', '21/00 2195.5'), ('p2.png', '22/00 2199.3')]
+    out = Image.new('RGB', (len(shots) * 260 - 4, 224), (24, 24, 24))
+    for i, (path, text) in enumerate(shots):
+        im = Image.open(f'work/exflag3/{path}').convert('RGB')
+        label(im, text)
+        out.paste(im, (i * 260, 0))
+    save(out, 'dq5-exflags3.webp')
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     rom = Rom(open('rom/dq5.sfc', 'rb').read())
@@ -711,6 +723,7 @@ def main():
     fig_perframe_more()
     fig_perframe_last()
     fig_exflags2()
+    fig_exflags3()
     os.remove(TMP)
 
 
