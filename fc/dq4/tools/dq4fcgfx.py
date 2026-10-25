@@ -168,6 +168,7 @@ def place_table(prg, data):
        1~3 의 이름이 붙은 그룹 입구 중 가장 가까운(맨해튼 거리) 것의 이름에 「ちかく」를 붙이고 'near' 에
        (필드, X, Y, 거리, 그 그룹)을 적는다. 가장 가까운 것이 둘 이상이고 이름이 다르면 붙이지 않는다.
     7. 'link': 필드 입구가 없는 그룹은 5 와 같이 출구로 이어진 가장 가까운 6 의 그룹 이름을 받는다.
+    6·7 은 게임 속 이름이 아니라서 'label' 을 켜 두고, 파일 이름에는 쓰지 않는다(에셋 저장소 규칙).
     못 찾은 그룹은 넣지 않는다."""
     rom = dq4text.Rom(data)
     names = place_list(prg)
@@ -211,7 +212,7 @@ def place_table(prg, data):
             out[g] = {'name': min(kinds, key=lambda x: (len(x), x)), 'src': 'talk-kind'}
     out.update(link_names(prg, out))
     out.update(near_names(prg, out))
-    out.update(link_names(prg, out, ('near',)))
+    out.update({g: v | {'label': True} for g, v in link_names(prg, out, ('near',)).items()})
     return out
 
 
@@ -234,7 +235,7 @@ def near_names(prg, names):
         if len({b[1] for b in best if b[0] == best[0][0]}) != 1:
             continue
         d, n, f, x, y, h = best[0]
-        out[g] = {'name': n + 'ちかく', 'src': 'near', 'near': (f, x, y, d, h)}
+        out[g] = {'name': n + 'ちかく', 'src': 'near', 'near': (f, x, y, d, h), 'label': True}
     return out
 
 
@@ -324,7 +325,8 @@ def map_records(prg, names):
     out = []
     for g, k, mid, bank, ptr in all_maps(prg):
         name, src = names.get(g, {}).get('name', ''), names.get(g, {}).get('src', '')
-        stem = f'{g:02X}-{k:02X}' + (f'-{safe(name)}' if name else '')
+        label = names.get(g, {}).get('label', False)
+        stem = f'{g:02X}-{k:02X}' + (f'-{safe(name)}' if name and not label else '')
         rec = {'g': g, 'k': k, 'type': mid & 0x3F, 'code': mid, 'name': name, 'name_src': src, 'stem': stem}
         if 'via' in names.get(g, {}):
             rec['name_via'] = names[g]['via']
