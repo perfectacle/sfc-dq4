@@ -500,6 +500,17 @@ def fig_hangul_retree():
     save(img, 'dq5-hangul-retree.webp')
 
 
+def fig_hangul_proto():
+    """dq5hangul.py proto 롬의 한글 시제품 화면: 명령 창·상태 창(work/hangul/proto-menu/end.png)과 메시지 129
+    (work/hangul/proto-msg/end.png). 덤프 명령은 sfc/dq5/journal/ 의 hangul2 일지 2절."""
+    menu = Image.open('work/hangul/proto-menu/end.png').convert('RGB')
+    msg = Image.open('work/hangul/proto-msg/end.png').convert('RGB')
+    out = Image.new('RGB', (menu.width + msg.width + 8, menu.height), (24, 24, 24))
+    out.paste(menu, (0, 0))
+    out.paste(msg, (menu.width + 8, 0))
+    save(out, 'dq5-hangul-proto.webp')
+
+
 def fig_worlds(rom):
     """$1949 로 고르는 세계 지도 셋(블록 1개를 2x2 로 축소)과 그 세계의 04:FD97 입구(노란 틀). 세계 1·2 는 땅이 있는 왼쪽 위
     128x128 블록만 2배로 키웠다. 타일은 롬, 팔레트는 세계마다
@@ -615,6 +626,7 @@ def main():
     fig_textctl()
     fig_hangul()
     fig_hangul_retree()
+    fig_hangul_proto()
     fig_mongfx(rom)
     fig_worlds(rom)
     fig_high_maps(rom)
