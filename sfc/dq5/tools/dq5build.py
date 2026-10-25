@@ -155,6 +155,44 @@ def build(original, lists, mb, fill=None):
     return bytes(checksum(d)), allw
 
 
+RLE_MIN = 16
+
+
+def make_ips(a, b):
+    """kr_patch.ips.make 와 같은 레코드에, 같은 바이트가 RLE_MIN 개 넘게 이어지는 곳은 RLE 레코드(크기 0)로 줄인 IPS.
+    늘린 자리의 0 이 대부분이라 4MB 롬이면 레코드 크기가 크게 준다. 맞는지는 ips.apply 로 다시 붙여 본다."""
+    out = bytearray(b'PATCH')
+    plain = ips.make(a, b)
+    i = 5
+    while plain[i:i + 3] != b'EOF':
+        off = int.from_bytes(plain[i:i + 3], 'big')
+        size = int.from_bytes(plain[i + 3:i + 5], 'big')
+        data = plain[i + 5:i + 5 + size]
+        i += 5 + size
+        j = 0
+        while j < size:
+            k = j
+            while k < size and data[k] == data[j] and k - j < 0xFFFF:
+                k += 1
+            if k - j >= RLE_MIN:
+                out += (off + j).to_bytes(3, 'big') + b'\0\0' + (k - j).to_bytes(2, 'big') + data[j:j + 1]
+                j = k
+                continue
+            # 다음 RLE 감 앞까지 글자 그대로.
+            k = j
+            while k < size:
+                r = k
+                while r < size and data[r] == data[k] and r - k < RLE_MIN:
+                    r += 1
+                if r - k >= RLE_MIN:
+                    break
+                k = r
+            out += (off + j).to_bytes(3, 'big') + (k - j).to_bytes(2, 'big') + data[j:k]
+            j = k
+    out += plain[i:]
+    return bytes(out)
+
+
 def fromrom(original, patched, name, out):
     """patched 를 같은 크기로 늘린 원래 롬과 견주어 dq5patch/1 목록을 쓴다. 긴 쓰기는 옆 .bin 파일로."""
     mb = len(patched) // 0x100000 if len(patched) > ORIGINAL_SIZE else 0
@@ -248,7 +286,7 @@ def main():
         f.write(out)
     print(f'{a.out}: {len(out):#x} 바이트, 머리 크기 {out[HEADER + 0x17]:02X}')
     if a.ips:
-        p = ips.make(original, out)
+        p = make_ips(original, out)
         if ips.apply(original, p) != out:
             print('오류: IPS 를 다시 붙인 결과가 롬과 다름', file=sys.stderr)
             return 1
