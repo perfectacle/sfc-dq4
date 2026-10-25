@@ -40,6 +40,7 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5battlebg.py rom [번호]` | DQ5 전투 배경 49개(번호 `$1AA0 & 7F`, 그림·목록·팔레트 주소). `--png` 256x128 띠, `--cgram` 레코드 밖 색, `--alt` 밤 팔레트, `--era N` 세계, `--indoor` 실내, `--terrain X,Y` 필드 좌표의 지형(= 배경 번호), `--compare 덤프폴더 프레임` 으로 `dq5battledump.lua` 덤프와 비교 |
 | `dq5anim.py rom [BC BD]` | DQ5 실내 맵의 움직이는 타일: 종류 16개(주기·벌 수·타일 수·자료 주소·원본 블록)와 맵 103곳의 종류. `BC BD` 는 그 맵, `--check 덤프폴더 첫 끝` 으로 `lua/dq5gfxdump.lua` 의 프레임별 덤프와 벌 바꾸기·줄 돌리기를 견줌 |
 | `dq5sound.py rom` | DQ5 소리 명령 입구(`24:FE91`~ 14개), `BRK 0F`~`19` 가 부르는 명령, 맵 346개의 곡 번호(맵 레코드 `+5`). `--check snd.txt --map BC/BD` 로 `lua/dq5sndlog.lua` 기록의 맵 곡과 견줌 |
+| `dq5mapmusic.py rom 세이브스테이트 폴더 --libdir 드라이버` | DQ5 맵 곡 표를 맵마다 들어가 견줌: 출구 도착 칸(없으면 통행 격자 가운데 칸)으로 `dq5warp.lua` `TO` 해 `lua/dq5sndlog.lua` 의 `00:CEA2` 명령 `01` 인자를 표와 비교. `--set` 으로 밤 등, `--only` 로 일부 맵. `MESENCE` 필요 |
 | `dq5spc.py rom` | DQ5 사운드 드라이버 자료: 샘플 0x26개(`2B:EB00`~)·시퀀스 0x47개(`2E:E2E4`~)·곡 묶음(`2B:E67F`)·고정 목록. `--check spc.bin` 으로 `lua/dq5sndlog.lua` 의 `SPCDUMP` 덤프(커밋 금지)에 올라 있는 것을 롬과 견줌 |
 | `spc700.py dump 시작 [개수]` | SPC700 디스어셈블러(SPC RAM 덤프 64KB 를 받음) |
 | `dq5brr.py rom [--out 폴더]` | DQ5 악기 샘플 0x26개(`2B:EB00`~)의 BRR 을 16비트 WAV(32000Hz, 반복은 `smpl` 청크)로, ADSR·GAIN·음높이는 `index.json`. 결과는 커밋 금지 |
