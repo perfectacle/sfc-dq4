@@ -1400,9 +1400,10 @@ def window_grid(rom, n):
             i += 1
     elif data[4] & 0x0F == 0 and 0xFE in data[5:8]:
         i = data.index(0xFE)
-    elif data[4] == 0 and 0xFF in data[6:] and all(b < 0x85 or b in (0xF3, 0xFE, 0xFF) for b in data[6:]):
+    elif data[4] == 0 and 0xFF in data[6:] and all(b < 0x89 or b in WINDOW_FIELDS or b in (0xF3, 0xFE, 0xFF)
+                                                   for b in data[6:]):
         # 커서 없는 글 창(이름 칸·말 빠르기 등): +6 부터 글, +5 위 니블만큼 첫 줄을 들여 씀(두 창 덤프로 확인).
-        # 자리 표시(85 xx·B0~ 등)가 섞인 창은 뜻을 모르는 제어가 있어 뺀다.
+        # 85 는 「:」 타일이다(dq5-text-format.md 상태 창 실측). 너비를 모르는 자리 표시(B2~B7·E0~E3 등)가 섞인 창은 뺀다.
         i, x, step = 6, 1 + (data[5] >> 4), 1
     elif data[4] & 0x0F and 0xFE in data[7 + (data[4] >> 6):10 + (data[4] >> 6)]:
         # 제목 있는 창(dq5text.window_header): +4 아래 니블 제목 자리, +5 제목 번호(04:AD78), 둘째 줄 제목, 셋째 줄 가로줄, 넷째 줄부터 항목.
@@ -1742,13 +1743,15 @@ def export_title(rom, out):
 #   29:8296[연출*2] → 29 뱅크의 조각 주소 목록(FFFF 로 끝). 앞 묶음은 BG3 2bpp 조각, 0000 뒤 묶음은 OBJ 조각
 #   29:FACF[연출*2] → 29 뱅크의 색 묶음 [색 수 n][15비트 색 n개]. 첫 묶음이 BG3, 다음 묶음이 OBJ(メラ 실측).
 #     22:BBBF 는 그 주소 한 바이트 앞의 위 니블이 0 이 아니면 묶음을 둘 읽는다(앞 묶음 끝 바이트와 겹쳐 둔 꼴).
-#     FFFF 인 행동 중 バギ 계열은 22:DEA3 이 22:DEE8 의 두 묶음 중 둘째(22:DEF2)를 썼고, たたかう 는 색을 바꾸지 않아
-#     전투 기본 BG3 팔레트 4(24:F987 의 세 색)였다(덤프 실측). ミナデイン 은 띄워 보지 않아 기본 색으로 둔다
+#     FFFF 인 연출 중 バギ 계열은 22:DEA3, ミナデイン 은 22:DEFA 가 전투 배경 $1AA0 이 00·09·0A·8E·92 이면 첫 묶음,
+#     아니면 둘째 묶음을 쓴다(표 22:DEE8·22:DF42). 그림은 둘째(풀밭 배경 02 덤프와 같음). たたかう 는 색을 바꾸지 않아
+#     전투 기본 BG3 팔레트 4(24:F987 의 세 색)였다(덤프 실측)
 # 조각 = [가로-1 위 니블·세로-1 아래 니블][칸 비트맵] 뒤에 칸마다 몬스터 그림과 같은 타일(dq5mongfx.tile).
 # OBJ 조각은 비트맵 뒤에 몬스터처럼 칸마다 니블(bit1 16x16, bit2·3 앞 조각 좌우 반전 복사)이 더 있다.
 # 조각을 놓는 자리와 차례(움직임)는 아직 읽지 않았다.
 EFFECT_CELS, EFFECT_COLORS, EFFECT_COUNT = 0x298296, 0x29FACF, 0xAA
-EFFECT_FALLBACK_COLORS, EFFECT_DEFAULT_COLORS = 0x22DEE8, 0x24F987
+EFFECT_FALLBACK_COLORS = {0x0D: 0x22DEE8, 0x0E: 0x22DEE8, 0x0F: 0x22DEE8, 0x12: 0x22DF42}
+EFFECT_DEFAULT_COLORS = 0x24F987
 
 
 def effect_lists(rom, n):
@@ -1773,8 +1776,8 @@ def effect_lists(rom, n):
 def effect_colors(rom, n):
     p = rom.u16(EFFECT_COLORS + n * 2)
     if p == 0xFFFF:
-        if n in (0x0D, 0x0E, 0x0F):
-            a = 0x220000 | rom.u16(EFFECT_FALLBACK_COLORS + 2)
+        if n in EFFECT_FALLBACK_COLORS:
+            a = 0x220000 | rom.u16(EFFECT_FALLBACK_COLORS[n] + 2)
             return [[rgb(rom.u16(a + 1 + i * 2)) for i in range(rom.u8(a))]]
         return [[rgb(rom.u16(EFFECT_DEFAULT_COLORS + i * 2)) for i in range(3)]]
     a, out = 0x290000 | p, []
