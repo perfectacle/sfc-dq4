@@ -115,23 +115,31 @@ def cpu_to_bytes(a):
     return bytes((a & 0xFF, a >> 8 & 0xFF, a >> 16))
 
 
-def glyph_bits(rows):
-    w, h = len(rows[0]), len(rows)
-    out = bytearray((w * h + 7) // 8)
-    for y, row in enumerate(rows):
-        for x, c in enumerate(row):
-            if c == '#':
-                i = y * w + w - 1 - x
-                out[i >> 3] |= 1 << (i & 7)
+def glyph_bits(glyphs):
+    """24:A631: 묶음 안 n 번째 글자는 n × 폭 × 높이 비트 뒤에서 시작하므로, 글자 사이에 채움 없이 비트를 잇는다."""
+    w, h = len(glyphs[0][0]), len(glyphs[0])
+    out = bytearray((w * h * len(glyphs) + 7) // 8)
+    for n, rows in enumerate(glyphs):
+        for y, row in enumerate(rows):
+            for x, c in enumerate(row):
+                if c == '#':
+                    i = n * w * h + y * w + w - 1 - x
+                    out[i >> 3] |= 1 << (i & 7)
     return out
 
 
-def retree(data):
-    """원본 롬 바이트 → 실험용 2MB 롬과 설명 줄."""
+def retree(data, glyphs=None, overrides=None):
+    """원본 롬 바이트 → 실험용 2MB 롬과 설명 줄. glyphs 는 새 글자(코드 3DB 부터 차례로)의 점 그림 목록,
+    overrides 는 {메시지 번호: 코드 목록}. 없으면 「한」「글」 두 자와 메시지 129 = {1006}한글{1001}."""
     rom = Rom(data)
     msgs = [message(rom, m) for m in range(MESSAGES)]
-    new_codes = list(range(GLYPHS, GLYPHS + len(NEW_GLYPHS)))
-    msgs[0x129] = [0x1006, *new_codes, 0x1001]
+    if glyphs is None:
+        glyphs = list(NEW_GLYPHS.values())
+    new_codes = list(range(GLYPHS, GLYPHS + len(glyphs)))
+    if overrides is None:
+        overrides = {0x129: [0x1006, *new_codes, 0x1001]}
+    for m, c in overrides.items():
+        msgs[m] = c
     freq = {}
     for m in msgs:
         for c in m:
@@ -150,11 +158,9 @@ def retree(data):
     groups = font_groups(rom)
     table = bytearray(data[lorom(FONT_GROUPS):lorom(FONT_GROUPS) + len(groups) * 5])
     glyph_at = 0x07D77C                                              # 옮긴 메시지가 비운 자리(뱅크 07)
-    g = bytearray()
-    for name in NEW_GLYPHS:
-        g += glyph_bits(NEW_GLYPHS[name])
-    w, h = len(next(iter(NEW_GLYPHS.values()))[0]), len(next(iter(NEW_GLYPHS.values())))
-    table += bytes((len(NEW_GLYPHS), w << 4, glyph_at & 0xFF, glyph_at >> 8 & 0xFF, (glyph_at >> 16) - 7 | h << 2))
+    g = glyph_bits(glyphs)
+    w, h = len(glyphs[0][0]), len(glyphs[0])
+    table += bytes((len(glyphs), w << 4, glyph_at & 0xFF, glyph_at >> 8 & 0xFF, (glyph_at >> 16) - 7 | h << 2))
     msg_at = font_at + len(table)
     blob, starts = encode(codes, msgs)
     assert (msg_at & 0xFFFF) + len(blob) < 0x10000 * 8, '메시지가 너무 김'
@@ -200,6 +206,75 @@ def retree(data):
     return checksum(d), info
 
 
+# 시제품(proto): 메시지 한 줄, 이름, 명령 창을 한글로.
+PROTO_LINE = ('이름은 ', '입니다')            # 메시지 129 = {1006}이름은 {1012}입니다。{1001}
+PROTO_NAME = '용사'                           # 주인공 이름. 바이트는 아래 창 타일 번호와 같게 둔다
+PROTO_MENU = (('대화', '주문'), ('강함', '도구'), ('장비', '작전'), ('문', '조사'))
+PROTO_TILE0 = 0x50                            # 창 글자 BG3 타일(04:E528 의 1bpp)을 이 번호부터 한글 8×8 로 바꾼다
+STRING_CODES = 0x24B270
+COMMAND_WINDOW = 0x04ED0C
+WINDOW_FONT = 0x04E528
+PERIOD = 0x356                               # 「。」
+
+
+def proto(data):
+    """retree 위에 한글 시제품을 얹은 2MB 롬과 설명 줄, 이름 바이트."""
+    from dq5hangulfont import render
+    syll = []
+    for ch in ''.join(PROTO_LINE) + PROTO_NAME:
+        if ch != ' ' and ch not in syll:
+            syll.append(ch)
+    vwf = {ch: GLYPHS + i for i, ch in enumerate(syll)}
+
+    def rows(ch, w, h):
+        return [''.join('#' if v else '.' for v in r) for r in render(ch, w, h)]
+    glyphs = [rows(ch, 11, 13) for ch in syll]
+
+    def line(t):
+        return [0x000 if ch == ' ' else vwf[ch] for ch in t]
+    msg = [0x1006, *line(PROTO_LINE[0]), 0x1012, *line(PROTO_LINE[1]), PERIOD, 0x1001]
+    d, info = retree(data, glyphs, {0x129: msg})
+    # 창 글자: 메뉴·이름의 음절마다 BG3 타일 하나(8×8 1bpp).
+    tiles = []
+    for pair in PROTO_MENU:
+        for word in pair:
+            for ch in word:
+                if ch not in tiles:
+                    tiles.append(ch)
+    for ch in PROTO_NAME:
+        if ch not in tiles:
+            tiles.append(ch)
+    tile = {ch: PROTO_TILE0 + i for i, ch in enumerate(tiles)}
+    for ch, t in tile.items():
+        bits = bytes(int(''.join('1' if v else '0' for v in r), 2) for r in render(ch, 8, 8))
+        o = lorom(WINDOW_FONT + (t - 1) * 8)
+        d[o:o + 8] = bits
+    # 이름 바이트 = 창 타일 번호. 보행 모드 메시지(1012)는 24:B270 으로 같은 바이트를 VWF 글자로 바꾼다.
+    name = bytes(tile[ch] for ch in PROTO_NAME)
+    for ch in PROTO_NAME:
+        o = lorom(STRING_CODES + tile[ch] * 2)
+        d[o:o + 2] = vwf[ch].to_bytes(2, 'little')
+    # 명령 창: 항목을 한글 타일로 다시 쓰고 너비를 가장 긴 줄 + 테두리 2 로.
+    o = lorom(COMMAND_WINDOW)
+    old_len = len(bytes(d[o:o + 0x38]).split(b'\xff\x80')[0])
+    body = bytearray()
+    width = 0
+    for a, b in PROTO_MENU:
+        row = b'\xfe' + bytes(tile[c] for c in a) + b'\x01' * (max(len(x) for x, _ in PROTO_MENU) - len(a) + 1) \
+            + b'\xfe' + bytes(tile[c] for c in b) + b'\xff'
+        width = max(width, len(row) - 1)                         # FF 를 뺀 칸 수(FE 는 커서 칸)
+        body += row
+    head = bytearray(d[o:o + 6])
+    head[2] = width + 2
+    rec = bytes(head) + bytes(body) + b'\x80'                      # 80 = 레코드 끝. 빼면 남은 옛 바이트를 이어 읽어 엉뚱한 창이 뜬다
+    assert len(rec) <= old_len + 1, (len(rec), old_len)
+    d[o:o + len(rec)] = rec
+    d = checksum(d)
+    info.append(f'한글 VWF {len(syll)}자 {GLYPHS:03X}~, 창 타일 {len(tiles)}개 {PROTO_TILE0:02X}~, 이름 바이트 {name.hex(" ")}, '
+                f'명령 창 너비 {width + 2}(원래 12)')
+    return d, info, name
+
+
 def decode_check(data):
     """retree 롬을 롬만으로 다시 풀어 원본 메시지와 같은지(129 제외) 센다. 디코더 사본·새 색인·훅을 그대로 따른다."""
     rom = Rom(data)
@@ -237,7 +312,7 @@ def decode_check(data):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('rom')
-    ap.add_argument('cmd', choices=('expand', 'retree'))
+    ap.add_argument('cmd', choices=('expand', 'retree', 'proto'))
     ap.add_argument('--size', type=int, default=2, choices=(2, 3, 4))
     ap.add_argument('-o', '--out', required=True)
     a = ap.parse_args()
@@ -245,6 +320,10 @@ def main():
     if a.cmd == 'expand':
         out = expand(data, a.size)
         print(f'{len(out):#x} 바이트, 머리 크기 {out[HEADER + 0x17]:02X}')
+    elif a.cmd == 'proto':
+        out, info, name = proto(data)
+        print('\n'.join(info))
+        print(f'이름을 넣으려면 POKE="7E2001={name[0]:02X};7E2002={name[1]:02X};7E2003=01"')
     else:
         out, info = retree(data)
         print('\n'.join(info))

@@ -15,7 +15,7 @@ from kr_patch.sfc.dis65816 import decode
 from kr_patch.sfc.mapper import LoROM
 
 sys.path.insert(0, os.path.dirname(__file__))
-from dq5map import Decoder, Rom, map_pointer  # noqa: E402
+from dq5map import Decoder, Rom, high_marks, map_pointer  # noqa: E402
 
 DEST_TABLE = 0x2AED61
 # 2A:FF37. 블록 오른쪽 아래 셀에만 bit7 이 붙으므로(01:8ACB) 블록 하나가 한 번만 세어진다.
@@ -174,8 +174,12 @@ def describe(bc, entry):
 
 def map_exit_cells(rom, bc, bd, attrs):
     """맵별 루틴까지 반영한 출구 셀 목록과, 그 루틴이 출구 여부를 바꾼 셀 목록."""
-    w, h, buf, _ = Decoder(rom, 0xBE).decode(map_pointer(rom, bc, bd))
+    dec = Decoder(rom, 0xBE, bc >= 0x50)
+    dec.preload(bc, bd)
+    w, h, buf, _ = dec.decode(map_pointer(rom, bc, bd))
     buf = bytearray(buf)
+    if dec.high:
+        high_marks(rom, bc, bd, buf)
     hooked = apply_hook(rom, bc, bd, buf, w)
     return exit_cells(buf, w, h, attrs), hooked
 

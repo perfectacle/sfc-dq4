@@ -6,9 +6,10 @@ FC DQ4(Rev A) 원작 데이터 분석. 이식할 데이터가 어디에 어떤 �
 
 분석은 포팅에 필요한 큰 줄기를 마쳤고, 아래는 남은 세부입니다. 각 형식 문서의 「남은 것」 절이 더 자세한 목록입니다. 포팅(DQ5 엔진에 넣기)이 시작되면 거기서 막히는 것부터 합니다.
 
-- **이벤트·플래그**: [추정]으로 남은 플래그 뜻, 인물·OAM 만 움직이는 이벤트(05 06 07 0B 10 19 21 2D 2E)의 장면, 마지막 전투(2B) 뒤 マスタードラゴン 장면, 맵 이벤트 줄 3~9·B, `$70E0`·`$7140`, 마차 안 자리 `$6172~$6177`, 이벤트 루틴 138개의 조건([dq4-save-format.md](docs/dq4-save-format.md), [dq4-npcblock-format.md](docs/dq4-npcblock-format.md), [dq4-script-format.md](docs/dq4-script-format.md)).
-- **표**: 작전마다 7바이트 표(`13:$BB53`~)와 후보 비교(`13:$AB92`)·공격 후보 점수 식, トルネコ·ライアン·アリーナ(`13:$B049`)·작전 4 규칙, 몬스터 쪽 두 배 비트·ザオラル 등 남은 주문 효과량, 몬스터 바이트 21 bit2-0, 아이템 플래그 `$8D1B` bit7·`$8D9A`, 여자 勇者 레코드 8([dq4-data-format.md](docs/dq4-data-format.md)).
+- **이벤트·플래그**: [추정]으로 남은 플래그 66개([dq4-story-format.md](docs/dq4-story-format.md#남은-것)), 인물·OAM 만 움직이는 이벤트의 화면(`07` `19` `2D` `2E` 는 부르는 대화까지 실측, `05` `06` `0B` `10` `21` 은 못 닿음), 마지막 전투(2B) 뒤 マスタードラゴン 장면, 맵 이벤트 줄 3·4·5·7·B, 전멸 뒤 갈래 `1E:$A3E7`, `$618E` 아래 3비트 2·3([dq4-save-format.md](docs/dq4-save-format.md), [dq4-script-format.md](docs/dq4-script-format.md)).
+- **표**: 동료 AI 의 칸 평가 루틴·아이템 후보·후보 비교(`13:$AB92`·`$AC63`)·작전 7칸 표(`13:$BB53`~)를 전투로 재기, 공격·주문 후보의 점수 식과 `$8B`~`$8D`, 작전 4(`13:$A8C6`) 규칙, 몬스터 쪽 두 배 비트·ザオラル 등 남은 주문 효과량, 몬스터 바이트 21 bit2-0, 아이템 플래그 `$8D1B` bit7·`$8D9A`, 여자 勇者 레코드 8([dq4-data-format.md](docs/dq4-data-format.md)).
 - **창**: 루틴 항목 `0B`·`20`·`25`·그룹 1 `06`·`07` 을 화면에서 보기, 걸러내기 아래 3비트, x3 `83` 두 곳이 실제 장면에서 도는 것(`10:$BAE1` 은 `10:$B497` 을 부르는 `10:$AEF0`·`$AF2B`·`$B0C3` 위를 거슬러, `11:$BC2B` 는 5장 필드 전투 いれかえ)([dq4-text-format.md](docs/dq4-text-format.md), [dq4-bank-format.md](docs/dq4-bank-format.md)).
+
 - **블록·맵**: 맵 번호 bit6·`$41` bit7 화면 확인, 그룹 48 의 장면, 성 앞 워프 nametable 차이, 배 자리 `$6195/$6196`, `12:$A728`·`15:$B110` 을 부르는 곳, 필드 3 막이의 `$62A4` 갈래([dq4-block-format.md](docs/dq4-block-format.md), [dq4-map-format.md](docs/dq4-map-format.md), [dq4-field-format.md](docs/dq4-field-format.md)).
 - **상점·조우**: 같은 장 안의 장면 순서로 숨김 조건 거르기, 그룹 FE 호출 경로, 대화 `13B`·`0AD`(문제)와 대화로 받는 물건 줄의 실측, `0F/00` 밤 이벤트 `3E`, `$6E44` bit7 을 읽는 나머지 여덟 곳, パルプンテ 27가지의 화면 효과([dq4-shop-format.md](docs/dq4-shop-format.md), [dq4-encounter-format.md](docs/dq4-encounter-format.md)).
 - **원작 그림**: 이름 없는 그룹 28개, 성문 연출 판정을 다른 성문에서, 4장 칸 5 의 표 `53`, 탈것 칸 `0D`·`58`~`60` 장면, `BOSS_STEPS` 명령 단위([dq4-fcgfx.md](docs/dq4-fcgfx.md#남은-것), [dq4-fcsprite-format.md](docs/dq4-fcsprite-format.md#남은-것)).
