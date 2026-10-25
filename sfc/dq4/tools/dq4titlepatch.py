@@ -83,15 +83,24 @@ def read_assets(source):
 
 
 def verify_layout(original, rom, blobs):
-    if len(rom) != 0x200000 or rom[HOOK:HOOK + 5] != NEW_HOOK or rom[MUSIC_HOOK:MUSIC_HOOK + 3] != NEW_MUSIC_HOOK:
+    frame_names = sorted(name for name in blobs if name.startswith('frame') and name.endswith('.chr'))
+    expected_size = 0x400000 if frame_names else 0x200000
+    if len(rom) != expected_size or rom[HOOK:HOOK + 5] != NEW_HOOK or rom[MUSIC_HOOK:MUSIC_HOOK + 3] != NEW_MUSIC_HOOK:
         raise ValueError('unexpected ROM size or title hook')
     ranges = [(0x7FDC, 0x7FE0), (MUSIC_HOOK, MUSIC_HOOK + 3), (HOOK, HOOK + 5), (0x180000, 0x181000),
               (0x188000, 0x188000 + len(blobs['title.chr'])), (0x190000, 0x190900), (0x192000, 0x194000)]
     mirrored = original + original[0x100000:]
+    if frame_names:
+        mirrored *= 2
+        ranges += [(0x7FD7, 0x7FD8)] + [(0x198000 + i * 0x8000, 0x198000 + i * 0x8000 + 0x7000) for i in range(len(frame_names))]
+        if rom[0x7FD7] != 0x0C:
+            raise ValueError('animated ROM must declare 4MiB size')
     for start, data in differences(mirrored, rom):
         if not any(lo <= start and start + len(data) <= hi for lo, hi in ranges):
             raise ValueError(f'assembler wrote outside declared regions at file offset {start:06X}')
-    for name, offset in (('title.chr', 0x188000), ('title.map', 0x190000), ('title.pal', 0x190800), ('gleam.pal', 0x192000)):
+    placements = [('title.chr', 0x188000), ('title.map', 0x190000), ('title.pal', 0x190800), ('gleam.pal', 0x192000)]
+    placements += [(name, 0x198000 + i * 0x8000) for i, name in enumerate(frame_names)]
+    for name, offset in placements:
         if rom[offset:offset + len(blobs[name])] != blobs[name]:
             raise ValueError(f'{name} was not embedded at its declared address')
 
@@ -107,7 +116,16 @@ def build(rom_path, source, output, asar):
         raise ValueError('source SHA-1 mismatch; use the unmodified Japanese DQ5 ROM')
     if len(original) != 0x180000 or original[0x7FD7] != 0x0B or original[HOOK:HOOK + 5] != ORIGINAL_HOOK or original[MUSIC_HOOK:MUSIC_HOOK + 3] != ORIGINAL_MUSIC_HOOK:
         raise ValueError('unexpected source header or hook bytes')
-    blobs, selected, deltas = read_assets(source)
+    animation_path = source / 'animation.json'
+    animation = json.loads(animation_path.read_text()) if animation_path.exists() else None
+    if animation:
+        from dq4titleanimation import read_pack
+        blobs = read_pack(source)
+        selected, deltas = [], [0] * 32
+        blobs['gleam.pal'] = blobs['title.pal'] * 32
+        protect_outputs(outputs, [source / name for name in (*blobs, 'animation.json', 'logo-mask.bin')])
+    else:
+        blobs, selected, deltas = read_assets(source)
     executable = shutil.which(asar)
     if executable is None:
         raise ValueError('Asar executable not found; set ASAR or pass --asar')
@@ -117,9 +135,12 @@ def build(rom_path, source, output, asar):
         temp = Path(directory)
         for name, data in blobs.items():
             (temp / name).write_bytes(data)
-        (temp / 'patch.asm').write_text(f'!chr_size = {len(blobs["title.chr"])}\n' + assembly)
+        (temp / 'patch.asm').write_text(f'!chr_size = {len(blobs["title.chr"])}\n!animation_enabled = {int(bool(animation))}\n!animation_frames = {animation["frame_count"] if animation else 8}\n' + assembly)
         target = temp / 'dq4-title.sfc'
-        target.write_bytes(original + original[0x100000:])
+        expanded = bytearray((original + original[0x100000:]) * (2 if animation else 1))
+        if animation:
+            expanded[0x7FD7] = 0x0C
+        target.write_bytes(expanded)
         result = subprocess.run([executable, '--no-title-check', str(temp / 'patch.asm'), str(target)], capture_output=True, text=True)
         if result.returncode:
             raise ValueError(f'Asar failed: {result.stderr.strip()} {result.stdout.strip()}')
@@ -131,7 +152,7 @@ def build(rom_path, source, output, asar):
     report = {
         'schema_version': 1, 'kind': 'dq5_integrated_title', 'source_sha1': SOURCE_SHA1,
         'rom_sha1': hashlib.sha1(rom).hexdigest(), 'rom_sha256': hashlib.sha256(rom).hexdigest(),
-        'rom_bytes': len(rom), 'assembler': version, 'assembly_sha256': hashlib.sha256(assembly.encode()).hexdigest(),
+        'rom_bytes': len(rom), 'animation': animation, 'assembler': version, 'assembly_sha256': hashlib.sha256(assembly.encode()).hexdigest(),
         'hook': {'cpu': '03:FDFB', 'file_offset': f'{HOOK:06X}', 'original': ORIGINAL_HOOK.hex(), 'replacement': NEW_HOOK.hex(), 'destination': '30:8000'},
         'music_hook': {'cpu': '00:A70C', 'file_offset': f'{MUSIC_HOOK:06X}', 'original': ORIGINAL_MUSIC_HOOK.hex(), 'replacement': NEW_MUSIC_HOOK.hex(), 'purpose': 'start native track 10 at title and preserve playback into menu'},
         'assets': {name: {'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()} for name, data in blobs.items()},

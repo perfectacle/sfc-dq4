@@ -82,11 +82,11 @@ def deduplicate(cells):
 
 def mirrored_checksum(data):
     """12Mbit ROM 의 마지막 4Mbit를 한 번 더 더해 16Mbit 주소 공간을 채운다."""
-    if len(data) == 0x200000:
+    if len(data) in (0x200000, 0x400000):
         return sum(data) & 0xFFFF
     if len(data) == 0x180000:
         return (sum(data[:0x100000]) + 2 * sum(data[0x100000:])) & 0xFFFF
-    raise ValueError('expected unheadered 12Mbit or 16Mbit ROM')
+    raise ValueError('expected unheadered 12Mbit, 16Mbit or 32Mbit ROM')
 
 
 def set_checksum(data):
@@ -135,7 +135,7 @@ def apply_ips(before, patch):
         start = int.from_bytes(patch[pos:pos + 3], 'big')
         length = int.from_bytes(patch[pos + 3:pos + 5], 'big')
         pos += 5
-        if not length or pos + length > len(patch) or start + length > 0x200000:
+        if not length or pos + length > len(patch) or start + length > 0x400000:
             raise ValueError('invalid or unsupported IPS record')
         if start + length > len(out):
             out.extend(bytes(start + length - len(out)))
