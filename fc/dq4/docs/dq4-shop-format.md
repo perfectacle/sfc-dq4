@@ -1,6 +1,6 @@
 # DQ4(FC) 상점·여관·보물상자 형식
 
-가게 창에 늘어서는 품목과 장소별 값, 여관 값, 교회·맡기는 곳의 메뉴와 요금, 가게 인물이 고르는 가게 종류, 보물상자와 발밑 숨은 물건(しらべる)의 위치·내용물·열었음 플래그, 그리고 이것들에 タンス·つぼ 와 대화로 받는 물건을 합친 「얻는 물건」 표입니다. 디코더는 [fc/dq4/tools/dq4shop.py](../tools/dq4shop.py)(들어갈 때 숨는 인물 포함)·[fc/dq4/tools/dq4chest.py](../tools/dq4chest.py), 실험 과정은 [2026-10-25-10 일지](../journal/2026-10-25-10-shop.md) 와 [2026-10-25-25 일지](../journal/2026-10-25-25-shop2.md), [2026-10-25-31 일지](../journal/2026-10-25-31-shop3.md), [2026-10-25-40 일지](../journal/2026-10-25-40-shop4.md), [2026-10-25-50 일지](../journal/2026-10-25-50-shopenc.md) 에 있습니다. 주소 표기는 [dq4-ram-format.md](dq4-ram-format.md), 아이템 ID·이름·가격은 [dq4-data-format.md](dq4-data-format.md), 맵 장소(그룹 `$63`/순번 `$64`)는 [dq4-map-format.md](dq4-map-format.md) 를 따릅니다.
+가게 창에 늘어서는 품목과 장소별 값, 여관 값, 교회·맡기는 곳의 메뉴와 요금, 가게 인물이 고르는 가게 종류, 보물상자와 발밑 숨은 물건(しらべる)의 위치·내용물·열었음 플래그, 그리고 이것들에 タンス·つぼ 와 대화로 받는 물건을 합친 「얻는 물건」 표입니다. 디코더는 [fc/dq4/tools/dq4shop.py](../tools/dq4shop.py)(들어갈 때 숨는 인물 포함)·[fc/dq4/tools/dq4chest.py](../tools/dq4chest.py), 실험 과정은 [2026-10-25-10 일지](../journal/2026-10-25-10-shop.md) 와 [2026-10-25-25 일지](../journal/2026-10-25-25-shop2.md), [2026-10-25-31 일지](../journal/2026-10-25-31-shop3.md), [2026-10-25-40 일지](../journal/2026-10-25-40-shop4.md), [2026-10-25-53 일지](../journal/2026-10-25-53-shopenc.md) 에 있습니다. 주소 표기는 [dq4-ram-format.md](dq4-ram-format.md), 아이템 ID·이름·가격은 [dq4-data-format.md](dq4-data-format.md), 맵 장소(그룹 `$63`/순번 `$64`)는 [dq4-map-format.md](dq4-map-format.md) 를 따릅니다.
 
 ## 대화 값과 가게 종류
 
