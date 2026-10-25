@@ -7,8 +7,8 @@ from PIL import Image, ImageChops, ImageStat
 SOURCE = Path(__file__).with_name("dq4art") / "title.png"
 
 
-def build_title():
-    with Image.open(SOURCE) as source:
+def build_title(source_path=None):
+    with Image.open(SOURCE if source_path is None else source_path) as source:
         image = source.convert("RGB").resize((256, 224), Image.Resampling.LANCZOS)
     boxes = [(x, y, x + 8, y + 8) for y in range(0, 224, 8) for x in range(0, 256, 8)]
     crops = [image.crop(box) for box in boxes]
@@ -33,6 +33,7 @@ def build_title():
             for i, crop in enumerate(members):
                 strip.paste(crop, (8 * i, 0))
             colors = strip.quantize(colors=15, dither=Image.Dither.NONE).getpalette()[:45]
+            colors += [0] * (45 - len(colors))
             # BG color zero always resolves to the common backdrop in hardware.
             colors = [0, 0, 0] + [((c >> 3) << 3) | (c >> 5) for c in colors]
             palette = Image.new("P", (1, 1))

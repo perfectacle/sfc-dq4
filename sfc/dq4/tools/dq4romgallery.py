@@ -27,7 +27,7 @@ HTML = r'''<!doctype html>
 </style></head><body><main>
 <header><div class="eyebrow">DRAGON QUEST IV / SUPER FAMICOM</div><h1>작은 도트에서 실제 ROM까지</h1>
 <p class="lead">DQ4의 인물과 복장을 DQ5의 16×24 격자에 맞춘 제작물입니다. 그림의 확인 상태와 ROM 변환 결과를 나란히 살펴봅니다.</p>
-<nav aria-label="갤러리 이동"><a href="#rom">ROM 비교</a><a href="#drafts">인물 시안 9명</a><a href="../../../fc/dq4/gallery/index.html">FC DQ4 참고</a><a href="../../../nds/dq4/index.html">NDS DQ4 참고</a><a href="../../dq5/gallery/index.html">SFC DQ5 참고</a></nav></header>
+<nav aria-label="갤러리 이동"><a href="index-title.html">한글 타이틀</a><a href="#rom">ROM 비교</a><a href="#drafts">인물 시안 9명</a><a href="../../../fc/dq4/gallery/index.html">FC DQ4 참고</a><a href="../../../nds/dq4/index.html">NDS DQ4 참고</a><a href="../../dq5/gallery/index.html">SFC DQ5 참고</a></nav></header>
 <div class="notice"><strong>첫 패치는 라이안 정면의 기술 검증용입니다.</strong><br>기존 라이안 정면 정지 자세만 사용자 확인을 받았습니다. 팔레트를 맞춘 새 색은 미확인이고, 두 번째 정면 프레임은 라이안 머리와 DQ5의 원래 몸이 섞입니다. 다른 방향은 DQ5 원본을 유지합니다.</div>
 <div class="controls" aria-label="미리보기 설정">
 <label>배율<select id="scale"><option value="1">1× 실제 크기</option><option value="2">2×</option><option value="4" selected>4×</option><option value="8">8×</option></select></label>
