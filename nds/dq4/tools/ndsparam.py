@@ -6,7 +6,7 @@ FC 쪽 이름·값은 dq4 트랙의 fc/dq4/tools/dq4data.py·dq4shop.py 를 읽�
 사용:
   python nds/dq4/tools/ndsparam.py monsters JPROOT [FCROM]   몬스터 표(60바이트). FC 를 주면 이름·능력치로 짝을 찾아 가른다
   python nds/dq4/tools/ndsparam.py items JPROOT FCROM        아이템 번호를 FC ID 와 맞대고 「같음·표기만 다름·바뀜·새로 생김」을 가른다
-  python nds/dq4/tools/ndsparam.py shops JPROOT [FCROM]      가게 표(208바이트). FC 를 주면 품목이 가장 많이 겹치는 FC 장소
+  python nds/dq4/tools/ndsparam.py shops JPROOT [FCROM]      가게 표(ARM9 안, 208바이트)와 맵. FC 를 주면 품목이 가장 많이 겹치는 FC 장소
   python nds/dq4/tools/ndsparam.py casino JPROOT FCROM       카지노·メダル 경품을 FC 와 나란히
   python nds/dq4/tools/ndsparam.py chests JPROOT MAP...      맵의 얻는 물건 표(param_item_<맵>.dat, 24바이트)
   python nds/dq4/tools/ndsparam.py talk JPROOT [장]          동료 대화 표: 맵, 말하는 인물, 메시지 번호+줄 수, 조건, 첫 문장
@@ -131,14 +131,26 @@ def cmd_monsters(root, rom=None):
 
 # 아이템·가게
 
+# 게임이 쓰는 가게 표는 ARM9 안의 것(PARAM 파일은 second 레코드 30~35 가 없는 사본). (ARM9 주소, 레코드 수)
+SHOP_TABLES = {'first': (0x020945F8, 19), 'second': (0x02099A30, 36)}
+# 맵 이름 앞 두 글자(ss 는 셋째 글자까지) → 레코드(0x0201D2BC·0x0200CCCC·0x0200CB10, 목록에 없으면 0)
+SHOP_MAPS = {'first': ['ma', 'mb', 'mc', 'md', 'me', 'sb', 'hc', 'cc', 'tb', 'mf', 'mg', 'cd', 'mh', 'mi', 'ce', 'mj', 'mk'],
+             'second': ['hc', 'sb', 'cd', 'mf', 'se', 'mm', 'mn', 'mo', 'cg', 'mj', 'mk', 'mi', 'mh', 'hh', 'mb', 'mc', 'md', 'tb', 'ma', 'ha', 'mq', 'mp', 'ci', 'td', 'sh', 'ms', 'ck', 'sm', 'dp', 'mr', 'ss1', 'ss2', 'ss3', 'ss4', 'ss5']}
+
+
 def shop_table(root):
-    """param_map_shop_first/second.dat: 머리 4바이트 + 208바이트 레코드. +2 여관 1인 값, +6 교회 종류, +8 부터 (아이템, 값) 50칸."""
+    """가게 표: 208바이트 레코드. +2 여관 1인 값, +6 교회 종류, +8 부터 (아이템, 값) 50칸.
+    표는 장 번호 4 이하면 first, 5 이상이면 second(0x020CE3EC)."""
+    with open(os.path.join(root, 'arm9.bin'), 'rb') as fh:
+        d = fh.read()
     out = []
-    for f in ('first', 'second'):
-        for k, r in enumerate(records(param(root, f'param_map_shop_{f}'), 208)):
+    for f, (addr, n) in SHOP_TABLES.items():
+        for k in range(n):
+            r = d[addr - 0x02000000 + 208 * k:][:208]
             w = struct.unpack_from('<104H', r)
             slots = [(w[4 + 2 * j], w[5 + 2 * j]) for j in range(50)]
-            out.append({'file': f, 'idx': k, 'head': w[:4], 'slots': slots})
+            maps = '그 밖' if not k else SHOP_MAPS[f][k - 1] if k <= len(SHOP_MAPS[f]) else '-'
+            out.append({'file': f, 'idx': k, 'head': w[:4], 'slots': slots, 'maps': maps})
     return out
 
 
@@ -154,9 +166,12 @@ def ds_items(root):
 
 
 def ds_prices(root):
-    """가게 표에 나온 아이템 값(G). 카지노 칸은 코인이라 뺀다."""
+    """가게 표에 나온 아이템 값(G). 카지노 칸은 코인이라 뺀다.
+    ARM9 에만 있는 second 30~35(mr·이민 마을)는 같은 값의 품목을 늘려 FC 짝짓기를 흐리므로 뺀다."""
     out = {}
     for s in shop_table(root):
+        if s['file'] == 'second' and s['idx'] >= 30:
+            continue
         for j, (it, v) in enumerate(s['slots']):
             if it and not 18 <= j < 24:
                 out.setdefault(it, v)
@@ -303,7 +318,7 @@ def cmd_shops(root, rom=None):
         if shops:
             g, score = match_shop(s, shops)
             fc = f'FC {g} 겹침 {score:.2f} 여관 {inn.get(g, "-")}  ' if g else 'FC -  '
-        print(f"{s['file']}[{s['idx']:2d}] 여관 {h[1]}G 교회 {h[3]}  {fc}" + ' / '.join(parts))
+        print(f"{s['file']}[{s['idx']:2d}] {s['maps']} 여관 {h[1]}G 교회 {h[3]}  {fc}" + ' / '.join(parts))
 
 
 def fc_casino(rom):
