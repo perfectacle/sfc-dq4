@@ -215,8 +215,9 @@ PROTO_TILE0 = 0x50                            # 창 글자 BG3 타일(04:E528 �
 PROTO_MENU_LONG = (('이야기하기', '주문외우기'), ('강함', '도구'), ('장비', '작전'), ('문열기', '조사하기'))
 PROTO_TILE0_LONG = 0x4B
 # 창 레코드를 읽는 코드는 데이터 뱅크 04 의 16비트 주소로 읽으므로(04:9C4F 등) 레코드는 뱅크 04 안이나, 뱅크 00~3F 의
-# $0000~$1FFF(낮은 WRAM 거울)에만 둘 수 있다. 7E:119F~ 610바이트는 선실·필드·전투 덤프 27개에서 모두 0 이었던 자리.
-LOW_WRAM_RECORD = 0x11A0
+# $0000~$1FFF(낮은 WRAM 거울)에만 둘 수 있다. 처음 고른 7E:11A0~ 는 전투가 쓰는 자리였고(20:A782·21:FExx), 7E:1C33~ 344바이트는
+# 전투·필드 무작위 전투·가게·교회·이벤트 전투를 돈 세이브스테이트 실행 다섯에서 쓰기가 한 번도 없던 자리다(증명은 아님).
+LOW_WRAM_RECORD = 0x1C40
 WINDOW_POINTER_LOAD = 0x049C46                # LDA $EB48,X / STA $DA (5바이트)
 LONG_BANK = 0x36
 # --twobyte: 이름 문자열(24:A7B6)에 접두 85 를 두어 「85 xx」 = 글자 코드 3DB + xx - 10 으로 읽게 한다. 이름 8바이트에 넉 자.
@@ -320,6 +321,59 @@ def proto(data, long=False, twobyte=False):
     return d, info, name
 
 
+# wintest: 창 문자열에 접두 9F 를 두어 「9F xx」 = 한글 8×8 글자 xx 를, 창을 그릴 때 VRAM 타일 83(창 글자 가운데 쓰이지 않는
+# 단 하나의 칸)에 올려(전송 목록 7E:4000, 00:8CF9 가 NMI 에서 처리) 그 타일로 찍는다. 글자 하나짜리 시제품.
+WIN_PREFIX = 0x9F
+WIN_TILE = 0x83
+WIN_DISPATCH = 0x04B11E                       # CMP #$01 / BEQ / JSR $B235 / BRA … / INY INY
+WIN_HOOK = 0x368200
+WIN_GLYPHS = 0x368300
+WINTEST_TEXT = '한'
+
+
+def wintest(data):
+    """2MB 롬에 창 2바이트 접두 9F 시제품을 넣고, 명령 창 첫 항목 「はなす」 의 は 를 「9F 00」 으로 바꾼다."""
+    from dq5hangulfont import render
+    d = expand(data, 2)
+    glyphs = b''.join(bytes(int(''.join('1' if v else '0' for v in r), 2) for r in render(ch, 8, 8))
+                      for ch in WINTEST_TEXT)
+    go = lorom(WIN_GLYPHS)
+    d[go:go + len(glyphs)] = glyphs
+    vram = 0x1000 + WIN_TILE * 8
+    g = WIN_GLYPHS
+    code = bytes((
+        0xC9, 0x01, 0xD0, 0x04, 0xC8, 0xC8, 0x38, 0x6B,          # CMP #$01 / BNE / INY / INY / SEC / RTL
+        0xC9, WIN_PREFIX, 0xF0, 0x02, 0x18, 0x6B,                # CMP #$9F / BEQ pre / CLC / RTL
+        0xBD, 0x00, 0x00, 0xE8,                                  # pre: LDA $0000,X / INX (글자 번호)
+        0xDA, 0x5A, 0x8B, 0x08,                                  # PHX / PHY / PHB / PHP
+        0xC2, 0x30, 0x29, 0xFF, 0x00, 0x0A, 0x0A, 0x0A, 0xAA,    # REP #$30 / AND #$00FF / ASL×3 / TAX
+        0xE2, 0x20, 0xA9, 0x7E, 0x48, 0xAB,                      # SEP #$20 / LDA #$7E / PHA / PLB
+        0xAC, 0x59, 0x07,                                        # LDY $0759
+        0xA9, 0x80, 0x99, 0x00, 0x40, 0xC8,                      # [80]
+        0xA9, vram & 0xFF, 0x99, 0x00, 0x40, 0xC8,               # [VRAM 낮은]
+        0xA9, vram >> 8, 0x99, 0x00, 0x40, 0xC8,                 # [VRAM 높은]
+        0xA9, 0x08, 0x99, 0x00, 0x40, 0xC8,                      # [워드 수 8]
+        0xA9, 0x00, 0x99, 0x00, 0x40, 0xC8,
+        0xA9, 0x08, 0x85, 0x00,                                  # LDA #8 / STA $00 (줄 수)
+        0xBF, g & 0xFF, g >> 8 & 0xFF, g >> 16,                  # loop: LDA glyphs,X
+        0x99, 0x00, 0x40, 0xC8, 0xA9, 0xFF, 0x99, 0x00, 0x40, 0xC8, 0xE8,   # STA / INY / LDA #$FF / STA / INY / INX
+        0xC6, 0x00, 0xD0, 0xED,                                  # DEC $00 / BNE loop(19바이트 뒤로)
+        0x8C, 0x59, 0x07, 0xEE, 0x58, 0x07,                      # STY $0759 / INC $0758
+        0xA9, 0x80, 0x04, 0x1A, 0x22, 0x8A, 0x95, 0x00,          # LDA #$80 / TSB $1A / JSL $00958A(NMI 에서 목록을 보낼 때까지 기다림, 04:E317 과 같음)
+        0x28, 0xAB, 0x7A, 0xFA,                                  # PLP / PLB / PLY / PLX
+        0xA9, WIN_TILE, 0x18, 0x6B))                             # LDA #$83 / CLC / RTL
+    ho = lorom(WIN_HOOK)
+    d[ho:ho + len(code)] = code
+    # 04:B11E: JSL hook / BCS (처리 끝) / JSR $B235 / BRA $B0ED / BRA $B0ED(원래 B129)
+    patch = bytes((0x22, WIN_HOOK & 0xFF, WIN_HOOK >> 8 & 0xFF, WIN_HOOK >> 16, 0xB0, 0x05, 0x20, 0x35, 0xB2, 0x80, 0xC4))
+    po = lorom(WIN_DISPATCH)
+    d[po:po + len(patch)] = patch
+    co = lorom(COMMAND_WINDOW + 7)
+    assert d[co] == 0x29
+    d[co:co + 2] = bytes((WIN_PREFIX, 0x00))
+    return checksum(d), [f'창 접두 {WIN_PREFIX:02X}: 훅 {WIN_HOOK:06X}, 글자 {len(WINTEST_TEXT)}개 {WIN_GLYPHS:06X}, VRAM 타일 {WIN_TILE:02X}']
+
+
 def decode_check(data):
     """retree 롬을 롬만으로 다시 풀어 원본 메시지와 같은지(129 제외) 센다. 디코더 사본·새 색인·훅을 그대로 따른다."""
     rom = Rom(data)
@@ -357,7 +411,7 @@ def decode_check(data):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('rom')
-    ap.add_argument('cmd', choices=('expand', 'retree', 'proto'))
+    ap.add_argument('cmd', choices=('expand', 'retree', 'proto', 'wintest'))
     ap.add_argument('--size', type=int, default=2, choices=(2, 3, 4))
     ap.add_argument('-o', '--out', required=True)
     ap.add_argument('--twobyte', action='store_true', help='proto: 이름 문자열 2바이트 접두 85(24:A7B6)')
@@ -367,6 +421,9 @@ def main():
     if a.cmd == 'expand':
         out = expand(data, a.size)
         print(f'{len(out):#x} 바이트, 머리 크기 {out[HEADER + 0x17]:02X}')
+    elif a.cmd == 'wintest':
+        out, info = wintest(data)
+        print('\n'.join(info))
     elif a.cmd == 'proto':
         out, info, name = proto(data, a.long, a.twobyte)
         print('\n'.join(info))
