@@ -15,7 +15,7 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5exit.py rom BC BD` | DQ5 실내 맵 출구 셀·목적지·도착 자리. 맵을 푼 뒤 도는 맵별 루틴(`15:F907`)이 바꾸는 출구 셀도 반영 |
 | `dq5npc.py rom BC BD` | DQ5 실내 맵 인물 목록과 인물 표 값·인라인 스크립트 명령. `--night` 밤 목록, `--flags 21AD=10` 이벤트 플래그, `--compare` 로 인물 표(`7E:3000-`) 23칸 비교, `--list 108BBD` 목록 주소로 보기, `--check-scripts` 모든 스크립트 길이 검사 |
 | `dq5text.py rom 번호` | DQ5 보행 모드 메시지를 글자로(`--codes` 로 코드). `--controls` 제어 코드 처리기와 뜻, `--window N` 메뉴 창 레코드와 항목 문자열. 폰트 그리기(`glyph`), 글자표(`CHARS`), 이름 문자열(`string`·`string_codes`)도 이 모듈 |
-| `dq5battlewin.py rom [번호…]` | DQ5 전투 메시지 창: 메시지를 글자 격자(`24:A4A4`, `7E:1DD5`)에 두고 BG3 타일맵(`24:A5D9`)과 창 틀로 그림. `--png 폴더` 예시 창, `--compare VRAM 05E,069` 로 전투 덤프의 BG3 타일맵 21~27줄과 칸마다 비교. 갤러리는 `dq5gfx.py` 의 `battlewin` |
+| `dq5battlewin.py rom [번호…]` | DQ5 전투 메시지 창: 메시지를 글자 격자(`24:A4A4`, `7E:1DD5`)에 두고 BG3 타일맵(`24:A5D9`)과 창 틀로 그림. `--png 폴더` 예시 창, `--compare VRAM 05E,069` 로 전투 덤프의 BG3 타일맵 21~27줄과 칸마다 비교. `--scroll` 은 둘째 메시지부터 `BRK 9E` 로 이어 찍기(셋째 줄 다음 줄 올리기). 갤러리는 `dq5gfx.py` 의 `battlewin` |
 | `dq5battletext.py rom [번호…]` | DQ5 전투 모드 메시지(`24:8C39`) 432개를 풂. 제어 코드는 `{F7}` 꼴 |
 | `dq5talk.py rom 대화번호` | 대화 번호의 갈래·스크립트·메시지(조건 코드 뜻, 특수 기능 처리기, 묻기 갈래 포함). `BC BD` 를 주면 그 맵 인물 전부, `--check` 로 스크립트 574개 경계 검사, `--calls` 로 네이티브 호출 대상·갈래·하는 일, `--field` 로 `BRK 80`~`93` 필드 설명자 |
 | `dq5hangul.py rom expand\|retree -o 롬` | DQ5 한글 넣기 실현성 실험용 롬: `expand --size 2\|3\|4` 롬 확장(표지·체크섬), `retree` 메시지를 새 허프만 트리로 다시 부호화해 뱅크 30 으로 옮기고 글자 3DB·3DC(「한」「글」)를 더함. `proto` 한글 시제품(메시지 129·이름·명령 창), `proto --long` 긴 항목 명령 창(레코드를 뱅크 36 → 낮은 WRAM 으로 복사하는 훅), `proto --twobyte` 이름 문자열 2바이트 접두 85(`24:A7B6`). 결과 롬은 `work/` 에만 |
