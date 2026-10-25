@@ -631,6 +631,19 @@ def fig_perframe_scenes():
     save(out, 'dq5-perframe-scenes.webp')
 
 
+def fig_perframe_more():
+    """남은 매 프레임 루틴을 돌린 화면(위)과 막은 화면(아래). 51/51 `1BBD` = 3 에 위·아래 입력(トロッコ), 01/00 청년기에
+    슬롯 11 을 주인공 곁으로. work/perframe3/<맵><a|b>/ 의 sNNN.png 이고 명령은 sfc/dq5/journal/ 의 perframe3 일지."""
+    cols = [('5151', 's320', '51/51'), ('0100', 's320', '01/00')]
+    out = Image.new('RGB', (len(cols) * 260 - 4, 2 * 228 - 4), (24, 24, 24))
+    for i, (name, shot, text) in enumerate(cols):
+        for j, k in enumerate('ab'):
+            im = Image.open(f'work/perframe3/{name}{k}/{shot}.png').convert('RGB')
+            label(im, text + ('' if k == 'a' else ' blocked'))
+            out.paste(im, (i * 260, j * 228))
+    save(out, 'dq5-perframe-more.webp')
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     rom = Rom(open('rom/dq5.sfc', 'rb').read())
@@ -662,6 +675,7 @@ def main():
     fig_gfx_diff(rom)
     fig_perframe_0400()
     fig_perframe_scenes()
+    fig_perframe_more()
     os.remove(TMP)
 
 
