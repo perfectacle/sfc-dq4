@@ -14,6 +14,13 @@ uv run --locked python nds/dq4/tools/ndsgfx.py export OUT --kr work/nds/kr  # PN
 uv run --locked python nds/dq4/tools/ndsgfx.py gallery OUT                  # OUT/index.html
 ```
 
+비공개 에셋 저장소의 `nds/dq4/` 에는 다른 세션의 `screens/`·`sound/` 도 있습니다. 그래서 동기화할 때는 이것들을 빼고, 그 폴더에서 `gallery` 를 다시 돌립니다. `gallery` 는 `*/gallery/index.html` 을 찾아 첫머리에 링크를 넣습니다.
+
+```sh
+rsync -a --delete --exclude screens --exclude sound --exclude README.md --exclude SOURCE.txt OUT/ <에셋>/nds/dq4/
+uv run --locked python nds/dq4/tools/ndsgfx.py gallery <에셋>/nds/dq4
+```
+
 `export --only chr,monster` 처럼 단계를 골라 돌릴 수 있습니다. 단계는 `chr`, `monster`, `map`, `render`, `g2d`, `effect`, `dssa`, `banner`, `tex`, `field`, `world`, `model_anim` 입니다. 전체는 약 15분 걸립니다.
 
 ## 공통

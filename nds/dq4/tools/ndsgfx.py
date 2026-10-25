@@ -979,6 +979,11 @@ def gallery(out, manifest):
     order = [c for c in CATEGORY_TITLES if c in items] + sorted(c for c in items if c not in CATEGORY_TITLES)
     nav = " · ".join(f'<a href="#{html.escape(c)}">{html.escape(CATEGORY_TITLES.get(c, c))} ({len(items[c])})</a>'
                      for c in order)
+    # Other sessions keep their own galleries next to ours (e.g. sound/gallery/index.html);
+    # link every one found so regenerating this page does not drop them.
+    extra = "".join(f'<p>{html.escape(g.parent.parent.name)}: <a href="{html.escape(g.relative_to(out).as_posix())}">'
+                    f'{html.escape(g.relative_to(out).as_posix())}</a></p>'
+                    for g in sorted(out.glob("*/gallery/index.html")))
     secs = []
     for c in order:
         cards = "".join(
@@ -1001,6 +1006,7 @@ nav{{line-height:1.8}}
 </style></head><body>
 <h1>NDS 「ドラゴンクエストIV 導かれし者たち」 그래픽</h1>
 <p>참고용 추출본입니다. 배포하지 않습니다. 만든 방법은 <a href="README.md">README.md</a>.</p>
+{extra}
 <nav>{nav}</nav>
 {''.join(secs)}
 </body></html>
