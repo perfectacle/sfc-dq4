@@ -8,6 +8,7 @@
   python sfc/dq5/tools/dq5monmotion.py rom/dq5.sfc 00:3,03:2 --png work/mm      # 무리 몬스터:마릿수(16진:10진)
   python sfc/dq5/tools/dq5monmotion.py rom/dq5.sfc 00:3 --check-hop work/m7 --check-hit work/m1
   python sfc/dq5/tools/dq5monmotion.py rom/dq5.sfc --shots work/e26 1338 1600 boss-sink --png work/mm   # 게임 화면 GIF
+--shots 는 lua/dq5monlog.lua 의 SHOTS=1 화면 버퍼(s<프레임>.raw)로 GIF 를 만든다.
 --check-* 는 lua/dq5monlog.lua 덤프(w<프레임>.bin = 7E:0C00~, o<프레임>.oam)와 프레임마다 견준다.
 """
 import argparse
@@ -129,15 +130,24 @@ def check_hit(folder, x, y):
     return out
 
 
-def shots_anim(folder, first, last, outdir, stem, title):
-    """dq5monlog.lua 의 SHOTS=1 화면(s<프레임>.png)을 위 SCREEN_H 줄만 잘라 시트·GIF 로. 게임을 찍은 것이라
-    화면을 찍는 프레임이 1~3프레임 흔들린다."""
+def shot_image(folder, f):
+    """dq5monlog.lua SHOTS=1 의 s<프레임>.raw(화면 버퍼, 32비트 ARGB 작은 끝)를 그림으로. 버퍼 줄 y = OAM y."""
+    import struct
     from PIL import Image
+    w, h = map(int, open(os.path.join(folder, 'size.txt')).read().split())
+    px = struct.unpack(f'<{w * h}I', open(os.path.join(folder, f's{f:05d}.raw'), 'rb').read())
+    img = Image.new('RGB', (w, h))
+    img.putdata([((c >> 16) & 255, (c >> 8) & 255, c & 255) for c in px])
+    return img
+
+
+def shots_anim(folder, first, last, outdir, stem, title):
+    """dq5monlog.lua SHOTS=1 화면 버퍼를 위 SCREEN_H 줄만 잘라 시트·GIF 로. 화면 버퍼는 그 프레임에 그린 그림이라
+    흔들리지 않고, 프레임 f 끝에 덤프한 OAM 은 f+1 의 화면에 나온다."""
     frames = []
     for f in range(first, last + 1):
-        p = os.path.join(folder, f's{f:05d}.png')
-        if os.path.exists(p):
-            frames.append(Image.open(p).convert('RGBA').crop((0, 0, 256, SCREEN_H)))
+        if os.path.exists(os.path.join(folder, f's{f:05d}.raw')):
+            frames.append(shot_image(folder, f).convert('RGBA').crop((0, 0, 256, SCREEN_H)))
     return save(frames, outdir, stem, title)
 
 
