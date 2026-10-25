@@ -28,7 +28,7 @@ ACTIONS = 0x95                                # 26:8BE0 표 길이(26:8B64 는 D
 BG3_MAP, BG3_CHR, OBJ_BASE, OBJ_HI = 0x1C00, 0x1000, 0x6000, 0x1000
 FX_ROWS = range(7, 21)
 EXPORT_COMMAND = ('uv run --locked python sfc/dq5/tools/dq5fx.py rom/dq5.sfc --export $OUT/gfx/effects/frames '
-                  'work/dq5fx/fxh work/dq5fx/fxm work/dq5fx/fxm2   # 덤프는 lua/dq5fxdump.lua(모듈 설명)')
+                  'work/dq5fx/fxh work/dq5fx/fxm work/dq5fx/fxm2 work/dq5fx/fxp   # 덤프는 lua/dq5fxdump.lua(모듈 설명)')
 CROP_H = 168
 
 
