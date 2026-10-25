@@ -133,10 +133,13 @@ def status_chance(rom, level, easy=False):
 # 표 밖 처리 루틴의 뜻(코드 읽기, 20:B1AB~B2FA)
 SPECIAL = {
     0xB1AB: '대상 값(20:9F41 & 3)이 3 이 아니면 20:AEC6(내성 59), 3 이면 ザキ 판정(내성 56)',
-    0xB1D4: '내성 57, 20:AEFF(27:8059 쪽 판정)',
+    0xB1D4: '내성 57, 20:AEFF 로 27:8059(255·255·169·0) 판정',
     0xB1F8: '내성 5B 판정 뒤 양 번호 31(5~11)만큼 MP 를 빼앗음(대상 MP 까지)',
     0xB224: '내성 5A, 20:AF05 판정 뒤 수비력을 min(레코드 수비, 지금 수비) 만큼 깎음',
     0xB278: '수비력을 min(기본 수비(필드 13), 2 × 기본 수비(필드 13) − 지금 수비) 만큼 올림',
+    0xB256: '내성 5A, 20:AECC(27:8055) 판정 뒤 수비력을 min(레코드 수비 / 2, 지금 수비) 만큼 깎음',
+    0xB2A6: '수비력을 min(기본 수비(필드 13) / 2, 2 × 기본 수비 − 지금 수비) 만큼 올림',
+    0xB17E: '실행 루틴이 대상 없는 9D18 이라 전투에서는 「となえた」 뒤 아무 일도 없음',
     0xB2D5: '최대 HP − HP 만큼 회복',
     0xB2FA: '우리 쪽 4/8',
 }
@@ -183,6 +186,9 @@ def table(rom):
         mp, rng, enemy = cost(rom, n)
         addr, lda, ldx, target = handler(rom, n)
         head = f'{n:02X} {name(rom, n)} ' + ('MP-' if mp is None else f'MP{mp}') + ' ' + ('적 ' if enemy else '편 ') + RANGES[rng]
+        if n >= 0x39 and spread(rom, n)[0] == 0x9D18 and addr in SPECIAL:
+            print(head + f' 루틴{addr:04X} {SPECIAL[addr]}')
+            continue
         if n >= 0x39:
             pd = party_damage(rom, n)
             if pd:
