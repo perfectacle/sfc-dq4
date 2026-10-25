@@ -42,3 +42,4 @@ uv run --locked krpatch nds unpack rom/dq4ds-kr.nds work/nds/kr
 - [2026-10-25-02: NDS 그래픽 형식 풀기와 참고용 추출](journal/2026-10-25-02-graphics.md)
 - [2026-10-25-03: 동료 대화 표](journal/2026-10-25-03-talk.md)
 - [2026-10-25-04: 디버그 메뉴·진행도 프리셋으로 장 시작 세이브스테이트 만들기](journal/2026-10-25-04-debug.md)
+- [2026-10-25-06: 메시지 번호, 대사 표지, 실행 파일 문자열, 이벤트 스크립트](journal/2026-10-25-06-text2.md)
