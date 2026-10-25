@@ -6,6 +6,7 @@
   python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes map G K OUT.png [--night|--annot]  맵 하나
   python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes screen DIR OUT.png     seq.lua·warp.lua 의 end.nt·chr·pal 로 nametable 두 장(512×240)
   python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes scenes OUT SPEC.json    fcgfxscene.lua 덤프 목록([{name, title, prefix}])을 OUT/gfx/screens 에(있는 목록에 더함)
+      항목에 ppulog(fcgfxscroll.lua 의 ppulog.txt)·mirror(v|h)·frame 을 주면 그 프레임의 줄 스크롤로 화면을 그려 견줌
   python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes verify DIR... [--mask-sprites]  롬만으로 그린 화면과 end.png 를 픽셀로 비교
   python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes gallery OUT            OUT/gallery/index.html 만 다시
 
@@ -20,6 +21,7 @@ import os
 import re
 import subprocess
 import sys
+from collections import deque
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw, ImageFont
@@ -159,6 +161,9 @@ def place_table(prg, data):
     3. 'talk-phrase': 「ここは X」의 X(끝의 だ·です 따위를 떼고)가 장소 이름씨(PLACE_NOUN)로 끝나거나 가타카나가 든
        8글자 이하이면 그중 가장 짧은 것(예: 13 「サラン」, 20 「きこりのいえ」).
     4. 'talk-kind': 「この とう」「この どうくつ」처럼 그 장소를 가리키는 말만 있으면 그 말(이름이 아니라 갈래).
+    5. 'link': 남은 그룹이 필드를 거치지 않는 출구(place_links)로 1~3 의 이름이 붙은 그룹과 이어져 있으면 가장 가까운
+       그룹의 이름. 거리가 같은데 이름이 다른 그룹이 있으면 붙이지 않는다. 'via' 에 거쳐 간 출구를 적는다
+       (예: 2C 「てんくうじょう」 ← 2C/10 (03,05) → 2D/00). 4 는 갈래라 퍼뜨리지 않는다.
     못 찾은 그룹은 넣지 않는다."""
     rom = dq4text.Rom(data)
     names = place_list(prg)
@@ -200,6 +205,60 @@ def place_table(prg, data):
         kinds = {m.group(1) for t in text[g] for m in re.finditer(r'この(とうだい|とう|どうくつ|ほこら)', t)}
         if kinds:
             out[g] = {'name': min(kinds, key=lambda x: (len(x), x)), 'src': 'talk-kind'}
+    out.update(link_names(prg, out))
+    return out
+
+
+def place_links(prg):
+    """필드를 거치지 않고 그룹끼리 잇는 출구: {그룹: {이웃 그룹: [(그룹, 순번, X, Y, 그룹, 순번, 표)]}}, 방향 없이.
+    연결 표(1B:$8223, dq4map.links)와 계단 칸 표(08:$B22E, dq4block.exit_links)를 함께 본다. 필드로 나가는 칸과
+    필드 도착 자리(08:$B7F9)로 보내는 칸은 필드를 거치는 것이라 뺀다."""
+    adj = {}
+
+    def add(g1, k1, x, y, g2, k2, src):
+        if g1 != g2:
+            e = (g1, k1, x, y, g2, k2, src)
+            adj.setdefault(g1, {}).setdefault(g2, []).append(e)
+            adj.setdefault(g2, {}).setdefault(g1, []).append(e)
+    for a, b in dq4map.links(prg):
+        add(a[0], a[1], a[2], a[3], b[0], b[1], '1B:$8223')
+    cache = {}
+    for g, k, *_ in all_maps(prg):
+        for e in dq4block.exit_links(prg, g, k, cache):
+            t = e['to']
+            if t and 'group' in t and 'field' not in t and not t.get('invalid'):
+                add(g, k, e['x'], e['y'], t['group'], t['index'], '08:$B22E')
+    return adj
+
+
+def link_names(prg, names):
+    """place_table 5 단계: names 에 없는 그룹마다 너비 우선으로 가장 가까운 1~3 단계 그룹을 찾는다."""
+    adj = place_links(prg)
+    out = {}
+    for g in sorted(adj):
+        if g in names:
+            continue
+        prev, q, found, best = {g: None}, deque([(g, 0)]), [], None
+        while q:
+            h, d = q.popleft()
+            if best is not None and d > best:
+                break
+            if h != g and names.get(h, {}).get('src') in ('rula', 'talk', 'talk-phrase'):
+                best = d
+                found.append(h)
+                continue
+            for n in adj[h]:
+                if n not in prev:
+                    prev[n] = h
+                    q.append((n, d + 1))
+        if len({names[h]['name'] for h in found}) != 1:
+            continue
+        h, via = found[0], []
+        while prev[h] is not None:
+            a, b, x, y, c, k, src = adj[prev[h]][h][0]
+            via.append(f'{a:02X}/{b:02X} ({x:02X},{y:02X}) → {c:02X}/{k:02X} {src}')
+            h = prev[h]
+        out[g] = {'name': names[found[0]]['name'], 'src': 'link', 'via': via[::-1]}
     return out
 
 
@@ -234,7 +293,10 @@ def map_records(prg, names):
     for g, k, mid, bank, ptr in all_maps(prg):
         name, src = names.get(g, {}).get('name', ''), names.get(g, {}).get('src', '')
         stem = f'{g:02X}-{k:02X}' + (f'-{safe(name)}' if name else '')
-        out.append({'g': g, 'k': k, 'type': mid & 0x3F, 'code': mid, 'name': name, 'name_src': src, 'stem': stem})
+        rec = {'g': g, 'k': k, 'type': mid & 0x3F, 'code': mid, 'name': name, 'name_src': src, 'stem': stem}
+        if 'via' in names.get(g, {}):
+            rec['name_via'] = names[g]['via']
+        out.append(rec)
     return out
 
 
@@ -550,6 +612,40 @@ def falls_cycle(pal12, n):
 
 FIELD_PHASES = 6   # 필드: 물결 2단계 × 용암 3단계, 폭포: 흐름 3단계 × 물결 2단계
 CYCLED = (0x00, 0x18)
+GATE_SRC = (0x8929, 0x8D29)  # 1B:$889C: 성문 연출(1B:$870D) 그림의 시작, 연출 갈래마다 $400 바이트
+
+
+def gate_chunks(ram, wram):
+    """성문 연출(1B:$870D)이 지금까지 BG CHR-RAM 에 쓴 $40 바이트 조각 [(PPU 주소, PRG 오프셋)], 오래된 것부터.
+    연출은 단계 $57(0~3, $56 = 8×단계)마다 조각 4개($55 = 1~4)를 $53/$54 에서 $0300 큐로 보낸다(1B:$8871). PPU 주소는
+    1B:$881D 가 성문 블록 $0540·$0541 로 만든 WRAM 표 $7700 의 (($55×2 + $56) & $0E) 번째다. 연출 밖에서도 $53~$57 은
+    다른 데 쓰이므로, 그 넷이 이 단계표와 맞고 $53/$54 를 되짚은 시작이 1B:$889C 의 값일 때만 연출 중으로 본다."""
+    step, n = ram[0x57], ram[0x55]
+    if step > 3 or not 0 < n <= 4 or ram[0x56] != 8 * step or ram[0x540] == 0xFF:
+        return []
+    done = 4 * step + n
+    base = (ram[0x53] | ram[0x54] << 8) - 0x40 * done
+    if base not in GATE_SRC:
+        return []
+    out = []
+    for i in range(done):
+        x = (i // 4 * 8 + i % 4 * 2) & 0x0E
+        ppu = wram[0x1700 + x] | wram[0x1701 + x] << 8
+        out.append((ppu, 0x1B * 0x4000 + base + 0x40 * i - 0x8000))
+    return out
+
+
+def gate_map(m, ram, wram, chunks):
+    """성문 연출 중인 맵: 조각이 덮어쓴 타일을 그 조각 그림으로, 1B:$8772 가 WRAM 블록 → 타일 표 $7600 에서 바꿔 놓은
+    성문 블록($0540·$0541 과 각각 그다음 블록)의 타일을 그 표 값으로."""
+    chr_, tiles = dict(m.blocks['chr']), dict(m.blocks['tiles'])
+    for ppu, off in chunks:
+        for t in range(4):
+            o = off + 16 * t
+            chr_[(ppu - 0x1000) // 16 + t] = (o // 0x4000, 0x8000 | o & 0x3FFF)
+    for b in (ram[0x540], ram[0x540] + 1, ram[0x541], ram[0x541] + 1):
+        tiles[b] = list(wram[0x1600 + 4 * b:0x1604 + 4 * b])
+    m.blocks = dict(m.blocks, chr=chr_, tiles=tiles)
 
 
 def rom_screen(prg, ram, wram, ppal=None, cycle=0, sparkle=False):
@@ -557,6 +653,12 @@ def rom_screen(prg, ram, wram, ppal=None, cycle=0, sparkle=False):
     nametable 의 (X/8 + 2i, Y/8 + 2j) 에 놓고 스크롤만큼 돌려 자른다. 돌려주는 것: 그림, 애니메이션 블록 자리 표시."""
     t = ram[0x28]
     m = dq4block.Map(prg, field=ram[0x65]) if t == 0 else dq4block.Map(prg, ram[0x63], ram[0x64])
+    left, top = ram[0x7C], ram[0x7B]
+    chunks = gate_chunks(ram, wram) if t else []
+    if chunks:
+        gate_map(m, ram, wram, chunks)
+        # 연출 중에는 $7C/$7B 를 매 프레임 고치는 0F:$D542 가 돌지 않아 앞 맵의 값이 남는다.
+        left, top = (wram[0xF60] - 8) & 0xFF, (wram[0xF80] - 7) & 0xFF
     area = wram[0x1140] & 0xE0 if t else 0
     sx, sy = (ram[0x505] & 1) * 256 + ram[0x508], ram[0x509]
     pal12 = dq4block.palette(prg, t, ram[0x63], ram[0x64], wram[0x2ED], ram[0x65], wram[0x293])
@@ -572,7 +674,7 @@ def rom_screen(prg, ram, wram, ppal=None, cycle=0, sparkle=False):
     amask = Image.new('L', (512, 240), 0)
     for j in range(15):
         for i in range(16):
-            x, y = (ram[0x7C] + i) & 0xFF, (ram[0x7B] + j) & 0xFF
+            x, y = (left + i) & 0xFF, (top + j) & 0xFF
             blk = field_block(m, x, y, sparkle) if t == 0 else m.block(x, y, area, ram[0x7BA])
             c, r = (sx // 16 * 2 + 2 * i) % 64, (sy // 16 * 2 + 2 * j) % 30
             im = p.block(blk)
@@ -641,6 +743,8 @@ def verify(prg, d, mask_sprites=False):
     where = f'{ram[0x63]:02X}/{ram[0x64]:02X}' if ram[0x28] else f'필드 {ram[0x65]}'
     if ram[0x28] in CYCLED:
         where += f'(팔레트 {phase}단계)'
+    if ram[0x28] and gate_chunks(ram, wram):
+        where += f'(성문 연출 조각 {len(gate_chunks(ram, wram))}개)'
     msg = f'{d}: {where} 맵 종류 {ram[0x28]:02X}  비교 {total} 픽셀 중 {diff} 다름(뺀 것 {skipped})'
     if diff:
         mine.save(os.path.join(d, 'fcgfx-rom.png'))
@@ -731,7 +835,8 @@ def gallery(out):
         h.append(f'<div class="card"><a href="../gfx/screens/{s["nt"]}"><img loading="lazy" src="../gfx/screens/{s["nt"]}" alt=""></a>'
                  f'<div class="t">{e(s["title"])}</div><div class="s">화면과 {s["diff"]} 픽셀 다름(스프라이트 자리 {s["masked"]} 뺌)</div>'
                  f'<div class="s"><a href="../gfx/screens/{s["nt"]}">nametable 512×240</a> · '
-                 f'<a href="../gfx/screens/{s["bgchr"]}">BG 패턴</a> · <a href="../gfx/screens/{s["shot"]}">화면</a></div></div>')
+                 f'<a href="../gfx/screens/{s["bgchr"]}">BG 패턴</a> · <a href="../gfx/screens/{s["shot"]}">화면</a>'
+                 + (f' · <a href="../gfx/screens/{s["screen"]}">줄 스크롤로 그린 화면</a>' if 'screen' in s else '') + '</div></div>')
     h.append('</div></body></html>')
     d = out / 'gallery'
     d.mkdir(parents=True, exist_ok=True)
@@ -768,13 +873,87 @@ def match_shot(full, shot, mask):
     return best
 
 
+def frame_scroll(log_path, frame):
+    """fc/dq4/tools/lua/fcgfxscroll.lua 의 ppulog.txt 에서 그 프레임(화면을 찍은 endFrame 번호)의 스크롤.
+    한 프레임 몫은 vblank(scanline 241 이후·-1)의 쓰기 다음에 그 화면의 보이는 줄(0~239) 쓰기가 온다.
+    돌려주는 것: 맨 위 스크롤 (x, y, nametable 번호), $2001 값, 보이는 줄의 $2005 첫 쓰기 [(scanline, cycle, x)].
+    보이는 줄의 $2005 둘째 쓰기(Y)는 다음 프레임에야 반영되므로 버린다. 보이는 줄의 $2000·$2006 쓰기는 다루지 않는다."""
+    sx = sy = nt = 0
+    mask = 0x1E
+    splits = []
+    for line in Path(log_path).read_text().split('\n'):
+        m = re.match(r'(\d+)\s+(-?\d+)\s+(\d+) (20\d\d)=([0-9A-F]{2}) .* w=(\d)', line)
+        if not m or int(m[1]) != frame:
+            continue
+        sl, cy, reg, v, w = int(m[2]), int(m[3]), m[4], int(m[5], 16), int(m[6])
+        visible = 0 <= sl < 240
+        if reg == '2000' and not visible:
+            nt = v & 3
+        elif reg == '2001' and not visible:
+            mask = v
+        elif reg == '2005':
+            if visible:
+                if w == 1:
+                    splits.append((sl, cy, v))
+            elif w == 1:
+                sx = v
+            else:
+                sy = v
+        elif visible:
+            raise ValueError(f'보이는 줄의 {reg} 쓰기는 다루지 않음: {line}')
+    return (sx, sy, nt), mask, splits
+
+
+def line_screen(nt, chr_, pal, base, mirror, scroll, mask, splits):
+    """덤프 nametable 을 줄마다 다른 가로 스크롤로 256×240 화면에. mirror 는 'v'(nametable 두 장이 가로로) 또는 'h'(세로로).
+    줄 안에서 $2005 를 쓰면 fine X(아래 3비트)는 그 자리부터 바로, coarse X 는 cycle 257 의 가로 복사부터 바뀐다.
+    MesenCE 에서 픽셀 x 가 새 fine X 를 쓰는 것은 x ≥ 쓴 cycle 이었다(엔딩 바다 장면 덤프 여섯 장). $2001 bit1 이 0 이면 왼쪽 8픽셀은 색 0."""
+    a = nt_image(nt[:0x400] * 2, chr_, pal, base).crop((0, 0, 256, 240))
+    b = nt_image(nt[0x400:] * 2, chr_, pal, base).crop((0, 0, 256, 240))
+    world = Image.new('RGB', (512, 480))
+    for i, im in enumerate((a, b, a, b) if mirror == 'v' else (a, a, b, b)):
+        world.paste(im, (i % 2 * 256, i // 2 * 240))
+    wp = world.load()
+    scr = Image.new('RGB', (256, 240), MESEN_RGB[pal[0] & 0x3F])
+    sp = scr.load()
+    sx, sy, n = scroll
+    at = {}
+    for sl, cy, v in splits:
+        at.setdefault(sl, []).append((cy, v))
+    # 한 줄 끝(cycle 257)에 쓴 값의 coarse X 는 그다음 줄 끝에 옮겨지므로 한 줄 늦게 들어간다.
+    coarse, fine, late = sx, sx, None
+    for y in range(240):
+        wy = (n // 2 * 240 + sy + y) % 480
+        changes = sorted(at.get(y, []))
+        for x in range(256):
+            f = fine
+            for cy, v in changes:
+                if x >= cy:
+                    f = v
+            if x < 8 and not mask & 2:
+                continue
+            sp[x, y] = wp[(n % 2 * 256 + (coarse & ~7) + (f & 7) + x) % 512, wy]
+        if late is not None:
+            coarse, late = late, None
+        for cy, v in changes:
+            fine = v
+            if cy < 257:
+                coarse = v
+            else:
+                late = v
+    return scr
+
+
 def screens_from_dumps(out, dumps):
-    """dumps = [(이름, 제목, prefix)]. nametable 두 장 그림, BG 패턴 표 시트, MesenCE 화면을 두고,
-    화면과 nametable 그림을 스크롤 자리를 찾아 스프라이트 자리를 뺀 픽셀로 견준다."""
+    """dumps = [(이름, 제목, prefix[, opts])]. nametable 두 장 그림, BG 패턴 표 시트, MesenCE 화면을 두고,
+    화면과 nametable 그림을 스크롤 자리를 찾아 스프라이트 자리를 뺀 픽셀로 견준다.
+    opts 에 'ppulog'(fcgfxscroll.lua 의 ppulog.txt)가 있으면 그 프레임('frame', 없으면 prefix 의 fNNNNN)의 줄 스크롤로
+    화면을 그려 견주고, 'mirror'('v' 기본, 'h')로 nametable 배치를 정한다. 그때는 <이름>-screen.png 도 둔다."""
     d = Path(out) / 'gfx' / 'screens'
     d.mkdir(parents=True, exist_ok=True)
     idx = []
-    for name, title, prefix in dumps:
+    for name, title, prefix, *rest in dumps:
+        opts = rest[0] if rest else {}
         f = scene_files(prefix)
         base = 0x1000 if f['ppu'] & 0x10 else 0
         full = nt_image(f['nt'], f['chr'], f['pal'], base)
@@ -791,12 +970,24 @@ def screens_from_dumps(out, dumps):
             if o in f:
                 m = sprite_mask(f[o], tall=bool(f['ppu'] & 0x20))
                 mask = m if mask is None else ImageChops.lighter(mask, m)
-        n, sx, sy = match_shot(full, shot, mask)
+        extra = {}
+        if 'ppulog' in opts:
+            frame = opts.get('frame') or int(re.search(r'f(\d+)$', prefix)[1])
+            scroll, pmask, splits = frame_scroll(opts['ppulog'], frame)
+            mirror = opts.get('mirror', 'v')
+            scr = line_screen(f['nt'], f['chr'], f['pal'], base, mirror, scroll, pmask, splits)
+            scr.save(d / f'{name}-screen.png')
+            n, sx, sy = diff_count(scr, shot, mask), scroll[0] + scroll[2] % 2 * 256, scroll[1] + scroll[2] // 2 * 240
+            extra = {'screen': f'{name}-screen.png', 'mirror': mirror, 'ppumask': pmask, 'lines': [list(s) for s in splits],
+                     'source': 'MesenCE 덤프(fc/dq4/tools/lua/fcgfxscroll.lua) 렌더링, 롬에서 직접 푼 것이 아님'}
+        else:
+            n, sx, sy = match_shot(full, shot, mask)
         masked = 0 if mask is None else mask.histogram()[255]
-        print(f'{name}: 화면 {256 * 240 - masked} 픽셀(스프라이트 자리 {masked} 뺌) 중 {n} 다름, 스크롤 ({sx},{sy})')
+        lines = f', 줄 스크롤 (scanline, cycle, X) {extra["lines"]}' if extra else ''
+        print(f'{name}: 화면 {256 * 240 - masked} 픽셀(스프라이트 자리 {masked} 뺌) 중 {n} 다름, 스크롤 ({sx},{sy}){lines}')
         idx.append({'name': name, 'title': title, 'nt': f'{name}-nt.png', 'bgchr': f'{name}-bgchr.png', 'shot': f'{name}-shot.png',
                     'source': 'MesenCE 덤프(fc/dq4/tools/lua/fcgfxscene.lua) 렌더링, 롬에서 직접 푼 것이 아님', 'dump': prefix,
-                    'scroll': [sx, sy], 'diff': n, 'masked': masked})
+                    'scroll': [sx, sy], 'diff': n, 'masked': masked, **extra})
     # 이미 있는 장면 목록에 더한다(같은 이름은 바꿈). 장면마다 덤프를 뜬 방법이 달라 한 번에 다시 뜨기 어렵다.
     old = json.loads((d / 'index.json').read_text()) if (d / 'index.json').exists() else []
     names = {x['name'] for x in idx}
@@ -838,7 +1029,8 @@ def main():
         return
     if cmd == 'scenes':
         spec = json.loads(Path(a[4]).read_text())
-        screens_from_dumps(a[3], [(x['name'], x['title'], x['prefix']) for x in spec])
+        screens_from_dumps(a[3], [(x['name'], x['title'], x['prefix'], {k: x[k] for k in ('ppulog', 'frame', 'mirror') if k in x})
+                                  for x in spec])
         source_txt(a[3], 'gfx/screens', 'uv run --locked python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes scenes $OUT ' + a[4], data)
         return
     if cmd == 'map':
