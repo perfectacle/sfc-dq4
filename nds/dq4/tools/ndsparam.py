@@ -322,6 +322,14 @@ def cmd_casino(root, rom):
         print('FC ' + line)
 
 
+# 얻는 물건 종류 → 같은 번호의 FMAP 배치(+0x2C)가 쓰는 모델 이름(맵 전체 통계)
+CHEST_KINDS = {0x00: '문·침대 등(물건 없음)', 0x01: '책장(hondana)', 0x02: '게시판(msgkb)', 0x04: '무덤(haka)',
+               0x07: '보물상자(tbox)', 0x09: '슬롯머신', 0x0B: '마신상', 0x0D: '석상(mgmzou)', 0x11: '서랍(hikidashi)',
+               0x13: '경대(kyodai)', 0x14: '칼 장식(ken)', 0x15: '도끼 장식(ono)', 0x16: '방패 장식(tate)',
+               0x17: '갑옷 장식(yoroi)', 0x18: '갑옷 장식(yoroi)', 0x1A: '찬장(bkdana)', 0x1B: '술 선반(sakadana)',
+               0x1C: '옷장(tansu)', 0x1F: '옷장(tansu)', 0x22: '그림(e)', 0x25: '통(taru)', 0x27: '항아리(tubo)'}
+
+
 def cmd_chests(root, maps):
     it = ds_items(root)
     for m in maps:
@@ -332,7 +340,7 @@ def cmd_chests(root, maps):
             flag, kind, seq = struct.unpack_from('<HBB', r, 0x12)
             if item or gold:
                 what = it.get(item, f'#{item}') if item else f'{gold}G'
-                print(f'  {num:5d} 칸 {seq:2d} 종류 {kind:02X} {what}  플래그 {flag}')
+                print(f'  {num:5d} 칸 {seq:2d} 종류 {kind:02X}({CHEST_KINDS.get(kind, "?")}) {what}  플래그 {flag}')
 
 
 # 동료 대화
