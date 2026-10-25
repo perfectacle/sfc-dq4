@@ -34,6 +34,13 @@ SFC DQ5 엔진을 분석하는 세션이 처음 읽는 문서입니다. 지금�
 준비(워크트리, `$MESENCE`, `$LIBDIR`)는 [analysis 스킬](../../.agents/skills/analysis/SKILL.md#준비) 을 따릅니다.
 
 - **세이브스테이트 `work/state/ship.mss`**: 배 선실(맵 17/00), 조작 가능. 사람마다 다시 만들어야 하면 `tools/lua/mkstate.lua` 로 만듭니다. 필드·다른 맵·전투 장면은 아래 「[장면 이동 도구](#장면-이동-도구)」(`sfc/dq5/tools/lua/dq5warp.lua`)로 이 상태에서 만듭니다.
+- **세이브스테이트 `work/state/ship-wake.mss`**: 새 게임 첫 장면, 배 선실에서 주인공이 아직 자는 상태(`7E:21A1` = 0, 주인공 숨김, 버튼을 누르면 깨어남). 전원을 켜고 A 를 40프레임마다 누르다 5,770프레임에 멈추고 5,790프레임에 저장합니다(17/00 이 5,744프레임에 풀림). `ship.mss` 는 이 장면이 끝난 뒤(`21A1` = `71`)입니다.
+
+  ```sh
+  LIBDIR=$(uv run --locked krpatch sfc lua) SHOT_DIR=$PWD/work/state MAXF=5800 EVERY=0 PERIOD=40 TAP=a TAPUNTIL=5770 SAVEAT=5790 STATE=ship-wake.mss \
+    "$MESENCE" --testrunner "$PWD/rom/dq5.sfc" "$PWD/tools/lua/mkstate.lua"
+  ```
+
 - **순간이동**: 배의 사다리 출구 항목(CPU `2A:EFF5`, 파일 오프셋 `156FF5`)을 `ROMPATCH` 로 덮어 원하는 맵으로 갑니다. 사다리는 (3,11) → (3,24) → (7,24) 를 거쳐 위로 누르면 밟힙니다.
 
   ```sh
@@ -96,7 +103,7 @@ STATE=… FIELD=341,56 GROUP=2C SETTLE=300 SAVE=battle-2c.mss …
 1. **주문·몬스터 표의 남은 것** — [dq5-data-format.md 「주문과 행동」](docs/dq5-data-format.md#주문과-행동-268765)·[「몬스터」](docs/dq5-data-format.md#몬스터-238000) 의 남은 것. 실험은 `sfc/dq5/tools/lua/dq5battle.lua` 로 전투 메시지와 HP·MP 를 메시지마다 적고(전투 중 몬스터 `7E:07C0 + 슬롯*16`, 파파스 HP·MP `7E:206C`), 파파스(몬스터 `DC`, 행동 = 파일 오프셋 `11958D`)나 슬라임(`118000`)의 레코드를 `ROMPATCH` 로 바꿉니다. 필드를 읽는 곳은 롬에서 `00 88 <필드>`(`BRK #88`)를 찾으면 나옵니다. 전투가 시작된 뒤에 몬스터 레코드를 덮으면 HP·MP 처럼 시작 때 슬롯으로 옮기는 값은 바뀌지 않으니, 그런 값은 `dq5warp.lua` 로 세이브스테이트를 만들 때 `ROMPATCH` 로 넣습니다. 전투 코드가 쓰는 WRAM(`$10F6` 등)은 CPU 주소로 쓰기 감시가 안 잡히니, Lua 콜백에 `emu.memType.snesWorkRam` 과 WRAM 오프셋을 줍니다. 주인공이 전투에서 주문을 쓰게 하려면 `dq5warp.lua` 에 `SET="2064=01;2050=63;2044=63"`(전투 주문 칸 8, MP 99)을 주고 たたかう → じゅもん 으로 고릅니다. 칸 8 의 주문은 `23:BE31`(파일 오프셋 `11BE31`)을 덮어 바꿉니다. 전투 명령 창이 たたかう·にげる 뿐인 것은 일행이 하나라서입니다. 상점은 01/00 도구점(대화 번호 `02`, (12,78))에 `TO=01/00,12,80,2`(넷째 값은 층)로 서서 위를 보고 말을 겁니다.
    - 전투 재현: `STATE=…/ship.mss PRE="b:4,wait:40,b:4,wait:40" ROMPATCH="156FF5=E0253C0103" WAYPOINTS="3,11;3,24;7,24;7,22;37,66;37,72;down:90" CHANGES=2 AFTER=400 MAXF=2500` 이면 2,500프레임에 슬라임 셋과의 전투 명령 창이 뜹니다(이벤트 전투).
 2. **전투** — 몬스터 그림은 [dq5-graphics-format.md](docs/dq5-graphics-format.md)(아무 몬스터와 싸우기: 위 전투 재현에 `POKE="7E1001=<번호>;7E1005=1"`, 덤프는 `sfc/dq5/tools/lua/dq5battledump.lua`). 남은 것은 전투 모드 메시지(`24:8C39`, 색인 `24:AECD`, 디코더 `24:9E47`). 조우 표는 [dq5-data-format.md 「전투 조우」](docs/dq5-data-format.md#전투-조우-23e7c2). 걸음마다의 구역·조우율은 `sfc/dq5/tools/lua/dq5warptrace.lua`(`dq5warp.lua` + 기록)로 `00:82AF` 를 찍어 `dq5encounter.py --steps` 로 대조합니다([일지 2026-10-25-14](journal/2026-10-25-14-encounter2.md)). 남은 것은 todo 의 「조우의 남은 것」.
-3. **인물 스크립트의 남은 명령** — [dq5-map-format.md 「인라인 스크립트」](docs/dq5-map-format.md#인라인-스크립트-01c800). 걷는 길은 `tools/lua/slottrack.lua`, 네이티브 호출이 매 프레임 도는지는 `tools/lua/execcount.lua` 로 봅니다. 명령 하나를 볼 때는 배 선실 파파스 스크립트(파일 오프셋 `2A850`, 23바이트)를 덮고 사다리 목적지를 `E0090B0117`(17/00 자신)로 바꿔 `tools/lua/wlog.lua` 로 인물 표를 적습니다([일지 2026-10-25-75](journal/2026-10-25-75-npc-script2.md#2-스크립트를-덮어-쓰는-실험대)). 덮어 쓰기로 아직 보지 않은 명령은 `06`·`07`·`09`·`10`·`11`·`15`·`16`·`18`·`19`·`1D`·`20`·`21`·`22`·`2F`·`30`~`32`·`36`·`38` 이고([일지 2026-10-25-85](journal/2026-10-25-85-npc-script3.md)), 첫 장면(깨어나기)은 배 선실 세이브스테이트가 이미 깨어난 뒤(`21A1` = `71`)라 새로 시작한 세이브스테이트가 있어야 봅니다.
+3. **인물 스크립트의 남은 것** — 데이터에 나오는 명령은 모두 실측했습니다([일지 2026-10-25-95](journal/2026-10-25-95-npc-script4.md)). 남은 것은 문 명령 넷째 바이트와 걷기·서기 그림을 고르는 비트 규칙입니다. 실험대는 배 선실 파파스 스크립트(파일 오프셋 `2A850`, 23바이트)를 덮고 사다리 목적지를 `E0090B0117` 로 둔 뒤 `tools/lua/wlog.lua` 로 인물 표를 적는 것이고, 그림을 견줄 때는 `1A` 로 애니메이션을 먼저 끕니다.
 4. **맵별 루틴의 남은 것**, **텍스트의 남은 것**(창 레코드 머리 일부, 한글 넣기: 전투·창 글자를 그리는 길).
 
 조사 실험 요령: 앞 칸을 보려면 몸을 돌리는 입력을 `right:8` 처럼 길게 주고, 명령 창은 `a:8;wait:60;down:6;wait:25;down:6;wait:25;down:6;wait:25;right:6;wait:25;a:8`(しらべる)로 엽니다.
