@@ -30,7 +30,15 @@ WAYPOINTS = '3,11;3,24;7,24;7,22;37,66;37,72;down:90'
 BASE_PATCH = '156FF5=E0253C0103;118003=C8'
 PAPAS_ACTIONS, SLIME_ACTIONS = 0x11958D, 0x118011
 MIN_CHANGE = 2000
+# 화면 버퍼 239줄 기준 몬스터 줄(MesenCE 224줄 화면의 y 40~150 에 해당)
+MONSTER_BAND = (0, 48, 256, 158)
 COMMAND = 'uv run --locked python sfc/dq5/tools/dq5effectgif.py rom/dq5.sfc --state work/state/ship.mss --out $OUT'
+
+
+def raw_image(path):
+    """lua/dq5shots.lua 의 sNNNNN.raw(32비트 ARGB) → RGB 그림. 크기는 같은 폴더의 size.txt."""
+    w, h = (int(v) for v in open(os.path.join(os.path.dirname(path), 'size.txt')).read().split())
+    return Image.frombytes('RGBA', (w, h), open(path, 'rb').read(), 'raw', 'BGRA').convert('RGB')
 
 
 def driver_dir(root):
@@ -45,7 +53,8 @@ def driver_dir(root):
 
 def run(mesen, rom_path, script, env, shot_dir):
     os.makedirs(shot_dir, exist_ok=True)
-    subprocess.run([mesen, '--testrunner', rom_path, script], env=dict(os.environ, SHOT_DIR=shot_dir, **env),
+    # 설정의 Snes.RamPowerOnState 가 Random 이면 같은 입력도 결과가 달라져, 이 실행만 RAM 을 0 으로 켠다(인자는 롬·스크립트 뒤에 두어야 먹음).
+    subprocess.run([mesen, '--testrunner', rom_path, script, '--Snes.RamPowerOnState=AllZeros'], env=dict(os.environ, SHOT_DIR=shot_dir, **env),
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=900)
 
 
@@ -74,21 +83,21 @@ def capture(args, n, work):
         return n, None
     env.update(FROM=str(win[0]), TO=str(win[1]), STEP=str(args.step), MAXF=str(win[1] + 1))
     run(args.mesen, args.rom, os.path.join(TOOLS, 'lua', 'dq5shots.lua'), env, os.path.join(d, 'shots'))
-    return n, (win, sorted(glob.glob(os.path.join(d, 'shots', 's*.png'))))
+    return n, (win, sorted(glob.glob(os.path.join(d, 'shots', 's*.raw'))))
 
 
 def changed(paths):
-    """몬스터 줄(y 40~150)에서 첫 장과 가장 많이 다른 점 수. 물결 배경과 글자만 바뀌면 1,700 아래였다."""
+    """몬스터 줄(MONSTER_BAND)에서 첫 장과 가장 많이 다른 점 수. 물결 배경과 글자만 바뀌면 1,700 아래였다."""
     from PIL import ImageChops
-    first = Image.open(paths[0]).convert('RGB').crop((0, 40, 256, 150))
-    return max(ImageChops.difference(first, Image.open(p).convert('RGB').crop((0, 40, 256, 150)))
+    first = raw_image(paths[0]).crop(MONSTER_BAND)
+    return max(ImageChops.difference(first, raw_image(p).crop(MONSTER_BAND))
                .convert('L').point(lambda v: 255 if v > 16 else 0).histogram()[255] for p in paths)
 
 
 def gif(paths, step):
     frames, durs = [], []
     for p in paths:
-        img = Image.open(p).convert('RGB')
+        img = raw_image(p)
         if frames and img.tobytes() == frames[-1].tobytes():
             durs[-1] += step
             continue
@@ -133,7 +142,7 @@ def main():
         os.makedirs(os.path.dirname(path), exist_ok=True)
         frames[0].save(path, save_all=True, append_images=frames[1:], duration=durs, loop=0)
         out.add(f'gfx/effects/anim/{stem}.gif', 'effects', f'{n:02X} {title} (GIF)', '전투 연출', action=f'{n:02X}',
-                frames=len(frames), w=256, h=224, start=start, end=end,
+                frames=len(frames), w=frames[0].width, h=frames[0].height, start=start, end=end,
                 note=('파파스가' if n < 0x39 else '슬라임이') + f' 쓴 장면, 메시지 프레임 {start}~{end - 10}')
         print(f'{n:02X} {title}: {len(frames)}장 {start}~{end}')
     out.finish(COMMAND)

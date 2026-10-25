@@ -30,8 +30,14 @@ TAPS = [f'a@{1651 + 40 * k}:4' for k in range(241)]
 FROM, TO = 5300, 7100
 
 
+def raw_image(path):
+    """lua/dq5shots.lua 의 sNNNNN.raw(32비트 ARGB) → RGB 그림. 크기는 같은 폴더의 size.txt."""
+    w, h = (int(v) for v in open(os.path.join(os.path.dirname(path), 'size.txt')).read().split())
+    return Image.frombytes('RGBA', (w, h), open(path, 'rb').read(), 'raw', 'BGRA').convert('RGB')
+
+
 def dark(path):
-    return sum(ImageStat.Stat(Image.open(path).convert('L')).mean) < 1.5
+    return sum(ImageStat.Stat(raw_image(path).convert('L')).mean) < 1.5
 
 
 def main():
@@ -47,15 +53,17 @@ def main():
     shots = tempfile.mkdtemp(prefix='dq5title-')
     env = dict(os.environ, LIBDIR=lib, PERIOD='40', TAP='a', TAPUNTIL='205', SEQ=','.join(MENU + TAPS), EVERY='0',
                FROM=str(FROM), TO=str(TO), STEP=str(args.step), MAXF=str(TO + 1), SHOT_DIR=shots)
-    subprocess.run([args.mesen, '--testrunner', args.rom, os.path.join(TOOLS, 'lua', 'dq5shots.lua')], env=env,
+    # 설정의 Snes.RamPowerOnState 가 Random 이면 같은 입력도 결과가 달라져, 이 실행만 RAM 을 0 으로 켠다(인자는 롬·스크립트 뒤에 두어야 먹음).
+    subprocess.run([args.mesen, '--testrunner', args.rom, os.path.join(TOOLS, 'lua', 'dq5shots.lua'),
+                    '--Snes.RamPowerOnState=AllZeros'], env=env,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1800, check=False)
-    paths = sorted(glob.glob(os.path.join(shots, 's*.png')))
+    paths = sorted(glob.glob(os.path.join(shots, 's*.raw')))
     flags = [dark(p) for p in paths]
     start = next(i for i in range(1, len(paths)) if flags[i - 1] and not flags[i])
     end = next(i for i in range(start, len(paths)) if flags[i])
     frames, durs = [], []
     for p in paths[start:end]:
-        img = Image.open(p).convert('RGB')
+        img = raw_image(p)
         if frames and img.tobytes() == frames[-1].tobytes():
             durs[-1] += args.step
             continue
@@ -69,7 +77,7 @@ def main():
     first = int(os.path.basename(paths[start])[1:6])
     last = int(os.path.basename(paths[end - 1])[1:6])
     out = Out(args.out, hashlib.sha1(data).hexdigest())
-    out.add(rel, 'screens', '오프닝 타이틀 연출 (GIF)', '타이틀', w=256, h=224, frames=len(frames), start=first, end=last,
+    out.add(rel, 'screens', '오프닝 타이틀 연출 (GIF)', '타이틀', w=frames[0].width, h=frames[0].height, frames=len(frames), start=first, end=last,
             note=f'전원부터 {first}~{last} 프레임을 {args.step}프레임마다 찍음(같은 장은 한 장으로)')
     out.finish(COMMAND)
     print(f'{len(frames)}장 {first}~{last} -> {path}')
