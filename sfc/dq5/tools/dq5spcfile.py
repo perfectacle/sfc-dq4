@@ -9,8 +9,10 @@ MesenCE testrunner 로 세이브스테이트(배 선실)를 불러 소리 대기
 
   python sfc/dq5/tools/dq5spcfile.py rom/dq5.sfc work/state/ship.mss --out work/sound            # 모두
   python sfc/dq5/tools/dq5spcfile.py rom/dq5.sfc work/state/ship.mss --out work/sound --only 02,33
-  --wav  game-music-emu(libgme, 환경 변수 GME_LIB 또는 시스템 라이브러리)로 .spc 를 WAV(44100Hz 스테레오)로도 굽는다.
-         곡은 WAV_SONG 초(기본 120, 끝 8초 줄이기), 효과음은 WAV_SFX 초(기본 4)
+  --wav  game-music-emu(libgme, 환경 변수 GME_LIB 또는 시스템 라이브러리)로 .spc 를 WAV(32000Hz 스테레오, S-DSP 의
+         빠르기)로도 굽는다. 곡은 WAV_SONG 초(기본 30, 끝 4초 줄이기), 효과음은 WAV_SFX 초(기본 4). 들어 보기용이라
+         짧게 둔다. 끝까지 들으려면 .spc 를 튼다
+  --wav-only  에뮬레이터를 돌리지 않고 --out 의 songs/·sfx/ 에 있는 .spc 와 index.json 으로 WAV 만 다시 굽는다
 """
 import argparse
 import concurrent.futures
@@ -90,7 +92,7 @@ def pack(ram, dsp, r, title, game='Dragon Quest V', seconds=SONG_SECONDS, commen
     return bytes(h) + bytes(ram) + bytes(dsp) + bytes(64) + extra
 
 
-def render(spc_path, wav_path, seconds, fade=8, rate=44100):
+def render(spc_path, wav_path, seconds, fade=4, rate=32000):
     """libgme 로 .spc 를 굽는다."""
     lib = ctypes.CDLL(os.environ.get('GME_LIB') or ctypes.util.find_library('gme') or 'libgme.dylib')
     lib.gme_open_file.restype = ctypes.c_char_p
@@ -127,6 +129,14 @@ def run_one(mesence, libdir, rom, state, n, work):
     return out
 
 
+def wav_entry(entry, folder, k):
+    sec = int(os.environ.get('WAV_SONG', '30')) if k == 'song' else int(os.environ.get('WAV_SFX', '4'))
+    render(os.path.join(folder, entry['file']), os.path.join(folder, entry['id'] + '.wav'), sec, 4 if k == 'song' else 0)
+    entry['wav'] = entry['id'] + '.wav'
+    entry['wav_seconds'] = sec
+    entry['wav_rate'] = 32000
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('rom')
@@ -135,11 +145,26 @@ def main():
     ap.add_argument('--only')
     ap.add_argument('--jobs', type=int, default=4)
     ap.add_argument('--wav', action='store_true')
+    ap.add_argument('--wav-only', action='store_true')
     a = ap.parse_args()
     mesence = os.environ.get('MESENCE')
     if not mesence:
         print('MESENCE 환경 변수가 필요함', file=sys.stderr)
         return 1
+    if a.wav_only:
+        for k, folder in (('song', 'songs'), ('sfx', 'sfx')):
+            path = os.path.join(a.out, folder, 'index.json')
+            if not os.path.exists(path):
+                continue
+            entries = json.load(open(path, encoding='utf-8'))
+            for e in entries:
+                if a.only and e['id'] not in a.only.upper().split(','):
+                    continue
+                wav_entry(e, os.path.join(a.out, folder), k)
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(entries, f, ensure_ascii=False, indent=1)
+                f.write('\n')
+        return 0
     libdir = subprocess.run(['krpatch', 'sfc', 'lua'], capture_output=True, text=True, check=True).stdout.strip()
     rom = Rom(open(a.rom, 'rb').read())
     seqs = {i: (addr, ln) for i, addr, ln in sequences(rom)}
@@ -167,10 +192,7 @@ def main():
              'sequence_bytes': seqs[n][1], 'command': '01' if k == 'song' else '0C', 'frame': int(r['frame']),
              'playing': found}
         if a.wav:
-            sec = int(os.environ.get('WAV_SONG', '120')) if k == 'song' else int(os.environ.get('WAV_SFX', '4'))
-            render(os.path.join(folder, name), os.path.join(folder, f'{n:02X}.wav'), sec, 8 if k == 'song' else 0)
-            entry['wav'] = f'{n:02X}.wav'
-            entry['wav_seconds'] = sec
+            wav_entry(entry, folder, k)
         index['songs' if k == 'song' else 'sfx'].append(entry)
         print(f'{k:4} {n:02X} frame {r["frame"]:>4} {"곡 자리에 있음" if found else "곡 자리에 없음(MAXF 에 잡음)"}')
     for k in index:
