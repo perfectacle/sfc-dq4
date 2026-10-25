@@ -3,6 +3,7 @@
 --   TO="01/04,12,44[,층]"    실내 맵 $BC/$BD(16진)와 셀 좌표(10진). 층은 도착 뒤 주인공 층 마스크($C3 → 7E:31A0), 기본 1.
 --                            그 맵 바닥의 층과 다르면 주인공이 움직이지 못한다(01/00 은 2).
 --                            $BD 가 1F 를 넘는 그룹 50 이상 맵이면 2A:F769 의 LDA $01 을 LDA #$BD 로 덮는다(종류 60 은 $BD 를 5비트에만 담음)
+--                            배의 다른 맵(17/01 등)도 된다. 선실 17/00 을 떠난 것을 $BC·$BD 둘로 본다
 --   FIELD="341,56"           필드 좌표($B6,$B8, 10진). 01/00 으로 간 뒤 아래로 걸어 나가는데, 그때 쓰는 입구 표
 --                            04:FD97 의 01 항목을 이 좌표로 덮는다. 첫 필드 이벤트(파파스와 슬라임 전투)를 끄려고
 --                            7E:2194 bit7 을 켠다(필드 루틴 15:F907 의 FE 항목)
@@ -193,7 +194,7 @@ emu.addEventCallback(function()
     local p = ladder[wi]
     if not p then
       L.press({up = true})
-      if rd(0x7E00BC) ~= 0x17 then
+      if rd(0x7E00BC) ~= 0x17 or rd(0x7E00BD) ~= 0x00 then
         phase = "load"; arrived = n
         log[#log + 1] = string.format("f%05d left ship", n)
       end
