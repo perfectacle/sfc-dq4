@@ -1,6 +1,7 @@
 """DQ5(SFC) 맵 곡 표(23:FD6A +5)를 맵마다 들어가 실측으로 견준다. 형식은 sfc/dq5/docs/dq5-sound-format.md 「맵 곡」.
 
 맵마다 들어갈 칸은 모든 맵 출구의 도착 칸(dq5exit.py)에서, 없으면 통행 격자(attrgrid.py)의 가운데에 가장 가까운 `o` 칸에서 고른다.
+`o` 칸이 없는 맵(03/09·06/07·2B/02·32/04)은 `.`·`^` 칸에 층 2 로 선다(dq5warp.lua TO 의 넷째 값).
 MesenCE 로 선실 세이브스테이트에서 dq5warp.lua 의 TO 로 들어가 lua/dq5sndlog.lua 가 적은 00:CEA2 의 명령 01 인자를 표와 견준다.
 
 사용(MESENCE 는 MesenCE 실행 파일, LIBDIR 은 seqlib.sh 로 만든 dq5warp 드라이버):
@@ -29,7 +30,7 @@ def _tool(rom, name, *args):
 
 
 def entry_cells(rom_path, maps, jobs=8):
-    """{맵: (x, y)}. 출구 도착 칸을 먼저 쓰고, 없는 맵은 통행 격자 가운데의 `o` 칸."""
+    """{맵: (x, y[, 층])}. 출구 도착 칸을 먼저 쓰고, 없는 맵은 통행 격자 가운데의 `o` 칸, 그것도 없으면 `.`·`^` 칸에 층 2."""
     cells = {}
     with ThreadPoolExecutor(jobs) as ex:
         for out in ex.map(lambda m: _tool(rom_path, "dq5exit.py", *m.split("/")), maps):
@@ -39,11 +40,13 @@ def entry_cells(rom_path, maps, jobs=8):
     def grid(m):
         rows = [ln for ln in _tool(rom_path, "attrgrid.py", *m.split("/")).splitlines()
                 if len(ln) > 3 and ln[:2].strip().isdigit() and ln[2] == " "]
-        free = [(x, y) for y, ln in enumerate(rows) for x, c in enumerate(ln[3:]) if c == "o"]
-        if not free:
-            return m, None
-        w = max(len(ln) - 3 for ln in rows)
-        return m, min(free, key=lambda c: (c[0] - w / 2) ** 2 + (c[1] - len(rows) / 2) ** 2)
+        w = max((len(ln) - 3 for ln in rows), default=0)
+        for marks, layer in (("o", ()), (".^", (2,))):
+            free = [(x, y) for y, ln in enumerate(rows) for x, c in enumerate(ln[3:]) if c in marks]
+            if free:
+                x, y = min(free, key=lambda c: (c[0] - w / 2) ** 2 + (c[1] - len(rows) / 2) ** 2)
+                return m, (x, y) + layer
+        return m, None
     with ThreadPoolExecutor(jobs) as ex:
         for m, c in ex.map(grid, [m for m in maps if m not in cells]):
             if c:
@@ -70,10 +73,10 @@ def main():
     probe = os.path.join(HERE, "lua", "dq5sndlog.lua")
 
     def run(m):
-        x, y = cells[m]
+        cell = ",".join(str(v) for v in cells[m])
         d = os.path.abspath(os.path.join(a.out, m.replace("/", "_")))
         os.makedirs(d, exist_ok=True)
-        env = dict(os.environ, LIBDIR=os.path.abspath(a.libdir), STATE=os.path.abspath(a.state), TO=f"{m},{x},{y}",
+        env = dict(os.environ, LIBDIR=os.path.abspath(a.libdir), STATE=os.path.abspath(a.state), TO=f"{m},{cell}",
                    SETTLE="60", TEST="wait:200", MAXF="640", SHOT_DIR=d)
         if a.set:
             env["SET"] = a.set
@@ -81,7 +84,8 @@ def main():
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
         try:
             snd = open(os.path.join(d, "snd.txt")).read()
-            arrived = re.search(r"arrived map (\S+)", open(os.path.join(d, "warp.txt")).read())
+            # 시작 세이브스테이트(배 선실 17/01)와 같은 그룹은 사다리 단계로 가서 「arrived」 없이 「end map」 만 찍힘
+            arrived = re.search(r"(?:arrived|end) map (\S+)", open(os.path.join(d, "warp.txt")).read())
         except OSError:
             return m, None, None
         songs = re.findall(r"cmd=01 arg=(..) from=00:CEA2", snd)
