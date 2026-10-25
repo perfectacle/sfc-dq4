@@ -130,12 +130,14 @@ def write_pages(items, root, sprite_items):
 
 
 def captured(root):
-    """게임을 돌려 찍은 그림(dq5effectgif.py 의 gfx/effects/anim/)이 있으면 그 목록을 갤러리에 붙인다."""
-    index = os.path.join(root, 'gfx', 'effects', 'anim', 'index.json')
-    if not os.path.exists(index):
-        return []
-    with open(index) as f:
-        return [dict(i, path='gfx/effects/anim/' + i['path']) for i in json.load(f)]
+    """게임을 돌려 찍은 GIF(dq5effectgif.py·dq5titlegif.py 의 anim/ 폴더)가 있으면 그 목록을 갤러리에 붙인다."""
+    out = []
+    for folder in ('gfx/effects/anim', 'gfx/screens/anim'):
+        index = os.path.join(root, folder, 'index.json')
+        if os.path.exists(index):
+            with open(index) as f:
+                out += [dict(i, path=f'{folder}/{i["path"]}') for i in json.load(f)]
+    return out
 
 
 def sprites(rom, root, only):

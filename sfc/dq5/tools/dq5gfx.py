@@ -1600,9 +1600,8 @@ TITLE_CASTLE_CHR, TITLE_CASTLE_MAP, TITLE_CASTLE_ATTR, TITLE_CASTLE_COLORS = 0x0
 # OBJ 는 OAM Y 보다 한 줄 아래에 그려진다(하드웨어 동작, 덤프 화면과 맞춤).
 TITLE_RING_CHR, TITLE_RING_COLORS, TITLE_RING_OAM = 0x0FE13C, 0x0FED4B, 0x02EDFE
 TITLE_BACKDROP = 0x1400
-# 로고·V 의 자리는 TITLE_LAYERS 의 at(타일맵 칸), 성은 타일맵 왼쪽 위가 화면 왼쪽 위.
-# 프레임 끝의 스크롤 레지스터 값(BG4 가로 508 등)과 달리 덤프 화면에서는 세 층 모두 8점 위, 성은 가로 0 자리에
-# 보인다(바다 줄만 흐르는 것으로 보아 줄마다 스크롤을 바꾸는 듯). 화면과 맞춘 값으로 TITLE_Y 만큼 올린다.
+# 로고·V 의 자리는 TITLE_LAYERS 의 at(타일맵 칸), 성은 타일맵 왼쪽 위가 화면 왼쪽 위(HDMA ch5 가 0~190줄의
+# BG4 가로 스크롤을 0 으로 둠). 이 화면은 overscan 모드라 MesenCE 224줄 화면이 위 8줄을 자르므로 TITLE_Y 만큼 올린다.
 TITLE_Y = -8
 
 
