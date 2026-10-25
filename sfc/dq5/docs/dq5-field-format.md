@@ -1,7 +1,7 @@
 # DQ5(SFC) 필드(세계 지도) 형식
 
 필드 지도가 ROM 에 어떻게 들어 있는지 정리한 문서입니다. 찾아낸 과정은
-[2026-10-24-09 일지](../journal/2026-10-24-09-field.md) 와 [2026-10-25-15 일지](../journal/2026-10-25-15-field.md), [2026-10-25-26 일지](../journal/2026-10-25-26-field2.md), [2026-10-26-05 일지](../journal/2026-10-26-05-daynight.md) 에 있습니다. 구현은 [sfc/dq5/tools/dq5field.py](../tools/dq5field.py).
+[2026-10-24-09 일지](../journal/2026-10-24-09-field.md) 와 [2026-10-25-15 일지](../journal/2026-10-25-15-field.md), [2026-10-25-26 일지](../journal/2026-10-25-26-field2.md), [2026-10-25-104 일지](../journal/2026-10-25-104-daynight.md) 에 있습니다. 구현은 [sfc/dq5/tools/dq5field.py](../tools/dq5field.py).
 
 ![DQ5 세계 지도 전체(256x256 블록을 1/4 로 축소). 빨간 틀이 실험에서 선 자리](../images/dq5-field-world.webp)
 
