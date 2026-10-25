@@ -112,7 +112,8 @@ def write_pages(items, root, sprite_items):
     ]
     nav = [('맵', '#maps'), ('필드', '#field'), ('블록', '#blocks'), ('CHR·폰트', '#chr'), ('타이틀', '#title'),
            ('창·메뉴', '#screens'),
-           ('움직이는 타일', '#anim'), ('움직이는 맵', '#animmaps'), ('스프라이트·몬스터', 'sprites.html')]
+           ('움직이는 타일', '#anim'), ('움직이는 맵', '#animmaps'), ('스프라이트·몬스터', 'sprites.html'),
+           ('소리', 'sound.html')]
     intro = ('썸네일을 누르면 원본이 열립니다(맵·지도는 1배). 주석판: 노랑 인물(번호, 낮 기본 목록), 하늘색 출구, '
              '빨강 T 보물상자, 분홍 S タンス·ツボ·タル, 분홍 F 발밑 숨은 물건, 주황 D 맵 위 물체(닫힌 문 등). 맵은 이야기 플래그가 모두 꺼진 상태. 맵 이름은 ルーラ 목적지 이름이 있는 그룹만 붙입니다.')
     with open(os.path.join(gallery, 'index.html'), 'w') as f:
@@ -121,10 +122,23 @@ def write_pages(items, root, sprite_items):
            for i in sprite_items]
     sections = [('sprites', f'인물 스프라이트 {len(spr)}', spr),
                 ('monsters', '전투 몬스터 236마리', simple_cards(items, 'monsters', lambda i: f'그림 {i["pic"]}')),
-                ('battlebg', '전투 배경', simple_cards(items, 'battlebg'))]
-    nav = [('스프라이트', '#sprites'), ('몬스터', '#monsters'), ('전투 배경', '#battlebg'), ('맵·필드', 'index.html')]
+                ('battlebg', '전투 배경', simple_cards(items, 'battlebg')),
+                ('effects', '전투 주문·특기 연출 조각', simple_cards(items, 'effects'))]
+    nav = [('스프라이트', '#sprites'), ('몬스터', '#monsters'), ('전투 배경', '#battlebg'), ('전투 연출', '#effects'),
+           ('맵·필드', 'index.html'), ('소리', 'sound.html')]
     with open(os.path.join(gallery, 'sprites.html'), 'w') as f:
         f.write(page('DQ5(SFC) 스프라이트·몬스터', nav, '인물 스프라이트는 sprites/index.json 그대로입니다.', sections))
+
+
+def captured(root):
+    """게임을 돌려 찍은 GIF(dq5effectgif.py·dq5titlegif.py 의 anim/ 폴더)가 있으면 그 목록을 갤러리에 붙인다."""
+    out = []
+    for folder in ('gfx/effects/anim', 'gfx/screens/anim'):
+        index = os.path.join(root, folder, 'index.json')
+        if os.path.exists(index):
+            with open(index) as f:
+                out += [dict(i, path=f'{folder}/{i["path"]}') for i in json.load(f)]
+    return out
 
 
 def sprites(rom, root, only):
@@ -164,7 +178,7 @@ def main():
     gfx = importlib.import_module('dq5gfx')
     sha = hashlib.sha1(data).hexdigest()
     items = gfx.export_all(rom, args.out, only, rom_sha=sha, command=COMMAND)
-    write_pages(items, args.out, sprites(rom, args.out, only))
+    write_pages(items + captured(args.out), args.out, sprites(rom, args.out, only))
     with open(os.path.join(args.out, 'gallery', 'SOURCE.txt'), 'w') as f:
         f.write(gfx.source_text(COMMAND, sha))
     print(f'{len(items)} items -> {os.path.join(args.out, "gallery")}')

@@ -1,7 +1,8 @@
-"""DQ5(SFC) 곡·효과음마다 .spc 파일(SPC700 상태 스냅샷, ID666 머리)을 만든다. 형식은 sfc/dq5/docs/dq5-sound-format.md.
+"""DQ5(SFC) 곡·효과음마다 .spc 파일(SPC700 상태 스냅샷, ID666 머리)을 만든다.
+곡 변수(E0) 갈래가 있으면 갈래마다 <번호>-<갈래>.spc 도 만든다(효과음은 갈래 00 부터 모두, 곡은 01 부터). 형식은 sfc/dq5/docs/dq5-sound-format.md.
 
 MesenCE testrunner 로 세이브스테이트(배 선실)를 불러 소리 대기열에 `1A 00`(앞 곡 정리) 뒤 곡이면 `01 n`, 효과음이면
-`0C n 00` 을 넣고, SPC 의 곡 자리에 n 이 오른 프레임의 spcRam·DSP 레지스터·SPC700 레지스터를 lua/dq5spcdump.lua 로 잡는다.
+`0C n X`(갈래 X)를 넣고, SPC 의 곡 자리에 n 이 오른 프레임의 spcRam·DSP 레지스터·SPC700 레지스터를 lua/dq5spcdump.lua 로 잡는다.
 곡 묶음이 「곡을 튼 뒤 보내는 샘플」을 두는 곡도 샘플이 모두 들어간 상태가 되도록, 실행 중에만 곡 묶음의 둘째 바이트를
 샘플 수로 바꾼다. 결과는 롬에서 나온 자료라 커밋하지 않는다(비공개 에셋 저장소로).
 
@@ -9,8 +10,10 @@ MesenCE testrunner 로 세이브스테이트(배 선실)를 불러 소리 대기
 
   python sfc/dq5/tools/dq5spcfile.py rom/dq5.sfc work/state/ship.mss --out work/sound            # 모두
   python sfc/dq5/tools/dq5spcfile.py rom/dq5.sfc work/state/ship.mss --out work/sound --only 02,33
-  --wav  game-music-emu(libgme, 환경 변수 GME_LIB 또는 시스템 라이브러리)로 .spc 를 WAV(44100Hz 스테레오)로도 굽는다.
-         곡은 WAV_SONG 초(기본 120, 끝 8초 줄이기), 효과음은 WAV_SFX 초(기본 4)
+  --wav  game-music-emu(libgme, 환경 변수 GME_LIB 또는 시스템 라이브러리)로 .spc 를 WAV(32000Hz 스테레오, S-DSP 의
+         빠르기)로도 굽는다. 곡은 WAV_SONG 초(기본 30, 끝 4초 줄이기), 효과음은 WAV_SFX 초(기본 4). 들어 보기용이라
+         짧게 둔다. 끝까지 들으려면 .spc 를 튼다
+  --wav-only  에뮬레이터를 돌리지 않고 --out 의 songs/·sfx/ 에 있는 .spc 와 index.json 으로 WAV 만 다시 굽는다
 """
 import argparse
 import concurrent.futures
@@ -24,13 +27,20 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 from dq5map import Rom  # noqa: E402
-from dq5spc import SEQUENCE_COUNT, sequences  # noqa: E402
+from dq5song import header, walk  # noqa: E402
+from dq5spc import SEQUENCE_COUNT, body, sequences, song_sets  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LUA = os.path.join(HERE, 'lua', 'dq5spcdump.lua')
 # 고정 목록(2B:C429)의 32~3D·46 과 그 사이 시퀀스는 효과음으로 친다. 00 은 빈 시퀀스.
 SFX_FROM = 0x32
 SONG_SECONDS, SFX_SECONDS, FADE_MS = 180, 5, 10000
+# 장면으로 쓰임을 확인한 것(dq5-sound-format.md 「곡 번호와 장면」·「효과음」). 소리를 듣고 붙인 이름이 아니다.
+SCENES = {
+    0x02: '필드 세계 0', 0x03: '마법 융단', 0x04: '배, 배 선실(04-01 은 배에 탔을 때 0C 04 01)', 0x05: '필드 세계 1',
+    0x0D: '天空城', 0x0E: '필드 세계 2', 0x10: '전원을 켠 뒤 처음 트는 곡', 0x17: '전투', 0x1D: '여관에서 잘 때',
+    0x1F: '전투 승리', 0x32: '대화 창이 열릴 때', 0x33: '명령 창 열기·고르기', 0x34: '창 닫기', 0x37: '공격이 맞을 때',
+}
 
 
 def kind(n):
@@ -90,7 +100,7 @@ def pack(ram, dsp, r, title, game='Dragon Quest V', seconds=SONG_SECONDS, commen
     return bytes(h) + bytes(ram) + bytes(dsp) + bytes(64) + extra
 
 
-def render(spc_path, wav_path, seconds, fade=8, rate=44100):
+def render(spc_path, wav_path, seconds, fade=4, rate=32000):
     """libgme 로 .spc 를 굽는다."""
     lib = ctypes.CDLL(os.environ.get('GME_LIB') or ctypes.util.find_library('gme') or 'libgme.dylib')
     lib.gme_open_file.restype = ctypes.c_char_p
@@ -116,15 +126,53 @@ def render(spc_path, wav_path, seconds, fade=8, rate=44100):
         f.write(b'RIFF' + struct.pack('<I', 4 + len(head) + len(pcm)) + b'WAVE' + head + pcm)
 
 
-def run_one(mesence, libdir, rom, state, n, work):
-    out = os.path.join(work, f'run{n:02X}')
+def variants(rom):
+    """{시퀀스: 갈래 수}. 시퀀스 명령 E0 [오프셋][값] 은 곡 변수(스크립트 00~14 가 X 로 둠)가 값과 같으면 뛴다.
+    흐름을 따라 닿는 E0 의 값은 늘 01 부터 이어지므로 갈래 수 = 가장 큰 값 + 1."""
+    out = {}
+    for i, a, n in sequences(rom):
+        seq = bytes(body(rom, a, n))
+        if not seq or i == 0:
+            continue
+        _, offs = header(seq)
+        vals = set()
+        for st in offs:
+            seen, _ = walk(seq, st)
+            vals |= {seq[pc + 3] for pc in seen if seq[pc] == 0xE0}
+        out[i] = max(vals) + 1 if vals else 1
+    return out
+
+
+def targets(rom, want):
+    """[(시퀀스, X, 파일 이름 줄기)]. 곡은 01 n(X 없음)과 갈래가 있으면 0C n X(X ≥ 1), 효과음은 갈래마다 0C n X."""
+    var = variants(rom)
+    out = []
+    for n in want:
+        if kind(n) == 'song':
+            out.append((n, None, f'{n:02X}'))
+            out += [(n, x, f'{n:02X}-{x:02X}') for x in range(1, var[n])]
+        else:
+            out += [(n, x, f'{n:02X}-{x:02X}') for x in range(var[n])]
+    return out
+
+
+def run_one(mesence, libdir, rom, state, n, x, stem, work):
+    out = os.path.join(work, f'run{stem}')
     os.makedirs(out, exist_ok=True)
-    cmd = f'10:1A:00:00;14:01:{n:02X}:00' if kind(n) == 'song' else f'10:1A:00:00;14:0C:{n:02X}:00'
+    cmd = f'10:1A:00:00;14:01:{n:02X}:00' if x is None else f'10:1A:00:00;14:0C:{n:02X}:{x:02X}'
     env = dict(os.environ, LIBDIR=libdir, SHOT_DIR=out, STATE=os.path.abspath(state), CMDS=cmd,
                WAITSONG=f'{n:02X}', FULLSET=f'{n:02X}', MAXF='900')
     subprocess.run([mesence, '--testrunner', os.path.abspath(rom), LUA], env=env,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
     return out
+
+
+def wav_entry(entry, folder, k):
+    sec = int(os.environ.get('WAV_SONG', '30')) if k == 'song' else int(os.environ.get('WAV_SFX', '4'))
+    render(os.path.join(folder, entry['file']), os.path.join(folder, entry['id'] + '.wav'), sec, 4 if k == 'song' else 0)
+    entry['wav'] = entry['id'] + '.wav'
+    entry['wav_seconds'] = sec
+    entry['wav_rate'] = 32000
 
 
 def main():
@@ -135,44 +183,59 @@ def main():
     ap.add_argument('--only')
     ap.add_argument('--jobs', type=int, default=4)
     ap.add_argument('--wav', action='store_true')
+    ap.add_argument('--wav-only', action='store_true')
     a = ap.parse_args()
     mesence = os.environ.get('MESENCE')
     if not mesence:
         print('MESENCE 환경 변수가 필요함', file=sys.stderr)
         return 1
+    if a.wav_only:
+        for k, folder in (('song', 'songs'), ('sfx', 'sfx')):
+            path = os.path.join(a.out, folder, 'index.json')
+            if not os.path.exists(path):
+                continue
+            entries = json.load(open(path, encoding='utf-8'))
+            for e in entries:
+                if a.only and e['id'] not in a.only.upper().split(','):
+                    continue
+                wav_entry(e, os.path.join(a.out, folder), k)
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(entries, f, ensure_ascii=False, indent=1)
+                f.write('\n')
+        return 0
     libdir = subprocess.run(['krpatch', 'sfc', 'lua'], capture_output=True, text=True, check=True).stdout.strip()
     rom = Rom(open(a.rom, 'rb').read())
     seqs = {i: (addr, ln) for i, addr, ln in sequences(rom)}
     want = [int(x, 16) for x in a.only.split(',')] if a.only else list(range(1, SEQUENCE_COUNT))
+    jobs = targets(rom, want)
+    sets = {i: smp for i, _, smp in song_sets(rom)}
     work = os.path.abspath(os.path.join(a.out, 'runs'))
     with concurrent.futures.ThreadPoolExecutor(a.jobs) as ex:
-        dirs = dict(zip(want, ex.map(lambda n: run_one(mesence, libdir, a.rom, a.state, n, work), want)))
+        dirs = list(ex.map(lambda t: run_one(mesence, libdir, a.rom, a.state, *t, work), jobs))
     index = {'songs': [], 'sfx': []}
-    for n in want:
-        d = dirs[n]
+    for (n, x, stem), d in zip(jobs, dirs):
         r = regs(os.path.join(d, 'regs.txt'))
         ram = open(os.path.join(d, 'spc.bin'), 'rb').read()
         dsp = open(os.path.join(d, 'dsp.bin'), 'rb').read()
         k = kind(n)
         found = any(ram[0x03B7 + i] and ram[0x03AF + i] == n for i in range(8))
-        title = f'DQ5 {"song" if k == "song" else "sfx"} {n:02X}'
+        title = f'DQ5 {"song" if k == "song" else "sfx"} {stem}'
         data = pack(ram, dsp, r, title, seconds=SONG_SECONDS if k == 'song' else SFX_SECONDS,
                     comment=f'sequence {n:02X} at {seqs[n][0] >> 16:02X}:{seqs[n][0] & 0xFFFF:04X}')
         folder = os.path.join(a.out, 'songs' if k == 'song' else 'sfx')
         os.makedirs(folder, exist_ok=True)
-        name = f'{n:02X}.spc'
+        name = f'{stem}.spc'
         with open(os.path.join(folder, name), 'wb') as f:
             f.write(data)
-        entry = {'id': f'{n:02X}', 'file': name, 'sequence_rom': f'{seqs[n][0] >> 16:02X}:{seqs[n][0] & 0xFFFF:04X}',
-             'sequence_bytes': seqs[n][1], 'command': '01' if k == 'song' else '0C', 'frame': int(r['frame']),
-             'playing': found}
+        entry = {'id': stem, 'sequence': f'{n:02X}', 'variant': None if x is None else f'{x:02X}', 'file': name,
+                 'scene': SCENES.get(n), 'sequence_rom': f'{seqs[n][0] >> 16:02X}:{seqs[n][0] & 0xFFFF:04X}',
+                 'sequence_bytes': seqs[n][1], 'samples': [f'{v:02X}' for v in sets[n]],
+                 'command': f'01 {n:02X}' if x is None else f'0C {n:02X} {x:02X}', 'frame': int(r['frame']),
+                 'playing': found}
         if a.wav:
-            sec = int(os.environ.get('WAV_SONG', '120')) if k == 'song' else int(os.environ.get('WAV_SFX', '4'))
-            render(os.path.join(folder, name), os.path.join(folder, f'{n:02X}.wav'), sec, 8 if k == 'song' else 0)
-            entry['wav'] = f'{n:02X}.wav'
-            entry['wav_seconds'] = sec
+            wav_entry(entry, folder, k)
         index['songs' if k == 'song' else 'sfx'].append(entry)
-        print(f'{k:4} {n:02X} frame {r["frame"]:>4} {"곡 자리에 있음" if found else "곡 자리에 없음(MAXF 에 잡음)"}')
+        print(f'{k:4} {stem} frame {r["frame"]:>4} {"곡 자리에 있음" if found else "곡 자리에 없음(MAXF 에 잡음)"}')
     for k in index:
         if index[k]:
             with open(os.path.join(a.out, 'songs' if k == 'songs' else 'sfx', 'index.json'), 'w', encoding='utf-8') as f:

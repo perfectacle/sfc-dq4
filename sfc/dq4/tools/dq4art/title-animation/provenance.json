@@ -1,7 +1,7 @@
 {
   "generator": "built-in image_gen",
   "reference": "../title-ko.png",
-  "visual_status": "animation_revision_pending_review",
+  "visual_status": "accepted_castle_trim_baseline",
   "assets": {
     "background.png": {
       "purpose": "sky/cloud/castle plate with dragon and title removed",
@@ -41,5 +41,12 @@
     "original title-ko.png remains unchanged",
     "logo and subtitle use original source pixels",
     "animation is newly authored SFC adaptation, not extracted NDS graphics"
-  ]
+  ],
+  "accepted_baseline": {
+    "date": "2026-10-25",
+    "rom_sha1": "639b221dc9c388ecb786855eecaa312d670eda51",
+    "source_commit": "a934dcc",
+    "scope": "User accepted the layered DQ5 title after removing the lower-left castle fragment; earlier source experiments remain references.",
+    "rebuild_document": "../../../docs/dq4-title-animation.md"
+  }
 }

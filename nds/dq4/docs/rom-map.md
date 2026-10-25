@@ -118,7 +118,13 @@ uv run --locked python nds/dq4/tools/ndstext.py sjis work/nds/jp work/nds/kr --k
 | `fieldsymbol.dat` | 90 | `번호,맵 머리글자 + 장소 이름` | 필드 기호(마을·동굴 표시) 번호와 장소. 예: `10,HA(CA)バトランド城下町＆城`, `120,DPお楽しみダンジョン（DPOUT）`. 머리글자는 맵 이름 앞 두 글자(`MAP/_list.txt` 의 둘째 칸)와 같은 꼴 |
 | `soundlist.dat` | 87 | `종류, 번호,이름`(종류는 `BGM`·`SE`) | 사운드 테스트 목록. BGM 48곡(1 `序曲`~), SE 38개(300 `決定音`, 301~303 `メッセージ（高·中·低）`, 400번대 전투음) |
 
+세 목록의 번호는 게임 안 번호와 같습니다.
+
+- `action.dat`: 주문·특기 이름 표(`b1003000`, 게임 번호 = 메시지 번호 − 1003000)와 번호가 맞습니다. 두 쪽에 이름이 있는 120개 중 88개는 이름 표의 이름이 그대로 들어 있고(`51,自ホイミ` ↔ 51 `ホイミ`), 나머지 32개도 같은 행동의 개발용 이름입니다(`110,ほのお小` ↔ `ひのいき`, `226,力ため１` ↔ `ちからため`).
+- `fieldsymbol.dat`: 스크립트 명령 `0xBE`(필드로 나가기)의 첫 인자로 쓰이는 15가지가 모두 이 목록에 있고, 그 스크립트의 맵이 있는 장소입니다(`caf1` 10 バトランド, `cbf3` 32 サントハイムの城, `mqout` 59 ロザリーヒル). [script-format.md](script-format.md)
+- `soundlist.dat` 의 SE: 스크립트 명령 `0x62`(효과음)의 인자 305·309·311 이 `階段`·`扉（大）`·`扉（岩・石など）` 와 번호가 같습니다. 글자 효과음 301~303 은 메시지 창 코드의 상수와 같습니다([text-format.md](text-format.md#끝-표지-cn)). BGM 번호는 확인하지 않았습니다.
+
 ## 남은 것
 
 - `PARAM/*.dat` 는 동료 대화·몬스터·가게·メダル·얻는 물건 표까지([param-format.md](param-format.md)), 나머지 파일은 남음. `SCRIPT/*.bin` 은 [script-format.md](script-format.md).
-- `DEBUG/action.dat`·`fieldsymbol.dat`·`soundlist.dat` 의 번호가 게임 안 번호(행동·필드 기호·효과음)와 같은지.
+- `DEBUG/soundlist.dat` 의 BGM 번호와 게임 BGM 번호.
