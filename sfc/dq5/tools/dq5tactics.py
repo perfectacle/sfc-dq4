@@ -58,6 +58,18 @@ def mp_factor(rec, mp, max_mp):
     return 0x100 + pen if word(rec, 0x10) & 0x8000 else max(0, 0x100 - pen)
 
 
+def target_value(tactic_no, damage, hp, worth, kill):
+    """21:D26D. worth = 1 + 대상 위협 7워드 합, kill = 7E:4039[대상](0~3). 작전 0 은 쓰러뜨릴 때 피해 + worth."""
+    if damage < hp:
+        return worth * damage // hp + 1
+    return damage + worth if tactic_no == 0 else kill + worth
+
+
+def metal_score(kinds):
+    """21:FBB2. 살아 있는 적 종류마다 メタルスライム 1, はぐれメタル 2, メタルキング 3. 작전 +A 보다 크면 ドラゴラム."""
+    return sum({0x2D: 1, 0x4B: 2, 0xA2: 3}.get(k, 0) for k in kinds)
+
+
 def attack_score(rec, value, mp, max_mp, incoming):
     """21:E98C. value = 21:D26D 의 대상 값, incoming = 행동자가 받을 예상 피해(7E:4138+413A)."""
     div = mp + ((incoming * 0x16) >> 8) + 1
@@ -116,6 +128,9 @@ def check(rom):
     print(f'MP 같음 {same[0]} 다름 {same[1]}, 내성 같음 {same[2]} 다름 {same[3]}')
     ok = sum(f(tactic(rom, t), *args) == want for t, f, args, want in MEASURED)
     print(f'점수 식 실측 {len(MEASURED)}개 중 {ok}개 같음')
+    vals = ((0, 12, 5, 2, 3, 14), (0, 8, 5, 2, 3, 10), (0, 12, 200, 2, 3, 1))
+    ok = sum(target_value(*v[:5]) == v[5] for v in vals)
+    print(f'대상 값 실측 {len(vals)}개 중 {ok}개 같음')
 
 
 def main():

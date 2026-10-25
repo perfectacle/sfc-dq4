@@ -1,6 +1,6 @@
 # DQ4(FC) 소리 드라이버와 악보 형식
 
-FC 판의 곡·효과음이 롬에 어떻게 들어 있고 드라이버가 어떻게 APU 로 내보내는지 정리한 문서입니다. SFC(DQ5 엔진, SPC700)로 다시 편곡할 원본을 롬만으로 뽑는 것이 목적입니다. 찾아낸 과정은 [2026-10-25-68 일지](../journal/2026-10-25-68-sound.md) 에 있고, SFC 쪽 명령 체계는 [sfc/dq5/docs/dq5-sound-format.md](../../../sfc/dq5/docs/dq5-sound-format.md) 에 있습니다.
+FC 판의 곡·효과음이 롬에 어떻게 들어 있고 드라이버가 어떻게 APU 로 내보내는지 정리한 문서입니다. SFC(DQ5 엔진, SPC700)로 다시 편곡할 원본을 롬만으로 뽑는 것이 목적입니다. 찾아낸 과정은 [2026-10-25-69 일지](../journal/2026-10-25-69-sound.md) 에 있고, SFC 쪽 명령 체계는 [sfc/dq5/docs/dq5-sound-format.md](../../../sfc/dq5/docs/dq5-sound-format.md) 에 있습니다.
 
 - 도구: [fc/dq4/tools/dq4sound.py](../tools/dq4sound.py)(곡·효과음 표, 악보 텍스트, 드라이버를 그대로 돌린 음 사건·APU 쓰기, MIDI, 맵 곡 표, 부르는 곳), 프로브 [fc/dq4/tools/lua/soundlog.lua](../tools/lua/soundlog.lua)(APU 쓰기·소리 입구·메시지 기록, 곡 바꿔 끼우기).
 - 악보 텍스트·MIDI 는 롬에서 뽑은 저작권 데이터라 이 저장소에 두지 않습니다. `dq4sound.py rom export` 가 `work/dq4-sound/` 에 만들고, 비공개 에셋 저장소에는 `fc/dq4/sound/` 아래에 둡니다.
