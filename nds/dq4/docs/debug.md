@@ -1,6 +1,6 @@
 # NDS DQ4 디버그 기능·RAM 지도·장면 이동
 
-NDS 「ドラゴンクエストIV 導かれし者たち」(일본판)에 남은 개발용 기능과, 그것으로 아무 장·아무 맵에서 바로 실험을 시작하는 방법입니다. 도구는 [ndsplay.py](../tools/ndsplay.py)(desmume libretro 코어를 화면 없이 돌리며 입력·화면·세이브스테이트·RAM 읽고 쓰기)와 [ndswarp.py](../tools/ndswarp.py)(장면 이동·진행도 프리셋·장 시작 세이브스테이트)이고, 찾은 과정은 [2026-10-25-04 일지](../journal/2026-10-25-04-debug.md) 와 [2026-10-25-08 일지](../journal/2026-10-25-08-debug2.md) 에 있습니다.
+NDS 「ドラゴンクエストIV 導かれし者たち」(일본판)에 남은 개발용 기능과, 그것으로 아무 장·아무 맵에서 바로 실험을 시작하는 방법입니다. 도구는 [ndsplay.py](../tools/ndsplay.py)(desmume libretro 코어를 화면 없이 돌리며 입력·화면·세이브스테이트·RAM 읽고 쓰기)와 [ndswarp.py](../tools/ndswarp.py)(장면 이동·진행도 프리셋·장 시작 세이브스테이트)이고, 찾은 과정은 [2026-10-25-04 일지](../journal/2026-10-25-04-debug.md), [2026-10-25-08 일지](../journal/2026-10-25-08-debug2.md), [2026-10-25-09 일지](../journal/2026-10-25-09-debug3.md) 에 있습니다.
 
 모든 「켜는 법」은 에뮬레이터 안에서 RAM 을 쓰는 것입니다. 롬 파일은 고치지 않습니다. 주소는 ARM9 주소(메인 RAM `0x02000000`~)입니다.
 
@@ -16,6 +16,7 @@ uv run --locked python nds/dq4/tools/ndswarp.py preset work/p 331       # 프리
 uv run --locked python nds/dq4/tools/ndswarp.py map work/m mlout2 --state work/state/dq4ds-ch5.state
 uv run --locked python nds/dq4/tools/ndswarp.py field work/f 200 60 --state work/state/dq4ds-ch1.state   # 필드 (200, 60) 칸
 uv run --locked python nds/dq4/tools/ndswarp.py map work/m dab1 --state work/state/dq4ds-ch1.state --no-encounter
+uv run --locked python nds/dq4/tools/ndswarp.py battle work/b 50x3 1x2 --state work/state/dq4ds-ch1.state  # m050 3마리 + m001 2마리
 uv run --locked python nds/dq4/tools/ndsplay.py rom/dq4ds.nds work/t --state work/state/dq4ds-ch1.state \
   --cmd "a 5; hold left 30; peek 20c55f0 4; poke32 20c55f0 270f; press x; shot menu"
 ```
@@ -70,7 +71,18 @@ uv run --locked python nds/dq4/tools/ndsplay.py rom/dq4ds.nds work/t --state wor
 
 ### 전투 테스트(장면 `0x11`, `Battle Menu Part`)
 
-위 화면에 `1.Mode : Encount`(또는 `Select`), `2.Encount Tile`, `3.Time Zone`, `4.Group`, `5.Map` 이 뜹니다. 첫 줄에서 오른쪽·왼쪽 방향키로 모드를 바꾸고, 위·아래로 값을 고르고, A 로 시작합니다(코드 읽기, `0x02008954`). `Encount` 모드에서 A 를 누르니 1장 상태에서 「スライムが あらわれた!」 전투가 지금 일행으로 시작했습니다. 맵 목록은 `data/btlmap/_list.txt`, `Select` 모드의 항목(`2.GROUP`, `3.MONSTER : m%03d`, `4.COUNT`)은 몬스터를 직접 고르는 것으로 보입니다(코드 읽기).
+위 화면에 `1.Mode : Encount`(또는 `Select`), `2.Encount Tile`, `3.Time Zone`, `4.Group`, `5.Map` 이 뜹니다. 첫 줄에서 오른쪽·왼쪽 방향키로 모드를 바꾸고, 위·아래로 값을 고르고, A 로 시작합니다(코드 읽기, `0x02008954`). `Encount` 모드에서 A 를 누르니 1장 상태에서 「スライムが あらわれた!」 전투가 지금 일행으로 시작했습니다. 맵 목록은 `data/btlmap/_list.txt` 입니다.
+
+`Select` 모드(첫 줄에서 오른쪽)는 무리 4개에 몬스터와 마릿수를 직접 넣습니다. 객체는 `0x020C28BC` 이고, 칸은 갱신 함수 `0x02008D78` 을 읽어 정리했습니다.
+
+| 줄 | 칸 | 오른쪽·왼쪽 |
+| --- | --- | --- |
+| `2.GROUP` | `+0x1C` 고른 무리(0~3) | 무리 바꾸기 |
+| `3.MONSTER : m%03d` | `+0x20 + 4×무리` 몬스터 번호(0~320) | ±1, R 을 누른 채면 ±10 |
+| `4.COUNT` | `+0x30 + 4×무리` 마릿수(0~8) | ±1 |
+| `5.Group`·`6.Map` | 무리 목록·전투 배경 목록(`0x020C27D4`) | 앞뒤 항목 |
+
+A 를 누르면 네 무리의 몬스터·마릿수를 전투 준비 객체로 옮기고 전투를 시작합니다. 무리 0 에 `m050` 3마리를 쓰고 A 를 누르니 「とらおとこAは みのけもよだつ おたけびを あげた!」 전투가 1장 일행으로 시작했습니다. `ndswarp.py battle OUT 50x3 --state S` 가 이 순서를 그대로 합니다.
 
 ### 메시지 디버그(장면 `0x16`)
 
@@ -136,7 +148,9 @@ uv run --locked python nds/dq4/tools/ndsplay.py rom/dq4ds.nds work/t --state wor
 
 ## 장면 이동(맵 워프)
 
-`ndswarp.py map` 은 진행도를 그대로 두고 맵 이름만 바꿔 장면 `0x0C` 를 다시 요청합니다. 주인공은 맵의 기본 자리(대개 원점 근처)에 서며, 그 자리가 벽 안이면 `--x`·`--z`(칸 단위)로 옮깁니다. 산골 마을 맵 `mlm1f1`·`mlm2f1`·`mly1f1`·`mlb1b`·`mlido`·`mlout2` 와 성 `ccf1a` 로 옮겨 화면을 확인했습니다. 문으로 들어가야 시작되는 이벤트는 워프로 건너뛰면 멈출 수 있습니다(서장 어머니 대화가 그랬음). 그럴 때는 바깥 맵에 워프한 뒤 주인공 자리를 문 앞에 써서 걸어 들어갑니다.
+`ndswarp.py map` 은 진행도를 그대로 두고 맵 이름만 바꿔 장면 `0x0C` 를 다시 요청합니다. 주인공은 맵의 기본 자리(대개 원점 근처)에 서며, 그 자리가 벽 안이면 `--x`·`--z`(칸 단위)로 옮깁니다. 산골 마을 맵 `mlm1f1`·`mlm2f1`·`mly1f1`·`mlb1b`·`mlido`·`mlout2` 와 성 `ccf1a` 로 옮겨 화면을 확인했습니다. 맵 544개 전부를 6장(프리셋 331) 상태에서 옮겨 보니 543개는 그 맵에 머물렀고, `fk01` 만 곧 `ckout` 으로 바뀌었습니다. `fk01` 은 하늘을 나는 天空城 연출 맵입니다. 부팅 상태에서 옮기면 구름 위 天空城이 그대로 보이고, 5장 상태에서는 「どこからともなく こえが きこえる……」 이벤트가 시작됩니다. 맵을 싣지 못한 것이 아니라, 진행도에 따라 그 맵의 스크립트가 다른 맵으로 넘기는 것입니다. 이 맵으로 가는 길은 목적지 번호 `0x17`(`0x02027F98` 의 분기, `0x19` 는 `dpb8b`)입니다.
+
+문으로 들어가야 시작되는 이벤트는 워프로 건너뛰면 멈출 수 있습니다(서장 어머니 대화가 그랬음). 그럴 때는 바깥 맵에 워프한 뒤 주인공 자리를 문 앞에 써서 걸어 들어갑니다.
 
 **벽 통과**는 따로 찾지 않았습니다. 주인공 자리(`0x020EC524`)를 쓰면 아무 칸에나 설 수 있어 같은 목적에 씁니다.
 
@@ -161,7 +175,8 @@ uv run --locked python nds/dq4/tools/ndsplay.py rom/dq4ds.nds work/t --state wor
 
 ## 남은 것
 
-- 전투 테스트 `Select` 모드의 실측.
 - 메시지 디버그의 번호 키·창 종류 키를 화면으로 확인하기.
 - 인물 레코드의 나머지 칸(경험치·능력치·장비·주문).
 - 필드 좌표의 범위와 위 화면 지도 위치의 대응.
+- `fk01` 을 `ckout` 으로 넘기는 플래그.
+- 몬스터 번호(`m%03d`)와 이름의 대조표(`m050` = とらおとこ 만 확인).
