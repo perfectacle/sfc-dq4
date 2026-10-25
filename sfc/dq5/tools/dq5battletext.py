@@ -33,6 +33,10 @@ CONTROLS = {
 }
 
 
+# 이름 문자열 글자표로는 ダ·ズ 등으로 찍히지만 전투 창에서는 다른 글자로 그려지는 바이트(메시지 118·136 을 화면에 띄워 확인).
+BATTLE_GLYPHS = {0x89: '＊', 0x9A: '。', 0x9C: '「', 0x9D: '…'}
+
+
 def code(rom, br):
     x = ROOT
     while True:
@@ -62,6 +66,8 @@ def show(rom, data):
         b = data[i]
         if b >= 0xE2:
             out.append(f'{{{b:02X}}}')
+        elif b in BATTLE_GLYPHS:
+            out.append(BATTLE_GLYPHS[b])
         elif b in (0x83, 0x84):
             out.append(text(string_codes(rom, bytes(data[i:i + 2]))))
             i += 1

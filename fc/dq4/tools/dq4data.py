@@ -7,7 +7,7 @@
   python fc/dq4/tools/dq4data.py rom/dq4.nes spells           주문 ID, 이름, 소비 MP, 대상, 배우는 인물과 레벨
   python fc/dq4/tools/dq4data.py rom/dq4.nes levels [인물]    레벨별 경험치와 능력치 기준값(인물 0-7, 생략하면 모두)
   python fc/dq4/tools/dq4data.py rom/dq4.nes actions          전투 행동 ID 00-FF: 처리 루틴, 위력, 양(회복·흡수·상승), 성공률
-  python fc/dq4/tools/dq4data.py rom/dq4.nes ai               몬스터 행동 가중치·재생·시작 상태 표, 동료 AI 의 인물별 주문 칸
+  python fc/dq4/tools/dq4data.py rom/dq4.nes ai               몬스터 행동 가중치·재생·시작 상태 표, 동료 AI 의 인물별 주문 칸·작전 × 인물 표
 
 근거: 0B:$B006(이름 목록 포인터), 10:$8BED(가격), 10:$8C3B(강도 $9E17), 10:$8B1E·$8B3B(종류·장비),
 18:$8046(몬스터 레코드, 10:$A67C 필드 표), 13:$B953(주문 MP), 12:$9D36(레벨업), 12:$9FC6(성장 곡선),
@@ -53,6 +53,7 @@ REGEN = (0x11, 0xAB31)                           # 바이트 13·14 bit7 → 턴
 START_STATUS = (0x12, 0x85BD)                    # 바이트 21 bit5-3 → 시작 상태 확률 (값+1)/256, 7 은 없음
 STATUS_NAMES = ('잠', '마비', '혼란', '없음')       # 바이트 21 bit7-6(메시지 001F + 값)
 AI_BANK, AI_SPELLS = 0x13, 0xA68A                # 동료 AI 가 평가하는 주문 칸: クリフト·ミネア·マーニャ·ブライ 12개씩
+AI_TACTIC = {0xBA74: '피해×/16', 0xBAD5: '피해×/256', 0xBAA5: '회복 목표 /16'}  # 작전 × 인물 표(13:$938B)
 AI_ORDER = {1: ((0, 1, 2, 3, 6, 7, 8, 9, 10, 11), (4, 5)), 2: ((0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11), (5,)),
             3: ((0, 1, 2, 3, 4, 5, 6, 7, 8), (9, 10)), 4: ((0, 1, 2, 3, 4, 6), (7, 8, 9, 10))}
 # 13:$AFF0·$AF97·$AF10·$AF48 이 평가하는 칸 순서와 13:$9135 를 통과할 때만 보는 칸. マーニャ 는 끝에 칸 11 도 봄
@@ -228,6 +229,11 @@ def ai_spells(prg, who):
     return [rd(prg, AI_BANK, AI_SPELLS + 12 * who + k) for k in range(12)]
 
 
+def tactic_value(prg, table, tactic, who):
+    """작전 × 인물 표의 값. 13:$938B 의 SEC·SBC 뒤 ADC 가 자리올림을 더해 칸은 7 × 작전 + 인물 + 1."""
+    return rd(prg, AI_BANK, table + 7 * tactic + who + 1)
+
+
 def drop_chance(prg, rate):
     """떨어뜨릴 확률(분수 문자열). 12:$922D."""
     if rate == 0:
@@ -392,6 +398,10 @@ def main():
             first, gated = AI_ORDER[who]
             print(f'{PARTY[who]}: ' + ' '.join(spells[sp[k]] for k in first) + ' / 9135 통과 때 '
                   + ' '.join(spells[sp[k]] for k in gated))
+        for table, what in AI_TACTIC.items():
+            print(f'13:${table:04X} {what}  작전 0-6 × 인물 1-7')
+            for t in range(7):
+                print(f'  {t} ' + ' '.join(f'{tactic_value(prg, table, t, w):02X}' for w in range(1, 8)))
     elif cmd == 'levels':
         for who in ([int(sys.argv[3])] if len(sys.argv) > 3 else range(8)):
             print(f'# {who} {PARTY[who]}  Lv ' + ' '.join(STATS))

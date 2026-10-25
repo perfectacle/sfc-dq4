@@ -136,6 +136,15 @@ def callers(rom, target):
     for m in re.finditer(rb'\x7b\x22' + bytes((target & 0xFF, target >> 8 & 0xFF, target >> 16)), rom.d):
         i = m.start()
         out.setdefault(0, []).append(f'{i // 0x8000:02X}:{0x8000 + i % 0x8000:04X}')
+    # JSL target / RTL 로 된 받침 루틴(05:F116 등)을 LDA #n / JMP·JSR 받침 으로 부르는 곳
+    stub = re.compile(re.escape(bytes((0x22, target & 0xFF, target >> 8 & 0xFF, target >> 16, 0x6B))))
+    for m in stub.finditer(rom.d):
+        j = m.start()
+        bank, lo, hi = j // 0x8000, (0x8000 + j % 0x8000) & 0xFF, (0x8000 + j % 0x8000) >> 8
+        base = bank * 0x8000
+        for k in re.finditer(rb'\xa9(.)[\x4c\x20]' + re.escape(bytes((lo, hi))), rom.d[base:base + 0x8000], re.S):
+            i = base + k.start()
+            out.setdefault(k.group(1)[0], []).append(f'{bank:02X}:{0x8000 + i % 0x8000:04X}')
     return out
 
 
