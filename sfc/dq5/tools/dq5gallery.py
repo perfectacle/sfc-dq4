@@ -140,7 +140,8 @@ def sprites(rom, root, only):
         # 에셋 저장소 꼴(note·obj_palettes·sprites). 갤러리 카드에 쓸 path·title·group 으로 바꾼다.
         got = [dict(i, path=i['file'], title=' '.join(x for x in (f'{i["set"]:02X}' if 'set' in i else i.get('where', ''),
                                                                     i.get('label') or '') if x),
-                    group=('탈것' if i.get('vehicle') is not None else '누운 모양' if i.get('rotated')
+                    group=('탈것' if i.get('vehicle') is not None else '맵 OBJ 물체' if 'map_place' in i
+                           else '누운 모양' if i.get('rotated')
                            else '맵 OBJ 타일' if 'map_object' in i else '인물'))
                for i in got['sprites']]
     return [i for i in got if str(i.get('path', '')).endswith('.png') and not i['path'].endswith('-index.png')]

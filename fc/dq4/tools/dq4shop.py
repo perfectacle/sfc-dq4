@@ -445,8 +445,9 @@ def hide_paths(prg, start, limit=4096):
                     eff += (('flag', dq4map.FLAGS + b1, '|=' if b2 == 0xCB else '&=', m),)
                 elif (b1, b2) == (0x66, 0x73):
                     item = f'{a:02X}' if isinstance(a, int) else a
-                    c = (f'아이템 {item}', '≠', 1)
-                    fl = dict(fl, C=(c, (c[0], '=', 1)))
+                    # 찾으면 C = 1(실측: 0F/00 의 1C:$A097)
+                    c = (f'아이템 {item}', '=', 1)
+                    fl = dict(fl, C=(c, (c[0], '≠', 1)))
                 else:
                     eff += (('call', f'BRK {b1:02X} {b2:02X}(A={a if isinstance(a, str) else f"{a:02X}"}'
                                      f' X={x if isinstance(x, str) else f"{x:02X}"})'),)

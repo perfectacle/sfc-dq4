@@ -5,7 +5,7 @@
 ## MesenCE: 툴킷의 FC 스크립트
 
 DQ4(FC)는 툴킷의 FC 용 Lua(`krpatch fc lua`)를 씁니다. 스크립트 목록과 환경 변수는
-[툴킷 README 의 `fc lua`](https://github.com/perfectacle/kr-patch-toolkit/blob/v0.5.0/README.md#fc-lua-mesence-scripts)
+[툴킷 README 의 `fc lua`](https://github.com/perfectacle/kr-patch-toolkit/blob/v0.8.0/README.md#fc-lua-mesence-scripts)
 가 정본입니다. 프로브에 `DRIVER=$LIBDIR/seq.lua` 를 주면 세이브스테이트에서 시작하므로
 [공통 도구](../../../tools/README.md) 의 `seqlib.sh` 가 필요 없습니다.
 
@@ -71,6 +71,7 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 | `lua/shopwalk.lua` | FC: 맵 좌표 `$44/$45` 를 보며 `WAY`(`"12,1C 0D,1C"`) 칸들로 걷고 `end.mss` 등 덤프. `STATE`, `TAIL`, `MAXF` |
 | `lua/shopcall.lua` | FC: PC 가 `AT`(쉼표로 여럿)에 닿을 때 A·X·Y·복귀 주소·`($X)` 포인터·`$0507` 을 `calls.txt` 로. `ONLYA`, `LIMIT`, `MAXF`, `DRIVER` |
 | `lua/shoppoke.lua` | FC: PC 가 `AT` 에 닿을 때 `POKE`(`3D=03;…`)를 RAM 에 씀. `BANK`(`$0507` 일치 때만), `ONCE`, `DRIVER` |
+| `lua/shopenc2.lua` | FC: 첫 프레임에 메모리상 PRG 를 바꾸고(`PRG="4786C=43;478A7=A905EA"`, PRG 오프셋=바이트들) 메시지 `16:$8656` 와 `HOOK="11:B8B9,12:A321"`(뱅크:주소)에 닿을 때 A·X·Y·P(와 `RAM` 의 바이트)를 `shopenc2.txt` 에. `DRIVER`(`seq.lua`·`warp.lua`) |
 | `lua/shopreads.lua` | FC: `RANGE`(기본 `6000-62FF`)를 읽는 명령을 「뱅크:PC 주소 값 횟수 첫프레임」으로 `reads.txt` 에. `FROM`, `BANK`, `PCLO`/`PCHI`, `MAXF`, `DRIVER` |
 | `lua/shopprg.lua` | FC: 첫 프레임에 메모리의 PRG ROM 을 `PRG`(`55CCA=4CF4BE;…`, PRG 오프셋)대로 바꿈(롬 파일은 그대로). `DRIVER` |
 | `lua/shopprice.lua` | FC: 가격 함수 `15:$B2F7` 에 들어갈 때의 아이템과 나올 때의 값을 「프레임 장소 아이템 값」으로 `price.txt` 에. `MAXF`, `DRIVER` |

@@ -27,7 +27,7 @@ Unity 리메이크가 아니라, 실제 SFC 롬에 덧대는 IPS 패치를 만�
 | `rom/dq4ds.nds` | Dragon Quest IV - Michibikareshi Mono-tachi (Japan), NDS. 헤더 `DRAGONQUEST4` / `YIVJ`, CRC32 `3257B207` | `84baf75d79b842fa5ecfdc66c112f1d19bf228ae` |
 | `rom/dq4ds-kr.nds` | 위 롬에 한글 팬패치 `NDS_DQ4_v1.1.xdelta` 를 적용한 것. CRC32 `4DA617AF` | `a2ee52765cd54715e777b2993277e752e3ec276d` |
 
-한글판은 `xdelta3 -d -s rom/dq4ds.nds NDS_DQ4_v1.1.xdelta rom/dq4ds-kr.nds` 로 만듭니다. 이 패치는 LZMA 2차 압축이라 툴킷 v0.5.0 의 `krpatch xdelta apply` 로는 풀리지 않습니다.
+한글판은 `uv run --locked krpatch xdelta apply rom/dq4ds.nds NDS_DQ4_v1.1.xdelta rom/dq4ds-kr.nds` 로 만듭니다. 이 패치는 LZMA 2차 압축이라 툴킷 v0.6.0 이상이 필요합니다(`xdelta3 -d -s` 로도 됩니다).
 
 ## 준비
 
@@ -38,9 +38,10 @@ Unity 리메이크가 아니라, 실제 SFC 롬에 덧대는 IPS 패치를 만�
 uv sync --locked
 ```
 
-- [kr-patch-toolkit](https://github.com/perfectacle/kr-patch-toolkit) v0.5.0:
+- [kr-patch-toolkit](https://github.com/perfectacle/kr-patch-toolkit) v0.8.0:
   65c816 디스어셈블러(`krpatch sfc dis`), MesenCE 용 Lua 라이브러리(`krpatch sfc lua`),
-  FC 용 iNES 헤더·6502 디스어셈블러·Lua 프로브(`krpatch fc`)
+  FC 용 iNES 헤더·6502 디스어셈블러·Lua 프로브(`krpatch fc`), NDS 롬 풀기·NFTR 폰트(`krpatch nds`),
+  xdelta 적용(`krpatch xdelta`)
 - [Pillow](https://python-pillow.org/): 맵·그림 렌더링
 - [MesenCE](https://github.com/nesdev-org/MesenCE) 2.2.1: 디버거와
   `--testrunner` 로 분석 스크립트를 돌립니다. 사용법은 [tools/README.md](tools/README.md).
