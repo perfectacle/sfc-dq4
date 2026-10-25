@@ -481,7 +481,8 @@ PLACE_MEANING = {
     3: '작전 두 줄 창: x24 폭 6, y = 몬스터 $6E45 가 AE·BC 면 2, 아니면 4',
 }
 FLAG_MEANING = {0x0: '$F5 |= 41', 0xF: '커서를 옮길 때마다 곁 창을 다시 그림($F5 bit4)'}
-FLAG_PAGE = '목록을 쪽으로 자름($03D2 = min($03D1 + ($03D5 & 0F), 줄 수), 넘치면 $F5 bit6). 값은 보지 않음'
+FLAG_PAGE = ('한 쪽 줄 수 n = 값 - B0: 창을 열 때 16:$961D 가 레코드의 첫 B1~BC 를 $03D5 낮은 니블에 두고, '
+             '$03D2 = min($03D1 + n, 줄 수), 넘치면 $F5 bit6. BD·BE 는 쓰는 레코드 없음')
 MODE_MEANING = '$03C6 = n: 상점 값 0 사는 값·1 파는 값, 모험의 서 0 빈 칸·1 이름, 이름 입력 8 글자판'
 
 
@@ -608,7 +609,7 @@ def meaning_lines(rom):
     out.append('# 자리 루틴(16:$A72C)')
     for n, desc in PLACE_MEANING.items():
         out.append(f'{n} 16:${rom.word(0x16, 0xA72C + 2 * n) + 1:04X}  {desc}')
-    out.append(f'# B0~BF: B0 {FLAG_MEANING[0]}, BF {FLAG_MEANING[0xF]}, B1~BE {FLAG_PAGE}')
+    out.append(f'# B0~BF: B0 {FLAG_MEANING[0]}, BF {FLAG_MEANING[0xF]}, B1~BC {FLAG_PAGE}')
     out.append(f'# E0~FF: {MODE_MEANING}')
     return out
 

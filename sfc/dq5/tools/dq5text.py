@@ -164,7 +164,10 @@ CONTROL_MEANING.update({
     0x1118: '딸꾹질: 7E:3180+슬롯 = 01 을 3프레임(「ヒック」, 실측)',
 })
 # 04:9C40. 창 번호 * 2 → 뱅크 04 의 창 레코드. 레코드의 항목 문자열은 FE 로 시작하고 FF 가 줄 끝.
+# 창 문자열 바이트는 BG3 타일 번호로 그대로 쓰인다(04:B235). 타일 01~8A 는 04:E528 의 1bpp 글자.
 WINDOWS = 0x04EB48
+# 04:ACC8. 창 제목 문자열 목록(FF 로 나뉨). 머리 +4 아래 4비트가 0 이 아니면 +5 가 이 목록의 번호. 탁점 접두는 92·93.
+WINDOW_TITLES = 0x04AD78
 
 
 class BitReader:
@@ -296,6 +299,35 @@ def window(rom, n):
     return 0x040000 | a, bytes(rom.u8(0x040000 | a + i) for i in range(end - a))
 
 
+def window_header(data):
+    """창 레코드 머리. +0 아래 5비트 X(bit6 을 끄면 일행 창이 한 줄만, bit7 을 켜면 안 뜸), +1 Y, +2 너비, +3 아래 4비트 높이(타일)·bit7 줄 간격 16점·bit5(명령 창에서 끄면 안 뜸, 상태 창은 꺼진 채 뜸).
+    +4 아래 4비트가 0 이면 +5 가 줄 수. 0 이 아니면 그 값이 제목의 가로 자리(타일), +5 가 제목 번호(WINDOW_TITLES),
+    +6 이 줄 수이고, +6 bit7 이면 일행 수만큼 되풀이(아래 비트 = 사람마다 줄 수)하며 +7 이 줄 앞 칸 타일."""
+    h = {'x': data[0] & 0x1F, 'x_flags': data[0] & 0xE0, 'y': data[1], 'w': data[2], 'h': data[3] & 0x0F, 'tall_rows': bool(data[3] & 0x80),
+         'bit5': bool(data[3] & 0x20)}
+    if data[4] & 0x0F:
+        h.update(title=data[5], title_x=data[4] & 0x0F, rows=data[6] & 0x7F, per_member=bool(data[6] & 0x80))
+        if data[6] & 0x80:
+            h['lead_tile'] = data[7]
+    else:
+        h.update(title=None, rows=data[5])
+    return h
+
+
+def window_title(rom, n):
+    """04:ACC8. 제목 n 의 바이트(92·93 은 탁점·반탁점 접두)."""
+    a = WINDOW_TITLES
+    for _ in range(n):
+        while rom.u8(a) != 0xFF:
+            a += 1
+        a += 1
+    out = bytearray()
+    while rom.u8(a) != 0xFF:
+        out.append(rom.u8(a))
+        a += 1
+    return bytes(out)
+
+
 def window_items(rom, data):
     """창 레코드의 첫 FE 부터를 항목 문자열로. FE = 항목 시작, FF = 줄 끝."""
     k = data.find(b'\xfe')
@@ -379,6 +411,12 @@ def main():
     if args.window is not None:
         a, data = window(rom, args.window)
         print(f'window {args.window:02X} at {a >> 16:02X}:{a & 0xFFFF:04X}: {data.hex(" ")}')
+        if not data[0] & 0x80:
+            h = window_header(data)
+            print(' '.join(f'{k}={v}' for k, v in h.items()))
+            if h['title'] is not None:
+                t = window_title(rom, h['title']).replace(b'\x92', b'\x84').replace(b'\x93', b'\x83')
+                print('title:', text(string_codes(rom, bytes(b for b in t if b < 0xE0))))
         print(window_items(rom, data))
         return 0
     codes = message(rom, args.msg, args.n)

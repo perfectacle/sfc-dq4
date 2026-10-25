@@ -43,6 +43,9 @@ SHOT_DIR=$PWD/work/wprof MAXF=1720 EVERY=0 PERIOD=40 TAP=a FROM=1625 TO=1710 \
 | `seqboot.lua` | 세이브스테이트에서 `SEQ` 입력을 재생하는 드라이버 | `STATE`, `SEQ`, `MAXF`, `EVERY` | |
 | `execcount.lua` | 드라이버(`boot.lua`) 입력을 재생하면서 PC 가 실행된 횟수를 맵(`$BC/$BD`)별로 셈. 매 프레임 도는 루틴인지 볼 때 | `EXEC`(`02AE55,0080B1`), `MAXF` | `exec.txt` |
 | `slottrack.lua` | 드라이버 입력을 재생하면서 슬롯 인물의 셀 좌표(`7E:3020`·`3080`)가 바뀔 때마다 프레임과 함께 기록. 인물 스크립트의 걷는 길을 볼 때 | `SLOT`(16진), `MAXF` | `track.txt` |
+| `wlog.lua` | 드라이버 입력을 재생하면서 지정한 WRAM 바이트들 중 하나라도 바뀔 때마다 프레임과 모든 값을 기록. 인물 스크립트를 덮어 결과를 볼 때 | `WLOG`(`x=7E3028;y=7E3088`), `MAXF` | `wlog.txt` |
+| `vramdiff.lua` | 드라이버 입력을 재생하면서 `A0` 프레임부터 `STEP` 마다 VRAM(`MEM=cg` 면 CGRAM)이 바뀐 바이트 수와 범위를 기록. `POKE1` 은 둘째 프레임에 한 번 씀 | `A0`, `STEP`, `LAST`, `MEM`, `POKE1` | `vram.txt` |
+| `hookdiff.lua` | 드라이버 입력을 재생하고 `LAST` 프레임에 WRAM·VRAM·CGRAM·OAM 을 덤프(`w.bin`·`v.bin`·`c.bin`·`o.bin`). `POKE1` 은 둘째 프레임에 한 번, `EXEC` 는 PC 실행 횟수. 같은 세이브스테이트로 두 번 돌려 견줄 때 | `LAST`, `POKE1`, `EXEC` | `w.bin` 등, `exec.txt`, `end.png` |
 
 세이브스테이트에서 시작하는 상황에 다른 프로브를 쓰려면, 드라이버를 `boot.lua` 로 둔 Lua 폴더를 만들어 `LIBDIR` 로 줍니다.
 

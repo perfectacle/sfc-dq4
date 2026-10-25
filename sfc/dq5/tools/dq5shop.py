@@ -37,6 +37,9 @@ INNS = 0x04FD6D
 INN_COUNT = 21
 # 26:8E5A. 시합 = 23:DC27 문턱 50개 중 주인공 레벨 이하인 것의 수 - 1 까지에서 난수, 23:DA97 + 시합*8 = [몬스터][倍率] x4.
 ARENA_MATCHES, ARENA_LEVELS, ARENA_COUNT = 0x23DA97, 0x23DC27, 50
+# 11:DDD5. 슬라임 레이스 다섯 값의 바탕 줄 5개(넷은 90~110% 난수, 다섯째 = 256 - 합). 11:E02F 는 쌍의 순서.
+SLIME_ROWS = 0x11E0B5
+SLIME_PAIRS = 0x11E02F
 
 
 def monster_name(rom, n):
@@ -89,6 +92,24 @@ def arena(rom):
     return out
 
 
+def slime_odds(rom, weights):
+    """다섯 값 → 쌍 10개의 倍率(11:DF49, 11:DD7B)."""
+    out = []
+    for k in range(10):
+        i, j = rom.u8(SLIME_PAIRS + 2 * k), rom.u8(SLIME_PAIRS + 2 * k + 1)
+        a, b = weights[i] * 16 // 14 & 0xFF, weights[j] * 16 // 14 & 0xFF
+        ra, rb = -a & 0xFF, -b & 0xFF
+        # 256·(256-a)(256-b) 을 a·b·((256-a)+(256-b)) 로 나눈 몫 + 1, 몫이 2 미만이면 2. 8비트로 넘친다.
+        q = ra * rb * 256 // (a * b * (ra + rb))
+        odds = (2 if q < 2 else q + 1) & 0xFF
+        if odds >= 31:
+            odds = odds * 7 // 10
+        elif odds >= 11:
+            odds = odds * 9 // 10
+        out.append((i + 1, j + 1, odds))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('rom')
@@ -100,6 +121,8 @@ def main():
         print(f'{name}: ' + ', '.join(f'{item_name(rom, i)} {v}' for i, v in items))
     for k, (level, fighters) in enumerate(arena(rom)):
         print(f'격투장 {k:2d} (레벨 {level}~): ' + ', '.join(f'{monster_name(rom, m)} {odds}' for m, odds in fighters))
+    for r in range(5):
+        print(f'슬라임 레이스 줄 {r}: ' + ' '.join(str(rom.u8(SLIME_ROWS + 5 * r + i)) for i in range(5)))
     print('여관(1인): ' + ', '.join(f'{bc:02X} {v}G' + ('*' if flag else '') for bc, v, flag in inns(rom)))
     return 0
 

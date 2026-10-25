@@ -9,7 +9,10 @@
                                                   들어갈 때 숨거나 옮겨지는 조건(1C:$A010)도 붙인다
   python fc/dq4/tools/dq4shop.py rom/dq4.nes hidden [--json]   들어갈 때 장소 루틴(1C:$A010·$AD32)이 인물마다 숨기거나
                                                   옮기는 조건 전부
-  python fc/dq4/tools/dq4shop.py rom/dq4.nes hidden G K --compare DIR   seq.lua·warp.lua 덤프 폴더의 인물 표와 비교
+                                                  조건은 진행 관계(장 ⇔ $6282, 한 곳에서만 켜는 장면 플래그 ⇒ 장)로
+                                                  나올 수 없는 조합을 걸러 줄인다. --raw 면 거르지 않는다
+  python fc/dq4/tools/dq4shop.py rom/dq4.nes hidden G K --compare DIR   seq.lua·warp.lua 덤프 폴더(또는 atpc.lua 의
+                                                  at_*.bin)의 인물 표와 비교: 숨김, 그리고 옮김·방향·간격·상태·그림 열
 
 근거 루틴(코드 읽기와 실측):
   15:$9962  대화 결과 $00:$01 이 7 미만이면 가게 처리 15:$9CBF 로 간다.
@@ -30,12 +33,14 @@
   교회      15:$B550. 메뉴 0 저장 1 おつげ 2 되살리기 3 해독 4 저주 풀기. 그룹 46·0E 와 04/0E 는 2~4 만(창 70).
             되살리기 (L² + 10) // 10 × 10(레코드 0~8), 해독 5, 저주 풀기 L × 30(L = 레벨 +05).
 """
+import re
 import sys
 
 from kr_patch.fc import ines
 
 import dq4chest
 import dq4data
+import dq4flags
 import dq4map
 import dq4talk
 
@@ -599,13 +604,63 @@ def path_dnf(path):
     return out
 
 
+# 진행 관계. 장 시작 루틴이 $6282 를 장마다 00·80·C0·E0·F0 으로 쓰고 장 끝은 비트를 더하기만 하므로,
+# $6282 의 bit7~4 는 「$615A ≥ 1~4」 와 같다(dq4-save-format.md 「1~5장 시작 표」).
+CHAPTER_BITS = {0x80: 1, 0x40: 2, 0x20: 3, 0x10: 4}
+# 맵·필드를 오가면 지워지는 바이트(dq4-story-format.md 「맵을 나가면 지워지는 바이트」)는 장과 묶지 않는다.
+TRANSIENT = {0x6285, 0x6289, 0x628B}
+# 장 끝 1A:$B92C~ 가 끄는 비트: 그 장 안에서만 켜져 있다.
+CHAPTER_END_CLEAR = {(0x6291, 0x80), (0x6288, 0x80), (0x6286, 0x04), (0x6285, 0xC0), (0x6281, 0x40)}
+
+
+def progress_rules(prg):
+    """{('$ADDR', 비트): (장 $615A, 그 장에서만인지)}. dq4flags.STORY 의 장면 플래그 가운데 롬에서 그 비트를 켤 수 있는
+    곳(set·store·절대 주소 쓰기)이 하나뿐인 것만 쓴다. 그 곳이 그 장의 장면이므로 켜져 있으면 그 장 이후다."""
+    import dq4event
+    writers = {}
+    for n, rows in dq4event.flag_xref(prg).items():
+        for m, kind, *_ in rows:
+            if kind in ('store', 'write') or (kind == 'set' and m):
+                for b in (0x80 >> j for j in range(8)):
+                    if kind != 'set' or m & b:
+                        writers[(n, b)] = writers.get((n, b), 0) + 1
+    out = {}
+    for c, scenes in dq4flags.STORY.items():
+        for _, fl in scenes:
+            for n, m in fl:
+                a = dq4map.FLAGS + n
+                if a in TRANSIENT or a == 0x6282 or writers.get((n, m)) != 1:
+                    continue
+                out[(f'${a:04X}', m)] = (c - 1, any(a == ca and m & cm for ca, cm in CHAPTER_END_CLEAR))
+    return out
+
+
+RULES = None      # hidden() 이 progress_rules 로 채운다. None 이면 관계를 보지 않음
+
+
+def chapters_ok(atoms, bits):
+    """원자 값들과 함께 설 수 있는 장 $615A(0~4) 가 하나라도 있는지."""
+    cs = set(range(5))
+    for (kind, sym, *rest), on in zip(atoms, bits):
+        if kind == 'num' and sym == '장':
+            cs = {c for c in cs if holds(rest[0], rest[1], c) == on}
+        elif kind == 'bit' and sym == '$6282' and rest[0] in CHAPTER_BITS:
+            cs = {c for c in cs if (c >= CHAPTER_BITS[rest[0]]) == on}
+        elif kind == 'bit' and on and (sym, rest[0]) in RULES:
+            c0, only = RULES[(sym, rest[0])]
+            cs = {c for c in cs if (c == c0 if only else c >= c0)}
+    return bool(cs)
+
+
 def consistent(atoms, bits):
-    """수 원자들이 값 하나로 함께 설 수 있는지(값마다 0~FF 를 다 해 봄)."""
+    """수 원자들이 값 하나로 함께 설 수 있는지(값마다 0~FF 를 다 해 봄). RULES 가 있으면 진행 관계도 본다."""
     by = {}
     for (kind, sym, *rest), on in zip(atoms, bits):
         if kind == 'num':
             by.setdefault(sym, []).append((rest[0], rest[1], on))
-    return all(any(all(holds(op, v, w) == on for op, v, on in cs) for w in range(256)) for cs in by.values())
+    if not all(any(all(holds(op, v, w) == on for op, v, on in cs) for w in range(256)) for cs in by.values()):
+        return False
+    return RULES is None or chapters_ok(atoms, bits)
 
 
 def primes_cover(n, on, dc):
@@ -726,8 +781,11 @@ def person_text(prg, g, k, i, terms):
     return f'인물 {i}(' + (', '.join(out) or '보통 목록에 없음') + ')'
 
 
-def hidden(prg):
-    """[(그룹, 순번, 루틴, [(인물 번호, 하는 일, 조건 합)])]: 1C:$A010 장소 루틴 전부와 1C:$AD32 의 장 줄."""
+def hidden(prg, story=True):
+    """[(그룹, 순번, 루틴, [(인물 번호, 하는 일, 조건 합)])]: 1C:$A010 장소 루틴 전부와 1C:$AD32 의 장 줄.
+    story 면 진행 관계로 나올 수 없는 조합을 거른다."""
+    global RULES
+    RULES = progress_rules(prg) if story else None
     out = [(g, k, p, hide_table(prg, p)) for g, k, p in hide_routines(prg)]
     for g, k, c, i in chapter_hides(prg):
         out.append((g, k, CHAPTER_HIDE, [(i, '숨김', [[(('num', '장', '=', c), False)]])]))
@@ -758,8 +816,51 @@ def predict_hidden(prg, start, mem):
     return (hits[0] if len(hits) == 1 else set.intersection(*hits) if hits else set()), len(hits)
 
 
+COL_ADDRS = {v: a for a, v in SLOT_COLS.items()}
+SYM_EXPR = re.compile(r'\$([0-9A-F]{4})((?:[&|][0-9A-F]{2})*)$')
+
+
+def expect_value(v, mem):
+    """옮김 효과 값 → (아는 비트 마스크, 값). '$7006&FC|02' 는 루틴 앞 값의 일부만 정하므로 정한 비트만 안다.
+    덤프로 셀 수 없으면 None."""
+    if isinstance(v, int):
+        return 0xFF, v
+    if v in SYM_ADDRS:
+        return 0xFF, mem[SYM_ADDRS[v]]
+    m = SYM_EXPR.match(v)
+    if not m:
+        return None
+    ops = re.findall(r'([&|])([0-9A-F]{2})', m.group(2))
+    if not ops:
+        return 0xFF, mem[int(m.group(1), 16)]
+    known = val = 0
+    for o, x in ops:
+        x = int(x, 16)
+        if o == '&':
+            known, val = known | ~x & 0xFF, val & x
+        else:
+            known, val = known | x, val | x
+    return known, val
+
+
+def predict_moves(prg, start, mem):
+    """덤프의 플래그·장·시간·자리로 맞는 길들이 모두 같게 정하는 {(인물 번호, 열): (마스크, 값)}."""
+    got = None
+    for path, eff in hide_paths(prg, start):
+        if not all(v is None or holds(c[1], c[2], v) for c in path for v in [sym_value(c[0], mem)]):
+            continue
+        want = {}
+        for e in eff:
+            if e[0] == 'pos' and e[2] and isinstance(e[1], int):
+                want[(e[1], e[2])] = expect_value(e[3], mem)
+        want = {key: v for key, v in want.items() if v is not None}
+        got = want if got is None else {key: v for key, v in got.items() if want.get(key) == v}
+    return got or {}
+
+
 def compare_hidden(prg, g, k, path):
-    """seq.lua·warp.lua 덤프(폴더)의 인물 표에서 자리가 (80,80) 인 슬롯과 장소 루틴의 예측을 비교."""
+    """seq.lua·warp.lua 덤프(폴더) 또는 atpc.lua 덤프의 인물 표에서 자리가 (80,80) 인 슬롯과 장소 루틴의 예측을 비교하고,
+    옮김·방향·간격·상태·그림 열도 예측과 비교한다."""
     mem = dq4map.cpu_dump(path)
     night = mem[TIME] >= dq4map.NIGHT
     recs = [r for r in dq4map.place_records(prg, g, k, dq4map.ram_flags(mem)) if r[0] & (0x08 if night else 0x10)]
@@ -774,10 +875,25 @@ def compare_hidden(prg, g, k, path):
     want = {i for i in want if i < len(recs)}
     print(f'{g:02X}/{k:02X} {"밤" if night else "낮"} 인물 {len(recs)}명, 맞는 길 {n}개')
     print(f'덤프 (80,80): {sorted(got)}  예측 숨김: {sorted(want)} — {"같음" if got == want else "다름"}')
+    moves = {}
+    for rg, rk, p in hide_routines(prg):
+        if (rg, rk) == (g, k):
+            moves = predict_moves(prg, p, mem)
+    bad = 0
+    for (i, col), (mask, val) in sorted(moves.items()):
+        if i in want:
+            continue
+        now = mem[COL_ADDRS[col] + i]
+        ok = now & mask == val & mask
+        bad += not ok
+        print(f'  인물 {i} {col} ${COL_ADDRS[col] + i:04X} = {now:02X}  예측 {val:02X}'
+              f'{"" if mask == 0xFF else f"(마스크 {mask:02X})"} — {"같음" if ok else "다름"}')
+    if moves:
+        print(f'옮김 열 {len(moves)}개 중 다름 {bad}')
 
 
-def show_hidden(prg, as_json=False):
-    rows = hidden(prg)
+def show_hidden(prg, as_json=False, story=True):
+    rows = hidden(prg, story)
     if as_json:
         import json
         print(json.dumps([{'group': g, 'index': k, 'routine': f'1C:{p:04X}',
@@ -803,7 +919,7 @@ def main():
     elif a[0] == 'hidden' and '--compare' in a:
         compare_hidden(prg, int(a[1], 16), int(a[2], 16), a[a.index('--compare') + 1])
     elif a[0] == 'hidden':
-        show_hidden(prg, '--json' in a)
+        show_hidden(prg, '--json' in a, '--raw' not in a)
     else:
         g, k = int(a[0], 16), int(a[1], 16)
         ram = open(a[3], 'rb').read() if len(a) > 3 and a[2] == '--compare' else None
