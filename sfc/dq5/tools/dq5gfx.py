@@ -1365,7 +1365,7 @@ def window_grid(rom, n):
     머리 +0·+1 위치, +2 아래 5비트 너비, +3 아래 4비트 높이·bit7 줄 간격 16점(sfc/dq5/docs/dq5-text-format.md 「창 레코드 머리」).
     목록 창: 첫 FE 부터. FE = 커서 칸 하나 뒤 글자, FF = 다음 줄, 바이트는 BG3 타일 번호 그대로. 84·83 xx 는 글자 xx 위 칸에
     탁점 84·반탁점 83(위 칸이 테두리면 92·93, 04:B258).
-    상태 창 꼴(+4 가 D0~D3): 뒤 4바이트 자리에 이름, 다음 8x 는 가로줄 하나와 그 뒤 x 줄. 자리 표시는 예시 값(WINDOW_SAMPLES, 이름은 SAMPLE_NAME)으로 채운다.
+    상태 창 꼴(+4 가 D0~D3, 곧 제목 자리 0~3·제목 뒤 3바이트 건너뜀): 뒤 4바이트 자리에 이름, 다음 8x 는 가로줄 하나와 그 뒤 x 줄. 자리 표시는 예시 값(WINDOW_SAMPLES, 이름은 SAMPLE_NAME)으로 채운다.
     커서 없는 글 창(+4 가 0, +6 부터 글): F3 은 이름 넉 자 자리."""
     from dq5text import window
     _, data = window(rom, n)
@@ -1404,7 +1404,7 @@ def window_grid(rom, n):
         # 커서 없는 글 창(이름 칸·말 빠르기 등): +6 부터 글, +5 위 니블만큼 첫 줄을 들여 씀(두 창 덤프로 확인).
         # 자리 표시(85 xx·B0~ 등)가 섞인 창은 뜻을 모르는 제어가 있어 뺀다.
         i, x, step = 6, 1 + (data[5] >> 4), 1
-    elif data[4] & 0x0F and 0xFE in data[7:10]:
+    elif data[4] & 0x0F and 0xFE in data[7 + (data[4] >> 6):10 + (data[4] >> 6)]:
         # 제목 있는 창(dq5text.window_header): +4 아래 니블 제목 자리, +5 제목 번호(04:AD78), 둘째 줄 제목, 셋째 줄 가로줄, 넷째 줄부터 항목.
         from dq5text import window_title
         tx, title, j = data[4] & 0x0F, window_title(rom, data[5]), 0
@@ -1426,8 +1426,9 @@ def window_grid(rom, n):
         for xx in range(1, w - 1):
             put(xx, 2, 0x090)
         grid[2][0], grid[2][w - 1] = 0x08F, 0x48F
-        i, y = data.index(0xFE, 7), 3
-        rows = data[6] & 0x7F
+        k = 6 + (data[4] >> 6)  # +4 bit6-7 = 제목 뒤 건너뛸 바이트 수, 그다음이 줄 수(dq5text.window_header)
+        i, y = data.index(0xFE, k + 1), 3
+        rows = data[k] & 0x7F
         step = 2 if rows and rows * 2 - 1 <= h - 4 else 1
     else:
         return None
@@ -1738,11 +1739,117 @@ def export_title(rom, out):
              note='성 BG4, 링 뒤쪽, V, 로고, 링 앞쪽 차례로 덤프 실측 자리에 겹침. BG3 물결 반짝임(색 더하기)은 뺌')
 
 
+# 전투 주문·특기 연출 그림(22:BBBF). 행동 번호(26:8765 와 같은 번호)마다
+#   29:8296[행동*2] → 29 뱅크의 조각 주소 목록(FFFF 로 끝). 앞 묶음은 BG3 2bpp 조각, 0000 뒤 묶음은 OBJ 조각
+#   29:FACF[행동*2] → 29 뱅크의 색 묶음 [색 수 n][15비트 색 n개]. 첫 묶음이 BG3, 다음 묶음이 OBJ(メラ 실측).
+#     22:BBBF 는 그 주소 한 바이트 앞의 위 니블이 0 이 아니면 묶음을 둘 읽는다(앞 묶음 끝 바이트와 겹쳐 둔 꼴).
+#     FFFF 인 행동 중 バギ 계열은 22:DEA3 이 22:DEE8 의 두 묶음 중 둘째(22:DEF2)를 썼고, たたかう 는 색을 바꾸지 않아
+#     전투 기본 BG3 팔레트 4(24:F987 의 세 색)였다(덤프 실측). ミナデイン 은 띄워 보지 않아 기본 색으로 둔다
+# 조각 = [가로-1 위 니블·세로-1 아래 니블][칸 비트맵] 뒤에 칸마다 몬스터 그림과 같은 타일(dq5mongfx.tile).
+# OBJ 조각은 비트맵 뒤에 몬스터처럼 칸마다 니블(bit1 16x16, bit2·3 앞 조각 좌우 반전 복사)이 더 있다.
+# 조각을 놓는 자리와 차례(움직임)는 아직 읽지 않았다.
+EFFECT_CELS, EFFECT_COLORS, EFFECT_COUNT = 0x298296, 0x29FACF, 0xAA
+EFFECT_FALLBACK_COLORS, EFFECT_DEFAULT_COLORS = 0x22DEE8, 0x24F987
+
+
+def effect_lists(rom, n):
+    """행동 n 의 (BG3 조각 주소 목록, OBJ 조각 주소 목록). 연출이 없으면 None."""
+    p = rom.u16(EFFECT_CELS + n * 2)
+    if p == 0xFFFF:
+        return None
+    a, groups = 0x290000 | p, [[]]
+    while True:
+        w = rom.u16(a)
+        a += 2
+        if w == 0xFFFF:
+            if rom.u16(a) != 0:
+                break
+            groups.append([])
+            a += 2
+            continue
+        groups[-1].append(0x290000 | w)
+    return groups[0], [c for g in groups[1:] for c in g]
+
+
+def effect_colors(rom, n):
+    p = rom.u16(EFFECT_COLORS + n * 2)
+    if p == 0xFFFF:
+        if n in (0x0D, 0x0E, 0x0F):
+            a = 0x220000 | rom.u16(EFFECT_FALLBACK_COLORS + 2)
+            return [[rgb(rom.u16(a + 1 + i * 2)) for i in range(rom.u8(a))]]
+        return [[rgb(rom.u16(EFFECT_DEFAULT_COLORS + i * 2)) for i in range(3)]]
+    a, out = 0x290000 | p, []
+    for _ in range(2 if rom.u8(a - 1) & 0xF0 else 1):
+        k = rom.u8(a)
+        out.append([rgb(rom.u16(a + 1 + i * 2)) for i in range(k)])
+        a += 1 + k * 2
+    return out
+
+
+def effect_cel(rom, a, obj):
+    """조각 하나 → (가로 칸, 세로 칸, [(x 점, y 점, 4bpp 타일 32바이트, 좌우 반전)])."""
+    from dq5mongfx import Stream, tile
+    s = Stream(rom, a)
+    b = s.u8(0)
+    w, h = (b >> 4) + 1, (b & 15) + 1
+    cells = [(i % w, i // w) for i in range(w * h) if s.u8(1 + i // 8) >> (7 - i % 8) & 1]
+    nib_at = 1 + (w * h + 7) // 8
+    pos = [nib_at + ((len(cells) + 1) // 2 if obj else 0)]
+    pieces, out = [], []
+    for k, (x, y) in enumerate(cells):
+        nib = s.u8(nib_at + k // 2) >> (0 if k & 1 else 4) & 15 if obj else 0
+        big = bool(nib & 2)
+        if nib & 0xC:
+            ref = pieces[s.u8(pos[0])]
+            pos[0] += 1
+            pieces.append((x * 8 - (0 if nib & 4 else 1), y * 8, ref[2], ref[3], not ref[4]))
+        else:
+            pieces.append((x * 8, y * 8, big, [tile(s, pos) for _ in range(4 if big else 1)], False))
+    for x, y, big, tiles, flip in pieces:
+        for i, t in enumerate(tiles):
+            dx = (i & 1) * 8
+            out.append((x + (8 - dx if flip and big else dx), y + (i >> 1) * 8, t, flip))
+    return w, h, out
+
+
+def effect_image(rom, a, obj, colors):
+    w, h, tiles = effect_cel(rom, a, obj)
+    img = Image.new('RGBA', (w * 8 + 8, h * 8), (0, 0, 0, 0))
+    pal = [(0, 0, 0)] + (colors + [(255, 0, 255)] * 15)[:15]
+    for x, y, t, flip in tiles:
+        ti = tile_image(planar(t), pal, flip)
+        img.paste(ti, (x + 1, y), ti)
+    return img
+
+
+def export_effects(rom, out):
+    from dq5spell import name
+    count = 0
+    for n in range(EFFECT_COUNT):
+        got = effect_lists(rom, n)
+        if not got:
+            continue
+        bg, obj = got
+        colors = effect_colors(rom, n)
+        imgs = ([effect_image(rom, a, False, colors[0]) for a in bg]
+                + [effect_image(rom, a, True, colors[-1]) for a in obj])
+        labels = [f'{a & 0xFFFF:04X}' for a in bg] + [f'O{a & 0xFFFF:04X}' for a in obj]
+        cw, ch = max(i.width for i in imgs), max(i.height for i in imgs)
+        title = name(rom, n)
+        stem = f'{n:02X}-{title}' if title else f'{n:02X}'
+        out.save(sheet(imgs, max(1, min(len(imgs), 480 // (cw + 1))), max(cw, 28), ch, labels, bg=(0, 0, 0),
+                       label_h=10), f'gfx/effects/{stem}.png', 'effects', f'{n:02X} {title}', '전투 연출', action=f'{n:02X}',
+                 bg=[f'{a:06X}' for a in bg], obj=[f'{a:06X}' for a in obj],
+                 note='조각 목록 차례대로(O 는 OBJ 조각). 놓는 자리와 움직임은 빠짐. 색은 29:FACF 의 첫 묶음(BG3)·마지막 묶음(OBJ)')
+        count += 1
+    print(f'effects {count}')
+
+
 EXPORTS = {'maps': export_maps, 'chr': export_chr, 'field': export_field, 'anim': export_anim,
            'monsters': export_monsters, 'battlebg': export_battlebg, 'font': export_font, 'ui': export_ui,
            'worldmap': export_world_screen, 'credits': export_credits,
            'windows': export_windows, 'theend': export_the_end, 'battlewin': export_battle_windows,
-           'title': export_title, 'menus': export_menu_screens}
+           'title': export_title, 'menus': export_menu_screens, 'effects': export_effects}
 COMMAND = 'uv run --locked python sfc/dq5/tools/dq5gallery.py rom/dq5.sfc --out $OUT'
 
 
