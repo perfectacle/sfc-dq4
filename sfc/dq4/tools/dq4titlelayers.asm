@@ -55,7 +55,7 @@ Title:
   stz $212E
   stz $2123
   stz $2133
-  lda.b #$A3
+  lda.b #$63
   sta $2101
   lda.b #$2C
   sta $2107
@@ -87,7 +87,7 @@ Title:
   sta $2121
   ldx.w #$E900
   stx $4302
-  ldx.w #$0020
+  ldx.w #$0040
   stx $4305
   lda.b #$01
   sta $420B
@@ -276,28 +276,45 @@ Motion:
   stx $4305
   lda.b #$01
   sta $420B
-  ; Two horizontal cloud bands share a periodic tilemap, with independent speeds.
+  rep #$20
+  tya
+  lsr
+  lsr
+  and.w #$007F
+  xba
+  lsr
+  ora.w #$8000
+  sta $4302
+  sep #$20
+  lda.b #$35
+  sta $4304
+  lda.b #$1E
+  sta $2102
+  stz $2103
+  ldx.w #$0024
+  stx $4305
+  lda.b #$01
+  sta $420B
+  stz $2102
+  lda.b #$01
+  sta $2103
+  ldx.w #$0020
+  stx $4305
+  lda.b #$01
+  sta $420B
+  stz $420C
+  rep #$20
+  tya
+  lsr
+  lsr
+  lsr
+  and.w #$007F
+  sep #$20
+  sta $210F
+  stz $210F
   lda.b #$FF
   sta $2110
   sta $2110
-  lda.b #$02
-  sta $4360
-  lda.b #$0F
-  sta $4361
-  lda.b #$35
-  sta $4364
-  rep #$20
-  tya
-  and.w #$03FF
-  asl
-  asl
-  asl
-  asl
-  ora.w #$8000
-  sta $4362
-  sep #$20
-  lda.b #$40
-  sta $420C
   plx
   rts
 
@@ -320,6 +337,8 @@ org $31E800
 incbin "background.pal"
 org $31E900
 incbin "dragon.pal"
+org $31E920
+incbin "cloud.pal"
 org $31EB00
 incbin "oam-pointers.bin"
 org $328000
@@ -330,17 +349,7 @@ incbin "dragon-dma.bin"
 org $348000
 incbin "dragon-initial.chr"
 org $358000
-!cloud_frame = 0
-while !cloud_frame < 1024
-  db $7F
-  dw ((!cloud_frame>>2)&$FF)
-  db $41
-  dw ((!cloud_frame>>2)&$FF)
-  db $20
-  dw ((!cloud_frame>>3)&$7F)
-  db $00,$00,$00,$00,$00,$00,$00
-  !cloud_frame #= !cloud_frame+1
-endwhile
+incbin "cloud-oam.bin"
 assert pc() == $35C000
 org $368000
 check bankcross off
