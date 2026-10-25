@@ -132,5 +132,4 @@ DS 아이템 표(ARM9 `0x02095594`, [param-format.md](param-format.md#아이템-
 
 ## 남은 것
 
-- 6장 이벤트를 스크립트 명령 단위로(지금은 대사 파일을 부르는 맵만).
 - 그 밖의 표 세부는 [param-format.md](param-format.md#남은-것).
