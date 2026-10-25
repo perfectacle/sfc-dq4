@@ -11,7 +11,6 @@ writes PNG files for reference only. Nothing here writes into the unpacked tree.
 import argparse
 import html
 import json
-import os
 import struct
 import sys
 from collections import Counter, defaultdict
@@ -391,7 +390,8 @@ def dssa(b, off=0, size=None):
     +0x10 cell count; cells from +0x20, 16 bytes: u32 flags, u16 top, left,
     bottom, right, pivot y, pivot x (pixels in the atlas; cell 0 is a 1x1
     dummy). Frames are `FRAM` blocks: u32 index, u32 record count, then
-    16-byte records from +0x10: u16 cell (low 12 bits; top bits flags), u16 -, s16 x, s16 y, u16 scale x,
+    16-byte records from +0x10: u16 cell (low 12 bits; 0x1000 mirror left-right, 0x2000
+    mirror top-bottom, 0x4000 unknown), u16 -, s16 x, s16 y, u16 scale x,
     u16 scale y (4.12), u16 rotation, u8 alpha (0-31), u8 order.
     """
     n = u32(b, off + 0x10)
@@ -437,6 +437,10 @@ def dssa_frame(atlas, cells, recs, reverse=False):
             continue
         im = atlas.crop((c["left"], c["top"], c["right"], c["bottom"]))
         sx, sy = r["sx"], r["sy"]
+        if r.get("flags", 0) & 1:  # 0x1000 in the cell word: mirror left-right
+            sx = -sx
+        if r.get("flags", 0) & 2:  # 0x2000: mirror top-bottom
+            sy = -sy
         if sx < 0:
             im = im.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
         if sy < 0:
@@ -592,7 +596,8 @@ class Exporter:
         x1 = max(o[0] + i.width for i, o in imgs)
         y1 = max(o[1] + i.height for i, o in imgs)
         seq = []
-        for i, o in imgs[::2] if len(imgs) > 1 else imgs:
+        # One DSSA frame lasts two video frames (1/30 s) in battle.
+        for i, o in imgs:
             c = Image.new("RGBA", (x1 - x0, y1 - y0))
             c.alpha_composite(i, (o[0] - x0, o[1] - y0))
             seq.append(c)
@@ -600,6 +605,7 @@ class Exporter:
         return True
 
     def monster(self):
+        self.stats["MonsterAnimation(짝 없음)"]  # always reported, also when zero
         tex, anm = {}, {}
         for rel in self.files("MONSTER", ".tex.lz"):
             name = Path(rel).name.split(".")[0]
@@ -617,13 +623,17 @@ class Exporter:
         for name in sorted(tex):
             base = name if name in anm else None
             if base is None:
-                best = 0.0
+                best = second = 0.0
                 for a in anm:
                     if a in tex and len(masks[a]) == len(masks[name]):
                         s = sum(x == y for x, y in zip(masks[a], masks[name])) / len(masks[name])
                         if s > best:
-                            best, base = s, a
-                if best < 0.97:
+                            best, second, base = s, best, a
+                        elif s > second:
+                            second = s
+                # Palette swaps share the atlas layout. A few variants redraw some parts,
+                # so below 0.97 take the best match only when it clearly beats the runner-up.
+                if not (best >= 0.97 or (best >= 0.9 and best - second >= 0.1)):
                     base = None
             if base is None:
                 self.stats["MonsterAnimation(짝 없음)"][1] += 1
@@ -699,6 +709,52 @@ class Exporter:
                         raise ValueError("no triangle")
                     self.save(cat, Path(rel).stem + ".png", img, f"{Path(rel).stem} ({len(inst)}개 배치)")
                 self.ok("MapPackData 렌더", rel, one)
+
+    def field(self):
+        """Illustrated world map (FIELD/large), its patches and the animated field chips."""
+        import numpy as np
+        base = "FIELD/large/"
+        pal = np.array(texture_object(self.read(base + "largemap.tex"))["pal"], np.uint8)
+
+        def tiled(rel, side):
+            d = np.frombuffer(self.read(rel), np.uint8)
+            n = side // 32
+            return Image.fromarray(pal[d.reshape(n, n, 32, 32).transpose(0, 2, 1, 3).reshape(side, side)])
+        self.ok("largemap.bin", base + "largemap.bin",
+                lambda: self.save("field/large", "largemap.png", tiled(base + "largemap.bin", 1024), "largemap (1024x1024)"))
+        for rel in self.files("FIELD/large", ".bin"):
+            if rel.endswith("largemap.bin"):
+                continue
+            self.ok("large 64x64", rel, lambda rel=rel: self.save("field/large", Path(rel).stem + ".png", tiled(rel, 64)))
+        fpal = texture_object(self.read("FIELD/field.tex"))["pal"]
+        ypal = texture_object(self.read("FIELD/yamifield.tex"))["pal"]
+        for rel in self.files("FIELD/texture", ".pack"):
+            def one(rel=rel):
+                b = self.read(rel)
+                pal = ypal if Path(rel).name.startswith("y") else fpal
+                ents = [b[eo:eo + es] for eo, es in pack_entries(b) if es]
+                width = 64 if "24" in rel else 256
+                frames = [texture(d, 4, width, len(d) // width, pal, False) for d in ents]
+                stem = Path(rel).stem
+                self.save("field/pattern", stem + ".png", frames[0], f"{stem} 첫 프레임")
+                self.save("field/pattern", stem + ".webp", [f.convert("RGBA") for f in frames], f"{stem} ({len(frames)}프레임)")
+            self.ok("field pattern", rel, one)
+
+    def model_anim(self):
+        """CHR 3D models played with their BCA0 animations, front orthographic view."""
+        for rel in self.files("CHR", ".nsbca"):
+            stem = Path(rel).stem
+            model = stem.rsplit("_", 1)[0]
+            if not (self.data / "CHR" / (model + ".nsbmd")).exists():
+                continue
+
+            def one(rel=rel, stem=stem, model=model):
+                mdl, bca = self.read(f"CHR/{model}.nsbmd"), self.read(rel)
+                for k in range(len(bca_anims(bca))):
+                    frames, anim = model_anim_frames(mdl, bca, k, step=2, max_frames=300)
+                    self.save("chr/model_anim", f"{stem}_{k}.webp", frames,
+                              f"{model} {anim['name']} ({anim['frames']}프레임)")
+            self.ok("BCA0", rel, one)
 
     def g2d(self):
         for rel in self.files("G2D/BATTLEBG", ".bgc"):
@@ -794,6 +850,7 @@ class Exporter:
         steps = dict(
             chr=self.chr, monster=self.monster, map=self.maps, g2d=self.g2d,
             effect=self.effects, dssa=self.dssa_files, banner=self.banner, render=self.render,
+            field=self.field, model_anim=self.model_anim,
             tex=lambda: [
                 self.textures("title", "2D", strip=["2D/MAP", "2D/FACE"]),
                 self.textures("ui/face", "2D/FACE"),
@@ -841,6 +898,7 @@ CATEGORY_TITLES = {
     "chr/field": "인물(필드 스프라이트 팩)",
     "chr/symbol": "필드 심벌",
     "chr/model": "3D 인물·소품 모델 텍스처",
+    "chr/model_anim": "3D 인물 모델 애니메이션(BCA0, 앞에서 본 직교)",
     "monster/pose": "몬스터(조립한 첫 프레임)",
     "monster/anim": "몬스터 동작(애니메이션 WebP)",
     "monster/atlas": "몬스터 부품 아틀라스",
@@ -848,6 +906,8 @@ CATEGORY_TITLES = {
     "map/tex": "맵 텍스처(3D 맵마다 한 장)",
     "map/render": "맵 위에서 본 렌더링",
     "field": "필드(세계 지도) 텍스처",
+    "field/large": "일러스트 세계 지도와 덧그림",
+    "field/pattern": "필드 물가·바다 애니메이션 칩",
     "battle/render": "전투 배경 위에서 본 렌더링",
     "battle/3d": "전투 배경(3D) 텍스처",
     "battle/upper": "전투 상단 배경(8×8 타일, 배치 미상)",
@@ -917,7 +977,7 @@ def main(argv=None):
     e.add_argument("out")
     e.add_argument("--root", default=DEFAULT_FS)
     e.add_argument("--kr", help="한글 팬패치 롬을 푼 폴더(바뀐 글꼴·로고를 kr/ 에)")
-    e.add_argument("--only", help="쉼표로 단계 이름(chr,monster,map,g2d,effect,dssa,banner,tex,render)")
+    e.add_argument("--only", help="쉼표로 단계 이름(chr,monster,map,g2d,effect,dssa,banner,tex,render,field,model_anim)")
     g = sub.add_parser("gallery", help="manifest.json 으로 index.html 을 씀")
     g.add_argument("out")
     a = ap.parse_args(argv)
@@ -939,7 +999,9 @@ def main(argv=None):
             merged.update({p: lbl for p, lbl in v})
             old["items"][k] = sorted(merged.items())
         old["stats"].update({k: v for k, v in stats.items()})
-        old["fail"].update({k: v for k, v in ex.fail.items()})
+        for k in stats:
+            old["fail"][k] = ex.fail.get(k, [])
+        old["fail"] = {k: v for k, v in old["fail"].items() if v}
         mpath.write_text(json.dumps(old, ensure_ascii=False, indent=1, sort_keys=True), encoding="utf-8")
         for k, (n_ok, n_bad) in sorted(stats.items()):
             print(f"{k:28s} 성공 {n_ok:5d}  실패 {n_bad:4d}")
@@ -965,8 +1027,8 @@ def _s(v, n):
     return v - (1 << n) if v & (1 << (n - 1)) else v
 
 
-def node_matrix(b, o):
-    """4x4 local matrix of a MDL0 node transform (translation, rotation, scale)."""
+def node_trs(b, o):
+    """(translation, 3x3 rotation, scale) of a MDL0 node transform."""
     import numpy as np
     flags = u16(b, o)
     m0 = struct.unpack_from("<h", b, o + 2)[0]
@@ -978,35 +1040,49 @@ def node_matrix(b, o):
     r = np.eye(3)
     if not flags & 2:
         if flags & 8:
-            # Pivot-compressed rotation: a ±1 at (select // 3, select % 3), the
-            # remaining 2x2 block is [a b; c d] with signs from bits 8-11.
             a = struct.unpack_from("<h", b, p)[0] / 4096
             bb = struct.unpack_from("<h", b, p + 2)[0] / 4096
             p += 4
-            sel, neg = flags >> 4 & 15, flags >> 8 & 15
-            one = -1.0 if neg & 1 else 1.0
-            c = -bb if neg & 2 else bb
-            d = -a if neg & 4 else a
-            m = np.zeros((3, 3))
-            prow, pcol = sel // 3, sel % 3
-            m[prow, pcol] = one
-            rr = [k for k in range(3) if k != prow]
-            cc = [k for k in range(3) if k != pcol]
-            m[rr[0], cc[0]], m[rr[0], cc[1]] = a, bb
-            m[rr[1], cc[0]], m[rr[1], cc[1]] = c, d
-            r = m
+            r = pivot_matrix(flags >> 4 & 15, flags >> 8 & 15, a, bb)
         else:
             v = [m0 / 4096] + [struct.unpack_from("<h", b, p + 2 * i)[0] / 4096 for i in range(8)]
             p += 16
             r = np.array(v).reshape(3, 3)
-    s = np.ones(3)
+    sc = np.ones(3)
     if not flags & 4:
-        s = np.array([s32(b, p + 4 * i) / 4096 for i in range(3)])
+        sc = np.array([s32(b, p + 4 * i) / 4096 for i in range(3)])
+    return t, r, sc
+
+
+def pivot_matrix(sel, neg, a, bb):
+    """Pivot-compressed rotation: a ±1 at (sel // 3, sel % 3), the remaining 2x2
+    block is [a b; c d] with c = ±b, d = ±a and the signs from `neg`."""
+    import numpy as np
+    one = -1.0 if neg & 1 else 1.0
+    c = -bb if neg & 2 else bb
+    d = -a if neg & 4 else a
+    m = np.zeros((3, 3))
+    prow, pcol = sel // 3, sel % 3
+    m[prow, pcol] = one
+    rr = [k for k in range(3) if k != prow]
+    cc = [k for k in range(3) if k != pcol]
+    m[rr[0], cc[0]], m[rr[0], cc[1]] = a, bb
+    m[rr[1], cc[0]], m[rr[1], cc[1]] = c, d
+    return m
+
+
+def trs_matrix(t, r, sc):
+    import numpy as np
     m = np.eye(4)
-    # Nitro stores row vectors: v' = v * M.
-    m[:3, :3] = r * s[:, None]
+    # Nitro uses row vectors: v' = v * M.
+    m[:3, :3] = r * np.asarray(sc)[:, None]
     m[3, :3] = t
     return m
+
+
+def node_matrix(b, o):
+    """4x4 local matrix of a MDL0 node transform (translation, rotation, scale)."""
+    return trs_matrix(*node_trs(b, o))
 
 
 def mdl0_models(b, off):
@@ -1014,14 +1090,20 @@ def mdl0_models(b, off):
     return [(n, off + u32(e, 0)) for n, e in nitro_dict(b, off + 8)]
 
 
-def model_triangles(b, mo):
-    """Triangles of one model: list of (material index, [(xyz, st)] * 3) in world units."""
+def model_nodes(b, mo):
+    """Offsets of the node transforms of a model, in node index order."""
+    return [mo + 0x40 + u32(e, 0) for _, e in nitro_dict(b, mo + 0x40)]
+
+
+def model_triangles(b, mo, local=None):
+    """Triangles of one model: list of (material index, [(xyz, st)] * 3) in world units.
+    `local` replaces the node matrices (animation)."""
     import numpy as np
     rcmd = mo + u32(b, mo + 4)
     meshes = mo + u32(b, mo + 0xC)
     pos_scale = s32(b, mo + 0x1C) / 4096
-    nodes = [mo + 0x40 + u32(e, 0) for _, e in nitro_dict(b, mo + 0x40)]
-    local = [node_matrix(b, o) for o in nodes]
+    if local is None:
+        local = [node_matrix(b, o) for o in model_nodes(b, mo)]
     mesh_list = []
     for _, e in nitro_dict(b, meshes):
         mh = meshes + u32(e, 0)
@@ -1051,7 +1133,7 @@ def model_triangles(b, mo):
             tris += [(mat, t) for t in display_list(b, dl, dsize, cur, stack, pos_scale)]
             p += 2
         elif op in (0x06, 0x26, 0x46, 0x66):
-            node, parent = b[p + 1], b[p + 2]
+            node = b[p + 1]  # b[p + 2] is the parent node; the matrix stack already chains it
             q = p + 4
             src = dst = None
             if op == 0x26:
@@ -1262,25 +1344,41 @@ def render_top(b, off, instances=None, max_side=2048, max_scale=32):
     scale = float(np.percentile(dens, 90)) if dens else 16.0
     span = max(hi[0] - lo[0], hi[2] - lo[2], 1e-3)
     scale = min(scale, max_scale, max_side / span)
-    w = int((hi[0] - lo[0]) * scale) + 1
-    h = int((hi[2] - lo[2]) * scale) + 1
+    return raster(tris, tex_rgba, "top", scale, lo, hi)
+
+
+VIEWS = {
+    # image x axis, image y axis (sign), depth axis: larger depth is nearer.
+    "top": (0, 2, 1, 1),     # looking down -Y: x right, z down
+    "front": (0, 1, -1, 2),  # looking down -Z: x right, y up
+}
+
+
+def raster(tris, tex_rgba, view, scale, lo, hi):
+    """Orthographic textured z-buffer raster of [(key, [(xyz, st)] * 3)] onto RGBA."""
+    import numpy as np
+    ax, ay, sy_, az = VIEWS[view]
+    w = int((hi[ax] - lo[ax]) * scale) + 1
+    h = int((hi[ay] - lo[ay]) * scale) + 1
     color = np.zeros((h, w, 4), np.uint8)
     depth = np.full((h, w), -1e9)
-    for (m, t), q in zip(tris, xyz):
+    for m, t in tris:
+        q = np.array([p for p, _ in t])
         img, flags = tex_rgba(m)
-        px = (q[:, 0] - lo[0]) * scale
-        py = (q[:, 2] - lo[2]) * scale
+        px = (q[:, ax] - lo[ax]) * scale
+        py = ((q[:, ay] - lo[ay]) if sy_ > 0 else (hi[ay] - q[:, ay])) * scale
         x0, x1 = int(max(0, np.floor(px.min()))), int(min(w - 1, np.ceil(px.max())))
         y0, y1 = int(max(0, np.floor(py.min()))), int(min(h - 1, np.ceil(py.max())))
         if x1 < x0 or y1 < y0:
             continue
         den = (py[1] - py[2]) * (px[0] - px[2]) + (px[2] - px[1]) * (py[0] - py[2])
         if abs(den) < 1e-9:
-            continue  # wall seen edge-on
-        # Back-face cull: with this winding an upward face has a positive normal y.
-        # Without it the inside of a battle sky dome hides the whole scene.
+            continue  # face seen edge-on
+        # Back-face cull with the model's winding: the face normal must point at the viewer.
+        # Without it the inside of a battle sky dome hides the whole scene from above.
         e1, e2 = q[1] - q[0], q[2] - q[0]
-        if e1[2] * e2[0] - e1[0] * e2[2] <= 0:
+        n = np.cross(e1, e2)
+        if n[az] <= 0:
             continue
         gx, gy = np.meshgrid(np.arange(x0, x1 + 1) + 0.5, np.arange(y0, y1 + 1) + 0.5)
         l0 = ((py[1] - py[2]) * (gx - px[2]) + (px[2] - px[1]) * (gy - py[2])) / den
@@ -1289,7 +1387,7 @@ def render_top(b, off, instances=None, max_side=2048, max_scale=32):
         inside = (l0 >= -1e-4) & (l1 >= -1e-4) & (l2 >= -1e-4)
         if not inside.any():
             continue
-        z = l0 * q[0, 1] + l1 * q[1, 1] + l2 * q[2, 1]
+        z = l0 * q[0, az] + l1 * q[1, az] + l2 * q[2, az]
         if img is None:
             rgba = np.zeros(gx.shape + (4,), np.uint8)
             rgba[...] = (128, 128, 128, 255)
@@ -1315,6 +1413,154 @@ def render_top(b, off, instances=None, max_side=2048, max_scale=32):
         color[y0:y1 + 1, x0:x1 + 1][draw] = rgba[draw]
     return Image.fromarray(color, "RGBA")
 
+
+# ---------------------------------------------------------------- BCA0 joint animation
+
+def _sext(v, n):
+    return v - (1 << n) if v & (1 << (n - 1)) else v
+
+
+def basis_matrix(b, o):
+    """10-byte compressed rotation: five u16 whose top 13 bits are m00 m01 m02 m10 m11
+    (1.12 fixed); the low 3 bits of c4 c0 c1 c2 c3 in that order build m12 (13-bit
+    signed, upper 2 bits unused here). Row 2 = row 0 x row 1."""
+    import numpy as np
+    c = struct.unpack_from("<5H", b, o)
+    top = [_sext(x >> 3, 13) / 4096 for x in c]
+    raw = (c[4] & 7) << 12 | (c[0] & 7) << 9 | (c[1] & 7) << 6 | (c[2] & 7) << 3 | (c[3] & 7)
+    r0 = np.array(top[:3])
+    r1 = np.array([top[3], top[4], _sext(raw & 0x1FFF, 13) / 4096])
+    return np.vstack([r0, r1, np.cross(r0, r1)])
+
+
+def bca_anims(b, off=0):
+    """[(name, frames, objects)] of a BCA0 file. Each object is (node, flags, tracks)."""
+    out = []
+    jo = nitro_blocks(b, off)["JNT0"]
+    for name, e in nitro_dict(b, jo + 8):
+        ao = jo + u32(e, 0)
+        if b[ao:ao + 4] != b"J\0AC":
+            continue
+        nf, no = u16(b, ao + 4), u16(b, ao + 6)
+        objs = [ao + u16(b, ao + 20 + 2 * i) for i in range(no)]
+        out.append(dict(name=name, frames=nf, ao=ao, pivot=ao + u32(b, ao + 12),
+                        basis=ao + u32(b, ao + 16), objs=objs))
+    return out
+
+
+def _track(b, ao, p, const, width_const):
+    """A track at p: (value or None, samples info, next p). const -> one value."""
+    if const:
+        return ("c", p), p + width_const
+    info, off = u32(b, p), u32(b, p + 4)
+    return ("a", info, ao + off), p + 8
+
+
+def _sample(b, tr, frame, kind):
+    """Value of a track at a frame. kind: 't' (fx), 'r' (rotation index), 's' (scale fx)."""
+    if tr[0] == "c":
+        p = tr[1]
+        if kind == "r":
+            return u16(b, p)
+        return s32(b, p) / 4096
+    info, p = tr[1], tr[2]
+    start, end = info & 0xFFFF, info >> 16 & 0xFFF
+    half = info >> 28 & 3  # 0: fx32 samples, otherwise fx16 (bit 29 seen in the data)
+    rate = info >> 30 & 3
+    f = min(max(frame, start), max(start, end - 1)) - start
+    i = f >> rate
+    if kind == "r":
+        return u16(b, p + 2 * i)
+    if half:
+        return struct.unpack_from("<h", b, p + (4 if kind == "s" else 2) * i)[0] / 4096
+    return s32(b, p + (8 if kind == "s" else 4) * i) / 4096
+
+
+def bca_pose(b, anim, frame, rest):
+    """Local node matrices at `frame`; `rest` is [(t, r, s)] of the model nodes.
+
+    Object: u16 flags, u8 -, u8 node, then translation x y z, rotation, scale x y z.
+    Flags: 0 no transform (rest), 1 translation zero, 2 rest translation, 3-5 x/y/z
+    constant, 6 rotation identity, 7 rest rotation, 8 rotation constant, 9 scale one,
+    10 rest scale, 11-13 x/y/z constant. A rotation value with bit 15 set indexes the
+    pivot table (6 bytes), otherwise the basis table (10 bytes)."""
+    import numpy as np
+    local = [trs_matrix(*r) for r in rest]
+    ao = anim["ao"]
+    for o in anim["objs"]:
+        flags, node = u16(b, o), b[o + 3]
+        if node >= len(rest) or flags & 1:
+            continue
+        t0, r0, s0 = rest[node]
+        p = o + 4
+        if flags & 2:
+            t = np.zeros(3)
+        elif flags & 4:
+            t = t0
+        else:
+            t = []
+            for k in range(3):
+                tr, p = _track(b, ao, p, flags >> (3 + k) & 1, 4)
+                t.append(_sample(b, tr, frame, "t"))
+            t = np.array(t)
+        if flags & 0x40:
+            r = np.eye(3)
+        elif flags & 0x80:
+            r = r0
+        else:
+            tr, p = _track(b, ao, p, flags >> 8 & 1, 4)
+            idx = _sample(b, tr, frame, "r")
+            if idx & 0x8000:
+                q = anim["pivot"] + 6 * (idx & 0x7FFF)
+                mode, a, bb = struct.unpack_from("<Hhh", b, q)
+                r = pivot_matrix(mode & 15, mode >> 4 & 15, a / 4096, bb / 4096)
+            else:
+                r = basis_matrix(b, anim["basis"] + 10 * idx)
+        if flags & 0x200:
+            sc = np.ones(3)
+        elif flags & 0x400:
+            sc = s0
+        else:
+            sc = []
+            for k in range(3):
+                tr, p = _track(b, ao, p, flags >> (11 + k) & 1, 8)
+                sc.append(_sample(b, tr, frame, "s"))
+            sc = np.array(sc)
+        local[node] = trs_matrix(t, r, sc)
+    return local
+
+
+def model_anim_frames(mdl, bca, anim_index=0, step=2, view="front", scale=None, max_frames=240):
+    """Frames of a BMD0 model played with a BCA0 animation, rendered orthographically."""
+    import numpy as np
+    blocks = nitro_blocks(mdl)
+    mo = mdl0_models(mdl, blocks["MDL0"])[0][1]
+    rest = [node_trs(mdl, o) for o in model_nodes(mdl, mo)]
+    anim = bca_anims(bca)[anim_index]
+    texs, pals = tex0(mdl, blocks["TEX0"]) if "TEX0" in blocks else ({}, {})
+    info = material_info(mdl, mo)
+    cache = {}
+
+    def tex_rgba(m):
+        if m not in cache:
+            t, pn, flags = info[m] if m < len(info) else (None, None, 0)
+            if t in texs:
+                tt = texs[t]
+                pal = palette(pals[pn]) if pn in pals else grey(256)
+                img = texture(tt["data"], tt["fmt"], tt["width"], tt["height"], pal or grey(256),
+                              bool(tt["c0"]), tt["pidx"])
+                cache[m] = (np.asarray(img), flags)
+            else:
+                cache[m] = (None, flags)
+        return cache[m]
+
+    frames = list(range(0, anim["frames"], step))[:max_frames]
+    tris = [model_triangles(mdl, mo, bca_pose(bca, anim, f, rest)) for f in frames]
+    pts = np.array([p for ts in tris for _, t in ts for p, _ in t])
+    lo, hi = pts.min(0), pts.max(0)
+    if scale is None:
+        scale = 160 / max(hi[0] - lo[0], hi[1] - lo[1], 1e-3)
+    return [raster(ts, tex_rgba, view, scale, lo, hi) for ts in tris], anim
 
 if __name__ == "__main__":
     main()
