@@ -22,8 +22,8 @@ JOURNAL = ROOT / 'docs' / 'journal'
 TRACKS = ()
 # 한 트랙이 폴더 여럿에 걸치면 일지 순번을 함께 쓴다(같은 날짜·순번이 두 폴더에 있으면 안 됨).
 SHARED_NUMBERS = {'sfc/dq4': 'dq4', 'fc/dq4': 'dq4'}
-NAME = re.compile(r'^(\d{4}-\d{2}-\d{2})-(\d{2})-[a-z0-9]+(?:-[a-z0-9]+)*\.md$')
-TITLE = re.compile(r'^# (\d{4}-\d{2}-\d{2})-(\d{2}): \S')
+NAME = re.compile(r'^(\d{4}-\d{2}-\d{2})-(\d{2,3})-[a-z0-9]+(?:-[a-z0-9]+)*\.md$')
+TITLE = re.compile(r'^# (\d{4}-\d{2}-\d{2})-(\d{2,3}): \S')
 LINK = re.compile(r'\]\(([^)\s]+)\)')
 TEXT_SUFFIXES = {'.md', '.py', '.lua', '.sh', '.toml', '.yml', '.yaml', '.json'}
 # 홈 폴더 절대 경로와 "~/" 로 시작하는 경로. 이 파일 자체는 검사하지 않는다.
@@ -35,6 +35,12 @@ def files():
     out = subprocess.run(['git', 'ls-files', '--cached', '--others', '--exclude-standard'],
                          cwd=ROOT, capture_output=True, text=True, check=True).stdout
     return [ROOT / p for p in out.splitlines() if (ROOT / p).is_file()]
+
+
+def order_key(name):
+    # 순번이 99 를 넘으면 세 자리라 문자열로 견주면 100 이 99 앞에 온다.
+    m = NAME.match(name)
+    return (m.group(1), int(m.group(2))) if m else (name, 0)
 
 
 def journal_dirs():
@@ -59,7 +65,7 @@ def check_journal(errors):
         for p in sorted(folder.glob('*.md')):
             m = NAME.match(p.name)
             if not m:
-                errors.append(f'{p.relative_to(ROOT)}: 이름이 YYYY-MM-DD-NN-<주제>.md 가 아님')
+                errors.append(f'{p.relative_to(ROOT)}: 이름이 YYYY-MM-DD-NN-<주제>.md 가 아님(NN 은 두 자리, 99 다음은 세 자리)')
                 continue
             key = (m.group(1), m.group(2))
             if key in seen:
@@ -75,7 +81,7 @@ def check_journal(errors):
             if n not in listed:
                 errors.append(f'{where}: 일지 목록에 {prefix}{n} 이 없음')
         ordered = [n for n in listed if n in names]
-        if ordered != sorted(ordered):
+        if ordered != sorted(ordered, key=order_key):
             errors.append(f'{where}: {folder.relative_to(ROOT)} 일지 목록이 날짜·순번 순서가 아님')
 
 
