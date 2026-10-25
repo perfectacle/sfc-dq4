@@ -11,7 +11,12 @@
 방어 상태(20:AF85): 1 이면 절반, 2·3 이면 1/5. 주문이 몬스터에게: 양 × 27:8055[내성] / 256(255 면 그대로),
 주인공 레벨 - 10 ≥ 무리 레벨이면 27:8059(20:AB9E).
 
+잠(20:8944): 턴마다 카운터(일행 칸 +8 bit4-5, 처음 3)를 하나 줄이고 난수(0~3) < 20:8A49[카운터] = 4,3,2,1 이면 깸.
+몬스터 행동 칸 고르기(21:B4D1, 필드 69): 0 고르게, 1~4 는 28:82BB 의 무게 표, 5·6 차례대로, 7 은 고르지 않음.
+전투 도구(20:BA4C): 27:819A 의 물건 53개 → 20:C162 의 처리기. 처리기 안의 LDA #행동 / STA $10F7 이 효과 주문이다.
+
 사용:
+  python sfc/dq5/tools/dq5damage.py --items rom/dq5.sfc   # 전투 도구 53개와 효과 행동
   python sfc/dq5/tools/dq5damage.py 200 5            # 공격력 200, 수비력 5: 피해 범위와 회심 범위
   python sfc/dq5/tools/dq5damage.py 64 120 --party   # 맞는 쪽이 일행
 """
@@ -56,7 +61,47 @@ def guarded(damage, state):
     return damage if state == 0 else damage >> 1 if state == 1 else damage // 5
 
 
+WAKE = (4, 3, 2, 1)
+AI_WEIGHTS = ((68, 58, 48, 38, 27, 17), (210, 29, 10, 4, 2, 1), (64, 64, 64, 21, 21, 21), (64, 64, 32, 32, 32, 32))
+BATTLE_ITEMS, ITEM_HANDLERS = 0x27819A, 0x20C162
+
+
+def wake_chance(counter):
+    """줄인 뒤의 잠 카운터 0~3 에서 깰 확률(4분의)."""
+    return WAKE[counter] / 4
+
+
+def battle_items(rom):
+    """[(물건, 처리기 주소, 효과 행동 또는 None)]. 효과 행동은 처리기 안(다음 처리기 앞까지)의 첫 LDA #n / STA $10F7."""
+    entries, k = [], 0
+    while rom.u8(BATTLE_ITEMS + k) != 0xFF:
+        entries.append((rom.u8(BATTLE_ITEMS + k), 0x200000 | rom.u16(ITEM_HANDLERS + 2 * k)))
+        k += 1
+    starts = sorted({h for _, h in entries})
+    out = []
+    for item, handler in entries:
+        end = min([h for h in starts if h > handler] + [handler + 0x20])
+        action = None
+        for a in range(handler, end - 4):
+            if rom.u8(a) == 0xA9 and rom.u8(a + 2) == 0x8D and rom.u16(a + 3) == 0x10F7:
+                action = rom.u8(a + 1)
+                break
+        out.append((item, handler, action))
+    return out
+
+
 def main():
+    if len(sys.argv) > 2 and sys.argv[1] == '--items':
+        import os
+        sys.path.insert(0, os.path.dirname(__file__))
+        from dq5chest import item_name
+        from dq5map import Rom
+        from dq5text import string, string_codes, text
+        rom = Rom(open(sys.argv[2], 'rb').read())
+        for item, handler, action in battle_items(rom):
+            act = f'{action:02X} {text(string_codes(rom, string(rom, 3, action)))}' if action is not None else '-'
+            print(f'{item:02X} {item_name(rom, item)}  {handler >> 16:02X}:{handler & 0xFFFF:04X}  {act}')
+        return 0
     ap = argparse.ArgumentParser()
     ap.add_argument('attack', type=int)
     ap.add_argument('defense', type=int)
