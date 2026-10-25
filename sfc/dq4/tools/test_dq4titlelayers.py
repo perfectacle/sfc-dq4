@@ -75,6 +75,14 @@ class LayerTests(unittest.TestCase):
         leaked = mask & ~protected & priority
         self.assertFalse(np.any(leaked[layers.CLOUD_Y:layers.CLOUD_Y + 32]))
 
+    def test_lower_left_fragment_is_transparent_but_text_remains(self):
+        blobs, _ = layers.read_pack(self.pack)
+        mask = np.frombuffer(blobs['foreground-mask.bin'], dtype=np.uint8).reshape(224, 256) > 0
+        glyphs = np.array(layers.glyph_mask()) > 0
+        self.assertFalse(np.any(mask[185:, 180:208]))
+        self.assertTrue(np.all(mask[glyphs]))
+        self.assertTrue(np.any(mask[185:200, 208:]))
+
     def test_unused_oam_hidden_and_page_parity(self):
         for phase in (0, 1, 127):
             oam = layers.oam_frame(phase)
