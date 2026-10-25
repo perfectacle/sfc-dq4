@@ -7,6 +7,11 @@
 | `dq4graphics.py [--check] [--output 폴더]` | 롬 없이 스프라이트·블록·샘플 맵·타이틀을 PNG·SFC 4bpp·팔레트로 출력. `--check` 는 파일을 쓰지 않고 반복 생성·왕복 검사 |
 | `dq4romassets.py rom --out 폴더` | 라이안 정면의 DQ5 엔진 데이터·별도 롬·IPS와 역변환 검증 보고서 생성. 기존 공용 팔레트를 유지하는 색 변경 시안. [롬 삽입](../docs/dq4-rom-assets-format.md) |
 | `dq4romgallery.py --input 폴더 --out 폴더` | ROM 변환 결과와 인물 시안의 비교 갤러리 생성. 시각 확인과 기술 검증 상태를 구분 |
+| `dq4titleassets.py [--out 폴더] [--assets-dir 폴더]` | 선택된 실제 크기 한글 타이틀을 다시 줄이지 않고 PNG·CHR·MAP·PAL과 갤러리로 출력. [타이틀 규격](../docs/dq4-title-format.md) |
+| `dq4titlepatch.py --rom 롬 --input 폴더 --out 롬 [--asar 실행파일]` | 승인 타이틀을 DQ5 시작 구간에 연결한 별도 롬·IPS 생성. 페이드·광택·입력·메뉴 복귀. [연결 규격](../docs/dq4-title-format.md#dq5-타이틀-구간-연결) |
+| `dq4titlepreview.py --input 폴더 --out 롬 [--asar 실행파일]` | 타이틀 에셋으로 독립 64KiB SFC 미리보기 롬 생성. DQ5 삽입본과 구분 |
+| `lua/dq4titleintegrationcheck.lua` | 통합 롬의 화면·VRAM·음악·메뉴 진입 관찰. `OUT`, `MAXF`, `EVERY`, `SEQ`, `RESETAT` 사용 |
+| `lua/dq4titlecheck.lua` | 독립 미리보기의 화면·VRAM·CGRAM 관찰. `OUT`, `FRAME` 사용 |
 | `dq4pixels.py` | 스프라이트·지형 제작물을 모으는 모듈 |
 | `dq4sprites.py` | DQ4 인물 9명의 16×24 스프라이트 원본. 인물별 팔레트와 색 번호 문자 행렬(방향마다 정지 자세, 보행은 몸만 바꿈). 실행하면 색 수와 행 폭 검사 |
 | `dq4spritelab.py hero\|data 이름\|compare 이름` | `hero` 는 `lua/dq4objdump.lua` 덤프에서 DQ5 주인공 4방향을 16×24 로 복원(`work/dq4-sprites/dq5-hero.png`), `data` 는 `lua/dq4sprite.lua` 용 4bpp·팔레트 Lua, `compare` 는 원작과 같은 배경·8배로 나란히. [sfc/dq4/docs/dq4-sprite-format.md](../docs/dq4-sprite-format.md) |
