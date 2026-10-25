@@ -1,6 +1,6 @@
 # DQ4(FC) 필드 인물·탈것 그림과 전투 몬스터 그림
 
-FC 원작의 필드 인물(일행·마을 사람·탈것)과 전투 몬스터 그림을 롬에서 그대로 뽑는 방법입니다. SFC DQ5 규격으로 스프라이트를 새로 그릴 때 원작을 옆에 놓고 보는 참조용입니다. 디코더·열람 도구는 [fc/dq4/tools/dq4fcsprite.py](../tools/dq4fcsprite.py), 전투 덤프용 프로브는 [fc/dq4/tools/lua/spritebattle.lua](../tools/lua/spritebattle.lua)·[spriteboss.lua](../tools/lua/spriteboss.lua) 이고, 찾아낸 과정은 [2026-10-25-29 일지](../journal/2026-10-25-29-fcsprite.md)·[2026-10-25-45 일지](../journal/2026-10-25-45-fcsprite2.md)·[2026-10-25-56 일지](../journal/2026-10-25-56-fcgfx3.md) 에 있습니다.
+FC 원작의 필드 인물(일행·마을 사람·탈것)과 전투 몬스터 그림을 롬에서 그대로 뽑는 방법입니다. SFC DQ5 규격으로 스프라이트를 새로 그릴 때 원작을 옆에 놓고 보는 참조용입니다. 디코더·열람 도구는 [fc/dq4/tools/dq4fcsprite.py](../tools/dq4fcsprite.py), 전투 덤프용 프로브는 [fc/dq4/tools/lua/spritebattle.lua](../tools/lua/spritebattle.lua)·[spriteboss.lua](../tools/lua/spriteboss.lua) 이고, 찾아낸 과정은 [2026-10-25-29 일지](../journal/2026-10-25-29-fcsprite.md)·[2026-10-25-45 일지](../journal/2026-10-25-45-fcsprite2.md)·[2026-10-25-58 일지](../journal/2026-10-25-58-fcgfx3.md) 에 있습니다.
 
 주소 표기는 `뱅크:$주소` 입니다. 근거 표시가 없는 것은 MesenCE 덤프와 디코더 결과가 같음을 확인한 것이고, 「코드 읽기」 는 리스팅만 읽은 것입니다. 롬에서 뽑은 그림은 저작권 데이터라 `work/` 에만 두고 커밋하지 않습니다.
 
