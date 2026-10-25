@@ -7,6 +7,19 @@ local every = tonumber(os.getenv("EVERY") or "10")
 local first = tonumber(os.getenv("FROM") or "0")
 local resetat = tonumber(os.getenv("RESETAT") or "-1")
 local frame = 0
+local dma
+if os.getenv("TRACE_DMA") == "1" then
+  dma = assert(io.open(out .. "/dma.tsv", "w"))
+  dma:write("frame\tscanline\tbytes\tsource_bank\n")
+  emu.addMemoryCallback(function()
+    local state = emu.getState()
+    local count = emu.read(0x4305, emu.memType.snesMemory)
+      + emu.read(0x4306, emu.memType.snesMemory) * 256
+    local bank = emu.read(0x4304, emu.memType.snesMemory)
+    dma:write(string.format("%d\t%d\t%d\t%02X\n", frame, state["ppu.scanline"], count, bank))
+    dma:flush()
+  end, emu.callbackType.write, 0x420B)
+end
 local active_audio_frames = 0
 local audio = assert(io.open(out .. "/audio.tsv", "w"))
 audio:write("frame\tleft\tright\tactive_frames\n")
@@ -15,6 +28,15 @@ for button, start, count in (os.getenv("SEQ") or ""):gmatch("(%a+)@(%d+):(%d+)")
   seq[#seq + 1] = {button, tonumber(start), tonumber(count)}
 end
 local log = assert(io.open(out .. "/events.txt", "w"))
+local motion
+if os.getenv("MOTION_PC") then
+  motion = assert(io.open(out .. "/motion.tsv", "w"))
+  motion:write("frame\tcounter\tphase\n")
+  emu.addMemoryCallback(function()
+    local y = emu.getState()["cpu.y"]
+    motion:write(string.format("%d\t%d\t%d\n", frame, y, y % 128)); motion:flush()
+  end, emu.callbackType.exec, assert(tonumber(os.getenv("MOTION_PC"), 16)))
+end
 for _, address in ipairs({0x03FDFB, 0x308000, 0x03FE5C, 0x00A6F1, 0x25801C}) do
   emu.addMemoryCallback(function()
     log:write(string.format("frame=%d pc=%06X\n", frame, address)); log:flush()
@@ -57,7 +79,13 @@ emu.addEventCallback(function()
     file:close()
     dump(out .. "/v" .. name .. ".bin", emu.memType.snesVideoRam, 0x10000)
     dump(out .. "/c" .. name .. ".bin", emu.memType.snesCgRam, 512)
+    dump(out .. "/o" .. name .. ".bin", emu.memType.snesSpriteRam, 544)
   end
   if frame == resetat then emu.reset() end
-  if frame >= maxf then log:close(); audio:close(); emu.stop(0) end
+  if frame >= maxf then
+    log:close(); audio:close()
+    if dma then dma:close() end
+    if motion then motion:close() end
+    emu.stop(0)
+  end
 end, emu.eventType.endFrame)

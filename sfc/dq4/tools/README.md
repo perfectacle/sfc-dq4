@@ -7,6 +7,9 @@
 | `dq4graphics.py [--check] [--output 폴더]` | 롬 없이 스프라이트·블록·샘플 맵·타이틀을 PNG·SFC 4bpp·팔레트로 출력. `--check` 는 파일을 쓰지 않고 반복 생성·왕복 검사 |
 | `dq4romassets.py rom --out 폴더` | 라이안 정면의 DQ5 엔진 데이터·별도 롬·IPS와 역변환 검증 보고서 생성. 기존 공용 팔레트를 유지하는 색 변경 시안. [롬 삽입](../docs/dq4-rom-assets-format.md) |
 | `dq4romgallery.py --input 폴더 --out 폴더` | ROM 변환 결과와 인물 시안의 비교 갤러리 생성. 시각 확인과 기술 검증 상태를 구분 |
+| `dq4titlelayers.py --out 폴더` | 고정 전경·하늘·용의 128개 중간 자세와 차이 전송 데이터를 생성. [애니메이션 규격](../docs/dq4-title-animation.md) |
+| `dq4titlelayerpatch.py --rom 롬 --input 폴더 --out 롬 [--asar 실행파일]` | 레이어별로 움직이는 DQ5 통합 롬·IPS 생성 |
+| `dq4titleanimation.py --out 폴더` | 전체 화면 프레임 교체 실험용 변환. 최종 레이어 방식과 구분 |
 | `dq4titleassets.py [--out 폴더] [--assets-dir 폴더]` | 선택된 실제 크기 한글 타이틀을 다시 줄이지 않고 PNG·CHR·MAP·PAL과 갤러리로 출력. [타이틀 규격](../docs/dq4-title-format.md) |
 | `dq4titlepatch.py --rom 롬 --input 폴더 --out 롬 [--asar 실행파일]` | 승인 타이틀을 DQ5 시작 구간에 연결한 별도 롬·IPS 생성. 페이드·광택·입력·메뉴 복귀. [연결 규격](../docs/dq4-title-format.md#dq5-타이틀-구간-연결) |
 | `dq4titlepreview.py --input 폴더 --out 롬 [--asar 실행파일]` | 타이틀 에셋으로 독립 64KiB SFC 미리보기 롬 생성. DQ5 삽입본과 구분 |

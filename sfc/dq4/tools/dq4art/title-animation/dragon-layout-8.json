@@ -1,0 +1,8 @@
+{
+  "file": "dragon-poses-8.png",
+  "grid": [4, 2],
+  "connected_components": true,
+  "anchors": [[295, 296], [720, 296], [1144, 296], [1574, 296], [292, 681], [718, 681], [1143, 681], [1573, 681]],
+  "native_width": 125,
+  "target_anchor": [84, 64]
+}

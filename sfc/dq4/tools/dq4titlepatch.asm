@@ -1,5 +1,13 @@
 lorom
 
+if defined("animation_enabled") == 0
+  !animation_enabled = 0
+endif
+if defined("animation_frames") == 0
+  !animation_frames = 8
+endif
+assert !animation_frames == 8 || !animation_frames == 32 || !animation_frames == 64
+
 org $03FDFB
   jml Title
   nop
@@ -82,6 +90,9 @@ Title:
 
 Frame:
   jsl $009506
+if !animation_enabled
+  jsr AnimationFrame
+endif
   cpy #$0020
   bcs .open
   tya
@@ -111,7 +122,9 @@ Frame:
 .full:
   lda #$0F
   sta $1D
+if !animation_enabled == 0
   jsr Gleam
+endif
 .input:
   cpy #$0040
   bcc .next
@@ -149,6 +162,25 @@ FadeOut:
   sep #$20
   bne .release
   jsl $009556
+if !animation_enabled
+  ; Restore the cleared boot VRAM before the native loader rebuilds the menu font.
+  lda #$80
+  sta $2115
+  ldx #$0000
+  stx $2116
+  stx $4305
+  lda #$09
+  sta $4300
+  lda #$18
+  sta $4301
+  ldx #TitleZero
+  stx $4302
+  lda #$30
+  sta $4304
+  lda #$01
+  sta $420B
+  jsl $02F9E3
+endif
   ; The original menu's palette copy was never modified by the title.
   stz $2121
   stz $4300
@@ -193,6 +225,74 @@ FadeOut:
   plp
   jml $03FE5C
 
+if !animation_enabled
+AnimationFrame:
+  phx
+  rep #$20
+  tya
+  and #$0007
+  cmp #$0007
+  beq .flip
+  xba
+  asl
+  asl
+  asl
+  pha
+  tya
+  and #$0008
+  beq .lower
+  pla
+  ora #$4000
+  bra .destination
+.lower:
+  pla
+.destination:
+  tax
+  stx $2116
+  tya
+  and #$0007
+  xba
+  asl
+  asl
+  asl
+  asl
+  ora #$8000
+  tax
+  stx $4302
+  tya
+  lsr
+  lsr
+  lsr
+  inc
+  and.w #(!animation_frames-1)
+  clc
+  adc #$0033
+  sep #$20
+  sta $4304
+  lda #$80
+  sta $2115
+  lda #$01
+  sta $4300
+  lda #$18
+  sta $4301
+  ldx #$1000
+  stx $4305
+  lda #$01
+  sta $420B
+  bra .done
+.flip:
+  tya
+  and #$0008
+  lsr
+  ora #$0020
+  sep #$20
+  sta $210B
+.done:
+  sep #$20
+  plx
+  rts
+endif
+
 Gleam:
   phx
   rep #$20
@@ -231,6 +331,11 @@ Palette:
   plx
   rts
 
+if !animation_enabled
+TitleZero:
+  db $00
+endif
+
 assert pc() <= $309000
 print "title_entry=",hex(Title)
 print "title_frame=",hex(Frame)
@@ -244,3 +349,16 @@ org $328800
 incbin "title.pal"
 org $32A000
 incbin "gleam.pal"
+
+if !animation_enabled
+!animation_index = 0
+while !animation_index < !animation_frames
+  org $338000+(!animation_index*$10000)
+  if !animation_index < 10
+    incbin "frame0!{animation_index}.chr"
+  else
+    incbin "frame!{animation_index}.chr"
+  endif
+  !animation_index #= !animation_index+1
+endwhile
+endif
