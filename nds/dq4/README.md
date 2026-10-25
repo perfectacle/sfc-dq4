@@ -53,3 +53,4 @@ uv run --locked krpatch nds unpack rom/dq4ds-kr.nds work/nds/kr
 - [2026-10-25-09: 전투 테스트 Select 모드와 fk01](journal/2026-10-25-09-debug3.md)
 - [2026-10-25-10: 동료 대화 거르기 루틴, 아이템 표, 남은 PARAM 칸](journal/2026-10-25-10-param2.md)
 - [2026-10-25-12: 시간대·인물 레코드·필드 좌표 범위·메시지 디버그 키·fk01 조건](journal/2026-10-25-12-debug4.md)
+- [2026-10-25-15: 장비 인물 비트, 몬스터 내성, 동료 대화 줄 수와 조건 값](journal/2026-10-25-15-param3.md)

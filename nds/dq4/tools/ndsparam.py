@@ -205,32 +205,38 @@ def edit1(a, b):
     return len(a) == len(b) and sum(x != y for x, y in zip(a, b)) == 1
 
 
-ITEM_TABLE, ITEM_SIZE, ITEM_COUNT = 0x02095584, 32, 162
-ITEM_KINDS = {0: '도구', 1: '무기', 2: '갑옷·방패·투구', 3: '장신구3', 4: '장신구4', 5: '장신구5', 6: '장신구6'}
+ITEM_TABLE, ITEM_SIZE, ITEM_COUNT = 0x02095594, 32, 162
+ITEM_KINDS = {0: '도구', 1: '무기', 2: '방어구', 3: '장신구', 4: '장신구', 5: '장신구', 6: '장신구'}
+# +14 장비 비트: 비트 n 이 인물 번호 n+1(ソロ, ソフィア, ライアン, …, マーニャ, ピサロ)
+EQUIP_BITS = ('ソロ', 'ソフィア', 'ライアン', 'アリーナ', 'クリフト', 'ブライ', 'トルネコ', 'ミネア', 'マーニャ', 'ピサロ')
 
 
 def item_table(root):
-    """ARM9 0x02095584 부터 32바이트 × 162(아이템 1~162). +0 이름 번호, +2 종류, +10 값, +12 팔 값, +16 강도."""
+    """ARM9 0x02095594 부터 32바이트 레코드(아이템 n 은 + 32×(n−1)).
+    +0 값, +2 팔 값, +6 강도, +10 아이템 번호, +12 종류, +14 장비 비트."""
     with open(os.path.join(root, 'arm9.bin'), 'rb') as fh:
         d = fh.read()
     out = {}
     for n in range(1, ITEM_COUNT + 1):
         r = d[ITEM_TABLE - 0x02000000 + (n - 1) * ITEM_SIZE:][:ITEM_SIZE]
-        price, sell = struct.unpack_from('<HH', r, 0x10)
-        out[n] = {'name_no': r[0], 'kind': r[2], 'price': price, 'sell': sell, 'power': r[0x16], 'raw': r}
+        price, sell = struct.unpack_from('<HH', r, 0)
+        equip = struct.unpack_from('<H', r, 0x14)[0]
+        out[n] = {'no': r[0x10], 'kind': r[0x12], 'price': price, 'sell': sell, 'power': r[6], 'equip': equip,
+                  'who': [nm for b, nm in enumerate(EQUIP_BITS) if equip >> b & 1], 'raw': r}
     return out
 
 
 def cmd_items(root, rom):
     rows, _dsp = classify_items(root, rom)
     table = item_table(root)
-    print('| DS 번호 | DS 이름 | 종류 | 강도 | DS 값 | FC ID | FC 이름 | FC 값 | 판정 |')
-    print('| --- | --- | --- | --- | --- | --- | --- | --- | --- |')
+    print('| DS 번호 | DS 이름 | 종류 | 강도 | DS 값 | 장비 | FC ID | FC 이름 | FC 값 | 판정 |')
+    print('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |')
     for n, d, i, nm, price, mark in sorted(rows, key=lambda r: (r[0] or 999, r[2] or 0)):
         fid = f'{i:02X}' if i is not None else ''
         t = table.get(n, {})
         kind = ITEM_KINDS.get(t.get('kind'), '') if t else ''
-        print(f"| {n or ''} | {d} | {kind} | {t.get('power', '')} | {t.get('price', '')} | {fid} | {nm.strip()} | "
+        who = '·'.join(t['who']) if t and t['kind'] else ''
+        print(f"| {n or ''} | {d} | {kind} | {t.get('power', '')} | {t.get('price', '')} | {who} | {fid} | {nm.strip()} | "
               f"{price if price else ''} | {mark} |")
     print('\n' + ' '.join(f'{k} {v}' for k, v in collections.Counter(r[5] for r in rows).most_common()))
 
@@ -334,9 +340,9 @@ def cmd_chests(root, maps):
 # 조건 종류(+1E·+1F·+20)와 값(+04·+08·+0C). ARM9 0x0203694C 의 갈래 표
 TALK_CODES = {1: '이야기 플래그 #{} 켜짐', 2: '이야기 플래그 #{} 꺼짐', 3: '플래그B #{} 켜짐', 4: '플래그B #{} 꺼짐',
               5: '플래그C #{} 켜짐', 6: '플래그C #{} 꺼짐', 7: '아이템 {} 가짐', 8: '아이템 {} 없음',
-              9: '선두 인물 {}', 10: '선두 +50 = 0', 11: '선두 +50 = 1', 12: '관리자 +1B4 = {}',
-              13: '5 − 0x020ED16E = {}', 14: '5 − 0x020ED16F = {}', 15: '0x020ED4B4 검사 = 1',
-              16: '0x020ED4B4 검사 = 0', 17: '0x020ED4B4 검사 = 0', 18: '관리자 +1B8 = {}'}
+              9: '선두 인물 {}', 10: '선두 +50 = 0', 11: '선두 +50 = 1', 12: '이동 값(0x020B91C8) = {}',
+              13: 'スコット 고용 경과 {}', 14: 'ロレンス 고용 경과 {}', 15: '변장 중',
+              16: '변장 아님', 17: '변장 아님', 18: '방금 얻은 열쇠 아이템 {}'}
 # 일행 칸 조건: (바이트, 비트 자리, 인물 번호들). 값 1~5 는 TALK_SLOT_MODES
 TALK_SLOTS = ((0x22, 3, '주인공'), (0x23, 0, 'ソロ'), (0x23, 3, 'ソフィア'), (0x24, 0, 'ライアン'),
               (0x24, 3, 'アリーナ'), (0x25, 0, 'クリフト'), (0x25, 3, 'ブライ'), (0x26, 0, 'トルネコ'),
