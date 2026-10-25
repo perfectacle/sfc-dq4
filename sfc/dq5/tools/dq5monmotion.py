@@ -7,6 +7,7 @@
 사용:
   python sfc/dq5/tools/dq5monmotion.py rom/dq5.sfc 00:3,03:2 --png work/mm      # 무리 몬스터:마릿수(16진:10진)
   python sfc/dq5/tools/dq5monmotion.py rom/dq5.sfc 00:3 --check-hop work/m7 --check-hit work/m1
+  python sfc/dq5/tools/dq5monmotion.py rom/dq5.sfc --shots work/e26 1338 1600 boss-sink --png work/mm   # 게임 화면 GIF
 --check-* 는 lua/dq5monlog.lua 덤프(w<프레임>.bin = 7E:0C00~, o<프레임>.oam)와 프레임마다 견준다.
 """
 import argparse
@@ -128,16 +129,34 @@ def check_hit(folder, x, y):
     return out
 
 
+def shots_anim(folder, first, last, outdir, stem, title):
+    """dq5monlog.lua 의 SHOTS=1 화면(s<프레임>.png)을 위 SCREEN_H 줄만 잘라 시트·GIF 로. 게임을 찍은 것이라
+    화면을 찍는 프레임이 1~3프레임 흔들린다."""
+    from PIL import Image
+    frames = []
+    for f in range(first, last + 1):
+        p = os.path.join(folder, f's{f:05d}.png')
+        if os.path.exists(p):
+            frames.append(Image.open(p).convert('RGBA').crop((0, 0, 256, SCREEN_H)))
+    return save(frames, outdir, stem, title)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('rom')
-    ap.add_argument('groups', help='몬스터:마릿수 쉼표 목록(몬스터 16진)')
+    ap.add_argument('groups', nargs='?', help='몬스터:마릿수 쉼표 목록(몬스터 16진)')
+    ap.add_argument('--shots', nargs=4, metavar=('DIR', 'FIRST', 'LAST', 'NAME'),
+                    help='dq5monlog SHOTS=1 화면을 FIRST~LAST 프레임 GIF 로(--png 폴더에 NAME.gif·png)')
     ap.add_argument('--target', type=int, default=0)
     ap.add_argument('--png', help='그림 폴더')
     ap.add_argument('--check-hop', help='dq5monlog 덤프 폴더(行動 89)')
     ap.add_argument('--check-hit', help='dq5monlog 덤프 폴더(맞음)')
     args = ap.parse_args()
     rom = Rom(open(args.rom, 'rb').read())
+    if args.shots:
+        d, a, b, name = args.shots
+        print(json.dumps(shots_anim(d, int(a), int(b), args.png, name, name), ensure_ascii=False))
+        return 0
     groups = [(int(m, 16), int(n)) for m, n in (g.split(':') for g in args.groups.split(','))]
     slots = scene(rom, groups)
     for k, s in enumerate(slots):
