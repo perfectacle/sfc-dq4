@@ -1,0 +1,36 @@
+{
+  "generator": "built-in image_gen",
+  "reference": "../title-ko.png",
+  "visual_status": "animation_revision_pending_review",
+  "assets": {
+    "background.png": {
+      "purpose": "sky/cloud/castle plate with dragon and title removed",
+      "prompt_summary": "Preserve sunset pixel-art scene; remove dragon and all lettering, reconstruct occluded sky."
+    },
+    "dragon-poses.png": {
+      "purpose": "four articulated wing poses on transparent 2x2 sheet",
+      "prompt_summary": "Same blue and orange dragon facing right; fixed torso/head, upstroke, mid-down, downstroke, mid-up. Transparent background."
+    },
+    "cloud-strip.png": {
+      "purpose": "transparent repeating horizontal cloud layer",
+      "prompt_summary": "Single seamless horizontal purple-blue and peach-gold pixel-art cloud band, true alpha, no castle/text, matching reference sunset."
+    },
+    "dragon-poses-8.png": {
+      "purpose": "eight articulated wing keyframes on transparent 4x2 sheet",
+      "prompt_summary": "Use the four-pose dragon as reference. Keep torso, face, legs, tail and scale fixed while wings move through an eight-frame upstroke/downstroke cycle. True alpha, no grid or text."
+    },
+    "dragon-rig.png": {
+      "purpose": "fixed body plus separately articulated near/far wings",
+      "prompt_summary": "Decompose reference blue dragon into wingless body and two fully spread wings on transparent background, preserve design and shoulder pivots."
+    },
+    "sky.png": {
+      "purpose": "scrolling cloud sky without solid landmarks",
+      "prompt_summary": "Remove castle and mountains from background plate, replace with matching sunset clouds. Preserve mood and pixel art; horizontally repeating sky."
+    }
+  },
+  "invariants": [
+    "original title-ko.png remains unchanged",
+    "logo and subtitle use original source pixels",
+    "animation is newly authored SFC adaptation, not extracted NDS graphics"
+  ]
+}
