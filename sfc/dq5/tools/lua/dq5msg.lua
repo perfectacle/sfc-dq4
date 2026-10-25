@@ -6,7 +6,8 @@
 --   SHOTS="300,400"         그 프레임 화면을 sNNNNN.png 로
 --   DUMP="300:7E2000:64"    그 프레임에 메모리(CPU 주소부터 길이)를 16진으로 기록
 --   WRAMWATCH="119F-13FF"  WRAM 오프셋 범위에 쓰는 PC 를 처음 한 번씩(뱅크 거울과 상관없이) 기록.
---                           WRAMWATCHBY=addr 면 주소마다 처음 한 번씩(낮은 8KB 거울 주소로 묶음)
+--                           WRAMWATCHBY=addr 면 주소마다 처음 한 번씩(낮은 8KB 거울 주소로 묶음), WRAMWATCHREAD=1 이면 읽기도(WRAMR). WWFROM 프레임부터
+--   COVER="008000-3FFFFF"   그 범위에서 실행한 PC 와 그때의 M·X(cover.txt, tools/listing.py 가 읽음)
 --   VRAMDUMP="300,400"      그 프레임에 VRAM 64KB 를 vNNNNN.bin 으로
 --   BG3FONT="26528:8A"      2프레임째에 롬(파일 오프셋)의 1bpp 글자 n 개를 전원을 켤 때(04:E17D)처럼 둘째 평면 FF 로 BG3 타일 1~ 에
 --                           다시 써 넣는다(세이브스테이트의 VRAM 에는 고친 롬의 창 글자가 없으므로)
@@ -64,15 +65,29 @@ local ww = os.getenv("WRAMWATCH")
 local wseen = {}
 if ww then
   local a, b = ww:match("(%x+)-(%x+)")
-  emu.addMemoryCallback(function(adr, v)
-    local s = emu.getState()
-    local key = string.format("%02X:%04X", s["cpu.k"], s["cpu.pc"])
-    if os.getenv("WRAMWATCHBY") == "addr" and adr then key = math.floor(adr) % 0x2000 end
-    if not wseen[key] then
-      wseen[key] = true
-      log[#log + 1] = string.format("%d WRAM %05X=%02X pc=%s", n, adr, v or 0, key)
-    end
-  end, emu.callbackType.write, tonumber(a, 16), tonumber(b, 16), emu.cpuType.snes, emu.memType.snesWorkRam)
+  local function watch(kind, ctype)
+    emu.addMemoryCallback(function(adr, v)
+      if n < wwfrom then return end
+      local s = emu.getState()
+      local key = string.format("%s %02X:%04X", kind, s["cpu.k"], s["cpu.pc"])
+      if os.getenv("WRAMWATCHBY") == "addr" and adr then key = kind .. (math.floor(adr) % 0x2000) end
+      if not wseen[key] then
+        wseen[key] = true
+        log[#log + 1] = string.format("%d WRAM%s %05X=%02X pc=%02X:%04X", n, kind, adr or 0, v or 0, s["cpu.k"], s["cpu.pc"])
+      end
+    end, ctype, tonumber(a, 16), tonumber(b, 16), emu.cpuType.snes, emu.memType.snesWorkRam)
+  end
+  watch("", emu.callbackType.write)
+  if os.getenv("WRAMWATCHREAD") then watch("R", emu.callbackType.read) end
+end
+local cover = os.getenv("COVER")
+local cst = {}
+if cover then
+  local a, b = cover:match("(%x+)-(%x+)")
+  emu.addMemoryCallback(function(addr)
+    local k = addr * 256 + (emu.getState()["cpu.ps"] & 0x30)
+    cst[k] = (cst[k] or 0) + 1
+  end, emu.callbackType.exec, tonumber(a, 16), tonumber(b, 16))
 end
 local maxf = tonumber(os.getenv("MAXF") or "1000")
 emu.addEventCallback(function()
@@ -120,6 +135,12 @@ emu.addEventCallback(function()
     end
   end
   if n == maxf then
+    if cover then
+      local t = {}
+      for k, c in pairs(cst) do t[#t + 1] = string.format("%06X %02X %d", k // 256, k % 256, c) end
+      table.sort(t)
+      L.write("cover.txt", table.concat(t, "\n") .. "\n")
+    end
     L.write("msg.txt", table.concat(log, "\n") .. "\n")
     L.shot("end.png")
     emu.stop()
