@@ -308,6 +308,9 @@ class Map:
         v = self.cell(x, y)
         if self.buf is not None and v & 0xE0 != area and not (mode == 4 and v & 0x1F == self.outside):
             return 0x21 if area else 0x20
+        if self.buf is None and self.f == 3 and v == 1:
+            # 0F:$D487·$EBD9·$ED5C: 필드 3 의 블록 01 은 난수(0F:$C891)가 FA 미만이면 18, 아니면 19 로 그린다
+            return 0x18
         return v & 0x1F
 
     def tiles(self, b):
@@ -649,7 +652,7 @@ def exit_special(g, k, n, flags=0, night=False, flag6295=0):
     if g == 0x45 and k == 4 and n in (0, 4) and flags & 0x10:
         return 6, 5 if n == 4 else n
     if g == 0x45 and k == 5 and n == 2 and flags & 0x02:
-        return 7, n
+        return 7, 3
     if g == 0x42 and k == 1 and flags & 0x08:
         return 0, n
     if g == 0x19 and k == 0 and night:
