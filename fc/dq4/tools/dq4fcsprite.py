@@ -13,6 +13,7 @@
   python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes changes            이벤트가 칸 그림을 바꾸는 곳(BRK 0D 87)과 へんげのつえ 그림 표
   python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes boss               デスピサロ 형태 0~7 → work/dq4-fcsprite/monster/AE-k.*
   python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes check-boss DIR...   lua/spriteboss.lua 덤프(f0~f7.nt/chr/pal/oam)와 비교
+  python fc/dq4/tools/dq4fcsprite.py rom/dq4.nes boss-steps [-v]   형태 루틴을 dq4cpu 로 돌려 BOSS_STEPS 를 롬에서 다시 만들고 비교
   --out 폴더 로 출력 위치를 바꾼다(기본 work/dq4-fcsprite). 롬 그림이므로 work/ 밖에 두지 않는다.
 
 필드 근거 루틴: 08:$85D3(BRK 04 87, 그림 하나 올리기), $859B(번호 → 표 번호), $80D5·$8132(레코드 → 타일 주소 4개),
@@ -30,6 +31,7 @@ import sys
 from kr_patch.fc import ines
 
 import dq4block
+import dq4cpu
 import dq4data
 import dq4map
 import dq4talk
@@ -301,7 +303,8 @@ def mon_pixels(prg, mid):
 # --- デスピサロ 형태 -------------------------------------------------------
 # 형태 번호 $6E7E(0~7)는 전투 시작 때 0(12:$8092)이고, 쓰러질 때마다 14:$A3F4 가 $A40D 의 루틴으로 다음 형태를 그린 뒤
 # 11:$9202·$9228 이 하나 올린다. 형태 루틴은 아래 부품 함수를 부른다. BOSS_STEPS 는 형태 k → k+1 루틴이 부르는 순서를
-# 전투에서 기록해 반복을 묶은 것(lua/spriteboss.lua CALLS)이고, 각 기호의 뜻·표는 롬에서 읽는다.
+# 전투에서 기록해 반복을 묶은 것(lua/spriteboss.lua CALLS)이고, 각 기호의 뜻·표는 롬에서 읽는다. boss_trace 가 형태
+# 루틴을 롬에서 그대로 돌려 같은 순서를 만든다(boss-steps 명령으로 비교).
 #   Bxx  14:$B100 CHR 부품 xx: 타일 $B169&0F 개(bit4 면 BG, 좌우 반전 짝으로 2장씩)를 07:$B1BA 워드에서 풀어
 #        PPU (($B169&10 | $B25C&0F) << 8 | $B25C&F0) 로. xx ≥ 2 는 자리 바이트 없음. 마지막 부품 데이터는 $7600 에도 남는다
 #   Nxx  14:$AA43 BG 부품: $AA66 개 칸(자리 $AB23 워드, 행 << 4 | 열)에 타일 $AAE4 + 2i(반전이면 +1), $AAE4 가 0 이면 0.
@@ -335,6 +338,56 @@ BOSS_STEPS = (
 BOSS_FORMS = len(BOSS_STEPS) + 1
 BOSS_COL0 = 0x0A         # 14:$9C84: 한 마리일 때 그림 왼쪽 열
 BOSS_PART_BANK = 0x07
+
+
+# 형태 루틴이 부르는 부품 함수 → BOSS_STEPS 기호. 인자는 그 함수가 읽는 레지스터·제로 페이지에서.
+BOSS_HOOKS = {
+    0xB100: lambda c: f'B{c.x:02X}', 0xAA43: lambda c: f'N{c.x:02X}', 0xAC1A: lambda c: f'O{c.x:02X}',
+    0xAE7C: lambda c: f'W{c.ram[0x0F]:X}', 0xAE80: lambda c: f'R{c.ram[0x0F]:X}',
+    0xAECD: lambda c: f'M{c.ram[4]:02X}.{c.ram[5]:02X}.{c.ram[8]:X}.{c.ram[9]:X}.{c.ram[0x0A]:02X}',
+    0x9C1D: lambda c: f'H{c.y:02X}.{c.ram[4]:02X}', 0xA44B: lambda c: f'S{c.y:X}.{c.ram[4]:02X}',
+    0xA9FD: lambda c: f'V{c.a:X}', 0xA07C: lambda c: 'Z0', 0xA080: lambda c: 'Z1',
+    0xA609: lambda c: f'C{c.ram[0]:X}', 0xA546: lambda c: 'P', 0xA77D: lambda c: f'Q{c.a:02X}',
+    0xA882: lambda c: f'Q{c.a:02X}', 0xA5DA: lambda c: 'K',
+    # 14:$A8BF 는 칸마다 도는 고리 머리라 처음 한 번만(열 끝 13·행 끝 0D·팔레트 3 은 고리의 상수)
+    0xA8BF: lambda c: f'A{c.ram[0]:02X}13.{c.ram[1]:02X}0D.3', 0xA42A: lambda c: 'T',
+}
+BOSS_WAIT = 0xFF74       # 1F:$FF74: 다음 프레임까지 기다림(NMI 가 없는 해석기에서는 바로 돌아오게 함)
+BOSS_BG_COLOR = 0x26     # $0514: 10:$AC44 가 전투마다 30·26·2A 중 고르는 색. 기록한 전투의 값(Q 기호가 읽음)
+
+
+def boss_trace(prg, k):
+    """형태 k → k+1 루틴(14:$A40D 의 k 번째)을 dq4cpu 로 처음부터 끝까지 돌려 부품 함수 호출을 BOSS_STEPS 기호로."""
+    c = dq4cpu.CPU(prg, B14)
+    c.stubs = {BOSS_WAIT}
+    c.wram[0x0E7E] = k
+    c.ram[0x514] = BOSS_BG_COLOR
+    out = []
+
+    def hook(fn):
+        def h(cpu):
+            if cpu.bank != B14:
+                return
+            t = fn(cpu)
+            if not (t[0] == 'A' and out and out[-1][0] == 'A'):
+                out.append(t)
+        return h
+    c.hooks = {a: hook(fn) for a, fn in BOSS_HOOKS.items()}
+    c.call(wd(prg, B14, 0xA40D + 2 * k), limit=5_000_000)
+    return out
+
+
+def cmd_boss_steps(prg, verbose):
+    bad = 0
+    for k in range(BOSS_FORMS - 1):
+        got, want = boss_trace(prg, k), boss_steps(k)
+        same = got == want
+        bad += not same
+        print(f'형태 {k} → {k + 1}: 루틴 {wd(prg, B14, 0xA40D + 2 * k):04X} 호출 {len(got)}개, BOSS_STEPS {len(want)}개 '
+              + ('같음' if same else '다름'))
+        if verbose or not same:
+            print('  ' + ' '.join(got))
+    return bad == 0
 
 
 def hflip_tile(d):
@@ -1168,6 +1221,8 @@ def main():
         write_boss(prg, md, monster_names(prg))
         for k in range(BOSS_FORMS):
             print(f'{md}/{BOSS:02X}-{k}.png')
+    elif a.cmd == 'boss-steps':
+        sys.exit(0 if cmd_boss_steps(prg, '-v' in a.args) else 1)
     elif a.cmd == 'changes':
         cmd_changes(prg)
     elif a.cmd == 'who':
