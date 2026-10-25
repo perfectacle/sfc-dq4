@@ -14,7 +14,8 @@ nds/dq4/tables/kr-font.tsv(일본어 코드 → 한글 음절)로 바꿔 읽는�
   python nds/dq4/tools/ndstext.py stats ROOT                   언어별 파일·문자열 수, 표지 통계
   python nds/dq4/tools/ndstext.py glossary JPROOT KRROOT FCROM  명칭 대조표(마크다운). FC 이름은 dq4 트랙의 dq4data.py 로 읽는다
   python nds/dq4/tools/ndstext.py talk JPROOT [장] [--kr KRROOT] 동료 대화 표(PARAM/param_player_talk<장>.dat) 레코드와 문장
-  python nds/dq4/tools/ndstext.py sjis JPROOT [KRROOT]          arm9.bin·오버레이의 Shift_JIS 문자열과 그것을 가리키는 포인터
+  python nds/dq4/tools/ndstext.py sjis JPROOT [KRROOT] [--kanji]  arm9.bin·오버레이의 Shift_JIS 문자열과 그것을 가리키는 포인터
+                                                               (--kanji: 가나 없는 한자·기호 문자열)
 JPROOT/KRROOT 는 `krpatch nds unpack` 으로 푼 폴더(그 아래 data/data/MESS/).
 """
 import collections
@@ -182,6 +183,7 @@ def cmd_stats(root):
 
 
 KANA = re.compile('[\u3040-\u30ff]')
+FULL = re.compile('@?[\u3000-\u303f\u4e00-\u9fff\uff01-\uff5e]+')
 
 
 def modules(root):
@@ -195,8 +197,9 @@ def modules(root):
             yield f'overlay_{i:04d}', ram, d
 
 
-def sjis_strings(d):
-    """4바이트 맞춘 자리에서 시작해 0 으로 끝나는 Shift_JIS 문자열(가나가 하나 이상, 반각 가나·사용자 정의 문자 없음, 줄바꿈 빼고 두 글자 이상)."""
+def sjis_strings(d, kanji=False):
+    """4바이트 맞춘 자리에서 시작해 0 으로 끝나는 Shift_JIS 문자열(가나가 하나 이상, 반각 가나·사용자 정의 문자 없음, 줄바꿈 빼고 두 글자 이상).
+    kanji 면 가나 없이 전각 글자(한자·기호)로만 된 것도 낸다. 잡음이 많아 cmd_sjis 가 포인터 있는 것만 남긴다."""
     out = []
     for o in range(0, len(d), 4):
         if o and d[o - 1]:
@@ -208,20 +211,22 @@ def sjis_strings(d):
             s = d[o:e].decode('cp932')
         except UnicodeDecodeError:
             continue
-        if len(s.replace('\n', '')) >= 2 and KANA.search(s) and not any(c < ' ' and c != '\n' or '\uff61' <= c <= '\uff9f' or '\ue000' <= c <= '\uf8ff' for c in s):
+        if len(s.replace('\n', '')) >= 2 and (KANA.search(s) or kanji and FULL.fullmatch(s)) and not any(c < ' ' and c != '\n' or '\uff61' <= c <= '\uff9f' or '\ue000' <= c <= '\uf8ff' for c in s):
             out.append((o, s))
     return out
 
 
-def cmd_sjis(jp_root, kr_root=None):
-    """모듈, 파일 오프셋, 주소, 가리키는 곳(표면 「표 시작+순번/개수」), 일본어, 한글패치에서 바뀌었으면 한글."""
+def cmd_sjis(jp_root, kr_root=None, kanji=False):
+    """모듈, 파일 오프셋, 주소, 가리키는 곳(표면 「표 시작+순번/개수」), 일본어, 한글패치에서 바뀌었으면 한글.
+    kanji 면 가나 없는 문자열만, 포인터가 있는 것만 낸다."""
     mods = list(modules(jp_root))
     kr = {n: d for n, _a, d in modules(kr_root)} if kr_root else {}
     table = kr_table() if kr_root else {}
     found = {}
     for name, ram, d in mods:
-        for o, s in sjis_strings(d):
-            found[ram + o] = (name, o, s)
+        for o, s in sjis_strings(d, kanji):
+            if not kanji or not KANA.search(s):
+                found[ram + o] = (name, o, s)
     refs = collections.defaultdict(list)
     for name, ram, d in mods:
         words = struct.unpack_from(f'<{len(d) // 4}I', d)
@@ -235,6 +240,8 @@ def cmd_sjis(jp_root, kr_root=None):
                 refs[words[i]].append(where)
             k = j + 1 if j == k else j
     for addr, (name, o, s) in sorted(found.items(), key=lambda x: (x[1][0], x[0])):
+        if kanji and not refs[addr]:
+            continue
         ko = ''
         if name in kr:
             raw = kr[name][o:kr[name].index(b'\0', o)]
@@ -262,7 +269,8 @@ def main(argv):
     elif argv[0] == 'glossary':
         cmd_glossary(argv[1], argv[2], argv[3])
     elif argv[0] == 'sjis':
-        cmd_sjis(argv[1], argv[2] if len(argv) > 2 else None)
+        rest = [a for a in argv[1:] if not a.startswith('--')]
+        cmd_sjis(rest[0], rest[1] if len(rest) > 1 else None, '--kanji' in argv)
     elif argv[0] == 'stats':
         cmd_stats(argv[1])
     else:

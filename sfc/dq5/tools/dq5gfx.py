@@ -1365,7 +1365,8 @@ def window_grid(rom, n):
     머리 +0·+1 위치, +2 아래 5비트 너비, +3 아래 4비트 높이·bit7 줄 간격 16점(sfc/dq5/docs/dq5-text-format.md 「창 레코드 머리」).
     목록 창: 첫 FE 부터. FE = 커서 칸 하나 뒤 글자, FF = 다음 줄, 바이트는 BG3 타일 번호 그대로. 84·83 xx 는 글자 xx 위 칸에
     탁점 84·반탁점 83(위 칸이 테두리면 92·93, 04:B258).
-    상태 창 꼴(+4 가 D0~D3): 뒤 4바이트 자리에 이름, 다음 8x 는 가로줄 하나와 그 뒤 x 줄. 자리 표시는 예시 값(WINDOW_SAMPLES, 이름은 SAMPLE_NAME)으로 채운다."""
+    상태 창 꼴(+4 가 D0~D3): 뒤 4바이트 자리에 이름, 다음 8x 는 가로줄 하나와 그 뒤 x 줄. 자리 표시는 예시 값(WINDOW_SAMPLES, 이름은 SAMPLE_NAME)으로 채운다.
+    커서 없는 글 창(+4 가 0, +6 부터 글): F3 은 이름 넉 자 자리."""
     from dq5text import window
     _, data = window(rom, n)
     if len(data) < 6:
@@ -1399,10 +1400,14 @@ def window_grid(rom, n):
             i += 1
     elif data[4] & 0x0F == 0 and 0xFE in data[5:8]:
         i = data.index(0xFE)
+    elif data[4] == 0 and 0xFF in data[6:] and all(b < 0x85 or b in (0xF3, 0xFE, 0xFF) for b in data[6:]):
+        # 커서 없는 글 창(이름 칸·말 빠르기 등): +6 부터 글, +5 위 니블만큼 첫 줄을 들여 씀(두 창 덤프로 확인).
+        # 자리 표시(85 xx·B0~ 등)가 섞인 창은 뜻을 모르는 제어가 있어 뺀다.
+        i, x, step = 6, 1 + (data[5] >> 4), 1
     elif data[4] & 0x0F and 0xFE in data[7:10]:
-        # 제목 있는 창(dq5text.window_header): +5 제목 번호(04:AD78), 둘째 줄에 제목, 셋째 줄에 가로줄, 넷째 줄부터 항목.
+        # 제목 있는 창(dq5text.window_header): +4 아래 니블 제목 자리, +5 제목 번호(04:AD78), 둘째 줄 제목, 셋째 줄 가로줄, 넷째 줄부터 항목.
         from dq5text import window_title
-        tx, title, j = 3, window_title(rom, data[5]), 0
+        tx, title, j = data[4] & 0x0F, window_title(rom, data[5]), 0
         while j < len(title):
             if title[j] in (0x92, 0x93) and j + 1 < len(title):
                 put(tx, 1, title[j + 1])
@@ -1433,6 +1438,12 @@ def window_grid(rom, n):
         elif b == 0xFF:
             x, y = 1, y + step
         elif b in (0x83, 0x84) and i + 1 < len(data):
+            if data[i + 1] in (0xFE, 0xFF):
+                # 뒤 글자 없이 줄 끝에 오면 위 칸에 탁점·반탁점만(이름 입력 창의 ゛゜ 칸)
+                if 0 < x < w - 1 and 0 < y < h - 1:
+                    grid[y - 1][x] = b
+                x, i = x + 1, i + 1
+                continue
             put(x, y, data[i + 1])
             if 0 < x < w - 1 and 0 < y < h - 1:
                 above = grid[y - 1][x]
@@ -1446,6 +1457,10 @@ def window_grid(rom, n):
         elif b < 0x89:
             put(x, y, b)
             x += 1
+        elif b == 0xF3:
+            for k in range(4):
+                put(x + k, y, 0x089)  # 이름 입력 칸: 아직 안 넣은 글자는 089(＊)
+            x += 4
         elif b in WINDOW_FIELDS:
             digits = WINDOW_SAMPLES[b].rjust(WINDOW_FIELDS[b])
             for k, ch in enumerate(digits):
@@ -1490,6 +1505,46 @@ def export_windows(rom, out):
     print(f'windows {count}')
 
 
+# 타이틀 뒤 모험의 서·이름 입력 화면: 창 레코드를 차례로 겹친 BG3 화면(덤프의 BG3 타일맵과 견줘 확인).
+# 겹친 테두리가 만나는 칸(08B 등)과 커서, 뒤 창이 어두워지는 팔레트는 게임이 따로 그려서 넣지 않았다.
+MENU_SCREENS = (
+    ('book', '모험의 서 첫 메뉴', (0x60,)),
+    ('book-new', '모험의 서 만들기(빈 칸 고르기)', (0x60, 0x68)),
+    ('name-entry', '이름 입력(히라가나)', (0x60, 0x6B, 0x6C)),
+    ('message-speed', '말 빠르기 고르기', (0x60, 0x6B, 0x6C, 0x63)),
+    ('sound', '스테레오·모노 고르기', (0x60, 0x6B, 0x6C, 0x63, 0x86)),
+)
+
+
+def menu_screen_map(rom, windows):
+    screen = [[0] * 32 for _ in range(28)]
+    for n in windows:
+        grid, wx, wy = window_grid(rom, n)
+        for y, row in enumerate(grid):
+            for x, w in enumerate(row):
+                if wy + y < 28 and wx + x < 32:
+                    screen[wy + y][wx + x] = w
+    return screen
+
+
+def export_menu_screens(rom, out):
+    o = lorom(UI_PALETTE)
+    colors = cgram_colors(rom.d[o:o + 8])
+    tiles = [chr_2bpp(t) for t in (ui_tiles(rom)[i * 16:i * 16 + 16] for i in range(150))]
+    for stem, title, windows in MENU_SCREENS:
+        img = Image.new('RGB', (256, 224), (0, 0, 0))
+        for y, row in enumerate(menu_screen_map(rom, windows)):
+            for x, w in enumerate(row):
+                t = w & 0xFF
+                if w and t < len(tiles):
+                    ti = tile_image(tiles[t], colors[0:4], bool(w & 0x400), bool(w & 0x800))
+                    img.paste(Image.new('RGB', (8, 8), colors[0]), (x * 8, y * 8))
+                    img.paste(ti, (x * 8, y * 8), ti)
+        out.save(img, f'gfx/screens/menu-{stem}.png', 'screens', title, '모험의 서·이름 입력',
+                 windows=' '.join(f'{n:02X}' for n in windows),
+                 note='창 레코드를 적힌 차례로 겹침. 테두리가 만나는 칸·커서·뒤 창 어둡게 하기는 빠짐')
+
+
 def the_end_tiles(rom):
     from dq5sprite import unpack
     lo, a = unpack(rom, THE_END_TILES, False)
@@ -1527,10 +1582,167 @@ def export_battle_windows(rom, out):
                  note='24:A4A4 글자 격자 → 24:A5D9 타일맵(dq5battlewin.py). 이름·숫자는 예시 값(ああああ·スライム·4·1·メラ)')
 
 
+# 오프닝 타이틀(모드 0, BG 넷 모두 2bpp). 타일은 모두 1F:D28B 런 길이 압축의 낮은·높은 바이트 줄기.
+# 로고(BG1)·V(BG2)는 02:E840 이 비트맵(한 줄 4바이트 = 32칸, 켜진 칸마다 다음 타일 번호)으로 타일맵을 만든다.
+# 로고는 02:EDED 의 타일 12개만 팔레트 1, V 는 02:EDF9 문턱 다섯 개로 줄마다 팔레트 1~5.
+# 성(BG4) 타일맵은 낮은 바이트 줄기 하나(0F:E7D4)이고 높은 바이트는 02:EA62 가 타일 번호 문턱표 02:EA84 로 정한다.
+# 그 뒤 줄기(0F:E9D1)는 BG3 의 물결 반짝임(타일 52 하나, 색 더하기)이다.
+TITLE_LAYERS = {
+    'logo': dict(chr=0x0FD97B, bitmap=0x02EDA1, rows=8, colors=0x0FECFB, ncolors=8, at=0x163),
+    'v': dict(chr=0x0FDED5, bitmap=0x02EDC1, rows=11, colors=0x0FED1B, ncolors=24, at=0x14B),
+}
+TITLE_LOGO_PAL1 = 0x02EDED
+TITLE_V_STEPS = 0x02EDF9
+TITLE_CASTLE_CHR, TITLE_CASTLE_MAP, TITLE_CASTLE_ATTR, TITLE_CASTLE_COLORS = 0x0FE41F, 0x0FE7D4, 0x02EA84, 0x02EE70
+# 링은 OBJ 4bpp(VRAM 워드 7000 = 타일 100~). 02:EDFE 의 4바이트 항목 [X][Y][세로 타일 수][속성] 마다 8x8 을
+# 아래로 이어 붙이고 타일 번호는 100 부터 차례로, FF 로 끝. 속성 30(우선순위 3)은 로고 앞, 00 은 로고 뒤.
+# OBJ 는 OAM Y 보다 한 줄 아래에 그려진다(하드웨어 동작, 덤프 화면과 맞춤).
+TITLE_RING_CHR, TITLE_RING_COLORS, TITLE_RING_OAM = 0x0FE13C, 0x0FED4B, 0x02EDFE
+TITLE_BACKDROP = 0x1400
+# 로고·V 의 자리는 TITLE_LAYERS 의 at(타일맵 칸), 성은 타일맵 왼쪽 위가 화면 왼쪽 위.
+# 프레임 끝의 스크롤 레지스터 값(BG4 가로 508 등)과 달리 덤프 화면에서는 세 층 모두 8점 위, 성은 가로 0 자리에
+# 보인다(바다 줄만 흐르는 것으로 보아 줄마다 스크롤을 바꾸는 듯). 화면과 맞춘 값으로 TITLE_Y 만큼 올린다.
+TITLE_Y = -8
+
+
+def title_tiles(rom, a):
+    from dq5sprite import unpack
+    lo, b = unpack(rom, a, False)
+    hi, _ = unpack(rom, b, False)
+    out = []
+    for i in range(len(lo) // 8):
+        t = bytearray(16)
+        t[0::2] = lo[i * 8:i * 8 + 8]
+        t[1::2] = hi[i * 8:i * 8 + 8]
+        out.append(chr_2bpp(t))
+    return out
+
+
+def title_bitmap_map(rom, name):
+    """02:E840 의 비트맵 → 32칸 줄 목록(타일맵 낱말)."""
+    lay, rows, t = TITLE_LAYERS[name], [], 0
+    special = {rom.u8(TITLE_LOGO_PAL1 + i) for i in range(12)}
+    steps = [rom.u8(TITLE_V_STEPS + i) for i in range(5)]
+    for r in range(lay['rows']):
+        row = []
+        for k in range(32):
+            if rom.u8(lay['bitmap'] + r * 4 + k // 8) & (0x80 >> (k & 7)):
+                t += 1
+                pal = (1 if t in special else 0) if name == 'logo' else sum(t >= s for s in steps)
+                row.append(pal << 10 | t)
+            else:
+                row.append(0)
+        rows.append(row)
+    return rows
+
+
+def title_castle_map(rom):
+    from dq5sprite import unpack
+    lo, _ = unpack(rom, TITLE_CASTLE_MAP, False)
+
+    def attr(t):
+        for y in range(0x12, -1, -2):
+            if t < rom.u8(TITLE_CASTLE_ATTR + y):
+                return rom.u8(TITLE_CASTLE_ATTR + 1 + y)
+        return rom.u8(TITLE_CASTLE_ATTR - 1)
+    return [[lo[r * 32 + c] | attr(lo[r * 32 + c]) << 8 for c in range(32)] for r in range(32)]
+
+
+def draw_words(rows, tiles, colors, size=None, at=(0, 0)):
+    img = Image.new('RGBA', size or (len(rows[0]) * 8, len(rows) * 8), (0, 0, 0, 0))
+    for y, row in enumerate(rows):
+        for x, w in enumerate(row):
+            t, pal = w & 0x3FF, (w >> 10) & 7
+            if t and t < len(tiles):
+                ti = tile_image(tiles[t], colors[pal * 4:pal * 4 + 4], bool(w & 0x4000), bool(w & 0x8000))
+                img.paste(ti, (at[0] + x * 8, at[1] + y * 8), ti)
+    return img
+
+
+def title_layer(rom, name):
+    lay = TITLE_LAYERS[name]
+    o = lorom(lay['colors'])
+    colors = cgram_colors(bytes(2) + rom.d[o + 2:o + lay['ncolors'] * 2])
+    return draw_words(title_bitmap_map(rom, name), title_tiles(rom, lay['chr']), colors)
+
+
+def title_castle(rom):
+    o = lorom(TITLE_CASTLE_COLORS)
+    return draw_words(title_castle_map(rom), title_tiles(rom, TITLE_CASTLE_CHR), cgram_colors(rom.d[o:o + 64]))
+
+
+def title_ring_tiles(rom):
+    """낮은 바이트 줄기는 $2118, 높은 바이트는 $2119 로 가서 2bpp 짝 둘이 4bpp OBJ 타일 하나가 된다."""
+    from dq5sprite import unpack
+    lo, b = unpack(rom, TITLE_RING_CHR, False)
+    hi, _ = unpack(rom, b, False)
+    out = []
+    for i in range(len(lo) // 16):
+        t = bytearray(32)
+        t[0::2] = lo[i * 16:i * 16 + 16]
+        t[1::2] = hi[i * 16:i * 16 + 16]
+        out.append(planar(bytes(t)))
+    return out
+
+
+def title_ring(rom, front):
+    o = lorom(TITLE_RING_COLORS)
+    colors = cgram_colors(rom.d[o:o + 32])
+    tiles = title_ring_tiles(rom)
+    img = Image.new('RGBA', (256, 224), (0, 0, 0, 0))
+    a, t = TITLE_RING_OAM, 0
+    while rom.u8(a) != 0xFF:
+        x, y, n, attr = rom.u8(a), rom.u8(a + 1), rom.u8(a + 2), rom.u8(a + 3)
+        for k in range(n):
+            if bool(attr & 0x30) == front and t < len(tiles):
+                ti = tile_image(tiles[t], colors)
+                img.paste(ti, (x, y + k * 8 + TITLE_Y + 1), ti)
+            t += 1
+        a += 4
+    return img
+
+
+def title_screen(rom):
+    """오프닝 마지막 타이틀 화면. BG3 반짝임은 뺌. 256x224."""
+    img = Image.new('RGB', (256, 224), rgb(TITLE_BACKDROP))
+    castle = title_castle(rom)
+    img.paste(castle, (0, TITLE_Y), castle)
+    back = title_ring(rom, False)
+    img.paste(back, (0, 0), back)
+    for name in ('v', 'logo'):
+        lay = TITLE_LAYERS[name]
+        layer = title_layer(rom, name)
+        img.paste(layer, (lay['at'] % 32 * 8, lay['at'] // 32 * 8 + TITLE_Y), layer)
+    front = title_ring(rom, True)
+    img.paste(front, (0, 0), front)
+    return img
+
+
+def export_title(rom, out):
+    meta = '02:E840 비트맵 타일맵, 타일 1F:D28B 압축'
+    for name, title in (('logo', '타이틀 로고(BG1)'), ('v', '타이틀 「V」(BG2)')):
+        lay = TITLE_LAYERS[name]
+        out.save(title_layer(rom, name), f'gfx/screens/title-{name}.png', 'screens', title, '타이틀',
+                 chr=f'{lay["chr"]:06X}', bitmap=f'{lay["bitmap"]:06X}', colors=f'{lay["colors"]:06X}', note=meta)
+    out.save(title_castle(rom), 'gfx/screens/title-castle.png', 'screens', '타이틀 배경 성과 바다(BG4)', '타이틀',
+             chr=f'{TITLE_CASTLE_CHR:06X}', map=f'{TITLE_CASTLE_MAP:06X}', colors=f'{TITLE_CASTLE_COLORS:06X}',
+             note='타일맵 낮은 바이트 0F:E7D4, 높은 바이트는 02:EA62 가 타일 번호로 정함. 게임은 가로로 흘려 보낸다')
+    o = lorom(TITLE_RING_COLORS)
+    colors = cgram_colors(rom.d[o:o + 32])
+    ring = title_ring_tiles(rom)
+    out.save(sheet([tile_image(t, colors) for t in ring], 16, 8, 8, pad=0, bg=rgb(TITLE_BACKDROP)),
+             'gfx/screens/title-ring-tiles.png', 'screens', f'타이틀 링 OBJ 타일 {len(ring)}개', '타이틀',
+             chr=f'{TITLE_RING_CHR:06X}', colors=f'{TITLE_RING_COLORS:06X}', oam=f'{TITLE_RING_OAM:06X}',
+             note='OBJ 두 번째 표(VRAM 워드 7000, 타일 100~)에 올라가는 4bpp 타일')
+    out.save(title_screen(rom), 'gfx/screens/title.png', 'screens', '오프닝 타이틀 화면', '타이틀',
+             note='성 BG4, 링 뒤쪽, V, 로고, 링 앞쪽 차례로 덤프 실측 자리에 겹침. BG3 물결 반짝임(색 더하기)은 뺌')
+
+
 EXPORTS = {'maps': export_maps, 'chr': export_chr, 'field': export_field, 'anim': export_anim,
            'monsters': export_monsters, 'battlebg': export_battlebg, 'font': export_font, 'ui': export_ui,
            'worldmap': export_world_screen, 'credits': export_credits,
-           'windows': export_windows, 'theend': export_the_end, 'battlewin': export_battle_windows}
+           'windows': export_windows, 'theend': export_the_end, 'battlewin': export_battle_windows,
+           'title': export_title, 'menus': export_menu_screens}
 COMMAND = 'uv run --locked python sfc/dq5/tools/dq5gallery.py rom/dq5.sfc --out $OUT'
 
 

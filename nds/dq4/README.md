@@ -7,6 +7,7 @@ NDS 「ドラゴンクエストIV 導かれし者たち」(일본판)과 그 한
 - [handoff.md](handoff.md): nds 트랙 시작점(지금 상태, 다음 할 일)
 - [docs/rom-map.md](docs/rom-map.md): 파일 시스템 지도, 한글 팬패치가 바꾼 파일
 - [docs/text-format.md](docs/text-format.md): 대사 파일 MPT0·표지·파일 묶음, 폰트 NFTR, 한글 팬패치 방식과 대응표
+- [docs/script-format.md](docs/script-format.md): 이벤트 스크립트(`SCRIPT/*.bin`) 블록·실행 방식·명령표·깃발, 6장 이벤트
 - [docs/glossary.md](docs/glossary.md): 명칭 대조표(FC·DS 일본어·DS 영어·한글 팬패치), 본문은 [docs/glossary-table.md](docs/glossary-table.md)
 - [docs/extras.md](docs/extras.md): DS 판에서 늘어난 것과 이식 판단
 - [docs/param-format.md](docs/param-format.md): `PARAM` 표(동료 대화 조건·몬스터·가게·メダル·카지노·얻는 물건)
@@ -52,4 +53,8 @@ uv run --locked krpatch nds unpack rom/dq4ds-kr.nds work/nds/kr
 - [2026-10-25-08: 조우 끄기·필드 워프·장 번호와 플래그·메시지 디버그](journal/2026-10-25-08-debug2.md)
 - [2026-10-25-09: 전투 테스트 Select 모드와 fk01](journal/2026-10-25-09-debug3.md)
 - [2026-10-25-10: 동료 대화 거르기 루틴, 아이템 표, 남은 PARAM 칸](journal/2026-10-25-10-param2.md)
+- [2026-10-25-11: 스크립트 명령표와 대사 표지·변수의 코드](journal/2026-10-25-11-script.md)
 - [2026-10-25-12: 시간대·인물 레코드·필드 좌표 범위·메시지 디버그 키·fk01 조건](journal/2026-10-25-12-debug4.md)
+- [2026-10-25-14: 주문 배우는 표, ドラン 의 고정 능력치, 상태 이상 칸](journal/2026-10-25-14-debug5.md)
+- [2026-10-25-15: 장비 인물 비트, 몬스터 내성, 동료 대화 줄 수와 조건 값](journal/2026-10-25-15-param3.md)
+- [2026-10-25-17: 이민 마을 단계 전환, 얻는 물건 자리와 종류](journal/2026-10-25-17-param4.md)
