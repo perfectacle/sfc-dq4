@@ -38,6 +38,10 @@ HOOKS = 0x15F907
 # 0B 뒤 BEQ·BNE 가 다섯 번 이상 나오는 뱅크와 게임에서 BRK 0B 실행을 본 29. 0C·0D·0E 는 그림 데이터라 우연히 같은 바이트가 많다.
 CODE_BANKS = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x0F, 0x11, 0x12, 0x1E, 0x1F, 0x20, 0x21, 0x23, 0x24,
               0x25, 0x29, 0x2A}
+# 코드와 그림 데이터가 섞인 뱅크(17·2B 는 코드 뱅크에서 JSL 로 들어감)에서 디스어셈블해 코드로 확인한 BRK 자리.
+EXTRA_BRK = {0x179375, 0x179397, 0x2BBCCA, 0x2BBEBC}
+# 롱 주소 참조만 받는 뱅크. 2B 의 BRK 0C 꼴 바이트는 그림 데이터였다.
+LONG_BANKS = CODE_BANKS | {0x2B}
 # BRK 0C·0D 바로 뒤에 오는 것으로 받아 주는 명령.
 NEXT_OPS = {0x00, 0x08, 0x18, 0x20, 0x22, 0x28, 0x38, 0x4C, 0x5C, 0x60, 0x64, 0x6B, 0x80, 0x82, 0x85, 0x8B, 0x8D,
             0x8F, 0x9C, 0xA0, 0xA2, 0xA5, 0xA9, 0xAB, 0xAD, 0xAF, 0xC2, 0xE2, 0xEE, 0xF0, 0xD0,
@@ -192,7 +196,9 @@ def refs_code(rom):
     for op, kind in ((0x0B, 'test'), (0x0C, 'set'), (0x0D, 'clear')):
         for m in re.finditer(bytes((0x00, op)), data):
             i = m.start()
-            if i + 5 > len(data) or i // 0x8000 not in CODE_BANKS:
+            if i + 5 > len(data):
+                continue
+            if i // 0x8000 not in CODE_BANKS and (i // 0x8000) << 16 | (0x8000 + i % 0x8000) not in EXTRA_BRK:
                 continue
             mask, idx, nxt = data[i + 2], data[i + 3], data[i + 4]
             if not mask or idx >= 0x80:
@@ -219,13 +225,34 @@ def refs_long(rom):
     data = rom.d
     for m in re.finditer(rb'[\x21\x22]\x7e', data):
         i = m.start() - 2
-        if i < 0 or i // 0x8000 not in CODE_BANKS or data[i] not in LONG_OPS:
+        if i < 0 or i // 0x8000 not in LONG_BANKS or data[i] not in LONG_OPS:
             continue
         addr = data[i + 1] | data[i + 2] << 8
         if not FLAG_BASE <= addr < 0x2210:
             continue
         kind, name = LONG_OPS[data[i]]
         out.append(('long', addr - FLAG_BASE, 0, kind, f'코드 {i // 0x8000:02X}:{0x8000 + i % 0x8000:04X} {name} 7E:{addr:04X}', None))
+    return out
+
+
+def refs_short(rom):
+    """LDA #m 뒤 TSB·TRB $21xx(데이터 뱅크 7E). 02:8B22 의 LDA #$80 / TSB $21A2 / TSB $21D7 처럼 TSB·TRB 가 이어지면
+    앞의 LDA # 를 같이 쓴다."""
+    out = []
+    data = rom.d
+    for m in re.finditer(rb'[\x0c\x1c][\x90-\xff]\x21|[\x0c\x1c][\x00-\x0f]\x22', data):
+        i = m.start()
+        if i // 0x8000 not in CODE_BANKS:
+            continue
+        k = i
+        while k >= 3 and data[k - 3] in (0x0C, 0x1C) and data[k - 1] in (0x21, 0x22):
+            k -= 3
+        if k < 2 or data[k - 2] != 0xA9 or not data[k - 1]:
+            continue
+        addr = data[i + 1] | data[i + 2] << 8
+        kind, name = ('set', 'TSB') if data[i] == 0x0C else ('clear', 'TRB')
+        out.append(('short', addr - FLAG_BASE, data[k - 1], kind,
+                    f'코드 {i // 0x8000:02X}:{0x8000 + i % 0x8000:04X} {name} ${addr:04X}', None))
     return out
 
 
@@ -269,7 +296,7 @@ def check(rom, paths):
 def collect(rom, sources):
     fns = {'talk': refs_talk, 'npc': refs_npc, 'list': refs_lists, 'hook': lambda r: refs_hooks(r) + refs_tables(r),
            'code': refs_code, 'event': refs_event,
-           'long': refs_long}
+           'long': refs_long, 'short': refs_short}
     refs = []
     for s in sources:
         refs += fns[s](rom)
@@ -299,13 +326,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('rom')
     ap.add_argument('flag', nargs='?')
-    ap.add_argument('--source', action='append', choices=['talk', 'npc', 'list', 'hook', 'code', 'long', 'event'])
+    ap.add_argument('--source', action='append', choices=['talk', 'npc', 'list', 'hook', 'code', 'long', 'short', 'event'])
     ap.add_argument('--check', nargs='+')
     args = ap.parse_args()
     rom = Rom(open(args.rom, 'rb').read())
     if args.check:
         return check(rom, args.check)
-    refs = by_bit(collect(rom, args.source or ['talk', 'npc', 'list', 'hook', 'event', 'code', 'long']))
+    refs = by_bit(collect(rom, args.source or ['talk', 'npc', 'list', 'hook', 'event', 'code', 'long', 'short']))
 
     if args.flag:
         m = re.fullmatch(r'(?:7E:?)?([0-9A-Fa-f]{4})(?:\.([0-7]))?', args.flag)
