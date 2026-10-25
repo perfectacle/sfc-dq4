@@ -57,10 +57,23 @@ class LayerTests(unittest.TestCase):
         self.assertTrue(np.array_equal(palette[pixels][mask], np.array(original.convert('RGB'))[mask]))
         self.assertTrue(np.all(pixels[mask] != 0))
         self.assertTrue(np.all(pixels[~mask] == 0))
-        glyphs = np.array(layers.glyph_mask()) > 0
+        glyphs = np.array(layers.protected_glyph_mask()) > 0
         priority = np.repeat(np.repeat((mapping & 0x2000) != 0, 8, axis=0), 8, axis=1)[:224]
         self.assertTrue(np.all(priority[glyphs]))
         self.assertTrue(np.any(mask & ~priority))
+
+    def test_castle_cloud_depth_preserves_ornament_without_priority_leak(self):
+        blobs, _ = layers.read_pack(self.pack)
+        mapping = np.frombuffer(blobs['foreground.map'], dtype='<u2').reshape(32, 32)
+        priority = np.repeat(np.repeat((mapping & 0x2000) != 0, 8, axis=0), 8, axis=1)[:224]
+        mask = np.frombuffer(blobs['foreground-mask.bin'], dtype=np.uint8).reshape(224, 256) > 0
+        protected = np.array(layers.protected_glyph_mask()) > 0
+        ornament_tail = (np.array(layers.glyph_mask()) > 0) & ~protected
+        self.assertEqual(int(ornament_tail.sum()), 30)
+        self.assertTrue(np.all(mask[ornament_tail]))
+        self.assertFalse(np.any(priority[ornament_tail]))
+        leaked = mask & ~protected & priority
+        self.assertFalse(np.any(leaked[layers.CLOUD_Y:layers.CLOUD_Y + 32]))
 
     def test_unused_oam_hidden_and_page_parity(self):
         for phase in (0, 1, 127):
