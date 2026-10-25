@@ -152,6 +152,13 @@ def glyph_mask():
     return mask
 
 
+def protected_glyph_mask():
+    mask = glyph_mask()
+    # The ornament tail shares tiles with the castle and must pass behind its clouds.
+    ImageDraw.Draw(mask).rectangle((176, 176, 255, 223), fill=0)
+    return mask
+
+
 def foreground():
     original = native_title(DEFAULT_SOURCE)
     mask = glyph_mask()
@@ -166,7 +173,7 @@ def foreground():
     padded[:224] = pixels
     data, mapping = tilemap(padded, 8)
     glyphs = np.zeros((256, 256), dtype=np.uint8)
-    glyphs[:224] = np.array(glyph_mask())
+    glyphs[:224] = np.array(protected_glyph_mask())
     priority = glyphs.reshape(32, 8, 32, 8).any(axis=(1, 3))
     mapping |= priority.astype(np.uint16) << 13
     if len(data) > 0x6000:
@@ -316,7 +323,7 @@ def write_pack(out):
     protect_outputs(outputs, [DEFAULT_SOURCE, ART / 'sky.png', ART / 'dragon-rig.png', CLOUD_SOURCE, GLYPH_MASK])
     out.mkdir(parents=True, exist_ok=True)
     previews = []
-    glyphs = glyph_mask()
+    glyphs = protected_glyph_mask()
     cloud_rgba = cloud.convert('RGBA')
     priorities = np.frombuffer(fgmap, dtype='<u2').reshape(32, 32) & 0x2000 != 0
     high = np.repeat(np.repeat(priorities, 8, axis=0), 8, axis=1)[:224] & (np.array(mask) > 0)
