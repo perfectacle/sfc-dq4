@@ -121,8 +121,10 @@ def write_pages(items, root, sprite_items):
            for i in sprite_items]
     sections = [('sprites', f'인물 스프라이트 {len(spr)}', spr),
                 ('monsters', '전투 몬스터 236마리', simple_cards(items, 'monsters', lambda i: f'그림 {i["pic"]}')),
-                ('battlebg', '전투 배경', simple_cards(items, 'battlebg'))]
-    nav = [('스프라이트', '#sprites'), ('몬스터', '#monsters'), ('전투 배경', '#battlebg'), ('맵·필드', 'index.html')]
+                ('battlebg', '전투 배경', simple_cards(items, 'battlebg')),
+                ('effects', '전투 주문·특기 연출 조각', simple_cards(items, 'effects'))]
+    nav = [('스프라이트', '#sprites'), ('몬스터', '#monsters'), ('전투 배경', '#battlebg'), ('전투 연출', '#effects'),
+           ('맵·필드', 'index.html')]
     with open(os.path.join(gallery, 'sprites.html'), 'w') as f:
         f.write(page('DQ5(SFC) 스프라이트·몬스터', nav, '인물 스프라이트는 sprites/index.json 그대로입니다.', sections))
 
