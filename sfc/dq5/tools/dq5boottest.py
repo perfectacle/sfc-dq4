@@ -8,7 +8,7 @@
   python sfc/dq5/tools/dq5boottest.py rom/dq5.sfc work/build/dq5kr.sfc
   --allow-diff  화면이 원래 롬과 달라도(글자를 바꾼 롬) 첫 장면에 닿으면 통과
   --scenes ST   첫 장면 뒤 단계도 돈다. 배 선실 세이브스테이트 ST(sfc/dq5/handoff.md)에서 두 롬 모두 dq5warp.lua 로
-                필드 걷기·첫 필드 이벤트 전투·명령 창 열고 닫기를 돌려, 정한 프레임의 해시와 끝 상태(warp.txt 의 end 줄)를
+                필드 걷기·첫 필드 이벤트 전투·명령 창 열고 닫기·サンタローズ(01/00) 도구 가게와 대화(보행 모드 메시지·물건 창)를 돌려, 정한 프레임의 해시와 끝 상태(warp.txt 의 end 줄)를
                 견준다. --allow-diff 면 끝 상태만 같으면 통과
 """
 import argparse
@@ -56,6 +56,8 @@ SCENES = [
     ('battle', {'FIELD': '341,56', 'BATTLE': '00:1', 'TEST': TAPS}, '600,700,800,900,1000,1100,1200'),
     ('menu', {'FIELD': '341,56', 'TEST': 'a:6,wait:30,down:6,wait:20,a:6,wait:40,b:6,wait:20,b:6,wait:30'},
      '580,620,660,700'),
+    ('talk', {'TO': '01/00,12,80,2', 'TEST': 'up:20,wait:20,a:6,wait:30,a:6,wait:60,a:6,wait:60,a:6,wait:60,b:6,wait:30,b:6,wait:30'},
+     '660,720,780,840'),
 ]
 
 
