@@ -5,6 +5,9 @@
 --   WWRANGE="7E3000-7E37FF:1F=0B"  범위 안에서 (주소 & 마스크) = 값 인 곳(인물 표의 한 슬롯)에 쓸 때 기록(WWFROM 프레임부터)
 --   SHOTS="300,400"         그 프레임 화면을 sNNNNN.png 로
 --   DUMP="300:7E2000:64"    그 프레임에 메모리(CPU 주소부터 길이)를 16진으로 기록
+--   VRAMDUMP="300,400"      그 프레임에 VRAM 64KB 를 vNNNNN.bin 으로
+--   BG3FONT="26528:8A"      2프레임째에 롬(파일 오프셋)의 1bpp 글자 n 개를 전원을 켤 때(04:E17D)처럼 둘째 평면 FF 로 BG3 타일 1~ 에
+--                           다시 써 넣는다(세이브스테이트의 VRAM 에는 고친 롬의 창 글자가 없으므로)
 -- STATE 가 없으면 전원을 켠 상태에서 시작한다. MAXF 프레임에 SHOT_DIR/msg.txt 와 end.png 를 쓰고 멈춘다.
 package.path = os.getenv("LIBDIR") .. "/?.lua;" .. package.path
 local L = require("lib")
@@ -23,6 +26,9 @@ for a in string.gmatch(os.getenv("SHOTS") or "", "%d+") do shots[tonumber(a)] = 
 for fr, a, len in string.gmatch(os.getenv("DUMP") or "", "(%d+):(%x+):(%d+)") do dumps[#dumps + 1] = {tonumber(fr), tonumber(a, 16), tonumber(len)} end
 for a in string.gmatch(os.getenv("LOG") or "", "[^,]+") do extra[#extra + 1] = a end
 local log, n, si, left = {}, 0, 1, nil
+local vdumps = {}
+for a in string.gmatch(os.getenv("VRAMDUMP") or "", "%d+") do vdumps[tonumber(a)] = true end
+local font = os.getenv("BG3FONT")
 for a in string.gmatch(os.getenv("CALLS") or "", "[^,]+") do
   local addr = tonumber(a, 16)
   emu.addMemoryCallback(function()
@@ -68,6 +74,17 @@ emu.addEventCallback(function()
       emu.write(a, v, m)
     end
   end
+  if n == 2 and font then
+    local off, cnt = font:match("(%x+):(%x+)")
+    off, cnt = tonumber(off, 16), tonumber(cnt, 16)
+    for t = 1, cnt do
+      for r = 0, 7 do
+        local b = emu.read(off + (t - 1) * 8 + r, emu.memType.snesPrgRom)
+        emu.write(0x2000 + t * 16 + r * 2, b, emu.memType.snesVideoRam)
+        emu.write(0x2000 + t * 16 + r * 2 + 1, 0xFF, emu.memType.snesVideoRam)
+      end
+    end
+  end
   for _, p in ipairs(pokes) do emu.write(p[1], p[2], m) end
   L.release()
   if si <= #seq then
@@ -78,6 +95,7 @@ emu.addEventCallback(function()
     if left <= 0 then si = si + 1; left = nil end
   end
   if shots[n] then L.shot(string.format("s%05d.png", n)) end
+  if vdumps[n] then L.dump(string.format("v%05d.bin", n), emu.memType.snesVideoRam, 0x10000) end
   for _, d in ipairs(dumps) do
     if d[1] == n then
       local t = {}
