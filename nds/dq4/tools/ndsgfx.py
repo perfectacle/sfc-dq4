@@ -972,6 +972,20 @@ CATEGORY_TITLES = {
 }
 
 
+SIBLING_TITLES = {"sound": "소리(곡·효과음·샘플)", "screens": "맵 화면"}
+
+
+def sibling_links(out):
+    """Pages of other sessions' folders: */gallery/index.html, else the folder's README.txt."""
+    links = []
+    for d in sorted(p for p in Path(out).iterdir() if p.is_dir()):
+        if (d / "gallery" / "index.html").exists():
+            links.append(f"{d.name}/gallery/index.html")
+        elif d.name in SIBLING_TITLES and (d / "README.txt").exists():
+            links.append(f"{d.name}/README.txt")
+    return links
+
+
 def gallery(out, manifest):
     """Static index.html: one section per category, thumbnails link to the full image."""
     out = Path(out)
@@ -979,11 +993,10 @@ def gallery(out, manifest):
     order = [c for c in CATEGORY_TITLES if c in items] + sorted(c for c in items if c not in CATEGORY_TITLES)
     nav = " · ".join(f'<a href="#{html.escape(c)}">{html.escape(CATEGORY_TITLES.get(c, c))} ({len(items[c])})</a>'
                      for c in order)
-    # Other sessions keep their own galleries next to ours (e.g. sound/gallery/index.html);
-    # link every one found so regenerating this page does not drop them.
-    extra = "".join(f'<p>{html.escape(g.parent.parent.name)}: <a href="{html.escape(g.relative_to(out).as_posix())}">'
-                    f'{html.escape(g.relative_to(out).as_posix())}</a></p>'
-                    for g in sorted(out.glob("*/gallery/index.html")))
+    # Other sessions keep their own folders next to ours (sound/ with its gallery, screens/ with
+    # map screenshots); link them so regenerating this page does not drop them.
+    extra = "".join(f'<p>{html.escape(SIBLING_TITLES.get(t.split("/")[0], t.split("/")[0]))}: '
+                    f'<a href="{html.escape(t)}">{html.escape(t)}</a></p>' for t in sibling_links(out))
     secs = []
     for c in order:
         cards = "".join(
