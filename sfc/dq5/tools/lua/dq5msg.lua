@@ -7,7 +7,10 @@
 --   DUMP="300:7E2000:64"    그 프레임에 메모리(CPU 주소부터 길이)를 16진으로 기록
 --   WRAMWATCH="119F-13FF"  WRAM 오프셋 범위에 쓰는 PC 를 처음 한 번씩(뱅크 거울과 상관없이) 기록.
 --                           WRAMWATCHBY=addr 면 주소마다 처음 한 번씩(낮은 8KB 거울 주소로 묶음), WRAMWATCHREAD=1 이면 읽기도(WRAMR). WWFROM 프레임부터
---   COVER="008000-3FFFFF"   그 범위에서 실행한 PC 와 그때의 M·X(cover.txt, tools/listing.py 가 읽음)
+--   COVER="008000-3FFFFF"   그 범위(쉼표로 여럿)에서 실행한 PC 와 그때의 M·X(cover.txt, tools/listing.py 가 읽음), 본 D 값(dregs.txt). 짧은 실행에만
+--   ACCESS="1ABC-1BB1"     끝에 MesenCE 접근 카운터로 그 WRAM 오프셋 범위의 읽기·쓰기 횟수(access.txt)와 롬에서 실행된
+--                           바이트(exec.txt, 파일 오프셋). 콜백이 없어 긴 실행에도 쓸 수 있음
+--   VMADD=1                 VMADD($2116/2117)를 쓴 PC·주소와 MDMAEN($420B) 때 채널 설정을 모아 vmadd.txt 로
 --   VRAMDUMP="300,400"      그 프레임에 VRAM 64KB 를 vNNNNN.bin 으로
 --   BG3FONT="26528:8A"      2프레임째에 롬(파일 오프셋)의 1bpp 글자 n 개를 전원을 켤 때(04:E17D)처럼 둘째 평면 FF 로 BG3 타일 1~ 에
 --                           다시 써 넣는다(세이브스테이트의 VRAM 에는 고친 롬의 창 글자가 없으므로)
@@ -81,13 +84,54 @@ if ww then
   if os.getenv("WRAMWATCHREAD") then watch("R", emu.callbackType.read) end
 end
 local cover = os.getenv("COVER")
-local cst = {}
+local cst, cd = {}, {}
 if cover then
-  local a, b = cover:match("(%x+)-(%x+)")
-  emu.addMemoryCallback(function(addr)
-    local k = addr * 256 + (emu.getState()["cpu.ps"] & 0x30)
-    cst[k] = (cst[k] or 0) + 1
-  end, emu.callbackType.exec, tonumber(a, 16), tonumber(b, 16))
+  local function hit(addr)
+    local st = emu.getState()
+    local k = addr * 256 + (st["cpu.ps"] & 0x30)
+    if not cst[k] then cst[k] = 0 end
+    cst[k] = cst[k] + 1
+    local d = st["cpu.d"]
+    if not cd[d] then cd[d] = addr end
+  end
+  for a, b in cover:gmatch("(%x+)-(%x+)") do
+    emu.addMemoryCallback(hit, emu.callbackType.exec, tonumber(a, 16), tonumber(b, 16))
+  end
+end
+local vmadd, vlo, vlast, vseen, vpend = os.getenv("VMADD"), 0, 0, {}, nil
+local function vrec(k) vseen[k] = (vseen[k] or 0) + 1 end
+-- $2116 만 쓰고 $2117 을 쓰지 않은 경우: 다음 $2116 쓰기·MDMAEN·끝에서 낮은 바이트만 바뀐 주소로 기록
+local function vflush()
+  if vpend then vrec(string.format("VMADD %04X pc=%s (2116만)", vlast, vpend)); vpend = nil end
+end
+if vmadd then
+  -- VMADD($2116/2117)를 쓴 PC 와 주소, MDMAEN($420B)을 쓴 PC 와 그때 켠 채널의 B 버스·A 주소·길이·VMADD
+  emu.addMemoryCallback(function(adr, v)
+    local s = emu.getState()
+    local pc = string.format("%02X:%04X", s["cpu.k"], s["cpu.pc"])
+    if adr & 0xFFFF == 0x2116 then
+      vflush()
+      vlo = v; vlast = (vlast & 0xFF00) | v; vpend = pc
+    else
+      vpend = nil
+      vlast = (v << 8) | vlo; vrec(string.format("VMADD %04X pc=%s", vlast, pc))
+    end
+  end, emu.callbackType.write, 0x2116, 0x2117)
+  emu.addMemoryCallback(function(adr, v)
+    vflush()
+    local s = emu.getState()
+    local pc = string.format("%02X:%04X", s["cpu.k"], s["cpu.pc"])
+    for ch = 0, 7 do
+      if v & (1 << ch) ~= 0 then
+        local b = 0x4300 + ch * 16
+        local bb = emu.read(b + 1, emu.memType.snesMemory)
+        local aa = emu.read(b + 4, emu.memType.snesMemory) * 65536 + emu.read16(b + 2, emu.memType.snesMemory)
+        local len = emu.read16(b + 5, emu.memType.snesMemory)
+        local tag = (bb == 0x18 or bb == 0x19) and string.format(" vmadd=%04X", vlast) or ""
+        vrec(string.format("DMA ch%d bbus=21%02X src=%06X len=%04X%s pc=%s", ch, bb, aa, len, tag, pc))
+      end
+    end
+  end, emu.callbackType.write, 0x420B, 0x420B)
 end
 local maxf = tonumber(os.getenv("MAXF") or "1000")
 emu.addEventCallback(function()
@@ -134,12 +178,40 @@ emu.addEventCallback(function()
       log[#log + 1] = string.format("%d dump %06X %s", n, d[2], table.concat(t, " "))
     end
   end
+  if n == maxf and os.getenv("ACCESS") then
+    -- MesenCE 접근 카운터(콜백 없이 빠름, 배열 첨자는 0부터): WRAM 범위의 읽기·쓰기 횟수, 롬에서 실행된 바이트 수
+    local a, b = os.getenv("ACCESS"):match("(%x+)-(%x+)")
+    a, b = tonumber(a, 16), tonumber(b, 16)
+    local rd = emu.getAccessCounters(emu.memType.snesWorkRam, emu.counterType.readCount)
+    local wr = emu.getAccessCounters(emu.memType.snesWorkRam, emu.counterType.writeCount)
+    local ex = emu.getAccessCounters(emu.memType.snesPrgRom, emu.counterType.execCount)
+    local t = {}
+    for i = a, b do
+      if (rd[i] or 0) > 0 or (wr[i] or 0) > 0 then t[#t + 1] = string.format("%05X r=%d w=%d", i, rd[i] or 0, wr[i] or 0) end
+    end
+    local e = {}
+    for i, v in pairs(ex) do if v > 0 then e[#e + 1] = string.format("%06X %d", i, v) end end
+    table.sort(e)
+    L.write("access.txt", table.concat(t, "\n") .. "\n")
+    L.write("exec.txt", table.concat(e, "\n") .. "\n")
+  end
+  if n == maxf and vmadd then
+    vflush()
+    local t = {}
+    for k, c in pairs(vseen) do t[#t + 1] = k .. " x" .. c end
+    table.sort(t)
+    L.write("vmadd.txt", table.concat(t, "\n") .. "\n")
+  end
   if n == maxf then
     if cover then
       local t = {}
       for k, c in pairs(cst) do t[#t + 1] = string.format("%06X %02X %d", k // 256, k % 256, c) end
       table.sort(t)
       L.write("cover.txt", table.concat(t, "\n") .. "\n")
+      local u = {}
+      for d, pc in pairs(cd) do u[#u + 1] = string.format("D=%04X first=%06X", d, pc) end
+      table.sort(u)
+      L.write("dregs.txt", table.concat(u, "\n") .. "\n")
     end
     L.write("msg.txt", table.concat(log, "\n") .. "\n")
     L.shot("end.png")
