@@ -1,7 +1,7 @@
 -- DQ5 소리 명령 기록. 24:FF83(소리 명령 대기열)에 들어올 때 명령(A)·인자(스택의 PHA 값)·부른 곳(JSL 24:FExx 의 자리)을
 -- snd.txt 에 적는다(MAXF-1 프레임). SHOTS 프레임에 화면. 드라이버(boot.lua, 보통 dq5warp.lua·walk.lua) 뒤에 붙여 쓴다. DSP=1 이면 프레임마다 DSP 레지스터(주 음량·메아리·ENVX 합·KON·KOF·FLG·채널 0 음량)를 dsp.txt 로.
 -- HCMD·HARG(·HX) 를 주면 처음 들어온 HFROM_CMD·HFROM_ARG 명령(예: 메뉴 효과음 0C 33)을 그 명령·인자·X 로 바꿔 보낸다.
--- WATCH=주소,… 는 그 주소를 실행한 프레임을, SPCDUMP=프레임,… 은 그 프레임의 SPC RAM 64KB 를 spcNNNNN.bin 으로 남긴다(커밋 금지).
+-- WATCH=주소,… 는 그 주소를 실행한 프레임을, SPCDUMP=프레임,… 은 그 프레임의 SPC RAM 64KB 와 DSP 레지스터 128바이트를 spcNNNNN.bin·dspNNNNN.bin 으로 남긴다(커밋 금지).
 package.path = os.getenv("LIBDIR") .. "/?.lua;" .. package.path
 local L = require("lib")
 local n, log = 0, {}
@@ -47,6 +47,9 @@ emu.addEventCallback(function()
       local t = {}
       for i = 0, 0xFFFF do t[#t + 1] = string.char(emu.read(i, emu.memType.spcRam)) end
       local fh = io.open(os.getenv("SHOT_DIR") .. string.format("/spc%05d.bin", n), "wb"); fh:write(table.concat(t)); fh:close()
+      t = {}
+      for i = 0, 0x7F do t[#t + 1] = string.char(emu.read(i, emu.memType.spcDspRegisters)) end
+      fh = io.open(os.getenv("SHOT_DIR") .. string.format("/dsp%05d.bin", n), "wb"); fh:write(table.concat(t)); fh:close()
     end
   end
   if shots[n] then L.shot(string.format("s%05d.png", n)) end
