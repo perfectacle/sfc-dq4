@@ -1327,6 +1327,9 @@ def export_credits(rom, out):
 
 # 창 문자열의 자리 표시(B0~) 너비: HP·MP 3칸, 레벨 2칸(상태 창 실측). 나머지는 1칸으로 둔다.
 WINDOW_FIELDS = {0xB0: 3, 0xB1: 3, 0xC6: 2, 0xBD: 2}
+# 갤러리용 예시 값: 자리 표시마다 오른쪽 맞춤 숫자(타일 02~0B = 0~9), 이름 자리는 「ああああ」(타일 10).
+WINDOW_SAMPLES = {0xB0: '999', 0xB1: '999', 0xC6: '99', 0xBD: '99'}
+SAMPLE_NAME = (0x10, 0x10, 0x10, 0x10)
 
 
 def window_grid(rom, n):
@@ -1334,7 +1337,7 @@ def window_grid(rom, n):
     머리 +0·+1 위치, +2 아래 5비트 너비, +3 아래 4비트 높이·bit7 줄 간격 16점(sfc/dq5/docs/dq5-text-format.md 「창 레코드 머리」).
     목록 창: 첫 FE 부터. FE = 커서 칸 하나 뒤 글자, FF = 다음 줄, 바이트는 BG3 타일 번호 그대로. 84·83 xx 는 글자 xx 위 칸에
     탁점 84·반탁점 83(위 칸이 테두리면 92·93, 04:B258).
-    상태 창 꼴(+4 가 D0~D3): 뒤 4바이트 자리에 이름, 다음 8x 는 가로줄 하나와 그 뒤 x 줄. 자리 표시 B0 이상은 빈칸(WINDOW_FIELDS 너비)."""
+    상태 창 꼴(+4 가 D0~D3): 뒤 4바이트 자리에 이름, 다음 8x 는 가로줄 하나와 그 뒤 x 줄. 자리 표시는 예시 값(WINDOW_SAMPLES, 이름은 SAMPLE_NAME)으로 채운다."""
     from dq5text import window
     _, data = window(rom, n)
     if len(data) < 6:
@@ -1357,7 +1360,7 @@ def window_grid(rom, n):
     if 0xD0 <= data[4] <= 0xD3:
         step = 2  # 상태 창은 +3 bit7 이 꺼져 있어도 16점 간격(배 선실 덤프)
         for k in range(4):
-            put(1 + k, 1, data[5 + k])
+            put(1 + k, 1, SAMPLE_NAME[k])
         i, y = 9, 2
         if i < len(data) and data[i] & 0x80 and data[i] < 0x84:
             for xx in range(1, w - 1):
@@ -1378,6 +1381,11 @@ def window_grid(rom, n):
                 if 0 < tx < w - 1:
                     grid[0][tx] = title[j]
                 tx, j = tx + 1, j + 2
+                continue
+            if title[j] >= 0xE0:
+                for k, t in enumerate(SAMPLE_NAME):
+                    put(tx + k, 1, t)
+                tx, j = tx + len(SAMPLE_NAME), j + 1
                 continue
             if title[j] < 0x89:
                 put(tx, 1, title[j])
@@ -1411,6 +1419,10 @@ def window_grid(rom, n):
             put(x, y, b)
             x += 1
         elif b in WINDOW_FIELDS:
+            digits = WINDOW_SAMPLES[b].rjust(WINDOW_FIELDS[b])
+            for k, ch in enumerate(digits):
+                if ch != ' ':
+                    put(x + k, y, 0x02 + int(ch))
             x += WINDOW_FIELDS[b]
         else:
             x += 1
@@ -1445,7 +1457,7 @@ def export_windows(rom, out):
                     img.paste(ti, (x * 8, y * 8), ti)
         out.save(img, f'gfx/screens/windows/{n:02X}.png', 'screens', f'창 {n:02X}', '창 레코드',
                  window=f'{n:02X}', pos=f'{wx},{wy}', record=f'{WINDOWS >> 16:02X}:{rom.u16(WINDOWS + n * 2):04X}',
-                 note='04:EB48 레코드의 너비·높이·항목으로 그림(글자 바이트 = BG3 타일). 자리 표시(HP·이름 등)는 빈칸')
+                 note='04:EB48 레코드의 너비·높이·항목으로 그림(글자 바이트 = BG3 타일). 자리 표시(HP·이름 등)는 예시 값 999·ああああ')
         count += 1
     print(f'windows {count}')
 
