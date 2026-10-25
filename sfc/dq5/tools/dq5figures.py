@@ -585,6 +585,17 @@ def fig_gfx_diff(rom):
     save(out, 'dq5-gfx-diff.webp')
 
 
+def fig_perframe_0400():
+    """04/00 (32,12) 에 순간이동한 화면 둘. 왼쪽은 매 프레임 루틴 02:A7BD 그대로(work/perframe/0400a/s320.png),
+    오른쪽은 그 루틴을 15:F906 으로 막은 것(work/perframe/0400b/s320.png). 덤프 명령은 sfc/dq5/journal/ 의 perframe 일지 4절."""
+    ims = [Image.open(f'work/perframe/0400{k}/s320.png').convert('RGB').resize((512, 448), Image.NEAREST) for k in 'ab']
+    out = Image.new('RGB', (512 * 2 + 8, 448), (24, 24, 24))
+    for i, (im, text) in enumerate(zip(ims, ('02:A7BD', 'blocked'))):
+        label(im, text)
+        out.paste(im, (i * 520, 0))
+    save(out, 'dq5-perframe-0400.webp')
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     rom = Rom(open('rom/dq5.sfc', 'rb').read())
@@ -612,6 +623,7 @@ def main():
     fig_mongfx_e9(rom)
     fig_seabattle(rom)
     fig_gfx_diff(rom)
+    fig_perframe_0400()
     os.remove(TMP)
 
 
