@@ -90,6 +90,19 @@ CREDITS_SCRIPTS = 0x02FF3B
 CREDITS_GLYPHS = 0x1EF539
 CREDITS_TEXT = 'ABCDEFGHIJKLNOPQRSTUVXYZ921'
 CREDITS_PAIRS = {(0x1B, 0x1C): '&', (0x1E, 0x1F): 'M', (0x20, 0x21): 'W', (0x23, 0x24): '©'}
+# 엔딩 「THE END」: BG3 2bpp 타일 41개를 03:B459 의 런 길이 압축(1F:D28B, 낮은·높은 바이트 줄기)에서 VRAM 워드 4000 에,
+# CGRAM 0~11 을 03:A502 에서(0번 색은 0). 타일맵은 코드가 7E:A007 에 만들어 0F:EBCE 가 VRAM 1D80 에 올리는데,
+# 만드는 곳을 아직 몰라 엔딩 덤프의 BG3 타일맵 12~15줄 3~28칸을 그대로 옮겨 둔다.
+THE_END_TILES = 0x03B459
+THE_END_COLORS = 0x03A502
+THE_END_MAP = (
+    (0x0828,) * 12 + (0x0801, 0x4801) + (0x0828,) * 12,
+    (0x0804, 0x0805, 0x0806, 0x0807, 0x0808, 0x0809, 0x0410, 0x4410, 0x0411, 0x0412, 0x0413, 0x0414, 0x0415,
+     0x0416, 0x0414, 0x0417, 0x0418, 0x0419, 0x041A, 0x041B, 0x4809, 0x4808, 0x4807, 0x4806, 0x4805, 0x4804),
+    (0x080A, 0x080B, 0x080C, 0x080D, 0x080E, 0x080F, 0x001C, 0x401C, 0x001D, 0x001E, 0x001F, 0x0020, 0x0021,
+     0x0022, 0x0020, 0x0023, 0x0024, 0x0025, 0x0026, 0x0027, 0x480F, 0x480E, 0x480D, 0x480C, 0x480B, 0x480A),
+    (0x0802,) * 12 + (0x0803, 0x4803) + (0x0802,) * 12,
+)
 # 25:85D5: ルーラ 목적지의 맵 그룹 22개. 이름은 이름 표 0B(23:D5F3) 의 같은 순번.
 RURA_GROUPS, RURA_COUNT, TOWN_NAMES = 0x2585D5, 22, 0x0B
 
@@ -1437,10 +1450,39 @@ def export_windows(rom, out):
     print(f'windows {count}')
 
 
+def the_end_tiles(rom):
+    from dq5sprite import unpack
+    lo, a = unpack(rom, THE_END_TILES, False)
+    hi, _ = unpack(rom, a, False)
+    out = []
+    for i in range(len(lo) // 8):
+        t = bytearray(16)
+        t[0::2] = lo[i * 8:i * 8 + 8]
+        t[1::2] = hi[i * 8:i * 8 + 8] if len(hi) >= i * 8 + 8 else bytes(8)
+        out.append(bytes(t))
+    return out
+
+
+def export_the_end(rom, out):
+    o = lorom(THE_END_COLORS)
+    colors = cgram_colors(bytes(2) + rom.d[o:o + 22])
+    tiles = [chr_2bpp(t) for t in the_end_tiles(rom)]
+    img = Image.new('RGB', (len(THE_END_MAP[0]) * 8, len(THE_END_MAP) * 8), colors[0])
+    for y, row in enumerate(THE_END_MAP):
+        for x, w in enumerate(row):
+            t = w & 0x3FF
+            if t < len(tiles):
+                pal = (w >> 10) & 7
+                ti = tile_image(tiles[t], colors[pal * 4:pal * 4 + 4], bool(w & 0x4000), bool(w & 0x8000))
+                img.paste(ti, (x * 8, y * 8), ti)
+    out.save(img, 'gfx/screens/the-end.png', 'screens', '엔딩 「THE END」', '타이틀·엔딩',
+             note='타일 03:B459, 색 03:A502. 배치는 엔딩 덤프의 BG3 타일맵을 옮긴 것')
+
+
 EXPORTS = {'maps': export_maps, 'chr': export_chr, 'field': export_field, 'anim': export_anim,
            'monsters': export_monsters, 'battlebg': export_battlebg, 'font': export_font, 'ui': export_ui,
            'worldmap': export_world_screen, 'credits': export_credits,
-           'windows': export_windows}
+           'windows': export_windows, 'theend': export_the_end}
 COMMAND = 'uv run --locked python sfc/dq5/tools/dq5gallery.py rom/dq5.sfc --out $OUT'
 
 
