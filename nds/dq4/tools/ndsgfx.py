@@ -733,12 +733,31 @@ class Exporter:
                 b = self.read(rel)
                 pal = ypal if Path(rel).name.startswith("y") else fpal
                 ents = [b[eo:eo + es] for eo, es in pack_entries(b) if es]
-                width = 64 if "24" in rel else 256
-                frames = [texture(d, 4, width, len(d) // width, pal, False) for d in ents]
+                frames = [texture(d, 4, 256, len(d) // 256, pal, False) for d in ents]
+                if "24" in rel:  # sea: only the four chips at the left of each 256x16 strip
+                    frames = [f.crop((0, 0, 64, 16)) for f in frames]
                 stem = Path(rel).stem
                 self.save("field/pattern", stem + ".png", frames[0], f"{stem} 첫 프레임")
                 self.save("field/pattern", stem + ".webp", [f.convert("RGBA") for f in frames], f"{stem} ({len(frames)}프레임)")
             self.ok("field pattern", rel, one)
+
+    def world(self):
+        """The field rendered from FIELD/bin (16 px per cell, first animation frames)."""
+        import numpy as np
+        ft = texture_object(self.read("FIELD/field.tex"))
+        pal = ft["pal"]
+        f_img = np.asarray(texture_object_image(ft, transparent0=False).convert("RGB"))
+        pb = self.read("FIELD/texture/pattern8.pack")
+        eo, es = pack_entries(pb)[0]
+        p_img = np.asarray(texture(pb[eo:eo + es], 4, 256, es // 256, pal, False).convert("RGB"))
+        sb = self.read("FIELD/texture/pattern24.pack")
+        eo, es = pack_entries(sb)[0]
+        s_img = np.asarray(texture(sb[eo:eo + es], 4, 256, 16, pal, False).convert("RGB"))
+        for rel in ("FIELD/bin/worldmap.bin", "FIELD/bin/worldmap_scene0.bin",
+                    "FIELD/bin/worldmap_scene1.bin", "FIELD/bin/worldmap_scene2.bin"):
+            self.ok("WMAP", rel, lambda rel=rel: self.save(
+                "field/world", Path(rel).stem + ".png", render_field(wmap(self.read(rel)), f_img, p_img, s_img),
+                Path(rel).stem + " (4096x4096)"))
 
     def model_anim(self):
         """CHR 3D models played with their BCA0 animations, front orthographic view."""
@@ -850,7 +869,7 @@ class Exporter:
         steps = dict(
             chr=self.chr, monster=self.monster, map=self.maps, g2d=self.g2d,
             effect=self.effects, dssa=self.dssa_files, banner=self.banner, render=self.render,
-            field=self.field, model_anim=self.model_anim,
+            field=self.field, world=self.world, model_anim=self.model_anim,
             tex=lambda: [
                 self.textures("title", "2D", strip=["2D/MAP", "2D/FACE"]),
                 self.textures("ui/face", "2D/FACE"),
@@ -906,6 +925,7 @@ CATEGORY_TITLES = {
     "map/tex": "맵 텍스처(3D 맵마다 한 장)",
     "map/render": "맵 위에서 본 렌더링",
     "field": "필드(세계 지도) 텍스처",
+    "field/world": "필드 세계 지도 렌더링(칸 16픽셀)",
     "field/large": "일러스트 세계 지도와 덧그림",
     "field/pattern": "필드 물가·바다 애니메이션 칩",
     "battle/render": "전투 배경 위에서 본 렌더링",
@@ -977,7 +997,7 @@ def main(argv=None):
     e.add_argument("out")
     e.add_argument("--root", default=DEFAULT_FS)
     e.add_argument("--kr", help="한글 팬패치 롬을 푼 폴더(바뀐 글꼴·로고를 kr/ 에)")
-    e.add_argument("--only", help="쉼표로 단계 이름(chr,monster,map,g2d,effect,dssa,banner,tex,render,field,model_anim)")
+    e.add_argument("--only", help="쉼표로 단계 이름(chr,monster,map,g2d,effect,dssa,banner,tex,render,field,world,model_anim)")
     g = sub.add_parser("gallery", help="manifest.json 으로 index.html 을 씀")
     g.add_argument("out")
     a = ap.parse_args(argv)
@@ -1413,6 +1433,60 @@ def raster(tris, tex_rgba, view, scale, lo, hi):
         color[y0:y1 + 1, x0:x1 + 1][draw] = rgba[draw]
     return Image.fromarray(color, "RGBA")
 
+
+# ---------------------------------------------------------------- field (world map)
+
+def wmap(b):
+    """256x256 u16 cells of the `WMAP` chunk in a FIELD/bin file (the chunk after the file header)."""
+    import numpy as np
+    i = b.find(b"WMAP", 4)
+    i = i + 8 if i >= 0 else 0
+    return np.frombuffer(b[i:i + 0x20000], "<u2").reshape(256, 256)
+
+
+def field_chip(w):
+    """('field' | 'pattern' | 'sea', chip number) for the low 10 bits of a field cell.
+
+    Measured against desmume screens (nds/dq4/docs/graphics-format.md). Field chips are
+    16x16 cells of FIELD/field.tex in row order, pattern chips those of one
+    FIELD/texture/pattern8.pack frame, sea chips the four 16x16 cells at the left of
+    one FIELD/texture/pattern24.pack frame (256 wide, 16 high).
+    """
+    if 298 <= w <= 304:
+        return "sea", (w - 298) // 2
+    if w <= 6 and w % 2 == 0 and w:
+        return "pattern", w // 2 - 1
+    if 8 <= w <= 29:
+        return "field", w - 7
+    if 30 <= w <= 174:
+        return "pattern", w // 2 - 12
+    if 175 <= w <= 296:
+        return "field", w - 153
+    if w >= 305:
+        return "field", w - 161
+    return None, 0
+
+
+def render_field(cells, field_tex, pattern8, sea):
+    """World map at 16 px per cell from the low 10 bits of each cell. Cells with higher
+    bits set (about 0.5 %) are drawn from their low bits too; on screen they show
+    something else (not a mirrored chip), so those spots are not reliable."""
+    import numpy as np
+    out = np.zeros((cells.shape[0] * 16, cells.shape[1] * 16, 3), np.uint8)
+    for y in range(cells.shape[0]):
+        for x in range(cells.shape[1]):
+            v = int(cells[y, x])
+            kind, c = field_chip(v & 0x3FF)
+            if kind == "sea":
+                chip = sea[0:16, c * 16:c * 16 + 16]
+            elif kind == "field" and c < 336:
+                chip = field_tex[c // 16 * 16:c // 16 * 16 + 16, c % 16 * 16:c % 16 * 16 + 16]
+            elif kind == "pattern" and 0 <= c < 80:
+                chip = pattern8[c // 16 * 16:c // 16 * 16 + 16, c % 16 * 16:c % 16 * 16 + 16]
+            else:
+                continue
+            out[y * 16:y * 16 + 16, x * 16:x * 16 + 16] = chip
+    return Image.fromarray(out)
 
 # ---------------------------------------------------------------- BCA0 joint animation
 

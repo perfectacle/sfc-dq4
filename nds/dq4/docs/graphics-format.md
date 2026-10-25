@@ -14,7 +14,7 @@ uv run --locked python nds/dq4/tools/ndsgfx.py export OUT --kr work/nds/kr  # PN
 uv run --locked python nds/dq4/tools/ndsgfx.py gallery OUT                  # OUT/index.html
 ```
 
-`export --only chr,monster` 처럼 단계를 골라 돌릴 수 있습니다. 단계는 `chr`, `monster`, `map`, `render`, `g2d`, `effect`, `dssa`, `banner`, `tex`, `field`, `model_anim` 입니다. 전체는 약 15분 걸립니다.
+`export --only chr,monster` 처럼 단계를 골라 돌릴 수 있습니다. 단계는 `chr`, `monster`, `map`, `render`, `g2d`, `effect`, `dssa`, `banner`, `tex`, `field`, `world`, `model_anim` 입니다. 전체는 약 15분 걸립니다.
 
 ## 공통
 
@@ -134,19 +134,33 @@ uv run --locked python nds/dq4/tools/ndsgfx.py gallery OUT                  # OU
 | `FIELD/large/largemap.bin` | **1024×1024 8bpp, 32×32 타일 순서**. 팔레트는 `largemap.tex`. 일러스트로 그린 세계 지도 |
 | `FIELD/large/*.bin`(4096바이트 8개) | 같은 팔레트의 64×64(32×32 타일 2×2). 다리 놓기 전후·용암·이민 마을 4단계·세계수 덧그림 |
 | `FIELD/texture/pattern8.pack` | 8프레임. 프레임마다 256폭 8bpp(16×16 물가 칩 80개), 팔레트는 `field.tex` |
-| `FIELD/texture/pattern24.pack` | 24프레임. 64×64 8bpp 바다 물결 |
+| `FIELD/texture/pattern24.pack` | 24프레임. 프레임마다 256×16 8bpp 이고 왼쪽 64×16(바다 칩 넷)만 씀 |
 | `FIELD/texture/ypattern*.pack` | 어둠의 세계 쪽(팔레트 `yamifield.tex`) |
-| `FIELD/bin/worldmap*.bin` | `WMAP` 256×256 u16 칸. 칸 하나가 화면 16×16 픽셀 |
+| `FIELD/bin/worldmap*.bin` | `WMAP` 256×256 u16 칸. 칸 하나가 화면 16×16 픽셀. `worldmap.bin` 은 머리 뒤 `WMAP` 덩어리, `worldmap_scene0~2.bin` 은 칸만 |
 
 ![FIELD/large/largemap.bin 을 1/4 로 줄인 것](../images/nds-gfx-largemap.webp)
 
-칸 값은 2×2 묶음으로 그림 한 덩어리를 이룹니다(풀 209·210/211·212, 숲 175·176/177·178). 필드 화면의 바다 모양을 WMAP 의 바다 칸(298~304)과 맞대면 화면 왼쪽 위가 칸 (19, 13)일 때 96.4~97% 가 같았습니다. 그 화면의 칸 82개를 VRAM 텍스처의 16×16 칩과 밝기 상관으로 견주어 아래 대응을 얻었습니다.
+**칸 값 → 칩**: 칸 값의 아래 10비트 w 가 16×16 칩을 고릅니다. field.tex 칩은 field.tex 를 16×16 으로 자른 행 순서 번호, 물가 칩은 `pattern8` 한 프레임, 바다 칩은 `pattern24` 한 프레임의 왼쪽 넷입니다.
 
-- 짝수 값 24~182 → `pattern8` 칩 `v/2 − 12`(칩 0~79). 예: 128 → 52, 150 → 63(상관 0.94·0.95).
-- 짝수 값 2~22 → 같은 칩 `v/2 − 1` 로 보이지만 상관이 0.33~0.57 로 약함.
-- 값 209·210·211 → `field.tex` 칩 56·57·58, 305 → 144, 421·422·424 → 260·261·263(상관 0.82~0.98). 오프셋이 153 과 161 로 일정하지 않아 표가 따로 있는 것으로 보이고, 그 표는 arm9·오버레이·PARAM 에서 찾지 못했습니다.
+| w | 칩 |
+| --- | --- |
+| 2·4·6 | 물가 칩 `w/2 − 1` |
+| 8~29 | field.tex 칩 `w − 7` |
+| 짝수 30~174 | 물가 칩 `w/2 − 12` |
+| 175~296 | field.tex 칩 `w − 153` |
+| 298·300·302·304 | 바다 칩 `(w − 298)/2` |
+| 305~ | field.tex 칩 `w − 161` |
 
-필드에서 주인공 좌표로 보이는 `0x020EC524`(x 424.0, y 295.0)는 매 프레임 다른 곳에서 덮여, 써도 화면이 옮겨지지 않습니다. 그래서 한 화면 밖의 칸은 확인하지 못했습니다.
+field.tex 칩 번호가 값 공간에서 물가·바다 구간을 건너뛰며 이어지는 모양입니다. 이 대응은 화면에서 배웠습니다. 필드 워프(`ndswarp.py field`, [debug.md](debug.md#필드-워프))로 부팅 메뉴 상태에서 81곳(좌표 100~1300, 150 간격)에 서서 화면을 찍었습니다. 좌표 단위의 3배가 필드 픽셀이고, 화면 왼쪽 위는 주인공 픽셀 − (129, 97)입니다. 화면 칸마다 VRAM 텍스처의 16×16 칩과 밝기 상관을 재어 값마다 가장 많이 뽑힌 칩을 모은 것이 위 표입니다. 표로 그린 지도를 같은 화면들과 칸 단위로 다시 견주었습니다.
+
+```text
+바다 아닌 칸 4,577개  상관 중앙값 0.941  0.8 이상 87.4%
+바다 칸 1,953개(20화면)  24프레임 중 가장 맞는 것과 상관 중앙값 0.896  0.8 이상 96.5%
+```
+
+비트 10 이상이 켜진 칸(1052 = `0x41C` 등)이 있습니다. 관찰한 칸의 0.5% 입니다. 아래 10비트 칩을 그대로·좌우·상하·양쪽으로 뒤집어 대도 상관이 0 근처라, 뒤집기가 아니라 다른 것(마을·성 같은 기호 자리로 보임)입니다. 내보내기는 이 칸도 아래 10비트로 그리므로 그 자리는 믿을 수 없습니다.
+
+![FIELD/bin/worldmap.bin 을 위 표로 그린 필드 일부(가로세로 32칸)](../images/nds-gfx-world.webp)
 
 ### G2D — 2D 화면
 
@@ -208,13 +222,14 @@ uv run --locked python nds/dq4/tools/ndsvram.py info work/b/b.state      # 레�
 | `PAM`, `PaletteAnimation` | 607 | 그림이 아님 |
 | `FIELD/large/*.bin` | 9 | 전부(1024×1024 1장, 64×64 8장) |
 | `FIELD/texture/*.pack` | 4 | 전부(첫 프레임 PNG + 애니메이션 WebP) |
-| `FIELD/bin/*.bin` | 6 | 그림으로는 못 냄(칸 → 칩 표가 일부만, 남은 것) |
+| `FIELD/bin/worldmap*.bin` | 4 | 전부(4096×4096 렌더링). 비트 10 이상 칸은 미확인 |
+| `FIELD/bin/gotmap.bin`·`yamimap.bin` | 2 | 그리지 않음(남은 것) |
 
-뽑은 파일은 4,266개, 합계 약 280MB 입니다.
+뽑은 그림은 4,268개, 합계 약 300MB 입니다.
 
 ## 남은 것
 
-- **필드 칸 값 → 칩 표**: 위 대응 밖의 값(특히 `field.tex` 쪽 오프셋이 바뀌는 자리), 짝수 2~22 의 정체. 화면을 다른 곳으로 옮기는 좌표 칸을 찾으면 여러 화면에서 배울 수 있습니다. `WSYN`·`WCHA`·`WCMA` 덩어리와 `gotmap.bin`·`yamimap.bin` 의 뜻도 아직입니다.
+- **필드 칸의 비트 10 이상**(마을·성 기호 자리로 보임)과 `WSYN`·`WCHA`·`WCMA` 덩어리, `gotmap.bin`·`yamimap.bin`(어둠의 세계 쪽 표가 같은지).
 - **전투 위 화면 배경 `ubtl*`**: 평원 낮 전투 두 번에서 쓰이지 않았습니다. 어떤 전투에서 쓰는지와 타일 배치.
 - **DSSA 셀 플래그 `0x2000`·`0x4000`** 과 셀 머리 u32, 프레임 표 첫 8바이트.
 - **몬스터 동작 칸 2~13 의 뜻**(주문·숨결·피해·죽음 등으로 보임). 칸 0 대기·칸 1 공격만 확인했습니다.

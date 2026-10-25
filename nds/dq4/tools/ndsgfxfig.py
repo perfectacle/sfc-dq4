@@ -65,11 +65,28 @@ def largemap_figure():
     img.resize((256, 256), Image.LANCZOS).save(os.path.join(OUT, "nds-gfx-largemap.webp"), quality=85)
 
 
+def world_figure():
+    """FIELD/bin/worldmap.bin 을 칸 값 → 칩 대응으로 그린 필드 일부(가로세로 32칸, 512×512)."""
+    import numpy as np
+    ft = g.texture_object(read("FIELD/field.tex"))
+    pal = ft["pal"]
+    f_img = np.asarray(g.texture_object_image(ft, transparent0=False).convert("RGB"))
+    pb = read("FIELD/texture/pattern8.pack")
+    eo, es = g.pack_entries(pb)[0]
+    p_img = np.asarray(g.texture(pb[eo:eo + es], 4, 256, es // 256, pal, False).convert("RGB"))
+    sb = read("FIELD/texture/pattern24.pack")
+    eo, es = g.pack_entries(sb)[0]
+    s_img = np.asarray(g.texture(sb[eo:eo + es], 4, 256, 16, pal, False).convert("RGB"))
+    cells = g.wmap(read("FIELD/bin/worldmap.bin"))[81:113, 81:113]
+    g.render_field(cells, f_img, p_img, s_img).save(os.path.join(OUT, "nds-gfx-world.webp"), quality=85)
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     flip_figure()
     bca_figure()
     largemap_figure()
+    world_figure()
 
 
 if __name__ == "__main__":
