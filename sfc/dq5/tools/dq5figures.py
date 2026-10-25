@@ -664,6 +664,18 @@ def fig_perframe_last():
     save(out, 'dq5-perframe-last.webp')
 
 
+def fig_exflags2():
+    """예외 표 플래그 장면. 31/10 이벤트 3B 를 원래 흐름으로 건 화면 둘(ジャミ 의 대사, 석상이 된 둘)과 06/08 에서 天空城 이 호수에서 떠오르는 화면(21D4.2).
+    work/exflag2/ 의 b3a.png·b3b.png·d42.png 이고 명령은 sfc/dq5/journal/ 의 exflag2 일지."""
+    shots = [('b3a.png', '31/10 3B'), ('b3b.png', '31/10 3B'), ('d42.png', '06/08 21D4.2')]
+    out = Image.new('RGB', (len(shots) * 260 - 4, 224), (24, 24, 24))
+    for i, (path, text) in enumerate(shots):
+        im = Image.open(f'work/exflag2/{path}').convert('RGB')
+        label(im, text)
+        out.paste(im, (i * 260, 0))
+    save(out, 'dq5-exflags2.webp')
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     rom = Rom(open('rom/dq5.sfc', 'rb').read())
@@ -698,6 +710,7 @@ def main():
     fig_perframe_scenes()
     fig_perframe_more()
     fig_perframe_last()
+    fig_exflags2()
     os.remove(TMP)
 
 
