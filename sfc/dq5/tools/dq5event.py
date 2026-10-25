@@ -49,8 +49,8 @@ OPS = {
     0xC1: (2, '7E:31E0 쓰기'),         # 00:C104
     0xC2: (1, '한 걸음 쉬기'),         # 00:C11A  8 프레임
     0xC3: (4, '뛰기'),                 # 00:C122  주소 3바이트
-    0xC4: (4, 'C4'),                   # 00:C092  7E:1E8C~1E8E, 01:D915
-    0xC5: (4, 'C5'),                   # 00:C0D4  7E:1E8C~1E8E, 01:F117
+    0xC4: (4, '문 열기'),              # 00:C092  7E:1E8C~1E8E, 01:D915
+    0xC5: (4, '문 닫기'),              # 00:C0D4  7E:1E8C~1E8E, 01:F117
     0xC6: (1, 'C6'),                   # 00:C15E  23:FE69
     0xC7: (2, 'C7'),                   # 00:C16E  23:FE77
     0xC8: (2, 'C8'),                   # 00:C182  23:FE80
@@ -90,7 +90,9 @@ def decode(rom, a, limit=600):
             desc += f' {m:03X} 「{short_message(rom, m)}」'
         elif op == 0x90:
             desc += f' {raw[1]:02X}/{raw[2]:02X} ({raw[3]},{raw[4]}) 방향 {raw[5]}'
-        elif op in (0xA0, 0xC3, 0xC4, 0xC5):
+        elif op in (0xC4, 0xC5):
+            desc += f' ({raw[1]},{raw[2]}) {raw[3]:02X}'
+        elif op in (0xA0, 0xC3):
             t = raw[1] | raw[2] << 8 | raw[3] << 16
             desc += f' {t >> 16:02X}:{t & 0xFFFF:04X}'
             if op == 0xC3:

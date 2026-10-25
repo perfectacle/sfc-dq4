@@ -1,6 +1,6 @@
 # NDS DQ4 대사·폰트·한글 팬패치
 
-DS 일본판의 대사 파일, 폰트, 그리고 한글 팬패치가 한글을 넣은 방식입니다. 도구는 `nds/dq4/tools/ndstext.py`(대사), `ndsfont.py`(폰트), `ndskr.py`(한글 대응표)입니다.
+DS 일본판의 대사 파일, 폰트, 그리고 한글 팬패치가 한글을 넣은 방식입니다. 도구는 `nds/dq4/tools/ndstext.py`(대사), 툴킷의 `krpatch nds font`(폰트), `ndskr.py`(한글 대응표)입니다.
 
 ## 대사 파일 MPT0
 
@@ -142,7 +142,7 @@ uv run --locked python nds/dq4/tools/ndstext.py dump work/nds/kr/data/data/MESS/
 
 ## 폰트 NFTR
 
-`data/data/G2D/FONT/`. NDS 표준 비트맵 폰트 형식입니다. `ndsfont.py info` 로 읽었습니다.
+`data/data/G2D/FONT/`. NDS 표준 비트맵 폰트 형식입니다. `krpatch nds font info` 로 읽습니다.
 
 | 파일 | 칸 | bpp | 글자 | 코드 |
 | --- | --- | --- | --- | --- |
@@ -263,4 +263,4 @@ uv run --locked python nds/dq4/tools/ndstext.py talk work/nds/jp 1 --kr work/nds
 - 이름 표(`ndstext.py names`·`glossary`)의 「번호」 열은 색인 번호이고 메시지 번호가 아님. 아이템·몬스터 번호와의 관계는 확인 안 함.
 - 이벤트 스크립트 명령 번호의 뜻(`0x05` 메시지 말고는 모름). `0x03`·`0x06` 의 인자도 메시지 번호와 맞는 일이 많음.
 - 실행 파일 문자열 중 폰트에 없는 코드(撒·燕)가 화면에 어떻게 나오는지.
-- 동료 대화 표의 필드 뜻(장소·일행·진행·시간대 조건, 여러 문장 묶음). 에뮬레이터로 대화를 걸며 레코드 번호를 잡아야 함.
+- 동료 대화 표 필드의 나머지 뜻은 [param-format.md](param-format.md#남은-것).

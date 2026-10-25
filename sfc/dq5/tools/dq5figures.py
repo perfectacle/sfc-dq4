@@ -511,6 +511,17 @@ def fig_hangul_proto():
     save(out, 'dq5-hangul-proto.webp')
 
 
+def fig_hangul_poweron():
+    """dq5hangul.py proto --long 롬을 새 SRAM 으로 전원부터 켜 찍은 화면 넷(work/hangul/poweron-long/s03200·s06850·s10390·
+    s10600.png): 이름 입력, 이름을 짓는 메시지, 긴 항목 명령 창, 메시지 129. 명령은 sfc/dq5/journal/ 의 hangul3 일지 1절."""
+    names = ('s03200', 's06850', 's10390', 's10600')
+    imgs = [Image.open(f'work/hangul/poweron-long/{n}.png').convert('RGB') for n in names]
+    out = Image.new('RGB', (imgs[0].width * 2 + 8, imgs[0].height * 2 + 8), (24, 24, 24))
+    for k, img in enumerate(imgs):
+        out.paste(img, ((k % 2) * (img.width + 8), (k // 2) * (img.height + 8)))
+    save(out, 'dq5-hangul-poweron.webp')
+
+
 def fig_worlds(rom):
     """$1949 로 고르는 세계 지도 셋(블록 1개를 2x2 로 축소)과 그 세계의 04:FD97 입구(노란 틀). 세계 1·2 는 땅이 있는 왼쪽 위
     128x128 블록만 2배로 키웠다. 타일은 롬, 팔레트는 세계마다
@@ -607,6 +618,46 @@ def fig_perframe_0400():
     save(out, 'dq5-perframe-0400.webp')
 
 
+def fig_perframe_scenes():
+    """쉬던 매 프레임 루틴을 조건을 맞춰 돌린 화면(위)과 그 루틴을 막은 화면(아래). 07/00 (20,43), 06/08 (24,8) `21D4|04`,
+    14/01 슬롯 8 을 (38,27) 로, 31/06 (52,23). work/perframe2/<맵><a|b>/ 의 sNNN.png 이고 명령은 sfc/dq5/journal/ 의 perframe2 일지."""
+    cols = [('0700', 's320', '07/00'), ('0608', 's320', '06/08'), ('1401', 's320', '14/01'), ('3106', 's096', '31/06')]
+    out = Image.new('RGB', (len(cols) * 260 - 4, 2 * 228 - 4), (24, 24, 24))
+    for i, (name, shot, text) in enumerate(cols):
+        for j, k in enumerate('ab'):
+            im = Image.open(f'work/perframe2/{name}{k}/{shot}.png').convert('RGB')
+            label(im, text + ('' if k == 'a' else ' blocked'))
+            out.paste(im, (i * 260, j * 228))
+    save(out, 'dq5-perframe-scenes.webp')
+
+
+def fig_perframe_more():
+    """남은 매 프레임 루틴을 돌린 화면(위)과 막은 화면(아래). 51/51 `1BBD` = 3 에 위·아래 입력(トロッコ), 01/00 청년기에
+    슬롯 11 을 주인공 곁으로. work/perframe3/<맵><a|b>/ 의 sNNN.png 이고 명령은 sfc/dq5/journal/ 의 perframe3 일지."""
+    cols = [('5151', 's320', '51/51'), ('0100', 's320', '01/00')]
+    out = Image.new('RGB', (len(cols) * 260 - 4, 2 * 228 - 4), (24, 24, 24))
+    for i, (name, shot, text) in enumerate(cols):
+        for j, k in enumerate('ab'):
+            im = Image.open(f'work/perframe3/{name}{k}/{shot}.png').convert('RGB')
+            label(im, text + ('' if k == 'a' else ' blocked'))
+            out.paste(im, (i * 260, j * 228))
+    save(out, 'dq5-perframe-more.webp')
+
+
+def fig_perframe_last():
+    """0E/04 에서 걸은 뒤 화면(왼쪽 루틴대로, 가운데 03:F928 을 막음), 31/07 바위를 옮긴 뒤 전투(오른쪽 둘),
+    01/00 ドラゴンキッズ. work/perframe4/ 의 0E04a·0E04b/end.png, s0c3/s00760·s01060.png, o11b/s00900.png.
+    명령은 sfc/dq5/journal/ 의 perframe4 일지."""
+    shots = [('0E04a/end.png', '0E/04'), ('0E04b/end.png', '0E/04 blocked'), ('s0c3/s00760.png', '31/07'),
+             ('s0c3/s01060.png', '31/07'), ('o11b/s00900.png', '01/00')]
+    out = Image.new('RGB', (len(shots) * 260 - 4, 224), (24, 24, 24))
+    for i, (path, text) in enumerate(shots):
+        im = Image.open(f'work/perframe4/{path}').convert('RGB')
+        label(im, text)
+        out.paste(im, (i * 260, 0))
+    save(out, 'dq5-perframe-last.webp')
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     rom = Rom(open('rom/dq5.sfc', 'rb').read())
@@ -627,6 +678,7 @@ def main():
     fig_hangul()
     fig_hangul_retree()
     fig_hangul_proto()
+    fig_hangul_poweron()
     fig_mongfx(rom)
     fig_worlds(rom)
     fig_high_maps(rom)
@@ -636,6 +688,9 @@ def main():
     fig_seabattle(rom)
     fig_gfx_diff(rom)
     fig_perframe_0400()
+    fig_perframe_scenes()
+    fig_perframe_more()
+    fig_perframe_last()
     os.remove(TMP)
 
 

@@ -19,8 +19,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import ndsfont  # noqa: E402
 import ndstext  # noqa: E402
+from kr_patch.nds.font import Font  # noqa: E402
 
 FONT_PATH = ('data', 'data', 'G2D', 'FONT')
 ORDERED_FROM = 0x3300
@@ -43,7 +43,7 @@ def ks_syllables():
 
 
 def fonts(root, name):
-    return ndsfont.Font(open(os.path.join(root, *FONT_PATH, name + '.nftr'), 'rb').read())
+    return Font(open(os.path.join(root, *FONT_PATH, name + '.nftr'), 'rb').read())
 
 
 def changed(jp, kr):

@@ -85,24 +85,36 @@ WORLD_SCREEN_STEP_X, WORLD_SCREEN_STEP_Y = 0x03CD48, 0x03CD58
 CREDITS_FONT = 0x1ED7E3
 # 02:FB2B: 글자 문자열(02:FF3B 의 24비트 포인터 둘: 0 = 엔딩 스태프 롤 1E:F5B8, 1 = 타이틀 1E:FEEC).
 # 00~3F 는 글자 번호 → 1E:F539 + 번호*3 = [위 타일][아래 타일][너비(0 이면 8점)]. 그 밖은 제어:
-# FC n 은 n*8점 띄움, FE 줄 끝, FD 빈 줄, F9 한 프레임 쉼, F8 VRAM 칸 하나 되돌림(점 자리는 그대로), FB·F7·F6 n 은 인자 하나, F5 끝.
+# FC n 은 n*8점 띄움, FE 줄 끝, FD 빈 줄, F9 한 프레임 쉼, F8 VRAM 칸 하나 되돌림(점 자리는 그대로), FB n 은 줄 무늬 칸 n 개, F7·F6 n 은 인자 하나, F5 끝.
 CREDITS_SCRIPTS = 0x02FF3B
 CREDITS_GLYPHS = 0x1EF539
 CREDITS_TEXT = 'ABCDEFGHIJKLNOPQRSTUVXYZ921'
+CREDITS_BAND = 'band'
+CREDITS_BAND_TILE = 0x1EF5A8
 CREDITS_PAIRS = {(0x1B, 0x1C): '&', (0x1E, 0x1F): 'M', (0x20, 0x21): 'W', (0x23, 0x24): '©'}
 # 엔딩 「THE END」: BG3 2bpp 타일 41개를 03:B459 의 런 길이 압축(1F:D28B, 낮은·높은 바이트 줄기)에서 VRAM 워드 4000 에,
-# CGRAM 0~11 을 03:A502 에서(0번 색은 0). 타일맵은 코드가 7E:A007 에 만들어 0F:EBCE 가 VRAM 1D80 에 올리는데,
-# 만드는 곳을 아직 몰라 엔딩 덤프의 BG3 타일맵 12~15줄 3~28칸을 그대로 옮겨 둔다.
+# CGRAM 0~11 을 03:A502 에서(0번 색은 0). 타일맵은 03:A40A 가 03:A478 의 바이트 128개(bit0-6 타일, bit7 좌우 반전)로
+# 7E:A007 에 32x4 칸을 만들고 0F:EBCE 가 VRAM 1D80(12~15줄)에 올린다. 속성은 03:A4F8 의 [타일 한계][속성 위 바이트]
+# 쌍에서 타일 번호보다 한계가 큰 첫 쌍. 그림은 글자가 있는 3~28칸만 쓴다.
 THE_END_TILES = 0x03B459
 THE_END_COLORS = 0x03A502
-THE_END_MAP = (
-    (0x0828,) * 12 + (0x0801, 0x4801) + (0x0828,) * 12,
-    (0x0804, 0x0805, 0x0806, 0x0807, 0x0808, 0x0809, 0x0410, 0x4410, 0x0411, 0x0412, 0x0413, 0x0414, 0x0415,
-     0x0416, 0x0414, 0x0417, 0x0418, 0x0419, 0x041A, 0x041B, 0x4809, 0x4808, 0x4807, 0x4806, 0x4805, 0x4804),
-    (0x080A, 0x080B, 0x080C, 0x080D, 0x080E, 0x080F, 0x001C, 0x401C, 0x001D, 0x001E, 0x001F, 0x0020, 0x0021,
-     0x0022, 0x0020, 0x0023, 0x0024, 0x0025, 0x0026, 0x0027, 0x480F, 0x480E, 0x480D, 0x480C, 0x480B, 0x480A),
-    (0x0802,) * 12 + (0x0803, 0x4803) + (0x0802,) * 12,
-)
+THE_END_CELLS = 0x03A478
+THE_END_ATTRS = 0x03A4F8
+THE_END_COLS = (3, 29)
+
+
+def the_end_map(rom):
+    """03:A40A. 4줄 × 26칸의 타일맵 낱말(타일 | 속성 << 8)."""
+    words = []
+    for i in range(128):
+        b = rom.u8(THE_END_CELLS + i)
+        t, k = b & 0x7F, 0
+        while not t < rom.u8(THE_END_ATTRS + k * 2):
+            k += 1
+        words.append(t | ((0x40 if b & 0x80 else 0) | rom.u8(THE_END_ATTRS + k * 2 + 1)) << 8)
+    return [words[r * 32 + THE_END_COLS[0]:r * 32 + THE_END_COLS[1]] for r in range(4)]
+
+
 # 25:85D5: ルーラ 목적지의 맵 그룹 22개. 이름은 이름 표 0B(23:D5F3) 의 같은 순번.
 RURA_GROUPS, RURA_COUNT, TOWN_NAMES = 0x2585D5, 22, 0x0B
 
@@ -1258,7 +1270,16 @@ def credits_rows(rom, script):
                 cur.append((x, None))
             x += rom.u8(p + k) * 8
             k += 1
-        elif b in (0xFB, 0xF7, 0xF6):
+        elif b == 0xFB:
+            # 02:FC66: 줄 무늬 칸(1E:F5A8 의 2bpp 타일 위 + 빈 아래) n 개를 지금 자리부터 늘어놓는다(섹션 제목 밑줄).
+            if cur is None:
+                cur, x = [], 0
+                rows.append(cur)
+            for _ in range(rom.u8(p + k)):
+                cur.append((x, CREDITS_BAND))
+                x += 8
+            k += 1
+        elif b in (0xF7, 0xF6):
             k += 1
         elif b == 0xFE:
             cur = None
@@ -1279,6 +1300,9 @@ def credits_rows(rom, script):
             if codes[i] is None:
                 t, i = t + ' ', i + 1
                 continue
+            if codes[i] == CREDITS_BAND:
+                t, i = t + '─', i + 1
+                continue
             pair = tuple(codes[i:i + 2])
             if pair in CREDITS_PAIRS:
                 t, i = t + CREDITS_PAIRS[pair], i + 2
@@ -1293,9 +1317,13 @@ def credits_rows(rom, script):
 def credits_image(rom, rows, colors):
     tiles = credits_tiles(rom)[1:]
     img = Image.new('RGB', (256, len(rows) * 16), colors[0])
+    band = tile_image(chr_2bpp(bytes(rom.u8(CREDITS_BAND_TILE + i) for i in range(16))), colors[0:4])
     for y, r in enumerate(rows):
         for x, c in r:
             if c is None:
+                continue
+            if c == CREDITS_BAND:
+                img.paste(band, (x, y * 16), band)
                 continue
             for half in (0, 1):
                 t = rom.u8(CREDITS_GLYPHS + c * 3 + half)
@@ -1479,8 +1507,9 @@ def export_the_end(rom, out):
     o = lorom(THE_END_COLORS)
     colors = cgram_colors(bytes(2) + rom.d[o:o + 22])
     tiles = [chr_2bpp(t) for t in the_end_tiles(rom)]
-    img = Image.new('RGB', (len(THE_END_MAP[0]) * 8, len(THE_END_MAP) * 8), colors[0])
-    for y, row in enumerate(THE_END_MAP):
+    the_end = the_end_map(rom)
+    img = Image.new('RGB', (len(the_end[0]) * 8, len(the_end) * 8), colors[0])
+    for y, row in enumerate(the_end):
         for x, w in enumerate(row):
             t = w & 0x3FF
             if t < len(tiles):
@@ -1488,13 +1517,20 @@ def export_the_end(rom, out):
                 ti = tile_image(tiles[t], colors[pal * 4:pal * 4 + 4], bool(w & 0x4000), bool(w & 0x8000))
                 img.paste(ti, (x * 8, y * 8), ti)
     out.save(img, 'gfx/screens/the-end.png', 'screens', '엔딩 「THE END」', '타이틀·엔딩',
-             note='타일 03:B459, 색 03:A502. 배치는 엔딩 덤프의 BG3 타일맵을 옮긴 것')
+             note='타일 03:B459, 색 03:A502, 배치 03:A478(03:A40A)')
+
+
+def export_battle_windows(rom, out):
+    import dq5battlewin
+    for name, title, img in dq5battlewin.windows(rom):
+        out.save(img, f'gfx/screens/{name}', 'screens', title, '전투 메시지 창',
+                 note='24:A4A4 글자 격자 → 24:A5D9 타일맵(dq5battlewin.py). 이름·숫자는 예시 값(ああああ·スライム·4·1·メラ)')
 
 
 EXPORTS = {'maps': export_maps, 'chr': export_chr, 'field': export_field, 'anim': export_anim,
            'monsters': export_monsters, 'battlebg': export_battlebg, 'font': export_font, 'ui': export_ui,
            'worldmap': export_world_screen, 'credits': export_credits,
-           'windows': export_windows, 'theend': export_the_end}
+           'windows': export_windows, 'theend': export_the_end, 'battlewin': export_battle_windows}
 COMMAND = 'uv run --locked python sfc/dq5/tools/dq5gallery.py rom/dq5.sfc --out $OUT'
 
 
