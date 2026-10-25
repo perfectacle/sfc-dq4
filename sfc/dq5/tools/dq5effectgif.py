@@ -134,7 +134,7 @@ def main():
         frames[0].save(path, save_all=True, append_images=frames[1:], duration=durs, loop=0)
         out.add(f'gfx/effects/anim/{stem}.gif', 'effects', f'{n:02X} {title} (GIF)', '전투 연출', action=f'{n:02X}',
                 frames=len(frames), w=256, h=224, start=start, end=end,
-                note=('파파스' if n < 0x39 else '슬라임') + f'이 쓴 장면, 메시지 프레임 {start}~{end - 10}')
+                note=('파파스가' if n < 0x39 else '슬라임이') + f' 쓴 장면, 메시지 프레임 {start}~{end - 10}')
         print(f'{n:02X} {title}: {len(frames)}장 {start}~{end}')
     out.finish(COMMAND)
     shutil.rmtree(tmp, ignore_errors=True)

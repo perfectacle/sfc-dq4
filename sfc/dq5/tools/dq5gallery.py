@@ -129,6 +129,15 @@ def write_pages(items, root, sprite_items):
         f.write(page('DQ5(SFC) 스프라이트·몬스터', nav, '인물 스프라이트는 sprites/index.json 그대로입니다.', sections))
 
 
+def captured(root):
+    """게임을 돌려 찍은 그림(dq5effectgif.py 의 gfx/effects/anim/)이 있으면 그 목록을 갤러리에 붙인다."""
+    index = os.path.join(root, 'gfx', 'effects', 'anim', 'index.json')
+    if not os.path.exists(index):
+        return []
+    with open(index) as f:
+        return [dict(i, path='gfx/effects/anim/' + i['path']) for i in json.load(f)]
+
+
 def sprites(rom, root, only):
     if only and 'sprites' not in only:
         return []
@@ -166,7 +175,7 @@ def main():
     gfx = importlib.import_module('dq5gfx')
     sha = hashlib.sha1(data).hexdigest()
     items = gfx.export_all(rom, args.out, only, rom_sha=sha, command=COMMAND)
-    write_pages(items, args.out, sprites(rom, args.out, only))
+    write_pages(items + captured(args.out), args.out, sprites(rom, args.out, only))
     with open(os.path.join(args.out, 'gallery', 'SOURCE.txt'), 'w') as f:
         f.write(gfx.source_text(COMMAND, sha))
     print(f'{len(items)} items -> {os.path.join(args.out, "gallery")}')
