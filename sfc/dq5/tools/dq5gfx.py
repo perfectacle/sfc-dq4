@@ -1354,9 +1354,11 @@ def export_credits(rom, out):
 
 
 # 창 문자열의 자리 표시(B0~) 너비: HP·MP 3칸, 레벨 2칸(상태 창 실측). 나머지는 1칸으로 둔다.
-WINDOW_FIELDS = {0xB0: 3, 0xB1: 3, 0xC6: 2, 0xBD: 2}
+# B0~BA 는 04:B3A2 표의 처리기가 일행 필드(B0 = 00 HP, B1 = 07 MP, B2~BA = 05·0D·1C·17·1E·20·22·0F·13)를 읽어
+# 같은 꼬리(04:B443)로 세 자리를 찍고, BB 는 필드 49 를 다섯 자리로 찍는다(코드 읽기).
+WINDOW_FIELDS = {**{b: 3 for b in range(0xB0, 0xBB)}, 0xBB: 5, 0xC6: 2, 0xBD: 2}
 # 갤러리용 예시 값: 자리 표시마다 오른쪽 맞춤 숫자(타일 02~0B = 0~9), 이름 자리는 「ああああ」(타일 10).
-WINDOW_SAMPLES = {0xB0: '999', 0xB1: '999', 0xC6: '99', 0xBD: '99'}
+WINDOW_SAMPLES = {**{b: '999' for b in range(0xB0, 0xBB)}, 0xBB: '99999', 0xC6: '99', 0xBD: '99'}
 SAMPLE_NAME = (0x10, 0x10, 0x10, 0x10)
 
 
