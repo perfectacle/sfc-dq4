@@ -66,7 +66,7 @@ def largemap_figure():
 
 
 def world_figure():
-    """FIELD/bin/worldmap.bin 을 칸 값 → 칩 대응으로 그린 필드 일부(가로세로 32칸, 512×512)."""
+    """FIELD/bin/worldmap.bin 을 WTEX 표와 SDAT 기호로 그린 필드 일부(가로세로 32칸, 512×512)."""
     import numpy as np
     ft = g.texture_object(read("FIELD/field.tex"))
     pal = ft["pal"]
@@ -77,8 +77,26 @@ def world_figure():
     sb = read("FIELD/texture/pattern24.pack")
     eo, es = g.pack_entries(sb)[0]
     s_img = np.asarray(g.texture(sb[eo:eo + es], 4, 256, 16, pal, False).convert("RGB"))
-    cells = g.wmap(read("FIELD/bin/worldmap.bin"))[81:113, 81:113]
-    g.render_field(cells, f_img, p_img, s_img).save(os.path.join(OUT, "nds-gfx-world.webp"), quality=85)
+    b = read("FIELD/bin/worldmap.bin")
+    pictures = [g.texture_object_image(t) for t in g.texture_pack(read("FIELD/symbol/symbol.pack"))]
+    img = g.render_field(g.wmap(b), g.wtex(b), f_img, p_img, s_img, g.sdat(b), pictures)
+    img.crop((1296, 1296, 1808, 1808)).convert("RGB").save(os.path.join(OUT, "nds-gfx-world.webp"), quality=85)
+
+
+def effect_figure():
+    """3D 효과 effect010(ヒャド 계열)을 BCA0·BTA0·BMA0 로 재생한 프레임 6장(앞에서 본 직교, 반투명 섞기)."""
+    b = read("EFFECT/effect010.lz")
+    ents = g.pack_entries(b)
+
+    def pick(tag):
+        return next((b[eo:eo + es] for eo, es in ents if es and b[eo:eo + 4] == tag), None)
+    frames, _ = g.model_anim_frames(pick(b"BMD0"), pick(b"BCA0"), 0, step=10, max_frames=6, blend=True,
+                                    srt=pick(b"BTA0"), mat=pick(b"BMA0"), scale=60)
+    w, h = frames[0].size
+    out = Image.new("RGBA", (w * len(frames), h), (24, 26, 40, 255))
+    for k, f in enumerate(frames):
+        out.alpha_composite(f, (k * w, 0))
+    out.save(os.path.join(OUT, "nds-gfx-effect.webp"), lossless=True)
 
 
 def main():
@@ -87,6 +105,7 @@ def main():
     bca_figure()
     largemap_figure()
     world_figure()
+    effect_figure()
 
 
 if __name__ == "__main__":
