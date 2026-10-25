@@ -10,7 +10,7 @@
     python nds/dq4/tools/ndswarp.py chapters OUTDIR               서장·1~6장 시작 세이브스테이트(dq4ds-chN.state)
 
 공통 옵션: --state IN(출발 세이브스테이트, 없으면 boot 와 같은 경로로 전원부터), --rom, --fs(풀어 둔 롬),
---core(없으면 $DESMUME_CORE), --after "ndsplay 명령", --no-encounter(도착한 맵의 조우를 끔).
+--core(없으면 $DESMUME_CORE), --after "ndsplay 명령", --no-encounter(도착한 맵의 조우를 끔), --time N(시간대를 정하고 맵에 들어감).
 결과마다 OUTDIR/<이름>.state 와 .png 를 남긴다.
 """
 import argparse
@@ -28,9 +28,11 @@ SCENE_TOWN = 0x0C         # 맵(마을·던전) 장면
 SCENE_FIELD = 0x0E        # 필드(세계 지도) 장면
 MAP_FLAGS = 0x020CE100    # 지금 맵의 속성 비트. 0x200 이 서 있어야 조우 판정(0x0201C790)을 함
 ENCOUNTER_BIT = 0x200
-CHAPTER = 0x020EB9A8      # 장 번호(0 서장 ~ 6)
+CHAPTER = 0x020EB9A8      # 장 번호(서장 프리셋도 1, 1~6장)
+TIME_ZONE = 0x020CE1B4    # 시간대: 0 없음, 1 아침, 2 낮, 3 저녁, 4 밤. 맵을 다시 실을 때 반영됨
 HERO_OBJ = 0x020EC4F0     # 주인공 객체 포인터. 필드에서는 [객체+0x70] 이 가리키는 곳이 x, z(s32)
 FIELD_TILE = 0x3000       # 필드 한 칸
+FIELD_WRAP = 0x1000000    # 필드 좌표는 이 값으로 돌아감(한 바퀴 1365⅓ 칸)
 SCENE_BATTLE_TEST = 0x11  # 전투 테스트(Battle Menu Part)
 BATTLE_TEST = 0x020C28BC  # 그 객체: +4 모드(0 Encount, 1 Select), +0x20 무리별 몬스터, +0x30 무리별 마릿수
 MAP_NAME = 0x020C4F44     # 지금 맵 이름(ASCII)
@@ -81,8 +83,10 @@ def boot(p):
     p.run(300)
 
 
-def enter(p, name, preset=None, x=None, z=None, settle=300):
+def enter(p, name, preset=None, x=None, z=None, settle=300, time=None):
     assert len(name) < 16
+    if time is not None:
+        p.w32(TIME_ZONE, time)
     if preset is not None:
         p.w32(PRESET, preset)
     p.write(MAP_NAME, name.encode().ljust(16, b"\0"))
@@ -107,10 +111,11 @@ def field(p, x, z, settle=300):
     p.w32(SCENE_REQ, SCENE_FIELD)
     p.run(settle)
     pos = p.u32(p.u32(HERO_OBJ) + 0x70)
-    p.w32(pos, round(x * FIELD_TILE))
-    p.w32(pos + 4, round(z * FIELD_TILE))
+    rx, rz = round(x * FIELD_TILE) % FIELD_WRAP, round(z * FIELD_TILE) % FIELD_WRAP
+    p.w32(pos, rx)
+    p.w32(pos + 4, rz)
     p.run(60)
-    return p.u32(SCENE_CUR) == SCENE_FIELD and p.u32(HERO_POS) == round(x * FIELD_TILE) & 0xFFFFFFFF
+    return p.u32(SCENE_CUR) == SCENE_FIELD and p.u32(HERO_POS) == rx
 
 
 def battle(p, groups, settle=300):
@@ -160,6 +165,7 @@ def main():
     ap.add_argument("--z", type=float, help="맵이 실린 뒤 주인공 z(칸)")
     ap.add_argument("--after", default="", help="끝에 실행할 ndsplay 명령(; 로 나눔)")
     ap.add_argument("--settle", type=int, default=300)
+    ap.add_argument("--time", type=int, choices=range(5), help="시간대(0 없음, 1 아침, 2 낮, 3 저녁, 4 밤)")
     ap.add_argument("--no-encounter", action="store_true", help="도착한 맵의 조우 비트(0x020CE100 의 0x200)를 지움")
     a = ap.parse_args()
 
@@ -195,7 +201,7 @@ def main():
     if a.cmd == "map":
         for name in a.args[1:]:
             start(p, state)
-            ok = enter(p, name, None, a.x, a.z, a.settle)
+            ok = enter(p, name, None, a.x, a.z, a.settle, a.time)
             finish(p, out, name, ok, a.after, a.no_encounter)
     elif a.cmd == "battle":
         groups = [tuple(int(v) for v in (g.split("x") + ["1"])[:2]) for g in a.args[1:5]]
@@ -213,7 +219,7 @@ def main():
         jobs = CHAPTERS if a.cmd == "chapters" else [(f"preset{int(n):03d}", int(n)) for n in a.args[1:]]
         for name, n in jobs:
             start(p, state)
-            ok = enter(p, preset_map(recs, n), n, a.x, a.z, a.settle)
+            ok = enter(p, preset_map(recs, n), n, a.x, a.z, a.settle, a.time)
             finish(p, out, ("dq4ds-" + name) if a.cmd == "chapters" else name, ok, a.after, a.no_encounter)
 
 
