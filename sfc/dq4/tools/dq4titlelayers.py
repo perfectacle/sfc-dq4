@@ -152,12 +152,20 @@ def glyph_mask():
     return mask
 
 
+def protected_glyph_mask():
+    mask = glyph_mask()
+    # The ornament tail shares tiles with the castle and must pass behind its clouds.
+    ImageDraw.Draw(mask).rectangle((176, 176, 255, 223), fill=0)
+    return mask
+
+
 def foreground():
     original = native_title(DEFAULT_SOURCE)
     mask = glyph_mask()
     ImageDraw.Draw(mask).polygon([(185,183),(185,174),(187,180),(190,180),(190,171),(192,169),(192,167),(194,167),(194,170),(201,171),(201,160),(203,160),(203,165),(209,165),(209,152),(211,148),(213,161),(213,159),(215,159),(215,163),(220,163),(220,144),(222,142),(224,153),(226,153),(227,155),(227,140),(229,137),(231,150),(231,153),(233,154),(233,147),(234,145),(235,154),(238,153),(239,160),(239,165),(244,166),(245,160),(246,164),(246,168),(250,168),(251,165),(252,170),(254,171),(254,174),(247,174),(240,171),(232,172),(231,166),(225,165),(224,176),(221,176),(220,171),(216,171),(216,177),(211,183),(206,185),(201,185),(200,177),(196,176),(194,180),(194,185),(191,186),(190,183)], fill=255)
     # Keep the cloud bank attached to the castle when the front cloud drifts away.
     ImageDraw.Draw(mask).polygon([(185,180),(190,178),(196,174),(204,173),(211,175),(218,171),(226,169),(233,172),(240,170),(248,172),(255,174),(255,185),(251,185),(248,189),(243,188),(239,192),(234,191),(230,194),(225,192),(221,195),(216,194),(211,197),(206,196),(201,199),(196,196),(191,197),(187,194),(182,194),(180,190),(183,187)], fill=255)
+    ImageDraw.Draw(mask).rectangle((180, 185, 207, 223), fill=0)
     source = np.array(original)
     pixels = np.where(np.array(mask) > 0, np.where(source == 0, 16, source), 0).astype(np.uint8)
     palette = np.array(original.getpalette()[:384], dtype=np.uint8).reshape(128, 3)
@@ -166,7 +174,7 @@ def foreground():
     padded[:224] = pixels
     data, mapping = tilemap(padded, 8)
     glyphs = np.zeros((256, 256), dtype=np.uint8)
-    glyphs[:224] = np.array(glyph_mask())
+    glyphs[:224] = np.array(protected_glyph_mask())
     priority = glyphs.reshape(32, 8, 32, 8).any(axis=(1, 3))
     mapping |= priority.astype(np.uint16) << 13
     if len(data) > 0x6000:
@@ -316,7 +324,7 @@ def write_pack(out):
     protect_outputs(outputs, [DEFAULT_SOURCE, ART / 'sky.png', ART / 'dragon-rig.png', CLOUD_SOURCE, GLYPH_MASK])
     out.mkdir(parents=True, exist_ok=True)
     previews = []
-    glyphs = glyph_mask()
+    glyphs = protected_glyph_mask()
     cloud_rgba = cloud.convert('RGBA')
     priorities = np.frombuffer(fgmap, dtype='<u2').reshape(32, 32) & 0x2000 != 0
     high = np.repeat(np.repeat(priorities, 8, axis=0), 8, axis=1)[:224] & (np.array(mask) > 0)

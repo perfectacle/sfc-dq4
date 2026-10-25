@@ -45,7 +45,7 @@ POWER_MAP = (0xB5CE, 0xB5D9, 11)                 # 행동 ID → 위력 칸(나�
 HEAL = (0xB62F, 0xB64D, 30, 0xB7E3)              # 행동 ID 30개 → 회복 칸 → (기본, 폭). 폭 FF = 전부
 SUCCESS, RESIST_SLOT, RESIST_RATE = 0xB80B, 0xB736, 0xB803
 RESIST_NAMES = ('イオ', 'ギラ', 'メラ', 'デイン', 'バギ', 'ヒャド', 'マヌーサ', 'ラリホー', 'ザキ', 'ニフラム',
-                'マホトラ', 'マホトーン', 'メダパニ', 'ルカニ', 'メガンテ')   # 13:$B80B bit4-0 의 내성 칸 0-E
+                'マホトラ', 'マホトーン', 'メダパニ', 'ルカニ', 'メガンテ')   # 13:$B80B bit4-0 의 내성 칸 0-E(15칸 모두 실측)
 ITEM_FLAG_NAMES = ('쓰면 없어짐', '저주', '못 버림', '못 팖', '하나만 떨어뜨림', 'bit7')   # $8D1B bit2-7
 SELECT = ('고르게', '앞 칸 많이', '첫 칸 대부분', '차례')   # 몬스터 바이트 9·10 bit7(필드 1F)
 WEIGHTS = (0x18, 0x9AA9)                         # 고르는 법 0-2 마다 여섯 칸의 가중치(합 255), 3 은 차례
@@ -125,7 +125,8 @@ def monster_fields(r):
         'def': r[6] | (r[17] & 3) << 8, 'gold': r[7] | (r[18] & 3) << 8,
         'drop': r[8] & 0x7F, 'drop_rate': r[20] & 7,
         'actions': [b & 0x7F for b in r[9:15]],
-        'resist': [r[15 + j // 4] >> (2 * (j % 4)) & 3 for j in range(20) if j % 4],
+        # 필드 22 번호(1, 2, 3, 5, …) 순서라 내성 칸 순서가 아니다. RESIST_NAMES 와 짝지으려면 resists()
+        'resist_fields': [r[15 + j // 4] >> (2 * (j % 4)) & 3 for j in range(20) if j % 4],
         # bit7 둘을 묶은 2비트 값: 앞 바이트 bit7 이 bit0(10:$ACB4·$B121 의 ASL·ROL·ROL)
         'select': r[9] >> 7 | r[10] >> 7 << 1, 'count': r[11] >> 7 | r[12] >> 7 << 1,
         'f21': r[13] >> 7 | r[14] >> 7 << 1,
