@@ -4,7 +4,6 @@
 
 SFC DQ5 엔진 분석. 시작점은 [handoff.md](handoff.md). 결과 문서: [dq5-map-format.md](docs/dq5-map-format.md), [dq5-field-format.md](docs/dq5-field-format.md), [dq5-text-format.md](docs/dq5-text-format.md), [dq5-data-format.md](docs/dq5-data-format.md), [dq5-graphics-format.md](docs/dq5-graphics-format.md).
 
-- **전투**: 바다에서 전투가 붙지 않는 까닭(배 `$1954` = `03` 으로 조우 계수를 `FF` 로 해도 안 붙음, `23:E7C2` 의 나머지 조건), 전투 메시지 `F9` 의 소리 `0C 32` 의 정체.
 - **소리**: 명령 `01`·`02`·`03`·`04`·`0D`·`0E`·`94`·`8B`·`93`·`95`·`96`·`09` 의 뜻, `24:FE44` 기다림, 효과음·곡 번호의 이름, 필드 세계 1·2·탈것의 곡.
 - **이야기 플래그·이벤트 스크립트**: 「문맥」 사건 이름 실측(청년기는 6단계 확인, 신전·カボチ 남음), 켜는 곳이 없는 비트 30개, 제 장면에서 걸리지 않은 이벤트 4·5·7·9·6 과 `02:B705` 직접 호출 여러 곳, 명령 `C2`·`C4`·`C5`·`91` 의 뜻, パルプンテ `1D` 의 조건.
 - **조우의 남은 것**: 예외 표(`1F:F921`·`1F:FA3C`) 플래그의 사건을 게임으로 확인(지금은 켜는 곳 곁의 대사로 붙인 문맥).
