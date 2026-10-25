@@ -123,21 +123,25 @@ def write_pages(items, root, sprite_items):
     sections = [('sprites', f'인물 스프라이트 {len(spr)}', spr),
                 ('monsters', '전투 몬스터 236마리', simple_cards(items, 'monsters', lambda i: f'그림 {i["pic"]}')),
                 ('battlebg', '전투 배경', simple_cards(items, 'battlebg')),
+                ('motion', '전투 몬스터 움직임', simple_cards(items, 'motion')),
                 ('effects', '전투 주문·특기 연출 조각', simple_cards(items, 'effects'))]
-    nav = [('스프라이트', '#sprites'), ('몬스터', '#monsters'), ('전투 배경', '#battlebg'), ('전투 연출', '#effects'),
+    nav = [('스프라이트', '#sprites'), ('몬스터', '#monsters'), ('움직임', '#motion'), ('전투 배경', '#battlebg'),
+           ('전투 연출', '#effects'),
            ('맵·필드', 'index.html'), ('소리', 'sound.html')]
     with open(os.path.join(gallery, 'sprites.html'), 'w') as f:
         f.write(page('DQ5(SFC) 스프라이트·몬스터', nav, '인물 스프라이트는 sprites/index.json 그대로입니다.', sections))
 
 
 def captured(root):
-    """게임을 돌려 찍은 GIF(dq5effectgif.py·dq5titlegif.py 의 anim/ 폴더)가 있으면 그 목록을 갤러리에 붙인다."""
+    """다른 도구가 낸 그림(dq5effectgif.py·dq5titlegif.py 의 anim/, dq5fx.py 의 effects/frames/, dq5monmotion.py 의
+    monsters/motion/)이 있으면 그 목록을 갤러리에 붙인다."""
     out = []
-    for folder in ('gfx/effects/anim', 'gfx/screens/anim'):
+    for folder in ('gfx/effects/anim', 'gfx/effects/frames', 'gfx/screens/anim', 'monsters/motion'):
         index = os.path.join(root, folder, 'index.json')
         if os.path.exists(index):
             with open(index) as f:
-                out += [dict(i, path=f'{folder}/{i["path"]}') for i in json.load(f)]
+                # dq5monmotion.py 의 monsters/motion/index.json 은 cat 이 없어 'motion' 으로 둔다
+                out += [{'cat': 'motion', **i, 'path': f'{folder}/{i["path"]}'} for i in json.load(f)]
     return out
 
 
