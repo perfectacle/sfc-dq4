@@ -98,17 +98,27 @@ if cover then
     emu.addMemoryCallback(hit, emu.callbackType.exec, tonumber(a, 16), tonumber(b, 16))
   end
 end
-local vmadd, vlo, vlast, vseen = os.getenv("VMADD"), 0, 0, {}
+local vmadd, vlo, vlast, vseen, vpend = os.getenv("VMADD"), 0, 0, {}, nil
+local function vrec(k) vseen[k] = (vseen[k] or 0) + 1 end
+-- $2116 만 쓰고 $2117 을 쓰지 않은 경우: 다음 $2116 쓰기·MDMAEN·끝에서 낮은 바이트만 바뀐 주소로 기록
+local function vflush()
+  if vpend then vrec(string.format("VMADD %04X pc=%s (2116만)", vlast, vpend)); vpend = nil end
+end
 if vmadd then
   -- VMADD($2116/2117)를 쓴 PC 와 주소, MDMAEN($420B)을 쓴 PC 와 그때 켠 채널의 B 버스·A 주소·길이·VMADD
-  local function rec(k) vseen[k] = (vseen[k] or 0) + 1 end
   emu.addMemoryCallback(function(adr, v)
     local s = emu.getState()
     local pc = string.format("%02X:%04X", s["cpu.k"], s["cpu.pc"])
-    if adr & 0xFFFF == 0x2116 then vlo = v; vlast = (vlast & 0xFF00) | v
-    else vlast = (v << 8) | vlo; rec(string.format("VMADD %04X pc=%s", vlast, pc)) end
+    if adr & 0xFFFF == 0x2116 then
+      vflush()
+      vlo = v; vlast = (vlast & 0xFF00) | v; vpend = pc
+    else
+      vpend = nil
+      vlast = (v << 8) | vlo; vrec(string.format("VMADD %04X pc=%s", vlast, pc))
+    end
   end, emu.callbackType.write, 0x2116, 0x2117)
   emu.addMemoryCallback(function(adr, v)
+    vflush()
     local s = emu.getState()
     local pc = string.format("%02X:%04X", s["cpu.k"], s["cpu.pc"])
     for ch = 0, 7 do
@@ -118,7 +128,7 @@ if vmadd then
         local aa = emu.read(b + 4, emu.memType.snesMemory) * 65536 + emu.read16(b + 2, emu.memType.snesMemory)
         local len = emu.read16(b + 5, emu.memType.snesMemory)
         local tag = (bb == 0x18 or bb == 0x19) and string.format(" vmadd=%04X", vlast) or ""
-        rec(string.format("DMA ch%d bbus=21%02X src=%06X len=%04X%s pc=%s", ch, bb, aa, len, tag, pc))
+        vrec(string.format("DMA ch%d bbus=21%02X src=%06X len=%04X%s pc=%s", ch, bb, aa, len, tag, pc))
       end
     end
   end, emu.callbackType.write, 0x420B, 0x420B)
@@ -186,6 +196,7 @@ emu.addEventCallback(function()
     L.write("exec.txt", table.concat(e, "\n") .. "\n")
   end
   if n == maxf and vmadd then
+    vflush()
     local t = {}
     for k, c in pairs(vseen) do t[#t + 1] = k .. " x" .. c end
     table.sort(t)
