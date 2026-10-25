@@ -1312,17 +1312,22 @@ def export_credits(rom, out):
              note='1E:D7E3 RLE 타일을 위·아래 짝으로 늘어놓음(글자표 아님, 타일을 나눠 쓰는 글자가 있음). 색은 BG3 팔레트 0(04:98D7)')
 
 
+# 창 문자열의 자리 표시(B0~) 너비: HP·MP 3칸, 레벨 2칸(상태 창 실측). 나머지는 1칸으로 둔다.
+WINDOW_FIELDS = {0xB0: 3, 0xB1: 3, 0xC6: 2, 0xBD: 2}
+
+
 def window_grid(rom, n):
-    """창 레코드 n(04:EB48)을 BG3 타일 번호 격자로. 머리 +4 아래 니블이 0 인 목록 창만(그 밖은 None).
-    +0·+1 위치, +2 너비, +3 아래 4비트 높이·bit7 줄 간격 16점(sfc/dq5/docs/dq5-text-format.md 「창 레코드 머리」).
-    항목: FE = 커서 칸 하나 뒤 글자, FF = 다음 줄, 바이트는 BG3 타일 번호 그대로. 84·83 xx 는 글자 xx 위 칸에
-    탁점 84·반탁점 83(위 칸이 테두리면 92·93, 04:B258)."""
+    """창 레코드 n(04:EB48)을 BG3 타일 번호 격자로. (격자, X, Y) 또는 못 그리는 창이면 None.
+    머리 +0·+1 위치, +2 아래 5비트 너비, +3 아래 4비트 높이·bit7 줄 간격 16점(sfc/dq5/docs/dq5-text-format.md 「창 레코드 머리」).
+    목록 창: 첫 FE 부터. FE = 커서 칸 하나 뒤 글자, FF = 다음 줄, 바이트는 BG3 타일 번호 그대로. 84·83 xx 는 글자 xx 위 칸에
+    탁점 84·반탁점 83(위 칸이 테두리면 92·93, 04:B258).
+    상태 창 꼴(+4 가 D0~D3): 뒤 4바이트 자리에 이름, 다음 8x 는 가로줄 하나와 그 뒤 x 줄. 자리 표시 B0 이상은 빈칸(WINDOW_FIELDS 너비)."""
     from dq5text import window
     _, data = window(rom, n)
-    if len(data) < 7 or data[4] & 0x0F or data[2] >= 0x20 or 0xFE not in data[5:8]:
+    if len(data) < 6:
         return None
-    w, h, step = data[2], data[3] & 0x0F, 2 if data[3] & 0x80 else 1
-    if w < 3 or h < 3:
+    w, h, step = data[2] & 0x1F, data[3] & 0x0F, 2 if data[3] & 0x80 else 1
+    if w < 3 or h < 3 or data[0] & 0x80:
         return None
     grid = [[0x001] * w for _ in range(h)]
     for x in range(w):
@@ -1330,7 +1335,28 @@ def window_grid(rom, n):
     for y in range(h):
         grid[y][0], grid[y][w - 1] = 0x08E, 0x48E
     grid[0][0], grid[0][w - 1], grid[h - 1][0], grid[h - 1][w - 1] = 0x08C, 0x48C, 0x88C, 0xC8C
-    x, y, i = 1, 1, data.index(0xFE)
+
+    def put(x, y, t):
+        if 0 < x < w - 1 and 0 < y < h - 1:
+            grid[y][x] = t
+
+    x, y = 1, 1
+    if 0xD0 <= data[4] <= 0xD3:
+        step = 2  # 상태 창은 +3 bit7 이 꺼져 있어도 16점 간격(배 선실 덤프)
+        for k in range(4):
+            put(1 + k, 1, data[5 + k])
+        i, y = 9, 2
+        if i < len(data) and data[i] & 0x80 and data[i] < 0x84:
+            for xx in range(1, w - 1):
+                put(xx, y, 0x090)
+            grid[y][0], grid[y][w - 1] = 0x08F, 0x48F
+            i, y = i + 1, y + 1
+        elif i < len(data) and data[i] >= 0x80:
+            i += 1
+    elif data[4] & 0x0F == 0 and 0xFE in data[5:8]:
+        i = data.index(0xFE)
+    else:
+        return None  # 머리 +4 가 0 이 아닌 목록 창은 머리 길이·줄 간격을 아직 몰라 그리지 않는다
     while i < len(data):
         b = data[i]
         if b == 0xFE:
@@ -1338,20 +1364,21 @@ def window_grid(rom, n):
         elif b == 0xFF:
             x, y = 1, y + step
         elif b in (0x83, 0x84) and i + 1 < len(data):
+            put(x, y, data[i + 1])
             if 0 < x < w - 1 and 0 < y < h - 1:
-                grid[y][x] = data[i + 1]
                 grid[y - 1][x] = (0x093 if b == 0x83 else 0x092) if y - 1 == 0 else b
             x, i = x + 1, i + 1
-        elif b < 0x80:
-            if 0 < x < w - 1 and 0 < y < h - 1:
-                grid[y][x] = b
+        elif b < 0x89:
+            put(x, y, b)
             x += 1
+        elif b in WINDOW_FIELDS:
+            x += WINDOW_FIELDS[b]
         else:
             x += 1
         if y >= h - 1:
             break
         i += 1
-    return grid, data[0], data[1] & 0x7F
+    return grid, data[0] & 0x1F, data[1] & 0x1F
 
 
 def export_windows(rom, out):
@@ -1377,7 +1404,7 @@ def export_windows(rom, out):
                     img.paste(ti, (x * 8, y * 8), ti)
         out.save(img, f'gfx/screens/windows/{n:02X}.png', 'screens', f'창 {n:02X}', '창 레코드',
                  window=f'{n:02X}', pos=f'{wx},{wy}', record=f'{WINDOWS >> 16:02X}:{rom.u16(WINDOWS + n * 2):04X}',
-                 note='04:EB48 레코드의 너비·높이·항목으로 그림(글자 바이트 = BG3 타일). 머리 +4 가 0 인 목록 창만')
+                 note='04:EB48 레코드의 너비·높이·항목으로 그림(글자 바이트 = BG3 타일). 자리 표시(HP·이름 등)는 빈칸')
         count += 1
     print(f'windows {count}')
 
