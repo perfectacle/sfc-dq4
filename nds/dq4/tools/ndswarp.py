@@ -6,6 +6,7 @@
     python nds/dq4/tools/ndswarp.py preset OUTDIR N [N ...]       프리셋 N 을 적용하고 그 시작 맵에 들어감
     python nds/dq4/tools/ndswarp.py map OUTDIR MAP [MAP ...]      지금 진행도 그대로 맵만 옮김(--x/--z 로 자리)
     python nds/dq4/tools/ndswarp.py field OUTDIR X Z [X Z ...]    필드(세계 지도)의 (X, Z) 칸으로(--state 필요)
+    python nds/dq4/tools/ndswarp.py battle OUTDIR M[xN] ...      전투 테스트 Select 모드로 몬스터 M 을 N 마리씩(무리 4개까지, --state 필요)
     python nds/dq4/tools/ndswarp.py chapters OUTDIR               서장·1~6장 시작 세이브스테이트(dq4ds-chN.state)
 
 공통 옵션: --state IN(출발 세이브스테이트, 없으면 boot 와 같은 경로로 전원부터), --rom, --fs(풀어 둔 롬),
@@ -30,6 +31,8 @@ ENCOUNTER_BIT = 0x200
 CHAPTER = 0x020EB9A8      # 장 번호(0 서장 ~ 6)
 HERO_OBJ = 0x020EC4F0     # 주인공 객체 포인터. 필드에서는 [객체+0x70] 이 가리키는 곳이 x, z(s32)
 FIELD_TILE = 0x3000       # 필드 한 칸
+SCENE_BATTLE_TEST = 0x11  # 전투 테스트(Battle Menu Part)
+BATTLE_TEST = 0x020C28BC  # 그 객체: +4 모드(0 Encount, 1 Select), +0x20 무리별 몬스터, +0x30 무리별 마릿수
 MAP_NAME = 0x020C4F44     # 지금 맵 이름(ASCII)
 PRESET = 0x020B970C       # 적용 대기 중인 진행도 프리셋 번호(-1 이면 없음)
 HERO_POS = 0x020EC524     # 주인공 x, y, z (s32, 4096 = 1.0)
@@ -110,6 +113,21 @@ def field(p, x, z, settle=300):
     return p.u32(SCENE_CUR) == SCENE_FIELD and p.u32(HERO_POS) == round(x * FIELD_TILE) & 0xFFFFFFFF
 
 
+def battle(p, groups, settle=300):
+    """전투 테스트를 열고 Select 모드의 무리 칸을 채운 뒤 A 로 전투를 시작한다. groups: [(몬스터, 마릿수)] 최대 4개."""
+    p.w32(SCENE_REQ, SCENE_BATTLE_TEST)
+    p.run(100)
+    p.press("right", 1, 20)
+    for i in range(4):
+        m, n = groups[i] if i < len(groups) else (0, 0)
+        p.w32(BATTLE_TEST + 0x20 + 4 * i, m)
+        p.w32(BATTLE_TEST + 0x30 + 4 * i, n)
+    p.run(10)
+    p.press("a", 1, 10)
+    p.run(settle)
+    return p.u32(SCENE_CUR) == 0x0D
+
+
 def start(p, state):
     p.load(state)
     p.run(2)
@@ -132,7 +150,7 @@ def finish(p, out, name, ok, after, noenc=False):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["list", "presets", "boot", "preset", "map", "field", "chapters"])
+    ap.add_argument("cmd", choices=["list", "presets", "boot", "preset", "map", "field", "battle", "chapters"])
     ap.add_argument("args", nargs="*")
     ap.add_argument("--state")
     ap.add_argument("--rom", default="rom/dq4ds.nds")
@@ -166,8 +184,8 @@ def main():
         p.shot(os.path.abspath(os.path.splitext(a.args[0])[0] + ".png"))
         print(f"boot\tmap={p.read(MAP_NAME, 16).split(b'\0')[0].decode()}\tscene={p.u32(SCENE_CUR):#x}")
         return
-    if a.cmd == "field" and not a.state:
-        raise SystemExit("field 는 필드로 나갈 수 있는 상태(--state)가 필요합니다")
+    if a.cmd in ("field", "battle") and not a.state:
+        raise SystemExit(f"{a.cmd} 는 일행이 있는 상태(--state)가 필요합니다")
     state = a.state
     if not state:
         # 작업마다 같은 출발점에서 시작해야 한다. 앞 작업의 장면·진행도가 남으면 다음 맵이 검게 실린다.
@@ -179,6 +197,11 @@ def main():
             start(p, state)
             ok = enter(p, name, None, a.x, a.z, a.settle)
             finish(p, out, name, ok, a.after, a.no_encounter)
+    elif a.cmd == "battle":
+        groups = [tuple(int(v) for v in (g.split("x") + ["1"])[:2]) for g in a.args[1:5]]
+        start(p, state)
+        ok = battle(p, groups, a.settle)
+        finish(p, out, "battle_" + "_".join(f"{m}x{n}" for m, n in groups), ok, a.after)
     elif a.cmd == "field":
         xs = [float(v) for v in a.args[1:]]
         for x, z in zip(xs[0::2], xs[1::2]):
