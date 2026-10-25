@@ -1355,8 +1355,28 @@ def window_grid(rom, n):
             i += 1
     elif data[4] & 0x0F == 0 and 0xFE in data[5:8]:
         i = data.index(0xFE)
+    elif data[4] & 0x0F and 0xFE in data[7:10]:
+        # 제목 있는 창(dq5text.window_header): +5 제목 번호(04:AD78), 둘째 줄에 제목, 셋째 줄에 가로줄, 넷째 줄부터 항목.
+        from dq5text import window_title
+        tx, title, j = 3, window_title(rom, data[5]), 0
+        while j < len(title):
+            if title[j] in (0x92, 0x93) and j + 1 < len(title):
+                put(tx, 1, title[j + 1])
+                if 0 < tx < w - 1:
+                    grid[0][tx] = title[j]
+                tx, j = tx + 1, j + 2
+                continue
+            if title[j] < 0x89:
+                put(tx, 1, title[j])
+            tx, j = tx + 1, j + 1
+        for xx in range(1, w - 1):
+            put(xx, 2, 0x090)
+        grid[2][0], grid[2][w - 1] = 0x08F, 0x48F
+        i, y = data.index(0xFE, 7), 3
+        rows = data[6] & 0x7F
+        step = 2 if rows and rows * 2 - 1 <= h - 4 else 1
     else:
-        return None  # 머리 +4 가 0 이 아닌 목록 창은 머리 길이·줄 간격을 아직 몰라 그리지 않는다
+        return None
     while i < len(data):
         b = data[i]
         if b == 0xFE:
@@ -1366,7 +1386,13 @@ def window_grid(rom, n):
         elif b in (0x83, 0x84) and i + 1 < len(data):
             put(x, y, data[i + 1])
             if 0 < x < w - 1 and 0 < y < h - 1:
-                grid[y - 1][x] = (0x093 if b == 0x83 else 0x092) if y - 1 == 0 else b
+                above = grid[y - 1][x]
+                if y - 1 == 0:
+                    grid[y - 1][x] = 0x093 if b == 0x83 else 0x092
+                elif above == 0x090:
+                    grid[y - 1][x] = 0x095 if b == 0x83 else 0x094
+                else:
+                    grid[y - 1][x] = b
             x, i = x + 1, i + 1
         elif b < 0x89:
             put(x, y, b)
@@ -1375,6 +1401,8 @@ def window_grid(rom, n):
             x += WINDOW_FIELDS[b]
         else:
             x += 1
+        if x > w:
+            return None  # 줄이 창보다 길면 항목 꼴이 아니다(창 레코드 뒤의 다른 자료로 보임)
         if y >= h - 1:
             break
         i += 1
