@@ -13,6 +13,8 @@ MesenCE testrunner 로 세이브스테이트(배 선실)를 불러 소리 대기
   --wav  game-music-emu(libgme, 환경 변수 GME_LIB 또는 시스템 라이브러리)로 .spc 를 WAV(32000Hz 스테레오, S-DSP 의
          빠르기)로도 굽는다. 곡은 WAV_SONG 초(기본 30, 끝 4초 줄이기), 효과음은 WAV_SFX 초(기본 4). 들어 보기용이라
          짧게 둔다. 끝까지 들으려면 .spc 를 튼다
+  --free-watch  dq5build.py 의 원래 롬 빈 자리 22곳에 롬 읽기·실행 감시를 걸고, 곡마다 읽힌 것을 free-watch.txt 로 모은다
+  --index-only  에뮬레이터를 돌리지 않고 --out 의 index.json 에 장면(scene)·이 곡을 쓰는 맵(maps)만 다시 넣는다
   --wav-only  에뮬레이터를 돌리지 않고 --out 의 songs/·sfx/ 에 있는 .spc 와 index.json 으로 WAV 만 다시 굽는다
 """
 import argparse
@@ -28,6 +30,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 from dq5map import Rom  # noqa: E402
 from dq5song import header, walk  # noqa: E402
+from dq5sound import map_songs  # noqa: E402
 from dq5spc import SEQUENCE_COUNT, body, sequences, song_sets  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -35,11 +38,19 @@ LUA = os.path.join(HERE, 'lua', 'dq5spcdump.lua')
 # 고정 목록(2B:C429)의 32~3D·46 과 그 사이 시퀀스는 효과음으로 친다. 00 은 빈 시퀀스.
 SFX_FROM = 0x32
 SONG_SECONDS, SFX_SECONDS, FADE_MS = 180, 5, 10000
-# 장면으로 쓰임을 확인한 것(dq5-sound-format.md 「곡 번호와 장면」·「효과음」). 소리를 듣고 붙인 이름이 아니다.
+# 장면으로 쓰임을 확인한 것과 맵 곡 표(dq5sound.py, 23:FD6A +5)에서 나온 것(dq5-sound-format.md 「곡 번호와 장면」·「효과음」).
+# 소리를 듣고 붙인 이름이 아니다.
 SCENES = {
-    0x02: '필드 세계 0', 0x03: '마법 융단', 0x04: '배, 배 선실(04-01 은 배에 탔을 때 0C 04 01)', 0x05: '필드 세계 1',
-    0x0D: '天空城', 0x0E: '필드 세계 2', 0x10: '전원을 켠 뒤 처음 트는 곡', 0x17: '전투', 0x1D: '여관에서 잘 때',
-    0x1F: '전투 승리', 0x32: '대화 창이 열릴 때', 0x33: '명령 창 열기·고르기', 0x34: '창 닫기', 0x37: '공격이 맞을 때',
+    0x00: '빈 시퀀스(5바이트), 맵 30/00 의 곡', 0x01: '맵 곡 38곳(그룹 00·01·02·05)', 0x02: '필드 세계 0',
+    0x03: '마법 융단', 0x04: '배, 배 선실(04-01 은 배에 탔을 때 0C 04 01); 맵 곡 17/00~04·27/00',
+    0x05: '필드 세계 1; 맵 곡 22/00~03', 0x06: '맵 곡 60곳(그룹 18~21, 1D/00·1D/01 등)', 0x07: '맵 곡 19/02',
+    0x08: '맵 곡 16곳(그룹 1B·23)', 0x09: '맵 곡 106곳(03/05 등; 노예 시절 시작 장면 뒤 03/05 에서 01 09)',
+    0x0A: '맵 곡 80곳(그룹 03·04·31~35; 03/02 에서 실측)', 0x0B: '파파스가 ゲマ 에게 쓰러지는 장면(07/02)',
+    0x0C: '맵 곡 20곳(그룹 24~2F)', 0x0D: '天空城; 맵 곡 그룹 06(9곳)', 0x0E: '필드 세계 2', 0x0F: '맵 곡 1F/01',
+    0x10: '타이틀 화면(DRAGON QUEST V 글자, 전원 켠 뒤 1647 프레임 01 10)', 0x11: '맵 곡 1F/0A',
+    0x13: '맵 곡 0E/02·21/05·21/0D', 0x17: '전투', 0x1D: '여관에서 잘 때', 0x1F: '전투 승리',
+    0x32: '대화 창이 열릴 때', 0x33: '명령 창 열기·고르기', 0x34: '창 닫기',
+    0x37: '공격이 맞을 때(전투에서 쓴 갈래 X = 01·02·03·04·07, 03·04 는 잡음)',
 }
 
 
@@ -156,12 +167,20 @@ def targets(rom, want):
     return out
 
 
-def run_one(mesence, libdir, rom, state, n, x, stem, work):
+def song_maps(rom):
+    """{곡 번호: ['BC/BD', …]} 맵 레코드 +5 로 그 곡을 쓰는 실내 맵."""
+    out = {}
+    for bc, bd, song in map_songs(rom):
+        out.setdefault(song, []).append(f'{bc:02X}/{bd:02X}')
+    return out
+
+
+def run_one(mesence, libdir, rom, state, n, x, stem, work, free=''):
     out = os.path.join(work, f'run{stem}')
     os.makedirs(out, exist_ok=True)
     cmd = f'10:1A:00:00;14:01:{n:02X}:00' if x is None else f'10:1A:00:00;14:0C:{n:02X}:{x:02X}'
     env = dict(os.environ, LIBDIR=libdir, SHOT_DIR=out, STATE=os.path.abspath(state), CMDS=cmd,
-               WAITSONG=f'{n:02X}', FULLSET=f'{n:02X}', MAXF='900')
+               WAITSONG=f'{n:02X}', FULLSET=f'{n:02X}', MAXF='900', FREEWATCH=free)
     subprocess.run([mesence, '--testrunner', os.path.abspath(rom), LUA], env=env,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
     return out
@@ -184,11 +203,29 @@ def main():
     ap.add_argument('--jobs', type=int, default=4)
     ap.add_argument('--wav', action='store_true')
     ap.add_argument('--wav-only', action='store_true')
+    ap.add_argument('--free-watch', action='store_true')
+    ap.add_argument('--index-only', action='store_true')
     a = ap.parse_args()
     mesence = os.environ.get('MESENCE')
     if not mesence:
         print('MESENCE 환경 변수가 필요함', file=sys.stderr)
         return 1
+    if a.index_only:
+        rom = Rom(open(a.rom, 'rb').read())
+        maps = song_maps(rom)
+        for folder in ('songs', 'sfx'):
+            path = os.path.join(a.out, folder, 'index.json')
+            if not os.path.exists(path):
+                continue
+            entries = json.load(open(path, encoding='utf-8'))
+            for e in entries:
+                n = int(e['sequence'], 16)
+                e['scene'] = SCENES.get(n)
+                e['maps'] = maps.get(n, [])
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(entries, f, ensure_ascii=False, indent=1)
+                f.write('\n')
+        return 0
     if a.wav_only:
         for k, folder in (('song', 'songs'), ('sfx', 'sfx')):
             path = os.path.join(a.out, folder, 'index.json')
@@ -209,9 +246,14 @@ def main():
     want = [int(x, 16) for x in a.only.split(',')] if a.only else list(range(1, SEQUENCE_COUNT))
     jobs = targets(rom, want)
     sets = {i: smp for i, _, smp in song_sets(rom)}
+    maps = song_maps(rom)
     work = os.path.abspath(os.path.join(a.out, 'runs'))
+    free = ''
+    if a.free_watch:
+        from dq5build import cpu, free_ranges
+        free = ','.join(f'{cpu(o).replace(":", "")}-{cpu(o + n - 1).replace(":", "")}' for o, n in free_ranges(rom.d))
     with concurrent.futures.ThreadPoolExecutor(a.jobs) as ex:
-        dirs = list(ex.map(lambda t: run_one(mesence, libdir, a.rom, a.state, *t, work), jobs))
+        dirs = list(ex.map(lambda t: run_one(mesence, libdir, a.rom, a.state, *t, work, free), jobs))
     index = {'songs': [], 'sfx': []}
     for (n, x, stem), d in zip(jobs, dirs):
         r = regs(os.path.join(d, 'regs.txt'))
@@ -228,7 +270,7 @@ def main():
         with open(os.path.join(folder, name), 'wb') as f:
             f.write(data)
         entry = {'id': stem, 'sequence': f'{n:02X}', 'variant': None if x is None else f'{x:02X}', 'file': name,
-                 'scene': SCENES.get(n), 'sequence_rom': f'{seqs[n][0] >> 16:02X}:{seqs[n][0] & 0xFFFF:04X}',
+                 'scene': SCENES.get(n), 'maps': maps.get(n, []), 'sequence_rom': f'{seqs[n][0] >> 16:02X}:{seqs[n][0] & 0xFFFF:04X}',
                  'sequence_bytes': seqs[n][1], 'samples': [f'{v:02X}' for v in sets[n]],
                  'command': f'01 {n:02X}' if x is None else f'0C {n:02X} {x:02X}', 'frame': int(r['frame']),
                  'playing': found}
@@ -236,6 +278,15 @@ def main():
             wav_entry(entry, folder, k)
         index['songs' if k == 'song' else 'sfx'].append(entry)
         print(f'{k:4} {stem} frame {r["frame"]:>4} {"곡 자리에 있음" if found else "곡 자리에 없음(MAXF 에 잡음)"}')
+    if a.free_watch:
+        lines = []
+        for (n, x, stem), d in zip(jobs, dirs):
+            fw = os.path.join(d, 'freewatch.txt')
+            hits = [h for h in open(fw).read().split('\n') if h] if os.path.exists(fw) else ['(기록 없음)']
+            lines += [f'{stem} {h}' for h in hits]
+        with open(os.path.join(a.out, 'free-watch.txt'), 'w') as f:
+            f.write('\n'.join(lines) + '\n')
+        print(f'빈 자리 감시: 곡·갈래 {len(jobs)}개, 읽힌 기록 {len(lines)}줄')
     for k in index:
         if index[k]:
             with open(os.path.join(a.out, 'songs' if k == 'songs' else 'sfx', 'index.json'), 'w', encoding='utf-8') as f:

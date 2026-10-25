@@ -54,9 +54,11 @@ def rows_play(cat, entries):
     out = []
     for e in entries:
         smp = ' '.join(f'<a href="#s{s}">{s}</a>' for s in e.get('samples', []))
+        maps = e.get('maps') or []
+        mp = f'<details><summary>맵 {len(maps)}곳</summary>{" ".join(maps)}</details>' if maps else ''
         out.append(f'<tr id="{cat[:2]}{esc(e["id"])}"><td>{esc(e["id"])}</td><td>{esc(e.get("scene") or "")}</td>'
                    f'<td>{audio(cat, e.get("wav"))}</td><td class="wide">{e.get("wav_seconds", "")}초</td>'
-                   f'<td class="wide">{smp}</td><td class="wide mut">{esc(e.get("command", ""))}</td>'
+                   f'<td class="wide">{smp}</td><td class="wide">{mp}</td><td class="wide mut">{esc(e.get("command", ""))}</td>'
                    f'<td><a href="../sound/{cat}/{esc(e["file"])}">.spc</a></td>'
                    f'<td><input data-id="{cat}/{esc(e["id"])}" placeholder="들어 보고 이름"></td></tr>')
     return out
@@ -77,7 +79,7 @@ def rows_samples(entries):
 def page(root):
     songs, sfx, smp = load(root, 'songs'), load(root, 'sfx'), load(root, 'samples')
     head = '<tr><th>번호</th><th>쓰이는 장면</th><th>듣기</th><th class="wide">길이</th><th class="wide">악기</th>' \
-           '<th class="wide">명령</th><th>파일</th><th>이름</th></tr>'
+           '<th class="wide">쓰는 맵</th><th class="wide">명령</th><th>파일</th><th>이름</th></tr>'
     body = [f'<h2 id="songs">곡 {len(songs)}</h2><table>{head}', *rows_play('songs', songs), '</table>',
             f'<h2 id="sfx">효과음 {len(sfx)}</h2><table>{head}', *rows_play('sfx', sfx), '</table>',
             f'<h2 id="samples">악기 샘플 {len(smp)}</h2><table><tr><th>번호</th><th>듣기</th><th>길이</th>'
