@@ -1365,7 +1365,7 @@ def window_grid(rom, n):
     머리 +0·+1 위치, +2 아래 5비트 너비, +3 아래 4비트 높이·bit7 줄 간격 16점(sfc/dq5/docs/dq5-text-format.md 「창 레코드 머리」).
     목록 창: 첫 FE 부터. FE = 커서 칸 하나 뒤 글자, FF = 다음 줄, 바이트는 BG3 타일 번호 그대로. 84·83 xx 는 글자 xx 위 칸에
     탁점 84·반탁점 83(위 칸이 테두리면 92·93, 04:B258).
-    상태 창 꼴(+4 가 D0~D3): 뒤 4바이트 자리에 이름, 다음 8x 는 가로줄 하나와 그 뒤 x 줄. 자리 표시는 예시 값(WINDOW_SAMPLES, 이름은 SAMPLE_NAME)으로 채운다.
+    상태 창 꼴(+4 가 D0~D3, 곧 제목 자리 0~3·제목 뒤 3바이트 건너뜀): 뒤 4바이트 자리에 이름, 다음 8x 는 가로줄 하나와 그 뒤 x 줄. 자리 표시는 예시 값(WINDOW_SAMPLES, 이름은 SAMPLE_NAME)으로 채운다.
     커서 없는 글 창(+4 가 0, +6 부터 글): F3 은 이름 넉 자 자리."""
     from dq5text import window
     _, data = window(rom, n)
@@ -1404,7 +1404,7 @@ def window_grid(rom, n):
         # 커서 없는 글 창(이름 칸·말 빠르기 등): +6 부터 글, +5 위 니블만큼 첫 줄을 들여 씀(두 창 덤프로 확인).
         # 자리 표시(85 xx·B0~ 등)가 섞인 창은 뜻을 모르는 제어가 있어 뺀다.
         i, x, step = 6, 1 + (data[5] >> 4), 1
-    elif data[4] & 0x0F and 0xFE in data[7:10]:
+    elif data[4] & 0x0F and 0xFE in data[7 + (data[4] >> 6):10 + (data[4] >> 6)]:
         # 제목 있는 창(dq5text.window_header): +4 아래 니블 제목 자리, +5 제목 번호(04:AD78), 둘째 줄 제목, 셋째 줄 가로줄, 넷째 줄부터 항목.
         from dq5text import window_title
         tx, title, j = data[4] & 0x0F, window_title(rom, data[5]), 0
@@ -1426,8 +1426,9 @@ def window_grid(rom, n):
         for xx in range(1, w - 1):
             put(xx, 2, 0x090)
         grid[2][0], grid[2][w - 1] = 0x08F, 0x48F
-        i, y = data.index(0xFE, 7), 3
-        rows = data[6] & 0x7F
+        k = 6 + (data[4] >> 6)  # +4 bit6-7 = 제목 뒤 건너뛸 바이트 수, 그다음이 줄 수(dq5text.window_header)
+        i, y = data.index(0xFE, k + 1), 3
+        rows = data[k] & 0x7F
         step = 2 if rows and rows * 2 - 1 <= h - 4 else 1
     else:
         return None
