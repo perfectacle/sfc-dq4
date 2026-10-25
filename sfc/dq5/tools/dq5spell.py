@@ -13,7 +13,8 @@
 
 사용:
   python sfc/dq5/tools/dq5spell.py rom/dq5.sfc
-  python sfc/dq5/tools/dq5spell.py rom/dq5.sfc --table   (주인공 주문 01~38 의 내성 단계별 피해·성공률)
+  python sfc/dq5/tools/dq5spell.py rom/dq5.sfc --table   (주문 01~65 의 내성 단계별 피해·성공률, 몬스터 주문의 일행 피해)
+  python sfc/dq5/tools/dq5spell.py rom/dq5.sfc --armor   (주문 피해를 줄이는 갑옷·방패)
 """
 import argparse
 import os
@@ -134,23 +135,66 @@ SPECIAL = {
     0xB1AB: '대상 값(20:9F41 & 3)이 3 이 아니면 20:AEC6(내성 59), 3 이면 ザキ 판정(내성 56)',
     0xB1D4: '내성 57, 20:AEFF(27:8059 쪽 판정)',
     0xB1F8: '내성 5B 판정 뒤 양 번호 31(5~11)만큼 MP 를 빼앗음(대상 MP 까지)',
-    0xB224: '내성 5A, 20:AF05 판정 뒤 수비력을 깎음(20:B0C9)',
+    0xB224: '내성 5A, 20:AF05 판정 뒤 수비력을 min(레코드 수비, 지금 수비) 만큼 깎음',
+    0xB278: '수비력을 min(기본 수비(필드 13), 2 × 기본 수비(필드 13) − 지금 수비) 만큼 올림',
     0xB2D5: '최대 HP − HP 만큼 회복',
     0xB2FA: '우리 쪽 4/8',
 }
 
 
+ELEMENTS = 0x2780E3     # 행동 01~12·39~47 의 원소 비트(행동 - 01 / - 39), 27:80F5 는 숨 8E~94 (20:ABDC)
+BREATH_ELEMENTS = 0x2780F5
+ARMOR = 0x2780FC        # [원소 비트][갑옷·방패 물건][값] 3바이트 항목, 00 에서 끝. 값 bit7 이면 256 - 값 을 더함
+ELEMENT_NAMES = {0x01: 'メラ', 0x02: 'ギラ', 0x40: 'イオ', 0x04: 'ヒャド', 0x08: 'バギ', 0x80: 'デイン', 0x10: '불숨', 0x20: '찬숨'}
+
+
+def element(rom, n):
+    """일행이 맞을 때 갑옷이 보는 원소 비트(없으면 0)."""
+    if 0x01 <= n < 0x13:
+        return rom.u8(ELEMENTS + n - 1)
+    if 0x39 <= n < 0x48:
+        return rom.u8(ELEMENTS + n - 0x39)
+    if 0x8E <= n < 0x95:
+        return rom.u8(BREATH_ELEMENTS + n - 0x8E)
+    return 0
+
+
+def armor_entries(rom):
+    out, a = [], ARMOR
+    while rom.u8(a):
+        v = rom.u8(a + 2)
+        out.append((rom.u8(a), rom.u8(a + 1), -(256 - v) if v & 0x80 else v))
+        a += 3
+    return out
+
+
+def party_damage(rom, n, armor_items=()):
+    """몬스터 주문 n 이 일행에게 주는 (최소, 최대). 갑옷·방패 물건 번호를 주면 27:80FC 값을 뺌(음수는 더함)."""
+    addr, lda, ldx, target = handler(rom, n)
+    if target not in AMOUNT_ROUTINES or lda is None or ldx is None or ldx < 0x50:
+        return None
+    base, width = amount(rom, lda)
+    cut = sum(v for bit, item, v in armor_entries(rom) if bit & element(rom, n) and item in armor_items)
+    return max(base - cut, 0), max(base + max(width, 1) - 1 - cut, 0)
+
+
 def table(rom):
-    for n in range(1, 0x39):
+    for n in list(range(1, 0x39)) + list(range(0x39, 0x66)):
         mp, rng, enemy = cost(rom, n)
         addr, lda, ldx, target = handler(rom, n)
         head = f'{n:02X} {name(rom, n)} ' + ('MP-' if mp is None else f'MP{mp}') + ' ' + ('적 ' if enemy else '편 ') + RANGES[rng]
+        if n >= 0x39:
+            pd = party_damage(rom, n)
+            if pd:
+                el = ELEMENT_NAMES.get(element(rom, n), '-')
+                print(head + f' 일행에게 {pd[0]}~{pd[1]}(원소 {el}, 갑옷 값을 뺌)')
+                continue
         d = [damage_range(rom, n, lv) for lv in range(4)]
         if d[0]:
             print(head + f' 내성{ldx:02X} 단계0~3: ' + ' / '.join(f'{a}~{b}' for a, b in d))
         elif target == 0xAE41 and ldx is not None and ldx >= 0x50:
             ch = ' / '.join(f'{status_chance(rom, lv) * 100 // 256}%' for lv in range(4))
-            print(head + f' 내성{ldx:02X} 몬스터 {ch}, 우리 {lda}/8')
+            print(head + (f' 일행에게 {lda}/8' if n >= 0x39 else f' 내성{ldx:02X} 몬스터 {ch}, 우리 {lda}/8'))
         elif target in AMOUNT_ROUTINES and lda is not None:
             base, width = amount(rom, lda)
             print(head + f' 회복 {base}~{base + max(width, 1) - 1}')
@@ -161,11 +205,18 @@ def table(rom):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('rom')
-    ap.add_argument('--table', action='store_true', help='주인공 주문의 내성 단계별 피해·성공률')
+    ap.add_argument('--table', action='store_true', help='주문 01~65 의 내성 단계별 피해·성공률, 몬스터 주문의 일행 피해')
+    ap.add_argument('--armor', action='store_true', help='주문 피해를 줄이는 갑옷·방패(27:80FC)')
     args = ap.parse_args()
     rom = Rom(open(args.rom, 'rb').read())
     if args.table:
         table(rom)
+        return 0
+    if args.armor:
+        from dq5chest import item_name
+        for bit, item, v in armor_entries(rom):
+            names = '·'.join(nm for b, nm in ELEMENT_NAMES.items() if bit & b)
+            print(f'{item:02X} {item_name(rom, item)} {names} {"-" if v >= 0 else "+"}{abs(v)}')
         return 0
     for n in range(COUNT):
         print(describe(rom, n))
