@@ -65,6 +65,9 @@ def fields(r):
     }
 
 
+COMPANION_NAMES = 0x0A
+
+
 def companion(rom, k):
     """23:AED1 + k*9. 동료가 될 때 처음 레벨·최대 레벨·능력치·HP·MP 와 장비 갈래."""
     b = [rom.u8(COMPANIONS + k * COMPANION_SIZE + i) for i in range(COMPANION_SIZE)]
@@ -84,6 +87,8 @@ def main():
             names.setdefault(record(rom, n)[0x18] & 0x7F, text(string_codes(rom, string(rom, NAMES, n))))
         for k in range(1, COMPANION_KINDS):
             c = companion(rom, k)
+            # 이름 표 0A 의 종류 × 4 + 이름 번호(일행 레코드 +1 bit0-1). 들일 때 7E:29EA+종류 의 처음 꺼진 비트.
+            c['이름'] = '·'.join(text(string_codes(rom, string(rom, COMPANION_NAMES, k * 4 + i))) for i in range(4))
             print(f'{k:02X} {names.get(k, "?")} ' + ' '.join(f'{x}={v}' for x, v in c.items()))
         return 0
     for n in range(COUNT):
