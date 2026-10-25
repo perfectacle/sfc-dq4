@@ -51,4 +51,5 @@ uv run --locked krpatch nds unpack rom/dq4ds-kr.nds work/nds/kr
 - [2026-10-25-07: PARAM 표로 늘어난 내용 가르기, 동료 대화 조건](journal/2026-10-25-07-param.md)
 - [2026-10-25-08: 조우 끄기·필드 워프·장 번호와 플래그·메시지 디버그](journal/2026-10-25-08-debug2.md)
 - [2026-10-25-09: 전투 테스트 Select 모드와 fk01](journal/2026-10-25-09-debug3.md)
+- [2026-10-25-10: 동료 대화 거르기 루틴, 아이템 표, 남은 PARAM 칸](journal/2026-10-25-10-param2.md)
 - [2026-10-25-12: 시간대·인물 레코드·필드 좌표 범위·메시지 디버그 키·fk01 조건](journal/2026-10-25-12-debug4.md)
