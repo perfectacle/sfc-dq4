@@ -83,6 +83,13 @@ WORLD_SCREEN_STEP_X, WORLD_SCREEN_STEP_Y = 0x03CD48, 0x03CD58
 # 1E:D7E3: 타이틀 화면 글자(ENIX PRESENTS ~ DRAGON QUEST V)의 2bpp 타일. 필드 RLE(01:A64F)와 같은 꼴이고,
 # 앞 16바이트(빈 타일 하나)를 더해 위·아래로 짝지으면 대부분 8x16 글자 하나지만, 타일을 나눠 쓰는 글자(D·E·M·W 등)도 있다.
 CREDITS_FONT = 0x1ED7E3
+# 02:FB2B: 글자 문자열(02:FF3B 의 24비트 포인터 둘: 0 = 엔딩 스태프 롤 1E:F5B8, 1 = 타이틀 1E:FEEC).
+# 00~3F 는 글자 번호 → 1E:F539 + 번호*3 = [위 타일][아래 타일][너비(0 이면 8점)]. 그 밖은 제어:
+# FC n 은 n*8점 띄움, FE 줄 끝, FD 빈 줄, F9 한 프레임 쉼, F8 VRAM 칸 하나 되돌림(점 자리는 그대로), FB·F7·F6 n 은 인자 하나, F5 끝.
+CREDITS_SCRIPTS = 0x02FF3B
+CREDITS_GLYPHS = 0x1EF539
+CREDITS_TEXT = 'ABCDEFGHIJKLNOPQRSTUVXYZ921'
+CREDITS_PAIRS = {(0x1B, 0x1C): '&', (0x1E, 0x1F): 'M', (0x20, 0x21): 'W', (0x23, 0x24): '©'}
 # 25:85D5: ルーラ 목적지의 맵 그룹 22개. 이름은 이름 표 0B(23:D5F3) 의 같은 순번.
 RURA_GROUPS, RURA_COUNT, TOWN_NAMES = 0x2585D5, 22, 0x0B
 
@@ -1221,6 +1228,70 @@ def credits_tiles(rom):
     return [data[i * 16:i * 16 + 16] for i in range(len(data) // 16)]
 
 
+def credits_rows(rom, script):
+    """글자 문자열을 줄마다 [(x 점, 글자 번호)] 와 글자로 푼 문자열로."""
+    p = rom.u24(CREDITS_SCRIPTS + script * 3)
+    rows, cur, x, k = [], None, 0, 0
+    while k < 0x4000:
+        b = rom.u8(p + k)
+        k += 1
+        if b == 0xF5 or (b == 0x00 and cur is None and script == 1 and rows):
+            break
+        if b == 0xFC:
+            if cur is None:
+                cur, x = [], 0
+                rows.append(cur)
+            elif cur:
+                cur.append((x, None))
+            x += rom.u8(p + k) * 8
+            k += 1
+        elif b in (0xFB, 0xF7, 0xF6):
+            k += 1
+        elif b == 0xFE:
+            cur = None
+        elif b == 0xFD:
+            rows.append([])
+        elif b < 0x40:
+            if cur is None:
+                cur, x = [], 0
+                rows.append(cur)
+            cur.append((x, b))
+            width = rom.u8(CREDITS_GLYPHS + b * 3 + 2)
+            x += width or 8
+    texts = []
+    for r in rows:
+        t, i = '', 0
+        codes = [c for _, c in r]
+        while i < len(codes):
+            if codes[i] is None:
+                t, i = t + ' ', i + 1
+                continue
+            pair = tuple(codes[i:i + 2])
+            if pair in CREDITS_PAIRS:
+                t, i = t + CREDITS_PAIRS[pair], i + 2
+                continue
+            c = codes[i]
+            t += CREDITS_TEXT[c] if c < len(CREDITS_TEXT) else {0x1D: '.', 0x22: '-'}.get(c, '?')
+            i += 1
+        texts.append(t)
+    return rows, texts
+
+
+def credits_image(rom, rows, colors):
+    tiles = credits_tiles(rom)[1:]
+    img = Image.new('RGB', (256, len(rows) * 16), colors[0])
+    for y, r in enumerate(rows):
+        for x, c in r:
+            if c is None:
+                continue
+            for half in (0, 1):
+                t = rom.u8(CREDITS_GLYPHS + c * 3 + half)
+                if t < len(tiles):
+                    ti = tile_image(chr_2bpp(tiles[t]), colors[0:4])
+                    img.paste(ti, (x, y * 16 + half * 8), ti)
+    return img
+
+
 def export_credits(rom, out):
     o = lorom(UI_PALETTE)
     colors = cgram_colors(rom.d[o:o + 8])
@@ -1231,6 +1302,12 @@ def export_credits(rom, out):
         for half in (0, 1):
             t = tile_image(chr_2bpp(tiles[g * 2 + half]), colors[0:4])
             img.paste(t, (g * 8, half * 8), t)
+    for script, stem, title in ((1, 'title-credits', '타이틀 화면 글자(ENIX PRESENTS ~ DRAGON QUEST V)'),
+                                (0, 'staff-roll', '엔딩 스태프 롤')):
+        rows, texts = credits_rows(rom, script)
+        out.save(credits_image(rom, rows, colors), f'gfx/screens/{stem}.png', 'screens', title, '타이틀·엔딩',
+                 script=f'{rom.u24(CREDITS_SCRIPTS + script * 3):06X}', lines=[t for t in texts if t],
+                 note='02:FB2B 의 글자 문자열을 줄마다 16점으로 늘어놓음(게임은 화면에 몇 줄씩 띄우거나 올림)')
     out.save(img, 'gfx/screens/credits-font.png', 'screens', f'타이틀 화면 글자 칸 {n}개(8x16)', '타이틀',
              note='1E:D7E3 RLE 타일을 위·아래 짝으로 늘어놓음(글자표 아님, 타일을 나눠 쓰는 글자가 있음). 색은 BG3 팔레트 0(04:98D7)')
 
