@@ -7,11 +7,13 @@
   처리 루틴 20:B7F9 + 행동*2. 루틴 첫머리가 LDX #내성 종류 / LDA #표 번호 를 넣고 공통 루틴으로 뛴다
   피해·회복량 27:8071 + (표 번호 & 3F)*2 = [바탕][폭]. 값 = 바탕(FE 이면 300) + 난수(0 ~ 폭-1) (20:AB70)
 내성 종류(50~61)는 몬스터 레코드 +0C~+10 의 2비트 칸이다(21:91F9 + 종류*2, sfc/dq5/tools/dq5monster.py).
-상태 주문 20:AE41 은 몬스터에게는 내성 0 이면 반드시, 1~3 이면 난수 < 27:8065[내성](128 89 38 0)일 때 걸리고,
-우리 쪽에게는 난수(0~7) < LDA # 값일 때 걸린다(출력의 「아군n/8」).
+피해 주문이 몬스터에게: 값 × 27:8055[내성 단계] / 256(FF 면 그대로). 상태 주문 20:AE41 은 몬스터에게 20:AECC 로 가서
+내성 단계 0 이면 반드시, 그 밖에는 난수(0~255) < 27:8055[단계] 일 때 걸린다(255 205 84 0). 주인공 레벨 − 10 이
+구역 레벨($100F) 이상이면 표가 27:8059(255 255 169 0)로 바뀐다. 우리 쪽에게는 난수(0~7) < LDA # 값(「아군n/8」).
 
 사용:
   python sfc/dq5/tools/dq5spell.py rom/dq5.sfc
+  python sfc/dq5/tools/dq5spell.py rom/dq5.sfc --table   (주인공 주문 01~38 의 내성 단계별 피해·성공률)
 """
 import argparse
 import os
@@ -100,11 +102,71 @@ def describe(rom, n):
     return ' '.join(out)
 
 
+RESIST = 0x278055       # 내성 단계 0~3 의 배율(/256), 피해와 상태 성공 모두
+RESIST_EASY = 0x278059  # 주인공 레벨 - 10 >= 구역 레벨일 때
+
+
+def resist_rates(rom, easy=False):
+    t = RESIST_EASY if easy else RESIST
+    return [rom.u8(t + i) for i in range(4)]
+
+
+def damage_range(rom, n, level, easy=False):
+    """피해 주문 n 이 내성 단계 level 인 몬스터에게 주는 (최소, 최대). 피해 주문이 아니면 None (20:AB70·20:AB9E)."""
+    addr, lda, ldx, target = handler(rom, n)
+    if target not in AMOUNT_ROUTINES or lda is None or ldx is None or ldx < 0x50:
+        return None
+    base, width = amount(rom, lda)
+    lo, hi = base, base + max(width, 1) - 1
+    r = resist_rates(rom, easy)[level]
+    if r == 0xFF:
+        return lo, hi
+    return lo * r >> 8, hi * r >> 8
+
+
+def status_chance(rom, level, easy=False):
+    """상태 주문이 내성 단계 level 인 몬스터에게 걸릴 확률(/256). 20:AECC."""
+    return 256 if level == 0 else resist_rates(rom, easy)[level]
+
+
+# 표 밖 처리 루틴의 뜻(코드 읽기, 20:B1AB~B2FA)
+SPECIAL = {
+    0xB1AB: '대상 값(20:9F41 & 3)이 3 이 아니면 20:AEC6(내성 59), 3 이면 ザキ 판정(내성 56)',
+    0xB1D4: '내성 57, 20:AEFF(27:8059 쪽 판정)',
+    0xB1F8: '내성 5B 판정 뒤 양 번호 31(5~11)만큼 MP 를 빼앗음(대상 MP 까지)',
+    0xB224: '내성 5A, 20:AF05 판정 뒤 수비력을 깎음(20:B0C9)',
+    0xB2D5: '최대 HP − HP 만큼 회복',
+    0xB2FA: '우리 쪽 4/8',
+}
+
+
+def table(rom):
+    for n in range(1, 0x39):
+        mp, rng, enemy = cost(rom, n)
+        addr, lda, ldx, target = handler(rom, n)
+        head = f'{n:02X} {name(rom, n)} ' + ('MP-' if mp is None else f'MP{mp}') + ' ' + ('적 ' if enemy else '편 ') + RANGES[rng]
+        d = [damage_range(rom, n, lv) for lv in range(4)]
+        if d[0]:
+            print(head + f' 내성{ldx:02X} 단계0~3: ' + ' / '.join(f'{a}~{b}' for a, b in d))
+        elif target == 0xAE41 and ldx is not None and ldx >= 0x50:
+            ch = ' / '.join(f'{status_chance(rom, lv) * 100 // 256}%' for lv in range(4))
+            print(head + f' 내성{ldx:02X} 몬스터 {ch}, 우리 {lda}/8')
+        elif target in AMOUNT_ROUTINES and lda is not None:
+            base, width = amount(rom, lda)
+            print(head + f' 회복 {base}~{base + max(width, 1) - 1}')
+        else:
+            print(head + f' 루틴{addr:04X}' + (f' {SPECIAL[addr]}' if addr in SPECIAL else ''))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('rom')
+    ap.add_argument('--table', action='store_true', help='주인공 주문의 내성 단계별 피해·성공률')
     args = ap.parse_args()
     rom = Rom(open(args.rom, 'rb').read())
+    if args.table:
+        table(rom)
+        return 0
     for n in range(COUNT):
         print(describe(rom, n))
     return 0
