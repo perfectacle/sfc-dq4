@@ -2,18 +2,20 @@
 
 저장소 최상위에서 `uv run --locked python sfc/dq4/tools/<스크립트>` 로 실행합니다. 모듈끼리는 같은 폴더에서 import 합니다. SFC 프로브(`lua/`)는 `"$PWD/sfc/dq4/tools/lua/<스크립트>"` 로 주고, 툴킷 `boot.lua` 드라이버는 [공통 도구](../../../tools/README.md) 의 `LIBDIR`·`seqlib.sh` 설정을 따릅니다. FC 원작 분석 도구는 [fc/dq4/tools/README.md](../../../fc/dq4/tools/README.md) 에 있습니다.
 
+사용자가 채택한 타이틀은 `dq4titlelayers.py`와 `dq4titlelayerpatch.py`로 만듭니다. [채택본 재현 절차](../docs/dq4-title-animation.md)를 먼저 읽고, 정지 미리보기·전체 화면 교체 실험과 구분합니다.
+
 | 스크립트 | 하는 일 |
 | --- | --- |
 | `dq4graphics.py [--check] [--output 폴더]` | 롬 없이 스프라이트·블록·샘플 맵·타이틀을 PNG·SFC 4bpp·팔레트로 출력. `--check` 는 파일을 쓰지 않고 반복 생성·왕복 검사 |
 | `dq4romassets.py rom --out 폴더` | 라이안 정면의 DQ5 엔진 데이터·별도 롬·IPS와 역변환 검증 보고서 생성. 기존 공용 팔레트를 유지하는 색 변경 시안. [롬 삽입](../docs/dq4-rom-assets-format.md) |
 | `dq4romgallery.py --input 폴더 --out 폴더` | ROM 변환 결과와 인물 시안의 비교 갤러리 생성. 시각 확인과 기술 검증 상태를 구분 |
-| `dq4titlelayers.py --out 폴더` | 고정 전경·하늘·용의 128개 중간 자세와 차이 전송 데이터를 생성. [애니메이션 규격](../docs/dq4-title-animation.md) |
+| `dq4titlelayers.py --out 폴더` | 고정 전경·하늘·앞 구름·용의 128위상(12자세)과 차이 전송 데이터를 생성. [애니메이션 규격](../docs/dq4-title-animation.md) |
 | `dq4titlelayerpatch.py --rom 롬 --input 폴더 --out 롬 [--asar 실행파일]` | 레이어별로 움직이는 DQ5 통합 롬·IPS 생성 |
 | `dq4titleanimation.py --out 폴더` | 전체 화면 프레임 교체 실험용 변환. 최종 레이어 방식과 구분 |
 | `dq4titleassets.py [--out 폴더] [--assets-dir 폴더]` | 선택된 실제 크기 한글 타이틀을 다시 줄이지 않고 PNG·CHR·MAP·PAL과 갤러리로 출력. [타이틀 규격](../docs/dq4-title-format.md) |
-| `dq4titlepatch.py --rom 롬 --input 폴더 --out 롬 [--asar 실행파일]` | 승인 타이틀을 DQ5 시작 구간에 연결한 별도 롬·IPS 생성. 페이드·광택·입력·메뉴 복귀. [연결 규격](../docs/dq4-title-format.md#dq5-타이틀-구간-연결) |
+| `dq4titlepatch.py --rom 롬 --input 폴더 --out 롬 [--asar 실행파일]` | 초기 정지 타이틀을 DQ5 시작 구간에 연결한 실험 롬·IPS 생성. 페이드·광택·입력·메뉴 복귀. [연결 규격](../docs/dq4-title-format.md#dq5-타이틀-구간-연결) |
 | `dq4titlepreview.py --input 폴더 --out 롬 [--asar 실행파일]` | 타이틀 에셋으로 독립 64KiB SFC 미리보기 롬 생성. DQ5 삽입본과 구분 |
-| `lua/dq4titleintegrationcheck.lua` | 통합 롬의 화면·VRAM·음악·메뉴 진입 관찰. `OUT`, `MAXF`, `EVERY`, `SEQ`, `RESETAT` 사용 |
+| `lua/dq4titleintegrationcheck.lua` | 통합 롬의 화면·VRAM·음악·메뉴 진입 관찰. `OUT`, `MAXF`, `EVERY`, `FROM`, `SEQ`, `RESETAT`, `TRACE_DMA`, `MOTION_PC` 사용 |
 | `lua/dq4titlecheck.lua` | 독립 미리보기의 화면·VRAM·CGRAM 관찰. `OUT`, `FRAME` 사용 |
 | `dq4pixels.py` | 스프라이트·지형 제작물을 모으는 모듈 |
 | `dq4sprites.py` | DQ4 인물 9명의 16×24 스프라이트 원본. 인물별 팔레트와 색 번호 문자 행렬(방향마다 정지 자세, 보행은 몸만 바꿈). 실행하면 색 수와 행 폭 검사 |
