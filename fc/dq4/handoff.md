@@ -4,7 +4,7 @@ FC DQ4 원작을 분석하는 세션이 처음 읽는 문서입니다. 이 트�
 
 ## 목표
 
-DQ4 의 내용(맵, 인물과 대사, 이벤트 흐름, 몬스터·아이템·주문·상점 표)을 DQ5 엔진에 옮기려면, 원작에서 그 데이터를 **롬만으로** 뽑아낼 수 있어야 합니다. 이 트랙은 FC DQ4(일본판 Rev A)의 데이터 형식을 풀고 이 폴더의 `tools/dq4*.py` 추출기와 `docs/dq4-*.md` 명세를 만듭니다. DQ5 쪽에 어떻게 넣을지는 dq5 트랙의 결과([dq5-handoff.md](../../sfc/dq5/handoff.md))와 맞춰 나중에 정합니다.
+DQ4 의 내용(맵, 인물과 대사, 이벤트 흐름, 몬스터·아이템·주문·상점 표, 곡·효과음)을 DQ5 엔진에 옮기려면, 원작에서 그 데이터를 **롬만으로** 뽑아낼 수 있어야 합니다. 이 트랙은 FC DQ4(일본판 Rev A)의 데이터 형식을 풀고 이 폴더의 `tools/dq4*.py` 추출기와 `docs/dq4-*.md` 명세를 만듭니다. DQ5 쪽에 어떻게 넣을지는 dq5 트랙의 결과([dq5-handoff.md](../../sfc/dq5/handoff.md))와 맞춰 나중에 정합니다.
 
 그래픽은 원작 데이터를 옮기지 않고 직접 그립니다. 원작 그래픽은 무엇을 그려야 하는지 확인하는 용도로만 봅니다.
 
@@ -27,9 +27,10 @@ SFC 로 옮길 데이터는 거의 모두 롬만으로 뽑을 수 있게 됐습�
 | 상점·얻는 것 | [dq4-shop-format.md](docs/dq4-shop-format.md) · `dq4shop.py`·`dq4chest.py`(`loot`) | 가게 창, 여관·교회 요금, 상자 160개, 얻는 물건 238줄, 숨는 인물 |
 | 조우 | [dq4-encounter-format.md](docs/dq4-encounter-format.md) · `dq4encounter.py` | 필드·던전 21층 전투 158번, 특수 전투 34개, 기습·선제 비율 |
 | 원작 그림 | [dq4-fcgfx.md](docs/dq4-fcgfx.md)·[dq4-fcsprite-format.md](docs/dq4-fcsprite-format.md) · `dq4fcgfx.py`·`dq4fcsprite.py` | 맵·필드·장면 화면 픽셀 0 다름, 스프라이트·몬스터 픽셀 대조 |
+| 소리 | [dq4-sound-format.md](docs/dq4-sound-format.md) · `dq4sound.py`(`export` 가 곡·효과음마다 MIDI·악보 텍스트·채널별 JSON) | 곡 50·효과음 55 를 롬 드라이버 실행과 APU 기록으로 프레임마다 0 다름, 맵·필드·전투 곡 표 |
 | 디버그 | [dq4-debug.md](docs/dq4-debug.md) | `$C000` 스위치(장 고르기·벽 통과·인카운트 끄기·전투 테스트) |
 
-뽑은 원작 그림(맵 279·필드·블록·CHR·폰트·장면, 인물 스프라이트·몬스터)은 저작권 데이터라 비공개 저장소 `perfectacle/sfc-dq4-assets` 의 `fc/dq4/` 에 있습니다(`gallery/index.html`). 공개 저장소에는 다시 만드는 도구만 둡니다.
+뽑은 원작 그림(맵 279·필드·블록·CHR·폰트·장면, 인물 스프라이트·몬스터)과 소리(`fc/dq4/sound/` 의 MIDI·악보·JSON)는 저작권 데이터라 비공개 저장소 `perfectacle/sfc-dq4-assets` 의 `fc/dq4/` 에 있습니다(`gallery/index.html`). 공개 저장소에는 다시 만드는 도구만 둡니다.
 
 포팅용 그래픽의 현재 판단은 [그래픽 핸드오프](../../sfc/dq4/handoff.md)에 있습니다.
 
@@ -73,7 +74,7 @@ uv run krpatch fc listing rom/dq4.nes work/cov/cover.txt --range 3C000-3FFFF
 분석은 남은 세부만 있습니다([todo.md](todo.md)). 다음 큰 일은 이 데이터를 SFC DQ5 엔진에 넣는 쪽입니다.
 
 1. **DQ5 쪽 대응 정하기** — dq5 트랙 결과([sfc/dq5/handoff.md](../../sfc/dq5/handoff.md))와 맞춰, 맵(블록 속성 → DQ5 블록), 인물·대화 스크립트·이벤트(→ DQ5 스크립트), 대사 기호(`dq4text.py export` 의 `{NAME:k}` 등 → DQ5 제어 코드), 창(`dq4-window-layouts` → DQ5 창), 표(몬스터·아이템·주문)를 어떤 형식으로 옮길지 정합니다.
-2. **변환기** — 위 디코더들의 JSON 출력을 DQ5 형식으로 바꾸는 도구. 결과물은 `sfc/dq4/` 에 둡니다.
+2. **변환기** — 위 디코더들의 JSON 출력을 DQ5 형식으로 바꾸는 도구. 소리는 `dq4sound.py` 의 채널별 JSON 을 DQ5 SPC 악보로 다시 편곡합니다(DQ5 음원 형식은 dq5 트랙 몫). 결과물은 `sfc/dq4/` 에 둡니다.
 3. **분석 세부** — [todo.md](todo.md) 의 항목. 변환하다 막히는 것부터 합니다.
 
 ## 조심할 것

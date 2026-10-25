@@ -6,11 +6,11 @@ FC DQ4(Rev A) 원작 데이터 분석. 이식할 데이터가 어디에 어떤 �
 
 분석은 포팅에 필요한 큰 줄기를 마쳤고, 아래는 남은 세부입니다. 각 형식 문서의 「남은 것」 절이 더 자세한 목록입니다. 포팅(DQ5 엔진에 넣기)이 시작되면 거기서 막히는 것부터 합니다.
 
-- **이벤트·플래그**: [추정]으로 남은 플래그 66개([dq4-story-format.md](docs/dq4-story-format.md#남은-것)), 인물·OAM 만 움직이는 이벤트의 화면(`07` `19` `2D` `2E` 는 부르는 대화까지 실측, `05` `06` `0B` `10` `21` 은 못 닿음), 마지막 전투(2B) 뒤 マスタードラゴン 장면, 맵 이벤트 줄 3·4·5·7·B, 전멸 뒤 갈래 `1E:$A3E7`, `$618E` 아래 3비트 2·3([dq4-save-format.md](docs/dq4-save-format.md), [dq4-script-format.md](docs/dq4-script-format.md)).
-- **표**: 동료 AI 의 칸 평가 루틴·아이템 후보·후보 비교(`13:$AB92`·`$AC63`)·작전 7칸 표(`13:$BB53`~)를 전투로 재기, 공격·주문 후보의 점수 식과 `$8B`~`$8D`, 작전 4(`13:$A8C6`) 규칙, 몬스터 쪽 두 배 비트·ザオラル 등 남은 주문 효과량, 몬스터 바이트 21 bit2-0, 아이템 플래그 `$8D1B` bit7·`$8D9A`, 여자 勇者 레코드 8([dq4-data-format.md](docs/dq4-data-format.md)).
-- **창**: 루틴 항목 `0B`·`20`·`25`·그룹 1 `06`·`07` 을 화면에서 보기, 걸러내기 아래 3비트, x3 `83` 두 곳이 실제 장면에서 도는 것(`10:$BAE1` 은 `10:$B497` 을 부르는 `10:$AEF0`·`$AF2B`·`$B0C3` 위를 거슬러, `11:$BC2B` 는 5장 필드 전투 いれかえ)([dq4-text-format.md](docs/dq4-text-format.md), [dq4-bank-format.md](docs/dq4-bank-format.md)).
-
-- **블록·맵**: 맵 번호 bit6·`$41` bit7 화면 확인, 그룹 48 의 장면, 성 앞 워프 nametable 차이, 배 자리 `$6195/$6196`, `12:$A728`·`15:$B110` 을 부르는 곳, 필드 3 막이의 `$62A4` 갈래([dq4-block-format.md](docs/dq4-block-format.md), [dq4-map-format.md](docs/dq4-map-format.md), [dq4-field-format.md](docs/dq4-field-format.md)).
-- **상점·조우**: 같은 장 안의 장면 순서로 숨김 조건 거르기, 그룹 FE 호출 경로, 대화 `13B`·`0AD`(문제)와 대화로 받는 물건 줄의 실측, `0F/00` 밤 이벤트 `3E`, `$6E44` bit7 을 읽는 나머지 여덟 곳, パルプンテ 27가지의 화면 효과([dq4-shop-format.md](docs/dq4-shop-format.md), [dq4-encounter-format.md](docs/dq4-encounter-format.md)).
-- **원작 그림**: 이름 없는 그룹 28개, 성문 연출 판정을 다른 성문에서, 4장 칸 5 의 표 `53`, 탈것 칸 `0D`·`58`~`60` 장면, `BOSS_STEPS` 명령 단위([dq4-fcgfx.md](docs/dq4-fcgfx.md#남은-것), [dq4-fcsprite-format.md](docs/dq4-fcsprite-format.md#남은-것)).
+- **이벤트·플래그**: [추정]으로 남은 플래그 29개(검사만 있는 것 4, 인물 블록 10, 끄는 곳만 찾은 것 3, `15:$9D1A`·`$9D25` 등, [dq4-story-format.md](docs/dq4-story-format.md#남은-것)), `$629B` bit3 을 본래 경로(46/01 이벤트 `84`)로 켜기, 4장 キングレオ 에게 지는 갈래 `1E:$A453`, 맵 이벤트 줄 3·4·5·7·B(대화 `00F`·`010` 이 메시지 `078E` 뒤로 가지 않음), 1D 이벤트 `05` `06` `0B` `10` `21` 의 화면, 1C 이벤트 `2B`(마지막 전투 뒤), 3장 `16/00` READY, `$618E` bit2·3([dq4-save-format.md](docs/dq4-save-format.md)).
+- **동료 AI·표**: `$75EF` 예산(`$7368`, `13:$BB06`·`$BB22`), `$BB92`/`$AB59` 갈래, 회복·되살리기 전투 실측(ザオラル 는 HP 0 만으로는 죽음이 아님), ザオラル·フバーハ 양, 작전 4 분포 표본 늘리기(인물마다 약 26번), 몬스터 바이트 21 bit2-0, 아이템 `$8D1B` bit7·`$8D9A`, `$618E` bit6·레코드 8, 내성 값 1·2 의 확률(ヒャド 만 실측)([dq4-data-format.md](docs/dq4-data-format.md)).
+- **창**: `10:$BAE1` 이 실제로 도는 장면(일행 쪽 전투원이 몬스터 AI 로 움직이는 경우), 항목 `25`(쓰는 창 없음), 걸러내기 `04` 를 상수로 주는 호출([dq4-text-format.md](docs/dq4-text-format.md)).
+- **블록·맵**: ラナルータ 를 주문으로 써서 `12:$A728` 확인, 배 타고 내리기(`$0527`), `48/09` 갈래([dq4-block-format.md](docs/dq4-block-format.md)).
+- **상점·조우**: `$6E44` 를 읽는 `13:$8094`·`10:$B0EF` 실측(5장 동료가 있는 이벤트 전투), 앞 장면 플래그를 검사하는 숨김 조건만 골라 장 안 순서로 거르기, 그룹 FE 를 부르는 곳(정적 검색으론 없음), パルプンテ `D8` 의 `$72E5` 를 읽는 곳과 `E3` 보상 계산([dq4-shop-format.md](docs/dq4-shop-format.md), [dq4-encounter-format.md](docs/dq4-encounter-format.md)).
+- **소리**: 탈것 곡 `09`·`13` 의 실제 장면, 곡 `19` 를 부르는 곳, 5장 필드 곡을 고르는 x3 `2B`/`62 63 41` 의 뜻, `$6BF9` 를 읽는 곳, 곡 이름을 nds 곡 표와 대조, MIDI 에 엔벨로프·음량 담기, WAV·NSF(약 200MB 라 보류)([dq4-sound-format.md](docs/dq4-sound-format.md)).
+- **원작 그림**: 탈것 칸 `0D`·`58`~`60` 장면(RAM 으로 열기구를 태우면 스프라이트가 모두 숨겨짐), 이름 없는 28그룹의 진짜 이름(지금은 「가까운 입구+ちかく」 자리 표시), `02/00` 연출 시작 1~2프레임, `1D:$A6C3` 으로 들어오는 곳([dq4-fcgfx.md](docs/dq4-fcgfx.md#남은-것), [dq4-fcsprite-format.md](docs/dq4-fcsprite-format.md#남은-것)).
 - **실험 환경**: 1장 세이브스테이트 넷을 지금 `dq4state.sh` 로 다시 만들지(문서 숫자 다시 확인 필요, [handoff.md](handoff.md#실험-출발점)).
