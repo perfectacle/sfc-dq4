@@ -1,4 +1,4 @@
-"""Encode independent title layers and continuous dragon wing phases."""
+"""Encode fixed title glyphs, held dragon poses and scrolling cloud layers."""
 
 import json
 import math
@@ -7,10 +7,14 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 
-from dq4titleanimation import ART, logo_mask
+from dq4titleanimation import ART, connected_poses, cloud_strip
 from dq4titleassets import DEFAULT_SOURCE, APPROVED_SOURCE_SHA256, native_title
 
 PHASES = 128
+CLOUD_Y = 168
+CLOUD_SPRITES = 9
+CLOUD_SOURCE = ART / 'front-cloud.png'
+GLYPH_MASK = ART / 'title-glyph-mask.png'
 
 
 def affine_part(part, pivot, target, scale, angle=0, squash=1):
@@ -24,19 +28,21 @@ def affine_part(part, pivot, target, scale, angle=0, squash=1):
 
 def dragon_frames():
     source = Image.open(ART / 'dragon-rig.png').convert('RGBA')
-    body = source.crop((0, 280, 970, 650))
-    near = source.crop((970, 140, 1520, 575))
-    far = source.crop((1525, 235, 2079, 575))
-    fixed = affine_part(body, (630, 160), (88, 67), .15)
+    parts = sorted(connected_poses(source), key=lambda item: item[1][0])
+    if len(parts) != 3:
+        raise ValueError('dragon rig must contain body and two isolated wings')
+    (body, body_origin), (near, near_origin), (far, far_origin) = parts
+    pivot = lambda point, origin: (point[0] - origin[0], point[1] - origin[1])
+    fixed = affine_part(body, pivot((630, 440), body_origin), (88, 67), .15)
     frames = []
     for phase in range(PHASES):
-        theta = phase * math.tau / PHASES
+        theta = (phase * 12 // PHASES) * math.tau / 12
         # Foreshortening stays nonzero so the inverse transform is well-defined.
-        squash = .58 + .42 * math.cos(theta)
-        angle = -.12 + .48 * math.sin(theta)
+        squash = .78 + .12 * math.cos(theta)
+        angle = -.08 + .12 * math.sin(theta)
         canvas = Image.new('RGBA', (160, 96))
-        canvas.alpha_composite(affine_part(far, (485, 200), (100, 57), .13, angle + .15, squash))
-        canvas.alpha_composite(affine_part(near, (505, 295), (98, 57), .15, angle, squash))
+        canvas.alpha_composite(affine_part(far, pivot((2010, 435), far_origin), (100, 57), .12, angle + .15, squash))
+        canvas.alpha_composite(affine_part(near, pivot((1475, 435), near_origin), (98, 57), .14, angle, squash))
         canvas.alpha_composite(fixed)
         frames.append(canvas)
     return frames
@@ -136,9 +142,19 @@ def tilemap(pixels, bpp, banks=None, priority=0):
     return encode_tiles(tiles, bpp), np.array(indices, dtype='<u2')
 
 
+def glyph_mask():
+    with Image.open(GLYPH_MASK) as image:
+        if image.mode != 'L' or image.size != (256, 224):
+            raise ValueError('glyph mask must be a 256x224 grayscale PNG')
+        mask = image.copy()
+    if not set(np.unique(np.array(mask))).issubset({0, 255}):
+        raise ValueError('glyph mask must contain only opaque and transparent pixels')
+    return mask
+
+
 def foreground():
     original = native_title(DEFAULT_SOURCE)
-    mask = logo_mask()
+    mask = glyph_mask()
     ImageDraw.Draw(mask).polygon([(185,183),(185,174),(187,180),(190,180),(190,171),(192,169),(192,167),(194,167),(194,170),(201,171),(201,160),(203,160),(203,165),(209,165),(209,152),(211,148),(213,161),(213,159),(215,159),(215,163),(220,163),(220,144),(222,142),(224,153),(226,153),(227,155),(227,140),(229,137),(231,150),(231,153),(233,154),(233,147),(234,145),(235,154),(238,153),(239,160),(239,165),(244,166),(245,160),(246,164),(246,168),(250,168),(251,165),(252,170),(254,171),(254,174),(247,174),(240,171),(232,172),(231,166),(225,165),(224,176),(221,176),(220,171),(216,171),(216,177),(211,183),(206,185),(201,185),(200,177),(196,176),(194,180),(194,185),(191,186),(190,183)], fill=255)
     source = np.array(original)
     pixels = np.where(np.array(mask) > 0, np.where(source == 0, 16, source), 0).astype(np.uint8)
@@ -146,7 +162,11 @@ def foreground():
     palette[16] = 0
     padded = np.zeros((256, 256), dtype=np.uint8)
     padded[:224] = pixels
-    data, mapping = tilemap(padded, 8, priority=1)
+    data, mapping = tilemap(padded, 8)
+    glyphs = np.zeros((256, 256), dtype=np.uint8)
+    glyphs[:224] = np.array(glyph_mask())
+    priority = glyphs.reshape(32, 8, 32, 8).any(axis=(1, 3))
+    mapping |= priority.astype(np.uint16) << 13
     if len(data) > 0x6000:
         raise ValueError('foreground exceeds 384 8bpp tiles')
     return data, mapping.tobytes(), palette, pixels, mask
@@ -199,8 +219,46 @@ def oam_frame(phase):
     hover = round(2 * math.sin(phase * math.tau / PHASES))
     for i in range(15):
         data[512 + i // 4] &= ~(3 << (i % 4 * 2))
+        data[512 + i // 4] |= 2 << (i % 4 * 2)
         data[i * 4:i * 4 + 4] = bytes((i % 5 * 32, i // 5 * 32 + hover + 2, i % 4 * 4 + i // 4 * 64, 0x20 | phase % 2))
     return bytes(data)
+
+
+def cloud_assets():
+    strip = Image.open(CLOUD_SOURCE).convert('RGBA').resize((64, 32), Image.Resampling.LANCZOS)
+    frames, palette = quantize_dragon([strip])
+    return frames[0], palette
+
+
+def add_cloud_tiles(page, cloud, parity):
+    data = bytearray(page)
+    pixels = np.array(cloud)
+    for ty in range(4):
+        for tx in range(4):
+            x = parity * 32 + tx * 8
+            tile = pixels[ty * 8:ty * 8 + 8, x:x + 8]
+            encoded = encode_tiles([tile], 4)
+            offset = (204 + ty * 16 + tx) * 32
+            data[offset:offset + 32] = encoded
+    return bytes(data)
+
+
+def cloud_oam():
+    records = bytearray()
+    for offset in range(128):
+        low = bytearray()
+        high = bytearray(oam_frame(0)[512:])
+        for i in range(CLOUD_SPRITES):
+            sprite = 15 + i
+            x = -(offset % 32) + i * 32
+            part = (offset // 32 + i) % 2
+            base = 204
+            y = 224 if x >= 256 or x + 32 <= 0 else CLOUD_Y
+            low.extend(bytes((x & 255, y, base, 0x22 | part)))
+            high[sprite // 4] &= ~(3 << (sprite % 4 * 2))
+            high[sprite // 4] |= (2 | int(x < 0 or x >= 256)) << (sprite % 4 * 2)
+        records.extend(low + high + bytes(128 - len(low) - len(high)))
+    return bytes(records)
 
 
 def pack_payload(pages):
@@ -222,7 +280,7 @@ def pack_payload(pages):
         if len(runs) > 31:
             raise ValueError('dragon delta exceeds descriptor run limit')
         total = sum(len(data) for _, data in runs)
-        if total + 544 > 4096:
+        if total + 612 > 4096:
             raise ValueError('dragon delta and OAM exceed per-frame transfer budget')
         for i, (offset, data) in enumerate(runs):
             address, bank = store(data)
@@ -243,37 +301,62 @@ def write_pack(out):
     fg, fgmap, palette, fg_pixels, mask = foreground()
     bg, bgmap, sky = background(palette)
     frames, obj_palette = quantize_dragon(dragon_frames())
-    pages = [obj_chr(frame) for frame in frames]
+    cloud, cloud_palette = cloud_assets()
+    pages = [add_cloud_tiles(obj_chr(frame), cloud, i % 2) for i, frame in enumerate(frames)]
     payload, descriptors, pointers, stats = pack_payload(pages)
     blobs = {'background.chr': bg, 'foreground.chr': fg, 'background.map': bgmap,
              'foreground.map': fgmap, 'background.pal': snes_palette(palette),
-             'dragon.pal': snes_palette(obj_palette), 'dragon-initial.chr': pages[0] + pages[-1],
+             'dragon.pal': snes_palette(obj_palette), 'cloud.pal': snes_palette(cloud_palette),
+             'cloud-oam.bin': cloud_oam(), 'dragon-initial.chr': pages[0] + pages[-1],
              'oam-pointers.bin': pointers, 'dragon-dma.bin': descriptors, 'layer-payload.bin': payload,
              'foreground-mask.bin': bytes(mask.tobytes())}
-    outputs = [out / name for name in (*blobs, 'layers.json', 'title.png', 'animation.gif')]
-    protect_outputs(outputs, [DEFAULT_SOURCE, ART / 'sky.png', ART / 'dragon-rig.png'])
+    outputs = [out / name for name in (*blobs, 'layers.json', 'title.png', 'animation.gif', 'frame-0064.png', 'frame-0128.png', 'frame-0192.png')]
+    protect_outputs(outputs, [DEFAULT_SOURCE, ART / 'sky.png', ART / 'dragon-rig.png', CLOUD_SOURCE, GLYPH_MASK])
     out.mkdir(parents=True, exist_ok=True)
     previews = []
+    glyphs = glyph_mask()
+    cloud_rgba = cloud.convert('RGBA')
+    priorities = np.frombuffer(fgmap, dtype='<u2').reshape(32, 32) & 0x2000 != 0
+    high = np.repeat(np.repeat(priorities, 8, axis=0), 8, axis=1)[:224] & (np.array(mask) > 0)
+    high_mask = Image.fromarray((high * 255).astype(np.uint8))
+    castle = (np.array(mask) > 0) & (np.array(glyphs) == 0) & ~high
+    source_rgb = np.array(native_title(DEFAULT_SOURCE).convert('RGB'))
+    coverage, glyph_differences = [], []
     for tick in range(1024):
         phase = tick % PHASES
         frame = frames[phase]
-        scrolling = np.concatenate([np.roll(sky[:192], -(tick // 4), axis=1), np.roll(sky[192:], -(tick // 8), axis=1)])
+        scrolling = np.roll(sky, -(tick // 8), axis=1)
         image = Image.fromarray(np.tile(scrolling, (1, 2, 1))).convert('RGBA')
         image.alpha_composite(frame.convert('RGBA'), (0, round(2 * math.sin(phase * math.tau / PHASES)) + 2))
         layer = Image.fromarray(palette[fg_pixels]).convert('RGBA')
         layer.putalpha(mask)
         image.alpha_composite(layer)
-        previews.append(image.convert('RGB'))
+        cloud_plane = Image.new('RGBA', (256, 224))
+        for x in range(-(tick // 4) % 64 - 64, 256, 64):
+            cloud_plane.alpha_composite(cloud_rgba, (x, CLOUD_Y))
+        image.alpha_composite(cloud_plane)
+        coverage.append(int(((np.array(cloud_plane)[:, :, 3] > 0) & castle).sum()))
+        layer.putalpha(high_mask)
+        image.alpha_composite(layer)
+        rendered = image.convert('RGB')
+        glyph_differences.append(int((np.any(np.array(rendered) != source_rgb, axis=2) & (np.array(glyphs) > 0)).sum()))
+        if tick in (64, 128, 192):
+            rendered.save(out / f'frame-{tick:04d}.png')
+        previews.append(rendered)
     previews[0].save(out / 'title.png')
     previews[0].save(out / 'animation.gif', save_all=True, append_images=previews[1:], duration=[20,20,10]*341+[20], loop=0)
     for name, data in blobs.items():
         (out / name).write_bytes(data)
     report = {'schema_version': 1, 'kind': 'dq4_title_layers', 'frame_count': PHASES,
-              'mode': 3, 'foreground_bpp': 8, 'background_bpp': 4,
+              'mode': 3, 'wing_poses': 12, 'cloud_y': CLOUD_Y, 'cloud_sprite_count': CLOUD_SPRITES, 'foreground_bpp': 8, 'background_bpp': 4,
               'approved_source_sha256': APPROVED_SOURCE_SHA256,
+              'glyph_mask_sha256': hashlib.sha256(GLYPH_MASK.read_bytes()).hexdigest(),
+              'cloud_source_sha256': hashlib.sha256(CLOUD_SOURCE.read_bytes()).hexdigest(),
               'background_period': 128, 'foreground_tiles': len(fg)//64,
               'background_tiles': len(bg)//32, 'max_delta_bytes': max(s['bytes'] for s in stats),
               'max_runs': max(s['runs'] for s in stats), 'frames': stats,
+              'composition': {'preview_ticks': 1024, 'castle_occluded_pixels_min': min(coverage),
+                              'castle_occluded_pixels_max': max(coverage), 'glyph_rgb_differences_max': max(glyph_differences)},
               'files': {name: {'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()} for name, data in blobs.items()}}
     (out / 'layers.json').write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps({k:v for k,v in report.items() if k not in ('frames','files')}))
@@ -295,8 +378,12 @@ def read_pack(source):
         raise ValueError('unexpected layered title manifest')
     if hashlib.sha256(DEFAULT_SOURCE.read_bytes()).hexdigest() != APPROVED_SOURCE_SHA256 or report.get('approved_source_sha256') != APPROVED_SOURCE_SHA256:
         raise ValueError('approved native title SHA-256 mismatch')
+    if report.get('glyph_mask_sha256') != hashlib.sha256(GLYPH_MASK.read_bytes()).hexdigest():
+        raise ValueError('glyph mask source SHA-256 mismatch')
+    if report.get('cloud_source_sha256') != hashlib.sha256(CLOUD_SOURCE.read_bytes()).hexdigest() or report.get('cloud_sprite_count') != CLOUD_SPRITES:
+        raise ValueError('foreground cloud source or layout mismatch')
     sizes = {'background.map': 4096, 'foreground.map': 2048, 'background.pal': 256,
-             'dragon.pal': 32, 'dragon-initial.chr': 16384, 'oam-pointers.bin': 512,
+             'dragon.pal': 32, 'cloud.pal': 32, 'cloud-oam.bin': 16384, 'dragon-initial.chr': 16384, 'oam-pointers.bin': 512,
              'dragon-dma.bin': 32768, 'foreground-mask.bin': 57344}
     names = set(sizes) | {'background.chr', 'foreground.chr', 'layer-payload.bin'}
     if set(report.get('files', {})) != names:
@@ -320,6 +407,11 @@ def read_pack(source):
         raise ValueError('background palette differs from approved title palette')
     if any(value & 0x8000 for value in np.frombuffer(blobs['dragon.pal'], dtype='<u2')):
         raise ValueError('OBJ palette contains non-SNES colors')
+    if blobs['cloud-oam.bin'] != cloud_oam():
+        raise ValueError('foreground cloud OAM layout mismatch')
+    cloud, cloud_palette = cloud_assets()
+    if blobs['cloud.pal'] != snes_palette(cloud_palette):
+        raise ValueError('foreground cloud palette mismatch')
     if blobs['dragon.pal'][:2] != b'\0\0':
         raise ValueError('OBJ transparent color must be zero')
     mapping = np.frombuffer(blobs['background.map'], dtype='<u2')
@@ -359,8 +451,11 @@ def read_pack(source):
             pages[phase % 2][offset:offset + length] = extract(address, bank, length)
             total += length
             runs += 1
-        if not ended or runs > 31 or total + 544 > 4096:
+        if not ended or runs > 31 or total + 612 > 4096:
             raise ValueError('per-frame DMA budget exceeded')
+        cloud_page = add_cloud_tiles(bytes(pages[phase % 2]), cloud, phase % 2)
+        if cloud_page != bytes(pages[phase % 2]):
+            raise ValueError('delta playback overwrote reserved cloud tiles')
         if frames[phase]['phase'] != phase or frames[phase]['runs'] != runs or frames[phase]['bytes'] != total or hashlib.sha256(pages[phase % 2]).hexdigest() != frames[phase]['chr_sha256']:
             raise ValueError('delta playback differs from encoded phase')
         pointer = blobs['oam-pointers.bin'][phase * 4:phase * 4 + 4]
