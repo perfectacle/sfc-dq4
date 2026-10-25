@@ -511,6 +511,17 @@ def fig_hangul_proto():
     save(out, 'dq5-hangul-proto.webp')
 
 
+def fig_hangul_poweron():
+    """dq5hangul.py proto --long 롬을 새 SRAM 으로 전원부터 켜 찍은 화면 넷(work/hangul/poweron-long/s03200·s06850·s10390·
+    s10600.png): 이름 입력, 이름을 짓는 메시지, 긴 항목 명령 창, 메시지 129. 명령은 sfc/dq5/journal/ 의 hangul3 일지 1절."""
+    names = ('s03200', 's06850', 's10390', 's10600')
+    imgs = [Image.open(f'work/hangul/poweron-long/{n}.png').convert('RGB') for n in names]
+    out = Image.new('RGB', (imgs[0].width * 2 + 8, imgs[0].height * 2 + 8), (24, 24, 24))
+    for k, img in enumerate(imgs):
+        out.paste(img, ((k % 2) * (img.width + 8), (k // 2) * (img.height + 8)))
+    save(out, 'dq5-hangul-poweron.webp')
+
+
 def fig_worlds(rom):
     """$1949 로 고르는 세계 지도 셋(블록 1개를 2x2 로 축소)과 그 세계의 04:FD97 입구(노란 틀). 세계 1·2 는 땅이 있는 왼쪽 위
     128x128 블록만 2배로 키웠다. 타일은 롬, 팔레트는 세계마다
@@ -640,6 +651,7 @@ def main():
     fig_hangul()
     fig_hangul_retree()
     fig_hangul_proto()
+    fig_hangul_poweron()
     fig_mongfx(rom)
     fig_worlds(rom)
     fig_high_maps(rom)
