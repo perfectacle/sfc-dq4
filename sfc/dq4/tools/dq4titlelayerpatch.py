@@ -16,7 +16,8 @@ from dq4titlepatch import HOOK, MUSIC_HOOK, NEW_HOOK, NEW_MUSIC_HOOK, ORIGINAL_H
 
 PLACEMENTS = {'background.chr': 0x188000, 'background.map': 0x18D000,
               'foreground.map': 0x18E000, 'background.pal': 0x18E800,
-              'dragon.pal': 0x18E900, 'oam-pointers.bin': 0x18EB00,
+              'dragon.pal': 0x18E900, 'cloud.pal': 0x18E920, 'oam-pointers.bin': 0x18EB00,
+              'cloud-oam.bin': 0x1A8000,
               'foreground.chr': 0x190000, 'dragon-dma.bin': 0x198000,
               'dragon-initial.chr': 0x1A0000, 'layer-payload.bin': 0x1B0000}
 
@@ -25,7 +26,7 @@ def verify_layout(original, rom, blobs):
     if len(rom) != 0x200000 or rom[0x7FD7] != 0x0B or rom[HOOK:HOOK + 5] != NEW_HOOK or rom[MUSIC_HOOK:MUSIC_HOOK + 3] != NEW_MUSIC_HOOK:
         raise ValueError('unexpected ROM layout, header or hooks')
     ranges = [(0x7FDC, 0x7FE0), (HOOK, HOOK + 5),
-              (MUSIC_HOOK, MUSIC_HOOK + 3), (0x180000, 0x181000), (0x1A8000, 0x1AC000)]
+              (MUSIC_HOOK, MUSIC_HOOK + 3), (0x180000, 0x181000)]
     ranges += [(offset, offset + len(blobs[name])) for name, offset in PLACEMENTS.items()]
     merged = []
     for lo, hi in sorted(ranges):
@@ -41,12 +42,6 @@ def verify_layout(original, rom, blobs):
     for name, offset in PLACEMENTS.items():
         if rom[offset:offset + len(blobs[name])] != blobs[name]:
             raise ValueError(f'embedded asset mismatch: {name}')
-    hdma = bytearray()
-    for frame in range(1024):
-        fast, slow = (frame >> 2) & 255, (frame >> 3) & 127
-        hdma.extend(bytes((127, fast, 0, 65, fast, 0, 32, slow, 0)) + bytes(7))
-    if rom[0x1A8000:0x1AC000] != hdma:
-        raise ValueError('HDMA tables differ from the declared cloud cadence')
 
 
 def build(rom_path, source, output, asar):
@@ -61,6 +56,8 @@ def build(rom_path, source, output, asar):
     if original[0x7FD7] != 0x0B or original[HOOK:HOOK + 5] != ORIGINAL_HOOK or original[MUSIC_HOOK:MUSIC_HOOK + 3] != ORIGINAL_MUSIC_HOOK:
         raise ValueError('source header or hook mismatch')
     blobs, assets = read_pack(source)
+    if assets.get('cloud_sprite_count') != 9:
+        raise ValueError('runtime requires nine 32px foreground cloud sprites')
     protect_outputs(outputs, inputs + [source / name for name in (*blobs, 'title.png', 'animation.gif')])
     executable = shutil.which(asar)
     if not executable:
