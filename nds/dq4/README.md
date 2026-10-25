@@ -59,3 +59,4 @@ uv run --locked krpatch nds unpack rom/dq4ds-kr.nds work/nds/kr
 - [2026-10-25-15: 장비 인물 비트, 몬스터 내성, 동료 대화 줄 수와 조건 값](journal/2026-10-25-15-param3.md)
 - [2026-10-25-17: 이민 마을 단계 전환, 얻는 물건 자리와 종류](journal/2026-10-25-17-param4.md)
 - [2026-10-25-19: 이민자 수, 가게 표 자리, 맵 안 임시 플래그](journal/2026-10-25-19-param5.md)
+- [2026-10-25-20: 상태 이상 번호와 ドラン 고정 블록](journal/2026-10-25-20-debug6.md)
