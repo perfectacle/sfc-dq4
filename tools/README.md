@@ -63,7 +63,7 @@ STATE=$PWD/work/state/ship.mss PRE="b:4,wait:40" WAYPOINTS="3,11;3,24;7,24;7,22"
 
 ## Python
 
-저장소 최상위에서 `uv run python tools/<스크립트>` 로 실행합니다(`uv sync` 가 툴킷 v0.7.0 과 Pillow 를 설치).
+저장소 최상위에서 `uv run python tools/<스크립트>` 로 실행합니다(`uv sync` 가 툴킷 v0.8.0 과 Pillow 를 설치).
 
 표는 트랙마다 나눕니다. 자기 트랙 도구는 자기 절에만 줄을 더합니다.
 

@@ -38,9 +38,9 @@ Unity 리메이크가 아니라, 실제 SFC 롬에 덧대는 IPS 패치를 만�
 uv sync --locked
 ```
 
-- [kr-patch-toolkit](https://github.com/perfectacle/kr-patch-toolkit) v0.7.0:
+- [kr-patch-toolkit](https://github.com/perfectacle/kr-patch-toolkit) v0.8.0:
   65c816 디스어셈블러(`krpatch sfc dis`), MesenCE 용 Lua 라이브러리(`krpatch sfc lua`),
-  FC 용 iNES 헤더·6502 디스어셈블러·Lua 프로브(`krpatch fc`), NDS 롬 풀기(`krpatch nds`),
+  FC 용 iNES 헤더·6502 디스어셈블러·Lua 프로브(`krpatch fc`), NDS 롬 풀기·NFTR 폰트(`krpatch nds`),
   xdelta 적용(`krpatch xdelta`)
 - [Pillow](https://python-pillow.org/): 맵·그림 렌더링
 - [MesenCE](https://github.com/nesdev-org/MesenCE) 2.2.1: 디버거와

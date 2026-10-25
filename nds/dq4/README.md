@@ -30,7 +30,6 @@ uv run --locked krpatch nds unpack rom/dq4ds-kr.nds work/nds/kr
 | `ndstext.py` | 대사 파일 읽기(`dump`, `--kr` 로 한글판), 이름 표(`names`), 대조표(`glossary`), 통계(`stats`), 동료 대화 문장(`talk`), 실행 파일의 Shift_JIS 문자열과 포인터(`sjis`) |
 | `ndsscript.py` | 이벤트 스크립트 `SCRIPT/<맵>.bin` 의 블록 나무(`tree`), 명령 목록(`dump`, 메시지 명령 옆에 문장), 전체 검사(`stats`) |
 | `ndsparam.py` | `PARAM` 표: 몬스터(`monsters`, FC 와 짝 찾기), 아이템 번호 대조(`items`), 가게(`shops`), 카지노·メダル(`casino`), 얻는 물건(`chests`), 동료 대화 조건(`talk`), 대사 파일을 부르는 스크립트(`scripts`). [docs/param-format.md](docs/param-format.md) |
-| `ndsfont.py` | NFTR 폰트 정보(`info`)와 글자 시트(`sheet`) |
 | `ndskr.py` | 한글 대응표 검사(`check`)와 다시 만들기(`draft`) |
 | `ndsgfx.py` | 그래픽 디코더. `survey` 폴더·헤더별 파일 수, `export OUT` 으로 인물·몬스터(조립·애니메이션 WebP)·맵 텍스처와 위에서 본 렌더링·전투 배경·아이콘·글꼴·효과·타이틀을 PNG 로(`--only` 단계, `--kr work/nds/kr` 한글판 글꼴·로고), `gallery OUT` 으로 `index.html`. 결과는 비공개 에셋 저장소에만 |
 | `ndsplay.py` | desmume libretro 코어(`DESMUME_CORE`)를 화면 없이 돌리며 버튼·터치를 넣고 화면 저장(`every N K 이름`), RAM 읽기·쓰기·고정(`peek`·`poke`·`freeze`·`until`), 세이브스테이트 |
