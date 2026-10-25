@@ -19,6 +19,8 @@
 | `lua/dq4titlecheck.lua` | 독립 미리보기의 화면·VRAM·CGRAM 관찰. `OUT`, `FRAME` 사용 |
 | `dq4pixels.py` | 스프라이트·지형 제작물을 모으는 모듈 |
 | `dq4sprites.py` | DQ4 인물 9명의 16×24 스프라이트 원본. 인물별 팔레트와 색 번호 문자 행렬(방향마다 정지 자세, 보행은 몸만 바꿈). 실행하면 색 수와 행 폭 검사 |
+| `dq4spritedrafts.py` | 16×24 를 끝까지 쓰는 정면 시안(톨네코·주인공). 실행하면 색 수와 평평함 지표 |
+| `dq4spritecheck.py 행렬파일...` | 색 번호 행렬의 평평함 지표(같은 색 연속 길이·좌우 비대칭·색 경계 밀도). 잘 그린 참고 그림과 견줄 때 |
 | `dq4spritelab.py hero\|data 이름\|compare 이름` | `hero` 는 `lua/dq4objdump.lua` 덤프에서 DQ5 주인공 4방향을 16×24 로 복원(`work/dq4-sprites/dq5-hero.png`), `data` 는 `lua/dq4sprite.lua` 용 4bpp·팔레트 Lua, `compare` 는 원작과 같은 배경·8배로 나란히. [sfc/dq4/docs/dq4-sprite-format.md](../docs/dq4-sprite-format.md) |
 | `lua/dq4romcheck.lua` | `STATE`·`ROUTE`·`SEQ` 입력으로 장면 재진입을 관찰하고 로더 횟수·WRAM·VRAM·OAM·CGRAM·화면을 기록. 그래픽 주입 없음. `OUT`, `MAXF`, `EVERY`, `FROM`, `DUMPF` 사용. [실측 명령](../docs/dq4-rom-assets-format.md#mesence-실측-결과) |
 | `lua/dq4objdump.lua` | SFC: 필드 세이브스테이트(`STATE`)에서 4방향으로 걷다 멈춘 VRAM·OAM·CGRAM 과 주인공을 숨긴 화면을 `OUT` 에 덤프 |

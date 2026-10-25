@@ -4,6 +4,7 @@ from pathlib import Path
 
 from dq4graphics import assets
 from dq4spritelab import field_figure
+from dq4spritedrafts import DRAFT_NAMES, front
 from dq4sprites import SPRITE_NAMES
 from PIL import Image
 
@@ -21,6 +22,14 @@ def sprite_gallery(images):
     return sheet.resize((sheet.width * 6, sheet.height * 6), Image.Resampling.NEAREST)
 
 
+def draft_figure():
+    """16×24 정면 시안(dq4spritedrafts.py)을 풀색 위에 8배로 나란히 놓는다."""
+    sheet = Image.new("RGBA", (18 * len(DRAFT_NAMES) + 2, 26), (66, 156, 74, 255))
+    for i, name in enumerate(DRAFT_NAMES):
+        sheet.alpha_composite(front(name), (2 + i * 18, 1))
+    return sheet.resize((sheet.width * 8, sheet.height * 8), Image.Resampling.NEAREST)
+
+
 def main():
     images = assets()
     output = ROOT / "sfc" / "dq4" / "images"
@@ -32,6 +41,7 @@ def main():
         )
         preview.save(output / f"dq4-graphics-{name}.webp", lossless=True)
     sprite_gallery(images).save(output / "dq4-sprites-gallery.webp", lossless=True)
+    draft_figure().save(output / "dq4-sprite-drafts.webp", lossless=True)
     field = field_figure(ROOT / "work" / "dq4-sprites")
     if field is None:
         print("work/dq4-sprites 에 DQ5 덤프·보행 화면이 없어 dq4-sprites-field.webp 는 건너뜀")
