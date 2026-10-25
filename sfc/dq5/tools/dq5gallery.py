@@ -68,6 +68,7 @@ def rel(p):
 
 
 def maps_cards(items):
+    gifs = {i['stem']: i['path'] for i in items if i['cat'] == 'anim' and i.get('stem')}
     by = {}
     for it in items:
         if it['cat'] == 'maps':
@@ -77,6 +78,8 @@ def maps_cards(items):
         day = next(i for i in its if i['variant'] == '낮')
         links = [(i['variant'], rel(i['path'])) for i in its]
         links.append(('블록', rel(f'gfx/blocks/maps/{stem}.png')))
+        if stem in gifs:
+            links.append(('움직임', rel(gifs[stem])))
         note = next((i['note'] for i in its if i.get('note')), '')
         cards.append(card(rel(day['path']), day['title'],
                           [f'{day["size"]} 셀 · 블록 {day["blocks"]} · 인물 {day["npcs"]} · 출구 {day["exits"]} · '
@@ -100,10 +103,11 @@ def write_pages(items, root, sprite_items):
                                      if i['cat'] == 'blocks' and not i['path'].startswith('gfx/blocks/maps/')]),
         ('chr', 'CHR·폰트', simple_cards(items, 'chr') + simple_cards(items, 'font')),
         ('screens', '창·메뉴', simple_cards(items, 'screens')),
-        ('anim', '움직이는 타일', simple_cards(items, 'anim')),
+        ('anim', '움직이는 타일', simple_cards([i for i in items if not i.get('stem')], 'anim')),
+        ('animmaps', '움직이는 맵(GIF)', simple_cards([i for i in items if i.get('stem')], 'anim')),
     ]
     nav = [('맵', '#maps'), ('필드', '#field'), ('블록', '#blocks'), ('CHR·폰트', '#chr'), ('창·메뉴', '#screens'),
-           ('움직이는 타일', '#anim'), ('스프라이트·몬스터', 'sprites.html')]
+           ('움직이는 타일', '#anim'), ('움직이는 맵', '#animmaps'), ('스프라이트·몬스터', 'sprites.html')]
     intro = ('썸네일을 누르면 원본이 열립니다(맵·지도는 1배). 주석판: 노랑 인물(번호, 낮 기본 목록), 하늘색 출구, '
              '빨강 T 보물상자, 분홍 S タンス·ツボ·タル, 분홍 F 발밑 숨은 물건, 주황 D 맵 위 물체(닫힌 문 등). 맵은 이야기 플래그가 모두 꺼진 상태. 맵 이름은 ルーラ 목적지 이름이 있는 그룹만 붙입니다.')
     with open(os.path.join(gallery, 'index.html'), 'w') as f:
@@ -132,6 +136,13 @@ def sprites(rom, root, only):
         except ImportError:
             print('dq5sprite: 모듈 없음, 건너뜀')
             return []
+    if isinstance(got, dict):
+        # 에셋 저장소 꼴(note·obj_palettes·sprites). 갤러리 카드에 쓸 path·title·group 으로 바꾼다.
+        got = [dict(i, path=i['file'], title=' '.join(x for x in (f'{i["set"]:02X}' if 'set' in i else i.get('where', ''),
+                                                                    i.get('label') or '') if x),
+                    group=('탈것' if i.get('vehicle') is not None else '누운 모양' if i.get('rotated')
+                           else '맵 OBJ 타일' if 'map_object' in i else '인물'))
+               for i in got['sprites']]
     return [i for i in got if str(i.get('path', '')).endswith('.png') and not i['path'].endswith('-index.png')]
 
 

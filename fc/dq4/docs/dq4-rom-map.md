@@ -40,14 +40,14 @@ PRG 512KB(16KB 뱅크 32개)의 뱅크마다 무엇이 들어 있는지와 빈 �
 | `13` | 전투 코드 | 전투에서만 140 | 140 | `$BFA7`~`$BFD7`(49) |
 | `14` | 전투 들어가기·전투 화면 코드, 몬스터 그림 풀기(`14:$9F7F` 가 `0F:$C7E1` 로 `06`·`07` 을 읽음) | 조우 1439, 전투 727 | 1756 | 없음 |
 | `15` | 인물 대화 해석기와 대화 스크립트, 가게 처리 | [dq4-script-format.md](dq4-script-format.md), [dq4-shop-format.md](dq4-shop-format.md). 왕에게 말 걸기에서 140 | 145 | 없음 |
-| `16` | 대사·창 코드, 메시지 포인터·글자표·사전 포인터·제어 처리기, 창 정의 표·메뉴 문구 | [dq4-text-format.md](dq4-text-format.md). 모든 장면 | 2503 | `$BF40`~`$BFD7`(152) |
-| `17` | 맵 그룹 표 `$B181` 등 데이터 | [dq4-map-format.md](dq4-map-format.md). 실행 0 | 0 | `$93E6`(256, 끝은 아님) |
+| `16` | 대사·창 코드, 메시지 포인터·글자표·사전 포인터·제어 처리기, 창 정의 표·메뉴 문구, 창 본문의 항목 루틴 표 `$A6DE`·`$A71C`, 자리 루틴 `$A72C`, `C1` 루틴 `$A734`, 수 항목 값 번호 `$BAFE` | [dq4-text-format.md](dq4-text-format.md). 모든 장면 | 2503 | `$BF40`~`$BFD7`(152) |
+| `17` | 맵 그룹 표 `$B181` 등 데이터, 카지노 포커(함수 `00`, `$804C`) | [dq4-map-format.md](dq4-map-format.md), [dq4-text-format.md](dq4-text-format.md#폰트). 보행 실행 0, 포커에서 실행 | 0 | `$93E6`(256, 끝은 아님) |
 | `18` | 몬스터 표 `$8046`, 조우 표, 폰트 `$B840`와 올리는 루틴 `$B7A3`(함수 `08`), 라틴 글꼴과 `$B7A9`(함수 `0C`), 조우·전투 코드 | [dq4-data-format.md](dq4-data-format.md), [dq4-encounter-format.md](dq4-encounter-format.md). 조우 691 | 876 | 없음 |
 | `19` | 소리 데이터와 소리 진입점(`$8014`~) | `1F` 의 소리 코드가 `$815E`~`$8B5D` 를 읽음. `BRK xx FB` 가 함수 `03` | 25 | `$BF7E`~`$BFD7`(90) |
 | `1A` | 부팅·화면 올리기 코드(`$0300` 큐 → `$2007`) | 부팅 1047 | 1069 | 없음 |
 | `1B` | 출구 표 `$8223`, 출구 검사 코드, 대사 본문 뒤쪽 `$A500`~`$BB93`, 사전 `$BB94`~`$BF13` | [dq4-map-format.md](dq4-map-format.md), [dq4-text-format.md](dq4-text-format.md) | 27 | `$BF14`~`$BFD7`(196) |
 | `1C` | 인물 코드 | `1C:$9878` 인물 표 | 155 | 없음 |
-| `1D` | 이벤트·필드 코드(특수 전투를 부르는 스크립트 포함) | [dq4-encounter-format.md](dq4-encounter-format.md) | 377 | 없음 |
+| `1D` | 이벤트·필드 코드(특수 전투를 부르는 스크립트 포함), たからのちず 지도 화면(함수 `01`, `$8DED`) | [dq4-encounter-format.md](dq4-encounter-format.md) | 377 | 없음 |
 | `1E` | 보행·맵 이동 코드 | `1E:$9155`, `1E:$8ED6` | 744 | 없음 |
 | `1F` | 고정 뱅크(`$0507 ≥ 10`). `0F` 와 같은 공통 루틴과 소리 코드, 디버그 장 고르기 창 `$F102`([dq4-save-format.md](dq4-save-format.md#디버그-장-고르기)) | [dq4-bank-format.md](dq4-bank-format.md) | 2581 | `$FE8C`~`$FF73`(232) |
 

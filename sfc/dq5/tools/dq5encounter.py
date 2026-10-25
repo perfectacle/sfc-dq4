@@ -26,7 +26,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from dq5field import FIELD_E000, WORLD, block_number, rle  # noqa: E402
+from dq5field import WORLDS, block_number, rle  # noqa: E402
 from dq5map import Rom  # noqa: E402
 from dq5text import string, string_codes, text  # noqa: E402
 
@@ -173,8 +173,7 @@ def field_grid_index(v1948, v1949):
 def check_steps(rom, path):
     """00:82AF(01:84CF 에서 돌아온 곳) 기록의 A(구역)·Y(조우율)를 표로 계산한 값과 맞춘다.
     LOG=7E00BC,7E00BE,7E00B6,7E00B8,7E1948,7E075E,7E21C9 가 있어야 한다. 실내는 구역만 본다."""
-    world, _ = rle(rom, WORLD)
-    hibits, _ = rle(rom, FIELD_E000)
+    maps = [tuple(rle(rom, a)[0] for a in pair) for pair in WORLDS]
     bad = total = 0
     seen = {}
     for line in open(path):
@@ -194,18 +193,15 @@ def check_steps(rom, path):
             x, yy = kv['7E00B6'], kv['7E00B8']
             g = field_grid_index(v1948, v1949)
             want_a = field_area(rom, g, x, yy)
-            if v1949:
-                # 다른 세계의 지도는 아직 풀지 않아 지형을 모른다. 구역만 본다
-                ok = a == want_a
-                key = (f'필드 격자 {FIELD_GRIDS[g][0]} 칸 ({x >> 5},{yy >> 5})', a, y)
-            else:
-                t = field_terrain(rom, world, hibits, x, yy)
-                night = kv['7E075E'] >= 0xF0
-                rate = rom.u8((FIELD_RATE_NIGHT if night else FIELD_RATE_DAY) + t)
-                if kv['7E21C9'] >= 3:
-                    rate = rate * 8 & 0xFF
-                ok = a == want_a and y == rate
-                key = (f'필드 격자 {FIELD_GRIDS[g][0]} 칸 ({x >> 5},{yy >> 5}) 지형 {t}', a, y)
+            # 세계 1·2 도 같은 지형 표(03:CB1B)를 쓰고 지도만 $1949 로 바뀐다(dq5field.WORLDS)
+            world, hibits = maps[min(v1949, 2)]
+            t = field_terrain(rom, world, hibits, x, yy)
+            night = kv['7E075E'] >= 0xF0
+            rate = rom.u8((FIELD_RATE_NIGHT if night else FIELD_RATE_DAY) + t)
+            if kv['7E21C9'] >= 3:
+                rate = rate * 8 & 0xFF
+            ok = a == want_a and y == rate
+            key = (f'필드 격자 {FIELD_GRIDS[g][0]} 칸 ({x >> 5},{yy >> 5}) 지형 {t}', a, y)
         total += 1
         bad += not ok
         if not ok:
