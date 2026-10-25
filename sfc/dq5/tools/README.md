@@ -25,6 +25,7 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5monster.py rom` | DQ5 몬스터 236개의 필드(HP·MP·민첩·공격·수비·경험치·금화·행동 수·재생·떨어뜨리는 물건·동료 확률과 종류 등), 행동 6개, 내성 18칸. `--companions` 동료 레코드(`23:AED1`) 41개 |
 | `dq5spell.py rom` | DQ5 전투 행동 171개(주문·몬스터 행동)의 이름·MP·범위 비트·처리 루틴·피해/회복량·내성 종류 |
 | `dq5recruit.py rom` | DQ5 동료가 되는 몬스터 41종의 확률 등급(필드 76)·동료 종류(필드 77)·들인 수 0·1·2 일 때의 1/N(`27:8162`·`8172`·`8182`)과 반드시 동료가 되는 가진 물건(`26:8D33`) |
+| `dq5drop.py rom` | DQ5 몬스터 220종이 떨어뜨리는 물건(필드 75)과 확률 1/N(필드 74 → `27:8218`) |
 | `dq5encounter.py rom [BC BD]` | DQ5 전투 조우 구역 85개의 칸별 무리·확률·마릿수. `BC BD` 는 그 실내 맵의 구역, `--maps` 조우가 있는 실내 맵, `--field` 필드 구역 격자, `--events` 이벤트 전투 무리 표(`23:D757`), `--trace trace.txt` 로 `probe/trace.lua` 기록(`TRACE=23E7C2,23E9B0,23EA40,23E98F LOG=7E1001,7E1003,7E1005,7E1007`)의 무리를 표와 대조, `--steps trace.txt` 로 걸음마다의 구역·조우율(`TRACE=0082AF LOG=7E00BC,7E00BE,7E00B6,7E00B8,7E1948,7E075E,7E21C9`)을 격자·지형으로 계산한 값과 대조 |
 | `dq5mongfx.py rom [몬스터…]` | DQ5 전투 몬스터 그림(그림 번호·머리·조각·색). `--png` 그림, `--compare at.bin` 게임 버퍼(`7E:4000`)와 타일 비교, `--shot` 전투 화면과 RGB 비교, `--oam o.oam v.vram` OBJ 색 번호 비교, `--layout "몬스터:마릿수[:무리 값],…"` 무리 배치(그림 상자 OAM 좌표) |
 | `dq5battlebg.py rom [번호]` | DQ5 전투 배경 49개(번호 `$1AA0 & 7F`, 그림·목록·팔레트 주소). `--png` 256x128 띠, `--cgram` 레코드 밖 색, `--alt` 밤 팔레트, `--era N` 세계, `--indoor` 실내, `--terrain X,Y` 필드 좌표의 지형(= 배경 번호), `--compare 덤프폴더 프레임` 으로 `dq5battledump.lua` 덤프와 비교 |
