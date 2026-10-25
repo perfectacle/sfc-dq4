@@ -11,5 +11,5 @@ FC DQ4(Rev A) 원작 데이터 분석. 이식할 데이터가 어디에 어떤 �
 - **창**: 루틴 항목 `0B`·`20`·`25`·그룹 1 `06`·`07` 을 화면에서 보기, 걸러내기 아래 3비트, x3 `83` 두 곳이 실제 장면에서 도는 것(`10:$BAE1` 은 `10:$B497` 을 부르는 `10:$AEF0`·`$AF2B`·`$B0C3` 위를 거슬러, `11:$BC2B` 는 5장 필드 전투 いれかえ)([dq4-text-format.md](docs/dq4-text-format.md), [dq4-bank-format.md](docs/dq4-bank-format.md)).
 - **블록·맵**: 맵 번호 bit6·`$41` bit7 화면 확인, 그룹 48 의 장면, 성 앞 워프 nametable 차이, 배 자리 `$6195/$6196`, `12:$A728`·`15:$B110` 을 부르는 곳, 필드 3 막이의 `$62A4` 갈래([dq4-block-format.md](docs/dq4-block-format.md), [dq4-map-format.md](docs/dq4-map-format.md), [dq4-field-format.md](docs/dq4-field-format.md)).
 - **상점·조우**: 같은 장 안의 장면 순서로 숨김 조건 거르기, 그룹 FE 호출 경로, 대화 `13B`·`0AD`(문제)와 대화로 받는 물건 줄의 실측, `0F/00` 밤 이벤트 `3E`, `$6E44` bit7 을 읽는 나머지 여덟 곳, パルプンテ 27가지의 화면 효과([dq4-shop-format.md](docs/dq4-shop-format.md), [dq4-encounter-format.md](docs/dq4-encounter-format.md)).
-- **원작 그림**: 엔딩 바다 물결(줄 스크롤), 장 제목 타일 둘째 평면, 1장 제목 화면, 이름 없는 그룹 30개, デスピサロ 등 [dq4-fcsprite-format.md](docs/dq4-fcsprite-format.md) 의 남은 것([dq4-fcgfx.md](docs/dq4-fcgfx.md)).
+- **원작 그림**: 이름 없는 그룹 28개, 성문 연출 판정을 다른 성문에서, 4장 칸 5 의 표 `53`, 탈것 칸 `0D`·`58`~`60` 장면, `BOSS_STEPS` 명령 단위([dq4-fcgfx.md](docs/dq4-fcgfx.md#남은-것), [dq4-fcsprite-format.md](docs/dq4-fcsprite-format.md#남은-것)).
 - **실험 환경**: 1장 세이브스테이트 넷을 지금 `dq4state.sh` 로 다시 만들지(문서 숫자 다시 확인 필요, [handoff.md](handoff.md#실험-출발점)).
