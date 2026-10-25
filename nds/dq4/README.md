@@ -32,7 +32,9 @@ uv run --locked krpatch nds unpack rom/dq4ds-kr.nds work/nds/kr
 | `ndsscript.py` | 이벤트 스크립트 `SCRIPT/<맵>.bin` 의 블록 나무(`tree`), 명령 목록(`dump`, 메시지 명령 옆에 문장), 전체 검사(`stats`) |
 | `ndsparam.py` | `PARAM` 표: 몬스터(`monsters`, FC 와 짝 찾기), 아이템 번호 대조(`items`), 가게(`shops`), 카지노·メダル(`casino`), 얻는 물건(`chests`), 동료 대화 조건(`talk`), 대사 파일을 부르는 스크립트(`scripts`). [docs/param-format.md](docs/param-format.md) |
 | `ndskr.py` | 한글 대응표 검사(`check`)와 다시 만들기(`draft`) |
-| `ndsgfx.py` | 그래픽 디코더. `survey` 폴더·헤더별 파일 수, `export OUT` 으로 인물·몬스터(조립·애니메이션 WebP)·맵 텍스처와 위에서 본 렌더링·전투 배경·아이콘·글꼴·효과·타이틀을 PNG 로(`--only` 단계, `--kr work/nds/kr` 한글판 글꼴·로고), `gallery OUT` 으로 `index.html`. 결과는 비공개 에셋 저장소에만 |
+| `ndsgfx.py` | 그래픽 디코더. `survey` 폴더·헤더별 파일 수, `export OUT` 으로 인물·몬스터(조립·애니메이션 WebP)·맵 텍스처와 위에서 본 렌더링·전투 배경·세계 지도(WTEX·기호)·3D 인물·효과 애니메이션·아이콘·글꼴·효과·타이틀을 PNG 로(`--only` 단계, `--kr work/nds/kr` 한글판 글꼴·로고), `gallery OUT` 으로 `index.html`. 결과는 비공개 에셋 저장소에만 |
+| `ndsvram.py` | desmume 세이브스테이트에서 메인 RAM·VRAM·I/O 레지스터·팔레트를 꺼냄. `info` 레이어 설정, `bg` 텍스트 BG 그림 |
+| `ndsgfxfig.py` | 그래픽 형식 문서의 그림(`images/nds-gfx-*`)을 다시 만듦 |
 | `ndsplay.py` | desmume libretro 코어(`DESMUME_CORE`)를 화면 없이 돌리며 버튼·터치를 넣고 화면 저장(`every N K 이름`), RAM 읽기·쓰기·고정(`peek`·`poke`·`freeze`·`until`), 세이브스테이트 |
 | `ndswarp.py` | 장면 이동(`map`, `--time` 시간대·`--no-encounter`), 필드 워프(`field`), 진행도 프리셋(`presets`·`preset`), 전투 테스트로 몬스터 고르기(`battle`), 부팅 디버그 메뉴로 시작(`boot`), 장 시작 세이브스테이트(`chapters`). [docs/debug.md](docs/debug.md) |
 | `ndsvram.py` | 세이브스테이트에서 VRAM·레이어 레지스터·팔레트를 꺼내 레이어 설정(`info`)과 BG 화면(`bg`)을 그림 |
@@ -55,6 +57,7 @@ uv run --locked krpatch nds unpack rom/dq4ds-kr.nds work/nds/kr
 - [2026-10-25-10: 동료 대화 거르기 루틴, 아이템 표, 남은 PARAM 칸](journal/2026-10-25-10-param2.md)
 - [2026-10-25-11: 스크립트 명령표와 대사 표지·변수의 코드](journal/2026-10-25-11-script.md)
 - [2026-10-25-12: 시간대·인물 레코드·필드 좌표 범위·메시지 디버그 키·fk01 조건](journal/2026-10-25-12-debug4.md)
+- [2026-10-25-13: 필드 기호·WTEX, ubtl, DSSA 플래그, LOCN, 3D 효과 재생](journal/2026-10-25-13-graphics3.md)
 - [2026-10-25-14: 주문 배우는 표, ドラン 의 고정 능력치, 상태 이상 칸](journal/2026-10-25-14-debug5.md)
 - [2026-10-25-15: 장비 인물 비트, 몬스터 내성, 동료 대화 줄 수와 조건 값](journal/2026-10-25-15-param3.md)
 - [2026-10-25-17: 이민 마을 단계 전환, 얻는 물건 자리와 종류](journal/2026-10-25-17-param4.md)

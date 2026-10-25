@@ -742,22 +742,35 @@ class Exporter:
             self.ok("field pattern", rel, one)
 
     def world(self):
-        """The field rendered from FIELD/bin (16 px per cell, first animation frames)."""
+        """The field rendered from FIELD/bin (16 px per cell, first animation frames, symbols)."""
         import numpy as np
-        ft = texture_object(self.read("FIELD/field.tex"))
-        pal = ft["pal"]
-        f_img = np.asarray(texture_object_image(ft, transparent0=False).convert("RGB"))
-        pb = self.read("FIELD/texture/pattern8.pack")
-        eo, es = pack_entries(pb)[0]
-        p_img = np.asarray(texture(pb[eo:eo + es], 4, 256, es // 256, pal, False).convert("RGB"))
-        sb = self.read("FIELD/texture/pattern24.pack")
-        eo, es = pack_entries(sb)[0]
-        s_img = np.asarray(texture(sb[eo:eo + es], 4, 256, 16, pal, False).convert("RGB"))
-        for rel in ("FIELD/bin/worldmap.bin", "FIELD/bin/worldmap_scene0.bin",
-                    "FIELD/bin/worldmap_scene1.bin", "FIELD/bin/worldmap_scene2.bin"):
-            self.ok("WMAP", rel, lambda rel=rel: self.save(
-                "field/world", Path(rel).stem + ".png", render_field(wmap(self.read(rel)), f_img, p_img, s_img),
-                Path(rel).stem + " (4096x4096)"))
+        sym = texture_pack(self.read("FIELD/symbol/symbol.pack"))
+        pictures = [texture_object_image(t) for t in sym]
+        base = self.read("FIELD/bin/worldmap.bin")
+        for rel, tex, pat in (("FIELD/bin/worldmap.bin", "field", "pattern"),
+                              ("FIELD/bin/worldmap_scene0.bin", "field", "pattern"),
+                              ("FIELD/bin/worldmap_scene1.bin", "field", "pattern"),
+                              ("FIELD/bin/worldmap_scene2.bin", "field", "pattern"),
+                              ("FIELD/bin/gotmap.bin", "field", "pattern"),
+                              ("FIELD/bin/yamimap.bin", "yamifield", "ypattern")):
+            def one(rel=rel, tex=tex, pat=pat):
+                ft = texture_object(self.read(f"FIELD/{tex}.tex"))
+                pal = ft["pal"]
+                f_img = np.asarray(texture_object_image(ft, transparent0=False).convert("RGB"))
+                pb = self.read(f"FIELD/texture/{pat}8.pack")
+                eo, es = pack_entries(pb)[0]
+                p_img = np.asarray(texture(pb[eo:eo + es], 4, 256, es // 256, pal, False).convert("RGB"))
+                sb = self.read(f"FIELD/texture/{pat}24.pack")
+                eo, es = pack_entries(sb)[0]
+                s_img = np.asarray(texture(sb[eo:eo + es], 4, 256, 16, pal, False).convert("RGB"))
+                b = self.read(rel)
+                chunks = wmap_chunks(b)
+                table = wtex(b if "WTEX" in chunks else base)
+                symbols = sdat(b) if "SDAT" in chunks else sdat(base)
+                img = render_field(wmap(b), table, f_img, p_img, s_img, symbols, pictures)
+                side = img.width
+                self.save("field/world", Path(rel).stem + ".png", img, f"{Path(rel).stem} ({side}x{side})")
+            self.ok("WMAP", rel, one)
 
     def model_anim(self):
         """CHR 3D models played with their BCA0 animations, front orthographic view."""
@@ -831,6 +844,13 @@ class Exporter:
                 if not ts:
                     raise ValueError("no TextureObject or BMD0 texture")
                 self.save("effect/atlas", stem + ".png", shelf(ts, 256), label + " (3D)")
+
+                def pick(tag):
+                    return next((b[eo:eo + es] for eo, es in ents if es and b[eo:eo + 4] == tag), None)
+                if pick(b"BCA0"):
+                    frames, _ = model_anim_frames(pick(b"BMD0"), pick(b"BCA0"), 0, step=2, blend=True,
+                                                  srt=pick(b"BTA0"), mat=pick(b"BMA0"))
+                    self.save("effect/anim", stem + ".webp", frames, label + " (3D, 앞에서 본 직교)")
             self.ok("EffectPack", rel, one)
 
     def dssa_files(self):
@@ -1374,8 +1394,9 @@ VIEWS = {
 }
 
 
-def raster(tris, tex_rgba, view, scale, lo, hi):
-    """Orthographic textured z-buffer raster of [(key, [(xyz, st)] * 3)] onto RGBA."""
+def raster(tris, tex_rgba, view, scale, lo, hi, blend=False):
+    """Orthographic textured z-buffer raster of [(key, [(xyz, st)] * 3)] onto RGBA.
+    blend=True draws translucent texels over what is below (effects) instead of an alpha test."""
     import numpy as np
     ax, ay, sy_, az = VIEWS[view]
     w = int((hi[ax] - lo[ax]) * scale) + 1
@@ -1428,65 +1449,90 @@ def raster(tris, tex_rgba, view, scale, lo, hi):
                 ti = ti % th if flags & 2 else np.clip(ti, 0, th - 1)
             rgba = img[ti, si]
         sub_d = depth[y0:y1 + 1, x0:x1 + 1]
-        draw = inside & (rgba[..., 3] >= 128) & (z >= sub_d)
-        sub_d[draw] = z[draw]
-        color[y0:y1 + 1, x0:x1 + 1][draw] = rgba[draw]
+        if blend:
+            draw = inside & (rgba[..., 3] > 0) & (z >= sub_d - 1e-6)
+            sub_c = color[y0:y1 + 1, x0:x1 + 1]
+            a = rgba[..., 3:4].astype(np.float32) / 255
+            mixed = rgba[..., :3] * a + sub_c[..., :3] * (1 - a)
+            sub_c[..., :3][draw] = mixed[draw].astype(np.uint8)
+            sub_c[..., 3][draw] = np.maximum(sub_c[..., 3], rgba[..., 3])[draw]
+        else:
+            draw = inside & (rgba[..., 3] >= 128) & (z >= sub_d)
+            sub_d[draw] = z[draw]
+            color[y0:y1 + 1, x0:x1 + 1][draw] = rgba[draw]
     return Image.fromarray(color, "RGBA")
 
 
 # ---------------------------------------------------------------- field (world map)
 
+def wmap_chunks(b):
+    """{tag: bytes} of a FIELD/bin `WMAP` file: `WSYN` (u8 blocks x, y, u8 block width,
+    height in cells), `WCHA`, `WMAP` (u16 cells, row-major), `WCMA`, `WTEX` (cell value
+    table), `SDAT` (symbols). A file without the `WMAP` header is bare 256x256 cells."""
+    if b[:4] != b"WMAP":
+        return {"WMAP": b}
+    out, o = {}, 0x10
+    while o + 8 <= len(b):
+        tag, size = b[o:o + 4], u32(b, o + 4)
+        if tag == b"\0\0\0\0":
+            break
+        out[tag.decode("latin-1")] = b[o + 8:o + 8 + size]
+        o += 8 + size
+    return out
+
+
 def wmap(b):
-    """256x256 u16 cells of the `WMAP` chunk in a FIELD/bin file (the chunk after the file header)."""
+    """Cells of a FIELD/bin file as a square u16 array."""
     import numpy as np
-    i = b.find(b"WMAP", 4)
-    i = i + 8 if i >= 0 else 0
-    return np.frombuffer(b[i:i + 0x20000], "<u2").reshape(256, 256)
+    cells = np.frombuffer(wmap_chunks(b)["WMAP"], "<u2")
+    side = int(len(cells) ** 0.5)
+    return cells[:side * side].reshape(side, side)
 
 
-def field_chip(w):
-    """('field' | 'pattern' | 'sea', chip number) for the low 10 bits of a field cell.
-
-    Measured against desmume screens (nds/dq4/docs/graphics-format.md). Field chips are
-    16x16 cells of FIELD/field.tex in row order, pattern chips those of one
-    FIELD/texture/pattern8.pack frame, sea chips the four 16x16 cells at the left of
-    one FIELD/texture/pattern24.pack frame (256 wide, 16 high).
-    """
-    if 298 <= w <= 304:
-        return "sea", (w - 298) // 2
-    if w <= 6 and w % 2 == 0 and w:
-        return "pattern", w // 2 - 1
-    if 8 <= w <= 29:
-        return "field", w - 7
-    if 30 <= w <= 174:
-        return "pattern", w // 2 - 12
-    if 175 <= w <= 296:
-        return "field", w - 153
-    if w >= 305:
-        return "field", w - 161
-    return None, 0
+def wtex(b):
+    """`WTEX`: 6 bytes per cell value from 1: u8 terrain, u8 flags, u16 animated chip,
+    u16 still chip. Flag 8: animated chip of the coast pattern (pattern8), 8|16: of the
+    sea pattern (pattern24); otherwise the still chip of the field texture (16x16 cells
+    of field.tex in row order)."""
+    t = wmap_chunks(b)["WTEX"]
+    return [struct.unpack_from("<BBHH", t, 6 * i) for i in range(len(t) // 6)]
 
 
-def render_field(cells, field_tex, pattern8, sea):
-    """World map at 16 px per cell from the low 10 bits of each cell. Cells with higher
-    bits set (about 0.5 %) are drawn from their low bits too; on screen they show
-    something else (not a mirrored chip), so those spots are not reliable."""
+def sdat(b):
+    """`SDAT` symbols: 10 bytes each: u8 0, u8 symbol picture (FIELD/symbol/symbol.pack),
+    u16 place number (PARAM/param_map_field_symbol.dat, DEBUG/fieldsymbol.dat), u16 x,
+    u16 y (field pixels, bottom centre of the symbol box), u8 box width, u8 height.
+    The picture's top-left sits at (x - width // 2 - 1, y - height - 1); measured on
+    61 symbols, all within one pixel."""
+    t = wmap_chunks(b).get("SDAT", b"")
+    return [struct.unpack_from("<BBHHHBB", t, 10 * i) for i in range(len(t) // 10)]
+
+
+def render_field(cells, table, field_tex, pattern8, sea, symbols=(), pictures=()):
+    """Field at 16 px per cell: each cell value v is looked up in `table` (WTEX, entry
+    v - 1) on its low 10 bits; cells with higher bits mark symbol places and are drawn
+    from their low bits (the ground under the symbol). `symbols` (SDAT) are then drawn
+    from `pictures` (symbol.pack images)."""
     import numpy as np
     out = np.zeros((cells.shape[0] * 16, cells.shape[1] * 16, 3), np.uint8)
     for y in range(cells.shape[0]):
         for x in range(cells.shape[1]):
-            v = int(cells[y, x])
-            kind, c = field_chip(v & 0x3FF)
-            if kind == "sea":
-                chip = sea[0:16, c * 16:c * 16 + 16]
-            elif kind == "field" and c < 336:
-                chip = field_tex[c // 16 * 16:c // 16 * 16 + 16, c % 16 * 16:c % 16 * 16 + 16]
-            elif kind == "pattern" and 0 <= c < 80:
-                chip = pattern8[c // 16 * 16:c // 16 * 16 + 16, c % 16 * 16:c % 16 * 16 + 16]
-            else:
+            w = int(cells[y, x]) & 0x3FF
+            if not 1 <= w <= len(table):
                 continue
-            out[y * 16:y * 16 + 16, x * 16:x * 16 + 16] = chip
-    return Image.fromarray(out)
+            _, flags, anim, still = table[w - 1]
+            if flags & 8:
+                src, c = (sea if flags & 16 else pattern8), anim
+            else:
+                src, c = field_tex, still
+            chip = src[c // 16 * 16:c // 16 * 16 + 16, c % 16 * 16:c % 16 * 16 + 16]
+            if chip.shape[:2] == (16, 16):
+                out[y * 16:y * 16 + 16, x * 16:x * 16 + 16] = chip
+    img = Image.fromarray(out).convert("RGBA")
+    for _, pic, _, sx, sy, bw, bh in sorted(symbols, key=lambda r: r[4]):
+        if pic < len(pictures) and pictures[pic] is not None:
+            img.alpha_composite(pictures[pic], (sx - bw // 2 - 1, sy - bh - 1))
+    return img
 
 # ---------------------------------------------------------------- BCA0 joint animation
 
@@ -1604,37 +1650,99 @@ def bca_pose(b, anim, frame, rest):
     return local
 
 
-def model_anim_frames(mdl, bca, anim_index=0, step=2, view="front", scale=None, max_frames=240):
-    """Frames of a BMD0 model played with a BCA0 animation, rendered orthographically."""
+def material_anims(blk):
+    """Per-material texture animation of a BTA0 (`SRT0`) or BMA0 (`MAT0`) file.
+
+    Returns (frames, {material: {track: value or [samples]}}). SRT0 `M\\0AT`: per material
+    five 8-byte tracks (scale S, scale T, rotation, translation S, T): u16 frames, u8 0,
+    u8 flags, u32 value; flag 0x10 alone means u32 is the offset of s16 1.12 samples,
+    one per frame (translation 1.0 = one texture). MAT0 `M\\0AM`: per material five
+    4-byte tracks (diffuse, ambient, specular, emission, alpha): u16 value,
+    u8 frames, u8 flags; flag 0 means the value is the offset of u8 samples (alpha 0-31).
+    """
+    blocks = nitro_blocks(blk)
+    tag = "SRT0" if "SRT0" in blocks else "MAT0"
+    o = blocks[tag]
+    _, e = nitro_dict(blk, o + 8)[0]
+    ao = o + u32(e, 0)
+    frames = u16(blk, ao + 4)
+    out = {}
+    for name, ent in nitro_dict(blk, ao + 8):
+        tracks = {}
+        if tag == "SRT0":
+            for k, key in enumerate(("ss", "st", "rot", "ts", "tt")):
+                _, _, flags, v = struct.unpack_from("<HBBI", ent, 8 * k)
+                if flags & 0x30 == 0x10:
+                    tracks[key] = [struct.unpack_from("<h", blk, ao + v + 2 * f)[0] / 4096 for f in range(frames)]
+                elif key in ("ts", "tt"):
+                    tracks[key] = s32(ent, 8 * k + 4) / 4096
+        else:
+            v, _, flags = struct.unpack_from("<HBB", ent, 4 * 4)
+            tracks["alpha"] = list(blk[ao + v:ao + v + frames]) if flags == 0 else (v & 31)
+        out[name] = tracks
+    return frames, out
+
+
+def _track_at(t, f):
+    return t[min(f, len(t) - 1)] if isinstance(t, list) else t
+
+
+def model_anim_frames(mdl, bca, anim_index=0, step=2, view="front", scale=None, max_frames=240, blend=False,
+                      srt=None, mat=None):
+    """Frames of a BMD0 model played with a BCA0 animation, rendered orthographically.
+    `srt`/`mat` are BTA0/BMA0 files: texture scrolling and material alpha per frame."""
     import numpy as np
     blocks = nitro_blocks(mdl)
     mo = mdl0_models(mdl, blocks["MDL0"])[0][1]
     rest = [node_trs(mdl, o) for o in model_nodes(mdl, mo)]
-    anim = bca_anims(bca)[anim_index]
+    anim = bca_anims(bca)[anim_index] if bca else dict(name="-", frames=1)
     texs, pals = tex0(mdl, blocks["TEX0"]) if "TEX0" in blocks else ({}, {})
     info = material_info(mdl, mo)
-    cache = {}
+    mat_names = [n for n, _ in nitro_dict(mdl, mo + u32(mdl, mo + 8) + 4)]
+    srt_tr = material_anims(srt)[1] if srt else {}
+    mat_tr = material_anims(mat)[1] if mat else {}
+    base = {}
 
-    def tex_rgba(m):
-        if m not in cache:
+    def base_img(m):
+        if m not in base:
             t, pn, flags = info[m] if m < len(info) else (None, None, 0)
             if t in texs:
                 tt = texs[t]
                 pal = palette(pals[pn]) if pn in pals else grey(256)
                 img = texture(tt["data"], tt["fmt"], tt["width"], tt["height"], pal or grey(256),
                               bool(tt["c0"]), tt["pidx"])
-                cache[m] = (np.asarray(img), flags)
+                base[m] = (np.asarray(img), flags)
             else:
-                cache[m] = (None, flags)
-        return cache[m]
+                base[m] = (None, flags)
+        return base[m]
 
     frames = list(range(0, anim["frames"], step))[:max_frames]
-    tris = [model_triangles(mdl, mo, bca_pose(bca, anim, f, rest)) for f in frames]
+    tris = [model_triangles(mdl, mo, bca_pose(bca, anim, f, rest) if bca else None) for f in frames]
     pts = np.array([p for ts in tris for _, t in ts for p, _ in t])
     lo, hi = pts.min(0), pts.max(0)
     if scale is None:
         scale = 160 / max(hi[0] - lo[0], hi[1] - lo[1], 1e-3)
-    return [raster(ts, tex_rgba, view, scale, lo, hi) for ts in tris], anim
+    out = []
+    for f, ts in zip(frames, tris):
+        cache = {}
+
+        def tex_rgba(m, f=f, cache=cache):
+            if m not in cache:
+                img, flags = base_img(m)
+                name = mat_names[m] if m < len(mat_names) else None
+                if img is not None and name in srt_tr:
+                    tr = srt_tr[name]
+                    h, w = img.shape[:2]
+                    img = np.roll(img, (round(_track_at(tr.get("tt", 0), f) * h),
+                                        round(_track_at(tr.get("ts", 0), f) * w)), axis=(0, 1))
+                if img is not None and name in mat_tr:
+                    a = _track_at(mat_tr[name]["alpha"], f) / 31
+                    img = img.copy()
+                    img[..., 3] = (img[..., 3] * a).astype(np.uint8)
+                cache[m] = (img, flags)
+            return cache[m]
+        out.append(raster(ts, tex_rgba, view, scale, lo, hi, blend))
+    return out, anim
 
 if __name__ == "__main__":
     main()
