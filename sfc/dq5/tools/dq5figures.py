@@ -607,6 +607,19 @@ def fig_perframe_0400():
     save(out, 'dq5-perframe-0400.webp')
 
 
+def fig_perframe_scenes():
+    """쉬던 매 프레임 루틴을 조건을 맞춰 돌린 화면(위)과 그 루틴을 막은 화면(아래). 07/00 (20,43), 06/08 (24,8) `21D4|04`,
+    14/01 슬롯 8 을 (38,27) 로, 31/06 (52,23). work/perframe2/<맵><a|b>/ 의 sNNN.png 이고 명령은 sfc/dq5/journal/ 의 perframe2 일지."""
+    cols = [('0700', 's320', '07/00'), ('0608', 's320', '06/08'), ('1401', 's320', '14/01'), ('3106', 's096', '31/06')]
+    out = Image.new('RGB', (len(cols) * 260 - 4, 2 * 228 - 4), (24, 24, 24))
+    for i, (name, shot, text) in enumerate(cols):
+        for j, k in enumerate('ab'):
+            im = Image.open(f'work/perframe2/{name}{k}/{shot}.png').convert('RGB')
+            label(im, text + ('' if k == 'a' else ' blocked'))
+            out.paste(im, (i * 260, j * 228))
+    save(out, 'dq5-perframe-scenes.webp')
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     rom = Rom(open('rom/dq5.sfc', 'rb').read())
@@ -636,6 +649,7 @@ def main():
     fig_seabattle(rom)
     fig_gfx_diff(rom)
     fig_perframe_0400()
+    fig_perframe_scenes()
     os.remove(TMP)
 
 
