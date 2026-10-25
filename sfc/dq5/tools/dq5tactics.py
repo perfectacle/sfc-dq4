@@ -10,6 +10,7 @@
   python sfc/dq5/tools/dq5tactics.py rom/dq5.sfc
   python sfc/dq5/tools/dq5tactics.py rom/dq5.sfc --actions
   python sfc/dq5/tools/dq5tactics.py rom/dq5.sfc --check
+  python sfc/dq5/tools/dq5tactics.py rom/dq5.sfc --score 3 6 10   (대상 값, MP, 최대 MP 로 작전마다 점수)
 """
 import argparse
 import os
@@ -45,6 +46,48 @@ def heal_line(rom, t, max_hp):
     return (max_hp * tactic(rom, t)[6]) >> 8
 
 
+def word(rec, i):
+    return rec[i] | rec[i + 1] << 8
+
+
+def mp_factor(rec, mp, max_mp):
+    """21:E9DD. MP 가 문턱(+2 × 최대 MP / 256) 이상이면 +10 비율로 깎음(+11 bit7 이면 더함), 256 이 1배."""
+    if max_mp == 0 or mp < (rec[2] * max_mp) >> 8:
+        return 0x100
+    pen = ((word(rec, 0x10) & 0x7FFF) * mp) >> 8
+    return 0x100 + pen if word(rec, 0x10) & 0x8000 else max(0, 0x100 - pen)
+
+
+def attack_score(rec, value, mp, max_mp, incoming):
+    """21:E98C. value = 21:D26D 의 대상 값, incoming = 행동자가 받을 예상 피해(7E:4138+413A)."""
+    div = mp + ((incoming * 0x16) >> 8) + 1
+    return (value * rec[0] // div + value * rec[1]) * mp_factor(rec, mp, max_mp)
+
+
+def heal_score(rec, power, mp, hp, max_hp, incoming, danger, critical):
+    """21:EA94. 위급 표시(danger 7E:4136 bit6, critical bit7)가 없으면 0."""
+    if not (danger or critical):
+        return 0
+    s = min(power, max_hp - hp) * rec[3] + incoming * rec[5] + ((999 - hp) << 8) - mp * rec[4] * 12
+    if s < 0:
+        return 0
+    return s + (10 << 8 if danger or critical else 0) + (300 << 8 if critical else 0)
+
+
+# 실측(PARTY=05,04 슬라임 셋, 21:E9DB·7E:4019 에서 읽음): (작전, 식, 인자, 값)
+MEASURED = (
+    (0, attack_score, (1, 0, 10, 0), 0x011100),
+    (0, attack_score, (3, 4, 10, 0), 0x030700),
+    (1, attack_score, (3, 6, 10, 0), 0x029630),
+    (1, attack_score, (3, 10, 10, 0), 0x022024),
+    (2, attack_score, (1, 2, 10, 0), 0x009345),
+    (2, attack_score, (3, 4, 10, 0), 0x011CE2),
+    (4, attack_score, (3, 6, 10, 0), 0x0292F0),
+    (0, heal_score, (35, 3, 2, 24, 0, True, False), 0x03F6DA),
+    (4, heal_score, (35, 3, 2, 24, 0, True, False), 0x03EA32),
+)
+
+
 def action(rom, n, item=False):
     """(+0 종류 비트, +1 기대 값, +2 평가 갈래, +3 MP, +4 범위·내성)."""
     base = ITEMS if item else ACTIONS
@@ -71,17 +114,24 @@ def check(rom):
         if ldx is not None and ldx >= 0x50 and target is not None:
             same[2 if (rec[4] & 0x1F) + 0x50 == ldx else 3] += 1
     print(f'MP 같음 {same[0]} 다름 {same[1]}, 내성 같음 {same[2]} 다름 {same[3]}')
+    ok = sum(f(tactic(rom, t), *args) == want for t, f, args, want in MEASURED)
+    print(f'점수 식 실측 {len(MEASURED)}개 중 {ok}개 같음')
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('rom')
     ap.add_argument('--actions', action='store_true', help='행동·물건 AI 레코드')
-    ap.add_argument('--check', action='store_true', help='행동 레코드를 주문 표와 견줌')
+    ap.add_argument('--check', action='store_true', help='행동 레코드를 주문 표와, 점수 식을 실측 값과 견줌')
+    ap.add_argument('--score', nargs=3, type=int, metavar=('값', 'MP', '최대MP'), help='작전마다 공격·주문 점수')
     args = ap.parse_args()
     rom = Rom(open(args.rom, 'rb').read())
     if args.check:
         check(rom)
+        return 0
+    if args.score:
+        for t in range(TACTIC_COUNT):
+            print(f'{t} {NAMES[t]} {attack_score(tactic(rom, t), *args.score, 0):06X}')
         return 0
     if args.actions:
         for n in range(dq5spell.COUNT):
