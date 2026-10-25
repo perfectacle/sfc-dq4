@@ -1520,10 +1520,17 @@ def export_the_end(rom, out):
              note='타일 03:B459, 색 03:A502, 배치 03:A478(03:A40A)')
 
 
+def export_battle_windows(rom, out):
+    import dq5battlewin
+    for name, title, img in dq5battlewin.windows(rom):
+        out.save(img, f'gfx/screens/{name}', 'screens', title, '전투 메시지 창',
+                 note='24:A4A4 글자 격자 → 24:A5D9 타일맵(dq5battlewin.py). 이름·숫자는 예시 값(ああああ·スライム·4·1·メラ)')
+
+
 EXPORTS = {'maps': export_maps, 'chr': export_chr, 'field': export_field, 'anim': export_anim,
            'monsters': export_monsters, 'battlebg': export_battlebg, 'font': export_font, 'ui': export_ui,
            'worldmap': export_world_screen, 'credits': export_credits,
-           'windows': export_windows, 'theend': export_the_end}
+           'windows': export_windows, 'theend': export_the_end, 'battlewin': export_battle_windows}
 COMMAND = 'uv run --locked python sfc/dq5/tools/dq5gallery.py rom/dq5.sfc --out $OUT'
 
 
