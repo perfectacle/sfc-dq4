@@ -1,6 +1,6 @@
 # NDS DQ4 대사·폰트·한글 팬패치
 
-DS 일본판의 대사 파일, 폰트, 그리고 한글 팬패치가 한글을 넣은 방식입니다. 도구는 `nds/dq4/tools/ndstext.py`(대사), `ndsfont.py`(폰트), `ndskr.py`(한글 대응표)입니다.
+DS 일본판의 대사 파일, 폰트, 그리고 한글 팬패치가 한글을 넣은 방식입니다. 도구는 `nds/dq4/tools/ndstext.py`(대사), 툴킷의 `krpatch nds font`(폰트), `ndskr.py`(한글 대응표)입니다.
 
 ## 대사 파일 MPT0
 
@@ -142,7 +142,7 @@ uv run --locked python nds/dq4/tools/ndstext.py dump work/nds/kr/data/data/MESS/
 
 ## 폰트 NFTR
 
-`data/data/G2D/FONT/`. NDS 표준 비트맵 폰트 형식입니다. `ndsfont.py info` 로 읽었습니다.
+`data/data/G2D/FONT/`. NDS 표준 비트맵 폰트 형식입니다. `krpatch nds font info` 로 읽습니다.
 
 | 파일 | 칸 | bpp | 글자 | 코드 |
 | --- | --- | --- | --- | --- |
