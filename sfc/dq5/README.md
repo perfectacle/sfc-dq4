@@ -14,6 +14,7 @@ SFC 「드래곤 퀘스트 V」(일본판) 엔진을 분석하는 트랙입니�
 - [docs/dq5-hangul-format.md](docs/dq5-hangul-format.md): 한글 넣기 실현성(롬 확장, 메시지 옮기기와 트리 다시 만들기, 새 글자, 1바이트 부호)
 - [docs/dq5-event-format.md](docs/dq5-event-format.md): DQ5 이벤트 스크립트(주인공을 조종하는 표와 명령)
 - [docs/dq5-sound-format.md](docs/dq5-sound-format.md): DQ5 소리 명령(명령 입구·대기열·BRK 0F~19·효과음·맵 곡)
+- [docs/dq5-build-format.md](docs/dq5-build-format.md): 패치 빌드(쓰기 도구의 패치 목록 형식, 빌더, 빈 자리 지도, 부팅 시험)
 - [todo.md](todo.md): 남은 일
 - [references.md](references.md): 참고 자료
 - [tools/README.md](tools/README.md): 도구 사용법
@@ -163,3 +164,5 @@ SFC 「드래곤 퀘스트 V」(일본판) 엔진을 분석하는 트랙입니�
 - [2026-10-25-127: SRAM 칸 상태 비트, 빠지는 레벨업 메시지, 사람 성장 레코드](journal/2026-10-25-127-leftover.md)
 - [2026-10-25-128: 일행 작전 AI](journal/2026-10-25-128-tactics.md)
 - [2026-10-25-129: 문 명령 넷째 바이트는 층](journal/2026-10-25-129-door2.md)
+- [2026-10-25-130: 매 프레임 루틴 마무리(바위·ドラゴンキッズ·물결·발자국)](journal/2026-10-25-130-perframe4.md)
+- [2026-10-25-131: 패치 빌드 길과 빈 자리 지도](journal/2026-10-25-131-build.md)

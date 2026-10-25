@@ -20,6 +20,8 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5talk.py rom 대화번호` | 대화 번호의 갈래·스크립트·메시지(조건 코드 뜻, 특수 기능 처리기, 묻기 갈래 포함). `BC BD` 를 주면 그 맵 인물 전부, `--check` 로 스크립트 574개 경계 검사, `--calls` 로 네이티브 호출 대상·갈래·하는 일, `--field` 로 `BRK 80`~`93` 필드 설명자 |
 | `dq5hangul.py rom expand\|retree -o 롬` | DQ5 한글 넣기 실현성 실험용 롬: `expand --size 2\|3\|4` 롬 확장(표지·체크섬), `retree` 메시지를 새 허프만 트리로 다시 부호화해 뱅크 30 으로 옮기고 글자 3DB·3DC(「한」「글」)를 더함. `proto` 한글 시제품(메시지 129·이름·명령 창), `proto --long` 긴 항목 명령 창(레코드를 뱅크 36 → 낮은 WRAM 으로 복사하는 훅), `proto --twobyte` 이름 문자열 2바이트 접두 85(`24:A7B6`). 결과 롬은 `work/` 에만 |
 | `dq5hangulfont.py` | 한글 시제품 글꼴: 자모를 좌표로 정의해 조합한 점 그림(`render(글자, 폭, 높이)`). 남의 글꼴을 쓰지 않음 |
+| `dq5build.py rom build 목록… -o 롬 [--ips IPS]` | 패치 빌더: 쓰기 도구들의 `dq5patch/1` 목록을 받아 겹침·`orig`·범위를 검사하고 롬을 늘려(`--size 2\|3\|4`) 써 넣은 뒤 체크섬을 고치고 IPS 를 냄(다시 붙여 확인). `check` 검사만, `free` 빈 자리 지도, `fromrom 롬` 롬 전체를 목록으로, `--fill-free XX` 빈 자리 채우기. 형식은 [dq5-build-format.md](../docs/dq5-build-format.md). 결과는 `work/` 에만 |
+| `dq5boottest.py 원래롬 만든롬` | 부팅 시험: 두 롬을 전원부터 켜(RAM 0, 새 SRAM) 6,500프레임에 배 선실(17/00)에 닿는지와 11개 프레임의 VRAM·CGRAM·OAM·WRAM 해시가 같은지. `--allow-diff` 는 첫 장면만. `MESENCE` 필요 |
 | `dq5chest.py rom [BC BD]` | DQ5 보물상자(번호·칸·열림 플래그·내용물), タンス·ツボ·タル 항목, 발밑 표(`1E:F08B`), 두 칸 앞 표(`1E:F435`). 물건 이름과 `D000`~`D009` 의 뜻까지 |
 | `dq5shop.py rom` | DQ5 상점 품목 목록(종류·마을 그룹 키)과 물건 가격, 작은 메달·코인 교환 값, 격투장 시합 50개(문턱 레벨·倍率), 슬라임 레이스 바탕 줄과 倍率 식(`slime_odds`), 여관 1인 값 |
 | `dq5growth.py rom` | DQ5 레벨업 성장 표: 사람(`23:9E41`, `--person`)·동료 몬스터(`23:A1B1`, `--monster`) 레코드의 레벨 1~99 능력치 일곱과 누적 경험치(`stat_at`·`exp_at`·`gains`) |
@@ -55,6 +57,7 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | 스크립트 | 하는 일 | 추가 환경 변수 | 결과 |
 | --- | --- | --- | --- |
 | `lua/dq5savestate.lua` | 드라이버(`boot.lua`) 입력을 재생하다가 `SAVEAT` 프레임에 세이브스테이트와 화면 저장. `seqlib.sh` 로 `dq5warp.lua` 를 드라이버로 두면 장면 이동 뒤 걸어 들어간 곳을 남길 수 있음 | `SAVEAT`, `SAVENAME` | `<SAVENAME>`, `.png` |
+| `lua/dq5boot.lua` | DQ5 부팅 시험(`dq5boottest.py` 가 부름): 전원부터 A 를 `PERIOD` 마다 누르며 `SHOTS` 프레임에 메모리 해시·화면, `CHECKAT` 에 맵 번호 | `MAXF`, `PERIOD`, `TAPUNTIL`, `SHOTS`, `CHECKAT` | `boot.txt`, `fNNNNN.png` |
 | `lua/dq5warp.lua` | DQ5: 배 선실 세이브스테이트에서 조작 가능한 필드(`FIELD`), 아무 실내 맵(`TO`, 그룹 `50` 이상 포함), 고른 무리와의 전투(`BATTLE`, `GROUP`)로, 동료 몬스터 일행(`PARTY`)·청년기 플래그(`ADULT`)를 넣고 가서 세이브스테이트 저장. 사용법은 [dq5-handoff.md 「장면 이동 도구」](../handoff.md#장면-이동-도구) | `STATE`, `FIELD`(`X,Y`)·`TO`(`BC/BD,X,Y[,방향]`)·`BATTLE`(`몬스터:마릿수,…`)·`GROUP`(이벤트 무리 번호), `PARTY`(`02,05`), `ADULT`(`1`·`2`), `WAGON`(`1`), `LATESET`(`1954=03`), `SET`(`2194\|80`), `POKE`, `ROMPATCH`, `TEST`, `SETTLE`, `SAVE`, `MAXF` | `warp.txt`, `end.png`, `<SAVE>` |
 | `lua/dq5battle.lua` | DQ5: `walk.lua` 처럼 걸은 뒤 `LOOP` 입력(기본 A 연타)으로 싸우면서 전투 메시지(`24:8C39`) 번호와 `PEEK` 주소 값을 메시지마다 기록. 쓰는 예는 [dq5-data-format.md 「주문과 행동」](../docs/dq5-data-format.md#주문과-행동-268765) | `STATE`, `PRE`, `WAYPOINTS`, `LOOP`, `ROMPATCH`, `POKE`, `PEEK`(`7E07C0:64,…`), `SHOTMSG`, `SHOTDELAY`, `MAXF` | `battle.txt`, `sNNNNN.png`, `end.png` |
 | `lua/dq5sprdump.lua` | DQ5: 세이브스테이트에서 `SEQ` 대로 걸으며 정한 프레임마다 WRAM·VRAM·OAM·CGRAM·화면 덤프(걷는 동안 조우 끔). `dq5sprite.py --compare` 가 읽음 | `STATE`, `OUT`, `SEQ`(`down@20:30,…`), `DUMPF`(`5,60`), `EVERY`·`FROM`, `MAXF`, `ROMPATCH`(런타임 롬), `POKE`(매 프레임 고정, 예 `7E075E=F0` 밤) | `wNNNN.bin`, `vNNNN.vram`, `oNNNN.oam`, `cNNNN.cgram`, `sNNNN.png` |

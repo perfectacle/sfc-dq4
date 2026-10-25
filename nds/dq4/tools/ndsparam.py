@@ -6,7 +6,7 @@ FC 쪽 이름·값은 dq4 트랙의 fc/dq4/tools/dq4data.py·dq4shop.py 를 읽�
 사용:
   python nds/dq4/tools/ndsparam.py monsters JPROOT [FCROM]   몬스터 표(60바이트). FC 를 주면 이름·능력치로 짝을 찾아 가른다
   python nds/dq4/tools/ndsparam.py items JPROOT FCROM        아이템 번호를 FC ID 와 맞대고 「같음·표기만 다름·바뀜·새로 생김」을 가른다
-  python nds/dq4/tools/ndsparam.py shops JPROOT              가게 표(param_map_shop_first/second, 208바이트)
+  python nds/dq4/tools/ndsparam.py shops JPROOT [FCROM]      가게 표(208바이트). FC 를 주면 품목이 가장 많이 겹치는 FC 장소
   python nds/dq4/tools/ndsparam.py casino JPROOT FCROM       카지노·メダル 경품을 FC 와 나란히
   python nds/dq4/tools/ndsparam.py chests JPROOT MAP...      맵의 얻는 물건 표(param_item_<맵>.dat, 24바이트)
   python nds/dq4/tools/ndsparam.py talk JPROOT [장]          동료 대화 표: 맵, 말하는 인물, 메시지 번호+줄 수, 조건, 첫 문장
@@ -16,6 +16,7 @@ JPROOT 는 `krpatch nds unpack` 으로 푼 일본판 롬 폴더, FCROM 은 rom/d
 import collections
 import importlib
 import os
+import re
 import struct
 import sys
 
@@ -24,7 +25,7 @@ sys.path.insert(0, HERE)
 import ndstext
 
 SMALL = str.maketrans('ァィゥェォッャュョヮ', 'アイウエオツヤユヨワ')
-SHOP_SLOTS = (('무기', 0, 6), ('방어구', 6, 12), ('도구', 12, 18), ('카지노', 18, 24), ('?', 24, 26),
+SHOP_SLOTS = (('무기', 0, 6), ('방어구', 6, 12), ('도구', 12, 18), ('카지노', 18, 24), ('다른 여관 값', 24, 26),
               ('밤 무기', 26, 32), ('특별', 32, 50))
 
 
@@ -66,7 +67,9 @@ def monster_table(root):
     for r in records(param(root, 'param_monster_monster'), 60):
         num, lv, exp, mp, hp, atk, df, gold = struct.unpack_from('<8H', r)
         out.append({'num': num, 'name': nm.get(num, ''), 'lv': lv, 'exp': exp, 'mp': mp, 'hp': hp, 'atk': atk,
-                    'df': df, 'gold': gold, 'agi': r[0x1E], 'raw': r})
+                    'df': df, 'gold': gold, 'agi': r[0x1E], 'drop': struct.unpack_from('<H', r, 0x10)[0],
+                    'drop_rate': r[0x1F], 'acts': struct.unpack_from('<6H', r, 0x12), 'ai': r[0x20],
+                    'count': r[0x22], 'crit': r[0x24], 'start': r[0x26], 'select': r[0x27], 'raw': r})
     return out
 
 
@@ -114,12 +117,14 @@ def classify_monsters(ds, fc):
 def cmd_monsters(root, rom=None):
     ds = monster_table(root)
     marks = classify_monsters(ds, fc_monsters(rom)) if rom else [('', None)] * len(ds)
-    print('| 레코드 | 번호 | 이름 | Lv | 경험치 | 골드 | HP | MP | 공격 | 수비 | 민첩 | FC | 판정 |')
-    print('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |')
+    items = ds_items(root)
+    print('| 레코드 | 번호 | 이름 | Lv | 경험치 | 골드 | HP | MP | 공격 | 수비 | 민첩 | 드롭 | 행동 | FC | 판정 |')
+    print('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |')
     for k, (m, (mark, f)) in enumerate(zip(ds, marks)):
         fcs = f"{f['id']:02X} {f['name']}" if f else ''
         print(f"| {k} | {m['num']} | {m['name']} | {m['lv']} | {m['exp']} | {m['gold']} | {m['hp']} | {m['mp']} | "
-              f"{m['atk']} | {m['df']} | {m['agi']} | {fcs} | {mark} |")
+              f"{m['atk']} | {m['df']} | {m['agi']} | {items.get(m['drop'], '')} {m['drop_rate']} | "
+              f"{' '.join(f'{a:X}' for a in m['acts'])} | {fcs} | {mark} |")
     if rom:
         print('\n' + ' '.join(f'{k} {v}' for k, v in collections.Counter(mk.split('(')[0] for mk, _ in marks).most_common()))
 
@@ -200,30 +205,38 @@ def edit1(a, b):
     return len(a) == len(b) and sum(x != y for x, y in zip(a, b)) == 1
 
 
+ITEM_TABLE, ITEM_SIZE, ITEM_COUNT = 0x02095584, 32, 162
+ITEM_KINDS = {0: '도구', 1: '무기', 2: '갑옷·방패·투구', 3: '장신구3', 4: '장신구4', 5: '장신구5', 6: '장신구6'}
+
+
+def item_table(root):
+    """ARM9 0x02095584 부터 32바이트 × 162(아이템 1~162). +0 이름 번호, +2 종류, +10 값, +12 팔 값, +16 강도."""
+    with open(os.path.join(root, 'arm9.bin'), 'rb') as fh:
+        d = fh.read()
+    out = {}
+    for n in range(1, ITEM_COUNT + 1):
+        r = d[ITEM_TABLE - 0x02000000 + (n - 1) * ITEM_SIZE:][:ITEM_SIZE]
+        price, sell = struct.unpack_from('<HH', r, 0x10)
+        out[n] = {'name_no': r[0], 'kind': r[2], 'price': price, 'sell': sell, 'power': r[0x16], 'raw': r}
+    return out
+
+
 def cmd_items(root, rom):
-    rows, dsp = classify_items(root, rom)
-    print('| DS 번호 | DS 이름 | DS 가게 값 | FC ID | FC 이름 | FC 값 | 판정 |')
-    print('| --- | --- | --- | --- | --- | --- | --- |')
+    rows, _dsp = classify_items(root, rom)
+    table = item_table(root)
+    print('| DS 번호 | DS 이름 | 종류 | 강도 | DS 값 | FC ID | FC 이름 | FC 값 | 판정 |')
+    print('| --- | --- | --- | --- | --- | --- | --- | --- | --- |')
     for n, d, i, nm, price, mark in sorted(rows, key=lambda r: (r[0] or 999, r[2] or 0)):
         fid = f'{i:02X}' if i is not None else ''
-        print(f"| {n or ''} | {d} | {dsp.get(n, '') if n else ''} | {fid} | {nm.strip()} | {price if price else ''} | {mark} |")
+        t = table.get(n, {})
+        kind = ITEM_KINDS.get(t.get('kind'), '') if t else ''
+        print(f"| {n or ''} | {d} | {kind} | {t.get('power', '')} | {t.get('price', '')} | {fid} | {nm.strip()} | "
+              f"{price if price else ''} | {mark} |")
     print('\n' + ' '.join(f'{k} {v}' for k, v in collections.Counter(r[5] for r in rows).most_common()))
 
 
-def cmd_shops(root):
-    it = ds_items(root)
-    for s in shop_table(root):
-        h = s['head']
-        parts = []
-        for label, a, b in SHOP_SLOTS:
-            got = [f'{it.get(i, i)} {v}' for i, v in s['slots'][a:b] if i or v]
-            if got:
-                parts.append(f'{label}: ' + ', '.join(got))
-        print(f"{s['file']}[{s['idx']:2d}] 여관 {h[1]}G 교회 {h[3]}  " + ' / '.join(parts))
-
-
-def fc_casino(rom):
-    """FC dq4shop.py 의 카지노(04/01)·メダル 왕(22/00) 줄을 그대로 읽는다."""
+def fc_shop_output(rom):
+    """FC dq4shop.py 의 가게 목록 출력(dq4 트랙 도구, 읽기만)."""
     root = os.path.abspath(os.path.join(HERE, '..', '..', '..'))
     sys.path.insert(0, os.path.join(root, 'fc', 'dq4', 'tools'))
     import contextlib
@@ -237,7 +250,59 @@ def fc_casino(rom):
             dq4shop.main()
     finally:
         sys.argv = argv
-    return [l for l in buf.getvalue().splitlines() if l.startswith(('04/01', '22/00'))]
+    return buf.getvalue().splitlines()
+
+
+def fc_shops(root, rom):
+    """FC 장소(그룹/순번)마다 무기·방어구·도구 품목(DS 번호로 바꿈)과 여관 1인 값."""
+    rows, _dsp = classify_items(root, rom)
+    to_ds = {r[2]: r[0] for r in rows if r[0] and r[2] is not None}
+    shops = collections.defaultdict(lambda: {'무기': set(), '방어구': set(), '도구': set()})
+    inn, kind = {}, None
+    for line in fc_shop_output(rom):
+        if line.startswith('# '):
+            kind = line.split()[1]
+            continue
+        m = re.match(r'([0-9A-F]{2}/[0-9A-F]{2})\s+(.*)', line)
+        if m and kind in shops.default_factory():
+            for it in re.findall(r'\b([0-9A-F]{2}) \S+ \d+G', m.group(2)):
+                shops[m.group(1)][kind].add(to_ds.get(int(it, 16)))
+        if kind == '여관':
+            inn.update((g, int(v)) for g, v in re.findall(r'([0-9A-F]{2}/[0-9A-F]{2})=(\d+)', line))
+    return shops, inn
+
+
+def match_shop(s, shops):
+    """DS 가게 레코드와 품목이 가장 많이 겹치는 FC 장소와 겹침 비율."""
+    mine = {'무기': {i for i, _v in s['slots'][0:6] if i}, '방어구': {i for i, _v in s['slots'][6:12] if i},
+            '도구': {i for i, _v in s['slots'][12:18] if i}}
+    if not any(mine.values()):
+        return None, 0
+    best = max(((sum(len(mine[k] & f[k]) for k in mine) / sum(len(mine[k] | f[k]) for k in mine), g)
+                for g, f in shops.items()))
+    return best[1], best[0]
+
+
+def cmd_shops(root, rom=None):
+    it = ds_items(root)
+    shops, inn = fc_shops(root, rom) if rom else ({}, {})
+    for s in shop_table(root):
+        h = s['head']
+        parts = []
+        for label, a, b in SHOP_SLOTS:
+            got = [f'{it.get(i, i)} {v}' for i, v in s['slots'][a:b] if i or v]
+            if got:
+                parts.append(f'{label}: ' + ', '.join(got))
+        fc = ''
+        if shops:
+            g, score = match_shop(s, shops)
+            fc = f'FC {g} 겹침 {score:.2f} 여관 {inn.get(g, "-")}  ' if g else 'FC -  '
+        print(f"{s['file']}[{s['idx']:2d}] 여관 {h[1]}G 교회 {h[3]}  {fc}" + ' / '.join(parts))
+
+
+def fc_casino(rom):
+    """FC dq4shop.py 의 카지노(04/01)·メダル 왕(22/00) 줄."""
+    return [l for l in fc_shop_output(rom) if l.startswith(('04/01', '22/00'))]
 
 
 def cmd_casino(root, rom):
@@ -266,36 +331,45 @@ def cmd_chests(root, maps):
 
 # 동료 대화
 
-TALK_FIELDS = (('ops', '<8H', 0x00), ('msg', '<I', 0x10), ('story', '<2H', 0x14), ('map', '<H', 0x18),
-               ('count', '<H', 0x1A), ('x1c', '<2B', 0x1C), ('sense', '<2B', 0x1E), ('who', '<B', 0x21),
-               ('time', '<B', 0x22), ('bits', '<H', 0x28))
-SENSE = {1: '켜짐', 2: '꺼짐'}
+# 조건 종류(+1E·+1F·+20)와 값(+04·+08·+0C). ARM9 0x0203694C 의 갈래 표
+TALK_CODES = {1: '이야기 플래그 #{} 켜짐', 2: '이야기 플래그 #{} 꺼짐', 3: '플래그B #{} 켜짐', 4: '플래그B #{} 꺼짐',
+              5: '플래그C #{} 켜짐', 6: '플래그C #{} 꺼짐', 7: '아이템 {} 가짐', 8: '아이템 {} 없음',
+              9: '선두 인물 {}', 10: '선두 +50 = 0', 11: '선두 +50 = 1', 12: '관리자 +1B4 = {}',
+              13: '5 − 0x020ED16E = {}', 14: '5 − 0x020ED16F = {}', 15: '0x020ED4B4 검사 = 1',
+              16: '0x020ED4B4 검사 = 0', 17: '0x020ED4B4 검사 = 0', 18: '관리자 +1B8 = {}'}
+# 일행 칸 조건: (바이트, 비트 자리, 인물 번호들). 값 1~5 는 TALK_SLOT_MODES
+TALK_SLOTS = ((0x22, 3, '주인공'), (0x23, 0, 'ソロ'), (0x23, 3, 'ソフィア'), (0x24, 0, 'ライアン'),
+              (0x24, 3, 'アリーナ'), (0x25, 0, 'クリフト'), (0x25, 3, 'ブライ'), (0x26, 0, 'トルネコ'),
+              (0x26, 3, 'ミネア'), (0x27, 0, 'マーニャ'), (0x27, 3, 'ピサロ'), (0x28, 0, 'パノン'))
+TALK_SLOT_MODES = {1: '걷는 줄·살아 있음', 2: '걷는 줄 밖이거나 쓰러짐', 3: '일행에 없거나 걷는 줄 밖·쓰러짐',
+                   4: '살아 있음', 5: '걷는 줄·쓰러짐'}
+TIMES = {2: '낮', 4: '밤'}
 
 
 def talk_fields(r):
-    out = {}
-    for name, fmt, off in TALK_FIELDS:
-        v = struct.unpack_from(fmt, r, off)
-        out[name] = v if len(v) > 1 else v[0]
-    return out
+    return {'v0': struct.unpack_from('<I', r, 0)[0], 'vals': struct.unpack_from('<3I', r, 4),
+            'msg': struct.unpack_from('<I', r, 0x10)[0], 'story': struct.unpack_from('<2H', r, 0x14),
+            'map': struct.unpack_from('<H', r, 0x18)[0], 'count': struct.unpack_from('<H', r, 0x1A)[0],
+            'place': (r[0x1C], r[0x1D]), 'codes': (r[0x1E], r[0x1F], r[0x20]), 'who': r[0x21],
+            'time': r[0x22] & 7, 'prio': (r[0x28] & 0x78) >> 3,
+            'slots': [(name, (r[off] >> sh) & 7) for off, sh, name in TALK_SLOTS if (r[off] >> sh) & 7]}
 
 
 def talk_conditions(f):
-    """레코드의 조건을 사람이 읽는 말로. 이야기 플래그 번호는 RAM 0x020CE7DC 의 비트(낮은 비트부터)."""
-    out = []
+    """ARM9 0x02036530 이 보는 차례대로 조건을 말로. 이야기 플래그는 RAM 0x020CE7DC 의 비트(낮은 비트부터)."""
     on, off = f['story']
-    out.append(f'#{on} 켜짐' + ('' if off == 0xFFFF else f' & #{off} 꺼짐'))
-    for slot, sense in ((2, f['sense'][0]), (4, f['sense'][1])):
-        if f['ops'][slot]:
-            out.append(f"#{f['ops'][slot]} {SENSE.get(sense, f'?{sense}')}")
-    if f['ops'][0]:
-        out.append(f"+00=#{f['ops'][0]}")
-    if f['x1c'][0] != 0xFF:
-        out.append(f"+1C={f['x1c'][0]}")
+    out = [f'#{on} 켜짐' + ('' if off == 0xFFFF else f' & #{off} 꺼짐')]
     if f['time']:
-        out.append({2: '낮', 4: '밤'}.get(f['time'], f"시간 {f['time']}"))
-    if not f['bits'] & 0x40:
-        out.append('비트 40 없음')
+        out.append(TIMES.get(f['time'], f"시간 {f['time']}"))
+    if f['place'][0] != 0xFF:
+        out.append('직전 대화 값 ' + '/'.join(str(x) for x in f['place'] if x != 0xFF))
+    if f['v0']:
+        out.append(f"최근 이벤트 값 {f['v0']}")
+    for code, v in zip(f['codes'], f['vals']):
+        if not code:
+            break
+        out.append(TALK_CODES.get(code, f'종류 {code} 값 {{}}').format(v))
+    out += [f'{name} {TALK_SLOT_MODES.get(m, m)}' for name, m in f['slots']]
     return ' & '.join(out)
 
 
@@ -309,7 +383,7 @@ def cmd_talk(root, chapters):
             mp = maps[f['map']] if f['map'] < len(maps) else f"#{f['map']}"
             who = people.get(f['who'] - 1, f['who'])
             text = msgs.get(f['msg'], '-').replace('\n', '/')
-            print(f"{ch}\t{k}\t{mp}\t{who}\t{f['msg']}+{f['count']}\t{talk_conditions(f)}\t{text}")
+            print(f"{ch}\t{k}\t{mp}\t우선 {f['prio']}\t{who}\t{f['msg']}+{f['count']}\t{talk_conditions(f)}\t{text}")
 
 
 def map_list(root):
@@ -360,7 +434,7 @@ def main(argv):
     elif cmd == 'items':
         cmd_items(root, rest[0])
     elif cmd == 'shops':
-        cmd_shops(root)
+        cmd_shops(root, rest[0] if rest else None)
     elif cmd == 'casino':
         cmd_casino(root, rest[0])
     elif cmd == 'chests':
