@@ -164,6 +164,10 @@ def place_table(prg, data):
     5. 'link': 남은 그룹이 필드를 거치지 않는 출구(place_links)로 1~3 의 이름이 붙은 그룹과 이어져 있으면 가장 가까운
        그룹의 이름. 거리가 같은데 이름이 다른 그룹이 있으면 붙이지 않는다. 'via' 에 거쳐 간 출구를 적는다
        (예: 2C 「てんくうじょう」 ← 2C/10 (03,05) → 2D/00). 4 는 갈래라 퍼뜨리지 않는다.
+    6. 'near': 그래도 남은 그룹은 이름이 아니라 자리 표시다. 필드 입구(dq4field.entrances)가 있으면 같은 필드에서
+       1~3 의 이름이 붙은 그룹 입구 중 가장 가까운(맨해튼 거리) 것의 이름에 「ちかく」를 붙이고 'near' 에
+       (필드, X, Y, 거리, 그 그룹)을 적는다. 가장 가까운 것이 둘 이상이고 이름이 다르면 붙이지 않는다.
+    7. 'link': 필드 입구가 없는 그룹은 5 와 같이 출구로 이어진 가장 가까운 6 의 그룹 이름을 받는다.
     못 찾은 그룹은 넣지 않는다."""
     rom = dq4text.Rom(data)
     names = place_list(prg)
@@ -206,6 +210,31 @@ def place_table(prg, data):
         if kinds:
             out[g] = {'name': min(kinds, key=lambda x: (len(x), x)), 'src': 'talk-kind'}
     out.update(link_names(prg, out))
+    out.update(near_names(prg, out))
+    out.update(link_names(prg, out, ('near',)))
+    return out
+
+
+def near_names(prg, names):
+    """place_table 6 단계: 이름 없는 그룹의 필드 입구마다 가장 가까운 1~3 단계 그룹 입구."""
+    ents = dq4field.entrances(prg)
+    out = {}
+    for g in sorted({e[0] for e in ents}):
+        if g in names:
+            continue
+        best = []
+        for e in (e for e in ents if e[0] == g):
+            f = e[7] or 0
+            for h in dq4field.entrances_on(ents, f):
+                if names.get(h[0], {}).get('src') in NAMED:
+                    best.append((abs(h[1] - e[1]) + abs(h[2] - e[2]), names[h[0]]['name'], f, h[1], h[2], h[0]))
+        if not best:
+            continue
+        best.sort()
+        if len({b[1] for b in best if b[0] == best[0][0]}) != 1:
+            continue
+        d, n, f, x, y, h = best[0]
+        out[g] = {'name': n + 'ちかく', 'src': 'near', 'near': (f, x, y, d, h)}
     return out
 
 
@@ -231,8 +260,11 @@ def place_links(prg):
     return adj
 
 
-def link_names(prg, names):
-    """place_table 5 단계: names 에 없는 그룹마다 너비 우선으로 가장 가까운 1~3 단계 그룹을 찾는다."""
+NAMED = ('rula', 'talk', 'talk-phrase')
+
+
+def link_names(prg, names, srcs=NAMED):
+    """place_table 5·7 단계: names 에 없는 그룹마다 너비 우선으로 src 가 srcs 인 가장 가까운 그룹을 찾는다."""
     adj = place_links(prg)
     out = {}
     for g in sorted(adj):
@@ -243,7 +275,7 @@ def link_names(prg, names):
             h, d = q.popleft()
             if best is not None and d > best:
                 break
-            if h != g and names.get(h, {}).get('src') in ('rula', 'talk', 'talk-phrase'):
+            if h != g and names.get(h, {}).get('src') in srcs:
                 best = d
                 found.append(h)
                 continue
@@ -296,6 +328,9 @@ def map_records(prg, names):
         rec = {'g': g, 'k': k, 'type': mid & 0x3F, 'code': mid, 'name': name, 'name_src': src, 'stem': stem}
         if 'via' in names.get(g, {}):
             rec['name_via'] = names[g]['via']
+        if 'near' in names.get(g, {}):
+            f, x, y, d, h = names[g]['near']
+            rec['name_near'] = {'field': f, 'x': x, 'y': y, 'distance': d, 'group': h}
         out.append(rec)
     return out
 
@@ -612,39 +647,55 @@ def falls_cycle(pal12, n):
 
 FIELD_PHASES = 6   # 필드: 물결 2단계 × 용암 3단계, 폭포: 흐름 3단계 × 물결 2단계
 CYCLED = (0x00, 0x18)
-GATE_SRC = (0x8929, 0x8D29)  # 1B:$889C: 성문 연출(1B:$870D) 그림의 시작, 연출 갈래마다 $400 바이트
+GATE_SRC = (0x8929, 0x8D29)  # 1B:$889C: 성문 연출(1B:$870D) 그림의 시작. 1E:$8F42 가 맵 종류 32 면 뒤의 것을 고른다
 
 
-def gate_chunks(ram, wram):
-    """성문 연출(1B:$870D)이 지금까지 BG CHR-RAM 에 쓴 $40 바이트 조각 [(PPU 주소, PRG 오프셋)], 오래된 것부터.
-    연출은 단계 $57(0~3, $56 = 8×단계)마다 조각 4개($55 = 1~4)를 $53/$54 에서 $0300 큐로 보낸다(1B:$8871). PPU 주소는
+def gate_chunks(prg, ram, wram):
+    """성문 연출(1B:$870D)이 지금까지 BG CHR-RAM 에 쓴 $40 바이트 조각 [(PPU 주소, PRG 오프셋)](오래된 것부터),
+    연출이 아직 도는지, 성문 블록 넷. 연출은 단계 $57(0~3, $56 = 8×단계)마다 조각 4개($55 = 1~4, 다음 단계 첫 조각
+    전에는 0)를 $53/$54 에서 $0300 큐로 보내고(1B:$8871), 마지막 단계 뒤에는 $57 = 4, $55 = 4 로 멈춘다. PPU 주소는
     1B:$881D 가 성문 블록 $0540·$0541 로 만든 WRAM 표 $7700 의 (($55×2 + $56) & $0E) 번째다. 연출 밖에서도 $53~$57 은
-    다른 데 쓰이므로, 그 넷이 이 단계표와 맞고 $53/$54 를 되짚은 시작이 1B:$889C 의 값일 때만 연출 중으로 본다."""
+    다른 데 쓰이므로, 그 넷이 이 단계표와 맞고 $53/$54 를 되짚은 시작이 1B:$889C 의 값일 때만 연출 중으로 본다.
+    마지막 단계는 조각을 성문 블록의 원래 타일 자리에 쓰고 $7600 을 롬 정의로 되돌리므로, 연출이 끝나 $53~$57 이
+    덮이고 $0540 이 FF 로 지워진 뒤에도(02/00) 그 맵을 나갈 때까지 CHR 에 열린 그림이 남는다. 그때는 롬 속성이
+    A0·A2(성문)인 블록 넷의 속성($6F40 + 블록)이 1B:$885F 가 바꾼 80·80·24·24 이면 조각 16개를 모두 쓴 것으로 본다."""
+    if not ram[0x28]:
+        return [], False, ()
     step, n = ram[0x57], ram[0x55]
-    if step > 3 or not 0 < n <= 4 or ram[0x56] != 8 * step or ram[0x540] == 0xFF:
-        return []
-    done = 4 * step + n
+    done = min(4 * step + n, 16)
     base = (ram[0x53] | ram[0x54] << 8) - 0x40 * done
-    if base not in GATE_SRC:
-        return []
+    running = (ram[0x540] != 0xFF and step <= 4 and n <= 4 and ram[0x56] == 8 * step and 0 < done
+               and base in GATE_SRC)
+    if running:
+        gate = (ram[0x540], ram[0x540] + 1, ram[0x541], ram[0x541] + 1)
+    else:
+        prop = dq4block.Map(prg, ram[0x63], ram[0x64]).blocks['prop']
+        gate = tuple(sorted(b for b, v in prop.items() if v in (0xA0, 0xA2)))
+        if len(gate) != 4 or [wram[0xF40 + b] for b in gate] != [0x80, 0x80, 0x24, 0x24]:
+            return [], False, ()
+        done, base = 16, GATE_SRC[ram[0x28] == 0x32]
     out = []
     for i in range(done):
         x = (i // 4 * 8 + i % 4 * 2) & 0x0E
         ppu = wram[0x1700 + x] | wram[0x1701 + x] << 8
         out.append((ppu, 0x1B * 0x4000 + base + 0x40 * i - 0x8000))
-    return out
+    return out, running, gate
 
 
-def gate_map(m, ram, wram, chunks):
-    """성문 연출 중인 맵: 조각이 덮어쓴 타일을 그 조각 그림으로, 1B:$8772 가 WRAM 블록 → 타일 표 $7600 에서 바꿔 놓은
-    성문 블록($0540·$0541 과 각각 그다음 블록)의 타일을 그 표 값으로."""
+def gate_map(m, wram, chunks, gate, shown=None):
+    """성문 연출 중이거나 연 뒤의 맵: 조각이 덮어쓴 타일을 그 조각 그림으로, 성문 블록 넷의 타일을 1B:$8772 가 바꿔
+    놓은 WRAM 블록 → 타일 표 $7600 의 값으로. 1B:$8772 는 단계 $57 의 bit0 으로 $7710 의 두 벌(16바이트씩) 중
+    하나를 $7600 에 옮긴다. shown 이 있으면 $7600 대신 그 벌을 쓴다."""
     chr_, tiles = dict(m.blocks['chr']), dict(m.blocks['tiles'])
     for ppu, off in chunks:
         for t in range(4):
             o = off + 16 * t
             chr_[(ppu - 0x1000) // 16 + t] = (o // 0x4000, 0x8000 | o & 0x3FFF)
-    for b in (ram[0x540], ram[0x540] + 1, ram[0x541], ram[0x541] + 1):
+    for b in gate:
         tiles[b] = list(wram[0x1600 + 4 * b:0x1604 + 4 * b])
+    if shown is not None:
+        for i, b in enumerate(gate):
+            tiles[b] = list(wram[0x1710 + 16 * shown + 4 * i:0x1714 + 16 * shown + 4 * i])
     m.blocks = dict(m.blocks, chr=chr_, tiles=tiles)
 
 
@@ -654,9 +705,12 @@ def rom_screen(prg, ram, wram, ppal=None, cycle=0, sparkle=False):
     t = ram[0x28]
     m = dq4block.Map(prg, field=ram[0x65]) if t == 0 else dq4block.Map(prg, ram[0x63], ram[0x64])
     left, top = ram[0x7C], ram[0x7B]
-    chunks = gate_chunks(ram, wram) if t else []
+    chunks, running, gate = gate_chunks(prg, ram, wram)
     if chunks:
-        gate_map(m, ram, wram, chunks)
+        # 단계의 넷째 조각을 보낸 프레임에 $0300 큐가 아직 안 비었으면($1F bit5) 화면은 앞 단계의 블록 → 타일 표다.
+        stale = running and ram[0x57] < 4 and ram[0x55] == 4 and ram[0x1F] & 0x20
+        gate_map(m, wram, chunks, gate, (ram[0x57] + 1) & 1 if stale else None)
+    if running:
         # 연출 중에는 $7C/$7B 를 매 프레임 고치는 0F:$D542 가 돌지 않아 앞 맵의 값이 남는다.
         left, top = (wram[0xF60] - 8) & 0xFF, (wram[0xF80] - 7) & 0xFF
     area = wram[0x1140] & 0xE0 if t else 0
@@ -743,8 +797,9 @@ def verify(prg, d, mask_sprites=False):
     where = f'{ram[0x63]:02X}/{ram[0x64]:02X}' if ram[0x28] else f'필드 {ram[0x65]}'
     if ram[0x28] in CYCLED:
         where += f'(팔레트 {phase}단계)'
-    if ram[0x28] and gate_chunks(ram, wram):
-        where += f'(성문 연출 조각 {len(gate_chunks(ram, wram))}개)'
+    chunks, running, _ = gate_chunks(prg, ram, wram)
+    if chunks:
+        where += f'(성문 {"연출" if running else "연출 뒤"} 조각 {len(chunks)}개)'
     msg = f'{d}: {where} 맵 종류 {ram[0x28]:02X}  비교 {total} 픽셀 중 {diff} 다름(뺀 것 {skipped})'
     if diff:
         mine.save(os.path.join(d, 'fcgfx-rom.png'))
