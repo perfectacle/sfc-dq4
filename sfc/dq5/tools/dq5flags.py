@@ -236,7 +236,7 @@ def refs_long(rom):
 
 
 def refs_short(rom):
-    """LDA #m 뒤 TSB·TRB $21xx(데이터 뱅크 7E). 02:8B22 의 LDA #$80 / TSB $21A2 / TSB $21D7 처럼 TSB·TRB 가 이어지면
+    """LDA #m 뒤 TSB·TRB $21xx(데이터 뱅크 7E)와 짧은·롱 주소로 읽어 비트를 가르는 곳. 02:8B22 의 LDA #$80 / TSB $21A2 / TSB $21D7 처럼 TSB·TRB 가 이어지면
     앞의 LDA # 를 같이 쓴다."""
     out = []
     data = rom.d
@@ -252,6 +252,25 @@ def refs_short(rom):
         addr = data[i + 1] | data[i + 2] << 8
         kind, name = ('set', 'TSB') if data[i] == 0x0C else ('clear', 'TRB')
         out.append(('short', addr - FLAG_BASE, data[k - 1], kind,
+                    f'코드 {i // 0x8000:02X}:{0x8000 + i % 0x8000:04X} {name} ${addr:04X}', None))
+    # 비트 시험: LDA $21xx(또는 롱 7E:21xx) 뒤 AND #m·BIT #m 은 m, BPL·BMI 는 bit7. BIT $21xx 뒤 BPL·BMI 는 bit7, BVC·BVS 는 bit6
+    for m in re.finditer(rb'(?:\xad|\x2c)(?:[\x90-\xff]\x21|[\x00-\x0f]\x22)|\xaf(?:[\x90-\xff]\x21|[\x00-\x0f]\x22)\x7e', data):
+        i = m.start()
+        if i // 0x8000 not in CODE_BANKS | {0x2B}:
+            continue
+        op, j = data[i], m.end()
+        nxt = data[j]
+        if op == 0x2C:
+            mask = {0x10: 0x80, 0x30: 0x80, 0x50: 0x40, 0x70: 0x40}.get(nxt)
+        elif nxt in (0x29, 0x89):
+            mask = data[j + 1]
+        else:
+            mask = 0x80 if nxt in (0x10, 0x30) else None
+        if not mask:
+            continue
+        addr = data[i + 1] | data[i + 2] << 8
+        name = {0xAD: 'LDA', 0xAF: 'LDA', 0x2C: 'BIT'}[op]
+        out.append(('short', addr - FLAG_BASE, mask, 'test',
                     f'코드 {i // 0x8000:02X}:{0x8000 + i % 0x8000:04X} {name} ${addr:04X}', None))
     return out
 
