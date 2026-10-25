@@ -25,19 +25,19 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 from dq5map import Rom, lorom  # noqa: E402
-from dq5spc import body, sequences  # noqa: E402
+from dq5spc import SONG_SETS, body, sequences  # noqa: E402
 
 # 명령 바이트: (이름, 인자 수). 처리기 주소는 SPC RAM 0795 표.
 ARGS = {
     0xDB: ("if_loop2", 2), 0xDC: ("loop2", 2), 0xDD: ("release", 1), 0xDE: ("adsr_release", 3),
-    0xDF: ("phase", 1), 0xE0: ("if_flag", 3), 0xE1: ("marker", 0), 0xE2: ("e2", 1),
-    0xE3: ("noise_on", 0), 0xE4: ("noise_off", 0), 0xE5: ("song_volume", 1), 0xE6: ("e6", 2),
-    0xE7: ("e7", 1), 0xE8: ("pan_slide", 2), 0xE9: ("e9", 1), 0xEA: ("jump", 2),
+    0xDF: ("phase", 1), 0xE0: ("if_flag", 3), 0xE1: ("marker", 0), 0xE2: ("pitch_env", 1),
+    0xE3: ("noise_on", 0), 0xE4: ("noise_off", 0), 0xE5: ("song_volume", 1), 0xE6: ("volume2_slide", 2),
+    0xE7: ("fade", 1), 0xE8: ("pan_slide", 2), 0xE9: ("fine_tune", 1), 0xEA: ("jump", 2),
     0xEB: ("tempo", 1), 0xEC: ("gate", 1), 0xED: ("volume", 1), 0xEE: ("pan", 1),
     0xEF: ("adsr", 2), 0xF0: ("instrument", 1), 0xF1: ("follow1", 0), 0xF2: ("follow", 0),
     0xF3: ("follow_off", 0), 0xF4: ("loop2b", 2), 0xF5: ("loop", 3), 0xF6: ("volume2", 1),
     0xF7: ("nop", 0), 0xF8: ("call", 2), 0xF9: ("ret", 0), 0xFA: ("transpose", 1),
-    0xFB: ("vibrato", 2), 0xFC: ("echo_on", 0), 0xFD: ("echo_off", 0), 0xFE: ("fe", 1),
+    0xFB: ("pitch_slide", 2), 0xFC: ("echo_on", 0), 0xFD: ("echo_off", 0), 0xFE: ("fe", 1),
 }
 GATES = bytes.fromhex("0d1a2633404d5a6673808c99a6b3bfccd9e6f2feff00")  # 17CD, A0~B5
 JUMPS = {0xDB, 0xDC, 0xE0, 0xEA, 0xF4, 0xF5, 0xF8}
@@ -346,6 +346,94 @@ def patch(rom, n, new):
          "note": f"시퀀스 {n:02X} 바꿔 넣기({len(new)} 바이트)"}]}
 
 
+# 긴 시퀀스·새 샘플: 2B:C3AB(샘플·시퀀스 묶음을 길이로 걷기)를 늘린 뱅크의 고리로 돌린다. 시퀀스 묶음(2E:E2E4)이나
+# 샘플 묶음(2B:EB00)을 걸을 때는 표의 3바이트 포인터([길이 2][자료] 의 자리)를 먼저 보고, 0 이면 원래대로 걷는다.
+RELOC_BANK = 0x70
+RELOC_CODE = 0x708010
+RELOC_SEQ_TABLE = 0x708100  # 시퀀스 번호 x 3 (0x64 칸, SPC 04C7 표 크기)
+RELOC_SMP_TABLE = 0x708300  # 샘플 번호 x 3 (0xC8 칸, SPC 03FF 표 크기)
+RELOC_DATA = 0x708600
+
+
+def _asm(items):
+    """(바이트열 | ('label', 이름) | ('b', 명령 바이트, 이름)) 목록을 2번 훑어 짧은 분기를 채운다."""
+    for final in (False, True):
+        out, labels_now = bytearray(), {}
+        for it in items:
+            if isinstance(it, bytes):
+                out += it
+            elif it[0] == "label":
+                labels_now[it[1]] = len(out)
+            else:
+                rel = (labels[it[2]] - (len(out) + 2)) if final else 0
+                out += bytes([it[1], rel & 0xFF])
+        labels = labels_now
+    return bytes(out)
+
+
+def reloc_code():
+    def tbl(a, k=0):
+        return bytes([(a + k) & 0xFF, (a + k) >> 8 & 0xFF, RELOC_BANK])
+    h = bytes.fromhex
+    return _asm([
+        h("48 DA 5A"),                          # PHA / PHX / PHY (16비트, 2B:C21E·C22C 문맥)
+        h("A5 FD 29 FF 00 C9 2E 00"), ("b", 0xD0, "smp"),  # 뱅크 2E?
+        h("A5 FB C9 E4 E2"), ("b", 0xD0, "walk"),         # 시퀀스 묶음 시작?
+        h("A0 00 00"), ("b", 0x80, "look"),
+        ("label", "smp"), h("C9 2B 00"), ("b", 0xD0, "walk"),
+        h("A5 FB C9 00 EB"), ("b", 0xD0, "walk"),
+        h("A0") + bytes([(RELOC_SMP_TABLE - RELOC_SEQ_TABLE) & 0xFF, (RELOC_SMP_TABLE - RELOC_SEQ_TABLE) >> 8]),
+        ("label", "look"),
+        h("A3 05 29 FF 00 48 0A 18 63 01 83 01 98 18 63 01 AA 68"),  # X = 표 위치 + 번호 x 3
+        h("BF") + tbl(RELOC_SEQ_TABLE), ("b", 0xF0, "walk"),
+        h("85 FB E2 20 BF") + tbl(RELOC_SEQ_TABLE, 2) + h("85 FD C2 20"),
+        ("label", "done"), h("7A FA 68 6B"),       # PLY / PLX / PLA / RTL
+        ("label", "walk"), h("A3 05 29 FF 00 AA"), ("b", 0xF0, "done"),
+        ("label", "loop"), h("A7 FB 1A 1A 18 65 FB 85 FB"), ("b", 0x90, "same"),
+        h("A9 00 80 04 FB E6 FD"),                 # LoROM 뱅크 넘김(원래 루틴과 같음)
+        ("label", "same"), h("CA"), ("b", 0xD0, "loop"), ("b", 0x80, "done"),
+    ])
+
+
+def patch_reloc(rom, seqs=None, smps=None, sets=None):
+    """시퀀스 {번호: 바이트}·샘플 {번호: [길이 2][자료] 바이트}를 뱅크 70 에 두고 포인터 표로 가리키는 dq5patch/1(롬 4MB).
+    sets 는 {곡 번호: 곡 묶음 레코드 바이트} 로, 같은 길이로 제자리를 덮는다(2B:E67F, 드라이버 이미지 안이라 SPC 28EC 에도 감)."""
+    seqs, smps, sets = seqs or {}, smps or {}, sets or {}
+    seq_table = bytearray(0x64 * 3)
+    smp_table = bytearray(0xC8 * 3)
+    data, addr = bytearray(), RELOC_DATA
+    for table, items, wrap in ((seq_table, seqs, True), (smp_table, smps, False)):
+        for n, b in sorted(items.items()):
+            rec = bytes([len(b) & 0xFF, len(b) >> 8]) + b if wrap else b
+            table[n * 3:n * 3 + 3] = bytes([addr & 0xFF, addr >> 8 & 0xFF, RELOC_BANK])
+            data += rec
+            addr += len(rec)
+    if (RELOC_DATA & 0xFFFF) + len(data) > 0x10000:
+        raise SystemExit("relocated data does not fit in bank 70")
+
+    def at(a):
+        return f"{a >> 16:02X}:{a & 0xFFFF:04X}"
+    hook = bytes([0x22, RELOC_CODE & 0xFF, RELOC_CODE >> 8 & 0xFF, RELOC_BANK, 0x60])  # JSL 고리 / RTS
+    writes = [
+        {"at": "2B:C3AB", "hex": hook.hex(" "), "orig": rom.d[lorom(0x2BC3AB):lorom(0x2BC3AB) + 5].hex(" "),
+         "note": "샘플·시퀀스 묶음 걷기를 포인터 표 고리로"},
+        {"at": at(RELOC_CODE), "hex": reloc_code().hex(" "), "note": "포인터 표 고리"},
+        {"at": at(RELOC_SEQ_TABLE), "hex": seq_table.hex(" "), "note": "시퀀스 포인터 표(0 이면 원래 자리)"},
+        {"at": at(RELOC_SMP_TABLE), "hex": smp_table.hex(" "), "note": "샘플 포인터 표(0 이면 원래 자리)"},
+        {"at": at(RELOC_DATA), "hex": data.hex(" "),
+         "note": f"시퀀스 {sorted(seqs)} 샘플 {sorted(smps)}"},
+    ]
+    for song, rec in sorted(sets.items()):
+        a = SONG_SETS
+        for _ in range(song):
+            a += rom.u8(a) + 2
+        if len(rec) != rom.u8(a) + 2:
+            raise SystemExit(f"song set {song:02X}: length must stay {rom.u8(a) + 2}")
+        writes.append({"at": at(a), "hex": rec.hex(" "), "orig": rom.d[lorom(a):lorom(a) + len(rec)].hex(" "),
+                       "note": f"곡 묶음 {song:02X}"})
+    return {"format": "dq5patch/1", "name": "dq5song-reloc", "rom_size": 4, "writes": writes}
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("rom")
@@ -358,6 +446,11 @@ def main():
     ap.add_argument("--flag", type=lambda v: int(v, 16), default=0, help="곡 변수(명령 0C 의 X 스크립트가 넣는 값)")
     ap.add_argument("--flow", action="store_true", help="흐름대로 닿는 바이트만 트랙별로(다시 쌀 수 없는 보기)")
     ap.add_argument("--encode", metavar="TXT", help="listing 꼴 글을 싸서 시퀀스 seq 자리에 넣는 dq5patch/1 을 -o 로")
+    ap.add_argument("--reloc", action="store_true", help="--encode 를 제자리 대신 뱅크 70 의 포인터 표로(길이 제한 없음)")
+    ap.add_argument("--sample", action="append", default=[], metavar="ID=FILE",
+                    help="--reloc 와 함께: dq5brrenc.py 가 만든 샘플 자료를 샘플 번호 ID 로 더함")
+    ap.add_argument("--set", action="append", default=[], metavar="N=HEX",
+                    help="--reloc 와 함께: 곡 묶음 레코드 N 을 같은 길이의 바이트로 덮음")
     ap.add_argument("--seqfile", metavar="TXT", help="--kon 에서 롬 대신 이 글을 싸서 견줌")
     ap.add_argument("-o", "--out")
     args = ap.parse_args()
@@ -386,7 +479,13 @@ def main():
         sys.exit(1 if bad else 0)
     if args.encode:
         new = assemble(open(args.encode, encoding="utf-8").read().splitlines())
-        print(json.dumps(patch(rom, args.seq, new), ensure_ascii=False, indent=1), file=open(args.out, "w"))
+        if args.reloc:
+            smps = {int(k, 16): open(v, "rb").read() for k, v in (x.split("=", 1) for x in args.sample)}
+            sets = {int(k, 16): bytes.fromhex(v) for k, v in (x.split("=", 1) for x in args.set)}
+            doc = patch_reloc(rom, {args.seq: new}, smps, sets)
+        else:
+            doc = patch(rom, args.seq, new)
+        print(json.dumps(doc, ensure_ascii=False, indent=1), file=open(args.out, "w"))
         print(f"sequence {args.seq:02X}: {len(new)} bytes into {len(seqs[args.seq])}")
         return
     if args.kon:
