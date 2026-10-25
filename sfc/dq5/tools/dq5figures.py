@@ -644,6 +644,20 @@ def fig_perframe_more():
     save(out, 'dq5-perframe-more.webp')
 
 
+def fig_perframe_last():
+    """0E/04 에서 걸은 뒤 화면(왼쪽 루틴대로, 가운데 03:F928 을 막음), 31/07 바위를 옮긴 뒤 전투(오른쪽 둘),
+    01/00 ドラゴンキッズ. work/perframe4/ 의 0E04a·0E04b/end.png, s0c3/s00760·s01060.png, o11b/s00900.png.
+    명령은 sfc/dq5/journal/ 의 perframe4 일지."""
+    shots = [('0E04a/end.png', '0E/04'), ('0E04b/end.png', '0E/04 blocked'), ('s0c3/s00760.png', '31/07'),
+             ('s0c3/s01060.png', '31/07'), ('o11b/s00900.png', '01/00')]
+    out = Image.new('RGB', (len(shots) * 260 - 4, 224), (24, 24, 24))
+    for i, (path, text) in enumerate(shots):
+        im = Image.open(f'work/perframe4/{path}').convert('RGB')
+        label(im, text)
+        out.paste(im, (i * 260, 0))
+    save(out, 'dq5-perframe-last.webp')
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     rom = Rom(open('rom/dq5.sfc', 'rb').read())
@@ -676,6 +690,7 @@ def main():
     fig_perframe_0400()
     fig_perframe_scenes()
     fig_perframe_more()
+    fig_perframe_last()
     os.remove(TMP)
 
 
