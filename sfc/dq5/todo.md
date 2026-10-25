@@ -4,7 +4,6 @@
 
 SFC DQ5 엔진 분석. 시작점은 [handoff.md](handoff.md). 결과 문서: [dq5-map-format.md](docs/dq5-map-format.md), [dq5-field-format.md](docs/dq5-field-format.md), [dq5-text-format.md](docs/dq5-text-format.md), [dq5-data-format.md](docs/dq5-data-format.md), [dq5-graphics-format.md](docs/dq5-graphics-format.md).
 
-- **패치 빌드**: 곡 자료 뱅크(`22`·`29`·`2F` 등) 끝 빈 자리를 들어 보지 않은 곡이 읽는지, 첫 장면 뒤(필드·전투·메뉴)까지 보는 시험([dq5-build-format.md](docs/dq5-build-format.md)).
 - **소리**: 곡 이름(dq5-warp 의 들어 보기 페이지에 장면 설명을 넘김), 이야기 이벤트 안의 `02`·`03`·`04` 부르는 곳(`02:AAE8`·`03:9833`·`03:EC2F`·`06:E0EC`·`23:DE18`·`23:FE71`·`29:80D1`·`03:9964`·`0F:FC49`)을 그 진행 상태에서 걸기.
 - **조우의 남은 것**: 예외 표 플래그 장면 가운데 이벤트 `3B` 를 31/10 에서 대화 `1A4` 로 앞부분까지 걸기(네이티브 `05:E4B8`·`E542`·`E5A3`·`E5BF` 와 기다리는 플래그 `21A1.5`·`21A2.7`·`.6`·`21A4.7`), `2190.6` 을 켠 뒤 그 상태에서의 ルーラ.
 - **그래픽 내보내기의 남은 것**: 오프닝 타이틀의 별·링 반짝이 자리와 HDMA 표를 만드는 곳(롬만으로 연출 그리기), 커서 없는 글 창의 `85 xx` 자리 표시, 전투 연출 중 상태 주문·회복·숨의 GIF(몬스터가 그 행동을 고르게 하는 틀)와 스크립트가 부르는 네이티브 루틴(`3E`) 읽기.

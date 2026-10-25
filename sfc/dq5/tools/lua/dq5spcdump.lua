@@ -6,6 +6,7 @@
 --   곡이 시작하기 전에 샘플을 모두 보내게 한다(롬 그 자체는 바꾸지 않고 이 실행에서만).
 -- WAITSONG=n 이면 SPC 의 곡 자리(03AF 곡 번호, 03B7 켜짐)에 n 이 오르고 대기열이 빈 첫 프레임에서 DELAY 프레임 뒤에 남긴다.
 -- 결과: spc.bin, dsp.bin, regs.txt(남긴 프레임·CPU 레지스터·포트·타이머·목소리 BRR 표본). MAXF 에 멈춘다.
+-- FREEWATCH="01FED0-01FFFF,…"(CPU 주소, 뱅크 +80 거울도) 를 주면 그 범위의 읽기·실행을 세어 freewatch.txt 로(MAXF 에).
 -- ENVLOG=1 이면 남긴 뒤 프레임마다 목소리별 음높이·샘플 번호(DSP x2·x3·x4)를 env.txt 로(.spc 를 따로 틀어 견줄 때).
 package.path = os.getenv("LIBDIR") .. "/?.lua;" .. package.path
 local L = require("lib")
@@ -83,6 +84,24 @@ local function dump(n)
 end
 
 local envlog = os.getenv("ENVLOG") and {} or nil
+local freeHits = {}
+for lo, hi in string.gmatch(os.getenv("FREEWATCH") or "", "(%x+)-(%x+)") do
+  local a, b = tonumber(lo, 16), tonumber(hi, 16)
+  local key = lo .. "-" .. hi
+  for _, base in ipairs({0, 0x800000}) do
+    for _, ct in ipairs({emu.callbackType.read, emu.callbackType.exec}) do
+      emu.addMemoryCallback(function(addr)
+        local h = freeHits[key]
+        if not h then
+          local st = emu.getState()
+          h = {n = 0, a = addr, pc = st["cpu.k"] * 0x10000 + st["cpu.pc"]}
+          freeHits[key] = h
+        end
+        h.n = h.n + 1
+      end, ct, a + base, b + base)
+    end
+  end
+end
 local n, ready, done, hook = 0, nil, false, nil
 emu.addEventCallback(function()
   n = n + 1
@@ -109,6 +128,11 @@ emu.addEventCallback(function()
   if n >= maxf then
     if not done then dump(n) end
     if envlog then L.write("env.txt", table.concat(envlog, "\n") .. "\n") end
+    if os.getenv("FREEWATCH") then
+      local o = {}
+      for k, h in pairs(freeHits) do o[#o + 1] = string.format("%s n=%d addr=%06X pc=%06X", k, h.n, h.a, h.pc) end
+      L.write("freewatch.txt", table.concat(o, "\n") .. "\n")
+    end
     emu.stop(0)
   end
 end, emu.eventType.endFrame)
