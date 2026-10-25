@@ -7,6 +7,7 @@
   python fc/dq4/tools/dq4encounter.py rom/dq4.nes dungeons                던전 그룹 → 층(순번)마다 구역
   python fc/dq4/tools/dq4encounter.py rom/dq4.nes formations              고정 편성 16개(칸 12·13)
   python fc/dq4/tools/dq4encounter.py rom/dq4.nes bosses                  특수 전투 34개와 부르는 곳
+  python fc/dq4/tools/dq4encounter.py rom/dq4.nes henge                   へんげのつえ 모습 표 1E:$B079(사람 37칸·몬스터 15칸)와 그 그림을 쓰는 인물 수
   python fc/dq4/tools/dq4encounter.py rom/dq4.nes scripts                 인물 블록(맵·이벤트 목록)에서 명령 21(1F:$DA8A, 특수 전투)을 찾음
   python fc/dq4/tools/dq4encounter.py rom/dq4.nes check [enc.txt ...]     표 경계 검사, fc/dq4/tools/lua/enc.lua 기록 대조
 
@@ -205,6 +206,33 @@ def arena_list(prg):
     """1C:$B024 의 특수 전투 번호 07~0B 다섯 개. 바로 뒤는 코드(20 0B D2 = JSR $D20B)다."""
     o = ARENA[0] * 0x4000 + (ARENA[1] & 0x3FFF)
     return list(prg[o:o + 5])
+
+
+# 1E:$B02F: へんげのつえ. $6296 = 78 을 두고 모습 칸을 고른다. 칸 = rand(25)(사람) 또는 25 + rand(0F)(몬스터);
+# 그룹 03 이 아니고 순번 01 맵의 X 01~0D·Y 0F~17 안이면 늘 몬스터, 아니면 난수 < C0 이면 몬스터.
+# $6297 = 표[칸] | (칸 ≥ 25) << 7. 1E:$97B8 이 이 값으로 일행 첫 칸 그림을 바꾼다.
+HENGE = (0x1E, 0xB079)
+HENGE_PEOPLE, HENGE_MONSTERS = 0x25, 0x0F
+PARTY_LOOKS = ['勇者', 'クリフト', 'ミネア', 'マーニャ', 'ブライ', 'トルネコ', 'ライアン', 'アリーナ', '여자 勇者']
+
+
+def henge_table(prg):
+    """[(칸, 그림 번호, 몬스터 쪽인지)]. 몬스터 쪽이면 $6297 bit7 이 켜져 デスパレス 인물이 싸움을 걸지 않는다."""
+    o = HENGE[0] * 0x4000 + (HENGE[1] & 0x3FFF)
+    return [(i, prg[o + i], i >= HENGE_PEOPLE) for i in range(HENGE_PEOPLE + HENGE_MONSTERS)]
+
+
+def show_henge(prg):
+    import dq4talk
+    use = {}
+    for g, k, *_ in dq4map.maps(prg):
+        for r in dq4map.npc_records(prg, g, k):
+            for night in (False, True):
+                if r[0] & (0x08 if night else 0x10):
+                    use.setdefault(dq4talk.sprite(r, night), set()).add((g, k))
+    for i, look, monster in henge_table(prg):
+        who = PARTY_LOOKS[look] if look < len(PARTY_LOOKS) else f'맵 인물 {len(use.get(look, ()))}곳'
+        print(f'{i:02X} 그림 {look:02X} → $6297={look | monster << 7:02X} {"몬스터" if monster else "사람"}  {who}')
 
 
 def scan_blocks(prg):
@@ -554,6 +582,8 @@ def main():
         print('# 그 밖에 1F:$DA8A(인물 블록 명령 21 NN)가 부를 수 있으나 롬의 블록(맵·이벤트 목록)에는 없음(scripts)')
         print('# 01: 부르는 곳 없음 — BRK 01/81 88~8F 전부, $A1AD 를 뛰는 JSR·JMP, BRK 자리로 뛰는 분기, 계산한 A'
               '(투기장 표 밖 20 0B D2, デスパレス 1C~21)에 01 이 없음')
+    elif cmd == 'henge':
+        show_henge(prg)
     elif cmd == 'scripts':
         n_blocks, n_cmds, bad, hits = scan_blocks(prg)
         print(f'블록 {n_blocks}개(본문 주소가 다른 것), 명령 {n_cmds}개, 못 읽은·넘친 명령 {bad}, 명령 21 {len(hits)}번')
