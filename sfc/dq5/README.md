@@ -13,6 +13,7 @@ SFC 「드래곤 퀘스트 V」(일본판) 엔진을 분석하는 트랙입니�
 - [docs/dq5-graphics-format.md](docs/dq5-graphics-format.md): DQ5 전투 몬스터 그림(레코드·머리·조각·타일 압축·팔레트·배치·그림자)과 전투 배경, 필드 인물 스프라이트(세트·레코드·타일 압축·프레임 배치·맵 OBJ 타일)
 - [docs/dq5-hangul-format.md](docs/dq5-hangul-format.md): 한글 넣기 실현성(롬 확장, 메시지 옮기기와 트리 다시 만들기, 새 글자, 1바이트 부호)
 - [docs/dq5-event-format.md](docs/dq5-event-format.md): DQ5 이벤트 스크립트(주인공을 조종하는 표와 명령)
+- [docs/dq5-sound-format.md](docs/dq5-sound-format.md): DQ5 소리 명령(명령 입구·대기열·BRK 0F~19·효과음·맵 곡)
 - [todo.md](todo.md): 남은 일
 - [references.md](references.md): 참고 자료
 - [tools/README.md](tools/README.md): 도구 사용법
@@ -128,3 +129,4 @@ SFC 「드래곤 퀘스트 V」(일본판) 엔진을 분석하는 트랙입니�
 - [2026-10-25-93: 맡기는 곳에서 찾는 한도, 슬라임 레이스 倍率 코드, D005 의 기다림](journal/2026-10-25-93-shop5.md)
 - [2026-10-25-94: 조건 루틴 25개 실측 마무리](journal/2026-10-25-94-aicond3.md)
 - [2026-10-25-95: 첫 장면 재현과 남은 스크립트 명령](journal/2026-10-25-95-npc-script4.md)
+- [2026-10-25-96: 소리 명령과 맵 곡](journal/2026-10-25-96-sound.md)
