@@ -142,6 +142,10 @@ def encode_field(raw, changes, block_at):
 
 
 def layout(rom):
+    # 표를 옮긴 롬의 원래 자리는 엔진이 읽지 않으므로, 고정 표 쓰기가 그 자리를 고치면 아무 효과가 없다
+    from dq5chestreloc import ORIGINAL, locate
+    if locate(rom) != ORIGINAL:
+        raise ValueError('표를 옮긴 롬임. dq5chestreloc.py 로 고쳐야 함')
     for name, (start, count, size) in TABLES.items():
         read(rom, start, count * size)
         if name == 'chests':
