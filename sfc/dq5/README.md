@@ -16,6 +16,7 @@ SFC 「드래곤 퀘스트 V」(일본판) 엔진을 분석하는 트랙입니�
 - [docs/dq5-event-format.md](docs/dq5-event-format.md): DQ5 이벤트 스크립트(주인공을 조종하는 표와 명령)
 - [docs/dq5-sound-format.md](docs/dq5-sound-format.md): DQ5 소리 명령(명령 입구·대기열·BRK 0F~19·효과음·맵 곡)
 - [docs/dq5-build-format.md](docs/dq5-build-format.md): 패치 빌드(쓰기 도구의 패치 목록 형식, 빌더, 빈 자리 지도, 부팅 시험)
+- [docs/dq5-port-tool-audit.md](docs/dq5-port-tool-audit.md): DQ4 포팅 도구의 지원 범위·누락·통합 배치 실측
 - [todo.md](todo.md): 남은 일
 - [references.md](references.md): 참고 자료
 - [tools/README.md](tools/README.md): 도구 사용법
@@ -292,3 +293,4 @@ SFC 「드래곤 퀘스트 V」(일본판) 엔진을 분석하는 트랙입니�
 - [2026-10-26-55: 성장·조우·상점 쓰기 도구](journal/2026-10-26-55-progresswrite.md)
 - [2026-10-26-56: 보행 대사 3,200개 일괄 쓰기](journal/2026-10-26-56-textwrite.md)
 - [2026-10-26-57: 인물 스크립트 길이를 늘려 목록째 재배치하기](journal/2026-10-26-57-npc-relocate.md)
+- [2026-10-26-58: DQ4 포팅 도구 누락과 통합 충돌 점검](journal/2026-10-26-58-port-tool-audit.md)
