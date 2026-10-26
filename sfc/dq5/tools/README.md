@@ -55,6 +55,8 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5tablecheck.py rom --state 선실 --out 폴더` | `dq5tables.py` 로 고친 물건 플래그·장비 비트 17건·주문 3필드·피해량·동료 5필드를 원래 롬과 같은 장면(무기점 비교·팔기·설명, 파파스의 メラ, 슬라임 동료·레벨업, 필드 どうぐ·そうび·インパス, 전투 どうぐ·じゅもん)에서 견줌. 표 읽기 값·장비 AND·HP·일행 레코드·창 번호·메시지 번호를 비교. `MESENCE` 필요 |
 | `dq5freesweep.py rom 세이브스테이트 OUT` | 빈 자리 22곳(`dq5build.py free`)을 실내 맵 346곳·몬스터 236종 전투·필드 세계 0~2 에서 롬 읽기·실행 감시(`--kinds maps,battles,field`), `OUT/summary.txt` 에 읽힌 것. `MESENCE` 필요 |
 | `dq5chestwrite.py rom dump\|patch\|check` | 일반 상자161개·맵 연결83개·서랍/항아리/통86개·발밑18개·두 칸 앞17개·아래층 상자11개 고정 표와 필드 조사 보상(`12:E5F2`, 보상만). `dq5chest/1` 일부 필드 편집, 원본·종료자·명령 바이트 보존. [쓰기 형식](../docs/dq5-build-format.md#보물상자조사-보상-dq5chest1) |
+| `dq5spellfx.py rom dump\|patch\|check` | 전투 행동 171개의 처리 루틴(`20:B7F9`, 실행 루틴과 원래 짝만)과 첫머리 54개의 양 번호·성공 값·내성 칸, 필드 주문 18칸의 처리기(`11:8024`)와 처리기 14개의 MP·ホイミ/ベホイミ 회복량. `--raw` 로 연결 검사를 풂. [쓰기 형식](../docs/dq5-build-format.md#처리-루틴-연결필드-주문-dq5spellfx1) |
+| `dq5spellfxcheck.py rom --state 선실 --out 폴더` | 변경 롬 9벌과 원본에서 파파스 メラ·슬라임 ラリホー·전투/필드 ホイミ·ラナルータ 15회 실행. 피해·메시지·HP·MP 비교. `MESENCE` 필요 |
 | `dq5exitwrite.py rom dump -o\|patch\|check` | 실내 출구569개·영역 이동430개 고정 슬롯의 목적지·사각형·층. 종류·길이·개수 보존, 고층 공유 목록은 `shared_maps` 필요. [쓰기 형식](../docs/dq5-build-format.md#실내-출구영역-이동-dq5connections1) |
 | `dq5maphook.py rom dump\|patch\|rewrite\|check` | 맵별 루틴 표(`15:F907`) 162개의 맵 고르기·플래그 조건·맵을 푼 뒤/매 프레임 루틴. 루틴은 원래 표의 같은 칸에 있던 것만(`--raw-routines` 로 풂), `rewrite --at` 은 뱅크 15 의 원래 자리·`15:FF80` 에 다른 항목 수로 다시 쓰고 로더 피연산자 11곳을 고침. [쓰기 형식](../docs/dq5-build-format.md#맵별-루틴-표-dq5maphook1) |
 | `dq5maphookcheck.py rom --state 선실 --out 폴더` | 변경 롬 5벌과 원본에서 루틴 막기·플래그 조건·표 옮기기 15장면. 고른 루틴, 01/05 (51,20) 셀, 도착 맵·칸 비교. `MESENCE` 필요 |
