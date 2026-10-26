@@ -46,6 +46,19 @@ def menu_figure(folder):
     return sheet.resize((sheet.width * 2, sheet.height * 2), Image.Resampling.NEAREST)
 
 
+def name_entry_figure(folder):
+    """이름 입력·기록 목록 화면의 창만 나란히 놓는다.
+    work/name-entry/fig/entry.png·list.png 는 dq4-name-entry-format.md 검증 절차의 MesenCE 화면이다."""
+    paths = [folder / f"{name}.png" for name in ("entry", "list")]
+    if not all(path.exists() for path in paths):
+        return None
+    sheet = Image.new("RGB", (516, 176), (24, 24, 24))
+    for i, path in enumerate(paths):
+        with Image.open(path) as shot:
+            sheet.paste(shot.convert("RGB").crop((0, 16, 256, 192)), (i * 260, 0))
+    return sheet.resize((sheet.width * 2, sheet.height * 2), Image.Resampling.NEAREST)
+
+
 def main():
     images = assets()
     output = ROOT / "sfc" / "dq4" / "images"
@@ -68,6 +81,9 @@ def main():
         print("work/dq4-menu/fig 에 메뉴 화면이 없어 dq4-menu.webp 는 건너뜀")
     else:
         menu.save(output / "dq4-menu.webp", lossless=True)
+    names = name_entry_figure(ROOT / "work" / "name-entry" / "fig")
+    if names is not None:
+        names.save(output / "dq4-name-entry.webp", lossless=True)
     with Image.open(ROOT / "sfc" / "dq4" / "tools" / "dq4art" / "journey.png") as source:
         source.save(output / "dq4-graphics-journey.webp", lossless=True)
     frames = []

@@ -17,8 +17,8 @@
 | 예/아니요 | 창 `32`(はい/いいえ), `62`(いいえ/はい) | | 예 / 아니요 |
 | 표시 속도 | 창 `63` | おこのみの　ひょうじそくどは？ はやい … おそい | 원하는 표시 속도는? 빠름 … 느림 |
 | 소리 | 창 `86` | ステレオ　モノラル | 스테레오　모노 |
-| 기록 목록 | 창 `70` | 1：ああああ　Lv 1 | 그대로(이름은 가나, 조합형 이름 입력에서) |
-| 이름 입력 | 창 `6B`·`6C`·`6D`, 제목 `24` | なまえをいれてください, 가나 판 | 그대로(다음 단계) |
+| 기록 목록 | 창 `61` | 1：ああああ　Lv 1 | [한글 이름 표시](dq4-name-entry-format.md)(시작 메뉴 실측으로 창 번호 정정) |
+| 이름 입력 | 창 `6B`·`6C`·`6D`, 제목 `24` | なまえをいれてください, 가나 판 | [조합형 입력](dq4-name-entry-format.md): `6B`·`6C`를 교체하고 원래 제목·가나판 경로를 건너뜀 |
 | 지우기 확인 | 메시지 `1CE`·`1CF` | ぼうけんのしょ{1004}を　消します。いいですか？ / 消しました。 | 그대로(허프만 메시지, 다음 단계) |
 | 기록 깨짐 | 메시지 `1D0` | まことに　ざんねんですが … 消えてしまいました。 | 그대로 |
 
@@ -80,6 +80,8 @@
 
 ## 공용 창 `32`·`62`
 
+아래 주소와 48바이트 길이는 메뉴 문구만 넣은 첫 빌드의 기록입니다. [조합형 이름 입력](dq4-name-entry-format.md) 빌드는 `6B`·`6C`를 더하고 가변 길이로 배치합니다. 현재 한글 레코드는 `60:B000`, 원래 레코드는 `60:B400`, 메뉴 표시는 `7E:1BB0`입니다.
+
 예/아니요 창 `32` 는 교회 같은 게임 안에서도 엽니다. 게임 안에서는 VRAM `2000` 이후가 BG1·BG2 그림이라 한글 열을 쓸 수 없습니다. 그래서 롬의 레코드는 그대로 두고, 창 표(`04:EB48`) 칸을 낮은 WRAM 거울 주소로 돌렸습니다.
 
 ```
@@ -108,13 +110,14 @@ Galmuri11(한글 12점 폭)·Galmuri9(10점)·Galmuri11 Condensed(8점)로 각�
 ## 재현
 
 ```sh
+export ASAR=/path/to/asar                 # 조합형 이름 입력 루틴 조립
 export DQ4_GALMURI="$PWD/work/galmuri"     # Galmuri-v2.40.4.zip 을 푼 폴더
 uv run --locked python sfc/dq4/tools/dq4menupatch.py build --rom work/overture/dq4-title-overture.sfc \
   --out work/menu/dq4-menu.sfc
 uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4menupatch.py
 ```
 
-입력은 [타이틀 서곡 재현](dq4-overture-format.md#재현)의 결과 롬입니다. 결과 롬 SHA-1 은 `f93de73999e11792ad3b8aca599ed8a903231330` 이고, 같은 이름의 `.ips` 가 함께 나옵니다. 롬 빌드 테스트는 `work/base/dq4-title-overture.sfc` 와 `DQ4_GALMURI` 가 있을 때만 돕니다.
+입력은 [타이틀 서곡 재현](dq4-overture-format.md#재현)의 결과 롬입니다. 메뉴 문구만 넣은 첫 빌드의 SHA-1 은 `f93de73999e11792ad3b8aca599ed8a903231330`입니다. 현재 빌드는 [조합형 이름 입력](dq4-name-entry-format.md)을 포함하고, 같은 이름의 `.ips`가 함께 나옵니다. 롬 빌드 테스트는 `work/base/dq4-title-overture.sfc` 와 `DQ4_GALMURI` 가 있을 때만 돕니다.
 
 ## 검증
 
@@ -134,7 +137,7 @@ MesenCE 에서 전원부터 `sfc/dq5/tools/lua/dq5msg.lua` 의 `PRE` 입력으�
 
 ## 남은 것
 
-- 조합형 이름 입력(두벌식 자모 판, 완성형 2,350자, 2바이트 이름 부호)과 이름 입력 제목·기록 목록의 이름
+- 게임 안 메시지·상태 창의 이름 한글화와 기존 가나 이름의 구분([이름 입력](dq4-name-entry-format.md))
 - 메뉴 메시지 `1CE`·`1CF`·`1D0`(허프만 트리 다시 만들기와 11×13 한글)
 - 창 `62` 가 게임 안에서 쓰이는지, `7E:1AC0`~`1AEF` 를 실행하지 않은 코드가 쓰는지
 - 실제 SFC 기기

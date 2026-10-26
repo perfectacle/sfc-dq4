@@ -29,6 +29,7 @@ from dq5map import lorom  # noqa: E402
 BASE_SHA1 = 'ed46db6d9e8113191de124949f7d50a375adc410'   # 서곡 채택본(dq4-overture-format.md)
 PREFIX = 0x9F               # 창 레코드에 쓰이지 않는 캔버스 타일 번호. 바로 뒤 [열 수][첫 열]
 COLUMNS = 0x100             # 열 k 는 타일 200+k(글자 줄)·300+k(아래 줄)
+LAST_COLUMN = 0xD0          # D0~E7 은 목록 세 이름, F8~FF 는 이름 입력 칸
 HOOK = 0x608000             # 창 접두 처리
 UPLOAD = 0x608100           # 타이틀 FadeOut 끝에서 열 그림을 VRAM 2000 에 올림
 TILES = 0x609000            # 열 그림 8KB: 글자 줄 256 타일, 이어서 아래 줄 256 타일
@@ -60,14 +61,17 @@ WINDOWS = {
 }
 # 게임 안에서도 여는 창(32 는 교회 등의 はい/いいえ). 롬 레코드는 그대로 두고 창 표 칸을 낮은 WRAM 자리로 돌린 뒤,
 # 그 자리에 메뉴에서는 한글 레코드를, 맵을 불러올 때(2B:82BD)부터는 원래 레코드를 복사해 둔다.
+# 6B·6C 는 이름 입력의 이름 칸과 판이다(게임 안의 이름 짓기도 씀, dq4nameentry.py).
 SHARED = {
     0x32: [['예'], ['아니요']],
     0x62: [['아니요'], ['예']],
+    0x6B: 'field',
+    0x6C: 'board',
 }
 SHARED_WRAM = 0x1AC0        # 7E:1ABC~1BB1 은 DQ5 트랙이 실행한 장면 열일곱에서 접근이 없던 자리(dq5-hangul-format.md)
-SHARED_SLOT = 0x18
-SHARED_KR = 0x60B000        # 한글 레코드들(SHARED_SLOT 간격)
-SHARED_JP = 0x60B100        # 원래 레코드들
+MENU_FLAG = 0x1BB0          # 메뉴에서 A5, 맵을 불러오면 00. 이름 입력 03:8B72 가 본다
+SHARED_KR = 0x60B000        # 한글 레코드들과 표시 A5(창마다 원래와 한글 중 긴 쪽만큼 칸을 잡음)
+SHARED_JP = 0x60B400        # 원래 레코드들과 표시 00
 MAP_LOAD = 0x2B82BD         # LDA #$1C / STA $0725 (맵을 불러올 때마다)
 # 창 63(표시 속도)은 FE 항목 창이 아니라 줄 글 + 숫자 항목이라 따로 엮는다(speed_record).
 SPEED_WINDOW = 0x63
@@ -105,6 +109,7 @@ class Font:
     """글자 → (넓이, 16줄 띠 안의 점 목록). 한글 윗줄을 띠의 1줄에 맞춘다(가나 글자는 글자 줄 0~7 을 거의 다 씀)."""
 
     def __init__(self, name):
+        self.name = name
         folder = os.environ.get('DQ4_GALMURI')
         if not folder:
             raise SystemExit('DQ4_GALMURI 에 Galmuri BDF 가 든 폴더를 주세요(sfc/dq4/docs/dq4-menu-format.md)')
@@ -126,14 +131,15 @@ class Font:
         return g['adv'], pts
 
 
-def render(font, text):
-    """문자열을 16줄 띠 하나로. 왼쪽 1점은 비운다(가나 글자도 왼쪽 열이 비어 있음). 돌려주는 것은 열 목록."""
+def render(font, text, tight=False):
+    """문자열을 16줄 띠 하나로. 왼쪽 1점은 비운다(가나 글자도 왼쪽 열이 비어 있음). 돌려주는 것은 열 목록.
+    tight 면 마지막 글자의 진행 폭 대신 점이 있는 데까지만 센다(이름 입력 판의 한 칸 자모)."""
     x, pts = 1, []
     for ch in text:
         adv, p = font.char(ch)
         pts.extend((x + px, py) for px, py in p)
         x += adv
-    width = max([x] + [px + 1 for px, _ in pts])
+    width = max(([] if tight else [x]) + [px + 1 for px, _ in pts], default=1)
     ncols = (width + 7) // 8
     band = [[0] * (ncols * 8) for _ in range(BAND)]
     for px, py in pts:
@@ -160,14 +166,17 @@ class Atlas:
     def __init__(self, font):
         self.font, self.runs, self.cols = font, {}, [None] * self.FIRST
 
-    def run(self, text):
-        if text not in self.runs:
-            cols = render(self.font, text)
-            self.runs[text] = (len(cols), len(self.cols))
+    def run(self, text, font=None):
+        tight = font is not None
+        font = font or self.font
+        key = (text, font.name)
+        if key not in self.runs:
+            cols = render(font, text, tight)
+            self.runs[key] = (len(cols), len(self.cols))
             self.cols.extend(cols)
-            if len(self.cols) > COLUMNS:
-                raise ValueError(f'열이 {COLUMNS} 개를 넘음')
-        return self.runs[text]
+            if len(self.cols) > LAST_COLUMN:
+                raise ValueError(f'열이 {LAST_COLUMN} 개를 넘음(그 뒤는 이름 칸)')
+        return self.runs[key]
 
     def tiles(self):
         cols = self.cols + [None] * (COLUMNS - len(self.cols))
@@ -187,6 +196,14 @@ def window_count(data):
     """창 표 칸 수. 표 바로 뒤에 첫 레코드가 오므로 가장 낮은 레코드 주소까지(dq5text.window 와 같은 셈)."""
     first = int.from_bytes(data[lorom(0x04EB48):lorom(0x04EB48) + 2], 'little')
     return (first - 0xEB48) // 2
+
+
+def window_span(data, n):
+    """창 n 레코드의 바이트를 다음 레코드 시작까지(6B 처럼 끝 80 이 없는 레코드도 있음)."""
+    a = window_addr(data, n) & 0xFFFF
+    starts = sorted({window_addr(data, m) & 0xFFFF for m in range(window_count(data))})
+    end = next(s for s in starts if s > a)
+    return bytes(data[lorom(0x040000 | a):lorom(0x040000 | end)])
 
 
 def window_addr(data, n):
@@ -237,7 +254,8 @@ def speed_record(atlas, old):
 
 def hook_code():
     """04:B11E 에서 JSL. A = 창 바이트(8비트), X = 레코드 자리(DB 04), Y = $E0(7E 타일맵 버퍼) 기준 자리.
-    01 이면 원래처럼 칸만 넘기고, 9F 면 열 n 개를 글자 줄(타일 200+k)과 아래 줄(300+k)에 쓴다. C = 처리 끝."""
+    01 이면 원래처럼 칸만 넘기고, 9F 면 열 n 개를 글자 줄(타일 200+k)과 아래 줄(300+k)에 쓴다. C = 처리 끝.
+    n = 0 이면 칸도 그림도 없다. 이름 입력 판이 9F 00 FE 로 줄 칸 수(04:C6E7 이 첫 줄의 FE 바이트를 셈)를 맞출 때 쓴다."""
     loop = bytes((
         0x8A, 0x99, 0x00, 0x00,                  # TXA / STA $0000,Y         글자 줄 낮은 바이트 = k
         0xB9, 0x01, 0x00, 0x29, 0xFC, 0x48,      # LDA $0001,Y / AND #$FC / PHA   속성(팔레트·우선)은 그대로
@@ -257,6 +275,7 @@ def hook_code():
         0xC2, 0x30, 0x29, 0xFF, 0x00, 0xAA,               # REP #$30 / AND #$00FF / TAX
         0x98, 0x18, 0x65, 0xE0, 0xA8,                     # TYA / CLC / ADC $E0 / TAY    버퍼 안 주소
         0xE2, 0x20, 0xF4, 0x7E, 0x7E, 0xAB, 0xAB,         # SEP #$20 / PEA $7E7E / PLB / PLB
+        0xA3, 0x04, 0xF0, len(loop),                      # LDA $04,S / BEQ 끝(열 0 개: 그리지 않음)
     )) + loop + bytes((
         0xC2, 0x20, 0x98, 0x38, 0xE5, 0xE0, 0xA8,         # REP #$20 / TYA / SEC / SBC $E0 / TAY
         0xE2, 0x20, 0xAB, 0xFA, 0x68, 0x38, 0x6B))        # SEP #$20 / PLB / PLX / PLA / SEC / RTL
@@ -360,7 +379,7 @@ def put(data, addr, b, expect=None):
     data[o:o + len(b)] = b
 
 
-def build(rom, font):
+def build(rom, font, jamo_font):
     data = bytearray(rom)
     atlas = Atlas(font)
     records = {}
@@ -399,17 +418,28 @@ def build(rom, font):
     for site, target in CURSOR_MOVES.items():
         t = place(data, slack, cursor_tramp(target, common))
         put(data, site, bytes((0x20, t & 0xFF, t >> 8 & 0xFF)), bytes((0x20, target & 0xFF, target >> 8)))
-    kr, jp = bytearray(), bytearray()
-    for i, (n, rows) in enumerate(sorted(SHARED.items())):
+    import dq4nameentry as ne
+    kr, jp, keys = bytearray(), bytearray(), None
+    for n, rows in sorted(SHARED.items()):
         a = window_addr(data, n)
-        old = window_record(data, a)
-        new = item_record(atlas, old[:6], rows)
-        if max(len(old), len(new)) > SHARED_SLOT:
-            raise ValueError(f'창 {n:02X}: 공용 칸 {SHARED_SLOT} 을 넘음')
-        kr += new.ljust(SHARED_SLOT, b'\x00')
-        jp += old.ljust(SHARED_SLOT, b'\x00')
-        put(data, 0x04EB48 + n * 2, (SHARED_WRAM + i * SHARED_SLOT).to_bytes(2, 'little'))
-        records[n] = [0x7E0000 | SHARED_WRAM + i * SHARED_SLOT, old, new]
+        old = window_span(data, n)
+        if rows == 'field':
+            new = ne.field_record(old, PREFIX)
+        elif rows == 'board':
+            new, keys = ne.board_record(atlas, old, jamo_font, PREFIX)
+        else:
+            new = item_record(atlas, old[:6], rows)
+        slot = SHARED_WRAM + len(kr)
+        size = max(len(old), len(new))
+        kr += new.ljust(size, b'\x00')
+        jp += old.ljust(size, b'\x00')
+        put(data, 0x04EB48 + n * 2, slot.to_bytes(2, 'little'))
+        records[n] = [0x7E0000 | slot, old, new]
+    if SHARED_WRAM + len(kr) > MENU_FLAG:
+        raise ValueError(f'공용 창 {len(kr)}바이트가 7E:{MENU_FLAG:04X} 을 넘음')
+    pad = MENU_FLAG - SHARED_WRAM - len(kr)
+    kr += bytes(pad) + b'\xa5'
+    jp += bytes(pad) + b'\x00'
     put(data, SHARED_KR, bytes(kr), bytes(len(kr)))
     put(data, SHARED_JP, bytes(jp), bytes(len(jp)))
     for addr, code in ((COPY_KR, copy_code(SHARED_KR, len(kr))), (COPY_JP, copy_code(SHARED_JP, len(jp))),
@@ -426,7 +456,8 @@ def build(rom, font):
     put(data, WIN_DISPATCH, bytes((0x22, HOOK & 0xFF, HOOK >> 8 & 0xFF, HOOK >> 16, 0xB0, 0x05,
                                    0x20, 0x35, 0xB2, 0x80, 0xC4)), bytes.fromhex('c901f0052035b280c6c8c8'))
     put(data, FADEOUT_EXIT, bytes((0x5C, UPLOAD & 0xFF, UPLOAD >> 8 & 0xFF, UPLOAD >> 16)), bytes.fromhex('5c5cfe03'))
-    return set_checksum(bytes(data)), atlas, records
+    data = ne.apply(bytes(data), keys, ne.glyph_blob(font, render))
+    return set_checksum(data), atlas, records
 
 
 def sheet(atlas, path):
@@ -469,7 +500,7 @@ def main():
     rom = Path(args.rom).read_bytes()
     if hashlib.sha1(rom).hexdigest() != BASE_SHA1:
         raise SystemExit(f'{args.rom}: 서곡 채택본({BASE_SHA1})이 아님')
-    out, atlas, records = build(rom, font)
+    out, atlas, records = build(rom, font, Font('galmuri11c'))
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_bytes(out)
     Path(args.out).with_suffix('.ips').write_bytes(ips_patch(rom, out))
