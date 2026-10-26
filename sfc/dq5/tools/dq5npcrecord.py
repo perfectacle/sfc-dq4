@@ -31,7 +31,8 @@ FACINGS = ('up', 'right', 'down', 'left')     # 1E:DD9C 색인 순서(X bit7 << 
 TIMES = {0x80: 'day', 0x40: 'night', 0xC0: 'both'}
 TIME_BITS = {'day': 0x80, 'night': 0x40}
 VALUE_KEYS = ('x', 'y', 'facing', 'talk', 'gfx', 'layer', 'interval', 'speed', 'step', 'walk_anim', 'stand_anim')
-ENTRY_KEYS = {'list', 'index', 'name', 'address', 'time', 'fields', 'day', 'night'}
+EDIT_KEYS = {'time', 'fields', 'day', 'night'}
+ENTRY_KEYS = {'list', 'index', 'name', 'address', *EDIT_KEYS}
 CONDITION_KEYS = {'index', 'map', 'flag', 'when', 'mask'}
 
 

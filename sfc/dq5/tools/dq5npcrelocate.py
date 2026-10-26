@@ -28,6 +28,7 @@ from dq5npc import (  # noqa: E402
     ALT_END, ALT_START, NO_NPC, NPC_GROUPS, OVERRIDE_LISTS, all_lists, entry_size,
     list_entries, parse, script_address, script_bytes, script_ops, table_values,
 )
+from dq5npclists import FIND_OVERRIDE, assemble_find, condition_plan, list_plan, slot_guard  # noqa: E402
 from dq5npcrecord import edits as record_edits  # noqa: E402
 from dq5npcwrite import FORMAT as SCRIPT_FORMAT, dump_script, encode, validate_flow  # noqa: E402
 
@@ -93,8 +94,9 @@ def dump(rom):
 
 
 def replacements(rom, doc, known):
-    if not isinstance(doc, dict) or set(doc) - {'format', 'scripts'} or doc.get('format') != FORMAT:
-        raise ValueError(f'문서는 format={FORMAT}, scripts를 담은 객체여야 함')
+    if not isinstance(doc, dict) or set(doc) - {'format', 'scripts', 'lists', 'new_lists', 'overrides', 'no_npc'} \
+            or doc.get('format') != FORMAT:
+        raise ValueError(f'문서는 format={FORMAT}, scripts·lists·new_lists·overrides·no_npc 만 담은 객체여야 함')
     rows = doc.get('scripts', [])
     if not isinstance(rows, list):
         raise ValueError('scripts는 배열이어야 함')
@@ -117,9 +119,9 @@ def replacements(rom, doc, known):
     return out
 
 
-def repack_entry(rom, old, new, changes, records=None):
+def repack_entry(rom, old, new, changes, raw=None):
     size = entry_size(rom, old)
-    raw = (records or {}).get(old) or read(rom, old, size)
+    raw = raw or read(rom, old, size)
     if len(raw) != size:
         raise ValueError(f'{cpu(old)}: 고친 인물 레코드 길이가 원본과 다름')
     scripts = sorted(script_slots(rom, [(old, size)]))
@@ -143,16 +145,18 @@ def repack_entry(rom, old, new, changes, records=None):
     return bytes(out), mapping
 
 
-def pack_region(rom, lists, start, changes, prefix=0, records=None):
+def pack_region(rom, lists, start, changes, prefix=0):
+    """lists 는 [(목록 열쇠, [(원본 엔트리 주소, 엔트리 바이트)])]. 같은 원본을 두 번 쓰면 대응표에는 처음 것을 남긴다."""
     out = bytearray(prefix)
     mapping, scripts, entries = {}, {}, {}
-    for old, _ in lists:
-        mapping[old] = start + len(out)
-        for addr, size in list_entries(rom, old):
+    for key, items in lists:
+        mapping[key] = start + len(out)
+        for addr, raw in items:
             new = start + len(out)
-            raw, moved = repack_entry(rom, addr, new, changes, records)
-            entries[addr] = new
-            scripts.update(moved)
+            raw, moved = repack_entry(rom, addr, new, changes, raw)
+            entries.setdefault(addr, new)
+            for old, at in moved.items():
+                scripts.setdefault(old, at)
             out.extend(raw)
         out.append(0)
     if (start & 0xFFFF) + len(out) > 0x10000:
@@ -160,7 +164,7 @@ def pack_region(rom, lists, start, changes, prefix=0, records=None):
     return out, mapping, scripts, entries
 
 
-def patch(rom, doc, base=0x328000, alt=0x338000, records=None):
+def patch(rom, doc, base=0x328000, alt=0x338000, records=None, allow_growth=False):
     if type(base) is not int or type(alt) is not int:
         raise ValueError('목적지 주소는 정수여야 함')
     base, alt = destination(cpu(base)), destination(cpu(alt))
@@ -175,8 +179,20 @@ def patch(rom, doc, base=0x328000, alt=0x338000, records=None):
     changes = replacements(rom, doc, known)
     # 인물 레코드·조건 표 수정(dq5npcrecord.py)은 옮기는 사본에 넣는다. 원본 자리를 고쳐도 게임은 사본을 읽는다.
     edited = {at: new for at, new, old, _ in (record_edits(rom, records) if records is not None else []) if new != old}
-    first, lm1, sm1, em1 = pack_region(rom, base_lists, base, changes, GROUP_COUNT * 2, edited)
-    second, lm2, sm2, em2 = pack_region(rom, alt_lists, alt, changes, records=edited)
+    entry_edits = {at: v for at, v in edited.items() if not NO_NPC <= at < OVERRIDE_LISTS + OVERRIDE_COUNT * 6}
+    base_items, alt_items = list_plan(rom, doc, base_lists + alt_lists, entry_edits)
+    first, lm1, sm1, em1 = pack_region(rom, base_items, base, changes, GROUP_COUNT * 2)
+    second, lm2, sm2, em2 = pack_region(rom, alt_items, alt, changes)
+    overrides, no_npc, moved = condition_plan(rom, doc, edited, [key for key, _ in alt_items])
+    growth = slot_guard(rom, lists, base_items, alt_items, overrides, allow_growth)
+    if moved:
+        table = alt + len(second)
+        rows = b''.join(head + (lm2[key] & 0xFFFF).to_bytes(2, 'little') for head, key in overrides) + b'\xff'
+        routine = assemble_find(table, alt >> 16)
+        second.extend(rows + routine)
+        if (alt & 0xFFFF) + len(second) > 0x10000:
+            raise ValueError(f'{cpu(alt)}: 대체 목록·대체 표·루틴 {len(second)}바이트가 한 뱅크를 넘음')
+        find = table + len(rows)
     for i in range(GROUP_COUNT):
         old = 0x050000 | rom.u16(NPC_GROUPS + i * 2)
         if old not in lm1:
@@ -190,13 +206,21 @@ def patch(rom, doc, base=0x328000, alt=0x338000, records=None):
 
     original_write(0x128021, bytes([base >> 16]), '기본 인물 목록 뱅크')
     original_write(0x128051, (base & 0xFFFF).to_bytes(2, 'little'), '기본 그룹 포인터 표')
-    original_write(0x12833C, bytes([alt >> 16]), '대체 인물 목록 뱅크')
-    for addr, value, note in condition_writes(rom, edited, lm2):
-        original_write(addr, value, note)
-    layout = {'lists': {cpu(k): cpu(v) for k, v in (lm1 | lm2).items()},
+    if moved:
+        original_write(FIND_OVERRIDE, bytes([0x22, find & 0xFF, find >> 8 & 0xFF, find >> 16, 0x60]),
+                       f'대체 표 찾기를 {cpu(find)} 로(표 {cpu(table)} {len(overrides)}항목)')
+    else:
+        original_write(0x12833C, bytes([alt >> 16]), '대체 인물 목록 뱅크')
+        for addr, value, note in condition_writes(rom, edited, lm2):
+            original_write(addr, value, note)
+    if no_npc is not None:
+        original_write(NO_NPC, b''.join(no_npc) + b'\xff', f'빈 맵 표 {len(no_npc)}항목')
+    layout = {'lists': {(k if isinstance(k, str) else cpu(k)): cpu(v) for k, v in (lm1 | lm2).items()},
               'scripts': {cpu(k): cpu(v) for k, v in (sm1 | sm2).items()},
               'entries': {cpu(k): cpu(v) for k, v in (em1 | em2).items()},
-              'base_bytes': len(first), 'alt_bytes': len(second)}
+              'base_bytes': len(first), 'alt_bytes': len(second), 'slot_growth': growth}
+    if moved:
+        layout['override_table'], layout['override_find'] = cpu(table), cpu(find)
     return {'format': 'dq5patch/1', 'name': 'npc-relocate', 'rom_size': 2, 'writes': writes}, layout
 
 
@@ -288,6 +312,8 @@ def main():
     write.add_argument('--alt', default='33:8000')
     write.add_argument('--report')
     write.add_argument('--records', help='dq5npcrecord/1 문서. 레코드·조건 표 수정을 옮기는 사본에 넣는다')
+    write.add_argument('--allow-growth', action='store_true',
+                       help='맵의 원본 최대 대신 슬롯 1F 까지 인물을 늘림(맵에서 04:FB1C 등이 더 쓰는 슬롯은 따지지 않음)')
     sub.add_parser('check')
     args = parser.parse_args()
     try:
@@ -305,7 +331,9 @@ def main():
             if args.records:
                 with open(args.records, encoding='utf-8') as f:
                     records = json.load(f)
-            manifest, layout = patch(rom, doc, destination(args.base), destination(args.alt), records)
+            manifest, layout = patch(rom, doc, destination(args.base), destination(args.alt), records, args.allow_growth)
+            for line in layout['slot_growth']:
+                print(f'원본보다 많은 슬롯: {line}')
             save(args.out, manifest)
             if args.report:
                 save(args.report, layout)
