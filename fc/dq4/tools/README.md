@@ -29,7 +29,7 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 | --- | --- |
 | `dq4state.sh` | 전원 켜기부터 1장 왕좌의 방, 성 밖, 필드, 첫 전투까지 단계별로 입력을 재생해 세이브스테이트를 만들고 장면마다 좌표·맵 번호를 찍음. 같은 결과가 나오도록 MesenCE 에 `--nes.ramPowerOnState=AllZeros` 를 주고, 전원을 켜는 첫 단계는 `lua/debugsram.lua` 로 SRAM 을 `00` 으로 채움(MesenCE 의 `Saves/dq4.sav` 를 따르지 않게). `STATE_DIR` 로 출력 폴더. `MESENCE` 필요 |
 | `dq4warp.sh OUT GG/KK [X Y [DIR]]\|field F X Y` | DQ4 장면 이동. 1장 세이브스테이트에서 게임의 출구·맵 가장자리 루틴을 타고 목적지로 옮겨 `OUT/warp.mss`(조작 가능)를 만듦. 좌표를 빼면 그 맵으로 들어오는 출구의 도착 자리. `lua/warp.lua` 는 프로브의 `DRIVER` 로도 씀. `STATE` 는 상대 경로(워크트리 기준)도 되고, 앞 실행의 `end.mss` 에서 이어 갈 수 있음. [fc/dq4/docs/dq4-warp.md](../docs/dq4-warp.md) |
-| `dq4assets.sh [OUT]` | 비공개 에셋 저장소 `fc/dq4/` 전체(맵·필드·gfx·갤러리·스프라이트·몬스터·소리·장면 화면)를 롬 하나에서 다시 뽑아 OUT(기본 `work/dq4assets`, 빈 폴더)에 같은 배치로 둠. 먼저 `rom/dq4.nes` 의 SHA-1 을 검사. 장면 화면은 MesenCE 를 전원 켜기부터 정해 둔 입력으로 돌려 뜨고(1장 상태는 `dq4state.sh`, 2·5장은 디버그 장 고르기, 장 끝·엔딩은 `dq4warp.sh`) 덤프는 `work/dq4scenes/` 에 둠. `MESENCE` 가 없으면 장면 화면만 빠짐. 같은 커밋·롬이면 두 번 돌려 바이트까지 같음 |
+| `dq4assets.sh [OUT]` | 비공개 에셋 저장소 `fc/dq4/` 전체(맵·필드·gfx·갤러리·스프라이트·몬스터·소리·장면 화면)를 롬 하나에서 다시 뽑아 OUT(기본 `work/dq4assets`, 빈 폴더)에 같은 배치로 둠. 먼저 `rom/dq4.nes` 의 SHA-1 을 검사. 장면 화면은 `dq4scenes.py`(에뮬레이터 필요 없음), 덤프는 `work/dq4scenes/`. 같은 커밋·롬이면 두 번 돌려 바이트까지 같음 |
 
 ## Python과 프로브
 
@@ -66,6 +66,8 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 | `lua/fcgfxgate.lua` | FC: `AT` 프레임마다 메모리(RAM·SRAM·nametable·CHR·팔레트·OAM)는 앞 프레임, 화면은 그 프레임에 찍어 `SHOT_DIR/fNNNNN/end.*` 로(`dq4fcgfx.py verify` 가 바로 읽음, 폴더는 미리 만들 것). 입력은 `DRIVER` |
 | `lua/fcgfxslot.lua` | FC: 필드 그림 칸 몸통 `08:$8676` 진입(`SLOTS` 칸만)과 `WATCH` 범위 쓰기를 프레임·칸·표·PC·스택(`DEPTH` 바이트)과 함께 `fcgfxslot.txt` 로(바로 씀). 입력은 `DRIVER`(`eventwalk.lua` 등) |
 | `dq4cpu.py` | (모듈) 롬만으로 루틴을 따라가는 작은 6502 해석기: 공식 명령, `$FF91` 뱅크 전환, BRK 뱅크 호출(소리·메시지 형식은 건너뜀), `hooks`(주소 → 함수)·`stubs`(바로 RTS). `dq4fcsprite.py boss-steps` 가 씀 |
+| `dq4nes.py` | (모듈) `dq4cpu` 위의 작은 NES: MMC1(SUROM), PPU 레지스터·nametable·CHR RAM·팔레트·스크롤, OAM DMA, 패드, BRK·NMI, 프레임 29781사이클. 롬만으로 전원을 켜서 장면을 돌림. `snapshot()` 이 세이브스테이트 대신 |
+| `dq4scenes.py rom DIR [--sheet 단계 --every N --range A-B]` | 장면 화면 25개의 덤프를 `dq4nes` 로 롬만으로 뜸(전원 켜기, 새로 시작, 디버그 장 고르기, 장 끝 조건 + 워프, 엔딩). `scenes.json` 을 `dq4fcgfx.py scenes` 에 줌. `--sheet` 는 그 단계를 N 프레임마다 떠서 확인용 시트로. [fc/dq4/docs/dq4-fcgfx.md](../docs/dq4-fcgfx.md#롬만으로-뜬-장면) |
 | `lua/fcgfxrula.lua` | FC: ルーラ·キメラのつばさ 목록 순번 `$76` 을 `PICK` 으로 바꿔 `1E:$AE19` 에 원하는 목적지를 넣고, 레코드를 쓴 뒤 RAM 을 `fcgfxrula.txt` 로 |
 | `dq4shop.py rom [G K\|people\|hidden]` | DQ4 무기·방어구·도구 가게 목록 전부(장소별 값 `15:$B2F7`: 메달·코인 포함)와 여관 1인 값. `G K` 는 그 장소의 목록·여관·가게 인물(스크립트·호출로 여는 가게 포함), `--compare end.ram [end.sram]` 으로 가게 창 목록 `$07BD` 와 비교(SRAM 을 주면 덧붙임까지). `people` 은 롬 전체의 「인물 → 가게(종류·품목·여관 값)」 표와 들어갈 때 숨거나 옮겨지는 조건. `hidden [--json]` 은 맵에 들어갈 때 장소 루틴(`1C:$A010`·`$AD32`)이 인물마다 숨기거나 옮기는 조건 전부(루틴을 기호로 돌려 원자의 곱의 합으로 줄이고, 장 ⇔ `$6282`·한 곳에서만 켜는 장면 플래그 ⇒ 장 의 진행 관계로 나올 수 없는 조합을 거름. `--raw` 면 거르지 않음), `hidden G K --compare DIR` 은 `seq.lua`·`warp.lua` 덤프 폴더나 `lua/atpc.lua` 의 `at_*.bin`(`AT=9EB4`)의 (80,80) 슬롯과, 옮김·방향·간격·상태·그림 열을 예측과 비교 |
 | `dq4chest.py rom G K\|all\|check\|loot` | DQ4 보물상자(칸·내용물·열었음 플래그 `$625D`~)와 발밑 숨은 물건(특수 내용 설명 포함). `check` 맵마다(마지막 그룹 `48` 포함) 상자 칸 수와 개수 표 비교, `G K --compare end.sram` 으로 열었음 비트. `loot [--json]` 은 상자·발밑·タンス·つぼ·대화로 받는 물건을 합친 「맵·자리 → 얻는 것·플래그」 롬 전체 표 |
