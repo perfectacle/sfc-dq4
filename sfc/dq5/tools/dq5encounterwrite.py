@@ -9,7 +9,8 @@
 
 JSON format 은 dq5encounter/1.
   field_grids   index 0~4(dq5encounter.FIELD_GRIDS 순서), rows 는 17칸 줄의 배열(줄 수는 원래대로). 값은 구역 0~84
-  maps          map "BC/BD"(16진, 그룹 00~35), areas 는 $1948 = 0·1·2 일 때의 구역 셋(0~84, 255 = 조우 없음)
+  maps          map "BC/BD"(16진, 그룹 00~35 와 23:FDD6 의 50~54), areas 는 $1948 = 0·1·2 일 때의 구역 셋
+                (0~84, 255 = 조우 없음). patch --progress 패치 목록을 주면 그 패치가 더한 구역까지
   fixed_groups  index 0~8, members 는 1~3개의 {monster 0~235, count_code 0~14}
   event_groups  index 0~63, flags 첫 바이트(bit0-1 곡 0~2, bit4~7. 실측 안 된 bit2·3 은 받지 않음),
                 members 는 1~4개의 {monster 0~235, count 1~9}
@@ -21,7 +22,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from dq5encounter import (AREA_COUNT, EVENT_COUNT, EVENT_GROUPS, EVENT_SIZE, FIELD_GRIDS, FIELD_WIDTH,  # noqa: E402
+from dq5encounter import (AREA_COUNT, AREA_SIZE, EVENT_COUNT, EVENT_GROUPS, EVENT_SIZE, FIELD_GRIDS, FIELD_WIDTH,  # noqa: E402
                           FIXED, FIXED_COUNT, GROUPS, MAP_TABLE)
 from dq5map import Rom, lorom  # noqa: E402
 
@@ -32,6 +33,10 @@ MONSTER_MAX = 235
 COUNT_CODES = 15       # 23:EA63·23:EA73 의 마릿수 부호 0~14
 EVENT_COUNT_MAX = 9    # 이벤트 무리에서 실측한 가장 큰 마릿수(몬스터 00 9마리)
 NO_AREA = 0xFF
+# 01:8477: BC 가 50 이상이면 23:FDD6 의 [BC][포인터] 목록(FF 로 끝)에서 그룹을 찾고, 그 포인터의 [BD][6바이트] 목록
+# (BD 자리 FF 로 끝)에서 맵을 찾는다. 6바이트의 꼴은 그룹 00~35 의 항목과 같다.
+HIGH_GROUPS = 0x23FDD6
+HIGH_FIRST = 0x50
 
 
 def integer(value, maximum, name, minimum=0):
@@ -62,6 +67,24 @@ def map_slots(rom):
             raise ValueError(f'맵 그룹 {bc:02X} 의 항목 범위가 원래 꼴이 아님')
         for bd in range((q - p) // MAP_SIZE):
             out[bc, bd] = 0x230000 | p + bd * MAP_SIZE
+    return out | high_map_slots(rom)
+
+
+def high_map_slots(rom):
+    """그룹 50 이상의 (BC, BD) → 6바이트 항목 주소(23:FDD6, 코드 읽기 01:8477)."""
+    out, at = {}, HIGH_GROUPS
+    while (bc := rom.u8(at)) != 0xFF:
+        if bc < HIGH_FIRST:
+            raise ValueError(f'23:FDD6 목록에 그룹 {bc:02X}(50 미만)이 있음')
+        if any(key[0] == bc for key in out):
+            raise ValueError(f'23:FDD6 목록에 그룹 {bc:02X} 가 둘 있음(앞의 것만 읽힘)')
+        entry = 0x230000 | rom.u16(at + 1)
+        while (bd := rom.u8(entry)) != 0xFF:
+            if (bc, bd) in out:
+                raise ValueError(f'23:FDD6 목록에 맵 {bc:02X}/{bd:02X} 가 둘 있음(앞의 것만 읽힘)')
+            out[bc, bd] = entry + 1
+            entry += 1 + MAP_SIZE
+        at += 3
     return out
 
 
@@ -91,23 +114,23 @@ def member_list(value, most, name):
     return value
 
 
-def encode_grid(raw, rows, name):
+def encode_grid(raw, rows, name, areas=AREA_COUNT):
     if not isinstance(rows, list) or len(rows) != len(raw) // FIELD_WIDTH:
         raise ValueError(f'{name}: {len(raw) // FIELD_WIDTH}줄이어야 함')
     out = bytearray()
     for row in rows:
         if not isinstance(row, list) or len(row) != FIELD_WIDTH:
             raise ValueError(f'{name}: 줄마다 {FIELD_WIDTH}칸이어야 함')
-        out += bytes(integer(v, AREA_COUNT - 1, f'{name} 구역') for v in row)
+        out += bytes(integer(v, areas - 1, f'{name} 구역') for v in row)
     return bytes(out)
 
 
-def encode_map(raw, areas, name):
+def encode_map(raw, areas, name, count=AREA_COUNT):
     if not isinstance(areas, list) or len(areas) != 3:
         raise ValueError(f'{name}: areas 는 구역 셋이어야 함')
     for v in areas:
         if integer(v, NO_AREA, f'{name} 구역') != NO_AREA:
-            integer(v, AREA_COUNT - 1, f'{name} 구역(255 = 조우 없음)')
+            integer(v, count - 1, f'{name} 구역(255 = 조우 없음)')
     return bytes(areas) + raw[3:]
 
 
@@ -150,7 +173,8 @@ def encode_event(raw, change, name):
     return bytes(out)
 
 
-def edits(rom, doc):
+def edits(rom, doc, areas=AREA_COUNT):
+    integer(areas, NO_AREA, '구역 수', AREA_COUNT)
     fields(doc, {'format', 'field_grids', 'maps', 'fixed_groups', 'event_groups'}, '문서')
     if doc.get('format') != FORMAT:
         raise ValueError(f'format 은 {FORMAT} 이어야 함')
@@ -169,7 +193,7 @@ def edits(rom, doc):
                     raise ValueError(f'격자 {key}: condition 이 {FIELD_GRIDS[key][0]!r} 와 다름')
                 _, addr, count = FIELD_GRIDS[key]
                 raw = read(rom, addr, count * FIELD_WIDTH)
-                new = encode_grid(raw, row.get('rows'), f'격자 {key}')
+                new = encode_grid(raw, row.get('rows'), f'격자 {key}', areas)
             elif section == 'maps':
                 fields(row, {'map', 'areas'}, section)
                 text = row.get('map')
@@ -177,10 +201,10 @@ def edits(rom, doc):
                 key = tuple(int(v, 16) for v in parts) if len(parts) == 2 and all(
                     len(v) == 2 and all(c in '0123456789abcdefABCDEF' for c in v) for v in parts) else None
                 if key not in slots:
-                    raise ValueError(f'maps: {text!r} 는 구역 연결 표에 없는 맵(그룹 00~{GROUPS - 1:02X})')
+                    raise ValueError(f'maps: {text!r} 는 구역 연결 표에 없는 맵(그룹 00~{GROUPS - 1:02X}, 23:FDD6 의 50~)')
                 addr = slots[key]
                 raw = read(rom, addr, MAP_SIZE)
-                new = encode_map(raw, row.get('areas'), f'맵 {text}')
+                new = encode_map(raw, row.get('areas'), f'맵 {text}', areas)
             elif section == 'fixed_groups':
                 fields(row, {'index', 'members'}, section)
                 key = integer(row.get('index'), FIXED_COUNT - 1, 'fixed_groups index')
@@ -200,10 +224,23 @@ def edits(rom, doc):
     return out
 
 
-def patch(rom, doc, name='encounter'):
+def areas_in(progress):
+    """dq5progresswrite.py 패치 목록(dq5patch/1)에서 구역 수. 구역 표를 옮기지 않았으면 원래 수."""
+    tables = [w for w in progress.get('writes', []) if w.get('note') == 'area table relocated']
+    if len(tables) > 1:
+        raise ValueError('구역 표 쓰기가 둘 이상인 패치 목록')
+    if not tables:
+        return AREA_COUNT
+    size = len(bytes.fromhex(tables[0]['hex']))
+    if size % AREA_SIZE:
+        raise ValueError('구역 표 쓰기의 길이가 22 의 배수가 아님')
+    return size // AREA_SIZE
+
+
+def patch(rom, doc, name='encounter', areas=AREA_COUNT):
     return {'format': 'dq5patch/1', 'name': name, 'writes': [
         {'at': f'{addr >> 16:02X}:{addr & 0xFFFF:04X}', 'hex': new.hex(' '), 'orig': old.hex(' '), 'note': note}
-        for addr, new, old, note in edits(rom, doc) if new != old]}
+        for addr, new, old, note in edits(rom, doc, areas) if new != old]}
 
 
 def check(rom):
@@ -224,6 +261,7 @@ def main():
     write.add_argument('source')
     write.add_argument('-o', '--out', required=True)
     write.add_argument('--name', default='encounter')
+    write.add_argument('--progress', help='dq5progresswrite.py 패치 목록. 구역을 더했으면 그 구역 번호를 받음')
     sub.add_parser('check')
     args = parser.parse_args()
     try:
@@ -235,7 +273,12 @@ def main():
             result = dump(rom)
         else:
             with open(args.source, encoding='utf-8') as f:
-                result = patch(rom, json.load(f), args.name)
+                doc = json.load(f)
+            areas = AREA_COUNT
+            if args.progress:
+                with open(args.progress, encoding='utf-8') as f:
+                    areas = areas_in(json.load(f))
+            result = patch(rom, doc, args.name, areas)
         os.makedirs(os.path.dirname(args.out) or '.', exist_ok=True)
         with open(args.out, 'w', encoding='utf-8') as f:
             json.dump(result, f, ensure_ascii=False, indent=2)

@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dq5encounter import (EVENT_COUNT, EVENT_GROUPS, EVENT_SIZE, FIELD_GRIDS, FIELD_WIDTH, FIXED,  # noqa: E402
                           FIXED_COUNT, GROUPS, MAP_TABLE)
-from dq5encounterwrite import FORMAT, dump, patch  # noqa: E402
+from dq5encounterwrite import FORMAT, HIGH_GROUPS, areas_in, dump, patch  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
 
 MAPS_START = 0x23F54E
@@ -24,6 +24,11 @@ def fixture():
     off = lorom(MAPS_START)
     for k in range(((MAP_TABLE - MAPS_START)) // 6):
         data[off + k * 6:off + k * 6 + 6] = bytes([k % 85, 0x14, 0xFF, 0x07, 0x01, 0x09])
+    # 그룹 50 이상: 23:FDD6 에 그룹 51 하나, 그 목록에 맵 50·51.
+    off = lorom(HIGH_GROUPS)
+    data[off:off + 4] = bytes([0x51, 0xE0, 0xFD, 0xFF])
+    off = lorom(0x23FDE0)
+    data[off:off + 15] = bytes.fromhex('50 ff ff 3d 13 01 09 51 ff ff 3e 13 01 09 ff')
     for g in range(FIXED_COUNT):
         off = lorom(FIXED + g * 6)
         data[off:off + 6] = bytes([0x10 + g, 0x20, 0xFF, 0x13, 0x02, 0x60])
@@ -77,6 +82,36 @@ class EncounterWriteTest(unittest.TestCase):
     def test_event_flags_alone(self):
         manifest = patch(self.rom, {'format': FORMAT, 'event_groups': [{'index': 0, 'flags': 0x40}]})
         self.assertEqual([w['hex'] for w in manifest['writes']], ['40 00 05 ff ff 01 02 00 00 00 07 00 09'])
+
+    def test_high_group_maps_and_area_count(self):
+        maps = {row['map']: row['areas'] for row in dump(self.rom)['maps']}
+        self.assertEqual((maps['51/50'], maps['51/51']), ([0xFF, 0xFF, 0x3D], [0xFF, 0xFF, 0x3E]))
+        manifest = patch(self.rom, {'format': FORMAT, 'maps': [{'map': '51/51', 'areas': [1, 2, 3]}]})
+        self.assertEqual([w['at'] for w in manifest['writes']], ['23:FDE8'])
+        self.assertEqual(Rom(apply(self.data, manifest)).d[lorom(0x23FDE8):lorom(0x23FDE8) + 6], bytes.fromhex('010203130109'))
+        doc = {'format': FORMAT, 'maps': [{'map': '01/02', 'areas': [85, 86, 255]}]}
+        with self.assertRaises(ValueError):
+            patch(self.rom, doc)
+        self.assertEqual(len(patch(self.rom, doc, areas=87)['writes']), 1)
+        grid = dump(self.rom)['field_grids'][0]
+        doc = {'format': FORMAT, 'field_grids': [{**grid, 'rows': [[86] * FIELD_WIDTH] + grid['rows'][1:]}]}
+        self.assertEqual(len(patch(self.rom, doc, areas=87)['writes']), 1)
+        relocated = {'writes': [{'note': 'area table relocated', 'hex': '00' * 22 * 87}]}
+        self.assertEqual((areas_in(relocated), areas_in({'writes': []})), (87, 85))
+        for bad in ({'writes': [{'note': 'area table relocated', 'hex': '00' * 23}]},
+                    {'writes': [relocated['writes'][0]] * 2}):
+            with self.assertRaises(ValueError):
+                areas_in(bad)
+        for areas in (84, 256, True):
+            with self.subTest(areas=areas), self.assertRaises(ValueError):
+                patch(self.rom, doc, areas=areas)
+        twice = bytearray(self.data)
+        twice[lorom(HIGH_GROUPS) + 3:lorom(HIGH_GROUPS) + 7] = bytes([0x51, 0xE0, 0xFD, 0xFF])
+        with self.assertRaises(ValueError):
+            dump(Rom(bytes(twice)))
+        for case in ({'map': '51/52', 'areas': [1, 1, 1]}, {'map': '50/50', 'areas': [1, 1, 1]}):
+            with self.subTest(case=case), self.assertRaises(ValueError):
+                patch(self.rom, {'format': FORMAT, 'maps': [case]})
 
     def test_rejects(self):
         grid = dump(self.rom)['field_grids'][3]

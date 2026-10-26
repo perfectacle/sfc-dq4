@@ -8,8 +8,8 @@ from dq5encounter import AREAS, AREA_COUNT, AREA_SIZE, area  # noqa: E402
 from dq5growth import exp_at, stat_at  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
 from dq5progresswrite import (  # noqa: E402
-    FORMAT, GROWTH, RECORD, SHOP_BANK, SHOP_COUNTS, SHOP_TABLE, STATS, STAT_OFFSETS, dump, edits,
-    encode_growth, growth_fields, patch, shop_records,
+    AREA_LONG, AREA_OPERANDS, FORMAT, GROWTH, GROWTH_BASE, RECORD, SHOP_BANK, SHOP_COUNTS, SHOP_TABLE, STATS,
+    STAT_OFFSETS, dump, edits, encode_growth, growth_fields, parse_at, patch, shop_records, table_bases,
 )
 from dq5shop import COIN_PRICES, END, LISTS, MEDAL_PRICES, prize_lists, shop_lists  # noqa: E402
 
@@ -51,6 +51,13 @@ def fixture():
     for i in range(6):
         off = lorom(COIN_PRICES + i * 3)
         data[off:off + 3] = (100 * (i + 1)).to_bytes(3, 'little')
+    for kind, at in GROWTH_BASE.items():
+        data[lorom(at):lorom(at) + 3] = bytes([0xA2]) + (GROWTH[kind][0] & 0xFFFF).to_bytes(2, 'little')
+    for at, field in AREA_OPERANDS:
+        data[lorom(at)] = 0xA9 if at == 0x23EA50 else 0xBD
+        data[lorom(at + 1):lorom(at + 3)] = ((AREAS & 0xFFFF) + field).to_bytes(2, 'little')
+    data[lorom(AREA_LONG)] = 0xBF
+    data[lorom(AREA_LONG + 1):lorom(AREA_LONG + 4)] = AREAS.to_bytes(3, 'little')
     return bytes(data)
 
 
@@ -174,6 +181,80 @@ class ProgressWriteTests(unittest.TestCase):
         for bad in (0x40FBB0, 0x0B7000, 0x0BFFF0):
             with self.subTest(at=bad), self.assertRaises(ValueError):
                 patch(self.rom, big, shop_at=bad)
+
+    def with_operands(self):
+        return self.data
+
+    def test_append_and_relocate(self):
+        data = self.with_operands()
+        rom = Rom(data)
+        self.assertEqual(table_bases(rom), {'person': GROWTH['person'][0], 'monster': GROWTH['monster'][0],
+                                            'area': AREAS})
+        person_count, monster_count = GROWTH['person'][1], GROWTH['monster'][1]
+        change = doc(growth=[{'kind': 'person', 'index': person_count, 'base': 0, 'exp2': 33},
+                             {'kind': 'person', 'index': person_count + 1, 'base': 3},
+                             {'kind': 'person', 'index': 0, 'exp2': 44}],
+                     encounters=[{'index': AREA_COUNT, 'base': 1, 'level': 77},
+                                 {'index': 2, 'level': 66}])
+        places = {'area': 0x23C242, 'person': AREAS}
+        manifest = patch(rom, change, places=places, reuse_names=True)
+        updated = Rom(apply(data, manifest))
+        bases = table_bases(updated)
+        self.assertEqual(bases, {'person': AREAS, 'monster': GROWTH['monster'][0], 'area': 0x23C242})
+        old_people = [growth_fields(rom.d[lorom(GROWTH['person'][0] + i * RECORD):][:RECORD]) for i in range(person_count)]
+        new_people = [growth_fields(updated.d[lorom(AREAS + i * RECORD):][:RECORD]) for i in range(person_count + 2)]
+        self.assertEqual(new_people[0]['exp2'], 44)
+        self.assertEqual(new_people[1:person_count], old_people[1:])
+        self.assertEqual(new_people[person_count], {**old_people[0], 'exp2': 33})
+        self.assertEqual(new_people[person_count + 1], old_people[3])
+        new_areas = [updated.d[lorom(0x23C242 + i * AREA_SIZE):][:AREA_SIZE] for i in range(AREA_COUNT + 1)]
+        self.assertEqual(new_areas[AREA_COUNT][0], 77)
+        self.assertEqual(new_areas[AREA_COUNT][1:], new_areas[1][1:])
+        self.assertEqual(new_areas[2][0], 66)
+        self.assertEqual(updated.d[lorom(GROWTH['monster'][0]):][:RECORD * monster_count],
+                         rom.d[lorom(GROWTH['monster'][0]):][:RECORD * monster_count])
+
+    def test_append_and_relocate_rejects(self):
+        rom = Rom(self.with_operands())
+        person_count = GROWTH['person'][1]
+        cases = [
+            (doc(growth=[{'kind': 'person', 'index': person_count, 'base': 0}]), {}, False),
+            (doc(growth=[{'kind': 'person', 'index': person_count + 1, 'base': 0}]), {'person': 0x23FF20}, False),
+            (doc(growth=[{'kind': 'person', 'index': person_count}]), {'person': AREAS}, False),
+            (doc(growth=[{'kind': 'person', 'index': 0, 'base': 1}]), {}, False),
+            (doc(growth=[{'kind': 'person', 'index': 64, 'base': 0}]), {'person': AREAS}, False),
+            (doc(encounters=[{'index': AREA_COUNT, 'base': 0}]), {'area': 0x23C242}, False),
+            (doc(encounters=[{'index': 255, 'base': 0}]), {'area': 0x23C242}, True),
+            (doc(), {'area': 0x23FF20}, False),
+            (doc(), {'person': 0x23FF20, 'monster': 0x23FF20}, False),
+            (doc(), {'shop': 0x23FF20}, False),
+            # 옮기지 않은 사람 표 자리로 구역 표가 넘어감
+            (doc(), {'area': AREAS + 0x10}, False),
+            # 둘 다 빈 자리 안이지만 서로 겹침(구역 1,870바이트를 이름 자리 끝에서 4,000바이트 앞에 두고 사람을 그 안에)
+            (doc(), {'area': 0x23D6A1 - 4000, 'person': 0x23D6A1 - 4000 + 100}, True),
+        ]
+        for change, places, reuse in cases:
+            with self.subTest(change=change, places=places), self.assertRaises(ValueError):
+                patch(rom, change, places=places, reuse_names=reuse)
+        # 몬스터 표를 이름 자리로 옮기고, 떠난 자리에 사람 표를 자기 원래 자리와 겹치게 둔다.
+        manifest = patch(rom, doc(growth=[{'kind': 'monster', 'index': GROWTH['monster'][1], 'base': 2}]),
+                         places={'monster': 0x23C242, 'person': GROWTH['person'][0] + RECORD}, reuse_names=True)
+        updated = Rom(apply(self.data, manifest))
+        self.assertEqual(table_bases(updated)['monster'], 0x23C242)
+        self.assertEqual(table_bases(updated)['person'], GROWTH['person'][0] + RECORD)
+        self.assertEqual(updated.d[lorom(0x23C242 + GROWTH['monster'][1] * RECORD):][:RECORD],
+                         rom.d[lorom(GROWTH['monster'][0] + 2 * RECORD):][:RECORD])
+        with self.assertRaises(ValueError):
+            dump(updated)
+        broken = bytearray(self.data)
+        broken[lorom(AREA_OPERANDS[0][0])] = 0xEA
+        with self.assertRaises(ValueError):
+            table_bases(Rom(bytes(broken)))
+        # 원래 자리로 「옮기면」 바뀌는 바이트가 없어 쓰기가 없다.
+        self.assertEqual(patch(rom, doc(), places={'person': GROWTH['person'][0]})['writes'], [])
+        for value in ('24:8000', '23:7FFF', '238000', '23:80000', None):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                parse_at(value, 'x')
 
     def test_invalid_documents(self):
         bad = [None, [], {}, doc(extra=[]), doc(growth=None), doc(growth=[None]),
