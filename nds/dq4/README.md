@@ -8,7 +8,7 @@ NDS 「ドラゴンクエストIV 導かれし者たち」(일본판)과 그 한
 - [docs/rom-map.md](docs/rom-map.md): 파일 시스템 지도, 한글 팬패치가 바꾼 파일
 - [docs/text-format.md](docs/text-format.md): 대사 파일 MPT0·표지·파일 묶음, 폰트 NFTR, 한글 팬패치 방식과 대응표
 - [docs/script-format.md](docs/script-format.md): 이벤트 스크립트(`SCRIPT/*.bin`) 블록·실행 방식·명령표·깃발, 6장 이벤트
-- [docs/glossary.md](docs/glossary.md): 명칭 대조표(FC·DS 일본어·DS 영어·한글 팬패치), 본문은 [docs/glossary-table.md](docs/glossary-table.md)
+- [docs/glossary.md](docs/glossary.md): 명칭 대조표(FC·DS 일본어·DS 영어·한글 팬패치)와 채택 이름·근거, 본문은 [docs/glossary-table.md](docs/glossary-table.md). 채택의 정본은 [tables/adopt.tsv](tables/adopt.tsv), 정발 용어 출처는 [tables/kr-official.tsv](tables/kr-official.tsv)
 - [docs/extras.md](docs/extras.md): DS 판에서 늘어난 것과 이식 판단
 - [docs/param-format.md](docs/param-format.md): `PARAM` 표(동료 대화 조건·몬스터·가게·メダル·카지노·얻는 물건)
 - [docs/graphics-format.md](docs/graphics-format.md): 그래픽 형식(텍스처·인물 팩·DSSA 조립 애니메이션·3D 맵과 배치표·2D 아이콘·글꼴), 참고용 추출과 갤러리
@@ -97,3 +97,4 @@ STEPS="gfx screens" nds/dq4/tools/ndsassets.sh OUT     # 단계 고르기(unpack
 - [2026-10-26-04: 글자 효과음이 나는 길, `%a` 값을 대는 코드, 메뉴의 빈 글자, PARAM 나머지 표](journal/2026-10-26-04-text3.md)
 - [2026-10-26-05: 행동 표, 상태 번호, 내성 값 1·2, 동료 대화의 세 값](journal/2026-10-26-05-actions.md)
 - [2026-10-26-06: 메모리 감시 코어로 DSSA 반투명·동작 표·LOCN·필드 지도 번호 찾기](journal/2026-10-26-06-graphics4.md)
+- [2026-10-26-07: 명칭 대조표의 채택 열 채우기](journal/2026-10-26-07-glossary2.md)
