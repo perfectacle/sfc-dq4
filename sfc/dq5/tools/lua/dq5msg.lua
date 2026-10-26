@@ -106,7 +106,7 @@ local function vflush()
 end
 if vmadd then
   -- VMADD($2116/2117)를 쓴 PC 와 주소, MDMAEN($420B)을 쓴 PC 와 그때 켠 채널의 B 버스·A 주소·길이·VMADD
-  emu.addMemoryCallback(function(adr, v)
+  local function vmaddw(adr, v)
     local s = emu.getState()
     local pc = string.format("%02X:%04X", s["cpu.k"], s["cpu.pc"])
     if adr & 0xFFFF == 0x2116 then
@@ -116,8 +116,8 @@ if vmadd then
       vpend = nil
       vlast = (v << 8) | vlo; vrec(string.format("VMADD %04X pc=%s", vlast, pc))
     end
-  end, emu.callbackType.write, 0x2116, 0x2117)
-  emu.addMemoryCallback(function(adr, v)
+  end
+  local function mdmaen(adr, v)
     vflush()
     local s = emu.getState()
     local pc = string.format("%02X:%04X", s["cpu.k"], s["cpu.pc"])
@@ -131,7 +131,15 @@ if vmadd then
         vrec(string.format("DMA ch%d bbus=21%02X src=%06X len=%04X%s pc=%s", ch, bb, aa, len, tag, pc))
       end
     end
-  end, emu.callbackType.write, 0x420B, 0x420B)
+  end
+  -- 레지스터는 뱅크 00~3F·80~BF 어디로든 쓸 수 있다(2B:82C2 STA $2109 처럼 데이터 뱅크가 00 이 아닌 곳)
+  for bank = 0, 0xBF do
+    if bank < 0x40 or bank >= 0x80 then
+      local base = bank * 0x10000
+      emu.addMemoryCallback(vmaddw, emu.callbackType.write, base + 0x2116, base + 0x2117)
+      emu.addMemoryCallback(mdmaen, emu.callbackType.write, base + 0x420B, base + 0x420B)
+    end
+  end
 end
 local maxf = tonumber(os.getenv("MAXF") or "1000")
 emu.addEventCallback(function()
