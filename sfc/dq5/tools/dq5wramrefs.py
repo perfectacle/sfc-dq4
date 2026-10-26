@@ -96,6 +96,8 @@ def cdl_starts(d, cdl):
 
 # 형식 문서에 「빈틈없이 이어진다」 고 적힌 자료 덩어리(CPU 주소, [시작, 끝)). 이 안의 바이트는 그 형식의 자료다.
 KNOWN = [
+    ('전투 메시지 자료', 0x078000, 0x07980E),    # dq5battletext.py: 색인 24:AECD 의 첫 값이 07:8000, 글자 그림 앞까지
+    ('글자 그림', 0x07980E, 0x07D77C),           # dq5-text-format.md: 1bpp, 07:980E~07:D77B
     ('메시지 자료', 0x07D77C, 0x0C8020),         # dq5-text-format.md: 3,200개가 07:D77C~0C:8020 에 이어짐
     ('인물 목록', 0x058651, 0x05D4B1),           # dq5-map-format.md: 54개 그룹 목록이 05:8651~D4B1 에 빈틈없이
     ('대체 인물 목록', 0x108000, 0x10DDB1),       # dq5-map-format.md: 대체 목록이 10:8000~DDB1 에 빈틈없이
@@ -109,6 +111,7 @@ KNOWN = [
     ('창 레코드', 0x04ED04, 0x04FA34),
     ('상점 목록', 0x04FBDD, 0x04FD55),           # dq5-data-format.md: 04:FBDD~FD54 에 빈틈없이
     ('맵 레코드', 0x0F8F43, 0x0FCF68),           # dq5-map-format.md: 레코드는 0F:8F43 ~ 0F:CF68
+    ('출구·영역 이동 표', 0x2AD812, 0x2AF224),     # dq5-build-format.md: 원래 표 자리 2A:D812~2A:F223
     ('엔딩 스태프 롤', 0x1EF5B8, 0x1EFEEC),       # dq5-text-format.md: 1E:F5B8~1E:FEEB(F5 로 끝)
     ('행동 → 연출 번호 표', 0x268BE0, 0x268C75),  # dq5fx.py: 26:8BE0 [행동] 95개
     ('인물 놓지 않는 표', 0x12839C, 0x12839C + 43 * 4),   # dq5-map-format.md: 12:839C 43개 x [BC][BD][플래그][마스크]
@@ -229,6 +232,11 @@ def decoded_ranges(d):
     import dq5chestwrite
     for name, (start, count, size) in dq5chestwrite.TABLES.items():
         out.append(('보상 표', off(start), off(start) + count * size + (0 if name == 'chests' else 2)))
+    # 필드(dq5field.py): 세 세계의 지도·9번째 비트 RLE, 필드 BG 타일 RLE, 블록 정의(층마다 511 x 5바이트)
+    import dq5field
+    for a in [x for w in dq5field.WORLDS for x in w] + [dq5field.FIELD_CHR]:
+        out.append(('필드 RLE', off(a), off(dq5field.rle(rom, a)[1])))
+    out.append(('필드 블록 정의', off(dq5field.BLOCK_LOWER), off(dq5field.BLOCK_UPPER) + 511 * 5))
     for a, n in fx_script_ranges(rom):
         out.append(('연출 스크립트', off(a), off(a) + n))
     return out
@@ -359,10 +367,48 @@ def gap_decode(d, cdl, cs, o, brk_args):
     return verdict or '명령 중간', None
 
 
-def pattern(d, cdl, o):
+def boundary_decode(d, cdl, cs, o, brk_args):
+    """자료 표시 바로 뒤 바이트를 명령 시작으로 보고 다음 실행 명령까지 네 가지 M·X 폭으로 읽는다. 다음 실행 명령 시작에 꼭
+    닿는 폭들이 모두 후보를 명령 중간으로 읽으면 '명령 중간', 그 밖은 None. 1바이트 명령처럼 읽히는 자료(2B 2B 2A …)도
+    명령 시작으로 이어지므로 명령 시작 판정은 쓰지 않는다."""
+    from kr_patch.sfc.dis65816 import decode
+    from kr_patch.sfc.mapper import LoROM
+    mapper = LoROM()
+    base = o - o % 0x8000
+    i = o - 1
+    while i >= base and not cdl[i] & 3:
+        i -= 1
+    j = o + 1
+    while j < base + 0x8000 and not cdl[j] & 3:
+        j += 1
+    if j >= base + 0x8000 or j not in cs:
+        return None
+    verdicts = set()
+    for m8 in (False, True):
+        for x8 in (False, True):
+            p, v, mm, xx = i + 1, None, m8, x8
+            while p < j:
+                if p == o:
+                    v = '명령 시작'
+                op = d[p]
+                n = 2 + brk_args(d[p + 1]) if op == 0x00 else decode(d, cpu(p), m8=mm, x8=xx, mapper=mapper)[1]
+                if op == 0xC2:
+                    mm, xx = mm and not d[p + 1] & 0x20, xx and not d[p + 1] & 0x10
+                elif op == 0xE2:
+                    mm, xx = mm or bool(d[p + 1] & 0x20), xx or bool(d[p + 1] & 0x10)
+                if v is None and p < o < p + n:
+                    v = '명령 중간'
+                p += n
+            if p == j:
+                verdicts.add(v)
+    return '명령 중간' if verdicts == {'명령 중간'} else None
+
+
+def pattern(d, cdl, o, brk_args=None):
     """실측이 아닌 모양 판정(문서에는 「보임」 으로 적는다). 앞뒤 가장 가까운 CDL 표시가 모두 자료이고 그 틈이 16바이트
     이하면 '짧은 자료 틈', 피연산자 둘레(-8~+10)에 1씩 느는 바이트 6개 이상이나 같은 간격으로 느는 16비트 값 5개 이상이
-    이어지면 '증가 수열'. 둘 다 아니면 None."""
+    이어지면 '증가 수열'. 바로 앞 1~3바이트에 BRK 와 서비스 번호가 있고 그 인자 바이트가 후보를 덮으면 'BRK 인자 안'
+    (코드라면 BRK 의 인자, 자료라면 명령이 아님). 모두 아니면 None."""
     base = o - o % 0x8000
     i = o - 1
     while i >= base and not cdl[i] & 3:
@@ -373,6 +419,10 @@ def pattern(d, cdl, o):
     if i >= base and j < base + 0x8000 and cdl[i] & 2 and cdl[j] & 2 and not cdl[i] & 1 and not cdl[j] & 1 \
             and j - i - 1 <= 16:
         return '짧은 자료 틈'
+    if brk_args:
+        for k in range(1, 4):
+            if d[o - k - 1] == 0x00 and k <= brk_args(d[o - k]):
+                return 'BRK 인자 안'
     w = d[o - 8:o + 11]
     run = best = 1
     for k in range(1, len(w)):
@@ -503,13 +553,19 @@ def main():
             else:
                 v, landed = gap_decode(d, cdl, cs, o, ba)
                 j = v + ('' if landed is None else ', 틈 끝 맞음' if landed else ', 틈 끝 어긋남')
-                if v != '명령 중간' and pattern(d, cdl, o):
-                    j = pattern(d, cdl, o) + ' 보임(' + j + ')'
+                pat = pattern(d, cdl, o, ba) if v != '명령 중간' else None
+                if pat:
+                    j = pat + ' 보임(' + j + ')'
+                elif v in ('자료에서 끊김', '앞 코드 없음'):
+                    bv = boundary_decode(d, cdl, cs, o, ba)
+                    if bv:
+                        j = '자료 뒤부터 읽으면 ' + bv + ' 보임'
             judged[(k in KINDS[:7], j)] += 1
             rows2.append((k, o, det, j))
 
         def coarse(j):
-            return ('명령 시작' if j.startswith('명령 시작') else '명령 중간' if j.startswith('명령 중간') else
+            return ('명령 시작' if j.startswith('명령 시작') else
+                    '명령 중간' if j.startswith('명령 중간') else
                     '모양으로 자료 보임' if '보임' in j else '자료 구조 안' if j.endswith(' 안') else '미정')
         cols = ('자료 구조 안', '명령 중간', '모양으로 자료 보임', '명령 시작', '미정')
         print('\nCDL 표시가 없는 후보의 판정(디코더·형식 문서의 자료 구조 안, 앞의 실행 명령부터 틈 이어 읽기, 모양):')
