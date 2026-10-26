@@ -106,6 +106,7 @@ uv run --locked python sfc/dq5/tools/dq5flags.py rom/dq5.sfc 2191       # 그 �
 | `2192.7` | 선실 파파스가 「港に着いたか」를 말한 뒤 켬. 17/00 에 인물을 놓지 않고 17/01 목록을 바꿈 | [dq5-text-format.md](dq5-text-format.md), 인물 목록 표 |
 | `2194.7` | 첫 필드 이벤트를 건너뜀(필드 맵별 루틴 `FE` 항목) | [handoff.md](../handoff.md), 실측 |
 | `21A5.7` | 첫 필드 이벤트 뒤 `06:CFC8` 이 켬. 켜져 있으면 조작·조우 없음 | 위, 실측 |
+| `21D1.5`·`.4` | 10/00 수문을 연 뒤 물이 흐르는 중(`.5`)·빠지는 중(`.4`). `03:EA42` 가 `.5` 를 켜고 맵별 루틴 `03:EA62` 가 `.4` 로 넘김 | [dq5-map-format.md 「맵별 루틴」](dq5-map-format.md), 실측 |
 | `21B1.6` | 몬스터가 동료가 되는 조건 | [dq5-data-format.md](dq5-data-format.md) |
 | `21B3.3` | 신부가 ビアンカ | [dq5-text-format.md](dq5-text-format.md), 실측 |
 | `21C9`(바이트) | 조우 효과(トヘロス·せいすい·においぶくろ·まもののエサ) | [dq5-data-format.md](dq5-data-format.md), 실측 |
