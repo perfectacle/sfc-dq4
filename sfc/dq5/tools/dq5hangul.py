@@ -378,21 +378,28 @@ def wintest(data):
     return checksum(d), [f'창 접두 {WIN_PREFIX:02X}: 훅 {WIN_HOOK:06X}, 글자 {len(WINTEST_TEXT)}개 {WIN_GLYPHS:06X}, VRAM 타일 {WIN_TILE:02X}']
 
 
-def decode_check(data):
-    """retree 롬을 롬만으로 다시 풀어 원본 메시지와 같은지(129 제외) 센다. 디코더 사본·새 색인·훅을 그대로 따른다."""
+def decode_check(data, decoder=None, bank_mask=0x20):
+    """디코더의 트리 피연산자와 색인을 따라 메시지 전체를 푼다. 기본값은 retree 배치다."""
     rom = Rom(data)
-    t1 = (NEW_BANK << 16) | rom.u16(NEW_BANK << 16 | 0x8000 | (NODES_1_OPERAND - DECODER))
-    t0 = (NEW_BANK << 16) | rom.u16(NEW_BANK << 16 | 0x8000 | (NODES_0_OPERAND - DECODER))
-    root = rom.u16(NEW_BANK << 16 | 0x8000 | (ROOT_OPERAND - DECODER))
+    decoder = NEW_BANK << 16 | 0x8000 if decoder is None else decoder
+    bank = decoder & 0xFF0000
+    t1 = bank | rom.u16(decoder + NODES_1_OPERAND - DECODER)
+    t0 = bank | rom.u16(decoder + NODES_0_OPERAND - DECODER)
+    root = rom.u16(decoder + ROOT_OPERAND - DECODER)
     out = []
+    remaining_bits = len(data) * 8
     for g in range(MESSAGES // 16):
         v = rom.u24(INDEX + g * 3)
-        addr, bit = (v >> 3) | 0x200000, v & 7
+        addr, bit = (v >> 3) | (bank_mask << 16), v & 7
         for _m in range(16):
             msg = []
             while True:
-                x = root
+                x, seen = root, set()
                 while True:
+                    if x in seen or remaining_bits <= 0:
+                        raise ValueError('허프만 트리 순환 또는 메시지 비트 한계 초과')
+                    seen.add(x)
+                    remaining_bits -= 1
                     b = (rom.u8(addr) >> bit) & 1
                     bit += 1
                     if bit == 8:
