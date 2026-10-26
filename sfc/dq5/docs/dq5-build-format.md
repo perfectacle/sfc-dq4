@@ -11,6 +11,7 @@
 - [2026-10-26-41: 실내 맵 레코드 쓰기 도구](../journal/2026-10-26-41-mapwrite.md)
 - [2026-10-26-46: 블록 배치 목록을 맵 명령으로](../journal/2026-10-26-46-mapcompile.md)
 - [2026-10-26-49: 필드 세계 지도 쓰기 도구](../journal/2026-10-26-49-fieldwrite.md)
+- [2026-10-26-53: 이벤트·인물 스크립트 쓰기 도구](../journal/2026-10-26-53-scriptwrite.md)
 
 ## 흐름
 
@@ -84,6 +85,8 @@ uv run --locked python sfc/dq5/tools/dq5build.py rom/dq5.sfc fromrom work/hangul
 | `dq5mapwrite.py` | 실내 맵 레코드(머리·배치 비트스트림·속성 패스)와 맵 포인터 | `dq5map/1` JSON |
 | `dq5mapcompile.py` | 블록 배치 목록 → 배치 명령(`dq5mapwrite.py` 의 입력) | `dq5mapsrc/1` JSON |
 | `dq5fieldwrite.py` | 필드 세계 지도 셋(RLE 두 덩어리)과 불러오기 루틴의 원본 주소 | 칸마다 16비트 블록 번호 `.bin` |
+| `dq5eventwrite.py` | 이벤트 명령과 지정한 이벤트·번호 표 항목 | `dq5event/1` JSON |
+| `dq5npcwrite.py` | 기존 인물 슬롯 안의 명령 | `dq5npcscript/1` JSON |
 
 ### 게임 데이터 표 `dq5tables/1`
 
@@ -224,6 +227,69 @@ uv run --locked python sfc/dq5/tools/dq5fieldwrite.py rom/dq5.sfc check
 - `check`: 세 세계 여섯 덩어리를 다시 싸서 풀면 모두 원래와 같았습니다.
 - 세계 0 을 고치지 않고 옮긴 2MB 롬과, 블록 (172~176, 25~28) 을 블록 307(9번째 비트가 켜진 언덕)으로 칠한 롬을 만들었습니다. `dq5warp.lua` `FIELD=341,56` 으로 필드에 서서 `00:8090` 에서 WRAM 을 덤프하자 두 롬 모두 `7F:0000`·`7E:E000` 이 입력 지도와 바이트까지 같았고, 고친 롬은 주인공 오른쪽의 산이 언덕으로 바뀌어 보였습니다.
 
+### 이벤트 스크립트 `dq5event/1`
+
+`sfc/dq5/tools/dq5eventwrite.py` 는 [이벤트 명령](dq5-event-format.md)을 JSON으로 내보내고, 편집한 명령을 확장 뱅크에 놓습니다. `patch` 는 `binding` 으로 지정한 표 항목만 바꿉니다.
+
+```sh
+uv run --locked python sfc/dq5/tools/dq5eventwrite.py rom/dq5.sfc dump --number 41 -o work/event.json
+uv run --locked python sfc/dq5/tools/dq5eventwrite.py rom/dq5.sfc patch work/event.json -o work/event.dq5patch.json
+uv run --locked python sfc/dq5/tools/dq5eventwrite.py rom/dq5.sfc check
+```
+
+명령의 `op` 는 두 자리 16진 문자열이고 `args` 는 바이트 정수 목록입니다. 메시지 번호와 네이티브 주소도 롬에 쓰는 순서인 하위 바이트부터 적습니다. `C3` 점프만 `args` 대신 `target` 에 24비트 CPU 주소 정수 또는 명령의 `label` 을 적습니다.
+
+```json
+{"format":"dq5event/1", "binding":{"kind":"number","index":65},
+ "commands":[{"op":"10","args":[37,16]}, {"op":"FF"}]}
+```
+
+이 예는 번호 `41` 의 스크립트를 플래그 `7E:21B5` 에 `10` 을 OR하고 끝내는 명령으로 바꿉니다. `binding.index` 는 정수이므로 65가 번호 `41` 입니다. CLI의 `--number` 는 16진수, `--event` 는 0~9의 이벤트 번호입니다. `binding.kind` 를 `event` 로 쓰면 이벤트 표 `23:E2C2` 의 `index` 항목을 바꾸고, `x`·`y` 로 목표 좌표도 지정할 수 있습니다. 좌표를 빼면 원래 값을 보존합니다.
+
+- `dump 주소` 는 임의 시작점을 읽지만 표 연결을 고르지 않습니다. `patch` 하려면 `binding` 을 넣어야 합니다.
+- `encode 입력 -o 출력.bin --at 60:8000` 은 패치 목록 없이 명령 바이트만 만듭니다. 내부 라벨을 쓰면 배치 주소가 필요합니다.
+- `patch` 의 기본 위치는 `60:8000` 이며 4MB 롬을 만듭니다. `--at` 으로 바꿀 수 있고, 스크립트 하나가 뱅크 끝을 넘으면 다음 뱅크 첫머리에 놓습니다.
+- 같은 주소를 가리키는 다른 표 항목이나 스크립트 중간을 가리키는 항목은 그대로 둡니다. 코드 안에 직접 적힌 주소, 계산해서 만든 주소, 외부 주소로 적은 `C3` 대상도 자동으로 고치지 않습니다.
+- 마지막 명령은 `FF` 또는 `C3` 여야 합니다. 모르는 명령, 인자 수·값 범위 오류, 정의하지 않은 라벨, 한 뱅크보다 긴 코드는 거부합니다.
+- 번호 `1A`·`1B`·`1C`·`3C` 는 원본에서 코드를 가리키므로 `dump` 는 거부합니다. 새 명령을 작성해 그 표 항목을 지정하는 것은 별개입니다.
+
+### 인물 스크립트 `dq5npcscript/1`
+
+`sfc/dq5/tools/dq5npcwrite.py` 는 [인물 인라인 명령](dq5-map-format.md#인라인-스크립트-01c800)을 편집합니다. 인물 목록의 뱅크와 레코드 경계를 유지하기 위해 기존 슬롯 안에서만 패치합니다. 더 긴 스크립트는 `encode` 로 바이트를 만들 수 있지만 목록에 넣거나 재배치하는 기능은 아직 없습니다.
+
+```sh
+uv run --locked python sfc/dq5/tools/dq5npcwrite.py rom/dq5.sfc dump 05:A84F -o work/npc.json
+uv run --locked python sfc/dq5/tools/dq5npcwrite.py rom/dq5.sfc patch work/npc.json -o work/npc.dq5patch.json
+uv run --locked python sfc/dq5/tools/dq5npcwrite.py rom/dq5.sfc encode work/npc.json -o work/npc.bin
+uv run --locked python sfc/dq5/tools/dq5npcwrite.py rom/dq5.sfc check
+```
+
+`address` 는 첫 명령 주소가 아니라 **길이 바이트 주소**입니다. 선실 파파스는 `05:A84F` 에 길이 23이 있고 첫 명령이 `05:A850` 에 있습니다. `dump` 의 `references` 는 그 슬롯을 사용하는 인물 엔트리와 낮·밤을 보여 줍니다. 공유 슬롯을 바꾸면 참조하는 시간대 모두 바뀝니다.
+
+```json
+{"format":"dq5npcscript/1", "address":"05:A84F", "length":23,
+ "commands":[
+   {"op":"06","args":[15,1],"target":"on"},
+   {"op":"2B","args":[5,13]}, {"op":"16"},
+   {"op":"2B","args":[8,13],"label":"on"}, {"op":"16"}
+ ]}
+```
+
+이 예는 플래그 `7E:219F` 의 bit0에 따라 인물을 (5,13) 또는 (8,13)으로 옮기고 멈춥니다. 명령의 `op` 는 두 자리 16진 문자열, `args` 는 바이트 정수 목록입니다. `03`·`06`·`07` 의 마지막 변위 바이트를 `target` 라벨로 바꿔 적을 수 있습니다. `03` 은 명령 주소+1, `06`·`07` 은 명령 주소에서 변위를 계산합니다. 변위는 −128~127이고 도착점은 스크립트 안의 명령 첫 바이트여야 합니다. `04` 절대 점프와 `05`·`37` 네이티브 주소는 원시 바이트 인자를 그대로 씁니다.
+
+- `patch` 는 `address` 가 원본 인물 슬롯이고 `length` 가 원본 길이와 같은지 확인합니다. 길이 바이트를 유지하고 남는 부분은 `00`(그 자리)으로 채웁니다. 원본보다 길면 거부합니다.
+- 바뀐 슬롯은 도달 가능한 명령 흐름이 슬롯 끝이나 명령 중간으로 넘어가는지 검사합니다. 외부 절대 점프·네이티브 호출의 동작까지 해석하지는 않습니다. 원본과 같은 패치는 원본의 끝 명령을 보존합니다.
+- 모르는 명령, 인자 수·범위 오류, 중복·미정의 라벨, 잘못된 상대 분기를 거부합니다. 길이 바이트 한계가 있어 새 명령 본문도 1~255바이트여야 합니다.
+- `encode` 는 길이 바이트를 뺀 명령 본문만 내보냅니다. 롬에 쓸 때는 `patch` 와 빌더의 슬롯·원본 대조를 거칩니다.
+
+### 스크립트 쓰기 검증
+
+이벤트 시작점 106개(2,420바이트)와 연속 영역 86개(1,664바이트), 인물 고유 스크립트 1,034개(21,559바이트)를 JSON으로 내보내고 다시 인코딩해 원본과 모두 같았습니다. 이벤트 두 집합은 일부가 겹칩니다. 인물의 낮·밤 참조는 1,274개입니다.
+
+MesenCE에서는 번호 표와 이벤트 표를 거쳐 `60:8000`의 플래그 변경·보행·종료 명령을 실행했습니다. 두 경우 모두 주인공이 (9,11)에서 (11,11)로 갔고 `7E:220F`에 `40`이 들어갔습니다. 인물은 `03`의 무조건 분기, `06`의 플래그 꺼짐·켜짐, `07`의 사각형 안·밖을 시험해 다섯 경우 모두 예상 좌표에 멈췄습니다. 이 확인은 시험용 명령의 실행 결과이며 모든 이야기 장면을 다시 돌린 것은 아닙니다.
+
+재현은 [스크립트 쓰기 일지](../journal/2026-10-26-53-scriptwrite.md)에 있습니다.
+
 ## 빈 자리 지도
 
 ### 원래 롬
@@ -333,5 +399,5 @@ uv run --locked python sfc/dq5/tools/dq5fieldwrite.py rom/dq5.sfc check
 
 ## 남은 것
 
-- 쓰기 도구가 아직 없는 것: 필드 블록 정의(`2A:A32C`·`2A:AD27`)·입구 표(`04:FD97`), 이벤트·인물 스크립트 인코더, 대사 대량 넣기, 성장 표(`23:EB50`)·조우 구역 레코드(`23:96F3`)·상점 목록.
+- 쓰기 도구가 아직 없는 것: 필드 블록 정의(`2A:A32C`·`2A:AD27`)·입구 표(`04:FD97`), 인물 목록의 가변 길이 재배치, 대사 대량 넣기, 성장 표(`23:EB50`)·조우 구역 레코드(`23:96F3`)·상점 목록.
 - `dq5tables.py` 의 물건·주문·피해량·동료 표 쓰기는 읽기 도구와 값을 대조했을 뿐, 고친 롬을 게임에서 돌려 보지는 않았습니다.

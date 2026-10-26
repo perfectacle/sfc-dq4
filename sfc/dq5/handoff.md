@@ -4,6 +4,8 @@ SFC DQ5 엔진을 분석하는 세션이 처음 읽는 문서입니다. 지금�
 
 ## 지금 상태
 
+포팅용 스크립트 쓰기는 `dq5eventwrite.py`·`dq5npcwrite.py`로 이어집니다([쓰기 형식](docs/dq5-build-format.md#이벤트-스크립트-dq5event1)). 이벤트는 지정한 표 항목을 확장 뱅크로 연결하고, 인물은 기존 슬롯 길이를 유지합니다. 원본 왕복 비교와 MesenCE 실측 7건을 마쳤습니다([일지](journal/2026-10-26-53-scriptwrite.md)). 다음 쓰기 도구는 필드 블록·입구 표이며, 인물 목록 재배치는 남아 있습니다.
+
 해킹 일지(dq5) 2026-10-25-06 까지 풀었습니다. 형식은 [dq5-map-format.md](docs/dq5-map-format.md), [dq5-field-format.md](docs/dq5-field-format.md), [dq5-text-format.md](docs/dq5-text-format.md), [dq5-data-format.md](docs/dq5-data-format.md), [dq5-graphics-format.md](docs/dq5-graphics-format.md) 에 있습니다.
 
 | 영역 | 상태 | 확인 방법 |
@@ -109,7 +111,7 @@ STATE=… FIELD=341,56 GROUP=2C SETTLE=300 SAVE=battle-2c.mss …
 2. **전투** — 몬스터 그림은 [dq5-graphics-format.md](docs/dq5-graphics-format.md)(아무 몬스터와 싸우기: 위 전투 재현에 `POKE="7E1001=<번호>;7E1005=1"`, 덤프는 `sfc/dq5/tools/lua/dq5battledump.lua`). 남은 것은 전투 모드 메시지(`24:8C39`, 색인 `24:AECD`, 디코더 `24:9E47`). 조우 표는 [dq5-data-format.md 「전투 조우」](docs/dq5-data-format.md#전투-조우-23e7c2). 걸음마다의 구역·조우율은 `sfc/dq5/tools/lua/dq5warptrace.lua`(`dq5warp.lua` + 기록)로 `00:82AF` 를 찍어 `dq5encounter.py --steps` 로 대조합니다([일지 2026-10-25-14](journal/2026-10-25-14-encounter2.md)). 남은 것은 todo 의 「조우의 남은 것」.
 3. **인물 스크립트의 남은 것** — 데이터에 나오는 명령은 모두 실측했습니다([일지 2026-10-25-95](journal/2026-10-25-95-npc-script4.md)). 그림 고르기(`32A0`·`33A0`·`23 n`)도 OAM 타일로 맞췄습니다([일지 2026-10-25-114](journal/2026-10-25-114-npc-script5.md)). 주인공 とびら 명령 쪽의 `7E:1E8E` 도 주인공의 층 `$C3` 이라는 것을 [dq5-map-format.md 「인라인 스크립트」](docs/dq5-map-format.md) 의 `41`·`43` 줄에서 실측해, 남은 것은 없습니다. 실험대는 배 선실 파파스 스크립트(파일 오프셋 `2A850`, 23바이트)를 덮고 사다리 목적지를 `E0090B0117` 로 둔 뒤 `tools/lua/wlog.lua` 로 인물 표를 적는 것이고, 그림을 견줄 때는 `1A` 로 애니메이션을 먼저 끕니다.
 4. **텍스트의 남은 것**(창 레코드 머리 일부, 한글 넣기: 전투·창 글자를 그리는 길).
-5. **포팅용 쓰기 도구** — 표는 `dq5tables.py`(export → JSON 고치기 → patch → `dq5build.py build`), 실내 맵은 `dq5mapcompile.py extract`·`compile`(블록 배치 목록 ↔ 명령)과 `dq5mapwrite.py`(dump → 명령 고치기 → patch, 필드는 `dq5fieldwrite.py`. 늘린 뱅크로 옮기고 포인터를 바꿈. 확인은 `atpc.lua` `AT=01BA4C` 덤프를 `dq5map.py --compare`). 형식은 [dq5-build-format.md 「쓰기 도구」](docs/dq5-build-format.md#쓰기-도구). 고친 롬은 `dq5battle.lua` 를 롬 인자만 바꿔 돌리면 됩니다. 다음 도구는 todo 의 「쓰기 도구」 순서대로.
+5. **포팅용 쓰기 도구** — 표는 `dq5tables.py`(export → JSON 고치기 → patch → `dq5build.py build`), 실내 맵은 `dq5mapcompile.py extract`·`compile`(블록 배치 목록 ↔ 명령)과 `dq5mapwrite.py`(dump → 명령 고치기 → patch, 필드는 `dq5fieldwrite.py`. 늘린 뱅크로 옮기고 포인터를 바꿈. 확인은 `atpc.lua` `AT=01BA4C` 덤프를 `dq5map.py --compare`). 형식은 [dq5-build-format.md 「쓰기 도구」](docs/dq5-build-format.md#쓰기-도구). 고친 롬은 `dq5battle.lua` 를 롬 인자만 바꿔 돌리면 됩니다. 이벤트·인물 스크립트는 `dq5eventwrite.py`·`dq5npcwrite.py`입니다. 선실 파파스의 길이 바이트는 `05:A84F`(본문 `05:A850`, 23바이트)입니다. `dq5scriptcheck.py`로 새 명령 실행을 재현합니다. 다음 도구는 todo 의 「쓰기 도구」 순서대로.
 
 조사 실험 요령: 앞 칸을 보려면 몸을 돌리는 입력을 `right:8` 처럼 길게 주고, 명령 창은 `a:8;wait:60;down:6;wait:25;down:6;wait:25;down:6;wait:25;right:6;wait:25;a:8`(しらべる)로 엽니다.
 상자 내용물을 바꿔 보려면 `ROMPATCH` 에 `F6E4E + 번호*2` 오프셋을 파일 바이트 순서로 줍니다.
