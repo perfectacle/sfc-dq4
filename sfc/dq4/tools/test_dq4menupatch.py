@@ -42,6 +42,17 @@ class RecordTests(unittest.TestCase):
         start = bne + 2 + (code[bne + 1] - 0x100)
         self.assertEqual(code[start:start + 4], bytes((0x8A, 0x99, 0x00, 0x00)))
 
+    def test_b_check_branches_reach_ignore_and_keep(self):
+        code = mp.b_check()
+        ignore = code.index(bytes((0x68, 0x68, 0x60)))
+        for i in range(len(mp.TOP_MENUS) - 1):
+            at = 8 + i * 4
+            self.assertEqual(code[at + 2], 0xF0)
+            self.assertEqual(at + 4 + code[at + 3], ignore)
+        last = 8 + (len(mp.TOP_MENUS) - 1) * 4
+        self.assertEqual(last + 4 + code[last + 3], ignore + 3)
+        self.assertEqual(code[ignore + 3:], bytes.fromhex('ade80a60'))
+
     def test_tiles_leave_bg12_tile_zero_empty(self):
         atlas = mp.Atlas.__new__(mp.Atlas)
         atlas.cols = [None] * mp.Atlas.FIRST + [[[1] * 8] * mp.BAND]
@@ -67,6 +78,13 @@ class BuildTests(unittest.TestCase):
             a, old, _ = self.records[n]
             self.assertEqual(mp.window_addr(self.out, n) & 0xFFFF, a & 0xFFFF)
             self.assertEqual(mp.window_record(self.out, mp.window_addr(self.rom, n)), old)
+
+    def test_cursor_tramps_call_original_movers(self):
+        for site, target in mp.CURSOR_MOVES.items():
+            o = mp.lorom(site)
+            self.assertEqual(self.out[o], 0x20)
+            t = mp.lorom(0x040000 | int.from_bytes(self.out[o + 1:o + 3], 'little'))
+            self.assertEqual(self.out[t + 4:t + 7], bytes((0x20, target & 0xFF, target >> 8)))
 
     def test_records_fit_and_end_with_80(self):
         for n, (a, old, new) in self.records.items():

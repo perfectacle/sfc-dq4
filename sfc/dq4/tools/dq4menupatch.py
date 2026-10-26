@@ -307,6 +307,52 @@ def upload_code():
         0x5C, MENU_ENTRY & 0xFF, MENU_ENTRY >> 8 & 0xFF, MENU_ENTRY >> 16))
 
 
+# 커서 이동 효과음. 04:CB29 선택 고리의 네 방향 처리기(위 CB5A·아래 CC0E·왼쪽 CC2F·오른쪽 CC5C)가 자리를 옮기는
+# JSR 을 트램펄린으로 바꾸고, 커서 자리 $0AD7 이 바뀌었을 때만 BRK 19 33 00(창을 열고 고를 때의 소리, 기다리지 않음)을 낸다.
+CURSOR_SE = 0x33
+CURSOR_MOVES = {0x04CB66: 0xD584, 0x04CC1A: 0xD68C, 0x04CC47: 0xD794, 0x04CC73: 0xD82E}
+# B(취소, $24 bit6)는 04:CCA1 BVS → 04:CD0A 로 창을 닫는다. 창 스택 맨 위($09FF + $0AD6)가 첫 메뉴면 아무것도 하지 않는다.
+B_CANCEL = 0x04CD0A
+TOP_MENUS = (0x5E, 0x5F, 0x60)
+
+
+def cursor_common():
+    """트램펄린이 넘긴 옛 $0AD7(스택)과 지금 값이 다르면 효과음. 이어서 처리기로 RTS."""
+    return bytes((0x68, 0xCD, 0xD7, 0x0A, 0xF0, 0x04,          # PLA / CMP $0AD7 / BEQ +4
+                  0x00, 0x19, CURSOR_SE, 0x00, 0x60))         # BRK 19 33 00 / RTS
+
+
+def cursor_tramp(target, common):
+    return bytes((0xAD, 0xD7, 0x0A, 0x48,                     # LDA $0AD7 / PHA
+                  0x20, target & 0xFF, target >> 8,           # JSR 원래 자리 옮기기
+                  0x4C, common & 0xFF, common >> 8 & 0xFF))   # JMP common
+
+
+def b_check():
+    """04:CD0A 의 LDA $0AE8 자리에서 JSR. 첫 메뉴면 이 JSR 과 CC9D 의 JSR 을 함께 버려 선택 고리로 돌아간다."""
+    head = bytes((0xDA, 0xAE, 0xD6, 0x0A, 0xBD, 0xFF, 0x09, 0xFA))   # PHX / LDX $0AD6 / LDA $09FF,X / PLX
+    body = bytearray()
+    for i, n in enumerate(TOP_MENUS):
+        left = len(TOP_MENUS) - 1 - i
+        if left:
+            body += bytes((0xC9, n, 0xF0, 4 * left))         # CMP #n / BEQ ignore
+        else:
+            body += bytes((0xC9, n, 0xD0, 0x03))             # CMP #n / BNE keep
+    return head + bytes(body) + bytes((0x68, 0x68, 0x60,       # ignore: PLA / PLA / RTS
+                                        0xAD, 0xE8, 0x0A, 0x60))  # keep: LDA $0AE8 / RTS
+
+
+def place(data, slack, code):
+    """뱅크 04 의 줄어든 레코드 뒤 빈자리(끝 80 뒤라 읽는 곳이 없음)에 code 를 두고 주소를 돌려준다."""
+    spot = next((s for s in slack if s[1] - s[0] >= len(code)), None)
+    if spot is None:
+        raise ValueError(f'뱅크 04 빈자리가 모자람({len(code)}바이트)')
+    a = spot[0]
+    put(data, a, code)
+    spot[0] += len(code)
+    return a
+
+
 def put(data, addr, b, expect=None):
     o = lorom(addr)
     if expect is not None and bytes(data[o:o + len(expect)]) != expect:
@@ -346,6 +392,13 @@ def build(rom, font):
             put(data, 0x04EB48 + m * 2, (spot[0] & 0xFFFF).to_bytes(2, 'little'))
         records[n][0] = spot[0]
         spot[0] += len(new)
+    slack.sort(key=lambda s: s[0] - s[1])
+    check = place(data, slack, b_check())
+    put(data, B_CANCEL, bytes((0x20, check & 0xFF, check >> 8 & 0xFF)), bytes.fromhex('ade80a'))
+    common = place(data, slack, cursor_common())
+    for site, target in CURSOR_MOVES.items():
+        t = place(data, slack, cursor_tramp(target, common))
+        put(data, site, bytes((0x20, t & 0xFF, t >> 8 & 0xFF)), bytes((0x20, target & 0xFF, target >> 8)))
     kr, jp = bytearray(), bytearray()
     for i, (n, rows) in enumerate(sorted(SHARED.items())):
         a = window_addr(data, n)
