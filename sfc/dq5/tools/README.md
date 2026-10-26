@@ -24,7 +24,7 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5boottest.py 원래롬 만든롬` | 부팅 시험: 두 롬을 전원부터 켜(RAM 0, 새 SRAM) 6,500프레임에 배 선실(17/00)에 닿는지와 11개 프레임의 VRAM·CGRAM·OAM·WRAM 해시가 같은지. `--allow-diff` 는 첫 장면만. `--scenes 세이브스테이트` 는 배 선실에서 필드 걷기·전투·메뉴·가게 대화 네 장면도 해시·끝 상태로 견줌. `MESENCE` 필요 |
 | `dq5freesweep.py rom 세이브스테이트 OUT` | 빈 자리 22곳(`dq5build.py free`)을 실내 맵 346곳·몬스터 236종 전투·필드 세계 0~2 에서 롬 읽기·실행 감시(`--kinds maps,battles,field`), `OUT/summary.txt` 에 읽힌 것. `MESENCE` 필요 |
 | `dq5chest.py rom [BC BD]` | DQ5 보물상자(번호·칸·열림 플래그·내용물), タンス·ツボ·タル 항목, 발밑 표(`1E:F08B`), 두 칸 앞 표(`1E:F435`). 물건 이름과 `D000`~`D009` 의 뜻까지 |
-| `dq5items.py rom` | DQ5 숨은 물건 전부를 맵별로(상자·タンス 류·발밑·두 칸 앞·필드). `--check` 로 모든 맵의 상자·タンス·ツボ·タル 칸과 표 맞추기, `--medals` 로 ちいさなメダル 자리, `--slots` 로 슬롯 기계 9대의 자리·코인·그림 수 |
+| `dq5items.py rom` | DQ5 숨은 물건 전부를 맵별로(상자·タンス 류·발밑·두 칸 앞·필드). `--check` 로 모든 맵의 상자·タンス·ツボ·タル 칸과 표 맞추기, `--medals` 로 ちいさなメダル 자리, `--slots` 로 슬롯 기계 9대의 자리·코인·그림 수, `--slot-odds` 로 기계마다 배당 확률과 코인 한 장당 기대 수익, `--slot-stop 기계 시작자리 난수` 로 릴 다섯이 멈출 `$1294` 와 배당 |
 | `dq5shop.py rom` | DQ5 상점 품목 목록(종류·마을 그룹 키)과 물건 가격, 작은 메달·코인 교환 값, 격투장 시합 50개(문턱 레벨·倍率), 슬라임 레이스 바탕 줄과 倍率 식(`slime_odds`), 여관 1인 값 |
 | `dq5growth.py rom` | DQ5 레벨업 성장 표: 사람(`23:9E41`, `--person`)·동료 몬스터(`23:A1B1`, `--monster`) 레코드의 레벨 1~99 능력치 일곱과 누적 경험치(`stat_at`·`exp_at`·`gains`) |
 | `dq5sram.py rom 세이브` | DQ5 SRAM 세이브 8KB: 머리 두 곳, 쓰는 칸 비트, 모험의 서 3칸의 상태·체크섬(저장값과 `25:8450` 계산값)·주인공 이름·레벨·금화. `--fix out` 으로 체크섬을 다시 계산해 씀 |
@@ -92,4 +92,5 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `lua/dq5shots.lua` | 드라이버 앞에 붙여 정한 프레임 범위의 화면 버퍼(`emu.getScreenBuffer`, 늦게 찍히지 않음)를 남김. `dq5effectgif.py`·`dq5titlegif.py` 가 씀 | `FROM`, `TO`, `STEP` | `sNNNNN.raw`(32비트 ARGB), `size.txt` |
 | `lua/dq5titlefx.lua` | 타이틀 세이브스테이트에서 프레임 끝마다 `$075B`·`$71`·`$75`·`7E:A000`~`A1E6`·`7E:A4DC`~·OAM 앞 48바이트를 남김. `dq5titlefx.py --check` 가 읽음 | `STATE`, `MAXF` | `titlefx.bin` |
 | `lua/dq5fxdump.lua` | DQ5: 드라이버(보통 `dq5battle.lua`)로 싸우며 `22:D73C`(A = 연출 번호)부터 `22:D796` 뒤 `POST` 프레임까지 프레임마다 덤프. 같은 번호는 처음 한 번만 | `ONLY`, `POST`(기본 4), `SHOTS=1` | `fx.txt`, `eNN-kkk.vram`·`.cgram`·`.oam`·`.ppu`·`.png` |
+| `lua/dq5fx3e.lua` | DQ5: 드라이버(보통 `dq5battle.lua`)로 싸우며 연출 스크립트 명령 `3E` 가 부르는 22 뱅크 루틴마다(`22:DBE1`~`22:D934`) WRAM 읽기·쓰기, PPU·DMA 쓰기, 변수 `7E:9E73`~ 의 바뀐 값, 배치 표 `7E:5BA0`~`5BFF` 를 한 줄씩. NMI·IRQ 안의 접근은 뺌 | `MAXCALL`(같은 연출의 같은 루틴을 자세히 적는 횟수, 기본 3) | `3e.txt` |
 | `lua/dq5vramlog.lua` | DQ5: VRAM 에 올리는 곳 찾기. `$420B` DMA 마다 B 버스 대상·원본·크기·VRAM 주소, `$2118`/`$2119` 를 쓰는 PC(다음 명령 주소)별 첫 프레임·VRAM 주소·횟수. 레지스터 미러 뱅크 `00`~`3F`·`80`~`BF` 모두 감시 | `FROM`, `STOPF`, `BBUS`(16진, 0 이면 전부), `VLO`·`VHI`(VRAM 워드) | `dma.txt`, `vport.txt` |
