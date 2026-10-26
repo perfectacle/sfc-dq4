@@ -1,4 +1,4 @@
-"""DQ5(SFC) 곡·효과음 시퀀스를 악보로: 다시 쌀 수 있는 글(.txt), MIDI(.mid), MusicXML(.musicxml).
+"""DQ5(SFC) 곡·효과음 시퀀스를 악보로: 다시 쌀 수 있는 글(.txt), MIDI(.mid), MusicXML(.musicxml), 판각 악보 SVG(-score-NN.svg, verovio).
 형식은 sfc/dq5/docs/dq5-sound-format.md 의 「시퀀스 형식」·「악보 내보내기」. 롬만 읽는다(에뮬레이터·세이브스테이트 없음).
 
 시퀀스 0x47개 전부를 낸다. 곡(00~31)은 <번호>(곡 변수 0)와 갈래가 있으면 <번호>-<갈래>, 효과음(32~)은 갈래마다
@@ -22,6 +22,7 @@
   MusicXML 은 4/4 박자로 보고 마디를 자른다(롬에 박자 정보는 없다). 음 길이는 온음표~128분 셋잇단을 이어 붙여 나타낸다.
 """
 import argparse
+import concurrent.futures
 import json
 import math
 import os
@@ -442,13 +443,15 @@ def to_musicxml(perf, tunes, title, meter=None):
             pos = nxt
         if pos < total:
             segs.append((pos, total - pos, None))
+        ps = sorted(midi_pitch(nt) for nt in tr['notes'] if not nt['noise'])
+        clef = '<sign>F</sign><line>4</line>' if ps and ps[len(ps) // 2] < 60 else '<sign>G</sign><line>2</line>'
         xs = []
         for m, (a, b) in enumerate(spans):
             num = m if pickup else m + 1
             x = [f'<measure number="{num}"' + (' implicit="yes">' if pickup and m == 0 else '>')]
             if m == 0:
                 x.append(f'<attributes><divisions>{PPQ}</divisions><key><fifths>0</fifths></key>'
-                         f'<time><beats>{beats}</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef>'
+                         f'<time><beats>{beats}</beats><beat-type>4</beat-type></time><clef>{clef}</clef>'
                          '</attributes>')
             if i == 0:
                 for t, v in sorted(tempo_at.items()):
@@ -474,94 +477,17 @@ def to_musicxml(perf, tunes, title, meter=None):
             f'<part-list>{"".join(plist)}</part-list>{"".join(parts)}</score-partwise>\n')
 
 
-# ---- SVG(시간 비례 오선 악보) ----
+# ---- SVG(판각 악보) ----
 
-LETTER = [0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6]     # 반음 → 음이름 칸(C=0 … B=6)
-SVG_X, SVG_BARS, SVG_LINE = 1.0, 4, 8             # 1틱 = 1px, 한 줄 마디 수, 오선 간격
-
-
-def to_svg(perf, title, meter=None):
-    """마디선·음표 머리·올림표·기둥·꼬리를 그리고 음 길이를 가는 가로줄로 보이는 시간 비례 악보. 트랙마다 한 오선,
-    마디 SVG_BARS 개씩 줄을 바꾼다. 음 높이가 낮은 트랙(가운데 값 < 60)은 낮은음자리표."""
-    beats, bar, pickup = meter or (4, MEASURE, 0)
-    tracks = [tr for tr in perf['tracks']]
-    end = max(perf['end'], 1)
-    bounds = ([0] if pickup else []) + list(range(pickup, end + bar, bar))
-    if bounds[-1] < end:
-        bounds.append(bounds[-1] + bar)
-    spans = list(zip(bounds, bounds[1:]))
-    rows = [spans[i:i + SVG_BARS] for i in range(0, len(spans), SVG_BARS)]
-    staff_h, gap, left = SVG_LINE * 4, 46, 60
-    sys_h = len(tracks) * (staff_h + gap) + 24
-    width = left + int(bar * SVG_BARS * SVG_X) + 20
-    height = 50 + len(rows) * sys_h
-    out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" '
-           'font-family="sans-serif">', f'<rect width="{width}" height="{height}" fill="white"/>',
-           f'<text x="{left}" y="22" font-size="15">{escape(title)}</text>',
-           f'<text x="{left}" y="40" font-size="11" fill="#555">{beats}/4(추정) ♩={perf["tempo"][0][1]}  1px = 1틱</text>']
-    clefs = []
-    for tr in tracks:
-        ps = sorted(midi_pitch(nt) for nt in tr['notes'] if not nt['noise'])
-        clefs.append('F' if ps and ps[len(ps) // 2] < 60 else 'G')
-    for r, row in enumerate(rows):
-        y0 = 50 + r * sys_h
-        a0 = row[0][0]
-        for i, tr in enumerate(tracks):
-            top = y0 + i * (staff_h + gap) + 16
-            bottom = top + staff_h
-            x1 = left + (row[-1][1] - a0) * SVG_X
-            out.append(f'<text x="4" y="{top + 20}" font-size="10" fill="#555">t{i} {clefs[i]}</text>')
-            for k in range(5):
-                out.append(f'<line x1="{left}" y1="{top + k * SVG_LINE}" x2="{x1:.1f}" y2="{top + k * SVG_LINE}" '
-                           'stroke="#999" stroke-width="0.6"/>')
-            for a, b in row:
-                xa = left + (a - a0) * SVG_X
-                out.append(f'<line x1="{xa:.1f}" y1="{top}" x2="{xa:.1f}" y2="{bottom}" stroke="#333" stroke-width="0.8"/>')
-                if i == 0:
-                    num = bounds.index(a) + (0 if pickup else 1)
-                    out.append(f'<text x="{xa + 2:.1f}" y="{top - 4}" font-size="8" fill="#777">{num}</text>')
-            out.append(f'<line x1="{x1:.1f}" y1="{top}" x2="{x1:.1f}" y2="{bottom}" stroke="#333" stroke-width="0.8"/>')
-            lo_d = 4 * 7 + 2 if clefs[i] == 'G' else 2 * 7 + 4      # 아래 줄: E4 / G2
-            for nt in tr['notes']:
-                if not (a0 <= nt['tick'] < row[-1][1]):
-                    continue
-                x = left + (nt['tick'] - a0) * SVG_X
-                ln = min(nt['len'], row[-1][1] - nt['tick']) * SVG_X
-                if nt['noise']:
-                    yy = top + 2 * SVG_LINE
-                    out.append(f'<text x="{x - 3:.1f}" y="{yy + 3:.1f}" font-size="9">x</text>')
-                    continue
-                p = midi_pitch(nt)
-                d = (p // 12 - 1) * 7 + LETTER[p % 12]
-                yy = bottom - (d - lo_d) * SVG_LINE / 2
-                out.append(f'<line x1="{x:.1f}" y1="{yy:.1f}" x2="{x + ln:.1f}" y2="{yy:.1f}" stroke="#7aa6d8" stroke-width="2"/>')
-                for ly in range(1, 40):
-                    lyy = bottom + ly * SVG_LINE
-                    if lyy > yy + 0.1:
-                        break
-                    out.append(f'<line x1="{x - 6:.1f}" y1="{lyy}" x2="{x + 6:.1f}" y2="{lyy}" stroke="#333" stroke-width="0.6"/>')
-                for ly in range(1, 40):
-                    lyy = top - ly * SVG_LINE
-                    if lyy < yy - 0.1:
-                        break
-                    out.append(f'<line x1="{x - 6:.1f}" y1="{lyy}" x2="{x + 6:.1f}" y2="{lyy}" stroke="#333" stroke-width="0.6"/>')
-                fill = 'white' if nt['len'] >= 96 else 'black'
-                out.append(f'<ellipse cx="{x:.1f}" cy="{yy:.1f}" rx="4.4" ry="3.2" fill="{fill}" stroke="black" stroke-width="1" '
-                           f'transform="rotate(-20 {x:.1f} {yy:.1f})"/>')
-                if ALTER[p % 12]:
-                    out.append(f'<text x="{x - 13:.1f}" y="{yy + 4:.1f}" font-size="11">♯</text>')
-                if nt['len'] < 192:
-                    up = yy > top + 2 * SVG_LINE
-                    sx = x + 4 if up else x - 4
-                    sy = yy - 26 if up else yy + 26
-                    out.append(f'<line x1="{sx:.1f}" y1="{yy:.1f}" x2="{sx:.1f}" y2="{sy:.1f}" stroke="black" stroke-width="1"/>')
-                    flags = 3 if nt['len'] <= 6 else 2 if nt['len'] <= 12 else 1 if nt['len'] <= 24 else 0
-                    for f in range(flags):
-                        fy = sy + (f * 5 if up else -f * 5)
-                        out.append(f'<line x1="{sx:.1f}" y1="{fy:.1f}" x2="{sx + 7:.1f}" y2="{fy + (7 if up else -7):.1f}" '
-                                   'stroke="black" stroke-width="1.4"/>')
-    out.append('</svg>')
-    return '\n'.join(out) + '\n'
+def svg_pages(xml):
+    """verovio 로 MusicXML → SVG 쪽 목록. fc/dq4/tools/dq4score.py 와 같은 설정(xmlIdSeed 고정이라 같은 입력이면 같은 바이트)."""
+    import verovio
+    tk = verovio.toolkit()
+    tk.setOptions({'xmlIdSeed': 1, 'pageWidth': 2100, 'pageHeight': 2970, 'scale': 40, 'adjustPageHeight': True,
+                   'footer': 'none', 'header': 'auto', 'breaks': 'auto'})
+    if not tk.loadData(xml):
+        raise ValueError('verovio 가 MusicXML 을 읽지 못함')
+    return [tk.renderToSVG(p) for p in range(1, tk.getPageCount() + 1)]
 
 
 # ---- KON 견주기 ----
@@ -607,7 +533,7 @@ def _same_instr(tr, t0, t1):
     return a['instrument'] == b['instrument'] and not a['noise'] and not b['noise']
 
 
-def export(rom, out, only=None):
+def export(rom, out, only=None, jobs=4):
     seqs = {n: bytes(body(rom, a, ln)) for n, a, ln in sequences(rom)}
     made = []
     envs = env_tables(rom)
@@ -629,12 +555,19 @@ def export(rom, out, only=None):
         perf['meter'] = meter
         with open(os.path.join(d, stem + '.mid'), 'wb') as f:
             f.write(to_midi(perf, tunes, title, envs, meter[0]))
+        xml = to_musicxml(perf, tunes, title, meter)
         with open(os.path.join(d, stem + '.musicxml'), 'w', encoding='utf-8') as f:
-            f.write(to_musicxml(perf, tunes, title, meter))
-        with open(os.path.join(d, stem + '.svg'), 'w', encoding='utf-8') as f:
-            f.write(to_svg(perf, title, meter))
-        made.append((n, x, stem, folder, perf))
-    return made
+            f.write(xml)
+        made.append((n, x, stem, folder, perf, xml))
+    # verovio 가 느려(곡 0F 는 63쪽) 프로세스 여럿으로 그린다. 결과는 입력 순서대로라 같은 바이트
+    with concurrent.futures.ProcessPoolExecutor(jobs) as ex:
+        allpages = list(ex.map(svg_pages, [m[5] for m in made]))
+    for (n, x, stem, folder, perf, _), pages in zip(made, allpages):
+        perf['svg'] = [f'{stem}-score-{k + 1:02d}.svg' for k in range(len(pages))]
+        for name, page in zip(perf['svg'], pages):
+            with open(os.path.join(out, folder, name), 'w', encoding='utf-8') as f:
+                f.write(page)
+    return [m[:5] for m in made]
 
 
 def update_index(rom, out, made):
@@ -660,7 +593,7 @@ def update_index(rom, out, made):
                      'sequence_bytes': ln, 'samples': [f'{s:02X}' for s in song_sets(rom)[n][2]], 'maps': []}
                 entries.append(e)
                 by[stem] = e
-            e['score'] = {'txt': stem + '.txt', 'mid': stem + '.mid', 'musicxml': stem + '.musicxml', 'svg': stem + '.svg',
+            e['score'] = {'txt': stem + '.txt', 'mid': stem + '.mid', 'musicxml': stem + '.musicxml', 'svg': perf['svg'],
                           'ticks': perf['end'], 'looped': perf['looped'],
                           'notes': sum(len(t['notes']) for t in perf['tracks']),
                           'meter': f'{perf["meter"][0]}/4(추정)', 'pickup': perf['meter'][2]}
@@ -675,6 +608,7 @@ def main():
     ap.add_argument('rom')
     ap.add_argument('--out')
     ap.add_argument('--only', help='시퀀스 번호 쉼표 목록(16진)')
+    ap.add_argument('--jobs', type=int, default=4, help='SVG 를 그리는 프로세스 수')
     ap.add_argument('--kon', metavar='DSPW', help='lua/dq5dspw.lua 기록과 견줌(--seq 필요)')
     ap.add_argument('--seq', type=lambda s: int(s, 16))
     ap.add_argument('--flag', type=lambda s: int(s, 16), default=0)
@@ -692,7 +626,7 @@ def main():
             print(f'track {i}: 음 {m}개' + ('' if err is None else f', 최대 {err:.2f} 프레임 차, 음 차이 틀림 {bad}'))
         return 0
     only = {int(v, 16) for v in a.only.split(',')} if a.only else None
-    made = export(rom, a.out, only)
+    made = export(rom, a.out, only, a.jobs)
     update_index(rom, a.out, made)
     print(f'{len(made)}개: 곡 {sum(1 for m in made if m[3] == "songs")}, 효과음 {sum(1 for m in made if m[3] == "sfx")}, '
           f'시퀀스 {len({m[0] for m in made})}개')

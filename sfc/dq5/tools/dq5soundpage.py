@@ -58,7 +58,10 @@ def rows_play(cat, entries):
         mp = f'<details><summary>맵 {len(maps)}곳</summary>{" ".join(maps)}</details>' if maps else ''
         files = [f'<a href="../sound/{cat}/{esc(e["file"])}">.spc</a>'] if e.get('file') else []
         sc = e.get('score') or {}
-        files += [f'<a href="../sound/{cat}/{esc(sc[k])}">.{k}</a>' for k in ('txt', 'mid', 'musicxml', 'svg') if sc.get(k)]
+        files += [f'<a href="../sound/{cat}/{esc(sc[k])}">.{k}</a>' for k in ('txt', 'mid', 'musicxml') if sc.get(k)]
+        svg = sc.get('svg') or []
+        if svg:
+            files.append(f'<a href="../sound/{cat}/{esc(svg[0])}">악보</a>' + (f'({len(svg)}쪽)' if len(svg) > 1 else ''))
         sec = f'{e["wav_seconds"]}초' if e.get('wav_seconds') else ''
         out.append(f'<tr id="{cat[:2]}{esc(e["id"])}"><td>{esc(e["id"])}</td><td>{esc(e.get("scene") or "")}</td>'
                    f'<td>{audio(cat, e.get("wav"))}</td><td class="wide">{sec}</td>'
@@ -90,7 +93,7 @@ def page(root):
             '<th class="wide">반복</th><th class="wide">머리</th><th>이름</th></tr>', *rows_samples(smp), '</table>']
     intro = ('곡·효과음 WAV 는 들어 보기용 앞부분(곡 30초, 효과음 4초)입니다. 끝까지는 .spc 를 SPC 플레이어로 틉니다. '
              '「쓰이는 장면」은 게임에서 그 장면에 나가는 것을 확인한 것만 적었습니다. <번호>-<갈래> 는 곡 변수(명령 0C 의 X)로 '
-             '갈라지는 소리입니다. 악보는 롬의 시퀀스에서 바로 푼 것입니다: .txt 는 다시 쌀 수 있는 글(dq5song.py), .mid 는 트랙=채널·4분음표 48틱·끝없는 되풀이를 두 번 돈 MIDI, .musicxml 은 박자를 추정해 마디를 자른 악보, .svg 는 그것을 시간 비례로 그린 오선 악보입니다. '
+             '갈라지는 소리입니다. 악보는 롬의 시퀀스에서 바로 푼 것입니다: .txt 는 다시 쌀 수 있는 글(dq5song.py), .mid 는 트랙=채널·4분음표 48틱·끝없는 되풀이를 두 번 돈 MIDI, .musicxml 은 박자를 추정해 마디를 자른 악보, 「악보」 는 그것을 verovio 로 그린 SVG(<번호>-score-<쪽>.svg)입니다. '
              '이름 칸에 적은 것은 이 브라우저에만 남습니다.')
     nav = ' '.join(f'<a href="{h}">{t}</a>' for t, h in (('곡', '#songs'), ('효과음', '#sfx'), ('악기 샘플', '#samples'),
                                                         ('맵·필드', 'index.html'), ('스프라이트·몬스터', 'sprites.html')))
