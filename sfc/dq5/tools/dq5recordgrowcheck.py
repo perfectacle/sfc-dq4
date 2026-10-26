@@ -2,16 +2,21 @@
 
 만드는 롬(dq5build.py 로 셋을 합침):
   dq5namewrite.py --at 4E:8000            이름 표를 옮겨 23:C242~D6A0 을 비운다
-  dq5progresswrite.py --area-at 23:C242 --person-at 23:96F3 --reuse-names
-                                          구역 85(구역 1 을 틀로 スライム 한 종만) 추가, 사람 성장 11(주인공을 틀로
-                                          ちから 곡선 +10·레벨 2 경험치 바꿈) 추가
-  dq5encounterwrite.py --progress …           21/02 의 $1948 = 0 구역과 53/50(23:FDD6, 그룹 50 이상)의 $1948 = 1·2 구역을 85 로
-장면(원본 롬과 만든 롬 모두):
-  growth-0   슬라임 전투에서 이겨 주인공(+0 = 00) 레벨 1 → 2
-  growth-11  동료 칸(PARTY=02, 7E:206A)의 +0 을 0B 로, 능력치를 새 레코드의 레벨 1 값으로 둔 채 붙인 같은 전투에서
-             레벨업(만든 롬만). 주인공 +0 을 바꾸면 필드·전투가 멈춰서 동료 칸을 쓴다
-  area       21/02 (50,43) 에서 좌우로 걸음
-  high       53/50 (40,42) 에서 $1948 = 1 로 좌우로 걸음
+  dq5progresswrite.py --area-at 23:96F3 --person-at 23:9E57 --monster-at 23:C242 --reuse-names
+                                          구역 85(구역 1 을 틀로 スライム 한 종만), 사람 성장 11(주인공을 틀로 ちから 곡선 +10·
+                                          레벨 2 경험치 31), 몬스터 성장 42(スライム 2 를 틀로 ちから 곡선 +10) 추가
+  dq5encounterwrite.py --progress … --high-at 3E:F000
+                                          21/02 의 $1948 = 0 구역과 53/50 의 $1948 = 1·2 구역을 85 로,
+                                          그룹 50 이상 목록에 없던 52/51 을 더해 목록을 3E:F000 으로 옮김
+장면:
+  growth-0     슬라임 전투에서 이겨 주인공(+0 = 00) 레벨 1 → 2(원본·만든 롬)
+  growth-11    동료 칸(PARTY=02, 7E:206A)의 +0 을 0B 로, 능력치를 레코드의 레벨 1 값으로 둔 채 같은 전투(만든 롬).
+               주인공 +0 을 바꾸면 필드·전투가 멈춰서 동료 칸을 쓴다
+  monster-2    동료 칸 +0 = 82(スライム), 능력치를 레코드의 레벨 1 값으로(원본·만든 롬)
+  monster-42   동료 칸 +0 = AA(더한 몬스터 42, 만든 롬)
+  area         21/02 (50,43) 에서 좌우로 걸음
+  high         53/50 (40,42) 에서 $1948 = 1 로 좌우로 걸음
+  newmap       52/51 (40,42) 로 장면 이동, $1948 = 1. 원본은 목록에 없어 01:8474 에서 장면이 깨짐
 원본 롬과 선실 상태는 읽기만 하며 JSON·패치·롬·기록은 --out 의 새 폴더에 쓴다.
   MESENCE=… python sfc/dq5/tools/dq5recordgrowcheck.py rom/dq5.sfc --state work/state/ship.mss
 """
@@ -25,12 +30,12 @@ import subprocess
 import sys
 import tempfile
 
-from dq5growth import RECORD, RECORD_FIELD, exp_at, stats_at
+from dq5growth import RECORD, RECORD_FIELD, exp_at, gains, stats_at
 from dq5map import Rom
 from dq5progresswrite import dump, table_bases
 
 HERE = Path(__file__).resolve().parent
-NEW_AREA, NEW_PERSON = 0x55, 0x0B
+NEW_AREA, NEW_PERSON, NEW_MONSTER = 0x55, 0x0B, 0x2A
 HERO, SLOT = 0x2040, 0x206A           # 일행 레코드 0·1(42바이트씩)
 
 
@@ -49,25 +54,31 @@ def command(tool, rom, *args):
 
 
 def build(original, out):
-    hero = dump(Rom(original.read_bytes()))['growth'][0]
+    growth = dump(Rom(original.read_bytes()))['growth']
+    hero = growth[0]
+    slime = next(row for row in growth if row['kind'] == 'monster' and row['index'] == 2)
     strength = [min(255, v + 10) for v in hero['stats']['strength']]
     slots = [{'index': i, 'weight': 7 if i == 5 else 0} for i in range(10)]
     slots[5].update(monster=0, count_code=0)
     progress = {'format': 'dq5progress/1',
                 'growth': [{'kind': 'person', 'index': NEW_PERSON, 'base': 0, 'exp2': 31,
-                            'stats': {'strength': strength}}],
+                            'stats': {'strength': strength}},
+                           {'kind': 'monster', 'index': NEW_MONSTER, 'base': 2,
+                            'stats': {'strength': [min(255, v + 10) for v in slime['stats']['strength']]}}],
                 'encounters': [{'index': NEW_AREA, 'base': 1, 'slots': slots, 'fixed': {'weight': 0},
                                 'rate_index': 7}]}
     encounter = {'format': 'dq5encounter/1', 'maps': [{'map': '21/02', 'areas': [NEW_AREA, 0x14, 0x14]},
-                                                      {'map': '53/50', 'areas': [0xFF, NEW_AREA, NEW_AREA]}]}
+                                                      {'map': '53/50', 'areas': [0xFF, NEW_AREA, NEW_AREA]},
+                                                      {'map': '52/51', 'areas': [0xFF, NEW_AREA, NEW_AREA],
+                                                       'tail': [0x00, 0x03, 0x09]}]}
     names = {'format': 'dq5names/1', 'tables': []}
     for name, doc in (('progress', progress), ('encounter', encounter), ('names', names)):
         save_json(out / f'{name}.json', doc)
     command('dq5namewrite.py', original, 'patch', out / 'names.json', '--at', '4E:8000', '-o', out / 'names.patch.json')
-    command('dq5progresswrite.py', original, 'patch', out / 'progress.json', '--area-at', '23:C242',
-            '--person-at', '23:96F3', '--reuse-names', '-o', out / 'progress.patch.json')
+    command('dq5progresswrite.py', original, 'patch', out / 'progress.json', '--area-at', '23:96F3',
+            '--person-at', '23:9E57', '--monster-at', '23:C242', '--reuse-names', '-o', out / 'progress.patch.json')
     command('dq5encounterwrite.py', original, 'patch', out / 'encounter.json', '--progress', out / 'progress.patch.json',
-            '-o', out / 'encounter.patch.json')
+            '--high-at', '3E:F000', '-o', out / 'encounter.patch.json')
     command('dq5build.py', original, 'build', out / 'names.patch.json', out / 'progress.patch.json',
             out / 'encounter.patch.json', '-o', out / 'grown.sfc', '--ips', out / 'grown.ips')
     return out / 'grown.sfc'
@@ -92,31 +103,38 @@ def run(mesence, rom, lua, dest, env):
 def scene(name, rom, battle_state, ship_state, out, mesence, libdir):
     dest = out / name
     walk = 'right:150,left:150,right:150,left:150'
-    if name.startswith('growth'):
-        state = battle_state.with_name('battle-11.mss') if name.startswith('growth-11') else battle_state
+    if name.startswith(('growth', 'monster')):
+        prefix = name.rsplit('-', 1)[0]
+        state = battle_state if prefix == 'growth-0' else battle_state.with_name(f'{name}.mss')
         env = environment(libdir, state, dest, DRIVER=str(HERE / 'lua/dq5battle.lua'), MAXF='2400',
                           LOOP='a:4,wait:20', LVLUP='1')
     elif name.startswith('area'):
         env = environment(libdir, ship_state, dest, DRIVER=str(HERE / 'lua/dq5warp.lua'), TO='21/02,50,43',
                           SETTLE='100', MAXF='1800', TEST=walk)
     else:
-        env = environment(libdir, ship_state, dest, DRIVER=str(HERE / 'lua/dq5warp.lua'), TO='53/50,40,42',
+        place = '53/50' if name.startswith('high') else '52/51'
+        env = environment(libdir, ship_state, dest, DRIVER=str(HERE / 'lua/dq5warp.lua'), TO=f'{place},40,42',
                           SET='1948=01', SETTLE='100', MAXF='1800', TEST=walk)
     run(mesence, rom, HERE / 'lua/dq5recordgrowcheck.lua', dest, env)
     return (dest / 'records.txt').read_text(), (dest / 'final.wram').read_bytes()
 
 
-def growth_result(name, rom_path, text, ram, person, slot=HERO):
+def growth_result(name, rom_path, text, ram, person, slot=HERO, kind='person'):
+    """일행 레코드 slot 의 +0 이 person 이고, 그 성장 레코드로 레벨 2 가 된 값인지."""
     rom = Rom(rom_path.read_bytes())
-    record = table_bases(rom)['person'] + person * RECORD
+    record = table_bases(rom)[kind] + (person & 0x3F) * RECORD
     actual = [int.from_bytes(ram[slot + field:slot + field + (2 if i < 2 else 1)], 'little')
               for i, field in enumerate(RECORD_FIELD)]
     next_exp = int.from_bytes(ram[slot + 0x26:slot + 0x29], 'little')
     require(ram[slot] == person, f'{name}: 일행 레코드 +0 이 {ram[slot]:02X}')
     require(f'growth record={record:06X}' in text, f'{name}: 성장 레코드 {record:06X} 를 고르지 않음')
     require(ram[slot + 0x12] == 2, f'{name}: 레벨 2 가 되지 않음')
-    require(actual == stats_at(rom, record, 2) and next_exp == exp_at(rom, record, 3),
-            f'{name}: 능력치 {actual}·다음 경험치 {next_exp} 가 레코드 {record:06X} 와 다름')
+    # 지금 값이 레벨 1 값의 1.5배 이상이면(레벨 1 값이 1 이하일 때 등) 23:EC8E 가 난수 0·1 만 더한다.
+    start = stats_at(rom, record, 1)
+    expected = [None if g is None else v + g for v, g in zip(start, gains(rom, record, 1, start))]
+    ok = all(a == e if e is not None else a in (v, v + 1) for a, e, v in zip(actual, expected, start))
+    require(ok and next_exp == exp_at(rom, record, 3),
+            f'{name}: 능력치 {actual}·다음 경험치 {next_exp} 가 레코드 {record:06X} 의 {expected} 와 다름')
     return {'case': name, 'record': f'{record:06X}', 'stats': actual, 'next_exp': next_exp}
 
 
@@ -155,20 +173,25 @@ def main():
         run(mesence, original, HERE / 'lua/dq5warp.lua', battle,
             environment(libdir, state, battle, FIELD='341,56', BATTLE='00:1', SETTLE='300', SAVE='battle.mss',
                         MAXF='1800'))
-        # 전투 중에 +0 을 바꾸면 전투가 끝날 때 원래 값으로 돌아오므로, 전투를 붙이기 전에 바꾼 상태를 따로 만든다.
-        record = table_bases(Rom(grown.read_bytes()))['person'] + NEW_PERSON * RECORD
-        sets = [f'{SLOT:04X}={NEW_PERSON:02X}', f'{SLOT + 0x26:04X}=01', f'{SLOT + 0x27:04X}=00', f'{SLOT + 0x28:04X}=00']
-        for i, (field, value) in enumerate(zip(RECORD_FIELD, stats_at(Rom(grown.read_bytes()), record, 1))):
-            for k in range(2 if i < 2 else 1):
-                sets.append(f'{SLOT + field + k:04X}={value >> 8 * k & 0xFF:02X}')
-        run(mesence, original, HERE / 'lua/dq5warp.lua', battle / '11',
-            environment(libdir, state, battle / '11', FIELD='341,56', BATTLE='00:1', SETTLE='300', PARTY='02',
-                        SAVE='battle.mss', MAXF='1800', LATESET=';'.join(sets)))
-        (battle / '11/battle.mss').rename(battle / 'battle-11.mss')
+        # 전투 중에 +0 을 바꾸면 전투가 끝날 때 원래 값으로 돌아오므로, 전투를 붙이기 전에 동료 칸을 바꾼 상태를 만든다.
+        companions = [('growth-11-grown', grown, NEW_PERSON, 'person'), ('monster-2-original', original, 0x82, 'monster'),
+                      ('monster-2-grown', grown, 0x82, 'monster'), ('monster-42-grown', grown, 0x80 | NEW_MONSTER, 'monster')]
+        for name, rom_path, plus0, kind in companions:
+            rom = Rom(rom_path.read_bytes())
+            record = table_bases(rom)[kind] + (plus0 & 0x3F) * RECORD
+            sets = [f'{SLOT:04X}={plus0:02X}', f'{SLOT + 0x26:04X}=01', f'{SLOT + 0x27:04X}=00', f'{SLOT + 0x28:04X}=00']
+            for i, (field, value) in enumerate(zip(RECORD_FIELD, stats_at(rom, record, 1))):
+                for k in range(2 if i < 2 else 1):
+                    sets.append(f'{SLOT + field + k:04X}={value >> 8 * k & 0xFF:02X}')
+            run(mesence, original, HERE / 'lua/dq5warp.lua', battle / name,
+                environment(libdir, state, battle / name, FIELD='341,56', BATTLE='00:1', SETTLE='300', PARTY='02',
+                            SAVE='battle.mss', MAXF='1800', LATESET=';'.join(sets)))
+            (battle / name / 'battle.mss').rename(battle / f'{name}.mss')
         require((battle / 'battle.mss').is_file(), '전투 상태가 저장되지 않음')
-        scenes = [('growth-0-original', original), ('growth-0-grown', grown), ('growth-11-grown', grown),
-                  ('area-original', original), ('area-grown', grown), ('high-original', original),
-                  ('high-grown', grown)]
+        scenes = [('growth-0-original', original), ('growth-0-grown', grown)] + \
+            [(name, rom_path) for name, rom_path, _, _ in companions] + \
+            [('area-original', original), ('area-grown', grown), ('high-original', original),
+             ('high-grown', grown), ('newmap-original', original), ('newmap-grown', grown)]
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
             seen = dict(zip((s[0] for s in scenes), pool.map(
                 lambda s: scene(s[0], s[1], battle / 'battle.mss', state, out, mesence, libdir), scenes)))
@@ -177,10 +200,19 @@ def main():
                    growth_result('growth-11-grown', grown, *seen['growth-11-grown'], NEW_PERSON, SLOT)]
         require(results[2]['stats'] != results[1]['stats'] and results[2]['next_exp'] != results[1]['next_exp'],
                 '새 사람 레코드와 주인공 레코드의 결과가 같아 구별되지 않음')
+        for name, rom_path, plus0, kind in companions[1:]:
+            results.append(growth_result(name, rom_path, *seen[name], plus0, SLOT, kind))
+        require(results[-1]['stats'] != results[-2]['stats'], '더한 몬스터 레코드와 スライム 레코드의 결과가 같음')
         results += [area_result('area-original', seen['area-original'][0], '21/02', 0x01, None),
                     area_result('area-grown', seen['area-grown'][0], '21/02', NEW_AREA, 0x00),
                     area_result('high-original', seen['high-original'][0], '53/50', 0x27, None),
-                    area_result('high-grown', seen['high-grown'][0], '53/50', NEW_AREA, None)]
+                    area_result('high-grown', seen['high-grown'][0], '53/50', NEW_AREA, None),
+                    area_result('newmap-grown', seen['newmap-grown'][0], '52/51', NEW_AREA, None)]
+        warp = (out / 'newmap-original/warp.txt').read_text()
+        require('arrived map 52/51' not in warp, '원본에서 목록에 없는 52/51 에 정상으로 도착함')
+        require('arrived map 52/51' in (out / 'newmap-grown/warp.txt').read_text(), '만든 롬에서 52/51 에 도착하지 않음')
+        results.append({'case': 'newmap-original', 'warp': [line for line in warp.splitlines() if 'arrived' in line
+                                                            or 'end map' in line]})
         save_json(out / 'results.json', results)
         print(json.dumps(results, ensure_ascii=False))
         return 0
