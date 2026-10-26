@@ -28,10 +28,10 @@
 | `dq4bg3slotcheck.py --old 원래롬 --new 새롬 --state work/state/ship.mss --out 새폴더 [--maps 맵,...]` | 실내 맵마다 순간이동해 명령 창을 열고, BG3 타일맵을 옮긴 롬이 버퍼와 같은 타일맵을 보이는지·옛 자리를 건드리지 않는지 원래 롬과 견줌. `MESENCE` 필요. [BG3 타일맵 옮기기](../docs/dq4-window-text-format.md#bg3-타일맵-옮기기) |
 | `lua/dq4bg3slotwarp.lua` | `dq4bg3slotcheck.py` 가 부름. `dq5warp.lua` 를 돌리며 30프레임마다 맵, `$0725`, 타일맵과 버퍼 `7E:5000` 차이, 옛 자리 `1C00`~`1FFF` 변화를 `bg3.txt` 에 적음. `SHOTS` 프레임 화면도 남김 |
 | `dq4soundcatalog.py --assets 폴더 [--dq5-rom 롬] --out JSON` | NDS 곡·효과음 목록, FC 장면 대응, DQ5 재사용 후보와 숙박곡 비교. [사운드 포팅](../docs/dq4-sound-port-format.md) |
-| `dq4soundport.py export --assets 폴더 --out 폴더` | NDS 악보 JSON 을 DQ5 시퀀스로(템포·세기 합치기, 꼬리를 남기는 성부 배분, 손실 보고서) |
+| `dq4soundport.py export --assets 폴더 --out 폴더` | NDS 악보 JSON 을 DQ5 시퀀스로(템포·세기 합치기, 꼬리를 남기는 성부 배분, 되풀이·깊이 3 부르기로 묶기와 KOF 미리 보기 검산, 손실 보고서) |
 | `dq4soundbank.py --score JSON --assets 폴더 --out 폴더 [--max-rate 8000]` | 곡에 쓰이는 NDS PCM 을 S-DSP 계산으로 BRR 로(무음 첫 블록, 실기 SNR) |
 | `dq4soundpatch.py --base 롬 --replace 자리=JSON --bank 폴더 --out 롬 [--map-fades] [--preview 자리]` | 시퀀스·샘플을 롬에 넣음(4MB 롬·IPS). `--map-fades` 는 프레임을 기다리지 않는 맵 전환 페이드, `--preview` 는 청취용 타이틀 곡 교체 |
-| `dq4soundset.py --base 롬 --assets 폴더 --song 자리=NDS곡 ... --out 롬 [--stream 자리=바이트] [--preview 자리] [--map-fades]` | 곡마다 SPC 샘플 예산을 정하고 샘플을 줄여(영역 합치기·표본율·자르기) 여러 곡을 한꺼번에 넣음. `--stream` 은 먼저 쓰이는 샘플만 그 바이트 안에서 곡 앞에 보내고 나머지는 곡이 울리는 동안 보냄(늦은 샘플의 음마다 악기 명령을 다시 씀). 보고서에 줄인 것과 도착 전 음을 남김 |
+| `dq4soundset.py --base 롬 --assets 폴더 --song 자리=NDS곡 ... --out 롬 [--stream 자리=바이트] [--budget 자리=바이트] [--preview 자리] [--map-fades]` | 곡마다 SPC 샘플 예산을 정하고 샘플을 줄여(영역 합치기·표본율·자르기) 여러 곡을 한꺼번에 넣음. `--stream` 은 먼저 쓰이는 샘플만 그 바이트 안에서 곡 앞에 보내고 나머지는 곡이 울리는 동안 보냄(늦은 샘플의 음마다 악기 명령을 다시 씀). `--budget` 은 계산한 샘플 예산 대신 그 값을 씀(청취 승인한 샘플을 그대로 둘 때). 보고서에 줄인 것과 도착 전 음을 남김 |
 | `dq4soundcheck.py 롬 OUT --song 자리` | `lua/dq4overturespc.lua` 결과로 SPC 의 시퀀스·샘플, KON 시각·SRCN·음 간격을 견줌. 곡 뒤 샘플이 도착하기 전의 음은 뺌 |
 | `lua/dq4soundstate.lua` | 세이브스테이트를 불러온 뒤 롬의 드라이버 IPL 블록(곡 묶음 표)을 SPC RAM 에 다시 쓰고 `SOUND_PROBE` 를 돌림. 롬 목록에 없는데 상태에 고정된 시퀀스는 고정을 풂. 곡 묶음을 바꾼 롬을 세이브스테이트로 시험할 때 필요. `AT` 사용 |
 | `lua/dq4soundload.lua` | `SOUND_PROBE` 로 걸어, 샘플이 SPC 에 다 받아진 프레임(`SAMPLES`), 목소리마다 울리기 시작한 프레임과 SRCN, 곡(`SONGS`)이 오르내린 프레임을 `load.txt` 로. 이어서 `NEXT_PROBE` 를 돌림 |

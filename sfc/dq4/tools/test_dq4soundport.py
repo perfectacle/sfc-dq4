@@ -2,6 +2,7 @@
 import unittest
 
 import dq4soundport as port
+from dq5song import assemble
 from dq4soundport import DQ5_TICKS_PER_SECOND_PER_TEMPO as RATE
 
 
@@ -116,6 +117,75 @@ class StreamTests(unittest.TestCase):
         self.assertEqual(ticks, before + [first_after])
         self.assertEqual(result.report['late_notes'], {'0A': len(before)})
         self.assertEqual(result.report['reissued_instruments'], len(before))
+
+
+def body(*voices):
+    """목소리마다 본문 줄 목록 → compact 에 넣는 글."""
+    lines = ['tempo 40'] + [f'track Lvoice{i}' for i in range(len(voices))]
+    for i, lines_ in enumerate(voices):
+        lines += [f'Lvoice{i}:', *lines_, '  rest len 30', '  end']
+    return lines
+
+
+def flat(seq, ticks=100000):
+    return port.execution_trace(seq, ticks, peek=True)
+
+
+class CompactTests(unittest.TestCase):
+    def check(self, lines):
+        plain = assemble(lines)
+        packed = assemble(port.compact(lines))
+        self.assertEqual(flat(plain), flat(packed))
+        return plain, packed
+
+    def test_consecutive_repeats_become_one_loop(self):
+        phrase = ['  instrument 01', '  note 30 len 0C', '  note 32', '  note 34', '  tie len 18']
+        plain, packed = self.check(body(phrase * 6))
+        self.assertIn(0xF5, packed)
+        self.assertLess(len(packed) * 5, len(plain) * 3)
+
+    def test_loop_counter_runs_the_body_n_times(self):
+        lines = body(['  note 30 len 0C', '  note 31', '  note 32', '  note 33'] * 5)
+        packed = assemble(port.compact(lines))
+        notes = [e for e in flat(packed)[0] if e[1][0] < 0xA0 and e[1][0] not in (0, 0x50)]
+        self.assertEqual(len(notes), 20)
+
+    def test_shared_phrases_across_voices_are_called_within_depth(self):
+        a = ['  pan 10', '  note 30 len 0C', '  note 34', '  volume2 80', '  note 37', '  note 3C len 18']
+        b = ['  pan F0', '  note 20 len 0C', '  note 24', '  volume2 60', '  note 27', '  note 2C len 18']
+        voice0 = a + b + ['  rest len 06'] + a + ['  rest len 03'] + b + a
+        voice1 = b + ['  rest len 05'] + a + ['  rest len 07'] + b
+        plain, packed = self.check(body(voice0, voice1))
+        self.assertIn(0xF8, packed)
+        self.assertLess(len(packed), len(plain))
+        lines = port.compact(body(voice0, voice1))
+        self.assertTrue(all(_depth(lines, label) <= port.MAX_CALL_DEPTH
+                            for label in {ln[:-1] for ln in lines if ln.startswith('Lphrase')}))
+
+    def test_rest_after_note_is_not_split_by_call(self):
+        # 음 뒤가 쉼이면 15E5 가 KOF 를 걸지 않는다. 그 사이에 F8·F9 가 끼면 KOF 가 생기므로 묶지 않아야 한다.
+        phrase = ['  note 30 len 0C', '  rest len 0C']
+        voice = []
+        for i in range(8):
+            voice += [f'  note {0x40 + i:02X} len 06'] + phrase + [f'  pan {i * 8:02X}']
+        self.check(body(voice))
+
+    def test_peek_flag_sees_skipped_commands(self):
+        seq = assemble(body(['  note 30 len 0C', '  volume2 40', '  gate_preset FE', '  rest len 0C',
+                             '  note 31 len 0C', '  instrument 02', '  rest len 0C']))
+        notes = [(raw[0], rest) for _, raw, *rest in flat(seq)[0] if raw[0] < 0xA0]
+        self.assertEqual(notes[:3], [(0x80, [True]), (0x50, [False]), (0x81, [False])])
+
+
+def _depth(lines, label, seen=()):
+    start = lines.index(label + ':')
+    calls = []
+    for line in lines[start + 1:]:
+        if line == '  ret':
+            break
+        if line.split()[0] == 'call':
+            calls.append(line.split()[-1])
+    return 1 + max((_depth(lines, c) for c in calls), default=0)
 
 
 if __name__ == '__main__':
