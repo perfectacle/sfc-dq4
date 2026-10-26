@@ -8,8 +8,8 @@ from dq5encounter import AREAS, AREA_COUNT, AREA_SIZE, area  # noqa: E402
 from dq5growth import exp_at, stat_at  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
 from dq5progresswrite import (  # noqa: E402
-    FORMAT, GROWTH, RECORD, SHOP_COUNTS, STATS, STAT_OFFSETS, dump, edits,
-    encode_growth, growth_fields, patch,
+    FORMAT, GROWTH, RECORD, SHOP_BANK, SHOP_COUNTS, SHOP_TABLE, STATS, STAT_OFFSETS, dump, edits,
+    encode_growth, growth_fields, patch, shop_records,
 )
 from dq5shop import COIN_PRICES, END, LISTS, MEDAL_PRICES, prize_lists, shop_lists  # noqa: E402
 
@@ -43,6 +43,10 @@ def fixture():
             data[off:off + len(raw)] = raw
             cursor += len(raw)
     assert cursor == END
+    for at in SHOP_BANK:
+        data[lorom(at)] = 0x04
+    for at in SHOP_TABLE:
+        data[lorom(at):lorom(at) + 2] = (LISTS & 0xFFFF).to_bytes(2, 'little')
     data[lorom(MEDAL_PRICES):lorom(MEDAL_PRICES) + 6] = bytes(range(1, 7))
     for i in range(6):
         off = lorom(COIN_PRICES + i * 3)
@@ -55,7 +59,8 @@ def apply(data, manifest):
     for w in manifest['writes']:
         off = lorom(int(w['at'].replace(':', ''), 16))
         raw = bytes.fromhex(w['hex'])
-        assert data[off:off + len(raw)] == bytes.fromhex(w['orig'])
+        if 'orig' in w:
+            assert data[off:off + len(raw)] == bytes.fromhex(w['orig'])
         updated[off:off + len(raw)] = raw
     return bytes(updated)
 
@@ -68,7 +73,7 @@ class ProgressWriteTests(unittest.TestCase):
 
     def test_roundtrip_reserved_and_unused(self):
         rows = edits(self.rom, dump(self.rom))
-        self.assertEqual(sum(len(old) for _, _, old, _ in rows), 6510)
+        self.assertEqual(sum(len(old) for _, _, old, _ in rows), 6518)
         self.assertTrue(all(old == new for _, new, old, _ in rows))
         self.assertEqual(patch(self.rom, dump(self.rom))['writes'], [])
 
@@ -134,6 +139,42 @@ class ProgressWriteTests(unittest.TestCase):
         self.assertEqual(updated[lorom(LISTS):lorom(LISTS) + 8], self.data[lorom(LISTS):lorom(LISTS) + 8])
         self.assertEqual(updated[lorom(END) + 24:], self.data[lorom(END) + 24:])
 
+    def test_shop_resize_in_place_and_append(self):
+        updated = Rom(apply(self.data, patch(self.rom, doc(shops=[
+            {'kind': 1, 'index': 0, 'items': [9] * 6}, {'kind': 1, 'index': 1, 'items': [3]},
+            {'kind': 2, 'index': 0, 'items': [4]}, {'kind': 3, 'index': 5, 'key': 0x30, 'items': [7, 8]}]))))
+        lists = {key: raw for key, (_, raw) in shop_records(updated).items()}
+        self.assertEqual(lists[1, 0][1:-1], bytes([9] * 6))
+        self.assertEqual(lists[1, 1][1:-1], bytes([3]))
+        self.assertEqual(lists[3, 5], bytes([0x30, 7, 8, 255]))
+        self.assertEqual(len(lists), sum(SHOP_COUNTS) + 1)
+        self.assertEqual(patch(updated, dump(updated))['writes'], [])
+        with self.assertRaisesRegex(ValueError, 'shop-at'):
+            patch(self.rom, doc(shops=[{'kind': 0, 'index': i, 'items': [1] * 6} for i in range(11)]))
+
+    def test_shop_relocation(self):
+        big = doc(shops=[{'kind': 0, 'index': i, 'items': [1] * 6} for i in range(11)])
+        manifest = patch(self.rom, big, shop_at=0x0BFBB0)
+        moved = Rom(apply(self.data, manifest))
+        self.assertEqual(moved.d[lorom(SHOP_BANK[0])], 0x0B)
+        lists = shop_records(moved)
+        self.assertEqual(lists[0, 0][0], 0x0BFBB8)
+        self.assertEqual(lists[0, 10][1][1:-1], bytes([1] * 6))
+        self.assertEqual(patch(moved, dump(moved))['writes'], [])
+        # 옮긴 자리는 끝 표시 FF 한 바이트 말고는 남는 자리가 없어 제자리로는 늘릴 수 없다.
+        with self.assertRaisesRegex(ValueError, 'shop-at'):
+            patch(moved, doc(shops=[{'kind': 3, 'index': 5, 'key': 9, 'items': [2]}]))
+        shrunk = Rom(apply(bytes(moved.d), patch(moved, doc(shops=[{'kind': 3, 'index': 4, 'items': [3]}]))))
+        self.assertEqual(shop_records(shrunk)[3, 4][1], bytes([shop_records(moved)[3, 4][1][0], 3, 255]))
+        self.assertEqual(len(shop_records(shrunk)), len(shop_records(moved)))
+        grown = Rom(apply(bytes(moved.d), patch(moved, doc(shops=[{'kind': 0, 'index': 11, 'key': 9, 'items': [2]}]),
+                                                shop_at=0x0BFBB0)))
+        self.assertEqual(shop_records(grown)[0, 11][1], bytes([9, 2, 255]))
+        self.assertEqual(shop_records(grown)[1, 0][0], shop_records(moved)[1, 0][0] + 3)
+        for bad in (0x40FBB0, 0x0B7000, 0x0BFFF0):
+            with self.subTest(at=bad), self.assertRaises(ValueError):
+                patch(self.rom, big, shop_at=bad)
+
     def test_invalid_documents(self):
         bad = [None, [], {}, doc(extra=[]), doc(growth=None), doc(growth=[None]),
                doc(growth=[{'kind': [], 'index': 0}]), doc(growth=[{'kind': 'person', 'index': 11}]),
@@ -153,8 +194,12 @@ class ProgressWriteTests(unittest.TestCase):
                doc(encounters=[{'index': 0, 'slots': [{'index': i, 'weight': 0} for i in range(10)], 'fixed': {'weight': 0}}]),
                doc(shops=[{'kind': 4, 'index': 0}]), doc(shops=[{'kind': 0, 'index': 11}]),
                doc(shops=[{'kind': 0, 'index': 0, 'key': 255}]),
-               doc(shops=[{'kind': 0, 'index': 0, 'items': [1]}]),
+               doc(shops=[{'kind': 0, 'index': 0, 'items': []}]),
+               doc(shops=[{'kind': 0, 'index': 0, 'items': [1] * 7}]),
                doc(shops=[{'kind': 0, 'index': 0, 'items': [216] * 4}]),
+               doc(shops=[{'kind': 0, 'index': 12, 'key': 9, 'items': [1]}]),
+               doc(shops=[{'kind': 0, 'index': 11, 'items': [1]}]),
+               doc(shops=[{'kind': 0, 'index': 11, 'key': 255, 'items': [1]}]),
                doc(medal_prices=[0] * 5), doc(coin_prices=[0x1000000] * 6)]
         for value in bad:
             with self.subTest(value=value), self.assertRaises(ValueError):

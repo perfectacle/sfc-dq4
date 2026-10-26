@@ -147,6 +147,60 @@ def verify(out, items):
     return results
 
 
+SHOP_KEY_PATCH = '35C37=A9{:02X}'  # 06:DC37 LDA $BC(맵 그룹을 키로) → LDA #키
+NEW_KEY = 0x40  # 원본 무기점 목록에 없는 키
+
+
+def shop_scene(name, rom, key, state, out, mesence, libdir):
+    dest = out / name
+    env = environment(libdir, state, dest)
+    env.update(MODE='shop', DRIVER=str(HERE / 'lua/dq5msg.lua'), MAXF='900', POKE='7E36EB=01;7E370B=00',
+               ROMPATCH=SHOP_KEY_PATCH.format(key),
+               PRE='b:4,wait:40,up:3,wait:20,a:4,wait:30,a:4,wait:150,a:4,wait:80,a:4,wait:80')
+    run(mesence, rom, HERE / 'lua/dq5progresscheck.lua', dest, env)
+    text = (dest / 'observed.txt').read_text()
+    require('pc=06F49C' in text, f'{name}: 상점 목록 검색을 거치지 않음')
+    return [(int(item, 16), int(value)) for item, value in re.findall(r'price item=([0-9A-F]+) value=(\d+)', text)]
+
+
+def shop_growth(original, state, out, mesence, libdir):
+    """품목 수를 줄인 목록(원래 자리)과 새 키 목록(옮긴 자리)을 열고, 안 바꾼 목록이 그대로인지 본다."""
+    data = dump(Rom(original.read_bytes()))
+    weapons = [row for row in data['shops'] if row['kind'] == 2]
+    first = next(row for row in weapons if row['key'] == 1)
+    shorter, added = first['items'][:4], [0, 1, 2, 3, 4, 5]
+    docs = {
+        'inplace': ({'shops': [{'kind': 2, 'index': first['index'], 'items': shorter}]}, None),
+        'moved': ({'shops': [{'kind': 2, 'index': len(weapons), 'key': NEW_KEY, 'items': added}]}, '0B:FBB0'),
+    }
+    roms = {'original': original}
+    for name, (changes, at) in docs.items():
+        source, manifest = out / f'shop-{name}.json', out / f'shop-{name}.patch.json'
+        save_json(source, {'format': 'dq5progress/1', **changes})
+        command('dq5progresswrite.py', original, 'patch', source, '-o', manifest, *(['--shop-at', at] if at else []))
+        roms[name] = out / f'shop-{name}.sfc'
+        command('dq5build.py', original, 'build', manifest, '-o', roms[name], '--ips', out / f'shop-{name}.ips')
+    scenes = [('shop-key01-original', 'original', 1), ('shop-key01-inplace', 'inplace', 1),
+              ('shop-key01-moved', 'moved', 1), ('shop-key40-moved', 'moved', NEW_KEY),
+              ('shop-key1A-original', 'original', 0x1A), ('shop-key1A-moved', 'moved', 0x1A)]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+        seen = list(pool.map(lambda s: shop_scene(s[0], roms[s[1]], s[2], state, out, mesence, libdir), scenes))
+    found = dict(zip((s[0] for s in scenes), seen))
+    results = []
+    for name, rom_name, key in scenes:
+        rom = Rom(roms[rom_name].read_bytes())
+        items = [item for item, _ in found[name]]
+        require(found[name] == [(item, price(rom, item)) for item in items], f'{name}: 가격이 표와 다름')
+        expected = {(1, 'original'): first['items'], (1, 'inplace'): shorter, (1, 'moved'): first['items'],
+                    (NEW_KEY, 'moved'): added}.get((key, rom_name))
+        if expected is not None:
+            require(items == expected, f'{name}: 품목 {items} != {expected}')
+        results.append({'case': name, 'rom': rom_name, 'key': key, 'items': items})
+    require(found['shop-key1A-moved'] == found['shop-key1A-original'] and found['shop-key1A-original'],
+            '옮긴 롬에서 안 바꾼 목록(키 1A)이 원본과 다름')
+    return results
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('rom', type=Path)
@@ -170,7 +224,9 @@ def main():
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
             list(pool.map(lambda name: run_case(name, state, out, mesence, libdir), ('growth', 'encounter', 'shop')))
         results = verify(out, items)
-        print('3/3 게임 검사 통과')
+        results += shop_growth(original, state, out, mesence, libdir)
+        save_json(out / 'results.json', results)
+        print(f'{len(results)}개 게임 검사 통과')
         print(json.dumps(results, ensure_ascii=False))
         return 0
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
