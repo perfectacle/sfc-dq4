@@ -88,6 +88,18 @@ class PackTests(unittest.TestCase):
             place(packed(tiles), 0x3FFF00)
 
 
+class BuildTests(unittest.TestCase):
+    def test_builder_rejects_overlap_in_shared_free_space(self):
+        # 새 세트 레코드를 두는 뱅크 1F 빈 자리를 다른 도구가 함께 쓰면 빌더가 겹침으로 막는다.
+        from dq5build import PatchError, build
+        original = bytes(0x180000)
+        record = (0x1F * 0x8000 + 0x7E30, bytes(52), None, 'sprite record')
+        other = (0x1F * 0x8000 + 0x7E40, bytes(4), None, 'other tool')
+        with self.assertRaises(PatchError):
+            build(original, [('sprite', 0, [record]), ('other', 0, [other])], 0)
+        build(original, [('sprite', 0, [record])], 0)
+
+
 class LayoutTests(unittest.TestCase):
     def test_simple_and_overlap_images(self):
         rng = random.Random(11)
