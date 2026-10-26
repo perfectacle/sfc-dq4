@@ -59,6 +59,19 @@ def name_entry_figure(folder):
     return sheet.resize((sheet.width * 2, sheet.height * 2), Image.Resampling.NEAREST)
 
 
+def menu_message_figure(folder):
+    """한글 메뉴 메시지 셋(지우기 확인 1CE·지운 뒤 1CF·기록 깨짐 1D0)의 창 아래쪽을 세로로 2배.
+    화면은 work/dq4-menu-msg/fig/confirm·deleted·broken.png 에 둔다. 만드는 명령은 dq4-menu-format.md 「검증」."""
+    paths = [folder / f"{name}.png" for name in ("confirm", "deleted", "broken")]
+    if not all(p.exists() for p in paths):
+        return None
+    sheet = Image.new("RGB", (256, 96 * 3 + 8), (24, 24, 24))
+    for i, path in enumerate(paths):
+        with Image.open(path) as shot:
+            sheet.paste(shot.convert("RGB").crop((0, 128, 256, 224)), (0, i * 100))
+    return sheet.resize((sheet.width * 2, sheet.height * 2), Image.Resampling.NEAREST)
+
+
 def main():
     images = assets()
     output = ROOT / "sfc" / "dq4" / "images"
@@ -81,6 +94,9 @@ def main():
         print("work/dq4-menu/fig 에 메뉴 화면이 없어 dq4-menu.webp 는 건너뜀")
     else:
         menu.save(output / "dq4-menu.webp", lossless=True)
+    messages = menu_message_figure(ROOT / "work" / "dq4-menu-msg" / "fig")
+    if messages is not None:
+        messages.save(output / "dq4-menu-messages.webp", lossless=True)
     names = name_entry_figure(ROOT / "work" / "name-entry" / "fig")
     if names is not None:
         names.save(output / "dq4-name-entry.webp", lossless=True)
