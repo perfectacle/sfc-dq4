@@ -8,8 +8,9 @@
   python fc/dq4/tools/dq4sound.py rom/dq4.nes apu N [--frames F]  드라이버를 돌려 프레임마다 APU($4000~$4017) 쓰기
   python fc/dq4/tools/dq4sound.py rom/dq4.nes compare N DIR      lua/soundlog.lua 기록(DIR/sound.txt)과 위 apu 를 프레임마다 견줌
   python fc/dq4/tools/dq4sound.py rom/dq4.nes maps               맵·필드·탈것 → 곡(19:$803B 를 따라 롬 표에서)
-  python fc/dq4/tools/dq4sound.py rom/dq4.nes calls              롬에서 곡·효과음을 부르는 자리(LDA #n 뒤 소리 입구, BRK n FB, 대사 EE n)
-  python fc/dq4/tools/dq4sound.py rom/dq4.nes export [OUT]       곡·효과음 전부를 OUT(기본 work/dq4-sound)에 .mid·.txt 로
+  python fc/dq4/tools/dq4sound.py rom/dq4.nes calls              롬에서 곡·효과음을 부르는 자리(LDA #n 뒤 소리 입구, BRK n FB, 인물 블록 30 n, 대사 EE n)
+  python fc/dq4/tools/dq4sound.py rom/dq4.nes export [OUT] [--flac]  곡·효과음 전부를 OUT(기본 work/dq4-sound)에
+      .txt·.mid·.json·.musicxml·악보 SVG(·.flac) 와 index.json, dq4.nsf 로
 
 음원 결과물(.mid·.txt)은 롬에서 뽑은 저작권 데이터라 공개 저장소에 두지 않는다(work/ 나 비공개 에셋 저장소에만).
 
@@ -178,6 +179,11 @@ class Run:
         c.hooks[0xE6CB] = self._tick
         c.hooks[0xEABB] = self._note
         c.hooks[0xE96B] = self._tempo
+        # 음량: 엔벨로프 값 × 채널·주 음량($ED67). 프레임마다 (틱, 채널 Y, 엔벨로프·고정 음량 값, 곱하는 쪽 음량 0~F)
+        self.vols = []
+        c.hooks[0xEE61] = lambda cpu: self.vols.append((self.tick, cpu.ram[0xA4], cpu.a & 0x0F, cpu.ram[0x10]))
+        c.hooks[0xEDC7] = lambda cpu: self.vols.append((self.tick, cpu.ram[0xA4], cpu.a & 0x0F, cpu.ram[0xB0] & 0x0F))
+        c.hooks[0xEE68] = lambda cpu: cpu.x == 8 and self.vols.append((self.tick, 4, cpu.a & 0x0F, 0x0F))
         self._seen = {}
         self.sfx = n >= 0x80
         c.a = n
@@ -574,6 +580,58 @@ def track(events):
 NOISE_DRUMS = [42] * 4 + [38] * 5 + [36] * 7
 
 
+def frame_ticks(run):
+    """프레임 k(0 은 곡을 건 순간)의 APU 쓰기가 일어난 틱."""
+    return [0] + run.ticks_at
+
+
+def pitch_bends(run, ns, ch, end):
+    """APU 에 실제로 쓴 주기(비브라토·미세 음높이·이조가 모두 들어감)를 그 음의 MIDI 음높이에서 벗어난 만큼의
+    음높이 휨(폭 ±2반음)으로. 바뀐 프레임에만 낸다."""
+    base = 0x4000 + 4 * (1 if run.sfx else ch)
+    tri = ch == 2 and not run.sfx
+    starts = sorted((t, round(m)) for c, t, d, m, *_ in ns if c == ch and m is not None)
+    out, per, last, i, key = [], None, None, 0, None
+    for k, (ws, t) in enumerate(zip(run.frames, frame_ticks(run))):
+        if t >= end:
+            break
+        for a, v in ws:
+            if a == base + 2:
+                per = ((per or 0) & 0x700) | v
+            elif a == base + 3:
+                per = ((per or 0) & 0xFF) | (v & 7) << 8
+        while i < len(starts) and starts[i][0] <= t:
+            key = starts[i][1]
+            i += 1
+        if per is None or key is None:
+            continue
+        bend = midi_of_period(per, tri) - key
+        v = max(0, min(16383, 8192 + round(bend / 2 * 8192)))
+        if v != last:
+            out.append((t, 2.5, bytes([0xE0 | (9 if ch == 3 else ch), v & 0x7F, v >> 7])))
+            last = v
+    return out
+
+
+def volume_events(run, ch, end):
+    """CC7(채널 음량) = 곱하는 쪽 음량(주 음량 × 채널 음량, 0~F), CC11(표현) = 그 프레임의 엔벨로프·고정 음량 값(0~F).
+    둘 다 127 × (값 + 1) / 16·127 × 값 / 15 로 바꿔 바뀔 때만 낸다. APU 에 쓰는 음량은 둘을 곱한 것($EE8A)."""
+    mch = 9 if ch == 3 else ch
+    y = 4 if run.sfx else ch
+    out, last7, last11 = [], None, None
+    for t, yy, v, scale in run.vols:
+        if yy != y or t >= end:
+            continue
+        c7, c11 = round(127 * (scale + 1) / 16), round(127 * v / 15)
+        if c7 != last7:
+            out.append((t, 2.5, bytes([0xB0 | mch, 7, c7])))
+            last7 = c7
+        if c11 != last11:
+            out.append((t, 2.5, bytes([0xB0 | mch, 11, c11])))
+            last11 = c11
+    return out
+
+
 def midi_bytes(run, title):
     ns = notes(run)
     end = max([t + d for _, t, d, *_ in ns] + [run.tick])
@@ -588,11 +646,21 @@ def midi_bytes(run, title):
         conductor.append((run.loop_start, 2, b'\xff\x06\x09loopStart'))
         conductor.append((end, 2, b'\xff\x06\x07loopEnd'))
     tracks = [track(conductor)]
+    sfx_ch = (3 if sfx_entry(run.prg, run.n - 0x80)[0] == 'noise' else 1) if run.sfx else None
     for ch in range(4):
         mch = 9 if ch == 3 else ch
         ev = [(0, 0, b'\xff\x03' + vlq(len(CH_NAMES[ch])) + CH_NAMES[ch].encode())]
+        if sfx_ch is not None and ch != sfx_ch:
+            tracks.append(track(ev))
+            continue
         if ch != 3:
             ev.append((0, 1, bytes([0xC0 | mch, PROGRAMS[ch]])))
+            # 음높이 휨 폭 ±2반음(RPN 0)
+            ev += [(0, 1, bytes([0xB0 | mch, 101, 0])), (0, 1, bytes([0xB0 | mch, 100, 0])),
+                   (0, 1, bytes([0xB0 | mch, 6, 2])), (0, 1, bytes([0xB0 | mch, 38, 0]))]
+            ev += pitch_bends(run, ns, ch, end)
+        if ch != 2:
+            ev += volume_events(run, ch, end)
         for c, t, d, m, n, g in ns:
             if c != ch or t >= end:
                 continue
@@ -808,37 +876,407 @@ def cmd_score(prg, args):
     print(score_text(prg, args.n))
 
 
+# 선율로 맞춘 NDS 사운드 테스트 이름(fc/dq4/docs/dq4-sound-format.md 「곡 목록」, ndsmatch). 장면으로만 붙인 것도 포함
+NDS_NAMES = {
+    0x01: 'レベルアップ', 0x02: '序曲', 0x03: '王宮のメヌエット', 0x04: '楽しいカジノ', 0x05: '戦士はひとり征く',
+    0x06: '恐怖の洞窟', 0x07: '呪われし塔', 0x08: '不思議のほこら', 0x09: '海図を広げて', 0x0A: '謎の城',
+    0x0B: 'ジプシーの旅', 0x0C: '街でのひととき', 0x0D: '栄光への戦い・生か死か', 0x0E: 'エレジー', 0x0F: '宿屋宿泊',
+    0x10: '教会治療', 0x13: 'のどかな熱気球の旅', 0x15: 'コロシアム', 0x16: 'おてんば姫の行進', 0x17: '武器商人トルネコ',
+    0x19: 'コロシアム', 0x1A: '仲間が加わった', 0x1B: 'コロシアムスタンド', 0x1C: '勇者の故郷', 0x1D: '馬車のマーチ',
+    0x1E: '邪悪なるもの', 0x1F: 'インテルメッツォ', 0x20: 'ジプシーダンス', 0x25: 'エンディング第一章',
+    0x26: 'エンディング第二章', 0x27: 'エンディング第三章', 0x28: 'エンディング第四章', 0x2B: '重要アイテム発見',
+    0x2D: '病気回復', 0x2E: 'ファンファーレ小', 0x2F: 'ファンファーレ中', 0x30: 'ファンファーレ大',
+    0x31: '終曲・導かれし者たち', 0x35: '悪の化身',
+}
+
+
 def cmd_export(prg, args):
+    """곡·효과음마다 .txt·.mid·.json·.musicxml·-score-NN.svg(--no-svg 로 뺌)·.wav(--wav)·.flac(--flac, flac 명령),
+    폴더마다 index.json, 그리고 OUT/dq4.nsf. 같은 롬·같은 도구면 같은 바이트가 나온다(flac 은 같은 판일 때)."""
+    import subprocess
+    import dq4apu
+    import dq4score
     out = args.out
     os.makedirs(os.path.join(out, 'songs'), exist_ok=True)
     os.makedirs(os.path.join(out, 'sfx'), exist_ok=True)
     index = {'songs': [], 'sfx': []}
-    for n in list(range(NSONGS)) + [0x80 + i for i in range(NSFX)]:
+    for n in nsf_tracks(prg):
         sub = 'sfx' if n >= 0x80 else 'songs'
-        if n < 0x80 and song_unused(prg, n) or n >= 0x80 and sfx_unused(prg, n - 0x80):
-            continue
         r = Run(prg, n, max_frames=args.frames if n < 0x80 else 2000)
         base = os.path.join(out, sub, f'{n:02X}')
+        title = f'DQ4 {"sfx" if n >= 0x80 else "song"} {n:02X}' + (f' {NDS_NAMES[n]}' if n in NDS_NAMES else '')
+        files = [f'{n:02X}.mid', f'{n:02X}.txt', f'{n:02X}.json', f'{n:02X}.musicxml']
         with open(base + '.mid', 'wb') as f:
-            f.write(midi_bytes(r, f'DQ4 {"sfx" if n >= 0x80 else "song"} {n:02X}'))
+            f.write(midi_bytes(r, title))
         with open(base + '.txt', 'w') as f:
             f.write(score_text(prg, n) + '\n\n' + notes_text(r) + '\n')
         with open(base + '.json', 'w') as f:
             json.dump(song_json(prg, r), f, ensure_ascii=False, separators=(',', ':'))
+        xml = song_musicxml(r, title)
+        errs = score_check(r, xml)
+        if errs:
+            sys.exit(f'{n:02X} 악보가 MIDI 와 다름: ' + '; '.join(errs))
+        with open(base + '.musicxml', 'w') as f:
+            f.write(xml)
+        if not args.no_svg:
+            for i, page in enumerate(dq4score.svg_pages(xml)):
+                name = f'{n:02X}-score-{i + 1:02d}.svg'
+                with open(os.path.join(out, sub, name), 'w') as f:
+                    f.write(page)
+                files.append(name)
+        if args.wav or args.flac:
+            wav = base + '.wav'
+            dq4apu.write_wav(wav, dq4apu.render(r.frames, 44100, tail=30))
+            if args.flac:
+                subprocess.run(['flac', '-s', '-8', '-f', '-o', base + '.flac', wav], check=True)
+                if not args.wav:
+                    os.unlink(wav)
+                files.append(f'{n:02X}.flac')
+            if args.wav:
+                files.append(f'{n:02X}.wav')
         if n < 0x80:
             bank, ptrs, _ = song_entry(prg, n)
             where = [f'{chan_bank(bank, y):02X}:{p:04X}' for y, p in enumerate(ptrs)]
         else:
             ch, addr = sfx_entry(prg, n - 0x80)
             where = [f'19:{addr:04X} {ch}']
-        index[sub].append({'id': f'{n:02X}', 'files': [f'{n:02X}.mid', f'{n:02X}.txt', f'{n:02X}.json'], 'channels': where,
+        index[sub].append({'id': f'{n:02X}', 'nsf_track': nsf_tracks(prg).index(n) + 1, 'name': NDS_NAMES.get(n),
+                           'files': files, 'channels': where,
                            'tempo': r.tempos[0][1], 'notes': len(notes(r)), 'ticks': r.tick,
                            'loop_start': r.loop_start, 'loop_len': r.loop_len,
                            'seconds': round(len(r.frames) / FPS, 1)})
+        print(base, len(files))
     for sub, items in index.items():
         with open(os.path.join(out, sub, 'index.json'), 'w') as f:
             json.dump(items, f, ensure_ascii=False, indent=1)
+    data, _, _ = nsf_bytes(prg)
+    with open(os.path.join(out, 'dq4.nsf'), 'wb') as f:
+        f.write(data)
     print(out)
+
+
+# --- 오선 악보 ------------------------------------------------------------------
+
+def score_data(run):
+    """곡·효과음의 오선 악보 재료: (파트 목록, 끝 틱, 마디 틱, 템포 목록, 되풀이). 틱은 첫 틱(1)을 0 으로 당긴다.
+    박자는 롬에 없어 되풀이 길이로 정한다(96 의 배수면 4/4, 아니고 72 의 배수면 3/4, 되풀이가 없으면 4/4)."""
+    ns = notes(run)
+    end = max([t + d for _, t, d, *_ in ns] + [run.tick])
+    loop = None
+    if run.loop_start is not None:
+        end = run.loop_start + run.loop_len
+        loop = (run.loop_start - 1, end - 1)
+    end -= 1
+    bar = 96
+    if run.loop_len and run.loop_len % 96 and not run.loop_len % 72:
+        bar = 72
+    sfx_ch = (3 if sfx_entry(run.prg, run.n - 0x80)[0] == 'noise' else 1) if run.sfx else None
+    parts = []
+    for ch in range(4):
+        if sfx_ch is not None and ch != sfx_ch:
+            continue
+        evs = []
+        for c, t, d, m, n, g in ns:
+            if c != ch or t - 1 >= end:
+                continue
+            key = NOISE_DRUMS[n & 0x0F] if ch == 3 else max(0, min(127, round(m)))
+            evs.append([t - 1, d, key])
+        for a, b in zip(evs, evs[1:]):
+            a[1] = min(a[1], b[0] - a[0])
+        keys = [k for *_, k in evs]
+        clef = 'perc' if ch == 3 else 'bass' if keys and sorted(keys)[len(keys) // 2] < 60 else 'treble'
+        parts.append((CH_NAMES[ch], clef, [tuple(e) for e in evs]))
+    tempos = [(max(0, t - 1), 60 * FPS * tick_rate(v) / PPQ) for t, v in run.tempos if v]
+    return parts, end, bar, tempos, loop
+
+
+def song_musicxml(run, title):
+    import dq4score
+    parts, end, bar, tempos, loop = score_data(run)
+    return dq4score.musicxml(title, parts, end, PPQ, bar, tempos, loop,
+                             subtitle='FC ドラゴンクエストIV — sfc-dq4 dq4sound.py 가 롬의 드라이버를 돌려 뽑음')
+
+
+def score_check(run, xml):
+    """MusicXML 과 같은 곡의 MIDI(midi_bytes)를 견준다: 파트마다 음 수(붙임줄로 이어진 조각은 하나), 음 시작 틱 목록,
+    전체 길이(틱). 다르면 그 차이를 적은 문자열 목록을 돌려준다."""
+    import xml.etree.ElementTree as ET
+    import tempfile
+    root = ET.fromstring(xml.split('\n', 2)[2])
+    got = []
+    for part in root.findall('part'):
+        t, starts = 0, []
+        for meas in part.findall('measure'):
+            for note in meas.findall('note'):
+                d = int(note.findtext('duration'))
+                tie = {x.get('type') for x in note.findall('tie')}
+                if note.find('rest') is None and 'stop' not in tie:
+                    starts.append(t)
+                t += d
+        got.append((starts, t))
+    with tempfile.NamedTemporaryFile(suffix='.mid', delete=False) as f:
+        f.write(midi_bytes(run, 'check'))
+    mid = read_midi_notes(f.name)
+    os.unlink(f.name)
+    parts, end, *_ = score_data(run)
+    errs = []
+    names = [p[0] for p in parts]
+    for (starts, length), name in zip(got, names):
+        ch = CH_NAMES.index(name)
+        # MIDI 트랙 = 지휘 + 채널 4개. 노이즈는 채널 10 이라 read_midi_notes 가 빼므로 악보 재료와 견준다
+        if ch == 3:
+            want = [s for s, _, _ in parts[names.index(name)][2]]
+        else:
+            want = [round(t * PPQ) - 1 for t, _ in mid[1 + ch]]
+        if starts != want:
+            errs.append(f'{name}: 음 {len(starts)}개 / MIDI {len(want)}개')
+        if length < end:
+            errs.append(f'{name}: 길이 {length} < {end}')
+    return errs
+
+
+def cmd_scorecheck(prg, args):
+    ids = [int(v, 16) for v in args.ids] if args.ids else nsf_tracks(prg)
+    bad = 0
+    for n in ids:
+        r = Run(prg, n, max_frames=40000 if n < 0x80 else 2000)
+        errs = score_check(r, song_musicxml(r, f'{n:02X}'))
+        parts, end, *_ = score_data(r)
+        print(f'{n:02X}  음 ' + ' '.join(f'{p[0]} {len(p[2])}' for p in parts) + f'  길이 {end}틱  ' + ('; '.join(errs) or '같음'))
+        bad += bool(errs)
+    sys.exit(1 if bad else 0)
+
+
+# --- NSF ---------------------------------------------------------------------------
+
+NSF_BANKS = [0x19, 0x10, 0x12, 0x13, 0x17, 0x18, 0x1F]   # NSF 4KB 쪽 4개씩 이 순서로 싣는다
+NSF_FREE = 0xFE8C          # 1F 의 빈 자리 $FE8C~$FF73(232바이트, 모두 FF)
+NSF_PLAY = 0xC019          # NMI 가 부르는 JMP $E685
+
+
+def nsf_tracks(prg):
+    return ([n for n in range(NSONGS) if not song_unused(prg, n)]
+            + [0x80 + i for i in range(NSFX) if not sfx_unused(prg, i)])
+
+
+def nsf_bytes(prg, start=1):
+    """드라이버(1F)와 소리 데이터 뱅크 6개를 NSF(버전 1, 뱅크 전환)로 묶는다. 1F 는 두 곳만 고친다:
+    $FF94(MMC1 뱅크 전환, A = 뱅크)를 NSF 뱅크 레지스터 $5FF8~$5FFB 쓰기로, 빈 자리 $FE8C 에 INIT·뱅크 표·곡 목록.
+    INIT 은 게임과 같은 차례로 초기화($F088) → 한 틱($E685) → 채널 음 번호 FF → 곡 시작($EF59)을 하고,
+    PLAY 는 NMI 와 같은 $C019 다. 곡 번호는 NSF 트랙 순서(nsf_tracks)이다."""
+    tracks = nsf_tracks(prg)
+    banks = {b: i * 4 for i, b in enumerate(NSF_BANKS)}
+    fixed = bytearray(prg[0x1F * 0x4000:0x20 * 0x4000])
+
+    def put(addr, code):
+        fixed[addr - 0xC000:addr - 0xC000 + len(code)] = bytes(code)
+
+    bankmap = NSF_FREE
+    table = bankmap + 0x20
+    init = table + len(tracks)
+    assert all(v == 0xFF for v in fixed[NSF_FREE - 0xC000:0xFF74 - 0xC000])
+    put(bankmap, [banks.get(b, 0) for b in range(0x20)])
+    put(table, tracks)
+    lo, hi = table & 0xFF, table >> 8
+    code = [0xAA, 0xBD, lo, hi, 0x48,                   # TAX; LDA table,X; PHA
+            0xA9, 0x00, 0x20, 0x88, 0xF0,               # LDA #0; JSR $F088
+            0x20, 0x85, 0xE6,                           # JSR $E685
+            0xA9, 0xFF]                                 # LDA #$FF
+    for a in range(0x0646, 0x064B):
+        code += [0x8D, a & 0xFF, a >> 8]                # STA $0646..$064A
+    code += [0x68]                                      # PLA
+    start_pc = init + len(code)
+    code += [0x20, 0x59, 0xEF, 0x60]                    # JSR $EF59; RTS
+    put(init, code)
+    assert init + len(code) <= 0xFF74
+    blo, bhi = bankmap & 0xFF, bankmap >> 8
+    swap = [0x48, 0x8A, 0x48, 0xBA, 0xBD, 0x02, 0x01,   # PHA; TXA; PHA; TSX; LDA $0102,X
+            0x29, 0x1F, 0xAA, 0xBD, blo, bhi,           # AND #$1F; TAX; LDA bankmap,X
+            0x8D, 0xF8, 0x5F, 0x18, 0x69, 0x01,         # STA $5FF8; CLC; ADC #1
+            0x8D, 0xF9, 0x5F, 0x69, 0x01,               # STA $5FF9; ADC #1
+            0x8D, 0xFA, 0x5F, 0x69, 0x01,               # STA $5FFA; ADC #1
+            0x8D, 0xFB, 0x5F,                           # STA $5FFB
+            0x68, 0xAA, 0x68, 0x60]                     # PLA; TAX; PLA; RTS
+    put(0xFF94, swap)
+    data = b''.join(prg[b * 0x4000:(b + 1) * 0x4000] for b in NSF_BANKS[:-1]) + bytes(fixed)
+
+    def text(t):
+        return t.encode('ascii')[:31].ljust(32, b'\0')
+
+    head = (b'NESM\x1a' + bytes([1, len(tracks), start]) + struct.pack('<HHH', 0x8000, init, NSF_PLAY)
+            + text('Dragon Quest IV') + text('Koichi Sugiyama') + text('1990 Enix')
+            + struct.pack('<H', round(1e6 / FPS)) + bytes([0, 1, 2, 3, 24, 25, 26, 27])
+            + struct.pack('<H', 20000) + bytes([0, 0]) + bytes(4))
+    assert len(head) == 0x80
+    return head + data, tracks, start_pc
+
+
+def cmd_nsf(prg, args):
+    data, tracks, start_pc = nsf_bytes(prg, args.start)
+    with open(args.out, 'wb') as f:
+        f.write(data)
+    print(f'{args.out}: 트랙 {len(tracks)}개, 곡 시작 자리 ${start_pc:04X}')
+    print(' '.join(f'{i + 1}={n:02X}' for i, n in enumerate(tracks)))
+
+
+def cmd_apucheck(prg, args):
+    """lua/apustate.lua 의 apu.txt 에서 게임의 APU 쓰기(W)를 합성기(dq4apu)에 그대로 넣고, 프레임 끝마다 채널 상태가
+    MesenCE 의 채널 상태(F)와 같은지 본다. 채널마다 음량 레지스터와 주기 상위 레지스터를 모두 쓴 프레임부터 견주고,
+    F 줄에 프레임 카운터 클록이 있으면 첫 프레임에서 합성기의 프레임 카운터를 그 자리에 맞춘다(스윕·엔벨로프 시각)."""
+    import dq4apu
+    names = ['pulse1 주기', 'pulse1 음량', 'pulse1 듀티', 'pulse2 주기', 'pulse2 음량', 'pulse2 듀티',
+             'triangle 주기', 'triangle 움직임', 'noise 주기', 'noise 음량', 'noise 짧은꼴']
+    chan_of = [0, 0, 0, 1, 1, 1, 2, 2, 3, 3, 3]
+    need = {0: {0x4000, 0x4003}, 1: {0x4004, 0x4007}, 2: {0x4008, 0x400B}, 3: {0x400C, 0x400F}}
+    total_frames, total_bad = 0, 0
+    for d in args.dirs:
+        writes, states, fcs = {}, {}, {}
+        with open(os.path.join(d, 'apu.txt')) as f:
+            for line in f:
+                p = line.split()
+                if p[0] == 'W':
+                    writes.setdefault(int(p[1]), []).append((int(p[2], 16), int(p[3], 16)))
+                elif p[0] == 'F':
+                    v = list(map(int, p[2:]))
+                    if len(v) > 12:
+                        fcs[int(p[1])] = v.pop()
+                    del v[8]                       # 삼각파 단계(시작 자리가 달라 견주지 않음)
+                    v[8] = dq4apu.NOISE_PERIODS.index(v[8] + 1)
+                    states[int(p[1])] = v
+        apu = dq4apu.APU()
+        apu.write(0x4015, 0x0F)
+        apu.write(0x4017, 0x80)
+        live, bad, n, seen = set(), {}, 0, set()
+        fs = sorted(states)
+        if fs[0] in fcs:
+            apu.fc = float(fcs[fs[0]])
+        for fr in range(fs[0], fs[-1]):
+            for a, v in writes.get(fr, []):
+                apu.write(a, v)
+                seen.add(a)
+            live |= {c for c, regs in need.items() if regs <= seen}
+            apu.run(dq4apu.FRAME)
+            real = states.get(fr + 1)
+            if real is None:
+                continue
+            p1, p2, t, z = apu.p[0], apu.p[1], apu.t, apu.n
+            mine = [p1.timer, p1.level(), p1.duty, p2.timer, p2.level(), p2.duty, t.timer,
+                    int(bool(t.linear and t.length)), dq4apu.NOISE_PERIODS.index(z.period),
+                    0 if z.length == 0 else z.env.out(), int(z.short)]
+            n += 1
+            for i, (a, b) in enumerate(zip(mine, real)):
+                if chan_of[i] in live and a != b:
+                    bad.setdefault(names[i], []).append(fr + 1)
+        nb = len({x for v in bad.values() for x in v})
+        total_frames += n
+        total_bad += nb
+        print(f'{d}: 프레임 {n}개 중 다름 {nb}개' + ''.join(f' / {k} {len(v)}(처음 {v[0]})' for k, v in bad.items()))
+    print(f'합계: 프레임 {total_frames}개 중 다름 {total_bad}개')
+    sys.exit(1 if total_bad else 0)
+
+
+def read_midi_notes(path):
+    """SMF 의 트랙마다 [(4분음표 단위 시각, 음 번호)](음 켬, 세기 > 0, 채널 10 제외)."""
+    with open(path, 'rb') as f:
+        d = f.read()
+    ntr, ppq = struct.unpack('>HH', d[10:14])
+    p, tracks = 14, []
+
+    def var(q):
+        v = 0
+        while True:
+            b = d[q]
+            q += 1
+            v = (v << 7) | (b & 0x7F)
+            if not b & 0x80:
+                return v, q
+    for _ in range(ntr):
+        end = p + 8 + struct.unpack('>I', d[p + 4:p + 8])[0]
+        q, t, run, out = p + 8, 0, 0, []
+        while q < end:
+            dt, q = var(q)
+            t += dt
+            st = d[q]
+            if st & 0x80:
+                q += 1
+                if st < 0xF0:
+                    run = st
+            else:
+                st = run
+            if st == 0xFF:
+                ln, q = var(q + 1)
+                q += ln
+            elif st in (0xF0, 0xF7):
+                ln, q = var(q)
+                q += ln
+            else:
+                n = 1 if st & 0xF0 in (0xC0, 0xD0) else 2
+                if st & 0xF0 == 0x90 and d[q + 1] and st & 0x0F != 9:
+                    out.append((t / ppq, d[q]))
+                q += n
+        tracks.append(out)
+        p = end
+    return tracks
+
+
+def intervals(notes):
+    """같은 16분음표 자리의 음은 가장 높은 것만 두고, 이어지는 두 음의 반음 차이 열(조 옮김과 무관)."""
+    top = {}
+    for t, n in notes:
+        k = round(t * 4)
+        top[k] = max(top.get(k, 0), n)
+    seq = [top[k] for k in sorted(top)]
+    return [b - a for a, b in zip(seq, seq[1:])]
+
+
+def melody_score(a, b, k):
+    """a 의 k 개짜리 음정 묶음 가운데 b 에도 있는 비율."""
+    ga = {tuple(a[i:i + k]) for i in range(len(a) - k + 1)}
+    gb = {tuple(b[i:i + k]) for i in range(len(b) - k + 1)}
+    return len(ga & gb) / len(ga) if ga else 0.0
+
+
+def cmd_ndsmatch(prg, args):
+    """FC 곡마다 펄스 1·2·삼각파의 음정 열을 NDS 곡(비공개 에셋 nds/dq4/sound/songs/*.mid)의 트랙과 견줘
+    가장 비슷한 셋을 찍는다. 음이 많은 곡은 5개 묶음, 적은 곡(음정 30개 미만)은 3개 묶음으로 센다."""
+    nds = {}
+    for name in sorted(os.listdir(args.dir)):
+        if name.endswith('.mid'):
+            nds[name[:-4]] = [intervals(t) for t in read_midi_notes(os.path.join(args.dir, name)) if len(t) > 2]
+    for n in range(NSONGS):
+        if song_unused(prg, n):
+            continue
+        r = Run(prg, n)
+        end = r.loop_start + r.loop_len if r.loop_start is not None else r.tick
+        fc = [intervals([(t / PPQ, round(m)) for c, t, d, m, *_ in notes(r) if c == ch and t < end]) for ch in range(3)]
+        fc = [x for x in fc if len(x) >= 3]
+        if not fc:
+            print(f'{n:02X}  (음이 적음)')
+            continue
+        k = 5 if max(map(len, fc)) >= 30 else 3
+        res = sorted(((max((melody_score(a, b, k) for a in fc for b in ts), default=0), name)
+                      for name, ts in nds.items()), reverse=True)
+        print(f'{n:02X}  k={k}  ' + ' | '.join(f'{name} {v:.2f}' for v, name in res[:3]))
+
+
+# --- WAV ---------------------------------------------------------------------------
+
+def song_audio(prg, n, rate=44100):
+    """곡은 처음부터 첫 되풀이의 끝까지(되풀이가 없으면 끝까지), 효과음은 끝(또는 첫 되풀이)까지 합성한 표본."""
+    import dq4apu
+    r = Run(prg, n, max_frames=40000 if n < 0x80 else 2000)
+    return r, dq4apu.render(r.frames, rate, tail=30)
+
+
+def cmd_wav(prg, args):
+    import dq4apu
+    ids = [int(v, 16) for v in args.ids] if args.ids else nsf_tracks(prg)
+    os.makedirs(args.out, exist_ok=True)
+    for n in ids:
+        r, x = song_audio(prg, n)
+        path = os.path.join(args.out, f'{n:02X}.wav')
+        dq4apu.write_wav(path, x)
+        print(f'{path}  {len(x) / 44100:.1f}초  최대 {abs(x).max():.3f}')
 
 
 def main():
@@ -862,14 +1300,29 @@ def main():
     s = sub.add_parser('json')
     s.add_argument('n', type=lambda v: int(v, 16))
     s.add_argument('--frames', type=int, default=40000)
+    s = sub.add_parser('nsf')
+    s.add_argument('out')
+    s.add_argument('--start', type=int, default=1)
+    s = sub.add_parser('apucheck')
+    s.add_argument('dirs', nargs='+')
+    s = sub.add_parser('ndsmatch')
+    s.add_argument('dir')
+    s = sub.add_parser('scorecheck')
+    s.add_argument('ids', nargs='*')
+    s = sub.add_parser('wav')
+    s.add_argument('out')
+    s.add_argument('ids', nargs='*')
     s = sub.add_parser('export')
     s.add_argument('out', nargs='?', default='work/dq4-sound')
     s.add_argument('--frames', type=int, default=40000)
+    s.add_argument('--no-svg', action='store_true')
+    s.add_argument('--wav', action='store_true')
+    s.add_argument('--flac', action='store_true')
     args = ap.parse_args()
     prg = load(args.rom)
     {'songs': cmd_songs, 'sfx': cmd_sfx, 'score': cmd_score, 'notes': cmd_notes, 'apu': cmd_apu,
      'compare': cmd_compare, 'export': cmd_export, 'maps': cmd_maps, 'calls': cmd_calls,
-     'envelopes': cmd_envelopes, 'json': cmd_json}[args.cmd](prg, args)
+     'envelopes': cmd_envelopes, 'json': cmd_json, 'nsf': cmd_nsf, 'wav': cmd_wav, 'apucheck': cmd_apucheck, 'ndsmatch': cmd_ndsmatch, 'scorecheck': cmd_scorecheck}[args.cmd](prg, args)
 
 
 # 19:$803B(맵 곡 고르기)가 읽는 표
@@ -904,7 +1357,8 @@ def cmd_maps(prg, args):
     print(f'  5장, $6292 ≠ FF → {b(CHAPTER_SONGS + 4):02X}')
     print('  5장, $6292 = FF: 일행 첫 자리 인물(x3 2B 63 41)의 곡 '
           + ', '.join(f'{PERSONS[i]} {b(LEAD_SONGS + i):02X}' for i in range(1, 8)))
-    print(f'    첫 자리가 勇者면 x3 62 63 41 이 1 일 때 {b(LEAD_SONGS):02X} 아니면 {b(CHAPTER_SONGS + 5):02X}')
+    # 첫 자리가 勇者(0)면 19:$804C 로 가서 걷는 일행 수(x3 62 63 41)를 본다. 곡 1C 는 $8055 의 즉치값
+    print(f'    첫 자리가 勇者면 걷는 일행 수(x3 62 63 41)가 1 일 때 {b(0x8056):02X} 아니면 {b(CHAPTER_SONGS + 5):02X}')
 
 
 def code_calls(prg):
@@ -938,10 +1392,24 @@ def message_calls(rom_bytes):
     return out
 
 
+def npc_calls(prg):
+    """인물 블록 명령 30 n(1F:$DDBE, 소리 n): (블록 뱅크, 주소, 번호)."""
+    import dq4npcblock
+    out, seen = [], set()
+    for _, bank, _, _, a, ln, _ in dq4npcblock.all_blocks(prg):
+        for p, bs, _, _ in dq4npcblock.decode(prg, bank, a, ln):
+            if bs[0] == 0x30 and (bank, p) not in seen:
+                seen.add((bank, p))
+                out.append((bank, p, bs[1]))
+    return out
+
+
 def cmd_calls(prg, args):
     by = {}
     for bank, addr, how, n in code_calls(prg):
         by.setdefault(n, []).append(f'{bank:02X}:{addr:04X}' + ('' if how == 'BRK n FB' else f'({how})'))
+    for bank, addr, n in npc_calls(prg):
+        by.setdefault(n, []).append(f'{bank:02X}:{addr:04X}(인물 블록 30)')
     msgs = {}
     with open(args.rom, 'rb') as f:
         for m, n in message_calls(f.read()):

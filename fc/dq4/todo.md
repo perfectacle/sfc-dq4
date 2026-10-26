@@ -11,6 +11,6 @@ FC DQ4(Rev A) 원작 데이터 분석. 이식할 데이터가 어디에 어떤 �
 - **창**: `10:$BAE1` 이 실제로 도는 장면(일행 쪽 전투원이 몬스터 AI 로 움직이는 경우), 항목 `25`(쓰는 창 없음), 걸러내기 `04` 를 상수로 주는 호출([dq4-text-format.md](docs/dq4-text-format.md)).
 - **블록·맵**: ラナルータ 를 주문으로 써서 `12:$A728` 확인, 배 타고 내리기(`$0527`), `48/09` 갈래([dq4-block-format.md](docs/dq4-block-format.md)).
 - **상점·조우**: `$6E44` 를 읽는 `13:$8094`·`10:$B0EF` 실측(5장 동료가 있는 이벤트 전투), 앞 장면 플래그를 검사하는 숨김 조건만 골라 장 안 순서로 거르기, 그룹 FE 를 부르는 곳(정적 검색으론 없음), パルプンテ `D8` 의 `$72E5` 를 읽는 곳과 `E3` 보상 계산([dq4-shop-format.md](docs/dq4-shop-format.md), [dq4-encounter-format.md](docs/dq4-encounter-format.md)).
-- **소리**: 탈것 곡 `09`·`13` 의 실제 장면, 곡 `19` 를 부르는 곳, 5장 필드 곡을 고르는 x3 `2B`/`62 63 41` 의 뜻, `$6BF9` 를 읽는 곳, 곡 이름을 nds 곡 표와 대조, MIDI 에 엔벨로프·음량 담기, WAV·NSF(약 200MB 라 보류)([dq4-sound-format.md](docs/dq4-sound-format.md)).
+- **소리**: `x3 62 63 41` 의 조건 `41` 이 죽은 동료를 빼는지, 장 끝 연출의 `1A:$806E` 기다림 실측, NDS 이름을 못 정한 징글 11곡([dq4-sound-format.md](docs/dq4-sound-format.md#남은-것)).
 - **원작 그림**: 탈것 칸 `0D`·`58`~`60` 장면(RAM 으로 열기구를 태우면 스프라이트가 모두 숨겨짐), 이름 없는 28그룹의 진짜 이름(지금은 「가까운 입구+ちかく」 자리 표시), `02/00` 연출 시작 1~2프레임, `1D:$A6C3` 으로 들어오는 곳([dq4-fcgfx.md](docs/dq4-fcgfx.md#남은-것), [dq4-fcsprite-format.md](docs/dq4-fcsprite-format.md#남은-것)).
 - **실험 환경**: 1장 세이브스테이트 넷을 지금 `dq4state.sh` 로 다시 만들지(문서 숫자 다시 확인 필요, [handoff.md](handoff.md#실험-출발점)).
