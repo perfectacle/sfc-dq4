@@ -21,14 +21,18 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(__file__))
 from dq5map import Rom, lorom  # noqa: E402
+from dq5mapwrite import all_maps  # noqa: E402
 from dq5npc import (  # noqa: E402
     ALT_END, ALT_START, NO_NPC, NPC_GROUPS, OVERRIDE_LISTS, all_lists, entry_size,
     list_entries, parse, script_address, script_bytes, script_ops, table_values,
 )
-from dq5npclists import FIND_OVERRIDE, assemble_find, condition_plan, list_plan, slot_guard  # noqa: E402
+from dq5npclists import (  # noqa: E402
+    FIND_OVERRIDE, assemble_find, condition_plan, list_plan, new_map_keys, slot_guard,
+)
 from dq5npcrecord import edits as record_edits  # noqa: E402
 from dq5npcwrite import FORMAT as SCRIPT_FORMAT, dump_script, encode, validate_flow  # noqa: E402
 
@@ -164,7 +168,7 @@ def pack_region(rom, lists, start, changes, prefix=0):
     return out, mapping, scripts, entries
 
 
-def patch(rom, doc, base=0x328000, alt=0x338000, records=None, allow_growth=False):
+def patch(rom, doc, base=0x328000, alt=0x338000, records=None, allow_growth=False, new_maps=()):
     if type(base) is not int or type(alt) is not int:
         raise ValueError('목적지 주소는 정수여야 함')
     base, alt = destination(cpu(base)), destination(cpu(alt))
@@ -180,11 +184,13 @@ def patch(rom, doc, base=0x328000, alt=0x338000, records=None, allow_growth=Fals
     # 인물 레코드·조건 표 수정(dq5npcrecord.py)은 옮기는 사본에 넣는다. 원본 자리를 고쳐도 게임은 사본을 읽는다.
     edited = {at: new for at, new, old, _ in (record_edits(rom, records) if records is not None else []) if new != old}
     entry_edits = {at: v for at, v in edited.items() if not NO_NPC <= at < OVERRIDE_LISTS + OVERRIDE_COUNT * 6}
-    base_items, alt_items = list_plan(rom, doc, base_lists + alt_lists, entry_edits)
-    first, lm1, sm1, em1 = pack_region(rom, base_items, base, changes, GROUP_COUNT * 2)
+    new_maps = new_map_keys(base_lists, list(new_maps))
+    new_groups = sorted({bc for bc, _ in new_maps if bc >= GROUP_COUNT})
+    base_items, alt_items = list_plan(rom, doc, base_lists + alt_lists, entry_edits, new_maps)
+    first, lm1, sm1, em1 = pack_region(rom, base_items, base, changes, (GROUP_COUNT + len(new_groups)) * 2)
     second, lm2, sm2, em2 = pack_region(rom, alt_items, alt, changes)
-    overrides, no_npc, moved = condition_plan(rom, doc, edited, [key for key, _ in alt_items])
-    growth = slot_guard(rom, lists, base_items, alt_items, overrides, allow_growth)
+    overrides, no_npc, moved = condition_plan(rom, doc, edited, [key for key, _ in alt_items], new_maps)
+    growth = slot_guard(rom, lists, base_items, alt_items, overrides, allow_growth, new_maps)
     if moved:
         table = alt + len(second)
         rows = b''.join(head + (lm2[key] & 0xFFFF).to_bytes(2, 'little') for head, key in overrides) + b'\xff'
@@ -198,6 +204,9 @@ def patch(rom, doc, base=0x328000, alt=0x338000, records=None, allow_growth=Fals
         if old not in lm1:
             raise ValueError(f'그룹 {i}: 목록 시작점이 아닌 포인터')
         first[i * 2:i * 2 + 2] = (lm1[old] & 0xFFFF).to_bytes(2, 'little')
+    # 새 그룹(36~)의 포인터는 옮긴 그룹 표 끝에 이어 둔다. 12:8050 이 $BC*2 로 읽는 표다.
+    for bc in new_groups:
+        first[bc * 2:bc * 2 + 2] = (lm1[f'{bc:02X}/00'] & 0xFFFF).to_bytes(2, 'little')
     writes = [{'at': cpu(base), 'hex': first.hex(' '), 'note': '기본 인물 그룹 포인터와 목록'},
               {'at': cpu(alt), 'hex': second.hex(' '), 'note': '대체 인물 목록'}]
 
@@ -292,6 +301,34 @@ def check(rom):
           f'05·37의 원본 목록 영역 호출 {native_refs}개')
 
 
+def new_map(text):
+    if not re.fullmatch(r'[0-9A-F]{2}/[0-9A-F]{2}', text):
+        raise argparse.ArgumentTypeError('--new-map 은 대문자 16진 GG/MM')
+    return tuple(int(v, 16) for v in text.split('/'))
+
+
+def new_maps_from(rom, given, newmap_doc):
+    """--new-map 과 dq5newmap 문서의 새 맵을 맞춘다. 문서가 더하는 맵을 빠뜨리면 그 맵이 다음 그룹 첫 목록을 읽기 때문이다."""
+    if newmap_doc is None:
+        return given
+    doc = json.loads(newmap_doc.read_text(encoding='utf-8'))
+    if not isinstance(doc, dict) or doc.get('format') != 'dq5newmap/1' or not isinstance(doc.get('maps'), list):
+        raise ValueError(f'{newmap_doc}: dq5newmap/1 문서가 아님')
+    known = set(all_maps(rom))
+    added = []
+    for row in doc['maps']:
+        name = row.get('map') if isinstance(row, dict) else None
+        if not isinstance(name, str) or not re.fullmatch(r'[0-9A-F]{2}/[0-9A-F]{2}', name):
+            raise ValueError(f'{newmap_doc}: map 은 대문자 GG/MM')
+        key = tuple(int(v, 16) for v in name.split('/'))
+        if key not in known:
+            added.append(key)
+    if given and sorted(set(given)) != sorted(added):
+        raise ValueError('--new-map ' + ' '.join(f'{a:02X}/{b:02X}' for a, b in sorted(set(given))) + ' 이 dq5newmap 문서의 새 맵 '
+                         + ' '.join(f'{a:02X}/{b:02X}' for a, b in sorted(added)) + ' 과 다름')
+    return added
+
+
 def save(path, value):
     os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
     with open(path, 'w', encoding='utf-8') as f:
@@ -312,6 +349,10 @@ def main():
     write.add_argument('--alt', default='33:8000')
     write.add_argument('--report')
     write.add_argument('--records', help='dq5npcrecord/1 문서. 레코드·조건 표 수정을 옮기는 사본에 넣는다')
+    write.add_argument('--new-map', action='append', default=[], type=new_map,
+                       help='dq5newmap.py 로 더할 맵 GG/MM(여럿이면 되풀이). 그 그룹 마지막 목록 뒤에 기본 목록을 둔다')
+    write.add_argument('--newmap-doc', type=Path,
+                       help='dq5newmap/1 문서. 원래 롬에 없는 맵을 새 맵으로 받고, --new-map 을 함께 주면 둘이 같은지 본다')
     write.add_argument('--allow-growth', action='store_true',
                        help='맵의 원본 최대 대신 슬롯 1F 까지 인물을 늘림(맵에서 04:FB1C 등이 더 쓰는 슬롯은 따지지 않음)')
     sub.add_parser('check')
@@ -331,7 +372,8 @@ def main():
             if args.records:
                 with open(args.records, encoding='utf-8') as f:
                     records = json.load(f)
-            manifest, layout = patch(rom, doc, destination(args.base), destination(args.alt), records, args.allow_growth)
+            manifest, layout = patch(rom, doc, destination(args.base), destination(args.alt), records, args.allow_growth,
+                                     new_maps_from(rom, args.new_map, args.newmap_doc))
             for line in layout['slot_growth']:
                 print(f'원본보다 많은 슬롯: {line}')
             save(args.out, manifest)

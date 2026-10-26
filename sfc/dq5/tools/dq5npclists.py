@@ -82,23 +82,69 @@ def entry_items(rom, lists, rows, own, records, label):
     return out
 
 
-def list_plan(rom, doc, original, records):
-    """[(목록 열쇠, [(원본 엔트리, 바이트)])] 기본·대체 두 영역. 열쇠는 원본 목록 주소 또는 'new:이름'."""
+GROUP_COUNT = 54           # 05:D4B2 의 원래 그룹 포인터 수(00~35)
+HIGH_GROUPS = 0x50         # 12:801C: 그룹 50 이상은 기본 목록을 읽지 않는다
+
+
+def new_map_keys(original, new_maps):
+    """--new-map 으로 더할 맵 [(BC, BD)]. 기존 그룹은 끝 번호부터, 새 그룹은 36 부터 차례로 맵 0 부터 빈틈없이 이어져야
+    한다(dq5newmap.py 와 같은 규칙). 그룹 50 이상은 기본 목록이 없어 받지 않는다."""
+    counts = {}
+    for _, name in original:
+        if re.fullmatch(r'[0-9A-F]{2}/[0-9A-F]{2}', name):
+            bc = int(name[:2], 16)
+            counts[bc] = counts.get(bc, 0) + 1
+    out = sorted(set(new_maps))
+    if len(out) != len(new_maps):
+        raise ValueError('--new-map 에 같은 맵을 두 번 줌')
+    groups = sorted({bc for bc, _ in out if bc not in counts})
+    if groups and groups != list(range(GROUP_COUNT, GROUP_COUNT + len(groups))):
+        raise ValueError('새 그룹은 36 부터 빈틈없이 이어져야 함: ' + ' '.join(f'{g:02X}' for g in groups))
+    for bc, bd in out:
+        if bc >= HIGH_GROUPS:
+            raise ValueError(f'{map_name(bc, bd)}: 그룹 50 이상은 기본 인물 목록을 읽지 않음(12:801C)')
+        want = counts.get(bc, 0) + sum(1 for g, d in out if g == bc and d < bd)
+        if bd != want:
+            raise ValueError(f'{map_name(bc, bd)}: 새 맵은 {map_name(bc, want)} 부터 이어져야 함')
+    return out
+
+
+def list_plan(rom, doc, original, records, new_maps=()):
+    """[(목록 열쇠, [(원본 엔트리, 바이트)])] 기본·대체 두 영역. 열쇠는 원본 목록 주소, 'new:이름'(새 대체 목록),
+    'GG/MM'(새 맵의 기본 목록). 새 맵 목록은 그 그룹 마지막 목록 뒤에 둔다(12:803F 가 00 끝 목록을 $BD 개 건너뜀)."""
     lists = {at: [a for a, _ in list_entries(rom, at)] for at, _ in original}
+    by_map = {name: at for at, name in original if re.fullmatch(r'[0-9A-F]{2}/[0-9A-F]{2}', name)}
+    fresh = {map_name(bc, bd): [] for bc, bd in new_map_keys(original, list(new_maps))}
+    given = set()
     changed = {}
     rows = doc.get('lists', [])
     if not isinstance(rows, list):
         raise ValueError('lists는 배열이어야 함')
     for row in rows:
-        if not isinstance(row, dict) or row.keys() != {'list', 'entries'} or not isinstance(row['list'], str) \
-                or not re.fullmatch(r'[0-9A-Fa-f]{2}:[0-9A-Fa-f]{4}', row['list']):
-            raise ValueError('lists 항목은 list(BB:AAAA)와 entries 만 받음')
-        at = int(row['list'].replace(':', ''), 16)
-        if at not in lists:
-            raise ValueError(f'{row["list"]}는 원본 인물 목록의 시작점이 아님')
+        if isinstance(row, dict) and row.keys() == {'map', 'entries'} and isinstance(row['map'], str):
+            label = f'lists[{row["map"]}]'
+            if not re.fullmatch(r'[0-9A-F]{2}/[0-9A-F]{2}', row['map']):
+                raise ValueError(f'{label}: map 은 대문자 16진 GG/MM 이어야 함')
+            if row['map'] in fresh:
+                if row['map'] in given:
+                    raise ValueError(f'{row["map"]}를 두 번 지정함')
+                given.add(row['map'])
+                fresh[row['map']] = entry_items(rom, lists, row['entries'], None, records, label)
+                continue
+            if row['map'] not in by_map:
+                raise ValueError(f'{row["map"]}: 원본 맵도 --new-map 으로 준 맵도 아님')
+            at = by_map[row['map']]
+        elif isinstance(row, dict) and row.keys() == {'list', 'entries'} and isinstance(row['list'], str) \
+                and re.fullmatch(r'[0-9A-Fa-f]{2}:[0-9A-Fa-f]{4}', row['list']):
+            label = f'lists[{row["list"]}]'
+            at = int(row['list'].replace(':', ''), 16)
+            if at not in lists:
+                raise ValueError(f'{row["list"]}는 원본 인물 목록의 시작점이 아님')
+        else:
+            raise ValueError('lists 항목은 list(BB:AAAA) 또는 map(GG/MM)과 entries 만 받음')
         if at in changed:
-            raise ValueError(f'{row["list"]}를 두 번 지정함')
-        changed[at] = entry_items(rom, lists, row['entries'], at, records, f'lists[{row["list"]}]')
+            raise ValueError(f'{label}: 같은 목록을 두 번 지정함')
+        changed[at] = entry_items(rom, lists, row['entries'], at, records, label)
     news = doc.get('new_lists', [])
     if not isinstance(news, list):
         raise ValueError('new_lists는 배열이어야 함')
@@ -117,7 +163,16 @@ def list_plan(rom, doc, original, records):
             return changed[at]
         return [(e, records.get(e, read(rom, e, entry_size(rom, e)))) for e in lists[at]]
 
-    base = [(at, items(at)) for at, _ in original if not ALT_START <= at < ALT_END]
+    base_only = [(at, name) for at, name in original if not ALT_START <= at < ALT_END]
+    base = []
+    for i, (at, name) in enumerate(base_only):
+        base.append((at, items(at)))
+        if i + 1 == len(base_only) or base_only[i + 1][1][:2] != name[:2]:
+            # 그룹 마지막 목록 뒤에 새 맵 목록을 번호 차례로 둔다.
+            base.extend((key, fresh[key]) for key in sorted(k for k in fresh if k[:2] == name[:2]))
+    # 새 그룹(36~)은 기본 목록 맨 뒤에 그룹·맵 차례로. 그룹 포인터는 dq5npcrelocate 가 표 끝에 더한다.
+    old_groups = {name[:2] for _, name in base_only}
+    base.extend((key, fresh[key]) for key in sorted(k for k in fresh if k[:2] not in old_groups))
     alt = [(at, items(at)) for at, _ in original if ALT_START <= at < ALT_END] + created
     return base, alt
 
@@ -148,9 +203,9 @@ def condition_row(row, known, targets, label):
     raise ValueError(f'{label}.list: 원본 대체 목록 시작점(10:xxxx) 또는 new:이름 이어야 함')
 
 
-def condition_plan(rom, doc, records, alt_keys):
+def condition_plan(rom, doc, records, alt_keys, new_maps=()):
     """(대체 표 [(조건 4바이트, 목록 열쇠)], 빈 맵 표 [4바이트], 대체 표를 옮기는지)."""
-    known = set(all_maps(rom))
+    known = set(all_maps(rom)) | set(new_maps)
     record_rows = {at for at in records if NO_NPC <= at < OVERRIDE_LISTS + OVERRIDE_COUNT * 6}
     moved = 'overrides' in doc or 'no_npc' in doc and isinstance(doc['no_npc'], list) and len(doc['no_npc']) > NO_NPC_COUNT
     if ('overrides' in doc or 'no_npc' in doc) and record_rows:
@@ -181,7 +236,7 @@ def condition_plan(rom, doc, records, alt_keys):
     return overrides, no_npc, moved
 
 
-def slot_guard(rom, original, base, alt, overrides, allow_growth):
+def slot_guard(rom, original, base, alt, overrides, allow_growth, new_maps=()):
     """맵·시간대마다 물체까지 놓은 뒤의 $81 이 원본 그 맵의 최댓값(allow_growth 면 SLOT_LIMIT)을 넘지 않게 한다."""
     def pairs(rows):
         out = {(tuple(int(v, 16) for v in name.split('/')), at) for at, name in original
@@ -199,15 +254,18 @@ def slot_guard(rom, original, base, alt, overrides, allow_growth):
             most[bc, bd, night] = max(most.get((bc, bd, night), 0), used)
     new_lists = {key: [raw for _, raw in items] for key, items in base + alt}
     report = []
-    for (bc, bd), key in sorted(pairs(overrides), key=str):
+    fresh = {((bc, bd), map_name(bc, bd)) for bc, bd in new_maps}
+    for (bc, bd), key in sorted(pairs(overrides) | fresh, key=str):
         for night in (False, True):
             used = SLOT_FIRST + placed(new_lists[key], night) + map_objects(rom, bc, bd, night)
-            limit = SLOT_LIMIT if allow_growth else most.get((bc, bd, night), SLOT_FIRST + map_objects(rom, bc, bd, night))
+            # 새 맵은 원본에 잰 값이 없어 원본 전체 최댓값까지 받는다(늘어난 맵으로 출력).
+            limit = SLOT_LIMIT if allow_growth or (bc, bd) in new_maps else \
+                most.get((bc, bd, night), SLOT_FIRST + map_objects(rom, bc, bd, night))
             name = key if isinstance(key, str) else cpu(key)
             if used > limit:
                 raise ValueError(f'{map_name(bc, bd)} {"밤" if night else "낮"} {name}: 인물·물체 뒤 슬롯 {used:#04x} 가 '
                                  f'한도 {limit:#04x} 를 넘음' + ('' if allow_growth else '(--allow-growth 로 1F 까지)'))
-            if used > most.get((bc, bd, night), 0):
+            if used > most.get((bc, bd, night), SLOT_FIRST + map_objects(rom, bc, bd, night)):
                 report.append(f'{map_name(bc, bd)} {"밤" if night else "낮"} {name} 슬롯 {used:#04x}')
     return report
 
