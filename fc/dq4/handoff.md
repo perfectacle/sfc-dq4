@@ -22,15 +22,15 @@ SFC 로 옮길 데이터는 거의 모두 롬만으로 뽑을 수 있게 됐습�
 | 블록·통행·출구 | [dq4-block-format.md](docs/dq4-block-format.md) · `dq4block.py`(`props`·`links`·`json`) | 맵 종류 50가지 블록·CHR 0 다름, 출구 칸 555개(걸어서 47곳), 지형 효과·문·열쇠 |
 | 인물·대화 | [dq4-script-format.md](docs/dq4-script-format.md) · `dq4talk.py` | 스크립트 346개 못 읽은 명령 0, 말 걸기 2658+337번 0 다름, 이벤트 표 50개 |
 | 인물 블록(움직임·자동 이벤트) | [dq4-npcblock-format.md](docs/dq4-npcblock-format.md) · `dq4npcblock.py` | 블록 2131개·명령 5010개, 실행 2027개 0 다름 |
-| 저장·플래그·장 | [dq4-save-format.md](docs/dq4-save-format.md) · `dq4event.py` | CRC, 1~5장 시작·끝·엔딩, 귀환·ルーラ 37곳, 플래그 뜻(장별 진행 순서) |
+| 저장·플래그·장 | [dq4-save-format.md](docs/dq4-save-format.md) · `dq4event.py` | CRC, 1~5장 시작·끝·엔딩, 귀환·ルーラ 37곳, 플래그 뜻(장별 진행 순서), 플래그 [확인] 184·[추정] 0 |
 | 표 | [dq4-data-format.md](docs/dq4-data-format.md) · `dq4data.py` | 레벨업 626건, 주문·행동 256개, 몬스터 레코드 전 바이트, 몬스터·동료 AI |
 | 상점·얻는 것 | [dq4-shop-format.md](docs/dq4-shop-format.md) · `dq4shop.py`·`dq4chest.py`(`loot`) | 가게 창, 여관·교회 요금, 상자 160개, 얻는 물건 238줄, 숨는 인물 |
 | 조우 | [dq4-encounter-format.md](docs/dq4-encounter-format.md) · `dq4encounter.py` | 필드·던전 21층 전투 158번, 특수 전투 34개, 기습·선제 비율 |
-| 원작 그림 | [dq4-fcgfx.md](docs/dq4-fcgfx.md)·[dq4-fcsprite-format.md](docs/dq4-fcsprite-format.md) · `dq4fcgfx.py`·`dq4fcsprite.py` | 맵·필드·장면 화면 픽셀 0 다름, 스프라이트·몬스터 픽셀 대조 |
-| 소리 | [dq4-sound-format.md](docs/dq4-sound-format.md) · `dq4sound.py`(`export` 가 곡·효과음마다 MIDI·악보 텍스트·채널별 JSON) | 곡 50·효과음 55 를 롬 드라이버 실행과 APU 기록으로 프레임마다 0 다름, 맵·필드·전투 곡 표 |
+| 원작 그림 | [dq4-fcgfx.md](docs/dq4-fcgfx.md)·[dq4-fcsprite-format.md](docs/dq4-fcsprite-format.md) · `dq4fcgfx.py`·`dq4fcsprite.py` | 맵·필드·장면 화면 픽셀 0 다름, 스프라이트·몬스터 픽셀 대조, 롬에 이름 없는 21그룹은 NDS 지명으로(`name_src` 로 출처 표시) |
+| 소리 | [dq4-sound-format.md](docs/dq4-sound-format.md) · `dq4sound.py`(`export --flac` 이 곡·효과음마다 MIDI·MusicXML·SVG 오선 악보·FLAC·채널별 JSON, 전체 NSF) | 곡 50·효과음 55 를 롬 드라이버 실행과 APU 기록으로 프레임마다 0 다름, 맵·필드·전투 곡 표 |
 | 디버그 | [dq4-debug.md](docs/dq4-debug.md) | `$C000` 스위치(장 고르기·벽 통과·인카운트 끄기·전투 테스트) |
 
-뽑은 원작 그림(맵 279·필드·블록·CHR·폰트·장면, 인물 스프라이트·몬스터)과 소리(`fc/dq4/sound/` 의 MIDI·악보·JSON)는 저작권 데이터라 비공개 저장소 `perfectacle/sfc-dq4-assets` 의 `fc/dq4/` 에 있습니다(`gallery/index.html`). 공개 저장소에는 다시 만드는 도구만 둡니다. 에셋 전체는 `fc/dq4/tools/dq4assets.sh OUT` 한 번으로 롬에서 다시 뽑습니다(장면 화면도 `dq4nes.py` 로 롬만 돌려 뜸, 에뮬레이터·세이브스테이트 필요 없음). 에셋 저장소의 `SOURCE.txt` 는 그때의 커밋을 적습니다.
+뽑은 원작 그림(맵 279·필드·블록·CHR·폰트·장면, 인물 스프라이트·몬스터)과 소리(`fc/dq4/sound/` 의 MIDI·MusicXML·오선 악보·FLAC·NSF·JSON)는 저작권 데이터라 비공개 저장소 `perfectacle/sfc-dq4-assets` 의 `fc/dq4/` 에 있습니다(`gallery/index.html`). 공개 저장소에는 다시 만드는 도구만 둡니다. 에셋 전체는 `fc/dq4/tools/dq4assets.sh OUT` 한 번으로 롬에서 다시 뽑습니다(장면 화면도 `dq4nes.py` 로 롬만 돌려 뜸, 에뮬레이터·세이브스테이트 필요 없음). 에셋 저장소의 `SOURCE.txt` 는 그때의 커밋을 적습니다. FLAC 은 `PATH` 의 `flac` 명령으로 만들어 그 판을 `SOURCE.txt` 에 적습니다(판이 다르면 바이트가 달라질 수 있음).
 
 포팅용 그래픽의 현재 판단은 [그래픽 핸드오프](../../sfc/dq4/handoff.md)에 있습니다.
 
@@ -42,8 +42,9 @@ SFC 로 옮길 데이터는 거의 모두 롬만으로 뽑을 수 있게 됐습�
 | `dq4-ch{1..5}-start`, `dq4-debugB-start` | 장 시작(디버그 장 고르기로 만듦), 디버그 B(8명 일행) |
 | `dq4-ch2-b3` | 2장 시작에서 B 세 번 — 바로 조작 가능, 워프 출발점 |
 | `dq4-ch1-casino` | 1장 일행, 카지노 04/01 포커 딜러 앞, 코인 100 |
+| `dq4-ch1-ship2`·`dq4-ch1-balloon2` | 1장 일행이 배(필드 0 (67,68))·열기구((68,66))에 탄 채. 탈것 자리는 워프 전 `SET`(예: `628E=02;6197=6866`)으로 써야 탈것이 놓임 — `AFTER` 로 쓴 `dq4-ch1-ship`·`balloon` 은 스프라이트가 숨겨진 채라 쓰지 않음 |
 
-- 1장 상태 넷은 테스트러너가 MesenCE `Saves/dq4.sav` 를 읽던 시절에 만든 것이라, 지금 `fc/dq4/tools/dq4state.sh`(SRAM 을 00 으로 채움)로 다시 만들면 이름이 「ああ」, 첫 전투가 おおみみず·スライム 로 달라집니다. 문서 숫자가 기존 파일 기준이므로 덮어쓰지 않았습니다.
+- 1장 상태 넷은 테스트러너가 MesenCE `Saves/dq4.sav` 를 읽던 시절에 만든 것이라, 지금 `fc/dq4/tools/dq4state.sh`(SRAM 을 00 으로 채움)로 다시 만들면 이름이 「ああ」, 첫 전투가 おおみみず·スライム 로 달라집니다. 문서 숫자가 기존 파일 기준이므로 덮어쓰지 않았습니다. 네 파일은 두 번 불러도 RAM·WRAM 이 같아 다시 만들 필요가 없다고 판단했습니다(2026-10-26).
 - `dq4-ch3-start` 는 머리 장면이 약 2000프레임 돌아 그동안 워프가 안 됩니다. `dq4-ch4-start` 는 A 로 대사를 넘기면 15/00 (1A,02) 에서 조작됩니다. `dq4-ch5-start` 는 명령 창이 떠 있어 B 세 번 뒤 걷습니다.
 - 원하는 맵으로 가기는 [dq4-warp.md](docs/dq4-warp.md)(`STATE` 는 절대 경로, `end.mss` 에서 이으면 SEQ 를 `wait:30` 으로 시작, 일행 `$616A` 는 `SET` 이 아니라 `AFTER` 로).
 
