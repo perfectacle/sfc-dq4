@@ -337,7 +337,7 @@ def check(rom, doc=None, base=Path('.'), at=None, workdir=None, records_at=RECOR
     doc 를 주면 빌드한 롬에서 바꾼 세트가 입력 그림대로 풀리고 나머지 세트는 그대로인지 본다."""
     import tempfile
     folder = Path(workdir or tempfile.mkdtemp(prefix='dq5sprite-'))
-    rows, shapes, sizes = [], 0, []
+    rows, shapes, sizes, crossing = [], 0, [], []
     for s in range(S.SET_COUNT):
         rec = S.set_record(rom, s)
         if rec is None:
@@ -351,10 +351,17 @@ def check(rom, doc=None, base=Path('.'), at=None, workdir=None, records_at=RECOR
         shapes += len(want)
         sizes.append((len(tiles), rec['tiles']))
         rows.append({'set': f'{s:02X}', 'image': f'{s:02X}.png'})
+        # 제자리에 다시 놓아도 원래 끝 안이고, 조각이 뱅크의 8000 아래나 FFFF 에서 끝나는 명령을 만들지 않는지.
+        pieces, end = place(packed(tiles), rec['data'])
+        if end > rec['end'] or any(at & 0xFFFF < 0x8000 for at, _ in pieces) or end & 0xFFFF < 0x8000:
+            raise ValueError(f'세트 {s:02X}: 다시 압축한 자료가 원래 자리에 들어가지 않음')
+        if len(pieces) > 1:
+            crossing.append(f'{s:02X}')
     if patch(rom, {'format': FORMAT, 'sets': rows}, folder)['writes']:
         raise ValueError('원본 그림을 그대로 넣었는데 쓰기가 생김')
     print(f'세트 {len(rows)}개, 모양 {shapes}개 다시 인코딩 일치; 원본 문서 쓰기 0개; '
-          f'다시 나눈 타일 수가 원본보다 많은 세트 {sum(a > b for a, b in sizes)}개, 적은 세트 {sum(a < b for a, b in sizes)}개')
+          f'다시 나눈 타일 수가 원본보다 많은 세트 {sum(a > b for a, b in sizes)}개, 적은 세트 {sum(a < b for a, b in sizes)}개; '
+          f'다시 압축해 모두 원래 자리 안(뱅크를 넘는 세트 {" ".join(crossing) or "없음"})')
     if doc is None:
         return
     manifest = patch(rom, doc, base, at, records_at)
