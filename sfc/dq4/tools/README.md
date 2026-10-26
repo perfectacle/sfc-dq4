@@ -28,6 +28,7 @@
 | `dq4soundbank.py --score JSON --assets 폴더 --out 폴더 [--max-rate 8000]` | 곡에 쓰이는 NDS PCM 을 S-DSP 계산으로 BRR 로(무음 첫 블록, 실기 SNR) |
 | `dq4soundpatch.py --base 롬 --replace 자리=JSON --bank 폴더 --out 롬 [--map-fades] [--preview 자리]` | 시퀀스·샘플을 롬에 넣음(4MB 롬·IPS). `--map-fades` 는 프레임을 기다리지 않는 맵 전환 페이드, `--preview` 는 청취용 타이틀 곡 교체 |
 | `dq4soundcheck.py 롬 OUT --song 자리` | `lua/dq4overturespc.lua` 결과로 SPC 의 시퀀스·샘플, KON 시각·SRCN·음 간격을 견줌 |
+| `lua/dq4soundcmdlog.lua` | 전원부터 `INPUT`(버튼@프레임:길이)·`AFTER`(A 연타 간격)로 진행하며 소리 대기열 명령·부른 자리와 300프레임마다 화면을 남김. `OUT`, `MAXF`, `AFTERFROM` 사용 |
 | `lua/dq4overturespc.lua` | 서곡 롬을 전원부터 돌려 곡 10 이 시작한 뒤의 SPC 상태와 DSP 쓰기(`dspw.txt`)를 남김. `OUT`, `MAXF`, `SONG`, `SEQ`, `DUMPAT` 사용 |
 | `lua/dq4titleintegrationcheck.lua` | 통합 롬의 화면·VRAM·음악·메뉴 진입 관찰. `OUT`, `MAXF`, `EVERY`, `FROM`, `SEQ`, `RESETAT`, `TRACE_DMA`, `MOTION_PC` 사용 |
 | `lua/dq4titlecheck.lua` | 독립 미리보기의 화면·VRAM·CGRAM 관찰. `OUT`, `FRAME` 사용 |
