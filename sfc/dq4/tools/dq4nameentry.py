@@ -5,8 +5,9 @@ DQ5 의 이름 입력 03:8B72 는 판(창 6C/6D)을 BRK 95 로 띄워 고른 칸
 슈퍼 마리오 RPG 한글 패치 v1.3(kr-patches 저장소 sfc/super-mario-rpg/src/name_entry.asm)과 같다.
 
 이름 글자 = 글리프 n. n < 51 은 호환 자모 U+3131~U+3163, n = 51 + k 는 KS X 1001 완성형 2,350자의 k 번째(코드 순).
-저장은 두 바이트 (10 + n // 111, 10 + n % 111). 두 바이트 모두 가나 타일 범위(10~7E)라 이름 끝 01·탁점 접두 84/83·
-자리 표시 B0~ 와 겹치지 않아, 아직 일본어인 게임 안에서도 가나 두 자로 찍힐 뿐 멈추지 않는다.
+저장은 글자마다 두 바이트 (85 + n // 111, 10 + n % 111). 첫 바이트 85~9A 는 원래 이름(가나 01~8A·탁점 접두 84/83)에
+없는 값이라 한글 이름의 표시가 된다. 이름 끝 01·창 자리 표시 B0~·메뉴 창 접두 9F 와도 겹치지 않는다.
+표시 없는 이름은 일본어로 읽는다. 첫 바이트가 10~25 였던 예전 한글 저장은 dq4namesave.py 로 바꾼다.
 """
 import os
 from pathlib import Path
@@ -28,7 +29,8 @@ KS = sorted((bytes([hi, lo]).decode('euc-kr') for hi in range(0xB0, 0xC9) for lo
 GLYPHS = JAMO + KS + ['＊', '　']           # 이름 입력의 빈 칸 표시와 목록의 빈 글자
 STAR = len(GLYPHS) - 2
 MAX_CHARS = 4                         # 이름 8바이트(7E:2001~2008)
-CODE_BASE, CODE_RADIX = 0x10, 111
+HI_BASE, LO_BASE, CODE_RADIX = 0x85, 0x10, 111
+LEGACY_HI_BASE = 0x10                 # 표시 없던 예전 한글 저장의 첫 바이트
 GLYPH_BANK = 0x62                     # 글리프 32바이트 × 2,403 = 뱅크 62~64(뱅크마다 1,024자)
 FIELD_COL = 0xF8                      # 이름 칸 열 F8~FF(타일 2F8~2FF·3F8~3FF), 문구 열은 그 앞까지
 
@@ -46,17 +48,21 @@ GRID = [
 CURSOR_START = 'ㅂ'
 
 
-def code_bytes(n):
-    return bytes((CODE_BASE + n // CODE_RADIX, CODE_BASE + n % CODE_RADIX))
+def code_bytes(n, hi_base=HI_BASE):
+    return bytes((hi_base + n // CODE_RADIX, LO_BASE + n % CODE_RADIX))
 
 
-def decode_name(data):
-    """저장된 이름 8바이트 → 문자열(01 에서 끝)."""
+def decode_name(data, hi_base=HI_BASE):
+    """저장된 이름 8바이트 → 문자열(01 에서 끝). 한글 부호가 아닌 바이트가 있으면 ValueError."""
     out = []
     for i in range(0, 8, 2):
         if data[i] == 0x01:
             break
-        out.append(GLYPHS[(data[i] - CODE_BASE) * CODE_RADIX + data[i + 1] - CODE_BASE])
+        hi, lo = data[i] - hi_base, data[i + 1] - LO_BASE
+        n = hi * CODE_RADIX + lo
+        if not (0 <= hi and 0 <= lo < CODE_RADIX and n < len(GLYPHS)):
+            raise ValueError(f'한글 이름 부호가 아님: {bytes(data[:8]).hex()}')
+        out.append(GLYPHS[n])
     return ''.join(out)
 
 
@@ -159,7 +165,7 @@ def data_asm(keys, bridges):
         rest.append(JONG.index(pair[0]) if pair else 0)
         move.append(CHO.index(pair[1] if pair else j))
     defs = ['; dq4nameentry.py 가 만든다', f'!ne_ks_count = {len(KS)}', f'!ne_jamo = {len(JAMO)}',
-             f'!ne_star = {STAR}', f'!ne_blank_glyph = {STAR + 1}', f'!ne_glyph_bank = ${GLYPH_BANK:02X}', f'!ne_max = {MAX_CHARS}',
+             f'!ne_star = {STAR}', f'!ne_hi_base = ${HI_BASE:02X}', f'!ne_blank_glyph = {STAR + 1}', f'!ne_glyph_bank = ${GLYPH_BANK:02X}', f'!ne_max = {MAX_CHARS}',
              f'!ne_cursor = {keys.index(JAMO.index(CURSOR_START))}', f'!ne_back = ${BACK:02X}',
              f'!ne_done = ${DONE:02X}', f'!ne_none = ${NONE:02X}', f'!ne_last = {keys.index(DONE)}']
     defs += [f'!ne_{name} = ${address:06X}' for name, address in bridges.items()]

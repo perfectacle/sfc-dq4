@@ -816,7 +816,7 @@ NeListHook:
     CMP #$0001
     BEQ .decoded
     SEC
-    SBC #$0010
+    SBC.w #!ne_hi_base       ; 표시 없는 이름은 일본어라 원래 경로로
     CMP #$0016
     BCC +
     JMP .legacy
