@@ -93,3 +93,4 @@ STEPS="gfx screens" nds/dq4/tools/ndsassets.sh OUT     # 단계 고르기(unpack
 - [2026-10-26-01: 곡·효과음 악보를 FC 와 같은 json·txt 로](journal/2026-10-26-01-score.md)
 - [2026-10-26-02: 에셋을 롬에서 처음부터 다시 만들기](journal/2026-10-26-02-repro.md)
 - [2026-10-26-03: 스크립트 명령 처리 함수 분류, 칸·상태 비트·깃발 종류](journal/2026-10-26-03-script3.md)
+- [2026-10-26-04: 글자 효과음이 나는 길, `%a` 값을 대는 코드, 메뉴의 빈 글자, PARAM 나머지 표](journal/2026-10-26-04-text3.md)
