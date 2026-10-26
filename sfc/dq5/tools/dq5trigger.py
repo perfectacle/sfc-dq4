@@ -44,7 +44,7 @@ def describe(t):
         dest = '필드로'
     else:
         dest = f'{t["bc"]:02X}/{t["bd"]:02X} ({t["x"]},{t["y"]})'
-    cond = '' if t['flags'] & 0x40 else ' (조건 검사 있음)'
+    cond = '' if t['flags'] & 0x40 else ' (이동 효과음)'
     return f'{where} 에 층 {t["source_layer"]:02X}로 들어서면 → {dest}, 도착 층 {t["destination_layer"]:02X}{cond}'
 
 

@@ -156,7 +156,7 @@ end
 -- 영역 이동 레코드 하나를 (x,y) 칸·목적지로 써서 2A:D812(첫 레코드 자리)에 두고, 지금 맵의 레코드 위치·개수
 -- (01:9430 이 맵을 불러올 때 두는 7E:183A~183C·183D)를 그 한 개로 바꾼다. 레코드가 없는 맵(선실 등)에서도 된다.
 local function patchTrigger(x, y)
-  -- [x0][y0][x1][y1][보는 방향 01=아래][플래그 C0: 조건 검사 없음][BC][BD][X][Y][층][01]
+  -- [x0][y0][x1][y1][출발 층 01][플래그 C0: 이동 효과음 없음][BC][BD][X][Y][층][01]
   prgWrite(0x155812, {x, y, x + 1, y + 1, 0x01, 0xC0, bc, bd, tx, ty, dir, 0x01})
   emu.write(0x7E183A, 0x12, m); emu.write(0x7E183B, 0xD8, m); emu.write(0x7E183C, 0x2A, m); emu.write(0x7E183D, 0x01, m)
   return true

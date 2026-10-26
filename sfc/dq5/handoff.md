@@ -30,9 +30,9 @@ git worktree list
 
 ### 2. 실내 출구·영역 이동 쓰기(머지됨)
 
-`dq5exitwrite.py`(`dq5connections/1`)와 실측 도구 `dq5exitcheck.py`로 마쳤습니다([일지](journal/2026-10-27-03-exitwrite.md), [쓰기 형식](docs/dq5-build-format.md#실내-출구영역-이동-dq5connections1)). 원본 6,990바이트 쓰기 0개, 합성 테스트 7개, 변경 롬 두 벌과 원본에서 20장면을 밟아 도착 맵·칸·층을 비교했습니다. reader 의 영역 이동 `+4`·`+B` 와 좌표 출구 넷째 바이트 표시는 층으로 고쳤습니다.
+`dq5exitwrite.py`(`dq5connections/1`)와 실측 도구 `dq5exitcheck.py`로 마쳤습니다([일지](journal/2026-10-27-03-exitwrite.md), [쓰기 형식](docs/dq5-build-format.md#실내-출구영역-이동-dq5connections1)). 원본 6,990바이트 쓰기 0개, 합성 테스트 7개, 변경 롬 세 벌과 원본에서 24장면을 밟아 도착 맵·칸·층을 비교했습니다. reader 의 영역 이동 `+4`·`+B` 와 좌표 출구 넷째 바이트 표시는 층으로 고쳤습니다.
 
-남은 범위는 증설·재배치·출구 종류 변경, 조건 검사가 막는 경우의 변경 실측, 01/0A·2A/00 출구가 원본에서도 발동하지 않는 조건입니다. 배 맵 17/xx 는 `dq5warp.lua`가 `2A:EFF5`부터 5바이트를 덮어 17/01 출구까지 바뀌므로 출구 실측에 쓰지 않습니다. 실측 결과 `work/exitcheck/`는 원래 체크아웃 `work/dq5-exitwrite/`에 복사해 두고 워크트리를 정리합니다.
+영역 이동 `flags` bit6 은 이동 효과음이고, 01/0A·2A/00 출구는 블록 속성 `33` 이 막고 오른쪽 칸을 `85` 로 바꾸면 열립니다(막는 루틴은 남음)([일지](journal/2026-10-27-05-exit-flags.md)). 실측은 24장면입니다. 남은 범위는 증설·재배치·출구 종류 변경입니다. 배 맵 17/xx 는 `dq5warp.lua`가 `2A:EFF5`부터 5바이트를 덮어 17/01 출구까지 바뀌므로 출구 실측에 쓰지 않습니다. 실측 결과 `work/exitcheck/`는 원래 체크아웃 `work/dq5-exitwrite/`에 복사해 두고 워크트리를 정리합니다.
 
 ### 3. 병합과 후속 도구
 

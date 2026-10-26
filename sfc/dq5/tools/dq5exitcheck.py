@@ -1,6 +1,6 @@
 """출구·영역 이동 쓰기를 MesenCE에서 밟아 확인한다.
 
-변경 롬 두 벌(출구 세 종류·출발층·고층 공유 목록·음수 가장자리, 옮긴 사각형)과 원본 롬에서
+변경 롬 세 벌(출구 세 종류·출발층·고층 공유 목록·음수 가장자리, 옮긴 사각형, 이동 효과음 플래그)과 원본 롬에서
 같은 자리를 밟아 도착 맵·칸·주인공 층을 견준다. 원본 롬·선실 상태는 읽기만 하고 출력은 --out의 새 하위 폴더에 둔다.
   MESENCE=… python sfc/dq5/tools/dq5exitcheck.py rom/dq5.sfc --state work/state/ship.mss
 """
@@ -29,7 +29,10 @@ EDITS = {
                        {'map': '01/06', 'index': 0, 'rect': [255, 6, 0, 9]}]},
     'b': {'triggers': [{'map': '01/00', 'index': 6, 'rect': [32, 58, 33, 59], 'source_layer': 2,
                         'destination_map': 4, 'x': 16, 'y': 6, 'span_raw': 1}]},
+    'c': {'triggers': [{'map': '01/06', 'index': 0, 'flags': 0xC0}]},
 }
+# 01/0A (9,10) 출구 블록은 두 칸 다 속성 33 이라 계단 판정(00:E2C5)을 넘지 못한다. 오른쪽 칸 +4 를 85 로 두면 열린다.
+OPEN_0A = f'{0xC000 + (10 * 18 + 9) * 8 + 4:04X}=85'
 # (이름, 롬, TO, TEST, 기대: 맵(field 면 필드로 나감), 칸·층(None 이면 보지 않음))
 # 사각형이 넓으면 도착 칸이 들어선 자리에 비례하므로(2A:F650) 그런 장면은 맵과 층만 본다.
 CASES = [
@@ -53,6 +56,10 @@ CASES = [
     ('rect-original', 'original', '01/00,32,57,2', 'down:16', ('01/00', (32, 58), 2)),
     ('rect-old', 'b', '01/00,32,61,1', 'up:16', ('01/00', None, 1)),
     ('rect-old-original', 'original', '01/00,32,61,1', 'up:16', ('01/01', None, None)),
+    ('sound-off', 'c', '01/06,0,8,1', 'left:24', ('01/04', (16, 6), 1), {'sound': 0}),
+    ('sound-original', 'original', '01/06,0,8,1', 'left:24', ('01/04', (16, 6), 1), {'sound': 1}),
+    ('stair33-original', 'original', '01/0A,8,11,1', 'up:16', ('01/0A', (8, 10), 1)),
+    ('stair33-opened', 'original', '01/0A,8,11,1', 'up:16', ('2A/00', ('arrival', 0x2A, 0, 0), None), {'late': OPEN_0A}),
 ]
 
 
@@ -67,7 +74,8 @@ def command(tool, rom, *args):
 
 
 def run(case, roms, state, out, mesence, libdir):
-    name, rom, to, test, _ = case
+    name, rom, to, test, _, *extra = case
+    extra = extra[0] if extra else {}
     dest = out / name
     dest.mkdir()
     env = {k: v for k, v in os.environ.items()
@@ -75,14 +83,17 @@ def run(case, roms, state, out, mesence, libdir):
                         'ROMPATCH', 'SAVE', 'SET', 'WAGON')}
     env.update(LIBDIR=str(libdir), STATE=str(state), SHOT_DIR=str(dest), MAXF='1500', SETTLE='120',
                TO=to, TEST=f'{test},wait:300')
+    if 'late' in extra:
+        env['LATESET'] = extra['late']
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
         subprocess.run([str(mesence), '--testrunner', str(roms[rom]), str(HERE / 'lua/dq5exitcheck.lua'),
                         '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
                        check=True, timeout=120)
     text = (dest / 'warp.txt').read_text(encoding='utf-8')
-    match = re.search(r'final map (\w\w/\w\w) cell (\d+),(\d+) layer (\w\w) BE=(\w\w)', text)
+    match = re.search(r'final map (\w\w/\w\w) cell (\d+),(\d+) layer (\w\w) BE=(\w\w) sound (\d+)', text)
     require(match is not None and 'timeout' not in text, f'{name}: 보행 결과가 없음')
-    return match[1] if int(match[5], 16) & 0x80 else 'field', (int(match[2]), int(match[3])), int(match[4], 16)
+    place = match[1] if int(match[5], 16) & 0x80 else 'field'
+    return place, (int(match[2]), int(match[3])), int(match[4], 16), int(match[6])
 
 
 def main():
@@ -118,17 +129,18 @@ def main():
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
             seen = list(pool.map(lambda case: run(case, roms, state, out, mesence, libdir), CASES))
         results = []
-        for (name, rom, to, test, (want_map, want_cell, want_layer)), (got_map, cell, layer) in zip(CASES, seen):
+        for (name, rom, to, test, (want_map, want_cell, want_layer), *extra), (got_map, cell, layer, sound) in zip(CASES, seen):
+            want_sound = extra[0].get('sound') if extra else None
             if want_cell and want_cell[0] == 'arrival':
                 _, bc, bd, n = want_cell
                 built = Rom(roms[rom].read_bytes())
                 want_cell = arrival(built, bc, bd, n, exit_attrs(built))
             ok = (got_map == want_map and (want_cell is None or cell == tuple(want_cell))
-                  and (want_layer is None or layer == want_layer))
+                  and (want_layer is None or layer == want_layer) and (want_sound is None or sound == want_sound))
             results.append({'case': name, 'rom': rom, 'to': to, 'test': test, 'map': got_map, 'cell': list(cell),
                             'layer': layer, 'expected_map': want_map,
                             'expected_cell': list(want_cell) if want_cell else None,
-                            'expected_layer': want_layer, 'passed': ok})
+                            'expected_layer': want_layer, 'sound': sound, 'expected_sound': want_sound, 'passed': ok})
         (out / 'results.json').write_text(json.dumps(results, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
         failed = [r['case'] for r in results if not r['passed']]
         for r in results:
