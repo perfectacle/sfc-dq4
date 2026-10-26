@@ -17,7 +17,7 @@ FC 「드래곤 퀘스트 IV」(일본판 Rev A) 원작 데이터를 분석하�
 - [docs/dq4-shop-format.md](docs/dq4-shop-format.md): DQ4(FC) 상점 품목·장소별 값·여관 값·가게 종류, 보물상자·발밑 숨은 물건과 열었음 플래그, 얻는 물건 통합 표
 - [docs/dq4-save-format.md](docs/dq4-save-format.md): DQ4(FC) 저장 데이터(모험의 서·체크섬·인물 레코드), 이벤트 플래그, 장 시작 표
 - [docs/dq4-rom-map.md](docs/dq4-rom-map.md): DQ4(FC) 롬 뱅크 지도(뱅크 32개의 내용, 실행 장면, 빈 자리)
-- [docs/dq4-sound-format.md](docs/dq4-sound-format.md): DQ4(FC) 소리 드라이버(입구·명령·채널·템포), 곡 50개·효과음 표, 악보 바이트, 맵·필드·전투 곡, MIDI 내보내기
+- [docs/dq4-sound-format.md](docs/dq4-sound-format.md): DQ4(FC) 소리 드라이버(입구·명령·채널·템포), 곡 50개·효과음 표, 악보 바이트, 맵·필드·탈것·전투 곡, 맞춤 셈 `$6BF9`, NDS 곡 이름, MIDI·NSF·WAV·오선 악보 내보내기
 - [docs/dq4-debug.md](docs/dq4-debug.md): DQ4(FC) 디버그 스위치 `$C000`(벽 통과·인카운트 끄기·전투 테스트), 패드 2 흔적, 미실행 코드 찾기
 - [docs/dq4-block-format.md](docs/dq4-block-format.md): DQ4(FC) 맵 블록 → 8×8 타일·팔레트·통행 속성, CHR 올리기, 타일 애니메이션, 지형 효과
 - [docs/dq4-fcgfx.md](docs/dq4-fcgfx.md): DQ4(FC) 원작 맵·필드·블록·CHR·폰트·장면(장 제목·엔딩) 그림 뽑기(비공개 에셋용), MesenCE 색, 필드 물가 블록, 필드·폭포 팔레트 순환
@@ -97,4 +97,5 @@ FC 「드래곤 퀘스트 IV」(일본판 Rev A) 원작 데이터를 분석하�
 - [2026-10-26-21: 잠든 인물을 깨우는 곳을 찾아 [추정] 29개를 11개로](journal/2026-10-26-21-flags3.md)
 - [2026-10-26-22: 동료 AI 의 MP 예산 식, ザオラル·フバーハ 의 양, マホカンタ 갈래, 작전 4 표본, 내성 값 1·2, 아이템 플래그와 `$618E` bit6](journal/2026-10-26-22-ai5.md)
 - [2026-10-26-23: 손님 동료의 AI, 쓰이지 않는 창 항목, ラナルータ·배·48/09, 시간 멈춤과 2배, 대화로 거르는 앞뒤 비트](journal/2026-10-26-23-misc3.md)
+- [2026-10-26-24: 탈것 곡과 5장 필드 곡, 맞춤 셈 $6BF9, NDS 곡 이름, NSF·WAV·오선 악보](journal/2026-10-26-24-sound2.md)
 - [2026-10-26-25: 열기구가 보이는 장면, 방위로 가리키는 대사로 이름 붙이기, 성문 연출 시작 전 프레임](journal/2026-10-26-25-fcgfx5.md)
