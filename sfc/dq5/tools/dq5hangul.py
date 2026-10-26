@@ -16,7 +16,7 @@
   24:AF1E  새 색인(16개마다 3바이트)
   24:A63C·A660·A6C2·A673  폰트 묶음 표 피연산자 → 새 표
 
-  bg3move     BG3 타일맵 주소 즉값 일곱 곳을 1C00 → 3C00 으로(VRAM 3C00 으로 옮겨지는지 보는 실측용)
+  bg3move     BG3 타일맵 주소 즉값 열일곱을 1C00 → BASE(기본 3C00)로(VRAM 3C00 으로 옮겨지는지 보는 실측용)
   slots       실내 맵마다 VRAM 슬롯 범위(롬을 쓰지 않음)
 
 사용:
@@ -412,27 +412,37 @@ def decode_check(data):
     return out
 
 
-# BG3 타일맵 VRAM 주소를 즉값으로 둔 곳(파일 오프셋, 원래 바이트). 높은 바이트만 1C→3C(1E→3E)로 바꾼다.
-# 대기열 레코드(00:B44F 의 $27, 02:FEF7 의 $1F18)와 전원 지우기(00:A436)는 장면을 못 돌려 넣지 않았다.
+# BG3 타일맵 VRAM 주소를 즉값으로 둔 곳(파일 오프셋, 원래 바이트). 높은 바이트만 1C→3C(1D→3D, 1E→3E)로 바꾼다.
+# BG3SC 는 2B:82C2 가 그림자 $0725 와 함께 $2109 에 바로 쓰므로, 전원부터 켜면 따로 고칠 레지스터가 없다.
 BG3_MAP_IMMEDIATES = (
     (0x000E15, 0x1C),  # 00:8E13 LDA #$1C00 → 00:8E1F STA $2116(창마다 2KB, 21BF.5 가 켜져 있으면 8E1C 의 4C00)
     (0x000E54, 0x1C),  # 00:8E52 LDA #$1C00 (0BEC bit6 갈래 앞 0x1C0 바이트)
     (0x000E74, 0x1E),  # 00:8E72 LDA #$1EA0 (같은 갈래 뒤 0x240 바이트)
-    (0x1582BE, 0x1C),  # 2B:82BD LDA #$1C → $0725(BG3SC 그림자)
+    (0x1582BE, 0x1C),  # 2B:82BD LDA #$1C → $0725(BG3SC 그림자)·$2109
     (0x110B4F, 0x1C),  # 22:8B4D LDA #$1CE0 → $0F5E → 00:FDA1 STA $2116(전투 창)
     (0x110B71, 0x1C),  # 22:8B6F 같은 꼴
     (0x110BC8, 0x1C),  # 22:8BC6 같은 꼴
+    (0x02183F, 0x1C),  # 04:983E LDA #$1C → 04:9849 STA $2117(창 버퍼 7E:5000 과 BG3 타일맵을 포트로 지움, 21BF.5 면 4C)
+    (0x002437, 0x1C),  # 00:A436 LDA #$1C → 00:A43B STA $2117(전원을 켤 때 BG3 타일맵 지우기)
+    (0x017CEE, 0x1C),  # 02:FCEC LDX #$1C00 → $CE → 02:FA88 STX $2116(로고 장면에서 BG3 타일맵을 DMA 로 지우기)
+    (0x017D20, 0x1C),  # 02:FD1E 같은 꼴
+    (0x017A35, 0x1C),  # 02:FA33 LDX #$1C00 → $1F18(타이틀 메뉴 창 줄 주소, 02:FEF7 이 전송 목록에 넣음)
+    (0x017D7E, 0x1D),  # 02:FD7C LDX #$1DC0 → $1F18
+    (0x017E8E, 0x1C),  # 02:FE8C SBC #$1C00($1F18 을 버퍼 안 자리로 바꿈)
+    (0x017ED8, 0x1C),  # 02:FED6 LDA #$1C00 → $1F18
+    (0x01FE10, 0x1D),  # 03:FE0E LDX #$1DA0 → $1F18
+    (0x01FE73, 0x1D),  # 03:FE71 LDX #$1DC0 → $1F18
 )
 
 
-def bg3move(data):
+def bg3move(data, base=0x3C):
     out = bytearray(data)
     info = []
     for off, old in BG3_MAP_IMMEDIATES:
         assert out[off] == old, f'{off:06X}: {out[off]:02X}'
-        out[off] = old + 0x20
+        out[off] = old - 0x1C + base
         info.append(f'{off:06X} {old:02X} -> {out[off]:02X}')
-    info.append('세이브스테이트에서 시작하면 BG3SC 가 다시 쓰이지 않으므로 POKE="000725=3C;002109=3C" 를 함께 건다')
+    info.append(f'세이브스테이트에서 시작하면 맵을 다시 불러올 때까지 BG3SC 가 그대로이므로 POKE="000725={base:02X};002109={base:02X}" 를 함께 건다')
     return out, info
 
 
@@ -460,6 +470,7 @@ def main():
     ap.add_argument('--size', type=int, default=2, choices=(2, 3, 4))
     ap.add_argument('-o', '--out')
     ap.add_argument('--twobyte', action='store_true', help='proto: 이름 문자열 2바이트 접두 85(24:A7B6)')
+    ap.add_argument('--base', default='3C', help='bg3move: 새 BG3 타일맵 VRAM 워드 주소의 높은 바이트(16진, 3C 또는 4C 등)')
     ap.add_argument('--long', action='store_true', help='proto: 레코드에 안 들어가는 긴 명령 창 항목(뱅크 36 → 낮은 WRAM)')
     a = ap.parse_args()
     data = open(a.rom, 'rb').read()
@@ -474,7 +485,7 @@ def main():
         out = expand(data, a.size)
         print(f'{len(out):#x} 바이트, 머리 크기 {out[HEADER + 0x17]:02X}')
     elif a.cmd == 'bg3move':
-        out, info = bg3move(data)
+        out, info = bg3move(data, int(a.base, 16))
         print('\n'.join(info))
     elif a.cmd == 'wintest':
         out, info = wintest(data)

@@ -29,6 +29,7 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 | --- | --- |
 | `dq4state.sh` | 전원 켜기부터 1장 왕좌의 방, 성 밖, 필드, 첫 전투까지 단계별로 입력을 재생해 세이브스테이트를 만들고 장면마다 좌표·맵 번호를 찍음. 같은 결과가 나오도록 MesenCE 에 `--nes.ramPowerOnState=AllZeros` 를 주고, 전원을 켜는 첫 단계는 `lua/debugsram.lua` 로 SRAM 을 `00` 으로 채움(MesenCE 의 `Saves/dq4.sav` 를 따르지 않게). `STATE_DIR` 로 출력 폴더. `MESENCE` 필요 |
 | `dq4warp.sh OUT GG/KK [X Y [DIR]]\|field F X Y` | DQ4 장면 이동. 1장 세이브스테이트에서 게임의 출구·맵 가장자리 루틴을 타고 목적지로 옮겨 `OUT/warp.mss`(조작 가능)를 만듦. 좌표를 빼면 그 맵으로 들어오는 출구의 도착 자리. `lua/warp.lua` 는 프로브의 `DRIVER` 로도 씀. `STATE` 는 상대 경로(워크트리 기준)도 되고, 앞 실행의 `end.mss` 에서 이어 갈 수 있음. [fc/dq4/docs/dq4-warp.md](../docs/dq4-warp.md) |
+| `dq4assets.sh [OUT]` | 비공개 에셋 저장소 `fc/dq4/` 전체(맵·필드·gfx·갤러리·스프라이트·몬스터·소리·장면 화면)를 롬 하나에서 다시 뽑아 OUT(기본 `work/dq4assets`, 빈 폴더)에 같은 배치로 둠. 먼저 `rom/dq4.nes` 의 SHA-1 을 검사. 장면 화면은 MesenCE 를 전원 켜기부터 정해 둔 입력으로 돌려 뜨고(1장 상태는 `dq4state.sh`, 2·5장은 디버그 장 고르기, 장 끝·엔딩은 `dq4warp.sh`) 덤프는 `work/dq4scenes/` 에 둠. `MESENCE` 가 없으면 장면 화면만 빠짐. 같은 커밋·롬이면 두 번 돌려 바이트까지 같음 |
 
 ## Python과 프로브
 
@@ -95,6 +96,7 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 | `lua/sprite62a5.lua` | FC: `08:$85BE` 가 `$62A5` 를 읽을 때만 bit7 을 켜 勇者 그림 고르기를 봄. `DRIVER=warp.lua` 와 같이 |
 | `lua/spritebattle.lua` | FC: 필드 세이브스테이트(`STATE`)에서 위아래로 걸으며 조우 판정 `18:$9D06` 을 메모리상 `CLC`/`RTS` 로 바꿔 전투를 일으키고, 전투 시작 `18:$A11A` 에서 무리 칸을 `MON`(`"67:1,03:2"`, ID:마릿수)으로 덮음. `WAIT` 프레임 뒤 `end.*` 덤프, `COVER=1` 이면 그동안의 `cover.txt`(`krpatch fc listing` 형식), `READS=1` 이면 PRG 읽기 쪽별 `reads.txt` |
 | `lua/spriteboss.lua` | FC: `spritebattle.lua` 와 같은 방법으로 전투를 일으켜(기본 `MON=AE:1`) 적 HP 를 `HP` 이하로 누르고 A 를 누름. 형태 번호 `$6E7E` 가 바뀔 때마다 `WAIT` 프레임 뒤 `f<순번>.*` 덤프(`FORMS` 개). `CALLS="14:AC1A,0F:C73E"` 면 그 주소를 실행할 때마다 프레임·A X Y·`ZP` 바이트를 `calls.txt` 에, `OAMLOG=1` 이면 OAM 조합이 바뀐 프레임을 `oamlog.txt` 에. `PRESS=1`·`HPFRAMES` 로 전투를 끝내고 필드로 돌아온 화면도 덤프 |
+| `lua/guestai.lua` | FC: 드라이버 겸 프로브. 필드 세이브스테이트(`STATE`)에서 전투를 일으켜 무리를 `MON` 으로 덮고, 명령마다 A 를 눌러 턴을 돌리며 `HOOK="10:B497"`(뱅크:주소)에 닿을 때 `$96`·`$0B`·A·X·Y 를, 메시지 `16:$8656` 와 함께 `guestai.txt` 에. `SET`(첫 프레임)·`POKE`(프레임마다)는 CPU 주소, `PRG` 는 메모리상 PRG 오프셋 |
 | `lua/uibattle.lua` | FC: 입력 드라이버(`DRIVER`). `spritebattle.lua` 와 같은 방법으로 필드 세이브스테이트(`STATE`)에서 전투를 일으켜 무리를 `MON` 으로 덮고, `WAIT` 프레임 뒤 `battle.mss` 와 `end.*` 를 남김. 이어서 창을 고르는 입력은 `seq.lua` 에 `STATE=battle.mss` 로. 프로브는 `probe/trace.lua` 등 |
 | `dq4sound.py rom songs\|sfx\|score N\|notes N\|json N\|apu N\|compare [N] DIR\|maps\|calls\|envelopes\|export [OUT]` | DQ4(FC) 소리. 롬의 드라이버(`1F:$E685`)를 `dq4cpu` 로 그대로 돌려 곡 `00`~`35`·효과음 `80`~`B7` 의 음 사건·되풀이·APU 쓰기를 뽑음. `score` 채널별 악보 텍스트, `maps` 맵·필드·탈것 곡 표(`19:$803B`), `calls` 곡·효과음을 부르는 코드·대사, `compare` 는 `lua/soundlog.lua` 기록과 프레임마다·음마다 대조, `envelopes` 쓰이는 엔벨로프·비브라토 표(마크다운), `json` SPC 로 옮길 중간 형식(악보 명령 + 음 시간표 + 엔벨로프), `export` 곡·효과음마다 `.txt`·`.mid`·`.json`(커밋 금지, 기본 `work/dq4-sound`) |
 | `lua/soundlog.lua` | FC: APU 쓰기(`W`)·NMI 소리 틱(`N`)·소리 입구 `$C01F`(`S`)·`$C022`~`$C02B`(`C`)·메시지(`M`)를 `sound.txt` 로. `SONG` 으로 첫 `$C01F` 의 곡 번호를 바꾸고 `MUTE=1` 이면 뒤의 부르기를 지금 곡으로 바꿈 |

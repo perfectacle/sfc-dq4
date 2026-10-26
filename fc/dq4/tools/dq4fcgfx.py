@@ -1097,7 +1097,7 @@ def screens_from_dumps(out, dumps):
         idx.append({'name': name, 'title': title, 'nt': f'{name}-nt.png', 'bgchr': f'{name}-bgchr.png', 'shot': f'{name}-shot.png',
                     'source': 'MesenCE 덤프(fc/dq4/tools/lua/fcgfxscene.lua) 렌더링, 롬에서 직접 푼 것이 아님', 'dump': prefix,
                     'scroll': [sx, sy], 'diff': n, 'masked': masked, **extra})
-    # 이미 있는 장면 목록에 더한다(같은 이름은 바꿈). 장면마다 덤프를 뜬 방법이 달라 한 번에 다시 뜨기 어렵다.
+    # 이미 있는 장면 목록에 더한다(같은 이름은 바꿈). 장면 하나만 다시 뜬 덤프로 바꿀 때 쓴다.
     old = json.loads((d / 'index.json').read_text()) if (d / 'index.json').exists() else []
     names = {x['name'] for x in idx}
     idx = [x for x in old if x['name'] not in names] + idx

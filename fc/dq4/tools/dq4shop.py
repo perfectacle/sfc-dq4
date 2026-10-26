@@ -636,7 +636,66 @@ def progress_rules(prg):
     return out
 
 
+def order_rules(prg):
+    """{(뒤 비트): {(앞 비트)}}. 뒤 비트를 켜는 곳이 롬 전체에서 대화 스크립트의 「flag|=」 하나뿐이고, 그 문장에 닿는
+    갈래가 앞 비트가 켜져 있는지(조건 1B)를 검사하며, 앞 비트를 끄는 곳이 롬에 없을 때만 「뒤가 켜져 있으면 앞도 켜져 있다」.
+    장면 차례만으로는 이 관계가 서지 않는다(대화 021 은 $627E bit1 을 켤 때 다른 비트를 보지 않음)."""
+    import dq4event
+    xref = dq4event.flag_xref(prg)
+    sets, clears = {}, set()
+    for n, rows in xref.items():
+        for m, kind, *_ in rows:
+            if kind in ('set', 'store', 'write'):
+                for b in (0x80 >> j for j in range(8)):
+                    if m is None or kind != 'set' or m & b:
+                        sets[(n, b)] = sets.get((n, b), 0) + 1
+            if kind in ('clear', 'store', 'write'):
+                for b in (0x80 >> j for j in range(8)):
+                    if m is None or kind != 'clear' or not m & b:
+                        clears.add((n, b))
+    out, seen = {}, set()
+
+    def walk(tree, need):
+        for s in tree:
+            if s[0] == 'flag|=':
+                n, v = s[1]
+                for b in (0x80 >> j for j in range(8)):
+                    if v & b and sets.get((n, b)) == 1:
+                        out.setdefault((n, b), set()).update(need)
+            elif s[0] == 'if':
+                _, neg, op, args, then, other = s
+                if op == 0x1B:
+                    bits = {(args[0], b) for b in (0x80 >> j for j in range(8)) if args[1] & b}
+                    walk(then, need | bits if not neg and len(bits) == 1 else need)
+                    if other:
+                        walk(other, need | bits if neg and len(bits) == 1 else need)
+                else:
+                    walk(then, need)
+                    if other:
+                        walk(other, need)
+
+    for _, _, _, night, recs in dq4event.npc_lists(prg):
+        for r in recs:
+            tid = dq4talk.talk_id(r, night)
+            if tid in seen:
+                continue
+            seen.add(tid)
+            c = dq4talk.classify(prg, tid)
+            if c[0] == 'script':
+                walk(c[2], frozenset())
+    rules = {}
+    for (n, b), need in out.items():
+        a = dq4map.FLAGS + n
+        keep = {(f'${dq4map.FLAGS + e:04X}', eb) for e, eb in need
+                if (e, eb) != (n, b) and (e, eb) not in clears and dq4map.FLAGS + e not in TRANSIENT
+                and (dq4map.FLAGS + e, eb) not in CHAPTER_END_CLEAR}
+        if keep and a not in TRANSIENT:
+            rules[(f'${a:04X}', b)] = keep
+    return rules
+
+
 RULES = None      # hidden() 이 progress_rules 로 채운다. None 이면 관계를 보지 않음
+ORDER = {}        # hidden() 이 order_rules 로 채운다
 
 
 def chapters_ok(atoms, bits):
@@ -661,7 +720,13 @@ def consistent(atoms, bits):
             by.setdefault(sym, []).append((rest[0], rest[1], on))
     if not all(any(all(holds(op, v, w) == on for op, v, on in cs) for w in range(256)) for cs in by.values()):
         return False
-    return RULES is None or chapters_ok(atoms, bits)
+    if RULES is None:
+        return True
+    on = {(sym, rest[0]) for (kind, sym, *rest), v in zip(atoms, bits) if kind == 'bit' and v}
+    off = {(sym, rest[0]) for (kind, sym, *rest), v in zip(atoms, bits) if kind == 'bit' and not v}
+    if any(ORDER.get(k, set()) & off for k in on):
+        return False
+    return chapters_ok(atoms, bits)
 
 
 def primes_cover(n, on, dc):
@@ -785,8 +850,9 @@ def person_text(prg, g, k, i, terms):
 def hidden(prg, story=True):
     """[(그룹, 순번, 루틴, [(인물 번호, 하는 일, 조건 합)])]: 1C:$A010 장소 루틴 전부와 1C:$AD32 의 장 줄.
     story 면 진행 관계로 나올 수 없는 조합을 거른다."""
-    global RULES
+    global RULES, ORDER
     RULES = progress_rules(prg) if story else None
+    ORDER = order_rules(prg) if story else {}
     out = [(g, k, p, hide_table(prg, p)) for g, k, p in hide_routines(prg)]
     for g, k, c, i in chapter_hides(prg):
         out.append((g, k, CHAPTER_HIDE, [(i, '숨김', [[(('num', '장', '=', c), False)]])]))
