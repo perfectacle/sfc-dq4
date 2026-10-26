@@ -52,5 +52,59 @@ class BankTests(unittest.TestCase):
         self.assertGreater(bank.hw_snr(pcm, encoded), 20)
 
 
+def write_wave(path, seconds, rate=16000):
+    t = np.arange(int(seconds * rate))
+    pcm = np.rint(np.sin(t * 2 * np.pi / 37) * 9000).astype('<i2')
+    with wave.open(str(path), 'wb') as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        wav.writeframes(pcm.tobytes())
+
+
+class FitTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        root = Path(self.directory.name)
+        samples = root / 'nds/dq4/sound/samples'
+        samples.mkdir(parents=True)
+        for name in ('a', 'b', 'c', 'd'):
+            write_wave(samples / f'{name}.wav', 0.5)
+        region = {'type': 'PCM', 'base': 60, 'attack': 127, 'decay': 127, 'sustain': 127}
+        self.root = root
+        self.score = {
+            'instruments': {
+                '1': {'regions': [region | {'sample': 'a.wav', 'lo': 0, 'hi': 59},
+                                  region | {'sample': 'b.wav', 'lo': 60, 'hi': 127}]},
+                '2': {'regions': [region | {'sample': 'c.wav', 'lo': 0, 'hi': 127}]},
+                '3': {'regions': [region | {'sample': 'd.wav', 'lo': 0, 'hi': 127}]},
+                '4': None,
+            },
+            'timeline': [{'op': 'note', 'program': p, 'note': n} for p, n, k in
+                         ((1, 50, 9), (1, 70, 1), (2, 60, 5), (3, 60, 5), (4, 60, 2)) for _ in range(k)],
+        }
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def test_slot_limit_merges_least_used_region(self):
+        _, mapping, report = bank.build_bank(self.score, self.root, max_samples=3)
+        self.assertEqual(report['sample_count'], 3)
+        self.assertEqual(mapping[1][0]['sample'], mapping[1][1]['sample'])
+        self.assertIn('program 1 region 1 -> region 0', report['reductions'][0]['merge'])
+        self.assertEqual(report['undefined_program_notes'], 2)
+
+    def test_budget_lowers_rates_until_it_fits(self):
+        _, _, full = bank.build_bank(self.score, self.root)
+        budget = full['resource_bytes'] * 2 // 3
+        _, _, fitted = bank.build_bank(self.score, self.root, budget=budget)
+        self.assertLessEqual(fitted['resource_bytes'], budget)
+        self.assertTrue(any('rate' in r or 'cut' in r or 'merge' in r for r in fitted['reductions']))
+
+    def test_impossible_budget_is_reported(self):
+        with self.assertRaisesRegex(ValueError, 'cannot fit samples'):
+            bank.build_bank(self.score, self.root, budget=200)
+
+
 if __name__ == '__main__':
     unittest.main()

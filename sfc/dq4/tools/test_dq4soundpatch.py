@@ -56,8 +56,21 @@ class InstallTests(unittest.TestCase):
 
     def test_table_expansion_does_not_overrun_spc_area(self):
         wide = patch.Replacement(melody(), tuple(range(19)))
-        with self.assertRaisesRegex(ValueError, 'sample table exceeds'):
+        with self.assertRaisesRegex(ValueError, 'SPC budget exceeded'):
             patch.install(self.base, {2: wide, 5: wide})
+
+    def test_table_growth_moves_heap_start(self):
+        # 표가 28EC~2A5D 를 넘으면 샘플 자리 시작($28E7)이 표 끝으로 밀리고 예산도 그만큼 준다.
+        wide = patch.Replacement(melody(), (0x00, 0x05, 0x1F, 0x20, 0x21, 0x22, 0x03, 0x04, 0x18, 0x13, 0x0A, 0x0B, 0x15, 0x16))
+        out, report = patch.install(self.base, {2: wide})
+        table = sum(map(len, patch.read_sets(out)))
+        self.assertGreater(table, patch.TABLE_CAPACITY)
+        self.assertEqual(patch.heap_start(out), 0x28EC + table)
+        self.assertEqual(report['songs'][0]['spc_budget']['capacity'], patch.SPC_END - 0x28EC - table)
+
+    def test_table_within_capacity_keeps_heap_start(self):
+        out, _ = patch.install(self.base, {2: self.item})
+        self.assertEqual(patch.heap_start(out), 0x2A5D)
 
     def test_occupied_allocation_is_not_overwritten(self):
         base = bytearray(self.base) + bytes(0x400000 - len(self.base))
