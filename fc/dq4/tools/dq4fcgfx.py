@@ -1145,7 +1145,8 @@ def screens_from_dumps(out, dumps):
     """dumps = [(이름, 제목, prefix[, opts])]. nametable 두 장 그림, BG 패턴 표 시트, MesenCE 화면을 두고,
     화면과 nametable 그림을 스크롤 자리를 찾아 스프라이트 자리를 뺀 픽셀로 견준다.
     opts 에 'ppulog'(fcgfxscroll.lua 의 ppulog.txt)가 있으면 그 프레임('frame', 없으면 prefix 의 fNNNNN)의 줄 스크롤로
-    화면을 그려 견주고, 'mirror'('v' 기본, 'h')로 nametable 배치를 정한다. 그때는 <이름>-screen.png 도 둔다."""
+    화면을 그려 견주고, 'mirror'('v' 기본, 'h')로 nametable 배치를 정한다. 그때는 <이름>-screen.png 도 둔다.
+    'source' 는 index.json 에 적을 덤프 출처(없으면 MesenCE 덤프)."""
     d = Path(out) / 'gfx' / 'screens'
     d.mkdir(parents=True, exist_ok=True)
     idx = []
@@ -1176,14 +1177,14 @@ def screens_from_dumps(out, dumps):
             scr.save(d / f'{name}-screen.png')
             n, sx, sy = diff_count(scr, shot, mask), scroll[0] + scroll[2] % 2 * 256, scroll[1] + scroll[2] // 2 * 240
             extra = {'screen': f'{name}-screen.png', 'mirror': mirror, 'ppumask': pmask, 'lines': [list(s) for s in splits],
-                     'source': 'MesenCE 덤프(fc/dq4/tools/lua/fcgfxscroll.lua) 렌더링, 롬에서 직접 푼 것이 아님'}
+                     'source': opts.get('source', 'MesenCE 덤프(fc/dq4/tools/lua/fcgfxscroll.lua) 렌더링, 롬에서 직접 푼 것이 아님')}
         else:
             n, sx, sy = match_shot(full, shot, mask)
         masked = 0 if mask is None else mask.histogram()[255]
         lines = f', 줄 스크롤 (scanline, cycle, X) {extra["lines"]}' if extra else ''
         print(f'{name}: 화면 {256 * 240 - masked} 픽셀(스프라이트 자리 {masked} 뺌) 중 {n} 다름, 스크롤 ({sx},{sy}){lines}')
         idx.append({'name': name, 'title': title, 'nt': f'{name}-nt.png', 'bgchr': f'{name}-bgchr.png', 'shot': f'{name}-shot.png',
-                    'source': 'MesenCE 덤프(fc/dq4/tools/lua/fcgfxscene.lua) 렌더링, 롬에서 직접 푼 것이 아님', 'dump': prefix,
+                    'source': opts.get('source', 'MesenCE 덤프(fc/dq4/tools/lua/fcgfxscene.lua) 렌더링, 롬에서 직접 푼 것이 아님'), 'dump': prefix,
                     'scroll': [sx, sy], 'diff': n, 'masked': masked, **extra})
     # 이미 있는 장면 목록에 더한다(같은 이름은 바꿈). 장면 하나만 다시 뜬 덤프로 바꿀 때 쓴다.
     old = json.loads((d / 'index.json').read_text()) if (d / 'index.json').exists() else []
@@ -1226,7 +1227,7 @@ def main():
         return
     if cmd == 'scenes':
         spec = json.loads(Path(a[4]).read_text())
-        screens_from_dumps(a[3], [(x['name'], x['title'], x['prefix'], {k: x[k] for k in ('ppulog', 'frame', 'mirror') if k in x})
+        screens_from_dumps(a[3], [(x['name'], x['title'], x['prefix'], {k: x[k] for k in ('ppulog', 'frame', 'mirror', 'source') if k in x})
                                   for x in spec])
         source_txt(a[3], 'gfx/screens', 'uv run --locked python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes scenes $OUT ' + a[4], data)
         return
