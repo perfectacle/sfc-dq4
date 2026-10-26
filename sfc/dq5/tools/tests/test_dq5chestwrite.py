@@ -5,8 +5,8 @@ from pathlib import Path
 from unittest.mock import patch as mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from dq5chestwrite import (FIELD_CALL, FIELD_CODE, FIELD_TEMPLATE, FORMAT, TABLES, decode, dump, edits, encode,
-                           encode_field, layout, map_dimensions, patch, read_field)
+from dq5chestwrite import (FIELD_ADDRS, FIELD_CALL, FIELD_CODE, FIELD_TEMPLATE, FORMAT, TABLES, decode, dump, edits,
+                           encode, encode_field, layout, map_dimensions, named, patch, read_field, world_block)
 from dq5map import Rom, lorom
 
 
@@ -30,12 +30,19 @@ def fixture():
         if name != 'chests':
             at = lorom(start + count * size)
             data[at:at + 2] = b'\xff\xff'
-    values = {'x0': 10, 'x1': 0, 'X0': 12, 'X1': 0, 'y0': 0x20, 'y1': 1, 'Y0': 0x22, 'Y1': 1,
-              'r0': 0xA1, 'r1': 0, 'i0': 0x30, 'i1': 0x30, 'm0': 0x08, 'm1': 0x08, '??': 0x01}
-    code = bytes(values[token] if token in values else int(token, 16) for token in FIELD_TEMPLATE)
-    data[lorom(FIELD_CODE):lorom(FIELD_CODE) + len(code)] = code
+    for addr, token in zip(FIELD_ADDRS, FIELD_TEMPLATE):
+        data[lorom(addr)] = FIELD_VALUES[token] if named(token) else int(token, 16)
     data[lorom(FIELD_CALL):lorom(FIELD_CALL) + 3] = bytes.fromhex('20 f2 e5')
     return Rom(data)
+
+
+ROM = Path(__file__).resolve().parents[4] / 'rom/dq5.sfc'
+FIELD_VALUES = {'x0': 10, 'x1': 0, 'X0': 12, 'X1': 0, 'y0': 0x20, 'y1': 1, 'Y0': 0x22, 'Y1': 1, 'r0': 0xA1, 'r1': 0,
+                'i0': 0x30, 'm0': 0x08, 'a0': 0xC0, 'a1': 0x21, 'b0': 0x55, 'b1': 0}
+
+
+def at(token, n=0):
+    return FIELD_ADDRS[[i for i, t in enumerate(FIELD_TEMPLATE) if t == token][n]]
 
 
 def poke(rom, addr, value):
@@ -91,7 +98,8 @@ class ChestWriteTests(unittest.TestCase):
 
     @mock('dq5chestwrite.map_ids', return_value=[(0, i) for i in range(86)])
     @mock('dq5chestwrite.map_dimensions', return_value=(64, 64))
-    def test_full_roundtrip_and_manifest_orig(self, _, __):
+    @mock('dq5chestwrite.world_block', return_value=0x55)
+    def test_full_roundtrip_and_manifest_orig(self, _, __, ___):
         rom = fixture()
         self.assertEqual(patch(rom, dump(rom))['writes'], [])
         doc = {'format': FORMAT, 'search': [{'index': 1, 'x': 7, 'reward': 0x432}]}
@@ -119,31 +127,46 @@ class ChestWriteTests(unittest.TestCase):
                 edits(rom, doc)
 
 
-    def test_field_reads_immediates_and_writes_only_reward(self):
+    def test_field_reads_pieces_and_moves_together(self):
         rom = fixture()
         raw = read_field(rom)
         self.assertEqual(dump(rom)['field'], [{'index': 0, 'x': 10, 'y': 0x120, 'width': 2, 'height': 2,
                                                'reward': 0xA1, 'flag_index': 0x30, 'mask': 0x08}])
-        got = encode_field(raw, {'reward': 0x46C, 'x': 10, 'mask': 0x08})
-        self.assertEqual([i for i in range(len(raw)) if raw[i] != got[i]],
-                         [FIELD_TEMPLATE.index('r0'), FIELD_TEMPLATE.index('r1')])
-        for change in ({'x': 11}, {'width': 3}, {'y': 0}, {'height': 1}, {'flag_index': 0x31}, {'mask': 1},
-                       {'reward': 0xD000}, {'reward': 0xFFFF}, {'reward': True}, {'layer': 1}):
+        calls = []
+        same = encode_field(raw, {'reward': 0x46C, 'x': 10}, lambda x, y: calls.append((x, y)) or 0x55)
+        self.assertEqual([FIELD_TEMPLATE[i] for i in range(len(raw)) if raw[i] != same[i]], ['r0', 'r1'])
+        self.assertEqual(calls, [(10, 0x120)])
+        redrawn = encode_field(raw, {}, lambda x, y: 0x123)
+        self.assertEqual([FIELD_TEMPLATE[i] for i in range(len(raw)) if raw[i] != redrawn[i]], ['b0', 'b1'])
+        moved = encode_field(raw, {'x': 24, 'y': 168, 'flag_index': 0x22, 'mask': 4}, lambda x, y: 0x178)
+        got = {t: v for t, v in zip(FIELD_TEMPLATE, moved) if named(t)}
+        self.assertEqual((got['x0'], got['X0'], got['y0'], got['Y0'], got['y1']), (24, 26, 168, 170, 0))
+        self.assertEqual((got['i0'], got['m0'], got['a0'], got['a1'], got['b0'], got['b1']),
+                         (0x22, 4, 0xB2, 0x21, 0x78, 1))
+        self.assertEqual(sum(1 for t in FIELD_TEMPLATE if t == 'x0'), 2)
+        for change in ({'x': 11}, {'y': 511}, {'x': 512}, {'width': 3}, {'height': 1}, {'flag_index': 0x80},
+                       {'mask': 0}, {'flag_index': 0x15, 'mask': 0x0C}, {'flag_index': 0x1A, 'mask': 1},
+                       {'reward': 0xD000}, {'reward': True}, {'layer': 1}):
             with self.subTest(change=change), self.assertRaises(ValueError):
-                encode_field(raw, change)
+                encode_field(raw, change, lambda x, y: 0)
 
     @mock('dq5chestwrite.map_ids', return_value=[(0, i) for i in range(86)])
-    def test_field_manifest_and_schema(self, _):
+    @mock('dq5chestwrite.world_block', return_value=0x55)
+    def test_field_manifest_and_schema(self, _, __):
         rom = fixture()
         writes = patch(rom, {'format': FORMAT, 'field': [{'index': 0, 'reward': 0x46C}]})['writes']
         self.assertEqual(writes, [{'at': '12:E61F', 'hex': '6c 04', 'orig': 'a1 00', 'note': 'field 0'}])
+        moved = patch(rom, {'format': FORMAT, 'field': [{'index': 0, 'x': 24, 'flag_index': 0x31}]})['writes']
+        self.assertEqual([w['at'] for w in moved], ['12:E5FD', '12:E602', '12:E615', '12:E627', '01:9FFC', '01:A01C',
+                                                    '01:A05E'])
         for rows in ({}, [{'index': 1}], [{'index': 0}, {'index': 0}], [{'reward': 1}]):
             with self.subTest(rows=rows), self.assertRaises(ValueError):
                 edits(rom, {'format': FORMAT, 'field': rows})
 
     @mock('dq5chestwrite.map_ids', return_value=[(0, i) for i in range(86)])
     @mock('dq5chestwrite.map_dimensions', return_value=(64, 64))
-    def test_field_with_tables_high_byte_and_roundtrip(self, _, __):
+    @mock('dq5chestwrite.world_block', return_value=0x55)
+    def test_field_with_tables_high_byte_and_roundtrip(self, _, __, ___):
         rom = fixture()
         doc = {'format': FORMAT, 'search': [{'index': 1, 'reward': 0x432}], 'field': [{'index': 0, 'reward': 0x1A1}]}
         writes = patch(rom, doc)['writes']
@@ -164,11 +187,17 @@ class ChestWriteTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             edits(rom, {'format': FORMAT, 'field': [{'index': 0, 'reward': 1}]})
 
+    @unittest.skipUnless(ROM.is_file(), '롬 없음')
+    def test_world_block_reads_loader_chunks(self):
+        rom = Rom(ROM.read_bytes())
+        self.assertEqual(world_block(rom, 22, 166), 0xCA)
+        self.assertEqual(world_block(rom, 25, 169), 0x178)
+
     def test_field_code_must_match_template(self):
         rom = fixture()
-        for addr, value in ((FIELD_CALL + 1, 0), (FIELD_CODE, 0xE2), (FIELD_CODE + FIELD_TEMPLATE.index('i1'), 0x31),
-                            (FIELD_CODE + FIELD_TEMPLATE.index('m1'), 0x10),
-                            (FIELD_CODE + FIELD_TEMPLATE.index('X0'), 10)):
+        for addr, value in ((FIELD_CALL + 1, 0), (FIELD_CODE, 0xE2), (at('i0', 1), 0x31), (at('m0', 3), 0x10),
+                            (at('x0', 1), 12), (at('a0'), 0xC1), (at('X0'), 13), (at('x0'), 11), (at('x0', 1), 11),
+                            (at('01', 0), 0)):
             with self.subTest(addr=hex(addr)), self.assertRaises(ValueError):
                 dump(poke(rom, addr, value))
 
