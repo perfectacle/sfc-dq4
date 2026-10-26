@@ -1,7 +1,7 @@
-"""상자·서랍·발밑 보상 쓰기를 원본/패치 롬의 실제 조사 명령으로 비교한다.
+"""상자·서랍·발밑·두 칸 앞·아래층 상자·필드 보상 쓰기를 원본/패치 롬의 실제 조사 명령으로 비교한다.
 
 sfc/dq5/docs/dq5-map-format.md의 보물상자 형식. 입력 JSON→dq5patch→롬/IPS를 만들고,
-선실에서 걸어가거나 맵에 재진입한 뒤 컨트롤러로 조사한다. 금화·조회된 보상·열림 비트·
+선실에서 걸어가거나 dq5warp.lua 로 그 자리에 내려선 뒤 컨트롤러로 조사한다. 금화·조회된 보상·열림 비트·
 기존 비트 보존을 확인한다. 원본 롬/세이브는 읽기만 하고 --out 아래 새 폴더에 저장한다.
 
   MESENCE=… python sfc/dq5/tools/dq5chestcheck.py rom/dq5.sfc --state work/state/ship.mss
@@ -21,7 +21,7 @@ from dq5chestwrite import FORMAT
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 INPUT = ('up:8,wait:30,a:8,wait:60,down:6,wait:25,down:6,wait:25,down:6,wait:25,'
-         'right:6,wait:25,a:8,wait:200,a:4,wait:150,a:4,wait:150,b:4,wait:100')
+         'right:6,wait:25,a:8,wait:200,a:4,wait:150,a:4,wait:150,b:4,wait:220')
 CASES = {
     'chest': ({'chests': [{'index': 2, 'reward': 0x241}]}, 321, 0x2210, 0x20, 0x2210, 0x20, 0x33, 0x131),
     'search': ({'search': [{'index': 31, 'reward': 0x2B0, 'flag_index': 4, 'mask': 0x80}]},
@@ -29,7 +29,18 @@ CASES = {
     'foot': ({'foot': [{'index': 0, 'group': 0x17, 'map': 0, 'x': 3, 'y': 5, 'layer': 1,
                        'reward': 0x31F, 'flag_index': 3, 'mask': 0x40}]},
              543, 0x2243, 0x40, 0x222F, 1, 0xA1, 0x12B),
+    'ahead': ({'ahead': [{'index': 11, 'reward': 0x38E, 'flag_index': 0x2E, 'mask': 0x02}]},
+              654, 0x223E, 0x02, 0x223D, 0x08, 0x5F, 0x12B),
+    'lower': ({'lower': [{'index': 3, 'reward': 0x3FD, 'flag_index': 0x19, 'mask': 0x08}]},
+              765, 0x2229, 0x08, 0x2228, 0x08, 0xB1, 0x131),
+    'field': ({'field': [{'index': 0, 'reward': 0x46C}]}, 876, 0x21B3, 0x10, 0x21B3, 0x10, 0xCA, 0x12B),
 }
+# 장면: 원본 롬에서 dq5warp.lua 로 내려선 자리, 없으면 선실에서 걸어감.
+# 필드는 밤($075E >= 00F0)이고 21AA.0 이 켜져 있어야 빛 블록 코드가 21A5.2 를 켠다
+SCENES = {'chest': {'TO': '01/02,34,31'}, 'search': None, 'foot': None, 'ahead': {'TO': '03/04,10,10'},
+          'lower': {'TO': '51/51,18,37,2'}, 'field': {'FIELD': '22,166', 'SET': '21AA|01;075E=00;075F=01'}}
+# 필드 조사는 선 자리를 보므로 걷지 않고 바로 명령 창을 연다
+INPUTS = {'field': INPUT.removeprefix('up:8,wait:30,')}
 
 
 def command(tool, *args):
@@ -63,8 +74,8 @@ def prepare(name, original, state, out, mesence, libdir):
     dest = out / (name + '-scene')
     dest.mkdir()
     env = environment(libdir, state, dest)
-    if name == 'chest':
-        env.update(TO='01/02,34,31', SETTLE='120', SAVE='scene.mss', MAXF='1500')
+    if SCENES.get(name):
+        env.update(SCENES[name], SETTLE='120', SAVE='scene.mss', MAXF='1500')
         script = HERE / 'lua/dq5warp.lua'
     else:
         env.update(PREPARE='1', DRIVER=str(ROOT / 'tools/lua/walk.lua'), PRE='b:4,wait:40',
@@ -74,6 +85,10 @@ def prepare(name, original, state, out, mesence, libdir):
     result = dest / 'scene.mss'
     require(result.is_file(), f'{name}: 장면 세이브가 없음')
     return result
+
+
+def scene(name):
+    return name if SCENES[name] else 'ship'
 
 
 def gold(wram):
@@ -94,7 +109,7 @@ def compare(name, state, original, out, mesence, libdir):
         run_dir = dest / mode
         run_dir.mkdir()
         env = environment(libdir, state, run_dir)
-        env.update(INPUT=INPUT, FLAG=f'7E{flag:04X}', OLD_FLAG=f'7E{old_flag:04X}')
+        env.update(INPUT=INPUTS.get(name, INPUT), FLAG=f'7E{flag:04X}', OLD_FLAG=f'7E{old_flag:04X}')
         run(mesence, rom, HERE / 'lua/dq5chestcheck.lua', run_dir, env)
         before, after = [(run_dir / f'{when}.wram').read_bytes() for when in ('before', 'after')]
         require(len(before) == len(after) == 0x20000, f'{name}/{mode}: WRAM 크기가 다름')
@@ -116,7 +131,8 @@ def compare(name, state, original, out, mesence, libdir):
             if old_flag != flag:
                 require(after[flag] == 0, f'{name}: 원본 롬이 새 비트를 씀')
         results.append({'mode': mode, 'reward': expected, 'gold_before': gold(before), 'gold_after': gold(after),
-                        'flag': f'7E:{flag:04X}', 'flag_value': after[flag], 'passed': True})
+                        'flag': f'7E:{flag:04X}', 'flag_value': after[flag],
+                        'old_flag': f'7E:{old_flag:04X}', 'old_flag_value': after[old_flag], 'passed': True})
     return {'case': name, 'runs': results, 'passed': True}
 
 
@@ -126,6 +142,7 @@ def main():
     p.add_argument('--state', type=Path, required=True)
     p.add_argument('--out', type=Path, default=Path('work/chest-check'))
     p.add_argument('--mesence', default=os.environ.get('MESENCE'))
+    p.add_argument('--case', choices=CASES, action='append', help='이 사례만(여러 번 줄 수 있음)')
     args = p.parse_args()
     if not args.mesence:
         p.error('MESENCE 또는 --mesence가 필요함')
@@ -137,15 +154,17 @@ def main():
         out = Path(tempfile.mkdtemp(prefix='run-', dir=args.out.resolve()))
         libdir = subprocess.check_output(['krpatch', 'sfc', 'lua'], text=True, timeout=30).strip()
         print(f'출력 {out}', flush=True)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        cases = list(dict.fromkeys(args.case or CASES))
+        scenes = sorted({scene(name) for name in cases})
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
             futures = {name: pool.submit(prepare, name, original, state, out, mesence, libdir)
-                       for name in ('chest', 'ship')}
+                       for name in scenes}
             states = {name: future.result() for name, future in futures.items()}
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-            results = list(pool.map(lambda name: compare(name, states['chest' if name == 'chest' else 'ship'],
-                                                        original, out, mesence, libdir), CASES))
+            results = list(pool.map(lambda name: compare(name, states[scene(name)],
+                                                        original, out, mesence, libdir), cases))
         (out / 'results.json').write_text(json.dumps(results, indent=2) + '\n', encoding='utf-8')
-        print('3쌍/6실행 통과: 보상·금화·새 열림 비트·기존 비트 보존')
+        print(f'{len(cases)}쌍/{2 * len(cases)}실행 통과: 보상·금화·새 열림 비트·기존 비트 보존')
         return 0
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         print(f'오류: {error}', file=sys.stderr)

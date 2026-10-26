@@ -1,9 +1,10 @@
 """DQ5 보물상자·조사 보상의 고정 표 쓰기.
 
-sfc/dq5/docs/dq5-map-format.md의 보물상자 형식(25:FAB0, 12:FB9D·E6BE·FCDD·FD46).
+sfc/dq5/docs/dq5-map-format.md의 보물상자 형식(25:FAB0, 12:FB9D·E6BE·FCDD·FD46)과 필드 조사(12:E5F2).
 일반 상자의 좌표와 열림 비트는 맵 셀 순서·상자 번호에서 나온다. chest_maps는
 기존 맵 슬롯의 연결/개수만 바꾸며 총 상자 수를 유지한다. 나머지 표는 좌표·보상·
-플래그를 직접 바꾼다. 검색 우선순위·목록 길이·미사용 바이트·종료자는 보존한다.
+플래그를 직접 바꾼다. 검색 우선순위·목록 길이·미사용 바이트·종료자는 보존한다. field는
+코드에 박힌 보상 즉시값만 같은 길이로 바꾸고, 좌표·플래그·명령 바이트는 보존한다.
 
   python sfc/dq5/tools/dq5chestwrite.py rom/dq5.sfc dump -o work/chests.json
   python sfc/dq5/tools/dq5chestwrite.py rom/dq5.sfc patch work/chests.json -o work/chests.patch.json
@@ -11,6 +12,7 @@ sfc/dq5/docs/dq5-map-format.md의 보물상자 형식(25:FAB0, 12:FB9D·E6BE·FC
 
 JSON format=dq5chest/1. chests[{index,reward}], chest_maps[{index,group,map,count}],
 search/foot/ahead/lower[{index,group,map,x,y,reward,flag_index,mask}]. foot만 layer를 받는다.
+field[{index:0,reward}]. dump는 x,y,width,height(필드 8픽셀 칸)·flag_index·mask도 내지만 바꿀 수 없다.
 모든 수치는 JSON 정수, reward는 원본 16비트 부호다. index 외 필드는 생략할 수 있다.
 """
 import argparse
@@ -27,6 +29,13 @@ FORMAT = 'dq5chest/1'
 TABLES = {'chests': (CHEST_ITEMS, 161, 2), 'chest_maps': (CHEST_MAPS, 83, 3),
           'search': (SEARCH_TABLE, 86, 9), 'foot': (FOOT_TABLE, 18, 9),
           'ahead': (AHEAD_TABLE, 17, 8), 'lower': (LOWER_TABLE, 11, 8)}
+SECTIONS = {*TABLES, 'field'}
+FIELD_CALL, FIELD_CODE = 0x12E5A7, 0x12E5F2
+# 12:E5F2 의 명령 바이트. ?? 는 조건 플래그(21A5.2·21AA.0)이고, 이름 붙은 자리는 읽는 즉시값이다
+# (x·y 시작, X·Y 끝(미포함), r 보상, i·m 열림 시험과 기록의 번호·마스크). 0·1 은 하위·상위 바이트
+FIELD_TEMPLATE = ('C2 20 00 0B ?? ?? F0 3D A5 B6 C9 x0 x1 90 36 C9 X0 X1 B0 31 A5 B8 C9 y0 y1 90 2A C9 Y0 Y1 '
+                  'B0 25 00 0B m0 i0 D0 1F 00 0B ?? ?? F0 19 A9 r0 r1 8D 73 1E E2 20 A9 i1 8D 80 1E A9 m1 '
+                  '8D 81 1E').split()
 
 
 def integer(value, maximum, field):
@@ -45,6 +54,41 @@ def read(rom, addr, size):
     if len(raw) != size:
         raise ValueError(f'{addr:06X}: 롬 범위 밖')
     return raw
+
+
+def read_field(rom):
+    if read(rom, FIELD_CALL, 3) != bytes.fromhex('20 F2 E5'):
+        raise ValueError('field: 12:E5A7 이 12:E5F2 를 부르지 않음')
+    raw = read(rom, FIELD_CODE, len(FIELD_TEMPLATE))
+    for i, token in enumerate(FIELD_TEMPLATE):
+        if all(c in '0123456789ABCDEF' for c in token) and raw[i] != int(token, 16):
+            raise ValueError(f'field: 12:{(FIELD_CODE + i) & 0xFFFF:04X} 명령 바이트가 다름')
+    decode_field(raw)
+    return raw
+
+
+def decode_field(raw):
+    pick = {token: raw[i] for i, token in enumerate(FIELD_TEMPLATE)}
+    word = lambda key: pick[key + '0'] | pick[key + '1'] << 8
+    if (pick['i0'], pick['m0']) != (pick['i1'], pick['m1']):
+        raise ValueError('field: 열림 시험과 기록 플래그가 다름')
+    return {'x': word('x'), 'y': word('y'), 'width': word('X') - word('x'), 'height': word('Y') - word('y'),
+            'reward': word('r'), 'flag_index': pick['i0'], 'mask': pick['m0']}
+
+
+def encode_field(raw, changes):
+    old = decode_field(raw)
+    fields(changes, set(old), 'field')
+    # 01:9FF9~A035·A05D~ 의 빛나는 풀 블록 코드가 같은 칸과 21B3.4·21AA.0 을 따로 들고 있어 함께 바뀌지 않는다
+    if any(changes[key] != old[key] for key in changes.keys() - {'reward'}):
+        raise ValueError('field: reward만 바꿀 수 있음(좌표·플래그는 필드 빛 블록 코드와 짝이 맞아야 함)')
+    reward = integer(changes.get('reward', old['reward']), 65535, 'reward')
+    if reward > 0xCFFF:
+        raise ValueError('field: reward는 물건(0000~00FF)·금화(0100~CFFF)만 받음')
+    out = bytearray(raw)
+    out[FIELD_TEMPLATE.index('r0')] = reward & 0xFF
+    out[FIELD_TEMPLATE.index('r1')] = reward >> 8
+    return bytes(out)
 
 
 def layout(rom):
@@ -100,7 +144,8 @@ def encode(name, raw, changes):
 def dump(rom):
     layout(rom)
     return {'format': FORMAT, **{name: [{'index': i, **decode(name, read(rom, start + i * size, size))}
-                                       for i in range(count)] for name, (start, count, size) in TABLES.items()}}
+                                       for i in range(count)] for name, (start, count, size) in TABLES.items()},
+            'field': [{'index': 0, **decode_field(read_field(rom))}]}
 
 
 def validate_tables(rom, doc, check_cells=False):
@@ -137,7 +182,7 @@ def map_dimensions(rom, group, map_number):
 
 
 def edits(rom, doc):
-    fields(doc, {'format', *TABLES}, '문서')
+    fields(doc, {'format', *SECTIONS}, '문서')
     if doc.get('format') != FORMAT:
         raise ValueError(f'format={FORMAT}이 필요함')
     current = dump(rom)
@@ -162,6 +207,7 @@ def edits(rom, doc):
                 positions.append(current[name][i])
             map_changed |= name == 'chest_maps' and new != old
             out.append((addr, new, old, f'{name} {i}'))
+    out += field_edits(rom, doc.get('field', []))
     validate_tables(rom, current, map_changed)
     dimensions = {}
     for row in positions:
@@ -171,6 +217,28 @@ def edits(rom, doc):
         width, height = dimensions[key]
         if row['x'] >= width or row['y'] >= height:
             raise ValueError(f'좌표가 맵 {width}×{height} 밖')
+    return out
+
+
+def field_edits(rom, rows):
+    if not isinstance(rows, list) or len(rows) > 1:
+        raise ValueError('field: 항목 하나까지의 배열이어야 함')
+    if not rows:
+        return []
+    fields(rows[0], {'index', *decode_field(read_field(rom))}, 'field')
+    integer(rows[0].get('index'), 0, 'index')
+    old = read_field(rom)
+    new = encode_field(old, {k: v for k, v in rows[0].items() if k != 'index'})
+    out, i = [], 0
+    while i < len(new):
+        if new[i] == old[i]:
+            i += 1
+            continue
+        j = i
+        while j < len(new) and new[j] != old[j]:
+            j += 1
+        out.append((FIELD_CODE + i, new[i:j], old[i:j], 'field 0'))
+        i = j
     return out
 
 
@@ -187,7 +255,7 @@ def check(rom, doc=None):
     for addr, new, _, _ in rows:
         data[lorom(addr):lorom(addr) + len(new)] = new
     result = dump(Rom(data))
-    for name in TABLES:
+    for name in SECTIONS:
         for row in source.get(name, []):
             if any(result[name][row['index']][key] != value for key, value in row.items()):
                 raise ValueError(f'{name}: 쓴 뒤 읽은 값이 다름')
@@ -195,7 +263,7 @@ def check(rom, doc=None):
     if doc is None and data != rom.d:
         raise ValueError('원본을 다시 쓴 바이트가 다름')
     print(f'고정 항목 {sum(t[1] for t in TABLES.values())}개, '
-          f'{sum(t[1] * t[2] for t in TABLES.values())}바이트; 다시 읽기 일치, 맵 83개 상자 수 일치')
+          f'{sum(t[1] * t[2] for t in TABLES.values())}바이트와 필드 조사 1곳; 다시 읽기 일치, 맵 83개 상자 수 일치')
 
 
 def main():
@@ -214,7 +282,7 @@ def main():
         rom = Rom(args.rom.read_bytes())
         doc = json.loads(args.source.read_text(encoding='utf-8')) if getattr(args, 'source', None) else None
         if getattr(args, 'source', None):
-            fields(doc, {'format', *TABLES}, '문서')
+            fields(doc, {'format', *SECTIONS}, '문서')
         if args.command == 'check':
             check(rom, doc)
         else:
