@@ -28,7 +28,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from dq5map import BLOCK_BITS, GROUP_TABLE, HIGH_GROUPS, Rom, lorom, map_pointer, next_addr  # noqa: E402
+from dq5map import BLOCK_BITS, GROUP_TABLE, HIGH_GROUPS, Rom, group_spans, lorom, map_pointer, next_addr  # noqa: E402, F401
 
 FORMAT = 'dq5map/1'
 HEADER = ('kind', 'width', 'height', 'outside', 'zone', 'attr', 'bits', 'background_hi', 'background_lo')
@@ -39,9 +39,8 @@ HIGH_FIRST = 0x50
 def all_maps(rom):
     """(BC, BD) 전부. 그룹 목록은 이어져 있어서 다음 그룹 목록 시작까지가 그 그룹의 맵이다."""
     out = []
-    g = [rom.u16(GROUP_TABLE + i * 2) for i in range(GROUPS)] + [GROUP_TABLE & 0xFFFF]
-    for bc in range(GROUPS):
-        out += [(bc, bd) for bd in range((g[bc + 1] - g[bc]) // 3)]
+    for bc, (start, end) in enumerate(group_spans(rom)[0]):
+        out += [(bc, bd) for bd in range((end - start) // 3)]
     h = [rom.u16(HIGH_GROUPS + i * 2) for i in range(5)] + [HIGH_GROUPS & 0xFFFF]
     for i in range(5):
         out += [(HIGH_FIRST + i, HIGH_FIRST + bd) for bd in range((h[i + 1] - h[i]) // 3)]
@@ -54,7 +53,7 @@ def pointer_addr(rom, bc, bd):
         raise ValueError(f'원본 맵 목록에 {bc:02X}/{bd:02X}가 없음; 새 맵 추가는 지원하지 않음')
     if bc >= HIGH_FIRST:
         return HIGH_GROUPS & 0xFF0000 | rom.u16(HIGH_GROUPS + (bc - HIGH_FIRST) * 2) + (bd - HIGH_FIRST) * 3
-    return 0x0F0000 | rom.u16(GROUP_TABLE + bc * 2) + bd * 3
+    return 0x0F0000 | group_spans(rom)[0][bc][0] + bd * 3
 
 
 class BitReader:

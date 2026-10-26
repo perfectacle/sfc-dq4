@@ -1,4 +1,5 @@
--- dq5warp.lua 로 맵에 선 뒤 TEST 로 걸은 결과에 마지막 맵·칸·주인공 층(7E:31A0)·$BE 를 덧붙인다.
+-- dq5warp.lua 로 맵에 선 뒤 TEST 로 걸은 결과에 마지막 맵·칸·주인공 층(7E:31A0)·$BE 와, 맵 속성이 들어가는
+-- 7E:1A98(조우 구역)·1AA0(전투 배경)·194D·194B(곡 인자), 인물 뒤 슬롯 7E:1983 을 덧붙인다.
 -- 영역 이동 플래그 bit6 이 꺼진 레코드가 내는 효과음 갈래(2A:F4D1)를 지나가면 그 횟수도 적는다.
 -- LIBDIR 의 boot.lua 자리에 dq5warp.lua 를 둔다(dq5exitcheck.py 가 준비).
 -- AUDIT=1 이면 표 뱅크를 DB 로 두는 창(PLB 다음 명령: 출구 2A:F705, 색인 01:9441, 실행기 00:CDF9·2A:F4C2·2A:FD1A)이
@@ -87,6 +88,8 @@ L.write = function(name, data)
     data = data .. string.format('final map %02X/%02X cell %d,%d layer %02X BE=%02X sound %d\n', emu.read(0x7E00BC, m),
       emu.read(0x7E00BD, m), emu.read(0x7E3020, m), emu.read(0x7E3080, m), emu.read(0x7E31A0, m), emu.read(0x7E00BE, m), sound)
       .. string.format('stale reads %d %s\n', stale, staleFirst or '-')
+      .. string.format('map attrs 1A98=%02X 1AA0=%02X 194D=%02X 194B=%02X 1983=%02X\n', emu.read(0x7E1A98, m),
+        emu.read(0x7E1AA0, m), emu.read(0x7E194D, m), emu.read(0x7E194B, m), emu.read(0x7E1983, m))
     local t = {}
     for k in pairs(dp86) do t[#t + 1] = k end
     table.sort(t)

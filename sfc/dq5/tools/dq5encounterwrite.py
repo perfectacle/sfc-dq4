@@ -23,8 +23,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 from dq5encounter import (AREA_COUNT, AREA_SIZE, EVENT_COUNT, EVENT_GROUPS, EVENT_SIZE, FIELD_GRIDS, FIELD_WIDTH,  # noqa: E402
-                          FIXED, FIXED_COUNT, GROUPS, MAP_TABLE)
-from dq5map import Rom, lorom  # noqa: E402
+                          FIXED, FIXED_COUNT, GROUPS)
+from dq5map import Rom, group_spans, lorom  # noqa: E402
 
 FORMAT = 'dq5encounter/1'
 FIXED_SIZE = 6
@@ -60,9 +60,7 @@ def read(rom, addr, size):
 def map_slots(rom):
     """(BC, BD) → 맵 항목 주소. 그룹 n 의 항목은 포인터 n 부터 포인터 n+1(마지막은 표 자신) 앞까지."""
     out = {}
-    for bc in range(GROUPS):
-        p = rom.u16(MAP_TABLE + bc * 2)
-        q = rom.u16(MAP_TABLE + bc * 2 + 2) if bc + 1 < GROUPS else MAP_TABLE & 0xFFFF
+    for bc, (p, q) in enumerate(group_spans(rom, attr=True)[0]):
         if (q - p) % MAP_SIZE or q < p:
             raise ValueError(f'맵 그룹 {bc:02X} 의 항목 범위가 원래 꼴이 아님')
         for bd in range((q - p) // MAP_SIZE):
