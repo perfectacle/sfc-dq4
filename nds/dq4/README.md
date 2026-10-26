@@ -98,3 +98,4 @@ STEPS="gfx screens" nds/dq4/tools/ndsassets.sh OUT     # 단계 고르기(unpack
 - [2026-10-26-05: 행동 표, 상태 번호, 내성 값 1·2, 동료 대화의 세 값](journal/2026-10-26-05-actions.md)
 - [2026-10-26-06: 메모리 감시 코어로 DSSA 반투명·동작 표·LOCN·필드 지도 번호 찾기](journal/2026-10-26-06-graphics4.md)
 - [2026-10-26-07: 명칭 대조표의 채택 열 채우기](journal/2026-10-26-07-glossary2.md)
+- [2026-10-26-08: 실기 녹음과 합성의 대조, 남은 곡의 장면, 2SF](journal/2026-10-26-08-sound2.md)
