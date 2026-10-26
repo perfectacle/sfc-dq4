@@ -64,6 +64,8 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5freesweep.py rom 세이브스테이트 OUT` | 빈 자리 22곳(`dq5build.py free`)을 실내 맵 346곳·몬스터 236종 전투·필드 세계 0~2 에서 롬 읽기·실행 감시(`--kinds maps,battles,field`), `OUT/summary.txt` 에 읽힌 것. `MESENCE` 필요 |
 | `dq5chestwrite.py rom dump\|patch\|check` | 일반 상자161개·맵 연결83개·서랍/항아리/통86개·발밑18개·두 칸 앞17개·아래층 상자11개 고정 표와 필드 조사 보상(`12:E5F2`·`01:9FF9` 빛 블록 코드의 칸·플래그·보상). `dq5chest/1` 일부 필드 편집, 원본·종료자·명령 바이트 보존. [쓰기 형식](../docs/dq5-build-format.md#보물상자조사-보상-dq5chest1) |
 | `dq5spellfx.py rom dump\|patch\|check` | 전투 행동 171개의 처리 루틴(`20:B7F9`, 실행 루틴과 원래 짝만)과 첫머리 54개의 양 번호·성공 값·내성 칸, 필드 주문 18칸의 처리기(`11:8024`)와 처리기 14개의 MP·ホイミ/ベホイミ 회복량. `--raw` 로 연결 검사를 풂. [쓰기 형식](../docs/dq5-build-format.md#처리-루틴-연결필드-주문-dq5spellfx1) |
+| `dq5picturegrow.py rom dump\|patch\|check --at 자리` | 인물 그림 번호 표(`25:86D0`)를 256개까지 늘려 `--at` 에 옮기고, 물체 그림과 말 걸기에서 건너뛸 그림(`05:862F`)을 그림마다 고름. `1F:CF45`·`03:D202`·`05:85FE` 주소와 `1E:DC67` 을 고침. [쓰기 형식](../docs/dq5-build-format.md#인물-그림-번호-표-늘리기-dq5pictures1) |
+| `dq5picturegrowcheck.py rom --state 선실 --out 폴더` | 02/06 에 옮긴 인물의 그림을 18·A9(원래 표)·A9(늘린 표)·A9(물체)·A9(말 걸기 목록)로 바꾼 5롬에서 말 막힘 비트·칸 목록 번호·말 건 메시지 비교. `MESENCE` 필요 |
 | `dq5aiwrite.py rom dump\|patch\|check` | 행동 171개·물건 216개 AI 레코드의 기대 값·평가 갈래(행동은 MP·범위·내성 칸도), 작전 0~4 의 실측한 칸 8개, 학습 배율 표 셋, 내성 단계 배율(`27:8055`), 갑옷 원소 표 22항목. [쓰기 형식](../docs/dq5-build-format.md#작전-ai학습-배율내성-배율갑옷-원소-dq5ai1) |
 | `dq5aicheck.py rom --state 선실 --out 폴더` | 변경 롬 17벌·대조 롬 1벌과 원본에서 작전 AI 가 고른 행동(`20:8846`)·メラ 피해·갑옷이 빼는 양을 견줌. `MESENCE` 필요 |
 | `dq5spellfxcheck.py rom --state 선실 --out 폴더` | 변경 롬 9벌과 원본에서 파파스 メラ·슬라임 ラリホー·전투/필드 ホイミ·ラナルータ 15회 실행. 피해·메시지·HP·MP 비교. `MESENCE` 필요 |
