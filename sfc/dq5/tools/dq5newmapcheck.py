@@ -26,7 +26,7 @@ COPY_0D02 = {'record': {'copy': '0D/02'}, 'attrs': {'copy': '0D/02'}}
 # 0D/01 의 출구 1(원래 0D/02 로 감)을 새 맵으로 돌리고, 새 맵의 출구는 0D/02 처럼 0D/01 출구 1 로 둔다.
 # 롬마다 (dq5newmap 입력, 자리 선택, 새 맵, 출구 고치기 대상(0D/01 계단이 갈 맵, 출구 종류)).
 #  n: 0D/05 하나(그룹 표만 같은 뱅크로).  m: 0D/05~0D/18 스무 개(맵 포인터·속성 덩어리를 뱅크 3E 로, DB 즉값까지).
-#  g: 새 그룹 36 의 36/00(들어가는 곳 표를 3E 로).  h: 그룹 50 의 50/52(50/51 복사, 속성 목록을 23:FF20 으로).
+#  g: 새 그룹 36 의 36/00(들어가는 곳 표를 3E 로, 인물 그룹 포인터·빈 목록은 인물 도구로).  h: 그룹 50 의 50/52(50/51 복사, 속성 목록을 23:FF20 으로).
 VARIANTS = {
     'n': ({'format': 'dq5newmap/1', 'maps': [{'map': '0D/05', **COPY_0D02}]}, [], ['0D/05'], ('0D/05', 'same-group')),
     'm': ({'format': 'dq5newmap/1', 'maps': [{'map': f'0D/{bd:02X}', **COPY_0D02} for bd in range(5, 0x19)]},
@@ -38,6 +38,8 @@ VARIANTS = {
     'h': ({'format': 'dq5newmap/1', 'maps': [{'map': '50/52', 'record': {'copy': '50/51'}, 'attrs': {'copy': '50/51'}}]},
           ['--high-attr-at', '23:FF20'], [], None),
 }
+# 인물 기본 목록을 인물 도구(dq5npcrelocate.py --new-map)로 더하는 롬.
+NPC_NEW = {'g'}
 # 출구 표가 원래 자리보다 늘어 넘치므로 출구는 옛 레코드 자리로, 레코드는 늘린 뱅크로 옮긴다.
 EXIT_PLACES = ('--exits-at', '2A:D812', '--records-at', '3F:8000')
 # (이름, 롬, TO, TEST, 기대: 맵, 칸(('arrival', BC, BD, 출구) 면 그 출구의 도착 칸), 층, 속성을 견줄 장면,
@@ -62,7 +64,7 @@ CASES = [
     ('many-leave', 'm', '0D/18,14,9,1', 'down:16', ('0D/01', ('arrival', 0x0D, 1, 1), None, 'leave-original', None)),
     ('many-later', 'm', '21/02,111,8,1', 'up:16', ('0E/03', ('arrival', 0x0E, 3, 1), None, 'later-original', None)),
     ('many-earlier', 'm', '01/00,60,79,2', 'down:16', ('01/03', ('arrival', 1, 3, 0), None, 'earlier-original', None)),
-    ('group-enter', 'g', '0D/01,14,9,1', 'down:16', ('36/00', ('arrival', 0x36, 0, 0), None, 'enter-original', None)),
+    ('group-enter', 'g', '0D/01,14,9,1', 'down:16', ('36/00', ('arrival', 0x36, 0, 0), None, 'enter-original', 0x08)),
     ('group-leave', 'g', '36/00,14,9,1', 'down:16', ('0D/01', ('arrival', 0x0D, 1, 1), None, 'leave-original', None)),
     ('group-later', 'g', '21/02,111,8,1', 'up:16', ('0E/03', ('arrival', 0x0E, 3, 1), None, 'later-original', None)),
     ('high-new', 'h', '50/52,31,17,1', 'down:16', ('05/01', (33, 47), 1, 'high-original', None)),
@@ -81,8 +83,14 @@ def build_rom(original, out, key):
     command('dq5newmap.py', original, 'patch', source, '-o', out / f'{key}-newmap.dq5patch.json', *places)
     command('dq5newmap.py', original, 'check', source, *places)
     manifests = [out / f'{key}-newmap.dq5patch.json']
+    new = [x for m in new_maps for x in ('--new-map', m)]
+    if key in NPC_NEW:
+        # 새 그룹의 인물 그룹 포인터와 빈 기본 목록은 인물 도구가 둔다(목록은 기본 자리 32·33 으로 옮김).
+        npc = out / f'{key}-npc.json'
+        npc.write_text(json.dumps({'format': 'dq5npcrelocate/1', 'scripts': []}) + '\n', encoding='utf-8')
+        command('dq5npcrelocate.py', original, 'patch', npc, '-o', out / f'{key}-npc.dq5patch.json', *new)
+        manifests.append(out / f'{key}-npc.dq5patch.json')
     if target:
-        new = [x for m in new_maps for x in ('--new-map', m)]
         exits = out / f'{key}-exits.json'
         command('dq5exitreloc.py', original, 'dump', '-o', exits, *new)
         table = json.loads(exits.read_text(encoding='utf-8'))
