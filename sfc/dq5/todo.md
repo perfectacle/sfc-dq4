@@ -5,7 +5,7 @@
 SFC DQ5 엔진 분석. 시작점은 [handoff.md](handoff.md). 결과 문서: [dq5-map-format.md](docs/dq5-map-format.md), [dq5-field-format.md](docs/dq5-field-format.md), [dq5-text-format.md](docs/dq5-text-format.md), [dq5-data-format.md](docs/dq5-data-format.md), [dq5-graphics-format.md](docs/dq5-graphics-format.md).
 
 - **소리**: 곡 이름(사용자가 주면 들어 보기 페이지에 반영), 효과음 `42`·`45` 를 원래 장면에서 듣기(루틴만 직접 불러 확인, [dq5-sound-format.md](docs/dq5-sound-format.md) 「효과음마다」), 부르는 곳이 없는 15갈래, 에셋 `17.spc`·`17-01.spc` 에 빠진 샘플 여섯, 악보 박자를 들어서 정하기·PDF(시스템 도구 필요)·`FB` 가 다음 음 뒤에도 머무는지.
-- **조우의 남은 것**: 22/00 ポワン 장면으로 `2199.3` 을 켠 뒤의 ルーラ(장면 끝 메시지 `25D` 창이 닫히지 않음, [dq5-data-format.md 「남은 것」](docs/dq5-data-format.md#남은-것)). 원래 순서의 ラインハット 01/04·01/00 에서 パパス 가 기다리는 `21A1.7` 을 켜는 곳([dq5-story.md 「남은 것」](docs/dq5-story.md#남은-것)).
+- **조우의 남은 것**: 원래 순서의 ラインハット 01/04·01/00 에서 パパス 가 기다리는 `21A1.7` 을 켜는 곳([dq5-story.md 「남은 것」](docs/dq5-story.md#남은-것)).
 - **일행 관리의 남은 것**: 신부를 사람 동료 칸으로 옮기는 `05:FB7D`(`2F:8F7A` 가 부름)와 결혼식 뒤 ビアンカ 를 칸 0 에서 데려오는 `05:F6FF` 를 장면으로 실측, `21:8923`·루틴 `BD` 가 `2190.5`·`21B7.5` 로 칸 번호에 1 을 더하는 갈래([dq5-data-format.md 「사람 동료 칸」](docs/dq5-data-format.md#사람-동료-칸-7e294a)).
 - **네이티브 호출의 남은 것**: `21AA.7` 을 켜는 03/07 장면(인물 스크립트 `05:9653`+30)부터 03/05 소동·`FB41` 까지 이어 걷기.
 - **그래픽 내보내기의 남은 것**: 오프닝 타이틀 연출 전체를 롬만으로 그리기(별·반짝이·HDMA 표 계산은 `dq5titlefx.py`, 남은 것은 층 겹치기와 밝히기·V 내려오기 순서), 전투 연출을 입구 상태 없이 롬만으로 그리기(입구 WRAM·VRAM 한 벌을 넣은 롬 코드 실행 `dq5fxvm.py` 는 139벌 중 133벌 같음, 처리 도중 NMI·HDMA 는 흉내 안 함)·`3E` 의 `DDDC`·`F01F` 를 부르는 장면, `2F`(ミルドラース 둘째 모습)가 쓰러질 때 HDMA 채널 4(표 `00:0DB9`, 간접 뱅크 `27`)가 몇 프레임만 OBJ 팔레트 0 의 색 하나를 덮는 까닭.
