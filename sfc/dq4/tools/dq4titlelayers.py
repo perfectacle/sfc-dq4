@@ -149,6 +149,8 @@ def glyph_mask():
         mask = image.copy()
     if not set(np.unique(np.array(mask))).issubset({0, 255}):
         raise ValueError('glyph mask must contain only opaque and transparent pixels')
+    # These pixels above 자 belong to the source sky, not the letter.
+    ImageDraw.Draw(mask).rectangle((139, 175, 144, 176), fill=0)
     return mask
 
 
@@ -254,18 +256,25 @@ def add_cloud_tiles(page, cloud, parity):
     return bytes(data)
 
 
+def cloud_sprites(offset):
+    for i in range(CLOUD_SPRITES):
+        x = -(offset % 32) + i * 32
+        section = offset // 32 + i
+        mirrored = bool(section // 2 % 2)
+        part = (section % 2) ^ mirrored
+        y = CLOUD_Y + (6 if mirrored else 0)
+        yield x, y, part, mirrored
+
+
 def cloud_oam():
     records = bytearray()
     for offset in range(128):
         low = bytearray()
         high = bytearray(oam_frame(0)[512:])
-        for i in range(CLOUD_SPRITES):
+        for i, (x, y, part, mirrored) in enumerate(cloud_sprites(offset)):
             sprite = 15 + i
-            x = -(offset % 32) + i * 32
-            part = (offset // 32 + i) % 2
-            base = 204
-            y = 224 if x >= 256 or x + 32 <= 0 else CLOUD_Y
-            low.extend(bytes((x & 255, y, base, 0x22 | part)))
+            y = 224 if x >= 256 or x + 32 <= 0 else y
+            low.extend(bytes((x & 255, y, 204, 0x22 | part | (0x40 if mirrored else 0))))
             high[sprite // 4] &= ~(3 << (sprite % 4 * 2))
             high[sprite // 4] |= (2 | int(x < 0 or x >= 256)) << (sprite % 4 * 2)
         records.extend(low + high + bytes(128 - len(low) - len(high)))
@@ -343,8 +352,11 @@ def write_pack(out):
         layer.putalpha(mask)
         image.alpha_composite(layer)
         cloud_plane = Image.new('RGBA', (256, 224))
-        for x in range(-(tick // 4) % 64 - 64, 256, 64):
-            cloud_plane.alpha_composite(cloud_rgba, (x, CLOUD_Y))
+        for x, y, part, mirrored in cloud_sprites((tick // 4) % 128):
+            half = cloud_rgba.crop((part * 32, 0, part * 32 + 32, 32))
+            if mirrored:
+                half = half.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+            cloud_plane.alpha_composite(half, (x, y))
         image.alpha_composite(cloud_plane)
         coverage.append(int(((np.array(cloud_plane)[:, :, 3] > 0) & castle).sum()))
         layer.putalpha(high_mask)

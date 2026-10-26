@@ -83,6 +83,47 @@ class LayerTests(unittest.TestCase):
         self.assertTrue(np.all(mask[glyphs]))
         self.assertTrue(np.any(mask[185:200, 208:]))
 
+    def test_sky_fragment_above_subtitle_is_transparent(self):
+        from PIL import Image
+        original_mask = np.array(Image.open(layers.GLYPH_MASK)) > 0
+        glyphs = np.array(layers.glyph_mask()) > 0
+        removed = original_mask & ~glyphs
+        expected = np.zeros_like(removed)
+        expected[175:177, 139:145] = True
+        self.assertTrue(np.array_equal(removed, expected))
+        blobs, _ = layers.read_pack(self.pack)
+        mask = np.frombuffer(blobs['foreground-mask.bin'], dtype=np.uint8).reshape(224, 256)
+        self.assertFalse(np.any(mask[removed]))
+
+    def test_cloud_variation_and_scroll_wrap_are_continuous(self):
+        from PIL import Image
+        cloud, _ = layers.cloud_assets()
+        tiles = layers.decode_tiles((self.pack / 'dragon-initial.chr').read_bytes(), 4)
+        records = (self.pack / 'cloud-oam.bin').read_bytes()
+        pictures = []
+        for offset in range(128):
+            record = records[offset * 128:(offset + 1) * 128]
+            plane = Image.new('RGBA', (256, 224))
+            for i in reversed(range(9)):
+                x, y, tile, attr = record[i * 4:i * 4 + 4]
+                high = record[36 + (15 + i) // 4] >> ((15 + i) % 4 * 2) & 3
+                if high & 1:
+                    x -= 256
+                indices = tile + (attr & 1) * 256 + np.arange(4)[:, None] * 16 + np.arange(4)
+                pixels = tiles[indices].transpose(0, 2, 1, 3).reshape(32, 32)
+                if attr & 0x40:
+                    pixels = pixels[:, ::-1]
+                half = Image.fromarray(pixels).convert('P')
+                half.putpalette(cloud.getpalette())
+                half.info['transparency'] = 0
+                plane.alpha_composite(half.convert('RGBA'), (x, y))
+            pictures.append(np.array(plane))
+        # A one-pixel scroll must be continuous even as OAM slots and the cycle wrap.
+        for offset in range(128):
+            self.assertTrue(np.array_equal(pictures[offset][:, 1:], pictures[(offset + 1) % 128][:, :-1]), offset)
+        self.assertFalse(np.array_equal(pictures[0][:, :64], pictures[0][:, 64:128]))
+        self.assertTrue(np.array_equal(pictures[0][:, :128], pictures[0][:, 128:]))
+
     def test_unused_oam_hidden_and_page_parity(self):
         for phase in (0, 1, 127):
             oam = layers.oam_frame(phase)
@@ -106,9 +147,9 @@ class LayerTests(unittest.TestCase):
             for i in range(9):
                 x, y, tile, attr = record[i * 4:i * 4 + 4]
                 position = -(offset % 32) + i * 32
-                self.assertEqual(y, 224 if position >= 256 or position + 32 <= 0 else layers.CLOUD_Y)
+                self.assertEqual(y, 224 if position >= 256 or position + 32 <= 0 else layers.CLOUD_Y + (6 if attr & 0x40 else 0))
                 self.assertEqual(tile, 204)
-                self.assertEqual(attr & 0xFE, 0x22)
+                self.assertEqual(attr & 0xBE, 0x22)
                 self.assertEqual(record[36 + (15 + i) // 4] >> ((15 + i) % 4 * 2) & 2, 2)
         with tempfile.TemporaryDirectory() as directory:
             source = self.copy_pack(directory)
