@@ -30,7 +30,7 @@ import sys
 from xml.sax.saxutils import escape
 
 sys.path.insert(0, os.path.dirname(__file__))
-from dq5map import Rom  # noqa: E402
+from dq5map import Rom, lorom  # noqa: E402
 from dq5spc import body, sequences, song_sets  # noqa: E402
 from dq5song import GATES, header, listing, step  # noqa: E402
 
@@ -84,6 +84,7 @@ class Voice:
         self.done, self.loops, self.stop_tick = False, 0, None
         self.last = None                  # 이어 붙일 수 있는 마지막 음(쉼 뒤면 None)
         self.strikes, self.hold = [], False  # KON 을 낸 (틱, 음 번호), 앞 음을 비율 00 으로 읽었는지
+        self.env, self.fine, self.slide, self.echo = None, 0, None, False
 
 
 def perform(seq, flag=0, loops=LOOPS, max_ticks=MAX_TICKS):
@@ -136,7 +137,9 @@ def _perform(seq, flag, loops, max_ticks):
                             v.last['len'] += dur
                     else:
                         v.last = {'tick': tick, 'len': dur, 'sound': sound_len(dur, v.gate), 'n': n + v.transpose,
-                                  'instrument': v.instrument, 'noise': v.noise}
+                                  'instrument': v.instrument, 'noise': v.noise, 'env': v.env, 'fine': v.fine,
+                                  'slide': v.slide}
+                        v.slide = None
                         v.notes.append(v.last)
                     v.wait = dur
                 elif b == 0xFF:
@@ -158,6 +161,16 @@ def _perform(seq, flag, loops, max_ticks):
                     v.gate = seq[v.pc + 1]
                 elif b == 0xEB:
                     tempos.append((tick, seq[v.pc + 1]))
+                elif b == 0xE2:
+                    v.env = None if seq[v.pc + 1] == 0xFF else seq[v.pc + 1]
+                elif b == 0xE9:
+                    a = seq[v.pc + 1]
+                    v.fine = a - 256 if a >= 0x80 else a
+                elif b == 0xFB:
+                    a = seq[v.pc + 1]
+                    v.slide = (a - 256 if a >= 0x80 else a, seq[v.pc + 2] or 0x100)
+                elif b in (0xFC, 0xFD):
+                    v.ctl.append((tick, 'echo', b == 0xFC))
                 elif b == 0xED:
                     v.ctl.append((tick, 'volume', seq[v.pc + 1]))
                 elif b == 0xEE:
@@ -218,6 +231,58 @@ def midi_pitch(note, tunes=None):
     return max(0, min(127, note['n'] + MIDI_BASE))
 
 
+# ---- 음높이 엔벨로프(E2)·미세 조정(E9)·미끄럼(FB) ----
+
+ENV_PTRS = 0x2BC663              # SPC 08D4: 엔벨로프 표 포인터(SPC 주소). 08D4~09DF 가 롬에 그대로 있음
+ENV_COUNT = 7                    # 시퀀스가 쓰는 표는 00~06
+BEND_RANGE = 12                  # MIDI 피치 벤드 ±12 반음(RPN 0)
+FINE_DIV = 128                   # 미세 음높이 128 = 1 반음
+
+
+def env_tables(rom):
+    """[[(틱, 미세 음높이)]] 의 원본 바이트. 표는 [되돌 자리][돌아갈 자리] 뒤 [미세 음높이][틱] 쌍, 80 이 끝."""
+    base = lorom(ENV_PTRS) - 0x08D4
+    out = []
+    for i in range(ENV_COUNT):
+        o = base + (rom.d[lorom(ENV_PTRS) + i * 2] | rom.d[lorom(ENV_PTRS) + i * 2 + 1] << 8)
+        out.append(bytes(rom.d[o:o + 0x60]))
+    return out
+
+
+def env_steps(table, length):
+    """[(음 시작에서의 틱, 미세 음높이)]. 읽는 자리가 「되돌 자리」에 닿으면 「돌아갈 자리」로 간다(1F04)."""
+    out, p, t, guard = [], 2, 0, 0
+    while t < length and guard < 4096:
+        guard += 1
+        if p == table[0]:
+            p = table[1]
+        if p + 1 >= len(table) or table[p] == 0x80:
+            break
+        f = table[p] - 256 if table[p] >= 0x80 else table[p]
+        out.append((t, f))
+        t += table[p + 1] or 0x100
+        p += 2
+    return out
+
+
+def bend_curve(note, envs):
+    """[(음 시작에서의 틱, 반음)] 소리 나는 동안의 음높이 차. 미세 음높이(8D, E9·E2 가 씀) 1 = 1/128 반음:
+    곡 0D 트랙 1(E2 04, 피치 3375)에서 표 값 v 마다 피치가 1.5v 씩 바뀌었다(12 → +18 = 0.092 반음)."""
+    length = note['sound']
+    env = env_steps(envs[note['env']], length) if note.get('env') is not None and note['env'] < len(envs) else []
+    out, last = [], None
+    for k in range(length):
+        e = [f for t, f in env if t <= k]
+        semi = (note.get('fine', 0) + (e[-1] if e else 0)) / FINE_DIV
+        if note.get('slide'):
+            st, tk = note['slide']
+            semi += st * min(k, tk) / tk
+        if semi != last:
+            out.append((k, semi))
+            last = semi
+    return out
+
+
 # ---- MIDI ----
 
 def _vlq(v):
@@ -239,23 +304,33 @@ def _track(events):
     return b'MTrk' + struct.pack('>I', len(data)) + bytes(data)
 
 
-def to_midi(perf, tunes, title):
+def _bend(ch, semi):
+    v = max(0, min(16383, 8192 + round(semi * 8192 / BEND_RANGE)))
+    return bytes([0xE0 | ch, v & 0x7F, v >> 7])
+
+
+def to_midi(perf, tunes, title, envs=(), beats=4):
     trks = []
     meta = [(0, b'\xff\x03' + _vlq(len(title.encode())) + title.encode())]
     for t, tempo in perf['tempo']:
         us = round(60_000_000 / max(tempo, 1))
         meta.append((t, b'\xff\x51\x03' + us.to_bytes(3, 'big')))
-    meta.append((0, b'\xff\x58\x04\x04\x02\x18\x08'))
+    meta.append((0, b'\xff\x58\x04' + bytes([beats]) + b'\x02\x18\x08'))
     trks.append(_track(meta))
     for i, tr in enumerate(perf['tracks']):
         ch = i if i < 9 else i + 1
         ev = []
         name = f'track {i}'
         ev.append((0, b'\xff\x03' + _vlq(len(name)) + name.encode()))
-        prog = None
+        # RPN 0: 피치 벤드 범위 ±BEND_RANGE 반음
+        ev += [(0, bytes([0xB0 | ch, 101, 0])), (0, bytes([0xB0 | ch, 100, 0])), (0, bytes([0xB0 | ch, 6, BEND_RANGE])),
+               (0, bytes([0xB0 | ch, 38, 0])), (0, bytes([0xB0 | ch, 91, 0]))]
+        prog, bent = None, False
         for c in tr['ctl']:
             if c[1] == 'volume':
                 ev.append((c[0], bytes([0xB0 | ch, 7, min(127, c[2] >> 1)])))
+            elif c[1] == 'echo':
+                ev.append((c[0], bytes([0xB0 | ch, 91, 100 if c[2] else 0])))
             else:
                 ev.append((c[0], bytes([0xB0 | ch, 10, max(0, min(127, 64 + c[2] // 2))])))
         for nt in tr['notes']:
@@ -264,10 +339,19 @@ def to_midi(perf, tunes, title):
                 ev.append((nt['tick'], bytes([0xC0 | ch, s & 0x7F])))
                 prog = s
             p = midi_pitch(nt, tunes)
+            curve = [] if nt['noise'] else bend_curve(nt, envs)
+            if bent and (not curve or curve[0] != (0, 0.0)):
+                ev.append((nt['tick'], _bend(ch, 0.0)))
+                bent = False
+            for k, semi in curve:
+                if k == 0 and semi == 0 and not bent:
+                    continue
+                ev.append((nt['tick'] + k, _bend(ch, semi)))
+                bent = semi != 0
             ev.append((nt['tick'], bytes([0x90 | ch, p, 100])))
             ev.append((nt['tick'] + nt['sound'], bytes([0x80 | ch, p, 0])))
-        # 같은 틱이면 끄기를 켜기보다 먼저
-        ev.sort(key=lambda e: (e[0], 0 if e[1][0] & 0xF0 == 0x80 else 1))
+        # 같은 틱이면 끄기 → 벤드·CC → 켜기
+        ev.sort(key=lambda e: (e[0], {0xF0: -1, 0x80: 0, 0xE0: 1, 0xB0: 1, 0xC0: 1}.get(e[1][0] & 0xF0, 2)))
         trks.append(_track(ev))
     return b'MThd' + struct.pack('>IHHH', 6, 1, len(trks), PPQ) + b''.join(trks)
 
@@ -316,9 +400,32 @@ def _note_xml(dur, pitch, tie_start, tie_stop):
     return ''.join(x)
 
 
-def to_musicxml(perf, tunes, title):
+def guess_meter(perf):
+    """(박, 마디 틱, 못갖춘마디 틱) 추정. 롬에 박자 정보가 없어, 길이 24틱 이상 음(잡음 빼고)의 길이를 마디 첫 박에 놓인
+    만큼 더한 비율 x 박 수로 3/4·4/4 를 견준다. 3/4 은 그 값이 1.3 이상이고 4/4 의 1.2배를 넘을 때만, 못갖춘마디는 0 보다
+    1.2배 넘게 나을 때만 고른다."""
+    notes = [nt for tr in perf['tracks'] for nt in tr['notes'] if not nt['noise'] and nt['len'] >= 24]
+    tot = sum(nt['len'] for nt in notes) or 1
+
+    def score(beats, bar, c):
+        return sum(nt['len'] for nt in notes if (nt['tick'] - c) % bar == 0) / tot * beats
+    best = {}
+    for beats, bar in ((3, 144), (4, 192)):
+        r0 = score(beats, bar, 0)
+        rc, c = max((score(beats, bar, c), c) for c in range(0, bar, 12))
+        best[beats] = (rc, c) if rc > 1.2 * r0 and rc > r0 else (r0, 0)
+    beats = 3 if best[3][0] >= 1.3 and best[3][0] > 1.2 * best[4][0] else 4
+    return beats, beats * PPQ, best[beats][1]
+
+
+def to_musicxml(perf, tunes, title, meter=None):
+    beats, bar, pickup = meter or (4, MEASURE, 0)
     end = perf['end']
-    measures = max(1, math.ceil(end / MEASURE))
+    bounds = ([0] if pickup else []) + list(range(pickup, max(end, 1) + bar, bar))
+    if bounds[-1] < end:
+        bounds.append(bounds[-1] + bar)
+    spans = [(a, b) for a, b in zip(bounds, bounds[1:])]
+    total = spans[-1][1]
     parts, plist = [], []
     tempo_at = {t: v for t, v in perf['tempo']}
     for i, tr in enumerate(perf['tracks']):
@@ -333,15 +440,15 @@ def to_musicxml(perf, tunes, title):
             nxt = nt['tick'] + ln
             segs.append((nt['tick'], ln, midi_pitch(nt, tunes)))
             pos = nxt
-        if pos < measures * MEASURE:
-            segs.append((pos, measures * MEASURE - pos, None))
+        if pos < total:
+            segs.append((pos, total - pos, None))
         xs = []
-        for m in range(measures):
-            a, b = m * MEASURE, (m + 1) * MEASURE
-            x = [f'<measure number="{m + 1}">']
+        for m, (a, b) in enumerate(spans):
+            num = m if pickup else m + 1
+            x = [f'<measure number="{num}"' + (' implicit="yes">' if pickup and m == 0 else '>')]
             if m == 0:
                 x.append(f'<attributes><divisions>{PPQ}</divisions><key><fifths>0</fifths></key>'
-                         '<time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef>'
+                         f'<time><beats>{beats}</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef>'
                          '</attributes>')
             if i == 0:
                 for t, v in sorted(tempo_at.items()):
@@ -365,6 +472,96 @@ def to_musicxml(perf, tunes, title):
             '"http://www.musicxml.org/dtds/partwise.dtd">\n'
             f'<score-partwise version="4.0"><work><work-title>{escape(title)}</work-title></work>'
             f'<part-list>{"".join(plist)}</part-list>{"".join(parts)}</score-partwise>\n')
+
+
+# ---- SVG(시간 비례 오선 악보) ----
+
+LETTER = [0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6]     # 반음 → 음이름 칸(C=0 … B=6)
+SVG_X, SVG_BARS, SVG_LINE = 1.0, 4, 8             # 1틱 = 1px, 한 줄 마디 수, 오선 간격
+
+
+def to_svg(perf, title, meter=None):
+    """마디선·음표 머리·올림표·기둥·꼬리를 그리고 음 길이를 가는 가로줄로 보이는 시간 비례 악보. 트랙마다 한 오선,
+    마디 SVG_BARS 개씩 줄을 바꾼다. 음 높이가 낮은 트랙(가운데 값 < 60)은 낮은음자리표."""
+    beats, bar, pickup = meter or (4, MEASURE, 0)
+    tracks = [tr for tr in perf['tracks']]
+    end = max(perf['end'], 1)
+    bounds = ([0] if pickup else []) + list(range(pickup, end + bar, bar))
+    if bounds[-1] < end:
+        bounds.append(bounds[-1] + bar)
+    spans = list(zip(bounds, bounds[1:]))
+    rows = [spans[i:i + SVG_BARS] for i in range(0, len(spans), SVG_BARS)]
+    staff_h, gap, left = SVG_LINE * 4, 46, 60
+    sys_h = len(tracks) * (staff_h + gap) + 24
+    width = left + int(bar * SVG_BARS * SVG_X) + 20
+    height = 50 + len(rows) * sys_h
+    out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" '
+           'font-family="sans-serif">', f'<rect width="{width}" height="{height}" fill="white"/>',
+           f'<text x="{left}" y="22" font-size="15">{escape(title)}</text>',
+           f'<text x="{left}" y="40" font-size="11" fill="#555">{beats}/4(추정) ♩={perf["tempo"][0][1]}  1px = 1틱</text>']
+    clefs = []
+    for tr in tracks:
+        ps = sorted(midi_pitch(nt) for nt in tr['notes'] if not nt['noise'])
+        clefs.append('F' if ps and ps[len(ps) // 2] < 60 else 'G')
+    for r, row in enumerate(rows):
+        y0 = 50 + r * sys_h
+        a0 = row[0][0]
+        for i, tr in enumerate(tracks):
+            top = y0 + i * (staff_h + gap) + 16
+            bottom = top + staff_h
+            x1 = left + (row[-1][1] - a0) * SVG_X
+            out.append(f'<text x="4" y="{top + 20}" font-size="10" fill="#555">t{i} {clefs[i]}</text>')
+            for k in range(5):
+                out.append(f'<line x1="{left}" y1="{top + k * SVG_LINE}" x2="{x1:.1f}" y2="{top + k * SVG_LINE}" '
+                           'stroke="#999" stroke-width="0.6"/>')
+            for a, b in row:
+                xa = left + (a - a0) * SVG_X
+                out.append(f'<line x1="{xa:.1f}" y1="{top}" x2="{xa:.1f}" y2="{bottom}" stroke="#333" stroke-width="0.8"/>')
+                if i == 0:
+                    num = bounds.index(a) + (0 if pickup else 1)
+                    out.append(f'<text x="{xa + 2:.1f}" y="{top - 4}" font-size="8" fill="#777">{num}</text>')
+            out.append(f'<line x1="{x1:.1f}" y1="{top}" x2="{x1:.1f}" y2="{bottom}" stroke="#333" stroke-width="0.8"/>')
+            lo_d = 4 * 7 + 2 if clefs[i] == 'G' else 2 * 7 + 4      # 아래 줄: E4 / G2
+            for nt in tr['notes']:
+                if not (a0 <= nt['tick'] < row[-1][1]):
+                    continue
+                x = left + (nt['tick'] - a0) * SVG_X
+                ln = min(nt['len'], row[-1][1] - nt['tick']) * SVG_X
+                if nt['noise']:
+                    yy = top + 2 * SVG_LINE
+                    out.append(f'<text x="{x - 3:.1f}" y="{yy + 3:.1f}" font-size="9">x</text>')
+                    continue
+                p = midi_pitch(nt)
+                d = (p // 12 - 1) * 7 + LETTER[p % 12]
+                yy = bottom - (d - lo_d) * SVG_LINE / 2
+                out.append(f'<line x1="{x:.1f}" y1="{yy:.1f}" x2="{x + ln:.1f}" y2="{yy:.1f}" stroke="#7aa6d8" stroke-width="2"/>')
+                for ly in range(1, 40):
+                    lyy = bottom + ly * SVG_LINE
+                    if lyy > yy + 0.1:
+                        break
+                    out.append(f'<line x1="{x - 6:.1f}" y1="{lyy}" x2="{x + 6:.1f}" y2="{lyy}" stroke="#333" stroke-width="0.6"/>')
+                for ly in range(1, 40):
+                    lyy = top - ly * SVG_LINE
+                    if lyy < yy - 0.1:
+                        break
+                    out.append(f'<line x1="{x - 6:.1f}" y1="{lyy}" x2="{x + 6:.1f}" y2="{lyy}" stroke="#333" stroke-width="0.6"/>')
+                fill = 'white' if nt['len'] >= 96 else 'black'
+                out.append(f'<ellipse cx="{x:.1f}" cy="{yy:.1f}" rx="4.4" ry="3.2" fill="{fill}" stroke="black" stroke-width="1" '
+                           f'transform="rotate(-20 {x:.1f} {yy:.1f})"/>')
+                if ALTER[p % 12]:
+                    out.append(f'<text x="{x - 13:.1f}" y="{yy + 4:.1f}" font-size="11">♯</text>')
+                if nt['len'] < 192:
+                    up = yy > top + 2 * SVG_LINE
+                    sx = x + 4 if up else x - 4
+                    sy = yy - 26 if up else yy + 26
+                    out.append(f'<line x1="{sx:.1f}" y1="{yy:.1f}" x2="{sx:.1f}" y2="{sy:.1f}" stroke="black" stroke-width="1"/>')
+                    flags = 3 if nt['len'] <= 6 else 2 if nt['len'] <= 12 else 1 if nt['len'] <= 24 else 0
+                    for f in range(flags):
+                        fy = sy + (f * 5 if up else -f * 5)
+                        out.append(f'<line x1="{sx:.1f}" y1="{fy:.1f}" x2="{sx + 7:.1f}" y2="{fy + (7 if up else -7):.1f}" '
+                                   'stroke="black" stroke-width="1.4"/>')
+    out.append('</svg>')
+    return '\n'.join(out) + '\n'
 
 
 # ---- KON 견주기 ----
@@ -413,6 +610,7 @@ def _same_instr(tr, t0, t1):
 def export(rom, out, only=None):
     seqs = {n: bytes(body(rom, a, ln)) for n, a, ln in sequences(rom)}
     made = []
+    envs = env_tables(rom)
     for n, x, stem, folder in targets(rom):
         if only and n not in only:
             continue
@@ -427,10 +625,14 @@ def export(rom, out, only=None):
                 '# 악기(F0 i) → 샘플: ' + ' '.join(f'{i}={s:02X}' for i, (s, _) in enumerate(tunes))]
         with open(os.path.join(d, stem + '.txt'), 'w', encoding='utf-8') as f:
             f.write('\n'.join(head + listing(seq)) + '\n')
+        meter = guess_meter(perf)
+        perf['meter'] = meter
         with open(os.path.join(d, stem + '.mid'), 'wb') as f:
-            f.write(to_midi(perf, tunes, title))
+            f.write(to_midi(perf, tunes, title, envs, meter[0]))
         with open(os.path.join(d, stem + '.musicxml'), 'w', encoding='utf-8') as f:
-            f.write(to_musicxml(perf, tunes, title))
+            f.write(to_musicxml(perf, tunes, title, meter))
+        with open(os.path.join(d, stem + '.svg'), 'w', encoding='utf-8') as f:
+            f.write(to_svg(perf, title, meter))
         made.append((n, x, stem, folder, perf))
     return made
 
@@ -458,9 +660,10 @@ def update_index(rom, out, made):
                      'sequence_bytes': ln, 'samples': [f'{s:02X}' for s in song_sets(rom)[n][2]], 'maps': []}
                 entries.append(e)
                 by[stem] = e
-            e['score'] = {'txt': stem + '.txt', 'mid': stem + '.mid', 'musicxml': stem + '.musicxml',
+            e['score'] = {'txt': stem + '.txt', 'mid': stem + '.mid', 'musicxml': stem + '.musicxml', 'svg': stem + '.svg',
                           'ticks': perf['end'], 'looped': perf['looped'],
-                          'notes': sum(len(t['notes']) for t in perf['tracks'])}
+                          'notes': sum(len(t['notes']) for t in perf['tracks']),
+                          'meter': f'{perf["meter"][0]}/4(추정)', 'pickup': perf['meter'][2]}
         entries.sort(key=lambda e: (int(e['sequence'], 16), -1 if e.get('variant') is None else int(e['variant'], 16)))
         with open(path, 'w', encoding='utf-8') as fh:
             json.dump(entries, fh, ensure_ascii=False, indent=1)
