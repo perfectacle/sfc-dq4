@@ -4,7 +4,7 @@
 
 SFC DQ5 엔진 분석. 시작점은 [handoff.md](handoff.md). 결과 문서: [dq5-map-format.md](docs/dq5-map-format.md), [dq5-field-format.md](docs/dq5-field-format.md), [dq5-text-format.md](docs/dq5-text-format.md), [dq5-data-format.md](docs/dq5-data-format.md), [dq5-graphics-format.md](docs/dq5-graphics-format.md).
 
-- **소리**: 곡 이름(사용자가 주면 들어 보기 페이지에 반영).
+- **소리**: 곡 이름(사용자가 주면 들어 보기 페이지에 반영), SPC 스크립트 연산 `03`·`04`·`11`~`17` 의 실측.
 - **일행 관리의 남은 것**: 신부를 고른 뒤 1F/08 에서 하인·신부가 (29,23) 앞에 멈춰 결혼식(1F/01)까지 이어지지 않는 까닭, 석상 뒤 칸 0 의 아내가 일행으로 돌아오는 곳, 레코드 `+22` 를 つよさ 창 칭호로 확인([dq5-data-format.md 「사람 동료 칸」](docs/dq5-data-format.md#사람-동료-칸-7e294a)).
 - **그래픽 내보내기의 남은 것**: 전투 연출을 입구 상태 없이 롬만으로 그리기(입구 상태 한 벌을 넣은 `dq5fxvm.py --clock` 은 139벌 중 135벌 같음, `0C`·`6F` 는 처리 도중 NMI 가 끼는 명령이 다름)·`3E` 의 `DDDC` 를 부르는 장면.
 - **텍스트의 남은 것**: 한글 넣기([dq5-hangul-format.md](docs/dq5-hangul-format.md)): 창 2바이트 부호를 여러 글자로(캔버스 빌리기 또는 BG3 타일 칸 넓히기, 두 길의 근거는 문서, 고르기는 사람 몫), 옮긴 레코드 자리 `7E:1ABC`~ 의 정적 후보 중 코드 뱅크 미실행 6,659곳(직접 피연산자 907곳), BG3 타일맵 후보 `7800` 을 마을·카지노·엔딩·다른 주문 연출에서 확인, `21BF.5` 를 켜는 곳.
