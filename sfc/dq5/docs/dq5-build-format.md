@@ -91,6 +91,7 @@ uv run --locked python sfc/dq5/tools/dq5build.py rom/dq5.sfc fromrom work/hangul
 | `dq5textwrite.py` | 보행 메시지 3,200개 재압축·색인·디코더 | `dq5text/1` 코드 목록 JSON |
 | `dq5eventwrite.py` | 이벤트 명령과 지정한 이벤트·번호 표 항목 | `dq5event/1` JSON |
 | `dq5npcwrite.py` | 기존 인물 슬롯 안의 명령 | `dq5npcscript/1` JSON |
+| `dq5npcrelocate.py` | 인물 스크립트 길이 변경·기본/대체 목록 재배치 | `dq5npcrelocate/1` JSON |
 
 ### 게임 데이터 표 `dq5tables/1`
 
@@ -400,6 +401,34 @@ MesenCE에서는 번호 표와 이벤트 표를 거쳐 `60:8000`의 플래그 �
 
 재현은 [스크립트 쓰기 일지](../journal/2026-10-26-53-scriptwrite.md)에 있습니다.
 
+### 인물 목록 재배치 `dq5npcrelocate/1`
+
+`sfc/dq5/tools/dq5npcrelocate.py`는 스크립트 길이를 바꾸고 인물 목록을 확장 뱅크로 옮깁니다. 인물 수·순서·등장 조건과 낮밤 스크립트 공유 관계를 유지합니다. 기존 슬롯 안에서만 바꾸는 `dq5npcwrite.py`와 달리, 뒤따르는 레코드의 주소도 다시 계산합니다.
+
+```sh
+uv run --locked python sfc/dq5/tools/dq5npcrelocate.py rom/dq5.sfc dump -o work/npc-lists.json
+uv run --locked python sfc/dq5/tools/dq5npcrelocate.py rom/dq5.sfc patch work/npc-lists.json \
+  -o work/npc-lists.dq5patch.json --report work/npc-layout.json
+uv run --locked python sfc/dq5/tools/dq5npcrelocate.py rom/dq5.sfc check
+```
+
+입력의 `format`은 `dq5npcrelocate/1`, `scripts`는 `{address, commands}` 배열입니다. `address`는 **원본 길이 바이트**의 CPU 주소 문자열(`05:A84F` 등)이고, `commands`는 `dq5npcscript/1`과 같은 명령 목록입니다. 입력에서 빠진 스크립트는 원본을 유지합니다. 빈 배열이면 내용을 바꾸지 않고 목록만 옮깁니다.
+
+- 새 스크립트는 1~255바이트이며, 바뀐 명령의 상대 분기를 새 주소에서 검사합니다. 명령 `04`의 절대 점프는 지원하지 않습니다.
+- 기본 `--base 32:8000`에는 그룹 포인터 54개와 기본 목록을, `--alt 33:8000`에는 대체 목록을 놓습니다. 두 목적지는 서로 다른 `30`~`3F` 뱅크여야 하고 각 덩어리는 한 뱅크 안에 들어가야 합니다. 최소 롬 크기는 2MB입니다.
+- 원본 639목록·2,483인물 레코드·1,034스크립트를 유지하면 기본 20,173바이트·대체 23,986바이트입니다. 기본 로더의 뱅크·그룹 포인터 주소, 대체 로더의 뱅크와 선택 표 296항목의 목록 주소를 고칩니다. 원본 영역을 고칠 때는 `orig`를 확인합니다.
+- `--report`에는 목록·인물·스크립트의 옛 주소→새 주소와 영역별 크기를 저장합니다. 코드 안의 임의 직접 참조는 자동으로 바꾸지 않습니다.
+- 패치는 원본 롬에서 만듭니다. 기존 슬롯을 고치는 패치와 합쳐도 옛 슬롯의 변경이 새 목록에 전파되지는 않으므로, 옮길 명령은 이 입력의 `commands`에 적습니다. 다른 도구와의 확장 영역 겹침은 빌더가 검사합니다.
+
+원본 왕복에서는 낮·밤 인물 3,474개와 스크립트를 비교했습니다. 게임에서 기본 맵 낮밤 692쌍과 대체 목록 2쌍, 합계 694쌍의 인물 표와 새 포인터가 일치했습니다(1,581슬롯·활성 포인터 649개). 실제 게임에서는 길이를 39바이트로 늘린 선실·기본 공유·대체 공유 스크립트 5건의 좌표·이동 상태·포인터를 확인했습니다([일지](../journal/2026-10-26-57-npc-relocate.md)).
+
+`MESENCE`를 설정하고 다음 명령으로 기본 맵의 낮밤 전수 비교와 긴 스크립트 실행을 재현합니다. `--all`을 빼면 대표 장면 8쌍만 비교합니다. 결과·덤프·시험 롬은 출력 폴더의 새 하위 폴더에 남습니다.
+
+```sh
+uv run --locked python sfc/dq5/tools/dq5npcrelocatecheck.py rom/dq5.sfc \
+  --state work/state/ship.mss --out work/npc-relocate-check --all --mutations --jobs 6
+```
+
 ## 빈 자리 지도
 
 ### 원래 롬
@@ -509,5 +538,7 @@ MesenCE에서는 번호 표와 이벤트 표를 거쳐 `60:8000`의 플래그 �
 
 ## 남은 것
 
-- 쓰기 도구가 아직 없는 것: 필드 표 항목 증설·재배치, 인물 목록의 가변 길이 재배치, 대사 대량 넣기, 성장 표(`23:EB50`)·조우 구역 레코드(`23:96F3`)·상점 목록.
-- `dq5tables.py` 의 물건·주문·피해량·동료 표 쓰기는 읽기 도구와 값을 대조했을 뿐, 고친 롬을 게임에서 돌려 보지는 않았습니다.
+- 필드 표 항목 증설·재배치, 인물 수·순서·등장 조건 편집과 새 목록 추가.
+- 문자열 번역 편집·새 한글 글꼴 대량 삽입, 전투 메시지·창·이름 표 쓰기.
+- 성장·조우 레코드 수와 상점 품목 수 증설, 필드 조우 격자·실내 구역 연결·고정 무리·전투 이벤트 무리 쓰기.
+- `dq5tables.py`의 물건 가격 쓰기는 상점에서 확인했습니다. 가격 외 물건 필드·주문·피해량·동료 표 쓰기는 수정 롬의 게임 실측이 남아 있습니다.
