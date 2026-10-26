@@ -10,7 +10,7 @@
 JSON format 은 dq5encounter/1.
   field_grids   index 0~4(dq5encounter.FIELD_GRIDS 순서), rows 는 17칸 줄의 배열(줄 수는 원래대로). 값은 구역 0~84
   maps          map "BC/BD"(16진, 그룹 00~35 와 23:FDD6 의 50~54), areas 는 $1948 = 0·1·2 일 때의 구역 셋
-                (0~84, 255 = 조우 없음). patch --areas N 이면 구역 0~N-1(dq5progresswrite.py 로 더한 구역)
+                (0~84, 255 = 조우 없음). patch --progress 패치 목록을 주면 그 패치가 더한 구역까지
   fixed_groups  index 0~8, members 는 1~3개의 {monster 0~235, count_code 0~14}
   event_groups  index 0~63, flags 첫 바이트(bit0-1 곡 0~2, bit4~7. 실측 안 된 bit2·3 은 받지 않음),
                 members 는 1~4개의 {monster 0~235, count 1~9}
@@ -22,7 +22,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from dq5encounter import (AREA_COUNT, EVENT_COUNT, EVENT_GROUPS, EVENT_SIZE, FIELD_GRIDS, FIELD_WIDTH,  # noqa: E402
+from dq5encounter import (AREA_COUNT, AREA_SIZE, EVENT_COUNT, EVENT_GROUPS, EVENT_SIZE, FIELD_GRIDS, FIELD_WIDTH,  # noqa: E402
                           FIXED, FIXED_COUNT, GROUPS, MAP_TABLE)
 from dq5map import Rom, lorom  # noqa: E402
 
@@ -224,6 +224,19 @@ def edits(rom, doc, areas=AREA_COUNT):
     return out
 
 
+def areas_in(progress):
+    """dq5progresswrite.py 패치 목록(dq5patch/1)에서 구역 수. 구역 표를 옮기지 않았으면 원래 수."""
+    tables = [w for w in progress.get('writes', []) if w.get('note') == 'area table relocated']
+    if len(tables) > 1:
+        raise ValueError('구역 표 쓰기가 둘 이상인 패치 목록')
+    if not tables:
+        return AREA_COUNT
+    size = len(bytes.fromhex(tables[0]['hex']))
+    if size % AREA_SIZE:
+        raise ValueError('구역 표 쓰기의 길이가 22 의 배수가 아님')
+    return size // AREA_SIZE
+
+
 def patch(rom, doc, name='encounter', areas=AREA_COUNT):
     return {'format': 'dq5patch/1', 'name': name, 'writes': [
         {'at': f'{addr >> 16:02X}:{addr & 0xFFFF:04X}', 'hex': new.hex(' '), 'orig': old.hex(' '), 'note': note}
@@ -248,8 +261,7 @@ def main():
     write.add_argument('source')
     write.add_argument('-o', '--out', required=True)
     write.add_argument('--name', default='encounter')
-    write.add_argument('--areas', type=int, default=AREA_COUNT,
-                       help='구역 수. dq5progresswrite.py 로 구역을 더했으면 그 수(85~255). 실제로 더한 수인지는 보지 않음')
+    write.add_argument('--progress', help='dq5progresswrite.py 패치 목록. 구역을 더했으면 그 구역 번호를 받음')
     sub.add_parser('check')
     args = parser.parse_args()
     try:
@@ -261,7 +273,12 @@ def main():
             result = dump(rom)
         else:
             with open(args.source, encoding='utf-8') as f:
-                result = patch(rom, json.load(f), args.name, args.areas)
+                doc = json.load(f)
+            areas = AREA_COUNT
+            if args.progress:
+                with open(args.progress, encoding='utf-8') as f:
+                    areas = areas_in(json.load(f))
+            result = patch(rom, doc, args.name, areas)
         os.makedirs(os.path.dirname(args.out) or '.', exist_ok=True)
         with open(args.out, 'w', encoding='utf-8') as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
