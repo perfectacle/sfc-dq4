@@ -12,6 +12,7 @@
 --   SLOT=SS       대화 진입 때 A 를 이 슬롯으로 바꿈(talk.lua 와 같음)
 --   PIN=SS        매 프레임 그 슬롯 인물을 주인공이 보는 쪽($3D) 한 칸에 둔다. SLOT 과 같이 써서 아무 인물에게 말 건다.
 --                 PIN=auto 면 비어 있지 않은 첫 슬롯을 골라 SLOT 도 그 슬롯으로
+--   PINONCE=1     첫 대화 진입 뒤로는 PIN·SLOT 을 풀어, 말 건 뒤 이어지는 연출에서 일행이 걷게 둔다
 --   TID=NNN       대화 번호를 바꿈. EV=NN 이벤트 1C:$AD5F 의 A 를 바꿈
 --   PRGPOKE="71A2D=EAEAEA"  3번째 프레임에 PRG ROM(iNES 머리 뺀 오프셋)에 쓸 바이트들. 롬 파일은 그대로.
 --                 이벤트 안의 특수 전투 BRK 01 8F 를 EA 로 바꿔 전투를 건너뛸 때 쓴다
@@ -63,6 +64,7 @@ end)
 hook(0x98F8, 0x558F8, function()
   if slot then emu.setState({["cpu.a"] = slot}) end
   add(string.format("talk %02X", emu.getState()["cpu.a"]))
+  if os.getenv("PINONCE") then pin, slot, auto = nil, nil, false end
 end)
 hook(0x9942, 0x55942, function()
   if tid then emu.write(0x00, tid & 0xFF, mem); emu.write(0x01, tid >> 8, mem) end

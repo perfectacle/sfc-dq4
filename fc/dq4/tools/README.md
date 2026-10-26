@@ -88,7 +88,7 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 | `dq4story.py rom events\|jobs READY OUT\|run JOBS RUNS [-j N]\|confirm RUNS... [--json OUT]\|story [N]` | DQ4 이야기 진행. `events` 블록 이벤트 루틴 138개가 보는 것·하는 것, `jobs` [추정] 플래그를 켜는 곳마다 실험 시나리오, `run` 시나리오를 MesenCE 로(`MESENCE`·`LIBDIR`), `confirm` 실행 기록에서 비트마다 켜고 끈 장면, `story` 장마다 진행 순서 → 플래그. 뜻 표는 `dq4flags.py`. [dq4-story-format.md](../docs/dq4-story-format.md) |
 | `lua/eventwalk.lua` | FC: 세이브스테이트에서 좌표 목표(`x=NN`/`y=NN`)와 버튼으로 걷고 `reset:1` 로 리셋. `POKEAT` 프레임별 RAM 쓰기, `PRGPOKE` 메모리의 PRG ROM 바꾸기(롬 파일은 그대로). 프로브의 `DRIVER` 로도 씀. 끝나면 `walk.txt`·`end.*` |
 | `lua/eventflags.lua` | FC: 이벤트 플래그 영역(`$627B`~`$62EE`, `RANGE`) 읽기·쓰기를 PC·뱅크·BRK 주소와 함께 `flags.txt` 로. `FROM`, `MAXF` |
-| `lua/flagsweep.lua` | FC: 플래그 영역·일행 자리·`$618E` 쓰기(쓴 PC, BRK 자리, 블록 슬롯)와 메시지·대화 번호·이벤트·전투·맵 바뀜을 `sweep.txt` 로. `PIN`(인물을 주인공 앞에 붙임, `auto`)·`SLOT`·`TID`·`EV`·`PRGPOKE`(메모리상 PRG 쓰기). 드라이버는 `warp.lua` 등 |
+| `lua/flagsweep.lua` | FC: 플래그 영역·일행 자리·`$618E` 쓰기(쓴 PC, BRK 자리, 블록 슬롯)와 메시지·대화 번호·이벤트·전투·맵 바뀜을 `sweep.txt` 로. `PIN`(인물을 주인공 앞에 붙임, `auto`)·`PINONCE`(첫 대화 뒤 풂)·`SLOT`·`TID`·`EV`·`PRGPOKE`(메모리상 PRG 쓰기). 드라이버는 `warp.lua` 등 |
 | `lua/npcbits.lua` | FC: 인물 표 `$70E0` 를 매 프레임 `OR`/`AND` 로 바꾸고 OAM 변화·슬롯 자리·`SHOTS` 화면을 `npcbits.txt` 로 |
 | `dq4debug.py rom unrun\|find\|brk COVER...` | DQ4 미실행 코드 찾기. `cover.lua` 기록 여러 개를 합쳐 실행된 명령에서 닿는데 안 돈 코드 덩어리(`unrun`), 패드 2·`$4017`·디버그 스위치 `$C000` 읽기(`find`), 부르는 곳 없는 BRK 함수(`brk`). [fc/dq4/docs/dq4-debug.md](../docs/dq4-debug.md) |
 | `lua/debugpad.lua` | FC: 입력 드라이버 앞에 끼워 PRG 롬 메모리를 덮어쓰고(`ROMPATCH`, 예: `3C000=7F;7C000=7F`), 패드 2 를 흉내 내고(`PAD2`, `$15` 값), 바뀐 RAM 을 프레임마다 `debugpad.txt` 로(`LOGW`). 다른 프로브의 `DRIVER` 로 쓸 때는 `PAD_DRIVER` |
