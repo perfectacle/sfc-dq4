@@ -12,6 +12,7 @@ nds/dq4/tables/kr-font.tsv(일본어 코드 → 한글 음절)로 바꿔 읽는�
   python nds/dq4/tools/ndstext.py dump FILE.mpt [--kr]          메시지 번호와 문자열
   python nds/dq4/tools/ndstext.py names JPROOT KRROOT          이름 표(b1000000~b1007000)를 일본어·영어·한글로
   python nds/dq4/tools/ndstext.py stats ROOT                   언어별 파일·문자열 수, 표지 통계
+  python nds/dq4/tools/ndstext.py forms ROOT [변수 번호]        언어별 `%a` 꼴(앞 두 자리) 횟수와 쓰는 변수, 꼴마다 예문 하나
   python nds/dq4/tools/ndstext.py glossary JPROOT KRROOT FCROM  명칭 대조표(마크다운). FC 이름은 dq4 트랙의 dq4data.py 로 읽는다
   python nds/dq4/tools/ndstext.py talk JPROOT [장] [--kr KRROOT] 동료 대화 표(PARAM/param_player_talk<장>.dat) 레코드와 문장
   python nds/dq4/tools/ndstext.py sjis JPROOT [KRROOT] [--kanji]  arm9.bin·오버레이의 Shift_JIS 문자열과 그것을 가리키는 포인터
@@ -182,6 +183,27 @@ def cmd_stats(root):
     print(' '.join(f'{k}:{v}' for k, v in tags.most_common(20)))
 
 
+VAR = re.compile(r'%a(\d\d)(\d\d)(\d)')
+
+
+def cmd_forms(root, var=None):
+    """`%a` 앞 두 자리(꼴)를 언어별로 센다. 꼴이 이름 표의 관사·단복수 칸을 고른다는 추정의 근거."""
+    base = os.path.join(root, 'data', 'data', 'MESS')
+    for lang in sorted(os.listdir(base)):
+        forms, users, example = collections.Counter(), collections.defaultdict(collections.Counter), {}
+        for f in sorted(os.listdir(os.path.join(base, lang))):
+            for num, t in read(os.path.join(base, lang, f), full=True):
+                for m in VAR.finditer(t):
+                    if var is not None and int(m.group(2)) != var:
+                        continue
+                    forms[m.group(1)] += 1
+                    users[m.group(1)][int(m.group(2))] += 1
+                    example.setdefault(m.group(1), (num, t[max(0, m.start() - 20):m.end() + 20].replace('\n', '/')))
+        for k in sorted(forms):
+            top = ' '.join(f'{v}:{c}' for v, c in users[k].most_common(6))
+            print(f'{lang}\t{k}\t{forms[k]}\t{top}\t{example[k][0]}\t{example[k][1]}')
+
+
 KANA = re.compile('[\u3040-\u30ff]')
 FULL = re.compile('@?[\u3000-\u303f\u4e00-\u9fff\uff01-\uff5e]+')
 
@@ -273,6 +295,8 @@ def main(argv):
         cmd_sjis(rest[0], rest[1] if len(rest) > 1 else None, '--kanji' in argv)
     elif argv[0] == 'stats':
         cmd_stats(argv[1])
+    elif argv[0] == 'forms':
+        cmd_forms(argv[1], int(argv[2]) if len(argv) > 2 else None)
     else:
         raise SystemExit(__doc__)
 

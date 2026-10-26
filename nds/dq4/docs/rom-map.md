@@ -124,6 +124,36 @@ uv run --locked python nds/dq4/tools/ndstext.py sjis work/nds/jp work/nds/kr --k
 - `fieldsymbol.dat`: 스크립트 명령 `0xBE`(필드로 나가기)의 첫 인자로 쓰이는 15가지가 모두 이 목록에 있고, 그 스크립트의 맵이 있는 장소입니다(`caf1` 10 バトランド, `cbf3` 32 サントハイムの城, `mqout` 59 ロザリーヒル). [script-format.md](script-format.md)
 - `soundlist.dat` 의 SE: 스크립트 명령 `0x62`(효과음)의 인자 305·309·311 이 `階段`·`扉（大）`·`扉（岩・石など）` 와 번호가 같습니다. 글자 효과음 301~303 은 메시지 창 코드의 상수와 같습니다([text-format.md](text-format.md#끝-표지-cn)). BGM 번호는 SDAT 의 시퀀스 번호와 같습니다. SDAT 이름표의 `SND_BGM_*` 번호와 2~49 가 모두 맞고, 1 `序曲` 만 스트림(STRM)입니다([sound-format.md](sound-format.md#곡-목록)).
 
+## PARAM 파일
+
+`data/data/PARAM/` 의 450개입니다. 모두 머리 4바이트 + 고정 길이 레코드이고, 머리 값은 같은 형식의 파일끼리 같습니다(형식 표지로 보임). 게임이 이름으로 여는 것은 `param_player_*` 와 `param_item_%s` 뿐이고, `param_map_*`·`param_monster_monster` 는 같은 내용이 `arm9.bin`·오버레이에 들어 있어 그 사본을 씁니다([param-format.md](param-format.md#맵-설정-표arm9-사본)).
+
+| 파일 | 수 | 크기 | 머리 | 레코드 | 뜻 | 문서 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `param_item_<맵>` | 417 | 28~1,060 | `0xBC32` | 24 | 맵의 얻는 물건 | [param-format.md](param-format.md#얻는-물건-표) |
+| `param_map_common_list` | 1 | 24,244 | `0xBC32` | 24 × 1,010 | 얻는 물건 모음(게임이 안 읽음) | [param-format.md](param-format.md#맵-설정-표arm9-사본) |
+| `param_map_common_param` | 1 | 1,180 | `0x3580` | 24 × 49 | 조사하는 물체 종류별 메시지·효과음 | 〃 |
+| `param_map_field_symbol` | 1 | 1,372 | `0x18C0` | 12 × 114 | 필드 기호(마을·동굴·팻말) | 〃 |
+| `param_map_floor` | 1 | 22,852 | `0x3EAD8` | 42 × 544 | 맵 정보(곡, 전투 배경, 속성 비트) | 〃 |
+| `param_map_map` | 1 | 2,404 | `0x27C` | 12 × 200 | 던전 조우 구역 | 〃 |
+| `param_map_tile1`~`3`, `seatile` | 4 | 260 | `0x18C` | 16×16 | 필드 조우 구역 지도(장별), 바다 구역 | 〃 |
+| `param_map_gottile`, `yamitile` | 2 | 20, 13 | `0x18C` | 4×4, 3×3 | 필드 1·闇の世界 조우 구역 | 〃 |
+| `param_map_correct` | 1 | 6,484 | `0x12F2` | 12 × 540 | 맵·시간대별 조명 번호 | 〃 |
+| `param_map_backcolor` | 1 | 424 | `0x36D14` | 28 × 15 | 배경 꼭짓점 색 8벌 | 〃 |
+| `param_map_fog` | 1 | 44 | `0x8AD6` | 20 × 2 | 안개 | 〃 |
+| `param_map_clut` | 1 | 244 | `0x114C` | 16 × 15 | 색 보정 R·G·B 배율 | 〃 |
+| `param_map_battle` | 1 | 2,052 | `0x2F4` | 16 × 128 | 전투 배경 이름별 색 | 〃 |
+| `param_map_vehicle` | 1 | 700 | `0x2700` | 24 × 29 | 마을별 탈것 자리 | 〃 |
+| `param_map_shop_first`·`second` | 2 | 3,956, 6,244 | `0x1A` | 208 | 가게 | [param-format.md](param-format.md#가게-표) |
+| `param_map_medal` | 1 | 44 | `0x1A` | 4 × 10 | メダル 경품 | [param-format.md](param-format.md#메달-경품) |
+| `param_monster_monster` | 1 | 18,904 | `0x9E3460` | 60 × 315 | 몬스터 | [param-format.md](param-format.md#몬스터-표) |
+| `param_player_talk1`~`6` | 6 | 5,064~215,516 | `0x0E7C60` | 44 | 동료 대화 | [param-format.md](param-format.md#동료-대화-표) |
+| `param_player_event1`~`4` | 4 | 53,824~79,252 | `0xEA9C` | 156 | 진행도 프리셋 | [debug.md](debug.md) |
+| `param_player_flag` | 1 | 5,556 | `0x16B9A8` | 16 | 프리셋 이야기 플래그 | [debug.md](debug.md) |
+| `param_player_fukuro1` | 1 | 56,912 | `0x2CE0284` | 164 × 347 | 프리셋 주머니 | [param-format.md](param-format.md#param_player_fukuro1--프리셋-주머니) |
+
+`arm9.bin` 에는 롬에 없는 `data/param/param_monster_anim.dat` 이름도 있습니다.
+
 ## 남은 것
 
-- `PARAM/*.dat` 는 동료 대화·몬스터·가게·メダル·얻는 물건 표까지([param-format.md](param-format.md)), 나머지 파일은 남음. `SCRIPT/*.bin` 은 [script-format.md](script-format.md).
+- `PARAM` 의 맵 설정 표 세부(맵 속성 비트 대부분, 필드 기호 자리 단위, 탈것 자리를 쓰는 때, 전투 배경 색의 쓰임)는 [param-format.md](param-format.md#남은-것맵-설정-표) 에 남음. `SCRIPT/*.bin` 은 [script-format.md](script-format.md).
