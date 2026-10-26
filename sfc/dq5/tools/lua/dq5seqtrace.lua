@@ -1,5 +1,5 @@
 -- DQ5: 세이브스테이트 STATE 에서 SEQ 입력(wait:40,a:4,up+b:3,…)을 재생하며 기록한다. 드라이버 없이 혼자 돈다.
--- WR="7E36EB=4D;…" 는 처음 WRN(기본 3) 프레임 동안 매 프레임 쓴다.
+-- WR="7E36EB=4D;…" 는 처음 WRN(기본 3) 프레임 동안 매 프레임 쓴다. ROMPATCH="파일 오프셋=바이트;…" 는 첫 프레임에 롬을 덮는다.
 -- HOOK="248BAF,…" 실행 때 프레임·A·X·Y·S 와 스택 24바이트, WLOG="이름=7E2199;…" 값이 바뀐 프레임을 trc.txt 에.
 -- LO·HI(16진)가 있으면 FROM~TO 프레임 동안 그 범위의 실행을 순서대로(CAP 줄까지) trc.txt 에, 커버리지를 cover.txt 에.
 -- SAVEAT 프레임에 세이브스테이트 SAVE 와 save.png, SHOTS="300,600" 프레임에 sNNN.png.
@@ -10,6 +10,8 @@ local m = emu.memType.snesMemory
 local wr = {}
 for a, v in string.gmatch(os.getenv("WR") or "", "(%x+)=(%x+)") do wr[#wr + 1] = {tonumber(a, 16), tonumber(v, 16)} end
 local wrn = tonumber(os.getenv("WRN") or "3")
+local patches = {}
+for off, hex in string.gmatch(os.getenv("ROMPATCH") or "", "(%x+)=(%x+)") do patches[#patches + 1] = {tonumber(off, 16), hex} end
 local steps = {}
 for tok in string.gmatch(os.getenv("SEQ") or "", "[^,]+") do
   local b, f = tok:match("([%w+]+):(%d+)")
@@ -60,6 +62,13 @@ emu.addEventCallback(function()
     if last[e[1]] ~= v then last[e[1]] = v; ch[#ch + 1] = string.format("%s=%02X", e[1], v) end
   end
   if #ch > 0 then out[#out + 1] = string.format("f%d %s", n, table.concat(ch, " ")) end
+  if n == 1 then
+    for _, p in ipairs(patches) do
+      for k = 0, #p[2] // 2 - 1 do
+        emu.write(p[1] + k, tonumber(p[2]:sub(k * 2 + 1, k * 2 + 2), 16), emu.memType.snesPrgRom)
+      end
+    end
+  end
   if n <= wrn then for _, e in ipairs(wr) do emu.write(e[1], e[2], m) end end
   if lo and hi then
     if n == from then cb = emu.addMemoryCallback(onExec, emu.callbackType.exec, lo, hi) end
