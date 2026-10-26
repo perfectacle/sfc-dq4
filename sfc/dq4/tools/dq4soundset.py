@@ -6,6 +6,7 @@ dq4soundbank.build_bank 가 그 안으로 샘플을 줄인 뒤 dq4soundport 로 
 
   uv run --locked python sfc/dq4/tools/dq4soundset.py --base 롬 --assets ../sfc-dq4-assets \
     --song 06=0E --song 02=05 --song 17=1E --stream 17=9000 --out work/sound/set/set.sfc [--preview 06] [--map-fades]
+    [--budget 06=15967 ...]
 """
 import argparse
 import json
@@ -66,9 +67,14 @@ def transfer_plan(first_tick, notes, sizes, pre_bytes):
 
 
 def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_fades=False, preview=None,
-          stream=None):
-    """stream 은 {곡 자리: 곡 앞 샘플 바이트 상한}. 그 곡은 샘플 일부를 곡이 울리는 동안 보낸다(transfer_plan)."""
+          stream=None, budgets=None):
+    """stream 은 {곡 자리: 곡 앞 샘플 바이트 상한}. 그 곡은 샘플 일부를 곡이 울리는 동안 보낸다(transfer_plan).
+
+    budgets 는 {곡 자리: 샘플 예산 바이트}. 주면 시퀀스 크기로 정한 예산 대신 이 값으로 샘플을 줄인다. 시퀀스가
+    작아져도 청취 승인한 샘플(줄이기 결과)을 그대로 두려면 그때의 예산을 준다. SPC 예산 검사는 install 이 그대로 한다.
+    """
     stream = stream or {}
+    budgets = budgets or {}
     data = bytes(base)
     records = patch.read_sets(data)
     if len({slot for slot, _ in songs}) != len(songs):
@@ -85,7 +91,7 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
     # 표는 모든 곡을 넣은 뒤의 길이로 늘어나므로, 곡마다 예산에 전체 증가분을 쓴다.
     growth = sum(2 + slots - len(records[slot]) for slot, _, _, _, _, slots in plans)
     for slot, ident, path, score, sequence_size, _ in plans:
-        budget = patch.sample_budget(data, slot, sequence_size + MARGIN, extra_table=max(0, growth))
+        budget = budgets.get(slot) or patch.sample_budget(data, slot, sequence_size + MARGIN, extra_table=max(0, growth))
         found, program_map, bank_report = bank.build_bank(score, assets, start_id=next_id, max_rate=max_rate,
                                                           cache_dir=cache_dir, budget=budget, max_samples=max_samples)
         conversion = port.convert(score, program_map=program_map)
@@ -122,6 +128,8 @@ def main():
     ap.add_argument('--max-samples', type=int, default=14)
     ap.add_argument('--map-fades', action='store_true')
     ap.add_argument('--preview', type=lambda x: int(x, 16))
+    ap.add_argument('--budget', action='append', default=[], metavar='DQ5_SLOT=BYTES',
+                    help='sample budget for that song instead of the one computed from its sequence size')
     ap.add_argument('--stream', action='append', default=[], metavar='DQ5_SLOT=PRE_BYTES',
                     help='send only the first samples (up to PRE_BYTES) before the song starts, the rest while it plays')
     args = ap.parse_args()
@@ -131,8 +139,10 @@ def main():
         songs.append((int(slot, 16), ident))
     base = args.base.read_bytes()
     stream = {int(slot, 16): int(cap) for slot, cap in (value.split('=', 1) for value in args.stream)}
+    budgets = {int(slot, 16): int(value) for slot, value in (item.split('=', 1) for item in args.budget)}
     rom, report = build(base, args.assets, songs, cache_dir=args.out.parent / 'brr-cache', max_rate=args.max_rate,
-                        max_samples=args.max_samples, map_fades=args.map_fades, preview=args.preview, stream=stream)
+                        max_samples=args.max_samples, map_fades=args.map_fades, preview=args.preview, stream=stream,
+                        budgets=budgets)
     from dq5build import make_ips
     from kr_patch import ips
     patch_bytes = make_ips(base, rom)
