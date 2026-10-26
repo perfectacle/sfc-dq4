@@ -9,6 +9,8 @@ dependencies = [
   # nds/dq4/tools/ndskr.py draft 의 행렬 계산(툴킷이 이미 끌어오는 버전과 같다).
   "numpy",
   "pillow",
+  # fc/dq4/tools/dq4sound.py export 가 MusicXML 악보를 SVG 로 그린다.
+  "verovio",
 ]
 
 [tool.uv]

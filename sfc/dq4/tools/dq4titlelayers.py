@@ -153,10 +153,7 @@ def glyph_mask():
 
 
 def protected_glyph_mask():
-    mask = glyph_mask()
-    # The ornament tail shares tiles with the castle and must pass behind its clouds.
-    ImageDraw.Draw(mask).rectangle((176, 176, 255, 223), fill=0)
-    return mask
+    return glyph_mask()
 
 
 def foreground():
@@ -166,6 +163,10 @@ def foreground():
     # Keep the cloud bank attached to the castle when the front cloud drifts away.
     ImageDraw.Draw(mask).polygon([(185,180),(190,178),(196,174),(204,173),(211,175),(218,171),(226,169),(233,172),(240,170),(248,172),(255,174),(255,185),(251,185),(248,189),(243,188),(239,192),(234,191),(230,194),(225,192),(221,195),(216,194),(211,197),(206,196),(201,199),(196,196),(191,197),(187,194),(182,194),(180,190),(183,187)], fill=255)
     ImageDraw.Draw(mask).rectangle((180, 185, 207, 223), fill=0)
+    # Priority is per 8x8 tile, so castle pixels sharing a glyph tile would rise with the glyph.
+    glyphs = np.array(glyph_mask()) > 0
+    glyph_tiles = np.repeat(np.repeat(glyphs.reshape(28, 8, 32, 8).any(axis=(1, 3)), 8, axis=0), 8, axis=1)
+    mask = Image.fromarray(np.where((np.array(mask) > 0) & (~glyph_tiles | glyphs), 255, 0).astype(np.uint8), 'L')
     source = np.array(original)
     pixels = np.where(np.array(mask) > 0, np.where(source == 0, 16, source), 0).astype(np.uint8)
     palette = np.array(original.getpalette()[:384], dtype=np.uint8).reshape(128, 3)

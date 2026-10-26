@@ -8,6 +8,5 @@ FC DQ4(Rev A) 원작 데이터 분석. 이식할 데이터가 어디에 어떤 �
 
 - **이벤트·플래그**: [추정]으로 남은 플래그 11개(부르는 곳 없는 대화 호출 루틴 3, `$6291` bit4, 인물 블록 3, `$629A` bit0, `1B`·`1A` 의 3, [dq4-story-format.md](docs/dq4-story-format.md#남은-것)), `30/01` 목록 `1C:$9469` 슬롯 06 을 깨우는 곳, 맵 이벤트 줄 3·4·5·7·B(대화 `00F`·`010` 이 메시지 `078E` 뒤로 가지 않음), 1D 이벤트 `05` `06` `0B` `10` `21` 의 화면, 1C 이벤트 `2B`(마지막 전투 뒤), `$618E` bit2·3([dq4-save-format.md](docs/dq4-save-format.md)).
 - **동료 AI·표**: 회복 `13:$AB92` 비교 규칙을 전투로(레코드 HP 를 낮춰도 회복 평가가 불리지 않음), `13:$AC63`·보조 주문 문턱, 갑옷 단계 `BRK 22 B3` 의 숨결 감소, `$8D9A` bit5-0(`12:$9587`), `$618E` bit6 에서 레코드 8 레벨업([dq4-data-format.md](docs/dq4-data-format.md)).
-- **상점·조우**: 뱅크 코드가 켜는 장면 비트의 앞 조건을 뽑아 앞뒤 관계 늘리기(지금은 대화 스크립트 4쌍)([dq4-shop-format.md](docs/dq4-shop-format.md#남은-것)).
-- **소리**: 탈것 곡 `09`·`13` 의 실제 장면, 곡 `19` 를 부르는 곳, 5장 필드 곡을 고르는 x3 `2B`/`62 63 41` 의 뜻, `$6BF9` 를 읽는 곳, 곡 이름을 nds 곡 표와 대조, MIDI 에 엔벨로프·음량 담기, WAV·NSF(약 200MB 라 보류)([dq4-sound-format.md](docs/dq4-sound-format.md)).
-- **원작 그림**: 자리 표시로 남은 24그룹의 진짜 이름(롬에 더 없음, NDS 지명과 필드 자리 대조), 메시지 `0461`「てんくうのとう」를 내는 그룹, テンペ 이벤트 `39`(`1D:$A6C3`)에서 일행 칸을 숨기는 정상 경로([dq4-fcgfx.md](docs/dq4-fcgfx.md#남은-것), [dq4-fcsprite-format.md](docs/dq4-fcsprite-format.md#남은-것)).
+- **소리**: `x3 62 63 41` 의 조건 `41` 이 죽은 동료를 빼는지, 장 끝 연출의 `1A:$806E` 기다림 실측, NDS 이름을 못 정한 징글 11곡, 오선 악보의 박자(되풀이 길이로 추정)·PDF([dq4-sound-format.md](docs/dq4-sound-format.md#남은-것)).
+- **원작 그림**: `2C`(てんくうのとう) 입장 이벤트 `81` 의 장비 검사를 장비를 갖춘 상태로 실측, テンペ かご 장면을 셋 일행(칸 2 를 기다리는 갈래)으로([dq4-fcgfx.md](docs/dq4-fcgfx.md#남은-것), [dq4-fcsprite-format.md](docs/dq4-fcsprite-format.md#남은-것)).
