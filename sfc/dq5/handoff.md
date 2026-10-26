@@ -26,7 +26,7 @@ git worktree list
 
 `dq5learnwrite.py`와 실측 도구 `dq5learncheck.py`로 마쳤습니다([일지 61](journal/2026-10-26-61-learnwrite.md), [입력 형식](docs/dq5-data-format.md#주문-습득인물별-주문-목록-쓰기)). 원본 53종 쓰기 0개, 합성 테스트 5개, 레벨업 습득·필드·전투 사용 3건을 최신 기반에서 다시 실행해 같은 결과를 얻었습니다. `23:BE63` 같은 부분 겹침 보호를 유지합니다.
 
-남은 범위는 목록 증설·재배치, 레벨 1 초기 합류 처리, 필드 주문 비용·효과·AI 표입니다. 실측 결과 `work/learncheck/`는 원래 체크아웃 `work/dq5-learnwrite/`에 복사해 두고 워크트리를 정리합니다.
+몬스터 합류 때 처음 레벨 항목을 배우는 것을 실측했고, 몬스터 항목은 처음 레벨 이상으로 옮길 수 있습니다([일지](journal/2026-10-27-08-learnjoin.md)). 남은 범위는 목록 증설·재배치, 사람 합류 때의 레벨 1 항목, 필드 주문 비용·효과·AI 표입니다. 실측 결과 `work/learncheck/`는 원래 체크아웃 `work/dq5-learnwrite/`에 복사해 두고 워크트리를 정리합니다.
 
 ### 2. 실내 출구·영역 이동 쓰기(머지됨)
 
@@ -162,6 +162,12 @@ STATE=… FIELD=341,56 GROUP=2C SETTLE=300 SAVE=battle-2c.mss …
 4. **텍스트의 남은 것**(창 레코드 머리 일부, 한글 넣기: 전투·창 글자를 그리는 길).
 5. **포팅용 쓰기 도구** — 표는 `dq5tables.py`(export → JSON 고치기 → patch → `dq5build.py build`), 실내 맵은 `dq5mapcompile.py extract`·`compile`(블록 배치 목록 ↔ 명령)과 `dq5mapwrite.py`(dump → 명령 고치기 → patch, 필드는 `dq5fieldwrite.py`. 늘린 뱅크로 옮기고 포인터를 바꿈. 확인은 `atpc.lua` `AT=01BA4C` 덤프를 `dq5map.py --compare`). 형식은 [dq5-build-format.md 「쓰기 도구」](docs/dq5-build-format.md#쓰기-도구). 고친 롬은 `dq5battle.lua` 를 롬 인자만 바꿔 돌리면 됩니다. 이벤트·인물 스크립트는 `dq5eventwrite.py`·`dq5npcwrite.py`입니다. 선실 파파스의 길이 바이트는 `05:A84F`(본문 `05:A850`, 23바이트)입니다. `dq5scriptcheck.py`로 새 명령 실행을 재현합니다. 다음 도구는 todo 의 「쓰기 도구」 순서대로.
 
+소리 스크립트 실험 요령: `sfc/dq5/tools/lua/dq5sscript.lua` 로 SPC RAM 스크립트 `00` 자리(`0843`)를 시험 바이트로 덮고, 메뉴 효과음 `0C 33` 을 `HCMD=05 HARG=<곡> HX=00` 으로 바꿔 보내면 그 곡 자리에서 돕니다. 명령은 [일지 2026-10-27-02](journal/2026-10-27-02-spcscript.md).
+
+모험의 서 메뉴 실험 요령: 선실 세이브스테이트를 불러 WRAM `7E:2000`~`2A9F` 와 체크섬(`25:8450` 의 워드 합, `7E:2A9E`)을 SRAM 칸 1(`0012`)에, 롬 `25:8000` 의 14바이트를 `0000`·`1FF2` 에 쓰고 `000E` = `01`, `000F` = `C0` 으로 둔 뒤 `emu.reset()` 하면 メニュー(ぼうけんをする / せっていをかえる …)가 뜹니다. `L.loadState` 가 미뤄 실행되므로 SRAM 쓰기와 리셋도 `L.defer` 안에 둡니다. 입력은 리셋 뒤부터 셉니다(메뉴는 약 1,650프레임, START 로 크레디트를 건너뛰면 더 빠름).
+
+루틴 하나만 부르는 요령: `7E:1A40` 처럼 빈 WRAM 에 `PHP / SEP #$30 / LDA #n / JSL 루틴 / PLP / RTL` 을 쓰고, 이벤트 버퍼 `7E:1A0D` 에 `A0 40 1A 7E FF`, `19B3=0D;19B4=1A;19B5=7E;19AE|80` 을 `SET` 하면 다음 프레임에 돕니다. 사람 동료 칸을 인물 레코드 표에서 만드는 `21:8923`(A = 인물 번호)을 이렇게 불러 칸 0 의 ビアンカ 를 만들었습니다([일지 2026-10-27-07](journal/2026-10-27-07-party7.md)). 이 일지의 중간 세이브스테이트 `dq5-oji-0206.mss`·`dq5-flora-veiled-1f05.mss`·`dq5-church-1f00-flora.mss` 는 원래 체크아웃 `work/state/` 에 있습니다.
+
 조사 실험 요령: 앞 칸을 보려면 몸을 돌리는 입력을 `right:8` 처럼 길게 주고, 명령 창은 `a:8;wait:60;down:6;wait:25;down:6;wait:25;down:6;wait:25;right:6;wait:25;a:8`(しらべる)로 엽니다.
 상자 내용물을 바꿔 보려면 `ROMPATCH` 에 `F6E4E + 번호*2` 오프셋을 파일 바이트 순서로 줍니다.
 
@@ -173,6 +179,8 @@ STATE=… FIELD=341,56 GROUP=2C SETTLE=300 SAVE=battle-2c.mss …
 
 - [analysis 스킬의 「자주 밟는 함정」](../../.agents/skills/analysis/SKILL.md#참고--자주-밟는-함정) 을 먼저 읽습니다. 특히 macOS 의 `timeout` 부재, zsh 단어 분리, `SHOT_DIR` 절대 경로.
 - `walk.lua` 는 맵이 바뀐 직후 다음 경유점으로 넘어갑니다. 출구를 밟는 경유점이 출구 칸 바로 앞에서 끝나면(예: 사다리 (7,22) 대신 (7,23) 에서 바뀜) 그 경유점이 새 맵에 남아 엉뚱하게 걷습니다. 출구를 밟는 마지막 동작은 `up:10` 처럼 방향:프레임으로 씁니다.
+- 시스템 `python3`(macOS 3.9)는 긴 줄에 일본어·한국어가 섞인 스크립트를 「Non-UTF-8 code」 로 거부할 때가 있습니다. 파일이 올바른 UTF-8 이어도 그렇습니다. `uv run --locked python` 으로 돌립니다.
+- 일지 순번은 머지 뒤에도 다른 PR 의 rebase 로 밀릴 수 있습니다. 「해결됨」 링크를 달기 전에 `origin/main` 의 실제 파일 이름을 다시 봅니다.
 - `tools/lua/` 는 dq4 트랙과 함께 씁니다. 그림은 dq5 몫인 `sfc/dq5/tools/dq5figures.py` 에 더합니다([TRACK-02](../../.agents/skills/tracks/SKILL.md#track-02--공유-파일)).
 
 ## 보물상자·조사 보상 쓰기
