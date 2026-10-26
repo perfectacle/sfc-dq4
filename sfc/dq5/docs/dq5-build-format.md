@@ -10,6 +10,7 @@
 - [2026-10-26-37: 게임 데이터 표 쓰기 도구](../journal/2026-10-26-37-tablewrite.md)
 - [2026-10-26-41: 실내 맵 레코드 쓰기 도구](../journal/2026-10-26-41-mapwrite.md)
 - [2026-10-26-46: 블록 배치 목록을 맵 명령으로](../journal/2026-10-26-46-mapcompile.md)
+- [2026-10-26-49: 필드 세계 지도 쓰기 도구](../journal/2026-10-26-49-fieldwrite.md)
 
 ## 흐름
 
@@ -82,6 +83,7 @@ uv run --locked python sfc/dq5/tools/dq5build.py rom/dq5.sfc fromrom work/hangul
 | `dq5tables.py` | 몬스터·물건·주문·피해량·동료 몬스터 표 | `dq5tables/1` JSON |
 | `dq5mapwrite.py` | 실내 맵 레코드(머리·배치 비트스트림·속성 패스)와 맵 포인터 | `dq5map/1` JSON |
 | `dq5mapcompile.py` | 블록 배치 목록 → 배치 명령(`dq5mapwrite.py` 의 입력) | `dq5mapsrc/1` JSON |
+| `dq5fieldwrite.py` | 필드 세계 지도 셋(RLE 두 덩어리)과 불러오기 루틴의 원본 주소 | 칸마다 16비트 블록 번호 `.bin` |
 
 ### 게임 데이터 표 `dq5tables/1`
 
@@ -203,6 +205,25 @@ uv run --locked python sfc/dq5/tools/dq5mapcompile.py rom/dq5.sfc check
 - `check`: 364개 맵을 `extract` → `compile` 해 새 레코드로 풀자 셀 버퍼(슬롯을 CHR 로 되돌린 것)가 모두 원래와 같았고, 쓰는 슬롯이 늘어난 맵도 없었습니다. 레코드는 233,794바이트에서 249,471바이트로 6.7% 컸습니다(사람이 겹쳐 놓은 큰 fill 을 다 되살리지 못함).
 - 01/05 를 `extract` 한 목록 그대로, 그리고 블록 7개(`[4, 2, 774]` 와 블록 356 의 2×3 격자)와 속성 패스 엔트리 셋을 더한 목록을 각각 컴파일해 `30:8000` 에 놓았습니다. 두 롬 모두 `01:BA4C` 의 게임 셀 버퍼가 `dq5map.py --compare` 와 0바이트 차이였습니다. 더한 엔트리는 게임에서도 패스 1 `(10,6)` 의 `+1` 아래 니블 1 → 5, 패스 2 세로 3칸 `(20,6)`~`(20,8)` 의 `+1` 에 `40`, 패스 3 세로 4칸 `(30,10)`~`(30,13)` 의 `+0` 위 니블 3 으로 들어갔습니다.
 
+### 필드 세계 지도
+
+`sfc/dq5/tools/dq5fieldwrite.py` 는 세계(`$1949` = 0·1·2)마다 256×256 칸의 블록 번호(0~511)를 [dq5-field-format.md 「불러오기」](dq5-field-format.md#불러오기-01a5c2) 의 RLE 두 덩어리(지도 하위 8비트 64KB, 9번째 비트 8KB)로 싸서 늘린 롬에 놓습니다.
+
+```sh
+uv run --locked python sfc/dq5/tools/dq5fieldwrite.py rom/dq5.sfc dump 0 -o work/field/w0.bin
+uv run --locked python sfc/dq5/tools/dq5fieldwrite.py rom/dq5.sfc patch --world 0 work/field/w0.bin -o work/build/field.dq5patch.json
+uv run --locked python sfc/dq5/tools/dq5fieldwrite.py rom/dq5.sfc check
+```
+
+- 지도 파일은 칸 `y*256+x` 순서로 16비트 리틀 엔디언 블록 번호를 둔 131,072바이트입니다. 세계 1·2 도 256×256 이고 게임은 왼쪽 위 128×128 만 씁니다.
+- 불러오기 루틴(`01:A5C2`·`A5F1`·`A620`)은 덩어리마다 `LDA #뱅크 / STA $4374 / PHA / PLB / LDX #주소 / JSR $A64F` 입니다. `patch` 는 덩어리를 `--at`(기본 `34:8000`)부터 놓고 이 두 즉값(`orig` 포함)을 바꿉니다. `01:A64F` 는 덩어리를 DMA 원본(16비트 주소 + 뱅크)으로 읽으므로 덩어리 하나가 뱅크를 넘으면 다음 뱅크 `8000` 으로 옮겨 놓습니다.
+- RLE 는 같은 값 3개 이상을 반복(최대 128), 나머지를 글자 그대로(최대 128) 냅니다. 원래 덩어리와 크기가 조금 다릅니다(세계 0 지도 25,868 → 25,958바이트, 9번째 비트는 같음).
+
+확인한 것:
+
+- `check`: 세 세계 여섯 덩어리를 다시 싸서 풀면 모두 원래와 같았습니다.
+- 세계 0 을 고치지 않고 옮긴 2MB 롬과, 블록 (172~176, 25~28) 을 블록 307(9번째 비트가 켜진 언덕)으로 칠한 롬을 만들었습니다. `dq5warp.lua` `FIELD=341,56` 으로 필드에 서서 `00:8090` 에서 WRAM 을 덤프하자 두 롬 모두 `7F:0000`·`7E:E000` 이 입력 지도와 바이트까지 같았고, 고친 롬은 주인공 오른쪽의 산이 언덕으로 바뀌어 보였습니다.
+
 ## 빈 자리 지도
 
 ### 원래 롬
@@ -312,5 +333,5 @@ uv run --locked python sfc/dq5/tools/dq5mapcompile.py rom/dq5.sfc check
 
 ## 남은 것
 
-- 쓰기 도구가 아직 없는 것: 필드 지도 인코더, 이벤트·인물 스크립트 인코더, 대사 대량 넣기, 성장 표(`23:EB50`)·조우 구역 레코드(`23:96F3`)·상점 목록.
+- 쓰기 도구가 아직 없는 것: 필드 블록 정의(`2A:A32C`·`2A:AD27`)·입구 표(`04:FD97`), 이벤트·인물 스크립트 인코더, 대사 대량 넣기, 성장 표(`23:EB50`)·조우 구역 레코드(`23:96F3`)·상점 목록.
 - `dq5tables.py` 의 물건·주문·피해량·동료 표 쓰기는 읽기 도구와 값을 대조했을 뿐, 고친 롬을 게임에서 돌려 보지는 않았습니다.
