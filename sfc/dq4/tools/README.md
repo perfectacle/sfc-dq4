@@ -36,3 +36,9 @@
 | `dq4figures.py` | 제작 원본으로 그래픽 문서의 WebP·합성 보행 애니메이션 재생성(롬 불필요) |
 
 스프라이트·맵 출력은 채택되지 않은 초기 시안입니다. 타이틀·일러스트만 보존 대상으로 평가됐으며, 후속 작업은 [그래픽 핸드오프](../handoff.md)를 먼저 읽습니다. 그래픽 출력의 배치·제약은 [dq4-graphics.md](../docs/dq4-graphics.md)에 있습니다. 생성 원본과 프롬프트는 `sfc/dq4/tools/dq4art/` 에 보관합니다. `uv run --locked python sfc/dq4/tools/dq4graphics.py` 로 기본 출력 `work/dq4-graphics/` 를 만들고, `uv run --locked python sfc/dq4/tools/dq4figures.py` 로 문서 그림을 다시 만듭니다.
+
+## 환경 그래픽
+
+`uv run --locked python sfc/dq4/tools/dq4environment.py --out work/environment --rom rom/dq4.nes --references "$DQ4_ASSETS"`로 FC 원작의 색 역할과 DQ5 색·도트 구조로 새로 그린 환경 에셋, FC 배치 비교 맵, SFC 타일 데이터와 갤러리를 만듭니다. `DQ4_ASSETS`는 비공개 `sfc-dq4-assets` 체크아웃입니다. 캐릭터·몬스터는 포함하지 않습니다.
+
+`dq4environmentprobe.py`는 독립 SFC 미리보기의 MesenCE 화면·VRAM·팔레트를 검사합니다. DQ5 엔진 삽입은 아닙니다. 출력 규격과 실행 인수는 [환경 그래픽 문서](../docs/dq4-environment-format.md)에 있습니다.
