@@ -13,6 +13,7 @@
 
 공통 옵션: --state IN(출발 세이브스테이트, 없으면 boot 와 같은 경로로 전원부터), --rom, --fs(풀어 둔 롬),
 --core(없으면 $DESMUME_CORE), --after "ndsplay 명령", --no-encounter(도착한 맵의 조우를 끔), --time N(시간대를 정하고 맵에 들어감).
+battle 만: --act N(부른 몬스터의 행동 여섯 칸을 모두 행동 번호 N 으로, MP 999 로. 전투 전에 RAM 의 몬스터 표를 고침).
 결과마다 OUTDIR/<이름>.state 와 .png 를 남긴다.
 """
 import argparse
@@ -44,6 +45,7 @@ MAP_NAME = 0x020C4F44     # 지금 맵 이름(ASCII)
 PRESET = 0x020B970C       # 적용 대기 중인 진행도 프리셋 번호(-1 이면 없음)
 HERO_POS = 0x020EC524     # 주인공 x, y, z (s32, 4096 = 1.0)
 TILE = 0x1333             # 한 칸(1.2)
+MONSTER_TABLE = 0x0209DF78  # 몬스터 표(60바이트 레코드, +06 MP, +12 행동 여섯 칸). 전투를 시작할 때 읽어 감
 
 SCREENS_PRESET = 331      # 6장, 피사로가 동료. 맵이 가장 많이 열린 진행도
 CHAPTERS = [("ch0", 0), ("ch1", 1), ("ch2", 24), ("ch3", 59), ("ch4", 93), ("ch5", 109), ("ch6", 310), ("ch6-psaro", 331)]
@@ -124,8 +126,14 @@ def field(p, x, z, settle=300):
     return p.u32(SCENE_CUR) == SCENE_FIELD and p.u32(HERO_POS) == rx
 
 
-def battle(p, groups, settle=300):
-    """전투 테스트를 열고 Select 모드의 무리 칸을 채운 뒤 A 로 전투를 시작한다. groups: [(몬스터, 마릿수)] 최대 4개."""
+def battle(p, groups, settle=300, act=None):
+    """전투 테스트를 열고 Select 모드의 무리 칸을 채운 뒤 A 로 전투를 시작한다. groups: [(몬스터, 마릿수)] 최대 4개.
+    act 를 주면 그 몬스터들이 행동 act 만 쓰게 한다(주문·특기가 거는 상태를 일행 쪽에서 보려고)."""
+    if act is not None:
+        for m, _n in groups:
+            rec = MONSTER_TABLE + 60 * m
+            p.write(rec + 0x06, struct.pack("<H", 999))
+            p.write(rec + 0x12, struct.pack("<6H", *[act] * 6))
     p.w32(SCENE_REQ, SCENE_BATTLE_TEST)
     p.run(100)
     p.press("right", 1, 20)
@@ -244,6 +252,7 @@ def main():
     ap.add_argument("--settle", type=int, help="맵을 요청하고 기다릴 프레임(기본 300, screens 는 240)")
     ap.add_argument("--time", type=int, choices=range(5), help="시간대(0 없음, 1 아침, 2 낮, 3 저녁, 4 밤)")
     ap.add_argument("--no-encounter", action="store_true", help="도착한 맵의 조우 비트(0x020CE100 의 0x200)를 지움")
+    ap.add_argument("--act", type=lambda v: int(v, 0), help="battle: 몬스터가 쓸 행동 번호(ndsparam.py actions)")
     a = ap.parse_args()
 
     if a.cmd == "list":
@@ -290,7 +299,7 @@ def main():
     elif a.cmd == "battle":
         groups = [tuple(int(v) for v in (g.split("x") + ["1"])[:2]) for g in a.args[1:5]]
         start(p, state)
-        ok = battle(p, groups, a.settle)
+        ok = battle(p, groups, a.settle, a.act)
         finish(p, out, "battle_" + "_".join(f"{m}x{n}" for m, n in groups), ok, a.after)
     elif a.cmd == "field":
         xs = [float(v) for v in a.args[1:]]

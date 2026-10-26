@@ -5,6 +5,7 @@ FC 쪽 이름·값은 dq4 트랙의 fc/dq4/tools/dq4data.py·dq4shop.py 를 읽�
 
 사용:
   python nds/dq4/tools/ndsparam.py monsters JPROOT [FCROM]   몬스터 표(60바이트). FC 를 주면 이름·능력치로 짝을 찾아 가른다
+  python nds/dq4/tools/ndsparam.py actions JPROOT [N...]     행동 표(ARM9, 0x48바이트): 효과, 거는 상태 번호, 내성 칸, 등급, 문장
   python nds/dq4/tools/ndsparam.py items JPROOT FCROM        아이템 번호를 FC ID 와 맞대고 「같음·표기만 다름·바뀜·새로 생김」을 가른다
   python nds/dq4/tools/ndsparam.py shops JPROOT [FCROM]      가게 표(ARM9 안, 208바이트)와 맵. FC 를 주면 품목이 가장 많이 겹치는 FC 장소
   python nds/dq4/tools/ndsparam.py casino JPROOT FCROM       카지노·メダル 경품을 FC 와 나란히
@@ -22,7 +23,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import ndstext
+import ndstext  # noqa: E402
 
 SMALL = str.maketrans('ァィゥェォッャュョヮ', 'アイウエオツヤユヨワ')
 SHOP_SLOTS = (('무기', 0, 6), ('방어구', 6, 12), ('도구', 12, 18), ('카지노', 18, 24), ('다른 여관 값', 24, 26),
@@ -127,6 +128,47 @@ def cmd_monsters(root, rom=None):
               f"{' '.join(f'{a:X}' for a in m['acts'])} | {fcs} | {mark} |")
     if rom:
         print('\n' + ' '.join(f'{k} {v}' for k, v in collections.Counter(mk.split('(')[0] for mk, _ in marks).most_common()))
+
+
+# 행동(주문·특기·몬스터 행동·도구 사용) 표
+
+# ARM9 안의 0x48바이트 레코드. 레코드 n 이 행동 번호 n(+24 도 n). 주문 n 의 이름은 b1003000 의 n−1 번이고,
+# 몬스터 표 +12 의 여섯 칸과 아이템 표 +0A(つかう)도 같은 번호를 쓴다.
+ACTION_TABLE, ACTION_COUNT = 0x020A8294, 595
+# +37 내성 갈래 → 몬스터 내성 2비트 칸(1부터, 0 은 내성 없음). 0x020151F4 의 갈래 표
+RESIST_SLOT = (3, 2, 1, 6, 5, 4, 9, 15, 10, 7, 13, 8, 12, 11, 14, 0x18, 0x19, 0x15, 0x1B, 0x1A, 0x1C, 0x17, 0x16)
+RESIST_NAMES = {1: 'イオ', 2: 'ギラ', 3: 'メラ', 4: 'デイン', 5: 'バギ', 6: 'ヒャド', 7: 'マヌーサ', 8: 'ラリホー',
+                9: 'ザキ', 10: 'ニフラム', 11: 'マホトラ', 12: 'マホトーン', 13: 'メダパニ', 14: 'ルカニ',
+                15: 'メガンテ', 0x15: 'どくのいき', 0x18: '불 숨결', 0x19: '찬 숨결', 0x1A: '돌', 0x1B: 'やけつくいき'}
+# +38 효과 → 상태 칸(0x0201E494). 이 밖의 효과(피해·회복 등)는 상태 칸을 켜지 않음
+EFFECT_STATUS = {**{e: e for e in range(8, 0x17)}, 0x18: 0x18, 0x19: 0x19, 0x1A: 0x1A, 0x1C: 0x0B, 0x27: 0x1B, 0x29: 0x1E}
+
+
+def action_table(root):
+    with open(os.path.join(root, 'arm9.bin'), 'rb') as fh:
+        d = fh.read()
+    out = []
+    for n in range(ACTION_COUNT):
+        r = d[ACTION_TABLE - 0x02000000 + 0x48 * n:][:0x48]
+        effect = 0x27 if n in (0x4B, 0x9B, 0x9C) else r[0x38]
+        cat = r[0x37]
+        out.append({'num': n, 'valid': struct.unpack_from('<H', r, 0x24)[0] == n, 'msgs': struct.unpack_from('<7I', r),
+                    'effect': effect, 'cat': cat, 'slot': RESIST_SLOT[cat] if cat < len(RESIST_SLOT) else 0,
+                    'grade': (r[0x43] >> 2) & 7, 'status': EFFECT_STATUS.get(effect)})
+    return out
+
+
+def cmd_actions(root, nums):
+    spells = names(root, 'b1003000')
+    msgs = ndstext.messages(root)
+    for a in action_table(root):
+        if (nums and a['num'] not in nums) or (not nums and not a['valid']):
+            continue
+        slot = f"{a['slot']:X}({RESIST_NAMES.get(a['slot'], '?')})" if a['slot'] else '-'
+        st = f"{a['status']:02X}" if a['status'] is not None else '-'
+        text = next((msgs[m] for m in a['msgs'] if m in msgs and m != 801080), '').replace('\n', '/')[:40]
+        print(f"{a['num']}\t{spells.get(a['num'] - 1, '')}\t효과 {a['effect']:02X}\t상태 {st}\t내성 {slot}\t"
+              f"등급 {a['grade']}\t{text}")
 
 
 # 아이템·가게
@@ -323,7 +365,7 @@ def cmd_shops(root, rom=None):
 
 def fc_casino(rom):
     """FC dq4shop.py 의 카지노(04/01)·メダル 왕(22/00) 줄."""
-    return [l for l in fc_shop_output(rom) if l.startswith(('04/01', '22/00'))]
+    return [line for line in fc_shop_output(rom) if line.startswith(('04/01', '22/00'))]
 
 
 def cmd_casino(root, rom):
@@ -417,7 +459,7 @@ def cmd_talk(root, chapters):
 
 def map_list(root):
     path = os.path.join(root, 'data', 'data', 'MAP', '_list.txt')
-    return [l.strip().split(',')[2] for l in open(path, encoding='shift_jis') if l.count(',') >= 2]
+    return [line.strip().split(',')[2] for line in open(path, encoding='shift_jis') if line.count(',') >= 2]
 
 
 # SCRIPT 의 메시지 참조
@@ -460,6 +502,8 @@ def main(argv):
     cmd, root, rest = argv[0], argv[1], argv[2:]
     if cmd == 'monsters':
         cmd_monsters(root, rest[0] if rest else None)
+    elif cmd == 'actions':
+        cmd_actions(root, {int(a, 0) for a in rest})
     elif cmd == 'items':
         cmd_items(root, rest[0])
     elif cmd == 'shops':
