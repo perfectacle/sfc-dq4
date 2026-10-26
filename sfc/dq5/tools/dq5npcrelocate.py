@@ -13,6 +13,8 @@ address는 원본 길이 바이트 주소, commands는 dq5npcwrite.py와 같은 
 생략한 스크립트는 원본을 보존한다. 새 스크립트는 1~255바이트. 04 절대 점프는 재배치할 수 없어 거부한다.
 각 목록 영역은 한 뱅크에 들어가야 한다. 기본 32:8000에는 그룹 포인터 108바이트와 기본 목록,
 대체 33:8000에는 대체 목록을 둔다. --base·--alt는 서로 다른 30~3F 뱅크를 받는다.
+--records는 dq5npcrecord.py 문서(인물 필드·조건 표)를 옮기는 사본과 조건 표에 함께 넣는다.
+이때 dq5npcrecord.py의 패치 목록은 따로 빌드에 넣지 않는다.
 """
 import argparse
 import json
@@ -23,9 +25,10 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 from dq5map import Rom, lorom  # noqa: E402
 from dq5npc import (  # noqa: E402
-    ALT_END, ALT_START, NPC_GROUPS, OVERRIDE_LISTS, all_lists, entry_size,
+    ALT_END, ALT_START, NO_NPC, NPC_GROUPS, OVERRIDE_LISTS, all_lists, entry_size,
     list_entries, parse, script_address, script_bytes, script_ops, table_values,
 )
+from dq5npcrecord import edits as record_edits  # noqa: E402
 from dq5npcwrite import FORMAT as SCRIPT_FORMAT, dump_script, encode, validate_flow  # noqa: E402
 
 FORMAT = 'dq5npcrelocate/1'
@@ -114,9 +117,11 @@ def replacements(rom, doc, known):
     return out
 
 
-def repack_entry(rom, old, new, changes):
+def repack_entry(rom, old, new, changes, records=None):
     size = entry_size(rom, old)
-    raw = read(rom, old, size)
+    raw = (records or {}).get(old) or read(rom, old, size)
+    if len(raw) != size:
+        raise ValueError(f'{cpu(old)}: 고친 인물 레코드 길이가 원본과 다름')
     scripts = sorted(script_slots(rom, [(old, size)]))
     cursor, out, mapping = 0, bytearray(), {}
     for at in scripts:
@@ -138,14 +143,14 @@ def repack_entry(rom, old, new, changes):
     return bytes(out), mapping
 
 
-def pack_region(rom, lists, start, changes, prefix=0):
+def pack_region(rom, lists, start, changes, prefix=0, records=None):
     out = bytearray(prefix)
     mapping, scripts, entries = {}, {}, {}
     for old, _ in lists:
         mapping[old] = start + len(out)
         for addr, size in list_entries(rom, old):
             new = start + len(out)
-            raw, moved = repack_entry(rom, addr, new, changes)
+            raw, moved = repack_entry(rom, addr, new, changes, records)
             entries[addr] = new
             scripts.update(moved)
             out.extend(raw)
@@ -155,7 +160,7 @@ def pack_region(rom, lists, start, changes, prefix=0):
     return out, mapping, scripts, entries
 
 
-def patch(rom, doc, base=0x328000, alt=0x338000):
+def patch(rom, doc, base=0x328000, alt=0x338000, records=None):
     if type(base) is not int or type(alt) is not int:
         raise ValueError('목적지 주소는 정수여야 함')
     base, alt = destination(cpu(base)), destination(cpu(alt))
@@ -168,8 +173,10 @@ def patch(rom, doc, base=0x328000, alt=0x338000):
     for at, _ in lists:
         known.update(script_slots(rom, list_entries(rom, at)))
     changes = replacements(rom, doc, known)
-    first, lm1, sm1, em1 = pack_region(rom, base_lists, base, changes, GROUP_COUNT * 2)
-    second, lm2, sm2, em2 = pack_region(rom, alt_lists, alt, changes)
+    # 인물 레코드·조건 표 수정(dq5npcrecord.py)은 옮기는 사본에 넣는다. 원본 자리를 고쳐도 게임은 사본을 읽는다.
+    edited = {at: new for at, new, old, _ in (record_edits(rom, records) if records is not None else []) if new != old}
+    first, lm1, sm1, em1 = pack_region(rom, base_lists, base, changes, GROUP_COUNT * 2, edited)
+    second, lm2, sm2, em2 = pack_region(rom, alt_lists, alt, changes, records=edited)
     for i in range(GROUP_COUNT):
         old = 0x050000 | rom.u16(NPC_GROUPS + i * 2)
         if old not in lm1:
@@ -184,17 +191,31 @@ def patch(rom, doc, base=0x328000, alt=0x338000):
     original_write(0x128021, bytes([base >> 16]), '기본 인물 목록 뱅크')
     original_write(0x128051, (base & 0xFFFF).to_bytes(2, 'little'), '기본 그룹 포인터 표')
     original_write(0x12833C, bytes([alt >> 16]), '대체 인물 목록 뱅크')
-    for i in range(OVERRIDE_COUNT):
-        at = OVERRIDE_LISTS + i * 6 + 4
-        old = 0x100000 | rom.u16(at)
-        if old not in lm2:
-            raise ValueError(f'대체 표 {i}: 목록 시작점이 아닌 포인터')
-        original_write(at, (lm2[old] & 0xFFFF).to_bytes(2, 'little'), f'대체 표 {i} 목록 주소')
+    for addr, value, note in condition_writes(rom, edited, lm2):
+        original_write(addr, value, note)
     layout = {'lists': {cpu(k): cpu(v) for k, v in (lm1 | lm2).items()},
               'scripts': {cpu(k): cpu(v) for k, v in (sm1 | sm2).items()},
               'entries': {cpu(k): cpu(v) for k, v in (em1 | em2).items()},
               'base_bytes': len(first), 'alt_bytes': len(second)}
     return {'format': 'dq5patch/1', 'name': 'npc-relocate', 'rom_size': 2, 'writes': writes}, layout
+
+
+def condition_writes(rom, edited, moved_lists):
+    """대체 표 포인터를 옮긴 목록으로 바꾸고, 고친 조건 항목은 조건과 포인터를 한 번에 쓴다. [(주소, 바이트, 설명)]."""
+    out = []
+    for i in range(OVERRIDE_COUNT):
+        row = OVERRIDE_LISTS + i * 6
+        head = edited.get(row, read(rom, row, 6))
+        old = 0x100000 | head[4] | head[5] << 8
+        if old not in moved_lists:
+            raise ValueError(f'대체 표 {i}: 목록 시작점이 아닌 포인터')
+        pointer = (moved_lists[old] & 0xFFFF).to_bytes(2, 'little')
+        if row in edited:
+            out.append((row, head[:4] + pointer, f'대체 표 {i} 조건과 목록 주소'))
+        else:
+            out.append((row + 4, pointer, f'대체 표 {i} 목록 주소'))
+    out.extend((at, edited[at], '빈 맵 표 조건') for at in sorted(edited) if NO_NPC <= at < OVERRIDE_LISTS)
+    return out
 
 
 def apply_manifest(rom, manifest):
@@ -266,6 +287,7 @@ def main():
     write.add_argument('--base', default='32:8000')
     write.add_argument('--alt', default='33:8000')
     write.add_argument('--report')
+    write.add_argument('--records', help='dq5npcrecord/1 문서. 레코드·조건 표 수정을 옮기는 사본에 넣는다')
     sub.add_parser('check')
     args = parser.parse_args()
     try:
@@ -279,7 +301,11 @@ def main():
         else:
             with open(args.source, encoding='utf-8') as f:
                 doc = json.load(f)
-            manifest, layout = patch(rom, doc, destination(args.base), destination(args.alt))
+            records = None
+            if args.records:
+                with open(args.records, encoding='utf-8') as f:
+                    records = json.load(f)
+            manifest, layout = patch(rom, doc, destination(args.base), destination(args.alt), records)
             save(args.out, manifest)
             if args.report:
                 save(args.report, layout)
