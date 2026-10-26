@@ -37,15 +37,37 @@ uv run --locked krpatch nds unpack rom/dq4ds-kr.nds work/nds/kr
 | `ndsvram.py` | desmume 세이브스테이트에서 메인 RAM·VRAM·I/O 레지스터·팔레트를 꺼냄. `info` 레이어 설정, `bg` 텍스트 BG 그림 |
 | `ndsgfxfig.py` | 그래픽 형식 문서의 그림(`images/nds-gfx-*`)을 다시 만듦 |
 | `ndsplay.py` | desmume libretro 코어(`DESMUME_CORE`)를 화면 없이 돌리며 버튼·터치를 넣고 화면 저장(`every N K 이름`), RAM 읽기·쓰기·고정(`peek`·`poke`·`freeze`·`until`), 세이브스테이트 |
-| `ndswarp.py` | 장면 이동(`map`, `--time` 시간대·`--no-encounter`), 필드 워프(`field`), 진행도 프리셋(`presets`·`preset`), 전투 테스트로 몬스터 고르기(`battle`), 부팅 디버그 메뉴로 시작(`boot`), 장 시작 세이브스테이트(`chapters`). [docs/debug.md](docs/debug.md) |
+| `ndswarp.py` | 장면 이동(`map`, `--time` 시간대·`--no-encounter`), 필드 워프(`field`), 진행도 프리셋(`presets`·`preset`), 전투 테스트로 몬스터 고르기(`battle`), 부팅 디버그 메뉴로 시작(`boot`), 장 시작 세이브스테이트(`chapters`), 맵 544개 화면 모음(`screens`). [docs/debug.md](docs/debug.md) |
 | `ndsvram.py` | 세이브스테이트에서 VRAM·레이어 레지스터·팔레트를 꺼내 레이어 설정(`info`)과 BG 화면(`bg`)을 그림 |
 | `ndsgfxfig.py` | `images/nds-gfx-*` 그림을 롬에서 다시 만듦 |
 | `ndssound.py` | 소리 묶음 읽기. `info` SDAT 목록, `export OUT` 으로 곡(원본 SSEQ·MIDI·합성 WAV)·효과음·샘플과 폴더별 `index.json`, `maps` 맵 곡 표, `scenes` 에뮬레이터로 장면마다 곡·효과음 요청 기록, `summary`·`gallery`. 결과는 비공개 에셋 저장소에만. [docs/sound-format.md](docs/sound-format.md) |
 | `ndsfigures.py` | `images/` 의 일지 그림을 다시 만듦 |
+| `ndsassets.sh` | 비공개 에셋 저장소의 `nds/dq4/` 전체를 롬에서 다시 만들고 동기화([아래](#에셋-다시-만들기)) |
 
 표는 [tables/](tables/) 에 있습니다. `kr-font.tsv` 는 한글 팬패치의 「일본어 코드 → 한글 음절」 표, `hangul-freq.json` 은 `draft` 가 쓰는 음절 빈도입니다.
 
-## 해킹 일지
+## 에셋 다시 만들기
+
+비공개 에셋 저장소(`perfectacle/sfc-dq4-assets`)의 `nds/dq4/` 는 이 저장소와 두 롬만으로 다시 만들 수 있습니다. 저장소 최상위에서 한 줄로 돌립니다.
+
+```sh
+export DESMUME_CORE=/path/to/desmume_libretro.dylib   # 맵 화면·소리 장면용, docs/debug.md 「준비」
+nds/dq4/tools/ndsassets.sh OUT <sfc-dq4-assets>        # 둘째 인자를 빼면 OUT 에만 만듦
+STEPS="gfx screens" nds/dq4/tools/ndsassets.sh OUT     # 단계 고르기(unpack gfx screens sound)
+```
+
+순서는 롬 SHA-1 확인 → 풀기(`work/nds/{jp,kr}` 가 없을 때만) → 그래픽(`ndsgfx.py export`) → 맵 화면(`ndswarp.py screens`) → 소리(`ndssound.py export`·`scorecheck`·`scenes` 4조각·`summary`·`gallery`) → 첫 페이지(`ndsgfx.py gallery`, 옆 폴더 링크가 들어가도록 마지막) → 동기화입니다. 동기화는 만든 단계의 폴더만 `rsync --delete` 로 맞추고(그래픽은 `screens/`·`sound/`·`README.md` 를 뺀 최상위, 맵 화면은 `screens/`, 소리는 `sound/`), 최상위·`screens/`·`sound/` 마다 커밋 해시·롬 SHA-1·명령을 적은 `SOURCE.txt` 를 씁니다. 손으로 쓴 안내 `README.md` 는 지우지 않습니다. 전체는 약 35분(그래픽·맵 화면 23분, 소리 11분) 걸립니다.
+
+깨끗한 폴더에 다시 만들어 에셋 저장소(커밋 `0761722`)와 맞춘 결과입니다. 자세한 과정은 아래 「해킹 일지」의 2026-10-26-02 에 있습니다.
+
+| 폴더 | 파일 | 바이트까지 같음 | 다름과 이유 |
+| --- | --- | --- | --- |
+| 그래픽(최상위, `screens/`·`sound/` 밖) | 4,289 | 4,289(PNG·WebP·`manifest.json`·`index.html`) | 없음. `SOURCE.txt` 만 새로 씀 |
+| `screens/` | 544장 | 431 | 113장. `fk01` 1장은 일부러 바꿈(전에는 `ckout` 화면, 이제 天空城). 112장은 맵 인물 걸음·물·불꽃·카메라 위치. 다른 픽셀은 전체의 0.59%, 한 장 중앙값 805픽셀 |
+| `sound/` | 2,520 | 2,517 | `songs/index.json`·`gallery/index.html` 의 한 줄: 에셋은 6장 필드 곡을 선두 7명(マーニャ 포함)으로 쟀고 지금 `scenes` 는 6명만 잼. `SOURCE.txt` 는 새로 씀 |
+
+`scorecheck` 는 곡 50개(음표 98,679)·효과음 634개(음표 3,460) 모두 일치했습니다. 그래픽은 실행마다 바이트까지 같습니다. 맵 화면은 desmume 시계가 호스트 시각을 따라 실행마다 84장이 달랐으므로, `screens` 가 시계를 고정합니다. 고친 뒤 세 번 돌린 544장은 서로 바이트까지 같습니다. 에셋의 맵 화면은 고치기 전에 찍어서, 다른 112장은 다시 만들 수 없습니다. 그래서 에셋의 `screens/` 를 이번 결과로 바꿨습니다.
+
 
 - [2026-10-25-01: 대사 파일과 한글 팬패치 글꼴 읽기](journal/2026-10-25-01-text.md)
 - [2026-10-25-02: NDS 그래픽 형식 풀기와 참고용 추출](journal/2026-10-25-02-graphics.md)
@@ -69,3 +91,4 @@ uv run --locked krpatch nds unpack rom/dq4ds-kr.nds work/nds/kr
 - [2026-10-25-20: 상태 이상 번호와 ドラン 고정 블록](journal/2026-10-25-20-debug6.md)
 - [2026-10-25-21: 가게 표는 ARM9 안, 레코드 고르기, 몬스터 내성 칸 바로잡기](journal/2026-10-25-21-param6.md)
 - [2026-10-26-01: 곡·효과음 악보를 FC 와 같은 json·txt 로](journal/2026-10-26-01-score.md)
+- [2026-10-26-02: 에셋을 롬에서 처음부터 다시 만들기](journal/2026-10-26-02-repro.md)
