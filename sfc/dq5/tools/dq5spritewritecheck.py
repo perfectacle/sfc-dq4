@@ -1,0 +1,179 @@
+"""인물 스프라이트 세트 쓰기를 MesenCE에서 원본과 견준다.
+
+02/06 기본 목록의 밤 인물 둘을 낮으로 바꿔 주인공 위에 세우고(dq5npcrecord.py), 그 둘과 걷는 인물의 그림을 바꾼다.
+  세트 04(6타일, 그림 18): 다른 6타일 세트의 그림으로
+  세트 84(8타일, 그림 29): 다른 8타일 세트의 그림으로
+  새 세트 70(6타일): 방향·프레임마다 다른 시험 무늬, 그림 2B 를 70 으로
+원본 롬과 고친 롬에서 dq5gfxdump.lua 로 WRAM·VRAM·OAM·CGRAM 을 덤프하고, 각 롬을 dq5sprite.py 의 비교(VRAM 타일·칸 목록·
+OAM 묶음 픽셀)로 본다. 시험 그림은 롬에서 뽑으므로 --out 의 새 하위 폴더에만 둔다.
+  MESENCE=… python sfc/dq5/tools/dq5spritewritecheck.py rom/dq5.sfc --state work/state/ship.mss
+"""
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+from PIL import Image
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import dq5sprite as S  # noqa: E402
+from dq5map import Rom  # noqa: E402
+from dq5spritewrite import FORMAT, dump_image  # noqa: E402
+
+HERE = Path(__file__).resolve().parent
+RECORDS = {'format': 'dq5npcrecord/1', 'entries': [
+    {'list': '05:8CD4', 'index': 3, 'time': 'day', 'fields': {'x': 24, 'y': 12, 'facing': 'down'}},
+    {'list': '05:8CD4', 'index': 2, 'time': 'day', 'fields': {'x': 28, 'y': 12, 'facing': 'down', 'gfx': 0x29}}]}
+SIMPLE, OVERLAP, NEW, NEW_GFX = 0x04, 0x84, 0x70, 0x2B
+
+
+def pattern(path):
+    """방향·프레임마다 다른 6타일 시험 무늬. 프레임 1 은 위 네 타일을 프레임 0 과 나눠 쓴다(타일 32개)."""
+    grid = [[0] * 32 for _ in range(96)]
+    for row in range(4):
+        for f in (0, 1):
+            for y in range(24):
+                for x in range(16):
+                    top = y < 16
+                    edge = x in (0, 15) or y in (0, 23)
+                    color = 2 + row if edge else (8 + row if (x + y + (0 if top else 3 * f)) % 4 == 0 else 0)
+                    if not top and (x + 2 * f) % 5 == 0:
+                        color = 12 + f
+                    grid[row * 24 + y][f * 16 + x] = color
+    image = Image.new('P', (32, 96))
+    image.putpalette([c for i in range(16) for c in (i * 16, 255 - i * 16, (i * 64) % 256)])
+    image.putdata([c for line in grid for c in line])
+    image.save(path)
+
+
+def donor(rom, layout, limit, exclude):
+    """타일 수가 limit 이하인 같은 배치의 다른 세트 중 가장 큰 것(그림이 눈에 띄게 다르게)."""
+    best = None
+    for s in range(S.SET_COUNT):
+        rec = S.set_record(rom, s)
+        if rec and rec['layout'] == layout and s not in exclude and rec['tiles'] <= limit:
+            if best is None or rec['tiles'] > best[1]:
+                best = (s, rec['tiles'])
+    return best[0]
+
+
+def tool(name, *args):
+    subprocess.run([sys.executable, str(HERE / name), *map(str, args)], check=True, capture_output=True, text=True,
+                   timeout=300)
+
+
+def run(rom, name, out, state, mesence, libdir):
+    dest = out / name
+    dest.mkdir()
+    env = {k: v for k, v in os.environ.items()
+           if k not in ('ADULT', 'ANYWHERE', 'BATTLE', 'FIELD', 'GROUP', 'LATESET', 'PARTY', 'POKE',
+                        'ROMPATCH', 'SAVE', 'SET', 'WAGON', 'EVERY')}
+    env.update(LIBDIR=str(libdir), STATE=str(state), SHOT_DIR=str(dest), MAXF='1500', SETTLE='120',
+               TO='02/06,24,14,1', TEST='wait:400', DUMPF='620,700,780,860')
+    with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
+        subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5gfxdump.lua'),
+                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
+                       check=True, timeout=180)
+    return dest
+
+
+def compare(rom, dest):
+    stats = {}
+    tags = sorted(p.stem for p in dest.glob('f*.wram'))
+    if not tags:
+        raise ValueError(f'{dest.name}: 덤프가 없음')
+    for tag in tags:
+        rd = lambda ext: (dest / f'{tag}.{ext}').read_bytes()
+        S.compare(rom, rd('wram'), rd('vram'), rd('oam'), rd('cgram'), stats, False)
+    sets = {f'{s:02X}': v for s, v in stats.get('sets', {}).items()}
+    frames = sorted(f'{s:02X} {d}{f}' for s, d, f in stats.get('frames', set()))
+    return {'dumps': len(tags), 'sets': sets, 'groups': stats.get('groups', 0), 'hits': stats.get('hits', 0),
+            'frames': frames}
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('rom', type=Path)
+    ap.add_argument('--state', required=True, type=Path)
+    ap.add_argument('--mesence', default=os.environ.get('MESENCE'))
+    ap.add_argument('--out', type=Path, default='work/spritewritecheck')
+    ap.add_argument('--at', default='3A:8000', help='원래 자리에 들어가지 않는 자료를 놓을 곳(dq5spritewrite.py --at)')
+    args = ap.parse_args()
+    if not args.mesence:
+        ap.error('--mesence 또는 MESENCE가 필요함')
+    try:
+        original, state, mesence = args.rom.resolve(), args.state.resolve(), Path(args.mesence).resolve()
+        for path in (original, state, mesence):
+            if not path.is_file():
+                raise ValueError(f'파일 없음: {path}')
+        args.out.mkdir(parents=True, exist_ok=True)
+        out = Path(tempfile.mkdtemp(prefix='run-', dir=args.out.resolve()))
+        print(f'실행 출력: {out}', flush=True)
+        base = Rom(original.read_bytes())
+        simple = donor(base, 'simple', S.set_record(base, SIMPLE)['tiles'], {SIMPLE})
+        overlap = donor(base, 'overlap', S.set_record(base, OVERLAP)['tiles'], {OVERLAP})
+        dump_image(base, simple, out / 'simple.png')
+        dump_image(base, overlap, out / 'overlap.png')
+        pattern(out / 'pattern.png')
+        doc = {'format': FORMAT, 'sets': [{'set': f'{SIMPLE:02X}', 'image': 'simple.png'},
+                                          {'set': f'{OVERLAP:02X}', 'image': 'overlap.png'}],
+               'new_sets': [{'set': f'{NEW:02X}', 'image': 'pattern.png', 'palette': 0}],
+               'gfx': [{'gfx': f'{NEW_GFX:02X}', 'set': f'{NEW:02X}'}]}
+        (out / 'sprite.json').write_text(json.dumps(doc, indent=1) + '\n', encoding='utf-8')
+        (out / 'records.json').write_text(json.dumps(RECORDS, indent=1) + '\n', encoding='utf-8')
+        tool('dq5spritewrite.py', original, 'check', out / 'sprite.json', '--at', args.at)
+        tool('dq5spritewrite.py', original, 'patch', out / 'sprite.json', '-o', out / 'sprite.dq5patch.json', '--at', args.at)
+        tool('dq5npcrecord.py', original, 'patch', out / 'records.json', '-o', out / 'records.dq5patch.json')
+        roms = {}
+        for name, patches in (('original', [out / 'records.dq5patch.json']),
+                              ('edited', [out / 'records.dq5patch.json', out / 'sprite.dq5patch.json'])):
+            roms[name] = out / f'{name}.sfc'
+            tool('dq5build.py', original, 'build', *patches, '--size', '2', '-o', roms[name], '--ips', out / f'{name}.ips')
+        krlua = Path(subprocess.run(['krpatch', 'sfc', 'lua'], capture_output=True, text=True,
+                                    check=True, timeout=30).stdout.strip())
+        libdir = out / 'lib'
+        shutil.copytree(krlua, libdir)
+        shutil.copyfile(HERE / 'lua/dq5warp.lua', libdir / 'boot.lua')
+        results = {}
+        for name, rom in roms.items():
+            results[name] = compare(Rom(rom.read_bytes()), run(rom, name, out, state, mesence, libdir))
+        edited = Rom(roms['edited'].read_bytes())
+        changed = {}
+        for s in (SIMPLE, OVERLAP, NEW):
+            before, after = S.decode_set(base, s), S.decode_set(edited, s)
+            changed[f'{s:02X}'] = before is None or before['tile_data'] != after['tile_data']
+        mine = results['edited']
+        checks = {
+            'vram': all(f'{s:02X}' in mine['sets'] and mine['sets'][f'{s:02X}'][0] == mine['sets'][f'{s:02X}'][1]
+                        for s in (SIMPLE, OVERLAP, NEW)),
+            'oam': mine['groups'] == mine['hits'] > 0 and results['original']['groups'] == results['original']['hits'],
+            'shown': all(any(f.startswith(f'{s:02X} ') for f in mine['frames']) for s in (SIMPLE, OVERLAP, NEW)),
+            'changed': all(changed.values()),
+            'original': all(v[0] == v[1] for v in results['original']['sets'].values()),
+        }
+        report = {'donors': {'simple': f'{simple:02X}', 'overlap': f'{overlap:02X}'}, 'results': results,
+                  'changed': changed, 'checks': checks}
+        (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+        for name, r in results.items():
+            print(f'{name}: 덤프 {r["dumps"]}개, 세트 ' + ' '.join(f'{s} {v[0]}/{v[1]}' for s, v in sorted(r['sets'].items()))
+                  + f', OAM 묶음 {r["hits"]}/{r["groups"]}, 프레임 ' + ' '.join(r['frames']))
+        print(f'시험 그림: 세트 {SIMPLE:02X} ← {simple:02X}, {OVERLAP:02X} ← {overlap:02X}, 새 세트 {NEW:02X} ← 무늬(그림 {NEW_GFX:02X})')
+        for key, ok in checks.items():
+            print(f'{key}: {"통과" if ok else "불일치"}')
+        if not all(checks.values()):
+            raise ValueError('불일치: ' + ', '.join(k for k, ok in checks.items() if not ok))
+        print(f'검사 {len(checks)}개 통과')
+        return 0
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+        print(f'오류: {error}', file=sys.stderr)
+        if isinstance(error, subprocess.CalledProcessError) and error.stderr:
+            print(error.stderr, file=sys.stderr)
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())
