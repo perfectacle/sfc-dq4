@@ -77,6 +77,7 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 
 | 스크립트 | 하는 일 | 추가 환경 변수 | 결과 |
 | --- | --- | --- | --- |
+| `lua/dq5seqtrace.lua` | DQ5: 드라이버 없이 세이브스테이트를 불러 `SEQ` 입력을 재생하며, 처음 몇 프레임 WRAM 쓰기(`WR`), 주소 실행 때 레지스터·스택 24바이트(`HOOK`), 값이 바뀐 프레임(`WLOG`), 범위 실행 순서·커버리지(`LO`·`HI`·`FROM`·`TO`·`CAP`)를 남김. `SAVEAT` 에 세이브스테이트, `SHOTS` 에 화면. 2000 프레임마다 기록을 씀 | `STATE`, `SEQ`, `WR`·`WRN`, `HOOK`, `WLOG`, `LO`·`HI`·`FROM`·`TO`·`CAP`, `SAVEAT`·`SAVE`, `SHOTS`, `MAXF` | `trc.txt`, `cover.txt`, `<SAVE>`, `sNNN.png`, `end.png` |
 | `lua/dq5savestate.lua` | 드라이버(`boot.lua`) 입력을 재생하다가 `SAVEAT` 프레임에 세이브스테이트와 화면 저장. `seqlib.sh` 로 `dq5warp.lua` 를 드라이버로 두면 장면 이동 뒤 걸어 들어간 곳을 남길 수 있음 | `SAVEAT`, `SAVENAME` | `<SAVENAME>`, `.png` |
 | `lua/dq5boot.lua` | DQ5 부팅 시험(`dq5boottest.py` 가 부름): 전원부터 A 를 `PERIOD` 마다 누르며 `SHOTS` 프레임에 메모리 해시·화면, `CHECKAT` 에 맵 번호 | `MAXF`, `PERIOD`, `TAPUNTIL`, `SHOTS`, `CHECKAT` | `boot.txt`, `fNNNNN.png` |
 | `lua/dq5scenehash.lua` | DQ5 부팅 시험 장면 단계(`dq5boottest.py --scenes` 가 부름): 드라이버(`dq5warp.lua`)로 장면을 돌리며 `SHOTS` 프레임마다 메모리 해시·맵·`$BE` | `SHOTS`, `dq5warp.lua` 의 변수 | `scene.txt`, `fNNNNN.png`, `warp.txt` |
