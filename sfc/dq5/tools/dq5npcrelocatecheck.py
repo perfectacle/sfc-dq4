@@ -90,16 +90,26 @@ def compare_case(case, out, original_path, relocated_path, original, layout, sta
 
 
 
+# 선실·기본 공유·대체 공유 스크립트를 39바이트로 늘린다. 실행하면 (5,13) 에 멈춘다.
+MUTATION_ADDRESSES = ('05:A84F', '05:8B2D', '10:914F')
+MUTATION_COMMANDS = [{'op': '1A'}] * 35 + [{'op': '2B', 'args': [5, 13]}, {'op': '16'}]
+MUTATION_SOURCE = {'format': FORMAT, 'scripts': [{'address': address, 'commands': MUTATION_COMMANDS}
+                                                 for address in MUTATION_ADDRESSES]}
+
+
 def check_mutations(out, original_path, original, state, mesence, libdir, jobs):
-    addresses = ('05:A84F', '05:8B2D', '10:914F')
-    commands = [{'op': '1A'}] * 35 + [{'op': '2B', 'args': [5, 13]}, {'op': '16'}]
-    manifest, layout = patch(original, {'format': FORMAT, 'scripts': [
-        {'address': address, 'commands': commands} for address in addresses]})
+    manifest, layout = patch(original, MUTATION_SOURCE)
     manifest_path, rom_path = out / 'long.dq5patch.json', out / 'long.sfc'
     manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
     (out / 'long-layout.json').write_text(json.dumps(layout, indent=2), encoding='utf-8')
     command('dq5build.py', original_path, 'build', manifest_path, '-o', rom_path,
             '--ips', out / 'long.ips')
+    return run_mutations(out, rom_path, layout, state, mesence, libdir, jobs)
+
+
+def run_mutations(out, rom_path, layout, state, mesence, libdir, jobs):
+    """MUTATION_SOURCE 를 넣은 롬에서 긴 스크립트 5건을 실행해 좌표·이동 상태·포인터를 견준다."""
+    addresses = MUTATION_ADDRESSES
     cases = [((0x17, 0, False, ''), 8, addresses[0])]
     for night in (False, True):
         cases.extend([((2, 0, night, ';7E2190=00;7E21AD=00;7E21A8=00'), 10, addresses[1]),

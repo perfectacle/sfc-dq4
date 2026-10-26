@@ -17,6 +17,24 @@ from dq5textwrite import read_messages
 HERE = Path(__file__).resolve().parent
 
 
+def decoder_codes(rom, msg, ret, dest, state, mesence, libdir):
+    """선실에서 메시지 msg 를 띄워 디코더가 ret(디코더 사본의 RTL)에서 돌려준 첫 64코드와 스트림 주소."""
+    dest.mkdir()
+    env = os.environ.copy()
+    for key in ('ROMPATCH', 'SET', 'POKE', 'CALLS', 'WW', 'WWRANGE', 'WRAMWATCH', 'COVER',
+                'ACCESS', 'VMADD', 'SHOTS', 'DUMP', 'VRAMDUMP', 'BG3FONT'):
+        env.pop(key, None)
+    env.update(LIBDIR=libdir, STATE=str(state), SHOT_DIR=str(dest), MESSAGE=str(msg), RETURN_PC=ret,
+               DRIVER=str(HERE / 'lua/dq5msg.lua'), MAXF='500', ROMPATCH=f'30139={0x6000 | msg:04X}',
+               PRE='b:4,wait:40,up:3,wait:20,a:4,wait:30,a:4,wait:150')
+    with (dest / 'mesen.log').open('w') as log:
+        subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5textcheck.lua'),
+                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log,
+                       stderr=subprocess.STDOUT, check=True, timeout=90)
+    lines = (dest / 'decoded.txt').read_text().splitlines()
+    return int(lines[0].split('=')[1], 16), [int(code, 16) for code in lines[1:]]
+
+
 def command(tool, rom, *args):
     subprocess.run([sys.executable, str(HERE / tool), str(rom), *map(str, args)],
                    check=True, capture_output=True, text=True, timeout=60)
@@ -58,25 +76,10 @@ def main():
                 ('repacked', out / 'repacked.sfc', 0x129, messages, '388044'),
                 ('edited', out / 'edited.sfc', 0x129, edited, '388044'),
                 ('far', out / 'edited.sfc', 0xC70, edited, '388044')]:
-            dest = out / name
-            dest.mkdir()
-            env = os.environ.copy()
-            for key in ('ROMPATCH', 'SET', 'POKE', 'CALLS', 'WW', 'WWRANGE', 'WRAMWATCH', 'COVER',
-                        'ACCESS', 'VMADD', 'SHOTS', 'DUMP', 'VRAMDUMP', 'BG3FONT'):
-                env.pop(key, None)
-            env.update(LIBDIR=libdir, STATE=str(state), SHOT_DIR=str(dest), MESSAGE=str(msg), RETURN_PC=ret,
-                       DRIVER=str(HERE / 'lua/dq5msg.lua'), MAXF='500', ROMPATCH=f'30139={0x6000 | msg:04X}',
-                       PRE='b:4,wait:40,up:3,wait:20,a:4,wait:30,a:4,wait:150')
-            with (dest / 'mesen.log').open('w') as log:
-                subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5textcheck.lua'),
-                                '--Snes.DisableFrameSkipping=true'], env=env, stdout=log,
-                               stderr=subprocess.STDOUT, check=True, timeout=90)
-            lines = (dest / 'decoded.txt').read_text().splitlines()
-            actual = [int(code, 16) for code in lines[1:]]
+            stream, actual = decoder_codes(rom, msg, ret, out / name, state, mesence, libdir)
             expected = [code for row in expected_messages[msg:] for code in row][:64]
             if len(actual) != 64 or actual != expected:
                 raise ValueError(f'{name}: 실제 코드 불일치 {actual[:12]}, 기대 {expected[:12]}')
-            stream = int(lines[0].split('=')[1], 16)
             if name == 'far' and stream >> 16 <= 0x38:
                 raise ValueError('뒤쪽 메시지가 다음 스트림 뱅크에 있지 않음')
             results.append({'case': name, 'message': msg, 'stream': f'{stream:06X}', 'codes_equal': 64})
