@@ -227,9 +227,11 @@ def images(rom, prefix, nframes, pad=None):
 def boot_snapshot(rom_path, mesen, folder):
     """dq5titlegif.py 의 입력으로 전원부터 돌려 SNAP_FROM 뒤 스냅숏을 folder/snap.* 로. SEQ 를 돌려준다."""
     import dq5titlegif as T
-    test = os.path.join(folder, T.TEST_ROM)
+    # 롬 이름(=SRAM 파일 이름)을 임시 폴더마다 다르게 해, 다른 체크아웃의 실행과 SRAM 을 함께 쓰지 않는다
+    name = 'dq5titlevm-' + os.path.basename(folder.rstrip('/'))
+    test = os.path.join(folder, name + '.sfc')
     shutil.copy(rom_path, test)
-    srm = os.path.join(T.SAVES, os.path.splitext(T.TEST_ROM)[0] + '.srm')
+    srm = os.path.join(T.SAVES, name + '.srm')
     if os.path.exists(srm):
         os.remove(srm)
     lib = subprocess.run(['uv', 'run', '--locked', 'krpatch', 'sfc', 'lua'], capture_output=True, text=True,
@@ -240,6 +242,8 @@ def boot_snapshot(rom_path, mesen, folder):
     subprocess.run([mesen, '--testrunner', test, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lua',
                     'dq5titlesnap.lua'), '--Snes.RamPowerOnState=AllZeros', '--Snes.DisableFrameSkipping=true'],
                    env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1800, check=False)
+    if os.path.exists(srm):
+        os.remove(srm)
     return seq
 
 
