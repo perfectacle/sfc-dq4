@@ -43,10 +43,17 @@ def load(folder, fx, entry=False):
                       p=int(p, 16)), frames
 
 
-def run(rom, wram, regs, max_frames=2000, track_inputs=False, nmi=True, entry=False, ppu=False, video=None, keep_wram=False):
+def run(rom, wram, regs, max_frames=2000, track_inputs=False, nmi=True, entry=False, ppu=False, video=None,
+        keep_wram=False, clock=False):
     """해석기를 끝(3F)까지 돌려 [00:969A 때의 BG3 사본 896바이트] 와 Cpu 를 돌려준다. video 는 시작 때의
     (VRAM, CGRAM, OAM). 없으면 0 에서 시작한다."""
-    c = Cpu(rom, wram, ppu=ppu)
+    if clock:
+        # 메모리 접근 주기를 세어 처리가 한 프레임을 넘기면 처리 도중 NMI 를 넣는다(dq5titlevm.Cpu, 연출도 240줄에서 NMI)
+        import dq5titlevm
+        c = dq5titlevm.Cpu(rom, wram)
+        c.on_lag = lambda cpu: None
+    else:
+        c = Cpu(rom, wram, ppu=ppu)
     if ppu and video:
         c.vram[:], c.cgram[:], c.oam[:len(video[2])] = video[0], video[1], video[2]
         # VMAIN 은 전원을 켤 때 한 번 80(높은 바이트를 쓴 뒤 1 늘림)으로 두고 연출 안에서는 다시 쓰지 않는 곳이 있다
@@ -64,7 +71,11 @@ def run(rom, wram, regs, max_frames=2000, track_inputs=False, nmi=True, entry=Fa
         # NMI 를 돌려도 흉내 나지 않는다. 24:FE44 가 대기열이 빌 때까지 기다리는 연출(イオ·ギガデイン)이 있다.
         cpu.wram[0x1D93] = cpu.wram[0x1D91]
         cpu.rts()
-        if nmi:
+        if nmi and hasattr(cpu, 'nmi'):
+            # 주기를 세는 해석기(dq5titlevm.Cpu): 기다림에서 셈을 0 으로 하고 NMI 를 넣는다
+            cpu.cost = cpu.line = 0
+            cpu.nmi()
+        elif nmi:
             # 기다림이 끝나는 NMI 를 롬의 처리기 그대로 돌린다(RTI 로 부른 곳에 돌아옴). PPU 쪽은 w65816 이
             # 흉내 내는 CPU 쓰기와 일반 DMA 만 맞는다.
             cpu.push(cpu.pbr)
@@ -138,11 +149,11 @@ def game_screens(folder, fx):
     return out
 
 
-def vm_images(rom, folder, fx):
+def vm_images(rom, folder, fx, clock=True):
     """연출 입구부터 롬 코드로 돌린 연출 층 그림(PIL RGBA) 목록. 다른 도구가 import 해서 쓴다."""
     from dq5fx import render_frame
     wram, regs, _ = load(folder, fx, entry=True)
-    _, c = run(rom, wram, regs, entry=True, ppu=True, video=load_video(folder, fx))
+    _, c = run(rom, wram, regs, entry=True, ppu=True, video=load_video(folder, fx), clock=clock)
     return [render_frame(*sc) for sc in c.screens]
 
 
@@ -182,6 +193,7 @@ def main():
     ap.add_argument('--screens', help='lua/dq5fxdump.lua 덤프 폴더. --from-entry 로 VRAM·CGRAM·OAM 까지 흉내 내 연출 층 그림을 견줌')
     ap.add_argument('--png', help='VM 이 그린 연출 층을 이 폴더에 프레임마다 PNG 로')
     ap.add_argument('--gif', help='VM 이 그린 연출 층을 이 GIF 로(--from-entry 와 함께)')
+    ap.add_argument('--clock', action='store_true', help='메모리 접근 주기를 세어 처리 도중 NMI 를 넣음(dq5titlevm.Cpu)')
     a = ap.parse_args()
     rom = open(a.rom, 'rb').read()
     fx = int(a.fx, 16)
@@ -189,7 +201,7 @@ def main():
     game = load(a.folder, fx)[2]
     video = load_video(a.folder, fx) if a.from_entry else None
     frames, c = run(rom, wram, regs, track_inputs=a.inputs, entry=a.from_entry, ppu=bool(a.screens or a.png or a.gif),
-                    video=video)
+                    video=video, clock=a.clock)
     same = sum(1 for i, f in enumerate(frames) if i < len(game) and f[:BUF_LEN] == game[i][:BUF_LEN])
     print(f'{fx:02X} frames vm {len(frames)} game {len(game)} same {same} steps {c.steps}')
     for i in range(max(len(frames), len(game))):

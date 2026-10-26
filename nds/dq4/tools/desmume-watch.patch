@@ -1,0 +1,68 @@
+sfc-dq4 memory watch for the desmume libretro core.
+
+Base: https://github.com/libretro/desmume commit 95b4d79.
+desmume is licensed under the GNU General Public License v2 or later; this patch
+modifies GPL source and is distributed under the same license. Only the sfc-dq4
+changes are below; build with nds/dq4/tools/build-desmume-watch.sh.
+
+Every ARM9/ARM7 data read or write whose address lies in [wp_lo, wp_lo + wp_len)
+is appended to a 65,536-entry buffer. Exported: wp_set(lo, len) sets the range and
+clears the buffer, wp_count() returns the number of hits (it keeps counting past
+the buffer), wp_data() points at the buffer.
+
+diff --git a/desmume/src/MMU.h b/desmume/src/MMU.h
+index 696d4d1a..3f860b19 100644
+--- a/desmume/src/MMU.h
++++ b/desmume/src/MMU.h
+@@ -657,8 +657,12 @@ extern u32 _MMU_MAIN_MEM_MASK16;
+ extern u32 _MMU_MAIN_MEM_MASK32;
+ void SetupMMU(bool debugConsole, bool dsi);
+ 
++// sfc-dq4 memory watch: record ARM9/ARM7 data accesses in [wp_lo, wp_lo + wp_len).
++extern u32 wp_lo, wp_len;
++void wp_hit(int event, u32 addr, u32 size, u32 val);
+ FORCEINLINE void CheckMemoryDebugEvent(EDEBUG_EVENT event, const MMU_ACCESS_TYPE type, const u32 procnum, const u32 addr, const u32 size, const u32 val)
+ {
++	if(type!=MMU_AT_CODE && (u32)(addr - wp_lo) < wp_len) wp_hit(event | (type<<4) | (procnum<<7), addr, size, val);
+ 	//TODO - ugh work out a better prefetch event system
+ 	if(type == MMU_AT_CODE && event == DEBUG_EVENT_READ)
+ 		event = DEBUG_EVENT_EXECUTE;
+diff --git a/desmume/src/frontend/libretro/libretro.cpp b/desmume/src/frontend/libretro/libretro.cpp
+index 2314af93..37cc1883 100644
+--- a/desmume/src/frontend/libretro/libretro.cpp
++++ b/desmume/src/frontend/libretro/libretro.cpp
+@@ -7,6 +7,7 @@
+ 
+ #include "cheatSystem.h"
+ #include "MMU.h"
++#include "armcpu.h"
+ #include "NDSSystem.h"
+ #include "debug.h"
+ #include "render3D.h"
+@@ -2548,3 +2549,26 @@ int ftruncate(int fd, off_t length)
+    return -1;
+ }
+ #endif
++
++/* sfc-dq4 memory watch. Each hit is 9 u32: ARM9 instruction address (+1 in Thumb),
++   access address, size | event << 8 | type << 12 | cpu << 15, value, LR, r3-r6.
++   The register fields are the ARM9's even when the access came from the ARM7. */
++u32 wp_lo = 0, wp_len = 0;
++#define WP_MAX 65536
++static u32 wp_buf[WP_MAX][9];
++static u32 wp_n = 0;
++void wp_hit(int event, u32 addr, u32 size, u32 val)
++{
++   if (wp_n < WP_MAX) {
++      wp_buf[wp_n][0] = NDS_ARM9.instruct_adr | (NDS_ARM9.CPSR.bits.T ? 1 : 0);
++      wp_buf[wp_n][1] = addr;
++      wp_buf[wp_n][2] = size | (event << 8);
++      wp_buf[wp_n][3] = val;
++      wp_buf[wp_n][4] = NDS_ARM9.R[14];
++      for (int k = 0; k < 4; k++) wp_buf[wp_n][5 + k] = NDS_ARM9.R[3 + k];
++   }
++   wp_n++;
++}
++extern "C" RETRO_API void wp_set(u32 lo, u32 len) { wp_lo = lo; wp_len = len; wp_n = 0; }
++extern "C" RETRO_API u32 wp_count(void) { return wp_n; }
++extern "C" RETRO_API void *wp_data(void) { return wp_buf; }

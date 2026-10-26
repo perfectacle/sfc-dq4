@@ -6,6 +6,9 @@
   タンス 류: 셀 속성 $93(タンス)·$A7·$D4(ツボ)·$B9·$D3(タル) 이면 12:FB9D 가 1F:F5CB 표에서 맵과 좌표로 항목을 찾는다.
   발밑: 12:E6BE 가 선 칸과 이웃 칸을 1E:F08B 표에서 맵·좌표·층($C3)으로 찾는다. 열림은 7E:2240 + 번호 & 마스크.
   두 칸 앞: 12:ED48 이 방향에 따라 두 칸 앞 줄 세 칸을 1E:F435 표에서 찾는다. 열림은 7E:2190 + (+6 | 80) & +7.
+  아래층 상자: $BC >= 32 이면 12:ED62 가 앞 칸의 아래층(+4)에서 $84 를 찾고, 12:FD46 이 1E:F4DF 표에서 맵과 좌표로
+            항목을 찾는다. 위 상자 검사(12:E63B)는 위층(+7)만 보므로 그룹 50 이상 맵의 아래층 상자는 이 표로만 열린다.
+            열림은 두 칸 앞 표와 같은 7E:2190 + (+6 | 80) & +7.
 내용물 값(16비트, 12:F43B): 100 미만 = 물건 번호, 100~CFFF = 금화(값 - 100), D000~D009 = 장소마다 정한 일(12:F51F),
 FFFC 잠김, FFFD 人くい箱(상자 밖은 あくまのツボ), FFFE ミミック(상자 밖은 ツボック), FFFF 빈 상자.
 
@@ -37,6 +40,8 @@ FOOT_TABLE = 0x1EF08B
 FOOT_FLAGS = 0x7E2240
 # 1E:F435. [BC][BD][X][Y][내용물 16비트][번호][마스크], FFFF 로 끝(12:FCDD). 열림은 7E:2190 + (번호 | 80) & 마스크.
 AHEAD_TABLE = 0x1EF435
+# 1E:F4DF. [BC][BD][X][Y][내용물 16비트][번호][마스크], FFFF 로 끝(12:FD46). 열림은 7E:2190 + (번호 | 80) & 마스크.
+LOWER_TABLE = 0x1EF4DF
 ITEM_NAMES = 5
 SPECIAL = {0xFFFC: '잠김', 0xFFFD: '人くい箱', 0xFFFE: 'ミミック', 0xFFFF: '빈 상자'}
 # 상자가 아닌 곳($1E76 이 0 이 아님)에서는 FFFD·FFFE 가 다른 몬스터다(12:F493).
@@ -122,6 +127,16 @@ def ahead_entries(rom):
     return out
 
 
+def lower_entries(rom):
+    """1E:F4DF. [(bc, bd, x, y, 내용물, 열림 주소, 마스크)]."""
+    out, a = [], LOWER_TABLE
+    while rom.u16(a) != 0xFFFF:
+        e = [rom.u8(a + i) for i in range(8)]
+        out.append((e[0], e[1], e[2], e[3], e[4] | e[5] << 8, 0x7E2190 + (e[6] | 0x80), e[7]))
+        a += 8
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('rom')
@@ -149,6 +164,10 @@ def main():
         if want and (bc, bd) != want:
             continue
         print(f'{bc:02X}/{bd:02X} 두 칸 앞 ({x},{y}) 7E:{flag & 0xFFFF:04X}&{mask:02X} {describe(rom, v, chest=False)}')
+    for bc, bd, x, y, v, flag, mask in lower_entries(rom):
+        if want and (bc, bd) != want:
+            continue
+        print(f'{bc:02X}/{bd:02X} 아래층 상자 ({x},{y}) 7E:{flag & 0xFFFF:04X}&{mask:02X} {describe(rom, v)}')
     return 0
 
 
