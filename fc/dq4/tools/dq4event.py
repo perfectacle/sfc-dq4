@@ -526,6 +526,9 @@ def cmd_meaning(prg, rom):
         if known:
             print(head + '[확인] ' + known)
             continue
+        if (n, b) in dq4flags.UNUSED:
+            print(head + '[쓰이지 않음·정적] ' + dq4flags.UNUSED[(n, b)])
+            continue
         pick = sorted(e['w'] or e['r'], key=lambda x: x[1] is None)[0]
         where, msg = pick
         g = next((int(t[:2], 16) for t in where.split() if len(t) == 5 and t[2] == '/'), None)
