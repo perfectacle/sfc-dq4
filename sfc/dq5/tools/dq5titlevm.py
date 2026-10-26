@@ -33,6 +33,8 @@ import dq5ppu  # noqa: E402
 from w65816 import Cpu as _Cpu, Stop  # noqa: E402
 
 FRAME_WAIT = 0x00969A
+HDMA_TABLE = os.environ.get('DQ5_HDMA_TABLE', '1') == '1'
+DMA_COST = os.environ.get('DQ5_DMA_COST', '0') == '1'   # 넣으면 타이틀 지연이 어긋나 기본은 끔
 FRAME = 1364 * 262 - 40 * 262
 
 # 명령마다 메모리에 닿지 않는 내부 주기 수(65C816 주기 표에서 고른 것)
@@ -110,11 +112,18 @@ class Cpu(_Cpu):
         self.in_nmi = True
 
     def hdma_lines(self):
-        """보이는 줄(NMI 가 240줄에서 들어오므로 그 뒤 22줄을 뺀 240줄)마다 HDMA 가 CPU 를 멈추는 주기를 더한다:
-        18 + 켠 채널마다 8 + 옮기는 바이트마다 8."""
+        """보이는 줄(NMI 가 240줄에서 들어오므로 그 뒤 22줄을 뺀 240줄)마다 HDMA 가 CPU 를 멈추는 주기를 더한다.
+        HDMA_TABLE 이면 WRAM 의 표를 줄마다 따라가(18 + 살아 있는 채널마다 8 + 옮기는 바이트마다 8 + 항목을 읽을 때 8,
+        간접 주소를 읽을 때 16), 아니면 켠 채널이 매 줄 옮긴다고 어림한다."""
         while self.line < self.cost // 1364:
             self.line += 1
-            if (240 + self.line) % 262 >= 240:
+            sl = (240 + self.line) % 262
+            if sl == 0 and HDMA_TABLE:
+                self.hdma_init()
+            if sl >= 240:
+                continue
+            if HDMA_TABLE:
+                self.cost += self.hdma_line()
                 continue
             en, h = self.reg[0x420C], 0
             for ch in range(8):
@@ -122,6 +131,68 @@ class Cpu(_Cpu):
                     h += 8 + 8 * (1, 2, 2, 4, 4, 4, 2, 4)[self.reg[0x4300 + ch * 16] & 7]
             if h:
                 self.cost += 18 + h
+
+    def _dma(self, ch):
+        # 일반 DMA 동안 CPU 가 멈춘다: 채널마다 8 + 바이트마다 8 마스터 주기(앞뒤 맞춤 12~24 는 12 로 둠)
+        b = 0x4300 + ch * 16
+        n = self.reg[b + 5] | self.reg[b + 6] << 8 or 0x10000
+        if DMA_COST:
+            self.cost += 12 + 8 + 8 * n
+        super()._dma(ch)
+
+    def _rd(self, bank, addr):
+        return _Cpu.read(self, bank << 16 | (addr & 0xFFFF))
+
+    def hdma_init(self):
+        self.hch = {}
+        en, c = self.reg[0x420C], 18
+        for ch in range(8):
+            if not en >> ch & 1:
+                continue
+            b = 0x4300 + ch * 16
+            ctl, bank = self.reg[b], self.reg[b + 4]
+            p = self.reg[b + 2] | self.reg[b + 3] << 8
+            st = {'ctl': ctl, 'bank': bank, 'p': p, 'ib': self.reg[b + 7], 'ia': 0}
+            st['cnt'] = self._rd(bank, p)
+            st['p'] += 1
+            c += 8
+            if ctl & 0x40:
+                st['ia'] = self._rd(bank, st['p']) | self._rd(bank, st['p'] + 1) << 8
+                st['p'] += 2
+                c += 16
+            st['do'] = True
+            st['end'] = st['cnt'] == 0
+            self.hch[ch] = st
+        self.cost += c if self.hch else 0
+
+    def hdma_line(self):
+        live = [st for st in getattr(self, 'hch', {}).values() if not st['end']]
+        if not live:
+            return 0
+        c = 18
+        for st in live:
+            c += 8
+            nb = (1, 2, 2, 4, 4, 4, 2, 4)[st['ctl'] & 7]
+            if st['do']:
+                c += 8 * nb
+                if st['ctl'] & 0x40:
+                    st['ia'] += nb
+                else:
+                    st['p'] += nb
+            st['cnt'] = (st['cnt'] - 1) & 0xFF
+            st['do'] = bool(st['cnt'] & 0x80)
+            if st['cnt'] & 0x7F == 0:
+                st['cnt'] = self._rd(st['bank'], st['p'])
+                st['p'] += 1
+                c += 8
+                if st['cnt'] == 0:
+                    st['end'] = True
+                elif st['ctl'] & 0x40:
+                    st['ia'] = self._rd(st['bank'], st['p']) | self._rd(st['bank'], st['p'] + 1) << 8
+                    st['p'] += 2
+                    c += 16
+                st['do'] = True
+        return c
 
     def step(self):
         op = _Cpu.read(self, (self.pbr << 16) | self.pc)
