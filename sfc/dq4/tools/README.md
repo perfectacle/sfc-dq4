@@ -28,11 +28,12 @@
 | `dq4soundport.py export --assets 폴더 --out 폴더` | NDS 악보 JSON 을 DQ5 시퀀스로(템포·세기 합치기, 꼬리를 남기는 성부 배분, 손실 보고서) |
 | `dq4soundbank.py --score JSON --assets 폴더 --out 폴더 [--max-rate 8000]` | 곡에 쓰이는 NDS PCM 을 S-DSP 계산으로 BRR 로(무음 첫 블록, 실기 SNR) |
 | `dq4soundpatch.py --base 롬 --replace 자리=JSON --bank 폴더 --out 롬 [--map-fades] [--preview 자리]` | 시퀀스·샘플을 롬에 넣음(4MB 롬·IPS). `--map-fades` 는 프레임을 기다리지 않는 맵 전환 페이드, `--preview` 는 청취용 타이틀 곡 교체 |
-| `dq4soundset.py --base 롬 --assets 폴더 --song 자리=NDS곡 ... --out 롬 [--preview 자리] [--map-fades]` | 곡마다 SPC 샘플 예산을 정하고 샘플을 줄여(영역 합치기·표본율·자르기) 여러 곡을 한꺼번에 넣음. 보고서에 줄인 것을 남김 |
-| `dq4soundcheck.py 롬 OUT --song 자리` | `lua/dq4overturespc.lua` 결과로 SPC 의 시퀀스·샘플, KON 시각·SRCN·음 간격을 견줌 |
-| `lua/dq4soundstate.lua` | 세이브스테이트를 불러온 뒤 롬의 드라이버 IPL 블록(곡 묶음 표)을 SPC RAM 에 다시 쓰고 `SOUND_PROBE` 를 돌림. 곡 묶음을 바꾼 롬을 세이브스테이트로 시험할 때 필요. `AT` 사용 |
+| `dq4soundset.py --base 롬 --assets 폴더 --song 자리=NDS곡 ... --out 롬 [--stream 자리=바이트] [--preview 자리] [--map-fades]` | 곡마다 SPC 샘플 예산을 정하고 샘플을 줄여(영역 합치기·표본율·자르기) 여러 곡을 한꺼번에 넣음. `--stream` 은 먼저 쓰이는 샘플만 그 바이트 안에서 곡 앞에 보내고 나머지는 곡이 울리는 동안 보냄(늦은 샘플의 음마다 악기 명령을 다시 씀). 보고서에 줄인 것과 도착 전 음을 남김 |
+| `dq4soundcheck.py 롬 OUT --song 자리` | `lua/dq4overturespc.lua` 결과로 SPC 의 시퀀스·샘플, KON 시각·SRCN·음 간격을 견줌. 곡 뒤 샘플이 도착하기 전의 음은 뺌 |
+| `lua/dq4soundstate.lua` | 세이브스테이트를 불러온 뒤 롬의 드라이버 IPL 블록(곡 묶음 표)을 SPC RAM 에 다시 쓰고 `SOUND_PROBE` 를 돌림. 롬 목록에 없는데 상태에 고정된 시퀀스는 고정을 풂. 곡 묶음을 바꾼 롬을 세이브스테이트로 시험할 때 필요. `AT` 사용 |
+| `lua/dq4soundload.lua` | `SOUND_PROBE` 로 걸어, 샘플이 SPC 에 다 받아진 프레임(`SAMPLES`), 목소리마다 울리기 시작한 프레임과 SRCN, 곡(`SONGS`)이 오르내린 프레임을 `load.txt` 로. 이어서 `NEXT_PROBE` 를 돌림 |
 | `lua/dq4soundcmdlog.lua` | 전원부터 `INPUT`(버튼@프레임:길이)·`AFTER`(A 연타 간격)로 진행하며 소리 대기열 명령·부른 자리와 300프레임마다 화면을 남김. `OUT`, `MAXF`, `AFTERFROM` 사용 |
-| `lua/dq4overturespc.lua` | 서곡 롬을 전원부터 돌려 곡 10 이 시작한 뒤의 SPC 상태와 DSP 쓰기(`dspw.txt`)를 남김. `OUT`, `MAXF`, `SONG`, `SEQ`, `DUMPAT` 사용 |
+| `lua/dq4overturespc.lua` | 서곡 롬을 전원부터 돌려 곡 10 이 시작한 뒤의 SPC 상태와 DSP 쓰기(`dspw.txt`), 곡 시작·샘플 도착(`events.txt`)을 남김. `OUT`, `MAXF`, `SONG`, `SEQ`, `DUMPAT`, `QUIET` 사용 |
 | `lua/dq4titleintegrationcheck.lua` | 통합 롬의 화면·VRAM·음악·메뉴 진입 관찰. `OUT`, `MAXF`, `EVERY`, `FROM`, `SEQ`, `RESETAT`, `TRACE_DMA`, `MOTION_PC` 사용 |
 | `lua/dq4titlecheck.lua` | 독립 미리보기의 화면·VRAM·CGRAM 관찰. `OUT`, `FRAME` 사용 |
 | `dq4pixels.py` | 스프라이트·지형 제작물을 모으는 모듈 |
