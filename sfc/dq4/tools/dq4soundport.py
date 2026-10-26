@@ -329,12 +329,30 @@ def execution_trace(seq, ticks):
     return tracks
 
 
+def seconds_to_tick(tempos, seconds):
+    """곡 시작에서 seconds 초가 지난 시각을 틱으로(올림). tempos 는 {틱: DQ5 템포}."""
+    points = sorted(tempos.items())
+    elapsed = 0.0
+    for i, (tick, value) in enumerate(points):
+        rate = value * DQ5_TICKS_PER_SECOND_PER_TEMPO
+        span = (points[i + 1][0] - tick) / rate if i + 1 < len(points) else math.inf
+        if elapsed + span >= seconds:
+            return tick + math.ceil((seconds - elapsed) * rate)
+        elapsed += span
+    raise AssertionError('unreachable')
+
+
 def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_tolerance_db=1.0,
-            tail_ticks=12, release_rate=0x1C):
+            tail_ticks=12, release_rate=0x1C, sample_order=None, arrivals=None):
     """악보 → 글·바이너리·곡 묶음의 DQ5 샘플 번호·손실 보고서.
 
-    시퀀스만 만들며 ROM/SPC 공간 검사는 삽입기가 맡는다. 모든 샘플을 첫 음 전에
-    전송해야 한다. 8번째 목소리를 BGM에서 쓰지 않지만 실제 SFX 우선권은 드라이버 검증이 필요하다.
+    시퀀스만 만들며 ROM/SPC 공간 검사는 삽입기가 맡는다. 8번째 목소리를 BGM에서 쓰지 않지만
+    실제 SFX 우선권은 드라이버 검증이 필요하다.
+
+    sample_order 는 곡 묶음 레코드의 샘플 순서(악기 번호)다. 주지 않으면 번호 순.
+    arrivals 는 곡이 시작한 뒤에 도착하는 샘플의 {샘플: 도착 어림 초}다. 드라이버는 없는 샘플의
+    instrument(F0, SPC 182E)에서 그 트랙의 KON 을 막고(02CB+X bit7), 샘플이 있을 때의 instrument 만
+    풀어 준다. 그래서 그 샘플의 음마다 도착 어림 시각까지 instrument 를 다시 쓴다. 도착 전 음은 울리지 않는다.
     """
     if not 1 <= voices <= 7:
         raise ValueError('BGM voices must be between 1 and 7')
@@ -355,6 +373,15 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
     if missing:
         raise ValueError(f'programs require explicit mapping: {missing}')
     samples = sorted({resolve_sample(mapping, n['program'], n['note']) for lane in lanes for n in lane})
+    if sample_order is not None:
+        if sorted(sample_order) != samples:
+            raise ValueError('sample_order must list exactly the samples the song uses')
+        samples = list(sample_order)
+    usage = {}
+    for lane in lanes:
+        for n in lane:
+            first, count = usage.get(resolve_sample(mapping, n['program'], n['note']), (math.inf, 0))
+            usage[resolve_sample(mapping, n['program'], n['note'])] = (min(first, n['tick']), count + 1)
     if any(not isinstance(n, int) or not 0 <= n < 0xC8 for n in samples):
         raise ValueError('sample ID outside DQ5 table')
     ccs, restored = controllers(score, end)
@@ -385,6 +412,11 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
         tempos.update({t + lo: v for t, v in simplified.items()})
         tempo_error = max(tempo_error, error)
     lines = [f'tempo {tempos[0]:02X}'] + [f'track Lvoice{i}' for i in range(voices)]
+    arrival_ticks = {sample: seconds_to_tick(tempos, seconds) for sample, seconds in (arrivals or {}).items()}
+    if not arrival_ticks.keys() <= set(samples):
+        raise ValueError('arrivals name samples the song does not use')
+    late_notes = Counter()
+    reissued = 0
     folded = []
     cc_emitted = 0
     level_skips, level_error = 0, 0.0
@@ -437,7 +469,19 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
                 times = cc_times.get(note['ch'], [])
                 for t, cc, value in events[bisect_right(times, note['tick']):bisect_right(times, tick)]:
                     note_cc[cc] = value
-                setting('instrument', samples.index(resolve_sample(mapping, note['program'], note['note'])))
+                sample = resolve_sample(mapping, note['program'], note['note'])
+                index = samples.index(sample)
+                arrival = arrival_ticks.get(sample)
+                if fresh and arrival is not None and note['tick'] < arrival:
+                    late_notes[sample] += 1
+                # 마지막 instrument 가 샘플 도착 전이었으면 막힌 채일 수 있으니 다시 쓴다.
+                if fresh and arrival is not None and cache.get('instrument_at', -1) < arrival:
+                    if cache.get('instrument') == index:
+                        reissued += 1
+                    cache.pop('instrument', None)
+                if cache.get('instrument') != index:
+                    setting('instrument', index)
+                    cache['instrument_at'] = tick
                 setting('release', release_rate)
                 level = _level(note, note_cc[7], note_cc[11], score.get('volume', 127))
                 held = cache.get('volume2')
@@ -498,6 +542,11 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
         'undefined_program_notes': len(undefined),
         'sequence_bytes': len(seq), 'uncompressed_bytes': len(uncompressed), 'sequence_sha256': hashlib.sha256(seq).hexdigest(),
         'samples': samples, 'send_first': len(samples), 'end_tick': end,
+        'sample_first_tick': {f'{k:02X}': v[0] for k, v in sorted(usage.items())},
+        'sample_notes': {f'{k:02X}': v[1] for k, v in sorted(usage.items())},
+        'arrival_ticks': {f'{k:02X}': v for k, v in sorted(arrival_ticks.items())},
+        'late_notes': {f'{k:02X}': late_notes[k] for k in sorted(arrival_ticks)},
+        'reissued_instruments': reissued,
         'loop_start': loop_start, 'loop_len': score.get('loop_len'),
         'tempo_changes': [[t, v] for t, v in sorted(tempos.items())],
         'source_tempo_changes': len(raw) - 1, 'tempo_max_error_seconds': round(tempo_error, 4),

@@ -27,6 +27,17 @@ class SequenceValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'target outside'):
             patch.validate_replacement(patch.Replacement(bytes(seq), (0x18,)))
 
+    def test_rejects_send_first_beyond_sample_count(self):
+        with self.assertRaisesRegex(ValueError, 'send_first'):
+            patch.validate_replacement(patch.Replacement(melody(), (0x18,), send_first=2))
+
+    def test_unpin_removes_song_and_pads_with_ff(self):
+        data = bytearray(0x180000)
+        pos = lorom(patch.RESIDENT_SEQUENCES)
+        data[pos:pos + 5] = bytes.fromhex('00 17 1D 32 FF')
+        self.assertEqual(patch.unpin_sequences(data, {0x17, 0x02}), [0x17])
+        self.assertEqual(bytes(data[pos:pos + 5]), bytes.fromhex('00 1D 32 FF FF'))
+
     def test_rejects_eight_voice_bgm(self):
         with self.assertRaisesRegex(ValueError, '1..7 voices'):
             patch.validate_replacement(patch.Replacement(bytes([120, 8, 0, 0]), (0x18,)))
@@ -49,6 +60,16 @@ class InstallTests(unittest.TestCase):
         block = int.from_bytes(out[start:start + 2], 'little')
         self.assertEqual(start + 4 + block, lorom(patch.SONG_SETS) + sum(map(len, records)))
         self.assertLessEqual(report['songs'][0]['spc_budget']['bytes_with_margin'], patch.SPC_CAPACITY)
+
+    def test_send_first_and_unpinned_resident_song(self):
+        self.assertIn(0x17, patch.pinned_sequences(self.base))
+        item = patch.Replacement(melody(), (0x18, 0x00), send_first=1)
+        out, report = patch.install(self.base, {0x17: item})
+        self.assertEqual(patch.read_sets(out)[0x17], bytes([2, 1, 0x18, 0x00]))
+        self.assertNotIn(0x17, patch.pinned_sequences(out))
+        self.assertEqual(len(patch.pinned_sequences(out)), len(patch.pinned_sequences(self.base)) - 1)
+        self.assertEqual(report['unpinned_sequences'], ['17'])
+        self.assertEqual(report['songs'][0]['send_first'], 1)
 
     def test_rejects_title_replacement(self):
         with self.assertRaisesRegex(ValueError, 'protected title'):
