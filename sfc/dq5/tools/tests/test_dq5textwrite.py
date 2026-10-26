@@ -11,8 +11,9 @@ from dq5hangul import (  # noqa: E402
 )
 from dq5map import Rom, lorom  # noqa: E402
 from dq5text import NODES_0, NODES_1, ROOT  # noqa: E402
+from dq5text import FONT_GROUPS, FONT_TABLE_OPERANDS, GLYPHS  # noqa: E402
 from dq5textwrite import (  # noqa: E402
-    FORMAT, compile_messages, decoded_messages, overrides, parse_at, tree, valid_message,
+    FORMAT, base_package, compile_messages, decoded_messages, overrides, parse_at, patch, tree, valid_message,
 )
 
 
@@ -104,17 +105,56 @@ class TextWriteTests(unittest.TestCase):
             tree([[] for _ in range(MESSAGES)])
 
     def test_invalid_addresses_and_overflow(self):
-        for at in ('2F:8000', '40:8000', '60:8000', '38:7FFF', '38:10000', '38:8000x', '038:8000', None):
+        for at in ('2F:8000', '40:8000', '5F:8000', '7E:8000', '38:7FFF', '38:10000', '38:8000x', '038:8000', None):
             with self.subTest(at=at), self.assertRaises(ValueError):
                 parse_at(at)
         one = [[0x1001] for _ in range(MESSAGES)]
-        for at in ('38:FFFF', '3F:FE20'):
+        for at in ('38:FFFF', '3F:FE20', '7D:FE20'):
             with self.subTest(at=at), self.assertRaises(ValueError):
                 compile_messages(self.data, one, at)
         with self.assertRaises(ValueError):
             compile_messages(self.data + bytes(0x80000), one)
         with self.assertRaises(ValueError):
             compile_messages(b'', one)
+
+    def test_high_window_uses_or_60(self):
+        manifest = compile_messages(self.data, self.messages, '65:8000')
+        self.assertEqual(manifest['rom_size'], 4)
+        stub = next(w for w in manifest['writes'] if w['note'] == '보행 색인 뱅크 훅')
+        self.assertEqual(bytes.fromhex(stub['hex'])[6], 0x60)
+        self.assertEqual(decoded_messages(rebuild(self.data, manifest, 4)), self.messages)
+        pair = [[0, 0x1001] for _ in range(MESSAGES)]
+        crossing = compile_messages(self.data, pair, '6F:FF00')
+        self.assertIn('70:8000', [w['at'] for w in crossing['writes']])
+        self.assertEqual(decoded_messages(rebuild(self.data, crossing, 4)), pair)
+
+    def test_base_package_keeps_extra_glyphs_and_font_table(self):
+        data = bytearray(self.data)
+        groups = bytes((0xDB, 0x03, 0, 0, 0)) + bytes((0x10, 0x00, 0, 0, 0))   # 원래 3DB자 + 늘린 16자
+        for at, k in FONT_TABLE_OPERANDS:
+            data[lorom(at):lorom(at) + 3] = (FONT_GROUPS + k).to_bytes(3, 'little')
+        hangul = [[GLYPHS + i % 16, 0x1001] for i in range(MESSAGES)]
+        manifest = compile_messages(bytes(data), hangul, '65:8000', font=groups, glyphs=GLYPHS + 16)
+        base = rebuild(bytes(data), manifest, 4)
+        messages, font, glyphs, (start, end) = base_package(base)
+        self.assertEqual((messages, font, glyphs), (hangul, groups, GLYPHS + 16))
+        self.assertEqual(start, lorom(0x658000))
+        self.assertEqual(end, start + sum(len(bytes.fromhex(w['hex'])) for w in manifest['writes'] if 'orig' not in w))
+        with self.assertRaises(ValueError):
+            patch(bytes(data), {'format': FORMAT, 'messages': [{'id': 0, 'codes': [GLYPHS + 16, 0x1001]}]},
+                  '66:8000', base=base)
+        edited = patch(bytes(data), {'format': FORMAT, 'messages': [{'id': 0, 'codes': [GLYPHS + 15, 0x1001]}]},
+                       '30:8000', base=base)
+        again = rebuild(bytes(data), edited, 2)
+        self.assertEqual(decoded_messages(again)[0], [GLYPHS + 15, 0x1001])
+        self.assertEqual(decoded_messages(again)[1:], hangul[1:])
+        self.assertEqual(base_package(again)[1], groups)
+        with self.assertRaises(ValueError):
+            base_package(bytes(data))
+        bad = bytearray(base)
+        bad[lorom(0x249E07) + 6] = 0x40
+        with self.assertRaises(ValueError):
+            base_package(bytes(bad))
 
     def test_malformed_tree_does_not_loop(self):
         manifest = compile_messages(self.data, [[0, 0x1001] for _ in range(MESSAGES)])

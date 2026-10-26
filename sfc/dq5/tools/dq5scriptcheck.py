@@ -77,19 +77,21 @@ def build_cases(rom, out):
         build(rom, out, name, [body])
 
 
-def run_case(case, out, state, mesence, libdir):
+def run_case(case, out, state, mesence, libdir, rom=None, at=0x608000, rompatch=''):
+    """rom 을 주면 그 롬에서, at 은 패치한 이벤트 스크립트의 CPU 주소, rompatch 는 실행 때만 덮을 ROM 바이트(호출 틀)."""
     name, flag, expected = case
     tag = name + (str(flag) if flag is not None else '')
     dest = out / tag
     dest.mkdir()
     env = dict(os.environ, DRIVER=str(ROOT / 'tools/lua/walk.lua'), LIBDIR=libdir, STATE=str(state),
-               PRE='b:4,wait:40', WAYPOINTS='3,11;3,24;7,24;up:10', ROMPATCH='156FF5=E0090B0117',
+               PRE='b:4,wait:40', WAYPOINTS='3,11;3,24;7,24;up:10',
+               ROMPATCH=';'.join(filter(None, ['156FF5=E0090B0117', rompatch])),
                CHANGES='99', MAXF='1000', AFTER='120', HOLD='90', SHOT_DIR=str(dest),
                WATCH='x8=7E3028;y8=7E3088;flag=7E220F;ev=7E19B3:3;f19=7E219F;'
                      'p8lo=7E3488;p8hi=7E34A8;p8bank=7E34C8;move8=7E3308',
                POKE=f'7E219F={flag:02X}' if flag is not None else '')
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(out / f'{name}.sfc'),
+        subprocess.run([str(mesence), '--testrunner', str(rom or out / f'{name}.sfc'),
                         str(HERE / 'lua/dq5scriptcheck.lua'), '--Snes.DisableFrameSkipping=true'],
                        env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=90)
     walk = (dest / 'walk.txt').read_text(encoding='utf-8')
@@ -99,12 +101,11 @@ def run_case(case, out, state, mesence, libdir):
     pos = (int(fields['x8'], 16), int(fields['y8'], 16))
     checks = [pos == expected, 'end map 17/00' in walk]
     if name in ('number', 'event'):
-        checks += [fields['flag'] == '40', fields['ev'] == '608005', 'end map 17/00 x=11 y=11' in walk]
+        checks += [fields['flag'] == '40', fields['ev'] == f'{at + 5:06X}', 'end map 17/00 x=11 y=11' in walk]
         lookup = '23E2F4' if name == 'number' else '23E29A'
         calls = re.findall(rf'pc={lookup} a=([0-9A-F]+)', trace)
         checks.append(any(int(value, 16) & 0xFF == (7 if name == 'number' else 8) for value in calls))
-        checks += [f'event={addr} op={op}' in trace
-                   for addr, op in [('608000', '10'), ('608003', '01'), ('608005', 'FF')]]
+        checks += [f'event={at + k:06X} op={op}' in trace for k, op in [(0, '10'), (3, '01'), (5, 'FF')]]
         if name == 'event':
             checks.append('event=001A0D op=C3' in trace)
     else:
