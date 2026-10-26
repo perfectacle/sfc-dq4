@@ -3,6 +3,7 @@
 # 사용: MESENCE=/path/to/Mesen fc/dq4/tools/dq4assets.sh [OUT]
 #   OUT(기본 work/dq4assets)에 에셋 저장소 fc/dq4/ 와 같은 배치로 만든다. 비어 있지 않으면 멈춘다.
 #   롬은 rom/dq4.nes(일본판 Rev A)여야 한다. SHA-1 이 다르면 멈춘다.
+#   소리의 FLAC 은 flac 명령(PATH)으로 만든다. 판이 다르면 FLAC 바이트가 다를 수 있어 sound/*/SOURCE.txt 에 판을 적는다.
 #   맵·필드·gfx·스프라이트·몬스터·소리는 롬만 읽는다. 장면 화면(gfx/screens)은 MesenCE 를 전원 켜기부터
 #   정해 둔 입력으로 돌려 뜬다(세이브스테이트도 이 스크립트 안에서 만든다). MESENCE 가 없으면 장면 화면만 빠진다.
 # 같은 커밋·같은 롬이면 몇 번 돌려도 바이트까지 같다.
@@ -28,14 +29,15 @@ py fc/dq4/tools/dq4fcgfx.py rom/dq4.nes all "$out"
 py fc/dq4/tools/dq4fcsprite.py rom/dq4.nes assets "$tmp/sprite"
 mv "$tmp/sprite/sprites" "$tmp/sprite/monsters" "$out/"
 mv "$tmp/sprite/gallery/sprites.html" "$out/gallery/"
-py fc/dq4/tools/dq4sound.py rom/dq4.nes export "$tmp/sound"
+py fc/dq4/tools/dq4sound.py rom/dq4.nes export "$tmp/sound" --flac
 mkdir -p "$out/sound"
 rev=$(git rev-parse HEAD)
 for k in songs sfx; do
   mv "$tmp/sound/$k" "$out/sound/"
-  printf 'sfc-dq4 커밋: %s\n명령: uv run --locked python fc/dq4/tools/dq4sound.py rom/dq4.nes export $OUT  (OUT/%s 를 여기로)\n롬: FC 「ドラゴンクエストIV」 일본판 Rev A, SHA-1 %s\n' \
-    "$rev" "$k" "$sha" > "$out/sound/$k/SOURCE.txt"
+  printf 'sfc-dq4 커밋: %s\n명령: uv run --locked python fc/dq4/tools/dq4sound.py rom/dq4.nes export $OUT --flac  (OUT/%s 를 여기로, %s)\n롬: FC 「ドラゴンクエストIV」 일본판 Rev A, SHA-1 %s\n' \
+    "$rev" "$k" "$(flac --version)" "$sha" > "$out/sound/$k/SOURCE.txt"
 done
+mv "$tmp/sound/dq4.nsf" "$out/sound/"
 rm -rf "$tmp"
 
 if [ -z "$MESENCE" ]; then

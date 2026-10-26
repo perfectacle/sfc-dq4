@@ -5,6 +5,7 @@
 --   M: 몬스터 배치 7E:5BA0~5BFF 를 썼으면 돌아온 뒤의 값
 --   v: 변수 7E:9E73~9EA2 가 바뀐 것(9E73+k 의 k:전→후)   R: 읽은 WRAM 범위   W: 쓴 WRAM 범위(스택 제외)   P: PPU·DMA 쓰기(마지막 값)
 --   같은 연출에서 같은 루틴은 처음 MAXCALL(기본 3)번만 자세히 적고, 나머지는 끝에 횟수만 적는다.
+--   FORCE="0DA8=80;0DA7=21"  연출을 시작할 때마다 WRAM(오프셋)에 써 넣는다(회심 플래그·무기 번호처럼 스크립트가 고르는 갈래를 바꿀 때)
 --   연출을 시작할 때(22:D73C) 몬스터 배치 7E:5BA0~5BFF 와 기준 칸 9E78·9E79 를 L 줄로 적는다.
 package.path = os.getenv("LIBDIR") .. "/?.lua;" .. package.path
 local L = require("lib")
@@ -46,8 +47,11 @@ local function inInt()
   return false
 end
 
+local force = {}
+for a, v in string.gmatch(os.getenv("FORCE") or "", "(%x+)=(%x+)") do force[#force + 1] = {tonumber(a, 16), tonumber(v, 16)} end
 emu.addMemoryCallback(function()
   local fx = emu.getState()["cpu.a"] & 0xFF
+  for _, f in ipairs(force) do emu.write(f[1], f[2], wram) end
   log[#log + 1] = string.format("L fx=%02X f=%d base=%02X,%02X 5BA0=%s", fx, n, emu.read(0x9E78, wram), emu.read(0x9E79, wram), hex(0x5BA0, 0x60))
 end, emu.callbackType.exec, 0x22D73C, 0x22D73C)
 
@@ -93,6 +97,60 @@ emu.addMemoryCallback(function()
   if lay then log[#log] = log[#log] .. " M=" .. hex(0x5BA0, 0x60) end
   cur, intSP = nil, nil
 end, emu.callbackType.exec, 0x22D934, 0x22D934)
+
+-- VMDUMP=1: 22:D790(스크립트 해석기를 부르기 직전)에서 WRAM 128KB 와 레지스터를 v<연출>.wram·.regs 로,
+-- VMSCREENS=1 이면 연출 입구의 VRAM·CGRAM·OAM(v<연출>.vram0 등)과 그 프레임의 VRAM·CGRAM·OAM·BG3 스크롤도 e<연출>-<k>.* 로.
+-- 그 뒤 00:969A(프레임 기다림)마다 BG3 사본 7E:8A1D 896바이트와 $19·$0F5E·$0F5F·난수 $075B~$075D·$0DB0·$0DBC 8바이트를 v<연출>.frames 에 덧붙인다(dq5fxvm.py 가 견줌)
+local vm = os.getenv("VMDUMP") and {}
+if vm then
+  emu.addMemoryCallback(function()
+    local fx = emu.read(0x0D14, wram)
+    if vm[fx] then return end
+    local s = emu.getState()
+    vm[fx] = {}
+    vm.cur = fx
+    L.dump(string.format("v%02X.wram", fx), wram, 0x20000)
+    L.write(string.format("v%02X.regs", fx), string.format("%04X %04X %04X %04X %04X %02X %02X\n", s["cpu.a"], s["cpu.x"], s["cpu.y"], s["cpu.sp"], s["cpu.d"], s["cpu.dbr"] or s["cpu.db"] or 0x7E, s["cpu.ps"] or 0))
+  end, emu.callbackType.exec, 0x22D790, 0x22D790)
+  -- 연출 입구 22:D73C 에서도 WRAM·레지스터를 v<연출>.wram0·.regs0 으로(dq5fxvm.py --from-entry)
+  emu.addMemoryCallback(function()
+    local s = emu.getState()
+    local fx = s["cpu.a"] & 0xFF
+    if vm["e" .. fx] then return end
+    vm["e" .. fx] = true
+    L.dump(string.format("v%02X.wram0", fx), wram, 0x20000)
+    if (os.getenv("VMSCREENS") or "") ~= "" then
+      L.dump(string.format("v%02X.vram0", fx), emu.memType.snesVideoRam, 0x10000)
+      L.dump(string.format("v%02X.cgram0", fx), emu.memType.snesCgRam, 0x200)
+      L.dump(string.format("v%02X.oam0", fx), emu.memType.snesSpriteRam, 0x220)
+    end
+    L.write(string.format("v%02X.regs0", fx), string.format("%04X %04X %04X %04X %04X %02X %02X\n", s["cpu.a"], s["cpu.x"], s["cpu.y"], s["cpu.sp"], s["cpu.d"], s["cpu.dbr"] or s["cpu.db"] or 0x7E, s["cpu.ps"] or 0))
+  end, emu.callbackType.exec, 0x22D73C, 0x22D73C)
+  emu.addMemoryCallback(function()
+    if vm.cur then vm.cur = nil end
+  end, emu.callbackType.exec, 0x22D793, 0x22D793)
+  emu.addMemoryCallback(function()
+    if not vm.cur then return end
+    local t = vm[vm.cur]
+    local b = {}
+    for i = 0, 0x37F do b[#b + 1] = string.char(emu.read(0x8A1D + i, wram)) end
+    for _, a in ipairs({0x19, 0x0F5E, 0x0F5F, 0x075B, 0x075C, 0x075D, 0x0DB0, 0x0DBC}) do b[#b + 1] = string.char(emu.read(a, wram)) end
+    t[#t + 1] = table.concat(b)
+    local f = io.open(os.getenv("SHOT_DIR") .. string.format("/v%02X.frames", vm.cur), "wb")
+    f:write(table.concat(t))
+    f:close()
+    if (os.getenv("VMSCREENS") or "") ~= "" then
+      -- 같은 때의 VRAM·CGRAM·OAM 과 BG3 스크롤(dq5fxvm.py --screens 가 e<연출>-<k> 로 읽음)
+      local p = string.format("e%02X-%03d", vm.cur, #t - 1)
+      local st = emu.getState()
+      L.dump(p .. ".vram", emu.memType.snesVideoRam, 0x10000)
+      L.dump(p .. ".cgram", emu.memType.snesCgRam, 0x200)
+      L.dump(p .. ".oam", emu.memType.snesSpriteRam, 0x220)
+      L.write(p .. ".ppu", string.format("%d %d\n", st["ppu.layers[2].hscroll"], st["ppu.layers[2].vscroll"]))
+      if (os.getenv("VMWRAM") or "") ~= "" then L.dump(p .. ".wram", wram, 0x20000) end
+    end
+  end, emu.callbackType.exec, 0x00969A, 0x00969A)
+end
 
 emu.addEventCallback(function()
   n = n + 1
