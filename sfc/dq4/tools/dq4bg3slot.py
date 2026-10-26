@@ -1,17 +1,18 @@
 """게임 안 BG3 타일맵을 VRAM 워드 1C00 에서 장면마다 빈 자리로 옮겨, BG3 글자 칸 180~1FF(128칸)를 비운다.
 형식은 sfc/dq4/docs/dq4-window-text-format.md 「BG3 타일맵 옮기기」.
 
-DQ5 엔진은 BG3SC 를 맵을 불러올 때만(2B:82BD → 2B:82C2 STA $2109) 그림자 $0725 와 함께 쓴다. DQ5 트랙의
+DQ5 엔진은 평소 BG3SC 를 맵을 불러올 때(2B:82BD → 2B:82C2 STA $2109) 그림자 $0725 와 함께 쓴다. DQ5 트랙의
 실내 364맵 VRAM 칸 쓰기 실측과 전투 실측에 따라
-  필드($BE bit7 = 0)          78
-  3C00 을 쓰는 실내 맵 9개   48(전투를 시작하면 78)
-  나머지 실내 맵              3C(전투도 3C00 을 쓰지 않아 그대로)
+  필드($BE bit7 = 0)                       78
+  3C00 을 쓰고 7800 은 쓰지 않는 실내 맵 3개  78
+  3C00 과 7800 을 다 쓰는 마을 6개          48(전투를 시작하면 그 자리에서 78 로)
+  나머지 실내 맵                           3C(전투도 3C00 을 쓰지 않아 그대로)
 으로 BG3SC 를 고르고, 타일맵 VRAM 주소를 즉값 1C00~1FFF 로 쓰는 곳에서 그 값을 지금 자리 기준으로 다시 계산한다.
-전투가 끝나면 맵을 다시 불러와 위 규칙으로 돌아간다. 21BF.5 갈래의 4C00 은 원래대로 둔다. 타이틀·메뉴는 맵을
-불러오기 전이라 1C 그대로다.
+전투가 끝나면 맵을 다시 불러와 위 규칙으로 돌아간다. 특수 화면 효과가 BG3SC 를 즉값 1C 로 되돌리는 곳도 지금 자리로
+되돌린다. 21BF.5 갈래의 4C00 은 원래대로 둔다. 타이틀·메뉴는 맵을 불러오기 전이라 1C 그대로다.
 """
-from pathlib import Path
 import sys
+from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
@@ -22,10 +23,12 @@ CODE = 0x608300
 MAP_CHOOSE = 0x608284                 # dq4menupatch 의 맵 훅 안 LDA #$1C / STA $0725 / RTL
 BATTLE_START = 0x268030               # JSL $04E2A1(전투 글자 타일 올리기)
 INTERIOR, SHARED, FIELD = 0x3C, 0x48, 0x78
-# 3C00~3FFF 를 맵을 불러오며 쓰는 실내 맵(DQ5 트랙의 실내 364맵 VRAM 칸 쓰기 실측). 이 맵들만 48 로 둔다.
-# 전투는 3C00 을 한 번도 쓰지 않아(09/00 전투 실측) 3C 맵에서는 전투 중에도 자리를 바꾸지 않는다.
-USES_3C00 = ((0x00, 0x0A), (0x19, 0x00), (0x1A, 0x00), (0x1C, 0x00), (0x1F, 0x00), (0x20, 0x00), (0x21, 0x00),
-             (0x21, 0x05), (0x32, 0x00))
+# 3C00~3FFF 를 맵을 불러오며 쓰는 실내 맵과 그 자리(DQ5 트랙의 실내 364맵 VRAM 칸 쓰기 실측). 7800 도 비면 78 에 두어
+# 전투에서 자리를 바꾸지 않고, 7800 까지 쓰는 마을 6곳만 48 에 둔다. 전투는 3C00 을 한 번도 쓰지 않아(09/00 전투 실측)
+# 3C 맵에서는 전투 중에도 자리를 바꾸지 않는다.
+USES_3C00 = ((0x00, 0x0A, FIELD), (0x21, 0x05, FIELD), (0x32, 0x00, FIELD),
+             (0x19, 0x00, SHARED), (0x1A, 0x00, SHARED), (0x1C, 0x00, SHARED), (0x1F, 0x00, SHARED),
+             (0x20, 0x00, SHARED), (0x21, 0x00, SHARED))
 SHADOW = 0x7E0725                     # 바라는 BG3SC(게임의 그림자)
 SHOWN = 0x7E1ABC                      # 지금 $2109 에 든 BG3SC ^ 1C(0 이면 1C). 7E:1ABC~1ABF 는 메뉴 공용 창(1AC0~) 앞 빈자리
 BUFFER = 0x7E5000                     # BG3 타일맵 버퍼(00:8E1F 가 통째로 보내는 곳)
@@ -36,6 +39,9 @@ VMADD_SITES = ((0x008E1F, '8f162100'), (0x008E55, '8f162100'), (0x008E75, '8f162
 VMADD_HI_SITE = (0x049849, '8d1721a980')
 # LDA #$1CE0 / STA $0F5E(전투 창 줄 주소, 00:FDA1 이 $2116 에 씀).
 LINE_SITES = ((0x228B4D, 'a9e01c8d5e0f'), (0x228B6F, 'a9e01c8d5e0f'), (0x228BC6, 'a9e01c8d5e0f'))
+# 특수 화면 효과(03:F34D 의 맵 17 mode 2, 22:E6F8 의 BG3SC 19)가 끝나며 BG3SC 를 즉값 1C 로 되돌리는 곳.
+# 일반 필드·실내·전투에서는 돌지 않는다(실행 감시). 지금 자리로 되돌린다.
+RESTORE_SITES = ((0x03F3A9, 'a91c8d0921'), (0x03F54D, 'a91c8d0921'), (0x22E71B, 'a91c8f092100'))
 
 
 def long(a):
@@ -76,8 +82,8 @@ def rebase8():
 
 def clear_code():
     """8비트 A = 새 BG3SC. 이전 값과 다르면 타일맵 버퍼 7E:5000 2KB 를 DMA 7 로 새 자리에 올린 뒤 $0725 에 쓴다.
-    A·P 를 그대로 둔다. 맵을 불러올 때 타일맵 지우기(04:983E)는 BG3SC 를 고르기 전에 옛 자리에서 일어나고,
-    맵에 따라서는 그 뒤 타일맵 전체를 다시 올리지 않으므로, 새 자리는 옛 자리와 같은 버퍼 내용으로 채워 둔다."""
+    A·P 를 그대로 둔다. 화면이 꺼져 있고 NMI 가 돌지 않을 때만 부른다(DMA 7 은 NMI 전송 목록도 쓴다).
+    맵에 따라서는 불러온 뒤 타일맵 전체를 다시 올리지 않으므로, 새 자리는 옛 자리와 같은 버퍼 내용으로 채워 둔다."""
     dma = bytes((
         0xA9, 0x80, 0x8F, 0x15, 0x21, 0x00,            # LDA #$80 / STA $2115(워드 단위로 올림)
         0xA3, 0x01, 0x29, 0xFC, 0x8F, 0x17, 0x21, 0x00,  # LDA 1,S / AND #$FC / STA $2117
@@ -124,10 +130,10 @@ def build(base):
     clear = add(clear_code())
     table = add(b''.join(bytes(p) for p in USES_3C00) + b'\xff')
     third = bytes((0xBF, *long(table + 1), 0xCF, *long(0x7E00BD)))             # LDA table+1,X / CMP $7E00BD
-    step = bytes((0xE8, 0xE8))                                                  # INX / INX
-    pick = bytes((0xA9, INTERIOR, 0x80, 0x02, 0xA9, SHARED))                    # 3C: LDA #$3C / BRA / 48: LDA #$48
+    step = bytes((0xE8, 0xE8, 0xE8))                                            # INX / INX / INX
+    pick = bytes((0xA9, INTERIOR, 0x80, 0x04, 0xBF, *long(table + 2)))          # 3C: LDA #$3C / BRA / 표: LDA table+2,X
     body = (bytes((0xCF, *long(0x7E00BC), 0xD0, len(third) + 2)) + third       # CMP $7E00BC / BNE 다음
-            + bytes((0xF0, len(step) + 2 + 4)) + step)                          # BEQ 48
+            + bytes((0xF0, len(step) + 2 + 4)) + step)                          # BEQ 표
     head = bytes((0xBF, *long(table), 0xC9, 0xFF))                              # LDA table,X / CMP #$FF
     loop = head + bytes((0xF0, len(body) + 2)) + body                           # BEQ 3C
     loop += bytes((0x80, (-(len(loop) + 2)) & 0xFF))                            # BRA loop
@@ -135,15 +141,30 @@ def build(base):
     choose = add(bytes((0xAF, *long(0x7E00BE), 0x30, 0x04,                      # LDA $7E00BE / BMI 실내
                         0xA9, FIELD, 0x80, len(inner))) + inner + bytes((       # LDA #$78 / BRA 지우기로
                         0x22, *long(clear), 0x6B)))                             # JSL 새 자리 지우기 / RTL
-    battle = add(bytes((0x08, 0xE2, 0x20, 0xAF, *long(SHADOW),                  # PHP / SEP #$20 / LDA $7E0725
-                        0xC9, SHARED, 0xD0, 0x06,                               # CMP #$48 / BNE 그대로(3C·78 은 전투가 안 씀)
-                        0xA9, FIELD, 0x8F, *long(SHADOW),                       # LDA #$78 / STA $7E0725
+    # 48 에서 전투가 시작되면 그 자리에서 7800 을 채우고 BG3SC 를 바꾼다. 전투는 시작하고 16프레임 안에 4800 을 쓰는데,
+    # 화면이 켜져 있어(26:8030 에서 $2100 = 0F) 다음 전체 보내기까지 기다리면 그 그림이 BG3 로 보였다(09/00 을 48 로
+    # 둔 시험 롬 실측). NMI 를 끄고 새 vblank 를 기다려, 화면을 끈 채 2KB 를 보낸다. 이 프레임의 NMI 는 건너뛴다.
+    wait = bytes((0xAF, 0x12, 0x42, 0x00, 0x10, 0x03, 0xCA, 0xD0, 0xF7,       # LDA $4212 / BPL / DEX / BNE  vblank 밖까지
+                  0xA2, 0x00, 0x00,                                             # LDX #0
+                  0xAF, 0x12, 0x42, 0x00, 0x30, 0x03, 0xCA, 0xD0, 0xF7))        # LDA $4212 / BMI / DEX / BNE  vblank 까지
+    to78 = bytes((0xAF, 0x1E, 0x00, 0x00, 0x29, 0x7F, 0x8F, 0x00, 0x42, 0x00,   # LDA $1E / AND #$7F / STA $4200
+                  0xC2, 0x10, 0xA2, 0x00, 0x00)) + wait + bytes((               # REP #$10 / LDX #0
+                  0xA9, 0x80, 0x8F, 0x00, 0x21, 0x00,                           # LDA #$80 / STA $2100
+                  0xA9, FIELD, 0x22, *long(clear),                              # LDA #$78 / JSL 새 자리 채우기
+                  0x8F, 0x09, 0x21, 0x00,                                       # STA $2109
+                  0xAF, 0x10, 0x42, 0x00,                                       # LDA $4210(NMI 표시 지우기)
+                  0xAF, 0x1D, 0x00, 0x00, 0x8F, 0x00, 0x21, 0x00,               # LDA $1D / STA $2100
+                  0xAF, 0x1E, 0x00, 0x00, 0x8F, 0x00, 0x42, 0x00))              # LDA $1E / STA $4200
+    battle = add(bytes((0x08, 0x78, 0xE2, 0x20, 0xAF, *long(SHADOW),            # PHP / SEI / SEP #$20 / LDA $7E0725
+                        0xC9, SHARED, 0xD0, len(to78))) + to78 + bytes((        # CMP #$48 / BNE 그대로(3C·78 은 전투가 안 씀)
                         0x28, 0x5C, *long(0x04E2A1))))                          # PLP / JML $04E2A1
+    restore = add(bytes((0xAF, *long(SHOWN), 0x49, 0x1C, 0x8F, 0x09, 0x21, 0x00, 0x6B)))  # LDA $7E1ABC / EOR #$1C / STA $002109 / RTL
     sites = [(a, bytes((0x22, *long(full16 if a == FULL_SITE else store16))), old) for a, old in VMADD_SITES]
     sites.append((VMADD_HI_SITE[0], bytes((0x22, *long(store8), 0xEA)), VMADD_HI_SITE[1]))
     sites += [(a, bytes((0x22, *long(line), 0xEA, 0xEA)), old) for a, old in LINE_SITES]
     sites.append((MAP_CHOOSE, bytes((0x22, *long(choose), 0x6B, 0xEA)), 'a91c8d25076b'))
     sites.append((BATTLE_START, bytes((0x22, *long(battle))), '22a1e204'))
+    sites += [(a, bytes((0x22, *long(restore))) + b'\xea' * (len(old) // 2 - 4), old) for a, old in RESTORE_SITES]
     return bytes(code), sites
 
 
