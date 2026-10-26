@@ -13,6 +13,8 @@
                                                   나올 수 없는 조합을 걸러 줄인다. --raw 면 거르지 않는다
   python fc/dq4/tools/dq4shop.py rom/dq4.nes hidden G K --compare DIR   seq.lua·warp.lua 덤프 폴더(또는 atpc.lua 의
                                                   at_*.bin)의 인물 표와 비교: 숨김, 그리고 옮김·방향·간격·상태·그림 열
+  python fc/dq4/tools/dq4shop.py rom/dq4.nes order        hidden 이 거르는 앞뒤 비트 관계(뒤 비트 ← 켜져 있어야 하는 앞 비트).
+                                                  대화 스크립트의 flag|= 와 뱅크 코드의 BRK n CB m 앞 갈래에서 뽑는다
 
 근거 루틴(코드 읽기와 실측):
   15:$9962  대화 결과 $00:$01 이 7 미만이면 가게 처리 15:$9CBF 로 간다.
@@ -37,6 +39,7 @@ import re
 import sys
 
 from kr_patch.fc import ines
+from kr_patch.fc.dis6502 import OPS, SIZE
 
 import dq4chest
 import dq4data
@@ -636,14 +639,11 @@ def progress_rules(prg):
     return out
 
 
-def order_rules(prg):
-    """{(뒤 비트): {(앞 비트)}}. 뒤 비트를 켜는 곳이 롬 전체에서 대화 스크립트의 「flag|=」 하나뿐이고, 그 문장에 닿는
-    갈래가 앞 비트가 켜져 있는지(조건 1B)를 검사하며, 앞 비트를 끄는 곳이 롬에 없을 때만 「뒤가 켜져 있으면 앞도 켜져 있다」.
-    장면 차례만으로는 이 관계가 서지 않는다(대화 021 은 $627E bit1 을 켤 때 다른 비트를 보지 않음)."""
+def flag_writers(prg):
+    """({(번호, 비트): 켜는 곳 수}, {끄는 곳이 있는 (번호, 비트)}). 켜기·쓰기는 flag_xref 의 set·store·절대 주소 쓰기."""
     import dq4event
-    xref = dq4event.flag_xref(prg)
     sets, clears = {}, set()
-    for n, rows in xref.items():
+    for n, rows in dq4event.flag_xref(prg).items():
         for m, kind, *_ in rows:
             if kind in ('set', 'store', 'write'):
                 for b in (0x80 >> j for j in range(8)):
@@ -653,26 +653,39 @@ def order_rules(prg):
                 for b in (0x80 >> j for j in range(8)):
                     if m is None or kind != 'clear' or not m & b:
                         clears.add((n, b))
+    return sets, clears
+
+
+def one_bit(args):
+    """조건 1B 의 (번호, 마스크) 가 한 비트면 {(번호, 비트)}, 아니면 빈 집합."""
+    bits = {(args[0], b) for b in (0x80 >> j for j in range(8)) if args[1] & b}
+    return frozenset(bits) if len(bits) == 1 else frozenset()
+
+
+def script_needs(tree, pick, out, need=frozenset()):
+    """대화 나무에서 pick(문장) 이 키를 돌려주는 문장마다 그곳에 닿는 갈래가 켜져 있어야 하는 비트(조건 1B)를 모은다.
+    out[키] 는 그 키의 문장 모두에 공통인 비트."""
+    for s in tree:
+        if s[0] == 'if':
+            _, neg, op, args, then, other = s
+            bits = one_bit(args) if op == 0x1B else frozenset()
+            script_needs(then, pick, out, need if neg else need | bits)
+            script_needs(other or [], pick, out, need | bits if neg else need)
+            continue
+        for k in pick(s):
+            out[k] = out[k] & need if k in out else need
+
+
+def talk_rules(prg, sets):
+    """{(번호, 비트): 앞 비트}: 그 비트를 켜는 곳이 롬 전체에서 대화 스크립트의 「flag|=」 하나뿐일 때 그 문장의 조건."""
+    import dq4event
     out, seen = {}, set()
 
-    def walk(tree, need):
-        for s in tree:
-            if s[0] == 'flag|=':
-                n, v = s[1]
-                for b in (0x80 >> j for j in range(8)):
-                    if v & b and sets.get((n, b)) == 1:
-                        out.setdefault((n, b), set()).update(need)
-            elif s[0] == 'if':
-                _, neg, op, args, then, other = s
-                if op == 0x1B:
-                    bits = {(args[0], b) for b in (0x80 >> j for j in range(8)) if args[1] & b}
-                    walk(then, need | bits if not neg and len(bits) == 1 else need)
-                    if other:
-                        walk(other, need | bits if neg and len(bits) == 1 else need)
-                else:
-                    walk(then, need)
-                    if other:
-                        walk(other, need)
+    def pick(s):
+        if s[0] != 'flag|=':
+            return ()
+        n, v = s[1]
+        return [(n, b) for b in (0x80 >> j for j in range(8)) if v & b and sets.get((n, b)) == 1]
 
     for _, _, _, night, recs in dq4event.npc_lists(prg):
         for r in recs:
@@ -682,16 +695,186 @@ def order_rules(prg):
             seen.add(tid)
             c = dq4talk.classify(prg, tid)
             if c[0] == 'script':
-                walk(c[2], frozenset())
+                script_needs(c[2], pick, out)
+    return out
+
+
+# 뱅크 함수 가운데 BRK 뒤 바이트를 더 읽고 복귀 주소를 넘기는 것(스택의 복귀 주소에 INC $01xx,X).
+# 뱅크 16 의 창 열기 07·09 와 01·29 가 한 바이트씩 읽는다(16:$8976·$89A3).
+def inline_bytes(prg, bank, func):
+    import dq4bank
+    t = dq4bank.entry(prg, bank, func)
+    if not 0x8000 <= t < 0xC000:
+        return 0
+    code = prg[bank * 0x4000 + (t & 0x3FFF):][:24]
+    return sum(code[i] == 0xFE and code[i + 2] == 0x01 and code[i + 3] == 0xD0 for i in range(len(code) - 3))
+
+
+def brk_size(prg, b1, b2, cache):
+    n = dq4talk.brk_len(b1, b2)
+    if b2 & 0x0F not in (0x03, 0x0B) and not b1 & 0x80:
+        key = ((b2 >> 4) | (b2 & 0x08) << 1, b1)
+        if key not in cache:
+            cache[key] = inline_bytes(prg, *key)
+        n += cache[key]
+    return n
+
+
+NO_FLAGS = {'STA', 'STX', 'STY', 'CLC', 'SEC', 'CLI', 'SEI', 'CLD', 'SED', 'CLV', 'PHA', 'PHP', 'TXS', 'NOP', 'JMP'}
+
+
+def guard_walk(prg, bank, start, pre, found, cache, limit=3000000):
+    """bank 의 루틴 start 를 갈래 양쪽, 같은 뱅크 JSR 안까지 따라가며 BRK 플래그 켜기(n CB m)마다 그 길에서 켜져 있다고
+    아는 비트를 found[(뱅크, 주소)] 에 더한다. 아는 비트는 pre 와, 길에서 지난 검사(BRK n EB m, LDA/AND/BIT $62xx 뒤
+    BEQ·BNE·BMI·BPL)와 켜기·끄기. 고정 뱅크 JSR 은 결과를 모르는 호출로 넘기고, 간접 JMP·RTI·모르는 명령에서 길을 끝낸다."""
+    import dq4event
+    lo, hi = dq4map.FLAGS, dq4event.FLAGS_END
+    seen = set()
+    todo = [(start, (), frozenset((k, True) for k in pre), None, None, None)]
+    steps = 0
+    while todo:
+        pc, stack, known, z, nf, acc = todo.pop()
+        while 0x8000 <= pc < 0xC000 and (key := (pc, stack, known, z, nf, acc)) not in seen:
+            steps += 1
+            if steps > limit:
+                raise RuntimeError(f'{bank:02X}:{start:04X}: 길이 너무 많음')
+            seen.add(key)
+            op = rd(prg, bank, pc)
+            if op == 0x00:
+                b1, b2 = rd(prg, bank, pc + 1), rd(prg, bank, pc + 2)
+                if b2 & 0x0F == 0x0B and 0xCB <= b2 < 0xFB and b1 <= hi - lo:
+                    m = rd(prg, bank, pc + 3)
+                    if b2 == 0xEB:
+                        z = (b1, m) if m.bit_count() == 1 else None
+                    else:
+                        if b2 == 0xCB:
+                            found.setdefault((bank, pc), []).append(frozenset(k for k, v in known if v))
+                        hit = m if b2 == 0xCB else ~m & 0xFF
+                        known = frozenset((k, v) for k, v in known if not (k[0] == b1 and k[1] & hit)) | \
+                            {((b1, b), b2 == 0xCB) for b in (1 << i for i in range(8)) if hit & b}
+                        z = None
+                else:
+                    z = nf = acc = None
+                pc += brk_size(prg, b1, b2, cache)
+                continue
+            if op not in OPS:
+                break
+            mn, md = OPS[op]
+            n = 1 + SIZE[md]
+            arg = (rd(prg, bank, pc + 1) | (rd(prg, bank, pc + 2) << 8 if n == 3 else 0)) if n > 1 else 0
+            nxt = pc + n
+            if md == 'rel':
+                tgt = (pc + 2 + (arg - 256 if arg & 0x80 else arg)) & 0xFFFF
+                k, taken = {'BEQ': (z, False), 'BNE': (z, True), 'BMI': (nf, True), 'BPL': (nf, False)}.get(mn, (None, None))
+                if k is None:
+                    todo.append((tgt, stack, known, z, nf, acc))
+                    pc = nxt
+                    continue
+                have = dict(known).get(k)
+                if have in (None, taken):
+                    todo.append((tgt, stack, known | {(k, taken)}, z, nf, acc))
+                if have not in (None, not taken):
+                    break
+                known, pc = known | {(k, not taken)}, nxt
+                continue
+            if mn == 'JSR':
+                z = nf = acc = None
+                if 0x8000 <= arg < 0xC000 and len(stack) < 8 and nxt not in stack:
+                    stack, pc = stack + (nxt,), arg
+                else:
+                    pc = nxt
+                continue
+            if mn == 'JMP':
+                if md != 'abs':
+                    break
+                pc = arg
+                continue
+            if mn == 'RTS' and stack:
+                pc, stack = stack[-1], stack[:-1]
+                continue
+            if mn in ('RTS', 'RTI'):
+                break
+            if mn == 'LDA' and md == 'abs' and lo <= arg <= hi:
+                acc, z, nf = (arg - lo, 0xFF), None, (arg - lo, 0x80)
+            elif mn == 'AND' and md == 'imm' and acc is not None:
+                m = acc[1] & arg
+                acc = (acc[0], m)
+                z = acc if m.bit_count() == 1 else None
+                nf = (acc[0], 0x80) if m & 0x80 else None
+            elif mn == 'BIT' and md == 'abs' and lo <= arg <= hi:
+                z, nf = None, (arg - lo, 0x80)
+            elif mn not in NO_FLAGS:
+                z = nf = acc = None
+            pc = nxt
+
+
+def code_entries(prg):
+    """[(뱅크, 주소, 처음부터 켜져 있는 비트)]: 코드 뱅크의 BRK 일반 호출이 부르는 함수, 1C 이벤트 표, 1D 블록 이벤트 표,
+    대화 호출 문장이 부르는 뱅크 15 루틴. 마지막 것은 그 주소를 부르는 문장 모두에 공통인 대화 조건(1B)을 갖고 시작한다."""
+    import dq4bank
+    import dq4event
+    ent = set()
+    for p in range(len(prg) - 3):
+        b1, b2 = prg[p + 1], prg[p + 2]
+        if prg[p] or p // 0x4000 in dq4event.DATA_BANKS or b2 & 0x0F in (0x03, 0x0B) or b1 & 0x80:
+            continue
+        bank = (b2 >> 4) | (b2 & 0x08) << 1
+        t = dq4bank.entry(prg, bank, b1)
+        if bank not in dq4event.DATA_BANKS and 0x8000 <= t < 0xC000:
+            ent.add((bank, t))
+    ent |= {(0x1C, a) for a in dq4talk.event_table(prg)}
+    ent |= {(0x1D, dq4event.event_addr(prg, i)) for i in range(dq4event.EVENT_COUNT)}
+    calls = {}
+    for t in range(dq4talk.SCRIPT_FIRST, dq4talk.YESNO_FIRST):
+        script_needs(dq4talk.classify(prg, t)[2], lambda s: [s[1][1] << 8 | s[1][0]] if s[0] in ('call', 'call+2') else (),
+                     calls)
+    ent |= {(CODE_BANK, a) for a in calls if 0x8000 <= a < 0xC000}
+    return [(b, a, calls.get(a, frozenset()) if b == CODE_BANK else frozenset()) for b, a in sorted(ent)]
+
+
+def code_guards(prg):
+    """{(뱅크, 주소): 그 BRK 플래그 켜기에 닿는 모든 길에서 켜져 있는 비트}. 진입점에서 닿지 않는 켜기는 빠진다."""
+    found, cache = {}, {}
+    for bank, a, pre in code_entries(prg):
+        guard_walk(prg, bank, a, pre, found, cache)
+    return {k: frozenset.intersection(*v) for k, v in found.items()}
+
+
+def order_rules(prg):
+    """{(뒤 비트): {(앞 비트)}}. 뒤 비트를 켜는 곳이 롬 전체에서 하나뿐이고, 그곳에 닿는 모든 길이 앞 비트가 켜져 있음을
+    거치며, 앞 비트를 끄는 곳이 롬에 없을 때만 「뒤가 켜져 있으면 앞도 켜져 있다」. 켜는 곳은 대화 스크립트의 「flag|=」
+    (조건 1B)와 뱅크 코드의 BRK n CB m(앞의 플래그 검사 갈래, 같은 길에서 먼저 켠 비트, 부르는 대화 문장의 조건).
+    장면 차례만으로는 이 관계가 서지 않는다(대화 021 은 $627E bit1 을 켤 때 다른 비트를 보지 않음). 관계는 이어 붙여 닫는다."""
+    sets, clears = flag_writers(prg)
+    need = talk_rules(prg, sets)
+    for (bank, a), bits in code_guards(prg).items():
+        o = bank * 0x4000 + (a & 0x3FFF)
+        n, m = prg[o + 1], prg[o + 3]
+        for b in (0x80 >> j for j in range(8)):
+            if m & b and sets.get((n, b)) == 1:
+                need[(n, b)] = need.get((n, b), frozenset()) | bits
     rules = {}
-    for (n, b), need in out.items():
+    for (n, b), bits in need.items():
         a = dq4map.FLAGS + n
-        keep = {(f'${dq4map.FLAGS + e:04X}', eb) for e, eb in need
+        keep = {(f'${dq4map.FLAGS + e:04X}', eb) for e, eb in bits
                 if (e, eb) != (n, b) and (e, eb) not in clears and dq4map.FLAGS + e not in TRANSIENT
                 and (dq4map.FLAGS + e, eb) not in CHAPTER_END_CLEAR}
         if keep and a not in TRANSIENT:
             rules[(f'${a:04X}', b)] = keep
+    grew = True
+    while grew:
+        grew = False
+        for k, v in rules.items():
+            more = set().union(*(rules.get(x, set()) for x in v)) - v - {k}
+            if more:
+                v |= more
+                grew = True
     return rules
+
+
+def show_order(prg):
+    for (a, b), need in sorted(order_rules(prg).items()):
+        print(f'{a}&{b:02X} ← ' + ', '.join(f'{e}&{eb:02X}' for e, eb in sorted(need)))
 
 
 RULES = None      # hidden() 이 progress_rules 로 채운다. None 이면 관계를 보지 않음
@@ -983,6 +1166,8 @@ def main():
         show_all(prg)
     elif a[0] == 'people':
         show_people(prg)
+    elif a[0] == 'order':
+        show_order(prg)
     elif a[0] == 'hidden' and '--compare' in a:
         compare_hidden(prg, int(a[1], 16), int(a[2], 16), a[a.index('--compare') + 1])
     elif a[0] == 'hidden':
