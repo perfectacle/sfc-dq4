@@ -42,6 +42,13 @@ BLOCK_TABLE = 0x7EB000
 PALETTE_LINE1 = 0x3934
 WALL = 8
 FLOOR = 1
+WATER_BLOCK = 0x01
+WATER_FRAMES = ("water0", "water1", "water2")
+WATER_AT = 0x40C000
+WATER_PERIOD = 24
+ANIM_AT = 0x3DF000
+# Every caller of 15:F7D0, which picks the per-frame routine 7E:1AA5 after a map loads.
+ROUTINE_CALLS = (0x018F84, 0x0198FC, 0x019FD6)
 
 
 def _off(addr):
@@ -171,10 +178,18 @@ def _asm_targets():
     return code, fixups
 
 
+# Hooks run where the original code returned or called; keep the caller's A and P intact.
+SAVE_A = bytes((0x08, 0xC2, 0x30, 0x48, 0xE2, 0x20))
+RESTORE_A = bytes((0xC2, 0x30, 0x68, 0x28))
+
+
 def hooks(block_count):
     """Machine code for the two bank-01 hooks; returns (address, bytes) and the patched call sites."""
     base = HOOK_AT & 0xFFFF
-    load, fix = _asm_targets()
+    load = bytearray(SAVE_A)
+    body, fix = _asm_targets()
+    fix = [len(load) + at for at in fix]
+    load += body
     # Not a replaced map: rebuild the original block table only if a replaced map left its own
     # there. Before the game first builds the table it is all zero, so test for our entry.
     entry1 = BLOCK_TABLE + 2
@@ -199,7 +214,7 @@ def hooks(block_count):
         0x54, 0x7E, BLOCK_BANK,
     ))
     done = len(load)
-    load += bytes((0x28, 0xAB, 0x60))
+    load += RESTORE_A + bytes((0x28, 0xAB, 0x60))
     for at in fix:
         load[at] = ours - (at + 1)
     load[skip_restore] = done - (skip_restore + 1)
@@ -207,7 +222,7 @@ def hooks(block_count):
 
     pal_at = base + len(load)
     # 01:996A rewrites some BG lines per map after the palette loader, so override after it.
-    pal = bytearray((0x20, 0x6A, 0x99, 0x08, 0xE2, 0x20))
+    pal = bytearray((0x20, 0x6A, 0x99)) + SAVE_A
     start = len(pal)
     body, fix = _asm_targets()
     pal += body
@@ -222,7 +237,7 @@ def hooks(block_count):
         0x54, 0x7E, GFX_BANK,
     ))
     out = len(pal)
-    pal += bytes((0x28, 0x60))
+    pal += RESTORE_A + bytes((0x60,))
     for at in fix:
         pal[start + at] = ours - (start + at + 1)
     pal[skip] = out - (skip + 1)
@@ -236,6 +251,56 @@ def hooks(block_count):
     return code, sites
 
 
+def water_animation(water_ids):
+    """Per-frame routine for the replaced maps: every WATER_PERIOD frames queue the next water
+    frame's four CHR for the NMI DMA list (00:8F53: VRAM word 1C1C+2i, bytes 1C26+2i, source
+    1C0D+3i, count $BA), the same list 03:D4B5 uses for DQ5's own animated tiles."""
+    tick, frame = 0x7E1ECE, 0x7E1EC2
+    routine_at = ANIM_AT + 0x60
+    # The queueing body is longer than a relative branch reaches, so skip it with BCS/JMP.
+    routine = bytearray((0x08, 0xC2, 0x30, 0xAF) + tuple(tick.to_bytes(3, "little")) + (
+        0x1A, 0xC9, WATER_PERIOD, 0x00, 0xB0, 0x03, 0x4C, 0x00, 0x00))
+    skip = len(routine) - 2
+    routine += bytes((0xAF,) + tuple(frame.to_bytes(3, "little")) + (0x1A, 0xC9, len(WATER_FRAMES), 0x00,
+                     0x90, 0x03, 0xA9, 0x00, 0x00, 0x8F) + tuple(frame.to_bytes(3, "little")))
+    routine += bytes((0x0A,) * 7 + (0xAA,))
+    for k, chr_id in enumerate(water_ids):
+        slot = 0x7E6000 + chr_id * 2
+        source = (WATER_AT & 0xFFFF) + k * 32
+        routine += bytes((0xAF,) + tuple(slot.to_bytes(3, "little")) + (
+            0x29, 0xFF, 0x03, 0x0A, 0x0A, 0x0A, 0x0A, 0x18, 0x69, 0x00, 0x20,
+            0x8F, 0x1C + 2 * k, 0x1C, 0x00,
+            0xA9, 0x20, 0x00, 0x8F, 0x26 + 2 * k, 0x1C, 0x00,
+            0x8A, 0x18, 0x69, source & 0xFF, source >> 8, 0x8F, 0x0D + 3 * k, 0x1C, 0x00,
+            0xE2, 0x20, 0xA9, WATER_AT >> 16, 0x8F, 0x0F + 3 * k, 0x1C, 0x00, 0xC2, 0x20))
+    routine += bytes((0xE2, 0x20, 0xA9, len(water_ids), 0x85, 0xBA, 0xC2, 0x20, 0xA9, 0x00, 0x00))
+    store = (routine_at + len(routine)) & 0xFFFF
+    routine[skip:skip + 2] = store.to_bytes(2, "little")
+    routine += bytes((0x8F,) + tuple(tick.to_bytes(3, "little")) + (0x28, 0x6B))
+
+    wrapper = bytearray((0x22, 0xD0, 0xF7, 0x15)) + SAVE_A
+    start = len(wrapper)
+    body, fix = _asm_targets()
+    wrapper += body + bytes((0x80, 0x00))
+    out_fix = len(wrapper) - 1
+    ours = len(wrapper)
+    wrapper += bytes((0xC2, 0x20, 0xA9, routine_at & 0xFF, routine_at >> 8 & 0xFF, 0x8F, 0xA6, 0x1A, 0x7E,
+                      0xE2, 0x20, 0xA9, routine_at >> 16, 0x8F, 0xA8, 0x1A, 0x7E,
+                      0xA9, 0x00, 0x8F, 0xCE, 0x1E, 0x7E, 0x8F, 0xCF, 0x1E, 0x7E,
+                      0x8F, 0xC2, 0x1E, 0x7E, 0x8F, 0xC3, 0x1E, 0x7E))
+    out = len(wrapper)
+    wrapper += RESTORE_A + bytes((0x6B,))
+    for at in fix:
+        wrapper[start + at] = ours - (start + at + 1)
+    wrapper[out_fix] = out - (out_fix + 1)
+    if len(wrapper) > routine_at - ANIM_AT:
+        raise ValueError("animation wrapper overlaps the per-frame routine")
+    code = bytes(wrapper) + bytes(routine_at - ANIM_AT - len(wrapper)) + bytes(routine)
+    sites = [(at, bytes((0x22, 0xD0, 0xF7, 0x15)), bytes((0x22,)) + ANIM_AT.to_bytes(3, "little"))
+             for at in ROUTINE_CALLS]
+    return code, sites
+
+
 def _hex(data):
     return " ".join(f"{b:02X}" for b in data)
 
@@ -244,10 +309,27 @@ def _cpu(addr):
     return f"{addr >> 16:02X}:{addr & 0xFFFF:04X}"
 
 
+def water_frames(assets, chr_data, water_ids):
+    """Planar CHR of each water frame in the water block's quadrant order; frame 0 must be the map's."""
+    frames = []
+    for name in WATER_FRAMES:
+        image = assets[name]
+        frames.append([_planar(_tiles(image, x, y)[0]) for y in (0, 8) for x in (0, 8)])
+    if [chr_data[i] for i in water_ids] != frames[0]:
+        raise ValueError("the map's water block is not the first water frame")
+    return b"".join(b"".join(f) for f in frames)
+
+
 def build(dq5_path, dq4_path, out):
     dq5 = Path(dq5_path).read_bytes()
     prg = ines.prg(Path(dq4_path).read_bytes())
-    chr_data, chr_banks, block_words, maps, palette = build_graphics(prg, create_assets())
+    assets = create_assets()
+    chr_data, chr_banks, block_words, maps, palette = build_graphics(prg, assets)
+    water_blocks = {local[WATER_BLOCK] for _, local in maps.values() if WATER_BLOCK in local}
+    if len(water_blocks) != 1:
+        raise ValueError(f"expected one shared water block, got {water_blocks}")
+    water_ids = block_words[water_blocks.pop()]
+    anim_code, anim_sites = water_animation(water_ids)
     out.mkdir(parents=True, exist_ok=True)
 
     blocks, pointers = bytearray(), bytearray()
@@ -275,12 +357,14 @@ def build(dq5_path, dq4_path, out):
         {"at": _cpu(GFX_BANK << 16 | NIBBLES_AT), "hex": _hex(nibbles), "note": "CHR 팔레트 니블"},
         {"at": _cpu(GFX_BANK << 16 | PALETTE_AT), "hex": _hex(colors), "note": "BG 팔레트 1~7번 줄"},
         {"at": _cpu(HOOK_AT), "hex": _hex(code), "note": "바꾼 맵이면 CHR·블록·팔레트를 그래픽 뱅크로"},
+        {"at": _cpu(WATER_AT), "hex": _hex(water_frames(assets, chr_data, water_ids)), "note": "물 그림 3장"},
+        {"at": _cpu(ANIM_AT), "hex": _hex(anim_code), "note": "바꾼 맵의 매 프레임 물 루틴"},
     ]
-    for at, orig, new in sites:
+    for at, orig, new in sites + anim_sites:
         writes.append({"at": _cpu(at), "hex": _hex(new), "orig": _hex(orig), "note": "환경 맵 훅"})
     rom = Rom(dq5)
     at = MAPS_AT
-    report = {"chr": len(chr_data), "blocks": len(block_words), "maps": {}}
+    report = {"chr": len(chr_data), "blocks": len(block_words), "water_chr": list(water_ids), "maps": {}}
     for name, (source, local) in maps.items():
         target = TARGETS[name]
         doc = map_document(name, source, local, target)
