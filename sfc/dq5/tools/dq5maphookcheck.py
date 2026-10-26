@@ -1,7 +1,8 @@
 """맵별 루틴 표 쓰기(dq5maphook.py)를 MesenCE 에서 확인한다.
 
-변경 롬 다섯 벌(루틴 막기, 플래그 조건 둘, 표를 15:FF80 으로 옮겨 다시 쓰기, 제자리에 항목 하나를 빼고 다시 쓰기)과
-원본 롬에서 같은 맵에 순간이동해, 15:F7D0 이 고른 루틴·셀 버퍼 값·걸은 뒤의 맵과 칸을 견준다.
+변경 롬 여덟 벌(루틴 막기, 플래그 조건 둘, 표를 15:FF80 으로 옮겨 다시 쓰기, 제자리에 항목 하나를 빼고 다시 쓰기,
+163개로 늘려 뱅크 3F 로 옮기기, 15:FF5C 둘째 표에 01/04 항목 더하기·플래그 조건)과 원본 롬에서 같은 맵에 순간이동해,
+15:F7D0 이 고른 루틴·셀 읽기 루틴($1AAA)·셀 버퍼 값·걸은 뒤의 맵과 칸을 견준다.
 원본 롬·선실 상태는 읽기만 하고 출력은 --out 의 새 하위 폴더에 둔다.
   MESENCE=… python sfc/dq5/tools/dq5maphookcheck.py rom/dq5.sfc --state work/state/ship.mss
 """
@@ -16,7 +17,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from dq5maphook import FORMAT, NONE, dump, text
+from dq5maphook import CELL_FORMAT, FORMAT, NONE, cells_dump, dump, text
 from dq5map import Rom
 
 HERE = Path(__file__).resolve().parent
@@ -41,6 +42,9 @@ def edits(rom):
     flag = {'index': '00', 'mask': '40'}
     hall = {'group': '01', 'map': '04', 'flag': None, 'post_load': text(NONE), 'per_frame': tower['per_frame']}
     strip = [{k: v for k, v in e.items() if k != 'index'} for e in entries]
+    cells = [{k: v for k, v in e.items() if k != 'index'} for e in cells_dump(rom)['entries']]
+    # 01/04 를 17/01 의 셀 읽기 루틴(00:BCC3)으로. 「7E:2190 bit6 이 켜졌을 때」 조건을 단 것도 만든다.
+    room = {'group': '01', 'map': '04', 'flag': flag | {'when': 'set'}, 'routine': cells[0]['routine']}
     return {
         'off': ('patch', None, [{'index': stairs['index'], 'post_load': text(NONE)},
                                 {'index': tower['index'], 'per_frame': text(NONE)}]),
@@ -48,6 +52,10 @@ def edits(rom):
         'clear': ('patch', None, [{'index': stairs['index'], 'flag': flag | {'when': 'clear'}}]),
         'moved': ('rewrite', '15:FF80', [hall] + [strip[e['index']] for e in (stairs, ship)]),
         'short': ('rewrite', '15:F907', [e for i, e in enumerate(strip) if i != tower['index']]),
+        # 162개 뒤에 01/04 를 더해 163개. 뱅크 15 에 들어가지 않으므로 3F 로 옮기고 로더의 DB 를 스텁으로 바꾼다.
+        'grown': ('rewrite', '3F:8000', strip + [hall], '15:FFF0'),
+        'cells': ('cells-rewrite', '15:FF80', cells + [room | {'flag': None}]),
+        'cellflag': ('cells-rewrite', '15:FF80', cells + [room]),
     }
 
 
@@ -68,6 +76,16 @@ CASES = [
     ('tower-moved', 'moved', TOWER, None, ('15:F906', '15:F906'), None, '04/00', None),
     ('stairs-short', 'short', STAIRS, None, ('02:94E0', None), True, '01/04', (13, 47)),
     ('tower-short', 'short', TOWER, None, ('15:F906', '15:F906'), None, '04/00', None),
+    ('hall-grown', 'grown', HALL, None, (None, '02:A7BD'), None, '04/0A', (8, 17)),
+    ('tower-grown', 'grown', TOWER, None, (None, '02:A7BD'), None, '04/0A', (8, 17)),
+    ('stairs-grown', 'grown', STAIRS, None, ('02:94E0', None), True, '01/04', (13, 47)),
+]
+# (이름, 롬, SET, 01/04 를 풀었을 때의 $1AAA, JMP ($1AAA) 로 00:BCC3 에 갔는가)
+CELL_CASES = [
+    ('room-original', 'original', None, 'B869', False),
+    ('room-cells', 'cells', None, 'BCC3', True),
+    ('room-cellflag', 'cellflag', None, 'B869', False),
+    ('room-cellflag-adult', 'cellflag', ADULT, 'BCC3', True),
 ]
 
 
@@ -100,9 +118,11 @@ def run(case, roms, state, out, mesence, libdir):
     log = (dest / 'warp.txt').read_text(encoding='utf-8')
     final = re.search(r'final map (\w\w/\w\w) cell (\d+),(\d+)', log)
     target = to.split(',')[0]
-    load = re.search(rf'load {target} BE=\w\w post (\w\w:\w{{4}}) frame (\w\w:\w{{4}})(?: cell (\w\w))?', log)
+    load = re.search(rf'load {target} BE=\w\w post (\w\w:\w{{4}}) frame (\w\w:\w{{4}})(?: cell (\w\w))? cellread (\w{{4}})', log)
     require(final is not None and load is not None and 'timeout' not in log, f'{name}: 결과가 없음')
-    return {'post': load[1], 'frame': load[2], 'cell': load[3], 'map': final[1], 'at': [int(final[2]), int(final[3])]}
+    jumps = dict(re.findall(r'jump (\w{4}) (\d+)', log))
+    return {'post': load[1], 'frame': load[2], 'cell': load[3], 'cellread': load[4], 'jumps': jumps,
+            'map': final[1], 'at': [int(final[2]), int(final[3])]}
 
 
 def main():
@@ -123,13 +143,14 @@ def main():
         print(f'실행 출력: {out}', flush=True)
         roms = {'original': original}
         tool = HERE / 'dq5maphook.py'
-        for key, (mode, at, entries) in edits(Rom(original.read_bytes())).items():
+        for key, (mode, at, entries, *stub) in edits(Rom(original.read_bytes())).items():
             source, manifest = out / f'{key}.json', out / f'{key}.patch.json'
-            source.write_text(json.dumps({'format': FORMAT, 'entries': entries}, ensure_ascii=False, indent=2) + '\n',
+            kind = CELL_FORMAT if mode == 'cells-rewrite' else FORMAT
+            source.write_text(json.dumps({'format': kind, 'entries': entries}, ensure_ascii=False, indent=2) + '\n',
                               encoding='utf-8')
-            where = ['--at', at] if at else []
+            where = (['--at', at] if at else []) + (['--stub-at', stub[0]] if stub else [])
             command(tool, original, mode, source, *where, '-o', manifest)
-            command(tool, original, 'check', source, *where)
+            command(tool, original, 'cells-check' if mode == 'cells-rewrite' else 'check', source, *where)
             roms[key] = out / f'{key}.sfc'
             command(HERE / 'dq5build.py', original, 'build', manifest, '-o', roms[key], '--ips', out / f'{key}.ips')
         krlua = Path(subprocess.run(['krpatch', 'sfc', 'lua'], capture_output=True, text=True,
@@ -137,8 +158,10 @@ def main():
         libdir = out / 'lib'
         shutil.copytree(krlua, libdir)
         shutil.copyfile(HERE / 'lua/dq5warp.lua', libdir / 'boot.lua')
+        cell_cases = [(name, rom, HALL, setting) for name, rom, setting, _, _ in CELL_CASES]
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-            seen = list(pool.map(lambda case: run(case, roms, state, out, mesence, libdir), CASES))
+            seen = list(pool.map(lambda case: run(case, roms, state, out, mesence, libdir), CASES + cell_cases))
+        seen, cell_seen = seen[:len(CASES)], seen[len(CASES):]
         results = []
         for (name, rom, scene, setting, (post, frame), made, want_map, want_at), got in zip(CASES, seen):
             ok = ((post is None or got['post'] == post) and (frame is None or got['frame'] == frame)
@@ -147,9 +170,13 @@ def main():
             results.append({'case': name, 'rom': rom, 'to': scene[0], 'set': setting, **got,
                             'expected': {'post': post, 'frame': frame, 'exit_cell': made, 'map': want_map,
                                          'at': list(want_at) if want_at else None}, 'passed': ok})
+        for (name, rom, setting, want, jumped), got in zip(CELL_CASES, cell_seen):
+            ok = got['cellread'] == want and ('BCC3' in got['jumps']) == jumped and got['map'] == '01/04'
+            results.append({'case': name, 'rom': rom, 'to': HALL[0], 'set': setting, **got,
+                            'expected': {'cellread': want, 'jumps_bcc3': jumped, 'map': '01/04'}, 'passed': ok})
         (out / 'results.json').write_text(json.dumps(results, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
         for r in results:
-            print(f'{r["case"]}: post {r["post"]} frame {r["frame"]} cell {r["cell"]} → {r["map"]} {tuple(r["at"])}'
+            print(f'{r["case"]}: post {r["post"]} frame {r["frame"]} cell {r["cell"]} cellread {r["cellread"]} → {r["map"]} {tuple(r["at"])}'
                   f'{"" if r["passed"] else " 불일치"}')
         failed = [r['case'] for r in results if not r['passed']]
         require(not failed, f'불일치: {", ".join(failed)}')

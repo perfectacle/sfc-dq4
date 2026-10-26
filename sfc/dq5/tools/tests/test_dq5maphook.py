@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import dq5maphook as hook
 from dq5map import Rom, lorom
 
-MAPS = [(0x01, 0x04), (0x01, 0x05), (0x04, 0x00), (0x04, 0x05), (0x17, 0x00)]
+MAPS = [(0x01, 0x04), (0x01, 0x05), (0x04, 0x00), (0x04, 0x05), (0x17, 0x00), (0x17, 0x01)]
 ROWS = [
     bytes.fromhex('01 05 ff 00 e0 94 02 06 f9 15'),
     bytes.fromhex('04 00 ff 00 c1 94 02 bd a7 02'),
@@ -29,6 +29,10 @@ def rom(rows=ROWS, base=0x15F907):
     for i, raw in enumerate(rows):
         data[start + i * 10:start + i * 10 + 10] = raw
     data[start + len(rows) * 10] = 0xFF
+    data[lorom(hook.LOADER_CALL):lorom(hook.LOADER_CALL) + 3] = bytes.fromhex('20 f4 f7')
+    for at, opcode, offset in hook.CELL_OPERANDS:
+        data[lorom(at):lorom(at) + 3] = bytes([opcode]) + (0xFF5C + offset).to_bytes(2, 'little')
+    data[lorom(0x15FF5C):lorom(0x15FF5C) + 7] = bytes.fromhex('17 01 ff 00 c3 bc ff')
     return Rom(bytes(data))
 
 
@@ -37,8 +41,11 @@ def apply(r, result):
     for w in result['writes']:
         bank, addr = (int(v, 16) for v in w['at'].split(':'))
         off = lorom(bank << 16 | addr)
-        new, orig = bytes.fromhex(w['hex']), bytes.fromhex(w['orig'])
-        assert data[off:off + len(orig)] == orig
+        new = bytes.fromhex(w['hex'])
+        if 'orig' in w:
+            assert data[off:off + len(new)] == bytes.fromhex(w['orig'])
+        if off + len(new) > len(data):
+            data += bytes(off + len(new) - len(data))
         data[off:off + len(new)] = new
     return Rom(bytes(data))
 
@@ -198,6 +205,76 @@ class MapHookTests(unittest.TestCase):
         kept = copy.deepcopy(source)
         hook.patch(r, source)
         self.assertEqual(source, kept)
+
+
+class GrowAndCellTests(unittest.TestCase):
+    def setUp(self):
+        patcher = mock('dq5maphook.all_maps', return_value=MAPS)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        quiet = contextlib.redirect_stderr(io.StringIO())
+        quiet.__enter__()
+        self.addCleanup(quiet.__exit__, None, None, None)
+
+    def entries(self, r):
+        return [{k: v for k, v in e.items() if k != 'index'} for e in hook.dump(r)['entries']]
+
+    def test_grow_into_other_bank_through_stub(self):
+        r = rom()
+        rows = self.entries(r) * 40
+        result = hook.rewrite(r, doc(*rows), 0x3F8000, stub_at=0x15FFF0)
+        self.assertEqual(result['rom_size'], 2)
+        self.assertFalse(any('orig' in w for w in result['writes'] if w['at'] in ('3F:8000', '15:FFF0')))
+        after = apply(r, result)
+        self.assertEqual(after.d[lorom(0x15FFF0):lorom(0x15FFF0) + 10], bytes.fromhex('8b a9 3f 48 ab 20 f4 f7 ab 60'))
+        self.assertEqual(after.u16(hook.LOADER_CALL + 1), 0xFFF0)
+        self.assertEqual(hook.table_base(after), 0x3F8000)
+        self.assertEqual(len(hook.dump(after)['entries']), 200)
+        self.assertEqual(hook.rewrite(after, doc(*rows), 0x3F8000, stub_at=0x15FFF0)['writes'], [])
+        self.assertEqual(hook.cells_dump(after)['table'], '15:FF5C')
+        with self.assertRaises(ValueError):
+            hook.rewrite(after, doc(*rows[:3]), 0x15FF80)
+
+    def test_grow_rejects(self):
+        r = rom()
+        rows = self.entries(r)
+        for at, stub in ((0x408000, 0x15FFF0), (0x3F8000, None), (0x15FF80, 0x15FFF0), (0x3F7000, 0x15FFF0),
+                         (0x3FFFF0, 0x15FFF0), (0x3F8000, 0x168000)):
+            with self.subTest(at=hex(at), stub=stub), self.assertRaises(ValueError):
+                hook.rewrite(r, doc(*rows), at, stub_at=stub)
+        hook.rewrite(r, doc(*rows), 0x8F8000, stub_at=0x15FFF0)
+
+    def test_cells_dump_and_rewrite(self):
+        r = rom()
+        out = hook.cells_dump(r)
+        self.assertEqual(out['entries'], [{'index': 0, 'group': '17', 'map': '01', 'flag': None,
+                                           'routine': '00:BCC3'}])
+        rows = [{k: v for k, v in e.items() if k != 'index'} for e in out['entries']]
+        self.assertEqual(hook.cells_rewrite(r, {'format': hook.CELL_FORMAT, 'entries': rows})['writes'], [])
+        new = rows + [{'group': '01', 'map': '04', 'routine': '00:BCC3',
+                       'flag': {'index': '00', 'mask': '40', 'when': 'set'}}]
+        result = hook.cells_rewrite(r, {'format': hook.CELL_FORMAT, 'entries': new}, 0x15FF80)
+        after = apply(r, result)
+        self.assertEqual(after.d[lorom(0x15FF80):lorom(0x15FF80) + 13], bytes.fromhex('17 01 ff 00 c3 bc 01 04 00 40 c3 bc ff'))
+        for at, _, offset in hook.CELL_OPERANDS:
+            self.assertEqual(after.u16(at + 1), 0xFF80 + offset)
+        self.assertEqual(hook.cells_dump(after)['entries'][1]['flag'], {'index': '00', 'mask': '40', 'when': 'set'})
+        self.assertEqual(hook.table_base(after), 0x15F907)
+
+    def test_cells_rejects(self):
+        r = rom()
+        row = {'group': '01', 'map': '04', 'flag': None, 'routine': '00:BCC3'}
+        bad = [([row, row], None), ([row | {'routine': '00:9000'}], None), ([row | {'routine': '01:BCC3'}], None),
+               ([row | {'map': '09'}], None), ([row] * 22, 0x15FF80), ([row], 0x15F907), ([row | {'index': 3}], None), ([row], 0x2FFFC0)]
+        for rows, at in bad:
+            with self.subTest(rows=rows[:1], at=at), self.assertRaises(ValueError):
+                hook.cells_rewrite(r, {'format': hook.CELL_FORMAT, 'entries': rows}, at)
+        hook.cells_rewrite(r, {'format': hook.CELL_FORMAT, 'entries': [row | {'routine': '00:9000'}]}, raw_routines=True)
+        with contextlib.redirect_stdout(io.StringIO()):
+            hook.cells_check(r)
+            hook.cells_check(r, {'format': hook.CELL_FORMAT, 'entries': [row]}, 0x15FF80)
+        with self.assertRaises(ValueError):
+            hook.cells_rewrite(r, {'format': hook.CELL_FORMAT, 'entries': [row | {'routine': '01:9000'}]}, raw_routines=True)
 
 
 if __name__ == '__main__':

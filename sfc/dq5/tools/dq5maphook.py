@@ -2,12 +2,18 @@
 
 항목마다 맵 고르기(그룹·맵 또는 필드 세계), 플래그 조건, 맵을 푼 뒤 부를 루틴, 매 프레임 루틴을 JSON 으로 다룬다.
 patch 는 항목 수를 그대로 두고 고치고, rewrite 는 표 전체를 다른 항목 수로 --at 자리에 다시 쓴다.
+뱅크 15 밖(00~3F·80~BF)으로 옮기면 로더가 그 뱅크를 DB 로 두고 표를 읽도록 15:F7E2 의 JSR 을 작은 스텁으로 돌린다.
+cells-dump·cells-rewrite 는 15:FF5C 의 둘째 표(맵마다 셀 읽기 루틴 $1AAA)를 다룬다.
 형식: sfc/dq5/docs/dq5-map-format.md 의 「맵별 루틴」, sfc/dq5/docs/dq5-build-format.md 의 `dq5maphook/1`.
 
   python sfc/dq5/tools/dq5maphook.py rom/dq5.sfc dump -o work/maphook/dump.json
   python sfc/dq5/tools/dq5maphook.py rom/dq5.sfc patch work/maphook/edit.json -o work/build/maphook.dq5patch.json
   python sfc/dq5/tools/dq5maphook.py rom/dq5.sfc rewrite work/maphook/table.json --at 15:FF80 -o work/build/maphook.dq5patch.json
   python sfc/dq5/tools/dq5maphook.py rom/dq5.sfc check [work/maphook/edit.json] [--at 15:FF80]
+  python sfc/dq5/tools/dq5maphook.py rom/dq5.sfc rewrite work/maphook/table.json --at 3F:8000 --stub-at 15:FFF0 -o …
+  python sfc/dq5/tools/dq5maphook.py rom/dq5.sfc cells-dump -o work/maphook/cells.json
+  python sfc/dq5/tools/dq5maphook.py rom/dq5.sfc cells-rewrite work/maphook/cells.json --at 15:FF80 -o …
+  python sfc/dq5/tools/dq5maphook.py rom/dq5.sfc cells-check [work/maphook/cells.json] [--at 15:FF80]
 """
 import argparse
 import json
@@ -19,6 +25,7 @@ from dq5map import Rom, lorom
 from dq5mapwrite import all_maps
 
 FORMAT = 'dq5maphook/1'
+CELL_FORMAT = 'dq5cellhook/1'
 ENTRY = 10
 NONE = 0x15F906
 FIELD = 0xFE
@@ -31,6 +38,18 @@ OPERANDS = ((0x15F7F7, 0xBD, 0), (0x15F80A, 0xBD, 1), (0x15F85D, 0xDD, 1), (0x15
             (0x15F880, 0xBD, 7), (0x15F87A, 0xBD, 8), (0x15F874, 0xBD, 9))
 # 표를 다시 쓸 수 있는 자리. 원래 표(162개와 끝 FF)와 빈 자리 지도의 15:FF80~. 15:FF5C~FF62 는 15:F887 이 읽는 다른 표다.
 SPANS = ((0x15F907, 0x15FF5C), (0x15FF80, 0x160000))
+# 15:F7E2 JSR $F7F4. 뱅크 15 밖의 표는 이 JSR 을 스텁 [PHB][LDA #뱅크][PHA][PLB][JSR $F7F4][PLB][RTS] 로 돌린다.
+# 로더는 $1949·$1AA6~$1AA8 을 abs 로 쓰므로 DB 는 WRAM 거울이 있는 00~3F·80~BF 여야 한다.
+LOADER_CALL = 0x15F7E2
+STUB = bytes.fromhex('8b a9 00 48 ab 20 f4 f7 ab 60')
+STUB_BANK = 2
+# 15:F887 이 DB = 15 인 채 abs,X 로 읽는 둘째 표. 6바이트 [그룹][맵][플래그][마스크][뱅크 00 주소 16비트], FF 로 끝.
+# 맞는 항목이 없으면 $1A35 에 따라 00:B8CA·00:B869 를 $1AAA 에 두고, 00:B8C6 이 JMP ($1AAA) 로 셀을 읽는다.
+CELL_ENTRY = 6
+CELL_OPERANDS = ((0x15F88A, 0xBD, 0), (0x15F89D, 0xBD, 1), (0x15F8F1, 0xDD, 1), (0x15F8A8, 0xBD, 2),
+                 (0x15F8BE, 0x3D, 3), (0x15F8FF, 0xBD, 4), (0x15F8F9, 0xBD, 5))
+CELL_SPANS = ((0x15FF5C, 0x15FF63), (0x15FF80, 0x160000))
+CELL_ROUTINES = {0x00B869, 0x00B8CA, 0x00BCC3}
 
 
 def require(ok, message):
@@ -69,19 +88,43 @@ def read(rom, addr, size):
     return raw
 
 
+def stub_of(rom):
+    """15:F7E2 가 스텁을 부르면 (스텁 주소, DB 뱅크), 원래대로 JSR $F7F4 면 (None, 15)."""
+    raw = read(rom, LOADER_CALL, 3)
+    require(raw[0] == 0x20, f'{text(LOADER_CALL)}: 로더 호출이 JSR 이 아님')
+    target = int.from_bytes(raw[1:], 'little')
+    if target == 0xF7F4:
+        return None, 0x15
+    stub = read(rom, 0x150000 | target, len(STUB))
+    require(stub[:STUB_BANK] + stub[STUB_BANK + 1:] == STUB[:STUB_BANK] + STUB[STUB_BANK + 1:] and db_bank(stub[STUB_BANK]),
+            f'{text(LOADER_CALL)}: 알 수 없는 로더 호출 {text(0x150000 | target)}')
+    return 0x150000 | target, stub[STUB_BANK]
+
+
 def table_base(rom):
     """로더 피연산자 11개가 가리키는 표 시작. 서로 맞지 않으면 로더가 바뀐 롬이라 거부한다."""
+    _, bank = stub_of(rom)
+    return operand_base(rom, OPERANDS, bank, '맵별 루틴 로더')
+
+
+def operand_base(rom, operands, bank, name):
     bases = set()
-    for at, opcode, offset in OPERANDS:
+    for at, opcode, offset in operands:
         raw = read(rom, at, 3)
-        require(raw[0] == opcode, f'{text(at)}: 맵별 루틴 로더 명령이 원본과 다름')
-        bases.add(0x150000 | (int.from_bytes(raw[1:], 'little') - offset))
-    require(len(bases) == 1, '맵별 루틴 로더의 표 주소가 서로 맞지 않음')
+        require(raw[0] == opcode, f'{text(at)}: {name} 명령이 원본과 다름')
+        bases.add(bank << 16 | (int.from_bytes(raw[1:], 'little') - offset))
+    require(len(bases) == 1, f'{name}의 표 주소가 서로 맞지 않음')
     return bases.pop()
 
 
-def span_of(base, size):
-    for start, end in SPANS:
+def db_bank(bank):
+    return bank < 0x40 or 0x80 <= bank < 0xC0
+
+
+def span_of(base, size, spans=SPANS):
+    if base >> 16 != 0x15 and db_bank(base >> 16) and base & 0xFFFF >= 0x8000:
+        spans = ((base & 0xFF8000, (base & 0xFF0000) + 0x10000),)
+    for start, end in spans:
         if start <= base and base + size <= end:
             return start, end
     return None
@@ -205,7 +248,10 @@ def runs(rom, wanted, note):
 
 
 def result(writes):
-    return {'format': 'dq5patch/1', 'name': 'maphook', 'writes': writes}
+    out = {'format': 'dq5patch/1', 'name': 'maphook', 'writes': writes}
+    if any(int(w['at'][:2], 16) & 0x7F >= 0x30 for w in writes):
+        out['rom_size'] = 2
+    return out
 
 
 def warn(rows, known=()):
@@ -233,7 +279,7 @@ def patch(rom, doc, allowed=None, raw_routines=False, quiet=False):
     return result(runs(rom, wanted, '맵별 루틴 항목'))
 
 
-def rewrite(rom, doc, at=None, allowed=None, raw_routines=False, quiet=False):
+def rewrite(rom, doc, at=None, allowed=None, raw_routines=False, quiet=False, stub_at=None):
     keys(doc, ('format', 'table', 'entries'), '문서')
     require(doc.get('format') == FORMAT and isinstance(doc.get('entries'), list), 'format/entries 가 잘못됨')
     ctx = Context(rom, allowed, raw_routines)
@@ -248,12 +294,19 @@ def rewrite(rom, doc, at=None, allowed=None, raw_routines=False, quiet=False):
         rows.append(encode(row, ctx, f'항목 {i}'))
     require(rows, '항목이 하나도 없음')
     size = len(rows) * ENTRY + 1
-    require(base >> 16 == 0x15, '표는 뱅크 15 에 있어야 함(15:F7D2 PHK/PLB 로 DB = 15)')
+    bank = base >> 16
+    require(bank == 0x15 or db_bank(bank) and base & 0xFFFF >= 0x8000,
+            '표는 뱅크 15, 아니면 DB 로 둘 수 있는 00~3F·80~BF 뱅크의 8000~FFFF 에 있어야 함')
     require(span_of(base, size) is not None,
-            f'{text(base)}+{size}: 표를 둘 수 있는 자리 밖(' + ', '.join(f'{text(s)}~{text(e - 1)}' for s, e in SPANS) + ')')
+            f'{text(base)}+{size}: 표를 둘 수 있는 자리 밖(' + ', '.join(f'{text(s)}~{text(e - 1)}' for s, e in SPANS)
+            + ', 또는 다른 뱅크 안)')
+    require((stub_at is None) == (bank == 0x15), '뱅크 15 밖으로 옮길 때만 --stub-at 을 줌(그때는 꼭 필요함)')
+    require(bank != 0x15 or stub_of(rom)[0] is None, '표가 이미 뱅크 15 밖에 있음. 뱅크 15 로 되돌리는 쓰기는 없음')
     if not quiet:
         old = {ctx.rows[j] for j in shadowed(ctx.rows)}
         warn(rows, [j for j in shadowed(rows) if rows[j] in old])
+    if bank != 0x15:
+        return result(moved(rom, base, rows, stub_at))
     wanted = {base + i * ENTRY + k: v for i, raw in enumerate(rows) for k, v in enumerate(raw)}
     wanted[base + len(rows) * ENTRY] = 0xFF
     current = range(ctx.base, ctx.base + len(ctx.rows) * ENTRY + 1)
@@ -267,17 +320,125 @@ def rewrite(rom, doc, at=None, allowed=None, raw_routines=False, quiet=False):
     return result(writes + runs(rom, operands, '맵별 루틴 로더의 표 주소'))
 
 
-def check(rom, doc=None, at=None, raw_routines=False):
+def plain(at, data, note):
+    """orig 없는 쓰기. 원래 롬 안이면 빌더가 빈 자리 지도 밖을 거부한다."""
+    return {'at': text(at), 'hex': data.hex(' '), 'note': note}
+
+
+def moved(rom, base, rows, stub_at):
+    """뱅크 15 밖의 표: 표 본체, 스텁, 15:F7E2 JSR, 로더 피연산자 11곳."""
+    require(stub_at >> 16 == 0x15 and stub_at & 0xFFFF >= 0x8000, '--stub-at 은 뱅크 15 의 8000~FFFF 여야 함')
+    current, _ = stub_of(rom)
+    require(current in (None, stub_at), f'스텁이 이미 {text(current or 0)} 에 있음')
+    stub = STUB[:STUB_BANK] + bytes([base >> 16]) + STUB[STUB_BANK + 1:]
+    body = b''.join(rows) + b'\xff'
+    off = lorom(base)
+    writes = [] if bytes(rom.d[off:off + len(body)]) == body else [plain(base, body, '맵별 루틴 표(뱅크 15 밖)')]
+    if read(rom, stub_at, len(stub)) != stub:
+        writes.append(plain(stub_at, stub, '맵별 루틴 로더 스텁(DB 를 표 뱅크로)'))
+    call = bytes([0x20]) + (stub_at & 0xFFFF).to_bytes(2, 'little')
+    writes += runs(rom, {LOADER_CALL + k: v for k, v in enumerate(call)}, '맵별 루틴 로더 호출을 스텁로')
+    operands = {}
+    for at_, _, offset in OPERANDS:
+        operands.update({at_ + 1 + k: v for k, v in enumerate(((base & 0xFFFF) + offset).to_bytes(2, 'little'))})
+    return writes + runs(rom, operands, '맵별 루틴 로더의 표 주소')
+
+
+def cell_base(rom):
+    return operand_base(rom, CELL_OPERANDS, 0x15, '셀 읽기 루틴 표 로더')
+
+
+def cell_rows(rom, base):
+    span = span_of(base, 1, CELL_SPANS)
+    require(span is not None, f'{text(base)}: 셀 읽기 루틴 표가 알려진 자리 밖에 있음')
+    rows, addr = [], base
+    while read(rom, addr, 1)[0] != 0xFF:
+        require(addr + CELL_ENTRY + 1 <= span[1], f'{text(base)}: 표 끝 FF 가 자리 안에 없음')
+        rows.append(read(rom, addr, CELL_ENTRY))
+        addr += CELL_ENTRY
+    return rows
+
+
+def cells_dump(rom):
+    base = cell_base(rom)
+    out = []
+    for i, raw in enumerate(cell_rows(rom, base)):
+        row = decode(raw[:4] + bytes(6))
+        out.append({'index': i, 'group': row['group'], 'map': row['map'], 'flag': row['flag'],
+                    'routine': text(int.from_bytes(raw[4:6], 'little'))})
+    return {'format': CELL_FORMAT, 'table': text(base), 'entries': out}
+
+
+def cells_rewrite(rom, doc, at=None, raw_routines=False):
+    keys(doc, ('format', 'table', 'entries'), '문서')
+    require(doc.get('format') == CELL_FORMAT and isinstance(doc.get('entries'), list), 'format/entries 가 잘못됨')
+    old = cell_base(rom)
+    base = old if at is None else at
+    if 'table' in doc:
+        require(address(doc['table'], 'table') == base, f'table 이 쓸 자리 {text(base)} 와 다름(자리는 --at 으로 정함)')
+    ctx = Context(rom)
+    rows = []
+    for i, row in enumerate(doc['entries']):
+        keys(row, ('index', 'group', 'map', 'flag', 'routine'), '항목')
+        require(row.get('index', i) == i and type(row.get('index', i)) is int, f'항목 {i}: index 는 순서와 같아야 함')
+        require(set(row) >= {'group', 'map', 'flag', 'routine'}, f'항목 {i}: 필드가 빠짐')
+        head = encode(row | {'post_load': text(NONE), 'per_frame': text(NONE)}, ctx, f'항목 {i}')[:4]
+        addr = address(row['routine'], f'항목 {i} routine')
+        if raw_routines:
+            require(addr >> 16 == 0 and addr & 0xFFFF >= 0x8000, f'항목 {i} routine: 뱅크 00 의 8000~FFFF 여야 함(JMP ($1AAA))')
+        else:
+            require(addr in CELL_ROUTINES, f'항목 {i} routine: 알려진 셀 읽기 루틴 '
+                    + '·'.join(text(a) for a in sorted(CELL_ROUTINES)) + ' 가 아님(다른 주소는 --raw-routines)')
+        rows.append(head + (addr & 0xFFFF).to_bytes(2, 'little'))
+    size = len(rows) * CELL_ENTRY + 1
+    # 15:F887 은 DB = 15 인 채 읽으므로 둘째 표는 뱅크 15 를 벗어날 수 없다.
+    require(base >> 16 == 0x15, f'{text(base)}: 둘째 표는 뱅크 15 에 있어야 함(15:F887 은 DB = 15)')
+    require(span_of(base, size, CELL_SPANS) is not None, f'{text(base)}+{size}: 둘째 표를 둘 수 있는 자리 밖('
+            + ', '.join(f'{text(s)}~{text(e - 1)}' for s, e in CELL_SPANS) + ')')
+    data = b''.join(rows) + b'\xff'
+    if CELL_SPANS[0][0] <= base < CELL_SPANS[0][1]:
+        writes = runs(rom, {base + k: v for k, v in enumerate(data)}, '셀 읽기 루틴 표')
+    else:
+        writes = [plain(base, data, '셀 읽기 루틴 표')] if read(rom, base, len(data)) != data else []
+    operands = {}
+    for at_, _, offset in CELL_OPERANDS:
+        operands.update({at_ + 1 + k: v for k, v in enumerate(((base & 0xFFFF) + offset).to_bytes(2, 'little'))})
+    return result(writes + runs(rom, operands, '셀 읽기 루틴 표 로더의 표 주소'))
+
+
+def cells_check(rom, doc=None, at=None, raw_routines=False):
+    """둘째 표 입력을 패치해 빌더로 롬을 만들고, 다시 읽은 항목이 입력과 같고 다시 패치하면 쓰기가 0개인지 본다."""
+    from dq5build import build, parse_at
+    source = cells_dump(rom) if doc is None else doc
+    made = cells_rewrite(rom, source, at, raw_routines)
+    require(doc is not None or not made['writes'], '원본 왕복 쓰기가 0개가 아님')
+    rebuilt, _ = build(rom.d, [('cells', 0, [
+        (parse_at(w['at'])[0], bytes.fromhex(w['hex']), bytes.fromhex(w['orig']) if 'orig' in w else None, w['note'])
+        for w in made['writes']])], 0)
+    after = Rom(rebuilt)
+    require(not cells_rewrite(after, source, at, raw_routines)['writes'], '빌더 적용 후 같은 입력을 다시 패치하면 쓰기가 남음')
+    again = cells_dump(after)
+    strip = [{k: v for k, v in e.items() if k != 'index'} for e in again['entries']]
+    want = [{k: v for k, v in e.items() if k != 'index'} for e in source['entries']]
+    require(strip == want, '빌드한 롬을 다시 읽은 항목이 입력과 다름')
+    require(at is None or again['table'] == text(at), '빌드한 롬의 둘째 표 로더가 새 자리를 가리키지 않음')
+    require(table_base(after) == table_base(rom), '둘째 표를 쓰면서 맵별 루틴 표 자리가 바뀜')
+    print(f'둘째 표 항목 {len(strip)}개(표 {again["table"]}), 쓰기 {len(made["writes"])}개 검사 통과')
+
+
+def check(rom, doc=None, at=None, raw_routines=False, stub_at=None):
     from dq5build import build, parse_at
     original = dump(rom)
     source = original if doc is None else doc
     allowed = routines(Context(rom).rows)
-    make = (lambda r, d, q=True: rewrite(r, d, at, allowed, raw_routines, q)) if at is not None else (
+    make = (lambda r, d, q=True: rewrite(r, d, at, allowed, raw_routines, q, stub_at)) if at is not None else (
         lambda r, d, q=True: patch(r, d, allowed, raw_routines, q))
     writes = make(rom, source, False)['writes']
     require(doc is not None or not writes, '원본 왕복 쓰기가 0개가 아님')
-    rebuilt, _ = build(rom.d, [('maphook', 0, [
-        (parse_at(w['at'])[0], bytes.fromhex(w['hex']), bytes.fromhex(w['orig']), w['note']) for w in writes])], 0)
+    made = make(rom, source)
+    rebuilt, _ = build(rom.d, [('maphook', made.get('rom_size', 0), [
+        (parse_at(w['at'])[0], bytes.fromhex(w['hex']), bytes.fromhex(w['orig']) if 'orig' in w else None, w['note'])
+        for w in writes])], made.get('rom_size', 0))
     after = Rom(rebuilt)
     require(not make(after, source)['writes'], '빌더 적용 후 같은 입력을 다시 패치하면 쓰기가 남음')
     again = dump(after)
@@ -294,28 +455,41 @@ def main():
     sub = parser.add_subparsers(dest='command', required=True)
     export = sub.add_parser('dump')
     export.add_argument('-o', '--out', type=Path)
-    for name in ('patch', 'rewrite', 'check'):
+    cells = sub.add_parser('cells-dump')
+    cells.add_argument('-o', '--out', type=Path)
+    for name in ('patch', 'rewrite', 'check', 'cells-rewrite', 'cells-check'):
         p = sub.add_parser(name)
-        p.add_argument('source', type=Path, nargs='?' if name == 'check' else None)
-        if name != 'check':
+        p.add_argument('source', type=Path, nargs='?' if name.endswith('check') else None)
+        if not name.endswith('check'):
             p.add_argument('-o', '--out', type=Path)
-        p.add_argument('--at', help='rewrite·check: 표를 둘 자리 BB:AAAA. 빼면 rewrite 는 지금 자리')
+        p.add_argument('--at', help='rewrite·check: 맵별 루틴 표를 둘 자리 BB:AAAA(뱅크 15, 또는 00~3F·80~BF 와 --stub-at). '
+                       'cells-rewrite·cells-check: 둘째 표 자리(15:FF5C 또는 15:FF80~). 빼면 지금 자리')
         p.add_argument('--raw-routines', action='store_true', help='원래 표에 없는 루틴 주소도 받음')
+        p.add_argument('--stub-at', help='rewrite·check: 표를 뱅크 15 밖에 둘 때 로더 DB 를 바꾸는 스텁(10바이트)의 자리. 뱅크 15 의 빈 자리(15:FF80~)')
     args = parser.parse_args()
     try:
         rom = Rom(args.rom.read_bytes())
         doc = json.loads(args.source.read_text(encoding='utf-8')) if getattr(args, 'source', None) else None
         at = address(args.at, '--at') if getattr(args, 'at', None) else None
+        stub_at = address(args.stub_at, '--stub-at') if getattr(args, 'stub_at', None) else None
+        require(args.command in ('rewrite', 'check') or stub_at is None, '--stub-at 은 rewrite·check 에만')
         require(args.command != 'patch' or at is None, 'patch 는 --at 을 받지 않음(표 자리를 옮기려면 rewrite)')
         if args.command == 'check':
-            check(rom, doc, at, args.raw_routines)
+            check(rom, doc, at, args.raw_routines, stub_at)
+            return 0
+        if args.command == 'cells-check':
+            cells_check(rom, doc, at, args.raw_routines)
             return 0
         if args.command == 'dump':
             out = dump(rom)
+        elif args.command == 'cells-dump':
+            out = cells_dump(rom)
+        elif args.command == 'cells-rewrite':
+            out = cells_rewrite(rom, doc, at, args.raw_routines)
         elif args.command == 'patch':
             out = patch(rom, doc, raw_routines=args.raw_routines)
         else:
-            out = rewrite(rom, doc, at, raw_routines=args.raw_routines)
+            out = rewrite(rom, doc, at, raw_routines=args.raw_routines, stub_at=stub_at)
         body = json.dumps(out, ensure_ascii=False, indent=2) + '\n'
         if args.out:
             args.out.parent.mkdir(parents=True, exist_ok=True)
