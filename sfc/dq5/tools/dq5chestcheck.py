@@ -34,13 +34,21 @@ CASES = {
     'lower': ({'lower': [{'index': 3, 'reward': 0x3FD, 'flag_index': 0x19, 'mask': 0x08}]},
               765, 0x2229, 0x08, 0x2228, 0x08, 0xB1, 0x131),
     'field': ({'field': [{'index': 0, 'reward': 0x46C}]}, 876, 0x21B3, 0x10, 0x21B3, 0x10, 0xCA, 0x12B),
+    # 원본은 이 칸에 보상이 없다(old_reward None)
+    'field_move': ({'field': [{'index': 0, 'x': 24, 'y': 168, 'reward': 0x46C, 'flag_index': 0x22, 'mask': 0x04}]},
+                   876, 0x21B2, 0x04, 0x21B3, 0x10, None, 0x12B),
 }
+# 조사 뒤 세계 지도 버퍼의 블록(블록 좌표 x, y, 원본, 패치). 밤이라 빛 블록 A7 이 놓인 자리를 본다
+# 필드에 들어갈 때 빛 블록을 놓으므로, 장면도 그 롬으로 만들어야 하는 사례
+OWN_SCENE = {'field_move'}
+BLOCKS = {'field_move': ((11, 83, 0xA7, 0xCA), (12, 84, 0x178, 0xA7))}
 # 장면: 원본 롬에서 dq5warp.lua 로 내려선 자리, 없으면 선실에서 걸어감.
 # 필드는 밤(`$075E` = `0100` 으로 둠)이고 21AA.0 이 켜져 있어야 빛 블록 코드가 21A5.2 를 켠다
 SCENES = {'chest': {'TO': '01/02,34,31'}, 'search': None, 'foot': None, 'ahead': {'TO': '03/04,10,10'},
-          'lower': {'TO': '51/51,18,37,2'}, 'field': {'FIELD': '22,166', 'SET': '21AA|01;075E=00;075F=01'}}
+          'lower': {'TO': '51/51,18,37,2'}, 'field': {'FIELD': '22,166', 'SET': '21AA|01;075E=00;075F=01'},
+          'field_move': {'FIELD': '24,168', 'SET': '21AA|01;075E=00;075F=01'}}
 # 필드 조사는 선 자리를 보므로 걷지 않고 바로 명령 창을 연다
-INPUTS = {'field': INPUT.removeprefix('up:8,wait:30,')}
+INPUTS = {'field': INPUT.removeprefix('up:8,wait:30,'), 'field_move': INPUT.removeprefix('up:8,wait:30,')}
 
 
 def command(tool, *args):
@@ -70,8 +78,8 @@ def require(condition, message):
         raise ValueError(message)
 
 
-def prepare(name, original, state, out, mesence, libdir):
-    dest = out / (name + '-scene')
+def prepare(name, original, state, out, mesence, libdir, label=None):
+    dest = out / ((label or name) + '-scene')
     dest.mkdir()
     env = environment(libdir, state, dest)
     if SCENES.get(name):
@@ -91,11 +99,16 @@ def scene(name):
     return name if SCENES[name] else 'ship'
 
 
+def block(wram, x, y):
+    i = y * 256 + x
+    return wram[0x10000 + i] | (wram[0xE000 + (i >> 3)] >> (7 - (i & 7)) & 1) << 8
+
+
 def gold(wram):
     return int.from_bytes(wram[0x2019:0x201C], 'little')
 
 
-def compare(name, state, original, out, mesence, libdir):
+def compare(name, state, original, out, mesence, libdir, start):
     changes, amount, flag, mask, old_flag, old_mask, old_reward, message = CASES[name]
     dest = out / name
     dest.mkdir()
@@ -108,7 +121,8 @@ def compare(name, state, original, out, mesence, libdir):
     for mode, rom in (('original', original), ('patched', patched)):
         run_dir = dest / mode
         run_dir.mkdir()
-        env = environment(libdir, state, run_dir)
+        run_state = prepare(name, rom, start, out, mesence, libdir, f'{name}-{mode}') if name in OWN_SCENE else state
+        env = environment(libdir, run_state, run_dir)
         env.update(INPUT=INPUTS.get(name, INPUT), FLAG=f'7E{flag:04X}', OLD_FLAG=f'7E{old_flag:04X}')
         run(mesence, rom, HERE / 'lua/dq5chestcheck.lua', run_dir, env)
         before, after = [(run_dir / f'{when}.wram').read_bytes() for when in ('before', 'after')]
@@ -117,20 +131,26 @@ def compare(name, state, original, out, mesence, libdir):
         rewards = [int(v, 16) for v in re.findall(r'reward .* value=([0-9A-F]+)', trace)]
         changed = mode == 'patched'
         expected = 0x100 + amount if changed else old_reward
-        require(rewards == [expected], f'{name}/{mode}: 실제 조회 보상 {rewards} != {[expected]}')
+        require(rewards == ([] if expected is None else [expected]),
+                f'{name}/{mode}: 실제 조회 보상 {rewards} != {expected}')
         require(gold(before) == 100 and gold(after) == 100 + (amount if changed else 0),
                 f'{name}/{mode}: 금화 전후가 다름')
         wanted_message = message if changed or name != 'foot' else 0x12F
+        if expected is None:
+            require('value=012C' in trace, f'{name}/{mode}: 찾지 못함 메시지 12C 가 없음')
         require(f'value={wanted_message:04X}' in trace, f'{name}/{mode}: 조사 종류 메시지가 다름')
         if changed:
             require(after[flag] == mask, f'{name}: 새 열림 비트가 다름')
             if old_flag != flag:
                 require(after[old_flag] == 0, f'{name}: 원래 열림 비트까지 바뀜')
         else:
-            require(after[old_flag] == old_mask, f'{name}: 원본 열림 비트가 다름')
+            require(after[old_flag] == (0 if old_reward is None else old_mask), f'{name}: 원본 열림 비트가 다름')
             if old_flag != flag:
                 require(after[flag] == 0, f'{name}: 원본 롬이 새 비트를 씀')
-        results.append({'mode': mode, 'reward': expected, 'gold_before': gold(before), 'gold_after': gold(after),
+        blocks = {f'{x},{y}': block(after, x, y) for x, y, *_ in BLOCKS.get(name, ())}
+        for x, y, *values in BLOCKS.get(name, ()):
+            require(blocks[f'{x},{y}'] == values[changed], f'{name}/{mode}: 블록 ({x},{y}) = {blocks[f"{x},{y}"]:X}')
+        results.append({'mode': mode, 'reward': expected, 'blocks': blocks, 'gold_before': gold(before), 'gold_after': gold(after),
                         'flag': f'7E:{flag:04X}', 'flag_value': after[flag],
                         'old_flag': f'7E:{old_flag:04X}', 'old_flag_value': after[old_flag], 'passed': True})
     return {'case': name, 'runs': results, 'passed': True}
@@ -155,14 +175,14 @@ def main():
         libdir = subprocess.check_output(['krpatch', 'sfc', 'lua'], text=True, timeout=30).strip()
         print(f'출력 {out}', flush=True)
         cases = list(dict.fromkeys(args.case or CASES))
-        scenes = sorted({scene(name) for name in cases})
+        scenes = sorted({scene(name) for name in cases if name not in OWN_SCENE})
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
             futures = {name: pool.submit(prepare, name, original, state, out, mesence, libdir)
                        for name in scenes}
             states = {name: future.result() for name, future in futures.items()}
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-            results = list(pool.map(lambda name: compare(name, states[scene(name)],
-                                                        original, out, mesence, libdir), cases))
+            results = list(pool.map(lambda name: compare(name, states.get(scene(name)),
+                                                        original, out, mesence, libdir, state), cases))
         (out / 'results.json').write_text(json.dumps(results, indent=2) + '\n', encoding='utf-8')
         print(f'{len(cases)}쌍/{2 * len(cases)}실행 통과: 보상·금화·새 열림 비트·기존 비트 보존')
         return 0
