@@ -45,6 +45,28 @@ def flip_figure():
         os.path.join(OUT, "nds-gfx-flip.webp"), lossless=True)
 
 
+def alpha_figure():
+    """m133 주문 동작(칸 7) 프레임 3·11. 0x4000 부품을 무시한 조립(위)과 A3I5·덧붙은 팔레트로 그린 조립(아래), 2배."""
+    t = g.texture_object(read("MONSTER/m133.tex.lz"))
+    atlas, alpha = g.texture_object_image(t), g.translucent_atlas(t)
+    anm = read("MONSTER/m133.anm.lz")
+    eo, es = g.pack_entries(anm)[7]
+    cells, frames = g.dssa(anm, eo, es)
+    shots = [[g.dssa_frame(atlas, cells, frames[i], alpha_atlas=a) for i in (3, 11)] for a in (None, alpha)]
+    x0 = min(o[0] for row in shots for _, o in row)
+    y0 = min(o[1] for row in shots for _, o in row)
+    w = max(o[0] + im.width for row in shots for im, o in row) - x0
+    h = max(o[1] + im.height for row in shots for im, o in row) - y0
+    out = Image.new("RGBA", (2 * w + 8, 2 * h + 8), (40, 42, 48, 255))
+    for r, row in enumerate(shots):
+        for c, (im, o) in enumerate(row):
+            cell = Image.new("RGBA", (w, h), (64, 110, 64, 255))
+            cell.alpha_composite(im, (o[0] - x0, o[1] - y0))
+            out.alpha_composite(cell, (c * (w + 8), r * (h + 8)))
+    out.resize((out.width * 2, out.height * 2), Image.NEAREST).save(
+        os.path.join(OUT, "nds-gfx-alpha.webp"), lossless=True)
+
+
 def bca_figure():
     """피사로 3D 모델(CHR/pisaro.nsbmd)을 BCA0 동작 pisaro_1 로 움직인 프레임 6장(앞에서 본 직교)."""
     mdl, bca = read("CHR/pisaro.nsbmd"), read("CHR/pisaro_1.nsbca")
@@ -102,6 +124,7 @@ def effect_figure():
 def main():
     os.makedirs(OUT, exist_ok=True)
     flip_figure()
+    alpha_figure()
     bca_figure()
     largemap_figure()
     world_figure()

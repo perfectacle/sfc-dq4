@@ -6,6 +6,8 @@ writes PNG files for reference only. Nothing here writes into the unpacked tree.
     uv run --locked python nds/dq4/tools/ndsgfx.py survey [--root work/nds/jp]
     uv run --locked python nds/dq4/tools/ndsgfx.py export OUT [--root ...] [--only chr,monster]
     uv run --locked python nds/dq4/tools/ndsgfx.py gallery OUT
+    uv run --locked python nds/dq4/tools/ndsgfx.py locn MAP [--root ...]     LOCN faces and triggers of MAP/<MAP>.lz
+    uv run --locked python nds/dq4/tools/ndsgfx.py motion [--root ...]       battle motion table (overlay 3)
 """
 
 import argparse
@@ -390,9 +392,10 @@ def dssa(b, off=0, size=None):
     +0x10 cell count; cells from +0x20, 16 bytes: u32 flags, u16 top, left,
     bottom, right, pivot y, pivot x (pixels in the atlas; cell 0 is a 1x1
     dummy). Frames are `FRAM` blocks: u32 index, u32 record count, then
-    16-byte records from +0x10: u16 cell (low 12 bits; 0x1000 mirror left-right, 0x2000
-    mirror top-bottom, 0x4000 unknown), u16 -, s16 x, s16 y, u16 scale x,
-    u16 scale y (4.12), u16 rotation, u8 alpha (0-31), u8 order.
+    16-byte records from +0x10: u16 cell (low 8 bits the cell; bits 8-11 the record
+    kind, 0 part, 1 frame header, 2 not drawn; 0x1000 mirror left-right, 0x2000
+    mirror top-bottom, 0x4000 translucent, see `translucent_atlas`), u16 -, s16 x,
+    s16 y, u16 scale x, u16 scale y (4.12), u16 rotation, u8 alpha (0-31), u8 order.
     """
     n = u32(b, off + 0x10)
     cells = []
@@ -415,7 +418,7 @@ def dssa(b, off=0, size=None):
             r = f + 0x10 + 16 * k
             if r + 16 > len(b) or (nxt > 0 and r + 16 > nxt):
                 break
-            recs.append(dict(cell=u16(b, r) & 0xFFF, flags=u16(b, r) >> 12, x=struct.unpack_from("<h", b, r + 4)[0],
+            recs.append(dict(cell=b[r], kind=b[r + 1] & 0xF, flags=u16(b, r) >> 12, x=struct.unpack_from("<h", b, r + 4)[0],
                              y=struct.unpack_from("<h", b, r + 6)[0],
                              sx=struct.unpack_from("<h", b, r + 8)[0] / 4096,
                              sy=struct.unpack_from("<h", b, r + 10)[0] / 4096,
@@ -425,17 +428,30 @@ def dssa(b, off=0, size=None):
     return cells, frames
 
 
-def dssa_frame(atlas, cells, recs, reverse=False):
+def translucent_atlas(t):
+    """The atlas as the battle draws parts flagged 0x4000, or None.
+
+    The game rebinds the same texels as A3I5 with the first attached palette when
+    the texture's +0x18 is 1 (A5I3 for 2, which no file uses). Without an attached
+    palette it rebinds nothing and the part looks like any other.
+    """
+    if t["fmt"] != 4 or not t["extra"]:
+        return None
+    return texture(t["data"], 1, t["width"], t["height"], t["extra"][0])
+
+
+def dssa_frame(atlas, cells, recs, reverse=False, alpha_atlas=None):
     """Compose one frame. Returns (image, (min x, min y)) in sprite space."""
     parts = []
     for r in (reversed(recs) if reverse else recs):
-        if r["cell"] == 0 or r["cell"] >= len(cells) or not r["sx"] or not r["sy"]:
+        if r.get("kind") or r["cell"] == 0 or r["cell"] >= len(cells) or not r["sx"] or not r["sy"]:
             continue
         c = cells[r["cell"]]
         w, h = c["right"] - c["left"], c["bottom"] - c["top"]
         if w <= 0 or h <= 0:
             continue
-        im = atlas.crop((c["left"], c["top"], c["right"], c["bottom"]))
+        src = alpha_atlas if alpha_atlas is not None and r.get("flags", 0) & 4 else atlas
+        im = src.crop((c["left"], c["top"], c["right"], c["bottom"]))
         sx, sy = r["sx"], r["sy"]
         if r.get("flags", 0) & 1:  # 0x1000 in the cell word: mirror left-right
             sx = -sx
@@ -472,6 +488,83 @@ def dssa_frame(atlas, cells, recs, reverse=False):
     for im, x, y in parts:
         out.alpha_composite(im, (x - x0, y - y0))
     return out, (x0, y0)
+
+
+# ---------------------------------------------------------------- LOCN collision
+
+LOCN_KINDS = {0: "floor", 1: "wall", 2: "object"}
+
+
+def locn(b):
+    """`LOCN` collision block of a `MapPackData` (the third entry).
+
+    +0x10 u16 face count, floors, walls, object faces, triggers; +0x34 ten u32
+    offsets (from +0x10): faces, triggers, six sorted key lists (x min, x max,
+    y max, y min, z min, z max as s16 coordinate*32 with u16 face), two per-face
+    byte arrays the game fills while walking. A face is 96 bytes: fx32 quad,
+    normal, u8 flag (1 on all but 2,326 faces), u8 kind (0 floor, 1 wall, 2 object), u16 trigger id,
+    u16 0, u16 FMAP placement (objects), two fx32 xyz end points, u16 FMAP +0x2C.
+    """
+    n, nf, nw, no, nt = struct.unpack_from("<5H", b, 0x10)
+    offs = [u32(b, 0x34 + 4 * i) + 0x10 for i in range(10)]
+    faces = []
+    for i in range(n):
+        o = offs[0] + 96 * i
+        v = struct.unpack_from("<15i", b, o)
+        faces.append(dict(quad=[tuple(x / 4096 for x in v[k:k + 3]) for k in range(0, 12, 3)],
+                          normal=tuple(x / 4096 for x in v[12:15]), flag=b[o + 0x3C], kind=b[o + 0x3D],
+                          trigger=u16(b, o + 0x3E), placement=u16(b, o + 0x42),
+                          ends=[tuple(s32(b, o + 0x44 + 12 * k + 4 * j) / 4096 for j in range(3)) for k in range(2)],
+                          search=u16(b, o + 0x5C)))
+    triggers = [struct.unpack_from("<2H", b, offs[1] + 4 * i) for i in range(nt)]
+    return dict(counts=(n, nf, nw, no, nt), faces=faces, triggers=triggers)
+
+
+def cmd_locn(root, name):
+    b = unlz((Path(root) / "data" / "data" / "MAP" / f"{name}.lz").read_bytes())
+    eo, es = pack_entries(b)[2]
+    lc = locn(b[eo:eo + es])
+    print("faces %d  floor %d  wall %d  object %d  trigger %d" % lc["counts"])
+    trig = {f: t for t, f in lc["triggers"]}
+    for i, f in enumerate(lc["faces"]):
+        extra = f"  trigger {trig[i]:#06x}" if i in trig else ""
+        if f["kind"] == 2:
+            extra += f"  placement {f['placement']}  search {f['search']:#06x}"
+        ends = " ".join("(%.2f, %.2f, %.2f)" % e for e in f["ends"])
+        print(f"{i:4d} {LOCN_KINDS.get(f['kind'], f['kind']):6s} flag {f['flag']}  ends {ends}{extra}")
+
+
+# ---------------------------------------------------------------- battle motion table
+
+MOTION_TABLE = 0x114DC   # overlay 3 (battle) file offset; loaded at 0x0212EA1C
+MOTION_COUNT = 0x463
+
+
+def motions(ov3):
+    """(monster, action, variant, slot) rows of the battle motion table.
+
+    24-byte records: +4 u16 monster (1000 repeats the one above), +6 u16 action
+    (DEBUG/action.dat), +0x10 u8 variant (monster table +0x28 for the chosen act
+    slot), +0x12 u8 MonsterAnimation slot (255 none).
+    """
+    out, cur = [], None
+    for k in range(MOTION_COUNT):
+        r = MOTION_TABLE + 24 * k
+        m = u16(ov3, r + 4)
+        cur = cur if m == 1000 else m
+        out.append((cur, u16(ov3, r + 6), ov3[r + 0x10], ov3[r + 0x12]))
+    return out
+
+
+def cmd_motion(root):
+    root = Path(root)
+    names = {}
+    for line in (root / "data" / "data" / "DEBUG" / "action.dat").read_bytes().decode("shift_jis").splitlines():
+        k, _, v = line.partition(",")
+        if k.isdigit():
+            names[int(k)] = v
+    for m, act, var, slot in motions((root / "overlay9" / "overlay_0003.bin").read_bytes()):
+        print(f"m{m:03d} {act:4d} {names.get(act, '?'):12s} variant {var:3d} slot {slot}")
 
 
 # ---------------------------------------------------------------- export
@@ -582,10 +675,10 @@ class Exporter:
                 self.save("chr/model", Path(rel).stem + ".png", shelf(ts, 512))
             self.ok("BMD0", rel, mdl)
 
-    def anim(self, cat, name, atlas, b, off, label=None, still=None, size=None):
+    def anim(self, cat, name, atlas, b, off, label=None, still=None, size=None, alpha_atlas=None):
         """Write frame 0 (to `still`) and the animation of the DSSA at `off`."""
         cells, frames = dssa(b, off, size)
-        imgs = [dssa_frame(atlas, cells, f) for f in frames]
+        imgs = [dssa_frame(atlas, cells, f, alpha_atlas=alpha_atlas) for f in frames]
         imgs = [(i, o) for i, o in imgs if i is not None]
         if not imgs:
             return False
@@ -640,15 +733,17 @@ class Exporter:
                 self.fail["MonsterAnimation(짝 없음)"].append(name)
                 continue
             atlas = texture_object_image(tex[name])
+            alpha = translucent_atlas(tex[name])
             b = anm[base]
 
-            def one(name=name, base=base, b=b, atlas=atlas):
+            def one(name=name, base=base, b=b, atlas=atlas, alpha=alpha):
                 n = 0
                 for slot, (eo, es) in enumerate(pack_entries(b)):
                     if es and b[eo:eo + 4] == b"DSSA":
                         label = f"{name} 동작{slot}" + (f" ({base} 공유)" if base != name else "")
                         still = ("monster/pose", f"{name}.png") if n == 0 else None
-                        if self.anim("monster/anim", f"{name}_{slot:02d}.webp", atlas, b, eo, label, still, es):
+                        if self.anim("monster/anim", f"{name}_{slot:02d}.webp", atlas, b, eo, label, still, es,
+                                     alpha):
                             n += 1
                 if not n:
                     self.stats["MonsterAnimation(빈 파일)"][0] += 1
@@ -1039,7 +1134,18 @@ def main(argv=None):
     e.add_argument("--only", help="쉼표로 단계 이름(chr,monster,map,g2d,effect,dssa,banner,tex,render,field,world,model_anim)")
     g = sub.add_parser("gallery", help="manifest.json 으로 index.html 을 씀")
     g.add_argument("out")
+    lo = sub.add_parser("locn", help="맵의 LOCN 면·트리거를 찍음")
+    lo.add_argument("map")
+    lo.add_argument("--root", default=DEFAULT_FS)
+    mo = sub.add_parser("motion", help="전투 동작 표(오버레이 3)를 찍음")
+    mo.add_argument("--root", default=DEFAULT_FS)
     a = ap.parse_args(argv)
+    if a.cmd == "locn":
+        cmd_locn(a.root, a.map)
+        return
+    if a.cmd == "motion":
+        cmd_motion(a.root)
+        return
     if a.cmd == "survey":
         survey(a.root)
         return
