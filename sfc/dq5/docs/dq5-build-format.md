@@ -92,7 +92,7 @@ uv run --locked python sfc/dq5/tools/dq5build.py rom/dq5.sfc fromrom work/hangul
 | `dq5textwrite.py` | 보행 메시지 3,200개 재압축·색인·디코더 | `dq5text/1` 코드 목록 JSON |
 | `dq5eventwrite.py` | 이벤트 명령과 지정한 이벤트·번호 표 항목 | `dq5event/1` JSON |
 | `dq5npcwrite.py` | 기존 인물 슬롯 안의 명령 | `dq5npcscript/1` JSON |
-| `dq5npcrelocate.py` | 인물 스크립트 길이 변경·기본/대체 목록 재배치 | `dq5npcrelocate/1` JSON |
+| `dq5npcrelocate.py` | 인물 스크립트 길이 변경·기본/대체 목록 재배치·인물 수와 순서·새 대체 목록·조건 표 옮기기 | `dq5npcrelocate/1` JSON |
 | `dq5exitwrite.py` | 기존 실내 출구 목적지·영역 이동 레코드 | `dq5connections/1` JSON |
 | `dq5npcrecord.py` | 기존 인물 엔트리 필드·등장 조건 표 항목 | `dq5npcrecord/1` JSON |
 | `dq5maphook.py` | 맵별 루틴 표 항목(맵 고르기·플래그 조건·루틴 주소)과 표 다시 쓰기 | `dq5maphook/1` JSON |
@@ -466,7 +466,7 @@ MesenCE에서는 번호 표와 이벤트 표를 거쳐 `60:8000`의 플래그 �
 
 ### 인물 목록 재배치 `dq5npcrelocate/1`
 
-`sfc/dq5/tools/dq5npcrelocate.py`는 스크립트 길이를 바꾸고 인물 목록을 확장 뱅크로 옮깁니다. 인물 수·순서·등장 조건과 낮밤 스크립트 공유 관계를 유지합니다. 기존 슬롯 안에서만 바꾸는 `dq5npcwrite.py`와 달리, 뒤따르는 레코드의 주소도 다시 계산합니다.
+`sfc/dq5/tools/dq5npcrelocate.py`는 스크립트 길이를 바꾸고 인물 목록을 확장 뱅크로 옮깁니다. 따로 적지 않으면 인물 수·순서·등장 조건과 낮밤 스크립트 공유 관계를 유지하고, 아래 「인물 수·순서와 조건 표」의 키로 바꿀 수 있습니다. 기존 슬롯 안에서만 바꾸는 `dq5npcwrite.py`와 달리, 뒤따르는 레코드의 주소도 다시 계산합니다.
 
 ```sh
 uv run --locked python sfc/dq5/tools/dq5npcrelocate.py rom/dq5.sfc dump -o work/npc-lists.json
@@ -491,6 +491,49 @@ uv run --locked python sfc/dq5/tools/dq5npcrelocate.py rom/dq5.sfc check
 uv run --locked python sfc/dq5/tools/dq5npcrelocatecheck.py rom/dq5.sfc \
   --state work/state/ship.mss --out work/npc-relocate-check --all --mutations --jobs 6
 ```
+
+#### 인물 수·순서와 조건 표 (`lists`·`new_lists`·`overrides`·`no_npc`)
+
+같은 문서에 아래 키를 더하면 목록 구조와 등장 조건 표를 다시 씁니다. 빠진 키는 원본 그대로입니다.
+
+```json
+{
+  "format": "dq5npcrelocate/1",
+  "lists": [{"list": "05:8CD4", "entries": [
+    {"from": 1}, {"from": 0},
+    {"from": 3, "time": "day", "fields": {"x": 24, "y": 12, "talk": 768}}]}],
+  "new_lists": [{"name": "extra", "entries": [{"from": {"list": "05:8CD4", "index": 1}}]}],
+  "overrides": [{"map": "02/06", "flag": 29, "when": "off", "mask": 16, "list": "new:extra"}],
+  "no_npc": [{"map": "17/00", "flag": 2, "when": "on", "mask": 128}]
+}
+```
+
+- **`lists`**: 원본 목록 하나(`list` 는 그 시작 주소)의 새 엔트리 차례입니다. 항목마다 `from` 으로 원본 엔트리를 고릅니다. 같은 목록이면 번호, 다른 목록이면 `{"list", "index"}` 입니다. 빠진 엔트리는 지워지고, 같은 엔트리를 여러 번 쓰면 복사됩니다. 항목에 `time`·`fields`·`day`·`night` 를 더하면 그 사본을 [`dq5npcrecord/1`](#인물-레코드등장-조건-dq5npcrecord1) 과 같은 규칙으로 고칩니다. 스크립트는 원본 엔트리의 것을 따라가고, `scripts` 로 바꾼 스크립트도 사본마다 들어갑니다.
+- **`new_lists`**: 새 대체 목록입니다. 대체 목록 뒤에 놓이며 `overrides` 에서 `new:이름` 으로 가리킵니다. 엔트리의 `from` 은 `{"list", "index"}` 만 받습니다.
+- **`overrides`**: 대체 표 전체입니다. 표 순서대로 처음 참인 항목을 쓰므로 원본 항목을 남기려면 함께 적습니다. `list` 는 원본 대체 목록 시작(`10:xxxx`) 또는 `new:이름` 입니다. 이 키가 있으면 표를 대체 목록 뒤로 옮기고 `12:82FB` 다섯 바이트를 `JSL 새 루틴; RTS` 로 덮습니다. 새 루틴은 데이터 뱅크를 `7E` 로 두어 플래그를 `$2190,Y` 로 읽고, 표는 긴 주소 `,X` 로 읽고, `$A7` 에 대체 목록 뱅크를 넣습니다. 이때 `12:833C` 와 옛 표는 쓰지 않습니다.
+- **`no_npc`**: 빈 맵 표 전체(63항목까지)를 `12:839C` 에 다시 씁니다. 43항목을 넘으면 옛 대체 표 자리를 덮으므로 대체 표도 함께 옮깁니다.
+- 조건 행의 `map`·`flag`·`when`·`mask` 규칙은 `dq5npcrecord/1` 과 같습니다. `--records` 의 조건 표 수정과 이 키들은 함께 쓸 수 없고, `--records` 로 고친 엔트리를 `lists` 에서 다시 고칠 수도 없습니다.
+- **슬롯 한도**: 맵·낮밤마다 「8 + 놓이는 인물 수 + 맵 OBJ 물체 수」(물체까지 놓은 뒤의 `$81`, [맵 형식의 인물 슬롯](dq5-map-format.md#인물-슬롯-81))를 셉니다. 기본은 그 맵의 원본 목록들이 같은 시간대에 쓰던 최댓값까지입니다. `--allow-growth` 를 주면 원본 전체 최댓값 `1F` 까지 늘리고, 원본보다 늘어난 맵을 출력합니다. 이 한도는 `--records` 만 줄 때도 봅니다. 낮밤 전환이나 대체 항목의 목록 바꾸기로 인물이 늘면 같은 기준을 넘을 수 없습니다. 맵을 놓은 뒤 `7E:1983` 부터 슬롯을 더 쓰는 장면 코드(`04:FB1C` 등)는 따지지 않으므로, 그런 장면이 있는 맵에서는 늘리지 않습니다.
+- 인물을 지우거나 순서를 바꾸면 그 뒤 인물의 슬롯 번호가 달라집니다. 이벤트 코드가 슬롯 번호를 직접 쓰는 맵에서는 장면이 다른 인물을 움직입니다.
+- 대체 표를 옮기면 표(항목 × 6 + 1바이트)와 루틴 102바이트가 `--alt` 뱅크의 대체 목록 뒤에 붙고, 그 덩어리가 한 뱅크에 들어가야 합니다. `--report` 에는 `override_table`·`override_find` 주소와 늘어난 슬롯(`slot_growth`)이 더해집니다. 같은 엔트리를 여러 번 쓰면 `entries`·`scripts` 대응표에는 첫 사본만 남습니다. 대체 표가 가리키지 않는 새 목록과, `12:82FB` 가 원본 루틴이 아닌 롬은 받지 않습니다.
+
+`dq5npclistcheck.py` 가 롬 세 벌(목록 구조, 옮긴 조건 표, 슬롯 1F 까지 늘림)을 원본과 함께 02/06·01/01·21/00 에서 10장면 돌립니다. 장면마다 로더 직후 인물 표 23칸·목록 끝 주소(`$A5`~`$A7`)와 맵을 다 놓은 직후 `7E:1983` 을 롬에서 예측한 값과 견주고, 더한 인물에게 말을 겁니다. `--objects` 를 주면 맵 OBJ 물체가 있는 33개 맵의 낮·밤 물체 슬롯 수(66장면)도 잽니다.
+
+```sh
+MESENCE="$MESENCE" uv run --locked python sfc/dq5/tools/dq5npclistcheck.py rom/dq5.sfc \
+  --state work/state/ship.mss --out work/npclistcheck --objects
+```
+
+| 장면 | 변경 롬 | 원본 롬 |
+| --- | --- | --- |
+| 02/06 낮, 목록 [둘째, 첫째, 넷째를 낮·(24,12)·대화 `300` 으로] | 3명이 그 순서로, `$1983` = `0B`, 말을 걸자 메시지 `6C6` | 2명, `0A`, 메시지 `129` |
+| 02/06 밤, 같은 롬 | 0명(밤 인물을 지움) | 2명 |
+| 02/06 낮, 맨 앞에 더한 대체 항목 → 새 목록 | 새 목록 2명, 메시지 `6C6` | 기본 목록 |
+| 01/01, 빈 맵 표 44번째 항목 | 인물 없음, `$81` = `08` | 5명 |
+| 21/00, 옮긴 표의 원래 항목 | 옮긴 `10:CB92` 사본 10명 | `10:CB92` 10명 |
+| 02/06 낮, `--allow-growth` 로 23명 | 23명, `$1983` = `1F`, 메시지 `6C6` | |
+
+10장면 모두 인물 표와 목록 끝 주소가 예측과 같았고, 33개 맵 낮·밤 66장면의 물체 수도 모두 같았습니다.
 
 ### 보물상자·조사 보상 (`dq5chest/1`)
 
@@ -707,7 +750,7 @@ MESENCE="$MESENCE" uv run --locked python sfc/dq5/tools/dq5npcrecordcheck.py rom
 
 7장면 모두 인물 표 23칸이 예측과 같았습니다. 인물을 주인공 바로 위 칸 (24,13) 에 두었을 때는 위를 눌러도 움직이지 않았고, 말을 걸자 「その方向には　誰もいない。」 였습니다. 두 칸 위 (24,12) 로 옮기자 말이 걸렸습니다.
 
-인물 수·순서를 바꾸거나 목록·조건 항목을 늘리는 쓰기는 남았습니다.
+인물 수·순서를 바꾸거나 목록·조건 항목을 늘리는 쓰기는 [목록 재배치](#인물-수순서와-조건-표-listsnew_listsoverridesno_npc)에서 합니다.
 
 ### 맵별 루틴 표 (`dq5maphook/1`)
 
@@ -900,7 +943,7 @@ MESENCE="$MESENCE" uv run --locked python sfc/dq5/tools/dq5maphookcheck.py rom/d
 
 포팅 전체의 지원 범위와 통합 배치 문제는 [도구 점검](dq5-port-tool-audit.md)을 봅니다. 아래 목록만으로 전체 도구가 갖춰졌다고 판단하지 않습니다.
 
-- 필드 표 항목 증설·재배치, 인물 수·순서 편집과 새 목록·조건 항목 추가.
+- 필드 표 항목 증설·재배치. 인물 슬롯을 맵을 놓은 뒤 더 쓰는 장면 코드의 맵별 정리.
 - 문자열 번역 편집·새 한글 글꼴 대량 삽입, 전투 메시지·창·이름 표 쓰기.
 - 성장·조우 레코드 수와 상점 품목 수 증설. 배의 바다 구역 직사각형(`01:85D8`)과 그룹 `50` 이상 맵의 구역 연결(`23:FDD6`) 쓰기, 고정 무리 줄 번호와 이벤트 무리 `+9`~`+C` 의 값 편집.
 - `dq5tables.py` 의 물건 플래그 가운데 `장비사람`·`칸` 밖의 것, 주문 `범위`·`적쪽`, 동료 `최대레벨`·`장비갈래` 는 고친 롬의 게임 실측이 남아 있습니다.
