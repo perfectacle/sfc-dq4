@@ -88,7 +88,7 @@ BLOCK_ART = {
     },
 }
 
-# Blocks of the other town and castle sheets whose graphics are not in BLOCK_ART. Each entry names
+# Blocks of the other sheets whose graphics are not in BLOCK_ART. Each entry names
 # the first sheet block showing that graphic; every block with the same CHR and colours follows it.
 EXAMPLES = {
     (0x03, 0x02): ("wood_floor", "나무 바닥"),
@@ -148,11 +148,29 @@ EXAMPLES = {
     (0x0C, 0x19): ("pew", "긴 의자"),
     (0x0D, 0x18): ("counter", "카운터 왼쪽"),
     (0x0D, 0x19): ("counter", "카운터 오른쪽"),
+    (0x01, 0x15): ("quay_nw", "석축 북서 모서리"),
+    (0x01, 0x16): ("quay_n", "석축 북쪽 끝"),
+    (0x01, 0x17): ("quay_ne", "석축 북동 모서리"),
+    (0x01, 0x18): ("quay_inner_sw", "석축 안쪽 모서리(물이 남서)"),
+    (0x01, 0x19): ("quay_w", "석축 서쪽"),
+    (0x01, 0x1A): ("quay_stairs", "물가 계단"),
+    (0x01, 0x1B): ("quay_e", "석축 동쪽"),
+    (0x01, 0x1C): ("quay_inner_se", "석축 안쪽 모서리(물이 남동)"),
+    (0x01, 0x1D): ("quay_sw", "석축 남서 모서리"),
+    (0x01, 0x1E): ("quay_s", "석축 남쪽"),
+    (0x01, 0x1F): ("quay_se", "석축 남동 모서리"),
+    (0x27, 0x06): ("red_paving", "붉은 바닥"),
+    (0x27, 0x14): ("dark_void", "떨어지는 검은 칸"),
+    (0x27, 0x19): ("stairs_up", "위 계단"),
+    (0x2C, 0x0D): ("audience_pink", "관객"),
+    (0x2C, 0x0E): ("audience_green", "관객"),
+    (0x2C, 0x19): ("audience_green", "관객"),
+    (0x2C, 0x1B): ("audience_pink", "관객"),
 }
 # The floor under transparent fixtures, as on the FC sheet.
 SHEET_FLOORS = {0x04: "dirt", 0x0E: "carpet"}
 BACKGROUNDS = {(0x08, 0x0F): "grass"}
-TOWN_SHEETS = (0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0B, 0x0C, 0x0D)
+SHEETS = (0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0B, 0x0C, 0x0D, 0x0F, 0x27, 0x2C)
 
 # FC interior maps drawn with block sheets 0A and 0E, by name; their FC palettes are the same set
 # except アッテムト, which uses a darker set.
@@ -165,16 +183,16 @@ MAPS = (
     (0x34, 7, 0x0E, "attemut-07"),
 )
 # Maps whose FC palette is darker than their sheet's: アッテムト, and the night or cursed variants
-# 34/09, 3C/09 and 46/01-03 (one NES brightness step down in some or all colours).
-MAP_PALETTES = {"attemut-05": "dim", "attemut-07": "dim", "34-09": "dim", "3C-09": "dim",
+# 34/06, 34/09, 3C/09 and 46/01-03 (one NES brightness step down in some or all colours).
+MAP_PALETTES = {"attemut-05": "dim", "attemut-07": "dim", "34-06": "dim", "34-09": "dim", "3C-09": "dim",
                 "46-01": "dim", "46-02": "dim", "46-03": "dim"}
 
 
 def all_maps(prg):
-    """MAPS plus every FC map of TOWN_SHEETS as (group, number, sheet, name)."""
+    """MAPS plus every FC map of SHEETS as (group, number, sheet, name)."""
     yield from MAPS
     for _, source in dq4block.all_maps(prg):
-        if source.buf is not None and source.t in TOWN_SHEETS:
+        if source.buf is not None and source.t in SHEETS:
             yield source.g, source.k, source.t, f"{source.g:02X}-{source.k:02X}"
 
 

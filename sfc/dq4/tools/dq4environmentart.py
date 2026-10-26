@@ -1325,6 +1325,69 @@ def _castle_town_assets():
     return assets
 
 
+# Red paving colours as found in bank 3, so paving and grey quay stone can share an 8x8 tile.
+_PAVING_IN_GREY = {1: 12, 2: 8, 4: 9, 5: 10}
+# Quay colours by depth from the paved top: cream cap, then steps of face, face and dark riser.
+_QUAY_STEPS = (7, 6, 2, 5, 5, 2, 5, 4, 1, 4, 4, 1, 4, 3, 1, 3, 3, 1)
+
+
+def _quay(depth, role):
+    """Harbour embankment stepping down to the water; depth(x, y) is 0 or less on the paved top
+    and counts pixels outward into the steps."""
+    paving = _red_paving()
+    c = _Canvas(3)
+    for y in range(16):
+        for x in range(16):
+            d = depth(x, y)
+            if d <= 0:
+                logical = _REMAP[6].index(paving.getpixel((x, y)) & 15)
+                c.point((x, y), _PAVING_IN_GREY[logical])
+            else:
+                c.point((x, y), _QUAY_STEPS[min(d, len(_QUAY_STEPS)) - 1])
+    return _finish(c, f"항구 석축 {role}")
+
+
+def _quay_stairs():
+    c = _Canvas(3, fill=1)
+    c.image.paste(_quay(lambda x, y: 3 - y, "계단 위").crop((0, 0, 16, 3)), (0, 0))
+    for y0 in (4, 8, 12):
+        c.rect((2, y0, 13, y0 + 1), 5)
+        c.line((2, y0, 13, y0), 6)
+        c.line((3, y0 + 2, 12, y0 + 2), 2)
+    for x in (0, 14):
+        c.rect((x, 3, x + 1, 15), 4)
+        c.line((x, 3, x, 15), 6)
+    return _finish(c, "물가로 내려가는 돌계단")
+
+
+def _audience(clothes):
+    """A seated spectator seen from behind, as the FC theatre draws its crowd."""
+    body, fold = ("D", "B") if clothes == "pink" else ("5", "3")
+    rows = (
+        "................", ".....999999.....", "....9FFFFFF9....", "...9FFAFFAFF9...",
+        "...9FAFFFFAF9...", "...9FFAFFAFF9...", "....9AFFFFA9....", "...999AAAA999...",
+        "..9DDDDDDDDDD9..", ".9DDCDDDDDDCDD9.", ".9DDCDDDDDDCDD9.", ".9DDDDDDDDDDDD9.",
+        ".99DDDDDDDDDD99.", "..9999999999 9..".replace(" ", "9"), "..9A9......9A9..", "..99........99..",
+    )
+    rows = tuple(r.replace("D", body).replace("C", fold) for r in rows)
+    return _pattern(1, rows, f"관객 뒷모습 {clothes}", "interior")
+
+
+def _harbour_theatre_assets():
+    quays = {
+        "quay_w": lambda x, y: 12 - x, "quay_e": lambda x, y: x - 3, "quay_s": lambda x, y: y - 2,
+        "quay_n": lambda x, y: 3 - y,
+        "quay_sw": lambda x, y: max(12 - x, y - 3), "quay_se": lambda x, y: max(x - 3, y - 3),
+        "quay_ne": lambda x, y: max(x - 3, 3 - y), "quay_nw": lambda x, y: max(12 - x, 3 - y),
+        "quay_inner_sw": lambda x, y: min(12 - x, y - 3), "quay_inner_se": lambda x, y: min(x - 3, y - 3),
+    }
+    assets = {name: _quay(depth, name[5:]) for name, depth in quays.items()}
+    assets["quay_stairs"] = _quay_stairs()
+    for clothes in ("pink", "green"):
+        assets[f"audience_{clothes}"] = _audience(clothes)
+    return assets
+
+
 def create_assets():
     """Return original indexed art; global palette entry zero is transparent."""
     assets = {
@@ -1398,4 +1461,5 @@ def create_assets():
     for direction in "nsew":
         assets[f"shore_{direction}"] = _shore(direction)
     assets.update(_castle_town_assets())
+    assets.update(_harbour_theatre_assets())
     return assets

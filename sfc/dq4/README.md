@@ -90,3 +90,5 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [2026-10-27-14: 다른 마을·성 블록 시트로 넓히기](journal/2026-10-27-14-environment-castles.md)
 
 - [2026-10-27-15: 게임 안 BG3 타일맵을 빈 VRAM 자리로 옮기기](journal/2026-10-27-15-bg3-slot.md)
+
+- [2026-10-27-16: 항구 석축과 극장 객석](journal/2026-10-27-16-environment-harbour.md)
