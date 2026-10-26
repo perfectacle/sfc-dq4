@@ -40,6 +40,7 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5progresswrite.py rom dump\|patch\|check` | 성장53개·조우구역85개·상점48목록·메달/코인 교환값 고정 표. `dq5progress/1` JSON으로 일부필드만 원위치 편집, 키·품목수·미사용비트 보존. [쓰기 형식](../docs/dq5-build-format.md#성장조우상점-dq5progress1) |
 | `dq5progresscheck.py rom --state 상태 --out 폴더` | MesenCE로 성장·조우·상점 쓰기 실측 3건을 재현. 레벨업 능력치·다음 경험치, 조우 구역·몬스터·마릿수, 상점 품목·가격을 비교. `MESENCE` 필요 |
 | `dq5tables.py rom export\|patch\|check` | 게임 데이터 표 쓰기: 몬스터·물건·주문·피해량·동료 몬스터 표를 필드 이름이 붙은 JSON(`dq5tables/1`)으로 내보내고(`export -o`), 고친 JSON(일부 항목·필드만 있어도 됨)을 `dq5patch/1` 목록으로(`patch … -o`), `check` 로 붙인 롬을 다시 읽어 확인. 형식은 [dq5-build-format.md](../docs/dq5-build-format.md#게임-데이터-표-dq5tables1) |
+| `dq5tablecheck.py rom --state 선실 --out 폴더` | `dq5tables.py` 로 고친 물건 `장비사람`·`칸`, 주문 `대상루틴`, 피해량 `바탕`·`폭`, 동료 `레벨`·`HP`·`MP` 를 원래 롬과 같은 장면(무기점 비교 창, 파파스의 メラ, 슬라임 동료)에서 견줌. 표 읽기 값·장비 AND 값·HP 감소·일행 레코드를 비교. `MESENCE` 필요 |
 | `dq5freesweep.py rom 세이브스테이트 OUT` | 빈 자리 22곳(`dq5build.py free`)을 실내 맵 346곳·몬스터 236종 전투·필드 세계 0~2 에서 롬 읽기·실행 감시(`--kinds maps,battles,field`), `OUT/summary.txt` 에 읽힌 것. `MESENCE` 필요 |
 | `dq5chestwrite.py rom dump\|patch\|check` | 일반 상자161개·맵 연결83개·서랍/항아리/통86개·발밑18개·두 칸 앞17개·아래층 상자11개 고정 표. `dq5chest/1` 일부 필드 편집, 원본·종료자 보존. [쓰기 형식](../docs/dq5-build-format.md#보물상자조사-보상-dq5chest1) |
 | `dq5exitwrite.py rom dump -o\|patch\|check` | 실내 출구569개·영역 이동430개 고정 슬롯의 목적지·사각형·층. 종류·길이·개수 보존, 고층 공유 목록은 `shared_maps` 필요. [쓰기 형식](../docs/dq5-build-format.md#실내-출구영역-이동-dq5connections1) |
@@ -120,6 +121,7 @@ uv run --locked python sfc/dq5/tools/dq5assets.py rom/dq5.sfc --out "$ASSETS/sfc
 | 스크립트 | 하는 일 | 추가 환경 변수 | 결과 |
 | --- | --- | --- | --- |
 | `lua/dq5progresscheck.lua` | 성장 처리·상점 가격 계산과 조우 결과를 기록. `dq5progresscheck.py`가 환경과 드라이버를 준비 | `MODE`, `DRIVER`, `MAXF` | `observed.txt` |
+| `lua/dq5tablecheck.lua` | 롬 주소 읽기(범위)와 PC 통과를 기록하고 끝에 WRAM 을 덤프. `dq5tablecheck.py` 가 환경과 드라이버를 준비 | `READS`, `EXECS`, `DRIVER`, `MAXF` | `observed.txt`, `final.wram` |
 | `lua/dq5textcheck.lua` | 보행 메시지 스트림 주소와 디코더 반환 코드를 기록. `dq5textcheck.py`가 드라이버와 환경을 준비 | `MESSAGE`, `RETURN_PC`, `DRIVER` | `decoded.txt`, `end.png` |
 | `lua/dq5npcrelocatecheck.lua` | 인물 배치 직후 `12:803C`에서 목적지 맵의 WRAM을 저장. `dq5npcrelocatecheck.py`가 드라이버와 환경을 준비 | `CHECK_GROUP`, `CHECK_MAP`, `DRIVER` | `npc.bin` |
 | `lua/dq5scriptcheck.lua` | 스크립트 쓰기 실측: 이벤트 조회·명령 주소, 인물 좌표·포인터·플래그 기록. `dq5scriptcheck.py`가 드라이버와 환경 변수를 준비 | `DRIVER`, `MAXF`, 드라이버 변수 | `trace.txt`(종합 `results.json`은 Python 도구) |
