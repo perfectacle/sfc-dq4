@@ -24,6 +24,34 @@ uv run --locked python nds/dq4/tools/ndsplay.py rom/dq4ds.nds work/t --state wor
 
 `ndsplay.py` 명령: `wait`·`press`·`hold`·`a`·`mash`·`touch`·`drag`·`shot`·`every`(입력·화면), `poke`·`poke32`·`freeze`·`peek`·`dump`·`until`(RAM), `save`·`load`(세이브스테이트). 자세한 꼴은 도구의 docstring 에 있습니다. 세이브스테이트는 코어의 `retro_serialize` 그대로(약 12MB)라 같은 코어 빌드에서만 읽힙니다.
 
+### 메모리 감시 코어
+
+libretro 코어에는 중단점이 없어서, 어떤 코드가 RAM 의 한 곳을 읽고 쓰는지 보려면 감시를 넣은 코어를 따로 빌드합니다. [tools/desmume-watch.patch](../tools/desmume-watch.patch)(desmume 은 GPL)가 메모리 접근 검사 `CheckMemoryDebugEvent` 에 주소 범위 검사를 넣고, 걸린 접근을 버퍼에 쌓는 함수를 내보냅니다. [tools/build-desmume-watch.sh](../tools/build-desmume-watch.sh) 가 소스를 받고 커밋 `95b4d79` 에 패치를 적용해 처음부터 빌드합니다. 세이브스테이트는 감시 없는 코어와 그대로 오갑니다.
+
+```sh
+sh nds/dq4/tools/build-desmume-watch.sh work/desmume-watch.dylib    # 소스는 work/desmume-watch/
+export DESMUME_CORE=$PWD/work/desmume-watch.dylib                   # ndsplay.py·ndswarp.py 가 이 코어를 씀
+```
+
+`ndsplay.Player` 의 `core`(ctypes 로 연 코어)에서 세 함수를 부릅니다.
+
+| 함수 | 하는 일 |
+| --- | --- |
+| `wp_set(lo, len)` | 감시 범위 `[lo, lo + len)` 을 정하고 버퍼를 비움. `len` 0 이면 끔 |
+| `wp_count()` | 그 뒤 걸린 접근 수(버퍼 65,536칸을 넘어도 계속 셈) |
+| `wp_data()` | 버퍼 주소. 칸마다 u32 9개: ARM9 명령 주소(Thumb 이면 +1), 접근 주소, 크기(8·16·32) \| 읽기 1·쓰기 2 `<< 8` \| 접근 종류 `<< 12` \| CPU(0 ARM9, 1 ARM7) `<< 15`, 값(쓰기), LR, r3~r6. 명령 주소·LR·r3~r6 은 ARM7 접근이어도 ARM9 의 값 |
+
+```python
+p = Player(core_path(), "rom/dq4ds.nds", "work/w")
+p.core.wp_set.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
+p.core.wp_count.restype = ctypes.c_uint32
+p.core.wp_data.restype = ctypes.c_void_p
+p.core.wp_set(0x020EC524, 12)   # 주인공 x·y·z
+p.hold("down", 30)
+```
+
+부팅 상태에서 이렇게 30프레임 걸으면 1,161번이 걸리고, 그중 177번이 주인공 좌표 쓰기(`0x02084EF0` 등)입니다. 데이터 접근만 걸리고 명령 읽기는 걸리지 않습니다. 쓰임은 [graphics-format.md](graphics-format.md#검증) 의 「메모리 감시」를 봅니다.
+
 ## 장 시작 세이브스테이트
 
 `ndswarp.py chapters OUT` 가 전원부터 만듭니다(세이브스테이트 입력이 필요 없음). 원래 체크아웃의 `work/state/` 에 아래 이름으로 둡니다.
