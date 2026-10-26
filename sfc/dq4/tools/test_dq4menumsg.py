@@ -64,7 +64,7 @@ class BuildTests(unittest.TestCase):
         import dq4menupatch as mp
         cls.mp = mp
         cls.font = mp.Font('galmuri11')
-        cls.out, _, _ = mp.build(BASE.read_bytes(), cls.font, mp.Font('galmuri11c'))
+        cls.out, _, _ = mp.build(BASE.read_bytes(), mp.Font('galmuri9'), mp.Font('galmuri7'), cls.font)
 
     def test_new_glyphs_read_back_through_group_table(self):
         from dq5map import Rom

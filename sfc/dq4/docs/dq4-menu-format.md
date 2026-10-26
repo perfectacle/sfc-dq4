@@ -41,7 +41,7 @@
 ### 글자 줄과 아래 줄
 
 16점 줄 간격 창(머리 `+3` bit7)은 항목마다 글자 줄 하나와 빈 줄 하나를 씁니다. 메인 메뉴 덤프에서 항목은 타일맵 5·7·9·11·13 줄이고, 탁점은 글자 **위** 줄에 놓입니다(첫 항목 ぼ 의 탁점은 테두리 줄의 `92`, 셋째 항목부터는 앞 빈 줄의 `84`).
-그래서 첫 항목의 위 줄은 테두리라 쓸 수 없고, 한글(Galmuri11 한글은 10~11점 높이)은 글자 줄에서 아래 빈 줄로 3점 내려 그립니다. 마지막 항목의 아래 줄은 아래 테두리이므로 창 높이(`+3` 아래 4비트)를 하나 늘립니다.
+그래서 첫 항목의 위 줄은 테두리라 쓸 수 없고, 한글(Galmuri9 한글은 9점 높이)은 글자 줄의 둘째 점 줄부터 그려 아래 빈 줄로 2점 내려갑니다. 마지막 항목의 아래 줄은 아래 테두리이므로 창 높이(`+3` 아래 4비트)를 하나 늘립니다.
 8점 줄 간격 창 `63` 은 질문 줄과 빠름·느림 줄 바로 아래가 빈 줄이라 높이를 그대로 둡니다.
 
 ### 창 접두 훅 `04:B11E`
@@ -96,16 +96,17 @@
 
 ## 글꼴
 
-[Galmuri](https://github.com/quiple/galmuri) v2.40.4(SIL Open Font License 1.1)의 `Galmuri11.bdf` 를 씁니다. 남의 팬 패치 데이터가 아니고 OFL 은 글꼴을 다른 결과물에 넣는 것을 허락합니다. 저장소에는 글꼴 파일을 넣지 않고, 빌드가 파일 SHA-256 을 확인합니다.
+[Galmuri](https://github.com/quiple/galmuri) v2.40.4(SIL Open Font License 1.1)의 `Galmuri9.bdf`(창 글자), `Galmuri7.bdf`(자모판 한 칸), `Galmuri11.bdf`(메시지)를 씁니다. 남의 팬 패치 데이터가 아니고 OFL 은 글꼴을 다른 결과물에 넣는 것을 허락합니다. 저장소에는 글꼴 파일을 넣지 않고, 빌드가 파일 SHA-256 을 확인합니다.
 
 | 파일 | SHA-256 |
 | --- | --- |
 | 릴리스 `Galmuri-v2.40.4.zip` | `c8b3d9861a62ae73c8b1178091401cd79994812437ef386413f6dd54856e60e7` |
-| `Galmuri11.bdf`(채택) | `98716d08aa5762e6ce440d5a757d107cb5d3f32a53861878be06c00aacc23304` |
-| `Galmuri9.bdf`(비교) | `cc9b6d6f660d8391016be7691b3fc3f864bfa3b095f67bc5e830e9b03ce42162` |
+| `Galmuri9.bdf`(창 글자) | `cc9b6d6f660d8391016be7691b3fc3f864bfa3b095f67bc5e830e9b03ce42162` |
+| `Galmuri7.bdf`(자모판) | `0ec6b8707e8c47d85995b5b2b507180aed7bcc724792fe5477e998d41f8b075f` |
+| `Galmuri11.bdf`(메시지) | `98716d08aa5762e6ce440d5a757d107cb5d3f32a53861878be06c00aacc23304` |
 | `Galmuri11-Condensed.bdf`(비교) | `5adbdedb3d118e99cc7e114b746b3cf6f6a46a4642e0ff215d6a431e55901995` |
 
-Galmuri11(한글 12점 폭)·Galmuri9(10점)·Galmuri11 Condensed(8점)로 각각 롬을 만들어 같은 화면에서 견준 뒤 사용자가 Galmuri11 을 골랐습니다. 메뉴 문구는 음절 36자, 열 110개(앞 두 칸은 비움, 도구 출력은 112)입니다. 자모를 좌표로 그린 DQ5 트랙의 시제품 글꼴(`dq5hangulfont.py`)은 `ㅢ` 같은 모음이 없어 이번 문구를 그리지 못했습니다.
+처음에는 Galmuri11(한글 12점 폭)·Galmuri9(10점)·Galmuri11 Condensed(8점)로 견준 뒤 사용자가 Galmuri11 을 골랐습니다. 이름 입력까지 넣고 보니 원작보다 커서 「노안 패치」 같다는 사용자 의견에 따라 다시 견줬습니다(2026-10-27). 원작 창 가나는 8×8 타일에 7점 남짓이고 메시지 가나는 11~13점입니다. 원작 일본어, Galmuri11, Galmuri9, Galmuri7(한글 7×7) 롬으로 기록 목록·표시 속도·이름 입력을 찍었습니다. 게임 안 상태 창과 전투 이름은 화면 위에 합성해 견줬습니다. Galmuri7 은 원작 칸 크기와 같지만 「을」 이 「올」 처럼 받침이 뭉개졌습니다. 사용자가 원작 가나와 높이가 비슷한 Galmuri9 를 골랐습니다. 자모판은 한 칸이 8점이라 Galmuri9 자모(ㅃ 9점)가 들어가지 않아 Galmuri7 로 그립니다. 메시지는 원작 가나 크기에 맞는 Galmuri11 을 그대로 씁니다. 메뉴 문구는 음절 36자, 열 110개(앞 두 칸은 비움, 도구 출력은 112)입니다. 자모를 좌표로 그린 DQ5 트랙의 시제품 글꼴(`dq5hangulfont.py`)은 `ㅢ` 같은 모음이 없어 이번 문구를 그리지 못했습니다.
 
 ## 메뉴 메시지
 
@@ -157,7 +158,7 @@ Galmuri11(한글 12점 폭)·Galmuri9(10점)·Galmuri11 Condensed(8점)로 각�
 
 ```sh
 export ASAR=/path/to/asar                 # 조합형 이름 입력 루틴 조립
-export DQ4_GALMURI="$PWD/work/galmuri"     # Galmuri-v2.40.4.zip 을 푼 폴더
+export DQ4_GALMURI="$PWD/work/galmuri"     # Galmuri-v2.40.4.zip 을 푼 폴더(Galmuri7·9·11 BDF)
 uv run --locked python sfc/dq4/tools/dq4menupatch.py build --rom work/overture/dq4-title-overture.sfc \
   --out work/menu/dq4-menu.sfc
 uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4menupatch.py
