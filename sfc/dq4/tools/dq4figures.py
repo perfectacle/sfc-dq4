@@ -32,6 +32,16 @@ def environment_map_figure(rom, name="imuru", box=None):
     return image.resize((image.width * 2, image.height * 2), Image.Resampling.NEAREST)
 
 
+def environment_field_figure(rom, box=(1600, 1200, 2240, 1600)):
+    """FC 필드 0 에 새 필드 에셋을 놓은 그림의 한 부분(box). 롬이 없으면 None."""
+    if not rom.exists():
+        return None
+    from dq4environmentart import create_assets
+    from dq4environmentmap import render_fields
+
+    return render_fields(rom, create_assets())["field0"][0].convert("RGB").crop(box)
+
+
 def environment_rom_figure(folder):
     """DQ5 에 넣은 바트랜드·이무르 맵의 MesenCE 화면을 2배로 나란히 놓는다.
 
@@ -163,6 +173,7 @@ def main():
         environment_map.save(output / "dq4-environment-imuru.webp", lossless=True)
         castle = environment_map_figure(ROOT / "rom" / "dq4.nes", "burland", (0, 0, 608, 320))
         castle.save(output / "dq4-environment-castle.webp", lossless=True)
+        environment_field_figure(ROOT / "rom" / "dq4.nes").save(output / "dq4-environment-field.webp", lossless=True)
     for name, image in images.items():
         scale = 1 if name == "map" else 3
         preview = image.convert("RGBA").resize(

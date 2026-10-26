@@ -1601,6 +1601,126 @@ def _dungeon_assets():
     return assets
 
 
+def _hill():
+    # Bank 1 tops out in neon greens; the hill keeps to the grass tones below them.
+    rows = (
+        "................", "................", "................", "......3333......",
+        "....33566533....", "...3566776653...", "..356677776653..", ".35667777766653.",
+        ".25566666665553.", "2455555555554432", "2344444444433322", ".22333333332222.",
+        "................", "................", "................", "................",
+    )
+    return _pattern(1, tuple(r.translate(str.maketrans("234567", "122345")) for r in rows), "언덕", "town")
+
+
+def _forest():
+    c = _Canvas(1)
+    for x, y, shade in ((-1, 6, 1), (7, 6, 1), (3, 0, 0), (10, -1, 0)):
+        _leaves(c, x, y, shade)
+    for x in (3, 11):
+        c.rect((x, 13, x + 1, 15), 10)
+    return _finish(c, "숲", "town")
+
+
+def _mountain():
+    return _pattern(2, (
+        ".......88.......", "......8887......", ".....877776.....", ".....776665.....",
+        "....77656545....", "....76555444....", "...765554443....", "...65545434433..",
+        "..6554444333432.", "..55444343333321", ".554443333232221", ".54443332322221.",
+        "5444333322222211", "4333322222221111", "1111111111111111", "................",
+    ), "산", "town")
+
+
+def _cave_mouth():
+    c = _Canvas(2)
+    c.image = _pattern(2, (
+        "................", "....11111111....", "...1566666651...", "..156777777651..",
+        ".15671111117651.", ".1561999999 1651".replace(" ", "9"), "15619999999 9651".replace(" ", "9"), "1561999999999651",
+        "1561999999999651", "1451999999999541", "1451999999999541", "1441999999999441",
+        "1341999999999431", "1331999999999331", "1111999999999111", "................",
+    ), "동굴 입구", "town")
+    return c.image
+
+
+def _shoal():
+    c = _Canvas(7)
+    c.image = _water(0).copy()
+    c.draw = ImageDraw.Draw(c.image)
+    for x, y in ((2, 3), (9, 1), (5, 9), (11, 10)):
+        c.rows((".22.", "2332", "1221", ".11."), (x, y))
+    return _finish(c, "바다 암초")
+
+
+def _shrine():
+    return _pattern(3, (
+        "................", "......6666......", ".....677776.....", "....67777776....",
+        "...6777777776...", "..222222222222..", "...5444444445...", "...5411111145...",
+        "...541....145...", "...541....145...", "...541....145...", "..65411111145 6.".replace(" ", "5"),
+        ".66666666666666.", ".33333333333333.", "................", "................",
+    ), "사당", "town")
+
+
+def _tower_icon():
+    return _pattern(2, (
+        "......1111......", ".....155551.....", ".....166661.....", "....15555551....",
+        "....16767671....", "....15555551....", "....15599551....", "....15599551....",
+        "....15555551....", "....16767671....", "....15555551....", "....15599551....",
+        "...1555555551...", "...1666666661...", "...1111111111...", "................",
+    ), "탑", "town")
+
+
+def _town_icon():
+    return _pattern(5, (
+        "................", "...44...........", "..4554.....44...", ".455554...4554..",
+        "45555554.455554.", "1BBBBBB14555555 4".replace(" ", "")[:16], "1B1BB1B11BBBBBB1", "1B1BB1B11B1BB1B1",
+        "1BBBBBB11B1BB1B1", "11111111 1BBBBBB1".replace(" ", "")[:16], "........1BB11BB1", "........1BB11BB1",
+        "........11111111", "................", "................", "................",
+    ), "마을", "town")
+
+
+def _castle_icon():
+    c = _Canvas(3, (32, 16))
+    for x in (2, 13, 24):
+        c.rect((x, 2, x + 5, 15), 4)
+        c.line((x, 2, x, 15), 6)
+        c.line((x + 5, 2, x + 5, 15), 2)
+        for cx in range(x, x + 6, 2):
+            c.point((cx, 1), 4)
+        c.rect((x + 2, 5, x + 3, 7), 1)
+    c.rect((7, 6, 24, 15), 5)
+    c.line((7, 6, 24, 6), 7)
+    for cx in range(7, 25, 2):
+        c.point((cx, 5), 5)
+    c.poly(((13, 15), (13, 10), (15, 8), (16, 8), (18, 10), (18, 15)), 1)
+    c.line((7, 15, 24, 15), 2)
+    return _finish(c, "성")
+
+
+def _rocky_path():
+    c = _Canvas(2, fill=5)
+    rng = random.Random(83)
+    for y in range(16):
+        for x in range(16):
+            v = rng.random()
+            if v < 0.18:
+                c.point((x, y), 4)
+            elif v < 0.24:
+                c.point((x, y), 6)
+    for x, y in ((3, 4), (11, 2), (7, 11), (13, 13)):
+        c.rows(("66", "43"), (x, y))
+    return _finish(c, "돌길", "town")
+
+
+def _field_assets():
+    assets = {
+        "hill": _hill(), "forest": _forest(), "mountain": _mountain(), "cave_mouth": _cave_mouth(),
+        "shoal": _shoal(), "shrine": _shrine(), "tower_icon": _tower_icon(), "town_icon": _town_icon(),
+        "rocky_path": _rocky_path(),
+    }
+    castle = _castle_icon()
+    assets["castle_icon_left"], assets["castle_icon_right"] = castle.crop((0, 0, 16, 16)), castle.crop((16, 0, 32, 16))
+    return assets
+
+
 def create_assets():
     """Return original indexed art; global palette entry zero is transparent."""
     assets = {
@@ -1676,4 +1796,5 @@ def create_assets():
     assets.update(_castle_town_assets())
     assets.update(_harbour_theatre_assets())
     assets.update(_dungeon_assets())
+    assets.update(_field_assets())
     return assets
