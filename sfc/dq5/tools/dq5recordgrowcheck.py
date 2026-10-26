@@ -5,7 +5,7 @@
   dq5progresswrite.py --area-at 23:C242 --person-at 23:96F3 --reuse-names
                                           구역 85(구역 1 을 틀로 スライム 한 종만) 추가, 사람 성장 11(주인공을 틀로
                                           ちから 곡선 +10·레벨 2 경험치 바꿈) 추가
-  dq5encounterwrite.py --areas 86         21/02 의 $1948 = 0 구역과 53/50(23:FDD6, 그룹 50 이상)의 $1948 = 1·2 구역을 85 로
+  dq5encounterwrite.py --progress …           21/02 의 $1948 = 0 구역과 53/50(23:FDD6, 그룹 50 이상)의 $1948 = 1·2 구역을 85 로
 장면(원본 롬과 만든 롬 모두):
   growth-0   슬라임 전투에서 이겨 주인공(+0 = 00) 레벨 1 → 2
   growth-11  동료 칸(PARTY=02, 7E:206A)의 +0 을 0B 로, 능력치를 새 레코드의 레벨 1 값으로 둔 채 붙인 같은 전투에서
@@ -66,7 +66,7 @@ def build(original, out):
     command('dq5namewrite.py', original, 'patch', out / 'names.json', '--at', '4E:8000', '-o', out / 'names.patch.json')
     command('dq5progresswrite.py', original, 'patch', out / 'progress.json', '--area-at', '23:C242',
             '--person-at', '23:96F3', '--reuse-names', '-o', out / 'progress.patch.json')
-    command('dq5encounterwrite.py', original, 'patch', out / 'encounter.json', '--areas', NEW_AREA + 1,
+    command('dq5encounterwrite.py', original, 'patch', out / 'encounter.json', '--progress', out / 'progress.patch.json',
             '-o', out / 'encounter.patch.json')
     command('dq5build.py', original, 'build', out / 'names.patch.json', out / 'progress.patch.json',
             out / 'encounter.patch.json', '-o', out / 'grown.sfc', '--ips', out / 'grown.ips')

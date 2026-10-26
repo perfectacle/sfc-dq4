@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dq5encounter import (EVENT_COUNT, EVENT_GROUPS, EVENT_SIZE, FIELD_GRIDS, FIELD_WIDTH, FIXED,  # noqa: E402
                           FIXED_COUNT, GROUPS, MAP_TABLE)
-from dq5encounterwrite import FORMAT, HIGH_GROUPS, dump, patch  # noqa: E402
+from dq5encounterwrite import FORMAT, HIGH_GROUPS, areas_in, dump, patch  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
 
 MAPS_START = 0x23F54E
@@ -96,6 +96,12 @@ class EncounterWriteTest(unittest.TestCase):
         grid = dump(self.rom)['field_grids'][0]
         doc = {'format': FORMAT, 'field_grids': [{**grid, 'rows': [[86] * FIELD_WIDTH] + grid['rows'][1:]}]}
         self.assertEqual(len(patch(self.rom, doc, areas=87)['writes']), 1)
+        relocated = {'writes': [{'note': 'area table relocated', 'hex': '00' * 22 * 87}]}
+        self.assertEqual((areas_in(relocated), areas_in({'writes': []})), (87, 85))
+        for bad in ({'writes': [{'note': 'area table relocated', 'hex': '00' * 23}]},
+                    {'writes': [relocated['writes'][0]] * 2}):
+            with self.assertRaises(ValueError):
+                areas_in(bad)
         for areas in (84, 256, True):
             with self.subTest(areas=areas), self.assertRaises(ValueError):
                 patch(self.rom, doc, areas=areas)
