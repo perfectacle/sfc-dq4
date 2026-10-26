@@ -33,7 +33,7 @@ SFC DQ5 엔진을 분석하는 세션이 처음 읽는 문서입니다. 지금�
 
 준비(워크트리, `$MESENCE`, `$LIBDIR`)는 [analysis 스킬](../../.agents/skills/analysis/SKILL.md#준비) 을 따릅니다.
 
-- **세이브스테이트 `work/state/ship.mss`**: 배 선실(맵 17/00), 조작 가능. 사람마다 다시 만들어야 하면 `tools/lua/mkstate.lua` 로 만듭니다. 필드·다른 맵·전투 장면은 아래 「[장면 이동 도구](#장면-이동-도구)」(`sfc/dq5/tools/lua/dq5warp.lua`)로 이 상태에서 만듭니다.
+- **세이브스테이트 `work/state/ship.mss`**: 배 선실(맵 17/00), 조작 가능. 사람마다 다시 만들어야 하면 `tools/lua/mkstate.lua` 로 만듭니다. 롬만으로 같은 장면을 똑같이 다시 만들려면 `dq5assets.py` 가 쓰는 `sfc/dq5/tools/lua/dq5shipstate.lua`(빈 SRAM·RAM 0, 6,800프레임)를 씁니다. `dq5assets.py rom/dq5.sfc --out DIR --only sound` 처럼 MesenCE 단계를 하나 돌리면 `work/dq5assets/ship/ship.mss` 에 남습니다. 기존 `ship.mss` 는 RAM 을 무작위로 켠 상태라 SPC RAM 빈 곳이 이것과 다릅니다. 필드·다른 맵·전투 장면은 아래 「[장면 이동 도구](#장면-이동-도구)」(`sfc/dq5/tools/lua/dq5warp.lua`)로 이 상태에서 만듭니다.
 - **세이브스테이트 `work/state/ship-wake.mss`**: 새 게임 첫 장면, 배 선실에서 주인공이 아직 자는 상태(`7E:21A1` = 0, 주인공 숨김, 버튼을 누르면 깨어남). 전원을 켜고 A 를 40프레임마다 누르다 5,770프레임에 멈추고 5,790프레임에 저장합니다(17/00 이 5,744프레임에 풀림). `ship.mss` 는 이 장면이 끝난 뒤(`21A1` = `71`)입니다.
 
   ```sh
