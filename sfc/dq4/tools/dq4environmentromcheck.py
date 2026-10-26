@@ -26,7 +26,8 @@ for path in (TOOLS, DQ5_TOOLS):
 import dq5map  # noqa: E402
 from dq4environmentart import create_assets  # noqa: E402
 from dq4environmentmap import prepare_maps, render_maps  # noqa: E402
-from dq4environmentrom import FLOOR, TARGETS, WALL, build_graphics  # noqa: E402
+from dq4environmentrom import (FLOOR, TARGETS, WALL, WATER_BLOCK, WATER_FRAMES, WATER_PERIOD, build_graphics,  # noqa: E402
+                               water_frames)  # noqa: E402
 
 WARP = DQ5_TOOLS / "lua" / "dq5warp.lua"
 DUMP = TOOLS / "lua" / "dq4environmentdump.lua"
@@ -54,9 +55,9 @@ def warp(mesence, rom, state, to, out, name, test=False):
     return saved, "moved=yes" in log
 
 
-def dump(mesence, rom, state, out):
+def dump(mesence, rom, state, out, frames=10):
     out.mkdir(parents=True, exist_ok=True)
-    _run(mesence, rom, DUMP, {"STATE": state, "OUT": out, "FRAMES": 10})
+    _run(mesence, rom, DUMP, {"STATE": state, "OUT": out, "FRAMES": frames})
     return tuple((out / f).read_bytes() for f in ("wram.bin", "vram.bin", "cgram.bin"))
 
 
@@ -133,6 +134,20 @@ def _static_cells(wram, width, height):
     return bytes(cells)
 
 
+def water_cycle(wram_vram, water_ids, frames):
+    """Which water frame each dump holds in the four water CHR slots (None if no frame matches)."""
+    seen = []
+    for wram, vram in wram_vram:
+        tiles = []
+        for chr_id in water_ids:
+            slot = (wram[0x6000 + chr_id * 2] | wram[0x6001 + chr_id * 2] << 8) & 0x3FF
+            at = (0x2000 + slot * 16) * 2
+            tiles.append(bytes(vram[at:at + 32]))
+        data = b"".join(tiles)
+        seen.append(next((i for i in range(len(frames) // 128) if frames[i * 128:i * 128 + 128] == data), None))
+    return seen
+
+
 def _arrival(source):
     """A walkable FC cell (and its right neighbour) closest to the centre, in DQ5 cells."""
     best = None
@@ -171,10 +186,17 @@ def main():
         raise SystemExit(f"{out} is not empty")
     prg = ines.prg(args.dq4.read_bytes())
     assets = create_assets()
-    expected = {name: image for name, (image, _) in render_maps(args.dq4, assets).items()}
+
+    def expected(name, frame):
+        """Offline render with the water frame the game was showing."""
+        shown = dict(assets, **{WATER_FRAMES[0]: assets[WATER_FRAMES[frame]]})
+        return render_maps(args.dq4, shown)[name][0]
+
     sources = {name: source for _, _, name, source, _, _, _ in prepare_maps(prg, assets)}
-    chr_data = build_graphics(prg, assets)[0]
+    chr_data, _, block_words, built, _ = build_graphics(prg, assets)
     known = set(chr_data)
+    water_ids = block_words[next(local[WATER_BLOCK] for _, local in built.values() if WATER_BLOCK in local)]
+    frames = water_frames(assets, chr_data, water_ids)
     results = {"maps": {}}
     states = {}
     for name, (group, number) in TARGETS.items():
@@ -182,8 +204,14 @@ def main():
         to = f"{group:02X}/{number:02X},{x},{y}"
         states[name], moved = warp(mesence, args.rom.resolve(), args.state.resolve(), to, out / name, name, True)
         wram, vram, cgram = dump(mesence, args.rom.resolve(), states[name], out / name / "dump")
-        result, image = check_map(name, wram, vram, cgram, expected[name], sources[name], known)
+        later = [dump(mesence, args.rom.resolve(), states[name], out / name / f"dump{n}", 10 + n * WATER_PERIOD)
+                 for n in (1, 2)]
+        cycle = water_cycle([(wram, vram)] + [(w, v) for w, v, _ in later], water_ids, frames)
+        result, image = check_map(name, wram, vram, cgram, expected(name, cycle[0] or 0), sources[name], known)
         image.save(out / name / "redraw.png")
+        result["water_frames"] = cycle
+        result["water_cycles"] = None not in cycle and all(
+            (b - a) % 3 == 1 for a, b in zip(cycle, cycle[1:]))
         results["maps"][name] = {"target": f"{group:02X}/{number:02X}", "arrival": [x, y], "moved": moved, **result}
     cx, cy = _control_cell(args.orig.read_bytes())
     to = f"{CONTROL[0]:02X}/{CONTROL[1]:02X},{cx},{cy}"
@@ -200,6 +228,7 @@ def main():
         "chr_bank_equal": w0[0x1823:0x1827] == w1[0x1823:0x1827],
     }
     ok = all(m.get("pixel_differences") == 0 and m.get("walk_layer_mismatches") == 0 and m["moved"]
+             and m["water_cycles"]
              for m in results["maps"].values()) and all(
         v for k, v in results["control"].items() if k.endswith("_equal"))
     results["status"] = "passed" if ok else "failed"
