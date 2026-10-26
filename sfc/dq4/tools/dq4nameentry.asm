@@ -30,6 +30,15 @@ incsrc "dq4nameentry-defs.asm"
 !ne_slot = $F06E
 !ne_blank = $F070
 !ne_vowel = $F06A
+!ne_active = $F072
+!ne_direction = $F073
+!ne_raw = $F074
+!ne_pending = $F075
+!ne_edge = $F076
+!ne_delay = $F077
+!ne_buttons = $F078
+!ne_pressed = $F079
+!ne_move = $F07A
 !ne_tiles = $F100           ; 이름 칸 2bpp: 글자 줄 8타일(128바이트), 이어서 아래 줄 8타일
 
 org $038B72
@@ -44,6 +53,19 @@ org $04A270
 
 org $04B79B
     JML NeListHook
+
+org $04D1DE
+    JML NePollHook
+org $04D222
+    JML NeRepeatHook
+org $04D584
+    JML NeUpHook
+org $04D68C
+    JML NeDownHook
+org $04D794
+    JML NeLeftHook
+org $04D82E
+    JML NeRightHook
 
 org $30A000
 NeHook:
@@ -65,7 +87,13 @@ NeKorean:
     REP #$30
     STZ !ne_n
     STZ !ne_sp
+    STZ !ne_raw
+    STZ !ne_pending
+    STZ !ne_delay
     SEP #$30
+    STZ !ne_direction
+    LDA #$01
+    STA !ne_active
     LDA.b #!ne_cursor
     STA.b $CC
     JSR NeDraw
@@ -150,6 +178,7 @@ NeDone:
     JSR NeSerialize
 NeReturn:
     SEP #$30
+    STZ !ne_active
     STZ.b $E8
     PLB
     PLP
@@ -900,6 +929,246 @@ NeListHook:
     PLB
     PLP
     JMP .original
+
+
+; 첫 메뉴 밖의 선택·보행 입력은 원래 루틴으로 간다.
+macro NameGuard(original, mover)
+    PHP
+    REP #$20
+    PHA
+    SEP #$20
+    LDA.l !flag
+    CMP #$A5
+    BNE ?original
+    LDA.l $7FF072
+    CMP #$01
+    BEQ ?name
+?original:
+    REP #$20
+    PLA
+    PLP
+    PHP
+    if <mover>
+        LDA $0AD7
+    else
+        PHB
+        REP #$30
+    endif
+    JML <original>+4
+?name:
+    REP #$20
+    PLA
+    PLP
+    PHP
+    PHB
+    REP #$30
+    PHA
+    PHX
+    PHY
+    SEP #$20
+    LDA #$04
+    PHA
+    PLB
+endmacro
+
+NeUpHook:
+    %NameGuard($04D584, 1)
+    LDA #$00
+    JMP NeMoveCursor
+NeDownHook:
+    %NameGuard($04D68C, 1)
+    LDA #$2C
+    JMP NeMoveCursor
+NeLeftHook:
+    %NameGuard($04D794, 1)
+    LDA #$58
+    JMP NeMoveCursor
+NeRightHook:
+    %NameGuard($04D82E, 1)
+    LDA #$84
+NeMoveCursor:
+    REP #$30
+    AND #$00FF
+    STA.l $7FF07A
+    LDA $0AD7
+    AND #$00FF
+    CLC
+    ADC.l $7FF07A
+    TAX
+    SEP #$20
+    LDA.l NeNavigation,X
+    STA $0AD7
+    LDA #$00
+    STA.l $7FF075
+    JSL !ne_row
+    JML $04CEBF
+
+; 커서를 그리는 동안 들어온 입력은 다음 선택 고리에서 기다리지 않고 먼저 쓴다.
+NePollHook:
+    %NameGuard($04D1DE, 0)
+    LDA.l $7FF075
+    BEQ .wait
+    LDA #$00
+    STA.l $7FF075
+    BRA .ready
+.wait
+    JSL !ne_blink
+    JSL !ne_wait
+    JSR NeSampleInput
+.ready
+    LDA.b $24
+    STA $0ADB
+    STZ $0ADA
+    JML $04CEBF
+
+; 한 방향만 고른 뒤 반복 대기를 센다. 다른 방향을 떼는 것은 새 누름이 아니다.
+NeRepeatHook:
+    %NameGuard($04D222, 0)
+    JSR NeSampleInput
+    JSR NeInputReady
+    BCS .return
+    LDA $0ADA
+    BEQ .first
+    LDA #$07
+    BRA .delay
+.first
+    LDA #$10
+.delay
+    STA.l $7FF077
+.wait
+    JSL !ne_wait
+    JSR NeSampleInput
+    JSR NeInputReady
+    BCS .return
+    LDA.l $7FF077
+    DEC
+    STA.l $7FF077
+    BNE .wait
+    LDA #$01
+    STA $0ADA
+    STA $0B4C
+    STA.l $7FF075
+    BRA .return
+.return
+    JML $04CEBF
+
+; C=1 이면 새 입력·해제. 새 방향은 곧바로, 유지한 방향은 반복 시각에만 움직인다.
+NeInputReady:
+    LDA.b $24
+    STA $0ADB
+    AND #$F0
+    BNE .button
+    LDA.b $24
+    AND #$0F
+    BEQ .released
+    LDA.l $7FF076
+    BNE .direction
+    CLC
+    RTS
+.direction
+    LDA #$01
+    STA $0B4C
+    STA.l $7FF075
+    STZ $0ADA
+    SEC
+    RTS
+.button
+    LDA #$01
+    STA.l $7FF075
+.released
+    STZ $0B4C
+    STZ $0ADA
+    SEC
+    RTS
+
+; $0749 는 실제 패드 상위 바이트다. Start 는 DQ5 의 $24 로 옮겨지지 않는다.
+NeSampleInput:
+    SEP #$20
+    LDA #$00
+    STA.l $7FF076
+    LDA.b $24
+    AND #$F0
+    STA.l $7FF078
+    LDA $0749
+    AND #$1F
+    PHA
+    AND #$10
+    BEQ .directions
+    LDA.l $7FF074
+    AND #$10
+    BNE .startHeld
+    LDA.b #!ne_last
+    STA.b $CC
+    LDA $0AD7
+    CMP.b #!ne_last
+    BEQ .startHeld
+    JSL !ne_erase
+    STZ $0AD9
+    LDA.b #!ne_last
+    STA $0AD7
+    JSL !ne_row
+    JSL !ne_draw
+    PHB
+    PHK
+    PLB
+    BRK #$19
+    db $33,$00
+    PLB
+.startHeld
+    PLA
+    STA.l $7FF074
+    LDA #$00
+    STA.l $7FF073
+    STA.b $24
+    RTS
+.directions
+    PLA
+    PHA
+    AND #$0F
+    STA.l $7FF079
+    LDA.l $7FF074
+    EOR #$FF
+    AND.l $7FF079
+    BEQ .held
+    JSR NeChooseDirection
+    STA.l $7FF073
+    LDA #$01
+    STA.l $7FF076
+    BRA .emit
+.held
+    LDA.l $7FF073
+    AND.l $7FF079
+    BNE .emit
+    LDA.l $7FF079
+    JSR NeChooseDirection
+    STA.l $7FF073
+.emit
+    PLA
+    STA.l $7FF074
+    LDA.l $7FF073
+    ORA.l $7FF078
+    STA.b $24
+    RTS
+
+; 동시에 누른 방향에 순서가 없으면 위·아래·왼쪽·오른쪽 순으로 고른다.
+NeChooseDirection:
+    BIT #$08
+    BEQ +
+    LDA #$08
+    RTS
++
+    BIT #$04
+    BEQ +
+    LDA #$04
+    RTS
++
+    BIT #$02
+    BEQ +
+    LDA #$02
+    RTS
++
+    AND #$01
+    RTS
 
 assert pc() <= $30C000
 

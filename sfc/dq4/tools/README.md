@@ -18,6 +18,7 @@
 | `dq4overture.py text\|build\|tempo-map\|render` | FC 서곡 악보를 NDS 템포·DQ5 악기로 편곡해 타이틀 롬의 시퀀스 10 에 갈래로 넣음(4MB 롬·IPS). `tempo-map` 은 NDS 녹음과 DTW 로 템포 지도를 다시 잼, `render` 는 프로브 결과를 .spc·.wav 로. [타이틀 서곡](../docs/dq4-overture-format.md) |
 | `dq4menupatch.py build\|sheet` | 서곡 롬 위에 모험의 서 메뉴·조합형 이름 입력을 한글로(4MB 롬·IPS). `DQ4_GALMURI` 의 Galmuri BDF 와 `ASAR` 실행 파일 필요. `sheet` 는 문구 열 그림. [메뉴 한글화](../docs/dq4-menu-format.md), [이름 입력](../docs/dq4-name-entry-format.md) |
 | `dq4nameentrycheck.py --rom 롬 --symbols 심볼 --out 새폴더` | MesenCE에서 조합·삭제·Y 완료·새 게임 이름을 검사하고 입력 칸 VRAM을 비교. `MESENCE` 실행 파일 필요. [재현](../docs/dq4-name-entry-format.md#재현) |
+| `dq4namecursorcheck.py --rom 롬 --symbols 심볼 --out 새폴더` | MesenCE 실제 입력으로 빠른 방향 전환·겹침·반복·빈칸 경계와 Start 이동을 검사. `MESENCE` 실행 파일 필요. [재현](../docs/dq4-name-entry-format.md#재현) |
 | `lua/dq4overturespc.lua` | 서곡 롬을 전원부터 돌려 곡 10 이 시작한 뒤의 SPC 상태와 DSP 쓰기(`dspw.txt`)를 남김. `OUT`, `MAXF`, `SONG`, `SEQ`, `DUMPAT` 사용 |
 | `lua/dq4titleintegrationcheck.lua` | 통합 롬의 화면·VRAM·음악·메뉴 진입 관찰. `OUT`, `MAXF`, `EVERY`, `FROM`, `SEQ`, `RESETAT`, `TRACE_DMA`, `MOTION_PC` 사용 |
 | `lua/dq4titlecheck.lua` | 독립 미리보기의 화면·VRAM·CGRAM 관찰. `OUT`, `FRAME` 사용 |

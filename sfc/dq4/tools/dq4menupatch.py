@@ -456,7 +456,10 @@ def build(rom, font, jamo_font):
     put(data, WIN_DISPATCH, bytes((0x22, HOOK & 0xFF, HOOK >> 8 & 0xFF, HOOK >> 16, 0xB0, 0x05,
                                    0x20, 0x35, 0xB2, 0x80, 0xC4)), bytes.fromhex('c901f0052035b280c6c8c8'))
     put(data, FADEOUT_EXIT, bytes((0x5C, UPLOAD & 0xFF, UPLOAD >> 8 & 0xFF, UPLOAD >> 16)), bytes.fromhex('5c5cfe03'))
-    data = ne.apply(bytes(data), keys, ne.glyph_blob(font, render))
+    bridges = {}
+    for name, target in {'wait': 0x9D35, 'erase': 0xD1B9, 'draw': 0xD183, 'row': 0xD319, 'blink': 0xD162}.items():
+        bridges[name] = place(data, slack, bytes((0x20, target & 0xFF, target >> 8, 0x6B)))
+    data = ne.apply(bytes(data), keys, ne.glyph_blob(font, render), bridges)
     return set_checksum(data), atlas, records
 
 
