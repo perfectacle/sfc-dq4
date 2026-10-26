@@ -23,6 +23,7 @@
 | `dq4namegamecheck.py --rom 롬 --state work/state/ship.mss --out 새폴더` | 선실에서 주인공 이름을 넣고 메시지 첫 코드를 `1012` 로 바꿔, 한글·가나 이름이 맞는 글자 코드가 되는지 MesenCE 로 검사. `MESENCE` 필요. [게임 안 이름](../docs/dq4-name-entry-format.md#게임-안-이름) |
 | `dq4namesave.py show\|convert` | SRAM 주인공 이름의 부호(한글·예전 한글·가나)를 보고, 고른 칸의 예전 한글 이름을 표시 있는 부호로 바꿔 새 파일에 씀. [예전 저장](../docs/dq4-name-entry-format.md#예전-저장) |
 | `dq4namegame.py` | `dq4menupatch.py build` 가 부르는 게임 안 메시지 이름 모듈(`24:A7D5` → `24:9E11`) |
+| `dq4bg3tiles.py 장면=VRAM덤프 ...` | VRAM 덤프에서 BG3 타일맵이 가리키는 칸과 빈 칸을 셈. [게임 안 창 한글 조사](../docs/dq4-window-text-format.md) |
 | `dq4soundcatalog.py --assets 폴더 [--dq5-rom 롬] --out JSON` | NDS 곡·효과음 목록, FC 장면 대응, DQ5 재사용 후보와 숙박곡 비교. [사운드 포팅](../docs/dq4-sound-port-format.md) |
 | `dq4soundport.py export --assets 폴더 --out 폴더` | NDS 악보 JSON 을 DQ5 시퀀스로(템포·세기 합치기, 꼬리를 남기는 성부 배분, 손실 보고서) |
 | `dq4soundbank.py --score JSON --assets 폴더 --out 폴더 [--max-rate 8000]` | 곡에 쓰이는 NDS PCM 을 S-DSP 계산으로 BRR 로(무음 첫 블록, 실기 SNR) |
