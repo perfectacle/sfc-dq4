@@ -119,7 +119,30 @@ def glyph_blob(font, render):
     return bytes(out)
 
 
-def data_asm(keys):
+def navigation(keys):
+    """위·아래는 같은 열에서 빈 칸을 건너뛰고 경계에서 멈춘다. 좌·우는 같은 줄 안에서 순환한다."""
+    rows = len(keys) // ROW_CELLS
+    tables = []
+    for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+        table = []
+        for index, key in enumerate(keys):
+            target = index
+            if key != NONE:
+                row, col = divmod(index, ROW_CELLS)
+                for step in range(1, rows if dr else ROW_CELLS):
+                    nr, nc = row + dr * step, (col + dc * step) % ROW_CELLS
+                    if not 0 <= nr < rows:
+                        break
+                    candidate = nr * ROW_CELLS + nc
+                    if keys[candidate] != NONE:
+                        target = candidate
+                        break
+            table.append(target)
+        tables.extend(table)
+    return tables
+
+
+def data_asm(keys, bridges):
     def db(label, values):
         values = list(values)
         return [f'{label}:'] + ['    db ' + ','.join(f'${v:02X}' for v in values[i:i + 16])
@@ -139,7 +162,9 @@ def data_asm(keys):
              f'!ne_star = {STAR}', f'!ne_blank_glyph = {STAR + 1}', f'!ne_glyph_bank = ${GLYPH_BANK:02X}', f'!ne_max = {MAX_CHARS}',
              f'!ne_cursor = {keys.index(JAMO.index(CURSOR_START))}', f'!ne_back = ${BACK:02X}',
              f'!ne_done = ${DONE:02X}', f'!ne_none = ${NONE:02X}', f'!ne_last = {keys.index(DONE)}']
-    lines = dw('NeKsSyl', [ord(ch) - 0xAC00 for ch in KS])
+    defs += [f'!ne_{name} = ${address:06X}' for name, address in bridges.items()]
+    lines = db('NeNavigation', navigation(keys))
+    lines += dw('NeKsSyl', [ord(ch) - 0xAC00 for ch in KS])
     lines += dw('NeCode', [int.from_bytes(code_bytes(n), 'little') for n in range(len(GLYPHS))])
     lines += db('NeGrid', keys)
     lines += db('NeJCho', [CHO.index(j) if j in CHO else 0xFF for j in JAMO])
@@ -155,14 +180,14 @@ def data_asm(keys):
     return '\n'.join(defs) + '\n', '\n'.join(lines) + '\n'
 
 
-def apply(rom, keys, blob, asar=None):
+def apply(rom, keys, blob, bridges, asar=None):
     """롬에 루틴·표·글리프를 asar 로 넣는다."""
     asar = asar or os.environ.get('ASAR')
     if not asar:
         raise SystemExit('ASAR 에 asar 실행 파일을 주세요(sfc/dq4/docs/dq4-menu-format.md)')
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
-        defs, tables = data_asm(keys)
+        defs, tables = data_asm(keys, bridges)
         (tmp / 'dq4nameentry-defs.asm').write_text(defs)
         (tmp / 'dq4nameentry-tables.asm').write_text(tables)
         for i in range(3):
