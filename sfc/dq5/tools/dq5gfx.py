@@ -612,7 +612,7 @@ def field_block_images(rom, cgram, tiles, layers=('lower', 'upper')):
     colors = cgram_colors(cgram)
     cache = {}
     out = []
-    for m in range(512):
+    for m in range(511):
         img = Image.new('RGBA', (16, 16), colors[0] + (255,))
         for upper, table in ((False, BLOCK_LOWER), (True, BLOCK_UPPER)):
             if ('upper' if upper else 'lower') not in layers:
@@ -983,11 +983,11 @@ def export_field(rom, out):
         out.save(img, f'field/field{world}-annot.png', 'field', f'세계 {world}', '세계 지도', variant='주석',
                  entrances=el, note='노랑 = 04:FD97 입구(그룹 번호와 이름)')
     cg = field_cgram(rom, 0, day)
-    labels = [f'{m:03X}' for m in range(512)]
+    labels = [f'{m:03X}' for m in range(511)]
     for layers, stem in ((('lower', 'upper'), 'field'), (('lower',), 'field-lower'), (('upper',), 'field-upper')):
         imgs = field_block_images(rom, cg, tiles, layers)
         out.save(sheet(imgs, 16, 20, 16, labels, label_h=10, below=True), f'gfx/blocks/{stem}.png', 'blocks',
-                 f'필드 블록 512개 ({"·".join({"lower": "아래층", "upper": "위층"}[k] for k in layers)})', '필드',
+                 f'필드 블록 511개 ({"·".join({"lower": "아래층", "upper": "위층"}[k] for k in layers)})', '필드',
                  note='블록 번호(9비트). 정의 2A:A32C·2A:AD27')
     colors = cgram_colors(cg)
     cells = []

@@ -4,7 +4,7 @@ SFC DQ5 엔진을 분석하는 세션이 처음 읽는 문서입니다. 지금�
 
 ## 지금 상태
 
-포팅용 스크립트 쓰기는 `dq5eventwrite.py`·`dq5npcwrite.py`로 이어집니다([쓰기 형식](docs/dq5-build-format.md#이벤트-스크립트-dq5event1)). 이벤트는 지정한 표 항목을 확장 뱅크로 연결하고, 인물은 기존 슬롯 길이를 유지합니다. 원본 왕복 비교와 MesenCE 실측 7건을 마쳤습니다([일지](journal/2026-10-26-53-scriptwrite.md)). 다음 쓰기 도구는 필드 블록·입구 표이며, 인물 목록 재배치는 남아 있습니다.
+포팅용 스크립트 쓰기는 `dq5eventwrite.py`·`dq5npcwrite.py`로 이어집니다([쓰기 형식](docs/dq5-build-format.md#이벤트-스크립트-dq5event1)). 이벤트는 지정한 표 항목을 확장 뱅크로 연결하고, 인물은 기존 슬롯 길이를 유지합니다. 원본 왕복 비교와 MesenCE 실측 7건을 마쳤습니다([일지](journal/2026-10-26-53-scriptwrite.md)). 필드 블록·입구·도착 고정 표는 `dq5fieldtables.py`로 씁니다([일지](journal/2026-10-26-54-fieldtables.md)). 블록은0~510, 지도 자료 배치는30~3F이며 세 세계 재압축을 게임에서 확인했습니다. `dq5fieldtablecheck.py`로 블록·입구·출구·세계 지도 검증을 재현합니다. 다음은 성장·조우·상점 쓰기이고, 대사 일괄 쓰기와 인물 목록 재배치도 남아 있습니다.
 
 해킹 일지(dq5) 2026-10-25-06 까지 풀었습니다. 형식은 [dq5-map-format.md](docs/dq5-map-format.md), [dq5-field-format.md](docs/dq5-field-format.md), [dq5-text-format.md](docs/dq5-text-format.md), [dq5-data-format.md](docs/dq5-data-format.md), [dq5-graphics-format.md](docs/dq5-graphics-format.md) 에 있습니다.
 
