@@ -82,6 +82,7 @@ uv run --locked python sfc/dq5/tools/dq5build.py rom/dq5.sfc fromrom work/hangul
 
 | 도구 | 쓰는 것 | 입력 |
 | --- | --- | --- |
+| `dq5progresswrite.py` | 성장·조우 구역·상점 고정 목록·교환 값 | `dq5progress/1` JSON |
 | `dq5tables.py` | 몬스터·물건·주문·피해량·동료 몬스터 표 | `dq5tables/1` JSON |
 | `dq5mapwrite.py` | 실내 맵 레코드(머리·배치 비트스트림·속성 패스)와 맵 포인터 | `dq5map/1` JSON |
 | `dq5mapcompile.py` | 블록 배치 목록 → 배치 명령(`dq5mapwrite.py` 의 입력) | `dq5mapsrc/1` JSON |
@@ -124,6 +125,40 @@ uv run --locked python sfc/dq5/tools/dq5tables.py rom/dq5.sfc check work/tables/
 - 내보낸 JSON 을 그대로 다시 넣으면 바뀐 바이트가 0개였습니다. 내보낸 값은 읽기 도구 `dq5monster.py`(236종의 필드·내성·행동)·`dq5item.py`(216개)·`dq5spell.py`(171개)와 하나도 다르지 않았습니다.
 - 다섯 표의 첫·둘째·마지막 항목에서 필드마다 0 과 최댓값을 넣고 다시 읽자 354번 모두 그 필드만 바뀌었습니다.
 - スライム(`00`)을 고친 롬을 빌더로 만들어 슬라임 셋 이벤트 전투(handoff 의 전투 재현)를 했습니다. `HP` 300 이면 전투 슬롯 `7E:07C0 + 슬롯*16 + 2` 가 셋 모두 `2C 01` 이었습니다(바이트10 의 위 비트까지 들어감). `HP` 1·`경험치` 777 이면 「それぞれ 2331ポイントの けいけんちを かくとく！」, `경험치` 0·`금화` 600 이면 소지금(`7E:2019`)이 20 → 1,820 이었습니다(바이트8 bit2-3 의 위 비트까지).
+
+### 성장·조우·상점 `dq5progress/1`
+
+`sfc/dq5/tools/dq5progresswrite.py`는 성장 53개, 조우 구역 85개, 상점 48목록, 메달·코인 교환 값 6개씩을 편집합니다. 목록·필드를 생략하면 원래 값을 유지합니다. 바뀐 레코드만 `orig`를 포함한 패치 목록으로 냅니다. 일반 물건 가격은 기존 `dq5tables.py`의 `items`로 고칩니다.
+
+```sh
+uv run --locked python sfc/dq5/tools/dq5progresswrite.py rom/dq5.sfc dump -o work/progress.json
+uv run --locked python sfc/dq5/tools/dq5progresswrite.py rom/dq5.sfc patch work/progress.json -o work/progress.dq5patch.json
+uv run --locked python sfc/dq5/tools/dq5progresswrite.py rom/dq5.sfc check
+```
+
+```json
+{"format":"dq5progress/1",
+ "growth":[{"kind":"person","index":0,"exp2":8}],
+ "encounters":[{"index":1,"slots":[{"index":5,"monster":3,"weight":7,"count_code":0}]}]}
+```
+
+`growth`의 `kind`는 `person`(11종)·`monster`(42종), `index`는 종류 안 번호입니다. 레코드는 16진 `50`, 즉 80바이트입니다. `breaks`는 꺾이는 레벨 최대 7개, `exp2`는 레벨 2의 누적 경험치, `multipliers`는 구간별 배수 바이트(`breaks` 수+1개)입니다. `stats`의 키는 `hp`·`mp`·`strength`·`agility`·`wisdom`·`luck`·`resilience`이며, 각 배열에 레벨 1·꺾이는 레벨들·레벨 99의 저장값을 적습니다. HP·MP는 레벨 1을 제외한 저장값의 두 배가 실제 값입니다.
+
+꺾임 수를 바꾸면 배수와 능력치 일곱 배열을 모두 지정해야 합니다. 새로 바꾼 꺾임은 2~99에서 엄격한 오름차순, 새 능력치 곡선은 실제 값 기준 비감소여야 합니다. 원본의 중복 꺾임이나 감소 곡선을 수정하지 않는 경우는 그대로 보존합니다. 활성 값 밖의 빈 칸도 원본에서 유지합니다.
+
+`encounters`는 `index` 0~84로 고릅니다. `slots`는 일반 몬스터 칸 0~9 중 고칠 칸만 적으며 `weight`·`count_code`는 각각 0~7, `monster`는 0~235입니다. 마지막 칸 10은 `fixed`의 `weight`(0~7)·`group`(0~8)으로 따로 고칩니다. `species_weights`는 여러 종 무리의 종 수 무게 셋(각 0~3), `rate_index`는 조우 확률 계수 색인(0~7), `flag_1000`은 2비트, `flag_1010`·`fixed_night_only`는 bool입니다. 모든 칸의 무게가 0이거나 여러 종을 뽑는데 종 수 무게가 모두 0이면 거부합니다. 원시 비트가 겹치는 칸도 다른 필드의 비트는 보존합니다.
+
+`shops`는 `kind`(0 도구·1 방어구·2 무기·3 잡화)와 종류 안의 `index`로 고릅니다. 종류별 목록 수는 11·15·17·5개입니다. `items`는 원래와 같은 수의 물건 번호(0~215)여야 합니다. `key`를 적었다면 원래 값과 같은지 확인하며 키·순서·품목 수·종료 `FF`는 바꾸지 않습니다. 같은 키라도 이야기 플래그나 주인공 자리로 다른 목록을 고르기 때문입니다. `medal_prices`와 `coin_prices`는 각각 여섯 값이고 범위는 0~255·0~16,777,215입니다.
+
+숫자는 JSON 정수이며 모르는 필드·잘못된 타입·중복 식별자는 오류입니다. 원본 전체를 내보내 다시 인코딩한 6,510바이트가 모두 같았고, 그대로 패치하면 쓰기는 0개였습니다. 게임에서는 수정한 성장 표로 레벨업한 능력치·다음 경험치, 던전 보행 조우의 몬스터·마릿수, 상점 품목 여섯 개와 가격을 확인했습니다. 일반 가격 둘은 `dq5tables.py`로 바꾸어 상점 계산 결과까지 대조했습니다([일지](../journal/2026-10-26-55-progresswrite.md)).
+
+`MESENCE`를 설정한 뒤 다음 명령으로 레벨업·조우·상점 검사를 다시 돌립니다. 결과와 실행별 로그는 출력 폴더 아래 새 하위 폴더에 남습니다.
+
+```sh
+uv run --locked python sfc/dq5/tools/dq5progresscheck.py rom/dq5.sfc \
+  --state work/state/ship.mss --out work/progresscheck
+```
+
 
 ### 실내 맵 레코드 `dq5map/1`
 
