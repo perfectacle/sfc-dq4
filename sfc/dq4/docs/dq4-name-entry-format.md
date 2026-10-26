@@ -138,7 +138,8 @@ MESENCE=/path/to/Mesen uv run --locked python sfc/dq4/tools/dq4nameentrycheck.py
   --out work/name-entry/check
 MESENCE=/path/to/Mesen uv run --locked python sfc/dq4/tools/dq4namecursorcheck.py \
   --rom work/name-entry/dq4-name-entry.sfc --symbols work/name-entry/name-entry.sym \
-  --out work/name-entry/cursor-checkMESENCE=/path/to/Mesen uv run --locked python sfc/dq4/tools/dq4namegamecheck.py \
+  --out work/name-entry/cursor-check
+MESENCE=/path/to/Mesen uv run --locked python sfc/dq4/tools/dq4namegamecheck.py \
   --rom work/name-entry/dq4-name-entry.sfc --state work/state/ship.mss --out work/name-entry/game-check
 ```
 

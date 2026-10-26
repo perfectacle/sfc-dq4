@@ -467,6 +467,8 @@ def build(rom, font, jamo_font, message_font=None):
     data, atlas.messages = dq4menumsg.apply(data, message_font or Font('galmuri11'))
     import dq4namegame
     data = dq4namegame.apply(data)
+    import dq4bg3slot
+    data = dq4bg3slot.apply(data)
     return set_checksum(data), atlas, records
 
 
