@@ -69,6 +69,7 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5flags.py rom [2192.7]` | DQ5 이야기 플래그(`7E:2190`~`220F`) 비트·바이트마다 켜는 곳·끄는 곳·보는 곳(대화·인물 스크립트·인물 목록 표·맵별 루틴·맵 조건 표·이벤트 스크립트·네이티브 `BRK 0B`·`0C`·`0D`·롱 주소)과 문맥 메시지. `--source` 출처 고르기, `--check flagtrace.txt` 로 게임 기록과 대조 |
 | `dq5story.py rom` | DQ5 이야기 진행 지도. 사건마다 켜는 비트·거는 곳에 그 비트를 보는 인물 목록·맵 표를 붙인 표, `--lists` 로 조건 비트별 인물 목록 표([dq5-story.md](../docs/dq5-story.md)) |
 | `dq5event.py rom [주소]` | DQ5 이벤트 스크립트(`00:BEC3`). 이벤트 표 `23:E2C2` 10개의 목표 자리와 스크립트, 주소를 주면 그 스크립트, `--all` 로 `15:F150`~`F7CF` 의 86개, `--number N` 스크립트 번호 표(`23:E325`), `--starts` 번호 표·이벤트 표·코드·`02:B705` 직접 호출·점프에서 모은 106개, `--list` 시작 주소·부르는 곳(`LDA #n` + `JSL` 이나 받침 루틴 `JMP`)·첫 메시지 한 줄씩 |
+| `dq5fxvm.py rom 폴더 연출` | DQ5 전투 연출 스크립트를 `w65816.py`(작은 65C816 해석기, VRAM·CGRAM·OAM 쓰기와 일반 DMA 만 흉내)로 롬 코드 그대로 돌려 `lua/dq5fx3e.lua` `VMDUMP` 덤프와 프레임마다 견줌. `--from-entry` 연출 입구부터, `--screens 폴더` 연출 층 그림 비교, `--gif` 저장, `--inputs` 쓰기 전에 읽은 WRAM. import 용 `vm_images`·`save_gif` |
 | `dq5framediff.py 원래 패치` | `lua/dq5framedump.lua` 결과 둘(`frames.bin`)을 덤프마다 견주어 WRAM·VRAM·CGRAM·OAM 의 다른 구간과 처음 다른 덤프 번호를 보임. 기본은 DP·스택 임시 값을 뺌(`--all` 이면 모두) |
 | `dq5figures.py` | `sfc/dq5/images/` 의 그림을 다시 만듦(롬 필요, 게임 화면 비교 그림만 `work/` 덤프 필요) |
 
@@ -94,5 +95,5 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `lua/dq5shots.lua` | 드라이버 앞에 붙여 정한 프레임 범위의 화면 버퍼(`emu.getScreenBuffer`, 늦게 찍히지 않음)를 남김. `dq5effectgif.py`·`dq5titlegif.py` 가 씀 | `FROM`, `TO`, `STEP` | `sNNNNN.raw`(32비트 ARGB), `size.txt` |
 | `lua/dq5titlefx.lua` | 타이틀 세이브스테이트에서 프레임 끝마다 `$075B`·`$71`·`$75`·`7E:A000`~`A1E6`·`7E:A4DC`~·OAM 앞 48바이트를 남김. `dq5titlefx.py --check` 가 읽음 | `STATE`, `MAXF` | `titlefx.bin` |
 | `lua/dq5fxdump.lua` | DQ5: 드라이버(보통 `dq5battle.lua`)로 싸우며 `22:D73C`(A = 연출 번호)부터 `22:D796` 뒤 `POST` 프레임까지 프레임마다 덤프. 같은 번호는 처음 한 번만 | `ONLY`, `POST`(기본 4), `SHOTS=1` | `fx.txt`, `eNN-kkk.vram`·`.cgram`·`.oam`·`.ppu`·`.png` |
-| `lua/dq5fx3e.lua` | DQ5: 드라이버(보통 `dq5battle.lua`)로 싸우며 연출 스크립트 명령 `3E` 가 부르는 22 뱅크 루틴마다(`22:DBE1`~`22:D934`) WRAM 읽기·쓰기, PPU·DMA 쓰기, 변수 `7E:9E73`~ 의 바뀐 값, 배치 표 `7E:5BA0`~`5BFF` 를 한 줄씩. NMI·IRQ 안의 접근은 뺌 | `MAXCALL`(같은 연출의 같은 루틴을 자세히 적는 횟수, 기본 3) | `3e.txt` |
+| `lua/dq5fx3e.lua` | DQ5: 드라이버(보통 `dq5battle.lua`)로 싸우며 연출 스크립트 명령 `3E` 가 부르는 22 뱅크 루틴마다(`22:DBE1`~`22:D934`) WRAM 읽기·쓰기, PPU·DMA 쓰기, 변수 `7E:9E73`~ 의 바뀐 값, 배치 표 `7E:5BA0`~`5BFF` 를 한 줄씩. NMI·IRQ 안의 접근은 뺌 | `MAXCALL`(같은 연출의 같은 루틴을 자세히 적는 횟수, 기본 3), `FORCE`(`0DA8=80`, 연출을 시작할 때 WRAM 오프셋에 써 넣음), `VMDUMP=1`(해석기 앞·연출 입구의 WRAM·레지스터와 프레임마다 BG3 사본, `dq5fxvm.py` 입력), `VMSCREENS=1`(입구의 VRAM·CGRAM·OAM 과 프레임마다 화면 메모리 `e<연출>-<k>.*`), `VMWRAM=1`(프레임마다 WRAM) | `3e.txt`, `v<연출>.wram`·`.regs`·`.frames`·`.wram0`·`.vram0` 등 |
 | `lua/dq5vramlog.lua` | DQ5: VRAM 에 올리는 곳 찾기. `$420B` DMA 마다 B 버스 대상·원본·크기·VRAM 주소, `$2118`/`$2119` 를 쓰는 PC(다음 명령 주소)별 첫 프레임·VRAM 주소·횟수. 레지스터 미러 뱅크 `00`~`3F`·`80`~`BF` 모두 감시 | `FROM`, `STOPF`, `BBUS`(16진, 0 이면 전부), `VLO`·`VHI`(VRAM 워드) | `dma.txt`, `vport.txt` |
