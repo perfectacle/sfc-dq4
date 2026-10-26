@@ -13,6 +13,7 @@ if str(FC_TOOLS) not in sys.path:
     sys.path.insert(0, str(FC_TOOLS))
 
 import dq4block  # noqa: E402
+from dq4environmentart import palette_variant  # noqa: E402
 
 
 # IDs address the eight-column FC block sheets, not the art sheet's order.
@@ -87,7 +88,17 @@ BLOCK_ART = {
     },
 }
 
-MAPS = ((0x02, 0, 0x0A, "burland"), (0x12, 0, 0x0E, "imuru"))
+# Every FC interior map drawn with block sheets 0A and 0E; their FC palettes are the same set
+# except アッテムト, which uses a darker set.
+MAPS = (
+    (0x02, 0, 0x0A, "burland"), (0x08, 0, 0x0A, "gardenburg"), (0x09, 0, 0x0A, "stancia"),
+    (0x09, 3, 0x0A, "stancia-03"), (0x09, 6, 0x0A, "stancia-06"), (0x0D, 0, 0x0A, "mintos"),
+    (0x12, 0, 0x0E, "imuru"), (0x13, 4, 0x0A, "saran-04"), (0x19, 0, 0x0E, "seaside"),
+    (0x19, 1, 0x0E, "seaside-01"), (0x1B, 0, 0x0A, "rosaryhill"), (0x1B, 1, 0x0A, "rosaryhill-01"),
+    (0x2A, 0, 0x0A, "shrine-2a"), (0x32, 6, 0x0E, "konenbery-06"), (0x34, 5, 0x0E, "attemut-05"),
+    (0x34, 7, 0x0E, "attemut-07"),
+)
+MAP_PALETTES = {"attemut-05": "dim", "attemut-07": "dim"}
 
 
 def _tile(assets, name, palette, map_type):
@@ -142,6 +153,14 @@ def _tile(assets, name, palette, map_type):
     }
 
 
+# Blocks without an FC definition (the black filler 0E/1E) have no property; treat them as walls.
+UNDEFINED = 0x80
+
+
+def block_prop(source, block):
+    return source.blocks["prop"].get(block, UNDEFINED)
+
+
 def prepare_maps(prg, assets):
     """Yield each FC map with its block counts and composited 16x16 block art."""
     if not assets:
@@ -169,14 +188,14 @@ def render_maps(rom_path, assets):
     for group, number, name, source, counts, prepared, palette in prepare_maps(ines.prg(data), assets):
         mapping = BLOCK_ART[source.t]
         preview = Image.new("P", (source.w * 16, source.h * 16))
-        preview.putpalette(palette)
+        preview.putpalette(palette_variant(MAP_PALETTES.get(name, "normal")))
         for y in range(source.h):
             for x in range(source.w):
                 block = source.cell(x, y) & 31
                 preview.paste(prepared[block][0], (x * 16, y * 16))
         records = []
         for block, count in sorted(counts.items()):
-            prop = source.blocks["prop"][block]
+            prop = block_prop(source, block)
             records.append({
                 "source_block": f"{block:02X}",
                 "asset": mapping[block][0],
@@ -190,6 +209,7 @@ def render_maps(rom_path, assets):
         result[name] = (preview, {
             "map": f"{group:02X}/{number:02X}",
             "map_type": f"{source.t:02X}",
+            "palette": MAP_PALETTES.get(name, "normal"),
             "size_blocks": [source.w, source.h],
             "source_rom_sha1": hashlib.sha1(data).hexdigest(),
             "source_layout_sha256": hashlib.sha256(bytes(source.buf)).hexdigest(),

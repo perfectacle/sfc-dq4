@@ -26,7 +26,7 @@ for path in (TOOLS, DQ5_TOOLS):
 import dq5map  # noqa: E402
 from dq4environmentart import create_assets  # noqa: E402
 from dq4environmentmap import prepare_maps, render_maps  # noqa: E402
-from dq4environmentmap import BLOCK_ART  # noqa: E402
+from dq4environmentmap import BLOCK_ART, block_prop  # noqa: E402
 from dq4environmentrom import (DOOR, DOOR_KIND, FLOOR, FLOORS, GATE, GATE_KIND, TARGETS, WALL, WATER_BLOCK,  # noqa: E402
                                WATER_FRAMES, WATER_PERIOD, build_graphics, objects, water_frames)
 
@@ -117,7 +117,7 @@ def with_floor_doors(image, source, floor):
     tile = floor.convert("RGB")
     for y in range(source.h):
         for x in range(source.w):
-            if source.blocks["prop"][source.cell(x, y) & 31] in (DOOR, GATE):
+            if block_prop(source, source.cell(x, y) & 31) in (DOOR, GATE):
                 image.paste(tile, (x * 16, y * 16))
     return image
 
@@ -147,7 +147,7 @@ def check_map(name, wram, vram, cgram, expected, source, known):
     wrong = 0
     for i, value in enumerate(layers):
         x, y = i % width, i // width
-        prop = source.blocks["prop"][source.cell(x // 2, y // 2) & 31]
+        prop = block_prop(source, source.cell(x // 2, y // 2) & 31)
         blocked = prop & 0x80 and prop not in (DOOR, GATE)
         if value != (WALL if blocked else FLOOR):
             wrong += 1
@@ -183,7 +183,7 @@ def _arrival(source):
     best = None
     for y in range(source.h):
         for x in range(source.w - 1):
-            if any(source.blocks["prop"][source.cell(x + d, y) & 31] & 0x80 for d in (0, 1)):
+            if any(block_prop(source, source.cell(x + d, y) & 31) & 0x80 for d in (0, 1)):
                 continue
             score = abs(x - source.w // 2) + abs(y - source.h // 2)
             if best is None or score < best[0]:
@@ -221,7 +221,7 @@ def main():
         """Offline render with the water frame the game was showing."""
         shown = dict(assets, **{WATER_FRAMES[0]: assets[WATER_FRAMES[frame]]})
         image = render_maps(args.dq4, shown)[name][0]
-        floor = BLOCK_ART[sources[name].t][FLOORS[name]][0]
+        floor = BLOCK_ART[sources[name].t][FLOORS[sources[name].t]][0]
         return with_floor_doors(image, sources[name], assets[floor])
 
     sources = {name: source for _, _, name, source, _, _, _ in prepare_maps(prg, assets)}
@@ -238,11 +238,12 @@ def main():
         wram, vram, cgram = dump(mesence, args.rom.resolve(), states[name], out / name / "dump")
         later = [dump(mesence, args.rom.resolve(), states[name], out / name / f"dump{n}", 10 + n * WATER_PERIOD)
                  for n in (1, 2)]
-        cycle = water_cycle([(wram, vram)] + [(w, v) for w, v, _ in later], water_ids, frames)
+        has_water = WATER_BLOCK in built[name][1]
+        cycle = water_cycle([(wram, vram)] + [(w, v) for w, v, _ in later], water_ids, frames) if has_water else [0]
         result, image = check_map(name, wram, vram, cgram, expected(name, cycle[0] or 0), sources[name], known)
         image.save(out / name / "redraw.png")
         result["water_frames"] = cycle
-        result["water_cycles"] = None not in cycle and all(
+        result["water_cycles"] = not has_water or None not in cycle and all(
             (b - a) % 3 == 1 for a, b in zip(cycle, cycle[1:]))
         results["maps"][name] = {"target": f"{group:02X}/{number:02X}", "arrival": [x, y], "moved": moved, **result}
     cx, cy = _control_cell(args.orig.read_bytes())

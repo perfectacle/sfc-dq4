@@ -20,14 +20,22 @@ for path in (TOOLS, DQ5_TOOLS):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from dq4environmentart import create_assets  # noqa: E402
-from dq4environmentmap import prepare_maps  # noqa: E402
+from dq4environmentart import create_assets, palette_variant  # noqa: E402
+from dq4environmentmap import MAP_PALETTES, block_prop, prepare_maps  # noqa: E402
 from dq5mapwrite import Rom, encode, lorom, pointer_addr  # noqa: E402
 
 # FC map name -> replaced DQ5 interior map. Targets must have no animated tiles,
 # preloaded blocks, reserved slots, per-map routine or objects (01:D2FC): those run with the original
-# block numbers or common tiles and would overwrite the new map.
-TARGETS = {"burland": (0x03, 0x00), "imuru": (0x19, 0x02)}
+# block numbers or common tiles and would overwrite the new map. 08/00 is also out: the object
+# drawer 01:F3D9 sends it to its own routine 01:FCD5 instead of the table.
+TARGETS = {
+    "burland": (0x03, 0x00), "gardenburg": (0x16, 0x02), "stancia": (0x09, 0x00), "stancia-03": (0x09, 0x01),
+    "stancia-06": (0x09, 0x04), "mintos": (0x0A, 0x01), "imuru": (0x19, 0x02), "saran-04": (0x0A, 0x02),
+    "seaside": (0x0B, 0x01), "seaside-01": (0x0D, 0x03), "rosaryhill": (0x0D, 0x04), "rosaryhill-01": (0x0E, 0x01),
+    "shrine-2a": (0x0E, 0x03), "konenbery-06": (0x12, 0x00), "attemut-05": (0x13, 0x00), "attemut-07": (0x16, 0x01),
+}
+# Second bank for map records once the first one reaches the library.
+MAPS_NEXT = 0x3E8000
 CHR_BANK = 0x40
 GFX_BANK = 0x41
 NIBBLES_AT = 0x8000
@@ -46,13 +54,13 @@ WATER_BLOCK = 0x01
 WATER_FRAMES = ("water0", "water1", "water2")
 WATER_AT = 0x40C000
 WATER_PERIOD = 24
-ANIM_AT = 0x3DF000
+LIB_AT = 0x3DE000
 # FC door properties and the DQ5 objects (01:D2FC kinds) that replace them. The record under an
 # object is the map's floor so the cell is walkable once the object opens; closed objects block
 # their last row themselves (cell +1 bit7).
 DOOR = 0x94
 GATE = 0xA0
-FLOORS = {"burland": 0x05, "imuru": 0x04}
+FLOORS = {0x0A: 0x05, 0x0E: 0x04}
 DOOR_KIND = 0x3B
 GATE_KIND = 0x48
 OBJECT_TABLE = 0x01D2FC
@@ -121,7 +129,7 @@ def build_graphics(prg, assets):
 
 
 def _prop(source, x, y):
-    return source.blocks["prop"][source.cell(x, y) & 31]
+    return block_prop(source, source.cell(x, y) & 31)
 
 
 def objects(source):
@@ -144,13 +152,13 @@ def object_entries(found):
     out = bytearray()
     for i, (x, y, kind) in enumerate(found):
         out += bytes((x, y, kind, (i // 8) << 4 | i % 8, 0x80 if i == len(found) - 1 else 0x00))
-    return bytes(out or b"\x80")
+    return bytes(out)
 
 
 def map_document(name, source, local, target):
     """FC layout as DQ5 commands; blocked FC cells become wall cells via attribute pass 1."""
     width, height = source.w * 2, source.h * 2
-    floor = local[FLOORS[name]]
+    floor = local[FLOORS[source.t]]
     opening = {DOOR, GATE}
 
     def block_at(x, y):
@@ -213,149 +221,166 @@ def map_document(name, source, local, target):
     }
 
 
-def _asm_targets():
-    """Compare $BC/$BD against each target; branch offsets are filled by the caller."""
-    code, fixups = bytearray(), []
-    for group, number in TARGETS.values():
-        code += bytes((0xA5, 0xBC, 0xC9, group, 0xD0, 0x06, 0xA5, 0xBD, 0xC9, number, 0xF0, 0x00))
-        fixups.append(len(code) - 1)
-    return code, fixups
+class _Asm:
+    """Two-pass assembler for the few hand-written routines: bytes plus label references."""
+
+    def __init__(self, origin):
+        self.origin, self.items = origin, []
+
+    def b(self, *values):
+        self.items.append(("b", bytes(values)))
+        return self
+
+    def label(self, name):
+        self.items.append(("label", name))
+        return self
+
+    def rel(self, opcode, name):
+        self.items.append(("rel", opcode, name))
+        return self
+
+    def word(self, opcode, name, offset=0):
+        """opcode + 16-bit address of a label plus offset (opcode None: the value alone)."""
+        self.items.append(("word", opcode, name, offset))
+        return self
+
+    def long(self, opcode, name, offset=0):
+        self.items.append(("long", opcode, name, offset))
+        return self
+
+    def assemble(self, external=None):
+        labels, at = dict(external or {}), self.origin
+        size = {"b": lambda it: len(it[1]), "label": lambda it: 0, "rel": lambda it: 2,
+                "word": lambda it: 2 if it[1] is None else 3, "long": lambda it: 4}
+        for item in self.items:
+            if item[0] == "label":
+                labels[item[1]] = at
+            at += size[item[0]](item)
+        out, at = bytearray(), self.origin
+        for item in self.items:
+            kind = item[0]
+            if kind == "b":
+                out += item[1]
+            elif kind == "rel":
+                distance = labels[item[2]] - (at + 2)
+                if not -128 <= distance <= 127:
+                    raise ValueError(f"branch to {item[2]} is {distance} bytes away")
+                out += bytes((item[1], distance & 0xFF))
+            elif kind == "word":
+                target = (labels[item[2]] + item[3]) & 0xFFFF
+                out += (bytes((item[1],)) if item[1] is not None else b"") + target.to_bytes(2, "little")
+            elif kind == "long":
+                out += bytes((item[1],)) + (labels[item[2]] + item[3]).to_bytes(3, "little")
+            at += size[kind](item)
+        return bytes(out), labels
 
 
-# Hooks run where the original code returned or called; keep the caller's A and P intact.
-SAVE_A = bytes((0x08, 0xC2, 0x30, 0x48, 0xE2, 0x20))
-RESTORE_A = bytes((0xC2, 0x30, 0x68, 0x28))
+# Hooked code paths keep the caller's A, X, Y and P.
+_ENTER = (0x08, 0xC2, 0x30, 0x48, 0xDA, 0x5A)
+_LEAVE = (0xC2, 0x30, 0x7A, 0xFA, 0x68, 0x28)
 
 
-def hooks(block_count):
-    """Machine code for the two bank-01 hooks; returns (address, bytes) and the patched call sites."""
-    base = HOOK_AT & 0xFFFF
-    load = bytearray(SAVE_A)
-    body, fix = _asm_targets()
-    fix = [len(load) + at for at in fix]
-    load += body
-    # Not a replaced map: rebuild the original block table only if a replaced map left its own
-    # there. Before the game first builds the table it is all zero, so test for our entry.
-    entry1 = BLOCK_TABLE + 2
-    ours_entry1 = BLOCKS_AT + 11
-    load += bytes((0xC2, 0x20, 0xAF, entry1 & 0xFF, entry1 >> 8 & 0xFF, entry1 >> 16,
-                   0xC9, ours_entry1 & 0xFF, ours_entry1 >> 8, 0xE2, 0x20, 0xD0, 0x00))
-    skip_restore = len(load) - 1
-    load += bytes((0x20, 0xD8, 0x8C, 0x80, 0x00))
-    skip_ours = len(load) - 1
-    ours = len(load)
+def engine_code(block_count, water_ids, palettes, entries):
+    """Routines in BLOCK_BANK (LIB_AT) and the bank-01 stubs that call them.
+
+    palettes: per target, the bank-GFX address of its 224-byte BG palette.
+    entries: per target, its 01:D2FC-format object entries (placed in bank 01, since the object
+    reader 01:F3F9 indexes $D2FC,Y with the data bank at 01).
+    Returns (library bytes, bank-01 bytes, patched sites)."""
+    targets = list(TARGETS.values())
+    stubs = _Asm(HOOK_AT)
+    stubs.label("s_load").long(0x22, "load").b(0x28, 0xAB, 0x60)
+    stubs.label("s_pal").b(0x20, 0x6A, 0x99).long(0x22, "pal").b(0x60)
+    stubs.label("s_obj").long(0x22, "obj").b(0x60)
+    stubs.label("s_rebuild").b(0x20, 0xD8, 0x8C, 0x6B)
+    stubs.label("no_objects").b(0x80)
+    for i, data in enumerate(entries):
+        if data:
+            stubs.label(f"objects{i}").b(*data)
+
+    lib = _Asm(LIB_AT)
+    lib.label("targets")
+    for group, number in targets:
+        lib.b(group, number)
+    lib.b(0xFF).label("palettes")
+    for address in palettes:
+        lib.b(address & 0xFF, address >> 8)
+    lib.label("objects")
+    for i, data in enumerate(entries):
+        lib.word(None, f"objects{i}" if data else "no_objects", -(OBJECT_TABLE & 0xFFFF))
+
+    # find: carry set and X = target index * 2 if $BC/$BD is a replaced map.
+    lib.label("find").b(0x08, 0xE2, 0x30, 0xA2, 0x00)
+    lib.label("find_loop").long(0xBF, "targets").b(0xC9, 0xFF).rel(0xF0, "find_none")
+    lib.b(0xC5, 0xBC).rel(0xD0, "find_next").long(0xBF, "targets", 1).b(0xC5, 0xBD).rel(0xF0, "find_hit")
+    lib.label("find_next").b(0xE8, 0xE8).rel(0x80, "find_loop")
+    lib.label("find_none").b(0x28, 0x18, 0x6B)
+    lib.label("find_hit").b(0x28, 0x38, 0x6B)
+
+    # load (end of 01:92E2): new CHR bank, nibble table and block table for a replaced map; any
+    # other map gets the original block table back if a replaced map left its own there.
     count = block_count * 2 - 1
-    load += bytes((
-        0xA9, BLOCK_BANK, 0x8D, 0x23, 0x18,
-        0xA9, CHR_BANK, 0x8D, 0x24, 0x18,
-        0xA2, 0x00, 0x80, 0x8E, 0x25, 0x18,
+    lib.label("load").b(*_ENTER).long(0x22, "find").rel(0xB0, "load_ours")
+    lib.b(0xC2, 0x20, 0xAF, 0x02, 0xB0, 0x7E, 0xC9, (BLOCKS_AT + 11) & 0xFF, (BLOCKS_AT + 11) >> 8)
+    lib.rel(0xD0, "load_done").long(0x22, "s_rebuild").rel(0x80, "load_done")
+    lib.label("load_ours").b(
+        0xE2, 0x20, 0xA9, BLOCK_BANK, 0x8D, 0x23, 0x18, 0xA9, CHR_BANK, 0x8D, 0x24, 0x18,
         0xA9, GFX_BANK, 0x85, 0xB3,
-        0xA2, NIBBLES_AT & 0xFF, NIBBLES_AT >> 8, 0x86, 0xB1,
-        0xC2, 0x30,
-        0xA9, count & 0xFF, count >> 8,
-        0xA2, POINTERS_AT & 0xFF, POINTERS_AT >> 8,
-        0xA0, BLOCK_TABLE & 0xFF, BLOCK_TABLE >> 8 & 0xFF,
-        0x54, 0x7E, BLOCK_BANK,
-    ))
-    done = len(load)
-    load += RESTORE_A + bytes((0x28, 0xAB, 0x60))
-    for at in fix:
-        load[at] = ours - (at + 1)
-    load[skip_restore] = done - (skip_restore + 1)
-    load[skip_ours] = done - (skip_ours + 1)
+        0xC2, 0x20, 0xA9, 0x00, 0x80, 0x8D, 0x25, 0x18, 0xA9, NIBBLES_AT & 0xFF, NIBBLES_AT >> 8, 0x85, 0xB1,
+        0xA9, count & 0xFF, count >> 8, 0xA2, POINTERS_AT & 0xFF, POINTERS_AT >> 8,
+        0xA0, BLOCK_TABLE & 0xFF, BLOCK_TABLE >> 8 & 0xFF, 0x54, 0x7E, BLOCK_BANK)
+    lib.label("load_done").b(*_LEAVE, 0x6B)
 
-    pal_at = base + len(load)
-    # 01:996A rewrites some BG lines per map after the palette loader, so override after it.
-    pal = bytearray((0x20, 0x6A, 0x99)) + SAVE_A
-    start = len(pal)
-    body, fix = _asm_targets()
-    pal += body
-    pal += bytes((0x80, 0x00))
-    skip = len(pal) - 1
-    ours = len(pal)
-    pal += bytes((
-        0xC2, 0x30,
-        0xA9, 0xDF, 0x00,
-        0xA2, PALETTE_AT & 0xFF, PALETTE_AT >> 8,
-        0xA0, PALETTE_LINE1 & 0xFF, PALETTE_LINE1 >> 8,
-        0x54, 0x7E, GFX_BANK,
-    ))
-    out = len(pal)
-    pal += RESTORE_A + bytes((0x60,))
-    for at in fix:
-        pal[start + at] = ours - (start + at + 1)
-    pal[skip] = out - (skip + 1)
-    code = bytes(load + pal)
-    if HOOK_AT + len(code) > HOOK_END:
-        raise ValueError("bank 01 hooks overflow the free tail")
-    sites = [
-        (0x01936E, bytes((0x28, 0xAB, 0x60)), bytes((0x4C, base & 0xFF, base >> 8))),
-        (0x0193B2, bytes((0x20, 0x6A, 0x99)), bytes((0x20, pal_at & 0xFF, pal_at >> 8))),
-    ]
-    return code, sites
+    # pal (after 01:996A): copy the target's BG lines 1-7.
+    lib.label("pal").b(*_ENTER).long(0x22, "find").rel(0x90, "pal_done")
+    lib.long(0xBF, "palettes").b(0xAA, 0xA9, 0xDF, 0x00, 0xA0, PALETTE_LINE1 & 0xFF, PALETTE_LINE1 >> 8,
+                                 0x54, 0x7E, GFX_BANK)
+    lib.label("pal_done").b(*_LEAVE, 0x6B)
 
+    # obj (01:F42D): Y = the target's object entries, then the replaced LDX #$0009.
+    lib.label("obj").b(0x08, 0xC2, 0x30, 0x48, 0xDA).long(0x22, "find").rel(0x90, "obj_keep")
+    lib.long(0xBF, "objects").b(0xA8)
+    lib.label("obj_keep").b(0xC2, 0x30, 0xFA, 0x68, 0x28, 0xA2, 0x09, 0x00, 0x6B)
 
-def water_animation(water_ids):
-    """Per-frame routine for the replaced maps: every WATER_PERIOD frames queue the next water
-    frame's four CHR for the NMI DMA list (00:8F53: VRAM word 1C1C+2i, bytes 1C26+2i, source
-    1C0D+3i, count $BA), the same list 03:D4B5 uses for DQ5's own animated tiles."""
+    # wrap (calls of 15:F7D0): after the original choice, a replaced map runs the water routine.
+    lib.label("wrap").b(0x22, 0xD0, 0xF7, 0x15, 0x08, 0xC2, 0x30, 0x48, 0xDA).long(0x22, "find")
+    lib.rel(0x90, "wrap_out").b(0xC2, 0x20).word(0xA9, "water").b(0x8F, 0xA6, 0x1A, 0x7E, 0xE2, 0x20)
+    lib.b(0xA9, LIB_AT >> 16, 0x8F, 0xA8, 0x1A, 0x7E, 0xA9, 0x00)
+    for counter in (0x1ECE, 0x1ECF, 0x1EC2, 0x1EC3):
+        lib.b(0x8F, counter & 0xFF, counter >> 8, 0x7E)
+    lib.label("wrap_out").b(0xC2, 0x30, 0xFA, 0x68, 0x28, 0x6B)
+
+    # water: every WATER_PERIOD frames queue the next water frame's four CHR on the NMI DMA list
+    # (00:8F53: VRAM word 1C1C+2i, bytes 1C26+2i, source 1C0D+3i, count $BA) that 03:D4B5 uses.
     tick, frame = 0x7E1ECE, 0x7E1EC2
-    routine_at = ANIM_AT + 0x60
-    # The queueing body is longer than a relative branch reaches, so skip it with BCS/JMP.
-    routine = bytearray((0x08, 0xC2, 0x30, 0xAF) + tuple(tick.to_bytes(3, "little")) + (
-        0x1A, 0xC9, WATER_PERIOD, 0x00, 0xB0, 0x03, 0x4C, 0x00, 0x00))
-    skip = len(routine) - 2
-    routine += bytes((0xAF,) + tuple(frame.to_bytes(3, "little")) + (0x1A, 0xC9, len(WATER_FRAMES), 0x00,
-                     0x90, 0x03, 0xA9, 0x00, 0x00, 0x8F) + tuple(frame.to_bytes(3, "little")))
-    routine += bytes((0x0A,) * 7 + (0xAA,))
+    lib.label("water").b(0x08, 0xC2, 0x30, 0xAF, *tick.to_bytes(3, "little"), 0x1A, 0xC9, WATER_PERIOD, 0x00)
+    lib.b(0xB0, 0x03).word(0x4C, "water_store")
+    lib.b(0xAF, *frame.to_bytes(3, "little"), 0x1A, 0xC9, len(WATER_FRAMES), 0x00, 0x90, 0x03, 0xA9, 0x00, 0x00,
+          0x8F, *frame.to_bytes(3, "little"), *(0x0A,) * 7, 0xAA)
     for k, chr_id in enumerate(water_ids):
-        slot = 0x7E6000 + chr_id * 2
         source = (WATER_AT & 0xFFFF) + k * 32
-        routine += bytes((0xAF,) + tuple(slot.to_bytes(3, "little")) + (
-            0x29, 0xFF, 0x03, 0x0A, 0x0A, 0x0A, 0x0A, 0x18, 0x69, 0x00, 0x20,
-            0x8F, 0x1C + 2 * k, 0x1C, 0x00,
-            0xA9, 0x20, 0x00, 0x8F, 0x26 + 2 * k, 0x1C, 0x00,
-            0x8A, 0x18, 0x69, source & 0xFF, source >> 8, 0x8F, 0x0D + 3 * k, 0x1C, 0x00,
-            0xE2, 0x20, 0xA9, WATER_AT >> 16, 0x8F, 0x0F + 3 * k, 0x1C, 0x00, 0xC2, 0x20))
-    routine += bytes((0xE2, 0x20, 0xA9, len(water_ids), 0x85, 0xBA, 0xC2, 0x20, 0xA9, 0x00, 0x00))
-    store = (routine_at + len(routine)) & 0xFFFF
-    routine[skip:skip + 2] = store.to_bytes(2, "little")
-    routine += bytes((0x8F,) + tuple(tick.to_bytes(3, "little")) + (0x28, 0x6B))
+        lib.b(0xAF, *(0x7E6000 + chr_id * 2).to_bytes(3, "little"),
+              0x29, 0xFF, 0x03, 0x0A, 0x0A, 0x0A, 0x0A, 0x18, 0x69, 0x00, 0x20, 0x8F, 0x1C + 2 * k, 0x1C, 0x00,
+              0xA9, 0x20, 0x00, 0x8F, 0x26 + 2 * k, 0x1C, 0x00,
+              0x8A, 0x18, 0x69, source & 0xFF, source >> 8, 0x8F, 0x0D + 3 * k, 0x1C, 0x00,
+              0xE2, 0x20, 0xA9, WATER_AT >> 16, 0x8F, 0x0F + 3 * k, 0x1C, 0x00, 0xC2, 0x20)
+    lib.b(0xE2, 0x20, 0xA9, len(water_ids), 0x85, 0xBA, 0xC2, 0x20, 0xA9, 0x00, 0x00)
+    lib.label("water_store").b(0x8F, *tick.to_bytes(3, "little"), 0x28, 0x6B)
 
-    wrapper = bytearray((0x22, 0xD0, 0xF7, 0x15)) + SAVE_A
-    start = len(wrapper)
-    body, fix = _asm_targets()
-    wrapper += body + bytes((0x80, 0x00))
-    out_fix = len(wrapper) - 1
-    ours = len(wrapper)
-    wrapper += bytes((0xC2, 0x20, 0xA9, routine_at & 0xFF, routine_at >> 8 & 0xFF, 0x8F, 0xA6, 0x1A, 0x7E,
-                      0xE2, 0x20, 0xA9, routine_at >> 16, 0x8F, 0xA8, 0x1A, 0x7E,
-                      0xA9, 0x00, 0x8F, 0xCE, 0x1E, 0x7E, 0x8F, 0xCF, 0x1E, 0x7E,
-                      0x8F, 0xC2, 0x1E, 0x7E, 0x8F, 0xC3, 0x1E, 0x7E))
-    out = len(wrapper)
-    wrapper += RESTORE_A + bytes((0x6B,))
-    for at in fix:
-        wrapper[start + at] = ours - (start + at + 1)
-    wrapper[out_fix] = out - (out_fix + 1)
-    if len(wrapper) > routine_at - ANIM_AT:
-        raise ValueError("animation wrapper overlaps the per-frame routine")
-    code = bytes(wrapper) + bytes(routine_at - ANIM_AT - len(wrapper)) + bytes(routine)
-    sites = [(at, bytes((0x22, 0xD0, 0xF7, 0x15)), bytes((0x22,)) + ANIM_AT.to_bytes(3, "little"))
-             for at in ROUTINE_CALLS]
-    return code, sites
-
-
-def object_hook(base, tables):
-    """01:F42D (LDX #$0009 after 01:F3F9 found the map's entries in Y) -> pick our entries for the
-    replaced maps. Everything that reads the object table (drawing 01:F3E8, とびら 01:DE62, 01:D920,
-    01:F122) goes through 01:F3F9, so one hook covers them. Returns the code and its call site."""
-    code = bytearray()
-    for (group, number), at in tables.items():
-        offset = at - (OBJECT_TABLE & 0xFFFF)
-        code += bytes((0xA5, 0xBC, 0xC9, group, 0xD0, 0x09, 0xA5, 0xBD, 0xC9, number, 0xD0, 0x03,
-                       0xA0, offset & 0xFF, offset >> 8))
-    code += bytes((0xA2, 0x09, 0x00, 0x60))
-    return bytes(code), (0x01F42D, bytes((0xA2, 0x09, 0x00)), bytes((0x20, base & 0xFF, base >> 8)))
+    _, stub_labels = stubs.assemble({"load": 0, "pal": 0, "obj": 0})
+    lib_code, lib_labels = lib.assemble(stub_labels)
+    stub_code, stub_labels = stubs.assemble(lib_labels)
+    if HOOK_AT + len(stub_code) > HOOK_END:
+        raise ValueError(f"bank 01 tail overflows by {HOOK_AT + len(stub_code) - HOOK_END} bytes")
+    if LIB_AT + len(lib_code) > (LIB_AT | 0xFFFF) + 1:
+        raise ValueError("library overflows its bank")
+    sites = [
+        (0x01936E, bytes((0x28, 0xAB, 0x60)), bytes((0x4C,)) + (stub_labels["s_load"] & 0xFFFF).to_bytes(2, "little")),
+        (0x0193B2, bytes((0x20, 0x6A, 0x99)), bytes((0x20,)) + (stub_labels["s_pal"] & 0xFFFF).to_bytes(2, "little")),
+        (0x01F42D, bytes((0xA2, 0x09, 0x00)), bytes((0x20,)) + (stub_labels["s_obj"] & 0xFFFF).to_bytes(2, "little")),
+    ] + [(at, bytes((0x22, 0xD0, 0xF7, 0x15)), bytes((0x22,)) + lib_labels["wrap"].to_bytes(3, "little"))
+         for at in ROUTINE_CALLS]
+    return lib_code, stub_code, sites
 
 
 def _hex(data):
@@ -386,7 +411,6 @@ def build(dq5_path, dq4_path, out):
     if len(water_blocks) != 1:
         raise ValueError(f"expected one shared water block, got {water_blocks}")
     water_ids = block_words[water_blocks.pop()]
-    anim_code, anim_sites = water_animation(water_ids)
     out.mkdir(parents=True, exist_ok=True)
 
     blocks, pointers = bytearray(), bytearray()
@@ -398,24 +422,17 @@ def build(dq5_path, dq4_path, out):
     nibbles = bytearray((len(chr_banks) + 1) // 2)
     for i, bank in enumerate(chr_banks):
         nibbles[i // 2] |= (bank - 1) << (0 if i & 1 else 4)
-    colors = b"".join(_bgr555(palette[i * 3:i * 3 + 3]).to_bytes(2, "little") for i in range(16, 128))
 
     orig_entry1 = 0x8000 + 3 + 2 * (((dq5[_off(0x168000)] >> 3 & 7) + 1) * ((dq5[_off(0x168000)] & 7) + 1))
     if orig_entry1 == BLOCKS_AT + 11:
         raise ValueError("original first block has our block size; dirty-table check would not work")
-    code, sites = hooks(len(block_words))
+    variants = sorted({MAP_PALETTES.get(name, "normal") for name in maps})
+    palette_at = {kind: PALETTE_AT + 0x100 * i for i, kind in enumerate(variants)}
     found = {name: objects(source) for name, (source, _) in maps.items()}
-    tables, at = {}, HOOK_AT + len(code)
-    entries = bytearray()
-    for name in maps:
-        tables[TARGETS[name]] = (at + len(entries)) & 0xFFFF
-        entries += object_entries(found[name])
-    hook_at = at + len(entries)
-    obj_code, obj_site = object_hook(hook_at & 0xFFFF, tables)
-    code += bytes(entries) + obj_code
-    if HOOK_AT + len(code) > HOOK_END:
-        raise ValueError(f"bank 01 tail overflows by {HOOK_AT + len(code) - HOOK_END} bytes")
-    sites.append(obj_site)
+    lib_code, stub_code, sites = engine_code(
+        len(block_words), water_ids,
+        [palette_at[MAP_PALETTES.get(name, "normal")] for name in TARGETS],
+        [object_entries(found[name]) for name in TARGETS])
 
     (out / "chr.bin").write_bytes(b"".join(chr_data))
     (out / "blocks.bin").write_bytes(blocks)
@@ -424,23 +441,28 @@ def build(dq5_path, dq4_path, out):
         {"at": _cpu(BLOCK_BANK << 16 | BLOCKS_AT), "file": "blocks.bin", "note": f"2x2 블록 {len(block_words)}개"},
         {"at": _cpu(BLOCK_BANK << 16 | POINTERS_AT), "hex": _hex(pointers), "note": "7E:B000 에 복사할 블록 포인터"},
         {"at": _cpu(GFX_BANK << 16 | NIBBLES_AT), "hex": _hex(nibbles), "note": "CHR 팔레트 니블"},
-        {"at": _cpu(GFX_BANK << 16 | PALETTE_AT), "hex": _hex(colors), "note": "BG 팔레트 1~7번 줄"},
-        {"at": _cpu(HOOK_AT), "hex": _hex(code), "note": "바꾼 맵이면 CHR·블록·팔레트를 그래픽 뱅크로"},
+        {"at": _cpu(HOOK_AT), "hex": _hex(stub_code), "note": "엔진 훅 중계 코드와 맵 위 물체 항목"},
         {"at": _cpu(WATER_AT), "hex": _hex(water_frames(assets, chr_data, water_ids)), "note": "물 그림 3장"},
-        {"at": _cpu(ANIM_AT), "hex": _hex(anim_code), "note": "바꾼 맵의 매 프레임 물 루틴"},
+        {"at": _cpu(LIB_AT), "hex": _hex(lib_code), "note": "바꾼 맵 표와 불러오기·팔레트·물체·물 루틴"},
     ]
-    for at, orig, new in sites + anim_sites:
+    for kind, at in palette_at.items():
+        flat = palette_variant(kind)
+        data = b"".join(_bgr555(flat[i * 3:i * 3 + 3]).to_bytes(2, "little") for i in range(16, 128))
+        writes.append({"at": _cpu(GFX_BANK << 16 | at), "hex": _hex(data), "note": f"BG 팔레트 1~7번 줄({kind})"})
+    for at, orig, new in sites:
         writes.append({"at": _cpu(at), "hex": _hex(new), "orig": _hex(orig), "note": "환경 맵 훅"})
     rom = Rom(dq5)
     at = MAPS_AT
     report = {"chr": len(chr_data), "blocks": len(block_words), "water_chr": list(water_ids),
-              "bank01_bytes": len(code), "objects": found, "maps": {}}
+              "bank01_bytes": len(stub_code), "library_bytes": len(lib_code), "objects": found, "maps": {}}
     for name, (source, local) in maps.items():
         target = TARGETS[name]
         doc = map_document(name, source, local, target)
         (out / f"{name}.dq5map.json").write_text(json.dumps(doc, ensure_ascii=False) + "\n")
         record = encode(doc)
         (out / f"{name}.bin").write_bytes(record)
+        if at < LIB_AT <= at + len(record):
+            at = MAPS_NEXT
         if (at & 0xFFFF) + len(record) > 0x10000:
             raise ValueError("map records must stay inside one bank below 40")
         writes.append({"at": _cpu(at), "file": f"{name}.bin", "note": f"{name} 맵 레코드"})

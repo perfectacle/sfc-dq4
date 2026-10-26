@@ -82,3 +82,5 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [2026-10-27-10: 환경 맵의 문을 DQ5 문 물체로](journal/2026-10-27-10-environment-doors.md)
 
 - [2026-10-27-11: 마을·필드 곡을 SPC 예산에 맞추기](journal/2026-10-27-11-sound-budget.md)
+
+- [2026-10-27-12: 같은 블록 시트의 마을 16곳을 DQ5 에 넣기](journal/2026-10-27-12-environment-towns.md)
