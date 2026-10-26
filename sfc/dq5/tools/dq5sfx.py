@@ -76,9 +76,15 @@ def code_sites(rom):
         if d[o] == 0xA9 and d[o + 1] in SFX:
             # LDA #n [LDX #x] JSL 24:FEAC
             if d[o + 2:o + 6] == b'\x22\xAC\xFE\x24':
-                out.append((cpu, 'JSL', d[o + 1], None))
+                # 바로 앞이 LDA #x / TAX 면 아래에서 갈래 x 로 센다
+                if not (d[o - 1] == 0xAA and d[o - 3] == 0xA9):
+                    out.append((cpu, 'JSL', d[o + 1], None))
             elif d[o + 2] == 0xA2 and d[o + 4:o + 8] == b'\x22\xAC\xFE\x24':
                 out.append((cpu, 'JSL', d[o + 1], d[o + 3]))
+        # LDA #x / TAX / LDA #n / JSL 24:FEAC (00:944E)
+        if d[o] == 0xA9 and d[o + 2] == 0xAA and d[o + 3] == 0xA9 and d[o + 4] in SFX and \
+                d[o + 5:o + 9] == b'\x22\xAC\xFE\x24':
+            out.append(((o // 0x8000) << 16 | 0x8000 | ((o + 3) & 0x7FFF), 'JSL', d[o + 4], d[o + 1]))
     return out
 
 

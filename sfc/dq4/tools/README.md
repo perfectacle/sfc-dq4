@@ -15,6 +15,8 @@
 | `dq4titleassets.py [--out 폴더] [--assets-dir 폴더]` | 선택된 실제 크기 한글 타이틀을 다시 줄이지 않고 PNG·CHR·MAP·PAL과 갤러리로 출력. [타이틀 규격](../docs/dq4-title-format.md) |
 | `dq4titlepatch.py --rom 롬 --input 폴더 --out 롬 [--asar 실행파일]` | 초기 정지 타이틀을 DQ5 시작 구간에 연결한 실험 롬·IPS 생성. 페이드·광택·입력·메뉴 복귀. [연결 규격](../docs/dq4-title-format.md#dq5-타이틀-구간-연결) |
 | `dq4titlepreview.py --input 폴더 --out 롬 [--asar 실행파일]` | 타이틀 에셋으로 독립 64KiB SFC 미리보기 롬 생성. DQ5 삽입본과 구분 |
+| `dq4overture.py text\|build\|tempo-map\|render` | FC 서곡 악보를 NDS 템포·DQ5 악기로 편곡해 타이틀 롬의 시퀀스 10 에 갈래로 넣음(4MB 롬·IPS). `tempo-map` 은 NDS 녹음과 DTW 로 템포 지도를 다시 잼, `render` 는 프로브 결과를 .spc·.wav 로. [타이틀 서곡](../docs/dq4-overture-format.md) |
+| `lua/dq4overturespc.lua` | 서곡 롬을 전원부터 돌려 곡 10 이 시작한 뒤의 SPC 상태와 DSP 쓰기(`dspw.txt`)를 남김. `OUT`, `MAXF`, `SONG`, `SEQ`, `DUMPAT` 사용 |
 | `lua/dq4titleintegrationcheck.lua` | 통합 롬의 화면·VRAM·음악·메뉴 진입 관찰. `OUT`, `MAXF`, `EVERY`, `FROM`, `SEQ`, `RESETAT`, `TRACE_DMA`, `MOTION_PC` 사용 |
 | `lua/dq4titlecheck.lua` | 독립 미리보기의 화면·VRAM·CGRAM 관찰. `OUT`, `FRAME` 사용 |
 | `dq4pixels.py` | 스프라이트·지형 제작물을 모으는 모듈 |

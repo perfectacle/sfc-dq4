@@ -30,7 +30,7 @@ SFC 로 옮길 데이터는 거의 모두 롬만으로 뽑을 수 있게 됐습�
 | 소리 | [dq4-sound-format.md](docs/dq4-sound-format.md) · `dq4sound.py`(`export` 가 곡·효과음마다 MIDI·악보 텍스트·채널별 JSON) | 곡 50·효과음 55 를 롬 드라이버 실행과 APU 기록으로 프레임마다 0 다름, 맵·필드·전투 곡 표 |
 | 디버그 | [dq4-debug.md](docs/dq4-debug.md) | `$C000` 스위치(장 고르기·벽 통과·인카운트 끄기·전투 테스트) |
 
-뽑은 원작 그림(맵 279·필드·블록·CHR·폰트·장면, 인물 스프라이트·몬스터)과 소리(`fc/dq4/sound/` 의 MIDI·악보·JSON)는 저작권 데이터라 비공개 저장소 `perfectacle/sfc-dq4-assets` 의 `fc/dq4/` 에 있습니다(`gallery/index.html`). 공개 저장소에는 다시 만드는 도구만 둡니다.
+뽑은 원작 그림(맵 279·필드·블록·CHR·폰트·장면, 인물 스프라이트·몬스터)과 소리(`fc/dq4/sound/` 의 MIDI·악보·JSON)는 저작권 데이터라 비공개 저장소 `perfectacle/sfc-dq4-assets` 의 `fc/dq4/` 에 있습니다(`gallery/index.html`). 공개 저장소에는 다시 만드는 도구만 둡니다. 에셋 전체는 `fc/dq4/tools/dq4assets.sh OUT` 한 번으로 롬에서 다시 뽑습니다(장면 화면도 `dq4nes.py` 로 롬만 돌려 뜸, 에뮬레이터·세이브스테이트 필요 없음). 에셋 저장소의 `SOURCE.txt` 는 그때의 커밋을 적습니다.
 
 포팅용 그래픽의 현재 판단은 [그래픽 핸드오프](../../sfc/dq4/handoff.md)에 있습니다.
 

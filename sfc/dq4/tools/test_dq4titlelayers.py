@@ -62,18 +62,18 @@ class LayerTests(unittest.TestCase):
         self.assertTrue(np.all(priority[glyphs]))
         self.assertTrue(np.any(mask & ~priority))
 
-    def test_castle_cloud_depth_preserves_ornament_without_priority_leak(self):
+    def test_ornament_tail_stays_above_front_cloud_without_priority_leak(self):
         blobs, _ = layers.read_pack(self.pack)
         mapping = np.frombuffer(blobs['foreground.map'], dtype='<u2').reshape(32, 32)
         priority = np.repeat(np.repeat((mapping & 0x2000) != 0, 8, axis=0), 8, axis=1)[:224]
         mask = np.frombuffer(blobs['foreground-mask.bin'], dtype=np.uint8).reshape(224, 256) > 0
-        protected = np.array(layers.protected_glyph_mask()) > 0
-        ornament_tail = (np.array(layers.glyph_mask()) > 0) & ~protected
-        self.assertEqual(int(ornament_tail.sum()), 30)
-        self.assertTrue(np.all(mask[ornament_tail]))
-        self.assertFalse(np.any(priority[ornament_tail]))
-        leaked = mask & ~protected & priority
-        self.assertFalse(np.any(leaked[layers.CLOUD_Y:layers.CLOUD_Y + 32]))
+        glyphs = np.array(layers.glyph_mask()) > 0
+        tail = np.zeros_like(glyphs)
+        tail[176:192, 176:192] = glyphs[176:192, 176:192]
+        self.assertEqual(int(tail.sum()), 30)
+        self.assertTrue(np.all(mask[tail]))
+        self.assertTrue(np.all(priority[tail]))
+        self.assertFalse(np.any(mask & ~glyphs & priority))
 
     def test_lower_left_fragment_is_transparent_but_text_remains(self):
         blobs, _ = layers.read_pack(self.pack)
