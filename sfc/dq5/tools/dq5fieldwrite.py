@@ -4,8 +4,9 @@ sfc/dq5/docs/dq5-build-format.md.
 세계마다 256x256 칸의 블록 번호(9비트)를 RLE 두 덩어리(지도 하위 8비트 64KB, 9번째 비트 8KB)로 싸서 늘린 롬에 놓고,
 불러오기 루틴(01:A5C2·A5F1·A620)의 `LDA #뱅크 / STA $4374 / PHA / PLB / LDX #주소 / JSR $A64F` 두 벌의 뱅크·주소를
 바꾼다. 01:A64F 는 덩어리를 DMA 원본($4372 16비트 + $4374 뱅크)으로 쓰므로 덩어리 하나는 뱅크를 넘지 않게 놓는다.
+DB를 바꾼 뒤 01:A668의 LDX $00A5와 01:A67D의 STA $420B도 같은 뱅크를 쓰므로, 확장 영역 중 30~3F만 허용한다.
 
-지도 파일(.bin)은 칸마다 16비트 리틀 엔디언 블록 번호(0~511)를 y*256+x 순서로 둔 128KB 다.
+지도 파일(.bin)은 칸마다 16비트 리틀 엔디언 블록 번호(0~510)를 y*256+x 순서로 둔 128KB 다.
 
   dump   세계 N 의 지도 → .bin(-o)
   check  세계 셋을 풀어 다시 싸고 풀면 같은지, 크기는 원래와 얼마나 다른지
@@ -18,6 +19,7 @@ sfc/dq5/docs/dq5-build-format.md.
 import argparse
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -26,6 +28,8 @@ from dq5map import Rom, lorom  # noqa: E402
 
 LOADERS = (0x01A5C2, 0x01A5F1, 0x01A620)
 SIZE = 256 * 256
+BLOCK_COUNT = 511
+DATA_START, DATA_END = 0x180000, 0x200000
 
 
 def loader_sites(rom, world):
@@ -88,18 +92,42 @@ def world_grid(rom, world):
 
 
 def read_grid(path):
-    b = open(path, 'rb').read()
+    with open(path, 'rb') as source:
+        b = source.read()
     if len(b) != SIZE * 2:
         raise ValueError(f'{path}: {SIZE * 2}바이트여야 함(지금 {len(b)})')
     grid = [b[i * 2] | b[i * 2 + 1] << 8 for i in range(SIZE)]
-    bad = [i for i, v in enumerate(grid) if v > 0x1FF]
+    bad = [i for i, v in enumerate(grid) if v >= BLOCK_COUNT]
     if bad:
-        raise ValueError(f'{path}: ({bad[0] % 256},{bad[0] // 256}) 의 블록 {grid[bad[0]]} 가 0~511 밖')
+        raise ValueError(f'{path}: ({bad[0] % 256},{bad[0] // 256}) 의 블록 {grid[bad[0]]} 가 0~510 밖')
     return grid
 
 
 def cpu(off):
     return f'{off // 0x8000:02X}:{0x8000 + off % 0x8000:04X}'
+
+
+def parse_at(value):
+    """필드 로더가 읽을 수 있는 확장 뱅크 30~3F의 CPU 주소를 파일 위치로."""
+    if not isinstance(value, str) or not re.fullmatch(r'[0-9A-Fa-f]{2}:[0-9A-Fa-f]{4}', value):
+        raise ValueError('--at은 BB:AAAA 형식이어야 함')
+    bank, low = (int(part, 16) for part in value.split(':'))
+    if not 0x30 <= bank <= 0x3F or not 0x8000 <= low <= 0xFFFF:
+        raise ValueError('--at은 확장 뱅크 30~3F의 8000~FFFF만 허용함')
+    return lorom(bank << 16 | low)
+
+
+def place_chunk(at, size):
+    """한 뱅크 안에 놓고, 맞춘 뒤에도 필드 로더의 주소 범위인지 확인한다."""
+    if not 1 <= size <= 0x8000:
+        raise ValueError(f'필드 압축 덩어리 {size}바이트가 1~32768 밖')
+    if not DATA_START <= at < DATA_END:
+        raise ValueError('필드 압축 덩어리는 확장 뱅크 30~3F에 놓아야 함')
+    if at // 0x8000 != (at + size - 1) // 0x8000:
+        at = (at // 0x8000 + 1) * 0x8000
+    if at + size > DATA_END:
+        raise ValueError('필드 압축 덩어리가 뱅크 3F 끝을 넘음')
+    return at
 
 
 def main():
@@ -109,7 +137,7 @@ def main():
     ap.add_argument('args', nargs='*')
     ap.add_argument('--world', type=int, action='append', choices=(0, 1, 2))
     ap.add_argument('-o', '--out')
-    ap.add_argument('--at', default='34:8000')
+    ap.add_argument('--at', default='34:8000', help='CPU 주소 BB:AAAA, 뱅크 30~3F만 허용')
     ap.add_argument('--name', default='field')
     a = ap.parse_args()
     data = open(a.rom, 'rb').read()
@@ -139,8 +167,11 @@ def main():
     if len(worlds) != len(a.args):
         print('오류: --world N 과 지도 파일을 같은 수로', file=sys.stderr)
         return 1
-    bank, _, low = a.at.partition(':')
-    at = lorom(int(bank, 16) << 16 | int(low, 16))
+    try:
+        at = parse_at(a.at)
+    except ValueError as e:
+        print(f'오류: {e}', file=sys.stderr)
+        return 1
     writes = []
     for w, path in zip(worlds, a.args):
         try:
@@ -151,11 +182,11 @@ def main():
         hi_part, map_part = split(grid)[1], split(grid)[0]
         for (bank_site, addr_site), part, label in zip(loader_sites(rom, w), (hi_part, map_part), ('9번째 비트', '지도')):
             enc = encode_rle(part)
-            if len(enc) > 0x8000:
-                print(f'오류: 세계 {w} {label} 덩어리 {len(enc)}바이트가 한 뱅크보다 큼', file=sys.stderr)
+            try:
+                at = place_chunk(at, len(enc))
+            except ValueError as e:
+                print(f'오류: 세계 {w} {label}: {e}', file=sys.stderr)
                 return 1
-            if at // 0x8000 != (at + len(enc) - 1) // 0x8000:
-                at = (at // 0x8000 + 1) * 0x8000
             cpu_at = (at // 0x8000) << 16 | 0x8000 + at % 0x8000
             writes.append({'at': cpu(at), 'hex': enc.hex(' '), 'note': f'세계 {w} {label} RLE'})
             b, ad = lorom(bank_site), lorom(addr_site)
@@ -164,7 +195,7 @@ def main():
             writes.append({'at': cpu(ad), 'hex': (cpu_at & 0xFFFF).to_bytes(2, 'little').hex(' '),
                            'orig': data[ad:ad + 2].hex(' '), 'note': f'세계 {w} {label} 주소'})
             at += len(enc)
-    doc = {'format': 'dq5patch/1', 'name': a.name, 'rom_size': 4 if at > 0x300000 else 3 if at > 0x200000 else 2,
+    doc = {'format': 'dq5patch/1', 'name': a.name, 'rom_size': 2,
            'writes': writes}
     os.makedirs(os.path.dirname(a.out) or '.', exist_ok=True)
     with open(a.out, 'w', encoding='utf-8') as f:
