@@ -247,8 +247,8 @@ def run_one(mesence, libdir, rom, state, n, x, stem, work, free='', preload=Fals
     out = os.path.join(work, f'run{stem}')
     os.makedirs(out, exist_ok=True)
     play = f'01:{n:02X}:00' if x is None else f'0C:{n:02X}:{x:02X}'
-    # 고정 시퀀스(2B:C429) 곡은 01·0C 로는 곡 묶음의 샘플을 첫 하나 뒤로 보내지 않았다(곡 17 의 8개 중 2개만 SPC 에).
-    # 94 n(곡 n 자료 올리기)을 먼저 보내면 모두 올라간다.
+    # 고정 시퀀스(2B:C429) 곡은 「곡 앞」 샘플(2B:C1AE)을 건너뛰고 「곡 뒤」(2B:C1BA)만 보내는데, FULLSET 이 모두를 「곡 앞」 으로
+    # 옮겨 하나도 가지 않는다(곡 17 은 8개 중 2개만 SPC 에). 94 n(곡 n 자료 올리기)을 먼저 보내면 모두 올라간다.
     cmd = f'10:1A:00:00;14:94:{n:02X}:00;200:{play}' if preload else f'10:1A:00:00;14:{play}'
     env = dict(os.environ, LIBDIR=libdir, SHOT_DIR=out, STATE=os.path.abspath(state), CMDS=cmd,
                WAITSONG=f'{n:02X}', FULLSET=f'{n:02X}', MAXF='900', FREEWATCH=free)
