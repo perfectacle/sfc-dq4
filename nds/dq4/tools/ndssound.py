@@ -1426,7 +1426,15 @@ BATTLE_COUNT = 245
 SOUND_MGR = 0x02108200        # 음 관리자. +4 지금 BGM, +0x10 BGM 핸들 2개, +0x50 효과음 핸들 8개(0x20 씩)
 GAME_SOUND = 0x020EAA70       # 게임 쪽 곡 상태. +8 지금 곡, +0xC 다음 곡, 0 이 아니면 전투 곡이 33
 VEHICLE = 0x020ECE40          # 탈것: 1 기구, 2 배(필드 곡 함수가 봄)
-PARTY = 0x020C5614            # 일행 순서(인물 번호 u32 x 13, 0 은 빈칸). 5·6장 필드 곡은 일행 첫 인물로 고름
+PARTY = 0x020C5614            # 일행 순서(인물 번호 u32 x 13, 0 은 빈칸). 5·6장 필드 곡은 걷는 일행의 첫 산 인물로 고름
+PARTY_COPY = 0x020C5648       # 일행 순서 사본. 필드로 나갈 때 PARTY 를 이것으로 다시 쓰므로 둘을 함께 바꿔야 함
+WALKING = 0x020C52D4          # 인물 번호마다 u32. 0x1000 이 걷는 일행(앞 넷)
+STORY_FLAGS = 0x020CE7DC      # 이야기 플래그 n 은 n >> 5 번째 낱말의 n & 31 비트
+MAP_FLAGS = 0x020CE6DC        # 맵 플래그(같은 꼴)
+# 장 끝: 스크립트의 장 제목 명령 0xB3 장 1 을 감싼 조건 플래그와 그 명령이 있는 맵(field 는 필드)
+CHAPTER_ENDS = [(1, (0x3F,), "caf1"), (2, (0x6C, 0x6D), "field"), (3, (0x9F,), "dob2"), (4, (0xCD,), "field")]
+# 맵 플래그를 켜면 가게(0x98)를 여는 맵: (맵, 맵 플래그, 가게 이름, 누를 단추)
+SHOPS = [("hhk1f1", 0, "교회 「おいのりをする」", "a"), ("hay1f1", 0, "여관", "a")]
 OUT_RATE = 32768
 
 
@@ -1676,7 +1684,7 @@ def summarize(scene_files, fs=FS):
     """scenes 결과 json 들과 정적 표(맵·조우 레코드·스크립트)를 곡·효과음별 장면 목록으로 묶는다.
     → {"bgm": {곡: [문장]}, "se": {효과음: [문장]}, "measured_bgm": [곡], "measured_se": [효과음], "maps": 검사 결과}."""
     names = place_names(fs)
-    rows = {"maps": [], "fields": [], "battles": [], "vehicles": []}
+    rows = {"maps": [], "fields": [], "battles": [], "vehicles": [], "events": []}
     for f in scene_files:
         r = json.loads(Path(f).read_text())
         for k in rows:
@@ -1719,7 +1727,15 @@ def summarize(scene_files, fs=FS):
         else:
             add(bgm, r["bgm"][-1], "필드 " + r["scene"].replace("ch", "") + "장")
     for b, who in leaders.items():
-        add(bgm, b, f"필드 6장 마차와 함께, 선두 {len(who)}명 모두({'·'.join(who)})")
+        add(bgm, b, f"필드 6장 선두 {'·'.join(who)}")
+    for r in rows["events"]:
+        k = r.get("pick", 0)
+        if 0 <= k < len(r["bgm"]):
+            add(bgm, r["bgm"][k], r["scene"])
+            measured.add(r["bgm"][k])
+        for x in r["se"]:
+            measured_se.add(x)
+            add(se, x, r["scene"])
     for r in rows["vehicles"]:
         if r["bgm"]:
             add(bgm, r["bgm"][-1], "필드 " + {1: "기구", 2: "배"}[r["vehicle"]])
@@ -2011,6 +2027,7 @@ def boot_song(p, n, maxf=1200):
 def compare(out, songs=None, fs=FS, rom=None, seconds=20.0):
     """곡마다 에뮬레이터 소리를 녹음해(OUT/rec/) 합성과 반음 띠 스펙트럼으로 견준다. 대조로 다음 번호 곡의 합성과도 견준다."""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import ndswarp as W
     from ndsplay import Player, core_path
 
     out = Path(out)
@@ -2026,6 +2043,7 @@ def compare(out, songs=None, fs=FS, rom=None, seconds=20.0):
         return synth[n]
 
     p = Player(core_path(), rom or str(ROOT / "rom" / "dq4ds.nds"), str(out / "rec"))
+    W.fixed_clock(p)
     tap = AudioTap(p)
     rows = []
     for i, n in enumerate(songs):
@@ -2149,11 +2167,16 @@ def scenes(out_json, fs=FS, rom=None, maps="sample", shard=(0, 1)):
 
     state = ROOT / "work" / "state"
     rom = rom or str(ROOT / "rom" / "dq4ds.nds")
-    tmp = Path(out_json).with_suffix("")
+    tmp = Path(out_json).resolve().with_suffix("")
     tmp.mkdir(parents=True, exist_ok=True)
     p = Player(core_path(), rom, str(tmp))
+    W.fixed_clock(p)
     rec = Recorder(p)
     res = {"maps": [], "fields": [], "battles": [], "events": [], "vehicles": []}
+
+    def set_flag(base, n):
+        a = base + 4 * (n >> 5)
+        p.w32(a, p.u32(a) | 1 << (n & 31))
 
     def start(name):
         W.start(p, str(state / f"dq4ds-{name}.state") if not os.path.isabs(name) else name)
@@ -2189,13 +2212,18 @@ def scenes(out_json, fs=FS, rom=None, maps="sample", shard=(0, 1)):
         start(ch)
         W.field(p, 200, 60)
         note("fields", ch, chapter=p.u32(W.CHAPTER))
-    for leader in (1, 3, 4, 7, 8, 25):
-        start("ch6")
-        order = list(struct.unpack("<13I", p.read(PARTY, 52)))
+    for leader in (1, 3, 4, 7, 8, 9, 25):
+        start("ch6-psaro")
+        order = [x for x in struct.unpack("<13I", p.read(PARTY, 52)) if x]
         if leader in order:
             order.remove(leader)
         order.insert(0, leader)
-        p.write(PARTY, struct.pack("<13I", *order[:13]))
+        for k, i in enumerate(order):
+            v = p.u32(WALKING + 4 * i)
+            p.w32(WALKING + 4 * i, v | 0x1000 if k < 4 else v & ~0x1000)
+        data = struct.pack("<13I", *(order + [0] * 13)[:13])
+        p.write(PARTY, data)
+        p.write(PARTY_COPY, data)
         W.field(p, 200, 60)
         note("fields", f"ch6 선두 {leader}", leader=leader)
     for veh in (1, 2):
@@ -2203,10 +2231,43 @@ def scenes(out_json, fs=FS, rom=None, maps="sample", shard=(0, 1)):
         p.w32(VEHICLE, veh)
         W.field(p, 200, 60)
         note("vehicles", f"ch6 탈것 {veh}", vehicle=veh)
-    for ch in ("ch1", "ch4", "ch6"):
+    for ch in ("ch1", "ch2", "ch3", "ch4", "ch5", "ch6"):
         start(ch)
         W.battle(p, [(1, 1)])
-        note("battles", f"{ch} 전투 테스트")
+        for _ in range(200):
+            if p.u32(W.SCENE_CUR) != 0x0D:
+                break
+            p.press("a", 4, 26)
+        note("battles", f"{ch} 전투 테스트", won=p.u32(W.SCENE_CUR) == W.SCENE_BATTLE_TEST)
+    start("ch1")
+    p.w32(W.SCENE_REQ, 0x03)
+    p.run(400)
+    note("events", "모험의 서 고르기(장면 0x03)", pick=0)
+    for ch, flags, where in CHAPTER_ENDS:
+        start(f"ch{ch}")
+        for f in flags:
+            set_flag(STORY_FLAGS, f)
+        if where == "field":
+            W.field(p, 200, 60)
+        else:
+            W.enter(p, where, settle=60)
+        n = len(rec.bgm())
+        for _ in range(60):
+            p.press("a", 4, 26)
+            if p.u32(W.CHAPTER) != ch:
+                n = len(rec.bgm())
+                break
+        # 장 번호가 바뀐 때까지의 마지막 요청이 장 끝 곡이다(앞에 필드 곡, 뒤에 다음 장 맵 곡이 올 수 있음)
+        note("events", f"{ch}장 끝", pick=n - 1, chapter=p.u32(W.CHAPTER))
+    for m, flag, what, key in SHOPS:
+        start("ch6")
+        W.enter(p, m, settle=200)
+        set_flag(MAP_FLAGS, flag)
+        rec.install()
+        for _ in range(8):
+            p.press(key, 4, 40)
+        p.run(300)
+        note("events", f"{what}({m})", pick=0)
     # 실제 조우: 1장 イムルへの洞くつ 에서 걸어 전투를 일으키고, 이길 때까지 A
     start("ch1")
     W.enter(p, "dab1", settle=300)
