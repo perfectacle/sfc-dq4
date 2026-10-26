@@ -138,6 +138,14 @@ def callers(rom, target):
     for m in re.finditer(rb'\x7b\x22' + bytes((target & 0xFF, target >> 8 & 0xFF, target >> 16)), rom.d):
         i = m.start()
         out.setdefault(0, []).append(f'{i // 0x8000:02X}:{0x8000 + i % 0x8000:04X}')
+    # LDA #n / BRA 로 JSL target 바로 앞에 모이는 갈래(06:CBA4 의 07~0B, 29:8231 의 14)
+    jsl = re.compile(re.escape(b'\x22' + bytes((target & 0xFF, target >> 8 & 0xFF, target >> 16))))
+    for m in jsl.finditer(rom.d):
+        j = m.start()
+        base = j // 0x8000 * 0x8000
+        for i in range(max(base + 2, j - 0x80), j):
+            if rom.d[i] == 0x80 and rom.d[i - 2] == 0xA9 and i + 2 + ((rom.d[i + 1] ^ 0x80) - 0x80) == j:
+                out.setdefault(rom.d[i - 1], []).append(f'{i // 0x8000:02X}:{0x8000 + (i - 2) % 0x8000:04X}')
     # JSL target / RTL 로 된 받침 루틴(05:F116 등)을 LDA #n / JMP·JSR 받침 으로 부르는 곳
     stub = re.compile(re.escape(bytes((0x22, target & 0xFF, target >> 8 & 0xFF, target >> 16, 0x6B))))
     for m in stub.finditer(rom.d):
