@@ -2,8 +2,8 @@
 
 NDS DQ4의 곡을 SFC DQ5 사운드 드라이버로 옮기는 도구와 실측 결과입니다. 편곡·악기·표현은 NDS판을 주된 참고로 삼고, FC판은 원곡과 장면 대응을 확인하는 데 씁니다. 채택된 [타이틀 서곡](dq4-overture-format.md)은 그대로 둡니다. DQ5 드라이버의 명령·시퀀스 형식은 [DQ5 소리 형식](../../dq5/docs/dq5-sound-format.md)을 따릅니다. 작업 경과·재현 명령·로컬 실험 폴더는 [사운드 작업 인계](dq4-sound-port-handoff.md)에 있습니다.
 
-- 일지: [2026-10-27-07: NDS 성 곡을 DQ5 엔진으로](../journal/2026-10-27-07-sound-port.md)
-- 도구: [dq4soundcatalog.py](../tools/dq4soundcatalog.py)(목록·장면·재사용 후보), [dq4soundport.py](../tools/dq4soundport.py)(NDS 악보 → DQ5 시퀀스), [dq4soundbank.py](../tools/dq4soundbank.py)(NDS PCM → BRR), [dq4soundpatch.py](../tools/dq4soundpatch.py)(롬 삽입·맵 전환 페이드·미리듣기), [dq4soundcheck.py](../tools/dq4soundcheck.py)(SPC 실측과 견주기)
+- 일지: [2026-10-27-07: NDS 성 곡을 DQ5 엔진으로](../journal/2026-10-27-07-sound-port.md), [2026-10-27-11: 마을·필드 곡을 SPC 예산에 맞추기](../journal/2026-10-27-11-sound-budget.md)
+- 도구: [dq4soundcatalog.py](../tools/dq4soundcatalog.py)(목록·장면·재사용 후보), [dq4soundport.py](../tools/dq4soundport.py)(NDS 악보 → DQ5 시퀀스), [dq4soundbank.py](../tools/dq4soundbank.py)(NDS PCM → BRR), [dq4soundpatch.py](../tools/dq4soundpatch.py)(롬 삽입·맵 전환 페이드·미리듣기), [dq4soundcheck.py](../tools/dq4soundcheck.py)(SPC 실측과 견주기), [dq4soundset.py](../tools/dq4soundset.py)(여러 곡을 예산에 맞춰 한꺼번에 넣기), [lua/dq4soundstate.lua](../tools/lua/dq4soundstate.lua)(세이브스테이트 실험의 SPC 곡 묶음 표 갱신)
 - 입력: [nds/dq4/tools/ndssound.py](../../../nds/dq4/tools/ndssound.py)가 내는 악보 JSON·샘플 WAV(비공개 에셋 저장소 [sfc-dq4-assets](https://github.com/perfectacle/sfc-dq4-assets)). 롬·악보·샘플·렌더는 커밋하지 않고 `work/`에만 둡니다.
 
 ## 현재 상태
@@ -11,10 +11,11 @@ NDS DQ4의 곡을 SFC DQ5 사운드 드라이버로 옮기는 도구와 실측 �
 | 항목 | 상태 |
 | --- | --- |
 | 성 곡 NDS `02`(왕궁의 미뉴에트) → DQ5 곡 자리 `02` | 롬 실행·SPC 대조 통과, 2026-10-27 사용자 청취로 딸깍 없음 확인 |
-| NDS 시퀀스 곡 50개 변환 | 50/50 시퀀스 생성. 롬에 넣어 재생한 것은 `02` 하나 |
+| 마을 NDS `0E` → 자리 `06`, 필드 NDS `05` → 자리 `02` | 샘플 예산 맞추기 뒤 롬 실행·SPC 대조 통과, 마을·필드 맵에서 재생 확인. 청취 미확인 |
+| NDS 시퀀스 곡 50개 변환 | 50/50 시퀀스 생성. 롬에 넣어 재생한 것은 성·마을·필드 |
 | 효과음 634개 | 목록만 |
 | 맵 전환 페이드(`--map-fades`) | 멈춤 해결, 성 → 필드 실측. 청취 미확인 |
-| 곡 맨 처음 한 번의 짧은 잡음 | 남음 |
+| 곡 맨 처음 한 번의 짧은 잡음 | 성 곡 최종 렌더에서 사용자 청취로 들리지 않음 확인(2026-10-27) |
 
 ## 시퀀스 변환
 
@@ -53,6 +54,42 @@ DQ5 드라이버는 음이 끝나기 1틱 전에 다음 트랙 바이트를 미�
 | `29` | `02-1A.wav` 22,050Hz | 처음부터 | 3,330바이트 | 27.2dB |
 
 표본율 상한은 8kHz입니다. 12kHz로 만들면 샘플이 약 7.8KB 늘어 SPC 예산을 넘습니다.
+
+## 샘플 예산 맞추기
+
+마을 곡 `0E` 는 NDS 샘플 15개·BRR 36,090바이트, 필드 곡 `05` 는 13개·40,140바이트였습니다. 곡 하나가 쓸 수 있는 칸은 14개(늘 두는 6개를 뺀 0x14칸)이고, 샘플 자리는 늘 두는 샘플·시퀀스와 그 곡 시퀀스를 빼면 16~20KB 남습니다. `dq4soundset.py` 가 곡마다 예산을 정하고 `build_bank(budget=…, max_samples=14)` 가 손실이 가장 작은 줄이기를 하나씩 고릅니다.
+
+| 줄이기 | 고르는 기준(손실 ÷ 줄어드는 바이트) |
+| --- | --- |
+| 영역 합치기 | 쓰이는 음이 적은 키 영역을 같은 프로그램의 가장 가까운 영역 샘플로 돌림. 손실 = 옮겨지는 음 수 |
+| 표본율 낮추기 | 8000 → 6000 → 4500 → 3200Hz. 손실 = 그 샘플을 쓰는 음 수 x 0.25 |
+| 반복 없는 샘플 자르기 | 1.2초, 0.6초에서 자르고 끝 20% 를 줄임. 손실 = 음 수 x 0.15 |
+
+칸이 넘칠 때는 합치기를 먼저 고릅니다. 크기는 재표본 길이로 어림해 표본율을 바꿔 보는 데 인코딩이 들지 않고, 고른 결과만 인코딩합니다. NDS 뱅크에 정의가 없는 프로그램(전투 곡 `1E` 의 `63`, 4음)은 NDS 에서도 소리가 없으므로 그 음을 뺍니다(`undefined_program_notes`).
+
+| 곡 | 예산 | 샘플 | BRR | 시퀀스 | 줄이기 | 실기 SNR |
+| --- | --- | --- | --- | --- | --- | --- |
+| 마을 `0E` → `06` | 15,983 | 9 | 14,940 | 10,781 | 합치기 6, 표본율 9 | 19.8~44.1dB |
+| 필드 `05` → `02` | 20,074 | 7 | 18,927 | 6,744 | 합치기 5, 표본율 7 | 23.7~32.0dB |
+
+## 곡 묶음 표 늘리기
+
+곡 묶음 표는 SPC `28EC`~`2A5D`(369바이트)에 드라이버 IPL 블록(`2B:E676`)으로 올라갑니다. 같은 블록 첫 2바이트(SPC `$28E7`)가 샘플·시퀀스 자리의 시작이고 드라이버가 이 값을 읽습니다(`22F4`). 그다음 2바이트(`$28E9` = `28EC`)는 표 포인터입니다. 바꾼 곡들의 샘플 수가 늘어 표가 369바이트를 넘으면 `install` 이 이 시작값을 표 끝으로 옮기고, 넘친 만큼 SPC 예산이 줄어듭니다.
+
+## 세이브스테이트 실험
+
+세이브스테이트의 SPC RAM 에는 그 상태를 만든 롬의 IPL 블록(곡 묶음 표 포함)이 그대로 있습니다. 곡 묶음을 바꾼 롬으로 선실 세이브스테이트에서 맵에 들어가면, 시퀀스와 새 샘플이 모두 전송돼도 드라이버가 옛 표로 곡의 샘플을 찾습니다. 그래서 매 프레임 `01 n` 을 다시 보내며 곡을 틀지 않았습니다(`2B:BF2B`·`C1AE` 가 598프레임부터 매 프레임 반복, 샘플 참조 수가 `C0` 까지 쌓임). [lua/dq4soundstate.lua](../tools/lua/dq4soundstate.lua) 는 상태를 불러온 뒤 롬의 IPL 블록을 SPC RAM 에 다시 씁니다. 전원부터 켜는 실험(미리듣기 등)에는 필요 없습니다.
+
+선실 세이브스테이트에서 마을 `18/00` 으로 워프하고 성 `01/00` 에서 필드로 걸어 나갔습니다. 880프레임 SPC 덤프에서 시퀀스와 샘플이 롬과 같았고, 곡 자리에 `06`·`02` 가 켜져 ENVX 가 0 보다 큰 프레임이 도착 뒤 64~79% 였습니다.
+
+```sh
+export LIBDIR=$(tools/lua/seqlib.sh "$(uv run --locked krpatch sfc lua)" work/warplib ../../sfc/dq5/tools/lua/dq5warp.lua)
+TO="18/00,30,50" SOUND_PROBE="$PWD/sfc/dq5/tools/lua/dq5sndlog.lua" LIBDIR="$LIBDIR" STATE="$PWD/work/state/ship.mss" \
+  SETTLE=60 TEST=wait:900 MAXF=900 DSP=1 SPCDUMP=880 SHOT_DIR="$PWD/work/sound/town" \
+  "$MESENCE" --testrunner work/sound/set/game.sfc "$PWD/sfc/dq4/tools/lua/dq4soundstate.lua"
+```
+
+워프 드라이버는 [dq5warp.lua](../../dq5/tools/lua/dq5warp.lua)이고, `LIBDIR` 만드는 법은 [공통 도구](../../../tools/README.md)에 있습니다.
 
 ## 롬 삽입
 
@@ -105,8 +142,7 @@ DQ5 드라이버는 음이 끝나기 1틱 전에 다음 트랙 바이트를 미�
 
 ## 남은 것
 
-- 곡 맨 처음 한 번 나는 짧은 잡음. 혼합과 목소리별 렌더 합의 차이가 0.03초에만 컸습니다(700). 앞 곡 메아리 버퍼가 남은 것으로 추정하며, 확인하지 않았습니다.
-- 마을·필드·전투 곡과 팡파르, 효과음 변환·삽입. 8KB를 넘는 곡(`22` 약 15KB 등)은 더 줄여야 합니다.
+- 마을·필드 곡의 청취(`work/sound/listen/v5-town.wav`·`v6-field.wav`), 전투 곡과 팡파르, 효과음 변환·삽입. 8KB를 넘는 곡(`22` 약 15KB 등)은 더 줄여야 합니다.
 - 50곡 일괄 변환을 지금 성부 배분으로 다시 하고 크기를 재기
 - 맵 전환 페이드: 청취, 최대 음량에서 줄이기, 같은 곡 이동, 대기열이 바쁠 때 건너뛰기, 전투 복귀, 빠른 연속 이동
 - 늘 두는 곡(`17` 등)을 바꿀 때 곡 묶음 `[L,L,…]`이면 새 샘플이 전송되지 않을 수 있음([DQ5 소리 형식](../../dq5/docs/dq5-sound-format.md)의 묶음 앞·뒤 전송)

@@ -24,11 +24,13 @@ from dq5spc import (SONG_SETS, SEQUENCE_COUNT, RESIDENT_SAMPLES,  # noqa: E402
 IPL_BLOCK = 0x2BE676
 IPL_END = bytes.fromhex('00 00 00 02')
 TABLE_CAPACITY = 0x2A5D - 0x28EC
+HEAP_START = 0x2BE67A  # IPL 블록 첫 2바이트 = SPC $28E7, 드라이버 22F4 가 읽는 샘플·시퀀스 자리 시작
+SPC_END = 0xD700
 CODE = 0x718000
 DATA_BANKS = range(0x72, 0x7E)
 MAP_CLEANUP, MAP_START = 0x00CEB1, 0x00CEA2
 FADE_OUT, FADE_IN = 0x40, 0x30
-SPC_CAPACITY = 0xD700 - 0x2A5D
+SPC_CAPACITY = SPC_END - 0x2A5D
 
 
 @dataclass(frozen=True)
@@ -98,6 +100,22 @@ def sample_size(data, sample):
     return samples(Rom(data))[sample][2]
 
 
+def heap_start(data):
+    return int.from_bytes(data[lorom(HEAP_START):lorom(HEAP_START) + 2], 'little')
+
+
+def sample_budget(data, song, sequence_size, extra_table=0):
+    """곡 하나가 새 샘플에 쓸 수 있는 SPC 바이트. 늘 두는 샘플·시퀀스와 이 곡 시퀀스, 여유 512를 뺀다.
+
+    extra_table 은 곡 묶음 표가 지금보다 늘어날 바이트로, 그만큼 샘플 자리 시작이 뒤로 밀린다.
+    """
+    rom = Rom(data)
+    resident_samples = sum(sample_size(data, i) for i in set(ff_list(rom, RESIDENT_SAMPLES)))
+    resident_sequences = sum(len(sequence_bytes(data, i)) for i in set(ff_list(rom, RESIDENT_SEQUENCES)) if i != song)
+    capacity = SPC_END - max(heap_start(data), 0x28EC + sum(map(len, read_sets(data))) + extra_table)
+    return capacity - resident_samples - resident_sequences - sequence_size - 512
+
+
 def memory_budget(data, song, item):
     rom = Rom(data)
     resident_samples = set(ff_list(rom, RESIDENT_SAMPLES))
@@ -108,9 +126,10 @@ def memory_budget(data, song, item):
     sequence_size = sum(len(sequence_bytes(data, i)) for i in used_sequences)
     # 슬롯 관리·정렬과 잔향 버퍼 사이에 여유를 둔다. 전환은 이전 곡 자료를 정리한 뒤 로드한다.
     required = sample_bytes + sequence_size + 512
-    if len(used_samples) > 20 or len(used_sequences) > 20 or required > SPC_CAPACITY:
-        raise ValueError(f'song {song:02X}: SPC budget exceeded ({required}/{SPC_CAPACITY} bytes)')
-    return {'bytes_with_margin': required, 'capacity': SPC_CAPACITY,
+    capacity = SPC_END - heap_start(data)
+    if len(used_samples) > 20 or len(used_sequences) > 20 or required > capacity:
+        raise ValueError(f'song {song:02X}: SPC budget exceeded ({required}/{capacity} bytes)')
+    return {'bytes_with_margin': required, 'capacity': capacity,
             'sample_slots': len(used_samples), 'sequence_slots': len(used_sequences)}
 
 
@@ -215,8 +234,12 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
         write(RELOC_SMP_TABLE + sample * 3, address.to_bytes(3, 'little'))
         within += len(payload)
     table = b''.join(records)
-    if len(table) > TABLE_CAPACITY:
-        raise ValueError(f'song sample table exceeds SPC area: {len(table)}/{TABLE_CAPACITY} bytes; use fewer replacements')
+    if 0x28EC + len(table) > 0x3000:
+        raise ValueError(f'song sample table too large: {len(table)} bytes')
+    if not 0x2A5D <= heap_start(data) < 0x3000:
+        raise ValueError('unexpected SPC heap start in IPL block')
+    # 표가 원래 자리(28EC~2A5D)를 넘으면 샘플·시퀀스 자리 시작($28E7)을 표 끝으로 민다. 넘친 만큼 SPC 예산이 준다.
+    write(HEAP_START, max(0x2A5D, 0x28EC + len(table)).to_bytes(2, 'little'))
     end = lorom(SONG_SETS) + old_size + 4
     if len(table) > old_size and any(data[end:end + len(table) - old_size]):
         raise ValueError('IPL expansion would overwrite nonzero ROM data')
@@ -255,6 +278,7 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
     return result, {'kind': 'dq4_sound_port', 'base_sha1': hashlib.sha1(base).hexdigest(),
                     'rom_sha1': hashlib.sha1(result).hexdigest(), 'songs': allocations,
                     'sample_table_bytes': len(table), 'sample_table_capacity': TABLE_CAPACITY,
+                    'heap_start': f'{heap_start(result):04X}',
                     'map_fades': map_fades, 'preview': preview,
                     'limitations': ['Map fades apply only to the ordinary DQ5 map-song calls; battle and event timing is unchanged.',
                                     'The early fade-out is skipped when the sound queue is busy at load time; the original 1A cleanup still runs.',

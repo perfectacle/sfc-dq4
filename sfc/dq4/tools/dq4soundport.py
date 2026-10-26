@@ -341,6 +341,13 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
     if score.get('ticks_per_quarter', 48) != 48:
         raise ValueError('expected 48 ticks per quarter')
     loop_start, end = score_bounds(score)
+    instruments = score.get('instruments') or {}
+    # NDS 뱅크에 정의가 없는 프로그램(None)의 음은 NDS 에서도 소리가 나지 않는다.
+    undefined = [e for e in score['timeline'] if e.get('op') == 'note' and instruments
+                 and instruments.get(str(e['program'])) is None]
+    if undefined:
+        skip = {id(e) for e in undefined}
+        score = score | {'timeline': [e for e in score['timeline'] if id(e) not in skip]}
     mapping = PROGRAM_MAP | (program_map or {})
     lanes, report = allocate(score, voices, end, tail_ticks)
     used = {n['program'] for lane in lanes for n in lane}
@@ -488,6 +495,7 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
     report |= {
         'id': score.get('id'), 'title': score.get('title', score.get('name')),
         'status': 'arrangement-draft', 'source': 'NDS DQ4 score', 'voices': voices,
+        'undefined_program_notes': len(undefined),
         'sequence_bytes': len(seq), 'uncompressed_bytes': len(uncompressed), 'sequence_sha256': hashlib.sha256(seq).hexdigest(),
         'samples': samples, 'send_first': len(samples), 'end_tick': end,
         'loop_start': loop_start, 'loop_len': score.get('loop_len'),
