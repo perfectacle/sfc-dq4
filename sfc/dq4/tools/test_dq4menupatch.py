@@ -4,6 +4,7 @@ from pathlib import Path
 import unittest
 
 import dq4menupatch as mp
+import dq4nameentry as ne
 
 ROOT = Path(__file__).resolve().parents[3]
 BASE = ROOT / 'work' / 'base' / 'dq4-title-overture.sfc'
@@ -62,22 +63,40 @@ class RecordTests(unittest.TestCase):
         self.assertEqual(tiles[32:34], b'\xff\xff')
 
 
-@unittest.skipUnless(BASE.exists() and os.environ.get('DQ4_GALMURI'),
-                     'work/base 의 서곡 채택본 롬과 DQ4_GALMURI(Galmuri BDF)가 필요')
+@unittest.skipUnless(BASE.exists() and os.environ.get('DQ4_GALMURI') and os.environ.get('ASAR'),
+                     'work/base 의 서곡 채택본 롬과 DQ4_GALMURI(Galmuri BDF), ASAR 가 필요')
 class BuildTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.rom = BASE.read_bytes()
-        cls.out, cls.atlas, cls.records = mp.build(cls.rom, mp.Font('galmuri11'))
+        cls.out, cls.atlas, cls.records = mp.build(cls.rom, mp.Font('galmuri11'), mp.Font('galmuri11c'))
 
     def test_base_is_overture_build(self):
         self.assertEqual(hashlib.sha1(self.rom).hexdigest(), mp.BASE_SHA1)
+
+    def test_static_atlas_leaves_list_and_input_name_tiles_empty(self):
+        self.assertLessEqual(len(self.atlas.cols), 0xD0)
+        self.assertGreaterEqual(ne.FIELD_COL, 0xD0 + 3 * 8)
+        self.assertLessEqual(ne.FIELD_COL + 8, mp.COLUMNS)
+        start = mp.lorom(mp.TILES)
+        for row in (0, 0x1000):
+            reserved = self.out[start + row + 0xD0 * 16:start + row + 0x1000]
+            self.assertEqual(reserved, bytes(0x30 * 16))
+
+    def test_name_padding_glyph_is_blank_in_built_rom(self):
+        start = mp.lorom((ne.GLYPH_BANK << 16) | 0x8000)
+        blank = start + ne.GLYPHS.index('　') * 32
+        star = start + ne.GLYPHS.index('＊') * 32
+        self.assertEqual(self.out[blank:blank + 32], bytes(32))
+        self.assertNotEqual(self.out[star:star + 32], bytes(32))
 
     def test_shared_windows_keep_rom_records(self):
         for n in mp.SHARED:
             a, old, _ = self.records[n]
             self.assertEqual(mp.window_addr(self.out, n) & 0xFFFF, a & 0xFFFF)
-            self.assertEqual(mp.window_record(self.out, mp.window_addr(self.rom, n)), old)
+            offset = mp.lorom(mp.window_addr(self.rom, n))
+            self.assertEqual(self.out[offset:offset + len(old)], old)
+            self.assertEqual(mp.window_span(self.rom, n), old)
 
     def test_cursor_tramps_call_original_movers(self):
         for site, target in mp.CURSOR_MOVES.items():
@@ -86,9 +105,9 @@ class BuildTests(unittest.TestCase):
             t = mp.lorom(0x040000 | int.from_bytes(self.out[o + 1:o + 3], 'little'))
             self.assertEqual(self.out[t + 4:t + 7], bytes((0x20, target & 0xFF, target >> 8)))
 
-    def test_records_fit_and_end_with_80(self):
+    def test_records_fit_and_keep_window_terminators(self):
         for n, (a, old, new) in self.records.items():
-            self.assertEqual(new[-1], 0x80, f'{n:02X}')
+            self.assertEqual(new[-1], 0xFF if n == 0x6B else 0x80, f'{n:02X}')
             if n not in mp.SHARED:
                 self.assertEqual(mp.window_record(self.out, a), new, f'{n:02X}')
 
