@@ -56,10 +56,14 @@ def rows_play(cat, entries):
         smp = ' '.join(f'<a href="#s{s}">{s}</a>' for s in e.get('samples', []))
         maps = e.get('maps') or []
         mp = f'<details><summary>맵 {len(maps)}곳</summary>{" ".join(maps)}</details>' if maps else ''
+        files = [f'<a href="../sound/{cat}/{esc(e["file"])}">.spc</a>'] if e.get('file') else []
+        sc = e.get('score') or {}
+        files += [f'<a href="../sound/{cat}/{esc(sc[k])}">.{k}</a>' for k in ('txt', 'mid', 'musicxml') if sc.get(k)]
+        sec = f'{e["wav_seconds"]}초' if e.get('wav_seconds') else ''
         out.append(f'<tr id="{cat[:2]}{esc(e["id"])}"><td>{esc(e["id"])}</td><td>{esc(e.get("scene") or "")}</td>'
-                   f'<td>{audio(cat, e.get("wav"))}</td><td class="wide">{e.get("wav_seconds", "")}초</td>'
+                   f'<td>{audio(cat, e.get("wav"))}</td><td class="wide">{sec}</td>'
                    f'<td class="wide">{smp}</td><td class="wide">{mp}</td><td class="wide mut">{esc(e.get("command", ""))}</td>'
-                   f'<td><a href="../sound/{cat}/{esc(e["file"])}">.spc</a></td>'
+                   f'<td>{" ".join(files)}</td>'
                    f'<td><input data-id="{cat}/{esc(e["id"])}" placeholder="들어 보고 이름"></td></tr>')
     return out
 
@@ -79,14 +83,15 @@ def rows_samples(entries):
 def page(root):
     songs, sfx, smp = load(root, 'songs'), load(root, 'sfx'), load(root, 'samples')
     head = '<tr><th>번호</th><th>쓰이는 장면</th><th>듣기</th><th class="wide">길이</th><th class="wide">악기</th>' \
-           '<th class="wide">쓰는 맵</th><th class="wide">명령</th><th>파일</th><th>이름</th></tr>'
+           '<th class="wide">쓰는 맵</th><th class="wide">명령</th><th>파일·악보</th><th>이름</th></tr>'
     body = [f'<h2 id="songs">곡 {len(songs)}</h2><table>{head}', *rows_play('songs', songs), '</table>',
             f'<h2 id="sfx">효과음 {len(sfx)}</h2><table>{head}', *rows_play('sfx', sfx), '</table>',
             f'<h2 id="samples">악기 샘플 {len(smp)}</h2><table><tr><th>번호</th><th>듣기</th><th>길이</th>'
             '<th class="wide">반복</th><th class="wide">머리</th><th>이름</th></tr>', *rows_samples(smp), '</table>']
     intro = ('곡·효과음 WAV 는 들어 보기용 앞부분(곡 30초, 효과음 4초)입니다. 끝까지는 .spc 를 SPC 플레이어로 틉니다. '
              '「쓰이는 장면」은 게임에서 그 장면에 나가는 것을 확인한 것만 적었습니다. <번호>-<갈래> 는 곡 변수(명령 0C 의 X)로 '
-             '갈라지는 소리입니다. 이름 칸에 적은 것은 이 브라우저에만 남습니다.')
+             '갈라지는 소리입니다. 악보는 롬의 시퀀스에서 바로 푼 것입니다: .txt 는 다시 쌀 수 있는 글(dq5song.py), .mid 는 트랙=채널·4분음표 48틱·끝없는 되풀이를 두 번 돈 MIDI, .musicxml 은 4/4 로 마디를 자른 악보입니다. '
+             '이름 칸에 적은 것은 이 브라우저에만 남습니다.')
     nav = ' '.join(f'<a href="{h}">{t}</a>' for t, h in (('곡', '#songs'), ('효과음', '#sfx'), ('악기 샘플', '#samples'),
                                                         ('맵·필드', 'index.html'), ('스프라이트·몬스터', 'sprites.html')))
     return ('<!doctype html><html lang="ko"><head><meta charset="utf-8">\n'
