@@ -10,7 +10,7 @@
   sprites    sprites/                       dq5sprite.py
   samples    sound/samples/                 dq5brr.py
   sound      sound/songs/·sfx/ (.spc·.wav)   dq5spcfile.py --wav       MesenCE, GME_LIB
-  score      sound/songs/·sfx/ (.txt·.mid·.musicxml, index.json 의 score)   dq5score.py
+  score      sound/songs/·sfx/ (.txt·.mid·.musicxml·쪽별 .svg, index.json 의 score)   dq5score.py
   effects    gfx/effects/anim/              dq5effectgif.py           MesenCE
   fxframes   gfx/effects/frames/            dq5scenes.py 덤프 → dq5fx.py --export   MesenCE
   title      gfx/screens/anim/              dq5titlegif.py            MesenCE
@@ -119,7 +119,7 @@ def run_step(step, rom, out, work, ship, env, jobs):
         py(t + 'dq5spcfile.py', rom, ship, '--out', os.path.join(out, 'sound'), '--wav', '--jobs', str(jobs),
            '--work', os.path.join(work, 'spc'), env=env)
     elif step == 'score':
-        py(t + 'dq5score.py', rom, '--out', os.path.join(out, 'sound'), env=env)
+        py(t + 'dq5score.py', rom, '--out', os.path.join(out, 'sound'), '--jobs', str(jobs), env=env)
     elif step == 'effects':
         py(t + 'dq5effectgif.py', rom, '--state', ship, '--out', out, '--jobs', str(jobs), env=env)
     elif step == 'fxframes':
