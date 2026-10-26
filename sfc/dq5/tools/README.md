@@ -26,6 +26,9 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5scriptcheck.py rom --state 선실 --out 폴더` | 이벤트 표·번호 표 연결과 인물 라벨 분기 7건을 새 인코더·빌더·MesenCE로 재현. `MESENCE` 필요. 롬·IPS·실행 기록과 검사 결과는 새 출력 하위 폴더에 저장 |
 | `dq5textwrite.py rom export\|patch\|check` | 보행 메시지3200개 코드목록 `dq5text/1`. 일부메시지만 수정하고 전체허프만 재압축, 기존글꼴보존, 기본38:8000. `check [입력]`으로빌더적용후전체메시지비교. [쓰기 형식](../docs/dq5-build-format.md#보행-대사-일괄-쓰기-dq5text1) |
 | `dq5textcheck.py rom --state 상태 --out 폴더` | MesenCE로 원본·원문 재배치·수정·뒤쪽 뱅크 메시지 4건의 실제 디코더 반환 코드를 대조. `MESENCE` 필요 |
+| `dq5battletextwrite.py rom export\|patch\|check --at BB:AAAA` | 전투 메시지 432개 1바이트 부호 목록 `dq5battletext/1`. 일부 메시지만 고치고 전체 허프만 재압축, 디코더 사본·트리·메시지를 `--at`(필수, 30~7D)에 두고 색인 훅으로 뱅크를 OR. [쓰기 형식](../docs/dq5-build-format.md#전투-메시지-일괄-쓰기-dq5battletext1) |
+| `dq5namewrite.py rom export\|patch\|check [--at BB:AAAA]` | 이름 문자열 표 아홉 개 `dq5names/1`. 이름 길이 0~12 바꾸기, 원래 자리에 다시 채우거나 `--at` 으로 옮기고 `21:959B` 포인터 고침. [쓰기 형식](../docs/dq5-build-format.md#이름-문자열-표-쓰기-dq5names1) |
+| `dq5battletextcheck.py rom --state 상태 --out 폴더` | MesenCE 전투에서 원본·원문 재배치·고침·옮김 4건의 푼 버퍼(`7E:0E4B`)와 글자 격자(`7E:1DD5`)의 몬스터 이름·메시지를 대조. `MESENCE` 필요 |
 | `dq5eventwrite.py rom dump\|encode\|patch\|check` | 이벤트 명령 JSON(`dq5event/1`). `dump --event N` 또는 `--number HEX`, `patch 입력 -o 목록`으로 지정한 표 항목을 확장 뱅크 스크립트에 연결. 기본 `60:8000`, 내부 라벨은 배치 주소로 계산. [쓰기 형식](../docs/dq5-build-format.md#이벤트-스크립트-dq5event1) |
 | `dq5npcwrite.py rom dump\|encode\|patch\|check` | 인물 인라인 JSON(`dq5npcscript/1`). `dump BB:AAAA -o 입력`은 길이 바이트 주소를 받음. `patch 입력 -o 목록`은 원본 슬롯 크기를 유지하고 남는 부분을 `00`으로 채움. 상대 분기는 라벨 지원. [쓰기 형식](../docs/dq5-build-format.md#인물-스크립트-dq5npcscript1) |
 | `dq5npcrelocate.py rom dump\|patch\|check` | 인물 스크립트 길이를 바꾸어 기본·대체 목록을 각각 확장 뱅크로 재배치. `--base`·`--alt`, `--report`로 주소 대응표 출력, `--records`로 `dq5npcrecord/1` 수정을 옮긴 사본에 넣음. `lists`·`new_lists`·`overrides`·`no_npc` 로 인물 수·순서·새 대체 목록·조건 표(대체 표는 `12:82FB` 를 새 루틴으로 옮김), `--allow-growth` 로 슬롯 `1F` 까지 |
@@ -135,6 +138,7 @@ uv run --locked python sfc/dq5/tools/dq5assets.py rom/dq5.sfc --out "$ASSETS/sfc
 | `lua/dq5progresscheck.lua` | 성장 처리·상점 가격 계산과 조우 결과를 기록. `dq5progresscheck.py`가 환경과 드라이버를 준비 | `MODE`, `DRIVER`, `MAXF` | `observed.txt` |
 | `lua/dq5tablecheck.lua` | 롬 주소 읽기(범위)와 PC 통과를 기록하고 끝에 WRAM 을 덤프. `dq5tablecheck.py` 가 환경과 드라이버를 준비 | `READS`, `EXECS`, `DRIVER`, `MAXF` | `observed.txt`, `final.wram` |
 | `lua/dq5textcheck.lua` | 보행 메시지 스트림 주소와 디코더 반환 코드를 기록. `dq5textcheck.py`가 드라이버와 환경을 준비 | `MESSAGE`, `RETURN_PC`, `DRIVER` | `decoded.txt`, `end.png` |
+| `lua/dq5battletextcheck.lua` | 전투 메시지 번호·비트 위치·푼 버퍼·글자 격자를 기록. `dq5battletextcheck.py`가 드라이버(`dq5warp.lua`)와 환경을 준비 | `DRIVER`, `GRIDDELAY` | `battletext.txt`, `fNNNNN.png` |
 | `lua/dq5npcrelocatecheck.lua` | 인물 배치 직후 `12:803C`에서 목적지 맵의 WRAM을 저장. `dq5npcrelocatecheck.py`가 드라이버와 환경을 준비 | `CHECK_GROUP`, `CHECK_MAP`, `DRIVER` | `npc.bin` |
 | `lua/dq5npcrecordcheck.lua` | `dq5warp.lua`(LIBDIR 의 `boot.lua`)로 맵에 들어가며 `12:803C`에서 WRAM 을 저장하고, 맵을 다 놓은 직후(`00:E1CC`)의 `7E:1982`·`1983` 과 들어간 뒤 `24:8BAF`가 받은 메시지 번호를 `warp.txt`에 덧붙임. `dq5npcrecordcheck.py`·`dq5npclistcheck.py`가 준비 | `CHECK_GROUP`, `CHECK_MAP`, `dq5warp.lua` 의 변수 | `npc.bin`, `warp.txt`, `end.png` |
 | `lua/dq5maphookcheck.lua` | `dq5warp.lua`(LIBDIR 의 `boot.lua`)로 맵에 들어가며, 맵을 풀 때마다 `15:F7EA` 에서 고른 루틴(`$A5`~`$A7`, `7E:1AA6`~`1AA8`)을, `15:F7EE` 에서 셀 하나를 `warp.txt` 에 덧붙임. `dq5maphookcheck.py`가 준비 | `CELL`, `dq5warp.lua` 의 변수 | `warp.txt` |
