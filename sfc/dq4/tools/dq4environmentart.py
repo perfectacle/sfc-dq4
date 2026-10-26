@@ -34,6 +34,24 @@ _REMAP = {
 # nearest colour inside the object's bank).
 PALETTE = tuple(_rgb(color) for bank in _BANKS for color in bank)
 _FLAT_PALETTE = [channel for rgb in PALETTE for channel in rgb] + [0] * 384
+# Colours DQ5's common door tiles expect; palette variants keep them.
+_RESERVED = {(5, i) for i in (1, 2, 3, 6, 7)} | {(6, i) for i in (1, 2, 3, 6, 7, 9)}
+
+
+def palette_variant(kind):
+    """Flat 768-entry palette. "dim" follows FC DQ4's darker set for アッテムト (each colour one
+    NES brightness step down, e.g. 15→07, 1a→0a, 27→17)."""
+    if kind == "normal":
+        return list(_FLAT_PALETTE)
+    if kind != "dim":
+        raise ValueError(kind)
+    out = []
+    for index, rgb in enumerate(PALETTE):
+        if (index >> 4, index & 15) in _RESERVED or not index & 15:
+            out += list(rgb)
+        else:
+            out += [(int(c * 0.6) >> 3) << 3 | int(c * 0.6) >> 5 for c in rgb]
+    return out + [0] * 384
 _REF = {
     "castle": "nds/dq4/map/tex/haout.png",
     "town": "nds/dq4/map/tex/maout.png",

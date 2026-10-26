@@ -220,9 +220,9 @@ def build(out, rom=None, references=None):
             manifest["maps"][name] = info
             left = ((image.width - 256) // 32) * 16
             top = min(224, max(0, ((image.height - 224) // 32) * 16))
-            preview = image.crop((left, top, left + 256, top + 224))
-            previews[f"preview-{name}"] = preview
-            info["preview_crop"] = [left, top, left + 256, top + 224]
+            if name in ("burland", "imuru"):
+                previews[f"preview-{name}"] = image.crop((left, top, left + 256, top + 224))
+                info["preview_crop"] = [left, top, left + 256, top + 224]
     for name, image in previews.items():
         image.info.pop("transparency", None)
         data, details = encode_image(image, PALETTE)
