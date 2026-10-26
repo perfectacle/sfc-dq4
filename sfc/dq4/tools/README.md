@@ -23,6 +23,11 @@
 | `dq4namegamecheck.py --rom 롬 --state work/state/ship.mss --out 새폴더` | 선실에서 주인공 이름을 넣고 메시지 첫 코드를 `1012` 로 바꿔, 한글·가나 이름이 맞는 글자 코드가 되는지 MesenCE 로 검사. `MESENCE` 필요. [게임 안 이름](../docs/dq4-name-entry-format.md#게임-안-이름) |
 | `dq4namesave.py show\|convert` | SRAM 주인공 이름의 부호(한글·예전 한글·가나)를 보고, 고른 칸의 예전 한글 이름을 표시 있는 부호로 바꿔 새 파일에 씀. [예전 저장](../docs/dq4-name-entry-format.md#예전-저장) |
 | `dq4namegame.py` | `dq4menupatch.py build` 가 부르는 게임 안 메시지 이름 모듈(`24:A7D5` → `24:9E11`) |
+| `dq4soundcatalog.py --assets 폴더 [--dq5-rom 롬] --out JSON` | NDS 곡·효과음 목록, FC 장면 대응, DQ5 재사용 후보와 숙박곡 비교. [사운드 포팅](../docs/dq4-sound-port-format.md) |
+| `dq4soundport.py export --assets 폴더 --out 폴더` | NDS 악보 JSON 을 DQ5 시퀀스로(템포·세기 합치기, 꼬리를 남기는 성부 배분, 손실 보고서) |
+| `dq4soundbank.py --score JSON --assets 폴더 --out 폴더 [--max-rate 8000]` | 곡에 쓰이는 NDS PCM 을 S-DSP 계산으로 BRR 로(무음 첫 블록, 실기 SNR) |
+| `dq4soundpatch.py --base 롬 --replace 자리=JSON --bank 폴더 --out 롬 [--map-fades] [--preview 자리]` | 시퀀스·샘플을 롬에 넣음(4MB 롬·IPS). `--map-fades` 는 프레임을 기다리지 않는 맵 전환 페이드, `--preview` 는 청취용 타이틀 곡 교체 |
+| `dq4soundcheck.py 롬 OUT --song 자리` | `lua/dq4overturespc.lua` 결과로 SPC 의 시퀀스·샘플, KON 시각·SRCN·음 간격을 견줌 |
 | `lua/dq4overturespc.lua` | 서곡 롬을 전원부터 돌려 곡 10 이 시작한 뒤의 SPC 상태와 DSP 쓰기(`dspw.txt`)를 남김. `OUT`, `MAXF`, `SONG`, `SEQ`, `DUMPAT` 사용 |
 | `lua/dq4titleintegrationcheck.lua` | 통합 롬의 화면·VRAM·음악·메뉴 진입 관찰. `OUT`, `MAXF`, `EVERY`, `FROM`, `SEQ`, `RESETAT`, `TRACE_DMA`, `MOTION_PC` 사용 |
 | `lua/dq4titlecheck.lua` | 독립 미리보기의 화면·VRAM·CGRAM 관찰. `OUT`, `FRAME` 사용 |
