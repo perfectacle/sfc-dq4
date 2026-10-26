@@ -2,11 +2,10 @@
 형식은 sfc/dq4/docs/dq4-window-text-format.md 「BG3 타일맵 옮기기」.
 
 DQ5 엔진은 평소 BG3SC 를 맵을 불러올 때(2B:82BD → 2B:82C2 STA $2109) 그림자 $0725 와 함께 쓴다. DQ5 트랙의
-실내 364맵 VRAM 칸 쓰기 실측과 전투 실측에 따라
-  필드($BE bit7 = 0)                       78
-  3C00 을 쓰고 7800 은 쓰지 않는 실내 맵 3개  78
-  3C00 과 7800 을 다 쓰는 마을 6개          48(전투를 시작하면 그 자리에서 78 로)
-  나머지 실내 맵                           3C(전투도 3C00 을 쓰지 않아 그대로)
+VRAM 칸 쓰기·가리킴 실측(실내 맵, 전투, 특수 장면)에 따라
+  필드($BE bit7 = 0)                 78
+  실내 맵 대부분                     3C(전투도 3C00 을 쓰지 않아 그대로)
+  3C00 을 쓰거나 가리키는 실내 맵     MAP_SLOTS 의 자리(78·7C 는 그대로, 48·4C 는 전투를 시작하면 그 자리에서 78 로)
 으로 BG3SC 를 고르고, 타일맵 VRAM 주소를 즉값 1C00~1FFF 로 쓰는 곳에서 그 값을 지금 자리 기준으로 다시 계산한다.
 전투가 끝나면 맵을 다시 불러와 위 규칙으로 돌아간다. 특수 화면 효과가 BG3SC 를 즉값 1C 로 되돌리는 곳도 지금 자리로
 되돌린다. 21BF.5 갈래의 4C00 은 원래대로 둔다. 타이틀·메뉴는 맵을 불러오기 전이라 1C 그대로다.
@@ -22,13 +21,16 @@ from dq5map import lorom  # noqa: E402
 CODE = 0x608300
 MAP_CHOOSE = 0x608284                 # dq4menupatch 의 맵 훅 안 LDA #$1C / STA $0725 / RTL
 BATTLE_START = 0x268030               # JSL $04E2A1(전투 글자 타일 올리기)
-INTERIOR, SHARED, FIELD = 0x3C, 0x48, 0x78
-# 3C00~3FFF 를 맵을 불러오며 쓰는 실내 맵과 그 자리(DQ5 트랙의 실내 364맵 VRAM 칸 쓰기 실측). 7800 도 비면 78 에 두어
-# 전투에서 자리를 바꾸지 않고, 7800 까지 쓰는 마을 6곳만 48 에 둔다. 전투는 3C00 을 한 번도 쓰지 않아(09/00 전투 실측)
-# 3C 맵에서는 전투 중에도 자리를 바꾸지 않는다.
-USES_3C00 = ((0x00, 0x0A, FIELD), (0x21, 0x05, FIELD), (0x32, 0x00, FIELD),
-             (0x19, 0x00, SHARED), (0x1A, 0x00, SHARED), (0x1C, 0x00, SHARED), (0x1F, 0x00, SHARED),
-             (0x20, 0x00, SHARED), (0x21, 0x00, SHARED))
+INTERIOR, FIELD, SPARE = 0x3C, 0x78, 0x7C
+# 3C00 을 쓰거나 가리키는 실내 맵과 그 자리. DQ5 트랙의 VRAM 칸 실측(실내 364맵 도착·보행, 전투 61벌, 특수 장면 35벌)에서
+# 그 맵과 그 맵에서 일어나는 장면이 쓰지도 가리키지도 않는 자리다. 전투는 70~7C 와 3C 를 쓰지 않으므로, 40~5C 자리에 둔
+# 맵만 전투를 시작할 때 78 로 옮긴다.
+MAP_SLOTS = ((0x00, 0x0A, FIELD), (0x32, 0x00, FIELD),
+             (0x01, 0x00, SPARE), (0x01, 0x01, SPARE), (0x02, 0x06, SPARE), (0x12, 0x00, SPARE), (0x1F, 0x00, SPARE),
+             (0x20, 0x00, SPARE), (0x21, 0x00, SPARE), (0x21, 0x05, SPARE), (0x21, 0x08, SPARE), (0x22, 0x00, SPARE),
+             (0x51, 0x54, SPARE),
+             (0x19, 0x00, 0x48), (0x19, 0x05, 0x48), (0x1A, 0x00, 0x48), (0x1C, 0x00, 0x48), (0x1F, 0x01, 0x48),
+             (0x19, 0x02, 0x4C))
 SHADOW = 0x7E0725                     # 바라는 BG3SC(게임의 그림자)
 SHOWN = 0x7E1ABC                      # 지금 $2109 에 든 BG3SC ^ 1C(0 이면 1C). 7E:1ABC~1ABF 는 메뉴 공용 창(1AC0~) 앞 빈자리
 BUFFER = 0x7E5000                     # BG3 타일맵 버퍼(00:8E1F 가 통째로 보내는 곳)
@@ -128,7 +130,7 @@ def build(base):
     line = add(bytes((0xC2, 0x20, 0xA9, 0xE0, 0x1C, 0x22, *long(r16),           # REP #$20 / LDA #$1CE0 / JSL r16
                       0x8F, 0x5E, 0x0F, 0x7E, 0x6B)))                          # STA $7E0F5E / RTL
     clear = add(clear_code())
-    table = add(b''.join(bytes(p) for p in USES_3C00) + b'\xff')
+    table = add(b''.join(bytes(p) for p in MAP_SLOTS) + b'\xff')
     third = bytes((0xBF, *long(table + 1), 0xCF, *long(0x7E00BD)))             # LDA table+1,X / CMP $7E00BD
     step = bytes((0xE8, 0xE8, 0xE8))                                            # INX / INX / INX
     pick = bytes((0xA9, INTERIOR, 0x80, 0x04, 0xBF, *long(table + 2)))          # 3C: LDA #$3C / BRA / 표: LDA table+2,X
@@ -141,7 +143,7 @@ def build(base):
     choose = add(bytes((0xAF, *long(0x7E00BE), 0x30, 0x04,                      # LDA $7E00BE / BMI 실내
                         0xA9, FIELD, 0x80, len(inner))) + inner + bytes((       # LDA #$78 / BRA 지우기로
                         0x22, *long(clear), 0x6B)))                             # JSL 새 자리 지우기 / RTL
-    # 48 에서 전투가 시작되면 그 자리에서 7800 을 채우고 BG3SC 를 바꾼다. 전투는 시작하고 16프레임 안에 4800 을 쓰는데,
+    # 40~5C 자리에서 전투가 시작되면 그 자리에서 7800 을 채우고 BG3SC 를 바꾼다. 전투는 시작하고 16프레임 안에 4000~5C00 을 쓰는데,
     # 화면이 켜져 있어(26:8030 에서 $2100 = 0F) 다음 전체 보내기까지 기다리면 그 그림이 BG3 로 보였다(09/00 을 48 로
     # 둔 시험 롬 실측). NMI 를 끄고 새 vblank 를 기다려, 화면을 끈 채 2KB 를 보낸다. 이 프레임의 NMI 는 건너뛴다.
     wait = bytes((0xAF, 0x12, 0x42, 0x00, 0x10, 0x03, 0xCA, 0xD0, 0xF7,       # LDA $4212 / BPL / DEX / BNE  vblank 밖까지
@@ -156,7 +158,8 @@ def build(base):
                   0xAF, 0x1D, 0x00, 0x00, 0x8F, 0x00, 0x21, 0x00,               # LDA $1D / STA $2100
                   0xAF, 0x1E, 0x00, 0x00, 0x8F, 0x00, 0x42, 0x00))              # LDA $1E / STA $4200
     battle = add(bytes((0x08, 0x78, 0xE2, 0x20, 0xAF, *long(SHADOW),            # PHP / SEI / SEP #$20 / LDA $7E0725
-                        0xC9, SHARED, 0xD0, len(to78))) + to78 + bytes((        # CMP #$48 / BNE 그대로(3C·78 은 전투가 안 씀)
+                        0xC9, 0x40, 0x90, 4 + len(to78), 0xC9, 0x60,            # CMP #$40 / BCC 그대로 / CMP #$60
+                        0xB0, len(to78))) + to78 + bytes((                      # BCS 그대로(3C·78·7C 는 전투가 안 씀)
                         0x28, 0x5C, *long(0x04E2A1))))                          # PLP / JML $04E2A1
     restore = add(bytes((0xAF, *long(SHOWN), 0x49, 0x1C, 0x8F, 0x09, 0x21, 0x00, 0x6B)))  # LDA $7E1ABC / EOR #$1C / STA $002109 / RTL
     sites = [(a, bytes((0x22, *long(full16 if a == FULL_SITE else store16))), old) for a, old in VMADD_SITES]
