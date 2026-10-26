@@ -94,14 +94,26 @@ if has sound; then
   say "소리"
   rm -rf "$OUT/sound"
   $PY $TOOLS/ndssound.py export "$OUT/sound"
-  for i in 0 1 2 3; do
-    $PY $TOOLS/ndssound.py scenes "$WORK/sc$i.json" --maps all --shard "$i/4" &
+  $PY $TOOLS/ndssound.py scorecheck "$OUT/sound"
+  # scenes 는 장 시작 세이브스테이트 work/state/dq4ds-ch*.state 에서 출발한다. 없을 때만 롬에서 만든다.
+  for c in ch0 ch1 ch2 ch3 ch4 ch5 ch6 ch6-psaro; do
+    if [[ ! -f work/state/dq4ds-$c.state ]]; then
+      $PY $TOOLS/ndswarp.py chapters work/state
+      break
+    fi
   done
-  wait
+  # scenes 는 결과 json 옆의 임시 폴더를 상대 경로로 받으면 세이브스테이트를 못 찾으므로 절대 경로로 준다.
+  pids=()
+  for i in 0 1 2 3; do
+    $PY $TOOLS/ndssound.py scenes "$PWD/$WORK/sc$i.json" --maps all --shard "$i/4" >"$WORK/sc$i.log" 2>&1 &
+    pids+=($!)
+  done
+  for pid in "${pids[@]}"; do wait "$pid"; done
   $PY $TOOLS/ndssound.py summary "$WORK/summary.json" "$WORK"/sc{0,1,2,3}.json
   $PY $TOOLS/ndssound.py gallery "$OUT/sound" --scenes "$WORK/summary.json"
   source_txt "$OUT/sound" "NDS DQ4 소리" \
     "$PY $TOOLS/ndssound.py export OUT/sound" \
+    "$PY $TOOLS/ndssound.py scorecheck OUT/sound   # 악보 json 으로 다시 만든 MIDI 가 .mid 와 같은지" \
     "$PY $TOOLS/ndssound.py scenes $WORK/scI.json --maps all --shard I/4   # I = 0 1 2 3" \
     "$PY $TOOLS/ndssound.py summary $WORK/summary.json $WORK/sc0.json $WORK/sc1.json $WORK/sc2.json $WORK/sc3.json" \
     "$PY $TOOLS/ndssound.py gallery OUT/sound --scenes $WORK/summary.json"
