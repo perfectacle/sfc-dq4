@@ -14,6 +14,7 @@
   effects    gfx/effects/anim/              dq5effectgif.py           MesenCE
   fxframes   gfx/effects/frames/            dq5scenes.py 덤프 → dq5fx.py --export   MesenCE
   title      gfx/screens/anim/              dq5titlegif.py            MesenCE
+  titlevm    gfx/screens/anim/title-opening-rom.gif   dq5titlevm.py(스냅숏만 MesenCE, 나머지는 롬 코드)   MesenCE
   motion     monsters/motion/               dq5monmotion.py, dq5scenes.py 장면    MesenCE
   soundpage  gallery/sound.html             dq5soundpage.py
   gallery    maps/ field/ monsters/ battlebg/ gfx/… 와 gallery/index.html·sprites.html   dq5gallery.py
@@ -44,8 +45,8 @@ PINNED = ['--Snes.RamPowerOnState=AllZeros', '--Snes.EnableRandomPowerOnState=fa
 SAVES = os.environ.get('MESENCE_SAVES') or os.path.join(os.path.expanduser('~'), 'Library', 'Application Support',
                                                         'MesenCE', 'Saves')
 SHIP_AT = 6800            # 전원부터 A 를 40프레임마다 누르면 6,500프레임 무렵 선실 장면이 끝나 조작할 수 있다(21A1 = 71)
-STEPS = ['sprites', 'samples', 'sound', 'score', 'effects', 'fxframes', 'title', 'motion', 'soundpage', 'gallery']
-MESEN_STEPS = {'sound', 'effects', 'fxframes', 'title', 'motion'}
+STEPS = ['sprites', 'samples', 'sound', 'score', 'effects', 'fxframes', 'title', 'titlevm', 'motion', 'soundpage', 'gallery']
+MESEN_STEPS = {'sound', 'effects', 'fxframes', 'title', 'titlevm', 'motion'}
 SHIP_STEPS = {'sound', 'effects', 'fxframes', 'motion'}
 FOLDERS = {
     'sprites': ['sprites'],
@@ -55,6 +56,7 @@ FOLDERS = {
     'effects': ['gfx/effects/anim'],
     'fxframes': ['gfx/effects/frames'],
     'title': ['gfx/screens/anim'],
+    'titlevm': ['gfx/screens/anim'],
     'motion': ['monsters/motion'],
 }
 
@@ -129,6 +131,8 @@ def run_step(step, rom, out, work, ship, env, jobs):
            *[os.path.join(dumps, k) for k in ('h', 'm', 'm2', 'p')], env=env)
     elif step == 'title':
         py(t + 'dq5titlegif.py', rom, '--out', out, env=env)
+    elif step == 'titlevm':
+        py(t + 'dq5titlevm.py', rom, '--out', out, env=env)
     elif step == 'motion':
         py(t + 'dq5scenes.py', rom, ship, '--motion', os.path.join(out, 'monsters', 'motion'),
            '--work', os.path.join(work, 'motion'), '--jobs', str(jobs), env=env)
