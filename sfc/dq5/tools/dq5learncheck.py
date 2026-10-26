@@ -16,6 +16,10 @@ from dq5learnwrite import FORMAT, dump
 from dq5map import Rom
 
 HERE = Path(__file__).resolve().parent
+# (몬스터 번호, 동료 종류, 동료 확률 등급) — 처음 레벨 1 인 スライムナイト 와 3 인 キメラ.
+JOINS = ((0x26, 7, 5), (0x5E, 17, 4))
+# 20:8000 bit0 이 합류 앞의 플래그·레벨 검사를 건너뛰고, 27:8162 워드 표가 등급마다 1/N 의 N 이다.
+JOIN_PATCH = '100000=01;{:06X}=0100'
 
 
 def require(ok, message):
@@ -42,7 +46,7 @@ def run(name, state, driver, rom, out, mesence, libdir, **options):
                 'SAVE', 'LATESET', 'TEST'):
         env.pop(key, None)
     env.update(LIBDIR=libdir, STATE=str(state), SHOT_DIR=str(dest), DRIVER=str(HERE / 'lua' / driver), **options)
-    lua = HERE / ('lua/dq5warp.lua' if name == 'prepare' else 'lua/dq5learncheck.lua')
+    lua = HERE / ('lua/dq5warp.lua' if driver == 'dq5warp.lua' else 'lua/dq5learncheck.lua')
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
         subprocess.run([str(mesence), '--testrunner', str(rom), str(lua), '--Snes.DisableFrameSkipping=true'],
                        env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=90)
@@ -103,6 +107,36 @@ def main():
                 hp, mp = int.from_bytes(ram[0x2042:0x2044], 'little'), int.from_bytes(ram[0x2044:0x2046], 'little')
             require(80 <= hp <= 100 and mp == 95, f'{name}: 베호이미 회복/MP 불일치 {hp}/{mp}')
             results.append({'case': name, 'spell': 0x28, 'hp_set': 5, 'hp_after': hp, 'mp_set': 100, 'mp_after': mp})
+        original_doc = dump(Rom(original.read_bytes()))
+        for monster, kind, grade in JOINS:
+            row = next(r for r in original_doc['characters'] if r['kind'] == 'monster' and r['index'] == kind)
+            first = row['learn'][0]
+            changed = {**first, 'field_slots': [1], 'battle_slots': [2]}
+            weak = out / f'join{kind}-weak.json'
+            save(weak, {'format': 'dq5tables/1', 'monsters': [{'id': f'{monster:02X}', 'HP': 1, '공격': 0, '민첩': 0}]})
+            command('dq5tables.py', original, 'patch', weak, '-o', out / f'join{kind}-weak.patch.json')
+            learn = out / f'join{kind}-learn.json'
+            save(learn, {'format': FORMAT, 'characters': [{'kind': 'monster', 'index': kind,
+                                                            'learn': [changed, *row['learn'][1:]]}]})
+            command('dq5learnwrite.py', original, 'patch', learn, '-o', out / f'join{kind}-learn.patch.json')
+            for label, manifests, entry in (('original', [f'join{kind}-weak.patch.json'], first),
+                                           ('patched', [f'join{kind}-weak.patch.json', f'join{kind}-learn.patch.json'], changed)):
+                target = out / f'join{kind}-{label}.sfc'
+                command('dq5build.py', original, 'build', *(out / m for m in manifests), '-o', target)
+                name = f'join{kind}-{label}'
+                start = run(f'{name}-prepare', state, 'dq5warp.lua', target, out, mesence, libdir, FIELD='341,56',
+                            BATTLE=f'{monster:02X}:1', SETTLE='300', SAVE='battle.mss', MAXF='1800')
+                dest = run(name, start / 'battle.mss', 'dq5battle.lua', target, out, mesence, libdir, MODE='join',
+                           MAXF='4000', LOOP='a:4,wait:20', ROMPATCH=JOIN_PATCH.format(0x138162 + grade * 2))
+                ram = (dest / 'final.wram').read_bytes()
+                records = [ram[0x2040 + k * 42:0x2040 + (k + 1) * 42] for k in range(4)]
+                joined = [r for r in records if r[0] == 0x80 | kind]
+                require(len(joined) == 1, f'{name}: 동료가 되지 않음')
+                mask = sum(1 << s for s in entry['field_slots']) | sum(1 << (s + 8) for s in entry['battle_slots'])
+                level, bits = joined[0][0x12], joined[0][0x23:0x26]
+                require(level == first['level'] and bits == mask.to_bytes(3, 'little'),
+                        f'{name}: 합류 레벨/습득 비트 불일치 {level} {bits.hex()}')
+                results.append({'case': name, 'monster': monster, 'kind': kind, 'level': level, 'learned_bits': bits.hex()})
         save(out / 'results.json', results)
         print(json.dumps(results, ensure_ascii=False))
         return 0

@@ -44,6 +44,15 @@ class LearnTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             encode(old, {})
 
+    def test_floor_is_join_level_for_monsters(self):
+        old = decode(parts())
+        moved = {'learn': [{'level': 3, 'field_slots': [0], 'battle_slots': []}]}
+        self.assertEqual(encode(old, moved, floor=3)['learn'], bytes([1, 3, 1, 0, 0]))
+        with self.assertRaises(ValueError):
+            encode(old, moved, floor=5)
+        self.assertEqual(encode(old, {'learn': [{'level': 1, 'field_slots': [0], 'battle_slots': []}]}, floor=1)['learn'],
+                         bytes([1, 1, 1, 0, 0]))
+
     def test_original_noop_and_guards(self):
         original = {('person', 0): parts()}
         with mock('dq5learnwrite.layout', return_value=original):
