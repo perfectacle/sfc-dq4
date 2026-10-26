@@ -42,6 +42,7 @@ uv run --locked krpatch nds unpack rom/dq4ds-kr.nds work/nds/kr
 | `ndsgfxfig.py` | `images/nds-gfx-*` 그림을 롬에서 다시 만듦 |
 | `ndssound.py` | 소리 묶음 읽기. `info` SDAT 목록, `export OUT` 으로 곡(원본 SSEQ·MIDI·합성 WAV)·효과음·샘플과 폴더별 `index.json`, `maps` 맵 곡 표, `scenes` 에뮬레이터로 장면마다 곡·효과음 요청 기록, `summary`·`gallery`. 결과는 비공개 에셋 저장소에만. [docs/sound-format.md](docs/sound-format.md) |
 | `ndsfigures.py` | `images/` 의 일지 그림을 다시 만듦 |
+| `build-desmume-watch.sh` | 메모리 감시를 넣은 desmume 코어를 빌드(`desmume-watch.patch` 를 커밋 `95b4d79` 에 적용). 쓰는 법은 [docs/debug.md](docs/debug.md#메모리-감시-코어) |
 | `ndsassets.sh` | 비공개 에셋 저장소의 `nds/dq4/` 전체를 롬에서 다시 만들고 동기화([아래](#에셋-다시-만들기)) |
 
 표는 [tables/](tables/) 에 있습니다. `kr-font.tsv` 는 한글 팬패치의 「일본어 코드 → 한글 음절」 표, `hangul-freq.json` 은 `draft` 가 쓰는 음절 빈도입니다.
