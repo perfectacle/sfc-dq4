@@ -13,6 +13,7 @@ from dq5map import Rom, lorom
 FORMAT = 'dq5learn/1'
 GROUPS = {'person': (11, 0x23B819, 0x23B978, 0), 'monster': (42, 0x23B979, 0x23BD53, 11)}
 TABLES = {'field': 0x23BD53, 'battle': 0x23BDBD}
+COMPANIONS = 0x23AED1
 
 
 def require(ok, message):
@@ -74,7 +75,7 @@ def dump(rom):
                                             for (kind, index), parts in layout(rom).items()]}
 
 
-def encode(old, change):
+def encode(old, change, floor=2):
     result = old | {k: v for k, v in change.items() if k in ('learn', 'field', 'battle')}
     for name in TABLES:
         values = result[name]
@@ -91,8 +92,9 @@ def encode(old, change):
         require(set(row) == {'level', 'field_slots', 'battle_slots'}, 'learn 항목의 필드가 빠짐')
         level = integer(row['level'], 1, 99, 'level')
         require(level > previous, '습득 레벨은 중복 없이 오름차순이어야 함')
-        # 습득 루틴은 레벨업 때만 같은 레벨을 찾으므로, 새로 레벨 1로 옮긴 항목은 배울 기회가 없다.
-        require(level != 1 or before['level'] == 1, '원본이 레벨 1이 아닌 항목은 레벨 1로 옮길 수 없음')
+        # 23:EB50 은 레벨이 오를 때와 동료가 될 때(21:81D5, 처음 레벨) 그 레벨의 항목만 찾는다.
+        # floor 보다 낮은 레벨로 새로 옮긴 항목은 배울 기회가 없다.
+        require(level >= floor or level == before['level'], f'레벨 {floor} 보다 낮게 옮긴 항목은 배울 기회가 없음(몬스터는 동료 표의 처음 레벨, 사람은 2)')
         previous = level
         mask = 0
         for name, shift in (('field', 0), ('battle', 8)):
@@ -121,7 +123,9 @@ def patch(rom, doc):
         index = integer(row.get('index'), 0, GROUPS[kind][0] - 1, 'index')
         key = kind, index
         require(key not in changes, '중복 인물')
-        changes[key] = encode(decode(original[key]), row)
+        # 사람의 합류 처리는 확인하지 못해 레벨 1 은 원본이 1 인 항목에만 허용한다.
+        floor = read(rom, COMPANIONS + index * 9, 1)[0] if kind == 'monster' else 2
+        changes[key] = encode(decode(original[key]), row, floor)
     users = {}
     for key, parts in original.items():
         for name, (address, raw) in parts.items():

@@ -36,7 +36,7 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5mapcompile.py rom extract BC BD\|compile 목록\|check` | 블록 배치 목록(`dq5mapsrc/1`, `[x, y, 블록]` 을 칠하는 순서대로)을 put·block·fill 명령의 `dq5map/1` 로 컴파일. `extract` 는 기존 맵을 목록으로, `check` 는 364개 맵을 목록 → 명령으로 다시 만들어 셀 버퍼(슬롯을 CHR 로 되돌림)를 견줌. 형식은 [dq5-build-format.md](../docs/dq5-build-format.md#블록-배치-목록-dq5mapsrc1) |
 | `dq5mapwrite.py rom dump BC BD\|check\|patch` | 실내 맵 레코드 쓰기: 맵 레코드(머리·배치 명령·속성 패스)를 `dq5map/1` JSON 으로 풀고(`dump`), 다시 싸서 늘린 롬에 놓고 맵 포인터를 바꾸는 `dq5patch/1` 목록으로(`patch … -o`, `--at`, `--in-place`). `check` 는 364개 맵을 풀고 다시 싸 원래 바이트와 견줌. 형식은 [dq5-build-format.md](../docs/dq5-build-format.md#실내-맵-레코드-dq5map1) |
 | `dq5learnwrite.py rom dump\|patch\|check` | 53종의 주문 습득 레벨·슬롯과 필드/전투 목록. 기존 길이·공유 바이트 보존. [입력 형식](../docs/dq5-data-format.md#주문-습득인물별-주문-목록-쓰기) |
-| `dq5learncheck.py rom --state 선실` | 레벨업 습득과 필드·전투 주문 사용 실측. `MESENCE` 필요 |
+| `dq5learncheck.py rom --state 선실` | 레벨업 습득, 필드·전투 주문 사용, 몬스터 2종의 합류 습득(원본·변경) 실측. `MESENCE` 필요 |
 | `dq5progresswrite.py rom dump\|patch\|check` | 성장53개·조우구역85개·상점48목록·메달/코인 교환값 고정 표. `dq5progress/1` JSON으로 일부필드만 원위치 편집, 키·품목수·미사용비트 보존. [쓰기 형식](../docs/dq5-build-format.md#성장조우상점-dq5progress1) |
 | `dq5progresscheck.py rom --state 상태 --out 폴더` | MesenCE로 성장·조우·상점 쓰기 실측 3건을 재현. 레벨업 능력치·다음 경험치, 조우 구역·몬스터·마릿수, 상점 품목·가격을 비교. `MESENCE` 필요 |
 | `dq5tables.py rom export\|patch\|check` | 게임 데이터 표 쓰기: 몬스터·물건·주문·피해량·동료 몬스터 표를 필드 이름이 붙은 JSON(`dq5tables/1`)으로 내보내고(`export -o`), 고친 JSON(일부 항목·필드만 있어도 됨)을 `dq5patch/1` 목록으로(`patch … -o`), `check` 로 붙인 롬을 다시 읽어 확인. 형식은 [dq5-build-format.md](../docs/dq5-build-format.md#게임-데이터-표-dq5tables1) |

@@ -17,7 +17,7 @@ emu.addEventCallback(function()
     emu.write(0x7E2066, 1, m)
     emu.write(0x7E2067, 0, m)
     emu.write(0x7E2068, 0, m)
-  else
+  elseif os.getenv('MODE') ~= 'join' then
     local bits = os.getenv('LEARNED')
     for i = 0, 2 do
       emu.write(0x7E2063 + i, tonumber(bits:sub(i * 2 + 1, i * 2 + 2), 16), m)
