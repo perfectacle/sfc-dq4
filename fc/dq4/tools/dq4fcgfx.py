@@ -9,6 +9,8 @@
       항목에 ppulog(fcgfxscroll.lua 의 ppulog.txt)·mirror(v|h)·frame 을 주면 그 프레임의 줄 스크롤로 화면을 그려 견줌
   python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes verify DIR... [--mask-sprites]  롬만으로 그린 화면과 end.png 를 픽셀로 비교
   python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes gallery OUT            OUT/gallery/index.html 만 다시
+  python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes nds ROOT               NDS_PLACES 를 NDS 판 필드 기호 자리와 다시 대조(ROOT 는
+      `krpatch nds unpack` 으로 푼 NDS 일본판 폴더). 표와 다른 그룹이 있으면 1로 끝남
 
 출력은 롬 그래픽이라 공개 저장소에 커밋하지 않는다(비공개 에셋 저장소나 work/ 에만).
 맵은 칸마다 제 블록으로 그린다(게임은 주인공과 다른 구역을 블록 20·21 로 가리지만 참고용 그림에서는 다 보이게).
@@ -33,6 +35,7 @@ import dq4chest  # noqa: E402
 import dq4data  # noqa: E402
 import dq4field  # noqa: E402
 import dq4map  # noqa: E402
+import dq4npcblock  # noqa: E402
 import dq4talk  # noqa: E402
 import dq4text  # noqa: E402
 
@@ -159,21 +162,23 @@ def place_table(prg, data):
     2. 'talk': 그 그룹 인물 대사(낮·밤, 조건 갈래 전부)에서 「ここは」「ようこそ」 뒤 30글자 안에 이름표의 이름이 처음
        나온 것. 뒤에 「ほこら」「どうくつ」가 이어지면 붙인다(예: 「ここは エンドールに つうじる たびのほこら」).
     3. 'talk-phrase': 「ここは X」의 X(끝의 だ·です 따위를 떼고)가 장소 이름씨(PLACE_NOUN)로 끝나거나 가타카나가 든
-       8글자 이하이면 그중 가장 짧은 것(예: 13 「サラン」, 20 「きこりのいえ」).
+       8글자 이하이면 그중 가장 짧은 것(예: 13 「サラン」, 20 「きこりのいえ」). 인물 블록 명령 26 의 메시지(block_msgs)도
+       같이 보고, 그 X 가 블록 메시지에서만 나왔으면 'block-phrase'(예: 2C 「てんくうのとう」).
     4. 'talk-kind': 「この とう」「この どうくつ」처럼 그 장소를 가리키는 말만 있으면 그 말(이름이 아니라 갈래).
     4.5 'talk-dir': 다른 그룹 대사의 「きたの どうくつ」처럼 방위로 가리키는 말을 필드 자리로 이어 붙인다(dir_names).
     5. 'link': 남은 그룹이 필드를 거치지 않는 출구(place_links)로 1~3 의 이름이 붙은 그룹과 이어져 있으면 가장 가까운
        그룹의 이름. 거리가 같은데 이름이 다른 그룹이 있으면 붙이지 않는다. 'via' 에 거쳐 간 출구를 적는다
-       (예: 2C 「てんくうじょう」 ← 2C/10 (03,05) → 2D/00). 4 는 갈래라 퍼뜨리지 않는다.
+       (예: 34 「アッテムト」 ← 0A/00 (0A,03) → 34/00). 4 는 갈래라 퍼뜨리지 않는다.
+    5.5 'nds': 롬 글자에 이름이 더 없는 그룹은 NDS 판 지명(NDS_PLACES)을 받는다. 'nds' 에 지명 번호를 적는다.
     6. 'near': 그래도 남은 그룹은 이름이 아니라 자리 표시다. 필드 입구(dq4field.entrances)가 있으면 같은 필드에서
        1~3 의 이름이 붙은 그룹 입구 중 가장 가까운(맨해튼 거리) 것의 이름에 「ちかく」를 붙이고 'near' 에
        (필드, X, Y, 거리, 그 그룹)을 적는다. 가장 가까운 것이 둘 이상이고 이름이 다르면 붙이지 않는다.
-    7. 'link': 필드 입구가 없는 그룹은 5 와 같이 출구로 이어진 가장 가까운 6 의 그룹 이름을 받는다.
-    6·7 은 게임 속 이름이 아니라서 'label' 을 켜 두고, 파일 이름에는 쓰지 않는다(에셋 저장소 규칙).
+    7. 'link': 필드 입구가 없는 그룹은 5 와 같이 출구로 이어진 가장 가까운 5.5·6 의 그룹 이름을 받는다.
+    5.5~7 은 롬에 없는 이름이라 'label' 을 켜 두고, 파일 이름에는 쓰지 않는다(에셋 저장소 규칙).
     못 찾은 그룹은 넣지 않는다."""
     rom = dq4text.Rom(data)
     names = place_list(prg)
-    text, said = {}, {}
+    text, said, said_block = {}, {}, {}
     for g, k, *_ in all_maps(prg):
         for night in (False, True):
             for r in dq4talk.npc_list(prg, g, k, night):
@@ -181,6 +186,12 @@ def place_table(prg, data):
                     t = msg_text(rom, msg).replace('　', '').replace(' ', '').replace('\n', '')
                     text.setdefault(g, []).append(t)
                     said.setdefault(g, {}).setdefault(msg, t)
+    for g, msgs in sorted(block_msgs(prg).items()):
+        for msg in sorted(msgs):
+            t = msg_text(rom, msg).replace('　', '').replace(' ', '').replace('\n', '')
+            text.setdefault(g, []).append(t)
+            said.setdefault(g, {}).setdefault(msg, t)
+            said_block.setdefault(g, set()).add(t)
     out = {}
     for e in dq4field.places(prg):
         if e['name'] and e['group'] is not None:
@@ -201,23 +212,86 @@ def place_table(prg, data):
                 break
         if g in out:
             continue
-        phrases = set()
+        phrases = {}
         for t in text[g]:
             for m in re.finditer(r'ここは([^。！？…]{1,24})', t):
                 x = re.sub(COPULA, '', m.group(1))
                 if re.search(PLACE_NOUN + '$', x) or (re.search(r'[ァ-ヴ]', x) and len(x) <= 8):
-                    phrases.add(x)
+                    phrases.setdefault(x, set()).add(t)
         if phrases:
-            out[g] = {'name': min(phrases, key=lambda x: (len(x), x)), 'src': 'talk-phrase'}
+            x = min(phrases, key=lambda x: (len(x), x))
+            block = phrases[x] <= said_block.get(g, set())
+            out[g] = {'name': x, 'src': 'block-phrase' if block else 'talk-phrase'}
             continue
         kinds = {m.group(1) for t in text[g] for m in re.finditer(r'この(とうだい|とう|どうくつ|ほこら)', t)}
         if kinds:
             out[g] = {'name': min(kinds, key=lambda x: (len(x), x)), 'src': 'talk-kind'}
     out.update(dir_names(prg, said, out))
     out.update(link_names(prg, out))
+    out.update({g: {'name': n, 'src': 'nds', 'nds': num, 'label': True}
+                for g, (num, n) in NDS_PLACES.items() if g not in out})
     out.update(near_names(prg, out))
-    out.update({g: v | {'label': True} for g, v in link_names(prg, out, ('near',)).items()})
+    out.update({g: v | {'label': True} for g, v in link_names(prg, out, ('nds', 'near')).items()})
     return out
+
+
+# 롬 글자에 이름이 없는 그룹의 NDS 판 지명: 그룹 → (DEBUG/fieldsymbol.dat 번호, 머리글자·괄호를 뗀 지명).
+# 그 지명 기호가 NDS 필드에서 이 그룹 필드 입구와 같은 자리(4칸 안)에 있다. `nds ROOT` 명령이 다시 대조한다.
+NDS_PLACES = {
+    0x18: (25, 'ボンモール北の村'), 0x1C: (87, '古井戸の底'), 0x21: (51, '砂漠の宿屋'), 0x22: (27, 'メダル王の城'),
+    0x23: (72, 'ミントス東のほこら'), 0x24: (68, '島の老人の家'), 0x25: (47, '王家の墓'),
+    0x27: (103, '南西　結界のほこら'), 0x28: (104, '南東　結界のほこら'), 0x29: (105, '北西　結界のほこら'),
+    0x2A: (101, '掛け橋の塔'), 0x2B: (77, '魔神像'), 0x33: (106, '北東　結界のほこら'), 0x35: (28, '海鳴りのほこら'),
+    0x37: (31, 'ガーデンブルグ南の洞くつ'), 0x3C: (85, '闇の洞くつ'), 0x3F: (57, '裏切りの洞くつ'), 0x43: (108, '山'),
+    0x44: (76, 'リバーサイド北西のほこら'), 0x45: (107, 'デスキャッスル'), 0x47: (83, 'つの笛のほこら'),
+}
+# FC 필드 번호 → NDS 필드 지도(FIELD/bin). 필드 2 는 입구가 없다.
+NDS_FIELDS = {0: 'worldmap', 1: 'gotmap', 3: 'yamimap'}
+
+
+def nds_symbols(root):
+    """NDS 일본판 필드 지도마다 기호 [(지명 번호, 칸 X, 칸 Y, 보이는지)]과 지명 {번호: 머리글자를 뗀 이름}.
+    기호 자리는 SDAT 의 필드 픽셀(nds/dq4/docs/graphics-format.md)을 16으로 나눈 칸이다. 그림 18 은 화면에 그리지 않는
+    자리(같은 곳의 다른 층·루ーラ 도착 자리 따위)다."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'nds' / 'dq4' / 'tools'))
+    import ndsgfx
+    data = Path(root) / 'data' / 'data'
+    names = {}
+    for line in (data / 'DEBUG' / 'fieldsymbol.dat').read_bytes().decode('shift_jis').splitlines():
+        n, v = line.split(',', 1)
+        v = re.sub(r'^[A-Z]{2}(（[A-Z]+）|\([A-Z]+\))?', '', v)
+        names[int(n)] = re.sub(r'（[^）]*）$', '', v)
+    syms = {}
+    for f, stem in NDS_FIELDS.items():
+        b = (data / 'FIELD' / 'bin' / f'{stem}.bin').read_bytes()
+        syms[f] = [(p, x / 16, y / 16, pic != 18) for _, pic, p, x, y, _, _ in ndsgfx.sdat(b) if p in names]
+    return syms, names
+
+
+def nds_match(prg, root):
+    """필드마다 FC 입구와 NDS 기호의 어긋남(정수 칸)을 보이는 기호까지 거리의 중앙값이 가장 작게 고르고, 그룹마다 가장 가까운
+    기호를 찾는다. 보이는 기호가 4칸 안에 없을 때만 그림 18 자리를 본다. 돌려주는 것: {필드: 어긋남},
+    {그룹: (거리, 지명 번호)}."""
+    syms, _ = nds_symbols(root)
+    ents = dq4field.entrances(prg)
+    offs, out = {}, {}
+    for f, ss in syms.items():
+        es = [(e[0], e[1], e[2]) for e in ents if (e[7] or 0) == f]
+        vis = [s for s in ss if s[3]]
+
+        def cost(o):
+            d = sorted(min(abs(sx - o[0] - x) + abs(sy - o[1] - y) for _, sx, sy, _ in vis) for _, x, y in es)
+            return d[len(d) // 2], o
+        span = range(-5, 6) if f == 0 else range(-80, 81)
+        offs[f] = min(cost((ox, oy)) for ox in span for oy in span)[1]
+        ox, oy = offs[f]
+        for g, x, y in es:
+            for pool in (vis, ss):
+                d, p = min((abs(sx - ox - x) + abs(sy - oy - y), p) for p, sx, sy, _ in pool)
+                if d <= 4:
+                    out[g] = min(out.get(g, (99, 0)), (d, p))
+                    break
+    return offs, out
 
 
 DIRS = {'ひがし': (1, 0), 'にし': (-1, 0), 'みなみ': (0, 1), 'きた': (0, -1)}
@@ -304,7 +378,7 @@ def place_links(prg):
     return adj
 
 
-NAMED = ('rula', 'talk', 'talk-phrase')
+NAMED = ('rula', 'talk', 'talk-phrase', 'block-phrase')
 
 
 def link_names(prg, names, srcs=NAMED):
@@ -335,6 +409,18 @@ def link_names(prg, names, srcs=NAMED):
             via.append(f'{a:02X}/{b:02X} ({x:02X},{y:02X}) → {c:02X}/{k:02X} {src}')
             h = prev[h]
         out[g] = {'name': names[found[0]]['name'], 'src': 'link', 'via': via[::-1]}
+        if 'nds' in names[found[0]]:
+            out[g]['nds'] = names[found[0]]['nds']
+    return out
+
+
+def block_msgs(prg):
+    """그룹마다 인물 블록(맵 목록·이벤트 목록) 명령 26 이 띄우는 메시지 번호. 말을 걸지 않아도 자리에 서면 나오는 대사다."""
+    out = {}
+    for name, bank, _, _, a, ln, _ in dq4npcblock.all_blocks(prg):
+        for _, bs, _, bad in dq4npcblock.decode(prg, bank, a, ln):
+            if bs[0] == 0x26 and not bad:
+                out.setdefault(int(name[:2], 16), set()).add(bs[2] << 8 | bs[1])
     return out
 
 
@@ -379,6 +465,8 @@ def map_records(prg, names):
         if 'near' in names.get(g, {}):
             f, x, y, d, h = names[g]['near']
             rec['name_near'] = {'field': f, 'x': x, 'y': y, 'distance': d, 'group': h}
+        if 'nds' in names.get(g, {}):
+            rec['name_nds'] = {'place': names[g]['nds'], 'list': 'DEBUG/fieldsymbol.dat'}
         out.append(rec)
     return out
 
@@ -1149,6 +1237,17 @@ def main():
             im = annotate(im, annotations(prg, m.g, m.k))
         im.save(a[5])
         return
+    if cmd == 'nds':
+        offs, got = nds_match(prg, a[3])
+        _, nds_names = nds_symbols(a[3])
+        print('필드 어긋남(NDS 칸 − FC 칸):', ', '.join(f'{f} {o}' for f, o in sorted(offs.items())))
+        bad = 0
+        for g, (num, name) in sorted(NDS_PLACES.items()):
+            d, p = got.get(g, (None, None))
+            ok = p == num and nds_names.get(p) == name
+            bad += not ok
+            print(f'{g:02X} {num:3} {name}  {"같음" if ok else "다름"}: 가장 가까운 기호 {p} {nds_names.get(p, "-")} 거리 {d}')
+        sys.exit(1 if bad else 0)
     if cmd == 'gallery':
         gallery(a[3])
         source_txt(a[3], 'gallery', 'uv run --locked python fc/dq4/tools/dq4fcgfx.py rom/dq4.nes gallery $OUT', data)
