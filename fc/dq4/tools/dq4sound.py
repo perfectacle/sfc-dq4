@@ -1119,6 +1119,20 @@ def cmd_nsf(prg, args):
     print(' '.join(f'{i + 1}={n:02X}' for i, n in enumerate(tracks)))
 
 
+def frame_counter_phase(logged, frame):
+    """MesenCE 의 frameCounter.previousCycle 은 마지막으로 지난 단계의 자리(5단계: 0·7458·14914·22372·29829)만 알려 준다.
+    프레임마다 그 값이 이어지는 꼴과 맞는 첫 프레임 끝의 자리(클록)를 찾는다. 맞는 것이 여럿이면 가운데 값."""
+    steps = [0, 7458, 14914, 22372, 29829]
+
+    def last(x):
+        return max(v for v in steps if v <= x)
+    ok = []
+    for phi in range(37282):
+        if all(v is None or last((phi + k * frame) % 37282) == v for k, v in enumerate(logged)):
+            ok.append(phi)
+    return float(ok[len(ok) // 2]) if ok else float(logged[0] or 0)
+
+
 def cmd_apucheck(prg, args):
     """lua/apustate.lua 의 apu.txt 에서 게임의 APU 쓰기(W)를 합성기(dq4apu)에 그대로 넣고, 프레임 끝마다 채널 상태가
     MesenCE 의 채널 상태(F)와 같은지 본다. 채널마다 음량 레지스터와 주기 상위 레지스터를 모두 쓴 프레임부터 견주고,
@@ -1149,13 +1163,14 @@ def cmd_apucheck(prg, args):
         live, bad, n, seen = set(), {}, 0, set()
         fs = sorted(states)
         if fs[0] in fcs:
-            apu.fc = float(fcs[fs[0]])
+            apu.fc = frame_counter_phase([fcs.get(f) for f in fs], dq4apu.FRAME)
         for fr in range(fs[0], fs[-1]):
+            apu.run(dq4apu.WRITE_AT)
             for a, v in writes.get(fr, []):
                 apu.write(a, v)
                 seen.add(a)
             live |= {c for c, regs in need.items() if regs <= seen}
-            apu.run(dq4apu.FRAME)
+            apu.run(dq4apu.FRAME - dq4apu.WRITE_AT)
             real = states.get(fr + 1)
             if real is None:
                 continue

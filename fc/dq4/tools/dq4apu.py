@@ -1,7 +1,7 @@
 """FC APU(2A03) 의 펄스 2·삼각파·노이즈를 프레임마다의 레지스터 쓰기로 합성해 PCM 으로 낸다.
 
 dq4sound.py 의 Run.frames(프레임마다 [(주소, 값)…], 드라이버를 그대로 돌린 APU 쓰기)를 받아 쓴다. DQ4 는 DMC 를 쓰지 않으므로
-DMC 는 없다. 쓰기는 그 프레임의 처음(NMI)에 한꺼번에 일어난 것으로 둔다.
+DMC 는 없다. 한 프레임의 쓰기는 프레임이 시작하고 WRITE_AT 클록 뒤(NMI 안의 드라이버)에 한꺼번에 일어난 것으로 둔다.
 
 - 프레임 카운터: $4017 bit7 = 1(5단계, DQ4 드라이버의 초기화 값)이면 37282 클록마다 1/4 프레임 4번(7457·14913·22371·37281),
   1/2 프레임 2번(14913·37281). 0 이면 29830 클록에 4번(7457·14913·22371·29829), 1/2 은 14913·29829.
@@ -18,6 +18,9 @@ import numpy as np
 
 CPU = 1789773
 FRAME = CPU / 60.0988          # NMI 사이 클록 수(약 29780.6)
+# 프레임 끝(MesenCE 의 endFrame)에서 드라이버가 APU 를 쓰기까지의 클록. NMI 가 화면 일을 먼저 하므로 늦다.
+# 스윕을 쓰는 효과음 A8·B1·92 의 MesenCE 채널 상태와 견줘 1000~2000 이면 모두 맞아 그 가운데로 둔다
+WRITE_AT = 1500
 LENGTHS = [10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14, 12, 26, 14,
            12, 16, 24, 18, 48, 20, 96, 22, 192, 24, 72, 26, 16, 28, 32, 30]
 NOISE_PERIODS = [4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068]
@@ -298,9 +301,10 @@ def render(frames, rate=44100, tail=0):
     apu.write(0x4005, 0x88)
     chunks = []
     for ws in list(frames) + [[]] * tail:
+        chunks.append(apu.run(WRITE_AT))
         for a, v in ws:
             apu.write(a, v)
-        chunks.append(apu.run(FRAME))
+        chunks.append(apu.run(FRAME - WRITE_AT))
     x = np.concatenate(chunks)
     x = x[:len(x) // OVER * OVER].reshape(-1, OVER).mean(axis=1)
     return filters(x, rate)
