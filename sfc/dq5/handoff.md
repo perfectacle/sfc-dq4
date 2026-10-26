@@ -46,6 +46,8 @@ git worktree list
 
 `dq5talkwrite.py`(`dq5talk/1`)와 실측 도구 `dq5talkcheck.py`로 마쳤습니다([일지](journal/2026-10-27-20-talkwrite.md), [쓰기 형식](docs/dq5-build-format.md#대화-스크립트-dq5talk1)). 원본 574개·11,727바이트 쓰기 0개, 단위 검사 17개, 변경 롬 네 벌과 원본에서 파파스에게 말을 건 12장면의 메시지 순서·묶음 시작·플래그가 기대와 같았습니다. 스크립트는 데이터 뱅크 06 고정이라 늘린 뱅크에 두지 않고, 길어진 묶음은 `--at 06:FE10`(뱅크 06 의 유일한 빈 자리 496바이트)이나 `--repack` 으로 옮깁니다. 대화 번호 → 스크립트는 계산이라 바꿀 표가 없고, 인물의 대화 번호는 `dq5npcrecord.py` 의 `talk` 필드로 바꿉니다. 실측 결과 `work/talkcheck/`는 원래 체크아웃 `work/dq5-talkwrite/`에 복사해 둡니다.
 
+대화 번호 `900`~`FFF` 에 스크립트를 덧붙이는 쓰기를 더했습니다(`--extra-at` 뱅크 30~3F, `--hook-at` 뱅크 06 루틴 84바이트, [일지](journal/2026-10-27-53-talkgrow.md)). `06:AF7B`·`B04F`·`B05D`·`B136` 네 자리를 루틴으로 돌리며, `dq5talkgrowcheck.py` 로 원래 뱅크의 같은 스크립트·원본 롬·02/06 인물 레코드 연결 5비교가 메시지와 플래그까지 같았습니다. 남은 것은 덧붙인 뱅크에서 BRK 조회 조건의 거짓 갈래입니다.
+
 ### 처리 루틴 연결·필드 주문 쓰기
 
 `dq5spellfx.py`(`dq5spellfx/1`)와 실측 도구 `dq5spellfxcheck.py`로 마쳤습니다([일지](journal/2026-10-27-27-spellfx.md), [쓰기 형식](docs/dq5-build-format.md#처리-루틴-연결필드-주문-dq5spellfx1)). 원본 쓰기 0개, 합성 테스트 7개, 변경 롬 아홉 벌과 원본에서 15회(メラ 양·내성·처리 루틴, ラリホー 성공 값, 전투 ホイミ 양, 필드 ホイミ MP·회복·처리기, ラナルータ MP)를 확인했습니다. 처리 루틴은 실행 루틴과 원래 짝인 것만 받습니다(`--raw`). AI 표·작전·학습 배율 쓰기는 이어서 합니다. 실측 결과 `work/spellfxcheck/`는 원래 체크아웃 `work/dq5-spellfx/`에 복사해 둡니다.
@@ -53,10 +55,6 @@ git worktree list
 ### 작전 AI 표 쓰기
 
 `dq5aiwrite.py`(`dq5ai/1`)와 실측 도구 `dq5aicheck.py`로 마쳤습니다([일지](journal/2026-10-27-43-aiwrite.md), [쓰기 형식](docs/dq5-build-format.md#작전-ai학습-배율내성-배율갑옷-원소-dq5ai1)). 원본 쓰기 0개, 합성 테스트 4개, 변경 롬 17벌과 원본에서 AI 가 고른 행동 15건·メラ 피해·갑옷이 빼는 양을 견주었습니다. 받는 칸은 게임에서 효과가 바뀐 것뿐이고, 나머지는 todo 의 질문으로 남겼습니다. 전투 MP 를 바꾸면 AI MP(`mp`)도 함께 적습니다. 실측 결과 `work/aicheck/`는 원래 체크아웃 `work/dq5-aiwrite/`에 복사해 둡니다.
-
-### 그림 번호 A9 이상
-
-`dq5picturegrow.py`(`dq5pictures/1`)와 실측 도구 `dq5picturegrowcheck.py`로 마쳤습니다([일지](journal/2026-10-27-53-picturegrow.md), [쓰기 형식](docs/dq5-build-format.md#인물-그림-번호-표-늘리기-dq5pictures1)). 그림 표를 `--at` 에 256개까지 옮기고 `1E:DC67` 의 물체 판정을 표로 바꿉니다. 말 걸기 목록 `05:862F` 도 함께 옮겨 그림마다 `talk_skip` 으로 고릅니다. 원본 왕복, 합성 테스트 5개, 02/06 5장면(그림 `A9` 가 원래 롬에서는 말을 걸 수 없고 늘린 표에서는 걸림, 물체·`talk_skip` 이면 막힘)을 확인했습니다. 기존 그림의 세트 잇기는 `dq5spritewrite.py` 의 `gfx` 이고, 표를 옮긴 빌드에서는 이 도구의 문서로 적습니다. 실측 결과 `work/picturegrowcheck/`는 원래 체크아웃 `work/dq5-picturegrow/`에 복사해 둡니다.
 
 ### 3. 병합과 후속 도구
 
