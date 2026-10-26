@@ -102,6 +102,7 @@ uv run --locked python sfc/dq5/tools/dq5build.py rom/dq5.sfc fromrom work/hangul
 | `dq5monwrite.py` | 전투 몬스터 그림(제자리 또는 `--at` 과 24비트 머리 포인터 표)·몬스터 레코드 그림 번호·색 | `dq5monster/1` JSON + 색 번호 PNG |
 | `dq5battlebgwrite.py` | 전투 배경 그림·목록·팔레트 레코드와 포인터 표 셋, 배경 번호 값 | `dq5battlebg/1` JSON + 그림 `.bin` |
 | `dq5mapgfxwrite.py` | 실내 맵 CHR·CHR 팔레트 니블·BG 팔레트 줄·블록 정의 | `dq5mapgfx/1` JSON + `chr.bin` |
+| `dq5objpalette.py` | 필드 OBJ 팔레트 0~7 색·맵 팔레트(`01:9A12`) 색·세트 팔레트 배정 | `dq5objpalette/1` JSON |
 | `dq5spellfx.py` | 전투 행동의 처리 루틴 연결·첫머리 양/성공 값/내성 칸, 필드 주문의 처리기·MP·회복량 | `dq5spellfx/1` JSON |
 | `dq5aiwrite.py` | 행동·물건 AI 레코드, 작전 레코드, 학습 배율 표 셋, 내성 단계 배율, 갑옷 원소 표 | `dq5ai/1` JSON |
 | `dq5maphook.py` | 맵별 루틴 표 항목(맵 고르기·플래그 조건·루틴 주소)과 표 다시 쓰기(뱅크 15 밖은 로더 DB 스텁과 함께), `15:FF5C` 셀 읽기 루틴 표 | `dq5maphook/1`·`dq5cellhook/1` JSON |
@@ -1705,6 +1706,50 @@ uv run --locked python sfc/dq5/tools/dq5newgame.py rom/dq5.sfc check
 ```sh
 uv run --locked python sfc/dq5/tools/dq5newgamecheck.py rom/dq5.sfc --out work/newgamecheck
 ```
+
+### OBJ 팔레트·세트 팔레트 배정 (`dq5objpalette/1`)
+
+`dq5objpalette.py` 는 필드 OBJ 팔레트의 색, 맵마다 덮는 16색 줄(`01:9A12`)의 색, 인물 세트가 쓰는 OBJ 팔레트 번호를 고칩니다. 맵을 불러올 때 `01:93AE` 가 `1F:D45F` 를 불러 `04:96D6` 의 256바이트(OBJ 팔레트 0~7, 16색씩)를 CGRAM 사본 `7E:3A14` 로 옮기고, 이어 `01:93B2` → `01:996A` 가 맵 줄을 덮습니다(코드 읽기). 세트는 레코드 `+2` bit6-7 로 OBJ 팔레트 0~3 을 고릅니다([그래픽 형식의 「팔레트」](dq5-graphics-format.md#팔레트)).
+
+```sh
+uv run --locked python sfc/dq5/tools/dq5objpalette.py rom/dq5.sfc dump -o work/objpalette.json
+uv run --locked python sfc/dq5/tools/dq5objpalette.py rom/dq5.sfc patch work/objpalette.json -o work/objpalette.dq5patch.json
+uv run --locked python sfc/dq5/tools/dq5objpalette.py rom/dq5.sfc check work/objpalette.json
+```
+
+```json
+{"format": "dq5objpalette/1",
+ "palettes": [{"palette": 1, "colors": [15개]}],
+ "map_palettes": [{"index": 13, "colors": [15개]}],
+ "sets": [{"set": "84", "palette": 2}]}
+```
+
+- `palettes` 는 OBJ 팔레트 0~7 의 색 1~15 입니다(0 번은 투명이라 두지 않음). `dump` 는 팔레트 0~3 마다 그 팔레트를 쓰는 세트와 그림 번호(`users`)를 적습니다. 원본은 팔레트 0 을 98세트, 1 을 40세트, 2 를 7세트, 3 을 2세트가 씁니다. `patch` 는 바꾼 팔레트를 쓰는 세트를 출력합니다.
+- `map_palettes` 는 `01:9A12` 의 기존 항목 36개의 색 1~15 입니다. 맵·조건·줄 번호는 바꾸지 않습니다. 줄 `08`~`0F` 이 OBJ 팔레트 0~7 이고, 원본 항목의 줄은 `01`·`06`(BG)과 `08`·`09`·`0A`·`0B`·`0C`·`0F`(OBJ 팔레트 0·1·2·3·4·7)입니다. OBJ 팔레트 색을 바꿔도 그 줄을 덮는 맵에서는 맵 팔레트 색이 보이므로, `patch` 가 그런 맵을 함께 출력합니다.
+- `sets` 는 세트가 쓰는 OBJ 팔레트(0~3)입니다. 레코드 `+2` 의 아래 6비트(자료 뱅크)는 그대로 둡니다.
+- **세트마다 고유 팔레트는 아직 안 됩니다.** 레코드의 팔레트 칸이 2비트라 세트는 팔레트 0~3 만 고를 수 있습니다. 팔레트 4~7 은 같은 256바이트로 불러오지만 세트가 고를 수 없습니다. 맵마다 다른 색이 필요하면 그 맵의 `01:9A12` 항목이 OBJ 줄을 덮게 합니다(지금은 기존 항목의 색만 바꿈).
+
+`check` 는 원본 전체를 내보내 다시 패치해 쓰기가 0개인지, 빌드한 롬을 다시 읽어 패치해도 쓰기가 남지 않는지, 팔레트 밖의 세트 레코드가 그대로인지 봅니다.
+
+`dq5objpalettecheck.py` 는 02/06 의 밤 인물 둘을 낮으로 세운 롬에서 비교합니다. 세트 `04` 는 팔레트 1, `84` 는 팔레트 0 이었습니다. 고친 롬은 다음 셋을 바꿨습니다.
+
+- OBJ 팔레트 1 의 색
+- 세트 `84` 를 팔레트 2 로
+- 04/06 의 맵 팔레트(13번, OBJ 팔레트 3 줄) 색
+
+원본 롬과 함께 02/06·04/06 에 들어가 덤프했습니다.
+
+```sh
+MESENCE="$MESENCE" uv run --locked python sfc/dq5/tools/dq5objpalettecheck.py rom/dq5.sfc \
+  --state work/state/ship.mss --out work/objpalettecheck
+```
+
+```
+edited-0206 f00780: CGRAM OBJ 줄 0~7 같음 8/8, OAM 묶음 4/4, 세트 00 04 82 84
+edited-0406 f00780: CGRAM OBJ 줄 0~7 같음 8/8, OAM 묶음 1/1, 세트 82
+```
+
+고친 롬은 덤프 셋 모두 CGRAM OBJ 줄 0~7 이 고친 `04:96D6` 과 같았습니다(04/06 의 줄 `0B` 는 고친 맵 팔레트). 02/06 의 OAM 묶음 4개는 세트 레코드의 팔레트로 그려졌고, 세트 `84` 는 OAM 팔레트 2 로 그려졌습니다. 원본 롬도 같은 방법으로 모두 맞았습니다.
 
 ## 통합 포팅 빌드 `dq5portbuild/1`
 
