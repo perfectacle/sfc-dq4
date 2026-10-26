@@ -1,19 +1,26 @@
-"""DQ5 실내 맵 그룹 00~35 에 새 맵 번호를 더한다(그룹 끝 번호부터 차례로).
+"""DQ5 실내 맵에 새 맵 번호·새 그룹 번호를 더한다(그룹 끝 번호부터, 새 그룹은 마지막 그룹 다음부터 차례로).
 
-맵 번호로 곧장 색인하는 표 넷 가운데 이 도구는 맵 포인터(0F:8ED7, 맵마다 3바이트)와 맵 속성(23:FD6A, 맵마다 6바이트:
-조우 구역·전투 배경·주문 막기·곡)을 맡는다. 두 표 모두 그룹 목록 바로 뒤에 그룹 표가 있어 늘릴 빈틈이 없으므로,
-그룹 표를 같은 뱅크 빈 자리로 옮기고(끝 표시 16비트를 하나 더 붙임) 비는 108바이트만큼 뒤 그룹의 목록을 민다.
-코드는 표 주소 피연산자(01:9317, 01:83FC·8401)만 바꾸고 DB·뱅크는 그대로다. 출구·영역 이동은
-dq5exitreloc.py --new-map, 인물 목록은 인물 도구가 맡는다. 형식: sfc/dq5/docs/dq5-build-format.md 「새 맵 번호」.
+맵 번호로 곧장 색인하는 표 가운데 이 도구는 맵 포인터(0F:8ED7, 맵마다 3바이트), 맵 속성(23:FD6A, 맵마다 6바이트:
+조우 구역·전투 배경·주문 막기·곡), 그룹 50 이상의 맵 포인터(1F:CEB6)·맵 속성(23:FDD6 의 [BD]+6바이트 목록),
+그룹마다 들어가는 곳(0F:EA97, 5바이트)을 맡는다. 세 포인터·속성 표는 그룹 목록 바로 뒤에 그룹 표가 있어 늘릴 틈이 없다.
+  같은 뱅크: 그룹 표를 같은 뱅크 빈 자리로 옮기고 비는 옛 표 자리만큼 목록을 민다. 표 주소 피연산자만 바꾼다.
+  다른 뱅크(00~3F): 목록과 그룹 표를 함께 옮기고 DB 즉값(01:92F1·01:83ED·01:9326)까지 바꾼다. DB 로 WRAM·MMIO 를
+  abs 로 쓰므로 뱅크 40 이상은 안 된다.
+옮긴 그룹 표는 [그룹마다 시작][끝][0000] 꼴이다(dq5map.group_spans). 출구·영역 이동은 dq5exitreloc.py --new-map,
+인물 목록은 인물 도구가 맡는다. 형식: sfc/dq5/docs/dq5-build-format.md 「새 맵 번호」.
 
-  python sfc/dq5/tools/dq5newmap.py rom/dq5.sfc patch work/newmap.json -o work/newmap.dq5patch.json
-      [--pointer-table-at 0F:FF50] [--attr-table-at 23:FF20] [--records-at BB:AAAA]
-  python sfc/dq5/tools/dq5newmap.py rom/dq5.sfc check work/newmap.json [같은 자리 선택]
+  python sfc/dq5/tools/dq5newmap.py rom/dq5.sfc patch work/newmap.json -o work/newmap.dq5patch.json [자리 선택]
+  python sfc/dq5/tools/dq5newmap.py rom/dq5.sfc check work/newmap.json [자리 선택]
+  자리 선택: --pointer-table-at --attr-table-at --high-table-at --entrance-table-at --high-attr-at --records-at BB:AAAA
 
-입력: {"format": "dq5newmap/1", "maps": [{"map": "0D/05", "record": {"copy": "0D/02"}, "attrs": {"copy": "0D/02"}}]}
+입력: {"format": "dq5newmap/1", "groups": [{"group": "36", "entrance": {"copy": "0D"}}],
+       "maps": [{"map": "0D/05", "record": {"copy": "0D/02"}, "attrs": {"copy": "0D/02"}}]}
   record: {"copy": "GG/MM"} 그 맵과 같은 레코드, {"source": "파일.json"} dq5map/1 문서(입력 파일 기준 경로, --records-at 에 놓음)
-  attrs:  {"copy": "GG/MM"} 또는 {"bytes": [6개]}
-  새 맵은 record·attrs 가 둘 다 있어야 한다. 기존 맵(목록이 밀리는 그룹 포함)도 record·attrs 중 바꿀 것만 적을 수 있다.
+  attrs:  {"copy": "GG/MM"} 또는 {"bytes": [6개]}. entrance: {"copy": "GG"} 또는 {"bytes": [5개]}
+  새 맵은 record·attrs 가 둘 다 있어야 한다. 기존 맵도 바꿀 것만 적을 수 있다. 새 그룹은 groups 에 들어가는 곳이 있어야 하고,
+  groups 에 기존 그룹을 적으면 그 그룹의 들어가는 곳을 바꾼다.
+  그룹 50 이상은 50·52·53 에만 더한다(51·54 는 01:94B4 가 $BD 마다 영역 이동 목록을 고르고, 맞는 것이 없으면
+  앞 맵의 개수 $183D 가 남음).
 """
 import argparse
 import json
@@ -21,14 +28,21 @@ import re
 import sys
 from pathlib import Path
 
-from dq5build import BANK, build, free_ranges
-from dq5map import ATTR_SITES, ATTR_TABLE, GROUP_TABLE, GROUPS, POINTER_SITE, Rom, group_spans, lorom, map_pointer
+from dq5build import BANK, ORIGINAL_SIZE, build, free_ranges
+from dq5map import TABLE_KINDS, Rom, group_spans, group_table, lorom, map_pointer
 from dq5mapwrite import encode, entries_for
 
 FORMAT = 'dq5newmap/1'
-TABLE_SIZE = GROUPS * 2
-# (원래 그룹 표, 맵 하나의 크기, 기본 새 표 자리). 원래 표 뒤는 다른 자료(0F:8F43 고층 맵 레코드, 23:FDD6 고층 속성 목록).
-TABLES = {'pointer': (GROUP_TABLE, 3, 0x0FFF50), 'attr': (ATTR_TABLE, 6, 0x23FF20)}
+HIGH_FIRST = 0x50
+HIGH_OK = (0x50, 0x52, 0x53)
+# 같은 뱅크에서 그룹 표를 둘 기본 자리(그 뱅크 끝 빈 자리).
+DEFAULT_TABLE = {'pointer': 0x0FFF50, 'attr': 0x23FF20, 'high': 0x1FFE30}
+# 2A:F393 등 LDA $0FEA97,X 꼴(긴 주소) 여덟 곳의 피연산자와 표 시작에서 더하는 값. 그룹마다 5바이트.
+ENTRANCE_SITES = ((0x2AF394, 0), (0x2AF39C, 1), (0x2AF3A2, 2), (0x2AF3A8, 3), (0x2AF3AE, 4),
+                  (0x2AFD90, 4), (0x2AFD9B, 0), (0x2AFF13, 0))
+ENTRANCE_SIZE = 5
+# 01:847F LDA $FDD6,Y: [BC][목록 16비트]… FF. 목록은 [BD][6바이트]… FF(뱅크 23).
+HIGH_ATTR_LIST = 0x23FDD6
 
 
 def cpu(addr):
@@ -50,58 +64,139 @@ def map_key(value, name):
 
 
 def entries(rom, kind):
-    """그룹마다 [맵 항목 바이트…] 와 지금 그룹 표 자리."""
-    spans, table = group_spans(rom, attr=kind == 'attr')
-    size = TABLES[kind][1]
-    bank = TABLES[kind][0] & 0xFF0000
+    """그룹마다 [항목 바이트…] 와 지금 그룹 표 자리."""
+    spans, table = group_spans(rom, kind=kind)
+    size, bank = TABLE_KINDS[kind]['size'], table & 0xFF0000
     return [[read(rom, bank | start + i * size, size) for i in range((end - start) // size)]
             for start, end in spans], table
 
 
-def plan(rom, doc, base):
-    """입력 → 그룹마다 새 항목 목록(포인터·속성)과 새로 놓을 레코드 [(이름, 바이트)]."""
-    if not isinstance(doc, dict) or set(doc) != {'format', 'maps'} or doc['format'] != FORMAT:
-        raise ValueError(f'문서는 format={FORMAT} 과 maps 만 담아야 함')
-    pointers, _ = entries(rom, 'pointer')
-    attrs, _ = entries(rom, 'attr')
-    if [len(g) for g in pointers] != [len(g) for g in attrs]:
-        raise ValueError('맵 포인터와 맵 속성의 그룹별 맵 수가 다름')
-    # copy 는 원본 항목에서 푼다. 입력 차례나 같은 입력의 다른 고침에 따라 값이 달라지지 않게 한다.
-    base_pointers, base_attrs = [list(g) for g in pointers], [list(g) for g in attrs]
-    pointers, attrs = [list(g) for g in pointers], [list(g) for g in attrs]
-    records, seen = [], set()
-    if not isinstance(doc['maps'], list):
-        raise ValueError('maps 는 배열이어야 함')
-    for i, row in enumerate(doc['maps']):
-        name = f'maps[{i}]'
+def entrance_table(rom):
+    table = None
+    for site, plus in ENTRANCE_SITES:
+        if read(rom, site - 1, 1)[0] != 0xBF:
+            raise ValueError(f'{cpu(site - 1)} 이 들어가는 곳 표를 읽는 원래 명령이 아님')
+        value = int.from_bytes(read(rom, site, 3), 'little') - plus
+        if table not in (None, value):
+            raise ValueError('들어가는 곳 표 주소 피연산자가 서로 맞지 않음')
+        table = value
+    return table
+
+
+def high_attrs(rom):
+    """그룹 50 이상의 [BC] → (목록 주소, [(BD, 6바이트)]) 와 [BC][목록] 항목 자리."""
+    out, at = {}, HIGH_ATTR_LIST
+    while (bc := read(rom, at, 1)[0]) != 0xFF:
+        start = 0x230000 | int.from_bytes(read(rom, at + 1, 2), 'little')
+        rows, q = [], start
+        while (bd := read(rom, q, 1)[0]) != 0xFF:
+            rows.append((bd, read(rom, q + 1, 6)))
+            q += 7
+        out[bc] = (at + 1, start, rows)
+        at += 3
+    return out
+
+
+class Plan:
+    """입력을 표마다 새 항목으로 푼다."""
+
+    def __init__(self, rom, doc, base):
+        if not isinstance(doc, dict) or set(doc) - {'format', 'maps', 'groups'} or doc.get('format') != FORMAT:
+            raise ValueError(f'문서는 format={FORMAT}, maps, groups 만 담아야 함')
+        self.pointers, _ = entries(rom, 'pointer')
+        self.attrs, _ = entries(rom, 'attr')
+        self.high, _ = entries(rom, 'high')
+        self.high_attrs = {bc: list(rows) for bc, (_, _, rows) in high_attrs(rom).items()}
+        if [len(g) for g in self.pointers] != [len(g) for g in self.attrs]:
+            raise ValueError('맵 포인터와 맵 속성의 그룹별 맵 수가 다름')
+        table = entrance_table(rom)
+        self.entrances = [read(rom, table + g * ENTRANCE_SIZE, ENTRANCE_SIZE) for g in range(len(self.pointers))]
+        # copy 는 원본 항목에서 푼다. 입력 차례나 같은 입력의 다른 고침에 따라 값이 달라지지 않게 한다.
+        base_ptr, base_attr = [list(g) for g in self.pointers], [list(g) for g in self.attrs]
+        base_high, base_high_attr = [list(g) for g in self.high], {k: dict(v) for k, v in self.high_attrs.items()}
+        base_entr = list(self.entrances)
+        self.records, self.changed = [], set()
+        groups = doc.get('groups', [])
+        if not isinstance(groups, list):
+            raise ValueError('groups 는 배열이어야 함')
+        for i, row in enumerate(groups):
+            name = f'groups[{i}]'
+            if not isinstance(row, dict) or set(row) != {'group', 'entrance'} or not isinstance(row['group'], str) \
+                    or not re.fullmatch(r'[0-9A-F]{2}', row['group']):
+                raise ValueError(f'{name}: group(대문자 16진 GG)·entrance 가 필요함')
+            bc = int(row['group'], 16)
+            if bc > len(self.pointers) or bc >= HIGH_FIRST:
+                raise ValueError(f'{name}: 새 그룹은 {len(self.pointers):02X} 부터 차례로(50 미만)')
+            value = row['entrance']
+            if isinstance(value, dict) and set(value) == {'copy'} and isinstance(value['copy'], str) \
+                    and re.fullmatch(r'[0-9A-F]{2}', value['copy']) and int(value['copy'], 16) < len(base_entr):
+                entrance = base_entr[int(value['copy'], 16)]
+            elif isinstance(value, dict) and set(value) == {'bytes'} and isinstance(value['bytes'], list) and \
+                    len(value['bytes']) == 5 and all(type(v) is int and 0 <= v <= 255 for v in value['bytes']):
+                entrance = bytes(value['bytes'])
+            else:
+                raise ValueError(f'{name}.entrance: 원본 그룹 copy 또는 0~255 정수 5개의 bytes 가 필요함')
+            if bc < len(self.pointers):
+                self.entrances[bc] = entrance
+                continue
+            self.pointers.append([])
+            self.attrs.append([])
+            self.entrances.append(entrance)
+        if not isinstance(doc.get('maps', []), list):
+            raise ValueError('maps 는 배열이어야 함')
+        for i, row in enumerate(doc.get('maps', [])):
+            self.map_row(f'maps[{i}]', row, base, base_ptr, base_attr, base_high, base_high_attr)
+        for g, maps in enumerate(self.pointers):
+            if not maps:
+                raise ValueError(f'새 그룹 {g:02X} 에 맵이 없음')
+
+    def map_row(self, name, row, base, base_ptr, base_attr, base_high, base_high_attr):
         if not isinstance(row, dict) or 'map' not in row or set(row) - {'map', 'record', 'attrs'}:
             raise ValueError(f'{name}: map·record·attrs 만 받음')
         bc, bd = map_key(row['map'], name)
-        if bc >= GROUPS or (bc, bd) in seen:
-            raise ValueError(f'{name}: 그룹 00~35 의 맵을 한 번만 적어야 함')
-        seen.add((bc, bd))
-        if bd == len(pointers[bc]):
+        if (bc, bd) in self.changed:
+            raise ValueError(f'{name}: 같은 맵을 두 번 적음')
+        self.changed.add((bc, bd))
+        high = bc >= HIGH_FIRST
+        if high:
+            if bc - HIGH_FIRST >= len(self.high):
+                raise ValueError(f'{name}: 그룹 {bc:02X} 이 없음(그룹 50 이상의 새 그룹은 받지 않음)')
+            ptrs, slot = self.high[bc - HIGH_FIRST], bd - HIGH_FIRST
+        else:
+            if bc >= len(self.pointers):
+                raise ValueError(f'{name}: 그룹 {bc:02X} 이 없음(새 그룹은 groups 에 먼저 적음)')
+            ptrs, slot = self.pointers[bc], bd
+        if slot == len(ptrs):
             if set(row) != {'map', 'record', 'attrs'}:
                 raise ValueError(f'{name}: 새 맵 {row["map"]} 에는 record 와 attrs 가 둘 다 필요함')
-            pointers[bc].append(None)
-            attrs[bc].append(None)
-        elif bd > len(pointers[bc]):
-            raise ValueError(f'{name}: 새 맵 번호는 그룹 {bc:02X} 의 끝 번호 {len(pointers[bc]):02X} 부터 차례로 더함')
+            if high and bc not in HIGH_OK:
+                raise ValueError(f'{name}: 그룹 {bc:02X} 에는 새 맵을 더하지 않음(50·52·53 만)')
+            ptrs.append(None)
+            if not high:
+                self.attrs[bc].append(None)
+        elif not 0 <= slot < len(ptrs):
+            raise ValueError(f'{name}: 새 맵 번호는 그룹 {bc:02X} 의 끝 번호부터 차례로 더함')
 
-        def source(value, field):
+        def copy_key(value, field):
             if not isinstance(value, dict) or len(value) != 1:
                 raise ValueError(f'{name}.{field}: 키 하나짜리 객체여야 함')
-            if 'copy' in value:
-                key = map_key(value['copy'], f'{name}.{field}.copy')
-                if key[0] >= GROUPS or key[1] >= len(base_pointers[key[0]]):
-                    raise ValueError(f'{name}.{field}: 복사할 맵 {value["copy"]} 이 원본에 없음(새 맵은 복사하지 않음)')
-                return key
-            return None
+            if 'copy' not in value:
+                return None
+            key = map_key(value['copy'], f'{name}.{field}.copy')
+            if (key[0] >= HIGH_FIRST) != high:
+                raise ValueError(f'{name}.{field}: 그룹 50 이상과 미만은 서로 복사하지 않음')
+            if high:
+                ok = key[0] - HIGH_FIRST < len(base_high) and 0 <= key[1] - HIGH_FIRST < len(base_high[key[0] - HIGH_FIRST])
+            else:
+                ok = key[0] < len(base_ptr) and key[1] < len(base_ptr[key[0]])
+            if not ok:
+                raise ValueError(f'{name}.{field}: 복사할 맵 {value["copy"]} 이 원본에 없음(새 맵은 복사하지 않음)')
+            return key
 
         if 'record' in row:
-            key = source(row['record'], 'record')
+            key = copy_key(row['record'], 'record')
             if key:
-                pointers[bc][bd] = base_pointers[key[0]][key[1]]
+                ptrs[slot] = (base_high[key[0] - HIGH_FIRST][key[1] - HIGH_FIRST] if high else base_ptr[key[0]][key[1]])
             elif set(row['record']) == {'source'}:
                 path = base / row['record']['source']
                 record = json.loads(path.read_text(encoding='utf-8'))
@@ -109,88 +204,112 @@ def plan(rom, doc, base):
                     raise ValueError(f'{name}.record: {path} 의 map 이 {row["map"]} 이 아님')
                 for line in entries_for(record):
                     raise ValueError(f'{name}.record: {line}')
-                records.append(((bc, bd), encode(record)))
-                pointers[bc][bd] = len(records) - 1
+                self.records.append(((bc, bd), encode(record)))
+                ptrs[slot] = len(self.records) - 1
             else:
                 raise ValueError(f'{name}.record: copy 또는 source 가 필요함')
         if 'attrs' in row:
-            key = source(row['attrs'], 'attrs')
+            key = copy_key(row['attrs'], 'attrs')
             if key:
-                attrs[bc][bd] = base_attrs[key[0]][key[1]]
+                value = base_high_attr[key[0]][key[1]] if high else base_attr[key[0]][key[1]]
             elif set(row['attrs']) == {'bytes'} and isinstance(row['attrs']['bytes'], list) and \
                     len(row['attrs']['bytes']) == 6 and all(type(v) is int and 0 <= v <= 255 for v in row['attrs']['bytes']):
-                attrs[bc][bd] = bytes(row['attrs']['bytes'])
+                value = bytes(row['attrs']['bytes'])
             else:
                 raise ValueError(f'{name}.attrs: copy 또는 0~255 정수 6개의 bytes 가 필요함')
-    return pointers, attrs, records
+            if high:
+                rows = self.high_attrs.get(bc)
+                if rows is None:
+                    raise ValueError(f'{name}: 23:FDD6 에 그룹 {bc:02X} 목록이 없음')
+                self.high_attrs[bc] = [r for r in rows if r[0] != bd] + [(bd, value)]
+            else:
+                self.attrs[bc][slot] = value
 
 
 def bank_free(rom, addr, size, extra=()):
-    """addr~ size 바이트가 원래 롬 빈 자리나 extra 안이면 참."""
+    """addr~ size 바이트가 원래 롬 빈 자리·늘린 뱅크·extra 안이면 참."""
+    if lorom(addr) >= ORIGINAL_SIZE and (addr & 0xFFFF) + size <= 0x10000:
+        return True
     spans = [((off // BANK) << 16 | 0x8000 | off % BANK, ((off // BANK) << 16 | 0x8000 | off % BANK) + n)
              for off, n in free_ranges(rom.d)] + list(extra)
     return any(lo <= addr and addr + size <= hi for lo, hi in spans)
 
 
 def table_writes(rom, kind, groups, at):
-    """그룹 목록을 밀어 쓴 쓰기와 새 그룹 표 쓰기, 피연산자 쓰기."""
-    original, size, default = TABLES[kind]
-    spans, table = group_spans(rom, attr=kind == 'attr')
-    at = at or (table if table != original else default)
-    bank = original & 0xFF0000
-    if at >> 16 != original >> 16:
-        raise ValueError(f'{kind}: 그룹 표는 뱅크 {original >> 16:02X} 에 둠(코드가 DB 를 그 뱅크로 둠)')
-    start = spans[0][0]
-    limit = (original & 0xFFFF) + TABLE_SIZE
+    """목록·그룹 표·코드 쓰기. 같은 뱅크면 표만 옮기고 목록을 밀고, 다른 뱅크면 목록과 표를 함께 옮긴다."""
+    k = TABLE_KINDS[kind]
+    original, size = k['original'], k['size']
+    spans, table = group_spans(rom, kind=kind)
+    bank, start = table & 0xFF0000, spans[0][0]
     blob = b''.join(b for g in groups for b in g)
-    if start + len(blob) > limit:
-        raise ValueError(f'{kind}: 목록이 {len(blob) - (limit - start)}바이트 넘침(늘릴 수 있는 것은 옛 그룹 표 자리 108바이트)')
-    starts, cursor = [], start
+    lists = [(bank | start, blob, f'{kind} 목록')]
+    if len(groups) == len(spans) and len(blob) == spans[-1][1] - start and at is None:
+        return lists
+    moved_block = bank != original & 0xFF0000
+    if at is None:
+        at = bank | start if moved_block else (table if table != original else DEFAULT_TABLE[kind])
+    table_size = 2 * len(groups) + 4
+    if at >> 16 == original >> 16 and not moved_block:
+        # 같은 뱅크: 목록은 제자리에서 밀고 그룹 표만 at 으로 옮긴다.
+        limit = (original & 0xFFFF) + 2 * k['groups']
+        if start + len(blob) > limit:
+            raise ValueError(f'{kind}: 목록이 {start + len(blob) - limit}바이트 넘침(같은 뱅크에서는 옛 그룹 표 자리만큼만 '
+                             f'늘어남, 다른 뱅크 00~3F 를 주면 표 덩어리를 옮김)')
+        current = [(table, table + 2 * len(spans) + 4)] if table != original else []
+        if not bank_free(rom, at, table_size, current):
+            raise ValueError(f'{kind}: {cpu(at)}~ {table_size}바이트가 빈 자리가 아님')
+        list_start, table_at = start, at
+        out = lists
+    else:
+        # 다른 뱅크(또는 이미 옮긴 덩어리): [목록][그룹 표] 를 at 에 둔다.
+        if at >> 16 > 0x3F:
+            raise ValueError(f'{kind}: 뱅크 00~3F 만 됨(DB 로 WRAM·MMIO 를 abs 로 씀)')
+        total = len(blob) + table_size
+        current = [(bank | start, (table + 2 * len(spans) + 4))] if moved_block else []
+        if (at & 0xFFFF) + total > 0x10000 or not bank_free(rom, at, total, current):
+            raise ValueError(f'{kind}: {cpu(at)}~ {total}바이트가 한 뱅크의 빈 자리가 아님')
+        list_start, table_at = at & 0xFFFF, (at & 0xFF0000) | (at + len(blob)) & 0xFFFF
+        out = [(at, blob, f'{kind} 목록(옮김)')]
+    starts, cursor = [], list_start
     for g in groups:
         starts.append(cursor)
         cursor += len(g) * size
-    new_table = b''.join(v.to_bytes(2, 'little') for v in [*starts, cursor])
-    out = [(bank | start, blob, '맵 포인터 목록' if kind == 'pointer' else '맵 속성 목록')]
-    if len(blob) == spans[-1][1] - start:
-        # 맵 수가 그대로면 표는 지금 자리에 둔다.
-        return out
-    current = [(table, table + TABLE_SIZE + 2)] if table != original else []
-    if not bank_free(rom, at, TABLE_SIZE + 2, current):
-        raise ValueError(f'{kind}: {cpu(at)}~ {TABLE_SIZE + 2}바이트가 빈 자리가 아님')
-    out.append((at, new_table, '그룹 표(끝 표시 붙음)'))
-    if kind == 'pointer':
-        out.append((POINTER_SITE, (at & 0xFFFF).to_bytes(2, 'little'), '그룹 표 주소 01:9316'))
-    else:
-        out += [(ATTR_SITES[0], (at & 0xFFFF).to_bytes(2, 'little'), '맵 속성 표 주소 01:83FB'),
-                (ATTR_SITES[1], (at + 1 & 0xFFFF).to_bytes(2, 'little'), '맵 속성 표 주소 01:8400')]
+    out.append((table_at, b''.join(v.to_bytes(2, 'little') for v in [*starts, cursor, 0]), f'{kind} 그룹 표(끝 표시·0000)'))
+    out.append((k['db'], bytes([table_at >> 16]), f'{kind} 표 뱅크(DB)'))
+    out += [(site, (table_at + i & 0xFFFF).to_bytes(2, 'little'), f'{kind} 표 주소') for i, site in enumerate(k['sites'])]
     return out
 
 
 def writes_for(rom, doc, base=Path('.'), at=None):
     at = at or {}
-    pointers, attrs, records = plan(rom, doc, base)
-    cursor, placed = at.get('records'), []
-    if records and not cursor:
+    plan = Plan(rom, doc, base)
+    cursor, placed, out = at.get('records'), [], []
+    if plan.records and not cursor:
         raise ValueError('새 레코드(source)를 놓을 --records-at 이 필요함')
-    out = []
-    if records and lorom(cursor) < 0x180000 and not bank_free(rom, cursor, sum(len(r) for _, r in records)):
+    if plan.records and not bank_free(rom, cursor, sum(len(r) for _, r in plan.records)):
         raise ValueError(f'--records-at {cpu(cursor)}: 원래 롬의 빈 자리나 늘린 뱅크(30~)여야 함')
-    for key, raw in records:
+    for key, raw in plan.records:
         if (cursor & 0xFFFF) + len(raw) > 0x10000:
             raise ValueError(f'{key[0]:02X}/{key[1]:02X} 레코드가 {cpu(cursor)} 의 뱅크를 넘음')
         out.append((cursor, raw, f'맵 {key[0]:02X}/{key[1]:02X} 레코드'))
         placed.append(cursor)
         cursor += len(raw)
-    pointer_groups = [[p if isinstance(p, bytes) else placed[p].to_bytes(3, 'little') for p in g] for g in pointers]
-    if any(v is None for g in attrs for v in g):
+
+    def resolve(groups):
+        return [[p if isinstance(p, bytes) else placed[p].to_bytes(3, 'little') for p in g] for g in groups]
+
+    if any(v is None for g in plan.attrs for v in g):
         raise ValueError('속성이 없는 새 맵이 있음')
-    out += table_writes(rom, 'pointer', pointer_groups, at.get('pointer'))
-    out += table_writes(rom, 'attr', attrs, at.get('attr'))
+    out += table_writes(rom, 'pointer', resolve(plan.pointers), at.get('pointer'))
+    out += table_writes(rom, 'attr', plan.attrs, at.get('attr'))
+    out += table_writes(rom, 'high', resolve(plan.high), at.get('high'))
+    out += entrance_writes(rom, plan, at.get('entrance'))
+    out += high_attr_writes(rom, plan, at.get('high_attr'))
     result = []
     for addr, new, note in out:
         off = lorom(addr)
         old = bytes(rom.d[off:off + len(new)]) if off + len(new) <= len(rom.d) else None
-        # 앞이 같은 목록은 바뀐 첫 바이트부터 쓴다. 앞 그룹 맵을 고치는 다른 쓰기와 겹치지 않게 한다.
+        # 앞뒤가 같은 쓰기는 바뀐 곳만 쓴다. 다른 맵을 고치는 다른 쓰기와 겹치지 않게 한다.
         same = next((i for i, (a, b) in enumerate(zip(new, old or b'')) if a != b), min(len(new), len(old or b'')))
         if old is not None and same:
             addr, new, old = addr + same, new[same:], old[same:]
@@ -198,9 +317,46 @@ def writes_for(rom, doc, base=Path('.'), at=None):
         if old is not None and tail:
             new, old = new[:-tail], old[:-tail]
         if new and new != old:
-            result.append((addr, new, old if off < 0x180000 else None, note))
+            result.append((addr, new, old if lorom(addr) < ORIGINAL_SIZE else None, note))
     top = max([a >> 16 for a, _, _, _ in result] or [0])
     return result, 0 if top < 0x30 else 2 if top < 0x40 else 3 if top < 0x60 else 4
+
+
+def entrance_writes(rom, plan, at):
+    table = entrance_table(rom)
+    blob = b''.join(plan.entrances)
+    count = len(group_spans(rom)[0])
+    if len(plan.entrances) == count and at is None:
+        return [(table, blob, '들어가는 곳 표')]
+    if at is None:
+        if table == 0x0FEA97:
+            raise ValueError('새 그룹을 더하면 들어가는 곳 표(0F:EA97)를 옮길 --entrance-table-at 이 필요함')
+        at = table
+    current = [(table, table + count * ENTRANCE_SIZE)] if table != 0x0FEA97 else []
+    if (at & 0xFFFF) + len(blob) > 0x10000 or not bank_free(rom, at, len(blob), current):
+        raise ValueError(f'들어가는 곳 표: {cpu(at)}~ {len(blob)}바이트가 한 뱅크의 빈 자리가 아님')
+    return [(at, blob, '들어가는 곳 표(옮김)')] + [
+        (site, (at + plus).to_bytes(3, 'little'), '들어가는 곳 표 주소') for site, plus in ENTRANCE_SITES]
+
+
+def high_attr_writes(rom, plan, at):
+    """맵 수가 바뀐 그룹 50 이상의 속성 목록을 at(뱅크 23)에 다시 쓰고 23:FDD6 의 목록 주소를 바꾼다."""
+    out = []
+    for bc, (entry, start, rows) in high_attrs(rom).items():
+        new = plan.high_attrs[bc]
+        if new == rows:
+            continue
+        blob = b''.join(bytes([bd]) + v for bd, v in new) + b'\xff'
+        if len(new) == len(rows):
+            out.append((start, blob, f'그룹 {bc:02X} 속성 목록'))
+            continue
+        if at is None or at >> 16 != 0x23:
+            raise ValueError('그룹 50 이상에 맵을 더하면 속성 목록을 둘 --high-attr-at(뱅크 23)이 필요함')
+        if not bank_free(rom, at, len(blob), [(start, start + 7 * len(rows) + 1)]):
+            raise ValueError(f'--high-attr-at {cpu(at)}~ {len(blob)}바이트가 빈 자리가 아님')
+        out += [(at, blob, f'그룹 {bc:02X} 속성 목록(옮김)'), (entry, (at & 0xFFFF).to_bytes(2, 'little'), f'그룹 {bc:02X} 속성 목록 주소')]
+        at += len(blob)
+    return out
 
 
 def patch(rom, doc, base=Path('.'), at=None):
@@ -221,35 +377,54 @@ def check(rom, doc, base=Path('.'), at=None):
                bytes.fromhex(w['orig']) if 'orig' in w else None, w['note']) for w in manifest['writes']]
     built = Rom(build(rom.d, [('new-maps', mb, writes)], mb)[0])
     before, after = set(all_maps(rom)), set(all_maps(built))
-    pointers, attrs, _ = plan(rom, doc, base)
-    added = sorted(after - before)
-    if not before <= after or len(added) != sum(map(len, pointers)) - len([m for m in before if m[0] < GROUPS]):
+    plan = Plan(rom, doc, base)
+    want = {(bc, bd) for bc, g in enumerate(plan.pointers) for bd in range(len(g))} | \
+        {(HIGH_FIRST + i, HIGH_FIRST + bd) for i, g in enumerate(plan.high) for bd in range(len(g))}
+    if after != want or not before <= after:
         raise ValueError('만든 롬의 맵 목록이 원래 맵 + 새 맵이 아님')
-    changed = {map_key(r['map'], '') for r in doc['maps']}
-    old_attr, _ = entries(rom, 'attr')
-    new_attr, _ = entries(built, 'attr')
+    old_attr, new_attr = entries(rom, 'attr')[0], entries(built, 'attr')[0]
+    old_high, new_high = high_attrs(rom), high_attrs(built)
     for bc, bd in sorted(before):
-        if bc >= GROUPS or (bc, bd) in changed:
+        if (bc, bd) in plan.changed:
             continue
-        if map_pointer(built, bc, bd) != map_pointer(rom, bc, bd) or new_attr[bc][bd] != old_attr[bc][bd]:
+        same = map_pointer(built, bc, bd) == map_pointer(rom, bc, bd)
+        if bc < HIGH_FIRST:
+            same = same and new_attr[bc][bd] == old_attr[bc][bd]
+        else:
+            same = same and dict(new_high[bc][2]).get(bd) == dict(old_high[bc][2]).get(bd)
+        if not same:
             raise ValueError(f'{bc:02X}/{bd:02X}: 고치지 않은 맵의 포인터나 속성이 바뀜')
-    for bc, bd in sorted(changed):
-        if isinstance(attrs[bc][bd], bytes) and new_attr[bc][bd] != attrs[bc][bd]:
-            raise ValueError(f'{bc:02X}/{bd:02X}: 속성이 입력과 다름')
-        want = pointers[bc][bd]
-        if isinstance(want, bytes) and map_pointer(built, bc, bd) != int.from_bytes(want, 'little'):
+    for bc, bd in sorted(plan.changed):
+        ptrs = plan.high[bc - HIGH_FIRST] if bc >= HIGH_FIRST else plan.pointers[bc]
+        value = ptrs[bd - HIGH_FIRST if bc >= HIGH_FIRST else bd]
+        if isinstance(value, bytes) and map_pointer(built, bc, bd) != int.from_bytes(value, 'little'):
             raise ValueError(f'{bc:02X}/{bd:02X}: 맵 포인터가 입력과 다름')
+        got = dict(new_high[bc][2]).get(bd) if bc >= HIGH_FIRST else new_attr[bc][bd]
+        planned = dict(plan.high_attrs[bc]).get(bd) if bc >= HIGH_FIRST else plan.attrs[bc][bd]
+        if got != planned:
+            raise ValueError(f'{bc:02X}/{bd:02X}: 속성이 입력과 다름')
+    table = entrance_table(built)
+    if [read(built, table + g * ENTRANCE_SIZE, ENTRANCE_SIZE) for g in range(len(plan.entrances))] != plan.entrances:
+        raise ValueError('들어가는 곳 표가 입력과 다름')
     if patch(built, doc, base, at)['writes']:
         raise ValueError('만든 롬에 같은 입력을 다시 패치하면 쓰기가 남음')
-    print(f'맵 {len(before)}개 → {len(after)}개(새 {", ".join(f"{a:02X}/{b:02X}" for a, b in added)}); '
-          f'그룹 표 {cpu(group_spans(built)[1])}·{cpu(group_spans(built, attr=True)[1])}; '
-          f'쓰기 {len(writes)}개 검사 통과')
+    added = sorted(after - before)
+    print(f'맵 {len(before)}개 → {len(after)}개(새 {", ".join(f"{a:02X}/{b:02X}" for a, b in added) or "없음"}); '
+          f'그룹 {len(group_spans(rom)[0])} → {len(group_spans(built)[0])}개; 표 '
+          f'{cpu(group_table(built, "pointer"))}·{cpu(group_table(built, "attr"))}·{cpu(group_table(built, "high"))}'
+          f'·들어가는 곳 {cpu(table)}; 쓰기 {len(writes)}개 검사 통과')
 
 
 def address(text):
     if not re.fullmatch(r'[0-9A-Fa-f]{2}:[0-9A-Fa-f]{4}', text) or int(text[3:], 16) < 0x8000:
         raise argparse.ArgumentTypeError('BB:AAAA(AAAA 8000~FFFF) 로 적어야 함')
     return int(text[:2], 16) << 16 | int(text[3:], 16)
+
+
+PLACES = {'pointer': '맵 포인터 그룹 표(같은 뱅크 0F 면 표만, 다른 뱅크면 덩어리)',
+          'attr': '맵 속성 그룹 표(23 / 다른 뱅크)', 'high': '그룹 50 이상 맵 포인터 그룹 표(1F / 다른 뱅크)',
+          'entrance': '들어가는 곳 표(새 그룹이 있으면 필요)', 'high_attr': '그룹 50 이상 속성 목록(뱅크 23)',
+          'records': 'source 레코드'}
 
 
 def main():
@@ -261,14 +436,14 @@ def main():
         p.add_argument('source', type=Path)
         if name == 'patch':
             p.add_argument('-o', '--out', type=Path, required=True)
-        p.add_argument('--pointer-table-at', type=address, help=f'기본 {cpu(TABLES["pointer"][2])}')
-        p.add_argument('--attr-table-at', type=address, help=f'기본 {cpu(TABLES["attr"][2])}')
-        p.add_argument('--records-at', type=address, help='source 레코드를 놓을 자리')
+        for key, text in PLACES.items():
+            p.add_argument(f'--{key.replace("_", "-")}{"-table" if key in ("pointer", "attr", "high", "entrance") else ""}-at',
+                           dest=key, type=address, help=text)
     args = parser.parse_args()
     try:
         rom = Rom(args.rom.read_bytes())
         doc = json.loads(args.source.read_text(encoding='utf-8'))
-        at = {'pointer': args.pointer_table_at, 'attr': args.attr_table_at, 'records': args.records_at}
+        at = {k: getattr(args, k) for k in PLACES}
         if args.command == 'check':
             check(rom, doc, args.source.parent, at)
         else:

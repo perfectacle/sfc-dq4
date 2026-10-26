@@ -233,6 +233,17 @@ class RelocTests(unittest.TestCase):
         self.assertEqual(engine_triggers(moved, loc, 1, 3)[0][:4], bytes([3, 2, 4, 3]))
         self.assertEqual(writes_for(moved, doc, at, new), ([], 0))
 
+    def test_new_group_gets_exit_block(self):
+        new = [(0x36, 0)]
+        doc = dump(self.rom, new)
+        self.assertEqual(doc['exits'][-1], {'map': '36/00', 'records': [{'kind': 'special', 'special': 0}]})
+        doc['exits'][-1]['records'] = [{'kind': 'other-group', 'destination_map': 0, 'exit': 0, 'group': 1}]
+        at = {'exits': 0x2AD812, 'records': 0x3E8000}
+        moved = apply(self.rom.d, writes_for(self.rom, doc, at, new)[0])
+        loc = locate(moved)
+        self.assertEqual(parse(moved, loc, KNOWN | set(new)), doc)
+        self.assertEqual([r for _, r in engine_exits(moved, loc, 0x36, 0)], [bytes([0xA0, 0, 1])])
+
     def test_negative_edge_and_field_records_round_trip(self):
         doc = copy.deepcopy(self.doc)
         doc['triggers'][0]['records'][0]['rect'] = [255, 6, 0, 12]

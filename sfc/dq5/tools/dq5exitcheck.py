@@ -125,7 +125,7 @@ CASES = [
 # --audit 이 DB 창을 모으는 원본 롬 장면: 출구 세 종류, 영역 이동(효과음 갈래 포함)·고층·음수 가장자리.
 AUDIT = ('same-original', 'other-original', 'position-original', 'rect-old-original', 'high-original',
          'edge-original', 'sound-original', 'stair33-opened')
-ENV_CLEAR = ('ADULT', 'ANYWHERE', 'AUDIT', 'BATTLE', 'FIELD', 'GROUP', 'LATESET', 'PARTY', 'POKE',
+ENV_CLEAR = ('ADULT', 'ANYWHERE', 'AUDIT', 'AUDITOPEN', 'BATTLE', 'FIELD', 'GROUP', 'LATESET', 'PARTY', 'POKE',
              'DP86OK', 'ROMPATCH', 'SAVE', 'SET', 'STALE', 'WAGON', 'WARPEXIT')
 # r 롬은 네 표를 모두 옮겼으므로 옛 자리(일반 표 2A:D812~F223, 고층 01:9635~9770)를 읽는 곳이 없어야 한다.
 STALE = {'r': '2AD812-2AF223,019635-019770'}
@@ -172,6 +172,8 @@ def run(case, roms, state, out, mesence, libdir, audit=False):
         env['STALE'] = STALE[rom]
     if audit:
         env['AUDIT'] = '1'
+        if os.environ.get('AUDITOPEN'):
+            env['AUDITOPEN'] = os.environ['AUDITOPEN']
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
         subprocess.run([str(mesence), '--testrunner', str(roms[rom][0]), str(HERE / 'lua/dq5exitcheck.lua'),
                         '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,

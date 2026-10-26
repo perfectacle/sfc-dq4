@@ -5,6 +5,7 @@
 -- AUDIT=1 이면 표 뱅크를 DB 로 두는 창(PLB 다음 명령: 출구 2A:F705, 색인 01:9441, 실행기 00:CDF9·2A:F4C2·2A:FD1A)이
 -- 열린 뒤 DB 가 그 값인 동안 실행한 명령(dbwin.txt, cover.lua 꼴 "PC P 횟수")과, 그동안 그 뱅크 8000~ 에서 읽은
 -- 자료의 주소(dbread.txt, "PC 주소 횟수", 명령 인출 제외)를 적는다. DB 가 5000 명령 넘게 다른 값이면 창을 닫는다.
+-- AUDITOPEN="0192F4,0183F0" 이면 그 PC 들에서 창을 연다.
 -- STALE="2AD812-2AF223,..." 이면 표를 옮긴 뒤 비어야 할 옛 자리를 읽은 횟수와 처음 읽은 PC 를 적는다.
 package.path = os.getenv('LIBDIR') .. '/?.lua;' .. package.path
 local L = require('lib')
@@ -73,7 +74,12 @@ if audit then
     local k = string.format('%06X %06X', pc, addr)
     reads[k] = (reads[k] or 0) + 1
   end
-  for _, open in ipairs({0x2AF705, 0x019441, 0x00CDF9, 0x2AF4C2, 0x2AFD1A}) do
+  local opens = {0x2AF705, 0x019441, 0x00CDF9, 0x2AF4C2, 0x2AFD1A}
+  if os.getenv('AUDITOPEN') then
+    opens = {}
+    for pc in string.gmatch(os.getenv('AUDITOPEN'), '%x+') do opens[#opens + 1] = tonumber(pc, 16) end
+  end
+  for _, open in ipairs(opens) do
     emu.addMemoryCallback(function()
       db, miss = emu.getState()['cpu.dbr'], 0
       if execCb then return end

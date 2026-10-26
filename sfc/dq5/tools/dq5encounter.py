@@ -132,10 +132,13 @@ def event_group(rom, g):
 
 
 def map_entry(rom, bc, bd):
-    p, q = group_spans(rom, attr=True)[0][bc]
+    spans, table = group_spans(rom, attr=True)
+    if bc >= len(spans):
+        return None
+    p, q = spans[bc]
     if bd >= (q - p) // 6:
         return None
-    return [rom.u8(0x230000 | (p + bd * 6 + i)) for i in range(6)]
+    return [rom.u8(table & 0xFF0000 | (p + bd * 6 + i)) for i in range(6)]
 
 
 def map_entries(rom):

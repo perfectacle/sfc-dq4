@@ -41,9 +41,8 @@ def all_maps(rom):
     out = []
     for bc, (start, end) in enumerate(group_spans(rom)[0]):
         out += [(bc, bd) for bd in range((end - start) // 3)]
-    h = [rom.u16(HIGH_GROUPS + i * 2) for i in range(5)] + [HIGH_GROUPS & 0xFFFF]
-    for i in range(5):
-        out += [(HIGH_FIRST + i, HIGH_FIRST + bd) for bd in range((h[i + 1] - h[i]) // 3)]
+    for i, (start, end) in enumerate(group_spans(rom, kind='high')[0]):
+        out += [(HIGH_FIRST + i, HIGH_FIRST + bd) for bd in range((end - start) // 3)]
     return out
 
 
@@ -52,8 +51,10 @@ def pointer_addr(rom, bc, bd):
     if (bc, bd) not in all_maps(rom):
         raise ValueError(f'원본 맵 목록에 {bc:02X}/{bd:02X}가 없음; 새 맵 번호는 dq5newmap.py 로 더함')
     if bc >= HIGH_FIRST:
-        return HIGH_GROUPS & 0xFF0000 | rom.u16(HIGH_GROUPS + (bc - HIGH_FIRST) * 2) + (bd - HIGH_FIRST) * 3
-    return 0x0F0000 | group_spans(rom)[0][bc][0] + bd * 3
+        spans, table = group_spans(rom, kind='high')
+        return table & 0xFF0000 | spans[bc - HIGH_FIRST][0] + (bd - HIGH_FIRST) * 3
+    spans, table = group_spans(rom)
+    return table & 0xFF0000 | spans[bc][0] + bd * 3
 
 
 class BitReader:
