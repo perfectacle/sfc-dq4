@@ -1,7 +1,7 @@
 -- DQ5 소리 명령 기록. 24:FF83(소리 명령 대기열)에 들어올 때 명령(A)·인자(스택의 PHA 값)·부른 곳(JSL 24:FExx 의 자리)을
 -- snd.txt 에 적는다(MAXF-1 프레임). SHOTS 프레임에 화면. 드라이버(boot.lua, 보통 dq5warp.lua·walk.lua) 뒤에 붙여 쓴다. DSP=1 이면 프레임마다 DSP 레지스터(주 음량·메아리·ENVX 합·KON·KOF·FLG·채널 0 음량)를 dsp.txt 로.
 -- HCMD·HARG(·HX) 를 주면 처음 들어온 HFROM_CMD·HFROM_ARG 명령(예: 메뉴 효과음 0C 33)을 그 명령·인자·X 로 바꿔 보낸다.
--- 소리 서비스 BRK(0F~19)로 온 명령은 「brk=BRK 자리 X=둘째 인자」를 덧붙인다.
+-- 소리 서비스 BRK(0F~19)로 온 명령은 「brk=BRK 자리 X=둘째 인자」를, 24:FEAC 를 바로 부른 명령 0C 는 X 레지스터(갈래)를 덧붙인다.
 -- WATCH=주소,… 는 그 주소를 실행한 프레임을, SPCDUMP=프레임,… 은 그 프레임의 SPC RAM 64KB 와 DSP 레지스터 128바이트를 spcNNNNN.bin·dspNNNNN.bin 으로 남긴다(커밋 금지).
 package.path = os.getenv("LIBDIR") .. "/?.lua;" .. package.path
 local L = require("lib")
@@ -36,7 +36,8 @@ emu.addMemoryCallback(function()
   local rl = emu.read(sp + 3, m) | emu.read(sp + 4, m) << 8
   local rb = emu.read(sp + 5, m)
   local line = string.format("%d cmd=%02X arg=%02X from=%02X:%04X", n, s["cpu.a"] & 0xFF, arg, rb, (rl - 3) & 0xFFFF)
-  if rb == 0 and ((rl - 3) & 0xFF00) == 0x9200 and brk then line = line .. " brk=" .. brk; brk = nil end
+  if rb == 0 and ((rl - 3) & 0xFF00) == 0x9200 and brk then line = line .. " brk=" .. brk; brk = nil
+  elseif (s["cpu.a"] & 0xFF) == 0x0C then line = line .. string.format(" X=%02X", s["cpu.x"] & 0xFF) end
   log[#log + 1] = line
 end, emu.callbackType.exec, 0x24FF83, 0x24FF83)
 local dsp = {}
