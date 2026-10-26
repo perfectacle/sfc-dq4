@@ -7,6 +7,8 @@
 
   python sfc/dq5/tools/dq5progresswrite.py rom/dq5.sfc dump -o work/progress.json
   python sfc/dq5/tools/dq5progresswrite.py rom/dq5.sfc patch work/progress.json -o work/progress.dq5patch.json [--shop-at 0B:FBB0]
+  python sfc/dq5/tools/dq5progresswrite.py rom/dq5.sfc patch work/progress.json -o work/progress.dq5patch.json \
+      --area-at 23:C242 --person-at 23:96F3 --reuse-names
   python sfc/dq5/tools/dq5progresswrite.py rom/dq5.sfc check
 
 JSON format은 dq5progress/1. growth의 kind는 person/monster, index는 종류 내 번호.
@@ -14,6 +16,8 @@ stats는 hp/mp/strength/agility/wisdom/luck/resilience의 활성 값(레벨1, �
 HP·MP는 레벨1 외에는 저장값의 두 배로 읽힌다. breaks 길이를 바꾸면 multipliers와 모든 stats가 필요하다.
 encounters의 slots는 0~9만이며 칸10은 fixed:{weight,group}이다. shops는 kind와 종류 내 index로 식별한다.
 medal_prices·coin_prices는 각각 여섯 값. 모든 숫자는 JSON 정수, 플래그 둘은 JSON bool이다.
+원래 수 뒤의 새 성장(종류마다 64개까지)·구역(255개까지) 레코드는 base 로 고른 원래 레코드를 틀로 삼고,
+그 표를 --person-at·--monster-at·--area-at 으로 뱅크 23 의 빈 자리에 옮겨야 한다.
 """
 import argparse
 import json
@@ -35,6 +39,22 @@ SHOP_BANK = (0x06F4AE, 0x06F54E)
 SHOP_TABLE = (0x06F4BA, 0x06F50D)
 # 7번째부터는 고를 수는 있지만 목록 창 밖(비교 창 아래)이라 보이지 않는다.
 SHOP_ITEMS_MAX = 6
+# 23:EDCD 가 일행 레코드 +0 & 3F 로 성장 레코드를 고르므로 종류마다 64개까지. 기준 주소는 LDX 즉값 하나뿐이고
+# 레코드는 데이터 뱅크 23 으로 읽는다.
+GROWTH_MAX = 64
+GROWTH_BASE = {'person': 0x23EDD3, 'monster': 0x23EDDA}   # LDX #즉값 명령 주소
+# 01:84B8 이 구역 번호(8비트)에 22를 곱해 읽으므로 구역은 FF(조우 없음) 앞의 255개까지.
+AREA_MAX = 255
+# 구역 표를 읽는 명령의 피연산자(명령 주소 + 1)와 그 명령이 읽는 필드. 23:EA50 은 LDA #즉값(포인터), 나머지는
+# 데이터 뱅크 23 의 LDA abs,X. 01:84C9 는 LDA long,X 라 뱅크 바이트도 쓴다.
+AREA_OPERANDS = ((0x23E875, 5), (0x23E87C, 6), (0x23E885, 7), (0x23E8CD, 4), (0x23E8DD, 0), (0x23E8E6, 8),
+                 (0x23E904, 1), (0x23E944, 9), (0x23E956, 11), (0x23E9BB, 1), (0x23E9C3, 2), (0x23E9CB, 3),
+                 (0x23EA50, 0), (0x23EAAD, 1))
+AREA_LONG = 0x0184C9
+# 옮긴 표를 둘 수 있는 뱅크 23 자리: 원래 롬의 빈 자리, 그리고 dq5namewrite.py --at 으로 이름 표를 옮겨야
+# 비는 23:C242~D6A0. 옮긴 표가 떠난 원래 자리도 쓸 수 있다.
+FREE_23 = (0x23FF20, 0x240000)
+NAMES_23 = (0x23C242, 0x23D6A1)
 
 
 def integer(value, maximum, name):
@@ -231,7 +251,66 @@ def shop_writes(rom, changes, shop_at):
     return out
 
 
+def parse_at(value, name):
+    """'23:AAAA' → CPU 주소. 성장·구역 표는 데이터 뱅크 23 으로 읽으므로 뱅크 23 만 받는다."""
+    bank, _, low = value.partition(':') if isinstance(value, str) else ('', '', '')
+    try:
+        addr = int(bank, 16) << 16 | int(low, 16)
+    except ValueError:
+        raise ValueError(f'{name}: BB:AAAA 형식이어야 함') from None
+    if len(bank) != 2 or len(low) != 4 or addr >> 16 != 0x23 or addr & 0xFFFF < 0x8000:
+        raise ValueError(f'{name}: 뱅크 23 의 8000~FFFF 여야 함')
+    return addr
+
+
+def table_bases(rom):
+    """성장(사람·몬스터)·구역 표를 읽는 명령의 피연산자에서 표 시작 주소를 읽는다. 피연산자가 서로 맞지 않으면 오류."""
+    for at, opcode in [(at, 0xA2) for at in GROWTH_BASE.values()] + [(AREA_LONG, 0xBF)] + \
+            [(at, 0xA9 if at == 0x23EA50 else 0xBD) for at, _ in AREA_OPERANDS]:
+        if read(rom, at, 1)[0] != opcode:
+            raise ValueError(f'{at:06X}: 표를 읽는 명령({opcode:02X})이 아님')
+    bases = {kind: 0x230000 | int.from_bytes(read(rom, at + 1, 2), 'little') for kind, at in GROWTH_BASE.items()}
+    area = {0x230000 | (int.from_bytes(read(rom, at + 1, 2), 'little') - field) for at, field in AREA_OPERANDS}
+    area.add(int.from_bytes(read(rom, AREA_LONG + 1, 3), 'little'))
+    if len(area) != 1:
+        raise ValueError('구역 표를 읽는 명령의 주소가 서로 다름')
+    bases['area'] = area.pop()
+    return bases
+
+
+def relocation_writes(rom, kind, at):
+    """표 kind 를 at 으로 가리키게 고치는 (주소, 새 바이트, 원래 바이트, 설명) 목록."""
+    if kind in GROWTH_BASE:
+        return [(GROWTH_BASE[kind] + 1, (at & 0xFFFF).to_bytes(2, 'little'), read(rom, GROWTH_BASE[kind] + 1, 2),
+                 f'{kind} growth base')]
+    out = [(op + 1, ((at & 0xFFFF) + field).to_bytes(2, 'little'), read(rom, op + 1, 2), 'area operand')
+           for op, field in AREA_OPERANDS]
+    out.append((AREA_LONG + 1, at.to_bytes(3, 'little'), read(rom, AREA_LONG + 1, 3), 'area long operand'))
+    return out
+
+
+def check_places(spans, reuse_names):
+    """옮긴 표 자리 {종류: (시작, 끝, 원래 시작, 원래 끝)} 가 쓸 수 있는 자리 안이고 서로 겹치지 않는지 본다."""
+    allowed = [FREE_23] + ([NAMES_23] if reuse_names else []) + [(a, b) for _, _, a, b in spans.values()]
+    merged = []
+    for a, b in sorted(allowed):
+        if merged and a <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], b)
+        else:
+            merged.append([a, b])
+    for kind, (a, b, _, _) in spans.items():
+        if not any(x <= a and b <= y for x, y in merged):
+            raise ValueError(f'{kind} 표 자리 {a:06X}~{b - 1:06X} 는 빈 자리(23:FF20~, 옮긴 표가 떠난 자리'
+                             f'{", 이름 표 자리" if reuse_names else ""}) 밖임')
+    for k1, (a1, b1, _, _) in spans.items():
+        for k2, (a2, b2, _, _) in spans.items():
+            if k1 < k2 and a1 < b2 and a2 < b1:
+                raise ValueError(f'{k1}·{k2} 표의 새 자리가 겹침')
+
+
 def dump(rom):
+    if table_bases(rom) != {'person': GROWTH['person'][0], 'monster': GROWTH['monster'][0], 'area': AREAS}:
+        raise ValueError('성장·구역 표가 원래 자리가 아님; 원본 롬만 읽음')
     return {'format': FORMAT,
             'growth': [{'kind': kind, 'index': i, **growth_fields(read(rom, base + i * RECORD, RECORD))}
                        for kind, (base, count) in GROWTH.items() for i in range(count)],
@@ -242,11 +321,13 @@ def dump(rom):
             'coin_prices': [int.from_bytes(read(rom, COIN_PRICES + 3 * i, 3), 'little') for i in range(6)]}
 
 
-def edits(rom, doc, shop_at=None):
+def edits(rom, doc, shop_at=None, places=None, reuse_names=False):
+    """places 는 {'person'·'monster'·'area': 새 CPU 주소}. 준 표는 통째로 옮기고 읽는 명령을 고친다."""
     fields(doc, {'format', 'growth', 'encounters', 'shops', 'medal_prices', 'coin_prices'}, '문서')
     if doc.get('format') != FORMAT:
         raise ValueError(f'format은 {FORMAT}이어야 함')
-    out, shop_changes = [], {}
+    places = places or {}
+    out, shop_changes, records = [], {}, {}
     for section in ('growth', 'encounters', 'shops'):
         rows = doc.get(section, [])
         if not isinstance(rows, list):
@@ -255,21 +336,32 @@ def edits(rom, doc, shop_at=None):
         shops = shop_records(rom) if section == 'shops' and rows else {}
         for row in rows:
             if section == 'growth':
-                fields(row, {'kind', 'index', 'breaks', 'exp2', 'multipliers', 'stats'}, section)
+                fields(row, {'kind', 'index', 'base', 'breaks', 'exp2', 'multipliers', 'stats'}, section)
                 kind = row.get('kind')
                 if not isinstance(kind, str) or kind not in GROWTH:
                     raise ValueError('growth kind는 person/monster여야 함')
                 base, count = GROWTH[kind]
-                index = integer(row.get('index'), count - 1, 'growth index')
+                index = integer(row.get('index'), GROWTH_MAX - 1, 'growth index')
                 key, addr = (kind, index), base + index * RECORD
-                raw = read(rom, addr, RECORD)
+                if index < count:
+                    if 'base' in row:
+                        raise ValueError('base 는 새 레코드에만 씀')
+                    raw = read(rom, addr, RECORD)
+                else:
+                    raw = read(rom, base + integer(row.get('base'), count - 1, '새 성장 레코드 base') * RECORD, RECORD)
                 new = encode_growth(raw, row)
             elif section == 'encounters':
-                fields(row, {'index', 'level', 'slots', 'fixed', 'species_weights', 'rate_index', 'flag_1000',
+                fields(row, {'index', 'base', 'level', 'slots', 'fixed', 'species_weights', 'rate_index', 'flag_1000',
                              'flag_1010', 'fixed_night_only'}, section)
-                key = integer(row.get('index'), AREA_COUNT - 1, 'encounter index')
+                key = integer(row.get('index'), AREA_MAX - 1, 'encounter index')
                 addr = AREAS + key * AREA_SIZE
-                raw = read(rom, addr, AREA_SIZE)
+                if key < AREA_COUNT:
+                    if 'base' in row:
+                        raise ValueError('base 는 새 레코드에만 씀')
+                    raw = read(rom, addr, AREA_SIZE)
+                else:
+                    raw = read(rom, AREAS + integer(row.get('base'), AREA_COUNT - 1, '새 구역 base') * AREA_SIZE,
+                               AREA_SIZE)
                 new = encode_encounter(raw, row)
             else:
                 fields(row, {'kind', 'index', 'key', 'items'}, section)
@@ -297,7 +389,8 @@ def edits(rom, doc, shop_at=None):
             if key in seen:
                 raise ValueError(f'{section}: 중복 항목 {key}')
             seen.add(key)
-            out.append((addr, new, raw, f'{section} {key}'))
+            records[('area', key) if section == 'encounters' else key] = (addr, new, raw)
+    out += table_writes(rom, records, places, reuse_names)
     if shop_changes or shop_at is not None:
         out += shop_writes(rom, shop_changes, shop_at)
     for name, addr, size, maximum in (('medal_prices', MEDAL_PRICES, 1, 255), ('coin_prices', COIN_PRICES, 3, 0xFFFFFF)):
@@ -308,9 +401,41 @@ def edits(rom, doc, shop_at=None):
     return out
 
 
-def patch(rom, doc, name='progress', shop_at=None):
+def table_writes(rom, records, places, reuse_names):
+    """성장·구역 레코드 쓰기. 새 레코드는 원래 수 바로 뒤부터 빈틈 없이 이어져야 하고 그 표는 옮겨야 한다."""
+    tables = {'person': (GROWTH['person'][0], GROWTH['person'][1], RECORD),
+              'monster': (GROWTH['monster'][0], GROWTH['monster'][1], RECORD),
+              'area': (AREAS, AREA_COUNT, AREA_SIZE)}
+    if places.keys() - tables.keys():
+        raise ValueError(f'옮길 수 있는 표는 {sorted(tables)}')
+    out, spans, rows = [], {}, {}
+    for kind, (base, count, size) in tables.items():
+        added = sorted(i for k, i in records if k == kind and i >= count)
+        if added != list(range(count, count + len(added))):
+            raise ValueError(f'{kind} 새 레코드 번호는 {count} 부터 빈틈 없이 이어져야 함')
+        if added and kind not in places:
+            raise ValueError(f'{kind} 새 레코드는 원래 자리에 둘 곳이 없어 --{kind}-at 으로 표를 옮겨야 함')
+        if kind not in places:
+            out += [(addr, new, raw, f'{kind} {i}') for (k, i), (addr, new, raw) in records.items() if k == kind]
+            continue
+        body = b''.join(records[kind, i][1] if (kind, i) in records else read(rom, base + i * size, size)
+                        for i in range(count + len(added)))
+        at = places[kind]
+        spans[kind] = (at, at + len(body), base, base + count * size)
+        rows[kind] = body
+    if spans:
+        table_bases(rom)
+    check_places(spans, reuse_names)
+    for kind, body in rows.items():
+        at = places[kind]
+        out.append((at, body, read(rom, at, len(body)), f'{kind} table relocated'))
+        out += relocation_writes(rom, kind, at)
+    return out
+
+
+def patch(rom, doc, name='progress', shop_at=None, places=None, reuse_names=False):
     writes = []
-    for addr, new, old, note in edits(rom, doc, shop_at):
+    for addr, new, old, note in edits(rom, doc, shop_at, places, reuse_names):
         if new == old:
             continue
         write = {'at': f'{addr >> 16:02X}:{addr & 0xFFFF:04X}', 'hex': new.hex(' '), 'note': note}
@@ -339,6 +464,11 @@ def main():
     write.add_argument('-o', '--out', required=True)
     write.add_argument('--name', default='progress')
     write.add_argument('--shop-at', help='상점 목록을 옮길 자리(예 0B:FBB0)')
+    write.add_argument('--person-at', help='사람 성장 표를 옮길 뱅크 23 자리')
+    write.add_argument('--monster-at', help='동료 몬스터 성장 표를 옮길 뱅크 23 자리')
+    write.add_argument('--area-at', help='조우 구역 표를 옮길 뱅크 23 자리')
+    write.add_argument('--reuse-names', action='store_true',
+                       help='dq5namewrite.py --at 으로 이름 표를 옮긴다는 전제로 23:C242~D6A0 을 쓴다')
     sub.add_parser('check')
     args = parser.parse_args()
     try:
@@ -354,7 +484,9 @@ def main():
                 if args.shop_at:
                     bank, _, low = args.shop_at.partition(':')
                     shop_at = int(bank, 16) << 16 | int(low, 16)
-                result = patch(rom, json.load(f), args.name, shop_at)
+                places = {kind: parse_at(value, f'--{kind}-at') for kind, value in
+                          (('person', args.person_at), ('monster', args.monster_at), ('area', args.area_at)) if value}
+                result = patch(rom, json.load(f), args.name, shop_at, places, args.reuse_names)
         os.makedirs(os.path.dirname(args.out) or '.', exist_ok=True)
         with open(args.out, 'w', encoding='utf-8') as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
