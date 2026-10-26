@@ -30,6 +30,22 @@ def draft_figure():
     return sheet.resize((sheet.width * 8, sheet.height * 8), Image.Resampling.NEAREST)
 
 
+MENU_SHOTS = ("book", "menu", "settings", "delete")
+
+
+def menu_figure(folder):
+    """한글 메뉴 롬의 MesenCE 화면 넷(첫 메뉴·기록 있는 메뉴·설정·지우기 확인)을 2×2 로 2배.
+    화면은 work/dq4-menu/fig/<이름>.png 에 둔다. 만드는 명령은 sfc/dq4/docs/dq4-menu-format.md 「검증」."""
+    paths = [folder / f"{name}.png" for name in MENU_SHOTS]
+    if not all(p.exists() for p in paths):
+        return None
+    sheet = Image.new("RGB", (256 * 2 + 4, 224 * 2 + 4), (24, 24, 24))
+    for i, path in enumerate(paths):
+        with Image.open(path) as shot:
+            sheet.paste(shot.convert("RGB").crop((0, 0, 256, 224)), ((i % 2) * 260, (i // 2) * 228))
+    return sheet.resize((sheet.width * 2, sheet.height * 2), Image.Resampling.NEAREST)
+
+
 def main():
     images = assets()
     output = ROOT / "sfc" / "dq4" / "images"
@@ -47,6 +63,11 @@ def main():
         print("work/dq4-sprites 에 DQ5 덤프·보행 화면이 없어 dq4-sprites-field.webp 는 건너뜀")
     else:
         field.save(output / "dq4-sprites-field.webp", lossless=True)
+    menu = menu_figure(ROOT / "work" / "dq4-menu" / "fig")
+    if menu is None:
+        print("work/dq4-menu/fig 에 메뉴 화면이 없어 dq4-menu.webp 는 건너뜀")
+    else:
+        menu.save(output / "dq4-menu.webp", lossless=True)
     with Image.open(ROOT / "sfc" / "dq4" / "tools" / "dq4art" / "journey.png") as source:
         source.save(output / "dq4-graphics-journey.webp", lossless=True)
     frames = []

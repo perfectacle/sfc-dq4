@@ -8,6 +8,8 @@
 - [2026-10-25-176: 빈 자리를 곡으로 다시 확인, 부팅 시험을 장면까지, IPS 줄이기](../journal/2026-10-25-176-build2.md)
 - [2026-10-25-197: 빈 자리를 맵·전투로 넓게 감시, 부팅 시험에 대화 장면](../journal/2026-10-25-197-build3.md)
 - [2026-10-26-37: 게임 데이터 표 쓰기 도구](../journal/2026-10-26-37-tablewrite.md)
+- [2026-10-26-41: 실내 맵 레코드 쓰기 도구](../journal/2026-10-26-41-mapwrite.md)
+- [2026-10-26-46: 블록 배치 목록을 맵 명령으로](../journal/2026-10-26-46-mapcompile.md)
 
 ## 흐름
 
@@ -78,6 +80,8 @@ uv run --locked python sfc/dq5/tools/dq5build.py rom/dq5.sfc fromrom work/hangul
 | 도구 | 쓰는 것 | 입력 |
 | --- | --- | --- |
 | `dq5tables.py` | 몬스터·물건·주문·피해량·동료 몬스터 표 | `dq5tables/1` JSON |
+| `dq5mapwrite.py` | 실내 맵 레코드(머리·배치 비트스트림·속성 패스)와 맵 포인터 | `dq5map/1` JSON |
+| `dq5mapcompile.py` | 블록 배치 목록 → 배치 명령(`dq5mapwrite.py` 의 입력) | `dq5mapsrc/1` JSON |
 
 ### 게임 데이터 표 `dq5tables/1`
 
@@ -113,6 +117,91 @@ uv run --locked python sfc/dq5/tools/dq5tables.py rom/dq5.sfc check work/tables/
 - 내보낸 JSON 을 그대로 다시 넣으면 바뀐 바이트가 0개였습니다. 내보낸 값은 읽기 도구 `dq5monster.py`(236종의 필드·내성·행동)·`dq5item.py`(216개)·`dq5spell.py`(171개)와 하나도 다르지 않았습니다.
 - 다섯 표의 첫·둘째·마지막 항목에서 필드마다 0 과 최댓값을 넣고 다시 읽자 354번 모두 그 필드만 바뀌었습니다.
 - スライム(`00`)을 고친 롬을 빌더로 만들어 슬라임 셋 이벤트 전투(handoff 의 전투 재현)를 했습니다. `HP` 300 이면 전투 슬롯 `7E:07C0 + 슬롯*16 + 2` 가 셋 모두 `2C 01` 이었습니다(바이트10 의 위 비트까지 들어감). `HP` 1·`경험치` 777 이면 「それぞれ 2331ポイントの けいけんちを かくとく！」, `경험치` 0·`금화` 600 이면 소지금(`7E:2019`)이 20 → 1,820 이었습니다(바이트8 bit2-3 의 위 비트까지).
+
+### 실내 맵 레코드 `dq5map/1`
+
+`sfc/dq5/tools/dq5mapwrite.py` 는 [dq5-map-format.md 「맵 레코드」](dq5-map-format.md#맵-레코드) 를 명령 단위 JSON 으로 풀고 다시 쌉니다. 실내 맵 346개와 그룹 `50` 이상 맵 18개를 모두 다룹니다.
+
+```sh
+uv run --locked python sfc/dq5/tools/dq5mapwrite.py rom/dq5.sfc check
+uv run --locked python sfc/dq5/tools/dq5mapwrite.py rom/dq5.sfc dump 01 05 -o work/map/0105.json
+uv run --locked python sfc/dq5/tools/dq5mapwrite.py rom/dq5.sfc patch work/map/0105.json -o work/build/map.dq5patch.json
+```
+
+```json
+{
+ "format": "dq5map/1",
+ "map": "01/05",
+ "kind": 1, "width": 68, "height": 60, "outside": 0, "zone": 0, "attr": 8, "bits": 12,
+ "background_hi": 130, "background_lo": 206,
+ "commands": [
+  ["block", 904],
+  ["fill", 50, 56, 66, 58],
+  ["put", 42, 50],
+  ["end"]
+ ],
+ "stream_tail": 0,
+ "passes": [
+  {"vertical": false, "flag_low": 0, "end_low": 8, "entries": [
+    [1, 4, 66, 1, "long"]
+  ]},
+  …
+ ],
+ "junk": "800"
+}
+```
+
+| 키 | 뜻 |
+| --- | --- |
+| `kind`~`background_lo` | 머리 9바이트(`+0`~`+8`) 그대로. `bits` 는 위치 비트 수 |
+| `commands` | `["block", 블록 번호]`·`["put", x, y]`·`["fill", x0, y0, x1, y1]`·`["end"]`. 위치 `y*폭+x` 가 `bits` 비트에 들어가야 함. 마지막은 `end` |
+| `passes` | 속성 패스 1·2·3. `vertical` 은 반복 방향, `entries` 는 `[x, y, 칸 수, 값 니블, 꼴]`. 꼴 `one` 은 1칸, `short` 는 2~17칸, `long` 은 2~257칸 |
+| `stream_tail`·`flag_low`·`end_low`·`junk` | 게임이 읽지 않는 비트(비트스트림 끝의 남은 비트, 패스 머리 바이트 아래 7비트, 끝 바이트 아래 6비트, 아무도 읽지 않는 니블). 원래 레코드와 바이트까지 같게 싸려고 담음. 빼면 0 |
+
+- `patch` 는 새 레코드를 늘린 롬의 `--at`(기본 `30:8000`)부터 차례로 놓고 맵 포인터(그룹 목록 `0F:8ED7`, 그룹 `50` 이상은 `1F:CEB6`)의 24비트를 바꿉니다. 레코드는 파일 위치(`0x…`)로 써서 뱅크를 넘어도 됩니다(게임 리더 `01:AC66` 이 `FFFF` 에서 다음 뱅크로 넘어감). `rom_size` 는 놓은 끝에 맞춰 2·3·4 를 적습니다.
+- `--in-place` 는 원래 자리에 덮습니다. 원래 레코드보다 길면 거부합니다.
+- 속성 패스의 니블 위치는 게임 리더를 그대로 따릅니다. 게임 리더의 상태(주소, 반 바이트)를 니블 위치 q 로 보면 패스 머리는 `N[q]` 의 bit3 이고, 이어 읽는 바이트·니블은 `N[q+1]` 부터입니다. 그래서 패스 2·3 의 머리 니블은 앞 패스의 끝 바이트 아래 니블과 겹칠 수 있고(그때는 `flag_low` 가 없음), 머리 다음 니블은 아무도 읽지 않습니다.
+- 레코드는 마지막으로 읽힌 니블이 든 바이트까지입니다. 20/03·31/04·31/05 세 맵은 패스 3 끝 바이트의 아래 니블이 다음 맵 머리 첫 바이트와 같은 바이트라 레코드가 1바이트 겹칩니다(게임은 그 니블을 보지 않음).
+
+확인한 것:
+
+- `check`: 364개 맵을 풀고 다시 싸자 233,794바이트 모두 원래 롬과 같았습니다. 레코드 끝은 다음 맵 시작과 맞닿았고(겹치는 세 곳 빼고), `dq5map.py` 디코더가 속성 패스를 끝낸 자리와도 같았습니다.
+- 01/05 를 고치지 않고 `30:8000` 으로 옮긴 2MB 롬과, 끝에 `["block", 774], ["put", 4, 2], ["block", 356], ["fill", 8, 2, 13, 5]` 를 더해 옮긴 롬을 만들었습니다. 배 사다리 순간이동으로 들어가 `01:BA4C`(속성 패스 끝)에서 WRAM 을 덤프하자, 옮기기만 한 롬은 셀 버퍼가 원래 롬과 같았고, 고친 롬은 셀 28칸이 달라졌으며 `dq5map.py --compare` 가 두 롬 모두 0바이트 차이였습니다. 화면에도 더한 붉은 바닥과 벽 조각이 보였습니다.
+
+### 블록 배치 목록 `dq5mapsrc/1`
+
+배치 명령을 손으로 적는 대신, 블록을 놓을 자리를 칠하는 순서대로 적으면 `sfc/dq5/tools/dq5mapcompile.py` 가 put·block·fill 명령으로 바꿉니다. 새 맵을 그릴 때는 이 목록을 씁니다.
+
+```sh
+uv run --locked python sfc/dq5/tools/dq5mapcompile.py rom/dq5.sfc extract 01 05 -o work/map/0105.src.json
+uv run --locked python sfc/dq5/tools/dq5mapcompile.py rom/dq5.sfc compile work/map/0105.src.json -o work/map/0105.json
+uv run --locked python sfc/dq5/tools/dq5mapwrite.py rom/dq5.sfc patch work/map/0105.json -o work/build/map.dq5patch.json
+uv run --locked python sfc/dq5/tools/dq5mapcompile.py rom/dq5.sfc check
+```
+
+```json
+{
+ "format": "dq5mapsrc/1",
+ "map": "01/05",
+ "kind": 1, "width": 68, "height": 60, …, "background_hi": 130, "background_lo": 206,
+ "placements": [
+  [50, 56, 904],
+  [52, 56, 904],
+  [4, 2, 774]
+ ],
+ "passes": [ … dq5map/1 과 같음 … ]
+}
+```
+
+- `placements` 는 `[x, y, 블록]` 을 칠하는 순서대로 적습니다. 블록은 원점(왼쪽 위)부터 블록 폭×높이 셀을 덮고, 뒤 배치가 앞 배치를 덮습니다. 머리의 배경 블록(`background_hi` bit7)은 모든 배치보다 먼저 맵 전체를 칠합니다.
+- `extract` 는 기존 맵의 명령을 펼쳐(fill 은 게임처럼 원점마다) 이 목록으로 만듭니다. 머리와 속성 패스는 그대로 옮깁니다.
+- `compile` 이 순서를 고르는 법: 셀마다 배치가 쓰는 단위(`+1` 플래그, 아래층 `+2`~`+4`, 위층 `+5`~`+7`)를 보고 끝까지 남는 단위가 하나도 없는 배치는 버립니다. 남은 배치끼리는 같은 단위를 쓰는 앞뒤만 지키고, 지금 칠할 수 있는 배치가 가장 많은 블록을 골라 한 묶음으로 냅니다. 묶음은 블록 크기 간격의 직사각형(원점 3개 이상)을 fill, 나머지를 put 으로 냅니다. 버린 배치 자리는 그것을 덮을 배치가 아직 나오지 않았고 같은 묶음에도 없을 때만 직사각형을 메우는 데 씁니다.
+- CHR 의 VRAM 슬롯은 블록을 처음 쓰는 순서대로 받으므로(`01:8C15`), 명령 순서가 바뀌면 셀 버퍼의 타일 워드 값(슬롯 번호)은 원래와 달라도 그림은 같습니다. `check` 는 슬롯을 CHR 번호로 되돌려 견줍니다.
+
+확인한 것:
+
+- `check`: 364개 맵을 `extract` → `compile` 해 새 레코드로 풀자 셀 버퍼(슬롯을 CHR 로 되돌린 것)가 모두 원래와 같았고, 쓰는 슬롯이 늘어난 맵도 없었습니다. 레코드는 233,794바이트에서 249,471바이트로 6.7% 컸습니다(사람이 겹쳐 놓은 큰 fill 을 다 되살리지 못함).
+- 01/05 를 `extract` 한 목록 그대로, 그리고 블록 7개(`[4, 2, 774]` 와 블록 356 의 2×3 격자)와 속성 패스 엔트리 셋을 더한 목록을 각각 컴파일해 `30:8000` 에 놓았습니다. 두 롬 모두 `01:BA4C` 의 게임 셀 버퍼가 `dq5map.py --compare` 와 0바이트 차이였습니다. 더한 엔트리는 게임에서도 패스 1 `(10,6)` 의 `+1` 아래 니블 1 → 5, 패스 2 세로 3칸 `(20,6)`~`(20,8)` 의 `+1` 에 `40`, 패스 3 세로 4칸 `(30,10)`~`(30,13)` 의 `+0` 위 니블 3 으로 들어갔습니다.
 
 ## 빈 자리 지도
 
@@ -223,5 +312,5 @@ uv run --locked python sfc/dq5/tools/dq5tables.py rom/dq5.sfc check work/tables/
 
 ## 남은 것
 
-- 쓰기 도구가 아직 없는 것: 실내 맵·필드 지도 인코더, 이벤트·인물 스크립트 인코더, 대사 대량 넣기, 성장 표(`23:EB50`)·조우 구역 레코드(`23:96F3`)·상점 목록.
+- 쓰기 도구가 아직 없는 것: 필드 지도 인코더, 이벤트·인물 스크립트 인코더, 대사 대량 넣기, 성장 표(`23:EB50`)·조우 구역 레코드(`23:96F3`)·상점 목록.
 - `dq5tables.py` 의 물건·주문·피해량·동료 표 쓰기는 읽기 도구와 값을 대조했을 뿐, 고친 롬을 게임에서 돌려 보지는 않았습니다.

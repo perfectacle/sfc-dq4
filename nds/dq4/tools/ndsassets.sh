@@ -111,12 +111,19 @@ if has sound; then
   for pid in "${pids[@]}"; do wait "$pid"; done
   $PY $TOOLS/ndssound.py summary "$WORK/summary.json" "$WORK"/sc{0,1,2,3}.json
   $PY $TOOLS/ndssound.py gallery "$OUT/sound" --scenes "$WORK/summary.json"
+  $PY $TOOLS/ndssound.py mini2sf "$OUT/sound/mini2sf"
+  # 대조 녹음 WAV(약 176MB)는 작업 폴더에 두고 점수(compare.json)만 에셋에 넣는다.
+  $PY $TOOLS/ndssound.py compare "$WORK/compare"
+  mkdir -p "$OUT/sound/compare"
+  cp "$WORK/compare/compare.json" "$OUT/sound/compare/compare.json"
   source_txt "$OUT/sound" "NDS DQ4 소리" \
     "$PY $TOOLS/ndssound.py export OUT/sound" \
     "$PY $TOOLS/ndssound.py scorecheck OUT/sound   # 악보 json 으로 다시 만든 MIDI 가 .mid 와 같은지" \
     "$PY $TOOLS/ndssound.py scenes $WORK/scI.json --maps all --shard I/4   # I = 0 1 2 3" \
     "$PY $TOOLS/ndssound.py summary $WORK/summary.json $WORK/sc0.json $WORK/sc1.json $WORK/sc2.json $WORK/sc3.json" \
-    "$PY $TOOLS/ndssound.py gallery OUT/sound --scenes $WORK/summary.json"
+    "$PY $TOOLS/ndssound.py gallery OUT/sound --scenes $WORK/summary.json" \
+    "$PY $TOOLS/ndssound.py mini2sf OUT/sound/mini2sf" \
+    "$PY $TOOLS/ndssound.py compare $WORK/compare   # compare.json 만 OUT/sound/compare/ 로, 녹음 WAV 는 두지 않음"
 fi
 
 # 첫 페이지는 옆 폴더(screens/·sound/)가 있어야 그 링크가 들어가므로 마지막에 쓴다.
