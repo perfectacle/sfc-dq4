@@ -1,6 +1,6 @@
 """DQ5(SFC) 부팅 시험. 원래 롬과 만든 롬을 MesenCE testrunner 로 전원부터 켜 A 를 눌러 가며 새 게임 첫 장면
 (배 선실, 맵 17/00)까지 가게 하고, 그 맵에 닿았는지와 정한 프레임의 화면 상태 해시(VRAM·CGRAM·OAM·WRAM)가
-원래 롬과 같은지 본다. 화면 PNG 도 남기지만 실행마다 한 프레임 앞뒤가 섞여 찍혀 견주지 않는다.
+원래 롬과 같은지 본다. 화면 PNG 도 남긴다(견주지는 않는다).
 
 환경 변수 MESENCE(실행 파일)가 있어야 한다. 롬은 work/boot/ 에 시험 전용 이름으로 복사하고, 그 이름의 SRAM 파일을
 지운 뒤 RAM 을 0 으로 켜서 돌린다. SRAM 폴더는 MESENCE_SAVES(기본 macOS 의 MesenCE 설정 폴더 Saves).
@@ -30,7 +30,9 @@ def start(mesence, libdir, rom, out):
         os.remove(srm)
     env = dict(os.environ, LIBDIR=libdir, SHOT_DIR=os.path.abspath(out))
     # 설정의 Snes.RamPowerOnState 가 Random 이면 같은 롬도 결과가 달라진다. 이 실행만 0 으로 켠다.
-    return subprocess.Popen([mesence, '--testrunner', os.path.abspath(rom), LUA, '--Snes.RamPowerOnState=AllZeros'],
+    # 프레임 건너뛰기를 끄지 않으면 화면 PNG 가 시간에 따라 1~3프레임 앞의 그림으로 찍힌다.
+    return subprocess.Popen([mesence, '--testrunner', os.path.abspath(rom), LUA, '--Snes.RamPowerOnState=AllZeros',
+                             '--Snes.DisableFrameSkipping=true'],
                             env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
