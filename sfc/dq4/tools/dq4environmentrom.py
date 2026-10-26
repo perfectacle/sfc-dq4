@@ -22,7 +22,7 @@ for path in (TOOLS, DQ5_TOOLS):
         sys.path.insert(0, str(path))
 
 from dq4environmentart import create_assets, palette_variant  # noqa: E402
-from dq4environmentmap import MAP_PALETTES, block_prop, prepare_maps, sheet_art  # noqa: E402
+from dq4environmentmap import block_prop, map_palette, prepare_maps, sheet_art  # noqa: E402
 from dq5mapwrite import Rom, encode, lorom, pointer_addr  # noqa: E402
 
 # FC map name -> replaced DQ5 interior map. Targets must have no animated tiles,
@@ -43,6 +43,9 @@ TARGETS = {
     # Harbour, theatre and the smaller sheets; none of these has a door.
     "11-00": (0x03, 0x03), "1A-00": (0x03, 0x09), "0E-00": (0x04, 0x0A), "15-03": (0x0A, 0x08),
     "34-06": (0x0A, 0x0B), "2E-00": (0x0B, 0x03),
+    # One doorless map of several dungeon and tower families.
+    "34-00": (0x0D, 0x01), "36-01": (0x0D, 0x02), "2F-00": (0x11, 0x01), "43-00": (0x12, 0x02),
+    "46-00": (0x12, 0x04), "31-02": (0x12, 0x06), "48-01": (0x12, 0x07), "2D-00": (0x15, 0x00),
 }
 # Further banks for map records once the first one reaches the library.
 MAPS_NEXT = (0x3E8000, 0x3F8000)
@@ -465,12 +468,12 @@ def build(dq5_path, dq4_path, out):
     orig_entry1 = 0x8000 + 3 + 2 * (((dq5[_off(0x168000)] >> 3 & 7) + 1) * ((dq5[_off(0x168000)] & 7) + 1))
     if orig_entry1 == BLOCKS_AT + 11:
         raise ValueError("original first block has our block size; dirty-table check would not work")
-    variants = sorted({MAP_PALETTES.get(name, "normal") for name in maps})
+    variants = sorted({map_palette(name, source.t) for name, (source, _) in maps.items()})
     palette_at = {kind: PALETTE_AT + 0x100 * i for i, kind in enumerate(variants)}
     found = {name: objects(source) for name, (source, _) in maps.items()}
     lib_code, stub_code, sites = engine_code(
         len(block_words), water_ids,
-        [palette_at[MAP_PALETTES.get(name, "normal")] for name in TARGETS],
+        [palette_at[map_palette(name, maps[name][0].t)] for name in TARGETS],
         [object_entries(found[name]) for name in TARGETS],
         [water_block(*maps[name]) is not None for name in TARGETS])
 

@@ -94,3 +94,5 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [2026-10-27-16: 항구 석축과 극장 객석](journal/2026-10-27-16-environment-harbour.md)
 
 - [2026-10-27-17: 시퀀스를 되풀이·부르기로 묶기](journal/2026-10-27-17-sound-compact.md)
+
+- [2026-10-27-18: 던전·탑 시트는 재질로 그리기](journal/2026-10-27-18-environment-dungeons.md)

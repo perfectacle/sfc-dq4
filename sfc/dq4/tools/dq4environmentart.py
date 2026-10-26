@@ -38,11 +38,20 @@ _FLAT_PALETTE = [channel for rgb in PALETTE for channel in rgb] + [0] * 384
 _RESERVED = {(5, i) for i in (1, 2, 3, 6, 7)} | {(6, i) for i in (1, 2, 3, 6, 7, 9)}
 
 
+# The demon castles turn the grey stone ramp (bank 3, colours 1-7) purple.
+_PURPLE = ("100818", "2e1850", "432a78", "5a3c9c", "7656be", "a08ade", "d8ceff")
+
+
 def palette_variant(kind):
     """Flat 768-entry palette. "dim" follows FC DQ4's darker set for アッテムト (each colour one
-    NES brightness step down, e.g. 15→07, 1a→0a, 27→17)."""
+    NES brightness step down, e.g. 15→07, 1a→0a, 27→17); "purple" recolours the grey stone."""
     if kind == "normal":
         return list(_FLAT_PALETTE)
+    if kind == "purple":
+        out = list(_FLAT_PALETTE)
+        for i, value in enumerate(_PURPLE, 1):
+            out[(3 * 16 + i) * 3:(3 * 16 + i) * 3 + 3] = _rgb(value)
+        return out
     if kind != "dim":
         raise ValueError(kind)
     out = []
@@ -1388,6 +1397,210 @@ def _harbour_theatre_assets():
     return assets
 
 
+_ROCK_NAMES = {1: "이끼", 2: "흙", 4: "갈색", 5: "붉은"}
+
+
+def _cave_rock(bank):
+    """DQ5 cave walls: lit lumps over dark crevices, using ramp 1-7 of one bank."""
+    c = _Canvas(bank)
+    # Bank 1 runs up to neon greens; moss stays in its darker half.
+    body, light = (3, 4) if bank == 1 else (4, 6)
+    _stones(c, 51 + bank, 6, body, 1, 2, light)
+    rng = random.Random(bank)
+    for _ in range(14):
+        x, y = rng.randrange(16), rng.randrange(16)
+        if c.image.getpixel((x, y)) == c.c(body):
+            c.point((x, y), body - 1 if rng.random() < 0.6 else body + 1)
+    return _finish(c, f"{_ROCK_NAMES[bank]} 동굴 바위벽", "town")
+
+
+def _cave_floor(bank):
+    c = _Canvas(bank, fill=4)
+    rng = random.Random(70 + bank)
+    for y in range(16):
+        for x in range(16):
+            if rng.random() < 0.14:
+                c.point((x, y), 3 if rng.random() < 0.6 else 5)
+    for x, y in ((3, 4), (11, 9), (6, 13)):
+        c.rows(("66", "53", "22"), (x, y))
+    return _finish(c, f"{_ROCK_NAMES[bank]} 동굴 바닥", "town")
+
+
+def _boulder_wall():
+    c = _Canvas(3)
+    _stones(c, 61, 4, 5, 1, 3, 6)
+    for x, y in ((3, 3), (11, 5), (6, 11), (13, 13)):
+        if c.image.getpixel((x, y)) == c.c(5):
+            c.point((x, y), 7)
+    return _finish(c, "회색 바위벽")
+
+
+def _ice_wall():
+    c = _Canvas(7, fill=4)
+    for y in range(16):
+        row, yy = divmod(y, 4)
+        for x in range(16):
+            xx = (x + (4 if row & 1 else 0)) % 8
+            if yy == 3 or xx == 7:
+                continue
+            c.point((x, y), 7 if yy == 0 else 6)
+    for x, y in ((2, 1), (10, 5), (5, 9), (13, 13)):
+        c.point((x, y), 5)
+    return _finish(c, "얼음 벽돌")
+
+
+def _ice_floor():
+    c = _Canvas(7, fill=7)
+    for x0, y0 in ((1, 3), (8, 10), (11, 1)):
+        c.line((x0, y0 + 3, x0 + 3, y0), 6)
+    c.line((0, 15, 15, 15), 6)
+    return _finish(c, "얼음 바닥")
+
+
+def _wood_grain():
+    import math
+    c = _Canvas(4)
+    for y in range(16):
+        for x in range(16):
+            r = math.hypot(x - 7.5, (y - 7.5) * 1.4)
+            c.point((x, y), (5, 6, 6, 4)[int(r * 0.9) % 4])
+    c.line((0, 0, 15, 0), 3)
+    c.line((0, 15, 15, 15), 2)
+    c.line((0, 0, 0, 15), 3)
+    c.line((15, 0, 15, 15), 2)
+    return _finish(c, "나이테 나무벽", "town")
+
+
+def _cloud():
+    c = _Canvas(7, fill=6)
+    for x, y, r in ((3, 4, 4), (11, 3, 4), (8, 10, 5), (1, 13, 3), (14, 12, 3)):
+        c.draw.ellipse((x - r, y - r, x + r, y + r), fill=c.c(7))
+    for x, y in ((5, 7), (12, 6), (10, 14)):
+        c.point((x, y), 5)
+    return _finish(c, "구름")
+
+
+def _sandstone():
+    c = _Canvas(4, fill=3)
+    for y in range(16):
+        row, yy = divmod(y, 4)
+        for x in range(16):
+            xx = (x + (4 if row & 1 else 0)) % 8
+            if yy == 3 or xx == 7:
+                continue
+            c.point((x, y), 7 if yy == 0 else 6 if (x + y) % 5 else 5)
+    return _finish(c, "사암 벽돌")
+
+
+def _ladder():
+    c = _Canvas(4)
+    for x in (3, 11):
+        c.rect((x, 0, x + 1, 15), 3)
+        c.line((x, 0, x, 15), 6)
+    for y in (2, 6, 10, 14):
+        c.line((4, y, 11, y), 6)
+        c.line((4, y + 1, 11, y + 1), 2)
+    return _finish(c, "사다리", "town")
+
+
+def _stone_steps():
+    c = _Canvas(3, fill=2)
+    for y0 in range(0, 16, 4):
+        c.line((0, y0, 15, y0), 6)
+        c.rect((0, y0 + 1, 15, y0 + 2), 5)
+        c.line((0, y0 + 3, 15, y0 + 3), 2)
+    for x in (0, 15):
+        c.line((x, 0, x, 15), 1)
+    return _finish(c, "돌계단")
+
+
+def _arrow(direction):
+    """Conveyor plate pushing one way; drawn pointing up and turned."""
+    c = _Canvas(3, fill=4)
+    c.rect((0, 0, 15, 15), 2)
+    c.rect((1, 1, 14, 14), 4)
+    c.poly(((7, 2), (13, 8), (10, 8), (10, 13), (5, 13), (5, 8), (2, 8)), 7)
+    c.line(((2, 8), (7, 3)), 6)
+    c.line(((10, 9), (10, 13), (5, 13)), 3)
+    turn = {"up": None, "right": Image.Transpose.ROTATE_270, "down": Image.Transpose.ROTATE_180,
+            "left": Image.Transpose.ROTATE_90}[direction]
+    if turn:
+        c.image = c.image.transpose(turn)
+    return _finish(c, f"밀리는 바닥 {direction}")
+
+
+def _lift():
+    c = _Canvas(3, fill=3)
+    c.rect((0, 0, 15, 15), 1)
+    c.rect((1, 1, 14, 14), 5)
+    for v in (4, 8, 11):
+        c.line((2, v, 13, v), 3)
+        c.line((v, 2, v, 13), 3)
+    c.line((1, 1, 14, 1), 7)
+    return _finish(c, "승강판")
+
+
+def _mine_beam():
+    """Timber frame propping a mine wall: lintel over two posts, rock showing between."""
+    c = _Canvas(2)
+    c.image = _cave_rock(2).copy()
+    c.draw = ImageDraw.Draw(c.image)
+    c.rect((0, 8, 15, 15), 1)
+    c.rect((0, 6, 15, 9), 5)
+    c.line((0, 6, 15, 6), 7)
+    c.line((0, 9, 15, 9), 3)
+    for x in (1, 11):
+        c.rect((x, 10, x + 3, 15), 4)
+        c.line((x, 10, x, 15), 6)
+        c.line((x + 3, 10, x + 3, 15), 2)
+    return _finish(c, "광산 들보", "town")
+
+
+def _rock_pile():
+    return _pattern(2, (
+        "................", "................", "....1111........", "...156651.......",
+        "..15677651..11..", "..16766551.1651.", ".1566655431675 1".replace(" ", "1"), ".145555433157651",
+        "1111444331166551", "1566133311555541", "1567651115544431", "15666551.1444331",
+        "14555541.1333311", ".1444431..1111..", "..111111........", "................",
+    ), "바위 더미", "town")
+
+
+def _pit():
+    c = _Canvas(2)
+    c.draw.ellipse((1, 2, 14, 14), fill=c.c(3))
+    c.draw.ellipse((2, 3, 13, 13), fill=c.c(9))
+    c.draw.arc((2, 3, 13, 13), 200, 340, fill=c.c(1))
+    c.line((4, 13, 11, 13), 5)
+    return _finish(c, "구덩이", "town")
+
+
+def _grate():
+    c = _Canvas(3, fill=1)
+    c.rect((0, 0, 15, 15), 4)
+    c.line((0, 0, 15, 0), 6)
+    for v in (3, 7, 11):
+        c.rect((v, 1, v + 1, 14), 5)
+        c.rect((1, v, 14, v + 1), 5)
+        c.line((v, 1, v, 14), 6)
+    return _finish(c, "쇠 창살 바닥")
+
+
+def _dungeon_assets():
+    assets = {f"cave_rock_{_ROCK_NAMES[b]}": _cave_rock(b) for b in _ROCK_NAMES}
+    assets.update({f"cave_floor_{_ROCK_NAMES[b]}": _cave_floor(b) for b in (2, 4)})
+    assets = {name.replace("이끼", "moss").replace("흙", "earth").replace("갈색", "brown").replace("붉은", "red"): image
+              for name, image in assets.items()}
+    assets.update({
+        "boulder_wall": _boulder_wall(), "ice_wall": _ice_wall(), "ice_floor": _ice_floor(),
+        "wood_grain": _wood_grain(), "cloud": _cloud(), "sandstone": _sandstone(), "ladder": _ladder(),
+        "stone_steps": _stone_steps(), "lift": _lift(), "mine_beam": _mine_beam(), "rock_pile": _rock_pile(),
+        "pit": _pit(), "grate": _grate(),
+    })
+    for direction in ("up", "right", "down", "left"):
+        assets[f"arrow_{direction}"] = _arrow(direction)
+    return assets
+
+
 def create_assets():
     """Return original indexed art; global palette entry zero is transparent."""
     assets = {
@@ -1462,4 +1675,5 @@ def create_assets():
         assets[f"shore_{direction}"] = _shore(direction)
     assets.update(_castle_town_assets())
     assets.update(_harbour_theatre_assets())
+    assets.update(_dungeon_assets())
     return assets
