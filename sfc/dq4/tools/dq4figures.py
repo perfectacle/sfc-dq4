@@ -93,6 +93,15 @@ def menu_message_figure(folder):
     return sheet.resize((sheet.width * 2, sheet.height * 2), Image.Resampling.NEAREST)
 
 
+def name_game_figure(path):
+    """선실 메시지 창의 주인공 이름. dq4namegamecheck.py 첫 사례(라이안)의 shot.png 를 work/name-game/fig/message.png 로 둔다."""
+    if not path.exists():
+        return None
+    with Image.open(path) as shot:
+        part = shot.convert("RGB").crop((0, 128, 256, 200))
+    return part.resize((part.width * 2, part.height * 2), Image.Resampling.NEAREST)
+
+
 def main():
     images = assets()
     output = ROOT / "sfc" / "dq4" / "images"
@@ -126,6 +135,9 @@ def main():
     messages = menu_message_figure(ROOT / "work" / "dq4-menu-msg" / "fig")
     if messages is not None:
         messages.save(output / "dq4-menu-messages.webp", lossless=True)
+    game = name_game_figure(ROOT / "work" / "name-game" / "fig" / "message.png")
+    if game is not None:
+        game.save(output / "dq4-name-game.webp", lossless=True)
     names = name_entry_figure(ROOT / "work" / "name-entry" / "fig")
     if names is not None:
         names.save(output / "dq4-name-entry.webp", lossless=True)

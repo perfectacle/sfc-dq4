@@ -462,6 +462,8 @@ def build(rom, font, jamo_font):
     data = ne.apply(bytes(data), keys, ne.glyph_blob(font, render), bridges)
     import dq4menumsg
     data, atlas.messages = dq4menumsg.apply(data, font)
+    import dq4namegame
+    data = dq4namegame.apply(data)
     return set_checksum(data), atlas, records
 
 
