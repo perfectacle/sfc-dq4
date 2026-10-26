@@ -48,6 +48,22 @@ def environment_rom_figure(folder):
     return sheet.resize((sheet.width * 2, sheet.height * 2), Image.Resampling.NEAREST)
 
 
+TOWN_SHOTS = ("17-00", "0B-00", "16-00", "0F-00", "00-01", "09-01", "05-01", "01-00")
+
+
+def environment_towns_figure(folder):
+    """DQ5 에 넣은 다른 블록 시트 맵 여덟 곳의 MesenCE 도착 화면을 4×2 로 2배. 화면은
+    dq4environmentromcheck.py 가 남긴 <맵>/<맵>.png 다. 없으면 None."""
+    paths = [folder / name / f"{name}.png" for name in TOWN_SHOTS]
+    if not all(path.exists() for path in paths):
+        return None
+    sheet = Image.new("RGB", (4 * 260 - 4, 2 * 228 - 4), (24, 24, 24))
+    for i, path in enumerate(paths):
+        with Image.open(path) as shot:
+            sheet.paste(shot.convert("RGB"), ((i % 4) * 260, (i // 4) * 228))
+    return sheet.resize((sheet.width * 2, sheet.height * 2), Image.Resampling.NEAREST)
+
+
 def sprite_gallery(images):
     """인물마다 남 정지·보행, 서 정지·보행, 동, 북 정지·보행을 풀색 위에 6배로 늘어놓는다."""
     cells = ((0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (3, 0), (3, 1))
@@ -157,6 +173,11 @@ def main():
         print("work/dq4-environment-rom/check 에 게임 화면이 없어 dq4-environment-rom.webp 는 건너뜀")
     else:
         rom_shots.save(output / "dq4-environment-rom.webp", lossless=True)
+    towns = environment_towns_figure(ROOT / "work" / "dq4-environment-rom" / "check")
+    if towns is None:
+        print("work/dq4-environment-rom/check 에 게임 화면이 없어 dq4-environment-towns.webp 는 건너뜀")
+    else:
+        towns.save(output / "dq4-environment-towns.webp", lossless=True)
     sprite_gallery(images).save(output / "dq4-sprites-gallery.webp", lossless=True)
     draft_figure().save(output / "dq4-sprite-drafts.webp", lossless=True)
     field = field_figure(ROOT / "work" / "dq4-sprites")
