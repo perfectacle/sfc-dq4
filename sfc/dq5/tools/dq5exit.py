@@ -168,7 +168,7 @@ def describe(bc, entry):
     if kind == 0x20:
         return f'{entry[2]:02X}/{bd:02X} 의 출구 {entry[1]}'
     if kind == 0x60:
-        return f'{entry[4]:02X}/{bd:02X} ({entry[1]},{entry[2]}) 방향 {entry[3]}'
+        return f'{entry[4]:02X}/{bd:02X} ({entry[1]},{entry[2]}) 층 {entry[3]}'
     return '특수(2A:F7B2)'
 
 

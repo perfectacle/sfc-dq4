@@ -10,7 +10,7 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | --- | --- |
 | `dq5map.py rom BC BD` | DQ5 실내 맵 디코더. `--compare` 로 게임 셀 버퍼(속성 패스 끝)와 비교, `--png` 로 그림(팔레트도 롬에서). BC `50`~`54` 맵은 따로 된 포인터·블록·CHR 과 맵 전후 처리(슬롯 건너뛰기·블록 먼저 올리기·`+4` 찍기)를 따름 |
 | `dq5field.py rom` | DQ5 필드 세계 지도 풀기. `--world 0~2` 로 `$1949` 세계 고르기, `--compare` 로 WRAM 과 비교, `--png` 회색조 지도, `--entrances` 로 입구 47개와 도착 자리 |
-| `dq5trigger.py rom [BC BD]` | DQ5 실내 맵 영역 이동 레코드(맵을 빼면 전체 통계) |
+| `dq5trigger.py rom [BC BD]` | DQ5 실내 맵 영역 이동 레코드(맵을 빼면 전체 통계). `+4`·`+B` 는 출발·도착 층 |
 | `attrgrid.py rom BC BD` | 통행 격자를 글자로 찍기(경로 잡기용) |
 | `dq5exit.py rom BC BD` | DQ5 실내 맵 출구 셀·목적지·도착 자리. 맵을 푼 뒤 도는 맵별 루틴(`15:F907`)이 바꾸는 출구 셀도 반영 |
 | `dq5npc.py rom BC BD` | DQ5 실내 맵 인물 목록과 인물 표 값·인라인 스크립트 명령. `--night` 밤 목록, `--flags 21AD=10` 이벤트 플래그, `--compare` 로 인물 표(`7E:3000-`) 23칸 비교, `--list 108BBD` 목록 주소로 보기, `--check-scripts` 모든 스크립트 길이 검사 |
@@ -42,6 +42,8 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5tables.py rom export\|patch\|check` | 게임 데이터 표 쓰기: 몬스터·물건·주문·피해량·동료 몬스터 표를 필드 이름이 붙은 JSON(`dq5tables/1`)으로 내보내고(`export -o`), 고친 JSON(일부 항목·필드만 있어도 됨)을 `dq5patch/1` 목록으로(`patch … -o`), `check` 로 붙인 롬을 다시 읽어 확인. 형식은 [dq5-build-format.md](../docs/dq5-build-format.md#게임-데이터-표-dq5tables1) |
 | `dq5freesweep.py rom 세이브스테이트 OUT` | 빈 자리 22곳(`dq5build.py free`)을 실내 맵 346곳·몬스터 236종 전투·필드 세계 0~2 에서 롬 읽기·실행 감시(`--kinds maps,battles,field`), `OUT/summary.txt` 에 읽힌 것. `MESENCE` 필요 |
 | `dq5chestwrite.py rom dump\|patch\|check` | 일반 상자161개·맵 연결83개·서랍/항아리/통86개·발밑18개·두 칸 앞17개·아래층 상자11개 고정 표. `dq5chest/1` 일부 필드 편집, 원본·종료자 보존. [쓰기 형식](../docs/dq5-build-format.md#보물상자조사-보상-dq5chest1) |
+| `dq5exitwrite.py rom dump -o\|patch\|check` | 실내 출구569개·영역 이동430개 고정 슬롯의 목적지·사각형·층. 종류·길이·개수 보존, 고층 공유 목록은 `shared_maps` 필요. [쓰기 형식](../docs/dq5-build-format.md#실내-출구영역-이동-dq5connections1) |
+| `dq5exitcheck.py rom --state 선실 --out 폴더` | 변경 롬 2벌과 원본에서 출구 세 종류·출발층·고층 공유·음수 가장자리·사각형 이동 20장면을 밟아 도착 맵·칸·층 비교. `MESENCE` 필요 |
 | `dq5chestcheck.py rom --state 선실 --out 폴더` | 원본·패치 롬에서 상자·서랍·옮긴 발밑 보상 3쌍을 실제 조사. 금화·조회 값·열림 비트 비교. `MESENCE` 필요 |
 | `dq5chest.py rom [BC BD]` | DQ5 보물상자(번호·칸·열림 플래그·내용물), タンス·ツボ·タル 항목, 발밑 표(`1E:F08B`), 두 칸 앞 표(`1E:F435`), 그룹 `50` 이상의 아래층 상자 표(`1E:F4DF`). 물건 이름과 `D000`~`D009` 의 뜻까지 |
 | `dq5items.py rom` | DQ5 숨은 물건 전부를 맵별로(상자·タンス 류·발밑·두 칸 앞·필드). `--check` 로 모든 맵의 상자·タンス·ツボ·タル 칸과 표 맞추기, `--medals` 로 ちいさなメダル 자리, `--slots` 로 슬롯 기계 9대의 자리·코인·그림 수, `--slot-odds` 로 기계마다 배당 확률과 코인 한 장당 기대 수익, `--slot-stop 기계 시작자리 난수` 로 릴 다섯이 멈출 `$1294` 와 배당, `--slot-sim 판수 [--slot-gap 프레임]` 으로 난수 `11:BC26` 과 멈출 칸을 그대로 돌려 판을 이어 감(r 분포·기계마다 수익), `--slot-log 기계:파일…` 로 `lua/dq5slot.lua` 기록을 멈출 칸·배당과 맞추고 r 분포·받은 코인 / 넣은 코인, `--slot-rng 파일` 로 그 `RNGLOG` 기록을 `11:BC26` 계산과 맞춤 |

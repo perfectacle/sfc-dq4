@@ -1,7 +1,7 @@
 """DQ5(SFC) 실내 맵 영역 이동(트리거). 형식은 sfc/dq5/docs/dq5-map-format.md 의 「영역 이동」.
 
 맵을 불러올 때 01:9430 이 2A:EB0E 색인([$BC][$BD][개수], bit7 바이트로 끝)에서 그 맵의 레코드 위치를 정하고,
-걸을 때마다 00:CDEC 가 12바이트 레코드의 사각형·방향을 검사해 2A:F47D 로 맵을 옮긴다.
+걸을 때마다 00:CDEC 가 12바이트 레코드의 사각형·층을 검사해 2A:F47D 로 맵을 옮긴다.
 
 사용:
   python sfc/dq5/tools/dq5trigger.py rom/dq5.sfc [BC BD]   (맵을 주지 않으면 전체 통계)
@@ -16,8 +16,6 @@ from dq5map import Rom  # noqa: E402
 INDEX = 0x2AEB0E
 RECORDS = 0x2AD812
 RECORD_SIZE = 12
-# 바라보는 방향 값. 1 은 아래(실험으로 확인), 2·4 는 아직 확인 안 함.
-DIRS = {1: '아래'}
 
 
 def index(rom):
@@ -34,21 +32,20 @@ def index(rom):
 def record(rom, a):
     r = [rom.u8(a + i) for i in range(RECORD_SIZE)]
     return {
-        'rect': (r[0], r[1], r[2], r[3]), 'facing': r[4], 'flags': r[5],
-        'bc': r[6], 'bd': r[7], 'x': r[8], 'y': r[9], 'span': r[10], 'dir': r[11], 'raw': r,
+        'rect': (r[0], r[1], r[2], r[3]), 'source_layer': r[4], 'flags': r[5],
+        'bc': r[6], 'bd': r[7], 'x': r[8], 'y': r[9], 'span': r[10], 'destination_layer': r[11], 'raw': r,
     }
 
 
 def describe(t):
     x0, y0, x1, y1 = t['rect']
     where = f'({x0},{y0})~({x1 - 1},{y1 - 1})'
-    face = DIRS.get(t['facing'], f'{t["facing"]:02X}')
     if t['bc'] & 0x80:
         dest = '필드로'
     else:
         dest = f'{t["bc"]:02X}/{t["bd"]:02X} ({t["x"]},{t["y"]})'
     cond = '' if t['flags'] & 0x40 else ' (조건 검사 있음)'
-    return f'{where} 에 {face} 보고 들어서면 → {dest}{cond}'
+    return f'{where} 에 층 {t["source_layer"]:02X}로 들어서면 → {dest}, 도착 층 {t["destination_layer"]:02X}{cond}'
 
 
 def main():
