@@ -10,8 +10,8 @@ from kr_patch.sfc.mapper import LoROM
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dq5map import Rom, lorom  # noqa: E402
 from dq5npclists import (  # noqa: E402
-    MAP_OBJECTS, OVERRIDE_COUNT, assemble_find, condition_row, entry_items, list_plan, map_objects, placed,
-    slot_guard,
+    MAP_OBJECTS, OVERRIDE_COUNT, assemble_find, condition_row, entry_items, list_plan, map_objects, new_map_keys,
+    placed, slot_guard,
 )
 
 BASE, ALT = 0x058000, 0x108000
@@ -83,6 +83,44 @@ class PlanTests(unittest.TestCase):
                     list_plan(self.rom, doc, ORIGINAL, {})
 
 
+class NewMapTests(unittest.TestCase):
+    ORIGINAL = [(0x058000, '01/00'), (0x058001, '01/01'), (0x058002, '02/00'), (ALT, '01/00 대체')]
+
+    def test_new_map_numbers_follow_group_end(self):
+        self.assertEqual(new_map_keys(self.ORIGINAL, [(1, 3), (1, 2), (2, 1)]), [(1, 2), (1, 3), (2, 1)])
+        for maps in ([(1, 3)], [(1, 2), (1, 2)], [(3, 0)], [(2, 0)]):
+            with self.subTest(maps=maps), self.assertRaises(ValueError):
+                new_map_keys(self.ORIGINAL, maps)
+
+    def test_new_groups_follow_35(self):
+        original = self.ORIGINAL
+        with mock('dq5npclists.GROUP_COUNT', 3):
+            self.assertEqual(new_map_keys(original, [(3, 0), (3, 1), (4, 0)]), [(3, 0), (3, 1), (4, 0)])
+            for maps in ([(4, 0)], [(3, 1)], [(0x50, 0)]):
+                with self.subTest(maps=maps), self.assertRaises(ValueError):
+                    new_map_keys(original, maps)
+
+    def test_new_map_lists_go_after_their_group(self):
+        rom = fixture()
+        lists = {0x058000: [], 0x058001: [], 0x058002: [], ALT: [ALT]}
+        with mock('dq5npclists.list_entries', side_effect=lambda r, at: [(a, 0) for a in lists[at]]):
+            doc = {'lists': [{'map': '01/02', 'entries': [{'from': {'list': '10:8000', 'index': 0}}]}]}
+            base, alt = list_plan(rom, doc, self.ORIGINAL, {}, [(1, 2), (1, 3)])
+            self.assertEqual([k for k, _ in base], [0x058000, 0x058001, '01/02', '01/03', 0x058002])
+            self.assertEqual([len(items) for _, items in base], [0, 0, 1, 0, 0])
+            with mock('dq5npclists.GROUP_COUNT', 3):
+                base, _ = list_plan(rom, {}, self.ORIGINAL, {}, [(1, 2), (3, 0)])
+            self.assertEqual([k for k, _ in base], [0x058000, 0x058001, '01/02', 0x058002, '03/00'])
+            for bad in ({'lists': [{'map': '01/04', 'entries': []}]},
+                        {'lists': [{'map': '01/02', 'entries': []}, {'map': '01/02', 'entries': []}]},
+                        {'lists': [{'map': '01/00', 'entries': []}, {'list': '05:8000', 'entries': []}]},
+                        {'lists': [{'map': '01/0a', 'entries': []}]},
+                        {'lists': [{'map': '01/02', 'entries': [{'from': 0}]}]},
+                        {'lists': [{'map': '01/00', 'entries': []}, {'list': '05:8000', 'entries': []}]}):
+                with self.subTest(doc=bad), self.assertRaises(ValueError):
+                    list_plan(rom, bad, self.ORIGINAL, {}, [(1, 2)])
+
+
 class ConditionTests(unittest.TestCase):
     def test_condition_rows(self):
         known = {(1, 2)}
@@ -116,6 +154,11 @@ class SlotTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 slot_guard(rom, ORIGINAL, *more, rows, False)
             self.assertEqual(len(slot_guard(rom, ORIGINAL, *more, rows, True)), 1)
+            # 새 맵은 원본 값이 없어 1F 까지, 인물이 있을 때만 늘어난 맵으로 알린다(그룹 전체 물체 01/7F 도 셈).
+            fresh = [(BASE, [(BASE, DAY), (0, NIGHT)]), ('01/03', [(BASE, DAY)])], [(ALT, [(ALT, DAY)])]
+            self.assertEqual(slot_guard(rom, ORIGINAL, *fresh, rows, False, [(1, 3)]), ['01/03 낮 01/03 슬롯 0x0a'])
+            empty = [(BASE, [(BASE, DAY), (0, NIGHT)]), ('01/03', [])], [(ALT, [(ALT, DAY)])]
+            self.assertEqual(slot_guard(rom, ORIGINAL, *empty, rows, False, [(1, 3)]), [])
             full = [(BASE, [(BASE, DAY)] * 22)], [(ALT, [(ALT, DAY)])]
             with self.assertRaises(ValueError):
                 slot_guard(rom, ORIGINAL, *full, rows, True)

@@ -32,6 +32,8 @@ MESSAGE = TALK + 0x3C6
 BASE = '05:8CD4'                     # 02/06 기본 목록: 낮 8CD4·8D0B, 밤 8D2C·8D34
 ADDED = {'from': 3, 'time': 'day', 'fields': {'x': 24, 'y': 12, 'facing': 'down', 'talk': TALK}}
 TALK_TEST = 'up:40,wait:40,a:4,wait:60,a:4,wait:200'
+NEW_MAP = '0D/05'
+NEW_MAP_DOC = {'format': 'dq5newmap/1', 'maps': [{'map': NEW_MAP, 'record': {'copy': '0D/02'}, 'attrs': {'copy': '0D/02'}}]}
 
 
 def condition(rom, at, count, size):
@@ -58,6 +60,10 @@ def documents(rom):
                   'no_npc': condition(rom, 0x12839C, NO_NPC_COUNT, 4)
                   + [{'map': '01/01', 'flag': 0x1D, 'when': 'off', 'mask': 0x10}]},
         'growth': {'lists': [{'list': BASE, 'entries': [{'from': 0}, {'from': 1}, ADDED] + filler}]},
+        # 새 맵 0D/05(dq5newmap.py 로 0D/02 의 레코드·속성)에 인물 둘: 주인공 두 칸 위에 말 거는 인물, 옆에 하나.
+        'newmap': {'lists': [{'map': NEW_MAP, 'entries': [
+            dict(added, fields={'x': 12, 'y': 2, 'facing': 'down', 'talk': TALK}),
+            dict(added, fields={'x': 16, 'y': 2, 'facing': 'down', 'talk': TALK})]}]},
     }
 
 
@@ -73,6 +79,12 @@ CASES = [
     ('table-0101', 'table', '01/01,13,8,1', False, ''),
     ('table-2100', 'table', '21/00,10,10,1', False, ''),
     ('growth-day', 'growth', '02/06,24,14,1', False, TALK_TEST),
+    ('original-0D02', 'original', '0D/02,12,4,1', False, ''),
+    ('original-0E00', 'original', '0E/00,10,10,1', False, ''),
+    ('newmap-day', 'newmap', '0D/05,12,4,1', False, TALK_TEST),
+    ('newmap-night', 'newmap', '0D/05,12,4,1', True, ''),
+    ('newmap-0D02', 'newmap', '0D/02,12,4,1', False, ''),
+    ('newmap-0E00', 'newmap', '0E/00,10,10,1', False, ''),
 ]
 
 
@@ -133,9 +145,15 @@ def main():
             source.write_text(json.dumps({'format': 'dq5npcrelocate/1', **doc}, ensure_ascii=False, indent=1) + '\n',
                               encoding='utf-8')
             command('dq5npcrelocate.py', original, 'patch', source, '-o', out / f'{key}.dq5patch.json',
-                    '--report', out / f'{key}.layout.json', *(['--allow-growth'] if key == 'growth' else []))
+                    '--report', out / f'{key}.layout.json', *(['--allow-growth'] if key == 'growth' else []),
+                    *(['--new-map', NEW_MAP] if key == 'newmap' else []))
             roms[key] = out / f'{key}.sfc'
-            command('dq5build.py', original, 'build', out / f'{key}.dq5patch.json', '-o', roms[key],
+            extra = []
+            if key == 'newmap':
+                (out / 'newmap.map.json').write_text(json.dumps(NEW_MAP_DOC) + '\n', encoding='utf-8')
+                command('dq5newmap.py', original, 'patch', out / 'newmap.map.json', '-o', out / 'newmap.map.dq5patch.json')
+                extra = [out / 'newmap.map.dq5patch.json']
+            command('dq5build.py', original, 'build', out / f'{key}.dq5patch.json', *extra, '-o', roms[key],
                     '--ips', out / f'{key}.ips')
             layouts[key] = json.loads((out / f'{key}.layout.json').read_text(encoding='utf-8'))
         krlua = Path(subprocess.run(['krpatch', 'sfc', 'lua'], capture_output=True, text=True,
@@ -165,6 +183,8 @@ def main():
                 source = int(layouts[rom]['lists']['new:extra'].replace(':', ''), 16)
             if rom == 'table' and (bc, bd) == (1, 1):
                 source = None
+            if rom == 'newmap' and f'{bc:02X}/{bd:02X}' == NEW_MAP:
+                source = int(layouts[rom]['lists'][NEW_MAP].replace(':', ''), 16)
             placed = [] if source is None else [(at, f) for at, _ in list_entries(built, source)
                                                  if (f := parse(built, at, night))]
             bad = compare(wram, table_values(built, placed, flags))
@@ -187,6 +207,11 @@ def main():
             'table-no-npc': results['table-0101']['slots'] == 0 and results['original-0101']['slots'] == 5,
             'table-original-row': results['table-2100']['slots'] == results['original-2100']['slots'] > 0,
             'growth': results['growth-day']['free_slot'] == 0x1F and results['growth-day']['talk'],
+            # 새 맵에 인물 둘이 서고 말이 걸리며, 같은 그룹 0D/02 와 다음 그룹 0E/00 의 인물은 원본과 같다.
+            'new-map': results['newmap-day']['slots'] == 2 and results['newmap-day']['talk']
+            and results['newmap-night']['slots'] == 0
+            and results['newmap-0D02']['slots'] == results['original-0D02']['slots'] > 0
+            and results['newmap-0E00']['slots'] == results['original-0E00']['slots'],
         }
         if objects:
             checks['objects'] = all(r['objects'] == r['expected_objects'] for r in objects.values())
