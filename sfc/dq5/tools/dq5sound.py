@@ -8,6 +8,7 @@ BRK 0F~19 는 이 입구를 부르는 서비스 호출이다(00:9256, 표 00:928
 
 사용:
   python sfc/dq5/tools/dq5sound.py rom/dq5.sfc            # 명령 입구, BRK 0F~19, 맵 곡 표
+  python sfc/dq5/tools/dq5sound.py rom/dq5.sfc --battle   # 이벤트 무리 00~3F 의 전투 곡 등급과 곡
   python sfc/dq5/tools/dq5sound.py rom/dq5.sfc --check snd.txt
       # sfc/dq5/tools/lua/dq5sndlog.lua 의 기록에서 맵 곡(명령 1A, 00:CEB1)을 표와 견줌. --map BC/BD 로 그 맵
 """
@@ -16,11 +17,12 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from dq5encounter import map_entries, map_entry  # noqa: E402
+from dq5encounter import EVENT_COUNT, event_group, map_entries, map_entry, monster_name  # noqa: E402
 from dq5map import Rom  # noqa: E402
 
 ENTRIES = 0x24FE91
 BRK_TABLE = 0x00928C  # BRK 0F~19 의 처리 루틴(00 뱅크 16비트)
+BATTLE_SONGS = 0x268F96  # [$1014] 전투 곡. 26:8F78 이 이벤트 무리(40 미만) 첫 바이트 하위 2비트를 $1014 에 둠
 
 
 def entries(rom):
@@ -52,13 +54,29 @@ def map_songs(rom):
     return [(bc, bd, e[5]) for bc, bd, e in map_entries(rom)]
 
 
+def battle_songs(rom):
+    """[(무리, 등급, 곡, [(몬스터, 마릿수)])]. 이벤트 무리 00~3F 만. 마주침 무리(40 이상)는 늘 등급 0."""
+    out = []
+    for g in range(EVENT_COUNT):
+        flags, mons, _ = event_group(rom, g)
+        grade = flags & 3
+        out.append((g, grade, rom.u8(BATTLE_SONGS + grade), mons))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('rom')
     ap.add_argument('--check')
     ap.add_argument('--map')
+    ap.add_argument('--battle', action='store_true', help='이벤트 무리마다 전투 곡')
     args = ap.parse_args()
     rom = Rom(open(args.rom, 'rb').read())
+    if args.battle:
+        for g, grade, song, mons in battle_songs(rom):
+            desc = ', '.join('%s(%02X) %d' % (monster_name(rom, m), m, c) for m, c in mons)
+            print('%02X 등급 %d 곡 %02X  %s' % (g, grade, song, desc))
+        return 0
     if args.check:
         bc, bd = (int(v, 16) for v in args.map.split('/'))
         want = map_entry(rom, bc, bd)[5]
