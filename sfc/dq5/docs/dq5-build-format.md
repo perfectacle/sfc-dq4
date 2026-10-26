@@ -83,6 +83,7 @@ uv run --locked python sfc/dq5/tools/dq5build.py rom/dq5.sfc fromrom work/hangul
 | 도구 | 쓰는 것 | 입력 |
 | --- | --- | --- |
 | `dq5progresswrite.py` | 성장·조우 구역·상점 고정 목록·교환 값 | `dq5progress/1` JSON |
+| `dq5encounterwrite.py` | 필드 구역 격자·실내 맵의 구역 연결·고정 무리·이벤트 전투 무리 | `dq5encounter/1` JSON |
 | `dq5tables.py` | 몬스터·물건·주문·피해량·동료 몬스터 표 | `dq5tables/1` JSON |
 | `dq5mapwrite.py` | 실내 맵 레코드(머리·배치 비트스트림·속성 패스)와 맵 포인터 | `dq5map/1` JSON |
 | `dq5mapcompile.py` | 블록 배치 목록 → 배치 명령(`dq5mapwrite.py` 의 입력) | `dq5mapsrc/1` JSON |
@@ -175,6 +176,48 @@ uv run --locked python sfc/dq5/tools/dq5progresscheck.py rom/dq5.sfc \
   --state work/state/ship.mss --out work/progresscheck
 ```
 
+
+### 조우 표 `dq5encounter/1`
+
+`sfc/dq5/tools/dq5encounterwrite.py` 는 조우 구역을 고르는 표와 구역 밖의 무리 표를 고칩니다. 구역 레코드(`23:96F3`)는 위 `dq5progresswrite.py` 가 씁니다. 표의 크기와 자리는 그대로이고 적은 값만 바꿉니다. 뜻과 근거는 [dq5-data-format.md](dq5-data-format.md#전투-조우-23e7c2) 를 봅니다.
+
+```sh
+uv run --locked python sfc/dq5/tools/dq5encounterwrite.py rom/dq5.sfc dump -o work/encounter.json
+uv run --locked python sfc/dq5/tools/dq5encounterwrite.py rom/dq5.sfc patch work/encounter.json -o work/build/encounter.dq5patch.json
+uv run --locked python sfc/dq5/tools/dq5encounterwrite.py rom/dq5.sfc check
+```
+
+```json
+{"format": "dq5encounter/1",
+ "maps": [{"map": "21/02", "areas": [13, 1, 13]}],
+ "fixed_groups": [{"index": 5, "members": [{"monster": 0, "count_code": 2}, {"monster": 3, "count_code": 0}]}],
+ "event_groups": [{"index": 1, "members": [{"monster": 3, "count": 2}]}]}
+```
+
+| 키 | 자리 | 항목 | 쓰는 값 |
+| --- | --- | --- | --- |
+| `field_grids` | `23:F1FC`~`23:F54D` | 격자 5개(`index` 0~4, `$1949`·`$1948` 로 고름) | `rows`: 17칸 줄의 배열. 줄 수(7·17·17·5·4)는 원래대로. 값은 구역 0~84 |
+| `maps` | `23:FD6A` 포인터가 가리키는 6바이트 항목 | 그룹 `00`~`35` 의 맵 346개(`"BC/BD"`) | `areas`: `$1948` = 0·1·2 일 때 구역 셋(0~84, 255 = 조우 없음). `+3`~`+5`(전투 배경·주문 막기·소리)는 원래대로 |
+| `fixed_groups` | `23:B04B` + n×6 | 9개(`index` 0~8) | `members`: 1~3개의 `monster`(0~235)·`count_code`(마릿수 부호 0~14). 줄 번호(하위 4비트)는 원래대로 |
+| `event_groups` | `23:D757` + n×13 | 64개(`index` 0~63) | `flags`: 첫 바이트. bit0-1(곡 0~2)·bit4~7 만 받고, 곡 번호 3 과 뜻을 보지 못한 bit2·3 은 거부. `members`: 1~4개의 `monster`(0~235)·`count`(1~9). `+9`~`+C` 는 원래대로 |
+
+- JSON 의 수는 10진입니다(구역 `0D` 는 13). 무리의 빈 자리는 몬스터 `FF` 로 채웁니다. 이벤트 무리의 빈 자리 마릿수는 원래 표처럼 0 입니다. 고정 무리 빈 자리의 하위 4비트는 그대로 둡니다.
+- 맵은 구역 연결 표에 있는 그룹 `00`~`35` 만 받습니다. 그룹 `50` 이상의 맵(`23:FDD6`, 코드 읽기만 함)은 받지 않습니다.
+- 이벤트 무리의 마릿수 상한 9 는 실측한 가장 큰 값입니다. 한 줄에 들어가는 수는 게임이 몬스터 너비로 다시 줄입니다(「줄과 마릿수」).
+- 내보낸 JSON 을 그대로 넣으면 쓰기가 0개입니다(`check`, 3,812바이트).
+
+확인한 것(`sfc/dq5/tools/dq5encountercheck.py`, 12회 실행). 장면 준비로 조우 계수 표 `23:EA44` 를 모두 `FF` 로 덮어 조우를 잦게 했고, 이 표는 확인하는 표가 아닙니다. 걸음마다 `23:E7C2` 의 A(구역)와 무리를 정하고 나가는 세 곳의 `$1001`~`$1008` 을 기록했습니다.
+
+| 고친 것 | 장면 | 대조 롬 | 고친 롬 |
+| --- | --- | --- | --- |
+| 격자 0 의 (9~11, 0~2) 를 구역 `01` 로 | 필드 341,56 에서 좌우로 걸음 | 12걸음 모두 구역 `0D`, 무리 몬스터 `20` 2·`22` 2 | 12걸음 모두 구역 `01`, 몬스터 `01` 2·`00` 2 |
+| 21/02 의 `areas` 를 `01`·`14`·`14` → `0D`·`01`·`0D` | 21/02 (50,43) 에서 좌우로 걸음, `$1948` = 0 | 26걸음 모두 구역 `01`, 몬스터 `01` 2 | 26걸음 모두 구역 `0D`, 몬스터 `22` 1·`26` 1 |
+| 같은 롬 | 같은 장면, 시작할 때 `$1948` = 1 | 구역 `14`, 몬스터 `28` 3·`00` 3 | 구역 `01`, 몬스터 `01` 2 |
+| 같은 롬 | 같은 장면, `$1948` = 2 | 구역 `14`, 몬스터 `28` 3·`00` 3 | 구역 `0D`, 몬스터 `22` 1·`26` 1 |
+| 고정 무리 5 를 スライム 3·ドラキー 1 로 | 같은 자리. 구역 `01` 을 고정 무리 5 만 나오게 한 롬(`dq5progresswrite.py`)이 대조 롬 | ブルーイーター 2·エビルマスター 1·レッドイーター 2 | スライム 3·ドラキー 1 |
+| 이벤트 무리 1 을 ドラキー 2 로 | 첫 필드 이벤트 전투 | スライム 3 | ドラキー 2 |
+
+필드·실내 장면의 무리는 모두 그 구역의 무게가 있는 칸 몬스터였습니다. 이벤트 무리는 첫 전투 메시지(`24:8C39`) 때의 `$1001`~`$1008` 입니다.
 
 ### 실내 맵 레코드 `dq5map/1`
 
@@ -703,5 +746,5 @@ MESENCE="$MESENCE" uv run --locked python sfc/dq5/tools/dq5exitcheck.py rom/dq5.
 
 - 필드 표 항목 증설·재배치, 인물 수·순서·등장 조건 편집과 새 목록 추가.
 - 문자열 번역 편집·새 한글 글꼴 대량 삽입, 전투 메시지·창·이름 표 쓰기.
-- 성장·조우 레코드 수와 상점 품목 수 증설, 필드 조우 격자·실내 구역 연결·고정 무리·전투 이벤트 무리 쓰기.
+- 성장·조우 레코드 수와 상점 품목 수 증설. 배의 바다 구역 직사각형(`01:85D8`)과 그룹 `50` 이상 맵의 구역 연결(`23:FDD6`) 쓰기, 고정 무리 줄 번호와 이벤트 무리 `+9`~`+C` 의 값 편집.
 - `dq5tables.py` 의 물건 플래그 가운데 `장비사람`·`칸` 밖의 것, 주문 `범위`·`적쪽`, 동료 `최대레벨`·`장비갈래` 는 고친 롬의 게임 실측이 남아 있습니다.
