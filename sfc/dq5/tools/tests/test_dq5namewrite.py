@@ -97,6 +97,22 @@ class NameWriteTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             patch(self.data + bytes(0x80000), {'format': FORMAT, 'tables': []}, '3C:8000')
 
+    def test_append_after_last_id(self):
+        new = [{'id': COUNTS[3], 'bytes': [1, 2]}, {'id': COUNTS[3] + 1, 'bytes': [3]}]
+        doc = {'format': FORMAT, 'tables': [{'table': 3, 'names': new}]}
+        with self.assertRaises(ValueError):
+            patch(self.data, doc, '3C:8000')
+        manifest = patch(self.data, doc, '3C:8000', append=True)
+        counts = {**COUNTS, 3: COUNTS[3] + 2}
+        decoded = decoded_tables(rebuild(self.data, manifest), counts)
+        self.assertEqual(decoded[3][-2:], [[1, 2], [3]])
+        self.assertEqual(decoded[3][:-2], self.tables[3])
+        for bad in ([{'id': COUNTS[3] + 1, 'bytes': [1]}], [new[0], new[0]]):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                patch(self.data, {'format': FORMAT, 'tables': [{'table': 3, 'names': bad}]}, '3C:8000', append=True)
+        with self.assertRaisesRegex(ValueError, '넘침'):
+            patch(self.data, doc, append=True)
+
     def test_bad_input(self):
         for raw in (None, [0] * (MAX_NAME + 1), [256], [-1], [True], [1.0], '01'):
             with self.subTest(raw=raw), self.assertRaises(ValueError):

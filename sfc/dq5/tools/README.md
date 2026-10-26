@@ -33,7 +33,7 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5textwrite.py rom export\|patch\|check` | 보행 메시지3200개 코드목록 `dq5text/1`. 일부메시지만 수정하고 전체허프만 재압축, 기존글꼴보존, 기본38:8000, `60`~`7D` 도 받음(색인 OR 60). `--base 롬`은 보행 메시지를 이미 옮긴 롬(DQ4 메뉴)을 기준으로 고친 것만 바꾸고 늘린 글자 묶음 표를 옮김. `check [입력]`으로빌더적용후전체메시지비교. [쓰기 형식](../docs/dq5-build-format.md#보행-대사-일괄-쓰기-dq5text1) |
 | `dq5textcheck.py rom --state 상태 --out 폴더` | MesenCE로 원본·원문 재배치·수정·뒤쪽 뱅크 메시지 4건의 실제 디코더 반환 코드를 대조. `MESENCE` 필요 |
 | `dq5battletextwrite.py rom export\|patch\|check --at BB:AAAA` | 전투 메시지 432개 1바이트 부호 목록 `dq5battletext/1`. 일부 메시지만 고치고 전체 허프만 재압축, 디코더 사본·트리·메시지를 `--at`(필수, 30~7D)에 두고 색인 훅으로 뱅크를 OR. [쓰기 형식](../docs/dq5-build-format.md#전투-메시지-일괄-쓰기-dq5battletext1) |
-| `dq5namewrite.py rom export\|patch\|check [--at BB:AAAA]` | 이름 문자열 표 아홉 개 `dq5names/1`. 이름 길이 0~12 바꾸기, 원래 자리에 다시 채우거나 `--at` 으로 옮기고 `21:959B` 포인터 고침. [쓰기 형식](../docs/dq5-build-format.md#이름-문자열-표-쓰기-dq5names1) |
+| `dq5namewrite.py rom export\|patch\|check [--at BB:AAAA]` | 이름 문자열 표 아홉 개 `dq5names/1`. 이름 길이 0~12 바꾸기, 원래 자리에 다시 채우거나 `--at` 으로 옮기고 `21:959B` 포인터 고침. [쓰기 형식](../docs/dq5-build-format.md#이름-문자열-표-쓰기-dq5names1). `--append` 로 원래 항목 수 뒤에 이름을 덧붙임(`--at` 과 함께) |
 | `dq5battletextcheck.py rom --state 상태 --out 폴더` | MesenCE 전투에서 원본·원문 재배치·고침·옮김 4건의 푼 버퍼(`7E:0E4B`)와 글자 격자(`7E:1DD5`)의 몬스터 이름·메시지를 대조. `MESENCE` 필요 |
 | `dq5eventwrite.py rom dump\|encode\|patch\|check` | 이벤트 명령 JSON(`dq5event/1`). `dump --event N` 또는 `--number HEX`, `patch 입력 -o 목록`으로 지정한 표 항목을 확장 뱅크 스크립트에 연결. 기본 `60:8000`, 내부 라벨은 배치 주소로 계산. [쓰기 형식](../docs/dq5-build-format.md#이벤트-스크립트-dq5event1) |
 | `dq5npcwrite.py rom dump\|encode\|patch\|check` | 인물 인라인 JSON(`dq5npcscript/1`). `dump BB:AAAA -o 입력`은 길이 바이트 주소를 받음. `patch 입력 -o 목록`은 원본 슬롯 크기를 유지하고 남는 부분을 `00`으로 채움. 상대 분기는 라벨 지원. [쓰기 형식](../docs/dq5-build-format.md#인물-스크립트-dq5npcscript1) |
@@ -67,6 +67,8 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5aiwrite.py rom dump\|patch\|check` | 행동 171개·물건 216개 AI 레코드의 기대 값·평가 갈래(행동은 MP·범위·내성 칸도), 작전 0~4 의 실측한 칸 8개, 학습 배율 표 셋, 내성 단계 배율(`27:8055`), 갑옷 원소 표 22항목. [쓰기 형식](../docs/dq5-build-format.md#작전-ai학습-배율내성-배율갑옷-원소-dq5ai1) |
 | `dq5aicheck.py rom --state 선실 --out 폴더` | 변경 롬 17벌·대조 롬 1벌과 원본에서 작전 AI 가 고른 행동(`20:8846`)·メラ 피해·갑옷이 빼는 양을 견줌. `MESENCE` 필요 |
 | `dq5spellfxcheck.py rom --state 선실 --out 폴더` | 변경 롬 9벌과 원본에서 파파스 メラ·슬라임 ラリホー·전투/필드 ホイミ·ラナルータ 15회 실행. 피해·메시지·HP·MP 비교. `MESENCE` 필요 |
+| `dq5spellgrow.py rom patch\|check SOURCE --at BB:AAAA` | 전투 행동 번호를 `AB`~`B4` 로 늘림(`dq5spellgrow/1`, 게임 실측은 `AB`). 행동 번호로 색인하는 긴 주소 표 여섯을 옮겨 늘리고, 처리 루틴(`20:B7F9`)·필드 처리기(`11:8024`)는 뱅크 끝 스텁과 덧붙인 표로. 새 번호는 원래 행동을 베끼고 MP·범위·적쪽·목록 MP 만 덮음. 형식은 [dq5-build-format.md](../docs/dq5-build-format.md#행동-번호-늘리기-dq5spellgrow1) |
+| `dq5spellgrowcheck.py rom --state 선실 --out 폴더` | 새 행동 `AB`(ホイミ 베낌)를 레벨업으로 배우고 필드·전투에서 외우는 것을 대조 롬과 견줌. 습득 비트·메시지·HP·MP·스텁 실행·옮긴 표 읽기 비교. `MESENCE` 필요 |
 | `dq5exitwrite.py rom dump -o\|patch\|check` | 실내 출구569개·영역 이동430개 고정 슬롯의 목적지·사각형·층. 종류·길이·개수 보존, 고층 공유 목록은 `shared_maps` 필요. [쓰기 형식](../docs/dq5-build-format.md#실내-출구영역-이동-dq5connections1) |
 | `dq5maphook.py rom dump\|patch\|rewrite\|check\|cells-dump\|cells-rewrite\|cells-check` | 맵별 루틴 표(`15:F907`) 162개의 맵 고르기·플래그 조건·맵을 푼 뒤/매 프레임 루틴. 루틴은 원래 표의 같은 칸에 있던 것만(`--raw-routines` 로 풂), `rewrite --at` 은 뱅크 15 의 원래 자리·`15:FF80` 에 다른 항목 수로 다시 쓰고 로더 피연산자 11곳을 고침. [쓰기 형식](../docs/dq5-build-format.md#맵별-루틴-표-dq5maphook1). `rewrite --at BB:AAAA --stub-at 15:XXXX` 로 163개 넘게 늘려 뱅크 `00`~`3F`·`80`~`BF` 로 옮기고 로더 DB 를 스텁으로 바꿈. `cells-*` 는 `15:FF5C` 의 셀 읽기 루틴 표(`$1AAA`) |
 | `dq5maphookcheck.py rom --state 선실 --out 폴더` | 변경 롬 8벌과 원본에서 루틴 막기·플래그 조건·표 옮기기·163개로 늘려 뱅크 3F 로 옮기기·셀 읽기 루틴 표 22장면. 고른 루틴, `$1AAA` 와 `JMP ($1AAA)` 가 간 곳, 01/05 (51,20) 셀, 도착 맵·칸 비교. `MESENCE` 필요 |
@@ -166,6 +168,7 @@ uv run --locked python sfc/dq5/tools/dq5assets.py rom/dq5.sfc --out "$ASSETS/sfc
 | `lua/dq5newgamecheck.lua` | 전원부터 A 를 40프레임마다 눌러 새 게임을 켜고 `FRAMES` 프레임에 WRAM·맵 번호·화면을 남김 | `FRAMES` | `final.wram`, `newgame.txt`, `end.png` |
 | `lua/dq5recordgrowcheck.lua` | 성장 레코드 주소(`23:EDF5` 의 `Y`), 조우 판정 구역과 맵, 무리 `7E:1001`~`1008` 을 기록. `LVLUP=1` 이면 승리 때 레벨업 | `DRIVER`, `LVLUP` | `records.txt`, `final.wram` |
 | `lua/dq5tablecheck.lua` | 롬 주소 읽기(범위)와 PC 통과를 기록하고 끝에 WRAM 을 덤프. `dq5tablecheck.py` 가 환경과 드라이버를 준비 | `READS`, `EXECS`, `DRIVER`, `MAXF` | `observed.txt`, `final.wram` |
+| `lua/dq5spellgrowcheck.lua` | `MODE=level` 이면 레벨업만 일으키고, `LEARNED` 가 있으면 습득 비트·HP 5·MP 100 을 둔 뒤 롬 읽기(`READS`)와 PC 통과(`EXECS`)를 기록. `dq5spellgrowcheck.py` 가 준비 | `MODE`, `LEARNED`, `READS`, `EXECS`, `DRIVER` | `observed.txt`, `final.wram` |
 | `lua/dq5textcheck.lua` | 보행 메시지 스트림 주소와 디코더 반환 코드를 기록. `dq5textcheck.py`가 드라이버와 환경을 준비 | `MESSAGE`, `RETURN_PC`, `DRIVER` | `decoded.txt`, `end.png` |
 | `lua/dq5battletextcheck.lua` | 전투 메시지 번호·비트 위치·푼 버퍼·글자 격자를 기록. `dq5battletextcheck.py`가 드라이버(`dq5warp.lua`)와 환경을 준비 | `DRIVER`, `GRIDDELAY` | `battletext.txt`, `fNNNNN.png` |
 | `lua/dq5npcrelocatecheck.lua` | 인물 배치 직후 `12:803C`에서 목적지 맵의 WRAM을 저장. `dq5npcrelocatecheck.py`가 드라이버와 환경을 준비 | `CHECK_GROUP`, `CHECK_MAP`, `DRIVER` | `npc.bin` |

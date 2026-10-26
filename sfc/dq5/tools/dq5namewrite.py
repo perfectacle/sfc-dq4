@@ -15,6 +15,8 @@ bytes 는 0~255 정수 배열(24:A7B6 이 읽는 1바이트 부호, 84·83 은 �
 --at 을 주면 표 아홉 개를 모두 그 자리부터 차례로 옮기고 포인터를 고친다. 한 표는 한 뱅크 안에 있어야 하므로
 뱅크 끝에 들어가지 않는 표는 다음 뱅크 8000 에서 시작한다. 30~7D 뱅크만 받는다.
 표 7(30:8000)·8·9(23:D6A1, 표가 아니라 21:A1D7 이 JSL 하는 코드)는 다루지 않는다.
+--append 를 주면 원래 항목 수 다음 id 부터 빈틈 없이 이름을 덧붙인다(늘어난 표는 --at 으로 옮겨야 들어간다).
+21:955D 는 항목 수를 보지 않고 n 번 건너뛰므로, 늘린 번호(예: dq5spellgrow.py 의 새 주문 AB~)의 이름이 된다.
 """
 import argparse
 import json
@@ -76,7 +78,7 @@ def read_tables(data):
     return out
 
 
-def overrides(original, doc):
+def overrides(original, doc, append=False):
     keys(doc, {'format', 'tables'}, '문서')
     if doc.get('format') != FORMAT or not isinstance(doc.get('tables'), list):
         raise ValueError(f'format={FORMAT}과 tables 배열이 필요함')
@@ -94,8 +96,13 @@ def overrides(original, doc):
         for name in row['names']:
             keys(name, {'id', 'bytes'}, '이름')
             i = name.get('id')
+            if append and type(i) is int and i == len(tables[t]) and i not in ids:
+                ids.add(i)
+                tables[t].append(valid_name(name.get('bytes')))
+                continue
             if type(i) is not int or not 0 <= i < COUNTS[t] or i in ids:
-                raise ValueError(f'표 {t:X} 의 id 는 중복 없는 0~{COUNTS[t] - 1} 정수여야 함')
+                raise ValueError(f'표 {t:X} 의 id 는 중복 없는 0~{COUNTS[t] - 1} 정수여야 함'
+                                 + ('(--append 면 그 뒤로 빈틈 없이)' if append else ''))
             ids.add(i)
             tables[t][i] = valid_name(name.get('bytes'))
     return tables
@@ -178,11 +185,11 @@ def compile_tables(data, tables, at=None, name='names'):
     return manifest
 
 
-def patch(data, doc, at=None, name='names'):
-    return compile_tables(data, overrides(read_tables(data), doc), at, name)
+def patch(data, doc, at=None, name='names', append=False):
+    return compile_tables(data, overrides(read_tables(data), doc, append), at, name)
 
 
-def decoded_tables(data):
+def decoded_tables(data, counts=None):
     """21:955D 와 같이 포인터를 따라 표마다 원래 항목 수만큼 읽는다."""
     rom = Rom(data)
     out = {}
@@ -190,7 +197,7 @@ def decoded_tables(data):
         a = table_at(data, t)
         names = []
         try:
-            for _ in range(COUNTS[t]):
+            for _ in range((counts or COUNTS)[t]):
                 n = rom.u8(a)
                 if (a & 0xFFFF) + n >= 0x10000:
                     raise ValueError(f'표 {t:X} 가 뱅크 끝을 넘음')
@@ -202,9 +209,9 @@ def decoded_tables(data):
     return out
 
 
-def check(data, doc, at=None):
+def check(data, doc, at=None, append=False):
     from dq5build import PatchError, build, parse_at as patch_at
-    tables = overrides(read_tables(data), doc)
+    tables = overrides(read_tables(data), doc, append)
     manifest = compile_tables(data, tables, at)
     writes = [(patch_at(w['at'])[0], bytes.fromhex(w['hex']), bytes.fromhex(w['orig']) if 'orig' in w else None,
                w['note']) for w in manifest['writes']]
@@ -213,7 +220,7 @@ def check(data, doc, at=None):
         rebuilt, _ = build(data, [(manifest['name'], size, writes)], size)
     except PatchError as error:
         raise ValueError(str(error)) from None
-    decoded = decoded_tables(rebuilt)
+    decoded = decoded_tables(rebuilt, {t: len(names) for t, names in tables.items()})
     different = sum(a != b for t in TABLES for a, b in zip(tables[t], decoded[t]))
     print(f'이름 표 {len(TABLES)}개, 이름 {sum(map(len, decoded.values()))}개, 쓰기 {len(writes)}개, 다른 이름 {different}개')
     return bool(different)
@@ -235,9 +242,11 @@ def main():
     write.add_argument('-o', '--out', required=True)
     write.add_argument('--at')
     write.add_argument('--name', default='names')
+    write.add_argument('--append', action='store_true', help='원래 항목 수 다음 id 부터 이름을 덧붙임(--at 과 함께)')
     verify = subs.add_parser('check')
     verify.add_argument('source', nargs='?')
     verify.add_argument('--at')
+    verify.add_argument('--append', action='store_true')
     args = parser.parse_args()
     try:
         with open(args.rom, 'rb') as f:
@@ -250,8 +259,8 @@ def main():
                 with open(args.source, encoding='utf-8') as f:
                     doc = json.load(f)
             if args.command == 'check':
-                return int(check(data, doc, args.at))
-            result = patch(data, doc, args.at, args.name)
+                return int(check(data, doc, args.at, args.append))
+            result = patch(data, doc, args.at, args.name, args.append)
         os.makedirs(os.path.dirname(args.out) or '.', exist_ok=True)
         with open(args.out, 'w', encoding='utf-8') as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
