@@ -15,13 +15,23 @@ def _rgb(value):
 _BANKS = (
     ("18202a",) * 16,
     ("18202a", "102900", "054600", "007200", "0ba100", "3fb800", "20e30e", "2dff39", "9cff8c", "292121", "947321", "f7f7d6", "f7f7d6", "ff5a9c", "ffffef", "ffd629"),
-    ("18202a", "292121", "40342f", "5a4a41", "7b6b62", "9d8e84", "beb4a5", "d8d2bf", "efefd6", "101010", "7c8078", "efefd6", "292121", "6d2921", "b5604f", "f7c69c"),
-    ("18202a", "101010", "474740", "636860", "7c8078", "9c9c92", "c5c5b4", "efefd6", "9cff8c", "31d308", "008300", "102900", "292121", "634200", "c69429", "f7f7d6"),
-    ("18202a", "292121", "3e2805", "5a3b00", "7f5e13", "a98124", "cda23c", "e2cd7a", "f7f7d6", "101010", "7c8078", "efefd6", "102900", "008300", "31d308", "9cff8c"),
-    ("18202a", "292121", "461b15", "64231b", "81362e", "9f4d45", "c16953", "df906d", "f7c69c", "292121", "947321", "f7f7d6", "101010", "636860", "9c9c92", "efefd6"),
-    ("18202a", "292121", "57072e", "850054", "b3177f", "de4fa9", "ffa5de", "292121", "523600", "947321", "d2ad4a", "f7f7d6", "efefd6", "101010", "efefd6", "00298c"),
+    ("18202a", "292121", "40342f", "5a4a41", "7b6b62", "9d8e84", "beb4a5", "d8d2bf", "efefd6", "101010", "57072e", "b3177f", "292121", "6d2921", "b5604f", "f7c69c"),
+    ("18202a", "101010", "474740", "636860", "7c8078", "9c9c92", "c5c5b4", "efefd6", "57072e", "b3177f", "de4fa9", "102900", "292121", "634200", "c69429", "f7f7d6"),
+    ("18202a", "292121", "3e2805", "5a3b00", "7f5e13", "a98124", "cda23c", "e2cd7a", "f7f7d6", "101010", "7c8078", "efefd6", "102900", "b3177f", "57072e", "de4fa9"),
+    ("18202a", "000000", "292121", "52524a", "461b15", "64231b", "4a4200", "846b00", "81362e", "9f4d45", "c16953", "df906d", "f7c69c", "947321", "f7f7d6", "efefd6"),
+    ("18202a", "000000", "292121", "52524a", "57072e", "850054", "634a00", "c69429", "b3177f", "ffde00", "de4fa9", "ffa5de", "947321", "f7f7d6", "efefd6", "00298c"),
     ("18202a", "00104a", "002581", "0024d9", "0042ff", "0073ff", "1aa2ff", "9ce7ff", "102900", "054600", "0ba100", "2dff39", "9cff8c", "102900", "25ac00", "9cff8c"),
 )
+# DQ5 maps keep object colours at fixed slots: line 6 = 1·2·3·6·7·9 (doors), line 5 = 1·2·3·6·7
+# (gates), shared by the common door tiles. Drawing code keeps its old colour numbers for these
+# banks; _REMAP moves them around the reserved slots (two wood shades merge into DQ5's).
+_REMAP = {
+    5: (0, 2, 4, 5, 8, 9, 10, 11, 12, 2, 13, 14, 1, 3, 3, 15),
+    6: (0, 2, 4, 5, 8, 10, 11, 2, 6, 12, 7, 13, 14, 1, 14, 15),
+}
+# Unused slots of the object banks 2-4 repeat the carpet and red-paving colours so that the
+# transparent background of furniture keeps the floor colour (map compositing picks the
+# nearest colour inside the object's bank).
 PALETTE = tuple(_rgb(color) for bank in _BANKS for color in bank)
 _FLAT_PALETTE = [channel for rgb in PALETTE for channel in rgb] + [0] * 384
 _REF = {
@@ -40,7 +50,9 @@ class _Canvas:
         self.draw = ImageDraw.Draw(self.image)
 
     def c(self, color):
-        return self.bank * 16 + color if color else 0
+        if not color:
+            return 0
+        return self.bank * 16 + (_REMAP[self.bank][color] if self.bank in _REMAP else color)
 
     def rect(self, box, color):
         self.draw.rectangle(box, fill=self.c(color))

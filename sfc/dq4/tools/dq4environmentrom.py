@@ -47,6 +47,15 @@ WATER_FRAMES = ("water0", "water1", "water2")
 WATER_AT = 0x40C000
 WATER_PERIOD = 24
 ANIM_AT = 0x3DF000
+# FC door properties and the DQ5 objects (01:D2FC kinds) that replace them. The record under an
+# object is the map's floor so the cell is walkable once the object opens; closed objects block
+# their last row themselves (cell +1 bit7).
+DOOR = 0x94
+GATE = 0xA0
+FLOORS = {"burland": 0x05, "imuru": 0x04}
+DOOR_KIND = 0x3B
+GATE_KIND = 0x48
+OBJECT_TABLE = 0x01D2FC
 # Every caller of 15:F7D0, which picks the per-frame routine 7E:1AA5 after a map loads.
 ROUTINE_CALLS = (0x018F84, 0x0198FC, 0x019FD6)
 
@@ -111,23 +120,59 @@ def build_graphics(prg, assets):
     return chr_data, chr_banks, block_words, maps, palette
 
 
+def _prop(source, x, y):
+    return source.blocks["prop"][source.cell(x, y) & 31]
+
+
+def objects(source):
+    """DQ5 object entries [x, y, kind] for FC doors (2x3 door over the wall row above) and gates."""
+    found = []
+    gate = [(x, y) for y in range(source.h) for x in range(source.w) if _prop(source, x, y) == GATE]
+    if gate:
+        found.append([min(x for x, _ in gate) * 2, min(y for _, y in gate) * 2, GATE_KIND])
+    for y in range(source.h):
+        for x in range(source.w):
+            if _prop(source, x, y) == DOOR:
+                found.append([x * 2, y * 2 - 1, DOOR_KIND])
+    if len(found) > 32:
+        raise ValueError("more objects than the 32 open flags 7E:21C2-21C5")
+    return found
+
+
+def object_entries(found):
+    """01:D2FC entries [x][y][kind][flag][end]; flag picks bit (i % 8) of 7E:21C2 + i // 8."""
+    out = bytearray()
+    for i, (x, y, kind) in enumerate(found):
+        out += bytes((x, y, kind, (i // 8) << 4 | i % 8, 0x80 if i == len(found) - 1 else 0x00))
+    return bytes(out or b"\x80")
+
+
 def map_document(name, source, local, target):
     """FC layout as DQ5 commands; blocked FC cells become wall cells via attribute pass 1."""
     width, height = source.w * 2, source.h * 2
+    floor = local[FLOORS[name]]
+    opening = {DOOR, GATE}
+
+    def block_at(x, y):
+        return floor if _prop(source, x, y) in opening else local[source.cell(x, y) & 31]
+
+    def blocked(x, y):
+        prop = _prop(source, x, y)
+        return prop & 0x80 and prop not in opening
     bits = max(10, (width * height - 1).bit_length())
     if bits > 14:
         raise ValueError(f"{name}: {width}x{height} cells exceed 14 position bits")
     commands = []
-    for block in sorted(set(local.values())):
+    for block in sorted({block_at(x, y) for y in range(source.h) for x in range(source.w)}):
         commands.append(["block", block])
         for y in range(source.h):
             x = 0
             while x < source.w:
-                if local[source.cell(x, y) & 31] != block:
+                if block_at(x, y) != block:
                     x += 1
                     continue
                 end = x
-                while end + 1 < source.w and local[source.cell(end + 1, y) & 31] == block:
+                while end + 1 < source.w and block_at(end + 1, y) == block:
                     end += 1
                 if end - x >= 2:
                     commands.append(["fill", x * 2, y * 2, end * 2, y * 2])
@@ -139,12 +184,11 @@ def map_document(name, source, local, target):
     for y in range(height):
         x = 0
         while x < width:
-            blocked = source.blocks["prop"][source.cell(x // 2, y // 2) & 31] & 0x80
-            if not blocked:
+            if not blocked(x // 2, y // 2):
                 x += 1
                 continue
             end = x
-            while end + 1 < width and source.blocks["prop"][source.cell((end + 1) // 2, y // 2) & 31] & 0x80:
+            while end + 1 < width and blocked((end + 1) // 2, y // 2):
                 end += 1
             run = end - x + 1
             while run:
@@ -301,6 +345,19 @@ def water_animation(water_ids):
     return code, sites
 
 
+def object_hook(base, tables):
+    """01:F42D (LDX #$0009 after 01:F3F9 found the map's entries in Y) -> pick our entries for the
+    replaced maps. Everything that reads the object table (drawing 01:F3E8, とびら 01:DE62, 01:D920,
+    01:F122) goes through 01:F3F9, so one hook covers them. Returns the code and its call site."""
+    code = bytearray()
+    for (group, number), at in tables.items():
+        offset = at - (OBJECT_TABLE & 0xFFFF)
+        code += bytes((0xA5, 0xBC, 0xC9, group, 0xD0, 0x09, 0xA5, 0xBD, 0xC9, number, 0xD0, 0x03,
+                       0xA0, offset & 0xFF, offset >> 8))
+    code += bytes((0xA2, 0x09, 0x00, 0x60))
+    return bytes(code), (0x01F42D, bytes((0xA2, 0x09, 0x00)), bytes((0x20, base & 0xFF, base >> 8)))
+
+
 def _hex(data):
     return " ".join(f"{b:02X}" for b in data)
 
@@ -347,6 +404,18 @@ def build(dq5_path, dq4_path, out):
     if orig_entry1 == BLOCKS_AT + 11:
         raise ValueError("original first block has our block size; dirty-table check would not work")
     code, sites = hooks(len(block_words))
+    found = {name: objects(source) for name, (source, _) in maps.items()}
+    tables, at = {}, HOOK_AT + len(code)
+    entries = bytearray()
+    for name in maps:
+        tables[TARGETS[name]] = (at + len(entries)) & 0xFFFF
+        entries += object_entries(found[name])
+    hook_at = at + len(entries)
+    obj_code, obj_site = object_hook(hook_at & 0xFFFF, tables)
+    code += bytes(entries) + obj_code
+    if HOOK_AT + len(code) > HOOK_END:
+        raise ValueError(f"bank 01 tail overflows by {HOOK_AT + len(code) - HOOK_END} bytes")
+    sites.append(obj_site)
 
     (out / "chr.bin").write_bytes(b"".join(chr_data))
     (out / "blocks.bin").write_bytes(blocks)
@@ -364,7 +433,8 @@ def build(dq5_path, dq4_path, out):
         writes.append({"at": _cpu(at), "hex": _hex(new), "orig": _hex(orig), "note": "환경 맵 훅"})
     rom = Rom(dq5)
     at = MAPS_AT
-    report = {"chr": len(chr_data), "blocks": len(block_words), "water_chr": list(water_ids), "maps": {}}
+    report = {"chr": len(chr_data), "blocks": len(block_words), "water_chr": list(water_ids),
+              "bank01_bytes": len(code), "objects": found, "maps": {}}
     for name, (source, local) in maps.items():
         target = TARGETS[name]
         doc = map_document(name, source, local, target)
