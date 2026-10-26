@@ -308,9 +308,9 @@ def dumps(doc):
     j = lambda v: json.dumps(v, ensure_ascii=False)  # noqa: E731
     lines = ['{']
     for k, v in doc.items():
-        if k == 'commands':
+        if k in ('commands', 'placements'):
             body = ',\n'.join(f'  {j(c)}' for c in v)
-            lines.append(f' "commands": [\n{body}\n ],')
+            lines.append(f' "{k}": [\n{body}\n ],')
         elif k == 'passes':
             ps = []
             for p in v:
