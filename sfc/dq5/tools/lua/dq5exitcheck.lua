@@ -12,14 +12,38 @@ local sound = 0
 emu.addMemoryCallback(function() sound = sound + 1 end, emu.callbackType.exec, 0x2AF4D1, 0x2AF4D1)
 local audit = os.getenv('AUDIT') == '1'
 local stale, staleFirst = 0, nil
+local function onStale(addr)
+  stale = stale + 1
+  if not staleFirst then
+    local s = emu.getState()
+    staleFirst = string.format('%02X%04X@%06X', s['cpu.k'], s['cpu.pc'], addr)
+  end
+end
 for a, b in string.gmatch(os.getenv('STALE') or '', '(%x+)-(%x+)') do
-  emu.addMemoryCallback(function(addr)
-    stale = stale + 1
-    if not staleFirst then
-      local s = emu.getState()
-      staleFirst = string.format('%02X%04X@%06X', s['cpu.k'], s['cpu.pc'], addr)
-    end
-  end, emu.callbackType.read, tonumber(a, 16), tonumber(b, 16))
+  -- 뱅크 80~ 은 00~ 의 거울이라 같은 롬을 읽는다.
+  for _, mirror in ipairs({0, 0x800000}) do
+    emu.addMemoryCallback(onStale, emu.callbackType.read, tonumber(a, 16) | mirror, tonumber(b, 16) | mirror)
+  end
+end
+-- 출구를 다른 뱅크로 옮기면 스텁이 직접 페이지 $86 을 덮는다(원래 로더는 $84·$85 만). $86 은 다른 곳에서도 임시로 쓰므로,
+-- 출구 로더가 2A:F709 에 닿은 뒤 다른 코드가 $86 을 다시 쓰기 전에 읽으면(덮은 값에 기대면) 그 PC 를 모은다.
+-- [$84] 읽기 11곳은 뺀다(DP86OK, 쉼표로 PC 16진).
+local dp86, dirty = {}, false
+local dp86ok = {}
+for pc in string.gmatch(os.getenv('DP86OK') or '', '%x+') do dp86ok[tonumber(pc, 16)] = true end
+emu.addMemoryCallback(function() dirty = true end, emu.callbackType.exec, 0x2AF709, 0x2AF709)
+for _, a in ipairs({0x000086, 0x7E0086}) do
+  emu.addMemoryCallback(function()
+    if not dirty then return end
+    local s = emu.getState()
+    local pc = (s['cpu.k'] << 16) | s['cpu.pc']
+    if not dp86ok[pc] then dp86[string.format('%06X', pc)] = true end
+  end, emu.callbackType.read, a, a)
+  emu.addMemoryCallback(function()
+    local s = emu.getState()
+    local pc = (s['cpu.k'] << 16) | s['cpu.pc']
+    if not dp86ok[pc] then dirty = false end
+  end, emu.callbackType.write, a, a)
 end
 local cover, reads = {}, {}
 if audit then
@@ -50,8 +74,8 @@ if audit then
   end
   for _, open in ipairs({0x2AF705, 0x019441, 0x00CDF9, 0x2AF4C2, 0x2AFD1A}) do
     emu.addMemoryCallback(function()
-      if execCb then return end
       db, miss = emu.getState()['cpu.dbr'], 0
+      if execCb then return end
       execCb = emu.addMemoryCallback(onExec, emu.callbackType.exec, 0, 0xFFFFFF)
       readCb = emu.addMemoryCallback(onRead, emu.callbackType.read, 0, 0xFFFFFF)
     end, emu.callbackType.exec, open, open)
@@ -63,6 +87,10 @@ L.write = function(name, data)
     data = data .. string.format('final map %02X/%02X cell %d,%d layer %02X BE=%02X sound %d\n', emu.read(0x7E00BC, m),
       emu.read(0x7E00BD, m), emu.read(0x7E3020, m), emu.read(0x7E3080, m), emu.read(0x7E31A0, m), emu.read(0x7E00BE, m), sound)
       .. string.format('stale reads %d %s\n', stale, staleFirst or '-')
+    local t = {}
+    for k in pairs(dp86) do t[#t + 1] = k end
+    table.sort(t)
+    data = data .. 'dp86 ' .. (#t > 0 and table.concat(t, ',') or '-') .. '\n'
     if audit then
       local t, r = {}, {}
       for k, c in pairs(cover) do t[#t + 1] = string.format('%06X %02X %d', k // 256, k % 256, c) end

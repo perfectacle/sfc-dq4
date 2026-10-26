@@ -4,7 +4,7 @@
 맵마다 출구·레코드 수, 출구 종류(길이), 색인에 새 맵을 넣는 것까지 바꿀 수 있다. 표 크기가 원래 자리에 맞으면
 원래 자리에 그대로 쓰고 코드는 고치지 않는다. 옮기면 표를 찾는 코드의 즉값만 고친다.
 
-  출구 표(2A:F6FD): 같은 뱅크 2A 안이면 2A:F709·F70D 의 즉값 두 개만. 다른 뱅크면 ($84) 읽기 11곳을 [$84] 로 바꾸고
+  출구 표(2A:F6FD): 같은 뱅크 2A 안이면 2A:F70A·F70E 의 즉값 두 개만. 다른 뱅크면 ($84) 읽기 11곳을 [$84] 로 바꾸고
                     2A:F709 를 JSL 로 바꿔, 표 앞 13바이트 스텁이 $84~$86 을 채운다. DB 는 그대로 2A 다.
   색인(01:9430):    DB 를 색인 뱅크로 두고 abs 로 읽는다. 같은 DB 로 MMIO 곱셈($4202~)과 $183A~ 를 쓰므로 뱅크 00~3F.
   레코드(01:94A2):  실행기 00:CDEC·2A:F4B9·2A:FD11 이 레코드 뱅크를 DB 로 두고 WRAM($1954·$1EAB·$198E)을 abs 로
@@ -199,7 +199,10 @@ def encode_exit(row, last, name):
     # 2A:F711 은 다른 그룹을 FF 가 나올 때까지 한 바이트씩 건너뛰므로 레코드 안의 FF 는 그룹을 끊는다.
     values = [integer(row[k], 31 if k in ('special', 'destination_map') else 254, f'{name}.{k}')
               for k in EXIT_FIELDS[row['kind']]]
-    return bytes([(0x80 if last else 0) | KIND_BITS[row['kind']] | values[0], *values[1:]])
+    raw = bytes([(0x80 if last else 0) | KIND_BITS[row['kind']] | values[0], *values[1:]])
+    if 0xFF in raw:
+        raise ValueError(f'{name}: 레코드에 FF 바이트가 생김(마지막 좌표 출구의 destination_map 31)')
+    return raw
 
 
 def encode_trigger(row, name):
@@ -298,6 +301,12 @@ def allowed(original):
     return out
 
 
+def current_places(loc):
+    """locate() 결과를 --*-at 과 같은 꼴(출구는 스텁 자리)로."""
+    exits = loc['exits'] if loc['exits'] >> 16 == 0x2A else loc['exits'] - STUB_SIZE
+    return {'exits': exits, 'records': loc['records'], 'index': loc['index'], 'high': loc['high'][0]}
+
+
 def occupied(rom, known):
     """이미 옮긴 롬이면 지금 표들이 차지한 자리. 같은 자리에 다시 쓸 수 있게 허용 목록에 더한다."""
     loc = locate(rom)
@@ -308,9 +317,9 @@ def occupied(rom, known):
             (loc['high'][0], loc['high'][0] + sum(map(len, blobs['high'])))]
 
 
-def placement(original, sizes, at, extra=()):
-    """at: 표 이름 → CPU 주소(없으면 원래 자리). extra 는 더 허용할 (시작, 끝). 검사한 자리를 돌려준다."""
-    at = {k: at.get(k) or ORIGINAL[k] for k in ORIGINAL}
+def placement(original, sizes, at, current, extra=()):
+    """at: 표 이름 → CPU 주소(없으면 지금 자리 current). extra 는 더 허용할 (시작, 끝). 검사한 자리를 돌려준다."""
+    at = {k: at.get(k) or current[k] for k in ORIGINAL}
     spans = {}
     for name, size in sizes.items():
         start = at[name]
@@ -345,7 +354,7 @@ def writes_for(rom, doc, at=None):
     blobs = serialize(doc, known)
     sizes = {'exits': len(blobs['exits']), 'index': len(blobs['index']), 'records': len(blobs['records']),
              'high': sum(map(len, blobs['high']))}
-    at = placement(rom.d, sizes, at or {}, occupied(rom, known))
+    at = placement(rom.d, sizes, at or {}, current_places(locate(rom)), occupied(rom, known))
     short = at['exits'] >> 16 == 0x2A
     table = at['exits'] if short else at['exits'] + STUB_SIZE
     data = [(at['exits'], (b'' if short else stub(table)) + blobs['exits'], '출구 목적지 표'),
@@ -373,6 +382,20 @@ def writes_for(rom, doc, at=None):
         old = bytes(rom.d[lorom(addr):lorom(addr) + len(new)]) if lorom(addr) + len(new) <= len(rom.d) else None
         if new and new != old:
             out.append((addr, new, old if lorom(addr) < ORIGINAL_SIZE else None, note))
+    if out:
+        # 원래 표 자리 중 새 표가 들지 않은 곳도 같은 바이트로 써서 이 도구가 맡는다. 고정 슬롯 쓰기(dq5exitwrite.py)를
+        # 한 빌드에 함께 넣으면 빌더가 겹침으로 거부한다. 같이 넣으면 그 편집이 옮겨 간 표에 닿지 않기 때문이다.
+        gaps = []
+        for lo, hi in POOLS:
+            taken = sorted((max(a, lo), min(a + len(n), hi)) for a, n, _, _ in out if a < hi and a + len(n) > lo)
+            cursor = lo
+            for first, last in taken + [(hi, hi)]:
+                if first > cursor:
+                    old = read(rom, cursor, first - cursor)
+                    gaps.append((cursor, old, old, '원래 표 자리 맡음(바이트 그대로)'))
+                cursor = max(cursor, last)
+        out += gaps
+        out.sort()
     return out, rom_size([a for a, _, _, _ in out] or [0])
 
 
@@ -455,13 +478,13 @@ def check(rom, doc=None, at=None):
 
 
 def address(text):
+    if not re.fullmatch(r'[0-9A-Fa-f]{2}:[0-9A-Fa-f]{4}', text):
+        raise argparse.ArgumentTypeError('BB:AAAA 로 적어야 함')
     try:
-        off, is_cpu = parse_at(text)
+        off, _ = parse_at(text)
     except Exception as error:
         raise argparse.ArgumentTypeError(str(error)) from error
-    if not is_cpu:
-        raise argparse.ArgumentTypeError('BB:AAAA 로 적어야 함')
-    return int(text[:2], 16) << 16 | int(text[3:], 16)
+    return (off // BANK) << 16 | 0x8000 | off % BANK
 
 
 def main():

@@ -16,6 +16,7 @@ from dq5exitreloc import (
     INDEX_BANK,
     INDEX_OPERANDS,
     ORIGINAL,
+    POOLS,
     RECORD_BANK,
     RECORD_LOW,
     engine_exits,
@@ -110,7 +111,13 @@ class RelocTests(unittest.TestCase):
         doc['exits'][1]['records'][2] = {'kind': 'same-group', 'destination_map': 2, 'exit': 0}
         writes, size = writes_for(self.rom, doc)
         self.assertEqual(size, 0)
-        self.assertEqual([w[0] for w in writes], [ORIGINAL['exits']])
+        self.assertEqual([w[0] for w in writes if '맡음' not in w[3]], [ORIGINAL['exits']])
+        # 원래 표 자리는 바뀐 표와 「맡음」 쓰기로 빈틈없이 덮여, 고정 슬롯 쓰기와 함께 빌드하면 겹친다.
+        for lo, hi in POOLS:
+            spans = sorted((a, a + len(n)) for a, n, _, _ in writes if lo <= a < hi)
+            self.assertEqual(spans[0][0], lo)
+            self.assertEqual(spans[-1][1], hi)
+            self.assertTrue(all(e == s2 for (_, e), (s2, _) in zip(spans, spans[1:])))
         moved = apply(self.rom.d, writes, 0x180000)
         self.assertEqual(parse(moved), doc)
 
@@ -163,6 +170,9 @@ class RelocTests(unittest.TestCase):
         doc = copy.deepcopy(self.doc)
         doc['exits'][1]['records'][0]['exit'] = 1
         cases.append((doc, '출구 수 밖'))
+        doc = copy.deepcopy(self.doc)
+        doc['exits'][1]['records'][2]['destination_map'] = 31
+        cases.append((doc, 'FF'))
         doc = copy.deepcopy(self.doc)
         doc['exits'][1]['records'][0]['destination_map'] = 3
         cases.append((doc, '목적지'))

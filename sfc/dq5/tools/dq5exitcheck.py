@@ -21,7 +21,7 @@ from kr_patch.sfc.dis65816 import decode
 from kr_patch.sfc.mapper import LoROM
 
 from dq5exit import arrival, exit_attrs
-from dq5exitreloc import cpu, engine_exits, locate
+from dq5exitreloc import EXIT_INDEXED, EXIT_SHORT, STUB_SIZE, cpu, engine_exits, locate
 from dq5map import Rom, lorom
 
 HERE = Path(__file__).resolve().parent
@@ -126,7 +126,7 @@ CASES = [
 AUDIT = ('same-original', 'other-original', 'position-original', 'rect-old-original', 'high-original',
          'edge-original', 'sound-original', 'stair33-opened')
 ENV_CLEAR = ('ADULT', 'ANYWHERE', 'AUDIT', 'BATTLE', 'FIELD', 'GROUP', 'LATESET', 'PARTY', 'POKE',
-             'ROMPATCH', 'SAVE', 'SET', 'STALE', 'WAGON', 'WARPEXIT')
+             'DP86OK', 'ROMPATCH', 'SAVE', 'SET', 'STALE', 'WAGON', 'WARPEXIT')
 # r 롬은 네 표를 모두 옮겼으므로 옛 자리(일반 표 2A:D812~F223, 고층 01:9635~9770)를 읽는 곳이 없어야 한다.
 STALE = {'r': '2AD812-2AF223,019635-019770'}
 # DB 를 기준으로 주소를 내는 꼴. long($xxxxxx)·[$xx]·직접 페이지($xx)·즉값·점프 대상은 DB 를 쓰지 않는다.
@@ -150,6 +150,14 @@ def warp_exit(path):
     return lorom(engine_exits(rom, locate(rom), 0x17, 0)[0][0])
 
 
+def dp86_allowed(path):
+    """$86 을 건드려도 되는 PC: 스텁(STA $86)과 [$84] 읽기 11곳. 출구가 뱅크 2A 밖이면 스텁 자리도 더한다."""
+    rom = Rom(path.read_bytes())
+    table = locate(rom)['exits']
+    stub = [table - STUB_SIZE + 10] if table >> 16 != 0x2A else []
+    return ','.join(f'{a:06X}' for a in (*EXIT_SHORT, *EXIT_INDEXED, *stub))
+
+
 def run(case, roms, state, out, mesence, libdir, audit=False):
     name, rom, to, test, _, *extra = case
     extra = extra[0] if extra else {}
@@ -157,7 +165,7 @@ def run(case, roms, state, out, mesence, libdir, audit=False):
     dest.mkdir()
     env = {k: v for k, v in os.environ.items() if k not in ENV_CLEAR}
     env.update(LIBDIR=str(libdir), STATE=str(state), SHOT_DIR=str(dest), MAXF='1500', SETTLE='120',
-               TO=to, TEST=f'{test},wait:300', WARPEXIT=f'{roms[rom][1]:X}')
+               TO=to, TEST=f'{test},wait:300', WARPEXIT=f'{roms[rom][1]:X}', DP86OK=roms[rom][2])
     if 'late' in extra:
         env['LATESET'] = extra['late']
     if rom in STALE:
@@ -171,6 +179,8 @@ def run(case, roms, state, out, mesence, libdir, audit=False):
     text = (dest / 'warp.txt').read_text(encoding='utf-8')
     match = re.search(r'final map (\w\w/\w\w) cell (\d+),(\d+) layer (\w\w) BE=(\w\w) sound (\d+)', text)
     require(match is not None and 'timeout' not in text, f'{name}: 보행 결과가 없음')
+    dp86 = re.search(r'dp86 (\S+)', text)
+    require(dp86 is not None and dp86[1] == '-', f'{name}: 출구 로더가 덮은 $86 을 다른 곳이 읽음 {dp86 and dp86[1]}')
     stale = re.search(r'stale reads (\d+) (\S+)', text)
     require(stale is not None and stale[1] == '0', f'{name}: 옛 표 자리를 읽음 {stale and stale[2]}')
     place = match[1] if int(match[5], 16) & 0x80 else 'field'
@@ -193,6 +203,8 @@ def audit_report(rom, out):
                 reads.setdefault(int(pc, 16), set()).add(int(addr, 16))
     access = []
     for (pc, p), count in sorted(executed.items()):
+        if pc >> 16 in (0x7E, 0x7F) or pc & 0xFFFF < 0x8000:
+            continue
         op = decode(data, pc, m8=bool(p & 0x20), x8=bool(p & 0x10), mapper=mapper)[0][22:]
         hit = DB_ABS.match(op)
         if hit or DB_INDIRECT.match(op):
@@ -222,7 +234,7 @@ def main():
         args.out.mkdir(parents=True, exist_ok=True)
         out = Path(tempfile.mkdtemp(prefix='run-', dir=args.out.resolve()))
         print(f'실행 출력: {out}', flush=True)
-        roms = {'original': (original, lorom(0x2AEFF5))}
+        roms = {'original': (original, lorom(0x2AEFF5), dp86_allowed(original))}
         cases = [c for c in CASES if c[0] in AUDIT] if args.audit else CASES
         for key, edits in () if args.audit else EDITS.items():
             source, manifest = out / f'{key}.json', out / f'{key}.patch.json'
@@ -231,7 +243,7 @@ def main():
             command('dq5exitwrite.py', original, 'patch', source, '-o', manifest)
             command('dq5exitwrite.py', original, 'check', source)
             command('dq5build.py', original, 'build', manifest, '-o', out / f'{key}.sfc', '--ips', out / f'{key}.ips')
-            roms[key] = (out / f'{key}.sfc', lorom(0x2AEFF5))
+            roms[key] = (out / f'{key}.sfc', lorom(0x2AEFF5), dp86_allowed(out / f'{key}.sfc'))
         for key, (edit, at) in () if args.audit else RELOC.items():
             source, manifest = out / f'{key}.json', out / f'{key}.patch.json'
             command('dq5exitreloc.py', original, 'dump', '-o', source)
@@ -243,7 +255,7 @@ def main():
             command('dq5exitreloc.py', original, 'patch', source, '-o', manifest, *places)
             command('dq5exitreloc.py', original, 'check', source, *places)
             command('dq5build.py', original, 'build', manifest, '-o', out / f'{key}.sfc', '--ips', out / f'{key}.ips')
-            roms[key] = (out / f'{key}.sfc', warp_exit(out / f'{key}.sfc'))
+            roms[key] = (out / f'{key}.sfc', warp_exit(out / f'{key}.sfc'), dp86_allowed(out / f'{key}.sfc'))
         krlua = Path(subprocess.run(['krpatch', 'sfc', 'lua'], capture_output=True, text=True,
                                     check=True, timeout=30).stdout.strip())
         libdir = out / 'lib'
