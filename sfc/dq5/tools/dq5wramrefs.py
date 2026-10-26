@@ -74,6 +74,7 @@ def main():
     ap.add_argument('--range', default='1ABC-1BB1')
     ap.add_argument('--exec', nargs='*', default=[], help='exec.txt 가 든 폴더들')
     ap.add_argument('--probe', nargs='*', default=[], help='probe.txt 가 든 폴더들')
+    ap.add_argument('--cdl', help='lua/dq5execcov.lua CDL=1 의 cdl.bin. 미실행 후보를 CDL 코드·자료·없음으로 더 나눔')
     ap.add_argument('--positions', help='실행된 후보 자리를 CPU 주소(00~3F 와 80~BF 거울 둘 다)로 이 파일에 씀(POSFILE 용)')
     a = ap.parse_args()
     d = open(a.rom, 'rb').read()
@@ -111,6 +112,22 @@ def main():
     for k, r in rows.items():
         print(f'| {k} | ' + ' | '.join(f'{v:,}' for v in r) + ' |')
     print('| 합계 | ' + ' | '.join(f'{sum(r[i] for r in rows.values()):,}' for i in range(5)) + ' |')
+    if a.cdl:
+        cdl = open(a.cdl, 'rb').read()
+        sub = collections.Counter()
+        for k, o, _ in cands:
+            if o in ex:
+                continue
+            f = cdl[o] if o < len(cdl) else 0
+            where = '자료 뱅크' if bank_exec[o // 0x8000] == 0 else '코드 뱅크'
+            sub[(k in KINDS[:7], where, '코드' if f & 1 else '자료' if f & 2 else '없음')] += 1
+        print('\n미실행 후보의 CDL(직접 피연산자 여부, 뱅크, CDL):')
+        for key, v in sorted(sub.items()):
+            print(f'  {"직접" if key[0] else "값 모름"} {key[1]} {key[2]}: {v:,}')
+        print('\nCDL 이 코드라 한 직접 피연산자 후보(정렬된 디스어셈블로 명령 중간인지 볼 것):')
+        for k, o, det in cands:
+            if o not in ex and k in KINDS[:7] and o < len(cdl) and cdl[o] & 1:
+                print(f'  {cpu(o) >> 16:02X}:{cpu(o) & 0xFFFF:04X} {k} {det} {d[o:o + 4].hex(" ")}')
     if starts:
         print('\n명령으로 실행된 후보:')
         byo = {cpu(o): (k, det) for k, o, det in cands}

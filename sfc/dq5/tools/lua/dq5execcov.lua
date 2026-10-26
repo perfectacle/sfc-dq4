@@ -3,6 +3,7 @@
 --   acc.txt    WRAM 범위 RANGE(기본 1ABC-1BB1)의 읽기·쓰기 횟수 합
 --   vw.txt     VRAM 0x400워드 칸마다 쓰기 횟수(FROM 프레임부터)
 --   probe.txt  POSFILE(쉼표로 CPU 주소)의 자리가 명령으로 실행될 때 레지스터(자리마다 처음 20번)
+--   cdl.bin    CDL=1 이면 MesenCE 가 이 롬에 쌓아 둔 코드·자료 기록(emu.getCdlData, 바이트마다 bit0 코드·bit1 자료)
 -- 입력: STATE 가 있으면 세이브스테이트, PRE 는 dq5msg.lua 와 같은 꼴. BOOT=1 이면 LIBDIR 의 boot.lua 를 드라이버로 돈다.
 package.path = os.getenv("LIBDIR") .. "/?.lua;" .. package.path
 local L = require("lib")
@@ -64,6 +65,11 @@ emu.addEventCallback(function()
     for i = lo, hi do r = r + rc[i]; ww = ww + wc[i] end
     write("acc.txt", string.format("r=%d w=%d\n", r, ww))
     write("probe.txt", table.concat(hits, "\n") .. "\n")
+    if os.getenv("CDL") then
+      local c, b = emu.getCdlData(emu.memType.snesPrgRom), {}
+      for i = 0, #c do b[#b + 1] = string.char(c[i] or 0) end
+      local f = io.open(os.getenv("SHOT_DIR") .. "/cdl.bin", "wb"); f:write(table.concat(b)); f:close()
+    end
     emu.stop()
   end
 end, emu.eventType.inputPolled)
