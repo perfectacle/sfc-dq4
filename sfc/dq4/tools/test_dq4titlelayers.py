@@ -51,7 +51,7 @@ class LayerTests(unittest.TestCase):
         tiles = layers.decode_tiles(blobs['foreground.chr'], 8)
         mapping = np.frombuffer(blobs['foreground.map'], dtype='<u2').reshape(32, 32)
         pixels = tiles[mapping & 1023].transpose(0, 2, 1, 3).reshape(256, 256)[:224]
-        original = native_title(DEFAULT_SOURCE)
+        original = layers.foreground_source()
         palette = np.array(original.getpalette()[:384]).reshape(128, 3)
         mask = np.frombuffer(blobs['foreground-mask.bin'], dtype=np.uint8).reshape(224, 256) > 0
         self.assertTrue(np.array_equal(palette[pixels][mask], np.array(original.convert('RGB'))[mask]))
@@ -97,11 +97,11 @@ class LayerTests(unittest.TestCase):
 
     def test_cloud_variation_and_scroll_wrap_are_continuous(self):
         from PIL import Image
-        cloud, _ = layers.cloud_assets()
+        clouds, palettes = layers.cloud_assets()
         tiles = layers.decode_tiles((self.pack / 'dragon-initial.chr').read_bytes(), 4)
         records = (self.pack / 'cloud-oam.bin').read_bytes()
         pictures = []
-        for offset in range(128):
+        for offset in range(256):
             record = records[offset * 128:(offset + 1) * 128]
             plane = Image.new('RGBA', (256, 224))
             for i in reversed(range(9)):
@@ -114,22 +114,51 @@ class LayerTests(unittest.TestCase):
                 if attr & 0x40:
                     pixels = pixels[:, ::-1]
                 half = Image.fromarray(pixels).convert('P')
-                half.putpalette(cloud.getpalette())
+                palette = palettes[(attr >> 1 & 7) - 1]
+                half.putpalette(palette.flatten().tolist() + [0] * (768 - 48))
                 half.info['transparency'] = 0
                 plane.alpha_composite(half.convert('RGBA'), (x, y))
             pictures.append(np.array(plane))
         # A one-pixel scroll must be continuous even as OAM slots and the cycle wrap.
-        for offset in range(128):
-            self.assertTrue(np.array_equal(pictures[offset][:, 1:], pictures[(offset + 1) % 128][:, :-1]), offset)
+        for offset in range(256):
+            self.assertTrue(np.array_equal(pictures[offset][:, 1:], pictures[(offset + 1) % 256][:, :-1]), offset)
         self.assertFalse(np.array_equal(pictures[0][:, :64], pictures[0][:, 64:128]))
-        self.assertTrue(np.array_equal(pictures[0][:, :128], pictures[0][:, 128:]))
+        self.assertEqual(len({pictures[0][:, x:x + 64].tobytes() for x in range(0, 256, 64)}), 4)
+
+    def test_subtitle_separator_changes_only_the_gap_above_final_consonant(self):
+        original = np.array(native_title(DEFAULT_SOURCE))
+        corrected = np.array(layers.foreground_source())
+        expected = original.copy()
+        expected[183, 115:122] = 111
+        self.assertTrue(np.array_equal(corrected, expected))
+        self.assertTrue(np.array_equal(corrected[184:187, 113:124], original[184:187, 113:124]))
+
+    def test_cloud_reservations_are_empty_in_every_dragon_pose(self):
+        frames, _ = layers.quantize_dragon(layers.dragon_frames())
+        clouds, palettes = layers.cloud_assets()
+        self.assertEqual(len({layers.snes_palette(palette) for palette in palettes}), 4)
+        silhouettes = {np.array(cloud).astype(bool).tobytes() for cloud in clouds}
+        self.assertEqual(len(silhouettes), 3)
+        for phase, frame in enumerate(frames):
+            source = np.array(frame)
+            self.assertFalse(np.any(source[:32, 96:160]))
+            encoded = layers.add_cloud_tiles(layers.obj_chr(frame), clouds, phase % 2)
+            tiles = layers.decode_tiles(encoded, 4)
+            for i in range(15):
+                if i in (3, 4):
+                    continue
+                base = i % 4 * 4 + i // 4 * 64
+                indices = base + np.arange(4)[:, None] * 16 + np.arange(4)
+                pixels = tiles[indices].transpose(0, 2, 1, 3).reshape(32, 32)
+                x, y = i % 5 * 32, i // 5 * 32
+                self.assertTrue(np.array_equal(pixels, source[y:y + 32, x:x + 32]))
 
     def test_unused_oam_hidden_and_page_parity(self):
         for phase in (0, 1, 127):
             oam = layers.oam_frame(phase)
             for sprite in range(128):
                 high = oam[512 + sprite // 4] >> (sprite % 4 * 2) & 3
-                if sprite < 15:
+                if sprite < 15 and sprite not in (3, 4):
                     self.assertEqual(high, 2)
                     self.assertEqual(oam[sprite * 4 + 3] & 1, phase & 1)
                 else:
@@ -138,18 +167,20 @@ class LayerTests(unittest.TestCase):
 
     def test_cloud_table_priority_and_reserved_tiles(self):
         blobs, report = layers.read_pack(self.pack)
-        self.assertEqual(len(blobs['cloud-oam.bin']), 16384)
-        for offset in range(128):
+        self.assertEqual(len(blobs['cloud-oam.bin']), 32768)
+        for offset in range(256):
             record = blobs['cloud-oam.bin'][offset * 128:(offset + 1) * 128]
             self.assertEqual(record[68:], bytes(60))
             for sprite in range(15):
-                self.assertEqual(record[36 + sprite // 4] >> (sprite % 4 * 2) & 2, 2)
+                self.assertEqual(record[36 + sprite // 4] >> (sprite % 4 * 2) & 2, 0 if sprite in (3, 4) else 2)
             for i in range(9):
                 x, y, tile, attr = record[i * 4:i * 4 + 4]
                 position = -(offset % 32) + i * 32
-                self.assertEqual(y, 224 if position >= 256 or position + 32 <= 0 else layers.CLOUD_Y + (6 if attr & 0x40 else 0))
-                self.assertEqual(tile, 204)
-                self.assertEqual(attr & 0xBE, 0x22)
+                variant = (attr >> 1 & 7) - 1
+                self.assertIn(variant, range(4))
+                self.assertEqual(y, 224 if position >= 256 or position + 32 <= 0 else layers.CLOUD_Y + layers.CLOUD_HEIGHTS[variant])
+                self.assertEqual(tile, layers.CLOUD_BASES[layers.CLOUD_FORMS[variant]])
+                self.assertEqual(attr & 0xB0, 0x20)
                 self.assertEqual(record[36 + (15 + i) // 4] >> ((15 + i) % 4 * 2) & 2, 2)
         with tempfile.TemporaryDirectory() as directory:
             source = self.copy_pack(directory)

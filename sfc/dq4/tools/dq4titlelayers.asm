@@ -87,7 +87,7 @@ Title:
   sta $2121
   ldx.w #$E900
   stx $4302
-  ldx.w #$0040
+  ldx.w #$00A0
   stx $4305
   lda.b #$01
   sta $420B
@@ -280,7 +280,7 @@ Motion:
   tya
   lsr
   lsr
-  and.w #$007F
+  and.w #$00FF
   xba
   lsr
   ora.w #$8000
@@ -350,7 +350,7 @@ org $348000
 incbin "dragon-initial.chr"
 org $358000
 incbin "cloud-oam.bin"
-assert pc() == $35C000
+assert pc() == $360000
 org $368000
 check bankcross off
 incbin "layer-payload.bin"
