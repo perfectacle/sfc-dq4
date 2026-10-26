@@ -4,6 +4,7 @@
 --   VFRAMES(쉼표 목록) 프레임에는 v<프레임>.vram 도 남긴다. SHOTS=1 이면 그 프레임의 화면 버퍼(emu.getScreenBuffer)를
 --   s<프레임>.raw(점마다 32비트 ARGB, 작은 끝)로, 크기를 size.txt 에 남긴다(emu.takeScreenshot 은 1~3프레임 늦을 때가 있음).
 --   EXEC="22B38C,22B347"   그 PC 를 실행한 프레임을 exec.txt 에 "프레임 PC A X Y" 로
+--   CGW=1 이면 화면을 그리는 동안(줄 0~224) $2121·$2122 에 쓴 것을 cgw.txt 에 "프레임 줄 레지스터 값" 으로(HDMA 가 CGRAM 을 바꾸는 것)
 package.path = os.getenv("LIBDIR") .. "/?.lua;" .. package.path
 local L = require("lib")
 local m = emu.memType
@@ -18,6 +19,14 @@ for a in string.gmatch(os.getenv("EXEC") or "", "%x+") do
     local st = emu.getState()
     ex[#ex + 1] = string.format("%d %06X %04X %04X %04X", n, pc, st["cpu.a"], st["cpu.x"], st["cpu.y"])
   end, emu.callbackType.exec, pc, pc)
+end
+local cgw = {}
+if os.getenv("CGW") then
+  emu.addMemoryCallback(function(a, v)
+    if n < from or n > to then return end
+    local sl = emu.getState()["ppu.scanline"]
+    if sl < 225 then cgw[#cgw + 1] = string.format("%d %d %04X %02X", n, sl, a & 0xFFFF, v) end
+  end, emu.callbackType.write, 0x2121, 0x2122)
 end
 emu.addEventCallback(function()
   n = n + 1
@@ -45,6 +54,7 @@ emu.addEventCallback(function()
   if n == to then
     L.write("ppu.txt", table.concat(ppu, "\n") .. "\n")
     L.write("exec.txt", table.concat(ex, "\n") .. "\n")
+    if os.getenv("CGW") then L.write("cgw.txt", table.concat(cgw, "\n") .. "\n") end
   end
 end, emu.eventType.endFrame)
 dofile(os.getenv("LIBDIR") .. "/boot.lua")
