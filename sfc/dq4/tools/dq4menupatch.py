@@ -460,6 +460,8 @@ def build(rom, font, jamo_font):
     for name, target in {'wait': 0x9D35, 'erase': 0xD1B9, 'draw': 0xD183, 'row': 0xD319, 'blink': 0xD162}.items():
         bridges[name] = place(data, slack, bytes((0x20, target & 0xFF, target >> 8, 0x6B)))
     data = ne.apply(bytes(data), keys, ne.glyph_blob(font, render), bridges)
+    import dq4menumsg
+    data, atlas.messages = dq4menumsg.apply(data, font)
     return set_checksum(data), atlas, records
 
 
@@ -509,6 +511,7 @@ def main():
     Path(args.out).with_suffix('.ips').write_bytes(ips_patch(rom, out))
     print(f'{args.out} sha1={hashlib.sha1(out).hexdigest()} 열={len(atlas.cols)} '
           f'바뀐 구간={len(differences(rom, out))}')
+    print('\n'.join(atlas.messages))
     for n, (a, old, new) in sorted(records.items()):
         print(f'창 {n:02X} {a:06X} {len(old)}→{len(new)} {new.hex(" ")}')
 
