@@ -688,6 +688,19 @@ def fig_exflags3():
     save(out, 'dq5-exflags3.webp')
 
 
+def fig_party6():
+    """1F/01 결혼식 화면과, つよさみる 창에서 ビアンカ 레코드 +22(7E:208C)를 0B·01·0D 로 바꾼 화면 셋.
+    work/party6/ 의 wed.png·t0B.png·t01.png·t0D.png 이고 명령은 sfc/dq5/journal/ 의 party6 일지."""
+    save(Image.open('work/party6/wed.png').convert('RGB'), 'dq5-party6-wedding.webp')
+    shots = [('t0B.png', '+22 = 0B'), ('t01.png', '+22 = 01'), ('t0D.png', '+22 = 0D')]
+    out = Image.new('RGB', (len(shots) * 260 - 4, 224), (24, 24, 24))
+    for i, (path, text) in enumerate(shots):
+        im = Image.open(f'work/party6/{path}').convert('RGB')
+        label(im, text)
+        out.paste(im, (i * 260, 0))
+    save(out, 'dq5-party6-title.webp')
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     rom = Rom(open('rom/dq5.sfc', 'rb').read())
@@ -724,6 +737,7 @@ def main():
     fig_perframe_last()
     fig_exflags2()
     fig_exflags3()
+    fig_party6()
     os.remove(TMP)
 
 
