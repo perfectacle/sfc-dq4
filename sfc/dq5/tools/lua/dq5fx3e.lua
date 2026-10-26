@@ -99,7 +99,8 @@ emu.addMemoryCallback(function()
 end, emu.callbackType.exec, 0x22D934, 0x22D934)
 
 -- VMDUMP=1: 22:D790(스크립트 해석기를 부르기 직전)에서 WRAM 128KB 와 레지스터를 v<연출>.wram·.regs 로,
--- VMSCREENS=1 이면 연출 입구의 VRAM·CGRAM·OAM(v<연출>.vram0 등)과 그 프레임의 VRAM·CGRAM·OAM·BG3 스크롤도 e<연출>-<k>.* 로.
+-- VMSCREENS=1 이면 연출 입구의 VRAM·CGRAM·OAM·DMA 레지스터·시계 상태(v<연출>.vram0·.dma0·.clock0 등)와 그 프레임의 VRAM·CGRAM·OAM·BG3 스크롤도
+-- e<연출>-<k>.* 로, 입구 뒤 조이패드·소리 포트 읽기를 v<연출>.pad·.apu 로(dq5fxvm.py --clock 의 dq5clock 입력).
 -- 그 뒤 00:969A(프레임 기다림)마다 BG3 사본 7E:8A1D 896바이트와 $19·$0F5E·$0F5F·난수 $075B~$075D·$0DB0·$0DBC 8바이트를 v<연출>.frames 에 덧붙인다(dq5fxvm.py 가 견줌)
 local vm = os.getenv("VMDUMP") and {}
 if vm then
@@ -123,12 +124,59 @@ if vm then
       L.dump(string.format("v%02X.vram0", fx), emu.memType.snesVideoRam, 0x10000)
       L.dump(string.format("v%02X.cgram0", fx), emu.memType.snesCgRam, 0x200)
       L.dump(string.format("v%02X.oam0", fx), emu.memType.snesSpriteRam, 0x220)
+      -- DMA 채널 레지스터 $4300~$437F(읽을 수 있음)와 HDMA 켜기($420C 는 쓰기 전용이라 상태에서)
+      local b = {}
+      for i = 0, 0x7F do b[#b + 1] = string.char(emu.read(0x4300 + i, emu.memType.snesMemory)) end
+      b[#b + 1] = string.char(emu.getState()["dmaController.hdmaChannels"] or 0)
+      L.write(string.format("v%02X.dma0", fx), table.concat(b))
+      -- 주기 모형(dq5fxvm.py --clock)의 출발점: 마스터 클록·줄 안 자리·줄·리프레시 자리·DMA/HDMA 내부 상태
+      local st, ks = emu.getState(), {}
+      for k, v in pairs(st) do
+        if k:find("^dmaController") or k == "masterClock" or k:find("^memoryManager%.") or k == "ppu.scanline"
+          or k == "ppu.frameCount" or k:find("^cpu%.nmi") or k:find("^cpu%.needNmi") or k:find("^internalRegisters%.autoRead") or k == "internalRegisters.enableNmi" then
+          ks[#ks + 1] = k .. "=" .. tostring(v)
+        end
+      end
+      table.sort(ks)
+      L.write(string.format("v%02X.clock0", fx), table.concat(ks, "\n") .. "\n")
+      vm.pad = {fx = fx, n = 0, log = {}}
     end
     L.write(string.format("v%02X.regs0", fx), string.format("%04X %04X %04X %04X %04X %02X %02X\n", s["cpu.a"], s["cpu.x"], s["cpu.y"], s["cpu.sp"], s["cpu.d"], s["cpu.dbr"] or s["cpu.db"] or 0x7E, s["cpu.ps"] or 0))
   end, emu.callbackType.exec, 0x22D73C, 0x22D73C)
   emu.addMemoryCallback(function()
     if vm.cur then vm.cur = nil end
   end, emu.callbackType.exec, 0x22D793, 0x22D793)
+  -- 입구 뒤 NMI 마다 NMI 처리기가 읽은 조이패드($4218, 00:8BEB)를 v<연출>.pad 에 「NMI 차례 값」으로(dq5fxvm.py --clock 의 입력)
+  emu.addEventCallback(function()
+    if vm.pad then vm.pad.n = vm.pad.n + 1 end
+  end, emu.eventType.nmi)
+  emu.addMemoryCallback(function()
+    local p = vm.pad
+    if not p or #p.log > 4000 then return end
+    local c = emu.getState()["internalRegisters.controllerData[0]"] or 0
+    p.log[#p.log + 1] = string.format("%d %04X", p.n, c)
+    L.write(string.format("v%02X.pad", p.fx), table.concat(p.log, "\n") .. "\n")
+  end, emu.callbackType.exec, 0x008BEB, 0x008BEB)
+  -- 입구 뒤 CPU 가 소리 칩 포트($2140~$2143)에서 읽은 값을 v<연출>.apu 에 「마스터 클록 포트 값」으로(소리 칩은 흉내 내지 않고 입력으로 씀)
+  local apu = {}
+  local function onApu(addr, value)
+    local p = vm.pad
+    if not p or #apu > 400000 then return end
+    apu[#apu + 1] = string.format("%d %X %02X", emu.getMasterClock(), addr & 3, value)
+  end
+  for b = 0, 0xBF do
+    if b < 0x40 or b >= 0x80 then
+      emu.addMemoryCallback(onApu, emu.callbackType.read, b * 0x10000 + 0x2140, b * 0x10000 + 0x2143)
+    end
+  end
+  local apuN, apuF = 0, 0
+  emu.addEventCallback(function()
+    apuF = apuF + 1
+    if vm.pad and #apu > apuN and apuF % 30 == 0 then
+      apuN = #apu
+      L.write(string.format("v%02X.apu", vm.pad.fx), table.concat(apu, "\n") .. "\n")
+    end
+  end, emu.eventType.endFrame)
   emu.addMemoryCallback(function()
     if not vm.cur then return end
     local t = vm[vm.cur]

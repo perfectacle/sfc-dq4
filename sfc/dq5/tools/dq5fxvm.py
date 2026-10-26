@@ -8,7 +8,8 @@ WRAM 128KB 와 레지스터(lua/dq5fx3e.lua 의 VMDUMP=1 이 v<연출>.wram·.re
 
 --from-entry 는 연출 입구 22:D73C 부터 돈다. VMSCREENS=1 로 남긴 입구의 VRAM·CGRAM·OAM(v<연출>.vram0 등)을 넣으면
 w65816 이 VRAM·CGRAM·OAM 쓰기와 일반 DMA 를 따라 해 프레임마다 연출 층 그림을 만든다(--screens 로 같은 실행의
-e<연출>-<k>.* 와 견주고, --gif 로 저장). HDMA 는 흉내 내지 않으므로 줄마다 바뀌는 스크롤은 그림에 없다.
+e<연출>-<k>.* 와 견주고, --gif 로 저장). --clock 이고 입구의 v<연출>.clock0 이 있으면 dq5clock.Cpu(마스터 클록 단위,
+HDMA 까지)로 돌아 처리 도중 NMI·줄마다 바뀌는 스크롤까지 게임과 같다(run_exact). 없으면 HDMA 는 흉내 내지 않는다.
 
   uv run --locked python sfc/dq5/tools/dq5fxvm.py rom/dq5.sfc work/vm/h04 04        # 프레임마다 같음/다름
   uv run --locked python sfc/dq5/tools/dq5fxvm.py rom/dq5.sfc work/vm/h04 04 --inputs   # 해석기가 읽은 WRAM 중 쓰기 전에 읽은 곳
@@ -149,12 +150,73 @@ def game_screens(folder, fx):
     return out
 
 
-def vm_images(rom, folder, fx, clock=True):
-    """연출 입구부터 롬 코드로 돌린 연출 층 그림(PIL RGBA) 목록. 다른 도구가 import 해서 쓴다."""
-    from dq5fx import render_frame
+def run_exact(rom, folder, fx, max_frames=2000):
+    """연출 입구부터 dq5clock.Cpu(마스터 클록 단위, MesenCE 와 같은 주기 차례)로 돈다. 입구 상태 v<연출>.wram0·regs0·
+    vram0·cgram0·oam0·dma0·clock0 과 입구 뒤 입력 v<연출>.pad(NMI 마다 조이패드)·v<연출>.apu(소리 칩 포트에서 읽은 값)를 쓴다.
+    프레임 기다림 00:969A 도 롬 코드 그대로(소리 대기열 고리에서 NMI 를 기다림) 돈다. (프레임 기록, 화면 목록, Cpu)."""
+    import dq5clock
     wram, regs, _ = load(folder, fx, entry=True)
-    _, c = run(rom, wram, regs, entry=True, ppu=True, video=load_video(folder, fx), clock=clock)
-    return [render_frame(*sc) for sc in c.screens]
+    base = os.path.join(folder, f'v{fx:02X}')
+    c = dq5clock.Cpu(rom, wram, dq5clock.load_clock(base + '.clock0'))
+    video = load_video(folder, fx)
+    c.vram[:], c.cgram[:], c.oam[:len(video[2])] = video[0], video[1], video[2]
+    c.reg[0x2115] = 0x80
+    dma = open(base + '.dma0', 'rb').read()
+    c.reg[0x4300:0x4380] = dma[:0x80]
+    c.reg[0x420C] = dma[0x80]
+    pads = {}
+    if os.path.exists(base + '.pad'):
+        for ln in open(base + '.pad'):
+            k, v = ln.split()
+            pads[int(k)] = int(v, 16)
+    c.pad = lambda n: pads.get(n, 0)
+    if os.path.exists(base + '.apu'):
+        c.apu = dq5clock.load_apu(base + '.apu')
+    c.a, c.x, c.y, c.s, c.d, c.dbr = regs['a'], regs['x'], regs['y'], regs['s'], regs['d'], regs['dbr']
+    c.setp(regs['p'])
+    frames, c.screens = [], []
+    started = [False]
+
+    def wait(cpu):
+        if started[0]:
+            frames.append(bytes(cpu.wram[BUF:BUF + BUF_LEN]) + bytes(cpu.wram[a] for a in TRAILER))
+            cpu.screens.append((bytes(cpu.vram), bytes(cpu.cgram), bytes(cpu.oam),
+                                cpu.scroll.get(0x2111, 0), cpu.scroll.get(0x2112, 0)))
+            if len(frames) >= max_frames:
+                raise Stop('frame limit')
+        return False
+
+    def gate(on):
+        def f(cpu):
+            started[0] = on
+            return False
+        return f
+    c.hooks[FRAME_WAIT] = wait
+    c.hooks[INTERP] = gate(True)
+    c.hooks[INTERP_RET] = gate(False)
+    # 입구를 JSL 로 부른 것처럼 돌아갈 곳(FF:FFFD)을 스택에 두되, 그 쓰기에는 시간을 세지 않는다
+    c.quiet = True
+    c.push8(0xFF)
+    c.pushw(0xFFFD)
+    c.quiet = False
+    c.pbr, c.pc = ENTRY >> 16, ENTRY & 0xFFFF
+    while not (c.pbr == 0xFF and c.pc == 0xFFFE):
+        if c.steps > 30_000_000:
+            raise Stop('step limit')
+        c.step()
+    return frames, c.screens, c
+
+
+def vm_images(rom, folder, fx, clock=True):
+    """연출 입구부터 롬 코드로 돌린 연출 층 그림(PIL RGBA) 목록. 다른 도구가 import 해서 쓴다. clock 이고 입구의
+    v<연출>.clock0 이 있으면 run_exact, 아니면 dq5titlevm.Cpu 주기 모형."""
+    from dq5fx import render_frame
+    if clock and os.path.exists(os.path.join(folder, f'v{fx:02X}.clock0')):
+        screens = run_exact(rom, folder, fx)[1]
+    else:
+        wram, regs, _ = load(folder, fx, entry=True)
+        screens = run(rom, wram, regs, entry=True, ppu=True, video=load_video(folder, fx), clock=clock)[1].screens
+    return [render_frame(*sc) for sc in screens]
 
 
 def save_gif(images, path, ms=17):
@@ -193,15 +255,19 @@ def main():
     ap.add_argument('--screens', help='lua/dq5fxdump.lua 덤프 폴더. --from-entry 로 VRAM·CGRAM·OAM 까지 흉내 내 연출 층 그림을 견줌')
     ap.add_argument('--png', help='VM 이 그린 연출 층을 이 폴더에 프레임마다 PNG 로')
     ap.add_argument('--gif', help='VM 이 그린 연출 층을 이 GIF 로(--from-entry 와 함께)')
-    ap.add_argument('--clock', action='store_true', help='메모리 접근 주기를 세어 처리 도중 NMI 를 넣음(dq5titlevm.Cpu)')
+    ap.add_argument('--clock', action='store_true', help='메모리 접근 주기를 세어 처리 도중 NMI 를 넣음. --from-entry 이고 '
+                    'v<연출>.clock0 이 있으면 dq5clock.Cpu(마스터 클록 단위), 없으면 dq5titlevm.Cpu')
     a = ap.parse_args()
     rom = open(a.rom, 'rb').read()
     fx = int(a.fx, 16)
     wram, regs, _ = load(a.folder, fx, entry=a.from_entry)
     game = load(a.folder, fx)[2]
     video = load_video(a.folder, fx) if a.from_entry else None
-    frames, c = run(rom, wram, regs, track_inputs=a.inputs, entry=a.from_entry, ppu=bool(a.screens or a.png or a.gif),
-                    video=video, clock=a.clock)
+    if a.clock and a.from_entry and os.path.exists(os.path.join(a.folder, f'v{fx:02X}.clock0')) and not a.inputs:
+        frames, _, c = run_exact(rom, a.folder, fx)
+    else:
+        frames, c = run(rom, wram, regs, track_inputs=a.inputs, entry=a.from_entry, ppu=bool(a.screens or a.png or a.gif),
+                        video=video, clock=a.clock)
     same = sum(1 for i, f in enumerate(frames) if i < len(game) and f[:BUF_LEN] == game[i][:BUF_LEN])
     print(f'{fx:02X} frames vm {len(frames)} game {len(game)} same {same} steps {c.steps}')
     for i in range(max(len(frames), len(game))):
