@@ -69,7 +69,7 @@ class BuildTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.rom = BASE.read_bytes()
-        cls.out, cls.atlas, cls.records = mp.build(cls.rom, mp.Font('galmuri11'), mp.Font('galmuri11c'))
+        cls.out, cls.atlas, cls.records = mp.build(cls.rom, mp.Font('galmuri9'), mp.Font('galmuri7'))
 
     def test_base_is_overture_build(self):
         self.assertEqual(hashlib.sha1(self.rom).hexdigest(), mp.BASE_SHA1)

@@ -118,6 +118,22 @@ def name_game_figure(path):
     return part.resize((part.width * 2, part.height * 2), Image.Resampling.NEAREST)
 
 
+FONT_SIZES = ("orig", "galmuri11", "galmuri9", "galmuri7")
+
+
+def font_size_figure(folder):
+    """원작 일본어·Galmuri11·9·7 롬의 기록 목록과 이름 입력 화면 위쪽을 가로로 2배.
+    work/font-size/list-<이름>.png·name-<이름>.png 는 dq4-menu-format.md 「글꼴」 의 MesenCE 화면이다."""
+    paths = [folder / f"{kind}-{name}.png" for kind in ("list", "name") for name in FONT_SIZES]
+    if not all(p.exists() for p in paths):
+        return None
+    sheet = Image.new("RGB", (4 * 260 - 4, 2 * 124 - 4), (24, 24, 24))
+    for i, path in enumerate(paths):
+        with Image.open(path) as shot:
+            sheet.paste(shot.convert("RGB").crop((0, 8, 256, 128)), ((i % 4) * 260, (i // 4) * 124))
+    return sheet.resize((sheet.width * 2, sheet.height * 2), Image.Resampling.NEAREST)
+
+
 def main():
     images = assets()
     output = ROOT / "sfc" / "dq4" / "images"
@@ -159,6 +175,9 @@ def main():
     game = name_game_figure(ROOT / "work" / "name-game" / "fig" / "message.png")
     if game is not None:
         game.save(output / "dq4-name-game.webp", lossless=True)
+    sizes = font_size_figure(ROOT / "work" / "font-size")
+    if sizes is not None:
+        sizes.save(output / "dq4-font-size.webp", lossless=True)
     names = name_entry_figure(ROOT / "work" / "name-entry" / "fig")
     if names is not None:
         names.save(output / "dq4-name-entry.webp", lossless=True)

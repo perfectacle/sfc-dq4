@@ -7,11 +7,12 @@
 형식은 sfc/dq4/docs/dq4-menu-format.md.
 
   python sfc/dq4/tools/dq4menupatch.py build --rom work/overture/dq4-title-overture.sfc \\
-      --font galmuri11 --out work/menu/dq4-menu.sfc
-  python sfc/dq4/tools/dq4menupatch.py sheet --font galmuri11 --out work/menu/sheet.png   # 문구 열 그림
+      --out work/menu/dq4-menu.sfc
+  python sfc/dq4/tools/dq4menupatch.py sheet --out work/menu/sheet.png   # 문구 열 그림
 
 글꼴은 Galmuri v2.40.4(SIL OFL 1.1)의 BDF 를 DQ4_GALMURI 폴더에서 읽는다(저장소에 넣지 않음, 받는 법은 형식 문서).
-채택은 galmuri11 이고 galmuri9·galmuri11c 는 비교 시안이다.
+창 글자는 galmuri9, 자모판은 galmuri7, 메시지는 galmuri11 이 채택이다(원작 창 가나 8×8 과 메시지 가나 11~13 점에 맞춤).
+나머지는 비교 시안이다.
 """
 import argparse
 import hashlib
@@ -42,6 +43,7 @@ GALMURI = {
     'galmuri11': ('Galmuri11.bdf', '98716d08aa5762e6ce440d5a757d107cb5d3f32a53861878be06c00aacc23304'),
     'galmuri9': ('Galmuri9.bdf', 'cc9b6d6f660d8391016be7691b3fc3f864bfa3b095f67bc5e830e9b03ce42162'),
     'galmuri11c': ('Galmuri11-Condensed.bdf', '5adbdedb3d118e99cc7e114b746b3cf6f6a46a4642e0ff215d6a431e55901995'),
+    'galmuri7': ('Galmuri7.bdf', '0ec6b8707e8c47d85995b5b2b507180aed7bcc724792fe5477e998d41f8b075f'),
 }
 
 # 메뉴에서만 여는 창 → 줄 목록. 줄은 조각의 목록이고, 문자열은 한글로 그린 열, bytes 는 원래 창 바이트(공백 01·숫자 03~0A·
@@ -379,7 +381,8 @@ def put(data, addr, b, expect=None):
     data[o:o + len(b)] = b
 
 
-def build(rom, font, jamo_font):
+def build(rom, font, jamo_font, message_font=None):
+    """font = 창 글자, jamo_font = 자모판 한 칸 글자, message_font = 메시지 글자(없으면 galmuri11)."""
     data = bytearray(rom)
     atlas = Atlas(font)
     records = {}
@@ -461,7 +464,7 @@ def build(rom, font, jamo_font):
         bridges[name] = place(data, slack, bytes((0x20, target & 0xFF, target >> 8, 0x6B)))
     data = ne.apply(bytes(data), keys, ne.glyph_blob(font, render), bridges)
     import dq4menumsg
-    data, atlas.messages = dq4menumsg.apply(data, font)
+    data, atlas.messages = dq4menumsg.apply(data, message_font or Font('galmuri11'))
     import dq4namegame
     data = dq4namegame.apply(data)
     return set_checksum(data), atlas, records
@@ -486,10 +489,11 @@ def main():
     sub = ap.add_subparsers(dest='cmd', required=True)
     b = sub.add_parser('build')
     b.add_argument('--rom', required=True)
-    b.add_argument('--font', default='galmuri11', choices=list(GALMURI))
+    b.add_argument('--font', default='galmuri9', choices=list(GALMURI))
     b.add_argument('--out', required=True)
+    b.add_argument('--jamo-font', default='galmuri7', choices=list(GALMURI))
     s = sub.add_parser('sheet')
-    s.add_argument('--font', default='galmuri11', choices=list(GALMURI))
+    s.add_argument('--font', default='galmuri9', choices=list(GALMURI))
     s.add_argument('--out', required=True)
     args = ap.parse_args()
     font = Font(args.font)
@@ -507,7 +511,7 @@ def main():
     rom = Path(args.rom).read_bytes()
     if hashlib.sha1(rom).hexdigest() != BASE_SHA1:
         raise SystemExit(f'{args.rom}: 서곡 채택본({BASE_SHA1})이 아님')
-    out, atlas, records = build(rom, font, Font('galmuri11c'))
+    out, atlas, records = build(rom, font, Font(args.jamo_font))
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_bytes(out)
     Path(args.out).with_suffix('.ips').write_bytes(ips_patch(rom, out))
