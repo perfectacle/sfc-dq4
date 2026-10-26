@@ -52,6 +52,8 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5exitwrite.py rom dump -o\|patch\|check` | 실내 출구569개·영역 이동430개 고정 슬롯의 목적지·사각형·층. 종류·길이·개수 보존, 고층 공유 목록은 `shared_maps` 필요. [쓰기 형식](../docs/dq5-build-format.md#실내-출구영역-이동-dq5connections1) |
 | `dq5maphook.py rom dump\|patch\|rewrite\|check` | 맵별 루틴 표(`15:F907`) 162개의 맵 고르기·플래그 조건·맵을 푼 뒤/매 프레임 루틴. 루틴은 원래 표의 같은 칸에 있던 것만(`--raw-routines` 로 풂), `rewrite --at` 은 뱅크 15 의 원래 자리·`15:FF80` 에 다른 항목 수로 다시 쓰고 로더 피연산자 11곳을 고침. [쓰기 형식](../docs/dq5-build-format.md#맵별-루틴-표-dq5maphook1) |
 | `dq5maphookcheck.py rom --state 선실 --out 폴더` | 변경 롬 5벌과 원본에서 루틴 막기·플래그 조건·표 옮기기 15장면. 고른 루틴, 01/05 (51,20) 셀, 도착 맵·칸 비교. `MESENCE` 필요 |
+| `dq5talkwrite.py rom dump -o\|patch\|check` | 대화 스크립트 574개(대화 번호 `011`~`24E`)의 조건·else·はい/いいえ·플래그·메시지·호출을 `dq5talk/1` JSON 으로. 원래 자리보다 긴 묶음은 `--at 06:XXXX`(뱅크 06 빈 자리)로 옮기거나 `--repack` 으로 다시 채움. [쓰기 형식](../docs/dq5-build-format.md#대화-스크립트-dq5talk1) |
+| `dq5talkcheck.py rom --state 선실 --out 폴더` | 변경 롬 4벌과 원본에서 파파스에게 말을 걸어 조건 뒤집기·메시지 바꾸기·옮긴 긴 스크립트(はい/いいえ·플래그·호출)·다시 채우기 12장면의 메시지 순서·묶음 시작·플래그 비교. `MESENCE` 필요 |
 | `dq5exitcheck.py rom --state 선실 --out 폴더` | 변경 롬 3벌과 원본에서 출구 세 종류·출발층·고층 공유·음수 가장자리·사각형 이동·이동 효과음·속성 33 계단 24장면을 밟아 도착 맵·칸·층·효과음 비교. `MESENCE` 필요 |
 | `dq5chestcheck.py rom --state 선실 --out 폴더 [--case 이름]` | 원본·패치 롬에서 상자·서랍·옮긴 발밑·두 칸 앞·아래층 상자·필드 보상 6쌍을 실제 조사. 금화·조회 값·열림 비트 비교. `MESENCE` 필요 |
 | `dq5chest.py rom [BC BD]` | DQ5 보물상자(번호·칸·열림 플래그·내용물), タンス·ツボ·タル 항목, 발밑 표(`1E:F08B`), 두 칸 앞 표(`1E:F435`), 그룹 `50` 이상의 아래층 상자 표(`1E:F4DF`). 물건 이름과 `D000`~`D009` 의 뜻까지 |

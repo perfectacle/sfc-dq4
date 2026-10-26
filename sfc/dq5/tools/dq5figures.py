@@ -701,6 +701,19 @@ def fig_party6():
     save(out, 'dq5-party6-title.webp')
 
 
+def fig_talkwrite():
+    """대화 스크립트 쓰기 실측의 240프레임 화면 넷(원본·조건 뒤집기·else 메시지 바꾸기·옮긴 긴 스크립트의 いいえ).
+    dq5talkcheck.py 를 --out work/talkcheck 로 돌린 가장 최근 run-*/<장면>/s00240.png 이고 명령은 sfc/dq5/journal/ 의 talkwrite 일지."""
+    run = max(glob.glob('work/talkcheck/run-*/'), key=os.path.getmtime)
+    shots = [('original', 'original 742'), ('cond', 'not 1B: 74F'), ('msg', 'else 129'), ('long-no', '06:FE10 yes/no')]
+    out = Image.new('RGB', (2 * 260 - 4, 2 * 172 - 4), (24, 24, 24))
+    for i, (case, text) in enumerate(shots):
+        im = Image.open(os.path.join(run, case, 's00240.png')).convert('RGB').crop((0, 30, 256, 198))
+        label(im, text)
+        out.paste(im, (i % 2 * 260, i // 2 * 172))
+    save(out, 'dq5-talkwrite.webp')
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     rom = Rom(open('rom/dq5.sfc', 'rb').read())
@@ -738,6 +751,7 @@ def main():
     fig_exflags2()
     fig_exflags3()
     fig_party6()
+    fig_talkwrite()
     os.remove(TMP)
 
 
