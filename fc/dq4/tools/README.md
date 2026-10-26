@@ -29,6 +29,7 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 | --- | --- |
 | `dq4state.sh` | 전원 켜기부터 1장 왕좌의 방, 성 밖, 필드, 첫 전투까지 단계별로 입력을 재생해 세이브스테이트를 만들고 장면마다 좌표·맵 번호를 찍음. 같은 결과가 나오도록 MesenCE 에 `--nes.ramPowerOnState=AllZeros` 를 주고, 전원을 켜는 첫 단계는 `lua/debugsram.lua` 로 SRAM 을 `00` 으로 채움(MesenCE 의 `Saves/dq4.sav` 를 따르지 않게). `STATE_DIR` 로 출력 폴더. `MESENCE` 필요 |
 | `dq4warp.sh OUT GG/KK [X Y [DIR]]\|field F X Y` | DQ4 장면 이동. 1장 세이브스테이트에서 게임의 출구·맵 가장자리 루틴을 타고 목적지로 옮겨 `OUT/warp.mss`(조작 가능)를 만듦. 좌표를 빼면 그 맵으로 들어오는 출구의 도착 자리. `lua/warp.lua` 는 프로브의 `DRIVER` 로도 씀. `STATE` 는 상대 경로(워크트리 기준)도 되고, 앞 실행의 `end.mss` 에서 이어 갈 수 있음. [fc/dq4/docs/dq4-warp.md](../docs/dq4-warp.md) |
+| `dq4assets.sh [OUT]` | 비공개 에셋 저장소 `fc/dq4/` 전체(맵·필드·gfx·갤러리·스프라이트·몬스터·소리·장면 화면)를 롬 하나에서 다시 뽑아 OUT(기본 `work/dq4assets`, 빈 폴더)에 같은 배치로 둠. 먼저 `rom/dq4.nes` 의 SHA-1 을 검사. 장면 화면은 MesenCE 를 전원 켜기부터 정해 둔 입력으로 돌려 뜨고(1장 상태는 `dq4state.sh`, 2·5장은 디버그 장 고르기, 장 끝·엔딩은 `dq4warp.sh`) 덤프는 `work/dq4scenes/` 에 둠. `MESENCE` 가 없으면 장면 화면만 빠짐. 같은 커밋·롬이면 두 번 돌려 바이트까지 같음 |
 
 ## Python과 프로브
 
