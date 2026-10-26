@@ -2,6 +2,8 @@
 
 장면 목록은 dq5freesweep.py 와 같다(실내 맵 346곳에 들어가 걷기, 몬스터 236종과 싸우기, 세계 0·1·2 걷기).
 effects 는 행동 00~AA 마다 dq5effectgif.py 처럼 슬라임 셋 이벤트 전투에서 파파스(< 39)나 슬라임이 그 행동을 쓰게 한다.
+extra 는 여관에서 묵기, 교회에서 기록한 뒤 리셋해 불러오기, 배에 걸어 오르기, 융단·天空城·드래곤으로 날기, 슬롯 셋(맞음 판정을
+덮은 것 포함), 슬라임 레이스, 격투장이다. --acc 1ABC-1BB0 이면 실행마다 그 WRAM 범위의 주소별 읽기·쓰기 횟수(acc.txt)를 모아 찍는다.
 sound 는 시퀀스 00~46 마다 dq5spcfile.py 처럼 대기열에 1A·94 n·01 n 을 넣어 곡 자료를 SPC 로 보낸다(lua/dq5spcdump.lua).
 실행마다 lua/dq5cdldump.lua 가 남긴 cdl.bin 을 바이트 OR 로 합쳐 OUT/cdl.bin 에 쓴다. MesenCE 가 디스크에 두는 CDL 은
 함께 돈 실행끼리 덮어쓰므로 실행마다 따로 받아 합친다. --base 로 앞서 모은 cdl.bin 들을 더한다.
@@ -41,6 +43,7 @@ def main():
     ap.add_argument('--kinds', default='maps,battles,field')
     ap.add_argument('--jobs', type=int, default=8)
     ap.add_argument('--base', nargs='*', default=[], help='함께 합칠 cdl.bin')
+    ap.add_argument('--acc', help='WRAM 오프셋 범위(예 1ABC-1BB0). 실행마다 그 범위의 주소별 읽기·쓰기 횟수를 모음')
     a = ap.parse_args()
     data = open(a.rom, 'rb').read()
     krlua = subprocess.run(['krpatch', 'sfc', 'lua'], capture_output=True, text=True, check=True).stdout.strip()
@@ -64,12 +67,44 @@ def main():
                 'ROMPATCH': f'{fx.BASE_PATCH};{fx.PAPAS_ACTIONS if papas else fx.SLIME_ACTIONS:06X}={f"{n:02X}" * 6}',
                 'MAXF': '2400' if papas else '1500'}))
 
+    if 'extra' in kinds:
+        msg = os.path.join(HERE, 'lua', 'dq5msg.lua')
+        talk = 'b:4,wait:40,up:3,wait:20,' + ','.join(['a:4,wait:60'] * 40)
+        ship = os.path.abspath(a.state)
+        for name, env in (
+                ('inn', {'NEXT': msg, 'POKE': '7E36EB=06;7E370B=00', 'PRE': talk, 'MAXF': '3000'}),
+                ('church-save-load', {'NEXT': msg, 'POKE': '7E36EB=05;7E370B=00', 'PRE': talk + ',wait:300,'
+                                      + ','.join(['start:4,wait:200'] * 3 + ['a:4,wait:120'] * 12), 'RESETAT': '2700',
+                                      'MAXF': '6500'}),
+                ('slime-race', {'NEXT': msg, 'SET': '36EB=0D;370B=00', 'POKE': '7E203C=64', 'ROMPATCH': '37210=80',
+                                'PRE': talk + ',' + ','.join(['a:4,wait:60'] * 20), 'MAXF': '4000'}),
+                ('arena', {'NEXT': msg, 'SET': '36EB=0E;370B=00', 'POKE': '7E203C=64', 'ROMPATCH': '37210=80',
+                           'PRE': talk + ',' + ','.join(['a:4,wait:60'] * 20), 'MAXF': '4000'}),
+                ('ship-board', {'FIELD': '328,39', 'SET': '21B5|80;21CD=48;21CE=01;21CF=25;21D0=00',
+                                'TEST': 'up:60,wait:60,left:200,up:200,right:200', 'MAXF': '1800'}),
+                ('carpet', {'FIELD': '328,27', 'LATESET': '1954=80', 'TEST': 'left:200,up:200,right:200,down:200', 'MAXF': '1800'}),
+                ('tenkuujou', {'FIELD': '310,60', 'LATESET': '1954=81', 'TEST': 'left:200,up:200,right:200,down:200', 'MAXF': '1800'}),
+                ('dragon', {'FIELD': '310,60', 'LATESET': '1954=82', 'TEST': 'left:200,up:200,right:200,down:200', 'MAXF': '1800'})):
+            todo.append(('extra', name, env))
+        for k in (1, 3, 5):
+            spin = ','.join(['up:4,wait:30,a:4,wait:400'] * 7)
+            for win in (False, True):
+                env = {'NEXT': msg, 'STATE_OVERRIDE': os.path.join(os.path.dirname(ship), f'slot{k}-slotrng.mss'),
+                       'PRE': spin, 'MAXF': '3200'}
+                if win:
+                    env['ROMPATCH'] = '8B39D=EAEA'
+                todo.append(('extra', f'slot{k}{"-win" if win else ""}', env))
+
     def run(job):
         kind, name, env = job
         d = os.path.abspath(os.path.join(a.out, kind, name))
         os.makedirs(d, exist_ok=True)
         e = dict(os.environ, LIBDIR=krlua, STATE=os.path.abspath(a.state), SHOT_DIR=d)
+        if a.acc:
+            e['ACCRANGE'] = a.acc
         e.update(env)
+        if 'STATE_OVERRIDE' in e:
+            e['STATE'] = e.pop('STATE_OVERRIDE')
         subprocess.run([mesen, '--testrunner', os.path.abspath(a.rom), PROBE, '--Snes.DisableFrameSkipping=true'], env=e,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
         return os.path.join(d, 'cdl.bin')
@@ -81,6 +116,20 @@ def main():
         f.write(out)
     print(f'실행 {len(todo)}, cdl.bin 을 남긴 실행 {len(got)}, 코드 바이트 {sum(1 for b in out if b & 1):,}, '
           f'자료 바이트 {sum(1 for b in out if b & 2):,}')
+    if a.acc:
+        hits, missing = {}, []
+        for kind, name, _ in todo:
+            path = os.path.join(a.out, kind, name, 'acc.txt')
+            if not os.path.exists(path):
+                missing.append(f'{kind}/{name}')
+                continue
+            for line in open(path).read().split('\n')[1:]:
+                if line:
+                    addr, r, w = line.split()
+                    hits.setdefault(addr, []).append(f'{kind}/{name} 읽기 {r} 쓰기 {w}')
+        print(f'{a.acc} 접근: 주소 {len(hits)}곳, acc.txt 없는 실행 {len(missing)}' + (f' ({" ".join(missing[:10])})' if missing else ''))
+        for addr in sorted(hits):
+            print(f'  {addr}: ' + '; '.join(hits[addr][:6]) + (f' 외 {len(hits[addr]) - 6}' if len(hits[addr]) > 6 else ''))
     return 0
 
 
