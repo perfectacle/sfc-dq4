@@ -32,6 +32,22 @@ def environment_map_figure(rom, name="imuru", box=None):
     return image.resize((image.width * 2, image.height * 2), Image.Resampling.NEAREST)
 
 
+def environment_rom_figure(folder):
+    """DQ5 에 넣은 바트랜드·이무르 맵의 MesenCE 화면을 2배로 나란히 놓는다.
+
+    화면은 dq4environmentromcheck.py --out work/dq4-environment-rom/check 가 남긴
+    <맵>/<맵>.png(워프해 도착한 프레임)다. 없으면 None.
+    """
+    paths = [folder / name / f"{name}.png" for name in ("burland", "imuru")]
+    if not all(path.exists() for path in paths):
+        return None
+    sheet = Image.new("RGB", (516, 224), (24, 24, 24))
+    for i, path in enumerate(paths):
+        with Image.open(path) as shot:
+            sheet.paste(shot.convert("RGB"), (i * 260, 0))
+    return sheet.resize((sheet.width * 2, sheet.height * 2), Image.Resampling.NEAREST)
+
+
 def sprite_gallery(images):
     """인물마다 남 정지·보행, 서 정지·보행, 동, 북 정지·보행을 풀색 위에 6배로 늘어놓는다."""
     cells = ((0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (3, 0), (3, 1))
@@ -120,6 +136,11 @@ def main():
             (image.width * scale, image.height * scale), Image.Resampling.NEAREST
         )
         preview.save(output / f"dq4-graphics-{name}.webp", lossless=True)
+    rom_shots = environment_rom_figure(ROOT / "work" / "dq4-environment-rom" / "check")
+    if rom_shots is None:
+        print("work/dq4-environment-rom/check 에 게임 화면이 없어 dq4-environment-rom.webp 는 건너뜀")
+    else:
+        rom_shots.save(output / "dq4-environment-rom.webp", lossless=True)
     sprite_gallery(images).save(output / "dq4-sprites-gallery.webp", lossless=True)
     draft_figure().save(output / "dq4-sprite-drafts.webp", lossless=True)
     field = field_figure(ROOT / "work" / "dq4-sprites")

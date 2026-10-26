@@ -142,16 +142,13 @@ def _tile(assets, name, palette, map_type):
     }
 
 
-def render_maps(rom_path, assets):
-    """Return complete block-grid previews and their ROM-derived mapping evidence."""
-    data = Path(rom_path).read_bytes()
-    prg = ines.prg(data)
+def prepare_maps(prg, assets):
+    """Yield each FC map with its block counts and composited 16x16 block art."""
     if not assets:
         raise ValueError("Environment asset collection is empty")
     palette = next(iter(assets.values())).getpalette()
     if palette is None:
         raise ValueError("Environment palette is missing")
-    result = {}
     for group, number, expected_type, name in MAPS:
         source = dq4block.Map(prg, group, number)
         if source.t != expected_type:
@@ -162,6 +159,15 @@ def render_maps(rom_path, assets):
         if unsupported:
             raise ValueError(f"{name}: unsupported source blocks {unsupported}")
         prepared = {block: _tile(assets, mapping[block][0], palette, source.t) for block in counts}
+        yield group, number, name, source, counts, prepared, palette
+
+
+def render_maps(rom_path, assets):
+    """Return complete block-grid previews and their ROM-derived mapping evidence."""
+    data = Path(rom_path).read_bytes()
+    result = {}
+    for group, number, name, source, counts, prepared, palette in prepare_maps(ines.prg(data), assets):
+        mapping = BLOCK_ART[source.t]
         preview = Image.new("P", (source.w * 16, source.h * 16))
         preview.putpalette(palette)
         for y in range(source.h):
