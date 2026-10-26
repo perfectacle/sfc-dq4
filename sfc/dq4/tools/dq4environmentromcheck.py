@@ -26,8 +26,8 @@ for path in (TOOLS, DQ5_TOOLS):
 import dq5map  # noqa: E402
 from dq4environmentart import create_assets  # noqa: E402
 from dq4environmentmap import prepare_maps, render_maps  # noqa: E402
-from dq4environmentmap import BLOCK_ART, block_prop  # noqa: E402
-from dq4environmentrom import (DOOR, DOOR_KIND, FLOOR, FLOORS, GATE, GATE_KIND, TARGETS, WALL, WATER_BLOCK,  # noqa: E402
+from dq4environmentmap import block_prop  # noqa: E402
+from dq4environmentrom import (DOOR_KIND, FLOOR, GATE_KIND, OPENINGS, door_floor, TARGETS, WALL, water_block,  # noqa: E402
                                WATER_FRAMES, WATER_PERIOD, build_graphics, objects, water_frames)
 
 OBJECT_SIZE = {DOOR_KIND: (2, 3), GATE_KIND: (4, 4)}  # noqa: E402
@@ -62,6 +62,9 @@ def dump(mesence, rom, state, out, frames=10):
     out.mkdir(parents=True, exist_ok=True)
     _run(mesence, rom, DUMP, {"STATE": state, "OUT": out, "FRAMES": frames})
     return tuple((out / f).read_bytes() for f in ("wram.bin", "vram.bin", "cgram.bin"))
+
+
+BLANK_TILE = 0x2000 * 2
 
 
 def _rgb(cgram, index):
@@ -111,14 +114,13 @@ def walk_layers(wram):
     return [wram[0xC000 + i * 8 + 1] & 0x0F for i in range(width * height)]
 
 
-def with_floor_doors(image, source, floor):
-    """Offline render with FC doors and gates replaced by the map floor, as the ROM record has them."""
+def with_floor_doors(image, source, prepared):
+    """Offline render with FC doors and gates replaced by their floor, as the ROM record has them."""
     image = image.convert("RGB")
-    tile = floor.convert("RGB")
     for y in range(source.h):
         for x in range(source.w):
-            if block_prop(source, source.cell(x, y) & 31) in (DOOR, GATE):
-                image.paste(tile, (x * 16, y * 16))
+            if block_prop(source, source.cell(x, y) & 31) in OPENINGS:
+                image.paste(prepared[door_floor(source, x, y)][0].convert("RGB"), (x * 16, y * 16))
     return image
 
 
@@ -148,7 +150,7 @@ def check_map(name, wram, vram, cgram, expected, source, known):
     for i, value in enumerate(layers):
         x, y = i % width, i // width
         prop = block_prop(source, source.cell(x // 2, y // 2) & 31)
-        blocked = prop & 0x80 and prop not in (DOOR, GATE)
+        blocked = prop & 0x80 and prop not in OPENINGS
         if value != (WALL if blocked else FLOOR):
             wrong += 1
     return {"pixels": len(a) // 3, "object_cells_skipped": len(covered), "pixel_differences": differences,
@@ -220,14 +222,15 @@ def main():
     def expected(name, frame):
         """Offline render with the water frame the game was showing."""
         shown = dict(assets, **{WATER_FRAMES[0]: assets[WATER_FRAMES[frame]]})
-        image = render_maps(args.dq4, shown)[name][0]
-        floor = BLOCK_ART[sources[name].t][FLOORS[sources[name].t]][0]
-        return with_floor_doors(image, sources[name], assets[floor])
+        image = render_maps(args.dq4, shown, [name])[name][0]
+        return with_floor_doors(image, sources[name], prepared[name])
 
-    sources = {name: source for _, _, name, source, _, _, _ in prepare_maps(prg, assets)}
+    sources, prepared = {}, {}
+    for _, _, name, source, _, tiles, _ in prepare_maps(prg, assets, TARGETS):
+        sources[name], prepared[name] = source, tiles
     chr_data, _, block_words, built, _ = build_graphics(prg, assets)
     known = set(chr_data)
-    water_ids = block_words[next(local[WATER_BLOCK] for _, local in built.values() if WATER_BLOCK in local)]
+    water_ids = block_words[next(w for w in (water_block(*b) for b in built.values()) if w is not None)]
     frames = water_frames(assets, chr_data, water_ids)
     results = {"maps": {}}
     states = {}
@@ -238,11 +241,14 @@ def main():
         wram, vram, cgram = dump(mesence, args.rom.resolve(), states[name], out / name / "dump")
         later = [dump(mesence, args.rom.resolve(), states[name], out / name / f"dump{n}", 10 + n * WATER_PERIOD)
                  for n in (1, 2)]
-        has_water = WATER_BLOCK in built[name][1]
+        has_water = water_block(*built[name]) is not None
         cycle = water_cycle([(wram, vram)] + [(w, v) for w, v, _ in later], water_ids, frames) if has_water else [0]
         result, image = check_map(name, wram, vram, cgram, expected(name, cycle[0] or 0), sources[name], known)
         image.save(out / name / "redraw.png")
         result["water_frames"] = cycle
+        # BG1 is filled with CHR slot 0 (VRAM word 2000); it must stay blank or it covers the map.
+        result["blank_tile_kept"] = all(bytes(v[BLANK_TILE:BLANK_TILE + 32]) == bytes(32)
+                                        for v in [vram] + [v for _, v, _ in later])
         result["water_cycles"] = not has_water or None not in cycle and all(
             (b - a) % 3 == 1 for a, b in zip(cycle, cycle[1:]))
         results["maps"][name] = {"target": f"{group:02X}/{number:02X}", "arrival": [x, y], "moved": moved, **result}
@@ -277,7 +283,7 @@ def main():
 
     ok = results["gate_open"]["passed_gate_row"] and all(m.get("pixel_differences") == 0 and m.get("walk_layer_mismatches") == 0 and m["moved"]
              and m["objects_drawn"].split("/")[0] == m["objects_drawn"].split("/")[1]
-             and m["water_cycles"]
+             and m["water_cycles"] and m["blank_tile_kept"]
              for m in results["maps"].values()) and all(
         v for k, v in results["control"].items() if k.endswith("_equal"))
     results["status"] = "passed" if ok else "failed"

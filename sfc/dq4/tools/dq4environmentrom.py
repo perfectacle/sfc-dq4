@@ -10,6 +10,7 @@ replaced maps; see sfc/dq4/docs/dq4-environment-format.md.
 import argparse
 import json
 import sys
+from collections import Counter
 from pathlib import Path
 
 from kr_patch.fc import ines
@@ -21,7 +22,7 @@ for path in (TOOLS, DQ5_TOOLS):
         sys.path.insert(0, str(path))
 
 from dq4environmentart import create_assets, palette_variant  # noqa: E402
-from dq4environmentmap import MAP_PALETTES, block_prop, prepare_maps  # noqa: E402
+from dq4environmentmap import MAP_PALETTES, block_prop, prepare_maps, sheet_art  # noqa: E402
 from dq5mapwrite import Rom, encode, lorom, pointer_addr  # noqa: E402
 
 # FC map name -> replaced DQ5 interior map. Targets must have no animated tiles,
@@ -33,16 +34,22 @@ TARGETS = {
     "stancia-06": (0x09, 0x04), "mintos": (0x0A, 0x01), "imuru": (0x19, 0x02), "saran-04": (0x0A, 0x02),
     "seaside": (0x0B, 0x01), "seaside-01": (0x0D, 0x03), "rosaryhill": (0x0D, 0x04), "rosaryhill-01": (0x0E, 0x01),
     "shrine-2a": (0x0E, 0x03), "konenbery-06": (0x12, 0x00), "attemut-05": (0x13, 0x00), "attemut-07": (0x16, 0x01),
+    # One or two maps of each other town and castle sheet, picked for block coverage and few doors:
+    # door objects must fit the bank 01 tail.
+    "1A-01": (0x08, 0x02), "03-02": (0x08, 0x03), "17-00": (0x03, 0x0B), "0B-00": (0x03, 0x0E),
+    "08-01": (0x03, 0x0F), "10-00": (0x03, 0x10), "16-00": (0x04, 0x01), "0F-00": (0x04, 0x08),
+    "0A-00": (0x04, 0x09), "04-06": (0x0A, 0x06), "00-01": (0x04, 0x0B), "09-01": (0x04, 0x0C),
+    "00-00": (0x05, 0x00), "05-01": (0x06, 0x03), "02-01": (0x06, 0x06), "01-00": (0x08, 0x01),
 }
-# Second bank for map records once the first one reaches the library.
-MAPS_NEXT = 0x3E8000
+# Further banks for map records once the first one reaches the library.
+MAPS_NEXT = (0x3E8000,)
 CHR_BANK = 0x40
 GFX_BANK = 0x41
 NIBBLES_AT = 0x8000
 PALETTE_AT = 0x8400
 BLOCK_BANK = 0x3D
 BLOCKS_AT = 0x8000
-POINTERS_AT = 0x8800
+POINTERS_AT = 0x8C00
 MAPS_AT = 0x3D9000
 HOOK_AT = 0x01FED0
 HOOK_END = 0x020000
@@ -50,17 +57,16 @@ BLOCK_TABLE = 0x7EB000
 PALETTE_LINE1 = 0x3934
 WALL = 8
 FLOOR = 1
-WATER_BLOCK = 0x01
 WATER_FRAMES = ("water0", "water1", "water2")
-WATER_AT = 0x40C000
+WATER_AT = 0x41F000
 WATER_PERIOD = 24
 LIB_AT = 0x3DE000
 # FC door properties and the DQ5 objects (01:D2FC kinds) that replace them. The record under an
 # object is the map's floor so the cell is walkable once the object opens; closed objects block
 # their last row themselves (cell +1 bit7).
-DOOR = 0x94
+DOORS = {0x94, 0x95, 0x96}
 GATE = 0xA0
-FLOORS = {0x0A: 0x05, 0x0E: 0x04}
+OPENINGS = DOORS | {GATE}
 DOOR_KIND = 0x3B
 GATE_KIND = 0x48
 OBJECT_TABLE = 0x01D2FC
@@ -102,7 +108,7 @@ def build_graphics(prg, assets):
     block_ids, block_words = {}, []
     maps = {}
     palette = None
-    for group, number, name, source, counts, prepared, palette in prepare_maps(prg, assets):
+    for group, number, name, source, counts, prepared, palette in prepare_maps(prg, assets, TARGETS):
         local = {}
         for fc_block, (image, _) in prepared.items():
             words = []
@@ -128,6 +134,14 @@ def build_graphics(prg, assets):
     return chr_data, chr_banks, block_words, maps, palette
 
 
+def water_block(source, local):
+    """New block id of the map's water, or None; every sheet's water uses the same art."""
+    found = {local[b] for b, (asset, _) in sheet_art(source.prg, source.t).items() if asset == WATER_FRAMES[0] and b in local}
+    if len(found) > 1:
+        raise ValueError(f"{len(found)} water blocks in one map")
+    return found.pop() if found else None
+
+
 def _prop(source, x, y):
     return block_prop(source, source.cell(x, y) & 31)
 
@@ -135,16 +149,35 @@ def _prop(source, x, y):
 def objects(source):
     """DQ5 object entries [x, y, kind] for FC doors (2x3 door over the wall row above) and gates."""
     found = []
-    gate = [(x, y) for y in range(source.h) for x in range(source.w) if _prop(source, x, y) == GATE]
-    if gate:
-        found.append([min(x for x, _ in gate) * 2, min(y for _, y in gate) * 2, GATE_KIND])
+    gate = {(x, y) for y in range(source.h) for x in range(source.w) if _prop(source, x, y) == GATE}
+    for x, y in sorted(gate, key=lambda c: (c[1], c[0])):
+        if (x, y) in gate:
+            found.append([x * 2, y * 2, GATE_KIND])
+            gate -= {(x + dx, y + dy) for dx in (0, 1) for dy in (0, 1)}
     for y in range(source.h):
         for x in range(source.w):
-            if _prop(source, x, y) == DOOR:
+            if _prop(source, x, y) in DOORS:
                 found.append([x * 2, y * 2 - 1, DOOR_KIND])
     if len(found) > 32:
         raise ValueError("more objects than the 32 open flags 7E:21C2-21C5")
     return found
+
+
+def door_floor(source, x, y):
+    """FC block drawn under a door or gate: the nearest walkable cell, below first on ties. Water
+    gates in a wall row have none; they take the map's most common walkable block."""
+    best = None
+    for ny in range(max(0, y - 3), min(source.h, y + 4)):
+        for nx in range(max(0, x - 3), min(source.w, x + 4)):
+            if _prop(source, nx, ny) & 0x80:
+                continue
+            key = (abs(nx - x) + abs(ny - y), ny < y, abs(nx - x))
+            if best is None or key < best[0]:
+                best = (key, source.cell(nx, ny) & 31)
+    if best is None:
+        return Counter(source.cell(cx, cy) & 31 for cy in range(source.h) for cx in range(source.w)
+                       if not _prop(source, cx, cy) & 0x80).most_common(1)[0][0]
+    return best[1]
 
 
 def object_entries(found):
@@ -158,15 +191,12 @@ def object_entries(found):
 def map_document(name, source, local, target):
     """FC layout as DQ5 commands; blocked FC cells become wall cells via attribute pass 1."""
     width, height = source.w * 2, source.h * 2
-    floor = local[FLOORS[source.t]]
-    opening = {DOOR, GATE}
-
     def block_at(x, y):
-        return floor if _prop(source, x, y) in opening else local[source.cell(x, y) & 31]
+        return local[door_floor(source, x, y) if _prop(source, x, y) in OPENINGS else source.cell(x, y) & 31]
 
     def blocked(x, y):
         prop = _prop(source, x, y)
-        return prop & 0x80 and prop not in opening
+        return prop & 0x80 and prop not in OPENINGS
     bits = max(10, (width * height - 1).bit_length())
     if bits > 14:
         raise ValueError(f"{name}: {width}x{height} cells exceed 14 position bits")
@@ -280,12 +310,13 @@ _ENTER = (0x08, 0xC2, 0x30, 0x48, 0xDA, 0x5A)
 _LEAVE = (0xC2, 0x30, 0x7A, 0xFA, 0x68, 0x28)
 
 
-def engine_code(block_count, water_ids, palettes, entries):
+def engine_code(block_count, water_ids, palettes, entries, waters):
     """Routines in BLOCK_BANK (LIB_AT) and the bank-01 stubs that call them.
 
     palettes: per target, the bank-GFX address of its 224-byte BG palette.
     entries: per target, its 01:D2FC-format object entries (placed in bank 01, since the object
     reader 01:F3F9 indexes $D2FC,Y with the data bank at 01).
+    waters: per target, whether the map has water.
     Returns (library bytes, bank-01 bytes, patched sites)."""
     targets = list(TARGETS.values())
     stubs = _Asm(HOOK_AT)
@@ -305,6 +336,9 @@ def engine_code(block_count, water_ids, palettes, entries):
     lib.b(0xFF).label("palettes")
     for address in palettes:
         lib.b(address & 0xFF, address >> 8)
+    lib.label("waters")
+    for flag in waters:
+        lib.b(int(flag), 0)
     lib.label("objects")
     for i, data in enumerate(entries):
         lib.word(None, f"objects{i}" if data else "no_objects", -(OBJECT_TABLE & 0xFFFF))
@@ -342,9 +376,11 @@ def engine_code(block_count, water_ids, palettes, entries):
     lib.long(0xBF, "objects").b(0xA8)
     lib.label("obj_keep").b(0xC2, 0x30, 0xFA, 0x68, 0x28, 0xA2, 0x09, 0x00, 0x6B)
 
-    # wrap (calls of 15:F7D0): after the original choice, a replaced map runs the water routine.
+    # wrap (calls of 15:F7D0): after the original choice, a replaced map with water runs the water
+    # routine. Without water its CHR have no slot (7E:6000 reads 0), and the routine would write
+    # them over slot 0, the blank tile that fills BG1.
     lib.label("wrap").b(0x22, 0xD0, 0xF7, 0x15, 0x08, 0xC2, 0x30, 0x48, 0xDA).long(0x22, "find")
-    lib.rel(0x90, "wrap_out").b(0xC2, 0x20).word(0xA9, "water").b(0x8F, 0xA6, 0x1A, 0x7E, 0xE2, 0x20)
+    lib.rel(0x90, "wrap_out").long(0xBF, "waters").rel(0xF0, "wrap_out").b(0xC2, 0x20).word(0xA9, "water").b(0x8F, 0xA6, 0x1A, 0x7E, 0xE2, 0x20)
     lib.b(0xA9, LIB_AT >> 16, 0x8F, 0xA8, 0x1A, 0x7E, 0xA9, 0x00)
     for counter in (0x1ECE, 0x1ECF, 0x1EC2, 0x1EC3):
         lib.b(0x8F, counter & 0xFF, counter >> 8, 0x7E)
@@ -407,7 +443,7 @@ def build(dq5_path, dq4_path, out):
     prg = ines.prg(Path(dq4_path).read_bytes())
     assets = create_assets()
     chr_data, chr_banks, block_words, maps, palette = build_graphics(prg, assets)
-    water_blocks = {local[WATER_BLOCK] for _, local in maps.values() if WATER_BLOCK in local}
+    water_blocks = {water_block(source, local) for source, local in maps.values()} - {None}
     if len(water_blocks) != 1:
         raise ValueError(f"expected one shared water block, got {water_blocks}")
     water_ids = block_words[water_blocks.pop()]
@@ -432,7 +468,8 @@ def build(dq5_path, dq4_path, out):
     lib_code, stub_code, sites = engine_code(
         len(block_words), water_ids,
         [palette_at[MAP_PALETTES.get(name, "normal")] for name in TARGETS],
-        [object_entries(found[name]) for name in TARGETS])
+        [object_entries(found[name]) for name in TARGETS],
+        [water_block(*maps[name]) is not None for name in TARGETS])
 
     (out / "chr.bin").write_bytes(b"".join(chr_data))
     (out / "blocks.bin").write_bytes(blocks)
@@ -452,7 +489,7 @@ def build(dq5_path, dq4_path, out):
     for at, orig, new in sites:
         writes.append({"at": _cpu(at), "hex": _hex(new), "orig": _hex(orig), "note": "환경 맵 훅"})
     rom = Rom(dq5)
-    at = MAPS_AT
+    at, spare = MAPS_AT, list(MAPS_NEXT)
     report = {"chr": len(chr_data), "blocks": len(block_words), "water_chr": list(water_ids),
               "bank01_bytes": len(stub_code), "library_bytes": len(lib_code), "objects": found, "maps": {}}
     for name, (source, local) in maps.items():
@@ -461,10 +498,10 @@ def build(dq5_path, dq4_path, out):
         (out / f"{name}.dq5map.json").write_text(json.dumps(doc, ensure_ascii=False) + "\n")
         record = encode(doc)
         (out / f"{name}.bin").write_bytes(record)
-        if at < LIB_AT <= at + len(record):
-            at = MAPS_NEXT
-        if (at & 0xFFFF) + len(record) > 0x10000:
-            raise ValueError("map records must stay inside one bank below 40")
+        if at < LIB_AT <= at + len(record) or (at & 0xFFFF) + len(record) > 0x10000:
+            if not spare:
+                raise ValueError("map records overflow the banks below 40")
+            at = spare.pop(0)
         writes.append({"at": _cpu(at), "file": f"{name}.bin", "note": f"{name} 맵 레코드"})
         pointer = lorom(pointer_addr(rom, *target))
         writes.append({"at": f"0x{pointer:06X}", "hex": _hex(at.to_bytes(3, "little")),

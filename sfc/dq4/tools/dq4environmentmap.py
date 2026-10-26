@@ -88,7 +88,73 @@ BLOCK_ART = {
     },
 }
 
-# Every FC interior map drawn with block sheets 0A and 0E; their FC palettes are the same set
+# Blocks of the other town and castle sheets whose graphics are not in BLOCK_ART. Each entry names
+# the first sheet block showing that graphic; every block with the same CHR and colours follows it.
+EXAMPLES = {
+    (0x03, 0x02): ("wood_floor", "나무 바닥"),
+    (0x03, 0x06): ("gold_door16", "문(とうぞくのカギ)"),
+    (0x03, 0x07): ("iron_door", "쇠창살 문(さいごのカギ)"),
+    (0x03, 0x08): ("red_paving_cracked", "갈라진 붉은 바닥"),
+    (0x03, 0x0E): ("cloth_table", "천 덮인 탁자"),
+    (0x03, 0x0F): ("counter", "카운터 끝"),
+    (0x03, 0x10): ("potted_plant", "화분"),
+    (0x03, 0x14): ("chair", "등받이 의자"),
+    (0x03, 0x15): ("pot", "항아리"),
+    (0x03, 0x18): ("counter", "카운터"),
+    (0x03, 0x19): ("bookshelf", "책장"),
+    (0x03, 0x1A): ("sky", "하늘・떨어지는 칸"),
+    (0x03, 0x1B): ("gold_door16", "문(まほうのカギ)"),
+    (0x03, 0x1E): ("brick_paving", "벽돌 바닥"),
+    (0x04, 0x06): ("cabin_slats_left", "통나무집 창살 왼쪽"),
+    (0x04, 0x07): ("cabin_slats", "통나무집 창살"),
+    (0x04, 0x08): ("cabin_planks_right", "통나무집 벽 오른쪽 기둥"),
+    (0x04, 0x09): ("cabin_slats_post", "통나무집 창살 기둥"),
+    (0x04, 0x0A): ("cabin_planks_post", "통나무집 벽 기둥"),
+    (0x04, 0x0B): ("cabin_slats_right", "통나무집 창살 오른쪽"),
+    (0x04, 0x0D): ("stump", "그루터기"),
+    (0x04, 0x0F): ("log_pile", "장작"),
+    (0x04, 0x10): ("crops", "채소밭"),
+    (0x04, 0x11): ("signboard", "팻말"),
+    (0x04, 0x12): ("grave", "묘비"),
+    (0x04, 0x14): ("stairs_up", "위 계단"),
+    (0x04, 0x15): ("stairs_down", "아래 계단"),
+    (0x04, 0x1F): ("pot", "항아리"),
+    (0x05, 0x0C): ("stone_ledge", "바위 턱"),
+    (0x05, 0x18): ("stone_floor", "흰 바닥"),
+    (0x05, 0x1E): ("lion_statue", "사자상"),
+    (0x06, 0x05): ("swamp", "독늪"),
+    (0x06, 0x10): ("travel_door", "여행의 문"),
+    (0x07, 0x0A): ("rock_wall", "바위벽"),
+    (0x07, 0x0B): ("rock_wall_dark", "어두운 바위벽"),
+    (0x07, 0x1D): ("blue_tile", "청백 타일"),
+    (0x08, 0x0D): ("stone_wall_cracked", "금 간 석벽"),
+    (0x08, 0x0E): ("stone_wall_cracked", "금 간 석벽"),
+    (0x08, 0x0F): ("log_pile", "장작"),
+    (0x09, 0x0C): ("stone_band", "무늬 판석 띠"),
+    (0x09, 0x17): ("altar", "금 제단"),
+    (0x09, 0x18): ("curtain", "휘장 문간"),
+    (0x09, 0x19): ("valance", "푸른 휘장"),
+    (0x09, 0x1A): ("pillar_top", "기둥 머리"),
+    (0x09, 0x1B): ("pillar", "기둥"),
+    (0x09, 0x1C): ("dais_left", "왕좌 뒤 장식 왼쪽"),
+    (0x09, 0x1D): ("dais_middle", "왕좌 뒤 장식 가운데"),
+    (0x09, 0x1E): ("dais_right", "왕좌 뒤 장식 오른쪽"),
+    (0x09, 0x1F): ("throne", "옥좌"),
+    (0x0B, 0x12): ("archway_left", "아치 통로 왼쪽"),
+    (0x0B, 0x13): ("archway_right", "아치 통로 오른쪽"),
+    (0x0B, 0x1C): ("bridge", "다리"),
+    (0x0B, 0x1F): ("dark_void", "어둠"),
+    (0x0C, 0x06): ("barrier", "결계"),
+    (0x0C, 0x19): ("pew", "긴 의자"),
+    (0x0D, 0x18): ("counter", "카운터 왼쪽"),
+    (0x0D, 0x19): ("counter", "카운터 오른쪽"),
+}
+# The floor under transparent fixtures, as on the FC sheet.
+SHEET_FLOORS = {0x04: "dirt", 0x0E: "carpet"}
+BACKGROUNDS = {(0x08, 0x0F): "grass"}
+TOWN_SHEETS = (0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0B, 0x0C, 0x0D)
+
+# FC interior maps drawn with block sheets 0A and 0E, by name; their FC palettes are the same set
 # except アッテムト, which uses a darker set.
 MAPS = (
     (0x02, 0, 0x0A, "burland"), (0x08, 0, 0x0A, "gardenburg"), (0x09, 0, 0x0A, "stancia"),
@@ -98,10 +164,43 @@ MAPS = (
     (0x2A, 0, 0x0A, "shrine-2a"), (0x32, 6, 0x0E, "konenbery-06"), (0x34, 5, 0x0E, "attemut-05"),
     (0x34, 7, 0x0E, "attemut-07"),
 )
-MAP_PALETTES = {"attemut-05": "dim", "attemut-07": "dim"}
+# Maps whose FC palette is darker than their sheet's: アッテムト, and the night or cursed variants
+# 34/09, 3C/09 and 46/01-03 (one NES brightness step down in some or all colours).
+MAP_PALETTES = {"attemut-05": "dim", "attemut-07": "dim", "34-09": "dim", "3C-09": "dim",
+                "46-01": "dim", "46-02": "dim", "46-03": "dim"}
 
 
-def _tile(assets, name, palette, map_type):
+def all_maps(prg):
+    """MAPS plus every FC map of TOWN_SHEETS as (group, number, sheet, name)."""
+    yield from MAPS
+    for _, source in dq4block.all_maps(prg):
+        if source.buf is not None and source.t in TOWN_SHEETS:
+            yield source.g, source.k, source.t, f"{source.g:02X}-{source.k:02X}"
+
+
+def _graphic(prg, t, block):
+    d = dq4block.defs(prg, t).get(block)
+    if d is None:
+        return None
+    colours = dq4block.palette(prg, t)[3 * d["pal"]:3 * d["pal"] + 3]
+    return d["bank"], tuple(d["addrs"]), bytes(colours)
+
+
+def sheet_art(prg, t):
+    """{block: (asset, role)} for every block of sheet t that has a BLOCK_ART or EXAMPLES graphic."""
+    known = {}
+    for (sheet, block), art in [((s, b), a) for s, arts in BLOCK_ART.items() for b, a in arts.items()] + list(EXAMPLES.items()):
+        known.setdefault(_graphic(prg, sheet, block), art)
+    out = dict(BLOCK_ART.get(t, {}))
+    for block in range(32):
+        if block not in out:
+            graphic = _graphic(prg, t, block)
+            if graphic in known:
+                out[block] = known[graphic]
+    return out
+
+
+def _tile(assets, name, palette, map_type, block=None):
     if name not in assets:
         raise ValueError(f"Missing environment asset: {name}")
     tile = assets[name]
@@ -114,8 +213,8 @@ def _tile(assets, name, palette, map_type):
         raise ValueError(f"{name}: only transparent index zero is supported")
     pixels = tile.tobytes()
     transparent = pixels.count(0) if transparency == 0 and name != "dark_void" else 0
-    background_name = "carpet" if map_type == 0x0E else "red_paving"
-    if name in {"tree16", "bush", "flowers"}:
+    background_name = BACKGROUNDS.get((map_type, block), SHEET_FLOORS.get(map_type, "red_paving"))
+    if name in {"tree16", "bush", "flowers", "crops"}:
         background_name = "grass"
     elif name in {"sign_church", "sign_weapon", "sign_armour", "sign_inn", "sign_shop", "window16"}:
         background_name = "stone_wall"
@@ -161,32 +260,34 @@ def block_prop(source, block):
     return source.blocks["prop"].get(block, UNDEFINED)
 
 
-def prepare_maps(prg, assets):
+def prepare_maps(prg, assets, names=None):
     """Yield each FC map with its block counts and composited 16x16 block art."""
     if not assets:
         raise ValueError("Environment asset collection is empty")
     palette = next(iter(assets.values())).getpalette()
     if palette is None:
         raise ValueError("Environment palette is missing")
-    for group, number, expected_type, name in MAPS:
+    arts = {}
+    for group, number, expected_type, name in all_maps(prg) if names is None else [m for m in all_maps(prg) if m[3] in names]:
         source = dq4block.Map(prg, group, number)
         if source.t != expected_type:
             raise ValueError(f"{group:02X}/{number:02X}: expected map type {expected_type:02X}, got {source.t:02X}")
         counts = Counter(value & 31 for value in source.buf)
-        mapping = BLOCK_ART[source.t]
+        mapping = arts.setdefault(source.t, sheet_art(prg, source.t))
         unsupported = sorted(set(counts) - mapping.keys())
         if unsupported:
             raise ValueError(f"{name}: unsupported source blocks {unsupported}")
-        prepared = {block: _tile(assets, mapping[block][0], palette, source.t) for block in counts}
+        prepared = {block: _tile(assets, mapping[block][0], palette, source.t, block) for block in counts}
         yield group, number, name, source, counts, prepared, palette
 
 
-def render_maps(rom_path, assets):
+def render_maps(rom_path, assets, names=None):
     """Return complete block-grid previews and their ROM-derived mapping evidence."""
     data = Path(rom_path).read_bytes()
     result = {}
-    for group, number, name, source, counts, prepared, palette in prepare_maps(ines.prg(data), assets):
-        mapping = BLOCK_ART[source.t]
+    prg = ines.prg(data)
+    for group, number, name, source, counts, prepared, palette in prepare_maps(prg, assets, names):
+        mapping = sheet_art(prg, source.t)
         preview = Image.new("P", (source.w * 16, source.h * 16))
         preview.putpalette(palette_variant(MAP_PALETTES.get(name, "normal")))
         for y in range(source.h):
