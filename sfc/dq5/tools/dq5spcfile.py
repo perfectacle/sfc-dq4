@@ -52,28 +52,73 @@ SCENES = {
     0x13: '맵 곡 0E/02·21/05·21/0D', 0x16: '보스 전투(무리 등급 1, 예: 무리 20)', 0x17: '전투',
     0x18: '마지막 보스 전투(エスターク·ミルドラース)', 0x1D: '여관에서 잘 때', 0x1F: '전투 승리',
     0x20: '교회에서 기록했을 때(25:FD03·FD07)',
-    0x32: '대화 창이 열릴 때', 0x33: '명령 창 열기·고르기', 0x34: '창 닫기',
+    0x32: '대화 창이 열릴 때', 0x33: '명령 창 열기·고르기', 0x34: '창 닫기', 0x35: '문 열기',
+    0x38: '공격 주문 연출(メラ~ミナデイン)', 0x39: '숨·ザキ 연출', 0x3A: 'マホカンタ 연출', 0x3B: '카지노 슬롯',
+    0x3E: '순간이동 효과 등(맵 루틴)', 0x40: '순간이동(ラマダ 뒤)', 0x46: '상태 주문 연출(ラリホー·マヌーサ 등)',
     0x37: '공격이 맞을 때(전투에서 쓴 갈래 X = 01·02·03·04·07, 03·04 는 잡음)',
     0x44: 'トロッコ 가 구를 때(51/54, 끝 칸에서 02 44 로 멈춤)',
 }
-# 갈래(곡 변수 X)마다 확인한 쓰임. dq5-sound-format.md 「전투 곡」·「효과음 쓰임」(dq5-mongfx2 실측).
+# 갈래(곡 변수 X)마다 확인한 쓰임. dq5-sound-format.md 「전투 곡」·「효과음 쓰임」. 「코드 읽기」 는 장면을 띄우지 못한 것.
 BRANCH_SCENES = {
-    (0x16, 1): '동굴 안 보스 전투(0C 16 01)', (0x17, 1): '동굴 안 전투(0C 17 01, 주 음량 4D·메아리 40/40)',
+    (0x16, 1): '동굴 안 보스 전투(0C 16 01)', (0x17, 1): '동굴 안 전투(0C 17 01, 21/02 에서 마주친 전투로 실측)',
     (0x18, 1): '동굴 안 마지막 보스 전투', (0x32, 0): '대화 창 열기, 전투 메시지 F9',
     (0x33, 0): '필드 명령 창 열기·창에서 고르기·전투 명령 창', (0x34, 3): '창 닫기(B)',
-    (0x34, 2): '맵 옮길 때로 보임, 인물 명령 02/06', (0x36, 2): 'キメラのつばさ 로 날 때',
+    (0x34, 2): '맵 옮길 때로 보임, 인물 명령 02/06', (0x35, 1): '문 열기(01:E01B, 23/00 에서 とびら)',
+    (0x36, 2): 'キメラのつばさ 로 날 때',
     (0x36, 0): '전투(20:F5EE)·파파스 장면', (0x37, 1): '전투에서 맞을 때(26:8Bxx)', (0x37, 2): '전투에서 맞을 때(26:8Bxx)',
     (0x37, 4): '전투에서 맞을 때(26:8Bxx)', (0x37, 3): '전투에서 맞을 때(20:Cxxx·F50A, 잡음)',
     (0x37, 0x0D): '전투에서 맞을 때(20:Cxxx·F50A)', (0x37, 7): '전투 연출(28:804E)', (0x37, 0x11): '파파스 장면',
+    (0x37, 0x0E): '전투에서 주문을 외울 때(26:8AFF, 모든 주문)',
     (0x37, 0): '인물 명령 03/05·03/07', (0x37, 0x13): '인물 명령 03/05·03/07', (0x38, 1): '파파스 장면(02:9DFF)',
-    (0x3D, 2): 'ミルドラース 둘째 싸움 앞', (0x3D, 1): '인물 명령 03/0A', (0x3F, 0): 'レヌール城 04/09(29:8044)',
-    (0x41, 0): 'トロッコ 가 멈출 때(51/54)', (0x44, 7): '54/53 ミルドラース 장면에서 되풀이', (0x44, 0x0B): '전투 연출',
+    (0x3B, 0): '카지노 슬롯에 코인 넣기(11:B4EB)', (0x3B, 1): '슬롯 돌리기 시작(11:B673)',
+    (0x3B, 2): '슬롯 릴 하나가 멈출 때(11:B6C3)', (0x3C, 0): '슬롯(11:B3B7, 코드 읽기)',
+    (0x3D, 2): 'ミルドラース 둘째 싸움 앞', (0x3D, 1): '인물 명령 03/0A', (0x3E, 5): '인물이 순간이동해 나타날 때'
+    '(인라인 명령 2C·2D, 03:AE91; 31/0B 의 몬스터 셋)', (0x3F, 0): 'レヌール城 04/09(29:8044)',
+    (0x40, 0): 'ラマダ 를 쓰러뜨린 뒤 03/02 에서 순간이동할 때(02:BBA3)',
+    (0x41, 0): 'トロッコ 가 멈출 때(51/54)', (0x42, 0): 'グランバニア 02/07 밤 인물(21A8.2)이 23:E7A9 로 60프레임 울리고 멈춤(코드 읽기)',
+    (0x43, 0): '배($1954 = 03)로 바꾼 뒤(0F:FDD7, 코드 읽기)',
+    (0x44, 7): '54/53 ミルドラース 장면에서 되풀이', (0x44, 0x0B): '전투 연출',
+    (0x45, 1): '54/53 ミルドラース 「わが名は…」 뒤 23:E6A4 → 02:EF26(코드 읽기)',
 }
+# 전투 연출의 효과음 표(dq5sfx.py, 28:8074 → 28:811E)와 인물 인라인 명령 20 n X 는 롬에서 그대로 붙인다.
+_CATALOGUE = {}
 
 
-def scene(n, x):
-    """갈래 쓰임이 있으면 그것, 없으면 번호의 쓰임."""
-    return BRANCH_SCENES.get((n, x)) or SCENES.get(n)
+def auto_scene(rom, n, x):
+    if rom is None or x is None:
+        return ''
+    if not _CATALOGUE:
+        import dq5sfx
+        _CATALOGUE.update(dq5sfx.catalogue(rom))
+    v = _CATALOGUE.get((n, x))
+    if not v:
+        return ''
+    parts = []
+    names = []
+    named = [f for f in v['fx'] if f['name']] or v['fx']
+    for f in named:
+        nm = f['name'] or '번호 %02X' % f['fx']
+        if f['cond']:
+            # '무기 종류 k(물건·… 등 n개)' 에서 첫 물건 이름만
+            inner = f['cond'].split('(')[1].split('·')[0].rstrip(')') if '(' in f['cond'] else f['cond']
+            nm = '%s(%s)' % (nm, inner if '무기' in f['cond'] else f['cond'])
+        if nm not in names:
+            names.append(nm)
+    if names:
+        parts.append('전투 연출 ' + '·'.join(names[:8]) + (' 등' if len(names) > 8 else ''))
+    lists = sorted({p['list'].split()[0] for p in v['npc']})
+    if lists:
+        parts.append('인물 명령 20(%s)' % '·'.join(lists))
+    return ', '.join(parts)
+
+
+def scene(n, x, rom=None):
+    """갈래 쓰임이 있으면 그것, 없으면 번호의 쓰임. rom 을 주면 연출 표·인물 명령에서 나온 쓰임을 붙인다."""
+    base = BRANCH_SCENES.get((n, x)) or SCENES.get(n)
+    extra = auto_scene(rom, n, x)
+    if base and extra:
+        return f'{base}; {extra}'
+    return base or extra or None
 
 
 def kind(n):
@@ -242,7 +287,7 @@ def main():
             entries = json.load(open(path, encoding='utf-8'))
             for e in entries:
                 n = int(e['sequence'], 16)
-                e['scene'] = scene(n, int(e['variant'], 16) if e.get('variant') else None)
+                e['scene'] = scene(n, int(e['variant'], 16) if e.get('variant') else None, rom)
                 e['maps'] = maps.get(n, [])
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(entries, f, ensure_ascii=False, indent=1)
@@ -292,7 +337,7 @@ def main():
         with open(os.path.join(folder, name), 'wb') as f:
             f.write(data)
         entry = {'id': stem, 'sequence': f'{n:02X}', 'variant': None if x is None else f'{x:02X}', 'file': name,
-                 'scene': scene(n, x), 'maps': maps.get(n, []), 'sequence_rom': f'{seqs[n][0] >> 16:02X}:{seqs[n][0] & 0xFFFF:04X}',
+                 'scene': scene(n, x, rom), 'maps': maps.get(n, []), 'sequence_rom': f'{seqs[n][0] >> 16:02X}:{seqs[n][0] & 0xFFFF:04X}',
                  'sequence_bytes': seqs[n][1], 'samples': [f'{v:02X}' for v in sets[n]],
                  'command': f'01 {n:02X}' if x is None else f'0C {n:02X} {x:02X}', 'frame': int(r['frame']),
                  'playing': found}
