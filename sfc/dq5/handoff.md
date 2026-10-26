@@ -34,6 +34,8 @@ git worktree list
 
 영역 이동 `flags` bit6 은 이동 효과음이고, 01/0A·2A/00 출구는 블록 속성 `33` 이 막고 오른쪽 칸을 `85` 로 바꾸면 열립니다(막는 루틴은 남음)([일지](journal/2026-10-27-05-exit-flags.md)). 실측은 24장면입니다. 남은 범위는 증설·재배치·출구 종류 변경입니다. 배 맵 17/xx 는 `dq5warp.lua`가 `2A:EFF5`부터 5바이트를 덮어 17/01 출구까지 바뀌므로 출구 실측에 쓰지 않습니다. 실측 결과 `work/exitcheck/`는 원래 체크아웃 `work/dq5-exitwrite/`에 복사해 두고 워크트리를 정리합니다.
 
+증설·재배치·종류 변경은 `dq5exitreloc.py`(`dq5exittables/1`)가 맡습니다([일지](journal/2026-10-27-17-exitreloc.md), [쓰기 형식](docs/dq5-build-format.md#실내-출구영역-이동-표-옮기기-dq5exittables1)). 네 표를 통째로 다시 쓰고, 원래 자리에 들어가면 코드를 고치지 않습니다. 옮길 때 출구는 `[$84]` 읽기와 스텁으로 어느 뱅크든(`00`~`7D`), 색인·레코드·고층 목록은 DB 로 WRAM·MMIO 를 쓰므로 `00`~`3F` 에만 둡니다(`--audit` 로 DB 창 명령 415개 감사). 기본 새 자리는 없고 `--exits-at` 등으로 줍니다. 표를 옮긴 롬에서는 `dq5warp.lua` 에 `WARPEXIT` 를 줘야 순간이동이 됩니다(`dq5exitcheck.py` 가 계산). 실측은 44장면이고, 결과 `work/exitcheck/` 는 원래 체크아웃 `work/dq5-exitreloc/` 에 복사합니다.
+
 ### 맵별 루틴 표 쓰기(머지됨)
 
 `dq5maphook.py`(`dq5maphook/1`)와 실측 도구 `dq5maphookcheck.py`로 마쳤습니다([일지](journal/2026-10-27-18-maphook.md), [쓰기 형식](docs/dq5-build-format.md#맵별-루틴-표-dq5maphook1)). 원본 162개 쓰기 0개, 합성 테스트 11개, 변경 롬 다섯 벌과 원본에서 루틴 막기·플래그 조건·표 옮기기 15장면을 확인했습니다. 루틴 주소는 원래 표의 같은 칸에 있던 것만 받고(`--raw-routines` 로 풂), 표는 DB = 15 인 로더 때문에 뱅크 15 의 원래 자리(162개)나 `15:FF80`(12개)에만 다시 씁니다. 163개 이상 증설과 `15:FF5C` 둘째 표는 남았습니다. 실측 결과 `work/maphookcheck/`는 원래 체크아웃 `work/dq5-maphook/`에 복사해 둡니다.

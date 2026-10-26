@@ -1,5 +1,5 @@
 -- DQ5: 배 선실 세이브스테이트(STATE)에서 원하는 장면으로 순간이동해, 조작할 수 있는 상태로 세이브스테이트(SAVE)를 남긴다.
--- 배의 사다리 출구 항목(2A:EFF5)을 목적지 표 종류 60 항목으로 덮고 사다리를 밟아, 게임의 맵 불러오기를 그대로 탄다.
+-- 배의 사다리 출구 항목(2A:EFF5, WARPEXIT 로 바꿈)을 목적지 표 종류 60 항목으로 덮고 사다리를 밟아, 게임의 맵 불러오기를 그대로 탄다.
 -- 시작 세이브스테이트가 배 선실(17/00)이 아니면(또는 ANYWHERE=1) 「어디서나」 방식으로 간다.
 --   실내: 영역 이동 레코드 하나(12바이트, 2A:D812 자리)를 주인공 아래 칸·목적지로 쓰고 지금 맵의 레코드 위치·개수
 --         (7E:183A~183D)를 그것으로 바꾼 뒤 아래로 한 걸음.
@@ -123,7 +123,8 @@ else
   if bd > 0x1F then hexbytes(0x157769, string.format("A9%02X", bd), patches) end
 end
 -- 종류 60 항목: [E0|BD][X][Y][층][BC]. bit7 은 「그 맵의 마지막 항목」 표시라 켜 둔다.
-hexbytes(0x156FF5, string.format("%02X%02X%02X%02X%02X", 0xE0 | bd, tx, ty, dir, bc), patches)
+-- 출구 표를 옮긴 롬이면 WARPEXIT(파일 위치 16진)에 옮긴 표의 17/00 첫 항목 자리를 준다.
+hexbytes(tonumber(os.getenv("WARPEXIT") or "156FF5", 16), string.format("%02X%02X%02X%02X%02X", 0xE0 | bd, tx, ty, dir, bc), patches)
 
 local function parseSeq(s)
   local t = {}

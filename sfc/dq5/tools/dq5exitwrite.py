@@ -75,6 +75,9 @@ def high_list(bc, bd):
 
 
 def layout(rom):
+    from dq5exitreloc import HIGH_ORIGINAL, ORIGINAL, locate
+    if locate(rom) != {**ORIGINAL, 'high': HIGH_ORIGINAL}:
+        raise ValueError('표를 옮긴 롬이라 고정 슬롯을 쓸 수 없음(dq5exitreloc.py 로 고침)')
     known = set(all_maps(rom))
     exits, triggers = {}, {}
     addr = DEST_TABLE
