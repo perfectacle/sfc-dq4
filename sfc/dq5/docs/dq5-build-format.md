@@ -431,6 +431,74 @@ uv run --locked python sfc/dq5/tools/dq5npcrelocatecheck.py rom/dq5.sfc \
   --state work/state/ship.mss --out work/npc-relocate-check --all --mutations --jobs 6
 ```
 
+### 보물상자·조사 보상 (`dq5chest/1`)
+
+`dq5chestwrite.py`는 보물상자와 서랍·항아리·통, 발밑, 두 칸 앞, 아래층 상자의 기존 표를 편집합니다. 원본 슬롯 수와 순서를 유지하고, 지정하지 않은 필드·미사용 바이트·종료자는 보존합니다. 결과는 바뀐 항목의 원본 바이트를 `orig`에 담은 `dq5patch/1` 목록입니다. 읽기 형식과 처리 루틴은 [맵 형식의 보물상자 절](dq5-map-format.md#보물상자와-タンスツボタル-12e4c9)에 있습니다.
+
+```sh
+uv run --locked python sfc/dq5/tools/dq5chestwrite.py rom/dq5.sfc dump -o work/chests.json
+uv run --locked python sfc/dq5/tools/dq5chestwrite.py rom/dq5.sfc patch work/chests.json -o work/chests.patch.json
+uv run --locked python sfc/dq5/tools/dq5chestwrite.py rom/dq5.sfc check work/chests.json
+uv run --locked python sfc/dq5/tools/dq5build.py rom/dq5.sfc build work/chests.patch.json \
+  -o work/chests.sfc --ips work/chests.ips
+```
+
+`check`의 입력을 생략하면 원본 전체를 다시 쓰고 읽어 비교합니다. 입력이 있으면 편집 결과를 메모리에 적용한 뒤 다시 읽습니다. 두 경우 모두 일반 상자 맵 83개의 셀 수와 등록 개수를 대조합니다.
+
+#### 입력과 고정 한도
+
+형식 표시는 `"format": "dq5chest/1"`입니다. 아래 목록 중 필요한 것만 넣을 수 있고, 각 항목은 `index`와 바꿀 필드만 적어도 됩니다. 숫자는 모두 JSON 정수이며 `true`·문자열은 받지 않습니다. 모르는 필드·중복 번호·같은 표에서 먼저 나오는 항목에 가려지는 중복 위치는 거부합니다.
+
+| 목록 | 항목 수 | 필드 (`index` 외) | 롬 위치 |
+| --- | ---: | --- | --- |
+| `chests` | 161 | `reward` | `1E:EE4E` |
+| `chest_maps` | 83 | `group`, `map`, `count` | `1E:EF90` |
+| `search` | 86 | `group`, `map`, `x`, `y`, `reward`, `flag_index`, `mask` | `1F:F5CB` |
+| `foot` | 18 | 위 필드와 `layer` | `1E:F08B` |
+| `ahead` | 17 | `group`, `map`, `x`, `y`, `reward`, `flag_index`, `mask` | `1E:F435` |
+| `lower` | 11 | 위 필드 | `1E:F4DF` |
+
+`index`는 해당 표의 0부터 시작하는 슬롯 번호입니다. `group`·`map`은 디코더가 아는 364개 맵 중 한 곳이어야 합니다. 새로 지정한 좌표는 그 맵의 크기 안이어야 합니다. 서랍·항아리·통의 `+4`는 엔진이 읽지 않는 바이트이므로 입력으로 받지 않고 원본을 보존합니다. `foot.layer`는 방향이 아니라 주인공 층(`$C3`)입니다.
+
+`reward`는 엔진의 16비트 보상 값입니다. `0000`~`00FF`는 물건 번호, `0100`~`CFFF`는 값에서 `0100`을 뺀 금화, `D000`~`D009`는 기존 특수 처리, `FFFC`~`FFFF`는 잠김·몬스터·빈 상자입니다. 이 사이의 지원하지 않는 값은 거부합니다. 특수 처리의 내용과 맵·시대·플래그에 따른 예외 코드는 바꾸지 않습니다. 예를 들어 일반 상자 2를 321G로, 선실 서랍 31을 432G와 다른 열림 비트로 바꾸려면 다음처럼 씁니다.
+
+```json
+{
+  "format": "dq5chest/1",
+  "chests": [{"index": 2, "reward": 577}],
+  "search": [{"index": 31, "reward": 688, "flag_index": 4, "mask": 128}]
+}
+```
+
+#### 상자 위치와 열림 플래그
+
+일반 상자는 좌표와 열림 비트를 표에 직접 저장하지 않습니다. `chest_maps` 앞 항목의 `count` 합계에, 맵 셀 버퍼에서 상자를 센 순서를 더해 `chests.index`를 얻습니다. 위치를 옮기려면 맵 쓰기 도구로 상자 셀 배치를 바꿉니다. 맵 쓰기를 먼저 적용한 롬에서 보상 목록을 만들면 변경된 셀 배치를 기준으로 검사할 수 있습니다.
+
+`chest_maps`는 일반 실내 그룹 `00`~`35`만 받으며, 총 `count` 161을 유지해야 하며, 연결이나 개수가 바뀌면 실제 맵 상자 셀 수와 일치해야 합니다. 맵 표의 항목 순서를 바꾸거나 앞쪽 개수를 바꾸면 뒤 상자의 번호·보상·열림 비트 연결도 달라집니다. 기존 세이브의 비트를 자동으로 옮기지는 않습니다.
+
+| 목록 | 열림 비트 |
+| --- | --- |
+| 일반 상자 번호 `n` | `7E:2210 + (n >> 3)`, 마스크 `80 >> (n & 7)` |
+| `search` | `7E:222C + flag_index`, `mask` |
+| `foot` | `7E:2240 + flag_index`, `mask` |
+| `ahead`·`lower` | `7E:2190 + (flag_index \| 80)`, `mask` |
+
+`flag_index`는 원본 한 바이트(0~255), `mask`는 1~255입니다. 두 칸 앞·아래층 상자의 `flag_index` 상위 비트도 원본대로 보존합니다. 여러 비트를 묶는 마스크와 다른 항목의 비트 공유는 허용합니다. 새 비트가 이야기 진행이나 다른 보상에 쓰이는지는 편집자가 확인해야 합니다.
+
+#### 확인한 범위와 남은 것
+
+원본 376항목 1,731바이트를 다시 써도 바이트가 같고, 일반 상자 맵 83개의 개수가 셀 버퍼와 일치했습니다. 다음 명령은 입력 JSON부터 롬·IPS·장면 준비·실제 컨트롤러 조사까지 재현하며, 결과를 새 출력 하위 폴더에 남깁니다.
+
+```sh
+MESENCE="$MESENCE" uv run --locked python sfc/dq5/tools/dq5chestcheck.py rom/dq5.sfc \
+  --state work/state/ship.mss --out work/chest-check
+```
+
+원본·패치 롬 3쌍, 6회 실행을 비교했습니다. 상자 2는 321G와 `2210 & 20`, 선실 서랍은 432G와 새 비트 `2230 & 80`, 선실 `(3,5)`·층 1로 옮긴 발밑 항목은 543G와 `2243 & 40`을 얻었습니다. 조사 종류 메시지·실제 조회 보상·금화 증가·열림 비트를 확인했고, 서랍과 발밑의 패치가 기존 서랍 비트 `222F & 01`을 건드리지 않는 것도 확인했습니다.
+
+목록 증설·재배치, 일반 상자 수 161의 증설, 상자 그림 배치 자동 편집, 필드의 코드에 고정된 조사 보상은 이번 범위 밖입니다. 두 칸 앞·아래층 상자 표 쓰기는 바이트 왕복과 다시 읽기를 확인했으며, 변경한 표를 게임에서 여는 실측은 남았습니다. 좌표가 맵 안이라는 검사만으로 알맞은 가구·상자 속성이 그 자리에 생기거나 걸어갈 수 있게 되지는 않습니다.
+
+
 ## 빈 자리 지도
 
 ### 원래 롬
