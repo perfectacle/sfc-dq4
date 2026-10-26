@@ -24,6 +24,8 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5build.py rom build 목록… -o 롬 [--ips IPS]` | 패치 빌더: 쓰기 도구들의 `dq5patch/1` 목록을 받아 겹침·`orig`·범위를 검사하고 롬을 늘려(`--size 2\|3\|4`) 써 넣은 뒤 체크섬을 고치고 IPS 를 냄(같은 바이트 16개 넘는 곳은 RLE, 다시 붙여 확인). `check` 검사만, `free` 빈 자리 지도, `fromrom 롬` 롬 전체를 목록으로, `--fill-free XX` 빈 자리 채우기. 형식은 [dq5-build-format.md](../docs/dq5-build-format.md). 결과는 `work/` 에만 |
 | `dq5boottest.py 원래롬 만든롬` | 부팅 시험: 두 롬을 전원부터 켜(RAM 0, 새 SRAM) 6,500프레임에 배 선실(17/00)에 닿는지와 11개 프레임의 VRAM·CGRAM·OAM·WRAM 해시가 같은지. `--allow-diff` 는 첫 장면만. `--scenes 세이브스테이트` 는 배 선실에서 필드 걷기·전투·메뉴·가게 대화 네 장면도 해시·끝 상태로 견줌. `MESENCE` 필요 |
 | `dq5scriptcheck.py rom --state 선실 --out 폴더` | 이벤트 표·번호 표 연결과 인물 라벨 분기 7건을 새 인코더·빌더·MesenCE로 재현. `MESENCE` 필요. 롬·IPS·실행 기록과 검사 결과는 새 출력 하위 폴더에 저장 |
+| `dq5textwrite.py rom export\|patch\|check` | 보행 메시지3200개 코드목록 `dq5text/1`. 일부메시지만 수정하고 전체허프만 재압축, 기존글꼴보존, 기본38:8000. `check [입력]`으로빌더적용후전체메시지비교. [쓰기 형식](../docs/dq5-build-format.md#보행-대사-일괄-쓰기-dq5text1) |
+| `dq5textcheck.py rom --state 상태 --out 폴더` | MesenCE로 원본·원문 재배치·수정·뒤쪽 뱅크 메시지 4건의 실제 디코더 반환 코드를 대조. `MESENCE` 필요 |
 | `dq5eventwrite.py rom dump\|encode\|patch\|check` | 이벤트 명령 JSON(`dq5event/1`). `dump --event N` 또는 `--number HEX`, `patch 입력 -o 목록`으로 지정한 표 항목을 확장 뱅크 스크립트에 연결. 기본 `60:8000`, 내부 라벨은 배치 주소로 계산. [쓰기 형식](../docs/dq5-build-format.md#이벤트-스크립트-dq5event1) |
 | `dq5npcwrite.py rom dump\|encode\|patch\|check` | 인물 인라인 JSON(`dq5npcscript/1`). `dump BB:AAAA -o 입력`은 길이 바이트 주소를 받음. `patch 입력 -o 목록`은 원본 슬롯 크기를 유지하고 남는 부분을 `00`으로 채움. 상대 분기는 라벨 지원. [쓰기 형식](../docs/dq5-build-format.md#인물-스크립트-dq5npcscript1) |
 | `dq5fieldtablecheck.py rom --state 선실 --out 폴더` | 필드 표 쓰기 게임 실측 재현: 블록 양층 타일맵·일반/보조 입구·출구·세계0~2 지도. `MESENCE` 필요. 새 실행 폴더에 롬·IPS·덤프·`results.json` |
@@ -109,6 +111,7 @@ uv run --locked python sfc/dq5/tools/dq5assets.py rom/dq5.sfc --out "$ASSETS/sfc
 | 스크립트 | 하는 일 | 추가 환경 변수 | 결과 |
 | --- | --- | --- | --- |
 | `lua/dq5progresscheck.lua` | 성장 처리·상점 가격 계산과 조우 결과를 기록. `dq5progresscheck.py`가 환경과 드라이버를 준비 | `MODE`, `DRIVER`, `MAXF` | `observed.txt` |
+| `lua/dq5textcheck.lua` | 보행 메시지 스트림 주소와 디코더 반환 코드를 기록. `dq5textcheck.py`가 드라이버와 환경을 준비 | `MESSAGE`, `RETURN_PC`, `DRIVER` | `decoded.txt`, `end.png` |
 | `lua/dq5scriptcheck.lua` | 스크립트 쓰기 실측: 이벤트 조회·명령 주소, 인물 좌표·포인터·플래그 기록. `dq5scriptcheck.py`가 드라이버와 환경 변수를 준비 | `DRIVER`, `MAXF`, 드라이버 변수 | `trace.txt`(종합 `results.json`은 Python 도구) |
 | `lua/dq5seqtrace.lua` | DQ5: 드라이버 없이 세이브스테이트를 불러 `SEQ` 입력을 재생하며, 처음 몇 프레임 WRAM 쓰기(`WR`), 첫 프레임 롬 덮기(`ROMPATCH`), 주소 실행 때 레지스터·스택 24바이트(`HOOK`), 값이 바뀐 프레임(`WLOG`), 범위 실행 순서·커버리지(`LO`·`HI`·`FROM`·`TO`·`CAP`)를 남김. `SAVEAT` 에 세이브스테이트, `SHOTS` 에 화면. 2000 프레임마다 기록을 씀 | `STATE`, `SEQ`, `WR`·`WRN`, `ROMPATCH`, `HOOK`, `WLOG`, `LO`·`HI`·`FROM`·`TO`·`CAP`, `SAVEAT`·`SAVE`, `SHOTS`, `MAXF` | `trc.txt`, `cover.txt`, `<SAVE>`, `sNNN.png`, `end.png` |
 | `lua/dq5savestate.lua` | 드라이버(`boot.lua`) 입력을 재생하다가 `SAVEAT` 프레임에 세이브스테이트와 화면 저장. `seqlib.sh` 로 `dq5warp.lua` 를 드라이버로 두면 장면 이동 뒤 걸어 들어간 곳을 남길 수 있음 | `SAVEAT`, `SAVENAME` | `<SAVENAME>`, `.png` |

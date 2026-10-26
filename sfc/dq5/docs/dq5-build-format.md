@@ -88,6 +88,7 @@ uv run --locked python sfc/dq5/tools/dq5build.py rom/dq5.sfc fromrom work/hangul
 | `dq5mapcompile.py` | 블록 배치 목록 → 배치 명령(`dq5mapwrite.py` 의 입력) | `dq5mapsrc/1` JSON |
 | `dq5fieldwrite.py` | 필드 세계 지도 셋(RLE 두 덩어리)과 불러오기 루틴의 원본 주소 | 칸마다 16비트 블록 번호 `.bin` |
 | `dq5fieldtables.py` | 필드 블록 양층·일반/보조 입구·그룹 도착 표 | `dq5fieldtables/1` JSON |
+| `dq5textwrite.py` | 보행 메시지 3,200개 재압축·색인·디코더 | `dq5text/1` 코드 목록 JSON |
 | `dq5eventwrite.py` | 이벤트 명령과 지정한 이벤트·번호 표 항목 | `dq5event/1` JSON |
 | `dq5npcwrite.py` | 기존 인물 슬롯 안의 명령 | `dq5npcscript/1` JSON |
 
@@ -301,6 +302,40 @@ uv run --locked python sfc/dq5/tools/dq5fieldtables.py rom/dq5.sfc check
 블록 1,022항목·입구 61항목·도착 54항목, 합계 5,685바이트를 다시 인코딩해 원본과 같았습니다. 블록 양층·일반/보조 입구·도착 표를 고쳐 빌더에 넣은 뒤 기존 읽기 도구로 다시 확인했습니다.
 
 게임에서는 블록 양층의 BG 타일맵 8,192바이트가 예측과 같았고, 일반·보조 입구를 실제 걸어 바꾼 도착 맵·좌표·층·방향에 섰습니다. 마을에서 나오는 필드 좌표도 맞았습니다. `dq5fieldtablecheck.py`가 이 보행과 세계 지도 검사를 재현합니다([일지](../journal/2026-10-26-54-fieldtables.md)).
+
+### 보행 대사 일괄 쓰기 `dq5text/1`
+
+`sfc/dq5/tools/dq5textwrite.py`는 보행 메시지 3,200개를 코드 목록으로 내보내고, 고친 항목을 반영해 허프만 트리·메시지 전체를 다시 만듭니다. 원래 글꼴과 메시지 번호를 유지하며 새 글꼴·전투 메시지·창·이름 표는 편집하지 않습니다.
+
+```sh
+uv run --locked python sfc/dq5/tools/dq5textwrite.py rom/dq5.sfc export -o work/messages.json
+uv run --locked python sfc/dq5/tools/dq5textwrite.py rom/dq5.sfc patch work/messages.json -o work/text.dq5patch.json
+uv run --locked python sfc/dq5/tools/dq5textwrite.py rom/dq5.sfc check work/messages.json
+```
+
+```json
+{"format":"dq5text/1", "messages":[{"id":297,"codes":[4102,0,4097]}]}
+```
+
+`id`는 0~3199의 정수입니다. `codes`에는 글자·제어 코드 정수를 순서대로 적습니다. 예제는 메시지 `129`를 `{1006}`·글자 `000`·끝 `{1001}`로 바꿉니다. 글자는 기존 코드 `000`~`3DA`, 제어는 `1000`~`101D`·`1100`~`1118` 범위입니다(범위 설명은 16진수, JSON 예는 10진수). 끝 코드 `1001`·`1010`·`1018` 중 하나가 마지막에 한 번만 있어야 합니다. 이름·숫자 변수에 필요한 인자는 원래처럼 부르는 코드가 대기열에 넣어야 합니다.
+
+- 적지 않은 메시지는 원본 그대로 유지합니다. 빈 `messages` 배열이면 원본 전체를 다시 부호화합니다. `check`에 입력 파일을 빼도 같은 원본 재압축 검사를 합니다.
+- 문자열을 글자 코드로 바꾸는 번역 편집기 기능은 없습니다. 원본 `export`의 코드 목록을 편집하는 단계입니다. 새 한글 글꼴 추가와 함께 쓰려면 글꼴·코드 배분을 별도로 설계해야 합니다.
+- `patch --at BB:AAAA`의 기본 위치는 `38:8000`입니다. 보행 디코더 사본·마스크·트리는 한 뱅크에, 메시지는 그 뒤에 이어 놓습니다. 허용 뱅크는 `30`~`3F`이고 모든 자료가 `3F:FFFF` 안에 들어가야 합니다. 다른 도구와 같은 자리를 쓰면 빌더가 거부합니다.
+- 원본 쪽에서는 색인, 보행 디코더 호출, 보행 색인 호출과 훅만 바꾸고 `orig`를 기록합니다. 전투 호출은 바꾸지 않습니다. 패치의 최소 롬 크기는 2MB이며 다른 패치와 합쳐 3·4MB로 빌드할 수도 있습니다.
+- 중복 번호, 잘못된 타입·코드·끝 코드, 디코더·트리의 뱅크 초과, 전체 배치 초과는 거부합니다. 입력은 원본 롬이어야 합니다.
+
+원본 3,200개·163,649코드를 재압축해 빌더에 넣은 뒤 새 디코더의 트리·색인을 따라 풀자 모두 같았습니다. 메시지 두 개를 바꾼 검사에서는 두 개만 입력대로 바뀌고 나머지 3,198개가 그대로였습니다. 기존 한글 실험용 `retree`도 같은 결과를 유지했습니다.
+
+게임에서도 원본·원문 재배치·수정·뒤쪽 뱅크 메시지의 디코더 반환 64코드를 각각 비교해 일치했습니다. 뒤쪽 메시지는 `3C:B1BE`에서 읽혔습니다([일지](../journal/2026-10-26-56-textwrite.md)).
+
+`MESENCE`를 설정한 뒤 다음 명령으로 게임 검사 4건을 재현합니다. 실행마다 새 출력 폴더에 `results.json`과 디코더 기록·화면을 남깁니다.
+
+```sh
+uv run --locked python sfc/dq5/tools/dq5textcheck.py rom/dq5.sfc \
+  --state work/state/ship.mss --out work/textcheck
+```
+
 
 ### 이벤트 스크립트 `dq5event/1`
 
