@@ -64,11 +64,11 @@ def all_entries(rom):
 
 
 def container_cells(rom):
-    """{(bc, bd): [(x, y, 종류)]}. 그룹 $50 이상 맵 가운데 Decoder 가 풀지 못하는 것은 건너뛴다."""
+    """{(bc, bd): [(x, y, 종류, +4 또는 +7)]}. 그룹 $50 이상 맵은 그 경로(Decoder high)로 푼다."""
     out, skipped = {}, []
     for bc, bd in map_ids(rom):
         try:
-            w, h, buf, _ = Decoder(rom, 0xBE).decode(map_pointer(rom, bc, bd))
+            w, h, buf, _ = Decoder(rom, 0xBE, bc >= 0x50).decode(map_pointer(rom, bc, bd))
         except IndexError:
             skipped.append((bc, bd))
             continue
