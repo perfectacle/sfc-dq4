@@ -19,6 +19,7 @@ from dq5exitreloc import (
     POOLS,
     RECORD_BANK,
     RECORD_LOW,
+    dump,
     engine_exits,
     engine_triggers,
     high_maps,
@@ -95,7 +96,7 @@ def apply(data, writes, size=0x400000):
 
 class RelocTests(unittest.TestCase):
     def setUp(self):
-        patcher = mock('dq5exitreloc.known_maps', return_value=KNOWN)
+        patcher = mock('dq5exitreloc.known_maps', side_effect=lambda rom, new=(): KNOWN | set(new))
         patcher.start()
         self.addCleanup(patcher.stop)
         self.doc = document()
@@ -212,6 +213,25 @@ class RelocTests(unittest.TestCase):
         moved = apply(self.rom.d, writes_for(self.rom, self.doc, {'records': 0x3E8000})[0])
         with self.assertRaisesRegex(ValueError, '옮긴 롬'):
             layout(moved)
+
+    def test_new_map_gets_exit_list_and_trigger_index(self):
+        new = [(1, 3)]
+        doc = dump(self.rom, new)
+        rows = [r['map'] for r in doc['exits']]
+        self.assertEqual(rows[rows.index('01/02') + 1], '01/03')
+        self.assertEqual(doc['exits'][rows.index('01/03')]['records'], [{'kind': 'special', 'special': 0}])
+        doc['exits'][rows.index('01/03')]['records'] = [{'kind': 'same-group', 'destination_map': 0, 'exit': 0}]
+        doc['exits'][rows.index('01/00')]['records'][0] = {'kind': 'same-group', 'destination_map': 3, 'exit': 0}
+        doc['triggers'].append({'map': '01/03', 'records': [trigger(3)]})
+        with self.assertRaisesRegex(ValueError, '순서'):
+            writes_for(self.rom, doc, {'exits': 0x2AD812, 'records': 0x3E8000})
+        at = {'exits': 0x2AD812, 'records': 0x3E8000}
+        moved = apply(self.rom.d, writes_for(self.rom, doc, at, new)[0])
+        loc = locate(moved)
+        self.assertEqual(parse(moved, loc, KNOWN | set(new)), doc)
+        self.assertEqual([r for _, r in engine_exits(moved, loc, 1, 3)], [bytes([0xC0, 0])])
+        self.assertEqual(engine_triggers(moved, loc, 1, 3)[0][:4], bytes([3, 2, 4, 3]))
+        self.assertEqual(writes_for(moved, doc, at, new), ([], 0))
 
     def test_negative_edge_and_field_records_round_trip(self):
         doc = copy.deepcopy(self.doc)

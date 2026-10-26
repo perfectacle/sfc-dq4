@@ -118,8 +118,9 @@ def locate(rom):
     return {'exits': exits, 'records': records, 'index': index, 'high': tuple(lists)}
 
 
-def known_maps(rom):
-    known = set(all_maps(rom))
+def known_maps(rom, new=()):
+    """원본 맵 목록과 new(dq5newmap.py 로 그룹 끝에 더할 맵). 새 맵도 그룹마다 번호가 이어져야 한다."""
+    known = set(all_maps(rom)) | set(new)
     groups = {}
     for bc, bd in known:
         groups.setdefault(bc, []).append(bd)
@@ -136,10 +137,10 @@ def exit_kind(raw):
     return next(k for k, v in KIND_BITS.items() if v == raw & 0x60)
 
 
-def parse(rom, loc=None):
-    """표 자리(loc, 생략하면 코드에서 읽음)에서 문서를 읽는다. 엔진이 읽는 순서 그대로 따라간다."""
+def parse(rom, loc=None, known=None):
+    """표 자리(loc, 생략하면 코드에서 읽음)에서 known(생략하면 롬의 맵 목록)의 문서를 읽는다. 엔진이 읽는 순서 그대로 따라간다."""
     loc = loc or locate(rom)
-    known = known_maps(rom)
+    known = known or known_maps(rom)
     doc = {'format': FORMAT, 'exits': [], 'triggers': [], 'high_triggers': []}
     addr = loc['exits']
     for bc in range(EXIT_GROUPS):
@@ -310,7 +311,7 @@ def current_places(loc):
 def occupied(rom, known):
     """이미 옮긴 롬이면 지금 표들이 차지한 자리. 같은 자리에 다시 쓸 수 있게 허용 목록에 더한다."""
     loc = locate(rom)
-    blobs = serialize(parse(rom, loc), known)
+    blobs = serialize(parse(rom, loc, known), known)
     exits = loc['exits'] if loc['exits'] >> 16 == 0x2A else loc['exits'] - STUB_SIZE
     return [(exits, loc['exits'] + len(blobs['exits'])), (loc['index'], loc['index'] + len(blobs['index'])),
             (loc['records'], loc['records'] + len(blobs['records'])),
@@ -348,13 +349,16 @@ def rom_size(addresses):
     return 0 if top < 0x30 else 2 if top < 0x40 else 3 if top < 0x60 else 4
 
 
-def writes_for(rom, doc, at=None):
-    """문서와 자리 → [(CPU 주소, 새 바이트, 원래 바이트 또는 None, 설명)] 과 롬 크기(MB)."""
-    known = known_maps(rom)
+def writes_for(rom, doc, at=None, new=()):
+    """문서와 자리 → [(CPU 주소, 새 바이트, 원래 바이트 또는 None, 설명)] 과 롬 크기(MB). new 는 더할 맵."""
+    known = known_maps(rom, new)
     blobs = serialize(doc, known)
     sizes = {'exits': len(blobs['exits']), 'index': len(blobs['index']), 'records': len(blobs['records']),
              'high': sum(map(len, blobs['high']))}
-    at = placement(rom.d, sizes, at or {}, current_places(locate(rom)), occupied(rom, known))
+    loc = locate(rom)
+    # 원래 꼴 롬이면 원래 표 자리(POOLS)가 이미 허용 목록에 있다.
+    extra = [] if loc == {**ORIGINAL, 'high': HIGH_ORIGINAL} else occupied(rom, known)
+    at = placement(rom.d, sizes, at or {}, current_places(loc), extra)
     short = at['exits'] >> 16 == 0x2A
     table = at['exits'] if short else at['exits'] + STUB_SIZE
     data = [(at['exits'], (b'' if short else stub(table)) + blobs['exits'], '출구 목적지 표'),
@@ -399,8 +403,18 @@ def writes_for(rom, doc, at=None):
     return out, rom_size([a for a, _, _, _ in out] or [0])
 
 
-def patch(rom, doc, at=None):
-    writes, mb = writes_for(rom, doc, at)
+def dump(rom, new=()):
+    """원본 문서. new 의 맵은 출구 special 0 하나(출구 없음)로 넣는다."""
+    doc = parse(rom)
+    known = known_maps(rom, new)
+    names = [map_name(*k) for k in sorted(known) if k[0] < HIGH_FIRST]
+    rows = {r['map']: r for r in doc['exits']}
+    doc['exits'] = [rows.get(n) or {'map': n, 'records': [{'kind': 'special', 'special': 0}]} for n in names]
+    return doc
+
+
+def patch(rom, doc, at=None, new=()):
+    writes, mb = writes_for(rom, doc, at, new)
     result = {'format': 'dq5patch/1', 'name': 'exit-tables', 'writes': [
         {'at': cpu(addr), 'hex': new.hex(' '), **({'orig': old.hex(' ')} if old is not None else {}), 'note': note}
         for addr, new, old, note in writes]}
@@ -443,22 +457,22 @@ def engine_triggers(rom, loc, bc, bd):
     return []
 
 
-def check(rom, doc=None, at=None):
+def check(rom, doc=None, at=None, new=()):
     if locate(rom) != {**ORIGINAL, 'high': HIGH_ORIGINAL}:
         raise ValueError('check 는 원래 롬에서 돌린다')
     original = parse(rom)
     if patch(rom, original)['writes']:
         raise ValueError('원본을 다시 직렬화한 결과가 원래 바이트와 다름')
-    source = original if doc is None else doc
-    manifest = patch(rom, source, at)
+    source = dump(rom, new) if doc is None else doc
+    known = known_maps(rom, new)
+    manifest = patch(rom, source, at, new)
     writes = [(lorom(int(w['at'][:2], 16) << 16 | int(w['at'][3:], 16)), bytes.fromhex(w['hex']),
                bytes.fromhex(w['orig']) if 'orig' in w else None, w['note']) for w in manifest['writes']]
     built, _ = build(rom.d, [('exit-tables', manifest.get('rom_size', 0), writes)], manifest.get('rom_size', 0))
     moved = Rom(built)
     loc = locate(moved)
-    if parse(moved, loc) != json.loads(json.dumps(source)):
+    if parse(moved, loc, known) != json.loads(json.dumps(source)):
         raise ValueError('만든 롬을 코드가 가리키는 자리에서 다시 읽은 결과가 입력과 다름')
-    known = known_maps(rom)
     for row in source['exits']:
         bc, bd = map_key(row['map'], 'exits')
         want = [encode_exit(r, i == len(row['records']) - 1, '') for i, r in enumerate(row['records'])]
@@ -468,7 +482,7 @@ def check(rom, doc=None, at=None):
     for bc, bd in sorted(known):
         if bc < HIGH_FIRST and [decode_trigger(r) for r in engine_triggers(moved, loc, bc, bd)] != listed.get((bc, bd), []):
             raise ValueError(f'{map_name(bc, bd)}: 엔진 순서로 찾은 영역 이동이 입력과 다름')
-    if patch(moved, source, at)['writes']:
+    if patch(moved, source, at, new)['writes']:
         raise ValueError('만든 롬에 같은 입력을 다시 패치하면 쓰기가 남음')
     sizes = (sum(len(r['records']) for r in source['exits']), sum(len(r['records']) for r in source['triggers']),
              len(source['triggers']), sum(len(r['records']) for r in source['high_triggers']))
@@ -487,6 +501,16 @@ def address(text):
     return (off // BANK) << 16 | 0x8000 | off % BANK
 
 
+def new_map(text):
+    try:
+        key = map_key(text, '--new-map')
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+    if key[0] >= EXIT_GROUPS:
+        raise argparse.ArgumentTypeError('--new-map 은 그룹 00~35 만 받음')
+    return key
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('rom', type=Path)
@@ -501,15 +525,18 @@ def main():
     for p in (write, verify):
         for name in ORIGINAL:
             p.add_argument(f'--{name}-at', type=address, help=f'기본 {cpu(ORIGINAL[name])}')
+    for p in (export, write, verify):
+        p.add_argument('--new-map', action='append', default=[], type=new_map,
+                       help='dq5newmap.py 로 더할 맵 GG/MM(여럿이면 되풀이)')
     args = parser.parse_args()
     try:
         rom = Rom(args.rom.read_bytes())
         at = {k: getattr(args, f'{k}_at', None) for k in ORIGINAL}
         doc = json.loads(args.source.read_text(encoding='utf-8')) if getattr(args, 'source', None) else None
         if args.command == 'check':
-            check(rom, doc, at)
+            check(rom, doc, at, args.new_map)
         else:
-            result = parse(rom) if args.command == 'dump' else patch(rom, doc, at)
+            result = dump(rom, args.new_map) if args.command == 'dump' else patch(rom, doc, at, args.new_map)
             args.out.parent.mkdir(parents=True, exist_ok=True)
             args.out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
         return 0

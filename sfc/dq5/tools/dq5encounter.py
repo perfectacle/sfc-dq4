@@ -27,7 +27,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 from dq5field import WORLDS, block_number, rle  # noqa: E402
-from dq5map import Rom  # noqa: E402
+from dq5map import Rom, group_spans  # noqa: E402
 from dq5text import string, string_codes, text  # noqa: E402
 
 AREAS = 0x2396F3
@@ -132,17 +132,14 @@ def event_group(rom, g):
 
 
 def map_entry(rom, bc, bd):
-    p = rom.u16(MAP_TABLE + bc * 2)
-    q = rom.u16(MAP_TABLE + bc * 2 + 2) if bc + 1 < GROUPS else MAP_TABLE & 0xFFFF
+    p, q = group_spans(rom, attr=True)[0][bc]
     if bd >= (q - p) // 6:
         return None
     return [rom.u8(0x230000 | (p + bd * 6 + i)) for i in range(6)]
 
 
 def map_entries(rom):
-    for bc in range(GROUPS):
-        p = rom.u16(MAP_TABLE + bc * 2)
-        q = rom.u16(MAP_TABLE + bc * 2 + 2) if bc + 1 < GROUPS else MAP_TABLE & 0xFFFF
+    for bc, (p, q) in enumerate(group_spans(rom, attr=True)[0]):
         for bd in range((q - p) // 6):
             yield bc, bd, map_entry(rom, bc, bd)
 

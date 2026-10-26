@@ -32,14 +32,13 @@ from PIL import Image, ImageDraw
 
 sys.path.insert(0, os.path.dirname(__file__))
 from dq5exit import apply_hook, exit_attrs  # noqa: E402
-from dq5map import (CHR_PALETTE, GROUP_TABLE, HIGH_CHR_PALETTE, PALETTES, PALSET_LISTS, Decoder,  # noqa: E402
-                    Rom, chr_pixels, lorom, map_cgram, map_pointer)
+from dq5map import (CHR_PALETTE, HIGH_CHR_PALETTE, PALETTES, PALSET_LISTS, Decoder,  # noqa: E402
+                    Rom, chr_pixels, group_spans, lorom, map_cgram, map_pointer)
 
 SLOT = 0xBE
 # 01:9771: 맵을 들어갈 때 10:DE0B 로 고른 팔레트 세트를 플래그에 따라 바꾸는 표. [BC][BD|FF][플래그|FF][마스크][세트], FF 로 끝.
 # 플래그 bit7 이 0 이면 7E:2190+번호 & 마스크가 켜졌을 때, 1 이면 꺼졌을 때 그 세트를 10:DDCF 로 다시 불러온다.
 PALSET_FLAGS = 0x2A8690
-# 0F:8ED7 그룹 포인터 54개. 마지막 그룹은 표 바로 앞에서 끝난다.
 GROUPS = 0x36
 HOOK_SCAN = 400
 # 그룹 $50 이상: ($BC, $BD 개수). docs/dq5-map-format.md 「그룹 $50 이상」.
@@ -169,9 +168,8 @@ def sheet(cells, cols, cell_w, cell_h, labels=None, bg=(32, 32, 40), pad=1, labe
 # ---------------------------------------------------------------- 실내 맵
 
 def map_ids(rom):
-    """실내 맵 346개와 그룹 $50 이상 18개의 ($BC, $BD)."""
-    ptr = [rom.u16(GROUP_TABLE + g * 2) for g in range(GROUPS)] + [GROUP_TABLE & 0xFFFF]
-    out = [(g, b) for g in range(GROUPS) for b in range((ptr[g + 1] - ptr[g]) // 3)]
+    """실내 맵(원본 346개)과 그룹 $50 이상 18개의 ($BC, $BD)."""
+    out = [(g, b) for g, (start, end) in enumerate(group_spans(rom)[0]) for b in range((end - start) // 3)]
     return out + [(g, 0x50 + b) for g, n in HIGH_MAPS for b in range(n)]
 
 

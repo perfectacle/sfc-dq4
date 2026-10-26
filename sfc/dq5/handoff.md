@@ -36,6 +36,8 @@ git worktree list
 
 증설·재배치·종류 변경은 `dq5exitreloc.py`(`dq5exittables/1`)가 맡습니다([일지](journal/2026-10-27-24-exitreloc.md), [쓰기 형식](docs/dq5-build-format.md#실내-출구영역-이동-표-옮기기-dq5exittables1)). 네 표를 통째로 다시 쓰고, 원래 자리에 들어가면 코드를 고치지 않습니다. 옮길 때 출구는 `[$84]` 읽기와 스텁으로 어느 뱅크든(`00`~`7D`), 색인·레코드·고층 목록은 DB 로 WRAM·MMIO 를 쓰므로 `00`~`3F` 에만 둡니다(`--audit` 로 DB 창 명령 417개 감사). 기본 새 자리는 없고 `--exits-at` 등으로 줍니다. 표를 옮긴 롬에서는 `dq5warp.lua` 에 `WARPEXIT` 를 줘야 순간이동이 됩니다(`dq5exitcheck.py` 가 계산). 실측은 44장면입니다.
 
+새 맵 번호는 `dq5newmap.py`(`dq5newmap/1`)가 맵 포인터(`0F:8ED7`)와 맵 속성(`23:FD6A`)의 그룹 표를 같은 뱅크 빈 자리로 옮기고 목록을 밀어 그룹 끝에 더합니다. 출구·영역 이동은 `dq5exitreloc.py --new-map` 으로 잇습니다([일지](journal/2026-10-27-39-newmap.md), [쓰기 형식](docs/dq5-build-format.md#새-맵-번호-dq5newmap1)). 맵 번호로 곧장 색인하는 표는 넷(맵 포인터·맵 속성·출구·인물 기본 목록)이고, 인물 기본 목록은 아직 늘리지 못해 새 맵은 다음 그룹 첫 맵의 인물을 읽습니다([todo](todo.md) 의 출구·영역 이동 항목). `dq5newmapcheck.py` 가 0D/05 에 계단으로 들어가 걷고 나오는 장면 등 12장면을 확인합니다. 도구들은 맵 포인터 표를 `dq5map.group_spans` 로 읽어 옮긴 표를 따라갑니다.
+
 ### 맵별 루틴 표 쓰기(머지됨)
 
 `dq5maphook.py`(`dq5maphook/1`)와 실측 도구 `dq5maphookcheck.py`로 마쳤습니다([일지](journal/2026-10-27-18-maphook.md), [쓰기 형식](docs/dq5-build-format.md#맵별-루틴-표-dq5maphook1)). 원본 162개 쓰기 0개, 합성 테스트 11개, 변경 롬 다섯 벌과 원본에서 루틴 막기·플래그 조건·표 옮기기 15장면을 확인했습니다. 루틴 주소는 원래 표의 같은 칸에 있던 것만 받고(`--raw-routines` 로 풂), 표는 DB = 15 인 로더 때문에 뱅크 15 의 원래 자리(162개)나 `15:FF80`(12개)에만 다시 씁니다. 163개 이상 증설과 `15:FF5C` 둘째 표는 남았습니다. 실측 결과 `work/maphookcheck/`는 원래 체크아웃 `work/dq5-maphook/`에 복사해 둡니다.
