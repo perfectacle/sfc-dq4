@@ -6,7 +6,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dq5encounter import (EVENT_COUNT, EVENT_GROUPS, EVENT_SIZE, FIELD_GRIDS, FIELD_WIDTH, FIXED,  # noqa: E402
                           FIXED_COUNT, GROUPS, MAP_TABLE)
-from dq5encounterwrite import FORMAT, HIGH_GROUPS, areas_in, dump, patch  # noqa: E402
+from dq5encounterwrite import (  # noqa: E402
+    FORMAT, HIGH_BANK, HIGH_GROUPS, HIGH_LIST, HIGH_POINTER, areas_in, dump, high_base, high_map_slots, patch,
+)
 from dq5map import Rom, lorom  # noqa: E402
 
 MAPS_START = 0x23F54E
@@ -29,6 +31,8 @@ def fixture():
     data[off:off + 4] = bytes([0x51, 0xE0, 0xFD, 0xFF])
     off = lorom(0x23FDE0)
     data[off:off + 15] = bytes.fromhex('50 ff ff 3d 13 01 09 51 ff ff 3e 13 01 09 ff')
+    for addr, raw in ((HIGH_BANK - 1, b'\xa9\x23'), (HIGH_LIST - 1, b'\xb9\xd6\xfd'), (HIGH_POINTER - 1, b'\xbe\xd7\xfd')):
+        data[lorom(addr):lorom(addr) + len(raw)] = raw
     for g in range(FIXED_COUNT):
         off = lorom(FIXED + g * 6)
         data[off:off + 6] = bytes([0x10 + g, 0x20, 0xFF, 0x13, 0x02, 0x60])
@@ -112,6 +116,49 @@ class EncounterWriteTest(unittest.TestCase):
         for case in ({'map': '51/52', 'areas': [1, 1, 1]}, {'map': '50/50', 'areas': [1, 1, 1]}):
             with self.subTest(case=case), self.assertRaises(ValueError):
                 patch(self.rom, {'format': FORMAT, 'maps': [case]})
+
+    def test_high_group_relocation_and_new_map(self):
+        doc = {'format': FORMAT, 'maps': [{'map': '52/51', 'areas': [255, 1, 1], 'tail': [0x0E, 1, 9]},
+                                         {'map': '51/50', 'areas': [2, 2, 2]}]}
+        with self.assertRaises(ValueError):
+            patch(self.rom, doc)
+        manifest = patch(self.rom, doc, high_at=0x3EF000)
+        self.assertEqual(manifest['rom_size'], 2)
+        data = bytearray(self.data) + bytes(0x80000)
+        for w in manifest['writes']:
+            off = lorom(int(w['at'].replace(':', ''), 16))
+            raw = bytes.fromhex(w['hex'])
+            if 'orig' in w:
+                self.assertEqual(bytes(data[off:off + len(raw)]), bytes.fromhex(w['orig']))
+            data[off:off + len(raw)] = raw
+        rom = Rom(bytes(data))
+        self.assertEqual(high_base(rom), 0x3EF000)
+        self.assertEqual(int.from_bytes(data[lorom(HIGH_POINTER):lorom(HIGH_POINTER) + 2], 'little'), 0xF001)
+        slots = high_map_slots(rom, high_base(rom))
+        read = {key: bytes(data[lorom(a):lorom(a) + 6]) for key, a in slots.items()}
+        self.assertEqual(read, {(0x51, 0x50): bytes.fromhex('020202130109'), (0x51, 0x51): bytes.fromhex('ffff3e130109'),
+                                (0x52, 0x51): bytes.fromhex('ff01010e0109')})
+        # 옮긴 롬에서도 dump·patch 가 옮긴 목록을 읽는다.
+        self.assertIn('52/51', {row['map'] for row in dump(rom)['maps']})
+        again = patch(rom, {'format': FORMAT, 'maps': [{'map': '52/51', 'areas': [3, 3, 3]}]})
+        self.assertEqual(again['writes'][0]['at'][:2], '3E')
+        grown = patch(self.rom, {'format': FORMAT, 'maps': [{'map': '60/01', 'areas': [1, 1, 1], 'tail': [0, 1, 9]}]},
+                      high_at=0x3EF000)
+        body = bytes.fromhex(grown['writes'][0]['hex'])
+        self.assertEqual(body[:7], bytes([0x51, 0x07, 0xF0, 0x60, 0x16, 0xF0, 0xFF]))
+        broken = bytearray(self.data)
+        broken[lorom(HIGH_LIST - 1)] = 0xEA
+        with self.assertRaises(ValueError):
+            patch(Rom(bytes(broken)), doc, high_at=0x3EF000)
+        bad = [{'map': '52/51', 'areas': [1, 1, 1]}, {'map': '52/51', 'areas': [1, 1, 1], 'tail': [1, 1]},
+               {'map': '51/50', 'areas': [1, 1, 1], 'tail': [1, 1, 1]}, {'map': '30/50', 'areas': [1, 1, 1], 'tail': [1, 1, 1]},
+               {'map': '52/FF', 'areas': [1, 1, 1], 'tail': [1, 1, 1]}]
+        for row in bad:
+            with self.subTest(row=row), self.assertRaises(ValueError):
+                patch(self.rom, {'format': FORMAT, 'maps': [row]}, high_at=0x3EF000)
+        for at in (0x23FF20, 0x408000, 0x3E7000, 0x3EFFF0):
+            with self.subTest(at=at), self.assertRaises(ValueError):
+                patch(self.rom, doc, high_at=at)
 
     def test_rejects(self):
         grid = dump(self.rom)['field_grids'][3]
