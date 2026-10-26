@@ -14,7 +14,7 @@ MesenCE testrunner 로 세이브스테이트(배 선실)를 불러 소리 대기
          빠르기)로도 굽는다. 곡은 WAV_SONG 초(기본 30, 끝 4초 줄이기), 효과음은 WAV_SFX 초(기본 4). 들어 보기용이라
          짧게 둔다. 끝까지 들으려면 .spc 를 튼다
   --free-watch  dq5build.py 의 원래 롬 빈 자리 22곳에 롬 읽기·실행 감시를 걸고, 곡마다 읽힌 것을 free-watch.txt 로 모은다
-  --index-only  에뮬레이터를 돌리지 않고 --out 의 index.json 에 장면(scene)·이 곡을 쓰는 맵(maps)만 다시 넣는다
+  --index-only  에뮬레이터를 돌리지 않고 --out 의 index.json 에 장면(scene)·이 곡을 쓰는 맵(maps)·공식 곡명(name)만 다시 넣는다
   --work DIR  MesenCE 실행마다의 덤프(spc.bin 등)를 둘 곳(기본 --out/runs)
   --wav-only  에뮬레이터를 돌리지 않고 --out 의 songs/·sfx/ 에 있는 .spc 와 index.json 으로 WAV 만 다시 굽는다
 """
@@ -81,6 +81,30 @@ BRANCH_SCENES = {
     (0x44, 7): '54/53 ミルドラース 장면에서 되풀이', (0x44, 0x0B): '전투 연출',
     (0x45, 1): '54/53 ミルドラース 「わが名は…」 뒤 사라질 때(23:E6A4 → 02:EF26, 2190.5·21E1.0)',
 }
+# 공식 음반의 곡명(교향조곡 「ドラゴンクエストV」天空の花嫁 의 곡명·메들리 부제)을 위 실측 장면에 짝지은 것.
+# 「확정」 은 장면이 곡명과 바로 맞는 것, 「추정」 은 같은 장면에 맞을 곡이 둘 이상이거나 장면이 곡명과 느슨하게 맞는 것.
+# 장면을 모르거나 공식 곡명이 없는 효과음 같은 곡(여관·승리·교회 기록 등)은 비운다. dq5-sound-format.md 「곡 이름」.
+NAME_SOURCES = ('https://ja.wikipedia.org/wiki/交響組曲「ドラゴンクエストV」天空の花嫁',
+                'https://www.inside-games.jp/article/2015/03/02/85484.html')
+SONG_NAMES = {
+    0x01: ('王宮のトランペット', '확정'), 0x02: ('地平の彼方へ', '확정'), 0x03: ('空飛ぶ絨毯', '확정'),
+    0x04: ('大海原へ', '확정'), 0x06: ('街角のメロディ', '추정'), 0x07: ('カジノ都市', '확정'),
+    0x08: ('淋しい村', '추정'), 0x09: ('洞窟に魔物の影が', '확정'), 0x0A: ('死の塔', '추정'),
+    0x0C: ('聖(ひじり)', '추정'), 0x0D: ('天空城', '확정'), 0x0E: ('暗黒の世界', '확정'),
+    0x0F: ('結婚ワルツ', '확정'), 0x10: ('序曲のマーチ', '확정'), 0x11: ('愛の旋律', '추정'),
+    0x13: ('さびれた村', '추정'), 0x16: ('不死身の敵に挑む', '확정'), 0x17: ('戦火を交えて', '확정'),
+    0x18: ('大魔王', '확정'),
+}
+
+
+def name_fields(n):
+    """곡 n 의 index.json 이름 칸. 이름이 없으면 빈 dict."""
+    if n not in SONG_NAMES:
+        return {}
+    name, status = SONG_NAMES[n]
+    return {'name': name, 'name_status': status, 'name_source': list(NAME_SOURCES)}
+
+
 # 전투 연출의 효과음 표(dq5sfx.py, 28:8074 → 28:811E)와 인물 인라인 명령 20 n X 는 롬에서 그대로 붙인다.
 _CATALOGUE = {}
 
@@ -294,6 +318,10 @@ def main():
                 n = int(e['sequence'], 16)
                 e['scene'] = scene(n, int(e['variant'], 16) if e.get('variant') else None, rom)
                 e['maps'] = maps.get(n, [])
+                for k in ('name', 'name_status', 'name_source'):
+                    e.pop(k, None)
+                if folder == 'songs':
+                    e.update(name_fields(n))
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(entries, f, ensure_ascii=False, indent=1)
                 f.write('\n')
@@ -347,6 +375,8 @@ def main():
                  'sequence_bytes': seqs[n][1], 'samples': [f'{v:02X}' for v in sets[n]],
                  'command': f'01 {n:02X}' if x is None else f'0C {n:02X} {x:02X}', 'frame': int(r['frame']),
                  'playing': found}
+        if k == 'song':
+            entry.update(name_fields(n))
         if a.wav:
             wav_entry(entry, folder, k)
         index['songs' if k == 'song' else 'sfx'].append(entry)
