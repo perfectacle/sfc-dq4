@@ -24,6 +24,7 @@ JSON 의 commands 는 ["block", n] / ["put", x, y] / ["fill", x0, y0, x1, y1] / 
 import argparse
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -49,6 +50,8 @@ def all_maps(rom):
 
 def pointer_addr(rom, bc, bd):
     """맵 포인터(24비트)가 놓인 CPU 주소."""
+    if (bc, bd) not in all_maps(rom):
+        raise ValueError(f'원본 맵 목록에 {bc:02X}/{bd:02X}가 없음; 새 맵 추가는 지원하지 않음')
     if bc >= HIGH_FIRST:
         return HIGH_GROUPS & 0xFF0000 | rom.u16(HIGH_GROUPS + (bc - HIGH_FIRST) * 2) + (bd - HIGH_FIRST) * 3
     return 0x0F0000 | rom.u16(GROUP_TABLE + bc * 2) + bd * 3
@@ -201,6 +204,15 @@ class BitWriter:
 
 def encode(doc):
     """JSON 문서 → 레코드 바이트. 틀린 값은 ValueError."""
+    allowed = {'format', 'map', *HEADER, 'commands', 'passes', 'stream_tail', 'junk'}
+    if not isinstance(doc, dict):
+        raise ValueError('맵 문서는 JSON 객체여야 함')
+    unknown = doc.keys() - allowed
+    if unknown:
+        raise ValueError(f'지원하지 않는 맵 필드: {sorted(unknown)}')
+    missing = {'format', *HEADER, 'commands', 'passes'} - doc.keys()
+    if missing:
+        raise ValueError(f'빠진 맵 필드: {sorted(missing)}')
     if doc.get('format') != FORMAT:
         raise ValueError(f'format 이 {FORMAT!r} 이 아님')
     head = [doc[k] for k in HEADER]
@@ -360,7 +372,14 @@ def main():
         print(f'맵 {len(maps)}개 {total}바이트, 다른 맵 {bad}개')
         return 1 if bad else 0
     if a.cmd == 'dump':
-        bc, bd = int(a.args[0], 16), int(a.args[1], 16)
+        try:
+            if len(a.args) != 2:
+                raise ValueError('dump에는 그룹과 맵 번호가 필요함')
+            bc, bd = int(a.args[0], 16), int(a.args[1], 16)
+            pointer_addr(rom, bc, bd)
+        except ValueError as e:
+            print(f'오류: {e}', file=sys.stderr)
+            return 1
         doc, length = parse(rom, map_pointer(rom, bc, bd))
         doc = {'format': doc['format'], 'map': f'{bc:02X}/{bd:02X}', **{k: v for k, v in doc.items() if k != 'format'}}
         s = dumps(doc)
@@ -375,9 +394,13 @@ def main():
     writes = []
     for path in a.args:
         doc = json.load(open(path, encoding='utf-8'))
-        bc, bd = (int(v, 16) for v in doc['map'].split('/'))
         try:
             rec = encode(doc)
+            name = doc.get('map')
+            if not isinstance(name, str) or not re.fullmatch(r'[0-9a-fA-F]{2}/[0-9a-fA-F]{2}', name):
+                raise ValueError('map은 GG/MM 형태의 두 자리 16진 번호여야 함')
+            bc, bd = (int(v, 16) for v in name.split('/'))
+            p = lorom(pointer_addr(rom, bc, bd))
         except ValueError as e:
             print(f'오류: {path}: {e}', file=sys.stderr)
             return 1
@@ -402,7 +425,6 @@ def main():
             continue
         # 레코드는 뱅크를 넘어 읽혀도 되지만(next_addr), 빌더의 CPU 주소 쓰기는 한 뱅크 안이라 파일 위치로 쓴다.
         writes.append({'at': f'0x{at:X}', 'hex': rec.hex(' '), 'note': label})
-        p = lorom(pointer_addr(rom, bc, bd))
         new = to_cpu(at).to_bytes(3, 'little')
         writes.append({'at': cpu(p), 'hex': new.hex(' '), 'orig': data[p:p + 3].hex(' '), 'note': f'{label} 포인터'})
         at += len(rec)
