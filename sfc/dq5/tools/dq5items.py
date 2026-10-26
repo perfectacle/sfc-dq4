@@ -1,9 +1,10 @@
 """DQ5(SFC) 맵에 숨은 물건 전부, 작은 메달 자리, 카지노 슬롯 기계. 형식은 sfc/dq5/docs/dq5-map-format.md 의
 「보물상자와 タンス·ツボ·タル」, sfc/dq5/docs/dq5-data-format.md 의 「작은 메달」「교회·코인 판매·맡기는 곳·카지노」.
 
-표 넷(상자 1E:EF90·1E:EE4E, タンス 류 1F:F5CB, 발밑 1E:F08B, 두 칸 앞 1E:F435)은 dq5chest.py 가 읽고, 여기서는
+표 다섯(상자 1E:EF90·1E:EE4E, タンス 류 1F:F5CB, 발밑 1E:F08B, 두 칸 앞 1E:F435, 아래층 상자 1E:F4DF)은 dq5chest.py 가 읽고, 여기서는
 맵별로 합치고 필드의 숨은 물건(12:E5F2 에 박힌 ルラムーンそう 한 곳)을 더한다.
 --check 는 모든 실내 맵의 셀 버퍼(맵별 루틴 반영)에서 상자·タンス·ツボ·タル 칸을 세어 표와 맞춰 본다.
+아래층(+4) 상자 칸은 1E:F4DF 의 좌표와 맞춘다.
 
 사용:
   python sfc/dq5/tools/dq5items.py rom/dq5.sfc            # 맵별 전부
@@ -65,6 +66,8 @@ def all_entries(rom):
                     v, False))
     for bc, bd, x, y, v, flag, mask in chest.ahead_entries(rom):
         out.append((f'{bc:02X}/{bd:02X}', '두 칸 앞', (x, y), f'7E:{flag & 0xFFFF:04X}&{mask:02X}', v, False))
+    for bc, bd, x, y, v, flag, mask in chest.lower_entries(rom):
+        out.append((f'{bc:02X}/{bd:02X}', '아래층 상자', (x, y), f'7E:{flag & 0xFFFF:04X}&{mask:02X}', v, True))
     name, xy, flag, v = FIELD_ITEM
     out.append((name, '필드 발밑', xy, flag, v, False))
     return sorted(out, key=lambda e: (e[0] != '필드', e[0], e[2][1], e[2][0]))
@@ -93,8 +96,11 @@ def check(rom):
     print(f'맵 {len(map_ids(rom)) - len(skipped)}개를 셈(풀지 못한 맵 {len(skipped)}개)')
     print('칸:', dict(Counter(c[2] for v in cells.values() for c in v)))
     table = {(bc, bd): n for bc, bd, _, n in chest.chest_maps(rom)}
+    lower = {(e[0], e[1], e[2], e[3]) for e in chest.lower_entries(rom)}
+    lower_cells = {(*key, x, y) for key, v in cells.items() for x, y, kind, off in v if kind == '상자' and off == 4}
+    print(f'아래층 상자 칸 {len(lower_cells)}개, 표 1E:F4DF {len(lower)}개, 서로 없는 것:', sorted(lower ^ lower_cells) or '없음')
     for key, v in sorted(cells.items()):
-        found = [c for c in v if c[2] == '상자']
+        found = [c for c in v if c[2] == '상자' and (*key, c[0], c[1]) not in lower]
         if len(found) != table.get(key, 0):
             print(f'{key[0]:02X}/{key[1]:02X} 상자 칸 {len(found)}개, 표 {table.get(key, 0)}개:',
                   ' '.join(f'({x},{y}){"+7" if off == 7 else "+4"}' for x, y, _, off in found))

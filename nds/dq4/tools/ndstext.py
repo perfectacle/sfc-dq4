@@ -108,8 +108,23 @@ def kana_key(s):
     return ''.join(chr(ord(c) + 0x60) if 'ぁ' <= c <= 'ゖ' else c for c in s)
 
 
+ADOPT = os.path.join(HERE, '..', 'tables', 'adopt.tsv')
+
+
+def adopt_table():
+    """{(표, 번호): (DS 일본어, 채택, 근거)}. 채택 이름의 정본은 adopt.tsv 이고 대조표는 그것을 옮겨 적기만 한다."""
+    out = {}
+    with open(ADOPT, encoding='utf-8') as f:
+        next(f)
+        for line in f:
+            kind, num, ja, name, why = line.rstrip('\n').split('\t')
+            out[kind, int(num)] = (ja, name, why)
+    return out
+
+
 def cmd_glossary(jp_root, kr_root, rom):
     table = kr_table()
+    adopt = adopt_table()
     try:
         fc = {k: {kana_key(n) for n in v} for k, v in fc_names(rom).items()}
     except Exception as e:  # FC 도구가 없거나 형식이 바뀌면 FC 열을 비운다
@@ -120,9 +135,9 @@ def cmd_glossary(jp_root, kr_root, rom):
         en = dict(read(os.path.join(mess(jp_root, 'en'), f + '.mpt')))
         ko = dict(read(os.path.join(mess(kr_root, 'ja'), f + '.mpt')))
         print(f'\n## {kind}\n')
-        head = '| 번호 | DS 일본어 | FC 에 같은 이름 | DS 영어 | DS 한글 팬패치 | 채택 |'
+        head = '| 번호 | DS 일본어 | FC 에 같은 이름 | DS 영어 | DS 한글 팬패치 | 채택 | 근거 |'
         print(head)
-        print('| --- | --- | --- | --- | --- | --- |')
+        print('| --- | --- | --- | --- | --- | --- | --- |')
         seen = set()
         for num in sorted(ja):
             j = label(ja[num])
@@ -134,7 +149,10 @@ def cmd_glossary(jp_root, kr_root, rom):
             if kind in fc:
                 mark = '있음' if kana_key(j) in fc[kind] else '없음'
             e = label(en.get(num, '')).replace('|', '/')
-            print(f'| {num} | {j} | {mark} | {e} | {k} |  |')
+            a_ja, name, why = adopt.get((kind, num), (j, '', ''))
+            if a_ja != j:  # 롬이 바뀌어 번호가 밀렸으면 엉뚱한 이름을 붙이지 않는다
+                name, why = '', f'adopt.tsv 의 일본어({a_ja})와 다름'
+            print(f'| {num} | {j} | {mark} | {e} | {k} | {name} | {why} |')
 
 
 TALK_HEAD, TALK_SIZE = 4, 44
