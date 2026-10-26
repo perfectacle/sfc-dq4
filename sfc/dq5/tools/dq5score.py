@@ -385,7 +385,7 @@ def split(ticks):
     return out
 
 
-def _note_xml(dur, pitch, tie_start, tie_stop):
+def _note_xml(dur, pitch, tie_start, tie_stop, tuplet=None):
     t, typ, dot, trip = dur
     x = ['<note>']
     if pitch is None:
@@ -401,11 +401,25 @@ def _note_xml(dur, pitch, tie_start, tie_stop):
     x.append(f'<voice>1</voice><type>{typ}</type>' + ('<dot/>' * dot))
     if trip:
         x.append('<time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification>')
-    if pitch is not None and (tie_start or tie_stop):
-        x.append('<notations>' + ('<tied type="stop"/>' if tie_stop else '') + ('<tied type="start"/>' if tie_start else '')
-                 + '</notations>')
+    tied = pitch is not None and (tie_start or tie_stop)
+    if tied or tuplet:
+        x.append('<notations>' + ('<tied type="stop"/>' if tied and tie_stop else '')
+                 + ('<tied type="start"/>' if tied and tie_start else '')
+                 + (f'<tuplet type="{tuplet}"/>' if tuplet else '') + '</notations>')
     x.append('</note>')
     return ''.join(x)
+
+
+def mark_tuplets(items):
+    """마디 안에서 같은 종류의 셋잇단 셋이 이어지면 첫째에 셋잇단 묶음 시작, 셋째에 끝을 단다(fc/dq4 의 dq4score.py 와 같은 규칙)."""
+    k = 0
+    while k + 2 < len(items):
+        d = items[k][0]
+        if d[3] and all(items[k + j][0] == d for j in (1, 2)):
+            items[k][4], items[k + 2][4] = 'start', 'stop'
+            k += 3
+        else:
+            k += 1
 
 
 def guess_meter(perf):
@@ -465,6 +479,7 @@ def to_musicxml(perf, tunes, title, meter=None):
                     if a <= t < b:
                         x.append(f'<direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit>'
                                  f'<per-minute>{v}</per-minute></metronome></direction-type><sound tempo="{v}"/></direction>')
+            items = []
             for s, ln, p in segs:
                 lo, hi = max(s, a), min(s + ln, b)
                 if lo >= hi:
@@ -473,7 +488,9 @@ def to_musicxml(perf, tunes, title, meter=None):
                 for k, d in enumerate(parts_d):
                     first = lo == s and k == 0
                     last = hi == s + ln and k == len(parts_d) - 1
-                    x.append(_note_xml(d, p, p is not None and not last, p is not None and not first))
+                    items.append([d, p, p is not None and not last, p is not None and not first, None])
+            mark_tuplets(items)
+            x += [_note_xml(*it) for it in items]
             x.append('</measure>')
             xs.append(''.join(x))
         parts.append(f'<part id="{pid}">' + ''.join(xs) + '</part>')
