@@ -48,6 +48,8 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5freesweep.py rom 세이브스테이트 OUT` | 빈 자리 22곳(`dq5build.py free`)을 실내 맵 346곳·몬스터 236종 전투·필드 세계 0~2 에서 롬 읽기·실행 감시(`--kinds maps,battles,field`), `OUT/summary.txt` 에 읽힌 것. `MESENCE` 필요 |
 | `dq5chestwrite.py rom dump\|patch\|check` | 일반 상자161개·맵 연결83개·서랍/항아리/통86개·발밑18개·두 칸 앞17개·아래층 상자11개 고정 표와 필드 조사 보상(`12:E5F2`, 보상만). `dq5chest/1` 일부 필드 편집, 원본·종료자·명령 바이트 보존. [쓰기 형식](../docs/dq5-build-format.md#보물상자조사-보상-dq5chest1) |
 | `dq5exitwrite.py rom dump -o\|patch\|check` | 실내 출구569개·영역 이동430개 고정 슬롯의 목적지·사각형·층. 종류·길이·개수 보존, 고층 공유 목록은 `shared_maps` 필요. [쓰기 형식](../docs/dq5-build-format.md#실내-출구영역-이동-dq5connections1) |
+| `dq5maphook.py rom dump\|patch\|rewrite\|check` | 맵별 루틴 표(`15:F907`) 162개의 맵 고르기·플래그 조건·맵을 푼 뒤/매 프레임 루틴. 루틴은 원래 표의 같은 칸에 있던 것만(`--raw-routines` 로 풂), `rewrite --at` 은 뱅크 15 의 원래 자리·`15:FF80` 에 다른 항목 수로 다시 쓰고 로더 피연산자 11곳을 고침. [쓰기 형식](../docs/dq5-build-format.md#맵별-루틴-표-dq5maphook1) |
+| `dq5maphookcheck.py rom --state 선실 --out 폴더` | 변경 롬 5벌과 원본에서 루틴 막기·플래그 조건·표 옮기기 15장면. 고른 루틴, 01/05 (51,20) 셀, 도착 맵·칸 비교. `MESENCE` 필요 |
 | `dq5exitcheck.py rom --state 선실 --out 폴더` | 변경 롬 3벌과 원본에서 출구 세 종류·출발층·고층 공유·음수 가장자리·사각형 이동·이동 효과음·속성 33 계단 24장면을 밟아 도착 맵·칸·층·효과음 비교. `MESENCE` 필요 |
 | `dq5chestcheck.py rom --state 선실 --out 폴더 [--case 이름]` | 원본·패치 롬에서 상자·서랍·옮긴 발밑·두 칸 앞·아래층 상자·필드 보상 6쌍을 실제 조사. 금화·조회 값·열림 비트 비교. `MESENCE` 필요 |
 | `dq5chest.py rom [BC BD]` | DQ5 보물상자(번호·칸·열림 플래그·내용물), タンス·ツボ·タル 항목, 발밑 표(`1E:F08B`), 두 칸 앞 표(`1E:F435`), 그룹 `50` 이상의 아래층 상자 표(`1E:F4DF`). 물건 이름과 `D000`~`D009` 의 뜻까지 |
@@ -131,6 +133,7 @@ uv run --locked python sfc/dq5/tools/dq5assets.py rom/dq5.sfc --out "$ASSETS/sfc
 | `lua/dq5textcheck.lua` | 보행 메시지 스트림 주소와 디코더 반환 코드를 기록. `dq5textcheck.py`가 드라이버와 환경을 준비 | `MESSAGE`, `RETURN_PC`, `DRIVER` | `decoded.txt`, `end.png` |
 | `lua/dq5npcrelocatecheck.lua` | 인물 배치 직후 `12:803C`에서 목적지 맵의 WRAM을 저장. `dq5npcrelocatecheck.py`가 드라이버와 환경을 준비 | `CHECK_GROUP`, `CHECK_MAP`, `DRIVER` | `npc.bin` |
 | `lua/dq5npcrecordcheck.lua` | `dq5warp.lua`(LIBDIR 의 `boot.lua`)로 맵에 들어가며 `12:803C`에서 WRAM 을 저장하고, 들어간 뒤 `24:8BAF`가 받은 메시지 번호를 `warp.txt`에 덧붙임. `dq5npcrecordcheck.py`가 준비 | `CHECK_GROUP`, `CHECK_MAP`, `dq5warp.lua` 의 변수 | `npc.bin`, `warp.txt`, `end.png` |
+| `lua/dq5maphookcheck.lua` | `dq5warp.lua`(LIBDIR 의 `boot.lua`)로 맵에 들어가며, 맵을 풀 때마다 `15:F7EA` 에서 고른 루틴(`$A5`~`$A7`, `7E:1AA6`~`1AA8`)을, `15:F7EE` 에서 셀 하나를 `warp.txt` 에 덧붙임. `dq5maphookcheck.py`가 준비 | `CELL`, `dq5warp.lua` 의 변수 | `warp.txt` |
 | `lua/dq5scriptcheck.lua` | 스크립트 쓰기 실측: 이벤트 조회·명령 주소, 인물 좌표·포인터·플래그 기록. `dq5scriptcheck.py`가 드라이버와 환경 변수를 준비 | `DRIVER`, `MAXF`, 드라이버 변수 | `trace.txt`(종합 `results.json`은 Python 도구) |
 | `lua/dq5seqtrace.lua` | DQ5: 드라이버 없이 세이브스테이트를 불러 `SEQ` 입력을 재생하며, 처음 몇 프레임 WRAM 쓰기(`WR`), 첫 프레임 롬 덮기(`ROMPATCH`), 주소 실행 때 레지스터·스택 24바이트(`HOOK`), 값이 바뀐 프레임(`WLOG`), 범위 실행 순서·커버리지(`LO`·`HI`·`FROM`·`TO`·`CAP`)를 남김. `SAVEAT` 에 세이브스테이트, `SHOTS` 에 화면. 2000 프레임마다 기록을 씀 | `STATE`, `SEQ`, `WR`·`WRN`, `ROMPATCH`, `HOOK`, `WLOG`, `LO`·`HI`·`FROM`·`TO`·`CAP`, `SAVEAT`·`SAVE`, `SHOTS`, `MAXF` | `trc.txt`, `cover.txt`, `<SAVE>`, `sNNN.png`, `end.png` |
 | `lua/dq5savestate.lua` | 드라이버(`boot.lua`) 입력을 재생하다가 `SAVEAT` 프레임에 세이브스테이트와 화면 저장. `seqlib.sh` 로 `dq5warp.lua` 를 드라이버로 두면 장면 이동 뒤 걸어 들어간 곳을 남길 수 있음 | `SAVEAT`, `SAVENAME` | `<SAVENAME>`, `.png` |
