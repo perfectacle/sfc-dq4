@@ -92,3 +92,4 @@ STEPS="gfx screens" nds/dq4/tools/ndsassets.sh OUT     # 단계 고르기(unpack
 - [2026-10-25-21: 가게 표는 ARM9 안, 레코드 고르기, 몬스터 내성 칸 바로잡기](journal/2026-10-25-21-param6.md)
 - [2026-10-26-01: 곡·효과음 악보를 FC 와 같은 json·txt 로](journal/2026-10-26-01-score.md)
 - [2026-10-26-02: 에셋을 롬에서 처음부터 다시 만들기](journal/2026-10-26-02-repro.md)
+- [2026-10-26-03: 스크립트 명령 처리 함수 분류, 칸·상태 비트·깃발 종류](journal/2026-10-26-03-script3.md)
