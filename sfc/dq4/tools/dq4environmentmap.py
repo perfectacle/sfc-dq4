@@ -166,11 +166,184 @@ EXAMPLES = {
     (0x2C, 0x0E): ("audience_green", "관객"),
     (0x2C, 0x19): ("audience_green", "관객"),
     (0x2C, 0x1B): ("audience_pink", "관객"),
+    # Dungeon and tower sheets: only blocks whose property fallback would hide what they show.
+    (0x10, 0x04): ("mine_beam", "광산 들보"),
+    (0x10, 0x05): ("rock_pile", "바위 더미"),
+    (0x10, 0x06): ("mine_beam", "광산 들보"),
+    (0x10, 0x07): ("mine_beam", "광산 들보"),
+    (0x10, 0x09): ("washbasin", "돌 함지"),
+    (0x10, 0x0B): ("grave", "묘비"),
+    (0x10, 0x0C): ("ladder", "사다리(입구·출구)"),
+    (0x10, 0x0D): ("pit", "구덩이(입구·출구)"),
+    (0x10, 0x0E): ("counter", "돌 카운터"),
+    (0x10, 0x11): ("grate", "창살 바닥"),
+    (0x10, 0x14): ("statue", "얼굴 조각"),
+    (0x10, 0x15): ("grate", "격자 바닥"),
+    (0x10, 0x18): ("rock_pile", "바위"),
+    (0x10, 0x1B): ("stump", "그루터기"),
+    (0x12, 0x03): ("grass", "덤불 바닥"),
+    (0x12, 0x04): ("rock_pile", "흙 바위"),
+    (0x12, 0x05): ("rock_pile", "회색 바위"),
+    (0x12, 0x0B): ("water0", "징검돌 물"),
+    (0x12, 0x0C): ("grass", "풀밭"),
+    (0x13, 0x0A): ("sandstone", "벽돌"),
+    (0x13, 0x0E): ("wood_wall", "판자 벽"),
+    (0x13, 0x0F): ("wood_wall", "판자 벽"),
+    (0x13, 0x12): ("cabin_slats", "세로 판자"),
+    (0x13, 0x13): ("cabin_slats", "세로 판자"),
+    (0x13, 0x14): ("statue", "석상"),
+    (0x13, 0x16): ("wood_floor", "판자 바닥"),
+    (0x13, 0x17): ("wood_floor", "판자 바닥"),
+    (0x13, 0x18): ("washbasin", "샘"),
+    (0x14, 0x13): ("stone_band", "문양 바닥"),
+    (0x14, 0x17): ("statue", "석상"),
+    (0x14, 0x18): ("washbasin", "샘"),
+    (0x15, 0x0C): ("pillar", "기둥"),
+    (0x15, 0x0E): ("statue", "괴수 석상"),
+    (0x15, 0x0F): ("statue", "괴수 석상"),
+    (0x15, 0x10): ("pillar", "기둥"),
+    (0x15, 0x12): ("statue", "부조"),
+    (0x15, 0x13): ("statue", "부조"),
+    (0x15, 0x15): ("grate", "창살"),
+    (0x15, 0x18): ("grate", "창살 바닥"),
+    (0x15, 0x19): ("statue", "얼굴 조각"),
+    (0x15, 0x1D): ("statue", "석상"),
+    (0x16, 0x07): ("pillar_top", "기둥 머리"),
+    (0x16, 0x08): ("statue", "괴수 석상"),
+    (0x16, 0x09): ("statue", "괴수 석상"),
+    (0x16, 0x0B): ("pillar", "기둥"),
+    (0x16, 0x0C): ("statue", "부조"),
+    (0x16, 0x0D): ("statue", "부조"),
+    (0x16, 0x13): ("stone_floor", "판석"),
+    (0x1B, 0x12): ("archway_left", "굴 입구 왼쪽"),
+    (0x1B, 0x13): ("archway_right", "굴 입구 오른쪽"),
+    (0x1C, 0x01): ("lion_statue", "금빛 석상"),
+    (0x1C, 0x04): ("red_paving", "분홍 바닥"),
+    (0x22, 0x06): ("brick_paving", "붉은 성 바닥"),
+    (0x1E, 0x10): ("cave_rock_earth", "벼랑"),
+    (0x1E, 0x11): ("cave_rock_earth", "벼랑"),
+    (0x1E, 0x14): ("cave_rock_earth", "벼랑"),
+    (0x1E, 0x15): ("cave_rock_earth", "벼랑"),
+    (0x1E, 0x16): ("cave_rock_earth", "벼랑"),
+    (0x1E, 0x17): ("cave_rock_earth", "벼랑"),
+    (0x1E, 0x18): ("cave_rock_red", "아래의 붉은 땅"),
+    (0x1E, 0x19): ("cave_rock_red", "아래의 붉은 땅"),
+    (0x1E, 0x1A): ("cave_rock_red", "아래의 붉은 땅"),
+    (0x1E, 0x1B): ("cave_rock_red", "아래의 붉은 땅"),
+    (0x1E, 0x0E): ("water0", "먼 물결"),
+    (0x1E, 0x0F): ("water0", "먼 물결"),
+    (0x32, 0x15): ("cloud", "구름"),
+    (0x32, 0x16): ("cloud", "구름"),
+    (0x32, 0x17): ("cloud", "구름"),
+    (0x32, 0x18): ("cloud", "구름"),
+    (0x32, 0x19): ("cloud", "구름"),
+    (0x32, 0x1A): ("cloud", "구름"),
+    (0x32, 0x1B): ("cloud", "구름"),
+    (0x32, 0x1C): ("cloud", "구름"),
+    (0x32, 0x1D): ("cloud", "구름"),
+    (0x1C, 0x02): ("altar", "금 제단"),
+    (0x1C, 0x10): ("pot", "분홍 항아리"),
+    (0x1E, 0x00): ("statue", "마물 석상"),
+    (0x1E, 0x01): ("statue", "마물 석상"),
+    (0x1E, 0x02): ("pillar", "기둥"),
+    (0x1E, 0x03): ("pillar", "기둥"),
+    (0x1E, 0x06): ("altar", "제단"),
+    (0x1F, 0x14): ("stone_wall", "벽돌"),
+    (0x1F, 0x15): ("stone_wall", "벽돌"),
+    (0x1F, 0x16): ("stone_wall", "벽돌"),
+    (0x1F, 0x18): ("archway_left", "굴 입구"),
+    (0x22, 0x10): ("statue", "마물 석상"),
+    (0x22, 0x11): ("statue", "마물 석상"),
+    (0x23, 0x14): ("wood_wall", "나무껍질"),
+    (0x23, 0x15): ("wood_wall", "나무껍질"),
+    (0x23, 0x16): ("wood_wall", "나무껍질"),
+    (0x23, 0x1A): ("ladder", "사다리(입구·출구)"),
+    (0x23, 0x1B): ("pit", "구멍(입구·출구)"),
+    (0x23, 0x1C): ("bush", "잎"),
+    (0x23, 0x1D): ("bush", "잎"),
+    (0x24, 0x07): ("pit", "구멍"),
+    (0x24, 0x10): ("stump", "그루터기"),
+    (0x24, 0x12): ("dirt", "모래"),
+    (0x24, 0x13): ("tree16", "나무"),
+    (0x24, 0x14): ("bush", "덤불"),
+    (0x24, 0x15): ("grass", "풀밭"),
+    (0x24, 0x19): ("wood_floor", "판자"),
+    (0x25, 0x0B): ("pillar_top", "기둥 머리"),
+    (0x25, 0x0C): ("statue", "괴수 석상"),
+    (0x25, 0x0D): ("statue", "괴수 석상"),
+    (0x25, 0x0F): ("pillar", "기둥"),
+    (0x25, 0x10): ("statue", "부조"),
+    (0x25, 0x11): ("statue", "부조"),
+    (0x25, 0x12): ("grate", "창살 바닥"),
+    (0x25, 0x16): ("statue", "석상"),
+    (0x25, 0x1A): ("statue", "석상"),
+    (0x2A, 0x03): ("statue", "얼굴 조각"),
+    (0x2A, 0x06): ("rock_pile", "바위"),
+    (0x2A, 0x07): ("rock_pile", "바위"),
+    (0x2D, 0x0E): ("statue", "굳은 병사"),
+    (0x2D, 0x0F): ("statue", "굳은 사람"),
+    (0x2D, 0x10): ("statue", "굳은 사람"),
+    (0x2D, 0x11): ("statue", "굳은 사람"),
+    (0x2D, 0x12): ("statue", "굳은 사람"),
+    (0x2D, 0x13): ("statue", "굳은 사람"),
+    (0x2D, 0x14): ("statue", "굳은 사람"),
+    (0x2D, 0x1F): ("statue", "굳은 병사"),
+    (0x2F, 0x10): ("pot", "금 항아리"),
+    (0x2F, 0x11): ("pot", "금 항아리"),
+    (0x2F, 0x12): ("grate", "창살"),
+    (0x2F, 0x14): ("pillar", "금 기둥"),
+    (0x2F, 0x15): ("pillar", "금 기둥"),
+    (0x2F, 0x18): ("pillar", "금 기둥"),
+    (0x2F, 0x19): ("pillar", "금 기둥"),
+    (0x30, 0x08): ("statue", "마물 석상"),
+    (0x30, 0x0A): ("statue", "마물 석상"),
+    (0x30, 0x0B): ("statue", "금빛 석상"),
+    (0x31, 0x07): ("window16", "창"),
+    (0x31, 0x10): ("tree16", "나무"),
+    (0x31, 0x13): ("statue", "금빛 석상"),
+    (0x32, 0x10): ("altar", "문장"),
 }
+# Dungeon and tower sheets: the wall and floor that every block without its own art falls back to,
+# by whether its FC property blocks the way, and what a falling cell shows.
+SHEET_STYLES = {
+    0x10: ("cave_rock_earth", "cave_floor_earth"), 0x11: ("cave_rock_brown", "cave_floor_brown"),
+    0x12: ("boulder_wall", "cave_floor_earth"), 0x13: ("boulder_wall", "cave_floor_earth"),
+    0x14: ("boulder_wall", "cave_floor_earth"), 0x15: ("castle_wall", "stone_floor"),
+    0x16: ("castle_wall", "red_paving"), 0x17: ("wood_wall", "cave_floor_brown"),
+    0x18: ("boulder_wall", "stone_floor"), 0x19: ("ice_wall", "ice_floor"),
+    0x1A: ("boulder_wall", "cave_floor_earth"), 0x1B: ("cave_rock_brown", "dirt"),
+    0x1C: ("cave_rock_brown", "stone_floor", "sky"), 0x1D: ("cave_rock_brown", "cave_floor_brown"),
+    0x1E: ("dark_void", "cave_floor_earth"), 0x1F: ("cave_rock_earth", "cave_floor_earth"),
+    0x20: ("castle_wall", "stone_floor", "sky"), 0x21: ("castle_wall", "brick_paving", "sky"),
+    0x22: ("castle_wall", "cloud", "sky"), 0x23: ("wood_grain", "wood_floor"), 0x24: ("wood_grain", "wood_floor"),
+    0x25: ("castle_wall", "grass"), 0x26: ("castle_wall", "red_paving"), 0x28: ("castle_wall", "stone_floor"),
+    0x29: ("cave_rock_moss", "cave_floor_earth"), 0x2A: ("cave_rock_red", "cave_floor_brown"),
+    0x2B: ("castle_wall", "red_paving"), 0x2D: ("stone_wall", "dirt"), 0x2E: ("wood_wall", "wood_floor"),
+    0x2F: ("sandstone", "dirt"), 0x30: ("castle_wall", "stone_floor"), 0x31: ("boulder_wall", "stone_floor"),
+    0x32: ("castle_wall", "stone_floor", "sky"),
+}
+SHEET_PALETTES = {0x28: "purple", 0x30: "purple"}
+# Sheets whose slow vertical cells (property 31) are wooden ladders rather than stone steps.
+LADDER_SHEETS = {0x11, 0x17, 0x1B, 0x1C, 0x23, 0x24}
+# Fallback art by FC block property, before the sheet's wall or floor.
+PROPERTY_ART = {
+    0x83: "water0", 0x08: "stairs_up", 0x09: "stairs_down", 0x04: "chest_closed", 0x31: "stone_steps",
+    0x0A: "travel_door", 0x01: "swamp", 0x02: "barrier", 0x0F: "lift", 0x10: "arrow_up",
+    0x11: "arrow_right", 0x12: "arrow_down", 0x13: "arrow_left", 0x94: "gold_door16", 0x96: "gold_door16",
+    0x9C: "gold_door16", 0x9D: "gold_door16", 0xA0: "gold_door16", 0xAC: "iron_door", 0xA7: "counter",
+    0xAB: "wardrobe", 0xAA: "pot",
+}
+FALLING = (0x05, 0x0B)
+
+
+def map_palette(name, sheet):
+    return MAP_PALETTES.get(name, SHEET_PALETTES.get(sheet, "normal"))
+
+
 # The floor under transparent fixtures, as on the FC sheet.
 SHEET_FLOORS = {0x04: "dirt", 0x0E: "carpet"}
-BACKGROUNDS = {(0x08, 0x0F): "grass"}
-SHEETS = (0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0B, 0x0C, 0x0D, 0x0F, 0x27, 0x2C)
+BACKGROUNDS = {(0x08, 0x0F): "grass", **{(0x2D, b): "grass" for b in (0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x1F)}}
+SHEETS = (0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0B, 0x0C, 0x0D, 0x0F, 0x27, 0x2C) + tuple(SHEET_STYLES)
 
 # FC interior maps drawn with block sheets 0A and 0E, by name; their FC palettes are the same set
 # except アッテムト, which uses a darker set.
@@ -210,11 +383,24 @@ def sheet_art(prg, t):
     for (sheet, block), art in [((s, b), a) for s, arts in BLOCK_ART.items() for b, a in arts.items()] + list(EXAMPLES.items()):
         known.setdefault(_graphic(prg, sheet, block), art)
     out = dict(BLOCK_ART.get(t, {}))
+    style = SHEET_STYLES.get(t)
     for block in range(32):
-        if block not in out:
-            graphic = _graphic(prg, t, block)
-            if graphic in known:
-                out[block] = known[graphic]
+        if block in out:
+            continue
+        graphic = _graphic(prg, t, block)
+        if graphic in known:
+            out[block] = known[graphic]
+        elif style:
+            d = dq4block.defs(prg, t).get(block)
+            prop = UNDEFINED if d is None else d["prop"]
+            if prop in FALLING:
+                out[block] = (style[2] if len(style) > 2 else "dark_void", "떨어지는 칸(시트 기본)")
+            elif prop == 0x31 and t in LADDER_SHEETS:
+                out[block] = ("ladder", "사다리(속성 기본)")
+            elif prop in PROPERTY_ART:
+                out[block] = (PROPERTY_ART[prop], f"{dq4block.kind_name(prop)}(속성 기본)")
+            else:
+                out[block] = (style[0], "벽(시트 기본)") if prop & 0x80 else (style[1], "바닥(시트 기본)")
     return out
 
 
@@ -231,7 +417,8 @@ def _tile(assets, name, palette, map_type, block=None):
         raise ValueError(f"{name}: only transparent index zero is supported")
     pixels = tile.tobytes()
     transparent = pixels.count(0) if transparency == 0 and name != "dark_void" else 0
-    background_name = BACKGROUNDS.get((map_type, block), SHEET_FLOORS.get(map_type, "red_paving"))
+    floor = SHEET_STYLES[map_type][1] if map_type in SHEET_STYLES else SHEET_FLOORS.get(map_type, "red_paving")
+    background_name = BACKGROUNDS.get((map_type, block), floor)
     if name in {"tree16", "bush", "flowers", "crops"}:
         background_name = "grass"
     elif name in {"sign_church", "sign_weapon", "sign_armour", "sign_inn", "sign_shop", "window16"}:
@@ -307,7 +494,7 @@ def render_maps(rom_path, assets, names=None):
     for group, number, name, source, counts, prepared, palette in prepare_maps(prg, assets, names):
         mapping = sheet_art(prg, source.t)
         preview = Image.new("P", (source.w * 16, source.h * 16))
-        preview.putpalette(palette_variant(MAP_PALETTES.get(name, "normal")))
+        preview.putpalette(palette_variant(map_palette(name, source.t)))
         for y in range(source.h):
             for x in range(source.w):
                 block = source.cell(x, y) & 31
@@ -328,7 +515,7 @@ def render_maps(rom_path, assets, names=None):
         result[name] = (preview, {
             "map": f"{group:02X}/{number:02X}",
             "map_type": f"{source.t:02X}",
-            "palette": MAP_PALETTES.get(name, "normal"),
+            "palette": map_palette(name, source.t),
             "size_blocks": [source.w, source.h],
             "source_rom_sha1": hashlib.sha1(data).hexdigest(),
             "source_layout_sha256": hashlib.sha256(bytes(source.buf)).hexdigest(),
