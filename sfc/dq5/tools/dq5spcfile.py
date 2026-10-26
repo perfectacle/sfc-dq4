@@ -32,7 +32,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from dq5map import Rom  # noqa: E402
 from dq5song import header, walk  # noqa: E402
 from dq5sound import map_songs  # noqa: E402
-from dq5spc import SEQUENCE_COUNT, body, sequences, song_sets  # noqa: E402
+from dq5spc import RESIDENT_SEQUENCES, SEQUENCE_COUNT, body, ff_list, sequences, song_sets  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LUA = os.path.join(HERE, 'lua', 'dq5spcdump.lua')
@@ -243,10 +243,13 @@ def song_maps(rom):
     return out
 
 
-def run_one(mesence, libdir, rom, state, n, x, stem, work, free=''):
+def run_one(mesence, libdir, rom, state, n, x, stem, work, free='', preload=False):
     out = os.path.join(work, f'run{stem}')
     os.makedirs(out, exist_ok=True)
-    cmd = f'10:1A:00:00;14:01:{n:02X}:00' if x is None else f'10:1A:00:00;14:0C:{n:02X}:{x:02X}'
+    play = f'01:{n:02X}:00' if x is None else f'0C:{n:02X}:{x:02X}'
+    # 고정 시퀀스(2B:C429) 곡은 01·0C 로는 곡 묶음의 샘플을 첫 하나 뒤로 보내지 않았다(곡 17 의 8개 중 2개만 SPC 에).
+    # 94 n(곡 n 자료 올리기)을 먼저 보내면 모두 올라간다.
+    cmd = f'10:1A:00:00;14:94:{n:02X}:00;200:{play}' if preload else f'10:1A:00:00;14:{play}'
     env = dict(os.environ, LIBDIR=libdir, SHOT_DIR=out, STATE=os.path.abspath(state), CMDS=cmd,
                WAITSONG=f'{n:02X}', FULLSET=f'{n:02X}', MAXF='900', FREEWATCH=free)
     subprocess.run([mesence, '--testrunner', os.path.abspath(rom), LUA], env=env,
@@ -322,7 +325,8 @@ def main():
         from dq5build import cpu, free_ranges
         free = ','.join(f'{cpu(o).replace(":", "")}-{cpu(o + n - 1).replace(":", "")}' for o, n in free_ranges(rom.d))
     with concurrent.futures.ThreadPoolExecutor(a.jobs) as ex:
-        dirs = list(ex.map(lambda t: run_one(mesence, libdir, a.rom, a.state, *t, work, free), jobs))
+        preload = {v for v in ff_list(rom, RESIDENT_SEQUENCES) if 0 < v < SFX_FROM}
+        dirs = list(ex.map(lambda t: run_one(mesence, libdir, a.rom, a.state, *t, work, free, t[0] in preload), jobs))
     index = {'songs': [], 'sfx': []}
     for (n, x, stem), d in zip(jobs, dirs):
         r = regs(os.path.join(d, 'regs.txt'))
