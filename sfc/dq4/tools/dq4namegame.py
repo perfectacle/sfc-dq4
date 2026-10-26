@@ -24,8 +24,17 @@ STRING_CODE = 0xA81E
 PUSH_CODE = 0xA832                 # A = 글자 코드(16비트)를 7E:0ECB,Y 에 쌓음
 
 
+# 24:9E11~9E46: 옮긴 뒤 쓰이지 않는 원래 디코더의 뒷부분
+MOVED_DECODER_TAIL = bytes.fromhex('a7f0a4f3398c9ec220f005bdb68c8003bd7294'
+                                   '48e6f3c8c00800900a64f3e6f0d004e6f266f0'
+                                   '683007 29ff1f0aaa80ce29ff1fab2860'.replace(' ', ''))
+
+
 def routine():
-    """A = 이름 바이트(8비트), X = $01 기준 자리(16비트), DB = 24. 한글이면 X·$00 을 한 바이트 더 넘긴다."""
+    """A = 이름 바이트(8비트), X = $01 기준 자리(16비트), DB = 24. 한글이면 X·$00 을 한 바이트 더 넘긴다.
+    남은 길이 $00 이 2 미만이면(표시 바이트가 마지막, 깨진 저장) 둘째 바이트를 먹지 않고 원래 경로로 보낸다.
+    먹으면 24:A7D9 의 DEC $00 이 FF 로 넘어가 버퍼 7E:0ECB 를 넘겨 쓴다. 곱셈기는 원래 엔진(04:ACFF 등)처럼
+    인터럽트를 막지 않고 쓴다."""
     hi_end = ne.HI_BASE + (len(ne.GLYPHS) - 1) // ne.CODE_RADIX + 1
     add = GLYPHS - ne.LO_BASE
     body = bytes((
@@ -40,6 +49,9 @@ def routine():
         0x18, 0x69, add & 0xFF, add >> 8,      # CLC / ADC #(3DB - 10)
         0x20, PUSH_CODE & 0xFF, PUSH_CODE >> 8,
         0xE2, 0x20, 0x60))                     # SEP #$20 / RTS
+    guard = bytes((0xEB, 0xA5, 0x00, 0xC9, 0x02, 0xEB))    # XBA / LDA $00 / CMP #2 / XBA (XBA 는 C 를 두므로)
+    guard += bytes((0x90, len(body)))                      # BCC 원래
+    body = guard + body
     head = bytes((0xC9, ne.HI_BASE, 0x90, 4 + len(body),   # CMP #$85 / BCC 원래
                   0xC9, hi_end, 0xB0, len(body)))          # CMP #$9B / BCS 원래
     return head + body + bytes((0x4C, STRING_CODE & 0xFF, STRING_CODE >> 8))
@@ -54,7 +66,7 @@ def apply(data):
     if bytes(d[o:o + 4]) != bytes((0x22, *mm.cpu_to_bytes(mm.BASE))):
         raise ValueError('메시지 디코더가 옮겨지지 않은 롬')
     o = lorom(ROUTINE)
-    if bytes(d[o:o + 4]) != bytes.fromhex('a7f0a4f3'):
+    if bytes(d[o:o + len(code)]) != MOVED_DECODER_TAIL[:len(code)]:
         raise ValueError(f'{ROUTINE:06X}: 예상한 원래 바이트가 아님')
     d[o:o + len(code)] = code
     o = lorom(NAME_BYTE_CALL)

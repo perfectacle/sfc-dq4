@@ -25,6 +25,7 @@ PRE = 'b:4,wait:40,up:3,wait:20,a:4,wait:30,a:4,wait:200'
 CASES = [
     ('라이안', None), ('크리프트', None), ('ㄱ힝', None), ('땟땠', None),
     ('kana', bytes.fromhex('10101010')), ('dakuten', bytes.fromhex('14842918')),
+    ('lone-tag', bytes.fromhex('1085')),            # 마지막 바이트가 표시면 원래 경로(깨진 저장 방어)
 ]
 
 

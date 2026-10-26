@@ -40,7 +40,8 @@ def show(sram):
             continue
         raw = sram[off + NAME:off + NAME + 8]
         kind, text = name_kind(raw)
-        lines.append(f'칸 {n + 1}: {raw.hex(" ")} {kind} {text}')
+        note = '  (가나일 수도 있음: 일본어 이름이면 바꾸지 말 것)' if kind == 'legacy' else ''
+        lines.append(f'칸 {n + 1}: {raw.hex(" ")} {kind} {text}{note}')
     return lines
 
 
@@ -85,7 +86,10 @@ def main():
         return
     if a.out.exists() or a.out.resolve() == a.sram.resolve():
         ap.error('--out 은 아직 없는 새 파일이어야 합니다(원본을 덮어쓰지 않음)')
-    out = convert(sram, [int(x) for x in a.korean_slots.split(',')])
+    try:
+        out = convert(sram, [int(x) for x in a.korean_slots.split(',')])
+    except ValueError as e:
+        ap.error(str(e))
     a.out.write_bytes(out)
     print('\n'.join(show(out)))
 
