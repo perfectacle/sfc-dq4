@@ -108,8 +108,8 @@ def fx_dumps(rom, ship, work, kinds=None, jobs=6):
 
 MONSTER_RECORD, MONSTER_SIZE = 0x118000, 25     # 23:8000 몬스터 레코드(파일 오프셋). +3·+10 하위 3비트 HP, +8 필드 68, +11 행동 6칸
 HERO_HP = '7E2042=E7;7E2043=03'                 # 전투 중 주인공 지금 HP(일행 레코드 +2) 999
-# 보스 HP 를 1 로: 전투 몬스터 칸 0(7E:07C0)의 +2 지금 HP. 레코드를 덮지 않는 것은 무리 2F 의 칸이 표의 EA 가 아니라
-# E8(HP 4500, 레코드의 11비트 HP 로는 못 담음)이어서다. 불러온 뒤 한 번만 쓴다(lua/dq5pokeonce.lua).
+# 보스 HP 를 1 로: 전투 몬스터 칸 0(7E:07C0)의 +2 지금 HP. 레코드를 덮지 않는 것은 무리 2F 의 칸 HP 가 4500 으로
+# 레코드의 11비트 HP(최대 2047)와 따로 정해져서다. 불러온 뒤 한 번만 쓴다(lua/dq5pokeonce.lua).
 BOSS_HP1 = '7E07C2=01;7E07C3=00'
 SHOT_SOURCE = '게임 화면 버퍼(dq5monlog SHOTS=1, emu.getScreenBuffer), 프레임 흔들림 없음'
 SHEET_GROUPS = '00:3,03:2'

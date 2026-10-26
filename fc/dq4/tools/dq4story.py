@@ -318,7 +318,8 @@ def unconfirmed(prg):
             b = dq4event.bit_of(m, kind)
             if b is not None and b.bit_count() == 1 and kind in dq4event.WRITERS:
                 bits.setdefault((n, b), []).append((kind, where, msg))
-    return {k: v for k, v in bits.items() if k not in dq4event.KNOWN and k not in dq4flags.CONFIRMED}
+    return {k: v for k, v in bits.items()
+            if k not in dq4event.KNOWN and k not in dq4flags.CONFIRMED and k not in dq4flags.UNUSED}
 
 
 def cmd_jobs(prg, ready, outpath):

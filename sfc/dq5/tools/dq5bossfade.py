@@ -120,6 +120,36 @@ def frames(colors, stages):
     return [[[blend(c, s, e, k) for c in colors] for k in range(STEPS)] for s, e in stages]
 
 
+def hdma_writes(folder):
+    """{프레임: {CGRAM 색 번호: 값}} cgw.txt(lua/dq5monlog.lua 의 CGW=1)에서 화면을 그리는 동안 $2121·$2122 로 쓴 색."""
+    path = os.path.join(folder, 'cgw.txt')
+    out = {}
+    if not os.path.exists(path):
+        return out
+    addr, low = 0, None
+    for ln in open(path):
+        p = ln.split()
+        if len(p) != 4:
+            continue
+        f, reg, v = int(p[0]), int(p[2], 16), int(p[3], 16)
+        if reg == 0x2121:
+            addr, low = v, None
+        elif low is None:
+            low = v
+        else:
+            out.setdefault(f, {})[addr] = low | v << 8
+            addr, low = (addr + 1) & 0xFF, None
+    return out
+
+
+def last_hdma(hw, f, idx):
+    """프레임 f 까지 HDMA 가 색 idx 에 마지막으로 쓴 값. CGRAM 전체 DMA 가 매 프레임 있지는 않아 앞 프레임에 쓴 것이 남는다."""
+    for g in sorted((g for g in hw if g <= f), reverse=True):
+        if idx in hw[g]:
+            return hw[g][idx]
+    return None
+
+
 def check(rom, folder):
     ex = [ln.split() for ln in open(os.path.join(folder, 'exec.txt')) if ln.strip()]
     cc = [int(x[0]) for x in ex if x[1] == '22CC16'][0]
@@ -141,23 +171,30 @@ def check(rom, folder):
     # k = 0 은 앞 단계의 끝과 같으므로, 덤프가 몇 프레임 늦게 나오는지는 첫 단계의 가운데로 정한다
     mid = STEPS // 2
     lag = max(range(6), key=lambda d: sum(a == b for a, b in zip(line(starts[0] + mid + d)[1:], want[0][mid][1:])))
-    same = total = 0
+    hw = hdma_writes(folder)
+    same = total = hdma = 0
     odd = []
     for si, s0 in enumerate(starts[:len(stages)]):
         for k in range(STEPS):
             total += 1
-            got = line(s0 + k + lag)
-            if got[1:] == want[si][k][1:]:
+            f = s0 + k + lag
+            got = line(f)
+            diff = [i for i in range(1, 16) if got[i] != want[si][k][i]]
+            if not diff:
                 same += 1
+            elif all(last_hdma(hw, f, PAL_LINE * 16 + i) == got[i] for i in diff):
+                hdma += 1          # 그 프레임까지 화면 가운데에서 HDMA 가 그 색 칸에 마지막으로 쓴 값
             else:
-                odd.append('%d(색 %s)' % (s0 + k + lag, ','.join(str(i) for i in range(1, 16) if got[i] != want[si][k][i])))
+                odd.append('%d(색 %s)' % (f, ','.join(str(i) for i in diff)))
     print('%s 첫 몬스터 %s, 단계 %d개 %s' % (folder, first, len(stages),
                                          ' → '.join('%02X' % s for s, _ in stages) + ' → %02X' % stages[-1][1]))
     print('  단계 시작 프레임 %s, 덤프는 %s 프레임 뒤' % (starts[:len(stages)], lag))
     print('  레코드 색 %d개, 줄 8 의 색 1~15 가 같은 프레임 %d/%d' % (len(colors), same, total))
+    if hdma:
+        print('  나머지 %d프레임은 다른 색이 모두 그 프레임까지 HDMA 가 CGRAM 에 마지막으로 쓴 값(cgw.txt)' % hdma)
     if odd:
-        print('  다른 프레임: ' + ' '.join(odd))
-    return same == total
+        print('  설명 못 한 프레임: ' + ' '.join(odd))
+    return same + hdma == total
 
 
 def main():

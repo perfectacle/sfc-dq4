@@ -169,7 +169,13 @@ def _perform(seq, flag, loops, max_ticks):
                     v.fine = a - 256 if a >= 0x80 else a
                 elif b == 0xFB:
                     a = seq[v.pc + 1]
-                    v.slide = (a - 256 if a >= 0x80 else a, seq[v.pc + 2] or 0x100)
+                    sl = (a - 256 if a >= 0x80 else a, seq[v.pc + 2] or 0x100)
+                    # 곡 0A 트랙 2: 「note 27 len 60 / FB 07 30 / tie」 에서 붙임 동안(틱 96~144) 피치가 7반음 오르고,
+                    # 다음 새 음(틱 432, 음 44)은 제 음높이였다. 곧 울리는 음에 지금부터 걸리고 새 음에서 풀린다.
+                    if v.last is not None:
+                        v.last['slide'] = sl + (tick - v.last['tick'],)
+                    else:
+                        v.slide = sl + (0,)
                 elif b in (0xFC, 0xFD):
                     v.ctl.append((tick, 'echo', b == 0xFC))
                 elif b == 0xED:
@@ -276,8 +282,9 @@ def bend_curve(note, envs):
         e = [f for t, f in env if t <= k]
         semi = (note.get('fine', 0) + (e[-1] if e else 0)) / FINE_DIV
         if note.get('slide'):
-            st, tk = note['slide']
-            semi += st * min(k, tk) / tk
+            st, tk, at = note['slide']
+            if k >= at:
+                semi += st * min(k - at, tk) / tk
         if semi != last:
             out.append((k, semi))
             last = semi

@@ -13,9 +13,16 @@
   python sfc/dq5/tools/dq5items.py rom/dq5.sfc --slot-odds          # 기계마다 배당 확률과 코인 한 장당 기대 수익
   python sfc/dq5/tools/dq5items.py rom/dq5.sfc --slot-stop 1 0,24,24,216,288 0,1,1,6,0
                                                           # 기계 1, 시작 $1294 다섯, 릴마다 난수 → 멈출 $1294 와 배당
+  python sfc/dq5/tools/dq5items.py rom/dq5.sfc --slot-sim 1000000   # 난수 11:BC26 과 멈출 칸을 그대로 돌려 판을 이어 감
+  python sfc/dq5/tools/dq5items.py rom/dq5.sfc --slot-sim 1000000 --slot-gap 60   # 판 사이 프레임을 고정
+  python sfc/dq5/tools/dq5items.py rom/dq5.sfc --slot-log 5:work/slot/m5.txt 1:work/slot/m1.txt
+                                                          # lua/dq5slot.lua 기록을 멈출 칸·배당과 맞추고 r 분포·수익을 셈
+  python sfc/dq5/tools/dq5items.py rom/dq5.sfc --slot-rng work/slot/rng.rng   # RNGLOG 기록을 11:BC26 과 맞춤
 """
 import argparse
+import math
 import os
+import random
 import sys
 from collections import Counter
 
@@ -222,6 +229,144 @@ def slot_odds(rom):
     print('(줄 1·2·3 은 칸이 한 칸씩 어긋난 같은 분포라 확률이 같음. 여러 줄은 기대 수익이 줄 수에 비례)')
 
 
+def slot_rand(state, limit=8):
+    """11:BC26. $1200~$120F(state, 16바이트 리스트)를 제자리에서 섞고 $1200 % limit 을 낸다."""
+    c = 0
+    for x in range(15, 0, -1):
+        v = state[x - 1] + state[x] + c
+        state[x - 1], c = v & 0xFF, v >> 8
+    for x in range(15, -1, -1):
+        state[x] = (state[x] + 1) & 0xFF
+        if state[x]:
+            break
+    return state[0] % limit
+
+
+def slot_frames(state, n):
+    """11:BB09 가 화면마다 $1200·$1202·$1204·$1206 을 하나씩 올리는 것을 n 프레임만큼."""
+    for i in (0, 2, 4, 6):
+        state[i] = (state[i] + n) & 0xFF
+
+
+def slot_sim(rom, spins, gap=None, seed=1):
+    """판을 이어 돌린다. 릴 k 의 r 은 앞 릴보다 120프레임 뒤에 뽑고, 판 사이는 gap 프레임(없으면 0~255 에서 고르게).
+    멈출 칸은 릴 1·3·5 가 시작 칸 - 13 - r, 릴 2·4 가 - 5 - r(slot_reel_stop 과 같음). 그림 줄 다섯 묶음을 같은 칸으로 센다."""
+    rng = random.Random(seed)
+    state = [rng.randrange(256) for _ in range(16)]
+    groups = {}
+    for m in range(SLOT_COUNT):
+        strips, bet, runs = slot_machine(rom, m)
+        groups.setdefault(tuple(map(tuple, strips)), []).append((m, bet))
+    pay = []
+    for key in groups:
+        table = []
+        for c in range(16 ** 5):
+            table.append(slot_pay(rom, key, [(c >> (4 * i)) & 15 for i in range(5)], 3))
+        pay.append(table)
+    idx = [0] * 5
+    rc, pairs = Counter(), Counter()
+    sums = [[0, 0] for _ in pay]
+    for _ in range(spins):
+        rs = []
+        for i in range(5):
+            if i:
+                slot_frames(state, 120)
+            rs.append(slot_rand(state))
+        slot_frames(state, rng.randrange(256) if gap is None else gap)
+        rc.update(rs)
+        for i in range(4):
+            pairs[rs[i], rs[i + 1]] += 1
+        c = 0
+        for i in range(5):
+            idx[i] = (idx[i] - (13 if i % 2 == 0 else 5) - rs[i]) % 16
+            c |= idx[i] << (4 * i)
+        for g, table in enumerate(pay):
+            v = table[c]
+            sums[g][0] += v
+            sums[g][1] += v * v
+    chi2 = _chi2
+    print(f'{spins}판, 판 사이 {"0~255 프레임에서 고르게" if gap is None else f"{gap}프레임"}')
+    print('r 0~7:', ' '.join(str(rc[k]) for k in range(8)), f' χ²(자유도 7) {chi2([rc[k] for k in range(8)]):.1f}')
+    print(f'이웃 릴 r 쌍 64칸 χ²(자유도 63) {chi2([pairs[a, b] for a in range(8) for b in range(8)]):.1f}')
+    for (key, ms), (s1, s2) in zip(groups.items(), sums):
+        mean = s1 / spins
+        sd = math.sqrt(max(s2 / spins - mean * mean, 0))
+        names = '·'.join(str(m) for m, _ in ms)
+        print(f'기계 {names}: 코인 한 장당 기대 수익 {mean / 3:.4f} ± {1.96 * sd / math.sqrt(spins) / 3:.4f}(95%)')
+
+
+def _chi2(counts):
+    e = sum(counts) / len(counts)
+    return sum((x - e) ** 2 / e for x in counts)
+
+
+def slot_log(rom, specs):
+    """lua/dq5slot.lua 의 S 줄(기계:파일)을 읽어, 판마다 시작 칸·r 로 낸 배당이 $1252 와 같은지, 시작 칸이 앞 판의
+    멈출 칸과 같은지 보고, r 분포와 이웃 릴 r 쌍, 기계마다 받은 코인 / 넣은 코인(3장씩)과 95% 구간을 낸다."""
+    rc, pairs = Counter(), Counter()
+    per = {}
+    for spec in specs:
+        m, path = spec.split(':', 1)
+        m = int(m)
+        strips, bet, runs = slot_machine(rom, m)
+        prev, bad_pay, bad_chain, pays = None, 0, 0, []
+        for line in open(path):
+            t = line.split()
+            if not t or t[0] != 'S':
+                continue
+            starts = [int(v) for v in t[3].split(',')]
+            rs = [int(v) for v in t[5].split(',')]
+            stops = [slot_reel_stop(rom, starts[i], runs[i], rs[i], len(strips[i])) for i in range(5)]
+            if slot_pay(rom, strips, [p // SLOT_CELL_PX for p in stops], 3) != int(t[9]):
+                bad_pay += 1
+            if prev is not None and prev != starts:
+                bad_chain += 1
+            prev = stops
+            rc.update(rs)
+            for i in range(4):
+                pairs[rs[i], rs[i + 1]] += 1
+            pays.append(int(t[9]) * bet)
+        print(f'{path}: 기계 {m} {len(pays)}판, 배당이 다른 판 {bad_pay}, 시작 칸이 앞 판 멈춘 칸과 다른 판 {bad_chain}')
+        per.setdefault(m, [bet, []])[1].extend(pays)
+    print('r 0~7:', ' '.join(str(rc[k]) for k in range(8)), f' χ²(자유도 7) {_chi2([rc[k] for k in range(8)]):.1f}')
+    print(f'이웃 릴 r 쌍 64칸 χ²(자유도 63) {_chi2([pairs[a, b] for a in range(8) for b in range(8)]):.1f}')
+    for m, (bet, pays) in sorted(per.items()):
+        n = len(pays)
+        mean = sum(pays) / n
+        sd = math.sqrt(sum((p - mean) ** 2 for p in pays) / max(n - 1, 1))
+        # 777 다섯 개 같은 드문 큰 배당은 수천 판에 거의 안 나와 표본 표준편차가 작게 나오므로 모형의 것도 낸다.
+        strips = slot_machine(rom, m)[0]
+        dist = Counter(slot_pay(rom, strips, [(c >> (4 * i)) & 15 for i in range(5)], 3) for c in range(16 ** 5))
+        mev = sum(k * v for k, v in dist.items()) / 16 ** 5
+        msd = math.sqrt(sum(k * k * v for k, v in dist.items()) / 16 ** 5 - mev * mev)
+        print(f'기계 {m}: {n}판 넣은 {3 * bet * n} 받은 {sum(pays)} → 코인 한 장당 {mean / (3 * bet):.4f}'
+              f' ± {1.96 * sd / math.sqrt(n) / (3 * bet):.4f}(표본) ± {1.96 * msd / math.sqrt(n) / 3:.4f}(모형), 모형 {mev / 3:.4f}')
+
+
+def slot_rng(path):
+    """RNGLOG 기록(릴 상태16바이트 r)에서 r 이 slot_rand 와 같은지, 다음 릴의 상태가 섞은 뒤 120프레임 올린 것과 같은지,
+    판 사이에는 $1200·$1202·$1204·$1206 만 같은 수만큼 올랐는지 본다."""
+    rows = [line.split() for line in open(path) if line.strip()]
+    ok_r = ok_next = n_next = n_gap = bad_gap = 0
+    for i, (reel, st, r) in enumerate(rows):
+        state = list(bytes.fromhex(st))
+        ok_r += slot_rand(state) == int(r)
+        if i + 1 == len(rows):
+            break
+        nreel, nst = int(rows[i + 1][0]), list(bytes.fromhex(rows[i + 1][1]))
+        if nreel == int(reel) + 1:
+            n_next += 1
+            slot_frames(state, 120)
+            ok_next += state == nst
+        elif int(reel) == 4 and nreel == 0:
+            n_gap += 1
+            g = {(nst[j] - state[j]) & 0xFF for j in (0, 2, 4, 6)}
+            if len(g) != 1 or any(nst[j] != state[j] for j in range(16) if j not in (0, 2, 4, 6)):
+                bad_gap += 1
+    print(f'릴 {len(rows)}개: r 이 같음 {ok_r}, 다음 릴 상태 = 섞기 + 120프레임 {ok_next}/{n_next}, '
+          f'판 사이에 네 바이트만 같은 수만큼 오름 {n_gap - bad_gap}/{n_gap}')
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('rom')
@@ -230,6 +375,10 @@ def main():
     ap.add_argument('--slots', action='store_true')
     ap.add_argument('--slot-odds', action='store_true')
     ap.add_argument('--slot-stop', nargs=3, metavar=('MACHINE', 'STARTS', 'RANDS'))
+    ap.add_argument('--slot-sim', type=int, metavar='SPINS')
+    ap.add_argument('--slot-gap', type=int, metavar='FRAMES')
+    ap.add_argument('--slot-log', nargs='+', metavar='MACHINE:FILE')
+    ap.add_argument('--slot-rng', metavar='FILE')
     args = ap.parse_args()
     rom = Rom(open(args.rom, 'rb').read())
     if args.check:
@@ -240,6 +389,12 @@ def main():
         slots(rom)
     elif args.slot_odds:
         slot_odds(rom)
+    elif args.slot_log:
+        slot_log(rom, args.slot_log)
+    elif args.slot_rng:
+        slot_rng(args.slot_rng)
+    elif args.slot_sim:
+        slot_sim(rom, args.slot_sim, args.slot_gap)
     elif args.slot_stop:
         m, starts, rs = args.slot_stop
         slot_stop(rom, int(m), [int(v) for v in starts.split(',')], [int(v) for v in rs.split(',')])

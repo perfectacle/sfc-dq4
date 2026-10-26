@@ -29,7 +29,7 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 | --- | --- |
 | `dq4state.sh` | 전원 켜기부터 1장 왕좌의 방, 성 밖, 필드, 첫 전투까지 단계별로 입력을 재생해 세이브스테이트를 만들고 장면마다 좌표·맵 번호를 찍음. 같은 결과가 나오도록 MesenCE 에 `--nes.ramPowerOnState=AllZeros` 를 주고, 전원을 켜는 첫 단계는 `lua/debugsram.lua` 로 SRAM 을 `00` 으로 채움(MesenCE 의 `Saves/dq4.sav` 를 따르지 않게). `STATE_DIR` 로 출력 폴더. `MESENCE` 필요 |
 | `dq4warp.sh OUT GG/KK [X Y [DIR]]\|field F X Y` | DQ4 장면 이동. 1장 세이브스테이트에서 게임의 출구·맵 가장자리 루틴을 타고 목적지로 옮겨 `OUT/warp.mss`(조작 가능)를 만듦. 좌표를 빼면 그 맵으로 들어오는 출구의 도착 자리. `lua/warp.lua` 는 프로브의 `DRIVER` 로도 씀. `STATE` 는 상대 경로(워크트리 기준)도 되고, 앞 실행의 `end.mss` 에서 이어 갈 수 있음. [fc/dq4/docs/dq4-warp.md](../docs/dq4-warp.md) |
-| `dq4assets.sh [OUT]` | 비공개 에셋 저장소 `fc/dq4/` 전체(맵·필드·gfx·갤러리·스프라이트·몬스터·소리·장면 화면)를 롬 하나에서 다시 뽑아 OUT(기본 `work/dq4assets`, 빈 폴더)에 같은 배치로 둠. 먼저 `rom/dq4.nes` 의 SHA-1 을 검사. 장면 화면은 MesenCE 를 전원 켜기부터 정해 둔 입력으로 돌려 뜨고(1장 상태는 `dq4state.sh`, 2·5장은 디버그 장 고르기, 장 끝·엔딩은 `dq4warp.sh`) 덤프는 `work/dq4scenes/` 에 둠. `MESENCE` 가 없으면 장면 화면만 빠짐. 같은 커밋·롬이면 두 번 돌려 바이트까지 같음 |
+| `dq4assets.sh [OUT]` | 비공개 에셋 저장소 `fc/dq4/` 전체(맵·필드·gfx·갤러리·스프라이트·몬스터·소리·장면 화면)를 롬 하나에서 다시 뽑아 OUT(기본 `work/dq4assets`, 빈 폴더)에 같은 배치로 둠. 먼저 `rom/dq4.nes` 의 SHA-1 을 검사. 장면 화면은 `dq4scenes.py`(에뮬레이터 필요 없음), 덤프는 `work/dq4scenes/`. 같은 커밋·롬이면 두 번 돌려 바이트까지 같음 |
 
 ## Python과 프로브
 
@@ -66,6 +66,8 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 | `lua/fcgfxgate.lua` | FC: `AT` 프레임마다 메모리(RAM·SRAM·nametable·CHR·팔레트·OAM)는 앞 프레임, 화면은 그 프레임에 찍어 `SHOT_DIR/fNNNNN/end.*` 로(`dq4fcgfx.py verify` 가 바로 읽음, 폴더는 미리 만들 것). 입력은 `DRIVER` |
 | `lua/fcgfxslot.lua` | FC: 필드 그림 칸 몸통 `08:$8676` 진입(`SLOTS` 칸만)과 `WATCH` 범위 쓰기를 프레임·칸·표·PC·스택(`DEPTH` 바이트)과 함께 `fcgfxslot.txt` 로(바로 씀). 입력은 `DRIVER`(`eventwalk.lua` 등) |
 | `dq4cpu.py` | (모듈) 롬만으로 루틴을 따라가는 작은 6502 해석기: 공식 명령, `$FF91` 뱅크 전환, BRK 뱅크 호출(소리·메시지 형식은 건너뜀), `hooks`(주소 → 함수)·`stubs`(바로 RTS). `dq4fcsprite.py boss-steps` 가 씀 |
+| `dq4nes.py` | (모듈) `dq4cpu` 위의 작은 NES: MMC1(SUROM), PPU 레지스터·nametable·CHR RAM·팔레트·스크롤, OAM DMA, 패드, BRK·NMI, 프레임 29781사이클. 롬만으로 전원을 켜서 장면을 돌림. `snapshot()` 이 세이브스테이트 대신 |
+| `dq4scenes.py rom DIR [--sheet 단계 --every N --range A-B]` | 장면 화면 25개의 덤프를 `dq4nes` 로 롬만으로 뜸(전원 켜기, 새로 시작, 디버그 장 고르기, 장 끝 조건 + 워프, 엔딩). `scenes.json` 을 `dq4fcgfx.py scenes` 에 줌. `--sheet` 는 그 단계를 N 프레임마다 떠서 확인용 시트로. [fc/dq4/docs/dq4-fcgfx.md](../docs/dq4-fcgfx.md#롬만으로-뜬-장면) |
 | `dq4apu.py` | (모듈) FC APU 합성기: 프레임마다의 APU 쓰기 → 펄스 2·삼각파·노이즈(엔벨로프·길이·선형 카운터·스윕·프레임 카운터), 비선형 섞기, 본체 필터, 16비트 WAV. `dq4sound.py wav`·`export --flac`·`apucheck` 가 씀 |
 | `dq4score.py` | (모듈) 음 목록 → MusicXML 3.1(채널마다 파트, 붙임줄·셋잇단·도돌이표), verovio 로 쪽마다 SVG. `dq4sound.py export` 가 씀 |
 | `lua/fcgfxrula.lua` | FC: ルーラ·キメラのつばさ 목록 순번 `$76` 을 `PICK` 으로 바꿔 `1E:$AE19` 에 원하는 목적지를 넣고, 레코드를 쓴 뒤 RAM 을 `fcgfxrula.txt` 로 |
@@ -86,7 +88,7 @@ uv run krpatch fc dis rom/dq4.nes E940 8 --bank 0F    # BB:AAAA, BB 는 16KB 뱅
 | `dq4story.py rom events\|jobs READY OUT\|run JOBS RUNS [-j N]\|confirm RUNS... [--json OUT]\|story [N]` | DQ4 이야기 진행. `events` 블록 이벤트 루틴 138개가 보는 것·하는 것, `jobs` [추정] 플래그를 켜는 곳마다 실험 시나리오, `run` 시나리오를 MesenCE 로(`MESENCE`·`LIBDIR`), `confirm` 실행 기록에서 비트마다 켜고 끈 장면, `story` 장마다 진행 순서 → 플래그. 뜻 표는 `dq4flags.py`. [dq4-story-format.md](../docs/dq4-story-format.md) |
 | `lua/eventwalk.lua` | FC: 세이브스테이트에서 좌표 목표(`x=NN`/`y=NN`)와 버튼으로 걷고 `reset:1` 로 리셋. `POKEAT` 프레임별 RAM 쓰기, `PRGPOKE` 메모리의 PRG ROM 바꾸기(롬 파일은 그대로). 프로브의 `DRIVER` 로도 씀. 끝나면 `walk.txt`·`end.*` |
 | `lua/eventflags.lua` | FC: 이벤트 플래그 영역(`$627B`~`$62EE`, `RANGE`) 읽기·쓰기를 PC·뱅크·BRK 주소와 함께 `flags.txt` 로. `FROM`, `MAXF` |
-| `lua/flagsweep.lua` | FC: 플래그 영역·일행 자리·`$618E` 쓰기(쓴 PC, BRK 자리, 블록 슬롯)와 메시지·대화 번호·이벤트·전투·맵 바뀜을 `sweep.txt` 로. `PIN`(인물을 주인공 앞에 붙임, `auto`)·`SLOT`·`TID`·`EV`·`PRGPOKE`(메모리상 PRG 쓰기). 드라이버는 `warp.lua` 등 |
+| `lua/flagsweep.lua` | FC: 플래그 영역·일행 자리·`$618E` 쓰기(쓴 PC, BRK 자리, 블록 슬롯)와 메시지·대화 번호·이벤트·전투·맵 바뀜을 `sweep.txt` 로. `PIN`(인물을 주인공 앞에 붙임, `auto`)·`PINONCE`(첫 대화 뒤 풂)·`SLOT`·`TID`·`EV`·`PRGPOKE`(메모리상 PRG 쓰기). 드라이버는 `warp.lua` 등 |
 | `lua/npcbits.lua` | FC: 인물 표 `$70E0` 를 매 프레임 `OR`/`AND` 로 바꾸고 OAM 변화·슬롯 자리·`SHOTS` 화면을 `npcbits.txt` 로 |
 | `dq4debug.py rom unrun\|find\|brk COVER...` | DQ4 미실행 코드 찾기. `cover.lua` 기록 여러 개를 합쳐 실행된 명령에서 닿는데 안 돈 코드 덩어리(`unrun`), 패드 2·`$4017`·디버그 스위치 `$C000` 읽기(`find`), 부르는 곳 없는 BRK 함수(`brk`). [fc/dq4/docs/dq4-debug.md](../docs/dq4-debug.md) |
 | `lua/debugpad.lua` | FC: 입력 드라이버 앞에 끼워 PRG 롬 메모리를 덮어쓰고(`ROMPATCH`, 예: `3C000=7F;7C000=7F`), 패드 2 를 흉내 내고(`PAD2`, `$15` 값), 바뀐 RAM 을 프레임마다 `debugpad.txt` 로(`LOGW`). 다른 프로브의 `DRIVER` 로 쓸 때는 `PAD_DRIVER` |
