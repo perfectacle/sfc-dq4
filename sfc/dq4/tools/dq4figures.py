@@ -19,14 +19,16 @@ def environment_figure():
     return contact_sheet(create_assets())
 
 
-def environment_map_figure(rom):
-    """FC 이무르 블록 배치에 새 환경 에셋을 놓은 맵을 2배로 키운다. 롬이 없으면 None."""
+def environment_map_figure(rom, name="imuru", box=None):
+    """FC 블록 배치에 새 환경 에셋을 놓은 맵(box 로 자름)을 2배로 키운다. 롬이 없으면 None."""
     if not rom.exists():
         return None
     from dq4environmentart import create_assets
     from dq4environmentmap import render_maps
 
-    image = render_maps(rom, create_assets())["imuru"][0].convert("RGB")
+    image = render_maps(rom, create_assets())[name][0].convert("RGB")
+    if box:
+        image = image.crop(box)
     return image.resize((image.width * 2, image.height * 2), Image.Resampling.NEAREST)
 
 
@@ -101,6 +103,8 @@ def main():
         print("rom/dq4.nes 가 없어 dq4-environment-imuru.webp 는 건너뜀")
     else:
         environment_map.save(output / "dq4-environment-imuru.webp", lossless=True)
+        castle = environment_map_figure(ROOT / "rom" / "dq4.nes", "burland", (0, 0, 608, 320))
+        castle.save(output / "dq4-environment-castle.webp", lossless=True)
     for name, image in images.items():
         scale = 1 if name == "map" else 3
         preview = image.convert("RGBA").resize(

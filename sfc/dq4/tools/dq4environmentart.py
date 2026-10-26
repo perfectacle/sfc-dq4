@@ -651,65 +651,87 @@ def _tree16():
     return _finish(c, "작은 활엽수", "town")
 
 
-def _tower_segment(right=False, cap=False):
-    c = _Canvas(2, fill=2)
-    for y in range(0, 16, 4):
+def _castle_bricks(c, x0=0, width=16, top=0, bottom=15, shade=None):
+    """Dark DQ5 castle masonry: black joints, a lit top edge on each brick, speckled faces."""
+    rng = random.Random(31 + x0)
+    for y in range(top, bottom + 1):
+        row, yy = divmod(y - top, 4)
         for x in range(16):
-            color = (3 if x < 2 else 5 if x < 5 else 6 if x < 11 else 5)
-            c.line((x, y, x, y + 2), color)
-        c.line((3, y, 15, y), 7)
-        for x in range(4 if y % 8 else 8, 16, 8):
-            c.line((x, y + 1, x, y + 2), 3)
-    c.line((0, 0, 0, 15), 1)
-    c.line((1, 0, 1, 15), 3)
+            gx = x0 + x
+            body = shade(gx) if shade else 3
+            joint = (gx + (4 if row & 1 else 0)) % 8 == 7
+            if yy == 3 or joint:
+                color = 1
+            elif yy == 0:
+                color = min(body + 2, 6)
+            else:
+                v = rng.random()
+                color = body - 1 if v < 0.25 else body + 1 if v > 0.9 else body
+            c.point((x, y), color)
+
+
+def _castle_wall():
+    c = _Canvas(3)
+    _castle_bricks(c)
+    return _finish(c, "성 석벽")
+
+
+def _tower_segment(right=False, cap=False):
+    """Two blocks side by side form one 32-pixel round tower; brightness follows the curve."""
+    c = _Canvas(3)
+
+    def shade(gx):
+        d = abs(gx - 15.5)
+        return 2 if d > 13 else 3 if d > 9 else 4 if d > 4 else 5
+
+    x0 = 16 if right else 0
+    _castle_bricks(c, x0, shade=shade, bottom=9 if cap else 15)
     if cap:
-        c.poly(((0, 9), (2, 5), (6, 2), (11, 0), (15, 0), (15, 8), (8, 9), (3, 12)), 4)
-        c.line(((0, 9), (2, 5), (6, 2), (11, 0), (15, 0)), 8)
-        c.line(((2, 10), (7, 7), (15, 5)), 7)
-        c.line(((2, 11), (7, 8), (15, 6)), 3)
-    if right:
-        c.image = c.image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
-        lut = list(range(256))
-        for a, b in ((7, 6), (6, 5), (5, 4)):
-            lut[32 + a] = 32 + b
-        c.image = c.image.point(lut)
-    return _finish(c, "성탑 상단" if cap else "성탑 곡면 석벽")
+        for y, color in ((10, 6), (11, 5), (12, 4), (13, 4), (14, 3), (15, 1)):
+            c.line((0, y, 15, y), color)
+        for x in range(16):
+            if (x0 + x) % 6 == 5:
+                c.line((x, 11, x, 14), 2)
+    edge = 15 if right else 0
+    c.line((edge, 0, edge, 15), 1)
+    return _finish(c, "성탑 아랫단" if cap else "성탑 곡면 석벽")
 
 
 def _gate():
-    c = _Canvas(2, (32, 32), fill=1)
-    c.poly(((0, 31), (0, 8), (3, 4), (8, 1), (23, 1), (28, 4), (31, 8), (31, 31)), 4)
-    c.line(((0, 9), (3, 4), (8, 1), (23, 1), (28, 4), (31, 9)), 8)
-    c.poly(((4, 31), (4, 11), (7, 7), (11, 5), (20, 5), (24, 7), (27, 11), (27, 31)), 2)
-    c.poly(((6, 31), (6, 12), (9, 9), (12, 7), (19, 7), (22, 9), (25, 12), (25, 31)), 3)
-    c.line(((5, 31), (5, 12), (8, 8), (12, 6), (19, 6), (23, 8), (26, 12), (26, 31)), 7)
-    for x in (7, 11, 15, 19, 23):
-        c.line((x, 12 if x in (7, 23) else 9, x, 30), 5)
-        c.line((x + 1, 12 if x in (7, 23) else 9, x + 1, 30), 4)
+    """Arched stone frame around iron-banded wooden doors, all in the wood bank's ramp."""
+    c = _Canvas(4, (32, 32), fill=10)
+    rng = random.Random(41)
+    for y in range(32):
+        for x in range(32):
+            if (y % 4 == 3) or (x + (4 if y // 4 % 2 else 0)) % 8 == 7:
+                c.point((x, y), 9)
+            elif rng.random() < 0.2:
+                c.point((x, y), 9 if rng.random() < 0.5 else 11)
+    c.poly(((3, 31), (3, 10), (6, 5), (11, 2), (20, 2), (25, 5), (28, 10), (28, 31)), 11)
+    c.poly(((5, 31), (5, 11), (8, 7), (12, 5), (19, 5), (23, 7), (26, 11), (26, 31)), 1)
+    c.poly(((6, 31), (6, 12), (9, 8), (12, 7), (19, 7), (22, 8), (25, 12), (25, 31)), 5)
+    for x in range(6, 26):
+        if x % 3 == 2:
+            c.line((x, 9 if 9 < x < 22 else 12, x, 31), 4)
+        elif x % 3 == 0:
+            c.line((x, 9 if 9 < x < 22 else 12, x, 31), 6)
     c.line((15, 7, 15, 31), 1)
-    c.line((16, 7, 16, 31), 2)
-    for y in (15, 25):
-        c.line((6, y, 14, y), 1)
-        c.line((17, y, 25, y), 1)
-        c.line((7, y + 1, 14, y + 1), 9)
-        c.line((17, y + 1, 24, y + 1), 9)
-    c.rows(("6776", "7127", "7127", "6776"), (10, 19))
-    c.rows(("6776", "7127", "7127", "6776"), (18, 19))
-    for y in (12, 18, 24, 30):
-        c.line((0, y, 4, y), 7)
-        c.line((27, y, 31, y), 6)
-    for x in (7, 15, 24):
-        c.line((x, 2, x + 1, 5), 3)
+    c.line((16, 7, 16, 31), 3)
+    for y in (13, 24):
+        c.line((6, y, 25, y), 1)
+        c.line((6, y + 1, 25, y + 1), 9)
+    c.rows(("8778", "7117", "7117", "8778"), (10, 18))
+    c.rows(("8778", "7117", "7117", "8778"), (18, 18))
     return _finish(c, "바트랜드 양쪽 여닫이 성문")
 
 
 def _small_fixture(kind):
     patterns = {
         "gold_door16": (4, (
-            "...233333332....", "..26777777632...", "..26444444632...", "..26444444632...",
-            "..26555555632...", "..23333333332...", "..26444444632...", "..26444444632...",
-            "..26444448632...", "..26555555632...", "..23333333332...", "..26444444632...",
-            "..26444444632...", "..26777777632...", "..23333333332...", "................",
+            "....11111111....", "...1155555511...", "..115677766511..", ".11567656765611.",
+            ".15676567656751.", ".15676567656751.", ".15676567656751.", ".15676567656751.",
+            ".15676567658751.", ".15676567658751.", ".15676567656751.", ".15676567656751.",
+            ".15676567656751.", ".15676567656751.", ".14444444444441.", ".11111111111111.",
         ), "小형 문"),
         "iron_fence16": (3, (
             "..2...2...2...2.", "..5...5...5...5.", "..5...5...5...5.", "..5...5...5...5.",
@@ -909,6 +931,7 @@ def create_assets():
         "tower_cap_right": _tower_segment(True, True),
         "counter": _counter(),
         "sign_armour": _armour_sign(),
+        "castle_wall": _castle_wall(),
         "dark_void": _finish(_Canvas(6, fill=1), "어두운 빈 공간"),
         "house_red": _house("red"),
         "house_straw": _house("straw"),

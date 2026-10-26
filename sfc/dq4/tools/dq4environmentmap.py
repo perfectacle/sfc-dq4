@@ -26,7 +26,7 @@ BLOCK_ART = {
         0x05: ("red_paving", "붉은 바닥・실내와 길 공용"),
         0x06: ("stone_wall_top", "석벽 윗줄"),
         0x07: ("stone_wall", "석벽 가운데"),
-        0x08: ("stone_wall", "석벽 아랫줄"),
+        0x08: ("castle_wall", "성 몸체 석벽"),
         0x09: ("tower_cap_left", "성탑 상단 왼쪽"),
         0x0A: ("tower_cap_right", "성탑 상단 오른쪽"),
         0x0B: ("tower_left", "성탑 벽 왼쪽"),
