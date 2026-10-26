@@ -72,6 +72,8 @@ def decode_field(raw):
     word = lambda key: pick[key + '0'] | pick[key + '1'] << 8
     if (pick['i0'], pick['m0']) != (pick['i1'], pick['m1']):
         raise ValueError('field: 열림 시험과 기록 플래그가 다름')
+    if word('X') <= word('x') or word('Y') <= word('y'):
+        raise ValueError('field: 칸 범위의 끝이 시작보다 커야 함')
     return {'x': word('x'), 'y': word('y'), 'width': word('X') - word('x'), 'height': word('Y') - word('y'),
             'reward': word('r'), 'flag_index': pick['i0'], 'mask': pick['m0']}
 
@@ -141,11 +143,14 @@ def encode(name, raw, changes):
     return bytes(out)
 
 
-def dump(rom):
+def dump(rom, field=True):
     layout(rom)
-    return {'format': FORMAT, **{name: [{'index': i, **decode(name, read(rom, start + i * size, size))}
-                                       for i in range(count)] for name, (start, count, size) in TABLES.items()},
-            'field': [{'index': 0, **decode_field(read_field(rom))}]}
+    # 필드 코드가 다른 패치로 바뀐 롬에서도 표만 고치는 입력은 받도록, field 를 쓰지 않으면 읽지 않는다
+    doc = {'format': FORMAT, **{name: [{'index': i, **decode(name, read(rom, start + i * size, size))}
+                                       for i in range(count)] for name, (start, count, size) in TABLES.items()}}
+    if field:
+        doc['field'] = [{'index': 0, **decode_field(read_field(rom))}]
+    return doc
 
 
 def validate_tables(rom, doc, check_cells=False):
@@ -185,7 +190,7 @@ def edits(rom, doc):
     fields(doc, {'format', *SECTIONS}, '문서')
     if doc.get('format') != FORMAT:
         raise ValueError(f'format={FORMAT}이 필요함')
-    current = dump(rom)
+    current = dump(rom, 'field' in doc)
     out, positions, map_changed = [], [], False
     for name, (start, count, size) in TABLES.items():
         rows = doc.get(name, [])
@@ -254,7 +259,7 @@ def check(rom, doc=None):
     data = bytearray(rom.d)
     for addr, new, _, _ in rows:
         data[lorom(addr):lorom(addr) + len(new)] = new
-    result = dump(Rom(data))
+    result = dump(Rom(data), 'field' in source)
     for name in SECTIONS:
         for row in source.get(name, []):
             if any(result[name][row['index']][key] != value for key, value in row.items()):

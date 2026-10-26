@@ -141,10 +141,34 @@ class ChestWriteTests(unittest.TestCase):
             with self.subTest(rows=rows), self.assertRaises(ValueError):
                 edits(rom, {'format': FORMAT, 'field': rows})
 
+    @mock('dq5chestwrite.map_ids', return_value=[(0, i) for i in range(86)])
+    @mock('dq5chestwrite.map_dimensions', return_value=(64, 64))
+    def test_field_with_tables_high_byte_and_roundtrip(self, _, __):
+        rom = fixture()
+        doc = {'format': FORMAT, 'search': [{'index': 1, 'reward': 0x432}], 'field': [{'index': 0, 'reward': 0x1A1}]}
+        writes = patch(rom, doc)['writes']
+        self.assertEqual([w['at'] for w in writes], ['1F:F5D4', '12:E620'])
+        self.assertEqual(writes[1]['hex'], '01')
+        data = bytearray(rom.d)
+        for addr, new, _, _ in edits(rom, doc):
+            data[lorom(addr):lorom(addr) + len(new)] = new
+        self.assertEqual(dump(Rom(data))['field'][0]['reward'], 0x1A1)
+        with self.assertRaises(ValueError):
+            edits(rom, {'format': FORMAT, 'field': ['x']})
+
+    @mock('dq5chestwrite.map_ids', return_value=[(0, i) for i in range(86)])
+    def test_tables_ignore_changed_field_code(self, _):
+        rom = poke(fixture(), FIELD_CODE, 0xE2)
+        self.assertNotIn('field', dump(rom, False))
+        self.assertEqual(len(patch(rom, {'format': FORMAT, 'chests': [{'index': 0, 'reward': 1}]})['writes']), 1)
+        with self.assertRaises(ValueError):
+            edits(rom, {'format': FORMAT, 'field': [{'index': 0, 'reward': 1}]})
+
     def test_field_code_must_match_template(self):
         rom = fixture()
         for addr, value in ((FIELD_CALL + 1, 0), (FIELD_CODE, 0xE2), (FIELD_CODE + FIELD_TEMPLATE.index('i1'), 0x31),
-                            (FIELD_CODE + FIELD_TEMPLATE.index('m1'), 0x10)):
+                            (FIELD_CODE + FIELD_TEMPLATE.index('m1'), 0x10),
+                            (FIELD_CODE + FIELD_TEMPLATE.index('X0'), 10)):
             with self.subTest(addr=hex(addr)), self.assertRaises(ValueError):
                 dump(poke(rom, addr, value))
 
