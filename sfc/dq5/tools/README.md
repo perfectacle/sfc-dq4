@@ -49,7 +49,7 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5spc.py rom` | DQ5 사운드 드라이버 자료: 샘플 0x26개(`2B:EB00`~)·시퀀스 0x47개(`2E:E2E4`~)·곡 묶음(`2B:E67F`)·고정 목록. `--check spc.bin` 으로 `lua/dq5sndlog.lua` 의 `SPCDUMP` 덤프(커밋 금지)에 올라 있는 것을 롬과 견줌 |
 | `spc700.py dump 시작 [개수]` | SPC700 디스어셈블러(SPC RAM 덤프 64KB 를 받음) |
 | `dq5brr.py rom [--out 폴더]` | DQ5 악기 샘플 0x26개(`2B:EB00`~)의 BRR 을 16비트 WAV(32000Hz, 반복은 `smpl` 청크)로, ADSR·GAIN·음높이는 `index.json`. 결과는 커밋 금지 |
-| `dq5spcfile.py rom 세이브스테이트 --out 폴더` | DQ5 곡·효과음과 그 곡 변수(`E0`) 갈래마다 .spc(ID666, 갈래는 `<번호>-<갈래>`, `index.json` 에 장면·악기) 를 `songs/`·`sfx/` 와 `index.json` 으로: MesenCE 로 대기열에 `1A 00`·`01 n`(효과음 `0C n 00`)을 넣고 곡이 자리에 오른 뒤 SPC700 명령 경계에서 `lua/dq5spcdump.lua` 가 잡음. `--only 02,33`, `--free-watch` 는 빈 자리 22곳 롬 읽기 감시, `--wav` 는 libgme(`GME_LIB`)로 WAV(32000Hz, 곡 30초), `--wav-only` 는 만든 .spc 로 WAV 만, `--index-only` 는 `index.json` 의 장면·쓰는 맵만 다시. `MESENCE` 필요, 결과는 커밋 금지 |
+| `dq5spcfile.py rom 세이브스테이트 --out 폴더` | DQ5 곡·효과음과 그 곡 변수(`E0`) 갈래마다 .spc(ID666, 갈래는 `<번호>-<갈래>`, `index.json` 에 장면·악기) 를 `songs/`·`sfx/` 와 `index.json` 으로: MesenCE 로 대기열에 `1A 00`·`01 n`(효과음 `0C n 00`)을 넣고 곡이 자리에 오른 뒤 SPC700 명령 경계에서 `lua/dq5spcdump.lua` 가 잡음. `--only 02,33`, `--free-watch` 는 빈 자리 22곳 롬 읽기 감시, `--wav` 는 libgme(`GME_LIB`)로 WAV(32000Hz, 곡 30초), `--wav-only` 는 만든 .spc 로 WAV 만, `--index-only` 는 `index.json` 의 장면·쓰는 맵만 다시, `--work` 는 실행마다의 덤프 폴더(기본 `--out/runs`). `MESENCE` 필요, 결과는 커밋 금지 |
 | `dq5soundpage.py --root 폴더` | `dq5spcfile.py`·`dq5brr.py` 결과(`폴더/sound/`)로 들어 보기 페이지 `폴더/gallery/sound.html`: 재생기·장면·길이·악기·쓰는 맵, 이름 적기(JSON 복사). 에셋 저장소 갤러리용, 커밋 금지 |
 | `dq5song.py rom 번호` | DQ5 곡·효과음 시퀀스 디코더·인코더. 번호를 주면 다시 쌀 수 있는 글(`--flow` 는 트랙별 흐름 보기), `--encode 글 -o 패치.json` 으로 그 시퀀스 자리에 넣는 `dq5patch/1`(제자리, 원래 길이 이하), `--seqfile 글` 로 `--kon` 을 롬 대신 그 글과 견줌. `--reloc` 은 `2B:C3AB` 를 뱅크 `70` 의 포인터 표 고리로 돌려 길이 제한 없이 넣음(`--sample ID=파일` 새 샘플, `--set N=바이트` 곡 묶음 덮기, 롬 4MB). `--check` 로 0x47개를 흐름대로 끝까지 풀어 모르는 바이트·범위 밖 점프 검사와 다시 싸기 비교, `--kon dspw.txt --start F [--flag X --voice V --count N]` 으로 `lua/dq5dspw.lua` 기록의 KON 시각·피치(잡음은 FLG)와 견줌 |
 | `dq5brrenc.py` | DQ5 샘플 만들기: `--wave square\|triangle\|saw\|sine` 이나 `--wav` 를 BRR 로 싸서 샘플 자료(`[길이][반복 위치][ADSR1][ADSR2][GAIN][음높이][BRR]`)로. `--check rom` 롬 샘플 다시 싸기 SNR, `--nearest rom` 반복 부분 배음으로 사각·삼각·사인에 가까운 샘플 |
@@ -71,7 +71,24 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5event.py rom [주소]` | DQ5 이벤트 스크립트(`00:BEC3`). 이벤트 표 `23:E2C2` 10개의 목표 자리와 스크립트, 주소를 주면 그 스크립트, `--all` 로 `15:F150`~`F7CF` 의 86개, `--number N` 스크립트 번호 표(`23:E325`), `--starts` 번호 표·이벤트 표·코드·`02:B705` 직접 호출·점프에서 모은 106개, `--list` 시작 주소·부르는 곳(`LDA #n` + `JSL` 이나 받침 루틴 `JMP`)·첫 메시지 한 줄씩 |
 | `dq5fxvm.py rom 폴더 연출` | DQ5 전투 연출 스크립트를 `w65816.py`(작은 65C816 해석기, VRAM·CGRAM·OAM 쓰기와 일반 DMA 만 흉내)로 롬 코드 그대로 돌려 `lua/dq5fx3e.lua` `VMDUMP` 덤프와 프레임마다 견줌. `--from-entry` 연출 입구부터, `--screens 폴더` 연출 층 그림 비교, `--gif` 저장, `--inputs` 쓰기 전에 읽은 WRAM. import 용 `vm_images`·`save_gif` |
 | `dq5framediff.py 원래 패치` | `lua/dq5framedump.lua` 결과 둘(`frames.bin`)을 덤프마다 견주어 WRAM·VRAM·CGRAM·OAM 의 다른 구간과 처음 다른 덤프 번호를 보임. 기본은 DP·스택 임시 값을 뺌(`--all` 이면 모두) |
+| `dq5assets.py rom --out 폴더` | 에셋 저장소 `sfc/dq5/` 의 모든 파일을 롬 하나로 다시 뽑는 단일 진입점. 세이브스테이트를 받지 않고 전원부터 배 선실 세이브스테이트(`lua/dq5shipstate.lua`)를 만들어 MesenCE 단계에 줌. MesenCE 를 감싼 셸 스크립트로 결과를 바꾸는 설정(`SpcClockSpeedAdjustment=40`·RAM 0·프레임 건너뛰기 끔 등)을 고정. `--only sprites,samples,sound,effects,fxframes,title,motion,soundpage,gallery`, `--work` 중간물 폴더(기본 `work/dq5assets`), `--jobs`. 폴더마다 `SOURCE.txt`. `MESENCE`·`GME_LIB` 필요, 결과는 커밋 금지. 절차는 아래 「에셋 다시 뽑기」 |
+| `dq5scenes.py rom 세이브스테이트` | `dq5assets.py` 의 MesenCE 장면: `--fx-dumps 폴더` 는 `dq5warp.lua` 로 전투 상태 셋(주인공 주문·슬라임 행동·동료 일행)을 만들어 연출 81가지를 `lua/dq5fxdump.lua` 로 덤프(`dq5fx.py --export` 입력), `--motion 폴더` 는 몬스터 움직임 롬 그림과 장면 GIF 14개(장면마다 실마리 PC 를 처음 실행한 프레임 앞뒤를 `lua/dq5monlog.lua` 화면 버퍼로)와 `index.json`. `MESENCE` 필요 |
 | `dq5figures.py` | `sfc/dq5/images/` 의 그림을 다시 만듦(롬 필요, 게임 화면 비교 그림만 `work/` 덤프 필요) |
+
+## 에셋 다시 뽑기
+
+비공개 에셋 저장소 `sfc-dq4-assets` 의 `sfc/dq5/` 는 이 저장소와 롬(`rom/dq5.sfc`)만 있으면 다시 만들 수 있습니다. 세이브스테이트나 `work/` 의 중간물은 필요 없습니다.
+
+```sh
+export MESENCE=<MesenCE 실행 파일>      # 예: macOS 는 MesenCE.app/Contents/MacOS/Mesen
+export GME_LIB=<libgme 동적 라이브러리>  # 예: Homebrew 는 $(brew --prefix)/lib/libgme.dylib
+uv run --locked python sfc/dq5/tools/dq5assets.py rom/dq5.sfc --out "$ASSETS/sfc/dq5"
+```
+
+- `$ASSETS` 는 에셋 저장소 체크아웃입니다. 한 단계만 다시 뽑으려면 `--only sound` 처럼 줍니다. 모두 도는 데 MesenCE 6개를 함께 돌려 20분 남짓 걸립니다.
+- MesenCE 의 Saves 폴더가 macOS 기본 자리(`~/Library/Application Support/MesenCE/Saves`)가 아니면 `MESENCE_SAVES` 로 알려 줍니다. 전원부터 켜는 단계가 시험용 롬 이름의 SRAM 파일을 지우고 켭니다. 남은 SRAM 이 있으면 모험의 서 메뉴가 달라져 입력이 어긋납니다.
+- 사용자 설정 파일과 상관없이 같은 결과가 나오도록 결과를 바꾸는 MesenCE 설정을 인자로 고정합니다(`dq5assets.py` 의 `PINNED`). `Snes.SpcClockSpeedAdjustment` 는 0 과 40 에서 `.spc` 가 달랐습니다.
+- 같은 커밋에서 두 번 돌리면 모든 파일이 바이트까지 같습니다. 숫자와 확인한 방법은 [일지 2026-10-26-NN](../journal/2026-10-26-NN-repro.md).
 
 ## lua/: MesenCE 분석 스크립트
 
@@ -79,6 +96,7 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | --- | --- | --- | --- |
 | `lua/dq5seqtrace.lua` | DQ5: 드라이버 없이 세이브스테이트를 불러 `SEQ` 입력을 재생하며, 처음 몇 프레임 WRAM 쓰기(`WR`), 주소 실행 때 레지스터·스택 24바이트(`HOOK`), 값이 바뀐 프레임(`WLOG`), 범위 실행 순서·커버리지(`LO`·`HI`·`FROM`·`TO`·`CAP`)를 남김. `SAVEAT` 에 세이브스테이트, `SHOTS` 에 화면. 2000 프레임마다 기록을 씀 | `STATE`, `SEQ`, `WR`·`WRN`, `HOOK`, `WLOG`, `LO`·`HI`·`FROM`·`TO`·`CAP`, `SAVEAT`·`SAVE`, `SHOTS`, `MAXF` | `trc.txt`, `cover.txt`, `<SAVE>`, `sNNN.png`, `end.png` |
 | `lua/dq5savestate.lua` | 드라이버(`boot.lua`) 입력을 재생하다가 `SAVEAT` 프레임에 세이브스테이트와 화면 저장. `seqlib.sh` 로 `dq5warp.lua` 를 드라이버로 두면 장면 이동 뒤 걸어 들어간 곳을 남길 수 있음 | `SAVEAT`, `SAVENAME` | `<SAVENAME>`, `.png` |
+| `lua/dq5shipstate.lua` | DQ5: 전원부터 `dq5boot.lua` 와 같은 입력(A 를 `PERIOD` 마다)으로 배 선실까지 가서 `SAVEAT` 프레임에 세이브스테이트·화면. `LOGEVERY` 마다 맵·`21A1` 을 기록. `dq5assets.py` 가 빈 SRAM·RAM 0 으로 부름 | `SAVEAT`(6600), `SAVE`, `PERIOD`, `TAPUNTIL`, `LOGFROM`, `LOGEVERY` | `<SAVE>`, `.png`, `ship.txt` |
 | `lua/dq5boot.lua` | DQ5 부팅 시험(`dq5boottest.py` 가 부름): 전원부터 A 를 `PERIOD` 마다 누르며 `SHOTS` 프레임에 메모리 해시·화면, `CHECKAT` 에 맵 번호 | `MAXF`, `PERIOD`, `TAPUNTIL`, `SHOTS`, `CHECKAT` | `boot.txt`, `fNNNNN.png` |
 | `lua/dq5scenehash.lua` | DQ5 부팅 시험 장면 단계(`dq5boottest.py --scenes` 가 부름): 드라이버(`dq5warp.lua`)로 장면을 돌리며 `SHOTS` 프레임마다 메모리 해시·맵·`$BE` | `SHOTS`, `dq5warp.lua` 의 변수 | `scene.txt`, `fNNNNN.png`, `warp.txt` |
 | `lua/dq5freewatch.lua` | DQ5 빈 자리 감시(`dq5freesweep.py` 가 부름): `FREE` 범위(CPU, +80 거울)의 읽기·실행 횟수·첫 PC. 드라이버 뒤에 얹음 | `FREE` | `free.txt` |

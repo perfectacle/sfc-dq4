@@ -15,6 +15,7 @@ MesenCE testrunner 로 세이브스테이트(배 선실)를 불러 소리 대기
          짧게 둔다. 끝까지 들으려면 .spc 를 튼다
   --free-watch  dq5build.py 의 원래 롬 빈 자리 22곳에 롬 읽기·실행 감시를 걸고, 곡마다 읽힌 것을 free-watch.txt 로 모은다
   --index-only  에뮬레이터를 돌리지 않고 --out 의 index.json 에 장면(scene)·이 곡을 쓰는 맵(maps)만 다시 넣는다
+  --work DIR  MesenCE 실행마다의 덤프(spc.bin 등)를 둘 곳(기본 --out/runs)
   --wav-only  에뮬레이터를 돌리지 않고 --out 의 songs/·sfx/ 에 있는 .spc 와 index.json 으로 WAV 만 다시 굽는다
 """
 import argparse
@@ -272,6 +273,7 @@ def main():
     ap.add_argument('--wav-only', action='store_true')
     ap.add_argument('--free-watch', action='store_true')
     ap.add_argument('--index-only', action='store_true')
+    ap.add_argument('--work', help='MesenCE 실행마다의 덤프 폴더(기본 --out/runs)')
     a = ap.parse_args()
     mesence = os.environ.get('MESENCE')
     if not mesence:
@@ -314,7 +316,7 @@ def main():
     jobs = targets(rom, want)
     sets = {i: smp for i, _, smp in song_sets(rom)}
     maps = song_maps(rom)
-    work = os.path.abspath(os.path.join(a.out, 'runs'))
+    work = os.path.abspath(a.work or os.path.join(a.out, 'runs'))
     free = ''
     if a.free_watch:
         from dq5build import cpu, free_ranges
