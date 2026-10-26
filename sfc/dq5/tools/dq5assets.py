@@ -10,6 +10,7 @@
   sprites    sprites/                       dq5sprite.py
   samples    sound/samples/                 dq5brr.py
   sound      sound/songs/·sfx/ (.spc·.wav)   dq5spcfile.py --wav       MesenCE, GME_LIB
+  score      sound/songs/·sfx/ (.txt·.mid·.musicxml, index.json 의 score)   dq5score.py
   effects    gfx/effects/anim/              dq5effectgif.py           MesenCE
   fxframes   gfx/effects/frames/            dq5scenes.py 덤프 → dq5fx.py --export   MesenCE
   title      gfx/screens/anim/              dq5titlegif.py            MesenCE
@@ -43,13 +44,14 @@ PINNED = ['--Snes.RamPowerOnState=AllZeros', '--Snes.EnableRandomPowerOnState=fa
 SAVES = os.environ.get('MESENCE_SAVES') or os.path.join(os.path.expanduser('~'), 'Library', 'Application Support',
                                                         'MesenCE', 'Saves')
 SHIP_AT = 6800            # 전원부터 A 를 40프레임마다 누르면 6,500프레임 무렵 선실 장면이 끝나 조작할 수 있다(21A1 = 71)
-STEPS = ['sprites', 'samples', 'sound', 'effects', 'fxframes', 'title', 'motion', 'soundpage', 'gallery']
+STEPS = ['sprites', 'samples', 'sound', 'score', 'effects', 'fxframes', 'title', 'motion', 'soundpage', 'gallery']
 MESEN_STEPS = {'sound', 'effects', 'fxframes', 'title', 'motion'}
 SHIP_STEPS = {'sound', 'effects', 'fxframes', 'motion'}
 FOLDERS = {
     'sprites': ['sprites'],
     'samples': ['sound/samples'],
     'sound': ['sound/songs', 'sound/sfx'],
+    'score': ['sound/songs', 'sound/sfx'],
     'effects': ['gfx/effects/anim'],
     'fxframes': ['gfx/effects/frames'],
     'title': ['gfx/screens/anim'],
@@ -98,8 +100,9 @@ def ship_state(rom, work, env):
 
 
 def write_sources(out, step, rom_sha):
-    command = f'uv run --locked python sfc/dq5/tools/dq5assets.py rom/dq5.sfc --out $OUT --only {step}'
     for d in FOLDERS.get(step, []):
+        owners = ','.join(s for s in STEPS if d in FOLDERS.get(s, []))
+        command = f'uv run --locked python sfc/dq5/tools/dq5assets.py rom/dq5.sfc --out $OUT --only {owners}'
         folder = os.path.join(out, d)
         if os.path.isdir(folder):
             with open(os.path.join(folder, 'SOURCE.txt'), 'w') as f:
@@ -115,6 +118,8 @@ def run_step(step, rom, out, work, ship, env, jobs):
     elif step == 'sound':
         py(t + 'dq5spcfile.py', rom, ship, '--out', os.path.join(out, 'sound'), '--wav', '--jobs', str(jobs),
            '--work', os.path.join(work, 'spc'), env=env)
+    elif step == 'score':
+        py(t + 'dq5score.py', rom, '--out', os.path.join(out, 'sound'), env=env)
     elif step == 'effects':
         py(t + 'dq5effectgif.py', rom, '--state', ship, '--out', out, '--jobs', str(jobs), env=env)
     elif step == 'fxframes':
