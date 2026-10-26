@@ -4,10 +4,14 @@
 --   dspw.txt(sfc/dq5/tools/dq5song.py --kon 이 읽는 꼴), events.txt(타이틀 진입·곡 시작 프레임). MAXF 에 멈춘다.
 -- SEQ="a@600:2" 처럼 주면 그 프레임에 버튼을 누른다(메뉴로 넘어간 뒤 곡이 이어지는지 볼 때).
 -- DUMPAT=n 이면 곡을 기다리지 않고 n 프레임에 남긴다(곡이 시작하지 않을 때 SPC 상태를 볼 때).
+-- 곡 자리에 SONG 이 처음 오른 프레임을 events.txt 에 「started at frame」으로 적고, 그 뒤 SPC 샘플 색인(03FF+n)이
+-- 바뀔 때마다 「sample n slot s at frame」을 적는다(곡이 울리는 동안 보내는 샘플의 도착). 상태는 대기열이 빈 뒤
+-- QUIET(기본 0) 프레임 동안 계속 비어 있을 때 남긴다. 곡 뒤 샘플을 보내는 곡은 마지막 샘플을 보내는 동안에도 대기열이 비므로 늘린다.
 local out = os.getenv("OUT")
 local maxf = tonumber(os.getenv("MAXF") or "1200")
 local want = tonumber(os.getenv("SONG") or "10", 16)
 local dumpAt = tonumber(os.getenv("DUMPAT") or "-1")
+local quiet = tonumber(os.getenv("QUIET") or "0")
 local spcRam = emu.memType.spcRam
 local dspT = emu.memType.spcDspRegisters
 local wram = emu.memType.snesMemory
@@ -24,6 +28,7 @@ for b, f, n in string.gmatch(os.getenv("SEQ") or "", "(%a+)@(%d+):(%d+)") do
 end
 
 local frame, songAt, dumped, hook = 0, nil, false, nil
+local startedAt, emptyFor, index = nil, 0, {}
 local dspw, events, reg = {}, {}, 0
 
 emu.addMemoryCallback(function(_, value) reg = value end, emu.callbackType.write, 0xF2, 0xF2,
@@ -40,6 +45,14 @@ local function songOn()
     if emu.read(0x03B7 + i, spcRam) ~= 0 and emu.read(0x03AF + i, spcRam) == want then return true end
   end
   return false
+end
+
+-- 샘플 칸 색인(03FF+n)은 전송을 시작할 때 생기고, 받는 동안은 $0184 가 그 번호다. instrument(182E)는 둘 다 보고
+-- 받는 중인 샘플을 없는 것으로 다룬다.
+local function present(i)
+  local v = emu.read(0x03FF + i, spcRam)
+  if emu.read(0x0184, spcRam) == i then return 0xFF end
+  return v
 end
 
 local function queueEmpty()
@@ -77,7 +90,21 @@ end, emu.eventType.inputPolled)
 emu.addEventCallback(function()
   frame = frame + 1
   if frame == dumpAt then dump(); dumped = true end
-  if not songAt and songOn() and queueEmpty() then
+  if not startedAt and songOn() then
+    startedAt = frame
+    events[#events + 1] = string.format("song %02X started at frame %d", want, frame)
+    for i = 0, 0xC7 do index[i] = present(i) end
+  elseif startedAt then
+    for i = 0, 0xC7 do
+      local v = present(i)
+      if v ~= index[i] then
+        events[#events + 1] = string.format("sample %02X slot %02X at frame %d", i, v, frame)
+        index[i] = v
+      end
+    end
+  end
+  emptyFor = queueEmpty() and emptyFor + 1 or 0
+  if not songAt and songOn() and emptyFor > quiet then
     songAt = frame
     events[#events + 1] = string.format("song %02X on at frame %d", want, frame)
     -- 프레임 끝의 SPC700 은 명령 한가운데일 수 있어 다음 명령이 시작될 때 잡는다

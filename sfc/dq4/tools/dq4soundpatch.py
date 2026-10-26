@@ -37,6 +37,7 @@ SPC_CAPACITY = SPC_END - 0x2A5D
 class Replacement:
     sequence: bytes
     samples: tuple[int, ...]
+    send_first: int | None = None  # 곡을 틀기 전에 보낼 앞쪽 샘플 수 k. None 이면 모두
 
 
 def read_sets(data):
@@ -67,6 +68,8 @@ def validate_replacement(item):
     _, offsets = header(seq)
     if len(set(item.samples)) != len(item.samples) or any(not 0 <= x < 0xC8 for x in item.samples):
         raise ValueError('sample IDs must be distinct DQ5 sample-table indices')
+    if item.send_first is not None and not 0 <= item.send_first <= len(item.samples):
+        raise ValueError('send_first must be between 0 and the sample count')
     pending, seen = list(offsets), set()
     while pending:
         pc = pending.pop()
@@ -167,6 +170,25 @@ def transition_code():
     return cleanup, start
 
 
+def pinned_sequences(data):
+    pos = lorom(RESIDENT_SEQUENCES)
+    end = data.index(0xFF, pos)
+    return list(data[pos:end])
+
+
+def unpin_sequences(data, songs):
+    """늘 두는 시퀀스 목록(2B:C429, 켤 때 명령 93 으로 고정)에서 songs 를 빼고 FF 로 채운다.
+
+    늘 두는 곡은 2B 로더가 곡 앞 전송(2B:C1AE)을 건너뛰어 곡 묶음의 「곡 앞」 샘플을 보내지 않고,
+    시퀀스가 SPC 에 늘 남아 다른 모든 곡의 예산을 줄인다. 빼면 보통 곡처럼 틀 때마다 올라간다.
+    """
+    pos = lorom(RESIDENT_SEQUENCES)
+    old = pinned_sequences(data)
+    kept = [x for x in old if x not in songs]
+    data[pos:pos + len(old) + 1] = bytes(kept) + b'\xff' * (len(old) - len(kept) + 1)
+    return [x for x in old if x in songs]
+
+
 def install(base, replacements, *, sample_resources=None, map_fades=False, preview=None):
     if len(base) not in (0x180000, 0x200000, 0x400000):
         raise ValueError('base must be a headerless 1.5MB, 2MB or 4MB DQ5 build')
@@ -199,6 +221,7 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
         raise ValueError('unsupported sequence relocation hook')
     records = read_sets(data)
     old_size = sum(map(len, records))
+    unpinned = unpin_sequences(data, set(replacements))
     bank, within = DATA_BANKS.start, 0x8000
     for song, item in sorted(replacements.items()):
         if not 0 <= song < SEQUENCE_COUNT or song == 0x10:
@@ -214,9 +237,10 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
         address = bank << 16 | within
         write(address, payload, empty=True)
         write(RELOC_SEQ_TABLE + song * 3, address.to_bytes(3, 'little'))
-        records[song] = bytes([len(item.samples), len(item.samples), *item.samples])
+        first = len(item.samples) if item.send_first is None else item.send_first
+        records[song] = bytes([len(item.samples), first, *item.samples])
         allocations.append({'song': f'{song:02X}', 'at': f'{address:06X}', 'bytes': len(item.sequence),
-                            'samples': list(item.samples), 'send_first': len(item.samples)})
+                            'samples': list(item.samples), 'send_first': first})
         within += len(payload)
     for sample, payload in sorted(sample_resources.items()):
         if not 0x26 <= sample < 0xC8:
@@ -279,6 +303,7 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
                     'rom_sha1': hashlib.sha1(result).hexdigest(), 'songs': allocations,
                     'sample_table_bytes': len(table), 'sample_table_capacity': TABLE_CAPACITY,
                     'heap_start': f'{heap_start(result):04X}',
+                    'unpinned_sequences': [f'{x:02X}' for x in unpinned],
                     'map_fades': map_fades, 'preview': preview,
                     'limitations': ['Map fades apply only to the ordinary DQ5 map-song calls; battle and event timing is unchanged.',
                                     'The early fade-out is skipped when the sound queue is busy at load time; the original 1A cleanup still runs.',

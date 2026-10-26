@@ -5,6 +5,7 @@ dq5spc.py --check·dq5song.py --kon 은 원래 자리의 시퀀스와 템포 하
 1) SPC 칸 표에 오른 시퀀스·샘플이 재배치 표(70:8100·70:8300)가 가리키는 롬 자료와 같은지,
 2) 목소리마다 KON 시각이 시퀀스의 템포 변화를 따른 예상 시각과 맞는지,
 3) KON 때의 SRCN 이 곡 묶음 샘플의 칸인지, 같은 샘플끼리 음 간격이 맞는지 본다.
+곡이 울리는 동안 도착하는 샘플(곡 묶음 k < L)의 음은 도착 전이면 드라이버가 막으므로 예상 음에서 뺀다.
 """
 import argparse
 import json
@@ -105,7 +106,30 @@ def read_srcn(path):
     return hits
 
 
-def timing(seq, run, start, slots, record):
+def read_events(path):
+    """events.txt → (곡이 처음 오른 프레임, {샘플: 마지막으로 칸이 생긴 프레임})."""
+    start, on, arrivals = None, None, {}
+    for line in path.read_text().splitlines():
+        words = line.split()
+        if 'started' in words:
+            start = int(words[-1])
+        elif words[:1] == ['song'] and 'on' in words:
+            on = int(words[-1])
+        elif words[:1] == ['sample']:
+            sample, slot = int(words[1], 16), int(words[3], 16)
+            if slot == 0xFF:
+                arrivals.pop(sample, None)
+            else:
+                arrivals[sample] = int(words[-1])
+    return (on if start is None else start), arrivals
+
+
+def blocked(note_seconds, sample, start, arrivals):
+    """그 음이 샘플 도착 전에 나오는지. 첫 KON 은 곡이 오른 다음 프레임이라 1프레임을 더한다."""
+    return sample in arrivals and start + 1 + note_seconds * NTSC_FPS < arrivals[sample]
+
+
+def timing(seq, run, start, slots, record, arrivals=None):
     """KON 을 예상 음과 순서대로 짝짓고, 전 목소리 공통의 시작·속도 비를 최소제곱으로 맞춘 잔차를 본다.
 
     APU 발진기는 공칭 32kHz 보다 조금 빨라(실기·MesenCE 모두 약 32.04kHz) 공칭 속도로는 시간에 비례해 어긋난다.
@@ -120,6 +144,8 @@ def timing(seq, run, start, slots, record):
         actual = [(f, p) for f, p, _ in kon[voice] if f >= start]
         sources = [s for f, s in src[voice] if f >= start]
         expected = [n for n in expected if n[0] * 1.002 < horizon]
+        late = [n for n in expected if blocked(n[0], record[n[2]], start, arrivals or {})]
+        expected = [n for n in expected if not blocked(n[0], record[n[2]], start, arrivals or {})]
         count = min(len(expected), len(actual))
         pairs += [(expected[i][0], actual[i][0] - start) for i in range(count)]
         wrong_source = sum(sources[i] != slots.get(record[expected[i][2]]) for i in range(count))
@@ -128,7 +154,8 @@ def timing(seq, run, start, slots, record):
             if expected[i][2] == expected[i - 1][2] and actual[i][1] and actual[i - 1][1]:
                 intervals += 1
                 bad += round(12 * math.log2(actual[i][1] / actual[i - 1][1])) != expected[i][1] - expected[i - 1][1]
-        voices.append({'voice': voice, 'expected_notes': len(expected), 'kon': len(actual), 'compared': count,
+        voices.append({'voice': voice, 'expected_notes': len(expected), 'blocked_notes': len(late),
+                       'kon': len(actual), 'compared': count,
                        'wrong_srcn': wrong_source, 'intervals': intervals, 'interval_mismatches': bad,
                        'pairs': pairs[len(pairs) - count:]})
     n = len(pairs)
@@ -151,13 +178,13 @@ def main():
     args = ap.parse_args()
     data = args.rom.read_bytes()
     spc = (args.run / 'spc.bin').read_bytes()
-    events = (args.run / 'events.txt').read_text().split()
-    start = int(events[events.index('frame') + 1]) if 'frame' in events else int(events[-1])
+    start, arrivals = read_events(args.run / 'events.txt')
     seq, mem = memory(data, spc, args.song)
     record = read_sets(data)[args.song][2:]
     slots = {int(k, 16): v['slot'] for k, v in mem['samples'].items()}
     report = {'song': f'{args.song:02X}', 'tracks': seq[1], 'memory': mem,
-              'timing': timing(seq, args.run, start, slots, record)}
+              'arrivals': {f'{k:02X}': v for k, v in sorted(arrivals.items()) if k in record},
+              'timing': timing(seq, args.run, start, slots, record, arrivals)}
     print(json.dumps(report, indent=2))
     speed = report['timing']['speed_ratio']
     ok = (0.995 < speed < 1.005 and mem['sequence_ok'] and all(v['ok'] for v in mem['samples'].values())
