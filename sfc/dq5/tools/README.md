@@ -31,6 +31,8 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5fieldwrite.py rom dump N\|check\|patch --world N 지도.bin` | 필드 세계 지도 쓰기(블록 0~510, 배치 뱅크 30~3F): 세계 N 을 칸마다 16비트 블록 번호 `.bin` 으로(`dump`), 고친 지도를 RLE 두 덩어리로 싸서 늘린 롬(`--at`, 기본 `34:8000`)에 놓고 불러오기 루틴의 뱅크·주소 즉값을 바꾸는 `dq5patch/1` 목록으로(`patch`). `check` 는 세 세계를 다시 싸서 풀어 견줌. 형식은 [dq5-build-format.md](../docs/dq5-build-format.md#필드-세계-지도) |
 | `dq5mapcompile.py rom extract BC BD\|compile 목록\|check` | 블록 배치 목록(`dq5mapsrc/1`, `[x, y, 블록]` 을 칠하는 순서대로)을 put·block·fill 명령의 `dq5map/1` 로 컴파일. `extract` 는 기존 맵을 목록으로, `check` 는 364개 맵을 목록 → 명령으로 다시 만들어 셀 버퍼(슬롯을 CHR 로 되돌림)를 견줌. 형식은 [dq5-build-format.md](../docs/dq5-build-format.md#블록-배치-목록-dq5mapsrc1) |
 | `dq5mapwrite.py rom dump BC BD\|check\|patch` | 실내 맵 레코드 쓰기: 맵 레코드(머리·배치 명령·속성 패스)를 `dq5map/1` JSON 으로 풀고(`dump`), 다시 싸서 늘린 롬에 놓고 맵 포인터를 바꾸는 `dq5patch/1` 목록으로(`patch … -o`, `--at`, `--in-place`). `check` 는 364개 맵을 풀고 다시 싸 원래 바이트와 견줌. 형식은 [dq5-build-format.md](../docs/dq5-build-format.md#실내-맵-레코드-dq5map1) |
+| `dq5progresswrite.py rom dump\|patch\|check` | 성장53개·조우구역85개·상점48목록·메달/코인 교환값 고정 표. `dq5progress/1` JSON으로 일부필드만 원위치 편집, 키·품목수·미사용비트 보존. [쓰기 형식](../docs/dq5-build-format.md#성장조우상점-dq5progress1) |
+| `dq5progresscheck.py rom --state 상태 --out 폴더` | MesenCE로 성장·조우·상점 쓰기 실측 3건을 재현. 레벨업 능력치·다음 경험치, 조우 구역·몬스터·마릿수, 상점 품목·가격을 비교. `MESENCE` 필요 |
 | `dq5tables.py rom export\|patch\|check` | 게임 데이터 표 쓰기: 몬스터·물건·주문·피해량·동료 몬스터 표를 필드 이름이 붙은 JSON(`dq5tables/1`)으로 내보내고(`export -o`), 고친 JSON(일부 항목·필드만 있어도 됨)을 `dq5patch/1` 목록으로(`patch … -o`), `check` 로 붙인 롬을 다시 읽어 확인. 형식은 [dq5-build-format.md](../docs/dq5-build-format.md#게임-데이터-표-dq5tables1) |
 | `dq5freesweep.py rom 세이브스테이트 OUT` | 빈 자리 22곳(`dq5build.py free`)을 실내 맵 346곳·몬스터 236종 전투·필드 세계 0~2 에서 롬 읽기·실행 감시(`--kinds maps,battles,field`), `OUT/summary.txt` 에 읽힌 것. `MESENCE` 필요 |
 | `dq5chest.py rom [BC BD]` | DQ5 보물상자(번호·칸·열림 플래그·내용물), タンス·ツボ·タル 항목, 발밑 표(`1E:F08B`), 두 칸 앞 표(`1E:F435`), 그룹 `50` 이상의 아래층 상자 표(`1E:F4DF`). 물건 이름과 `D000`~`D009` 의 뜻까지 |
@@ -106,6 +108,7 @@ uv run --locked python sfc/dq5/tools/dq5assets.py rom/dq5.sfc --out "$ASSETS/sfc
 
 | 스크립트 | 하는 일 | 추가 환경 변수 | 결과 |
 | --- | --- | --- | --- |
+| `lua/dq5progresscheck.lua` | 성장 처리·상점 가격 계산과 조우 결과를 기록. `dq5progresscheck.py`가 환경과 드라이버를 준비 | `MODE`, `DRIVER`, `MAXF` | `observed.txt` |
 | `lua/dq5scriptcheck.lua` | 스크립트 쓰기 실측: 이벤트 조회·명령 주소, 인물 좌표·포인터·플래그 기록. `dq5scriptcheck.py`가 드라이버와 환경 변수를 준비 | `DRIVER`, `MAXF`, 드라이버 변수 | `trace.txt`(종합 `results.json`은 Python 도구) |
 | `lua/dq5seqtrace.lua` | DQ5: 드라이버 없이 세이브스테이트를 불러 `SEQ` 입력을 재생하며, 처음 몇 프레임 WRAM 쓰기(`WR`), 첫 프레임 롬 덮기(`ROMPATCH`), 주소 실행 때 레지스터·스택 24바이트(`HOOK`), 값이 바뀐 프레임(`WLOG`), 범위 실행 순서·커버리지(`LO`·`HI`·`FROM`·`TO`·`CAP`)를 남김. `SAVEAT` 에 세이브스테이트, `SHOTS` 에 화면. 2000 프레임마다 기록을 씀 | `STATE`, `SEQ`, `WR`·`WRN`, `ROMPATCH`, `HOOK`, `WLOG`, `LO`·`HI`·`FROM`·`TO`·`CAP`, `SAVEAT`·`SAVE`, `SHOTS`, `MAXF` | `trc.txt`, `cover.txt`, `<SAVE>`, `sNNN.png`, `end.png` |
 | `lua/dq5savestate.lua` | 드라이버(`boot.lua`) 입력을 재생하다가 `SAVEAT` 프레임에 세이브스테이트와 화면 저장. `seqlib.sh` 로 `dq5warp.lua` 를 드라이버로 두면 장면 이동 뒤 걸어 들어간 곳을 남길 수 있음 | `SAVEAT`, `SAVENAME` | `<SAVENAME>`, `.png` |
