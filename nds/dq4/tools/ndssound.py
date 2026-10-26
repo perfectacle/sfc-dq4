@@ -4,11 +4,13 @@
     uv run --locked python nds/dq4/tools/ndssound.py export OUT [--only songs,sfx,samples] [--seq 2,5] [--jobs N]
     uv run --locked python nds/dq4/tools/ndssound.py summary OUT.json SCENES.json...   장면 실측 + 정적 표 → 곡·효과음별 장면
     uv run --locked python nds/dq4/tools/ndssound.py gallery OUT [--scenes summary.json]
+    uv run --locked python nds/dq4/tools/ndssound.py scorecheck OUT                   악보 json 으로 MIDI 를 다시 만들어 견줌
     uv run --locked python nds/dq4/tools/ndssound.py maps                             맵 정보 표의 낮·밤 곡(ARM9)
     uv run --locked python nds/dq4/tools/ndssound.py scenes OUT.json [--maps all|sample] 에뮬레이터로 곡·효과음 요청을 기록
 
 export 는 곡마다 원본 .sseq, MIDI(루프 2회), 합성 WAV(도입 + 루프 1회 + 페이드)를(songs/), SSAR 효과음마다 합성 WAV 를
 (sfx/), SWAR 샘플을 WAV(루프는 smpl 청크)로(samples/) 내고, 루프 지점·SDAT 위치·뱅크 정의는 폴더마다 index.json 에 둔다.
+곡·효과음마다 FC 와 같은 꼴의 악보 .json(트랙별 명령·음 시간표)과 .txt(사람이 읽는 덤프)도 낸다.
 결과는 비공개 에셋 저장소의 nds/dq4/sound/ 에만 둔다(롬에서 뽑은 소리).
 
 이 파일의 앞부분(「SDAT 일반」)은 게임과 무관한 NitroSDK 형식 코드이고, 뒷부분(「DQ4」)만 이 게임에 묶여 있다.
@@ -359,8 +361,9 @@ def sin_idx(i):
 
 
 class Track:
-    def __init__(self, pc):
+    def __init__(self, pc, number=0):
         self.pc, self.wait, self.stack, self.done = pc, 0, [], False
+        self.start, self.number = pc, number
         self.prog, self.vol, self.expr, self.pan = 0, 127, 127, 64
         self.transpose, self.bend, self.bend_range, self.prio = 0, 0, 2, 64
         self.note_wait, self.tie = True, False
@@ -423,6 +426,7 @@ class Sequencer:
         self.vars = [0] * 32
         self.rng = seed
         self.events = []          # (틱, 트랙 번호, 종류, 값…)
+        self.timeline = []        # 음마다 그때의 트랙 상태(악보 json)
         self.tick_frames = []     # 틱 n 이 처리된 프레임
         self.track_offset = None
 
@@ -491,11 +495,12 @@ class Sequencer:
                 run, c = t.cond, s[t.pc]
                 t.pc += 1
             if c < 0x80:
+                at = t.pc - 1
                 vel = s[t.pc]
                 t.pc += 1
                 dur = self.arg(t, "var", mode)
                 if run:
-                    self.note(ti, t, c, vel, dur)
+                    self.note(ti, t, c, vel, dur, at)
                 continue
             if c == 0x80:
                 v = self.arg(t, "var", mode)
@@ -510,9 +515,7 @@ class Sequencer:
                 n, off = s[t.pc], self.u24(t.pc + 1)
                 t.pc += 4
                 if run:
-                    nt = Track(self.base_of(t) + off)
-                    nt.number = n
-                    self.tracks.append(nt)
+                    self.tracks.append(Track(self.base_of(t) + off, n))
             elif c == 0x94:
                 dest = self.base_of(t) + self.u24(t.pc)
                 t.pc += 3
@@ -650,9 +653,17 @@ class Sequencer:
                 v.release()
         t.tie_voice = None
 
-    def note(self, ti, t, key, vel, dur):
+    def note(self, ti, t, key, vel, dur, at=None):
         key = max(0, min(127, key + t.transpose))
         self.events.append((self.ticks, ti, "note", key, vel, dur))
+        self.timeline.append({
+            "tick": self.ticks, "frame": self.frame, "ch": ti, "addr": f"{at:04X}" if at is not None else None,
+            "op": "note", "note": key, "velocity": vel, "len": dur if t.note_wait else 0, "gate": dur,
+            "program": t.prog, "volume": t.vol, "expression": t.expr, "pan": t.pan, "transpose": t.transpose,
+            "bend": t.bend, "bend_range": t.bend_range, "priority": t.prio, "tie": t.tie,
+            "mod": dict(t.mod) if t.mod["depth"] else None,
+            "adsr": [None if x == 255 else x for x in t.adsr], "sweep": t.sweep,
+            "portamento": [t.porta_key, t.porta_time] if t.porta_on else None})
         if t.note_wait:
             t.wait = dur
         if t.tie and t.tie_voice is not None and not t.tie_voice.dead and t.tie_voice.state != "release":
@@ -751,6 +762,272 @@ class Sequencer:
         return any(not t.done for t in self.tracks)
 
 
+# --- 악보(json·txt) -----------------------------------------------------------
+# 명령 이름은 FC 악보 json(fc/dq4/docs/dq4-sound-format.md 「중간 형식」)과 뜻이 같은 것은 같은 이름을 쓴다
+SEQ_OPS = {
+    0x80: ("rest", "var"), 0x81: ("program", "var"),
+    0xC0: ("pan", "u8"), 0xC1: ("volume", "u8"), 0xC2: ("master-vol", "u8"), 0xC3: ("transpose", "s8"),
+    0xC4: ("bend", "s8"), 0xC5: ("bend-range", "u8"), 0xC6: ("priority", "u8"), 0xC7: ("note-wait", "u8"),
+    0xC8: ("tie-mode", "u8"), 0xC9: ("porta-key", "u8"), 0xCA: ("mod-depth", "u8"), 0xCB: ("mod-speed", "u8"),
+    0xCC: ("mod-type", "u8"), 0xCD: ("mod-range", "u8"), 0xCE: ("porta", "u8"), 0xCF: ("porta-time", "u8"),
+    0xD0: ("attack", "u8"), 0xD1: ("decay", "u8"), 0xD2: ("sustain", "u8"), 0xD3: ("release", "u8"),
+    0xD4: ("loop-start", "u8"), 0xD5: ("expression", "u8"), 0xD6: ("print-var", "u8"),
+    0xE0: ("mod-delay", "u16"), 0xE1: ("tempo", "u16"), 0xE3: ("sweep-pitch", "s16"),
+    0xFC: ("loop-end", None), 0xFD: ("return", None), 0xFF: ("end", None),
+}
+MIDI_CC = {"pan": 10, "volume": 7, "mod-depth": 1, "expression": 11}   # Sequencer.control 이 MIDI 로 내는 것
+NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
+
+def note_name(k):
+    return f"{NOTE_NAMES[k % 12]}{k // 12 - 1}"
+
+
+def decode_cmd(s, p, base):
+    """시퀀스 명령 하나 → (크기, 악보 항목, 사람이 읽는 글). base 는 건너뛰기 목적지의 기준(SSEQ 자료 시작, SSAR 는 자료 시작)."""
+    a = p
+    c = s[p]
+    p += 1
+    item, prefix = {}, None
+    if c in (0xA0, 0xA1, 0xA2):
+        prefix, c = {0xA0: "random", 0xA1: "variable", 0xA2: "if"}[c], s[p]
+        p += 1
+        item["prefix"] = prefix
+
+    def varlen():
+        nonlocal p
+        v = 0
+        while True:
+            b = s[p]
+            p += 1
+            v = (v << 7) | (b & 0x7F)
+            if not b & 0x80:
+                return v
+
+    def value(kind):
+        nonlocal p
+        if prefix == "random":
+            lo, hi = struct.unpack_from("<hh", s, p)
+            p += 4
+            return [lo, hi]
+        if prefix == "variable":
+            p += 1
+            return {"var": s[p - 1]}
+        if kind == "var":
+            return varlen()
+        size = {"u8": 1, "s8": 1, "u16": 2, "s16": 2}[kind]
+        v = int.from_bytes(s[p:p + size], "little", signed=kind[0] == "s")
+        p += size
+        return v
+
+    if c < 0x80:
+        vel = s[p]
+        p += 1
+        dur = value("var")
+        item |= {"op": "note", "note": c, "velocity": vel, "gate": dur}
+        text = f"note {note_name(c)}({c:02X}) vel={vel} gate={dur}"
+    elif c == 0x93:
+        n, off = s[p], int.from_bytes(s[p + 1:p + 4], "little")
+        p += 4
+        item |= {"op": "open-track", "track": n, "target": base + off}
+        text = f"open-track {n} → ${base + off:04X}"
+    elif c in (0x94, 0x95):
+        off = int.from_bytes(s[p:p + 3], "little")
+        p += 3
+        name = "jump" if c == 0x94 else "call"
+        item |= {"op": name, "target": base + off}
+        text = f"{name} ${base + off:04X}"
+    elif c == 0xFE:
+        mask = u16(s, p)
+        p += 2
+        item |= {"op": "track-alloc", "args": [mask]}
+        text = f"track-alloc {mask:04X} (트랙 {','.join(str(i) for i in range(16) if mask >> i & 1)})"
+    elif 0xB0 <= c <= 0xBD:
+        var = s[p]
+        p += 1
+        item |= {"op": f"var-{c:02X}", "args": [var, value("s16")]}
+        text = f"var-{c:02X} {item['args']}"
+    elif c in SEQ_OPS:
+        name, kind = SEQ_OPS[c]
+        item["op"] = name
+        if kind is None:
+            text = name
+        else:
+            v = value(kind)
+            if name == "rest":
+                item["len"] = v
+                text = f"rest len={v}"
+            else:
+                item["args"] = [v]
+                text = f"{name} {v}"
+                if name == "loop-start":
+                    item["count"] = v
+                    text = f"loop-start x{v or '∞'}"
+                elif name == "tempo":
+                    text = f"tempo {v} ({v / 240 * FRAME_RATE:.1f} 틱/초)"
+    else:
+        raise ValueError(f"알 수 없는 명령 {c:#x} @ {a:#x}")
+    if prefix:
+        text = f"[{prefix}] {text}"
+    return p - a, item, text
+
+
+def score_doc(seq, ident, kind, stop_tick, loop, base, extra):
+    """시퀀서를 돌린 뒤의 Sequencer → 악보 json(FC 중간 형식 꼴). 트랙마다 실제로 지난 명령을 주소 순으로 푼다."""
+    s = seq.s
+    names = [f"track{t.number}" for t in seq.tracks]
+    channels, texts = [], []
+    for ti, t in enumerate(seq.tracks):
+        items, lines = [], []
+        loop_starts = []
+        for a in sorted(t.visited):
+            size, item, text = decode_cmd(s, a, base)
+            if item["op"] == "loop-start":
+                loop_starts.append(a + size)
+            elif item["op"] == "loop-end" and loop_starts:
+                item["target"] = loop_starts.pop()
+                text += f" → ${item['target']:04X}"
+            raw = " ".join(f"{b:02X}" for b in s[a:a + size])
+            items.append({"addr": f"{a:04X}", "bytes": raw, **item})
+            lines.append(f"  {a:04X}  {raw:<12s}  {text}")
+        channels.append({"name": names[ti], "track": t.number, "start": f"{t.start:04X}",
+                         "midi_track": ti + 1, "midi_channel": MIDI_CHANNELS[ti % 16],
+                         "programs": sorted({e["program"] for e in seq.timeline if e["ch"] == ti}), "items": items})
+        texts.append((f"[{names[ti]}] ${t.start:04X}", lines))
+    by_tick = {}
+    for ev in seq.events:
+        if ev[2] == "tempo" and ev[0] <= stop_tick:
+            by_tick[ev[0]] = ev[3]
+    tempo = by_tick.pop(0, 120)
+    changes, cur = [], tempo
+    for tick in sorted(by_tick):
+        if by_tick[tick] != cur:
+            changes.append([tick, by_tick[tick]])
+            cur = by_tick[tick]
+    timeline = [e | {"ch": names[e["ch"]]} for e in seq.timeline if e["tick"] <= stop_tick]
+    doc = {"id": ident, "kind": kind, "tempo": tempo, "ticks_per_second": round(tempo / 240 * FRAME_RATE, 4),
+           "ticks_per_quarter": 48, "tempo_changes": changes,
+           "loop_start": loop["start_tick"] if loop else None,
+           "loop_len": loop["end_tick"] - loop["start_tick"] if loop else None, "end_tick": stop_tick,
+           **extra, "channels": channels, "timeline": timeline,
+           "note_ref": "items 의 note 는 전치(transpose) 전 MIDI 음 번호(60 = C4), timeline 의 note 는 전치 뒤. "
+                       "gate 는 울리는 틱, len 은 다음 명령까지 기다리는 틱(note-wait 0 이면 0, 쉼은 rest 의 len). "
+                       "addr·target 은 SSEQ(효과음은 SSAR) 파일 안 위치"}
+    return doc, texts
+
+
+def score_text(doc, head, texts):
+    """악보 json → FC 의 NN.txt 꼴 텍스트."""
+    out = [head, ""]
+    for title, lines in texts:
+        out += [title] + (lines or ["  (빈 트랙)"]) + [""]
+    out.append(f"음 사건(시퀀서 실행, 템포 {doc['tempo']} 에서 초당 {doc['ticks_per_second']:.2f}틱, 4분음표 48틱)")
+    for e in doc["timeline"]:
+        out.append(f"{e['tick']:6d} {e['ch']:8s} {note_name(e['note']):4s} ({e['note']:3d})  vel={e['velocity']:3d} "
+                   f"len={e['len']:4d} gate={e['gate']:4d} prog={e['program']:3d}")
+    for tick, v in doc["tempo_changes"]:
+        out.append(f"템포 바뀜 {tick}틱: {v}")
+    if doc["loop_start"] is not None:
+        out.append(f"되풀이: {doc['loop_start']}틱부터 {doc['loop_len']}틱")
+    out.append(f"끝: {doc['end_tick']}틱")
+    return "\n".join(out) + "\n"
+
+
+def bank_doc(sdat, bank, programs):
+    """뱅크 번호와, 악보가 쓰는 프로그램(악기)의 SBNK 정의. 파형은 samples/ 의 파일 이름(파형 묶음-파형)."""
+    bi = sdat.bank_info(bank)
+    insts = sbnk_instruments(sdat.file(bi["file"]))
+    out = {}
+    for p in sorted(programs):
+        if p >= len(insts) or not insts[p]["type"]:
+            out[str(p)] = None
+            continue
+        regs = []
+        for r in insts[p]["regions"]:
+            r = dict(r, type=INST_TYPES.get(r["type"], r["type"]))
+            if r["type"] == "PCM":
+                w = bi["wavearcs"][r["swar"]]
+                r |= {"wavearc": w, "sample": f"{w:02X}-{r['swav']:02X}.wav"}
+            regs.append(r)
+        out[str(p)] = {"type": INST_TYPES.get(insts[p]["type"], insts[p]["type"]), "regions": regs}
+    return {"id": bank, "name": sdat.name("bank", bank), "wavearcs": bi["wavearcs"]}, out
+
+
+def score_events(doc, s=None):
+    """악보 json 의 items 만으로 트랙을 돌려 Sequencer.events 와 같은 꼴의 사건을 낸다(시퀀서와 따로 짠 검산).
+    틱마다 열린 순서대로 트랙을 돌리고 그 뒤 기다림을 하나 줄인다. 새로 연 트랙은 다음 틱부터 돈다."""
+    chans = doc["channels"]
+    progs = [{int(it["addr"], 16): it for it in c["items"]} for c in chans]
+    tracks = [{"ci": 0, "pc": int(chans[0]["start"], 16), "wait": 0, "stack": [], "done": False,
+               "transpose": 0, "note_wait": True}]
+    events = []
+    for tick in range(doc["end_tick"] + 1):
+        for ti, t in enumerate(list(tracks)):
+            prog = progs[t["ci"]]
+            while t["wait"] == 0 and not t["done"]:
+                it = prog[t["pc"]]
+                if "prefix" in it:
+                    raise ValueError(f"접두 명령은 검산하지 않음 {it}")
+                op = it["op"]
+                t["pc"] += len(it["bytes"].split())
+                v = it.get("args", [None])[0]
+                if op == "note":
+                    key = max(0, min(127, it["note"] + t["transpose"]))
+                    events.append((tick, ti, "note", key, it["velocity"], it["gate"]))
+                    if t["note_wait"]:
+                        t["wait"] = it["gate"]
+                elif op == "rest":
+                    t["wait"] = it["len"]
+                elif op == "program":
+                    events.append((tick, ti, "prog", v))
+                elif op == "open-track":
+                    ci = len(tracks)
+                    if int(chans[ci]["start"], 16) != it["target"] or chans[ci]["track"] != it["track"]:
+                        raise ValueError(f"트랙 순서가 다름 {ci} {it}")
+                    tracks.append({"ci": ci, "pc": it["target"], "wait": 0, "stack": [], "done": False,
+                                   "transpose": 0, "note_wait": True})
+                elif op == "jump":
+                    t["pc"] = it["target"]
+                elif op == "call":
+                    t["stack"].append(("call", t["pc"]))
+                    t["pc"] = it["target"]
+                elif op == "loop-start":
+                    t["stack"].append(("loop", t["pc"], v))
+                elif op == "loop-end":
+                    if t["stack"] and t["stack"][-1][0] == "loop":
+                        _, pos, n = t["stack"].pop()
+                        if n != 1:
+                            t["stack"].append(("loop", pos, max(0, n - 1) if n else 0))
+                            t["pc"] = pos
+                elif op == "return":
+                    while t["stack"] and t["stack"][-1][0] != "call":
+                        t["stack"].pop()
+                    if t["stack"]:
+                        t["pc"] = t["stack"].pop()[1]
+                    else:
+                        t["done"] = True
+                elif op == "end":
+                    t["done"] = True
+                elif op == "tempo":
+                    events.append((tick, ti, "tempo", v))
+                elif op == "transpose":
+                    t["transpose"] = v
+                elif op == "note-wait":
+                    t["note_wait"] = bool(v)
+                elif op in MIDI_CC:
+                    events.append((tick, ti, "cc", MIDI_CC[op], v))
+                elif op == "bend":
+                    events.append((tick, ti, "bend", v))
+                elif op == "bend-range":
+                    events.append((tick, ti, "range", v))
+        for t in tracks:
+            if t["wait"]:
+                t["wait"] -= 1
+    return events, len(tracks)
+
+
+
+MIDI_CHANNELS = [c for c in range(16) if c != 9] + [9]   # 트랙 i → MIDI 채널(9 는 마지막에 씀)
 NOISE = None
 
 
@@ -881,7 +1158,7 @@ def write_wav(path, y, rate, loop=None):
 
 def write_midi(path, events, stop_tick, loop, ntracks, title):
     """SSEQ 사건 → SMF 형식 1, 시간 단위 48(4분음표). 트랙 i → 채널(9 는 마지막에 씀)."""
-    chans = [c for c in range(16) if c != 9] + [9]
+    chans = MIDI_CHANNELS
 
     def vlq(n):
         b = [n & 0x7F]
@@ -938,13 +1215,93 @@ def write_midi(path, events, stop_tick, loop, ntracks, title):
             f.write(t)
 
 
+def midi_notes(data):
+    """SMF → [(트랙, 켠 틱, 끈 틱, 음, 세기)] 와 템포 [(틱, 마이크로초)]. write_midi 가 낸 꼴만 읽는다."""
+    notes, tempos = [], []
+    o, ti = 14, 0
+    while o < len(data):
+        size = struct.unpack_from(">I", data, o + 4)[0]
+        p, end, tick, run, on = o + 8, o + 8 + size, 0, 0, {}
+        while p < end:
+            d = 0
+            while True:
+                b = data[p]
+                p += 1
+                d = d << 7 | (b & 0x7F)
+                if not b & 0x80:
+                    break
+            tick += d
+            st = data[p]
+            if st == 0xFF:
+                kind, n = data[p + 1], data[p + 2]
+                if kind == 0x51:
+                    tempos.append((tick, int.from_bytes(data[p + 3:p + 6], "big")))
+                p += 3 + n
+                continue
+            if st & 0x80:
+                run, p = st, p + 1
+            hi = run & 0xF0
+            if hi in (0x80, 0x90):
+                key, vel = data[p], data[p + 1]
+                if hi == 0x90 and vel:
+                    on.setdefault(key, []).append((tick, vel))
+                elif on.get(key):
+                    t0, v0 = on[key].pop(0)
+                    notes.append((ti, t0, tick, key, v0))
+                else:
+                    # 끊는 틱에 켠 음은 끔(같은 틱에서 앞에 정렬됨)이 먼저 와 짝이 없다
+                    notes.append((ti, None, tick, key, None))
+            p += 1 if hi in (0xC0, 0xD0) else 2
+        notes += [(ti, t0, None, key, v0) for key, lst in on.items() for t0, v0 in lst]
+        o, ti = end, ti + 1
+    return sorted(notes, key=lambda n: tuple(-1 if x is None else x for x in n)), tempos
+
+
+def score_check(out):
+    """OUT 의 songs/·sfx/ 악보 json 마다 items 만으로 사건을 다시 만든다. 곡은 그것으로 MIDI 를 써 .mid 와 바이트·음표를,
+    효과음은 json 의 timeline 과 음표를 견준다. → 다른 것의 수."""
+    import tempfile
+    bad = 0
+    tmp = Path(tempfile.mkdtemp())
+    for sub in ("songs", "sfx"):
+        files = sorted((Path(out) / sub).glob("*.json"))
+        files = [f for f in files if f.name != "index.json"]
+        same = notes = 0
+        for f in files:
+            doc = json.loads(f.read_text(encoding="utf-8"))
+            events, ntracks = score_events(doc)
+            mine = sorted((e[0], e[1], e[3], e[4], e[5]) for e in events if e[2] == "note")
+            names = {c["name"]: i for i, c in enumerate(doc["channels"])}
+            ref = sorted((e["tick"], names[e["ch"]], e["note"], e["velocity"], e["gate"]) for e in doc["timeline"])
+            ok = mine == ref
+            if sub == "songs":
+                loop = ({"start_tick": doc["loop_start"], "end_tick": doc["loop_start"] + doc["loop_len"]}
+                        if doc["loop_start"] is not None else None)
+                write_midi(tmp / "x.mid", events, doc["end_tick"], loop, ntracks, doc["name"])
+                a, b = (tmp / "x.mid").read_bytes(), f.with_suffix(".mid").read_bytes()
+                na, nb = midi_notes(a), midi_notes(b)
+                ok = ok and na == nb
+                print(f"{f.stem}: 음표 {len(na[0])}/{len(nb[0])} 템포 {len(na[1])}/{len(nb[1])} "
+                      f"{'MIDI 바이트 같음' if a == b else 'MIDI 바이트 다름'} {'일치' if ok else '불일치'}")
+                ok = ok and a == b
+                notes += len(nb[0])
+            else:
+                notes += len(ref)
+                if not ok:
+                    print(f"{f.stem}: items {len(mine)} timeline {len(ref)} 불일치")
+            same += ok
+            bad += not ok
+        print(f"[{sub}] {len(files)}개 중 일치 {same}, 음표 {notes}")
+    return bad
+
+
 def seq_channels(sdat, player):
     pi = sdat.player_info(player) if player is not None else None
     return len(pi["channels"]) if pi and pi["channels"] else 16
 
 
 def render_sseq(sdat, index, out_rate=32768, loops=2, fade=4.0, audio_loops=None):
-    """SSEQ index → (float32 [표본, 2], 정보 dict, 사건, 끊을 틱, 트랙 수).
+    """SSEQ index → (float32 [표본, 2], 정보 dict, 사건, 끊을 틱, 트랙 수, Sequencer, 루프).
     사건(MIDI)은 루프 loops 회, 음원은 audio_loops 회(없으면 loops) 뒤 fade 초 페이드."""
     audio_loops = audio_loops or loops
     si = sdat.seq_info(index)
@@ -970,11 +1327,11 @@ def render_sseq(sdat, index, out_rate=32768, loops=2, fade=4.0, audio_loops=None
     y, peak = finish_audio(y, out_rate, fade_from)
     info["duration"] = round(len(y) / out_rate, 3)
     info["peak"] = round(peak, 4)
-    return y, info, seq.events, stop_tick, len(seq.tracks)
+    return y, info, seq.events, stop_tick, len(seq.tracks), seq, loop
 
 
 def render_seqarc_entry(sdat, arc_index, k, out_rate=32768, max_seconds=30):
-    """SSAR 의 시퀀스 k → (float32 [표본, 2], 정보) 또는 None."""
+    """SSAR 의 시퀀스 k → (float32 [표본, 2], 정보, Sequencer, 루프, 끊을 틱) 또는 None."""
     data = sdat.file(sdat.seqarc_info(arc_index)["file"])
     base, n = u32(data, 0x18), u32(data, 0x1C)
     if k >= n:
@@ -984,14 +1341,14 @@ def render_seqarc_entry(sdat, arc_index, k, out_rate=32768, max_seconds=30):
         return None
     seq = Sequencer(data, base + off, Bank(sdat, bank), vol, seq_channels(sdat, player))
     seq.track_offset = base
-    frames, loop, _stop = run_sequence(seq, loops=2, max_seconds=max_seconds, fade_seconds=0.5, tail_seconds=3)
+    frames, loop, stop_tick = run_sequence(seq, loops=2, max_seconds=max_seconds, fade_seconds=0.5, tail_seconds=3)
     y = render_voices(seq.finished + seq.voices, out_rate, frames)[:int(frames * out_rate / FRAME_RATE) + 1]
     nz = np.nonzero(np.abs(y).max(1) > 1e-4)[0]
     y = y[:nz[-1] + 1] if len(nz) else y[:1]
     y, peak = finish_audio(y, out_rate)
     info = {"index": k, "bank": bank, "volume": vol, "player": player, "duration": round(len(y) / out_rate, 3),
             "loop": bool(loop), "silent": peak == 0}
-    return y, info
+    return y, info, seq, loop, stop_tick
 
 
 def seqarc_entries(sdat, arc_index):
@@ -1178,7 +1535,9 @@ def export(out, fs=FS, only=None, seqs=None, jobs=None):
             write_wav(d / name, pcm, rate)
             idx["01"] = {"index": 1, "kind": "STRM", "name": sd.name("strm", s_), "title": title, "wav": name,
                          "rate": rate, "format": fmt, "channels": pcm.shape[1], "duration": round(len(pcm) / rate, 3),
-                         "loopStart": loop, "sdat": fat_entry(sd, x["file"])}
+                         "loopStart": loop, "sdat": fat_entry(sd, x["file"]), "score": None,
+                         "scoreNote": "STRM(PCM 녹음)이라 악보(시퀀스)가 없음. 포팅은 FC 곡 02(序曲)의 악보를 쓴다",
+                         "fcScore": "fc/dq4/sound/songs/02.json"}
             print(f"strm {s_} {len(pcm) / rate:.1f}s", flush=True)
         write_index(d / "index.json", idx)
     if "sfx" in only:
@@ -1232,15 +1591,34 @@ def export(out, fs=FS, only=None, seqs=None, jobs=None):
 def _song_job(args):
     fs, out, i, title = args
     sd = load_sdat(fs)
-    y, info, events, stop_tick, ntracks = render_sseq(sd, i, OUT_RATE, loops=2, audio_loops=1)
+    y, info, events, stop_tick, ntracks, seq, loop = render_sseq(sd, i, OUT_RATE, loops=2, audio_loops=1)
     base = Path(out) / "songs" / stem(i, title)
     write_wav(base.with_suffix(".wav"), y, OUT_RATE)
-    fid = sd.seq_info(i)["file"]
-    base.with_suffix(".sseq").write_bytes(sd.file(fid))
-    loop = {"start_tick": info["loopStartTick"], "end_tick": info["loopEndTick"]} if "loopStartTick" in info else None
+    si = sd.seq_info(i)
+    data = sd.file(si["file"])
+    base.with_suffix(".sseq").write_bytes(data)
     write_midi(base.with_suffix(".mid"), events, stop_tick, loop, ntracks, info["name"])
+    write_score(sd, base, seq, f"{i:02X}", "song", stop_tick, loop, u32(data, 0x18), title, info["name"], si,
+                f"SSEQ 파일 {si['file']}")
     return info | {"kind": "SSEQ", "title": title, "wav": base.name + ".wav", "midi": base.name + ".mid",
-                   "sseq": base.name + ".sseq", "sdat": fat_entry(sd, fid)}
+                   "sseq": base.name + ".sseq", "score": base.name + ".json", "scoreText": base.name + ".txt",
+                   "sdat": fat_entry(sd, si["file"])}
+
+
+def write_score(sd, base, seq, ident, kind, stop_tick, loop, data_base, title, name, rec, where):
+    """악보 json(base.json)과 txt(base.txt). rec 은 SEQ 레코드나 SSAR 칸(뱅크·음량·우선·플레이어)."""
+    bank, insts = bank_doc(sd, rec["bank"], {e["program"] for e in seq.timeline})
+    extra = {"name": name, "title": title, "bank": bank, "instruments": insts, "volume": rec["volume"],
+             "channel_priority": rec["channel_priority"], "player_priority": rec["player_priority"],
+             "player": rec["player"]}
+    doc, texts = score_doc(seq, ident, kind, stop_tick, loop, data_base, extra)
+    base.with_suffix(".json").write_text(json.dumps(doc, ensure_ascii=False, separators=(",", ":")),
+                                         encoding="utf-8")
+    word = "곡" if kind == "song" else "효과음"
+    starts = " ".join(f"{c['track']}:${c['start']}" for c in doc["channels"])
+    head = (f"{word} {ident}: {title or '-'} ({name}), {where}, 뱅크 {bank['id']} {bank['name']}, 음량 {rec['volume']}, "
+            f"플레이어 {rec['player']}, 트랙 {starts}")
+    base.with_suffix(".txt").write_text(score_text(doc, head, texts), encoding="utf-8")
 
 
 def _sfx_job(args):
@@ -1249,12 +1627,18 @@ def _sfx_job(args):
     r = render_seqarc_entry(sd, 0, k, OUT_RATE)
     if r is None:
         return None
-    y, info = r
-    name = stem(k, title, 3) + ".wav"
-    write_wav(Path(out) / "sfx" / name, y, OUT_RATE)
+    y, info, seq, loop, stop_tick = r
+    base = Path(out) / "sfx" / stem(k, title, 3)
+    name = base.name + ".wav"
+    write_wav(base.with_suffix(".wav"), y, OUT_RATE)
     fid = sd.seqarc_info(0)["file"]
     arc = sd.file(fid)
-    return info | {"title": title, "wav": name,
+    _off, bank, vol, cpr, ppr, player = struct.unpack_from("<IHBBBB", arc, 0x20 + 12 * k)
+    rec = {"bank": bank, "volume": vol, "channel_priority": cpr, "player_priority": ppr, "player": player}
+    subs = sd.names["seqarc"][0][1]
+    write_score(sd, base, seq, f"{k:03X}", "sfx", stop_tick, loop, u32(arc, 0x18), title,
+                subs[k] if k < len(subs) else None, rec, f"SSAR 파일 {fid} 칸 {k}")
+    return info | {"title": title, "wav": name, "score": base.name + ".json", "scoreText": base.name + ".txt",
                    "sdat": fat_entry(sd, fid) | {"seqOffset": u32(arc, 0x18) + u32(arc, 0x20 + 12 * k)}}
 
 
@@ -1633,6 +2017,8 @@ def main(argv=None):
     y.add_argument("out")
     y.add_argument("scenes", nargs="+")
     y.add_argument("--fs", default=FS)
+    k = sub.add_parser("scorecheck", help="악보 json 의 items 로 MIDI·음표를 다시 만들어 export 결과와 견줌")
+    k.add_argument("out")
     m = sub.add_parser("maps", help="맵 정보 표의 낮·밤 곡")
     m.add_argument("--fs", default=FS)
     c = sub.add_parser("scenes", help="에뮬레이터로 장면마다 곡·효과음 요청 기록(DESMUME_CORE 필요)")
@@ -1650,6 +2036,8 @@ def main(argv=None):
         gallery(a.out, a.scenes)
     elif a.cmd == "summary":
         Path(a.out).write_text(json.dumps(summarize(a.scenes, a.fs), ensure_ascii=False, indent=1), encoding="utf-8")
+    elif a.cmd == "scorecheck":
+        sys.exit(1 if score_check(a.out) else 0)
     elif a.cmd == "maps":
         for n, day, night in map_songs(a.fs):
             print(f"{n:10s} {day:3d} {night:3d}")

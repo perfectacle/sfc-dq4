@@ -1,8 +1,8 @@
 # NDS DQ4 소리 형식과 곡 목록
 
-NDS 「ドラゴンクエストIV 導かれし者たち」(일본판)의 소리 자료(`data/data/SOUND/sound_data.sdat`)와 게임이 곡·효과음을 고르는 방식을 정리한 문서입니다. SFC DQ5 엔진의 소리를 해킹할 때 곡 대응·편곡 참고로 씁니다. 찾은 과정은 [2026-10-25-16 일지](../journal/2026-10-25-16-sound.md) 에 있습니다.
+NDS 「ドラゴンクエストIV 導かれし者たち」(일본판)의 소리 자료(`data/data/SOUND/sound_data.sdat`)와 게임이 곡·효과음을 고르는 방식을 정리한 문서입니다. SFC DQ5 엔진의 소리를 해킹할 때 곡 대응·편곡 참고로 씁니다. 찾은 과정은 [2026-10-25-16 일지](../journal/2026-10-25-16-sound.md) 에, 악보 json·txt 는 [2026-10-26-01 일지](../journal/2026-10-26-01-score.md) 에 있습니다.
 
-- 도구: [ndssound.py](../tools/ndssound.py). `info`(SDAT 목록), `export`(곡·효과음 합성, MIDI, 샘플·뱅크), `maps`(맵 곡 표), `scenes`(에뮬레이터 실측), `summary`(곡별 장면), `gallery`. 앞부분은 게임과 무관한 SDAT 코드(SDAT·SSEQ·SSAR·SBNK·SWAR·STRM 읽기, 합성, MIDI)이고 뒷부분만 이 게임에 묶여 있습니다.
+- 도구: [ndssound.py](../tools/ndssound.py). `info`(SDAT 목록), `export`(곡·효과음 합성, MIDI, 악보 json·txt, 샘플·뱅크), `scorecheck`(악보로 MIDI 를 다시 만들어 견줌), `maps`(맵 곡 표), `scenes`(에뮬레이터 실측), `summary`(곡별 장면), `gallery`. 앞부분은 게임과 무관한 SDAT 코드(SDAT·SSEQ·SSAR·SBNK·SWAR·STRM 읽기, 합성, MIDI)이고 뒷부분만 이 게임에 묶여 있습니다.
 - 추출물(원본 SSEQ·합성 WAV·MIDI·샘플)은 롬에서 뽑은 소리라 비공개 에셋 저장소 `nds/dq4/sound/` 에만 둡니다([아래](#추출물)).
 - 기준 롬: `rom/dq4ds.nds`(SHA-1 은 [README](../../../README.md#원본-롬)). 주소는 ARM9 주소(메인 RAM `0x02000000`~)입니다.
 
@@ -82,6 +82,31 @@ SSEQ 는 머리 `0x18` 에 자료 시작(u32)이 있고, SSAR 는 `0x18` 자료 
 
 합성 결과는 근사입니다. 에뮬레이터(desmume libretro)의 소리를 녹음해 견주려 했으나, 이 코어를 화면 없이 돌려 받은 소리는 장면을 바꿔도 스펙트럼이 거의 같고 리듬이 보이지 않아(동기 모드 출력으로 보임) 대조하지 못했습니다(「남은 것」).
 
+### 악보(JSON·TXT)
+
+SFC DQ5 의 SPC 악보로 옮길 때 FC 곡과 같은 변환기를 쓰려고, FC 의 `NN.json`·`NN.txt`([FC 「중간 형식」](../../../fc/dq4/docs/dq4-sound-format.md#중간-형식json))와 같은 꼴로 냅니다. `export` 가 곡·효과음마다 MIDI·WAV 를 만드는 같은 시퀀서 실행에서 씁니다.
+
+| 키 | 내용 | FC 와 다른 점 |
+| --- | --- | --- |
+| `id`, `kind` | 번호(16진, 곡 2자리·효과음 3자리), `song`/`sfx` | 같음 |
+| `tempo`, `ticks_per_second`, `tempo_changes` | 틱 0 의 템포(`E1` 이 없으면 120), 그 템포의 실제 틱 속도(템포 ÷ 240 × 191.96), 값이 바뀐 [틱, 템포](같은 틱에 여럿이면 마지막) | 템포 값의 단위가 다름(SSEQ 는 4분음표/분) |
+| `ticks_per_quarter` | 48 | NDS 만 |
+| `loop_start`, `loop_len`, `end_tick` | 곡 루프의 시작 틱·길이(없으면 `null`), 기록을 멈춘 틱(루프 곡은 루프 2회 끝, MIDI 와 같음) | 같음 |
+| `name`, `title` | `SYMB` 이름, 사운드 테스트 이름 | NDS 만 |
+| `bank`, `instruments` | SBNK 번호·이름·파형 묶음, 이 악보가 쓰는 프로그램마다 SBNK 정의(종류, 구간마다 음 범위·파형·기준 음·ADSR·팬, PCM 은 `samples/` 파일 이름) | FC 의 `channels[].bank` 는 롬 뱅크라 뜻이 다름 |
+| `volume`, `channel_priority`, `player_priority`, `player` | SEQ 레코드(효과음은 SSAR 칸) | NDS 만 |
+| `channels[]` | 트랙마다 `name`(`trackN`)·`track`(트랙 번호)·`start`·`midi_track`·`midi_channel`·`programs` 와 `items[]` | FC 는 기종 채널(`pulse1` 등) 4개 |
+| `items[]` | 그 트랙이 시퀀서 실행에서 지난 명령을 주소 순으로 푼 것. 모두 `addr`·`bytes`·`op`. `note` 는 `note`(전치 전 MIDI 음 번호)·`velocity`·`gate`(울리는 틱), `rest` 는 `len`, `jump`·`call`·`open-track` 은 `target`(`open-track` 은 `track` 도), `loop-start` 는 `count`(0 은 끝없이), `loop-end` 는 `target`(되풀이 첫 명령), 그 밖은 `args` | 아래 |
+| `timeline[]` | 음마다 `tick`·`frame`·`ch`·`addr`·`note`(전치 뒤)·`velocity`·`len`·`gate`·`program`·`volume`·`expression`·`pan`·`transpose`·`bend`·`bend_range`·`priority`·`tie`·`mod`(깊이가 0 이 아닐 때 깊이·속도·종류·폭·지연)·`adsr`(트랙이 덮어쓴 값, 없으면 `null`)·`sweep`·`portamento` | FC 는 쉼·이음도 있음. NDS 는 쉼이 따로 없어 음만 |
+
+- `addr`·`target` 은 SSEQ 파일(효과음은 SSAR 파일) 안 위치입니다. FC 와 같이 `addr` 는 16진 글자, `target` 은 정수입니다.
+- 음 길이: FC 의 음은 `len`(다음 음까지)과 `gate`(울리는 길이)를 함께 가집니다. SSEQ 는 `note-wait`(`C7`)가 0 이면 음이 기다리지 않고 쉼(`rest`)이 시간을 넘깁니다. 곡은 433트랙 모두 0 입니다. 그래서 `items` 의 음에는 `gate` 만 두고, `timeline` 의 `len` 은 그때 기다린 틱(`note-wait` 0 이면 0)입니다.
+- `op` 이름: 뜻이 같은 것은 FC 와 같게 씁니다(`note`·`rest`·`tempo`·`jump`·`call`·`return`·`transpose`·`end`). 나머지는 SSEQ 명령 그대로입니다: `program`(`81`), `pan`·`volume`·`master-vol`·`expression`(`C0`·`C1`·`C2`·`D5`), `bend`·`bend-range`(`C4`·`C5`), `priority`·`note-wait`·`tie-mode`(`C6`~`C8`), `porta-key`·`porta`·`porta-time`(`C9`·`CE`·`CF`), `mod-depth`·`mod-speed`·`mod-type`·`mod-range`·`mod-delay`(`CA`~`CD`·`E0`), `attack`·`decay`·`sustain`·`release`(`D0`~`D3`, 엔벨로프 덮어쓰기), `loop-start`·`loop-end`(`D4`·`FC`), `sweep-pitch`(`E3`), `open-track`·`track-alloc`(`93`·`FE`). FC 의 `tie`(앞 음 잇기 음표)는 SSEQ 에서 `tie-mode` 를 켠 뒤의 음이라 이름을 나눴습니다. FC 의 `loop` 는 끝에 횟수가 있고 SSEQ 는 처음(`loop-start`)에 있습니다.
+- `items` 는 정적 디스어셈블이 아니라 시퀀서가 실제로 지난 명령입니다(트랙 번호마다 `Track.visited`). 곡은 끝까지 따라가므로 위 명령 표의 수와 모두 같습니다(음 42,970, 쉼 117,419, 음량 77,342 등). 부르기(`call`)로 들어간 서브루틴은 그것을 부른 트랙마다 들어갑니다.
+- txt 는 FC 처럼 `곡 NN: 이름 (SYMB), SSEQ 파일, 뱅크, 음량, 플레이어, 트랙 번호:시작` 머리, 트랙마다 `[trackN] $시작` 과 `주소  바이트  명령`, 끝에 음 사건(틱, 트랙, 음 이름, 음 번호, 세기, len, gate, 프로그램)·템포 바뀜·되풀이·끝 틱입니다.
+
+검증(`scorecheck`): `items` 만으로 트랙을 돌리는 해석기(시퀀서와 따로 짠 것)로 사건을 다시 만들어, 곡은 같은 MIDI 쓰기로 SMF 를 써 `export` 의 `.mid` 와 견주고, 효과음은 json 의 `timeline` 과 음을 견줍니다. 곡 50개 모두 MIDI 바이트가 같았고(음 98,675개, 템포 사건 포함), 효과음 634개도 모두 음(3,460개)이 같았습니다. 이번 `export` 의 `.mid`·`.sseq`·`.wav`(곡 폴더 151개, 효과음 634개)는 PR #328 때 에셋 저장소에 올린 것과 바이트가 같습니다.
+
 ## SBNK·SWAR·STRM
 
 - SBNK: `0x38` 악기 칸 수, `0x3C` 부터 칸마다 4바이트(u8 종류, u16 위치). 종류 1·2·3 은 위치에 10바이트(u16 파형, u16 파형 묶음 칸, u8 기준 음, u8 어택·디케이·서스테인·릴리스, u8 팬), 0x10 은 (낮은 음, 높은 음) 뒤 음마다 12바이트(u16 종류 + 10바이트), 0x11 은 8바이트 위쪽 음 경계 뒤 구간마다 12바이트입니다. 54개 뱅크의 악기 칸은 빈 칸 4,087, PCM 194, PSG 7, 잡음 27, 드럼 세트 21(구간 236), 키 분할 195(구간 556)입니다.
@@ -153,7 +178,7 @@ SSEQ 는 머리 `0x18` 에 자료 시작(u32)이 있고, SSAR 는 `0x18` 자료 
 
 | 곡 | 사운드 테스트 이름 | SYMB | 장면 | FC 같은 장면 | DQ5 같은 장면 |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 序曲 | `STRM_OVERTURE32_8`(스트림) | 오프닝 크레디트·타이틀 [실측: SSEQ 요청 없이 이 스트림 자료가 RAM 버퍼에 차례로 실림] | `02` 타이틀 | `10` 전원 뒤 첫 곡 |
+| 1 | 序曲 | `STRM_OVERTURE32_8`(스트림) | 오프닝 크레디트·타이틀 [실측: SSEQ 요청 없이 이 스트림 자료가 RAM 버퍼에 차례로 실림]. 악보 없음(PCM 녹음), 포팅은 FC `02` 악보를 씀 | `02` 타이틀 | `10` 전원 뒤 첫 곡 |
 | 2 (`02`) | 王宮のメヌエット | `M02_MENUET` | 성 낮 [실측 84맵] | `03` 성 | |
 | 3 (`03`) | 王宮のメヌエット(夜) | `M03_NIGHT_MENUET` | 성 밤 [실측 75맵] | `03`(밤에도 같은 곡) | |
 | 4 (`04`) | インテルメッツォ | `M04_INTERMEZZO` | 못 찾음 | | |
@@ -270,10 +295,12 @@ SSEQ 는 머리 `0x18` 에 자료 시작(u32)이 있고, SSAR 는 `0x18` 자료 
 | --- | --- | --- |
 | `songs/NN-이름.sseq` | SDAT 의 원본 SSEQ | 50 |
 | `songs/NN-이름.mid` | MIDI(SMF 1, 4분음표 48틱, 트랙마다 채널, `loopStart`/`loopEnd` 표시, 루프 2회 펼침) | 50 |
+| `songs/NN-이름.json`·`.txt` | 악보(아래 「악보」). 서곡 `01` 은 스트림이라 없음 | 50 |
 | `songs/NN-이름.wav` | 합성(32768Hz 스테레오, 도입 + 루프 1회 + 4초 페이드). `01-序曲.wav` 는 스트림을 그대로 | 50 + 1 |
 | `sfx/NNN-이름.wav` | 효과음 합성(루프는 2회 + 0.5초, 30초까지) | 634 |
+| `sfx/NNN-이름.json`·`.txt` | 효과음 악보 | 634 |
 | `samples/SS-NN.wav` | SWAR 샘플(16비트, 루프는 `smpl` 청크). SS 는 파형 묶음 번호 | 362 |
-| `songs/`·`sfx/`·`samples/index.json` | 번호·이름·길이·루프 지점(초·표본·틱)·SDAT 위치(FAT 파일 번호·위치·크기, 효과음은 SSAR 안 시퀀스 위치)·쓰는 장면. `samples/index.json` 에 SBNK 악기 정의(종류·구간·파형·기준 음·ADSR·팬) 54개 | |
+| `songs/`·`sfx/`·`samples/index.json` | 번호·이름·길이·루프 지점(초·표본·틱)·SDAT 위치(FAT 파일 번호·위치·크기, 효과음은 SSAR 안 시퀀스 위치)·쓰는 장면·악보 파일(`score`·`scoreText`). `01` 은 `score: null` 과 까닭(`scoreNote`), FC 서곡 악보 자리(`fcScore`: `fc/dq4/sound/songs/02.json`). `samples/index.json` 에 SBNK 악기 정의(종류·구간·파형·기준 음·ADSR·팬) 54개 | |
 | `gallery/index.html` | 갤러리(`audio` 태그, `preload="none"`) | |
 
 곡 WAV 를 루프 2회로 두면 726MB 라 1회로 줄였고(약 400MB), 루프 2회는 MIDI 와 `index.json` 의 루프 지점으로 씁니다. `.mini2sf` 는 DS 쪽 재생 드라이버 롬이 있어야 만들 수 있어 두지 않았습니다(「남은 것」).
@@ -281,6 +308,7 @@ SSEQ 는 머리 `0x18` 에 자료 시작(u32)이 있고, SSAR 는 `0x18` 자료 
 ```sh
 uv run --locked python nds/dq4/tools/ndssound.py info
 uv run --locked python nds/dq4/tools/ndssound.py export OUT
+uv run --locked python nds/dq4/tools/ndssound.py scorecheck OUT     # 악보 json → MIDI 가 .mid 와 같은지
 DESMUME_CORE=… uv run --locked python nds/dq4/tools/ndssound.py scenes work/sc0.json --maps all --shard 0/4   # 1/4·2/4·3/4 도
 uv run --locked python nds/dq4/tools/ndssound.py summary work/summary.json work/sc0.json work/sc1.json work/sc2.json work/sc3.json
 uv run --locked python nds/dq4/tools/ndssound.py gallery OUT --scenes work/summary.json
@@ -289,6 +317,7 @@ uv run --locked python nds/dq4/tools/ndssound.py gallery OUT --scenes work/summa
 ## 남은 것
 
 - `.mini2sf`(DS 재생 드라이버를 담은 2SF) 만들기.
+- 악보 json 을 SPC 악보로 옮기는 변환기와, DS 에만 있는 곡(ピサロ 26·27·51, 밤 3·15, 17·33)의 옮김. 악기(SBNK 프로그램)를 DQ5 악기에 대응시키는 표.
 - 합성과 실기(에뮬레이터) 소리의 대조. desmume libretro 코어를 화면 없이 돌려 받은 소리가 장면과 무관하게 뭉개져 있어 견주지 못했습니다. 코어의 소리 동기 방식을 바꾸거나 다른 에뮬레이터로 녹음해야 합니다.
 - 쓰는 곳을 못 찾은 곡: 4, 장 끝 6·8·10·13, ME 39·40·42·44·48·49·50. 승리 팡파르(FC `11`, DQ5 `1F`)가 DS 에 있는지(6장 승리에서 곡 요청 없음).
 - 5·6장 선두 인물별 필드 곡의 실측(마차가 있으면 늘 20). 마차 칸으로 본 `0x020C4EB0` 이 맞는지.

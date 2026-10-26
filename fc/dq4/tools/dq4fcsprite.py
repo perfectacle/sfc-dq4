@@ -44,6 +44,9 @@ FIELD_OFFS = 0x8239      # 08:$8237+2: 모양마다 다음 타일까지 부호 �
 OBJ_PAL = 0x8703         # 08:$86F2 가 $0609 에 복사(FF 로 끝)
 FIELD_COUNT = 108        # 표는 08:$A1BB(블록 모양 표) 앞에서 끝난다
 VEHICLES = (0x1E, 0x97AE, 10)   # 1E:$9799 가 필드에서 칸 4~D 에 올리는 그림 번호 10개
+# 1D:$8D26: 필드 3 에서 2프레임마다 칸 C(막이)의 타일 $7500~+3 에 쓰는 두 그림(64바이트씩)
+BARRIER = (0x1D, (0x8D6D, 0x8DAD))
+BALLOON_PAL0 = 0x0F   # 1E:$85D2: 열기구가 떠 있는 동안 OBJ 팔레트 0 색 2($060A). 내려앉으면 1E:$866D 가 되돌림
 DIRS = ('북', '동', '남', '서')  # 블록 = 방향 × 2 + 걸음. 방향은 $7000(0 위 1 오른쪽 2 아래 3 왼쪽)
 SHEET_ROWS = (2, 3, 1, 0)        # 시트 행 순서: 남·서·동·북(sfc/dq4/docs/dq4-sprite-format.md 시트와 같은 순서)
 B14 = 0x14
@@ -1019,6 +1022,7 @@ def check_field(prg, d):
         if hits:
             slots[sl] = hits[0]
     tiles_ok = tiles_n = 0
+    override = {}
     for sl, n in sorted(slots.items()):
         got = s[0x1200 + sl * 64:0x1240 + sl * 64]
         table, ch = field_load(prg, n, got[0])
@@ -1033,6 +1037,14 @@ def check_field(prg, d):
                 n = slots[sl] = raw_number(alt[0])
                 table, ch = field_load(prg, n, got[0])
                 ok = True
+        if sl == 0xC and ram[0x28] == 0 and ram[0x65] == 3:
+            # 막이 그림은 1D:$8D26 이 $0300 큐로 덮어써, 덤프 프레임에 따라 두 그림 중 하나다
+            t0 = s[0x1500]
+            pics = [bytes(rd(prg, BARRIER[0], a + i) for i in range(64)) for a in BARRIER[1]]
+            k = next((i for i, v in enumerate(pics) if chr_[t0 * 16:t0 * 16 + 64] == v), 0)
+            ch = {t0 + i: pics[k][16 * i:16 * i + 16] for i in range(4)}
+            override.update(ch)
+            print(f'  칸 C 는 필드 3 막이: 타일 {t0:02X}~ 에 1D:${BARRIER[1][k]:04X} 그림')
         cb = sum(chr_[t * 16:t * 16 + 16] != v for t, v in ch.items())
         tiles_n += len(ch)
         tiles_ok += len(ch) - cb
@@ -1053,6 +1065,13 @@ def check_field(prg, d):
             continue
         sl, n, b = found[0]
         px, pal = field_frame(prg, n, b)
+        if sl == 0xC and override:
+            px = [[0] * 16 for _ in range(16)]
+            for k in range(4):
+                t, a = s[0x1200 + sl * 64 + b * 8 + 2 * k], s[0x1201 + sl * 64 + b * 8 + 2 * k]
+                tp = flip(planes(override[t]), a & 0x40, a & 0x80)
+                for yy in range(8):
+                    px[(k >> 1) * 8 + yy][(k & 1) * 8:(k & 1) * 8 + 8] = tp[yy]
         groups += 1
         # 0F:$D869: 블록 = ($7000 아래 2비트) × 2 + ($0526 bit7). 그 칸을 쓰는 보이는 인물($6F60 < 80)이
         # 모두 같은 방향이면 견준다(칸 0 은 주인공 하나). 같은 그림의 블록이 여럿이면(물결처럼 방향이 없는 그림) 그중 하나면 된다
@@ -1071,9 +1090,12 @@ def check_field(prg, d):
                     px_n += 1
                     px_ok += tp[yy][xx] == px[(k >> 1) * 8 + yy][(k & 1) * 8 + xx]
     pal = [c & 0x3F for c in open(os.path.join(d, 'end.pal'), 'rb').read()]
-    pal_ok = [pal[17 + 4 * i:20 + 4 * i] for i in range(4)] == obj_palettes(prg)
+    want = obj_palettes(prg)
+    got = [pal[17 + 4 * i:20 + 4 * i] for i in range(4)]
+    balloon = [[want[0][0], BALLOON_PAL0, want[0][2]]] + want[1:]
+    pal_ok = got in (want, balloon)
     print(f'  화면 OAM 묶음 {groups}개, 픽셀 {px_ok}/{px_n} 같음, 방향 {dir_ok}/{dir_n} 같음. CHR 타일 {tiles_ok}/{tiles_n},'
-          f' OBJ 팔레트 {"같음" if pal_ok else "다름 " + bytes(pal[16:32]).hex(" ")}')
+          f' OBJ 팔레트 {("같음(열기구가 뜬 동안의 팔레트 0)" if got == balloon else "같음") if pal_ok else "다름 " + bytes(pal[16:32]).hex(" ")}')
     return bad == 0 and px_ok == px_n and dir_ok == dir_n and pal_ok
 
 

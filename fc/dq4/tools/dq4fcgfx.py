@@ -153,7 +153,7 @@ COPULA = r'(なるぞ|だよ|です|だ|じゃ|よ|ね)$'
 
 
 def place_table(prg, data):
-    """그룹마다 {'name', 'src'}. 롬에 그룹 → 이름 표는 없어서 세 군데서 차례로 찾는다.
+    """그룹마다 {'name', 'src'}. 롬에 그룹 → 이름 표는 없어서 여러 군데서 차례로 찾는다.
     1. 'rula': ルーラ 목적지 레코드(dq4field.places)가 이름표(0B:$B634)의 순번과 같은 순서이고, 필드 자리가 입구 표의
        한 그룹과 2칸 안에 있거나 맵 레코드가 그룹을 바로 적는다.
     2. 'talk': 그 그룹 인물 대사(낮·밤, 조건 갈래 전부)에서 「ここは」「ようこそ」 뒤 30글자 안에 이름표의 이름이 처음
@@ -161,6 +161,7 @@ def place_table(prg, data):
     3. 'talk-phrase': 「ここは X」의 X(끝의 だ·です 따위를 떼고)가 장소 이름씨(PLACE_NOUN)로 끝나거나 가타카나가 든
        8글자 이하이면 그중 가장 짧은 것(예: 13 「サラン」, 20 「きこりのいえ」).
     4. 'talk-kind': 「この とう」「この どうくつ」처럼 그 장소를 가리키는 말만 있으면 그 말(이름이 아니라 갈래).
+    4.5 'talk-dir': 다른 그룹 대사의 「きたの どうくつ」처럼 방위로 가리키는 말을 필드 자리로 이어 붙인다(dir_names).
     5. 'link': 남은 그룹이 필드를 거치지 않는 출구(place_links)로 1~3 의 이름이 붙은 그룹과 이어져 있으면 가장 가까운
        그룹의 이름. 거리가 같은데 이름이 다른 그룹이 있으면 붙이지 않는다. 'via' 에 거쳐 간 출구를 적는다
        (예: 2C 「てんくうじょう」 ← 2C/10 (03,05) → 2D/00). 4 는 갈래라 퍼뜨리지 않는다.
@@ -172,12 +173,14 @@ def place_table(prg, data):
     못 찾은 그룹은 넣지 않는다."""
     rom = dq4text.Rom(data)
     names = place_list(prg)
-    text = {}
+    text, said = {}, {}
     for g, k, *_ in all_maps(prg):
         for night in (False, True):
             for r in dq4talk.npc_list(prg, g, k, night):
                 for msg in talk_msgs(prg, dq4talk.talk_id(r, night)):
-                    text.setdefault(g, []).append(msg_text(rom, msg).replace('　', '').replace(' ', '').replace('\n', ''))
+                    t = msg_text(rom, msg).replace('　', '').replace(' ', '').replace('\n', '')
+                    text.setdefault(g, []).append(t)
+                    said.setdefault(g, {}).setdefault(msg, t)
     out = {}
     for e in dq4field.places(prg):
         if e['name'] and e['group'] is not None:
@@ -210,10 +213,50 @@ def place_table(prg, data):
         kinds = {m.group(1) for t in text[g] for m in re.finditer(r'この(とうだい|とう|どうくつ|ほこら)', t)}
         if kinds:
             out[g] = {'name': min(kinds, key=lambda x: (len(x), x)), 'src': 'talk-kind'}
+    out.update(dir_names(prg, said, out))
     out.update(link_names(prg, out))
     out.update(near_names(prg, out))
     out.update({g: v | {'label': True} for g, v in link_names(prg, out, ('near',)).items()})
     return out
+
+
+DIRS = {'ひがし': (1, 0), 'にし': (-1, 0), 'みなみ': (0, 1), 'きた': (0, -1)}
+DIR_RE = re.compile(r'(ひがし|にし|みなみ|きた)(?:に|の)(?:ある|あるという)?(とうだい|とう|どうくつ|ほこら)')
+
+
+def dir_names(prg, said, names):
+    """place_table 4.5 단계 'talk-dir': 그룹 H 인물 대사의 「きたの どうくつ」처럼 방위 + 장소 이름씨를 H 의 필드 입구에서
+    그 방위 45도 안(앞으로 간 거리 ≥ 옆 거리)에 입구가 있는 그룹 중 맨해튼 거리가 가장 가까운 것에 붙인다. 후보는 이름이
+    없는 그룹과, 'talk-kind' 가 같은 이름씨인 그룹뿐이다(마을·성은 이름씨가 달라 뺀다). 가장 가까운 것이 둘이거나, 한 그룹에
+    다른 이름이 둘 모이면 붙이지 않는다. 'dir' 에 (H, 메시지, dx, dy)를 적는다."""
+    ents = dq4field.entrances(prg)
+    pos = {}
+    for e in ents:
+        pos.setdefault(e[0], []).append((e[7] or 0, e[1], e[2]))
+    hits = {}
+    for h in sorted(said):
+        if h not in pos:
+            continue
+        f, hx, hy = pos[h][0]
+        for msg, t in sorted(said[h].items()):
+            for m in DIR_RE.finditer(t):
+                (ux, uy), noun = DIRS[m.group(1)], m.group(2)
+                cand = []
+                for g, es in pos.items():
+                    v = names.get(g)
+                    if g == h or (v and not (v['src'] == 'talk-kind' and v['name'] == noun)):
+                        continue
+                    for ff, x, y in es:
+                        dx, dy = x - hx, y - hy
+                        along, side = dx * ux + dy * uy, abs(dx * uy - dy * ux)
+                        if ff == f and along > 0 and side <= along:
+                            cand.append((abs(dx) + abs(dy), g, dx, dy))
+                cand.sort()
+                if not cand or (len(cand) > 1 and cand[1][0] == cand[0][0] and cand[1][1] != cand[0][1]):
+                    continue
+                _, g, dx, dy = cand[0]
+                hits.setdefault(g, {}).setdefault(m.group(1) + 'の' + noun, (h, msg, dx, dy))
+    return {g: {'name': n, 'src': 'talk-dir', 'dir': v} for g, d in hits.items() if len(d) == 1 for n, v in d.items()}
 
 
 def near_names(prg, names):
@@ -330,6 +373,9 @@ def map_records(prg, names):
         rec = {'g': g, 'k': k, 'type': mid & 0x3F, 'code': mid, 'name': name, 'name_src': src, 'stem': stem}
         if 'via' in names.get(g, {}):
             rec['name_via'] = names[g]['via']
+        if 'dir' in names.get(g, {}):
+            h, msg, dx, dy = names[g]['dir']
+            rec['name_dir'] = {'group': h, 'message': f'{msg:04X}', 'dx': dx, 'dy': dy}
         if 'near' in names.get(g, {}):
             f, x, y, d, h = names[g]['near']
             rec['name_near'] = {'field': f, 'x': x, 'y': y, 'distance': d, 'group': h}
@@ -660,20 +706,26 @@ def gate_chunks(prg, ram, wram):
     다른 데 쓰이므로, 그 넷이 이 단계표와 맞고 $53/$54 를 되짚은 시작이 1B:$889C 의 값일 때만 연출 중으로 본다.
     마지막 단계는 조각을 성문 블록의 원래 타일 자리에 쓰고 $7600 을 롬 정의로 되돌리므로, 연출이 끝나 $53~$57 이
     덮이고 $0540 이 FF 로 지워진 뒤에도(02/00) 그 맵을 나갈 때까지 CHR 에 열린 그림이 남는다. 그때는 롬 속성이
-    A0·A2(성문)인 블록 넷의 속성($6F40 + 블록)이 1B:$885F 가 바꾼 80·80·24·24 이면 조각 16개를 모두 쓴 것으로 본다."""
+    A0·A2(성문)인 블록 넷의 속성($6F40 + 블록)이 1B:$885F 가 바꾼 80·80·24·24 이면 조각 16개를 모두 쓴 것으로 본다.
+    02/00 에 들어올 때는 1E:$8F63 이 $0541 에 발밑 블록을 두고 화면을 일행 자리로 다시 그린 뒤에야 $0540 과
+    $53~$57 을 정하므로, 그 사이(성문 속성이 아직 롬 값)와 첫 조각 전($57 = $55 = 0)도 조각 0개로 연출 중이다."""
     if not ram[0x28]:
         return [], False, ()
     step, n = ram[0x57], ram[0x55]
     done = min(4 * step + n, 16)
     base = (ram[0x53] | ram[0x54] << 8) - 0x40 * done
-    running = (ram[0x540] != 0xFF and step <= 4 and n <= 4 and ram[0x56] == 8 * step and 0 < done
-               and base in GATE_SRC)
+    running = (ram[0x540] != 0xFF and step <= 4 and n <= 4 and ram[0x56] == 8 * step and base in GATE_SRC)
     if running:
         gate = (ram[0x540], ram[0x540] + 1, ram[0x541], ram[0x541] + 1)
     else:
         prop = dq4block.Map(prg, ram[0x63], ram[0x64]).blocks['prop']
         gate = tuple(sorted(b for b, v in prop.items() if v in (0xA0, 0xA2)))
-        if len(gate) != 4 or [wram[0xF40 + b] for b in gate] != [0x80, 0x80, 0x24, 0x24]:
+        if len(gate) != 4:
+            return [], False, ()
+        attr = [wram[0xF40 + b] for b in gate]
+        if ram[0x540] == 0xFF and ram[0x541] in gate and attr == [prop[b] for b in gate]:
+            return [], True, gate
+        if attr != [0x80, 0x80, 0x24, 0x24]:
             return [], False, ()
         done, base = 16, GATE_SRC[ram[0x28] == 0x32]
     out = []
