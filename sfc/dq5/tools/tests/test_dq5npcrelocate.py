@@ -42,14 +42,14 @@ class NpcRelocateTests(unittest.TestCase):
     def test_record_edits_are_copied(self):
         rom = fixture(bytes.fromhex('b0 12 03 04 05 06 07 01 16'))
         edited = bytes.fromhex('b0 34 03 09 05 18 07 01 16')
-        out, mapping = repack_entry(rom, OLD, NEW, {OLD + 7: bytes.fromhex('2b 05 0d 16')}, {OLD: edited})
+        out, mapping = repack_entry(rom, OLD, NEW, {OLD + 7: bytes.fromhex('2b 05 0d 16')}, edited)
         self.assertEqual(out, edited[:7] + bytes.fromhex('04 2b 05 0d 16'))
         self.assertEqual(mapping, {OLD + 7: NEW + 7})
 
     def test_record_length_must_not_change(self):
         rom = fixture(bytes.fromhex('b0 12 03 04 05 06 07 01 16'))
         with self.assertRaises(ValueError):
-            repack_entry(rom, OLD, NEW, {}, {OLD: bytes.fromhex('b0 12 03 04 05 06 07 01 16 00')})
+            repack_entry(rom, OLD, NEW, {}, bytes.fromhex('b0 12 03 04 05 06 07 01 16 00'))
 
     def test_condition_rows_follow_moved_lists(self):
         data = bytearray(0x98000)
@@ -93,13 +93,13 @@ class NpcRelocateTests(unittest.TestCase):
 
     def test_next_record_and_list_shift(self):
         raw = bytes.fromhex('b0 12 03 04 05 06 07 01 16 90 21 03 04 05 06 07 00')
-        out, lists, scripts, entries = pack_region(fixture(raw), [(OLD, 'test')], NEW, {OLD + 7: b'\x1a\x16'}, prefix=4)
+        out, lists, scripts, entries = pack_region(fixture(raw), [(OLD, [(OLD, None), (OLD + 9, None)])], NEW, {OLD + 7: b'\x1a\x16'}, prefix=4)
         self.assertEqual(lists[OLD], NEW + 4)
         self.assertEqual(entries[OLD + 9], NEW + 14)
         self.assertEqual(scripts[OLD + 7], NEW + 11)
         self.assertEqual(out[-8:], raw[-8:])
         with self.assertRaises(ValueError):
-            pack_region(fixture(raw), [(OLD, 'test')], 0x32FFF0, {OLD + 7: b'\x1a\x16'}, prefix=4)
+            pack_region(fixture(raw), [(OLD, [(OLD, None), (OLD + 9, None)])], 0x32FFF0, {OLD + 7: b'\x1a\x16'}, prefix=4)
 
     def test_absolute_and_fallthrough_rejected(self):
         rom = fixture(bytes.fromhex('b0 12 03 04 05 06 07 01 16'))

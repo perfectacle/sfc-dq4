@@ -160,8 +160,13 @@ def approximate_adsr(region):
     return 0x80 | decay << 4 | attack, sustain << 5
 
 
-def convert_sample(path, region, *, max_rate=12000, cache_dir=None):
+def convert_sample(path, region, *, max_rate=12000, cache_dir=None, seconds=None):
     pcm, rate, loop = read_wave(path)
+    if seconds is not None and loop is None:
+        # 반복 없는 긴 샘플은 끝을 잘라 짧게 사라지게 한다(꼬리 20% 를 선형으로 줄임).
+        pcm = pcm[:int(rate * seconds)].copy()
+        fade = max(1, len(pcm) // 5)
+        pcm[-fade:] *= np.linspace(1, 0, fade)
     converted, effective_rate, loop_start = prepare_pcm(pcm, rate, loop, max_rate)
     # DQ5 샘플처럼 무음 블록으로 시작한다. KON 직후 보간 버퍼에 앞 음 표본이 남아 첫 블록이 크면 음머리가 튄다.
     converted = np.concatenate((np.zeros(16), np.clip(np.rint(converted), -16384, 16383))).astype('<i2')
@@ -198,40 +203,173 @@ def convert_sample(path, region, *, max_rate=12000, cache_dir=None):
     return result, report
 
 
-def build_bank(score, asset_root, *, start_id=0x26, max_rate=12000, cache_dir=None):
-    """(resources, program_map, report). sample은 DQ5 전역 번호. PCM 이외는 거부한다."""
+RATES = (8000, 6000, 4500, 3200)
+ONE_SHOT_SECONDS = (None, 1.2, 0.6)
+
+
+def used_regions(score):
+    """곡에 쓰이는 (프로그램, 영역)과 그 영역에 드는 음 수. NDS 뱅크에 없는 프로그램(None)의 음은 NDS 에서도 소리가 없다."""
+    counts = {}
+    silent = 0
+    for e in score['timeline']:
+        if e.get('op') != 'note':
+            continue
+        instrument = score['instruments'].get(str(e['program']))
+        if instrument is None:  # 정의가 없거나 None
+            silent += 1
+            continue
+        for k, region in enumerate(instrument['regions']):
+            if region['lo'] <= e['note'] <= region['hi']:
+                counts[(e['program'], k)] = counts.get((e['program'], k), 0) + 1
+                break
+    return counts, silent
+
+
+def estimate(path, max_rate, seconds):
+    """encode 하지 않고 자원 바이트 수를 센다(무음 머리 블록·머리 9바이트 포함)."""
+    pcm, rate, loop = read_wave(path)
+    if seconds is not None and loop is None:
+        pcm = pcm[:int(rate * seconds)]
+    converted, _, _ = prepare_pcm(pcm, rate, loop, max_rate)
+    return 2 + 7 + (len(converted) + 16 + 15) // 16 * 9
+
+
+def build_bank(score, asset_root, *, start_id=0x26, max_rate=8000, cache_dir=None, budget=None, max_samples=14):
+    """(resources, program_map, report). sample은 DQ5 전역 번호.
+
+    budget(바이트)·max_samples(곡 묶음 칸)를 넘으면 손실이 가장 작은 줄이기를 하나씩 고른다.
+    쓰이는 음이 적은 영역을 같은 프로그램의 이웃 영역 샘플로 합치기, 표본율 낮추기, 반복 없는 샘플 자르기.
+    무엇을 줄였는지는 report['reductions']에 남긴다.
+    """
     if not 0x26 <= start_id < 0xC8:
         raise ValueError('custom sample IDs must start in 26..C7')
     root = Path(asset_root)
     samples = root / 'nds/dq4/sound/samples'
-    resources, mapping, details, reused = {}, {}, {}, {}
-    for program, instrument in sorted(score['instruments'].items(), key=lambda p: int(p[0])):
-        notes = [e['note'] for e in score['timeline'] if e.get('op') == 'note' and e.get('program') == int(program)]
-        mapping[int(program)] = []
-        for region in instrument['regions']:
-            if not any(region['lo'] <= n <= region['hi'] for n in notes):
+    counts, silent = used_regions(score)
+    regions = {}
+    for (program, k), n in counts.items():
+        region = score['instruments'][str(program)]['regions'][k]
+        if region['type'] != 'PCM':
+            raise ValueError(f'unsupported instrument program {program}: {region["type"]}')
+        path = samples / region['sample']
+        if not path.resolve().is_relative_to(samples.resolve()):
+            raise ValueError('sample path outside asset root')
+        regions[(program, k)] = (region, path, n)
+    rates = [max_rate] + [r for r in RATES if r < max_rate]
+    looped = {}
+
+    def has_loop(path):
+        if path not in looped:
+            looped[path] = read_wave(path)[2] is not None
+        return looped[path]
+
+    target = {key: key for key in regions}      # 영역 → 실제로 쓸 영역
+    rate, cut = {}, {}                          # identity → 표본율·자르기 단계
+
+    def identity(key):
+        region = regions[key][0]
+        return region['sample'], region['base'], approximate_adsr(region)
+
+    sizes = {}
+
+    def size(ident, path):
+        key = (ident, rate.get(ident, 0), cut.get(ident, 0))
+        if key not in sizes:
+            seconds = ONE_SHOT_SECONDS[cut.get(ident, 0)]
+            sizes[key] = estimate(path, rates[rate.get(ident, 0)], seconds)
+        return sizes[key]
+
+    def active():
+        out = {}
+        for key in set(target.values()):
+            out.setdefault(identity(key), regions[key][1])
+        return out
+
+    def notes_of(ident):
+        return sum(regions[k][2] for k in regions if identity(target[k]) == ident)
+
+    reductions = []
+    while True:
+        live = active()
+        total = sum(size(i, p) for i, p in live.items())
+        if len(live) <= max_samples and (budget is None or total <= budget):
+            break
+        options = []
+        for key in set(target.values()):
+            program = key[0]
+            mates = sorted({target[k] for k in regions if k[0] == program and target[k] != key}, key=lambda m: abs(m[1] - key[1]))
+            if not mates:
                 continue
-            if region['type'] != 'PCM':
-                raise ValueError(f'unsupported instrument program {program}: {region["type"]}')
-            path = samples / region['sample']
-            if not path.resolve().is_relative_to(samples.resolve()):
-                raise ValueError('sample path outside asset root')
-            identity = (region['sample'], region['base'], approximate_adsr(region))
-            if identity not in reused:
-                identifier = start_id + len(resources)
-                if identifier >= 0xC8:
-                    raise ValueError('sample ID table exhausted')
-                resource, detail = convert_sample(path, region, max_rate=max_rate, cache_dir=cache_dir)
-                resources[identifier], details[f'{identifier:02X}'] = resource, detail
-                reused[identity] = identifier
-            mapping[int(program)].append({'lo': region['lo'], 'hi': region['hi'], 'sample': reused[identity]})
+            ident = identity(key)
+            if sum(1 for k in set(target.values()) if identity(k) == ident) > 1:
+                saving = 0
+            else:
+                saving = size(ident, regions[key][1])
+            moved = sum(regions[k][2] for k in regions if target[k] == key)
+            options.append((moved * 1.0, max(saving, 1), 'merge', key, mates[0]))  # saving 1 = 칸을 비우지 못함
+        for ident, path in live.items():
+            if rate.get(ident, 0) + 1 < len(rates):
+                before = size(ident, path)
+                rate[ident] = rate.get(ident, 0) + 1
+                saving = before - size(ident, path)
+                rate[ident] -= 1
+                options.append((notes_of(ident) * 0.25, max(saving, 1), 'rate', ident, None))
+            if not has_loop(path) and cut.get(ident, 0) + 1 < len(ONE_SHOT_SECONDS):
+                before = size(ident, path)
+                cut[ident] = cut.get(ident, 0) + 1
+                saving = before - size(ident, path)
+                cut[ident] -= 1
+                if saving > 0:
+                    options.append((notes_of(ident) * 0.15, saving, 'cut', ident, None))
+        if not options:
+            raise ValueError(f'cannot fit samples: {len(live)} slots, {total} bytes (budget {budget})')
+        need_slots = len(live) > max_samples
+        if need_slots:
+            # 칸이 모자라면 샘플 하나를 통째로 없애는 합치기만 칸을 줄인다.
+            options = [o for o in options if o[2] == 'merge' and o[1] > 1]
+            if not options:
+                raise ValueError(f'cannot fit samples: {len(live)} slots > {max_samples}')
+        options.sort(key=lambda o: o[0] / o[1])
+        loss, saving, kind, what, into = options[0]
+        if kind == 'merge':
+            for k in regions:
+                if target[k] == what:
+                    target[k] = into
+            reductions.append({'merge': f'program {what[0]} region {what[1]} -> region {into[1]}', 'notes': int(loss)})
+        elif kind == 'rate':
+            rate[what] = rate.get(what, 0) + 1
+            reductions.append({'rate': what[0], 'hz': rates[rate[what]], 'notes': notes_of(what)})
+        else:
+            cut[what] = cut.get(what, 0) + 1
+            reductions.append({'cut': what[0], 'seconds': ONE_SHOT_SECONDS[cut[what]], 'notes': notes_of(what)})
+
+    resources, details, ids = {}, {}, {}
+    for key in sorted(set(target.values())):
+        ident = identity(key)
+        if ident in ids:
+            continue
+        identifier = start_id + len(ids)
+        if identifier >= 0xC8:
+            raise ValueError('sample ID table exhausted')
+        region, path, _ = regions[key]
+        resource, detail = convert_sample(path, region, max_rate=rates[rate.get(ident, 0)],
+                                          cache_dir=cache_dir, seconds=ONE_SHOT_SECONDS[cut.get(ident, 0)])
+        resources[identifier], details[f'{identifier:02X}'] = resource, detail
+        ids[ident] = identifier
+    mapping = {}
+    for (program, k) in sorted(regions):
+        region = regions[(program, k)][0]
+        mapping.setdefault(program, []).append({'lo': region['lo'], 'hi': region['hi'],
+                                                'sample': ids[identity(target[(program, k)])]})
     return resources, mapping, {
         'samples': details, 'sample_count': len(resources),
         'resource_bytes': sum(map(len, resources.values())),
         'spc_brr_bytes': sum(d['brr_bytes'] for d in details.values()),
+        'budget': budget, 'max_samples': max_samples, 'reductions': reductions,
+        'undefined_program_notes': silent,
         'runtime_verified': False,
         'limitations': ['ADSR parameter approximation', 'release supplied by sequence',
-                        'SPC memory and sample slots require runtime budget validation'],
+                        'merged regions play another NDS sample of the same program, transposed'],
     }
 
 
@@ -240,11 +378,14 @@ def main():
     parser.add_argument('--score', type=Path, required=True)
     parser.add_argument('--assets', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
-    parser.add_argument('--max-rate', type=int, default=12000)
+    parser.add_argument('--max-rate', type=int, default=8000)
+    parser.add_argument('--budget', type=int, help='SPC bytes available for this song\'s samples')
+    parser.add_argument('--max-samples', type=int, default=14)
     parser.add_argument('--start-id', type=lambda s: int(s, 16), default=0x26)
     args = parser.parse_args()
     resources, mapping, report = build_bank(json.loads(args.score.read_text()), args.assets,
                                            start_id=args.start_id, max_rate=args.max_rate,
+                                           budget=args.budget, max_samples=args.max_samples,
                                            cache_dir=args.out / 'cache')
     args.out.mkdir(parents=True, exist_ok=True)
     for identifier, resource in resources.items():

@@ -28,10 +28,12 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5textcheck.py rom --state 상태 --out 폴더` | MesenCE로 원본·원문 재배치·수정·뒤쪽 뱅크 메시지 4건의 실제 디코더 반환 코드를 대조. `MESENCE` 필요 |
 | `dq5eventwrite.py rom dump\|encode\|patch\|check` | 이벤트 명령 JSON(`dq5event/1`). `dump --event N` 또는 `--number HEX`, `patch 입력 -o 목록`으로 지정한 표 항목을 확장 뱅크 스크립트에 연결. 기본 `60:8000`, 내부 라벨은 배치 주소로 계산. [쓰기 형식](../docs/dq5-build-format.md#이벤트-스크립트-dq5event1) |
 | `dq5npcwrite.py rom dump\|encode\|patch\|check` | 인물 인라인 JSON(`dq5npcscript/1`). `dump BB:AAAA -o 입력`은 길이 바이트 주소를 받음. `patch 입력 -o 목록`은 원본 슬롯 크기를 유지하고 남는 부분을 `00`으로 채움. 상대 분기는 라벨 지원. [쓰기 형식](../docs/dq5-build-format.md#인물-스크립트-dq5npcscript1) |
-| `dq5npcrelocate.py rom dump\|patch\|check` | 인물 스크립트 길이를 바꾸어 기본·대체 목록을 각각 확장 뱅크로 재배치. `--base`·`--alt`, `--report`로 주소 대응표 출력, `--records`로 `dq5npcrecord/1` 수정을 옮긴 사본에 넣음. 인물 수·순서·낮밤 공유 유지 |
+| `dq5npcrelocate.py rom dump\|patch\|check` | 인물 스크립트 길이를 바꾸어 기본·대체 목록을 각각 확장 뱅크로 재배치. `--base`·`--alt`, `--report`로 주소 대응표 출력, `--records`로 `dq5npcrecord/1` 수정을 옮긴 사본에 넣음. `lists`·`new_lists`·`overrides`·`no_npc` 로 인물 수·순서·새 대체 목록·조건 표(대체 표는 `12:82FB` 를 새 루틴으로 옮김), `--allow-growth` 로 슬롯 `1F` 까지 |
 | `dq5npcrelocatecheck.py rom --state 상태 --out 폴더` | MesenCE 원본·재배치 인물 표와 3바이트 스크립트 포인터 비교. `--all` 맵 346개 낮밤·대체 목록 2건, `--mutations` 긴 스크립트 실행 5건 추가, `--jobs` 동시 실행 수. `MESENCE` 필요 |
 | `dq5npcrecord.py rom dump -o\|patch\|check` | 인물 엔트리 2,483개의 좌표·방향·그림·대화 번호·층·이동·걸음·애니메이션 간격, 한 벌 엔트리 낮/밤, 대체 표 296개·빈 맵 표 43개 기존 항목을 제자리에서 고침. 길이·수·순서·모르는 비트 보존. [쓰기 형식](../docs/dq5-build-format.md#인물-레코드등장-조건-dq5npcrecord1) |
 | `dq5npcrecordcheck.py rom --state 선실 --out 폴더` | 원본과 변경 롬 3벌(레코드, `--records` 재배치, 대체 조건)로 02/06 7장면을 돌려 인물 표 23칸·말 걸기 메시지 번호·고른 목록 비교. `MESENCE` 필요 |
+| `dq5npclists.py` | `dq5npcrelocate.py` 가 쓰는 목록 구조·조건 표 계획, 맵 OBJ 물체 수(`16:F862`), 슬롯 한도, 옮긴 대체 표 찾기 루틴 조립 |
+| `dq5npclistcheck.py rom --state 선실 --out 폴더` | 목록 구조·옮긴 조건 표·슬롯 `1F` 롬 3벌과 원본으로 10장면: 인물 표 23칸·목록 끝 주소·`7E:1983`·말 걸기. `--objects` 로 물체 있는 맵 33곳의 물체 슬롯 수. `MESENCE` 필요 |
 | `dq5fieldtablecheck.py rom --state 선실 --out 폴더` | 필드 표 쓰기 게임 실측 재현: 블록 양층 타일맵·일반/보조 입구·출구·세계0~2 지도. `MESENCE` 필요. 새 실행 폴더에 롬·IPS·덤프·`results.json` |
 | `dq5fieldtables.py rom dump\|patch\|check` | 필드 블록 양층 511개·일반 입구47개·보조 입구14개·도착54개 고정 표. JSON 일부 필드만 편집, 바뀐 항목에 `orig` 포함. [쓰기 형식](../docs/dq5-build-format.md#필드-블록입구-표-dq5fieldtables1) |
 | `dq5fieldwrite.py rom dump N\|check\|patch --world N 지도.bin` | 필드 세계 지도 쓰기(블록 0~510, 배치 뱅크 30~3F): 세계 N 을 칸마다 16비트 블록 번호 `.bin` 으로(`dump`), 고친 지도를 RLE 두 덩어리로 싸서 늘린 롬(`--at`, 기본 `34:8000`)에 놓고 불러오기 루틴의 뱅크·주소 즉값을 바꾸는 `dq5patch/1` 목록으로(`patch`). `check` 는 세 세계를 다시 싸서 풀어 견줌. 형식은 [dq5-build-format.md](../docs/dq5-build-format.md#필드-세계-지도) |
@@ -50,6 +52,8 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5exitwrite.py rom dump -o\|patch\|check` | 실내 출구569개·영역 이동430개 고정 슬롯의 목적지·사각형·층. 종류·길이·개수 보존, 고층 공유 목록은 `shared_maps` 필요. [쓰기 형식](../docs/dq5-build-format.md#실내-출구영역-이동-dq5connections1) |
 | `dq5maphook.py rom dump\|patch\|rewrite\|check` | 맵별 루틴 표(`15:F907`) 162개의 맵 고르기·플래그 조건·맵을 푼 뒤/매 프레임 루틴. 루틴은 원래 표의 같은 칸에 있던 것만(`--raw-routines` 로 풂), `rewrite --at` 은 뱅크 15 의 원래 자리·`15:FF80` 에 다른 항목 수로 다시 쓰고 로더 피연산자 11곳을 고침. [쓰기 형식](../docs/dq5-build-format.md#맵별-루틴-표-dq5maphook1) |
 | `dq5maphookcheck.py rom --state 선실 --out 폴더` | 변경 롬 5벌과 원본에서 루틴 막기·플래그 조건·표 옮기기 15장면. 고른 루틴, 01/05 (51,20) 셀, 도착 맵·칸 비교. `MESENCE` 필요 |
+| `dq5talkwrite.py rom dump -o\|patch\|check` | 대화 스크립트 574개(대화 번호 `011`~`24E`)의 조건·else·はい/いいえ·플래그·메시지·호출을 `dq5talk/1` JSON 으로. 원래 자리보다 긴 묶음은 `--at 06:XXXX`(뱅크 06 빈 자리)로 옮기거나 `--repack` 으로 다시 채움. [쓰기 형식](../docs/dq5-build-format.md#대화-스크립트-dq5talk1) |
+| `dq5talkcheck.py rom --state 선실 --out 폴더` | 변경 롬 4벌과 원본에서 파파스에게 말을 걸어 조건 뒤집기·메시지 바꾸기·옮긴 긴 스크립트(はい/いいえ·플래그·호출)·다시 채우기 12장면의 메시지 순서·묶음 시작·플래그 비교. `MESENCE` 필요 |
 | `dq5exitcheck.py rom --state 선실 --out 폴더` | 변경 롬 3벌과 원본에서 출구 세 종류·출발층·고층 공유·음수 가장자리·사각형 이동·이동 효과음·속성 33 계단 24장면을 밟아 도착 맵·칸·층·효과음 비교. `MESENCE` 필요 |
 | `dq5chestcheck.py rom --state 선실 --out 폴더 [--case 이름]` | 원본·패치 롬에서 상자·서랍·옮긴 발밑·두 칸 앞·아래층 상자·필드 보상 6쌍을 실제 조사. 금화·조회 값·열림 비트 비교. `MESENCE` 필요 |
 | `dq5chest.py rom [BC BD]` | DQ5 보물상자(번호·칸·열림 플래그·내용물), タンス·ツボ·タル 항목, 발밑 표(`1E:F08B`), 두 칸 앞 표(`1E:F435`), 그룹 `50` 이상의 아래층 상자 표(`1E:F4DF`). 물건 이름과 `D000`~`D009` 의 뜻까지 |
@@ -132,7 +136,7 @@ uv run --locked python sfc/dq5/tools/dq5assets.py rom/dq5.sfc --out "$ASSETS/sfc
 | `lua/dq5tablecheck.lua` | 롬 주소 읽기(범위)와 PC 통과를 기록하고 끝에 WRAM 을 덤프. `dq5tablecheck.py` 가 환경과 드라이버를 준비 | `READS`, `EXECS`, `DRIVER`, `MAXF` | `observed.txt`, `final.wram` |
 | `lua/dq5textcheck.lua` | 보행 메시지 스트림 주소와 디코더 반환 코드를 기록. `dq5textcheck.py`가 드라이버와 환경을 준비 | `MESSAGE`, `RETURN_PC`, `DRIVER` | `decoded.txt`, `end.png` |
 | `lua/dq5npcrelocatecheck.lua` | 인물 배치 직후 `12:803C`에서 목적지 맵의 WRAM을 저장. `dq5npcrelocatecheck.py`가 드라이버와 환경을 준비 | `CHECK_GROUP`, `CHECK_MAP`, `DRIVER` | `npc.bin` |
-| `lua/dq5npcrecordcheck.lua` | `dq5warp.lua`(LIBDIR 의 `boot.lua`)로 맵에 들어가며 `12:803C`에서 WRAM 을 저장하고, 들어간 뒤 `24:8BAF`가 받은 메시지 번호를 `warp.txt`에 덧붙임. `dq5npcrecordcheck.py`가 준비 | `CHECK_GROUP`, `CHECK_MAP`, `dq5warp.lua` 의 변수 | `npc.bin`, `warp.txt`, `end.png` |
+| `lua/dq5npcrecordcheck.lua` | `dq5warp.lua`(LIBDIR 의 `boot.lua`)로 맵에 들어가며 `12:803C`에서 WRAM 을 저장하고, 맵을 다 놓은 직후(`00:E1CC`)의 `7E:1982`·`1983` 과 들어간 뒤 `24:8BAF`가 받은 메시지 번호를 `warp.txt`에 덧붙임. `dq5npcrecordcheck.py`·`dq5npclistcheck.py`가 준비 | `CHECK_GROUP`, `CHECK_MAP`, `dq5warp.lua` 의 변수 | `npc.bin`, `warp.txt`, `end.png` |
 | `lua/dq5maphookcheck.lua` | `dq5warp.lua`(LIBDIR 의 `boot.lua`)로 맵에 들어가며, 맵을 풀 때마다 `15:F7EA` 에서 고른 루틴(`$A5`~`$A7`, `7E:1AA6`~`1AA8`)을, `15:F7EE` 에서 셀 하나를 `warp.txt` 에 덧붙임. `dq5maphookcheck.py`가 준비 | `CELL`, `dq5warp.lua` 의 변수 | `warp.txt` |
 | `lua/dq5scriptcheck.lua` | 스크립트 쓰기 실측: 이벤트 조회·명령 주소, 인물 좌표·포인터·플래그 기록. `dq5scriptcheck.py`가 드라이버와 환경 변수를 준비 | `DRIVER`, `MAXF`, 드라이버 변수 | `trace.txt`(종합 `results.json`은 Python 도구) |
 | `lua/dq5seqtrace.lua` | DQ5: 드라이버 없이 세이브스테이트를 불러 `SEQ` 입력을 재생하며, 처음 몇 프레임 WRAM 쓰기(`WR`), 첫 프레임 롬 덮기(`ROMPATCH`), 주소 실행 때 레지스터·스택 24바이트(`HOOK`), 값이 바뀐 프레임(`WLOG`), 범위 실행 순서·커버리지(`LO`·`HI`·`FROM`·`TO`·`CAP`)를 남김. `SAVEAT` 에 세이브스테이트, `SHOTS` 에 화면. 2000 프레임마다 기록을 씀 | `STATE`, `SEQ`, `WR`·`WRN`, `ROMPATCH`, `HOOK`, `WLOG`, `LO`·`HI`·`FROM`·`TO`·`CAP`, `SAVEAT`·`SAVE`, `SHOTS`, `MAXF` | `trc.txt`, `cover.txt`, `<SAVE>`, `sNNN.png`, `end.png` |
