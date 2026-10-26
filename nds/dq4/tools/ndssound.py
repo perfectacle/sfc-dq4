@@ -7,6 +7,8 @@
     uv run --locked python nds/dq4/tools/ndssound.py scorecheck OUT                   악보 json 으로 MIDI 를 다시 만들어 견줌
     uv run --locked python nds/dq4/tools/ndssound.py maps                             맵 정보 표의 낮·밤 곡(ARM9)
     uv run --locked python nds/dq4/tools/ndssound.py scenes OUT.json [--maps all|sample] 에뮬레이터로 곡·효과음 요청을 기록
+    uv run --locked python nds/dq4/tools/ndssound.py compare OUT [--seq 5,18] [--seconds 20]  에뮬레이터 녹음과 합성을 견줌
+    uv run --locked python nds/dq4/tools/ndssound.py mini2sf OUT [--seq 5,18]          2sflib 과 곡별 .mini2sf
 
 export 는 곡마다 원본 .sseq, MIDI(루프 2회), 합성 WAV(도입 + 루프 1회 + 페이드)를(songs/), SSAR 효과음마다 합성 WAV 를
 (sfx/), SWAR 샘플을 WAV(루프는 smpl 청크)로(samples/) 내고, 루프 지점·SDAT 위치·뱅크 정의는 폴더마다 index.json 에 둔다.
@@ -680,13 +682,19 @@ class Sequencer:
         v = Voice(t, r, wav, key, vel, None if t.tie or dur == 0 else dur, self.frame)
         self.set_sweep(t, v, key, dur)
         t.porta_key = key
-        if t.tie:
-            t.tie_voice = v
         live = [x for x in self.voices if not x.dead]
         if len(live) >= self.max_voices:
-            # 우선순위가 낮은 것, 놓는 중인 것, 오래된 것 순으로 뺏는다
-            victim = min(live, key=lambda x: (x.t.prio, x.state != "release", x.start))
+            # 드라이버처럼 놓는 중인 음은 우선순위 1 로 보고, 가장 낮은 우선순위(같으면 소리가 작은 것)를 뺏는다.
+            # 그것도 새 음보다 우선순위가 높으면 새 음을 버린다. 놓는 중인 음을 트랙 우선순위로 두면 긴 놓기가 남아
+            # 새 음이 빠져, 트랙이 많은 곡(18·6)이 실기 녹음과 어긋났다.
+            def prio(x):
+                return 1 if x.state == "release" else x.t.prio
+            victim = min(live, key=lambda x: (prio(x), x.amp))
+            if prio(victim) > t.prio:
+                return
             victim.dead = True
+        if t.tie:
+            t.tie_voice = v
         self.voices.append(v)
 
     def set_sweep(self, t, v, key, dur):
@@ -1827,6 +1835,8 @@ HOOK_BASE = 0x023F9000        # 장면 실측 때만 쓰는 빈 RAM(여러 장�
 HOOK_LOG = 0x023F9100         # u32 기록 수 + 32바이트 기록 256개. 바로 앞 u32 는 곡 바꿔치기(0 이면 그대로)
 START_SEQ = 0x0208420C        # (핸들, 곡 번호): 음 관리자 BGM 핸들로 곡 시작
 START_SEQARC = 0x02084268     # (핸들, 묶음 번호, 효과음 번호): 효과음 핸들로 SSAR 시작
+SONG_ARG = 0x0205407C         # 번호로 틀기(0x02054074)의 mov r4,r0. mov r4,#N 으로 바꾸면 어느 곡 요청이든 곡 N 이 됨
+SONG_ARG_ORIG = 0xE1A04000
 
 
 def hook_code():
@@ -1907,6 +1917,228 @@ class Recorder:
 
     def se(self):
         return [x[2] for x in self.log if x[1] == "se"]
+
+
+AUDIO_RATE = 44100            # desmume libretro 코어가 내는 소리(retro_get_system_av_info)
+# 전원을 켜면 타이틀 대신 부팅 디버그 메뉴 → Town Part(caf1)로 곧장 들어가 곡 SONG_ARG 를 트는 고침(주소, 원래, 새).
+# 타이틀을 거치지 않으니 서곡 스트림(STRM, SPU 채널 6·7)이 시작되지 않는다. 디버그 메뉴를 거친 세이브스테이트에는 이
+# 스트림이 음량 127 로 계속 돌아 녹음이 뭉개지고, 드라이버도 그 두 채널을 곡에 내주지 않는다.
+BOOT_TO_SONG = [
+    (0x0200BAFA, bytes([0x0C, 0x21]), bytes([0x01, 0x21])),                       # movs r1,#0xC → #1: 첫 장면을 디버그 메뉴로
+    (0x020094D0, struct.pack("<I", 0x08BD8010), struct.pack("<I", 0xE1A00000)),   # popeq {r4,pc} → nop: A 를 기다리지 않음
+]
+NO_BACKUP_CHECK = (0x0205B698, struct.pack("<I", 0xFAFF3E3D), struct.pack("<I", 0xE3A00001))  # 세이브 칩 검사 → 통과
+
+
+def song_word(n):
+    return struct.pack("<I", 0xE3A04000 | n)   # mov r4,#n
+
+
+class AudioTap:
+    """코어의 소리(audio_sample_batch, 16비트 스테레오)를 모은다."""
+
+    def __init__(self, player):
+        import ctypes as C
+        from kr_patch.sfc.libretro import AUDB_CB
+        self.chunks = []
+
+        def batch(data, frames):
+            if data:
+                self.chunks.append(C.string_at(data, frames * 4))
+            return frames
+        self._cb = AUDB_CB(batch)
+        player.core.retro_set_audio_sample_batch(self._cb)
+
+    def clear(self):
+        self.chunks = []
+
+    def take(self):
+        a = np.frombuffer(b"".join(self.chunks), "<i2").reshape(-1, 2)
+        self.clear()
+        return a.astype(np.float32) / 32768
+
+
+def band_spectrum(y, rate, hop=0.02):
+    """반음 띠(55Hz~3.5kHz, 72칸)의 로그 세기를 hop 초마다. 띠마다 시간 평균을 빼고 프레임마다 평균·편차로 정규화한다."""
+    y = np.asarray(y, np.float32)
+    if y.ndim == 2:
+        y = y.mean(1)
+    win, step = int(rate * 0.064), int(rate * hop)
+    if len(y) < win + step:
+        return np.zeros((0, 72), np.float32), np.zeros(0)
+    starts = np.arange(0, len(y) - win, step)
+    mag = np.abs(np.fft.rfft(y[starts[:, None] + np.arange(win)] * np.hanning(win), axis=1)) ** 2
+    freqs = np.fft.rfftfreq(win, 1 / rate)
+    edges = 55 * 2 ** (np.arange(73) / 12)
+    band = np.stack([mag[:, (freqs >= edges[k]) & (freqs < edges[k + 1])].sum(1) for k in range(72)], 1)
+    s = np.log10(band + 1e-6)
+    s -= s.mean(0)            # 곡 전체에 깔린 음색(띠별 평균)을 빼고 시간에 따라 바뀌는 음만 남긴다
+    s -= s.mean(1, keepdims=True)
+    return s / (s.std(1, keepdims=True) + 1e-9), mag.sum(1)
+
+
+def spectrum_match(rec, rec_rate, ref, ref_rate, hop=0.02):
+    """녹음의 반음 띠 스펙트럼을 참조(합성) 위에서 밀어 가며 프레임별 상관의 평균이 가장 큰 자리를 찾는다.
+    → (점수, 참조 위치 초). 조용한 프레임(가장 큰 세기의 1/1000 아래)은 뺀다."""
+    a, pa = band_spectrum(rec, rec_rate, hop)
+    b, _ = band_spectrum(ref, ref_rate, hop)
+    if not len(a) or not len(b):
+        return 0.0, 0.0
+    a = a * (pa > pa.max() * 1e-3)[:, None]
+    if len(b) < len(a):
+        a = a[:len(b)]
+    used = max(1, int((a != 0).any(1).sum()))
+    n = len(b) - len(a) + 1
+    size = 1 << int(np.ceil(np.log2(len(b) + len(a))))
+    corr = np.fft.irfft(np.fft.rfft(a[::-1], size, axis=0) * np.fft.rfft(b, size, axis=0), size, axis=0).sum(1)
+    corr = corr[len(a) - 1:len(a) - 1 + n] / (used * a.shape[1])
+    k = int(corr.argmax())
+    return float(corr[k]), k * hop
+
+
+def boot_song(p, n, maxf=1200):
+    """전원부터 곡 n 이 실릴 때까지 돌린다(RAM 위 ARM9 코드만 고침). → 곡이 시작한 프레임 또는 None."""
+    for addr, old, new in BOOT_TO_SONG + [(SONG_ARG, struct.pack("<I", SONG_ARG_ORIG), song_word(n))]:
+        assert p.read(addr, len(old)) == old, hex(addr)
+        p.write(addr, new)
+    for _ in range(maxf):
+        p.run(1)
+        if p.u32(SOUND_MGR + 4) == n:
+            return p.frame
+    return None
+
+
+def compare(out, songs=None, fs=FS, rom=None, seconds=20.0):
+    """곡마다 에뮬레이터 소리를 녹음해(OUT/rec/) 합성과 반음 띠 스펙트럼으로 견준다. 대조로 다음 번호 곡의 합성과도 견준다."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from ndsplay import Player, core_path
+
+    out = Path(out)
+    (out / "rec").mkdir(parents=True, exist_ok=True)
+    sd = load_sdat(fs)
+    names = soundlist(fs)
+    songs = songs or [i for i in range(sd.count("seq")) if sd.record("seq", i)]
+    synth = {}
+
+    def ref(n):
+        if n not in synth:
+            synth[n] = render_sseq(sd, n, loops=1, fade=0.0)[0]
+        return synth[n]
+
+    p = Player(core_path(), rom or str(ROOT / "rom" / "dq4ds.nds"), str(out / "rec"))
+    tap = AudioTap(p)
+    rows = []
+    for i, n in enumerate(songs):
+        p.core.retro_reset()
+        p.frame = 0
+        started = boot_song(p, n)
+        tap.clear()
+        p.run(int(seconds * 60))
+        y = tap.take()
+        write_wav(out / "rec" / f"{stem(n, names.get(('BGM', n)))}.wav", y, AUDIO_RATE)
+        score, at = spectrum_match(y, AUDIO_RATE, ref(n), OUT_RATE)
+        other = songs[(i + 1) % len(songs)]
+        base, _ = spectrum_match(y, AUDIO_RATE, ref(other), OUT_RATE)
+        row = {"song": n, "name": names.get(("BGM", n)), "startFrame": started, "score": round(score, 3),
+               "at": round(at, 2), "control": other, "controlScore": round(base, 3),
+               "peak": round(float(np.abs(y).max()) if len(y) else 0, 3)}
+        rows.append(row)
+        print(json.dumps(row, ensure_ascii=False), flush=True)
+    write_index(out / "compare.json", rows)
+    return rows
+
+
+# 2sflib 에 남길 data/ 파일. 곡 50개를 vio2sf 로 모두 돌려 읽힌 롬 구간을 모으니(trim2sflib) 시스템 영역·오버레이와 함께
+# 이것들만 읽혔다(부팅 디버그 메뉴 → caf1 에서 쓰는 그림·글꼴·맵·스크립트와 SDAT).
+LIB_FILES = ("2D/arte_logo.tex", "2D/sqex_logo.tex", "BTLMAP/_list.txt", "CHR/h100.pack", "G2D/BIN/81_9F.bin",
+             "G2D/BIN/E0_EF.bin", "G2D/FONT/han10.nftr", "G2D/FONT/han12.nftr", "G2D/FONT/zen10.nftr",
+             "G2D/FONT/zen12.nftr", "G2D/ICON/char32.mptp", "G2D/ICON/command24.mptp", "G2D/ICON/command32.mptp",
+             "G2D/ICON/face48.mpt", "G2D/ICON/item32.mptp", "G2D/ICON/loading48.mpt", "G2D/ICON/wireless48.mpt",
+             "G2D/SYSTEM/bg.bgc", "G2D/SYSTEM/bg.bgp", "G2D/SYSTEM/obj.bgc", "G2D/SYSTEM/obj.bgp", "MAP/caf1.lz",
+             "MAP/map_link.bin", "PARAM/param_item_caf1.dat", "SCRIPT/caf1.bin", "SOUND/sound_data.sdat", "common.tex",
+             "date.dtd")
+BOOT_SECONDS = 4.0            # 전원부터 곡이 시작할 때까지(libretro 240프레임, vio2sf 3.3초)
+
+
+def rom_files(rom):
+    """NDS 롬의 FNT·FAT → {경로: (시작, 끝)}, 오버레이 파일 번호 목록."""
+    fnt, fat, fat_len = u32(rom, 0x40), u32(rom, 0x48), u32(rom, 0x4C)
+    ranges = [struct.unpack_from("<II", rom, fat + 8 * i) for i in range(fat_len // 8)]
+    out = {}
+
+    def walk(did, path):
+        off, fid = struct.unpack_from("<IH", rom, fnt + 8 * (did & 0xFFF))
+        q = fnt + off
+        while rom[q]:
+            n = rom[q] & 0x7F
+            name = rom[q + 1:q + 1 + n].decode("ascii")
+            q += 1 + n
+            if rom[q - 1 - n] & 0x80:
+                walk(u16(rom, q), path + name + "/")
+                q += 2
+            else:
+                out[path + name] = ranges[fid]
+                fid += 1
+    walk(0xF000, "")
+    ovt, ovt_len = u32(rom, 0x50), u32(rom, 0x54)
+    overlays = [ranges[u32(rom, ovt + 32 * i + 24)] for i in range(ovt_len // 32)]
+    return out, overlays
+
+
+def psf(program, tags, version=0x24):
+    """PSF 묶음: 머리(PSF·판, 예약 크기, 프로그램 크기, CRC32) + zlib 프로그램 + [TAG]."""
+    import zlib
+    z = zlib.compress(program, 9)
+    head = b"PSF" + bytes([version]) + struct.pack("<III", 0, len(z), zlib.crc32(z))
+    return head + z + b"[TAG]" + "".join(f"{k}={v}\n" for k, v in tags.items()).encode("utf-8")
+
+
+def rom_offset(addr):
+    return 0x4000 + addr - 0x02000000   # ARM9 은 압축되지 않고 롬 0x4000 에 그대로 있다
+
+
+def song_lib(rom):
+    """곡을 트는 2SF 롬 이미지: 부팅 고침을 걸고, 2SF 재생에 쓰이지 않는 롬 영역은 0 으로 지워 잘라 낸다."""
+    d = bytearray(rom)
+    assert u32(d, 0x20) == 0x4000 and u32(d, 0x28) == 0x02000000
+    for addr, old, new in BOOT_TO_SONG + [NO_BACKUP_CHECK, (SONG_ARG, struct.pack("<I", SONG_ARG_ORIG), song_word(2))]:
+        o = rom_offset(addr)
+        assert d[o:o + len(old)] == old, hex(addr)
+        d[o:o + len(new)] = new
+    files, overlays = rom_files(rom)
+    keep = [(0, 0x200), (0x4000, 0x4000 + u32(rom, 0x2C)), (u32(rom, 0x50), u32(rom, 0x50) + u32(rom, 0x54)),
+            (u32(rom, 0x30), u32(rom, 0x30) + u32(rom, 0x3C)), (u32(rom, 0x40), u32(rom, 0x40) + u32(rom, 0x44)),
+            (u32(rom, 0x48), u32(rom, 0x48) + u32(rom, 0x4C))] + overlays + [files["data/" + f] for f in LIB_FILES]
+    out = bytearray(max(b for a, b in keep))
+    for a, b in keep:
+        out[a:b] = d[a:b]
+    return bytes(out)
+
+
+def mini2sf(out, fs=FS, rom=None, songs=None):
+    """2sflib(곡을 트는 롬) 하나와 곡마다 곡 번호 4바이트만 덮는 mini2sf. 길이는 합성의 도입 + 루프 2회(없으면 곡 길이)."""
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    sd = load_sdat(fs)
+    names = soundlist(fs)
+    rom = Path(rom or ROOT / "rom" / "dq4ds.nds").read_bytes()
+    lib = "dq4ds.2sflib"
+    image = song_lib(rom)
+    (out / lib).write_bytes(psf(struct.pack("<II", 0, len(image)) + image, {"2sfby": "ndssound.py"}))
+    rows = []
+    for n in songs or [i for i in range(sd.count("seq")) if sd.record("seq", i)]:
+        info = render_sseq(sd, n, loops=2, fade=0.0)[1]
+        secs = BOOT_SECONDS + (info["loopEnd"] + (info["loopEnd"] - info["loopStart"]) if "loopEnd" in info
+                               else info["duration"])
+        title = names.get(("BGM", n)) or short(sd.name("seq", n))
+        tags = {"_lib": lib, "title": title, "game": "ドラゴンクエストIV 導かれし者たち (DS)",
+                "length": f"{int(secs // 60)}:{secs % 60:06.3f}", "fade": "8" if "loopEnd" in info else "0"}
+        word = song_word(n)
+        path = out / f"{stem(n, names.get(('BGM', n)))}.mini2sf"
+        path.write_bytes(psf(struct.pack("<II", rom_offset(SONG_ARG), len(word)) + word, tags))
+        rows.append({"song": n, "file": path.name, "title": title, "seconds": round(secs, 2), "loop": "loopEnd" in info})
+    write_index(out / "index.json", {"lib": lib, "libBytes": len(image), "songs": rows})
+    return rows
 
 
 def scenes(out_json, fs=FS, rom=None, maps="sample", shard=(0, 1)):
@@ -2026,6 +2258,15 @@ def main(argv=None):
     c.add_argument("--fs", default=FS)
     c.add_argument("--maps", choices=["all", "sample"], default="sample")
     c.add_argument("--shard", default="0/1", help="맵을 나눠 돌릴 때 i/n(0 번만 필드·전투도 기록)")
+    r = sub.add_parser("compare", help="에뮬레이터 녹음과 합성을 스펙트럼으로 견줌(DESMUME_CORE 필요)")
+    r.add_argument("out")
+    r.add_argument("--seq", help="곡 번호(쉼표, 없으면 전부)")
+    r.add_argument("--seconds", type=float, default=20.0)
+    r.add_argument("--fs", default=FS)
+    q = sub.add_parser("mini2sf", help="2sflib 과 곡별 .mini2sf")
+    q.add_argument("out")
+    q.add_argument("--seq", help="곡 번호(쉼표, 없으면 전부)")
+    q.add_argument("--fs", default=FS)
     a = ap.parse_args(argv)
     if a.cmd == "info":
         print(summary(load_sdat(a.fs)))
@@ -2043,6 +2284,10 @@ def main(argv=None):
             print(f"{n:10s} {day:3d} {night:3d}")
     elif a.cmd == "scenes":
         scenes(a.out, a.fs, maps=a.maps, shard=tuple(int(x) for x in a.shard.split("/")))
+    elif a.cmd == "compare":
+        compare(a.out, [int(x) for x in a.seq.split(",")] if a.seq else None, a.fs, seconds=a.seconds)
+    elif a.cmd == "mini2sf":
+        mini2sf(a.out, a.fs, songs=[int(x) for x in a.seq.split(",")] if a.seq else None)
 
 
 if __name__ == "__main__":
