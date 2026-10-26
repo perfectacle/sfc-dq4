@@ -22,28 +22,11 @@ git fetch origin main
 git worktree list
 ```
 
-### 1. 주문 습득·주문 목록 쓰기
+### 1. 주문 습득·주문 목록 쓰기(머지됨)
 
-- 워크트리: `${MAIN}-dq5-learnwrite`, 브랜치 `feat/dq5-learnwrite`, 기반 `b9f115c`.
-- 새 파일: `sfc/dq5/tools/dq5learnwrite.py`, `dq5learncheck.py`, `lua/dq5learncheck.lua`, `tests/test_dq5learnwrite.py`, 일지 초안 `sfc/dq5/journal/2026-10-26-61-learnwrite.md`.
-- 수정 파일: `sfc/dq5/docs/dq5-data-format.md`, `sfc/dq5/tools/README.md`. README 일지 목록·todo·핸드오프 갱신은 아직입니다. 커밋·PR·최종 독립 검토도 아직입니다.
-- 입력 `dq5learn/1`: 사람 11종·동료 몬스터 42종의 습득 레벨, 필드/전투 슬롯, 주문 목록. 항목 수와 목록 길이는 유지합니다. 사람 표 `23:B819`와 몬스터 표 `23:B979` 사이의 `B978`은 보존합니다.
-- 필드 습득 비트는 0~7, 전투는 8~19입니다. `23:BE63`은 사람 2의 전투 목록 마지막 주문과 사람 3의 필드 목록 개수가 공유합니다. 포인터가 다르더라도 바이트 범위가 겹치므로 미수정 목록까지 검사하는 보호를 유지해야 합니다.
-- 기존 검증 기록: 53종 원본 입력의 쓰기 0개, 테스트 5개. 이번 인계에서 테스트를 다시 돌리지는 않았습니다.
-- 저장된 실측: 해당 워크트리 `work/learncheck/run-h8x_2eqf/results.json`과 `run-kbkivuke/results.json` 모두 레벨 2·습득 비트 `010100`, 필드 HP 5→100/MP 100→95, 전투 HP 5→85/MP 100→95를 기록합니다. 주문 번호는 `28`(JSON의 십진수 40)입니다. 실제 목록 읽기와 메시지 근거는 각 실행 폴더의 `observed.txt`, `battle.txt`, `final.wram` 및 하위 장면 폴더를 확인합니다.
-- 일지의 방법: 첫 습득 레벨 4→2, 첫 주문 호이미→베호이미. 레벨업에서 얻은 비트를 별도 필드/전투 상태에 전달해 사용했습니다. 하나의 연속 플레이로 모두 확인한 것은 아닙니다. helper와 Lua를 검토해 결과와 일지의 주장이 일치하는지 확인합니다.
+`dq5learnwrite.py`와 실측 도구 `dq5learncheck.py`로 마쳤습니다([일지 61](journal/2026-10-26-61-learnwrite.md), [입력 형식](docs/dq5-data-format.md#주문-습득인물별-주문-목록-쓰기)). 원본 53종 쓰기 0개, 합성 테스트 5개, 레벨업 습득·필드·전투 사용 3건을 최신 기반에서 다시 실행해 같은 결과를 얻었습니다. `23:BE63` 같은 부분 겹침 보호를 유지합니다.
 
-필요한 재현 명령은 해당 워크트리에서 실행합니다. `$MESENCE`는 사용자 환경의 MesenCE 실행 파일입니다.
-
-```sh
-cd "${MAIN}-dq5-learnwrite"
-uv run --locked python -m unittest discover -s sfc/dq5/tools/tests -p 'test_dq5learnwrite.py'
-uv run --locked python sfc/dq5/tools/dq5learnwrite.py rom/dq5.sfc check
-uv run --locked python sfc/dq5/tools/dq5learncheck.py rom/dq5.sfc \
-  --state work/state/ship.mss --mesence "$MESENCE" --out work/learncheck
-```
-
-남은 범위는 목록 증설·재배치, 레벨 1 초기 합류 처리, 필드 주문 비용·효과·AI 표입니다. 이 도구로 완료됐다고 표시하지 않습니다.
+남은 범위는 목록 증설·재배치, 레벨 1 초기 합류 처리, 필드 주문 비용·효과·AI 표입니다. 실측 결과 `work/learncheck/`는 원래 체크아웃 `work/dq5-learnwrite/`에 복사해 두고 워크트리를 정리합니다.
 
 ### 2. 실내 출구·영역 이동 쓰기
 
@@ -80,7 +63,7 @@ DQ4 타이틀/메뉴와 기존 writer 기본 주소가 충돌합니다: 타이�
 
 ## 지금 상태
 
-[DQ4 포팅 도구 점검](docs/dq5-port-tool-audit.md)을 먼저 읽습니다. 기존 쓰기 도구 완성이 전체 포팅 도구 완성을 뜻하지 않습니다. DQ4 타이틀/메뉴와 기본 주소가 겹치는 5조합, 없는 맵 번호의 이웃 포인터 변경, 출구·인물 배치·대화 VM·보상·주문 습득·범용 그림·게임 전체 한글 쓰기 공백을 확인했습니다. 물건 힘·전투 주문 MP와 조합형 이름 입력은 게임에서 다시 확인했습니다. 맵 입력 보호는 [일지 59](journal/2026-10-26-59-mapwrite-guard.md)에서 고쳤습니다. 상자·조사 보상의 고정 표는 [일지 60](journal/2026-10-26-60-chestwrite.md)에서 작성했습니다. 다음은 영역 배치와 나머지 월드 연결 도구입니다([일지](journal/2026-10-26-58-port-tool-audit.md)).
+[DQ4 포팅 도구 점검](docs/dq5-port-tool-audit.md)을 먼저 읽습니다. 기존 쓰기 도구 완성이 전체 포팅 도구 완성을 뜻하지 않습니다. DQ4 타이틀/메뉴와 기본 주소가 겹치는 5조합, 없는 맵 번호의 이웃 포인터 변경, 출구·인물 배치·대화 VM·보상·주문 습득·범용 그림·게임 전체 한글 쓰기 공백을 확인했습니다. 물건 힘·전투 주문 MP와 조합형 이름 입력은 게임에서 다시 확인했습니다. 맵 입력 보호는 [일지 59](journal/2026-10-26-59-mapwrite-guard.md)에서 고쳤습니다. 상자·조사 보상의 고정 표는 [일지 60](journal/2026-10-26-60-chestwrite.md)에서 작성했습니다. 주문 습득과 기존 필드/전투 목록 쓰기는 [일지 61](journal/2026-10-26-61-learnwrite.md)에서 작성했습니다. 다음은 영역 배치와 나머지 월드 연결 도구입니다([일지](journal/2026-10-26-58-port-tool-audit.md)).
 
 포팅용 스크립트 쓰기는 `dq5eventwrite.py`·`dq5npcwrite.py`로 이어집니다([쓰기 형식](docs/dq5-build-format.md#이벤트-스크립트-dq5event1)). 이벤트는 지정한 표 항목을 확장 뱅크로 연결하고, 인물은 기존 슬롯 길이를 유지합니다. 원본 왕복 비교와 MesenCE 실측 7건을 마쳤습니다([일지](journal/2026-10-26-53-scriptwrite.md)). 필드 블록·입구·도착 고정 표는 `dq5fieldtables.py`로 씁니다([일지](journal/2026-10-26-54-fieldtables.md)). 블록은0~510, 지도 자료 배치는30~3F이며 세 세계 재압축을 게임에서 확인했습니다. `dq5fieldtablecheck.py`로 블록·입구·출구·세계 지도 검증을 재현합니다. 성장·조우·상점 고정 표는 `dq5progresswrite.py`로 씁니다([일지](journal/2026-10-26-55-progresswrite.md)). `dq5progresscheck.py`로 레벨업·조우·상점 실측 3건을 재현하며, 물건 가격 쓰기도 확인했습니다. 보행 대사 일괄 쓰기는 `dq5textwrite.py`이며 원래 글꼴의 코드 목록을 받습니다([일지](journal/2026-10-26-56-textwrite.md)). `dq5textcheck.py`로 실제 디코더 비교 4건을 재현합니다. 인물 스크립트 길이 변경은 `dq5npcrelocate.py`로 기본·대체 목록을 두 뱅크로 옮깁니다([일지](journal/2026-10-26-57-npc-relocate.md)). 인물 수·순서·등장 조건은 유지하며, `dq5npcrelocatecheck.py --all --mutations`로 원본·재배치 694쌍과 긴 스크립트 실행 5건을 재현합니다. 남은 도구는 todo의 항목 증설·문자열/글꼴 편집·아직 쓰지 못하는 표입니다.
 
