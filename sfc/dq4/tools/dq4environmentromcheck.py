@@ -26,8 +26,11 @@ for path in (TOOLS, DQ5_TOOLS):
 import dq5map  # noqa: E402
 from dq4environmentart import create_assets  # noqa: E402
 from dq4environmentmap import prepare_maps, render_maps  # noqa: E402
-from dq4environmentrom import (FLOOR, TARGETS, WALL, WATER_BLOCK, WATER_FRAMES, WATER_PERIOD, build_graphics,  # noqa: E402
-                               water_frames)  # noqa: E402
+from dq4environmentmap import BLOCK_ART  # noqa: E402
+from dq4environmentrom import (DOOR, DOOR_KIND, FLOOR, FLOORS, GATE, GATE_KIND, TARGETS, WALL, WATER_BLOCK,  # noqa: E402
+                               WATER_FRAMES, WATER_PERIOD, build_graphics, objects, water_frames)
+
+OBJECT_SIZE = {DOOR_KIND: (2, 3), GATE_KIND: (4, 4)}  # noqa: E402
 
 WARP = DQ5_TOOLS / "lua" / "dq5warp.lua"
 DUMP = TOOLS / "lua" / "dq4environmentdump.lua"
@@ -41,12 +44,12 @@ def _run(mesence, rom, script, env):
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600, check=False)
 
 
-def warp(mesence, rom, state, to, out, name, test=False):
+def warp(mesence, rom, state, to, out, name, test=False, **extra):
     """Warp in and save; with test, also press each direction after saving (dq5warp TEST)."""
     out.mkdir(parents=True, exist_ok=True)
-    env = {"STATE": state, "TO": to, "SHOT_DIR": out, "SAVE": f"{name}.mss", "MAXF": 1500}
+    env = {"STATE": state, "TO": to, "SHOT_DIR": out, "SAVE": f"{name}.mss", "MAXF": 1500, **extra}
     if test:
-        env["TEST"] = "left:40,up:40,right:40,down:40"
+        env.setdefault("TEST", "left:40,up:40,right:40,down:40")
     _run(mesence, rom, WARP, env)
     log = (out / "warp.txt").read_text()
     saved = out / f"{name}.mss"
@@ -108,21 +111,48 @@ def walk_layers(wram):
     return [wram[0xC000 + i * 8 + 1] & 0x0F for i in range(width * height)]
 
 
+def with_floor_doors(image, source, floor):
+    """Offline render with FC doors and gates replaced by the map floor, as the ROM record has them."""
+    image = image.convert("RGB")
+    tile = floor.convert("RGB")
+    for y in range(source.h):
+        for x in range(source.w):
+            if source.blocks["prop"][source.cell(x, y) & 31] in (DOOR, GATE):
+                image.paste(tile, (x * 16, y * 16))
+    return image
+
+
 def check_map(name, wram, vram, cgram, expected, source, known):
+    """Compare everything except the cells DQ5 objects draw over; objects are checked by their
+    kind byte at cell +7 of the top-left cell."""
     got = redraw(wram, vram, cgram, known)
     if got.size != expected.size:
         return {"size": [got.size, expected.size], "pixel_differences": None}
+    width = source.w * 2
+    covered = set()
+    placed = []
+    for x, y, kind in objects(source):
+        w, h = OBJECT_SIZE[kind]
+        covered |= {(x + dx, y + dy) for dx in range(w) for dy in range(h)}
+        placed.append(wram[0xC000 + (y * width + x) * 8 + 7] == kind)
     a, b = got.tobytes(), expected.convert("RGB").tobytes()
-    differences = sum(1 for i in range(0, len(a), 3) if a[i:i + 3] != b[i:i + 3])
+    differences = 0
+    for i in range(0, len(a), 3):
+        px = i // 3
+        if (px % got.width // 8, px // got.width // 8) in covered:
+            continue
+        differences += a[i:i + 3] != b[i:i + 3]
     layers = walk_layers(wram)
     width = source.w * 2
     wrong = 0
     for i, value in enumerate(layers):
         x, y = i % width, i // width
-        blocked = source.blocks["prop"][source.cell(x // 2, y // 2) & 31] & 0x80
+        prop = source.blocks["prop"][source.cell(x // 2, y // 2) & 31]
+        blocked = prop & 0x80 and prop not in (DOOR, GATE)
         if value != (WALL if blocked else FLOOR):
             wrong += 1
-    return {"pixels": len(a) // 3, "pixel_differences": differences, "cells": len(layers),
+    return {"pixels": len(a) // 3, "object_cells_skipped": len(covered), "pixel_differences": differences,
+            "objects_drawn": f"{sum(placed)}/{len(placed)}", "cells": len(layers),
             "walk_layer_mismatches": wrong}, got
 
 
@@ -161,10 +191,10 @@ def _arrival(source):
     return best[1], best[2]
 
 
-def _control_cell(dq5):
+def _control_cell(dq5, target=CONTROL):
     rom = dq5map.Rom(dq5)
     dec = dq5map.Decoder(rom, 0xBE)
-    width, height, buf, _ = dec.decode(dq5map.map_pointer(rom, *CONTROL))
+    width, height, buf, _ = dec.decode(dq5map.map_pointer(rom, *target))
     for y in range(height // 3, height - 1):
         for x in range(width // 3, width - 2):
             if all(buf[((y + dy) * width + x + dx) * 8 + 1] & 1 for dx in (0, 1, 2) for dy in (0, 1)):
@@ -190,7 +220,9 @@ def main():
     def expected(name, frame):
         """Offline render with the water frame the game was showing."""
         shown = dict(assets, **{WATER_FRAMES[0]: assets[WATER_FRAMES[frame]]})
-        return render_maps(args.dq4, shown)[name][0]
+        image = render_maps(args.dq4, shown)[name][0]
+        floor = BLOCK_ART[sources[name].t][FLOORS[name]][0]
+        return with_floor_doors(image, sources[name], assets[floor])
 
     sources = {name: source for _, _, name, source, _, _, _ in prepare_maps(prg, assets)}
     chr_data, _, block_words, built, _ = build_graphics(prg, assets)
@@ -227,7 +259,23 @@ def main():
         "block_table_equal": w0[0xB000:0xC000] == w1[0xB000:0xC000],
         "chr_bank_equal": w0[0x1823:0x1827] == w1[0x1823:0x1827],
     }
-    ok = all(m.get("pixel_differences") == 0 and m.get("walk_layer_mismatches") == 0 and m["moved"]
+    # Open state: object flags 7E:21C2- are cleared on a group change, so visit another map of the
+    # Burland target's group, set every flag there, come back and walk up through the gate.
+    group = TARGETS["burland"][0]
+    gx, gy, _ = next(o for o in objects(sources["burland"]) if o[2] == GATE_KIND)
+    hop = (group, 0x01)
+    hx, hy = _control_cell(args.orig.read_bytes(), hop)
+    side, _ = warp(mesence, args.rom.resolve(), states["burland"], f"{group:02X}/01,{hx},{hy}",
+                   out / "open-hop", "hop", ANYWHERE=1)
+    back, _ = warp(mesence, args.rom.resolve(), side, f"{group:02X}/00,{gx},{gy + 9}", out / "open-gate", "gate",
+                   True, ANYWHERE=1, SET="21C2=FF", TEST="up:150", MAXF=1700)
+    end = (out / "open-gate" / "warp.txt").read_text().split("test cell ")[-1].split(" ->")[1].split()[1]
+    reached = int(end.split(",")[1])
+    results["gate_open"] = {"flags": "7E:21C2=FF", "start": [gx, gy + 9], "reached_row": reached,
+                            "passed_gate_row": reached <= gy + 3}
+
+    ok = results["gate_open"]["passed_gate_row"] and all(m.get("pixel_differences") == 0 and m.get("walk_layer_mismatches") == 0 and m["moved"]
+             and m["objects_drawn"].split("/")[0] == m["objects_drawn"].split("/")[1]
              and m["water_cycles"]
              for m in results["maps"].values()) and all(
         v for k, v in results["control"].items() if k.endswith("_equal"))
