@@ -50,7 +50,7 @@ def all_maps(rom):
 def pointer_addr(rom, bc, bd):
     """맵 포인터(24비트)가 놓인 CPU 주소."""
     if (bc, bd) not in all_maps(rom):
-        raise ValueError(f'원본 맵 목록에 {bc:02X}/{bd:02X}가 없음; 새 맵 추가는 지원하지 않음')
+        raise ValueError(f'원본 맵 목록에 {bc:02X}/{bd:02X}가 없음; 새 맵 번호는 dq5newmap.py 로 더함')
     if bc >= HIGH_FIRST:
         return HIGH_GROUPS & 0xFF0000 | rom.u16(HIGH_GROUPS + (bc - HIGH_FIRST) * 2) + (bd - HIGH_FIRST) * 3
     return 0x0F0000 | group_spans(rom)[0][bc][0] + bd * 3

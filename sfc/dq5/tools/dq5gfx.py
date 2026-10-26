@@ -168,7 +168,7 @@ def sheet(cells, cols, cell_w, cell_h, labels=None, bg=(32, 32, 40), pad=1, labe
 # ---------------------------------------------------------------- 실내 맵
 
 def map_ids(rom):
-    """실내 맵 346개와 그룹 $50 이상 18개의 ($BC, $BD)."""
+    """실내 맵(원본 346개)과 그룹 $50 이상 18개의 ($BC, $BD)."""
     out = [(g, b) for g, (start, end) in enumerate(group_spans(rom)[0]) for b in range((end - start) // 3)]
     return out + [(g, 0x50 + b) for g, n in HIGH_MAPS for b in range(n)]
 

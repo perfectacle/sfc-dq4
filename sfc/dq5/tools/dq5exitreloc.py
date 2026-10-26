@@ -503,9 +503,12 @@ def address(text):
 
 def new_map(text):
     try:
-        return map_key(text, '--new-map')
+        key = map_key(text, '--new-map')
     except ValueError as error:
         raise argparse.ArgumentTypeError(str(error)) from error
+    if key[0] >= EXIT_GROUPS:
+        raise argparse.ArgumentTypeError('--new-map 은 그룹 00~35 만 받음')
+    return key
 
 
 def main():

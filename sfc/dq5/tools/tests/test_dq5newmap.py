@@ -114,6 +114,15 @@ class NewMapTests(unittest.TestCase):
         for value, message in cases:
             with self.subTest(message=message), self.assertRaisesRegex((ValueError, OSError), message):
                 writes_for(self.rom, value)
+        with mock('dq5newmap.encode', return_value=b'\x11'), mock('dq5newmap.entries_for', return_value=[]), \
+                mock('pathlib.Path.read_text', return_value='{"format": "dq5map/1"}'), \
+                self.assertRaisesRegex(ValueError, '빈 자리'):
+            writes_for(self.rom, doc({'map': '01/02', 'record': {'source': 'x.json'}, 'attrs': {'copy': '01/00'}}),
+                       at={'records': 0x018000})
+        hooked = Rom(bytearray(self.rom.d))
+        write(hooked.d, POINTER_SITE - 1, bytes([0x22, 0, 0x80]))
+        with self.assertRaisesRegex(ValueError, '원래 명령'):
+            group_spans(hooked)
         one = doc({'map': '01/02', 'record': {'copy': '01/00'}, 'attrs': {'copy': '01/00'}})
         for at, message in (({'pointer': 0x10FF50}, '뱅크 0F'), ({'attr': 0x238000}, '빈 자리')):
             with self.subTest(at=at), self.assertRaisesRegex(ValueError, message):

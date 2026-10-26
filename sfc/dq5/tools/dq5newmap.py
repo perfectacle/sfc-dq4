@@ -66,6 +66,8 @@ def plan(rom, doc, base):
     attrs, _ = entries(rom, 'attr')
     if [len(g) for g in pointers] != [len(g) for g in attrs]:
         raise ValueError('맵 포인터와 맵 속성의 그룹별 맵 수가 다름')
+    # copy 는 원본 항목에서 푼다. 입력 차례나 같은 입력의 다른 고침에 따라 값이 달라지지 않게 한다.
+    base_pointers, base_attrs = [list(g) for g in pointers], [list(g) for g in attrs]
     pointers, attrs = [list(g) for g in pointers], [list(g) for g in attrs]
     records, seen = [], set()
     if not isinstance(doc['maps'], list):
@@ -91,15 +93,15 @@ def plan(rom, doc, base):
                 raise ValueError(f'{name}.{field}: 키 하나짜리 객체여야 함')
             if 'copy' in value:
                 key = map_key(value['copy'], f'{name}.{field}.copy')
-                if key[0] >= GROUPS or key[1] >= len(pointers[key[0]]) or pointers[key[0]][key[1]] is None:
-                    raise ValueError(f'{name}.{field}: 복사할 맵 {value["copy"]} 이 없음(새 맵끼리는 복사하지 않음)')
+                if key[0] >= GROUPS or key[1] >= len(base_pointers[key[0]]):
+                    raise ValueError(f'{name}.{field}: 복사할 맵 {value["copy"]} 이 원본에 없음(새 맵은 복사하지 않음)')
                 return key
             return None
 
         if 'record' in row:
             key = source(row['record'], 'record')
             if key:
-                pointers[bc][bd] = pointers[key[0]][key[1]]
+                pointers[bc][bd] = base_pointers[key[0]][key[1]]
             elif set(row['record']) == {'source'}:
                 path = base / row['record']['source']
                 record = json.loads(path.read_text(encoding='utf-8'))
@@ -114,7 +116,7 @@ def plan(rom, doc, base):
         if 'attrs' in row:
             key = source(row['attrs'], 'attrs')
             if key:
-                attrs[bc][bd] = attrs[key[0]][key[1]]
+                attrs[bc][bd] = base_attrs[key[0]][key[1]]
             elif set(row['attrs']) == {'bytes'} and isinstance(row['attrs']['bytes'], list) and \
                     len(row['attrs']['bytes']) == 6 and all(type(v) is int and 0 <= v <= 255 for v in row['attrs']['bytes']):
                 attrs[bc][bd] = bytes(row['attrs']['bytes'])
@@ -171,6 +173,8 @@ def writes_for(rom, doc, base=Path('.'), at=None):
     if records and not cursor:
         raise ValueError('새 레코드(source)를 놓을 --records-at 이 필요함')
     out = []
+    if records and lorom(cursor) < 0x180000 and not bank_free(rom, cursor, sum(len(r) for _, r in records)):
+        raise ValueError(f'--records-at {cpu(cursor)}: 원래 롬의 빈 자리나 늘린 뱅크(30~)여야 함')
     for key, raw in records:
         if (cursor & 0xFFFF) + len(raw) > 0x10000:
             raise ValueError(f'{key[0]:02X}/{key[1]:02X} 레코드가 {cpu(cursor)} 의 뱅크를 넘음')
@@ -190,6 +194,9 @@ def writes_for(rom, doc, base=Path('.'), at=None):
         same = next((i for i, (a, b) in enumerate(zip(new, old or b'')) if a != b), min(len(new), len(old or b'')))
         if old is not None and same:
             addr, new, old = addr + same, new[same:], old[same:]
+        tail = next((i for i, (a, b) in enumerate(zip(new[::-1], (old or b'')[::-1])) if a != b), 0)
+        if old is not None and tail:
+            new, old = new[:-tail], old[:-tail]
         if new and new != old:
             result.append((addr, new, old if off < 0x180000 else None, note))
     top = max([a >> 16 for a, _, _, _ in result] or [0])
@@ -229,6 +236,9 @@ def check(rom, doc, base=Path('.'), at=None):
     for bc, bd in sorted(changed):
         if isinstance(attrs[bc][bd], bytes) and new_attr[bc][bd] != attrs[bc][bd]:
             raise ValueError(f'{bc:02X}/{bd:02X}: 속성이 입력과 다름')
+        want = pointers[bc][bd]
+        if isinstance(want, bytes) and map_pointer(built, bc, bd) != int.from_bytes(want, 'little'):
+            raise ValueError(f'{bc:02X}/{bd:02X}: 맵 포인터가 입력과 다름')
     if patch(built, doc, base, at)['writes']:
         raise ValueError('만든 롬에 같은 입력을 다시 패치하면 쓰기가 남음')
     print(f'맵 {len(before)}개 → {len(after)}개(새 {", ".join(f"{a:02X}/{b:02X}" for a, b in added)}); '

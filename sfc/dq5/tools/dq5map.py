@@ -80,18 +80,24 @@ def next_addr(a):
 def group_spans(rom, attr=False):
     """그룹 00~35 의 목록 (시작, 끝) 16비트 주소와 그룹 표 자리. 맵 포인터(3바이트) 또는 맵 속성(attr, 6바이트) 표.
     목록은 이어져 있어 다음 그룹의 시작이 끝이다. 마지막 그룹은 원래 표 바로 앞에서 끝나고, 표를 옮긴 롬은
-    표 뒤 끝 표시(55번째 16비트)가 끝이다(dq5newmap.py). 코드 자리가 그 명령이 아니면(코드 없는 합성 롬) 원래 표를 본다."""
+    표 뒤 끝 표시(55번째 16비트)가 끝이다(dq5newmap.py). 코드 자리가 모두 0 이면(코드 없는 합성 롬) 원래 표를 본다."""
     original = ATTR_TABLE if attr else GROUP_TABLE
+    sites = [(a - 1, 0xBD) for a in ATTR_SITES] if attr else [(POINTER_SITE - 1, 0xBC)]
+    code = [(rom.u8(op), rom.u16(op + 1)) for op, _ in sites]
     table = original
-    if attr and rom.u8(ATTR_SITES[0] - 1) == rom.u8(ATTR_SITES[1] - 1) == 0xBD:
-        table = ATTR_TABLE & 0xFF0000 | rom.u16(ATTR_SITES[0])
-        if rom.u16(ATTR_SITES[1]) != (table + 1) & 0xFFFF:
+    if any(c != (0, 0) for c in code):
+        if any(c[0] != want for c, (_, want) in zip(code, sites)):
+            raise ValueError(f'{sites[0][0] >> 16:02X}:{sites[0][0] & 0xFFFF:04X} 이 그룹 표를 읽는 원래 명령이 아님')
+        table = original & 0xFF0000 | code[0][1]
+        if attr and code[1][1] != (table + 1) & 0xFFFF:
             raise ValueError('01:83FC·8401 의 맵 속성 표 주소가 서로 맞지 않음')
-    elif not attr and rom.u8(POINTER_SITE - 1) == 0xBC:
-        table = GROUP_TABLE & 0xFF0000 | rom.u16(POINTER_SITE)
     starts = [rom.u16(table + g * 2) for g in range(GROUPS)]
     end = table & 0xFFFF if table == original else rom.u16(table + GROUPS * 2)
-    return list(zip(starts, starts[1:] + [end])), table
+    spans = list(zip(starts, starts[1:] + [end]))
+    size = 6 if attr else 3
+    if any(e < s or (e - s) % size for s, e in spans):
+        raise ValueError(f'{table >> 16:02X}:{table & 0xFFFF:04X} 그룹 표의 목록 범위가 맞지 않음')
+    return spans, table
 
 
 def map_pointer(rom, bc, bd):
