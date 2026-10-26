@@ -211,9 +211,12 @@ def build(out, rom=None, references=None):
     if all(name in assets for name in ("house_red", "house_straw", "market_slate")):
         previews["preview-architecture"] = architecture_screen(assets, PALETTE)
     if rom:
-        from dq4environmentmap import render_maps
+        from dq4environmentmap import render_fields, render_maps
 
         (out / "maps").mkdir(exist_ok=True)
+        for name, (image, info) in render_fields(rom, assets).items():
+            image.save(out / "maps" / f"{name}.png")
+            manifest["maps"][name] = info
         for name, (image, info) in render_maps(rom, assets).items():
             image.info.pop("transparency", None)
             image.save(out / "maps" / f"{name}.png")

@@ -13,6 +13,7 @@ if str(FC_TOOLS) not in sys.path:
     sys.path.insert(0, str(FC_TOOLS))
 
 import dq4block  # noqa: E402
+import dq4field  # noqa: E402
 from dq4environmentart import palette_variant  # noqa: E402
 
 
@@ -404,7 +405,7 @@ def sheet_art(prg, t):
     return out
 
 
-def _tile(assets, name, palette, map_type, block=None):
+def _tile(assets, name, palette, map_type, block=None, background_name=None):
     if name not in assets:
         raise ValueError(f"Missing environment asset: {name}")
     tile = assets[name]
@@ -417,8 +418,9 @@ def _tile(assets, name, palette, map_type, block=None):
         raise ValueError(f"{name}: only transparent index zero is supported")
     pixels = tile.tobytes()
     transparent = pixels.count(0) if transparency == 0 and name != "dark_void" else 0
-    floor = SHEET_STYLES[map_type][1] if map_type in SHEET_STYLES else SHEET_FLOORS.get(map_type, "red_paving")
-    background_name = BACKGROUNDS.get((map_type, block), floor)
+    if background_name is None:
+        floor = SHEET_STYLES[map_type][1] if map_type in SHEET_STYLES else SHEET_FLOORS.get(map_type, "red_paving")
+        background_name = BACKGROUNDS.get((map_type, block), floor)
     if name in {"tree16", "bush", "flowers", "crops"}:
         background_name = "grass"
     elif name in {"sign_church", "sign_weapon", "sign_armour", "sign_inn", "sign_shop", "window16"}:
@@ -536,5 +538,50 @@ def render_maps(rom_path, assets, names=None):
                 "Wall heights and roof overlays are not added to the FC block grid.",
                 "Visual meanings marked unconfirmed remain hypotheses, independent of ROM properties.",
             ],
+        })
+    return result
+
+
+# FC field blocks (sheet 00, fields 0, 1 and 3). The 2-wide cave mouths and castles use the
+# same left and right halves as on the field.
+FIELD_ART = {
+    0x00: ("water0", "바다"), 0x01: ("hill", "언덕"), 0x02: ("grass", "초원"), 0x03: ("bush", "덤불"),
+    0x04: ("forest", "숲"), 0x05: ("dirt", "사막"), 0x06: ("mountain", "산"), 0x07: ("swamp", "독늪"),
+    0x08: ("cave_mouth", "동굴 입구 왼쪽"), 0x09: ("cave_mouth", "동굴 입구 오른쪽"), 0x0A: ("shoal", "암초"),
+    0x0B: ("cave_mouth", "동굴 입구"), 0x0C: ("shrine", "사당"), 0x0D: ("tower_icon", "탑"),
+    0x0E: ("rocky_path", "돌길"), 0x0F: ("rocky_path", "돌길"), 0x10: ("town_icon", "마을"),
+    0x11: ("tower_icon", "탑"), 0x12: ("castle_icon_left", "성 왼쪽"), 0x13: ("castle_icon_right", "성 오른쪽"),
+    0x14: ("rocky_path", "어두운 돌길"), 0x15: ("signboard", "팻말"), 0x16: ("bridge", "다리"),
+    0x17: ("rocky_path", "돌길"), 0x1D: ("rocky_path", "어두운 돌길"), 0x1E: ("rocky_path", "어두운 돌길"),
+}
+
+
+def render_fields(rom_path, assets):
+    """FC fields drawn with FIELD_ART: {"field0": (image, info), …}. Unused blocks stay unsupported."""
+    prg = ines.prg(Path(rom_path).read_bytes())
+    palette = next(iter(assets.values())).getpalette()
+    result = {}
+    for number in dq4field.FIELDS:
+        source = dq4block.Map(prg, field=number)
+        counts = Counter(source.cell(x, y) for y in range(source.dh) for x in range(source.dw))
+        unsupported = sorted(set(counts) - FIELD_ART.keys())
+        if unsupported:
+            raise ValueError(f"field {number}: unsupported blocks {unsupported}")
+        tiles = {}
+        for block in counts:
+            name = FIELD_ART[block][0]
+            if name == "water0" or name == "shoal":
+                tiles[block] = assets[name]
+            else:
+                tiles[block] = _tile(assets, name, palette, 0x0A, None, "grass")[0]
+        image = Image.new("P", (source.dw * 16, source.dh * 16))
+        image.putpalette(palette_variant("normal"))
+        for y in range(source.dh):
+            for x in range(source.dw):
+                image.paste(tiles[source.cell(x, y)], (x * 16, y * 16))
+        result[f"field{number}"] = (image, {
+            "field": number, "size_blocks": [source.dw, source.dh],
+            "block_mappings": [{"source_block": f"{b:02X}", "asset": FIELD_ART[b][0], "visual_role": FIELD_ART[b][1],
+                                "cells": n} for b, n in sorted(counts.items())],
         })
     return result
