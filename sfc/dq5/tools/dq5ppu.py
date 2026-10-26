@@ -23,8 +23,55 @@ def b(v):
     return v == 'true'
 
 
-def hdma_lines(wram, P, nlines=241):
-    """HDMA 채널마다 줄별 (모드, B 버스 주소, 바이트들) 목록. 채널 설정은 P, 표는 WRAM."""
+B_OFFSETS = ((0,), (0, 1), (0, 0), (0, 0, 1, 1), (0, 1, 2, 3), (0, 1, 0, 1), (0, 0), (0, 0, 1, 1))   # 옮기기 꼴별 B 버스 주소 더하기
+HDMA_H = 1104   # 줄 안에서 HDMA 가 옮기는 자리(마스터 주기). 이보다 앞서 CPU 가 쓴 표 값은 그 줄에 보인다
+
+
+def wram_offset(a):
+    """CPU 주소 → WRAM 오프셋(WRAM 이 아니면 None)."""
+    bank, lo = a >> 16, a & 0xFFFF
+    if bank in (0x7E, 0x7F):
+        return (bank & 1) << 16 | lo
+    if (bank & 0x7F) < 0x40 and lo < 0x2000:
+        return lo
+    return None
+
+
+def reader(wram, rom, bank, wr=None):
+    """뱅크 bank 의 16비트 주소를 읽는 함수. rom 이 없으면 모두 WRAM 하위 64KB 로 본다(LoROM: 00~3F·80~BF 의 0000~1FFF 는 WRAM 거울).
+    wr 을 주면 WRAM 은 wr(오프셋) 으로 읽는다(프레임 도중 CPU 가 고친 표)."""
+    w = wr or (lambda o: wram[o % len(wram)])
+    if rom is None:
+        return lambda a: w(a & 0xFFFF)
+    if bank in (0x7E, 0x7F):
+        return lambda a: w((bank & 1) << 16 | (a & 0xFFFF))
+    def rd(a):
+        a &= 0xFFFF
+        if a < 0x2000 and (bank & 0x7F) < 0x40:
+            return w(a)
+        return rom[((bank & 0x7F) * 0x8000 + (a & 0x7FFF)) % len(rom)]
+    return rd
+
+
+def hdma_lines(wram, P, nlines=241, rom=None, writes=None):
+    """HDMA 채널마다 줄별 (모드, B 버스 주소, 바이트들) 목록. 채널 설정은 P. 표는 rom 이 있으면 채널의 뱅크에서, 없으면 WRAM.
+    writes 는 프레임 첫머리 WRAM(wram) 뒤에 CPU 가 쓴 [(줄, 줄 안 마스터 주기, CPU 주소, 값)] 이다. 줄 i 의 옮기기는 줄 i 의
+    HDMA_H 에 일어나므로 그보다 앞선 쓰기만 본다."""
+    ov = {}
+    for sl, h, a, v in writes or ():
+        o = wram_offset(a)
+        if o is not None:
+            ov.setdefault(o, []).append((sl, h, v))
+    now = [0]
+
+    def wr(o):
+        o %= len(wram)
+        v = wram[o]
+        for sl, h, x in ov.get(o, ()):
+            if sl < now[0] or (sl == now[0] and h < HDMA_H):
+                v = x
+        return v
+
     en = int(P['dmaController.hdmaChannels'])
     regs = {}
     for ch in range(8):
@@ -34,15 +81,18 @@ def hdma_lines(wram, P, nlines=241):
         ind = b(P[k + 'hdmaIndirectAddressing'])
         p = int(P[k + 'srcAddress'])
         nb = {0: 1, 1: 2, 2: 2, 3: 4, 4: 4}[mode]
-        rd = lambda a: wram[a & 0xFFFF]
+        rd = reader(wram, rom, int(P.get(k + 'srcBank', '126')), wr if ov else None)
+        rdi = reader(wram, rom, int(P.get(k + 'hdmaBank', '126')), wr if ov else None)
         vals = [None] * nlines
+        now[0] = 0
         lc = rd(p); p += 1; fin = lc == 0; addr = 0
         if ind and not fin: addr = rd(p) | rd(p + 1) << 8; p += 2
         do = True
         for line in range(nlines):
+            now[0] = line
             if fin: break
             if do:
-                if ind: data = [rd(addr + i) for i in range(nb)]; addr += nb
+                if ind: data = [rdi(addr + i) for i in range(nb)]; addr += nb
                 else: data = [rd(p + i) for i in range(nb)]; p += nb
                 vals[line] = (mode, dest, data)
             lc = (lc - 1) & 0xFF
@@ -55,8 +105,8 @@ def hdma_lines(wram, P, nlines=241):
         regs[ch] = vals
     return regs
 
-def state_from(P, vram, cgram, oam, wram, hofs=1):
-    """렌더러 입력. hofs 는 HDMA 첫 줄이 몇째 줄에 쓰이는지(MesenCE 와 맞춘 값 1)."""
+def regs_from(P):
+    """상태 P 의 PPU 레지스터 → 렌더러 레지스터 dict."""
     L = []
     for i in range(4):
         k = f'ppu.layers[{i}].'
@@ -69,13 +119,36 @@ def state_from(P, vram, cgram, oam, wram, hofs=1):
              fixed=int(P['ppu.fixedColor']), brightness=int(P['ppu.screenBrightness']), forcedBlank=b(P['ppu.forcedBlank']),
              win=[dict(act=[b(P[f'ppu.window[{w}].activeLayers[{i}]']) for i in range(6)], inv=[b(P[f'ppu.window[{w}].invertedLayers[{i}]']) for i in range(6)]) for w in range(2)],
              wmain=[b(P[f'ppu.windowMaskMain[{i}]']) for i in range(5)], wsub=[b(P[f'ppu.windowMaskSub[{i}]']) for i in range(5)],
-             objbase=int(P['ppu.oamBaseAddress']) * 2, objofs=int(P['ppu.oamAddressOffset']))
-    H = hdma_lines(wram, P)
+             objbase=int(P['ppu.oamBaseAddress']) * 2, objofs=int(P['ppu.oamAddressOffset']),
+             # $2130 bit6-7(주 화면을 검게)·bit4-5(색 계산을 할 곳). MesenCE 상태에 없어 apply 나 호출한 쪽이 둔다
+             clip=int(P.get('ppu.colorMathClipMode', '0')), prevent=int(P.get('ppu.colorMathPreventMode', '0')))
+    return R
+
+
+def state_from(P, vram, cgram, oam, wram, hofs=1, rom=None, writes=None, cgram0=None, cpu_writes=None, P0=None):
+    """렌더러 입력. hofs 는 HDMA 첫 줄이 몇째 줄에 쓰이는지(MesenCE 와 맞춘 값 1). rom 을 주면 롬에 있는 HDMA 표도 읽는다.
+    writes 는 hdma_lines 와 같다(그때 wram 은 프레임 첫머리 것). cgram0 을 주면 HDMA 의 $2121·$2122 쓰기를 프레임 첫머리
+    CGRAM 에 줄마다 더해 줄별 팔레트를 만든다(프레임 끝 CGRAM 에는 아래 줄에서 바꾼 색이 이미 들어 있으므로).
+    cpu_writes 는 화면을 그리는 동안 CPU 가 쓴 PPU 레지스터 [(줄, 줄 안 마스터 주기, 주소, 값)](HDMA 쓰기는 빼고), P0 는 프레임
+    첫머리 상태다. 주면 줄마다 그때까지의 쓰기를 P0 에 더한 레지스터로 그리고, 줄 도중의 쓰기는 점 x 의 자리
+    88 + 4x 가 쓴 때보다 뒤인 점부터 색 계산 레지스터에 건다."""
+    R = regs_from(P)
+    L = R['layers']
+    H = hdma_lines(wram, P, rom=rom, writes=writes)
     # HDMA 쓰기를 줄마다 누적해 그 줄의 스크롤·창 자리를 만든다
     hs = [l['hs'] for l in L]; vs = [l['vs'] for l in L]
     table = []
     cur_h = list(hs); cur_v = list(vs)
     cur_w = [[int(P[f'ppu.window[{w}].left']), int(P[f'ppu.window[{w}].right'])] for w in range(2)]
+    # 주·서브 화면 층($212C·$212D)과 고정색($2132)도 HDMA 로 줄마다 바뀐다(전투는 OBJ 를 화면 56~166줄에만 켜고,
+    # メラゾーマ·ベギラゴン 등은 고정색을 줄마다 바꿔 BG1~3 에 더한다)
+    cur_ms = [R['main'], R['sub']]
+    cur_fixed = R['fixed']
+    cg_dests = any(v and v[1] in (0x21, 0x22) for vals in H.values() for v in vals)
+    cg = bytearray(cgram0) if cgram0 is not None and cg_dests else None
+    cg_addr, cg_latch, cg_snap = 0, None, bytes(cg) if cg is not None else None
+    if cpu_writes is not None:
+        Pc, latch = dict(P0), [0]
     for line in range(241):
         for ch, vals in H.items():
             v = vals[line - hofs] if 0 <= line - hofs < len(vals) else None
@@ -89,7 +162,40 @@ def state_from(P, vram, cgram, oam, wram, hofs=1):
                 for i, x in enumerate(data):
                     r = dest + (i if mode in (1, 3, 4) else 0) - 0x26
                     if r < 4: cur_w[r // 2][r % 2] = x
-        table.append(dict(hs=list(cur_h), vs=list(cur_v), win=[list(w) for w in cur_w]))
+            elif dest in (0x2C, 0x2D):
+                for i, x in enumerate(data):
+                    r = dest + (i if mode in (1, 3, 4) else 0) - 0x2C
+                    if r < 2: cur_ms[r] = x & 0x1F
+            elif dest in (0x21, 0x22) and cg is not None:
+                for i, x in enumerate(data):
+                    r = dest + B_OFFSETS[mode][i]
+                    if r == 0x21:
+                        cg_addr, cg_latch = x, None
+                    elif r == 0x22:
+                        if cg_latch is None:
+                            cg_latch = x
+                        else:
+                            cg[cg_addr * 2 & 0x1FF], cg[cg_addr * 2 + 1 & 0x1FF] = cg_latch, x & 0x7F
+                            cg_addr, cg_latch = (cg_addr + 1) & 0xFF, None
+                cg_snap = None
+            elif dest == 0x32:
+                for i, x in enumerate(data):
+                    if dest + (i if mode in (1, 3, 4) else 0) != 0x32: continue
+                    for bit, sh in ((0x20, 0), (0x40, 5), (0x80, 10)):
+                        if x & bit: cur_fixed = (cur_fixed & ~(31 << sh)) | ((x & 31) << sh)
+        if cg is not None and cg_snap is None:
+            cg_snap = bytes(cg)
+        ent = dict(hs=list(cur_h), vs=list(cur_v), win=[list(w) for w in cur_w], main=cur_ms[0], sub=cur_ms[1],
+                   fixed=cur_fixed, cg=cg_snap)
+        if cpu_writes is not None:
+            ent['R'] = regs_from(Pc)   # 앞 줄까지의 쓰기는 아래 segs 를 만들며 이미 더했다
+            segs = []
+            for sl, h, a, v in sorted(w for w in cpu_writes if w[0] == line):
+                apply(Pc, [(a, v)], latch)
+                segs.append((max(0, (h - 88) // 4 + 1), regs_from(Pc)))
+            if segs:
+                ent['segs'] = segs
+        table.append(ent)
     return dict(vram=vram, cgram=cgram, oam=oam,
                 regs=R, lines=lambda y: table[min(y, 240)])
 
@@ -134,6 +240,7 @@ def apply(P, writes, latch):
             for i in range(5): P[f"ppu.windowMask{'Main' if a == 0x212E else 'Sub'}[{i}]"] = T(v & (1 << i))
         elif a == 0x2130:
             P['ppu.colorMathAddSubscreen'] = T(v & 2)
+            P['ppu.colorMathPreventMode'] = str((v >> 4) & 3); P['ppu.colorMathClipMode'] = str(v >> 6)
         elif a == 0x2131:
             P['ppu.colorMathEnabled'] = str(v & 0x3F); P['ppu.colorMathHalveResult'] = T(v & 0x40); P['ppu.colorMathSubtractMode'] = T(v & 0x80)
         elif a == 0x2132:
@@ -210,15 +317,20 @@ def render(st, size=(256, 239), yofs=1):
     for row in range(size[1]):
         y = row + yofs  # scanline
         lines = st['lines'](y)
+        R = lines.get('R', st['regs'])
+        segs = lines.get('segs', ())
+        main, sub, fixed = lines.get('main', R['main']), lines.get('sub', R['sub']), lines.get('fixed', R['fixed'])
+        if lines.get('cg') is not None:
+            pal = [struct.unpack_from('<H', lines['cg'], i * 2)[0] for i in range(256)]
         layers = []
         for n in range(4):
             L = R['layers'][n]
-            if not ((R['main'] | R['sub']) >> n) & 1:
+            if not ((main | sub) >> n) & 1:
                 layers.append(None); continue
             layers.append(bg_line(vram, L, n, y, lines['hs'][n], lines['vs'][n], R['mode']) if R['mode'] == 0 or n < 3 else None)
         # OBJ line (first in OAM order wins)
         objl = [None] * 256
-        if (R['main'] | R['sub']) & 16:
+        if (main | sub) & 16:
             for (k, x, oy, t, a, sz) in objs:
                 dy = (y - 1 - oy) & 0xFF  # OBJ drawn one line below
                 if dy >= sz: continue
@@ -243,8 +355,8 @@ def render(st, size=(256, 239), yofs=1):
                     r = r or a
             return r
         for sx in range(256):
-            mm = R['main'] & ~sum((1 << i) for i in range(5) if R['wmain'][i] and inwin(i, sx))
-            sm = R['sub'] & ~sum((1 << i) for i in range(5) if R['wsub'][i] and inwin(i, sx))
+            mm = main & ~sum((1 << i) for i in range(5) if R['wmain'][i] and inwin(i, sx))
+            sm = sub & ~sum((1 << i) for i in range(5) if R['wsub'][i] and inwin(i, sx))
             def top(mask):
                 b = [layers[n][sx] if layers[n] and (mask >> n) & 1 else (0, 0) for n in range(4)]
                 o = objl[sx] if (mask & 16) and objl[sx] else None
@@ -260,21 +372,31 @@ def render(st, size=(256, 239), yofs=1):
                 return ('bd', 0)
             mw, mc = top(mm)
             col = c15(pal[mc])
-            en = R['cmath']
+            Rp = R
+            for x0, Rs in segs:
+                if sx >= x0: Rp = Rs
+            en = Rp['cmath']
             idx = {'o': 4, 'bd': 5}.get(mw, mw)
             use = (en >> idx) & 1 and not (mw == 'o' and mc < 192)
+            if Rp['clip'] or Rp['prevent']:
+                # 1 = 색 창 안, 2 = 색 창 밖, 3 = 늘(검게) / 0 = 늘(색 계산). 색 창은 창 칸 5
+                cw = inwin(5, sx)
+                if Rp['clip'] == 3 or (Rp['clip'] == 2 and cw) or (Rp['clip'] == 1 and not cw):
+                    col = (0, 0, 0)
+                if Rp['prevent'] == 3 or (Rp['prevent'] == 1 and not cw) or (Rp['prevent'] == 2 and cw):
+                    use = False
             if use:
-                if R['addsub']:
+                if Rp['addsub']:
                     sw, sc = top(sm)
-                    s = c15(pal[sc]) if sw != 'bd' else c15(R['fixed'])
+                    s = c15(pal[sc]) if sw != 'bd' else c15(fixed)
                 else:
-                    s = c15(R['fixed'])
-                if R['subtract']:
-                    col = tuple(max(0, a - b) for a, b in zip(col, s))
+                    sw, s = 'fixed', c15(fixed)   # 고정색 모드는 반으로 나누기가 걸린다(서브 화면 배경색 자리만 안 걸림)
+                # 반으로 나누기는 31 로 자르기 전의 합에 건다(31 + 10 → 20)
+                sh = 1 if Rp['halve'] and sw != 'bd' else 0
+                if Rp['subtract']:
+                    col = tuple(max(0, a - b) >> sh for a, b in zip(col, s))
                 else:
-                    col = tuple(min(31, a + b) for a, b in zip(col, s))
-                if R['halve'] and sw != 'bd':
-                    col = tuple(v >> 1 for v in col)
+                    col = tuple(min(31, (a + b) >> sh) for a, b in zip(col, s))
             if bright < 15:
                 col = tuple(v * (bright + 1) // 16 for v in col)
             img[row, sx] = [(v << 3) | (v >> 2) for v in col]

@@ -10,7 +10,8 @@
   python sfc/dq5/tools/dq5fx.py rom/dq5.sfc --export work/effects work/fxh work/fxm   # 연출마다 시트·GIF·index.json
   python sfc/dq5/tools/dq5fx.py rom/dq5.sfc --check work/fxh/01 01                     # SHOTS=1 화면과 견줌
 연출 층은 BG3 타일맵 7~20줄(연출 버퍼 7E:8A1D → VRAM 워드 1CE0)과 팔레트 4~7 의 OBJ 다. 몬스터 OBJ 는
-팔레트 0~3(무리별, 그림자 0)이라 빠진다. 화면 위 0~167줄(창 아래 줄 위)만 자른다.
+팔레트 0~3(무리별, 그림자 0)이라 빠진다. 화면 위 0~167줄(창 아래 줄 위)만 자른다. 화면에 더해지는 색 계산(HDMA 고정색 등)은
+넣지 않는다. 화면 전체는 dq5fxscreen.py.
 """
 import argparse
 import json
@@ -56,24 +57,29 @@ def fx_name(rom, fx):
 
 
 def render_frame(vram, cgram, oam, hscroll=0, vscroll=0):
-    """덤프 한 프레임의 연출 층(256 x CROP_H, RGBA)."""
+    """덤프 한 프레임의 연출 층(256 x CROP_H, RGBA). 전투는 모드 1 에 BG3 우선(`$2105` bit3)이 켜져 있어,
+    우선순위 비트가 선 BG3 타일은 OBJ 위에, 나머지 BG3 타일은 OBJ 아래에 그린다."""
     from PIL import Image
     import dq5gfx
     colors = dq5gfx.cgram_colors(cgram)
     img = Image.new('RGBA', (256, CROP_H), (0, 0, 0, 0))
-    for row in FX_ROWS:
-        for col in range(32):
-            a = (BG3_MAP + row * 32 + col) * 2
-            w = vram[a] | vram[a + 1] << 8
-            t, p = w & 0x3FF, (w >> 10) & 7
-            if t == 0:
-                continue
-            c = (BG3_CHR + t * 8) * 2
-            px = dq5gfx.chr_2bpp(vram[c:c + 16])
-            y = row * 8 - vscroll
-            if 0 <= y < CROP_H:
-                img.alpha_composite(dq5gfx.tile_image(px, colors[p * 4:p * 4 + 4], bool(w & 0x4000), bool(w & 0x8000)),
-                                    ((col * 8 - hscroll) & 0xFF, y))
+
+    def bg3(high):
+        for row in FX_ROWS:
+            for col in range(32):
+                a = (BG3_MAP + row * 32 + col) * 2
+                w = vram[a] | vram[a + 1] << 8
+                t, p = w & 0x3FF, (w >> 10) & 7
+                if t == 0 or bool(w & 0x2000) != high:
+                    continue
+                c = (BG3_CHR + t * 8) * 2
+                px = dq5gfx.chr_2bpp(vram[c:c + 16])
+                y = row * 8 - vscroll
+                if 0 <= y < CROP_H:
+                    img.alpha_composite(dq5gfx.tile_image(px, colors[p * 4:p * 4 + 4], bool(w & 0x4000), bool(w & 0x8000)),
+                                        ((col * 8 - hscroll) & 0xFF, y))
+
+    bg3(False)
     for i in reversed(range(128)):   # 앞 번호가 위에 그려진다
         x, y, t, a = oam[i * 4:i * 4 + 4]
         hi = (oam[512 + i // 4] >> ((i % 4) * 2)) & 3
@@ -96,6 +102,7 @@ def render_frame(vram, cgram, oam, hscroll=0, vscroll=0):
                 px_, py_ = x + dx, y + 1 + dy
                 if -8 < px_ < 256 and -8 < py_ < CROP_H:
                     img.alpha_composite(tile, (px_, py_)) if px_ >= 0 and py_ >= 0 else img.paste(tile, (px_, py_), tile)
+    bg3(True)
     return img
 
 
