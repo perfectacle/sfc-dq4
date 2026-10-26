@@ -11,6 +11,25 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[3]
 
 
+def environment_figure():
+    """새로 그린 환경 에셋을 확대합니다. 롬과 원작 추출 그림을 읽지 않습니다."""
+    from dq4environment import contact_sheet
+    from dq4environmentart import create_assets
+
+    return contact_sheet(create_assets())
+
+
+def environment_map_figure(rom):
+    """FC 이무르 블록 배치에 새 환경 에셋을 놓은 맵을 2배로 키운다. 롬이 없으면 None."""
+    if not rom.exists():
+        return None
+    from dq4environmentart import create_assets
+    from dq4environmentmap import render_maps
+
+    image = render_maps(rom, create_assets())["imuru"][0].convert("RGB")
+    return image.resize((image.width * 2, image.height * 2), Image.Resampling.NEAREST)
+
+
 def sprite_gallery(images):
     """인물마다 남 정지·보행, 서 정지·보행, 동, 북 정지·보행을 풀색 위에 6배로 늘어놓는다."""
     cells = ((0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (3, 0), (3, 1))
@@ -76,6 +95,12 @@ def main():
     images = assets()
     output = ROOT / "sfc" / "dq4" / "images"
     output.mkdir(parents=True, exist_ok=True)
+    environment_figure().save(output / "dq4-environment.webp", lossless=True)
+    environment_map = environment_map_figure(ROOT / "rom" / "dq4.nes")
+    if environment_map is None:
+        print("rom/dq4.nes 가 없어 dq4-environment-imuru.webp 는 건너뜀")
+    else:
+        environment_map.save(output / "dq4-environment-imuru.webp", lossless=True)
     for name, image in images.items():
         scale = 1 if name == "map" else 3
         preview = image.convert("RGBA").resize(

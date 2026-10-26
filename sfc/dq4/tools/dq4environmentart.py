@@ -1,0 +1,941 @@
+"""Hand-authored DQ4 environment pixels, indexed for SFC 4bpp backgrounds.
+
+NDS DQ4 supplies architectural references; no source image pixels are read.
+"""
+
+import random
+
+from PIL import Image, ImageDraw
+
+
+def _rgb(value):
+    return tuple(((int(value[n : n + 2], 16) >> 3) << 3) | (int(value[n : n + 2], 16) >> 5) for n in (0, 2, 4))
+
+
+_BANKS = (
+    ("18202a",) * 16,
+    ("18202a", "102900", "054600", "007200", "0ba100", "3fb800", "20e30e", "2dff39", "9cff8c", "292121", "947321", "f7f7d6", "f7f7d6", "ff5a9c", "ffffef", "ffd629"),
+    ("18202a", "292121", "40342f", "5a4a41", "7b6b62", "9d8e84", "beb4a5", "d8d2bf", "efefd6", "101010", "7c8078", "efefd6", "292121", "6d2921", "b5604f", "f7c69c"),
+    ("18202a", "101010", "474740", "636860", "7c8078", "9c9c92", "c5c5b4", "efefd6", "9cff8c", "31d308", "008300", "102900", "292121", "634200", "c69429", "f7f7d6"),
+    ("18202a", "292121", "3e2805", "5a3b00", "7f5e13", "a98124", "cda23c", "e2cd7a", "f7f7d6", "101010", "7c8078", "efefd6", "102900", "008300", "31d308", "9cff8c"),
+    ("18202a", "292121", "461b15", "64231b", "81362e", "9f4d45", "c16953", "df906d", "f7c69c", "292121", "947321", "f7f7d6", "101010", "636860", "9c9c92", "efefd6"),
+    ("18202a", "292121", "57072e", "850054", "b3177f", "de4fa9", "ffa5de", "292121", "523600", "947321", "d2ad4a", "f7f7d6", "efefd6", "101010", "efefd6", "00298c"),
+    ("18202a", "00104a", "002581", "0024d9", "0042ff", "0073ff", "1aa2ff", "9ce7ff", "102900", "054600", "0ba100", "2dff39", "9cff8c", "102900", "25ac00", "9cff8c"),
+)
+PALETTE = tuple(_rgb(color) for bank in _BANKS for color in bank)
+_FLAT_PALETTE = [channel for rgb in PALETTE for channel in rgb] + [0] * 384
+_REF = {
+    "castle": "nds/dq4/map/tex/haout.png",
+    "town": "nds/dq4/map/tex/maout.png",
+    "interior": "nds/dq4/map/tex/caf1.png",
+}
+
+
+class _Canvas:
+    def __init__(self, bank, size=(16, 16), fill=0):
+        self.bank = bank
+        self.image = Image.new("P", size, self.c(fill))
+        self.image.putpalette(_FLAT_PALETTE)
+        self.image.info["transparency"] = 0
+        self.draw = ImageDraw.Draw(self.image)
+
+    def c(self, color):
+        return self.bank * 16 + color if color else 0
+
+    def rect(self, box, color):
+        self.draw.rectangle(box, fill=self.c(color))
+
+    def line(self, points, color, width=1):
+        self.draw.line(points, fill=self.c(color), width=width)
+
+    def poly(self, points, color):
+        self.draw.polygon(points, fill=self.c(color))
+
+    def point(self, xy, color):
+        self.draw.point(xy, fill=self.c(color))
+
+    def rows(self, rows, at=(0, 0)):
+        for y, row in enumerate(rows):
+            for x, char in enumerate(row):
+                if char != ".":
+                    self.point((at[0] + x, at[1] + y), int(char, 16))
+
+
+def _finish(canvas, role, reference="castle"):
+    canvas.image.info.update(bank=canvas.bank, role=role, reference=_REF[reference])
+    return canvas.image
+
+
+def _stone_wall(edge=None):
+    """DQ5 walls: speckled bricks under a cream cap; side walls show only the cap's edge."""
+    c = _Canvas(2, fill=6)
+    rng = random.Random(11)
+    top = 6 if edge == "top" else 0
+    for y in range(top, 16):
+        row, yy = divmod(y - top, 4)
+        for x in range(16):
+            xx = (x + (4 if row & 1 else 0)) % 8
+            if yy == 3 or xx == 7:
+                color = 6
+            elif yy == 0:
+                color = 5 if xx < 6 else 4
+            else:
+                color = 3 if rng.random() < 0.28 else 4
+            c.point((x, y), color)
+    if edge == "top":
+        for y, color in enumerate((8, 8, 7, 7, 6, 1)):
+            c.line((0, y, 15, y), color)
+        for x in (7, 15):
+            c.point((x, 1), 7)
+            c.point((x, 2), 6)
+    elif edge in ("left", "right"):
+        rim = (1, 6, 8, 8, 7, 6) if edge == "left" else (6, 7, 8, 8, 6, 1)
+        x0 = 0 if edge == "left" else 10
+        for i, color in enumerate(rim):
+            c.line((x0 + i, 0, x0 + i, 15), color)
+        for y in (7, 15):
+            c.line((x0 + 1, y, x0 + 4, y), 6)
+    return _finish(c, "석벽" + (f" {edge}" if edge else ""))
+
+
+def _stone_floor():
+    c = _Canvas(3, fill=3)
+    c.rows((
+        "5555553555555553", "5666553566666653", "5655553555555653", "5555553555555553",
+        "5555553555555553", "5555553555555553", "4444443444444443", "3333333333333333",
+        "5553555555553555", "5653566666653566", "5553555555653555", "5553555555553555",
+        "5553555555553555", "5553555555553555", "4443444444443444", "3333333333333333",
+    ))
+    return _finish(c, "회청색 판석")
+
+
+def _cobble():
+    """DQ5 town roads are a basket weave of tan bricks, not loose stones."""
+    c = _Canvas(4, fill=7)
+    for by in (0, 8):
+        for bx in (0, 8):
+            vertical = (bx + by) // 8 % 2
+            for y in range(8):
+                for x in range(8):
+                    a, b = (x, y) if vertical else (y, x)
+                    color = 3 if a in (3, 7) else 5 if a in (0, 4) or b == 7 else 7
+                    if color == 7 and (x * 5 + y * 3 + bx + by) % 7 == 0:
+                        color = 5
+                    c.point((bx + x, by + y), color)
+    return _finish(c, "황토 벽돌길", "town")
+
+
+def _grass():
+    c = _Canvas(1, fill=7)
+    for x, y in ((2, 2), (10, 0), (13, 6), (6, 10), (0, 13), (12, 14)):
+        c.line((x, y + 1, x + 2, y + 1), 3)
+        c.point((x + 1, y), 6)
+        c.point(((x + 3) % 16, (y + 2) % 16), 5)
+    return _finish(c, "잔디", "town")
+
+
+def _dirt():
+    c = _Canvas(4, fill=8)
+    rng = random.Random(4)
+    for y in range(16):
+        for x in range(16):
+            if rng.random() < 0.12:
+                c.point((x, y), 7 if rng.random() < 0.7 else 6)
+    return _finish(c, "모래", "town")
+
+
+def _stones(c, seed, count, stone, gap, shade, light=None):
+    """Tileable rounded stones from a wrapped Voronoi split; the lower edge of each stone is shaded."""
+    rng = random.Random(seed)
+    sites = [(rng.uniform(0, 16), rng.uniform(0, 16)) for _ in range(count)]
+
+    def border(x, y):
+        d = sorted(min((x - sx - ox) ** 2 + (y - sy - oy) ** 2 for ox in (-16, 0, 16) for oy in (-16, 0, 16))
+                   for sx, sy in sites)
+        return d[1] ** 0.5 - d[0] ** 0.5
+
+    for y in range(16):
+        for x in range(16):
+            if border(x + 0.5, y + 0.5) < 1.1:
+                c.point((x, y), gap)
+            elif border(x + 0.5, y + 1.5) < 1.1 or border(x + 1.5, y + 0.5) < 1.1:
+                c.point((x, y), shade)
+            elif light and (border(x + 0.5, y - 0.5) < 1.1 or border(x - 0.5, y + 0.5) < 1.1):
+                c.point((x, y), light)
+            else:
+                c.point((x, y), stone)
+
+
+def _carpet():
+    c = _Canvas(6)
+    _stones(c, 21, 6, 4, 2, 1)
+    return _finish(c, "자주색 카펫", "interior")
+
+
+def _red_paving():
+    c = _Canvas(6)
+    _stones(c, 8, 7, 4, 2, 1, 5)
+    return _finish(c, "붉은 돌 포장", "castle")
+
+
+def _wood_floor():
+    c = _Canvas(4, fill=2)
+    for y in range(0, 16, 4):
+        c.rect((0, y, 15, y + 2), 4)
+        c.line((0, y, 15, y), 6)
+        c.line((1, y + 2, 15, y + 2), 3)
+        x = 4 if y % 8 else 12
+        c.line((x, y, x, y + 2), 2)
+        c.line((x + 2, y + 1, x + 5, y + 1), 5)
+    return _finish(c, "나무 바닥", "interior")
+
+
+def _wood_wall():
+    c = _Canvas(4, fill=3)
+    for x in range(0, 16, 4):
+        c.rect((x, 0, x + 2, 15), 5)
+        c.line((x, 0, x, 15), 7)
+        c.line((x + 2, 1, x + 2, 15), 4)
+        c.line((x + 1, 5 + x % 3, x + 1, 10 + x % 3), 6)
+    c.rect((0, 0, 15, 2), 3)
+    c.line((0, 0, 15, 0), 6)
+    c.rect((0, 13, 15, 15), 2)
+    c.line((0, 13, 15, 13), 5)
+    c.line((1, 3, 13, 12), 2, 2)
+    c.line((2, 3, 14, 12), 6)
+    return _finish(c, "목조 가새 벽", "town")
+
+
+def _roof(kind):
+    bank = {"red": 5, "straw": 4, "slate": 3}[kind]
+    c = _Canvas(bank, fill=2)
+    if kind == "straw":
+        for x in range(16):
+            c.line((x, 0, x, 15), (4, 6, 5, 7, 4, 5, 6, 5)[x % 8])
+        for x, y, length in ((1, 3, 3), (6, 6, 3), (11, 1, 2), (14, 10, 4), (4, 12, 3), (9, 12, 2)):
+            c.line((x, y, x, y + length), 3)
+        c.line((0, 7, 15, 7), 4)
+        c.line((0, 8, 15, 8), 6)
+        c.line((0, 15, 15, 15), 3)
+    else:
+        for y in range(-4, 16, 4):
+            for x in range(-4 if y % 8 else 0, 16, 8):
+                c.poly(((x, y), (x + 6, y), (x + 6, y + 2), (x + 5, y + 3), (x + 1, y + 3), (x, y + 2)), 4)
+                c.line((x + 1, y, x + 5, y), 6)
+                c.line((x + 1, y + 1, x + 4, y + 1), 5)
+                c.line((x + 1, y + 3, x + 5, y + 3), 3)
+                c.point((x + 6, y + 1), 3)
+    return _finish(c, {"red": "적갈색 둥근 기와", "straw": "짚지붕", "slate": "회청색 기와"}[kind], "town" if kind == "straw" else "castle")
+
+
+def _ridge(kind):
+    c = _Canvas({"red": 5, "straw": 4, "slate": 3}[kind])
+    c.rect((0, 5, 15, 12), 3)
+    c.rect((0, 6, 15, 10), 5)
+    c.line((0, 5, 15, 5), 7)
+    c.line((0, 7, 15, 7), 6)
+    for x in (3, 11):
+        c.line((x, 5, x, 11), 4)
+        c.line((x + 1, 5, x + 1, 9), 6)
+    return _finish(c, "용마루", "town" if kind == "straw" else "castle")
+
+
+def _water(frame):
+    c = _Canvas(7, fill=3)
+    rng = random.Random(5)
+    for y in range(0, 16, 2):
+        x = rng.randrange(16) + frame * 2
+        length = rng.choice((3, 4, 5))
+        for dx in range(length):
+            c.point(((x + dx) % 16, y), 6)
+        c.point(((x + length) % 16, y + 1), 5)
+        c.point(((x - 1) % 16, y + 1), 4)
+    return _finish(c, f"물결 {frame}")
+
+
+def _shore(direction):
+    c = _Canvas(7)
+    c.image = _water(0)
+    c.draw = ImageDraw.Draw(c.image)
+    rng = random.Random(9)
+    for y in range(16):
+        for x in range(16):
+            if y < 4:
+                c.point((x, y), 10 if rng.random() < 0.1 else 11)
+            elif y == 4:
+                c.point((x, y), 9)
+            elif y == 5 or (y == 6 and (x * 7) % 3 == 0):
+                c.point((x, y), 1 if y == 5 else 2)
+    if direction != "n":
+        turn = {"e": Image.Transpose.ROTATE_270, "s": Image.Transpose.ROTATE_180, "w": Image.Transpose.ROTATE_90}[direction]
+        c.image = c.image.transpose(turn)
+    return _finish(c, f"물가 {direction}")
+
+
+def _bridge():
+    c = _Canvas(3, fill=3)
+    for y in range(0, 16, 4):
+        c.rect((3, y, 12, y + 2), 5)
+        c.line((4, y, 11, y), 6)
+        c.line((7 if y % 8 else 10, y, 7 if y % 8 else 10, y + 2), 4)
+    for x in (0, 13):
+        c.rect((x, 0, x + 2, 15), 2)
+        c.line((x, 0, x, 15), 6)
+        c.line((x + 1, 0, x + 1, 15), 4)
+        for y in (3, 11):
+            c.line((x, y, x + 2, y), 3)
+    return _finish(c, "석교")
+
+
+def _stairs(down=False):
+    c = _Canvas(3, fill=1 if down else 3)
+    for n in range(5):
+        y = 1 + n * 3
+        left = n // 2 if down else 0
+        c.line((left, y, 15 - left, y), 6 if not down or n < 3 else 4)
+        c.line((left, y + 1, 15 - left, y + 1), 4 if not down or n < 3 else 3)
+        c.line((left, y + 2, 15 - left, y + 2), 2)
+    return _finish(c, "내려가는 계단" if down else "올라가는 계단")
+
+
+def _door(opened=False):
+    c = _Canvas(4, (16, 32))
+    c.poly(((1, 31), (1, 10), (3, 6), (6, 4), (9, 4), (12, 6), (14, 10), (14, 31)), 1)
+    c.line(((1, 30), (1, 10), (3, 6), (6, 4), (9, 4), (12, 6), (14, 10), (14, 30)), 7)
+    c.line(((3, 29), (3, 10), (5, 7), (10, 7), (12, 10), (12, 29)), 3)
+    if not opened:
+        c.rect((4, 11, 11, 29), 4)
+        c.rect((5, 8, 10, 10), 4)
+        for x in (4, 7, 10):
+            c.line((x, 10, x, 29), 6)
+            c.line((x + 2, 10, x + 2, 29), 2)
+        for y in (14, 25):
+            c.rect((4, y, 11, y + 1), 2)
+            c.line((4, y, 11, y), 9)
+        c.point((10, 20), 8)
+        c.point((10, 21), 3)
+    else:
+        c.poly(((3, 10), (6, 8), (6, 29), (3, 28)), 4)
+        c.line((4, 11, 4, 27), 6)
+        c.line((6, 9, 6, 29), 2)
+        c.point((5, 20), 8)
+    c.line((1, 31, 14, 31), 5)
+    return _finish(c, "문 열림" if opened else "문 닫힘", "town")
+
+
+def _window():
+    c = _Canvas(2, (16, 32))
+    c.poly(((2, 25), (2, 11), (4, 7), (7, 5), (8, 5), (11, 7), (13, 11), (13, 25)), 3)
+    c.line(((2, 25), (2, 11), (4, 7), (7, 5), (8, 5), (11, 7), (13, 11)), 8)
+    c.poly(((4, 23), (4, 12), (6, 8), (9, 8), (11, 12), (11, 23)), 1)
+    c.line((7, 8, 7, 23), 6)
+    c.line((4, 15, 11, 15), 6)
+    c.line((5, 12, 5, 14), 9)
+    c.line((9, 17, 9, 22), 9)
+    c.rect((1, 24, 14, 26), 4)
+    c.line((1, 24, 14, 24), 8)
+    return _finish(c, "아치창")
+
+
+def _leaves(c, x, y, shade=0):
+    c.rows((
+        "....43....", "..45654...", ".5676543..", "456654543.",
+        "345434532.", ".34432421.", "..232321..", "...121....",
+    ), (x, y))
+    if shade:
+        for yy in range(y, min(y + 8, c.image.height)):
+            for xx in range(x, min(x + 10, c.image.width)):
+                value = c.image.getpixel((xx, yy))
+                if 18 <= value <= 23:
+                    c.image.putpixel((xx, yy), value - shade)
+
+
+def _tree():
+    c = _Canvas(1, (32, 32))
+    c.rows(("...999...", "..9aba9..", "..9bba9..", "...aba...", "..9aba9..", ".9a99aa9.", "99.....99"), (12, 24))
+    c.poly(((15, 0), (20, 2), (22, 5), (26, 6), (26, 9), (29, 12), (28, 16), (30, 20), (27, 23), (24, 25), (19, 27), (14, 26), (10, 27), (6, 24), (3, 23), (3, 19), (1, 17), (4, 13), (3, 10), (7, 7), (8, 4), (12, 4)), 1)
+    for x, y, shade in ((11, 17, 1), (18, 17, 1), (3, 16, 1), (21, 11, 1), (11, 10, 0), (5, 9, 0), (17, 6, 0), (7, 4, 0), (12, 0, 0), (2, 13, 0), (8, 17, 0), (17, 13, 0)):
+        _leaves(c, x, y, shade)
+    c.point((15, 2), 8)
+    c.point((10, 7), 8)
+    c.line((7, 15, 8, 15), 7)
+    c.line((11, 8, 14, 9), 5)
+    c.line((19, 10, 22, 11), 4)
+    c.line((8, 18, 10, 17), 5)
+    c.point((18, 20), 5)
+    return _finish(c, "활엽수", "town")
+
+
+def _bush():
+    c = _Canvas(1)
+    c.rows((
+        "......333.......", "....345543......", "..345676543.....", ".345676765432...",
+        "34556545456543..", "245676345676543.", "235676545676543.", ".234565434565432",
+        "123453234543321.", ".1234323454321..", "..12321234321...", "....1121221.....",
+        "......999.......", "................", "................", "................",
+    ))
+    return _finish(c, "관목", "town")
+
+
+def _flowers():
+    c = _Canvas(1)
+    for x, y, color in ((3, 4, 14), (10, 7, 13), (5, 12, 14), (13, 2, 13)):
+        c.line((x, y + 1, x, min(15, y + 3)), 2)
+        c.line((x - 2, y + 3, x + 1, y + 2), 4)
+        c.point((x - 1, y), color)
+        c.point((x + 1, y), color)
+        c.point((x, y - 1), color)
+        c.point((x, y + 1), color)
+        c.point((x, y), 15)
+    return _finish(c, "흰꽃과 분홍꽃", "town")
+
+
+def _fence():
+    c = _Canvas(4)
+    for y in (6, 11):
+        c.rect((0, y, 15, y + 2), 2)
+        c.line((0, y, 15, y), 6)
+        c.line((0, y + 1, 15, y + 1), 4)
+    for x in (2, 11):
+        c.poly(((x, 15), (x, 4), (x + 1, 2), (x + 2, 4), (x + 2, 15)), 3)
+        c.line((x, 4, x, 15), 7)
+        c.line((x + 1, 5, x + 1, 14), 5)
+    return _finish(c, "나무 울타리", "town")
+
+
+_LETTERS = {
+    "I": ("111", "010", "010", "010", "111"),
+    "N": ("101", "111", "111", "111", "101"),
+}
+
+
+def _sign(kind):
+    c = _Canvas(4)
+    c.rect((7, 9, 9, 15), 2)
+    c.line((7, 9, 7, 15), 5)
+    c.rect((1, 1, 14, 11), 1)
+    c.rect((2, 2, 13, 9), 6)
+    c.line((2, 2, 13, 2), 8)
+    c.line((2, 10, 13, 10), 3)
+    if kind == "inn":
+        for n, char in enumerate("INN"):
+            for y, row in enumerate(_LETTERS[char]):
+                for x, pixel in enumerate(row):
+                    if pixel == "1":
+                        c.point((2 + n * 4 + x, 4 + y), 2)
+    elif kind == "church":
+        c.rect((3, 3, 12, 9), 12)
+        c.line((7, 3, 7, 8), 11)
+        c.line((5, 5, 9, 5), 11)
+    else:
+        c.line((5, 3, 10, 8), 10)
+        c.line((6, 3, 11, 8), 11)
+        c.line((8, 8, 11, 5), 3)
+        c.line((8, 7, 6, 9), 2)
+    return _finish(c, f"간판 {kind}", "town")
+
+
+def _well():
+    c = _Canvas(3, (16, 16))
+    c.poly(((1, 6), (4, 3), (11, 3), (14, 6), (14, 12), (11, 15), (4, 15), (1, 12)), 2)
+    c.poly(((2, 7), (4, 5), (11, 5), (13, 7), (13, 11), (10, 13), (5, 13), (2, 11)), 5)
+    c.line((2, 10, 4, 12, 10, 12), 6)
+    c.line((4, 13, 4, 14), 3)
+    c.line((9, 13, 9, 14), 3)
+    c.poly(((1, 5), (4, 2), (11, 2), (14, 5), (14, 8), (11, 11), (4, 11), (1, 8)), 6)
+    c.line(((1, 5), (4, 2), (11, 2), (14, 5)), 7)
+    c.poly(((4, 5), (6, 4), (10, 4), (12, 6), (10, 8), (5, 8), (3, 6)), 1)
+    c.line((5, 8, 10, 8), 3)
+    for x, y in ((3, 4), (8, 2), (12, 8), (5, 9)):
+        c.point((x, y), 4)
+    return _finish(c, "돌우물", "town")
+
+
+def _barrel():
+    c = _Canvas(4)
+    c.rows((
+        "....222222......", "..2367765322....", ".256443344532...", ".265223322542...",
+        ".276544445642...", ".254566655432...", ".29a999999932...", ".235453454532...",
+        ".235453454532...", ".235453454532...", ".29a999999932...", ".245453454532...",
+        "..2453344532....", "...23344322.....", "....222222......", "................",
+    ))
+    return _finish(c, "나무통", "town")
+
+
+def _pot():
+    c = _Canvas(4)
+    c.rows((
+        "................", ".....34443......", "....3677653.....", "....3511153.....",
+        ".....34543......", "....4566543.....", "...467765432....", "..36776544322...",
+        "..36765444322...", "..35654444322...", "..34544443322...", "...344443322....",
+        "....3333322.....", ".....22222......", "................", "................",
+    ))
+    return _finish(c, "항아리", "town")
+
+
+def _table():
+    c = _Canvas(4, (32, 16))
+    c.rect((4, 9, 6, 15), 2)
+    c.rect((25, 9, 27, 15), 2)
+    c.line((4, 10, 4, 14), 5)
+    c.line((25, 10, 25, 14), 5)
+    c.rect((2, 3, 29, 11), 2)
+    c.rect((3, 2, 28, 9), 5)
+    c.line((3, 2, 28, 2), 8)
+    c.line((3, 3, 3, 8), 7)
+    c.line((3, 9, 28, 9), 3)
+    c.line((3, 5, 28, 5), 4)
+    c.line((3, 6, 28, 6), 6)
+    c.line((6, 3, 12, 3), 6)
+    c.line((19, 7, 26, 7), 4)
+    return _finish(c, "식탁", "interior")
+
+
+def _chair():
+    c = _Canvas(4)
+    c.rows((
+        "...2333332......", "...2677762......", "...2644462......", "...2644462......",
+        "...2644462......", "...2355532......", "...2344432......", "..256666532.....",
+        "..267777642.....", "..256666532.....", "..233333332.....", "...24..242......",
+        "...24..242......", "...22..222......", "................", "................",
+    ))
+    return _finish(c, "의자", "interior")
+
+
+def _bed():
+    c = _Canvas(6, (16, 32))
+    c.rect((1, 1, 14, 29), 7)
+    c.rect((2, 2, 13, 5), 9)
+    c.line((2, 2, 13, 2), 11)
+    c.rect((2, 6, 13, 27), 4)
+    c.rect((3, 7, 12, 12), 12)
+    c.line((3, 12, 12, 12), 14)
+    c.rect((3, 14, 12, 26), 3)
+    c.line((3, 14, 12, 14), 5)
+    c.line((4, 15, 4, 25), 4)
+    c.line((11, 15, 11, 25), 2)
+    c.line((3, 26, 12, 26), 2)
+    for x in (1, 13):
+        c.rect((x, 26, x + 1, 31), 8)
+        c.line((x, 26, x, 30), 10)
+    c.line((2, 28, 13, 28), 10)
+    return _finish(c, "침대", "interior")
+
+
+def _bed_wide():
+    """FC places beds as two side-by-side blocks with the headboard on the right."""
+    c = _Canvas(6, (32, 16))
+    c.rect((1, 4, 4, 14), 7)
+    c.line((1, 4, 4, 4), 9)
+    c.line((1, 5, 1, 13), 8)
+    c.rect((27, 0, 30, 14), 7)
+    c.rect((28, 0, 29, 13), 9)
+    c.line((27, 0, 30, 0), 11)
+    c.line((28, 1, 28, 12), 10)
+    c.rect((4, 3, 27, 12), 7)
+    c.rect((5, 3, 26, 10), 12)
+    c.line((5, 3, 26, 3), 6)
+    c.rect((20, 4, 25, 9), 14)
+    c.rect((20, 4, 24, 8), 12)
+    c.line((20, 4, 24, 4), 6)
+    c.rect((5, 3, 18, 10), 4)
+    c.line((5, 3, 18, 3), 5)
+    c.line((5, 4, 5, 9), 5)
+    c.line((8, 5, 15, 5), 5)
+    c.line((8, 8, 15, 8), 3)
+    c.rect((18, 3, 19, 10), 6)
+    c.line((19, 4, 19, 10), 5)
+    c.rect((5, 10, 26, 11), 3)
+    c.line((5, 11, 26, 11), 2)
+    c.rect((4, 12, 27, 13), 8)
+    c.line((4, 13, 27, 13), 7)
+    for x in (2, 28):
+        c.rect((x, 14, x + 1, 15), 7)
+    return _finish(c, "가로 침대", "interior")
+
+
+def _chest(opened=False):
+    c = _Canvas(4)
+    c.rect((2, 7, 13, 13), 2)
+    c.rect((3, 8, 12, 12), 4)
+    c.line((3, 13, 12, 13), 1)
+    for x in (3, 11):
+        c.line((x, 7, x, 12), 7)
+        c.line((x + 1, 7, x + 1, 12), 5)
+    if opened:
+        c.rect((2, 1, 13, 5), 3)
+        c.rect((3, 2, 12, 4), 1)
+        c.line((2, 1, 13, 1), 6)
+        c.rect((3, 6, 12, 8), 1)
+    else:
+        c.poly(((2, 7), (2, 4), (4, 2), (11, 2), (13, 4), (13, 7)), 4)
+        c.line(((2, 4), (4, 2), (11, 2), (13, 4)), 7)
+        c.line((3, 5, 12, 5), 6)
+        for x in (4, 11):
+            c.line((x, 3, x, 7), 7)
+        c.line((2, 7, 13, 7), 1)
+    c.rect((7, 8, 8, 10), 7)
+    c.point((8, 9), 2)
+    return _finish(c, "보물상자 열림" if opened else "보물상자 닫힘", "interior")
+
+
+def _banner():
+    c = _Canvas(6, (16, 32))
+    c.line((1, 2, 14, 2), 8)
+    c.line((1, 1, 14, 1), 11)
+    c.point((0, 2), 10)
+    c.point((15, 2), 10)
+    c.poly(((4, 3), (12, 3), (12, 26), (8, 30), (4, 26)), 2)
+    c.poly(((5, 3), (11, 3), (11, 25), (8, 28), (5, 25)), 3)
+    c.line((5, 4, 5, 24), 5)
+    c.line((10, 4, 10, 25), 4)
+    c.line((4, 25, 8, 29, 12, 25), 10)
+    c.rows(("..a..", ".aba.", "aabaa", ".aba.", "..a..", "..a.."), (6, 11))
+    return _finish(c, "보라색 성기")
+
+
+def _tower():
+    c = _Canvas(2, (32, 64))
+    c.poly(((6, 22), (25, 22), (27, 27), (27, 58), (24, 62), (7, 62), (4, 58), (4, 27)), 2)
+    for y in range(23, 61, 4):
+        for x in range(5, 27):
+            shade = 4 if x < 8 else 6 if x < 17 else 5 if x < 23 else 3
+            c.line((x, y, x, y + 2), shade)
+        c.line((7, y, 23, y), 7)
+        for x in range(7 if y % 8 else 11, 27, 8):
+            c.line((x, y + 1, x, y + 2), 3)
+    for y in (23, 42, 58):
+        c.poly(((3, y), (7, y - 2), (24, y - 2), (28, y), (28, y + 3), (24, y + 5), (7, y + 5), (3, y + 3)), 3)
+        c.line(((3, y), (7, y - 2), (24, y - 2), (28, y)), 8)
+        c.line(((4, y + 1), (8, y + 3), (23, y + 3), (27, y + 1)), 6)
+        c.line((8, y + 4, 23, y + 4), 4)
+    c.poly(((13, 32), (14, 30), (17, 30), (19, 32), (19, 39), (13, 39)), 2)
+    c.line(((12, 39), (12, 32), (14, 29), (17, 29), (20, 32), (20, 39)), 7)
+    c.line((15, 31, 15, 38), 9)
+    c.line((11, 40, 20, 40), 8)
+    c.poly(((2, 18), (5, 15), (8, 11), (12, 6), (15, 1), (17, 4), (21, 9), (26, 15), (29, 18), (27, 21), (23, 23), (8, 23), (4, 21)), 12)
+    for y, half in ((6, 3), (9, 5), (12, 8), (15, 10), (18, 13)):
+        c.line((15 - half, y, 15 + half, y), 14)
+        c.line((16 - half, y + 1, 15 + half, y + 1), 13)
+        c.line((16 - half, y, 14, y), 15)
+        for x in range(16 - half, 16 + half, 5):
+            c.point((x, y + 1), 12)
+    c.line(((4, 20), (8, 22), (23, 22), (27, 20)), 15)
+    c.point((15, 1), 8)
+    return _finish(c, "원추 지붕 성탑")
+
+
+def _tree16():
+    """A DQ5-style round crown with a dark rim, dithered leaves and a rooted trunk."""
+    c = _Canvas(1)
+    rng = random.Random(3)
+    cx, cy, rx, ry = 7.5, 6.3, 8.0, 7.0
+    for y in range(14):
+        for x in range(16):
+            e = ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2
+            if e > 1.0:
+                continue
+            shade = (x - cx) * 0.5 + (y - cy) > 2.5
+            light = (x - cx) * 0.6 + (y - cy) < -3.5
+            v = rng.random() if (x + y) % 2 else rng.random() * 0.6
+            if e > 0.72:
+                color = 1 if shade or y > cy or v >= 0.5 else 2
+            elif shade:
+                color = 2 if v < 0.55 else 4
+            elif light:
+                color = 7 if v < 0.35 else 5 if v < 0.7 else 4
+            else:
+                color = 5 if v < 0.3 else 4 if v < 0.85 else 2
+            c.point((x, y), color)
+    c.rows(("......99a.......", ".....99aa9......", "....9.9a9.9....."), (0, 13))
+    return _finish(c, "작은 활엽수", "town")
+
+
+def _tower_segment(right=False, cap=False):
+    c = _Canvas(2, fill=2)
+    for y in range(0, 16, 4):
+        for x in range(16):
+            color = (3 if x < 2 else 5 if x < 5 else 6 if x < 11 else 5)
+            c.line((x, y, x, y + 2), color)
+        c.line((3, y, 15, y), 7)
+        for x in range(4 if y % 8 else 8, 16, 8):
+            c.line((x, y + 1, x, y + 2), 3)
+    c.line((0, 0, 0, 15), 1)
+    c.line((1, 0, 1, 15), 3)
+    if cap:
+        c.poly(((0, 9), (2, 5), (6, 2), (11, 0), (15, 0), (15, 8), (8, 9), (3, 12)), 4)
+        c.line(((0, 9), (2, 5), (6, 2), (11, 0), (15, 0)), 8)
+        c.line(((2, 10), (7, 7), (15, 5)), 7)
+        c.line(((2, 11), (7, 8), (15, 6)), 3)
+    if right:
+        c.image = c.image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        lut = list(range(256))
+        for a, b in ((7, 6), (6, 5), (5, 4)):
+            lut[32 + a] = 32 + b
+        c.image = c.image.point(lut)
+    return _finish(c, "성탑 상단" if cap else "성탑 곡면 석벽")
+
+
+def _gate():
+    c = _Canvas(2, (32, 32), fill=1)
+    c.poly(((0, 31), (0, 8), (3, 4), (8, 1), (23, 1), (28, 4), (31, 8), (31, 31)), 4)
+    c.line(((0, 9), (3, 4), (8, 1), (23, 1), (28, 4), (31, 9)), 8)
+    c.poly(((4, 31), (4, 11), (7, 7), (11, 5), (20, 5), (24, 7), (27, 11), (27, 31)), 2)
+    c.poly(((6, 31), (6, 12), (9, 9), (12, 7), (19, 7), (22, 9), (25, 12), (25, 31)), 3)
+    c.line(((5, 31), (5, 12), (8, 8), (12, 6), (19, 6), (23, 8), (26, 12), (26, 31)), 7)
+    for x in (7, 11, 15, 19, 23):
+        c.line((x, 12 if x in (7, 23) else 9, x, 30), 5)
+        c.line((x + 1, 12 if x in (7, 23) else 9, x + 1, 30), 4)
+    c.line((15, 7, 15, 31), 1)
+    c.line((16, 7, 16, 31), 2)
+    for y in (15, 25):
+        c.line((6, y, 14, y), 1)
+        c.line((17, y, 25, y), 1)
+        c.line((7, y + 1, 14, y + 1), 9)
+        c.line((17, y + 1, 24, y + 1), 9)
+    c.rows(("6776", "7127", "7127", "6776"), (10, 19))
+    c.rows(("6776", "7127", "7127", "6776"), (18, 19))
+    for y in (12, 18, 24, 30):
+        c.line((0, y, 4, y), 7)
+        c.line((27, y, 31, y), 6)
+    for x in (7, 15, 24):
+        c.line((x, 2, x + 1, 5), 3)
+    return _finish(c, "바트랜드 양쪽 여닫이 성문")
+
+
+def _small_fixture(kind):
+    patterns = {
+        "gold_door16": (4, (
+            "...233333332....", "..26777777632...", "..26444444632...", "..26444444632...",
+            "..26555555632...", "..23333333332...", "..26444444632...", "..26444444632...",
+            "..26444448632...", "..26555555632...", "..23333333332...", "..26444444632...",
+            "..26444444632...", "..26777777632...", "..23333333332...", "................",
+        ), "小형 문"),
+        "iron_fence16": (3, (
+            "..2...2...2...2.", "..5...5...5...5.", "..5...5...5...5.", "..5...5...5...5.",
+            "5555555555555555", "2222222222222222", "..5...5...5...5.", "..5...5...5...5.",
+            "..5...5...5...5.", "..5...5...5...5.", "5555555555555555", "2222222222222222",
+            "..5...5...5...5.", "..5...5...5...5.", "..2...2...2...2.", "................",
+        ), "철창"),
+        "window16": (2, (
+            "......77........", "....78877.......", "...7811177......", "..781171177.....",
+            "..781171137.....", "..781171137.....", "..787777737.....", "..781171137.....",
+            "..781171137.....", "..781171137.....", "..781171137.....", "..781171137.....",
+            ".78888888877....", ".34444444443....", "................", "................",
+        ), "작은 아치창"),
+        "statue": (3, (
+            ".......34.......", "......3563......", "....445664......", "...3455432......",
+            "..34564332......", "..356654432.....", ".34556544332....", ".2345644332.....",
+            "..23544332......", "...2444432......", "...2555542......", "..355555543.....",
+            ".35666666543....", ".34555555432....", ".23333333332....", "................",
+        ), "석재 장식상"),
+        "round_table": (4, (
+            ".....233332.....", "...2367776532...", "..367777777653..", ".36776666677653.",
+            ".36766666667653.", ".35666666666643.", "..345666666543..", "...2345555432...",
+            "....23333332....", "......242.......", "......242.......", ".....24442......",
+            "....2442442.....", "....22...22.....", "................", "................",
+        ), "둥근 탁자"),
+        "wardrobe": (4, (
+            ".23333333333332.", ".26777777777762.", ".26444424444462.", ".26455424554462.",
+            ".26455424554462.", ".26444424444462.", ".26444424444462.", ".26448424844462.",
+            ".26444424444462.", ".26455424554462.", ".26455424554462.", ".26444424444462.",
+            ".26777777777762.", ".23333333333332.", "..22........22..", "................",
+        ), "옷장"),
+        "washbasin": (3, (
+            "................", "....3455543.....", "..35677777653...", ".3565333356653..",
+            ".3653222235563..", ".3653322335563..", ".3456555565543..", "..34566666543...",
+            "...345555543....", "....2333332.....", ".....24442......", "....3455543.....",
+            "...345555543....", "....2333332.....", "................", "................",
+        ), "수반"),
+        "chimney": (2, (
+            "....3455543.....", "...357777753....", "..35731113753...", "..35731113753...",
+            "..34577777543...", "...345555543....", "...356535643....", "...356535643....",
+            "...344444443....", "...356356543....", "...356356543....", "..35777777543...",
+            "..34555555443...", "...233333332....", "................", "................",
+        ), "원통형 석재 장식"),
+    }
+    bank, rows, role = patterns[kind]
+    c = _Canvas(bank)
+    c.rows(rows)
+    return _finish(c, role.replace("小형", "작은"), "town")
+
+
+def _counter():
+    c = _Canvas(4, fill=3)
+    c.rect((0, 0, 15, 6), 5)
+    c.line((0, 0, 15, 0), 8)
+    c.line((0, 3, 15, 3), 4)
+    c.line((0, 6, 15, 6), 7)
+    c.line((0, 7, 15, 7), 2)
+    for x in (0, 8):
+        c.rect((x + 1, 9, x + 6, 14), 4)
+        c.line((x + 1, 9, x + 6, 9), 6)
+        c.line((x + 6, 10, x + 6, 14), 2)
+    return _finish(c, "카운터", "town")
+
+
+def _armour_sign():
+    c = _Canvas(4)
+    c.image = _sign("shop")
+    c.draw = ImageDraw.Draw(c.image)
+    c.rect((3, 3, 12, 9), 6)
+    c.rows(("..a..a..", ".abbaab.", "abbbbbba", ".bbbbbb.", ".abbbba.", "..aaaa.."), (4, 3))
+    return _finish(c, "방어구점 간판", "town")
+
+
+def _house(kind):
+    """Keep changes of material on CHR boundaries for the BG palette selector."""
+    bank = 5 if kind == "red" else 4
+    roof = _Canvas(bank, (64, 64))
+    tile = _roof(kind)
+    roof_mask = Image.new("1", (64, 32))
+    ImageDraw.Draw(roof_mask).polygon(((15, 0), (48, 0), (63, 29), (63, 31), (0, 31), (0, 29)), fill=1)
+    for y in range(0, 32, 16):
+        for x in range(0, 64, 16):
+            roof.image.paste(tile, (x, y))
+    for y in range(32):
+        for x in range(64):
+            if not roof_mask.getpixel((x, y)):
+                roof.image.putpixel((x, y), 0)
+    roof.line(((15, 0), (0, 29), (0, 31)), 7)
+    roof.line(((48, 0), (63, 29), (63, 31)), 2)
+    roof.line((1, 30, 62, 30), 6)
+    roof.line((1, 31, 62, 31), 1)
+    wall = _Canvas(4, (64, 64))
+    wall.rect((8, 32, 55, 55), 11)
+    wall.line((8, 32, 55, 32), 2)
+    wall.line((8, 33, 55, 33), 3)
+    for x in (8, 21, 40, 53):
+        wall.rect((x, 34, x + 2, 55), 2)
+        wall.line((x, 34, x, 55), 5)
+    for x in (12, 44):
+        wall.rect((x, 38, x + 6, 46), 1)
+        wall.line((x, 37, x + 6, 37), 5)
+        wall.line((x + 3, 38, x + 3, 46), 6)
+        wall.line((x, 42, x + 6, 42), 5)
+        wall.line((x - 1, 47, x + 7, 47), 4)
+    wall.rect((25, 37, 38, 55), 2)
+    wall.rect((27, 38, 36, 55), 4)
+    for x in (27, 30, 33, 36):
+        wall.line((x, 39, x, 55), 6)
+    wall.line((27, 43, 36, 43), 2)
+    wall.line((27, 52, 36, 52), 2)
+    wall.point((35, 48), 8)
+    roof.image.paste(wall.image.crop((0, 32, 64, 56)), (0, 32))
+    foundation = _Canvas(3, (64, 8))
+    foundation.rect((8, 0, 55, 5), 3)
+    foundation.line((8, 0, 55, 0), 6)
+    foundation.line((8, 4, 55, 4), 2)
+    for x in range(12, 56, 8):
+        foundation.line((x, 1, x, 3), 4)
+    roof.image.paste(foundation.image, (0, 56))
+    result = _finish(roof, "붉은 기와 민가" if kind == "red" else "짚지붕 민가", "town")
+    result.info["bank"] = None
+    return result
+
+
+def _market():
+    c = _Canvas(3, (64, 64))
+    for x0 in (0, 32):
+        for y in range(32):
+            inset = (8, 5, 3, 2, 1, 0)[min(y // 2, 5)]
+            if y >= 28:
+                inset = 0
+            c.line((x0 + inset, y, x0 + 31 - inset, y), (5, 6, 5, 4)[y % 4])
+            if y % 4 == 3:
+                c.line((x0 + inset, y, x0 + 31 - inset, y), 3)
+            c.point((x0 + inset, y), 7)
+        c.line((x0, 31, x0 + 31, 31), 2)
+    wood = _Canvas(4, (64, 32))
+    for x0 in (0, 32):
+        wood.rect((x0 + 2, 0, x0 + 29, 22), 1)
+        for x in (x0 + 1, x0 + 28):
+            wood.rect((x, 0, x + 2, 30), 3)
+            wood.line((x, 0, x, 29), 7)
+        wood.rect((x0 + 4, 8, x0 + 27, 21), 4)
+        wood.line((x0 + 4, 8, x0 + 27, 8), 7)
+        wood.line((x0 + 4, 11, x0 + 27, 11), 6)
+        for x in range(x0 + 5, x0 + 27, 5):
+            wood.line((x, 12, x, 20), 3)
+            wood.line((x + 1, 12, x + 1, 20), 5)
+        wood.line((x0 + 4, 22, x0 + 27, 22), 2)
+    wood.rows(("...a...", "..aba..", ".abbaa.", "abbbba.", ".abbaa.", "..aa..."), (12, 1))
+    wood.rows(("..aaaa..", ".abbbba.", "abbbbbba", ".bbbbbb.", "..aaaa.."), (42, 2))
+    c.image.paste(wood.image, (0, 32))
+    result = _finish(c, "이무르 곡면 지붕 시장", "town")
+    result.info["bank"] = None
+    return result
+
+
+def create_assets():
+    """Return original indexed art; global palette entry zero is transparent."""
+    assets = {
+        "stone_wall": _stone_wall(),
+        "stone_wall_top": _stone_wall("top"),
+        "stone_wall_left": _stone_wall("left"),
+        "stone_wall_right": _stone_wall("right"),
+        "stone_floor": _stone_floor(),
+        "cobble": _cobble(),
+        "grass": _grass(),
+        "dirt": _dirt(),
+        "carpet": _carpet(),
+        "red_paving": _red_paving(),
+        "wood_floor": _wood_floor(),
+        "wood_wall": _wood_wall(),
+        "bridge": _bridge(),
+        "stairs_up": _stairs(),
+        "stairs_down": _stairs(True),
+        "door_closed": _door(),
+        "door_open": _door(True),
+        "window": _window(),
+        "tree": _tree(),
+        "bush": _bush(),
+        "flowers": _flowers(),
+        "fence": _fence(),
+        "well": _well(),
+        "barrel": _barrel(),
+        "pot": _pot(),
+        "table": _table(),
+        "chair": _chair(),
+        "bed": _bed(),
+        "chest_closed": _chest(),
+        "chest_open": _chest(True),
+        "tower": _tower(),
+        "banner": _banner(),
+        "tree16": _tree16(),
+        "tower_left": _tower_segment(),
+        "tower_right": _tower_segment(True),
+        "tower_cap_left": _tower_segment(cap=True),
+        "tower_cap_right": _tower_segment(True, True),
+        "counter": _counter(),
+        "sign_armour": _armour_sign(),
+        "dark_void": _finish(_Canvas(6, fill=1), "어두운 빈 공간"),
+        "house_red": _house("red"),
+        "house_straw": _house("straw"),
+        "market_slate": _market(),
+    }
+    for name in ("gold_door16", "iron_fence16", "window16", "statue", "round_table", "wardrobe", "washbasin", "chimney"):
+        assets[name] = _small_fixture(name)
+    assets["sign_weapon"] = _sign("shop")
+    assets["sign_weapon"].info["role"] = "무기점 간판"
+    gate = _gate()
+    assets["gate"] = gate
+    for name, box in {
+        "gate_top_left": (0, 0, 16, 16), "gate_top_right": (16, 0, 32, 16),
+        "gate_bottom_left": (0, 16, 16, 32), "gate_bottom_right": (16, 16, 32, 32),
+    }.items():
+        assets[name] = gate.crop(box)
+    bed = _bed_wide()
+    assets["bed_wide"] = bed
+    for name, box in {"bed_left": (0, 0, 16, 16), "bed_right": (16, 0, 32, 16)}.items():
+        assets[name] = bed.crop(box)
+    for kind in ("red", "straw", "slate"):
+        assets[f"roof_{kind}"] = _roof(kind)
+        assets[f"roof_{kind}_ridge"] = _ridge(kind)
+    for kind in ("inn", "shop", "church"):
+        assets[f"sign_{kind}"] = _sign(kind)
+    for frame in range(3):
+        assets[f"water{frame}"] = _water(frame)
+    for direction in "nsew":
+        assets[f"shore_{direction}"] = _shore(direction)
+    return assets
