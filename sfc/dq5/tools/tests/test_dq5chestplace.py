@@ -55,6 +55,21 @@ class ChestPlaceTests(unittest.TestCase):
         check(rom, value, 0x3E8000, {'chests': 0x3F8000})
 
     @unittest.skipUnless(ROM.is_file(), '롬 없음')
+    def test_furniture_appends_search_row_at_attribute_cell(self):
+        rom = Rom(ROM.read_bytes())
+        value = {'format': FORMAT, 'maps': [{'map': '01/02', 'furniture': [
+            {'x': 40, 'y': 24, 'block': 204, 'reward': 0x3FD, 'flag_index': 0x0B, 'mask': 2}]}]}
+        _, _, _, tables, new = plan(rom, value, 0x3E8000, {'search': 0x3F9000})
+        self.assertEqual(new, [])
+        self.assertEqual(tables['search'][-1], {'group': 1, 'map': 2, 'x': 41, 'y': 26, 'unused': 1, 'reward': 0x3FD,
+                                                'flag_index': 0x0B, 'mask': 2})
+        check(rom, value, 0x3E8000, {'search': 0x3F9000})
+        for change in ({'flag_index': 4, 'mask': 0x80}, {'block': CHEST_BLOCK}, {'mask': 0}, {'reward': 0xD00A}):
+            bad = {'format': FORMAT, 'maps': [{'map': '01/02', 'furniture': [value['maps'][0]['furniture'][0] | change]}]}
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                plan(rom, bad, 0x3E8000, {'search': 0x3F9000})
+
+    @unittest.skipUnless(ROM.is_file(), '롬 없음')
     def test_rejects(self):
         rom = Rom(ROM.read_bytes())
         at = {'chests': 0x3F8000}
@@ -67,6 +82,7 @@ class ChestPlaceTests(unittest.TestCase):
             (doc((36, 26, CHEST_BLOCK, 1)), 0x1E8000, at),          # 늘린 롬이 아닌 맵 자리
             (doc((36, 26, CHEST_BLOCK, 1)), 0x3F8000, at),          # 맵 레코드와 상자 표가 겹침
             ({'format': FORMAT, 'maps': []}, 0x3E8000, at),
+            ({'format': FORMAT, 'maps': [{'map': '01/02', 'chests': [], 'furniture': []}]}, 0x3E8000, at),
             ({'format': FORMAT, 'maps': [doc((36, 26, CHEST_BLOCK, 1))['maps'][0]] * 2}, 0x3E8000, at),
             (doc((36, 26, CHEST_BLOCK, 1)), 0x3E8000, {}),           # 상자 표가 원래 자리에 들지 않음
             (doc((2, 44, CHEST_BLOCK, 1), map_name='19/00'), 0x3E8000, at),  # 표에 없는 맵의 기존 상자 칸

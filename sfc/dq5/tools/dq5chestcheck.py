@@ -80,7 +80,7 @@ RELOC = {
                    0x131, None),
 }
 # 원본이 그 자리에서 아무것도 찾지 못할 때의 첫 메시지가 패치와 다른 사례(상자로 보지 않아 12B)
-ORIGINAL_KIND = {'grow_chests': 0x12B, 'place_chest': 0x12B}
+ORIGINAL_KIND = {'grow_chests': 0x12B, 'place_chest': 0x12B, 'place_furniture': 0x12B}
 for _name, (_edit, _at, *_rest) in RELOC.items():
     CASES[_name] = (None, *_rest[:-1])
 # dq5chestplace.py 로 01/02 에 상자 블록 384 를 (36,26) 에 놓는 사례. 새 상자 칸 (37,27) 이 맵의 첫 상자(번호 2)가 되어
@@ -88,14 +88,20 @@ for _name, (_edit, _at, *_rest) in RELOC.items():
 PLACE_DOC = {'format': 'dq5chestplace/1', 'maps': [{'map': '01/02', 'chests': [
     {'x': 36, 'y': 26, 'block': 384, 'reward': 0x100 + 954}]}]}
 PLACE_AT = ('--map-at', '3E:8000', '--chests-at', '3F:8000')
+# 01/02 의 (40,24) 에 タンス 블록 204(2×3)를 놓으면 오른쪽 아래 (41,26) 이 가구 칸(+4 = 93)이 된다
+FURNITURE_DOC = {'format': 'dq5chestplace/1', 'maps': [{'map': '01/02', 'furniture': [
+    {'x': 40, 'y': 24, 'block': 204, 'reward': 0x100 + 765, 'flag_index': 0x0B, 'mask': 0x02}]}]}
+PLACE_INPUTS = {'place_chest': (PLACE_DOC, PLACE_AT), 'place_shift': (PLACE_DOC, PLACE_AT),
+                'place_furniture': (FURNITURE_DOC, ('--map-at', '3E:8000', '--search-at', '3F:9000'))}
 PLACE = {'place_chest': (954, 0x2210, 0x20, 0x2210, 0x20, None, 0x131),
+         'place_furniture': (765, 0x2237, 0x02, 0x2237, 0x02, None, 0x12F),
          # 패치 롬에서도 금화가 아니라 원래 물건 33 을 얻으므로 금화 대신 보상 값을 적는다
          'place_shift': (None, 0x2210, 0x10, 0x2210, 0x20, 0x33, 0x131)}
 CASES.update({name: (None, *values) for name, values in PLACE.items()})
 PATCHED_REWARD = {'place_shift': 0x33}
 # 조사 뒤 세계 지도 버퍼의 블록(블록 좌표 x, y, 원본, 패치). 밤이라 빛 블록 A7 이 놓인 자리를 본다
 # 필드에 들어갈 때 빛 블록을 놓으므로, 장면도 그 롬으로 만들어야 하는 사례
-OWN_SCENE = {'field_move', 'place_chest', 'place_shift'}
+OWN_SCENE = {'field_move', 'place_chest', 'place_shift', 'place_furniture'}
 BLOCKS = {'field_move': ((11, 83, 0xA7, 0xCA), (12, 84, 0x178, 0xA7))}
 # 장면 없이 --state 를 그대로 쓰는 사례
 START = 'start'
@@ -106,7 +112,7 @@ SCENES = {'chest': {'TO': '01/02,34,31'}, 'search': None, 'foot': None, 'ahead':
           'field_move': {'FIELD': '24,168', 'SET': '21AA|01;075E=00;075F=01'},
           'grow_chests': {'TO': '19/00,5,46'}, 'grow_search': {'WAYPOINTS': '1,5;up:8'}, 'grow_foot': None,
           'grow_ahead': START, 'move_lower': 'lower', 'place_chest': {'TO': '01/02,36,29'},
-          'place_shift': {'TO': '01/02,34,31'}}
+          'place_shift': {'TO': '01/02,34,31'}, 'place_furniture': {'TO': '01/02,40,27'}}
 # 필드 조사는 선 자리를 보므로 걷지 않고 바로 명령 창을 연다
 INPUTS = {'field': INPUT.removeprefix('up:8,wait:30,'), 'field_move': INPUT.removeprefix('up:8,wait:30,')}
 
@@ -182,9 +188,10 @@ def compare(name, state, original, out, mesence, libdir, start):
     source, manifest, patched = dest / 'input.json', dest / 'patch.json', dest / 'patched.sfc'
     none_message = 0x12C
     if name in PLACE:
-        source.write_text(json.dumps(PLACE_DOC, indent=2) + '\n', encoding='utf-8')
-        command('dq5chestplace.py', original, 'patch', source, '-o', manifest, *PLACE_AT)
-        command('dq5chestplace.py', original, 'check', source, *PLACE_AT)
+        place_doc, place_at = PLACE_INPUTS[name]
+        source.write_text(json.dumps(place_doc, indent=2) + '\n', encoding='utf-8')
+        command('dq5chestplace.py', original, 'patch', source, '-o', manifest, *place_at)
+        command('dq5chestplace.py', original, 'check', source, *place_at)
     elif name in RELOC:
         edit, at, *_, none_message = RELOC[name]
         command('dq5chestreloc.py', original, 'dump', '-o', source)
