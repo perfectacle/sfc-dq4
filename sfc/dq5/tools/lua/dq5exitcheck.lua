@@ -5,7 +5,7 @@
 -- AUDIT=1 이면 표 뱅크를 DB 로 두는 창(PLB 다음 명령: 출구 2A:F705, 색인 01:9441, 실행기 00:CDF9·2A:F4C2·2A:FD1A)이
 -- 열린 뒤 DB 가 그 값인 동안 실행한 명령(dbwin.txt, cover.lua 꼴 "PC P 횟수")과, 그동안 그 뱅크 8000~ 에서 읽은
 -- 자료의 주소(dbread.txt, "PC 주소 횟수", 명령 인출 제외)를 적는다. DB 가 5000 명령 넘게 다른 값이면 창을 닫는다.
--- AUDITOPEN="0192F4,0183F0" 이면 그 PC 들에서 창을 연다.
+-- AUDITOPEN="0192F4,0183F0" 이면 그 PC 들에서 창을 연다. AUDITMISS 는 창을 닫는 명령 수(BRK 처리처럼 DB 가 잠시 바뀌는 긴 갈래를 넘길 때).
 -- STALE="2AD812-2AF223,..." 이면 표를 옮긴 뒤 비어야 할 옛 자리를 읽은 횟수와 처음 읽은 PC 를 적는다.
 package.path = os.getenv('LIBDIR') .. '/?.lua;' .. package.path
 local L = require('lib')
@@ -13,6 +13,13 @@ local m = emu.memType.snesMemory
 local sound = 0
 emu.addMemoryCallback(function() sound = sound + 1 end, emu.callbackType.exec, 0x2AF4D1, 0x2AF4D1)
 local audit = os.getenv('AUDIT') == '1'
+-- MSGLOG=1 이면 메시지 루틴 24:8BAF 에 들어갈 때의 A(메시지 번호)를 모은다. CELL="x,y" 면 끝에 그 셀 8바이트를 적는다.
+local msgs = {}
+if os.getenv('MSGLOG') == '1' then
+  emu.addMemoryCallback(function()
+    msgs[#msgs + 1] = string.format('%03X', emu.getState()['cpu.a'] & 0xFFFF)
+  end, emu.callbackType.exec, 0x248BAF, 0x248BAF)
+end
 local stale, staleFirst = 0, nil
 local function onStale(addr)
   stale = stale + 1
@@ -50,6 +57,7 @@ end
 local cover, reads = {}, {}
 if audit then
   local db, miss, pc, execCb, readCb = nil, 0, 0, nil, nil
+  local missLimit = tonumber(os.getenv('AUDITMISS') or '5000')
   local function close()
     emu.removeMemoryCallback(execCb, emu.callbackType.exec, 0, 0xFFFFFF)
     emu.removeMemoryCallback(readCb, emu.callbackType.read, 0, 0xFFFFFF)
@@ -64,7 +72,7 @@ if audit then
       cover[k] = (cover[k] or 0) + 1
     else
       miss = miss + 1
-      if miss > 5000 then close() end
+      if miss > missLimit then close() end
     end
   end
   local function onRead(addr)
@@ -96,6 +104,14 @@ L.write = function(name, data)
       .. string.format('stale reads %d %s\n', stale, staleFirst or '-')
       .. string.format('map attrs 1A98=%02X 1AA0=%02X 194D=%02X 194B=%02X 1983=%02X\n', emu.read(0x7E1A98, m),
         emu.read(0x7E1AA0, m), emu.read(0x7E194D, m), emu.read(0x7E194B, m), emu.read(0x7E1983, m))
+    data = data .. 'msgs ' .. (#msgs > 0 and table.concat(msgs, ',') or '-') .. '\n'
+    local cx, cy = (os.getenv('CELL') or ''):match('(%d+),(%d+)')
+    if cx then
+      local at = 0x7EC000 + (tonumber(cy) * emu.read(0x7E00BF, m) + tonumber(cx)) * 8
+      local c = {}
+      for i = 0, 7 do c[#c + 1] = string.format('%02X', emu.read(at + i, m)) end
+      data = data .. 'cell ' .. table.concat(c, ' ') .. '\n'
+    end
     local t = {}
     for k in pairs(dp86) do t[#t + 1] = k end
     table.sort(t)

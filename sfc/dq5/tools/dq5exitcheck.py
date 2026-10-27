@@ -126,7 +126,7 @@ CASES = [
 AUDIT = ('same-original', 'other-original', 'position-original', 'rect-old-original', 'high-original',
          'edge-original', 'sound-original', 'stair33-opened')
 ENV_CLEAR = ('ADULT', 'ANYWHERE', 'AUDIT', 'AUDITOPEN', 'BATTLE', 'FIELD', 'GROUP', 'LATESET', 'PARTY', 'POKE',
-             'DP86OK', 'ROMPATCH', 'SAVE', 'SET', 'STALE', 'WAGON', 'WARPEXIT')
+             'CELL', 'DP86OK', 'MSGLOG', 'ROMPATCH', 'SAVE', 'SET', 'STALE', 'WAGON', 'WARPEXIT')
 # r 롬은 네 표를 모두 옮겼으므로 옛 자리(일반 표 2A:D812~F223, 고층 01:9635~9770)를 읽는 곳이 없어야 한다.
 STALE = {'r': '2AD812-2AF223,019635-019770'}
 # DB 를 기준으로 주소를 내는 꼴. long($xxxxxx)·[$xx]·직접 페이지($xx)·즉값·점프 대상은 DB 를 쓰지 않는다.
@@ -168,6 +168,10 @@ def run(case, roms, state, out, mesence, libdir, audit=False):
                TO=to, TEST=f'{test},wait:300', WARPEXIT=f'{roms[rom][1]:X}', DP86OK=roms[rom][2])
     if 'late' in extra:
         env['LATESET'] = extra['late']
+    if 'cell' in extra:
+        env['CELL'] = extra['cell']
+    if extra.get('msglog'):
+        env['MSGLOG'] = '1'
     if rom in STALE:
         env['STALE'] = STALE[rom]
     if audit:

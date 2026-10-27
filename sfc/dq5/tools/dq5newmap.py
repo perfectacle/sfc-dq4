@@ -12,7 +12,8 @@
 
   python sfc/dq5/tools/dq5newmap.py rom/dq5.sfc patch work/newmap.json -o work/newmap.dq5patch.json [자리 선택]
   python sfc/dq5/tools/dq5newmap.py rom/dq5.sfc check work/newmap.json [자리 선택]
-  자리 선택: --pointer-table-at --attr-table-at --high-table-at --entrance-table-at --records-at BB:AAAA
+  자리 선택: --pointer-table-at --attr-table-at --high-table-at --entrance-table-at --door-stub-at --records-at BB:AAAA,
+            --door-bank BB
 
 입력: {"format": "dq5newmap/1", "groups": [{"group": "36", "entrance": {"copy": "0D"}}],
        "maps": [{"map": "0D/05", "record": {"copy": "0D/02"}, "attrs": {"copy": "0D/02"}}]}
@@ -22,7 +23,9 @@
   groups 에 기존 그룹을 적으면 그 그룹의 들어가는 곳을 바꾼다.
   그룹 50 이상은 50·52·53 에만 더한다(51·54 는 01:94B4 가 $BD 마다 영역 이동 목록을 고르고, 맞는 것이 없으면
   앞 맵의 개수 $183D 가 남음).
-  문 표(01:D2FC)는 늘리지 못한다. 새 맵이 건너뛰기로 읽게 되는 문 목록이 비어 있지 않거나 표 밖이면 거부하고,
+  문 표(01:D2FC)는 --door-bank BB(30~3F)로 늘린다: 뱅크 01 을 그 뱅크에 복사하고 복사본의 문 표에 빈 맵·빈 그룹을
+  끼운 뒤, 문 자료로 들어가는 다섯 입구를 JML 로 --door-stub-at(기본 01:FED0)의 스텁에 보내 DB 를 그 뱅크로 둔다.
+  주지 않으면 새 맵이 건너뛰기로 읽게 되는 문 목록이 비어 있지 않거나 표 밖일 때 거부하고,
   --allow-door-readthrough 를 주면 그대로 만든다.
 """
 import argparse
@@ -32,7 +35,7 @@ import sys
 from pathlib import Path
 
 from dq5build import BANK, ORIGINAL_SIZE, PatchError, build, free_ranges
-from dq5map import TABLE_KINDS, Rom, group_spans, group_table, lorom, map_pointer
+from dq5map import DOOR_ENTRIES, TABLE_KINDS, Rom, door_groups, door_table, group_spans, group_table, lorom, map_pointer
 from dq5mapwrite import encode, entries_for
 
 FORMAT = 'dq5newmap/1'
@@ -46,6 +49,8 @@ ENTRANCE_SITES = ((0x2AF394, 0), (0x2AF39C, 1), (0x2AF3A2, 2), (0x2AF3A8, 3), (0
 ENTRANCE_SIZE = 5
 # 01:F3F9: 문 표. 그룹은 C0 이상 바이트로, 그룹 안 맵은 80 이상 바이트로 끝나고 $BC·$BD 만큼 건너뛰어 찾는다.
 DOOR_TABLE, DOOR_END = 0x01D2FC, 0x01D8C2
+DOOR_STUB = 0x01FED0
+STUB_SIZE = 11
 
 
 def cpu(addr):
@@ -284,18 +289,67 @@ def table_writes(rom, kind, groups, at):
     return out
 
 
+def door_writes(rom, plan, at):
+    """새 맵·새 그룹에 빈 문 목록을 끼운 문 표. 처음 늘릴 때는 뱅크 01 전체를 door_bank 에 복사하고 그 복사본의
+    D2FC 에 표를 둔 뒤, 다섯 입구를 JML 로 스텁에 보내 DB 를 door_bank 로 둔다(문 루틴이 DB 로 읽는 뱅크 01 의 다른
+    자료도 복사본에서 같은 값으로 읽힌다)."""
+    table = door_table(rom)
+    groups = door_groups(rom, len(group_spans(rom)[0]))
+    for g, maps in enumerate(plan.pointers):
+        have = len(groups[g]) if g < len(groups) else 0
+        if len(maps) <= have:
+            continue
+        add = [b'\x80'] * (len(maps) - have - 1) + [b'\xc0']
+        if g < len(groups):
+            last = groups[g][-1]
+            groups[g][-1] = last[:-1] + bytes([last[-1] & 0x3F | 0x80])
+            groups[g] += add
+        else:
+            groups.append(add)
+    blob = b''.join(b''.join(maps) for maps in groups)
+    if table != DOOR_TABLE:
+        if at.get('door_bank') not in (None, table >> 16):
+            raise ValueError(f'문 표는 이미 뱅크 {table >> 16:02X} 에 있음')
+        return [(table, blob, '문 표')]
+    bank = at.get('door_bank')
+    if bank is None:
+        return [(table, blob, '문 표')] if len(blob) == DOOR_END - DOOR_TABLE else []
+    if not 0x30 <= bank <= 0x3F:
+        raise ValueError('--door-bank 는 30~3F(문 루틴이 그 DB 로 WRAM 을 abs 로 씀)')
+    if (DOOR_TABLE & 0xFFFF) + len(blob) > 0x10000:
+        raise ValueError('문 표가 뱅크 끝을 넘음')
+    copy = bytearray(read(rom, 0x018000, 0x8000))
+    copy[(DOOR_TABLE & 0x7FFF):(DOOR_TABLE & 0x7FFF) + len(blob)] = blob
+    stub = at.get('door_stub') or DOOR_STUB
+    if stub >> 16 != 0x01 or not bank_free(rom, stub, STUB_SIZE * len(DOOR_ENTRIES)):
+        raise ValueError(f'--door-stub-at {cpu(stub)}: 뱅크 01 의 빈 자리 {STUB_SIZE * len(DOOR_ENTRIES)}바이트가 필요함')
+    out = [(bank << 16 | 0x8000, bytes(copy), f'뱅크 01 복사본(문 표를 늘림)')]
+    for i, entry in enumerate(DOOR_ENTRIES):
+        at_stub = stub + i * STUB_SIZE
+        if entry == 0x01F3C9:
+            # PHB / PEA / PLB / PLB / JSR F3D1 / PLB / RTL
+            code = bytes([0x8B, 0xF4, bank, bank, 0xAB, 0xAB, 0x20, 0xD1, 0xF3, 0xAB, 0x6B])
+        else:
+            # PHP / PHB / PEA / PLB / PLB / JML 입구+4(원래 PHP·PHB·PHK·PLB 다음)
+            code = bytes([0x08, 0x8B, 0xF4, bank, bank, 0xAB, 0xAB, 0x5C, *(entry + 4).to_bytes(3, 'little')])
+        out += [(at_stub, code, f'문 표 입구 {cpu(entry)} 스텁'),
+                (entry, bytes([0x5C, *at_stub.to_bytes(3, 'little')]), f'문 표 입구 {cpu(entry)}')]
+    return out
+
+
 def writes_for(rom, doc, base=Path('.'), at=None, allow_doors=False):
     at = at or {}
     plan = Plan(rom, doc, base)
-    if not allow_doors:
+    doors_handled = door_table(rom) != DOOR_TABLE or at.get('door_bank') is not None
+    if not allow_doors and not doors_handled:
         original = entries(rom, 'pointer')[0]
         for bc, maps in enumerate(plan.pointers):
             for bd in range(len(original[bc]) if bc < len(original) else 0, len(maps)):
                 door = door_readthrough(rom, bc, bd)
                 if door is None or read(rom, door, 1)[0] < 0x80:
                     where = '표 밖' if door is None else f'{cpu(door)} 의 문 목록'
-                    raise ValueError(f'{bc:02X}/{bd:02X}: 문 표(01:D2FC)를 건너뛰면 {where}을 읽음(문 표는 아직 늘리지 못함, '
-                                     '--allow-door-readthrough 로 그대로 만듦)')
+                    raise ValueError(f'{bc:02X}/{bd:02X}: 문 표(01:D2FC)를 건너뛰면 {where}을 읽음(--door-bank 로 문 표를 '
+                                     '늘리거나 --allow-door-readthrough 로 그대로 만듦)')
     cursor, placed, out = at.get('records'), [], []
     if plan.records and not cursor:
         raise ValueError('새 레코드(source)를 놓을 --records-at 이 필요함')
@@ -317,6 +371,8 @@ def writes_for(rom, doc, base=Path('.'), at=None, allow_doors=False):
     out += table_writes(rom, 'attr', plan.attrs, at.get('attr'))
     out += table_writes(rom, 'high', resolve(plan.high), at.get('high'))
     out += entrance_writes(rom, plan, at.get('entrance'))
+    if doors_handled:
+        out += door_writes(rom, plan, at)
     spans = sorted((addr, addr + len(new), note) for addr, new, note in out)
     for (a1, e1, n1), (a2, _, n2) in zip(spans, spans[1:]):
         if a2 < e1:
@@ -397,6 +453,16 @@ def check(rom, doc, base=Path('.'), at=None, allow_doors=False):
     table = entrance_table(built)
     if [read(built, table + g * ENTRANCE_SIZE, ENTRANCE_SIZE) for g in range(len(plan.entrances))] != plan.entrances:
         raise ValueError('들어가는 곳 표가 입력과 다름')
+    if door_table(built) != DOOR_TABLE or door_table(rom) != DOOR_TABLE:
+        doors = door_groups(built, len(plan.pointers))
+        old = door_groups(rom, len(group_spans(rom)[0]))
+        for bc, maps in enumerate(plan.pointers):
+            if len(doors[bc]) != len(maps):
+                raise ValueError(f'그룹 {bc:02X}: 문 표의 맵 수 {len(doors[bc])} 가 맵 수 {len(maps)} 와 다름')
+            for bd, raw in enumerate(doors[bc]):
+                prev = old[bc][bd] if bc < len(old) and bd < len(old[bc]) else raw[-1:]
+                if raw[:-1] != prev[:-1] or raw[-1] & 0x3F != prev[-1] & 0x3F:
+                    raise ValueError(f'{bc:02X}/{bd:02X}: 문 목록이 원래와 다름')
     if patch(built, doc, base, at, allow_doors)['writes']:
         raise ValueError('만든 롬에 같은 입력을 다시 패치하면 쓰기가 남음')
     added = sorted(after - before)
@@ -414,7 +480,8 @@ def address(text):
 
 PLACES = {'pointer': '맵 포인터 그룹 표(같은 뱅크 0F 면 표만, 다른 뱅크면 덩어리)',
           'attr': '맵 속성 그룹 표(23 / 다른 뱅크)', 'high': '그룹 50 이상 맵 포인터 그룹 표(1F / 다른 뱅크)',
-          'entrance': '들어가는 곳 표(새 그룹이 있으면 필요)', 'records': 'source 레코드'}
+          'entrance': '들어가는 곳 표(새 그룹이 있으면 필요)', 'records': 'source 레코드',
+          'door_stub': '문 표 입구 스텁(뱅크 01, 기본 01:FED0)'}
 
 
 def main():
@@ -428,6 +495,7 @@ def main():
             p.add_argument('-o', '--out', type=Path, required=True)
         p.add_argument('--allow-door-readthrough', action='store_true',
                        help='새 맵이 문 표를 건너뛰어 다른 맵의 문 목록이나 표 밖을 읽어도 만듦')
+        p.add_argument('--door-bank', type=lambda v: int(v, 16), help='문 표를 늘릴 때 뱅크 01 을 복사할 늘린 뱅크(30~3F)')
         for key, text in PLACES.items():
             p.add_argument(f'--{key.replace("_", "-")}{"-table" if key in ("pointer", "attr", "high", "entrance") else ""}-at',
                            dest=key, type=address, help=text)
@@ -435,7 +503,7 @@ def main():
     try:
         rom = Rom(args.rom.read_bytes())
         doc = json.loads(args.source.read_text(encoding='utf-8'))
-        at = {k: getattr(args, k) for k in PLACES}
+        at = {k: getattr(args, k) for k in PLACES} | {'door_bank': args.door_bank}
         if args.command == 'check':
             check(rom, doc, args.source.parent, at, args.allow_door_readthrough)
         else:

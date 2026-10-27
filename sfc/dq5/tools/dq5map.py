@@ -124,6 +124,51 @@ def group_spans(rom, attr=False, kind=None):
     return spans, table
 
 
+# 01:D2FC 문 표(01:F3F9 가 C0 이상 바이트를 $BC 번, 80 이상 바이트를 $BD 번 건너뛰어 찾는다). 다섯 입구가 PHK·PLB 로
+# DB 를 01 로 두고 읽는다. dq5newmap.py 가 표를 늘린 롬은 입구가 JML 로 뱅크 01 의 스텁에 가고, 스텁이 PEA·PLB·PLB 로
+# DB 를 표 뱅크(뱅크 01 을 복사한 늘린 뱅크)로 둔다. 표는 그 뱅크의 같은 주소 D2FC 에 있다.
+DOOR_TABLE = 0x01D2FC
+DOOR_ENTRIES = (0x01D8C2, 0x01D915, 0x01D92E, 0x01F117, 0x01F3C9)
+
+
+def door_table(rom):
+    """문 표 자리(뱅크 포함). 입구 01:F3C9 가 원래 꼴이면 01:D2FC, JML 이면 스텁의 PEA 뱅크."""
+    a = 0x01F3C9
+    head = bytes(rom.u8(a + i) for i in range(4))
+    if head == b'\x8b\x4b\xab\x20' or head == bytes(4):
+        return DOOR_TABLE
+    if head[0] != 0x5C or head[3] != 0x01:
+        raise ValueError('01:F3C9 가 문 표 입구의 원래 꼴도 JML 도 아님')
+    stub = 0x010000 | head[1] | head[2] << 8
+    code = bytes(rom.u8(stub + i) for i in range(6))
+    if code[:2] != b'\x8b\xf4' or code[4:] != b'\xab\xab' or code[2] != code[3]:
+        raise ValueError(f'01:{stub & 0xFFFF:04X} 이 문 표 스텁 꼴이 아님')
+    return code[2] << 16 | DOOR_TABLE & 0xFFFF
+
+
+def door_groups(rom, groups):
+    """문 표를 그룹마다 [맵마다 원래 바이트(끝 표시 바이트 포함)] 로. 항목은 5바이트, 끝 바이트가 80 이상이면 맵 끝."""
+    a, out = door_table(rom), []
+    for _ in range(groups):
+        maps, cur = [], bytearray()
+        while True:
+            b = rom.u8(a)
+            if b < 0x80:
+                cur += bytes(rom.u8(a + i) for i in range(5))
+                a += 5
+                b = cur[-1]
+            else:
+                cur.append(b)
+                a += 1
+            if b >= 0x80:
+                maps.append(bytes(cur))
+                cur = bytearray()
+                if b >= 0xC0:
+                    break
+        out.append(maps)
+    return out
+
+
 def map_pointer(rom, bc, bd):
     if bc >= 0x50:
         spans, table = group_spans(rom, kind='high')
