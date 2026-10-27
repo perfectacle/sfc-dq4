@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import dq5sprite as S  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
 from dq5spritewrite import (  # noqa: E402
-    FORMAT, cell_tiles, commands, decoded, deduplicate, packed, place, plan, tile_bytes,
+    FORMAT, cell_tiles, commands, decoded, deduplicate, grow_table, packed, place, plan, tile_bytes,
 )
 
 
@@ -100,6 +100,45 @@ class BuildTests(unittest.TestCase):
         build(original, [('sprite', 0, [record])], 0)
 
 
+class GrowTableTests(unittest.TestCase):
+    """원래 표(1F:D63D, 세트 00·80 만)를 가진 가짜 롬에서 256칸 표로 옮기기."""
+
+    def setUp(self):
+        table = bytearray(b'\xff' * (S.TABLE_ENTRIES * 2))
+        table[0:2], table[0x100:0x102] = b'\x87\xd7', b'\xbb\xd7'
+        pieces = [(S.SET_POINTERS, bytes(table)), (0x1FD787, bytes(range(52))), (0x1FD7BB, bytes(range(52, 104)))]
+        pieces += [(site, S.SET_POINTERS.to_bytes(3, 'little')) for site in S.SET_TABLE_SITES]
+        pieces += [(site, b'\x1f') for site in S.SET_BANK_SITES]
+        self.rom = rom_with(pieces)
+
+    def apply(self, writes):
+        data = bytearray(self.rom.d)
+        for w in writes:
+            raw = bytes.fromhex(w['hex'])
+            if 'orig' in w:
+                self.assertEqual(bytes(data[lorom(int(w['at'].replace(':', ''), 16)):][:len(raw)]).hex(' '), w['orig'])
+            o = lorom(int(w['at'].replace(':', ''), 16))
+            data[o:o + len(raw)] = raw
+        return Rom(data)
+
+    def test_moves_all_records(self):
+        new = bytes([0, 0x80, 0x3A]) + bytes(48) + b'\x05'
+        rom = self.apply(grow_table(self.rom, {0xFF: new}, 0x3B8000, None, None))
+        self.assertEqual(S.set_table(rom), (0x3B8000, 0x3B, 0x100))
+        self.assertEqual([s for s in S.set_numbers(rom) if S.set_record(rom, s)], [0x00, 0x80, 0xFF])
+        self.assertEqual(S.set_record(rom, 0x80)['cells'], list(range(55, 103)))
+        self.assertEqual((S.set_record(rom, 0xFF)['data'], S.set_record(rom, 0xFF)['tiles']), (0x3A8000, 5))
+        self.assertIsNone(S.set_record(rom, 0x70))
+        self.assertIsNone(S.set_record(self.rom, 0xFF))
+
+    def test_rejects_bank_overflow_and_overlap(self):
+        with self.assertRaises(ValueError):
+            grow_table(self.rom, {}, 0x3BFF00, None, None)
+        with self.assertRaises(ValueError):
+            grow_table(self.rom, {}, 0x3A8100, 0x3A8000, 0x3A8200)
+        grow_table(self.rom, {}, 0x3A8200, 0x3A8000, 0x3A8200)
+
+
 class LayoutTests(unittest.TestCase):
     def test_simple_and_overlap_images(self):
         rng = random.Random(11)
@@ -133,6 +172,7 @@ class PlanTests(unittest.TestCase):
                 0x80: {'set': 0x80, 'tiles': 4, 'palette': 0, 'layout': 'overlap'}}
         self.mocks = [mock('dq5spritewrite.S.set_record', side_effect=lambda rom, s: recs.get(s)),
                       mock('dq5spritewrite.S.gfx_set', side_effect=lambda rom, g: 0x80 if g == 1 else 0),
+                      mock('dq5spritewrite.S.set_numbers', side_effect=lambda rom: list(range(0xA3))),
                       mock('dq5spritewrite.S.GFX_COUNT', 2)]
         for m in self.mocks:
             m.start()
@@ -155,6 +195,17 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(sorted(sets), [0x70, 0x80])
         self.assertEqual((sets[0x70][2], sets[0x80][2]), (2, 0))
         self.assertEqual(mapping, {0: 0x70})
+
+    def test_grown_new_sets(self):
+        # A5~FF 는 표를 늘릴 때(--sets-at)만 새 8타일 세트가 된다.
+        doc = {'new_sets': [{'set': 'A5', 'image': 'parts.png', 'palette': 3}], 'gfx': [{'gfx': '01', 'set': 'A5'}]}
+        with self.assertRaises(ValueError):
+            self.run_plan(**doc)
+        sets, mapping = plan(None, {'format': FORMAT, **doc}, self.dir, grown=True)
+        self.assertEqual((sorted(sets), sets[0xA5][2], mapping), ([0xA5], 3, {1: 0xA5}))
+        with self.assertRaises(ValueError):
+            plan(None, {'format': FORMAT, 'new_sets': [{'set': 'A4', 'image': 'parts.png', 'palette': 0}],
+                        'gfx': [{'gfx': '01', 'set': 'A4'}]}, self.dir, grown=True)
 
     def test_rejects(self):
         bad = [{'sets': [{'set': '00', 'image': 'parts.png'}]},

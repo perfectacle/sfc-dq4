@@ -33,6 +33,12 @@ GFX_SETS = 0x2586D0
 GFX_COUNT = 0xA9
 SET_POINTERS = 0x1FD63D
 SET_COUNT = 0xA3
+# 세트 포인터 표를 읽는 세 곳(1F:CFB6·1F:D0E9·03:D20B 의 LDA long,X)과 레코드 뱅크를 정하는 LDA #$1F 세 곳의 피연산자.
+# dq5spritewrite.py --sets-at 이 표를 256칸으로 늘려 옮기면 이 피연산자가 바뀐다.
+SET_TABLE_SITES = (0x1FCFB7, 0x1FD0EA, 0x03D20C)
+SET_BANK_SITES = (0x1FCFBF, 0x1FD0F2, 0x03D214)
+TABLE_ENTRIES = 0xA5                # 원래 표 칸 수(00~A4). 바로 뒤 1F:D787 부터 레코드
+GROWN_SETS = range(TABLE_ENTRIES, 0x100)
 OBJ_PALETTES = 0x0496D6
 MAP_OBJECTS = 0x1FD59A
 FRAME_W, FRAME_H = 16, 24
@@ -56,12 +62,26 @@ def gfx_set(rom, g, flags_21b3=None):
     return rom.u8(GFX_SETS + g)
 
 
+def set_table(rom):
+    """(포인터 표 주소, 레코드 뱅크, 표 칸 수). 표를 옮기지 않은 롬은 1F:D63D, 1F, A5."""
+    table, bank = rom.u24(SET_TABLE_SITES[0]), rom.u8(SET_BANK_SITES[0])
+    return table, bank, TABLE_ENTRIES if table == SET_POINTERS else 0x100
+
+
+def set_numbers(rom):
+    """레코드를 찾아볼 세트 번호. 원래 세트 00~A2 에, 표를 늘린 롬이면 A5~FF 를 더한다(A3·A4 는 쓰이지 않는 1타일 레코드)."""
+    return [*range(SET_COUNT), *(GROWN_SETS if set_table(rom)[2] > TABLE_ENTRIES else ())]
+
+
 def set_record(rom, s):
-    """레코드 dict. 쓰지 않는 번호(70~7F, 포인터 FFFF)는 None."""
-    p = rom.u16(SET_POINTERS + s * 2)
+    """레코드 dict. 쓰지 않는 번호(70~7F, 포인터 FFFF)와 표 밖 번호는 None."""
+    table, bank, entries = set_table(rom)
+    if s >= entries:
+        return None
+    p = rom.u16(table + s * 2)
     if p == 0xFFFF:
         return None
-    a = 0x1F0000 | p
+    a = bank << 16 | p
     b = [rom.u8(a + i) for i in range(0x34)]
     return {'set': s, 'record': a, 'data': (b[2] & 0x3F) << 16 | b[1] << 8 | b[0], 'palette': b[2] >> 6,
             'cells': b[3:51], 'tiles': b[51], 'layout': 'overlap' if s & 0x80 else 'simple'}
@@ -614,7 +634,7 @@ def export_all(rom, outdir, scale=1, grid=False, index=True):
         img.save(os.path.join(outdir, name))
         return {'cat': 'sprites', 'path': name, 'w': img.width, 'h': img.height}
 
-    for s in range(SET_COUNT):
+    for s in set_numbers(rom):
         rec = decode_set(rom, s)
         if rec is None:
             continue
@@ -1059,7 +1079,7 @@ def main():
         gfx_of = {}
         for g in range(GFX_COUNT):
             gfx_of.setdefault(gfx_set(rom, g), []).append(g)
-        for s in range(SET_COUNT):
+        for s in set_numbers(rom):
             rec = set_record(rom, s)
             if rec is None:
                 continue

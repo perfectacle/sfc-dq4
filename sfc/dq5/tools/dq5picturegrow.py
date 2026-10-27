@@ -133,7 +133,7 @@ def patch(rom, doc, at, new_sets=()):
     current = {int(p['picture'], 16): p for p in before['pictures']}
     # 그림 번호마다 원래 세트의 타일 수. 1F:CF1E 가 세트 타일 수만큼 VRAM 을 잡으므로 넘지 못하게 한다.
     limit = {g: set_tiles(rom, int(p['set'], 16)) for g, p in current.items()}
-    # dq5spritewrite.py 가 같은 빌드에서 새로 채우는 세트(70~7F)는 --new-sets 로 받는다.
+    # dq5spritewrite.py 가 같은 빌드에서 새로 채우는 세트(70~7F, 표를 늘리면 A5~FF)는 --new-sets 로 받는다.
     sets = valid_sets(rom) | set(new_sets)
     seen = set()
     for row in rows:
@@ -224,7 +224,7 @@ def patch_rows(rom, doc):
 
 def sets_arg(value):
     out = [hexbyte(v.strip(), '--new-sets') for v in value.split(',') if v.strip()]
-    require(all(0x70 <= v <= 0x7F for v in out), '--new-sets 는 70~7F')
+    require(all(0x70 <= v <= 0x7F or v >= 0xA5 for v in out), '--new-sets 는 70~7F 와 A5~FF(dq5spritewrite.py --sets-at)')
     return out
 
 

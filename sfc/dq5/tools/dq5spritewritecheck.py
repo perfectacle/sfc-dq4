@@ -4,6 +4,8 @@
   세트 04(6타일, 그림 18): 다른 6타일 세트의 그림으로
   세트 84(8타일, 그림 29): 다른 8타일 세트의 그림으로
   새 세트 70(6타일): 방향·프레임마다 다른 시험 무늬, 그림 2B 를 70 으로
+늘린 표 롬(grown)은 --sets-at 으로 세트 표를 256칸으로 옮기고, 세트 04 와 새 세트 70 은 위와 같게, 그림 29 는 세트 84 대신
+새 8타일 세트 FF(세트 84 의 시험 그림, 팔레트 2)로 잇는다.
 원본 롬과 고친 롬에서 dq5gfxdump.lua 로 WRAM·VRAM·OAM·CGRAM 을 덤프하고, 각 롬을 dq5sprite.py 의 비교(VRAM 타일·칸 목록·
 OAM 묶음 픽셀)로 본다. 시험 그림은 롬에서 뽑으므로 --out 의 새 하위 폴더에만 둔다.
   MESENCE=… python sfc/dq5/tools/dq5spritewritecheck.py rom/dq5.sfc --state work/state/ship.mss
@@ -29,6 +31,7 @@ RECORDS = {'format': 'dq5npcrecord/1', 'entries': [
     {'list': '05:8CD4', 'index': 3, 'time': 'day', 'fields': {'x': 24, 'y': 12, 'facing': 'down'}},
     {'list': '05:8CD4', 'index': 2, 'time': 'day', 'fields': {'x': 28, 'y': 12, 'facing': 'down', 'gfx': 0x29}}]}
 SIMPLE, OVERLAP, NEW, NEW_GFX = 0x04, 0x84, 0x70, 0x2B
+GROWN, GROWN_GFX, GROWN_PALETTE = 0xFF, 0x29, 2
 
 
 def pattern(path):
@@ -92,7 +95,7 @@ def compare(rom, dest):
     sets = {f'{s:02X}': v for s, v in stats.get('sets', {}).items()}
     frames = sorted(f'{s:02X} {d}{f}' for s, d, f in stats.get('frames', set()))
     return {'dumps': len(tags), 'sets': sets, 'groups': stats.get('groups', 0), 'hits': stats.get('hits', 0),
-            'frames': frames}
+            'other_palette': stats.get('other_palette', 0), 'frames': frames}
 
 
 def main():
@@ -102,6 +105,7 @@ def main():
     ap.add_argument('--mesence', default=os.environ.get('MESENCE'))
     ap.add_argument('--out', type=Path, default='work/spritewritecheck')
     ap.add_argument('--at', default='3A:8000', help='원래 자리에 들어가지 않는 자료를 놓을 곳(dq5spritewrite.py --at)')
+    ap.add_argument('--sets-at', default='3B:8000', help='늘린 세트 표와 레코드를 놓을 곳(dq5spritewrite.py --sets-at)')
     args = ap.parse_args()
     if not args.mesence:
         ap.error('--mesence 또는 MESENCE가 필요함')
@@ -124,13 +128,21 @@ def main():
                'new_sets': [{'set': f'{NEW:02X}', 'image': 'pattern.png', 'palette': 0}],
                'gfx': [{'gfx': f'{NEW_GFX:02X}', 'set': f'{NEW:02X}'}]}
         (out / 'sprite.json').write_text(json.dumps(doc, indent=1) + '\n', encoding='utf-8')
+        grown_doc = {'format': FORMAT, 'sets': doc['sets'][:1],
+                     'new_sets': doc['new_sets'] + [{'set': f'{GROWN:02X}', 'image': 'overlap.png', 'palette': GROWN_PALETTE}],
+                     'gfx': doc['gfx'] + [{'gfx': f'{GROWN_GFX:02X}', 'set': f'{GROWN:02X}'}]}
+        (out / 'grown.json').write_text(json.dumps(grown_doc, indent=1) + '\n', encoding='utf-8')
         (out / 'records.json').write_text(json.dumps(RECORDS, indent=1) + '\n', encoding='utf-8')
         tool('dq5spritewrite.py', original, 'check', out / 'sprite.json', '--at', args.at)
         tool('dq5spritewrite.py', original, 'patch', out / 'sprite.json', '-o', out / 'sprite.dq5patch.json', '--at', args.at)
+        grown_args = ('--at', args.at, '--sets-at', args.sets_at)
+        tool('dq5spritewrite.py', original, 'check', out / 'grown.json', *grown_args)
+        tool('dq5spritewrite.py', original, 'patch', out / 'grown.json', '-o', out / 'grown.dq5patch.json', *grown_args)
         tool('dq5npcrecord.py', original, 'patch', out / 'records.json', '-o', out / 'records.dq5patch.json')
         roms = {}
         for name, patches in (('original', [out / 'records.dq5patch.json']),
-                              ('edited', [out / 'records.dq5patch.json', out / 'sprite.dq5patch.json'])):
+                              ('edited', [out / 'records.dq5patch.json', out / 'sprite.dq5patch.json']),
+                              ('grown', [out / 'records.dq5patch.json', out / 'grown.dq5patch.json'])):
             roms[name] = out / f'{name}.sfc'
             tool('dq5build.py', original, 'build', *patches, '--size', '2', '-o', roms[name], '--ips', out / f'{name}.ips')
         krlua = Path(subprocess.run(['krpatch', 'sfc', 'lua'], capture_output=True, text=True,
@@ -146,22 +158,32 @@ def main():
         for s in (SIMPLE, OVERLAP, NEW):
             before, after = S.decode_set(base, s), S.decode_set(edited, s)
             changed[f'{s:02X}'] = before is None or before['tile_data'] != after['tile_data']
-        mine = results['edited']
+        grown = Rom(roms['grown'].read_bytes())
+        changed[f'{GROWN:02X}'] = S.decode_set(base, GROWN) is None and S.decode_set(grown, GROWN) is not None
+        mine, big = results['edited'], results['grown']
+
+        def same(r, sets):
+            return all(f'{s:02X}' in r['sets'] and r['sets'][f'{s:02X}'][0] == r['sets'][f'{s:02X}'][1] for s in sets)
+
+        def shown(r, sets):
+            return all(any(f.startswith(f'{s:02X} ') for f in r['frames']) for s in sets)
         checks = {
-            'vram': all(f'{s:02X}' in mine['sets'] and mine['sets'][f'{s:02X}'][0] == mine['sets'][f'{s:02X}'][1]
-                        for s in (SIMPLE, OVERLAP, NEW)),
+            'vram': same(mine, (SIMPLE, OVERLAP, NEW)),
             'oam': mine['groups'] == mine['hits'] > 0 and results['original']['groups'] == results['original']['hits'],
-            'shown': all(any(f.startswith(f'{s:02X} ') for f in mine['frames']) for s in (SIMPLE, OVERLAP, NEW)),
+            'shown': shown(mine, (SIMPLE, OVERLAP, NEW)),
             'changed': all(changed.values()),
             'original': all(v[0] == v[1] for v in results['original']['sets'].values()),
+            'grown': same(big, (SIMPLE, NEW, GROWN)) and shown(big, (SIMPLE, NEW, GROWN)) and big['groups'] == big['hits'] > 0
+                     and S.set_record(grown, GROWN)['palette'] == GROWN_PALETTE and big['other_palette'] == 0,
         }
         report = {'donors': {'simple': f'{simple:02X}', 'overlap': f'{overlap:02X}'}, 'results': results,
                   'changed': changed, 'checks': checks}
         (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
         for name, r in results.items():
             print(f'{name}: 덤프 {r["dumps"]}개, 세트 ' + ' '.join(f'{s} {v[0]}/{v[1]}' for s, v in sorted(r['sets'].items()))
-                  + f', OAM 묶음 {r["hits"]}/{r["groups"]}, 프레임 ' + ' '.join(r['frames']))
-        print(f'시험 그림: 세트 {SIMPLE:02X} ← {simple:02X}, {OVERLAP:02X} ← {overlap:02X}, 새 세트 {NEW:02X} ← 무늬(그림 {NEW_GFX:02X})')
+                  + f', OAM 묶음 {r["hits"]}/{r["groups"]}(레코드와 다른 팔레트 {r["other_palette"]}), 프레임 ' + ' '.join(r['frames']))
+        print(f'시험 그림: 세트 {SIMPLE:02X} ← {simple:02X}, {OVERLAP:02X} ← {overlap:02X}, 새 세트 {NEW:02X} ← 무늬(그림 {NEW_GFX:02X}), '
+              f'늘린 표의 새 세트 {GROWN:02X} ← {overlap:02X}(그림 {GROWN_GFX:02X}, 팔레트 {GROWN_PALETTE})')
         for key, ok in checks.items():
             print(f'{key}: {"통과" if ok else "불일치"}')
         if not all(checks.values()):
