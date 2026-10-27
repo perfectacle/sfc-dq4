@@ -32,12 +32,27 @@ FIXED_KIND = 7
 FIXED_PREFIX = 0x9E
 # 창 번호 → 오른쪽으로 넓힐 칸 수. 명령 창은 한 항목이 네 칸이라 adopt.tsv 의 긴 이름(「강한 정도」·「조사하다」)
 # 대신 두 자 낱말로 줄였다. 「どうする」 창은 「건네기」 석 자가 들어가게 한 칸 넓힌다.
-FIXED_WINDOWS = {0x01: 0, 0x10: 1}
+# 09 さくせん, 0B つよさ(「강함 보기」 가 들어가게 한 칸 넓힘), 19·1A·87·88 전투 첫 창, 1C·1D·1E 전투 명령 창
+FIXED_WINDOWS = {0x01: 0, 0x10: 1, 0x09: 0, 0x0B: 1,
+                 0x19: 0, 0x1A: 0, 0x87: 0, 0x88: 0, 0x1C: 0, 0x1D: 0, 0x1E: 0}
 FIXED = {
     'はなす': '대화', 'じゅもん': '주문', 'つよさ': '강함', 'どうぐ': '도구',
     'そうび': '장비', 'さくせん': '작전', 'とびら': '문', 'しらべる': '조사',
     'つかう': '쓰기', 'わたす': '건네기', 'すてる': '버리기',
+    'ならびかえをする': '대열 바꾸기', 'さくせんをねる': '작전 짜기',
+    'ＨＰとＭＰ': 'HP와 MP', 'こうげきカ': '공격력', 'つよさみる': '강함 보기', 'まんたん': '만땅',
+    'たたかう': '싸우기', 'いれかえ': '교체', 'にげる': '도망',
+    'こうげき': '공격', 'とくぎ': '특기', 'ぼうぎょ': '방어',
 }
+# 창 제목(04:AD78 목록). 표에 없는 제목(이름 뒤 「の１」, 이름 입력 등)은 가나로 둔다.
+TITLES = {
+    'コマンド': '명령', 'どうする': '어떻게', 'だれに': '누구에게', 'どこへ': '어디로',
+    'ぶき': '무기', 'せんとう': '전투', 'だれの': '누구의', 'だれが': '누가', 'のどうぐ': '의 도구',
+    'せんとうじゅもん': '전투 주문', 'のじゅもん': '의 주문', 'しょうひＭＰ': '소비 MP', 'だれを': '누구를',
+    'よろい': '갑옷', 'たて': '방패', 'かぶと': '투구', 'レベル': '레벨', 'しゅび': '수비', 'ぼうぐ': '방어구',
+    'せんとうとくぎ': '전투 특기', 'のとくぎ': '의 특기', 'だれと': '누구와', 'だれがたたかう': '누가 싸울까',
+}
+TITLE_COUNT = 0x2B              # 제목 2B 부터는 목록 뒤의 코드
 
 
 def kana_key(text):
@@ -72,16 +87,41 @@ def columns(font, text):
     return out
 
 
+def phrases():
+    """고정 문구 {일본어: 한글}. 번호 k 는 이 순서(FE·FF 를 넘지 않음)."""
+    out = dict(FIXED)
+    for jp, ko in TITLES.items():
+        out.setdefault(jp, ko)
+    return out
+
+
+def _runs(rom, rec, i, start_ok):
+    """rec[i] 부터 가나 한 덩이: (끝, 칸 수, 일본어). 탁점 접두 84·83(제목은 92·93)은 칸을 차지하지 않는다."""
+    import dq5text
+    j, n = i, 0
+    while j < len(rec) and 0x02 <= rec[j] < 0xB0:
+        j += 2 if rec[j] in (0x83, 0x84, 0x92, 0x93) else 1
+        n += 1
+    raw = rec[i:j].replace(b'\x92', b'\x84').replace(b'\x93', b'\x83')
+    return j, n, dq5text.text(dq5text.string_codes(rom, raw))
+
+
 def fixed_records(data, font):
-    """FIXED_WINDOWS 의 창 레코드를 고쳐 쓴 [(파일 자리, 새 바이트)]와 문구 번호 {일본어: k}.
-    항목 머리 FE 바로 뒤의 가나 n 칸과 그 뒤 빈칸 s 개를 9E k 와 빈칸 (n + s + 넓힘 − 한글 열 수) 개로 바꿔, 뒤 항목의 열 자리와
-    04:B0F0 의 칸 셈($0ADE)을 원래와 같게 둔다."""
+    """FIXED_WINDOWS 의 창 레코드와 제목 목록을 고쳐 쓴 [(파일 자리, 새 바이트)]와 문구 번호 {일본어: k}.
+    가나 n 칸과 그 뒤 빈칸 s 개를 9E k 와 빈칸 (n + s − 한글 열 수) 개로 바꿔, 뒤 항목의 열 자리와
+    04:B0F0 의 칸 셈($0ADE)을 원래와 같게 둔다. 창 본문은 항목 머리 FE 바로 뒤만 바꾼다."""
     if str(DQ5_TOOLS) not in sys.path:
         sys.path.insert(0, str(DQ5_TOOLS))
     import dq5text
     from dq5map import Rom
     rom = Rom(bytes(data))
-    numbers = {jp: k for k, jp in enumerate(FIXED)}
+    table = phrases()
+    numbers = {jp: k for k, jp in enumerate(table)}
+    width = {jp: len(columns(font, ko)) for jp, ko in table.items()}
+
+    def lorom(addr):
+        return ((addr >> 16) & 0x7F) * 0x8000 + (addr & 0x7FFF)
+
     out = []
     for w, widen in FIXED_WINDOWS.items():
         addr, rec = dq5text.window(rom, w)
@@ -89,35 +129,74 @@ def fixed_records(data, font):
         new = bytearray(rec[:start])
         i = start
         while i < len(rec):
-            b = rec[i]
-            if not (0x02 <= b < 0xB0 and rec[i - 1] == 0xFE):
-                new.append(b)
+            if not (0x02 <= rec[i] < 0xB0 and rec[i - 1] == 0xFE):
+                new.append(rec[i])
                 i += 1
                 continue
-            j, n = i, 0
-            while j < len(rec) and (0x02 <= rec[j] < 0xB0):
-                j += 2 if rec[j] in (0x83, 0x84) else 1
-                n += 1
-            jp = dq5text.text(dq5text.string_codes(rom, rec[i:j]))
-            if jp not in numbers:
+            j, n, jp = _runs(rom, rec, i, True)
+            if jp not in FIXED:
                 raise ValueError(f'창 {w:02X}: 「{jp}」 의 한글 문구가 없음')
             s = 0
             while j + s < len(rec) and rec[j + s] == 0x01:
                 s += 1
             last = j + s >= len(rec) or rec[j + s] == 0xFF
             room = n + s + (widen if last else 0)
-            m = len(columns(font, FIXED[jp]))
-            if m > room:
-                raise ValueError(f'창 {w:02X}: 「{FIXED[jp]}」 {m}열, 자리 {room}열')
-            new += bytes((FIXED_PREFIX, numbers[jp])) + b'\x01' * (n + s - m)
+            if width[jp] > room:
+                raise ValueError(f'창 {w:02X}: 「{table[jp]}」 {width[jp]}열, 자리 {room}열')
+            new += bytes((FIXED_PREFIX, numbers[jp])) + b'\x01' * max(0, n + s - width[jp])
             i = j + s
         if len(new) > len(rec):
             raise ValueError(f'창 {w:02X}: 고친 레코드가 원래보다 김')
         new[2] += widen
-        o = ((addr >> 16) & 0x7F) * 0x8000 + (addr & 0x7FFF)
+        o = lorom(addr)
         if bytes(data[o:o + len(rec)]) != rec:
             raise ValueError(f'창 {w:02X}: 레코드 자리가 어긋남')
         out.append((o, bytes(new) + b'\xff' * (len(rec) - len(new))))
+
+    # 제목: 이름 자리(E0~) 없이 가나 한 덩이뿐인 제목만 창 안에서 늘어날 수 있다. 쓰는 창마다 제목 자리 + 열 수 ≤ 너비 − 1
+    users = {}
+    first = rom.u16(dq5text.WINDOWS)
+    for w in range((first - (dq5text.WINDOWS & 0xFFFF)) // 2):
+        addr, rec = dq5text.window(rom, w)
+        # 메뉴 패치가 낮은 WRAM 으로 돌린 창(공용 창·이름 입력)은 롬에 레코드가 없다
+        if addr & 0xFFFF >= 0x8000 and rec and not rec[0] & 0x80 and len(rec) > 6 and rec[4] & 0x0F:
+            h = dq5text.window_header(rec)
+            users.setdefault(h['title'], []).append((w, h['title_x'], h['w'] + FIXED_WINDOWS.get(w, 0)))
+    start = lorom(dq5text.WINDOW_TITLES)
+    o, old, new = start, bytearray(), bytearray()
+    for t in range(TITLE_COUNT):
+        e = data.index(0xFF, o)
+        rec = bytes(data[o:e])
+        old += rec + b'\xff'
+        i, cols = 0, 0
+        body = bytearray()
+        single = len(rec) > 0 and all(0x02 <= b < 0xB0 for b in rec)
+        while i < len(rec):
+            if not 0x02 <= rec[i] < 0xB0 or rec[i] == 0x01:
+                body.append(rec[i])
+                cols += 1
+                i += 1
+                continue
+            j, n, jp = _runs(rom, rec, i, False)
+            s = 0
+            while j + s < len(rec) and rec[j + s] == 0x01:
+                s += 1
+            if jp not in table or (not single and width[jp] > n + s):
+                body += rec[i:j]
+                cols += n
+                i = j
+                continue
+            body += bytes((FIXED_PREFIX, numbers[jp])) + b'\x01' * max(0, n + s - width[jp])
+            cols += max(width[jp], n + s)
+            i = j + s
+        for w, x, wd in users.get(t, ()):
+            if single and x + cols > wd - 1:
+                raise ValueError(f'제목 {t:02X} 「{rec.hex()}」: 창 {w:02X} 너비 {wd} 에 {cols}열이 안 들어감')
+        new += body + b'\xff'
+        o = e + 1
+    if len(new) > len(old):
+        raise ValueError('고친 제목 목록이 원래보다 김')
+    out.append((start, bytes(new) + b'\xff' * (len(old) - len(new))))
     return out, numbers
 
 
@@ -126,12 +205,12 @@ def build(data, font):
     index = bytearray(DATA - INDEX)
     body = bytearray()
     report = {}
-    for jp, k in {jp: k for k, jp in enumerate(FIXED)}.items():
-        cols = columns(font, FIXED[jp])
+    for k, (jp, ko) in enumerate(phrases().items()):
+        cols = columns(font, ko)
         at = DATA + len(body)
         index[FIXED_KIND * 0x200 + k * 2:FIXED_KIND * 0x200 + k * 2 + 2] = at.to_bytes(2, 'little')
         body += bytes((len(cols),)) + b''.join(cols)
-    report[FIXED_KIND] = (len(FIXED), len(FIXED))
+    report[FIXED_KIND] = (len(phrases()), len(phrases()))
     for kind, (table, limit, strict) in KINDS.items():
         korean = adopted(table)
         names = rom_names(data, kind)
