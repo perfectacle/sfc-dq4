@@ -309,6 +309,8 @@ def new_map(text):
 
 def new_maps_from(rom, given, newmap_doc):
     """--new-map 과 dq5newmap 문서의 새 맵을 맞춘다. 문서가 더하는 맵을 빠뜨리면 그 맵이 다음 그룹 첫 목록을 읽기 때문이다."""
+    if any(bc >= 0x50 for bc, _ in given):
+        raise ValueError('--new-map 은 그룹 50 미만만 받음(그룹 50 이상은 기본 인물 목록을 읽지 않음, 12:801C)')
     if newmap_doc is None:
         return given
     doc = json.loads(newmap_doc.read_text(encoding='utf-8'))
@@ -321,7 +323,8 @@ def new_maps_from(rom, given, newmap_doc):
         if not isinstance(name, str) or not re.fullmatch(r'[0-9A-F]{2}/[0-9A-F]{2}', name):
             raise ValueError(f'{newmap_doc}: map 은 대문자 GG/MM')
         key = tuple(int(v, 16) for v in name.split('/'))
-        if key not in known:
+        # 그룹 50 이상은 기본 인물 목록을 읽지 않으므로(12:801C) 고층 새 맵은 인물 목록 대상이 아니다.
+        if key not in known and key[0] < 0x50:
             added.append(key)
     if given and sorted(set(given)) != sorted(added):
         raise ValueError('--new-map ' + ' '.join(f'{a:02X}/{b:02X}' for a, b in sorted(set(given))) + ' 이 dq5newmap 문서의 새 맵 '
