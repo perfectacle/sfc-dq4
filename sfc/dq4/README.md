@@ -15,6 +15,7 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [docs/dq4-sound-port-handoff.md](docs/dq4-sound-port-handoff.md): 사운드 포팅 작업 경과·재현 명령·로컬 실험 폴더
 - [docs/dq4-menu-format.md](docs/dq4-menu-format.md): 모험의 서 메뉴 한글화(미리 그린 열을 VRAM 2000 에, 창 접두 9F, 공용 창의 WRAM 교체, Galmuri9·7·11)
 - [docs/dq4-name-entry-format.md](docs/dq4-name-entry-format.md): 두벌식 자모 조합과 네 글자 이름 저장, 메뉴 이름 표시
+- [handoff-window-text.md](handoff-window-text.md): 창 글자 한글화 ① 도구 목록 인계(초안 코드, 막힌 것, 다음 할 일)
 - [docs/dq4-window-text-format.md](docs/dq4-window-text-format.md): 게임 안 창 한글 조사(이름이 지나는 루틴, 장면마다 빈 BG3 타일, 가나 칸 재사용, 글꼴 크기와 타일 수)와 BG3 타일맵 옮기기
 - [docs/dq4-title-format.md](docs/dq4-title-format.md): 정지 한글 타이틀, NDS 오프닝 관찰과 초기 SFC 연결 기록
 - [todo.md](todo.md): 남은 일
