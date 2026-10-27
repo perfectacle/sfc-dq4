@@ -115,7 +115,7 @@ def group_spans(rom, attr=False, kind=None):
         values = []
         while (v := rom.u16(table + len(values) * 2)) != 0:
             values.append(v)
-            if len(values) > 0x50:
+            if len(values) > 0x51:
                 raise ValueError(f'{kind}: 옮긴 그룹 표에 0000 끝이 없음')
         starts, end = values[:-1], values[-1]
     spans = list(zip(starts, starts[1:] + [end]))

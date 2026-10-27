@@ -3,7 +3,8 @@
 package.path = os.getenv('LIBDIR') .. '/?.lua;' .. package.path
 local L = require('lib')
 local seen = {}
-for _, r in ipairs({{0x0000BC, 0x0000BD}, {0x7E00BC, 0x7E00BD}}) do
+-- 직접 페이지는 뱅크 00, 긴 주소는 7E 거울로 읽힌다. 뱅크 80 거울도 함께 본다.
+for _, r in ipairs({{0x0000BC, 0x0000BD}, {0x7E00BC, 0x7E00BD}, {0x8000BC, 0x8000BD}}) do
   emu.addMemoryCallback(function()
     local s = emu.getState()
     local k = string.format('%02X%04X', s['cpu.k'], s['cpu.pc'])
