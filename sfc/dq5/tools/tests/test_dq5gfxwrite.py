@@ -162,7 +162,7 @@ class BattleBgPatchTests(unittest.TestCase):
 
     def test_grow_needs_at_then_uses_freed_picture_room(self):
         self.doc['palettes'][0]['rows'].append([3])                # 3바이트 커짐: 팔레트 자리에 안 들어감
-        with self.assertRaisesRegex(ValueError, '--at'):
+        with self.assertRaisesRegex(ValueError, '--palettes-at'):
             bgw.patch(self.rom, self.doc, self.tmp.name)
         manifest, layout = bgw.patch(self.rom, self.doc, self.tmp.name, at=0x408000)
         self.assertEqual(manifest['rom_size'], 3)
@@ -174,6 +174,23 @@ class BattleBgPatchTests(unittest.TestCase):
         self.assertEqual(bgw.read_palette(rom, pal_at)[0]['rows'], [[1, 2], [3]])
         pic = 0x400000 | rom.u16(0x2882FB)
         self.assertEqual(bgw.read_picture(rom, pic)[3][0], b'\x11' * 32)
+
+    def test_move_palettes_and_lists_together(self):
+        self.doc['palettes'][0]['rows'].append([3])
+        for x in self.doc['lists']:
+            x['entries'].append([9, 9])
+        manifest, _ = bgw.patch(self.rom, self.doc, self.tmp.name, palettes_at=0x418000, lists_at=0x418000)
+        out = apply(self.data, manifest)
+        rom = Rom(out)
+        self.assertEqual((out[lorom(0x228809)], out[lorom(0x228880)], out[lorom(0x22CB36)]), (0x41, 0x41, 0x28))
+        pal = 0x410000 | rom.u16(0x28BDFC)
+        lst = 0x410000 | rom.u16(0x28C9C2)
+        alt = 0x410000 | rom.u16(0x2288D4)
+        self.assertEqual(bgw.read_palette(rom, pal)[0]['rows'], [[1, 2], [3]])
+        self.assertEqual(bgw.read_list(rom, lst)[0], [[1, 2], [9, 9]])
+        self.assertEqual(bgw.read_list(rom, alt)[0], [[3, 4], [5, 6], [9, 9]])
+        spans = sorted([(pal, pal + bgw.read_palette(rom, pal)[1]), (lst, lst + 5), (alt, alt + 7)])
+        self.assertTrue(all(a[1] <= b[0] for a, b in zip(spans, spans[1:])))
 
     def test_alt_list_moves_with_immediate(self):
         alt = self.doc['alt_list']
@@ -201,6 +218,8 @@ class MapGfxPatchTests(unittest.TestCase):
         for i in range(3):
             put(d, mgw.chr_addr(0x13, i), bytes([i + 1]) * 32)
         put(d, 0x2A8781, bytes([0x12, 0x3F]))                        # 니블 1,2,3 과 다음 CHR 몫 F
+        put(d, mgw.PALSET_LISTS, (0xE0F8).to_bytes(2, 'little') * (mgw.SET_COUNT * 2))   # 세트마다 같은 목록
+        put(d, mgw.ROW_READ, bytes.fromhex('b9 c8 e5'))
         self.data = bytes(d)
         self.rom = Rom(self.data)
         self.tmp = tempfile.TemporaryDirectory()
@@ -215,6 +234,22 @@ class MapGfxPatchTests(unittest.TestCase):
         self.doc['chr_palettes'][2] = 9
         out = apply(self.data, mgw.patch(self.rom, self.doc, self.tmp.name))
         self.assertEqual(out[lorom(0x2A8782)], 0x9F)                 # 아래 니블(다음 CHR 몫)은 그대로
+
+    def test_palette_rows_grow_with_hook(self):
+        self.doc['palettes'].append([0x1F] * 16)
+        with self.assertRaisesRegex(ValueError, '--palettes-at'):
+            mgw.patch(self.rom, self.doc, self.tmp.name)
+        first = next(iter(self.doc['palette_lists']))
+        self.doc['palette_lists'][first] = [208] * 7
+        manifest = mgw.patch(self.rom, self.doc, self.tmp.name, palettes_at=0x428000)
+        out = apply(self.data, manifest)
+        self.assertEqual(out[lorom(0x10DE84):lorom(0x10DE84) + 3], bytes.fromhex('20 e0 ff'))
+        self.assertEqual(out[lorom(0x10FFE0):lorom(0x10FFE0) + 8], bytes.fromhex('da bb bf 00 80 42 fa 60'))
+        self.assertEqual(out[lorom(0x428000) + 208 * 32:lorom(0x428000) + 208 * 32 + 2], b'\x1f\x00')
+        self.assertEqual(Rom(out).u16(0x100000 | int(first, 16)), 208)
+        self.doc['palette_lists'][first] = [209] * 7
+        with self.assertRaises(ValueError):
+            mgw.patch(self.rom, self.doc, self.tmp.name, palettes_at=0x428000)
 
     def test_grow_chr_and_blocks(self):
         with open(os.path.join(self.tmp.name, 'chr.bin'), 'ab') as f:

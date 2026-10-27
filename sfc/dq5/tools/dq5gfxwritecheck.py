@@ -5,6 +5,9 @@
               (그림이 원래 크기 안이라 제자리에 씀)
   bg-repack   그 칸을 줄무늬로(그림이 커져 그림 자리를 다시 놓음)과 같은 색
   bg-moved    bg-repack 수정 + 그림 전체를 --at 40:8000 으로
+  bg-tables   bg-repack 수정 + 팔레트 레코드 --palettes-at 43:8000, 목록 --lists-at 44:8000
+  map-rows    BG 팔레트 줄 208 을 더하고 01/05 낮 목록의 줄 50 자리를 208 로, 줄 52 의 색 4~15 를 바꿔
+              --palettes-at 42:8000(10:DE84 훅). 필드에 서서 줄 52 를 쓰는 4번 줄도 본다
   map-inplace CHR 080 을 줄무늬로, BG 팔레트 줄 50 의 1번 색을 빨강으로, CHR 080 을 쓰는 블록 하나를 좌우 반전(제자리)
   map-moved   CHR 을 늘려(새 CHR) --chr-at 40:8000, 새 블록(그 CHR 2x2)을 더해 --blocks-at 31:8000,
               01/05 맵 끝에 그 블록을 (4,2) 에 놓음(dq5mapwrite --at 30:8000)
@@ -38,6 +41,7 @@ STRIPE = bytes(v for r in range(8) for v in ((0xAA if r % 2 == 0 else 0x55), 0xF
 DOTS = bytes(v for r in range(8) for v in (0x81 << (r % 4) & 0xFF, 0)) + bytes([0xFF, 0xFF]) * 8
 BG, BG_CELL, BG_PALETTE = 6, 10, 0x18 // 2
 MAP, MAP_CHR, MAP_ROW, NEW_BLOCK_AT = (1, 5), 0x080, 50, (4, 2)
+NEW_ROW = [0] + [0x001F, 0x03E0, 0x7C00] * 5                    # 더하는 BG 팔레트 줄: 빨강·초록·파랑
 ENTRY = '01/05,34,48'
 # 실내 맵 BG 의 글자 기준은 VRAM 바이트 4000(타일 200)이다(01/05 덤프에서 CHR 이 슬롯 + 200 자리에 있음).
 CHR_VRAM = 0x200
@@ -67,7 +71,8 @@ def make_roms(original, out):
     pal = next(p for p in doc['palettes'] if p['id'] == doc['palette_table'][BG_PALETTE])
     pal['rows'][0][0] = 0x001F
     (src / 'bg.json').write_text(json.dumps(doc), encoding='utf-8')
-    for name, extra in (('bg-repack', []), ('bg-moved', ['--at', '40:8000'])):
+    for name, extra in (('bg-repack', []), ('bg-moved', ['--at', '40:8000']),
+                        ('bg-tables', ['--palettes-at', '43:8000', '--lists-at', '44:8000'])):
         command('dq5battlebgwrite.py', original, 'patch', src / 'bg.json', '-o', out / f'{name}.json', *extra)
     # 제자리: 칸 하나를 같은 그림의 다른 타일로 바꿔 그림이 원래 크기 안에 드는 것을 고른다.
     cells = pic['cells']
@@ -100,6 +105,16 @@ def make_roms(original, out):
     (msrc / 'chr.bin').write_bytes(chrs)
     (msrc / 'mapgfx.json').write_text(json.dumps(mdoc), encoding='utf-8')
     command('dq5mapgfxwrite.py', original, 'patch', msrc / 'mapgfx.json', '-o', out / 'map-inplace.json')
+    rsrc = out / 'map-rows-src'
+    rdoc = mgw.dump(rom, rsrc)
+    rdoc['palettes'].append(list(NEW_ROW))
+    # 필드 4번 줄이 쓰는 줄 52 의 색 4~15 도 바꿔, 필드도 옮긴 표를 읽는지 가른다(원래 자리에는 옛 색이 남음).
+    rdoc['palettes'][0x34][4:] = NEW_ROW[4:]
+    day = rdoc['palette_sets'][dq5map.palette_set(rom, *MAP)][0]
+    rdoc['palette_lists'][day] = [len(rdoc['palettes']) - 1 if v == MAP_ROW else v for v in rdoc['palette_lists'][day]]
+    (rsrc / 'mapgfx.json').write_text(json.dumps(rdoc), encoding='utf-8')
+    command('dq5mapgfxwrite.py', original, 'patch', rsrc / 'mapgfx.json', '-o', out / 'map-rows.json',
+            '--palettes-at', '42:8000')
 
     grow = out / 'map-grow'
     gdoc = mgw.dump(rom, grow)
@@ -122,12 +137,13 @@ def make_roms(original, out):
     command('dq5mapwrite.py', original, 'patch', grow / 'map0105.json', '-o', out / 'map-0105.json')
 
     builds = {'bg-inplace': ['bg-inplace.json'], 'bg-repack': ['bg-repack.json'], 'bg-moved': ['bg-moved.json'],
+              'bg-tables': ['bg-tables.json'], 'map-rows': ['map-rows.json'],
               'map-inplace': ['map-inplace.json'], 'map-moved': ['map-grow.json', 'map-0105.json']}
     for name, lists in builds.items():
         command('dq5build.py', original, 'build', *(out / p for p in lists), '--size', '4',
                 '-o', out / f'{name}.sfc', '--ips', out / f'{name}.ips')
     return {'new_chr': new_chr, 'new_block': new_block, 'flipped_block': flipped, 'bg_tiles': {
-        'bg-inplace': inplace_tile, 'bg-repack': STRIPE, 'bg-moved': STRIPE}}
+        'bg-inplace': inplace_tile, 'bg-repack': STRIPE, 'bg-moved': STRIPE, 'bg-tables': STRIPE}}
 
 
 def run(mesence, rom, lua, env_extra, dest, libdir, state):
@@ -153,7 +169,8 @@ def bg_expect(rom, n):
     bufb[0:32] = bytes(32)
     bufa = bg.picture(rom, pa)[0]
     x = k + (k >> 1)
-    l1, l2, l3 = (0x280000 | rom.u16(bg.LISTS + x + i) for i in (0, 2, 4))
+    lbank = rom.u8(bgw.BANK_SITES['lists'][0]) << 16
+    l1, l2, l3 = (lbank | rom.u16(bg.LISTS + x + i) for i in (0, 2, 4))
     low, o = bytearray(0x2000), 0
     for t, c in bg.tile_list(rom, l3):
         for _ in range(c):
@@ -162,7 +179,8 @@ def bg_expect(rom, n):
             o += 32
     tiles = {0x200 + i: bytes(low[i * 32:i * 32 + 32]) for i in range(256)}
     tiles.update({0x300 + i: bytes(bufb[i * 32:i * 32 + 32]) for i in range(256)})
-    pals, slot = bg.palette(rom, k)
+    record, _ = bgw.read_palette(rom, rom.u8(bgw.BANK_SITES['palettes'][0]) << 16 | rom.u16(bg.PALS + k))
+    pals = {(record['slot'] + i) & 15: row for i, row in enumerate(record['rows'])}
     m1 = (bg.map_list(rom, l1, hi) + [0] * 0x100)[:0x100]
     m2 = (bg.map_list(rom, l2, hi) + [0] * 0x100)[:0x100]
     return tiles, m1, m2, pals
@@ -235,6 +253,13 @@ def check_map(name, rom_path, dump, orig_dump, info):
                     for r in range(7) for c in range(1, 16))
         require(bad_c == 0, f'{name}: BG 팔레트 1~7번 줄 색 {bad_c}개가 기대와 다름')
         result['colors'] = 7 * 15
+    if name == 'map-rows':
+        oc = (orig_dump / 'f00700.cgram').read_bytes()
+        row = rows_index(Rom(original_rom_bytes(orig_dump))).index(MAP_ROW)
+        got = [cg[0x20 + row * 32 + c * 2] | cg[0x21 + row * 32 + c * 2] << 8 for c in range(1, 16)]
+        require(got == NEW_ROW[1:] and cg[0x20 + row * 32:0x40 + row * 32] != oc[0x20 + row * 32:0x40 + row * 32],
+                f'{name}: 더한 줄 208 이 CGRAM {row + 1}번 줄에 없음')
+        result['edited'] = {'row': f'줄 208 → CGRAM {row + 1}번 줄', 'base': f'{row_base(rom):06X}'}
     if name == 'map-inplace':
         slot = chr_map[MAP_CHR] & 0x3FF
         ov = (orig_dump / 'at_01BA4C.vram').read_bytes()
@@ -303,14 +328,39 @@ def check_walk(rom_path, original, dump, orig_dump):
     return out
 
 
+def check_field_row4(rom_path, dump, orig_dump):
+    """필드 4번 줄(세트 목록의 줄 $34)도 옮긴 줄 표에서 읽는지. 색 1~3 은 물결이 덮으므로 4~15 만."""
+    rom = Rom(rom_path.read_bytes())
+    cg, oc = (dump / 'f00900.cgram').read_bytes(), (orig_dump / 'f00900.cgram').read_bytes()
+    w = (dump / 'f00900.wram').read_bytes()
+    require(w[0xBE] & 0x80 == 0, 'field-rows: 필드에 서지 않음')
+    want = rom_rows(rom, [0x34])[0]
+    require(cg[4 * 32 + 8:5 * 32] == want[8:] != oc[4 * 32 + 8:5 * 32],
+            'field-rows: 4번 줄 색 4~15 가 옮긴 줄 52(고친 색)와 다르거나 원본 게임과 같음')
+    return {'case': 'field-rows', 'row': '4번 줄 색 4~15 = 옮긴 표의 줄 52', 'base': f'{row_base(rom):06X}'}
+
+
 def rows_index(rom):
     s = dq5map.palette_set(rom, *MAP)
     lst = 0x100000 | rom.u16(dq5map.PALSET_LISTS + s * 4)
     return [rom.u16(lst + r * 2) & 0x7FF for r in range(7)]
 
 
-def rom_rows(rom):
-    return [rom.d[lorom(dq5map.PALETTES + i * 32):lorom(dq5map.PALETTES + i * 32) + 32] for i in rows_index(rom)]
+def original_rom_bytes(dump):
+    """원본 롬 장면 폴더에 복사해 둔 롬."""
+    return (dump / f'{dump.name}.sfc').read_bytes()
+
+
+def row_base(rom):
+    """BG 팔레트 줄 표 자리. 10:DE84 를 훅으로 바꾼 롬이면 10:FFE0 스텁의 롱 주소."""
+    if rom.d[lorom(mgw.ROW_READ):lorom(mgw.ROW_READ) + 3] == bytes.fromhex('20 e0 ff'):
+        return rom.u24(mgw.ROW_STUB + 3)
+    return dq5map.PALETTES
+
+
+def rom_rows(rom, rows=None):
+    base = row_base(rom)
+    return [rom.d[lorom(base + i * 32):lorom(base + i * 32) + 32] for i in (rows or rows_index(rom))]
 
 
 def main():
@@ -339,7 +389,7 @@ def main():
         enter = {'TO': ENTRY, 'AT': '01BA4C', 'SETTLE': '400', 'MAXF': '1500'}
         cases = [(name, rom, 'lua/dq5battledump.lua', battle) for name, rom in (
             ('bg-orig', original), ('bg-inplace', out / 'bg-inplace.sfc'), ('bg-repack', out / 'bg-repack.sfc'),
-            ('bg-moved', out / 'bg-moved.sfc'))]
+            ('bg-moved', out / 'bg-moved.sfc'), ('bg-tables', out / 'bg-tables.sfc'))]
         # 블록 포인터 표(7E:B000)는 게임을 시작할 때(00:A6BD) 만든다. 원본 롬으로 만든 선실 상태에는 옛 표가 남아
         # 블록을 옮긴 롬에서는 쓸 수 없으므로, 그 롬으로 전원부터 선실 상태를 새로 만든다.
         from dq5assets import ship_state
@@ -347,11 +397,14 @@ def main():
         moved_state = out / 'map-moved-state' / 'ship' / 'ship.mss'
         states = {}
         for name, rom in (('map-orig', original), ('map-inplace', out / 'map-inplace.sfc'),
-                          ('map-moved', out / 'map-moved.sfc')):
+                          ('map-moved', out / 'map-moved.sfc'), ('map-rows', out / 'map-rows.sfc')):
             cases.append((name, rom, ROOT / 'tools/lua/atpc.lua', enter))
             cases.append((name + '-late', rom, HERE / 'lua/dq5gfxdump.lua',
                           {'TO': ENTRY, 'DUMPF': '700', 'SETTLE': '400', 'MAXF': '1500'}))
             states[name] = states[name + '-late'] = moved_state if name == 'map-moved' else state
+        field = {'FIELD': '341,56', 'SETTLE': '900', 'DUMPF': '900', 'MAXF': '1800'}
+        for name, rom in (('field-orig', original), ('field-rows', out / 'map-rows.sfc')):
+            cases.append((name, rom, HERE / 'lua/dq5gfxdump.lua', field))
         walklib = out / 'walklib'
         shutil.copytree(krlua, walklib)
         shutil.copyfile(ROOT / 'tools/lua/walk.lua', walklib / 'boot.lua')
@@ -362,16 +415,18 @@ def main():
             dirs = dict(zip([c[0] for c in cases], pool.map(
                 lambda c: run(mesence, c[1], HERE / c[2] if isinstance(c[2], str) else c[2], c[3], out / c[0],
                               walklib if c[0].startswith('walk') else libdir, states.get(c[0], state)), cases)))
-        for name in ('map-orig', 'map-inplace', 'map-moved'):
+        for name in ('map-orig', 'map-inplace', 'map-moved', 'map-rows'):
             for f in dirs[name + '-late'].glob('f00700.*'):
                 shutil.copyfile(f, dirs[name] / f.name)
         results = [check_bg('bg-orig', original, dirs['bg-orig'], None)]
         results += [check_bg(name, out / f'{name}.sfc', dirs[name], dirs['bg-orig'], info['bg_tiles'][name])
-                    for name in ('bg-inplace', 'bg-repack', 'bg-moved')]
+                    for name in ('bg-inplace', 'bg-repack', 'bg-moved', 'bg-tables')]
         results += [
                    check_map('map-orig', original, dirs['map-orig'], None, info),
                    check_map('map-inplace', out / 'map-inplace.sfc', dirs['map-inplace'], dirs['map-orig'], info),
                    check_map('map-moved', out / 'map-moved.sfc', dirs['map-moved'], dirs['map-orig'], info),
+                   check_map('map-rows', out / 'map-rows.sfc', dirs['map-rows'], dirs['map-orig'], info),
+                   check_field_row4(out / 'map-rows.sfc', dirs['field-rows'], dirs['field-orig']),
                    check_walk(out / 'map-moved.sfc', original, dirs['walk-moved'], dirs['walk-orig'])]
         (out / 'results.json').write_text(json.dumps(results, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
         print(f'{len(results)}/{len(results)} 통과')
