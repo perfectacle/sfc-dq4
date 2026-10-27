@@ -204,6 +204,8 @@ def convert_sample(path, region, *, max_rate=12000, cache_dir=None, seconds=None
 
 
 RATES = (8000, 6000, 4500, 3200)
+# 시퀀스가 커서 샘플 예산이 작은 곡이 RATES 로도 들지 않을 때만 쓴다. RATES 에 넣으면 고르는 순서가 바뀌어 다른 곡의 샘플도 달라진다.
+LOW_RATES = RATES + (2400,)
 ONE_SHOT_SECONDS = (None, 1.2, 0.6)
 
 
@@ -234,7 +236,8 @@ def estimate(path, max_rate, seconds):
     return 2 + 7 + (len(converted) + 16 + 15) // 16 * 9
 
 
-def build_bank(score, asset_root, *, start_id=0x26, max_rate=8000, cache_dir=None, budget=None, max_samples=14):
+def build_bank(score, asset_root, *, start_id=0x26, max_rate=8000, cache_dir=None, budget=None, max_samples=14,
+               rates=RATES):
     """(resources, program_map, report). sample은 DQ5 전역 번호.
 
     budget(바이트)·max_samples(곡 묶음 칸)를 넘으면 손실이 가장 작은 줄이기를 하나씩 고른다.
@@ -255,7 +258,7 @@ def build_bank(score, asset_root, *, start_id=0x26, max_rate=8000, cache_dir=Non
         if not path.resolve().is_relative_to(samples.resolve()):
             raise ValueError('sample path outside asset root')
         regions[(program, k)] = (region, path, n)
-    rates = [max_rate] + [r for r in RATES if r < max_rate]
+    rates = [max_rate] + [r for r in rates if r < max_rate]
     looped = {}
 
     def has_loop(path):

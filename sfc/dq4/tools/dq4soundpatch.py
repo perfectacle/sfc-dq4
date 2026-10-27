@@ -27,7 +27,8 @@ TABLE_CAPACITY = 0x2A5D - 0x28EC
 HEAP_START = 0x2BE67A  # IPL 블록 첫 2바이트 = SPC $28E7, 드라이버 22F4 가 읽는 샘플·시퀀스 자리 시작
 SPC_END = 0xD700
 CODE = 0x718000
-DATA_BANKS = range(0x72, 0x7E)
+# 70 은 재배치 표, 71 은 훅 코드, 65~69 는 DQ4 메뉴 메시지. 곡 50개의 시퀀스·샘플은 약 0.5MB 라 72~7D 만으로는 모자란다.
+DATA_BANKS = (*range(0x6A, 0x70), *range(0x72, 0x7E))
 MAP_CLEANUP, MAP_START = 0x00CEB1, 0x00CEA2
 FADE_OUT, FADE_IN = 0x40, 0x30
 SPC_CAPACITY = SPC_END - 0x2A5D
@@ -132,8 +133,20 @@ def memory_budget(data, song, item):
     capacity = SPC_END - heap_start(data)
     if len(used_samples) > 20 or len(used_sequences) > 20 or required > capacity:
         raise ValueError(f'song {song:02X}: SPC budget exceeded ({required}/{capacity} bytes)')
+    free = capacity - required + 512
+    # 늘 두지 않는 효과음(3E~45 등)은 부를 때 시퀀스와 샘플을 올린다. 곡이 남긴 자리보다 크면 시퀀스 칸만 잡히고
+    # 샘플이 오지 않아 소리가 나지 않는다(필드 곡 02 에서 0C 42 실측). 원래 DQ5 곡 자리에서는 울렸다.
+    no_room = {}
+    for effect in range(0x32, SEQUENCE_COUNT):
+        if effect in resident_sequences:
+            continue
+        record = read_sets(data)[effect]
+        need = len(sequence_bytes(data, effect)) + sum(sample_size(data, i) for i in set(record[2:]) - used_samples)
+        if need > free:
+            no_room[f'{effect:02X}'] = need
     return {'bytes_with_margin': required, 'capacity': capacity,
-            'sample_slots': len(used_samples), 'sequence_slots': len(used_sequences)}
+            'sample_slots': len(used_samples), 'sequence_slots': len(used_sequences),
+            'free_while_playing': free, 'effects_without_room': no_room}
 
 
 def transition_code():
@@ -189,6 +202,41 @@ def unpin_sequences(data, songs):
     return [x for x in old if x in songs]
 
 
+def put(data, addr, payload, expected=None, empty=False):
+    pos = lorom(addr)
+    old = data[pos:pos + len(payload)]
+    if expected is not None and old != expected:
+        raise ValueError(f'{addr:06X}: incompatible base bytes')
+    if empty and any(old):
+        raise ValueError(f'{addr:06X}: output area already occupied')
+    data[pos:pos + len(payload)] = payload
+
+
+def write_preview(data, preview):
+    """미리듣기에서만 타이틀·메뉴 곡을 preview 로 바꾼다(청취용). 게임용 빌드는 이 훅을 쓰지 않는다."""
+    def write(addr, payload, expected=None, empty=False):
+        put(data, addr, payload, expected, empty)
+
+    call = data[lorom(0x30801C):lorom(0x30801C) + 6]
+    if call != bytes.fromhex('22 00 FF 70 EA EA'):
+        raise ValueError('preview needs the accepted overture title build')
+    title = bytes.fromhex('08 E2 20 A9') + bytes([preview]) + bytes.fromhex('22 9A FE 24 28 6B')
+    write(CODE + 0x100, title, empty=True)
+    write(0x30801C, bytes.fromhex('22 00 81 71 EA EA'))
+    write(0x30FF05, bytes([preview]), b'\x10')
+    menu = bytes.fromhex('8D 00 21 08 E2 20 A9') + bytes([preview])
+    menu += bytes.fromhex('22 BE FE 24 A9 10 22 9A FE 24 22 44 FE 24 28 6B')
+    write(CODE + 0x140, menu, empty=True)
+    write(0x00A709, bytes.fromhex('22 40 81 71 EA EA'), bytes.fromhex('22 20 FF 70 EA EA'))
+
+
+def preview_rom(rom, preview):
+    """install 로 만든 게임용 롬에 미리듣기 훅만 더한다. 곡이 많을 때 곡마다 다시 변환하지 않으려고 쓴다."""
+    data = bytearray(rom)
+    write_preview(data, preview)
+    return set_checksum(bytes(data))
+
+
 def install(base, replacements, *, sample_resources=None, map_fades=False, preview=None):
     if len(base) not in (0x180000, 0x200000, 0x400000):
         raise ValueError('base must be a headerless 1.5MB, 2MB or 4MB DQ5 build')
@@ -199,13 +247,7 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
     sample_resources = sample_resources or {}
 
     def write(addr, payload, expected=None, empty=False):
-        pos = lorom(addr)
-        old = data[pos:pos + len(payload)]
-        if expected is not None and old != expected:
-            raise ValueError(f'{addr:06X}: incompatible base bytes')
-        if empty and any(old):
-            raise ValueError(f'{addr:06X}: output area already occupied')
-        data[pos:pos + len(payload)] = payload
+        put(data, addr, payload, expected, empty)
 
     hook = bytes.fromhex('22 10 80 70 60')
     actual = bytes(data[lorom(0x2BC3AB):lorom(0x2BC3AB) + 5])
@@ -222,41 +264,40 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
     records = read_sets(data)
     old_size = sum(map(len, records))
     unpinned = unpin_sequences(data, set(replacements))
-    bank, within = DATA_BANKS.start, 0x8000
+    free = {bank: 0x8000 for bank in DATA_BANKS}
+
+    def place(payload, what):
+        # 첫 맞춤: 앞 뱅크의 남은 자리부터 채워 뱅크 끝에 버려지는 바이트를 줄인다.
+        if len(payload) > 0x8000:
+            raise ValueError(f'{what} exceeds a LoROM bank')
+        for bank in DATA_BANKS:
+            if free[bank] + len(payload) <= 0x10000:
+                address = bank << 16 | free[bank]
+                free[bank] += len(payload)
+                return address
+        raise ValueError(f'reserved sound banks exhausted placing {what} '
+                         f'({sum(0x10000 - x for x in free.values())} bytes left in fragments)')
+
     for song, item in sorted(replacements.items()):
         if not 0 <= song < SEQUENCE_COUNT or song == 0x10:
             raise ValueError('target song must be 00..46 except the protected title 10')
         validate_replacement(item)
         payload = len(item.sequence).to_bytes(2, 'little') + item.sequence
-        if len(payload) > 0x8000:
-            raise ValueError('sequence exceeds a LoROM bank')
-        if within + len(payload) > 0x10000:
-            bank, within = bank + 1, 0x8000
-        if bank not in DATA_BANKS:
-            raise ValueError('reserved sequence banks exhausted')
-        address = bank << 16 | within
+        address = place(payload, f'sequence {song:02X}')
         write(address, payload, empty=True)
         write(RELOC_SEQ_TABLE + song * 3, address.to_bytes(3, 'little'))
         first = len(item.samples) if item.send_first is None else item.send_first
         records[song] = bytes([len(item.samples), first, *item.samples])
         allocations.append({'song': f'{song:02X}', 'at': f'{address:06X}', 'bytes': len(item.sequence),
                             'samples': list(item.samples), 'send_first': first})
-        within += len(payload)
     for sample, payload in sorted(sample_resources.items()):
         if not 0x26 <= sample < 0xC8:
             raise ValueError('custom samples must use free IDs 26..C7')
         if len(payload) < 18 or int.from_bytes(payload[:2], 'little') != len(payload) - 2:
             raise ValueError('sample resource must contain its 2-byte size header')
-        if len(payload) > 0x8000:
-            raise ValueError('sample exceeds a LoROM bank')
-        if within + len(payload) > 0x10000:
-            bank, within = bank + 1, 0x8000
-        if bank not in DATA_BANKS:
-            raise ValueError('reserved sample banks exhausted')
-        address = bank << 16 | within
+        address = place(payload, f'sample {sample:02X}')
         write(address, payload, empty=True)
         write(RELOC_SMP_TABLE + sample * 3, address.to_bytes(3, 'little'))
-        within += len(payload)
     table = b''.join(records)
     if 0x28EC + len(table) > 0x3000:
         raise ValueError(f'song sample table too large: {len(table)} bytes')
@@ -285,24 +326,14 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
     if preview is not None:
         if preview not in replacements:
             raise ValueError('preview song must be one of the replacements')
-        # 미리듣기에서만 타이틀 곡을 바꾼다. 게임용 빌드는 이 훅을 쓰지 않는다.
-        call = data[lorom(0x30801C):lorom(0x30801C) + 6]
-        if call != bytes.fromhex('22 00 FF 70 EA EA'):
-            raise ValueError('preview needs the accepted overture title build')
-        title = bytes.fromhex('08 E2 20 A9') + bytes([preview]) + bytes.fromhex('22 9A FE 24 28 6B')
-        write(CODE + 0x100, title, empty=True)
-        write(0x30801C, bytes.fromhex('22 00 81 71 EA EA'))
-        write(0x30FF05, bytes([preview]), b'\x10')
-        menu = bytes.fromhex('8D 00 21 08 E2 20 A9') + bytes([preview])
-        menu += bytes.fromhex('22 BE FE 24 A9 10 22 9A FE 24 22 44 FE 24 28 6B')
-        write(CODE + 0x140, menu, empty=True)
-        write(0x00A709, bytes.fromhex('22 40 81 71 EA EA'), bytes.fromhex('22 20 FF 70 EA EA'))
+        write_preview(data, preview)
     data[0x7FD7] = 0x0C
     result = set_checksum(bytes(data))
     return result, {'kind': 'dq4_sound_port', 'base_sha1': hashlib.sha1(base).hexdigest(),
                     'rom_sha1': hashlib.sha1(result).hexdigest(), 'songs': allocations,
                     'sample_table_bytes': len(table), 'sample_table_capacity': TABLE_CAPACITY,
                     'heap_start': f'{heap_start(result):04X}',
+                    'sound_bank_bytes_left': {f'{bank:02X}': 0x10000 - at for bank, at in free.items() if at > 0x8000},
                     'unpinned_sequences': [f'{x:02X}' for x in unpinned],
                     'map_fades': map_fades, 'preview': preview,
                     'limitations': ['Map fades apply only to the ordinary DQ5 map-song calls; battle and event timing is unchanged.',

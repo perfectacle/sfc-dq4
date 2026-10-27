@@ -2,6 +2,29 @@
 
 사운드 포팅을 이어받는 세션이 읽는 작업 기록입니다. 확정된 형식·실측은 [사운드 포팅](dq4-sound-port-format.md)에 있고, 여기에는 경과·로컬 실험 폴더(`work/`, 커밋하지 않음)·재현 명령을 둡니다. 아래 「첫 세션 인계」는 그때의 기록이며, 그 뒤 고친 것은 「이어받은 세션의 진행」에 있습니다.
 
+## 곡 자리 45곳 빌드(2026-10-27)
+
+조사 대응표(`work/sound/bgm-research/plan.md`·`mapping.json`, 커밋하지 않음)대로 45곡을 한 롬에 넣었습니다. 결과는 [사운드 포팅 「곡 자리 45곳 한꺼번에 넣기」](dq4-sound-port-format.md#곡-자리-45곳-한꺼번에-넣기)와 [일지](../journal/2026-10-27-23-sound-all-bgm.md)에 있습니다.
+
+| 위치(커밋하지 않음) | 내용 |
+| --- | --- |
+| `work/sound/bgm-set/game.sfc`·`.json`·`songs.args` | 게임용 롬, 보고서, `--song` 목록 |
+| `work/sound/bgm-set/pv/pvNN.sfc`, `run/NN/` | 곡마다 미리듣기 롬과 `dq4soundcheck.py` 결과(`check.json`) |
+| `work/sound/bgm-set/map/<맵>/` | 맵 워프 실측(`maprun.sh`, `mapcheck.py`), 효과음 실측(`sfx42f-*`, `sfx3f-port`, `sfx43-port`, `inject.lua`) |
+| `work/sound/listen/v9-<자리>-<이름>.wav` | 새 42곡 렌더(청취 전) |
+
+```sh
+uv run --locked python sfc/dq4/tools/dq4soundset.py --base work/name-entry/dq4-name-entry.sfc --assets ../sfc-dq4-assets \
+  --song 06=0E --song 02=05 --song 17=1E --song 01=02 --song 03=1C --song 04=19 --song 05=07 --song 07=10 --song 08=0C --song 09=15 --song 0A=16 --song 0B=17 --song 0C=18 --song 0D=1D --song 0E=09 --song 0F=13 --song 11=14 --song 12=06 --song 13=08 --song 14=0A --song 16=1F --song 18=20 --song 19=0D --song 1A=22 --song 1B=0B --song 1C=21 --song 1E=11 --song 20=27 --song 21=2F --song 22=12 --song 23=04 --song 24=26 --song 25=28 --song 26=2A --song 27=2C --song 28=2D --song 29=2E --song 2A=31 --song 2B=23 --song 2C=24 --song 2D=25 --song 2E=2B --song 2F=30 --song 30=03 --song 31=0F \
+  --stream 17=9000 --budget 06=15967 --budget 02=20068 --budget 17=20791 \
+  --out work/sound/bgm-set/game.sfc --preview-dir work/sound/bgm-set/pv
+OUT="$PWD/work/sound/bgm-set/run/01" MAXF=2400 SONG=01 \
+  "$MESENCE" --testrunner work/sound/bgm-set/pv/pv01.sfc "$PWD/sfc/dq4/tools/lua/dq4overturespc.lua"
+uv run --locked python sfc/dq4/tools/dq4soundcheck.py work/sound/bgm-set/pv/pv01.sfc work/sound/bgm-set/run/01 --song 01
+```
+
+빌드는 약 3분이고 같은 입력이면 같은 롬이 나옵니다. 곡이 울리는 동안 효과음을 시험할 때는 메뉴의 `0C 33` 을 바꾸는 방법이 이 빌드에서 듣지 않았습니다(명령 창이 열려도 대기열에 들어오지 않음). `inject.lua` 처럼 대기열이 빈 프레임에 `$1D95`(명령)·`$1DA5`(인자)·`$1DB5`(X)·`$1DC5`(=05)를 `24:FF83` 과 같은 칸에 쓰고 `$1D91`·`$1D93` 을 맞춰 넣습니다.
+
 ## 이어받은 세션의 진행(2026-10-27 두 번째 세션)
 
 - 브랜치를 최신 `origin/main`(`c60504a`)으로 빨리 감기했습니다. 미추적 초안은 `work/sound-port/backup-20261027/`에 복사해 두었습니다. main에서 이름 입력이 바뀌었으므로 기준 ROM `work/sound/baseline/dq4-sound-base.sfc`는 통합 전에 최신 빌드로 바꿔야 합니다.

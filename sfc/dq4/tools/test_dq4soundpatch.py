@@ -95,7 +95,7 @@ class InstallTests(unittest.TestCase):
 
     def test_occupied_allocation_is_not_overwritten(self):
         base = bytearray(self.base) + bytes(0x400000 - len(self.base))
-        base[lorom(0x728000)] = 0x12
+        base[lorom(patch.DATA_BANKS[0] << 16 | 0x8000)] = 0x12
         with self.assertRaisesRegex(ValueError, 'already occupied'):
             patch.install(bytes(base), {2: self.item})
 
