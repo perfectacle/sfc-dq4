@@ -127,8 +127,12 @@ def controllers(score, end):
     return dict(result), True
 
 
-def allocate(score, voices, end, tail_ticks=0):
-    """원래 우선순위와 선율·저음을 보존하며, 넘친 음은 늦게 재발음하지 않고 버린다."""
+def allocate(score, voices, end, tail_ticks=0, lanes_for=None):
+    """원래 우선순위와 선율·저음을 보존하며, 넘친 음은 늦게 재발음하지 않고 버린다.
+
+    lanes_for 는 {NDS 트랙 이름: 쓸 목소리 목록}. 준 트랙의 음은 그 목소리에만 들어가고, 그 목소리가 모두
+    울리는 중이면 우선순위가 낮은 쪽을 끊거나 버린다. 목소리마다 트랙이 바뀌지 않아 악기·팬·세기 명령이 준다.
+    """
     candidates = []
     silent = 0
     for i, source in enumerate(score['timeline']):
@@ -169,21 +173,41 @@ def allocate(score, voices, end, tail_ticks=0):
         outer = -n['note'] if n['ch'] == bass else n['note']
         return role, n.get('priority', 64), n['velocity'], outer, -n['uid']
 
+    lanes_for = lanes_for or {}
+    if any(not ls or any(not 0 <= k < voices for k in ls) for ls in lanes_for.values()):
+        raise ValueError('lanes_for lists lanes outside the voice range')
+
+    def cut(lane, tick):
+        note = active.pop(lane)
+        old_end = note['end']
+        note['end'] = tick
+        truncated.append({'source': note['uid'], 'tick': tick, 'lost_ticks': old_end - tick})
+
     for tick, incoming in sorted(starts.items()):
         active = {lane: n for lane, n in active.items() if n['end'] > tick}
-        selected = sorted(list(active.values()) + incoming, key=priority, reverse=True)[:voices]
-        keep = {n['uid'] for n in selected}
-        for lane, note in list(active.items()):
-            if note['uid'] not in keep:
-                old_end = note['end']
-                note['end'] = tick
-                truncated.append({'source': note['uid'], 'tick': tick, 'lost_ticks': old_end - tick})
-                del active[lane]
+        if lanes_for:
+            # 목소리를 고정하면 목소리마다 따로 겨룬다. 전체 상위 voices 개로 고르면 제 목소리가 비어 있는 음도 버려진다.
+            keep = {n['uid'] for n in incoming}
+        else:
+            selected = sorted(list(active.values()) + incoming, key=priority, reverse=True)[:voices]
+            keep = {n['uid'] for n in selected}
+            for lane, note in list(active.items()):
+                if note['uid'] not in keep:
+                    cut(lane, tick)
         for note in sorted(incoming, key=priority, reverse=True):
             if note['uid'] not in keep:
                 dropped.append(note['uid'])
                 continue
-            free = [lane for lane in range(voices) if lane not in active]
+            allowed = lanes_for.get(note['ch'], range(voices))
+            free = [lane for lane in allowed if lane not in active]
+            if not free:
+                weaker = [lane for lane in allowed if priority(active[lane]) < priority(note)]
+                if not weaker:
+                    dropped.append(note['uid'])
+                    continue
+                lane = min(weaker, key=lambda k: priority(active[k]))
+                cut(lane, tick)
+                free = [lane]
 
             def idle(k):
                 return tick - lanes[k][-1]['end'] if lanes[k] else 1 << 30
@@ -591,7 +615,7 @@ def seconds_to_tick(tempos, seconds):
 
 
 def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_tolerance_db=1.0,
-            tail_ticks=12, release_rate=0x1C, sample_order=None, arrivals=None):
+            tail_ticks=12, release_rate=0x1C, sample_order=None, arrivals=None, lanes_for=None):
     """악보 → 글·바이너리·곡 묶음의 DQ5 샘플 번호·손실 보고서.
 
     시퀀스만 만들며 ROM/SPC 공간 검사는 삽입기가 맡는다. 8번째 목소리를 BGM에서 쓰지 않지만
@@ -601,6 +625,7 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
     arrivals 는 곡이 시작한 뒤에 도착하는 샘플의 {샘플: 도착 어림 초}다. 드라이버는 없는 샘플의
     instrument(F0, SPC 182E)에서 그 트랙의 KON 을 막고(02CB+X bit7), 샘플이 있을 때의 instrument 만
     풀어 준다. 그래서 그 샘플의 음마다 도착 어림 시각까지 instrument 를 다시 쓴다. 도착 전 음은 울리지 않는다.
+    lanes_for 는 allocate 의 트랙별 목소리 고정이다.
     """
     if not 1 <= voices <= 7:
         raise ValueError('BGM voices must be between 1 and 7')
@@ -615,7 +640,7 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
         skip = {id(e) for e in undefined}
         score = score | {'timeline': [e for e in score['timeline'] if id(e) not in skip]}
     mapping = PROGRAM_MAP | (program_map or {})
-    lanes, report = allocate(score, voices, end, tail_ticks)
+    lanes, report = allocate(score, voices, end, tail_ticks, lanes_for)
     used = {n['program'] for lane in lanes for n in lane}
     missing = sorted(used - mapping.keys())
     if missing:

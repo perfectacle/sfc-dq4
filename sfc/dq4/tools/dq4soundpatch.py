@@ -19,7 +19,7 @@ from dq5map import Rom, lorom  # noqa: E402
 from dq5song import (RELOC_CODE, RELOC_SEQ_TABLE, RELOC_SMP_TABLE,  # noqa: E402
                     _asm, header, reloc_code, step)
 from dq5spc import (SONG_SETS, SEQUENCE_COUNT, RESIDENT_SAMPLES,  # noqa: E402
-                   RESIDENT_SEQUENCES, ff_list, samples, sequences)
+                   RESIDENT_SEQUENCES, samples, sequences)
 
 IPL_BLOCK = 0x2BE676
 IPL_END = bytes.fromhex('00 00 00 02')
@@ -32,6 +32,10 @@ DATA_BANKS = (*range(0x6A, 0x70), *range(0x72, 0x7E))
 MAP_CLEANUP, MAP_START = 0x00CEB1, 0x00CEA2
 FADE_OUT, FADE_IN = 0x40, 0x30
 SPC_CAPACITY = SPC_END - 0x2A5D
+# 2B:BFDF 의 LDA $2BC422,X 가 늘 두는 샘플 목록(명령 8B, 켤 때 한 번)을 읽는다. 목록은 7바이트라 늘리려면 옮긴다.
+RESIDENT_SAMPLE_LOAD = 0x2BBFDF
+RESIDENT_SAMPLE_LIST = CODE + 0x200
+SAMPLE_SLOTS = 0x14
 
 
 @dataclass(frozen=True)
@@ -108,30 +112,42 @@ def heap_start(data):
     return int.from_bytes(data[lorom(HEAP_START):lorom(HEAP_START) + 2], 'little')
 
 
-def sample_budget(data, song, sequence_size, extra_table=0):
+def resident_samples(data):
+    """명령 8B 가 고정하는 샘플 목록. install 이 목록을 옮겼으면 옮긴 자리를 읽는다."""
+    pos = lorom(RESIDENT_SAMPLE_LOAD)
+    if data[pos] != 0xBF:
+        raise ValueError('unexpected resident sample list load at 2B:BFDF')
+    start = lorom(int.from_bytes(data[pos + 1:pos + 4], 'little'))
+    return list(data[start:data.index(0xFF, start)])
+
+
+def sample_budget(data, song, sequence_size, extra_table=0, resident=None, pinned=None):
     """곡 하나가 새 샘플에 쓸 수 있는 SPC 바이트. 늘 두는 샘플·시퀀스와 이 곡 시퀀스, 여유 512를 뺀다.
 
     extra_table 은 곡 묶음 표가 지금보다 늘어날 바이트로, 그만큼 샘플 자리 시작이 뒤로 밀린다.
+    resident·pinned 는 넣은 뒤의 {늘 둘 샘플: 바이트}·{늘 둘 시퀀스: 바이트}. 주지 않으면 data 의 목록과 크기.
     """
-    rom = Rom(data)
-    resident_samples = sum(sample_size(data, i) for i in set(ff_list(rom, RESIDENT_SAMPLES)))
-    resident_sequences = sum(len(sequence_bytes(data, i)) for i in set(ff_list(rom, RESIDENT_SEQUENCES)) if i != song)
+    if resident is None:
+        resident = {i: sample_size(data, i) for i in resident_samples(data)}
+    if pinned is None:
+        pinned = {i: len(sequence_bytes(data, i)) for i in pinned_sequences(data)}
+    resident_bytes = sum(resident.values())
+    resident_sequences = sum(size for i, size in pinned.items() if i != song)
     capacity = SPC_END - max(heap_start(data), 0x28EC + sum(map(len, read_sets(data))) + extra_table)
-    return capacity - resident_samples - resident_sequences - sequence_size - 512
+    return capacity - resident_bytes - resident_sequences - sequence_size - 512
 
 
 def memory_budget(data, song, item):
-    rom = Rom(data)
-    resident_samples = set(ff_list(rom, RESIDENT_SAMPLES))
-    resident_sequences = set(ff_list(rom, RESIDENT_SEQUENCES))
-    used_samples = resident_samples | set(item.samples)
+    resident = set(resident_samples(data))
+    resident_sequences = set(pinned_sequences(data))
+    used_samples = resident | set(item.samples)
     used_sequences = resident_sequences | {song}
     sample_bytes = sum(sample_size(data, i) for i in used_samples)
     sequence_size = sum(len(sequence_bytes(data, i)) for i in used_sequences)
     # 슬롯 관리·정렬과 잔향 버퍼 사이에 여유를 둔다. 전환은 이전 곡 자료를 정리한 뒤 로드한다.
     required = sample_bytes + sequence_size + 512
     capacity = SPC_END - heap_start(data)
-    if len(used_samples) > 20 or len(used_sequences) > 20 or required > capacity:
+    if len(used_samples) > SAMPLE_SLOTS or len(used_sequences) > 20 or required > capacity:
         raise ValueError(f'song {song:02X}: SPC budget exceeded ({required}/{capacity} bytes)')
     free = capacity - required + 512
     # 늘 두지 않는 효과음(3E~45 등)은 부를 때 시퀀스와 샘플을 올린다. 곡이 남긴 자리보다 크면 시퀀스 칸만 잡히고
@@ -146,6 +162,8 @@ def memory_budget(data, song, item):
             no_room[f'{effect:02X}'] = need
     return {'bytes_with_margin': required, 'capacity': capacity,
             'sample_slots': len(used_samples), 'sequence_slots': len(used_sequences),
+            'streamed_while_playing': sorted(f'{x:02X}' for x in set(item.samples) - resident)
+            if song in resident_sequences else [],
             'free_while_playing': free, 'effects_without_room': no_room}
 
 
@@ -237,7 +255,24 @@ def preview_rom(rom, preview):
     return set_checksum(bytes(data))
 
 
-def install(base, replacements, *, sample_resources=None, map_fades=False, preview=None):
+def write_resident_samples(data, ids):
+    """늘 두는 샘플 목록을 71:8200 으로 옮겨 ids 로 바꾼다. 켤 때 명령 8B 가 이 순서로 보내고 고정한다.
+
+    고정 샘플은 SPC 샘플 칸 0x14개 가운데 늘 자리를 차지하므로, 곡 하나가 쓸 수 있는 칸은 0x14 - 고정 수에서
+    그 곡이 고정 샘플을 함께 쓰는 만큼 늘어난다.
+    """
+    if len(set(ids)) != len(ids) or any(not 0 <= x < 0xC8 for x in ids) or len(ids) >= SAMPLE_SLOTS:
+        raise ValueError('resident samples must be distinct IDs and leave sample slots for songs')
+    put(data, RESIDENT_SAMPLE_LIST, bytes(ids) + b'\xff', empty=True)
+    put(data, RESIDENT_SAMPLE_LOAD, bytes([0xBF]) + RESIDENT_SAMPLE_LIST.to_bytes(3, 'little'),
+        bytes([0xBF]) + RESIDENT_SAMPLES.to_bytes(3, 'little'))
+
+
+def install(base, replacements, *, sample_resources=None, map_fades=False, preview=None, pinned=(),
+            resident=None, set_records=None):
+    """pinned 는 늘 두는 시퀀스 목록에 남길 바꾸는 곡(나머지 바꾸는 곡은 목록에서 뺌). resident 는 새 늘 두는 샘플 목록
+    전체(주지 않으면 그대로). set_records 는 바꾸지 않는 곡의 곡 묶음 레코드 {곡: (k, 샘플…)}.
+    """
     if len(base) not in (0x180000, 0x200000, 0x400000):
         raise ValueError('base must be a headerless 1.5MB, 2MB or 4MB DQ5 build')
     if not replacements:
@@ -263,7 +298,15 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
         raise ValueError('unsupported sequence relocation hook')
     records = read_sets(data)
     old_size = sum(map(len, records))
-    unpinned = unpin_sequences(data, set(replacements))
+    if not set(pinned) <= set(replacements) or not set(pinned) <= set(pinned_sequences(data)):
+        raise ValueError('pinned songs must be replaced songs already in the resident sequence list')
+    unpinned = unpin_sequences(data, set(replacements) - set(pinned))
+    if resident is not None:
+        write_resident_samples(data, list(resident))
+    for song, (first, *ids) in (set_records or {}).items():
+        if song in replacements or not 0 <= first <= len(ids):
+            raise ValueError(f'record override {song:02X} must be an unreplaced song with 0 <= k <= L')
+        records[song] = bytes([len(ids), first, *ids])
     free = {bank: 0x8000 for bank in DATA_BANKS}
 
     def place(payload, what):
@@ -335,6 +378,8 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
                     'heap_start': f'{heap_start(result):04X}',
                     'sound_bank_bytes_left': {f'{bank:02X}': 0x10000 - at for bank, at in free.items() if at > 0x8000},
                     'unpinned_sequences': [f'{x:02X}' for x in unpinned],
+                    'pinned_sequences': [f'{x:02X}' for x in pinned_sequences(result)],
+                    'resident_samples': [f'{x:02X}' for x in resident_samples(result)],
                     'map_fades': map_fades, 'preview': preview,
                     'limitations': ['Map fades apply only to the ordinary DQ5 map-song calls; battle and event timing is unchanged.',
                                     'The early fade-out is skipped when the sound queue is busy at load time; the original 1A cleanup still runs.',

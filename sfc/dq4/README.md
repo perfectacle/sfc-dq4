@@ -106,3 +106,4 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [2026-10-27-22: 전투 뒤 물 루틴이 빈 타일을 덮던 것](journal/2026-10-27-22-environment-battle-water.md)
 
 - [2026-10-27-23: 남은 NDS 곡을 DQ5 곡 자리 45곳에 한꺼번에](journal/2026-10-27-23-sound-all-bgm.md)
+- [2026-10-27-24: 전투·레벨 업 곡을 다시 늘 두기 위한 조사](journal/2026-10-27-24-sound-resident-plan.md)
