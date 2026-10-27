@@ -7,7 +7,7 @@ from unittest.mock import patch as mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dq5map import ATTR_SITES, ATTR_TABLE, GROUP_TABLE, GROUPS, POINTER_SITE, Rom, group_spans, lorom, map_pointer
 from dq5mapwrite import all_maps
-from dq5newmap import FORMAT, writes_for
+from dq5newmap import DOOR_TABLE, ENTRANCE_SITES, FORMAT, writes_for
 
 # 그룹마다 맵 수. 그룹 01 은 둘, 나머지는 하나.
 COUNTS = [2 if g == 1 else 1 for g in range(GROUPS)]
@@ -30,7 +30,21 @@ def original_rom():
                 write(data, table & 0xFF0000 | cursor, value(g, b))
                 cursor += size
         write(data, table, b''.join(p.to_bytes(2, 'little') for p in pointers))
+    high, cursor = 0x1FCEB6, 0xCEB6 - 5 * 3
+    write(data, high, b''.join((cursor + g * 3).to_bytes(2, 'little') for g in range(5)))
+    for g in range(5):
+        write(data, 0x1F0000 | cursor + g * 3, (0x0F9000 + g).to_bytes(3, 'little'))
+    for db, bank in ((0x0192F0, 0x0F), (0x0183EC, 0x23), (0x019325, 0x1F)):
+        write(data, db, bytes([0xA9, bank]))
+    write(data, 0x01934E, bytes([0xBC, 0xB6, 0xCE]))
     write(data, POINTER_SITE - 1, bytes([0xBC, 0xD7, 0x8E]))
+    for site, plus in ENTRANCE_SITES:
+        write(data, site - 1, bytes([0xBF, *(0x0FEA97 + plus).to_bytes(3, 'little')]))
+    for g in range(GROUPS):
+        write(data, 0x0FEA97 + g * 5, bytes([g, 1, 2, 3, 4]))
+    # 문 표: 그룹마다 맵 사이 80, 그룹 끝 C0. 그룹 03 의 첫 맵에만 문 하나.
+    write(data, DOOR_TABLE, b''.join((b'\x01\x02\x03\x04\x05' if g == 3 else b'') + b'\x80' * (n - 1) + b'\xc0'
+                                     for g, n in enumerate(COUNTS)))
     write(data, ATTR_SITES[0] - 1, bytes([0xBD, 0x6A, 0xFD]))
     write(data, ATTR_SITES[1] - 1, bytes([0xBD, 0x6B, 0xFD]))
     return Rom(data)
@@ -46,8 +60,8 @@ def apply(rom, writes):
 
 
 def attr(rom, bc, bd):
-    start, _ = group_spans(rom, attr=True)[0][bc]
-    off = lorom(0x230000 | start + bd * 6)
+    spans, table = group_spans(rom, attr=True)
+    off = lorom(table & 0xFF0000 | spans[bc][0] + bd * 6)
     return bytes(rom.d[off:off + 6])
 
 
@@ -70,7 +84,7 @@ class NewMapTests(unittest.TestCase):
                 bd = COUNTS[group]
                 new = (group, bd)
                 writes, _ = writes_for(self.rom, doc({'map': f'{group:02X}/{bd:02X}', 'record': {'copy': '01/00'},
-                                                      'attrs': {'bytes': [9, 8, 7, 6, 5, 4]}}))
+                                                      'attrs': {'bytes': [9, 8, 7, 6, 5, 4]}}), allow_doors=group == 0x35)
                 moved = apply(self.rom, writes)
                 self.assertEqual(sorted(all_maps(moved)), sorted(self.before + [new]))
                 self.assertEqual(map_pointer(moved, *new), map_pointer(self.rom, 1, 0))
@@ -83,14 +97,14 @@ class NewMapTests(unittest.TestCase):
                 self.assertEqual(group_spans(moved, attr=True)[1], 0x23FF20)
                 again = doc({'map': f'{group:02X}/{bd:02X}', 'record': {'copy': '01/00'},
                              'attrs': {'bytes': [9, 8, 7, 6, 5, 4]}})
-                self.assertEqual(writes_for(moved, again)[0], [])
+                self.assertEqual(writes_for(moved, again, allow_doors=True)[0], [])
 
     def test_existing_map_and_new_record_source(self):
         with mock('dq5newmap.encode', return_value=b'\x11\x22'), mock('dq5newmap.entries_for', return_value=[]), \
                 mock('pathlib.Path.read_text', return_value='{"format": "dq5map/1"}'):
             writes, size = writes_for(self.rom, doc(
                 {'map': '02/01', 'record': {'source': 'x.json'}, 'attrs': {'copy': '02/00'}},
-                {'map': '05/00', 'attrs': {'bytes': [0, 0, 0, 0, 0, 0]}}), at={'records': 0x308000})
+                {'map': '05/00', 'attrs': {'bytes': [0, 0, 0, 0, 0, 0]}}), at={'records': 0x308000}, allow_doors=True)
         moved = apply(self.rom, writes)
         self.assertEqual(size, 2)
         self.assertEqual(map_pointer(moved, 2, 1), 0x308000)
@@ -103,17 +117,22 @@ class NewMapTests(unittest.TestCase):
         cases = [
             (doc({'map': '01/03', 'record': {'copy': '01/00'}, 'attrs': {'copy': '01/00'}}), '끝 번호'),
             (doc({'map': '01/02', 'record': {'copy': '01/00'}}), '둘 다'),
-            (doc({'map': '50/52', 'record': {'copy': '01/00'}, 'attrs': {'copy': '01/00'}}), '00~35'),
+            (doc({'map': '51/51', 'record': {'copy': '51/50'}}), '50·52·53'),
+            (doc({'map': '50/51', 'record': {'copy': '01/00'}}), '서로 복사'),
+            (doc({'map': '50/51', 'record': {'copy': '50/50'}, 'attrs': {'copy': '01/00'}}), 'dq5encounterwrite'),
+            (doc({'map': '01/02', 'record': {'copy': '01/00'}, 'attrs': {'copy': '01/00'}},
+                 {'map': '01/03', 'record': {'copy': '01/00'}, 'attrs': {'copy': '01/00'}}), '문 표'),
+            (doc({'map': '37/00', 'record': {'copy': '01/00'}, 'attrs': {'copy': '01/00'}}), 'groups'),
             (doc({'map': '01/02', 'record': {'copy': '09/09'}, 'attrs': {'copy': '01/00'}}), '없음'),
             (doc({'map': '01/02', 'record': {'copy': '01/00'}, 'attrs': {'bytes': [1, 2, 3]}}), 'bytes'),
             (doc({'map': '01/02', 'record': {'copy': '01/00'}, 'attrs': {'copy': '01/00'}, 'npc': 1}), 'map·record·attrs'),
             (doc({'map': '01/02', 'record': {'source': 'x.json'}, 'attrs': {'copy': '01/00'}}), ''),
             (doc(*many), '넘침'),
-            ({'format': FORMAT}, 'maps'),
+            ({'format': FORMAT, 'other': 1}, '문서는'),
         ]
         for value, message in cases:
             with self.subTest(message=message), self.assertRaisesRegex((ValueError, OSError), message):
-                writes_for(self.rom, value)
+                writes_for(self.rom, value, allow_doors=message != '문 표')
         with mock('dq5newmap.encode', return_value=b'\x11'), mock('dq5newmap.entries_for', return_value=[]), \
                 mock('pathlib.Path.read_text', return_value='{"format": "dq5map/1"}'), \
                 self.assertRaisesRegex(ValueError, '빈 자리'):
@@ -124,9 +143,68 @@ class NewMapTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '원래 명령'):
             group_spans(hooked)
         one = doc({'map': '01/02', 'record': {'copy': '01/00'}, 'attrs': {'copy': '01/00'}})
-        for at, message in (({'pointer': 0x10FF50}, '뱅크 0F'), ({'attr': 0x238000}, '빈 자리')):
+        for at, message in (({'pointer': 0x10FF50}, '빈 자리'), ({'attr': 0x238000}, '빈 자리'),
+                            ({'pointer': 0x408000}, '00~3F')):
             with self.subTest(at=at), self.assertRaisesRegex(ValueError, message):
                 writes_for(self.rom, one, at=at)
+
+
+class GrowTests(unittest.TestCase):
+    def setUp(self):
+        self.rom = original_rom()
+
+    def test_block_move_to_other_bank(self):
+        rows = [{'map': f'01/{bd:02X}', 'record': {'copy': '01/00'}, 'attrs': {'bytes': [bd, 0, 0, 0, 0, 0]}}
+                for bd in range(2, 42)]
+        with self.assertRaisesRegex(ValueError, '넘침'):
+            writes_for(self.rom, doc(*rows), allow_doors=True)
+        at = {'pointer': 0x3E8000, 'attr': 0x3EA000}
+        with self.assertRaisesRegex(ValueError, '자리가 겹침'):
+            writes_for(self.rom, doc(*rows), at={'pointer': 0x3E8000, 'attr': 0x3E8010}, allow_doors=True)
+        writes, size = writes_for(self.rom, doc(*rows), at=at, allow_doors=True)
+        moved = apply(self.rom, writes)
+        self.assertEqual(size, 2)
+        self.assertEqual(moved.d[lorom(0x0192F1)], 0x3E)
+        self.assertEqual(moved.d[lorom(0x0183ED)], 0x3E)
+        self.assertEqual(len([m for m in all_maps(moved) if m[0] == 1]), 42)
+        for bd in range(2, 42):
+            self.assertEqual(map_pointer(moved, 1, bd), map_pointer(self.rom, 1, 0))
+            self.assertEqual(attr(moved, 1, bd), bytes([bd, 0, 0, 0, 0, 0]))
+        for m in all_maps(self.rom):
+            self.assertEqual(map_pointer(moved, *m), map_pointer(self.rom, *m))
+        self.assertEqual(writes_for(moved, doc(*rows), at=at, allow_doors=True)[0], [])
+        self.assertEqual(writes_for(moved, doc(*rows), allow_doors=True)[0], [])
+        more = doc(*rows, {'map': '01/2A', 'record': {'copy': '01/00'}, 'attrs': {'copy': '01/00'}})
+        grown = apply(moved, writes_for(moved, more, allow_doors=True)[0])
+        self.assertIn((1, 0x2A), all_maps(grown))
+
+    def test_new_group_and_entrance(self):
+        value = doc({'map': '36/00', 'record': {'copy': '01/00'}, 'attrs': {'copy': '02/00'}})
+        value['groups'] = [{'group': '36', 'entrance': {'copy': '0D'}}]
+        with self.assertRaisesRegex(ValueError, '문 표'):
+            writes_for(self.rom, value, at={'entrance': 0x3E9000})
+        with self.assertRaisesRegex(ValueError, 'entrance-table-at'):
+            writes_for(self.rom, value, allow_doors=True)
+        moved = apply(self.rom, writes_for(self.rom, value, at={'entrance': 0x3E9000}, allow_doors=True)[0])
+        self.assertIn((0x36, 0), all_maps(moved))
+        self.assertEqual(len(group_spans(moved)[0]), GROUPS + 1)
+        self.assertEqual(map_pointer(moved, 0x36, 0), map_pointer(self.rom, 1, 0))
+        self.assertEqual(attr(moved, 0x36, 0), attr(self.rom, 2, 0))
+        self.assertEqual(bytes(moved.d[lorom(0x3E9000 + 0x36 * 5):lorom(0x3E9000 + 0x36 * 5) + 5]),
+                         bytes([0x0D, 1, 2, 3, 4]))
+        empty = dict(value, maps=[])
+        with self.assertRaisesRegex(ValueError, '맵이 없음'):
+            writes_for(self.rom, empty, at={'entrance': 0x3E9000})
+        with self.assertRaisesRegex(ValueError, '두 번'):
+            writes_for(self.rom, dict(value, groups=value['groups'] * 2), at={'entrance': 0x3E9000}, allow_doors=True)
+
+    def test_high_group_map(self):
+        value = doc({'map': '50/51', 'record': {'copy': '50/50'}})
+        moved = apply(self.rom, writes_for(self.rom, value)[0])
+        self.assertIn((0x50, 0x51), all_maps(moved))
+        self.assertEqual(map_pointer(moved, 0x50, 0x51), map_pointer(self.rom, 0x50, 0x50))
+        self.assertEqual(group_spans(moved, kind='high')[1], 0x1FFE30)
+        self.assertEqual(writes_for(moved, value)[0], [])
 
 
 if __name__ == '__main__':

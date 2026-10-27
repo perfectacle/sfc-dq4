@@ -66,11 +66,12 @@ def read(rom, addr, size):
 def map_slots(rom):
     """(BC, BD) → 맵 항목 주소. 그룹 n 의 항목은 포인터 n 부터 포인터 n+1(마지막은 표 자신) 앞까지."""
     out = {}
-    for bc, (p, q) in enumerate(group_spans(rom, attr=True)[0]):
+    spans, table = group_spans(rom, attr=True)
+    for bc, (p, q) in enumerate(spans):
         if (q - p) % MAP_SIZE or q < p:
             raise ValueError(f'맵 그룹 {bc:02X} 의 항목 범위가 원래 꼴이 아님')
         for bd in range((q - p) // MAP_SIZE):
-            out[bc, bd] = 0x230000 | p + bd * MAP_SIZE
+            out[bc, bd] = table & 0xFF0000 | p + bd * MAP_SIZE
     return out | high_map_slots(rom, high_base(rom))
 
 

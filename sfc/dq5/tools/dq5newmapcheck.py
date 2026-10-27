@@ -22,8 +22,29 @@ from dq5exitcheck import command, dp86_allowed, require, run, warp_exit
 from dq5map import Rom, lorom
 
 HERE = Path(__file__).resolve().parent
-NEW = {'format': 'dq5newmap/1', 'maps': [{'map': '0D/05', 'record': {'copy': '0D/02'}, 'attrs': {'copy': '0D/02'}}]}
-# 출구 표가 원래 자리보다 2바이트 늘어 넘치므로 출구는 옛 레코드 자리로, 레코드는 늘린 뱅크로 옮긴다.
+COPY_0D02 = {'record': {'copy': '0D/02'}, 'attrs': {'copy': '0D/02'}}
+# 0D/01 의 출구 1(원래 0D/02 로 감)을 새 맵으로 돌리고, 새 맵의 출구는 0D/02 처럼 0D/01 출구 1 로 둔다.
+# 롬마다 (dq5newmap 입력, 자리 선택, 새 맵, 출구 고치기 대상(0D/01 계단이 갈 맵, 출구 종류)).
+#  n: 0D/05 하나(그룹 표만 같은 뱅크로).  m: 0D/05~0D/18 스무 개(맵 포인터·속성 덩어리를 뱅크 3E 로, DB 즉값까지).
+#  g: 새 그룹 36 의 36/00(들어가는 곳 표를 3E 로, 인물 그룹 포인터·빈 목록은 인물 도구로).
+#  h: 그룹 50 의 50/52(50/51 복사, 속성은 조우 도구로 목록째 3D 로).
+#  m·g 의 새 맵은 문 표를 건너뛰어 다른 맵의 문 목록이나 표 밖을 읽는다(문 표는 늘리지 못함).
+VARIANTS = {
+    'n': ({'format': 'dq5newmap/1', 'maps': [{'map': '0D/05', **COPY_0D02}]}, [], ['0D/05'], ('0D/05', 'same-group')),
+    'm': ({'format': 'dq5newmap/1', 'maps': [{'map': f'0D/{bd:02X}', **COPY_0D02} for bd in range(5, 0x19)]},
+          ['--pointer-table-at', '3E:8000', '--attr-table-at', '3E:A000', '--allow-door-readthrough'],
+          [f'0D/{bd:02X}' for bd in range(5, 0x19)], ('0D/18', 'same-group')),
+    'g': ({'format': 'dq5newmap/1', 'groups': [{'group': '36', 'entrance': {'copy': '0D'}}],
+           'maps': [{'map': '36/00', **COPY_0D02}]}, ['--entrance-table-at', '3E:C000', '--allow-door-readthrough'], ['36/00'],
+          ('36/00', 'other-group')),
+    'h': ({'format': 'dq5newmap/1', 'maps': [{'map': '50/52', 'record': {'copy': '50/51'}}]}, [], [], None),
+}
+# 인물 기본 목록을 인물 도구(dq5npcrelocate.py --new-map)로 더하는 롬.
+NPC_NEW = {'g'}
+# 그룹 50 이상 새 맵의 속성(23:FDD6 목록)은 조우 도구로 쓴다. 50/52 는 50/51 과 같은 값(구역 없음, 꼬리 00 0A 0D).
+ENCOUNTER = {'h': ({'format': 'dq5encounter/1', 'maps': [{'map': '50/52', 'areas': [255, 255, 255], 'tail': [0, 10, 13]}]},
+                   ['--high-at', '3D:8000'])}
+# 출구 표가 원래 자리보다 늘어 넘치므로 출구는 옛 레코드 자리로, 레코드는 늘린 뱅크로 옮긴다.
 EXIT_PLACES = ('--exits-at', '2A:D812', '--records-at', '3F:8000')
 # (이름, 롬, TO, TEST, 기대: 맵, 칸(('arrival', BC, BD, 출구) 면 그 출구의 도착 칸), 층, 속성을 견줄 장면,
 #  인물 뒤 슬롯 7E:1983(None 이면 보지 않음))
@@ -42,27 +63,63 @@ CASES = [
     ('later-stay-original', 'original', '21/02,50,43,1', 'wait:16', ('21/02', (50, 43), None, None, None)),
     ('earlier', 'n', '01/00,60,79,2', 'down:16', ('01/03', ('arrival', 1, 3, 0), None, 'earlier-original', None)),
     ('earlier-original', 'original', '01/00,60,79,2', 'down:16', ('01/03', ('arrival', 1, 3, 0), None, None, None)),
+    ('many-enter', 'm', '0D/01,14,9,1', 'down:16', ('0D/18', ('arrival', 0x0D, 0x18, 0), None, 'enter-original', None)),
+    ('many-middle', 'm', '0D/0F,12,4,1', 'wait:16', ('0D/0F', (12, 4), 1, 'walk-original', None)),
+    ('many-leave', 'm', '0D/18,14,9,1', 'down:16', ('0D/01', ('arrival', 0x0D, 1, 1), None, 'leave-original', None)),
+    ('many-later', 'm', '21/02,111,8,1', 'up:16', ('0E/03', ('arrival', 0x0E, 3, 1), None, 'later-original', None)),
+    ('many-earlier', 'm', '01/00,60,79,2', 'down:16', ('01/03', ('arrival', 1, 3, 0), None, 'earlier-original', None)),
+    ('group-enter', 'g', '0D/01,14,9,1', 'down:16', ('36/00', ('arrival', 0x36, 0, 0), None, 'enter-original', 0x08)),
+    ('group-leave', 'g', '36/00,14,9,1', 'down:16', ('0D/01', ('arrival', 0x0D, 1, 1), None, 'leave-original', None)),
+    ('group-later', 'g', '21/02,111,8,1', 'up:16', ('0E/03', ('arrival', 0x0E, 3, 1), None, 'later-original', None)),
+    ('high-new', 'h', '50/52,31,17,1', 'down:16', ('05/01', (33, 47), 1, 'high-original', None)),
+    ('high-old', 'h', '50/51,31,17,1', 'down:16', ('05/01', (33, 47), 1, 'high-original', None)),
+    ('high-original', 'original', '50/51,31,17,1', 'down:16', ('05/01', (33, 47), 1, None, None)),
+    ('high-stay', 'h', '50/52,31,17,1', 'wait:16', ('50/52', (31, 17), 1, 'high-stay-original', None)),
+    ('high-stay-original', 'original', '50/51,31,17,1', 'wait:16', ('50/51', (31, 17), 1, None, None)),
 ]
 
 
-def build_rom(original, out):
+def build_rom(original, out, key):
     """새 맵 패치와 출구 패치를 원본에서 따로 만들어 함께 빌드한다."""
-    source = out / 'newmap.json'
-    source.write_text(json.dumps(NEW, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-    command('dq5newmap.py', original, 'patch', source, '-o', out / 'newmap.dq5patch.json')
-    command('dq5newmap.py', original, 'check', source)
-    exits = out / 'exits.json'
-    command('dq5exitreloc.py', original, 'dump', '-o', exits, '--new-map', '0D/05')
-    doc = json.loads(exits.read_text(encoding='utf-8'))
-    rows = {r['map']: r for r in doc['exits']}
-    rows['0D/05']['records'] = [dict(rows['0D/02']['records'][0])]
-    rows['0D/01']['records'][1] = {'kind': 'same-group', 'destination_map': 5, 'exit': 0}
-    exits.write_text(json.dumps(doc, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
-    command('dq5exitreloc.py', original, 'patch', exits, '-o', out / 'exits.dq5patch.json', '--new-map', '0D/05', *EXIT_PLACES)
-    command('dq5exitreloc.py', original, 'check', exits, '--new-map', '0D/05', *EXIT_PLACES)
-    rom = out / 'newmap.sfc'
-    command('dq5build.py', original, 'build', out / 'newmap.dq5patch.json', out / 'exits.dq5patch.json',
-            '-o', rom, '--ips', out / 'newmap.ips')
+    doc, places, new_maps, target = VARIANTS[key]
+    source = out / f'{key}-newmap.json'
+    source.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    command('dq5newmap.py', original, 'patch', source, '-o', out / f'{key}-newmap.dq5patch.json', *places)
+    command('dq5newmap.py', original, 'check', source, *places)
+    manifests = [out / f'{key}-newmap.dq5patch.json']
+    new = [x for m in new_maps for x in ('--new-map', m)]
+    if key in NPC_NEW:
+        # 새 그룹의 인물 그룹 포인터와 빈 기본 목록은 인물 도구가 둔다(목록은 그 도구의 기본 자리로 옮김).
+        npc = out / f'{key}-npc.json'
+        npc.write_text(json.dumps({'format': 'dq5npcrelocate/1', 'scripts': []}) + '\n', encoding='utf-8')
+        command('dq5npcrelocate.py', original, 'patch', npc, '-o', out / f'{key}-npc.dq5patch.json', *new)
+        manifests.append(out / f'{key}-npc.dq5patch.json')
+    if key in ENCOUNTER:
+        enc, extra = ENCOUNTER[key]
+        source = out / f'{key}-encounter.json'
+        source.write_text(json.dumps(enc) + '\n', encoding='utf-8')
+        command('dq5encounterwrite.py', original, 'patch', source, '-o', out / f'{key}-encounter.dq5patch.json', *extra)
+        manifests.append(out / f'{key}-encounter.dq5patch.json')
+    if target:
+        exits = out / f'{key}-exits.json'
+        command('dq5exitreloc.py', original, 'dump', '-o', exits, *new)
+        table = json.loads(exits.read_text(encoding='utf-8'))
+        rows = {r['map']: r for r in table['exits']}
+        name, kind = target
+        group, bd = (int(v, 16) for v in name.split('/'))
+        back = dict(rows['0D/02']['records'][0])
+        if kind == 'other-group':
+            back = {'kind': 'other-group', 'destination_map': 1, 'exit': 1, 'group': 0x0D}
+        for m in new_maps:
+            rows[m]['records'] = [dict(back)]
+        rows['0D/01']['records'][1] = ({'kind': 'same-group', 'destination_map': bd, 'exit': 0} if kind == 'same-group'
+                                       else {'kind': 'other-group', 'destination_map': bd, 'exit': 0, 'group': group})
+        exits.write_text(json.dumps(table, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
+        command('dq5exitreloc.py', original, 'patch', exits, '-o', out / f'{key}-exits.dq5patch.json', *new, *EXIT_PLACES)
+        command('dq5exitreloc.py', original, 'check', exits, *new, *EXIT_PLACES)
+        manifests.append(out / f'{key}-exits.dq5patch.json')
+    rom = out / f'{key}.sfc'
+    command('dq5build.py', original, 'build', *manifests, '-o', rom, '--ips', out / f'{key}.ips')
     return rom
 
 
@@ -82,9 +139,10 @@ def main():
         args.out.mkdir(parents=True, exist_ok=True)
         out = Path(tempfile.mkdtemp(prefix='run-', dir=args.out.resolve()))
         print(f'실행 출력: {out}', flush=True)
-        built = build_rom(original, out)
-        roms = {'original': (original, lorom(0x2AEFF5), dp86_allowed(original)),
-                'n': (built, warp_exit(built), dp86_allowed(built))}
+        roms = {'original': (original, lorom(0x2AEFF5), dp86_allowed(original))}
+        for key in VARIANTS:
+            built = build_rom(original, out, key)
+            roms[key] = (built, warp_exit(built), dp86_allowed(built))
         krlua = Path(subprocess.run(['krpatch', 'sfc', 'lua'], capture_output=True, text=True,
                                     check=True, timeout=30).stdout.strip())
         libdir = out / 'lib'

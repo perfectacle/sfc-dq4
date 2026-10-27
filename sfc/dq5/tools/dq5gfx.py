@@ -41,8 +41,6 @@ SLOT = 0xBE
 PALSET_FLAGS = 0x2A8690
 GROUPS = 0x36
 HOOK_SCAN = 400
-# 그룹 $50 이상: ($BC, $BD 개수). docs/dq5-map-format.md 「그룹 $50 이상」.
-HIGH_MAPS = ((0x50, 2), (0x51, 8), (0x52, 1), (0x53, 3), (0x54, 4))
 # 01:A16B: [하한 16비트][포인터 색인] 10개를 뒤에서부터 보아 $075E 이상인 첫 항목. 01:A189 포인터 → 2·3번 줄 색 1~15.
 FIELD_TIME = 0x01A16B
 FIELD_TIME_PTRS = 0x01A189
@@ -170,7 +168,8 @@ def sheet(cells, cols, cell_w, cell_h, labels=None, bg=(32, 32, 40), pad=1, labe
 def map_ids(rom):
     """실내 맵(원본 346개)과 그룹 $50 이상 18개의 ($BC, $BD)."""
     out = [(g, b) for g, (start, end) in enumerate(group_spans(rom)[0]) for b in range((end - start) // 3)]
-    return out + [(g, 0x50 + b) for g, n in HIGH_MAPS for b in range(n)]
+    return out + [(0x50 + g, 0x50 + b) for g, (start, end) in enumerate(group_spans(rom, kind='high')[0])
+                  for b in range((end - start) // 3)]
 
 
 class TileCache:

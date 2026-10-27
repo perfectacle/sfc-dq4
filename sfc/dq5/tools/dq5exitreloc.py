@@ -128,9 +128,15 @@ def known_maps(rom, new=()):
         # 2A:F732 는 $BD 번째 목록까지 건너뛰므로 맵 번호가 이어져 있어야 한다.
         if bc < HIGH_FIRST and sorted(maps) != list(range(len(maps))):
             raise ValueError(f'그룹 {bc:02X} 의 맵 번호가 0부터 이어지지 않음')
-    if sorted({bc for bc in groups if bc < HIGH_FIRST}) != list(range(EXIT_GROUPS)):
-        raise ValueError('출구 그룹이 00~35 가 아님')
+    normal = sorted({bc for bc in groups if bc < HIGH_FIRST})
+    # 원래 그룹 00~35 에 새 그룹(dq5newmap.py)이 이어 붙는다. 출구 표는 그룹 머리를 찾으므로 번호가 이어져야 한다.
+    if normal != list(range(len(normal))) or len(normal) < EXIT_GROUPS:
+        raise ValueError('출구 그룹이 00 부터 이어지지 않거나 원래 그룹 00~35 가 빠짐')
     return known
+
+
+def exit_groups(known):
+    return 1 + max(bc for bc, _ in known if bc < HIGH_FIRST)
 
 
 def exit_kind(raw):
@@ -143,7 +149,7 @@ def parse(rom, loc=None, known=None):
     known = known or known_maps(rom)
     doc = {'format': FORMAT, 'exits': [], 'triggers': [], 'high_triggers': []}
     addr = loc['exits']
-    for bc in range(EXIT_GROUPS):
+    for bc in range(exit_groups(known)):
         if read(rom, addr, 1)[0] != bc:
             raise ValueError(f'{cpu(addr)}: 출구 그룹 {bc:02X} 머리가 없음')
         addr += 1
@@ -227,7 +233,7 @@ def serialize(doc, known):
     want = [map_name(*k) for k in sorted(known) if k[0] < HIGH_FIRST]
     rows = doc['exits']
     if not isinstance(rows, list) or [r.get('map') if isinstance(r, dict) else None for r in rows] != want:
-        raise ValueError('exits 는 그룹 00~35 의 모든 맵을 맵 번호 순서로 하나씩 담아야 함')
+        raise ValueError('exits 는 그룹 50 미만의 모든 맵을 맵 번호 순서로 하나씩 담아야 함')
     counts = {}
     for row in rows:
         exact(row, ('map', 'records'), f'exits {row["map"]}')
@@ -235,7 +241,7 @@ def serialize(doc, known):
             raise ValueError(f'exits {row["map"]}: 레코드가 하나 이상이어야 함(출구가 없으면 special 0)')
         counts[map_key(row['map'], 'exits')] = len(row['records'])
     out = bytearray()
-    for bc in range(EXIT_GROUPS):
+    for bc in range(exit_groups(known)):
         out.append(bc)
         for row in rows:
             key = map_key(row['map'], 'exits')
@@ -270,7 +276,7 @@ def serialize(doc, known):
         exact(row, ('map', 'records'), 'triggers')
         key = map_key(row['map'], 'triggers')
         if key not in known or key[0] >= HIGH_FIRST or key in seen:
-            raise ValueError(f'triggers {row["map"]}: 그룹 00~35 의 원본 맵을 한 번만 적어야 함')
+            raise ValueError(f'triggers {row["map"]}: 그룹 50 미만의 맵을 한 번만 적어야 함')
         seen.add(key)
         blob = trigger_rows(row['records'], f'triggers {row["map"]}')
         if not blob:
@@ -506,8 +512,8 @@ def new_map(text):
         key = map_key(text, '--new-map')
     except ValueError as error:
         raise argparse.ArgumentTypeError(str(error)) from error
-    if key[0] >= EXIT_GROUPS:
-        raise argparse.ArgumentTypeError('--new-map 은 그룹 00~35 만 받음')
+    if key[0] >= HIGH_FIRST:
+        raise argparse.ArgumentTypeError('--new-map 은 그룹 50 미만만 받음(그룹 50 이상은 출구 표가 없음)')
     return key
 
 
