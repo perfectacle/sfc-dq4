@@ -14,7 +14,7 @@ SFC DQ5 엔진을 분석하는 세션이 처음 읽는 문서입니다. 지금�
 | [#564](https://github.com/perfectacle/sfc-dq4/pull/564) | `feat/dq5-doortable` | `dq5newmap.py --door-bank` 문 표(`01:D2FC`) 늘리기. 게임 33장면 통과(rebase 뒤 다시 돌리지 않음) | `$MAIN-dq5-doortable` |
 | [#566](https://github.com/perfectacle/sfc-dq4/pull/566) | `feat/dq5-slotuse` | `04:FB1C`·`01:BA95` 슬롯 실측과 `--allow-growth` 맵별 한도. 실측 6건 통과 | `$MAIN-dq5-slotuse` |
 | [#567](https://github.com/perfectacle/sfc-dq4/pull/567) | `feat/dq5-setgrow` | 스프라이트 세트 표(`1F:D63D`) 옮기기와 8타일 새 세트 | `$MAIN-dq5-setgrow` |
-| (PR 없음) | `feat/dq5-namegrow` | 이름 24바이트까지와 전투 창 자리·크기 쓰기. 로컬 커밋 `eaa20b0`, push 전 | `$MAIN-dq5-namegrow` |
+| [#569](https://github.com/perfectacle/sfc-dq4/pull/569) | `feat/dq5-namegrow` | 이름 24바이트까지와 전투 창 자리·크기 쓰기(`dq5windowwrite.py`). rebase 뒤 테스트는 다시 돌리지 않음 | `$MAIN-dq5-namegrow` |
 
 `$MAIN-…` 은 원래 체크아웃 옆 `sfc-dq4-dq5-…` 디렉터리입니다. #562·#564 는 지금 `origin/main` 과 충돌합니다.
 
@@ -23,7 +23,7 @@ SFC DQ5 엔진을 분석하는 세션이 처음 읽는 문서입니다. 지금�
 독립 리뷰가 찾았지만 중단 때문에 고치지 못한 것입니다. HIGH 가 있는 PR 은 고치기 전에 머지하지 않습니다.
 
 - **#564 문 표(HIGH):** 문 자료로 들어가는 입구 `01:D97B` 가 `DOOR_ENTRIES`(`dq5map.py`)에 빠졌습니다. 이 입구는 `D9A6`→`DE19`→`DE49`→`DE62`→`F3F9` 를 DB=01 로 지나 옛 표를 읽고, `11:8E54` 의 JSL 이 부릅니다. 넣으면 스텁이 66바이트가 되고, 문서의 「다섯」을 「여섯」으로 고칩니다. MEDIUM 은 둘입니다. 뱅크 01 을 복사할 뱅크가 비었는지 검사하지 않고, 복사본의 `01:FD97`~`FEB6` 가 다른 패치 뒤에 낡을 수 있습니다.
-- **#566 슬롯(HIGH 둘):** 이 지적은 PR 본문에 아직 없습니다.
+- **#566 슬롯(HIGH 둘):**
   - `01:BA95`(`05:E931` 경유)는 06/05 대체 목록의 `10:ABB5` 만 부릅니다. 그래서 `(06,05):4` 를 더하고, 1F/00·23/00·1F/08·23/06·02/00 은 빼야 합니다.
   - 11/00 이 빠졌습니다. `05:A3D2`→`05:E72A`→`JSR E838/E7EC`→`FB1C` 경로로 최대 2슬롯을 씁니다.
   - MEDIUM 은 둘입니다. `02:B3B4` 는 슬롯을 지우지 않고 복사합니다. 부르는 곳 검색은 JSL 만 봤고, JSR 과 인물 스크립트의 네이티브 호출은 보지 않았습니다.
@@ -31,7 +31,7 @@ SFC DQ5 엔진을 분석하는 세션이 처음 읽는 문서입니다. 지금�
   - `dq5objpalette`·`dq5picturegrow` 가 옛 표를 봅니다.
   - `range(SET_COUNT)` 를 도는 곳이 `A5` 이상을 건너뜁니다. `sfc/dq4/tools/dq4romassets.py` 에도 이런 곳이 있어 dq4 트랙에 알려야 합니다.
   - `patch(sets_at=…)` 를 끝까지 도는 테스트가 없습니다.
-- **`feat/dq5-namegrow` 이름·창(HIGH 둘):**
+- **#569 이름·창(HIGH 둘):**
   - `dq5windowwrite.py` 의 `records()` 는 창을 222개로 셉니다. 그러나 진짜 창은 `00`~`93` 이고, `94` 부터는 포인터가 `0000`·`FFFF` 같은 쓰레기입니다. `AC` 를 고치면 `04:FFFF` 에서 `05:8000` 으로 넘치는 것을 확인했습니다. 첫 포인터가 `8000` 미만이면 세기를 멈추고, 뱅크를 넘는 주소는 거부해야 합니다.
   - `7A` 로 시작하고 12바이트가 넘는 이름은 `21:95BF` 에서 넘칩니다. 이 코드는 12바이트만 `0BDC` 에 저장한 뒤 `01` 이 나올 때까지 길이 제한 없이 덧붙입니다(코드 읽기). `7A` 이름은 12바이트까지로 막아야 합니다.
   - MEDIUM 은 넷입니다.
