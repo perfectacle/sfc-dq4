@@ -109,3 +109,4 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [2026-10-27-24: 전투·레벨 업 곡을 다시 늘 두기 위한 조사](journal/2026-10-27-24-sound-resident-plan.md)
 - [2026-10-27-25: 상태 창에 한글 이름 찍기](journal/2026-10-27-25-status-window-name.md)
 - [2026-10-27-26: つよさ·「누구」 고르기 창의 한글 이름](journal/2026-10-27-26-list-window-name.md)
+- [2026-10-27-27: 전투 메시지와 이름 색](journal/2026-10-27-27-battle-message-name.md)

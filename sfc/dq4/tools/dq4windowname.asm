@@ -1,4 +1,4 @@
-; 게임 안 일행 열 창(상태 창·전투 상태 창)의 한글 이름. dq4windowname.py 가 정의(!wn_*)를 앞에 붙여 asar 로 넣는다.
+; 게임 안 창(상태 창·전투 상태 창·목록)과 전투 메시지의 한글 이름. dq4windowname.py 가 정의(!wn_*)를 앞에 붙여 asar 로 넣는다.
 ; 형식은 sfc/dq4/docs/dq4-window-text-format.md 「상태 창 이름」.
 ;
 ; 04:ABCF(일행 열 창)와 04:B79B(목록·つよさ 류의 공통 출력)는 이름 4바이트를 그대로 BG3 타일로 찍는다. 한글 표시 바이트(85~9A, 10~7E)면 대신 Galmuri9 글리프(뱅크 62~,
@@ -24,9 +24,29 @@ org $04ABCF
     NOP
     NOP
     NOP
+; 쓰러짐·독 등으로 이름에 색($ED)을 입히는 길.
+org $04AB73
+    JML WnNameAttr
+    NOP
+    NOP
+    NOP
 
 org $04B79B
     JML WnList
+
+; 전투 메시지: 이름을 글 큐 0ECB 로 옮기는 자리와, 큐의 바이트를 글 버퍼 아래 줄에 쓰는 자리.
+org $24A83C
+    JML WnBattle
+org $24A4E0
+    JML WnBattleChar
+    NOP
+    NOP
+; 글 버퍼를 타일맵 버퍼(7E:5546~)의 낮은 바이트로 옮기는 자리
+org $24A5E9
+    JSL WnBattleCell
+    NOP
+    NOP
+    NOP
 
 !wn_keys  = $1C40           ; 8 워드: 자리마다 이름 줄 버퍼 주소(7E), 0 = 빈 자리
 !wn_above = $1C50           ; 8 × 5 워드: 그 위 줄의 원래 타일맵 낱말
@@ -50,6 +70,15 @@ org $04B79B
 !wn_ptr   = $1D18           ; 타일맵 버퍼 포인터: 일행 열 창은 $DC, 목록은 $E0
 !wn_mode  = $1D1A           ; 0 = 일행 열 창(04:ABF4 로), 1 = 목록(04:BFF2 로)
 !wn_step  = $1D1C           ; 목록에서 이름 뒤 Y 를 나아갈 바이트 수
+!wn_bkeys = $1D20           ; 전투 이름 4자리 × 8바이트: 자리마다 이름 바이트
+!wn_bnext = $1D40           ; 다음에 내줄 전투 이름 자리
+!wn_attr  = $1D42           ; 이름 줄 타일맵 높은 바이트(색). 0 이면 버퍼에 있던 것을 살림
+
+; 전투 글은 바이트가 곧 BG3 타일 번호(낮은 8비트)이고 E2 이상은 제어 코드다. 공격 연출이 BG3 칸 B0~122 를 덮으므로
+; 이름 그림은 칸 1D0~1F7 에 두고, 글에는 코드 B0~D7(1D0 - 120 ~)을 쓴다. 이름 4자리 × 10칸(아래 줄 5 + 위 줄 5).
+; 큐에는 아래 줄 코드만 넣고, 위 줄 코드(아래 + 5)는 WnBattleChar 가, 타일 bit8 은 WnBattleCell 이 붙인다.
+!wn_btile = $B0
+!wn_bvram = $1D0
 
 !wn_stage = $3E00           ; 올릴 160바이트를 먼저 만드는 자리(7E:3D14~3FFF 는 실행한 장면에서 접근 없음)
 
@@ -73,6 +102,7 @@ WnName:
     STA.l $7E0000|!wn_ptr
     LDA #$0000
     STA.l $7E0000|!wn_mode
+    STA.l $7E0000|!wn_attr
     SEP #$20
     JMP WnKorean
 .original
@@ -80,6 +110,106 @@ WnName:
     LDA #$04
     STA.b $00
     JML $04ABD6
+
+; 04:AB73. A 의 높은 바이트에 $ED 가 들어 있고, 원래는 글자마다 16비트로 ($DC),Y 에 쓴 뒤 04:ABF4 로 간다.
+WnNameAttr:
+    LDA.b $01
+    CMP #!wn_hi_base
+    BCC .original
+    CMP #!wn_hi_base+!wn_hi_count
+    BCS .original
+    LDA.b $02
+    CMP #$10
+    BCC .original
+    CMP #$10+111
+    BCS .original
+    REP #$20
+    LDA.b $DC
+    STA.l $7E0000|!wn_ptr
+    LDA #$0000
+    STA.l $7E0000|!wn_mode
+    LDA.b $ED
+    AND #$00FF
+    XBA
+    STA.l $7E0000|!wn_attr
+    SEP #$20
+    JMP WnKorean
+.original
+    LDX #$0000
+    LDA #$04
+    STA.b $00
+    JML $04AB7A
+
+; 24:A83C(전투, DB = 04·20). 원래는 이름 $00 바이트를 $01~ 에서 0ECB~ 로 옮기고 FF 로 끝낸 뒤 RTS.
+WnBattle:
+    PHP
+    SEP #$20
+    REP #$10
+    LDA.b $01
+    CMP #!wn_hi_base
+    BCC .original
+    CMP #!wn_hi_base+!wn_hi_count
+    BCS .original
+    LDA.b $02
+    CMP #$10
+    BCC .original
+    CMP #$10+111
+    BCS .original
+    LDA #$02
+    STA.l $7E0000|!wn_mode
+    JMP WnKorean
+.original
+    JML $24A841
+
+; 24:A4E0. A = 글 바이트, X = 줄 자리 + 칸. 이름 아래 줄 타일이면 위 줄(1DD5)에 짝 타일을 함께 쓴다.
+WnBattleChar:
+    CMP #!wn_btile
+    BCC .write
+    CMP #!wn_btile+40
+    BCS .write
+    PHA
+    SEC
+    SBC #!wn_btile
+-
+    CMP #10
+    BCC +
+    SBC #10
+    BRA -
++
+    CMP #5
+    PLA
+    BCS .write
+    CLC
+    ADC #5
+    STA $1DD5,X
+    SEC
+    SBC #5
+.write
+    STA $1DEF,X
+    INC $0F0D
+    JML $24A4EE
+
+; 24:A5E9(JSL, DB = 24). 글 바이트 하나를 타일맵 낱말의 낮은 바이트로. 이름 코드면 타일 bit8 을 켜고, 아니면 끈다
+; (줄이 올라가며 같은 자리에 다른 글자가 올 수 있음).
+WnBattleCell:
+    LDA $1DD5,Y
+    CMP #!wn_btile
+    BCC .plain
+    CMP #!wn_btile+40
+    BCS .plain
+    CLC
+    ADC.b #!wn_bvram-!wn_btile
+    STA.l $7E5546,X
+    LDA.l $7E5547,X
+    ORA #$01
+    STA.l $7E5547,X
+    RTL
+.plain
+    STA.l $7E5546,X
+    LDA.l $7E5547,X
+    AND #$FE
+    STA.l $7E5547,X
+    RTL
 
 ; 04:B79B. 메뉴(모험의 서) 목록은 이름 입력의 훅이 그리므로 메뉴 플래그가 켜져 있거나 한글이 아니면 그리로 넘긴다.
 ; 원래 코드는 PHX 로 시작해 글자마다 04:B235 로 ($E0),Y 에 쓰고 PLX 뒤 04:BFF2 로 간다.
@@ -103,6 +233,15 @@ WnList:
     STA.l $7E0000|!wn_ptr
     LDA #$0001
     STA.l $7E0000|!wn_mode
+    ; 04:B235 처럼 $EC bit6 이면 $ED 를 높은 바이트로
+    LDA #$0000
+    BIT.b $EC-1
+    BVC +
+    LDA.b $ED
+    AND #$00FF
+    XBA
++
+    STA.l $7E0000|!wn_attr
     ; X 는 창 문자열(뱅크 04)에서 D0 다음 바이트. 「누구」 고르기 창은 이름 뒤 DD(상태 표시 한 칸)가 오고 창을 한 칸
     ; 넓혀 두었으므로 5칸 나아간다. 다른 창(HPとMP 등)은 뒤 내용의 자리가 정해져 있어 원래처럼 4칸.
     LDA #$0008
@@ -246,6 +385,11 @@ WnKorean:
     BCS .drawn
     JMP .glyph
 .drawn
+    LDA.w !wn_mode
+    CMP #$0002
+    BNE +
+    JMP WnBattleDraw
++
     JSR WnSlot
     JSR WnUpload
     JSR WnTilemap
@@ -271,6 +415,113 @@ WnKorean:
     REP #$10
     PLX
     JML $04BFF2
+
+; 전투 이름: 이름 바이트가 같은 자리를 찾거나 돌려 쓰고, 열 칸을 올린 뒤 큐에 아래 줄 타일을 넣는다.
+WnBattleDraw:
+    LDX #$0000
+.find
+    LDY #$0000
+-
+    LDA.w !wn_bkeys,X
+    CMP.b $01,Y
+    BNE .next
+    INX
+    INX
+    INY
+    INY
+    CPY #$0008
+    BCC -
+    TXA
+    SEC
+    SBC #$0008
+    BRA .found
+.next
+    TXA
+    AND #$FFF8
+    CLC
+    ADC #$0008
+    TAX
+    CPX #$0020
+    BCC .find
+    LDA.w !wn_bnext
+    AND #$0003
+    ASL
+    ASL
+    ASL
+    PHA
+    LDA.w !wn_bnext
+    INC
+    STA.w !wn_bnext
+    PLX
+    PHX
+    LDY #$0000
+-
+    LDA.b $01,Y
+    STA.w !wn_bkeys,X
+    INX
+    INX
+    INY
+    INY
+    CPY #$0008
+    BCC -
+    PLA
+.found
+    LSR
+    LSR
+    LSR                     ; 자리 0~3
+    STA.w !wn_c
+    ASL
+    ASL
+    CLC
+    ADC.w !wn_c
+    ASL                     ; × 10
+    CLC
+    ADC.w #!wn_bvram
+    STA.w !wn_tile
+    JSR WnUpload
+    ; 글자 수 k 면 타일 (10k + 7) / 8 칸
+    LDX #$0000
+-
+    LDA.w !wn_glyph,X
+    CMP #$FFFF
+    BEQ +
+    INX
+    INX
+    CPX #$0008
+    BCC -
++
+    TXA
+    LSR
+    STA.w !wn_c
+    ASL
+    ASL
+    CLC
+    ADC.w !wn_c
+    ASL
+    CLC
+    ADC #$0007
+    LSR
+    LSR
+    LSR
+    STA.w !wn_r
+    LDX #$0000
+    LDA.w !wn_tile
+    SEC
+    SBC.w #!wn_bvram-!wn_btile
+    SEP #$20
+-
+    STA.w $0ECB,X
+    INC
+    INX
+    CPX.w !wn_r
+    BCC -
+    LDA #$FF
+    STA.w $0ECB,X
+    REP #$20
+    PLB
+    PLP
+    PLP
+    JML $24A854
 
 ; 글리프 A 의 32바이트를 !wn_cell 로. 뱅크 62 + n / 1024, 주소 8000 + (n % 1024) × 32. 끝나면 DB = 7E.
 WnFetch:
@@ -426,8 +677,15 @@ WnUpload:
     ADC.w !wn_c
     ASL
     TAX
+    LDA.w !wn_mode
+    CMP #$0002
+    BNE +
+    LDA #$0000              ; 전투 글의 위 줄은 빈칸
+    BRA ++
++
     LDA.w !wn_above,X
     AND #$03FF
+++
     STA.w !wn_base
     STZ.w !wn_r
 -
@@ -568,7 +826,10 @@ WnTilemap:
     LDA #$0005
     STA.w !wn_r
 -
+    LDA.w !wn_attr
+    BNE +
     LDA.w $0000,X
++
     AND #$3C00
     ORA.w !wn_base
     STA.w $0000,X
