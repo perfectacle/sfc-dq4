@@ -5,6 +5,7 @@ SFC 「드래곤 퀘스트 V」(일본판) 엔진을 분석하는 트랙입니�
 ## 문서
 
 - [handoff.md](handoff.md): dq5 트랙 시작점(지금 상태, 실험 출발점, 다음 할 일)
+- [handoff-lead.md](handoff-lead.md): 리드 세션 인계(분석 에이전트 나누기, 남은 분석, PR 충돌 정리)
 - [docs/dq5-map-format.md](docs/dq5-map-format.md): DQ5 실내 맵 형식(지형·팔레트·인물·출구·영역 이동·보물상자)
 - [docs/dq5-field-format.md](docs/dq5-field-format.md): DQ5 필드(세계 지도) 형식
 - [docs/dq5-text-format.md](docs/dq5-text-format.md): DQ5 메시지(허프만 부호)·제어 코드·폰트·대화 스크립트·이름 문자열·메뉴 창 문자열

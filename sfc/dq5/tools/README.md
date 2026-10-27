@@ -152,6 +152,7 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5framediff.py 원래 패치` | `lua/dq5framedump.lua` 결과 둘(`frames.bin`)을 덤프마다 견주어 WRAM·VRAM·CGRAM·OAM 의 다른 구간과 처음 다른 덤프 번호를 보임. 기본은 DP·스택 임시 값을 뺌(`--all` 이면 모두) |
 | `dq5assets.py rom --out 폴더` | 에셋 저장소 `sfc/dq5/` 의 모든 파일을 롬 하나로 다시 뽑는 단일 진입점. 세이브스테이트를 받지 않고 전원부터 배 선실 세이브스테이트(`lua/dq5shipstate.lua`)를 만들어 MesenCE 단계에 줌. MesenCE 를 감싼 셸 스크립트로 결과를 바꾸는 설정(`SpcClockSpeedAdjustment=40`·RAM 0·프레임 건너뛰기 끔 등)을 고정. `--only sprites,samples,sound,score,effects,fxframes,title,titlevm,motion,soundpage,gallery`, `--work` 중간물 폴더(기본 `work/dq5assets`), `--jobs`. 폴더마다 `SOURCE.txt`. `MESENCE`·`GME_LIB` 필요, 결과는 커밋 금지. 절차는 아래 「에셋 다시 뽑기」 |
 | `dq5scenes.py rom 세이브스테이트` | `dq5assets.py` 의 MesenCE 장면: `--fx-dumps 폴더` 는 `dq5warp.lua` 로 전투 상태 셋(주인공 주문·슬라임 행동·동료 일행)을 만들어 연출 81가지를 `lua/dq5fxdump.lua` 로 덤프(`dq5fx.py --export` 입력), `--motion 폴더` 는 몬스터 움직임 롬 그림과 장면 GIF 14개(장면마다 실마리 PC 를 처음 실행한 프레임 앞뒤를 `lua/dq5monlog.lua` 화면 버퍼로)와 `index.json`. `MESENCE` 필요 |
+| `dq5fixconflicts.sh` | 열린 dq5 PR 가운데 충돌 난 것을 임시 워크트리(`<체크아웃>-lead-fix`)에서 `origin/main` 과 merge. 일지 번호만 겹치면 main 최대+1 로 다시 매기고 참조·라벨을 고쳐 push, 그 밖의 충돌은 「손으로 풀 것」으로 알림. 이미 닫힌 PR 에는 push 하지 않음. `gh` 필요(`GH_TOKEN` 이 없으면 `gh auth token`). 절차는 [handoff-lead.md](../handoff-lead.md#pr-충돌-정리) |
 | `dq5figures.py` | `sfc/dq5/images/` 의 그림을 다시 만듦(롬 필요, 게임 화면 비교 그림만 `work/` 덤프 필요) |
 
 ## 에셋 다시 뽑기
