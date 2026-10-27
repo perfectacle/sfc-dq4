@@ -22,8 +22,9 @@ ADOPT = ROOT / 'nds' / 'dq4' / 'tables' / 'adopt.tsv'
 TEXT_BANK = 0x58
 INDEX = 0x8000
 DATA = 0x9000
-# 이름 표 번호 → (adopt.tsv 의 표, 창 이름 칸의 최대 열 수)
-KINDS = {5: ('아이템', 10)}
+# 이름 표 번호 → (adopt.tsv 의 표, 창 이름 칸의 최대 열 수, 넘으면 멈출지). 주문 창(28)은 두 칸 넓혀 일곱 칸이고,
+# 그보다 긴 이름(몬스터 특기 「얼어붙은 눈보라」)은 가나로 둔다.
+KINDS = {5: ('아이템', 10, True), 3: ('주문·특기', 7, False)}
 SHIFT = 6                       # render 의 띠(한글 윗줄 = 1줄)를 위 줄 7줄로 내림
 
 
@@ -64,7 +65,7 @@ def build(data, font):
     index = bytearray(DATA - INDEX)
     body = bytearray()
     report = {}
-    for kind, (table, limit) in KINDS.items():
+    for kind, (table, limit, strict) in KINDS.items():
         korean = adopted(table)
         names = rom_names(data, kind)
         done = 0
@@ -74,7 +75,9 @@ def build(data, font):
                 continue
             cols = columns(font, ko)
             if len(cols) > limit:
-                raise ValueError(f'{ko!r}: {len(cols)}열, 창은 {limit}열')
+                if strict:
+                    raise ValueError(f'{ko!r}: {len(cols)}열, 창은 {limit}열')
+                continue
             at = DATA + len(body)
             index[kind * 0x200 + n * 2:kind * 0x200 + n * 2 + 2] = at.to_bytes(2, 'little')
             body += bytes((len(cols),)) + b''.join(cols)

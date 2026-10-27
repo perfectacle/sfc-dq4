@@ -41,18 +41,24 @@ org $24A4E0
     JML WnBattleChar
     NOP
     NOP
-; NMI 가 $1946 작업(평소 00:8DE9, 게임이 목록을 보낼 때만 00:8CEF)으로 가기 전에 우리 대기열을 보낸다.
-; 게임 목록은 게임이 프레임 끝에 한 번 보내는 장치라, 창을 그리는 도중에 끼어들면 메뉴 흐름이 어긋났다.
-org $008926
-    JSR $FFA1
+; NMI 가 $1944 작업(필드 00:8926, 전투 00:8952 등)으로 가기 전에 우리 대기열을 보낸다. 게임 전송 목록은 게임이
+; 프레임 끝에 한 번 보내는 장치($1946 = 00:8CEF, $19 bit2)라, 창을 그리는 도중에 끼어들면 메뉴 흐름이 어긋났다.
+org $00887C
+    JMP $FFA1
 org $00FFA1
+    LDA.l $7E3D62               ; !wq_count(아래 정의). M = 8. 비어 있으면 바로 넘겨 NMI 시간을 거의 늘리지 않는다
+    BEQ +
     JSL WqNmi
-    JMP $894F
++
+    JMP ($1944)
 
 ; 이름 표 문자열(도구 이름 등)을 글자마다 04:B235 로 찍는 자리. PHX / SEP #$10 / LDX #$00
 org $04B808
     JML WnText
     NOP
+; 주문 목록(D6)이 이름을 다섯 글자 고정으로 찍는 자리. PHX / LDX #$0000 / LDA #$05 / STA $00 / BRL $B7A3
+org $04B8F2
+    JML WnSpell
 
 ; 글 버퍼를 타일맵 버퍼(7E:5546~)의 낮은 바이트로 옮기는 자리
 org $24A5E9
@@ -90,6 +96,8 @@ org $24A5E9
 !wt_keys  = $3D20           ; 12 워드(7E): 슬롯마다 버퍼 자리($E0 + Y)
 !wt_ages  = $3D38           ; 12 워드: 마지막으로 쓴 때
 !wt_age   = $3D50           ; 쓸 때마다 하나씩
+!wt_mode  = $3D52           ; 0 = 04:B808(길이 $00), 1 = 04:B8F2(다섯 글자 고정)
+!wt_lastx = $3D54           ; 원래 루틴이 마지막으로 찍는 바이트의 DP 자리
 !wt_sp    = $3D60           ; 원래 스택 포인터(7E)
 !wt_cols  = $1D84           ; 그릴 열 수
 !wt_base  = $1D86           ; 빌린 첫 칸. 글자 줄 열 칸 다음에 위 줄 열 칸
@@ -889,8 +897,15 @@ WnTilemap:
 
 ; 04:B808. $43 = 이름 표 번호, $42 = 이름 번호, $00·$01~ = 원래 문자열, ($E0),Y = 타일맵 버퍼 자리.
 ; 원래는 글자마다 04:B235 로 쓰고 REP #$10 / PLX 뒤 04:BFF2 로 간다.
+WnSpell:
+    PHX
+    LDA #$01
+    BRA +
 WnText:
     PHX
+    LDA #$00
++
+    STA.l $7E0000|!wt_mode
     REP #$30
     LDA.b $43
     AND #$00FF
@@ -935,13 +950,28 @@ WnText:
     LDA.l !wt_bank<<16,X
     AND #$00FF
     STA.w !wt_cols
-    ; 원래 루틴이 나아가는 칸 수: 탁점 바이트(84·83)는 위 줄에 탁점만 찍고 칸을 나아가지 않는다
+    ; 원래 루틴이 나아가는 칸 수: 탁점 바이트(84·83)는 위 줄에 탁점만 찍고 칸을 나아가지 않는다.
+    ; 04:B808 은 $00 바이트를, 04:B8F2 는 탁점이 아닌 글자 다섯을 찍는다
     STZ.w !wt_len
+    STZ.w !wt_lastx
+    LDX #$0001
+.count
+    LDA.w !wt_mode
+    AND #$00FF
+    BNE +
     LDA.b $00
     AND #$00FF
-    TAX
+    STA.w !wn_c
+    CPX.w !wn_c
     BEQ ++
--
+    BCS .counted
+    BRA ++
++
+    LDA.w !wt_len
+    CMP #$0005
+    BCS .counted
+++
+    STX.w !wt_lastx
     LDA.b $00,X
     AND #$00FF
     CMP #$0083
@@ -950,9 +980,9 @@ WnText:
     BEQ +
     INC.w !wt_len
 +
-    DEX
-    BNE -
-++
+    INX
+    BRA .count
+.counted
     JSR WtAlloc
     BCS .full
     JSR WtQueue
@@ -967,9 +997,7 @@ WnText:
     LDA.w !wt_sp
     TCS
     ; 원래처럼 A 에 마지막 글자 바이트를 남긴다(창 해석이 돌아가서 A 를 본다)
-    LDA.b $00
-    AND #$00FF
-    TAX
+    LDX.w !wt_lastx
     PLB
     SEP #$20
     REP #$10
@@ -982,9 +1010,19 @@ WnText:
     LDY.w !wn_y
     PLB
 .original
+    LDA.l $7E0000|!wt_mode
+    AND #$00FF
+    BNE +
     SEP #$30
     LDX #$00
     JML $04B80D
++
+    SEP #$20
+    REP #$10
+    LDX #$0000
+    LDA #$05
+    STA.b $00
+    JML $04B7A3
 
 ; 칸 슬롯: 20칸(최대 10열 × 글자 줄·위 줄)씩 12개. 같은 버퍼 자리($E0 + Y)에 다시 그리면 같은 슬롯을, 처음 보는 자리면
 ; 가장 오래 쓰지 않은 슬롯을 쓴다. 타일맵 버퍼를 훑어 빈 칸을 찾던 방식은, 다른 창을 여는 동안 게임이 버퍼를 비워
