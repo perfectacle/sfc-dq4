@@ -18,6 +18,7 @@ CODE = 0x60C000
 CODE_END = 0x60E000
 STATUS_WINDOW = 0x02
 LIST_HOOK = 0x04B79B
+NMI_STUB = 0x00FFA1               # 00:8926 의 JSR 이 부르는 받침(JSL WqNmi / JMP $894F)
 # 이름 하나를 04:B79B 로 찍는 「누구」 고르기 창(본문에 D0 자리 표시). 이름 칸 5칸을 담게 한 칸 왼쪽으로 옮겨 넓힌다.
 # 오른쪽에는 이어서 열리는 창(도구·주문 목록 등)이 붙어 있어 오른쪽으로는 넓히지 않는다.
 NAME_LISTS = (0x0C, 0x0E, 0x11, 0x13, 0x2C, 0x36, 0x38, 0x3D, 0x4A, 0x4F, 0x6F, 0x7A, 0x7F)
@@ -50,6 +51,8 @@ def apply(data, font=None, asar=None):
     hi_count = -(-len(ne.GLYPHS) // ne.CODE_RADIX)
     text, _ = dq4windowtext.build(d, font or dq4menupatch.Font('galmuri9'))
     t = lorom(dq4windowtext.TEXT_BANK << 16 | dq4windowtext.INDEX)
+    if any(d[lorom(NMI_STUB):lorom(NMI_STUB) + 7]):
+        raise ValueError(f'{NMI_STUB:06X} 가 비어 있지 않음')
     if any(d[t:t + len(text)]):
         raise ValueError(f'{dq4windowtext.TEXT_BANK:02X}:{dq4windowtext.INDEX:04X} 가 비어 있지 않음')
     d[t:t + len(text)] = text
