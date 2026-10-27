@@ -57,7 +57,8 @@ org $04B808
     JML WnText
     NOP
 ; 주문 목록(D6)이 이름을 다섯 글자 고정으로 찍는 자리. PHX / LDX #$0000 / LDA #$05 / STA $00 / BRL $B7A3
-org $04B8F2
+; 04:BD4F·04:BD9F 도 PHX 를 한 뒤 BRL 로 04:B8F3 에 들어오므로, PHX 다음 자리를 바꾼다.
+org $04B8F3
     JML WnSpell
 
 ; 창 바이트 갈래(메뉴 패치의 JSL). 고정 문구 접두를 먼저 가르고, 나머지는 원래 대상으로.
@@ -109,7 +110,7 @@ org $24A5E9
 !wt_field = $3DD2           ; 0 = 전투(NMI 작업 $1944 = 00:8952). 필드 전용 슬롯을 쓸지
 !wt_nslot = 23
 !wt_age   = $3D50           ; 쓸 때마다 하나씩
-!wt_mode  = $3D52           ; 0 = 04:B808(길이 $00), 1 = 04:B8F2(다섯 글자 고정)
+!wt_mode  = $3D52           ; 0 = 04:B808(길이 $00), 1 = 04:B8F3(다섯 글자 고정)
 !wt_lastx = $3D54           ; 원래 루틴이 마지막으로 찍는 바이트의 DP 자리
 !wt_sp    = $3D60           ; 원래 스택 포인터(7E)
 !wt_cols  = $1D84           ; 그릴 열 수
@@ -910,8 +911,8 @@ WnTilemap:
 
 ; 04:B808. $43 = 이름 표 번호, $42 = 이름 번호, $00·$01~ = 원래 문자열, ($E0),Y = 타일맵 버퍼 자리.
 ; 원래는 글자마다 04:B235 로 쓰고 REP #$10 / PLX 뒤 04:BFF2 로 간다.
+; 04:B8F3. 부른 쪽이 이미 PHX 를 했다.
 WnSpell:
-    PHX
     LDA #$01
     BRA +
 WnText:
@@ -964,7 +965,7 @@ WnText:
     AND #$00FF
     STA.w !wt_cols
     ; 원래 루틴이 나아가는 칸 수: 탁점 바이트(84·83)는 위 줄에 탁점만 찍고 칸을 나아가지 않는다.
-    ; 04:B808 은 $00 바이트를, 04:B8F2 는 탁점이 아닌 글자 다섯을 찍는다
+    ; 04:B808 은 $00 바이트를, 04:B8F3 은 탁점이 아닌 글자 다섯을 찍는다
     STZ.w !wt_len
     STZ.w !wt_lastx
     LDX #$0001
@@ -1276,22 +1277,19 @@ WtQueue:
     ADC.w !wq_off
     CMP #!wq_size+1
     BCC .room
+    ; 대기열이 차면 NMI 를 끈 채 다음 VBlank 를 기다려 직접 보낸다. NMI 에 맡기면 게임이 그 프레임의 작업을
+    ; 건너뛸 때($19 bit7) 비워지지 않을 수 있다. 이 프레임의 게임 NMI 는 $4210 을 읽어 건너뛴다(VBlank 가 끝난 뒤
+    ; NMI 를 다시 켜면 화면을 그리는 도중에 NMI 가 돌기 때문).
     SEP #$20
-    LDA.b $1E
-    STA.l $004200
-    REP #$20
-    LDX #$0000
 -
-    LDA.w !wq_count
-    AND #$00FF
-    BEQ +
-    DEX
-    BNE -
-+
+    LDA.l $004212
+    BMI -
+-
+    LDA.l $004212
+    BPL -
+    JSL WqNmi
     SEP #$20
-    LDA.b $1E
-    AND #$7F
-    STA.l $004200
+    LDA.l $004210
     REP #$20
     STZ.w !wq_off
 .room
