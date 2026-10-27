@@ -56,6 +56,10 @@ git worktree list
 
 `dq5aiwrite.py`(`dq5ai/1`)와 실측 도구 `dq5aicheck.py`로 마쳤습니다([일지](journal/2026-10-27-43-aiwrite.md), [쓰기 형식](docs/dq5-build-format.md#작전-ai학습-배율내성-배율갑옷-원소-dq5ai1)). 원본 쓰기 0개, 합성 테스트 4개, 변경 롬 17벌과 원본에서 AI 가 고른 행동 15건·メラ 피해·갑옷이 빼는 양을 견주었습니다. 받는 칸은 게임에서 효과가 바뀐 것뿐이고, 나머지는 todo 의 질문으로 남겼습니다. 전투 MP 를 바꾸면 AI MP(`mp`)도 함께 적습니다. 실측 결과 `work/aicheck/`는 원래 체크아웃 `work/dq5-aiwrite/`에 복사해 둡니다.
 
+### 그림 번호 A9 이상
+
+`dq5picturegrow.py`(`dq5pictures/1`)와 실측 도구 `dq5picturegrowcheck.py`로 마쳤습니다([일지](journal/2026-10-27-54-picturegrow.md), [쓰기 형식](docs/dq5-build-format.md#인물-그림-번호-표-늘리기-dq5pictures1)). 그림 표를 `--at` 에 256개까지 옮기고 `1E:DC67` 의 물체 판정을 표로 바꿉니다. 말 걸기 목록 `05:862F` 도 함께 옮겨 그림마다 `talk_skip` 으로 고릅니다. 원본 왕복, 합성 테스트 5개, 02/06 5장면(그림 `A9` 가 원래 롬에서는 말을 걸 수 없고 늘린 표에서는 걸림, 물체·`talk_skip` 이면 막힘)을 확인했습니다. 기존 그림의 세트 잇기는 `dq5spritewrite.py` 의 `gfx` 이고, 표를 옮긴 빌드에서는 이 도구의 문서로 적습니다. 실측 결과 `work/picturegrowcheck/`는 원래 체크아웃 `work/dq5-picturegrow/`에 복사해 둡니다.
+
 ### 3. 병합과 후속 도구
 
 두 워크트리의 변경을 먼저 보존해 커밋한 뒤 최신 `origin/main`과 맞춥니다. 각 작업은 별도 PR로 검토하며, 일지 번호·README·todo·핸드오프를 갱신하고 문서 검사·Python/Lua 문법 검사·관련 테스트·`ci-ok`를 통과시킨 뒤 머지합니다. 새 파일은 `git ls-files` 기반 검사에서 빠지지 않도록 추가한 상태로 검사합니다. 새 테스트는 unittest이며 pytest를 전제로 실행하지 않습니다.
