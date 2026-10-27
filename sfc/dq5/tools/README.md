@@ -136,6 +136,8 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5spritewritecheck.py rom --state 선실 --out 폴더` | 02/06 에서 6타일·8타일·새 세트 그림을 바꾼 롬과 원본을 `dq5gfxdump.lua` 로 덤프해 VRAM 타일·칸 목록·OAM 묶음 비교. `MESENCE` 필요 |
 | `dq5objpalette.py rom dump -o\|patch\|check` | 필드 OBJ 팔레트 0~7(`04:96D6`, 256바이트) 색, 맵 팔레트(`01:9A12`) 기존 항목 색, 세트 팔레트 배정(0~3). `dump` 는 팔레트마다 쓰는 세트·그림 번호. [쓰기 형식](../docs/dq5-build-format.md#obj-팔레트세트-팔레트-배정-dq5objpalette1) |
 | `dq5objpalettecheck.py rom --state 선실 --out 폴더` | 02/06·04/06 에서 팔레트 1 색·세트 84 팔레트 2·04/06 맵 팔레트를 바꾼 롬과 원본의 CGRAM OBJ 줄·OAM 팔레트 비교. `MESENCE` 필요 |
+| `dq5objtiles.py rom dump -o 폴더\|patch\|check` | 맵 OBJ 타일(`1F:D59A` 의 17개 자료)·탈것 타일(4개 자료)을 타일 시트 PNG 에서 다시 압축(`1F:D28B` 꼴). 넘치면 `--at` 에 두고 항목 주소·`LDA`/`LDX` 피연산자를 고침. [쓰기 형식](../docs/dq5-build-format.md#맵-obj-타일탈것-타일-dq5objtiles1) |
+| `dq5objtilescheck.py rom --state 선실 --out 폴더` | 04/06 맵 OBJ·양탄자 타일을 옮긴 롬과 원본에서 VRAM 타일 비교(`FIELD`·`LATESET=1954=80`). `MESENCE` 필요 |
 | `dq5flags.py rom [2192.7]` | DQ5 이야기 플래그(`7E:2190`~`220F`) 비트·바이트마다 켜는 곳·끄는 곳·보는 곳(대화·인물 스크립트·인물 목록 표·맵별 루틴·맵 조건 표·이벤트 스크립트·네이티브 `BRK 0B`·`0C`·`0D`·롱 주소)과 문맥 메시지. `--source` 출처 고르기, `--check flagtrace.txt` 로 게임 기록과 대조 |
 | `dq5story.py rom` | DQ5 이야기 진행 지도. 사건마다 켜는 비트·거는 곳에 그 비트를 보는 인물 목록·맵 표를 붙인 표, `--lists` 로 조건 비트별 인물 목록 표([dq5-story.md](../docs/dq5-story.md)) |
 | `dq5event.py rom [주소]` | DQ5 이벤트 스크립트(`00:BEC3`). 이벤트 표 `23:E2C2` 10개의 목표 자리와 스크립트, 주소를 주면 그 스크립트, `--all` 로 `15:F150`~`F7CF` 의 86개, `--number N` 스크립트 번호 표(`23:E325`), `--starts` 번호 표·이벤트 표·코드·`02:B705` 직접 호출·점프에서 모은 106개, `--list` 시작 주소·부르는 곳(`LDA #n` + `JSL` 이나 받침 루틴 `JMP`)·첫 메시지 한 줄씩 |
