@@ -156,12 +156,19 @@ class SlotTests(unittest.TestCase):
             self.assertEqual(len(slot_guard(rom, ORIGINAL, *more, rows, True)), 1)
             # 새 맵은 원본 값이 없어 1F 까지, 인물이 있을 때만 늘어난 맵으로 알린다(그룹 전체 물체 01/7F 도 셈).
             fresh = [(BASE, [(BASE, DAY), (0, NIGHT)]), ('01/03', [(BASE, DAY)])], [(ALT, [(ALT, DAY)])]
-            self.assertEqual(slot_guard(rom, ORIGINAL, *fresh, rows, False, [(1, 3)]), ['01/03 낮 01/03 슬롯 0x0a'])
+            self.assertEqual(slot_guard(rom, ORIGINAL, *fresh, rows, False, [(1, 3)]), ['01/03 낮 01/03 슬롯 0x0a 남은 슬롯 22'])
             empty = [(BASE, [(BASE, DAY), (0, NIGHT)]), ('01/03', [])], [(ALT, [(ALT, DAY)])]
             self.assertEqual(slot_guard(rom, ORIGINAL, *empty, rows, False, [(1, 3)]), [])
             full = [(BASE, [(BASE, DAY)] * 22)], [(ALT, [(ALT, DAY)])]
             with self.assertRaises(ValueError):
                 slot_guard(rom, ORIGINAL, *full, rows, True)
+            # 장면이 슬롯을 더 쓰는 맵은 그만큼 한도가 낮다. 01/02 낮 인물 20명 + 물체 2개 = 슬롯 1E.
+            twenty = [(BASE, [(BASE, DAY)] * 20)], [(ALT, [(ALT, DAY)])]
+            self.assertEqual(len(slot_guard(rom, ORIGINAL, *twenty, rows, True)), 1)
+            with mock.dict('dq5npclists.SCENE_SLOTS', {(1, 2): 4}), self.assertRaises(ValueError):
+                slot_guard(rom, ORIGINAL, *twenty, rows, True)
+            with mock.dict('dq5npclists.SCENE_SLOTS', {(1, 2): 2}):
+                self.assertEqual(slot_guard(rom, ORIGINAL, *twenty, rows, True)[0].split('남은 슬롯 ')[1], '0(장면이 더 쓰는 2칸 뺌)')
 
 
 class RoutineTests(unittest.TestCase):

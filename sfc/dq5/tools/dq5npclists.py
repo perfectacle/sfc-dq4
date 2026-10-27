@@ -20,6 +20,13 @@ NO_NPC_MAX = 63
 MAP_OBJECTS = 0x16F862      # 16:F60D 가 인물 뒤에 같은 슬롯 번호($81)로 놓는 맵 OBJ 물체 표(9바이트 항목)
 SLOT_FIRST = 8              # 00:E1A9 가 $81 을 8 로 시작한다
 SLOT_LIMIT = 0x1F           # 원본 모든 맵·낮밤에서 물체까지 놓은 뒤 $81(7E:1983) 의 최댓값
+SLOT_END = 0x20             # 인물 표는 칸마다 $20 슬롯이라 슬롯 20 부터는 다음 칸의 슬롯 0 을 덮는다
+# 맵을 놓은 뒤 장면 코드가 7E:1983 부터 더 쓰는 슬롯 수. 04:FB1C 는 하나를 만들고 $1983 을 늘리고,
+# 01:BA95 는 $1983 부터 넷을 쓰되 $1983 은 늘리지 않는다. 1A/02·06/08·06/00 은 게임에서 잼,
+# 나머지는 부르는 인물·이벤트를 코드에서 따라간 것이다(sfc/dq5/docs/dq5-map-format.md 「인물 슬롯」).
+SCENE_SLOTS = {(0x1A, 0x02): 1, (0x06, 0x08): 1, (0x06, 0x00): 4, (0x1A, 0x00): 2, (0x22, 0x00): 1,
+               (0x01, 0x05): 2, (0x1F, 0x00): 4, (0x23, 0x00): 4, (0x1F, 0x08): 4, (0x23, 0x06): 4,
+               (0x02, 0x00): 4}
 FIND_OVERRIDE = 0x1282FB
 FIND_OVERRIDE_HEAD = bytes.fromhex('8b 08 4b ab c2 10')
 NAME = re.compile(r'[A-Za-z0-9_-]{1,32}')
@@ -258,15 +265,21 @@ def slot_guard(rom, original, base, alt, overrides, allow_growth, new_maps=()):
     for (bc, bd), key in sorted(pairs(overrides) | fresh, key=str):
         for night in (False, True):
             used = SLOT_FIRST + placed(new_lists[key], night) + map_objects(rom, bc, bd, night)
+            extra = SCENE_SLOTS.get((bc, bd), 0)
             # 새 맵은 원본에 잰 값이 없어 원본 전체 최댓값까지 받는다(늘어난 맵으로 출력).
-            limit = SLOT_LIMIT if allow_growth or (bc, bd) in new_maps else \
+            # 늘릴 때는 장면이 더 쓰는 슬롯까지 슬롯 1F 안에 들어야 한다.
+            grown = min(SLOT_LIMIT, SLOT_END - extra)
+            limit = grown if allow_growth or (bc, bd) in new_maps else \
                 most.get((bc, bd, night), SLOT_FIRST + map_objects(rom, bc, bd, night))
             name = key if isinstance(key, str) else cpu(key)
             if used > limit:
                 raise ValueError(f'{map_name(bc, bd)} {"밤" if night else "낮"} {name}: 인물·물체 뒤 슬롯 {used:#04x} 가 '
-                                 f'한도 {limit:#04x} 를 넘음' + ('' if allow_growth else '(--allow-growth 로 1F 까지)'))
+                                 f'한도 {limit:#04x} 를 넘음' + (f'(장면이 슬롯 {extra}칸을 더 씀)' if extra else '')
+                                 + ('' if allow_growth else f'(--allow-growth 로 {grown:02X} 까지)'))
             if used > most.get((bc, bd, night), SLOT_FIRST + map_objects(rom, bc, bd, night)):
-                report.append(f'{map_name(bc, bd)} {"밤" if night else "낮"} {name} 슬롯 {used:#04x}')
+                left = SLOT_END - used - extra
+                report.append(f'{map_name(bc, bd)} {"밤" if night else "낮"} {name} 슬롯 {used:#04x} 남은 슬롯 {left}'
+                              + (f'(장면이 더 쓰는 {extra}칸 뺌)' if extra else ''))
     return report
 
 

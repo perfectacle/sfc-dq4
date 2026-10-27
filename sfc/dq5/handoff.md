@@ -102,7 +102,11 @@ git worktree list
 
 ### 그림 번호 A9 이상
 
-`dq5picturegrow.py`(`dq5pictures/1`)와### 3. 병합과 후속 도구
+`dq5picturegrow.py`(`dq5pictures/1`)와### 맵을 놓은 뒤 더 쓰는 인물 슬롯
+
+`04:FB1C`(슬롯 하나, `$1983` 늘림)·`01:BA95`(슬롯 넷, `$1983` 그대로)가 도는 맵을 찾아 `dq5npclists.SCENE_SLOTS` 에 넣고, `dq5npcrelocate.py --allow-growth` 한도를 맵마다 「`20` − 장면이 더 쓰는 수」로 바꿨습니다([일지](journal/2026-10-27-63-slotuse.md)). 1A/02·06/08·06/00 은 실측, 나머지는 코드 읽기입니다. 슬롯 `20` 은 다음 칸의 슬롯 0 을 덮는 것을 확인했습니다(`dq5slotusecheck.py` 6건). 실측 결과 `work/slotusecheck/`는 원래 체크아웃 `work/dq5-slotuse/`에 복사해 둡니다.
+
+### 3. 병합과 후속 도구
 
 두 워크트리의 변경을 먼저 보존해 커밋한 뒤 최신 `origin/main`과 맞춥니다. 각 작업은 별도 PR로 검토하며, 일지 번호·README·todo·핸드오프를 갱신하고 문서 검사·Python/Lua 문법 검사·관련 테스트·`ci-ok`를 통과시킨 뒤 머지합니다. 새 파일은 `git ls-files` 기반 검사에서 빠지지 않도록 추가한 상태로 검사합니다. 새 테스트는 unittest이며 pytest를 전제로 실행하지 않습니다.
 

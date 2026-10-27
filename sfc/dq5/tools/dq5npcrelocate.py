@@ -357,7 +357,7 @@ def main():
     write.add_argument('--newmap-doc', type=Path,
                        help='dq5newmap/1 문서. 원래 롬에 없는 맵을 새 맵으로 받고, --new-map 을 함께 주면 둘이 같은지 본다')
     write.add_argument('--allow-growth', action='store_true',
-                       help='맵의 원본 최대 대신 슬롯 1F 까지 인물을 늘림(맵에서 04:FB1C 등이 더 쓰는 슬롯은 따지지 않음)')
+                       help='맵의 원본 최대 대신 슬롯 1F 까지 인물을 늘림(맵을 놓은 뒤 장면이 슬롯을 더 쓰는 맵은 그만큼 낮음)')
     sub.add_parser('check')
     args = parser.parse_args()
     try:

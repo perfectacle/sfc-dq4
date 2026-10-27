@@ -43,6 +43,7 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5npcwrite.py rom dump\|encode\|patch\|check` | 인물 인라인 JSON(`dq5npcscript/1`). `dump BB:AAAA -o 입력`은 길이 바이트 주소를 받음. `patch 입력 -o 목록`은 원본 슬롯 크기를 유지하고 남는 부분을 `00`으로 채움. 상대 분기는 라벨 지원. [쓰기 형식](../docs/dq5-build-format.md#인물-스크립트-dq5npcscript1) |
 | `dq5npcrelocate.py rom dump\|patch\|check` | 인물 스크립트 길이를 바꾸어 기본·대체 목록을 각각 확장 뱅크로 재배치. `--base`·`--alt`, `--report`로 주소 대응표 출력, `--records`로 `dq5npcrecord/1` 수정을 옮긴 사본에 넣음. `lists`·`new_lists`·`overrides`·`no_npc` 로 인물 수·순서·새 대체 목록·조건 표(대체 표는 `12:82FB` 를 새 루틴으로 옮김), `--allow-growth` 로 슬롯 `1F` 까지, `--new-map GG/MM` 으로 새 맵 기본 목록을 그룹 끝에 |
 | `dq5npcrelocatecheck.py rom --state 상태 --out 폴더` | MesenCE 원본·재배치 인물 표와 3바이트 스크립트 포인터 비교. `--all` 맵 346개 낮밤·대체 목록 2건, `--mutations` 긴 스크립트 실행 5건 추가, `--jobs` 동시 실행 수. `MESENCE` 필요 |
+| `dq5slotusecheck.py rom --state 선실 --out 폴더` | 맵을 놓은 뒤 슬롯을 더 쓰는 장면(1A/02 여관·06/08 이벤트 3·대화 `23A`)과 슬롯 `20` 넘침, 1A/02 를 인물 23명으로 늘린 롬과 24명 거부를 잼. `04:FB1C`·`01:BA95` 가 쓴 슬롯·`$1983`·`$1995` 를 봄. `MESENCE` 필요 |
 | `dq5npcrecord.py rom dump -o\|patch\|check` | 인물 엔트리 2,483개의 좌표·방향·그림·대화 번호·층·이동·걸음·애니메이션 간격, 한 벌 엔트리 낮/밤, 대체 표 296개·빈 맵 표 43개 기존 항목을 제자리에서 고침. 길이·수·순서·모르는 비트 보존. [쓰기 형식](../docs/dq5-build-format.md#인물-레코드등장-조건-dq5npcrecord1) |
 | `dq5npcrecordcheck.py rom --state 선실 --out 폴더` | 원본과 변경 롬 3벌(레코드, `--records` 재배치, 대체 조건)로 02/06 7장면을 돌려 인물 표 23칸·말 걸기 메시지 번호·고른 목록 비교. `MESENCE` 필요 |
 | `dq5npclists.py` | `dq5npcrelocate.py` 가 쓰는 목록 구조·조건 표 계획, 맵 OBJ 물체 수(`16:F862`), 슬롯 한도, 옮긴 대체 표 찾기 루틴 조립 |
@@ -186,6 +187,7 @@ uv run --locked python sfc/dq5/tools/dq5assets.py rom/dq5.sfc --out "$ASSETS/sfc
 | `lua/dq5windowcheck.lua` | `FRAMES` 마다 BG3 타일맵 버퍼 `7E:5000`~`57FF` 와 화면을 남김. `dq5windowcheck.py` 가 드라이버를 준비 | `DRIVER`, `FRAMES` | `bg3-fNNNNN.bin`, `fNNNNN.png` |
 | `lua/dq5namelive.lua` | 이름 문자열을 복사한 뒤(`21:959A`) 그 프레임 끝까지 직접 페이지 `$00`~`$3F` 에서 처음 접근이 읽기인 이름 뒤 주소를 기록 | `DRIVER` | `live.txt` |
 | `lua/dq5npcrelocatecheck.lua` | 인물 배치 직후 `12:803C`에서 목적지 맵의 WRAM을 저장. `dq5npcrelocatecheck.py`가 드라이버와 환경을 준비 | `CHECK_GROUP`, `CHECK_MAP`, `DRIVER` | `npc.bin` |
+| `lua/dq5slotuse.lua` | `04:FB1C`·`01:BA95`·`02:B3B4` 와 그 부르는 곳을 지날 때 맵·`$1982`·`$1983`·`$1995`·Y 를, 메시지 번호와 함께 `slots.txt` 에 적고 `01:BA95` 앞뒤 WRAM 을 남김. `dq5slotusecheck.py`가 준비 | `DRIVER`, 드라이버 변수 | `slots.txt`, `ba95-before.wram`, `ba95-after.wram`, `final.wram` |
 | `lua/dq5battleflee.lua` | 걷기 드라이버(`boot.lua`)가 붙인 무작위 전투에서 정한 프레임 동안 60프레임마다 아래·A 를 눌러 にげる 를 고름. 덤프는 `DUMPER` 의 Lua(보통 `dq5gfxdump.lua`) | `FLEE="900-1800"`, `DUMPER` | `DUMPER` 의 출력 |
 | `lua/dq5npcrecordcheck.lua` | `dq5warp.lua`(LIBDIR 의 `boot.lua`)로 맵에 들어가며 `12:803C`에서 WRAM 을 저장하고, 맵을 다 놓은 직후(`00:E1CC`)의 `7E:1982`·`1983` 과 들어간 뒤 `24:8BAF`가 받은 메시지 번호를 `warp.txt`에 덧붙임. `dq5npcrecordcheck.py`·`dq5npclistcheck.py`가 준비 | `CHECK_GROUP`, `CHECK_MAP`, `dq5warp.lua` 의 변수 | `npc.bin`, `warp.txt`, `end.png` |
 | `lua/dq5aicheck.lua` | `20:8846`(작전 AI 에서 돌아온 직후)마다 행동자 `$1200`·행동 `$1201`·대상 `$1202` 를 적고 DRIVER 를 실행. `dq5aicheck.py`가 준비 | `DRIVER`, 드라이버 변수 | `decisions.txt` |
