@@ -24,6 +24,7 @@ NMI_STUB = 0x00FFA1               # NMI 00:887C 가 들르는 받침(대기열�
 NAME_LISTS = (0x0C, 0x0E, 0x11, 0x13, 0x2C, 0x36, 0x38, 0x3D, 0x4A, 0x4F, 0x6F, 0x7A, 0x7F)
 # 주문 목록 창(본문 00 81 FE D6 FF). 다섯 글자 칸을 한글 일곱 칸으로 오른쪽으로 넓힌다.
 SPELL_WINDOW = 0x28
+PREFIX_HOOK = 0x04B11E            # 창 바이트 갈래(메뉴 패치가 JSL 로 바꿔 둔 자리). 고정 문구 접두를 먼저 가른다
 
 
 def lorom(a):
@@ -55,7 +56,14 @@ def apply(data, font=None, asar=None):
         raise ValueError(f'창 {SPELL_WINDOW:02X} 머리 {d[o:o + 9].hex()}: 주문 목록 창 모양이 아님')
     d[o + 2] += 2
     hi_count = -(-len(ne.GLYPHS) // ne.CODE_RADIX)
-    text, _ = dq4windowtext.build(d, font or dq4menupatch.Font('galmuri9'))
+    font = font or dq4menupatch.Font('galmuri9')
+    text, _ = dq4windowtext.build(d, font)
+    records, _ = dq4windowtext.fixed_records(d, font)
+    for o, rec in records:
+        d[o:o + len(rec)] = rec
+    po = lorom(PREFIX_HOOK)
+    if d[po] != 0x22:
+        raise ValueError(f'{PREFIX_HOOK:06X} 가 JSL 이 아님: {d[po:po + 4].hex()}')
     t = lorom(dq4windowtext.TEXT_BANK << 16 | dq4windowtext.INDEX)
     if any(d[lorom(NMI_STUB):lorom(NMI_STUB) + 13]):
         raise ValueError(f'{NMI_STUB:06X} 가 비어 있지 않음')
@@ -69,7 +77,9 @@ def apply(data, font=None, asar=None):
     flag = re.search(r'^!flag\s*=\s*\$([0-9A-Fa-f]{6})', (HERE / 'dq4nameentry.asm').read_text(), re.M).group(1)
     defs = (f'!wn_code = ${CODE:06X}\n!wn_hi_base = ${ne.HI_BASE:02X}\n!wn_hi_count = {hi_count}\n'
             f'!wn_glyph_bank = ${ne.GLYPH_BANK:02X}\n!wn_list_prev = ${int.from_bytes(d[o + 1:o + 4], "little"):06X}\n'
-            f'!wn_menu_flag = ${flag}\n!wt_bank = ${dq4windowtext.TEXT_BANK:02X}\n')
+            f'!wn_menu_flag = ${flag}\n!wt_bank = ${dq4windowtext.TEXT_BANK:02X}\n'
+            f'!wt_prefix_prev = ${int.from_bytes(d[po + 1:po + 4], "little"):06X}\n'
+            f'!wt_fixed = ${dq4windowtext.FIXED_PREFIX:02X}\n!wt_fixed_kind = {dq4windowtext.FIXED_KIND}\n')
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         (tmp / 'main.asm').write_text(defs + (HERE / 'dq4windowname.asm').read_text())
