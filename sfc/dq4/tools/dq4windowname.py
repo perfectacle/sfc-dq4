@@ -4,6 +4,7 @@
 이름 칸을 4칸에서 5칸으로 넓혀 Galmuri9 한글 넉 자(40점)를 담는다. 창 02(필드 상태 창)는 일행마다 열을 되풀이하므로
 머리 너비 6 → 7 과 함께 열 간격 상수(04:A394·A3A4·B18E)를 5 → 6 으로 바꾼다(asm).
 목록·つよさ 류의 공통 이름 출력 04:B79B 도 같은 렌더러로 그린다.
+도구 이름 등 이름 표 문자열은 dq4windowtext 가 만든 그림을 칸 풀에서 빌린 칸에 올린다(04:B808).
 """
 import os
 import re
@@ -14,9 +15,10 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 
 CODE = 0x60C000
-CODE_END = 0x60D000
+CODE_END = 0x60E000
 STATUS_WINDOW = 0x02
 LIST_HOOK = 0x04B79B
+NMI_STUB = 0x00FFA1               # 00:8926 의 JSR 이 부르는 받침(JSL WqNmi / JMP $894F)
 # 이름 하나를 04:B79B 로 찍는 「누구」 고르기 창(본문에 D0 자리 표시). 이름 칸 5칸을 담게 한 칸 왼쪽으로 옮겨 넓힌다.
 # 오른쪽에는 이어서 열리는 창(도구·주문 목록 등)이 붙어 있어 오른쪽으로는 넓히지 않는다.
 NAME_LISTS = (0x0C, 0x0E, 0x11, 0x13, 0x2C, 0x36, 0x38, 0x3D, 0x4A, 0x4F, 0x6F, 0x7A, 0x7F)
@@ -26,9 +28,10 @@ def lorom(a):
     return ((a >> 16) & 0x7F) * 0x8000 + (a & 0x7FFF)
 
 
-def apply(data, asar=None):
+def apply(data, font=None, asar=None):
     import dq4menupatch
     import dq4nameentry as ne
+    import dq4windowtext
     asar = asar or os.environ.get('ASAR')
     if not asar:
         raise SystemExit('ASAR 에 asar 실행 파일을 주세요(sfc/dq4/docs/dq4-menu-format.md)')
@@ -46,6 +49,13 @@ def apply(data, asar=None):
         d[o] -= 1
         d[o + 2] += 1
     hi_count = -(-len(ne.GLYPHS) // ne.CODE_RADIX)
+    text, _ = dq4windowtext.build(d, font or dq4menupatch.Font('galmuri9'))
+    t = lorom(dq4windowtext.TEXT_BANK << 16 | dq4windowtext.INDEX)
+    if any(d[lorom(NMI_STUB):lorom(NMI_STUB) + 7]):
+        raise ValueError(f'{NMI_STUB:06X} 가 비어 있지 않음')
+    if any(d[t:t + len(text)]):
+        raise ValueError(f'{dq4windowtext.TEXT_BANK:02X}:{dq4windowtext.INDEX:04X} 가 비어 있지 않음')
+    d[t:t + len(text)] = text
     # 04:B79B 는 이름 입력이 먼저 NeListHook 으로 훅해 둔다. 메뉴 플래그가 켜져 있거나 한글이 아니면 그리로 넘긴다.
     o = lorom(LIST_HOOK)
     if d[o] != 0x5C:
@@ -53,7 +63,7 @@ def apply(data, asar=None):
     flag = re.search(r'^!flag\s*=\s*\$([0-9A-Fa-f]{6})', (HERE / 'dq4nameentry.asm').read_text(), re.M).group(1)
     defs = (f'!wn_code = ${CODE:06X}\n!wn_hi_base = ${ne.HI_BASE:02X}\n!wn_hi_count = {hi_count}\n'
             f'!wn_glyph_bank = ${ne.GLYPH_BANK:02X}\n!wn_list_prev = ${int.from_bytes(d[o + 1:o + 4], "little"):06X}\n'
-            f'!wn_menu_flag = ${flag}\n')
+            f'!wn_menu_flag = ${flag}\n!wt_bank = ${dq4windowtext.TEXT_BANK:02X}\n')
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         (tmp / 'main.asm').write_text(defs + (HERE / 'dq4windowname.asm').read_text())

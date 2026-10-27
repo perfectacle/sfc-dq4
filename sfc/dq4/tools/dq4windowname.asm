@@ -41,6 +41,19 @@ org $24A4E0
     JML WnBattleChar
     NOP
     NOP
+; NMI 가 $1946 작업(평소 00:8DE9, 게임이 목록을 보낼 때만 00:8CEF)으로 가기 전에 우리 대기열을 보낸다.
+; 게임 목록은 게임이 프레임 끝에 한 번 보내는 장치라, 창을 그리는 도중에 끼어들면 메뉴 흐름이 어긋났다.
+org $008926
+    JSR $FFA1
+org $00FFA1
+    JSL WqNmi
+    JMP $894F
+
+; 이름 표 문자열(도구 이름 등)을 글자마다 04:B235 로 찍는 자리. PHX / SEP #$10 / LDX #$00
+org $04B808
+    JML WnText
+    NOP
+
 ; 글 버퍼를 타일맵 버퍼(7E:5546~)의 낮은 바이트로 옮기는 자리
 org $24A5E9
     JSL WnBattleCell
@@ -73,6 +86,26 @@ org $24A5E9
 !wn_bkeys = $1D20           ; 전투 이름 4자리 × 8바이트: 자리마다 이름 바이트
 !wn_bnext = $1D40           ; 다음에 내줄 전투 이름 자리
 !wn_attr  = $1D42           ; 이름 줄 타일맵 높은 바이트(색). 0 이면 버퍼에 있던 것을 살림
+!wt_stack = $1D83           ; 전용 스택 맨 위(1D44~1D83). 협동식 작업마다 낮은 WRAM 에 작은 스택이 있어, 그 스택을 깊게 쓰지 않는다
+!wt_keys  = $3D20           ; 12 워드(7E): 슬롯마다 버퍼 자리($E0 + Y)
+!wt_ages  = $3D38           ; 12 워드: 마지막으로 쓴 때
+!wt_age   = $3D50           ; 쓸 때마다 하나씩
+!wt_sp    = $3D60           ; 원래 스택 포인터(7E)
+!wt_cols  = $1D84           ; 그릴 열 수
+!wt_base  = $1D86           ; 빌린 첫 칸. 글자 줄 열 칸 다음에 위 줄 열 칸
+!wt_ptr   = $1D88           ; 그림 자리(뱅크 !wt_bank 안)
+!wt_len   = $1D8A           ; 원래 문자열 길이($00)
+!wq_count = $3D62           ; 우리 전송 대기열 항목 수(7E, NMI 가 보내고 0 으로)
+!wq_off   = $3D64           ; 대기열에 다음으로 쓸 자리
+!wq_buf   = $3EA0           ; 대기열 7E:3EA0~3FFF. 항목 [VRAM 워드 2][방식 1][칸 수 1][그림]
+!wq_size  = $0160
+!wq_left  = $3D66           ; NMI 안에서만: 남은 항목 수
+!wq_head  = $3D68           ; NMI 안에서만: 방식·칸 수
+!wq_len   = $3D6A           ; NMI 안에서만: 그림 바이트 수
+
+; 칸 풀: 1FF~1D0, 이어서 17F~B0 을 위에서부터 빌린다. 096~0AF 는 전투 글자, 180~1CF 는 상태 창 이름 자리라 넣지 않는다.
+; 걷는 메시지 캔버스는 096 부터 위로 채우므로 위에서부터 빌리면 겹치기 어렵다. 전투 연출(B0~122)과 전투 이름(1D0~1F7)은
+; 목록 창이 닫힌 뒤에 쓰인다.
 
 ; 전투 글은 바이트가 곧 BG3 타일 번호(낮은 8비트)이고 E2 이상은 제어 코드다. 공격 연출이 BG3 칸 B0~122 를 덮으므로
 ; 이름 그림은 칸 1D0~1F7 에 두고, 글에는 코드 B0~D7(1D0 - 120 ~)을 쓴다. 이름 4자리 × 10칸(아래 줄 5 + 위 줄 5).
@@ -852,6 +885,500 @@ WnTilemap:
     INY
     DEC.w !wn_r
     BNE -
+    RTS
+
+; 04:B808. $43 = 이름 표 번호, $42 = 이름 번호, $00·$01~ = 원래 문자열, ($E0),Y = 타일맵 버퍼 자리.
+; 원래는 글자마다 04:B235 로 쓰고 REP #$10 / PLX 뒤 04:BFF2 로 간다.
+WnText:
+    PHX
+    REP #$30
+    LDA.b $43
+    AND #$00FF
+    CMP #$0008
+    BCC +
+    JMP .original
++
+    XBA
+    ASL                     ; 번호 × 200
+    STA.l $7E0000|!wt_ptr
+    LDA.b $42
+    AND #$00FF
+    ASL
+    CLC
+    ADC.l $7E0000|!wt_ptr
+    TAX
+    LDA.l (!wt_bank<<16)|$8000,X
+    BNE +
+    JMP .original
++
+    STA.l $7E0000|!wt_ptr
+    PHB
+    SEP #$20
+    LDA #$7E
+    PHA
+    PLB
+    REP #$30
+    TSC
+    STA.w !wt_sp
+    LDA #!wt_stack
+    TCS
+    STY.w !wn_y
+    LDA #$0000
+    BIT.b $EC-1
+    BVC +
+    LDA.b $ED
+    AND #$00FF
+    XBA
++
+    STA.w !wn_attr
+    LDX.w !wt_ptr
+    LDA.l !wt_bank<<16,X
+    AND #$00FF
+    STA.w !wt_cols
+    ; 원래 루틴이 나아가는 칸 수: 탁점 바이트(84·83)는 위 줄에 탁점만 찍고 칸을 나아가지 않는다
+    STZ.w !wt_len
+    LDA.b $00
+    AND #$00FF
+    TAX
+    BEQ ++
+-
+    LDA.b $00,X
+    AND #$00FF
+    CMP #$0083
+    BEQ +
+    CMP #$0084
+    BEQ +
+    INC.w !wt_len
++
+    DEX
+    BNE -
+++
+    JSR WtAlloc
+    BCS .full
+    JSR WtQueue
+    JSR WtTilemap
+    ; Y 는 원래처럼 가나 글자 수만큼만 나아간다. 창 해석에는 Y 가 정한 열에 닿을 때까지 칸을 채우는 코드가 있어,
+    ; 그 열을 넘기면 끝나지 않고 WRAM 을 덮었다.
+    LDA.w !wt_len
+    ASL
+    CLC
+    ADC.w !wn_y
+    TAY
+    LDA.w !wt_sp
+    TCS
+    ; 원래처럼 A 에 마지막 글자 바이트를 남긴다(창 해석이 돌아가서 A 를 본다)
+    LDA.b $00
+    AND #$00FF
+    TAX
+    PLB
+    SEP #$20
+    REP #$10
+    LDA.b $00,X
+    PLX
+    JML $04BFF2
+.full
+    LDA.w !wt_sp
+    TCS
+    LDY.w !wn_y
+    PLB
+.original
+    SEP #$30
+    LDX #$00
+    JML $04B80D
+
+; 칸 슬롯: 20칸(최대 10열 × 글자 줄·위 줄)씩 12개. 같은 버퍼 자리($E0 + Y)에 다시 그리면 같은 슬롯을, 처음 보는 자리면
+; 가장 오래 쓰지 않은 슬롯을 쓴다. 타일맵 버퍼를 훑어 빈 칸을 찾던 방식은, 다른 창을 여는 동안 게임이 버퍼를 비워
+; 화면에 보이는 칸을 다시 빌렸다.
+WtAlloc:
+    LDA.b $E0
+    CLC
+    ADC.w !wn_y
+    STA.w !wn_key
+    INC.w !wt_age
+    LDX #$0000
+-
+    LDA.w !wt_keys,X
+    CMP.w !wn_key
+    BEQ .found
+    INX
+    INX
+    CPX #$0018
+    BCC -
+    ; 가장 오래된 슬롯
+    LDX #$0000
+    LDY #$0000
+    LDA #$FFFF
+    STA.w !wn_c
+-
+    LDA.w !wt_age
+    SEC
+    SBC.w !wt_ages,X        ; 지난 횟수(돌아가도 뺄셈이면 맞음)
+    CMP.w !wn_c
+    BCC +
+    BEQ +
+    STA.w !wn_c
+    TXY
++
+    ; 빈 슬롯(나이 0)은 가장 오래된 것으로
+    LDA.w !wt_ages,X
+    BNE +
+    TXY
+    BRA .pick
++
+    INX
+    INX
+    CPX #$0018
+    BCC -
+.pick
+    TYX
+    LDA.w !wn_key
+    STA.w !wt_keys,X
+.found
+    LDA.w !wt_age
+    STA.w !wt_ages,X
+    LDA.l WtSlot,X
+    STA.w !wt_base
+    CLC
+    RTS
+
+; 슬롯 첫 칸: 1D0·1E4 와 B0 부터 20칸씩 열(180~1CF 는 상태 창 이름, 096~0AF 는 전투 글자)
+WtSlot:
+    dw $01D0, $01E4, $00B0, $00C4, $00D8, $00EC, $0100, $0114, $0128, $013C, $0150, $0164
+
+; 대기열에 두 항목: 글자 줄(방식 1, 평면 0 만 열 × 8바이트, NMI 가 평면 1 을 FF 로)과 위 줄(방식 0, 두 평면 열 × 16바이트).
+; 위 줄은 지금 그 자리의 타일 그림에 글자 맨 윗줄을 겹친다. 넣는 동안은 NMI 를 끈다.
+WtQueue:
+    SEP #$20
+    LDA.b $1E
+    AND #$7F
+    STA.l $004200
+    REP #$20
+    LDA.w !wq_count
+    AND #$00FF
+    BNE +
+    STZ.w !wq_off
++
+    ; 필요한 바이트 = 8 + 열 × 24. 모자라면 대기열이 비워질 때까지 기다린다
+    LDA.w !wt_cols
+    ASL
+    ASL
+    ASL
+    STA.w !wn_c             ; 열 × 8
+    ASL
+    CLC
+    ADC.w !wn_c
+    CLC
+    ADC #$0008
+    CLC
+    ADC.w !wq_off
+    CMP #!wq_size+1
+    BCC .room
+    SEP #$20
+    LDA.b $1E
+    STA.l $004200
+    REP #$20
+    LDX #$0000
+-
+    LDA.w !wq_count
+    AND #$00FF
+    BEQ +
+    DEX
+    BNE -
++
+    SEP #$20
+    LDA.b $1E
+    AND #$7F
+    STA.l $004200
+    REP #$20
+    STZ.w !wq_off
+.room
+    ; 글자 줄 항목 머리
+    LDY.w !wq_off
+    LDA.w !wt_base
+    ASL
+    ASL
+    ASL
+    CLC
+    ADC #$1000
+    STA.w !wq_buf,Y
+    LDA.w !wt_cols
+    XBA
+    ORA #$0001
+    STA.w !wq_buf+2,Y
+    INY
+    INY
+    INY
+    INY
+    STZ.w !wn_k
+.lower
+    LDA.w !wn_k
+    ASL
+    ASL
+    ASL
+    ASL
+    CLC
+    ADC.w !wt_ptr
+    CLC
+    ADC #$0009              ; 열 수 바이트 + 위 줄 8줄
+    TAX
+    LDA #$0008
+    STA.w !wn_r
+-
+    LDA.l !wt_bank<<16,X
+    SEP #$20
+    STA.w !wq_buf,Y
+    REP #$20
+    INX
+    INY
+    DEC.w !wn_r
+    BNE -
+    INC.w !wn_k
+    LDA.w !wn_k
+    CMP.w !wt_cols
+    BCC .lower
+    ; 위 줄 항목 머리
+    LDA.w !wt_base
+    CLC
+    ADC.w !wt_cols
+    ASL
+    ASL
+    ASL
+    CLC
+    ADC #$1000
+    STA.w !wq_buf,Y
+    LDA.w !wt_cols
+    XBA
+    STA.w !wq_buf+2,Y
+    INY
+    INY
+    INY
+    INY
+    STZ.w !wn_k
+.upper
+    ; 위 줄 원래 타일: ($E0) + Y + 2 × 열 − 40
+    LDA.w !wn_k
+    ASL
+    CLC
+    ADC.w !wn_y
+    CLC
+    ADC.b $E0
+    SEC
+    SBC #$0040
+    TAX
+    LDA.w $0000,X
+    AND #$03FF
+    STA.w !wn_base
+    STZ.w !wn_r
+-
+    PHY
+    JSR WnBaseRow           ; A = p0 | p1 << 8
+    PLY
+    STA.w !wq_buf,Y
+    INY
+    INY
+    INC.w !wn_r
+    LDA.w !wn_r
+    CMP #$0008
+    BCC -
+    ; 7줄째에 글자 맨 윗줄
+    LDA.w !wn_k
+    ASL
+    ASL
+    ASL
+    ASL
+    CLC
+    ADC.w !wt_ptr
+    CLC
+    ADC #$0008              ; 열 수 바이트 + 위 줄 7줄
+    TAX
+    LDA.l !wt_bank<<16,X
+    AND #$00FF
+    STA.w !wn_t0
+    XBA
+    ORA.w !wn_t0
+    ORA.w !wq_buf-2,Y
+    STA.w !wq_buf-2,Y
+    INC.w !wn_k
+    LDA.w !wn_k
+    CMP.w !wt_cols
+    BCC .upper
+    STY.w !wq_off
+    SEP #$20
+    LDA.w !wq_count
+    CLC
+    ADC #$02
+    STA.w !wq_count
+    LDA.b $1E
+    STA.l $004200
+    REP #$30
+    RTS
+
+; NMI(00:FFA1 받침에서 JSL, DB = 00, D = 0). 대기열 항목을 DMA 채널 0 으로 보낸다.
+; 게임 목록(00:8CF9)도 채널 0 을 쓰며 보낼 때마다 다시 맞춘다.
+WqNmi:
+    PHP
+    PHB
+    SEP #$20
+    REP #$10
+    LDA.l $7E0000|!wq_count
+    BNE +
+    PLB
+    PLP
+    RTL
++
+    PHA
+    LDA #$7E
+    PHA
+    PLB
+    PLA
+    STA.w !wq_left
+    LDY #$0000
+.entry
+    REP #$20
+    LDA.w !wq_buf,Y
+    STA.l $002116
+    LDA.w !wq_buf+2,Y       ; 낮은 바이트 = 방식, 높은 바이트 = 칸 수
+    STA.w !wq_head
+    AND #$FF00
+    LSR
+    LSR
+    LSR
+    LSR
+    LSR                     ; 칸 × 8
+    STA.w !wq_len
+    TYA
+    CLC
+    ADC.w #!wq_buf+4
+    STA.l $004302
+    SEP #$20
+    LDA #$7E
+    STA.l $004304
+    LDA #$18
+    STA.l $004301
+    LDA.w !wq_head
+    BNE .plane0
+    ; 방식 0: 두 평면, 칸 × 16바이트
+    LDA #$80
+    STA.l $002115
+    LDA #$01
+    STA.l $004300
+    REP #$20
+    LDA.w !wq_len
+    ASL
+    STA.w !wq_len
+    STA.l $004305
+    SEP #$20
+    LDA #$01
+    STA.l $00420B
+    BRA .next
+.plane0
+    ; 방식 1: 평면 0 만(칸 × 8바이트), 이어서 같은 자리 평면 1 에 FF
+    LDA #$00
+    STA.l $002115
+    STA.l $004300
+    REP #$20
+    LDA.w !wq_len
+    STA.l $004305
+    SEP #$20
+    LDA #$01
+    STA.l $00420B
+    REP #$20
+    LDA.w !wq_buf,Y
+    STA.l $002116
+    LDA.w #WqFF
+    STA.l $004302
+    LDA.w !wq_len
+    STA.l $004305
+    SEP #$20
+    LDA #$80
+    STA.l $002115
+    LDA #$08                ; 고정 원본
+    STA.l $004300
+    LDA #$19
+    STA.l $004301
+    LDA.b #WqFF>>16
+    STA.l $004304
+    LDA #$01
+    STA.l $00420B
+.next
+    ; Y += 4 + 그림 바이트
+    REP #$20
+    TYA
+    CLC
+    ADC #$0004
+    CLC
+    ADC.w !wq_len
+    TAY
+    SEP #$20
+    DEC.w !wq_left
+    BEQ +
+    JMP .entry
++
+    STZ.w !wq_count
+    PLB
+    PLP
+    RTL
+
+WqFF:
+    db $FF
+
+; 타일맵: 글자 줄은 빌린 칸, 위 줄은 빌린 칸 + 열 수. 높은 바이트는 우선·팔레트만 살리고, 색($ED)이 있으면 글자 줄에 쓴다.
+WtTilemap:
+    STZ.w !wn_k
+-
+    LDA.w !wn_k
+    ASL
+    CLC
+    ADC.w !wn_y
+    CLC
+    ADC.b $E0
+    TAX
+    LDA.w !wn_attr
+    BNE +
+    LDA.w $0000,X
++
+    AND #$3C00
+    ORA.w !wt_base
+    CLC
+    ADC.w !wn_k
+    STA.w $0000,X
+    TXA
+    SEC
+    SBC #$0040
+    TAX
+    LDA.w $0000,X
+    AND #$3C00
+    ORA.w !wt_base
+    CLC
+    ADC.w !wn_k
+    CLC
+    ADC.w !wt_cols
+    STA.w $0000,X
+    INC.w !wn_k
+    LDA.w !wn_k
+    CMP.w !wt_cols
+    BCC -
+    ; 한글이 가나보다 짧으면 남는 칸을 빈칸으로
+-
+    LDA.w !wn_k
+    CMP.w !wt_len
+    BCS +
+    ASL
+    CLC
+    ADC.w !wn_y
+    CLC
+    ADC.b $E0
+    TAX
+    LDA.w !wn_attr
+    BNE ++
+    LDA.w $0000,X
+++
+    AND #$3C00
+    ORA #$0001
+    STA.w $0000,X
+    INC.w !wn_k
+    BRA -
++
     RTS
 
 WnShift:
