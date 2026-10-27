@@ -10,7 +10,7 @@
 
   python sfc/dq5/tools/dq5learnwrite.py rom/dq5.sfc dump -o work/learn.json
   python sfc/dq5/tools/dq5learnwrite.py rom/dq5.sfc patch work/learn.json -o work/learn.patch.json \\
-      [--learn-at 3F:8000 --stub-at 23:FF20] [--lists-at 3F:9000]
+      [--learn-at 3F:8000 --stub-at 23:FF20] [--lists-at 3F:9000] [--spells-from work/build/spellgrow.sfc]
   python sfc/dq5/tools/dq5learnwrite.py rom/dq5.sfc check work/learn.json [같은 옵션]
 """
 import argparse
@@ -35,6 +35,18 @@ LIST_REGION = (0x23BE27, 0x23C014)
 LDY_AT, LDY = 0x23ECD7, bytes.fromhex('a0 00 00')
 BASE_AT = {'person': 0x23ECE4, 'monster': 0x23ECEF}
 BANK_AT = {'field': 0x219CA2, 'battle': 0x219D13}
+# 사람이 일행에 들 때(21:8042 → 21:9F78 등) 인물 레코드 표 23:C014 의 칸을 그대로 베낀다. 습득 비트는 그 칸의 +23~+25 이고
+# 습득 표(23:EB50)는 이때 불리지 않는다(실측). 칸 +0 이 인물 번호(bit7 이면 동료 몬스터 종류).
+# dq5spellgrow.py 로 늘린 행동 번호(AB~). 20:AA9D 의 처리 루틴 JSR 이 20:FFE0 스텁으로 가면, 스텁 뒤 덧붙인 표
+# (20:FFEB~, 0000 이 아닌 칸)가 새 행동 수다. 11:801C 가 11:FFB0 스텁으로 가면 그 표(11:FFD2~)의 칸이 11:8022(멈춤)가
+# 아닌 새 번호만 필드에서 외울 수 있다.
+SPELLS = 0xAB
+HANDLER_CALL, HANDLER_STUB = 0x20AA9D, 0x20FFE0
+FIELD_CALL, FIELD_STUB, FIELD_HANG = 0x11801C, 0x11FFB0, 0x8022
+FIELD_SPELLS = set(range(0x27, 0x39)) - {0x2A, 0x2B, 0x30, 0x31}
+JOIN = 0x23C014
+JOIN_COUNT = 13
+JOIN_SIZE = 42
 
 
 def require(ok, message):
@@ -119,24 +131,61 @@ def decode(parts):
     return {'learn': learn, **{name: list(parts[name][1][1:]) for name in TABLES}}
 
 
+def join_owner(rom, entry):
+    """인물 레코드 표 칸의 (kind, index)."""
+    first = read(rom, JOIN + entry * JOIN_SIZE, 1)[0]
+    return ('monster', first & 0x7F) if first & 0x80 else ('person', first & 0x3F)
+
+
+def owner_name(owner):
+    return f'{owner[0]} {owner[1]:02X}'
+
+
+def join_rows(rom):
+    out = []
+    for k in range(JOIN_COUNT):
+        mask = int.from_bytes(read(rom, JOIN + k * JOIN_SIZE + 0x23, 3), 'little') & 0xFFFFF
+        out.append({'entry': k, 'owner': owner_name(join_owner(rom, k)), 'field_slots': [i for i in range(8) if mask >> i & 1],
+                    'battle_slots': [i for i in range(12) if mask >> (i + 8) & 1]})
+    return out
+
+
 def dump(rom):
     return {'format': FORMAT, 'characters': [dict(kind=kind, index=index, **decode(parts))
-                                            for (kind, index), parts in layout(rom).items()]}
+                                            for (kind, index), parts in layout(rom).items()],
+            'join': join_rows(rom)}
 
 
-def encode(old, change, floor=2, caps=None):
+def spells(rom):
+    """(전투 목록에 넣을 수 있는 가장 큰 행동 번호, 필드 목록에 넣을 수 있는 번호 집합)."""
+    battle, field = SPELLS - 1, set(FIELD_SPELLS)
+    if read(rom, HANDLER_CALL, 3) == bytes([0x20]) + (HANDLER_STUB & 0xFFFF).to_bytes(2, 'little'):
+        a = HANDLER_STUB + 11
+        while a + 2 <= 0x210000 and int.from_bytes(read(rom, a, 2), 'little'):
+            battle += 1
+            a += 2
+    if read(rom, FIELD_CALL, 3) == bytes([0x20]) + (FIELD_STUB & 0xFFFF).to_bytes(2, 'little'):
+        for n in range(SPELLS, battle + 1):
+            if int.from_bytes(read(rom, FIELD_STUB + 34 + (n - SPELLS) * 2, 2), 'little') != FIELD_HANG:
+                field.add(n)
+    return battle, field
+
+
+def encode(old, change, floor=2, caps=None, allowed=None):
     caps = caps or CAPS
+    battle_max, field_ok = allowed or (SPELLS - 1, FIELD_SPELLS)
     result = old | {k: v for k, v in change.items() if k in ('learn', 'field', 'battle')}
     for name in TABLES:
         values = result[name]
         require(isinstance(values, list) and len(values) <= caps[name], f'{name}: {caps[name]}칸까지의 배열이어야 함')
         for value in values:
-            integer(value, 0x27 if name == 'field' else 1, 0x38 if name == 'field' else 0xAA, name)
-            require(name != 'field' or value not in (0x2A, 0x2B, 0x30, 0x31), '필드에서 실행할 수 없는 주문')
+            integer(value, 1, battle_max, name)
+            require(name != 'field' or value in field_ok, f'필드에서 외울 수 없는 주문 {value:02X}')
     learn = result['learn']
     require(isinstance(learn, list) and len(learn) <= 99, 'learn: 99개까지의 배열이어야 함')
     # 23:EB50 은 레벨이 오를 때와 동료가 될 때(21:81D5, 처음 레벨) 그 레벨의 항목만 찾는다.
-    # floor 보다 낮은 레벨은 원본에 그 레벨 항목이 있던 경우만 받는다(사람의 레벨 1 항목은 쓰이는 때를 확인하지 못함).
+    # floor 보다 낮은 레벨은 원본에 그 레벨 항목이 있던 경우만 받는다. 사람이 일행에 들 때는 23:EB50 이 불리지 않아
+    # (실측) 사람의 레벨 1 항목은 쓰이지 않는다.
     low = {row['level'] for row in old['learn'] if row['level'] < floor}
     raw = bytearray([len(learn)])
     previous = 0
@@ -146,7 +195,8 @@ def encode(old, change, floor=2, caps=None):
         level = integer(row['level'], 1, 99, 'level')
         require(level > previous, '습득 레벨은 중복 없이 오름차순이어야 함')
         require(level >= floor or level in low,
-                f'레벨 {floor} 보다 낮은 항목은 배울 기회가 없음(몬스터는 동료 표의 처음 레벨, 사람은 2)')
+                f'레벨 {floor} 보다 낮은 항목은 배울 기회가 없음(몬스터는 동료 표의 처음 레벨, 사람은 2. '
+                '사람이 일행에 들 때의 주문은 습득 표가 아니라 join 으로 정함)')
         previous = level
         mask = 0
         for name, shift in (('field', 0), ('battle', 8)):
@@ -267,11 +317,14 @@ def place_lists(rom, cfg, original, blobs, lists_at):
     return where, start >> 16
 
 
-def patch(rom, doc, learn_at=None, stub_at=None, lists_at=None):
-    keys(doc, ('format', 'characters'), '문서')
+def patch(rom, doc, learn_at=None, stub_at=None, lists_at=None, spell_rom=None):
+    keys(doc, ('format', 'characters', 'join'), '문서')
     require(doc.get('format') == FORMAT and isinstance(doc.get('characters'), list), 'format/characters가 잘못됨')
+    require(isinstance(doc.get('join', []), list), 'join 은 배열이어야 함')
     cfg = config(rom)
     original = layout(rom, cfg)
+    # 행동 번호를 늘리는 패치(dq5spellgrow.py)와 함께 빌드할 때는 그 패치를 넣어 만든 롬에서 범위를 읽는다.
+    allowed = spells(spell_rom or rom)
     changes = {}
     for row in doc['characters']:
         keys(row, ('kind', 'index', 'learn', 'field', 'battle'), '인물')
@@ -282,7 +335,7 @@ def patch(rom, doc, learn_at=None, stub_at=None, lists_at=None):
         require(key not in changes, '중복 인물')
         floor = read(rom, COMPANIONS + index * 9, 1)[0] if kind == 'monster' else 2
         caps = CAPS if kind == 'person' else {**CAPS, 'battle': MONSTER_BATTLE}
-        changes[key] = encode(decode(original[key]), row, floor, caps)
+        changes[key] = encode(decode(original[key]), row, floor, caps, allowed)
     new = {key: {name: changes.get(key, {}).get(name, raw) for name, (_, raw) in parts.items()}
            for key, parts in original.items()}
     expected = {}
@@ -343,6 +396,34 @@ def patch(rom, doc, learn_at=None, stub_at=None, lists_at=None):
         for name in TABLES:
             if cfg['banks'][name] != list_bank:
                 put(BANK_AT[name], bytes([list_bank]), '목록 뱅크')
+    # 일행에 들 때의 습득 비트. 적지 않은 칸도 늘이거나 줄인 목록 길이 안인지 본다.
+    joins, seen = {row['entry']: row for row in join_rows(rom)}, set()
+    for row in doc.get('join', []):
+        keys(row, ('entry', 'owner', 'field_slots', 'battle_slots'), 'join 항목')
+        require({'entry', 'field_slots', 'battle_slots'} <= set(row), 'join 항목의 필드가 빠짐')
+        entry = integer(row['entry'], 0, JOIN_COUNT - 1, 'join entry')
+        require(entry not in seen, f'join 칸 {entry} 를 두 번 적음')
+        owner = join_owner(rom, entry)
+        require(row.get('owner', owner_name(owner)) == owner_name(owner), f'join 칸 {entry} 는 {owner_name(owner)} 의 칸')
+        seen.add(entry)
+        joins[entry] = row
+    for entry, row in joins.items():
+        owner = join_owner(rom, entry)
+        require(owner in new, f'join 칸 {entry}: 인물 {owner} 가 표에 없음')
+        mask = 0
+        for name, shift in (('field', 0), ('battle', 8)):
+            slots = row[name + '_slots']
+            require(isinstance(slots, list) and all(type(v) is int for v in slots) and len(set(slots)) == len(slots),
+                    'join 슬롯은 중복 없는 정수 배열이어야 함')
+            for slot in slots:
+                integer(slot, 0, len(new[owner][name]) - 2, f'join 칸 {entry} {name} slot')
+                mask |= 1 << (shift + slot)
+        at = JOIN + entry * JOIN_SIZE + 0x23
+        # 몬스터 칸(80·81)은 쓰이는 때를 확인하지 못했고, 몬스터 합류(21:81E5)는 +23~+25 를 습득 표 결과로 덮는다(코드 읽기).
+        require(owner[0] == 'person' or mask == int.from_bytes(read(rom, at, 3), 'little') & 0xFFFFF,
+                f'join 칸 {entry}: 동료 몬스터 칸은 바꾸지 않음(쓰임 미확인)')
+        high = read(rom, at + 2, 1)[0] & 0xF0
+        put(at, mask.to_bytes(3, 'little')[:2] + bytes([mask >> 16 | high]), '일행에 들 때 습득 비트')
     writes = changed_writes(expected, rom, '주문 습득·목록')
     result = {'format': 'dq5patch/1', 'name': 'learn', 'writes': writes}
     top = max((lorom(parse_at(w['at'], 'at')) + len(bytes.fromhex(w['hex'])) for w in writes), default=0)
@@ -372,6 +453,10 @@ def check(rom, doc=None, **options):
                                for e in want[key]['learn']]
     got = {(row['kind'], row['index']): row for row in dump(after)['characters']}
     require(got == want, '빌드한 롬을 다시 읽은 습득·목록이 입력과 다름')
+    joins = {row['entry']: row for row in original['join']}
+    joins.update({row['entry']: {**joins[row['entry']], 'field_slots': sorted(row['field_slots']),
+                                 'battle_slots': sorted(row['battle_slots'])} for row in source.get('join', [])})
+    require(dump(after)['join'] == [joins[k] for k in range(JOIN_COUNT)], '빌드한 롬의 일행에 들 때 습득 비트가 입력과 다름')
     require(not patch(after, source, **options)['writes'], '빌드한 롬에 같은 입력을 다시 패치하면 쓰기가 남음')
     cfg = config(after)
     print(f'인물 {len(source["characters"])}종, 쓰기 {len(writes)}개 {sum(len(w[1]) for w in writes)}바이트; '
@@ -388,11 +473,14 @@ def main():
     ap.add_argument('--learn-at', help='습득 표를 옮길 곳(뱅크 23 또는 30~3F)')
     ap.add_argument('--stub-at', help='습득 표가 뱅크 23 밖일 때 데이터 뱅크 루틴 8바이트를 둘 곳(뱅크 23)')
     ap.add_argument('--lists-at', help='주문 목록을 옮길 곳(뱅크 23 또는 30~3F)')
+    ap.add_argument('--spells-from', type=Path, help='dq5spellgrow.py 패치를 넣어 만든 롬. 늘린 행동 번호(AB~)를 받음')
     args = ap.parse_args()
     try:
         rom = Rom(args.rom.read_bytes())
         options = {name: parse_at(getattr(args, name), '--' + name.replace('_', '-'))
                    for name in ('learn_at', 'stub_at', 'lists_at') if getattr(args, name)}
+        if getattr(args, 'spells_from', None):
+            options['spell_rom'] = Rom(args.spells_from.read_bytes())
         require(args.command != 'dump' or args.source is None, 'dump에는 입력 파일을 주지 않음')
         if args.command == 'dump':
             result = dump(rom)

@@ -28,5 +28,48 @@ class TransferPlanTests(unittest.TestCase):
         self.assertAlmostEqual(arrivals[0x29], (1770 / rate + slack) / fps)
 
 
+def detail(source, rate, size):
+    return {'source': source, 'base_midi': 60, 'envelope': {'adsr1': 0xFF, 'adsr2': 0xE0}, 'source_loop': [0, 16],
+            'effective_rate': rate, 'resource_bytes': size}
+
+
+class ShareSamplesTests(unittest.TestCase):
+    def setUp(self):
+        self.resources, self.known = {}, {}
+        first = {0x26: b'A' * 100, 0x27: b'B' * 50}
+        details = {'26': detail('a.wav', 8000, 100), '27': detail('b.wav', 6000, 50)}
+        found, _, _, _ = soundset.share_samples(first, details, {}, self.resources, self.known, 0x26)
+        self.resources.update(found)
+
+    def test_identical_bytes_reuse_the_id(self):
+        found, mapping, remap, loose = soundset.share_samples(
+            {0x26: b'B' * 50}, {'26': detail('b.wav', 6000, 50)}, {5: [{'lo': 0, 'hi': 127, 'sample': 0x26}]},
+            self.resources, self.known, 0x28)
+        self.assertEqual(remap, {0x26: 0x27})
+        self.assertEqual(mapping[5][0]['sample'], 0x27)
+        self.assertEqual(loose, [])
+
+    def test_strict_mode_does_not_share_other_rates(self):
+        _, _, remap, _ = soundset.share_samples({0x26: b'a' * 75}, {'26': detail('a.wav', 6000, 75)}, {},
+                                                self.resources, self.known, 0x28)
+        self.assertEqual(remap, {0x26: 0x28})
+
+    def test_loose_mode_takes_a_higher_rate_only_within_budget(self):
+        args = ({0x26: b'a' * 75}, {'26': detail('a.wav', 6000, 75)}, {}, self.resources, self.known, 0x28)
+        _, _, remap, loose = soundset.share_samples(*args, budget=100, loose=True)
+        self.assertEqual(remap, {0x26: 0x26})
+        self.assertEqual(loose[0]['used_rate'], 8000)
+        _, _, remap, _ = soundset.share_samples(*args, budget=99, loose=True)
+        self.assertNotEqual(remap[0x26], 0x26)
+
+    def test_loose_mode_takes_a_lower_rate_one_step_down(self):
+        _, _, remap, _ = soundset.share_samples({0x26: b'b' * 70}, {'26': detail('b.wav', 8000, 70)}, {},
+                                                self.resources, self.known, 0x28, budget=60, loose=True)
+        self.assertEqual(remap, {0x26: 0x27})
+        _, _, remap, _ = soundset.share_samples({0x26: b'b' * 90}, {'26': detail('b.wav', 9000, 90)}, {},
+                                                self.resources, self.known, 0x28, budget=60, loose=True)
+        self.assertEqual(remap, {0x26: 0x28})
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -66,6 +66,51 @@ def transfer_plan(first_tick, notes, sizes, pre_bytes):
     return order, k, arrivals
 
 
+def sample_identity(detail):
+    """표본율·자르기만 다르고 같은 NDS 샘플·기준음·ADSR·반복인 자원을 한 묶음으로 본다."""
+    envelope = detail['envelope']
+    return detail['source'], detail['base_midi'], envelope['adsr1'], envelope['adsr2'], bool(detail['source_loop'])
+
+
+def share_samples(found, details, program_map, resources, known, next_id, *, budget=None, loose=False):
+    """build_bank 의 임시 번호(26~)를 전역 번호로 바꾼다. 앞 곡이 넣은 샘플을 다시 쓸 수 있으면 그 번호를 쓴다.
+
+    NDS 곡들은 파형 묶음 넷을 나눠 쓰므로 같은 샘플이 여러 곡에 나온다. 샘플 번호는 26~C7(162개)뿐이라
+    합치지 않으면 곡 묶음 전체에 모자란다. 바이트까지 같은 자원은 늘 합친다. loose 면 같은 샘플의 다른 표본율도 쓴다:
+    더 높은 표본율은 곡의 샘플 예산 안에 들 때, 낮은 것은 한 단계(0.7배) 안일 때만. 음높이는 자원 머리에 들어 있어
+    표본율이 달라도 음정은 같다. known 은 {전역 번호: (샘플 묶음, 표본율, 바이트, 보고서)} 이고 이 함수가 채운다.
+    """
+    by_bytes = {payload: ident for ident, payload in resources.items()}
+    total = sum(map(len, found.values()))
+    remap, out, shared = {}, {}, []
+    for ident, payload in sorted(found.items()):
+        detail = details[f'{ident:02X}']
+        key, rate = sample_identity(detail), detail['effective_rate']
+        chosen = by_bytes.get(payload)
+        if chosen is None and loose:
+            mates = [(r, size, i) for i, (k, r, size, _) in known.items() if k == key]
+            up = [m for m in mates if m[0] > rate and budget is not None and total - len(payload) + m[1] <= budget]
+            down = [m for m in mates if rate * 0.7 <= m[0] < rate]
+            pick = max(up or down, default=None)
+            if pick is not None:
+                chosen = pick[2]
+                total += pick[1] - len(payload)
+                shared.append({'sample': detail['source'], 'rate': round(rate), 'used': f'{chosen:02X}',
+                               'used_rate': round(pick[0])})
+        if chosen is None:
+            if next_id >= 0xC8:
+                raise ValueError('sample ID table exhausted (26..C7)')
+            chosen = next_id
+            by_bytes[payload] = chosen
+            known[chosen] = (key, rate, len(payload), detail)
+            next_id += 1
+        remap[ident] = chosen
+        out[chosen] = resources.get(chosen, payload)
+    mapping = {program: [{**r, 'sample': remap[r['sample']]} for r in regions]
+               for program, regions in program_map.items()}
+    return out, mapping, remap, shared
+
+
 def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_fades=False, preview=None,
           stream=None, budgets=None):
     """stream 은 {곡 자리: 곡 앞 샘플 바이트 상한}. 그 곡은 샘플 일부를 곡이 울리는 동안 보낸다(transfer_plan).
@@ -79,7 +124,7 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
     records = patch.read_sets(data)
     if len({slot for slot, _ in songs}) != len(songs):
         raise ValueError('each DQ5 slot may be replaced once')
-    replacements, resources, reports = {}, {}, {}
+    replacements, resources, reports, known = {}, {}, {}, {}
     next_id = 0x26
     plans = []
     for slot, ident in songs:
@@ -92,8 +137,23 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
     growth = sum(2 + slots - len(records[slot]) for slot, _, _, _, _, slots in plans)
     for slot, ident, path, score, sequence_size, _ in plans:
         budget = budgets.get(slot) or patch.sample_budget(data, slot, sequence_size + MARGIN, extra_table=max(0, growth))
-        found, program_map, bank_report = bank.build_bank(score, assets, start_id=next_id, max_rate=max_rate,
-                                                          cache_dir=cache_dir, budget=budget, max_samples=max_samples)
+        try:
+            found, program_map, bank_report = bank.build_bank(score, assets, start_id=0x26, max_rate=max_rate,
+                                                              cache_dir=cache_dir, budget=budget, max_samples=max_samples)
+        except ValueError as exc:
+            if 'cannot fit samples' not in str(exc):
+                raise
+            found, program_map, bank_report = bank.build_bank(score, assets, start_id=0x26, max_rate=max_rate,
+                                                              cache_dir=cache_dir, budget=budget, max_samples=max_samples,
+                                                              rates=bank.LOW_RATES)
+            bank_report['low_rates'] = True
+        # 청취 승인한 곡(예산을 준 곡)은 샘플을 바꾸지 않도록 바이트까지 같은 것만 합친다.
+        found, program_map, remap, loose = share_samples(found, bank_report['samples'], program_map, resources, known,
+                                                         next_id, budget=budget, loose=slot not in budgets)
+        bank_report['samples'] = {f'{x:02X}': known[x][3] for x in sorted(found)}
+        bank_report['shared_samples'] = sorted(f'{x:02X}' for x in found if x in resources)
+        bank_report['shared_other_rate'] = loose
+        bank_report['resource_bytes'] = sum(map(len, found.values()))
         conversion = port.convert(score, program_map=program_map)
         send_first, plan = None, None
         if slot in stream:
@@ -110,7 +170,9 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
                     'arrival_seconds': {f'{s:02X}': round(t, 3) for s, t in arrivals.items()}}
         replacements[slot] = patch.Replacement(conversion.sequence, tuple(conversion.samples), send_first)
         resources.update(found)
-        next_id += len(found)
+        next_id = max(resources) + 1
+        print(f'{slot:02X} <- NDS {ident.upper()}: {len(found)} samples ({len(bank_report["shared_samples"])} shared), '
+              f'sequence {len(conversion.sequence)}', file=sys.stderr, flush=True)
         reports[f'{slot:02X}'] = {'nds_song': ident.upper(), 'score': path.name, 'sample_budget': budget,
                                    'bank': bank_report, 'conversion': conversion.report, 'stream': plan}
     rom, install_report = patch.install(base, replacements, sample_resources=resources,
@@ -128,6 +190,8 @@ def main():
     ap.add_argument('--max-samples', type=int, default=14)
     ap.add_argument('--map-fades', action='store_true')
     ap.add_argument('--preview', type=lambda x: int(x, 16))
+    ap.add_argument('--preview-dir', type=Path,
+                    help='also write pvNN.sfc (title and menu play song NN) for every replaced song into this folder')
     ap.add_argument('--budget', action='append', default=[], metavar='DQ5_SLOT=BYTES',
                     help='sample budget for that song instead of the one computed from its sequence size')
     ap.add_argument('--stream', action='append', default=[], metavar='DQ5_SLOT=PRE_BYTES',
@@ -152,6 +216,10 @@ def main():
     args.out.write_bytes(rom)
     args.out.with_suffix('.ips').write_bytes(patch_bytes)
     args.out.with_suffix('.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
+    if args.preview_dir:
+        args.preview_dir.mkdir(parents=True, exist_ok=True)
+        for slot, _ in songs:
+            (args.preview_dir / f'pv{slot:02X}.sfc').write_bytes(patch.preview_rom(rom, slot))
     summary = {slot: {'budget': r['sample_budget'], 'samples': r['bank']['sample_count'],
                       'brr': r['bank']['resource_bytes'], 'sequence': r['conversion']['sequence_bytes'],
                       'reductions': len(r['bank']['reductions']), 'dropped_notes': r['conversion']['dropped_notes'],
