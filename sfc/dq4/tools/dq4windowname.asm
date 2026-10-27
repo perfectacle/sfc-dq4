@@ -80,8 +80,8 @@ WnKorean:
     LDA.b $01,X
     AND #$00FF
     SEC
-    SBC #!wn_hi_base
-    CMP #!wn_hi_count
+    SBC.w #!wn_hi_base
+    CMP.w #!wn_hi_count
     BCS .rest
     STA.w !wn_c
     ASL
@@ -101,7 +101,7 @@ WnKorean:
     AND #$00FF
     SEC
     SBC #$0010
-    CMP #111
+    CMP.w #111
     BCS .rest
     CLC
     ADC.w !wn_base
@@ -435,7 +435,15 @@ WnUpload:
     TSB.b $1A
     LDA.b $1E
     STA.l $004200
-    REP #$20
+    ; 04:9D41 이 매 프레임 $19 워드를 AND #$7FFF 로 써 $1A bit7 을 지우므로, 붙인 자리에서 NMI 가 보낼 때까지 기다린다.
+    ; 00:958A 는 저 RAM 을 절대 주소로 읽을 수 있어 DB = 00 으로 부른다(뱅크 60 에는 저 RAM 미러가 없음).
+    PHB
+    LDA #$00
+    PHA
+    PLB
+    JSL $00958A
+    PLB
+    REP #$30
     RTS
 
 ; !wn_base 타일의 줄 !wn_r 을 A = p0 | p1 << 8 로. 가나 칸 01~8A 는 1bpp(둘째 평면 FF), 테두리 8B~95 는 두 평면.
