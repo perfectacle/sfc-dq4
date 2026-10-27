@@ -25,7 +25,7 @@
 | `dq4namegame.py` | `dq4menupatch.py build` 가 부르는 게임 안 메시지 이름 모듈(`24:A7D5` → `24:9E11`) |
 | `dq4bg3tiles.py 장면=VRAM덤프 ...` | VRAM 덤프에서 BG3 타일맵이 가리키는 칸과 빈 칸을 셈. [게임 안 창 한글 조사](../docs/dq4-window-text-format.md) |
 | `dq4bg3slot.py` | `dq4menupatch.py build` 가 마지막에 부르는 BG3 타일맵 옮기기 모듈(`60:8300`~). 필드 `7800`, 실내 `3C00`, `3C00` 을 쓰거나 가리키는 맵은 표(`MAP_SLOTS`)의 자리. `40`~`5C` 자리 맵의 전투는 `7800` |
-| `dq4windowname.py` | `dq4menupatch.py build` 가 `dq4bg3slot` 다음에 부르는 상태 창 한글 이름 모듈(`dq4windowname.asm`, `60:C000`~). 이름 칸 5칸, BG3 칸 `180`~`1CF`. [상태 창 이름](../docs/dq4-window-text-format.md#상태-창-이름) |
+| `dq4windowname.py` | `dq4menupatch.py build` 가 `dq4bg3slot` 다음에 부르는 상태 창·목록(`04:B79B`) 한글 이름 모듈(`dq4windowname.asm`, `60:C000`~). 이름 칸 5칸, 「누구」 고르기 창 13개를 한 칸 넓힘, BG3 칸 `180`~`1CF`. [상태 창 이름](../docs/dq4-window-text-format.md#상태-창-이름) |
 | `dq4bg3slotcheck.py --old 원래롬 --new 새롬 --state work/state/ship.mss --out 새폴더 [--maps 맵,...]` | 실내 맵마다 순간이동해 명령 창을 열고, BG3 타일맵을 옮긴 롬이 버퍼와 같은 타일맵을 보이는지·옛 자리를 건드리지 않는지 원래 롬과 견줌. `MESENCE` 필요. [BG3 타일맵 옮기기](../docs/dq4-window-text-format.md#bg3-타일맵-옮기기) |
 | `lua/dq4bg3slotwarp.lua` | `dq4bg3slotcheck.py` 가 부름. `dq5warp.lua` 를 돌리며 30프레임마다 맵, `$0725`, 타일맵과 버퍼 `7E:5000` 차이, 옛 자리 `1C00`~`1FFF` 변화를 `bg3.txt` 에 적음. `SHOTS` 프레임 화면도 남김 |
 | `dq4soundcatalog.py --assets 폴더 [--dq5-rom 롬] --out JSON` | NDS 곡·효과음 목록, FC 장면 대응, DQ5 재사용 후보와 숙박곡 비교. [사운드 포팅](../docs/dq4-sound-port-format.md) |
