@@ -1,17 +1,19 @@
-"""DQ5 전투 행동(주문) 번호를 AB 이상으로 늘린다.
+"""DQ5 전투 행동(주문)을 비어 있는 행동 번호 C6~D4 에 더한다.
 
-행동 번호로 색인하는 표를 새 번호까지 늘린다. 긴 주소로 읽는 표 여섯은 --at 자리로 옮겨 쓰고 읽는 곳을 바꾼다.
-처리 루틴 표(20:B7F9)와 필드 주문 표(11:8024)는 JSR (abs,X) 라 같은 뱅크에 있어야 하므로, 원래 표는 두고
-뱅크 끝 빈 자리에 새 번호만 고르는 스텁과 덧붙인 표를 둔다. 이름(표 3)은 dq5namewrite.py --append 로 따로 늘린다.
-형식: sfc/dq5/docs/dq5-build-format.md 의 「행동 번호 늘리기」.
+행동 번호로 색인하는 표 가운데 MP·범위(26:8765)·실행 루틴(26:8865)·둘째 실행 표(26:8565)·처리 루틴(20:B7F9)은
+처음부터 256칸(00~FF)이라 새 번호의 칸에 바로 쓴다. 이 칸들이 모두 빈 값(MP 1F·실행 DB0C·둘째 0070·처리 AF27)인
+번호만 받는다. 주문 목록 창의 MP 숫자(21:9BB4)는 0 줄 안의 그 칸에 쓴다. 연출 표 둘(26:8BE0·26:8C75)은 우리 편
+표의 C6~D4 가 몬스터 표와 겹치므로 --at 으로 옮겨 쓴다. 필드 주문 표(11:8024)는 JSR (abs,X) 라 뱅크 끝 스텁과
+덧붙인 표로 늘린다. class 가 spell 이면 66 경계 비교 셋을 스텁으로 돌려 새 번호도 주문으로 다룬다.
+이름(표 3)은 dq5namewrite.py --append 로 따로 늘린다. 형식: sfc/dq5/docs/dq5-build-format.md 의 「행동 번호 늘리기」.
 
-  python sfc/dq5/tools/dq5spellgrow.py rom/dq5.sfc patch work/spellgrow.json --at 3D:8000 -o work/build/spellgrow.dq5patch.json
-  python sfc/dq5/tools/dq5spellgrow.py rom/dq5.sfc check work/spellgrow.json --at 3D:8000
+  python sfc/dq5/tools/dq5spellgrow.py rom/dq5.sfc patch work/spellgrow.json --at 6E:8000 -o work/build/spellgrow.dq5patch.json
+  python sfc/dq5/tools/dq5spellgrow.py rom/dq5.sfc check work/spellgrow.json --at 6E:8000
 
-JSON: {"format": "dq5spellgrow/1", "spells": [{"id": "AB", "copy": "27", "MP": 4, "menu_mp": 4}]}
-새 번호는 AB 부터 빈틈 없이 B4 까지 이어진다. copy 는 원래 행동(00~AA) 가운데 하나이고, 그 행동의 표 값을 모두 베낀다.
-MP·범위·적쪽(26:8765, dq5tables.py 와 같은 뜻)과 menu_mp(21:9BB4, 주문 목록 창의 MP 숫자)만 덮을 수 있다.
-copy 가 필드 주문(27~38)이면 필드 처리기도 베껴 필드에서 외울 수 있다.
+JSON: {"format": "dq5spellgrow/1", "spells": [{"id": "C6", "copy": "27", "class": "spell", "MP": 4, "menu_mp": 4}]}
+새 번호는 C6 부터 빈틈 없이 D4 까지 이어진다. copy 는 원래 행동(00~AA) 가운데 하나이고, 그 행동의 표 값을 모두 베낀다.
+MP·범위·적쪽(26:8765, dq5tables.py 와 같은 뜻)과 menu_mp(21:9BB4)만 덮을 수 있다. class 는 spell 또는 skill(기본)이고
+spell 을 앞에 몰아 둔다. copy 가 필드 주문(27~38)이면 필드 처리기도 베껴 필드에서 외울 수 있다.
 """
 import argparse
 import json
@@ -20,26 +22,25 @@ import sys
 from pathlib import Path
 
 from dq5map import Rom, lorom
-from dq5tables import SPELL_FIELDS, get, put
+from dq5tables import SPELL_FIELDS, put
 
 FORMAT = 'dq5spellgrow/1'
 COUNT = 0xAB
-# 처리 루틴 스텁(20:FFE0~FFFF)에 덧붙일 수 있는 것이 10개라 새 번호는 AB~B4 다(20:8455 는 D5 부터 전투 도구로 본다).
-LAST = 0xB4
-# 긴 주소로 읽는 표: 이름 → (원래 자리, 항목 크기, [(LDA long,X 명령 주소)]). 모두 X 를 행동 번호(또는 ×2)로 쓴다.
-TABLES = {
-    'flags': (0x268765, 1, (0x2683A1, 0x2683D7)),       # MP·범위·적쪽(26:839A·26:83D0)
-    'executor': (0x268865, 2, (0x208497,)),              # 실행 루틴(대상 수)
-    'executor_alt': (0x268565, 2, (0x2084A6,)),          # $1016 bit4 일 때 대신 읽는 표
-    'menu_mp': (0x219BB4, 1, (0x219BAD,)),              # 주문 목록 창의 MP 숫자
-    'fx_party': (0x268BE0, 1, (0x268B6E,)),             # 연출 번호(우리 편)
-    'fx_monster': (0x268C75, 1, (0x268B74,)),           # 연출 번호(몬스터)
+# 66~D4 는 특기 번호이고, 그 가운데 C6~D4 는 아래 네 표가 모두 빈 값이다. BB~C0 도 비어 있으나 C1~C5 를 몬스터가
+# 쓰므로 C6~D4 와 이어지지 않는다. 66 경계 스텁은 새 주문을 한 범위로 보므로 이어진 번호만 받는다.
+FIRST, LAST = 0xC6, 0xD4
+# 256칸 표: 이름 → (자리, 칸 크기, 빈 값).
+WIDE = {
+    'flags': (0x268765, 1, 0x1F),          # MP·범위·적쪽(26:839A·26:83D0)
+    'executor': (0x268865, 2, 0xDB0C),     # 실행 루틴(대상 수)
+    'executor_alt': (0x268565, 2, 0x0070),  # $1016 bit4 일 때 대신 읽는 표
+    'handler': (0x20B7F9, 2, 0xAF27),      # 처리 루틴(20:AA9D·AAD0 의 JSR ($B7F9,X))
 }
-# 20:AA9D·20:AAD0 의 JSR ($B7F9,X)(X = 행동×2). 원래 171개는 그대로 두고, 이 둘을 스텁 JSR 로 바꾼다.
-HANDLERS = 0x20B7F9
-HANDLER_CALLS = (0x20AA9D, 0x20AAD0)
-HANDLER_STUB = 0x20FFE0
-HANDLER_END = 0x210000
+# 주문 목록 창의 MP 숫자. 21:9BAD 가 LDA $219BB4,X 로 읽는다. 66 뒤는 21:9C92 의 코드 앞까지 0 이다.
+MENU_MP = 0x219BB4
+# 연출 번호. 26:8B64 가 D5 이상이면 읽지 않고, 우리 편 표(8BE0)는 95 칸부터 몬스터 표(8C75)와 겹친다. 둘 다 D5 칸으로 옮긴다.
+FX = {'fx_party': (0x268BE0, (0x268B6E,)), 'fx_monster': (0x268C75, (0x268B74,))}
+FX_COUNT = 0xD5
 # 11:8014 SBC #$27 / CMP #$12 / BCS 멈춤 / ASL / TAX / JSR ($8024,X). CMP 를 FF 로 풀고 JSR 을 스텁으로 돌린다.
 FIELD = 0x118024
 FIELD_FIRST, FIELD_COUNT = 0x27, 0x12
@@ -48,6 +49,16 @@ FIELD_CALL = 0x11801C
 FIELD_STUB = 0x11FFB0
 FIELD_HANG = 0x118022
 FIELD_END = 0x120000
+# 행동 번호가 66 밑이면 주문으로 보는 비교. (자리, 원래 4바이트, 비교 명령, 경계, 주문 갈래, 특기 갈래, 같을 때 갈래).
+#   25:8BF3 CMP #$66 / BCS: 습득 메시지 0C7「じゅもん」·19F「とくぎ」
+#   20:8460 CPX #$66 / BCS: 66 밑이면 20:A7B4(저주 상태면 1/4 로 행동을 DF 로 바꿔 「のろいのため じゅもんは かきけされた」)
+#   20:8EE8 CMP #$65 / BCC (이어서 BNE): $1073,X 가 65 이하면 $1016 bit4 를 켬
+# 롬에서 #$65~#$67 을 행동 번호와 견주는 비교를 모두 찾은 것 가운데 이 셋만 경계다(나머지는 같음 비교·다른 값).
+CLASS_SITES = (
+    (0x258BF3, 'c9 66 b0 05', 0xC9, 0x66, 0x258BF7, 0x258BFC, None),
+    (0x208460, 'e0 66 b0 17', 0xE0, 0x66, 0x208464, 0x20847B, None),
+    (0x208EE8, 'c9 65 90 05', 0xC9, 0x65, 0x208EF1, 0x208EFB, 0x208EEE),
+)
 
 
 def require(ok, message):
@@ -66,101 +77,103 @@ def read(rom, addr, size):
     return raw
 
 
-def hex_byte(value, name, low=0, high=0xFF):
-    require(isinstance(value, str) and re.fullmatch(r'[0-9A-Fa-f]{2}', value) is not None, f'{name}: 16진 두 자리 문자열')
-    v = int(value, 16)
-    require(low <= v <= high, f'{name}: {low:02X}~{high:02X} 여야 함')
-    return v
+def value(rom, base, size, n):
+    return int.from_bytes(read(rom, base + n * size, size), 'little')
 
 
-def address(value, name):
-    require(isinstance(value, str) and re.fullmatch(r'[0-9A-Fa-f]{2}:[0-9A-Fa-f]{4}', value) is not None,
-            f'{name}: BB:AAAA 형태여야 함')
-    bank, low = (int(v, 16) for v in value.split(':'))
+def hex_byte(v, name, low=0, high=0xFF):
+    require(isinstance(v, str) and re.fullmatch(r'[0-9A-Fa-f]{2}', v) is not None, f'{name}: 16진 두 자리 문자열')
+    n = int(v, 16)
+    require(low <= n <= high, f'{name}: {low:02X}~{high:02X} 여야 함')
+    return n
+
+
+def address(v, name):
+    require(isinstance(v, str) and re.fullmatch(r'[0-9A-Fa-f]{2}:[0-9A-Fa-f]{4}', v) is not None, f'{name}: BB:AAAA 형태여야 함')
+    bank, low = (int(x, 16) for x in v.split(':'))
     require(bank <= 0x7D and low >= 0x8000, f'{name}: 뱅크 00~7D 의 8000~FFFF 여야 함')
     return bank << 16 | low
 
 
-def check_original(rom):
-    """바꿀 명령·표 자리가 원래 롬 그대로인지. 다른 도구가 먼저 고쳤으면 거부한다."""
-    for name, (base, _, readers) in TABLES.items():
+def check_original(rom, rows):
+    """새 번호 칸이 빈 값이고, 바꿀 명령이 원래 롬 그대로인지. 다른 도구가 먼저 고쳤으면 거부한다."""
+    for row in rows:
+        n = row['id']
+        for name, (base, size, empty) in WIDE.items():
+            require(value(rom, base, size, n) == empty, f'{n:02X}: {name} 칸이 빈 값 {empty:X} 가 아님(이미 쓰는 번호)')
+        require(read(rom, MENU_MP + n, 1) == b'\0', f'{n:02X}: 주문 목록 MP 칸이 0 이 아님')
+    for name, (base, readers) in FX.items():
         for pc in readers:
             raw = read(rom, pc, 4)
-            require(raw[0] == 0xBF and int.from_bytes(raw[1:], 'little') == base,
-                    f'{text(pc)}: {name} 표를 읽는 원래 명령(LDA {text(base)},X)이 아님')
-    for pc in HANDLER_CALLS:
-        require(read(rom, pc, 3) == bytes([0xFC]) + (HANDLERS & 0xFFFF).to_bytes(2, 'little'),
-                f'{text(pc)}: 원래 JSR ($B7F9,X) 가 아님')
+            require(raw[0] == 0xBF and int.from_bytes(raw[1:], 'little') == base, f'{text(pc)}: {name} 원래 읽기 명령이 아님')
+    require(read(rom, 0x219BAD, 4) == bytes.fromhex('bf b4 9b 21'), '21:9BAD 가 원래 LDA $219BB4,X 가 아님')
     require(read(rom, FIELD_LIMIT - 3, 6) == bytes.fromhex('e9 27 c9 12 b0 08'), '11:8014 의 필드 주문 범위 검사가 원래와 다름')
     require(read(rom, FIELD_CALL, 3) == bytes.fromhex('fc 24 80'), '11:801C 가 원래 JSR ($8024,X) 가 아님')
-    require(read(rom, HANDLER_STUB, HANDLER_END - HANDLER_STUB) == bytes(HANDLER_END - HANDLER_STUB),
-            '20:FFE0~FFFF 가 0 이 아님')
 
 
 def new_rows(rom, doc):
-    keys = {'format', 'spells'}
-    require(isinstance(doc, dict) and not doc.keys() - keys and doc.get('format') == FORMAT, f'format={FORMAT}·spells 만 받음')
+    require(isinstance(doc, dict) and not doc.keys() - {'format', 'spells'} and doc.get('format') == FORMAT,
+            f'format={FORMAT}·spells 만 받음')
     spells = doc.get('spells')
     require(isinstance(spells, list) and spells, 'spells 는 하나 이상인 배열')
     rows = []
     for i, row in enumerate(spells):
-        require(isinstance(row, dict) and not row.keys() - {'id', 'copy', 'MP', '범위', '적쪽', 'menu_mp'},
-                f'spells[{i}]: id·copy·MP·범위·적쪽·menu_mp 만 받음')
-        n = hex_byte(row.get('id'), f'spells[{i}] id', COUNT, LAST)
-        require(n == COUNT + i, f'spells[{i}] id: {COUNT + i:02X} 여야 함(AB 부터 빈틈 없이)')
+        require(isinstance(row, dict) and not row.keys() - {'id', 'copy', 'MP', '범위', '적쪽', 'menu_mp', 'class'},
+                f'spells[{i}]: id·copy·MP·범위·적쪽·menu_mp·class 만 받음')
+        n = hex_byte(row.get('id'), f'spells[{i}] id', FIRST, LAST)
+        require(n == FIRST + i, f'spells[{i}] id: {FIRST + i:02X} 여야 함({FIRST:02X} 부터 빈틈 없이)')
+        kind = row.get('class', 'skill')
+        require(kind in ('spell', 'skill'), f'spells[{i}] class: spell 또는 skill')
+        require(kind == 'skill' or all(r['class'] == 'spell' for r in rows), f'spells[{i}]: spell 은 skill 보다 앞에 두어야 함')
         src = hex_byte(row.get('copy'), f'spells[{i}] copy', 0, COUNT - 1)
-        flags = [read(rom, TABLES['flags'][0] + src, 1)[0]]
+        flags = [value(rom, WIDE['flags'][0], 1, src)]
         for field in ('MP', '범위', '적쪽'):
             if field in row:
-                value = row[field]
+                v = row[field]
                 width = sum(w for _, _, w in SPELL_FIELDS[field][1])
-                require(type(value) is int and 0 <= value < 1 << width, f'spells[{i}] {field}: 0~{(1 << width) - 1} 정수')
-                put(flags, SPELL_FIELDS[field][1], value)
-        menu = read(rom, TABLES['menu_mp'][0] + src, 1)[0]
+                require(type(v) is int and 0 <= v < 1 << width, f'spells[{i}] {field}: 0~{(1 << width) - 1} 정수')
+                put(flags, SPELL_FIELDS[field][1], v)
+        menu = read(rom, MENU_MP + src, 1)[0]
         if 'menu_mp' in row:
             require(type(row['menu_mp']) is int and 0 <= row['menu_mp'] <= 0xFF, f'spells[{i}] menu_mp: 0~255 정수')
             menu = row['menu_mp']
-        rows.append({'id': n, 'copy': src, 'flags': flags[0], 'menu_mp': menu})
+        rows.append({'id': n, 'copy': src, 'flags': flags[0], 'menu_mp': menu, 'class': kind})
     return rows
 
 
-def blob(rom, rows, start):
-    """옮길 표 여섯을 start 부터 이어 놓은 (바이트, {표: 새 자리})."""
-    out, place = bytearray(), {}
-    for name, (base, size, _) in TABLES.items():
-        place[name] = start + len(out)
-        body = bytearray(read(rom, base, COUNT * size))
+def wide_writes(rom, rows):
+    writes = []
+    for name, (base, size, _) in WIDE.items():
         for row in rows:
-            if name == 'flags':
-                body += bytes([row['flags']])
-            elif name == 'menu_mp':
-                body += bytes([row['menu_mp']])
-            else:
-                body += read(rom, base + row['copy'] * size, size)
+            n = row['id']
+            new = bytes([row['flags']]) if name == 'flags' else read(rom, base + row['copy'] * size, size)
+            writes.append({'at': text(base + n * size), 'hex': new.hex(' '), 'orig': read(rom, base + n * size, size).hex(' '),
+                           'note': f'{name} {n:02X}'})
+    first = rows[0]['id']
+    writes.append({'at': text(MENU_MP + first), 'hex': bytes(r['menu_mp'] for r in rows).hex(' '),
+                   'orig': read(rom, MENU_MP + first, len(rows)).hex(' '), 'note': '주문 목록 MP'})
+    return writes
+
+
+def fx_blob(rom, rows, start):
+    out, place = bytearray(), {}
+    for name, (base, _) in FX.items():
+        place[name] = start + len(out)
+        body = bytearray(read(rom, base, FX_COUNT))
+        for row in rows:
+            body[row['id']] = read(rom, base + row['copy'], 1)[0]
         out += body
     return bytes(out), place
 
 
-def handler_stub(rom, rows):
-    """20:FFE0: CPX #$0156 / BCS +3 / JMP ($B7F9,X) / JMP (덧붙인 표 - $0156,X), 그 뒤 덧붙인 표."""
-    table = HANDLER_STUB + 11
-    code = (bytes([0xE0]) + (COUNT * 2).to_bytes(2, 'little') + bytes([0xB0, 0x03, 0x7C]) + (HANDLERS & 0xFFFF).to_bytes(2, 'little')
-            + bytes([0x7C]) + ((table - COUNT * 2) & 0xFFFF).to_bytes(2, 'little'))
-    body = b''.join(read(rom, HANDLERS + row['copy'] * 2, 2) for row in rows)
-    require(table + len(body) <= HANDLER_END, f'20:FFE0~FFFF 에 새 행동 {len(rows)}개의 처리 루틴이 들어가지 않음(10개까지)')
-    return code + body
-
-
 def field_stub(rom, rows):
-    """11:FFB0: X = (주문 - 27) * 2(carry 로 빠진 bit8 을 되살림). 원래 18칸이면 JMP ($8024,X),
-    새 번호 범위면 덧붙인 표, 아니면 원래처럼 멈춤."""
-    fields = [row for row in rows if FIELD_FIRST <= row['copy'] < FIELD_FIRST + FIELD_COUNT]
-    if not fields:
+    """11:FFB0: X = (주문 - 27) * 2(8비트 ASL 에서 carry 로 빠진 bit8 을 되살리고 B 를 다시 0 으로).
+    원래 18칸이면 JMP ($8024,X), 새 번호 범위면 덧붙인 표, 아니면 원래처럼 멈춤."""
+    if not any(FIELD_FIRST <= row['copy'] < FIELD_FIRST + FIELD_COUNT for row in rows):
         return None
     first, last = rows[0]['id'], rows[-1]['id']
     lo, hi = (first - FIELD_FIRST) * 2, (last - FIELD_FIRST + 1) * 2
     table = FIELD_STUB + 34
-    # 11:801A 의 ASL 은 A 8비트라 주문 A7 이상이면 (주문-27)*2 의 bit8 이 carry 로 빠진다. TAX 앞에 B 를 01 로 둔다.
     code = bytes([0x90, 0x05, 0xEB, 0xA9, 0x01, 0xEB, 0xAA])                                  # BCC / XBA / LDA #1 / XBA / TAX
     code += bytes([0xEB, 0xA9, 0x00, 0xEB])                                                   # B 를 다시 0 으로
     code += bytes([0xE0]) + (FIELD_COUNT * 2).to_bytes(2, 'little') + bytes([0xB0, 0x03, 0x7C]) + (FIELD & 0xFFFF).to_bytes(2, 'little')
@@ -177,22 +190,54 @@ def field_stub(rom, rows):
     return code + body
 
 
+def class_stubs(spells, start):
+    """비교 셋마다 JML 로 올 스텁. 원래 경계 밑이거나 새 주문 범위면 주문 갈래, 아니면 특기 갈래(carry 를 켜고)."""
+    first, last = spells[0]['id'], spells[-1]['id']
+    out, entry = bytearray(), {}
+    for site, _, op, limit, spell, skill, equal in CLASS_SITES:
+        entry[site] = start + len(out)
+        code = bytearray([op, limit, 0x90, 0])            # CMP #limit / BCC 주문
+        if equal is not None:
+            code += bytes([0xF0, 0])                       # BEQ 같을 때
+        code += bytes([op, first, 0x90, 0])                # CMP #first / BCC 특기
+        code += bytes([op, last + 1, 0x90, 0])             # CMP #last+1 / BCC 주문
+        to_skill = len(code)
+        code += bytes([0x38, 0x5C]) + skill.to_bytes(3, 'little')        # SEC / JML 특기
+        to_spell = len(code)
+        code += bytes([0x5C]) + spell.to_bytes(3, 'little')              # JML 주문
+        if equal is not None:
+            to_equal = len(code)
+            code += bytes([0x5C]) + equal.to_bytes(3, 'little')
+            code[5] = to_equal - 6
+        branches = [i for i in range(0, to_skill, 2) if code[i] == 0x90]
+        code[branches[0] + 1] = to_spell - (branches[0] + 2)
+        code[branches[1] + 1] = to_skill - (branches[1] + 2)
+        code[branches[2] + 1] = to_spell - (branches[2] + 2)
+        out += code
+    return bytes(out), entry
+
+
 def patch(rom, doc, at):
-    check_original(rom)
     rows = new_rows(rom, doc)
-    data, place = blob(rom, rows, at)
-    require((at & 0xFFFF) + len(data) <= 0x10000, f'{text(at)}: 표 {len(data)}바이트가 뱅크 끝을 넘음')
-    writes = [{'at': text(at), 'hex': data.hex(' '), 'note': '행동 번호로 색인하는 표(옮겨 늘림)'}]
-    for name, (base, size, readers) in TABLES.items():
+    check_original(rom, rows)
+    writes = wide_writes(rom, rows)
+    data, place = fx_blob(rom, rows, at)
+    spells = [row for row in rows if row['class'] == 'spell']
+    entry = {}
+    if spells:
+        stubs, entry = class_stubs(spells, at + len(data))
+        data += stubs
+    require((at & 0xFFFF) + len(data) <= 0x10000, f'{text(at)}: {len(data)}바이트가 뱅크 끝을 넘음')
+    writes.append({'at': text(at), 'hex': data.hex(' '), 'note': '옮긴 연출 표와 66 경계 스텁'})
+    for name, (base, readers) in FX.items():
         for pc in readers:
             writes.append({'at': text(pc + 1), 'hex': place[name].to_bytes(3, 'little').hex(' '),
                            'orig': read(rom, pc + 1, 3).hex(' '), 'note': f'{name} 표 읽기'})
-    stub = handler_stub(rom, rows)
-    writes.append({'at': text(HANDLER_STUB), 'hex': stub.hex(' '), 'orig': read(rom, HANDLER_STUB, len(stub)).hex(' '),
-                   'note': '처리 루틴 스텁과 덧붙인 표'})
-    for pc in HANDLER_CALLS:
-        writes.append({'at': text(pc), 'hex': (bytes([0x20]) + (HANDLER_STUB & 0xFFFF).to_bytes(2, 'little')).hex(' '),
-                       'orig': read(rom, pc, 3).hex(' '), 'note': '처리 루틴 JSR 을 스텁으로'})
+    for site, orig, *_ in CLASS_SITES:
+        if site in entry:
+            require(read(rom, site, 4) == bytes.fromhex(orig), f'{text(site)}: 원래 비교 {orig} 가 아님')
+            writes.append({'at': text(site), 'hex': (bytes([0x5C]) + entry[site].to_bytes(3, 'little')).hex(' '),
+                           'orig': orig, 'note': '행동 번호 66 경계를 스텁으로(새 번호도 주문)'})
     stub = field_stub(rom, rows)
     if stub is not None:
         writes.append({'at': text(FIELD_STUB), 'hex': stub.hex(' '), 'note': '필드 주문 스텁과 덧붙인 표'})
@@ -207,46 +252,36 @@ def patch(rom, doc, at):
     return out
 
 
-def read_back(rom, at, count):
-    """빌드한 롬에서 표를 읽어 새 행동마다 (flags, executor, executor_alt, menu_mp, fx_party, fx_monster, 처리 루틴)."""
-    out = []
-    for n in range(COUNT, COUNT + count):
-        row = []
-        for name, (base, size, readers) in TABLES.items():
-            where = int.from_bytes(read(rom, readers[0] + 1, 3), 'little')
-            row.append(read(rom, where + n * size, size).hex())
-        stub = HANDLER_STUB + 11 + (n - COUNT) * 2
-        row.append(read(rom, stub, 2).hex())
-        out.append(row)
-    return out
-
-
 def check(rom, doc, at):
-    from dq5build import build, parse_at
+    from dq5build import PatchError, build, parse_at
     made = patch(rom, doc, at)
     lists = [('spellgrow', made.get('rom_size', 0), [
         (parse_at(w['at'])[0], bytes.fromhex(w['hex']), bytes.fromhex(w['orig']) if 'orig' in w else None, w['note'])
         for w in made['writes']])]
-    from dq5build import PatchError
     try:
         rebuilt, _ = build(rom.d, lists, made.get('rom_size', 0))
     except PatchError as error:
         raise ValueError(str(error)) from None
     after = Rom(rebuilt)
-    rows = new_rows(rom, doc)
-    got = read_back(after, at, len(rows))
-    for row, values in zip(rows, got):
-        src = row['copy']
-        want = [bytes([row['flags']]).hex(), read(rom, 0x268865 + src * 2, 2).hex(), read(rom, 0x268565 + src * 2, 2).hex(),
-                bytes([row['menu_mp']]).hex(), read(rom, 0x268BE0 + src, 1).hex(), read(rom, 0x268C75 + src, 1).hex(),
-                read(rom, HANDLERS + src * 2, 2).hex()]
-        require(values == want, f'{row["id"]:02X}: 빌드한 롬에서 읽은 값 {values} 가 {want} 와 다름')
-    for name, (base, size, readers) in TABLES.items():
-        where = {int.from_bytes(read(after, pc + 1, 3), 'little') for pc in readers}
-        require(len(where) == 1, f'{name}: 읽는 곳들이 서로 다른 자리를 가리킴')
-        where = where.pop()
-        require(read(after, where, COUNT * size) == read(rom, base, COUNT * size), f'{name}: 옮긴 표의 원래 {COUNT}개가 다름')
-    print(f'새 행동 {len(rows)}개({rows[0]["id"]:02X}~{rows[-1]["id"]:02X}), 쓰기 {len(made["writes"])}개 검사 통과')
+    for row in new_rows(rom, doc):
+        n, src = row['id'], row['copy']
+        require(value(after, WIDE['flags'][0], 1, n) == row['flags'], f'{n:02X}: MP·범위 칸이 다름')
+        for name in ('executor', 'executor_alt', 'handler'):
+            base, size, _ = WIDE[name]
+            require(value(after, base, size, n) == value(rom, base, size, src), f'{n:02X}: {name} 칸이 {src:02X} 와 다름')
+        require(read(after, MENU_MP + n, 1)[0] == row['menu_mp'], f'{n:02X}: 주문 목록 MP 가 다름')
+        for name, (base, readers) in FX.items():
+            where = {int.from_bytes(read(after, pc + 1, 3), 'little') for pc in readers}
+            require(len(where) == 1, f'{name}: 읽는 곳들이 서로 다른 자리를 가리킴')
+            where = where.pop()
+            require(read(after, where + n, 1) == read(rom, base + src, 1), f'{n:02X}: {name} 칸이 다름')
+    for name, (base, readers) in FX.items():
+        where = int.from_bytes(read(after, readers[0] + 1, 3), 'little')
+        moved = bytearray(read(after, where, FX_COUNT))
+        for row in new_rows(rom, doc):
+            moved[row['id']] = read(rom, base + row['id'], 1)[0]
+        require(bytes(moved) == read(rom, base, FX_COUNT), f'{name}: 옮긴 표의 원래 칸이 다름')
+    print(f'새 행동 {len(new_rows(rom, doc))}개, 쓰기 {len(made["writes"])}개 검사 통과')
 
 
 def main():
@@ -256,7 +291,7 @@ def main():
     for name in ('patch', 'check'):
         p = sub.add_parser(name)
         p.add_argument('source', type=Path)
-        p.add_argument('--at', required=True, help='옮긴 표 여섯을 둘 자리 BB:AAAA(다른 패치와 겹치지 않게)')
+        p.add_argument('--at', required=True, help='옮긴 연출 표와 스텁을 둘 자리 BB:AAAA(다른 패치와 겹치지 않게)')
         if name == 'patch':
             p.add_argument('-o', '--out', type=Path, required=True)
     args = ap.parse_args()

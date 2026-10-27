@@ -37,11 +37,11 @@ BASE_AT = {'person': 0x23ECE4, 'monster': 0x23ECEF}
 BANK_AT = {'field': 0x219CA2, 'battle': 0x219D13}
 # 사람이 일행에 들 때(21:8042 → 21:9F78 등) 인물 레코드 표 23:C014 의 칸을 그대로 베낀다. 습득 비트는 그 칸의 +23~+25 이고
 # 습득 표(23:EB50)는 이때 불리지 않는다(실측). 칸 +0 이 인물 번호(bit7 이면 동료 몬스터 종류).
-# dq5spellgrow.py 로 늘린 행동 번호(AB~). 20:AA9D 의 처리 루틴 JSR 이 20:FFE0 스텁으로 가면, 스텁 뒤 덧붙인 표
-# (20:FFEB~, 0000 이 아닌 칸)가 새 행동 수다. 11:801C 가 11:FFB0 스텁으로 가면 그 표(11:FFD2~)의 칸이 11:8022(멈춤)가
-# 아닌 새 번호만 필드에서 외울 수 있다.
+# dq5spellgrow.py 로 더한 행동 번호(C6~D4). 256칸 처리 루틴 표(20:B7F9)의 그 칸이 빈 값 AF27 이 아니면 새 행동이다.
+# 11:801C 가 11:FFB0 스텁으로 가면 그 표(11:FFD2~, C6 부터)의 칸이 11:8022(멈춤)가 아닌 새 번호만 필드에서 외울 수 있다.
 SPELLS = 0xAB
-HANDLER_CALL, HANDLER_STUB = 0x20AA9D, 0x20FFE0
+NEW_FIRST, NEW_LAST = 0xC6, 0xD4
+HANDLERS, HANDLER_EMPTY = 0x20B7F9, 0xAF27
 FIELD_CALL, FIELD_STUB, FIELD_HANG = 0x11801C, 0x11FFB0, 0x8022
 FIELD_SPELLS = set(range(0x27, 0x39)) - {0x2A, 0x2B, 0x30, 0x31}
 JOIN = 0x23C014
@@ -159,14 +159,13 @@ def dump(rom):
 def spells(rom):
     """(전투 목록에 넣을 수 있는 가장 큰 행동 번호, 필드 목록에 넣을 수 있는 번호 집합)."""
     battle, field = SPELLS - 1, set(FIELD_SPELLS)
-    if read(rom, HANDLER_CALL, 3) == bytes([0x20]) + (HANDLER_STUB & 0xFFFF).to_bytes(2, 'little'):
-        a = HANDLER_STUB + 11
-        while a + 2 <= 0x210000 and int.from_bytes(read(rom, a, 2), 'little'):
-            battle += 1
-            a += 2
-    if read(rom, FIELD_CALL, 3) == bytes([0x20]) + (FIELD_STUB & 0xFFFF).to_bytes(2, 'little'):
-        for n in range(SPELLS, battle + 1):
-            if int.from_bytes(read(rom, FIELD_STUB + 34 + (n - SPELLS) * 2, 2), 'little') != FIELD_HANG:
+    n = NEW_FIRST
+    while n <= NEW_LAST and int.from_bytes(read(rom, HANDLERS + n * 2, 2), 'little') != HANDLER_EMPTY:
+        battle = n
+        n += 1
+    if battle >= NEW_FIRST and read(rom, FIELD_CALL, 3) == bytes([0x20]) + (FIELD_STUB & 0xFFFF).to_bytes(2, 'little'):
+        for n in range(NEW_FIRST, battle + 1):
+            if int.from_bytes(read(rom, FIELD_STUB + 34 + (n - NEW_FIRST) * 2, 2), 'little') != FIELD_HANG:
                 field.add(n)
     return battle, field
 
@@ -473,7 +472,7 @@ def main():
     ap.add_argument('--learn-at', help='습득 표를 옮길 곳(뱅크 23 또는 30~3F)')
     ap.add_argument('--stub-at', help='습득 표가 뱅크 23 밖일 때 데이터 뱅크 루틴 8바이트를 둘 곳(뱅크 23)')
     ap.add_argument('--lists-at', help='주문 목록을 옮길 곳(뱅크 23 또는 30~3F)')
-    ap.add_argument('--spells-from', type=Path, help='dq5spellgrow.py 패치를 넣어 만든 롬. 늘린 행동 번호(AB~)를 받음')
+    ap.add_argument('--spells-from', type=Path, help='dq5spellgrow.py 패치를 넣어 만든 롬. 더한 행동 번호(C6~)를 받음')
     args = ap.parse_args()
     try:
         rom = Rom(args.rom.read_bytes())

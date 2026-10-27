@@ -288,18 +288,19 @@ class PatchTests(unittest.TestCase):
 
     def test_spell_range_from_spellgrow_rom(self):
         rom = synthetic()
-        source = doc({'kind': 'person', 'index': 0, 'field': [0xAB], 'battle': [0xAC]})
+        source = doc({'kind': 'person', 'index': 0, 'field': [0xC6], 'battle': [0xC7]})
         with self.assertRaises(ValueError):
             patch(rom, source)
         data = bytearray(rom.d)
-        put(data, 0x20AA9D, bytes.fromhex('20 e0 ff'))
-        put(data, 0x20FFEB, bytes.fromhex('00 90 10 90'))          # 새 행동 AB·AC 의 처리 루틴
+        for n in range(0xC6, 0xD5):
+            put(data, 0x20B7F9 + n * 2, bytes.fromhex('27 af'))     # 처리 루틴 표의 빈 값
+        put(data, 0x20B7F9 + 0xC6 * 2, bytes.fromhex('00 90 10 90'))  # 새 행동 C6·C7 의 처리 루틴
         put(data, 0x11801C, bytes.fromhex('20 b0 ff'))
-        put(data, 0x11FFB0 + 34, bytes.fromhex('00 90 22 80'))     # AB 는 필드 처리기, AC 는 11:8022(멈춤)
+        put(data, 0x11FFB0 + 34, bytes.fromhex('00 90 22 80'))     # C6 은 필드 처리기, C7 은 11:8022(멈춤)
         grown = Rom(data)
-        self.assertEqual(spells(grown), (0xAC, FIELD_SPELLS | {0xAB}))
+        self.assertEqual(spells(grown), (0xC7, FIELD_SPELLS | {0xC6}))
         self.assertTrue(patch(rom, source, spell_rom=grown)['writes'])
-        for bad in ({'field': [0xAC]}, {'battle': [0xAD]}):
+        for bad in ({'field': [0xC7]}, {'battle': [0xC8]}):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 patch(rom, doc({'kind': 'person', 'index': 0, **bad}), spell_rom=grown)
         check(rom, source, spell_rom=grown)
