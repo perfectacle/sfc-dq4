@@ -2,7 +2,7 @@
 
 형식은 sfc/dq5/docs/dq5-build-format.md 의 「행동 번호 늘리기」. 롬 두 벌을 만든다.
   grow   dq5spellgrow.py(AB = 27 베낌) + dq5namewrite.py --append(표 3 의 AB 이름) + 주인공 습득 레벨 2
-         + 주인공 필드·전투 목록 첫 칸을 AB 로
+         + 주인공 필드·전투 목록 첫 칸을 AB 로(dq5learnwrite.py --spells-from 으로 늘린 번호를 받음)
   base   위에서 dq5spellgrow·이름만 뺀 대조 롬(목록에는 AB 가 있지만 표는 원래 171개)
 주인공을 레벨 2 로 올려 배우게 하고, 필드 じゅもん 과 전투 じゅもん 으로 외운다. 원본 롬·선실 상태는 읽기만 한다.
 
@@ -29,26 +29,26 @@ NAMES_AT = '6F:8000'
 NEW, COPY = 0xAB, 0x27
 FIELD_USE = 'b:4,wait:40,a:4,wait:30,right:4,wait:20,a:4,wait:40,a:4,wait:40,a:4,wait:200'
 BATTLE_USE = 'a:4,wait:30,down:4,wait:20,a:4,wait:40,a:4,wait:40,a:4,wait:200'
-# 주인공 필드 목록 첫 칸(23:BE28)과 전투 목록 첫 칸(23:BE31). 원래 둘 다 27 ホイミ.
-LISTS = (('23:BE28', '주인공 필드 목록 첫 칸'), ('23:BE31', '주인공 전투 목록 첫 칸'))
 
 
 def build(original, out):
     data = original.read_bytes()
-    hero = learn_dump(Rom(data))['characters'][0]
-    hero['learn'][0]['level'] = 2
-    save_json(out / 'learn.json', {'format': LEARN_FORMAT, 'characters': [hero]})
-    command('dq5learnwrite.py', original, 'patch', out / 'learn.json', '-o', out / 'learn.patch.json')
     save_json(out / 'grow.json', {'format': 'dq5spellgrow/1', 'spells': [{'id': f'{NEW:02X}', 'copy': f'{COPY:02X}'}]})
     command('dq5spellgrow.py', original, 'check', out / 'grow.json', '--at', AT)
     command('dq5spellgrow.py', original, 'patch', out / 'grow.json', '--at', AT, '-o', out / 'grow.patch.json')
+    command('dq5build.py', original, 'build', out / 'grow.patch.json', '-o', out / 'spells.sfc')
+    hero = learn_dump(Rom(data))['characters'][0]
+    hero['learn'][0]['level'] = 2
+    hero['field'][0] = hero['battle'][0] = NEW
+    save_json(out / 'learn.json', {'format': LEARN_FORMAT, 'characters': [hero]})
+    command('dq5learnwrite.py', original, 'check', out / 'learn.json', '--spells-from', out / 'spells.sfc')
+    command('dq5learnwrite.py', original, 'patch', out / 'learn.json', '-o', out / 'learn.patch.json',
+            '--spells-from', out / 'spells.sfc')
     name = read_tables(data)[3][COPY]
     save_json(out / 'names.json', {'format': 'dq5names/1', 'tables': [{'table': 3, 'names': [{'id': NEW, 'bytes': name + name[-1:]}]}]})
     command('dq5namewrite.py', original, 'check', out / 'names.json', '--at', NAMES_AT, '--append')
     command('dq5namewrite.py', original, 'patch', out / 'names.json', '--at', NAMES_AT, '--append', '-o', out / 'names.patch.json')
-    save_json(out / 'lists.patch.json', {'format': 'dq5patch/1', 'name': 'lists', 'writes': [
-        {'at': at, 'hex': f'{NEW:02x}', 'orig': f'{COPY:02x}', 'note': note} for at, note in LISTS]})
-    for rom, parts in (('grow', ('learn', 'grow', 'names', 'lists')), ('base', ('learn', 'lists'))):
+    for rom, parts in (('grow', ('learn', 'grow', 'names')), ('base', ('learn',))):
         command('dq5build.py', original, 'build', *[out / f'{p}.patch.json' for p in parts], '-o', out / f'{rom}.sfc',
                 '--ips', out / f'{rom}.ips')
 

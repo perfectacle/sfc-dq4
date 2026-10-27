@@ -6,8 +6,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dq5build import build, parse_at  # noqa: E402
-from dq5learnwrite import (BANK_AT, COMPANIONS, FORMAT, LDY_AT, TABLES, check, config,  # noqa: E402
-                           dump, encode, layout, patch, stub)
+from dq5learnwrite import (BANK_AT, COMPANIONS, FIELD_SPELLS, FORMAT, JOIN, JOIN_SIZE, LDY_AT, TABLES, check,  # noqa: E402
+                           config, spells, dump, encode, layout, patch, stub)
 from dq5map import Rom, lorom  # noqa: E402
 
 
@@ -245,6 +245,64 @@ class PatchTests(unittest.TestCase):
         rom = synthetic()
         check(rom, doc({'kind': 'person', 'index': 0, 'field': [0x27, 0x28],
                         'learn': [{'level': 4, 'field_slots': [1, 0], 'battle_slots': [0]}]}))
+
+
+    def test_join_bits(self):
+        data = bytearray(synthetic().d)
+        put(data, JOIN + 3 * JOIN_SIZE, bytes([3, 0x80]))
+        put(data, JOIN + 3 * JOIN_SIZE + 0x23, bytes([0, 1, 0x30]))
+        rom = Rom(data)
+        self.assertEqual(dump(rom)['join'][3], {'entry': 3, 'owner': 'person 03', 'field_slots': [], 'battle_slots': [0]})
+        writes = patch(rom, {'format': FORMAT, 'characters': [],
+                             'join': [{'entry': 3, 'field_slots': [0], 'battle_slots': []}]})['writes']
+        self.assertEqual([(w['at'], w['hex'], w['orig']) for w in writes], [('23:C0B5', '01 00', '00 01')])
+        for bad in ([{'entry': 3, 'field_slots': [1], 'battle_slots': []}],
+                    [{'entry': 13, 'field_slots': [], 'battle_slots': []}],
+                    [{'entry': 3, 'field_slots': [0, 0], 'battle_slots': []}],
+                    [{'entry': 3, 'field_slots': []}],
+                    [{'entry': 3, 'owner': 'person 02', 'field_slots': [], 'battle_slots': []}],
+                    [{'entry': 3, 'field_slots': [[0]], 'battle_slots': []}]):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                patch(rom, {'format': FORMAT, 'characters': [], 'join': bad})
+        # 칸 3 은 전투 칸 0 을 켜 두었으므로 사람 3 의 전투 목록을 비우면 거부한다.
+        field_only = {'kind': 'person', 'index': 3, 'battle': [],
+                      'learn': [{'level': 4, 'field_slots': [0], 'battle_slots': []}]}
+        with self.assertRaisesRegex(ValueError, 'join 칸 3'):
+            patch(rom, doc(field_only))
+        source = {'format': FORMAT, 'characters': [field_only],
+                  'join': [{'entry': 3, 'field_slots': [0], 'battle_slots': []}]}
+        check(rom, source)
+        after = apply(rom, patch(rom, source))
+        self.assertEqual(after.d[lorom(JOIN + 3 * JOIN_SIZE + 0x25)], 0x30)
+        # 전투 칸 8 은 +25 bit0 이고 위 4비트(30)는 그대로 둔다. 칸 11 의 +0 이 80 이면 몬스터 칸이다.
+        put(data, JOIN + 11 * JOIN_SIZE, bytes([0x80]))
+        rom = Rom(data)
+        self.assertEqual(dump(rom)['join'][11]['owner'], 'monster 00')
+        with self.assertRaisesRegex(ValueError, '동료 몬스터 칸'):
+            patch(rom, {'format': FORMAT, 'characters': [], 'join': [{'entry': 11, 'field_slots': [], 'battle_slots': [0]}]})
+        twelve = {'format': FORMAT, 'characters': [{'kind': 'person', 'index': 3, 'battle': list(range(1, 10))}],
+                  'join': [{'entry': 3, 'field_slots': [], 'battle_slots': [8]}]}
+        writes = patch(rom, twelve)['writes']
+        self.assertIn(('23:C0B6', '00 31'), [(w['at'], w['hex']) for w in writes])
+
+
+    def test_spell_range_from_spellgrow_rom(self):
+        rom = synthetic()
+        source = doc({'kind': 'person', 'index': 0, 'field': [0xAB], 'battle': [0xAC]})
+        with self.assertRaises(ValueError):
+            patch(rom, source)
+        data = bytearray(rom.d)
+        put(data, 0x20AA9D, bytes.fromhex('20 e0 ff'))
+        put(data, 0x20FFEB, bytes.fromhex('00 90 10 90'))          # 새 행동 AB·AC 의 처리 루틴
+        put(data, 0x11801C, bytes.fromhex('20 b0 ff'))
+        put(data, 0x11FFB0 + 34, bytes.fromhex('00 90 22 80'))     # AB 는 필드 처리기, AC 는 11:8022(멈춤)
+        grown = Rom(data)
+        self.assertEqual(spells(grown), (0xAC, FIELD_SPELLS | {0xAB}))
+        self.assertTrue(patch(rom, source, spell_rom=grown)['writes'])
+        for bad in ({'field': [0xAC]}, {'battle': [0xAD]}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                patch(rom, doc({'kind': 'person', 'index': 0, **bad}), spell_rom=grown)
+        check(rom, source, spell_rom=grown)
 
 
 if __name__ == '__main__':
