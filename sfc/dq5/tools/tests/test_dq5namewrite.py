@@ -118,6 +118,13 @@ class NameWriteTests(unittest.TestCase):
             with self.subTest(raw=raw), self.assertRaises(ValueError):
                 valid_name(raw)
         self.assertEqual(valid_name([]), [])
+        self.assertEqual(len(valid_name([1] * 24)), MAX_NAME)
+        full = {t: list(names) for t, names in self.tables.items()}
+        full[4] = full[4] + [[1]] * (256 - len(full[4]))
+        with self.assertRaises(ValueError):
+            overrides(full, {'format': FORMAT, 'tables': [{'table': 4, 'names': [{'id': 256, 'bytes': [1]}]}]}, True)
+        self.assertEqual(len(overrides(self.tables, {'format': FORMAT, 'tables': [
+            {'table': 4, 'names': [{'id': COUNTS[4], 'bytes': [1]}]}]}, True)[4]), COUNTS[4] + 1)
         cases = [None, {}, {'format': FORMAT}, {'format': FORMAT, 'tables': None}, {'format': 'x', 'tables': []},
                  {'format': FORMAT, 'tables': [], 'x': 1}, {'format': FORMAT, 'tables': [None]}]
         for t in (7, 8, 9, 12, -1, True, '4'):
