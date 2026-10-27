@@ -23,7 +23,8 @@ from pathlib import Path
 
 from dq5build import cpu, free_ranges
 from dq5map import Rom, lorom
-from dq5talk import FIRST_SCRIPT, FIRST_SPECIAL2, MESSAGE_BASE, THREE_BYTE
+from dq5talk import (EXTRA_BASE, FIRST_SCRIPT, FIRST_SPECIAL2, MESSAGE_BASE, SITES, THREE_BYTE, extra_address,
+                     extra_config, extra_hooks, site_bytes)
 
 FORMAT = 'dq5talk/1'
 BANK = 0x06
@@ -184,9 +185,25 @@ def layout(rom):
     return groups
 
 
+def extra_layout(rom):
+    """덧붙인 스크립트 [(대화 번호, 주소, 바이트, 명령 목록)]. 없으면 빈 목록."""
+    cfg = extra_config(rom)
+    if cfg is None:
+        return cfg, []
+    rows = []
+    for n in range(cfg['end'] - EXTRA_BASE):
+        a = extra_address(rom, n, cfg)
+        body, end = read_script(rom, a)
+        code = bytes(rom.d[lorom(a):lorom(a) + end - a])
+        if end >> 16 != a >> 16 or skip_length(code) != len(code):
+            raise ValueError(f'덧붙인 스크립트 {n + EXTRA_BASE:03X}: 뱅크를 넘거나 06:AFA9 건너뛰기 경계와 다름')
+        rows.append((n + EXTRA_BASE, a, code, body))
+    return cfg, rows
+
+
 def dump(rom, talks=None):
-    scripts = [{'talk': f'{t:03X}', 'body': body}
-               for _, rows in layout(rom) for t, _, _, body in rows if talks is None or t in talks]
+    rows = [row for _, group in layout(rom) for row in group] + extra_layout(rom)[1]
+    scripts = [{'talk': f'{t:03X}', 'body': body} for t, _, _, body in rows if talks is None or t in talks]
     return {'format': FORMAT, 'scripts': scripts}
 
 
@@ -265,7 +282,9 @@ def scripts_from(doc):
     out = {}
     for i, row in enumerate(doc['scripts']):
         fields(row, ('talk', 'body'), (), f'scripts[{i}]')
-        t = hexnum(row['talk'], FIRST_SCRIPT, FIRST_SPECIAL2 - 1, 3, f'scripts[{i}].talk')
+        t = hexnum(row['talk'], FIRST_SCRIPT, 0xFFF, 3, f'scripts[{i}].talk')
+        if FIRST_SPECIAL2 <= t < EXTRA_BASE:
+            raise ValueError(f'scripts[{i}].talk: 011~24E(원래 스크립트)나 900~FFF(덧붙인 스크립트)만 받음')
         if t in out:
             raise ValueError(f'대화 번호 {t:03X} 를 두 번 적음')
         out[t] = encode_script(row['body'], f'talk {t:03X}')
@@ -329,7 +348,63 @@ def runs(old, new, base):
     return [(base + i, new[i:j], old[i:j])]
 
 
-def edits(rom, doc, at=None, repack=False):
+def place_extra(rom, cfg, rows, codes, extra_at, hook_at):
+    """덧붙인 스크립트의 바이트 쓰기 {파일 위치: 값}. 바뀐 것이 없으면 빈 사전.
+    롬에 이미 있는 덧붙인 스크립트는 그대로 이어 받으므로 줄이거나 지울 수 없고, 옮기면 옛 자리는 남는다."""
+    old = {t: code for t, _, code, _ in rows}
+    merged = {**old, **{t: c for t, c in codes.items() if t >= EXTRA_BASE}}
+    if merged == old and extra_at is None and hook_at is None:
+        return {}
+    count = len(merged)
+    missing = [f'{t:03X}' for t in range(EXTRA_BASE, EXTRA_BASE + count) if t not in merged]
+    if missing:
+        raise ValueError(f'덧붙인 스크립트는 900 부터 빈 번호 없이 이어져야 함(빠짐 {missing[:4]})')
+    groups = (count + 31) // 32
+    blob_size = groups * 2 + sum(len(c) for c in merged.values())
+    here = None
+    if cfg is not None:
+        here = (cfg['table'], (cfg['end'] - EXTRA_BASE + 31) // 32 * 2 + sum(len(c) for c in old.values()))
+    if extra_at is None:
+        if here is None or blob_size > here[1]:
+            raise ValueError(f'덧붙인 스크립트 {blob_size}바이트를 둘 --extra-at(뱅크 30~3F)이 필요함')
+        extra_at = here[0]
+    if not 0x30 <= extra_at >> 16 <= 0x3F:
+        # 06:B065 가 데이터 뱅크로 $0F1C·$0A01 같은 WRAM 거울 주소를 읽어(코드 읽기) 뱅크 00~3F 여야 하고,
+        # 원래 롬(00~2F)에는 빈 자리가 거의 없으므로 늘린 뱅크 30~3F 만 받는다.
+        raise ValueError('--extra-at: 뱅크 30~3F 만 받음(데이터 뱅크로 WRAM 거울을 읽는 늘린 뱅크)')
+    if (extra_at & 0xFFFF) + blob_size > 0x10000:
+        raise ValueError(f'--extra-at {cpu(lorom(extra_at))}: {blob_size}바이트가 뱅크를 넘음')
+    # 이미 늘린 롬이면 옛 덧붙인 자리 밖의 바이트가 비어 있어야 한다(0, 또는 빌더가 뱅크 첫 8바이트에 쓰는 표지).
+    old_span = range(lorom(here[0]), lorom(here[0]) + here[1]) if here else range(0)
+    for off in range(lorom(extra_at), lorom(extra_at) + blob_size):
+        if off < len(rom.d) and off not in old_span and rom.d[off] and off % 0x8000 >= 8:
+            raise ValueError(f'--extra-at: {cpu(off)} 에 다른 자료가 있음(비어 있는 곳을 고름)')
+    if hook_at is None:
+        if cfg is None:
+            raise ValueError('덧붙인 스크립트 루틴(84바이트)을 둘 --hook-at(뱅크 06 빈 자리)이 필요함')
+        hook_at = cfg['hook']
+    out = {}
+    addresses, a = [], extra_at + groups * 2
+    for n, t in enumerate(sorted(merged)):
+        if n % 32 == 0:
+            addresses.append(a)
+        code = merged[t]
+        out.update({lorom(a) + i: v for i, v in enumerate(code)})
+        a += len(code)
+    table = b''.join((x & 0xFFFF).to_bytes(2, 'little') for x in addresses)
+    out.update({lorom(extra_at) + i: v for i, v in enumerate(table)})
+    hooks, starts = extra_hooks(hook_at, EXTRA_BASE + count, extra_at, extra_at >> 16)
+    if cfg is None or hook_at != cfg['hook']:
+        if hook_at >> 16 != 0x06 or not any(st <= lorom(hook_at) and lorom(hook_at) + len(hooks) <= st + n
+                                            for st, n in free_ranges(rom.d)):
+            raise ValueError(f'--hook-at {cpu(lorom(hook_at))}: 뱅크 06 빈 자리 지도 안이어야 함({len(hooks)}바이트)')
+    out.update({lorom(hook_at) + i: v for i, v in enumerate(hooks)})
+    for name, raw in site_bytes(starts).items():
+        out.update({lorom(SITES[name]) + i: v for i, v in enumerate(raw)})
+    return out
+
+
+def edits(rom, doc, at=None, repack=False, extra_at=None, hook_at=None):
     codes = scripts_from(doc)
     groups = layout(rom)
     starts = place(rom, groups, codes, at, repack)
@@ -345,20 +420,41 @@ def edits(rom, doc, at=None, repack=False):
     o = lorom(TABLE)
     for off, data, orig in runs(rom.d[o:o + len(table)], table, o):
         out.append((off, data, orig, '묶음 포인터 06:AEF8'))
+    cfg, rows = extra_layout(rom)
+    extra = place_extra(rom, cfg, rows, codes, extra_at, hook_at)
+    taken = {off + i for off, data, _, _ in out for i in range(len(data))}
+    if taken & set(extra):
+        raise ValueError(f'덧붙인 스크립트 쓰기가 원래 스크립트 쓰기와 겹침: {cpu(min(taken & set(extra)))}')
+    changed = sorted(off for off, v in extra.items() if off >= len(rom.d) or rom.d[off] != v)
+    while changed:
+        first = end = changed[0]
+        while end in extra and (end - first) < 0x8000 and (end % 0x8000 or end == first) \
+                and (end >= 0x180000) == (first >= 0x180000):
+            end += 1
+        data = bytes(extra[i] for i in range(first, end))
+        orig = bytes(rom.d[first:end]) if first < 0x180000 else None
+        if orig != data:
+            out.append((first, data, orig, '덧붙인 스크립트'))
+        changed = [c for c in changed if c >= end]
     return out, starts
 
 
-def patch(rom, doc, at=None, repack=False):
-    writes, _ = edits(rom, doc, at, repack)
-    return {'format': 'dq5patch/1', 'name': 'talk-scripts', 'writes': [
-        {'at': cpu(off), 'hex': data.hex(' '), 'orig': orig.hex(' '), 'note': note} for off, data, orig, note in writes]}
+def patch(rom, doc, at=None, repack=False, extra_at=None, hook_at=None):
+    writes, _ = edits(rom, doc, at, repack, extra_at, hook_at)
+    result = {'format': 'dq5patch/1', 'name': 'talk-scripts', 'writes': [
+        {'at': cpu(off), 'hex': data.hex(' '), **({'orig': orig.hex(' ')} if orig is not None else {}), 'note': note}
+        for off, data, orig, note in writes]}
+    top = max((off + len(data) for off, data, _, _ in writes), default=0)
+    if top > 0x180000:
+        result['rom_size'] = 2 if top <= 0x200000 else 3 if top <= 0x300000 else 4
+    return result
 
 
-def check(rom, doc=None, at=None, repack=False):
+def check(rom, doc=None, at=None, repack=False, extra_at=None, hook_at=None):
     from dq5build import build
     import dq5talk
     original = dump(rom)
-    writes, starts = edits(rom, original if doc is None else doc, at, repack)
+    writes, starts = edits(rom, original if doc is None else doc, at, repack, extra_at, hook_at)
     if dq5talk.check(rom):
         raise ValueError('dq5talk.py 의 경계 검사가 실패함')
     if doc is None:
@@ -367,7 +463,9 @@ def check(rom, doc=None, at=None, repack=False):
         total = sum(len(c) for _, rows in layout(rom) for _, _, c, _ in rows)
         print(f'스크립트 {len(original["scripts"])}개 {total}바이트, 묶음 {GROUPS}개 원본 왕복 쓰기 0개')
         return
-    built, _ = build(rom.d, [('talk-scripts', 0, writes)], 0)
+    top = max((off + len(data) for off, data, _, _ in writes), default=0)
+    size = 0 if top <= 0x180000 else 2 if top <= 0x200000 else 3 if top <= 0x300000 else 4
+    built, _ = build(rom.d, [('talk-scripts', size, writes)], size)
     moved = Rom(built)
     want = {row['talk']: row['body'] for row in original['scripts']}
     want.update({row['talk'].upper(): row['body'] for row in doc['scripts']})
@@ -381,11 +479,15 @@ def check(rom, doc=None, at=None, repack=False):
     for n in range(COUNT):
         if dq5talk.script_address(moved, n) != addresses[n]:
             raise ValueError(f'스크립트 {n:03X}: 게임의 찾기(06:AF85)와 다른 주소')
-    if edits(moved, doc, at, repack)[0]:
+    if edits(moved, doc, at, repack, extra_at, hook_at)[0]:
         raise ValueError('빌드한 롬에 같은 입력을 다시 패치하면 쓰기가 남음')
     if edits(moved, dump(moved), at, repack)[0]:
         raise ValueError('빌드한 롬을 다시 읽고 인코딩한 결과가 다름')
     moved_groups = [g for g, s in enumerate(starts) if s != layout(rom)[g][0]]
+    cfg, extras = extra_layout(moved)
+    if extras:
+        print(f'덧붙인 스크립트 {len(extras)}개(대화 900~{extras[-1][0]:03X}), 루틴 {cpu(lorom(cfg["hook"]))}, '
+              f'표 {cpu(lorom(cfg["table"]))}')
     print(f'입력 스크립트 {len(doc["scripts"])}개, 쓰기 {len(writes)}개 '
           f'{sum(len(w[1]) for w in writes)}바이트, 옮긴 묶음 '
           + (', '.join(f'{g}→{cpu(lorom(starts[g]))}' for g in moved_groups) or '없음')
@@ -406,21 +508,33 @@ def main():
             p.add_argument('-o', '--out', type=Path, required=True)
         p.add_argument('--at', help='원래 자리를 넘는 묶음을 둘 뱅크 06 주소(빈 자리 지도 안, 예 06:FE10)')
         p.add_argument('--repack', action='store_true', help='묶음을 06:8129 부터 다시 채우고 넘치는 것만 --at 에')
+        p.add_argument('--extra-at', help='대화 번호 900~ 의 덧붙인 스크립트(묶음 표 + 스크립트)를 둘 곳(뱅크 30~3F)')
+        p.add_argument('--hook-at', help='덧붙인 스크립트 루틴 84바이트를 둘 뱅크 06 빈 자리(예 06:FE10)')
     args = parser.parse_args()
     try:
         rom = Rom(args.rom.read_bytes())
         at = bank06(args.at) if getattr(args, 'at', None) else None
+        extra_at = hook_at = None
+        if getattr(args, 'extra_at', None):
+            m = re.fullmatch(r'([0-9A-Fa-f]{2}):([0-9A-Fa-f]{4})', args.extra_at)
+            if not m or int(m[2], 16) < 0x8000:
+                raise ValueError('--extra-at 은 BB:AAAA')
+            extra_at = int(m[1], 16) << 16 | int(m[2], 16)
+        if getattr(args, 'hook_at', None):
+            hook_at = bank06(args.hook_at)
         doc = json.loads(args.source.read_text(encoding='utf-8')) if getattr(args, 'source', None) else None
         if args.command == 'check':
-            check(rom, doc, at, args.repack)
+            check(rom, doc, at, args.repack, extra_at, hook_at)
             return 0
         if args.command == 'dump':
             talks = None
             if args.talk:
-                talks = {hexnum(t.upper().zfill(3), FIRST_SCRIPT, FIRST_SPECIAL2 - 1, 3, '--talk') for t in args.talk}
+                talks = {hexnum(t.upper().zfill(3), FIRST_SCRIPT, 0xFFF, 3, '--talk') for t in args.talk}
+                if any(FIRST_SPECIAL2 <= t < EXTRA_BASE for t in talks):
+                    raise ValueError('--talk: 011~24E 나 900~FFF 만 스크립트')
             result = dump(rom, talks)
         else:
-            result = patch(rom, doc, at, args.repack)
+            result = patch(rom, doc, at, args.repack, extra_at, hook_at)
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(result, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
         return 0

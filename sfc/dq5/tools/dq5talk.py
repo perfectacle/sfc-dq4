@@ -33,7 +33,80 @@ MESSAGE_BASE = 0x615
 THREE_BYTE = (0x00, *range(0x17, 0x1D))
 
 
+# 덧붙인 스크립트(dq5talkwrite.py). 대화 번호 900 이상은 원본에서 메시지 T + 3C6(3,200개 밖)이라 쓰이지 않는다.
+# 06:AF7B·06:B04F 의 CMP #$024F 와 06:B05D 의 LDA #$06, 06:B136 의 JSR $B13C 를 뱅크 06 의 작은 루틴으로 돌린다.
+EXTRA_BASE = 0x900
+SITES = {'lookup': 0x06AF7B, 'run': 0x06B04F, 'bank': 0x06B05D, 'call': 0x06B136}
+ORIGINAL_SITES = {'lookup': 'c9 4f 02', 'run': 'c9 4f 02', 'bank': 'a9 06 48 ab', 'call': '20 3c b1'}
+
+
+def extra_hooks(at, end, table, bank):
+    """뱅크 06 의 at 에 둘 루틴 넷(조회·스크립트인지·데이터 뱅크·네이티브 호출)과 각 시작 주소.
+    end 는 덧붙인 대화 번호의 끝(포함하지 않음), table 은 묶음 포인터 표(롱 주소), bank 는 스크립트 뱅크."""
+    lookup = bytes([0xC9, 0x00, 0x09, 0x90, 0x05, 0xC9, end & 0xFF, end >> 8, 0x90, 0x04,
+                    0xC9, 0x4F, 0x02, 0x60,
+                    # 900 이상: n = T - 900 을 원래 06:AF89 처럼 쌓고 JSR 복귀 주소를 버린 뒤, 묶음 포인터를 읽어
+                    # 데이터 뱅크를 스크립트 뱅크로 두고 06:AF9C(건너뛰기)로 간다. 06:AFF1 의 PLB 가 뱅크를 되돌린다.
+                    0x38, 0xE9, 0x00, 0x09, 0x7A, 0x7A, 0x48, 0x4A, 0x4A, 0x4A, 0x4A, 0x4A, 0x0A, 0xAA,
+                    0xBF, table & 0xFF, table >> 8 & 0xFF, table >> 16, 0x48,
+                    0xE2, 0x20, 0xA9, bank, 0x48, 0xAB, 0xC2, 0x20, 0x68, 0x4C, 0x9C, 0xAF])
+    run = bytes([0xC9, 0x00, 0x09, 0x90, 0x06, 0xC9, end & 0xFF, end >> 8, 0xB0, 0x01, 0x60, 0xC9, 0x4F, 0x02, 0x60])
+    # 06:B05D 자리. 대화 번호(7E:0F19) 위 바이트가 09 이상이면 스크립트 뱅크, 아니면 06.
+    data_bank = bytes([0xAF, 0x1A, 0x0F, 0x7E, 0xC9, 0x09, 0xA9, 0x06, 0x90, 0x02, 0xA9, bank, 0x48, 0xAB, 0x60])
+    # 06:B13C 와 같되 인자를 읽은 뒤 데이터 뱅크를 06 으로 두고 네이티브 루틴으로 뛴다(06:B139 의 PLB 가 되돌림).
+    call = bytes([0xC8, 0x20, 0x43, 0xB1, 0x4B, 0xAB, 0x6C, 0x33, 0x0F])
+    starts, a, code = {}, at, b''
+    for name, part in (('lookup', lookup), ('run', run), ('bank', data_bank), ('call', call)):
+        starts[name] = a
+        code += part
+        a += len(part)
+    return code, starts
+
+
+def site_bytes(starts):
+    """네 자리에 쓸 바이트(06:B05D 는 JSR 뒤 NOP)."""
+    jsr = {name: bytes([0x20, a & 0xFF, a >> 8 & 0xFF]) for name, a in starts.items()}
+    return {'lookup': jsr['lookup'], 'run': jsr['run'], 'bank': jsr['bank'] + b'\xea', 'call': jsr['call']}
+
+
+def extra_config(rom):
+    """덧붙인 스크립트 설정(end·table·bank·hook) 또는 None. 네 자리가 모두 원본이거나 모두 루틴이어야 한다."""
+    raw = {name: bytes(rom.u8(a + i) for i in range(len(bytes.fromhex(ORIGINAL_SITES[name]))))
+           for name, a in SITES.items()}
+    if all(raw[n] == bytes.fromhex(ORIGINAL_SITES[n]) for n in SITES):
+        return None
+    if raw['lookup'][0] != 0x20:
+        raise ValueError('06:AF7B 가 원본도 JSR 도 아님')
+    hook = 0x060000 | raw['lookup'][1] | raw['lookup'][2] << 8
+    end = rom.u16(hook + 6)
+    table = rom.u16(hook + 0x1D) | rom.u8(hook + 0x1F) << 16
+    bank = rom.u8(hook + 0x24)
+    code, starts = extra_hooks(hook, end, table, bank)
+    if bytes(rom.u8(hook + i) for i in range(len(code))) != code or any(
+            raw[n] != site_bytes(starts)[n] for n in SITES):
+        raise ValueError(f'{hook:06X}: 덧붙인 스크립트 루틴이 형식과 다름')
+    return {'hook': hook, 'end': end, 'table': table, 'bank': bank}
+
+
+def extra_address(rom, n, cfg):
+    """덧붙인 스크립트 n(= 대화 번호 - 900)의 시작. 06:AFA9 와 같은 규칙으로 건너뛴다."""
+    a = cfg['bank'] << 16 | rom.u16(cfg['table'] + (n >> 5) * 2)
+    for _ in range(n & 0x1F):
+        while True:
+            b = rom.u8(a)
+            a += 1
+            if b in THREE_BYTE:
+                a += 2
+            elif b & 0x40:
+                a += 1
+            elif b == 0x3F:
+                break
+    return a
+
+
 def talk_kind(t):
+    if t >= EXTRA_BASE:
+        return 'extra'
     if t < FIRST_SCRIPT:
         return 'special'
     if t < FIRST_SPECIAL2:
@@ -172,9 +245,17 @@ def talk(rom, t):
         m = t - FIRST_SPECIAL2 + MESSAGE_BASE
         return [f'talk {t:03X}: 06:B34F 묻기 {m:03X}, はい {m + 1:03X}, いいえ {m + 2:03X}',
                 *(text(message(rom, n)) for n in (m, m + 1, m + 2))]
-    a = script_address(rom, t - FIRST_SCRIPT)
+    if kind == 'extra':
+        cfg = extra_config(rom)
+        if cfg is None or t >= cfg['end']:
+            return [f'talk {t:03X}: 덧붙인 스크립트가 없는 번호(원본이면 메시지 {t + 0x3C6:03X}, 3,200개 밖)']
+        a = extra_address(rom, t - EXTRA_BASE, cfg)
+        label = f'덧붙인 스크립트 {t - EXTRA_BASE:03X}'
+    else:
+        a = script_address(rom, t - FIRST_SCRIPT)
+        label = f'스크립트 {t - FIRST_SCRIPT:03X}'
     ops, _ = parse_script(rom, a)
-    out = [f'talk {t:03X}: 스크립트 {t - FIRST_SCRIPT:03X} at {a:06X}']
+    out = [f'talk {t:03X}: {label} at {a:06X}']
     for addr, depth, name, raw, msg in ops:
         line = f'  {addr:06X} {raw.hex(" "):14} {"  " * depth}{name}'
         if msg is not None:

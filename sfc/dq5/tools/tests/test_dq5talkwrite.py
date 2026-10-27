@@ -6,6 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dq5build import build  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
+from dq5talk import ORIGINAL_SITES, SITES, extra_config  # noqa: E402
 from dq5talkwrite import (COUNT, FORMAT, REGION, TABLE, bank06, check, dump, edits, encode_script,  # noqa: E402
                           patch, skip_length)
 
@@ -25,6 +26,9 @@ def synthetic(fill_bank_end=False):
         code = PAPAS_CODE if n % 3 == 0 else bytes([0x40 | n >> 8, n & 0xFF, 0x3F])
         data[lorom(a):lorom(a) + len(code)] = code
         a += len(code)
+    for name, at in SITES.items():
+        raw = bytes.fromhex(ORIGINAL_SITES[name])
+        data[lorom(at):lorom(at) + len(raw)] = raw
     if fill_bank_end:
         data[lorom(0x06FFF0)] = 0xEA
     return Rom(data)
@@ -179,6 +183,82 @@ class LayoutTests(unittest.TestCase):
         for t in (0x11, 0x40, 0x24E):
             self.assertEqual(dump(moved, {t}), dump(rom, {t}))
         self.assertEqual(edits(moved, doc(('013', PAPAS + PAPAS)), 0x06FE10, repack=True)[0], [])
+
+
+def build_patch(rom, manifest):
+    writes = [(int(w['at'][:2], 16) * 0x8000 + int(w['at'][3:], 16) - 0x8000, bytes.fromhex(w['hex']),
+               bytes.fromhex(w['orig']) if 'orig' in w else None, '') for w in manifest['writes']]
+    size = manifest.get('rom_size', 0)
+    built, _ = build(rom.d, [('t', size, writes)], size)
+    return Rom(built)
+
+
+class ExtraTests(unittest.TestCase):
+    EXTRA = {'extra_at': 0x3F8000, 'hook_at': 0x06FE10}
+
+    def extras(self, count):
+        return doc(*((f'{0x900 + n:03X}', [{'op': 'msg', 'id': f'{0x700 + n:03X}'}]) for n in range(count)))
+
+    def test_needs_places_and_order(self):
+        rom = synthetic()
+        with self.assertRaisesRegex(ValueError, '--extra-at'):
+            patch(rom, self.extras(2))
+        with self.assertRaisesRegex(ValueError, '--hook-at'):
+            patch(rom, self.extras(2), extra_at=0x3F8000)
+        with self.assertRaisesRegex(ValueError, '빈 번호'):
+            patch(rom, doc(('901', PAPAS)), **self.EXTRA)
+        for bad in ({'extra_at': 0x068000, 'hook_at': 0x06FE10}, {'extra_at': 0x408000, 'hook_at': 0x06FE10},
+                    {'extra_at': 0x3F8000, 'hook_at': 0x078000}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                patch(rom, self.extras(2), **bad)
+        for talk in ('24F', '8FF', '1000'):
+            with self.subTest(talk=talk), self.assertRaises(ValueError):
+                patch(rom, doc((talk, PAPAS)), **self.EXTRA)
+
+    def test_round_trip_and_growth(self):
+        rom = synthetic()
+        source = self.extras(34)
+        manifest = patch(rom, source, **self.EXTRA)
+        self.assertEqual(manifest['rom_size'], 2)
+        after = build_patch(rom, manifest)
+        cfg = extra_config(after)
+        self.assertEqual((cfg['end'], cfg['table'], cfg['bank'], cfg['hook']), (0x922, 0x3F8000, 0x3F, 0x06FE10))
+        self.assertEqual(after.u16(0x3F8002), 0x8004 + 32 * 3)
+        self.assertEqual(dump(after, {0x921})['scripts'], [{'talk': '921', 'body': [{'op': 'msg', 'id': '721'}]}])
+        self.assertEqual(patch(after, source)['writes'], [])
+        self.assertEqual(patch(after, dump(after))['writes'], [])
+        grown = doc(('922', PAPAS))
+        with self.assertRaisesRegex(ValueError, '--extra-at'):
+            patch(after, grown)
+        again = build_patch(after, patch(after, grown, extra_at=0x3F8000))
+        self.assertEqual(extra_config(again)['end'], 0x923)
+        self.assertEqual(dump(again, {0x922})['scripts'][0]['body'], PAPAS)
+        self.assertEqual(dump(again, {0x900}), dump(after, {0x900}))
+        check(rom, source, extra_at=0x3F8000, hook_at=0x06FE10)
+
+    def test_hook_move_mixed_and_limits(self):
+        rom = synthetic()
+        after = build_patch(rom, patch(rom, self.extras(3), **self.EXTRA))
+        short = [{'op': 'msg', 'id': '129'}]
+        moved = build_patch(after, patch(after, doc(('012', short)), hook_at=0x06FF00))
+        cfg = extra_config(moved)
+        self.assertEqual(cfg['hook'], 0x06FF00)
+        self.assertEqual(dump(moved, {0x12})['scripts'][0]['body'], short)
+        self.assertEqual(dump(moved, {0x902}), dump(after, {0x902}))
+        with self.assertRaisesRegex(ValueError, '뱅크를 넘음'):
+            patch(rom, self.extras(3), extra_at=0x3FFFF8, hook_at=0x06FE10)
+        data = bytearray(after.d)
+        data[lorom(0x3F8050)] = 0x55
+        with self.assertRaisesRegex(ValueError, '다른 자료'):
+            patch(Rom(data), self.extras(40), extra_at=0x3F8000)
+        partial = bytearray(rom.d)
+        partial[lorom(SITES['run']):lorom(SITES['run']) + 3] = bytes.fromhex('20 10 fe')
+        with self.assertRaises(ValueError):
+            extra_config(Rom(partial))
+
+    def test_hooks_need_free_space(self):
+        with self.assertRaisesRegex(ValueError, '빈 자리'):
+            patch(synthetic(fill_bank_end=True), self.extras(1), **self.EXTRA)
 
 
 if __name__ == '__main__':
