@@ -469,6 +469,8 @@ def build(rom, font, jamo_font, message_font=None):
     data = dq4namegame.apply(data)
     import dq4bg3slot
     data = dq4bg3slot.apply(data)
+    import dq4windowname
+    data = dq4windowname.apply(data)
     return set_checksum(data), atlas, records
 
 
