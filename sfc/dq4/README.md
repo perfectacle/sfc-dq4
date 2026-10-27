@@ -102,3 +102,5 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [2026-10-27-20: 필드 지형 그리기](journal/2026-10-27-20-environment-field.md)
 
 - [2026-10-27-21: 간판 바탕과 열쇠 문, とびら 실측](journal/2026-10-27-21-environment-locks.md)
+
+- [2026-10-27-22: 전투 뒤 물 루틴이 빈 타일을 덮던 것](journal/2026-10-27-22-environment-battle-water.md)

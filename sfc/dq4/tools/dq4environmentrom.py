@@ -66,6 +66,10 @@ FLOOR = 1
 WATER_FRAMES = ("water0", "water1", "water2")
 WATER_AT = 0x41F000
 WATER_PERIOD = 24
+# Water is block 0 (CHR 0-3), and the CHR loader puts it in slots BE-C1 in every map that has it.
+# The water routine uses these slots directly: a battle reuses 7E:6000 (CHR id -> slot) as work
+# memory, and reading it after a battle sent the water frames to slot 0, the blank BG1 tile.
+WATER_SLOT = 0xBE
 LIB_AT = 0x3DE000
 # FC door properties and the DQ5 objects (01:D2FC kinds) that replace them. The record under an
 # object is the map's floor so the cell is walkable once the object opens; closed objects block
@@ -403,10 +407,10 @@ def engine_code(block_count, water_ids, palettes, entries, waters):
     lib.b(0xB0, 0x03).word(0x4C, "water_store")
     lib.b(0xAF, *frame.to_bytes(3, "little"), 0x1A, 0xC9, len(WATER_FRAMES), 0x00, 0x90, 0x03, 0xA9, 0x00, 0x00,
           0x8F, *frame.to_bytes(3, "little"), *(0x0A,) * 7, 0xAA)
-    for k, chr_id in enumerate(water_ids):
+    for k, _ in enumerate(water_ids):
         source = (WATER_AT & 0xFFFF) + k * 32
-        lib.b(0xAF, *(0x7E6000 + chr_id * 2).to_bytes(3, "little"),
-              0x29, 0xFF, 0x03, 0x0A, 0x0A, 0x0A, 0x0A, 0x18, 0x69, 0x00, 0x20, 0x8F, 0x1C + 2 * k, 0x1C, 0x00,
+        vram = 0x2000 + (WATER_SLOT + k) * 16
+        lib.b(0xA9, vram & 0xFF, vram >> 8, 0x8F, 0x1C + 2 * k, 0x1C, 0x00,
               0xA9, 0x20, 0x00, 0x8F, 0x26 + 2 * k, 0x1C, 0x00,
               0x8A, 0x18, 0x69, source & 0xFF, source >> 8, 0x8F, 0x0D + 3 * k, 0x1C, 0x00,
               0xE2, 0x20, 0xA9, WATER_AT >> 16, 0x8F, 0x0F + 3 * k, 0x1C, 0x00, 0xC2, 0x20)
@@ -456,7 +460,10 @@ def build(dq5_path, dq4_path, out):
     water_blocks = {water_block(source, local) for source, local in maps.values()} - {None}
     if len(water_blocks) != 1:
         raise ValueError(f"expected one shared water block, got {water_blocks}")
-    water_ids = block_words[water_blocks.pop()]
+    water_block_id = water_blocks.pop()
+    water_ids = block_words[water_block_id]
+    if water_block_id != 0 or tuple(water_ids) != (0, 1, 2, 3):
+        raise ValueError("the water block must be block 0 with CHR 0-3 so it takes the first slots")
     out.mkdir(parents=True, exist_ok=True)
 
     blocks, pointers = bytearray(), bytearray()

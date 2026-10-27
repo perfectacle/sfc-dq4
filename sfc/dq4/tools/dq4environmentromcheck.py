@@ -27,7 +27,7 @@ import dq5map  # noqa: E402
 from dq4environmentart import create_assets  # noqa: E402
 from dq4environmentmap import prepare_maps, render_maps  # noqa: E402
 from dq4environmentmap import block_prop  # noqa: E402
-from dq4environmentrom import (DOOR_KIND, FLOOR, GATE_KIND, OPENINGS, door_floor, TARGETS, WALL, water_block,  # noqa: E402
+from dq4environmentrom import (DOOR_KIND, FLOOR, GATE_KIND, OPENINGS, door_floor, TARGETS, WALL, WATER_SLOT, water_block,  # noqa: E402
                                WATER_FRAMES, WATER_PERIOD, build_graphics, objects, water_frames)
 
 OBJECT_SIZE = {DOOR_KIND: (2, 3), GATE_KIND: (4, 4)}  # noqa: E402
@@ -246,6 +246,8 @@ def main():
         result, image = check_map(name, wram, vram, cgram, expected(name, cycle[0] or 0), sources[name], known)
         image.save(out / name / "redraw.png")
         result["water_frames"] = cycle
+        result["water_slots"] = not has_water or all(
+            (wram[0x6000 + i * 2] | wram[0x6001 + i * 2] << 8) & 0x3FF == WATER_SLOT + k for k, i in enumerate(water_ids))
         # BG1 is filled with CHR slot 0 (VRAM word 2000); it must stay blank or it covers the map.
         result["blank_tile_kept"] = all(bytes(v[BLANK_TILE:BLANK_TILE + 32]) == bytes(32)
                                         for v in [vram] + [v for _, v, _ in later])
@@ -283,7 +285,7 @@ def main():
 
     ok = results["gate_open"]["passed_gate_row"] and all(m.get("pixel_differences") == 0 and m.get("walk_layer_mismatches") == 0 and m["moved"]
              and m["objects_drawn"].split("/")[0] == m["objects_drawn"].split("/")[1]
-             and m["water_cycles"] and m["blank_tile_kept"]
+             and m["water_cycles"] and m["blank_tile_kept"] and m["water_slots"]
              for m in results["maps"].values()) and all(
         v for k, v in results["control"].items() if k.endswith("_equal"))
     results["status"] = "passed" if ok else "failed"
