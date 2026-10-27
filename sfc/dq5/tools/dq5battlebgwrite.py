@@ -26,6 +26,8 @@ TABLES = {'pictures': (0x2882F9, 78), 'palettes': (0x28BDFC, 106), 'lists': (0x2
 # 표 다음부터 다음 표 앞까지가 원래 자료 자리. 목록 끝 28:FFEE~ 은 0 이지만 원래 쓰지 않던 자리라 넣지 않는다.
 REGIONS = {'pictures': (0x288395, 0x28BDFC), 'palettes': (0x28BED0, 0x28C9C2), 'lists': (0x28CAAC, 0x28FFEE)}
 PICTURE_BANK_SITES = (0x22CB36, 0x22CB55)    # LDA #$28 / STA $55 의 즉값
+# 종류별 뱅크 즉값. 팔레트는 22:8808 이 $55, 목록은 22:887F 가 $52 에 28 을 넣고 [$53]·[$50] 롱 간접으로 읽는다.
+BANK_SITES = {'pictures': PICTURE_BANK_SITES, 'palettes': (0x228809,), 'lists': (0x228880,)}
 ALT_LIST_SITE = 0x2288D4                    # LDA #$FD64 / STA $50 의 즉값
 
 
@@ -147,7 +149,8 @@ def encode_palette(p):
 
 
 # 원래 롬에서 이 자리들이 그림 뱅크·세계 2 목록 즉값이어야 한다(다른 패치를 먼저 한 롬을 거부).
-ORIGINAL_SITES = {0x22CB35: b'\xa9\x28', 0x22CB54: b'\xa9\x28', 0x2288D3: b'\xa9\x64\xfd'}
+ORIGINAL_SITES = {0x22CB35: b'\xa9\x28', 0x22CB54: b'\xa9\x28', 0x2288D3: b'\xa9\x64\xfd',
+                  0x228808: b'\xa9\x28', 0x22887F: b'\xa9\x28'}
 
 
 def original(rom):
@@ -300,7 +303,18 @@ def place(sizes, regions):
     return out, [tuple(r) for r in free if r[1] > r[0]]
 
 
-def patch(rom, doc, folder, at=None, name='battle-bg'):
+def subtract(ranges, taken):
+    out = []
+    for lo, hi in ranges:
+        cur = [(lo, hi)]
+        for a, b in taken:
+            cur = [piece for s, e in cur for piece in ((s, min(e, a)), (max(s, b), e)) if piece[0] < piece[1]]
+        out += cur
+    return out
+
+
+def patch(rom, doc, folder, at=None, name='battle-bg', palettes_at=None, lists_at=None):
+    """at 은 그림, palettes_at·lists_at 은 팔레트 레코드·목록 전체를 옮길 CPU 주소(늘린 뱅크)."""
     o = original(rom)
     res, tables, alt, numbers = load(doc, folder)
     origin = {kind: {ident(a): v for a, v in items.items()} for kind, items in o['resources'].items()}
@@ -331,24 +345,28 @@ def patch(rom, doc, folder, at=None, name='battle-bg'):
     for i, v in enumerate(numbers):
         if v != o['numbers'][i]:
             write(NUMBERS + i * 2, v.to_bytes(2, 'little'), f'배경 번호 {i:02X}')
-    if not any(changed.values()) and at is None:
+    moves = {'pictures': at, 'palettes': palettes_at, 'lists': lists_at}
+    if not any(changed.values()) and not any(v is not None for v in moves.values()):
         return {'format': 'dq5patch/1', 'name': name, 'writes': writes}, {}
 
-    # 자리: 그대로 들어가면 원래 자리, 아니면 종류별로 원래 자료가 쓰던 자리에 다시 놓고, 넘치면 그림이 비운 자리를 빌린다.
+    # 자리: 그대로 들어가면 원래 자리, 아니면 종류별로 원래 자료가 쓰던 자리에 다시 놓고, 넘치면 옮긴 종류가 비운
+    # 뱅크 28 자리를 빌린다. 옮기는 종류는 그 뱅크의 주소부터 뱅크 끝까지(먼저 옮긴 종류가 쓴 곳은 뺌).
     regions = {k: list(o['spans'][k]) for k in REGIONS}
-    pic_bank = BANK
-    spare = []
-    if at is not None:
-        bank, low = at >> 16, at & 0xFFFF
+    spare, taken = [], []
+    for kind, where in moves.items():
+        if where is None:
+            continue
+        bank, low = where >> 16, where & 0xFFFF
         if not 0x8000 <= low or bank in (0x7E, 0x7F) or bank > 0x7D or bank < 0x30:
-            raise ValueError('--at 은 늘린 뱅크 30~7D 의 BB:AAAA')
-        pic_bank = bank
-        regions['pictures'] = [(at, (bank << 16) | 0x10000)]
-        spare = list(o['spans']['pictures'])
+            raise ValueError(f'{kind} 를 옮길 자리는 늘린 뱅크 30~7D 의 BB:AAAA')
+        regions[kind] = [(where, (bank + 1) << 16)]
+        spare += list(o['spans'][kind])
     layout = {}
     for kind in ('pictures', 'palettes', 'lists'):
         items = blobs[kind]
-        moving = kind == 'pictures' and at is not None
+        moving = moves[kind] is not None
+        if moving:
+            regions[kind] = subtract(regions[kind], taken)
         in_place = all(rid in origin[kind] and len(items[rid]) <= len(origin[kind][rid][1]) for rid in items)
         if (not changed[kind] or in_place) and not moving:
             layout[kind] = {rid: int(rid, 16) for rid in items}
@@ -362,16 +380,18 @@ def patch(rom, doc, folder, at=None, name='battle-bg'):
                     if len(again) < len(items[rid]):
                         items[rid] = again
                 got, _ = place(sizes(), regions[kind])
-            if got is None and kind != 'pictures':
+            if got is None and not moving:
                 got, left = place(sizes(), regions[kind] + spare)
                 if got is not None:
                     spare = left
             if got is None:
                 need = sum(len(b) for b in items.values())
-                room = sum(e - s for s, e in regions[kind] + (spare if kind != 'pictures' else []))
-                raise ValueError(f'{kind} {need}바이트가 자리 {room}바이트에 들어가지 않음'
-                                 + ('(--at 으로 그림을 옮기면 그 자리를 목록·팔레트가 쓸 수 있음)' if at is None else ''))
+                room = sum(e - s for s, e in regions[kind] + ([] if moving else spare))
+                hint = '' if moving else f'(--{"at" if kind == "pictures" else kind + "-at"} 으로 옮기거나 다른 종류를 옮겨 자리를 비울 것)'
+                raise ValueError(f'{kind} {need}바이트가 자리 {room}바이트에 들어가지 않음{hint}')
             layout[kind] = got
+            if moving:
+                taken += [(a, a + len(items[rid])) for rid, a in got.items()]
         for rid, addr in sorted(layout[kind].items(), key=lambda x: x[1]):
             data = items[rid]
             old = origin[kind].get(rid)
@@ -383,9 +403,10 @@ def patch(rom, doc, folder, at=None, name='battle-bg'):
         old = rom.d[lorom(t):lorom(t) + n * 2]
         if new != old:
             write(t, new, f'{kind} 표')
-    if pic_bank != BANK:
-        for site in PICTURE_BANK_SITES:
-            write(site, bytes([pic_bank]), '그림 뱅크')
+    for kind, where in moves.items():
+        if where is not None:
+            for site in BANK_SITES[kind]:
+                write(site, bytes([where >> 16]), f'{kind} 뱅크')
     alt_addr = layout['lists'][alt]
     if alt_addr != o['alt_list']:
         write(ALT_LIST_SITE, (alt_addr & 0xFFFF).to_bytes(2, 'little'), '세계 2 목록 2')
@@ -421,6 +442,8 @@ def main():
     ap.add_argument('source', nargs='?', help='patch 의 bg.json')
     ap.add_argument('-o', '--out')
     ap.add_argument('--at', help='그림을 옮길 CPU 주소 BB:AAAA(늘린 뱅크)')
+    ap.add_argument('--palettes-at', help='팔레트 레코드 전체를 옮길 CPU 주소')
+    ap.add_argument('--lists-at', help='목록 전체를 옮길 CPU 주소')
     ap.add_argument('--name', default='battle-bg')
     ap.add_argument('--layout', help='patch 의 자리 대응표 JSON')
     a = ap.parse_args()
@@ -438,14 +461,17 @@ def main():
                 return int(check(rom, tmp))
         if not a.source or not a.out:
             raise ValueError('patch 에는 bg.json 과 -o')
-        at = None
-        if a.at:
-            if not re.fullmatch(r'[0-9A-Fa-f]{2}:[0-9A-Fa-f]{4}', a.at):
-                raise ValueError('--at 은 BB:AAAA')
-            at = int(a.at.replace(':', ''), 16)
+        def addr(v, opt):
+            if v is None:
+                return None
+            if not re.fullmatch(r'[0-9A-Fa-f]{2}:[0-9A-Fa-f]{4}', v):
+                raise ValueError(f'{opt} 은 BB:AAAA')
+            return int(v.replace(':', ''), 16)
+        at, palettes_at, lists_at = addr(a.at, '--at'), addr(a.palettes_at, '--palettes-at'), addr(a.lists_at, '--lists-at')
         with open(a.source, encoding='utf-8') as f:
             doc = json.load(f)
-        manifest, layout = patch(rom, doc, os.path.dirname(os.path.abspath(a.source)), at, a.name)
+        manifest, layout = patch(rom, doc, os.path.dirname(os.path.abspath(a.source)), at, a.name,
+                                 palettes_at, lists_at)
         os.makedirs(os.path.dirname(a.out) or '.', exist_ok=True)
         with open(a.out, 'w', encoding='utf-8') as f:
             json.dump(manifest, f, ensure_ascii=False, indent=1)

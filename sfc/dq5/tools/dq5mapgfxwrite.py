@@ -23,12 +23,17 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 from dq5map import (  # noqa: E402
-    CHR_BANK, CHR_PALETTE, HIGH_BLOCKS, HIGH_CHR_BANK, HIGH_CHR_PALETTE, PALETTES, Rom, lorom,
+    CHR_BANK, CHR_PALETTE, HIGH_BLOCKS, HIGH_CHR_BANK, HIGH_CHR_PALETTE, PALETTES, PALSET_LISTS, Rom, lorom,
 )
 
 FORMAT = 'dq5mapgfx/1'
 BANK = 0x8000
 PALETTE_ROWS = 208
+PALETTE_MAX = 0x800
+SET_COUNT = 69
+# 10:DE84 LDA $E5C8,Y(DB = 10)가 줄을 읽는다. 줄을 늘릴 때는 이 3바이트를 JSR $FFE0 으로 바꾸고, 원래 롬의 빈 자리
+# 10:FFE0 에 PHX / TYX / LDA long,X / PLX / RTS 를 두어 옮긴 줄을 롱 주소로 읽는다(Y = 줄 번호 * 32).
+ROW_READ, ROW_STUB = 0x10DE84, 0x10FFE0
 SITES = {'block_bank': (0x0192F5, 1), 'builder_bank': (0x018CDF, 1), 'builder_start': (0x018CE7, 2),
          'chr_bank': (0x0192FA, 1), 'chrpal_bank': (0x019305, 1), 'chrpal_addr': (0x019309, 2)}
 EXPECT = {'block_bank': b'\x16', 'builder_bank': b'\x16', 'builder_start': b'\x00\x80',
@@ -106,6 +111,17 @@ def chr_count(rom, blocks):
     return max(w & 0xFFF for raw, _ in blocks for w in block_doc(raw)['words']) + 1
 
 
+def palette_lists(rom):
+    """(세트마다 [낮 목록 id, 밤 목록 id], {목록 id: 줄 번호 7개}). 목록 id 는 10 뱅크 주소 4자리."""
+    sets, lists = [], {}
+    for i in range(SET_COUNT):
+        pair = [f'{rom.u16(PALSET_LISTS + i * 4 + k):04X}' for k in (0, 2)]
+        for p in pair:
+            lists.setdefault(p, [rom.u16(0x100000 | int(p, 16) + j * 2) for j in range(7)])
+        sets.append(pair)
+    return sets, dict(sorted(lists.items()))
+
+
 def dump(rom, out, kind='normal'):
     st = SETS[kind]
     check_sites(rom, kind)
@@ -121,19 +137,21 @@ def dump(rom, out, kind='normal'):
            'blocks': [block_doc(raw) for raw, _ in blocks]}
     if st['palettes']:
         doc['palettes'] = [[rom.u16(PALETTES + r * 32 + c * 2) for c in range(16)] for r in range(PALETTE_ROWS)]
+        doc['palette_sets'], doc['palette_lists'] = palette_lists(rom)
     with open(os.path.join(out, 'mapgfx.json'), 'w', encoding='utf-8') as f:
         json.dump(doc, f, separators=(',', ':'))
         f.write('\n')
     return doc
 
 
-def patch(rom, doc, folder, chr_at=None, blocks_at=None, name='map-gfx'):
+def patch(rom, doc, folder, chr_at=None, blocks_at=None, name='map-gfx', palettes_at=None):
     if not isinstance(doc, dict) or doc.get('format') != FORMAT or not isinstance(doc.get('set', 'normal'), str) \
             or doc.get('set', 'normal') not in SETS:
         raise ValueError(f'format={FORMAT}, set 은 {sorted(SETS)}')
     kind = doc.get('set', 'normal')
     st = SETS[kind]
-    fields = {'format', 'set', 'chr_file', 'chr_palettes', 'blocks'} | ({'palettes'} if st['palettes'] else set())
+    fields = {'format', 'set', 'chr_file', 'chr_palettes', 'blocks'} | (
+        {'palettes', 'palette_sets', 'palette_lists'} if st['palettes'] else set())
     if set(doc) - fields or not {'chr_file', 'chr_palettes', 'blocks'} <= set(doc):
         raise ValueError(f'{kind} 문서는 {sorted(fields)} 만')
     check_sites(rom, kind)
@@ -149,10 +167,15 @@ def patch(rom, doc, folder, chr_at=None, blocks_at=None, name='map-gfx'):
     if not isinstance(nib, list) or len(nib) != count or any(type(v) is not int or not 0 <= v <= 15 for v in nib):
         raise ValueError(f'chr_palettes 는 CHR 수({count})만큼의 0~15')
     pals = doc.get('palettes', [])
-    if st['palettes'] and (not isinstance(pals, list) or len(pals) != PALETTE_ROWS or any(
+    if st['palettes'] and (not isinstance(pals, list) or not PALETTE_ROWS <= len(pals) <= PALETTE_MAX or any(
             not isinstance(r, list) or len(r) != 16 or any(type(c) is not int or not 0 <= c <= 0x7FFF for c in r)
             for r in pals)):
-        raise ValueError(f'palettes 는 15비트 색 16개짜리 줄 {PALETTE_ROWS}개(줄 수는 늘리지 않음)')
+        raise ValueError(f'palettes 는 15비트 색 16개짜리 줄 {PALETTE_ROWS}~{PALETTE_MAX}개')
+    if not st['palettes'] and palettes_at is not None:
+        raise ValueError('--palettes-at 은 normal 쪽에서만')
+    if len(pals) > PALETTE_ROWS and palettes_at is None:
+        raise ValueError(f'BG 팔레트 줄 {len(pals)}개는 원래 {PALETTE_ROWS}개보다 많음: 10:FFC8 뒤가 비지 않아 '
+                         '--palettes-at 으로 옮겨야 함')
     if not isinstance(doc.get('blocks'), list) or not 1 <= len(doc['blocks']) <= st['block_max']:
         raise ValueError(f'blocks 는 1~{st["block_max"]}개')
     new_blocks = [encode_block(b, count) for b in doc['blocks']]
@@ -165,12 +188,43 @@ def patch(rom, doc, folder, chr_at=None, blocks_at=None, name='map-gfx'):
             w['orig'] = rom.d[o:o + len(data)].hex(' ')
         writes.append(w)
 
-    # BG 팔레트 줄: 제자리.
-    for r, row in enumerate(pals):
-        raw = b''.join(c.to_bytes(2, 'little') for c in row)
-        o = lorom(PALETTES + r * 32)
-        if raw != rom.d[o:o + 32]:
-            write(PALETTES + r * 32, raw, f'BG 팔레트 줄 {r}')
+    # BG 팔레트 줄: 제자리 또는 --palettes-at.
+    if palettes_at is None:
+        for r, row in enumerate(pals):
+            raw = b''.join(c.to_bytes(2, 'little') for c in row)
+            o = lorom(PALETTES + r * 32)
+            if raw != rom.d[o:o + 32]:
+                write(PALETTES + r * 32, raw, f'BG 팔레트 줄 {r}')
+    elif st['palettes']:
+        bank, low = palettes_at >> 16, palettes_at & 0xFFFF
+        raw = b''.join(c.to_bytes(2, 'little') for row in pals for c in row)
+        start = lorom(palettes_at)
+        if not 0x30 <= bank <= 0x7D or low < 0x8000 or lorom(0x7DFFFF) + 1 < start + len(raw):
+            raise ValueError('--palettes-at 은 늘린 뱅크 30~7D, 줄 전체가 7D:FFFF 안')
+        # 롱 색인 읽기는 뱅크 끝에서 다음 뱅크 0000 으로 넘어가므로(LoROM 이 아님) 한 뱅크 안에 둔다.
+        if low + len(raw) > 0x10000:
+            raise ValueError(f'--palettes-at 부터 {len(raw)}바이트가 한 뱅크를 넘음')
+        write(palettes_at, raw, 'BG 팔레트 줄', orig=False)
+        write(ROW_STUB, bytes([0xDA, 0xBB, 0xBF, low & 0xFF, low >> 8, bank, 0xFA, 0x60]), 'BG 팔레트 줄 읽기')
+        write(ROW_READ, bytes([0x20, ROW_STUB & 0xFF, ROW_STUB >> 8 & 0xFF]), 'BG 팔레트 줄 읽기 훅')
+    if st['palettes']:
+        sets0, lists0 = palette_lists(rom)
+        sets, lists = doc.get('palette_sets', sets0), doc.get('palette_lists', lists0)
+        if not isinstance(lists, dict) or set(lists) != set(lists0):
+            raise ValueError('palette_lists 는 원래 목록 id 그대로(목록은 늘리지 않음)')
+        if not isinstance(sets, list) or len(sets) != SET_COUNT or any(
+                not isinstance(p, list) or len(p) != 2 or any(v not in lists0 for v in p) for p in sets):
+            raise ValueError(f'palette_sets 는 [낮 목록 id, 밤 목록 id] {SET_COUNT}개')
+        for lid, rows in lists.items():
+            if not isinstance(rows, list) or len(rows) != 7 or any(
+                    type(v) is not int or not 0 <= v < len(pals) for v in rows):
+                raise ValueError(f'palette_lists.{lid}: 줄 번호(0~{len(pals) - 1}) 7개')
+            if rows != lists0[lid]:
+                write(0x100000 | int(lid, 16), b''.join(v.to_bytes(2, 'little') for v in rows), f'BG 팔레트 목록 {lid}')
+        for i, (pair, pair0) in enumerate(zip(sets, sets0)):
+            if pair != pair0:
+                write(PALSET_LISTS + i * 4, b''.join(int(v, 16).to_bytes(2, 'little') for v in pair),
+                      f'BG 팔레트 세트 {i}')
     # CHR 과 니블 표.
     if count > count0 and chr_at is None:
         raise ValueError(f'CHR {count}개는 원래 {count0}개보다 많음: 원래 자리 뒤는 다른 자료라 --chr-at 으로 옮겨야 함')
@@ -257,6 +311,7 @@ def main():
     ap.add_argument('-o', '--out')
     ap.add_argument('--chr-at')
     ap.add_argument('--blocks-at')
+    ap.add_argument('--palettes-at', help='BG 팔레트 줄 전체를 옮길 CPU 주소(줄을 늘릴 때)')
     ap.add_argument('--name', default='map-gfx')
     ap.add_argument('--set', default='normal', choices=sorted(SETS), help='dump·check 할 쪽(patch 는 문서의 set)')
     a = ap.parse_args()
@@ -279,7 +334,8 @@ def main():
         if isinstance(doc, dict) and doc.get('set', 'normal') != a.set and a.set != 'normal':
             raise ValueError(f'--set {a.set} 이지만 문서의 set 은 {doc.get("set", "normal")}(patch 는 문서의 set 을 따름)')
         manifest = patch(rom, doc, os.path.dirname(os.path.abspath(a.source)),
-                         parse_at(a.chr_at, '--chr-at'), parse_at(a.blocks_at, '--blocks-at'), a.name)
+                         parse_at(a.chr_at, '--chr-at'), parse_at(a.blocks_at, '--blocks-at'), a.name,
+                         parse_at(a.palettes_at, '--palettes-at'))
         os.makedirs(os.path.dirname(a.out) or '.', exist_ok=True)
         with open(a.out, 'w', encoding='utf-8') as f:
             json.dump(manifest, f, ensure_ascii=False, indent=1)
