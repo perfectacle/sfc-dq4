@@ -71,6 +71,17 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(report['unpinned_sequences'], ['17'])
         self.assertEqual(report['songs'][0]['send_first'], 1)
 
+    def test_pinned_song_resident_samples_and_record_override(self):
+        item = patch.Replacement(melody(), (0x18,))
+        out, report = patch.install(self.base, {0x17: item}, pinned={0x17}, resident=[0x18, 0x05, 0x1F, 0x22, 0x20, 0x21],
+                                    set_records={0x1D: (2, 0x1F, 0x05)})
+        self.assertIn(0x17, patch.pinned_sequences(out))
+        self.assertEqual(report['unpinned_sequences'], [])
+        self.assertEqual(patch.resident_samples(out), [0x18, 0x05, 0x1F, 0x22, 0x20, 0x21])
+        self.assertEqual(patch.resident_samples(self.base), [0x00, 0x05, 0x1F, 0x22, 0x20, 0x21])
+        self.assertEqual(patch.read_sets(out)[0x1D], bytes([2, 2, 0x1F, 0x05]))
+        self.assertEqual(report['songs'][0]['spc_budget']['streamed_while_playing'], [])
+
     def test_rejects_title_replacement(self):
         with self.assertRaisesRegex(ValueError, 'protected title'):
             patch.install(self.base, {0x10: self.item})

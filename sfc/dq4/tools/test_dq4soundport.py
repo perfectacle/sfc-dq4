@@ -190,3 +190,25 @@ def _depth(lines, label, seen=()):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class LaneTests(unittest.TestCase):
+    def test_fixed_lane_keeps_track_on_its_voice(self):
+        timeline = [{'op': 'note', 'tick': t, 'gate': 10, 'note': n, 'velocity': 100, 'ch': ch, 'program': 0}
+                    for t, n, ch in ((0, 60, 'track0'), (0, 48, 'track1'), (20, 62, 'track0'), (20, 50, 'track1'))]
+        song = {'ticks_per_quarter': 48, 'tempo': 120, 'timeline': timeline, 'end_tick': 40,
+                'channels': [{'name': 'track0'}]}
+        lanes, report = port.allocate(song, 3, 40, lanes_for={'track0': [2], 'track1': [0]})
+        self.assertEqual([n['ch'] for n in lanes[2]], ['track0', 'track0'])
+        self.assertEqual([n['ch'] for n in lanes[0]], ['track1', 'track1'])
+        self.assertEqual(lanes[1], [])
+        self.assertEqual(report['dropped_notes'], 0)
+
+    def test_busy_fixed_lane_drops_weaker_note(self):
+        timeline = [{'op': 'note', 'tick': 0, 'gate': 10, 'note': n, 'velocity': v, 'ch': 'track1', 'program': 0}
+                    for n, v in ((60, 100), (64, 50))]
+        song = {'ticks_per_quarter': 48, 'tempo': 120, 'timeline': timeline, 'end_tick': 10,
+                'channels': [{'name': 'track0'}]}
+        lanes, report = port.allocate(song, 3, 10, lanes_for={'track1': [1]})
+        self.assertEqual([n['note'] for n in lanes[1]], [60])
+        self.assertEqual(report['dropped_notes'], 1)
