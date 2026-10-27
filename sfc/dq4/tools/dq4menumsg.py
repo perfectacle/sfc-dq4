@@ -33,7 +33,7 @@ from dq5map import Rom, lorom  # noqa: E402
 from dq5text import FONT_GROUPS, FONT_TABLE_OPERANDS, GLYPHS, INDEX, font_groups, message  # noqa: E402
 
 BASE = 0x658000
-LIMIT = 0x6A0000            # 65~69 다섯 뱅크. 70 은 서곡 재배치 표, 72~7D 는 소리 이식이 쓴다
+LIMIT = 0x6A0000            # 65~69 다섯 뱅크. 70 은 서곡 재배치 표, 6A~6F·72~7D 는 소리 이식이 쓴다
 INDEX_BANK = 0x60
 GLYPH_START = 0x07D77C     # 원래 보행 모드 메시지 3,200개의 시작(끝은 0C:8020). 그림은 뱅크 0A 까지만
 GLYPH_BANKS = range(0x07, 0x0B)
