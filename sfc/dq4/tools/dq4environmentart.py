@@ -835,6 +835,18 @@ def _counter():
     return _finish(c, "카운터", "town")
 
 
+# Wall signs move from the wood bank (4) to the wall bank (2) so the bricks around the plaque keep
+# their exact colours; wood shades become bank 2's red-brown ramp.
+_SIGN_TO_WALL_BANK = {1: 1, 2: 13, 3: 13, 4: 14, 5: 14, 6: 15, 7: 15, 8: 8, 9: 9, 10: 4, 11: 8, 12: 9,
+                      13: 11, 14: 10, 15: 11}
+
+
+def _on_wall_bank(image):
+    out = image.copy()
+    out.putdata([2 * 16 + _SIGN_TO_WALL_BANK[v & 15] if v >> 4 == 4 else v for v in image.getdata()])
+    return out
+
+
 def _armour_sign():
     c = _Canvas(4)
     c.image = _sign("shop")
@@ -1789,6 +1801,8 @@ def create_assets():
         assets[f"roof_{kind}_ridge"] = _ridge(kind)
     for kind in ("inn", "shop", "church"):
         assets[f"sign_{kind}"] = _sign(kind)
+    for name in ("sign_inn", "sign_shop", "sign_church", "sign_weapon", "sign_armour"):
+        assets[name] = _on_wall_bank(assets[name])
     for frame in range(3):
         assets[f"water{frame}"] = _water(frame)
     for direction in "nsew":

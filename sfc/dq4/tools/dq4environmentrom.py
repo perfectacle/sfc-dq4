@@ -71,6 +71,9 @@ LIB_AT = 0x3DE000
 # object is the map's floor so the cell is walkable once the object opens; closed objects block
 # their last row themselves (cell +1 bit7).
 DOORS = {0x94, 0x95, 0x96}
+# FC key doors and the DQ5 lock kinds (end byte bit0-5) of the same key level: とうぞくのカギ, まほうのカギ.
+# 01:DCFC opens lock 1 with カギの技法 or a better key and lock 2 with まほうのカギ or さいごのカギ.
+LOCKS = {0x94: 0, 0x95: 1, 0x96: 2}
 GATE = 0xA0
 OPENINGS = DOORS | {GATE}
 DOOR_KIND = 0x3B
@@ -158,12 +161,12 @@ def objects(source):
     gate = {(x, y) for y in range(source.h) for x in range(source.w) if _prop(source, x, y) == GATE}
     for x, y in sorted(gate, key=lambda c: (c[1], c[0])):
         if (x, y) in gate:
-            found.append([x * 2, y * 2, GATE_KIND])
+            found.append([x * 2, y * 2, GATE_KIND, 0])
             gate -= {(x + dx, y + dy) for dx in (0, 1) for dy in (0, 1)}
     for y in range(source.h):
         for x in range(source.w):
             if _prop(source, x, y) in DOORS:
-                found.append([x * 2, y * 2 - 1, DOOR_KIND])
+                found.append([x * 2, y * 2 - 1, DOOR_KIND, LOCKS[_prop(source, x, y)]])
     if len(found) > 32:
         raise ValueError("more objects than the 32 open flags 7E:21C2-21C5")
     return found
@@ -187,10 +190,11 @@ def door_floor(source, x, y):
 
 
 def object_entries(found):
-    """01:D2FC entries [x][y][kind][flag][end]; flag picks bit (i % 8) of 7E:21C2 + i // 8."""
+    """01:D2FC entries [x][y][kind][flag][end]; flag picks bit (i % 8) of 7E:21C2 + i // 8, end is the
+    lock kind with bit7 on the map's last entry."""
     out = bytearray()
-    for i, (x, y, kind) in enumerate(found):
-        out += bytes((x, y, kind, (i // 8) << 4 | i % 8, 0x80 if i == len(found) - 1 else 0x00))
+    for i, (x, y, kind, lock) in enumerate(found):
+        out += bytes((x, y, kind, (i // 8) << 4 | i % 8, lock | (0x80 if i == len(found) - 1 else 0x00)))
     return bytes(out)
 
 

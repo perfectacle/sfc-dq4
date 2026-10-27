@@ -133,7 +133,7 @@ def check_map(name, wram, vram, cgram, expected, source, known):
     width = source.w * 2
     covered = set()
     placed = []
-    for x, y, kind in objects(source):
+    for x, y, kind, _ in objects(source):
         w, h = OBJECT_SIZE[kind]
         covered |= {(x + dx, y + dy) for dx in range(w) for dy in range(h)}
         placed.append(wram[0xC000 + (y * width + x) * 8 + 7] == kind)
@@ -269,7 +269,7 @@ def main():
     # Open state: object flags 7E:21C2- are cleared on a group change, so visit another map of the
     # Burland target's group, set every flag there, come back and walk up through the gate.
     group = TARGETS["burland"][0]
-    gx, gy, _ = next(o for o in objects(sources["burland"]) if o[2] == GATE_KIND)
+    gx, gy, _, _ = next(o for o in objects(sources["burland"]) if o[2] == GATE_KIND)
     hop = (group, 0x01)
     hx, hy = _control_cell(args.orig.read_bytes(), hop)
     side, _ = warp(mesence, args.rom.resolve(), states["burland"], f"{group:02X}/01,{hx},{hy}",
