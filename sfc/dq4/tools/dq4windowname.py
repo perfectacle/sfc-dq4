@@ -3,8 +3,10 @@
 
 이름 칸을 4칸에서 5칸으로 넓혀 Galmuri9 한글 넉 자(40점)를 담는다. 창 02(필드 상태 창)는 일행마다 열을 되풀이하므로
 머리 너비 6 → 7 과 함께 열 간격 상수(04:A394·A3A4·B18E)를 5 → 6 으로 바꾼다(asm).
+목록·つよさ 류의 공통 이름 출력 04:B79B 도 같은 렌더러로 그린다.
 """
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -14,6 +16,10 @@ HERE = Path(__file__).resolve().parent
 CODE = 0x60C000
 CODE_END = 0x60D000
 STATUS_WINDOW = 0x02
+LIST_HOOK = 0x04B79B
+# 이름 하나를 04:B79B 로 찍는 「누구」 고르기 창(본문에 D0 자리 표시). 이름 칸 5칸을 담게 한 칸 왼쪽으로 옮겨 넓힌다.
+# 오른쪽에는 이어서 열리는 창(도구·주문 목록 등)이 붙어 있어 오른쪽으로는 넓히지 않는다.
+NAME_LISTS = (0x0C, 0x0E, 0x11, 0x13, 0x2C, 0x36, 0x38, 0x3D, 0x4A, 0x4F, 0x6F, 0x7A, 0x7F)
 
 
 def lorom(a):
@@ -33,9 +39,21 @@ def apply(data, asar=None):
     if d[o + 2] & 0x1F != 6:
         raise ValueError(f'창 {STATUS_WINDOW:02X} 머리 {d[o:o + 4].hex()}: 너비가 6 이 아님')
     d[o + 2] = (d[o + 2] & 0xE0) | 7
+    for w in NAME_LISTS:
+        o = lorom(dq4menupatch.window_addr(d, w))
+        if d[o + 2] & 0x1F not in (8, 9) or d[o] & 0x1F == 0 or 0xD0 not in d[o + 4:o + 10]:
+            raise ValueError(f'창 {w:02X} 머리 {d[o:o + 10].hex()}: 누구 고르기 창 모양이 아님')
+        d[o] -= 1
+        d[o + 2] += 1
     hi_count = -(-len(ne.GLYPHS) // ne.CODE_RADIX)
+    # 04:B79B 는 이름 입력이 먼저 NeListHook 으로 훅해 둔다. 메뉴 플래그가 켜져 있거나 한글이 아니면 그리로 넘긴다.
+    o = lorom(LIST_HOOK)
+    if d[o] != 0x5C:
+        raise ValueError(f'{LIST_HOOK:06X} 가 JML 이 아님: {d[o:o + 4].hex()}')
+    flag = re.search(r'^!flag\s*=\s*\$([0-9A-Fa-f]{6})', (HERE / 'dq4nameentry.asm').read_text(), re.M).group(1)
     defs = (f'!wn_code = ${CODE:06X}\n!wn_hi_base = ${ne.HI_BASE:02X}\n!wn_hi_count = {hi_count}\n'
-            f'!wn_glyph_bank = ${ne.GLYPH_BANK:02X}\n')
+            f'!wn_glyph_bank = ${ne.GLYPH_BANK:02X}\n!wn_list_prev = ${int.from_bytes(d[o + 1:o + 4], "little"):06X}\n'
+            f'!wn_menu_flag = ${flag}\n')
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         (tmp / 'main.asm').write_text(defs + (HERE / 'dq4windowname.asm').read_text())
