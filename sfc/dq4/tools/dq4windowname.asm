@@ -60,6 +60,9 @@ org $04B808
 ; 04:BD4F·04:BD9F 도 PHX 를 한 뒤 BRL 로 04:B8F3 에 들어오므로, PHX 다음 자리를 바꾼다.
 org $04B8F3
     JML WnSpell
+; 전투 몬스터 목록(E6)이 이름을 아홉 글자 고정으로 찍는 자리
+org $04BC08
+    JML WnMonster
 
 ; 창 바이트 갈래(메뉴 패치의 JSL). 고정 문구 접두를 먼저 가르고, 나머지는 원래 대상으로.
 org $04B11E
@@ -117,7 +120,7 @@ org $24A5E9
 !wt_k     = $3D58           ; 그리는 고정 문구 번호
 !wt_dirty = $3DD4           ; 2 워드: 슬롯마다 1비트, 메시지 캔버스 안에 그림을 올린 슬롯
 !wt_age   = $3D50           ; 쓸 때마다 하나씩
-!wt_mode  = $3D52           ; 0 = 04:B808(길이 $00), 1 = 04:B8F3(다섯 글자 고정)
+!wt_mode  = $3D52           ; 고정 글자 수: 0 = 04:B808(길이 $00), 5 = 04:B8F3(주문), 9 = 04:BC08(몬스터)
 !wt_lastx = $3D54           ; 원래 루틴이 마지막으로 찍는 바이트의 DP 자리
 !wt_sp    = $3D60           ; 원래 스택 포인터(7E)
 !wt_cols  = $1D84           ; 그릴 열 수
@@ -920,7 +923,13 @@ WnTilemap:
 ; 원래는 글자마다 04:B235 로 쓰고 REP #$10 / PLX 뒤 04:BFF2 로 간다.
 ; 04:B8F3. 부른 쪽이 이미 PHX 를 했다.
 WnSpell:
-    LDA #$01
+    LDA #$05
+    BRA +
+; 04:BC08(E6 전투 몬스터 이름, 04:B6A0 의 C9 도 BRL 로 옴). 원래는 REP #$10 / LDX #0 / LDA #9 / STA $00 / BRL $B7A3,
+; 부른 쪽이 이미 PHX 를 했다.
+WnMonster:
+    REP #$10
+    LDA #$09
     BRA +
 WnText:
     PHX
@@ -971,8 +980,18 @@ WnText:
     LDA.l !wt_bank<<16,X
     AND #$00FF
     STA.w !wt_cols
+    ; 아홉 글자 고정(전투 몬스터·도구 창)은 자리가 아홉 칸이라 열 칸 이름(도구 9개)은 가나로 둔다
+    LDA.w !wt_mode
+    AND #$00FF
+    CMP #$0009
+    BNE +
+    LDA.w !wt_cols
+    CMP #$000A
+    BCC +
+    JMP .full
++
     ; 원래 루틴이 나아가는 칸 수: 탁점 바이트(84·83)는 위 줄에 탁점만 찍고 칸을 나아가지 않는다.
-    ; 04:B808 은 $00 바이트를, 04:B8F3 은 탁점이 아닌 글자 다섯을 찍는다
+    ; 04:B808 은 $00 바이트를, 04:B8F3·04:BC08 은 탁점이 아닌 글자 다섯·아홉을 찍는다
     STZ.w !wt_len
     STZ.w !wt_lastx
     LDX #$0001
@@ -988,8 +1007,9 @@ WnText:
     BCS .counted
     BRA ++
 +
+    STA.w !wn_c
     LDA.w !wt_len
-    CMP #$0005
+    CMP.w !wn_c
     BCS .counted
 ++
     STX.w !wt_lastx
@@ -1044,7 +1064,7 @@ WnText:
     SEP #$20
     REP #$10
     LDX #$0000
-    LDA #$05
+    LDA.l $7E0000|!wt_mode
     STA.b $00
     JML $04B7A3
 
