@@ -47,8 +47,9 @@ org $00887C
     JMP $FFA1
 org $00FFA1
     LDA.l $7E3D62               ; !wq_count(아래 정의). M = 8. 비어 있으면 바로 넘겨 NMI 시간을 거의 늘리지 않는다
+    ORA.l $7E3D5A               ; !wq_defer
     BEQ +
-    JSL WqNmi
+    JSL WqNmiGate
 +
     JMP ($1944)
 
@@ -132,6 +133,7 @@ org $24A5E9
 !wt_len   = $1D8A           ; 원래 문자열 길이($00)
 !wq_count = $3D62           ; 우리 전송 대기열 항목 수(7E, NMI 가 보내고 0 으로)
 !wq_off   = $3D64           ; 대기열에 다음으로 쓸 자리
+!wq_defer = $3D5A           ; 1바이트: 다음 NMI 로 미룬 게임의 창 타일맵 전송 요청($0BEC)
 !wq_buf   = $3EA0           ; 대기열 7E:3EA0~3FFF. 항목 [VRAM 워드 2][방식 1][칸 수 1][그림]
 !wq_size  = $0160
 !wq_left  = $3D66           ; NMI 안에서만: 남은 항목 수
@@ -1538,6 +1540,29 @@ WtQueue:
     STA.l $004200
     REP #$30
     RTS
+
+; 게임의 창 타일맵 전송($0BEC: bit7 = 7E:5000 2KB, bit6 = 위·아래 줄, 00:8DED 만 읽음)과 우리 대기열이 한 NMI 에
+; 겹치면 대기열을 보내고 게임 요청은 다음 NMI 로 미룬다. 둘 다 보내면 우리 뒤에 도는 2KB DMA 가 VBlank 를 넘겨 창
+; 아래쪽 줄이 VRAM 에 가지 않고, 대기열 쪽을 미루면 명령 창처럼 매 프레임 요청을 거는 동안 글자가 끝내 올라가지 않는다.
+WqNmiGate:
+    LDA.l $7E0000|!wq_defer
+    BEQ +
+    ORA.l $000BEC
+    STA.l $000BEC
+    LDA #$00
+    STA.l $7E0000|!wq_defer
++
+    LDA.l $7E0000|!wq_count
+    BEQ .done
+    LDA.l $000BEC
+    BEQ +
+    STA.l $7E0000|!wq_defer
+    LDA #$00
+    STA.l $000BEC
++
+    JMP WqNmi
+.done
+    RTL
 
 ; NMI(00:FFA1 받침에서 JSL, DB = 00, D = 0). 대기열 항목을 DMA 채널 0 으로 보낸다.
 ; 게임 목록(00:8CF9)도 채널 0 을 쓰며 보낼 때마다 다시 맞춘다.
