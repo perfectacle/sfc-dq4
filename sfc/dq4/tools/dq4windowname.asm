@@ -53,6 +53,13 @@ org $00FFA1
 +
     JMP ($1944)
 
+; 석 자 출력 D1(강함 보기의 성별, 이름 표 2)의 끝 PHX / LDX #$0000 / LDA #$03 / STA $00 / BRL $B7A3 을, 길이 3 으로
+; 04:B808 이름 표 길에 넘긴다. 두 고리 모두 PLX / BRL $BFF2 로 끝난다.
+org $04B7D7
+    LDA #$03
+    STA $00
+    db $82 : dw $B808-$B7DE     ; BRL $B808 (이 asar 는 BRL $주소 를 거리로 바꾸지 않음)
+    NOP #4
 ; 이름 표 문자열(도구 이름 등)을 글자마다 04:B235 로 찍는 자리. PHX / SEP #$10 / LDX #$00
 org $04B808
     JML WnText
