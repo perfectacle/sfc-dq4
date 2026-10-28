@@ -8,7 +8,7 @@ Galmuri9 그림으로 바꾼다. 번호가 아니라 이름으로 잇는 것은 
 뱅크 TEXT_BANK:
   8000 + 종류 × 200  이름 번호 256개 × 16비트: 그림의 뱅크 안 주소, 0 = 없음. 종류 FIXED_KIND 는 창 고정 문구
   9000               고정 문구 번호 256개 × 16비트: 캔버스 밖 전용 칸의 첫 칸, 0 = 일반 슬롯
-  9200~              [열 수][열마다 16바이트: 위 줄 8줄, 글자 줄 8줄](1bpp, bit7 = 왼쪽 점)
+  9200~              [열 수][열마다 9바이트: 위 줄 7줄째, 글자 줄 8줄](1bpp, bit7 = 왼쪽 점)
 글자의 맨 윗줄이 위 줄 타일의 7줄째, 나머지 여덟 줄이 글자 줄에 온다(상태 창 이름과 같은 배치).
 """
 import csv
@@ -26,7 +26,12 @@ SAFE = 0x9000                   # 고정 문구 번호 256개 × 16비트: 캔�
 DATA = 0x9200
 # 이름 표 번호 → (adopt.tsv 의 표, 창 이름 칸의 최대 열 수, 넘으면 멈출지). 주문 창(28)은 두 칸 넓혀 일곱 칸이고,
 # 그보다 긴 이름(몬스터 특기 「얼어붙은 눈보라」)은 가나로 둔다. 전투 몬스터 목록(창 1B)은 이름 아홉 칸이라 넘는 이름은 가나.
-KINDS = {5: ('아이템', 10, True), 3: ('주문·특기', 7, False), 4: ('몬스터', 9, False)}
+KINDS = {5: ('아이템', 10, True), 3: ('주문·특기', 7, False), 4: ('몬스터', 9, False), 6: ('작전', 10, True)}
+# adopt.tsv 에 없는 DQ5 고유 이름(가나 키는 kana_key 꼴). 작전은 고정 문구 FIXED 와 같은 한글
+EXTRA_NAMES = {6: {'みんながんばれ': '모두 힘내자', 'じゅもんせつやく': '주문 아끼자'}}
+# 전투 작전 창(16)은 작전 이름을 넉 자씩 두 줄로 찍는다(04:BB61). 한글은 띄어쓰기 자리에서 나눠 줄마다 고정 문구 하나
+TACTIC_LINES = (('한방에', '끝내자구'), ('모두', '힘내자'), ('주문', '아끼자'),
+                ('주문을', '쓰지마'), ('생명을', '소중히'), ('명령을', '내려줘'))
 SHIFT = 6                       # render 의 띠(한글 윗줄 = 1줄)를 위 줄 7줄로 내림
 
 # 창 레코드의 가나 항목을 접두 9E k(고정 문구 k)로 바꾼다. 이름 표가 쓰지 않는 종류 7 에 그림을 둔다.
@@ -34,9 +39,10 @@ FIXED_KIND = 7
 FIXED_PREFIX = 0x9E
 # 창 번호 → 오른쪽으로 넓힐 칸 수. 명령 창은 한 항목이 네 칸이라 adopt.tsv 의 긴 이름(「강한 정도」·「조사하다」)
 # 대신 두 자 낱말로 줄였다. 「どうする」 창은 「건네기」 석 자가 들어가게 한 칸 넓힌다.
-# 09 さくせん, 0B つよさ(「강함 보기」 가 들어가게 한 칸 넓힘), 19·1A·87·88 전투 첫 창, 1C·1D·1E 전투 명령 창
+# 09 さくせん, 0B つよさ(「강함 보기」 가 들어가게 한 칸 넓힘), 0A·1F 작전(필드·전투, 열 열 「한방에 끝내자구」 가 들어가게 두 칸), 0F 지금 작전(커서 + 이름 열 칸), 19·1A·87·88 전투 첫 창, 1C·1D·1E 전투 명령 창
 FIXED_WINDOWS = {0x01: 0, 0x10: 1, 0x09: 0, 0x0B: 1,
-                 0x19: 0, 0x1A: 0, 0x87: 0, 0x88: 0, 0x1C: 0, 0x1D: 0, 0x1E: 0, 0x33: 0}
+                 0x19: 0, 0x1A: 0, 0x87: 0, 0x88: 0, 0x1C: 0, 0x1D: 0, 0x1E: 0, 0x33: 0,
+                 0x0A: 2, 0x1F: 2, 0x0F: 1}
 FIXED = {
     'はなす': '대화', 'じゅもん': '주문', 'つよさ': '강함', 'どうぐ': '도구',
     'そうび': '장비', 'さくせん': '작전', 'とびら': '문', 'しらべる': '조사',
@@ -46,6 +52,10 @@ FIXED = {
     'たたかう': '싸우기', 'いれかえ': '교체', 'にげる': '도망',
     'こうげき': '공격', 'とくぎ': '특기', 'ぼうぎょ': '방어',
     'かいにきた': '사기', 'うりにきた': '팔기', 'やめる': '그만',
+    # 작전. adopt.tsv 의 DS 이름(사용자 결정 포함)을 쓰고, DQ5 고유 둘은 DS 의 가까운 작전에 맞춘다
+    # (みんながんばれ = DS バッチリがんばれ 「모두 힘내자」, じゅもんせつやく 는 새로 「주문 아끼자」)
+    'ガンガンいこうぜ': '한방에 끝내자구', 'みんながんばれ': '모두 힘내자', 'じゅもんせつやく': '주문 아끼자',
+    'じゅもんつかうな': '주문을 쓰지마', 'いのちだいじに': '생명을 소중히', 'めいれいさせろ': '명령을 내려줘',
 }
 # 창 제목(04:AD78 목록). 표에 없는 제목(이름 뒤 「の１」, 이름 입력 등)은 가나로 둔다.
 TITLES = {
@@ -87,14 +97,16 @@ def adopted(table):
 
 
 def columns(font, text):
-    """한글 문자열 → 열마다 16바이트(위 줄 8 + 글자 줄 8)."""
+    """한글 문자열 → 열마다 9바이트(위 줄 7줄째 + 글자 줄 8줄). 위 줄의 나머지 일곱 줄은 비어 있어 두지 않는다."""
     import dq4menupatch
     out = []
     for col in dq4menupatch.render(font, text):
         if any(any(row) for row in col[16 - SHIFT:]):
             raise ValueError(f'{text!r}: 글자가 글자 줄 아래로 넘침')
         rows = [[0] * 8] * SHIFT + col[:16 - SHIFT]
-        out.append(bytes(int(''.join(map(str, r)), 2) for r in rows))
+        if any(any(row) for row in rows[:7]):
+            raise ValueError(f'{text!r}: 글자가 위 줄 7줄째보다 위로 넘침')
+        out.append(bytes(int(''.join(map(str, r)), 2) for r in rows[7:]))
     return out
 
 
@@ -106,7 +118,13 @@ def phrases():
     rest = dict(FIXED)
     for jp, ko in TITLES.items():
         rest.setdefault(jp, ko)
-    return out + [(jp, ko, None) for jp, ko in rest.items()]
+    out += [(jp, ko, None) for jp, ko in rest.items()]
+    return out + [(f'作戦{n}{half}', ko, None) for n, pair in enumerate(TACTIC_LINES) for half, ko in zip('上下', pair)]
+
+
+def tactic_first():
+    """TACTIC_LINES 의 첫 번호. 작전 n 의 윗줄은 + 2n, 아랫줄은 + 2n + 1."""
+    return len(phrases()) - 2 * len(TACTIC_LINES)
 
 
 def safe_bases(font):
@@ -160,26 +178,46 @@ def fixed_records(data, font):
     for w, widen in FIXED_WINDOWS.items():
         addr, rec = dq5text.window(rom, w)
         start = rec.index(0xFE)
-        new = bytearray(rec[:start])
-        i = start
+        # 한 줄에 항목이 여럿이면(명령 창·전투 작전 창) 열마다 가장 넓은 항목에 맞춰 빈칸을 채워 열을 맞춘다
+        parts, row, col, i = [], 0, 0, start
         while i < len(rec):
             if not (0x02 <= rec[i] < 0xB0 and rec[i - 1] == 0xFE):
-                new.append(rec[i])
+                parts.append(rec[i])
+                if rec[i] == 0xFF:
+                    row, col = row + 1, 0
                 i += 1
                 continue
             j, n, jp = _runs(rom, rec, i, True)
             if jp not in FIXED or (w in SAFE_WINDOWS and (w, jp) not in safe):
                 raise ValueError(f'창 {w:02X}: 「{jp}」 의 한글 문구가 없음')
             k = safe[w, jp] if w in SAFE_WINDOWS else numbers[jp]
-            s = 0
-            while j + s < len(rec) and rec[j + s] == 0x01:
-                s += 1
-            last = j + s >= len(rec) or rec[j + s] == 0xFF
-            room = n + s + (widen if last else 0)
-            if width[jp] > room:
-                raise ValueError(f'창 {w:02X}: 「{korean[jp]}」 {width[jp]}열, 자리 {room}열')
-            new += bytes((FIXED_PREFIX, k)) + b'\x01' * max(0, n + s - width[jp])
-            i = j + s
+            sp = 0
+            while j + sp < len(rec) and rec[j + sp] == 0x01:
+                sp += 1
+            last = j + sp >= len(rec) or rec[j + sp] == 0xFF
+            parts.append((k, jp, max(width[jp], n + sp), col, last))
+            col += 1
+            i = j + sp
+        colw = {}
+        for part in parts:
+            if isinstance(part, tuple) and not part[4]:
+                colw[part[3]] = max(colw.get(part[3], 0), part[2])
+        inner = (rec[2] & 0x1F) + widen - 2
+        new, used = bytearray(rec[:start]), 0
+        for part in parts:
+            if isinstance(part, int):
+                new.append(part)
+                if part == 0xFF:
+                    used = 0
+                elif part != 0x80:
+                    used += 1
+                continue
+            k, jp, room, c, last = part
+            room = room if last else colw[c]
+            new += bytes((FIXED_PREFIX, k)) + b'\x01' * (room - width[jp])
+            used += room
+            if used > inner:
+                raise ValueError(f'창 {w:02X}: 「{korean[jp]}」 까지 {used}열, 창 안쪽 {inner}열')
         if len(new) > len(rec):
             raise ValueError(f'창 {w:02X}: 고친 레코드가 원래보다 김')
         new[2] += widen
@@ -250,6 +288,7 @@ def build(data, font):
     report[FIXED_KIND] = (len(phrases()), len(phrases()))
     for kind, (table, limit, strict) in KINDS.items():
         korean = adopted(table)
+        korean.update(EXTRA_NAMES.get(kind, {}))
         names = rom_names(data, kind)
         done = 0
         for n, name in enumerate(names):
