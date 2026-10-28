@@ -940,6 +940,13 @@ WnText:
 +
     STA.l $7E0000|!wt_mode
     REP #$30
+    ; 빈 자리(주문이 없는 칸 등)는 이름을 받지 않고 빈칸을 찍어, $42·$43 에 앞서 받은 이름이 남아 있다
+    LDA.b $01
+    AND #$00FF
+    CMP #$0001
+    BNE +
+    JMP .original
++
     LDA.b $43
     AND #$00FF
     CMP #$0008
