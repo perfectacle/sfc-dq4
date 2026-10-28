@@ -56,6 +56,9 @@ FIXED = {
     # (みんながんばれ = DS バッチリがんばれ 「모두 힘내자」, じゅもんせつやく 는 새로 「주문 아끼자」)
     'ガンガンいこうぜ': '한방에 끝내자구', 'みんながんばれ': '모두 힘내자', 'じゅもんせつやく': '주문 아끼자',
     'じゅもんつかうな': '주문을 쓰지마', 'いのちだいじに': '생명을 소중히', 'めいれいさせろ': '명령을 내려줘',
+    # 강함 보기의 능력치 라벨(adopt.tsv 능력치·직업 표). DQ5 창은 力 자리에 가타카나 カ 를 씀
+    'ちから': '힘', 'すばやさ': '민첩', 'みのまもり': '방어력', 'かしこさ': '현명함', 'うんのよさ': '운',
+    'さいだいＨＰ': '최대HP', 'さいだいＭＰ': '최대MP', 'しゅびカ': '수비력', 'せいべつ': '성별',
 }
 # 창 제목(04:AD78 목록). 표에 없는 제목(이름 뒤 「の１」, 이름 입력 등)은 가나로 둔다.
 TITLES = {
@@ -73,6 +76,9 @@ SAFE_WINDOWS = {
 }
 SAFE_FIRST = 0x1D0
 SAFE_TILES = 0x30
+# 라벨 창: 줄 머리 빈칸(01) + 가나 + 85(:) 꼴로 오른쪽 정렬된 라벨. 빈칸과 가나를 빈칸 + 9E k 로 바꿔 「:」 자리를 둔다.
+# 07 강함 보기 능력치, 06 강함 보기 성별·레벨
+LABEL_WINDOWS = (0x07, 0x06)
 TITLE_COUNT = 0x2B              # 제목 2B 부터는 목록 뒤의 코드
 
 
@@ -141,11 +147,12 @@ def safe_bases(font):
     return out
 
 
-def _runs(rom, rec, i, start_ok):
-    """rec[i] 부터 가나 한 덩이: (끝, 칸 수, 일본어). 탁점 접두 84·83(제목은 92·93)은 칸을 차지하지 않는다."""
+def _runs(rom, rec, i, start_ok, stop=()):
+    """rec[i] 부터 가나 한 덩이: (끝, 칸 수, 일본어). 탁점 접두 84·83(제목은 92·93)은 칸을 차지하지 않는다.
+    stop 의 부호에서 끊는다."""
     import dq5text
     j, n = i, 0
-    while j < len(rec) and 0x02 <= rec[j] < 0xB0:
+    while j < len(rec) and 0x02 <= rec[j] < 0xB0 and rec[j] not in stop:
         j += 2 if rec[j] in (0x83, 0x84, 0x92, 0x93) else 1
         n += 1
     raw = rec[i:j].replace(b'\x92', b'\x84').replace(b'\x93', b'\x83')
@@ -224,6 +231,32 @@ def fixed_records(data, font):
         o = lorom(addr)
         if bytes(data[o:o + len(rec)]) != rec:
             raise ValueError(f'창 {w:02X}: 레코드 자리가 어긋남')
+        out.append((o, bytes(new) + b'\xff' * (len(rec) - len(new))))
+
+    for w in LABEL_WINDOWS:
+        addr, rec = dq5text.window(rom, w)
+        h = dq5text.window_header(rec)
+        start = 6 + (rec[4] >> 6) + 1 if h['title'] is not None else 6
+        new, i, done = bytearray(rec[:start]), start, 0
+        while i < len(rec):
+            row = rec.index(0xFF, i) + 1 if 0xFF in rec[i:] else len(rec)
+            lead = 0
+            while i + lead < row and rec[i + lead] == 0x01:
+                lead += 1
+            k = i + lead
+            if k < row and 0x02 <= rec[k] < 0xB0:
+                j, n, jp = _runs(rom, rec, k, False, (0x85, 0x86, 0x87))
+                if j < row and rec[j] == 0x85 and jp in numbers:
+                    if width[jp] > lead + n:
+                        raise ValueError(f'창 {w:02X}: 「{korean[jp]}」 {width[jp]}열, 자리 {lead + n}열')
+                    new += b'\x01' * (lead + n - width[jp]) + bytes((FIXED_PREFIX, numbers[jp])) + rec[j:row]
+                    i, done = row, done + 1
+                    continue
+            new += rec[i:row]
+            i = row
+        if not done:
+            raise ValueError(f'창 {w:02X}: 바꾼 라벨이 없음')
+        o = lorom(addr)
         out.append((o, bytes(new) + b'\xff' * (len(rec) - len(new))))
 
     # 제목: 이름 자리(E0~) 없이 가나 한 덩이뿐인 제목만 창 안에서 늘어날 수 있다. 쓰는 창마다 제목 자리 + 열 수 ≤ 너비 − 1
