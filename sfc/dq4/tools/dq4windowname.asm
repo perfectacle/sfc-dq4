@@ -65,6 +65,10 @@ org $04B8F3
 org $04B11E
     JSL WnPrefix
 
+; 걷는 메시지 캔버스(7E:5800 의 평면 0 → 칸 096~)를 보내는 NMI 작업. PHB / PHK / PLB / LDA #$7E 의 첫 네 바이트
+org $008E9E
+    JML WqClean
+
 ; 창 제목 글자(04:AA10 고리의 B0 미만 바이트). STA $00 / PHB / LDA #$7E 자리
 org $04AC25
     JML WnTitle
@@ -102,13 +106,16 @@ org $24A5E9
 !wn_bnext = $1D40           ; 다음에 내줄 전투 이름 자리
 !wn_attr  = $1D42           ; 이름 줄 타일맵 높은 바이트(색). 0 이면 버퍼에 있던 것을 살림
 !wt_stack = $1D83           ; 전용 스택 맨 위(1D44~1D83). 협동식 작업마다 낮은 WRAM 에 작은 스택이 있어, 그 스택을 깊게 쓰지 않는다
-!wt_keys  = $3D70           ; 23 워드(7E): 슬롯마다 버퍼 자리(!wt_buf + Y)
-!wt_ages  = $3DA0           ; 23 워드: 마지막으로 쓴 때, 0 = 빈 슬롯
+!wt_keys  = $3D70           ; 17 워드(7E): 슬롯마다 버퍼 자리(!wt_buf + Y)
+!wt_ages  = $3DA0           ; 17 워드: 마지막으로 쓴 때, 0 = 빈 슬롯
 !wt_need  = $3D6C           ; 0 = 작은 슬롯(네 열까지), 1 = 큰 슬롯
 !wt_first = $3D6E           ; 빈 슬롯·오래된 슬롯을 찾기 시작할 자리(슬롯 × 2)
 !wt_buf   = $3DD0           ; 타일맵 버퍼 포인터: 목록·창 본문은 $E0, 창 제목은 $DC
 !wt_field = $3DD2           ; 0 = 전투(NMI 작업 $1944 = 00:8952). 필드 전용 슬롯을 쓸지
-!wt_nslot = 23
+!wt_nslot = 17
+!wt_slot2 = $3D56           ; 이번에 쓴 슬롯 × 2, FFFF = 명령 창 전용 칸
+!wt_k     = $3D58           ; 그리는 고정 문구 번호
+!wt_dirty = $3DD4           ; 2 워드: 슬롯마다 1비트, 메시지 캔버스 안에 그림을 올린 슬롯
 !wt_age   = $3D50           ; 쓸 때마다 하나씩
 !wt_mode  = $3D52           ; 0 = 04:B808(길이 $00), 1 = 04:B8F3(다섯 글자 고정)
 !wt_lastx = $3D54           ; 원래 루틴이 마지막으로 찍는 바이트의 DP 자리
@@ -1041,11 +1048,11 @@ WnText:
     STA.b $00
     JML $04B7A3
 
-; 칸 슬롯: 큰 슬롯 20칸(10열 × 글자 줄·위 줄) 8개와 작은 슬롯 8칸(4열) 15개. 명령 창 같은 짧은 문구가 목록 이름의
-; 큰 슬롯을 밀어내지 않게 나눈다. 메시지 창이 뜨면 타일맵이 캔버스 096~17F 를 모두 가리키므로, 그 밖의 앞 세 슬롯은
-; 목록 이름에만 준다(고정 문구는 !wt_first 를 3 슬롯 뒤로). 096~0AD 의 작은 슬롯 셋은 전투에서 전투 글자 칸이라 필드에서만 쓴다.
-; 같은 버퍼 자리(!wt_buf + Y)에 같은 크기로 다시 그리면 같은 슬롯을, 아니면 그 크기에서 가장 오래 쓰지 않은 슬롯을 쓴다.
-; 타일맵 버퍼를 훑어 빈 칸을 찾던 방식은, 다른 창을 여는 동안 게임이 버퍼를 비워 화면에 보이는 칸을 다시 빌렸다.
+; 칸 슬롯: 큰 슬롯 20칸(10열 × 글자 줄·위 줄) 8개와 작은 슬롯 8칸(4열) 9개. 모두 걷는 메시지 캔버스 096~17F 안이라,
+; 메시지 창이 뜨면 WqClean 이 지운다(명령 창 문구만 캔버스 밖 1D0~1FF 의 전용 칸). 096~0AD 의 작은 슬롯 셋은 전투에서
+; 전투 글자 칸이라 필드에서만 쓴다. 같은 버퍼 자리(!wt_buf + Y)에 같은 크기로 다시 그리면 같은 슬롯을, 아니면 그 크기에서
+; 가장 오래 쓰지 않은 슬롯을 쓴다. 타일맵 버퍼를 훑어 빈 칸을 찾던 방식은, 다른 창을 여는 동안 게임이 버퍼를 비워
+; 화면에 보이는 칸을 다시 빌렸다.
 WtAlloc:
     LDA #$0000
     LDX.w !wt_cols
@@ -1111,6 +1118,7 @@ WtAlloc:
     LDA.w !wn_key
     STA.w !wt_keys,X
 .found
+    STX.w !wt_slot2
     LDA.w !wt_age
     STA.w !wt_ages,X
     LDA.l WtSlot,X
@@ -1135,18 +1143,22 @@ WtFits:
     CLC
     RTS
 
-; 슬롯 첫 칸. 캔버스 밖(1F8·1D0·1E4)을 앞에 두고, 작은 슬롯은 17F 아래로(전투 공격 연출은 B0~122 를 덮음),
-; 큰 슬롯은 B0~127. 180~1CF 는 상태 창 이름. 등급 0 = 작은 슬롯, 1 = 큰 슬롯, 2 = 필드에서만 쓰는 작은 슬롯.
+; 슬롯 첫 칸. 등급 0 = 작은 슬롯, 1 = 큰 슬롯, 2 = 필드에서만 쓰는 작은 슬롯. 전투 공격 연출은 B0~122 를 덮어,
+; 전투에서 오래 남는 짧은 문구는 150~17F 의 작은 슬롯에 둔다.
 WtSlot:
-    dw $01F8, $01D0, $01E4
-    dw $0178, $0170, $0168, $0160, $0158, $0150, $0148, $0140, $0138, $0130, $0128
-    dw $0114, $0100, $00EC, $00D8, $00C4, $00B0
+    dw $0178, $0170, $0168, $0160, $0158, $0150
+    dw $013C, $0128, $0114, $0100, $00EC, $00D8, $00C4, $00B0
     dw $0096, $009E, $00A6
 WtClass:
-    dw 0, 1, 1
-    dw 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-    dw 1, 1, 1, 1, 1, 1
+    dw 0, 0, 0, 0, 0, 0
+    dw 1, 1, 1, 1, 1, 1, 1, 1
     dw 2, 2, 2
+; 슬롯 × 2 → !wt_dirty 의 비트(낮은 워드, 높은 워드)
+WtBitLo:
+    dw $0001, $0002, $0004, $0008, $0010, $0020, $0040, $0080
+    dw $0100, $0200, $0400, $0800, $1000, $2000, $4000, $8000, $0000
+WtBitHi:
+    dw 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, $0001
 
 ; 04:B11E(JSL, A = 창 바이트 8비트, X = 레코드에서 그다음 바이트 자리 16비트, DB = 04, Y = $E0 기준 자리). 9E k 면
 ; 고정 문구 k 를 그리고, 원래 접두 처리처럼 C = 1 로 돌아간다. 칸 셈 $0ADE 는 접두 바이트에서 하나 셌으므로 열 수 − 1 을
@@ -1204,6 +1216,7 @@ WnTitle:
 ; DB 는 그대로 둔다.
 WtFixedDraw:
     PHB
+    STA.l $7E0000|!wt_k
     ASL
     TAX
     LDA.l (!wt_bank<<16)|$8000+(!wt_fixed_kind*$200),X
@@ -1231,9 +1244,25 @@ WtFixedDraw:
     AND #$00FF
     STA.w !wt_cols
     STZ.w !wt_len
-    LDA #$0006
-    STA.w !wt_first
+    STZ.w !wt_first
+    ; 명령 창 문구(번호 !wt_cmd 미만)는 캔버스 밖 1D0~1FF 의 전용 칸(문구마다 6칸). 메시지 창이 함께 떠도 남는다
+    LDA.w !wt_k
+    CMP.w #!wt_cmd
+    BCS +
+    ASL
+    STA.w !wn_c
+    ASL
+    CLC
+    ADC.w !wn_c
+    CLC
+    ADC #$01D0
+    STA.w !wt_base
+    LDA #$FFFF
+    STA.w !wt_slot2
+    BRA ++
++
     JSR WtAlloc
+++
     JSR WtQueue
     JSR WtTilemap
     LDA.w !wt_cols
@@ -1404,6 +1433,15 @@ WtQueue:
     CMP.w !wt_cols
     BCC .upper
     STY.w !wq_off
+    LDX.w !wt_slot2
+    BMI +
+    LDA.l WtBitLo,X
+    ORA.w !wt_dirty
+    STA.w !wt_dirty
+    LDA.l WtBitHi,X
+    ORA.w !wt_dirty+2
+    STA.w !wt_dirty+2
++
     SEP #$20
     LDA.w !wq_count
     CLC
@@ -1522,6 +1560,84 @@ WqNmi:
 
 WqFF:
     db $FF
+
+; 00:8E9E(NMI 작업 안, 게임이 메시지 캔버스를 보내기 직전, M = 8, X = 16). 캔버스 안에 그림을 올린 슬롯의 평면 1 을
+; 원래 글자 칸처럼 FF 로 되돌리고 슬롯을 비운다. 게임은 캔버스의 평면 0 만 보내므로, 위 줄 합성(테두리 무늬가 든 평면 1)이
+; 남아 메시지 창 빈 줄에 선으로 보였다. NMI 작업 안이라 큐용 NMI 변수(!wq_head·!wq_len·!wq_left)를 쓴다.
+WqClean:
+    PHB
+    PEA $7E7E
+    PLB
+    PLB
+    REP #$30
+    LDA.w !wt_dirty
+    ORA.w !wt_dirty+2
+    BNE +
+    JMP .out
++
+    LDA.w !wt_dirty
+    STA.w !wq_head
+    LDA.w !wt_dirty+2
+    STA.w !wq_len
+    STZ.w !wt_dirty
+    STZ.w !wt_dirty+2
+    LDX #$0000
+.slot
+    LSR.w !wq_len
+    ROR.w !wq_head
+    BCS +
+    JMP .next
++
+    STZ.w !wt_keys,X
+    STZ.w !wt_ages,X
+    LDA.l WtClass,X
+    CMP #$0001
+    BNE +
+    LDA #$00A0              ; 20칸 × 8
+    BRA ++
++
+    LDA #$0040              ; 8칸 × 8
+++
+    STA.w !wq_left
+    LDA.l WtSlot,X
+    ASL
+    ASL
+    ASL
+    CLC
+    ADC #$1000
+    STA.l $002116
+    LDA.w !wq_left
+    STA.l $004305
+    LDA.w #WqFF
+    STA.l $004302
+    SEP #$20
+    LDA.b #WqFF>>16
+    STA.l $004304
+    LDA #$08                ; 고정 원본
+    STA.l $004300
+    LDA #$80
+    STA.l $002115
+    LDA #$19
+    STA.l $004301
+    LDA #$01
+    STA.l $00420B
+    REP #$20
+.next
+    INX
+    INX
+    CPX.w #!wt_nslot*2
+    BCS .out
+    JMP .slot
+.out
+    SEP #$20
+    PLB
+    ; 원래 명령: PHB / PHK / PLB(DB = 00) / LDA #$7E
+    PHB
+    LDA #$00
+    PHA
+    PLB
+    LDA #$7E
+    JML $008EA3
 
 ; 타일맵: 글자 줄은 빌린 칸, 위 줄은 빌린 칸 + 열 수. 높은 바이트는 우선·팔레트만 살리고, 색($ED)이 있으면 글자 줄에 쓴다.
 WtTilemap:
