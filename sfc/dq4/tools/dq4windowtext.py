@@ -52,6 +52,10 @@ TITLES = {
     'よろい': '갑옷', 'たて': '방패', 'かぶと': '투구', 'レベル': '레벨', 'しゅび': '수비', 'ぼうぐ': '방어구',
     'せんとうとくぎ': '전투 특기', 'のとくぎ': '의 특기', 'だれと': '누구와', 'だれがたたかう': '누가 싸울까',
 }
+# 명령 창(01)의 문구. 메시지 창과 함께 보이는 일이 많아 캔버스 밖 전용 칸(BG3 1D0~1FF, 문구마다 6칸)에 둔다
+COMMAND_WINDOW = 0x01
+COMMAND = ('はなす', 'じゅもん', 'つよさ', 'どうぐ', 'そうび', 'さくせん', 'とびら', 'しらべる')
+COMMAND_COLUMNS = 3
 TITLE_COUNT = 0x2B              # 제목 2B 부터는 목록 뒤의 코드
 
 
@@ -88,11 +92,13 @@ def columns(font, text):
 
 
 def phrases():
-    """고정 문구 {일본어: 한글}. 번호 k 는 이 순서(FE·FF 를 넘지 않음)."""
-    out = dict(FIXED)
+    """고정 문구 [(일본어, 한글)]. 번호 k 는 이 순서(FE·FF 를 넘지 않음). 앞 len(COMMAND) 개는 명령 창 전용 번호라,
+    같은 낱말이 다른 창·제목에 나오면 뒤에 따로 번호를 받는다(전용 칸의 위 줄 합성이 명령 창 자리에 맞춰져 있음)."""
+    out = [(jp, FIXED[jp]) for jp in COMMAND]
+    rest = dict(FIXED)
     for jp, ko in TITLES.items():
-        out.setdefault(jp, ko)
-    return out
+        rest.setdefault(jp, ko)
+    return out + list(rest.items())
 
 
 def _runs(rom, rec, i, start_ok):
@@ -116,8 +122,12 @@ def fixed_records(data, font):
     from dq5map import Rom
     rom = Rom(bytes(data))
     table = phrases()
-    numbers = {jp: k for k, jp in enumerate(table)}
-    width = {jp: len(columns(font, ko)) for jp, ko in table.items()}
+    numbers = {}
+    for k, (jp, _) in enumerate(table[len(COMMAND):], len(COMMAND)):
+        numbers.setdefault(jp, k)
+    command = {jp: k for k, (jp, _) in enumerate(table[:len(COMMAND)])}
+    width = {jp: len(columns(font, ko)) for jp, ko in table}
+    korean = dict(table)
 
     def lorom(addr):
         return ((addr >> 16) & 0x7F) * 0x8000 + (addr & 0x7FFF)
@@ -134,16 +144,19 @@ def fixed_records(data, font):
                 i += 1
                 continue
             j, n, jp = _runs(rom, rec, i, True)
-            if jp not in FIXED:
+            if jp not in FIXED or (w == COMMAND_WINDOW and jp not in command):
                 raise ValueError(f'창 {w:02X}: 「{jp}」 의 한글 문구가 없음')
+            k = command[jp] if w == COMMAND_WINDOW else numbers[jp]
+            if w == COMMAND_WINDOW and width[jp] > COMMAND_COLUMNS:
+                raise ValueError(f'창 {w:02X}: 「{FIXED[jp]}」 {width[jp]}열, 전용 칸은 {COMMAND_COLUMNS}열')
             s = 0
             while j + s < len(rec) and rec[j + s] == 0x01:
                 s += 1
             last = j + s >= len(rec) or rec[j + s] == 0xFF
             room = n + s + (widen if last else 0)
             if width[jp] > room:
-                raise ValueError(f'창 {w:02X}: 「{table[jp]}」 {width[jp]}열, 자리 {room}열')
-            new += bytes((FIXED_PREFIX, numbers[jp])) + b'\x01' * max(0, n + s - width[jp])
+                raise ValueError(f'창 {w:02X}: 「{korean[jp]}」 {width[jp]}열, 자리 {room}열')
+            new += bytes((FIXED_PREFIX, k)) + b'\x01' * max(0, n + s - width[jp])
             i = j + s
         if len(new) > len(rec):
             raise ValueError(f'창 {w:02X}: 고친 레코드가 원래보다 김')
@@ -181,7 +194,7 @@ def fixed_records(data, font):
             s = 0
             while j + s < len(rec) and rec[j + s] == 0x01:
                 s += 1
-            if jp not in table or (not single and width[jp] > n + s):
+            if jp not in numbers or (not single and width[jp] > n + s):
                 body += rec[i:j]
                 cols += n
                 i = j
@@ -205,7 +218,7 @@ def build(data, font):
     index = bytearray(DATA - INDEX)
     body = bytearray()
     report = {}
-    for k, (jp, ko) in enumerate(phrases().items()):
+    for k, (jp, ko) in enumerate(phrases()):
         cols = columns(font, ko)
         at = DATA + len(body)
         index[FIXED_KIND * 0x200 + k * 2:FIXED_KIND * 0x200 + k * 2 + 2] = at.to_bytes(2, 'little')
