@@ -1265,17 +1265,12 @@ WtFixedDraw:
     STA.w !wt_cols
     STZ.w !wt_len
     STZ.w !wt_first
-    ; 명령 창 문구(번호 !wt_cmd 미만)는 캔버스 밖 1D0~1FF 의 전용 칸(문구마다 6칸). 메시지 창이 함께 떠도 남는다
+    ; 메시지 창과 함께 뜨는 창(명령 창·가게)의 문구는 캔버스 밖 1D0~1FF 의 전용 칸(빌드가 정한 첫 칸). 메시지가 떠도 남는다
     LDA.w !wt_k
-    CMP.w #!wt_cmd
-    BCS +
     ASL
-    STA.w !wn_c
-    ASL
-    CLC
-    ADC.w !wn_c
-    CLC
-    ADC #$01D0
+    TAX
+    LDA.l (!wt_bank<<16)|!wt_safe,X
+    BEQ +
     STA.w !wt_base
     LDA #$FFFF
     STA.w !wt_slot2

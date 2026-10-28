@@ -7,7 +7,8 @@ Galmuri9 그림으로 바꾼다. 번호가 아니라 이름으로 잇는 것은 
 
 뱅크 TEXT_BANK:
   8000 + 종류 × 200  이름 번호 256개 × 16비트: 그림의 뱅크 안 주소, 0 = 없음. 종류 FIXED_KIND 는 창 고정 문구
-  9000~              [열 수][열마다 16바이트: 위 줄 8줄, 글자 줄 8줄](1bpp, bit7 = 왼쪽 점)
+  9000               고정 문구 번호 256개 × 16비트: 캔버스 밖 전용 칸의 첫 칸, 0 = 일반 슬롯
+  9200~              [열 수][열마다 16바이트: 위 줄 8줄, 글자 줄 8줄](1bpp, bit7 = 왼쪽 점)
 글자의 맨 윗줄이 위 줄 타일의 7줄째, 나머지 여덟 줄이 글자 줄에 온다(상태 창 이름과 같은 배치).
 """
 import csv
@@ -21,7 +22,8 @@ ADOPT = ROOT / 'nds' / 'dq4' / 'tables' / 'adopt.tsv'
 
 TEXT_BANK = 0x58
 INDEX = 0x8000
-DATA = 0x9000
+SAFE = 0x9000                   # 고정 문구 번호 256개 × 16비트: 캔버스 밖 전용 칸의 첫 칸, 0 = 일반 슬롯
+DATA = 0x9200
 # 이름 표 번호 → (adopt.tsv 의 표, 창 이름 칸의 최대 열 수, 넘으면 멈출지). 주문 창(28)은 두 칸 넓혀 일곱 칸이고,
 # 그보다 긴 이름(몬스터 특기 「얼어붙은 눈보라」)은 가나로 둔다. 전투 몬스터 목록(창 1B)은 이름 아홉 칸이라 넘는 이름은 가나.
 KINDS = {5: ('아이템', 10, True), 3: ('주문·특기', 7, False), 4: ('몬스터', 9, False)}
@@ -34,7 +36,7 @@ FIXED_PREFIX = 0x9E
 # 대신 두 자 낱말로 줄였다. 「どうする」 창은 「건네기」 석 자가 들어가게 한 칸 넓힌다.
 # 09 さくせん, 0B つよさ(「강함 보기」 가 들어가게 한 칸 넓힘), 19·1A·87·88 전투 첫 창, 1C·1D·1E 전투 명령 창
 FIXED_WINDOWS = {0x01: 0, 0x10: 1, 0x09: 0, 0x0B: 1,
-                 0x19: 0, 0x1A: 0, 0x87: 0, 0x88: 0, 0x1C: 0, 0x1D: 0, 0x1E: 0}
+                 0x19: 0, 0x1A: 0, 0x87: 0, 0x88: 0, 0x1C: 0, 0x1D: 0, 0x1E: 0, 0x33: 0}
 FIXED = {
     'はなす': '대화', 'じゅもん': '주문', 'つよさ': '강함', 'どうぐ': '도구',
     'そうび': '장비', 'さくせん': '작전', 'とびら': '문', 'しらべる': '조사',
@@ -43,6 +45,7 @@ FIXED = {
     'ＨＰとＭＰ': 'HP와 MP', 'こうげきカ': '공격력', 'つよさみる': '강함 보기', 'まんたん': '만땅',
     'たたかう': '싸우기', 'いれかえ': '교체', 'にげる': '도망',
     'こうげき': '공격', 'とくぎ': '특기', 'ぼうぎょ': '방어',
+    'かいにきた': '사기', 'うりにきた': '팔기', 'やめる': '그만',
 }
 # 창 제목(04:AD78 목록). 표에 없는 제목(이름 뒤 「の１」, 이름 입력 등)은 가나로 둔다.
 TITLES = {
@@ -52,10 +55,14 @@ TITLES = {
     'よろい': '갑옷', 'たて': '방패', 'かぶと': '투구', 'レベル': '레벨', 'しゅび': '수비', 'ぼうぐ': '방어구',
     'せんとうとくぎ': '전투 특기', 'のとくぎ': '의 특기', 'だれと': '누구와', 'だれがたたかう': '누가 싸울까',
 }
-# 명령 창(01)의 문구. 메시지 창과 함께 보이는 일이 많아 캔버스 밖 전용 칸(BG3 1D0~1FF, 문구마다 6칸)에 둔다
-COMMAND_WINDOW = 0x01
-COMMAND = ('はなす', 'じゅもん', 'つよさ', 'どうぐ', 'そうび', 'さくせん', 'とびら', 'しらべる')
-COMMAND_COLUMNS = 3
+# 메시지 창과 함께 뜨는 창(명령 창 01, 가게 33. 가게 창은 화면 오른쪽 끝이라 넓히지 못해 「그만두기」 를 「그만」 으로)의 문구는 걷는 메시지 캔버스(096~17F) 밖 전용 칸 1D0~1FF 에 둔다.
+# 창마다 1D0 부터 채우고, 서로 함께 뜨지 않는 창끼리는 같은 칸을 겹쳐 쓴다(창을 그릴 때마다 다시 올림).
+SAFE_WINDOWS = {
+    0x01: ('はなす', 'じゅもん', 'つよさ', 'どうぐ', 'そうび', 'さくせん', 'とびら', 'しらべる'),
+    0x33: ('かいにきた', 'うりにきた', 'やめる'),
+}
+SAFE_FIRST = 0x1D0
+SAFE_TILES = 0x30
 TITLE_COUNT = 0x2B              # 제목 2B 부터는 목록 뒤의 코드
 
 
@@ -92,13 +99,28 @@ def columns(font, text):
 
 
 def phrases():
-    """고정 문구 [(일본어, 한글)]. 번호 k 는 이 순서(FE·FF 를 넘지 않음). 앞 len(COMMAND) 개는 명령 창 전용 번호라,
-    같은 낱말이 다른 창·제목에 나오면 뒤에 따로 번호를 받는다(전용 칸의 위 줄 합성이 명령 창 자리에 맞춰져 있음)."""
-    out = [(jp, FIXED[jp]) for jp in COMMAND]
+    """고정 문구 [(일본어, 한글, 전용 칸 창 또는 None)]. 번호 k 는 이 순서(FE·FF 를 넘지 않음). SAFE_WINDOWS 의 문구가
+    앞에서 창마다 따로 번호를 받고, 같은 낱말이 다른 창·제목에 나오면 뒤에서 일반 번호를 또 받는다(전용 칸의 위 줄 합성은
+    그 창 자리에 맞춰져 있음)."""
+    out = [(jp, FIXED[jp], w) for w, jps in SAFE_WINDOWS.items() for jp in jps]
     rest = dict(FIXED)
     for jp, ko in TITLES.items():
         rest.setdefault(jp, ko)
-    return out + list(rest.items())
+    return out + [(jp, ko, None) for jp, ko in rest.items()]
+
+
+def safe_bases(font):
+    """번호 k → 전용 칸의 첫 칸. 창마다 SAFE_FIRST 부터 열 수 × 2 칸씩."""
+    out, used = {}, {}
+    for k, (jp, ko, w) in enumerate(phrases()):
+        if w is None:
+            continue
+        at = used.get(w, 0)
+        out[k] = SAFE_FIRST + at
+        used[w] = at + 2 * len(columns(font, ko))
+        if used[w] > SAFE_TILES:
+            raise ValueError(f'창 {w:02X}: 전용 칸 {used[w]}칸이 {SAFE_TILES}칸을 넘음')
+    return out
 
 
 def _runs(rom, rec, i, start_ok):
@@ -122,12 +144,14 @@ def fixed_records(data, font):
     from dq5map import Rom
     rom = Rom(bytes(data))
     table = phrases()
-    numbers = {}
-    for k, (jp, _) in enumerate(table[len(COMMAND):], len(COMMAND)):
-        numbers.setdefault(jp, k)
-    command = {jp: k for k, (jp, _) in enumerate(table[:len(COMMAND)])}
-    width = {jp: len(columns(font, ko)) for jp, ko in table}
-    korean = dict(table)
+    numbers, safe = {}, {}
+    for k, (jp, _, w) in enumerate(table):
+        if w is None:
+            numbers.setdefault(jp, k)
+        else:
+            safe[w, jp] = k
+    width = {jp: len(columns(font, ko)) for jp, ko, _ in table}
+    korean = {jp: ko for jp, ko, _ in table}
 
     def lorom(addr):
         return ((addr >> 16) & 0x7F) * 0x8000 + (addr & 0x7FFF)
@@ -144,11 +168,9 @@ def fixed_records(data, font):
                 i += 1
                 continue
             j, n, jp = _runs(rom, rec, i, True)
-            if jp not in FIXED or (w == COMMAND_WINDOW and jp not in command):
+            if jp not in FIXED or (w in SAFE_WINDOWS and (w, jp) not in safe):
                 raise ValueError(f'창 {w:02X}: 「{jp}」 의 한글 문구가 없음')
-            k = command[jp] if w == COMMAND_WINDOW else numbers[jp]
-            if w == COMMAND_WINDOW and width[jp] > COMMAND_COLUMNS:
-                raise ValueError(f'창 {w:02X}: 「{FIXED[jp]}」 {width[jp]}열, 전용 칸은 {COMMAND_COLUMNS}열')
+            k = safe[w, jp] if w in SAFE_WINDOWS else numbers[jp]
             s = 0
             while j + s < len(rec) and rec[j + s] == 0x01:
                 s += 1
@@ -218,7 +240,9 @@ def build(data, font):
     index = bytearray(DATA - INDEX)
     body = bytearray()
     report = {}
-    for k, (jp, ko) in enumerate(phrases()):
+    bases = safe_bases(font)
+    for k, (jp, ko, _) in enumerate(phrases()):
+        index[SAFE - INDEX + k * 2:SAFE - INDEX + k * 2 + 2] = bases.get(k, 0).to_bytes(2, 'little')
         cols = columns(font, ko)
         at = DATA + len(body)
         index[FIXED_KIND * 0x200 + k * 2:FIXED_KIND * 0x200 + k * 2 + 2] = at.to_bytes(2, 'little')
