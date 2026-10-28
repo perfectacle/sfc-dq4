@@ -60,6 +60,10 @@ org $04B7D7
     STA $00
     db $82 : dw $B808-$B7DE     ; BRL $B808 (이 asar 는 BRL $주소 를 거리로 바꾸지 않음)
     NOP #4
+; 장비 비교 창 제목의 물건 이름. PHB / LDA #$7E / PHA / PLB / LDX #$0000 / BRL $ABD6
+org $04AA79
+    JML WnTitleName
+    NOP #7
 ; 이름 표 문자열(도구 이름 등)을 글자마다 04:B235 로 찍는 자리. PHX / SEP #$10 / LDX #$00
 org $04B808
     JML WnText
@@ -949,6 +953,16 @@ WnText:
 +
     STA.l $7E0000|!wt_mode
     REP #$30
+    ; 버퍼가 9E k 로 시작하면(INLINE_STRINGS) 고정 문구 k 를 그린다. $42·$43 에는 앞서 받은 이름이 남아 있다
+    LDA.b $01
+    AND #$00FF
+    CMP.w #!wt_fixed
+    BNE +
+    LDA.b $02
+    AND #$00FF
+    ORA.w #!wt_fixed_kind<<8
+    STA.b $42
++
     ; 빈 자리(주문이 없는 칸 등)는 이름을 받지 않고 빈칸을 찍어, $42·$43 에 앞서 받은 이름이 남아 있다
     LDA.b $01
     AND #$00FF
@@ -1268,6 +1282,43 @@ WnTitle:
     PLX
     JML $04AA10
 
+; 04:AA79(장비 비교 창 제목의 물건 이름, M = 8, X = 16, PHX 뒤 BRK 88 로 $42·$43 의 이름을 $01~ 에 받은 뒤).
+; 원래는 PHB / DB = 7E / LDX #0 / BRL $ABD6 로 제목 줄에 찍고 PLB / PLX / INX / BRL $AA10.
+WnTitleName:
+    REP #$30
+    LDA.b $43
+    AND #$00FF
+    CMP #$0008
+    BCS .original
+    XBA
+    ASL
+    PHA                     ; $00 은 원래 고리의 글자 수라 건드리지 않는다
+    LDA.b $42
+    AND #$00FF
+    ASL
+    CLC
+    ADC 1,S
+    TAX
+    PLA
+    LDA.l (!wt_bank<<16)|$8000,X
+    BEQ .original
+    LDA.b $DC
+    STA.l $7E0000|!wt_buf
+    TXA
+    JSR WtNameDraw
+    SEP #$20
+    PLX
+    INX
+    JML $04AA10
+.original
+    SEP #$20
+    PHB
+    LDA #$7E
+    PHA
+    PLB
+    LDX #$0000
+    JML $04ABD6
+
 ; 04:BB70(E5, M = 8, X = 16, BRK 88 2B 로 $42 = 작전 번호의 이름을 받은 뒤). 원래는 넉 자를 찍고 Y 를 0x78 더해
 ; 두 줄 아래 같은 열로 가 넉 자를 더 찍은 뒤 INC $0A4C, PLX, 04:BFF2. 한글은 윗줄·아랫줄 고정 문구 둘로 그린다.
 WnTactic:
@@ -1317,8 +1368,19 @@ WtFixedDraw:
     PHB
     STA.l $7E0000|!wt_k
     ASL
+    CLC
+    ADC.w #!wt_fixed_kind*$200
+    BRA WtNameDraw_go
+; A = 이름 표 자리(종류 × 200 + 번호 × 2). 고정 문구와 같은 자리에 그리되 전용 칸은 쓰지 않는다
+WtNameDraw:
+    PHB
+    PHA
+    LDA #$FFFF
+    STA.l $7E0000|!wt_k
+    PLA
+.go
     TAX
-    LDA.l (!wt_bank<<16)|$8000+(!wt_fixed_kind*$200),X
+    LDA.l (!wt_bank<<16)|$8000,X
     STA.l $7E0000|!wt_ptr
     PEA $7E7E
     PLB
@@ -1346,6 +1408,7 @@ WtFixedDraw:
     STZ.w !wt_first
     ; 메시지 창과 함께 뜨는 창(명령 창·가게)의 문구는 캔버스 밖 1D0~1FF 의 전용 칸(빌드가 정한 첫 칸). 메시지가 떠도 남는다
     LDA.w !wt_k
+    BMI +
     ASL
     TAX
     LDA.l (!wt_bank<<16)|!wt_safe,X

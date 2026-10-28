@@ -42,10 +42,14 @@ FIXED_PREFIX = 0x9E
 # 창 번호 → 오른쪽으로 넓힐 칸 수. 명령 창은 한 항목이 네 칸이라 adopt.tsv 의 긴 이름(「강한 정도」·「조사하다」)
 # 대신 두 자 낱말로 줄였다. 「どうする」 창은 「건네기」 석 자가 들어가게 한 칸 넓힌다.
 # 09 さくせん, 0B つよさ(「강함 보기」 가 들어가게 한 칸 넓힘), 0A·1F 작전(필드·전투, 열 열 「한방에 끝내자구」 가 들어가게 두 칸), 0F 지금 작전(커서 + 이름 열 칸), 19·1A·87·88 전투 첫 창, 1C·1D·1E 전투 명령 창,
-# 33 가게, 3C 교회, 51·52·54 맡기는 곳, 32 예/아니요(「아니요」 네 열이 들어가게 한 칸)
+# 33 가게, 3C 교회, 51·52·54 맡기는 곳, 32 예/아니요(「아니요」 네 열이 들어가게 한 칸), 5A 혼자일 때의 さくせん
+# 코드가 $01~ 버퍼에 베껴 04:B808·04:BC08 로 찍는 문자열 목록(FF 로 끝남). 버퍼 첫 바이트 9E 면 훅이 고정 문구 $02 로
+# 그리므로, 자리(표 오프셋)를 지키도록 9E k + 빈칸으로 바꾼다. 04:C2BF 는 04:C25D 가 고르는 장비 비교 라벨
+# (첫 「？？？」 는 그대로), 04:C14D 는 04:BA60 이 베끼는 「そうびしない」(04:C14C 의 FE 항목이기도 함)
+INLINE_STRINGS = ((0x04C2C5, 0x04C2E7), (0x04C14D, 0x04C155))
 FIXED_WINDOWS = {0x01: 0, 0x10: 1, 0x09: 0, 0x0B: 1,
                  0x19: 0, 0x1A: 0, 0x87: 0, 0x88: 0, 0x1C: 0, 0x1D: 0, 0x1E: 0, 0x33: 0,
-                 0x0A: 2, 0x1F: 2, 0x0F: 1, 0x3C: 0, 0x51: 0, 0x52: 0, 0x54: 0, 0x32: 1}
+                 0x0A: 2, 0x1F: 2, 0x0F: 1, 0x3C: 0, 0x51: 0, 0x52: 0, 0x54: 0, 0x32: 1, 0x5A: 0}
 FIXED = {
     'はなす': '대화', 'じゅもん': '주문', 'つよさ': '강함', 'どうぐ': '도구',
     'そうび': '장비', 'さくせん': '작전', 'とびら': '문', 'しらべる': '조사',
@@ -66,6 +70,8 @@ FIXED = {
     'おいのりをする': '기도하기', 'おつげをきく': '계시', 'いきかえらせる': '소생', 'どくのちりょう': '해독',
     'のろいをとく': '저주 풀기', 'あずける': '맡기기', 'ひきだす': '꺼내기', 'もちもの': '소지품', 'おかね': '돈',
     'ぼうぐ': '방어구', 'ぶき': '무기', 'はい': '예', 'いいえ': '아니요',
+    # 장비 비교 창의 라벨과 장비 목록 끝 항목(INLINE_STRINGS)
+    'こうげきりょく': '공격력', 'しゅびりょく': '수비력', 'そうびしない': '장비 해제',
 }
 # 창 제목(04:AD78 목록). 표에 없는 제목(이름 뒤 「の１」, 이름 입력 등)은 가나로 둔다.
 TITLES = {
@@ -327,6 +333,22 @@ def fixed_records(data, font):
     if len(new) > len(old):
         raise ValueError('고친 제목 목록이 원래보다 김')
     out.append((start, bytes(new) + b'\xff' * (len(old) - len(new))))
+
+    for a, b in INLINE_STRINGS:
+        old = bytes(rom.u8(a + i) for i in range(b - a))
+        new, i = bytearray(), 0
+        while i < len(old):
+            e = old.index(0xFF, i)
+            seg = old[i:e]
+            jp = dq5text.text(dq5text.string_codes(rom, seg)) if seg else ''
+            if jp in FIXED:
+                cells = sum(1 for x in seg if x not in (0x83, 0x84))
+                if width[jp] > cells or len(seg) < 2:
+                    raise ValueError(f'{a:06X}: 「{korean[jp]}」 {width[jp]}열, 자리 {cells}칸')
+                seg = bytes((FIXED_PREFIX, numbers[jp])) + b'\x01' * (len(seg) - 2)
+            new += seg + b'\xff'
+            i = e + 1
+        out.append((lorom(a), bytes(new)))
     return out, numbers
 
 
