@@ -4,6 +4,8 @@ sfc/dq5/docs/dq5-map-format.md의 보물상자 형식. 입력 JSON→dq5patch→
 선실에서 걸어가거나 dq5warp.lua 로 그 자리에 내려선 뒤 컨트롤러로 조사한다. 금화·조회된 보상·열림 비트·
 기존 비트 보존을 확인한다. 원본 롬/세이브는 읽기만 하고 --out 아래 새 폴더에 저장한다.
 past_* 사례는 상자 194개·상자 맵 연결과 아래층 상자 표를 뱅크 3F 로 옮긴 롬에서 열기·들어갈 때 그리기·기록과 불러오기를 본다.
+new_* 사례는 원래 롬에 없는 새 그룹 맵 36/00(선실 17/00 에 상자 블록을 놓은 레코드)에 상자·タンス·두 칸 앞 항목을
+dq5chestreloc.py --new-map·--with-patch 로 넣은 롬을, 같은 새 맵 패치만 붙인 대조 롬과 견준다.
 --audit 은 원본 롬에서 상자 맵 연결·아래층 상자 표의 DB(1E) 창을 연 동안 실행한 명령을 모아(lua/dq5dbread.lua),
 DB 로 롬(8000~)에 닿는 명령이 표 읽기 자리뿐인지 본다.
 
@@ -24,7 +26,10 @@ from kr_patch.sfc.mapper import LoROM
 
 from dq5chestreloc import ABS
 from dq5chestwrite import FORMAT
-from dq5exitcheck import DB_ABS, DB_INDIRECT
+from dq5exitcheck import DB_ABS, DB_INDIRECT, warp_exit
+from dq5map import Rom
+from dq5mapcompile import compile_places, extract
+from dq5mapwrite import dumps
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
@@ -152,12 +157,41 @@ GROW = {'past_open': (987, 0x2228, 0x80, 0x2228, 0x80, None, 0x131),
         'past_lower': (None, 0x2229, 0x08, 0x2228, 0x08, 0xB1, 0x131),
         'full_open': (255, 0x222F, 0x01, 0x222F, 0x01, None, 0x131)}
 CASES.update({name: (None, *values) for name, values in GROW.items()})
+# 새 그룹 맵 36/00: 선실 17/00 의 레코드에 상자 블록 384 를 (6,4) 에 놓아 상자 칸 (7,5) 를 만든다. タンス 칸 (4,4) 와
+# 두 칸 앞 자리 (9,9) 는 선실과 같다. 들어가는 곳 표·문 표·새 레코드·출구는 새 맵 도구들이, 상자 표 넷은 뱅크 3B 로 옮긴다.
+# 대조 롬은 상자 패치 없이 같은 새 맵 패치만 붙인다
+NEWMAP_DOC = {'format': 'dq5newmap/1', 'groups': [{'group': '36', 'entrance': {'copy': '17'}}],
+              'maps': [{'map': '36/00', 'record': {'source': 'cabin-chest.dq5map.json'}, 'attrs': {'copy': '17/00'}}]}
+NEWMAP_AT = ('--entrance-table-at', '3E:C000', '--door-bank', '3D', '--records-at', '3A:8000')
+NEWMAP_EXITS = ('--exits-at', '2A:D812', '--records-at', '3F:8000')
+NEWMAP_CHEST_AT = ('--chests-at', '3B:8000', '--chest-maps-at', '3B:9000', '--search-at', '3B:A000',
+                   '--ahead-at', '3B:B000')
+NEW_MAP = ('--new-map', '36/00')
+
+
+def grow_newmap(doc):
+    # 상자 161 은 7E:2224 & 40. タンス·두 칸 앞은 grow_search·grow_ahead 와 같은 빈 비트
+    doc['chest_maps'].append({'group': 0x36, 'map': 0, 'count': 1})
+    doc['chests'].append({'reward': 0x100 + 456})
+    doc['search'].append({'group': 0x36, 'map': 0, 'x': 4, 'y': 4, 'unused': 1, 'reward': 0x100 + 567,
+                          'flag_index': 0x0B, 'mask': 0x01})
+    doc['ahead'].append({'group': 0x36, 'map': 0, 'x': 9, 'y': 9, 'reward': 0x100 + 678,
+                         'flag_index': 0x2E, 'mask': 0x04})
+
+
+# (금화, 열림 비트, 마스크, 패치 메시지, 대조 롬이 못 찾을 때의 첫 메시지·다음 메시지)
+NEWMAP = {'new_chest': (456, 0x2224, 0x40, 0x131, 0x12B, 0x12C),
+          'new_search': (567, 0x2237, 0x01, 0x12F, 0x12F, 0x130),
+          'new_ahead': (678, 0x223E, 0x04, 0x12B, 0x12B, 0x12C)}
+for _name, (_amount, _flag, _mask, _message, _kind, _none) in NEWMAP.items():
+    CASES[_name] = (None, _amount, _flag, _mask, _flag, _mask, None, _message)
+    ORIGINAL_KIND[_name] = _kind
 PATCHED_REWARD = {'place_shift': 0x33, 'past_lower': 0xB1, 'field_world1_day': None, 'field_world2_day': None}
 ORIGINAL_KIND.update(past_open=0x12B, full_open=0x12B)
 # 맵에 들어갈 때 열린 상자를 그리는 사례: (장면, 미리 켤 비트). 원본은 그 비트를 상자로 보지 않아 그대로 두고,
 # 패치는 1F:FC50 이 옮긴 표에서 그 상자를 찾아 열린 상자 타일(9E·9F)로 바꾼다
 ENTRY = {'past_entry': ({'TO': '19/00,5,46'}, '2228|80'), 'past_entry_lower': ({'TO': '51/51,18,37,2'}, '2229|08'),
-         'full_entry': ({'TO': '19/00,11,46'}, '222F|01')}
+         'full_entry': ({'TO': '19/00,11,46'}, '222F|01'), 'new_entry': ({'TO': '36/00,6,7'}, '2224|40')}
 # 열림 비트를 켠 채 교회에 기록하고 리셋해 불러오는 사례(dq5cdlsweep.py 의 church-save-load 와 같은 입력).
 # SRAM 칸 1 은 7E:2000~ 을 70:0012~ 에 그대로 담는다(25:83CE)
 SAVE_BITS = {0x2228: 0x80, 0x2229: 0x08}
@@ -166,7 +200,7 @@ SAVE_FRAMES = {'saved': 2600, 'reset': 2710, 'loaded': 6400}
 ALL = [*CASES, *ENTRY, 'past_save']
 # 조사 뒤 세계 지도 버퍼의 블록(블록 좌표 x, y, 원본, 패치). 밤이라 빛 블록 A7 이 놓인 자리를 본다
 # 필드에 들어갈 때 빛 블록을 놓으므로, 장면도 그 롬으로 만들어야 하는 사례
-OWN_SCENE = {'field_move', 'place_chest', 'place_shift', 'place_furniture'}
+OWN_SCENE = {'field_move', 'place_chest', 'place_shift', 'place_furniture', *NEWMAP}
 BLOCKS = {'field_move': ((11, 83, 0xA7, 0xCA), (12, 84, 0x178, 0xA7)),
           # 원래 보상(물건)을 집으면 빛 블록이 세계 0 의 지도 블록 CA 로 돌아간다(세계 1·2 지도의 그 자리는 00).
           # 금화로 바꾸면 돌아가지 않는다. 01:A055 는 열림 플래그가 켜져 있으면 빛을 건드리지 않는다
@@ -182,7 +216,8 @@ SCENES = {'chest': {'TO': '01/02,34,31'}, 'search': None, 'foot': None, 'ahead':
           'grow_chests': {'TO': '19/00,5,46'}, 'grow_search': {'WAYPOINTS': '1,5;up:8'}, 'grow_foot': None,
           'grow_ahead': START, 'move_lower': 'lower', 'place_chest': {'TO': '01/02,36,29'},
           'place_shift': {'TO': '01/02,34,31'}, 'place_furniture': {'TO': '01/02,40,27'},
-          'past_open': 'grow_chests', 'past_lower': 'lower', 'full_open': {'TO': '19/00,11,46'}}
+          'past_open': 'grow_chests', 'past_lower': 'lower', 'full_open': {'TO': '19/00,11,46'},
+          'new_chest': {'TO': '36/00,6,7'}, 'new_search': {'TO': '36/00,3,5'}, 'new_ahead': {'TO': '36/00,9,12'}}
 # 필드 조사는 선 자리를 보므로 걷지 않고 바로 명령 창을 연다
 INPUTS = {name: INPUT.removeprefix('up:8,wait:30,') for name in CASES if name.startswith('field')}
 for _world in (1, 2):
@@ -225,6 +260,9 @@ def prepare(name, original, state, out, mesence, libdir, label=None):
     setup = SCENES.get(name) or {'WAYPOINTS': '3,5;up:8'}
     if 'WAYPOINTS' not in setup:
         env.update(setup, SETTLE='120', SAVE='scene.mss', MAXF='1500')
+        if name in NEWMAP:
+            # 새 맵 롬은 출구 표를 옮겼으므로 dq5warp.lua 가 덮을 배 사다리 출구 자리도 옮겨 간다
+            env['WARPEXIT'] = f'{warp_exit(original):X}'
         script = HERE / 'lua/dq5warp.lua'
     else:
         env.update(PREPARE='1', DRIVER=str(ROOT / 'tools/lua/walk.lua'), PRE='b:4,wait:40',
@@ -261,7 +299,10 @@ def compare(name, state, original, out, mesence, libdir, start):
     dest.mkdir()
     source, manifest, patched = dest / 'input.json', dest / 'patch.json', dest / 'patched.sfc'
     none_message = 0x12C
-    if name in GROW:
+    if name in NEWMAP:
+        original, patched = newmap_roms(out)
+        none_message = NEWMAP[name][5]
+    elif name in GROW:
         patched = grow_rom(original, dest, name.split('_')[0])
     elif name in PLACE:
         place_doc, place_at = PLACE_INPUTS[name]
@@ -281,7 +322,7 @@ def compare(name, state, original, out, mesence, libdir, start):
         source.write_text(json.dumps({'format': FORMAT, **changes}, indent=2) + '\n', encoding='utf-8')
         command('dq5chestwrite.py', original, 'patch', source, '-o', manifest)
         command('dq5chestwrite.py', original, 'check', source)
-    if name not in GROW:
+    if name not in GROW and name not in NEWMAP:
         command('dq5build.py', original, 'build', manifest, '-o', patched, '--ips', dest / 'patched.ips')
     results = []
     for mode, rom in (('original', original), ('patched', patched)):
@@ -338,26 +379,73 @@ def grow_rom(original, dest, kind='past'):
     return patched
 
 
-def opened_tiles(before, after):
-    """7F 뱅크(맵 BG 버퍼)에서 after 에만 있는 열린 상자 타일(아래 바이트 9E·9F) 수. 인물이 따로 움직인 자리 등 다른
+def newmap_roms(out):
+    return out / 'newmap' / 'control.sfc', out / 'newmap' / 'patched.sfc'
+
+
+def build_newmap(original, out):
+    """new_* 사례의 대조 롬과 패치 롬을 out/newmap 에 만든다. 상자 표는 원래 롬에서 --new-map·--with-patch 로 만든다."""
+    dest = out / 'newmap'
+    dest.mkdir()
+    rom = Rom(original.read_bytes())
+    src = extract(rom, 0x17, 0)
+    src['placements'].append([6, 4, 384])
+    record = compile_places(src, rom, False)
+    record['map'] = '36/00'
+    (dest / 'cabin-chest.dq5map.json').write_text(dumps(record) + '\n', encoding='utf-8')
+    manifests = []
+
+    def step(tool, name, doc, *args, check=True):
+        source, manifest = dest / f'{name}.json', dest / f'{name}.dq5patch.json'
+        source.write_text(json.dumps(doc, indent=1) + '\n', encoding='utf-8')
+        command(tool, original, 'patch', source, '-o', manifest, *args)
+        if check:
+            command(tool, original, 'check', source, *args)
+        return manifest
+
+    manifests.append(step('dq5newmap.py', 'newmap', NEWMAP_DOC, *NEWMAP_AT, check=False))
+    manifests.append(step('dq5npcrelocate.py', 'npc', {'format': 'dq5npcrelocate/1', 'scripts': []}, *NEW_MAP,
+                          check=False))
+    command('dq5exitreloc.py', original, 'dump', '-o', dest / 'exits-orig.json', *NEW_MAP)
+    exits = json.loads((dest / 'exits-orig.json').read_text(encoding='utf-8'))
+    manifests.append(step('dq5exitreloc.py', 'exits', exits, *NEW_MAP, *NEWMAP_EXITS))
+    control, patched = newmap_roms(out)
+    command('dq5build.py', original, 'build', *manifests, '-o', control)
+    # dq5newmap.py 의 check 는 만든 롬에서 돈다
+    command('dq5newmap.py', control, 'check', dest / 'newmap.json', *NEWMAP_AT)
+    command('dq5chestreloc.py', original, 'dump', '-o', dest / 'chest-orig.json')
+    tables = json.loads((dest / 'chest-orig.json').read_text(encoding='utf-8'))
+    grow_newmap(tables)
+    with_patch = [arg for manifest in manifests for arg in ('--with-patch', manifest)]
+    chest = step('dq5chestreloc.py', 'chest', tables, *NEWMAP_CHEST_AT, *NEW_MAP, *with_patch)
+    command('dq5build.py', original, 'build', *manifests, chest, '-o', patched, '--ips', dest / 'patched.ips')
+
+
+def opened_tiles(before, after, span=(0x10000, 0x20000)):
+    """맵 BG 버퍼(기본 7F 뱅크)에서 after 에만 있는 열린 상자 타일(아래 바이트 9E·9F) 수. 인물이 따로 움직인 자리 등 다른
     차이는 세지 않고, before 에만 있는 열린 상자 타일이 있으면 거부한다."""
     tile = {0x9E, 0x9F}
-    gone = [i for i in range(0x10000, 0x20000) if before[i] in tile and after[i] not in tile]
-    require(not gone, f'7F:{gone[0] - 0x10000 if gone else 0:04X} 의 열린 상자 타일이 패치 롬에서 사라짐')
-    return sum(1 for i in range(0x10000, 0x20000) if after[i] in tile and before[i] not in tile)
+    gone = [i for i in range(*span) if before[i] in tile and after[i] not in tile]
+    require(not gone, f'7E:{gone[0] if gone else 0:05X} 의 열린 상자 타일이 패치 롬에서 사라짐')
+    return sum(1 for i in range(*span) if after[i] in tile and before[i] not in tile)
 
 
 def entry_compare(name, original, out, mesence, libdir, start):
     setup, bits = ENTRY[name]
     dest = out / name
     dest.mkdir()
-    patched = grow_rom(original, dest, name.split('_')[0])
+    if name.startswith('new_'):
+        original, patched = newmap_roms(out)
+    else:
+        patched = grow_rom(original, dest, name.split('_')[0])
     wram = {}
     for mode, rom in (('original', original), ('patched', patched)):
         run_dir = dest / mode
         run_dir.mkdir()
         env = environment(libdir, start, run_dir)
         env.update(setup, SET=bits, SETTLE='120', SAVE='scene.mss', MAXF='1500')
+        if name.startswith('new_'):
+            env['WARPEXIT'] = f'{warp_exit(rom):X}'
         run(mesence, rom, HERE / 'lua/dq5warp.lua', run_dir, env)
         require((run_dir / 'scene.mss').is_file(), f'{name}/{mode}: 장면 세이브가 없음')
         env = environment(libdir, run_dir / 'scene.mss', run_dir)
@@ -366,7 +454,8 @@ def entry_compare(name, original, out, mesence, libdir, start):
         wram[mode] = (run_dir / 'before.wram').read_bytes()
         address, value = bits.split('|')
         require(wram[mode][int(address, 16)] & int(value, 16), f'{name}/{mode}: 미리 켠 비트가 꺼짐')
-    words = opened_tiles(wram['original'], wram['patched'])
+    # 선실 크기(16×32)의 맵은 BG 버퍼가 7E:C000~ 이다(36/00 에서 상자를 열 때 7E:C235 등이 9E·9F 로 바뀜)
+    words = opened_tiles(wram['original'], wram['patched'], (0xC000, 0x10000) if name.startswith('new_') else (0x10000, 0x20000))
     require(words >= 2, f'{name}: 패치 롬이 열린 상자를 그리지 않음(바뀐 타일 {words}개)')
     return {'case': name, 'bits': bits, 'opened_tile_words': words, 'passed': True}
 
@@ -472,6 +561,8 @@ def main():
             (out / 'audit.json').write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
             return 0
         cases = list(dict.fromkeys(args.case or ALL))
+        if any(name.startswith('new_') for name in cases):
+            build_newmap(original, out)
         scenes = sorted({scene(name) for name in cases if name in CASES and name not in OWN_SCENE} - {START})
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
             futures = {name: pool.submit(prepare, name, original, state, out, mesence, libdir)

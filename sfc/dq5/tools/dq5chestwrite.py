@@ -14,18 +14,22 @@ JSON format=dq5chest/1. chests[{index,reward}], chest_maps[{index,group,map,coun
 search/foot/ahead/lower[{index,group,map,x,y,reward,flag_index,mask}]. foot만 layer를 받는다.
 field[{index:0,x,y,width,height,reward,flag_index,mask}]: 필드 8픽셀 칸, x·y 짝수, 크기 2×2 고정.
 모든 수치는 JSON 정수, reward는 원본 16비트 부호다. index 외 필드는 생략할 수 있다.
+원래 롬에 없는 맵(dq5newmap.py 로 더하는 맵)에 항목을 옮길 때는 patch·check 에 --new-map GG/MM 과 그 맵을 더하는
+패치 목록 --with-patch 를 준다(dq5chestreloc.py 와 같은 뜻).
 """
 import argparse
 import json
 import sys
 from pathlib import Path
 
+from dq5build import PatchError, build, load
 from dq5chest import (AHEAD_TABLE, CHEST_ITEMS, CHEST_MAPS, FOOT_TABLE, LOWER_TABLE,
                       SEARCH_TABLE, chests)
 from dq5field import block_number, rle
 from dq5fieldwrite import loader_sites
 from dq5gfx import map_ids
 from dq5map import Rom, lorom, map_pointer
+from dq5palsetwrite import new_map
 
 FORMAT = 'dq5chest/1'
 TABLES = {'chests': (CHEST_ITEMS, 161, 2), 'chest_maps': (CHEST_MAPS, 83, 3),
@@ -205,15 +209,66 @@ def dump(rom, field=True):
     return doc
 
 
-def validate_tables(rom, doc, check_cells=False):
-    available = set(map_ids(rom))
+def map_dimensions(rom, group, map_number):
+    addr = map_pointer(rom, group, map_number)
+    return tuple(read(rom, addr + 1, 2))
+
+
+class NewMaps:
+    """--new-map 으로 알린 원래 롬에 없는 맵과, 그 맵을 읽을 롬. 새 맵 레코드는 다른 도구(dq5newmap.py)의 패치가 쓰므로
+    그 패치 목록(--with-patch)을 원래 롬에 붙여 빌드한 롬에서 크기·상자 칸을 읽는다. 상자 도구의 패치도 그 목록과
+    한 빌드로 합쳐 보아(merged) 겹침을 거부한다."""
+
+    def __init__(self, rom, keys=(), patches=()):
+        keys, patches = list(keys), list(patches)
+        self.keys, self.lists, self.view = set(keys), [], rom
+        if len(self.keys) != len(keys):
+            raise ValueError('--new-map 에 같은 맵을 두 번 적음')
+        if bool(keys) != bool(patches):
+            raise ValueError('--new-map 과 그 맵을 더하는 패치 목록 --with-patch 는 함께 줌')
+        if not keys:
+            return
+        known = set(map_ids(rom))
+        for bc, bd in sorted(self.keys):
+            label = f'--new-map {bc:02X}/{bd:02X}'
+            if bc >= 0x50:
+                raise ValueError(f'{label}: 그룹 50 미만만 받음')
+            if (bc, bd) in known:
+                raise ValueError(f'{label}: 이미 롬에 있는 맵(원래 롬에 없는 맵만 알림)')
+        try:
+            self.lists = [load(str(path)) for path in patches]
+        except (KeyError, ValueError, PatchError) as error:
+            raise ValueError(f'--with-patch: {error}') from None
+        self.view = self.merged(rom, [], 0)
+        missing = sorted(self.keys - set(map_ids(self.view)))
+        if missing:
+            raise ValueError(f'--new-map {missing[0][0]:02X}/{missing[0][1]:02X}: --with-patch 를 붙인 롬에도 없는 맵')
+
+    def rom_for(self, rom, key):
+        return self.view if key in self.keys else rom
+
+    def merged(self, rom, lists, mb):
+        """원래 롬에 --with-patch 목록과 lists([(이름, 롬 크기 MB, [(파일 위치, 바이트, orig, 설명)])])를 함께 빌드한 롬."""
+        lists = self.lists + list(lists)
+        mb = max([mb, *(size for _, size, _ in lists)])
+        try:
+            return Rom(build(rom.d, lists, mb)[0])
+        except PatchError as error:
+            raise ValueError(f'--with-patch 와 한 빌드로 합치지 못함: {error}') from None
+
+
+NO_NEW_MAPS = NewMaps(None)
+
+
+def validate_tables(rom, doc, check_cells=False, new_maps=NO_NEW_MAPS):
+    available = set(map_ids(rom)) | new_maps.keys
     for name in TABLES.keys() - {'chests'}:
         seen = set()
         for row in doc[name]:
             if (row['group'], row['map']) not in available:
-                raise ValueError(f'{name} {row["index"]}: 존재하지 않는 맵')
+                raise ValueError(f'{name} {row["index"]}: 존재하지 않는 맵(새 맵은 --new-map 으로 알림)')
             if name == 'chest_maps' and row['group'] >= 0x50:
-                raise ValueError('chest_maps: 일반 실내 맵 그룹 00~35만 지원함')
+                raise ValueError('chest_maps: 일반 실내 맵(그룹 50 미만)만 지원함')
             key = (row['group'], row['map'])
             if name != 'chest_maps':
                 key += (row['x'], row['y'])
@@ -230,18 +285,13 @@ def validate_tables(rom, doc, check_cells=False):
     if check_cells:
         start = 0
         for row in doc['chest_maps']:
-            cells = chests(rom, row['group'], row['map'], start)
+            cells = chests(new_maps.rom_for(rom, (row['group'], row['map'])), row['group'], row['map'], start)
             if len(cells) != row['count']:
                 raise ValueError(f'chest_maps {row["index"]}: 맵 상자 셀 {len(cells)}개와 count가 다름')
             start += row['count']
 
 
-def map_dimensions(rom, group, map_number):
-    addr = map_pointer(rom, group, map_number)
-    return tuple(read(rom, addr + 1, 2))
-
-
-def edits(rom, doc):
+def edits(rom, doc, new_maps=NO_NEW_MAPS):
     fields(doc, {'format', *SECTIONS}, '문서')
     if doc.get('format') != FORMAT:
         raise ValueError(f'format={FORMAT}이 필요함')
@@ -268,12 +318,12 @@ def edits(rom, doc):
             map_changed |= name == 'chest_maps' and new != old
             out.append((addr, new, old, f'{name} {i}'))
     out += field_edits(rom, doc.get('field', []))
-    validate_tables(rom, current, map_changed)
+    validate_tables(rom, current, map_changed, new_maps)
     dimensions = {}
     for row in positions:
         key = row['group'], row['map']
         if key not in dimensions:
-            dimensions[key] = map_dimensions(rom, *key)
+            dimensions[key] = map_dimensions(new_maps.rom_for(rom, key), *key)
         width, height = dimensions[key]
         if row['x'] >= width or row['y'] >= height:
             raise ValueError(f'좌표가 맵 {width}×{height} 밖')
@@ -303,28 +353,35 @@ def field_edits(rom, rows):
     return out
 
 
-def patch(rom, doc):
+def patch(rom, doc, new_maps=NO_NEW_MAPS):
+    rows = [row for row in edits(rom, doc, new_maps) if row[1] != row[2]]
+    if new_maps.keys:
+        new_maps.merged(rom, [('chest-rewards', 0, [(lorom(addr), data, old, note) for addr, data, old, note in rows])], 0)
     return {'format': 'dq5patch/1', 'name': 'chest-rewards', 'writes': [
-        {'at': f'{addr >> 16:02X}:{addr & 0xFFFF:04X}', 'hex': new.hex(' '), 'orig': old.hex(' '), 'note': note}
-        for addr, new, old, note in edits(rom, doc) if new != old]}
+        {'at': f'{addr >> 16:02X}:{addr & 0xFFFF:04X}', 'hex': data.hex(' '), 'orig': old.hex(' '), 'note': note}
+        for addr, data, old, note in rows]}
 
 
-def check(rom, doc=None):
+def check(rom, doc=None, new_maps=NO_NEW_MAPS):
     source = dump(rom) if doc is None else doc
-    rows = edits(rom, source)
+    rows = edits(rom, source, new_maps)
     data = bytearray(rom.d)
-    for addr, new, _, _ in rows:
-        data[lorom(addr):lorom(addr) + len(new)] = new
-    result = dump(Rom(data), 'field' in source)
+    for addr, value, _, _ in rows:
+        data[lorom(addr):lorom(addr) + len(value)] = value
+    # 새 맵은 --with-patch 와 함께 빌드한 롬에만 있으므로, 그 롬을 다시 읽는다
+    built = new_maps.merged(rom, [('chest-rewards', 0, [(lorom(a), v, o, n) for a, v, o, n in rows if v != o])], 0) \
+        if new_maps.keys else Rom(data)
+    result = dump(built, 'field' in source)
     for name in SECTIONS:
         for row in source.get(name, []):
             if any(result[name][row['index']][key] != value for key, value in row.items()):
                 raise ValueError(f'{name}: 쓴 뒤 읽은 값이 다름')
-    validate_tables(Rom(data), result, True)
+    validate_tables(built, result, True)
     if doc is None and data != rom.d:
         raise ValueError('원본을 다시 쓴 바이트가 다름')
     print(f'고정 항목 {sum(t[1] for t in TABLES.values())}개, '
-          f'{sum(t[1] * t[2] for t in TABLES.values())}바이트와 필드 조사 1곳; 다시 읽기 일치, 맵 83개 상자 수 일치')
+          f'{sum(t[1] * t[2] for t in TABLES.values())}바이트와 필드 조사 1곳; 다시 읽기 일치, '
+          f'맵 {len(result["chest_maps"])}개 상자 수 일치' + (f', 새 맵 {len(new_maps.keys)}개' if new_maps.keys else ''))
 
 
 def main():
@@ -338,16 +395,22 @@ def main():
     w.add_argument('-o', '--out', type=Path, required=True)
     c = subs.add_parser('check')
     c.add_argument('source', type=Path, nargs='?')
+    for sub in (w, c):
+        sub.add_argument('--new-map', action='append', default=[], type=new_map,
+                         help='dq5newmap.py 로 함께 더하는 새 맵 GG/MM(여럿이면 되풀이)')
+        sub.add_argument('--with-patch', action='append', default=[], type=Path,
+                         help='새 맵을 더하는 패치 목록(dq5patch/1). 새 맵을 이 목록들을 붙인 롬에서 읽음')
     args = p.parse_args()
     try:
         rom = Rom(args.rom.read_bytes())
         doc = json.loads(args.source.read_text(encoding='utf-8')) if getattr(args, 'source', None) else None
         if getattr(args, 'source', None):
             fields(doc, {'format', *SECTIONS}, '문서')
+        new_maps = NewMaps(rom, getattr(args, 'new_map', []), getattr(args, 'with_patch', []))
         if args.command == 'check':
-            check(rom, doc)
+            check(rom, doc, new_maps)
         else:
-            result = dump(rom) if args.command == 'dump' else patch(rom, doc)
+            result = dump(rom) if args.command == 'dump' else patch(rom, doc, new_maps)
             args.out.parent.mkdir(parents=True, exist_ok=True)
             args.out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
             print(f'{args.command} → {args.out}')

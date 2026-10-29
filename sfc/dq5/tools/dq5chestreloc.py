@@ -18,11 +18,15 @@ sfc/dq5/docs/dq5-build-format.md 의 「보물상자·조사 보상 표 옮기�
 다섯 표의 열림 비트는 모두 7E:2210~224F 안이어야 하고 서로 겹치면 거부한다. 표 밖의 코드가 직접 보는 비트(RESERVED)는
 원래 주인 항목만 쓴다. 발밑·두 칸 앞·아래층 상자는 8비트 색인으로 읽어 행 수 한도(ROW_LIMIT)가 있다.
 게임에서는 상자 192·193·256 을 확인했고, 194~255번은 코드 읽기(12:E691·1F:FDD0·25:FAB0)로만 정했다.
+원래 롬에 없는 맵(dq5newmap.py 로 더하는 맵)은 --new-map GG/MM 으로 알리고, 그 맵을 더하는 패치 목록을 --with-patch 로 준다.
+그 맵의 크기와 상자 칸은 원래 롬에 그 패치들을 붙여 만든 롬에서 읽고, patch 는 그 패치들과 한 빌드로 겹치지 않는지 보며,
+check 는 그 패치들과 함께 빌드한 롬을 다시 읽는다.
 
   python sfc/dq5/tools/dq5chestreloc.py rom/dq5.sfc dump -o work/chest-tables.json
   python sfc/dq5/tools/dq5chestreloc.py rom/dq5.sfc patch work/chest-tables.json -o work/chest-tables.dq5patch.json \\
       [--chests-at BB:AAAA] [--chest-maps-at …] [--search-at …] [--foot-at …] [--ahead-at …] [--lower-at …]
   python sfc/dq5/tools/dq5chestreloc.py rom/dq5.sfc check [work/chest-tables.json] [같은 자리 선택]
+  새 맵: patch·check 에 --new-map 36/00 … --with-patch work/newmap.dq5patch.json …
 """
 import argparse
 import json
@@ -30,11 +34,12 @@ import re
 import sys
 from pathlib import Path
 
-from dq5build import BANK, ORIGINAL_SIZE, build, free_ranges, parse_at
+from dq5build import BANK, FREE_MARGIN, ORIGINAL_SIZE, free_ranges, parse_at
 from dq5chest import AHEAD_TABLE, CHEST_ITEMS, CHEST_MAPS, FOOT_TABLE, LOWER_TABLE, SEARCH_TABLE, chests
-from dq5chestwrite import decode, encode, integer, map_dimensions
+from dq5chestwrite import NO_NEW_MAPS, NewMaps, decode, encode, integer, map_dimensions
 from dq5gfx import map_ids
 from dq5map import Rom, lorom
+from dq5palsetwrite import new_map
 
 FORMAT = 'dq5chesttables/1'
 ORIGINAL = {'chests': CHEST_ITEMS, 'chest_maps': CHEST_MAPS, 'search': SEARCH_TABLE, 'foot': FOOT_TABLE,
@@ -150,11 +155,11 @@ def row_encode(name, row, label):
     return bytes(out)
 
 
-def serialize(rom, doc):
+def serialize(rom, doc, new_maps=NO_NEW_MAPS):
     """문서 → 표 이름별 바이트. 표에 든 맵·좌표·상자 수를 검사한다."""
     if not isinstance(doc, dict) or set(doc) != {'format', *ORIGINAL} or doc['format'] != FORMAT:
         raise ValueError(f'format={FORMAT} 과 표 여섯 {list(ORIGINAL)}을 모두 적어야 함')
-    available = set(map_ids(rom))
+    available = set(map_ids(rom)) | new_maps.keys
     blobs, dimensions = {}, {}
     for name in ORIGINAL:
         rows, limit = doc[name], MAX_CHESTS if name == 'chests' else MAX_ROWS
@@ -169,12 +174,12 @@ def serialize(rom, doc):
                 continue
             key = (row['group'], row['map'])
             if key not in available:
-                raise ValueError(f'{name}[{i}]: 존재하지 않는 맵')
+                raise ValueError(f'{name}[{i}]: 존재하지 않는 맵(새 맵은 --new-map 으로 알림)')
             if name == 'chest_maps' and row['group'] >= 0x50:
-                raise ValueError(f'{name}[{i}]: 일반 실내 맵 그룹 00~35만 지원함')
+                raise ValueError(f'{name}[{i}]: 일반 실내 맵(그룹 50 미만)만 지원함')
             if name != 'chest_maps':
                 if key not in dimensions:
-                    dimensions[key] = map_dimensions(rom, *key)
+                    dimensions[key] = map_dimensions(new_maps.rom_for(rom, key), *key)
                 width, height = dimensions[key]
                 if row['x'] >= width or row['y'] >= height:
                     raise ValueError(f'{name}[{i}]: 좌표가 맵 {width}×{height} 밖')
@@ -221,10 +226,11 @@ def flag_bits(doc):
     return owner
 
 
-def check_cells(rom, doc):
+def check_cells(rom, doc, new_maps=NO_NEW_MAPS):
     start = 0
     for i, row in enumerate(doc['chest_maps']):
-        cells = chests(rom, row['group'], row['map'], start)
+        key = (row['group'], row['map'])
+        cells = chests(new_maps.rom_for(rom, key), *key, start)
         if len(cells) != row['count']:
             raise ValueError(f'chest_maps[{i}]: 맵 상자 셀 {len(cells)}개와 count 가 다름')
         start += row['count']
@@ -242,8 +248,31 @@ def allowed(original):
         start = (off // BANK) << 16 | 0x8000 | off % BANK
         free.append((start, start + size))
     out = [*original_spans().values(), *free]
-    out += [(bank << 16 | 0x8000, bank + 1 << 16) for bank in range(ORIGINAL_SIZE // BANK, 0x7E)]
+    for bank in range(ORIGINAL_SIZE // BANK, 0x7E):
+        # 이미 늘린 롬(dq5newmap.py 등을 붙여 만든 롬)이면 뱅크 끝의 0 줄만 빈 자리로 본다. 첫 8바이트는 늘릴 때의 표지
+        chunk = bytearray(original[bank * BANK:(bank + 1) * BANK])
+        if chunk[:8] == b'DQ5X' + bank.to_bytes(4, 'little'):
+            chunk[:8] = bytes(8)
+        used = len(chunk.rstrip(b'\0'))
+        first = (used + FREE_MARGIN + 15) & ~15 if used else 0
+        if first < BANK:
+            out.append(((bank << 16) + 0x8000 + first, (bank + 1) << 16))
     return merge(out)
+
+
+def unused(data, start, end):
+    """늘린 자리(파일 위치 start~end)에 아직 아무것도 쓰지 않았는지. 원래 크기 롬이면 늘 비어 있고, 이미 늘린 롬이면
+    0 이 아닌 바이트가 없어야 한다(뱅크 첫 8바이트 표지는 뺌)."""
+    for off in range(start, min(end, len(data))):
+        bank = off - off % BANK
+        if data[off] and not (off - bank < 8 and data[bank:bank + 4] == b'DQ5X'):
+            return False
+    return start >= ORIGINAL_SIZE
+
+
+def rom_mb(rom):
+    """이미 늘린 롬의 크기(MB). 만드는 패치의 rom_size 가 이보다 작으면 빌더가 롬을 줄이려 한다."""
+    return len(rom.d) // 0x100000 if len(rom.d) > ORIGINAL_SIZE else 0
 
 
 def merge(spans):
@@ -285,13 +314,13 @@ def rom_size(addresses):
     return 0 if top < 0x30 else 2 if top < 0x40 else 3 if top < 0x60 else 4
 
 
-def writes_for(rom, doc, at=None):
+def writes_for(rom, doc, at=None, new_maps=NO_NEW_MAPS):
     """문서와 자리 → [(CPU 주소, 새 바이트, 원래 바이트 또는 None, 설명)] 과 롬 크기(MB)."""
     # orig 는 원래 롬 바이트여야 빌더가 붙일 수 있으므로, 이미 옮긴 롬에는 쓰지 않는다
     if locate(rom) != ORIGINAL:
         raise ValueError('표를 옮긴 롬에는 패치를 만들지 않음. 원래 롬에서 만든다')
-    blobs = serialize(rom, doc)
-    check_cells(rom, doc)
+    blobs = serialize(rom, doc, new_maps)
+    check_cells(rom, doc, new_maps)
     at = placement(rom, {name: len(blob) for name, blob in blobs.items()}, at or {}, {})
     data = [(at[name], blobs[name], f'{name} 표') for name in ORIGINAL]
     code = []
@@ -319,11 +348,13 @@ def writes_for(rom, doc, at=None):
                 cursor = max(cursor, last)
         out += gaps
         out.sort()
-    return out, rom_size([a for a, _, _, _ in out] or [0])
+    return out, max(rom_size([a for a, _, _, _ in out] or [0]), rom_mb(rom))
 
 
-def patch(rom, doc, at=None):
-    writes, mb = writes_for(rom, doc, at)
+def patch(rom, doc, at=None, new_maps=NO_NEW_MAPS):
+    writes, mb = writes_for(rom, doc, at, new_maps)
+    if new_maps.keys:
+        new_maps.merged(rom, [('chest-tables', mb, [(lorom(a), n, o, note) for a, n, o, note in writes])], mb)
     result = {'format': 'dq5patch/1', 'name': 'chest-tables', 'writes': [
         {'at': cpu(addr), 'hex': new.hex(' '), **({'orig': old.hex(' ')} if old is not None else {}), 'note': note}
         for addr, new, old, note in writes]}
@@ -332,7 +363,7 @@ def patch(rom, doc, at=None):
     return result
 
 
-def check(rom, doc=None, at=None):
+def check(rom, doc=None, at=None, new_maps=NO_NEW_MAPS):
     if locate(rom) != ORIGINAL:
         raise ValueError('check 는 원래 롬에서 돌린다')
     original = parse(rom)
@@ -341,11 +372,11 @@ def check(rom, doc=None, at=None):
     if patch(rom, original)['writes']:
         raise ValueError('원본을 다시 직렬화한 결과가 원래 바이트와 다름')
     source = original if doc is None else doc
-    manifest = patch(rom, source, at)
+    manifest = patch(rom, source, at, new_maps)
     writes = [(lorom(int(w['at'][:2], 16) << 16 | int(w['at'][3:], 16)), bytes.fromhex(w['hex']),
                bytes.fromhex(w['orig']) if 'orig' in w else None, w['note']) for w in manifest['writes']]
-    built, _ = build(rom.d, [('chest-tables', manifest.get('rom_size', 0), writes)], manifest.get('rom_size', 0))
-    moved = Rom(built)
+    # 새 맵은 --with-patch 와 함께 빌드한 롬에만 있으므로, 그 롬에서 다시 읽는다
+    moved = new_maps.merged(rom, [('chest-tables', manifest.get('rom_size', 0), writes)], manifest.get('rom_size', 0))
     loc = locate(moved)
     if parse(moved, loc) != json.loads(json.dumps(source)):
         raise ValueError('만든 롬을 코드가 가리키는 자리에서 다시 읽은 결과가 입력과 다름')
@@ -354,7 +385,8 @@ def check(rom, doc=None, at=None):
         raise ValueError('만든 롬의 표 바이트가 입력을 다시 직렬화한 것과 다름')
     counts = ', '.join(f'{name} {len(source[name])}' for name in ORIGINAL)
     print(f'{counts}; 표 자리 {", ".join(f"{k} {cpu(v)}" for k, v in loc.items())}; '
-          f'쓰기 {len(writes)}개, 롬 {manifest.get("rom_size") or 1.5}MB 검사 통과')
+          f'쓰기 {len(writes)}개, 롬 {manifest.get("rom_size") or 1.5}MB'
+          + (f', 새 맵 {len(new_maps.keys)}개를 --with-patch {len(new_maps.lists)}개와 함께 빌드해' if new_maps.keys else '') + ' 검사 통과')
 
 
 def address(text):
@@ -382,15 +414,20 @@ def main():
         for name in ORIGINAL:
             p.add_argument(f'--{name.replace("_", "-")}-at', dest=f'{name}_at', type=address,
                            help=f'기본 지금 자리(원래 {cpu(ORIGINAL[name])})')
+        p.add_argument('--new-map', action='append', default=[], type=new_map,
+                       help='dq5newmap.py 로 함께 더하는 새 맵 GG/MM(여럿이면 되풀이)')
+        p.add_argument('--with-patch', action='append', default=[], type=Path,
+                       help='새 맵을 더하는 패치 목록(dq5patch/1). 새 맵을 이 목록들을 붙인 롬에서 읽음')
     args = parser.parse_args()
     try:
         rom = Rom(args.rom.read_bytes())
         at = {k: getattr(args, f'{k}_at', None) for k in ORIGINAL}
         doc = json.loads(args.source.read_text(encoding='utf-8')) if getattr(args, 'source', None) else None
+        new_maps = NewMaps(rom, getattr(args, 'new_map', []), getattr(args, 'with_patch', []))
         if args.command == 'check':
-            check(rom, doc, at)
+            check(rom, doc, at, new_maps)
         else:
-            result = parse(rom) if args.command == 'dump' else patch(rom, doc, at)
+            result = parse(rom) if args.command == 'dump' else patch(rom, doc, at, new_maps)
             args.out.parent.mkdir(parents=True, exist_ok=True)
             args.out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
             print(f'{args.command} → {args.out}')
