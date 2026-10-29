@@ -8,6 +8,7 @@ from unittest.mock import patch as mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import dq5picturegrow as pg
+import dq5sprite as S
 from dq5map import Rom, lorom
 
 
@@ -20,8 +21,10 @@ def rom():
     for at in pg.READERS:
         put(at, [0xBF, 0xD0, 0x86, 0x25])
     put(pg.HOOK, pg.HOOK_ORIG)
-    for s in range(pg.SET_COUNT):
-        put(pg.SETS + s * 2, [0xFF, 0xFF] if 0x70 <= s < 0x80 else [0x00, 0x10])
+    for s in range(S.SET_COUNT):
+        put(S.SET_POINTERS + s * 2, [0xFF, 0xFF] if 0x70 <= s < 0x80 else [0x00, 0x10])
+    for site in S.SET_TABLE_SITES:
+        put(site, S.SET_POINTERS.to_bytes(3, 'little'))
     put(pg.TABLE, [g % 0x60 for g in range(pg.COUNT)])
     put(pg.TALK_READER, [0xBF, 0x2F, 0x86, 0x05])
     put(pg.TALK_LIST, [0x46, 0x47, 0x12, 0xFE, 0xFF])
@@ -117,6 +120,25 @@ class PictureGrowTests(unittest.TestCase):
             data[lorom(at)] = value
             with self.subTest(at=hex(at)), self.assertRaises(ValueError):
                 pg.dump(Rom(bytes(data)))
+
+    def test_valid_sets_follow_moved_table(self):
+        # dq5spritewrite.py --sets-at 으로 옮긴 표(여기서는 3B:8000, A5 만 채움)를 읽는다.
+        data = bytearray(rom().d)
+        data.extend(bytes(0x200000 - len(data)))
+        moved = bytearray(b'\xff' * 0x200)
+        moved[0xA5 * 2:0xA5 * 2 + 2] = b'\x00\x82'
+        data[lorom(0x3B8000):lorom(0x3B8000) + 0x200] = moved
+        for site in S.SET_TABLE_SITES:
+            data[lorom(site):lorom(site) + 3] = (0x3B8000).to_bytes(3, 'little')
+        self.assertEqual(pg.valid_sets(Rom(bytes(data))), {0xA5})
+        self.assertIn(0x04, pg.valid_sets(rom()))
+
+    def test_grown_new_sets_need_moved_table(self):
+        # 표를 옮기지 않은 롬에서 A5~FF 는 같은 빌드에 --sets-at 패치가 있다고 밝힐 때만 받는다.
+        r = rom()
+        with self.assertRaises(ValueError):
+            pg.patch(r, doc({'picture': 'A9', 'set': 'A5'}), 0x0BFBB0, new_sets=[0xA5])
+        self.assertTrue(pg.patch(r, doc({'picture': 'A9', 'set': 'A5'}), 0x0BFBB0, new_sets=[0xA5], sets_grown=True)['writes'])
 
     def test_check_through_builder(self):
         r = rom()

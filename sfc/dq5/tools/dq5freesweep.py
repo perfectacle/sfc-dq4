@@ -5,6 +5,7 @@
   battles  몬스터 236종마다 첫 필드 이벤트 전투(BATTLE=XX:1)를 붙여 A 를 눌러 싸우기
   field    필드 세계 0·1·2 에서 걷기
 결과는 OUT/<종류>/<이름>/free.txt 와 OUT/summary.txt(읽힌 곳만). MESENCE 가 있어야 한다.
+--ranges 7EAD4A-7EADFF 처럼 주면 빈 자리 지도 대신 그 범위를, --access read,write 면 그 접근을 감시한다.
 
   python sfc/dq5/tools/dq5freesweep.py rom/dq5.sfc work/state/ship.mss work/freesweep --kinds maps,battles,field
 """
@@ -51,9 +52,11 @@ def main():
     ap.add_argument('out')
     ap.add_argument('--kinds', default='maps,battles,field')
     ap.add_argument('--jobs', type=int, default=8)
+    ap.add_argument('--ranges', help='감시할 CPU 주소 범위(쉼표로 구분, 예: 7EAD4A-7EADFF). 기본은 빈 자리 지도')
+    ap.add_argument('--access', default='read,exec', help='감시할 접근(read·write·exec)')
     a = ap.parse_args()
     rom = Rom(open(a.rom, 'rb').read())
-    free = ','.join(f'{cpu(o).replace(":", "")}-{cpu(o + n - 1).replace(":", "")}' for o, n in free_ranges(rom.d))
+    free = a.ranges or ','.join(f'{cpu(o).replace(":", "")}-{cpu(o + n - 1).replace(":", "")}' for o, n in free_ranges(rom.d))
     krlua = subprocess.run(['krpatch', 'sfc', 'lua'], capture_output=True, text=True, check=True).stdout.strip()
     lib = os.path.abspath(os.path.join(a.out, 'warplib'))
     os.makedirs(lib, exist_ok=True)
@@ -68,7 +71,7 @@ def main():
         kind, name, env = job
         d = os.path.abspath(os.path.join(a.out, kind, name))
         os.makedirs(d, exist_ok=True)
-        e = dict(os.environ, LIBDIR=lib, STATE=os.path.abspath(a.state), SHOT_DIR=d, FREE=free, **env)
+        e = dict(os.environ, LIBDIR=lib, STATE=os.path.abspath(a.state), SHOT_DIR=d, FREE=free, ACCESS=a.access, **env)
         subprocess.run([mesen, '--testrunner', os.path.abspath(a.rom), PROBE], env=e,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
         path = os.path.join(d, 'free.txt')

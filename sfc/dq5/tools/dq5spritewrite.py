@@ -14,10 +14,13 @@
 문서(dq5sprite/1):
   {"format": "dq5sprite/1",
    "sets": [{"set": "84", "image": "84.png", "palette": 0}],          # 기존 세트 그림 바꾸기(palette 는 생략 가능)
-   "new_sets": [{"set": "70", "image": "70.png", "palette": 1}],      # 빈 세트 번호 70~7F(6타일)에 새 레코드
+   "new_sets": [{"set": "70", "image": "70.png", "palette": 1}],      # 빈 세트 번호 70~7F(6타일), --sets-at 이면 A5~FF(8타일)에도
    "gfx": [{"gfx": "2B", "set": "70"}]}                               # 그림 번호 → 세트(25:86D0)
 image 는 문서 파일 기준 상대 경로. 세트의 타일 수는 그 세트를 쓰는 그림 번호들이 원래 가리키던 세트의 타일 수를
 넘을 수 없다(인물마다 VRAM 을 타일 수만큼 잡는다, 1F:CF1E). 압축 자료가 원래 자리보다 크면 --at 부터 차례로 놓는다.
+--sets-at BB:AAAA 를 주면 세트 포인터 표를 256칸으로 늘려 그 자리에 두고, 모든 세트 레코드를 표 뒤로 옮긴다
+(레코드 포인터가 16비트라 표와 레코드는 한 뱅크). 표를 읽는 세 곳의 주소와 레코드 뱅크 세 곳을 고친다(dq5sprite.SET_TABLE_SITES).
+이미 표를 옮긴 롬은 기존 세트를 옮긴 레코드 자리에서 고치고, 새 세트를 더할 때는 --sets-at 으로 표를 새 자리에 다시 놓는다.
 """
 import argparse
 import json
@@ -35,6 +38,7 @@ from dq5map import Rom, lorom  # noqa: E402
 FORMAT = 'dq5sprite/1'
 RECORD_SIZE = 52
 FREE_SETS = range(0x70, 0x80)          # 1F:D63D 포인터가 FFFF 인 번호. 6타일 배치만 된다(set & 80 으로 배치를 고름)
+TABLE_SIZE = 0x200
 RECORD_AREA = (0x1FFE30, 0x200000)     # 뱅크 1F 끝 빈 자리(dq5build.py free). 레코드 포인터는 뱅크 1F 의 16비트
 SIMPLE_SIZE, OVERLAP_SIZE = (32, 96), (48, 64)
 
@@ -55,7 +59,7 @@ def address(value):
     bank, low = (int(p, 16) for p in value.split(':'))
     # 레코드 +2 의 아래 6비트가 뱅크다.
     if bank > 0x3F or low < 0x8000:
-        raise ValueError('타일 자료 주소는 뱅크 00~3F 의 8000~FFFF 여야 함')
+        raise ValueError('주소는 뱅크 00~3F 의 8000~FFFF 여야 함')
     return bank << 16 | low
 
 
@@ -221,8 +225,8 @@ def original_tiles_by_gfx(rom):
             if S.set_record(rom, S.gfx_set(rom, g)) is not None}
 
 
-def plan(rom, doc, base):
-    """{세트: (칸, 타일, 팔레트, 새 세트인지)}, {그림: 세트}."""
+def plan(rom, doc, base, grown=False):
+    """{세트: (칸, 타일, 팔레트, 새 세트인지)}, {그림: 세트}. grown 이면 A5~FF 도 새 세트로 받는다."""
     if not isinstance(doc, dict) or doc.keys() - {'format', 'sets', 'new_sets', 'gfx'} or doc.get('format') != FORMAT:
         raise ValueError(f'문서는 format={FORMAT}, sets·new_sets·gfx 만 담은 객체여야 함')
     sets = {}
@@ -235,9 +239,9 @@ def plan(rom, doc, base):
             if not isinstance(row, dict) or row.keys() - {'set', 'image', 'palette'} or not {'set', 'image'} <= row.keys():
                 raise ValueError(f'{label}: set·image(와 palette)만 받음')
             s = hexbyte(row['set'], f'{label}.set')
-            rec = S.set_record(rom, s) if s < S.SET_COUNT else None
-            if new and s not in FREE_SETS:
-                raise ValueError(f'{label}: 새 세트는 70~7F(6타일)만 됨')
+            rec = S.set_record(rom, s) if s in S.set_numbers(rom) else None
+            if new and s not in FREE_SETS and not (grown and s in S.GROWN_SETS):
+                raise ValueError(f'{label}: 새 세트는 70~7F(6타일), --sets-at 을 주면 A5~FF(8타일)도 됨')
             if new and rec is not None:
                 raise ValueError(f'{label}: 세트 {s:02X}는 이미 있음')
             if not new and rec is None:
@@ -264,7 +268,7 @@ def plan(rom, doc, base):
             raise ValueError(f'gfx[{i}]: 그림 번호 {g:02X}는 00~A8 이고 한 번만 지정함')
         if g == 0x9A:
             raise ValueError(f'gfx[{i}]: 그림 9A 는 1F:CF32 가 2F·97 칸을 대신 읽어 바꿔도 쓰이지 않음')
-        if s >= S.SET_COUNT or (S.set_record(rom, s) is None and s not in sets):
+        if s not in sets and (s not in S.set_numbers(rom) or S.set_record(rom, s) is None):
             raise ValueError(f'gfx[{i}]: 세트 {s:02X}가 없음')
         mapping[g] = s
     limit = original_tiles_by_gfx(rom)
@@ -279,9 +283,12 @@ def plan(rom, doc, base):
     return sets, mapping
 
 
-def patch(rom, doc, base=Path('.'), at=None, records_at=RECORD_AREA[0]):
-    sets, mapping = plan(rom, doc, base)
-    writes, cursor, record_cursor = [], at, records_at
+def patch(rom, doc, base=Path('.'), at=None, records_at=RECORD_AREA[0], sets_at=None):
+    sets, mapping = plan(rom, doc, base, grown=sets_at is not None)
+    # 표를 옮긴 롬의 1F:D63D 와 1F:FE30 은 엔진이 더 읽지 않는다. 새 레코드는 표와 함께 다시 놓아야 한다.
+    if sets_at is None and S.set_table(rom)[0] != S.SET_POINTERS and any(new for *_, new in sets.values()):
+        raise ValueError('세트 포인터 표를 옮긴 롬에 새 세트를 더하려면 --sets-at 으로 표와 레코드를 다시 놓아야 함')
+    writes, cursor, record_cursor, records = [], at, records_at, {}
 
     def write(addr, data, note, orig=True):
         item = {'at': cpu(addr), 'hex': data.hex(' '), 'note': note}
@@ -310,7 +317,9 @@ def patch(rom, doc, base=Path('.'), at=None, records_at=RECORD_AREA[0]):
             # 옮긴 자료는 orig 없이 쓴다. 원래 롬 안이면 빌더가 빈 자리 지도 밖을 거부한다.
             write(piece_at, data, f'세트 {s:02X} 타일 {len(tiles)}개 자료', orig=in_place)
         record = bytes([data_at & 0xFF, data_at >> 8 & 0xFF, data_at >> 16 | palette << 6]) + bytes(refs) + bytes([len(tiles)])
-        if rec is not None:
+        if sets_at is not None:
+            records[s] = record
+        elif rec is not None:
             write(rec['record'], record, f'세트 {s:02X} 레코드')
         else:
             if record_cursor + RECORD_SIZE > RECORD_AREA[1] or record_cursor >> 16 != 0x1F:
@@ -318,10 +327,58 @@ def patch(rom, doc, base=Path('.'), at=None, records_at=RECORD_AREA[0]):
             write(record_cursor, record, f'새 세트 {s:02X} 레코드', orig=False)
             write(S.SET_POINTERS + s * 2, (record_cursor & 0xFFFF).to_bytes(2, 'little'), f'세트 {s:02X} 레코드 포인터')
             record_cursor += RECORD_SIZE
+    if at is not None and cursor > at:
+        refuse_live(rom, at, cursor, '--at 에 옮긴 타일 자료')
+    if sets_at is not None:
+        writes += grow_table(rom, records, sets_at, at, cursor)
+        refuse_live(rom, sets_at, sets_at + TABLE_SIZE + RECORD_SIZE * len(records), '--sets-at 의 표와 레코드')
     for g, s in sorted(mapping.items()):
         if S.gfx_set(rom, g) != s:
             write(S.GFX_SETS + g, bytes([s]), f'그림 {g:02X} → 세트 {s:02X}')
     return {'format': 'dq5patch/1', 'name': 'sprite-sets', 'writes': writes}
+
+
+def live_ranges(rom):
+    """[(시작, 끝, 설명)]. 지금 롬에서 엔진이 읽는 세트 포인터 표·레코드와 모든 세트의 압축 타일 자료(CPU 주소)."""
+    table, _, entries = S.set_table(rom)
+    out = [(table, table + entries * 2, '세트 포인터 표')]
+    for s in S.set_numbers(rom):
+        if (rec := S.set_record(rom, s)) is not None:
+            out.append((rec['record'], rec['record'] + RECORD_SIZE, f'세트 {s:02X} 레코드'))
+            out.append((rec['data'], S.set_tiles(rom, rec)[1], f'세트 {s:02X} 타일 자료'))
+    return out
+
+
+def refuse_live(rom, start, end, what):
+    """새로 쓰는 [start, end) 가 지금 쓰이는 세트 자료를 덮으면 거부한다. 표를 옮긴 롬을 다시 고칠 때 옛 --at·--sets-at 을 또 주는 실수를 막는다."""
+    for a, b, name in live_ranges(rom):
+        if a < end and start < b:
+            raise ValueError(f'{what}({cpu(start)}~{cpu(end - 1)})가 지금 쓰이는 {name}({cpu(a)}~{cpu(b - 1)})와 겹침')
+
+
+def grow_table(rom, records, sets_at, at, cursor):
+    """256칸 포인터 표와 모든 세트 레코드(바꾸지 않은 것은 원래 바이트)를 sets_at 에 두고 읽는 곳을 고치는 쓰기."""
+    table, bank, entries = S.set_table(rom)
+    for s in range(entries):
+        if s not in records and (rec := S.set_record(rom, s)) is not None:
+            records[s] = bytes(rom.d[lorom(rec['record']):lorom(rec['record']) + RECORD_SIZE])
+    end = sets_at + TABLE_SIZE + RECORD_SIZE * len(records)
+    if end > (sets_at | 0xFFFF) + 1:
+        raise ValueError(f'세트 표와 레코드 {len(records)}개({end - sets_at}바이트)가 --sets-at 뱅크를 넘음')
+    if at is not None and cursor > at and sets_at < cursor and at < end:
+        raise ValueError(f'--sets-at {cpu(sets_at)}~{cpu(end - 1)} 이 --at 에 옮긴 타일 자료({cpu(at)}~{cpu(cursor - 1)})와 겹침')
+    pointers, body = bytearray(b'\xff' * TABLE_SIZE), bytearray()
+    for s in sorted(records):
+        pointers[s * 2:s * 2 + 2] = ((sets_at + TABLE_SIZE + len(body)) & 0xFFFF).to_bytes(2, 'little')
+        body += records[s]
+    out = [{'at': cpu(sets_at), 'hex': bytes(pointers).hex(' '), 'note': '세트 포인터 표 256칸'},
+           {'at': cpu(sets_at + TABLE_SIZE), 'hex': bytes(body).hex(' '), 'note': f'세트 레코드 {len(records)}개'}]
+    for site in S.SET_TABLE_SITES:
+        out.append({'at': cpu(site), 'hex': sets_at.to_bytes(3, 'little').hex(' '), 'note': '세트 포인터 표 주소',
+                    'orig': table.to_bytes(3, 'little').hex(' ')})
+    for site in S.SET_BANK_SITES:
+        out.append({'at': cpu(site), 'hex': f'{sets_at >> 16:02x}', 'note': '세트 레코드 뱅크', 'orig': f'{bank:02x}'})
+    return out
 
 
 def apply(rom, manifest):
@@ -332,13 +389,13 @@ def apply(rom, manifest):
     return Rom(data)
 
 
-def check(rom, doc=None, base=Path('.'), at=None, workdir=None, records_at=RECORD_AREA[0]):
+def check(rom, doc=None, base=Path('.'), at=None, workdir=None, records_at=RECORD_AREA[0], sets_at=None):
     """원본 세트 147개를 PNG 로 내보내 다시 인코딩해도 모든 모양이 같은지, 원본 문서가 쓰기 0개인지 본다.
     doc 를 주면 빌드한 롬에서 바꾼 세트가 입력 그림대로 풀리고 나머지 세트는 그대로인지 본다."""
     import tempfile
     folder = Path(workdir or tempfile.mkdtemp(prefix='dq5sprite-'))
     rows, shapes, sizes, crossing = [], 0, [], []
-    for s in range(S.SET_COUNT):
+    for s in S.set_numbers(rom):
         rec = S.set_record(rom, s)
         if rec is None:
             continue
@@ -364,10 +421,10 @@ def check(rom, doc=None, base=Path('.'), at=None, workdir=None, records_at=RECOR
           f'다시 압축해 모두 원래 자리 안(뱅크를 넘는 세트 {" ".join(crossing) or "없음"})')
     if doc is None:
         return
-    manifest = patch(rom, doc, base, at, records_at)
+    manifest = patch(rom, doc, base, at, records_at, sets_at)
     built = apply(rom, manifest)
-    sets, mapping = plan(rom, doc, base)
-    for s in range(S.SET_COUNT):
+    sets, mapping = plan(rom, doc, base, grown=sets_at is not None)
+    for s in S.set_numbers(built):
         after = S.decode_set(built, s)
         if s in sets:
             refs, tiles, palette, _ = sets[s]
@@ -400,10 +457,12 @@ def main():
     write.add_argument('-o', '--out', type=Path, required=True)
     write.add_argument('--at', help='원래 자리에 들어가지 않는 압축 자료를 놓을 곳(BB:AAAA, 뱅크 00~3F)')
     write.add_argument('--records-at', default='1F:FE30', help='새 세트 레코드를 놓을 곳(뱅크 1F 빈 자리)')
+    write.add_argument('--sets-at', help='세트 포인터 표(256칸)와 모든 레코드를 옮길 곳(BB:AAAA). 새 세트 A5~FF 에 필요')
     verify = sub.add_parser('check')
     verify.add_argument('source', type=Path, nargs='?')
     verify.add_argument('--at')
     verify.add_argument('--records-at', default='1F:FE30')
+    verify.add_argument('--sets-at')
     args = parser.parse_args()
     try:
         rom = Rom(args.rom.read_bytes())
@@ -417,10 +476,11 @@ def main():
         records_at = int(args.records_at.replace(':', ''), 16) if re.fullmatch(r'1[Ff]:[0-9A-Fa-f]{4}', args.records_at) else None
         if records_at is None or not RECORD_AREA[0] <= records_at < RECORD_AREA[1]:
             raise ValueError('--records-at 은 1F:FE30~1F:FFFF 안이어야 함')
+        sets_at = address(args.sets_at) if args.sets_at else None
         if args.command == 'check':
-            check(rom, doc, base, at, records_at=records_at)
+            check(rom, doc, base, at, records_at=records_at, sets_at=sets_at)
             return 0
-        manifest = patch(rom, doc, base, at, records_at)
+        manifest = patch(rom, doc, base, at, records_at, sets_at)
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(manifest, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
         print(f'patch → {args.out} (쓰기 {len(manifest["writes"])}개)')

@@ -21,7 +21,6 @@ FORMAT = 'dq5pictures/1'
 TABLE, COUNT = 0x2586D0, 0xA9
 # 그림 표를 읽는 LDA long,X 두 곳(롬 전체에서 25:86D0 을 24비트 피연산자로 읽는 곳은 이 둘뿐).
 READERS = (0x1FCF45, 0x03D202)
-SETS, SET_COUNT = 0x1FD63D, 0xA3
 HOOK = 0x1EDC67
 HOOK_ORIG = bytes.fromhex('a5 0a c9 84 f0 14')
 # 1E:DC67 의 원래 판정: 그림이 84·78·7F, A2 이상, 46~48 이면 물체.
@@ -86,8 +85,16 @@ def set_tiles(rom, s):
     return None if record is None else record['tiles']
 
 
+def set_table_grown(rom):
+    from dq5sprite import SET_POINTERS, set_table
+    return set_table(rom)[0] != SET_POINTERS
+
+
 def valid_sets(rom):
-    return {s for s in range(SET_COUNT) if int.from_bytes(read(rom, SETS + s * 2, 2), 'little') != 0xFFFF}
+    """포인터가 FFFF 가 아닌 세트. dq5spritewrite.py --sets-at 으로 옮긴 표면 그 표를 읽는다."""
+    from dq5sprite import set_numbers, set_table
+    table = set_table(rom)[0]
+    return {s for s in set_numbers(rom) if int.from_bytes(read(rom, table + s * 2, 2), 'little') != 0xFFFF}
 
 
 def layout(rom):
@@ -124,7 +131,11 @@ def dump(rom):
          'object': (flags[g] != 0) if flags else g in ORIGINAL_OBJECTS, 'talk_skip': g in skip} for g in range(count)]}
 
 
-def patch(rom, doc, at, new_sets=()):
+def patch(rom, doc, at, new_sets=(), sets_grown=False):
+    # A5~FF 는 dq5spritewrite.py --sets-at 이 표를 옮겨야 생긴다. 같은 빌드에 그 패치가 있는지 빌더가 알 수 없으므로
+    # 표를 옮기지 않은 롬에서는 sets_grown 으로 밝힌 때만 받는다.
+    require(sets_grown or set_table_grown(rom) or all(s < 0xA5 for s in new_sets),
+            '--new-sets A5~FF 는 표를 옮긴 롬이거나, 같은 빌드에 dq5spritewrite.py --sets-at 패치를 넣을 때(--sets-grown)만 받음')
     require(isinstance(doc, dict) and set(doc) <= {'format', 'table', 'pictures'} and doc.get('format') == FORMAT,
             'format/pictures 가 잘못됨')
     rows = doc.get('pictures', [])
@@ -133,7 +144,7 @@ def patch(rom, doc, at, new_sets=()):
     current = {int(p['picture'], 16): p for p in before['pictures']}
     # 그림 번호마다 원래 세트의 타일 수. 1F:CF1E 가 세트 타일 수만큼 VRAM 을 잡으므로 넘지 못하게 한다.
     limit = {g: set_tiles(rom, int(p['set'], 16)) for g, p in current.items()}
-    # dq5spritewrite.py 가 같은 빌드에서 새로 채우는 세트(70~7F)는 --new-sets 로 받는다.
+    # dq5spritewrite.py 가 같은 빌드에서 새로 채우는 세트(70~7F, 표를 늘리면 A5~FF)는 --new-sets 로 받는다.
     sets = valid_sets(rom) | set(new_sets)
     seen = set()
     for row in rows:
@@ -191,16 +202,16 @@ def patch(rom, doc, at, new_sets=()):
     return out
 
 
-def check(rom, doc, at, new_sets=()):
+def check(rom, doc, at, new_sets=(), sets_grown=False):
     from dq5build import build, parse_at
     source = dump(rom) if doc is None else doc
-    result = patch(rom, source, at, new_sets)
+    result = patch(rom, source, at, new_sets, sets_grown)
     lists = [('pictures', result.get('rom_size', 0), [
         (parse_at(w['at'])[0], bytes.fromhex(w['hex']), bytes.fromhex(w['orig']) if 'orig' in w else None, w['note'])
         for w in result['writes']])]
     rebuilt, _ = build(rom.d, lists, result.get('rom_size', 0))
     after = Rom(rebuilt)
-    again_writes = [w for w in patch(after, source, at, new_sets)['writes'] if 'orig' in w]
+    again_writes = [w for w in patch(after, source, at, new_sets, sets_grown)['writes'] if 'orig' in w]
     require(not again_writes, '빌더 적용 후 같은 입력을 다시 패치하면 쓰기가 남음')
     again = dump(after)
     require(again['table'] == text(at + ROUTINE_SIZE), '빌드한 롬의 그림 표 자리가 다름')
@@ -224,7 +235,7 @@ def patch_rows(rom, doc):
 
 def sets_arg(value):
     out = [hexbyte(v.strip(), '--new-sets') for v in value.split(',') if v.strip()]
-    require(all(0x70 <= v <= 0x7F for v in out), '--new-sets 는 70~7F')
+    require(all(0x70 <= v <= 0x7F or v >= 0xA5 for v in out), '--new-sets 는 70~7F 와 A5~FF(dq5spritewrite.py --sets-at)')
     return out
 
 
@@ -240,14 +251,16 @@ def main():
         if name == 'patch':
             p.add_argument('-o', '--out', type=Path)
         p.add_argument('--new-sets', default='', help='같은 빌드에서 dq5spritewrite.py 가 더하는 세트 번호(16진, 쉼표)')
+        p.add_argument('--sets-grown', action='store_true', help='같은 빌드에 dq5spritewrite.py --sets-at 패치가 있음(--new-sets A5~FF)')
     args = parser.parse_args()
     try:
         rom = Rom(args.rom.read_bytes())
         doc = json.loads(args.source.read_text(encoding='utf-8')) if getattr(args, 'source', None) else None
         if args.command == 'check':
-            check(rom, doc, address(args.at, '--at'), sets_arg(args.new_sets))
+            check(rom, doc, address(args.at, '--at'), sets_arg(args.new_sets), args.sets_grown)
             return 0
-        out = dump(rom) if args.command == 'dump' else patch(rom, doc, address(args.at, '--at'), sets_arg(args.new_sets))
+        out = dump(rom) if args.command == 'dump' else patch(rom, doc, address(args.at, '--at'), sets_arg(args.new_sets),
+                                                             args.sets_grown)
         body = json.dumps(out, ensure_ascii=False, indent=2) + '\n'
         if args.out:
             args.out.parent.mkdir(parents=True, exist_ok=True)
