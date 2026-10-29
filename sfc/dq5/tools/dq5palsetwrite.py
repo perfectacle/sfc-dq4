@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 
 from dq5build import PatchError, build
-from dq5map import HIGH_GROUPS, PALSET_LISTS, PALSET_TABLE, Rom, group_spans, lorom, palset_table
+from dq5map import PALSET_LISTS, PALSET_TABLE, Rom, group_spans, lorom, palset_table
 
 FORMAT = 'dq5palset/1'
 HIGH_FIRST = 0x50
@@ -224,7 +224,7 @@ def writes_for(rom, doc, table_at=None, new_maps=()):
         raise ValueError(f'{cpu(LOADER)}: 원래 팔레트 세트 찾기 명령이 아님')
     groups, size = parse_table(rom, PALSET_TABLE)
     if size != ORIGINAL_SIZE:
-        raise ValueError(f'원래 팔레트 세트 표 크기가 {ORIGINAL_SIZE}바이트가 아님({size})')
+        raise ValueError(f'원래 팔레트 세트 표 크기가 {ORIGINAL_SIZE}바이트가 아님({size}). 제자리로 고친 롬도 원본에서 다시 만듦')
     edits = group_rows(doc, known_maps(rom, new_maps), set_count(rom), original_keys(groups))
     out = [(bc, *edits.pop(bc)) if bc in edits else (bc, default, maps) for bc, default, maps in groups]
     out += [(bc, *edits[bc]) for bc in sorted(edits)]

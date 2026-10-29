@@ -289,6 +289,9 @@ def edits(rom, doc, entrances_at=None, new_maps=()):
                 if value != raw and arrival_at != GROUP_ARRIVAL:
                     raise ValueError(f'그룹 {key:02X} 도착: 도착 표를 옮긴 롬은 dq5newmap.py 의 groups[].entrance 로 고침'
                                      '(같은 자리를 두 도구가 쓰지 않게)')
+                # 새 그룹을 더하는 빌드는 dq5newmap.py 가 원래 표를 새 자리로 복사하므로, 원래 자리에 쓴 값은 읽히지 않는다.
+                if value != raw and groups > arrival_count:
+                    raise ValueError(f'그룹 {key:02X} 도착: 새 그룹을 더하는 빌드에서는 dq5newmap groups[].entrance 로 고침')
                 out.append((addr, value, raw, f'그룹 {key:02X} 도착'))
             if key in seen:
                 raise ValueError(f'{section}: 중복 항목 {key}')

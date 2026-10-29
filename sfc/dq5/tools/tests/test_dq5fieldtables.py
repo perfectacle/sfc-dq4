@@ -170,6 +170,12 @@ class NewGroupTest(unittest.TestCase):
     def test_new_group_numbers_must_follow_last_group(self):
         doc = document(entrances=[{'table': 'aux', 'index': 0, 'group': 0x37}])
         self.assertEqual(patch(self.rom, document(), new_maps=[(0x50, 0x52)])['writes'], [])
+        # 새 그룹을 더하는 빌드에서 원래 자리의 도착을 바꾸면 dq5newmap.py 가 옮긴 표에 묻혀 사라지므로 거부한다.
+        moved = document(arrivals=[{'group': 1, 'x': 9}])
+        self.assertTrue(patch(self.rom, moved)['writes'])
+        with self.assertRaises(ValueError):
+            patch(self.rom, moved, new_maps=[(0x36, 0)])
+        self.assertEqual(patch(self.rom, dump(self.rom), new_maps=[(0x36, 0)])['writes'], [])
         for maps in ([(0x37, 0)], [(0x36, 0), (0x38, 0)], [(0x4F, 0)]):
             with self.subTest(maps=maps), self.assertRaises(ValueError):
                 patch(self.rom, doc, new_maps=maps)
