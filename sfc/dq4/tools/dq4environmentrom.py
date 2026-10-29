@@ -385,20 +385,21 @@ def engine_code(block_count, water_ids, palettes, entries, waters):
                                  0x54, 0x7E, GFX_BANK)
     lib.label("pal_done").b(*_LEAVE, 0x6B)
 
-    # obj (01:F42D): Y = the target's object entries, then the replaced LDX #$0009.
-    lib.label("obj").b(0x08, 0xC2, 0x30, 0x48, 0xDA).long(0x22, "find").rel(0x90, "obj_keep")
-    lib.long(0xBF, "objects").b(0xA8)
-    lib.label("obj_keep").b(0xC2, 0x30, 0xFA, 0x68, 0x28, 0xA2, 0x09, 0x00, 0x6B)
+    # obj (01:F42D): Y = the target's object entries, then the replaced LDX #$0009. find's SEP #$30
+    # clears the high byte of Y, so Y is saved and the hit overwrites the saved copy (STA $01,S).
+    lib.label("obj").b(*_ENTER).long(0x22, "find").rel(0x90, "obj_keep")
+    lib.long(0xBF, "objects").b(0x83, 0x01)
+    lib.label("obj_keep").b(*_LEAVE, 0xA2, 0x09, 0x00, 0x6B)
 
     # wrap (calls of 15:F7D0): after the original choice, a replaced map with water runs the water
     # routine. Without water its CHR have no slot (7E:6000 reads 0), and the routine would write
     # them over slot 0, the blank tile that fills BG1.
-    lib.label("wrap").b(0x22, 0xD0, 0xF7, 0x15, 0x08, 0xC2, 0x30, 0x48, 0xDA).long(0x22, "find")
+    lib.label("wrap").b(0x22, 0xD0, 0xF7, 0x15, *_ENTER).long(0x22, "find")
     lib.rel(0x90, "wrap_out").long(0xBF, "waters").rel(0xF0, "wrap_out").b(0xC2, 0x20).word(0xA9, "water").b(0x8F, 0xA6, 0x1A, 0x7E, 0xE2, 0x20)
     lib.b(0xA9, LIB_AT >> 16, 0x8F, 0xA8, 0x1A, 0x7E, 0xA9, 0x00)
     for counter in (0x1ECE, 0x1ECF, 0x1EC2, 0x1EC3):
         lib.b(0x8F, counter & 0xFF, counter >> 8, 0x7E)
-    lib.label("wrap_out").b(0xC2, 0x30, 0xFA, 0x68, 0x28, 0x6B)
+    lib.label("wrap_out").b(*_LEAVE, 0x6B)
 
     # water: every WATER_PERIOD frames queue the next water frame's four CHR on the NMI DMA list
     # (00:8F53: VRAM word 1C1C+2i, bytes 1C26+2i, source 1C0D+3i, count $BA) that 03:D4B5 uses.
