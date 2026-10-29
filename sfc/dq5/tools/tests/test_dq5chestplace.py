@@ -17,6 +17,10 @@ def doc(*boxes, map_name='01/02'):
         {'x': x, 'y': y, 'block': block, 'reward': reward} for x, y, block, reward in boxes]}]}
 
 
+def furniture(x, y, **change):
+    return {'x': x, 'y': y, 'block': 204, 'reward': 0x3FD, 'flag_index': 0x0B, 'mask': 2} | change
+
+
 class ChestPlaceTests(unittest.TestCase):
     def test_map_key(self):
         self.assertEqual(map_key('1d/03', 'm'), (0x1D, 3))
@@ -68,6 +72,40 @@ class ChestPlaceTests(unittest.TestCase):
             bad = {'format': FORMAT, 'maps': [{'map': '01/02', 'furniture': [value['maps'][0]['furniture'][0] | change]}]}
             with self.subTest(change=change), self.assertRaises(ValueError):
                 plan(rom, bad, 0x3E8000, {'search': 0x3F9000})
+
+    @unittest.skipUnless(ROM.is_file(), '롬 없음')
+    def test_chest_and_two_furniture_in_one_map(self):
+        rom = Rom(ROM.read_bytes())
+        value = {'format': FORMAT, 'maps': [{'map': '01/02', 'chests': [{'x': 36, 'y': 26, 'block': CHEST_BLOCK,
+                                                                         'reward': 0x4BA}],
+                                             'furniture': [furniture(40, 24), furniture(30, 18, mask=4)]}]}
+        at = {'chests': 0x3F8000, 'search': 0x3F9000}
+        _, _, _, tables, new = plan(rom, value, 0x3E8000, at)
+        self.assertEqual(new, [(1, 2, (37, 27), 0x4BA)])
+        self.assertEqual([(r['x'], r['y'], r['mask']) for r in tables['search'][-2:]], [(41, 26, 2), (31, 20, 4)])
+        check(rom, value, 0x3E8000, at)
+
+    @unittest.skipUnless(ROM.is_file(), '롬 없음')
+    def test_rejects_furniture(self):
+        rom = Rom(ROM.read_bytes())
+        at = {'search': 0x3F9000, 'chests': 0x3F8000, 'chest_maps': 0x1EEE4E}
+
+        def one(*rows, map_name='01/02'):
+            return {'format': FORMAT, 'maps': [{'map': map_name, 'furniture': list(rows)}]}
+
+        bad = [
+            (one(furniture(3, 3), map_name='17/00'), at),            # 기존 서랍 (4,4) 를 덮음
+            ({'format': FORMAT, 'maps': [{'map': '17/00', 'chests': [{'x': 3, 'y': 3, 'block': CHEST_BLOCK,
+                                                                      'reward': 1}]}]}, at),  # 상자가 (4,4) 를 덮음
+            (one(furniture(40, 24), furniture(40, 24, mask=4)), at),  # 같은 칸에 두 번
+            (one(furniture(40, 24)), {}),                             # 늘어난 서랍 표가 원래 자리에 들지 않음
+            (one(furniture(40, 24, unused=256)), at),
+            (one(furniture(40, 24, unused='1')), at),
+            (one(furniture(40, 24, flag_index=0x14, mask=1)), at),   # 7E:2240 은 발밑 표의 비트
+        ]
+        for value, places in bad:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                plan(rom, value, 0x3E8000, places)
 
     @unittest.skipUnless(ROM.is_file(), '롬 없음')
     def test_rejects(self):

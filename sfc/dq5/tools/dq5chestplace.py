@@ -29,9 +29,12 @@ from dq5mapcompile import block_sizes, cell_buffer, compile_places, extract
 from dq5mapwrite import all_maps, encode, pointer_addr, to_cpu
 
 FORMAT = 'dq5chestplace/1'
-# 서랍 표 86항목이 놓인 칸의 속성. タンス 는 아래층(+4) 93, ツボ·タル 는 위층(+7) A7·B9 였다. D3·D4 는 12:E4C9 가
-# 같은 조사로 보는 속성(코드 읽기)이다. 블록 오른쪽 아래 칸의 +4 bit7 이 붙은 값이다
-FURNITURE = {0x93, 0xA7, 0xB9, 0xD3, 0xD4}
+# 서랍 표 86항목이 놓인 칸의 속성. タンス 는 아래층(+4) 93, ツボ·タル 는 위층(+7) A7·B9 였다. D3·D4 는 위층에만 있는
+# タル·ツボ 칸으로, 게임에서 149·135 메시지를 확인했다(dq5-map-format.md)
+LOWER_FURNITURE = {0x93}
+UPPER_FURNITURE = {0xA7, 0xB9, 0xD3, 0xD4}
+# 서랍 열림 비트는 7E:222C + flag_index. 2240 부터는 발밑 표의 비트다
+SEARCH_FLAGS = 0x2240 - 0x222C
 BOX_FIELDS = {'x', 'y', 'block', 'reward'}
 FURNITURE_FIELDS = BOX_FIELDS | {'flag_index', 'mask'}
 
@@ -105,7 +108,8 @@ def cell_rewards(rom, tables):
 def furniture_cells(data, bc, bd):
     width = map_dimensions(Rom(data), bc, bd)[0]
     cells, _ = cell_buffer(data, bc, bd)
-    return {(i % width, i // width) for i, cell in enumerate(cells) if cell[4] in FURNITURE or cell[7] in FURNITURE}
+    return {(i % width, i // width) for i, cell in enumerate(cells)
+            if cell[4] in LOWER_FURNITURE or cell[7] in UPPER_FURNITURE}
 
 
 def flag_bits(tables):
@@ -176,12 +180,25 @@ def plan(rom, doc, map_at, at=None):
         elif boxes:
             tables['chest_maps'].append({'group': bc, 'map': bd, 'count': len(after)})
         old_furniture, new_furniture = furniture_cells(rom.d, bc, bd), furniture_cells(middle.d, bc, bd)
+        # 블록이 기존 서랍 항목의 칸을 덮으면 그 항목은 다른 그림 밑의 고아가 된다. 덮은 칸의 아래층 93 은 남을 수
+        # 있어(17/00 (4,4)) 속성만으로는 못 가린다
+        lost = sorted(xy for row in tables['search'] if (row['group'], row['map']) == (bc, bd)
+                      for xy in [(row['x'], row['y'])] if xy in footprint or xy not in new_furniture or xy in after)
+        if lost:
+            raise ValueError(f'{bc:02X}/{bd:02X}: 블록이 기존 서랍 항목의 가구 칸 {lost} 을 덮거나 지움')
+        used = set()
         for k, box in enumerate(furniture):
             width, height = sizes[box['block']]
             new = [xy for xy in new_furniture - old_furniture
                    if box['x'] <= xy[0] < box['x'] + width and box['y'] <= xy[1] < box['y'] + height]
             if len(new) != 1:
                 raise ValueError(f'{bc:02X}/{bd:02X} furniture[{k}]: 블록 안에 새 가구 칸이 {len(new)}개(1개여야 함)')
+            if new[0] in used:
+                raise ValueError(f'{bc:02X}/{bd:02X} furniture[{k}]: 새 가구 칸 {new[0]} 을 다른 항목이 이미 씀')
+            used.add(new[0])
+            if integer(box['flag_index'], 255, 'flag_index') >= SEARCH_FLAGS:
+                raise ValueError(f'{bc:02X}/{bd:02X} furniture[{k}]: flag_index 는 {SEARCH_FLAGS - 1:02X} 이하여야 함'
+                                 f'(7E:222C~223F)')
             row = {'group': bc, 'map': bd, 'x': new[0][0], 'y': new[0][1], 'unused': box.get('unused', 1),
                    'reward': box['reward'], 'flag_index': box['flag_index'], 'mask': box['mask']}
             added.append(row)
@@ -234,9 +251,13 @@ def check(rom, doc, map_at, at=None):
     old = reloc.parse(rom)
     if tables['search'][:len(old['search'])] != old['search']:
         raise ValueError('기존 서랍 표 항목이 바뀜')
-    for row in tables['search'][len(old['search']):]:
-        if (row['x'], row['y']) not in furniture_cells(built.d, row['group'], row['map']):
-            raise ValueError(f'{row["group"]:02X}/{row["map"]:02X} ({row["x"]},{row["y"]}): 만든 롬에서 가구 칸이 아님')
+    open_cells = {}
+    for row in tables['search']:
+        key = (row['group'], row['map'])
+        if key not in open_cells:
+            open_cells[key] = furniture_cells(built.d, *key) - set(chest_cells(built, *key))
+        if (row['x'], row['y']) not in open_cells[key]:
+            raise ValueError(f'{key[0]:02X}/{key[1]:02X} ({row["x"]},{row["y"]}): 만든 롬에서 가구 칸이 아님')
     print(f'상자 {len(old["chests"])} → {len(tables["chests"])}개(놓은 {placed}개), '
           f'서랍 {len(old["search"])} → {len(tables["search"])}개, 맵 {len(doc["maps"])}곳; '
           f'쓰기 {len(writes)}개, 롬 {manifest["rom_size"]}MB 검사 통과')
