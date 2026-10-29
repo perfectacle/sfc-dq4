@@ -276,6 +276,32 @@ class NewMapRomTests(unittest.TestCase):
         new = NewMaps(big, [(0x36, 1)], [second])
         self.assertEqual(len(new.view.d), 0x400000)
 
+    def test_place_furniture_only_on_new_map_in_base(self):
+        # 바탕 표에 상자 연결이 이미 있는 새 맵에 가구만 적으면, 늘린 롬 입력 길과 같이 서랍 표 끝에 붙인다
+        doc = {'format': place.FORMAT, 'maps': [{'map': '36/00', 'furniture': [
+            {'x': 10, 'y': 21, 'reward': 0x204, 'flag_index': 0x0B, 'mask': 0x02}]}]}
+        base = self.tables()
+        _, _, _, tables, new = place.plan(self.rom, doc, None, self.AT, base, self.new)
+        self.assertEqual(new, [])
+        self.assertEqual(tables['chest_maps'], base['chest_maps'])
+        self.assertEqual(tables['search'][-1]['x'], 10)
+        _, _, _, grown, _ = place.plan(self.extended, doc, None, self.AT, base)
+        self.assertEqual(grown, tables)
+        # 상자까지 적으면 전처럼 한 입력에 모두 적으라고 거부한다
+        doc['maps'][0]['chests'] = [{'x': 8, 'y': 17, 'reward': 1}, {'x': 10, 'y': 17, 'reward': 2}]
+        with self.assertRaisesRegex(ValueError, '바탕 표에 이미 상자 연결이'):
+            place.plan(self.rom, doc, None, self.AT, base, self.new)
+
+    def test_place_needs_chest_maps_at_for_new_link(self):
+        doc = {'format': place.FORMAT, 'maps': [{'map': '36/00', 'chests': [
+            {'x': 8, 'y': 17, 'reward': 1}, {'x': 10, 'y': 17, 'reward': 2}]}]}
+        with self.assertRaisesRegex(ValueError, '--chest-maps-at 이 필요'):
+            place.plan(self.rom, doc, None, {'chests': 0x3F8000}, None, self.new)
+        block = {'format': place.FORMAT, 'maps': [{'map': '17/00', 'chests': [
+            {'x': 10, 'y': 4, 'block': 384, 'reward': 1}]}]}
+        with self.assertRaisesRegex(ValueError, '--chest-maps-at 이 필요'):
+            place.plan(self.rom, block, 0x3E8000, {'chests': 0x3F8000})
+
     def test_cli_with_new_map(self):
         tmp = Path(self.tmp.name)
         source = tmp / 'tables.json'

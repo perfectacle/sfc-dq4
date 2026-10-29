@@ -17,8 +17,8 @@ furniture[{x,y,block,reward,flag_index,mask[,unused]}]}]. x·y 는 블록 원점
 원래 롬에 없는 맵(dq5newmap.py 로 더하는 맵)은 --new-map GG/MM 과 그 맵을 더하는 패치 목록 --with-patch 로 알린다.
 그 맵의 레코드는 그 패치가 쓰므로 블록을 놓지 않고, block 없이 x·y 에 레코드에 이미 있는 상자 칸·가구 칸을 적는다.
 기존 맵(새 맵을 이미 붙인 롬의 새 맵 포함)도 모든 항목에 block 을 빼면 같이 적는다. 상자를 적으면 그 맵의 상자 칸을 모두
-적어야 하고(새 맵은 늘), 가구만 적으면 기존 서랍 항목 뒤에 붙인다. 블록을 놓는 맵이 없으면 --map-at 은 주지 않아도 된다. --with-patch 를 주면 기존 맵의 칸·블록도 그 패치를
-붙인 롬에서 읽는다.
+적어야 하고(새 맵은 바탕 표에 상자 연결이 없으면 늘), 가구만 적으면 기존 서랍 항목 뒤에 붙인다. 블록을 놓는 맵이
+없으면 --map-at 은 주지 않아도 된다. --with-patch 를 주면 기존 맵의 칸·블록도 그 패치를 붙인 롬에서 읽는다.
 """
 import argparse
 import json
@@ -251,7 +251,7 @@ def plan(rom, doc, map_at, at=None, base=None, new_maps=NO_NEW_MAPS):
         given = [(box['x'], box['y']) for box in boxes]
         # 상자는 맵 연결 하나에 그 맵의 상자 칸 전부를 셀 순서로 매기므로, 적으면 모두 적는다. 새 맵은 상자 칸이 있으면
         # 늘 적어야 한다. 가구만 적으면 기존 상자 연결·서랍 항목은 그대로 두고 서랍 표 끝에 붙인다
-        if boxes or (bc, bd) in new_maps.keys:
+        if boxes or ((bc, bd) in new_maps.keys and (bc, bd) not in rows):
             if (bc, bd) in rows:
                 raise ValueError(f'{bc:02X}/{bd:02X}: 바탕 표에 이미 상자 연결이 있는 맵. 블록 없이 적는 맵의 상자는 '
                                  '한 입력에 모두 적음')
@@ -276,6 +276,9 @@ def plan(rom, doc, map_at, at=None, base=None, new_maps=NO_NEW_MAPS):
             integer(box['flag_index'], 255, 'flag_index')
             added.append({'group': bc, 'map': bd, 'x': xy[0], 'y': xy[1], 'unused': box.get('unused', 1),
                           'reward': box['reward'], 'flag_index': box['flag_index'], 'mask': box['mask']})
+    # 맵 연결 표는 원래 자리 바로 뒤에 발밑 표가 있어 한 행도 늘 자리가 없다. 자리 겹침 오류보다 먼저 알린다
+    if len(tables['chest_maps']) > len(rows) and not (at or {}).get('chest_maps'):
+        raise ValueError('맵 연결(chest_maps)을 더하므로 --chest-maps-at 이 필요함')
     tables['chests'] = []
     for row in tables['chest_maps']:
         cells = chest_cells(seen, row['group'], row['map'])
