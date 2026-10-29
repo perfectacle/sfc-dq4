@@ -88,6 +88,9 @@ def _message(pages, prefix=()):
     first = max(0, len(prefix[1]) + 1 - 2) if prefix else 0
     for text in pages:
         lines = _wrap(text, first)
+        if prefix and len(lines) > PAGE_LINES:
+            # 쪽을 더 나누면 말하는 이 이름이 다시 붙는데, 그 줄의 너비는 이름 없이 셈했다
+            raise ValueError(f'말하는 이가 있는 쪽은 {PAGE_LINES}줄까지: {text}')
         for k in range(0, len(lines), PAGE_LINES):
             if out:
                 out.append(PAGE)
@@ -148,15 +151,18 @@ T_DAYTIME = talk(say('예전엔 밤에만 나오던/마물이 낮에도 나온�
 T_IMURU = talk(say('저희는 이무르 마을에서/왔습니다.'))
 T_HERB = talk(say('긴 여행이 될 것 같으면/마을에서 약초를/사 가시오.'))
 
-# 성 앞 마을(FC 02/00 → 36/00)
-T_KEY = talk(say('@ 공! 알고 있소?', '잠기지 않은 문도 있어서/열쇠 없이 열 수 있다네!'))
-T_SAFE = talk(say('괴물이라도 마을 안까지는/들어오지 못해요.', '그럼 왜 아이들이/없어지는 걸까요……'))
-T_TAX = talk(say('바트랜드 왕은/사람이 좋아서/이 나라는 세금도 싸지.', '하지만 그만큼/무기나 방어구에도/돈을 못 들이는 거야.',
-                 '더 강한 무기가 필요하면/스스로 돈을 모아/바꿔 사는 게 좋을걸.', '새 무기나 방어구를 사면/다시 장비하는 걸/잊지 말라고!'))
-T_WEST = talk(say('이 성에서 서쪽 동굴을/빠져나가 바닷가를 따라/가면 이무르 마을이에요.'))
-T_GOIMURU = talk(say('이무르 마을에 가면/뭔가 알 수 있을지도/모르겠네요.'))
-T_FLARE = talk(say('저는 프레아./남편 알렉스가 여행을/떠난 채 돌아오지 않아요.', '전사님! 여행길에 혹시/알렉스를 보시거든/알려 주세요!'))
-T_TOWN = talk(say('여기는 바트랜드의/성 아래 마을입니다.'))
+# 성 앞(36/00)은 dq4npcport.py 가 FC 인물을 놓고 일본어 원문을 둔다. 그 가운데 옮긴 것은 FC 메시지 묶음으로 찾아
+# 같은 DQ5 메시지 번호의 글을 한글로 바꾼다.
+FRONT_TEXTS = {
+    (0x78C,): say('@ 공! 알고 있소?', '잠기지 않은 문도 있어서/열쇠 없이 열 수 있다네!'),
+    (0x5E3, 0x5E4): say('괴물이라도 마을 안까지는/들어오지 못해요.', '그럼 왜 아이들이/없어지는 걸까요……'),
+    (0x5E1,): say('바트랜드 왕은/사람이 좋아서/이 나라는 세금도 싸지.', '하지만 그만큼/무기나 방어구에도/돈을 못 들이는 거야.',
+                  '더 강한 무기가 필요하면/스스로 돈을 모아/바꿔 사는 게 좋을걸.', '새 무기나 방어구를 사면/다시 장비하는 걸/잊지 말라고!'),
+    (0x5E2,): say('이 성에서 서쪽 동굴을/빠져나가 바닷가를 따라/가면 이무르 마을이에요.'),
+    (0x5E5,): say('이무르 마을에 가면/뭔가 알 수 있을지도/모르겠네요.'),
+    (0x78D,): say('저는 프레아./남편 알렉스가 여행을/떠난 채 돌아오지 않아요.', '전사님! 여행길에 혹시/알렉스를 보시거든/알려 주세요!'),
+    (0x5E0,): say('여기는 바트랜드의/성 아래 마을입니다.'),
+}
 
 # 그림 번호(dq5sprite.py 시트에서 고름)
 KING, MINISTER, GUARD, WARRIOR, WOMAN, MAID, SCHOLAR, MAN, VILLAGER = 0x14, 0x01, 0x67, 0x08, 0x04, 0x82, 0x09, 0x29, 0x0C
@@ -177,15 +183,6 @@ STAFF = [
     (0x16, 0x09, MAN, 'down', T_DAYTIME),
     (0x1C, 0x11, VILLAGER, 'down', T_IMURU),
     (0x11, 0x12, GUARD, 'down', T_HERB),
-]
-TOWN = [
-    (0x22, 0x24, 0x09, 'down', T_KEY),
-    (0x20, 0x15, 0x04, 'down', T_SAFE),
-    (0x13, 0x17, 0x08, 'down', T_TAX),
-    (0x1D, 0x1D, 0x04, 'down', T_WEST),
-    (0x13, 0x25, 0x0C, 'down', T_GOIMURU),
-    (0x08, 0x23, 0x15, 'down', T_FLARE),
-    (0x06, 0x1C, 0x29, 'down', T_TOWN),
 ]
 KING_AT = (0x10, 0x0D)
 # 연설이 끝나면 전사들이 두 줄로 아래 출구 (0F~10,23)까지 걸어가 빠진다(FC 인물 블록 레코드 12~19 와 같은 길).
@@ -219,7 +216,8 @@ def walk_out(address, path):
         [{"op": "28", "args": []}, {"op": "16", "args": []}]}
 
 
-def npc_doc(records):
+def npc_doc(records, ported=()):
+    """ported: dq4npcport.port 의 인물 목록. 왕좌의 방만 이 연출 배치로 바꾼다."""
     flag, mask = EVENT_FLAG
     staff = [entry(STATIC, x, y, g, f, t) for x, y, g, f, t in STAFF]
     king = entry(STATIC, *KING_AT, KING, 'down', T_KING)
@@ -248,11 +246,9 @@ def npc_doc(records):
     ]
     overrides = [{"map": THRONE, "flag": flag, "when": "on", "mask": mask, "list": "new:after"}] + \
         [{k: o[k] for k in ("map", "flag", "when", "mask", "list")} for o in records["overrides"]]
-    after_list = [{**e, "from": {"list": "05:8E43", "index": 0} if e["from"] is STATIC else e["from"]} for e in after]
     return {"format": "dq5npcrelocate/1", "scripts": scripts,
-            "lists": [{"map": THRONE, "entries": before},
-                      {"map": FRONT, "entries": [entry(STATIC, x, y, g, f, t) for x, y, g, f, t in TOWN]}],
-            "new_lists": [{"name": "after", "entries": after_list}],
+            "lists": [{"map": THRONE, "entries": before}] + [lst for lst in ported if lst["map"] != THRONE],
+            "new_lists": [{"name": "after", "entries": after}],
             "overrides": overrides}
 
 
@@ -266,8 +262,30 @@ def lorom(addr):
     return (addr >> 16 & 0x7F) * 0x8000 + (addr & 0x7FFF)
 
 
-def messages_doc():
-    return {"format": "dq4messages/1", "messages": {f'{m:03X}': parts for m, parts in sorted(TEXTS.items())}}
+def messages(lists, ported_messages, report):
+    """dq4npcport 의 일본어 메시지에 성 앞의 한글과 1장 메시지를 덮은 {번호: 부분 목록}. 왕좌의 방은 이 연출 배치로
+    바꾸므로 그 방 인물만 쓰던 메시지는 뺀다."""
+    used = {e["fields"]["talk"] + 0x3C6 for lst in lists if lst["map"] != THRONE for e in lst["entries"]}
+    out = {m["id"]: m["codes"] for m in ported_messages if m["id"] in used}
+    for person in report.get(FRONT, []):
+        key = tuple(m for m in person["shows"] if m is not None)
+        if key in FRONT_TEXTS:
+            out[int(person["message"], 16)] = FRONT_TEXTS[key]
+    clash = set(out) & set(TEXTS)
+    if clash:
+        raise ValueError(f'dq4npcport 메시지와 겹치는 번호: {sorted(f"{m:03X}" for m in clash)}')
+    return {**out, **TEXTS}
+
+
+def port(dq5, dq4):
+    import dq4npcport
+    return dq4npcport.port(dq5, dq4)
+
+
+def messages_doc(dq5, dq4):
+    lists, ported, report = port(dq5, dq4)
+    found = messages(lists, ported, report)
+    return {"format": "dq4messages/1", "messages": {f'{m:03X}': parts for m, parts in sorted(found.items())}}
 
 
 def apply_writes(data, original, paths):
@@ -308,11 +326,14 @@ def build(rom, dq5, dq4, work):
     import dq4groupbuild
     from dq4environmentrom import GROUPS
     original = dq5.read_bytes()
+    # 원래 롬에서는 새 맵 레코드를 34 에 두지만 통합 롬의 34 는 타이틀 자료다
+    dq4groupbuild.NEWMAP_AT = tuple('3A:8000' if a == '34:8000' else a for a in dq4groupbuild.NEWMAP_AT)
     dq4groupbuild.build(dq5, dq4, work / 'groups')
+    ported, _, _ = port(dq5, dq4)
     new_maps = [a for g, n in sorted(GROUPS.values()) for a in ('--new-map', f'{g:02X}/{n:02X}')]
     run_tool(DQ5_TOOLS / 'dq5npcrecord.py', dq5, 'dump', '-o', work / 'npc-records.json')
     records = json.loads((work / 'npc-records.json').read_text())
-    (work / 'npc.json').write_text(json.dumps(npc_doc(records), ensure_ascii=False, indent=1))
+    (work / 'npc.json').write_text(json.dumps(npc_doc(records, ported), ensure_ascii=False, indent=1))
     run_tool(DQ5_TOOLS / 'dq5npcrelocate.py', dq5, 'patch', work / 'npc.json', *NPC_AT, '--allow-growth', *new_maps,
              '-o', work / 'npc.dq5patch.json')
     out = bytearray(apply_writes(rom, original, [work / 'groups' / p for p in GROUP_PATCHES] +
@@ -330,6 +351,8 @@ def main():
     sub = ap.add_subparsers(dest='cmd', required=True)
     m = sub.add_parser('messages', help='dq4menupatch.py build --messages 에 줄 메시지 JSON')
     m.add_argument('-o', '--out', required=True, type=Path)
+    m.add_argument('--dq5', default='rom/dq5.sfc', type=Path)
+    m.add_argument('--dq4', default='rom/dq4.nes', type=Path)
     b = sub.add_parser('build')
     b.add_argument('--rom', required=True, type=Path, help='dq4menupatch.py build --messages 결과')
     b.add_argument('--dq5', default='rom/dq5.sfc', type=Path)
@@ -339,8 +362,9 @@ def main():
     args = ap.parse_args()
     if args.cmd == 'messages':
         args.out.parent.mkdir(parents=True, exist_ok=True)
-        args.out.write_text(json.dumps(messages_doc(), ensure_ascii=False, indent=1))
-        print(f'{args.out} 메시지 {len(TEXTS)}개')
+        doc = messages_doc(args.dq5, args.dq4)
+        args.out.write_text(json.dumps(doc, ensure_ascii=False, indent=1))
+        print(f'{args.out} 메시지 {len(doc["messages"])}개')
         return
     rom = args.rom.read_bytes()
     if args.keep:

@@ -96,7 +96,15 @@ def widen_tick(rows):
     v = max(range(w // 2, w), key=lambda x: counts[x])
     if counts[v] < 6 or v + 2 >= w:
         return rows
-    return [r[:v + 2] + '#' + r[v + 3:] if r[v + 1] == '#' and r[v + 2] == '.' else r for r in rows]
+    out = list(rows)
+    for y in range(1, len(rows) - 1):
+        r = rows[y]
+        tick = r[v - 1] == '.' and r[v] == '#' and r[v + 1] == '#' and r[v + 2] == '.'
+        alone = rows[y - 1][v + 1] == '.' and rows[y + 1][v + 1] == '.'
+        through = rows[y - 1][v] == '#' and rows[y + 1][v] == '#'
+        if tick and alone and through:
+            out[y] = r[:v + 2] + '#' + r[v + 3:]
+    return out
 
 
 def hangul_rows(font, ch):

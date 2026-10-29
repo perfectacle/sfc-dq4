@@ -28,21 +28,6 @@ sys.path[:0] = [str(HERE), str(ROOT / 'sfc' / 'dq5' / 'tools')]
 from dq4romassets import differences, ips_patch, set_checksum  # noqa: E402
 from dq5map import lorom  # noqa: E402
 
-# 바탕 롬은 dq4overture.py build 결과다. 해시 하나로 묶으면 타이틀을 고칠 때마다 서곡 해시가 바뀌어 빌드가 멈췄으므로,
-# 서곡 스텁(dq4overture.TITLE_STUB)이 있고 메뉴 메시지 자리(dq4menumsg.BASE)가 아직 비어 있는지를 본다.
-OVERTURE_STUB = 0x70FF00
-
-
-def base_problem(rom):
-    """메뉴를 얹을 수 없는 롬이면 까닭, 서곡 빌드면 None."""
-    import dq4menumsg
-    if len(rom) != 0x400000:
-        return f'4MB 가 아님({len(rom):#x})'
-    if not any(rom[lorom(OVERTURE_STUB):lorom(OVERTURE_STUB) + 0x20]):
-        return f'{OVERTURE_STUB:06X} 에 서곡 스텁이 없음(dq4overture.py build 결과가 아님)'
-    if any(rom[lorom(dq4menumsg.BASE):lorom(dq4menumsg.BASE) + 0x100]):
-        return f'{dq4menumsg.BASE:06X} 가 비어 있지 않음(이미 메뉴를 얹은 롬)'
-    return None
 PREFIX = 0x9F               # 창 레코드에 쓰이지 않는 캔버스 타일 번호. 바로 뒤 [열 수][첫 열]
 COLUMNS = 0x100             # 열 k 는 타일 200+k(글자 줄)·300+k(아래 줄)
 LAST_COLUMN = 0xD0          # D0~E7 은 목록 세 이름, F8~FF 는 이름 입력 칸
@@ -396,6 +381,23 @@ def put(data, addr, b, expect=None):
     data[o:o + len(b)] = b
 
 
+# 바탕 롬은 dq4overture.py build 결과다. 서곡 롬의 해시는 타이틀을 고칠 때마다 달라지므로, 서곡이 부르는 스텁
+# (dq4overture.TITLE_STUB, JSL 70:FF00)과 아직 비어 있는 메뉴 메시지 자리(dq4menumsg.BASE)로 본다.
+OVERTURE_STUB = 0x70FF00
+
+
+def base_problem(rom):
+    """메뉴를 얹을 수 없는 롬이면 까닭, 서곡 빌드면 None."""
+    import dq4menumsg
+    if len(rom) != 0x400000:
+        return f'4MB 가 아님({len(rom):#x})'
+    if not any(rom[lorom(OVERTURE_STUB):lorom(OVERTURE_STUB) + 0x20]) or bytes.fromhex('2200ff70') not in rom:
+        return f'{OVERTURE_STUB:06X} 에 서곡 스텁이 없음(dq4overture.py build 결과가 아님)'
+    if any(rom[lorom(dq4menumsg.BASE):lorom(dq4menumsg.BASE) + 0x100]):
+        return f'{dq4menumsg.BASE:06X} 가 비어 있지 않음(이미 메뉴를 얹은 롬)'
+    return None
+
+
 def build(rom, font, jamo_font, message_font=None, messages=None):
     """font = 창 글자, jamo_font = 자모판 한 칸 글자, message_font = 메시지 글자(없으면 galmuri11).
     messages = 더 바꿀 보행 메시지 {번호: 부분 목록}(dq4menumsg.apply 의 extra)."""
@@ -505,11 +507,18 @@ def sheet(atlas, path):
 
 
 def load_messages(path):
+    from dq4menumsg import CHARS
     """dq4messages/1: {"format", "messages": {"16진 번호": [글자열 또는 코드 정수, ...]}}."""
     doc = json.loads(Path(path).read_text())
     if doc.get('format') != 'dq4messages/1':
         raise SystemExit(f'{path}: format 이 dq4messages/1 이 아님')
-    return {int(k, 16): v for k, v in doc['messages'].items()}
+    out = {}
+    for k, parts in doc['messages'].items():
+        bad = [p for p in parts if not isinstance(p, (str, int)) or isinstance(p, str) and set(p) - set(' ') - set(CHARS)]
+        if bad:
+            raise SystemExit(f'{path}: 메시지 {k} 에 넣을 수 없는 부분 {bad[:3]}')
+        out[int(k, 16)] = parts
+    return out
 
 
 def main():
