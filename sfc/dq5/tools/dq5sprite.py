@@ -110,6 +110,9 @@ def set_obj_palette(rom, s, table=None):
     rec = set_record(rom, s)
     table = set_palette_table(rom) if table is None else table
     v = rom.u8(table + s) if table else 0xFF
+    if 8 <= v < 0xFF:
+        # 루틴은 bit7 만 보고 08~7F 를 ASL 해 다른 비트까지 OAM 속성에 넣는다. 그런 표는 이 도구가 쓰지 않는다.
+        raise ValueError(f'세트 팔레트 표 {table >> 16:02X}:{(table + s) & 0xFFFF:04X}: 세트 {s:02X} 값 {v:02X} 는 0~7·FF 가 아님')
     return v if v < 8 else rec['palette']
 
 

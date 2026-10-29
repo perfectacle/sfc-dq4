@@ -45,7 +45,8 @@ SITE_ORIG = bytes.fromhex('a0 02 b7 09 29 c0 4a 4a 4a 4a 4a 85 01')
 # 03:D24D 는 LDY #$0002 / LDA [$00],Y / LSR×5 / STA $08(16비트 X). AND 가 없어 자료 뱅크 bit5 가 OAM 타일 bit8 로 간다.
 SWAP_SITE = 0x03D24D
 SWAP_ORIG = bytes.fromhex('a0 02 00 b7 00 4a 4a 4a 4a 4a 85 08')
-# 03:D202 LDA $2586D0,X. 03:D24D 루틴이 그림 번호($1EC0)를 세트로 바꿀 때 이 표 주소를 그대로 쓴다.
+# 03:D202 LDA $2586D0,X. 03:D24D 루틴은 그림 번호($1EC0)를 세트로 바꿀 때 이 명령의 24비트 피연산자를 실행 중에 읽는다.
+# dq5picturegrow.py 가 그림 표를 옮기면 이 피연산자가 바뀌므로, 어느 순서로 패치해도 같은 표를 본다.
 PICTURE_SITE = 0x03D202
 MAP_LOADER, MAP_ALT = 0x01996A, 0x019954
 MAP_LOADER_SIZE = 0xA8          # 01:996A~9A11
@@ -90,11 +91,18 @@ def set_palettes(rom):
     return {s: S.set_obj_palette(rom, s, table) for s in S.set_numbers(rom) if S.set_record(rom, s) is not None}
 
 
+def pictures(rom):
+    """[(그림 번호, 세트)]. 그림 표 주소·개수는 dq5picturegrow.layout(옮긴 롬이면 늘린 표)."""
+    from dq5picturegrow import layout
+    base, count, _ = layout(rom)
+    return [(g, rom.u8(base + g)) for g in range(count)]
+
+
 def users(rom):
     """팔레트마다 (세트, 그 세트를 쓰는 그림 번호들)."""
     gfx = {}
-    for g in range(S.GFX_COUNT):
-        gfx.setdefault(S.gfx_set(rom, g), []).append(g)
+    for g, s in pictures(rom):
+        gfx.setdefault(s, []).append(g)
     out = {p: [] for p in range(PALETTES)}
     for s, p in set_palettes(rom).items():
         out[p].append({'set': f'{s:02X}', 'gfx': [f'{g:02X}' for g in gfx.get(s, [])]})
@@ -180,11 +188,15 @@ def set_routine(table):
                           '85 01 6b'))                      # 두기: STA $01 / RTL
 
 
-def swap_routine(pictures, table):
-    """03:D24D 가 JSL 로 부르는 루틴(8비트 M, 16비트 X). 그림 번호 $1EC0 을 세트로 바꿔 표를 찾고, FF 면 원래 명령."""
-    wide = bytes.fromhex('c2 20 29 ff 00 aa e2 20')         # REP #$20 / AND #$00FF / TAX / SEP #$20
-    return (bytes.fromhex('da af c0 1e 7e') + wide +          # PHX / LDA $7E1EC0
-            b'\xbf' + pictures.to_bytes(3, 'little') + wide +
+def swap_routine(table):
+    """03:D24D 가 JSL 로 부르는 루틴(8비트 M, 16비트 X). 그림 번호 $1EC0 을 세트로 바꿔 표를 찾고, FF 면 원래 명령.
+    그림 표는 03:D202 의 피연산자(뱅크 → DB, 주소 + 그림 번호 → X)로 찾는다."""
+    operand, bank = PICTURE_SITE + 1, PICTURE_SITE + 3
+    return (bytes.fromhex('da 8b af') + bank.to_bytes(3, 'little') +     # PHX / PHB / LDA 그림 표 뱅크
+            bytes.fromhex('48 ab c2 20 af c0 1e 7e 29 ff 00 18 6f') +    # PHA / PLB / REP #$20 / LDA $7E1EC0 / AND #$00FF / CLC / ADC
+            operand.to_bytes(3, 'little') +                              # 그림 표 주소(16비트)
+            bytes.fromhex('aa e2 20 bd 00 00 ab'                         # TAX / SEP #$20 / LDA $0000,X / PLB
+                          'c2 20 29 ff 00 aa e2 20') +                   # REP #$20 / AND #$00FF / TAX / SEP #$20
             bytes.fromhex('a0 02 00') + b'\xbf' + table.to_bytes(3, 'little') +
             bytes.fromhex('30 03 0a 80 07'                     # BMI 레코드 / ASL / BRA 두기
                           'b7 00 4a 4a 4a 4a 4a'               # 레코드: 원래 명령 그대로
@@ -284,12 +296,14 @@ def edits(rom, doc, at=None):
     blob, notes = b'', []
     if hook:
         swap_at = place + len(set_routine(0))
-        new_table = swap_at + len(swap_routine(0, 0))
+        new_table = swap_at + len(swap_routine(0))
         cells = bytearray([0xFF] * 0x100)
         for s, p in changed.items():
             cells[s] = p
-        blob = set_routine(new_table) + swap_routine(rom.u24(PICTURE_SITE + 1), new_table) + bytes(cells)
+        blob = set_routine(new_table) + swap_routine(new_table) + bytes(cells)
         notes.append(f'세트 팔레트 루틴·표(세트 {len(changed)}개)')
+        if rom.u8(PICTURE_SITE) != 0xBF:
+            raise ValueError(f'{cpu(PICTURE_SITE)}: 그림 표 읽기(LDA long,X)가 아님. 03:D24D 루틴이 이 피연산자를 읽음')
         for site, orig, entry in ((S.SET_PALETTE_SITES[0], SITE_ORIG, place), (S.SET_PALETTE_SITES[1], SITE_ORIG, place),
                                   (SWAP_SITE, SWAP_ORIG, swap_at)):
             if bytes(rom.d[lorom(site):lorom(site) + len(orig)]) != orig:
@@ -319,10 +333,9 @@ def edits(rom, doc, at=None):
 
 
 def patch(rom, doc, at=None):
-    writes, top, record, hooked = [], 0, False, False
+    writes, top, record = [], 0, False
     for addr, new, old, note in edits(rom, doc, at):
         record |= bool(re.match(r'세트 [0-9A-F]{2} 팔레트 .*\d$', note))
-        hooked |= addr == SWAP_SITE
         if new == old:
             continue
         w = {'at': cpu(addr), 'hex': new.hex(' '), 'note': note}
@@ -330,10 +343,6 @@ def patch(rom, doc, at=None):
             w['orig'] = old.hex(' ')
         writes.append(w)
         top = max(top, addr >> 16)
-    if hooked:
-        # 03:D24D 루틴이 그림 번호 표 주소를 품는다. dq5picturegrow.py 가 같은 빌드에서 표를 옮기면 빌더가 이 겹침으로 막는다.
-        raw = bytes(rom.d[lorom(PICTURE_SITE):lorom(PICTURE_SITE) + 4]).hex(' ')
-        writes.append({'at': cpu(PICTURE_SITE), 'hex': raw, 'orig': raw, 'note': '그림 번호 표 읽기(그대로, 03:D24D 루틴이 이 주소를 씀)'})
     if record:
         # 세트 팔레트는 지금 표가 가리키는 레코드에 쓴다. 같은 빌드에서 dq5spritewrite.py --sets-at 이 표와 레코드를
         # 옮기면 이 쓰기는 죽은 레코드에 떨어지므로, 표 주소 피연산자를 그대로 다시 써 빌더가 겹침으로 막게 한다.
@@ -468,9 +477,8 @@ def check(rom, doc=None, at=None):
     # 03:D24D: 그림 번호마다 $08. 표 값이 있으면 팔레트 × 2, 없으면 원래 명령(레코드 +2 >> 5)과 같고 Y 는 2 로 남는다.
     table = S.set_palette_table(moved)
     swaps = 0
-    for g in range(S.GFX_COUNT):
-        s = S.gfx_set(moved, g)
-        rec = S.set_record(moved, s)
+    for g, s in pictures(moved):
+        rec = S.set_record(moved, s) if s in S.set_numbers(moved) else None
         if rec is None:
             continue
         v = moved.u8(table + s) if table else 0xFF

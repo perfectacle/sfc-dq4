@@ -170,14 +170,18 @@ def refs_event(rom):
     return [('event', idx, mask, kind, where, ctx) for idx, mask, kind, where, ctx in dq5event.flag_refs(rom)]
 
 
-# [BC][BD][f][m] 로 시작하는 맵 조건 표: (주소, 항목 크기, 이름, BC 특수값)
-COND_TABLES = ((0x019A12, 0x23, '01:9A12 표', {0xFE: '필드'}),
+# [BC][BD][f][m] 로 시작하는 맵 조건 표: (주소, 항목 크기, 이름, BC 특수값). 주소 None 은 맵 팔레트 줄 표
+# (dq5objpalette.py --at 이 옮기면 옮긴 자리, dq5sprite.map_palette_table).
+COND_TABLES = ((None, 0x23, '01:9A12 표', {0xFE: '필드'}),
                (0x02CAF6, 6, '02:CAF6 표', {0xFE: '필드', 0xFD: '어디서나'}))
 
 
 def refs_tables(rom):
     out = []
     for base, size, name, special in COND_TABLES:
+        if base is None:
+            import dq5sprite
+            base = dq5sprite.map_palette_table(rom)
         a = base
         while rom.u8(a) != 0xFF:
             bc, bd, n, m = (rom.u8(a + i) for i in range(4))

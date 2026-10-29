@@ -131,12 +131,12 @@ class PaletteTests(unittest.TestCase):
             self.assertEqual(writes[site]['hex'], '22 00 80 3b' + ' ea' * 9)
         swap = len(P.set_routine(0))
         self.assertEqual(writes['03:D24D']['hex'][:11], f'22 {swap:02x} 80 3b')
-        # 그림 번호 표 주소를 루틴이 품으므로 그 읽기를 그대로 다시 써 둔다. 레코드는 건드리지 않는다.
-        self.assertEqual(writes['03:D202']['hex'], writes['03:D202']['orig'])
+        # 그림 표는 실행 중에 03:D202 에서 읽으므로 그 자리는 쓰지 않는다(dq5picturegrow 와 한 빌드에 넣을 수 있게). 레코드도 그대로.
+        self.assertNotIn('03:D202', writes)
         self.assertNotIn('1F:D789', writes)
         self.assertNotIn('1F:CFB7', writes)
         blob = bytes.fromhex(writes['3B:8000']['hex'])
-        table = swap + len(P.swap_routine(0, 0))
+        table = swap + len(P.swap_routine(0))
         self.assertEqual(len(blob), table + 0x100)
         self.assertEqual((blob[table + 0x84], blob[table + 0x04], blob[table + 0x85]), (6, 0xFF, 0xFF))
         self.assertNotIn('orig', writes['3B:8000'])
@@ -168,20 +168,35 @@ class PaletteTests(unittest.TestCase):
             self.assertEqual((c.wram[0x01], c.y, c.p & 0x30), (want, 2, 0x30), f'세트 {s:02X}')
 
     def test_swap_routine_runs(self):
+        """그림 표는 실행 중에 03:D202 의 피연산자로 찾는다. 표를 옮기면(dq5picturegrow 를 나중에 넣어도) 새 표를 읽는다."""
         data = bytearray(0x200000)
-        at, pictures, table, record = 0x3B8000, 0x258000, 0x3B9000, 0x0F8000
-        data[lorom(at):lorom(at) + 64] = P.swap_routine(pictures, table)
-        data[lorom(pictures) + 0x29] = 0x84
-        data[lorom(pictures) + 0x2B] = 0x04
+        at, table, record = 0x3B8000, 0x3B9000, 0x0F8000
+        data[lorom(at):lorom(at) + 64] = P.swap_routine(table)
         data[lorom(table) + 0x84] = 7
         data[lorom(table) + 0x04] = 0xFF
+        data[lorom(table) + 0x0A] = 5
         data[lorom(record) + 2] = 0x6F       # 팔레트 1, 뱅크 2F(bit5 가 $08 bit0 으로 가는 원래 명령 그대로)
-        for g, want in ((0x29, 0x0E), (0x2B, 0x03)):
-            c = Cpu(bytes(data), bytearray(0x20000))
-            c.wram[0x1EC0], c.wram[0x1EC1], c.wram[0:3] = g, 0, record.to_bytes(3, 'little')
-            c.p, c.x = 0x20, 0x1234
-            c.jsl(at)
-            self.assertEqual((c.wram[0x08], c.y, c.x), (want, 2, 0x1234), f'그림 {g:02X}')
+        for pictures, cases in ((0x2586D0, ((0x29, 0x84, 0x0E), (0x2B, 0x04, 0x03))),
+                                (0x16FE1F, ((0x18, 0x0A, 0x0A), (0xA9, 0x84, 0x0E), (0x2B, 0x04, 0x03)))):
+            data[lorom(P.PICTURE_SITE):lorom(P.PICTURE_SITE) + 4] = b'\xbf' + pictures.to_bytes(3, 'little')
+            for g, s, _ in cases:
+                data[lorom(pictures) + g] = s
+            for g, s, want in cases:
+                c = Cpu(bytes(data), bytearray(0x20000))
+                c.wram[0x1EC0], c.wram[0x1EC1], c.wram[0:3] = g, 0x55, record.to_bytes(3, 'little')
+                c.p, c.x, c.dbr = 0x20, 0x1234, 0x7E
+                c.jsl(at)
+                self.assertEqual((c.wram[0x08], c.y, c.x, c.dbr), (want, 2, 0x1234, 0x7E),
+                                 f'표 {pictures:06X} 그림 {g:02X}(세트 {s:02X})')
+
+    def test_table_value_range(self):
+        result = patch(self.rom, {'format': FORMAT, 'sets': [{'set': '84', 'palette': 6}]}, '3B:8000')
+        hooked = apply(self.rom, result['writes'])
+        table = S.set_palette_table(hooked)
+        data = bytearray(hooked.d)
+        data[lorom(table + 0x84)] = 0x08
+        with self.assertRaisesRegex(ValueError, '0~7·FF'):
+            S.set_obj_palette(Rom(data), 0x84)
 
     def test_map_lines(self):
         line = [0x111] * 15
@@ -248,6 +263,43 @@ class PaletteTests(unittest.TestCase):
                     else:
                         self.assertIn('OBJ 팔레트 5: 세트 84', stdout.getvalue())
             self.assertIn('3B:8000', [w['at'] for w in json.loads(out.read_text(encoding='utf-8'))['writes']])
+
+
+ROM = Path(__file__).resolve().parents[4] / 'rom' / 'dq5.sfc'
+
+
+class PictureOrderTests(unittest.TestCase):
+    """세트 팔레트 표와 dq5picturegrow 를 어느 순서로, 또는 한 빌드에 넣어도 03:D24D 가 늘린 그림 표의 세트를 본다."""
+
+    @unittest.skipUnless(ROM.is_file(), '롬 없음')
+    def test_orders(self):
+        import dq5picturegrow
+        from dq5build import build, parse_at
+        rom = Rom(ROM.read_bytes())
+        sets = {'format': FORMAT, 'sets': [{'set': '0A', 'palette': 5}, {'set': '84', 'palette': 6}]}
+        pics = {'format': 'dq5pictures/1', 'pictures': [{'picture': '18', 'set': '0A'}, {'picture': 'A9', 'set': '84'}]}
+
+        def make(base, which):
+            if which == 'sets':
+                return patch(base, sets, '3B:8000')
+            return dq5picturegrow.patch(base, pics, 0x16FE10)
+
+        def built(base, *manifests):
+            lists = [(m['name'], m.get('rom_size', 0), [(parse_at(w['at'])[0], bytes.fromhex(w['hex']),
+                                                         bytes.fromhex(w['orig']) if 'orig' in w else None, w['note'])
+                                                        for w in m['writes']]) for m in manifests]
+            mb = max(m.get('rom_size', 0) for m in manifests)
+            return Rom(build(base.d, lists, mb)[0])
+
+        cases = {'sets → pictures': built(built(rom, make(rom, 'sets')), make(built(rom, make(rom, 'sets')), 'pics')),
+                 'pictures → sets': built(built(rom, make(rom, 'pics')), make(built(rom, make(rom, 'pics')), 'sets')),
+                 'one build': built(rom, make(rom, 'sets'), make(rom, 'pics'))}
+        for name, r in cases.items():
+            for g, s, want in ((0x18, 0x0A, 5), (0xA9, 0x84, 6), (0x29, 0x84, 6)):
+                with self.subTest(case=name, picture=g):
+                    self.assertEqual(dict(P.pictures(r))[g], s)
+                    got8, y = P.run_swap(bytes(r.d), g, S.set_record(r, s)['record'])
+                    self.assertEqual((got8, y), (want << 1, 2))
 
 
 if __name__ == '__main__':

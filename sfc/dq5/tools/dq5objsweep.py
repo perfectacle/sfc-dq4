@@ -50,7 +50,7 @@ def look(rom, name, d):
     base = [[rom.u16(S.OBJ_PALETTES + (p * 16 + i) * 2) for i in range(1, 16)] for p in range(8)]
     covered = sorted({e['line'] - 8 for e in S.map_palettes(rom)
                       if 8 <= e['line'] <= 15 and e['bc'] == bc and e['bd'] in (bd, 0xFF)})
-    gfx = got['sets'].split()
+    gfx = got['gfx'].split()
     return {'map': f'{bc:02X}/{bd:02X}', 'frames': int(got['frames']), 'slots': int(got['slots']),
             'sets': sorted({f'{S.gfx_set(rom, int(g, 16)):02X}' for g in gfx}),
             'v1995': int(got['v1995']), 'v1997': int(got['v1997']),
@@ -102,7 +102,8 @@ def main():
     if not done:
         return 1
     top = max(done, key=lambda r: r['slots'])
-    print(f'인물 슬롯 최대 {top["slots"]}({top["map"]}), 세트 종류 최대 {max(len(r["sets"]) for r in done)}')
+    many = max(done, key=lambda r: len(r['sets']))
+    print(f'인물 슬롯 최대 {top["slots"]}({top["map"]}), 맵에 나온 세트 종류(센 프레임 합집합) 최대 {len(many["sets"])}({many["map"]})')
     for p in range(8):
         used = [r['map'] for r in done if p in r['oam']]
         lines = [r['map'] for r in done if p in r['map_lines']]
