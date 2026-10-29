@@ -222,6 +222,29 @@ class FieldPatchTests(unittest.TestCase):
             fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x348000)
 
 
+    def test_world_drawing_uses_world_nibbles(self):
+        import dq5gfx
+        nib1 = list(self.doc['tile_palettes'])
+        nib1[1] ^= 1
+        self.doc['worlds'] = {'world1': {'tiles_file': 'tiles.bin', 'tile_palettes': nib1}}
+        d = bytearray(self.apply(fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x348000)).d)
+        put(d, dq5field.BLOCK_LOWER, b'\x01' * 4)                                   # 블록 0 아래층 네 칸을 타일 1 로
+        rom = Rom(bytes(d))
+        cg = b''.join(((k * 0x0421) & 0x7FFF).to_bytes(2, 'little') for k in range(256))
+        tiles = dq5gfx.field_tiles(rom)
+        b0, b1 = (dq5gfx.field_block_images(rom, cg, tiles, world=w)[0].tobytes() for w in (0, 1))
+        self.assertNotEqual(b0, b1)
+        plain = bytearray(self.data)
+        put(plain, dq5field.BLOCK_LOWER, b'\x01' * 4)
+        self.assertEqual(dq5gfx.field_block_images(Rom(bytes(plain)), cg, tiles, world=1)[0].tobytes(), b0)
+        vram = bytes(0x4000) + bytes(range(256)) * 64 + bytes(0x8000)
+        drawn = []
+        for w in (0, 1):
+            path = os.path.join(self.tmp.name, f'w{w}.png')
+            dq5field.render(rom, bytes(1), bytes(1), vram, cg, 0, 0, 1, 1, path, world_no=w)
+            drawn.append(Path(path).read_bytes())
+        self.assertNotEqual(*drawn)
+
 class HighSetTests(unittest.TestCase):
     def test_high_sites_and_no_palettes(self):
         d = bytearray(0x180000)

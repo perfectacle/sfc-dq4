@@ -55,9 +55,10 @@ WATCH = {'WATCHR': '7EC000-7EDFFF'}
 BATTLE = {'FIELD': '341,56', 'BATTLE': '00:1', 'SETTLE': '300', 'MAXF': '2200', 'DUMPF': '500,1790',
           'EVERY': '1', 'FROM': '1975', 'TO': '2140', **WATCH,
           'TEST': 'wait:100,' + ','.join(['a:4,wait:30'] * 60) + ',wait:600'}
-# 세워 둔 배(dq5cdlsweep 의 ship-board)에 올라 바다를 돌고 내린 뒤 걸어서 선 동안(1110~1390).
+# 세워 둔 배(dq5cdlsweep 의 ship-board)에 올라 바다를 돌고 내린 뒤 걸은 동안(1110~1290). 1,303프레임쯤 무작위 전투가
+# 붙어 벌이 멈추므로 그 전에 끝낸다.
 SHIP = {'FIELD': '328,39', 'SET': '21B5|80;21CD=48;21CE=01;21CF=25;21D0=00', 'SETTLE': '300', 'MAXF': '1500',
-        'DUMPF': '900', 'EVERY': '1', 'FROM': '1110', 'TO': '1390', **WATCH,
+        'DUMPF': '900', 'EVERY': '1', 'FROM': '1110', 'TO': '1290', **WATCH,
         'TEST': 'up:60,wait:60,left:200,up:200,right:200,down:200,left:200,wait:300'}
 OBJ_PALETTES = 0x0496D6
 
@@ -109,15 +110,18 @@ def person_colors(cg):
 
 def anim_order(name, dump, frames, sets):
     """frames 마다 VRAM 타일 454~459 가 sets 의 몇째 벌인지, 바뀐 차례대로."""
-    order = []
+    order, last = [], None
     for n in frames:
         shown = b''.join(fgc.field_vram_tiles(frame(dump, n, 'vram'))[454:460])
         require(shown in sets, f'{name}: {n}프레임 움직이는 타일 454~459 가 {len(sets)}벌 어디와도 다름')
         k = sets.index(shown)
         if not order or order[-1] != k:
             order.append(k)
+            last = n
     steps = [(b - a) % len(sets) for a, b in zip(order, order[1:])]
     require(set(steps) == {1} and len(set(order)) == len(sets), f'{name}: 움직이는 타일 벌 차례 {order}')
+    # 벌은 8프레임(가끔 11)마다 넘어가므로, 창 끝까지 돌았다면 마지막으로 바뀐 프레임이 끝에서 16 안이다.
+    require(frames[-1] - last <= 16, f'{name}: {last}프레임 뒤로 창 끝({frames[-1]})까지 벌이 멈춤')
     return order
 
 
@@ -269,7 +273,7 @@ def main():
         results.append(check_scene('battle-grow', grow, dirs['battle-grow'], range(1975, 2141),
                                    (500, lambda w: w[0x1001] == 0, '전투 전($1001 = 0)'),
                                    (1790, lambda w: w[0x1001] != 0, '전투 뒤($1001 ≠ 0)')))
-        results.append(check_scene('ship-grow', grow, dirs['ship-grow'], range(1110, 1391),
+        results.append(check_scene('ship-grow', grow, dirs['ship-grow'], range(1110, 1291),
                                    (900, lambda w: w[0x1954] == 0x03, '배에 탐($1954 = 03)'),
                                    (1110, lambda w: (w[0xB6], w[0xB8]) != (328 & 0xFF, 39), '배에서 내려 옮겨 감')))
         high_results = []

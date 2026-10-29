@@ -116,8 +116,9 @@ def tile_word(rom, tile, upper, world=0):
     return tile | (p + 8) << 8
 
 
-def render(rom, world, hibits, vram, cgram, x0, y0, w, h, path, char_base=0x4000):
-    """블록 (x0, y0) 부터 w x h 블록을 그린다. 타일 그래픽·팔레트는 필드에 있을 때의 VRAM·CGRAM 덤프."""
+def render(rom, world, hibits, vram, cgram, x0, y0, w, h, path, char_base=0x4000, world_no=0):
+    """블록 (x0, y0) 부터 w x h 블록을 그린다. 타일 그래픽·팔레트는 필드에 있을 때의 VRAM·CGRAM 덤프.
+    world 는 블록 번호 지도 바이트, world_no 는 니블 표를 고르는 세계 번호($1949)."""
     from PIL import Image
     pal = []
     for i in range(256):
@@ -130,7 +131,7 @@ def render(rom, world, hibits, vram, cgram, x0, y0, w, h, path, char_base=0x4000
             m = block_number(world, hibits, (x0 + bx) % 256, (y0 + by) % 256)
             for upper, table in ((False, BLOCK_LOWER), (True, BLOCK_UPPER)):
                 for q, t in enumerate(block_tiles(rom, table, m)):
-                    word = tile_word(rom, t, upper)
+                    word = tile_word(rom, t, upper, world_no)
                     base = char_base + (word & 0x3FF) * 32
                     pn = (word >> 10) & 7
                     ox, oy = bx * 16 + (q & 1) * 8, by * 16 + (q >> 1) * 8
