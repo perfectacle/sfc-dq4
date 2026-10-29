@@ -11,7 +11,8 @@ DB를 바꾼 뒤 01:A668의 LDX $00A5와 01:A67D의 STA $420B도 같은 뱅크�
 --planes-at(30~7D)에 두고, 00:BBF7·00:BDC5 의 9번째 비트 읽기(00:BC33·00:BE06)를 평면도 함께 읽는 훅으로 바꾼다.
 평면은 롬이라 게임이 칸을 바꾸는 00:CF50(밤에 빛나는 풀 등, 부르는 곳 넷이 칸과 번호를 즉값으로 줌)은 10번째 비트를 바꾸지
 못한다. 그래서 그 칸들(즉값을 롬에서 읽으므로 dq5chestwrite.py 의 field 로 옮긴 빛 칸도 따름)에 512 이상을 두면
-거부한다. 지도 패치는 상자 패치를 넣은 롬에서 만든다(반대 순서는 dq5chestwrite.py 가 512 이상 칸을 거부). 10번째 비트 평면을 쓰는 세계는 한 번의 patch 에 함께 준다(훅이 하나다).
+거부한다. 지도 패치는 상자 패치를 넣은 롬에서 만든다(반대 순서는 dq5chestwrite.py 가 512 이상 칸을 거부).
+10번째 비트 평면을 쓰는 세계는 한 번의 patch 에 함께 준다(훅이 하나다).
 
   dump   세계 N 의 지도 → .bin(-o)
   check  세계 셋을 풀어 다시 싸고 풀면 같은지, 크기는 원래와 얼마나 다른지
@@ -203,8 +204,9 @@ def plane_writes(rom, data, grids, at):
     for site, want in zip(BIT9_SITES, BIT9_ORIG):
         if data[lorom(site):lorom(site) + len(want)] != want:
             raise ValueError(f'{site >> 16:02X}:{site & 0xFFFF:04X}: 원래 롬의 9번째 비트 읽기가 아님')
+    cells = changed_cells(rom)
     for w, g in wide.items():
-        bad = [(x, y) for x, y in changed_cells(rom) if g[y * 256 + x] >> 9]
+        bad = [(x, y) for x, y in cells if g[y * 256 + x] >> 9]
         if bad:
             raise ValueError(f'세계 {w} 블록 칸 {bad[0]}: 게임이 00:CF50 으로 바꾸는 칸이라 10번째 비트를 쓸 수 없음(512 미만만)')
     size = len(bit9_hook([None] * 3))
@@ -212,7 +214,10 @@ def plane_writes(rom, data, grids, at):
         raise ValueError(f'--planes-at: 훅 {size}바이트가 한 뱅크 안에 들어가지 않음')
     planes, a, out = [None] * 3, at + size, []
     for w in sorted(wide):
-        if (a & 0xFFFF) + PLANE > 0x10000:
+        # 훅이나 앞 평면이 뱅크 끝에 딱 맞으면 a 가 다음 뱅크 0000 이 되는데, 그 자리는 LoROM 의 롬이 아니다
+        if a & 0xFFFF < 0x8000:
+            a |= 0x8000
+        elif (a & 0xFFFF) + PLANE > 0x10000:
             a = ((a >> 16) + 1) << 16 | 0x8000
         if a >> 16 > 0x7D:
             raise ValueError('--planes-at: 평면이 뱅크 7D 를 넘음')

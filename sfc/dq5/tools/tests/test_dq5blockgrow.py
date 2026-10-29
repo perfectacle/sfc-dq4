@@ -166,6 +166,11 @@ class Bit9HookTests(unittest.TestCase):
             grid[y * 256 + x] = 5
         out, size = fw.plane_writes(rom, bytes(d), {0: grid, 2: [3] * fw.SIZE}, 0x618000)
         self.assertEqual([w['at'] for w in out], ['61:8000', '61:804E', '00:BC33', '00:BE06'])
+        # 훅이 뱅크 끝에 딱 맞거나 평면이 FFFF 에서 끝나면 다음 평면은 다음 뱅크 0000(롬 아님)이 아니라 8000 에
+        out, _ = fw.plane_writes(rom, bytes(d), {0: grid}, 0x61FFB2)
+        self.assertEqual([w['at'] for w in out[:2]], ['61:FFB2', '62:8000'])
+        out, _ = fw.plane_writes(rom, bytes(d), {0: grid, 2: grid}, 0x61DFB2)
+        self.assertEqual([w['at'] for w in out[:3]], ['61:DFB2', '61:E000', '62:8000'])
         self.assertEqual(size, 4)
         self.assertEqual(fw.plane_writes(rom, bytes(d), {0: [3] * fw.SIZE}, None), ([], 2))
         with self.assertRaisesRegex(ValueError, '한 뱅크'):
