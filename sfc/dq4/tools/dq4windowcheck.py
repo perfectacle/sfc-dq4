@@ -28,6 +28,7 @@ KANA = range(0x010, 0x079)
 CANVAS = range(0x096, 0x180)
 BUFFER = 0x5000                     # 창 타일맵 버퍼 7E:5000(32 × 32 칸)
 KEYS, AGES = 0x3D70, 0x3D14         # dq4windowname.asm 의 !wt_keys·!wt_ages(슬롯마다 워드)
+KANA_ENTRIES, KBASE = 12, 0x3DD8    # !wt_nkana, !wt_kbase(첫 칸 12바이트, 이어서 칸 수 12바이트)
 SHARED_JP = 0x60B400                # 맵을 불러올 때 7E:1AC0 으로 복사되는 원래 공용 창 레코드(dq4menupatch.SHARED_JP)
 TALK = 'b:4,wait:40,up:3,wait:20,a:4,wait:30,' + ','.join(['a:6,wait:40,down:4,wait:10,a:6,wait:40'] * 10)
 # 주인공 이름 7E:2001 에 넣는 「크리프트」 한글 표시 바이트. 세이브스테이트의 가나 이름은 가나 칸 슬롯과 겹쳐 깨진다.
@@ -81,7 +82,7 @@ def slot_table(rom, sym):
     for i in range(n):
         tile = int.from_bytes(rom[base + 2 * i:base + 2 * i + 2], 'little')
         c = int.from_bytes(rom[cls + 2 * i:cls + 2 * i + 2], 'little')
-        out.append((tile, (8, 14, 20)[c & 0x0F], c >= 0x10))
+        out.append((tile, (8, 14, 20, 0)[min(c & 0x0F, 3)], c >= 0x10))
     return out
 
 
@@ -94,7 +95,8 @@ def run(mesence, libdir, rom_path, rom, folder, scene):
     sets = ['7E0725=3C'] + [f'{0x7E1AC0 + i:X}={b:02X}' for i, b in enumerate(rom[o:o + 48])]
     sets += [f'{0x7E2001 + i:X}={NAME[2 * i:2 * i + 2]}' for i in range(8)]
     fs = ','.join(map(str, frames))
-    dump = ','.join(f'{f}:7E{KEYS:04X}:60,{f}:7E{AGES:04X}:60,{f}:7E0725:1,{f}:7E1944:2' for f in frames)
+    dump = ','.join(f'{f}:7E{KEYS:04X}:60,{f}:7E{AGES:04X}:60,{f}:7E{KBASE:04X}:24,{f}:7E0725:1,{f}:7E1944:2'
+                    for f in frames)
     env = dict(os.environ, LIBDIR=libdir, SHOT_DIR=str(folder), STATE=str(state), PRE=pre, SHOTS=fs, VRAMDUMP=fs,
                DUMP=dump, SET=','.join(sets), MAXF=str(frames[-1] + 10))
     if poke:
@@ -121,13 +123,15 @@ def check(folder, rom, slots):
     out = []
     for frame, d in sorted(dumps(folder).items()):
         vram_path = folder / f'v{frame:05d}.bin'
-        if not vram_path.exists() or len(d) < 4:
+        if not vram_path.exists() or len(d) < 5:
             continue
         vram = vram_path.read_bytes()
         keys, ages = d[KEYS], d[AGES]
         battle = int.from_bytes(d[0x1944], 'little') == 0x8952
         mine, live = set(), {}
-        for i, (tile, size, field_only) in enumerate(slots):
+        kb = d[KBASE]
+        table = [(kb[i], kb[KANA_ENTRIES + i], True) for i in range(KANA_ENTRIES)] + slots[KANA_ENTRIES:]
+        for i, (tile, size, field_only) in enumerate(table):
             key = int.from_bytes(keys[2 * i:2 * i + 2], 'little')
             age = int.from_bytes(ages[2 * i:2 * i + 2], 'little')
             if not key or not age:
