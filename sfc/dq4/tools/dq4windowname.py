@@ -28,11 +28,53 @@ SPELL_WINDOW = 0x28
 TACTIC_WINDOW = 0x16
 # 가게 동료 창(머리 02 0F 1C, 줄마다 이름 EF + 상태 CC). 이름 다섯째 칸 뒤로 상태를 미는 만큼 한 칸 왼쪽으로 옮겨 넓힌다
 SHOP_MEMBERS = 0x3A
+# 가나 이름(몬스터 동료 등)의 바이트 → 글리프 번호 표(평 · 탁점 84 · 반탁점 83, 바이트마다 16비트, FFFF = 없음).
+# 필드에서는 가나 칸을 슬롯으로 돌려 써 원래 가나 타일로 찍은 이름이 깨지므로, 한글 이름처럼 Galmuri9 가나로 그린다
+KANA_TABLE = 0x60E800
 PREFIX_HOOK = 0x04B11E            # 창 바이트 갈래(메뉴 패치가 JSL 로 바꿔 둔 자리). 고정 문구 접두를 먼저 가른다
 
 
 def lorom(a):
     return ((a >> 16) & 0x7F) * 0x8000 + (a & 0x7FFF)
+
+
+def kana_glyphs(d, font, render):
+    """가나 글자 글리프를 이름 글리프 뒤(dq4nameentry.GLYPHS 다음 번호)에 쓰고, 바이트 → 번호 표를 KANA_TABLE 에 쓴다."""
+    import sys
+    import dq4nameentry as ne
+    tools = str(HERE.parents[1] / 'dq5' / 'tools')
+    if tools not in sys.path:
+        sys.path.insert(0, tools)
+    import dq5text
+    from dq5map import Rom
+    rom = Rom(bytes(d))
+    table = bytearray(b'\xff' * 0x300)
+    numbers = {}
+    for k, prefix in enumerate(((), (0x84,), (0x83,))):
+        for b in range(0x10, 0x80):
+            try:
+                ch = dq5text.text(dq5text.string_codes(rom, bytes(prefix + (b,))))
+            except Exception:
+                continue
+            if len(ch) != 1 or not 0x3041 <= ord(ch) <= 0x30FC:
+                continue
+            n = numbers.setdefault(ch, len(ne.GLYPHS) + len(numbers))
+            table[k * 0x100 + b * 2:k * 0x100 + b * 2 + 2] = n.to_bytes(2, 'little')
+    for ch, n in numbers.items():
+        cols = render(font, ch, True)
+        if len(cols) > 2:
+            raise ValueError(f'{ch}: 가나 글자가 두 열을 넘음')
+        cols += [[[0] * 8 for _ in range(16)]] * (2 - len(cols))
+        cell = b''.join(bytes(int(''.join(map(str, r)), 2) for r in col) for col in cols)
+        o = lorom((ne.GLYPH_BANK + n // 1024) << 16 | 0x8000 + n % 1024 * 32)
+        if any(d[o:o + 32]):
+            raise ValueError(f'가나 글리프 {n} 자리가 비어 있지 않음')
+        d[o:o + 32] = cell
+    o = lorom(KANA_TABLE)
+    if any(d[o:o + len(table)]):
+        raise ValueError(f'{KANA_TABLE:06X} 가 비어 있지 않음')
+    d[o:o + len(table)] = table
+    return numbers
 
 
 def apply(data, font=None, asar=None):
@@ -88,13 +130,16 @@ def apply(data, font=None, asar=None):
     o = lorom(LIST_HOOK)
     if d[o] != 0x5C:
         raise ValueError(f'{LIST_HOOK:06X} 가 JML 이 아님: {d[o:o + 4].hex()}')
+    kana = kana_glyphs(d, font or dq4menupatch.Font('galmuri9'), dq4menupatch.render)
     flag = re.search(r'^!flag\s*=\s*\$([0-9A-Fa-f]{6})', (HERE / 'dq4nameentry.asm').read_text(), re.M).group(1)
     defs = (f'!wn_code = ${CODE:06X}\n!wn_hi_base = ${ne.HI_BASE:02X}\n!wn_hi_count = {hi_count}\n'
             f'!wn_glyph_bank = ${ne.GLYPH_BANK:02X}\n!wn_list_prev = ${int.from_bytes(d[o + 1:o + 4], "little"):06X}\n'
             f'!wn_menu_flag = ${flag}\n!wt_bank = ${dq4windowtext.TEXT_BANK:02X}\n'
             f'!wt_prefix_prev = ${int.from_bytes(d[po + 1:po + 4], "little"):06X}\n'
             f'!wt_fixed = ${dq4windowtext.FIXED_PREFIX:02X}\n!wt_fixed_kind = {dq4windowtext.FIXED_KIND}\n!wt_safe = ${dq4windowtext.SAFE:04X}\n'
-            f'!wt_tactic = {dq4windowtext.tactic_first()}\n!wt_tactic_count = {len(dq4windowtext.TACTIC_LINES)}\n')
+            f'!wt_tactic = {dq4windowtext.tactic_first()}\n!wt_tactic_count = {len(dq4windowtext.TACTIC_LINES)}\n'
+            f'!wn_kana_table = ${KANA_TABLE:06X}\n')
+    del kana
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         (tmp / 'main.asm').write_text(defs + (HERE / 'dq4windowname.asm').read_text())

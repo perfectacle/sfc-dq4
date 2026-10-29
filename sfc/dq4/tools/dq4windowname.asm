@@ -172,8 +172,10 @@ org $24A5E9
 org !wn_code
 WnName:
     LDA.b $01
-    CMP #!wn_hi_base
+    CMP #$10
     BCC .original
+    CMP #!wn_hi_base
+    BCC .kana                   ; 가나 이름(탁점 83·84 포함)
     CMP #!wn_hi_base+!wn_hi_count
     BCS .original
     LDA.b $02
@@ -181,6 +183,7 @@ WnName:
     BCC .original
     CMP #$10+111
     BCS .original
+.kana
     REP #$20
     LDA.b $DC
     STA.l $7E0000|!wn_ptr
@@ -302,8 +305,10 @@ WnList:
     CMP #$A5
     BEQ .previous
     LDA.b $01
-    CMP #!wn_hi_base
+    CMP #$10
     BCC .previous
+    CMP #!wn_hi_base
+    BCC .kana
     CMP #!wn_hi_base+!wn_hi_count
     BCS .previous
     LDA.b $02
@@ -311,6 +316,7 @@ WnList:
     BCC .previous
     CMP #$10+111
     BCS .previous
+.kana
     PHX
     REP #$20
     LDA.b $E0
@@ -357,6 +363,56 @@ WnKorean:
     STY.w !wn_y
     ; 글리프 번호: (첫 바이트 - 85) × 111 + (둘째 바이트 - 10). 01 이나 범위 밖이면 거기서 끝
     LDX #$0000
+    LDA.b $01
+    AND #$00FF
+    CMP.w #!wn_hi_base
+    BCS .decode
+    ; 가나 이름: 바이트마다 글리프 하나, 84·83 은 다음 바이트의 탁점·반탁점(!wn_kana_table 의 둘째·셋째 256바이트)
+    LDY #$0000
+.kana
+    CPY #$0008
+    BCS .kanadone
+    CPX #$0008
+    BCS .kanadone
+    LDA.b $01,X
+    AND #$00FF
+    INX
+    STA.w !wn_c
+    STZ.w !wn_r
+    CMP #$0084
+    BNE +
+    LDA #$0100
+    BRA ++
++
+    CMP #$0083
+    BNE +++
+    LDA #$0200
+++
+    STA.w !wn_r
+    LDA.b $01,X
+    AND #$00FF
+    INX
+    STA.w !wn_c
++++
+    LDA.w !wn_c
+    CMP #$0080
+    BCS .kanadone
+    ASL
+    CLC
+    ADC.w !wn_r
+    PHX
+    TAX
+    LDA.l !wn_kana_table,X
+    PLX
+    CMP #$FFFF
+    BEQ .kanadone
+    STA.w !wn_glyph,Y
+    INY
+    INY
+    BRA .kana
+.kanadone
+    TYX
+    JMP .rest
 .decode
     LDA.b $01,X
     AND #$00FF
