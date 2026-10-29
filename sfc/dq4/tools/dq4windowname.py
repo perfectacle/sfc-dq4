@@ -28,6 +28,9 @@ SPELL_WINDOW = 0x28
 TACTIC_WINDOW = 0x16
 # 가게 동료 창(머리 02 0F 1C, 줄마다 이름 EF + 상태 CC). 이름 다섯째 칸 뒤로 상태를 미는 만큼 한 칸 왼쪽으로 옮겨 넓힌다
 SHOP_MEMBERS = 0x3A
+# 대열 바꾸기 창(46 왼쪽 DF 줄, 45 오른쪽 F1 줄). 줄마다 「번호 이름 Lv:」 라 이름 다섯째 칸 뒤로 미는 만큼 한 칸씩 넓힌다.
+# 46 은 왼쪽으로 옮기고 45 는 오른쪽으로만 넓혀 둘이 겹치지 않게 한다
+FORMATION = ((0x46, bytes((0x42, 0x04, 0x0E)), True), (0x45, bytes((0x10, 0x84, 0x0E)), False))
 # 가나 이름(몬스터 동료 등)의 바이트 → 글리프 번호 표(평 · 탁점 84 · 반탁점 83, 바이트마다 16비트, FFFF = 없음).
 # 필드에서는 가나 칸을 슬롯으로 돌려 써 원래 가나 타일로 찍은 이름이 깨지므로, 한글 이름처럼 Galmuri9 가나로 그린다
 KANA_TABLE = 0x60E800
@@ -106,6 +109,12 @@ def apply(data, font=None, asar=None):
         raise ValueError(f'창 {SHOP_MEMBERS:02X} 머리 {d[o:o + 12].hex()}: 가게 동료 창 모양이 아님')
     d[o] -= 1
     d[o + 2] += 1
+    for w, head, left in FORMATION:
+        o = lorom(dq4menupatch.window_addr(d, w))
+        if d[o:o + 3] != head:
+            raise ValueError(f'창 {w:02X} 머리 {d[o:o + 8].hex()}: 대열 바꾸기 창 모양이 아님')
+        d[o] -= left
+        d[o + 2] += 1
     o = lorom(dq4menupatch.window_addr(d, TACTIC_WINDOW))
     if d[o:o + 4] != bytes((0x17, 0x82, 0x06, 0x05)):
         raise ValueError(f'창 {TACTIC_WINDOW:02X} 머리 {d[o:o + 8].hex()}: 전투 작전 창 모양이 아님')
