@@ -4,7 +4,8 @@
 없거나 필드면 기본 00:C687(CLC / RTS)을 둔다. 00:C357 이 `JMP ($1AAD)` 로 부르므로 루틴은 뱅크 00 에 있어야 한다.
 원본은 15그룹(46바이트)이고 표 바로 뒤가 코드라 제자리로는 늘리지 못한다. 그보다 많으면 --table-at 자리에
 [찾기 루틴][표] 를 두고 00:C652 를 JML 로 바꾼다. 루틴은 원래와 같은 차례로 표를 긴 주소로 읽고 $1AAD 를 긴 주소로 쓴 뒤
-RTL 한다(원래 루틴도 RTL 로 끝남). 색인 X 가 8비트라 표는 84그룹까지다.
+RTL 한다(원래 루틴도 RTL 로 끝남). 색인 X 가 8비트라 끝 FF 를 X ≤ 255 에서 읽어야 하므로
+표는 85그룹까지다(85그룹이면 끝 FF 가 X = 255).
 
   python sfc/dq5/tools/dq5stepwrite.py rom/dq5.sfc dump -o work/step.json
   python sfc/dq5/tools/dq5stepwrite.py rom/dq5.sfc patch work/step.json -o work/step.dq5patch.json \\
@@ -33,7 +34,7 @@ LOOKUP_END = 0x00C687
 TABLE = 0x00C689
 DEFAULT = 0x00C687
 ORIGINAL_SIZE = 46
-MAX_GROUPS = 84
+MAX_GROUPS = 85
 ROUTINE_SLOT = 0x1AAD
 
 

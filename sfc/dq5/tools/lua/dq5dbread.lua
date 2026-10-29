@@ -71,20 +71,26 @@ if win then
     end, emu.callbackType.exec, back, back)
   end
   -- BRK 를 실행할 때의 SP - 4(P·PC·K 를 쌓은 뒤)를 열쇠로, 그 SP 에서 도는 RTI 를 기다린다.
+  -- 창이 닫혀도 비우지 않는다. 메시지 BRK(95·98 등)는 처리 중 DB 가 바뀌어 창이 닫힌 뒤에 돌아온다.
   local brks = {}
   local brkCount = 0
+  local BRK_MAX_BACK = 4
   local function onRti()
     if brkCount == 0 then return end
     local sp = emu.getState()["cpu.sp"]
     local b = brks[sp]
     if b == nil then return end
-    brks[sp], brkCount = nil, brkCount - 1
     local back = emu.read(sp + 4, m) << 16 | emu.read(sp + 3, m) << 8 | emu.read(sp + 2, m)
+    -- 같은 SP 의 다른 RTI(인터럽트 등)를 BRK 의 것으로 보지 않게, BRK 뒤 인자 0~2개 자리로 돌아올 때만 받는다
+    local skip = (back & 0xFFFF) - (b.pc & 0xFFFF)
+    if back >> 16 ~= b.pc >> 16 or skip < 2 or skip > BRK_MAX_BACK then return end
+    brks[sp], brkCount = nil, brkCount - 1
     local key = string.format("%06X %06X", b.pc, back)
     brkBack[key] = (brkBack[key] or 0) + 1
     watch(back, b.db)
   end
-  -- 처리기와 서비스는 뱅크 00 이므로 뱅크 00 의 40 바이트(RTI 후보)마다 건다. 명령 중간의 40 은 실행되지 않는다.
+  -- SlowROM 이라 BRK 벡터가 처리기 00:8F80 으로 가므로, 뱅크 00 의 8000~FFFF 에 있는 40 바이트(RTI 후보)마다 건다.
+  -- 명령 중간의 40 은 실행되지 않는다.
   for a = 0x8000, 0xFFFF do
     if emu.read(a, m) == 0x40 then emu.addMemoryCallback(onRti, emu.callbackType.exec, a, a) end
   end

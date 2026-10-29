@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dq5stepwrite as step  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
 from test_dq5palsetwrite import apply, fixture, put  # noqa: E402
@@ -109,10 +110,23 @@ class StepRoutineTests(unittest.TestCase):
             step.writes_for(self.rom, document(('01', '00:C385')), '3C:FFE0')
 
     def test_max_groups(self):
+        # 85그룹이면 끝 FF 가 X = 255 에 놓여 8비트 X 로 읽힌다. 86그룹부터는 X 가 0 으로 돌아 끝을 못 찾는다.
         with mock.patch.object(step, 'known_maps', return_value={g: {0} for g in range(0x60)}):
-            doc = document(*((f'{g:02X}', '00:C385') for g in range(0x55)))
-            with self.assertRaisesRegex(ValueError, '84그룹'):
+            rows = [(g, 0x9000 + g) for g in range(0x55)]
+            doc = document(*((f'{g:02X}', f'00:{r:04X}') for g, r in rows))
+            moved = apply(self.rom, step.writes_for(self.rom, doc, '3C:A000'))
+            table = step.step_table(moved)
+            self.assertEqual(moved.u8(table + 255), 0xFF)
+            self.assertEqual(len(step.dump(moved)['groups']), 85)
+            self.assertEqual((routine(moved, 0x00), routine(moved, 0x54)), (0x9000, 0x9054))
+            self.assertEqual(routine(moved, 0x55), step.DEFAULT)          # 없는 그룹: X = 255 의 FF 에서 멈춤
+            doc = document(*((f'{g:02X}', '00:C385') for g in range(0x56)))
+            with self.assertRaisesRegex(ValueError, '85그룹'):
                 step.writes_for(self.rom, doc, '3C:A000')
+            data = bytearray(moved.d)
+            put(data, table + 255, b'\x55\x00\x90\xff')                  # 86번째 항목을 억지로 붙인 표
+            with self.assertRaisesRegex(ValueError, '끝 FF'):
+                step.dump(Rom(bytes(data)))
 
     def test_cli_patch_and_check(self):
         with tempfile.TemporaryDirectory() as tmp:
