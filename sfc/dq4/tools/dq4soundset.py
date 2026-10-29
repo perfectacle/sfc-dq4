@@ -121,9 +121,11 @@ def song_score(score, drop_tracks=(), drop_programs=()):
 
 
 def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_fades=False, preview=None,
-          stream=None, budgets=None, pinned=(), resident_from=None, drop_resident=(), lanes=None, drop_tracks=None,
+          stream=None, stream_ticks=None, budgets=None, pinned=(), resident_from=None, drop_resident=(), lanes=None, drop_tracks=None,
           level_db=None, programs=None, set_records=None):
     """stream 은 {곡 자리: 곡 앞 샘플 바이트 상한}. 그 곡은 샘플 일부를 곡이 울리는 동안 보낸다(transfer_plan).
+
+    stream_ticks 는 {곡 자리: 틱}. 곡 앞 바이트 상한을 곡이 처음 그 틱 안에 쓰는 샘플의 합으로 정한다.
 
     budgets 는 {곡 자리: 샘플 예산 바이트}. 주면 시퀀스 크기로 정한 예산 대신 이 값으로 샘플을 줄인다. 시퀀스가
     작아져도 청취 승인한 샘플(줄이기 결과)을 그대로 두려면 그때의 예산을 준다. SPC 예산 검사는 install 이 그대로 한다.
@@ -136,7 +138,7 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
     {곡: {프로그램: 이미 넣은 전역 샘플}} 로 그 프로그램을 새로 만들지 않고 그 샘플로 울린다.
     set_records 는 바꾸지 않는 곡의 곡 묶음 레코드(install 과 같음).
     """
-    stream, budgets, lanes = stream or {}, budgets or {}, lanes or {}
+    stream, stream_ticks, budgets, lanes = stream or {}, stream_ticks or {}, budgets or {}, lanes or {}
     drop_tracks, level_db, programs = drop_tracks or {}, level_db or {}, programs or {}
     data = bytes(base)
     records = patch.read_sets(data)
@@ -229,17 +231,18 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
         bank_report['shared_other_rate'] = loose
         bank_report['resource_bytes'] = sum(map(len, found.values()))
         send_first, plan = None, None
-        if slot in stream:
+        if slot in stream or slot in stream_ticks:
             if set(conversion.samples) - found.keys():
                 raise ValueError('streamed songs must use only their own converted samples')
             usage = conversion.report
             first = {int(k, 16): v for k, v in usage['sample_first_tick'].items()}
             notes = {int(k, 16): v for k, v in usage['sample_notes'].items()}
-            order, send_first, arrivals = transfer_plan(first, notes, {s: len(found[s]) for s in conversion.samples},
-                                                        stream[slot])
+            cap = stream[slot] if slot in stream else sum(len(found[x]) for x in conversion.samples
+                                                          if first[x] <= stream_ticks[slot])
+            order, send_first, arrivals = transfer_plan(first, notes, {s: len(found[s]) for s in conversion.samples}, cap)
             conversion = port.convert(score, program_map=program_map, sample_order=order, arrivals=arrivals,
                                       **convert_args(slot))
-            plan = {'pre_bytes_cap': stream[slot], 'send_first': send_first,
+            plan = {'pre_bytes_cap': cap, 'send_first': send_first,
                     'pre_sample_bytes': sum(len(found[s]) for s in order[:send_first]),
                     'arrival_seconds': {f'{s:02X}': round(t, 3) for s, t in arrivals.items()}}
             if slot == resident_from:
@@ -288,6 +291,8 @@ def main():
                     help='sample budget for that song instead of the one computed from its sequence size')
     ap.add_argument('--stream', action='append', default=[], metavar='DQ5_SLOT=PRE_BYTES',
                     help='send only the first samples (up to PRE_BYTES) before the song starts, the rest while it plays')
+    ap.add_argument('--stream-ticks', action='append', default=[], metavar='DQ5_SLOT=TICKS',
+                    help='like --stream, sending first only the samples the song uses within its first TICKS ticks')
     ap.add_argument('--pin', action='append', default=[], metavar='DQ5_SLOT',
                     help='keep this replaced song in the resident sequence list')
     ap.add_argument('--resident-from', metavar='DQ5_SLOT',
@@ -326,6 +331,7 @@ def main():
         records[slot] = (int(first), *(int(x, 16) for x in ids.split(',')))
     rom, report = build(base, args.assets, songs, cache_dir=args.out.parent / 'brr-cache', max_rate=args.max_rate,
                         max_samples=args.max_samples, map_fades=args.map_fades, preview=args.preview, stream=stream,
+                        stream_ticks={slot: int(v) for slot, v in per_slot(args.stream_ticks)},
                         budgets=budgets, pinned=[int(x, 16) for x in args.pin],
                         resident_from=int(args.resident_from, 16) if args.resident_from else None,
                         drop_resident=[int(x, 16) for x in args.drop_resident],

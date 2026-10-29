@@ -124,9 +124,15 @@ def read_events(path):
     return (on if start is None else start), arrivals
 
 
+ARRIVAL_MARGIN_FRAMES = 2
+
+
 def blocked(note_seconds, sample, start, arrivals):
-    """그 음이 샘플 도착 전에 나오는지. 첫 KON 은 곡이 오른 다음 프레임이라 1프레임을 더한다."""
-    return sample in arrivals and start + 1 + note_seconds * NTSC_FPS < arrivals[sample]
+    """그 음이 샘플 도착 전에 나오는지. 첫 KON 은 곡이 오른 다음 프레임이라 1프레임을 더한다.
+
+    칸이 생긴 프레임(events.txt)에 바로 이어지는 음도 막혔으므로(곡 0F, 도착 다음 프레임의 음) 2프레임을 더 본다.
+    """
+    return sample in arrivals and start + 1 + note_seconds * NTSC_FPS < arrivals[sample] + ARRIVAL_MARGIN_FRAMES
 
 
 def timing(seq, run, start, slots, record, arrivals=None):
@@ -141,8 +147,9 @@ def timing(seq, run, start, slots, record, arrivals=None):
     horizon = (last - start - 2) / NTSC_FPS
     pairs, voices = [], []
     for voice, expected in enumerate(notes):
-        actual = [(f, p) for f, p, _ in kon[voice] if f >= start]
-        sources = [s for f, s in src[voice] if f >= start]
+        # 곡 앞 샘플만 보내는 곡은 첫 KON 이 events.txt 의 시작 프레임보다 한 프레임 이를 수 있다(SPC 가 그 프레임 안에 시작)
+        actual = [(f, p) for f, p, _ in kon[voice] if f >= start - 1]
+        sources = [s for f, s in src[voice] if f >= start - 1]
         expected = [n for n in expected if n[0] * 1.002 < horizon]
         late = [n for n in expected if blocked(n[0], record[n[2]], start, arrivals or {})]
         expected = [n for n in expected if not blocked(n[0], record[n[2]], start, arrivals or {})]
