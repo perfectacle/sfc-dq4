@@ -151,6 +151,7 @@ org $24A5E9
 !wq_off   = $3D64           ; 대기열에 다음으로 쓸 자리
 !wt_vis   = $3DAC           ; 슬롯마다 1바이트: 마지막 창 타일맵 전송 때 보였거나 그 뒤에 그렸으면 1
 !wt_xfer  = $3DCA           ; 1바이트: 이번 NMI 에 게임이 보낼 창 타일맵 줄($0BEC 의 bit7·6), NMI 끝에서 WtVis 가 씀
+!wt_ecsave = $3DCC          ; 1바이트: 창 제목을 그리는 동안 맡겨 둔 $EC
 !wq_rd    = $3D5C           ; NMI 가 다음으로 보낼 항목 자리. VBlank 가 끝나 가면 남은 항목을 다음 NMI 로 넘긴다
 !wq_defer = $3D5A           ; 1바이트: bit7·6 = 다음 NMI 로 미룬 게임의 창 타일맵 전송 요청($0BEC),
                             ; bit1·0 = 전투에 들어가면 되돌릴 가나 칸 덩이 수(필드에서 가나 칸 슬롯을 쓰면 3)
@@ -1590,6 +1591,8 @@ WnPrefix:
 
 ; 04:AC25(04:AA10 제목 고리에서 B0 미만 바이트, A = 바이트 8비트, X = 그 바이트 자리, DB = 04, Y = $DC 기준 자리).
 ; 원래는 STA $00 / PHB / LDA #$7E / PHA / PLB 뒤 ($DC),Y 에 쓴다. 9E k 면 고정 문구를 그리고 고리로 돌아간다.
+; 원래 제목 글자는 낮은 바이트만 써 버퍼의 색을 살린다. 본문 색($EC bit6·$ED)은 앞서 그린 창(어두운 뒤 창의 2C 등)의
+; 것이 남아 있으므로, 그리는 동안 bit6 을 꺼 버퍼 색을 쓰게 한다(WtTitleColorOff·On).
 WnTitle:
     CMP #!wt_fixed
     BEQ +
@@ -1598,6 +1601,7 @@ WnTitle:
     LDA #$7E
     JML $04AC2A
 +
+    JSR WtTitleColorOff
     LDA.w $0001,X
     INX
     INX
@@ -1611,7 +1615,20 @@ WnTitle:
     JSR WtFixedDraw
     SEP #$20
     PLX
+    JSR WtTitleColorOn
     JML $04AA10
+
+; $EC 를 !wt_ecsave 에 두고 bit6 을 끈다 / 되돌린다(M = 8)
+WtTitleColorOff:
+    LDA.b $EC
+    STA.l $7E0000|!wt_ecsave
+    AND #$BF
+    STA.b $EC
+    RTS
+WtTitleColorOn:
+    LDA.l $7E0000|!wt_ecsave
+    STA.b $EC
+    RTS
 
 ; 04:AA79(장비 비교 창 제목의 물건 이름, M = 8, X = 16, PHX 뒤 BRK 88 로 $42·$43 의 이름을 $01~ 에 받은 뒤).
 ; 원래는 PHB / DB = 7E / LDX #0 / BRL $ABD6 로 제목 줄에 찍고 PLB / PLX / INX / BRL $AA10.
@@ -1622,12 +1639,16 @@ WnTitleName:
     AND #$00FF
     CMP.w #!wt_fixed
     BNE +
+    SEP #$20
+    JSR WtTitleColorOff
+    REP #$20
     LDA.b $DC
     STA.l $7E0000|!wt_buf
     LDA.b $02
     AND #$00FF
     JSR WtFixedDraw
     SEP #$20
+    JSR WtTitleColorOn
     PLX
     INX
     JML $04AA10
@@ -1648,11 +1669,15 @@ WnTitleName:
     PLA
     LDA.l (!wt_bank<<16)|$8000,X
     BEQ .original
+    SEP #$20
+    JSR WtTitleColorOff
+    REP #$20
     LDA.b $DC
     STA.l $7E0000|!wt_buf
     TXA
     JSR WtNameDraw
     SEP #$20
+    JSR WtTitleColorOn
     PLX
     INX
     JML $04AA10
