@@ -17,7 +17,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-import dq5exitcheck
 from dq5exit import arrival, exit_attrs
 from dq5exitcheck import command, dp86_allowed, require, run, warp_exit
 from dq5map import Rom, lorom
@@ -32,7 +31,7 @@ COPY_0D02 = {'record': {'copy': '0D/02'}, 'attrs': {'copy': '0D/02'}}
 #  m·g 의 새 맵은 문 표를 건너뛰어 다른 맵의 문 목록이나 표 밖을 읽는다(문 표 읽기 허용).
 #  doors: 0D/05~0D/07 을 더하고 문 표를 늘림(뱅크 01 을 3D 에 복사).  thru: 같은 맵을 문 표 읽기 허용으로(대조).
 # doors 롬은 문 표를 옮겼으므로 옛 문 표 자리를 읽는 곳이 없어야 한다.
-dq5exitcheck.STALE['doors'] = '01D2FC-01D8C1'
+STALE = {'doors': '01D2FC-01D8C1'}
 # 01/04 (48,1) 문(잠금 6) 아래에서 위를 보고 명령 창의 とびら(왼쪽 아래)를 고름. 열쇠가 없으면 메시지 187.
 DOOR_CMD = 'up:4,wait:20,a:6,wait:60,down:6,wait:15,down:6,wait:15,down:6,wait:15,a:6,wait:250'
 # 같은 문에서 どうぐ(오른쪽 열 둘째)로 첫 칸의 ラインハットのカギ(C9)를 つかう. 11:8E54 의 JSL 로 입구 01:D97B 를 지나 문이 열림
@@ -205,7 +204,7 @@ def main():
         shutil.copytree(krlua, libdir)
         shutil.copyfile(HERE / 'lua/dq5warp.lua', libdir / 'boot.lua')
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-            seen = list(pool.map(lambda case: run(case, roms, state, out, mesence, libdir), CASES))
+            seen = list(pool.map(lambda case: run(case, roms, state, out, mesence, libdir, stale=STALE), CASES))
         attrs, slots, cells, msgs = {}, {}, {}, {}
         for case in CASES:
             text = (out / case[0] / 'warp.txt').read_text(encoding='utf-8')
