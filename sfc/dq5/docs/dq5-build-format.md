@@ -1913,6 +1913,8 @@ uv run --locked python sfc/dq5/tools/dq5monwrite.py rom/dq5.sfc patch work/mon.j
 uv run --locked python sfc/dq5/tools/dq5monwrite.py rom/dq5.sfc check work/mon.json --at 3B:8000 --records-at 3C:8000
 ```
 
+`--records-at` 은 몬스터 색을 원래보다 늘릴 때만 줍니다. 색을 늘리지 않은 문서에 주면 거부합니다.
+
 ```json
 {"format": "dq5monster/1",
  "pictures": [{"picture": "02", "image": "02.png"}],
