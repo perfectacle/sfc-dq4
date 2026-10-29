@@ -5,7 +5,7 @@
   talk   every standing person: stand on the FC cell next to it, face it, press A; the first message the
          message routine 24:8BAF gets is the person's message (talk + 3C6), or for a church, an inn or the
          deposit the first message of that DQ5 service (an inn also leaves its price for one in 7E:0F28)
-  shop   every weapon, item and armor seller: talk, then かう; the items and prices the list window shows
+  shop   every weapon, item and armor seller: talk, then かう; the items the list window shows
          (dq5progresscheck.lua, MODE=shop) are the group's list from dq4shopport.py
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4npccheck.py --build work/dq4-groups --out work/dq4-groups/npccheck
@@ -202,7 +202,7 @@ def main():
                     got_price = wram[1][INN_PRICE] if isinstance(wram, tuple) else None
                     ok = ok and got_price == price
                 results[name] = {"ok": ok, "want": f"{message:03X}", "got": [f"{v:03X}" for v in messages or []][:4],
-                                 "timing": timing, **({"price": got_price, "want_price": price} if price else {})}
+                                 "timing": timing, **({"price": got_price, "want_price": price} if price is not None else {})}
     ok = all(r["ok"] for r in results.values())
     report = {"status": "passed" if ok else "failed", "scenes": dict(sorted(results.items()))}
     (out / "results.json").write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n")

@@ -1,8 +1,7 @@
 """FC DQ4 shops, inns and churches of the new DQ5 groups (dq4environmentrom.GROUPS).
 
 People who open a shop in FC (fc/dq4/tools/dq4shop.merchants, on the base person list) get the DQ5 talk
-number of the same service (06:DBD2: 01 weapon, 02 item, 03 armor, 04 deposit, 05 church, 06 inn; the FC
-numbers are the same). Weapon, item and armor lists go to the DQ5 shop lists (dq5progress/1 `shops`) under
+number of the same service (06:DBD2: 01 weapon, 02 item, 03 armor, 04 deposit, 05 church, 06 inn; SERVICE). Weapon, item and armor lists go to the DQ5 shop lists (dq5progress/1 `shops`) under
 the DQ5 group as key (06:DC37 keys them by $BC), with FC items matched to DQ5 items by name. The inn price
 table 04:FD6D has no end mark and no room, so it is copied with the new groups added and the two operands
 that point at it (06:F567 bank, 06:F56D address) are changed.
@@ -30,11 +29,20 @@ from kr_patch.fc import ines  # noqa: E402
 
 # FC shop kind (dq4shop.KINDS) -> DQ5 shop list kind (04:FBD5: 0 item, 1 armor, 2 weapon).
 LIST_KIND = {1: 2, 2: 0, 3: 1}
+# FC service (15:$9CBF; 0 and 5 both go to the church 15:$B550) -> DQ5 talk number of the same service.
+# FC 7 (a free inn, 15:$A6B0) has no DQ5 counterpart; DQ5 07 is the monster deposit.
+SERVICE = {0: 5, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6}
+# Script conditions a seller may have and still be one at the start of chapter 1: talking across the
+# counter, the time of day, and Burland's armor seller turning away at Y = 16 (15:$9D2A).
+SELLER_CONDITIONS = ("counter", "낮", "밤", "주인공 Y")
+# Story-flag person lists (dq4shop.npc_lists) are not the start of chapter 1.
+FLAG_LIST = "목록 플래그"
 INN, CHURCH = 6, 5
 INN_TABLE = 0x04FD6D
 INN_ENTRIES = 21
 INN_BANK_OPERAND = 0x06F568
 INN_ADDR_OPERAND = 0x06F56E
+# dq5progresswrite takes 1-6 items: the 7th row is under the comparison window (dq5-build-format 「성장·조우·상점」).
 MAX_ITEMS = 6
 
 
@@ -44,18 +52,31 @@ def _fold(name):
 
 
 def dq5_items(rom):
-    return {_fold(dq5item.item_name(rom, i)): i for i in range(216)}
+    out = {}
+    for i in range(216):
+        name = _fold(dq5item.item_name(rom, i))
+        if name in out:
+            raise ValueError(f"DQ5 items {out[name]:02X} and {i:02X} share the name {name}")
+        out[name] = i
+    return out
 
 
 def merchants(prg, fc_group, number):
     """{(x, y, night): FC service kind} for the base person list (no story-flag list)."""
     out = {}
     for x, y, _, kind, cond, _ in dq4shop.merchants(prg, fc_group, number):
-        if any("목록 플래그" in c for c in cond):
+        if any(FLAG_LIST in c for c in cond):
             continue
+        unknown = [c for c in cond if not any(c.startswith(k) for k in SELLER_CONDITIONS)]
+        if unknown:
+            raise ValueError(f"{fc_group:02X}/{number:02X} ({x:02X},{y:02X}): seller condition {unknown}")
+        if kind not in SERVICE:
+            raise ValueError(f"{fc_group:02X}/{number:02X} ({x:02X},{y:02X}): FC service {kind} has no DQ5 service")
         times = [n for n, tag in ((False, "낮"), (True, "밤")) if tag in cond] or [False, True]
         for night in times:
-            out.setdefault((x, y, night), kind)
+            if out.get((x, y, night), SERVICE[kind]) != SERVICE[kind]:
+                raise ValueError(f"{fc_group:02X}/{number:02X} ({x:02X},{y:02X}): two services")
+            out[x, y, night] = SERVICE[kind]
     return out
 
 
@@ -64,7 +85,10 @@ def _cpu(addr):
 
 
 def port(dq5_path, dq4_path, inn_at):
-    """(service kinds per person, dq5progress shops, inn patch writes, report)."""
+    """(service kinds per person, dq5progress shops, inn patch writes, report). The inn table bank must show
+    the low WRAM: 06:F563 keeps the table bank in DB and writes $0F28-$0F36 with absolute addresses."""
+    if not inn_at >> 16 <= 0x3F:
+        raise ValueError(f"inn table bank {inn_at >> 16:02X}: needs 00-3F")
     prg = ines.prg(Path(dq4_path).read_bytes())
     rom = dq5item.Rom(Path(dq5_path).read_bytes())
     items = dq5_items(rom)
@@ -102,6 +126,7 @@ def port(dq5_path, dq4_path, inn_at):
                 inns[group] = price
     report["inns"] = {f"{g:02X}": p for g, p in inns.items()}
     original = bytes(rom.u8(INN_TABLE + i) for i in range(INN_ENTRIES * 2))
+    # New entries keep bit7 off: after sleeping the party lines up behind the hero ($0F36 -> $198E).
     table = original + b"".join(bytes((g, p)) for g, p in sorted(inns.items()))
     writes = [
         {"at": _cpu(inn_at), "hex": table.hex(" ").upper(), "note": "여관 1인 값 표(원래 21항목 + 새 그룹)"},
