@@ -3,7 +3,10 @@
   table  every new map by day and by night (7E:075E = F0): the person table right after the list loader
          (12:803C) equals what the built ROM's list predicts (dq5npc.table_values)
   talk   every standing person: stand on the FC cell next to it, face it, press A; the first message the
-         message routine 24:8BAF gets is the person's message (talk + 3C6)
+         message routine 24:8BAF gets is the person's message (talk + 3C6), or for a church, an inn or the
+         deposit the first message of that DQ5 service (an inn also leaves its price for one in 7E:0F28)
+  shop   every weapon, item and armor seller: talk, then かう; the items and prices the list window shows
+         (dq5progresscheck.lua, MODE=shop) are the group's list from dq4shopport.py
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4npccheck.py --build work/dq4-groups --out work/dq4-groups/npccheck
 """
@@ -35,6 +38,18 @@ from dq5npcrecordcheck import compare  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
 
 PROBE = DQ5_TOOLS / "lua" / "dq5npcrecordcheck.lua"
+SHOP_PROBE = DQ5_TOOLS / "lua" / "dq5progresscheck.lua"
+# First message of each DQ5 service (06:DBD2, sfc/dq5/docs/dq5-data-format.md 「가게 종류」). At night the
+# inn opens with 071 and the church with 080 (measured on 36/00 and 37/00).
+SERVICE_MESSAGE = {1: 0x002, 2: 0x000, 3: 0x001, 4: 0x0B9, 5: 0x07E, 6: 0x070}
+NIGHT_MESSAGE = {5: 0x080, 6: 0x071}
+SHOPS = {1: "무기", 2: "도구", 3: "방어구"}
+INN, INN_PRICE = 6, 0x0F28
+# After the shop's greeting: A for the next page and the かう/うる menu, A for かう.
+BUY = ",a:4,wait:80,a:4,wait:150"
+# The inn sets the price (7E:0F28) for its second message (072). An A while 070 is still printing only
+# finishes the text, so wait first and press twice.
+STAY = ",wait:150,a:4,wait:150,a:4,wait:120"
 NIGHT_POKE = "7E075E=F0;7E075F=00"
 SIDES = ((0, 1, "up"), (0, -1, "down"), (1, 0, "left"), (-1, 0, "right"))
 # Inputs to talk: turn, A for the command window, A for はなす. A standing party gets the status window and
@@ -46,7 +61,7 @@ TALKS = tuple(f"{{dir}}:20,wait:{turn},a:4,wait:{window},a:4,wait:300"
 TALK_MESSAGE = 0x3C6
 
 
-def run(mesence, rom, state, out, name, libdir, to, test, night):
+def run(mesence, rom, state, out, name, libdir, to, test, night, shop=False):
     dest = out / name
     dest.mkdir(parents=True)
     group, number = to.split(",")[0].split("/")
@@ -58,16 +73,26 @@ def run(mesence, rom, state, out, name, libdir, to, test, night):
                WARPEXIT=f"{warp_exit(rom):X}", DP86OK=dp86_allowed(rom))
     if night:
         env["POKE"] = NIGHT_POKE
+    if shop:
+        env.update(MODE="shop", DRIVER=str(DQ5_TOOLS / "lua" / "dq5warp.lua"))
     with (dest / "mesen.log").open("w", encoding="utf-8") as log:
         try:
-            subprocess.run([str(mesence), "--testrunner", str(rom), str(PROBE), "--Snes.DisableFrameSkipping=true"],
+            subprocess.run([str(mesence), "--testrunner", str(rom), str(SHOP_PROBE if shop else PROBE),
+                            "--Snes.DisableFrameSkipping=true"],
                            env=env, stdout=log, stderr=subprocess.STDOUT, timeout=300, check=False)
         except subprocess.TimeoutExpired:
             return None, None
+    if shop:
+        text = (dest / "observed.txt").read_text(encoding="utf-8") if (dest / "observed.txt").exists() else ""
+        prices = [(int(i, 16), int(v)) for i, v in re.findall(r"price item=([0-9A-F]+) value=(\d+)", text)]
+        return None, prices
     text = (dest / "warp.txt").read_text(encoding="utf-8") if (dest / "warp.txt").exists() else ""
     found = re.search(r"^messages (.*)$", text, re.M)
     messages = [int(v, 16) for v in found[1].split(",") if v] if found else None
+    final = dest / "final.wram"
     wram = (dest / "npc.bin").read_bytes() if (dest / "npc.bin").exists() else None
+    if final.exists() and wram is not None:
+        wram = (wram, final.read_bytes())
     return wram, messages
 
 
@@ -95,6 +120,9 @@ def main():
     built = Rom(rom_path.read_bytes())
     layout = json.loads((args.build / "npc-layout.json").read_text(encoding="utf-8"))
     people = json.loads((args.build / "npc-report.json").read_text(encoding="utf-8"))
+    shop_report = json.loads((args.build / "shop-report.json").read_text(encoding="utf-8"))
+    shop_items = {(s["map"], s["kind"]): s["dq5"] for s in shop_report["shops"]}
+    inns = {int(g, 16): price for g, price in shop_report["inns"].items()}
     prg = ines.prg(args.dq4.read_bytes())
     state = args.state.resolve()
 
@@ -118,16 +146,28 @@ def main():
                 jobs.append(("unreachable", f"talk-{m.replace('/', '')}-{i}", m, None, None, p["night"], None))
                 continue
             sx, sy, d = side
-            jobs.append(("talk", f"talk-{m.replace('/', '')}-{i}", m, f"{m},{','.join(map(str, cell(sx, sy)))}",
-                         d, p["night"], int(p["message"], 16)))
+            to = f"{m},{','.join(map(str, cell(sx, sy)))}"
+            service = p.get("service")
+            if service in SHOPS:
+                jobs.append(("shop", f"shop-{m.replace('/', '')}-{i}", m, to, d, p["night"],
+                             shop_items[m, SHOPS[service]]))
+            elif service is not None:
+                first = NIGHT_MESSAGE.get(service, SERVICE_MESSAGE[service]) if p["night"] else SERVICE_MESSAGE[service]
+                jobs.append(("inn" if service == INN else "talk", f"talk-{m.replace('/', '')}-{i}", m, to, d,
+                             p["night"], (first, inns.get(group) if service == INN else None)))
+            else:
+                jobs.append(("talk", f"talk-{m.replace('/', '')}-{i}", m, to, d, p["night"],
+                             (int(p["message"], 16), None)))
 
     def scene(kind, name, to, test, night):
         if kind == "unreachable":
             return None, None, None
         if kind == "table":
             return run(mesence, rom_path, state, out, name, libdir, to, test, night) + (None,)
+        shop = kind == "shop"
         for n, talk in enumerate(TALKS):
-            wram, messages = run(mesence, rom_path, state, out, f"{name}-{n}", libdir, to, talk.format(dir=test), night)
+            wram, messages = run(mesence, rom_path, state, out, f"{name}-{n}", libdir, to,
+                                 talk.format(dir=test) + (BUY if shop else STAY if kind == "inn" else ""), night, shop)
             if messages:
                 return wram, messages, n
         return wram, messages, None
@@ -141,18 +181,28 @@ def main():
             wram, messages, timing = future.result()
             if kind == "unreachable":
                 results[name] = {"ok": False, "error": "no free walkable cell next to the person"}
+            elif kind == "shop":
+                items = [item for item, _ in messages or []]
+                results[name] = {"ok": items == want, "want": want, "got": messages, "timing": timing}
             elif kind == "table":
                 if wram is None:
                     results[name] = {"ok": False, "error": "no npc.bin"}
                     continue
+                wram = wram[0] if isinstance(wram, tuple) else wram
                 flags = {0x7E2190 + i: wram[0x2190 + i] for i in range(0x170)}
                 at = int(layout["lists"][m].replace(":", ""), 16)
                 placed = [(a, f) for a, _ in list_entries(built, at) if (f := parse(built, a, night))]
                 bad = compare(wram, table_values(built, placed, flags))
                 results[name] = {"ok": not bad, "people": len(placed), "mismatch": bad[:10]}
             else:
-                results[name] = {"ok": bool(messages) and messages[0] == want, "want": f"{want:03X}",
-                                 "got": [f"{v:03X}" for v in messages or []][:4], "timing": timing}
+                message, price = want
+                ok = bool(messages) and messages[0] == message
+                got_price = None
+                if price is not None:
+                    got_price = wram[1][INN_PRICE] if isinstance(wram, tuple) else None
+                    ok = ok and got_price == price
+                results[name] = {"ok": ok, "want": f"{message:03X}", "got": [f"{v:03X}" for v in messages or []][:4],
+                                 "timing": timing, **({"price": got_price, "want_price": price} if price else {})}
     ok = all(r["ok"] for r in results.values())
     report = {"status": "passed" if ok else "failed", "scenes": dict(sorted(results.items()))}
     (out / "results.json").write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n")

@@ -69,6 +69,9 @@ class PortTest(unittest.TestCase):
         for entries in lists:
             for e in entries["entries"]:
                 talk = e["fields"]["talk"]
+                if talk <= 6:  # a DQ5 shop, inn, church or deposit (06:DBD2)
+                    self.assertEqual(e["fields"]["interval"], 0)
+                    continue
                 self.assertGreaterEqual(talk, port.TALK_FIRST)
                 self.assertLess(talk, 0x900)
                 self.assertIn(talk + port.TALK_MESSAGE, ids)
