@@ -59,8 +59,11 @@ def run(mesence, rom, state, out, name, libdir, to, test, night):
     if night:
         env["POKE"] = NIGHT_POKE
     with (dest / "mesen.log").open("w", encoding="utf-8") as log:
-        subprocess.run([str(mesence), "--testrunner", str(rom), str(PROBE), "--Snes.DisableFrameSkipping=true"],
-                       env=env, stdout=log, stderr=subprocess.STDOUT, timeout=300, check=False)
+        try:
+            subprocess.run([str(mesence), "--testrunner", str(rom), str(PROBE), "--Snes.DisableFrameSkipping=true"],
+                           env=env, stdout=log, stderr=subprocess.STDOUT, timeout=300, check=False)
+        except subprocess.TimeoutExpired:
+            return None, None
     text = (dest / "warp.txt").read_text(encoding="utf-8") if (dest / "warp.txt").exists() else ""
     found = re.search(r"^messages (.*)$", text, re.M)
     messages = [int(v, 16) for v in found[1].split(",") if v] if found else None
@@ -112,12 +115,15 @@ def main():
                          if walkable(source, p["x"] + dx, p["y"] + dy) and (p["x"] + dx, p["y"] + dy) not in occupied),
                         None)
             if side is None:
+                jobs.append(("unreachable", f"talk-{m.replace('/', '')}-{i}", m, None, None, p["night"], None))
                 continue
             sx, sy, d = side
             jobs.append(("talk", f"talk-{m.replace('/', '')}-{i}", m, f"{m},{','.join(map(str, cell(sx, sy)))}",
                          d, p["night"], int(p["message"], 16)))
 
     def scene(kind, name, to, test, night):
+        if kind == "unreachable":
+            return None, None, None
         if kind == "table":
             return run(mesence, rom_path, state, out, name, libdir, to, test, night) + (None,)
         for n, talk in enumerate(TALKS):
@@ -133,7 +139,9 @@ def main():
         for future in concurrent.futures.as_completed(futures):
             kind, name, m, night, want = futures[future]
             wram, messages, timing = future.result()
-            if kind == "table":
+            if kind == "unreachable":
+                results[name] = {"ok": False, "error": "no free walkable cell next to the person"}
+            elif kind == "table":
                 if wram is None:
                     results[name] = {"ok": False, "error": "no npc.bin"}
                     continue

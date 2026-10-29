@@ -14,7 +14,10 @@ placeholders (SERVICES) until DQ4 shops are ported.
 import argparse
 import collections
 import json
+import re
+import subprocess
 import sys
+import tempfile
 import unicodedata
 from pathlib import Path
 
@@ -84,7 +87,9 @@ def fc_people(prg, fc_group, number, night):
     for rec in dq4talk.npc_list(prg, fc_group, number, night):
         x, y = dq4talk.pos(rec, night)
         step = rec[2] & 0x0F if night else rec[2] >> 4
-        out.append({"x": x, "y": y, "facing": FACING[rec[3] & 3], "interval": step,
+        # Facing comes from the picture's byte: byte 3, or byte 7 at night when F bit0 is off (1C:$99B3).
+        facing = rec[7] if night and not rec[0] & 1 else rec[3]
+        out.append({"x": x, "y": y, "facing": FACING[facing & 3], "interval": step,
                     "picture": dq4talk.sprite(rec, night) & 0x7F, "talk": dq4talk.talk_id(rec, night),
                     "shows": dq4talk.predict(prg, dq4talk.talk_id(rec, night), state)})
     return out
@@ -98,56 +103,81 @@ def _codes_of_char():
 
 
 CODE_OF = _codes_of_char()
+FULLWIDTH_DIGITS = {ord(c): ord(c) + 0xFEE0 for c in "0123456789"}
 REVERSE = {code: char for char, code in CODE_OF.items()}
 
 
+def _pieces(text):
+    """dq4text symbols as a list: control names as str, characters as ("char", c)."""
+    pieces, i = [], 0
+    while i < len(text):
+        if text[i] == "{":
+            j = text.index("}", i)
+            pieces.append(text[i + 1:j])
+            i = j + 1
+        else:
+            pieces.append(("char", text[i]))
+            i += 1
+    return pieces
+
+
+def _skip_speaker(pieces, k):
+    """Index after a speaker mark 「＊「」 (and a line break after it) at k, or k. DQ5 puts the mark on a
+    message and a page itself (24:8AF9), so a written one would show twice."""
+    if pieces[k:k + 2] == [("char", "＊"), ("char", "「")]:
+        k += 2
+        if pieces[k:k + 1] == ["LINE"]:
+            k += 1
+    return k
+
+
+def _code(m, char):
+    if char not in CODE_OF:
+        char = unicodedata.normalize("NFKC", char).translate(FULLWIDTH_DIGITS)
+    if char not in CODE_OF:
+        raise ValueError(f"FC message {m:04X}: no DQ5 character for {char!r}")
+    return CODE_OF[char]
+
+
 def dq5_codes(rom, messages):
-    """FC messages (dq4text symbols) as one DQ5 message: {LINE} -> line break, {WAIT} and the speaker mark
-    after it -> page, a dakuten mark {3D} joins the next kana, messages are joined by pages."""
+    """FC messages (dq4text symbols) as one DQ5 message: {LINE} -> line break, {WAIT} -> page, a dakuten
+    mark {3D} joins the next kana, messages are joined by pages. Speaker marks at the start of a message or
+    a page are dropped, and a page is never doubled or left empty at the end."""
     codes = []
-    for n, m in enumerate(messages):
-        text = dq4text.symbolize(dq4text.message_bytes(rom, m))
-        pieces = []
-        i = 0
-        while i < len(text):
-            if text[i] == "{":
-                j = text.index("}", i)
-                pieces.append(text[i + 1:j])
-                i = j + 1
-            else:
-                pieces.append(("char", text[i]))
-                i += 1
-        if n:
+
+    def page():
+        if codes and codes[-1] != PAGE:
             codes.append(PAGE)
+    for m in messages:
+        pieces = _pieces(dq4text.symbolize(dq4text.message_bytes(rom, m)))
+        page()
         k = 0
+        while k < len(pieces) and pieces[k] == "NOINDENT":
+            k += 1
+        k = _skip_speaker(pieces, k)
         while k < len(pieces):
             p = pieces[k]
+            k += 1
             if isinstance(p, tuple):
-                char = unicodedata.normalize("NFKC", p[1]) if p[1] not in CODE_OF else p[1]
-                if char not in CODE_OF:
-                    char = unicodedata.normalize("NFKC", char).translate({ord(c): ord(c) + 0xFEE0 for c in "0123456789"})
-                codes.append(CODE_OF[char])
+                codes.append(_code(m, p[1]))
             elif p == "LINE":
                 codes.append(LINE)
             elif p == "WAIT":
-                if codes[-1:] != [PAGE]:
-                    codes.append(PAGE)
-                if k + 2 < len(pieces) and pieces[k + 1] == ("char", "＊") and pieces[k + 2] == ("char", "「"):
-                    k += 2
-                    if k + 1 < len(pieces) and pieces[k + 1] == "LINE":
-                        k += 1
+                page()
+                k = _skip_speaker(pieces, k)
             elif p == "3D":
+                if k >= len(pieces) or not isinstance(pieces[k], tuple):
+                    raise ValueError(f"FC message {m:04X}: dakuten mark without a character")
+                codes.append(_code(m, unicodedata.normalize("NFC", pieces[k][1] + "\u3099")))
                 k += 1
-                codes.append(CODE_OF[unicodedata.normalize("NFC", pieces[k][1] + "゙")])
             elif p == "NOINDENT":
                 pass
             elif p == "END":
                 break
             else:
                 raise ValueError(f"FC message {m:04X}: no DQ5 code for {{{p}}}")
-            k += 1
-    if codes and codes[0] == PAGE:
-        codes.pop(0)
+    while codes and codes[-1] == PAGE:
+        codes.pop()
     return codes + [END]
 
 
@@ -176,12 +206,11 @@ def message_pool(dq5_rom_path):
             if TALK_FIRST <= f["talk"] < 0x900:
                 users[f["talk"] + TALK_MESSAGE].add(e["name"].split()[0])
     return sorted(m for m, names in users.items()
-                  if len(names) == 1 and int(next(iter(names))[:2], 16) in POOL_GROUPS and m not in in_scripts)
+                  if len(names) == 1 and re.fullmatch(r"[0-9A-F]{2}/[0-9A-F]{2}", name := next(iter(names)))
+                  and int(name[:2], 16) in POOL_GROUPS and m not in in_scripts)
 
 
 def subprocess_json(args):
-    import subprocess
-    import tempfile
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "out.json"
         subprocess.run([sys.executable, str(DQ5_TOOLS / args[0]), *args[1:], "-o", str(path)], check=True,
@@ -193,7 +222,7 @@ def port(dq5_path, dq4_path):
     """(dq5npcrelocate lists, dq5text messages, report)."""
     data = Path(dq4_path).read_bytes()
     prg, rom = ines.prg(data), dq4text.Rom(data)
-    pool = iter(message_pool(dq5_path))
+    pool = message_pool(dq5_path)
     texts = {}
     lists, report = [], {}
     for name, (group, number) in sorted(GROUPS.items(), key=lambda kv: kv[1]):
@@ -210,7 +239,9 @@ def port(dq5_path, dq4_path):
                     key = ("fc", tuple(shows))
                     codes = dq5_codes(rom, shows) if shows else service_codes(0)
                 if key not in texts:
-                    texts[key] = (next(pool), codes)
+                    if len(texts) == len(pool):
+                        raise ValueError(f"DQ5 message pool of {len(pool)} is used up")
+                    texts[key] = (pool[len(texts)], codes)
                 message = texts[key][0]
                 if p["picture"] not in PICTURES:
                     raise ValueError(f"{name}: FC picture {p['picture']:02X} has no DQ5 picture")

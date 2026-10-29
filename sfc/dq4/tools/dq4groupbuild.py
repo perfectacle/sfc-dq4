@@ -43,7 +43,7 @@ LINKS = {
 NEWMAP_AT = ("--entrance-table-at", "3C:C000", "--records-at", "34:8000", "--door-bank", "3B")
 EXIT_AT = ("--exits-at", "2A:D812", "--records-at", "3C:A000")
 ENTRANCES_AT = ("--entrances-at", "3C:8000")
-# The whole walking text is written again (dq5textwrite): about three and a half banks.
+# dq5textwrite writes the whole walking text again, so it takes banks of its own.
 TEXT_AT = ("--at", "35:8000")
 LAYER = 1
 WORLD_CODE = 1

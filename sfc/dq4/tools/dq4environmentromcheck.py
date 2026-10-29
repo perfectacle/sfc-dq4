@@ -261,8 +261,10 @@ def main():
         # BG1 is filled with CHR slot 0 (VRAM word 2000); it must stay blank or it covers the map.
         result["blank_tile_kept"] = all(bytes(v[BLANK_TILE:BLANK_TILE + 32]) == bytes(32)
                                         for v in [vram] + [v for _, v, _ in later])
+        # The routine counts its own calls, not frames: where the game runs slower (36/01 with 21 people
+        # calls it every other frame) a frame may stay for a dump, but it never skips or goes back.
         result["water_cycles"] = not has_water or None not in cycle and all(
-            (b - a) % 3 == 1 for a, b in zip(cycle, cycle[1:]))
+            (b - a) % 3 in (0, 1) for a, b in zip(cycle, cycle[1:])) and cycle[0] != cycle[-1]
         source = sources[name]
         result["exit_cells_expected"] = sum(block_prop(source, source.cell(cx, cy) & 31) in STAIRS
                                             for cy in range(source.h) for cx in range(source.w)) if name in GROUPS else 0
