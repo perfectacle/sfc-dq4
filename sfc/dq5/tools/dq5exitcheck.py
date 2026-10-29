@@ -158,7 +158,7 @@ def dp86_allowed(path):
     return ','.join(f'{a:06X}' for a in (*EXIT_SHORT, *EXIT_INDEXED, *stub))
 
 
-def run(case, roms, state, out, mesence, libdir, audit=False):
+def run(case, roms, state, out, mesence, libdir, audit=False, stale=STALE):
     name, rom, to, test, _, *extra = case
     extra = extra[0] if extra else {}
     dest = out / name
@@ -172,8 +172,8 @@ def run(case, roms, state, out, mesence, libdir, audit=False):
         env['CELL'] = extra['cell']
     if extra.get('msglog'):
         env['MSGLOG'] = '1'
-    if rom in STALE:
-        env['STALE'] = STALE[rom]
+    if rom in stale:
+        env['STALE'] = stale[rom]
     if audit:
         env['AUDIT'] = '1'
         if os.environ.get('AUDITOPEN'):

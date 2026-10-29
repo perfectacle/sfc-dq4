@@ -126,17 +126,19 @@ def group_spans(rom, attr=False, kind=None):
 
 # 01:D2FC 문 표(01:F3F9 가 C0 이상 바이트를 $BC 번, 80 이상 바이트를 $BD 번 건너뛰어 찾는다). 여섯 입구가 PHK·PLB 로
 # DB 를 01 로 두고 읽는다(01:D97B 는 11:8E54 의 JSL 이 부르고 D9A6·DE19·DE49 를 거쳐 F3F9 에 닿음). dq5newmap.py 가
-# 표를 늘린 롬은 입구가 JML 로 뱅크 01 의 스텁에 가고, 스텁이 PEA·PLB·PLB 로 DB 를 표 뱅크(뱅크 01 을 복사한 늘린
-# 뱅크)로 둔다. 표는 그 뱅크의 같은 주소 D2FC 에 있다.
+# 표를 늘린 롬은 입구가 JML 로 스텁에 가고, 스텁이 PEA·PLB·PLB 로 DB 를 표 뱅크(뱅크 01 을 복사한 늘린 뱅크)로
+# 둔다. 표는 그 뱅크의 같은 주소 D2FC 에 있다.
 DOOR_TABLE = 0x01D2FC
 DOOR_ENTRIES = (0x01D8C2, 0x01D915, 0x01D92E, 0x01D97B, 0x01F117, 0x01F3C9)
 
 
 def door_stub(entry, bank):
-    """입구 하나의 스텁(11바이트). 01:F3C9 만 PHB PHK PLB JSR $F3D1 PLB RTL 이라 스텁이 JSR 까지 맡는다."""
+    """입구 하나의 스텁(11바이트, 01:F3C9 는 13바이트). 스텁은 어느 뱅크에 있어도 된다.
+    01:F3C9 만 PHB PHK PLB JSR $F3D1 PLB RTL 이라, 스텁이 JSR 이 쌓을 복귀 주소 F3CE 를 PEA 로 쌓고 F3D1 로 JML 한다.
+    F3D1 의 RTS 는 JML 로 덮지 않은 입구의 PLB·RTL(01:F3CF)로 돌아온다."""
     if entry == 0x01F3C9:
-        # PHB / PEA / PLB / PLB / JSR F3D1 / PLB / RTL
-        return bytes([0x8B, 0xF4, bank, bank, 0xAB, 0xAB, 0x20, 0xD1, 0xF3, 0xAB, 0x6B])
+        # PHB / PEA / PLB / PLB / PEA F3CE / JML F3D1
+        return bytes([0x8B, 0xF4, bank, bank, 0xAB, 0xAB, 0xF4, 0xCE, 0xF3, 0x5C, 0xD1, 0xF3, 0x01])
     # PHP / PHB / PEA / PLB / PLB / JML 입구+4(원래 PHP·PHB·PHK·PLB 다음)
     return bytes([0x08, 0x8B, 0xF4, bank, bank, 0xAB, 0xAB, 0x5C, *(entry + 4).to_bytes(3, 'little')])
 
@@ -150,13 +152,16 @@ def door_table(rom):
         if head == (b'\x8b\x4b\xab\x20' if entry == 0x01F3C9 else b'\x08\x8b\x4b\xab'):
             banks.add(None)
             continue
-        if head[0] != 0x5C or head[3] != 0x01:
+        if head[0] != 0x5C:
             raise ValueError(f'{entry >> 16:02X}:{entry & 0xFFFF:04X} 가 문 표 입구의 원래 꼴도 JML 도 아님')
-        stub = 0x010000 | head[1] | head[2] << 8
-        code = bytes(rom.u8(stub + i) for i in range(11))
-        if code != door_stub(entry, code[3 if entry != 0x01F3C9 else 2]):
-            raise ValueError(f'01:{stub & 0xFFFF:04X} 이 {entry >> 16:02X}:{entry & 0xFFFF:04X} 의 문 표 스텁 꼴이 아님')
-        banks.add(code[3 if entry != 0x01F3C9 else 2])
+        stub = head[1] | head[2] << 8 | head[3] << 16
+        size = len(door_stub(entry, 0))
+        code = bytes(rom.d[lorom(stub):lorom(stub) + size]) if 0x8000 <= stub & 0xFFFF <= 0x10000 - size else b''
+        bank = code[3 if entry != 0x01F3C9 else 2] if len(code) == size else None
+        if bank is None or code != door_stub(entry, bank):
+            raise ValueError(f'{stub >> 16:02X}:{stub & 0xFFFF:04X} 이 {entry >> 16:02X}:{entry & 0xFFFF:04X} 의 문 표 스텁 꼴이 '
+                             '아님(옛 도구로 만든 롬이면 원래 롬에서 다시 만듦)')
+        banks.add(bank)
     if len(banks) != 1:
         raise ValueError('문 표 입구가 원래 꼴과 스텁으로 섞였거나 스텁의 뱅크가 다름')
     bank = banks.pop()

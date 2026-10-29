@@ -7,7 +7,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dq5chestplace import FORMAT, check, map_key, patch, plan
 from dq5build import build, parse_at
-from dq5map import Rom
+from dq5chest import LOWER_TABLE
+from dq5map import Rom, lorom
 from test_dq5chestwrite import ROM
 
 CHEST_BLOCK = 384
@@ -126,6 +127,18 @@ class ChestPlaceTests(unittest.TestCase):
         for value, places in bad:
             with self.subTest(value=value), self.assertRaises(ValueError):
                 plan(rom, value, 0x3E8000, places)
+
+    @unittest.skipUnless(ROM.is_file(), '롬 없음')
+    def test_lower_row_buried_only_where_engine_reads_it(self):
+        def moved(group, number, x, y):
+            data = bytearray(ROM.read_bytes())
+            data[lorom(LOWER_TABLE):lorom(LOWER_TABLE) + 4] = bytes([group, number, x, y])
+            return Rom(bytes(data))
+
+        at = {'chests': 0x3F8000, 'chest_maps': 0x1EEE4E}
+        with self.assertRaisesRegex(ValueError, "'lower', 2, 2"):
+            plan(moved(0x32, 0, 2, 2), doc((2, 2, CHEST_BLOCK, 1), map_name='32/00'), 0x3E8000, at)
+        plan(moved(0x01, 2, 36, 26), doc((36, 26, CHEST_BLOCK, 1)), 0x3E8000, at)
 
     @unittest.skipUnless(ROM.is_file(), '롬 없음')
     def test_rejects(self):

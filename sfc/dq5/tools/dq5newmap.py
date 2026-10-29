@@ -24,7 +24,7 @@
   그룹 50 이상은 50·52·53 에만 더한다(51·54 는 01:94B4 가 $BD 마다 영역 이동 목록을 고르고, 맞는 것이 없으면
   앞 맵의 개수 $183D 가 남음).
   문 표(01:D2FC)는 --door-bank BB(30~3F)로 늘린다: 뱅크 01 을 그 뱅크에 복사하고 복사본의 문 표에 빈 맵·빈 그룹을
-  끼운 뒤, 문 자료로 들어가는 여섯 입구를 JML 로 --door-stub-at(기본 01:FED0)의 스텁에 보내 DB 를 그 뱅크로 둔다.
+  끼운 뒤, 문 자료로 들어가는 여섯 입구를 JML 로 --door-stub-at(기본 22:FF30)의 스텁에 보내 DB 를 그 뱅크로 둔다.
   주지 않으면 새 맵이 건너뛰기로 읽게 되는 문 목록이 비어 있지 않거나 표 밖일 때 거부하고,
   --allow-door-readthrough 를 주면 그대로 만든다.
 """
@@ -50,13 +50,15 @@ ENTRANCE_SITES = ((0x2AF394, 0), (0x2AF39C, 1), (0x2AF3A2, 2), (0x2AF3A8, 3), (0
 ENTRANCE_SIZE = 5
 # 01:F3F9: 문 표. 그룹은 C0 이상 바이트로, 그룹 안 맵은 80 이상 바이트로 끝나고 $BC·$BD 만큼 건너뛰어 찾는다.
 DOOR_END = 0x01D8C2
-DOOR_STUB = 0x01FED0
-STUB_SIZE = 11
+# 뱅크 01 끝 빈 자리는 비워 둔다. 다른 패치가 거기 둔 자료도 문 루틴이 같은 DB 로 읽을 수 있어 복사본에 함께 든다.
+DOOR_STUB = 0x22FF30
+STUB_SIZES = [len(door_stub(entry, 0)) for entry in DOOR_ENTRIES]
 # 문 루틴이 문 표 밖에서 같은 DB 로 읽는 뱅크 01 자료가 든 구간. 문을 여는 01:DFAB 가 종류마다 $0E 에 넣는
 # 타일 워드 표 F037·F067(01:E170, 종류 3F·40)·F097·F0D7(01:E539, 41·42)과 $03 의 그림 표 FDxx·FExx 이 이 안이다.
-# 늘린 문 표는 이 앞에서 끝나야 하고, 복사본의 이 구간은 뱅크 01 과 같아야 한다. 구간 안의 코드도 함께 견주므로
-# 문 루틴을 고치는 다른 패치(01:F42D 훅 등)를 복사 뒤에 넣으면 거부된다.
-DOOR_DATA = (0xF037, 0xFEB7)
+# 뱅크 끝 빈 자리에 다른 패치가 둔 문 항목(LDA $D2FC,Y 의 Y 를 바꿔 가리킴)도 같은 DB 로 읽히므로
+# 뱅크 끝까지 본다. 늘린 문 표는 이 앞에서 끝나야 하고, 복사본의 이 구간은 뱅크 01 과 같아야 한다. 구간 안의 코드도
+# 함께 견주므로 문 루틴이나 그 자료를 고치는 다른 패치를 복사 뒤에 넣으면 거부된다.
+DOOR_DATA = (0xF037, 0x10000)
 
 
 def cpu(addr):
@@ -298,8 +300,8 @@ def table_writes(rom, kind, groups, at):
 def door_writes(rom, plan, at):
     """새 맵·새 그룹에 빈 문 목록을 끼운 문 표. 처음 늘릴 때는 뱅크 01 전체를 door_bank 에 복사하고 그 복사본의
     D2FC 에 표를 둔 뒤, 여섯 입구를 JML 로 스텁에 보내 DB 를 door_bank 로 둔다(문 루틴이 DB 로 읽는 뱅크 01 의 다른
-    자료도 복사본에서 같은 값으로 읽힌다). door_bank 는 비어 있어야 하고(롬 끝 너머이거나 모두 0), 이미 늘린 롬은
-    복사본의 DOOR_DATA(입구 머리 제외)가 뱅크 01 과 같을 때만 다시 쓴다."""
+    자료도 복사본에서 같은 값으로 읽힌다). door_bank 는 비어 있어야 하고(롬 끝 너머이거나 표지 말고 모두 0), 이미 늘린 롬은
+    복사본의 DOOR_DATA(입구 머리·뱅크 01 의 스텁 제외)가 뱅크 01 과 같을 때만 다시 쓴다."""
     table = door_table(rom)
     groups = door_groups(rom, len(group_spans(rom)[0]))
     size = sum(len(m) for maps in groups for m in maps)
@@ -323,14 +325,17 @@ def door_writes(rom, plan, at):
     if table != DOOR_TABLE:
         if at.get('door_bank') not in (None, table >> 16):
             raise ValueError(f'문 표는 이미 뱅크 {table >> 16:02X} 에 있음')
-        jml = read(rom, DOOR_ENTRIES[-1], 4)
-        stub = (0x010000 | jml[1] | jml[2] << 8) - (len(DOOR_ENTRIES) - 1) * STUB_SIZE
+        stub = int.from_bytes(read(rom, DOOR_ENTRIES[0], 4)[1:], 'little')
         if at.get('door_stub') not in (None, stub):
             raise ValueError(f'문 표 스텁은 이미 {cpu(stub)} 에 있음')
+        # 스텁을 뱅크 01 에 두었으면 복사본의 그 자리는 스텁을 쓰기 전 바이트다
+        skip = [(e & 0xFFFF, (e & 0xFFFF) + 4) for e in DOOR_ENTRIES]
+        if stub >> 16 == 0x01:
+            skip.append((stub & 0xFFFF, (stub & 0xFFFF) + sum(STUB_SIZES)))
         lo, n = DOOR_DATA[0], DOOR_DATA[1] - DOOR_DATA[0]
         copy, here = read(rom, table & 0xFF0000 | lo, n), read(rom, 0x010000 | lo, n)
         for a in range(lo, lo + n):
-            if copy[a - lo] != here[a - lo] and not any(e & 0xFFFF <= a < (e & 0xFFFF) + 4 for e in DOOR_ENTRIES):
+            if copy[a - lo] != here[a - lo] and not any(s <= a < e for s, e in skip):
                 raise ValueError(f'뱅크 {table >> 16:02X} 복사본의 {a:04X} 가 뱅크 01 과 다름(복사 뒤 다른 패치가 뱅크 01 을 '
                                  '고침. 그 패치를 먼저 넣은 롬에서 문 표 패치를 다시 만듦)')
         return [(table, blob, '문 표')]
@@ -338,18 +343,23 @@ def door_writes(rom, plan, at):
     if not 0x30 <= bank <= 0x3F:
         raise ValueError('--door-bank 는 30~3F(문 루틴이 그 DB 로 WRAM 을 abs 로 씀)')
     off = lorom(bank << 16 | 0x8000)
-    if any(rom.d[off:off + 0x8000]):
+    rest = bytes(rom.d[off:off + 0x8000])
+    # dq5build 가 늘린 뱅크 머리에 두는 표지는 빈 뱅크로 친다
+    if rest[:8] == b'DQ5X' + (off // 0x8000).to_bytes(4, 'little'):
+        rest = rest[8:]
+    if any(rest):
         raise ValueError(f'--door-bank {bank:02X}: 뱅크 01 을 복사할 뱅크가 비어 있지 않음')
     copy = bytearray(read(rom, 0x018000, 0x8000))
     copy[(DOOR_TABLE & 0x7FFF):(DOOR_TABLE & 0x7FFF) + len(blob)] = blob
     stub = at.get('door_stub') or DOOR_STUB
-    if stub >> 16 != 0x01 or not bank_free(rom, stub, STUB_SIZE * len(DOOR_ENTRIES)):
-        raise ValueError(f'--door-stub-at {cpu(stub)}: 뱅크 01 의 빈 자리 {STUB_SIZE * len(DOOR_ENTRIES)}바이트가 필요함')
+    if stub >> 16 in (bank, 0x00) or stub >> 16 > 0x7D or not bank_free(rom, stub, sum(STUB_SIZES)):
+        raise ValueError(f'--door-stub-at {cpu(stub)}: 문 표 뱅크 밖의 빈 자리 {sum(STUB_SIZES)}바이트가 필요함')
     out = [(bank << 16 | 0x8000, bytes(copy), '뱅크 01 복사본(문 표를 늘림)')]
-    for i, entry in enumerate(DOOR_ENTRIES):
-        at_stub = stub + i * STUB_SIZE
+    at_stub = stub
+    for entry, size in zip(DOOR_ENTRIES, STUB_SIZES):
         out += [(at_stub, door_stub(entry, bank), f'문 표 입구 {cpu(entry)} 스텁'),
                 (entry, bytes([0x5C, *at_stub.to_bytes(3, 'little')]), f'문 표 입구 {cpu(entry)}')]
+        at_stub += size
     return out
 
 
@@ -440,7 +450,8 @@ def patch(rom, doc, base=Path('.'), at=None, allow_doors=False):
 def check(rom, doc, base=Path('.'), at=None, allow_doors=False):
     from dq5mapwrite import all_maps
     manifest = patch(rom, doc, base, at, allow_doors)
-    mb = manifest.get('rom_size', 0)
+    # 이미 늘린 롬(다른 패치를 먼저 넣은 롬)에서 만든 패치는 그 크기 아래로 줄이지 않는다
+    mb = max(manifest.get('rom_size', 0), len(rom.d) // 0x100000) if 'rom_size' in manifest else 0
     writes = [(lorom(int(w['at'][:2], 16) << 16 | int(w['at'][3:], 16)), bytes.fromhex(w['hex']),
                bytes.fromhex(w['orig']) if 'orig' in w else None, w['note']) for w in manifest['writes']]
     built = Rom(build(rom.d, [('new-maps', mb, writes)], mb)[0])
@@ -497,7 +508,7 @@ def address(text):
 PLACES = {'pointer': '맵 포인터 그룹 표(같은 뱅크 0F 면 표만, 다른 뱅크면 덩어리)',
           'attr': '맵 속성 그룹 표(23 / 다른 뱅크)', 'high': '그룹 50 이상 맵 포인터 그룹 표(1F / 다른 뱅크)',
           'entrance': '들어가는 곳 표(새 그룹이 있으면 필요)', 'records': 'source 레코드',
-          'door_stub': '문 표 입구 스텁(뱅크 01, 기본 01:FED0)'}
+          'door_stub': '문 표 입구 스텁(기본 22:FF30)'}
 
 
 def main():

@@ -35,6 +35,8 @@ LOWER_FURNITURE = {0x93}
 UPPER_FURNITURE = {0xA7, 0xB9, 0xD3, 0xD4}
 # 서랍 열림 비트는 7E:222C + flag_index. 2240 부터는 발밑 표의 비트다
 SEARCH_FLAGS = 0x2240 - 0x222C
+# 아래층 상자 표는 12:ED62 가 $BC 32 이상일 때만 찾는다. 그보다 앞 그룹에서는 항목이 있어도 읽히지 않는다
+LOWER_FIRST = 0x32
 BOX_FIELDS = {'x', 'y', 'block', 'reward'}
 FURNITURE_FIELDS = BOX_FIELDS | {'flag_index', 'mask'}
 
@@ -187,7 +189,8 @@ def plan(rom, doc, map_at, at=None):
         if lost:
             raise ValueError(f'{bc:02X}/{bd:02X}: 블록이 기존 서랍 항목의 가구 칸 {lost} 을 덮거나 지움')
         # 발밑·두 칸 앞·아래층 상자는 칸 속성이 아니라 좌표로 찾으므로, 블록이 덮으면 보상이 그림 밑에 묻힌다
-        buried = sorted((name, row['x'], row['y']) for name in ('foot', 'ahead', 'lower') for row in tables[name]
+        names = ('foot', 'ahead', 'lower') if bc >= LOWER_FIRST else ('foot', 'ahead')
+        buried = sorted((name, row['x'], row['y']) for name in names for row in tables[name]
                         if (row['group'], row['map']) == (bc, bd) and (row['x'], row['y']) in footprint)
         if buried:
             raise ValueError(f'{bc:02X}/{bd:02X}: 블록이 기존 조사 항목 {buried} 의 칸을 덮음')
