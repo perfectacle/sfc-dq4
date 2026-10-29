@@ -73,7 +73,7 @@ def make_roms(original, out):
     grids = {}
     for w in range(3):
         g = fw.world_grid(rom, w)
-        keep = {y * 256 + x for x, y in fw.CHANGED_CELLS}
+        keep = {y * 256 + x for x, y in fw.changed_cells(rom)}
         grids[w] = [v if i in keep else v + 512 for i, v in enumerate(g)]
         (out / f'w{w}.bin').write_bytes(b''.join(v.to_bytes(2, 'little') for v in grids[w]))
     for name, make in variants.items():

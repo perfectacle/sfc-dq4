@@ -171,6 +171,18 @@ class TileGrowTests(unittest.TestCase):
             fgw.write_grow(rom, 0x348000, 0x358000, fgw.FIELD_CHR, tiles, self.doc['tile_palettes'], {}, [],
                            lambda *a, **k: None, bytes(1024))
 
+    def test_grown_blocks_count_in_tile_check(self):
+        """블록 표를 늘린 롬이면 번호 511 이상의 블록이 쓰는 타일도 센다."""
+        d = bytearray(self.data) + bytes(0x200000 - len(self.data))
+        hook = 0x3C8000
+        put(d, dq5field.BLOCK_GROW_SITE, b'\x5c' + hook.to_bytes(3, 'little'))
+        put(d, hook, b'\x80\x08' + (0x3C9000).to_bytes(3, 'little') + (0x3C9100).to_bytes(3, 'little') + (520).to_bytes(2, 'little'))
+        put(d, 0x3C9000 + 8 * 5, bytes([0xF0, 0, 0, 0, 0x88]))                   # 블록 519 아래층 타일 3F0(세계는 812개)
+        tiles = (self.folder / 'tiles.bin').read_bytes()
+        with self.assertRaisesRegex(ValueError, '타일 1008'):
+            fgw.write_grow(Rom(bytes(d)), 0x348000, 0x358000, fgw.FIELD_CHR, tiles, self.doc['tile_palettes'], {}, [],
+                           lambda *a, **k: None, bytes(1024))
+
     def test_attributes(self):
         self.doc['tile_attributes'] = list(range(256)) * 4
         rom = Rom(apply(self.data, fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x348000,

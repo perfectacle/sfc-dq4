@@ -25,7 +25,8 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from dq5field import BLOCK_LOWER, BLOCK_UPPER, FIELD_CHR, TILE_PALETTE, block_tiles, nibble_table, rle  # noqa: E402
+from dq5field import (BLOCK_LOWER, BLOCK_UPPER, FIELD_CHR, TILE_PALETTE, block_count, block_tiles,  # noqa: E402
+                      nibble_table, rle)
 from dq5gfx import FIELD_ANIM as ANIM, FIELD_ANIM_COUNT, FIELD_ANIM_SETS, FIELD_ANIM_TILE  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
 
@@ -742,7 +743,9 @@ def write_grow(rom, at, extra_at, world0_at, full0, nib0, world_data, placed, wr
     base0 = full0[:TILES * 32]
     worlds = [(full0, nib0)] + [world_data.get(k, (full0, nib0)) for k in WORLDS[1:]] + [(full0, nib0)]
     counts = [len(t) // 32 for t, _ in worlds[:3]]
-    used = max(t for table in (BLOCK_LOWER, BLOCK_UPPER) for m in range(511) for t in block_tiles(rom, table, m))
+    # 블록 표를 늘린 롬(dq5fieldtables --blocks-at)이면 번호 511 이상도 센다
+    used = max(t for table in (BLOCK_LOWER, BLOCK_UPPER) for m in range(block_count(rom))
+               for t in block_tiles(rom, table, m))
     if used >= min(counts):
         raise ValueError(f'블록은 세 세계가 함께 쓰므로 모든 세계에 그 타일을 둘 것(블록이 타일 {used} 을 쓰는데 '
                          f'세계 0·1·2 의 타일 수는 {counts})')

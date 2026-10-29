@@ -10,7 +10,8 @@ DB를 바꾼 뒤 01:A668의 LDX $00A5와 01:A67D의 STA $420B도 같은 뱅크�
 블록을 늘린 롬에서 만들면 그 블록 수(1,024개까지)를 받는다. 512 이상이 있는 세계는 10번째 비트를 압축하지 않은 8KB 평면으로
 --planes-at(30~7D)에 두고, 00:BBF7·00:BDC5 의 9번째 비트 읽기(00:BC33·00:BE06)를 평면도 함께 읽는 훅으로 바꾼다.
 평면은 롬이라 게임이 칸을 바꾸는 00:CF50(밤에 빛나는 풀 등, 부르는 곳 넷이 칸과 번호를 즉값으로 줌)은 10번째 비트를 바꾸지
-못한다. 그래서 그 칸들에 512 이상을 두면 거부한다. 10번째 비트 평면을 쓰는 세계는 한 번의 patch 에 함께 준다(훅이 하나다).
+못한다. 그래서 그 칸들(즉값을 롬에서 읽으므로 dq5chestwrite.py 의 field 로 옮긴 빛 칸도 따름)에 512 이상을 두면
+거부한다. 지도 패치는 상자 패치를 넣은 롬에서 만든다(반대 순서는 dq5chestwrite.py 가 512 이상 칸을 거부). 10번째 비트 평면을 쓰는 세계는 한 번의 patch 에 함께 준다(훅이 하나다).
 
   dump   세계 N 의 지도 → .bin(-o)
   check  세계 셋을 풀어 다시 싸고 풀면 같은지, 크기는 원래와 얼마나 다른지
@@ -88,8 +89,31 @@ def split(grid):
     return low, bytes(hi)
 
 
-# 00:CF50 이 블록을 바꾸는 칸(블록 좌표). 01:A018·12:EFC1 (0B,53), 03:BB3D (11,7C), 05:EF0F (E2,75)~(E2,77).
-CHANGED_CELLS = ((0x0B, 0x53), (0x11, 0x7C), (0xE2, 0x75), (0xE2, 0x76), (0xE2, 0x77))
+# 00:CF50 을 부르는 넷이 $90·$92(8픽셀 칸)를 즉값으로 두는 곳. 원본에서는 블록 (0B,53)·(0B,53)·(11,7C)·(E2,75)~(E2,77).
+# 01:A01B 는 밤에 빛나는 풀이라 dq5chestwrite.py 의 field 가 칸을 옮기므로 롬에서 읽는다.
+# 꼴: 16진은 그대로 있어야 하는 명령 바이트, x0 x1·y0 y1 은 칸, n0 n1 은 05:EF0F 의 되풀이 횟수 − 1(Y 는 2 씩 줄어듦).
+CHANGED_SITES = (
+    (0x01A01B, 'A2 x0 x1 86 90 A2 y0 y1 86 92 22 50 CF 00'),
+    (0x12EFC1, 'A9 x0 x1 85 90 A9 y0 y1 85 92 A9 CA 00 22 50 CF 00'),
+    (0x03BB3C, 'A2 x0 x1 86 90 A2 y0 y1 86 92 7B A9 71 22 50 CF 00'),
+    (0x05EF0F, 'A9 y0 y1 85 CA A9 x0 x1 85 CC A2 n0 n1 DA A5 CA 85 92 3A 3A 85 CA A5 CC 85 90'),
+)
+
+
+def changed_cells(rom):
+    """게임이 00:CF50 으로 블록을 바꾸는 칸(블록 좌표). 즉값 자리의 명령 바이트가 다르면 거부한다."""
+    out = []
+    for at, text in CHANGED_SITES:
+        raw = rom.d[lorom(at):lorom(at) + len(text.split())]
+        v = {}
+        for token, b in zip(text.split(), raw):
+            if token[0] in 'xyn':
+                v[token[0]] = v.get(token[0], 0) | b << 8 * int(token[1])
+            elif int(token, 16) != b:
+                raise ValueError(f'{at >> 16:02X}:{at & 0xFFFF:04X}: 00:CF50 을 부르는 즉값 꼴이 아님')
+        for k in range(v.get('n', 0) + 1):
+            out.append((v['x'] >> 1, (v['y'] - 2 * k) >> 1))
+    return out
 BIT9_ORIG = (bytes.fromhex('bf00e07ee210bb3fa0bc00f002a901eb'), bytes.fromhex('bf00e07ee21039a0bcf002a901eb'))
 PLANE = SIZE // 8
 
@@ -180,10 +204,13 @@ def plane_writes(rom, data, grids, at):
         if data[lorom(site):lorom(site) + len(want)] != want:
             raise ValueError(f'{site >> 16:02X}:{site & 0xFFFF:04X}: 원래 롬의 9번째 비트 읽기가 아님')
     for w, g in wide.items():
-        bad = [(x, y) for x, y in CHANGED_CELLS if g[y * 256 + x] >> 9]
+        bad = [(x, y) for x, y in changed_cells(rom) if g[y * 256 + x] >> 9]
         if bad:
             raise ValueError(f'세계 {w} 블록 칸 {bad[0]}: 게임이 00:CF50 으로 바꾸는 칸이라 10번째 비트를 쓸 수 없음(512 미만만)')
-    planes, a, out = [None] * 3, at + len(bit9_hook([None] * 3)), []
+    size = len(bit9_hook([None] * 3))
+    if (at & 0xFFFF) + size > 0x10000:
+        raise ValueError(f'--planes-at: 훅 {size}바이트가 한 뱅크 안에 들어가지 않음')
+    planes, a, out = [None] * 3, at + size, []
     for w in sorted(wide):
         if (a & 0xFFFF) + PLANE > 0x10000:
             a = ((a >> 16) + 1) << 16 | 0x8000

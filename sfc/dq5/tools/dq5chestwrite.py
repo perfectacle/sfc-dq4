@@ -25,8 +25,7 @@ from pathlib import Path
 from dq5build import PatchError, build, load
 from dq5chest import (AHEAD_TABLE, CHEST_ITEMS, CHEST_MAPS, FOOT_TABLE, LOWER_TABLE,
                       SEARCH_TABLE, chests)
-from dq5field import block_number, rle
-from dq5fieldwrite import loader_sites
+from dq5fieldwrite import world_grid
 from dq5gfx import map_ids
 from dq5map import Rom, lorom, map_pointer
 from dq5palsetwrite import new_map
@@ -112,11 +111,8 @@ def decode_field(raw):
 
 
 def world_block(rom, x, y):
-    # 세계 지도 쓰기가 덩어리를 옮겼을 수 있으므로 불러오기 루틴(01:A5C2)이 가리키는 곳을 읽는다
-    (hi_bank, hi_addr), (map_bank, map_addr) = loader_sites(rom, 0)
-    hibits, _ = rle(rom, rom.u8(hi_bank) << 16 | rom.u16(hi_addr))
-    world, _ = rle(rom, rom.u8(map_bank) << 16 | rom.u16(map_addr))
-    return block_number(world, hibits, x // 2, y // 2)
+    # 세계 지도 쓰기가 덩어리를 옮겼을 수 있으므로 불러오기 루틴(01:A5C2)이 가리키는 곳과 10번째 비트 평면을 읽는다
+    return world_grid(rom, 0)[(y // 2) * 256 + x // 2]
 
 
 def encode_field(raw, changes, block_at):
@@ -139,6 +135,9 @@ def encode_field(raw, changes, block_at):
         raise ValueError('field: 열림 플래그가 조건 21A5.2·21AA.0 과 겹침')
     # 칸을 옮기지 않아도 세계 지도 쓰기가 그 자리 블록을 바꿨을 수 있으므로 늘 다시 읽는다
     block = block_at(value['x'], value['y'])
+    # 빛이 꺼질 때 00:CF50 이 되돌리는 블록은 9번째 비트까지라(10번째 비트 평면은 롬) 512 이상 칸은 되돌리지 못한다
+    if block >= 512:
+        raise ValueError(f'field: ({value["x"]},{value["y"]}) 의 세계 0 블록 {block} 이 512 이상이라 빛 칸으로 쓸 수 없음')
     words = {'x': value['x'], 'X': value['x'] + 2, 'y': value['y'], 'Y': value['y'] + 2, 'r': value['reward'],
              'i': value['flag_index'], 'm': value['mask'], 'a': 0x2190 + value['flag_index'], 'b': block}
     return bytes(words[token[0]] >> (8 * int(token[1])) & 0xFF if named(token) else raw[i]

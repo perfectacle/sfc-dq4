@@ -26,7 +26,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from dq5field import WORLDS, block_number, rle  # noqa: E402
+from dq5field import terrain, world_blocks  # noqa: E402
 from dq5map import Rom, group_spans  # noqa: E402
 from dq5text import string, string_codes, text  # noqa: E402
 
@@ -57,7 +57,6 @@ FIELD_GRIDS = [
 SHIP_RECTS = 0x0185D8      # 01:858D. $1948 == 2 이면 +A 부터. [X0][X1][Y0][Y1](16비트) [안][밖]
 INDOOR_RATE = 7            # 01:8522
 INDOOR_RATE_REGION = 0x20  # 01:8526. 주인공이 선 두 셀이 모두 다른 셀 구역(7E:3720)으로 넘어간 걸음(00:CAFD 가 X=80)
-TERRAIN = 0x03CC48         # 03:CB1B. 블록 2개당 1바이트, 짝수 블록이 위 니블
 NAMES = 4
 # 01:86A7·01:86C3(A = 무리 번호) → 26:8E0A 가 23:D757 + 무리*13 을 $1000~$100C 로 옮긴다(+0 은 & FC).
 # [+0 플래그][+1~+4 몬스터, 빈 자리 FF][+5~+8 마릿수][+9~+C → $1009~$100C]
@@ -157,11 +156,10 @@ def field_area(rom, grid_index, x, y):
     return rom.u8(addr + (y >> 5) * FIELD_WIDTH + (x >> 5))
 
 
-def field_terrain(rom, world, hibits, x, y):
-    """필드 좌표(8픽셀 단위)의 지형 번호. 03:CB1B 가 00:BDC1 로 블록을 읽어 니블을 고른다."""
-    b = block_number(world, hibits, (x >> 1) & 255, (y >> 1) & 255)
-    v = rom.u8(TERRAIN + (b >> 1))
-    return v & 15 if b & 1 else v >> 4
+def field_terrain(rom, grid, x, y):
+    """필드 좌표(8픽셀 단위)의 지형 번호. 03:CB1B 가 00:BDC1 로 블록을 읽어 니블을 고른다.
+    grid 는 dq5field.world_blocks 의 블록 번호(10번째 비트 평면 포함), 지형 표는 블록을 늘린 롬이면 옮긴 표다."""
+    return terrain(rom, grid[((y >> 1) & 255) * 256 + ((x >> 1) & 255)])
 
 
 def field_grid_index(v1948, v1949):
@@ -173,7 +171,7 @@ def field_grid_index(v1948, v1949):
 def check_steps(rom, path):
     """00:82AF(01:84CF 에서 돌아온 곳) 기록의 A(구역)·Y(조우율)를 표로 계산한 값과 맞춘다.
     LOG=7E00BC,7E00BE,7E00B6,7E00B8,7E1948,7E075E,7E21C9 가 있어야 한다. 실내는 구역만 본다."""
-    maps = [tuple(rle(rom, a)[0] for a in pair) for pair in WORLDS]
+    maps = [world_blocks(rom, w) for w in range(3)]
     bad = total = 0
     seen = {}
     for line in open(path):
@@ -194,8 +192,8 @@ def check_steps(rom, path):
             g = field_grid_index(v1948, v1949)
             want_a = field_area(rom, g, x, yy)
             # 세계 1·2 도 같은 지형 표(03:CB1B)를 쓰고 지도만 $1949 로 바뀐다(dq5field.WORLDS)
-            world, hibits = maps[min(v1949, 2)]
-            t = field_terrain(rom, world, hibits, x, yy)
+            grid = maps[min(v1949, 2)]
+            t = field_terrain(rom, grid, x, yy)
             night = kv['7E075E'] >= 0xF0
             rate = rom.u8((FIELD_RATE_NIGHT if night else FIELD_RATE_DAY) + t)
             if kv['7E21C9'] >= 3:
