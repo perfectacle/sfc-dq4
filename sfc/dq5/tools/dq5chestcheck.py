@@ -7,7 +7,7 @@ past_* 사례는 상자 194개·상자 맵 연결과 아래층 상자 표를 뱅
 new_* 사례는 원래 롬에 없는 새 그룹 맵 36/00(선실 17/00 에 상자 블록을 놓은 레코드)에 상자·タンス·두 칸 앞 항목을
 dq5chestreloc.py --new-map·--with-patch 로 넣은 롬을, 같은 새 맵 패치만 붙인 대조 롬과 견준다.
 blocks_* 사례는 --env 로 준 DQ4 환경 패치 폴더(sfc/dq4/tools/dq4environmentrom.py 출력)로 새 맵 36/00 을 만든다. 그 맵은
-환경 패치의 01:936E 훅이 블록 표를 바꾸는 맵이다. 환경 블록 하나를 상자 블록 꼴로 바꾼 사본으로 빌드해 상자를 연다.
+환경 패치의 01:936E 훅이 블록 표를 바꾸는 맵이다. 그 맵에만 놓인 환경 블록을 상자 블록 꼴로 바꾼 사본으로 빌드해 상자를 연다.
 --audit 은 원본 롬에서 상자 맵 연결·아래층 상자 표의 DB(1E) 창을 연 동안 실행한 명령을 모아(lua/dq5dbread.lua),
 DB 로 롬(8000~)에 닿는 명령이 표 읽기 자리뿐인지 본다.
 
@@ -30,7 +30,8 @@ from dq5chestreloc import ABS
 from dq5chestwrite import FORMAT
 from dq5exitcheck import DB_ABS, DB_INDIRECT, warp_exit
 from dq5chest import chests
-from dq5map import Rom, block_table
+from dq5map import Rom, block_hook, block_table
+from dq5mapwrite import all_maps
 from dq5mapcompile import compile_places, extract
 from dq5mapwrite import dumps
 
@@ -202,9 +203,11 @@ def grow_newmap(doc):
 NEWMAP = {'new_chest': (456, 0x2224, 0x40, 0x131, 0x12B, 0x12C),
           'new_search': (567, 0x2237, 0x01, 0x12F, 0x12F, 0x130),
           'new_ahead': (678, 0x223E, 0x04, 0x12B, 0x12B, 0x12C)}
-# DQ4 환경 패치의 새 맵 36/00(burland). 한 번만 놓인 2×2 환경 블록 27(원점 (32,62))을 상자 블록 384 와 같은 머리
-# (49 24 04)로 바꾸면 오른쪽 아래 (33,63) 이 상자 칸이 된다. 새 맵 패치의 자리는 sfc/dq4/tools/dq4groupbuild.py 와 같다
-BLOCKS_MAP, BLOCKS_BLOCK, BLOCKS_HEAD, BLOCKS_CELL = (0x36, 0), 27, bytes((0x49, 0x24, 0x04)), (33, 63)
+# DQ4 환경 패치의 새 맵 36/00(burland). 2×2 환경 블록 21 은 목록의 다른 맵(롬에 있는 것)에는 놓이지 않고 36/00 에만
+# (68,40)·(8,68) 두 번 놓인다. 그 머리를 상자 블록 384 와 같은 49 24 04 로 바꾸면 오른쪽 아래 (69,41)·(9,69) 가 상자 칸
+# (상자 0·1)이 되고, 다른 맵의 칸은 바뀌지 않는다. 새 맵 패치의 자리는 sfc/dq4/tools/dq4groupbuild.py 와 같다
+BLOCKS_MAP, BLOCKS_BLOCK, BLOCKS_HEAD = (0x36, 0), 21, bytes((0x49, 0x24, 0x04))
+BLOCKS_CELLS = [(69, 41), (9, 69)]
 BLOCKS_NEWMAP_AT = ('--entrance-table-at', '3C:C000', '--records-at', '34:8000', '--door-bank', '3B',
                     '--attr-table-at', '3C:D000')
 BLOCKS_EXITS = ('--exits-at', '2A:D812', '--records-at', '3C:A000')
@@ -219,7 +222,7 @@ ORIGINAL_KIND.update(past_open=0x12B, full_open=0x12B)
 # 패치는 1F:FC50 이 옮긴 표에서 그 상자를 찾아 열린 상자 타일(9E·9F)로 바꾼다
 ENTRY = {'past_entry': ({'TO': '19/00,5,46'}, '2228|80'), 'past_entry_lower': ({'TO': '51/51,18,37,2'}, '2229|08'),
          'full_entry': ({'TO': '19/00,11,46'}, '222F|01'), 'new_entry': ({'TO': '36/00,6,7'}, '2224|40'),
-         'place_unlisted_entry': ({'TO': '19/00,5,46'}, '2224|08'), 'blocks_entry': ({'TO': '36/00,32,65'}, '2210|80')}
+         'place_unlisted_entry': ({'TO': '19/00,5,46'}, '2224|08'), 'blocks_entry': ({'TO': '36/00,68,44'}, '2210|80')}
 # 열림 비트를 켠 채 교회에 기록하고 리셋해 불러오는 사례(dq5cdlsweep.py 의 church-save-load 와 같은 입력).
 # SRAM 칸 1 은 7E:2000~ 을 70:0012~ 에 그대로 담는다(25:83CE)
 SAVE_BITS = {0x2228: 0x80, 0x2229: 0x08}
@@ -246,7 +249,7 @@ SCENES = {'chest': {'TO': '01/02,34,31'}, 'search': None, 'foot': None, 'ahead':
           'place_shift': {'TO': '01/02,34,31'}, 'place_furniture': {'TO': '01/02,40,27'},
           'place_jar': 'grow_search', 'place_unlisted': 'grow_chests',
           'past_open': 'grow_chests', 'past_lower': 'lower', 'full_open': {'TO': '19/00,11,46'},
-          'blocks_chest': {'TO': '36/00,32,65'},
+          'blocks_chest': {'TO': '36/00,68,44'},
           'new_chest': {'TO': '36/00,6,7'}, 'new_search': {'TO': '36/00,3,5'}, 'new_ahead': {'TO': '36/00,9,12'}}
 # 필드 조사는 선 자리를 보므로 걷지 않고 바로 명령 창을 연다
 INPUTS = {name: INPUT.removeprefix('up:8,wait:30,') for name in CASES if name.startswith('field')}
@@ -430,6 +433,11 @@ def build_blocks(original, env, out):
     data = bytearray(bytes.fromhex(hit[0]['hex']))
     k = (at & 0xFFFF) - int(hit[0]['at'][3:], 16)
     require(data[k] & 0x3F == 0x09, f'블록 {BLOCKS_BLOCK} 가 2×2 가 아님')
+    # 머리를 바꾼 블록이 목록의 다른 맵에도 놓이면 그 맵에 가짜 상자 칸이 생긴다
+    env_view = Rom(env_rom.read_bytes())
+    elsewhere = [key for key in block_hook(env_view)[0] if key != BLOCKS_MAP and key in set(all_maps(env_view))
+                 and any(b == BLOCKS_BLOCK for _, _, b in extract(env_view, *key)['placements'])]
+    require(not elsewhere, f'블록 {BLOCKS_BLOCK} 가 목록의 다른 맵 {elsewhere} 에도 놓임')
     data[k:k + 3] = BLOCKS_HEAD
     hit[0]['hex'] = data.hex(' ')
     base.write_text(json.dumps(doc) + '\n', encoding='utf-8')
@@ -449,10 +457,11 @@ def build_blocks(original, env, out):
     control, patched = newmap_roms(out, 'blocks')
     command('dq5build.py', original, 'build', *manifests, '--size', 4, '-o', control)
     cells = chests(Rom(control.read_bytes()), *BLOCKS_MAP, 0)
-    require([xy for _, xy, _ in cells] == [BLOCKS_CELL], f'36/00 의 상자 칸이 {BLOCKS_CELL} 하나가 아님: {cells}')
+    require([xy for _, xy, _ in cells] == BLOCKS_CELLS, f'36/00 의 상자 칸이 {BLOCKS_CELLS} 가 아님: {cells}')
     command('dq5chestreloc.py', original, 'dump', '-o', dest / 'chest.json')
     tables = json.loads((dest / 'chest.json').read_text(encoding='utf-8'))
-    # 환경 패치가 레코드를 바꾼 맵은 원래 상자 칸이 없어져 원래 맵 연결과 칸 수가 맞지 않는다. 그 연결과 내용물을 뺀다
+    # 환경 패치가 레코드를 바꾼 맵은 원래 상자 칸이 없어져(15곳 모두 0개) 원래 맵 연결과 칸 수가 맞지 않는다.
+    # 그 연결과 내용물을 뺀다
     view, rows, rewards, start = Rom(control.read_bytes()), [], [], 0
     for row in tables['chest_maps']:
         if len(chests(view, row['group'], row['map'], 0)) == row['count']:
@@ -461,8 +470,8 @@ def build_blocks(original, env, out):
         start += row['count']
     tables['chest_maps'], tables['chests'] = rows, rewards
     # 뺀 연결 수에 상관없이 번호가 정해지게 맨 앞에 둔다(상자 0, 7E:2210 & 80)
-    tables['chest_maps'].insert(0, {'group': BLOCKS_MAP[0], 'map': BLOCKS_MAP[1], 'count': 1})
-    tables['chests'].insert(0, {'reward': 0x100 + 246})
+    tables['chest_maps'].insert(0, {'group': BLOCKS_MAP[0], 'map': BLOCKS_MAP[1], 'count': len(BLOCKS_CELLS)})
+    tables['chests'][:0] = [{'reward': 0x100 + 246 + k} for k in range(len(BLOCKS_CELLS))]
     (dest / 'chest.json').write_text(json.dumps(tables) + '\n', encoding='utf-8')
     places = (*BLOCKS_CHEST_AT, *NEW_MAP, *(arg for m in manifests for arg in ('--with-patch', m)))
     command('dq5chestreloc.py', original, 'patch', dest / 'chest.json', '-o', dest / 'chest.dq5patch.json', *places)

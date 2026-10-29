@@ -230,7 +230,8 @@ def block_hook(rom):
     head = _code(rom, loader, '08 C2 30 48 DA 5A 22 ?? ?? ?? B0 ??', '훅 로더 머리(PHP·REP·PHA·PHX·PHY, JSL 찾기, BCS)')
     find, rel = int.from_bytes(head[:3], 'little'), head[3]
     hit = loader + 12 + (rel - 0x100 if rel & 0x80 else rel)
-    got = _code(rom, find, '08 E2 30 A2 00 BF ?? ?? ?? C9 FF F0 ?? C5 BC D0 ?? BF ?? ?? ?? C5 BD F0 ??', '훅 찾기 루틴')
+    got = _code(rom, find, '08 E2 30 A2 00 BF ?? ?? ?? C9 FF F0 ?? C5 BC D0 ?? BF ?? ?? ?? C5 BD F0 ?? '
+                           'E8 E8 80 E8 28 18 6B 28 38 6B', '훅 찾기 루틴(돌기·못 찾음·찾음까지)')
     targets, second = int.from_bytes(got[:3], 'little'), int.from_bytes(got[5:8], 'little')
     if second != targets + 1:
         raise ValueError(f'훅 찾기 루틴이 목록 {targets:06X} 의 둘째 바이트를 읽지 않음')
@@ -240,7 +241,7 @@ def block_hook(rom):
             break
     else:
         raise ValueError(f'{hit >> 16:02X}:{hit & 0xFFFF:04X}: 훅이 7E:B000 에 복사하는 MVN 을 찾지 못함')
-    raw =_code(rom, at - 6, 'A9 ?? ?? A2 ?? ?? A0 00 B0 54 7E ??', '훅의 포인터 표 복사')
+    raw = _code(rom, at - 6, 'A9 ?? ?? A2 ?? ?? A0 00 B0 54 7E ??', '훅의 포인터 표 복사')
     size, source, src_bank = int.from_bytes(raw[0:2], 'little') + 1, int.from_bytes(raw[2:4], 'little'), raw[4]
     if src_bank != bank or size % 2:
         raise ValueError(f'훅의 포인터 표 복사가 블록 뱅크 {bank:02X} 의 2바이트 표가 아님')
@@ -254,9 +255,12 @@ def block_hook(rom):
 
 
 def block_table(rom, count=0x800, key=None):
-    """7EB000 표. key(BC, BD)를 주면 01:936E 훅이 그 맵에 두는 표를 따른다. 없으면 01:8CD8 이 만드는 표:
-    01:8CDE·01:8CE6 의 뱅크·시작부터 블록을 차례로 놓은 포인터."""
-    hook = block_hook(rom) if key is not None else None
+    """7EB000 표. key(BC, BD)를 주면 01:936E 훅이 그 맵에 두는 표를 따른다(그때는 count 를 보지 않고 훅이 복사하는
+    n 개를 돌려준다). 목록에 없는 맵은 01:8CD8 이 만드는 표: 01:8CDE·01:8CE6 의 뱅크·시작부터 블록을 차례로 놓은 포인터.
+    훅이 있는 롬에서 key 없이 부르면 어느 표인지 모르므로 멈춘다."""
+    hook = block_hook(rom)
+    if hook and key is None:
+        raise ValueError('01:936E 훅이 맵마다 블록 표를 바꾸는 롬이라 맵 번호(key)가 필요함')
     if hook and tuple(key) in hook[0]:
         _, bank, table, n = hook
         return [bank << 16 | rom.u16(table + 2 * i) for i in range(n)]
@@ -443,6 +447,10 @@ class Decoder:
         """key(BC, BD)를 주면 그 맵의 블록 표(01:936E 훅이 맵마다 바꾸는 것)를 쓴다."""
         self.rom = rom
         self.high = high
+        hook = block_hook(rom) if high else None
+        # 그룹 50 이상 맵은 다른 블록 표(01:8C72 의 7E:A000)를 쓰므로, 목록에 들어도 훅을 따르는지 보지 않았다
+        if hook and key is not None and tuple(key) in hook[0]:
+            raise ValueError(f'{key[0]:02X}/{key[1]:02X}: 그룹 50 이상 맵이 01:936E 훅 목록에 있음(따르지 않음)')
         self.blocks = high_block_table(rom) if high else block_table(rom, key=key)
         self.chr_palette = HIGH_CHR_PALETTE if high else CHR_PALETTE
         self.slot = slot
@@ -692,7 +700,7 @@ def main():
     args = ap.parse_args()
     rom = Rom(open(args.rom, 'rb').read())
     addr = map_pointer(rom, args.bc, args.bd)
-    dec = Decoder(rom, args.slot, args.bc >= 0x50)
+    dec = Decoder(rom, args.slot, args.bc >= 0x50, (args.bc, args.bd))
     dec.preload(args.bc, args.bd)
     width, height, buf, stream = dec.decode(addr)
     if dec.high:

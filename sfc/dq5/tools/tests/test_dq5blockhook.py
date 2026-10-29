@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dq5chest import chests
 from dq5chestplace import furniture_cells
-from dq5map import LOAD_TAIL, Rom, block_hook, block_table, lorom
+from dq5map import LOAD_TAIL, Decoder, Rom, block_hook, block_table, lorom
 from test_dq5chestwrite import ROM
 
 STUB, LOADER, FIND, TARGETS, HIT = 0x01FF00, 0x3BE100, 0x3BE000, 0x3BD000, 0x3BE140
@@ -24,7 +24,8 @@ def hook(data, maps, bank, table, count):
     rel = HIT - (LOADER + 12)
     put(data, LOADER, bytes((0x08, 0xC2, 0x30, 0x48, 0xDA, 0x5A, 0x22, *FIND.to_bytes(3, 'little'), 0xB0, rel)))
     put(data, FIND, bytes((0x08, 0xE2, 0x30, 0xA2, 0x00, 0xBF, *TARGETS.to_bytes(3, 'little'), 0xC9, 0xFF, 0xF0, 0x10,
-                           0xC5, 0xBC, 0xD0, 0x08, 0xBF, *(TARGETS + 1).to_bytes(3, 'little'), 0xC5, 0xBD, 0xF0, 0x07)))
+                           0xC5, 0xBC, 0xD0, 0x08, 0xBF, *(TARGETS + 1).to_bytes(3, 'little'), 0xC5, 0xBD, 0xF0, 0x07,
+                           0xE8, 0xE8, 0x80, 0xE8, 0x28, 0x18, 0x6B, 0x28, 0x38, 0x6B)))
     size = count * 2 - 1
     put(data, HIT, bytes((0xE2, 0x20, 0xA9, bank, 0x8D, 0x23, 0x18, 0xC2, 0x20, 0xA9, size & 0xFF, size >> 8,
                           0xA2, table & 0xFF, table >> 8 & 0xFF, 0xA0, 0x00, 0xB0, 0x54, 0x7E, bank)))
@@ -40,9 +41,16 @@ class BlockHookTests(unittest.TestCase):
         self.assertEqual(block_hook(Rom(data)), ([(0x16, 2), (0x36, 0)], 0x3D, 0x3D8C00, 150))
         put(data, 0x3D8C00, bytes((0x00, 0x80, 0x0B, 0x80)))
         self.assertEqual(block_table(Rom(data), key=(0x36, 0))[:2], [0x3D8000, 0x3D800B])
+        self.assertEqual(len(block_table(Rom(data), count=4, key=(0x36, 0))), 150)
+        # 훅이 있는 롬에서 맵 번호 없이 부르거나, 그룹 50 이상 맵이 목록에 들면 멈춘다
+        with self.assertRaisesRegex(ValueError, '맵 번호'):
+            block_table(Rom(data))
+        hook(data, [(0x51, 0x51)], 0x3D, 0x8C00, 150)
+        with self.assertRaisesRegex(ValueError, '그룹 50 이상'):
+            Decoder(Rom(data), 0xBE, True, (0x51, 0x51))
 
     def test_unknown_hook_shapes_stop(self):
-        for addr, value, message in ((LOAD_TAIL, 0x20, '01:936E'), (STUB + 4, 0xEA, '스텁'), (FIND + 13, 0xC6, '찾기'),
+        for addr, value, message in ((LOAD_TAIL, 0x20, '01:936E'), (STUB + 4, 0xEA, '스텁'), (FIND + 13, 0xC6, '찾기'), (FIND + 31, 0x18, '찾기'),
                                      (HIT + 4, 0x8E, '\\$1823'), (HIT + 18, 0x44, 'MVN'), (HIT + 20, 0x3C, '포인터 표')):
             data = bytearray(0x200000)
             hook(data, [(0x16, 2)], 0x3D, 0x8C00, 150)
