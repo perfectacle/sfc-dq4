@@ -90,7 +90,8 @@ end, emu.eventType.inputPolled)
 emu.addEventCallback(function()
   frame = frame + 1
   if frame == dumpAt then dump(); dumped = true end
-  if not startedAt and songOn() then
+  -- 드라이버가 올라오기 전 SPC RAM 은 켤 때의 값이라, 곡 자리가 우연히 SONG 으로 읽힐 수 있다(곡 08 이 프레임 1)
+  if not startedAt and frame > 60 and songOn() then
     startedAt = frame
     events[#events + 1] = string.format("song %02X started at frame %d", want, frame)
     for i = 0, 0xC7 do index[i] = present(i) end

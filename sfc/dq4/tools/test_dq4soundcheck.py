@@ -29,6 +29,12 @@ class EventTests(unittest.TestCase):
         self.assertFalse(check.blocked(1.0, 0x3F, 209, arrivals))
         self.assertFalse(check.blocked(0.0, 0x39, 209, arrivals))
 
+    def test_note_right_after_arrival_counts_as_blocked(self):
+        # 칸이 생긴 다음 프레임의 음은 아직 울리지 않았다
+        arrivals = {0x77: 235}
+        self.assertTrue(check.blocked((236 - 217) / check.NTSC_FPS, 0x77, 216, arrivals))
+        self.assertFalse(check.blocked((240 - 217) / check.NTSC_FPS, 0x77, 216, arrivals))
+
 
 if __name__ == '__main__':
     unittest.main()
