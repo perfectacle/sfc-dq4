@@ -13,7 +13,8 @@
           (dq5mapgfxwrite --sets-at 37:8000, 그 롬으로 만든 dq5palsetwrite 패치)
 장면
   tiles: 세계 0 (341,56) 에 서기, 걷고 명령 창을 여닫은 뒤, 이벤트 전투(スライム 하나)를 이기고 돌아온 뒤, 세계 1·2 (50,28).
-         01:A4A7 뒤 00:A788 앞에 VRAM 워드 4000~5FFF 를 지우고 다시 오는지(lua/dq5vramwipe.lua), キメラのつばさ·ルーラ 앞뒤.
+         01:A4A7 뒤 00:A788 앞에 VRAM 워드 4000~5FFF 를 지우고 다시 오는지(lua/dq5vramwipe.lua, 01:B4D5 를 원본으로
+         되돌린 대조 롬은 비어 있어야 함), キメラのつばさ·ルーラ 앞뒤.
          VRAM 워드 2000~3FFF·4000~5FFF 의 타일과 BG1·2 타일맵의 채운 칸을 디코더(dq5field)와 견준다
   fieldpal: (341,56) 에서 $075E 를 여섯 값으로 두고 2·3번 줄 색 1~13 과 11·12번 줄(낮·밤 인물 팔레트)
   indoor: 01/01 과 세트를 그대로 둔 맵 셋(원본 게임과도 견줌)에서 BG 1~7번 줄
@@ -37,7 +38,7 @@ import dq5fieldgfxwrite as fgw  # noqa: E402
 import dq5gfxwritecheck as gwc  # noqa: E402
 import dq5map  # noqa: E402
 from dq5field import tile_word  # noqa: E402
-from dq5map import Rom, map_pointer  # noqa: E402
+from dq5map import Rom, lorom, map_pointer  # noqa: E402
 
 require, command = fgc.require, fgc.command
 SETTLE_FRAME = 900
@@ -47,7 +48,9 @@ BATTLE = {'FIELD': '341,56', 'BATTLE': '00:1', 'SETTLE': '300', 'MAXF': '2100', 
 IN_BATTLE, AFTER_BATTLE = 1000, 1990
 # 다시 그리기 시험: 01/00 에서 걸어 나와 01:A4A7(439프레임)이 늘린 타일을 보낸 뒤, 화면 다시 그리기 00:A771 의
 # JSL $01B4D5(00:A788, 462프레임) 앞인 450프레임에 VRAM 워드 4000~5FFF 를 지운다. 01:B4D5 훅이 다시 보내면 470프레임에 돌아와 있다.
-WIPE = {'FIELD': '341,56', 'SETTLE': '500', 'MAXF': '1000', 'DUMPF': '455,470', 'WIPEF': '450', 'WIPE': '8000-BFFF'}
+# 대조로 01:B4D5 만 원본 4바이트로 되돌린 롬(redraw-control)도 돌려, 470프레임에도 비어 있어야 한다.
+WIPE = {'FIELD': '341,56', 'SETTLE': '500', 'MAXF': '1000', 'DUMPF': '455,470', 'WIPEF': '450', 'WIPE': '8000-BFFF',
+        'EXECLOG': '01A4A7,00A788'}
 WIPED, REDRAWN = 455, 470
 # 속성 시험: 서서 네 방향으로 32프레임씩 걷는다. dq5warp.lua 가 좌표가 바뀌었는지 warp.txt 에 moved= 로 적는다.
 # 필드를 다시 불러오는 장면(01:A4A7 → 00:A788): キメラのつばさ(물건 A4)를 どうぐ → つかう, ルーラ(이동 주문, MP 99)를
@@ -206,13 +209,26 @@ def check_battle(name, rom_path, dump, orig):
     return out
 
 
-def check_redraw(name, rom_path, dump):
+def check_redraw(name, rom_path, dump, restored=True):
+    """WIPEF 와 REDRAWN 사이에 01:A4A7 이 돌지 않고 00:A788 만 돌았는지, 두 프레임 모두 세계 0 필드인지 본 뒤,
+    restored 면 470프레임에 늘린 타일이 돌아왔는지, 아니면(대조) 아직 비어 있는지."""
     rom = Rom(rom_path.read_bytes())
     extra = fgw.current(rom)['worlds']['world0'][0][fgw.TILES * 32:]
     wiped, back = (frame(dump, n, 'vram')[0x8000:0x8000 + len(extra)] for n in (WIPED, REDRAWN))
     require(wiped == bytes(len(extra)), f'{name}: {WIPED}프레임에 늘린 타일 자리가 지워지지 않음')
-    require(back == extra, f'{name}: {REDRAWN}프레임에 늘린 타일이 돌아오지 않음(00:A788 → 01:B4D5 훅)')
-    return {'case': name, 'wiped_at': int(WIPE['WIPEF']), 'restored_by': REDRAWN, 'tiles': len(extra) // 32}
+    wipe = int(WIPE['WIPEF'])
+    runs = [line.split() for line in (dump / 'exec.txt').read_text().splitlines() if line]
+    between = {pc for pc, n in runs if wipe <= int(n) < REDRAWN}
+    require(between == {'00A788'}, f'{name}: {wipe}~{REDRAWN}프레임에 돈 것이 {sorted(between)}(00:A788 만이어야 함)')
+    for n in (WIPED, REDRAWN):
+        w = frame(dump, n, 'wram')
+        require(not w[0xBE] & 0x80 and w[0x1949] == 0, f'{name}: {n}프레임이 세계 0 필드가 아님')
+    if restored:
+        require(back == extra, f'{name}: {REDRAWN}프레임에 늘린 타일이 돌아오지 않음(00:A788 → 01:B4D5 훅)')
+    else:
+        require(back == bytes(len(extra)), f'{name}: 01:B4D5 를 원본으로 둔 대조 롬인데 {REDRAWN}프레임에 채워짐')
+    return {'case': name, 'wiped_at': wipe, 'checked_at': REDRAWN, 'between': sorted(between),
+            'restored': back == extra, 'tiles': len(extra) // 32}
 
 
 def check_reload(name, rom_path, dump, frames):
@@ -311,11 +327,16 @@ def main():
         cases = [(f'tiles-{k}-{r}', path, env) for k, env in scenes.items()
                  for r, path in (('orig', original), ('grow', tiles))]
         cases += [('move-tiles', tiles, MOVE), *((f'move-{v:02x}', out / f'wall-{v:02x}.sfc', MOVE) for v in WALLS)]
-        luas = {'redraw-tiles': HERE / 'lua/dq5vramwipe.lua'}
+        control = out / 'redraw-control.sfc'
+        data = bytearray(tiles.read_bytes())
+        data[lorom(fgw.REDRAW_SITE):lorom(fgw.REDRAW_SITE) + 4] = fgw.REDRAW_ORIG
+        control.write_bytes(bytes(data))
+        luas = {k: HERE / 'lua/dq5vramwipe.lua' for k in ('redraw-tiles', 'redraw-control')}
         for k, (env, frames) in RELOAD.items():
             cases.append((f'reload-{k}', tiles, dict(env, FIELD='310,60', SETTLE='60', MAXF='2000',
                                                      DUMPF=','.join(map(str, frames)))))
-        cases.append(('redraw-tiles', tiles, dict(WIPE, NEXT=str(gfx))))
+        cases += [('redraw-tiles', tiles, dict(WIPE, NEXT=str(gfx))),
+                  ('redraw-control', control, dict(WIPE, NEXT=str(gfx)))]
         for t in TIME_CASES:
             env = dict(stand, SET=f'075E={t & 0xFF:02X};075F={t >> 8:02X}')
             cases += [(f'pal-{t:04X}-{k}', r, env) for k, r in (('orig', original), ('grow', fieldpal))]
@@ -339,6 +360,7 @@ def main():
                     *(check_move(f'move-{v:02x}', out / f'wall-{v:02x}.sfc', dirs[f'move-{v:02x}'], ok)
                       for v, ok in WALLS.items()),
                     check_redraw('redraw-tiles', tiles, dirs['redraw-tiles']),
+                    check_redraw('redraw-control', control, dirs['redraw-control'], restored=False),
                     *(check_reload(f'reload-{k}', tiles, dirs[f'reload-{k}'], f) for k, (_, f) in RELOAD.items())]
         results.append(check_fieldpal('fieldpal', fieldpal, {t: dirs[f'pal-{t:04X}-grow'] for t in TIME_CASES},
                                       {t: dirs[f'pal-{t:04X}-orig'] for t in TIME_CASES}))
