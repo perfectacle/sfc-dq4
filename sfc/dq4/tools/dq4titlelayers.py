@@ -19,6 +19,18 @@ CLOUD_FORMS = (0, 1, 2, 0)
 CLOUD_HEIGHTS = (0, 4, 1, 6)
 CLOUD_SOURCE = ART / 'front-cloud.png'
 GLYPH_MASK = ART / 'title-glyph-mask.png'
+# The redrawn subtitle replaces everything the source mask held in this box.
+SUBTITLE = ART / 'title-subtitle.png'
+SUBTITLE_BOX = (60, 174, 195, 190)
+SUBTITLE_CLEAR = 255
+CORNER_CUT = [(186, 176), (195, 176), (224, 201), (224, 223), (180, 223), (180, 185), (186, 185)]
+CORNER_LOBES = [(195, 173, 205, 183), (203, 179, 213, 191), (209, 185, 221, 197)]
+# Boxes around the logo's left end and the sword crystal, trimmed beyond the outermost dark outline on the named side.
+OUTLINE_TRIMS = (((14, 77, 45, 141), 'left'), ((205, 78, 251, 141), 'right'))
+# Source sky left inside the mask: the gap between 곤 and 퀘, and the tip of 스.
+SKY_BOXES = ((125, 103, 133, 111), (174, 94, 180, 98))
+# Detached specks of source sky are dropped above the subtitle, whose own strokes may be small.
+LOGO_BOTTOM = 170
 
 
 def affine_part(part, pivot, target, scale, angle=0, squash=1):
@@ -153,9 +165,61 @@ def glyph_mask():
         mask = image.copy()
     if not set(np.unique(np.array(mask))).issubset({0, 255}):
         raise ValueError('glyph mask must contain only opaque and transparent pixels')
-    # These pixels above 자 belong to the source sky, not the letter.
-    ImageDraw.Draw(mask).rectangle((139, 175, 144, 176), fill=0)
-    return mask
+    glyphs = np.array(mask) > 0
+    glyphs[SUBTITLE_BOX[1]:SUBTITLE_BOX[3] + 1, SUBTITLE_BOX[0]:SUBTITLE_BOX[2] + 1] = False
+    glyphs |= subtitle() != SUBTITLE_CLEAR
+    return Image.fromarray(np.where(glyphs & ~outside_logo_outline(glyphs), 255, 0).astype(np.uint8), 'L')
+
+
+def subtitle():
+    with Image.open(SUBTITLE) as image:
+        if image.mode != 'L' or image.size != (256, 224):
+            raise ValueError('subtitle art must be a 256x224 grayscale PNG of palette indices')
+        return np.array(image)
+
+
+def outside_logo_outline(glyphs):
+    # The mask hugs the logo loosely; static source sky beyond the dark outline shows as specks against the moving sky.
+    source = native_title(DEFAULT_SOURCE)
+    palette = np.array(source.getpalette()[:384], dtype=np.float64).reshape(128, 3)
+    dark = (palette @ (0.299, 0.587, 0.114) < 60)[np.array(source)] & glyphs
+    outside = np.zeros_like(glyphs)
+    for (x0, y0, x1, y1), side in OUTLINE_TRIMS:
+        pick, none = (min, x1 + 1) if side == 'left' else (max, x0 - 1)
+        edges = [pick(np.flatnonzero(dark[y, x0:x1 + 1]) + x0, default=none) for y in range(y0 - 1, y1 + 2)]
+        for y, (above, edge, below) in enumerate(zip(edges, edges[1:], edges[2:]), y0):
+            # Where the outline turns light for a row, its neighbours still mark the letter edge.
+            edge = pick(edge, max(above, below) if side == 'left' else min(above, below))
+            if side == 'left':
+                outside[y, x0:max(edge, x0)] = True
+            else:
+                outside[y, min(edge, x1) + 1:x1 + 1] = True
+    red, green, blue = palette[np.array(source)].transpose(2, 0, 1)
+    sky = (blue >= green) & ~((red > 140) & (green < 90)) & ~dark
+    for x0, y0, x1, y1 in SKY_BOXES:
+        outside[y0:y1 + 1, x0:x1 + 1] |= sky[y0:y1 + 1, x0:x1 + 1]
+    outside &= glyphs
+    return outside | stray_specks(glyphs & ~outside, LOGO_BOTTOM)
+
+
+def stray_specks(glyphs, bottom, size=4):
+    specks = np.zeros_like(glyphs)
+    seen = np.zeros_like(glyphs)
+    for y, x in zip(*np.nonzero(glyphs[:bottom])):
+        if seen[y, x]:
+            continue
+        seen[y, x] = True
+        stack, part = [(y, x)], []
+        while stack:
+            cy, cx = stack.pop()
+            part.append((cy, cx))
+            for ny, nx in ((cy + 1, cx), (cy - 1, cx), (cy, cx + 1), (cy, cx - 1)):
+                if 0 <= ny < bottom and 0 <= nx < glyphs.shape[1] and glyphs[ny, nx] and not seen[ny, nx]:
+                    seen[ny, nx] = True
+                    stack.append((ny, nx))
+        if len(part) < size:
+            specks[tuple(np.array(part).T)] = True
+    return specks
 
 
 def protected_glyph_mask():
@@ -164,9 +228,12 @@ def protected_glyph_mask():
 
 def foreground_source():
     image = native_title(DEFAULT_SOURCE)
-    # A dark separator keeps the lower ㄷ distinct from the upper strokes in 받.
-    ImageDraw.Draw(image).line((115, 183, 121, 183), fill=111)
-    return image
+    art = subtitle()
+    pixels = np.array(image)
+    pixels[art != SUBTITLE_CLEAR] = art[art != SUBTITLE_CLEAR]
+    result = Image.fromarray(pixels, 'P')
+    result.putpalette(image.getpalette())
+    return result
 
 
 def foreground():
@@ -175,7 +242,13 @@ def foreground():
     ImageDraw.Draw(mask).polygon([(185,183),(185,174),(187,180),(190,180),(190,171),(192,169),(192,167),(194,167),(194,170),(201,171),(201,160),(203,160),(203,165),(209,165),(209,152),(211,148),(213,161),(213,159),(215,159),(215,163),(220,163),(220,144),(222,142),(224,153),(226,153),(227,155),(227,140),(229,137),(231,150),(231,153),(233,154),(233,147),(234,145),(235,154),(238,153),(239,160),(239,165),(244,166),(245,160),(246,164),(246,168),(250,168),(251,165),(252,170),(254,171),(254,174),(247,174),(240,171),(232,172),(231,166),(225,165),(224,176),(221,176),(220,171),(216,171),(216,177),(211,183),(206,185),(201,185),(200,177),(196,176),(194,180),(194,185),(191,186),(190,183)], fill=255)
     # Keep the cloud bank attached to the castle when the front cloud drifts away.
     ImageDraw.Draw(mask).polygon([(185,180),(190,178),(196,174),(204,173),(211,175),(218,171),(226,169),(233,172),(240,170),(248,172),(255,174),(255,185),(251,185),(248,189),(243,188),(239,192),(234,191),(230,194),(225,192),(221,195),(216,194),(211,197),(206,196),(201,199),(196,196),(191,197),(187,194),(182,194),(180,190),(183,187)], fill=255)
-    ImageDraw.Draw(mask).rectangle((180, 185, 207, 223), fill=0)
+    # Drop the rock under the castle's left edge; the lobes give the cut cloud bank a rounded outline instead of a straight seam.
+    corner = Image.new('L', mask.size, 255)
+    ImageDraw.Draw(corner).polygon(CORNER_CUT, fill=0)
+    for lobe in CORNER_LOBES:
+        ImageDraw.Draw(corner).ellipse(lobe, fill=255)
+    keep = (np.array(corner) > 0) | (np.array(glyph_mask()) > 0)
+    mask = Image.fromarray(np.where(keep, np.array(mask), 0).astype(np.uint8), 'L')
     # Priority is per 8x8 tile, so castle pixels sharing a glyph tile would rise with the glyph.
     glyphs = np.array(glyph_mask()) > 0
     glyph_tiles = np.repeat(np.repeat(glyphs.reshape(28, 8, 32, 8).any(axis=(1, 3)), 8, axis=0), 8, axis=1)
@@ -404,6 +477,7 @@ def write_pack(out):
               'mode': 3, 'wing_poses': 12, 'cloud_y': CLOUD_Y, 'cloud_sprite_count': CLOUD_SPRITES, 'foreground_bpp': 8, 'background_bpp': 4,
               'approved_source_sha256': APPROVED_SOURCE_SHA256,
               'glyph_mask_sha256': hashlib.sha256(GLYPH_MASK.read_bytes()).hexdigest(),
+              'subtitle_sha256': hashlib.sha256(SUBTITLE.read_bytes()).hexdigest(),
               'cloud_source_sha256': hashlib.sha256(CLOUD_SOURCE.read_bytes()).hexdigest(),
               'cloud_period': CLOUD_PERIOD, 'cloud_forms': len(CLOUD_BASES), 'cloud_palettes': 4,
               'background_period': 128, 'foreground_tiles': len(fg)//64,
