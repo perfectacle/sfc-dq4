@@ -12,7 +12,6 @@ SFC DQ5 엔진을 분석하는 세션이 처음 읽는 문서입니다. 지금�
 | --- | --- | --- | --- |
 | [#562](https://github.com/perfectacle/sfc-dq4/pull/562) | `feat/dq5-furniture` | `dq5chestplace.py` 가구 배치와 서랍 표 항목 더하기. 게임 15쌍 통과 | `$MAIN-dq5-furniture` |
 | [#564](https://github.com/perfectacle/sfc-dq4/pull/564) | `feat/dq5-doortable` | `dq5newmap.py --door-bank` 문 표(`01:D2FC`) 늘리기. 게임 33장면 통과(rebase 뒤 다시 돌리지 않음) | `$MAIN-dq5-doortable` |
-| [#566](https://github.com/perfectacle/sfc-dq4/pull/566) | `feat/dq5-slotuse` | `04:FB1C`·`01:BA95` 슬롯 실측과 `--allow-growth` 맵별 한도. 실측 6건 통과 | `$MAIN-dq5-slotuse` |
 
 `$MAIN-…` 은 원래 체크아웃 옆 `sfc-dq4-dq5-…` 디렉터리입니다. #562·#564 는 지금 `origin/main` 과 충돌합니다.
 
