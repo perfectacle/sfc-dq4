@@ -9,6 +9,9 @@
   map1100   11/00 기본 목록 05:A3D2 스크립트(7E:219F bit7 을 기다림) → 05:E72A → 05:E838·05:E7EC → 04:FB1C 두 번.
             05:E72A 는 인물 01·02 가 일행에 살아 있을 때만 슬롯을 만들므로, 도착 뒤 일행 레코드 1·2 에
             인물 레코드 표(23:C014)의 01·02 를 베낌
+  map0109   01/09 대체 목록 10:8E0D(7E:2190 bit5)의 ヘンリー(15,6) 대화 234 → 06:B83C → 번호 3D(15:F588, 7E:219F bit1 을
+            기다림) → 1E:DDB3 → 05:E830·05:E7E4 → 04:FB1C 두 번. 06:B83C 는 일행의 인물 01·02 마다 7E:21D2 bit2·bit1 을
+            켜므로 map1100 과 같은 일행을 두고 219F bit1 을 켜 둠
 
 장면마다 부르는 곳을 지날 때의 $1983·Y(슬롯), 메시지 번호, 끝의 $1995(OBJ VRAM 다음 타일)를 적는다(lua/dq5slotuse.lua).
 원본 롬·선실 상태는 읽기만 하고 출력은 --out 의 새 하위 폴더에 둔다.
@@ -41,12 +44,12 @@ INN_LIST = '10:B7BA'
 PERSONS = 0x23C014          # 인물 레코드 표, 42바이트씩(일행 레코드 7E:2040 + i×42 와 같은 꼴)
 
 
-def party_sets(rom):
-    """일행을 주인공·인물 01·인물 02 셋으로 두고 11/00 장면을 거는 LATESET."""
+def party_sets(rom, flag):
+    """일행을 주인공·인물 01·인물 02 셋으로 두고 flag(예: 219F|98)를 켜는 LATESET."""
     data = rom.read_bytes()
     at = (PERSONS >> 16 & 0x7F) * 0x8000 + (PERSONS & 0x7FFF)
     sets = [f'{0x2040 + i * 42 + k:04X}={b:02X}' for i in (1, 2) for k, b in enumerate(data[at + i * 42:at + i * 42 + 42])]
-    return ';'.join(sets + ['201D=03', '201E=03', '201F=03', '2020=00', '2021=01', '2022=02', '219F|98'])
+    return ';'.join(sets + ['201D=03', '201E=03', '201F=03', '2020=00', '2021=01', '2022=02', flag])
 
 
 # 슬롯을 더 쓰는 루틴과 스크립트가 부르는 그 앞 루틴. 롬 전체에서 부르는 바이트 꼴을 찾아 아래와 같아야 한다.
@@ -56,18 +59,23 @@ CALLERS = {
     0x01BA95: {('JSL', '05:E931'), ('JSL', '06:B52D')},
     0x05E931: {('스크립트 37', '10:ABD1')},
     0x05E72A: {('스크립트 37', '05:A3E5')},
+    0x05E7E4: {('JSL', '1E:DDE3')},
+    0x05E830: {('JSL', '1E:DDC7')},
+    0x1EDDB3: {('이벤트 A0', '15:F58B')},
 }
 
 
 def callers(data, target):
     """target 을 부르는 곳. 긴 호출(JSL·JML, 인물 스크립트 05·37, 이벤트 스크립트 A0)은 롬 전체,
-    같은 뱅크 호출(JSR·JMP·JSR (a,X)·JMP (a,X), 뱅크 06 이면 대화 스크립트 00)은 그 뱅크에서 찾는다."""
+    같은 뱅크 호출(JSR·JMP·JSR (a,X)·JMP (a,X), 뱅크 06 이면 대화 스크립트 00)은 그 뱅크에서 찾는다.
+    긴 호출은 FastROM 미러(뱅크 | 80) 꼴도 찾는다."""
     def name(o):
         return f'{o // 0x8000:02X}:{0x8000 | o % 0x8000:04X}'
     long = {0x22: 'JSL', 0x5C: 'JML', 0x05: '스크립트 05', 0x37: '스크립트 37', 0xA0: '이벤트 A0'}
     near = {0x20: 'JSR', 0x4C: 'JMP', 0xFC: 'JSR', 0x7C: 'JMP'} | ({0x00: '대화 00'} if target >> 16 == 6 else {})
     out = {(long[data[m.start() - 1]], name(m.start() - 1))
-           for m in re.finditer(re.escape(bytes([target & 0xFF, target >> 8 & 0xFF, target >> 16])), data)
+           for bank in (target >> 16 & 0x7F, target >> 16 | 0x80)
+           for m in re.finditer(re.escape(bytes([target & 0xFF, target >> 8 & 0xFF, bank])), data)
            if m.start() and data[m.start() - 1] in long}
     base = (target >> 16 & 0x7F) * 0x8000
     for m in re.finditer(re.escape(bytes([target & 0xFF, target >> 8 & 0xFF])), data[base:base + 0x8000]):
@@ -77,11 +85,14 @@ def callers(data, target):
 
 
 def scenes(rom):
-    map1100 = dict(ALT0605, TO='11/00,100,67', LATESET=party_sets(rom))
+    map1100 = dict(ALT0605, TO='11/00,100,67', LATESET=party_sets(rom, '219F|98'))
     del map1100['SET']
+    map0109 = dict(ALT0605, TO='01/09,15,8', SET='2190|20', LATESET=party_sets(rom, '219F|02'), MAXF='9000',
+                   TEST='wait:30,up:8,' + 'a:4,wait:150,' * 40 + 'wait:1500')
     return {'inn': ('original', INN), 'inn-grown': ('grown', INN), 'ev3': ('original', EV3),
             'talk23a': ('original', T23A), 'overflow': ('original', dict(T23A, SET='1983=1E')),
-            'alt0605': ('original', ALT0605), 'map1100': ('original', map1100)}
+            'alt0605': ('original', ALT0605), 'map1100': ('original', map1100),
+            'map0109': ('original', map0109)}
 
 
 def grow_document():
@@ -170,6 +181,10 @@ def main():
             'map1100': [pc for pc, *_ in seen['map1100']['calls'] if pc in ('05E852', '05E806')] == ['05E852', '05E806']
             and len(made('map1100', '02B3B4')) == 2 and all(f == y + 1 for f, y in made('map1100', '02B3B4'))
             and seen['map1100']['free'] == made('map1100', '02B3B4')[0][1] + 2,
+            'map0109': [pc for pc, *_ in seen['map0109']['calls'] if pc in ('06B83C', '1EDDB3', '05E852', '05E806')]
+            == ['06B83C', '1EDDB3', '05E852', '05E806']
+            and len(made('map0109', '02B3B4')) == 2 and all(f == y + 1 for f, y in made('map0109', '02B3B4'))
+            and seen['map0109']['free'] == made('map0109', '02B3B4')[0][1] + 2,
         }
         results = {n: {**v, 'calls': [(pc, f'{f:02X}', f'{t:04X}', f'{y:02X}') for pc, f, t, y in v['calls']]}
                    for n, v in seen.items()}
