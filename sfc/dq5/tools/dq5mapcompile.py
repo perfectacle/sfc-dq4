@@ -30,19 +30,14 @@ from dq5mapwrite import HEADER, all_maps, dumps, encode, parse, pointer_addr  # 
 FORMAT = 'dq5mapsrc/1'
 
 
-def block_sizes(rom, high):
-    """블록 번호 → (폭, 높이)."""
-    table = high_block_table(rom) if high else block_table(rom)
+def block_sizes(rom, high, key=None):
+    """블록 번호 → (폭, 높이). key(BC, BD)를 주면 그 맵의 블록 표(dq5map.block_table)."""
+    table = high_block_table(rom) if high else block_table(rom, key=key)
     out = []
     for a in table:
         b0 = rom.u8(a)
         out.append((((b0 >> 3) & 7) + 1, (b0 & 7) + 1))
     return out
-
-
-def upper_rows(rom, high, n):
-    table = high_block_table(rom) if high else block_table(rom)
-    return rom.u8(table[n] + 1) >> 4
 
 
 def placements(commands, width, sizes):
@@ -180,7 +175,8 @@ def cover(points, spare, w, h):
 
 
 def compile_places(src, rom, high):
-    sizes = block_sizes(rom, high)
+    key = tuple(int(v, 16) for v in src['map'].split('/'))
+    sizes = block_sizes(rom, high, key)
     width = src['width']
     places = src['placements']
     for x, y, blk in places:
@@ -188,7 +184,8 @@ def compile_places(src, rom, high):
             raise ValueError(f'블록 번호 {blk} 가 표 0~{len(sizes) - 1} 밖')
         if not (0 <= x < width and 0 <= y < src['height']):
             raise ValueError(f'배치 ({x},{y}) 가 맵 밖')
-    us = [units(x, y, blk, width, sizes, lambda k: upper_rows(rom, high, k)) for x, y, blk in places]
+    table = high_block_table(rom) if high else block_table(rom, key=key)
+    us = [units(x, y, blk, width, sizes, lambda k: rom.u8(table[k] + 1) >> 4) for x, y, blk in places]
     cmds, cur = [], None
     for blk, pts, spare in schedule(places, us):
         if blk != cur:
@@ -204,7 +201,7 @@ def compile_places(src, rom, high):
 def extract(rom, bc, bd):
     high = bc >= 0x50
     doc, _ = parse(rom, map_pointer(rom, bc, bd))
-    sizes = block_sizes(rom, high)
+    sizes = block_sizes(rom, high, (bc, bd))
     return {'format': FORMAT, 'map': f'{bc:02X}/{bd:02X}', **{k: doc[k] for k in HEADER},
             'placements': placements(doc['commands'], doc['width'], sizes), 'passes': doc['passes']}
 
@@ -219,7 +216,7 @@ def cell_buffer(data, bc, bd, record=None):
         d[p:p + 3] = (0x308000).to_bytes(3, 'little')
         data = bytes(d)
     rom = Rom(data)
-    dec = Decoder(rom, 0xBE, bc >= 0x50)
+    dec = Decoder(rom, 0xBE, bc >= 0x50, (bc, bd))
     dec.preload(bc, bd)
     _, _, buf, _ = dec.decode(map_pointer(rom, bc, bd))
     back = {v & 0x3FF: k for k, v in dec.chr_map.items()}

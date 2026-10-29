@@ -90,7 +90,8 @@ def chest_maps(rom):
 
 def chests(rom, bc, bd, start):
     """맵의 상자 [(번호, (x, y), 내용물)]. 상자 셀은 맵별 루틴까지 반영한 셀 버퍼에서 센다."""
-    w, h, buf, _ = Decoder(rom, 0xBE).decode(map_pointer(rom, bc, bd))
+    # 블록 표는 맵마다 바뀔 수 있다(01:936E 훅, dq5map.block_table)
+    w, h, buf, _ = Decoder(rom, 0xBE, False, (bc, bd)).decode(map_pointer(rom, bc, bd))
     buf = bytearray(buf)
     apply_hook(rom, bc, bd, buf, w)
     return [(start + k, xy, rom.u16(CHEST_ITEMS + (start + k) * 2))

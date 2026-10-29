@@ -174,7 +174,7 @@ def describe(bc, entry):
 
 def map_exit_cells(rom, bc, bd, attrs):
     """맵별 루틴까지 반영한 출구 셀 목록과, 그 루틴이 출구 여부를 바꾼 셀 목록."""
-    dec = Decoder(rom, 0xBE, bc >= 0x50)
+    dec = Decoder(rom, 0xBE, bc >= 0x50, (bc, bd))
     dec.preload(bc, bd)
     w, h, buf, _ = dec.decode(map_pointer(rom, bc, bd))
     buf = bytearray(buf)

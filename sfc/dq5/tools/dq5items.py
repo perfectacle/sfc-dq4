@@ -78,7 +78,7 @@ def container_cells(rom):
     out, skipped = {}, []
     for bc, bd in map_ids(rom):
         try:
-            w, h, buf, _ = Decoder(rom, 0xBE, bc >= 0x50).decode(map_pointer(rom, bc, bd))
+            w, h, buf, _ = Decoder(rom, 0xBE, bc >= 0x50, (bc, bd)).decode(map_pointer(rom, bc, bd))
         except IndexError:
             skipped.append((bc, bd))
             continue

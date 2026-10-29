@@ -6,10 +6,12 @@ sfc/dq5/docs/dq5-map-format.md의 보물상자 형식. 입력 JSON→dq5patch→
 past_* 사례는 상자 194개·상자 맵 연결과 아래층 상자 표를 뱅크 3F 로 옮긴 롬에서 열기·들어갈 때 그리기·기록과 불러오기를 본다.
 new_* 사례는 원래 롬에 없는 새 그룹 맵 36/00(선실 17/00 에 상자 블록을 놓은 레코드)에 상자·タンス·두 칸 앞 항목을
 dq5chestreloc.py --new-map·--with-patch 로 넣은 롬을, 같은 새 맵 패치만 붙인 대조 롬과 견준다.
+blocks_* 사례는 --env 로 준 DQ4 환경 패치 폴더(sfc/dq4/tools/dq4environmentrom.py 출력)로 새 맵 36/00 을 만든다. 그 맵은
+환경 패치의 01:936E 훅이 블록 표를 바꾸는 맵이다. 그 맵에만 놓인 환경 블록을 상자 블록 꼴로 바꾼 사본으로 빌드해 상자를 연다.
 --audit 은 원본 롬에서 상자 맵 연결·아래층 상자 표의 DB(1E) 창을 연 동안 실행한 명령을 모아(lua/dq5dbread.lua),
 DB 로 롬(8000~)에 닿는 명령이 표 읽기 자리뿐인지 본다.
 
-  MESENCE=… python sfc/dq5/tools/dq5chestcheck.py rom/dq5.sfc --state work/state/ship.mss [--audit]
+  MESENCE=… python sfc/dq5/tools/dq5chestcheck.py rom/dq5.sfc --state work/state/ship.mss [--audit] [--env work/env]
 """
 import argparse
 import concurrent.futures
@@ -27,7 +29,9 @@ from kr_patch.sfc.mapper import LoROM
 from dq5chestreloc import ABS
 from dq5chestwrite import FORMAT
 from dq5exitcheck import DB_ABS, DB_INDIRECT, warp_exit
-from dq5map import Rom
+from dq5chest import chests
+from dq5map import Rom, block_hook, block_table
+from dq5mapwrite import all_maps
 from dq5mapcompile import compile_places, extract
 from dq5mapwrite import dumps
 
@@ -199,6 +203,16 @@ def grow_newmap(doc):
 NEWMAP = {'new_chest': (456, 0x2224, 0x40, 0x131, 0x12B, 0x12C),
           'new_search': (567, 0x2237, 0x01, 0x12F, 0x12F, 0x130),
           'new_ahead': (678, 0x223E, 0x04, 0x12B, 0x12B, 0x12C)}
+# DQ4 환경 패치의 새 맵 36/00(burland). 2×2 환경 블록 21 은 목록의 다른 맵(롬에 있는 것)에는 놓이지 않고 36/00 에만
+# (68,40)·(8,68) 두 번 놓인다. 그 머리를 상자 블록 384 와 같은 49 24 04 로 바꾸면 오른쪽 아래 (69,41)·(9,69) 가 상자 칸
+# (상자 0·1)이 되고, 다른 맵의 칸은 바뀌지 않는다. 새 맵 패치의 자리는 sfc/dq4/tools/dq4groupbuild.py 와 같다
+BLOCKS_MAP, BLOCKS_BLOCK, BLOCKS_HEAD = (0x36, 0), 21, bytes((0x49, 0x24, 0x04))
+BLOCKS_CELLS = [(69, 41), (9, 69)]
+BLOCKS_NEWMAP_AT = ('--entrance-table-at', '3C:C000', '--records-at', '34:8000', '--door-bank', '3B',
+                    '--attr-table-at', '3C:D000')
+BLOCKS_EXITS = ('--exits-at', '2A:D812', '--records-at', '3C:A000')
+BLOCKS_CHEST_AT = ('--chests-at', '36:8000', '--chest-maps-at', '36:9000')
+NEWMAP['blocks_chest'] = (246, 0x2210, 0x80, 0x131, 0x12B, 0x12C)
 for _name, (_amount, _flag, _mask, _message, _kind, _none) in NEWMAP.items():
     CASES[_name] = (None, _amount, _flag, _mask, _flag, _mask, None, _message)
     ORIGINAL_KIND[_name] = _kind
@@ -208,7 +222,7 @@ ORIGINAL_KIND.update(past_open=0x12B, full_open=0x12B)
 # 패치는 1F:FC50 이 옮긴 표에서 그 상자를 찾아 열린 상자 타일(9E·9F)로 바꾼다
 ENTRY = {'past_entry': ({'TO': '19/00,5,46'}, '2228|80'), 'past_entry_lower': ({'TO': '51/51,18,37,2'}, '2229|08'),
          'full_entry': ({'TO': '19/00,11,46'}, '222F|01'), 'new_entry': ({'TO': '36/00,6,7'}, '2224|40'),
-         'place_unlisted_entry': ({'TO': '19/00,5,46'}, '2224|08')}
+         'place_unlisted_entry': ({'TO': '19/00,5,46'}, '2224|08'), 'blocks_entry': ({'TO': '36/00,68,44'}, '2210|80')}
 # 열림 비트를 켠 채 교회에 기록하고 리셋해 불러오는 사례(dq5cdlsweep.py 의 church-save-load 와 같은 입력).
 # SRAM 칸 1 은 7E:2000~ 을 70:0012~ 에 그대로 담는다(25:83CE)
 SAVE_BITS = {0x2228: 0x80, 0x2229: 0x08}
@@ -235,6 +249,7 @@ SCENES = {'chest': {'TO': '01/02,34,31'}, 'search': None, 'foot': None, 'ahead':
           'place_shift': {'TO': '01/02,34,31'}, 'place_furniture': {'TO': '01/02,40,27'},
           'place_jar': 'grow_search', 'place_unlisted': 'grow_chests',
           'past_open': 'grow_chests', 'past_lower': 'lower', 'full_open': {'TO': '19/00,11,46'},
+          'blocks_chest': {'TO': '36/00,68,44'},
           'new_chest': {'TO': '36/00,6,7'}, 'new_search': {'TO': '36/00,3,5'}, 'new_ahead': {'TO': '36/00,9,12'}}
 # 필드 조사는 선 자리를 보므로 걷지 않고 바로 명령 창을 연다
 INPUTS = {name: INPUT.removeprefix('up:8,wait:30,') for name in CASES if name.startswith('field')}
@@ -318,7 +333,7 @@ def compare(name, state, original, out, mesence, libdir, start):
     source, manifest, patched = dest / 'input.json', dest / 'patch.json', dest / 'patched.sfc'
     none_message = NONE_MESSAGE.get(name, 0x12C)
     if name in NEWMAP:
-        original, patched = newmap_roms(out)
+        original, patched = newmap_roms(out, 'blocks' if name.startswith('blocks_') else 'newmap')
         none_message = NEWMAP[name][5]
     elif name in GROW:
         patched = grow_rom(original, dest, name.split('_')[0])
@@ -394,8 +409,74 @@ def grow_rom(original, dest, kind='past'):
     return patched
 
 
-def newmap_roms(out):
-    return out / 'newmap' / 'control.sfc', out / 'newmap' / 'patched.sfc'
+def newmap_roms(out, folder='newmap'):
+    return out / folder / 'control.sfc', out / folder / 'patched.sfc'
+
+
+def build_blocks(original, env, out):
+    """blocks_* 사례의 대조·패치 롬을 out/blocks 에 만든다. env 는 dq4environmentrom.py 출력 폴더(읽기만)."""
+    dest = out / 'blocks'
+    dest.mkdir()
+    doc = json.loads((env / 'dq4-environment.dq5patch.json').read_text(encoding='utf-8'))
+    for w in doc['writes']:
+        if 'file' in w:
+            w['hex'] = (env / w.pop('file')).read_bytes().hex(' ')
+    base = dest / 'env.dq5patch.json'
+    base.write_text(json.dumps(doc) + '\n', encoding='utf-8')
+    env_rom = dest / 'env.sfc'
+    command('dq5build.py', original, 'build', base, '--size', 4, '-o', env_rom)
+    # 블록 표는 그 맵의 훅 표(dq5map.block_table)에서 찾고, 그 블록 바이트를 쓰는 환경 패치 쓰기만 고친다
+    at = block_table(Rom(env_rom.read_bytes()), key=BLOCKS_MAP)[BLOCKS_BLOCK]
+    hit = [w for w in doc['writes'] if w['at'][:2] == f'{at >> 16:02X}'
+           and 0 <= (at & 0xFFFF) - int(w['at'][3:], 16) < len(bytes.fromhex(w['hex']))]
+    require(len(hit) == 1, f'블록 {BLOCKS_BLOCK} 를 쓰는 환경 패치 쓰기가 하나가 아님')
+    data = bytearray(bytes.fromhex(hit[0]['hex']))
+    k = (at & 0xFFFF) - int(hit[0]['at'][3:], 16)
+    require(data[k] & 0x3F == 0x09, f'블록 {BLOCKS_BLOCK} 가 2×2 가 아님')
+    # 머리를 바꾼 블록이 목록의 다른 맵에도 놓이면 그 맵에 가짜 상자 칸이 생긴다
+    env_view = Rom(env_rom.read_bytes())
+    elsewhere = [key for key in block_hook(env_view)[0] if key != BLOCKS_MAP and key in set(all_maps(env_view))
+                 and any(b == BLOCKS_BLOCK for _, _, b in extract(env_view, *key)['placements'])]
+    require(not elsewhere, f'블록 {BLOCKS_BLOCK} 가 목록의 다른 맵 {elsewhere} 에도 놓임')
+    data[k:k + 3] = BLOCKS_HEAD
+    hit[0]['hex'] = data.hex(' ')
+    base.write_text(json.dumps(doc) + '\n', encoding='utf-8')
+    command('dq5build.py', original, 'build', base, '--size', 4, '-o', env_rom)
+    (dest / 'burland.dq5map.json').write_bytes((env / 'burland.dq5map.json').read_bytes())
+    newmap = dest / 'newmap.json'
+    newmap.write_text(json.dumps({'format': 'dq5newmap/1', 'groups': [{'group': '36', 'entrance': {'copy': '03'}}],
+                                  'maps': [{'map': '36/00', 'record': {'source': 'burland.dq5map.json'},
+                                            'attrs': {'copy': '03/00'}}]}) + '\n', encoding='utf-8')
+    manifests = [base, dest / 'newmap.dq5patch.json', dest / 'npc.dq5patch.json', dest / 'exits.dq5patch.json']
+    # dq4groupbuild.py 와 같이 새 맵 패치는 환경 롬에서 만든다
+    command('dq5newmap.py', env_rom, 'patch', newmap, '-o', manifests[1], *BLOCKS_NEWMAP_AT)
+    (dest / 'npc.json').write_text(json.dumps({'format': 'dq5npcrelocate/1', 'scripts': []}) + '\n', encoding='utf-8')
+    command('dq5npcrelocate.py', original, 'patch', dest / 'npc.json', '-o', manifests[2], *NEW_MAP)
+    command('dq5exitreloc.py', original, 'dump', '-o', dest / 'exits.json', *NEW_MAP)
+    command('dq5exitreloc.py', original, 'patch', dest / 'exits.json', '-o', manifests[3], *NEW_MAP, *BLOCKS_EXITS)
+    control, patched = newmap_roms(out, 'blocks')
+    command('dq5build.py', original, 'build', *manifests, '--size', 4, '-o', control)
+    cells = chests(Rom(control.read_bytes()), *BLOCKS_MAP, 0)
+    require([xy for _, xy, _ in cells] == BLOCKS_CELLS, f'36/00 의 상자 칸이 {BLOCKS_CELLS} 가 아님: {cells}')
+    command('dq5chestreloc.py', original, 'dump', '-o', dest / 'chest.json')
+    tables = json.loads((dest / 'chest.json').read_text(encoding='utf-8'))
+    # 환경 패치가 레코드를 바꾼 맵은 원래 상자 칸이 없어져(15곳 모두 0개) 원래 맵 연결과 칸 수가 맞지 않는다.
+    # 그 연결과 내용물을 뺀다
+    view, rows, rewards, start = Rom(control.read_bytes()), [], [], 0
+    for row in tables['chest_maps']:
+        if len(chests(view, row['group'], row['map'], 0)) == row['count']:
+            rows.append(row)
+            rewards += tables['chests'][start:start + row['count']]
+        start += row['count']
+    tables['chest_maps'], tables['chests'] = rows, rewards
+    # 뺀 연결 수에 상관없이 번호가 정해지게 맨 앞에 둔다(상자 0, 7E:2210 & 80)
+    tables['chest_maps'].insert(0, {'group': BLOCKS_MAP[0], 'map': BLOCKS_MAP[1], 'count': len(BLOCKS_CELLS)})
+    tables['chests'][:0] = [{'reward': 0x100 + 246 + k} for k in range(len(BLOCKS_CELLS))]
+    (dest / 'chest.json').write_text(json.dumps(tables) + '\n', encoding='utf-8')
+    places = (*BLOCKS_CHEST_AT, *NEW_MAP, *(arg for m in manifests for arg in ('--with-patch', m)))
+    command('dq5chestreloc.py', original, 'patch', dest / 'chest.json', '-o', dest / 'chest.dq5patch.json', *places)
+    command('dq5chestreloc.py', original, 'check', dest / 'chest.json', *places)
+    command('dq5build.py', original, 'build', *manifests, dest / 'chest.dq5patch.json', '--size', 4, '-o', patched)
 
 
 def build_newmap(original, out):
@@ -457,8 +538,8 @@ def entry_compare(name, original, out, mesence, libdir, start):
     setup, bits = ENTRY[name]
     dest = out / name
     dest.mkdir()
-    if name.startswith('new_'):
-        original, patched = newmap_roms(out)
+    if name.startswith('new_') or name.startswith('blocks_'):
+        original, patched = newmap_roms(out, 'blocks' if name.startswith('blocks_') else 'newmap')
     elif name in PLACE_INPUTS:
         patched = dest / 'patched.sfc'
         place_manifest(name, original, dest / 'input.json', dest / 'patch.json')
@@ -471,7 +552,7 @@ def entry_compare(name, original, out, mesence, libdir, start):
         run_dir.mkdir()
         env = environment(libdir, start, run_dir)
         env.update(setup, SET=bits, SETTLE='120', SAVE='scene.mss', MAXF='1500')
-        if name.startswith('new_'):
+        if name.startswith('new_') or name.startswith('blocks_'):
             env['WARPEXIT'] = f'{warp_exit(rom):X}'
         run(mesence, rom, HERE / 'lua/dq5warp.lua', run_dir, env)
         require((run_dir / 'scene.mss').is_file(), f'{name}/{mode}: 장면 세이브가 없음')
@@ -482,7 +563,9 @@ def entry_compare(name, original, out, mesence, libdir, start):
         address, value = bits.split('|')
         require(wram[mode][int(address, 16)] & int(value, 16), f'{name}/{mode}: 미리 켠 비트가 꺼짐')
     # 선실 크기(16×32)의 맵은 BG 버퍼가 7E:C000~ 이다(36/00 에서 상자를 열 때 7E:C235 등이 9E·9F 로 바뀜)
-    words = opened_tiles(wram['original'], wram['patched'], (0xC000, 0x10000) if name.startswith('new_') else (0x10000, 0x20000))
+    span = (0xC000, 0x10000) if name.startswith('new_') else (0xC000, 0x20000) if name.startswith('blocks_') else \
+        (0x10000, 0x20000)
+    words = opened_tiles(wram['original'], wram['patched'], span)
     require(words >= 2, f'{name}: 패치 롬이 열린 상자를 그리지 않음(바뀐 타일 {words}개)')
     return {'case': name, 'bits': bits, 'opened_tile_words': words, 'passed': True}
 
@@ -572,6 +655,7 @@ def main():
     p.add_argument('--mesence', default=os.environ.get('MESENCE'))
     p.add_argument('--case', choices=ALL, action='append', help='이 사례만(여러 번 줄 수 있음)')
     p.add_argument('--audit', action='store_true', help='원본 롬의 DB 창 감사만 함')
+    p.add_argument('--env', type=Path, help='blocks_* 사례의 DQ4 환경 패치 폴더(dq4environmentrom.py --out)')
     args = p.parse_args()
     if not args.mesence:
         p.error('MESENCE 또는 --mesence가 필요함')
@@ -587,9 +671,14 @@ def main():
             result = audit(original, out, mesence, libdir, state)
             (out / 'audit.json').write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
             return 0
-        cases = list(dict.fromkeys(args.case or ALL))
+        # blocks_* 는 --env 가 있을 때만 돈다
+        cases = list(dict.fromkeys(args.case or [n for n in ALL if not n.startswith('blocks_') or args.env]))
         if any(name.startswith('new_') for name in cases):
             build_newmap(original, out)
+        if any(name.startswith('blocks_') for name in cases):
+            require(args.env and (args.env / 'dq4-environment.dq5patch.json').is_file(),
+                    'blocks_* 사례는 --env 에 dq4environmentrom.py 출력 폴더가 필요함')
+            build_blocks(original, args.env.resolve(), out)
         scenes = sorted({scene(name) for name in cases if name in CASES and name not in OWN_SCENE} - {START})
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
             futures = {name: pool.submit(prepare, name, original, state, out, mesence, libdir)
