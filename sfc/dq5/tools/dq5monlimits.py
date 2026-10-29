@@ -20,11 +20,13 @@ import sys
 from pathlib import Path
 
 import dq5mongfx as M
-from dq5encounter import AREA_COUNT, EVENT_COUNT, EVENT_GROUPS, EVENT_SIZE, area, count_range, fixed_group
+from dq5encounter import AREA_COUNT, AREAS, EVENT_COUNT, EVENT_GROUPS, EVENT_SIZE, area, count_range, fixed_group
 from dq5map import Rom
 
 PIECE_LIMIT, BAND_LIMIT = 100, 0x1C
 SKIP_FIRST = (0xE7, 0xEA)
+# 22:89E5·22:8A57·22:8A85 가 무리를 더하거나 합치는 ミルドラース 와 그 둘째 무리. 이 셈으로는 배치를 셀 수 없다.
+UNCOUNTED = range(0xE7, 0xEC)
 EVEN_FIRST = 0x6A
 
 
@@ -53,6 +55,9 @@ def compositions(rom, areas=None):
     found, skipped = {}, 0
     base = area_base(rom)
     if areas is None:
+        # 구역 수는 롬에 없어, 옮긴 표에서 원래 85개만 세면 늘린 구역이 소리 없이 빠진다.
+        if base != AREAS:
+            raise ValueError('구역 표를 옮긴 롬은 --progress 나 --areas 를 주어야 함')
         areas = AREA_COUNT
 
     def add(groups, where):
@@ -133,9 +138,14 @@ def losses(rom, pictures=None, monsters=None, found=None, areas=None):
     most = max((before.listed(groups) for groups in found), default=0)
     changed = set(monsters or ()) | {m for m in range(M.COUNT) if before.picture(m) in (pictures or {})}
     out = []
-    shown = {before.picture(m) for groups in found for m, _, _ in groups}
-    for g in sorted(set(pictures or ()) - shown):
-        out.append(((), [], [], f'그림 {g:02X}', '세는 조합에 나오지 않아 한도를 정할 수 없음'))
+    # 바꾼 뒤 기준으로, 늘린 그림을 쓰는 몬스터가 센 조합에 하나도 없거나 ミルドラース(E7~EB)면 셀 수 없다.
+    appear = {m for groups in found for m, _, _ in groups}
+    for g in sorted(pictures or ()):
+        users = {m for m in range(M.COUNT) if after.picture(m) == g}
+        if users & set(UNCOUNTED):
+            out.append(((), [], [], f'그림 {g:02X}', '무리를 더하는 몬스터(E7~EB)가 써서 한도를 정할 수 없음'))
+        elif not users & appear:
+            out.append(((), [], [], f'그림 {g:02X}', '세는 조합에 나오지 않아 한도를 정할 수 없음'))
     for groups, where in found.items():
         if not changed & {m for m, _, _ in groups}:
             continue

@@ -249,10 +249,12 @@ def copy_warnings(spells, doc):
     실행 루틴·둘째 실행 표·처리 루틴(26:8865·26:8565·20:B7F9)이 copy 원본과 다르면 경고 문장을 돌려준다(쓰기는 막지 않음).
     세 칸이 같은 다른 행동을 베꼈으면 알아차리지 못한다."""
     out = []
-    for row in doc.get('actions', []):
+    rows = doc.get('actions', []) if isinstance(doc, dict) else []
+    require(isinstance(rows, list), 'actions: 배열이어야 함')
+    for row in rows:
         if not isinstance(row, dict) or 'copy' not in row:
             continue
-        n, src = int(row['action'], 16), int(row['copy'], 16)
+        n, src = hexbyte(row.get('action'), 'actions action'), hexbyte(row['copy'], 'actions copy')
         if n not in NEW_ACTIONS:
             continue
         for name in ('handler', 'executor', 'executor_alt'):

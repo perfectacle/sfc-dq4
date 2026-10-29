@@ -73,6 +73,17 @@ class LimitTests(unittest.TestCase):
         self.assertEqual([x[3] for x in swapped], ['a'])   # 8 × 가로 4 칸이 줄 폭 28 을 넘음
         self.assertEqual(unshown, [])
 
+    def test_losses_uncountable_users(self):
+        with Fakes(), mock('dq5monlimits.M.COUNT', 0xEC):
+            # 늘린 그림을 ミルドラース(E7) 가 쓰게 바꾸면 E7 조합은 세지 않으므로 거부한다.
+            boss = L.losses(None, {0: (1, [2, 2])}, monsters={0xE7: 0}, found=FOUND)
+            # 그림 2 는 몬스터 2 만 쓰고 몬스터 2 는 조합에 없다. 몬스터 1 을 그림 2 로 바꾸면 셀 수 있다.
+            unseen = L.losses(None, {2: (1, [1, 1])}, found=FOUND)
+            moved = L.losses(None, {2: (1, [1, 1])}, monsters={1: 2}, found=FOUND)
+        self.assertEqual([x[4] for x in boss], ['무리를 더하는 몬스터(E7~EB)가 써서 한도를 정할 수 없음'])
+        self.assertEqual([x[4] for x in unseen], ['세는 조합에 나오지 않아 한도를 정할 수 없음'])
+        self.assertEqual(moved, [])
+
     def test_budgets_merge_same_head(self):
         # 몬스터 1 이 그림 3(그림 0 과 같은 머리)을 쓰면, 두 번호의 여유는 함께 센 하나다.
         found = {((0, 4, 0), (1, 4, 0)): 'c', ((0, 2, 0),): 'd'}
@@ -98,6 +109,9 @@ class LimitTests(unittest.TestCase):
             found, skipped = L.compositions(Rom(bytes(data)), areas=1)
             seen = L.area.call_args.args
         self.assertEqual(seen[1:], (0, 0x239000))
+        with mock('dq5monlimits.area_base', return_value=0x239000), \
+                self.assertRaisesRegex(ValueError, '구역 표를 옮긴 롬은 --progress 나 --areas 를 주어야 함'):
+            L.compositions(Rom(bytes(data)))
         self.assertEqual(skipped, 1)
         self.assertEqual(len(found), 19)
         self.assertIn(((0x10, 2, 0), (0x11, 1, 0)), found)

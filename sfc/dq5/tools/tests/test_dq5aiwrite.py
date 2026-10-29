@@ -134,6 +134,11 @@ class AiWriteTests(unittest.TestCase):
         self.assertEqual(len(got), 2)
         self.assertIn('copy 27', got[0])
         self.assertIn('C7', got[1])
+        for bad in ({'action': 'C6', 'copy': 4}, {'action': 6, 'copy': '04'}, {'action': 'C6', 'copy': 'x'}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                ai.copy_warnings(spells, doc(actions=[bad]))
+        with self.assertRaises(ValueError):
+            ai.copy_warnings(spells, doc(actions={'action': 'C6'}))
 
     def test_check_through_builder(self):
         r = rom()
