@@ -36,6 +36,9 @@ WARP = DQ5_TOOLS / "lua" / "dq5warp.lua"
 DUMP = TOOLS / "lua" / "dq4environmentdump.lua"
 # An untouched map with no animation, reached after leaving a replaced map.
 CONTROL = (0x01, 0x03)
+# Untouched maps whose door entries sit more than 0x100 bytes after 01:D2FC: the object hook must keep
+# the high byte of Y, or their doors are read from the wrong place and vanish.
+FAR_DOORS = ((0x1A, 0x00), (0x19, 0x00))
 
 
 def _run(mesence, rom, script, env):
@@ -268,6 +271,17 @@ def main():
         "block_table_equal": w0[0xB000:0xC000] == w1[0xB000:0xC000],
         "chr_bank_equal": w0[0x1823:0x1827] == w1[0x1823:0x1827],
     }
+    for group, number in FAR_DOORS:
+        name = f"doors-{group:02X}{number:02X}"
+        fx, fy = _control_cell(args.orig.read_bytes(), (group, number))
+        to = f"{group:02X}/{number:02X},{fx},{fy}"
+        dumps = []
+        for label, rom in (("orig", args.orig), ("rom", args.rom)):
+            saved, _ = warp(mesence, rom.resolve(), args.state.resolve(), to, out / f"{name}-{label}", name)
+            dumps.append(dump(mesence, rom.resolve(), saved, out / f"{name}-{label}" / "dump")[0])
+        width, height = dumps[0][0xBF], dumps[0][0xC0]
+        results["control"][f"{name}_cell_buffer_equal"] = (
+            _static_cells(dumps[0], width, height) == _static_cells(dumps[1], width, height))
     # Open state: object flags 7E:21C2- are cleared on a group change, so visit another map of the
     # Burland target's group, set every flag there, come back and walk up through the gate.
     group = TARGETS["burland"][0]
