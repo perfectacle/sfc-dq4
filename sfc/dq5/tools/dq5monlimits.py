@@ -41,13 +41,17 @@ def area_base(rom):
 
 
 def area_count(progress=None, areas=None):
-    """구역 수. --areas 를 주면 그 값, dq5progresswrite.py 패치 목록을 주면 거기서 읽고, 아니면 원래 85개."""
+    """구역 수. --areas 를 주면 그 값, 구역 표를 옮긴 dq5progresswrite.py 패치 목록이면 그 표의 항목 수.
+    둘 다 없거나 패치 목록에 구역 표를 옮긴 기록이 없으면 None 이고, 그때의 기본 85 는 compositions 가
+    구역 표가 원래 자리일 때만 정한다."""
     if areas is not None:
         return areas
     if progress is not None:
         from dq5encounterwrite import areas_in
-        return areas_in(json.loads(Path(progress).read_text(encoding='utf-8')))
-    return AREA_COUNT
+        doc = json.loads(Path(progress).read_text(encoding='utf-8'))
+        if any(w.get('note') == 'area table relocated' for w in doc.get('writes', [])):
+            return areas_in(doc)
+    return None
 
 
 def compositions(rom, areas=None):
@@ -57,7 +61,8 @@ def compositions(rom, areas=None):
     if areas is None:
         # 구역 수는 롬에 없어, 옮긴 표에서 원래 85개만 세면 늘린 구역이 소리 없이 빠진다.
         if base != AREAS:
-            raise ValueError('구역 표를 옮긴 롬은 --progress 나 --areas 를 주어야 함')
+            raise ValueError('구역 표를 옮긴 롬은 --progress 나 --areas 를 주어야 함'
+                             '(--progress 는 구역 표를 옮긴 기록이 있는 dq5progresswrite.py 패치 목록)')
         areas = AREA_COUNT
 
     def add(groups, where):

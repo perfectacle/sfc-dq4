@@ -1,5 +1,9 @@
 """무리 조합 늘어놓기와 조각 합·줄마다 타일 합 한도(여유·걸리는 조합)를 원본 롬 없이 확인한다."""
+import contextlib
+import io
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch as mock
@@ -7,6 +11,7 @@ from unittest.mock import patch as mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import dq5monlimits as L  # noqa: E402
 import dq5mongfx as M  # noqa: E402
+from dq5encounter import AREA_SIZE  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
 
 # 그림 0: 2x2 칸, 조각 1, 줄마다 타일 2. 그림 1: 4x4 칸, 조각 6, 줄마다 타일 4.
@@ -118,6 +123,63 @@ class LimitTests(unittest.TestCase):
         self.assertEqual(found[((0x15, 1, 0),)], '구역 00 칸 5')
         self.assertEqual(found[((0x20, 1, 1),)], '구역 00 칸 10')
         self.assertEqual(found[((0x6A, 3, 0),)], '이벤트 무리 00')
+
+
+class CliTests(unittest.TestCase):
+    """report·dq5monwrite.py 의 CLI 가 구역 수를 주지 않으면 None 을 넘겨, 옮긴 구역 표를 85개로 세지 않는다."""
+    MOVED = L.AREAS + AREA_SIZE
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp())
+        self.rom = self.dir / 'rom.sfc'
+        self.rom.write_bytes(bytes(0x180000))
+        empty = {'weights': [0] * 11, 'count_codes': [0] * 11, 'species_weights': [0, 0, 0], 'monsters': [0] * 10,
+                 'fixed_group': 0}
+        self.mocks = [mock('dq5monlimits.area', return_value=empty)]
+        for m in self.mocks:
+            m.start()
+
+    def tearDown(self):
+        for m in self.mocks:
+            m.stop()
+
+    def report(self, *extra, base=MOVED):
+        err = io.StringIO()
+        with mock('dq5monlimits.area_base', return_value=base), mock.object(sys, 'argv', ['x', str(self.rom), 'report', *extra]), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            return L.main(), err.getvalue()
+
+    def progress(self, name, writes):
+        path = self.dir / f'{name}.json'
+        path.write_text(json.dumps({'format': 'dq5patch/1', 'writes': writes}), encoding='utf-8')
+        return str(path)
+
+    def test_report(self):
+        code, err = self.report()
+        self.assertEqual(code, 1)
+        self.assertIn('구역 표를 옮긴 롬은 --progress 나 --areas 를 주어야 함', err)
+        self.assertEqual(self.report()[0], 1)
+        self.assertEqual(self.report(base=L.AREAS), (0, ''))
+        self.assertEqual(self.report('--areas', '2'), (0, ''))
+        # 구역 표를 옮긴 기록이 없는 패치 목록은 구역 수를 알려 주지 않는다.
+        plain = self.progress('plain', [{'at': '23:8000', 'hex': '00', 'note': 'growth'}])
+        self.assertEqual(self.report('--progress', plain)[0], 1)
+        moved = self.progress('moved', [{'at': '30:8000', 'hex': '00 ' * (2 * AREA_SIZE), 'note': 'area table relocated'}])
+        self.assertEqual(self.report('--progress', moved), (0, ''))
+        self.assertEqual(L.area_count(moved), 2)
+        self.assertIsNone(L.area_count(plain))
+        self.assertIsNone(L.area_count())
+
+    def test_monwrite_passes_none(self):
+        import dq5monwrite as W
+        doc = self.dir / 'mon.json'
+        doc.write_text(json.dumps({'format': W.FORMAT}), encoding='utf-8')
+        for command in (['patch', str(doc), '-o', str(self.dir / 'out.json')], ['check', str(doc)]):
+            target = 'patch' if command[0] == 'patch' else 'check'
+            with self.subTest(command=command[0]), mock(f'dq5monwrite.{target}', return_value={'writes': []}) as seen, \
+                    mock.object(sys, 'argv', ['x', str(self.rom), *command]), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(W.main(), 0)
+            self.assertIsNone(seen.call_args.args[4])
 
 
 if __name__ == '__main__':
