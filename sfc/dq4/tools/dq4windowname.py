@@ -37,6 +37,7 @@ HP_WINDOWS = (0x03, 0x04)
 # 가나 이름(몬스터 동료 등)의 바이트 → 글리프 번호 표(평 · 탁점 84 · 반탁점 83, 바이트마다 16비트, FFFF = 없음).
 # 필드에서는 가나 칸을 슬롯으로 돌려 써 원래 가나 타일로 찍은 이름이 깨지므로, 한글 이름처럼 Galmuri9 가나로 그린다
 KANA_TABLE = 0x60E800
+EMPTY_SLOT_HOOK = 0x04B9EB        # 모험의 서 기록 목록의 빈 칸 「 しようしていません」 을 한 글자씩 찍는 고리
 PREFIX_HOOK = 0x04B11E            # 창 바이트 갈래(메뉴 패치가 JSL 로 바꿔 둔 자리). 고정 문구 접두를 먼저 가른다
 
 
@@ -131,9 +132,12 @@ def apply(data, font=None, asar=None):
     hi_count = -(-len(ne.GLYPHS) // ne.CODE_RADIX)
     font = font or dq4menupatch.Font('galmuri9')
     text, _ = dq4windowtext.build(d, font)
-    records, _ = dq4windowtext.fixed_records(d, font)
+    records, numbers = dq4windowtext.fixed_records(d, font)
     for o, rec in records:
         d[o:o + len(rec)] = rec
+    eo = lorom(EMPTY_SLOT_HOOK)
+    if d[eo:eo + 12] != bytes.fromhex('a20900bdfbb92035b2ca10f7'):
+        raise ValueError(f'{EMPTY_SLOT_HOOK:06X}: 빈 기록 칸 고리가 아님')
     po = lorom(PREFIX_HOOK)
     if d[po] != 0x22:
         raise ValueError(f'{PREFIX_HOOK:06X} 가 JSL 이 아님: {d[po:po + 4].hex()}')
@@ -155,7 +159,7 @@ def apply(data, font=None, asar=None):
             f'!wt_prefix_prev = ${int.from_bytes(d[po + 1:po + 4], "little"):06X}\n'
             f'!wt_fixed = ${dq4windowtext.FIXED_PREFIX:02X}\n!wt_fixed_kind = {dq4windowtext.FIXED_KIND}\n!wt_safe = ${dq4windowtext.SAFE:04X}\n'
             f'!wt_tactic = {dq4windowtext.tactic_first()}\n!wt_tactic_count = {len(dq4windowtext.TACTIC_LINES)}\n'
-            f'!wn_kana_table = ${KANA_TABLE:06X}\n')
+            f'!wn_kana_table = ${KANA_TABLE:06X}\n!wt_empty_slot = {numbers[dq4windowtext.EMPTY_SLOT]}\n')
     del kana
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
