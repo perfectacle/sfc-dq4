@@ -16,7 +16,9 @@ furniture[{x,y,block,reward,flag_index,mask[,unused]}]}]. x·y 는 블록 원점
 블록이 놓인 칸 안에 상자 칸(가구 칸)이 하나 새로 생겨야 한다.
 원래 롬에 없는 맵(dq5newmap.py 로 더하는 맵)은 --new-map GG/MM 과 그 맵을 더하는 패치 목록 --with-patch 로 알린다.
 그 맵의 레코드는 그 패치가 쓰므로 블록을 놓지 않고, block 없이 x·y 에 레코드에 이미 있는 상자 칸·가구 칸을 적는다.
-상자는 그 맵의 상자 칸을 모두 적어야 하고, 기존 맵이 없으면 --map-at 은 주지 않아도 된다.
+기존 맵(새 맵을 이미 붙인 롬의 새 맵 포함)도 모든 항목에 block 을 빼면 같이 적는다. 상자는 그 맵의 상자 칸을 모두
+적어야 하고, 블록을 놓는 맵이 없으면 --map-at 은 주지 않아도 된다. --with-patch 를 주면 기존 맵의 칸·블록도 그 패치를
+붙인 롬에서 읽는다.
 """
 import argparse
 import json
@@ -41,7 +43,7 @@ UPPER_FURNITURE = {0xA7, 0xB9, 0xD3, 0xD4}
 LOWER_FIRST = 0x32
 BOX_FIELDS = {'x', 'y', 'block', 'reward'}
 FURNITURE_FIELDS = BOX_FIELDS | {'flag_index', 'mask'}
-# 새 맵은 레코드에 이미 있는 칸을 적으므로 block 이 없다
+# 블록 없이 적는 맵(새 맵 등)은 레코드에 이미 있는 칸을 적는다
 NEW_BOX_FIELDS = BOX_FIELDS - {'block'}
 NEW_FURNITURE_FIELDS = FURNITURE_FIELDS - {'block'}
 
@@ -57,13 +59,11 @@ def chest_cells(rom, bc, bd):
 
 
 def new_map_rows(item, label, view, key):
-    """새 맵 항목의 chests·furniture. 블록을 놓지 않으므로 칸 좌표와 보상만 받는다."""
+    """블록 없이 적은 맵 항목의 chests·furniture. 레코드에 있는 칸 좌표와 보상만 받는다."""
     width, height = map_dimensions(view, *key)
     for kind, need in (('chests', NEW_BOX_FIELDS), ('furniture', NEW_FURNITURE_FIELDS)):
         for k, box in enumerate(item.get(kind, [])):
             where = f'{label}.{kind}[{k}]'
-            if isinstance(box, dict) and 'block' in box:
-                raise ValueError(f'{where}: 새 맵의 레코드는 --with-patch 의 패치가 쓰므로 block 을 놓지 않음(칸 x·y 만 적음)')
             fields(box, need | ({'unused'} if kind == 'furniture' else set()), where)
             if need - set(box):
                 raise ValueError(f'{where}: {sorted(need)} 를 모두 적어야 함')
@@ -75,7 +75,7 @@ def new_map_rows(item, label, view, key):
 
 def map_writes(rom, doc, at, new_maps=NO_NEW_MAPS):
     """맵마다 상자 블록을 더한 레코드를 늘린 자리 at(파일 위치)부터 놓는다. (쓰기, 맵별 새 상자 목록, 끝 위치, 새 맵 항목).
-    새 맵(new_maps)은 레코드를 쓰지 않고 [(맵, 상자, 가구)] 로 따로 돌려준다."""
+    블록 없이 적은 맵(새 맵은 늘)은 레코드를 쓰지 않고 [(맵, 상자, 가구)] 로 따로 돌려준다."""
     fields(doc, {'format', 'maps'}, '문서')
     if doc.get('format') != FORMAT or not isinstance(doc.get('maps'), list) or not doc['maps']:
         raise ValueError(f'format={FORMAT} 과 비지 않은 maps 배열이 필요함')
@@ -92,14 +92,28 @@ def map_writes(rom, doc, at, new_maps=NO_NEW_MAPS):
         boxes, furniture = item.get('chests', []), item.get('furniture', [])
         if not isinstance(boxes, list) or not isinstance(furniture, list) or not boxes + furniture:
             raise ValueError(f'{label}: chests·furniture 는 배열이고 둘 중 하나는 비지 않아야 함')
-        if (bc, bd) in new_maps.keys:
-            new_map_rows(item, label, new_maps.view, (bc, bd))
+        blocks = [isinstance(box, dict) and 'block' in box for box in boxes + furniture]
+        # 블록 없이 적은 맵은 레코드에 이미 있는 칸에 보상을 단다. 새 맵은 레코드를 --with-patch 의 패치가 쓰므로 늘 이렇다
+        if (bc, bd) in new_maps.keys or not any(blocks):
+            if any(blocks) and (bc, bd) in new_maps.keys:
+                raise ValueError(f'{label}: 새 맵의 레코드는 --with-patch 의 패치가 쓰므로 block 을 놓지 않음(칸 x·y 만 적음)')
+            new_map_rows(item, label, new_maps.rom_for(rom, (bc, bd)), (bc, bd))
             fresh.append(((bc, bd), boxes, furniture))
             continue
+        if not all(blocks):
+            raise ValueError(f'{label}: 한 맵에 block 을 적은 항목과 적지 않은 항목을 섞지 않음')
         if at is None:
             raise ValueError(f'{label}: 기존 맵에 블록을 놓으려면 --map-at 이 필요함')
-        src = extract(rom, bc, bd)
-        sizes = block_sizes(rom, False)
+        # 블록과 레코드는 --with-patch 를 붙인 롬에서 읽는다(환경 패치가 블록을 바꿀 수 있음). 포인터는 원래 롬 자리에
+        # 쓰므로, 그 패치가 맵 포인터 목록을 옮겼거나 이 맵의 포인터를 바꿨으면 이 패치가 읽히지 않는다
+        view = new_maps.rom_for(rom, (bc, bd))
+        pointer = lorom(pointer_addr(rom, bc, bd))
+        if view is not rom and (lorom(pointer_addr(view, bc, bd)) != pointer
+                                or view.d[pointer:pointer + 3] != rom.d[pointer:pointer + 3]):
+            raise ValueError(f'{label}: --with-patch 의 패치가 맵 {bc:02X}/{bd:02X} 의 포인터 자리나 값을 바꿈'
+                             '(맵 포인터 목록을 옮긴 새 맵 패치와는 기존 맵에 블록을 놓을 수 없음)')
+        src = extract(view, bc, bd)
+        sizes = block_sizes(view, False)
         for kind, rows, need in (('chests', boxes, BOX_FIELDS), ('furniture', furniture, FURNITURE_FIELDS)):
             for k, box in enumerate(rows):
                 where = f'{label}.{kind}[{k}]'
@@ -113,8 +127,7 @@ def map_writes(rom, doc, at, new_maps=NO_NEW_MAPS):
                 if kind == 'chests':
                     reloc.row_encode('chests', {'reward': box['reward']}, f'{where}.reward')
                 src['placements'].append([box['x'], box['y'], box['block']])
-        record = encode(compile_places(src, rom, False))
-        pointer = lorom(pointer_addr(rom, bc, bd))
+        record = encode(compile_places(src, view, False))
         writes.append((at, record, None, f'map {bc:02X}/{bd:02X}'))
         writes.append((pointer, to_cpu(at).to_bytes(3, 'little'), bytes(rom.d[pointer:pointer + 3]),
                        f'map {bc:02X}/{bd:02X} 포인터'))
@@ -167,6 +180,10 @@ def plan(rom, doc, map_at, at=None, base=None, new_maps=NO_NEW_MAPS):
         raise ValueError(f'--map-at: 늘린 롬의 {file_cpu(start)}~ 에 이미 다른 자료가 있음')
     mb = max(mb_for(end), reloc.rom_mb(rom)) if maps else 0
     middle = Rom(build(rom.d, [('chest-place maps', mb, maps)], mb)[0]) if maps else rom
+    # 칸은 --with-patch 를 붙인 롬(view)에서 세고, 레코드를 다시 싼 뒤는 그 롬에 맵 쓰기까지 붙인 롬(seen)에서 센다
+    view = new_maps.rom_for(rom, None)
+    seen = new_maps.merged(rom, [('chest-place maps', mb, maps)], mb) if new_maps.keys and maps else \
+        view if new_maps.keys else middle
     if base is not None:
         # 바탕 표는 원래 롬의 맵 칸과 맞아야 상자 내용물을 칸으로 따라가게 할 수 있다
         reloc.serialize(rom, base, new_maps)
@@ -177,13 +194,13 @@ def plan(rom, doc, map_at, at=None, base=None, new_maps=NO_NEW_MAPS):
     new_cells = []
     added = []
     for (bc, bd), boxes, furniture, sizes in placed:
-        before, after = set(chest_cells(rom, bc, bd)), chest_cells(middle, bc, bd)
+        before, after = set(chest_cells(view, bc, bd)), chest_cells(seen, bc, bd)
         if boxes and (bc, bd) not in rows and before:
             raise ValueError(f'{bc:02X}/{bd:02X}: 표에 없는 맵인데 상자 칸 {len(before)}개가 이미 있음. 그 칸들의 '
                              '내용물을 정할 입력이 없어 받지 않음')
         footprint = {(box['x'] + i, box['y'] + j) for box in boxes + furniture
                      for i in range(sizes[box['block']][0]) for j in range(sizes[box['block']][1])}
-        changed = changed_cells(rom.d, middle.d, bc, bd) - footprint
+        changed = changed_cells(view.d, seen.d, bc, bd) - footprint
         if changed:
             raise ValueError(f'{bc:02X}/{bd:02X}: 놓은 블록 밖의 칸 {sorted(changed)[:8]} 이 바뀜(배치를 다시 짠 결과)')
         if before - set(after):
@@ -202,7 +219,7 @@ def plan(rom, doc, map_at, at=None, base=None, new_maps=NO_NEW_MAPS):
             rows[(bc, bd)]['count'] = len(after)
         elif boxes:
             tables['chest_maps'].append({'group': bc, 'map': bd, 'count': len(after)})
-        old_furniture, new_furniture = furniture_cells(rom.d, bc, bd), furniture_cells(middle.d, bc, bd)
+        old_furniture, new_furniture = furniture_cells(view.d, bc, bd), furniture_cells(seen.d, bc, bd)
         # 블록이 기존 서랍 항목의 칸을 덮으면 그 항목은 다른 그림 밑의 고아가 된다. 덮은 칸의 아래층 93 은 남을 수
         # 있어(17/00 (4,4)) 속성만으로는 못 가린다
         lost = sorted(xy for row in tables['search'] if (row['group'], row['map']) == (bc, bd)
@@ -230,19 +247,19 @@ def plan(rom, doc, map_at, at=None, base=None, new_maps=NO_NEW_MAPS):
                    'reward': box['reward'], 'flag_index': box['flag_index'], 'mask': box['mask']}
             added.append(row)
     for (bc, bd), boxes, furniture in fresh:
-        cells = chest_cells(new_maps.view, bc, bd)
+        cells = chest_cells(seen, bc, bd)
         given = [(box['x'], box['y']) for box in boxes]
         if (bc, bd) in rows or any((row['group'], row['map']) == (bc, bd) for row in tables['search']):
-            raise ValueError(f'{bc:02X}/{bd:02X}: 바탕 표에 이미 있는 새 맵. 그 맵의 상자·가구는 한 입력에 모두 적음')
+            raise ValueError(f'{bc:02X}/{bd:02X}: 바탕 표에 이미 있는 맵. 블록 없이 적는 맵의 상자·가구는 한 입력에 모두 적음')
         if len(set(given)) != len(given) or set(given) != set(cells):
-            raise ValueError(f'{bc:02X}/{bd:02X}: 새 맵의 상자 칸 {cells} 을 모두 한 번씩 적어야 함(적은 칸 {given})')
+            raise ValueError(f'{bc:02X}/{bd:02X}: 맵의 상자 칸 {cells} 을 모두 한 번씩 적어야 함(적은 칸 {given})')
         for box in boxes:
             rewards[(bc, bd, (box['x'], box['y']))] = box['reward']
         # 상자 번호는 셀 순서로 매기므로 적은 순서가 아니라 칸 순서로 둔다
         new_cells += [(bc, bd, xy, rewards[(bc, bd, xy)]) for xy in cells]
         if cells:
             tables['chest_maps'].append({'group': bc, 'map': bd, 'count': len(cells)})
-        open_cells, used = furniture_cells(new_maps.view.d, bc, bd) - set(cells), set()
+        open_cells, used = furniture_cells(seen.d, bc, bd) - set(cells), set()
         for k, box in enumerate(furniture):
             xy = (box['x'], box['y'])
             if xy not in open_cells:
@@ -256,7 +273,7 @@ def plan(rom, doc, map_at, at=None, base=None, new_maps=NO_NEW_MAPS):
                           'reward': box['reward'], 'flag_index': box['flag_index'], 'mask': box['mask']})
     tables['chests'] = []
     for row in tables['chest_maps']:
-        cells = chest_cells(new_maps.rom_for(middle, (row['group'], row['map'])), row['group'], row['map'])
+        cells = chest_cells(seen, row['group'], row['map'])
         tables['chests'] += [{'reward': rewards[(row['group'], row['map'], xy)]} for xy in cells]
     taken = set(reloc.flag_bits(tables))
     for k, row in enumerate(added):
@@ -268,7 +285,8 @@ def plan(rom, doc, map_at, at=None, base=None, new_maps=NO_NEW_MAPS):
                              f'7E:{addr:04X} & {row["mask"]:02X} 를 다른 보상이 이미 씀')
         taken |= bits
     tables['search'] += added
-    chest_writes, chest_mb = reloc.writes_for(middle, tables, at, new_maps)
+    chest_writes, chest_mb = reloc.writes_for(middle, tables, at, new_maps.viewing(seen) if new_maps.keys else new_maps,
+                                              rom)
     for addr, data, _, note in chest_writes if maps else ():
         off = lorom(addr)
         if off < end and off + len(data) > start:

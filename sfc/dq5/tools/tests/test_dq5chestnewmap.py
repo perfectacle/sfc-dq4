@@ -181,6 +181,69 @@ class NewMapRomTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '바탕 표에 이미 있는'):
             place.plan(self.rom, one(chests=[box, other]), None, self.AT, self.tables(), self.new)
 
+    def test_place_mixed_and_existing_cell_entries(self):
+        mixed = {'format': place.FORMAT, 'maps': [{'map': '01/02', 'chests': [
+            {'x': 36, 'y': 26, 'block': 384, 'reward': 1}, {'x': 37, 'y': 27, 'reward': 2}]}]}
+        with self.assertRaisesRegex(ValueError, '섞지 않음'):
+            place.plan(self.rom, mixed, 0x3E8000, self.AT)
+        # 블록 없이 적은 기존 맵은 레코드에 있는 칸에 보상을 단다. 표에 이미 있는 맵이면 한 입력에 모두 적으라고 거부한다
+        listed = {'format': place.FORMAT, 'maps': [{'map': '31/03', 'chests': [
+            {'x': 8, 'y': 17, 'reward': 1}, {'x': 10, 'y': 17, 'reward': 2}]}]}
+        with self.assertRaisesRegex(ValueError, '바탕 표에 이미 있는'):
+            place.plan(self.rom, listed, None, self.AT)
+
+    def test_place_cells_on_extended_rom(self):
+        # 새 맵을 이미 붙인 롬에서는 --new-map 없이 블록을 뺀 항목으로 같은 표가 나온다
+        doc = {'format': place.FORMAT, 'maps': [{'map': '36/00', 'chests': [
+            {'x': 8, 'y': 17, 'reward': 0x200}, {'x': 10, 'y': 17, 'reward': 0x201}],
+            'furniture': [{'x': 8, 'y': 21, 'reward': 0x202, 'flag_index': 0x0B, 'mask': 0x01}]}]}
+        base = reloc.parse(self.rom)
+        base['ahead'].append(self.tables()['ahead'][-1])
+        _, plain, _, tables, _ = place.plan(self.rom, doc, None, self.AT, base, self.new)
+        _, again, mb, grown, _ = place.plan(self.extended, doc, None, self.AT, base)
+        self.assertEqual(grown, tables)
+        self.assertEqual(mb, 2)
+        self.assertEqual([(a, n) for a, n, _, _ in again], [(a, n) for a, n, _, _ in plain])
+
+    def test_place_tables_in_front_of_record_bank(self):
+        # 맵 레코드를 3F:C000 에 두어도 같은 뱅크 앞쪽 3F:8000 은 표 자리로 받는다(빈 자리는 입력 롬으로 봄)
+        doc = {'format': place.FORMAT, 'maps': [{'map': '01/02', 'chests': [
+            {'x': 36, 'y': 26, 'block': 384, 'reward': 0x4BA}]}]}
+        for new in (reloc.NO_NEW_MAPS, self.new):
+            with self.subTest(new=bool(new.keys)):
+                maps, writes, _, _, _ = place.plan(self.rom, doc, 0x3FC000, {'chests': 0x3F8000}, None, new)
+                self.assertTrue(maps)
+                self.assertTrue(any(a == 0x3F8000 for a, _, _, _ in writes))
+        # 레코드와 겹치는 표는 여전히 거부한다
+        with self.assertRaisesRegex(ValueError, '맵 레코드 자리와 겹침'):
+            place.plan(self.rom, doc, 0x3F8000, {'chests': 0x3F8010})
+
+    def test_place_rejects_moved_pointer_list(self):
+        # 새 맵 패치가 맵 포인터 목록을 옮기면 원래 목록에 쓴 포인터는 읽히지 않는다
+        moved = Path(self.tmp.name) / 'moved.dq5patch.json'
+        manifest = dq5newmap.patch(self.rom, NEWMAP, at={'entrance': 0x3EC000, 'pointer': 0x3CC000}, allow_doors=True)
+        moved.write_text(json.dumps(manifest), encoding='utf-8')
+        new = NewMaps(self.rom, [NEW], [moved])
+        doc = {'format': place.FORMAT, 'maps': [{'map': '01/02', 'chests': [
+            {'x': 36, 'y': 26, 'block': 384, 'reward': 1}]}]}
+        with self.assertRaisesRegex(ValueError, '포인터 자리나 값을 바꿈'):
+            place.plan(self.rom, doc, 0x3E8000, {'chests': 0x3F8000}, None, new)
+        # 같은 자리 목록이면 --with-patch 를 붙인 롬에서 칸을 세어 --new-map 없을 때와 같은 표가 나온다
+        plain = place.plan(self.rom, doc, 0x3E8000, {'chests': 0x3F8000})
+        withnew = place.plan(self.rom, doc, 0x3E8000, {'chests': 0x3F8000}, None, self.new)
+        self.assertEqual(withnew[3], plain[3])
+        self.assertEqual(withnew[0], plain[0])
+
+    def test_new_map_on_rom_larger_than_patch_lists(self):
+        # 4MB 로 늘린 롬에 2MB 로 적은 새 맵 패치를 붙여도 롬을 줄이지 않는다(빌더의 negative count)
+        big = Rom(build(self.rom.d, [load(str(self.newmap))], 4)[0])
+        second = Path(self.tmp.name) / 'second.dq5patch.json'
+        manifest = dq5newmap.patch(big, {'format': 'dq5newmap/1', 'maps': [
+            {'map': '36/01', 'record': {'copy': '31/04'}, 'attrs': {'copy': '31/04'}}]}, allow_doors=True)
+        second.write_text(json.dumps(manifest | {'rom_size': 2}), encoding='utf-8')
+        new = NewMaps(big, [(0x36, 1)], [second])
+        self.assertEqual(len(new.view.d), 0x400000)
+
     def test_cli_with_new_map(self):
         tmp = Path(self.tmp.name)
         source = tmp / 'tables.json'

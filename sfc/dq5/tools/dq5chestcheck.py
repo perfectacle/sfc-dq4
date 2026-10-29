@@ -426,7 +426,8 @@ def opened_tiles(before, after, span=(0x10000, 0x20000)):
     차이는 세지 않고, before 에만 있는 열린 상자 타일이 있으면 거부한다."""
     tile = {0x9E, 0x9F}
     gone = [i for i in range(*span) if before[i] in tile and after[i] not in tile]
-    require(not gone, f'7E:{gone[0] if gone else 0:05X} 의 열린 상자 타일이 패치 롬에서 사라짐')
+    require(not gone, f'{0x7E + gone[0] // 0x10000 if gone else 0x7E:02X}:{gone[0] & 0xFFFF if gone else 0:04X} '
+            '의 열린 상자 타일이 패치 롬에서 사라짐')
     return sum(1 for i in range(*span) if after[i] in tile and before[i] not in tile)
 
 

@@ -1000,7 +1000,7 @@ uv run --locked python sfc/dq5/tools/dq5chestplace.py rom/dq5.sfc check work/pla
 ```
 
 - `x`·`y`는 블록 원점(왼쪽 위)이고 `block`은 실내 맵 블록 표의 번호입니다. 블록 384(2×2)는 01/02 의 두 상자에 쓰인 블록으로, 오른쪽 아래 칸이 상자 칸(`+7` = `84`)입니다. 다른 블록도 받지만, 블록이 덮는 칸 안에 새 상자 칸이 꼭 하나 생겨야 합니다. 기존 상자 칸을 지우는 배치도 거부합니다. 배치 목록은 블록별로 다시 묶어 싸므로, 블록이 덮는 칸 밖의 셀 버퍼가 하나라도 바뀌면 거부합니다.
-- 그룹 `00`~`35` 의 실내 맵에 블록을 놓습니다. `--new-map` 으로 알린 새 맵은 블록 없이 칸을 적습니다([새 맵의 상자](#새-맵의-상자---new-map)). 맵 레코드는 `--map-at`(늘린 롬 자리, 파일 `3F0000` 앞까지)부터 놓고 맵 포인터를 바꿉니다. 상자가 늘면 내용물 표가 원래 자리에 들지 않으므로 `--chests-at`이 늘 필요하고, 맵 연결을 새로 더하면 `--chest-maps-at`도 필요합니다. 표 자리가 맵 레코드와 겹치면 거부합니다.
+- 그룹 `00`~`35` 의 실내 맵에 블록을 놓습니다. `--new-map` 으로 알린 새 맵과, 모든 항목에서 `block` 을 뺀 맵은 블록 없이 칸을 적습니다([새 맵의 상자](#새-맵의-상자---new-map)). 맵 레코드는 `--map-at`(늘린 롬 자리, 파일 `3F0000` 앞까지)부터 놓고 맵 포인터를 바꿉니다. 상자가 늘면 내용물 표가 원래 자리에 들지 않으므로 `--chests-at`이 늘 필요하고, 맵 연결을 새로 더하면 `--chest-maps-at`도 필요합니다. 표 자리가 맵 레코드와 겹치면 거부합니다.
 - 상자 표에 없는 맵 8곳(00/0C·02/01·19/00·19/02·1D/03·1F/00·20/00·20/01)에는 등록되지 않은 상자 칸이 이미 있습니다. 롬의 표만으로는 그 칸들의 내용물을 정할 입력이 없으므로 이 맵들에는 놓지 않습니다. 등록된 맵도 셀 버퍼의 상자 칸 수가 등록 개수와 다르면 거부합니다.
 - `--tables FILE` 을 주면 롬의 표 대신 그 `dq5chesttables/1`(`dq5chestreloc.py dump` 를 고친 것)을 바탕으로 놓습니다. 표에 없던 맵의 상자 연결을 붙이거나 열림 비트를 옮긴 표에 상자를 더할 때 씁니다. 바탕 표는 원래 롬의 맵 칸 수와 맞아야 하고, 표 옮기기와 같은 검사(열림 비트 겹침 등)를 거칩니다.
 - 상자 번호는 맵 셀 순서로 정해지므로, 새 상자보다 뒤에 있는 상자는 번호와 열림 비트가 하나씩 밀립니다. 기존 상자의 내용물은 칸 좌표로 따라갑니다. 기존 세이브의 열림 비트는 옮기지 않습니다. 표에 없던 맵이면 맵 연결을 끝에 더합니다.
@@ -1030,7 +1030,7 @@ uv run --locked python sfc/dq5/tools/dq5chestplace.py rom/dq5.sfc check work/pla
 - `check` 는 원래 롬에 그 목록과 상자 패치를 함께 빌드한 롬을 다시 읽습니다. 표를 코드가 가리키는 자리에서 읽은 결과가 입력과 같은지, 새 맵을 포함한 맵마다 상자 칸 수와 `count` 가 같은지 봅니다.
 - 거부하는 입력: `--new-map` 만 있거나 `--with-patch` 만 있음, 같은 맵을 두 번 적음, 원래 롬에 이미 있는 맵, 목록을 붙인 롬에도 없는 맵, 그룹 `50` 이상. 새 맵을 알리지 않고 표에 적으면 「존재하지 않는 맵」으로 거부합니다.
 
-새 맵이 이미 들어간 롬(원래 롬에 새 맵 패치만 붙여 만든 롬, 상자 표는 원래 자리)을 입력 롬으로 줄 수도 있습니다. 그때는 새 맵이 롬의 맵이므로 `--new-map` 을 주지 않습니다(주면 「이미 롬에 있는 맵」). 표를 둘 늘린 뱅크(`30`~`7D`)는 그 롬에서 뱅크 끝의 0 줄만 빈 자리로 봅니다(뱅크 첫 8바이트 표지는 뺌). 만드는 패치의 `rom_size` 는 입력 롬 크기보다 작게 두지 않습니다. 같은 입력이면 원래 롬에서 `--new-map` 으로 만든 것과 표 쓰기가 바이트까지 같습니다(`tests/test_dq5chestnewmap.py`).
+새 맵이 이미 들어간 롬(원래 롬에 새 맵 패치만 붙여 만든 롬, 상자 표는 원래 자리)을 입력 롬으로 줄 수도 있습니다. 세 도구 모두 받고, 상자 놓기는 그 새 맵의 항목을 블록 없이 적습니다. 그때는 새 맵이 롬의 맵이므로 `--new-map` 을 주지 않습니다(주면 「이미 롬에 있는 맵」). 표를 둘 늘린 뱅크(`30`~`7D`)는 그 롬에서 뱅크 끝의 0 줄만 빈 자리로 봅니다(뱅크 첫 8바이트 표지는 뺌). 다른 패치의 자료가 0 으로 끝나면 그 끝의 0 까지 빈 자리로 봅니다. 그래서 이 길보다, 원래 롬에서 `--with-patch` 로 만들어 겹침을 빌더가 보게 하는 길을 권합니다. 만드는 패치의 `rom_size` 는 입력 롬 크기보다 작게 두지 않습니다. 같은 입력이면 원래 롬에서 `--new-map` 으로 만든 것과 표 쓰기가 바이트까지 같습니다(`tests/test_dq5chestnewmap.py`).
 
 #### 새 그룹에서 엔진이 표를 찾는 법
 
@@ -1048,14 +1048,28 @@ uv run --locked python sfc/dq5/tools/dq5chestplace.py rom/dq5.sfc check work/pla
 
 #### 순서
 
-새 맵 패치(`dq5newmap.py`)와 출구·인물 등 다른 새 맵 패치를 평소대로 원래 롬에서 만든 뒤, 상자 패치를 만들어 함께 빌드합니다. JSON 의 `group`·`map` 은 10진 정수입니다(그룹 `36` = 54).
+새 맵 패치(`dq5newmap.py`)와 출구·인물 등 다른 새 맵 패치를 평소대로 원래 롬에서 만든 뒤, 상자 패치를 만들어 함께 빌드합니다. 아래 예는 「확인한 것」의 36/00(선실 17/00 + 상자 블록, 상자 칸 (7,5), タンス 칸 (4,4))입니다. `work/newmap.dq5patch.json`·`npc.dq5patch.json`·`exits.dq5patch.json` 은 그 사례가 만드는 패치입니다(`dq5chestcheck.py --case new_chest` 출력의 `newmap/` 폴더). JSON 의 `group`·`map` 은 10진 정수입니다(그룹 `36` = 54).
+
+상자 표를 넣는 길은 둘이고, 하나만 고릅니다. 두 길의 패치는 같은 표 자리를 맡으므로 한 빌드에 함께 넣으면 빌더가 겹침으로 거부합니다.
 
 ```sh
 P='--new-map 36/00 --with-patch work/newmap.dq5patch.json --with-patch work/npc.dq5patch.json --with-patch work/exits.dq5patch.json'
 AT='--chests-at 3B:8000 --chest-maps-at 3B:9000 --search-at 3B:A000 --ahead-at 3B:B000'
-uv run --locked python sfc/dq5/tools/dq5chestreloc.py rom/dq5.sfc dump -o work/chest-tables.json
-# chest_maps 끝에 {"group": 54, "map": 0, "count": 상자 칸 수}, chests 끝에 그 수만큼 {"reward": …}(셀 순서),
-# search·foot·ahead 끝에 그 맵의 항목을 더한다
+uv run --locked python sfc/dq5/tools/dq5chestreloc.py rom/dq5.sfc dump -o work/chest-orig.json
+```
+
+**길 1: 표에 손으로 넣기(`dq5chestreloc.py`).** 덤프 끝에 그 맵의 항목을 더합니다. 상자 번호는 맵 셀 순서로 매기므로(`25:FAB0`), `chests` 에 넣는 순서는 그 맵의 상자 칸을 위 줄부터, 줄 안에서는 왼쪽부터 센 순서입니다.
+
+```sh
+uv run --locked python - <<'PY'
+import json
+doc = json.load(open('work/chest-orig.json', encoding='utf-8'))
+doc['chest_maps'].append({'group': 54, 'map': 0, 'count': 1})
+doc['chests'].append({'reward': 712})
+doc['search'].append({'group': 54, 'map': 0, 'x': 4, 'y': 4, 'unused': 1, 'reward': 823, 'flag_index': 11, 'mask': 1})
+doc['ahead'].append({'group': 54, 'map': 0, 'x': 9, 'y': 9, 'reward': 934, 'flag_index': 46, 'mask': 4})
+json.dump(doc, open('work/chest-tables.json', 'w', encoding='utf-8'), indent=1)
+PY
 uv run --locked python sfc/dq5/tools/dq5chestreloc.py rom/dq5.sfc patch work/chest-tables.json \
   -o work/chest-tables.dq5patch.json $AT $P
 uv run --locked python sfc/dq5/tools/dq5chestreloc.py rom/dq5.sfc check work/chest-tables.json $AT $P
@@ -1063,22 +1077,35 @@ uv run --locked python sfc/dq5/tools/dq5build.py rom/dq5.sfc build work/newmap.d
   work/npc.dq5patch.json work/exits.dq5patch.json work/chest-tables.dq5patch.json -o work/build.sfc
 ```
 
-상자 번호는 맵 셀 순서로 매기므로(`25:FAB0`), `chests` 에 넣는 순서는 그 맵의 상자 칸을 위 줄부터 왼쪽부터 센 순서입니다. 그 순서를 손으로 맞추기 싫으면 [상자 놓기](#보물상자-놓기-dq5chestplace1)로 칸마다 보상을 적습니다. 새 맵 항목은 `block` 없이 레코드에 이미 있는 칸을 적고, 도구가 셀 순서로 상자 번호를 매기고 서랍 표 끝에 가구를 붙입니다. 기존 맵에 블록을 놓지 않으면 `--map-at` 은 필요 없습니다. 발밑·두 칸 앞은 상자 놓기가 다루지 않으므로 `--tables` 로 준 바탕 표에 미리 넣습니다.
+**길 2: 칸마다 보상 적기([상자 놓기](#보물상자-놓기-dq5chestplace1)).** 새 맵 항목은 `block` 없이 레코드에 이미 있는 칸을 적습니다. 도구가 셀 순서로 상자 번호를 매기고, 맵 연결을 더하고, 서랍 표 끝에 가구를 붙입니다. 블록을 놓는 맵이 없으면 `--map-at` 은 필요 없습니다.
 
-```json
-{"format": "dq5chestplace/1", "maps": [{"map": "36/00",
-  "chests": [{"x": 7, "y": 5, "reward": 712}],
-  "furniture": [{"x": 4, "y": 4, "reward": 823, "flag_index": 11, "mask": 1}]}]}
-```
+발밑·두 칸 앞은 상자 놓기가 다루지 않습니다. 그래서 덤프에 그 맵의 발밑·두 칸 앞 항목만 더한 바탕 표(`work/chest-base.json`)를 `--tables` 로 줍니다. 바탕 표에 그 맵의 상자 연결이나 서랍 항목이 있으면 「바탕 표에 이미 있는 맵」으로 거부합니다. 그러니 길 1 의 `work/chest-tables.json` 을 바탕으로 주면 안 됩니다.
 
 ```sh
+uv run --locked python - <<'PY'
+import json
+doc = json.load(open('work/chest-orig.json', encoding='utf-8'))
+doc['ahead'].append({'group': 54, 'map': 0, 'x': 9, 'y': 9, 'reward': 934, 'flag_index': 46, 'mask': 4})
+json.dump(doc, open('work/chest-base.json', 'w', encoding='utf-8'), indent=1)
+place = {'format': 'dq5chestplace/1', 'maps': [{'map': '36/00',
+         'chests': [{'x': 7, 'y': 5, 'reward': 712}],
+         'furniture': [{'x': 4, 'y': 4, 'reward': 823, 'flag_index': 11, 'mask': 1}]}]}
+json.dump(place, open('work/place.json', 'w', encoding='utf-8'), indent=1)
+PY
 uv run --locked python sfc/dq5/tools/dq5chestplace.py rom/dq5.sfc patch work/place.json -o work/place.dq5patch.json \
-  --tables work/chest-tables.json $AT $P
+  --tables work/chest-base.json $AT $P
+uv run --locked python sfc/dq5/tools/dq5chestplace.py rom/dq5.sfc check work/place.json --tables work/chest-base.json $AT $P
+uv run --locked python sfc/dq5/tools/dq5build.py rom/dq5.sfc build work/newmap.dq5patch.json \
+  work/npc.dq5patch.json work/exits.dq5patch.json work/place.dq5patch.json -o work/build-place.sfc
 ```
 
-- 새 맵의 상자 칸은 모두 한 번씩 적어야 합니다. 빠지거나 두 번 적거나, `block` 을 주면 거부합니다.
+위 두 예의 상자 패치는 쓰기가 바이트까지 같습니다.
+
+- 블록 없이 적는 맵의 상자 칸은 모두 한 번씩 적어야 합니다. 빠지거나 두 번 적으면 거부합니다.
+- 새 맵에 `block` 을 주면 거부합니다. 한 맵에 `block` 이 있는 항목과 없는 항목을 섞어도 거부합니다.
 - 가구 칸은 상자 아닌 가구 칸(`+4` = `93`, `+7` = `A7`·`B9`·`D3`·`D4`)이어야 하고, 같은 칸을 두 번 적으면 거부합니다.
-- 바탕 표(`--tables`)에 이미 그 새 맵의 상자 연결이나 서랍 항목이 있으면, 한 입력에 모두 적으라고 거부합니다.
+- `--with-patch` 를 주면, 기존 맵에 블록을 놓을 때도 블록·레코드·칸을 그 목록을 붙인 롬에서 읽습니다.
+- 그 목록이 맵 포인터 목록을 옮겼거나(`dq5newmap.py --pointer-table-at`) 그 맵의 포인터를 바꿨으면, 기존 맵에 블록을 놓지 않고 거부합니다. 원래 자리에 쓴 포인터가 읽히지 않기 때문입니다.
 
 고정 표 쓰기(`dq5chestwrite.py`)도 같은 두 선택을 받아, 기존 슬롯을 새 맵으로 돌릴 수 있습니다(상자 수 161 은 그대로).
 

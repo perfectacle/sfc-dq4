@@ -286,9 +286,10 @@ def merge(spans):
     return out
 
 
-def placement(rom, sizes, at, extra):
-    """at: 표 이름 → CPU 주소(없으면 지금 자리). 지금 자리는 extra 로 허용한다."""
+def placement(rom, sizes, at, extra, space=None):
+    """at: 표 이름 → CPU 주소(없으면 지금 자리). 지금 자리는 extra 로 허용한다. 빈 자리는 space(기본 rom)의 바이트로 본다."""
     current = locate(rom)
+    free = allowed((space or rom).d)
     at = {name: at.get(name) or current[name] for name in ORIGINAL}
     spans = {}
     for name, size in sizes.items():
@@ -299,7 +300,7 @@ def placement(rom, sizes, at, extra):
             raise ValueError(f'{name}: 뱅크 00~3F 만 됨(같은 DB 로 WRAM 을 abs 로 씀)')
         if bank > 0x7D:
             raise ValueError(f'{name}: 뱅크 00~7D 로 적어야 함')
-        if not any(lo <= start and start + size <= hi for lo, hi in [*allowed(rom.d), *extra.get(name, ())]):
+        if not any(lo <= start and start + size <= hi for lo, hi in [*free, *extra.get(name, ())]):
             raise ValueError(f'{name}: {cpu(start)}~ {size}바이트가 원래 표 자리·빈 자리·늘린 뱅크 어느 한 곳에도 들지 않음')
         spans[name] = (start, start + size)
     order = sorted(spans.items(), key=lambda kv: kv[1])
@@ -314,14 +315,15 @@ def rom_size(addresses):
     return 0 if top < 0x30 else 2 if top < 0x40 else 3 if top < 0x60 else 4
 
 
-def writes_for(rom, doc, at=None, new_maps=NO_NEW_MAPS):
-    """문서와 자리 → [(CPU 주소, 새 바이트, 원래 바이트 또는 None, 설명)] 과 롬 크기(MB)."""
+def writes_for(rom, doc, at=None, new_maps=NO_NEW_MAPS, space=None):
+    """문서와 자리 → [(CPU 주소, 새 바이트, 원래 바이트 또는 None, 설명)] 과 롬 크기(MB). 상자 놓기는 맵 레코드를 쓴
+    롬을 rom 으로 주므로, 표를 둘 빈 자리는 입력 롬(space)으로 본다. 레코드와의 겹침은 상자 놓기가 본다."""
     # orig 는 원래 롬 바이트여야 빌더가 붙일 수 있으므로, 이미 옮긴 롬에는 쓰지 않는다
     if locate(rom) != ORIGINAL:
         raise ValueError('표를 옮긴 롬에는 패치를 만들지 않음. 원래 롬에서 만든다')
     blobs = serialize(rom, doc, new_maps)
     check_cells(rom, doc, new_maps)
-    at = placement(rom, {name: len(blob) for name, blob in blobs.items()}, at or {}, {})
+    at = placement(rom, {name: len(blob) for name, blob in blobs.items()}, at or {}, {}, space)
     data = [(at[name], blobs[name], f'{name} 표') for name in ORIGINAL]
     code = []
     for name in ORIGINAL:

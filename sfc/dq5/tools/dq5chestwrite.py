@@ -216,7 +216,8 @@ def map_dimensions(rom, group, map_number):
 
 class NewMaps:
     """--new-map 으로 알린 원래 롬에 없는 맵과, 그 맵을 읽을 롬. 새 맵 레코드는 다른 도구(dq5newmap.py)의 패치가 쓰므로
-    그 패치 목록(--with-patch)을 원래 롬에 붙여 빌드한 롬에서 크기·상자 칸을 읽는다. 상자 도구의 패치도 그 목록과
+    그 패치 목록(--with-patch)을 원래 롬에 붙여 빌드한 롬에서 크기·상자 칸을 읽는다. 그 목록의 다른 패치(환경 패치 등)가
+    기존 맵의 블록을 바꿀 수 있으므로 기존 맵의 칸도 그 롬에서 읽는다. 상자 도구의 패치도 그 목록과
     한 빌드로 합쳐 보아(merged) 겹침을 거부한다."""
 
     def __init__(self, rom, keys=(), patches=()):
@@ -245,12 +246,20 @@ class NewMaps:
             raise ValueError(f'--new-map {missing[0][0]:02X}/{missing[0][1]:02X}: --with-patch 를 붙인 롬에도 없는 맵')
 
     def rom_for(self, rom, key):
-        return self.view if key in self.keys else rom
+        return self.view if self.keys else rom
+
+    def viewing(self, view):
+        """같은 새 맵·목록에 칸을 읽을 롬만 view 로 바꾼 것(상자 놓기가 레코드를 다시 싼 뒤)."""
+        out = NewMaps(None)
+        out.keys, out.lists, out.view = self.keys, self.lists, view
+        return out
 
     def merged(self, rom, lists, mb):
         """원래 롬에 --with-patch 목록과 lists([(이름, 롬 크기 MB, [(파일 위치, 바이트, orig, 설명)])])를 함께 빌드한 롬."""
         lists = self.lists + list(lists)
-        mb = max([mb, *(size for _, size, _ in lists)])
+        # 이미 늘린 롬이 바탕이면 그 크기보다 작게 빌드하지 않는다(빌더가 롬을 줄이려다 실패함)
+        grown = len(rom.d) // 0x100000 if len(rom.d) > 0x180000 else 0
+        mb = max([mb, grown, *(size for _, size, _ in lists)])
         try:
             return Rom(build(rom.d, lists, mb)[0])
         except PatchError as error:
