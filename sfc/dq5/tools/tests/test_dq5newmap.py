@@ -238,6 +238,39 @@ class DoorTests(unittest.TestCase):
         self.assertEqual(writes_for(moved, value, at=at)[0], [])
         self.assertEqual(writes_for(moved, value)[0], [])
 
+    def moved(self):
+        value = doc({'map': '01/02', 'record': {'copy': '01/00'}, 'attrs': {'copy': '01/00'}})
+        return value, apply(self.rom, writes_for(self.rom, value, at={'door_bank': 0x3D})[0])
+
+    def test_every_entry_jumps_to_its_stub(self):
+        _, moved = self.moved()
+        for i, entry in enumerate(DOOR_ENTRIES):
+            stub = 0x01FED0 + i * 11
+            self.assertEqual(bytes(moved.d[lorom(entry):lorom(entry) + 4]), bytes([0x5C, *stub.to_bytes(3, 'little')]))
+        # 11:8E54 의 JSL 이 부르는 입구. PLB 뒤 01:D97F 로 돌아간다.
+        stub = 0x01FED0 + DOOR_ENTRIES.index(0x01D97B) * 11
+        self.assertEqual(bytes(moved.d[lorom(stub):lorom(stub) + 11]), bytes.fromhex('08 8b f4 3d 3d ab ab 5c 7f d9 01'))
+        self.assertEqual(lorom(0x01FED0) + 11 * len(DOOR_ENTRIES), lorom(0x01FF12))
+
+    def test_mixed_entries_rejected(self):
+        _, moved = self.moved()
+        write(moved.d, 0x01D97B, bytes.fromhex('08 8b 4b ab'))
+        with self.assertRaisesRegex(ValueError, '섞였'):
+            door_table(moved)
+
+    def test_door_bank_must_be_empty(self):
+        value = doc({'map': '01/02', 'record': {'copy': '01/00'}, 'attrs': {'copy': '01/00'}})
+        data = Rom(bytearray(self.rom.d) + bytes(0x100000))
+        write(data.d, 0x3DC000, b'\x01')
+        with self.assertRaisesRegex(ValueError, '비어 있지 않음'):
+            writes_for(data, value, at={'door_bank': 0x3D})
+
+    def test_stale_door_graphics_rejected(self):
+        value, moved = self.moved()
+        write(moved.d, 0x01FD9F, b'\x12')
+        with self.assertRaisesRegex(ValueError, 'FD97~FEB6'):
+            writes_for(moved, value)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -17,8 +17,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-from dq5exit import arrival, exit_attrs
 import dq5exitcheck
+from dq5exit import arrival, exit_attrs
 from dq5exitcheck import command, dp86_allowed, require, run, warp_exit
 from dq5map import Rom, lorom
 
@@ -35,6 +35,9 @@ COPY_0D02 = {'record': {'copy': '0D/02'}, 'attrs': {'copy': '0D/02'}}
 dq5exitcheck.STALE['doors'] = '01D2FC-01D8C1'
 # 01/04 (48,1) 문(잠금 6) 아래에서 위를 보고 명령 창의 とびら(왼쪽 아래)를 고름. 열쇠가 없으면 메시지 187.
 DOOR_CMD = 'up:4,wait:20,a:6,wait:60,down:6,wait:15,down:6,wait:15,down:6,wait:15,a:6,wait:250'
+# 같은 문에서 どうぐ(오른쪽 열 둘째)로 첫 칸의 ラインハットのカギ(C9)를 つかう. 11:8E54 의 JSL 로 입구 01:D97B 를 지나 문이 열림
+# (메시지 1A2). 이 입구가 옛 문 표를 읽으면 STALE 감시가 잡는다.
+KEY_CMD = 'up:4,wait:20,a:6,wait:60,right:6,wait:15,down:6,wait:15,a:6,wait:60,a:6,wait:60,a:6,wait:120,a:6,wait:250'
 VARIANTS = {
     'n': ({'format': 'dq5newmap/1', 'maps': [{'map': '0D/05', **COPY_0D02}]}, [], ['0D/05'], ('0D/05', 'same-group')),
     'm': ({'format': 'dq5newmap/1', 'maps': [{'map': f'0D/{bd:02X}', **COPY_0D02} for bd in range(5, 0x19)]},
@@ -95,6 +98,11 @@ CASES = [
      {'msglog': True, 'cell': '48,1', 'msgs_like': 'doors-lock-original', 'cell_like': 'doors-lock-original'}),
     ('doors-lock-original', 'original', '01/04,48,2,1', DOOR_CMD, ('01/04', (48, 2), None, None, None),
      {'msglog': True, 'cell': '48,1', 'msgs': '187'}),
+    ('doors-key', 'doors', '01/04,48,2,1', KEY_CMD, ('01/04', (48, 2), None, None, None),
+     {'late': '2056=C9', 'msglog': True, 'cell': '48,1', 'msgs_like': 'doors-key-original', 'cell_like': 'doors-key-original',
+      'cell_unlike': 'doors-lock-original'}),
+    ('doors-key-original', 'original', '01/04,48,2,1', KEY_CMD, ('01/04', (48, 2), None, None, None),
+     {'late': '2056=C9', 'msglog': True, 'cell': '48,1', 'msgs': '1A2'}),
     ('doors-room', 'doors', '01/03,14,8,1', 'wait:10', ('01/03', (14, 8), None, None, None),
      {'cell': '14,7', 'cell_like': 'doors-room-original'}),
     ('doors-room-original', 'original', '01/03,14,8,1', 'wait:10', ('01/03', (14, 8), None, None, None), {'cell': '14,7'}),
@@ -175,8 +183,8 @@ def main():
         attrs, slots, cells, msgs = {}, {}, {}, {}
         for case in CASES:
             text = (out / case[0] / 'warp.txt').read_text(encoding='utf-8')
-            cell_line = re.search(r'^cell (.+)$', text, re.M)
-            msg_line = re.search(r'^msgs (\S+)', text, re.M)
+            cell_line = re.search(r'^cell (.+)$', text, re.MULTILINE)
+            msg_line = re.search(r'^msgs (\S+)', text, re.MULTILINE)
             cells[case[0]] = cell_line[1] if cell_line else None
             msgs[case[0]] = msg_line[1] if msg_line else None
             found = re.search(r'map attrs (1A98=\w\w 1AA0=\w\w 194D=\w\w 194B=\w\w) 1983=(\w\w)', text)
