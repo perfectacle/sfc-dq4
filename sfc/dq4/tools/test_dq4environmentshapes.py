@@ -22,6 +22,24 @@ class SlopeTests(unittest.TestCase):
             self.assertEqual(sum(row.count("F") for row in rows), sum(row.count("A") for row in rows))
 
 
+class LidTests(unittest.TestCase):
+    def test_lid_tiles_are_two_tiles_of_the_chest_left_half(self):
+        from dq4environmentart import create_assets
+        import dq4environmentrom as rom
+        assets = create_assets()
+        data = rom.lid_tiles(assets)
+        self.assertEqual(len(data), 64)
+        image = assets["chest_open"]
+        # Transparent pixels stay colour 0; every drawn pixel gets a colour of line 6 (1-15).
+        for half, y in enumerate((0, 8)):
+            tile = image.crop((0, y, 8, y + 8)).tobytes()
+            planar = data[half * 32:(half + 1) * 32]
+            for i, v in enumerate(tile):
+                row, x = divmod(i, 8)
+                got = sum((planar[(p >> 1) * 16 + row * 2 + (p & 1)] >> (7 - x) & 1) << p for p in range(4))
+                self.assertEqual(got == 0, v == 0, f"tile {half} pixel {x},{row}")
+
+
 @unittest.skipUnless(DQ4.is_file(), "local source ROM not present")
 class TraceTests(unittest.TestCase):
     @classmethod

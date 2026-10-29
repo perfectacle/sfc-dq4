@@ -6,7 +6,9 @@ Order matters (sfc/dq4/docs/dq4-environment-format.md, 「그룹 연결」):
   3. dq5exitreloc.py, dq5npcrelocate.py (the FC people of dq4npcport.py), dq5fieldtables.py from the original
      ROM with --new-map, dq5textwrite.py with their Japanese FC text, and dq5progresswrite.py with the FC
      shop lists plus the inn price table of dq4shopport.py.
-  4. dq5build.py on the original ROM with 1, 2 and 3.
+  4. dq5chestplace.py from the original ROM with the patches of 1-3 (--with-patch): the FC chests and
+     タンス·つぼ of dq4chestport.py on the cells 1 gave their DQ5 attributes.
+  5. dq5build.py on the original ROM with 1-4.
 
 FC stairs (08:$B22E) become same-group exits, FC exit-table cells ($05A0) become area moves, and the map
 edge leads to the field through the aux entrance table. Field spots are temporary until the DQ4 field is in.
@@ -64,6 +66,8 @@ ENTRANCES_AT = ("--entrances-at", "3C:8000")
 TEXT_AT = ("--at", "35:8000")
 SHOP_AT = ("--shop-at", "3C:E000")
 INN_AT = 0x3CF000
+# The three tables chests and drawers grow; dq5chestplace reads chest_maps and search with DB, so bank 00-3F.
+CHEST_AT = ("--chests-at", "3C:8400", "--chest-maps-at", "3C:8800", "--search-at", "3C:8C00")
 LAYER = 1
 WORLD_CODE = 1
 AREA_FLAGS = 0x80
@@ -266,9 +270,18 @@ def build(dq5, dq4, out):
     step("dq5fieldtables.py", "entrances", {"format": "dq5fieldtables/1", "entrance_tables": {"aux": aux}}, dq5,
          *ENTRANCES_AT, *new_map_args)
 
+    import dq4chestport  # imports this module
+    place, chest_report = dq4chestport.port(dq5, dq4)
+    _save(out / "chest-report.json", chest_report)
+    _run(DQ5_TOOLS / "dq5chestreloc.py", dq5, "dump", "-o", out / "chest-tables-orig.json")
+    base = dq4chestport.base_tables(json.loads((out / "chest-tables-orig.json").read_text(encoding="utf-8")))
+    with_patches = [a for m in manifests for a in ("--with-patch", m)]
+    checks.append(step("dq5chestplace.py", "chests", place, dq5, *CHEST_AT, "--tables", _save(out / "chest-tables.json", base),
+                       *new_map_args, *with_patches))
+
     rom = out / "groups.sfc"
     _run(DQ5_TOOLS / "dq5build.py", dq5, "build", *manifests, "--size", 4, "-o", rom, "--ips", out / "groups.ips")
-    # dq5newmap checks the built ROM; dq5exitreloc and dq5textwrite build their own from the original.
+    # dq5newmap checks the built ROM; dq5exitreloc, dq5textwrite and dq5chestplace build their own from the original.
     for tool, source, args in checks:
         _run(DQ5_TOOLS / tool, rom if tool == "dq5newmap.py" else dq5, "check", source, *args)
     summary = {"rom": str(rom), "maps": new_maps, "exits": ours, "areas": areas,
