@@ -245,6 +245,21 @@ class FieldPatchTests(unittest.TestCase):
             drawn.append(Path(path).read_bytes())
         self.assertNotEqual(*drawn)
 
+    def test_world_drawing_uses_world_tiles(self):
+        import dq5gfx
+        folder = Path(self.tmp.name)
+        w1 = bytearray((folder / 'tiles.bin').read_bytes())
+        w1[63 * 32:64 * 32] = bytes(range(32))
+        (folder / 'w1.bin').write_bytes(w1)
+        self.doc['worlds'] = {'world1': {'tiles_file': 'w1.bin', 'tile_palettes': list(self.doc['tile_palettes'])}}
+        rom = self.apply(fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x348000))
+        t0, t1, t2 = (dq5gfx.field_tiles(rom, w) for w in (0, 1, 2))
+        self.assertEqual(t1[63], dq5gfx.planar(bytes(range(32))))
+        self.assertNotEqual(t0[63], t1[63])
+        self.assertEqual((t0[:63], t2), (t1[:63], t0))
+        self.assertEqual(dq5gfx.field_tiles(self.rom, 1), dq5gfx.field_tiles(self.rom, 0))  # 훅 없는 롬은 세 세계가 같음
+
+
 class HighSetTests(unittest.TestCase):
     def test_high_sites_and_no_palettes(self):
         d = bytearray(0x180000)

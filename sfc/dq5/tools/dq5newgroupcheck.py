@@ -8,7 +8,9 @@
   dq5exitreloc.py    36/00 의 출구(기본값, 필드로 나감)
   dq5fieldtables.py  보조 입구 표 끝에 (345,56) → 그룹 36. 입구 표 둘을 3C:8000 으로
   dq5palsetwrite.py  그룹 36 의 기본 세트 06, 36/00 은 세트 13(16진). 찾기 루틴·표를 3C:9000 으로(롬 g 만)
-롬 g 는 다섯을 모두, 롬 p 는 팔레트 세트만 뺀다.
+  dq5maphook.py      36/01(01/00 의 레코드·속성, 층 2)에 맵을 푼 뒤 $182F 를 2 로 두는 02:B1E3 항목. 표를 3B:8000 으로(롬 g 만)
+  dq5stepwrite.py    그룹 36 의 걸음 루틴을 그룹 01 과 같은 00:C385 로. 찾기 루틴·표를 3C:A000 으로(롬 g 만)
+롬 g 는 일곱을 모두, 롬 p 는 팔레트 세트·맵별 루틴·걸음 루틴을 뺀다.
 
   exit     g: 36/00 (38,70) 에서 아래로 걸어 필드로 나옴. 일반 표에 36 이 없으므로 보조 표대로 (345,57) 에 섬
   exit-03  g: 03/00 에서 같이 나옴. 옮긴 보조 표의 그룹 03 자리(원본과 같은 (251,216))
@@ -17,6 +19,11 @@
   palette  g: 36/00 에 선 CGRAM 1~7번 줄이 만든 롬의 dq5map.map_cgram(36/00) 과 같음
   palette-03  원본 03/00 의 같은 비교(대조)
   nopal    p: 팔레트 세트 표에 36 이 없는 롬에서 36/00 의 CGRAM 이 어느 맵의 팔레트와 같은지 기록
+  edge     g: 36/01 (32,92) 층 2 에서 아래로 걸어 맵 밖으로 나가 필드 (345,57) 에 섬
+  edge-none  p: 같은 걸음으로 36/01 에 남음($182F 가 1)
+  step     g: 36/01 에서 걸은 뒤 걸음 루틴 자리 $1AAD 가 00:C385
+  step-none  p: 같은 걸음 뒤 $1AAD 가 기본 00:C687
+  step-01  g: 01/00 에서 걸은 뒤 $1AAD 가 원래 표대로 00:C385(옮긴 표가 원래 항목을 지킴)
 인물: 만든 롬의 dq5npc.all_lists 에 36/00 이 있고 그 목록이 비었으면, 게임의 인물 뒤 슬롯 7E:1983 이 08 인지 본다.
 
   MESENCE=… python sfc/dq5/tools/dq5newgroupcheck.py rom/dq5.sfc --state work/state/ship.mss \\
@@ -37,16 +44,22 @@ from dq5map import Rom, lorom, map_cgram
 from dq5progresscheck import environment
 
 HERE = Path(__file__).resolve().parent
+# 맵 안에서 좌우로 몇 걸음. 걸음마다 00:C652 가 $1AAD 에 그룹의 걸음 루틴을 둔다
+STEP_WALK = 'left:24,wait:20,right:24'
 NEW = {'group': 0x36, 'x': 345, 'y': 56}
 PALETTE = {'format': 'dq5palset/1', 'groups': [{'group': '36', 'default': 6, 'maps': [{'map': '00', 'set': 0x13}]}]}
 # 도착: [세계 코드 1(세계 0)·맵 00][X][Y][층][방향 0]. 형식은 dq5fieldtables.py 의 arrivals 와 같다.
 ARRIVAL = [0x20, 38, 68, 1, 0]
 NEWMAP = {'format': 'dq5newmap/1', 'groups': [{'group': '36', 'entrance': {'bytes': ARRIVAL}}],
-          'maps': [{'map': '36/00', 'record': {'copy': '03/00'}, 'attrs': {'copy': '03/00'}}]}
+          'maps': [{'map': '36/00', 'record': {'copy': '03/00'}, 'attrs': {'copy': '03/00'}},
+                   {'map': '36/01', 'record': {'copy': '01/00'}, 'attrs': {'copy': '01/00'}}]}
+# 02:B1E3 은 01/00 루틴(02:B1DF)의 뒤쪽, LDA #$02 / STA $182F / RTL 이다(03/0D 항목도 이 자리를 씀).
+EDGE_HOOK = {'group': '36', 'map': '01', 'flag': None, 'post_load': '02:B1E3', 'per_frame': '15:F906'}
+STEP = {'format': 'dq5step/1', 'groups': [{'group': '36', 'routine': '00:C385'}]}
 ARRIVALS = 0x3EC000
 NEWMAP_AT = ('--entrance-table-at', f'{ARRIVALS >> 16:02X}:{ARRIVALS & 0xFFFF:04X}', '--door-bank', '3D')
 EXIT_PLACES = ('--exits-at', '2A:D812', '--records-at', '3F:8000')
-NEW_MAP = ('--new-map', '36/00')
+NEW_MAP = ('--new-map', '36/00', '--new-map', '36/01')
 
 
 def save(path, doc):
@@ -77,6 +90,19 @@ def build_rom(original, out, key):
          '--entrances-at', '3C:8000', *NEW_MAP, check=False)
     if key == 'g':
         step('dq5palsetwrite.py', 'palette', PALETTE, '--table-at', '3C:9000', *NEW_MAP)
+        hooks = out / 'maphook.json'
+        command('dq5maphook.py', original, 'dump', '-o', hooks)
+        rows = json.loads(hooks.read_text(encoding='utf-8'))['entries']
+        doc = {'format': 'dq5maphook/1', 'entries': [{k: v for k, v in e.items() if k != 'index'} for e in rows]
+               + [EDGE_HOOK]}
+        source = out / f'{key}-maphook.json'
+        save(source, doc)
+        manifest = out / f'{key}-maphook.dq5patch.json'
+        places = ('--at', '3B:8000', '--stub-at', '15:FF80', *NEW_MAP)
+        command('dq5maphook.py', original, 'rewrite', source, '-o', manifest, *places)
+        command('dq5maphook.py', original, 'check', source, *places)
+        manifests.append(manifest)
+        step('dq5stepwrite.py', 'step', STEP, '--table-at', '3C:A000', *NEW_MAP)
     built = out / f'{key}.sfc'
     command('dq5build.py', original, 'build', *manifests, '-o', built, '--ips', out / f'{key}.ips')
     return built
@@ -108,7 +134,8 @@ def walk(rom, name, state, out, mesence, libdir):
 
 def place(out, name):
     ram = (out / name / 'final.wram').read_bytes()
-    where = {'map': f'{ram[0xBC]:02X}/{ram[0xBD]:02X}', 'BE': ram[0xBE], '1983': ram[0x1983], '075E': ram[0x075E]}
+    where = {'map': f'{ram[0xBC]:02X}/{ram[0xBD]:02X}', 'BE': ram[0xBE], '1983': ram[0x1983], '075E': ram[0x075E],
+             '182F': ram[0x182F], '1AAD': f'{ram[0x1AAE]:02X}{ram[0x1AAD]:02X}'}
     if ram[0xBE] & 0x80:
         where['cell'] = [ram[0x3020], ram[0x3080]]
     else:
@@ -153,6 +180,11 @@ def main():
             'palette': lambda: warp(g, 'palette', state, out, mesence, libdir, '36/00,38,60,1', 'wait:10'),
             'palette-03': lambda: warp(original, 'palette-03', state, out, mesence, libdir, '03/00,38,60,1', 'wait:10'),
             'nopal': lambda: warp(p, 'nopal', state, out, mesence, libdir, '36/00,38,60,1', 'wait:10'),
+            'edge': lambda: warp(g, 'edge', state, out, mesence, libdir, '36/01,32,90,2', 'down:60'),
+            'edge-none': lambda: warp(p, 'edge-none', state, out, mesence, libdir, '36/01,32,90,2', 'down:60'),
+            'step': lambda: warp(g, 'step', state, out, mesence, libdir, '36/01,40,84,2', STEP_WALK),
+            'step-none': lambda: warp(p, 'step-none', state, out, mesence, libdir, '36/01,40,84,2', STEP_WALK),
+            'step-01': lambda: warp(g, 'step-01', state, out, mesence, libdir, '01/00,40,84,2', STEP_WALK),
         }
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
             list(pool.map(lambda job: job(), jobs.values()))
@@ -170,6 +202,11 @@ def main():
             'palette-03': seen['palette-03']['map'] == '03/00'
             and bg_rows(out, 'palette-03') == map_cgram(orig, 0x03, 0, seen['palette-03']['075E'] >= 0xF0)[0x20:0x100],
             'npc': npc_empty and seen['palette']['1983'] == 0x08,
+            'edge': seen['edge'].get('field') == [NEW['x'], NEW['y'] + 1],
+            'edge-none': seen['edge-none']['map'] == '36/01' and seen['edge-none']['182F'] == 1,
+            'step': seen['step']['map'] == '36/01' and seen['step']['1AAD'] == 'C385',
+            'step-none': seen['step-none']['map'] == '36/01' and seen['step-none']['1AAD'] == 'C687',
+            'step-01': seen['step-01']['map'] == '01/00' and seen['step-01']['1AAD'] == 'C385',
         }
         night = seen['nopal']['075E'] >= 0xF0
         nopal = bg_rows(out, 'nopal')

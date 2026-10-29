@@ -2,7 +2,9 @@
 import contextlib
 import copy
 import io
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch as mock
@@ -243,6 +245,32 @@ class GrowAndCellTests(unittest.TestCase):
             with self.subTest(at=hex(at), stub=stub), self.assertRaises(ValueError):
                 hook.rewrite(r, doc(*rows), at, stub_at=stub)
         hook.rewrite(r, doc(*rows), 0x8F8000, stub_at=0x15FFF0)
+
+    def test_new_map_entry(self):
+        r = rom()
+        edge = {'group': '36', 'map': '01', 'flag': None, 'post_load': '02:94E0', 'per_frame': '15:F906'}
+        rows = self.entries(r) + [edge]
+        with self.assertRaisesRegex(ValueError, '36/01'):
+            hook.rewrite(r, doc(*rows), 0x3F8000, stub_at=0x15FFF0)
+        for bad, message in (([(0x01, 0x05)], '이미'), ([(0x50, 0x50)], '그룹 50 미만'), ([(0x36, 0xFF)], '맵 FF')):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, message):
+                hook.rewrite(r, doc(*rows), 0x3F8000, stub_at=0x15FFF0, new_maps=bad)
+        after = apply(r, hook.rewrite(r, doc(*rows), 0x3F8000, stub_at=0x15FFF0, new_maps=[(0x36, 0x01)]))
+        self.assertEqual(hook.dump(after)['entries'][-1], {'index': len(rows) - 1, **edge})
+        with contextlib.redirect_stdout(io.StringIO()):
+            hook.check(r, doc(*rows), 0x3F8000, stub_at=0x15FFF0, new_maps=[(0x36, 0x01)])
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / 'rom.sfc').write_bytes(r.d)
+            (folder / 'in.json').write_text(json.dumps(doc(*rows)), encoding='utf-8')
+            base = ['dq5maphook.py', str(folder / 'rom.sfc'), 'rewrite', str(folder / 'in.json'), '-o',
+                    str(folder / 'out.json'), '--at', '3F:8000', '--stub-at', '15:FFF0']
+            for extra, code in (([], 1), (['--new-map', '36/01'], 0)):
+                with self.subTest(extra=extra), mock('sys.argv', base + extra), \
+                        contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(hook.main(), code)
+            self.assertEqual(hook.table_base(apply(r, json.loads((folder / 'out.json').read_text(encoding='utf-8')))),
+                             0x3F8000)
 
     def test_cells_dump_and_rewrite(self):
         r = rom()
