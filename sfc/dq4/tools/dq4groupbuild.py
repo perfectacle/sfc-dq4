@@ -4,7 +4,8 @@ Order matters (sfc/dq4/docs/dq4-environment-format.md, 「그룹 연결」):
   1. dq4environmentrom.py patch -> env ROM. The door table copy made in 2 must contain its bank-01 tail.
   2. dq5newmap.py from the env ROM: new groups, maps (records from the dq5map/1 documents of 1), arrivals.
   3. dq5exitreloc.py, dq5npcrelocate.py (the FC people of dq4npcport.py), dq5fieldtables.py from the original
-     ROM with --new-map, and dq5textwrite.py with their Japanese FC text.
+     ROM with --new-map, dq5textwrite.py with their Japanese FC text, and dq5progresswrite.py with the FC
+     shop lists plus the inn price table of dq4shopport.py.
   4. dq5build.py on the original ROM with 1, 2 and 3.
 
 FC stairs (08:$B22E) become same-group exits, FC exit-table cells ($05A0) become area moves, and the map
@@ -45,6 +46,8 @@ EXIT_AT = ("--exits-at", "2A:D812", "--records-at", "3C:A000")
 ENTRANCES_AT = ("--entrances-at", "3C:8000")
 # dq5textwrite writes the whole walking text again, so it takes banks of its own.
 TEXT_AT = ("--at", "35:8000")
+SHOP_AT = ("--shop-at", "3C:E000")
+INN_AT = 0x3CF000
 LAYER = 1
 WORLD_CODE = 1
 AREA_FLAGS = 0x80
@@ -192,6 +195,11 @@ def build(dq5, dq4, out):
          "-o", out / "npc.dq5patch.json", "--report", out / "npc-layout.json", *new_map_args)
     manifests.append(out / "npc.dq5patch.json")
     checks.append(step("dq5textwrite.py", "text", {"format": "dq5text/1", "messages": messages}, dq5, *TEXT_AT))
+    import dq4shopport  # imports this module
+    _, shops, inn_writes, shop_report = dq4shopport.port(dq5, dq4, INN_AT)
+    _save(out / "shop-report.json", shop_report)
+    step("dq5progresswrite.py", "shops", {"format": "dq5progress/1", "shops": shops}, dq5, *SHOP_AT)
+    manifests.append(_save(out / "inn.dq5patch.json", {"format": "dq5patch/1", "name": "dq4-inns", "writes": inn_writes}))
 
     _run(DQ5_TOOLS / "dq5exitreloc.py", dq5, "dump", "-o", out / "exits-orig.json", *new_map_args)
     exits = json.loads((out / "exits-orig.json").read_text(encoding="utf-8"))

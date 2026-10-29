@@ -5,8 +5,8 @@ Each FC person record of the day and the night list becomes one DQ5 entry of tha
 template entry: a standing one, or one that wanders (script 19 03 03) with the FC step interval. The
 picture is a placeholder DQ5 townsperson of the same role (PICTURES) until DQ4 sprites exist. The talk is
 the FC talk of chapter 1 at the start (dq4talk.predict with chapter 0, no flags, no party): the messages it
-shows are joined into one DQ5 message, shown by talk number m - 3C6. Shops, inns and churches stay
-placeholders (SERVICES) until DQ4 shops are ported.
+shows are joined into one DQ5 message, shown by talk number m - 3C6. People who open a shop, an inn, a
+church or the deposit in FC take the DQ5 talk number of the same service instead (dq4shopport).
 
   python sfc/dq4/tools/dq4npcport.py --out work/dq4-npcs
 """
@@ -33,6 +33,8 @@ import dq4text  # noqa: E402
 import dq5text  # noqa: E402
 from dq4environmentrom import GROUPS  # noqa: E402
 from dq4groupbuild import LINKS, cell  # noqa: E402
+import dq4shopport  # noqa: E402
+from dq4shopport import merchants  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
 
 # Template entries (dq5npcrelocate `from`): one-time entries with no extra byte. STAND has no script and
@@ -59,9 +61,8 @@ PICTURES = {
     0x36: 0x05,  # nun
 }
 FACING = ("up", "right", "down", "left")
-# FC services (dq4talk talk ids 000-006) as placeholder lines in kana.
-SERVICES = {0: "＜なにもない＞", 1: "＜ぶきや＞", 2: "＜どうぐや＞", 3: "＜ぼうぐや＞", 4: "＜あずかりじょ＞",
-            5: "＜きょうかい＞", 6: "＜やどや＞"}
+# Placeholder line for a person whose FC talk shows nothing at the start of chapter 1.
+NOTHING = "＜なにもない＞"
 # DQ5 groups whose people's direct messages may be overwritten: later towns. Left out: the ship 17 and the
 # early or often tested groups 00-0B, 0D-0F, 12-16, 19-1A, 21.
 POOL_GROUPS = {0x0C, 0x10, 0x11, 0x18, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x22, 0x23, 0x25, 0x26, 0x27, 0x29,
@@ -181,8 +182,8 @@ def dq5_codes(rom, messages):
     return codes + [END]
 
 
-def service_codes(n):
-    return [CODE_OF[c] for c in SERVICES[n]] + [END]
+def nothing_codes():
+    return [CODE_OF[c] for c in NOTHING] + [END]
 
 
 def message_pool(dq5_rom_path):
@@ -228,29 +229,36 @@ def port(dq5_path, dq4_path):
     for name, (group, number) in sorted(GROUPS.items(), key=lambda kv: kv[1]):
         fc_group = LINKS[group]["fc"]
         entries, people = [], []
+        shops = merchants(prg, fc_group, number)
         for night in (False, True):
             for p in fc_people(prg, fc_group, number, night):
                 shows = [m for m in p["shows"] if m is not None]
-                service = [m - dq4talk.SERVICE for m in shows if m >= dq4talk.SERVICE]
-                if service:
-                    key = ("service", service[0])
-                    codes = service_codes(key[1])
+                predicted = [m - dq4talk.SERVICE for m in shows if m >= dq4talk.SERVICE]
+                service = shops.get((p["x"], p["y"], night))
+                if service is None and predicted:
+                    service = dq4shopport.SERVICE[predicted[0]]
+                message = None
+                if service is not None:
+                    # A seller stays behind the counter: the DQ5 wander script would walk off it.
+                    talk = service
+                    p = {**p, "interval": 0}
                 else:
-                    key = ("fc", tuple(shows))
-                    codes = dq5_codes(rom, shows) if shows else service_codes(0)
-                if key not in texts:
-                    if len(texts) == len(pool):
-                        raise ValueError(f"DQ5 message pool of {len(pool)} is used up")
-                    texts[key] = (pool[len(texts)], codes)
-                message = texts[key][0]
+                    key = tuple(shows)
+                    if key not in texts:
+                        if len(texts) == len(pool):
+                            raise ValueError(f"DQ5 message pool of {len(pool)} is used up")
+                        texts[key] = (pool[len(texts)], dq5_codes(rom, shows) if shows else nothing_codes())
+                    message = texts[key][0]
+                    talk = message - TALK_MESSAGE
                 if p["picture"] not in PICTURES:
                     raise ValueError(f"{name}: FC picture {p['picture']:02X} has no DQ5 picture")
                 x, y = cell(p["x"], p["y"])
-                fields = {"x": x, "y": y, "facing": p["facing"], "talk": message - TALK_MESSAGE,
+                fields = {"x": x, "y": y, "facing": p["facing"], "talk": talk,
                           "gfx": PICTURES[p["picture"]], "layer": 0, "interval": p["interval"]}
                 entries.append({"from": WALK if p["interval"] else STAND, "time": "night" if night else "day",
                                 "fields": fields})
-                people.append({**p, "night": night, "message": f"{message:03X}", "dq5": fields})
+                people.append({**p, "night": night, "service": service,
+                               "message": None if message is None else f"{message:03X}", "dq5": fields})
         lists.append({"map": f"{group:02X}/{number:02X}", "entries": entries})
         report[f"{group:02X}/{number:02X}"] = people
     messages = [{"id": m, "codes": codes} for m, codes in sorted(texts.values())]
