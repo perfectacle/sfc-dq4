@@ -11,7 +11,7 @@
   indoor  실내 BG 팔레트 세트를 70개로(새 세트 69 의 낮 목록은 새 목록, 밤 목록은 세트 0 의 것), 01/01 을 세트 69 로
           (dq5mapgfxwrite --sets-at 37:8000, 그 롬으로 만든 dq5palsetwrite 패치)
 장면
-  tiles: 세계 0 (341,56) 에 서기, 걷고 명령 창을 여닫은 뒤, 이벤트 전투(スライム 하나)를 이기고 돌아온 뒤, 세계 1·2 (50,28).
+  tiles: 01:A4A7 뒤 00:A788 앞에 VRAM 워드 4000~5FFF 를 지우고 다시 오는지(lua/dq5vramwipe.lua), 세계 0 (341,56) 에 서기, 걷고 명령 창을 여닫은 뒤, 이벤트 전투(スライム 하나)를 이기고 돌아온 뒤, 세계 1·2 (50,28).
          VRAM 워드 2000~3FFF·4000~5FFF 의 타일과 BG1·2 타일맵의 채운 칸을 디코더(dq5field)와 견준다
   fieldpal: (341,56) 에서 $075E 를 여섯 값으로 두고 2·3번 줄 색 1~13 과 11·12번 줄(낮·밤 인물 팔레트)
   indoor: 01/01 과 세트를 그대로 둔 맵 셋(원본 게임과도 견줌)에서 BG 1~7번 줄
@@ -43,6 +43,10 @@ SETTLE_FRAME = 900
 BATTLE = {'FIELD': '341,56', 'BATTLE': '00:1', 'SETTLE': '300', 'MAXF': '2100', 'DUMPF': '1000,1990',
           'TEST': 'wait:100,' + ','.join(['a:4,wait:30'] * 60) + ',wait:600'}
 IN_BATTLE, AFTER_BATTLE = 1000, 1990
+# 다시 그리기 시험: 01/00 에서 걸어 나와 01:A4A7(439프레임)이 늘린 타일을 보낸 뒤, 화면 다시 그리기 00:A771 의
+# JSL $01B4D5(00:A788, 462프레임) 앞인 450프레임에 VRAM 워드 4000~5FFF 를 지운다. 01:B4D5 훅이 다시 보내면 470프레임에 돌아와 있다.
+WIPE = {'FIELD': '341,56', 'SETTLE': '500', 'MAXF': '1000', 'DUMPF': '455,470', 'WIPEF': '450', 'WIPE': '8000-BFFF'}
+WIPED, REDRAWN = 455, 470
 # 속성 시험: 서서 네 방향으로 32프레임씩 걷는다. dq5warp.lua 가 좌표가 바뀌었는지 warp.txt 에 moved= 로 적는다.
 WALL = 0x80
 MOVE = {'FIELD': '341,56', 'SETTLE': '300', 'MAXF': '1300', 'TEST': 'wait:60,left:32,up:32,right:32,down:32,wait:60'}
@@ -185,6 +189,15 @@ def check_battle(name, rom_path, dump, orig):
     return out
 
 
+def check_redraw(name, rom_path, dump):
+    rom = Rom(rom_path.read_bytes())
+    extra = fgw.current(rom)['worlds']['world0'][0][fgw.TILES * 32:]
+    wiped, back = (frame(dump, n, 'vram')[0x8000:0x8000 + len(extra)] for n in (WIPED, REDRAWN))
+    require(wiped == bytes(len(extra)), f'{name}: {WIPED}프레임에 늘린 타일 자리가 지워지지 않음')
+    require(back == extra, f'{name}: {REDRAWN}프레임에 늘린 타일이 돌아오지 않음(00:A788 → 01:B4D5 훅)')
+    return {'case': name, 'wiped_at': int(WIPE['WIPEF']), 'restored_by': REDRAWN, 'tiles': len(extra) // 32}
+
+
 def check_move(name, dump, want):
     line = next(x for x in (dump / 'warp.txt').read_text().splitlines() if ' test ' in x)
     require(f'moved={"yes" if want else "no"}' in line, f'{name}: {line}')
@@ -265,6 +278,8 @@ def main():
         cases = [(f'tiles-{k}-{r}', path, env) for k, env in scenes.items()
                  for r, path in (('orig', original), ('grow', tiles))]
         cases += [('move-tiles', tiles, MOVE), ('move-wall', wall, MOVE)]
+        luas = {'redraw-tiles': HERE / 'lua/dq5vramwipe.lua'}
+        cases.append(('redraw-tiles', tiles, dict(WIPE, NEXT=str(gfx))))
         for t in TIME_CASES:
             env = dict(stand, SET=f'075E={t & 0xFF:02X};075F={t >> 8:02X}')
             cases += [(f'pal-{t:04X}-{k}', r, env) for k, r in (('orig', original), ('grow', fieldpal))]
@@ -276,7 +291,7 @@ def main():
             cases += [(f'indoor-{m[0]:02X}{m[1]:02X}-{k}', r, env) for k, r in (('orig', original), ('grow', indoor))]
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
             dirs = dict(zip([c[0] for c in cases], pool.map(
-                lambda c: gwc.run(mesence, c[1], gfx, c[2], out / c[0], libdir, state), cases)))
+                lambda c: gwc.run(mesence, c[1], luas.get(c[0], gfx), c[2], out / c[0], libdir, state), cases)))
         d = {k: (dirs[f'tiles-{k}-grow'], dirs[f'tiles-{k}-orig']) for k in scenes}
         results = [check_tiles('tiles-stand-orig', original, d['stand'][1], SETTLE_FRAME, None, grown=False),
                    check_tiles('tiles-stand', tiles, *d['stand'][:1], SETTLE_FRAME, d['stand'][1]),
@@ -284,7 +299,8 @@ def main():
                    check_battle('tiles-battle', tiles, *d['battle']),
                    *(check_tiles(f'tiles-world{w}', tiles, d[f'world{w}'][0], SETTLE_FRAME, d[f'world{w}'][1], w)
                      for w in (1, 2))]
-        results += [check_move('move-tiles', dirs['move-tiles'], True), check_move('move-wall', dirs['move-wall'], False)]
+        results += [check_move('move-tiles', dirs['move-tiles'], True), check_move('move-wall', dirs['move-wall'], False),
+                    check_redraw('redraw-tiles', tiles, dirs['redraw-tiles'])]
         results.append(check_fieldpal('fieldpal', fieldpal, {t: dirs[f'pal-{t:04X}-grow'] for t in TIME_CASES},
                                       {t: dirs[f'pal-{t:04X}-orig'] for t in TIME_CASES}))
         for m in [NEW_MAP] + SAME_MAPS:

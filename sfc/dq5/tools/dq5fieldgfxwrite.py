@@ -68,9 +68,9 @@ def check_sites(rom):
     sites = [(at, want, kind) for kind, ss in SITES.items() for at, want in ss]
     sites += [(at, want, 'anim') for at, want in ANIM_SITES.values()]
     sites += [(LOAD_SITE, LOAD_ORIG, 'tiles'), *((at, NIB_ORIG, 'tile_palettes') for at in NIB_SITES)]
-    sites += [(at, want, 'blocks') for at, (want, _, _) in BLOCK_SITES.items()] + [(BATTLE_SITE, BATTLE_ORIG, 'battle')]
+    sites += [(at, want, 'blocks') for at, (want, _, _) in BLOCK_SITES.items()] + [(REDRAW_SITE, REDRAW_ORIG, 'redraw')]
     sites += [(at, want, 'palettes') for at, want in (SEARCH_SITE, PTR_SITE, NIGHT_SITE, PAL_BANK_SITE, WAVE_SITE)]
-    sites += [(at, want, 'tile_attributes') for at, want in ATTR_SITES.items()]
+    sites += [(at, want, 'tile_attributes') for at, want in ATTR_SITES.items()] + [(REDRAW_RTL, b'\x6b', 'redraw')]
     for at, want, kind in sites:
         if rom.d[lorom(at):lorom(at) + len(want)] != want:
             raise ValueError(f'{cpu(at)}: 원래 롬의 {kind} 코드가 아님; 원본 롬으로 만들어야 함')
@@ -140,18 +140,20 @@ def worlds_layout(at):
 
 # 타일 늘리기(512개 넘게). 필드에서 BG1·2 글자 기준이 VRAM 워드 2000 이라 타일 512~1023 은 워드 4000~5FFF 이고,
 # 필드에 선 동안 이 자리에 쓰는 코드는 없다(실측). 전투가 이 자리를 배경 그림으로 덮으므로, 필드에 들어갈 때(01:A4A7)와
-# 전투 뒤 맵 화면을 되살리는 01:8A87 의 JSL $01B4D5(01:8AA8, 화면을 끈 동안 타일맵을 CPU 로 쓰는 곳)에서
-# 늘린 타일을 DMA 채널 7 로 다시 보낸다. 블록의 10번째 비트는 상위 비트 바이트의 하위 니블(원래 롬에서 모두 0)이다.
+# 화면을 끈 동안 타일맵을 CPU 로 다시 쓰는 01:B4D5 에서 늘린 타일을 DMA 채널 7 로 다시 보낸다. 01:B4D5 를 부르는 곳은
+# 전투 뒤 맵 화면을 되살리는 01:8A87(01:8AA8)과 화면 다시 그리기 00:A771(00:A788) 둘이라 부르는 곳이 아닌 01:B4D5 를 훅으로 둔다. 블록의 10번째 비트는 상위 비트 바이트의 하위 니블(원래 롬에서 모두 0)이다.
 MAX_TILES = 1024
 EXTRA_VRAM = 0x4000
 BLOCK_SITES = {0x00BC80: (bytes.fromhex('bf30a32a399cbcf002a9018595'), 0x2AA330, 0x95),
                0x00BC8D: (bytes.fromhex('bf2bad2a399cbcf002a9018597'), 0x2AAD2B, 0x97)}
-BATTLE_SITE, BATTLE_ORIG = 0x018AA8, bytes.fromhex('22d5b401')
+# 01:B4D5 는 JSR $B50A / RTL 이다. 4바이트 JML 이 그 RTL 까지 덮으므로, 훅은 끝에 뱅크 01 의 다른 RTL(01:8A87 의 끝
+# 01:8ABA)을 돌아올 자리로 PEA 하고 JML $01B50A 로 간다. B50A 의 RTS 가 그 RTL 로 가서 부른 곳에 돌아간다.
+REDRAW_SITE, REDRAW_ORIG = 0x01B4D5, bytes.fromhex('200ab56b')
+REDRAW_BODY, REDRAW_RTL = 0x01B50A, 0x018ABA
 # 타일 속성: 00:BCA8 이 블록 위층 타일(0 이면 아래층)을 AND #$01FF 로 잘라 2A:D512 의 512바이트 표를 읽는다(00:C82C·C83B·
 # E32E·01:8192·2B:81E9·81F6 이 부름). 늘리면 AND 둘을 #$03FF 로, 표 읽기를 1,024바이트 표로 바꾼다.
 TILE_ATTR = 0x2AD512
 ATTR_SITES = {0x00BCB0: b'\x29\xff\x01', 0x00BCB7: b'\x29\xff\x01', 0x00BCBD: bytes.fromhex('bf12d52a')}
-BATTLE_NEXT = 0x01B4D5
 
 
 def dma_sub(table):
@@ -177,11 +179,13 @@ def grow_load_hook(table, dma):
             + b'\xc2\x20' + b'\xbf' + long_addr(table) + b'\xaa' + b'\x7b' + b'\xe2\x20' + b'\xab' + b'\x6b')
 
 
-def battle_hook(dma):
-    """01:8AA8 의 JSL $01B4D5 대신. 필드($BE bit7 = 0)이면 그 세계의 늘린 타일을 다시 보내고 01:B4D5 로 간다."""
+def redraw_hook(dma):
+    """01:B4D5 대신(JML 로 들어옴). 필드($BE bit7 = 0)이면 그 세계의 늘린 타일을 다시 보내고, 레지스터·P 를 되돌린 뒤
+    원래처럼 01:B50A 를 부른 다음 01:8ABA 의 RTL 로 부른 곳에 돌아간다."""
     body = b'\xaf\x49\x19\x7e' + b'\x29\x03\x00' + b'\x0a\x0a\x0a' + b'\xaa' + b'\x20' + (dma & 0xFFFF).to_bytes(2, 'little')
     return (b'\x08' + b'\xc2\x30' + b'\x48' + b'\xda' + b'\xaf\xbe\x00\x7e' + b'\x29\x80\x00'
-            + b'\xd0' + bytes([len(body)]) + body + b'\xfa' + b'\x68' + b'\x28' + b'\x5c' + long_addr(BATTLE_NEXT))
+            + b'\xd0' + bytes([len(body)]) + body + b'\xfa' + b'\x68' + b'\x28'
+            + b'\xf4' + (REDRAW_RTL - 1 & 0xFFFF).to_bytes(2, 'little') + b'\x5c' + long_addr(REDRAW_BODY))
 
 
 def block_hook(table):
@@ -192,22 +196,30 @@ def block_hook(table):
 
 
 GROW_LOAD_LEN = len(grow_load_hook(0, 0))
-DMA_LEN, BATTLE_LEN, BLOCK_LEN = len(dma_sub(0)), len(battle_hook(0)), len(block_hook(0))
+DMA_LEN, REDRAW_LEN, BLOCK_LEN = len(dma_sub(0)), len(redraw_hook(0)), len(block_hook(0))
 GROW_ENTRY = 8
 
 
 def grow_layout(at):
-    """타일 늘리기 --worlds-at 자리. 이름 → 주소: 불러오기 훅·니블 훅·블록 훅 둘·전투 뒤 훅·DMA·고르기 표(세계 넷 × 8바이트:
+    """타일 늘리기 --worlds-at 자리. 이름 → 주소: 불러오기 훅·니블 훅·블록 훅 둘·다시 그리기 훅·DMA·고르기 표(세계 넷 × 8바이트:
     [RLE 주소 16][RLE 뱅크][늘린 타일 뱅크][주소 16][크기 16])·니블 표(4 × 512바이트)·타일 속성(1,024바이트)·
     그 뒤 세계 1·2 RLE."""
     out, a = {}, at
     for name, n in (('load', GROW_LOAD_LEN), ('nib', len(nib_hook(0, wide=True))), ('block_lower', BLOCK_LEN), ('block_upper', BLOCK_LEN),
-                    ('battle', BATTLE_LEN), ('dma', DMA_LEN), ('table', GROW_ENTRY * 4), ('tables', 0x800),
+                    ('redraw', REDRAW_LEN), ('dma', DMA_LEN), ('table', GROW_ENTRY * 4), ('tables', 0x800),
                     ('attrs', MAX_TILES)):
         out[name] = a
         a += n
     out['rles'] = a
     return out
+
+
+def tile_counts(rom):
+    """세계 0·1·2 가 VRAM 에 올리는 타일 수. 타일 늘리기 훅이 없으면 모두 512."""
+    if rom.u8(LOAD_SITE) != 0x22 or not is_grow_hook(rom, rom.u24(LOAD_SITE + 1)):
+        return [TILES] * 3
+    table = grow_layout(rom.u24(LOAD_SITE + 1))['table']
+    return [TILES + rom.u16(table + w * GROW_ENTRY + 6) // 32 for w in range(3)]
 
 
 def is_grow_hook(rom, at):
@@ -628,10 +640,14 @@ def place_in_any(at, size, option, placed):
 
 def write_grow(at, extra_at, world0_at, full0, nib0, world_data, placed, write, attrs):
     """타일 늘리기. 세계마다 (앞 512개 RLE, 512개 뒤 늘린 타일, 니블 표 512바이트)를 고르기 표에 두고,
-    훅 다섯(불러오기·니블·블록 둘·전투 뒤)과 DMA 루틴을 at 에 놓는다. 세계 0 과 같은 앞 512개는 세계 0 RLE 를 쓴다."""
+    훅 다섯(불러오기·니블·블록 둘·다시 그리기)과 DMA 루틴을 at 에 놓는다. 세계 0 과 같은 앞 512개는 세계 0 RLE 를 쓴다."""
     lay = grow_layout(at)
     base0 = full0[:TILES * 32]
     worlds = [(full0, nib0)] + [world_data.get(k, (full0, nib0)) for k in WORLDS[1:]] + [(full0, nib0)]
+    counts = [len(t) // 32 for t, _ in worlds[:3]]
+    if len(set(counts)) > 1:
+        print(f'경고: 세계 0·1·2 의 타일 수가 {counts} 로 다름. 블록 표는 세 세계가 함께 쓰므로 블록 칸 타일은 '
+              f'{min(counts) - 1} 까지만 쓸 것(dq5fieldtables.py 가 넘는 번호를 거부함)', file=sys.stderr)
     extras = place_extras(extra_at, [t[TILES * 32:] for t, _ in worlds], placed)
     blob, srcs = bytearray(), []
     for tiles, _ in worlds:
@@ -652,7 +668,7 @@ def write_grow(at, extra_at, world0_at, full0, nib0, world_data, placed, write, 
         nibs += bytes(n[i] << 4 | n[i + 1] for i in range(0, MAX_TILES, 2))
     code = (grow_load_hook(lay['table'], lay['dma']) + nib_hook(lay['tables'], wide=True)
             + b''.join(block_hook(BLOCK_SITES[s][1]) for s in sorted(BLOCK_SITES))
-            + battle_hook(lay['dma']) + dma_sub(lay['table']))
+            + redraw_hook(lay['dma']) + dma_sub(lay['table']))
     body = code + table + nibs + attrs + bytes(blob)
     place_in(at, len(body), '--worlds-at', placed)
     write(at, body, '타일 늘리기: 훅 다섯·DMA·고르기 표·니블 표 넷·세계 1·2 RLE', orig=False)
@@ -664,7 +680,7 @@ def write_grow(at, extra_at, world0_at, full0, nib0, world_data, placed, write, 
     for (site, (orig, _, dp)), key in zip(sorted(BLOCK_SITES.items()), ('block_lower', 'block_upper')):
         write(site, b'\x22' + long_addr(lay[key]) + bytes([0x85, dp]) + b'\xea' * (len(orig) - 6),
               f'블록 {key[6:]} 층 9·10번째 비트')
-    write(BATTLE_SITE, b'\x22' + long_addr(lay['battle']), '전투 뒤 늘린 타일 다시 보내기')
+    write(REDRAW_SITE, b'\x5c' + long_addr(lay['redraw']), '타일맵 다시 그리기(전투 뒤·00:A771) 때 늘린 타일 다시 보내기')
     for site, orig in ATTR_SITES.items():
         if orig[0] == 0x29:
             write(site, b'\x29\xff\x03', '타일 속성 번호를 10비트로')

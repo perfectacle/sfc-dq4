@@ -131,12 +131,24 @@ def block_tiles(raw, wide=False):
             for i, (bit, bit10) in enumerate(zip(QUAD_BIT, QUAD_BIT10))]
 
 
-def encode_block(raw, tiles, wide=False):
+def tile_limit(rom):
+    """블록 칸이 쓸 수 있는 가장 큰 타일 번호. 블록 표는 세 세계가 함께 쓰므로 타일이 가장 적은 세계를 따른다."""
+    if not wide_tiles(rom):
+        return 511
+    from dq5fieldgfxwrite import tile_counts
+    return min(tile_counts(rom)) - 1
+
+
+def encode_block(raw, tiles, wide=False, limit=None):
     if not isinstance(tiles, list) or len(tiles) != 4:
         raise ValueError('블록 층은 타일 번호 네 개의 배열이어야 함')
     if not wide and any(type(v) is int and 512 <= v <= 1023 for v in tiles):
         raise ValueError('타일 512 이상은 dq5fieldgfxwrite.py 의 타일 늘리기(--extra-at) 패치를 넣은 롬으로 만들어야 함')
-    values = [integer(v, 1023 if wide else 511, '타일') for v in tiles]
+    limit = (1023 if wide else 511) if limit is None else limit
+    if any(type(v) is int and limit < v <= 1023 for v in tiles):
+        raise ValueError(f'타일 {limit + 1} 이상은 타일이 가장 적은 세계에 없음(세 세계가 블록 표를 함께 씀, '
+                         f'이 롬은 {limit + 1}개)')
+    values = [integer(v, limit, '타일') for v in tiles]
     high = 0 if wide else raw[4] & 0x0F
     for value, bit, bit10 in zip(values, QUAD_BIT, QUAD_BIT10):
         if value & 256:
@@ -264,6 +276,7 @@ def edits(rom, doc, entrances_at=None, new_maps=()):
     groups = interior_groups(rom, new_maps)
     check_layout(rom, groups)
     arrival_at, arrival_count = arrivals(rom)
+    limit = tile_limit(rom)
     out = []
     for section in ('blocks', 'entrances', 'arrivals'):
         rows = doc.get(section, [])
@@ -278,7 +291,8 @@ def edits(rom, doc, entrances_at=None, new_maps=()):
                     if layer in row:
                         addr = start + key * 5
                         raw = record(rom, addr)
-                        out.append((addr, encode_block(raw, row[layer], wide_tiles(rom)), raw, f'블록 {key} {layer}'))
+                        out.append((addr, encode_block(raw, row[layer], wide_tiles(rom), limit), raw,
+                                    f'블록 {key} {layer}'))
             elif section == 'entrances':
                 fields(row, {'table', 'index', 'group', 'x', 'y'}, section)
                 table = row.get('table')

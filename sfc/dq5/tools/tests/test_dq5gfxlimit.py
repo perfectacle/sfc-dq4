@@ -46,7 +46,8 @@ def field_rom():
         put(d, at, fgw.NIB_ORIG)
     for at, (want, _, _) in fgw.BLOCK_SITES.items():
         put(d, at, want)
-    put(d, fgw.BATTLE_SITE, fgw.BATTLE_ORIG)
+    put(d, fgw.REDRAW_SITE, fgw.REDRAW_ORIG)
+    put(d, fgw.REDRAW_RTL, b'\x6b')
     for at, want in (fgw.SEARCH_SITE, fgw.PTR_SITE, fgw.NIGHT_SITE, fgw.PAL_BANK_SITE, fgw.WAVE_SITE,
                      *fgw.ATTR_SITES.items()):
         put(d, at, want)
@@ -99,7 +100,8 @@ class TileGrowTests(unittest.TestCase):
         self.assertEqual(sites['01:A4A7']['hex'], f'22 {fgw.long_addr(lay["load"]).hex(" ")} 80 04 ea ea ea ea')
         self.assertEqual(sites['00:BC80']['hex'], f'22 {fgw.long_addr(lay["block_lower"]).hex(" ")} 85 95' + ' ea' * 7)
         self.assertEqual(sites['00:BC8D']['hex'], f'22 {fgw.long_addr(lay["block_upper"]).hex(" ")} 85 97' + ' ea' * 7)
-        self.assertEqual(sites['01:8AA8']['hex'], f'22 {fgw.long_addr(lay["battle"]).hex(" ")}')
+        self.assertEqual(sites['01:B4D5']['hex'], f'5c {fgw.long_addr(lay["redraw"]).hex(" ")}')
+        self.assertEqual(fgw.redraw_hook(0)[-7:], bytes.fromhex('f4 b9 8a 5c 0a b5 01'))
         self.assertEqual((sites['00:BCB0']['hex'], sites['00:BCB7']['hex']), ('29 ff 03', '29 ff 03'))
         self.assertEqual(sites['00:BCBD']['hex'], f'bf {fgw.long_addr(lay["attrs"]).hex(" ")}')
         self.assertEqual(sites['35:8000']['hex'], self.extra.hex(' '))
@@ -141,6 +143,20 @@ class TileGrowTests(unittest.TestCase):
             fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x358000, extra_at=0x358100)
         with self.assertRaisesRegex(ValueError, '30~7D'):
             fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x348000, extra_at=0x7E8000)
+
+    def test_world_counts_limit_blocks(self):
+        w1 = (self.folder / 'tiles.bin').read_bytes()[:fgw.TILES * 32] + bytes(32 * 100)
+        (self.folder / 'w1.bin').write_bytes(w1)
+        self.doc['worlds'] = {'world1': {'tiles_file': 'w1.bin', 'tile_palettes': [0] * 612}}
+        m = fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x348000, extra_at=0x358000)
+        rom = Rom(apply(self.data, m))
+        self.assertEqual(fgw.tile_counts(rom), [812, 612, 812])
+        self.assertEqual(fgw.tile_counts(self.rom), [512] * 3)
+        self.assertEqual(ft.tile_limit(rom), 611)                                 # 블록 표는 세 세계가 함께 씀
+        raw = bytes(5)
+        self.assertEqual(ft.encode_block(raw, [611, 0, 0, 0], True, 611)[:1], bytes([0x63]))
+        with self.assertRaisesRegex(ValueError, '가장 적은 세계'):
+            ft.encode_block(raw, [612, 0, 0, 0], True, 611)
 
     def test_attributes(self):
         self.doc['tile_attributes'] = list(range(256)) * 4
@@ -292,6 +308,21 @@ class IndoorSetTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '원본 롬으로'):
             mgw.patch(rom, self.doc, self.tmp.name, sets_at=0x378000)
 
+    def test_moved_rom_counts_its_sets_and_refuses_in_place(self):
+        self.doc['palette_sets'].append([self.lid, self.lid])
+        rom = Rom(apply(self.data, mgw.patch(self.rom, self.doc, self.tmp.name, sets_at=0x378000)))
+        doc = mgw.dump(rom, self.tmp.name)
+        self.assertEqual(len(doc['palette_sets']), mgw.SET_COUNT + 1)
+        self.assertEqual(mgw.patch(rom, doc, self.tmp.name)['writes'], [])       # 옮긴 롬의 세트 수와 견줌
+        lid = next(iter(doc['palette_lists']))                                    # 옮긴 롬의 id 는 뱅크 37 주소
+        self.assertNotIn(self.lid, doc['palette_lists'])
+        doc['palette_lists'][lid] = [9] * 7
+        with self.assertRaisesRegex(ValueError, '이미 --sets-at'):
+            mgw.patch(rom, doc, self.tmp.name)
+        doc['palette_sets'].append([lid, lid])
+        with self.assertRaisesRegex(ValueError, f'세트 {mgw.SET_COUNT + 1}개'):
+            mgw.patch(rom, doc, self.tmp.name)
+
     def test_bad_sets(self):
         self.doc['palette_sets'] = self.doc['palette_sets'] * 4
         with self.assertRaisesRegex(ValueError, '1~256'):
@@ -326,7 +357,7 @@ class CliTests(unittest.TestCase):
                               '--worlds-at', '34:8000', '--extra-at', '35:8000')
             self.assertEqual(r.returncode, 0, r.stderr)
             notes = [w['note'] for w in json.loads((tmp / 'p.json').read_text(encoding='utf-8'))['writes']]
-            self.assertIn('전투 뒤 늘린 타일 다시 보내기', notes)
+            self.assertIn('타일맵 다시 그리기(전투 뒤·00:A771) 때 늘린 타일 다시 보내기', notes)
             r = self.run_tool(tool, tmp / 'rom.sfc', 'patch', tmp / 'src' / 'fieldgfx.json', '-o', tmp / 'p.json',
                               '--worlds-at', '34:8000', '--extra-at', '3x:8000')
             self.assertEqual(r.returncode, 1)

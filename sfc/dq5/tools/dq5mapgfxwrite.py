@@ -258,9 +258,14 @@ def patch(rom, doc, folder, chr_at=None, blocks_at=None, name='map-gfx', palette
         sets, lists = doc.get('palette_sets', sets0), doc.get('palette_lists', lists0)
         if not isinstance(lists, dict) or any(not re.fullmatch('[0-9A-F]{4}', k) for k in lists):
             raise ValueError('palette_lists 는 목록 id(대문자 16진 4자리) → 줄 번호')
-        grow = set(lists) != set(lists0) or not isinstance(sets, list) or len(sets) != SET_COUNT
+        # sets0 은 그 롬의 세트 수(set_count)를 센 것이라, 옮긴 롬에서도 늘렸는지를 바르게 가른다.
+        grow = set(lists) != set(lists0) or not isinstance(sets, list) or len(sets) != len(sets0)
         if grow and sets_at is None:
-            raise ValueError(f'세트 {SET_COUNT}개·원래 목록 id 와 다르면(늘리기) 뱅크 10 이 차 있어 --sets-at 으로 옮겨야 함')
+            raise ValueError(f'세트 {len(sets0)}개·원래 목록 id 와 다르면(늘리기) 뱅크 10 이 차 있어 --sets-at 으로 옮겨야 함')
+        moved = palset_lists(rom) != PALSET_LISTS
+        if moved and sets_at is None and (sets != sets0 or lists != lists0):
+            raise ValueError('세트 표를 이미 --sets-at 으로 옮긴 롬이라 뱅크 10 제자리 쓰기는 읽히지 않음; '
+                             '원본 롬으로 --sets-at 을 주어 만들어야 함')
         if not isinstance(sets, list) or not 1 <= len(sets) <= SET_MAX or any(
                 not isinstance(p, list) or len(p) != 2 or any(v not in lists for v in p) for p in sets):
             raise ValueError(f'palette_sets 는 palette_lists 의 [낮 목록 id, 밤 목록 id] 1~{SET_MAX}개')

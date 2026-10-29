@@ -56,7 +56,8 @@ class FieldPatchTests(unittest.TestCase):
             put(d, at, fgw.NIB_ORIG)
         for at, (want, _, _) in fgw.BLOCK_SITES.items():
             put(d, at, want)
-        put(d, fgw.BATTLE_SITE, fgw.BATTLE_ORIG)
+        put(d, fgw.REDRAW_SITE, fgw.REDRAW_ORIG)
+        put(d, fgw.REDRAW_RTL, b'\x6b')
         for at, want in (fgw.SEARCH_SITE, fgw.PTR_SITE, fgw.NIGHT_SITE, fgw.PAL_BANK_SITE, fgw.WAVE_SITE,
                          *fgw.ATTR_SITES.items()):
             put(d, at, want)
