@@ -23,7 +23,7 @@ GLYPH_MASK = ART / 'title-glyph-mask.png'
 SUBTITLE = ART / 'title-subtitle.png'
 SUBTITLE_BOX = (60, 174, 195, 190)
 SUBTITLE_CLEAR = 255
-CORNER_CUT = [(186, 176), (195, 176), (224, 201), (224, 223), (180, 223), (180, 185), (186, 185)]
+CORNER_CUT = [(183, 173), (189, 173), (189, 176), (195, 176), (224, 201), (224, 223), (180, 223), (180, 185), (183, 185)]
 CORNER_LOBES = [(195, 173, 205, 183), (203, 179, 213, 191), (209, 185, 221, 197)]
 # Boxes around the logo's left end and the sword crystal, trimmed beyond the outermost dark outline on the named side.
 OUTLINE_TRIMS = (((14, 77, 45, 141), 'left'), ((205, 78, 251, 141), 'right'))
