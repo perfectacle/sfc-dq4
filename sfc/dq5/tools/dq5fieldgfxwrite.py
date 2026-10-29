@@ -24,7 +24,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from dq5field import FIELD_CHR, TILE_PALETTE, nibble_table, rle  # noqa: E402
+from dq5field import BLOCK_LOWER, BLOCK_UPPER, FIELD_CHR, TILE_PALETTE, block_tiles, nibble_table, rle  # noqa: E402
 from dq5gfx import FIELD_ANIM as ANIM, FIELD_ANIM_COUNT, FIELD_ANIM_SETS, FIELD_ANIM_TILE  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
 
@@ -535,7 +535,7 @@ def patch(rom, doc, folder, tiles_at=None, anim_at=None, name='field-gfx', world
             if v != o['tile_attributes'][i]:
                 write(TILE_ATTR + i, bytes([v]), f'타일 속성 {i:03X}')
     if grow:
-        write_grow(worlds_at, extra_at, world0_at, full0, nib_full, world_data, placed, write, bytes(attrs))
+        write_grow(rom, worlds_at, extra_at, world0_at, full0, nib_full, world_data, placed, write, bytes(attrs))
     elif worlds:
         write_worlds(worlds_at, world0_at, data['tiles'], nib, world_data, placed, write)
     for key in PALETTE_SETS:
@@ -638,13 +638,17 @@ def place_in_any(at, size, option, placed):
     placed.append((at, at + size, option))
 
 
-def write_grow(at, extra_at, world0_at, full0, nib0, world_data, placed, write, attrs):
+def write_grow(rom, at, extra_at, world0_at, full0, nib0, world_data, placed, write, attrs):
     """타일 늘리기. 세계마다 (앞 512개 RLE, 512개 뒤 늘린 타일, 니블 표 512바이트)를 고르기 표에 두고,
     훅 다섯(불러오기·니블·블록 둘·다시 그리기)과 DMA 루틴을 at 에 놓는다. 세계 0 과 같은 앞 512개는 세계 0 RLE 를 쓴다."""
     lay = grow_layout(at)
     base0 = full0[:TILES * 32]
     worlds = [(full0, nib0)] + [world_data.get(k, (full0, nib0)) for k in WORLDS[1:]] + [(full0, nib0)]
     counts = [len(t) // 32 for t, _ in worlds[:3]]
+    used = max(t for table in (BLOCK_LOWER, BLOCK_UPPER) for m in range(511) for t in block_tiles(rom, table, m))
+    if used >= min(counts):
+        raise ValueError(f'블록은 세 세계가 함께 쓰므로 모든 세계에 그 타일을 둘 것(블록이 타일 {used} 을 쓰는데 '
+                         f'세계 0·1·2 의 타일 수는 {counts})')
     if len(set(counts)) > 1:
         print(f'경고: 세계 0·1·2 의 타일 수가 {counts} 로 다름. 블록 표는 세 세계가 함께 쓰므로 블록 칸 타일은 '
               f'{min(counts) - 1} 까지만 쓸 것(dq5fieldtables.py 가 넘는 번호를 거부함)', file=sys.stderr)

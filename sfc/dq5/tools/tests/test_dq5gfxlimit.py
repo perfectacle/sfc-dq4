@@ -155,8 +155,20 @@ class TileGrowTests(unittest.TestCase):
         self.assertEqual(ft.tile_limit(rom), 611)                                 # 블록 표는 세 세계가 함께 씀
         raw = bytes(5)
         self.assertEqual(ft.encode_block(raw, [611, 0, 0, 0], True, 611)[:1], bytes([0x63]))
-        with self.assertRaisesRegex(ValueError, '가장 적은 세계'):
+        with self.assertRaisesRegex(ValueError, '모든 세계에 그 타일을 둘 것'):
             ft.encode_block(raw, [612, 0, 0, 0], True, 611)
+
+    def test_rejects_blocks_beyond_a_world(self):
+        """블록 표가 이미 512 이상을 쓰는데 타일이 그보다 적은 세계가 있으면 거부한다."""
+        d = bytearray(self.data)
+        put(d, dq5field.BLOCK_HOOK_SITE, b'\x22')
+        put(d, dq5field.BLOCK_LOWER, bytes([0xF0, 0, 0, 0, 0x80 | 0x08]))           # 타일 1008(세계는 812개)
+        # check_sites 가 00:BC80 을 보므로 디코더만 넓게 읽는 롬을 따로 쓰지 않고 write_grow 를 바로 부른다.
+        rom = Rom(bytes(d))
+        tiles = (self.folder / 'tiles.bin').read_bytes()
+        with self.assertRaisesRegex(ValueError, '모든 세계에 그 타일을 둘 것'):
+            fgw.write_grow(rom, 0x348000, 0x358000, fgw.FIELD_CHR, tiles, self.doc['tile_palettes'], {}, [],
+                           lambda *a, **k: None, bytes(1024))
 
     def test_attributes(self):
         self.doc['tile_attributes'] = list(range(256)) * 4

@@ -2,16 +2,18 @@
 
 시험 롬(원본에서 만듦)
   tiles   타일 512~1023 을 타일 0~511 의 비트 반전으로, 니블을 0~511 니블의 bit0 반전으로 두고(dq5fieldgfxwrite
-          --worlds-at 34:8000 --extra-at 35:8000), 그 롬으로 만든 dq5fieldtables 패치로 블록 511개 두 층의 칸 타일
+          --worlds-at 34:8000 --extra-at 60:8000), 그 롬으로 만든 dq5fieldtables 패치로 블록 511개 두 층의 칸 타일
           번호에 512 를 더함(위층 타일 0 은 그대로). 블록에서 그린 필드 칸이 모두 늘린 타일을 써야 맞다
-  wall    tiles 와 같되 타일 512~1023 의 속성(00:BCA8 이 읽는 표)을 모두 80 으로. 원래 속성 그대로인 tiles 롬에서는
-          걷고, 이 롬에서는 못 걸어야 늘린 속성 표를 읽는 것이다
+  wall-XX tiles 와 같되 늘린 타일을 35:8000 에 두고, 타일 512~1023 의 속성(00:BCA8 이 읽는 표)을 모두 XX(80·82·95·45·00)로.
+          원래 속성 그대로인 tiles 롬과 45·00 에서는
+          걷고, 80·82·95 에서는 못 걸어야 늘린 속성 표를 읽는 것이다. 걷기 앞 VRAM 으로 35:8000·60:8000 자리도 견준다
   fieldpal  세계 0 의 2·3번 줄 벌을 12개로(8~11 은 새 색), 시간대 표를 12항목으로(새 벌을 0·1·0100·0180 에), 밤 인물
           팔레트 시작을 벌 10 으로(dq5fieldgfxwrite --palettes-at 36:8000)
   indoor  실내 BG 팔레트 세트를 70개로(새 세트 69 의 낮 목록은 새 목록, 밤 목록은 세트 0 의 것), 01/01 을 세트 69 로
           (dq5mapgfxwrite --sets-at 37:8000, 그 롬으로 만든 dq5palsetwrite 패치)
 장면
-  tiles: 01:A4A7 뒤 00:A788 앞에 VRAM 워드 4000~5FFF 를 지우고 다시 오는지(lua/dq5vramwipe.lua), 세계 0 (341,56) 에 서기, 걷고 명령 창을 여닫은 뒤, 이벤트 전투(スライム 하나)를 이기고 돌아온 뒤, 세계 1·2 (50,28).
+  tiles: 세계 0 (341,56) 에 서기, 걷고 명령 창을 여닫은 뒤, 이벤트 전투(スライム 하나)를 이기고 돌아온 뒤, 세계 1·2 (50,28).
+         01:A4A7 뒤 00:A788 앞에 VRAM 워드 4000~5FFF 를 지우고 다시 오는지(lua/dq5vramwipe.lua), キメラのつばさ·ルーラ 앞뒤.
          VRAM 워드 2000~3FFF·4000~5FFF 의 타일과 BG1·2 타일맵의 채운 칸을 디코더(dq5field)와 견준다
   fieldpal: (341,56) 에서 $075E 를 여섯 값으로 두고 2·3번 줄 색 1~13 과 11·12번 줄(낮·밤 인물 팔레트)
   indoor: 01/01 과 세트를 그대로 둔 맵 셋(원본 게임과도 견줌)에서 BG 1~7번 줄
@@ -48,8 +50,20 @@ IN_BATTLE, AFTER_BATTLE = 1000, 1990
 WIPE = {'FIELD': '341,56', 'SETTLE': '500', 'MAXF': '1000', 'DUMPF': '455,470', 'WIPEF': '450', 'WIPE': '8000-BFFF'}
 WIPED, REDRAWN = 455, 470
 # 속성 시험: 서서 네 방향으로 32프레임씩 걷는다. dq5warp.lua 가 좌표가 바뀌었는지 warp.txt 에 moved= 로 적는다.
-WALL = 0x80
-MOVE = {'FIELD': '341,56', 'SETTLE': '300', 'MAXF': '1300', 'TEST': 'wait:60,left:32,up:32,right:32,down:32,wait:60'}
+# 필드를 다시 불러오는 장면(01:A4A7 → 00:A788): キメラのつばさ(물건 A4)를 どうぐ → つかう, ルーラ(이동 주문, MP 99)를
+# じゅもん 일곱째로. 둘 다 960·1047프레임쯤 다시 불러온다. 앞뒤 프레임의 늘린 타일 자리를 견준다.
+RELOAD = {
+    'chimera': ({'SET': '2056=A4', 'TEST': 'a:8,wait:60,right:8,wait:40,down:8,wait:40,a:8,wait:80,a:8,wait:80,a:8,wait:600'},
+                (900, 1000, 1300)),
+    'rula': ({'SET': '2063=FF;2044=63;2050=63',
+              'TEST': 'a:8,wait:60,right:8,wait:40,a:8,wait:80,' + 'down:6,wait:12,' * 6 + 'a:8,wait:80,a:8,wait:600'},
+             (1000, 1100, 1300)),
+}
+# 속성 값 → 걸을 수 있는지. 늘린 타일 자리(VRAM)도 걷기 앞(700프레임)에 견준다.
+WALLS = {0x80: False, 0x82: False, 0x95: False, 0x45: True, 0x00: True}
+MOVE = {'FIELD': '341,56', 'SETTLE': '300', 'MAXF': '1300', 'DUMPF': '700',
+        'TEST': 'wait:60,left:32,up:32,right:32,down:32,wait:60'}
+MOVE_FRAME = 700
 # 명령 창을 열어 고르고 닫은 뒤 몇 걸음 걷는다(01:A4A7·전투 뒤 말고 늘린 타일 자리를 덮는 곳이 없는지).
 # 오래 걸으면 무작위 전투가 붙으므로 짧게 걷고, 덤프 때 $1001 = 0(전투 전)을 본다.
 WALK = {'FIELD': '341,56', 'SETTLE': '300', 'MAXF': '1600', 'DUMPF': '1450',
@@ -79,11 +93,13 @@ def make_roms(original, out):
     doc['tile_palettes'] = doc['tile_palettes'] + [n ^ 1 for n in doc['tile_palettes']]
     (src / 'fieldgfx.json').write_text(json.dumps(doc), encoding='utf-8')
     command('dq5fieldgfxwrite.py', original, 'patch', src / 'fieldgfx.json', '-o', out / 'tiles-gfx.json',
-            '--worlds-at', '34:8000', '--extra-at', '35:8000')
-    doc['tile_attributes'] = doc['tile_attributes'] + [WALL] * fgw.TILES
-    (src / 'wall.json').write_text(json.dumps(doc), encoding='utf-8')
-    command('dq5fieldgfxwrite.py', original, 'patch', src / 'wall.json', '-o', out / 'wall-gfx.json',
-            '--worlds-at', '34:8000', '--extra-at', '35:8000')
+            '--worlds-at', '34:8000', '--extra-at', '60:8000')
+    attrs = doc['tile_attributes']
+    for v in WALLS:
+        doc['tile_attributes'] = attrs + [v] * fgw.TILES
+        (src / f'wall-{v:02x}.json').write_text(json.dumps(doc), encoding='utf-8')
+        command('dq5fieldgfxwrite.py', original, 'patch', src / f'wall-{v:02x}.json',
+                '-o', out / f'wall-{v:02x}-gfx.json', '--worlds-at', '34:8000', '--extra-at', '35:8000')
     command('dq5build.py', original, 'build', out / 'tiles-gfx.json', '--size', '4', '-o', out / 'tiles-step.sfc')
     command('dq5fieldtables.py', out / 'tiles-step.sfc', 'dump', '-o', out / 'tables.json')
     t = json.loads((out / 'tables.json').read_text(encoding='utf-8'))
@@ -122,7 +138,8 @@ def make_roms(original, out):
     (out / 'palset.json').write_text(json.dumps(p), encoding='utf-8')
     command('dq5palsetwrite.py', out / 'indoor-step.sfc', 'patch', out / 'palset.json', '-o', out / 'indoor-map.json')
     for name, lists in (('tiles', ['tiles-gfx.json', 'tiles-blocks.json']),
-                        ('wall', ['wall-gfx.json', 'tiles-blocks.json']), ('fieldpal', ['fieldpal.json']),
+                        *((f'wall-{v:02x}', [f'wall-{v:02x}-gfx.json', 'tiles-blocks.json']) for v in WALLS),
+                        ('fieldpal', ['fieldpal.json']),
                         ('indoor', ['indoor-sets.json', 'indoor-map.json'])):
         command('dq5build.py', original, 'build', *(out / x for x in lists), '--size', '4',
                 '-o', out / f'{name}.sfc', '--ips', out / f'{name}.ips')
@@ -198,10 +215,26 @@ def check_redraw(name, rom_path, dump):
     return {'case': name, 'wiped_at': int(WIPE['WIPEF']), 'restored_by': REDRAWN, 'tiles': len(extra) // 32}
 
 
-def check_move(name, dump, want):
+def check_reload(name, rom_path, dump, frames):
+    extra = fgw.current(Rom(rom_path.read_bytes()))['worlds']['world0'][0][fgw.TILES * 32:]
+    for n in frames:
+        w = frame(dump, n, 'wram')
+        require(not w[0xBE] & 0x80 and w[0x1001] == 0, f'{name}: {n}프레임에 필드에 서지 않음')
+        require(frame(dump, n, 'vram')[0x8000:0x8000 + len(extra)] == extra, f'{name}: {n}프레임 늘린 타일이 다름')
+    line = next(x for x in (dump / 'warp.txt').read_text().splitlines() if ' test ' in x)
+    return {'case': name, 'frames': list(frames), 'walk': line.split(' test ')[1]}
+
+
+def check_move(name, rom_path, dump, want):
+    """걷기 앞 VRAM 의 늘린 타일이 그 롬(--extra-at 자리)의 것과 같고, 걸었는지가 want 와 같은지."""
+    cur = fgw.current(Rom(rom_path.read_bytes()))
+    extra = cur['worlds']['world0'][0][fgw.TILES * 32:]
+    require(frame(dump, MOVE_FRAME, 'vram')[0x8000:0x8000 + len(extra)] == extra,
+            f'{name}: {MOVE_FRAME}프레임 VRAM 워드 4000~ 이 늘린 타일과 다름')
     line = next(x for x in (dump / 'warp.txt').read_text().splitlines() if ' test ' in x)
     require(f'moved={"yes" if want else "no"}' in line, f'{name}: {line}')
-    return {'case': name, 'walk': line.split(' test ')[1]}
+    return {'case': name, 'extra_tiles': len(extra) // 32, 'attribute': f'{cur["tile_attributes"][fgw.TILES]:02X}',
+            'walk': line.split(' test ')[1]}
 
 
 def rows23(cg):
@@ -264,7 +297,7 @@ def main():
         out = Path(tempfile.mkdtemp(prefix='run-', dir=args.out.resolve()))
         print(f'실행 출력: {out}', flush=True)
         make_roms(original, out)
-        tiles, wall, fieldpal, indoor = (out / f'{k}.sfc' for k in ('tiles', 'wall', 'fieldpal', 'indoor'))
+        tiles, fieldpal, indoor = (out / f'{k}.sfc' for k in ('tiles', 'fieldpal', 'indoor'))
         krlua = Path(subprocess.run(['krpatch', 'sfc', 'lua'], capture_output=True, text=True, check=True,
                                     timeout=30).stdout.strip())
         libdir = out / 'lib'
@@ -277,8 +310,11 @@ def main():
         scenes = {'stand': stand, 'walk': WALK, 'battle': BATTLE, 'world1': world[1], 'world2': world[2]}
         cases = [(f'tiles-{k}-{r}', path, env) for k, env in scenes.items()
                  for r, path in (('orig', original), ('grow', tiles))]
-        cases += [('move-tiles', tiles, MOVE), ('move-wall', wall, MOVE)]
+        cases += [('move-tiles', tiles, MOVE), *((f'move-{v:02x}', out / f'wall-{v:02x}.sfc', MOVE) for v in WALLS)]
         luas = {'redraw-tiles': HERE / 'lua/dq5vramwipe.lua'}
+        for k, (env, frames) in RELOAD.items():
+            cases.append((f'reload-{k}', tiles, dict(env, FIELD='310,60', SETTLE='60', MAXF='2000',
+                                                     DUMPF=','.join(map(str, frames)))))
         cases.append(('redraw-tiles', tiles, dict(WIPE, NEXT=str(gfx))))
         for t in TIME_CASES:
             env = dict(stand, SET=f'075E={t & 0xFF:02X};075F={t >> 8:02X}')
@@ -299,8 +335,11 @@ def main():
                    check_battle('tiles-battle', tiles, *d['battle']),
                    *(check_tiles(f'tiles-world{w}', tiles, d[f'world{w}'][0], SETTLE_FRAME, d[f'world{w}'][1], w)
                      for w in (1, 2))]
-        results += [check_move('move-tiles', dirs['move-tiles'], True), check_move('move-wall', dirs['move-wall'], False),
-                    check_redraw('redraw-tiles', tiles, dirs['redraw-tiles'])]
+        results += [check_move('move-tiles', tiles, dirs['move-tiles'], True),
+                    *(check_move(f'move-{v:02x}', out / f'wall-{v:02x}.sfc', dirs[f'move-{v:02x}'], ok)
+                      for v, ok in WALLS.items()),
+                    check_redraw('redraw-tiles', tiles, dirs['redraw-tiles']),
+                    *(check_reload(f'reload-{k}', tiles, dirs[f'reload-{k}'], f) for k, (_, f) in RELOAD.items())]
         results.append(check_fieldpal('fieldpal', fieldpal, {t: dirs[f'pal-{t:04X}-grow'] for t in TIME_CASES},
                                       {t: dirs[f'pal-{t:04X}-orig'] for t in TIME_CASES}))
         for m in [NEW_MAP] + SAME_MAPS:

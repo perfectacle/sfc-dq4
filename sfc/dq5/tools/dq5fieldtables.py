@@ -146,8 +146,8 @@ def encode_block(raw, tiles, wide=False, limit=None):
         raise ValueError('타일 512 이상은 dq5fieldgfxwrite.py 의 타일 늘리기(--extra-at) 패치를 넣은 롬으로 만들어야 함')
     limit = (1023 if wide else 511) if limit is None else limit
     if any(type(v) is int and limit < v <= 1023 for v in tiles):
-        raise ValueError(f'타일 {limit + 1} 이상은 타일이 가장 적은 세계에 없음(세 세계가 블록 표를 함께 씀, '
-                         f'이 롬은 {limit + 1}개)')
+        raise ValueError(f'블록은 세 세계가 함께 쓰므로 모든 세계에 그 타일을 둘 것(타일이 가장 적은 세계가 '
+                         f'{limit + 1}개)')
     values = [integer(v, limit, '타일') for v in tiles]
     high = 0 if wide else raw[4] & 0x0F
     for value, bit, bit10 in zip(values, QUAD_BIT, QUAD_BIT10):
