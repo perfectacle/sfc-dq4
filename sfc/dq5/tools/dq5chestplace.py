@@ -186,6 +186,11 @@ def plan(rom, doc, map_at, at=None):
                       for xy in [(row['x'], row['y'])] if xy in footprint or xy not in new_furniture or xy in after)
         if lost:
             raise ValueError(f'{bc:02X}/{bd:02X}: 블록이 기존 서랍 항목의 가구 칸 {lost} 을 덮거나 지움')
+        # 발밑·두 칸 앞·아래층 상자는 칸 속성이 아니라 좌표로 찾으므로, 블록이 덮으면 보상이 그림 밑에 묻힌다
+        buried = sorted((name, row['x'], row['y']) for name in ('foot', 'ahead', 'lower') for row in tables[name]
+                        if (row['group'], row['map']) == (bc, bd) and (row['x'], row['y']) in footprint)
+        if buried:
+            raise ValueError(f'{bc:02X}/{bd:02X}: 블록이 기존 조사 항목 {buried} 의 칸을 덮음')
         used = set()
         for k, box in enumerate(furniture):
             width, height = sizes[box['block']]

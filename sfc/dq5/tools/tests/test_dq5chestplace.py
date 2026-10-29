@@ -6,6 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dq5chestplace import FORMAT, check, map_key, patch, plan
+from dq5build import build, parse_at
 from dq5map import Rom
 from test_dq5chestwrite import ROM
 
@@ -86,6 +87,20 @@ class ChestPlaceTests(unittest.TestCase):
         check(rom, value, 0x3E8000, at)
 
     @unittest.skipUnless(ROM.is_file(), '롬 없음')
+    def test_patched_rom_is_not_patched_again(self):
+        rom = Rom(ROM.read_bytes())
+        first = {'format': FORMAT, 'maps': [{'map': '01/02', 'furniture': [furniture(40, 24)]}]}
+        manifest = patch(rom, first, 0x3E8000, {'search': 0x3F9000})
+        writes = [(parse_at(w['at'])[0], bytes.fromhex(w['hex']), bytes.fromhex(w['orig']) if 'orig' in w else None,
+                   w['note']) for w in manifest['writes']]
+        built = Rom(build(rom.d, [('first', manifest['rom_size'], writes)], manifest['rom_size'])[0])
+        check(rom, first, 0x3E8000, {'search': 0x3F9000})
+        # 표를 옮긴 롬 위에 다시 쌓지 않는다. 가구를 더하려면 원래 롬에서 입력 하나에 모두 적는다
+        second = {'format': FORMAT, 'maps': [{'map': '01/02', 'furniture': [furniture(30, 18, mask=4)]}]}
+        with self.assertRaisesRegex(ValueError, '표를 옮긴 롬'):
+            plan(built, second, 0x3EC000, {'search': 0x3FA000})
+
+    @unittest.skipUnless(ROM.is_file(), '롬 없음')
     def test_rejects_furniture(self):
         rom = Rom(ROM.read_bytes())
         at = {'search': 0x3F9000, 'chests': 0x3F8000, 'chest_maps': 0x1EEE4E}
@@ -102,6 +117,11 @@ class ChestPlaceTests(unittest.TestCase):
             (one(furniture(40, 24, unused=256)), at),
             (one(furniture(40, 24, unused='1')), at),
             (one(furniture(40, 24, flag_index=0x14, mask=1)), at),   # 7E:2240 은 발밑 표의 비트
+            (one(furniture(40, 24, flag_index=0x10, mask=1)), at),   # 7E:223C & 01 은 두 칸 앞·아래층 상자가 씀
+            (one(furniture(30, 12), map_name='00/01'), at),            # 발밑 항목 (31,14) 를 덮음
+            (one(furniture(5, 4), map_name='0E/02'), at),              # 두 칸 앞 항목 (6,6) 을 덮음
+            ({'format': FORMAT, 'maps': [{'map': '00/01', 'chests': [{'x': 30, 'y': 13, 'block': CHEST_BLOCK,
+                                                                      'reward': 1}]}]}, at),  # 상자가 발밑 (31,14) 를 덮음
         ]
         for value, places in bad:
             with self.subTest(value=value), self.assertRaises(ValueError):
