@@ -95,6 +95,8 @@ def known_maps(rom, new_maps=()):
     for bc, bd in new_maps:
         if bc >= HIGH_FIRST and bc not in out:
             raise ValueError(f'--new-map {bc:02X}/{bd:02X}: 그룹 50 이상의 새 그룹은 받지 않음')
+        if bc >= HIGH_FIRST and bd < HIGH_FIRST:
+            raise ValueError(f'--new-map {bc:02X}/{bd:02X}: 그룹 50 이상의 맵 번호는 50 부터')
         out.setdefault(bc, set()).add(bd)
     return out
 

@@ -511,8 +511,12 @@ def palset_table(rom):
     """팔레트 세트 표 자리. dq5palsetwrite.py 가 옮긴 롬은 10:DE0B 의 JSL 이 부르는 찾기 루틴 바로 뒤가 표다."""
     if rom.u8(0x10DE0B) != 0x22:
         return PALSET_TABLE
-    from dq5palsetwrite import stub_length
-    return rom.u24(0x10DE0C) + stub_length()
+    from dq5palsetwrite import assemble
+    stub = rom.u24(0x10DE0C)
+    code = assemble(stub)
+    if bytes(rom.d[lorom(stub):lorom(stub) + len(code)]) != code:
+        raise ValueError(f'10:DE0B 의 JSL 대상 {stub >> 16:02X}:{stub & 0xFFFF:04X} 이 팔레트 세트 찾기 루틴이 아님')
+    return stub + len(code)
 
 
 def palette_set(rom, bc, bd):

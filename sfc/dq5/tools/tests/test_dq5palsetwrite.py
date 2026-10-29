@@ -113,6 +113,7 @@ class PaletteSetTests(unittest.TestCase):
             (document({'group': '36', 'default': 1}), '3C:9000', ()),
             (document({'group': '36', 'default': 1}), '3C:9000', [(0x37, 0)]),
             (document({'group': '01', 'default': 1}), None, [(0x55, 0x50)]),
+            (document({'group': '01', 'default': 1}), None, [(0x52, 0x03)]),
             (document({'group': '1', 'default': 1}), None, ()), (document({'group': '0a', 'default': 1}), None, ()),
             (document({'group': '01', 'default': 69}), None, ()), (document({'group': '01', 'default': True}), None, ()),
             (document({'group': '01'}), None, ()), (document({'group': '01', 'default': 1, 'x': 1}), None, ()),
@@ -137,6 +138,10 @@ class PaletteSetTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             writes_for(hooked, document())
         self.assertEqual(dump(hooked), dump(self.rom))
+        data = bytearray(hooked.d)
+        put(data, 0x3C9000, b'\xea')
+        with self.assertRaises(ValueError):
+            palset_table(Rom(data))
         data = bytearray(self.rom.d)
         put(data, LOADER + 7, b'\xea')
         with self.assertRaises(ValueError):

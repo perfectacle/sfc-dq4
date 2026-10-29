@@ -356,7 +356,9 @@ def all_lists(rom):
             end, count = min(later), None
         else:
             spans = group_spans(rom)[0]
-            end, count = 0x1000000, (spans[bc][1] - spans[bc][0]) // 3 if bc < len(spans) else 1
+            if bc >= len(spans):
+                raise ValueError(f'인물 그룹 {bc:02X} 이 맵 포인터 그룹 표에 없음(dq5newmap.py 패치 없이 인물 그룹만 늘린 롬)')
+            end, count = 0x1000000, (spans[bc][1] - spans[bc][0]) // 3
         bd = 0
         while a < end and (count is None or bd < count):
             out.append((a, f'{bc:02X}/{bd:02X}'))

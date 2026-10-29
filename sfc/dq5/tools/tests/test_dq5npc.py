@@ -73,6 +73,17 @@ class GroupPointerTests(unittest.TestCase):
         self.assertEqual(map_list(rom, 0x36, 1), starts[GROUPS] + 1)
         self.assertEqual(map_entries(rom, 1, 0), [(starts[1], len(DAY))])
 
+    def test_relocated_group_without_map_group_is_refused(self):
+        # 인물 표만 그룹 55개로 옮기고 맵 포인터 그룹 표는 54개 그대로면 맨 뒤 그룹의 맵 수를 알 수 없다.
+        data = base([1] * GROUPS)
+        table, count = 0x328000, GROUPS + 1
+        put(data, BANK_SITE, bytes([0xA9, 0x32]))
+        put(data, GROUP_SITE, bytes([0xB9, 0x00, 0x80]))
+        lists = table + count * 2
+        put(data, table, b''.join((lists + g & 0xFFFF).to_bytes(2, 'little') for g in range(count)))
+        with self.assertRaises(ValueError):
+            all_lists(Rom(data))
+
     def test_changed_loader_is_refused(self):
         data = base([1] * GROUPS)
         put(data, BANK_SITE, bytes([0xEA, 0x05]))
