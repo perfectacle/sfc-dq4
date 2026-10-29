@@ -19,13 +19,25 @@ sys.path.insert(0, os.path.dirname(__file__))
 from dq5map import Rom  # noqa: E402
 
 RECORDS = 0x27E5DC
+TABLE_SIZE = 256                # 몬스터 번호 칸. EC~FF 는 몬스터 00 의 레코드를 가리킨다
 COUNT = 236
 HEADS = ((0x00, 0x258C45), (0x2A, 0x268F99), (0x57, 0x2782E4))
+# 22:9003 LDA $27E5DC,X 와 22:900B LDA #$27. dq5monwrite.py --records-at 이 표·뱅크를 바꾼다.
+RECORD_READ, RECORD_BANK = 0x229003, 0x22900B
+
+
+def record_table(rom):
+    """(레코드 포인터 표, 레코드 뱅크). 22:9003·900B 가 BF·A9 명령이면 그 피연산자를, 아니면 원래 27:E5DC·27."""
+    if rom.u8(RECORD_READ) == 0xBF and rom.u8(RECORD_BANK) == 0xA9:
+        return rom.u8(RECORD_READ + 1) | rom.u8(RECORD_READ + 2) << 8 | rom.u8(RECORD_READ + 3) << 16, \
+            rom.u8(RECORD_BANK + 1)
+    return RECORDS, RECORDS >> 16
 
 
 def monster(rom, m):
     """(그림 번호, 색 목록). 색 목록의 0 번째가 OBJ 팔레트 1번 색이다(0번은 투명)."""
-    a = 0x270000 | rom.u16(RECORDS + m * 2)
+    table, bank = record_table(rom)
+    a = bank << 16 | rom.u16(table + m * 2)
     n = rom.u8(a + 1)
     return rom.u8(a), [rom.u16(a + 2 + i * 2) for i in range(n)]
 

@@ -169,6 +169,28 @@ class PlanTests(unittest.TestCase):
             pictures, _ = self.run_plan(pictures=[{'picture': '00', 'image': 'less.png'}])
         self.assertEqual(pictures[0][3], 84)          # 맨 아래 칸 줄을 비우면 타일 84개라 받는다
 
+    def test_tile_limit_keeps_original_layout(self):
+        # 12x8 칸에 16x16 조각 24개. 마지막은 첫 조각의 반전 복사라 타일 92개(그림 6C 처럼 91 을 넘는 원본).
+        rng = random.Random(10)
+        cells = [(x, y) for y in range(0, 8, 2) for x in range(0, 12, 2)]
+        bitmap = bytearray(12)
+        for x, y in cells:
+            bitmap[(y * 12 + x) // 8] |= 0x80 >> ((y * 12 + x) % 8)
+        tiles = b''.join(encode_tile(tile_bytes([[rng.randrange(1, 3) for _ in range(8)] for _ in range(8)]))
+                         for _ in range(92))
+        raw = bytes([0, 0, 0, 1, 1, 0xB7]) + bytes(bitmap) + bytes([0x22] * 11 + [0x26]) + tiles + bytes([0])
+        self.rom.d[lorom(0x258C99):lorom(0x258C99) + len(raw)] = raw
+        grid = [row[1:] for row in M.index_image(M.decode(self.rom, 0))]
+        self.save('swap.png', [[{1: 2, 2: 1}.get(v, v) for v in row] for row in grid])
+        broken = [list(row) for row in grid]
+        broken[48][80] = 2 if broken[48][80] == 1 else 1       # 반전 복사 쪽만 바꾸면 새 배치(타일 96개)
+        self.save('broken.png', broken)
+        with mock('dq5monlimits.losses', return_value=[]):
+            pictures, _ = self.run_plan(pictures=[{'picture': '00', 'image': 'swap.png'}])
+            self.assertEqual(pictures[0][3], 92)
+            with self.assertRaisesRegex(ValueError, '타일 96개'):
+                self.run_plan(pictures=[{'picture': '00', 'image': 'broken.png'}])
+
     def test_rejects(self):
         self.save('same.png', self.grid)
         self.save('wide.png', [[1] * 24 for _ in range(16)])
@@ -203,9 +225,9 @@ class RecordTests(unittest.TestCase):
         raw = bytes([0, 0, 0, 1, 1, 0x11, 0x80, 0x20]) + encode_tile(first) + bytes(3)
         data = bytearray(0x200000)
         data[:0x180000] = fake_rom(raw).d
-        # 몬스터 0 은 2색, 몬스터 1·2 는 3색 레코드 하나를 함께 쓴다.
+        # 몬스터 0 은 2색, 몬스터 1·2 는 3색 레코드 하나를 함께 쓴다. 나머지 칸은 원본의 EC~FF 처럼 몬스터 0 의 레코드.
         table = lorom(M.RECORDS)
-        data[table:table + 6] = bytes([0x00, 0xE8, 0x06, 0xE8, 0x06, 0xE8])
+        data[table:table + 512] = bytes([0x00, 0xE8, 0x06, 0xE8, 0x06, 0xE8]) + bytes([0x00, 0xE8]) * 253
         data[lorom(0x27E800):lorom(0x27E800) + 14] = bytes([0, 2, 1, 0, 2, 0, 0, 3, 3, 0, 4, 0, 5, 0])
         self.rom = Rom(data)
         self.grid = [row[1:] for row in M.index_image(M.decode(self.rom, 0))]
@@ -243,13 +265,28 @@ class RecordTests(unittest.TestCase):
         self.assertEqual(after.u24(W.RECORD_READ + 1), 0x3C8000)
         self.assertEqual(after.u8(W.E4_BANK + 1), 0x3C)
         # 몬스터 1·2 는 새 자리에서도 레코드 하나를 함께 쓴다.
-        self.assertEqual([W.monster_of(after, m) for m in range(3)], [(0, [1, 2]), (0, colors), (0, colors)])
+        self.assertEqual([M.monster(after, m) for m in range(3)], [(0, [1, 2]), (0, colors), (0, colors)])
         self.assertEqual(after.u16(0x3C8002), after.u16(0x3C8004))
-        with W.following_table():
-            self.assertEqual(M.monster(after, 1), (0, colors))
-        self.assertEqual(M.monster(after, 1), (0, [3, 4, 5]))     # 밖에서는 원래 자리를 읽는다
+        # 표는 원본처럼 256칸이고, 몬스터 칸 밖(여기서는 03~FF)은 새 00 레코드를 가리킨다. 레코드는 표 뒤 3C:8200 부터.
+        self.assertEqual({after.u16(0x3C8000 + m * 2) for m in (0, 3, 0xEC, 0xFF)}, {0x8200})
+        # dq5mongfx.monster 는 22:9003 을 따라 옮긴 레코드를 읽는다(다른 도구도 같은 함수를 씀).
+        self.assertEqual(M.monster(after, 1), (0, colors))
+        self.assertEqual(M.record_table(after), (0x3C8000, 0x3C))
+        self.assertEqual(M.record_table(self.rom), (M.RECORDS, 0x27))
         with self.assertRaisesRegex(ValueError, '이미 옮긴'):
             W.plan(after, self.doc(colors), self.dir)
+
+    def test_rejects_records_at(self):
+        with self.assertRaisesRegex(ValueError, '색이 원래 레코드보다 많은 몬스터가 없음'):
+            W.patch(self.rom, self.doc([7, 8, 9]), self.dir, records_at=0x3C8000)
+        with self.assertRaisesRegex(ValueError, '22:9000~ 가 원래 롬의 코드·자료 자리와 겹침'):
+            W.patch(self.rom, self.doc(list(range(15))), self.dir, records_at=0x229000)
+
+    def test_e4_needs_ten_colors(self):
+        with mock('dq5monwrite.M.COUNT', 0xEC):
+            with self.assertRaisesRegex(ValueError, '몬스터 E4: 색 9개'):
+                W.plan(self.rom, {'format': FORMAT, 'monsters': [{'monster': 'E4', 'colors': [1] * 9}]}, self.dir)
+            W.plan(self.rom, {'format': FORMAT, 'monsters': [{'monster': 'E4', 'colors': [1] * 10}]}, self.dir)
 
     def test_rejects(self):
         with self.assertRaisesRegex(ValueError, '1~15개'):
@@ -282,7 +319,7 @@ class RecordTests(unittest.TestCase):
                 W.patch(self.rom, doc, self.dir, at=0x3C8000, records_at=0x3C8100)
             manifest = W.patch(self.rom, doc, self.dir, at=0x3C8000, records_at=0x3D8000)
         after = self.applied(manifest)
-        self.assertEqual(W.monster_of(after, 2), (0, list(range(15))))
+        self.assertEqual(M.monster(after, 2), (0, list(range(15))))
         self.assertEqual(W.picture_grid(after, 0)[0], noisy)
 
     def test_cli(self):
