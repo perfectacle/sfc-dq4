@@ -327,12 +327,33 @@ def patch(rom, doc, base=Path('.'), at=None, records_at=RECORD_AREA[0], sets_at=
             write(record_cursor, record, f'새 세트 {s:02X} 레코드', orig=False)
             write(S.SET_POINTERS + s * 2, (record_cursor & 0xFFFF).to_bytes(2, 'little'), f'세트 {s:02X} 레코드 포인터')
             record_cursor += RECORD_SIZE
+    if at is not None and cursor > at:
+        refuse_live(rom, at, cursor, '--at 에 옮긴 타일 자료')
     if sets_at is not None:
         writes += grow_table(rom, records, sets_at, at, cursor)
+        refuse_live(rom, sets_at, sets_at + TABLE_SIZE + RECORD_SIZE * len(records), '--sets-at 의 표와 레코드')
     for g, s in sorted(mapping.items()):
         if S.gfx_set(rom, g) != s:
             write(S.GFX_SETS + g, bytes([s]), f'그림 {g:02X} → 세트 {s:02X}')
     return {'format': 'dq5patch/1', 'name': 'sprite-sets', 'writes': writes}
+
+
+def live_ranges(rom):
+    """[(시작, 끝, 설명)]. 지금 롬에서 엔진이 읽는 세트 포인터 표·레코드와 모든 세트의 압축 타일 자료(CPU 주소)."""
+    table, _, entries = S.set_table(rom)
+    out = [(table, table + entries * 2, '세트 포인터 표')]
+    for s in S.set_numbers(rom):
+        if (rec := S.set_record(rom, s)) is not None:
+            out.append((rec['record'], rec['record'] + RECORD_SIZE, f'세트 {s:02X} 레코드'))
+            out.append((rec['data'], S.set_tiles(rom, rec)[1], f'세트 {s:02X} 타일 자료'))
+    return out
+
+
+def refuse_live(rom, start, end, what):
+    """새로 쓰는 [start, end) 가 지금 쓰이는 세트 자료를 덮으면 거부한다. 표를 옮긴 롬을 다시 고칠 때 옛 --at·--sets-at 을 또 주는 실수를 막는다."""
+    for a, b, name in live_ranges(rom):
+        if a < end and start < b:
+            raise ValueError(f'{what}({cpu(start)}~{cpu(end - 1)})가 지금 쓰이는 {name}({cpu(a)}~{cpu(b - 1)})와 겹침')
 
 
 def grow_table(rom, records, sets_at, at, cursor):

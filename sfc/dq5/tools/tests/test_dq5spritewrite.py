@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import dq5sprite as S  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
 from dq5spritewrite import (  # noqa: E402
-    FORMAT, cell_tiles, commands, decoded, deduplicate, grow_table, packed, patch, place, plan, tile_bytes,
+    FORMAT, apply, cell_tiles, commands, decoded, deduplicate, grow_table, packed, patch, place, plan, tile_bytes,
 )
 
 
@@ -106,13 +106,15 @@ class GrowTableTests(unittest.TestCase):
     def setUp(self):
         table = bytearray(b'\xff' * (S.TABLE_ENTRIES * 2))
         table[0:2], table[0x100:0x102] = b'\x87\xd7', b'\xbb\xd7'
-        pieces = [(S.SET_POINTERS, bytes(table)), (0x1FD787, bytes(range(52))), (0x1FD7BB, bytes(range(52, 104)))]
+        # 레코드 00·80 의 타일 자료는 3E:8000·3E:8010 의 빈 줄기 둘(80 80).
+        pieces = [(S.SET_POINTERS, bytes(table)), (0x1FD787, b'\x00\x80\x3e' + bytes(range(3, 52))),
+                  (0x1FD7BB, b'\x10\x80\x3e' + bytes(range(55, 104))), (0x3E8000, b'\x80\x80'), (0x3E8010, b'\x80\x80')]
         pieces += [(site, S.SET_POINTERS.to_bytes(3, 'little')) for site in S.SET_TABLE_SITES]
         pieces += [(site, b'\x1f') for site in S.SET_BANK_SITES]
         self.rom = rom_with(pieces)
 
-    def apply(self, writes, rom=None):
-        data = bytearray((self.rom if rom is None else rom).d)
+    def apply(self, writes):
+        data = bytearray(self.rom.d)
         for w in writes:
             raw = bytes.fromhex(w['hex'])
             if 'orig' in w:
@@ -132,18 +134,22 @@ class GrowTableTests(unittest.TestCase):
         self.assertIsNone(S.set_record(self.rom, 0xFF))
 
     def test_patch_end_to_end(self):
-        # patch(sets_at=…) 로 새 8타일 세트 A5 를 더한 롬을 다시 patch 한다. 표를 옮긴 롬에 새 세트를 더할 때
-        # --sets-at 이 없으면 죽은 옛 표(1F:D63D)에 쓰게 되므로 거부해야 한다.
+        # patch(sets_at=…) 로 새 8타일 세트 A5 를 더한 롬을 다시 patch 하고, 결과는 dq5build 로 빌드한다(apply).
+        # 표를 옮긴 롬에 새 세트를 더할 때 --sets-at 이 없으면 죽은 옛 표(1F:D63D)에 쓰게 되므로 거부해야 한다.
         folder = Path(tempfile.mkdtemp())
         two = [[2] * 48 for _ in range(64)]
         save(folder / 'two.png', two)
         save(folder / 'five.png', [[5] * 48 for _ in range(64)])
         save(folder / 'flat.png', [[1] * 32 for _ in range(96)])
+        # 모든 칸이 같은 잡음 타일 하나라 타일 수는 A5 와 같지만 압축 자료는 A5 의 원래 자리보다 크다.
+        rng = random.Random(3)
+        noise = [[rng.randrange(16) for _ in range(8)] for _ in range(8)]
+        save(folder / 'noise.png', [[noise[y % 8][x % 8] for x in range(48)] for y in range(64)])
         doc = {'format': FORMAT, 'new_sets': [{'set': 'A5', 'image': 'two.png', 'palette': 3}],
                'gfx': [{'gfx': '01', 'set': 'A5'}]}
         with self.assertRaises(ValueError):
             patch(self.rom, doc, folder, at=0x3A8000)
-        grown = self.apply(patch(self.rom, doc, folder, at=0x3A8000, sets_at=0x3B8000)['writes'])
+        grown = apply(self.rom, patch(self.rom, doc, folder, at=0x3A8000, sets_at=0x3B8000))
         self.assertEqual(S.set_table(grown), (0x3B8000, 0x3B, 0x100))
         self.assertEqual([s for s in S.set_numbers(grown) if S.set_record(grown, s)], [0x00, 0x80, 0xA5])
         self.assertEqual(S.set_record(grown, 0x80)['cells'], S.set_record(self.rom, 0x80)['cells'])
@@ -156,7 +162,11 @@ class GrowTableTests(unittest.TestCase):
                 'gfx': [{'gfx': '02', 'set': '71'}]}
         with self.assertRaises(ValueError):
             patch(grown, more, folder, at=0x3A9000)
-        again = self.apply(patch(grown, more, folder, at=0x3A9000, sets_at=0x3C8000)['writes'], grown)
+        # 다시 옮길 자리·옮길 타일 자료가 지금 쓰이는 표·레코드(3B:8000~)나 A5 의 타일 자료(3A:8000~)를 덮으면 거부한다.
+        for at, sets_at in ((0x3A9000, 0x3A8000), (0x3A9000, 0x3B8000), (0x3B8100, 0x3C8000), (0x3A8000, 0x3C8000)):
+            with self.subTest(at=hex(at), sets_at=hex(sets_at)), self.assertRaises(ValueError):
+                patch(grown, more, folder, at=at, sets_at=sets_at)
+        again = apply(grown, patch(grown, more, folder, at=0x3A9000, sets_at=0x3C8000))
         self.assertEqual(S.set_table(again)[:2], (0x3C8000, 0x3C))
         self.assertEqual([s for s in S.set_numbers(again) if S.set_record(again, s)], [0x00, 0x71, 0x80, 0xA5])
         self.assertEqual(S.set_record(again, 0xA5)['data'], 0x3A8000)
@@ -166,8 +176,14 @@ class GrowTableTests(unittest.TestCase):
         record = S.set_record(grown, 0xA5)['record']
         self.assertIn(f'{record >> 16:02X}:{record & 0xFFFF:04X}', [w['at'] for w in writes])
         self.assertFalse([w for w in writes if w['at'].startswith('1F:')])
-        edited = S.decode_set(self.apply(writes, grown), 0xA5)
+        edited = S.decode_set(apply(grown, {'writes': writes}), 0xA5)
         self.assertEqual((edited['palette'], edited['data']), (2, 0x3A8000))
+        # 넘쳐서 --at 으로 옮기는 자료도 살아 있는 표(3B:8000~)에 놓으면 거부한다.
+        noisy = {'format': FORMAT, 'sets': [{'set': 'A5', 'image': 'noise.png'}]}
+        with self.assertRaises(ValueError):
+            patch(grown, noisy, folder, at=0x3B8000)
+        moved = S.decode_set(apply(grown, patch(grown, noisy, folder, at=0x3A9000)), 0xA5)
+        self.assertEqual(moved['data'], 0x3A9000)
 
     def test_rejects_bank_overflow_and_overlap(self):
         with self.assertRaises(ValueError):

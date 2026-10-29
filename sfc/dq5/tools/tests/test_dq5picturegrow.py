@@ -133,6 +133,13 @@ class PictureGrowTests(unittest.TestCase):
         self.assertEqual(pg.valid_sets(Rom(bytes(data))), {0xA5})
         self.assertIn(0x04, pg.valid_sets(rom()))
 
+    def test_grown_new_sets_need_moved_table(self):
+        # 표를 옮기지 않은 롬에서 A5~FF 는 같은 빌드에 --sets-at 패치가 있다고 밝힐 때만 받는다.
+        r = rom()
+        with self.assertRaises(ValueError):
+            pg.patch(r, doc({'picture': 'A9', 'set': 'A5'}), 0x0BFBB0, new_sets=[0xA5])
+        self.assertTrue(pg.patch(r, doc({'picture': 'A9', 'set': 'A5'}), 0x0BFBB0, new_sets=[0xA5], sets_grown=True)['writes'])
+
     def test_check_through_builder(self):
         r = rom()
         with contextlib.redirect_stdout(io.StringIO()):
