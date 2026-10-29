@@ -71,7 +71,10 @@ class BlockHookTests(unittest.TestCase):
 
     def test_unknown_hook_shapes_stop(self):
         for addr, value, message in ((LOAD_TAIL, 0x20, '01:936E'), (STUB + 4, 0xEA, '스텁'), (FIND + 13, 0xC6, '찾기'), (FIND + 31, 0x18, '찾기'),
-                                     (HIT + 4, 0x8E, '\\$1823'), (LOADER + 26, 0x02, '뱅크 01'), (REBUILD + 1, 0xD9, 'JSR'), (HIT + 18, 0x44, 'MVN'), (HIT + 20, 0x3C, '포인터 표')):
+                                     (HIT + 4, 0x8E, '\\$1823'), (LOADER + 26, 0x02, '뱅크 01'), (REBUILD + 1, 0xD9, 'JSR'),
+                                     # BNE 가 JSL 을 건너뛰지 않음, JSL 대상이 뱅크 01 의 8000 미만, 스텁 끝이 RTL 아님
+                                     (LOADER + 22, 0x03, 'BNE'), (LOADER + 25, 0x7F, '뱅크 01'), (REBUILD + 3, 0x60, 'RTL'),
+                                     (HIT + 18, 0x44, 'MVN'), (HIT + 20, 0x3C, '포인터 표')):
             data = blank()
             put(data, 0x3D8C00, bytes((0x00, 0x80, 0x0B, 0x80)))
             hook(data, [(0x16, 2)], 0x3D, 0x8C00, 150)

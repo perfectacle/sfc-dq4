@@ -249,10 +249,13 @@ def block_hook(rom):
     # 맵이 늘 원래 표를 쓴다고 보므로, 그 값이 훅 표의 1번이고 원래 표의 1번과 달라야 한다(같으면 앞서 다녀온 맵에 따라
     # 훅 표가 남음)
     raw = _code(rom, loader + 12, 'C2 20 AF 02 B0 7E C9 ?? ?? D0 ?? 22 ?? ?? ??', '훅 로더의 못 찾은 길(7E:B002 견주기)')
-    probe, rebuild = int.from_bytes(raw[:2], 'little'), int.from_bytes(raw[3:6], 'little')
-    if rebuild >> 16 != 0x01:
-        raise ValueError(f'훅 로더가 원래 표를 다시 만들려 부르는 {rebuild:06X} 가 뱅크 01 이 아님')
-    _code(rom, rebuild, '20 D8 8C', '원래 표를 다시 만드는 스텁(JSR $8CD8)')
+    probe, skip, rebuild = int.from_bytes(raw[:2], 'little'), raw[2], int.from_bytes(raw[3:6], 'little')
+    # BNE 는 값이 다를 때 다시 만들기(JSL 4바이트)를 건너뛰어야 한다
+    if not 4 <= skip < 0x80:
+        raise ValueError(f'훅 로더의 BNE 거리 {skip:02X} 가 다시 만들기 JSL 을 건너뛰지 않음')
+    if rebuild >> 16 != 0x01 or rebuild & 0xFFFF < 0x8000:
+        raise ValueError(f'훅 로더가 원래 표를 다시 만들려 부르는 {rebuild:06X} 가 뱅크 01 의 롬(8000~)이 아님')
+    _code(rom, rebuild, '20 D8 8C 6B', '원래 표를 다시 만드는 스텁(JSR $8CD8 / RTL)')
     original = original_block_table(rom, count=2)[1] & 0xFFFF
     if probe != rom.u16((bank << 16 | source) + 2) or probe == original:
         raise ValueError(f'훅 로더가 견주는 7E:B002 값 {probe:04X} 가 훅 표 1번 {rom.u16((bank << 16 | source) + 2):04X} 과 '
