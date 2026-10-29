@@ -17,6 +17,7 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [docs/dq4-name-entry-format.md](docs/dq4-name-entry-format.md): 두벌식 자모 조합과 네 글자 이름 저장, 메뉴 이름 표시
 - [docs/dq4-window-text-format.md](docs/dq4-window-text-format.md): 게임 안 창 한글 조사(이름이 지나는 루틴, 장면마다 빈 BG3 타일, 가나 칸 재사용, 글꼴 크기와 타일 수)와 BG3 타일맵 옮기기
 - [docs/dq4-title-format.md](docs/dq4-title-format.md): 정지 한글 타이틀, NDS 오프닝 관찰과 초기 SFC 연결 기록
+- [docs/dq4-chapter1-format.md](docs/dq4-chapter1-format.md): 1장 첫머리(새 게임 첫 맵, 왕좌의 방 연출, 한글 대사, 인물 배치, 바트랜드 성 곡)
 - [todo.md](todo.md): 남은 일
 - [references.md](references.md): 참고 자료
 - [tools/README.md](tools/README.md): 도구 사용법
@@ -150,3 +151,4 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [2026-10-30-06: バトランド 성·イムル 에 FC 인물 놓기](journal/2026-10-30-06-group-people.md)
 - [2026-10-30-07: SPC 전송 빠르게](journal/2026-10-30-07-sound-fastrecv.md)
 - [2026-10-30-08: バトランド 성·イムル 의 가게·여관·교회](journal/2026-10-30-08-group-shops.md)
+- [2026-10-30-09: 새 게임을 DQ4 1장 첫머리로](journal/2026-10-30-09-chapter1.md)

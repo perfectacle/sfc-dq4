@@ -79,7 +79,8 @@ class BuildTests(unittest.TestCase):
         for ch in ('ㄱ', ne.GLYPHS[627], ne.GLYPHS[628], '힝', ne.GLYPHS[-1], *mm.PUNCT):
             w, h, rows = glyph(rom, mm.code(ch), groups)
             pic = [''.join('#' if v else '.' for v in r) for r in rows]
-            self.assertEqual(pic, mm.glyph_rows(self.font, ch, w, h), ch)
+            want = mm.punct_rows(self.font, ch) if ch in mm.PUNCT else (w, mm.hangul_rows(self.font, ch))
+            self.assertEqual((w, pic), (want[0], want[1]), ch)
 
     def test_messages_decode_from_new_bank(self):
         from dq5hangul import decode_check

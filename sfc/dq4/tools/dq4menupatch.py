@@ -16,6 +16,7 @@
 """
 import argparse
 import hashlib
+import json
 import os
 from pathlib import Path
 import sys
@@ -27,7 +28,6 @@ sys.path[:0] = [str(HERE), str(ROOT / 'sfc' / 'dq5' / 'tools')]
 from dq4romassets import differences, ips_patch, set_checksum  # noqa: E402
 from dq5map import lorom  # noqa: E402
 
-BASE_SHA1 = 'ed46db6d9e8113191de124949f7d50a375adc410'   # 서곡 채택본(dq4-overture-format.md)
 PREFIX = 0x9F               # 창 레코드에 쓰이지 않는 캔버스 타일 번호. 바로 뒤 [열 수][첫 열]
 COLUMNS = 0x100             # 열 k 는 타일 200+k(글자 줄)·300+k(아래 줄)
 LAST_COLUMN = 0xD0          # D0~E7 은 목록 세 이름, F8~FF 는 이름 입력 칸
@@ -381,8 +381,26 @@ def put(data, addr, b, expect=None):
     data[o:o + len(b)] = b
 
 
-def build(rom, font, jamo_font, message_font=None):
-    """font = 창 글자, jamo_font = 자모판 한 칸 글자, message_font = 메시지 글자(없으면 galmuri11)."""
+# 바탕 롬은 dq4overture.py build 결과다. 서곡 롬의 해시는 타이틀을 고칠 때마다 달라지므로, 서곡이 부르는 스텁
+# (dq4overture.TITLE_STUB, JSL 70:FF00)과 아직 비어 있는 메뉴 메시지 자리(dq4menumsg.BASE)로 본다.
+OVERTURE_STUB = 0x70FF00
+
+
+def base_problem(rom):
+    """메뉴를 얹을 수 없는 롬이면 까닭, 서곡 빌드면 None."""
+    import dq4menumsg
+    if len(rom) != 0x400000:
+        return f'4MB 가 아님({len(rom):#x})'
+    if not any(rom[lorom(OVERTURE_STUB):lorom(OVERTURE_STUB) + 0x20]) or bytes.fromhex('2200ff70') not in rom:
+        return f'{OVERTURE_STUB:06X} 에 서곡 스텁이 없음(dq4overture.py build 결과가 아님)'
+    if any(rom[lorom(dq4menumsg.BASE):lorom(dq4menumsg.BASE) + 0x100]):
+        return f'{dq4menumsg.BASE:06X} 가 비어 있지 않음(이미 메뉴를 얹은 롬)'
+    return None
+
+
+def build(rom, font, jamo_font, message_font=None, messages=None):
+    """font = 창 글자, jamo_font = 자모판 한 칸 글자, message_font = 메시지 글자(없으면 galmuri11).
+    messages = 더 바꿀 보행 메시지 {번호: 부분 목록}(dq4menumsg.apply 의 extra)."""
     data = bytearray(rom)
     atlas = Atlas(font)
     records = {}
@@ -464,7 +482,7 @@ def build(rom, font, jamo_font, message_font=None):
         bridges[name] = place(data, slack, bytes((0x20, target & 0xFF, target >> 8, 0x6B)))
     data = ne.apply(bytes(data), keys, ne.glyph_blob(font, render), bridges)
     import dq4menumsg
-    data, atlas.messages = dq4menumsg.apply(data, message_font or Font('galmuri11'))
+    data, atlas.messages = dq4menumsg.apply(data, message_font or Font('galmuri11'), messages)
     import dq4namegame
     data = dq4namegame.apply(data)
     import dq4bg3slot
@@ -488,6 +506,21 @@ def sheet(atlas, path):
     img.save(path)
 
 
+def load_messages(path):
+    from dq4menumsg import CHARS
+    """dq4messages/1: {"format", "messages": {"16진 번호": [글자열 또는 코드 정수, ...]}}."""
+    doc = json.loads(Path(path).read_text())
+    if doc.get('format') != 'dq4messages/1':
+        raise SystemExit(f'{path}: format 이 dq4messages/1 이 아님')
+    out = {}
+    for k, parts in doc['messages'].items():
+        bad = [p for p in parts if not isinstance(p, (str, int)) or isinstance(p, str) and set(p) - set(' ') - set(CHARS)]
+        if bad:
+            raise SystemExit(f'{path}: 메시지 {k} 에 넣을 수 없는 부분 {bad[:3]}')
+        out[int(k, 16)] = parts
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest='cmd', required=True)
@@ -496,6 +529,7 @@ def main():
     b.add_argument('--font', default='galmuri9', choices=list(GALMURI))
     b.add_argument('--out', required=True)
     b.add_argument('--jamo-font', default='galmuri7', choices=list(GALMURI))
+    b.add_argument('--messages', help='더 바꿀 보행 메시지 JSON(dq4messages/1, dq4chapter1.py messages 가 만듦)')
     s = sub.add_parser('sheet')
     s.add_argument('--font', default='galmuri9', choices=list(GALMURI))
     s.add_argument('--out', required=True)
@@ -513,9 +547,11 @@ def main():
         sheet(atlas, args.out)
         return
     rom = Path(args.rom).read_bytes()
-    if hashlib.sha1(rom).hexdigest() != BASE_SHA1:
-        raise SystemExit(f'{args.rom}: 서곡 채택본({BASE_SHA1})이 아님')
-    out, atlas, records = build(rom, font, Font(args.jamo_font))
+    problem = base_problem(rom)
+    if problem:
+        raise SystemExit(f'{args.rom}: {problem}')
+    messages = load_messages(args.messages) if args.messages else None
+    out, atlas, records = build(rom, font, Font(args.jamo_font), messages=messages)
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_bytes(out)
     Path(args.out).with_suffix('.ips').write_bytes(ips_patch(rom, out))

@@ -36,9 +36,11 @@ from kr_patch.fc import ines  # noqa: E402
 
 # New DQ5 group -> FC group, the FC arrival from the field ($44/$45 after walking in from the field entrance;
 # fc/dq4/tools/dq4field.py entrances lists the same cells), the borrowed DQ5 map whose attributes (encounters, battle background, music) it takes,
-# the temporary field cell of its entrance, and the way out of the arrival to the field.
+# the temporary field cell of its entrance, and the way out of the arrival to the field. "music" replaces the song
+# byte of the copied attributes (attribute +5): FC plays one song for the whole group (19:$803B, map branch $07BA),
+# and 02 バトランド plays FC song 03, 王宮のメヌエット, which the sound port puts in DQ5 song slot 01.
 LINKS = {
-    0x36: {"fc": 0x02, "arrival": (0x00, 0x1D), "attrs": "03/00", "field": (345, 56), "out": "left"},
+    0x36: {"fc": 0x02, "arrival": (0x00, 0x1D), "attrs": "03/00", "music": 0x01, "field": (345, 56), "out": "left"},
     0x37: {"fc": 0x12, "arrival": (0x0D, 0x19), "attrs": "19/02", "field": (337, 56), "out": "down"},
 }
 NEWMAP_AT = ("--entrance-table-at", "3C:C000", "--records-at", "34:8000", "--door-bank", "3B")
@@ -147,6 +149,19 @@ def _save(path, doc):
     return path
 
 
+def map_attrs(dq5, link):
+    """dq5newmap attrs: a copy of the borrowed map's attributes, with the song byte replaced when "music" is set."""
+    if "music" not in link:
+        return {"copy": link["attrs"]}
+    import dq5newmap
+    from dq5map import Rom
+    attrs, _ = dq5newmap.entries(Rom(dq5.read_bytes()), "attr")
+    group, number = (int(v, 16) for v in link["attrs"].split("/"))
+    row = list(attrs[group][number])
+    row[5] = link["music"]
+    return {"bytes": row}
+
+
 def check_groups(prg):
     """GROUPS must keep the FC map number as the DQ5 map number of the group's LINKS entry: exits are
     written with FC map numbers."""
@@ -176,7 +191,7 @@ def build(dq5, dq4, out):
     for m in new_maps:
         group = int(m[:2], 16)
         newmap["maps"].append({"map": m, "record": {"source": f"env/{names[m]}.dq5map.json"},
-                               "attrs": {"copy": LINKS[group]["attrs"]}})
+                               "attrs": map_attrs(dq5, LINKS[group])})
     manifests = [env / "dq4-environment.dq5patch.json"]
 
     def step(tool, name, doc, base, *args):
