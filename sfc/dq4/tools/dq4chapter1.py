@@ -318,7 +318,7 @@ def run_tool(*args):
 # 가 39:8220 에서 끝난 뒤의 39(원본 29 의 거울)다.
 NPC_AT = ('--base', '3F:9C00', '--alt', '39:9000')
 GROUP_PATCHES = ('env/dq4-environment.dq5patch.json', 'newmap.dq5patch.json', 'exits.dq5patch.json',
-                 'entrances.dq5patch.json')
+                 'entrances.dq5patch.json', 'shops.dq5patch.json', 'inn.dq5patch.json')
 
 
 def build(rom, dq5, dq4, work):

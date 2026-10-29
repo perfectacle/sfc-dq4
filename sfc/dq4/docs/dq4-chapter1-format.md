@@ -108,7 +108,7 @@ uv run --locked python sfc/dq4/tools/dq4chapter1.py build --rom work/ch1/menu.sf
 uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4chapter1.py
 ```
 
-`dq4chapter1.py build` 는 `dq4groupbuild.py` 를 돌려 환경·새 맵·출구·입구 패치를 얻고, 그 인물 패치 대신 왕좌의 방을 바꾼 인물 패치(`dq5npcrelocate.py --new-map …`)를 만들어 메뉴 롬 위에 얹습니다. 메뉴 4초, 1장 7초쯤 걸립니다. 그다음 새 게임 첫 맵 표를 바꾸고 체크섬을 맞춥니다. `--keep 폴더` 를 주면 중간 패치 목록을 남깁니다. 소리는 이 롬을 `dq4soundset.py --base` 로 넘겨 얹습니다([사운드 포팅](dq4-sound-port-format.md)).
+`dq4chapter1.py build` 는 `dq4groupbuild.py` 를 돌려 환경·새 맵·출구·입구·가게·여관 패치를 얻고, 그 인물 패치 대신 왕좌의 방을 바꾼 인물 패치(`dq5npcrelocate.py --new-map …`)를 만들어 메뉴 롬 위에 얹습니다. 메뉴 4초, 1장 7초쯤 걸립니다. 그다음 새 게임 첫 맵 표를 바꾸고 체크섬을 맞춥니다. `--keep 폴더` 를 주면 중간 패치 목록을 남깁니다. 소리는 이 롬을 `dq4soundset.py --base` 로 넘겨 얹습니다([사운드 포팅](dq4-sound-port-format.md)).
 
 ## 검증
 
