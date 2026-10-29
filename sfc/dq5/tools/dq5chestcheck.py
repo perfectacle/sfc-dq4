@@ -100,7 +100,8 @@ RELOC = {
                    0x131, None),
 }
 # 원본이 그 자리에서 아무것도 찾지 못할 때의 첫 메시지가 패치와 다른 사례(상자로 보지 않아 12B)
-ORIGINAL_KIND = {'grow_chests': 0x12B, 'place_chest': 0x12B, 'place_furniture': 0x12B}
+ORIGINAL_KIND = {'grow_chests': 0x12B, 'place_chest': 0x12B, 'place_furniture': 0x12B, 'place_jar': 0x12F,
+                 'place_unlisted': 0x12B}
 for _name, (_edit, _at, *_rest) in RELOC.items():
     CASES[_name] = (None, *_rest[:-1])
 # dq5chestplace.py 로 01/02 에 상자 블록 384 를 (36,26) 에 놓는 사례. 새 상자 칸 (37,27) 이 맵의 첫 상자(번호 2)가 되어
@@ -111,12 +112,27 @@ PLACE_AT = ('--map-at', '3E:8000', '--chests-at', '3F:8000')
 # 01/02 의 (40,24) 에 タンス 블록 204(2×3)를 놓으면 오른쪽 아래 (41,26) 이 가구 칸(+4 = 93)이 된다
 FURNITURE_DOC = {'format': 'dq5chestplace/1', 'maps': [{'map': '01/02', 'furniture': [
     {'x': 40, 'y': 24, 'block': 204, 'reward': 0x100 + 765, 'flag_index': 0x0B, 'mask': 0x02}]}]}
+# 블록 없는 항목. 선실 17/00 은 タンス (4,4) 가 서랍 표에 있고 (2,4) 는 없다. 가구만 적으면 (2,4) 를 서랍 표 끝에 붙인다
+JAR_DOC = {'format': 'dq5chestplace/1', 'maps': [{'map': '17/00', 'furniture': [
+    {'x': 2, 'y': 4, 'reward': 0x100 + 345, 'flag_index': 0x0B, 'mask': 0x01}]}]}
+# 상자 표에 없는 19/00 의 상자 칸 다섯((6,43)·(9,43)·(12,43)·(6,45)·(12,45))을 모두 적는다. 맵 연결을 끝에 붙이므로
+# (6,45) 는 넷째 칸, 상자 164(7E:2224 & 08)다
+UNLISTED_CELLS = ((6, 43), (9, 43), (12, 43), (6, 45), (12, 45))
+UNLISTED_DOC = {'format': 'dq5chestplace/1', 'maps': [{'map': '19/00', 'chests': [
+    {'x': x, 'y': y, 'reward': 0x100 + 786 + k} for k, (x, y) in enumerate(UNLISTED_CELLS)]}]}
+UNLISTED_AT = ('--chests-at', '3F:8000', '--chest-maps-at', '3F:C000')
 PLACE_INPUTS = {'place_chest': (PLACE_DOC, PLACE_AT), 'place_shift': (PLACE_DOC, PLACE_AT),
-                'place_furniture': (FURNITURE_DOC, ('--map-at', '3E:8000', '--search-at', '3F:9000'))}
+                'place_furniture': (FURNITURE_DOC, ('--map-at', '3E:8000', '--search-at', '3F:9000')),
+                'place_jar': (JAR_DOC, ('--search-at', '3F:9000')),
+                'place_unlisted': (UNLISTED_DOC, UNLISTED_AT), 'place_unlisted_entry': (UNLISTED_DOC, UNLISTED_AT)}
 PLACE = {'place_chest': (954, 0x2210, 0x20, 0x2210, 0x20, None, 0x131),
          'place_furniture': (765, 0x2237, 0x02, 0x2237, 0x02, None, 0x12F),
          # 패치 롬에서도 금화가 아니라 원래 물건 33 을 얻으므로 금화 대신 보상 값을 적는다
-         'place_shift': (None, 0x2210, 0x10, 0x2210, 0x20, 0x33, 0x131)}
+         'place_shift': (None, 0x2210, 0x10, 0x2210, 0x20, 0x33, 0x131),
+         'place_jar': (345, 0x2237, 0x01, 0x2237, 0x01, None, 0x12F),
+         'place_unlisted': (789, 0x2224, 0x08, 0x2224, 0x08, None, 0x131)}
+# 원래 롬이 그 칸에서 아무것도 찾지 못할 때의 다음 메시지(기본 12C)
+NONE_MESSAGE = {'place_jar': 0x130}
 CASES.update({name: (None, *values) for name, values in PLACE.items()})
 # 상자를 192개 넘게 쓰는 롬. 표에 없는 맵 8곳의 26칸을 붙이고(grow_chests) 01/02 에 상자 블록 7개를 놓아 194개가 된다.
 # 19/00 의 (6,45) 가 상자 192(7E:2228 & 80)다. 원래 아래층 상자 비트 2228~2229 와 겹치므로 아래층 상자의 flag_index 를
@@ -191,7 +207,7 @@ ORIGINAL_KIND.update(past_open=0x12B, full_open=0x12B)
 # 맵에 들어갈 때 열린 상자를 그리는 사례: (장면, 미리 켤 비트). 원본은 그 비트를 상자로 보지 않아 그대로 두고,
 # 패치는 1F:FC50 이 옮긴 표에서 그 상자를 찾아 열린 상자 타일(9E·9F)로 바꾼다
 ENTRY = {'past_entry': ({'TO': '19/00,5,46'}, '2228|80'), 'past_entry_lower': ({'TO': '51/51,18,37,2'}, '2229|08'),
-         'full_entry': ({'TO': '19/00,11,46'}, '222F|01'), 'new_entry': ({'TO': '36/00,6,7'}, '2224|40')}
+         'full_entry': ({'TO': '19/00,11,46'}, '222F|01'), 'place_unlisted_entry': ({'TO': '19/00,5,46'}, '2224|08'), 'new_entry': ({'TO': '36/00,6,7'}, '2224|40')}
 # 열림 비트를 켠 채 교회에 기록하고 리셋해 불러오는 사례(dq5cdlsweep.py 의 church-save-load 와 같은 입력).
 # SRAM 칸 1 은 7E:2000~ 을 70:0012~ 에 그대로 담는다(25:83CE)
 SAVE_BITS = {0x2228: 0x80, 0x2229: 0x08}
@@ -216,6 +232,7 @@ SCENES = {'chest': {'TO': '01/02,34,31'}, 'search': None, 'foot': None, 'ahead':
           'grow_chests': {'TO': '19/00,5,46'}, 'grow_search': {'WAYPOINTS': '1,5;up:8'}, 'grow_foot': None,
           'grow_ahead': START, 'move_lower': 'lower', 'place_chest': {'TO': '01/02,36,29'},
           'place_shift': {'TO': '01/02,34,31'}, 'place_furniture': {'TO': '01/02,40,27'},
+          'place_jar': 'grow_search', 'place_unlisted': 'grow_chests',
           'past_open': 'grow_chests', 'past_lower': 'lower', 'full_open': {'TO': '19/00,11,46'},
           'new_chest': {'TO': '36/00,6,7'}, 'new_search': {'TO': '36/00,3,5'}, 'new_ahead': {'TO': '36/00,9,12'}}
 # 필드 조사는 선 자리를 보므로 걷지 않고 바로 명령 창을 연다
@@ -298,17 +315,14 @@ def compare(name, state, original, out, mesence, libdir, start):
     dest = out / name
     dest.mkdir()
     source, manifest, patched = dest / 'input.json', dest / 'patch.json', dest / 'patched.sfc'
-    none_message = 0x12C
+    none_message = NONE_MESSAGE.get(name, 0x12C)
     if name in NEWMAP:
         original, patched = newmap_roms(out)
         none_message = NEWMAP[name][5]
     elif name in GROW:
         patched = grow_rom(original, dest, name.split('_')[0])
     elif name in PLACE:
-        place_doc, place_at = PLACE_INPUTS[name]
-        source.write_text(json.dumps(place_doc, indent=2) + '\n', encoding='utf-8')
-        command('dq5chestplace.py', original, 'patch', source, '-o', manifest, *place_at)
-        command('dq5chestplace.py', original, 'check', source, *place_at)
+        place_manifest(name, original, source, manifest)
     elif name in RELOC:
         edit, at, *_, none_message = RELOC[name]
         command('dq5chestreloc.py', original, 'dump', '-o', source)
@@ -431,12 +445,23 @@ def opened_tiles(before, after, span=(0x10000, 0x20000)):
     return sum(1 for i in range(*span) if after[i] in tile and before[i] not in tile)
 
 
+def place_manifest(name, original, source, manifest):
+    place_doc, place_at = PLACE_INPUTS[name]
+    source.write_text(json.dumps(place_doc, indent=2) + '\n', encoding='utf-8')
+    command('dq5chestplace.py', original, 'patch', source, '-o', manifest, *place_at)
+    command('dq5chestplace.py', original, 'check', source, *place_at)
+
+
 def entry_compare(name, original, out, mesence, libdir, start):
     setup, bits = ENTRY[name]
     dest = out / name
     dest.mkdir()
     if name.startswith('new_'):
         original, patched = newmap_roms(out)
+    elif name in PLACE_INPUTS:
+        patched = dest / 'patched.sfc'
+        place_manifest(name, original, dest / 'input.json', dest / 'patch.json')
+        command('dq5build.py', original, 'build', dest / 'patch.json', '-o', patched)
     else:
         patched = grow_rom(original, dest, name.split('_')[0])
     wram = {}

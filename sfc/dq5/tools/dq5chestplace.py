@@ -16,8 +16,8 @@ furniture[{x,y,block,reward,flag_index,mask[,unused]}]}]. x·y 는 블록 원점
 블록이 놓인 칸 안에 상자 칸(가구 칸)이 하나 새로 생겨야 한다.
 원래 롬에 없는 맵(dq5newmap.py 로 더하는 맵)은 --new-map GG/MM 과 그 맵을 더하는 패치 목록 --with-patch 로 알린다.
 그 맵의 레코드는 그 패치가 쓰므로 블록을 놓지 않고, block 없이 x·y 에 레코드에 이미 있는 상자 칸·가구 칸을 적는다.
-기존 맵(새 맵을 이미 붙인 롬의 새 맵 포함)도 모든 항목에 block 을 빼면 같이 적는다. 상자는 그 맵의 상자 칸을 모두
-적어야 하고, 블록을 놓는 맵이 없으면 --map-at 은 주지 않아도 된다. --with-patch 를 주면 기존 맵의 칸·블록도 그 패치를
+기존 맵(새 맵을 이미 붙인 롬의 새 맵 포함)도 모든 항목에 block 을 빼면 같이 적는다. 상자를 적으면 그 맵의 상자 칸을 모두
+적어야 하고(새 맵은 늘), 가구만 적으면 기존 서랍 항목 뒤에 붙인다. 블록을 놓는 맵이 없으면 --map-at 은 주지 않아도 된다. --with-patch 를 주면 기존 맵의 칸·블록도 그 패치를
 붙인 롬에서 읽는다.
 """
 import argparse
@@ -249,24 +249,29 @@ def plan(rom, doc, map_at, at=None, base=None, new_maps=NO_NEW_MAPS):
     for (bc, bd), boxes, furniture in fresh:
         cells = chest_cells(seen, bc, bd)
         given = [(box['x'], box['y']) for box in boxes]
-        if (bc, bd) in rows or any((row['group'], row['map']) == (bc, bd) for row in tables['search']):
-            raise ValueError(f'{bc:02X}/{bd:02X}: 바탕 표에 이미 있는 맵. 블록 없이 적는 맵의 상자·가구는 한 입력에 모두 적음')
-        if len(set(given)) != len(given) or set(given) != set(cells):
-            raise ValueError(f'{bc:02X}/{bd:02X}: 맵의 상자 칸 {cells} 을 모두 한 번씩 적어야 함(적은 칸 {given})')
-        for box in boxes:
-            rewards[(bc, bd, (box['x'], box['y']))] = box['reward']
-        # 상자 번호는 셀 순서로 매기므로 적은 순서가 아니라 칸 순서로 둔다
-        new_cells += [(bc, bd, xy, rewards[(bc, bd, xy)]) for xy in cells]
-        if cells:
-            tables['chest_maps'].append({'group': bc, 'map': bd, 'count': len(cells)})
+        # 상자는 맵 연결 하나에 그 맵의 상자 칸 전부를 셀 순서로 매기므로, 적으면 모두 적는다. 새 맵은 상자 칸이 있으면
+        # 늘 적어야 한다. 가구만 적으면 기존 상자 연결·서랍 항목은 그대로 두고 서랍 표 끝에 붙인다
+        if boxes or (bc, bd) in new_maps.keys:
+            if (bc, bd) in rows:
+                raise ValueError(f'{bc:02X}/{bd:02X}: 바탕 표에 이미 상자 연결이 있는 맵. 블록 없이 적는 맵의 상자는 '
+                                 '한 입력에 모두 적음')
+            if len(set(given)) != len(given) or set(given) != set(cells):
+                raise ValueError(f'{bc:02X}/{bd:02X}: 맵의 상자 칸 {cells} 을 모두 한 번씩 적어야 함(적은 칸 {given})')
+            for box in boxes:
+                rewards[(bc, bd, (box['x'], box['y']))] = box['reward']
+            # 상자 번호는 셀 순서로 매기므로 적은 순서가 아니라 칸 순서로 둔다
+            new_cells += [(bc, bd, xy, rewards[(bc, bd, xy)]) for xy in cells]
+            if cells:
+                tables['chest_maps'].append({'group': bc, 'map': bd, 'count': len(cells)})
+        listed = {(row['x'], row['y']) for row in tables['search'] if (row['group'], row['map']) == (bc, bd)}
         open_cells, used = furniture_cells(seen.d, bc, bd) - set(cells), set()
         for k, box in enumerate(furniture):
             xy = (box['x'], box['y'])
             if xy not in open_cells:
                 raise ValueError(f'{bc:02X}/{bd:02X} furniture[{k}]: 칸 {xy} 이 상자 아닌 가구 칸(+4 = 93 이나 +7 = '
                                  'A7·B9·D3·D4)이 아님')
-            if xy in used:
-                raise ValueError(f'{bc:02X}/{bd:02X} furniture[{k}]: 가구 칸 {xy} 을 두 번 적음')
+            if xy in used or xy in listed:
+                raise ValueError(f'{bc:02X}/{bd:02X} furniture[{k}]: 가구 칸 {xy} 을 두 번 적거나 이미 서랍 항목이 있음')
             used.add(xy)
             integer(box['flag_index'], 255, 'flag_index')
             added.append({'group': bc, 'map': bd, 'x': xy[0], 'y': xy[1], 'unused': box.get('unused', 1),
