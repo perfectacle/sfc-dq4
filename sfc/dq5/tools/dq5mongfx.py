@@ -19,13 +19,25 @@ sys.path.insert(0, os.path.dirname(__file__))
 from dq5map import Rom  # noqa: E402
 
 RECORDS = 0x27E5DC
+TABLE_SIZE = 256                # 몬스터 번호 칸. EC~FF 는 몬스터 00 의 레코드를 가리킨다
 COUNT = 236
 HEADS = ((0x00, 0x258C45), (0x2A, 0x268F99), (0x57, 0x2782E4))
+# 22:9003 LDA $27E5DC,X 와 22:900B LDA #$27. dq5monwrite.py --records-at 이 표·뱅크를 바꾼다.
+RECORD_READ, RECORD_BANK = 0x229003, 0x22900B
+
+
+def record_table(rom):
+    """(레코드 포인터 표, 레코드 뱅크). 22:9003·900B 가 BF·A9 명령이면 그 피연산자를, 아니면 원래 27:E5DC·27."""
+    if rom.u8(RECORD_READ) == 0xBF and rom.u8(RECORD_BANK) == 0xA9:
+        return rom.u8(RECORD_READ + 1) | rom.u8(RECORD_READ + 2) << 8 | rom.u8(RECORD_READ + 3) << 16, \
+            rom.u8(RECORD_BANK + 1)
+    return RECORDS, RECORDS >> 16
 
 
 def monster(rom, m):
     """(그림 번호, 색 목록). 색 목록의 0 번째가 OBJ 팔레트 1번 색이다(0번은 투명)."""
-    a = 0x270000 | rom.u16(RECORDS + m * 2)
+    table, bank = record_table(rom)
+    a = bank << 16 | rom.u16(table + m * 2)
     n = rom.u8(a + 1)
     return rom.u8(a), [rom.u16(a + 2 + i * 2) for i in range(n)]
 
@@ -225,6 +237,15 @@ def header(rom, g):
     return {'float': bool(b[0] & 0x80), 'raise': b[0] >> 5 & 3, 'shadow': b[0] & 0x1F,
             'shadow_dx': sb(b[1]), 'shadow_dy': sb(b[2]), 'hit_x': b[3], 'hit_y': b[4],
             'w': 0x13 if b[5] >> 4 == 0xF else (b[5] >> 4) + 1, 'h': (b[5] & 15) + 1}
+
+
+def slot_count(d):
+    """그림 하나가 차지하는 16x16 자리 수(22:91F7 이 $0D19 에 셈). 자리 s 는 OBJ 타일 (s%8)*2 + (s//8)*32 이고,
+    전투는 자리 128개(7E:8400 사슬)를 무리 차례로 나눠 준다. 16x16 조각은 하나씩, 8x8 조각은 넷이 한 자리를 나눠 쓰고,
+    반전 복사는 자리를 쓰지 않는다."""
+    big = sum(1 for p in d['pieces'] if p[2] and not p[4])
+    small = sum(1 for p in d['pieces'] if not p[2] and not p[4])
+    return big + (small + 3) // 4
 
 
 def band_counts(d):

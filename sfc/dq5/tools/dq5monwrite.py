@@ -8,18 +8,22 @@
 
   python sfc/dq5/tools/dq5monwrite.py rom/dq5.sfc dump 02 -o work/mon/02.png [--monster 00]
   python sfc/dq5/tools/dq5monwrite.py rom/dq5.sfc patch work/mon.json -o work/mon.dq5patch.json [--at 3B:8000]
-  python sfc/dq5/tools/dq5monwrite.py rom/dq5.sfc check [work/mon.json] [--at 3B:8000]
+      [--records-at 3C:8000]
+  python sfc/dq5/tools/dq5monwrite.py rom/dq5.sfc check [work/mon.json] [--at 3B:8000] [--records-at 3C:8000]
 
 문서(dq5monster/1):
   {"format": "dq5monster/1",
    "pictures": [{"picture": "02", "image": "02.png"}],
    "monsters": [{"monster": "00", "picture": "02", "colors": [32767, 0, 31]}]}
 
-조각·줄마다 타일이 원래보다 많은 그림은 입력 롬의 무리·구역으로 센 조합 검사(dq5monlimits.py)를 거친다. 같은 빌드에서
+조각·줄마다 타일·16x16 자리(22:91F7)가 원래보다 많은 그림은 입력 롬의 무리·구역으로 센 조합 검사(dq5monlimits.py)를 거친다. 같은 빌드에서
 무리·구역을 바꾸면 그 패치를 먼저 넣은 롬을 입력으로 주고, 구역 수를 늘렸으면 --progress 또는 --areas 를 준다.
 
 새 그림이 원래 자리보다 길면 --at 에 놓는다. 머리 포인터 표는 그림 번호 구간마다 뱅크 25·26·27 의 16비트라,
 이때는 22:9014 를 24비트 포인터 표(--at 첫머리)로 읽는 코드로 바꾼다.
+
+색은 15개까지 받는다. 원래 레코드의 색 수보다 많은 몬스터가 있으면 레코드 포인터 표와 레코드 모두를 --records-at 의
+한 뱅크에 새로 늘어놓고, 표를 읽는 두 곳(22:9003·22:900B, 몬스터 E4 의 색을 읽는 02:F48D·02:F498)의 주소·뱅크를 바꾼다.
 """
 import argparse
 import json
@@ -41,6 +45,16 @@ PICTURES = 0x72                 # 그림 번호 00~71
 FIND = 0x229014                 # 22:9014~9058: 그림 번호로 머리 포인터 $53~$55 를 정한다
 FIND_ORIGINAL = bytes.fromhex('c9 57 90 15 e9 57 c2 20 29 ff 00 0a aa bf e4 82 27 85 53 e2 20 a9 27 80 2a')
 FIND_END = 0x229059
+# 몬스터 레코드 포인터 표를 읽는 곳. 레코드는 [$50](22:900F 그림 번호, 22:A5A4 색)로 읽어 뱅크는 $52 에 둔다.
+RECORD_READ, RECORD_BANK = M.RECORD_READ, M.RECORD_BANK  # LDA $27E5DC,X / LDA #$27 (STA $52)
+E4_BANK, E4_READ = 0x02F48D, 0x02F498                  # LDA #$27 (STA $02) / LDA $27E5DC,X — 몬스터 E4 의 색 10개
+E4, E4_COLORS = 0xE4, 10
+READ_ORIGINAL, BANK_ORIGINAL = bytes.fromhex('bf dc e5 27'), bytes.fromhex('a9 27')
+MAX_COLORS = 15                 # OBJ 팔레트 1~15. 22:A5A4 는 색 수 0 이면 65536번 돈다
+# 그림 하나의 타일은 풀고 난 다음 NMI 한 번(00:FD4A)에 VRAM 으로 보내, 많으면 화면 기간에 걸린 뒤쪽이 VRAM 에 닿지 않는다.
+# 원래 그림 가운데 한 번에 보내는 가장 많은 수가 그림 70(EA)의 91개다. 110개인 그림 6C 는 E4 일 때 22:90FA 가 나눠 보낸다.
+TILE_LIMIT = 91
+ORIGINAL_SIZE = 0x180000        # 원래 롬. 이 안의 옮긴 자료는 빈 자리 지도(dq5build.free_ranges) 안이어야 한다
 
 
 def cpu(addr):
@@ -60,6 +74,15 @@ def address(value):
     if bank > 0x7D or low < 0x8000:
         raise ValueError('주소는 뱅크 00~7D 의 8000~FFFF 여야 함')
     return bank << 16 | low
+
+
+def records_moved(rom):
+    code = bytes(rom.d[lorom(RECORD_READ):lorom(RECORD_READ) + 4])
+    if code == READ_ORIGINAL and bytes(rom.d[lorom(RECORD_BANK):lorom(RECORD_BANK) + 2]) == BANK_ORIGINAL:
+        return False
+    if code[0] != 0xBF or rom.u8(RECORD_BANK) != 0xA9:
+        raise ValueError('22:9003 이 원본 레코드 읽기도 옮긴 레코드 읽기도 아님')
+    return True
 
 
 def used_pictures(rom):
@@ -224,7 +247,8 @@ ORIGINAL_HEAD = M.head
 
 @contextmanager
 def following_table():
-    """그 안에서 dq5mongfx 의 머리 찾기(decode·match_oam 등)가 head_of 를 쓴다. 옮긴 그림을 읽으려고."""
+    """그 안에서 dq5mongfx 의 머리 찾기(decode·match_oam 등)가 head_of 를 쓴다. 옮긴 그림을 읽으려고.
+    옮긴 레코드는 dq5mongfx.monster 가 늘 22:9003 을 따라 읽는다."""
     saved, M.head = M.head, head_of
     try:
         yield
@@ -274,6 +298,8 @@ def picture_limits(rom, g):
 def plan(rom, doc, base, areas=None):
     if not isinstance(doc, dict) or doc.keys() - {'format', 'pictures', 'monsters'} or doc.get('format') != FORMAT:
         raise ValueError(f'문서는 format={FORMAT}, pictures·monsters 만 담은 객체여야 함')
+    if records_moved(rom):
+        raise ValueError('몬스터 레코드를 이미 옮긴 롬(22:9003)은 받지 않음 — 레코드를 옮기기 전 롬을 입력으로 줌')
     used = set(used_pictures(rom))
     pictures, grown = {}, {}
     rows = doc.get('pictures', [])
@@ -292,10 +318,13 @@ def plan(rom, doc, base, areas=None):
         grid = image_grid(base / row['image'], d['w'], d['h'])
         raw, pieces, tiles, bands = encode(rom, g, grid)
         limit = stats(d)
-        if tiles > limit[1]:
-            raise ValueError(f'{label}: 타일 {tiles}/{limit[1]} — 원래 그림의 수를 넘음(7E:4000 타일 버퍼·VRAM 여유를 정하지 않음)')
-        if pieces > limit[0] or any(a > b for a, b in zip(bands, limit[2])):
-            grown[g] = (pieces, bands)
+        slots = M.slot_count(decode_bytes(raw))
+        # 그림 6C(110개)는 22:90FA 가 정해진 6타일을 다시 보내 버티므로, 원래 배치 그대로일 때만 91개를 넘겨 받는다.
+        if tiles > TILE_LIMIT and keep_layout(rom, g, grid) is None:
+            raise ValueError(f'{label}: 타일 {tiles}개 — 한 그림의 타일은 NMI 한 번에 VRAM 으로 보내므로 {TILE_LIMIT}개까지'
+                             f'(원래 배치를 그대로 쓰면 원래 {limit[1]}개까지)')
+        if pieces > limit[0] or slots > M.slot_count(d) or any(a > b for a, b in zip(bands, limit[2])):
+            grown[g] = (pieces, bands, slots)
         pictures[g] = (grid, raw, pieces, tiles)
     # 같은 머리를 가리키는 그림 번호(00·11·29, 58·5E 등)는 자료가 하나라 함께 바뀐다.
     for g in list(pictures):
@@ -322,9 +351,9 @@ def plan(rom, doc, base, areas=None):
         if g not in used:
             raise ValueError(f'{label}.picture: 그림 {g:02X}는 몬스터가 쓰는 그림이 아님')
         colors = row.get('colors', colors0)
-        if not isinstance(colors, list) or not 1 <= len(colors) <= len(colors0) or \
+        if not isinstance(colors, list) or not 1 <= len(colors) <= MAX_COLORS or \
                 any(type(c) is not int or not 0 <= c <= 0x7FFF for c in colors):
-            raise ValueError(f'{label}.colors: 0~7FFF 정수 1~{len(colors0)}개(레코드 자리를 늘리지 않음)')
+            raise ValueError(f'{label}.colors: 0~7FFF 정수 1~{MAX_COLORS}개(원래 {len(colors0)}개보다 많으면 --records-at)')
         if g != g0:
             old, new = picture_limits(rom, g0), picture_limits(rom, g)
             if any(a > b for a, b in zip(new, old)):
@@ -338,13 +367,16 @@ def plan(rom, doc, base, areas=None):
                 if other in monsters and monsters[other] != monsters[m]:
                     raise ValueError(f'몬스터 {m:02X}·{other:02X} 는 레코드를 함께 써서 다른 값을 줄 수 없음')
                 monsters[other] = monsters[m]
+    if E4 in monsters and len(monsters[E4][1]) < E4_COLORS:
+        raise ValueError(f'몬스터 {E4:02X}: 색 {len(monsters[E4][1])}개 — 02:F498 이 늘 {E4_COLORS}개를 읽으므로 '
+                         f'{E4_COLORS}개 이상이어야 함')
     for m in range(M.COUNT):
         g, colors = monsters.get(m, M.monster(rom, m))
         grid = pictures[g][0] if g in pictures else picture_grid(rom, g)[0]
         top = max(max(row) for row in grid)
         if top > len(colors):
             raise ValueError(f'몬스터 {m:02X}: 그림 {g:02X} 가 색 번호 {top} 을 쓰는데 색은 {len(colors)}개')
-    # 조각·줄마다 타일이 원래보다 많은 그림은, 나올 수 있는 무리 조합마다 원래보다 덜 놓이는 몬스터가 없을 때만 받는다.
+    # 조각·줄마다 타일·자리가 원래보다 많은 그림은, 나올 수 있는 무리 조합마다 원래보다 덜 놓이는 몬스터가 없을 때만 받는다.
     if grown:
         from dq5monlimits import losses
         swapped = {m: g for m, (g, _) in monsters.items() if g != M.monster(rom, m)[0]}
@@ -352,7 +384,7 @@ def plan(rom, doc, base, areas=None):
         if bad:
             groups, old, new, where, why = bad[0]
             shown = ' '.join(f'{m:02X}x{n}' for m, n, _ in groups)
-            raise ValueError(f'그림 {", ".join(f"{g:02X}" for g in sorted(grown))}: 조각·줄마다 타일이 원래보다 많아 '
+            raise ValueError(f'그림 {", ".join(f"{g:02X}" for g in sorted(grown))}: 조각·줄마다 타일·자리가 원래보다 많아 '
                              f'무리 조합 {len(bad)}개에 걸림. 첫째: {where} [{shown}] 놓이는 수 {old} → {new}, {why}')
     return pictures, monsters
 
@@ -366,7 +398,7 @@ def find_code(table):
     return code + bytes([0x80, (FIND_END - (FIND + len(code) + 2)) & 0xFF])
 
 
-def patch(rom, doc, base=Path('.'), at=None, areas=None):
+def patch(rom, doc, base=Path('.'), at=None, areas=None, records_at=None):
     pictures, monsters = plan(rom, doc, base, areas)
     writes = []
 
@@ -415,15 +447,64 @@ def patch(rom, doc, base=Path('.'), at=None, areas=None):
         if bytes(rom.d[lorom(FIND):lorom(FIND) + len(FIND_ORIGINAL)]) != FIND_ORIGINAL:
             raise ValueError('22:9014 가 원본 머리 포인터 선택 코드가 아님')
         write(FIND, find_code(table), '머리 포인터를 24비트 표에서 읽기')
-    records = set()
-    for m in sorted(monsters):
-        g, colors = monsters[m]
-        record = 0x270000 | rom.u16(M.RECORDS + m * 2)
-        if (g, colors) == M.monster(rom, m) or record in records:
-            continue
-        records.add(record)
-        write(record, bytes([g, len(colors)]) + b''.join(c.to_bytes(2, 'little') for c in colors), f'몬스터 {m:02X} 그림·색')
+    grown = [m for m, (_, colors) in monsters.items() if len(colors) > len(M.monster(rom, m)[1])]
+    if grown:
+        if records_at is None:
+            raise ValueError('몬스터 ' + ' '.join(f'{m:02X}' for m in sorted(grown)) + ' 의 색이 원래 레코드보다 많아 '
+                             '--records-at 이 필요함')
+        write_records(rom, monsters, records_at, write)
+    else:
+        if records_at is not None:
+            raise ValueError('--records-at 을 주었지만 색이 원래 레코드보다 많은 몬스터가 없음(레코드는 제자리에 씀)')
+        records = set()
+        for m in sorted(monsters):
+            g, colors = monsters[m]
+            record = 0x270000 | rom.u16(M.RECORDS + m * 2)
+            if (g, colors) == M.monster(rom, m) or record in records:
+                continue
+            records.add(record)
+            write(record, bytes([g, len(colors)]) + b''.join(c.to_bytes(2, 'little') for c in colors),
+                  f'몬스터 {m:02X} 그림·색')
+    spans = sorted((parse(w['at']), parse(w['at']) + len(w['hex']) // 3 + 1) for w in writes if 'orig' not in w)
+    for (a, b), (c, _) in zip(spans, spans[1:]):
+        if c < b:
+            raise ValueError(f'옮긴 자료가 겹침: {cpu(a)}~ 와 {cpu(c)}~ (--at·--records-at 을 떼어 줌)')
+    from dq5build import free_ranges, inside
+    free = free_ranges(rom.d)
+    for a, b in spans:
+        if lorom(a) < ORIGINAL_SIZE and not inside(lorom(a), b - a, free):
+            raise ValueError(f'옮긴 자료 {cpu(a)}~ 가 원래 롬의 코드·자료 자리와 겹침(빈 자리 지도 밖)')
     return {'format': 'dq5patch/1', 'name': 'monster-pictures', 'writes': writes}
+
+
+def parse(text):
+    bank, low = (int(p, 16) for p in text.split(':'))
+    return bank << 16 | low
+
+
+def write_records(rom, monsters, at, write):
+    """레코드 포인터 표(256칸 × 2바이트)와 레코드를 at 의 한 뱅크에 새로 늘어놓고, 표를 읽는 코드를 바꾼다.
+    레코드를 함께 쓰던 몬스터(3B·3C, 몬스터 칸이 아닌 EC~FF 와 00)는 새 자리에서도 함께 쓴다."""
+    for addr, want in ((RECORD_READ, READ_ORIGINAL), (RECORD_BANK, BANK_ORIGINAL),
+                       (E4_READ, READ_ORIGINAL), (E4_BANK, BANK_ORIGINAL)):
+        if bytes(rom.d[lorom(addr):lorom(addr) + len(want)]) != want:
+            raise ValueError(f'{cpu(addr)} 가 원본 레코드 읽기 코드가 아님')
+    old = [0x270000 | rom.u16(M.RECORDS + m * 2) for m in range(M.TABLE_SIZE)]
+    place, body = {}, bytearray()
+    for record in sorted(set(old)):
+        m = old.index(record)
+        g, colors = monsters.get(m, M.monster(rom, m))
+        place[record] = at + M.TABLE_SIZE * 2 + len(body)
+        body += bytes([g, len(colors)]) + b''.join(c.to_bytes(2, 'little') for c in colors)
+    if (at & 0xFFFF) + M.TABLE_SIZE * 2 + len(body) > 0x10000:
+        raise ValueError('몬스터 레코드 표와 레코드가 --records-at 의 뱅크를 넘음')
+    table = b''.join((place[r] & 0xFFFF).to_bytes(2, 'little') for r in old)
+    write(at, table + bytes(body), f'몬스터 레코드 포인터 표·레코드 {len(place)}개 옮김', orig=False)
+    t = at.to_bytes(3, 'little')
+    write(RECORD_READ, bytes([0xBF, *t]), '레코드 포인터 표를 옮긴 자리에서 읽기')
+    write(RECORD_BANK, bytes([0xA9, at >> 16]), '레코드 뱅크($52)')
+    write(E4_READ, bytes([0xBF, *t]), '몬스터 E4 의 레코드 포인터')
+    write(E4_BANK, bytes([0xA9, at >> 16]), '몬스터 E4 의 레코드 뱅크($02)')
 
 
 def built(rom, manifest):
@@ -434,14 +515,14 @@ def built(rom, manifest):
     return Rom(data)
 
 
-def check(rom, doc=None, base=Path('.'), at=None, areas=None):
+def check(rom, doc=None, base=Path('.'), at=None, areas=None, records_at=None):
     """원본 107그림을 PNG 로 내보내 다시 인코딩해도 같은 그림으로 풀리고 원래 수 안인지, 원본 문서 쓰기 0개인지.
     doc 를 주면 빌드한 롬에서 바꾼 그림·몬스터가 입력대로이고 나머지가 그대로인지도 본다."""
     with tempfile.TemporaryDirectory(prefix='dq5mon-') as folder:
-        check_in(rom, doc, base, at, Path(folder), areas)
+        check_in(rom, doc, base, at, Path(folder), areas, records_at)
 
 
-def check_in(rom, doc, base, at, folder, areas=None):
+def check_in(rom, doc, base, at, folder, areas=None, records_at=None):
     rows, fits, sizes = [], 0, [0, 0]
     for g in used_pictures(rom):
         d, _ = dump_image(rom, g, folder / f'{g:02X}.png')
@@ -463,7 +544,7 @@ def check_in(rom, doc, base, at, folder, areas=None):
           f'다시 인코딩 {sizes[0]}바이트 / 원본 {sizes[1]}바이트; 원본 문서 쓰기 0개')
     if doc is None:
         return
-    manifest = patch(rom, doc, base, at, areas)
+    manifest = patch(rom, doc, base, at, areas, records_at)
     after = built(rom, manifest)
     pictures, monsters = plan(rom, doc, base, areas)
     for g in used_pictures(rom):
@@ -476,13 +557,18 @@ def check_in(rom, doc, base, at, folder, areas=None):
     print(f'문서: 쓰기 {len(manifest["writes"])}개, 그림 {len(pictures)}개·몬스터 {len(monsters)}개를 빌드한 롬에서 확인')
 
 
-def decode_raw(raw, w, h):
-    """머리부터의 바이트를 dq5mongfx.decode 로 풀어 색 번호 격자로."""
+def decode_bytes(raw):
+    """머리부터의 바이트를 dq5mongfx.decode 로 푼 조각 목록."""
     data = bytearray(0x180000)
     data[lorom(0x258C99):lorom(0x258C99) + len(raw)] = raw
     data[lorom(0x258C45):lorom(0x258C45) + 2] = (0x8C99).to_bytes(2, 'little')
     data[lorom(FIND):lorom(FIND) + len(FIND_ORIGINAL)] = FIND_ORIGINAL
-    d = decode(Rom(data), 0)
+    return decode(Rom(data), 0)
+
+
+def decode_raw(raw, w, h):
+    """머리부터의 바이트를 dq5mongfx.decode 로 풀어 색 번호 격자로."""
+    d = decode_bytes(raw)
     if (d['w'], d['h']) != (w, h):
         raise ValueError('머리 크기가 다름')
     return [row[1:] for row in M.index_image(d)]
@@ -500,9 +586,11 @@ def main():
     write.add_argument('source', type=Path)
     write.add_argument('-o', '--out', type=Path, required=True)
     write.add_argument('--at', help='원래 자리보다 긴 그림과 24비트 포인터 표를 놓을 곳(BB:AAAA)')
+    write.add_argument('--records-at', help='색이 원래보다 많은 몬스터가 있을 때 레코드 표·레코드를 놓을 곳(BB:AAAA)')
     verify = sub.add_parser('check')
     verify.add_argument('source', type=Path, nargs='?')
     verify.add_argument('--at')
+    verify.add_argument('--records-at')
     for p in (write, verify):
         p.add_argument('--progress', type=Path, help='무리 조합 검사의 구역 수를 읽을 dq5progresswrite.py 패치 목록')
         p.add_argument('--areas', type=int, help='무리 조합 검사의 구역 수(기본 85)')
@@ -519,12 +607,13 @@ def main():
         doc = json.loads(args.source.read_text(encoding='utf-8')) if getattr(args, 'source', None) else None
         base = args.source.parent if getattr(args, 'source', None) else Path('.')
         at = address(args.at) if args.at else None
+        records_at = address(args.records_at) if getattr(args, 'records_at', None) else None
         from dq5monlimits import area_count
         areas = area_count(args.progress, args.areas)
         if args.command == 'check':
-            check(rom, doc, base, at, areas)
+            check(rom, doc, base, at, areas, records_at)
             return 0
-        manifest = patch(rom, doc, base, at, areas)
+        manifest = patch(rom, doc, base, at, areas, records_at)
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(manifest, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
         print(f'patch → {args.out} (쓰기 {len(manifest["writes"])}개)')

@@ -17,6 +17,7 @@ from dq5map import Rom, lorom  # noqa: E402
 # 그림 0: 2x2 칸, 조각 1, 줄마다 타일 2. 그림 1: 4x4 칸, 조각 6, 줄마다 타일 4.
 SHAPES = {0: (2, 2, 1, [2, 2]), 1: (4, 4, 6, [4, 4, 4, 4]), 2: (2, 2, 1, [1, 1]), 3: (2, 2, 1, [2, 2])}
 HEADS = {0: 0, 1: 1, 2: 2, 3: 3}
+SLOTS = {0: 1, 1: 6, 2: 1, 3: 1}
 FOUND = {((0, 8, 0),): 'a', ((0, 4, 0), (1, 1, 0)): 'b'}
 
 
@@ -29,6 +30,7 @@ class Fakes:
         self.mocks = [mock('dq5monlimits.M.monster', side_effect=lambda rom, m: (m, [])),
                       mock('dq5monlimits.M.decode', side_effect=lambda rom, g: {'pieces': [None] * SHAPES[g][2], 'g': g}),
                       mock('dq5monlimits.M.band_counts', side_effect=lambda d: list(SHAPES[d['g']][3])),
+                      mock('dq5monlimits.M.slot_count', side_effect=lambda d: SLOTS[d['g']]),
                       mock('dq5monlimits.M.header', side_effect=lambda rom, g: head(*SHAPES[g][:2])),
                       mock('dq5monlimits.M.head', side_effect=lambda rom, g: HEADS[g]),
                       mock('dq5monlimits.M.COUNT', 2)]
@@ -59,8 +61,9 @@ class LimitTests(unittest.TestCase):
         with Fakes():
             got = L.budgets(None, FOUND)
         # 조각: 조각 목록 합이 가장 큰 b(7) 에 걸려 0. 줄: a 는 (27 - 16) // 8 = 1, b 는 (27 - 12) // 4 = 3.
-        self.assertEqual(got[0], {'pieces': 0, 'bands': [1, 1], 'compositions': 2})
-        self.assertEqual(got[1], {'pieces': 0, 'bands': [23, 23, 15, 15], 'compositions': 1})
+        # 자리: 합이 가장 큰 b(1 + 6 = 7) 에 걸려 0.
+        self.assertEqual(got[0], {'pieces': 0, 'bands': [1, 1], 'slots': 0, 'compositions': 2})
+        self.assertEqual(got[1], {'pieces': 0, 'bands': [23, 23, 15, 15], 'slots': 0, 'compositions': 1})
 
     def test_losses(self):
         with Fakes():
@@ -77,6 +80,22 @@ class LimitTests(unittest.TestCase):
         self.assertEqual([x[4] for x in missing], ['세는 조합에 나오지 않아 한도를 정할 수 없음'])
         self.assertEqual([x[3] for x in swapped], ['a'])   # 8 × 가로 4 칸이 줄 폭 28 을 넘음
         self.assertEqual(unshown, [])
+
+    def test_losses_slots(self):
+        # c 는 자리 30 + 30 = 60 으로 원래 합이 가장 큰 조합. 그림 0 을 자리 2 로 늘리면 b 가 8 이 되지만 60 안이다.
+        found = {**FOUND, ((2, 1, 0), (3, 1, 0)): 'c'}
+        with Fakes(), mock.dict(SLOTS, {2: 30, 3: 30}):
+            self.assertEqual(L.losses(None, {0: (1, [2, 2], 2)}, found=found), [])
+            self.assertEqual([x[3] for x in L.losses(None, {0: (1, [2, 2], 55)}, found=found)], ['b'])
+            many = L.losses(None, {0: (1, [2, 2], 2)}, found=FOUND)
+            loads = L.Pictures(None).loads(((0, 4, 0), (1, 1, 0), (0, 1, 0)))
+        self.assertEqual([(x[3], x[4]) for x in many], [('b', '16x16 자리 8개 > 7개')])
+        self.assertEqual(loads, [(0, 0, 1), (1, 1, 6)])      # 그림 0 은 한 번만 푼다
+
+    def test_slot_count(self):
+        pieces = [(0, 0, True, [], False), (16, 0, True, [], False), (0, 0, True, [], True)] + \
+                 [(0, 0, False, [], False)] * 5 + [(0, 0, False, [], True)] * 2
+        self.assertEqual(M.slot_count({'pieces': pieces}), 4)
 
     def test_losses_uncountable_users(self):
         with Fakes(), mock('dq5monlimits.M.COUNT', 0xEC):
@@ -96,7 +115,7 @@ class LimitTests(unittest.TestCase):
             got = L.budgets(None, found)
         # 조각: 조각 목록 합이 가장 큰 c(번호 둘, 2)에서 남는 0. 줄: c 는 같은 줄에 8마리라 (27 - 16) // 8 = 1.
         self.assertEqual(got[0], got[3])
-        self.assertEqual(got[0], {'pieces': 0, 'bands': [1, 1], 'compositions': 2})
+        self.assertEqual(got[0], {'pieces': 0, 'bands': [1, 1], 'slots': 0, 'compositions': 2})
 
     def test_compositions(self):
         data = bytearray(0x180000)

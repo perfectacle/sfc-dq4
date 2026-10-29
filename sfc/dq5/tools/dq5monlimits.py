@@ -1,4 +1,5 @@
-"""전투 무리 조합마다 몬스터 그림의 조각 합(22:91DC, 100 미만)·화면 줄마다 타일 합(22:A119, 28 미만) 한도를 센다.
+"""전투 무리 조합마다 몬스터 그림의 조각 합(22:91DC, 100 미만)·화면 줄마다 타일 합(22:A119, 28 미만) 한도와
+그림을 푼 타일이 차지하는 16x16 자리(22:91F7) 합을 센다.
 
 나올 수 있는 무리 조합을 모두 늘어놓는다. 구역 레코드(23:96F3, 옮겼으면 dq5progresswrite.table_bases 가 읽는 자리)의 칸 5~9 한 종 무리·칸 0~4 여러 종 무리(종 수 2~4,
 나머지 종은 칸 0~4 에서 다시 뽑음)·칸 10 고정 무리(23:B04B)를 마릿수 범위의 값마다, 이벤트 무리(23:D757) 64개를 그대로.
@@ -8,7 +9,8 @@
 먼저 넣은 롬을 주고, 구역 수를 늘렸으면 --progress(그 패치 목록) 또는 --areas 로 준다.
 
   report  그림마다, 다른 그림을 그대로 둘 때 어느 조합에서도 원래보다 덜 놓이지 않는 여유.
-          pieces = 조각을 몇 개 더 늘릴 수 있는지, bands = 8픽셀 줄마다 타일을 몇 개 더 늘릴 수 있는지
+          pieces = 조각을 몇 개 더 늘릴 수 있는지, bands = 8픽셀 줄마다 타일을 몇 개 더 늘릴 수 있는지,
+          slots = 16x16 자리를 몇 개 더 늘릴 수 있는지
   losses  바꾼 그림의 조각 수·줄마다 타일 수로 다시 세어, 원래보다 덜 놓이는 무리가 있는 조합(dq5monwrite.py 가 씀)
 
   python sfc/dq5/tools/dq5monlimits.py rom/dq5.sfc report [-o work/monlimits.json] [--progress progress.dq5patch.json]
@@ -107,8 +109,8 @@ def compositions(rom, areas=None):
 
 
 class Pictures:
-    """그림마다 머리·조각 수·줄마다 타일 수. pictures = {그림: (조각 수, 줄마다 타일 수)} 로 바꾼 그림을,
-    monsters = {몬스터: 그림} 으로 바꾼 그림 번호를 덮는다."""
+    """그림마다 머리·조각 수·줄마다 타일 수·16x16 자리 수. pictures = {그림: (조각 수, 줄마다 타일 수[, 자리 수])} 로
+    바꾼 그림을, monsters = {몬스터: 그림} 으로 바꾼 그림 번호를 덮는다."""
 
     def __init__(self, rom, pictures=None, monsters=None):
         self.rom, self.pictures, self.monsters, self.cache = rom, pictures or {}, monsters or {}, {}
@@ -119,9 +121,13 @@ class Pictures:
     def stats(self, g):
         if g not in self.cache:
             d = M.decode(self.rom, g)
-            size, bands = self.pictures.get(g, (len(d['pieces']), M.band_counts(d)))
-            self.cache[g] = (M.header(self.rom, g), size, list(bands))
-        return self.cache[g]
+            size, bands, *slots = self.pictures.get(g, (len(d['pieces']), M.band_counts(d)))
+            self.cache[g] = (M.header(self.rom, g), size, list(bands), slots[0] if slots else M.slot_count(d))
+        return self.cache[g][:3]
+
+    def slots(self, g):
+        self.stats(g)
+        return self.cache[g][3]
 
     def place(self, groups):
         return M.place([(m, n, flag, *self.stats(self.picture(m))) for m, n, flag in groups])
@@ -133,14 +139,27 @@ class Pictures:
         """조합의 그림마다 한 번씩 푼 조각 수의 합. 풀 때 조각마다 7E:5800 에 4바이트씩 적는다(22:9DB0)."""
         return sum(self.stats(g)[1] for g in {self.picture(m) for m, _, _ in groups})
 
+    def loads(self, groups, kept=None):
+        """그림을 푸는 차례대로 [(그림, 첫 자리, 자리 수)]. 조각 한도까지 센 몬스터가 있는 무리만 풀고(22:9088 의 검사를
+        모두 지난 무리), 이미 푼 그림 번호는 다시 풀지 않는다(7E:0D3D). 새 전투는 자리 0 부터 차례로 준다(22:ACFE)."""
+        out, cursor = [], 0
+        for m, _, _, _, _, k in kept if kept is not None else self.place(groups)[0]:
+            g = self.picture(m)
+            if k and all(g != x for x, _, _ in out):
+                out.append((g, cursor, self.slots(g)))
+                cursor += self.slots(g)
+        return out
+
 
 def losses(rom, pictures=None, monsters=None, found=None, areas=None):
     """바꾼 그림·그림 번호로 다시 세어 걸리는 조합 [(조합, 원래 수, 바뀐 수, 나온 곳, 까닭)].
-    까닭은 원래보다 덜 놓이는 무리가 있음, 또는 조합의 그림 조각 합(7E:5800 목록)이 원래 롬의 모든 조합 중 가장 큰 값을
-    넘음이다. 조각 목록 자리의 끝은 확인하지 않아, 원래 게임이 이미 쓰는 크기까지만 받는다."""
+    까닭은 원래보다 덜 놓이는 무리가 있음, 또는 조합의 그림 조각 합(7E:5800 목록)이나 16x16 자리 합이 원래 롬의 모든
+    조합 중 가장 큰 값을 넘음이다. 자리는 연출의 OBJ 그림(22:BB3D)도 같은 128개에서 받으므로, 원래 게임이 이미 쓰는
+    합까지만 받는다."""
     found = found if found is not None else compositions(rom, areas)[0]
     before, after = Pictures(rom), Pictures(rom, pictures, monsters)
     most = max((before.listed(groups) for groups in found), default=0)
+    most_slots = max((sum(s for _, _, s in before.loads(groups)) for groups in found), default=0)
     changed = set(monsters or ()) | {m for m in range(M.COUNT) if before.picture(m) in (pictures or {})}
     out = []
     # 바꾼 뒤 기준으로, 늘린 그림을 쓰는 몬스터가 센 조합에 하나도 없거나 ミルドラース(E7~EB)면 셀 수 없다.
@@ -160,21 +179,26 @@ def losses(rom, pictures=None, monsters=None, found=None, areas=None):
             out.append((groups, old, new, where, '덜 놓임'))
         elif after.listed(groups) > most:
             out.append((groups, old, new, where, f'조각 목록 {after.listed(groups)}개 > {most}개'))
+        elif sum(s for _, _, s in after.loads(groups)) > most_slots:
+            out.append((groups, old, new, where, f'16x16 자리 {sum(s for _, _, s in after.loads(groups))}개 > {most_slots}개'))
     return out
 
 
 def budgets(rom, found=None):
-    """그림마다 {pieces: 더 늘릴 수 있는 조각 수, bands: 8픽셀 줄마다 더 늘릴 수 있는 타일 수, compositions: 나온 조합 수}.
+    """그림마다 {pieces: 더 늘릴 수 있는 조각 수, bands: 8픽셀 줄마다 더 늘릴 수 있는 타일 수, slots: 더 늘릴 수 있는
+    16x16 자리 수, compositions: 나온 조합 수}.
     한 그림만 바꿀 때 이 안이면 losses() 에 걸리는 조합이 없다(마지막 합 + 늘린 양이 한도 밑이면 도중의 합도 밑이고,
-    조각 목록 합도 원래 가장 큰 값 안). 같은 머리를 쓰는 그림 번호(00·11·29 등)는 함께 바뀌므로 머리마다 합쳐 세고,
+    조각 목록·자리 합도 원래 가장 큰 값 안). 같은 머리를 쓰는 그림 번호(00·11·29 등)는 함께 바뀌므로 머리마다 합쳐 세고,
     그 번호들에 같은 값을 준다."""
     found = found if found is not None else compositions(rom)[0]
     pics = Pictures(rom)
     most = max((pics.listed(groups) for groups in found), default=0)
+    most_slots = max((sum(s for _, _, s in pics.loads(groups)) for groups in found), default=0)
     table, members = {}, {}
     for groups in found:
         kept, pieces, bands = pics.place(groups)
         spare = most - pics.listed(groups)
+        spare_slots = most_slots - sum(s for _, _, s in pics.loads(groups, kept))
         by_head = {}
         for m, j, hd, row, y, k in kept:
             g = pics.picture(m)
@@ -187,10 +211,12 @@ def budgets(rom, found=None):
             if j:
                 entry[2].append((y >> 3) - 7)
         for key, (counted, placed, starts, numbers, g) in by_head.items():
-            row = table.setdefault(key, {'pieces': None, 'bands': [None] * pics.stats(g)[0]['h'], 'compositions': 0})
+            row = table.setdefault(key, {'pieces': None, 'bands': [None] * pics.stats(g)[0]['h'], 'slots': None,
+                                         'compositions': 0})
             row['compositions'] += 1
             # 조각 목록에는 그림 번호마다 한 번씩 들어가므로, 같은 머리 번호가 둘이면 늘린 양도 두 번 든다.
             row['pieces'] = least(row['pieces'], spare // len(numbers))
+            row['slots'] = least(row['slots'], spare_slots // len(numbers))
             if counted:
                 row['pieces'] = least(row['pieces'], (PIECE_LIMIT - 1 - pieces) // counted)
             for b in starts:
@@ -221,7 +247,8 @@ def main():
         for g in sorted(table):
             hd, size, bands = pics.stats(g)
             rows.append({'picture': f'{g:02X}', 'w': hd['w'], 'h': hd['h'], 'pieces': size, 'bands': bands,
-                         'extra_pieces': table[g]['pieces'], 'extra_bands': table[g]['bands'],
+                         'slots': pics.slots(g), 'extra_pieces': table[g]['pieces'], 'extra_bands': table[g]['bands'],
+                         'extra_slots': table[g]['slots'],
                          'compositions': table[g]['compositions'],
                          'monsters': [f'{m:02X}' for m in range(M.COUNT) if pics.picture(m) == g]})
         body = {'compositions': len(found), 'skipped': skipped, 'pictures': rows}
@@ -231,7 +258,8 @@ def main():
         print(f'무리 조합 {len(found)}개(E7·EA 첫 무리 {skipped}개는 세지 않음), 나오는 그림 {len(rows)}개')
         for row in rows:
             print(f"그림 {row['picture']}: 조각 {row['pieces']} 여유 {row['extra_pieces']}, "
-                  f"줄마다 타일 {row['bands']} 여유 {row['extra_bands']}, 조합 {row['compositions']}")
+                  f"줄마다 타일 {row['bands']} 여유 {row['extra_bands']}, 자리 {row['slots']} 여유 {row['extra_slots']}, "
+                  f"조합 {row['compositions']}")
         return 0
     except (ValueError, OSError) as error:
         print(f'오류: {error}', file=sys.stderr)
