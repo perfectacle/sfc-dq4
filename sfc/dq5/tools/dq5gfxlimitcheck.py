@@ -14,7 +14,7 @@
 장면
   tiles: 세계 0 (341,56) 에 서기, 걷고 명령 창을 여닫은 뒤, 이벤트 전투(スライム 하나)를 이기고 돌아온 뒤, 세계 1·2 (50,28).
          01:A4A7 뒤 00:A788 앞에 VRAM 워드 4000~5FFF 를 지우고 다시 오는지(lua/dq5vramwipe.lua, 01:B4D5 를 원본으로
-         되돌린 대조 롬은 비어 있어야 함), キメラのつばさ·ルーラ 앞뒤.
+         되돌린 대조 롬은 비어 있어야 함), キメラのつばさ·ルーラ 앞뒤(그 사이 01:A4A7 실행 기록), 마법 융단을 펴고 탄 채 걷기.
          VRAM 워드 2000~3FFF·4000~5FFF 의 타일과 BG1·2 타일맵의 채운 칸을 디코더(dq5field)와 견준다
   fieldpal: (341,56) 에서 $075E 를 여섯 값으로 두고 2·3번 줄 색 1~13 과 11·12번 줄(낮·밤 인물 팔레트)
   indoor: 01/01 과 세트를 그대로 둔 맵 셋(원본 게임과도 견줌)에서 BG 1~7번 줄
@@ -54,14 +54,20 @@ WIPE = {'FIELD': '341,56', 'SETTLE': '500', 'MAXF': '1000', 'DUMPF': '455,470', 
 WIPED, REDRAWN = 455, 470
 # 속성 시험: 서서 네 방향으로 32프레임씩 걷는다. dq5warp.lua 가 좌표가 바뀌었는지 warp.txt 에 moved= 로 적는다.
 # 필드를 다시 불러오는 장면(01:A4A7 → 00:A788): キメラのつばさ(물건 A4)를 どうぐ → つかう, ルーラ(이동 주문, MP 99)를
-# じゅもん 일곱째로. 둘 다 960·1047프레임쯤 다시 불러온다. 앞뒤 프레임의 늘린 타일 자리를 견준다.
+# じゅもん 일곱째로. 둘 다 960·1047프레임쯤 다시 불러온다. 앞뒤 프레임의 늘린 타일 자리를 견주고, 그 사이에 01:A4A7 이
+# 돌았는지 실행 기록(lua/dq5vramwipe.lua 의 EXECLOG)으로 본다. 물건·주문이 실패해 아무 일도 없으면 타일만으로는 가를 수 없다.
+# 마법 융단(물건 CC)은 같은 입력으로 펴고 융단에 탄 채 걷는다. 필드를 다시 불러오지 않으므로 마지막 덤프의 $1954 = 80(융단)과
+# 걸었는지를 본다.
+ITEM_MENU = 'a:8,wait:60,right:8,wait:40,down:8,wait:40,a:8,wait:80,a:8,wait:80,a:8,'
 RELOAD = {
-    'chimera': ({'SET': '2056=A4', 'TEST': 'a:8,wait:60,right:8,wait:40,down:8,wait:40,a:8,wait:80,a:8,wait:80,a:8,wait:600'},
-                (900, 1000, 1300)),
+    'chimera': ({'SET': '2056=A4', 'TEST': ITEM_MENU + 'wait:600'}, (900, 1000, 1300), True),
     'rula': ({'SET': '2063=FF;2044=63;2050=63',
               'TEST': 'a:8,wait:60,right:8,wait:40,a:8,wait:80,' + 'down:6,wait:12,' * 6 + 'a:8,wait:80,a:8,wait:600'},
-             (1000, 1100, 1300)),
+             (1000, 1100, 1300), True),
+    'carpet': ({'SET': '2056=CC', 'TEST': ITEM_MENU + 'wait:300,left:32,up:32,right:32,wait:300'}, (700, 1100, 1500),
+               False),
 }
+CARPET = 0x80
 # 속성 값 → 걸을 수 있는지. 늘린 타일 자리(VRAM)도 걷기 앞(700프레임)에 견준다.
 WALLS = {0x80: False, 0x82: False, 0x95: False, 0x45: True, 0x00: True}
 MOVE = {'FIELD': '341,56', 'SETTLE': '300', 'MAXF': '1300', 'DUMPF': '700',
@@ -231,14 +237,26 @@ def check_redraw(name, rom_path, dump, restored=True):
             'restored': back == extra, 'tiles': len(extra) // 32}
 
 
-def check_reload(name, rom_path, dump, frames):
+def check_reload(name, rom_path, dump, frames, reload=True):
+    """frames 마다 필드에 서서 늘린 타일이 그대로인지. reload 면 첫·마지막 덤프 사이에 01:A4A7 이 돌았는지,
+    아니면(융단) 첫 덤프에는 걸어 다니다 마지막 덤프에는 융단에 타고($1954) 걸었는지."""
     extra = fgw.current(Rom(rom_path.read_bytes()))['worlds']['world0'][0][fgw.TILES * 32:]
     for n in frames:
         w = frame(dump, n, 'wram')
         require(not w[0xBE] & 0x80 and w[0x1001] == 0, f'{name}: {n}프레임에 필드에 서지 않음')
         require(frame(dump, n, 'vram')[0x8000:0x8000 + len(extra)] == extra, f'{name}: {n}프레임 늘린 타일이 다름')
+    log = dump / 'exec.txt'
+    runs = [x.split() for x in log.read_text().splitlines() if x] if log.is_file() else []
+    loads = [int(n) for pc, n in runs if pc == '01A4A7' and frames[0] < int(n) <= frames[-1]]
+    vehicle = [frame(dump, n, 'wram')[0x1954] for n in (frames[0], frames[-1])]
     line = next(x for x in (dump / 'warp.txt').read_text().splitlines() if ' test ' in x)
-    return {'case': name, 'frames': list(frames), 'walk': line.split(' test ')[1]}
+    if reload:
+        require(loads, f'{name}: {frames[0]}~{frames[-1]}프레임에 01:A4A7 이 돌지 않음(필드를 다시 불러오지 않음)')
+    else:
+        require(vehicle == [0, CARPET], f'{name}: $1954 가 {vehicle[0]:02X} → {vehicle[1]:02X}(00 → 80 이어야 함)')
+        require('moved=yes' in line, f'{name}: 융단에 탄 채 걷지 않음 {line}')
+    return {'case': name, 'frames': list(frames), 'reloaded_at': loads, 'vehicle': [f'{v:02X}' for v in vehicle],
+            'walk': line.split(' test ')[1]}
 
 
 def check_move(name, rom_path, dump, want):
@@ -331,10 +349,11 @@ def main():
         data = bytearray(tiles.read_bytes())
         data[lorom(fgw.REDRAW_SITE):lorom(fgw.REDRAW_SITE) + 4] = fgw.REDRAW_ORIG
         control.write_bytes(bytes(data))
-        luas = {k: HERE / 'lua/dq5vramwipe.lua' for k in ('redraw-tiles', 'redraw-control')}
-        for k, (env, frames) in RELOAD.items():
-            cases.append((f'reload-{k}', tiles, dict(env, FIELD='310,60', SETTLE='60', MAXF='2000',
-                                                     DUMPF=','.join(map(str, frames)))))
+        luas = {k: HERE / 'lua/dq5vramwipe.lua'
+                for k in ('redraw-tiles', 'redraw-control', *(f'reload-{r}' for r in RELOAD))}
+        for k, (env, frames, _) in RELOAD.items():
+            cases.append((f'reload-{k}', tiles, dict(env, FIELD='310,60', SETTLE='60', MAXF='2000', EXECLOG='01A4A7',
+                                                     NEXT=str(gfx), DUMPF=','.join(map(str, frames)))))
         cases += [('redraw-tiles', tiles, dict(WIPE, NEXT=str(gfx))),
                   ('redraw-control', control, dict(WIPE, NEXT=str(gfx)))]
         for t in TIME_CASES:
@@ -361,7 +380,7 @@ def main():
                       for v, ok in WALLS.items()),
                     check_redraw('redraw-tiles', tiles, dirs['redraw-tiles']),
                     check_redraw('redraw-control', control, dirs['redraw-control'], restored=False),
-                    *(check_reload(f'reload-{k}', tiles, dirs[f'reload-{k}'], f) for k, (_, f) in RELOAD.items())]
+                    *(check_reload(f'reload-{k}', tiles, dirs[f'reload-{k}'], f, r) for k, (_, f, r) in RELOAD.items())]
         results.append(check_fieldpal('fieldpal', fieldpal, {t: dirs[f'pal-{t:04X}-grow'] for t in TIME_CASES},
                                       {t: dirs[f'pal-{t:04X}-orig'] for t in TIME_CASES}))
         for m in [NEW_MAP] + SAME_MAPS:

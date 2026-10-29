@@ -3,7 +3,8 @@
 블록 표(00:BC4E)는 아래층 2A:A32C, 위층 2A:AD27 에 각각 511항목이다.
 번호 511은 다음 표·세계 1 RLE와 겹치므로 쓰지 않는다. 블록 상위 비트 바이트의
 하위 니블은 원본에서 보존한다. dq5fieldgfxwrite.py 의 타일 늘리기 패치를 넣은 롬(00:BC80 이 JSL)이면
-그 니블을 10번째 비트로 써서 타일 번호를 1023 까지 받는다. 입구(2A:F247·FDCB)와 도착(2A:F384)도 고정 슬롯만
+그 니블을 10번째 비트로 써서 타일 번호를 1023 까지 받는다. check 는 롬의 블록 표가 타일이 가장 적은 세계의 타일 수
+이상을 쓰면 실패한다(그림 쪽 타일 수를 바꾸면 이 도구의 패치를 다시 만들 것). 입구(2A:F247·FDCB)와 도착(2A:F384)도 고정 슬롯만
 고치며 종료자·항목 순서·특수 그룹 도착 코드는 바꾸지 않는다.
 
   python sfc/dq5/tools/dq5fieldtables.py rom/dq5.sfc dump -o work/fieldtables.json
@@ -343,7 +344,21 @@ def patch(rom, doc, name='field-tables', entrances_at=None, new_maps=()):
     return doc
 
 
+def block_overflow(rom):
+    """롬의 블록 표에서 타일 수가 가장 적은 세계의 타일 수 이상을 쓰는 칸 [(블록, 층, 타일)]. 그림 쪽 타일 수를 블록 패치를
+    만든 뒤에 줄여 빌드하면 패치를 만들 때의 검사가 다시 돌지 않으므로, 빌드한 롬에서 이것으로 다시 본다."""
+    limit, wide = tile_limit(rom), wide_tiles(rom)
+    return [(i, layer, v) for i in range(BLOCK_COUNT) for layer, start in (('lower', BLOCK_LOWER), ('upper', BLOCK_UPPER))
+            for v in block_tiles(record(rom, start + i * 5), wide) if v > limit]
+
+
 def check(rom):
+    over = block_overflow(rom)
+    if over:
+        i, layer, v = over[0]
+        print(f'블록 칸 {len(over)}개가 타일이 가장 적은 세계의 타일 수({tile_limit(rom) + 1}개)를 넘음'
+              f'(처음: 블록 {i} {layer} 타일 {v}). 그림 쪽 타일 수를 바꿨으면 dq5fieldtables 패치를 다시 만들 것')
+        return True
     rows = edits(rom, dump(rom))
     bad = sum(new != old for _, new, old, _ in rows)
     print(f'블록 {BLOCK_COUNT}개 × 2층, 입구 61개, 도착 {arrivals(rom)[1]}개: '

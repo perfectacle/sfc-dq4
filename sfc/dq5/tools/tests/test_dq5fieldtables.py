@@ -1,12 +1,16 @@
 """필드 표 슬롯 경계·부분 수정·보존 비트를 원본 롬 없이 검사한다."""
+import contextlib
+import io
 import sys
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import dq5field  # noqa: E402
 from dq5field import BLOCK_LOWER, BLOCK_UPPER, GROUP_ARRIVAL, block_tiles  # noqa: E402
 from dq5fieldtables import (ARRIVAL_COUNT, BLOCK_COUNT, ENTRANCE_POINTERS, ENTRANCE_REFS, ENTRANCE_TABLES,  # noqa: E402
-                            FORMAT, dump, edits, patch)
+                            FORMAT, block_overflow, check, dump, edits, encode_block, patch, tile_limit)
+import dq5fieldgfxwrite as fgw  # noqa: E402
 from dq5build import PatchError, check as build_check, parse_at, unhex  # noqa: E402
 from dq5map import GROUP_TABLE, POINTER_SITE, TABLE_KINDS, Rom, lorom  # noqa: E402
 from dq5newmap import ENTRANCE_SITES  # noqa: E402
@@ -289,6 +293,45 @@ class EntranceRelocateTest(unittest.TestCase):
         data[lorom(pc)] = 0xEA
         with self.assertRaises(ValueError):
             patch(Rom(bytes(data)), document(entrance_tables={'aux': self.entries('aux')}), entrances_at='68:8000')
+
+
+class BuiltRomBlockLimitTest(unittest.TestCase):
+    """블록 패치를 만든 뒤 그림 쪽 세계 타일 수를 줄여 빌드한 롬을 check 가 거부한다."""
+
+    def rom(self, counts, tile):
+        raw = bytearray(fixture())
+        for base in (BLOCK_LOWER, BLOCK_UPPER):
+            for i in range(BLOCK_COUNT):
+                raw[lorom(base + i * 5):lorom(base + i * 5) + 5] = bytes([i & 255, 1, 2, 3, 0])
+        raw[lorom(dq5field.BLOCK_HOOK_SITE)] = 0x22
+        hook = 0x2B8000
+        raw[lorom(fgw.LOAD_SITE):lorom(fgw.LOAD_SITE) + 4] = b'\x22' + hook.to_bytes(3, 'little')
+        raw[lorom(hook):lorom(hook) + 10] = fgw.grow_load_hook(0, 0)[:10]
+        table = fgw.grow_layout(hook)['table']
+        for w, n in enumerate(counts):
+            off = lorom(table + w * fgw.GROW_ENTRY + 6)
+            raw[off:off + 2] = ((n - fgw.TILES) * 32).to_bytes(2, 'little')
+        off = lorom(BLOCK_LOWER + 7 * 5)
+        raw[off:off + 5] = encode_block(bytes(5), [tile, 0, 0, 0], wide=True)
+        return Rom(bytes(raw))
+
+    def check(self, rom):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            failed = check(rom)
+        return failed, out.getvalue()
+
+    def test_shrunk_world_fails_check(self):
+        grown = self.rom([812, 812, 812], 700)
+        self.assertEqual((tile_limit(grown), block_overflow(grown)), (811, []))
+        self.assertEqual(self.check(grown)[0], False)
+        shrunk = self.rom([812, 600, 812], 700)
+        self.assertEqual((tile_limit(shrunk), block_overflow(shrunk)), (599, [(7, 'lower', 700)]))
+        failed, text = self.check(shrunk)
+        self.assertTrue(failed)
+        self.assertIn('블록 7 lower 타일 700', text)
+        self.assertIn('dq5fieldtables 패치를 다시 만들 것', text)
+        self.assertEqual(self.check(self.rom([812, 600, 812], 599))[0], False)
 
 
 if __name__ == '__main__':

@@ -189,6 +189,43 @@ class PaletteTests(unittest.TestCase):
                 self.assertEqual((c.wram[0x08], c.y, c.x, c.dbr), (want, 2, 0x1234, 0x7E),
                                  f'표 {pictures:06X} 그림 {g:02X}(세트 {s:02X})')
 
+    def test_swap_follows_picture_table_in_three_orders(self):
+        """setpal 먼저 / picturegrow 먼저 / 한 빌드 모두 03:D24D 루틴이 그 롬의 03:D202 피연산자(늘린 그림 표)를 따라간다."""
+        import dq5picturegrow as pg
+        data = bytearray(self.rom.d)
+
+        def put(addr, raw):
+            data[lorom(addr):lorom(addr) + len(raw)] = bytes(raw)
+
+        put(pg.READERS[0], bytes.fromhex('bf d0 86 25'))
+        put(pg.HOOK, pg.HOOK_ORIG)
+        for k in range(S.SET_COUNT):
+            put(S.SET_POINTERS + k * 2, [0xFF, 0xFF] if 0x70 <= k < 0x80 else [0x00, 0x10])
+        for site in S.SET_TABLE_SITES:
+            put(site, S.SET_POINTERS.to_bytes(3, 'little'))
+        put(pg.TABLE, [0x04] * pg.COUNT)
+        put(pg.TABLE + 0x29, [0x84])
+        put(pg.TALK_READER, [0xBF, 0x2F, 0x86, 0x05])
+        put(pg.TALK_LIST, [0xFF])
+        rom = Rom(bytes(data))
+        sets = {'format': FORMAT, 'sets': [{'set': '84', 'palette': 6}]}
+        pics = {'format': pg.FORMAT, 'pictures': [{'picture': '29', 'set': '04'}, {'picture': 'A9', 'set': '84'}]}
+        make = {'sets': lambda r: patch(r, sets, '3B:8000'), 'pics': lambda r: pg.patch(r, pics, 0x16FE10)}
+
+        def then(first, second):
+            mid = apply(rom, make[first](rom)['writes'])
+            return apply(mid, make[second](mid)['writes'])
+
+        cases = {'sets → pictures': then('sets', 'pics'), 'pictures → sets': then('pics', 'sets'),
+                 'one build': apply(apply(rom, make['sets'](rom)['writes']), make['pics'](rom)['writes'])}
+        # 원래 표에서는 그림 29 가 세트 84(표의 팔레트 6)였다. 늘린 표는 29 → 04(레코드 팔레트 1), A9 → 84.
+        self.assertEqual(P.run_swap(bytes(apply(rom, make['sets'](rom)['writes']).d), 0x29, RECORD), (6 << 1, 2))
+        for name, r in cases.items():
+            self.assertEqual(r.u24(P.PICTURE_SITE + 1), 0x16FE10 + pg.ROUTINE_SIZE, name)
+            for g, want in ((0x29, 1), (0xA9, 6), (0x2B, 1)):
+                with self.subTest(case=name, picture=g):
+                    self.assertEqual(P.run_swap(bytes(r.d), g, RECORD), (want << 1, 2))
+
     def test_table_value_range(self):
         result = patch(self.rom, {'format': FORMAT, 'sets': [{'set': '84', 'palette': 6}]}, '3B:8000')
         hooked = apply(self.rom, result['writes'])
