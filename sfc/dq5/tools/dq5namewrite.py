@@ -10,7 +10,7 @@
 
 JSON: {"format":"dq5names/1", "tables":[{"table":4,"names":[{"id":0,"bytes":[33,58,4,64]}]}]}.
 tables·names 에는 바꿀 항목만 넣을 수 있고, 빈 목록은 원본 전체를 다시 쓴다(바뀐 바이트가 없어 쓰기 0개).
-bytes 는 0~255 정수 배열(24:A7B6 이 읽는 1바이트 부호, 84·83 은 탁점·반탁점 접두). 길이는 0~12.
+bytes 는 0~255 정수 배열(24:A7B6 이 읽는 1바이트 부호, 84·83 은 탁점·반탁점 접두). 길이는 0~24, 7A 로 시작하면 0~12.
 --at 을 빼면 표를 원래 자리(23:C242~D6A0 의 여덟 표, 22:8000~841E 의 표 3)에 다시 채운다. 모자라면 거부한다.
 --at 을 주면 표 아홉 개를 모두 그 자리부터 차례로 옮기고 포인터를 고친다. 한 표는 한 뱅크 안에 있어야 하므로
 뱅크 끝에 들어가지 않는 표는 다음 뱅크 8000 에서 시작한다. 30~7D 뱅크만 받는다.
@@ -33,9 +33,16 @@ FORMAT = 'dq5names/1'
 REGIONS = ((0x23C242, 0x23D6A1, (0x0A, 0, 1, 2, 4, 5, 6, 0x0B)), (0x228000, 0x22841F, (3,)))
 COUNTS = {0: 8, 1: 17, 2: 3, 3: 171, 4: 236, 5: 222, 6: 6, 0x0A: 168, 0x0B: 23}
 TABLES = tuple(t for _, _, ts in REGIONS for t in ts)
-# 21:9589 는 [길이][바이트…] 를 직접 페이지 $00 부터 복사하고, 21:95BF 는 첫 바이트가 7A 면 주인공 이름 뒤에 $02~$0D
-# 12바이트를 붙인다. 원래 표의 가장 긴 이름이 12바이트이고, 그보다 긴 이름이 덮을 직접 페이지는 확인하지 않았다.
-MAX_NAME = 12
+# 21:9589 는 [길이][바이트…] 를 직접 페이지 $00 부터 복사한다. 이름을 읽은 뒤 처음 접근이 읽기인 직접 페이지는
+# $19·$1A(04:9D43·00:96AD)가 가장 낮았으므로(전투·물건·주문·상점·전투 주문 창 실측) $00~$18 만 덮는 24바이트까지.
+MAX_NAME = 24
+# 21:95BF 는 첫 바이트가 7A 면 $02~$0D 12바이트만 0BDC 에 두고, 주인공 이름 뒤에 0BDC 를 01 이 나올 때까지 길이
+# 제한 없이 붙인다(코드 읽기). 14바이트부터는 뒷부분이 0BDC 에 들어가지 않고 13바이트로 늘린 이름도 재지 않았으므로,
+# 원본의 가장 긴 이름 12바이트까지.
+MAX_HERO_NAME = 12
+HERO = 0x7A
+# 21:955D 는 이름 번호 $42 를 8비트 X 로 세므로 한 표는 256개까지.
+MAX_ENTRIES = 256
 BANK = 0x8000
 LAST_BANK = 0x7D
 
@@ -48,6 +55,8 @@ def keys(value, allowed, name):
 def valid_name(raw):
     if not isinstance(raw, list) or len(raw) > MAX_NAME:
         raise ValueError(f'bytes 는 길이 0~{MAX_NAME} 정수 배열이어야 함')
+    if raw[:1] == [HERO] and len(raw) > MAX_HERO_NAME:
+        raise ValueError(f'{HERO:02X} 로 시작하는 이름(주인공 이름 붙임)은 {MAX_HERO_NAME}바이트까지')
     for b in raw:
         if type(b) is not int or not 0 <= b <= 0xFF:
             raise ValueError(f'1바이트 부호가 아님: {b!r}')
@@ -96,7 +105,7 @@ def overrides(original, doc, append=False):
         for name in row['names']:
             keys(name, {'id', 'bytes'}, '이름')
             i = name.get('id')
-            if append and type(i) is int and i == len(tables[t]) and i not in ids:
+            if append and type(i) is int and i == len(tables[t]) < MAX_ENTRIES and i not in ids:
                 ids.add(i)
                 tables[t].append(valid_name(name.get('bytes')))
                 continue
