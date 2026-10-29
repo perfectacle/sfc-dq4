@@ -1,4 +1,5 @@
 -- 조사 명령을 실제 컨트롤러로 눌러 보상·열림 비트와 최종 WRAM을 기록한다.
+-- FLAG(·OLD_FLAG)를 주면 첫 프레임에 그 바이트를 0 으로 둔다. 빼면 WRAM 을 건드리지 않고 덤프만 한다.
 package.path = os.getenv('LIBDIR') .. '/?.lua;' .. package.path
 local L = require('lib')
 if os.getenv('PREPARE') == '1' then
@@ -22,7 +23,7 @@ local steps = {}
 for button, frames in (os.getenv('INPUT') or ''):gmatch('([%w+]+):(%d+)') do
   steps[#steps + 1] = {button, tonumber(frames)}
 end
-local flag = tonumber(os.getenv('FLAG'), 16)
+local flag = os.getenv('FLAG') and tonumber(os.getenv('FLAG'), 16)
 local function b(a) return emu.read(a, m) end
 local function w(a) return emu.read16(a, m) end
 emu.addMemoryCallback(function()
@@ -37,7 +38,7 @@ emu.addEventCallback(function()
   n = n + 1
   if n == 1 then
     emu.write(0x7E2019, 100, m); emu.write(0x7E201A, 0, m); emu.write(0x7E201B, 0, m)
-    emu.write(flag, 0, m)
+    if flag then emu.write(flag, 0, m) end
     local old = os.getenv('OLD_FLAG')
     if old then emu.write(tonumber(old, 16), 0, m) end
     L.dump('before.wram', emu.memType.snesWorkRam, 0x20000)
@@ -56,7 +57,7 @@ emu.addEventCallback(function()
   else
     L.dump('after.wram', emu.memType.snesWorkRam, 0x20000)
     L.shot('end.png')
-    log[#log + 1] = string.format('end gold=%d flag=%02X', w(0x7E2019) | (b(0x7E201B) << 16), b(flag))
+    log[#log + 1] = string.format('end gold=%d flag=%02X', w(0x7E2019) | (b(0x7E201B) << 16), flag and b(flag) or 0)
     L.write('trace.txt', table.concat(log, '\n') .. '\n')
     emu.stop(0)
   end

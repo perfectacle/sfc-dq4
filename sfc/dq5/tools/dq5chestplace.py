@@ -9,6 +9,7 @@ sfc/dq5/docs/dq5-build-format.md 의 「보물상자 놓기」. 맵마다 상자
   python sfc/dq5/tools/dq5chestplace.py rom/dq5.sfc patch work/place.json -o work/place.dq5patch.json \\
       --map-at BB:AAAA [--chests-at BB:AAAA] [--chest-maps-at BB:AAAA]
   python sfc/dq5/tools/dq5chestplace.py rom/dq5.sfc check work/place.json --map-at … [같은 자리 선택]
+--tables 로 dq5chestreloc.py dump 를 고친 표(표에 없던 맵의 상자 연결, 옮긴 열림 비트 등)를 바탕으로 줄 수 있다.
 
 입력 format=dq5chestplace/1, maps[{map:"GG/MM", chests[{x,y,block,reward}],
 furniture[{x,y,block,reward,flag_index,mask[,unused]}]}]. x·y 는 블록 원점(왼쪽 위), block 은 실내 맵 블록 번호다.
@@ -33,8 +34,6 @@ FORMAT = 'dq5chestplace/1'
 # タル·ツボ 칸으로, 게임에서 149·135 메시지를 확인했다(dq5-map-format.md)
 LOWER_FURNITURE = {0x93}
 UPPER_FURNITURE = {0xA7, 0xB9, 0xD3, 0xD4}
-# 서랍 열림 비트는 7E:222C + flag_index. 2240 부터는 발밑 표의 비트다
-SEARCH_FLAGS = 0x2240 - 0x222C
 # 아래층 상자 표는 12:ED62 가 $BC 32 이상일 때만 찾는다. 그보다 앞 그룹에서는 항목이 있어도 읽히지 않는다
 LOWER_FIRST = 0x32
 BOX_FIELDS = {'x', 'y', 'block', 'reward'}
@@ -114,19 +113,6 @@ def furniture_cells(data, bc, bd):
             if cell[4] in LOWER_FURNITURE or cell[7] in UPPER_FURNITURE}
 
 
-def flag_bits(tables):
-    """표마다의 열림 비트 → {(WRAM 주소, 마스크)}. 새 서랍 항목이 다른 보상과 비트를 나눠 쓰지 않게 본다."""
-    out = set()
-    for n in range(len(tables['chests'])):
-        out.add((0x2210 + (n >> 3), 0x80 >> (n & 7)))
-    bases = {'search': 0x222C, 'foot': 0x2240}
-    for name in ('search', 'foot', 'ahead', 'lower'):
-        for row in tables[name]:
-            addr = bases[name] + row['flag_index'] if name in bases else 0x2210 + (row['flag_index'] & 0x7F)
-            out |= {(addr, bit) for bit in (1, 2, 4, 8, 16, 32, 64, 128) if row['mask'] & bit}
-    return out
-
-
 def changed_cells(before, after, bc, bd):
     width = map_dimensions(Rom(before), bc, bd)[0]
     old, _ = cell_buffer(before, bc, bd)
@@ -138,7 +124,7 @@ def mb_for(end):
     return 4 if end > 0x300000 else 3 if end > 0x200000 else 2
 
 
-def plan(rom, doc, map_at, at=None):
+def plan(rom, doc, map_at, at=None, base=None):
     """→ (맵 쓰기, 상자 표 쓰기, 롬 크기, 상자 표 문서, 놓은 상자 [(BC, BD, 칸, 내용물)])."""
     start = lorom(map_at)
     if start < 0x180000 or (map_at >> 16) > 0x7D:
@@ -150,7 +136,11 @@ def plan(rom, doc, map_at, at=None):
     mb = mb_for(end)
     middle, _ = build(rom.d, [('chest-place maps', mb, maps)], mb)
     middle = Rom(middle)
-    tables = reloc.parse(rom)
+    if base is not None:
+        # 바탕 표는 원래 롬의 맵 칸과 맞아야 상자 내용물을 칸으로 따라가게 할 수 있다
+        reloc.serialize(rom, base)
+        reloc.check_cells(rom, base)
+    tables = json.loads(json.dumps(base)) if base is not None else reloc.parse(rom)
     rewards = cell_rewards(rom, tables)
     rows = {(row['group'], row['map']): row for row in tables['chest_maps']}
     new_cells = []
@@ -204,9 +194,7 @@ def plan(rom, doc, map_at, at=None):
             if new[0] in used:
                 raise ValueError(f'{bc:02X}/{bd:02X} furniture[{k}]: 새 가구 칸 {new[0]} 을 다른 항목이 이미 씀')
             used.add(new[0])
-            if integer(box['flag_index'], 255, 'flag_index') >= SEARCH_FLAGS:
-                raise ValueError(f'{bc:02X}/{bd:02X} furniture[{k}]: flag_index 는 {SEARCH_FLAGS - 1:02X} 이하여야 함'
-                                 f'(7E:222C~223F)')
+            integer(box['flag_index'], 255, 'flag_index')
             row = {'group': bc, 'map': bd, 'x': new[0][0], 'y': new[0][1], 'unused': box.get('unused', 1),
                    'reward': box['reward'], 'flag_index': box['flag_index'], 'mask': box['mask']}
             added.append(row)
@@ -214,13 +202,14 @@ def plan(rom, doc, map_at, at=None):
     for row in tables['chest_maps']:
         cells = chest_cells(middle, row['group'], row['map'])
         tables['chests'] += [{'reward': rewards[(row['group'], row['map'], xy)]} for xy in cells]
-    taken = flag_bits(tables)
+    taken = set(reloc.flag_bits(tables))
     for k, row in enumerate(added):
         reloc.row_encode('search', row, f'furniture {k}')
-        bits = {(0x222C + row['flag_index'], bit) for bit in (1, 2, 4, 8, 16, 32, 64, 128) if row['mask'] & bit}
+        addr = reloc.FLAG_BASE['search'][0] + row['flag_index']
+        bits = {(addr, bit) for bit in (1, 2, 4, 8, 16, 32, 64, 128) if row['mask'] & bit}
         if bits & taken:
             raise ValueError(f'{row["group"]:02X}/{row["map"]:02X} ({row["x"]},{row["y"]}): 열림 비트 '
-                             f'7E:{0x222C + row["flag_index"]:04X} & {row["mask"]:02X} 를 다른 보상이 이미 씀')
+                             f'7E:{addr:04X} & {row["mask"]:02X} 를 다른 보상이 이미 씀')
         taken |= bits
     tables['search'] += added
     chest_writes, chest_mb = reloc.writes_for(middle, tables, at)
@@ -232,8 +221,8 @@ def plan(rom, doc, map_at, at=None):
     return maps, chest_writes, max(mb, chest_mb), tables, new_cells
 
 
-def patch(rom, doc, map_at, at=None):
-    maps, chest_writes, mb, _, _ = plan(rom, doc, map_at, at)
+def patch(rom, doc, map_at, at=None, base=None):
+    maps, chest_writes, mb, _, _ = plan(rom, doc, map_at, at, base)
     writes = [{'at': f'0x{off:X}' if off >= 0x180000 else file_cpu(off), 'hex': new.hex(' '),
                **({'orig': old.hex(' ')} if old is not None else {}), 'note': note} for off, new, old, note in maps]
     writes += [{'at': reloc.cpu(addr), 'hex': new.hex(' '), **({'orig': old.hex(' ')} if old is not None else {}),
@@ -241,22 +230,22 @@ def patch(rom, doc, map_at, at=None):
     return {'format': 'dq5patch/1', 'name': 'chest-place', 'rom_size': mb, 'writes': writes}
 
 
-def check(rom, doc, map_at, at=None):
-    manifest = patch(rom, doc, map_at, at)
+def check(rom, doc, map_at, at=None, base=None):
+    manifest = patch(rom, doc, map_at, at, base)
     writes = [(parse_at(w['at'])[0], bytes.fromhex(w['hex']), bytes.fromhex(w['orig']) if 'orig' in w else None,
                w['note']) for w in manifest['writes']]
     built, _ = build(rom.d, [('chest-place', manifest['rom_size'], writes)], manifest['rom_size'])
     built = Rom(built)
-    _, _, _, tables, new_cells = plan(rom, doc, map_at, at)
+    _, _, _, tables, new_cells = plan(rom, doc, map_at, at, base)
     if reloc.parse(built) != tables:
         raise ValueError('만든 롬의 상자 표가 계획과 다름')
     reloc.check_cells(built, tables)
     # 원본에서 칸으로 모은 내용물과 만든 롬에서 칸으로 다시 모은 내용물이 같아야 한다(놓은 상자만 더해짐)
-    want = cell_rewards(rom, reloc.parse(rom)) | {(bc, bd, xy): reward for bc, bd, xy, reward in new_cells}
+    old = base if base is not None else reloc.parse(rom)
+    want = cell_rewards(rom, old) | {(bc, bd, xy): reward for bc, bd, xy, reward in new_cells}
     if cell_rewards(built, tables) != want:
         raise ValueError('만든 롬에서 칸마다 모은 상자 내용물이 원본과 놓은 상자를 합친 것과 다름')
     placed = len(new_cells)
-    old = reloc.parse(rom)
     if tables['search'][:len(old['search'])] != old['search']:
         raise ValueError('기존 서랍 표 항목이 바뀜')
     open_cells = {}
@@ -282,6 +271,7 @@ def main():
     verify.add_argument('source', type=Path)
     for p in (write, verify):
         p.add_argument('--map-at', type=reloc.address, required=True, help='맵 레코드를 놓을 늘린 롬 자리')
+        p.add_argument('--tables', type=Path, help='롬의 표 대신 바탕으로 삼을 dq5chesttables/1(dq5chestreloc.py dump 를 고친 것)')
         for name in reloc.ORIGINAL:
             p.add_argument(f'--{name.replace("_", "-")}-at', dest=f'{name}_at', type=reloc.address)
     args = parser.parse_args()
@@ -289,10 +279,11 @@ def main():
         rom = Rom(args.rom.read_bytes())
         doc = json.loads(args.source.read_text(encoding='utf-8'))
         at = {k: getattr(args, f'{k}_at') for k in reloc.ORIGINAL}
+        base = json.loads(args.tables.read_text(encoding='utf-8')) if args.tables else None
         if args.command == 'check':
-            check(rom, doc, args.map_at, at)
+            check(rom, doc, args.map_at, at, base)
         else:
-            result = patch(rom, doc, args.map_at, at)
+            result = patch(rom, doc, args.map_at, at, base)
             args.out.parent.mkdir(parents=True, exist_ok=True)
             args.out.write_text(json.dumps(result, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
             print(f'patch → {args.out}')

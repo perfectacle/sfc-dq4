@@ -8,8 +8,8 @@ from unittest.mock import patch as mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from dq5chestreloc import (ABS, DB_MOVABLE, FORMAT, LONG, MAX_CHESTS, ORIGINAL, ORIGINAL_BYTES, address, locate,
-                           original_spans, parse, placement, read, rom_size, row_encode, serialize, writes_for)
+from dq5chestreloc import (ABS, DB_SITES, FORMAT, LONG, MAX_CHESTS, ORIGINAL, ORIGINAL_BYTES, address, flag_bits,
+                           locate, original_spans, parse, placement, read, rom_size, row_encode, serialize, writes_for)
 from dq5map import Rom, lorom
 from test_dq5chestwrite import ROM, fixture, poke
 
@@ -31,8 +31,13 @@ class ChestRelocTests(unittest.TestCase):
             locate(Rom(data))
         with self.assertRaises(ValueError):
             locate(poke(rom, LONG['ahead'][2] + 3, 0x1F))
+        # 상자 맵 연결의 DB 즉값 셋 가운데 하나만 다르면 거부한다
         with self.assertRaises(ValueError):
             locate(poke(rom, 0x25FAB5, 0x1F))
+        moved = rom
+        for site in DB_SITES['chest_maps']:
+            moved = poke(moved, site, 0x3F)
+        self.assertEqual(locate(moved)['chest_maps'], 0x3F0000 | ORIGINAL['chest_maps'] & 0xFFFF)
 
     def test_row_fields_and_bounds(self):
         self.assertEqual(row_encode('search', row('search'), 's'), bytes.fromhex('00 01 02 03 01 a1 00 03 80'))
@@ -64,12 +69,78 @@ class ChestRelocTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 serialize(rom, value)
 
+    @mock('dq5chestreloc.map_ids', return_value=[(0, 1), (0x11, 1)])
+    @mock('dq5chestreloc.map_dimensions', return_value=(8, 8))
+    def test_chests_up_to_256(self, _, __):
+        rom = fixture()
+        doc = {'format': FORMAT, 'chests': [{'reward': 1}] * MAX_CHESTS,
+               'chest_maps': [{'group': 0, 'map': 1, 'count': 128}, {'group': 0x11, 'map': 1, 'count': 128}],
+               'search': [], 'foot': [], 'ahead': [], 'lower': []}
+        self.assertEqual(MAX_CHESTS, 256)
+        serialize(rom, doc)
+        self.assertEqual(flag_bits(doc)[0x222F, 0x01], '일반 상자 255')
+        over = dict(doc, chests=[{'reward': 1}] * 257,
+                    chest_maps=[{'group': 0, 'map': 1, 'count': 129}, {'group': 0x11, 'map': 1, 'count': 128}])
+        with self.assertRaises(ValueError):
+            serialize(rom, over)
+        # 상자 224 부터는 서랍 비트 222C 와 같은 바이트다
+        with self.assertRaisesRegex(ValueError, '일반 상자 224'):
+            serialize(rom, dict(doc, search=[row('search', map=1, flag_index=0, mask=0x80)]))
+
+    def test_flag_bits_reject_shared_and_outside_bits(self):
+        doc = {'chests': [{'reward': 1}] * 3, 'search': [], 'foot': [], 'ahead': [], 'lower': []}
+        for name, value, words in (
+                ('lower', row('lower', flag_index=0, mask=0x40), '일반 상자 1'),
+                ('ahead', row('ahead', flag_index=0, mask=0x20), '일반 상자 2'),
+                ('ahead', row('ahead', flag_index=0x80, mask=1), '7F 이하'),
+                ('lower', row('lower', flag_index=0x98), '7F 이하'),
+                ('foot', row('foot', flag_index=0x10, mask=1), '7E:2250'),
+                ('search', row('search', flag_index=0x24), '7E:2250')):
+            with self.subTest(name=name, value=value), self.assertRaisesRegex(ValueError, words):
+                flag_bits(dict(doc, **{name: [value]}))
+        # 서랍 10 과 두 칸 앞 2C 는 같은 7E:223C 다
+        with self.assertRaisesRegex(ValueError, r'search\[0\]'):
+            flag_bits(dict(doc, search=[row('search', flag_index=0x10, mask=1)],
+                           ahead=[row('ahead', flag_index=0x2C, mask=1)]))
+        self.assertEqual(flag_bits(dict(doc, lower=[row('lower', flag_index=0x19, mask=8)]))[0x2229, 8], 'lower[0]')
+
+    def test_reserved_bits_belong_to_their_ahead_rows(self):
+        doc = {'chests': [], 'search': [], 'foot': [], 'ahead': [], 'lower': []}
+        owner = row('ahead', group=0x03, map=0x04, x=10, y=7, flag_index=0x2D, mask=0x08)
+        self.assertEqual(flag_bits(dict(doc, ahead=[owner]))[0x223D, 0x08], 'ahead[0]')
+        for value in (dict(doc, search=[row('search', flag_index=0x0C, mask=0x10)]),         # 7E:2238, 21:8C2F
+                      dict(doc, ahead=[row('ahead', flag_index=0x2C, mask=0x80)]),           # 06:D3CB 가 보는 비트
+                      dict(doc, lower=[row('lower', flag_index=0x2D, mask=0x20)]),           # 12:ADB0
+                      dict(doc, ahead=[dict(owner, mask=0x04)]),                             # 주인의 비트를 옮김
+                      dict(doc, ahead=[dict(owner, flag_index=0x30, mask=0x01)])):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                flag_bits(value)
+
+    @mock('dq5chestreloc.map_ids', return_value=[(0, 1)])
+    @mock('dq5chestreloc.map_dimensions', return_value=(64, 64))
+    def test_eight_bit_indexed_tables_have_row_limits(self, _, __):
+        rom = fixture()
+        doc = {'format': FORMAT, 'chests': [], 'chest_maps': [], 'search': [], 'foot': [], 'ahead': [], 'lower': []}
+
+        def rows(name, n):
+            # 행마다 다른 칸·다른 비트(아래층·두 칸 앞은 2210 + 30~, 발밑은 2240 + 0~)
+            first = 0 if name == 'foot' else 0x30 if name == 'ahead' else 0x18
+            return [row(name, x=i % 64, y=i // 64, flag_index=first + i // 8, mask=0x80 >> i % 8) for i in range(n)]
+        for name, limit in (('foot', 28), ('ahead', 31), ('lower', 31)):
+            with self.subTest(name=name):
+                serialize(rom, dict(doc, **{name: rows(name, limit)}))
+                with self.assertRaisesRegex(ValueError, '8비트 색인'):
+                    serialize(rom, dict(doc, **{name: rows(name, limit + 1)}))
+
     def test_placement_bank_rules(self):
         rom = fixture()
         sizes = {'search': 10, 'foot': 10, 'chests': 10, 'ahead': 10, 'chest_maps': 10, 'lower': 10}
         at = placement(rom, sizes, {'search': 0x3F8000, 'ahead': 0x7D8000, 'lower': 0x1EF435 + 20}, {})
         self.assertEqual((at['search'], at['ahead'], at['chest_maps']), (0x3F8000, 0x7D8000, ORIGINAL['chest_maps']))
-        for wrong in ({'search': 0x408000}, {'foot': 0x408000}, {'chest_maps': 0x3F8000}, {'lower': 0x1F8000},
+        at = placement(rom, sizes, {'chest_maps': 0x3F8000, 'lower': 0x3F9000}, {})
+        self.assertEqual((at['chest_maps'], at['lower']), (0x3F8000, 0x3F9000))
+        for wrong in ({'search': 0x408000}, {'foot': 0x408000}, {'chest_maps': 0x408000}, {'lower': 0x408000},
+                      {'lower': 0x1F8000},
                       {'chests': 0x7E8000}, {'ahead': 0x3FFFF8}, {'chests': 0x1E8000},
                       {'ahead': ORIGINAL['chests']}):
             with self.subTest(wrong=wrong), self.assertRaises(ValueError):
@@ -92,7 +163,7 @@ class ChestRelocTests(unittest.TestCase):
         self.assertEqual(len(sites[ORIGINAL['ahead']]), ORIGINAL_BYTES['ahead'])
         with self.assertRaises(ValueError):
             writes_for(rom, doc)
-        self.assertNotIn(DB_MOVABLE['search'], sites)
+        self.assertNotIn(DB_SITES['search'][0], sites)
         owned = sorted((a, a + len(new)) for a, new, _, _ in writes if a >> 16 == 0x1E or a >> 16 == 0x1F)
         for lo, hi in original_spans().values():
             covered = [(max(a, lo), min(b, hi)) for a, b in owned if a < hi and b > lo]

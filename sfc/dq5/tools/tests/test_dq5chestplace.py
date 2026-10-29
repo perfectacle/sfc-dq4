@@ -1,4 +1,5 @@
 """맵에 상자를 놓고 보상 표를 함께 고치는 도구의 입력 검사와 번호 다시 매기기."""
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -8,6 +9,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dq5chestplace import FORMAT, check, map_key, patch, plan
 from dq5build import build, parse_at
 from dq5chest import LOWER_TABLE
+from dq5chestcheck import grow_chests
+from dq5chestreloc import parse
 from dq5map import Rom, lorom
 from test_dq5chestwrite import ROM
 
@@ -49,6 +52,31 @@ class ChestPlaceTests(unittest.TestCase):
         self.assertEqual(tables['chest_maps'][-1], {'group': 0x17, 'map': 0, 'count': 1})
         self.assertEqual(tables['chests'][-1], {'reward': 0x200})
         self.assertEqual(new[0][:2], (0x17, 0))
+
+    @unittest.skipUnless(ROM.is_file(), '롬 없음')
+    def test_base_tables_grow_past_192(self):
+        rom = Rom(ROM.read_bytes())
+        base = parse(rom)
+        grow_chests(base)
+        boxes = [(x, 22, CHEST_BLOCK, 0x100 + x) for x in range(30, 44, 2)]
+        at = {'chests': 0x3F8000, 'chest_maps': 0x3FC000, 'lower': 0x3FD000}
+        # 194개가 되면 상자 192·193 이 원래 아래층 상자 비트 2228 & 80·40 과 겹친다
+        with self.assertRaisesRegex(ValueError, '2228'):
+            plan(rom, doc(*boxes), 0x3E8000, at, base)
+        for row in base['lower']:
+            row['flag_index'] += 1
+        _, writes, _, tables, _ = plan(rom, doc(*boxes), 0x3E8000, at, base)
+        self.assertEqual(len(tables['chests']), 194)
+        self.assertEqual(tables['chests'][192], {'reward': 0x100 + 987})
+        sites = {addr: new for addr, new, _, _ in writes}
+        self.assertEqual(sites[0x1FFC7E], b'\x3f')
+        check(rom, doc(*boxes), 0x3E8000, at, base)
+        # 바탕 표의 상자 수가 맵 칸과 다르면 거부
+        wrong = json.loads(json.dumps(base))
+        wrong['chest_maps'][-1]['count'] += 1
+        wrong['chests'].append({'reward': 1})
+        with self.assertRaises(ValueError):
+            plan(rom, doc(*boxes), 0x3E8000, at, wrong)
 
     @unittest.skipUnless(ROM.is_file(), '롬 없음')
     def test_patch_formats_and_check(self):
@@ -119,6 +147,8 @@ class ChestPlaceTests(unittest.TestCase):
             (one(furniture(40, 24, unused='1')), at),
             (one(furniture(40, 24, flag_index=0x14, mask=1)), at),   # 7E:2240 은 발밑 표의 비트
             (one(furniture(40, 24, flag_index=0x10, mask=1)), at),   # 7E:223C & 01 은 두 칸 앞·아래층 상자가 씀
+            (one(furniture(40, 24, flag_index=0x0C, mask=1)), at),   # 7E:2238 은 전투 0C 의 21:8C2F 가 읽음
+            (one(furniture(40, 24, flag_index=0x24, mask=1)), at),   # 7E:2250 은 상자 비트 자리 밖
             (one(furniture(30, 12), map_name='00/01'), at),            # 발밑 항목 (31,14) 를 덮음
             (one(furniture(5, 4), map_name='0E/02'), at),              # 두 칸 앞 항목 (6,6) 을 덮음
             ({'format': FORMAT, 'maps': [{'map': '00/01', 'chests': [{'x': 30, 'y': 13, 'block': CHEST_BLOCK,
@@ -127,6 +157,14 @@ class ChestPlaceTests(unittest.TestCase):
         for value, places in bad:
             with self.subTest(value=value), self.assertRaises(ValueError):
                 plan(rom, value, 0x3E8000, places)
+
+    @unittest.skipUnless(ROM.is_file(), '롬 없음')
+    def test_furniture_flag_limit_follows_area_not_search_range(self):
+        # 서랍 범위(222C~223F) 밖이라도 비어 있는 상자 비트(7E:2243)면 받는다
+        rom = Rom(ROM.read_bytes())
+        value = {'format': FORMAT, 'maps': [{'map': '01/02', 'furniture': [furniture(40, 24, flag_index=0x17, mask=1)]}]}
+        _, _, _, tables, _ = plan(rom, value, 0x3E8000, {'search': 0x3F9000})
+        self.assertEqual(tables['search'][-1]['flag_index'], 0x17)
 
     @unittest.skipUnless(ROM.is_file(), '롬 없음')
     def test_lower_row_buried_only_where_engine_reads_it(self):
