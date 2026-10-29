@@ -6,6 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dq5chestplace import FORMAT, check, map_key, patch, plan
+from dq5build import build, parse_at
 from dq5map import Rom
 from test_dq5chestwrite import ROM
 
@@ -15,6 +16,10 @@ CHEST_BLOCK = 384
 def doc(*boxes, map_name='01/02'):
     return {'format': FORMAT, 'maps': [{'map': map_name, 'chests': [
         {'x': x, 'y': y, 'block': block, 'reward': reward} for x, y, block, reward in boxes]}]}
+
+
+def furniture(x, y, **change):
+    return {'x': x, 'y': y, 'block': 204, 'reward': 0x3FD, 'flag_index': 0x0B, 'mask': 2} | change
 
 
 class ChestPlaceTests(unittest.TestCase):
@@ -55,6 +60,74 @@ class ChestPlaceTests(unittest.TestCase):
         check(rom, value, 0x3E8000, {'chests': 0x3F8000})
 
     @unittest.skipUnless(ROM.is_file(), '롬 없음')
+    def test_furniture_appends_search_row_at_attribute_cell(self):
+        rom = Rom(ROM.read_bytes())
+        value = {'format': FORMAT, 'maps': [{'map': '01/02', 'furniture': [
+            {'x': 40, 'y': 24, 'block': 204, 'reward': 0x3FD, 'flag_index': 0x0B, 'mask': 2}]}]}
+        _, _, _, tables, new = plan(rom, value, 0x3E8000, {'search': 0x3F9000})
+        self.assertEqual(new, [])
+        self.assertEqual(tables['search'][-1], {'group': 1, 'map': 2, 'x': 41, 'y': 26, 'unused': 1, 'reward': 0x3FD,
+                                                'flag_index': 0x0B, 'mask': 2})
+        check(rom, value, 0x3E8000, {'search': 0x3F9000})
+        for change in ({'flag_index': 4, 'mask': 0x80}, {'block': CHEST_BLOCK}, {'mask': 0}, {'reward': 0xD00A}):
+            bad = {'format': FORMAT, 'maps': [{'map': '01/02', 'furniture': [value['maps'][0]['furniture'][0] | change]}]}
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                plan(rom, bad, 0x3E8000, {'search': 0x3F9000})
+
+    @unittest.skipUnless(ROM.is_file(), '롬 없음')
+    def test_chest_and_two_furniture_in_one_map(self):
+        rom = Rom(ROM.read_bytes())
+        value = {'format': FORMAT, 'maps': [{'map': '01/02', 'chests': [{'x': 36, 'y': 26, 'block': CHEST_BLOCK,
+                                                                         'reward': 0x4BA}],
+                                             'furniture': [furniture(40, 24), furniture(30, 18, mask=4)]}]}
+        at = {'chests': 0x3F8000, 'search': 0x3F9000}
+        _, _, _, tables, new = plan(rom, value, 0x3E8000, at)
+        self.assertEqual(new, [(1, 2, (37, 27), 0x4BA)])
+        self.assertEqual([(r['x'], r['y'], r['mask']) for r in tables['search'][-2:]], [(41, 26, 2), (31, 20, 4)])
+        check(rom, value, 0x3E8000, at)
+
+    @unittest.skipUnless(ROM.is_file(), '롬 없음')
+    def test_patched_rom_is_not_patched_again(self):
+        rom = Rom(ROM.read_bytes())
+        first = {'format': FORMAT, 'maps': [{'map': '01/02', 'furniture': [furniture(40, 24)]}]}
+        manifest = patch(rom, first, 0x3E8000, {'search': 0x3F9000})
+        writes = [(parse_at(w['at'])[0], bytes.fromhex(w['hex']), bytes.fromhex(w['orig']) if 'orig' in w else None,
+                   w['note']) for w in manifest['writes']]
+        built = Rom(build(rom.d, [('first', manifest['rom_size'], writes)], manifest['rom_size'])[0])
+        check(rom, first, 0x3E8000, {'search': 0x3F9000})
+        # 표를 옮긴 롬 위에 다시 쌓지 않는다. 가구를 더하려면 원래 롬에서 입력 하나에 모두 적는다
+        second = {'format': FORMAT, 'maps': [{'map': '01/02', 'furniture': [furniture(30, 18, mask=4)]}]}
+        with self.assertRaisesRegex(ValueError, '표를 옮긴 롬'):
+            plan(built, second, 0x3EC000, {'search': 0x3FA000})
+
+    @unittest.skipUnless(ROM.is_file(), '롬 없음')
+    def test_rejects_furniture(self):
+        rom = Rom(ROM.read_bytes())
+        at = {'search': 0x3F9000, 'chests': 0x3F8000, 'chest_maps': 0x1EEE4E}
+
+        def one(*rows, map_name='01/02'):
+            return {'format': FORMAT, 'maps': [{'map': map_name, 'furniture': list(rows)}]}
+
+        bad = [
+            (one(furniture(3, 3), map_name='17/00'), at),            # 기존 서랍 (4,4) 를 덮음
+            ({'format': FORMAT, 'maps': [{'map': '17/00', 'chests': [{'x': 3, 'y': 3, 'block': CHEST_BLOCK,
+                                                                      'reward': 1}]}]}, at),  # 상자가 (4,4) 를 덮음
+            (one(furniture(40, 24), furniture(40, 24, mask=4)), at),  # 같은 칸에 두 번
+            (one(furniture(40, 24)), {}),                             # 늘어난 서랍 표가 원래 자리에 들지 않음
+            (one(furniture(40, 24, unused=256)), at),
+            (one(furniture(40, 24, unused='1')), at),
+            (one(furniture(40, 24, flag_index=0x14, mask=1)), at),   # 7E:2240 은 발밑 표의 비트
+            (one(furniture(40, 24, flag_index=0x10, mask=1)), at),   # 7E:223C & 01 은 두 칸 앞·아래층 상자가 씀
+            (one(furniture(30, 12), map_name='00/01'), at),            # 발밑 항목 (31,14) 를 덮음
+            (one(furniture(5, 4), map_name='0E/02'), at),              # 두 칸 앞 항목 (6,6) 을 덮음
+            ({'format': FORMAT, 'maps': [{'map': '00/01', 'chests': [{'x': 30, 'y': 13, 'block': CHEST_BLOCK,
+                                                                      'reward': 1}]}]}, at),  # 상자가 발밑 (31,14) 를 덮음
+        ]
+        for value, places in bad:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                plan(rom, value, 0x3E8000, places)
+
+    @unittest.skipUnless(ROM.is_file(), '롬 없음')
     def test_rejects(self):
         rom = Rom(ROM.read_bytes())
         at = {'chests': 0x3F8000}
@@ -67,6 +140,7 @@ class ChestPlaceTests(unittest.TestCase):
             (doc((36, 26, CHEST_BLOCK, 1)), 0x1E8000, at),          # 늘린 롬이 아닌 맵 자리
             (doc((36, 26, CHEST_BLOCK, 1)), 0x3F8000, at),          # 맵 레코드와 상자 표가 겹침
             ({'format': FORMAT, 'maps': []}, 0x3E8000, at),
+            ({'format': FORMAT, 'maps': [{'map': '01/02', 'chests': [], 'furniture': []}]}, 0x3E8000, at),
             ({'format': FORMAT, 'maps': [doc((36, 26, CHEST_BLOCK, 1))['maps'][0]] * 2}, 0x3E8000, at),
             (doc((36, 26, CHEST_BLOCK, 1)), 0x3E8000, {}),           # 상자 표가 원래 자리에 들지 않음
             (doc((2, 44, CHEST_BLOCK, 1), map_name='19/00'), 0x3E8000, at),  # 표에 없는 맵의 기존 상자 칸

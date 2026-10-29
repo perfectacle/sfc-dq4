@@ -1,16 +1,18 @@
-"""DQ5 실내 맵에 보물상자를 놓고, 그 상자의 내용물을 보상 표에 함께 넣는다.
+"""DQ5 실내 맵에 보물상자·가구를 놓고, 그 내용물을 보상 표에 함께 넣는다.
 
 sfc/dq5/docs/dq5-build-format.md 의 「보물상자 놓기」. 맵마다 상자 블록 배치를 더해 맵 레코드를 다시 싸고
 (dq5mapcompile·dq5mapwrite), 그 롬에서 셀 버퍼를 다시 풀어 상자 칸(+7 = 84) 순서를 센다. 상자 번호는 맵 셀 순서로
 정해지므로(25:FAB0), 기존 상자의 내용물은 좌표로 따라가게 상자 내용물·맵 연결 표를 다시 짜서 dq5chestreloc 로 쓴다.
+가구(タンス·ツボ·タル)는 블록 안에 새로 생긴 가구 칸(+4 = 93, +7 = A7·B9 등)을 찾아 서랍 표 끝에 항목을 더한다.
 결과는 맵 레코드와 상자 표를 함께 담은 dq5patch/1 하나다.
 
   python sfc/dq5/tools/dq5chestplace.py rom/dq5.sfc patch work/place.json -o work/place.dq5patch.json \\
       --map-at BB:AAAA [--chests-at BB:AAAA] [--chest-maps-at BB:AAAA]
   python sfc/dq5/tools/dq5chestplace.py rom/dq5.sfc check work/place.json --map-at … [같은 자리 선택]
 
-입력 format=dq5chestplace/1, maps[{map:"GG/MM", chests[{x,y,block,reward}]}]. x·y 는 블록 원점(왼쪽 위),
-block 은 그 맵 종류의 블록 번호다. 블록이 놓인 칸 안에 상자 칸이 하나 새로 생겨야 한다.
+입력 format=dq5chestplace/1, maps[{map:"GG/MM", chests[{x,y,block,reward}],
+furniture[{x,y,block,reward,flag_index,mask[,unused]}]}]. x·y 는 블록 원점(왼쪽 위), block 은 실내 맵 블록 번호다.
+블록이 놓인 칸 안에 상자 칸(가구 칸)이 하나 새로 생겨야 한다.
 """
 import argparse
 import json
@@ -27,6 +29,14 @@ from dq5mapcompile import block_sizes, cell_buffer, compile_places, extract
 from dq5mapwrite import all_maps, encode, pointer_addr, to_cpu
 
 FORMAT = 'dq5chestplace/1'
+# 서랍 표 86항목이 놓인 칸의 속성. タンス 는 아래층(+4) 93, ツボ·タル 는 위층(+7) A7·B9 였다. D3·D4 는 위층에만 있는
+# タル·ツボ 칸으로, 게임에서 149·135 메시지를 확인했다(dq5-map-format.md)
+LOWER_FURNITURE = {0x93}
+UPPER_FURNITURE = {0xA7, 0xB9, 0xD3, 0xD4}
+# 서랍 열림 비트는 7E:222C + flag_index. 2240 부터는 발밑 표의 비트다
+SEARCH_FLAGS = 0x2240 - 0x222C
+BOX_FIELDS = {'x', 'y', 'block', 'reward'}
+FURNITURE_FIELDS = BOX_FIELDS | {'flag_index', 'mask'}
 
 
 def map_key(text, label):
@@ -47,34 +57,37 @@ def map_writes(rom, doc, at):
     known, writes, placed, seen = set(all_maps(rom)), [], [], set()
     for i, item in enumerate(doc['maps']):
         label = f'maps[{i}]'
-        fields(item, {'map', 'chests'}, label)
+        fields(item, {'map', 'chests', 'furniture'}, label)
         bc, bd = map_key(item.get('map'), label)
         if (bc, bd) not in known or bc >= 0x50:
             raise ValueError(f'{label}: 일반 실내 맵(그룹 00~35)만 받음')
         if (bc, bd) in seen:
             raise ValueError(f'{label}: 같은 맵을 두 번 적음')
         seen.add((bc, bd))
-        boxes = item.get('chests')
-        if not isinstance(boxes, list) or not boxes:
-            raise ValueError(f'{label}: chests 는 비지 않은 배열이어야 함')
+        boxes, furniture = item.get('chests', []), item.get('furniture', [])
+        if not isinstance(boxes, list) or not isinstance(furniture, list) or not boxes + furniture:
+            raise ValueError(f'{label}: chests·furniture 는 배열이고 둘 중 하나는 비지 않아야 함')
         src = extract(rom, bc, bd)
         sizes = block_sizes(rom, False)
-        for k, box in enumerate(boxes):
-            fields(box, {'x', 'y', 'block', 'reward'}, f'{label}.chests[{k}]')
-            if set(box) != {'x', 'y', 'block', 'reward'}:
-                raise ValueError(f'{label}.chests[{k}]: x·y·block·reward 를 모두 적어야 함')
-            integer(box['block'], len(sizes) - 1, 'block')
-            width, height = sizes[box['block']]
-            if integer(box['x'], 255, 'x') + width > src['width'] or integer(box['y'], 255, 'y') + height > src['height']:
-                raise ValueError(f'{label}.chests[{k}]: 블록이 맵 {src["width"]}×{src["height"]} 밖으로 나감')
-            reloc.row_encode('chests', {'reward': box['reward']}, f'{label}.chests[{k}].reward')
-            src['placements'].append([box['x'], box['y'], box['block']])
+        for kind, rows, need in (('chests', boxes, BOX_FIELDS), ('furniture', furniture, FURNITURE_FIELDS)):
+            for k, box in enumerate(rows):
+                where = f'{label}.{kind}[{k}]'
+                fields(box, need | ({'unused'} if kind == 'furniture' else set()), where)
+                if need - set(box):
+                    raise ValueError(f'{where}: {sorted(need)} 를 모두 적어야 함')
+                integer(box['block'], len(sizes) - 1, 'block')
+                width, height = sizes[box['block']]
+                if integer(box['x'], 255, 'x') + width > src['width'] or integer(box['y'], 255, 'y') + height > src['height']:
+                    raise ValueError(f'{where}: 블록이 맵 {src["width"]}×{src["height"]} 밖으로 나감')
+                if kind == 'chests':
+                    reloc.row_encode('chests', {'reward': box['reward']}, f'{where}.reward')
+                src['placements'].append([box['x'], box['y'], box['block']])
         record = encode(compile_places(src, rom, False))
         pointer = lorom(pointer_addr(rom, bc, bd))
         writes.append((at, record, None, f'map {bc:02X}/{bd:02X}'))
         writes.append((pointer, to_cpu(at).to_bytes(3, 'little'), bytes(rom.d[pointer:pointer + 3]),
                        f'map {bc:02X}/{bd:02X} 포인터'))
-        placed.append(((bc, bd), boxes, sizes))
+        placed.append(((bc, bd), boxes, furniture, sizes))
         at += len(record)
     return writes, placed, at
 
@@ -89,6 +102,26 @@ def cell_rewards(rom, tables):
         for k, xy in enumerate(cells):
             out[(row['group'], row['map'], xy)] = tables['chests'][start + k]['reward']
         start += row['count']
+    return out
+
+
+def furniture_cells(data, bc, bd):
+    width = map_dimensions(Rom(data), bc, bd)[0]
+    cells, _ = cell_buffer(data, bc, bd)
+    return {(i % width, i // width) for i, cell in enumerate(cells)
+            if cell[4] in LOWER_FURNITURE or cell[7] in UPPER_FURNITURE}
+
+
+def flag_bits(tables):
+    """표마다의 열림 비트 → {(WRAM 주소, 마스크)}. 새 서랍 항목이 다른 보상과 비트를 나눠 쓰지 않게 본다."""
+    out = set()
+    for n in range(len(tables['chests'])):
+        out.add((0x2210 + (n >> 3), 0x80 >> (n & 7)))
+    bases = {'search': 0x222C, 'foot': 0x2240}
+    for name in ('search', 'foot', 'ahead', 'lower'):
+        for row in tables[name]:
+            addr = bases[name] + row['flag_index'] if name in bases else 0x2210 + (row['flag_index'] & 0x7F)
+            out |= {(addr, bit) for bit in (1, 2, 4, 8, 16, 32, 64, 128) if row['mask'] & bit}
     return out
 
 
@@ -119,12 +152,13 @@ def plan(rom, doc, map_at, at=None):
     rewards = cell_rewards(rom, tables)
     rows = {(row['group'], row['map']): row for row in tables['chest_maps']}
     new_cells = []
-    for (bc, bd), boxes, sizes in placed:
+    added = []
+    for (bc, bd), boxes, furniture, sizes in placed:
         before, after = set(chest_cells(rom, bc, bd)), chest_cells(middle, bc, bd)
-        if (bc, bd) not in rows and before:
+        if boxes and (bc, bd) not in rows and before:
             raise ValueError(f'{bc:02X}/{bd:02X}: 표에 없는 맵인데 상자 칸 {len(before)}개가 이미 있음. 그 칸들의 '
                              '내용물을 정할 입력이 없어 받지 않음')
-        footprint = {(box['x'] + i, box['y'] + j) for box in boxes
+        footprint = {(box['x'] + i, box['y'] + j) for box in boxes + furniture
                      for i in range(sizes[box['block']][0]) for j in range(sizes[box['block']][1])}
         changed = changed_cells(rom.d, middle.d, bc, bd) - footprint
         if changed:
@@ -143,12 +177,49 @@ def plan(rom, doc, map_at, at=None):
             raise ValueError(f'{bc:02X}/{bd:02X}: 새 상자 칸 수가 놓은 블록 수와 다름')
         if (bc, bd) in rows:
             rows[(bc, bd)]['count'] = len(after)
-        else:
+        elif boxes:
             tables['chest_maps'].append({'group': bc, 'map': bd, 'count': len(after)})
+        old_furniture, new_furniture = furniture_cells(rom.d, bc, bd), furniture_cells(middle.d, bc, bd)
+        # 블록이 기존 서랍 항목의 칸을 덮으면 그 항목은 다른 그림 밑의 고아가 된다. 덮은 칸의 아래층 93 은 남을 수
+        # 있어(17/00 (4,4)) 속성만으로는 못 가린다
+        lost = sorted(xy for row in tables['search'] if (row['group'], row['map']) == (bc, bd)
+                      for xy in [(row['x'], row['y'])] if xy in footprint or xy not in new_furniture or xy in after)
+        if lost:
+            raise ValueError(f'{bc:02X}/{bd:02X}: 블록이 기존 서랍 항목의 가구 칸 {lost} 을 덮거나 지움')
+        # 발밑·두 칸 앞·아래층 상자는 칸 속성이 아니라 좌표로 찾으므로, 블록이 덮으면 보상이 그림 밑에 묻힌다
+        buried = sorted((name, row['x'], row['y']) for name in ('foot', 'ahead', 'lower') for row in tables[name]
+                        if (row['group'], row['map']) == (bc, bd) and (row['x'], row['y']) in footprint)
+        if buried:
+            raise ValueError(f'{bc:02X}/{bd:02X}: 블록이 기존 조사 항목 {buried} 의 칸을 덮음')
+        used = set()
+        for k, box in enumerate(furniture):
+            width, height = sizes[box['block']]
+            new = [xy for xy in new_furniture - old_furniture
+                   if box['x'] <= xy[0] < box['x'] + width and box['y'] <= xy[1] < box['y'] + height]
+            if len(new) != 1:
+                raise ValueError(f'{bc:02X}/{bd:02X} furniture[{k}]: 블록 안에 새 가구 칸이 {len(new)}개(1개여야 함)')
+            if new[0] in used:
+                raise ValueError(f'{bc:02X}/{bd:02X} furniture[{k}]: 새 가구 칸 {new[0]} 을 다른 항목이 이미 씀')
+            used.add(new[0])
+            if integer(box['flag_index'], 255, 'flag_index') >= SEARCH_FLAGS:
+                raise ValueError(f'{bc:02X}/{bd:02X} furniture[{k}]: flag_index 는 {SEARCH_FLAGS - 1:02X} 이하여야 함'
+                                 f'(7E:222C~223F)')
+            row = {'group': bc, 'map': bd, 'x': new[0][0], 'y': new[0][1], 'unused': box.get('unused', 1),
+                   'reward': box['reward'], 'flag_index': box['flag_index'], 'mask': box['mask']}
+            added.append(row)
     tables['chests'] = []
     for row in tables['chest_maps']:
         cells = chest_cells(middle, row['group'], row['map'])
         tables['chests'] += [{'reward': rewards[(row['group'], row['map'], xy)]} for xy in cells]
+    taken = flag_bits(tables)
+    for k, row in enumerate(added):
+        reloc.row_encode('search', row, f'furniture {k}')
+        bits = {(0x222C + row['flag_index'], bit) for bit in (1, 2, 4, 8, 16, 32, 64, 128) if row['mask'] & bit}
+        if bits & taken:
+            raise ValueError(f'{row["group"]:02X}/{row["map"]:02X} ({row["x"]},{row["y"]}): 열림 비트 '
+                             f'7E:{0x222C + row["flag_index"]:04X} & {row["mask"]:02X} 를 다른 보상이 이미 씀')
+        taken |= bits
+    tables['search'] += added
     chest_writes, chest_mb = reloc.writes_for(middle, tables, at)
     record = (lorom(map_at), end)
     for addr, new, _, note in chest_writes:
@@ -183,7 +254,17 @@ def check(rom, doc, map_at, at=None):
         raise ValueError('만든 롬에서 칸마다 모은 상자 내용물이 원본과 놓은 상자를 합친 것과 다름')
     placed = len(new_cells)
     old = reloc.parse(rom)
-    print(f'상자 {len(old["chests"])} → {len(tables["chests"])}개(놓은 {placed}개), 맵 {len(doc["maps"])}곳; '
+    if tables['search'][:len(old['search'])] != old['search']:
+        raise ValueError('기존 서랍 표 항목이 바뀜')
+    open_cells = {}
+    for row in tables['search']:
+        key = (row['group'], row['map'])
+        if key not in open_cells:
+            open_cells[key] = furniture_cells(built.d, *key) - set(chest_cells(built, *key))
+        if (row['x'], row['y']) not in open_cells[key]:
+            raise ValueError(f'{key[0]:02X}/{key[1]:02X} ({row["x"]},{row["y"]}): 만든 롬에서 가구 칸이 아님')
+    print(f'상자 {len(old["chests"])} → {len(tables["chests"])}개(놓은 {placed}개), '
+          f'서랍 {len(old["search"])} → {len(tables["search"])}개, 맵 {len(doc["maps"])}곳; '
           f'쓰기 {len(writes)}개, 롬 {manifest["rom_size"]}MB 검사 통과')
 
 
