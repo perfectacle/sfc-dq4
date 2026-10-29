@@ -6,6 +6,8 @@
   새 세트 70(6타일): 방향·프레임마다 다른 시험 무늬, 그림 2B 를 70 으로
 늘린 표 롬(grown)은 --sets-at 으로 세트 표를 256칸으로 옮기고, 세트 04 와 새 세트 70 은 위와 같게, 그림 29 는 세트 84 대신
 새 8타일 세트 FF(세트 84 의 시험 그림, 팔레트 2)로 잇는다.
+다시 늘린 롬(regrown)은 grown 롬 위에 dq5spritewrite.py 를 한 번 더 돌린다. --sets-at 없이 새 세트를 더하면 거부되는지 보고,
+--regrow-at 으로 표를 다시 옮기며 새 세트 71(무늬, 팔레트 1)을 더해 그림 2B 를 잇는다.
 원본 롬과 고친 롬에서 dq5gfxdump.lua 로 WRAM·VRAM·OAM·CGRAM 을 덤프하고, 각 롬을 dq5sprite.py 의 비교(VRAM 타일·칸 목록·
 OAM 묶음 픽셀)로 본다. 시험 그림은 롬에서 뽑으므로 --out 의 새 하위 폴더에만 둔다.
   MESENCE=… python sfc/dq5/tools/dq5spritewritecheck.py rom/dq5.sfc --state work/state/ship.mss
@@ -24,7 +26,7 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dq5sprite as S  # noqa: E402
 from dq5map import Rom  # noqa: E402
-from dq5spritewrite import FORMAT, dump_image  # noqa: E402
+from dq5spritewrite import FORMAT, apply, dump_image, patch  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 RECORDS = {'format': 'dq5npcrecord/1', 'entries': [
@@ -32,6 +34,7 @@ RECORDS = {'format': 'dq5npcrecord/1', 'entries': [
     {'list': '05:8CD4', 'index': 2, 'time': 'day', 'fields': {'x': 28, 'y': 12, 'facing': 'down', 'gfx': 0x29}}]}
 SIMPLE, OVERLAP, NEW, NEW_GFX = 0x04, 0x84, 0x70, 0x2B
 GROWN, GROWN_GFX, GROWN_PALETTE = 0xFF, 0x29, 2
+REGROWN, REGROWN_PALETTE = 0x71, 1
 
 
 def pattern(path):
@@ -56,7 +59,7 @@ def pattern(path):
 def donor(rom, layout, limit, exclude):
     """타일 수가 limit 이하인 같은 배치의 다른 세트 중 가장 큰 것(그림이 눈에 띄게 다르게)."""
     best = None
-    for s in range(S.SET_COUNT):
+    for s in S.set_numbers(rom):
         rec = S.set_record(rom, s)
         if rec and rec['layout'] == layout and s not in exclude and rec['tiles'] <= limit:
             if best is None or rec['tiles'] > best[1]:
@@ -106,6 +109,8 @@ def main():
     ap.add_argument('--out', type=Path, default='work/spritewritecheck')
     ap.add_argument('--at', default='3A:8000', help='원래 자리에 들어가지 않는 자료를 놓을 곳(dq5spritewrite.py --at)')
     ap.add_argument('--sets-at', default='3B:8000', help='늘린 세트 표와 레코드를 놓을 곳(dq5spritewrite.py --sets-at)')
+    ap.add_argument('--regrow-at', default='3C:8000', help='grown 롬의 표와 레코드를 다시 옮길 곳')
+    ap.add_argument('--regrow-data-at', default='3D:8000', help='regrown 롬에 더하는 세트의 타일 자료를 놓을 곳')
     args = ap.parse_args()
     if not args.mesence:
         ap.error('--mesence 또는 MESENCE가 필요함')
@@ -145,6 +150,17 @@ def main():
                               ('grown', [out / 'records.dq5patch.json', out / 'grown.dq5patch.json'])):
             roms[name] = out / f'{name}.sfc'
             tool('dq5build.py', original, 'build', *patches, '--size', '2', '-o', roms[name], '--ips', out / f'{name}.ips')
+        grown = Rom(roms['grown'].read_bytes())
+        regrown_doc = {'format': FORMAT, 'new_sets': [{'set': f'{REGROWN:02X}', 'image': 'pattern.png', 'palette': REGROWN_PALETTE}],
+                       'gfx': [{'gfx': f'{NEW_GFX:02X}', 'set': f'{REGROWN:02X}'}]}
+        regrow_data_at, regrow_at = (int(v.replace(':', ''), 16) for v in (args.regrow_data_at, args.regrow_at))
+        try:
+            patch(grown, regrown_doc, out, regrow_data_at)
+            refused = False
+        except ValueError:
+            refused = True
+        roms['regrown'] = out / 'regrown.sfc'
+        roms['regrown'].write_bytes(apply(grown, patch(grown, regrown_doc, out, regrow_data_at, sets_at=regrow_at)).d)
         krlua = Path(subprocess.run(['krpatch', 'sfc', 'lua'], capture_output=True, text=True,
                                     check=True, timeout=30).stdout.strip())
         libdir = out / 'lib'
@@ -158,9 +174,9 @@ def main():
         for s in (SIMPLE, OVERLAP, NEW):
             before, after = S.decode_set(base, s), S.decode_set(edited, s)
             changed[f'{s:02X}'] = before is None or before['tile_data'] != after['tile_data']
-        grown = Rom(roms['grown'].read_bytes())
         changed[f'{GROWN:02X}'] = S.decode_set(base, GROWN) is None and S.decode_set(grown, GROWN) is not None
-        mine, big = results['edited'], results['grown']
+        mine, big, again = results['edited'], results['grown'], results['regrown']
+        regrown = Rom(roms['regrown'].read_bytes())
 
         def same(r, sets):
             return all(f'{s:02X}' in r['sets'] and r['sets'][f'{s:02X}'][0] == r['sets'][f'{s:02X}'][1] for s in sets)
@@ -175,6 +191,10 @@ def main():
             'original': all(v[0] == v[1] for v in results['original']['sets'].values()),
             'grown': same(big, (SIMPLE, NEW, GROWN)) and shown(big, (SIMPLE, NEW, GROWN)) and big['groups'] == big['hits'] > 0
                      and S.set_record(grown, GROWN)['palette'] == GROWN_PALETTE and big['other_palette'] == 0,
+            'regrown': refused and S.set_table(regrown)[0] == regrow_at
+                       and same(again, (SIMPLE, REGROWN, GROWN)) and shown(again, (SIMPLE, REGROWN, GROWN))
+                       and again['groups'] == again['hits'] > 0 and again['other_palette'] == 0
+                       and S.set_record(regrown, REGROWN)['palette'] == REGROWN_PALETTE,
         }
         report = {'donors': {'simple': f'{simple:02X}', 'overlap': f'{overlap:02X}'}, 'results': results,
                   'changed': changed, 'checks': checks}
@@ -183,7 +203,8 @@ def main():
             print(f'{name}: 덤프 {r["dumps"]}개, 세트 ' + ' '.join(f'{s} {v[0]}/{v[1]}' for s, v in sorted(r['sets'].items()))
                   + f', OAM 묶음 {r["hits"]}/{r["groups"]}(레코드와 다른 팔레트 {r["other_palette"]}), 프레임 ' + ' '.join(r['frames']))
         print(f'시험 그림: 세트 {SIMPLE:02X} ← {simple:02X}, {OVERLAP:02X} ← {overlap:02X}, 새 세트 {NEW:02X} ← 무늬(그림 {NEW_GFX:02X}), '
-              f'늘린 표의 새 세트 {GROWN:02X} ← {overlap:02X}(그림 {GROWN_GFX:02X}, 팔레트 {GROWN_PALETTE})')
+              f'늘린 표의 새 세트 {GROWN:02X} ← {overlap:02X}(그림 {GROWN_GFX:02X}, 팔레트 {GROWN_PALETTE}), '
+              f'다시 늘린 표의 새 세트 {REGROWN:02X} ← 무늬(그림 {NEW_GFX:02X}, 팔레트 {REGROWN_PALETTE}, --sets-at 없이 거부 {refused})')
         for key, ok in checks.items():
             print(f'{key}: {"통과" if ok else "불일치"}')
         if not all(checks.values()):

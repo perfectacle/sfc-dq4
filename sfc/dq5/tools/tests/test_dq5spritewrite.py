@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import dq5sprite as S  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
 from dq5spritewrite import (  # noqa: E402
-    FORMAT, cell_tiles, commands, decoded, deduplicate, grow_table, packed, place, plan, tile_bytes,
+    FORMAT, cell_tiles, commands, decoded, deduplicate, grow_table, packed, patch, place, plan, tile_bytes,
 )
 
 
@@ -111,8 +111,8 @@ class GrowTableTests(unittest.TestCase):
         pieces += [(site, b'\x1f') for site in S.SET_BANK_SITES]
         self.rom = rom_with(pieces)
 
-    def apply(self, writes):
-        data = bytearray(self.rom.d)
+    def apply(self, writes, rom=None):
+        data = bytearray((self.rom if rom is None else rom).d)
         for w in writes:
             raw = bytes.fromhex(w['hex'])
             if 'orig' in w:
@@ -130,6 +130,44 @@ class GrowTableTests(unittest.TestCase):
         self.assertEqual((S.set_record(rom, 0xFF)['data'], S.set_record(rom, 0xFF)['tiles']), (0x3A8000, 5))
         self.assertIsNone(S.set_record(rom, 0x70))
         self.assertIsNone(S.set_record(self.rom, 0xFF))
+
+    def test_patch_end_to_end(self):
+        # patch(sets_at=…) 로 새 8타일 세트 A5 를 더한 롬을 다시 patch 한다. 표를 옮긴 롬에 새 세트를 더할 때
+        # --sets-at 이 없으면 죽은 옛 표(1F:D63D)에 쓰게 되므로 거부해야 한다.
+        folder = Path(tempfile.mkdtemp())
+        two = [[2] * 48 for _ in range(64)]
+        save(folder / 'two.png', two)
+        save(folder / 'five.png', [[5] * 48 for _ in range(64)])
+        save(folder / 'flat.png', [[1] * 32 for _ in range(96)])
+        doc = {'format': FORMAT, 'new_sets': [{'set': 'A5', 'image': 'two.png', 'palette': 3}],
+               'gfx': [{'gfx': '01', 'set': 'A5'}]}
+        with self.assertRaises(ValueError):
+            patch(self.rom, doc, folder, at=0x3A8000)
+        grown = self.apply(patch(self.rom, doc, folder, at=0x3A8000, sets_at=0x3B8000)['writes'])
+        self.assertEqual(S.set_table(grown), (0x3B8000, 0x3B, 0x100))
+        self.assertEqual([s for s in S.set_numbers(grown) if S.set_record(grown, s)], [0x00, 0x80, 0xA5])
+        self.assertEqual(S.set_record(grown, 0x80)['cells'], S.set_record(self.rom, 0x80)['cells'])
+        a5 = S.decode_set(grown, 0xA5)
+        self.assertEqual((a5['palette'], a5['data'], S.gfx_set(grown, 1)), (3, 0x3A8000, 0xA5))
+        tiles, refs = deduplicate(cell_tiles(two, 'overlap'))
+        self.assertEqual(decoded(a5['cells'], a5['tile_data'], 'overlap'), decoded(refs, tiles, 'overlap'))
+
+        more = {'format': FORMAT, 'new_sets': [{'set': '71', 'image': 'flat.png', 'palette': 1}],
+                'gfx': [{'gfx': '02', 'set': '71'}]}
+        with self.assertRaises(ValueError):
+            patch(grown, more, folder, at=0x3A9000)
+        again = self.apply(patch(grown, more, folder, at=0x3A9000, sets_at=0x3C8000)['writes'], grown)
+        self.assertEqual(S.set_table(again)[:2], (0x3C8000, 0x3C))
+        self.assertEqual([s for s in S.set_numbers(again) if S.set_record(again, s)], [0x00, 0x71, 0x80, 0xA5])
+        self.assertEqual(S.set_record(again, 0xA5)['data'], 0x3A8000)
+
+        # 이미 있는 세트는 --sets-at 없이 옮긴 레코드 자리(뱅크 3B)에서 고친다.
+        writes = patch(grown, {'format': FORMAT, 'sets': [{'set': 'A5', 'image': 'five.png', 'palette': 2}]}, folder)['writes']
+        record = S.set_record(grown, 0xA5)['record']
+        self.assertIn(f'{record >> 16:02X}:{record & 0xFFFF:04X}', [w['at'] for w in writes])
+        self.assertFalse([w for w in writes if w['at'].startswith('1F:')])
+        edited = S.decode_set(self.apply(writes, grown), 0xA5)
+        self.assertEqual((edited['palette'], edited['data']), (2, 0x3A8000))
 
     def test_rejects_bank_overflow_and_overlap(self):
         with self.assertRaises(ValueError):

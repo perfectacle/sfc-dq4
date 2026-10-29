@@ -57,7 +57,7 @@ def users(rom):
     for g in range(S.GFX_COUNT):
         gfx.setdefault(S.gfx_set(rom, g), []).append(g)
     out = {p: [] for p in range(4)}
-    for s in range(S.SET_COUNT):
+    for s in S.set_numbers(rom):
         rec = S.set_record(rom, s)
         if rec is not None:
             out[rec['palette']].append({'set': f'{s:02X}', 'gfx': [f'{g:02X}' for g in gfx.get(s, [])]})
@@ -72,7 +72,7 @@ def dump(rom):
             'map_palettes': [{'index': i, 'map': f'{e["bc"]:02X}/{e["bd"]:02X}', 'line': f'{e["line"]:02X}',
                               'colors': e['colors'][1:]} for i, e in enumerate(S.map_palettes(rom))],
             'sets': [{'set': f'{s:02X}', 'palette': S.set_record(rom, s)['palette']}
-                     for s in range(S.SET_COUNT) if S.set_record(rom, s) is not None]}
+                     for s in S.set_numbers(rom) if S.set_record(rom, s) is not None]}
 
 
 def edits(rom, doc):
@@ -117,7 +117,7 @@ def edits(rom, doc):
         if not isinstance(name, str) or not re.fullmatch(r'[0-9A-Fa-f]{2}', name):
             raise ValueError(f'{label}.set: 두 자리 16진 문자열')
         s = int(name, 16)
-        rec = S.set_record(rom, s) if s < S.SET_COUNT else None
+        rec = S.set_record(rom, s) if s in S.set_numbers(rom) else None
         if rec is None or s in seen:
             raise ValueError(f'{label}: 세트 {name}가 없거나 두 번 지정함')
         seen.add(s)
@@ -131,9 +131,15 @@ def edits(rom, doc):
 
 
 def patch(rom, doc):
-    return {'format': 'dq5patch/1', 'name': 'obj-palettes', 'writes': [
-        {'at': cpu(at), 'hex': new.hex(' '), 'orig': old.hex(' '), 'note': note}
-        for at, new, old, note in edits(rom, doc) if new != old]}
+    writes = [{'at': cpu(at), 'hex': new.hex(' '), 'orig': old.hex(' '), 'note': note}
+              for at, new, old, note in edits(rom, doc) if new != old]
+    if any(w['note'].startswith('세트 ') for w in writes):
+        # 세트 팔레트는 지금 표가 가리키는 레코드에 쓴다. 같은 빌드에서 dq5spritewrite.py --sets-at 이 표와 레코드를
+        # 옮기면 이 쓰기는 죽은 레코드에 떨어지므로, 표 주소 피연산자를 그대로 다시 써 빌더가 겹침으로 막게 한다.
+        site = S.SET_TABLE_SITES[0]
+        raw = bytes(rom.d[lorom(site):lorom(site) + 3]).hex(' ')
+        writes.append({'at': cpu(site), 'hex': raw, 'orig': raw, 'note': '세트 포인터 표 주소(그대로, --sets-at 과 함께 쓰지 않게)'})
+    return {'format': 'dq5patch/1', 'name': 'obj-palettes', 'writes': writes}
 
 
 def overridden(rom, doc):
@@ -144,7 +150,7 @@ def overridden(rom, doc):
 
 def affected(rom, doc):
     """바꾼 OBJ 팔레트 0~3 을 쓰는 세트(새 배정 포함)."""
-    after = {s: rec['palette'] for s in range(S.SET_COUNT) if (rec := S.set_record(rom, s)) is not None}
+    after = {s: rec['palette'] for s in S.set_numbers(rom) if (rec := S.set_record(rom, s)) is not None}
     for row in doc.get('sets', []):
         after[int(row['set'], 16)] = row['palette']
     changed = {row['palette'] for row in doc.get('palettes', []) if row['colors'] != palette_colors(rom, row['palette'])}
@@ -159,11 +165,11 @@ def check(rom, doc=None):
     if doc is None and writes:
         raise ValueError('원본 왕복 쓰기가 0개가 아님')
     data, _ = build(rom.d, [('obj-palettes', 0, [(parse_at(w['at'])[0], bytes.fromhex(w['hex']), bytes.fromhex(w['orig']),
-                                                   w['note']) for w in writes])], 0)
+                                                   w['note']) for w in writes])], len(rom.d) >> 20 if len(rom.d) > 0x180000 else 0)
     moved = Rom(data)
     if patch(moved, source)['writes'] or patch(moved, dump(moved))['writes']:
         raise ValueError('빌드한 롬을 다시 읽어 패치하면 쓰기가 남음')
-    for s in range(S.SET_COUNT):
+    for s in S.set_numbers(rom):
         a, b = S.set_record(rom, s), S.set_record(moved, s)
         if (a is None) != (b is None) or a and (a['cells'], a['data'], a['tiles']) != (b['cells'], b['data'], b['tiles']):
             raise ValueError(f'세트 {s:02X}: 팔레트 밖 레코드가 달라짐')

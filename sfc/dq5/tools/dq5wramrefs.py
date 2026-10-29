@@ -131,7 +131,7 @@ def decoded_ranges(d):
     for n in range(dq5talk.FIRST_SPECIAL2 - dq5talk.FIRST_SCRIPT):
         a = dq5talk.script_address(rom, n)
         out.append(('대화 스크립트', off(a), off(dq5talk.parse_script(rom, a)[1])))
-    for k in range(dq5sprite.SET_COUNT):
+    for k in dq5sprite.set_numbers(rom):
         rec = dq5sprite.set_record(rom, k)
         if rec:
             out.append(('스프라이트 레코드', off(rec['record']), off(rec['record']) + 0x34))

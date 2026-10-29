@@ -21,7 +21,6 @@ FORMAT = 'dq5pictures/1'
 TABLE, COUNT = 0x2586D0, 0xA9
 # 그림 표를 읽는 LDA long,X 두 곳(롬 전체에서 25:86D0 을 24비트 피연산자로 읽는 곳은 이 둘뿐).
 READERS = (0x1FCF45, 0x03D202)
-SETS, SET_COUNT = 0x1FD63D, 0xA3
 HOOK = 0x1EDC67
 HOOK_ORIG = bytes.fromhex('a5 0a c9 84 f0 14')
 # 1E:DC67 의 원래 판정: 그림이 84·78·7F, A2 이상, 46~48 이면 물체.
@@ -87,7 +86,10 @@ def set_tiles(rom, s):
 
 
 def valid_sets(rom):
-    return {s for s in range(SET_COUNT) if int.from_bytes(read(rom, SETS + s * 2, 2), 'little') != 0xFFFF}
+    """포인터가 FFFF 가 아닌 세트. dq5spritewrite.py --sets-at 으로 옮긴 표면 그 표를 읽는다."""
+    from dq5sprite import set_numbers, set_table
+    table = set_table(rom)[0]
+    return {s for s in set_numbers(rom) if int.from_bytes(read(rom, table + s * 2, 2), 'little') != 0xFFFF}
 
 
 def layout(rom):

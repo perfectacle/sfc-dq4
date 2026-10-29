@@ -20,6 +20,7 @@ image 는 문서 파일 기준 상대 경로. 세트의 타일 수는 그 세트
 넘을 수 없다(인물마다 VRAM 을 타일 수만큼 잡는다, 1F:CF1E). 압축 자료가 원래 자리보다 크면 --at 부터 차례로 놓는다.
 --sets-at BB:AAAA 를 주면 세트 포인터 표를 256칸으로 늘려 그 자리에 두고, 모든 세트 레코드를 표 뒤로 옮긴다
 (레코드 포인터가 16비트라 표와 레코드는 한 뱅크). 표를 읽는 세 곳의 주소와 레코드 뱅크 세 곳을 고친다(dq5sprite.SET_TABLE_SITES).
+이미 표를 옮긴 롬은 기존 세트를 옮긴 레코드 자리에서 고치고, 새 세트를 더할 때는 --sets-at 으로 표를 새 자리에 다시 놓는다.
 """
 import argparse
 import json
@@ -283,9 +284,10 @@ def plan(rom, doc, base, grown=False):
 
 
 def patch(rom, doc, base=Path('.'), at=None, records_at=RECORD_AREA[0], sets_at=None):
-    if sets_at is not None and S.set_table(rom)[0] != S.SET_POINTERS:
-        raise ValueError('세트 포인터 표를 이미 옮긴 롬이라 --sets-at 을 다시 줄 수 없음')
     sets, mapping = plan(rom, doc, base, grown=sets_at is not None)
+    # 표를 옮긴 롬의 1F:D63D 와 1F:FE30 은 엔진이 더 읽지 않는다. 새 레코드는 표와 함께 다시 놓아야 한다.
+    if sets_at is None and S.set_table(rom)[0] != S.SET_POINTERS and any(new for *_, new in sets.values()):
+        raise ValueError('세트 포인터 표를 옮긴 롬에 새 세트를 더하려면 --sets-at 으로 표와 레코드를 다시 놓아야 함')
     writes, cursor, record_cursor, records = [], at, records_at, {}
 
     def write(addr, data, note, orig=True):
@@ -372,7 +374,7 @@ def check(rom, doc=None, base=Path('.'), at=None, workdir=None, records_at=RECOR
     import tempfile
     folder = Path(workdir or tempfile.mkdtemp(prefix='dq5sprite-'))
     rows, shapes, sizes, crossing = [], 0, [], []
-    for s in range(S.SET_COUNT):
+    for s in S.set_numbers(rom):
         rec = S.set_record(rom, s)
         if rec is None:
             continue

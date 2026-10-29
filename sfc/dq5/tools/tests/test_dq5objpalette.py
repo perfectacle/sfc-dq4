@@ -52,9 +52,12 @@ class PaletteTests(unittest.TestCase):
         writes = self.run_patch(palettes=[{'palette': 7, 'colors': colors}],
                                 map_palettes=[{'index': 0, 'map': '04/06', 'line': '0B', 'colors': colors}],
                                 sets=[{'set': '84', 'palette': 2}])
-        self.assertEqual([w['at'] for w in writes], ['04:97B8', '01:9A17', '1F:D789'])
+        self.assertEqual([w['at'] for w in writes], ['04:97B8', '01:9A17', '1F:D789', '1F:CFB7'])
         self.assertEqual(writes[0]['hex'][:11], '01 00 02 00')
         self.assertEqual((writes[2]['hex'], writes[2]['orig']), ('85', '45'))
+        # 세트 팔레트를 쓰면 표 주소를 그대로 다시 써 둔다. --sets-at 의 표 주소 쓰기와 함께 빌드하면 빌더가 겹침으로 막는다.
+        self.assertEqual(writes[3]['hex'], writes[3]['orig'])
+        self.assertNotIn('1F:CFB7', [w['at'] for w in self.run_patch(palettes=[{'palette': 7, 'colors': colors}])])
         # 같은 색이면 쓰지 않는다.
         same = [7 * 0x100 + i for i in range(1, 16)]
         self.assertEqual(self.run_patch(palettes=[{'palette': 7, 'colors': same}]), [])
