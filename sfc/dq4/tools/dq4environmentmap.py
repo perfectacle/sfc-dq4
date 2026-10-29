@@ -335,6 +335,30 @@ PROPERTY_ART = {
     0xAB: "wardrobe", 0xAA: "pot",
 }
 FALLING = (0x05, 0x0B)
+# Dungeon blocks whose shape matters: cliff tops, rock pillars, ledge and shore edges, tree-hollow rims.
+# "trace" keeps the FC block's black outline pixels and paints its sky and void areas, with the rest in the
+# sheet's wall or floor (or the asset after the colon). "slope" and "slope_r" are cave slopes that FC draws as
+# a one-colour floor triangle beside dithered rock, with no outline: the floor is the upper-left or upper-right
+# triangle.
+SHAPES = {
+    0x11: {0x02: "slope", 0x03: "slope_r", 0x16: "slope", 0x17: "slope_r"},
+    0x13: {0x09: "trace"},
+    0x17: {0x11: "trace"},
+    0x18: {0x0C: "trace:water0", 0x0D: "trace:water0", 0x0E: "trace:water0", 0x10: "trace:water0",
+           0x11: "trace:water0", 0x12: "trace:water0", 0x1B: "trace", 0x1D: "trace", 0x1E: "trace", 0x1F: "trace"},
+    0x1B: {b: "trace" for b in (0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0D, 0x0E, 0x10, 0x11, 0x14, 0x15, 0x16, 0x17,
+                                0x18)},
+    0x1C: {b: "trace" for b in (0x08, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+                                0x1A, 0x1C, 0x1D)},
+    0x1E: {b: "trace" for b in (0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x1C, 0x1D)},
+    0x23: {b: "trace" for b in (0x08, 0x09, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11)},
+    0x24: {b: "trace" for b in (0x04, 0x05, 0x06, 0x09, 0x0A, 0x0B, 0x0C, 0x0D)},
+    0x2A: {0x12: "slope", 0x13: "slope_r"},
+    0x2D: {b: "trace" for b in (0x04, 0x05, 0x0B, 0x15, 0x19, 0x1A)},
+}
+# FC sky blues; the pale cyans 2C, 3C and 31 are cloud. A traced water base keeps these blues as its own
+# water (sheet 18 draws deep water in 01, 11 and 21).
+SKY = {0x01, 0x02, 0x11, 0x12, 0x21, 0x22}
 
 
 def map_palette(name, sheet):
@@ -402,7 +426,89 @@ def sheet_art(prg, t):
                 out[block] = (PROPERTY_ART[prop], f"{dq4block.kind_name(prop)}(속성 기본)")
             else:
                 out[block] = (style[0], "벽(시트 기본)") if prop & 0x80 else (style[1], "바닥(시트 기본)")
+    for block, shape in SHAPES.get(t, {}).items():
+        if not out[block][1].endswith("(시트 기본)"):
+            raise ValueError(f"{t:02X}/{block:02X}: SHAPES would replace {out[block][0]}")
+        kind, _, base = shape.partition(":")
+        base = base or out[block][0]
+        out[block] = (f"{kind}:{base}", "벼랑·비탈(FC 모양)")
     return out
+
+
+def fc_pixels(prg, t, block):
+    """FC block as 16 rows of NES colours (colour 0 is 0F in every map, dq4block.palette)."""
+    bank, addrs, colours = _graphic(prg, t, block)
+    colours = (0x0F, *colours)
+    rows = [[0] * 16 for _ in range(16)]
+    for quarter, addr in enumerate(addrs):
+        o = bank * 0x4000 + (addr & 0x3FFF)
+        data = prg[o:o + 16]
+        for r in range(8):
+            for c in range(8):
+                rows[quarter // 2 * 8 + r][quarter % 2 * 8 + c] = colours[
+                    (data[r] >> (7 - c) & 1) | (data[r + 8] >> (7 - c) & 1) << 1]
+    return rows
+
+
+def _shape_classes(prg, t, block, kind, base):
+    """16 rows of A (the base), S (sky), V (void), O (outline) and F (floor, slopes only)."""
+    if kind == "slope":
+        return [["F" if x + y < 15 else "O" if x + y == 15 else "A" for x in range(16)] for y in range(16)]
+    if kind == "slope_r":
+        return [["F" if x > y else "O" if x == y else "A" for x in range(16)] for y in range(16)]
+    if kind != "trace":
+        raise ValueError(f"{t:02X}/{block:02X}: unknown shape {kind}")
+    rows = fc_pixels(prg, t, block)
+    out = []
+    for y in range(16):
+        row = []
+        for x in range(16):
+            c = rows[y][x]
+            if c in SKY and not base.startswith("water"):
+                row.append("S")
+            elif c in SKY:
+                row.append("A")
+            elif c == 0x0F:
+                around = [rows[yy][xx] for yy in range(max(0, y - 1), min(16, y + 2))
+                          for xx in range(max(0, x - 1), min(16, x + 2))]
+                # A black pixel inside a black area is the void around a cliff, not its outline.
+                row.append("V" if all(v == 0x0F for v in around) else "O")
+            else:
+                row.append("A")
+        out.append(row)
+    return out
+
+
+def _nearest(palette, value, bank):
+    rgb = palette[value * 3:value * 3 + 3]
+    return min(range(bank * 16 + 1, bank * 16 + 16),
+               key=lambda i: sum((palette[i * 3 + c] - rgb[c]) ** 2 for c in range(3)))
+
+
+def _shape_tile(prg, assets, name, palette, t, block):
+    """SHAPES art. Each 8x8 keeps the base's palette bank (one bank per SNES tile); sky, void and floor
+    colours from other banks move to the nearest colour of that bank, and the outline is its darkest."""
+    kind, base = name.split(":")
+    style = SHEET_STYLES[t]
+    layers = {"A": _tile(assets, base, palette, t, block)[0], "S": assets["sky"],
+              "V": assets[style[2] if len(style) > 2 else "dark_void"], "F": _tile(assets, style[1], palette, t, block)[0]}
+    classes = _shape_classes(prg, t, block, kind, base)
+    result = layers["A"].copy()
+    remapped = 0
+    for qy in (0, 8):
+        for qx in (0, 8):
+            bank = layers["A"].getpixel((qx, qy)) >> 4
+            dark = min(range(bank * 16 + 1, bank * 16 + 16), key=lambda i: sum(palette[i * 3:i * 3 + 3]))
+            for y in range(qy, qy + 8):
+                for x in range(qx, qx + 8):
+                    k = classes[y][x]
+                    value = dark if k == "O" else layers[k].getpixel((x, y))
+                    if value >> 4 != bank:
+                        value = _nearest(palette, value, bank)
+                        remapped += 1
+                    result.putpixel((x, y), value)
+    return result, {"shape": kind, "background": None, "transparent_pixels_filled": 0,
+                    "background_palette_remapped_pixels": remapped, "foreground_pixels_remapped": 0}
 
 
 def _tile(assets, name, palette, map_type, block=None, background_name=None):
@@ -446,9 +552,7 @@ def _tile(assets, name, palette, map_type, block=None, background_name=None):
                         continue
                     value = background.getpixel((x + dx, y + dy))
                     if bank is not None and value >> 4 != bank:
-                        rgb = palette[value * 3:value * 3 + 3]
-                        value = min(range(bank * 16 + 1, bank * 16 + 16), key=lambda i: sum(
-                            (palette[i * 3 + channel] - rgb[channel]) ** 2 for channel in range(3)))
+                        value = _nearest(palette, value, bank)
                         remapped += 1
                     result.putpixel((x + dx, y + dy), value)
     return result, {
@@ -484,7 +588,9 @@ def prepare_maps(prg, assets, names=None):
         unsupported = sorted(set(counts) - mapping.keys())
         if unsupported:
             raise ValueError(f"{name}: unsupported source blocks {unsupported}")
-        prepared = {block: _tile(assets, mapping[block][0], palette, source.t, block) for block in counts}
+        prepared = {block: _shape_tile(prg, assets, mapping[block][0], palette, source.t, block)
+                    if ":" in mapping[block][0] else _tile(assets, mapping[block][0], palette, source.t, block)
+                    for block in counts}
         yield group, number, name, source, counts, prepared, palette
 
 
