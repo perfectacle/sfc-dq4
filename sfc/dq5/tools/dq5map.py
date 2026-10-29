@@ -245,6 +245,14 @@ def block_hook(rom):
     size, source, src_bank = int.from_bytes(raw[0:2], 'little') + 1, int.from_bytes(raw[2:4], 'little'), raw[4]
     if src_bank != bank or size % 2:
         raise ValueError(f'훅의 포인터 표 복사가 블록 뱅크 {bank:02X} 의 2바이트 표가 아님')
+    # 못 찾은 맵: 로더는 7E:B002 가 CMP #값 과 같을 때만 원래 표를 다시 만든다. 디코더는 목록 밖 맵이 늘 원래 표를 쓴다고
+    # 보므로, 그 값이 훅 표의 1번이고 원래 표의 1번과 달라야 한다(같으면 앞서 다녀온 맵에 따라 훅 표가 남음)
+    probe = int.from_bytes(_code(rom, loader + 12, 'C2 20 AF 02 B0 7E C9 ?? ?? D0', '훅 로더의 못 찾은 길(7E:B002 견주기)'),
+                           'little')
+    original = original_block_table(rom, count=2)[1] & 0xFFFF
+    if probe != rom.u16((bank << 16 | source) + 2) or probe == original:
+        raise ValueError(f'훅 로더가 견주는 7E:B002 값 {probe:04X} 가 훅 표 1번 {rom.u16((bank << 16 | source) + 2):04X} 과 '
+                         f'같고 원래 표 1번 {original:04X} 과 달라야 함')
     maps, a = [], targets
     while rom.u8(a) != 0xFF:
         maps.append((rom.u8(a), rom.u8(a + 1)))
@@ -264,6 +272,11 @@ def block_table(rom, count=0x800, key=None):
     if hook and tuple(key) in hook[0]:
         _, bank, table, n = hook
         return [bank << 16 | rom.u16(table + 2 * i) for i in range(n)]
+    return original_block_table(rom, count)
+
+
+def original_block_table(rom, count=0x800):
+    """01:8CD8 이 만드는 원래 표(훅 목록 밖 맵의 표)."""
     bank = _code(rom, BANK_SITE, 'A9 ?? 8D 23 18', '01:92F4 블록 뱅크')[0]
     builder = _code(rom, BUILDER_BANK_SITE, 'A9 ?? 85 AA', '01:8CDE 블록 표 뱅크')[0]
     start = int.from_bytes(_code(rom, BUILDER_START_SITE, 'A9 ?? ??', '01:8CE6 블록 표 시작'), 'little')
