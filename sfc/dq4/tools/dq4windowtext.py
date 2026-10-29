@@ -68,7 +68,7 @@ FIXED = {
     'そうび': '장비', 'さくせん': '작전', 'とびら': '문', 'しらべる': '조사',
     'つかう': '쓰기', 'わたす': '건네기', 'すてる': '버리기',
     'ならびかえをする': '대열 바꾸기', 'さくせんをねる': '작전 짜기',
-    'ＨＰとＭＰ': 'HP와 MP', 'こうげきカ': '공격력', 'つよさみる': '상태 보기', 'まんたん': '만땅',
+    'ＨＰとＭＰ': 'HP와 MP', 'こうげきカ': '공격력', 'つよさみる': '상태 보기', 'まんたん': '전원 회복',
     'たたかう': '싸우기', 'にげる': '도망',
     'こうげき': '공격', 'とくぎ': '특기', 'ぼうぎょ': '방어',
     'かいにきた': '사기', 'うりにきた': '팔기', 'やめる': '나가기',
@@ -78,7 +78,9 @@ FIXED = {
     'じゅもんつかうな': '주문을 쓰지마', 'いのちだいじに': '생명을 소중히', 'めいれいさせろ': '명령을 내려줘',
     # 강함 보기의 능력치 라벨(adopt.tsv 능력치·직업 표). DQ5 창은 力 자리에 가타카나 カ 를 씀
     'ちから': '힘', 'すばやさ': '민첩', 'みのまもり': '방어력', 'かしこさ': '현명함', 'うんのよさ': '운',
-    'さいだいＨＰ': '최대HP', 'さいだいＭＰ': '최대MP', 'しゅびカ': '수비력', 'せいべつ': '성별',
+    'さいだいＨＰ': '최대 HP', 'さいだいＭＰ': '최대 MP', 'しゅびカ': '수비력', 'せいべつ': '성별',
+    # 롬에는 없는 키. 능력치 창 07 의 「Ex」 타일 줄(EXP_ROW)을 이 라벨 줄과 값 줄로 나눈다
+    'けいけんち': '경험치',
     # 교회(adopt.tsv 메뉴 202~206 을 전용 칸 48칸에 들어가게 줄임)와 맡기는 곳(300·301)
     'おいのりをする': '기도하기', 'おつげをきく': '계시를 듣기', 'いきかえらせる': '되살리기', 'どくのちりょう': '해독',
     'のろいをとく': '저주 풀기', 'あずける': '맡기기', 'ひきだす': '꺼내기', 'もちもの': '소지품', 'おかね': '돈',
@@ -117,10 +119,19 @@ SAFE_TILES = 0x30
 # 라벨 창: 줄 머리 빈칸(01) + 가나 + 85(:) 꼴로 오른쪽 정렬된 라벨. 빈칸과 가나를 빈칸 + 9E k 로 바꿔 「:」 자리를 둔다.
 # 07 강함 보기 능력치, 06 강함 보기 성별·레벨, 47 대열 바꾸기 정보 창의 성별
 LABEL_WINDOWS = (0x07, 0x06, 0x47)
+# 능력치 창 07. 마지막 줄 「Ex(타일 86) : 경험치(BC)」 는 경험치가 일곱 자리라 값 칸이 여덟 칸이고 라벨이 한 칸뿐이라
+# 왼쪽에 붙어 있었다. 라벨을 왼쪽에 붙이고 콜론을 가장 긴 라벨 다음 열에, 값을 오른쪽 끝에 맞춰 「경험치 :」 도 한 줄에
+# 넣는다. 창을 오른쪽으로 EXP_WIDEN 칸 넓히고(왼쪽은 이름 창), 줄마다 콜론 뒤 빈칸이 늘어 원래 자리에 들어가지 않으므로
+# 레코드를 뱅크 04 끝의 빈자리(EXP_SPOT, 원래 롬도 0)로 옮기고 창 표 포인터를 바꾼다
+EXP_WINDOW, EXP_WIDEN, EXP_SPOT, EXP_SPOT_END = 0x07, 4, 0x04FECA, 0x050000
+EXP_TILE, EXP_VALUE = 0x86, 0xBC               # 「Ex」 타일, 경험치 값 코드(여덟 칸). 다른 값 코드는 세 칸
 # 항목 머리 FE 없이 한 줄을 찍는 창 → 오른쪽으로 넓힐 칸 수. 2D じゅもんはつかえない(「주문을 쓸 수 없다」 가 들어가게 한 칸),
 # 82 じゅもんを まだ おぼえていない, 83 どうぐを もっていない
 LINE_WINDOWS = {0x2D: 1, 0x82: 0, 0x83: 0}
 TITLE_COUNT = 0x2B              # 제목 2B 부터는 목록 뒤의 코드
+# 열 머리 제목(11 「レベル　　こうげき　　しゅび」). 가나 끝이 아래 숫자 열의 오른쪽 끝과 맞으므로, 짧은 한글은 가나 자리
+# 안에서 오른쪽에 붙인다(남는 칸을 앞에)
+RIGHT_TITLES = (0x11,)
 
 
 def kana_key(text):
@@ -198,6 +209,48 @@ def _runs(rom, rec, i, start_ok, stop=()):
         n += 1
     raw = rec[i:j].replace(b'\x92', b'\x84').replace(b'\x93', b'\x83')
     return j, n, dq5text.text(dq5text.string_codes(rom, raw))
+
+
+def exp_record(rom, data, width, numbers, korean, lorom):
+    """능력치 창 07 을 왼쪽 라벨·한 줄 경험치 배치로 다시 만들어 EXP_SPOT 에 두고, 창 표 포인터를 바꾸는 쓰기 둘을 돌려준다."""
+    if str(DQ5_TOOLS) not in sys.path:
+        sys.path.insert(0, str(DQ5_TOOLS))
+    import dq5text
+    addr, rec = dq5text.window(rom, EXP_WINDOW)
+    if rec[4] != 0 or rec[5] != 10:
+        raise ValueError(f'창 {EXP_WINDOW:02X} 머리 {rec[:6].hex()}: 능력치 창 모양이 아님')
+    rows, i = [], 6
+    while i < len(rec) and rec[i] != 0x80:
+        row = rec.index(0xFF, i)
+        k = i
+        while rec[k] == 0x01:
+            k += 1
+        if rec[i:row] == bytes((EXP_TILE, 0x85, EXP_VALUE)):
+            jp = 'けいけんち'
+        else:
+            _, _, jp = _runs(rom, rec, k, False, (0x85,))
+        if rec[row - 2] != 0x85 or jp not in numbers:
+            raise ValueError(f'창 {EXP_WINDOW:02X}: 줄 {rec[i:row].hex()} 꼴이 아님')
+        rows.append((jp, rec[row - 1]))
+        i = row + 1
+    inner = (rec[2] & 0x1F) + EXP_WIDEN - 2
+    colon = max(width[jp] for jp, _ in rows)
+    new = bytearray(rec[:6])
+    new[2] += EXP_WIDEN
+    for jp, value in rows:
+        cells = 8 if value == EXP_VALUE else 3
+        gap = inner - colon - 1 - cells
+        if gap < 0:
+            raise ValueError(f'창 {EXP_WINDOW:02X}: 「{korean[jp]}」 줄이 창 안쪽 {inner}열을 넘음')
+        new += bytes((FIXED_PREFIX, numbers[jp])) + b'\x01' * (colon - width[jp]) + b'\x85' + b'\x01' * gap + bytes((value, 0xFF))
+    new.append(0x80)
+    o = lorom(EXP_SPOT)
+    if len(new) > EXP_SPOT_END - EXP_SPOT or any(data[o:o + len(new)]):
+        raise ValueError(f'{EXP_SPOT:06X}: 능력치 창 레코드 {len(new)}바이트 자리가 비어 있지 않음')
+    t = lorom(dq5text.WINDOWS + 2 * EXP_WINDOW)
+    if data[t] | data[t + 1] << 8 != addr & 0xFFFF:
+        raise ValueError(f'창 표 {EXP_WINDOW:02X} 포인터가 {addr:06X} 가 아님')
+    return [(o, bytes(new)), (t, bytes((EXP_SPOT & 0xFF, EXP_SPOT >> 8 & 0xFF)))]
 
 
 def fixed_records(data, font):
@@ -308,7 +361,10 @@ def fixed_records(data, font):
             raise ValueError(f'창 {w:02X}: 레코드 자리가 어긋남')
         out.append((o, bytes(new) + b'\xff' * (len(rec) - len(new))))
 
+    out += exp_record(rom, data, width, numbers, korean, lorom)
     for w in LABEL_WINDOWS:
+        if w == EXP_WINDOW:
+            continue
         addr, rec = dq5text.window(rom, w)
         h = dq5text.window_header(rec)
         start = 6 + (rec[4] >> 6) + 1 if h['title'] is not None else 6
@@ -367,7 +423,10 @@ def fixed_records(data, font):
                 cols += n
                 i = j
                 continue
-            body += bytes((FIXED_PREFIX, numbers[jp])) + b'\x01' * max(0, n + s - width[jp])
+            if t in RIGHT_TITLES and width[jp] <= n:
+                body += b'\x01' * (n - width[jp]) + bytes((FIXED_PREFIX, numbers[jp])) + b'\x01' * s
+            else:
+                body += bytes((FIXED_PREFIX, numbers[jp])) + b'\x01' * max(0, n + s - width[jp])
             cols += max(width[jp], n + s)
             i = j + s
         for w, x, wd in users.get(t, ()):
