@@ -40,6 +40,10 @@ EXTRA_NAMES = {6: {'みんながんばれ': '모두 힘내자', 'じゅもんせ
 # 전투 작전 창(16)은 작전 이름을 넉 자씩 두 줄로 찍는다(04:BB61). 한글은 띄어쓰기 자리에서 나눠 줄마다 고정 문구 하나
 TACTIC_LINES = (('한방에', '끝내자구'), ('모두', '힘내자'), ('주문', '아끼자'),
                 ('주문을', '쓰지마'), ('생명을', '소중히'), ('명령을', '내려줘'))
+# 한글이 없는 이름도 필드에서는 가나 칸을 슬롯으로 돌려 써 원래 가나 타일로 찍으면 깨진다. 필드 창에 나오는 물건·주문
+# 표는 원래 가나를 Galmuri9 가나 그림으로 넣는다(창 열 수를 넘는 이름은 뺌). 몬스터(4)는 전투에서만 나와 가나 칸이
+# 살아 있고, 직함 표(1)의 나머지는 몬스터 종족이다
+KANA_KINDS = (5, 3)
 SHIFT = 6                       # render 의 띠(한글 윗줄 = 1줄)를 위 줄 7줄로 내림
 
 # 창 레코드의 가나 항목을 접두 9E k(고정 문구 k)로 바꾼다. 이름 표가 쓰지 않는 종류 7 에 그림을 둔다.
@@ -384,11 +388,13 @@ def build(data, font):
         done = 0
         for n, name in enumerate(names):
             ko = korean.get(kana_key(name))
+            if not ko and kind in KANA_KINDS and name and all(0x3041 <= ord(c) <= 0x30FC for c in name):
+                ko = name
             if not ko:
                 continue
             cols = columns(font, ko)
             if len(cols) > limit:
-                if strict:
+                if strict and ko != name:
                     raise ValueError(f'{ko!r}: {len(cols)}열, 창은 {limit}열')
                 continue
             at = DATA + len(body)
