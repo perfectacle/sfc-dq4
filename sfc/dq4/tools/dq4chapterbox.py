@@ -276,14 +276,12 @@ class Layout:
 
     def code(self, a):
         # 새 게임 시작(시작 지점 표를 읽은 뒤): 21A5.6 이 켜져 있으면 맵을 불러올 때 곡을 바꾸지 않는다(00:CE6B).
-        # 메뉴 곡은 여기서 끈다
+        # 이 표는 「모험의 서를 만든다」에서 이름 입력 전에도 읽으므로 곡을 끄는 일은 여기서 하지 않는다
         start = (bytes((0xA9, 0x80, 0x85, 0xBE)) +                    # 원래: LDA #$80 / STA $BE
                  if_pending(bytes((0xAF, *le(SKIP_SONG[0], 3), 0x09, SKIP_SONG[1],   # LDA $7E21A5 / ORA #$40
-                                   0x8F, *le(SKIP_SONG[0], 3),                        # STA $7E21A5
-                                   # 메뉴 곡 끄기(1A). 새 게임이 지우는 $1D8B 만으로는 곡이 그대로 울렸다(KON 실측)
-                                   0xDA, 0x5A, 0x22, 0x91, 0xFE, 0x24, 0x7A, 0xFA))) +  # PHX / PHY / JSL $24FE91 / PLY / PLX
+                                   0x8F, *le(SKIP_SONG[0], 3)))) +                    # STA $7E21A5
                  bytes((0xA9, 0x80, 0x6B)))                            # LDA #$80 / RTL
-        # 맵을 불러올 때: 연출 전이면 주화면을 BG3 만으로
+        # 맵을 불러올 때: 연출 전이면 주화면을 BG3 만으로. 메뉴 곡은 메뉴를 나갈 때 줄어든다(dq4overture.MENU_FADE)
         hook = (if_pending(bytes((0xA9, 0x04)), bytes((0xA9, 0x17))) +
                 bytes((0x8F, 0x33, 0x07, 0x7E, 0x6B)))                # STA $7E0733 / RTL
         put_map = map_rows(lambda r: a['map'] + r * BOX_W * 2)

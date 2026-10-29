@@ -60,6 +60,9 @@ FADE_SPEED = 0x40           # 명령 04 의 X. 20 은 메뉴(약 80프레임 뒤
 # 모험의 서 곡. NDS 는 이 화면에서 インテルメッツォ(NDS 04, FC 1F)를 틀고, 사운드 세트(dq4soundset.py)가 그 곡을
 # DQ5 곡 자리 23 에 넣는다. 사운드를 얹지 않은 롬에서는 DQ5 의 23 번 곡이 나온다
 MENU_SONG = 0x23
+# 메뉴를 나갈 때(새 게임·이어하기) 00:A719 의 BRK 18 10 1E 가 메뉴 곡 10 을 줄인다(명령 04, 지금 곡일 때만).
+# 메뉴 곡을 바꾸면 이 인자도 바꿔야 곡이 줄어든다
+MENU_FADE = 0x00271B        # 00:A71B, BRK 18 의 곡 바이트
 MIDI_OFFSET = 23            # 음 번호 n = MIDI - 23. 샘플 머리의 음높이가 샘플마다 이 약속에 맞춘다
 TIMPANI_NOTE = {'G': 0x27, 'C': 0x20}    # 15 는 음 번호 n 이 약 MIDI n + 16 으로 울림(G3·C3 언저리)
 REF_SONG, REF_SNARE_TRACK = 0x15, 6
@@ -497,6 +500,7 @@ def build(nes, rom_path, title_path, out):
     put(rom_off(MENU_STUB), menu, bytes(len(menu)))
     put(MENU_CALL, bytes([0x22, MENU_STUB & 0xFF, MENU_STUB >> 8 & 0xFF, MENU_STUB >> 16, 0xEA, 0xEA]),
         bytes.fromhex('8D 00 21 EA EA EA'))
+    put(MENU_FADE, bytes([MENU_SONG]), bytes([0x10]))
     rom_out = set_checksum(bytes(data))
     # 늘린 2MB 의 대부분이 0 이라 RLE 레코드를 쓰는 dq5build 의 IPS 로 만든다
     from dq5build import make_ips
