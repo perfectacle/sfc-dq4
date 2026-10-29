@@ -16,6 +16,7 @@ from dq5map import Rom, lorom  # noqa: E402
 import dq5mapgfxwrite as mgw  # noqa: E402
 import dq5palsetwrite as psw  # noqa: E402
 from dq5mapgfxwrite import encode_block  # noqa: E402
+from w65816 import Cpu  # noqa: E402
 
 
 def put(data, addr, raw):
@@ -49,7 +50,7 @@ def field_rom():
     put(d, fgw.REDRAW_SITE, fgw.REDRAW_ORIG)
     put(d, fgw.REDRAW_RTL, b'\x6b')
     for at, want in (fgw.SEARCH_SITE, fgw.PTR_SITE, fgw.NIGHT_SITE, fgw.PAL_BANK_SITE, fgw.WAVE_SITE,
-                     *fgw.ATTR_SITES.items()):
+                     *fgw.ATTR_SITES.items(), fgw.REFRESH_SITE, *(x for pair in fgw.W12_LOAD.values() for x in pair)):
         put(d, at, want)
     for i, (lo, k) in enumerate(ORIGINAL_TIMES):
         put(d, fgw.TIMES + i * 3, lo.to_bytes(2, 'little') + bytes([k * 2]))
@@ -264,6 +265,53 @@ class FieldPaletteTests(unittest.TestCase):
 
     def test_place_only_when_moving(self):
         with self.assertRaisesRegex(ValueError, '--palettes-at 은'):
+            fgw.patch(self.rom, self.doc, self.tmp.name, palettes_at=0x368000)
+
+    def test_world12_sets_and_refresh_hook(self):
+        new = [[0x0400 + i for i in range(30)], [0x0800 + i for i in range(30)]]
+        for sets in new:
+            for i in fgw.CYCLED:
+                sets[i] = self.doc['palettes']['world1'][0][i]
+        self.doc['palettes']['world1'] += new
+        self.doc['world1_times'] = [[0, 2], [0x80, 1], [0x100, 0]]
+        self.doc['world2_times'] = [[0, 0]]
+        with self.assertRaisesRegex(ValueError, '--palettes-at'):
+            fgw.patch(self.rom, self.doc, self.tmp.name)
+        m = fgw.patch(self.rom, self.doc, self.tmp.name, palettes_at=0x368000)
+        sites = {w['at']: w['hex'] for w in m['writes']}
+        self.assertEqual(sites['01:9F91'], 'a9 36')
+        self.assertNotIn('01:9FA6', sites)                  # 세계 2 는 그대로
+        data = bytearray(apply(self.data, m))
+        rom = Rom(bytes(data))
+        cur = fgw.current(rom)
+        self.assertEqual(cur['palettes']['world1'], self.doc['palettes']['world1'])
+        self.assertEqual(cur['world1_times'], self.doc['world1_times'])
+        self.assertEqual(cur['world2_times'], [[0, 0]])
+        self.assertEqual(len(cur['palettes']['world2']), 1)
+        # 불러올 때 넘기는 벌은 시간대 표 첫 항목(벌 2)
+        first = rom.u16(0x019F8D)
+        self.assertEqual(fgw.colors(rom, 0x360000 | first, 30), new[1])
+        put(data, 0x01A055, b'\x6b')                        # 세계 0 갈래가 부르는 01:A055 자리
+        hook = rom.u24(0x02AD39)
+        for world, t, want in ((1, 0x0000, new[1]), (1, 0x0090, new[0]), (1, 0x0150, self.doc['palettes']['world1'][0]),
+                               (2, 0x0150, None), (0, 0x0150, None)):
+            cpu = Cpu(bytes(data), bytes(0x20000))
+            cpu.wram[0x1949], cpu.wram[0x75E], cpu.wram[0x75F] = world, t & 0xFF, t >> 8
+            cpu.p = 0x30
+            cpu.jsl(hook)
+            got = [cpu.wram[0x3956 + i * 2] | cpu.wram[0x3957 + i * 2] << 8 for i in range(15)] + \
+                [cpu.wram[0x3976 + i * 2] | cpu.wram[0x3977 + i * 2] << 8 for i in range(15)]
+            self.assertEqual(got, want or [0] * 30, f'세계 {world} {t:04X}')
+            self.assertEqual(cpu.p, 0x30)
+
+    def test_world12_bad_times(self):
+        for times in ([[1, 0]], [[0, 1]], [[0, 0], [0, 0]]):
+            self.doc['world2_times'] = times
+            with self.assertRaisesRegex(ValueError, 'world2_times'):
+                fgw.patch(self.rom, self.doc, self.tmp.name, palettes_at=0x368000)
+        self.doc.pop('world2_times')
+        self.doc['palettes']['world2'] = []
+        with self.assertRaisesRegex(ValueError, 'palettes'):
             fgw.patch(self.rom, self.doc, self.tmp.name, palettes_at=0x368000)
 
 

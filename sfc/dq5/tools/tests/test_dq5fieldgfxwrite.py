@@ -59,7 +59,7 @@ class FieldPatchTests(unittest.TestCase):
         put(d, fgw.REDRAW_SITE, fgw.REDRAW_ORIG)
         put(d, fgw.REDRAW_RTL, b'\x6b')
         for at, want in (fgw.SEARCH_SITE, fgw.PTR_SITE, fgw.NIGHT_SITE, fgw.PAL_BANK_SITE, fgw.WAVE_SITE,
-                         *fgw.ATTR_SITES.items()):
+                         *fgw.ATTR_SITES.items(), fgw.REFRESH_SITE, *(x for pair in fgw.W12_LOAD.values() for x in pair)):
             put(d, at, want)
         # 원래 롬의 시간대 표(01:A16B)
         for i, (lo, k) in enumerate(((0, 4), (1, 3), (2, 2), (0xEE, 3), (0xEF, 4), (0xF0, 5), (0xF1, 6), (0xF2, 7),

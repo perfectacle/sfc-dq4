@@ -7,7 +7,8 @@ sfc/dq5/docs/dq5-build-format.md 「필드 그림 `dq5fieldgfx/1`」.
   patch  fieldgfx.json → 패치 목록(-o). 바뀐 것이 없으면 쓰기 0개. 다시 싼 RLE 가 원래보다 길면
          --tiles-at·--anim-at BB:AAAA(30~3F, 한 뱅크 안)로 옮긴다. 움직이는 타일 벌을 16개로 늘리면 --anim-at,
          세계 1·2 의 타일 벌(worlds)을 주면 --worlds-at 이 필요하다. 타일을 512개 넘게 쓰면 --worlds-at 과
-         --extra-at(늘린 타일, 30~7D), 세계 0 의 2·3번 줄 벌 수·시간대 표·밤 시작을 바꾸면 --palettes-at(30~3F)
+         --extra-at(늘린 타일, 30~7D), 세계 0 의 2·3번 줄 벌 수·시간대 표·밤 시작이나 세계 1·2 의 벌 수·시간대 표를
+         바꾸면 --palettes-at(30~3F)
   check  두 RLE 를 다시 싸서 풀기, 내보낸 그대로 patch 하면 쓰기 0개인지
 
 타일: 12:B1A8 의 RLE(01:A4A7 이 뱅크, 01:A4AE 가 주소 즉값)를 7E:C000 에 풀면 평면 0~3 이 4KB 씩.
@@ -71,6 +72,7 @@ def check_sites(rom):
     sites += [(at, want, 'blocks') for at, (want, _, _) in BLOCK_SITES.items()] + [(REDRAW_SITE, REDRAW_ORIG, 'redraw')]
     sites += [(at, want, 'palettes') for at, want in (SEARCH_SITE, PTR_SITE, NIGHT_SITE, PAL_BANK_SITE, WAVE_SITE)]
     sites += [(at, want, 'tile_attributes') for at, want in ATTR_SITES.items()] + [(REDRAW_RTL, b'\x6b', 'redraw')]
+    sites += [(at, want, 'palettes') for pair in W12_LOAD.values() for at, want in pair] + [(*REFRESH_SITE, 'palettes')]
     for at, want, kind in sites:
         if rom.d[lorom(at):lorom(at) + len(want)] != want:
             raise ValueError(f'{cpu(at)}: 원래 롬의 {kind} 코드가 아님; 원본 롬으로 만들어야 함')
@@ -128,6 +130,54 @@ def ptr_hook(ptrs):
 
 
 SEARCH_LEN, PTR_LEN = len(search_hook(0, 1)), len(ptr_hook(0))
+
+# 세계 1·2 의 2·3번 줄 벌 늘리기(--palettes-at). 원래는 01:9F86·9FA0 이 $075E 를 0 으로 두고 LDX #벌 / LDA #뱅크(01) 로
+# 한 벌을 01:A6A3 에 넘기며, 몇 프레임마다 다시 옮기는 02:AD38 은 세계 0 일 때만 01:A055 를 부른다. 시계(00:82C6)도 세계 0 에서만
+# 돌아 두 세계는 늘 $075E = 0 이다. 늘리면 불러올 때는 시간대 표 첫 항목(하한 0)의 벌을 넘기고, 02:AD38 을 훅으로 바꿔
+# 세계 1·2 에서도 $075E 로 시간대 표를 찾아 그 벌을 7E:3956·3976(2·3번 줄 색 1~15)에 MVN 으로 옮긴다. $075E 를 0 으로 두는 것과
+# 시계는 바꾸지 않으므로, 벌은 이벤트 등이 $075E 를 바꿀 때만 바뀐다.
+W12_LOAD = {1: ((0x019F8C, b'\xa2\x99\xa1'), (0x019F91, b'\xa9\x01')),
+            2: ((0x019FA6, b'\xa2\xb5\xa3'), (0x019FAB, b'\xa9\x01'))}
+REFRESH_SITE = (0x02AD38, bytes.fromhex('ad4919d0042255a001'))
+W12_DEFAULT_TIMES = [[0, 0]]
+
+
+def world_refresh(times, n, ptrs, bank):
+    """세계 1·2 하나의 갈래(M·X 16비트, PHP 를 한 뒤). 시간대 표 n항목을 뒤에서부터 보아 $075E 이상인 첫 항목의 벌을 옮긴다."""
+    mvn = b'\x54\x7e' + bytes([bank])
+    return (b'\xa2' + ((n - 1) * 3).to_bytes(2, 'little') + b'\xaf\x5e\x07\x7e' + b'\xdf' + long_addr(times)
+            + b'\xb0\x05' + b'\xca\xca\xca' + b'\x80\xf5' + b'\xbf' + long_addr(times + 2) + b'\x29\xff\x00' + b'\xaa'
+            + b'\xbf' + long_addr(ptrs) + b'\xaa' + b'\x8b' + b'\xa0\x56\x39' + b'\xa9\x1d\x00' + mvn
+            + b'\xa0\x76\x39' + b'\xa9\x1d\x00' + mvn + b'\xab' + b'\x28\x6b')
+
+
+def refresh_hook(worlds, bank):
+    """02:AD38 의 LDA $1949 / BNE / JSL $01A055 대신(JSL). 세계 0 이면 원래처럼 01:A055 를 부르고, 세계 1·2 는 옮긴 벌이
+    있으면 world_refresh 로 옮긴다. worlds 는 {1: (시간대 표, 항목 수, 포인터 표) 또는 None, 2: …}. 머리는 BRA 로 건너뛰는
+    [세계 1 시간대 표 24비트][항목 수][세계 2 …](없으면 0)."""
+    head = b''.join(long_addr(w[0]) + bytes([w[1]]) if w else bytes(4) for w in (worlds[1], worlds[2]))
+    arms = [world_refresh(*worlds[k], bank) if worlds[k] else b'\x28\x6b' for k in (1, 2)]
+    pick = b'\xc9\x01\x00\xf0' + bytes([7]) + b'\xc9\x02\x00\xf0' + bytes([2 + len(arms[0])]) + b'\x28\x6b'
+    return (b'\x80\x08' + head + b'\x08\xe2\x20\xaf\x49\x19\x7e\xd0\x06\x22\x55\xa0\x01\x28\x6b'
+            + b'\xc2\x30\x29\x03\x00' + pick + arms[0] + arms[1])
+
+
+def read_world12(rom):
+    """세계 1·2 의 (벌 목록, 시간대 표). 02:AD38 훅이 없으면 원래 한 벌과 [[0, 0]]."""
+    out = {k: ([colors(rom, PALETTE_SETS[f'world{k}'][0], 30)], [list(t) for t in W12_DEFAULT_TIMES]) for k in (1, 2)}
+    if rom.u8(REFRESH_SITE[0]) != 0x22:
+        return out
+    hook = rom.u24(REFRESH_SITE[0] + 1)
+    for k in (1, 2):
+        times, n = rom.u24(hook + 2 + (k - 1) * 4), rom.u8(hook + 5 + (k - 1) * 4)
+        if not times:
+            continue
+        ptrs = times + n * 3
+        count = (rom.u16(ptrs) - (ptrs & 0xFFFF)) // 2           # 벌이 포인터 표 바로 뒤에 붙어 있다
+        bank = (times >> 16) << 16
+        out[k] = ([colors(rom, bank | rom.u16(ptrs + i * 2), 30) for i in range(count)],
+                  [[rom.u16(times + i * 3), rom.u8(times + i * 3 + 2) // 2] for i in range(n)])
+    return out
 
 
 def worlds_layout(at):
@@ -348,6 +398,8 @@ def current(rom):
         out['palettes']['world0'] = [colors(rom, bank | rom.u16(ptrs + k * 2), 30) for k in range(count)]
         out['wave'] = [colors(rom, bank | rom.u16(WAVE_SITE[0]) + i * 6, 3) for i in range(WAVE_STEPS)]
         out['world0_night_from'] = rom.u8(NIGHT_SITE[0]) // 2
+    for k, (sets, times) in read_world12(rom).items():
+        out['palettes'][f'world{k}'], out[f'world{k}_times'] = sets, times
     return out
 
 
@@ -414,7 +466,7 @@ def patch(rom, doc, folder, tiles_at=None, anim_at=None, name='field-gfx', world
           palettes_at=None):
     o = original(rom)
     keys = {'format', 'tiles_file', 'anim_file', 'tile_palettes', 'palettes', 'wave', 'person_palettes', 'worlds',
-            'world0_times', 'world0_night_from', 'tile_attributes'}
+            'world0_times', 'world0_night_from', 'tile_attributes', 'world1_times', 'world2_times'}
     if not isinstance(doc, dict) or doc.get('format') != FORMAT or set(doc) - keys:
         raise ValueError(f'format={FORMAT} 와 {sorted(keys - {"format"})} 만')
     data = {'tiles': read_file(folder, doc.get('tiles_file'), 'tiles_file'),
@@ -430,10 +482,11 @@ def patch(rom, doc, folder, tiles_at=None, anim_at=None, name='field-gfx', world
     nib = nib_full[:TILES]
     pals = doc.get('palettes')
     if not isinstance(pals, dict) or set(pals) != set(PALETTE_SETS) or \
-            any(not isinstance(pals[k], list) or len(pals[k]) != len(PALETTE_SETS[k]) for k in ('world1', 'world2')) \
-            or not isinstance(pals['world0'], list) or not 1 <= len(pals['world0']) <= FIELD_PAL_MAX:
-        raise ValueError(f'palettes 는 {sorted(PALETTE_SETS)} 마다 벌 목록(world1·world2 는 한 벌, '
-                         f'world0 은 1~{FIELD_PAL_MAX}벌)')
+            any(not isinstance(pals[k], list) or not 1 <= len(pals[k]) <= FIELD_PAL_MAX for k in PALETTE_SETS):
+        raise ValueError(f'palettes 는 {sorted(PALETTE_SETS)} 마다 벌 목록(1~{FIELD_PAL_MAX}벌)')
+    w12 = {k: time_table(doc.get(f'world{k}_times', W12_DEFAULT_TIMES), len(pals[f'world{k}']), f'world{k}_times')
+           for k in (1, 2)}
+    move12 = {k: len(pals[f'world{k}']) != 1 or w12[k] != W12_DEFAULT_TIMES for k in (1, 2)}
     times = doc.get('world0_times', o['world0_times'])
     night = doc.get('world0_night_from', o['world0_night_from'])
     if not isinstance(times, list) or not 1 <= len(times) <= TIME_MAX or any(
@@ -447,10 +500,12 @@ def patch(rom, doc, folder, tiles_at=None, anim_at=None, name='field-gfx', world
         raise ValueError(f'world0_night_from 은 밤 인물 팔레트를 쓰는 첫 벌 번호(0~{FIELD_PAL_MAX})')
     move_pals = len(pals['world0']) != len(PALETTE_SETS['world0']) or times != o['world0_times'] or \
         night != o['world0_night_from']
-    if move_pals and palettes_at is None:
-        raise ValueError('세계 0 의 2·3번 줄 벌 수·시간대 표·밤 시작을 바꾸려면 --palettes-at 이 필요함(뱅크 01 이 참)')
-    if palettes_at is not None and not move_pals:
-        raise ValueError('--palettes-at 은 세계 0 의 벌 수·world0_times·world0_night_from 을 바꿀 때만')
+    if (move_pals or any(move12.values())) and palettes_at is None:
+        raise ValueError('세계 0 의 2·3번 줄 벌 수·시간대 표·밤 시작이나 세계 1·2 의 벌 수·시간대 표를 바꾸려면 '
+                         '--palettes-at 이 필요함(뱅크 01 이 참)')
+    if palettes_at is not None and not move_pals and not any(move12.values()):
+        raise ValueError('--palettes-at 은 세계 0 의 벌 수·world0_times·world0_night_from, 세계 1·2 의 벌 수·시간대 표를 '
+                         '바꿀 때만')
     wave = doc.get('wave')
     if not isinstance(wave, list) or len(wave) != WAVE_STEPS:
         raise ValueError(f'wave 는 {WAVE_STEPS}단계')
@@ -546,11 +601,15 @@ def patch(rom, doc, folder, tiles_at=None, anim_at=None, name='field-gfx', world
             bad = [i for i in CYCLED if new[i] != ref[i]]
             if bad:
                 raise ValueError(f'palettes.{key}[{k}] 의 {bad}번은 2·3번 줄 색 14·15 라 게임이 덮어씀')
-            if not (move_pals and key == 'world0') and new != o['palettes'][key][k]:
+            moved = move_pals if key == 'world0' else move12[int(key[-1])]
+            if not moved and new != o['palettes'][key][k]:
                 write(PALETTE_SETS[key][k], b''.join(c.to_bytes(2, 'little') for c in new), f'필드 팔레트 {key} {k}')
     waves = [color_list(wave[i], 3, f'wave[{i}]') for i in range(WAVE_STEPS)]
+    end = palettes_at
     if move_pals:
-        write_field_palettes(palettes_at, pals['world0'], times, night, waves, placed, write)
+        end = write_field_palettes(palettes_at, pals['world0'], times, night, waves, placed, write)
+    if any(move12.values()):
+        write_world12(end, {k: (pals[f'world{k}'], w12[k]) if move12[k] else None for k in (1, 2)}, placed, write)
     for i, new in enumerate(waves):
         if not move_pals and new != o['wave'][i]:
             write(WAVE + i * 6, b''.join(c.to_bytes(2, 'little') for c in new), f'물결 색 {i}')
@@ -613,6 +672,44 @@ def write_field_palettes(at, sets, times, night, waves, placed, write):
     write(NIGHT_SITE[0], bytes([min(night * 2, 0xFF)]), f'밤 인물 팔레트 시작 벌 {night}')
     write(PAL_BANK_SITE[0], bytes([at >> 16]), '2·3번 줄·물결 DMA 뱅크')
     write(WAVE_SITE[0], (wave & 0xFFFF).to_bytes(2, 'little'), '물결 색 주소')
+    return at + len(data)
+
+
+def time_table(times, sets, name):
+    """[$075E 하한, 벌 번호] 목록 검사(세계 0 의 world0_times 와 같은 규칙)."""
+    if not isinstance(times, list) or not 1 <= len(times) <= TIME_MAX or any(
+            not isinstance(t, list) or len(t) != 2 or any(type(v) is not int for v in t) for t in times) or \
+            times[0][0] != 0 or any(not 0 <= f <= 0xFFFF for f, _ in times) or \
+            any(a[0] >= b[0] for a, b in zip(times, times[1:])) or any(not 0 <= k < sets for _, k in times):
+        raise ValueError(f'{name} 는 [$075E 하한, 벌 번호] 1~{TIME_MAX}개, 첫 하한 0, 하한이 커지는 차례, '
+                         '벌 번호는 그 세계 벌 안')
+    return times
+
+
+def write_world12(at, worlds, placed, write):
+    """세계 1·2 의 벌을 at 에 세계마다 [시간대 표][포인터 표][벌 60바이트씩] 으로, 그 뒤 02:AD38 훅을 둔다.
+    불러오기(01:9F86·9FA0)의 LDX #벌 / LDA #뱅크 를 시간대 표 첫 항목의 벌로 바꾼다($075E 를 0 으로 둔 바로 뒤라)."""
+    data, refs, a = b'', {1: None, 2: None}, at
+    for k in (1, 2):
+        if worlds[k] is None:
+            continue
+        sets, times = worlds[k]
+        ptrs = a + len(times) * 3
+        first = ptrs + len(sets) * 2
+        block = (b''.join(f.to_bytes(2, 'little') + bytes([i * 2]) for f, i in times)
+                 + b''.join(((first + i * 60) & 0xFFFF).to_bytes(2, 'little') for i in range(len(sets)))
+                 + b''.join(c.to_bytes(2, 'little') for row in sets for c in row))
+        refs[k] = (a, len(times), ptrs)
+        (ldx, _), (lda, _) = W12_LOAD[k]
+        write(ldx, b'\xa2' + ((first + times[0][1] * 60) & 0xFFFF).to_bytes(2, 'little'), f'세계 {k} 불러올 때의 벌')
+        write(lda, b'\xa9' + bytes([at >> 16]), f'세계 {k} 벌 뱅크')
+        data += block
+        a += len(block)
+    hook = refresh_hook(refs, at >> 16)
+    place_in(at, len(data) + len(hook), '--palettes-at', placed)
+    write(at, data + hook, '세계 1·2 의 2·3번 줄 벌·시간대 표와 02:AD38 훅', orig=False)
+    write(REFRESH_SITE[0], b'\x22' + long_addr(a) + b'\xea' * (len(REFRESH_SITE[1]) - 4),
+          '몇 프레임마다 2·3번 줄 다시 옮기기를 세계 1·2 도 하는 훅으로')
 
 
 def place_extras(at, chunks, placed):

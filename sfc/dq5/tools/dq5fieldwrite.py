@@ -6,7 +6,11 @@ sfc/dq5/docs/dq5-build-format.md.
 바꾼다. 01:A64F 는 덩어리를 DMA 원본($4372 16비트 + $4374 뱅크)으로 쓰므로 덩어리 하나는 뱅크를 넘지 않게 놓는다.
 DB를 바꾼 뒤 01:A668의 LDX $00A5와 01:A67D의 STA $420B도 같은 뱅크를 쓰므로, 확장 영역 중 30~3F만 허용한다.
 
-지도 파일(.bin)은 칸마다 16비트 리틀 엔디언 블록 번호(0~510)를 y*256+x 순서로 둔 128KB 다.
+지도 파일(.bin)은 칸마다 16비트 리틀 엔디언 블록 번호(0~510)를 y*256+x 순서로 둔 128KB 다. dq5fieldtables.py --blocks-at 으로
+블록을 늘린 롬에서 만들면 그 블록 수(1,024개까지)를 받는다. 512 이상이 있는 세계는 10번째 비트를 압축하지 않은 8KB 평면으로
+--planes-at(30~7D)에 두고, 00:BBF7·00:BDC5 의 9번째 비트 읽기(00:BC33·00:BE06)를 평면도 함께 읽는 훅으로 바꾼다.
+평면은 롬이라 게임이 칸을 바꾸는 00:CF50(밤에 빛나는 풀 등, 부르는 곳 넷이 칸과 번호를 즉값으로 줌)은 10번째 비트를 바꾸지
+못한다. 그래서 그 칸들에 512 이상을 두면 거부한다. 10번째 비트 평면을 쓰는 세계는 한 번의 patch 에 함께 준다(훅이 하나다).
 
   dump   세계 N 의 지도 → .bin(-o)
   check  세계 셋을 풀어 다시 싸고 풀면 같은지, 크기는 원래와 얼마나 다른지
@@ -23,7 +27,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from dq5field import WORLDS, rle  # noqa: E402
+from dq5field import BIT9_SITES, WORLDS, bit9_planes, block_count, rle, world_blocks  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
 
 LOADERS = (0x01A5C2, 0x01A5F1, 0x01A620)
@@ -79,28 +83,63 @@ def split(grid):
     low = bytes(v & 0xFF for v in grid)
     hi = bytearray(SIZE // 8)
     for i, v in enumerate(grid):
-        if v >> 8:
+        if v >> 8 & 1:
             hi[i >> 3] |= 0x80 >> (i & 7)
     return low, bytes(hi)
 
 
+# 00:CF50 이 블록을 바꾸는 칸(블록 좌표). 01:A018·12:EFC1 (0B,53), 03:BB3D (11,7C), 05:EF0F (E2,75)~(E2,77).
+CHANGED_CELLS = ((0x0B, 0x53), (0x11, 0x7C), (0xE2, 0x75), (0xE2, 0x76), (0xE2, 0x77))
+BIT9_ORIG = (bytes.fromhex('bf00e07ee210bb3fa0bc00f002a901eb'), bytes.fromhex('bf00e07ee21039a0bcf002a901eb'))
+PLANE = SIZE // 8
+
+
+def current_sources(rom, world):
+    """불러오기 루틴이 지금 가리키는 (지도, 9번째 비트) RLE 주소."""
+    (hb, ha), (mb, ma) = loader_sites(rom, world)
+    return rom.u8(mb) << 16 | rom.u16(ma), rom.u8(hb) << 16 | rom.u16(ha)
+
+
 def world_grid(rom, world):
-    src_w, src_e = WORLDS[world]
-    low, _ = rle(rom, src_w)
-    hi, _ = rle(rom, src_e)
-    return [low[i] | ((hi[i >> 3] >> (7 - (i & 7))) & 1) << 8 for i in range(SIZE)]
+    return world_blocks(rom, world, current_sources(rom, world))
 
 
-def read_grid(path):
+def read_grid(path, count=BLOCK_COUNT):
     with open(path, 'rb') as source:
         b = source.read()
     if len(b) != SIZE * 2:
         raise ValueError(f'{path}: {SIZE * 2}바이트여야 함(지금 {len(b)})')
     grid = [b[i * 2] | b[i * 2 + 1] << 8 for i in range(SIZE)]
-    bad = [i for i, v in enumerate(grid) if v >= BLOCK_COUNT]
+    bad = [i for i, v in enumerate(grid) if v >= count]
     if bad:
-        raise ValueError(f'{path}: ({bad[0] % 256},{bad[0] // 256}) 의 블록 {grid[bad[0]]} 가 0~510 밖')
+        hint = '' if count > BLOCK_COUNT else '(511 이상은 dq5fieldtables.py --blocks-at 을 넣은 롬으로 만들 것)'
+        raise ValueError(f'{path}: ({bad[0] % 256},{bad[0] // 256}) 의 블록 {grid[bad[0]]} 가 0~{count - 1} 밖{hint}')
     return grid
+
+
+def bit9_hook(planes):
+    """00:BC33·00:BE06 대신(JSL, A 8비트, X 16비트 = 9번째 비트 바이트 자리, Y 아랫바이트 = 칸의 비트 0~7, A 윗바이트 = 번호 하위
+    8비트). planes 는 세계 0·1·2 의 평면 주소(None 이면 그 세계는 10번째 비트 0). 나갈 때 A 아랫바이트 = 하위 8비트,
+    윗바이트 = 비트9 << 1 | 비트8 로 원래 루틴의 XBA 뒤와 같다. Y 의 윗바이트는 M 8비트·X 16비트의 TAY(00:BC32)가 A 윗바이트를
+    함께 옮긴 것이라, 원래 루틴처럼 SEP #$10 으로 지운 뒤 TYX 한다. 마스크는 원래처럼 00:BCA0 을 긴 주소로 읽는다."""
+    slot = [b'\xbf' + p.to_bytes(3, 'little') if p else b'\xa9\x00\xea\xea' for p in planes]
+    tail = (b'\x48\xbf\x00\xe0\x7e\xe2\x10\xbb\x3f\xa0\xbc\x00\xc9\x01\x68\x08'
+            + b'\x3f\xa0\xbc\x00\xc9\x01\xa9\x00\x2a\x28\x2a\xeb\x6b')
+    # 갈래는 세계 0·1·2 의 4바이트 읽기 + BRA(6바이트씩)와 넷째 세계(0). 머리 16바이트 뒤에 붙고 join 은 그 뒤다.
+    arms = b''
+    for k, sl in enumerate(slot):
+        arms += sl + b'\x80' + bytes([(2 - k) * 6 + 4])
+    arms += b'\xa9\x00\xea\xea'
+    head = b'\xaf\x49\x19\x7e\x29\x03\xf0\x08\x3a\xf0\x0b\x3a\xf0\x0e\x80\x12'
+    return b'\x80\x09' + b''.join((p or 0).to_bytes(3, 'little') for p in planes) + head + arms + tail
+
+
+def plane_bits(grid):
+    out = bytearray(PLANE)
+    for i, v in enumerate(grid):
+        if v >> 9 & 1:
+            out[i >> 3] |= 0x80 >> (i & 7)
+    return bytes(out)
 
 
 def cpu(off):
@@ -115,6 +154,54 @@ def parse_at(value):
     if not 0x30 <= bank <= 0x3F or not 0x8000 <= low <= 0xFFFF:
         raise ValueError('--at은 확장 뱅크 30~3F의 8000~FFFF만 허용함')
     return lorom(bank << 16 | low)
+
+
+def parse_any(value, option):
+    if not isinstance(value, str) or not re.fullmatch(r'[0-9A-Fa-f]{2}:[0-9A-Fa-f]{4}', value):
+        raise ValueError(f'{option} 은 BB:AAAA 형식이어야 함')
+    bank, low = (int(part, 16) for part in value.split(':'))
+    if not 0x30 <= bank <= 0x7D or not 0x8000 <= low <= 0xFFFF:
+        raise ValueError(f'{option} 은 30~7D 뱅크의 8000~FFFF')
+    return bank << 16 | low
+
+
+def plane_writes(rom, data, grids, at):
+    """번호 512 이상이 있는 세계의 10번째 비트 평면과 훅 쓰기, 롬 크기(MB). 평면은 뱅크를 넘지 않게 8KB 씩."""
+    wide = {w: g for w, g in grids.items() if any(v >> 9 for v in g)}
+    if not wide:
+        if at is not None:
+            raise ValueError('--planes-at 은 번호 512 이상의 블록을 쓰는 세계가 있을 때만')
+        return [], 2
+    if at is None:
+        raise ValueError(f'세계 {sorted(wide)} 가 번호 512 이상을 씀: --planes-at 으로 10번째 비트 평면 자리를 줄 것')
+    if rom.u8(BIT9_SITES[0]) == 0x22 or any(bit9_planes(rom)):
+        raise ValueError('이미 10번째 비트 훅이 있는 롬: 평면을 쓰는 세계를 모두 한 번에, 훅이 없는 롬으로 만들 것')
+    for site, want in zip(BIT9_SITES, BIT9_ORIG):
+        if data[lorom(site):lorom(site) + len(want)] != want:
+            raise ValueError(f'{site >> 16:02X}:{site & 0xFFFF:04X}: 원래 롬의 9번째 비트 읽기가 아님')
+    for w, g in wide.items():
+        bad = [(x, y) for x, y in CHANGED_CELLS if g[y * 256 + x] >> 9]
+        if bad:
+            raise ValueError(f'세계 {w} 블록 칸 {bad[0]}: 게임이 00:CF50 으로 바꾸는 칸이라 10번째 비트를 쓸 수 없음(512 미만만)')
+    planes, a, out = [None] * 3, at + len(bit9_hook([None] * 3)), []
+    for w in sorted(wide):
+        if (a & 0xFFFF) + PLANE > 0x10000:
+            a = ((a >> 16) + 1) << 16 | 0x8000
+        if a >> 16 > 0x7D:
+            raise ValueError('--planes-at: 평면이 뱅크 7D 를 넘음')
+        planes[w] = a
+        out.append({'at': f'{a >> 16:02X}:{a & 0xFFFF:04X}', 'hex': plane_bits(wide[w]).hex(' '),
+                    'note': f'세계 {w} 블록 번호 10번째 비트 평면'})
+        a += PLANE
+    hook = bit9_hook(planes)
+    out.insert(0, {'at': f'{at >> 16:02X}:{at & 0xFFFF:04X}', 'hex': hook.hex(' '), 'note': '블록 번호 10번째 비트 훅'})
+    for site, want in zip(BIT9_SITES, BIT9_ORIG):
+        skip = len(want) - 6
+        raw = b'\x22' + at.to_bytes(3, 'little') + b'\x80' + bytes([skip]) + b'\xea' * skip
+        out.append({'at': f'{site >> 16:02X}:{site & 0xFFFF:04X}', 'hex': raw.hex(' '), 'orig': want.hex(' '),
+                    'note': '9번째 비트 읽기를 10번째 비트 훅으로'})
+    end = lorom(a - 1) + 1
+    return out, 4 if end > 0x300000 else 3 if end > 0x200000 else 2
 
 
 def place_chunk(at, size):
@@ -138,6 +225,7 @@ def main():
     ap.add_argument('--world', type=int, action='append', choices=(0, 1, 2))
     ap.add_argument('-o', '--out')
     ap.add_argument('--at', default='34:8000', help='CPU 주소 BB:AAAA, 뱅크 30~3F만 허용')
+    ap.add_argument('--planes-at', help='번호 512 이상이 있는 세계의 10번째 비트 평면·훅 자리(BB:AAAA, 30~7D)')
     ap.add_argument('--name', default='field')
     a = ap.parse_args()
     data = open(a.rom, 'rb').read()
@@ -172,13 +260,15 @@ def main():
     except ValueError as e:
         print(f'오류: {e}', file=sys.stderr)
         return 1
+    try:
+        planes_at = None if a.planes_at is None else parse_any(a.planes_at, '--planes-at')
+        grids = {w: read_grid(path, block_count(rom)) for w, path in zip(worlds, a.args)}
+        tail, size = plane_writes(rom, data, grids, planes_at)
+    except ValueError as e:
+        print(f'오류: {e}', file=sys.stderr)
+        return 1
     writes = []
-    for w, path in zip(worlds, a.args):
-        try:
-            grid = read_grid(path)
-        except ValueError as e:
-            print(f'오류: {e}', file=sys.stderr)
-            return 1
+    for w, grid in grids.items():
         hi_part, map_part = split(grid)[1], split(grid)[0]
         for (bank_site, addr_site), part, label in zip(loader_sites(rom, w), (hi_part, map_part), ('9번째 비트', '지도')):
             enc = encode_rle(part)
@@ -195,8 +285,7 @@ def main():
             writes.append({'at': cpu(ad), 'hex': (cpu_at & 0xFFFF).to_bytes(2, 'little').hex(' '),
                            'orig': data[ad:ad + 2].hex(' '), 'note': f'세계 {w} {label} 주소'})
             at += len(enc)
-    doc = {'format': 'dq5patch/1', 'name': a.name, 'rom_size': 2,
-           'writes': writes}
+    doc = {'format': 'dq5patch/1', 'name': a.name, 'rom_size': size, 'writes': writes + tail}
     os.makedirs(os.path.dirname(a.out) or '.', exist_ok=True)
     with open(a.out, 'w', encoding='utf-8') as f:
         json.dump(doc, f, ensure_ascii=False, indent=1)
