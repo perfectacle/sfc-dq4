@@ -48,6 +48,12 @@ class WindowWriteTests(unittest.TestCase):
     def setUpClass(cls):
         cls.data = fixture()
         cls.rom = Rom(cls.data)
+        cls.first = cls.rom.u16(WINDOWS) | 0x040000
+
+    def with_byte(self, addr, value):
+        data = bytearray(self.data)
+        data[lorom(addr)] = value
+        return bytes(data)
 
     def test_dump_and_unchanged(self):
         doc = dump(self.rom)
@@ -80,6 +86,22 @@ class WindowWriteTests(unittest.TestCase):
         self.assertEqual(bytes(rom.d[lorom(addr):lorom(addr) + 4]), bytes([0x44, 0x86, 0xCA, 0xA5]))
         with self.assertRaises(ValueError):
             edits(self.rom, {'format': FORMAT, 'windows': [{'index': '05', 'h': 6}]})
+        # 저장된 높이 5 가 아니라 엔진이 다시 센 최악 높이로 BG3 안인지 본다(bit5 켜짐 11, 꺼짐 15).
+        self.assertEqual(len(edits(self.rom, {'format': FORMAT, 'windows': [{'index': '05', 'y': 17}]})), 1)
+        for y in (18, 27):
+            with self.subTest(y=y), self.assertRaises(ValueError):
+                edits(self.rom, {'format': FORMAT, 'windows': [{'index': '05', 'y': y}]})
+        party = Rom(self.with_byte(self.first + 5 * 8, 0x62))
+        self.assertEqual(len(edits(party, {'format': FORMAT, 'windows': [{'index': '05', 'y': 21}]})), 1)
+        with self.assertRaises(ValueError):
+            edits(party, {'format': FORMAT, 'windows': [{'index': '05', 'y': 22}]})
+
+    def test_low_height_window_moves(self):
+        rom = Rom(self.with_byte(self.first + 8 * 8 + 3, 0xA1))
+        self.assertEqual(len(edits(rom, {'format': FORMAT, 'windows': [{'index': '08', 'x': 4}]})), 1)
+        for row in ({'index': '08', 'h': 0}, {'index': '08', 'w': 1}):
+            with self.subTest(row=row), self.assertRaises(ValueError):
+                edits(rom, {'format': FORMAT, 'windows': [row]})
 
     def test_shared_record(self):
         table = records(self.rom)

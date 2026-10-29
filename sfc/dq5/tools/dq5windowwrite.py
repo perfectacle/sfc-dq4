@@ -26,6 +26,9 @@ FORMAT = 'dq5windows/1'
 FIELDS = {'x': (0, 0x1F), 'y': (1, 0x1F), 'w': (2, 0x1F), 'h': (3, 0x0F)}
 MAP_W = 32
 MESSAGE = 0x25
+# +0 bit6 창은 04:9FD3 이 높이를 다시 센다. bit5 가 켜지면 일행 수(4까지) × 2 + 3, 꺼지면 메뉴마다 달라 4비트 최대로 본다.
+PARTY_HEIGHT = 4 * 2 + 3
+MENU_HEIGHT = 0x0F
 
 
 def integer(value, maximum, name, minimum=0):
@@ -102,9 +105,11 @@ def edits(rom, doc):
             if key in row:
                 new[at] = new[at] & ~mask & 0xFF | integer(row[key], mask, f'창 {n:02X} {key}')
         h = header(new)
-        # 표 뒤쪽 번호에는 창이 아닌 바이트로 보이는 값(너비 31 등)도 있어, 바꾼 창만 BG3 타일맵 32 × 32 안인지 본다.
-        if new != old and (h['x'] + h['w'] > MAP_W or h['y'] + h['h'] > MAP_W or h['w'] < 2 or h['h'] < 2):
-            raise ValueError(f'창 {n:02X}: BG3 타일맵 32 × 32 밖이거나 너비·높이가 2 미만임')
+        height = (PARTY_HEIGHT if new[0] & 0x20 else MENU_HEIGHT) if new[0] & 0x40 else h['h']
+        # 원본에도 높이 1 인 창(28·8F)이 있어, 너비·높이 하한은 문서가 적은 필드에만 건다.
+        if new != old and (h['x'] + h['w'] > MAP_W or h['y'] + height > MAP_W
+                           or any(k in row and h[k] < 2 for k in ('w', 'h'))):
+            raise ValueError(f'창 {n:02X}: BG3 타일맵 32 × 32 밖(높이 {height})이거나 고친 너비·높이가 2 미만임')
         if n == MESSAGE and new != old:
             raise ValueError('창 25(전투 메시지)는 틀만 옮겨지고 글자는 원래 줄에 찍혀 받지 않음')
         if new != old and len(sharing[addr]) > 1:
