@@ -16,20 +16,27 @@ arrivals: [{group, map, x, y, layer, world_code, wagon, direction, party_overlap
 목록과 식별자 외의 필드는 생략할 수 있다. 생략한 값은 원본에서 보존한다.
 번호·좌표·타일은 JSON 정수다. 세계 코드 0은 원본의 빈 세계 값이며 1~3이 세계 0~2다.
 입구 그룹 50~54(16진)는 도착 표가 아닌 특수 코드가 처리한다. 원본의 좌표별 예외도 남는다.
+입구 그룹은 롬의 맵 포인터 그룹 수(dq5newmap.py 로 늘린 롬이면 늘린 수)까지 받는다. 원본 롬에서 새 그룹(36~)의 입구를
+함께 만들 때는 --new-map GG/MM 으로 그 그룹을 알린다(dq5newmap.py 입력과 같은 새 맵).
+도착 표(0F:EA97)는 dq5newmap.py 의 「들어가는 곳 표」와 같은 표다. 새 그룹의 도착은 그 도구의 groups[].entrance 로 쓰고,
+그 도구가 옮긴 롬에서는 옮긴 자리를 읽기만 한다(두 도구가 같은 자리를 쓰지 않게).
 entrance_tables: {main: [{group, x, y}…], aux: […]} 는 입구 표 전체를 새 길이로 --entrances-at 자리에 옮겨 쓴다.
 적지 않은 표는 원본 항목을 그대로 옮긴다. 표를 읽는 긴 주소 20곳과 세계 지도의 포인터 둘을 새 자리로 바꾼다.
 """
 import argparse
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 from dq5field import BLOCK_LOWER, BLOCK_UPPER, ENTRANCES, GROUP_ARRIVAL, QUAD_BIT  # noqa: E402
-from dq5map import Rom, lorom  # noqa: E402
+from dq5map import Rom, group_spans, lorom  # noqa: E402
+from dq5newmap import entrance_table  # noqa: E402
 
 FORMAT = 'dq5fieldtables/1'
 BLOCK_COUNT = 511
+# 원본 롬의 도착 항목 수(그룹 00~35). 늘린 롬은 arrivals() 가 센다.
 ARRIVAL_COUNT = 0x36
 ENTRANCE_TABLES = {'main': (ENTRANCES, 47), 'aux': (0x04FE83, 14)}
 # 입구 표를 긴 주소로 읽는 명령(LDA·CMP long,X)과 그 피연산자가 가리키는 표 안 거리(0 그룹, 1 X, 3 Y).
@@ -67,11 +74,29 @@ def fields(value, allowed, name):
         raise ValueError(f'{name}: 모르는 필드 {", ".join(sorted(unknown))}')
 
 
-def group_number(value):
+def group_number(value, groups):
     integer(value, 0x54, 'group')
-    if 0x36 <= value < 0x50:
-        raise ValueError('입구 group 은 00~35 또는 50~54(16진)여야 함')
+    if groups <= value < 0x50:
+        raise ValueError(f'입구 group 은 00~{groups - 1:02X} 또는 50~54(16진)여야 함')
     return value
+
+
+def interior_groups(rom, new_maps=()):
+    """그룹 50 미만의 그룹 수. 롬의 맵 포인터 그룹에 --new-map 이 알린 새 그룹을 더한다."""
+    try:
+        count = len(group_spans(rom)[0])
+    except IndexError:
+        raise ValueError('롬에 맵 포인터 그룹 표가 없음') from None
+    # 그룹 50 이상의 새 맵은 새 그룹이 아니다(입구 그룹 50~54 는 늘 받음).
+    new = sorted({bc for bc, _ in new_maps if count <= bc < 0x50})
+    if new != list(range(count, count + len(new))):
+        raise ValueError(f'--new-map 의 새 그룹은 {count:02X} 부터 빈 번호 없이 50 미만이어야 함')
+    return count + len(new)
+
+
+def arrivals(rom):
+    """도착 표 자리와 항목 수. 표를 옮긴 롬(dq5newmap.py)이면 옮긴 자리와 늘린 그룹 수다."""
+    return entrance_table(rom), len(group_spans(rom)[0])
 
 
 def record(rom, addr):
@@ -82,16 +107,17 @@ def record(rom, addr):
     return raw
 
 
-def check_layout(rom):
+def check_layout(rom, groups):
     for table in (BLOCK_LOWER, BLOCK_UPPER):
         record(rom, table + (BLOCK_COUNT - 1) * 5)
-    record(rom, GROUP_ARRIVAL + (ARRIVAL_COUNT - 1) * 5)
+    table, count = arrivals(rom)
+    record(rom, table + (count - 1) * 5)
     for name, (start, count) in ENTRANCE_TABLES.items():
         end = lorom(start + count * 5)
         if end >= len(rom.d) or rom.d[end] != 0xFF:
             raise ValueError(f'{name} 입구 표의 고정 종료자가 FF 가 아님')
         for i in range(count):
-            group_number(record(rom, start + i * 5)[0])
+            group_number(record(rom, start + i * 5)[0], groups)
 
 
 def block_tiles(raw):
@@ -113,9 +139,9 @@ def entrance_fields(raw):
     return {'group': raw[0], 'x': int.from_bytes(raw[1:3], 'little'), 'y': int.from_bytes(raw[3:5], 'little')}
 
 
-def encode_entrance(raw, changes):
+def encode_entrance(raw, changes, groups):
     value = entrance_fields(raw) | changes
-    return bytes([group_number(value['group'])]) + integer(value['x'], 511, 'x').to_bytes(2, 'little') + \
+    return bytes([group_number(value['group'], groups)]) + integer(value['x'], 511, 'x').to_bytes(2, 'little') + \
         integer(value['y'], 511, 'y').to_bytes(2, 'little')
 
 
@@ -144,7 +170,7 @@ def lorom_cpu(at):
     return b << 16 | a
 
 
-def entrance_list(rows, table):
+def entrance_list(rows, table, groups):
     if not isinstance(rows, list) or not rows:
         raise ValueError(f'entrance_tables.{table}: 항목이 하나 이상인 배열이어야 함')
     out = b''
@@ -152,7 +178,7 @@ def entrance_list(rows, table):
         fields(row, {'group', 'x', 'y'}, f'entrance_tables.{table}')
         if row.keys() != {'group', 'x', 'y'}:
             raise ValueError(f'entrance_tables.{table}: group·x·y 를 모두 적어야 함')
-        out += encode_entrance(bytes(5), row)
+        out += encode_entrance(bytes(5), row, groups)
     return out
 
 
@@ -164,16 +190,15 @@ def table_groups(body, start):
     return groups
 
 
-def relocate(rom, tables, at):
+def relocate(rom, tables, at, groups):
     """입구 표 둘을 at 에 [main][FF][aux][FF] 로 쓰고 읽는 곳을 바꾸는 (주소, 새 값, 원본|None, 설명)."""
     fields(tables, set(ENTRANCE_TABLES), 'entrance_tables')
-    check_layout(rom)
     start = lorom_cpu(at)
     body, place = b'', {}
     for name, (old, count) in ENTRANCE_TABLES.items():
         place[name] = start + len(body)
         if name in tables:
-            body += entrance_list(tables[name], name)
+            body += entrance_list(tables[name], name, groups)
         else:
             off = lorom(old)
             body += bytes(rom.d[off:off + count * 5])
@@ -203,18 +228,19 @@ def relocate(rom, tables, at):
 
 
 def dump(rom):
-    check_layout(rom)
+    check_layout(rom, interior_groups(rom))
+    table, count = arrivals(rom)
     return {
         'format': FORMAT,
         'blocks': [{'index': i, 'lower': block_tiles(record(rom, BLOCK_LOWER + i * 5)),
                     'upper': block_tiles(record(rom, BLOCK_UPPER + i * 5))} for i in range(BLOCK_COUNT)],
         'entrances': [{'table': name, 'index': i, **entrance_fields(record(rom, start + i * 5))}
                       for name, (start, count) in ENTRANCE_TABLES.items() for i in range(count)],
-        'arrivals': [{'group': i, **arrival_fields(record(rom, GROUP_ARRIVAL + i * 5))} for i in range(ARRIVAL_COUNT)],
+        'arrivals': [{'group': i, **arrival_fields(record(rom, table + i * 5))} for i in range(count)],
     }
 
 
-def edits(rom, doc, entrances_at=None):
+def edits(rom, doc, entrances_at=None, new_maps=()):
     """검사한 항목을 (주소, 새 값, 원본, 설명)으로 돌려준다. 원본이 None 이면 orig 없이 쓰는 새 자리."""
     fields(doc, {'format', 'blocks', 'entrances', 'arrivals', 'entrance_tables'}, '문서')
     if ('entrance_tables' in doc) != (entrances_at is not None):
@@ -223,7 +249,9 @@ def edits(rom, doc, entrances_at=None):
         raise ValueError('entrance_tables 로 옮길 때는 entrances(제자리 수정)를 함께 쓸 수 없음')
     if doc.get('format') != FORMAT:
         raise ValueError(f'format 은 {FORMAT}이어야 함')
-    check_layout(rom)
+    groups = interior_groups(rom, new_maps)
+    check_layout(rom, groups)
+    arrival_at, arrival_count = arrivals(rom)
     out = []
     for section in ('blocks', 'entrances', 'arrivals'):
         rows = doc.get(section, [])
@@ -250,25 +278,32 @@ def edits(rom, doc, entrances_at=None):
                 addr = start + index * 5
                 raw = record(rom, addr)
                 changes = {k: v for k, v in row.items() if k not in ('table', 'index')}
-                out.append((addr, encode_entrance(raw, changes), raw, f'{table} 입구 {index}'))
+                out.append((addr, encode_entrance(raw, changes, groups), raw, f'{table} 입구 {index}'))
             else:
                 fields(row, {'group'} | ARRIVAL_FIELDS, section)
-                key = integer(row.get('group'), ARRIVAL_COUNT - 1, 'group')
-                addr = GROUP_ARRIVAL + key * 5
+                key = integer(row.get('group'), arrival_count - 1, 'group')
+                addr = arrival_at + key * 5
                 raw = record(rom, addr)
                 changes = {k: v for k, v in row.items() if k != 'group'}
-                out.append((addr, encode_arrival(raw, changes), raw, f'그룹 {key:02X} 도착'))
+                value = encode_arrival(raw, changes)
+                if value != raw and arrival_at != GROUP_ARRIVAL:
+                    raise ValueError(f'그룹 {key:02X} 도착: 도착 표를 옮긴 롬은 dq5newmap.py 의 groups[].entrance 로 고침'
+                                     '(같은 자리를 두 도구가 쓰지 않게)')
+                # 새 그룹을 더하는 빌드는 dq5newmap.py 가 원래 표를 새 자리로 복사하므로, 원래 자리에 쓴 값은 읽히지 않는다.
+                if value != raw and groups > arrival_count:
+                    raise ValueError(f'그룹 {key:02X} 도착: 새 그룹을 더하는 빌드에서는 dq5newmap groups[].entrance 로 고침')
+                out.append((addr, value, raw, f'그룹 {key:02X} 도착'))
             if key in seen:
                 raise ValueError(f'{section}: 중복 항목 {key}')
             seen.add(key)
     if entrances_at is not None:
-        out += relocate(rom, doc['entrance_tables'], entrances_at)
+        out += relocate(rom, doc['entrance_tables'], entrances_at, groups)
     return out
 
 
-def patch(rom, doc, name='field-tables', entrances_at=None):
+def patch(rom, doc, name='field-tables', entrances_at=None, new_maps=()):
     writes, size = [], 0
-    for addr, new, old, note in edits(rom, doc, entrances_at):
+    for addr, new, old, note in edits(rom, doc, entrances_at, new_maps):
         if new != old:
             write = {'at': f'{addr >> 16:02X}:{addr & 0xFFFF:04X}', 'hex': new.hex(' '), 'note': note}
             if old is not None:
@@ -285,9 +320,15 @@ def patch(rom, doc, name='field-tables', entrances_at=None):
 def check(rom):
     rows = edits(rom, dump(rom))
     bad = sum(new != old for _, new, old, _ in rows)
-    print(f'블록 {BLOCK_COUNT}개 × 2층, 입구 61개, 도착 {ARRIVAL_COUNT}개: '
+    print(f'블록 {BLOCK_COUNT}개 × 2층, 입구 61개, 도착 {arrivals(rom)[1]}개: '
           f'{sum(len(old) for _, _, old, _ in rows)}바이트, 다른 항목 {bad}개')
     return bool(bad)
+
+
+def new_map(text):
+    if not re.fullmatch(r'[0-9A-F]{2}/[0-9A-F]{2}', text):
+        raise argparse.ArgumentTypeError('--new-map 은 대문자 16진 GG/MM 이어야 함')
+    return tuple(int(v, 16) for v in text.split('/'))
 
 
 def main():
@@ -301,6 +342,8 @@ def main():
     write.add_argument('-o', '--out', required=True)
     write.add_argument('--name', default='field-tables')
     write.add_argument('--entrances-at', help='entrance_tables 를 쓸 자리(BB:AAAA). 다른 패치와 겹치지 않게 고름')
+    write.add_argument('--new-map', action='append', default=[], type=new_map,
+                       help='dq5newmap.py 로 함께 더하는 새 맵 GG/MM(새 그룹의 입구를 받게 함)')
     subs.add_parser('check')
     args = parser.parse_args()
     try:
@@ -312,7 +355,7 @@ def main():
             result = dump(rom)
         else:
             with open(args.source, encoding='utf-8') as f:
-                result = patch(rom, json.load(f), args.name, args.entrances_at)
+                result = patch(rom, json.load(f), args.name, args.entrances_at, args.new_map)
         os.makedirs(os.path.dirname(args.out) or '.', exist_ok=True)
         with open(args.out, 'w', encoding='utf-8') as f:
             json.dump(result, f, ensure_ascii=False, indent=2)

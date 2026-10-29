@@ -1,7 +1,7 @@
 -- 표 쓰기 실측의 관측 프로브. READS 의 롬 주소를 읽을 때와 EXECS 의 PC 를 지날 때를 기록하고 DRIVER 의 입력을 재생한다.
 --   READS="23B591-23B668,278073"   그 CPU 주소(범위)를 읽을 때 값·PC
 --   EXECS="21A561"          그 PC 를 지날 때 A·X·Y
--- DRIVER 가 결과(battle.txt·msg.txt)를 쓸 때 observed.txt 와 WRAM 전체(final.wram)를 함께 남긴다.
+-- DRIVER 가 결과(battle.txt·msg.txt)를 쓸 때 observed.txt 와 WRAM 전체(final.wram)·CGRAM(final.cgram)을 함께 남긴다.
 package.path = os.getenv('LIBDIR') .. '/?.lua;' .. package.path
 local L = require('lib')
 local n, log, LIMIT = 0, {}, 20000
@@ -34,6 +34,7 @@ L.write = function(name, data)
   if name == 'battle.txt' or name == 'msg.txt' then
     write('observed.txt', table.concat(log, '\n') .. '\n')
     L.dump('final.wram', emu.memType.snesWorkRam, 0x20000)
+    L.dump('final.cgram', emu.memType.snesCgRam, 0x200)
   end
   return write(name, data)
 end
