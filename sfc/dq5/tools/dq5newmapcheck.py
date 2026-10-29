@@ -38,9 +38,11 @@ DOOR_CMD = 'up:4,wait:20,a:6,wait:60,down:6,wait:15,down:6,wait:15,down:6,wait:1
 # 같은 문에서 どうぐ(오른쪽 열 둘째)로 첫 칸의 ラインハットのカギ(C9)를 つかう. 11:8E54 의 JSL 로 입구 01:D97B 를 지나 문이 열림
 # (메시지 1A2). 이 입구가 옛 문 표를 읽으면 STALE 감시가 잡는다.
 # 01/00 성문 (31,51) 을 이벤트 명령 C4(입구 01:D915)로 열고, 이어 C5(01:F117)로 닫는다. 명령을 7E:1A0D 에 두고
-# $19B3 으로 건다.
+# $19B3 으로 건다. 1A/00 (36,27)·19/00 (32,47) 은 문 종류 3F·40 이라 01:E170 갈래로 표 F037·F067 을 읽는다.
 EVENT = '{},19B3=0D,19B4=1A,19B5=00,19AE|80'
 OPEN = EVENT.format('1A0D=C4,1A0E=1F,1A0F=33,1A10=02,1A11=FF')
+OPEN_3F = EVENT.format('1A0D=C4,1A0E=24,1A0F=1B,1A10=02,1A11=FF')
+OPEN_40 = EVENT.format('1A0D=C4,1A0E=20,1A0F=2F,1A10=02,1A11=FF')
 CLOSE = EVENT.format('1A0D=C4,1A0E=1F,1A0F=33,1A10=02,1A11=C5,1A12=1F,1A13=33,1A14=02,1A15=FF')
 KEY_CMD = 'up:4,wait:20,a:6,wait:60,right:6,wait:15,down:6,wait:15,a:6,wait:60,a:6,wait:60,a:6,wait:120,a:6,wait:250'
 VARIANTS = {
@@ -117,6 +119,16 @@ CASES = [
     ('doors-close-original', 'original', '01/00,31,54,1', 'wait:500', ('01/00', (31, 54), None, None, None),
      {'late': CLOSE, 'cell': '31,51'}),
     ('doors-gate-original', 'original', '01/00,31,54,1', 'wait:400', ('01/00', (31, 54), None, None, None), {'cell': '31,51'}),
+    ('doors-open3f', 'doors', '1A/00,36,30,1', 'wait:400', ('1A/00', (36, 30), None, None, None),
+     {'late': OPEN_3F, 'cell': '36,27', 'cell_like': 'doors-open3f-original', 'cell_unlike': 'doors-gate3f-original'}),
+    ('doors-open3f-original', 'original', '1A/00,36,30,1', 'wait:400', ('1A/00', (36, 30), None, None, None),
+     {'late': OPEN_3F, 'cell': '36,27'}),
+    ('doors-gate3f-original', 'original', '1A/00,36,30,1', 'wait:400', ('1A/00', (36, 30), None, None, None), {'cell': '36,27'}),
+    ('doors-open40', 'doors', '19/00,32,50,1', 'wait:400', ('19/00', (32, 50), None, None, None),
+     {'late': OPEN_40, 'cell': '32,47', 'cell_like': 'doors-open40-original', 'cell_unlike': 'doors-gate40-original'}),
+    ('doors-open40-original', 'original', '19/00,32,50,1', 'wait:400', ('19/00', (32, 50), None, None, None),
+     {'late': OPEN_40, 'cell': '32,47'}),
+    ('doors-gate40-original', 'original', '19/00,32,50,1', 'wait:400', ('19/00', (32, 50), None, None, None), {'cell': '32,47'}),
     ('doors-room', 'doors', '01/03,14,8,1', 'wait:10', ('01/03', (14, 8), None, None, None),
      {'cell': '14,7', 'cell_like': 'doors-room-original'}),
     ('doors-room-original', 'original', '01/03,14,8,1', 'wait:10', ('01/03', (14, 8), None, None, None), {'cell': '14,7'}),

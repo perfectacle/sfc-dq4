@@ -291,8 +291,8 @@ class DoorTests(unittest.TestCase):
 
     def test_stale_copy_elsewhere_rejected(self):
         value, moved = self.moved()
-        write(moved.d, 0x01F0A0, b'\x12')
-        with self.assertRaisesRegex(ValueError, 'F0A0 가 뱅크 01 과 다름'):
+        write(moved.d, 0x01F037, b'\x12')
+        with self.assertRaisesRegex(ValueError, 'F037 가 뱅크 01 과 다름'):
             writes_for(moved, value)
         _, moved = self.moved()
         with self.assertRaisesRegex(ValueError, '스텁은 이미'):
