@@ -79,6 +79,10 @@ org $04BC08
 org $04BB70
     JML WnTactic
 
+; 모험의 서 기록 목록(창 5D)의 코드 DC(04:B9A7)가 빈 칸이면 04:B9FB 의 10바이트를 거꾸로 JSR $B235 로 찍는 고리
+org $04B9EB
+    JML WnEmptySlot
+
 ; 창 바이트 갈래(메뉴 패치의 JSL). 고정 문구 접두를 먼저 가르고, 나머지는 원래 대상으로.
 org $04B11E
     JSL WnPrefix
@@ -1588,6 +1592,25 @@ WnPrefix:
     PLX
     SEC
     RTL
+
+; 04:B9EB(M = 8, Y = $E0 기준 자리). 원래 고리는 빈칸 하나와 「しようしていません」 아홉 칸을 찍어 Y 를 20 나아간다.
+; 빈칸 자리를 건너뛰고 고정 문구를 그린 뒤 Y 를 원래만큼 나아가, 고리 다음 PLX / BRL 로 돌아간다.
+; 필드에서는 원래 가나 타일 칸을 가나 칸 슬롯이 쓰므로 가나로 찍으면 깨진다
+WnEmptySlot:
+    REP #$30
+    TYA
+    CLC
+    ADC #$0014
+    PHA
+    INY
+    INY
+    LDA.b $E0
+    STA.l $7E0000|!wt_buf
+    LDA.w #!wt_empty_slot
+    JSR WtFixedDraw
+    PLY
+    SEP #$20
+    JML $04B9F7
 
 ; 04:AC25(04:AA10 제목 고리에서 B0 미만 바이트, A = 바이트 8비트, X = 그 바이트 자리, DB = 04, Y = $DC 기준 자리).
 ; 원래는 STA $00 / PHB / LDA #$7E / PHA / PLB 뒤 ($DC),Y 에 쓴다. 9E k 면 고정 문구를 그리고 고리로 돌아간다.
