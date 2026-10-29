@@ -608,7 +608,7 @@ def field_tiles(rom, world=0):
 
 
 def field_block_images(rom, cgram, tiles, layers=('lower', 'upper'), world=0):
-    """블록 511개 그림. world 는 니블 표를 고르는 세계 번호($1949, dq5fieldgfxwrite --worlds-at 롬이면 세계마다 다름)."""
+    """블록 그림(롬의 블록 수만큼, 블록을 늘린 롬이면 511 이상도). world 는 니블 표를 고르는 세계 번호($1949, dq5fieldgfxwrite --worlds-at 롬이면 세계마다 다름)."""
     from dq5field import BLOCK_LOWER, BLOCK_UPPER, block_count, block_tiles, tile_word
     colors = cgram_colors(cgram)
     cache = {}
@@ -989,8 +989,8 @@ def export_field(rom, out):
     for layers, stem in ((('lower', 'upper'), 'field'), (('lower',), 'field-lower'), (('upper',), 'field-upper')):
         imgs = field_block_images(rom, cg, tiles, layers)
         out.save(sheet(imgs, 16, 20, 16, labels, label_h=10, below=True), f'gfx/blocks/{stem}.png', 'blocks',
-                 f'필드 블록 511개 ({"·".join({"lower": "아래층", "upper": "위층"}[k] for k in layers)})', '필드',
-                 note='블록 번호(9비트). 정의 2A:A32C·2A:AD27')
+                 f'필드 블록 {len(labels)}개 ({"·".join({"lower": "아래층", "upper": "위층"}[k] for k in layers)})', '필드',
+                 note='블록 번호. 정의 2A:A32C·2A:AD27(511 이상은 dq5fieldtables --blocks-at 이 옮긴 표)')
     colors = cgram_colors(cg)
     cells = []
     for t in range(512):

@@ -227,6 +227,26 @@ class ChestWriteTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             dump(rom)
 
+    def test_world_block_reads_tenth_bit_plane(self):
+        """가짜 롬: 지도는 모두 블록 05, 9번째 비트 없음, 10번째 비트 평면은 칸 (11,83) 만 켬."""
+        import dq5fieldwrite as fw
+        d = bytearray(0x200000)
+
+        def put(at, raw):
+            d[lorom(at):lorom(at) + len(raw)] = raw
+        runs = lambda value, n: bytes([0xFF, value]) * (n // 128) + b'\x80'
+        put(0x308000, runs(0, 0x2000))                    # 9번째 비트 8KB
+        put(0x309000, runs(5, 0x10000))                   # 지도 64KB
+        put(fw.LOADERS[0], bytes.fromhex('a9308d744348aba20080204fa6') + bytes.fromhex('a9308d744348aba20090204fa6'))
+        hook, plane = 0x318000, 0x319000
+        put(fw.BIT9_SITES[0], b'\x22' + hook.to_bytes(3, 'little'))
+        put(hook, fw.bit9_hook([plane, None, None]))
+        i = 83 * 256 + 11
+        put(plane + (i >> 3), bytes([0x80 >> (i & 7)]))
+        rom = Rom(bytes(d))
+        self.assertEqual(world_block(rom, 22, 166), 0x205)        # 블록 좌표 (11,83)
+        self.assertEqual(world_block(rom, 24, 166), 0x05)
+
     @unittest.skipUnless(ROM.is_file(), '롬 없음')
     def test_world_block_reads_loader_chunks(self):
         rom = Rom(ROM.read_bytes())
