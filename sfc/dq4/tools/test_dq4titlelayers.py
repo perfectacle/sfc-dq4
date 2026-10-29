@@ -70,7 +70,8 @@ class LayerTests(unittest.TestCase):
         glyphs = np.array(layers.glyph_mask()) > 0
         tail = np.zeros_like(glyphs)
         tail[176:192, 176:192] = glyphs[176:192, 176:192]
-        self.assertEqual(int(tail.sum()), 30)
+        self.assertEqual(int(tail.sum()), int((layers.subtitle()[176:192, 176:192] != layers.SUBTITLE_CLEAR).sum()))
+        self.assertGreater(int(tail.sum()), 0)
         self.assertTrue(np.all(mask[tail]))
         self.assertTrue(np.all(priority[tail]))
         self.assertFalse(np.any(mask & ~glyphs & priority))
@@ -79,21 +80,65 @@ class LayerTests(unittest.TestCase):
         blobs, _ = layers.read_pack(self.pack)
         mask = np.frombuffer(blobs['foreground-mask.bin'], dtype=np.uint8).reshape(224, 256) > 0
         glyphs = np.array(layers.glyph_mask()) > 0
-        self.assertFalse(np.any(mask[185:, 180:208]))
+        self.assertFalse(np.any((mask & ~glyphs)[185:, 180:203]))
+        self.assertFalse(np.any((mask & ~glyphs)[192:, 180:208]))
         self.assertTrue(np.all(mask[glyphs]))
         self.assertTrue(np.any(mask[185:200, 208:]))
+        # A box-shaped cut left a straight seam in the cloud bank; its edge must step outward instead.
+        edges = [int(np.argmax(mask[y, 192:])) for y in range(176, 192)]
+        self.assertEqual(edges, sorted(edges))
+        self.assertGreater(len(set(edges)), 6)
 
-    def test_sky_fragment_above_subtitle_is_transparent(self):
+    def test_subtitle_box_shows_only_the_redrawn_subtitle(self):
+        art = layers.subtitle()
+        drawn = art != layers.SUBTITLE_CLEAR
+        x0, y0, x1, y1 = layers.SUBTITLE_BOX
+        glyphs = np.array(layers.glyph_mask()) > 0
+        self.assertTrue(np.array_equal(glyphs[y0:y1 + 1, x0:x1 + 1], drawn[y0:y1 + 1, x0:x1 + 1]))
+        self.assertFalse(np.any(drawn[:y0]) or np.any(drawn[y1 + 1:]))
+        source = np.array(layers.foreground_source())
+        self.assertTrue(np.array_equal(source[drawn], art[drawn]))
+        blobs, _ = layers.read_pack(self.pack)
+        mask = np.frombuffer(blobs['foreground-mask.bin'], dtype=np.uint8).reshape(224, 256) > 0
+        self.assertTrue(np.all(mask[drawn]))
+
+    def test_subtitle_ornaments_mirror_each_other(self):
+        import dq4titlesubtitle as subtitle
+        art = layers.subtitle()
+        xs = np.flatnonzero(np.isin(art, (subtitle.WHITE, subtitle.PALE)).any(axis=0))
+        axis = xs.min() + xs.max()
+        columns = np.flatnonzero((art != layers.SUBTITLE_CLEAR).any(axis=0))
+        left = columns[columns < xs.min() - 1]
+        self.assertGreater(len(left), 20)
+        self.assertTrue(np.array_equal(art[:, left], art[:, axis - left]))
+        self.assertFalse(np.any((art != layers.SUBTITLE_CLEAR)[:, axis - columns.min() + 1:]))
+
+    def test_subtitle_letters_use_white_fill_navy_outline_and_one_pale_row(self):
+        import dq4titlesubtitle as subtitle
+        art = layers.subtitle()
+        fill = np.isin(art, (subtitle.WHITE, subtitle.PALE))
+        self.assertTrue(np.all(art[subtitle.grow(fill) & ~fill] == subtitle.NAVY))
+        rows = np.flatnonzero((art == subtitle.PALE).any(axis=1))
+        self.assertEqual(rows.tolist(), [np.flatnonzero(fill.any(axis=1)).max()])
+
+    def test_sky_beyond_logo_outline_is_transparent(self):
         from PIL import Image
         original_mask = np.array(Image.open(layers.GLYPH_MASK)) > 0
         glyphs = np.array(layers.glyph_mask()) > 0
-        removed = original_mask & ~glyphs
-        expected = np.zeros_like(removed)
-        expected[175:177, 139:145] = True
-        self.assertTrue(np.array_equal(removed, expected))
-        blobs, _ = layers.read_pack(self.pack)
-        mask = np.frombuffer(blobs['foreground-mask.bin'], dtype=np.uint8).reshape(224, 256)
-        self.assertFalse(np.any(mask[removed]))
+        trimmed = original_mask & ~glyphs
+        self.assertTrue(np.any(trimmed[77:142, 14:46]))
+        self.assertTrue(np.any(trimmed[78:142, 205:252]))
+        inner = trimmed[:170].copy()
+        inner[:, :46] = inner[:, 205:] = False
+        for x0, y0, x1, y1 in layers.SKY_BOXES:
+            self.assertTrue(np.any(inner[y0:y1 + 1, x0:x1 + 1]))
+            inner[y0:y1 + 1, x0:x1 + 1] = False
+        # Only detached specks of one to three pixels go elsewhere.
+        self.assertLessEqual(int(inner.sum()), 6)
+        # Each trimmed row keeps the letter and sword crystal up to the dark outline.
+        for y in range(104, 135):
+            self.assertTrue(np.any(glyphs[y, 214:252]), y)
+            self.assertTrue(np.any(glyphs[y, 14:46]), y)
 
     def test_cloud_variation_and_scroll_wrap_are_continuous(self):
         from PIL import Image
@@ -124,14 +169,6 @@ class LayerTests(unittest.TestCase):
             self.assertTrue(np.array_equal(pictures[offset][:, 1:], pictures[(offset + 1) % 256][:, :-1]), offset)
         self.assertFalse(np.array_equal(pictures[0][:, :64], pictures[0][:, 64:128]))
         self.assertEqual(len({pictures[0][:, x:x + 64].tobytes() for x in range(0, 256, 64)}), 4)
-
-    def test_subtitle_separator_changes_only_the_gap_above_final_consonant(self):
-        original = np.array(native_title(DEFAULT_SOURCE))
-        corrected = np.array(layers.foreground_source())
-        expected = original.copy()
-        expected[183, 115:122] = 111
-        self.assertTrue(np.array_equal(corrected, expected))
-        self.assertTrue(np.array_equal(corrected[184:187, 113:124], original[184:187, 113:124]))
 
     def test_cloud_reservations_are_empty_in_every_dragon_pose(self):
         frames, _ = layers.quantize_dragon(layers.dragon_frames())

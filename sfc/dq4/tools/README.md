@@ -10,6 +10,7 @@
 | `dq4romassets.py rom --out 폴더` | 라이안 정면의 DQ5 엔진 데이터·별도 롬·IPS와 역변환 검증 보고서 생성. 기존 공용 팔레트를 유지하는 색 변경 시안. [롬 삽입](../docs/dq4-rom-assets-format.md) |
 | `dq4romgallery.py --input 폴더 --out 폴더` | ROM 변환 결과와 인물 시안의 비교 갤러리 생성. 시각 확인과 기술 검증 상태를 구분 |
 | `dq4titlelayers.py --out 폴더` | 고정 전경·하늘·앞 구름·용의 128위상(12자세)과 차이 전송 데이터를 생성. [애니메이션 규격](../docs/dq4-title-animation.md) |
+| `dq4titlesubtitle.py [--out PNG]` | 타이틀 부제를 Galmuri9 로 찍고 좌우 대칭 문양을 그려 `dq4art/title-animation/title-subtitle.png` 로. `DQ4_GALMURI` 필요. [부제](../docs/dq4-title-animation.md) |
 | `dq4titlelayerpatch.py --rom 롬 --input 폴더 --out 롬 [--asar 실행파일]` | 레이어별로 움직이는 DQ5 통합 롬·IPS 생성 |
 | `dq4titleanimation.py --out 폴더` | 전체 화면 프레임 교체 실험용 변환. 최종 레이어 방식과 구분 |
 | `dq4titleassets.py [--out 폴더] [--assets-dir 폴더]` | 선택된 실제 크기 한글 타이틀을 다시 줄이지 않고 PNG·CHR·MAP·PAL과 갤러리로 출력. [타이틀 규격](../docs/dq4-title-format.md) |
