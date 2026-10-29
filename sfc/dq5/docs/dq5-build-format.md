@@ -2366,7 +2366,7 @@ MESENCE=… uv run --locked python sfc/dq5/tools/dq5gfxlimitcheck.py rom/dq5.sfc
 
 ### 블록 1,024개·세계 1·2 벌 실측
 
-`dq5blockgrowcheck.py` 가 시험 롬 다섯을 원본에서 만들어 원본과 같은 장면을 돌립니다. 13건이 통과했습니다([일지](../journal/2026-10-30-11-fieldgfx3.md)).
+`dq5blockgrowcheck.py` 가 시험 롬 다섯을 원본에서 만들어 원본과 같은 장면을 돌립니다. 13건이 통과했습니다([일지](../journal/2026-10-30-12-fieldgfx3.md)).
 
 ```sh
 MESENCE=… uv run --locked python sfc/dq5/tools/dq5blockgrowcheck.py rom/dq5.sfc --state work/state/ship.mss --out work/blockgrowcheck
