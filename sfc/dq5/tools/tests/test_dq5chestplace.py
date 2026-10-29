@@ -147,6 +147,8 @@ class ChestPlaceTests(unittest.TestCase):
             (one(furniture(40, 24, unused='1')), at),
             (one(furniture(40, 24, flag_index=0x14, mask=1)), at),   # 7E:2240 은 발밑 표의 비트
             (one(furniture(40, 24, flag_index=0x10, mask=1)), at),   # 7E:223C & 01 은 두 칸 앞·아래층 상자가 씀
+            (one(furniture(40, 24, flag_index=0x0C, mask=1)), at),   # 7E:2238 은 전투 0C 의 21:8C2F 가 읽음
+            (one(furniture(40, 24, flag_index=0x24, mask=1)), at),   # 7E:2250 은 상자 비트 자리 밖
             (one(furniture(30, 12), map_name='00/01'), at),            # 발밑 항목 (31,14) 를 덮음
             (one(furniture(5, 4), map_name='0E/02'), at),              # 두 칸 앞 항목 (6,6) 을 덮음
             ({'format': FORMAT, 'maps': [{'map': '00/01', 'chests': [{'x': 30, 'y': 13, 'block': CHEST_BLOCK,
@@ -155,6 +157,14 @@ class ChestPlaceTests(unittest.TestCase):
         for value, places in bad:
             with self.subTest(value=value), self.assertRaises(ValueError):
                 plan(rom, value, 0x3E8000, places)
+
+    @unittest.skipUnless(ROM.is_file(), '롬 없음')
+    def test_furniture_flag_limit_follows_area_not_search_range(self):
+        # 서랍 범위(222C~223F) 밖이라도 비어 있는 상자 비트(7E:2243)면 받는다
+        rom = Rom(ROM.read_bytes())
+        value = {'format': FORMAT, 'maps': [{'map': '01/02', 'furniture': [furniture(40, 24, flag_index=0x17, mask=1)]}]}
+        _, _, _, tables, _ = plan(rom, value, 0x3E8000, {'search': 0x3F9000})
+        self.assertEqual(tables['search'][-1]['flag_index'], 0x17)
 
     @unittest.skipUnless(ROM.is_file(), '롬 없음')
     def test_lower_row_buried_only_where_engine_reads_it(self):

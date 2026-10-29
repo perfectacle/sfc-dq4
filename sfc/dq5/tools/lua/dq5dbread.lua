@@ -7,10 +7,16 @@ local out = os.getenv("SHOT_DIR")
 local m = emu.memType.snesMemory
 local hits = {}
 
+local function dbr(st)
+  local v = st["cpu.dbr"]
+  if v == nil then error("emu.getState() 에 cpu.dbr 이 없음") end
+  return v
+end
+
 local function add(addr)
   local st = emu.getState()
   local k, pc = st["cpu.k"], st["cpu.pc"]
-  local key = string.format("%02X:%04X db=%02X op=%02X", k, pc, st["cpu.dbr"] or st["cpu.db"] or 0, emu.read(k << 16 | pc, m))
+  local key = string.format("%02X:%04X db=%02X op=%02X", k, pc, dbr(st), emu.read(k << 16 | pc, m))
   local h = hits[key]
   if not h then h = {n = 0, lo = addr, hi = addr}; hits[key] = h end
   h.n = h.n + 1
@@ -30,7 +36,7 @@ for bank, pc in string.gmatch(os.getenv("EXEC") or "", "(%x+):(%x+)") do
   local a = tonumber(bank, 16) << 16 | tonumber(pc, 16)
   emu.addMemoryCallback(function()
     local st = emu.getState()
-    local key = string.format("exec %02X:%04X db=%02X", a >> 16, a & 0xFFFF, st["cpu.dbr"] or st["cpu.db"] or 0)
+    local key = string.format("exec %02X:%04X db=%02X", a >> 16, a & 0xFFFF, dbr(st))
     hits[key] = hits[key] or {n = 0, lo = 0, hi = 0}
     hits[key].n = hits[key].n + 1
   end, emu.callbackType.exec, a, a)
@@ -38,18 +44,39 @@ end
 
 -- DBWIN="1FFD1E,25FAB8" 이 PC 들에 닿을 때 그때의 DB 로 창을 열고, DB 가 그 값인 동안 실행한 명령을
 -- SHOT_DIR/dbwin.txt 에 cover.lua 꼴("PC P 횟수")로 적는다. DB 가 DBMISS(기본 5000) 명령 넘게 다른 값이면 창을 닫는다.
--- 모든 명령에 콜백을 거는 동안은 느리므로 창을 연 동안만 건다.
+-- 모든 명령에 콜백을 거는 동안은 느리므로 창을 연 동안만 건다. 창 안에서 부른 JSL·JSR·BRK 가 길어 창이 닫혀도
+-- 돌아오는 자리에서 DB 가 같으면 창을 다시 연다(돌아온 뒤의 명령을 놓치지 않게).
 local win = os.getenv("DBWIN")
 local cover = {}
 if win then
   local db, miss, execCb = nil, 0, nil
   local missLimit = tonumber(os.getenv("DBMISS") or "5000")
-  local function onExec(addr)
+  local returns = {}
+  local onExec
+  local function open(value)
+    db, miss = value, 0
+    if not execCb then execCb = emu.addMemoryCallback(onExec, emu.callbackType.exec, 0, 0xFFFFFF) end
+  end
+  -- 부른 뒤 돌아오는 자리. BRK 는 서명 바이트 뒤 인자 둘을 처리기가 건너뛴다(BRK 0B mask idx)
+  local CALL = {[0x22] = 4, [0x20] = 3, [0xFC] = 3, [0x00] = 4}
+  onExec = function(addr)
     local st = emu.getState()
-    if st["cpu.dbr"] == db then
+    if dbr(st) == db then
       miss = 0
       local k = addr * 256 + (st["cpu.ps"] & 0x30)
       cover[k] = (cover[k] or 0) + 1
+      local size = CALL[emu.read(addr, m)]
+      if size then
+        local back = (addr & 0xFF0000) | ((addr + size) & 0xFFFF)
+        local key = back * 256 + db
+        if not returns[key] then
+          returns[key] = true
+          local want = db
+          emu.addMemoryCallback(function()
+            if dbr(emu.getState()) == want then open(want) end
+          end, emu.callbackType.exec, back, back)
+        end
+      end
     else
       miss = miss + 1
       if miss > missLimit then
@@ -59,11 +86,8 @@ if win then
     end
   end
   for pc in string.gmatch(win, "%x+") do
-    local open = tonumber(pc, 16)
-    emu.addMemoryCallback(function()
-      db, miss = emu.getState()["cpu.dbr"], 0
-      if not execCb then execCb = emu.addMemoryCallback(onExec, emu.callbackType.exec, 0, 0xFFFFFF) end
-    end, emu.callbackType.exec, open, open)
+    local at = tonumber(pc, 16)
+    emu.addMemoryCallback(function() open(dbr(emu.getState())) end, emu.callbackType.exec, at, at)
   end
 end
 

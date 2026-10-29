@@ -34,8 +34,6 @@ FORMAT = 'dq5chestplace/1'
 # タル·ツボ 칸으로, 게임에서 149·135 메시지를 확인했다(dq5-map-format.md)
 LOWER_FURNITURE = {0x93}
 UPPER_FURNITURE = {0xA7, 0xB9, 0xD3, 0xD4}
-# 서랍 열림 비트는 7E:222C + flag_index. 2240 부터는 발밑 표의 비트다
-SEARCH_FLAGS = 0x2240 - 0x222C
 # 아래층 상자 표는 12:ED62 가 $BC 32 이상일 때만 찾는다. 그보다 앞 그룹에서는 항목이 있어도 읽히지 않는다
 LOWER_FIRST = 0x32
 BOX_FIELDS = {'x', 'y', 'block', 'reward'}
@@ -113,19 +111,6 @@ def furniture_cells(data, bc, bd):
     cells, _ = cell_buffer(data, bc, bd)
     return {(i % width, i // width) for i, cell in enumerate(cells)
             if cell[4] in LOWER_FURNITURE or cell[7] in UPPER_FURNITURE}
-
-
-def flag_bits(tables):
-    """표마다의 열림 비트 → {(WRAM 주소, 마스크)}. 새 서랍 항목이 다른 보상과 비트를 나눠 쓰지 않게 본다."""
-    out = set()
-    for n in range(len(tables['chests'])):
-        out.add((0x2210 + (n >> 3), 0x80 >> (n & 7)))
-    bases = {'search': 0x222C, 'foot': 0x2240}
-    for name in ('search', 'foot', 'ahead', 'lower'):
-        for row in tables[name]:
-            addr = bases[name] + row['flag_index'] if name in bases else 0x2210 + (row['flag_index'] & 0x7F)
-            out |= {(addr, bit) for bit in (1, 2, 4, 8, 16, 32, 64, 128) if row['mask'] & bit}
-    return out
 
 
 def changed_cells(before, after, bc, bd):
@@ -209,9 +194,7 @@ def plan(rom, doc, map_at, at=None, base=None):
             if new[0] in used:
                 raise ValueError(f'{bc:02X}/{bd:02X} furniture[{k}]: 새 가구 칸 {new[0]} 을 다른 항목이 이미 씀')
             used.add(new[0])
-            if integer(box['flag_index'], 255, 'flag_index') >= SEARCH_FLAGS:
-                raise ValueError(f'{bc:02X}/{bd:02X} furniture[{k}]: flag_index 는 {SEARCH_FLAGS - 1:02X} 이하여야 함'
-                                 f'(7E:222C~223F)')
+            integer(box['flag_index'], 255, 'flag_index')
             row = {'group': bc, 'map': bd, 'x': new[0][0], 'y': new[0][1], 'unused': box.get('unused', 1),
                    'reward': box['reward'], 'flag_index': box['flag_index'], 'mask': box['mask']}
             added.append(row)
@@ -219,13 +202,14 @@ def plan(rom, doc, map_at, at=None, base=None):
     for row in tables['chest_maps']:
         cells = chest_cells(middle, row['group'], row['map'])
         tables['chests'] += [{'reward': rewards[(row['group'], row['map'], xy)]} for xy in cells]
-    taken = flag_bits(tables)
+    taken = set(reloc.flag_bits(tables))
     for k, row in enumerate(added):
         reloc.row_encode('search', row, f'furniture {k}')
-        bits = {(0x222C + row['flag_index'], bit) for bit in (1, 2, 4, 8, 16, 32, 64, 128) if row['mask'] & bit}
+        addr = reloc.FLAG_BASE['search'][0] + row['flag_index']
+        bits = {(addr, bit) for bit in (1, 2, 4, 8, 16, 32, 64, 128) if row['mask'] & bit}
         if bits & taken:
             raise ValueError(f'{row["group"]:02X}/{row["map"]:02X} ({row["x"]},{row["y"]}): 열림 비트 '
-                             f'7E:{0x222C + row["flag_index"]:04X} & {row["mask"]:02X} 를 다른 보상이 이미 씀')
+                             f'7E:{addr:04X} & {row["mask"]:02X} 를 다른 보상이 이미 씀')
         taken |= bits
     tables['search'] += added
     chest_writes, chest_mb = reloc.writes_for(middle, tables, at)

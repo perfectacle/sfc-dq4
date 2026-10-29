@@ -104,6 +104,34 @@ class ChestRelocTests(unittest.TestCase):
                            ahead=[row('ahead', flag_index=0x2C, mask=1)]))
         self.assertEqual(flag_bits(dict(doc, lower=[row('lower', flag_index=0x19, mask=8)]))[0x2229, 8], 'lower[0]')
 
+    def test_reserved_bits_belong_to_their_ahead_rows(self):
+        doc = {'chests': [], 'search': [], 'foot': [], 'ahead': [], 'lower': []}
+        owner = row('ahead', group=0x03, map=0x04, x=10, y=7, flag_index=0x2D, mask=0x08)
+        self.assertEqual(flag_bits(dict(doc, ahead=[owner]))[0x223D, 0x08], 'ahead[0]')
+        for value in (dict(doc, search=[row('search', flag_index=0x0C, mask=0x10)]),         # 7E:2238, 21:8C2F
+                      dict(doc, ahead=[row('ahead', flag_index=0x2C, mask=0x80)]),           # 06:D3CB 가 보는 비트
+                      dict(doc, lower=[row('lower', flag_index=0x2D, mask=0x20)]),           # 12:ADB0
+                      dict(doc, ahead=[dict(owner, mask=0x04)]),                             # 주인의 비트를 옮김
+                      dict(doc, ahead=[dict(owner, flag_index=0x30, mask=0x01)])):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                flag_bits(value)
+
+    @mock('dq5chestreloc.map_ids', return_value=[(0, 1)])
+    @mock('dq5chestreloc.map_dimensions', return_value=(64, 64))
+    def test_eight_bit_indexed_tables_have_row_limits(self, _, __):
+        rom = fixture()
+        doc = {'format': FORMAT, 'chests': [], 'chest_maps': [], 'search': [], 'foot': [], 'ahead': [], 'lower': []}
+
+        def rows(name, n):
+            # 행마다 다른 칸·다른 비트(아래층·두 칸 앞은 2210 + 30~, 발밑은 2240 + 0~)
+            first = 0 if name == 'foot' else 0x30 if name == 'ahead' else 0x18
+            return [row(name, x=i % 64, y=i // 64, flag_index=first + i // 8, mask=0x80 >> i % 8) for i in range(n)]
+        for name, limit in (('foot', 28), ('ahead', 31), ('lower', 31)):
+            with self.subTest(name=name):
+                serialize(rom, dict(doc, **{name: rows(name, limit)}))
+                with self.assertRaisesRegex(ValueError, '8비트 색인'):
+                    serialize(rom, dict(doc, **{name: rows(name, limit + 1)}))
+
     def test_placement_bank_rules(self):
         rom = fixture()
         sizes = {'search': 10, 'foot': 10, 'chests': 10, 'ahead': 10, 'chest_maps': 10, 'lower': 10}

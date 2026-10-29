@@ -26,7 +26,9 @@ def fixture():
                 if size == 9:
                     row[4] = 0x38 if name == 'search' else 1
                 row[-4:-2] = b'\xa1\x00'
-                row[-2:] = b'\x03\x80'
+                # 표마다 겹치지 않는 열림 비트(dq5chestreloc.flag_bits): 서랍 222C~, 발밑 2240~, 아래층 2228~, 두 칸 앞 2243~
+                first = {'search': 0, 'foot': 0, 'lower': 0x18, 'ahead': 0x33}[name]
+                row[-2:] = bytes([first + i // 8, 0x80 >> i % 8])
             data[at:at + size] = row
         if name != 'chests':
             at = lorom(start + count * size)
@@ -77,6 +79,25 @@ class ChestWriteTests(unittest.TestCase):
         got = encode('ahead', ahead, {'reward': 0xD005})
         self.assertEqual(got[-2], 0xAC)
         self.assertEqual(decode('ahead', got)['reward'], 0xD005)
+
+    @mock('dq5chestwrite.map_ids', return_value=[(0, i) for i in range(86)])
+    @mock('dq5chestwrite.map_dimensions', return_value=(64, 64))
+    def test_flag_rules_match_reloc(self, _, __):
+        rom = fixture()
+        self.assertEqual(len(patch(rom, {'format': FORMAT, 'search': [{'index': 0, 'flag_index': 0x1A}]})['writes']), 1)
+        for row in ({'index': 1, 'flag_index': 0, 'mask': 0x80},   # 서랍 0 과 같은 비트
+                    {'index': 1, 'flag_index': 0x0C},              # 7E:2238
+                    {'index': 1, 'flag_index': 0x30}):             # 7E:225C 는 상자 비트 자리 밖
+            with self.subTest(row=row), self.assertRaises(ValueError):
+                patch(rom, {'format': FORMAT, 'search': [row]})
+
+    @unittest.skipUnless(ROM.is_file(), '롬 없음')
+    def test_fixed_code_bit_owner_keeps_its_bit(self):
+        rom = Rom(ROM.read_bytes())
+        # 두 칸 앞 11(03/04)의 7E:223D & 08 은 12:AE9C 가 직접 본다
+        patch(rom, {'format': FORMAT, 'ahead': [{'index': 11, 'reward': 0x38E}]})
+        with self.assertRaises(ValueError):
+            patch(rom, {'format': FORMAT, 'ahead': [{'index': 11, 'flag_index': 0x2E, 'mask': 0x02}]})
 
     def test_reward_and_mask_bounds(self):
         for value in (0, 255, 256, 0xCFFF, 0xD000, 0xD009, 0xFFFC, 0xFFFF):

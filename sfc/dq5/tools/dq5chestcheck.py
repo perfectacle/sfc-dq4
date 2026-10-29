@@ -32,13 +32,14 @@ INPUT = ('up:8,wait:30,a:8,wait:60,down:6,wait:25,down:6,wait:25,down:6,wait:25,
          'right:6,wait:25,a:8,wait:200,a:4,wait:150,a:4,wait:150,b:4,wait:220')
 CASES = {
     'chest': ({'chests': [{'index': 2, 'reward': 0x241}]}, 321, 0x2210, 0x20, 0x2210, 0x20, 0x33, 0x131),
-    'search': ({'search': [{'index': 31, 'reward': 0x2B0, 'flag_index': 4, 'mask': 0x80}]},
-               432, 0x2230, 0x80, 0x222F, 1, 0xA1, 0x12F),
+    # 2230 & 80 은 서랍 32 가 쓰므로 빈 2237 & 80 으로 옮긴다
+    'search': ({'search': [{'index': 31, 'reward': 0x2B0, 'flag_index': 0x0B, 'mask': 0x80}]},
+               432, 0x2237, 0x80, 0x222F, 1, 0xA1, 0x12F),
     'foot': ({'foot': [{'index': 0, 'group': 0x17, 'map': 0, 'x': 3, 'y': 5, 'layer': 1,
                        'reward': 0x31F, 'flag_index': 3, 'mask': 0x40}]},
              543, 0x2243, 0x40, 0x222F, 1, 0xA1, 0x12B),
-    'ahead': ({'ahead': [{'index': 11, 'reward': 0x38E, 'flag_index': 0x2E, 'mask': 0x02}]},
-              654, 0x223E, 0x02, 0x223D, 0x08, 0x5F, 0x12B),
+    # 항목 11(03/04)의 비트 223D & 08 은 12:AE9C 가 직접 보므로 보상만 바꾼다
+    'ahead': ({'ahead': [{'index': 11, 'reward': 0x38E}]}, 654, 0x223D, 0x08, 0x223D, 0x08, 0x5F, 0x12B),
     'lower': ({'lower': [{'index': 3, 'reward': 0x3FD, 'flag_index': 0x19, 'mask': 0x08}]},
               765, 0x2229, 0x08, 0x2228, 0x08, 0xB1, 0x131),
     'field': ({'field': [{'index': 0, 'reward': 0x46C}]}, 876, 0x21B3, 0x10, 0x21B3, 0x10, 0xCA, 0x12B),
@@ -126,15 +127,37 @@ def grow_base(doc):
         row['flag_index'] += 1
 
 
+# 상자 256개 롬. 01/02 에 상자 블록 69개를 더 놓아 상자 비트 2210~222F 를 다 쓴다. 19/00 의 마지막 칸 (12,45) 가
+# 상자 255(7E:222F & 01)다. 아래층 상자는 2243~2244 로, 2228~222F 를 쓰던 서랍 32항목은 빈 2237·2239~223B 로 옮긴다
+# (2238 은 21:8C2F 가 읽음)
+FULL_DOC = {'format': 'dq5chestplace/1', 'maps': [{'map': '01/02', 'chests': [
+    {'x': x, 'y': y, 'block': 384, 'reward': 0x100 + 600 + k} for k, (x, y) in enumerate(
+        [(x, y) for y in (14, 16, 18) for x in range(20, 60, 2)] + [(x, 20) for x in range(20, 38, 2)])]}]}
+FULL_AT = GROW_AT + ('--search-at', '3F:A000')
+
+
+def full_base(doc):
+    grow_chests(doc)
+    doc['chests'][186] = {'reward': 0x100 + 255}
+    for row in doc['lower']:
+        row['flag_index'] += 0x33 - 0x18
+    moved = {0: 0x0B, 1: 0x0D, 2: 0x0E, 3: 0x0F}
+    for row in doc['search']:
+        row['flag_index'] = moved.get(row['flag_index'], row['flag_index'])
+
+
+BUILDS = {'past': (GROW_DOC, grow_base, GROW_AT), 'full': (FULL_DOC, full_base, FULL_AT)}
 GROW = {'past_open': (987, 0x2228, 0x80, 0x2228, 0x80, None, 0x131),
         # 아래층 상자 51/51 (19,35). 원본은 2228 & 08, 패치는 옮긴 표의 2229 & 08 을 켠다
-        'past_lower': (None, 0x2229, 0x08, 0x2228, 0x08, 0xB1, 0x131)}
+        'past_lower': (None, 0x2229, 0x08, 0x2228, 0x08, 0xB1, 0x131),
+        'full_open': (255, 0x222F, 0x01, 0x222F, 0x01, None, 0x131)}
 CASES.update({name: (None, *values) for name, values in GROW.items()})
 PATCHED_REWARD = {'place_shift': 0x33, 'past_lower': 0xB1, 'field_world1_day': None, 'field_world2_day': None}
-ORIGINAL_KIND['past_open'] = 0x12B
+ORIGINAL_KIND.update(past_open=0x12B, full_open=0x12B)
 # 맵에 들어갈 때 열린 상자를 그리는 사례: (장면, 미리 켤 비트). 원본은 그 비트를 상자로 보지 않아 그대로 두고,
 # 패치는 1F:FC50 이 옮긴 표에서 그 상자를 찾아 열린 상자 타일(9E·9F)로 바꾼다
-ENTRY = {'past_entry': ({'TO': '19/00,5,46'}, '2228|80'), 'past_entry_lower': ({'TO': '51/51,18,37,2'}, '2229|08')}
+ENTRY = {'past_entry': ({'TO': '19/00,5,46'}, '2228|80'), 'past_entry_lower': ({'TO': '51/51,18,37,2'}, '2229|08'),
+         'full_entry': ({'TO': '19/00,11,46'}, '222F|01')}
 # 열림 비트를 켠 채 교회에 기록하고 리셋해 불러오는 사례(dq5cdlsweep.py 의 church-save-load 와 같은 입력).
 # SRAM 칸 1 은 7E:2000~ 을 70:0012~ 에 그대로 담는다(25:83CE)
 SAVE_BITS = {0x2228: 0x80, 0x2229: 0x08}
@@ -159,7 +182,7 @@ SCENES = {'chest': {'TO': '01/02,34,31'}, 'search': None, 'foot': None, 'ahead':
           'grow_chests': {'TO': '19/00,5,46'}, 'grow_search': {'WAYPOINTS': '1,5;up:8'}, 'grow_foot': None,
           'grow_ahead': START, 'move_lower': 'lower', 'place_chest': {'TO': '01/02,36,29'},
           'place_shift': {'TO': '01/02,34,31'}, 'place_furniture': {'TO': '01/02,40,27'},
-          'past_open': 'grow_chests', 'past_lower': 'lower'}
+          'past_open': 'grow_chests', 'past_lower': 'lower', 'full_open': {'TO': '19/00,11,46'}}
 # 필드 조사는 선 자리를 보므로 걷지 않고 바로 명령 창을 연다
 INPUTS = {name: INPUT.removeprefix('up:8,wait:30,') for name in CASES if name.startswith('field')}
 for _world in (1, 2):
@@ -239,7 +262,7 @@ def compare(name, state, original, out, mesence, libdir, start):
     source, manifest, patched = dest / 'input.json', dest / 'patch.json', dest / 'patched.sfc'
     none_message = 0x12C
     if name in GROW:
-        patched = grow_rom(original, dest)
+        patched = grow_rom(original, dest, name.split('_')[0])
     elif name in PLACE:
         place_doc, place_at = PLACE_INPUTS[name]
         source.write_text(json.dumps(place_doc, indent=2) + '\n', encoding='utf-8')
@@ -300,16 +323,17 @@ def compare(name, state, original, out, mesence, libdir, start):
     return {'case': name, 'runs': results, 'passed': True}
 
 
-def grow_rom(original, dest):
-    """GROW_DOC 와 grow_base 로 상자 194개 롬을 dest 에 만든다. 아래층 상자 비트를 옮긴 표를 바탕(--tables)으로 놓는다."""
+def grow_rom(original, dest, kind='past'):
+    """BUILDS 의 상자 194개(past)·256개(full) 롬을 dest 에 만든다. 열림 비트를 옮긴 표를 바탕(--tables)으로 놓는다."""
+    place_doc, edit, at = BUILDS[kind]
     base, source, manifest, patched = dest / 'base.json', dest / 'input.json', dest / 'patch.json', dest / 'patched.sfc'
     command('dq5chestreloc.py', original, 'dump', '-o', base)
     doc = json.loads(base.read_text(encoding='utf-8'))
-    grow_base(doc)
+    edit(doc)
     base.write_text(json.dumps(doc, indent=2) + '\n', encoding='utf-8')
-    source.write_text(json.dumps(GROW_DOC, indent=2) + '\n', encoding='utf-8')
-    command('dq5chestplace.py', original, 'patch', source, '-o', manifest, '--tables', base, *GROW_AT)
-    command('dq5chestplace.py', original, 'check', source, '--tables', base, *GROW_AT)
+    source.write_text(json.dumps(place_doc, indent=2) + '\n', encoding='utf-8')
+    command('dq5chestplace.py', original, 'patch', source, '-o', manifest, '--tables', base, *at)
+    command('dq5chestplace.py', original, 'check', source, '--tables', base, *at)
     command('dq5build.py', original, 'build', manifest, '-o', patched, '--ips', dest / 'patched.ips')
     return patched
 
@@ -327,7 +351,7 @@ def entry_compare(name, original, out, mesence, libdir, start):
     setup, bits = ENTRY[name]
     dest = out / name
     dest.mkdir()
-    patched = grow_rom(original, dest)
+    patched = grow_rom(original, dest, name.split('_')[0])
     wram = {}
     for mode, rom in (('original', original), ('patched', patched)):
         run_dir = dest / mode

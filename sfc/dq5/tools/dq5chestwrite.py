@@ -224,6 +224,9 @@ def validate_tables(rom, doc, check_cells=False):
             seen.add(key)
     if sum(row['count'] for row in doc['chest_maps']) != TABLES['chests'][1]:
         raise ValueError('chest_maps: count 합계는 161이어야 함')
+    # 표 옮기기와 같은 열림 비트 규칙(7E:2210~224F 안, 겹침·고정 코드가 보는 비트 거부)
+    from dq5chestreloc import flag_bits
+    flag_bits(doc)
     if check_cells:
         start = 0
         for row in doc['chest_maps']:

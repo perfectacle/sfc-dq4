@@ -15,7 +15,9 @@ sfc/dq5/docs/dq5-build-format.md 의 「보물상자·조사 보상 표 옮기�
 일반 상자 수(chest_maps 의 count 합)는 256 까지. 상자 번호 n 은 8비트 덧셈(25:FAB0·1F:FDD0)으로 나오고, 열림 비트는
 7E:2210 + n/8(12:E680·1F:FE02 읽기, 12:E697 이 2190 기준 번호 (n/8 | 80) 으로 켬)이라 2210~222F 를 쓴다. 상자가 193개를
 넘으면 원래 아래층 상자(2228~2229)·서랍(222C~)의 비트와 겹치므로, 그 항목들의 flag_index 를 빈 비트로 옮겨야 한다.
-다섯 표의 열림 비트는 모두 7E:2210~224F 안이어야 하고 서로 겹치면 거부한다.
+다섯 표의 열림 비트는 모두 7E:2210~224F 안이어야 하고 서로 겹치면 거부한다. 표 밖의 코드가 직접 보는 비트(RESERVED)는
+원래 주인 항목만 쓴다. 발밑·두 칸 앞·아래층 상자는 8비트 색인으로 읽어 행 수 한도(ROW_LIMIT)가 있다.
+게임에서는 상자 192·193·256 을 확인했고, 194~255번은 코드 읽기(12:E691·1F:FDD0·25:FAB0)로만 정했다.
 
   python sfc/dq5/tools/dq5chestreloc.py rom/dq5.sfc dump -o work/chest-tables.json
   python sfc/dq5/tools/dq5chestreloc.py rom/dq5.sfc patch work/chest-tables.json -o work/chest-tables.dq5patch.json \\
@@ -55,6 +57,14 @@ MAX_CHESTS = 256
 # 아래층 상자는 같은 식과 1F:FCB5 의 2210 + 번호 둘로 읽으므로 7F 이하만 받는다
 FLAG_BASE = {'search': (0x222C, 0xFF), 'foot': (0x2240, 0xFF), 'ahead': (0x2210, 0x7F), 'lower': (0x2210, 0x7F)}
 FLAG_AREA = (0x2210, 0x2250)
+# 표 밖의 코드가 직접 보는 열림 비트: (주소, 비트) → (보는 곳, 그 비트를 원래 쓰는 두 칸 앞 항목의 (BC, BD, X, Y) 또는 None).
+# 주인 항목만 그 비트를 쓸 수 있고, 주인 항목의 flag_index·mask 는 바꿀 수 없다. 2238 은 어느 비트를 보는지 몰라 바이트 전체
+RESERVED = {**{(0x2238, bit): ('21:8C2F(전투 0C 에서 읽음)', None) for bit in (1, 2, 4, 8, 16, 32, 64, 128)},
+            (0x223C, 0x80): ('06:D3CB', (0x10, 0x02, 29, 9)), (0x223D, 0x08): ('12:AE9C', (0x03, 0x04, 10, 7)),
+            (0x223D, 0x20): ('12:ADB0', (0x03, 0x0B, 13, 16)), (0x223D, 0x80): ('12:AEA9', (0x15, 0x0A, 28, 35)),
+            (0x223E, 0x01): ('12:AEB4', (0x15, 0x0A, 30, 35))}
+# 8비트 색인으로 읽는 표의 행 수 한도. 마지막 종료자 낱말을 색인 FE 이하에서 읽어야 한다(행 수 × 크기 ≤ FE)
+ROW_LIMIT = {'foot': (28, '12:E6E6'), 'ahead': (31, '12:FCE3'), 'lower': (31, '12:FD48·1F:FC81')}
 # 종료자를 못 찾은 표를 끝없이 읽지 않게 두는 한도. 서랍 표 86 이 원래 가장 길다
 MAX_ROWS = 255
 ORIGINAL_BYTES = {'chests': 161 * 2, 'chest_maps': 83 * 3 + 2, 'search': 86 * 9 + 2, 'foot': 18 * 9 + 2,
@@ -150,6 +160,8 @@ def serialize(rom, doc):
         rows, limit = doc[name], MAX_CHESTS if name == 'chests' else MAX_ROWS
         if not isinstance(rows, list) or len(rows) > limit:
             raise ValueError(f'{name}: {limit}개까지의 배열이어야 함')
+        if name in ROW_LIMIT and len(rows) > ROW_LIMIT[name][0]:
+            raise ValueError(f'{name}: {ROW_LIMIT[name][1]} 가 8비트 색인으로 읽으므로 {ROW_LIMIT[name][0]}행까지')
         seen, raws = set(), []
         for i, row in enumerate(rows):
             raws.append(row_encode(name, row, f'{name}[{i}]'))
@@ -181,14 +193,18 @@ def serialize(rom, doc):
 def flag_bits(doc):
     """다섯 표의 열림 비트 → {(WRAM 주소, 비트): 항목 이름}. 두 항목이 한 비트를 나눠 쓰면 하나를 열 때 다른 것도 열린다."""
     owner = {}
+    keep = {place: bit for bit, (_, place) in RESERVED.items() if place}
 
-    def claim(addr, mask, label):
+    def claim(addr, mask, label, place=None):
         if not FLAG_AREA[0] <= addr < FLAG_AREA[1]:
             raise ValueError(f'{label}: 열림 비트 7E:{addr:04X} 가 상자 비트 자리 7E:2210~224F 밖')
         for bit in (0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01):
             if mask & bit:
                 if (addr, bit) in owner:
                     raise ValueError(f'{label}: 열림 비트 7E:{addr:04X} & {bit:02X} 를 {owner[addr, bit]} 가 이미 씀')
+                if (addr, bit) in RESERVED and keep.get(place) != (addr, bit):
+                    raise ValueError(f'{label}: 열림 비트 7E:{addr:04X} & {bit:02X} 는 {RESERVED[addr, bit][0]} 가 '
+                                     '직접 보는 비트라 쓸 수 없음')
                 owner[addr, bit] = label
     for n in range(len(doc['chests'])):
         claim(0x2210 + (n >> 3), 0x80 >> (n & 7), f'일반 상자 {n}')
@@ -196,7 +212,12 @@ def flag_bits(doc):
         for i, row in enumerate(doc[name]):
             if row['flag_index'] > limit:
                 raise ValueError(f'{name}[{i}]: flag_index 는 {limit:02X} 이하여야 함')
-            claim(base + row['flag_index'], row['mask'], f'{name}[{i}]')
+            place = (row['group'], row['map'], row['x'], row['y']) if name == 'ahead' else None
+            if place in keep and (base + row['flag_index'], row['mask']) != keep[place]:
+                addr, bit = keep[place]
+                raise ValueError(f'{name}[{i}]: 이 자리의 열림 비트 7E:{addr:04X} & {bit:02X} 는 '
+                                 f'{RESERVED[addr, bit][0]} 가 직접 보므로 바꿀 수 없음')
+            claim(base + row['flag_index'], row['mask'], f'{name}[{i}]', place)
     return owner
 
 
