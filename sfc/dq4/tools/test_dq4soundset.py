@@ -71,5 +71,17 @@ class ShareSamplesTests(unittest.TestCase):
         self.assertEqual(remap, {0x26: 0x28})
 
 
+class SongScoreTests(unittest.TestCase):
+    SCORE = {'timeline': [{'op': 'note', 'ch': 'track0', 'program': 56}, {'op': 'note', 'ch': 'track10', 'program': 64},
+                          {'op': 'tempo', 'ch': 'track10'}, {'op': 'note', 'ch': 'track2', 'program': 127}]}
+
+    def test_without_drops_returns_the_same_score(self):
+        self.assertIs(soundset.song_score(self.SCORE), self.SCORE)
+
+    def test_drops_notes_of_tracks_and_programs_but_keeps_other_events(self):
+        out = soundset.song_score(self.SCORE, drop_tracks={'track10'}, drop_programs={127})
+        self.assertEqual(out['timeline'], [self.SCORE['timeline'][0], self.SCORE['timeline'][2]])
+
+
 if __name__ == '__main__':
     unittest.main()

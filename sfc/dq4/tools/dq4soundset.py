@@ -6,7 +6,8 @@ dq4soundbank.build_bank 가 그 안으로 샘플을 줄인 뒤 dq4soundport 로 
 
   uv run --locked python sfc/dq4/tools/dq4soundset.py --base 롬 --assets ../sfc-dq4-assets \
     --song 06=0E --song 02=05 --song 17=1E --stream 17=9000 --out work/sound/set/set.sfc [--preview 06] [--map-fades]
-    [--budget 06=15967 ...]
+    [--budget 06=15967 ...] [--pin 17 --resident-from 17 --drop-resident 00 --lanes 17=JSON --drop-track 17=track10
+    --level-db 17=2 --program 21=56:3C --record 1D=2:1F,05]
 """
 import argparse
 import json
@@ -111,50 +112,122 @@ def share_samples(found, details, program_map, resources, known, next_id, *, bud
     return out, mapping, remap, shared
 
 
+def song_score(score, drop_tracks=(), drop_programs=()):
+    """drop_tracks(트랙 이름)·drop_programs 의 음을 뺀 악보."""
+    if not drop_tracks and not drop_programs:
+        return score
+    return score | {'timeline': [e for e in score['timeline'] if e.get('op') != 'note'
+                                 or (e['ch'] not in drop_tracks and e['program'] not in drop_programs)]}
+
+
 def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_fades=False, preview=None,
-          stream=None, budgets=None):
+          stream=None, budgets=None, pinned=(), resident_from=None, drop_resident=(), lanes=None, drop_tracks=None,
+          level_db=None, programs=None, set_records=None):
     """stream 은 {곡 자리: 곡 앞 샘플 바이트 상한}. 그 곡은 샘플 일부를 곡이 울리는 동안 보낸다(transfer_plan).
 
     budgets 는 {곡 자리: 샘플 예산 바이트}. 주면 시퀀스 크기로 정한 예산 대신 이 값으로 샘플을 줄인다. 시퀀스가
     작아져도 청취 승인한 샘플(줄이기 결과)을 그대로 두려면 그때의 예산을 준다. SPC 예산 검사는 install 이 그대로 한다.
+
+    pinned 는 늘 두는 시퀀스 목록에 남길 바꾸는 곡. resident_from 은 stream 을 준 곡 하나로, 그 곡의 곡 앞 샘플을
+    늘 두는 샘플 목록 끝에 더한다(drop_resident 는 원래 목록에서 뺄 샘플). 늘 두는 곡은 2B 로더가 곡 앞 전송을
+    건너뛰므로, 늘 두지 않은 샘플은 모두 곡이 울리는 동안 온다. 늘 두는 샘플을 함께 쓰는 곡은 그 바이트를 예산에
+    돌려받아 한 번 더 줄이고, 샘플 칸(늘 두는 것과 합쳐 0x14)이 넘치면 곡의 샘플 수를 줄여 다시 만든다.
+    lanes·drop_tracks·level_db 는 곡마다 convert 의 lanes_for·뺄 트랙·level_tolerance_db, programs 는
+    {곡: {프로그램: 이미 넣은 전역 샘플}} 로 그 프로그램을 새로 만들지 않고 그 샘플로 울린다.
+    set_records 는 바꾸지 않는 곡의 곡 묶음 레코드(install 과 같음).
     """
-    stream = stream or {}
-    budgets = budgets or {}
+    stream, budgets, lanes = stream or {}, budgets or {}, lanes or {}
+    drop_tracks, level_db, programs = drop_tracks or {}, level_db or {}, programs or {}
     data = bytes(base)
     records = patch.read_sets(data)
     if len({slot for slot, _ in songs}) != len(songs):
         raise ValueError('each DQ5 slot may be replaced once')
+    replaced = {slot for slot, _ in songs}
+    if resident_from is not None and (resident_from not in stream or resident_from not in budgets):
+        raise ValueError('the resident_from song must be streamed and have a fixed budget')
+    resident_plan = bool(pinned or resident_from is not None or drop_resident)
+
+    def convert_args(slot):
+        return {'lanes_for': lanes.get(slot), 'level_tolerance_db': level_db.get(slot, 1.0)}
+
     replacements, resources, reports, known = {}, {}, {}, {}
     next_id = 0x26
     plans = []
     for slot, ident in songs:
         path = score_path(assets, ident)
-        score = json.loads(path.read_text())
+        score = song_score(json.loads(path.read_text()), drop_tracks.get(slot, ()))
         mapping, regions = provisional_map(score)
-        plans.append((slot, ident, path, score, len(port.convert(score, program_map=mapping).sequence),
+        plans.append((slot, ident, path, score,
+                      len(port.convert(score, program_map=mapping, **convert_args(slot)).sequence),
                       min(regions, max_samples)))
     # 표는 모든 곡을 넣은 뒤의 길이로 늘어나므로, 곡마다 예산에 전체 증가분을 쓴다.
     growth = sum(2 + slots - len(records[slot]) for slot, _, _, _, _, slots in plans)
-    for slot, ident, path, score, sequence_size, _ in plans:
-        budget = budgets.get(slot) or patch.sample_budget(data, slot, sequence_size + MARGIN, extra_table=max(0, growth))
+    resident = [x for x in patch.resident_samples(data) if x not in drop_resident]
+    resident_sizes = {x: patch.sample_size(data, x) for x in resident}
+    resident_done = resident_from is None
+    pinned_sizes = {x: len(patch.sequence_bytes(data, x)) for x in patch.pinned_sequences(data) if x not in replaced}
+    pinned_sizes |= {slot: size + MARGIN for slot, _, _, _, size, _ in plans if slot in pinned}
+
+    def make_bank(score, budget, limit, loose, overrides):
+        bank_score = song_score(score, drop_programs=set(overrides))
+        if not bank.used_regions(bank_score)[0]:
+            report = {'samples': {}, 'sample_count': 0, 'reductions': []}
+            return {}, {}, report, [], dict(known)
+        snapshot = dict(known)
         try:
-            found, program_map, bank_report = bank.build_bank(score, assets, start_id=0x26, max_rate=max_rate,
-                                                              cache_dir=cache_dir, budget=budget, max_samples=max_samples)
+            found, program_map, report = bank.build_bank(bank_score, assets, start_id=0x26, max_rate=max_rate,
+                                                         cache_dir=cache_dir, budget=budget, max_samples=limit)
         except ValueError as exc:
             if 'cannot fit samples' not in str(exc):
                 raise
-            found, program_map, bank_report = bank.build_bank(score, assets, start_id=0x26, max_rate=max_rate,
-                                                              cache_dir=cache_dir, budget=budget, max_samples=max_samples,
-                                                              rates=bank.LOW_RATES)
-            bank_report['low_rates'] = True
-        # 청취 승인한 곡(예산을 준 곡)은 샘플을 바꾸지 않도록 바이트까지 같은 것만 합친다.
-        found, program_map, remap, loose = share_samples(found, bank_report['samples'], program_map, resources, known,
-                                                         next_id, budget=budget, loose=slot not in budgets)
-        bank_report['samples'] = {f'{x:02X}': known[x][3] for x in sorted(found)}
+            found, program_map, report = bank.build_bank(bank_score, assets, start_id=0x26, max_rate=max_rate,
+                                                         cache_dir=cache_dir, budget=budget, max_samples=limit,
+                                                         rates=bank.LOW_RATES)
+            report['low_rates'] = True
+        found, program_map, _, shared = share_samples(found, report['samples'], program_map, resources, known,
+                                                      next_id, budget=budget, loose=loose)
+        report['samples'] = {f'{x:02X}': known[x][3] for x in sorted(found)}
+        return found, program_map, report, shared, snapshot
+
+    for slot, ident, path, score, sequence_size, _ in plans:
+        if slot not in budgets and not resident_done:
+            raise ValueError('songs without a fixed budget must come after the resident_from song')
+        overrides = programs.get(slot, {})
+        if any(x not in resources for x in overrides.values()):
+            raise ValueError(f'{slot:02X}: program overrides must name samples of earlier songs')
+        if slot in budgets:
+            budget = budgets[slot]
+        elif resident_plan:
+            budget = patch.sample_budget(data, slot, sequence_size + MARGIN, extra_table=max(0, growth),
+                                         resident=resident_sizes, pinned=pinned_sizes)
+        else:
+            budget = patch.sample_budget(data, slot, sequence_size + MARGIN, extra_table=max(0, growth))
+        limit, rebate = max_samples, 0
+        for attempt in range(4):
+            found, program_map, bank_report, loose, snapshot = make_bank(score, budget + rebate, limit,
+                                                                         slot not in budgets, overrides)
+            program_map |= {p: [{'lo': 0, 'hi': 127, 'sample': x}] for p, x in overrides.items()}
+            conversion = port.convert(score, program_map=program_map, **convert_args(slot))
+            if not resident_done or slot in budgets:
+                break
+            used = set(conversion.samples)
+            shared_resident = sum(resident_sizes[x] for x in used & set(found) if x in resident_sizes)
+            over = len(used | set(resident)) - patch.SAMPLE_SLOTS
+            if over <= 0 and shared_resident == rebate:
+                break
+            if attempt == 3 or (over > 0 and len(found) <= over):
+                raise ValueError(f'{slot:02X}: cannot settle resident sharing ({shared_resident} bytes, rebate {rebate}) '
+                                 f'and sample slots ({over} over); map programs to resident samples with --program')
+            known.clear()
+            known.update(snapshot)
+            rebate = shared_resident
+            if over > 0:
+                limit = len(found) - over
+        bank_report['samples_limit'] = limit
+        bank_report['resident_rebate'] = rebate
         bank_report['shared_samples'] = sorted(f'{x:02X}' for x in found if x in resources)
         bank_report['shared_other_rate'] = loose
         bank_report['resource_bytes'] = sum(map(len, found.values()))
-        conversion = port.convert(score, program_map=program_map)
         send_first, plan = None, None
         if slot in stream:
             if set(conversion.samples) - found.keys():
@@ -164,10 +237,17 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
             notes = {int(k, 16): v for k, v in usage['sample_notes'].items()}
             order, send_first, arrivals = transfer_plan(first, notes, {s: len(found[s]) for s in conversion.samples},
                                                         stream[slot])
-            conversion = port.convert(score, program_map=program_map, sample_order=order, arrivals=arrivals)
+            conversion = port.convert(score, program_map=program_map, sample_order=order, arrivals=arrivals,
+                                      **convert_args(slot))
             plan = {'pre_bytes_cap': stream[slot], 'send_first': send_first,
                     'pre_sample_bytes': sum(len(found[s]) for s in order[:send_first]),
                     'arrival_seconds': {f'{s:02X}': round(t, 3) for s, t in arrivals.items()}}
+            if slot == resident_from:
+                resident += order[:send_first]
+                resident_sizes |= {x: len(found[x]) for x in order[:send_first]}
+                resident_done = True
+        if slot in pinned:
+            pinned_sizes[slot] = len(conversion.sequence)
         replacements[slot] = patch.Replacement(conversion.sequence, tuple(conversion.samples), send_first)
         resources.update(found)
         next_id = max(resources) + 1
@@ -175,8 +255,20 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
               f'sequence {len(conversion.sequence)}', file=sys.stderr, flush=True)
         reports[f'{slot:02X}'] = {'nds_song': ident.upper(), 'score': path.name, 'sample_budget': budget,
                                    'bank': bank_report, 'conversion': conversion.report, 'stream': plan}
-    rom, install_report = patch.install(base, replacements, sample_resources=resources,
-                                        map_fades=map_fades, preview=preview)
+    rom, install_report = patch.install(base, replacements, sample_resources=resources, map_fades=map_fades,
+                                        preview=preview, pinned=tuple(pinned),
+                                        resident=resident if resident_plan else None, set_records=set_records)
+    # 바꾸지 않은 DQ5 곡도 늘 두는 목록이 바뀐 뒤의 SPC 에 드는지 본다. 넘치는 곡은 그 까닭을 남긴다.
+    sets, unreplaced = patch.read_sets(rom), {}
+    for song in range(1, 0x32):
+        if song in replaced:
+            continue
+        try:
+            unreplaced[f'{song:02X}'] = patch.memory_budget(
+                rom, song, patch.Replacement(patch.sequence_bytes(rom, song), tuple(dict.fromkeys(sets[song][2:]))))
+        except ValueError as exc:
+            unreplaced[f'{song:02X}'] = {'error': str(exc)}
+    install_report['unreplaced_songs'] = unreplaced
     return rom, {'install': install_report, 'songs': reports}
 
 
@@ -196,6 +288,21 @@ def main():
                     help='sample budget for that song instead of the one computed from its sequence size')
     ap.add_argument('--stream', action='append', default=[], metavar='DQ5_SLOT=PRE_BYTES',
                     help='send only the first samples (up to PRE_BYTES) before the song starts, the rest while it plays')
+    ap.add_argument('--pin', action='append', default=[], metavar='DQ5_SLOT',
+                    help='keep this replaced song in the resident sequence list')
+    ap.add_argument('--resident-from', metavar='DQ5_SLOT',
+                    help='add the samples this streamed song sends before it starts to the resident sample list')
+    ap.add_argument('--drop-resident', action='append', default=[], metavar='SAMPLE',
+                    help='remove this sample from the original resident sample list')
+    ap.add_argument('--lanes', action='append', default=[], metavar='DQ5_SLOT=JSON',
+                    help='pin NDS tracks to voices, e.g. 17=\'{"track0": [0]}\'')
+    ap.add_argument('--drop-track', action='append', default=[], metavar='DQ5_SLOT=TRACK')
+    ap.add_argument('--level-db', action='append', default=[], metavar='DQ5_SLOT=DB',
+                    help='merge volume changes within DB (default 1)')
+    ap.add_argument('--program', action='append', default=[], metavar='DQ5_SLOT=PROGRAM:SAMPLE',
+                    help='play this NDS program with an already built sample (hex ID) instead of its own')
+    ap.add_argument('--record', action='append', default=[], metavar='DQ5_SLOT=K:SAMPLE,...',
+                    help='song set record of an unreplaced song')
     args = ap.parse_args()
     songs = []
     for value in args.song:
@@ -204,9 +311,27 @@ def main():
     base = args.base.read_bytes()
     stream = {int(slot, 16): int(cap) for slot, cap in (value.split('=', 1) for value in args.stream)}
     budgets = {int(slot, 16): int(value) for slot, value in (item.split('=', 1) for item in args.budget)}
+
+    def per_slot(items):
+        return [(int(slot, 16), value) for slot, value in (item.split('=', 1) for item in items)]
+
+    drop_tracks, programs, records = {}, {}, {}
+    for slot, track in per_slot(args.drop_track):
+        drop_tracks.setdefault(slot, set()).add(track)
+    for slot, value in per_slot(args.program):
+        program, sample = value.split(':')
+        programs.setdefault(slot, {})[int(program)] = int(sample, 16)
+    for slot, value in per_slot(args.record):
+        first, ids = value.split(':')
+        records[slot] = (int(first), *(int(x, 16) for x in ids.split(',')))
     rom, report = build(base, args.assets, songs, cache_dir=args.out.parent / 'brr-cache', max_rate=args.max_rate,
                         max_samples=args.max_samples, map_fades=args.map_fades, preview=args.preview, stream=stream,
-                        budgets=budgets)
+                        budgets=budgets, pinned=[int(x, 16) for x in args.pin],
+                        resident_from=int(args.resident_from, 16) if args.resident_from else None,
+                        drop_resident=[int(x, 16) for x in args.drop_resident],
+                        lanes={slot: json.loads(value) for slot, value in per_slot(args.lanes)},
+                        drop_tracks=drop_tracks, level_db={slot: float(v) for slot, v in per_slot(args.level_db)},
+                        programs=programs, set_records=records)
     from dq5build import make_ips
     from kr_patch import ips
     patch_bytes = make_ips(base, rom)
@@ -226,7 +351,12 @@ def main():
                       **({'send_first': r['stream']['send_first'], 'late_notes': r['conversion']['late_notes'],
                           'reissued_instruments': r['conversion']['reissued_instruments']} if r['stream'] else {})}
                for slot, r in report['songs'].items()}
-    print(json.dumps({'heap_start': report['install']['heap_start'], 'songs': summary}, indent=2))
+    print(json.dumps({'heap_start': report['install']['heap_start'],
+                      'resident_samples': report['install']['resident_samples'],
+                      'pinned_sequences': report['install']['pinned_sequences'],
+                      'unreplaced_over_budget': sorted(k for k, v in report['install']['unreplaced_songs'].items()
+                                                       if 'error' in v),
+                      'songs': summary}, indent=2))
 
 
 if __name__ == '__main__':
