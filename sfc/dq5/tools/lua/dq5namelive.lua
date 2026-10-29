@@ -1,5 +1,6 @@
 -- 이름 문자열(21:955D)을 읽은 뒤 살아 있는 직접 페이지 재기. DRIVER(dq5warp·dq5warptrace·dq5msg 등)의 입력을 재생하며
 -- 21:959A(복사 끝)부터 그 프레임 끝까지 WRAM $00~$3F 의 첫 접근이 읽기이고 이름 길이보다 뒤인 주소를 live.txt 에 모은다.
+-- 복사한 프레임 안만 보므로, 다음 프레임 뒤에 처음 읽히는 자리는 잡지 못한다.
 -- 줄 꼴: t<이름 표> len=<길이> $<주소> pc=<읽은 명령 다음 PC> n=<횟수>.
 package.path = os.getenv('LIBDIR') .. '/?.lua;' .. package.path
 local L = require('lib')

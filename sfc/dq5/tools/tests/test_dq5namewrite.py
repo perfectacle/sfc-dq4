@@ -119,6 +119,11 @@ class NameWriteTests(unittest.TestCase):
                 valid_name(raw)
         self.assertEqual(valid_name([]), [])
         self.assertEqual(len(valid_name([1] * 24)), MAX_NAME)
+        self.assertEqual(len(valid_name([0x7A] + [1] * 11)), 12)
+        self.assertEqual(len(valid_name([1, 0x7A] + [1] * 22)), MAX_NAME)
+        for raw in ([1] * 25, [0x7A] + [1] * 12):
+            with self.subTest(raw=len(raw)), self.assertRaises(ValueError):
+                valid_name(raw)
         full = {t: list(names) for t, names in self.tables.items()}
         full[4] = full[4] + [[1]] * (256 - len(full[4]))
         with self.assertRaises(ValueError):

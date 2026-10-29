@@ -9,11 +9,13 @@
   python sfc/dq5/tools/dq5windowwrite.py rom/dq5.sfc check
 
 JSON: {"format":"dq5windows/1", "windows":[{"index":"19","x":12,"y":14}]}. index 는 창 번호(16진 문자열),
-x·y·w·h 가운데 바꿀 것만 적는다. 바꾼 창은 BG3 타일맵(32 × 32 타일) 안이어야 한다. +0 bit7 인 창(다른 창을 가리킴)은 받지 않는다.
+x·y·w·h 가운데 바꿀 것만 적는다. 바꾼 창은 BG3 타일맵(32 × 32 타일) 안이어야 한다. +0 bit7 인 창(다른 창을 가리킴),
+여러 번호가 함께 쓰는 레코드(89~8C), +0 bit6 창의 h(높이를 04:9FD3 이 일행에 맞춰 정함)는 받지 않는다.
 """
 import argparse
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -46,12 +48,20 @@ def read(rom, addr, size):
 
 
 def records(rom):
-    """창 번호 → 레코드 주소. 창 수는 첫 레코드 앞까지의 포인터 수."""
+    """창 번호 → 레코드 주소. 포인터는 첫 레코드 앞까지 놓일 수 있지만, 원본은 94 부터 0000·00FF·FFFF 같은
+    창이 아닌 바이트라 8000 미만인 첫 포인터에서 센다."""
     first = rom.u16(WINDOWS)
-    count = (first - (WINDOWS & 0xFFFF)) // 2
-    if not 0 < count <= 0x100:
+    out = {}
+    for n in range((first - (WINDOWS & 0xFFFF)) // 2):
+        low = rom.u16(WINDOWS + n * 2)
+        if low < 0x8000:
+            break
+        if low > 0x10000 - 4:
+            raise ValueError(f'창 {n:02X}: 레코드 머리 04:{low:04X} 가 뱅크 04 끝을 넘음')
+        out[n] = 0x040000 | low
+    if not 0 < len(out) <= 0x100:
         raise ValueError('04:EB48 창 표가 원래 꼴이 아님')
-    return {n: 0x040000 | rom.u16(WINDOWS + n * 2) for n in range(count)}
+    return out
 
 
 def header(raw):
@@ -72,14 +82,14 @@ def edits(rom, doc):
     if doc.get('format') != FORMAT or not isinstance(doc.get('windows'), list):
         raise ValueError(f'format={FORMAT}과 windows 배열이 필요함')
     table = records(rom)
+    sharing = {}
+    for n, addr in table.items():
+        sharing.setdefault(addr, []).append(n)
     out, seen = [], set()
     for row in doc['windows']:
         fields(row, {'index', *FIELDS}, '창')
         text = row.get('index')
-        try:
-            n = int(text, 16) if isinstance(text, str) and len(text) == 2 else None
-        except ValueError:
-            n = None
+        n = int(text, 16) if isinstance(text, str) and re.fullmatch(r'[0-9A-Fa-f]{2}', text) else None
         if n not in table or n in seen:
             raise ValueError(f'index {text!r}: 중복 없는 창 번호(16진 두 자리, 00~{len(table) - 1:02X})여야 함')
         seen.add(n)
@@ -97,6 +107,11 @@ def edits(rom, doc):
             raise ValueError(f'창 {n:02X}: BG3 타일맵 32 × 32 밖이거나 너비·높이가 2 미만임')
         if n == MESSAGE and new != old:
             raise ValueError('창 25(전투 메시지)는 틀만 옮겨지고 글자는 원래 줄에 찍혀 받지 않음')
+        if new != old and len(sharing[addr]) > 1:
+            names = '·'.join(f'{m:02X}' for m in sharing[addr])
+            raise ValueError(f'창 {n:02X}: 레코드 {addr >> 16:02X}:{addr & 0xFFFF:04X} 를 {names} 가 함께 써 따로 고칠 수 없음')
+        if old[0] & 0x40 and new[3] != old[3]:
+            raise ValueError(f'창 {n:02X}: +0 bit6 창은 높이를 04:9FD3 이 일행에 맞춰 정해 h 를 받지 않음')
         out.append((addr, bytes(new), old, f'window {n:02X}'))
     return out
 
