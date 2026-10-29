@@ -15,6 +15,9 @@
    "pictures": [{"picture": "02", "image": "02.png"}],
    "monsters": [{"monster": "00", "picture": "02", "colors": [32767, 0, 31]}]}
 
+조각·줄마다 타일이 원래보다 많은 그림은 입력 롬의 무리·구역으로 센 조합 검사(dq5monlimits.py)를 거친다. 같은 빌드에서
+무리·구역을 바꾸면 그 패치를 먼저 넣은 롬을 입력으로 주고, 구역 수를 늘렸으면 --progress 또는 --areas 를 준다.
+
 새 그림이 원래 자리보다 길면 --at 에 놓는다. 머리 포인터 표는 그림 번호 구간마다 뱅크 25·26·27 의 16비트라,
 이때는 22:9014 를 24비트 포인터 표(--at 첫머리)로 읽는 코드로 바꾼다.
 """
@@ -268,11 +271,11 @@ def picture_limits(rom, g):
     return pieces, tiles, d['w'], d['h'], max(bands)
 
 
-def plan(rom, doc, base):
+def plan(rom, doc, base, areas=None):
     if not isinstance(doc, dict) or doc.keys() - {'format', 'pictures', 'monsters'} or doc.get('format') != FORMAT:
         raise ValueError(f'문서는 format={FORMAT}, pictures·monsters 만 담은 객체여야 함')
     used = set(used_pictures(rom))
-    pictures = {}
+    pictures, grown = {}, {}
     rows = doc.get('pictures', [])
     if not isinstance(rows, list):
         raise ValueError('pictures는 배열이어야 함')
@@ -289,9 +292,10 @@ def plan(rom, doc, base):
         grid = image_grid(base / row['image'], d['w'], d['h'])
         raw, pieces, tiles, bands = encode(rom, g, grid)
         limit = stats(d)
-        if pieces > limit[0] or tiles > limit[1] or any(a > b for a, b in zip(bands, limit[2])):
-            raise ValueError(f'{label}: 조각 {pieces}/{limit[0]}, 타일 {tiles}/{limit[1]}, 줄마다 타일 {bands}/{limit[2]} — '
-                             '원래 그림의 수를 넘음(전투 배치 한도 22:91DC·22:A119 와 VRAM 버퍼)')
+        if tiles > limit[1]:
+            raise ValueError(f'{label}: 타일 {tiles}/{limit[1]} — 원래 그림의 수를 넘음(7E:4000 타일 버퍼·VRAM 여유를 정하지 않음)')
+        if pieces > limit[0] or any(a > b for a, b in zip(bands, limit[2])):
+            grown[g] = (pieces, bands)
         pictures[g] = (grid, raw, pieces, tiles)
     # 같은 머리를 가리키는 그림 번호(00·11·29, 58·5E 등)는 자료가 하나라 함께 바뀐다.
     for g in list(pictures):
@@ -300,6 +304,8 @@ def plan(rom, doc, base):
                 if other in pictures and pictures[other][0] != pictures[g][0]:
                     raise ValueError(f'그림 {g:02X}·{other:02X} 는 같은 머리를 써서 다른 그림을 줄 수 없음')
                 pictures[other] = pictures[g]
+                if g in grown:
+                    grown[other] = grown[g]
     monsters = {}
     rows = doc.get('monsters', [])
     if not isinstance(rows, list):
@@ -338,6 +344,16 @@ def plan(rom, doc, base):
         top = max(max(row) for row in grid)
         if top > len(colors):
             raise ValueError(f'몬스터 {m:02X}: 그림 {g:02X} 가 색 번호 {top} 을 쓰는데 색은 {len(colors)}개')
+    # 조각·줄마다 타일이 원래보다 많은 그림은, 나올 수 있는 무리 조합마다 원래보다 덜 놓이는 몬스터가 없을 때만 받는다.
+    if grown:
+        from dq5monlimits import losses
+        swapped = {m: g for m, (g, _) in monsters.items() if g != M.monster(rom, m)[0]}
+        bad = losses(rom, grown, swapped, areas=areas)
+        if bad:
+            groups, old, new, where, why = bad[0]
+            shown = ' '.join(f'{m:02X}x{n}' for m, n, _ in groups)
+            raise ValueError(f'그림 {", ".join(f"{g:02X}" for g in sorted(grown))}: 조각·줄마다 타일이 원래보다 많아 '
+                             f'무리 조합 {len(bad)}개에 걸림. 첫째: {where} [{shown}] 놓이는 수 {old} → {new}, {why}')
     return pictures, monsters
 
 
@@ -350,8 +366,8 @@ def find_code(table):
     return code + bytes([0x80, (FIND_END - (FIND + len(code) + 2)) & 0xFF])
 
 
-def patch(rom, doc, base=Path('.'), at=None):
-    pictures, monsters = plan(rom, doc, base)
+def patch(rom, doc, base=Path('.'), at=None, areas=None):
+    pictures, monsters = plan(rom, doc, base, areas)
     writes = []
 
     def write(addr, data, note, orig=True):
@@ -418,14 +434,14 @@ def built(rom, manifest):
     return Rom(data)
 
 
-def check(rom, doc=None, base=Path('.'), at=None):
+def check(rom, doc=None, base=Path('.'), at=None, areas=None):
     """원본 107그림을 PNG 로 내보내 다시 인코딩해도 같은 그림으로 풀리고 원래 수 안인지, 원본 문서 쓰기 0개인지.
     doc 를 주면 빌드한 롬에서 바꾼 그림·몬스터가 입력대로이고 나머지가 그대로인지도 본다."""
     with tempfile.TemporaryDirectory(prefix='dq5mon-') as folder:
-        check_in(rom, doc, base, at, Path(folder))
+        check_in(rom, doc, base, at, Path(folder), areas)
 
 
-def check_in(rom, doc, base, at, folder):
+def check_in(rom, doc, base, at, folder, areas=None):
     rows, fits, sizes = [], 0, [0, 0]
     for g in used_pictures(rom):
         d, _ = dump_image(rom, g, folder / f'{g:02X}.png')
@@ -447,9 +463,9 @@ def check_in(rom, doc, base, at, folder):
           f'다시 인코딩 {sizes[0]}바이트 / 원본 {sizes[1]}바이트; 원본 문서 쓰기 0개')
     if doc is None:
         return
-    manifest = patch(rom, doc, base, at)
+    manifest = patch(rom, doc, base, at, areas)
     after = built(rom, manifest)
-    pictures, monsters = plan(rom, doc, base)
+    pictures, monsters = plan(rom, doc, base, areas)
     for g in used_pictures(rom):
         want = pictures[g][0] if g in pictures else picture_grid(rom, g)[0]
         if picture_grid(after, g)[0] != want:
@@ -487,6 +503,9 @@ def main():
     verify = sub.add_parser('check')
     verify.add_argument('source', type=Path, nargs='?')
     verify.add_argument('--at')
+    for p in (write, verify):
+        p.add_argument('--progress', type=Path, help='무리 조합 검사의 구역 수를 읽을 dq5progresswrite.py 패치 목록')
+        p.add_argument('--areas', type=int, help='무리 조합 검사의 구역 수(기본 85)')
     args = parser.parse_args()
     try:
         rom = Rom(args.rom.read_bytes())
@@ -500,10 +519,12 @@ def main():
         doc = json.loads(args.source.read_text(encoding='utf-8')) if getattr(args, 'source', None) else None
         base = args.source.parent if getattr(args, 'source', None) else Path('.')
         at = address(args.at) if args.at else None
+        from dq5monlimits import area_count
+        areas = area_count(args.progress, args.areas)
         if args.command == 'check':
-            check(rom, doc, base, at)
+            check(rom, doc, base, at, areas)
             return 0
-        manifest = patch(rom, doc, base, at)
+        manifest = patch(rom, doc, base, at, areas)
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(manifest, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
         print(f'patch → {args.out} (쓰기 {len(manifest["writes"])}개)')

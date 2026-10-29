@@ -29,6 +29,10 @@ def fixture():
         data[lorom(grow.FIELD) + i] = 0x80 + i
     for site, orig, *_ in grow.CLASS_SITES:
         data[lorom(site):lorom(site) + 4] = bytes.fromhex(orig)
+    # 원소 갈래: 13 밑은 LDA #$11 로 20:AC27, 그 밖은 원소 없음(20:AC8D).
+    for at, raw in ((grow.ELEMENT_SITE, grow.ELEMENT_ORIG), (grow.ELEMENT_LOW, 'a9 11 4c 27 ac'),
+                    (grow.ELEMENT_HIGH, '4c 8d ac')):
+        data[lorom(at):lorom(at) + len(bytes.fromhex(raw))] = bytes.fromhex(raw)
     return bytes(data)
 
 
@@ -94,6 +98,30 @@ class SpellGrowTests(unittest.TestCase):
         data[lorom(grow.CLASS_SITES[0][0])] = 0xEA
         with self.assertRaises(ValueError):
             grow.patch(Rom(bytes(data)), doc({'id': 'C6', 'copy': '27', 'class': 'spell'}), 0x6E8000)
+
+    def test_element_stub(self):
+        self.assertEqual(grow.element_of(self.rom, 0x05), 0x11)
+        self.assertIsNone(grow.element_of(self.rom, 0xC7))
+        manifest = grow.patch(self.rom, doc({'id': 'C6', 'copy': '27', 'class': 'spell'},
+                                            {'id': 'C7', 'copy': '01', 'class': 'spell', 'element': '40'},
+                                            {'id': 'C8', 'copy': '01', 'element': '01'}), 0x6E8000)
+        after = apply(self.data, manifest)
+        self.assertEqual(after.u8(grow.ELEMENT_SITE), 0x5C)
+        self.assertEqual([grow.element_of(after, n) for n in (0x05, 0x12, 0x13, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9)],
+                         [0x11, 0x11, None, None, 0, 0x40, 0x01, None])
+        without = grow.patch(self.rom, doc({'id': 'C6', 'copy': '27', 'class': 'spell'}), 0x6E8000)
+        self.assertFalse(any(w['at'] == '20:ABF4' for w in without['writes']))
+        for element in ('03', '00', 'x', 1):
+            with self.subTest(element=element), self.assertRaises(ValueError):
+                grow.patch(self.rom, doc({'id': 'C6', 'copy': '27', 'element': element}), 0x6E8000)
+        data = bytearray(self.data)
+        data[lorom(grow.ELEMENT_SITE) + 1] = 0x14
+        with self.assertRaises(ValueError):
+            grow.patch(Rom(bytes(data)), doc({'id': 'C6', 'copy': '27', 'element': '01'}), 0x6E8000)
+        import contextlib
+        import io
+        with contextlib.redirect_stdout(io.StringIO()):
+            grow.check(self.rom, doc({'id': 'C6', 'copy': '27', 'element': '08'}, {'id': 'C7', 'copy': '01'}), 0x6E8000)
 
     def test_check_round_trip(self):
         import contextlib

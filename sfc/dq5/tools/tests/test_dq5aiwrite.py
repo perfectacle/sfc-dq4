@@ -22,6 +22,9 @@ def rom():
     put(ai.ACTIONS + 4 * 5, [0x01, 20, 0x01, 4, 0x21])
     put(ai.BATTLE_MP + 4, [0xA4])
     put(ai.ACTIONS + 0x27 * 5, [0x08, 35, 0x10, 3, 0x7F])
+    for n in range(ai.ACTION_COUNT, 0xF0):
+        put(ai.ACTIONS + n * 5, [0x11, 0, 0x30, 0, 0xFF])
+        put(ai.BATTLE_MP + n, [0x1F])
     for n in range(ai.ITEM_COUNT):
         put(ai.ITEMS + n * 5, [0, 0, 0, 0, 0x1F])
     put(ai.ITEMS + 0xA1 * 5, [0, 35, 0x13, 0, 0x7F])
@@ -92,6 +95,50 @@ class AiWriteTests(unittest.TestCase):
         self.assertEqual(writes(ai.patch(r, doc(actions=[{'action': '04', 'resist': None}])))[0][1], '3f')
         self.assertEqual(ai.patch(r, doc(actions=[{'action': '04', 'kind': '01', 'range': '20'}]))['writes'], [])
         self.assertEqual(writes(ai.patch(r, doc(actions=[{'action': '04', 'range': '80'}])))[0][1], '81')
+
+    def test_new_actions(self):
+        r = rom()
+        out = ai.dump(r)
+        self.assertEqual(len(out['actions']), ai.ACTION_COUNT + len(ai.NEW_ACTIONS))
+        self.assertEqual(out['actions'][ai.ACTION_COUNT], {'action': 'C6', 'kind': '11', 'value': 0, 'branch': '30', 'mp': 0,
+                                                           'range': 'E0', 'resist': None, 'battle_mp': None})
+        result = ai.patch(r, doc(actions=[{'action': 'C6', 'copy': '04'},
+                                          {'action': 'D4', 'copy': '27', 'value': 99, 'range': '80'}]))
+        self.assertEqual(writes(result), [('21:C064', '01 14 01 04 21', '11 00 30 00 ff'),
+                                          ('21:C0AA', '08', '11'), ('21:C0AB', '63', '00'), ('21:C0AC', '10 03', '30 00'),
+                                          ('21:C0AE', '9f', 'ff')])
+        # 베낀 레코드의 kind 와 같으면 받고, 다르면 거부한다.
+        self.assertEqual(len(ai.patch(r, doc(actions=[{'action': 'C6', 'copy': '04', 'kind': '01'}]))['writes']), 1)
+        bad = [{'action': '04', 'copy': '01'}, {'action': 'C6', 'copy': 'AB'}, {'action': 'C6', 'copy': 'C6'},
+               {'action': 'C5', 'value': 1}, {'action': 'D5', 'value': 1}, {'action': 'C6', 'copy': '04', 'kind': '08'},
+               {'action': 'C6', 'kind': '01'}, {'action': 'C6', 'copy': 4}]
+        for row in bad:
+            with self.subTest(row=row), self.assertRaises(ValueError):
+                ai.patch(r, doc(actions=[row]))
+        with contextlib.redirect_stdout(io.StringIO()):
+            ai.check(r, doc(actions=[{'action': 'C6', 'copy': '04', 'value': 1}, {'action': '04', 'value': 2}]))
+
+    def test_copy_warnings(self):
+        data = bytearray(0x180000)
+        for name, (base, size, empty) in ai.WIDE.items():
+            for n in range(0x100):
+                v = (empty if n >= ai.NEW_FIRST else n + 0x100) & (0xFF if size == 1 else 0xFFFF)
+                data[lorom(base) + n * size:lorom(base) + (n + 1) * size] = v.to_bytes(size, 'little')
+        # dq5spellgrow.py 가 C6 에 04 를 베낀 롬.
+        for name, (base, size, _) in ai.WIDE.items():
+            data[lorom(base) + 0xC6 * size:lorom(base) + 0xC7 * size] = (0x104 & (0xFF if size == 1 else 0xFFFF)).to_bytes(size, 'little')
+        spells = Rom(bytes(data))
+        self.assertEqual(ai.copy_warnings(spells, doc(actions=[{'action': 'C6', 'copy': '04'}])), [])
+        got = ai.copy_warnings(spells, doc(actions=[{'action': 'C6', 'copy': '27'}, {'action': 'C7', 'copy': '04'},
+                                                    {'action': '04', 'value': 1}]))
+        self.assertEqual(len(got), 2)
+        self.assertIn('copy 27', got[0])
+        self.assertIn('C7', got[1])
+        for bad in ({'action': 'C6', 'copy': 4}, {'action': 6, 'copy': '04'}, {'action': 'C6', 'copy': 'x'}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                ai.copy_warnings(spells, doc(actions=[bad]))
+        with self.assertRaises(ValueError):
+            ai.copy_warnings(spells, doc(actions={'action': 'C6'}))
 
     def test_check_through_builder(self):
         r = rom()

@@ -237,6 +237,41 @@ def band_counts(d):
     return counts
 
 
+def place(groups):
+    """무리 [(몬스터, 마릿수, 7E:1009 값, 머리, 조각 수, 줄마다 타일 수)] → (무리마다 (몬스터, 놓인 수, 머리, 줄, y,
+    조각 한도까지 센 수), 조각 한도까지 센 몬스터의 조각 합, 화면 8픽셀 줄마다 놓인 몬스터의 타일 합).
+    줄·y·마릿수 제한은 layout() 의 설명대로.
+    머리는 header() 의 값이고, 조각 수·줄마다 타일 수를 그림과 따로 받아 바꾼 그림의 배치도 셀 수 있다."""
+    used = {0: 0, 1: 0, 2: 0}
+    pieces = 0
+    placed = []
+    for m, n, flag, hd, size, cnt in groups:
+        row = 2 if hd['float'] or flag & 0x80 else 1 if flag == 1 else 0
+        k = 0
+        while k < n and used[row] + hd['w'] < 0x1C and pieces + size < 100:
+            used[row] += hd['w']
+            pieces += size
+            k += 1
+        if row == 2:
+            y = 0x58 - min(hd['h'] * 4, 0x18) - hd['raise'] * 8
+        else:
+            y = (0x88 if row == 1 else 0xA0) - hd['h'] * 8 - hd['raise'] * 8
+        placed.append((m, k, hd, row, y, cnt))
+    bands = [0] * 32
+    kept = []
+    for m, k, hd, row, y, cnt in placed:
+        j = 0
+        while j < k:
+            b = (y >> 3) - 7
+            if any(bands[b + r] + c >= 0x1C for r, c in enumerate(cnt)):
+                break
+            for r, c in enumerate(cnt):
+                bands[b + r] += c
+            j += 1
+        kept.append((m, j, hd, row, y, k))
+    return kept, pieces, bands
+
+
 def layout(rom, groups):
     """무리 [(몬스터, 마릿수, 7E:1009 값)] → 그림 상자 [(몬스터, x, y)]. x·y 는 OAM 좌표(왼쪽 위).
 
@@ -248,34 +283,13 @@ def layout(rom, groups):
     줄 전체 폭 T 에 대해 첫 무리의 x = (256 - T) / 2 (22:AF22).
     ミルドラース처럼 22:89E5 가 무리를 더하는 몬스터는 셈하지 않는다.
     """
-    used = {0: 0, 1: 0, 2: 0}
-    pieces = 0
-    placed = []
+    info = []
     for m, n, flag in groups:
         g = monster(rom, m)[0]
-        hd, d = header(rom, g), decode(rom, g)
-        row = 2 if hd['float'] or flag & 0x80 else 1 if flag == 1 else 0
-        k = 0
-        while k < n and used[row] + hd['w'] < 0x1C and pieces + len(d['pieces']) < 100:
-            used[row] += hd['w']
-            pieces += len(d['pieces'])
-            k += 1
-        if row == 2:
-            y = 0x58 - min(hd['h'] * 4, 0x18) - hd['raise'] * 8
-        else:
-            y = (0x88 if row == 1 else 0xA0) - hd['h'] * 8 - hd['raise'] * 8
-        placed.append((m, k, hd, row, y, band_counts(d)))
-    bands = [0] * 32
+        d = decode(rom, g)
+        info.append((m, n, flag, header(rom, g), len(d['pieces']), band_counts(d)))
     rows = {0: [], 1: [], 2: []}
-    for m, k, hd, row, y, cnt in placed:
-        j = 0
-        while j < k:
-            b = (y >> 3) - 7
-            if any(bands[b + r] + c >= 0x1C for r, c in enumerate(cnt)):
-                break
-            for r, c in enumerate(cnt):
-                bands[b + r] += c
-            j += 1
+    for m, j, hd, row, y, _ in place(info)[0]:
         if j:
             rows[row].append((m, j, hd, y))
     out = []

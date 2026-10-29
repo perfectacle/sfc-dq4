@@ -5,15 +5,19 @@
 번호만 받는다. 주문 목록 창의 MP 숫자(21:9BB4)는 0 줄 안의 그 칸에 쓴다. 연출 표 둘(26:8BE0·26:8C75)은 우리 편
 표의 C6~D4 가 몬스터 표와 겹치므로 --at 으로 옮겨 쓴다. 필드 주문 표(11:8024)는 JSR (abs,X) 라 뱅크 끝 스텁과
 덧붙인 표로 늘린다. class 가 spell 이면 66 경계 비교 셋을 스텁으로 돌려 새 번호도 주문으로 다룬다.
+element 를 주면 몬스터가 일행에게 쓸 때 갑옷 원소 표(27:80FC)에서 그 원소로 다룬다(20:ABF4 를 스텁으로).
 이름(표 3)은 dq5namewrite.py --append 로 따로 늘린다. 형식: sfc/dq5/docs/dq5-build-format.md 의 「행동 번호 늘리기」.
 
   python sfc/dq5/tools/dq5spellgrow.py rom/dq5.sfc patch work/spellgrow.json --at 6E:8000 -o work/build/spellgrow.dq5patch.json
   python sfc/dq5/tools/dq5spellgrow.py rom/dq5.sfc check work/spellgrow.json --at 6E:8000
 
-JSON: {"format": "dq5spellgrow/1", "spells": [{"id": "C6", "copy": "27", "class": "spell", "MP": 4, "menu_mp": 4}]}
+JSON: {"format": "dq5spellgrow/1", "spells": [{"id": "C6", "copy": "27", "class": "spell", "MP": 4, "menu_mp": 4,
+                                             "element": "01"}]}
 새 번호는 C6 부터 빈틈 없이 D4 까지 이어진다. copy 는 원래 행동(00~AA) 가운데 하나이고, 그 행동의 표 값을 모두 베낀다.
 MP·범위·적쪽(26:8765, dq5tables.py 와 같은 뜻)과 menu_mp(21:9BB4)만 덮을 수 있다. class 는 spell 또는 skill(기본)이고
 spell 을 앞에 몰아 둔다. copy 가 필드 주문(27~38)이면 필드 처리기도 베껴 필드에서 외울 수 있다.
+element 는 원소 비트 하나(01 メラ·02 ギラ·04 ヒャド·08 バギ·10·20 숨·40 イオ·80 デイン)이고, 주지 않으면 원래처럼
+갑옷으로 줄지 않는다.
 """
 import argparse
 import json
@@ -59,6 +63,12 @@ CLASS_SITES = (
     (0x208460, 'e0 66 b0 17', 0xE0, 0x66, 0x208464, 0x20847B, None),
     (0x208EE8, 'c9 65 90 05', 0xC9, 0x65, 0x208EF1, 0x208EFB, 0x208EEE),
 )
+
+# 일행이 맞는 주문의 원소(20:ABDC). 20:ABF4 CMP #$13 / BCS 에서 행동 01~12·39~47 은 27:80E3, 8E~94 는 27:80F5 를
+# 읽어 20:AC27 에서 $75 에 둔다. 그 밖의 번호는 20:AC8D 로 가 갑옷·$9E·$9F 장비 값을 빼지 않는다.
+ELEMENT_SITE, ELEMENT_ORIG = 0x20ABF4, 'c9 13 b0 0a'
+ELEMENT_LOW, ELEMENT_HIGH, ELEMENT_STORE = 0x20ABF8, 0x20AC02, 0x20AC27
+ELEMENTS = (0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80)
 
 
 def require(ok, message):
@@ -118,8 +128,8 @@ def new_rows(rom, doc):
     require(isinstance(spells, list) and spells, 'spells 는 하나 이상인 배열')
     rows = []
     for i, row in enumerate(spells):
-        require(isinstance(row, dict) and not row.keys() - {'id', 'copy', 'MP', '범위', '적쪽', 'menu_mp', 'class'},
-                f'spells[{i}]: id·copy·MP·범위·적쪽·menu_mp·class 만 받음')
+        require(isinstance(row, dict) and not row.keys() - {'id', 'copy', 'MP', '범위', '적쪽', 'menu_mp', 'class', 'element'},
+                f'spells[{i}]: id·copy·MP·범위·적쪽·menu_mp·class·element 만 받음')
         n = hex_byte(row.get('id'), f'spells[{i}] id', FIRST, LAST)
         require(n == FIRST + i, f'spells[{i}] id: {FIRST + i:02X} 여야 함({FIRST:02X} 부터 빈틈 없이)')
         kind = row.get('class', 'skill')
@@ -137,7 +147,11 @@ def new_rows(rom, doc):
         if 'menu_mp' in row:
             require(type(row['menu_mp']) is int and 0 <= row['menu_mp'] <= 0xFF, f'spells[{i}] menu_mp: 0~255 정수')
             menu = row['menu_mp']
-        rows.append({'id': n, 'copy': src, 'flags': flags[0], 'menu_mp': menu, 'class': kind})
+        element = None
+        if 'element' in row:
+            element = hex_byte(row['element'], f'spells[{i}] element')
+            require(element in ELEMENTS, f'spells[{i}] element: 원소 비트 하나(01·02·04·08·10·20·40·80)')
+        rows.append({'id': n, 'copy': src, 'flags': flags[0], 'menu_mp': menu, 'class': kind, 'element': element})
     return rows
 
 
@@ -217,6 +231,18 @@ def class_stubs(spells, start):
     return bytes(out), entry
 
 
+def element_stub(rows, start):
+    """20:ABF4 에서 JML 로 올 스텁. 새 번호면 덧붙인 원소 표를 읽어 20:AC27 로, 아니면 원래 CMP #$13 / BCS 대로."""
+    first, last = rows[0]['id'], rows[-1]['id']
+    table = start + 32
+    code = bytes([0xC9, first, 0x90, 0x10, 0xC9, last + 1, 0xB0, 0x0C, 0x38, 0xE9, first, 0xAA, 0xBF])  # CMP / BCC / CMP / BCS / SEC / SBC / TAX / LDA
+    code += table.to_bytes(3, 'little') + bytes([0x5C]) + ELEMENT_STORE.to_bytes(3, 'little')            # 표,X / JML 20:AC27
+    code += bytes([0xC9, 0x13, 0xB0, 0x04, 0x5C]) + ELEMENT_LOW.to_bytes(3, 'little')                    # CMP #$13 / BCS / JML 20:ABF8
+    code += bytes([0x5C]) + ELEMENT_HIGH.to_bytes(3, 'little')                                           # JML 20:AC02
+    require(len(code) == 32, '원소 스텁 길이')
+    return code + bytes(row['element'] or 0 for row in rows)
+
+
 def patch(rom, doc, at):
     rows = new_rows(rom, doc)
     check_original(rom, rows)
@@ -227,8 +253,16 @@ def patch(rom, doc, at):
     if spells:
         stubs, entry = class_stubs(spells, at + len(data))
         data += stubs
+    element_at = None
+    if any(row['element'] is not None for row in rows):
+        require(read(rom, ELEMENT_SITE, 4) == bytes.fromhex(ELEMENT_ORIG), f'{text(ELEMENT_SITE)}: 원래 비교 {ELEMENT_ORIG} 가 아님')
+        element_at = at + len(data)
+        data += element_stub(rows, element_at)
     require((at & 0xFFFF) + len(data) <= 0x10000, f'{text(at)}: {len(data)}바이트가 뱅크 끝을 넘음')
-    writes.append({'at': text(at), 'hex': data.hex(' '), 'note': '옮긴 연출 표와 66 경계 스텁'})
+    writes.append({'at': text(at), 'hex': data.hex(' '), 'note': '옮긴 연출 표와 66 경계·원소 스텁'})
+    if element_at is not None:
+        writes.append({'at': text(ELEMENT_SITE), 'hex': (bytes([0x5C]) + element_at.to_bytes(3, 'little')).hex(' '),
+                       'orig': ELEMENT_ORIG, 'note': '일행이 맞는 주문 원소를 스텁으로(새 번호의 갑옷 원소)'})
     for name, (base, readers) in FX.items():
         for pc in readers:
             writes.append({'at': text(pc + 1), 'hex': place[name].to_bytes(3, 'little').hex(' '),
@@ -250,6 +284,21 @@ def patch(rom, doc, at):
     if end > 0x180000:
         out['rom_size'] = 4 if end > 0x300000 else 3 if end > 0x200000 else 2
     return out
+
+
+def element_of(rom, action):
+    """20:ABF4 부터 롬 코드를 돌려 행동의 원소를 얻는다. 20:AC27 에 닿으면 A, 20:AC8D(원소 없음)면 None."""
+    from w65816 import Cpu
+    cpu = Cpu(rom.d, bytes(0x20000))
+    cpu.pbr, cpu.pc, cpu.p, cpu.a = ELEMENT_SITE >> 16, ELEMENT_SITE & 0xFFFF, 0x30, action
+    for _ in range(64):
+        here = cpu.pbr << 16 | cpu.pc
+        if here == ELEMENT_STORE:
+            return cpu.a & 0xFF
+        if here == 0x20AC8D:
+            return None
+        cpu.step()
+    raise ValueError(f'{action:02X}: 원소 갈래가 20:AC27·AC8D 에 닿지 않음')
 
 
 def check(rom, doc, at):
@@ -281,6 +330,13 @@ def check(rom, doc, at):
         for row in new_rows(rom, doc):
             moved[row['id']] = read(rom, base + row['id'], 1)[0]
         require(bytes(moved) == read(rom, base, FX_COUNT), f'{name}: 옮긴 표의 원래 칸이 다름')
+    if any(row['element'] is not None for row in new_rows(rom, doc)):
+        # element 를 주지 않은 새 번호는 표 값 0 이라 갑옷 항목과 맞는 것이 없다.
+        wanted = {row['id']: row['element'] or 0 for row in new_rows(rom, doc)}
+        for n in range(0x100):
+            want = wanted[n] if n in wanted else element_of(rom, n)
+            got = element_of(after, n)
+            require(got == want, f'{n:02X}: 갑옷 원소 {got} 이 {want} 가 아님')
     print(f'새 행동 {len(new_rows(rom, doc))}개, 쓰기 {len(made["writes"])}개 검사 통과')
 
 
