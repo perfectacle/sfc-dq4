@@ -25,15 +25,18 @@ class RecordsTest(unittest.TestCase):
         cls.prg = ines.prg(ROM.read_bytes())
 
     def test_stairs_lead_back(self):
+        records = {}
         for group in build.LINKS:
-            records = build.exit_records(self.prg, group)
-            for name, rows in records.items():
-                number = int(name[3:], 16)
-                for i, row in enumerate(rows):
-                    if row["kind"] != "same-group":
-                        continue
-                    back = records[f"{group:02X}/{row['destination_map']:02X}"][row["exit"]]
-                    self.assertEqual((back["destination_map"], back["exit"]), (number, i), f"{name} exit {i}")
+            records.update(build.exit_records(self.prg, group))
+        for name, rows in records.items():
+            group, number = int(name[:2], 16), int(name[3:], 16)
+            for i, row in enumerate(rows):
+                if row["kind"] == "special":
+                    continue
+                there = row.get("group", group)
+                back = records[f"{there:02X}/{row['destination_map']:02X}"][row["exit"]]
+                self.assertEqual((back.get("group", there), back["destination_map"], back["exit"]), (group, number, i),
+                                 f"{name} exit {i}")
 
     def test_area_rects_are_one_row(self):
         areas = {}

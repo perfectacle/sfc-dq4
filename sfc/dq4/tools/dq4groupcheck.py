@@ -1,11 +1,13 @@
 """Walk the links of the new DQ4 groups built by dq4groupbuild.py in MesenCE.
 
   stairs  every FC stair: warp onto a walkable FC neighbour, step onto the stair, expect the destination
-          map and the cell of the linked stair (dq4groupbuild.cell)
+          map and the cell of the linked stair (dq4groupbuild.cell), or for a stair to the field the group's
+          aux entrance (X, Y+1)
   area    02/00 gate (open flags) up into 02/01, and 02/01 down off the bottom edge back to the gate.
           The bottom edge is one cell away, so a short press: a held key walks on after landing
-  exit    the map edge from each group's field arrival out to the field: the aux entrance (X, Y+1)
-  enter   from the field state (341,56) walk to each group's entrance, expect the group's arrival cell
+  exit    from each group's field arrival, the way out (LINKS "out") to the field: the aux entrance (X, Y+1)
+  stay    the field arrival with no input: the party stays (an arrival off the map leaves at once)
+  enter   from the field save state (341,56), walk the group's path onto its aux entrance: the group arrival
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4groupcheck.py --rom work/dq4-groups/groups.sfc \\
       --state work/state/ship.mss --out work/dq4-groups/check
@@ -38,7 +40,6 @@ from kr_patch.fc import ines  # noqa: E402
 
 WARP = DQ5_TOOLS / "lua" / "dq5warp.lua"
 WALK = DQ5_TOOLS / "lua" / "dq5tablecheck.lua"
-FIELD_START = (341, 56)
 DIRS = {(0, -1): "up", (1, 0): "right", (0, 1): "down", (-1, 0): "left"}
 END = re.compile(r"end map (\w\w)/(\w\w) (cell|field) (\d+),(\d+)")
 # Frames a direction is held: the party first turns, then moves 8 px (one cell) per 8 frames; an FC cell
@@ -111,8 +112,14 @@ def stair_scenes(prg):
                 if not starts:
                     raise ValueError(f"{fc_group:02X}/{number:02X} ({x:02X},{y:02X}): no walkable cell next to the stair")
                 dest = to[x, y]
+                if "field" in dest:
+                    # The special exit 0 leaves by the group's aux entrance.
+                    fx, fy = link["field"]
+                    yield f"stair-{group:02X}{number:02X}-{i}", starts, {"field": [fx, fy + 1]}
+                    continue
+                there = next(g for g, other in LINKS.items() if other["fc"] == dest["group"])
                 yield (f"stair-{group:02X}{number:02X}-{i}", starts,
-                       {"map": f"{group:02X}/{dest['index']:02X}", "cell": list(cell(dest["x"], dest["y"]))})
+                       {"map": f"{there:02X}/{dest['index']:02X}", "cell": list(cell(dest["x"], dest["y"]))})
 
 
 def main():
@@ -133,24 +140,26 @@ def main():
 
     jobs = [(name, [{"TO": to, "TEST": test} for to, test in starts], want) for name, starts, want in stair_scenes(prg)]
     for group, link in LINKS.items():
+        if not link["field"]:
+            continue
         x, y = cell(*link["arrival"])
         fx, fy = link["field"]
-        jobs.append((f"exit-{group:02X}", [{"TO": f"{group:02X}/00,{x},{y}", "TEST": f"{link['out']}:{PRESS * 2},wait:400"}],
-                     {"field": [fx, fy + 1]}))
+        to = f"{group:02X}/{link.get('map', 0):02X},{x},{y}"
+        out_test = f"{link['out']},wait:400"
+        jobs.append((f"exit-{group:02X}", [{"TO": to, "TEST": out_test}], {"field": [fx, fy + 1]}))
+        # Without input the party stays: an arrival off the map steps onto the edge exit at once, and the exit
+        # scene would pass without its inputs.
+        jobs.append((f"stay-{group:02X}", [{"TO": to, "TEST": "wait:400"}],
+                     {"map": f"{group:02X}/{link.get('map', 0):02X}", "cell": [x, y]}))
+        # dq5warp stops its inputs at the map change, so entering walks from the field save state (341,56) along
+        # the group's path (dq4groupbuild.LINKS "walk"), which passes no other entrance.
+        jobs.append((f"enter-{group:02X}", None, (link["walk"], {"map": f"{group:02X}/{link.get('map', 0):02X}",
+                                                                 "cell": [x, y]})))
     results = {}
-    # Entering from the field starts on the free field cell (341,56) of --field-state: dq5warp's FIELD
-    # rewrites the entrance table that this build moves.
-    for group, link in LINKS.items():
-        fx, fy = link["field"]
-        if fy != FIELD_START[1]:
-            raise ValueError("field entrances must be on the start row")
-        step = "right" if fx > FIELD_START[0] else "left"
-        x, y = cell(*link["arrival"])
-        got = walk(mesence, rom, args.field_state.resolve(), out, f"enter-{group:02X}",
-                   f"{step}:{abs(fx - FIELD_START[0]) * 16},wait:400")
-        want = {"map": f"{group:02X}/00", "cell": [x, y]}
-        results[f"enter-{group:02X}"] = {"got": got, "want": want, "ok": same_place(got, want)}
     def tries(name, starts, want):
+        if starts is None:
+            path, want = want
+            return walk(mesence, rom, args.field_state.resolve(), out, name, f"{path},wait:400"), 0
         for n, extra in enumerate(starts):
             got = scene(mesence, rom, state, out, f"{name}-{n}" if n else name, **extra)
             if same_place(got, want):
@@ -162,6 +171,8 @@ def main():
         for future in concurrent.futures.as_completed(futures):
             name, want = futures[future]
             got, n = future.result()
+            if name.startswith("enter-"):
+                want = want[1]
             results[name] = {"got": got, "want": want, "ok": same_place(got, want), "start": n}
 
     # Area moves: the gate's open flag is cleared on a group change, so set it from another map of the group.
