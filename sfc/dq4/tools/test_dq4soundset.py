@@ -82,6 +82,13 @@ class SongScoreTests(unittest.TestCase):
         out = soundset.song_score(self.SCORE, drop_tracks={'track10'}, drop_programs={127})
         self.assertEqual(out['timeline'], [self.SCORE['timeline'][0], self.SCORE['timeline'][2]])
 
+    def test_track_db_scales_velocity_of_a_track_or_one_program_in_it(self):
+        score = {'timeline': [{'op': 'note', 'ch': 'track6', 'program': 45, 'velocity': 100},
+                              {'op': 'note', 'ch': 'track8', 'program': 40, 'velocity': 100},
+                              {'op': 'note', 'ch': 'track8', 'program': 45, 'velocity': 100}]}
+        out = soundset.song_score(score, track_db={'track6': -6, 'track8@45': -20})
+        self.assertEqual([e['velocity'] for e in out['timeline']], [50, 100, 10])
+
 
 if __name__ == '__main__':
     unittest.main()
