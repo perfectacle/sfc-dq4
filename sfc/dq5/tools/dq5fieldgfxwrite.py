@@ -1,12 +1,13 @@
-"""DQ5(SFC) 필드(세계 지도) 그림 쓰기. 타일 512개·타일 팔레트 니블·필드 팔레트 2·3번 줄·물결 색·움직이는 타일 벌·
-세계 0 낮밤 인물 팔레트(11·12번 줄)를 내보내고 고친 것을 넣는다. 블록 정의(2A:A32C·AD27)는 dq5fieldtables.py,
+"""DQ5(SFC) 필드(세계 지도) 그림 쓰기. 타일(512~1,024개)·타일 팔레트 니블·타일 속성·필드 팔레트 2·3번 줄·물결 색·
+움직이는 타일 벌·세계 0 낮밤 인물 팔레트(11·12번 줄)를 내보내고 고친 것을 넣는다. 블록 정의(2A:A32C·AD27)는 dq5fieldtables.py,
 지도는 dq5fieldwrite.py 가 쓴다. 형식은 sfc/dq5/docs/dq5-field-format.md 의 「타일 그래픽과 팔레트」「팔레트」, 입력은
 sfc/dq5/docs/dq5-build-format.md 「필드 그림 `dq5fieldgfx/1`」.
 
   dump   롬 → 폴더(-o). fieldgfx.json, tiles.bin(4bpp SNES 타일 512개), anim.bin(움직이는 타일 6개 × 8벌)
   patch  fieldgfx.json → 패치 목록(-o). 바뀐 것이 없으면 쓰기 0개. 다시 싼 RLE 가 원래보다 길면
          --tiles-at·--anim-at BB:AAAA(30~3F, 한 뱅크 안)로 옮긴다. 움직이는 타일 벌을 16개로 늘리면 --anim-at,
-         세계 1·2 의 타일 벌(worlds)을 주면 --worlds-at 이 필요하다
+         세계 1·2 의 타일 벌(worlds)을 주면 --worlds-at 이 필요하다. 타일을 512개 넘게 쓰면 --worlds-at 과
+         --extra-at(늘린 타일, 30~7D), 세계 0 의 2·3번 줄 벌 수·시간대 표·밤 시작을 바꾸면 --palettes-at(30~3F)
   check  두 RLE 를 다시 싸서 풀기, 내보낸 그대로 patch 하면 쓰기 0개인지
 
 타일: 12:B1A8 의 RLE(01:A4A7 이 뱅크, 01:A4AE 가 주소 즉값)를 7E:C000 에 풀면 평면 0~3 이 4KB 씩.
@@ -67,6 +68,9 @@ def check_sites(rom):
     sites = [(at, want, kind) for kind, ss in SITES.items() for at, want in ss]
     sites += [(at, want, 'anim') for at, want in ANIM_SITES.values()]
     sites += [(LOAD_SITE, LOAD_ORIG, 'tiles'), *((at, NIB_ORIG, 'tile_palettes') for at in NIB_SITES)]
+    sites += [(at, want, 'blocks') for at, (want, _, _) in BLOCK_SITES.items()] + [(BATTLE_SITE, BATTLE_ORIG, 'battle')]
+    sites += [(at, want, 'palettes') for at, want in (SEARCH_SITE, PTR_SITE, NIGHT_SITE, PAL_BANK_SITE, WAVE_SITE)]
+    sites += [(at, want, 'tile_attributes') for at, want in ATTR_SITES.items()]
     for at, want, kind in sites:
         if rom.d[lorom(at):lorom(at) + len(want)] != want:
             raise ValueError(f'{cpu(at)}: 원래 롬의 {kind} 코드가 아님; 원본 롬으로 만들어야 함')
@@ -85,16 +89,45 @@ def load_hook(table):
             + b'\xc2\x20' + b'\xbf' + long_addr(table) + b'\xaa' + b'\x7b' + b'\xe2\x20' + b'\xab' + b'\x6b')
 
 
-def nib_hook(tables):
+def nib_hook(tables, wide=False):
     """LDA $2AD712,X 대신. X(16비트)와 A 의 윗바이트를 지키고 tables + 세계*256 + X 를 읽는다.
     00:BBC9 가 XBA 로 윗바이트를 타일맵 워드의 아랫바이트에 넣으므로 윗바이트가 바뀌면 타일 번호가 어긋난다.
-    부른 곳은 바로 AND 로 플래그를 다시 정한다."""
+    부른 곳은 바로 AND 로 플래그를 다시 정한다. wide 면 CLC 자리에 ASL A 를 두어 세계*512 로 읽는다
+    (세계*256 은 0300 이하라 ASL 뒤 C 가 늘 0 이다). 또 wide 면 윗바이트를 0 으로 돌려준다. 부른 곳의 윗바이트는
+    LDA $94 / LSR A 가 남긴 (타일 >> 1) >> 8 이라 타일 512 이상이면 1 이 되어, XBA·ORA 뒤 타일 번호 bit0 이 켜진다.
+    원래 롬은 타일이 512 미만이라 늘 0 이었다."""
     return (b'\xda' + b'\xeb' + b'\x48' + b'\xc2\x20' + b'\xaf\x49\x19\x7e' + b'\x29\x03\x00' + b'\xeb'
-            + b'\x18' + b'\x63\x02' + b'\xaa' + b'\xe2\x20' + b'\x68' + b'\xeb'
-            + b'\xbf' + long_addr(tables) + b'\xfa' + b'\x6b')
+            + (b'\x0a' if wide else b'\x18') + b'\x63\x02' + b'\xaa' + b'\xe2\x20' + b'\x68' + b'\xeb'
+            + b'\xbf' + long_addr(tables) + b'\xfa' + (b'\xeb\x29\x00\xeb' if wide else b'') + b'\x6b')
 
 
 LOAD_LEN, NIB_LEN = len(load_hook(0)), len(nib_hook(0))
+
+# 세계 0 의 2·3번 줄 벌 늘리기(--palettes-at). 01:A132 가 [하한 16비트][색인] 10항목(01:A16B)을 뒤에서부터 보아
+# $075E 이상인 첫 항목의 색인(벌 번호 × 2)으로 01:A189 의 포인터를 고르고, 01:A090 이 그 벌을 DMA 로(뱅크 즉값 01:A0B1)
+# 옮긴다. 같은 DMA 뱅크로 물결 색(01:A0E3 의 즉값 A0F6)도 옮기므로 벌을 옮기면 물결 표도 함께 옮긴다.
+# 색인이 0C 이상(01:A145 의 CPX 즉값)이면 밤 인물 팔레트다. X 는 8비트라 항목 86개·벌 128개까지.
+TIMES, TIME_COUNT, TIME_PTRS = 0x01A16B, 10, 0x01A189
+NIGHT_FROM = 6
+FIELD_PAL_MAX, TIME_MAX = 128, 86
+SEARCH_SITE = (0x01A132, bytes.fromhex('a01bad5e07d96ba1b005888888 80f6be6da1'.replace(' ', '')))
+PTR_SITE = (0x01A166, bytes.fromhex('bd89a1a8'))
+NIGHT_SITE, PAL_BANK_SITE, WAVE_SITE = (0x01A145, b'\x0c'), (0x01A0B1, b'\x01'), (0x01A0E3, b'\xf6\xa0')
+
+
+def search_hook(times, n):
+    """01:A132 대신(M 16비트, X 8비트, DB = 01). 시간대 표 times 의 n항목을 뒤에서부터 보아 $075E 이상인 첫 항목의
+    색인을 X 에 둔다. 첫 항목의 하한은 0 이라 늘 멈춘다."""
+    return (bytes([0xA2, (n - 1) * 3]) + b'\xaf\x5e\x07\x7e' + b'\xdf' + long_addr(times) + b'\xb0\x05'
+            + b'\xca\xca\xca' + b'\x80\xf5' + b'\xbf' + long_addr(times + 2) + b'\x29\xff\x00' + b'\xaa' + b'\x6b')
+
+
+def ptr_hook(ptrs):
+    """01:A166 의 LDA $A189,X / TAY 대신(M·X 16비트). 옮긴 포인터 표를 읽는다."""
+    return b'\xbf' + long_addr(ptrs) + b'\xa8' + b'\x6b'
+
+
+SEARCH_LEN, PTR_LEN = len(search_hook(0, 1)), len(ptr_hook(0))
 
 
 def worlds_layout(at):
@@ -103,6 +136,83 @@ def worlds_layout(at):
     table = nib + NIB_LEN
     tables = table + 16
     return at, nib, table, tables, tables + 0x400
+
+
+# 타일 늘리기(512개 넘게). 필드에서 BG1·2 글자 기준이 VRAM 워드 2000 이라 타일 512~1023 은 워드 4000~5FFF 이고,
+# 필드에 선 동안 이 자리에 쓰는 코드는 없다(실측). 전투가 이 자리를 배경 그림으로 덮으므로, 필드에 들어갈 때(01:A4A7)와
+# 전투 뒤 맵 화면을 되살리는 01:8A87 의 JSL $01B4D5(01:8AA8, 화면을 끈 동안 타일맵을 CPU 로 쓰는 곳)에서
+# 늘린 타일을 DMA 채널 7 로 다시 보낸다. 블록의 10번째 비트는 상위 비트 바이트의 하위 니블(원래 롬에서 모두 0)이다.
+MAX_TILES = 1024
+EXTRA_VRAM = 0x4000
+BLOCK_SITES = {0x00BC80: (bytes.fromhex('bf30a32a399cbcf002a9018595'), 0x2AA330, 0x95),
+               0x00BC8D: (bytes.fromhex('bf2bad2a399cbcf002a9018597'), 0x2AAD2B, 0x97)}
+BATTLE_SITE, BATTLE_ORIG = 0x018AA8, bytes.fromhex('22d5b401')
+# 타일 속성: 00:BCA8 이 블록 위층 타일(0 이면 아래층)을 AND #$01FF 로 잘라 2A:D512 의 512바이트 표를 읽는다(00:C82C·C83B·
+# E32E·01:8192·2B:81E9·81F6 이 부름). 늘리면 AND 둘을 #$03FF 로, 표 읽기를 1,024바이트 표로 바꾼다.
+TILE_ATTR = 0x2AD512
+ATTR_SITES = {0x00BCB0: b'\x29\xff\x01', 0x00BCB7: b'\x29\xff\x01', 0x00BCBD: bytes.fromhex('bf12d52a')}
+BATTLE_NEXT = 0x01B4D5
+
+
+def dma_sub(table):
+    """M·X 16비트로 X = 세계 × 8 을 받아 table 항목의 [늘린 타일 뱅크][주소][크기]를 VRAM 워드 4000 에 DMA 로 보낸다.
+    크기가 0 이면 아무것도 하지 않는다. DB 와 상관없이 긴 주소로 쓴다. VRAM 주소는 시작 바로 앞에 둔다
+    (NMI 가 그 사이에 VRAM 주소를 바꿀 틈을 줄이려고)."""
+    def sta(reg):
+        return b'\x8f' + reg.to_bytes(2, 'little') + b'\x00'
+    body = (b'\xbf' + long_addr(table + 4) + sta(0x4372)
+            + b'\xa9\x01\x18' + sta(0x4370)
+            + b'\xe2\x20' + b'\xbf' + long_addr(table + 3) + sta(0x4374)
+            + b'\xa9\x80' + sta(0x2115)
+            + b'\xc2\x20' + b'\xa9' + EXTRA_VRAM.to_bytes(2, 'little') + sta(0x2116)
+            + b'\xe2\x20' + b'\xa9\x80' + sta(0x420B) + b'\xc2\x20')
+    return b'\xbf' + long_addr(table + 6) + b'\xf0' + bytes([len(body) + 4]) + sta(0x4375) + body + b'\x60'
+
+
+def grow_load_hook(table, dma):
+    """01:A4A7 대신(늘린 타일). 세계 항목(8바이트)을 골라 늘린 타일을 보내고, load_hook 과 같이 RLE 뱅크·주소를 둔다."""
+    return (b'\x7b' + b'\xaf\x49\x19\x7e' + b'\x29\x03' + b'\x0a\x0a\x0a' + b'\xaa'
+            + b'\xc2\x20' + b'\x20' + (dma & 0xFFFF).to_bytes(2, 'little') + b'\xe2\x20'
+            + b'\xbf' + long_addr(table + 2) + b'\x8d\x74\x43' + b'\x48'
+            + b'\xc2\x20' + b'\xbf' + long_addr(table) + b'\xaa' + b'\x7b' + b'\xe2\x20' + b'\xab' + b'\x6b')
+
+
+def battle_hook(dma):
+    """01:8AA8 의 JSL $01B4D5 대신. 필드($BE bit7 = 0)이면 그 세계의 늘린 타일을 다시 보내고 01:B4D5 로 간다."""
+    body = b'\xaf\x49\x19\x7e' + b'\x29\x03\x00' + b'\x0a\x0a\x0a' + b'\xaa' + b'\x20' + (dma & 0xFFFF).to_bytes(2, 'little')
+    return (b'\x08' + b'\xc2\x30' + b'\x48' + b'\xda' + b'\xaf\xbe\x00\x7e' + b'\x29\x80\x00'
+            + b'\xd0' + bytes([len(body)]) + body + b'\xfa' + b'\x68' + b'\x28' + b'\x5c' + long_addr(BATTLE_NEXT))
+
+
+def block_hook(table):
+    """00:BC80·BC8D 대신(M 8비트, X 16비트, DB = 00). 블록 상위 비트 바이트에서 그 칸(Y)의 9·10번째 비트를
+    A = 비트9 << 1 | 비트8 로 돌려준다. 00:BC9C 는 80>>칸, 00:BCA4 는 08>>칸 마스크다."""
+    return (b'\xbf' + long_addr(table) + b'\x39\xa4\xbc' + b'\xc9\x01' + b'\xa9\x00' + b'\x2a' + b'\xeb'
+            + b'\xbf' + long_addr(table) + b'\x39\x9c\xbc' + b'\xc9\x01' + b'\xeb' + b'\x2a' + b'\x6b')
+
+
+GROW_LOAD_LEN = len(grow_load_hook(0, 0))
+DMA_LEN, BATTLE_LEN, BLOCK_LEN = len(dma_sub(0)), len(battle_hook(0)), len(block_hook(0))
+GROW_ENTRY = 8
+
+
+def grow_layout(at):
+    """타일 늘리기 --worlds-at 자리. 이름 → 주소: 불러오기 훅·니블 훅·블록 훅 둘·전투 뒤 훅·DMA·고르기 표(세계 넷 × 8바이트:
+    [RLE 주소 16][RLE 뱅크][늘린 타일 뱅크][주소 16][크기 16])·니블 표(4 × 512바이트)·타일 속성(1,024바이트)·
+    그 뒤 세계 1·2 RLE."""
+    out, a = {}, at
+    for name, n in (('load', GROW_LOAD_LEN), ('nib', len(nib_hook(0, wide=True))), ('block_lower', BLOCK_LEN), ('block_upper', BLOCK_LEN),
+                    ('battle', BATTLE_LEN), ('dma', DMA_LEN), ('table', GROW_ENTRY * 4), ('tables', 0x800),
+                    ('attrs', MAX_TILES)):
+        out[name] = a
+        a += n
+    out['rles'] = a
+    return out
+
+
+def is_grow_hook(rom, at):
+    """01:A4A7 의 JSL 이 가리키는 훅이 타일 늘리기 꼴인지(ASL 셋)."""
+    return rom.d[lorom(at):lorom(at) + 10] == grow_load_hook(0, 0)[:10]
 
 
 def planar_to_tiles(planes):
@@ -157,8 +267,8 @@ def colors(rom, a, n):
     return [rom.u16(a + i * 2) for i in range(n)]
 
 
-def nibbles(rom, a):
-    return [rom.u8(a + i // 2) >> (0 if i & 1 else 4) & 15 for i in range(TILES)]
+def nibbles(rom, a, n=TILES):
+    return [rom.u8(a + i // 2) >> (0 if i & 1 else 4) & 15 for i in range(n)]
 
 
 def original(rom):
@@ -175,21 +285,31 @@ def original(rom):
             'tile_palettes': nibbles(rom, TILE_PALETTE),
             'palettes': {k: [colors(rom, a, 30) for a in v] for k, v in PALETTE_SETS.items()},
             'wave': [colors(rom, WAVE + i * 6, 3) for i in range(WAVE_STEPS)],
-            'person_palettes': {k: colors(rom, a, 30) for k, a in PERSON.items()}}
+            'person_palettes': {k: colors(rom, a, 30) for k, a in PERSON.items()},
+            'world0_times': [[rom.u16(TIMES + i * 3), rom.u8(TIMES + i * 3 + 2) // 2] for i in range(TIME_COUNT)],
+            'world0_night_from': NIGHT_FROM,
+            'tile_attributes': list(rom.d[lorom(TILE_ATTR):lorom(TILE_ATTR) + TILES])}
 
 
 def current(rom):
     """패치한 롬에서 지금 읽히는 것. 검사 도구가 쓴다. worlds 는 세계마다 (타일, 니블),
     anim_sets 는 $1C31 이 0 부터 도는 차례대로 DMA 로 올리는 192바이트."""
     out = {}
-    if rom.d[lorom(LOAD_SITE)] == 0x22:
+    extras = [b''] * 3
+    if rom.d[lorom(LOAD_SITE)] == 0x22 and is_grow_hook(rom, rom.u24(LOAD_SITE + 1)):
+        table = grow_layout(rom.u24(LOAD_SITE + 1))['table']
+        entries = [table + w * GROW_ENTRY for w in range(3)]
+        srcs = [rom.u8(e + 2) << 16 | rom.u16(e) for e in entries]
+        extras = [bytes(rom.d[lorom(rom.u8(e + 3) << 16 | rom.u16(e + 4)):][:rom.u16(e + 6)]) for e in entries]
+    elif rom.d[lorom(LOAD_SITE)] == 0x22:
         _, _, table, _, _ = worlds_layout(rom.u24(LOAD_SITE + 1))
         srcs = [rom.u8(table + w * 4 + 2) << 16 | rom.u16(table + w * 4) for w in range(3)]
     else:
         (bank_site, _), (addr_site, _) = SITES['tiles']
         srcs = [rom.u8(bank_site) << 16 | rom.u16(addr_site)] * 3
-    nibs = [nibbles(rom, nibble_table(rom, w)) for w in range(3)]
-    out['worlds'] = {k: (planar_to_tiles(rle(rom, srcs[w])[0]), nibs[w]) for w, k in enumerate(WORLDS)}
+    counts = [TILES + len(e) // 32 for e in extras]
+    nibs = [nibbles(rom, nibble_table(rom, w), counts[w]) for w in range(3)]
+    out['worlds'] = {k: (planar_to_tiles(rle(rom, srcs[w])[0]) + extras[w], nibs[w]) for w, k in enumerate(WORLDS)}
     out['tiles'], out['tile_palettes'] = out['worlds']['world0']
     (bank_site, _), (addr_site, _) = SITES['anim']
     out['anim'] = rle(rom, rom.u8(bank_site) << 16 | rom.u16(addr_site))[0]
@@ -203,6 +323,19 @@ def current(rom):
     out['palettes'] = {k: [colors(rom, a, 30) for a in v] for k, v in PALETTE_SETS.items()}
     out['wave'] = [colors(rom, WAVE + i * 6, 3) for i in range(WAVE_STEPS)]
     out['person_palettes'] = {k: colors(rom, a, 30) for k, a in PERSON.items()}
+    out['world0_times'] = [[rom.u16(TIMES + i * 3), rom.u8(TIMES + i * 3 + 2) // 2] for i in range(TIME_COUNT)]
+    out['world0_night_from'] = NIGHT_FROM
+    attrs = rom.u24(0x00BCBE) if rom.u8(0x00BCB1) == 0xFF and rom.u8(0x00BCB2) == 0x03 else TILE_ATTR
+    out['tile_attributes'] = list(rom.d[lorom(attrs):lorom(attrs) + (MAX_TILES if attrs != TILE_ATTR else TILES)])
+    if rom.u8(SEARCH_SITE[0]) == 0x22:
+        hook = rom.u24(SEARCH_SITE[0] + 1)
+        n, times = rom.u8(hook + 1) // 3 + 1, rom.u24(hook + 7)
+        ptrs, bank = rom.u24(rom.u24(PTR_SITE[0] + 1) + 1), rom.u8(PAL_BANK_SITE[0]) << 16
+        out['world0_times'] = [[rom.u16(times + i * 3), rom.u8(times + i * 3 + 2) // 2] for i in range(n)]
+        count = (rom.u16(ptrs) - (ptrs & 0xFFFF)) // 2           # 벌이 포인터 표 바로 뒤에 붙어 있다
+        out['palettes']['world0'] = [colors(rom, bank | rom.u16(ptrs + k * 2), 30) for k in range(count)]
+        out['wave'] = [colors(rom, bank | rom.u16(WAVE_SITE[0]) + i * 6, 3) for i in range(WAVE_STEPS)]
+        out['world0_night_from'] = rom.u8(NIGHT_SITE[0]) // 2
     return out
 
 
@@ -215,7 +348,8 @@ def dump(rom, out):
         f.write(o['anim'])
     doc = {'format': FORMAT, 'tiles_file': 'tiles.bin', 'anim_file': 'anim.bin',
            'tile_palettes': o['tile_palettes'], 'palettes': o['palettes'], 'wave': o['wave'],
-           'person_palettes': o['person_palettes']}
+           'person_palettes': o['person_palettes'], 'world0_times': o['world0_times'],
+           'world0_night_from': o['world0_night_from'], 'tile_attributes': o['tile_attributes']}
     with open(os.path.join(out, 'fieldgfx.json'), 'w', encoding='utf-8') as f:
         json.dump(doc, f, separators=(',', ':'))
         f.write('\n')
@@ -235,10 +369,17 @@ def read_file(folder, name, key):
         return f.read()
 
 
-def nibble_list(v, name):
-    if not isinstance(v, list) or len(v) != TILES or any(type(c) is not int or not 0 <= c <= 15 for c in v):
-        raise ValueError(f'{name} 는 0~15 {TILES}개')
+def nibble_list(v, name, n=TILES):
+    if not isinstance(v, list) or len(v) != n or any(type(c) is not int or not 0 <= c <= 15 for c in v):
+        raise ValueError(f'{name} 는 0~15 {n}개(타일 수와 같게)')
     return v
+
+
+def tile_count(raw, name):
+    n, rest = divmod(len(raw), 32)
+    if rest or not TILES <= n <= MAX_TILES:
+        raise ValueError(f'{name}: 타일 {TILES}~{MAX_TILES}개(32바이트씩)여야 함({len(raw)}바이트)')
+    return n
 
 
 def warn_anim_slots(tiles, orig, name):
@@ -257,25 +398,47 @@ def place_in(at, size, option, placed):
     placed.append((at, at + size, option))
 
 
-def patch(rom, doc, folder, tiles_at=None, anim_at=None, name='field-gfx', worlds_at=None):
+def patch(rom, doc, folder, tiles_at=None, anim_at=None, name='field-gfx', worlds_at=None, extra_at=None,
+          palettes_at=None):
     o = original(rom)
-    keys = {'format', 'tiles_file', 'anim_file', 'tile_palettes', 'palettes', 'wave', 'person_palettes', 'worlds'}
+    keys = {'format', 'tiles_file', 'anim_file', 'tile_palettes', 'palettes', 'wave', 'person_palettes', 'worlds',
+            'world0_times', 'world0_night_from', 'tile_attributes'}
     if not isinstance(doc, dict) or doc.get('format') != FORMAT or set(doc) - keys:
         raise ValueError(f'format={FORMAT} 와 {sorted(keys - {"format"})} 만')
     data = {'tiles': read_file(folder, doc.get('tiles_file'), 'tiles_file'),
             'anim': read_file(folder, doc.get('anim_file'), 'anim_file')}
-    if len(data['tiles']) != TILES * 32:
-        raise ValueError(f'{doc["tiles_file"]}: {TILES * 32}바이트여야 함(타일 수는 늘리지 않음)')
+    count0 = tile_count(data['tiles'], doc['tiles_file'])
+    full0, data['tiles'] = data['tiles'], data['tiles'][:TILES * 32]
     sets, rest = divmod(len(data['anim']), ANIM_SET)
     if rest or sets not in ANIM_COUNTS:
         raise ValueError(f'{doc["anim_file"]}: {ANIM_SET}바이트 벌 {ANIM_COUNTS} 개여야 함({len(data["anim"])}바이트)')
     if sets > FIELD_ANIM_SETS and anim_at is None:
         raise ValueError(f'움직이는 타일 벌을 {sets} 개로 늘리려면 --anim-at 이 필요함(벌 주소 표를 그 뒤에 둠)')
-    nib = nibble_list(doc.get('tile_palettes'), 'tile_palettes')
+    nib_full = nibble_list(doc.get('tile_palettes'), 'tile_palettes', count0)
+    nib = nib_full[:TILES]
     pals = doc.get('palettes')
     if not isinstance(pals, dict) or set(pals) != set(PALETTE_SETS) or \
-            any(not isinstance(pals[k], list) or len(pals[k]) != len(PALETTE_SETS[k]) for k in PALETTE_SETS):
-        raise ValueError(f'palettes 는 {sorted(PALETTE_SETS)} 마다 원래 벌 수')
+            any(not isinstance(pals[k], list) or len(pals[k]) != len(PALETTE_SETS[k]) for k in ('world1', 'world2')) \
+            or not isinstance(pals['world0'], list) or not 1 <= len(pals['world0']) <= FIELD_PAL_MAX:
+        raise ValueError(f'palettes 는 {sorted(PALETTE_SETS)} 마다 벌 목록(world1·world2 는 한 벌, '
+                         f'world0 은 1~{FIELD_PAL_MAX}벌)')
+    times = doc.get('world0_times', o['world0_times'])
+    night = doc.get('world0_night_from', o['world0_night_from'])
+    if not isinstance(times, list) or not 1 <= len(times) <= TIME_MAX or any(
+            not isinstance(t, list) or len(t) != 2 or any(type(v) is not int for v in t) for t in times) or \
+            times[0][0] != 0 or any(not 0 <= f <= 0xFFFF for f, _ in times) or \
+            any(a[0] >= b[0] for a, b in zip(times, times[1:])) or \
+            any(not 0 <= k < len(pals['world0']) for _, k in times):
+        raise ValueError(f'world0_times 는 [$075E 하한, 벌 번호] 1~{TIME_MAX}개, 첫 하한 0, 하한이 커지는 차례, '
+                         '벌 번호는 palettes.world0 안')
+    if type(night) is not int or not 0 <= night <= FIELD_PAL_MAX:
+        raise ValueError(f'world0_night_from 은 밤 인물 팔레트를 쓰는 첫 벌 번호(0~{FIELD_PAL_MAX})')
+    move_pals = len(pals['world0']) != len(PALETTE_SETS['world0']) or times != o['world0_times'] or \
+        night != o['world0_night_from']
+    if move_pals and palettes_at is None:
+        raise ValueError('세계 0 의 2·3번 줄 벌 수·시간대 표·밤 시작을 바꾸려면 --palettes-at 이 필요함(뱅크 01 이 참)')
+    if palettes_at is not None and not move_pals:
+        raise ValueError('--palettes-at 은 세계 0 의 벌 수·world0_times·world0_night_from 을 바꿀 때만')
     wave = doc.get('wave')
     if not isinstance(wave, list) or len(wave) != WAVE_STEPS:
         raise ValueError(f'wave 는 {WAVE_STEPS}단계')
@@ -286,17 +449,29 @@ def patch(rom, doc, folder, tiles_at=None, anim_at=None, name='field-gfx', world
     if not isinstance(worlds, dict) or set(worlds) - {'world1', 'world2'} or \
             any(not isinstance(v, dict) or set(v) != {'tiles_file', 'tile_palettes'} for v in worlds.values()):
         raise ValueError('worlds 는 world1·world2 마다 {tiles_file, tile_palettes}')
-    if worlds and worlds_at is None:
-        raise ValueError('worlds(세계마다 타일 벌)에는 --worlds-at 이 필요함')
-    if worlds_at is not None and not worlds:
-        raise ValueError('--worlds-at 은 worlds 와 함께만')
     world_data = {}
     for key, v in sorted(worlds.items()):
         tiles = read_file(folder, v['tiles_file'], f'worlds.{key}.tiles_file')
-        if len(tiles) != TILES * 32:
-            raise ValueError(f'{v["tiles_file"]}: {TILES * 32}바이트여야 함')
+        n = tile_count(tiles, v['tiles_file'])
         warn_anim_slots(tiles, o['tiles'], key)
-        world_data[key] = (tiles, nibble_list(v['tile_palettes'], f'worlds.{key}.tile_palettes'))
+        world_data[key] = (tiles, nibble_list(v['tile_palettes'], f'worlds.{key}.tile_palettes', n))
+    grow = count0 > TILES or any(len(t) > TILES * 32 for t, _ in world_data.values())
+    if grow and (worlds_at is None or extra_at is None):
+        raise ValueError(f'타일을 {TILES}개 넘게 쓰려면 --worlds-at(훅·니블 표)과 --extra-at(늘린 타일)이 필요함')
+    if extra_at is not None and not grow:
+        raise ValueError(f'--extra-at 은 타일이 {TILES}개를 넘을 때만')
+    attrs = doc.get('tile_attributes', o['tile_attributes'])
+    if grow and 'tile_attributes' not in doc:
+        attrs = attrs * 2                         # 늘린 타일 t 는 타일 t - 512 의 속성(원래 AND #$01FF 와 같음)
+    n_attr = MAX_TILES if grow else TILES
+    if not isinstance(attrs, list) or len(attrs) not in (TILES, n_attr) or \
+            any(type(v) is not int or not 0 <= v <= 255 for v in attrs):
+        raise ValueError(f'tile_attributes 는 0~255 {TILES}개(타일을 늘리면 {MAX_TILES}개까지)')
+    attrs = attrs + attrs[:TILES] * (n_attr // len(attrs) - 1)
+    if worlds and worlds_at is None:
+        raise ValueError('worlds(세계마다 타일 벌)에는 --worlds-at 이 필요함')
+    if worlds_at is not None and not worlds and not grow:
+        raise ValueError('--worlds-at 은 worlds 와 함께만')
     warn_anim_slots(data['tiles'], o['tiles'], 'world0')
     writes = []
 
@@ -325,7 +500,7 @@ def patch(rom, doc, folder, tiles_at=None, anim_at=None, name='field-gfx', world
         write(at, packed, f'{kind} RLE', orig=False)
         if kind == 'tiles':
             world0_at = at
-        if kind == 'tiles' and worlds:
+        if kind == 'tiles' and worlds_at is not None:
             continue                                  # 즉값 자리는 세계 훅이 덮는다
         (bank_site, _), (addr_site, _) = SITES[kind]
         write(bank_site, bytes([at >> 16]), f'{kind} 뱅크')
@@ -343,19 +518,29 @@ def patch(rom, doc, folder, tiles_at=None, anim_at=None, name='field-gfx', world
     for i in range(len(nib_bytes)):
         if nib_bytes[i] != old[i]:
             write(TILE_PALETTE + i, bytes([nib_bytes[i]]), f'타일 팔레트 니블 {i * 2:03X}')
-    if worlds:
+    if not grow:
+        for i, v in enumerate(attrs):
+            if v != o['tile_attributes'][i]:
+                write(TILE_ATTR + i, bytes([v]), f'타일 속성 {i:03X}')
+    if grow:
+        write_grow(worlds_at, extra_at, world0_at, full0, nib_full, world_data, placed, write, bytes(attrs))
+    elif worlds:
         write_worlds(worlds_at, world0_at, data['tiles'], nib, world_data, placed, write)
-    for key, addrs in PALETTE_SETS.items():
-        for k, a in enumerate(addrs):
-            new = color_list(pals[key][k], 30, f'palettes.{key}[{k}]')
-            bad = [i for i in CYCLED if new[i] != o['palettes'][key][k][i]]
+    for key in PALETTE_SETS:
+        for k, new in enumerate(pals[key]):
+            new = color_list(new, 30, f'palettes.{key}[{k}]')
+            # 늘린 벌의 그 자리는 원래 값이 없고 게임이 덮어 보이지 않으므로 묻지 않는다.
+            ref = o['palettes'][key][k] if k < len(o['palettes'][key]) else new
+            bad = [i for i in CYCLED if new[i] != ref[i]]
             if bad:
                 raise ValueError(f'palettes.{key}[{k}] 의 {bad}번은 2·3번 줄 색 14·15 라 게임이 덮어씀')
-            if new != o['palettes'][key][k]:
-                write(a, b''.join(c.to_bytes(2, 'little') for c in new), f'필드 팔레트 {key} {k}')
-    for i in range(WAVE_STEPS):
-        new = color_list(wave[i], 3, f'wave[{i}]')
-        if new != o['wave'][i]:
+            if not (move_pals and key == 'world0') and new != o['palettes'][key][k]:
+                write(PALETTE_SETS[key][k], b''.join(c.to_bytes(2, 'little') for c in new), f'필드 팔레트 {key} {k}')
+    waves = [color_list(wave[i], 3, f'wave[{i}]') for i in range(WAVE_STEPS)]
+    if move_pals:
+        write_field_palettes(palettes_at, pals['world0'], times, night, waves, placed, write)
+    for i, new in enumerate(waves):
+        if not move_pals and new != o['wave'][i]:
             write(WAVE + i * 6, b''.join(c.to_bytes(2, 'little') for c in new), f'물결 색 {i}')
     for key, a in PERSON.items():
         new = color_list(person[key], 30, f'person_palettes.{key}')
@@ -363,7 +548,8 @@ def patch(rom, doc, folder, tiles_at=None, anim_at=None, name='field-gfx', world
             write(a, b''.join(c.to_bytes(2, 'little') for c in new), f'세계 0 {key} 인물 팔레트(11·12번 줄)')
     manifest = {'format': 'dq5patch/1', 'name': name, 'writes': writes}
     if placed:
-        manifest['rom_size'] = 2
+        end = max(lorom(e - 1) + 1 for _, e, _ in placed)
+        manifest['rom_size'] = 4 if end > 0x300000 else 3 if end > 0x200000 else 2
     return manifest
 
 
@@ -394,6 +580,96 @@ def write_worlds(at, world0_at, tiles0, nib0, world_data, placed, write):
     write(LOAD_SITE, b'\x22' + long_addr(load) + b'\x80\x04' + b'\xea' * 4, '타일 불러오기를 세계 훅으로')
     for site in NIB_SITES:
         write(site, b'\x22' + long_addr(nib), '타일 팔레트 니블 읽기를 세계 훅으로')
+
+
+def write_field_palettes(at, sets, times, night, waves, placed, write):
+    """세계 0 의 2·3번 줄 벌을 at 에 [시간대 표][포인터 표][벌 60바이트씩][물결 60바이트][찾기 훅][포인터 훅] 으로 두고
+    01:A132·A166 을 훅으로, DMA 뱅크·물결 주소·밤 시작 즉값을 바꾼다. 포인터·물결 주소가 16비트라 한 뱅크 안에 둔다."""
+    ptrs = at + len(times) * 3
+    first = ptrs + len(sets) * 2
+    wave = first + len(sets) * 60
+    search = wave + WAVE_STEPS * 6
+    data = (b''.join(f.to_bytes(2, 'little') + bytes([k * 2]) for f, k in times)
+            + b''.join(((first + k * 60) & 0xFFFF).to_bytes(2, 'little') for k in range(len(sets)))
+            + b''.join(c.to_bytes(2, 'little') for row in sets for c in row)
+            + b''.join(c.to_bytes(2, 'little') for row in waves for c in row)
+            + search_hook(at, len(times)) + ptr_hook(ptrs))
+    place_in(at, len(data), '--palettes-at', placed)
+    write(at, data, f'세계 0 의 2·3번 줄 벌 {len(sets)}개·시간대 {len(times)}항목·물결 색과 훅 둘', orig=False)
+    write(SEARCH_SITE[0], b'\x22' + long_addr(search) + b'\xea' * (len(SEARCH_SITE[1]) - 4), '시간대 찾기를 훅으로')
+    write(PTR_SITE[0], b'\x22' + long_addr(search + SEARCH_LEN), '벌 포인터 읽기를 훅으로')
+    write(NIGHT_SITE[0], bytes([min(night * 2, 0xFF)]), f'밤 인물 팔레트 시작 벌 {night}')
+    write(PAL_BANK_SITE[0], bytes([at >> 16]), '2·3번 줄·물결 DMA 뱅크')
+    write(WAVE_SITE[0], (wave & 0xFFFF).to_bytes(2, 'little'), '물결 색 주소')
+
+
+def place_extras(at, chunks, placed):
+    """늘린 타일 덩어리(세계마다, 같은 것은 하나)를 at 부터 차례로 둔다. DMA 가 뱅크를 넘지 못하므로 덩어리가
+    뱅크 끝을 넘으면 다음 뱅크 8000 으로 넘긴다. 덩어리 → 긴 주소."""
+    out, a = {}, at
+    for chunk in chunks:
+        if not chunk or chunk in out:
+            continue
+        if (a & 0xFFFF) + len(chunk) > 0x10000:
+            a = ((a >> 16) + 1) << 16 | 0x8000
+        if not 0x30 <= a >> 16 <= 0x7D or a & 0xFFFF < 0x8000:
+            raise ValueError('--extra-at 은 30~7D 뱅크의 8000~FFFF(늘린 타일이 그 안에 들어야 함)')
+        place_in_any(a, len(chunk), '--extra-at', placed)
+        out[chunk] = a
+        a += len(chunk)
+    return out
+
+
+def place_in_any(at, size, option, placed):
+    if any(at < e and lo < at + size for lo, e, _ in placed):
+        raise ValueError(f'{option} 자리가 {[n for lo, e, n in placed if at < e and lo < at + size]} 와 겹침')
+    placed.append((at, at + size, option))
+
+
+def write_grow(at, extra_at, world0_at, full0, nib0, world_data, placed, write, attrs):
+    """타일 늘리기. 세계마다 (앞 512개 RLE, 512개 뒤 늘린 타일, 니블 표 512바이트)를 고르기 표에 두고,
+    훅 다섯(불러오기·니블·블록 둘·전투 뒤)과 DMA 루틴을 at 에 놓는다. 세계 0 과 같은 앞 512개는 세계 0 RLE 를 쓴다."""
+    lay = grow_layout(at)
+    base0 = full0[:TILES * 32]
+    worlds = [(full0, nib0)] + [world_data.get(k, (full0, nib0)) for k in WORLDS[1:]] + [(full0, nib0)]
+    extras = place_extras(extra_at, [t[TILES * 32:] for t, _ in worlds], placed)
+    blob, srcs = bytearray(), []
+    for tiles, _ in worlds:
+        base = tiles[:TILES * 32]
+        if base == base0:
+            srcs.append(world0_at)
+            continue
+        srcs.append(lay['rles'] + len(blob))
+        blob += encode_rle(tiles_to_planar(base))
+    table = b''
+    for (tiles, _), src in zip(worlds, srcs):
+        extra = tiles[TILES * 32:]
+        e = extras.get(extra, 0)
+        table += long_addr(src) + bytes([e >> 16]) + (e & 0xFFFF).to_bytes(2, 'little') + len(extra).to_bytes(2, 'little')
+    nibs = b''
+    for _, n in worlds:
+        n = list(n) + [0] * (MAX_TILES - len(n))
+        nibs += bytes(n[i] << 4 | n[i + 1] for i in range(0, MAX_TILES, 2))
+    code = (grow_load_hook(lay['table'], lay['dma']) + nib_hook(lay['tables'], wide=True)
+            + b''.join(block_hook(BLOCK_SITES[s][1]) for s in sorted(BLOCK_SITES))
+            + battle_hook(lay['dma']) + dma_sub(lay['table']))
+    body = code + table + nibs + attrs + bytes(blob)
+    place_in(at, len(body), '--worlds-at', placed)
+    write(at, body, '타일 늘리기: 훅 다섯·DMA·고르기 표·니블 표 넷·세계 1·2 RLE', orig=False)
+    for chunk, a in extras.items():
+        write(a, chunk, f'늘린 타일 {len(chunk) // 32}개(VRAM 워드 {EXTRA_VRAM:04X}~)', orig=False)
+    write(LOAD_SITE, b'\x22' + long_addr(lay['load']) + b'\x80\x04' + b'\xea' * 4, '타일 불러오기를 늘리기 훅으로')
+    for site in NIB_SITES:
+        write(site, b'\x22' + long_addr(lay['nib']), '타일 팔레트 니블 읽기를 세계마다 512바이트 훅으로')
+    for (site, (orig, _, dp)), key in zip(sorted(BLOCK_SITES.items()), ('block_lower', 'block_upper')):
+        write(site, b'\x22' + long_addr(lay[key]) + bytes([0x85, dp]) + b'\xea' * (len(orig) - 6),
+              f'블록 {key[6:]} 층 9·10번째 비트')
+    write(BATTLE_SITE, b'\x22' + long_addr(lay['battle']), '전투 뒤 늘린 타일 다시 보내기')
+    for site, orig in ATTR_SITES.items():
+        if orig[0] == 0x29:
+            write(site, b'\x29\xff\x03', '타일 속성 번호를 10비트로')
+        else:
+            write(site, b'\xbf' + long_addr(lay['attrs']), '타일 속성 표를 1,024바이트로')
 
 
 def check(rom, folder):
@@ -431,6 +707,8 @@ def main():
     ap.add_argument('--tiles-at')
     ap.add_argument('--anim-at')
     ap.add_argument('--worlds-at')
+    ap.add_argument('--extra-at')
+    ap.add_argument('--palettes-at')
     ap.add_argument('--name', default='field-gfx')
     a = ap.parse_args()
     try:
@@ -451,7 +729,8 @@ def main():
             doc = json.load(f)
         manifest = patch(rom, doc, os.path.dirname(os.path.abspath(a.source)),
                          parse_at(a.tiles_at, '--tiles-at'), parse_at(a.anim_at, '--anim-at'), a.name,
-                         parse_at(a.worlds_at, '--worlds-at'))
+                         parse_at(a.worlds_at, '--worlds-at'), parse_at(a.extra_at, '--extra-at'),
+                         parse_at(a.palettes_at, '--palettes-at'))
         os.makedirs(os.path.dirname(a.out) or '.', exist_ok=True)
         with open(a.out, 'w', encoding='utf-8') as f:
             json.dump(manifest, f, ensure_ascii=False, indent=1)

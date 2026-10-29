@@ -23,7 +23,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 from dq5map import (  # noqa: E402
-    CHR_BANK, CHR_PALETTE, HIGH_BLOCKS, HIGH_CHR_BANK, HIGH_CHR_PALETTE, PALETTES, PALSET_LISTS, Rom, lorom,
+    CHR_BANK, CHR_PALETTE, HIGH_BLOCKS, HIGH_CHR_BANK, HIGH_CHR_PALETTE, PALETTES, PALSET_LISTS, ROW_READ, ROW_STUB,
+    SET_READ, SET_STUB, Rom, lorom, palset_lists,
 )
 
 FORMAT = 'dq5mapgfx/1'
@@ -33,7 +34,11 @@ PALETTE_MAX = 0x800
 SET_COUNT = 69
 # 10:DE84 LDA $E5C8,Y(DB = 10)가 줄을 읽는다. 줄을 늘릴 때는 이 3바이트를 JSR $FFE0 으로 바꾸고, 원래 롬의 빈 자리
 # 10:FFE0 에 PHX / TYX / LDA long,X / PLX / RTS 를 두어 옮긴 줄을 롱 주소로 읽는다(Y = 줄 번호 * 32).
-ROW_READ, ROW_STUB = 0x10DE84, 0x10FFE0
+# 세트를 늘릴 때(--sets-at)는 10:DE56 의 LDA $DFE4,X(세트 번호 * 4 + 낮0/밤2)를 JSR $FFE8 로 바꾼다. 스텁은 옮긴 세트 표를
+# 긴 주소로 읽고 DB 를 그 뱅크로 바꿔, 뒤따르는 LDA ($00),Y 가 옮긴 목록을 읽게 한다. 그 뒤 LDA $1EAE 가 DB 로 읽으므로
+# WRAM 거울이 있는 30~3F 에만 두고, 줄 읽기도 DB 를 보지 않게 늘 10:FFE0 스텁으로 바꾼다. 세트 번호는 8비트($00, STZ $01).
+SET_ORIG = bytes.fromhex('bd e4 df')
+SET_MAX, LIST_ROWS = 256, 7
 SITES = {'block_bank': (0x0192F5, 1), 'builder_bank': (0x018CDF, 1), 'builder_start': (0x018CE7, 2),
          'chr_bank': (0x0192FA, 1), 'chrpal_bank': (0x019305, 1), 'chrpal_addr': (0x019309, 2)}
 EXPECT = {'block_bank': b'\x16', 'builder_bank': b'\x16', 'builder_start': b'\x00\x80',
@@ -111,15 +116,54 @@ def chr_count(rom, blocks):
     return max(w & 0xFFF for raw, _ in blocks for w in block_doc(raw)['words']) + 1
 
 
+def set_count(rom, table):
+    """세트 표의 세트 수. 첫 목록이 표 바로 뒤에서 시작한다(원본 69세트)."""
+    first = rom.u16(table)
+    if first <= table & 0xFFFF or (first - (table & 0xFFFF)) % 4:
+        raise ValueError(f'{cpu(table)}: 팔레트 세트 표의 첫 포인터가 맞지 않음')
+    return (first - (table & 0xFFFF)) // 4
+
+
 def palette_lists(rom):
-    """(세트마다 [낮 목록 id, 밤 목록 id], {목록 id: 줄 번호 7개}). 목록 id 는 10 뱅크 주소 4자리."""
+    """(세트마다 [낮 목록 id, 밤 목록 id], {목록 id: 줄 번호 7개}). 목록 id 는 세트 표 뱅크 안 주소 4자리."""
+    table = palset_lists(rom)
+    bank = table & 0xFF0000
     sets, lists = [], {}
-    for i in range(SET_COUNT):
-        pair = [f'{rom.u16(PALSET_LISTS + i * 4 + k):04X}' for k in (0, 2)]
+    for i in range(set_count(rom, table)):
+        pair = [f'{rom.u16(table + i * 4 + k):04X}' for k in (0, 2)]
         for p in pair:
-            lists.setdefault(p, [rom.u16(0x100000 | int(p, 16) + j * 2) for j in range(7)])
+            lists.setdefault(p, [rom.u16(bank | int(p, 16) + j * 2) for j in range(LIST_ROWS)])
         sets.append(pair)
     return sets, dict(sorted(lists.items()))
+
+
+def row_stub(rows):
+    return bytes([0xDA, 0xBB, 0xBF]) + rows.to_bytes(3, 'little') + bytes([0xFA, 0x60])
+
+
+def set_stub(table):
+    """10:DE56 의 LDA $DFE4,X 대신(M·X 16비트). 옮긴 세트 표를 읽고 DB 를 그 뱅크로 바꾼다."""
+    return (b'\xbf' + table.to_bytes(3, 'little') + b'\x48' + b'\xe2\x20' + bytes([0xA9, table >> 16]) + b'\x48\xab'
+            + b'\xc2\x20' + b'\x68' + b'\x60')
+
+
+def write_sets(sets_at, sets, lists, rows, write):
+    """세트 표와 목록을 sets_at 에 [세트 표 N×4][목록 14바이트씩] 으로 두고 10:DE56·10:DE84 를 스텁으로 바꾼다.
+    목록은 세트 표에 처음 나오는 차례로 둔다. 세트 0 의 낮 목록이 표 바로 뒤에 와야 세트 수를 셀 수 있다(set_count)."""
+    bank, low = sets_at >> 16, sets_at & 0xFFFF
+    order = list(dict.fromkeys([v for pair in sets for v in pair] + sorted(lists)))
+    start = low + len(sets) * 4
+    where = {lid: start + k * LIST_ROWS * 2 for k, lid in enumerate(order)}
+    raw = b''.join(where[v].to_bytes(2, 'little') for pair in sets for v in pair)
+    raw += b''.join(v.to_bytes(2, 'little') for lid in order for v in lists[lid])
+    if not 0x30 <= bank <= 0x3F or low < 0x8000 or low + len(raw) > 0x10000:
+        raise ValueError(f'--sets-at 은 30~3F 의 한 뱅크 안({len(raw)}바이트, 스텁이 DB 를 바꿔 WRAM 거울이 필요)')
+    write(sets_at, raw, f'BG 팔레트 세트 표 {len(sets)}개와 목록 {len(order)}개', orig=False)
+    write(SET_STUB, set_stub(sets_at), 'BG 팔레트 세트 표 읽기(DB 를 옮긴 뱅크로)')
+    write(SET_READ, bytes([0x20, SET_STUB & 0xFF, SET_STUB >> 8 & 0xFF]), 'BG 팔레트 세트 표 읽기 훅')
+    if rows == PALETTES:
+        write(ROW_STUB, row_stub(PALETTES), 'BG 팔레트 줄 읽기(DB 를 보지 않게 원래 자리를 긴 주소로)')
+        write(ROW_READ, bytes([0x20, ROW_STUB & 0xFF, ROW_STUB >> 8 & 0xFF]), 'BG 팔레트 줄 읽기 훅')
 
 
 def dump(rom, out, kind='normal'):
@@ -144,7 +188,7 @@ def dump(rom, out, kind='normal'):
     return doc
 
 
-def patch(rom, doc, folder, chr_at=None, blocks_at=None, name='map-gfx', palettes_at=None):
+def patch(rom, doc, folder, chr_at=None, blocks_at=None, name='map-gfx', palettes_at=None, sets_at=None):
     if not isinstance(doc, dict) or doc.get('format') != FORMAT or not isinstance(doc.get('set', 'normal'), str) \
             or doc.get('set', 'normal') not in SETS:
         raise ValueError(f'format={FORMAT}, set 은 {sorted(SETS)}')
@@ -171,8 +215,10 @@ def patch(rom, doc, folder, chr_at=None, blocks_at=None, name='map-gfx', palette
             not isinstance(r, list) or len(r) != 16 or any(type(c) is not int or not 0 <= c <= 0x7FFF for c in r)
             for r in pals)):
         raise ValueError(f'palettes 는 15비트 색 16개짜리 줄 {PALETTE_ROWS}~{PALETTE_MAX}개')
-    if not st['palettes'] and palettes_at is not None:
-        raise ValueError('--palettes-at 은 normal 쪽에서만')
+    if not st['palettes'] and (palettes_at is not None or sets_at is not None):
+        raise ValueError('--palettes-at·--sets-at 은 normal 쪽에서만')
+    if sets_at is not None and rom.d[lorom(SET_READ):lorom(SET_READ) + 3] != SET_ORIG:
+        raise ValueError(f'{cpu(SET_READ)}: 원래 롬의 세트 표 읽기가 아님; 원본 롬으로 만들어야 함')
     if len(pals) > PALETTE_ROWS and palettes_at is None:
         raise ValueError(f'BG 팔레트 줄 {len(pals)}개는 원래 {PALETTE_ROWS}개보다 많음: 10:FFC8 뒤가 비지 않아 '
                          '--palettes-at 으로 옮겨야 함')
@@ -205,26 +251,32 @@ def patch(rom, doc, folder, chr_at=None, blocks_at=None, name='map-gfx', palette
         if low + len(raw) > 0x10000:
             raise ValueError(f'--palettes-at 부터 {len(raw)}바이트가 한 뱅크를 넘음')
         write(palettes_at, raw, 'BG 팔레트 줄', orig=False)
-        write(ROW_STUB, bytes([0xDA, 0xBB, 0xBF, low & 0xFF, low >> 8, bank, 0xFA, 0x60]), 'BG 팔레트 줄 읽기')
+        write(ROW_STUB, row_stub(palettes_at), 'BG 팔레트 줄 읽기')
         write(ROW_READ, bytes([0x20, ROW_STUB & 0xFF, ROW_STUB >> 8 & 0xFF]), 'BG 팔레트 줄 읽기 훅')
     if st['palettes']:
         sets0, lists0 = palette_lists(rom)
         sets, lists = doc.get('palette_sets', sets0), doc.get('palette_lists', lists0)
-        if not isinstance(lists, dict) or set(lists) != set(lists0):
-            raise ValueError('palette_lists 는 원래 목록 id 그대로(목록은 늘리지 않음)')
-        if not isinstance(sets, list) or len(sets) != SET_COUNT or any(
-                not isinstance(p, list) or len(p) != 2 or any(v not in lists0 for v in p) for p in sets):
-            raise ValueError(f'palette_sets 는 [낮 목록 id, 밤 목록 id] {SET_COUNT}개')
+        if not isinstance(lists, dict) or any(not re.fullmatch('[0-9A-F]{4}', k) for k in lists):
+            raise ValueError('palette_lists 는 목록 id(대문자 16진 4자리) → 줄 번호')
+        grow = set(lists) != set(lists0) or not isinstance(sets, list) or len(sets) != SET_COUNT
+        if grow and sets_at is None:
+            raise ValueError(f'세트 {SET_COUNT}개·원래 목록 id 와 다르면(늘리기) 뱅크 10 이 차 있어 --sets-at 으로 옮겨야 함')
+        if not isinstance(sets, list) or not 1 <= len(sets) <= SET_MAX or any(
+                not isinstance(p, list) or len(p) != 2 or any(v not in lists for v in p) for p in sets):
+            raise ValueError(f'palette_sets 는 palette_lists 의 [낮 목록 id, 밤 목록 id] 1~{SET_MAX}개')
         for lid, rows in lists.items():
-            if not isinstance(rows, list) or len(rows) != 7 or any(
+            if not isinstance(rows, list) or len(rows) != LIST_ROWS or any(
                     type(v) is not int or not 0 <= v < len(pals) for v in rows):
-                raise ValueError(f'palette_lists.{lid}: 줄 번호(0~{len(pals) - 1}) 7개')
-            if rows != lists0[lid]:
+                raise ValueError(f'palette_lists.{lid}: 줄 번호(0~{len(pals) - 1}) {LIST_ROWS}개')
+            if sets_at is None and rows != lists0[lid]:
                 write(0x100000 | int(lid, 16), b''.join(v.to_bytes(2, 'little') for v in rows), f'BG 팔레트 목록 {lid}')
-        for i, (pair, pair0) in enumerate(zip(sets, sets0)):
-            if pair != pair0:
-                write(PALSET_LISTS + i * 4, b''.join(int(v, 16).to_bytes(2, 'little') for v in pair),
-                      f'BG 팔레트 세트 {i}')
+        if sets_at is not None:
+            write_sets(sets_at, sets, lists, PALETTES if palettes_at is None else palettes_at, write)
+        else:
+            for i, (pair, pair0) in enumerate(zip(sets, sets0)):
+                if pair != pair0:
+                    write(PALSET_LISTS + i * 4, b''.join(int(v, 16).to_bytes(2, 'little') for v in pair),
+                          f'BG 팔레트 세트 {i}')
     # CHR 과 니블 표.
     if count > count0 and chr_at is None:
         raise ValueError(f'CHR {count}개는 원래 {count0}개보다 많음: 원래 자리 뒤는 다른 자료라 --chr-at 으로 옮겨야 함')
@@ -312,6 +364,7 @@ def main():
     ap.add_argument('--chr-at')
     ap.add_argument('--blocks-at')
     ap.add_argument('--palettes-at', help='BG 팔레트 줄 전체를 옮길 CPU 주소(줄을 늘릴 때)')
+    ap.add_argument('--sets-at', help='BG 팔레트 세트 표와 목록을 옮길 CPU 주소(30~3F, 세트·목록을 늘릴 때)')
     ap.add_argument('--name', default='map-gfx')
     ap.add_argument('--set', default='normal', choices=sorted(SETS), help='dump·check 할 쪽(patch 는 문서의 set)')
     a = ap.parse_args()
@@ -335,7 +388,7 @@ def main():
             raise ValueError(f'--set {a.set} 이지만 문서의 set 은 {doc.get("set", "normal")}(patch 는 문서의 set 을 따름)')
         manifest = patch(rom, doc, os.path.dirname(os.path.abspath(a.source)),
                          parse_at(a.chr_at, '--chr-at'), parse_at(a.blocks_at, '--blocks-at'), a.name,
-                         parse_at(a.palettes_at, '--palettes-at'))
+                         parse_at(a.palettes_at, '--palettes-at'), parse_at(a.sets_at, '--sets-at'))
         os.makedirs(os.path.dirname(a.out) or '.', exist_ok=True)
         with open(a.out, 'w', encoding='utf-8') as f:
             json.dump(manifest, f, ensure_ascii=False, indent=1)

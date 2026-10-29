@@ -535,13 +535,34 @@ def palette_set(rom, bc, bd):
     raise KeyError(f'no palette set for $BC={bc:02X}')
 
 
+# dq5mapgfxwrite.py --sets-at 은 10:DE56 의 LDA $DFE4,X 를 JSR $FFE8 로 바꾸고, 그 스텁이 세트 표를 긴 주소로 읽은 뒤
+# DB 를 그 뱅크로 바꿔 목록도 거기서 읽게 한다. 줄 읽기(10:DE84)는 --palettes-at 과 같은 10:FFE0 스텁이 긴 주소로 읽는다.
+SET_READ, SET_STUB, ROW_READ, ROW_STUB = 0x10DE56, 0x10FFE8, 0x10DE84, 0x10FFE0
+
+
+def palset_lists(rom):
+    """세트 표(세트마다 낮·밤 16비트 목록 포인터)의 긴 주소. 옮긴 롬은 10:FFE8 스텁의 LDA long,X 피연산자."""
+    if rom.u8(SET_READ) == 0x20:
+        return rom.u24(SET_STUB + 1)
+    return PALSET_LISTS
+
+
+def palette_rows(rom):
+    """BG 팔레트 줄 표의 긴 주소. 줄 읽기를 훅으로 바꾼 롬은 10:FFE0 스텁의 LDA long,X 피연산자."""
+    if rom.u8(ROW_READ) == 0x20:
+        return rom.u24(ROW_STUB + 3)
+    return PALETTES
+
+
 def map_cgram(rom, bc, bd, alt=False):
     """BG 팔레트 1~7번 줄과 배경색(0번 줄 색 0)을 채운 CGRAM 앞 256바이트. 나머지 줄은 0."""
     s = palette_set(rom, bc, bd)
-    lst = 0x100000 | rom.u16(PALSET_LISTS + s * 4 + (2 if alt else 0))
+    table = palset_lists(rom)
+    lst = (table & 0xFF0000) | rom.u16(table + s * 4 + (2 if alt else 0))
+    rows = palette_rows(rom)
     cg = bytearray(0x200)
     for r in range(7):
-        o = lorom(PALETTES + (rom.u16(lst + r * 2) & 0x7FF) * 32)
+        o = lorom(rows + (rom.u16(lst + r * 2) & 0x7FF) * 32)
         cg[0x20 + r * 32:0x40 + r * 32] = rom.d[o:o + 32]
     # 10:DE9C: 7번 줄부터 2번 줄까지 내려가며 색 0 이 0 이 아닌 첫 줄의 색 0 을 배경색으로.
     for r in range(7, 1, -1):
