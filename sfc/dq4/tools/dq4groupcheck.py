@@ -101,8 +101,10 @@ def stair_scenes(prg):
             source = dq4block.Map(prg, fc_group, number)
             to = {(e["x"], e["y"]): e["to"] for e in dq4block.exit_links(prg, fc_group, number, cache)}
             for i, (x, y) in enumerate(order[number]):
-                start = next(((x - dx, y - dy), d) for (dx, dy), d in DIRS.items()
-                             if walkable(source, x - dx, y - dy) and (x - dx, y - dy) not in order[number])
+                start = next((((x - dx, y - dy), d) for (dx, dy), d in DIRS.items()
+                              if walkable(source, x - dx, y - dy) and (x - dx, y - dy) not in order[number]), None)
+                if start is None:
+                    raise ValueError(f"{fc_group:02X}/{number:02X} ({x:02X},{y:02X}): no walkable cell next to the stair")
                 (sx, sy), direction = start
                 dest = to[x, y]
                 yield (f"stair-{group:02X}{number:02X}-{i}", f"{group:02X}/{number:02X},{','.join(map(str, cell(sx, sy)))}",
@@ -163,6 +165,9 @@ def main():
     hop = out / "area-hop" / "hop.mss"
     area = [("area-up", {"TO": f"36/00,{gx},{gy + 5}", "SET": "21C2=FF", "TEST": f"up:{PRESS},wait:400"},
              {"map": "36/01", "cell": list(cell(0x0F, 0x23))}),
+            # The right end of the three-cell rect maps to the right end of the arrival (2A:F650).
+            ("area-up-right", {"TO": f"36/00,{gx + 2},{gy + 5}", "SET": "21C2=FF", "TEST": f"up:{PRESS},wait:400"},
+             {"map": "36/01", "cell": list(cell(0x10, 0x23))}),
             ("area-down", {"TO": "36/01,30,71", "TEST": "down:8,wait:400"},
              {"map": "36/00", "cell": list(cell(0x12, 0x0B))})]
     for name, extra, want in area:

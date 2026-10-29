@@ -28,7 +28,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
 
 import dq4block  # noqa: E402
 import dq4map  # noqa: E402
-from dq4environmentmap import block_prop  # noqa: E402
+from dq4environmentmap import all_maps, block_prop  # noqa: E402
 from dq4environmentrom import GROUPS, STAIRS  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
 
@@ -75,11 +75,15 @@ def exit_records(prg, group):
     cache = {}
     records = {}
     for number in numbers:
-        to = {(e["x"], e["y"]): e["to"] for e in dq4block.exit_links(prg, fc_group, number, cache)}
+        links = dq4block.exit_links(prg, fc_group, number, cache)
+        other = sorted({e["prop"] & 0x7F for e in links} - STAIRS)
+        if other:
+            raise ValueError(f"{fc_group:02X}/{number:02X}: FC exit kinds {[f'{p:02X}' for p in other]} have no DQ5 exit yet")
+        to = {(e["x"], e["y"]): e["to"] for e in links}
         rows = []
         for x, y in order[number]:
             dest = to[x, y]
-            if not dest or dest.get("group") != fc_group or "index" not in dest:
+            if not dest or dest.get("group") != fc_group or dest.get("index") not in order:
                 raise ValueError(f"{fc_group:02X}/{number:02X} ({x:02X},{y:02X}): stair leaves the group: {dest}")
             rows.append({"kind": "same-group", "destination_map": dest["index"],
                          "exit": order[dest["index"]].index((dest["x"], dest["y"]))})
@@ -98,7 +102,7 @@ def area_records(prg, group):
     fc_group = LINKS[group]["fc"]
     out = {}
     for number in fc_numbers(group):
-        cells = sorted(dq4map.exits(prg, fc_group, number))
+        cells = sorted(dq4map.exits(prg, fc_group, number), key=lambda e: (e[1], e[0]))
         runs = []
         for x, y, dg, dk, ax, ay, flag in cells:
             if dg != fc_group:
@@ -137,9 +141,20 @@ def _save(path, doc):
     return path
 
 
+def check_groups(prg):
+    """GROUPS must keep the FC map number as the DQ5 map number of the group's LINKS entry: exits are
+    written with FC map numbers."""
+    fc = {name: (g, k) for g, k, _, name in all_maps(prg)}
+    for name, (group, number) in GROUPS.items():
+        want = (LINKS[group]["fc"], number) if group in LINKS else None
+        if fc.get(name) != want:
+            raise ValueError(f"{name}: FC map {fc.get(name)} is not {want} for group {group:02X}")
+
+
 def build(dq5, dq4, out):
     out.mkdir(parents=True, exist_ok=True)
     prg = ines.prg(dq4.read_bytes())
+    check_groups(prg)
     env = out / "env"
     report = json.loads(_run(TOOLS / "dq4environmentrom.py", "--dq5", dq5, "--dq4", dq4, "--out", env))
     env_rom = out / "env.sfc"

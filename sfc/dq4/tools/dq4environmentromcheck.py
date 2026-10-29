@@ -28,10 +28,12 @@ from dq5exitcheck import dp86_allowed, warp_exit  # noqa: E402
 from dq4environmentart import create_assets  # noqa: E402
 from dq4environmentmap import prepare_maps, render_maps  # noqa: E402
 from dq4environmentmap import block_prop  # noqa: E402
-from dq4environmentrom import (DOOR_KIND, FLOOR, GATE_KIND, OPENINGS, door_floor, MAPS, WALL, WATER_SLOT, water_block,  # noqa: E402
+from dq4environmentrom import (DOOR_KIND, FLOOR, GATE_KIND, OPENINGS, door_floor, GROUPS, MAPS, STAIRS, WALL, WATER_SLOT, water_block,  # noqa: E402
                                WATER_FRAMES, WATER_PERIOD, build_graphics, objects, water_frames)
 
 OBJECT_SIZE = {DOOR_KIND: (2, 3), GATE_KIND: (4, 4)}  # noqa: E402
+# Cell +4/+7 values 2A:F6B8 counts as exits (2A:FF37).
+EXIT_MARKS = {0x85, 0xA1, 0xB3, 0xCC}
 
 WARP = DQ5_TOOLS / "lua" / "dq5warp.lua"
 DUMP = TOOLS / "lua" / "dq4environmentdump.lua"
@@ -39,7 +41,7 @@ DUMP = TOOLS / "lua" / "dq4environmentdump.lua"
 CONTROL = (0x01, 0x03)
 # Untouched maps compared with the original ROM: 1A/00 and 19/00 have their door entries more than 0x100
 # bytes after 01:D2FC (the object hook must keep the high byte of Y, or those doors vanish); 03/00, 19/02
-# and 06/06 held FC maps before those moved to new groups.
+# and 06/06 are DQ5 maps no longer replaced. Needs a ROM with the GROUPS maps (dq4groupbuild.py).
 UNTOUCHED = ((0x1A, 0x00), (0x19, 0x00), (0x03, 0x00), (0x19, 0x02), (0x06, 0x06))
 
 
@@ -153,6 +155,7 @@ def check_map(name, wram, vram, cgram, expected, source, known):
         differences += a[i:i + 3] != b[i:i + 3]
     layers = walk_layers(wram)
     width = source.w * 2
+    exits = sum(wram[0xC000 + i * 8 + at] in EXIT_MARKS for i in range(len(layers)) for at in (4, 7))
     wrong = 0
     for i, value in enumerate(layers):
         x, y = i % width, i // width
@@ -161,7 +164,7 @@ def check_map(name, wram, vram, cgram, expected, source, known):
         if value != (WALL if blocked else FLOOR):
             wrong += 1
     return {"pixels": len(a) // 3, "object_cells_skipped": len(covered), "pixel_differences": differences,
-            "objects_drawn": f"{sum(placed)}/{len(placed)}", "cells": len(layers),
+            "objects_drawn": f"{sum(placed)}/{len(placed)}", "cells": len(layers), "exit_cells": exits,
             "walk_layer_mismatches": wrong}, got
 
 
@@ -260,6 +263,9 @@ def main():
                                         for v in [vram] + [v for _, v, _ in later])
         result["water_cycles"] = not has_water or None not in cycle and all(
             (b - a) % 3 == 1 for a, b in zip(cycle, cycle[1:]))
+        source = sources[name]
+        result["exit_cells_expected"] = sum(block_prop(source, source.cell(cx, cy) & 31) in STAIRS
+                                            for cy in range(source.h) for cx in range(source.w)) if name in GROUPS else 0
         results["maps"][name] = {"target": f"{group:02X}/{number:02X}", "arrival": [x, y], "moved": moved, **result}
     cx, cy = _control_cell(args.orig.read_bytes())
     to = f"{CONTROL[0]:02X}/{CONTROL[1]:02X},{cx},{cy}"
@@ -306,6 +312,7 @@ def main():
     ok = results["gate_open"]["passed_gate_row"] and all(m.get("pixel_differences") == 0 and m.get("walk_layer_mismatches") == 0 and m["moved"]
              and m["objects_drawn"].split("/")[0] == m["objects_drawn"].split("/")[1]
              and m["water_cycles"] and m["blank_tile_kept"] and m["water_slots"]
+             and m["exit_cells"] == m["exit_cells_expected"]
              for m in results["maps"].values()) and all(
         v for k, v in results["control"].items() if k.endswith("_equal"))
     results["status"] = "passed" if ok else "failed"

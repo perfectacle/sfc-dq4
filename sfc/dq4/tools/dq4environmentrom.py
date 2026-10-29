@@ -86,8 +86,9 @@ DOORS = {0x94, 0x95, 0x96}
 # 01:DCFC opens lock 1 with カギの技法 or a better key and lock 2 with まほうのカギ or さいごのカギ.
 LOCKS = {0x94: 0, 0x95: 1, 0x96: 2}
 GATE = 0xA0
-# FC stairs (08:$B22E destinations) become DQ5 exit blocks: block attribute 05 puts $85 in +4 of the
-# block's bottom-right cell, and 2A:F6B8 numbers exits by those cells in cell-buffer order.
+# FC stairs (08:$B22E destinations) of GROUPS maps become DQ5 exit blocks: block attribute 05 puts $85 in
+# +4 of the block's bottom-right cell, and 2A:F6B8 numbers exits by those cells in cell-buffer order.
+# Borrowed TARGETS slots keep plain stairs: an exit cell there would fire the DQ5 map's own exit list.
 STAIRS = {0x08, 0x09}
 STAIR_ATTR = 0x05
 OPENINGS = DOORS | {GATE}
@@ -147,7 +148,7 @@ def build_graphics(prg, assets):
                         chr_data.append(_planar(pixels))
                         chr_banks.append(bank)
                     words.append(chr_ids[key])
-            attr = STAIR_ATTR if block_prop(source, fc_block) in STAIRS else 0
+            attr = STAIR_ATTR if name in GROUPS and block_prop(source, fc_block) in STAIRS else 0
             key = tuple(words), attr
             if key not in block_ids:
                 block_ids[key] = len(block_words)
