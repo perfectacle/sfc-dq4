@@ -86,15 +86,20 @@ class WindowWriteTests(unittest.TestCase):
         self.assertEqual(bytes(rom.d[lorom(addr):lorom(addr) + 4]), bytes([0x44, 0x86, 0xCA, 0xA5]))
         with self.assertRaises(ValueError):
             edits(self.rom, {'format': FORMAT, 'windows': [{'index': '05', 'h': 6}]})
-        # 저장된 높이 5 가 아니라 엔진이 다시 센 최악 높이로 BG3 안인지 본다(bit5 켜짐 11, 꺼짐 15).
-        self.assertEqual(len(edits(self.rom, {'format': FORMAT, 'windows': [{'index': '05', 'y': 17}]})), 1)
-        for y in (18, 27):
+        # 원래 Y 20 에서 내려가지 않으면 X·너비를 바꾸거나 올려도 받는다(원본 1B 와 같은 꼴).
+        for row in ({'x': 4, 'w': 12}, {'y': 18}, {'y': 2}):
+            with self.subTest(row=row):
+                self.assertEqual(len(edits(self.rom, {'format': FORMAT, 'windows': [{'index': '05', **row}]})), 1)
+        # 내려가면 엔진이 다시 센 최악 높이로 본다(bit5 꺼짐 15, 켜짐 11).
+        for y in (21, 27):
             with self.subTest(y=y), self.assertRaises(ValueError):
                 edits(self.rom, {'format': FORMAT, 'windows': [{'index': '05', 'y': y}]})
         party = Rom(self.with_byte(self.first + 5 * 8, 0x62))
         self.assertEqual(len(edits(party, {'format': FORMAT, 'windows': [{'index': '05', 'y': 21}]})), 1)
         with self.assertRaises(ValueError):
             edits(party, {'format': FORMAT, 'windows': [{'index': '05', 'y': 22}]})
+        with self.assertRaises(ValueError):
+            edits(self.rom, {'format': FORMAT, 'windows': [{'index': '05', 'x': 20, 'w': 13}]})
 
     def test_low_height_window_moves(self):
         rom = Rom(self.with_byte(self.first + 8 * 8 + 3, 0xA1))

@@ -106,10 +106,13 @@ def edits(rom, doc):
                 new[at] = new[at] & ~mask & 0xFF | integer(row[key], mask, f'창 {n:02X} {key}')
         h = header(new)
         height = (PARTY_HEIGHT if new[0] & 0x20 else MENU_HEIGHT) if new[0] & 0x40 else h['h']
+        # bit6 창이 원래 Y 보다 내려가지 않으면 원본 자리에서 그려지던 높이 그대로라 최악 높이로 막지 않는다.
+        if new[0] & 0x40 and h['y'] <= header(old)['y']:
+            height = 0
         # 원본에도 높이 1 인 창(28·8F)이 있어, 너비·높이 하한은 문서가 적은 필드에만 건다.
         if new != old and (h['x'] + h['w'] > MAP_W or h['y'] + height > MAP_W
                            or any(k in row and h[k] < 2 for k in ('w', 'h'))):
-            raise ValueError(f'창 {n:02X}: BG3 타일맵 32 × 32 밖(높이 {height})이거나 고친 너비·높이가 2 미만임')
+            raise ValueError(f'창 {n:02X}: BG3 타일맵 32 × 32 밖이거나 고친 너비·높이가 2 미만임')
         if n == MESSAGE and new != old:
             raise ValueError('창 25(전투 메시지)는 틀만 옮겨지고 글자는 원래 줄에 찍혀 받지 않음')
         if new != old and len(sharing[addr]) > 1:
