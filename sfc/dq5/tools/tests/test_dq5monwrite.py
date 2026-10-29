@@ -1,4 +1,7 @@
 """전투 몬스터 그림 쓰기: 타일 압축, 새 배치, 원래 배치 다시 쓰기, 24비트 머리 코드, 입력 검사."""
+import contextlib
+import io
+import json
 import random
 import sys
 import tempfile
@@ -10,6 +13,7 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import dq5mongfx as M  # noqa: E402
+import dq5monwrite as W  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
 from dq5monwrite import (  # noqa: E402
     FIND, FIND_END, FORMAT, decode_raw, encode_picture, encode_tile, find_code, keep_layout, plan, tile_bytes,
@@ -23,6 +27,9 @@ def fake_rom(raw):
     data[lorom(0x258C45):lorom(0x258C45) + 2] = (0x8C99).to_bytes(2, 'little')
     from dq5monwrite import FIND_ORIGINAL
     data[lorom(FIND):lorom(FIND) + len(FIND_ORIGINAL)] = FIND_ORIGINAL
+    for addr, code in ((W.RECORD_READ, W.READ_ORIGINAL), (W.RECORD_BANK, W.BANK_ORIGINAL),
+                       (W.E4_READ, W.READ_ORIGINAL), (W.E4_BANK, W.BANK_ORIGINAL)):
+        data[lorom(addr):lorom(addr) + len(code)] = code
     return Rom(data)
 
 
@@ -137,7 +144,8 @@ class PlanTests(unittest.TestCase):
         with mock('dq5monlimits.losses', return_value=[]) as seen:
             pictures, _ = self.run_plan(**doc)
         self.assertEqual(pictures[0][2:], (3, 3))
-        self.assertEqual(seen.call_args.args[1], {0: (3, [2, 1]), 1: (3, [2, 1])})   # 같은 머리인 그림 01 도
+        # (조각, 줄마다 타일, 16x16 자리). 8x8 셋은 자리 하나를 나눠 쓴다. 같은 머리인 그림 01 도.
+        self.assertEqual(seen.call_args.args[1], {0: (3, [2, 1], 1), 1: (3, [2, 1], 1)})
         hit = [(((0, 8, 0),), [8], [6], '구역 05 칸 1', '덜 놓임')]
         with mock('dq5monlimits.losses', return_value=hit), self.assertRaisesRegex(ValueError, '구역 05 칸 1'):
             self.run_plan(**doc)
@@ -147,6 +155,19 @@ class PlanTests(unittest.TestCase):
         # 구역 표를 읽는 명령이 없는 롬이면 구역 표 자리를 알 수 없어 거부한다.
         with self.assertRaisesRegex(ValueError, '표를 읽는 명령'):
             self.run_plan(**doc)
+
+    def test_tile_limit(self):
+        # 가로 12·세로 8 칸을 모두 다른 무늬로 칠하면 16x16 조각 24개 = 타일 96개로 NMI 한 번의 91개를 넘는다.
+        raw = bytes([0, 0, 0, 1, 1, 0xB7, 0x80] + [0] * 11 + [0x00]) + b'\x00'
+        self.rom.d[lorom(0x258C99):lorom(0x258C99) + len(raw)] = raw
+        rng = random.Random(9)
+        self.save('big.png', [[rng.randrange(1, 3) for _ in range(96)] for _ in range(64)])
+        with mock('dq5monlimits.losses', return_value=[]), self.assertRaisesRegex(ValueError, '타일 96개'):
+            self.run_plan(pictures=[{'picture': '00', 'image': 'big.png'}])
+        self.save('less.png', [[rng.randrange(1, 3) if y < 56 else 0 for _ in range(96)] for y in range(64)])
+        with mock('dq5monlimits.losses', return_value=[]):
+            pictures, _ = self.run_plan(pictures=[{'picture': '00', 'image': 'less.png'}])
+        self.assertEqual(pictures[0][3], 84)          # 맨 아래 칸 줄을 비우면 타일 84개라 받는다
 
     def test_rejects(self):
         self.save('same.png', self.grid)
@@ -169,6 +190,118 @@ class PlanTests(unittest.TestCase):
                     {'other': []}):
             with self.subTest(doc=doc), self.assertRaises(ValueError):
                 self.run_plan(**doc)
+
+
+class RecordTests(unittest.TestCase):
+    """색이 원래 레코드보다 많으면 레코드 표·레코드를 --records-at 으로 옮기고, 읽는 네 곳을 바꾼다."""
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp())
+        # 2x2 칸에 16x16 조각 하나. 왼쪽 위 타일만 색 1·2 로 그리고 나머지 셋은 비움.
+        rng = random.Random(5)
+        first = tile_bytes([[rng.randrange(1, 3) for _ in range(8)] for _ in range(8)])
+        raw = bytes([0, 0, 0, 1, 1, 0x11, 0x80, 0x20]) + encode_tile(first) + bytes(3)
+        data = bytearray(0x200000)
+        data[:0x180000] = fake_rom(raw).d
+        # 몬스터 0 은 2색, 몬스터 1·2 는 3색 레코드 하나를 함께 쓴다.
+        table = lorom(M.RECORDS)
+        data[table:table + 6] = bytes([0x00, 0xE8, 0x06, 0xE8, 0x06, 0xE8])
+        data[lorom(0x27E800):lorom(0x27E800) + 14] = bytes([0, 2, 1, 0, 2, 0, 0, 3, 3, 0, 4, 0, 5, 0])
+        self.rom = Rom(data)
+        self.grid = [row[1:] for row in M.index_image(M.decode(self.rom, 0))]
+        self.mocks = [mock('dq5monwrite.M.COUNT', 3)]
+        for m in self.mocks:
+            m.start()
+
+    def tearDown(self):
+        for m in self.mocks:
+            m.stop()
+
+    def doc(self, colors):
+        return {'format': FORMAT, 'monsters': [{'monster': '01', 'colors': colors}]}
+
+    def applied(self, manifest):
+        data = bytearray(self.rom.d)
+        for w in manifest['writes']:
+            at = lorom(W.parse(w['at']))
+            data[at:at + len(w['hex']) // 3 + 1] = bytes.fromhex(w['hex'])
+        return Rom(data)
+
+    def test_in_place_when_fits(self):
+        manifest = W.patch(self.rom, self.doc([7, 8, 9]), self.dir)
+        self.assertEqual([w['at'] for w in manifest['writes']], ['27:E806'])
+        self.assertFalse(W.records_moved(self.applied(manifest)))
+
+    def test_moves_records(self):
+        colors = list(range(100, 115))
+        with self.assertRaisesRegex(ValueError, '--records-at 이 필요함'):
+            W.patch(self.rom, self.doc(colors), self.dir)
+        manifest = W.patch(self.rom, self.doc(colors), self.dir, records_at=0x3C8000)
+        self.assertEqual({w['at'] for w in manifest['writes']}, {'3C:8000', '22:9003', '22:900B', '02:F498', '02:F48D'})
+        after = self.applied(manifest)
+        self.assertTrue(W.records_moved(after))
+        self.assertEqual(after.u24(W.RECORD_READ + 1), 0x3C8000)
+        self.assertEqual(after.u8(W.E4_BANK + 1), 0x3C)
+        # 몬스터 1·2 는 새 자리에서도 레코드 하나를 함께 쓴다.
+        self.assertEqual([W.monster_of(after, m) for m in range(3)], [(0, [1, 2]), (0, colors), (0, colors)])
+        self.assertEqual(after.u16(0x3C8002), after.u16(0x3C8004))
+        with W.following_table():
+            self.assertEqual(M.monster(after, 1), (0, colors))
+        self.assertEqual(M.monster(after, 1), (0, [3, 4, 5]))     # 밖에서는 원래 자리를 읽는다
+        with self.assertRaisesRegex(ValueError, '이미 옮긴'):
+            W.plan(after, self.doc(colors), self.dir)
+
+    def test_rejects(self):
+        with self.assertRaisesRegex(ValueError, '1~15개'):
+            W.plan(self.rom, self.doc(list(range(16))), self.dir)
+        with self.assertRaisesRegex(ValueError, '1~15개'):
+            W.plan(self.rom, self.doc([]), self.dir)
+        broken = Rom(bytearray(self.rom.d))
+        broken.d[lorom(W.E4_BANK) + 1] = 0x28
+        with self.assertRaisesRegex(ValueError, '02:F48D 가 원본 레코드 읽기 코드가 아님'):
+            W.patch(broken, self.doc(list(range(15))), self.dir, records_at=0x3C8000)
+        with self.assertRaisesRegex(ValueError, '뱅크를 넘음'):
+            W.patch(self.rom, self.doc(list(range(15))), self.dir, records_at=0x3CFFF0)
+        unknown = Rom(bytearray(self.rom.d))
+        unknown.d[lorom(W.RECORD_READ)] = 0xEA
+        with self.assertRaisesRegex(ValueError, '옮긴 레코드 읽기도 아님'):
+            W.plan(unknown, self.doc([1]), self.dir)
+
+    def test_rejects_overlap(self):
+        # 첫 타일만 그려진 그림을 네 타일 모두 그린 그림으로 바꾸면 원래 자리보다 길어 --at 으로 옮긴다.
+        rng = random.Random(6)
+        noisy = [[rng.randrange(1, 3) for _ in range(16)] for _ in range(16)]
+        image = Image.new('P', (16, 16))
+        image.putpalette([c for i in range(16) for c in (i * 16,) * 3])
+        image.putdata([c for row in noisy for c in row])
+        image.save(self.dir / 'noisy.png')
+        doc = {'format': FORMAT, 'pictures': [{'picture': '00', 'image': 'noisy.png'}],
+               'monsters': [{'monster': '01', 'colors': list(range(15))}]}
+        with mock('dq5monlimits.losses', return_value=[]):
+            with self.assertRaisesRegex(ValueError, '옮긴 자료가 겹침'):
+                W.patch(self.rom, doc, self.dir, at=0x3C8000, records_at=0x3C8100)
+            manifest = W.patch(self.rom, doc, self.dir, at=0x3C8000, records_at=0x3D8000)
+        after = self.applied(manifest)
+        self.assertEqual(W.monster_of(after, 2), (0, list(range(15))))
+        self.assertEqual(W.picture_grid(after, 0)[0], noisy)
+
+    def test_cli(self):
+        rom = self.dir / 'rom.sfc'
+        rom.write_bytes(bytes(self.rom.d))
+        (self.dir / 'mon.json').write_text(json.dumps(self.doc(list(range(15)))), encoding='utf-8')
+        out = self.dir / 'out.json'
+        run = lambda *extra: self.main(str(rom), 'patch', str(self.dir / 'mon.json'), '-o', str(out), *extra)  # noqa: E731
+        code, err = run()
+        self.assertEqual((code, '--records-at 이 필요함' in err), (1, True))
+        self.assertEqual(run('--records-at', '3C:8000'), (0, ''))
+        self.assertIn('22:9003', [w['at'] for w in json.loads(out.read_text(encoding='utf-8'))['writes']])
+        self.assertEqual(run('--records-at', '3C:1234')[0], 1)
+
+    def main(self, *argv):
+        err = io.StringIO()
+        with mock.object(sys, 'argv', ['x', *argv]), contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(err):
+            return W.main(), err.getvalue()
 
 
 if __name__ == '__main__':

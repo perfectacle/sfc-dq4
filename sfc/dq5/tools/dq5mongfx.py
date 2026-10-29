@@ -227,6 +227,15 @@ def header(rom, g):
             'w': 0x13 if b[5] >> 4 == 0xF else (b[5] >> 4) + 1, 'h': (b[5] & 15) + 1}
 
 
+def slot_count(d):
+    """그림 하나가 차지하는 16x16 자리 수(22:91F7 이 $0D19 에 셈). 자리 s 는 OBJ 타일 (s%8)*2 + (s//8)*32 이고,
+    전투는 자리 128개(7E:8400 사슬)를 무리 차례로 나눠 준다. 16x16 조각은 하나씩, 8x8 조각은 넷이 한 자리를 나눠 쓰고,
+    반전 복사는 자리를 쓰지 않는다."""
+    big = sum(1 for p in d['pieces'] if p[2] and not p[4])
+    small = sum(1 for p in d['pieces'] if not p[2] and not p[4])
+    return big + (small + 3) // 4
+
+
 def band_counts(d):
     """그림의 8픽셀 줄마다 OBJ 타일 수(22:9822 가 7E:5B60 에 적는 값). 16x16 조각은 두 줄에 2씩 센다."""
     counts = [0] * d['h']
