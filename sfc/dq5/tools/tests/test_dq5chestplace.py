@@ -1,4 +1,5 @@
 """맵에 상자를 놓고 보상 표를 함께 고치는 도구의 입력 검사와 번호 다시 매기기."""
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -8,6 +9,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dq5chestplace import FORMAT, check, map_key, patch, plan
 from dq5build import build, parse_at
 from dq5chest import LOWER_TABLE
+from dq5chestcheck import grow_chests
+from dq5chestreloc import parse
 from dq5map import Rom, lorom
 from test_dq5chestwrite import ROM
 
@@ -49,6 +52,31 @@ class ChestPlaceTests(unittest.TestCase):
         self.assertEqual(tables['chest_maps'][-1], {'group': 0x17, 'map': 0, 'count': 1})
         self.assertEqual(tables['chests'][-1], {'reward': 0x200})
         self.assertEqual(new[0][:2], (0x17, 0))
+
+    @unittest.skipUnless(ROM.is_file(), '롬 없음')
+    def test_base_tables_grow_past_192(self):
+        rom = Rom(ROM.read_bytes())
+        base = parse(rom)
+        grow_chests(base)
+        boxes = [(x, 22, CHEST_BLOCK, 0x100 + x) for x in range(30, 44, 2)]
+        at = {'chests': 0x3F8000, 'chest_maps': 0x3FC000, 'lower': 0x3FD000}
+        # 194개가 되면 상자 192·193 이 원래 아래층 상자 비트 2228 & 80·40 과 겹친다
+        with self.assertRaisesRegex(ValueError, '2228'):
+            plan(rom, doc(*boxes), 0x3E8000, at, base)
+        for row in base['lower']:
+            row['flag_index'] += 1
+        _, writes, _, tables, _ = plan(rom, doc(*boxes), 0x3E8000, at, base)
+        self.assertEqual(len(tables['chests']), 194)
+        self.assertEqual(tables['chests'][192], {'reward': 0x100 + 987})
+        sites = {addr: new for addr, new, _, _ in writes}
+        self.assertEqual(sites[0x1FFC7E], b'\x3f')
+        check(rom, doc(*boxes), 0x3E8000, at, base)
+        # 바탕 표의 상자 수가 맵 칸과 다르면 거부
+        wrong = json.loads(json.dumps(base))
+        wrong['chest_maps'][-1]['count'] += 1
+        wrong['chests'].append({'reward': 1})
+        with self.assertRaises(ValueError):
+            plan(rom, doc(*boxes), 0x3E8000, at, wrong)
 
     @unittest.skipUnless(ROM.is_file(), '롬 없음')
     def test_patch_formats_and_check(self):

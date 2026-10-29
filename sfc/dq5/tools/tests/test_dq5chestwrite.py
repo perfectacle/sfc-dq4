@@ -7,7 +7,7 @@ from unittest.mock import patch as mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dq5chestwrite import (FIELD_ADDRS, FIELD_CALL, FIELD_CODE, FIELD_TEMPLATE, FORMAT, TABLES, decode, dump, edits,
                            encode, encode_field, layout, map_dimensions, named, patch, read_field, world_block)
-from dq5chestreloc import ABS, DB_FIXED, DB_MOVABLE, LONG, ORIGINAL
+from dq5chestreloc import ABS, DB_SITES, LONG, ORIGINAL
 from dq5map import Rom, lorom
 
 
@@ -37,11 +37,9 @@ def fixture():
     for name, sites in ABS.items():
         for site, plus in sites:
             data[lorom(site) + 1:lorom(site) + 3] = (ORIGINAL[name] + plus & 0xFFFF).to_bytes(2, 'little')
-    for name, site in DB_MOVABLE.items():
-        data[lorom(site)] = ORIGINAL[name] >> 16
-    for sites in DB_FIXED.values():
+    for name, sites in DB_SITES.items():
         for site in sites:
-            data[lorom(site)] = 0x1E
+            data[lorom(site)] = ORIGINAL[name] >> 16
     for addr, token in zip(FIELD_ADDRS, FIELD_TEMPLATE):
         data[lorom(addr)] = FIELD_VALUES[token] if named(token) else int(token, 16)
     data[lorom(FIELD_CALL):lorom(FIELD_CALL) + 3] = bytes.fromhex('20 f2 e5')
@@ -200,7 +198,7 @@ class ChestWriteTests(unittest.TestCase):
             edits(rom, {'format': FORMAT, 'field': [{'index': 0, 'reward': 1}]})
 
     def test_moved_tables_are_refused(self):
-        rom = poke(fixture(), DB_MOVABLE['search'], 0x3F)
+        rom = poke(fixture(), DB_SITES['search'][0], 0x3F)
         with self.assertRaises(ValueError):
             dump(rom)
 

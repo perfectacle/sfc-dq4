@@ -3,8 +3,11 @@
 sfc/dq5/docs/dq5-map-format.md의 보물상자 형식. 입력 JSON→dq5patch→롬/IPS를 만들고,
 선실에서 걸어가거나 dq5warp.lua 로 그 자리에 내려선 뒤 컨트롤러로 조사한다. 금화·조회된 보상·열림 비트·
 기존 비트 보존을 확인한다. 원본 롬/세이브는 읽기만 하고 --out 아래 새 폴더에 저장한다.
+past_* 사례는 상자 194개·상자 맵 연결과 아래층 상자 표를 뱅크 3F 로 옮긴 롬에서 열기·들어갈 때 그리기·기록과 불러오기를 본다.
+--audit 은 원본 롬에서 상자 맵 연결·아래층 상자 표의 DB(1E) 창을 연 동안 실행한 명령을 모아(lua/dq5dbread.lua),
+DB 로 롬(8000~)에 닿는 명령이 표 읽기 자리뿐인지 본다.
 
-  MESENCE=… python sfc/dq5/tools/dq5chestcheck.py rom/dq5.sfc --state work/state/ship.mss
+  MESENCE=… python sfc/dq5/tools/dq5chestcheck.py rom/dq5.sfc --state work/state/ship.mss [--audit]
 """
 import argparse
 import concurrent.futures
@@ -16,7 +19,12 @@ import subprocess
 import sys
 import tempfile
 
+from kr_patch.sfc.dis65816 import decode
+from kr_patch.sfc.mapper import LoROM
+
+from dq5chestreloc import ABS
 from dq5chestwrite import FORMAT
+from dq5exitcheck import DB_ABS, DB_INDIRECT
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
@@ -38,6 +46,12 @@ CASES = {
     'field_move': ({'field': [{'index': 0, 'x': 24, 'y': 168, 'reward': 0x46C, 'flag_index': 0x22, 'mask': 0x04}]},
                    876, 0x21B2, 0x04, 0x21B3, 0x10, None, 0x12B),
 }
+# 세계 1·2 필드의 같은 칸. 들어서면 $075E 가 0 이라 밤이 오지 않아 원본·패치 모두 빛도 보상도 없다(마스크 0 = 비트를
+# 켜지 않음). 밤으로 고정하면 세계 0 과 같이 빛을 놓고 보상을 준다
+for _world in (1, 2):
+    CASES[f'field_world{_world}'] = CASES['field']
+    CASES[f'field_world{_world}_day'] = ({'field': [{'index': 0, 'reward': 0x46C}]}, None, 0x21B3, 0, 0x21B3, 0x10,
+                                         None, 0x12B)
 
 
 def grow_chests(doc):
@@ -98,11 +112,43 @@ PLACE = {'place_chest': (954, 0x2210, 0x20, 0x2210, 0x20, None, 0x131),
          # 패치 롬에서도 금화가 아니라 원래 물건 33 을 얻으므로 금화 대신 보상 값을 적는다
          'place_shift': (None, 0x2210, 0x10, 0x2210, 0x20, 0x33, 0x131)}
 CASES.update({name: (None, *values) for name, values in PLACE.items()})
-PATCHED_REWARD = {'place_shift': 0x33}
+# 상자를 192개 넘게 쓰는 롬. 표에 없는 맵 8곳의 26칸을 붙이고(grow_chests) 01/02 에 상자 블록 7개를 놓아 194개가 된다.
+# 19/00 의 (6,45) 가 상자 192(7E:2228 & 80)다. 원래 아래층 상자 비트 2228~2229 와 겹치므로 아래층 상자의 flag_index 를
+# 하나씩 올려 2229~222A 로 옮긴다. 상자 맵 연결·아래층 상자 표는 DB 즉값을 바꿔 뱅크 1E 밖(3F)으로 보낸다
+GROW_DOC = {'format': 'dq5chestplace/1', 'maps': [{'map': '01/02', 'chests': [
+    {'x': x, 'y': 22, 'block': 384, 'reward': 0x100 + 500 + x} for x in range(30, 44, 2)]}]}
+GROW_AT = ('--map-at', '3E:8000', '--chests-at', '3F:8000', '--chest-maps-at', '3F:C000', '--lower-at', '3F:D000')
+
+
+def grow_base(doc):
+    grow_chests(doc)
+    for row in doc['lower']:
+        row['flag_index'] += 1
+
+
+GROW = {'past_open': (987, 0x2228, 0x80, 0x2228, 0x80, None, 0x131),
+        # 아래층 상자 51/51 (19,35). 원본은 2228 & 08, 패치는 옮긴 표의 2229 & 08 을 켠다
+        'past_lower': (None, 0x2229, 0x08, 0x2228, 0x08, 0xB1, 0x131)}
+CASES.update({name: (None, *values) for name, values in GROW.items()})
+PATCHED_REWARD = {'place_shift': 0x33, 'past_lower': 0xB1, 'field_world1_day': None, 'field_world2_day': None}
+ORIGINAL_KIND['past_open'] = 0x12B
+# 맵에 들어갈 때 열린 상자를 그리는 사례: (장면, 미리 켤 비트). 원본은 그 비트를 상자로 보지 않아 그대로 두고,
+# 패치는 1F:FC50 이 옮긴 표에서 그 상자를 찾아 열린 상자 타일(9E·9F)로 바꾼다
+ENTRY = {'past_entry': ({'TO': '19/00,5,46'}, '2228|80'), 'past_entry_lower': ({'TO': '51/51,18,37,2'}, '2229|08')}
+# 열림 비트를 켠 채 교회에 기록하고 리셋해 불러오는 사례(dq5cdlsweep.py 의 church-save-load 와 같은 입력).
+# SRAM 칸 1 은 7E:2000~ 을 70:0012~ 에 그대로 담는다(25:83CE)
+SAVE_BITS = {0x2228: 0x80, 0x2229: 0x08}
+SAVE_SLOT = 0x700012
+SAVE_FRAMES = {'saved': 2600, 'reset': 2710, 'loaded': 6400}
+ALL = [*CASES, *ENTRY, 'past_save']
 # 조사 뒤 세계 지도 버퍼의 블록(블록 좌표 x, y, 원본, 패치). 밤이라 빛 블록 A7 이 놓인 자리를 본다
 # 필드에 들어갈 때 빛 블록을 놓으므로, 장면도 그 롬으로 만들어야 하는 사례
 OWN_SCENE = {'field_move', 'place_chest', 'place_shift', 'place_furniture'}
-BLOCKS = {'field_move': ((11, 83, 0xA7, 0xCA), (12, 84, 0x178, 0xA7))}
+BLOCKS = {'field_move': ((11, 83, 0xA7, 0xCA), (12, 84, 0x178, 0xA7)),
+          # 원래 보상(물건)을 집으면 빛 블록이 세계 0 의 지도 블록 CA 로 돌아간다(세계 1·2 지도의 그 자리는 00).
+          # 금화로 바꾸면 돌아가지 않는다. 01:A055 는 열림 플래그가 켜져 있으면 빛을 건드리지 않는다
+          'field': ((11, 83, 0xCA, 0xA7),), 'field_world1': ((11, 83, 0xCA, 0xA7),), 'field_world2': ((11, 83, 0xCA, 0xA7),),
+          'field_world1_day': ((11, 83, 0x00, 0x00),), 'field_world2_day': ((11, 83, 0x00, 0x00),)}
 # 장면 없이 --state 를 그대로 쓰는 사례
 START = 'start'
 # 장면: 원본 롬에서 dq5warp.lua 로 내려선 자리, 없으면 선실에서 걸어감.
@@ -112,9 +158,13 @@ SCENES = {'chest': {'TO': '01/02,34,31'}, 'search': None, 'foot': None, 'ahead':
           'field_move': {'FIELD': '24,168', 'SET': '21AA|01;075E=00;075F=01'},
           'grow_chests': {'TO': '19/00,5,46'}, 'grow_search': {'WAYPOINTS': '1,5;up:8'}, 'grow_foot': None,
           'grow_ahead': START, 'move_lower': 'lower', 'place_chest': {'TO': '01/02,36,29'},
-          'place_shift': {'TO': '01/02,34,31'}, 'place_furniture': {'TO': '01/02,40,27'}}
+          'place_shift': {'TO': '01/02,34,31'}, 'place_furniture': {'TO': '01/02,40,27'},
+          'past_open': 'grow_chests', 'past_lower': 'lower'}
 # 필드 조사는 선 자리를 보므로 걷지 않고 바로 명령 창을 연다
-INPUTS = {'field': INPUT.removeprefix('up:8,wait:30,'), 'field_move': INPUT.removeprefix('up:8,wait:30,')}
+INPUTS = {name: INPUT.removeprefix('up:8,wait:30,') for name in CASES if name.startswith('field')}
+for _world in (1, 2):
+    SCENES[f'field_world{_world}'] = dict(SCENES['field'], POKE=f'7E1949={_world:02X};7E075E=00;7E075F=01')
+    SCENES[f'field_world{_world}_day'] = dict(SCENES['field'], POKE=f'7E1949={_world:02X}')
 
 
 def command(tool, *args):
@@ -127,16 +177,17 @@ def environment(libdir, state, dest):
     for key in ('ADULT', 'ANYWHERE', 'BATTLE', 'FIELD', 'GROUP', 'LATESET', 'PARTY', 'POKE', 'ROMPATCH', 'SAVE',
                 'SET', 'TEST', 'TO', 'WAGON', 'PRE', 'LOOP', 'WAYPOINTS', 'PEEK', 'SHOTMSG', 'CALLS', 'WW',
                 'WWRANGE', 'WRAMWATCH', 'COVER', 'ACCESS', 'VMADD', 'SHOTS', 'DUMP', 'VRAMDUMP', 'BG3FONT',
-                'TRACE', 'LOG', 'RWATCH', 'WWATCH', 'LATE', 'PREPARE', 'WATCH', 'INPUT', 'FLAG', 'OLD_FLAG'):
+                'TRACE', 'LOG', 'RWATCH', 'WWATCH', 'LATE', 'PREPARE', 'WATCH', 'INPUT', 'FLAG', 'OLD_FLAG', 'NEXT',
+                'RESETAT', 'CDLEVERY', 'ACCRANGE', 'SETTLE', 'MAXF'):
         env.pop(key, None)
     env.update(LIBDIR=libdir, STATE=str(state), SHOT_DIR=str(dest))
     return env
 
 
-def run(mesence, rom, script, dest, env):
+def run(mesence, rom, script, dest, env, timeout=90):
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
         subprocess.run([str(mesence), '--testrunner', str(rom), str(script), '--Snes.DisableFrameSkipping=true'],
-                       env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=90)
+                       env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=timeout)
 
 
 def require(condition, message):
@@ -187,7 +238,9 @@ def compare(name, state, original, out, mesence, libdir, start):
     dest.mkdir()
     source, manifest, patched = dest / 'input.json', dest / 'patch.json', dest / 'patched.sfc'
     none_message = 0x12C
-    if name in PLACE:
+    if name in GROW:
+        patched = grow_rom(original, dest)
+    elif name in PLACE:
         place_doc, place_at = PLACE_INPUTS[name]
         source.write_text(json.dumps(place_doc, indent=2) + '\n', encoding='utf-8')
         command('dq5chestplace.py', original, 'patch', source, '-o', manifest, *place_at)
@@ -205,7 +258,8 @@ def compare(name, state, original, out, mesence, libdir, start):
         source.write_text(json.dumps({'format': FORMAT, **changes}, indent=2) + '\n', encoding='utf-8')
         command('dq5chestwrite.py', original, 'patch', source, '-o', manifest)
         command('dq5chestwrite.py', original, 'check', source)
-    command('dq5build.py', original, 'build', manifest, '-o', patched, '--ips', dest / 'patched.ips')
+    if name not in GROW:
+        command('dq5build.py', original, 'build', manifest, '-o', patched, '--ips', dest / 'patched.ips')
     results = []
     for mode, rom in (('original', original), ('patched', patched)):
         run_dir = dest / mode
@@ -246,13 +300,138 @@ def compare(name, state, original, out, mesence, libdir, start):
     return {'case': name, 'runs': results, 'passed': True}
 
 
+def grow_rom(original, dest):
+    """GROW_DOC 와 grow_base 로 상자 194개 롬을 dest 에 만든다. 아래층 상자 비트를 옮긴 표를 바탕(--tables)으로 놓는다."""
+    base, source, manifest, patched = dest / 'base.json', dest / 'input.json', dest / 'patch.json', dest / 'patched.sfc'
+    command('dq5chestreloc.py', original, 'dump', '-o', base)
+    doc = json.loads(base.read_text(encoding='utf-8'))
+    grow_base(doc)
+    base.write_text(json.dumps(doc, indent=2) + '\n', encoding='utf-8')
+    source.write_text(json.dumps(GROW_DOC, indent=2) + '\n', encoding='utf-8')
+    command('dq5chestplace.py', original, 'patch', source, '-o', manifest, '--tables', base, *GROW_AT)
+    command('dq5chestplace.py', original, 'check', source, '--tables', base, *GROW_AT)
+    command('dq5build.py', original, 'build', manifest, '-o', patched, '--ips', dest / 'patched.ips')
+    return patched
+
+
+def opened_tiles(before, after):
+    """7F 뱅크(맵 BG 버퍼)에서 after 에만 있는 열린 상자 타일(아래 바이트 9E·9F) 수. 인물이 따로 움직인 자리 등 다른
+    차이는 세지 않고, before 에만 있는 열린 상자 타일이 있으면 거부한다."""
+    tile = {0x9E, 0x9F}
+    gone = [i for i in range(0x10000, 0x20000) if before[i] in tile and after[i] not in tile]
+    require(not gone, f'7F:{gone[0] - 0x10000 if gone else 0:04X} 의 열린 상자 타일이 패치 롬에서 사라짐')
+    return sum(1 for i in range(0x10000, 0x20000) if after[i] in tile and before[i] not in tile)
+
+
+def entry_compare(name, original, out, mesence, libdir, start):
+    setup, bits = ENTRY[name]
+    dest = out / name
+    dest.mkdir()
+    patched = grow_rom(original, dest)
+    wram = {}
+    for mode, rom in (('original', original), ('patched', patched)):
+        run_dir = dest / mode
+        run_dir.mkdir()
+        env = environment(libdir, start, run_dir)
+        env.update(setup, SET=bits, SETTLE='120', SAVE='scene.mss', MAXF='1500')
+        run(mesence, rom, HERE / 'lua/dq5warp.lua', run_dir, env)
+        require((run_dir / 'scene.mss').is_file(), f'{name}/{mode}: 장면 세이브가 없음')
+        env = environment(libdir, run_dir / 'scene.mss', run_dir)
+        env.update(INPUT='wait:3')
+        run(mesence, rom, HERE / 'lua/dq5chestcheck.lua', run_dir, env)
+        wram[mode] = (run_dir / 'before.wram').read_bytes()
+        address, value = bits.split('|')
+        require(wram[mode][int(address, 16)] & int(value, 16), f'{name}/{mode}: 미리 켠 비트가 꺼짐')
+    words = opened_tiles(wram['original'], wram['patched'])
+    require(words >= 2, f'{name}: 패치 롬이 열린 상자를 그리지 않음(바뀐 타일 {words}개)')
+    return {'case': name, 'bits': bits, 'opened_tile_words': words, 'passed': True}
+
+
+def save_compare(original, out, mesence, libdir, start):
+    dest = out / 'past_save'
+    dest.mkdir()
+    patched = grow_rom(original, dest)
+    talk = 'b:4,wait:40,up:3,wait:20,' + ','.join(['a:4,wait:60'] * 40)
+    env = environment(libdir, start, dest)
+    span = max(SAVE_BITS) - min(SAVE_BITS) + 1
+    slot = SAVE_SLOT + min(SAVE_BITS) - 0x2000
+    dumps = [f'{SAVE_FRAMES[k]}:7E{min(SAVE_BITS):04X}:{span}' for k in SAVE_FRAMES]
+    dumps.append(f'{SAVE_FRAMES["saved"]}:{slot:06X}:{span}')
+    env.update(NEXT=str(HERE / 'lua/dq5msg.lua'), POKE='7E36EB=05;7E370B=00', RESETAT=str(SAVE_FRAMES['reset'] - 10),
+               PRE=talk + ',wait:300,' + ','.join(['start:4,wait:200'] * 3 + ['a:4,wait:120'] * 12),
+               SET=';'.join(f'{a:04X}|{m:02X}' for a, m in SAVE_BITS.items()), DUMP=';'.join(dumps),
+               MAXF=str(SAVE_FRAMES['loaded'] + 100))
+    run(mesence, patched, HERE / 'lua/dq5cdldump.lua', dest, env, timeout=600)
+    got = {}
+    for line in (dest / 'msg.txt').read_text(encoding='utf-8').split('\n'):
+        hit = re.match(r'(\d+) dump ([0-9A-F]{6}) (.*)', line)
+        if hit:
+            got[int(hit[1]), int(hit[2], 16)] = bytes.fromhex(hit[3])
+    want = bytes(SAVE_BITS.get(min(SAVE_BITS) + k, 0) for k in range(span))
+    wram = 0x7E0000 | min(SAVE_BITS)
+    require(got.get((SAVE_FRAMES['saved'], slot)) == want, f'past_save: SRAM 칸 1 이 {want.hex()} 가 아님')
+    require(got.get((SAVE_FRAMES['reset'], wram)) == bytes(span), 'past_save: 리셋 뒤 WRAM 이 지워지지 않음')
+    require(got.get((SAVE_FRAMES['loaded'], wram)) == want, 'past_save: 불러온 뒤 열림 비트가 다름')
+    return {'case': 'past_save', 'dumps': {f'{f}:{a:06X}': v.hex() for (f, a), v in sorted(got.items())},
+            'passed': True}
+
+
+# --audit 장면: (dq5warp.lua 변수, 미리 켤 비트). 상자 방 01/02 에 들어가 상자를 열고(닫힘·열림 둘 다),
+# 그룹 50 이상 맵 51/51 에서 아래층 상자를 열고, 54/52 의 BRK 0B·0D 갈래(1F:FCCA)까지 지난다
+AUDIT = {'chest': ({'TO': '01/02,34,31', 'TEST': INPUT}, ''),
+         'chest-open': ({'TO': '01/02,34,31', 'TEST': INPUT}, '2210|FF;2211|FF;2212|FF'),
+         'lower': ({'TO': '51/51,18,37,2', 'TEST': INPUT}, ''),
+         'lower-open': ({'TO': '51/51,18,37,2', 'TEST': INPUT}, '2228|FF;2229|FF;222A|FF'),
+         'lower-5452': ({'TO': '54/52,28,23,2'}, ''), 'lower-5452-flag': ({'TO': '54/52,28,23,2'}, '21E5|20')}
+# DB 를 1E 로 둔 PLB 다음 명령(1F:FD18·FDD0·FC7B, 25:FAB0)
+AUDIT_OPEN = '1FFD1E,1FFDDB,1FFC81,25FAB8'
+
+
+def audit(original, out, mesence, libdir, start):
+    """DB 창에서 실행한 명령 가운데 DB 로 롬에 닿는 명령이 표 읽기 자리(ABS)뿐인지 본다."""
+    data, mapper, executed = original.read_bytes(), LoROM(), {}
+    for name, (setup, bits) in AUDIT.items():
+        dest = out / f'audit-{name}'
+        dest.mkdir()
+        env = environment(libdir, start, dest)
+        env.update(setup, DRIVER=str(HERE / 'lua/dq5warp.lua'), DBWIN=AUDIT_OPEN, MAXF='2500' if 'TEST' in setup else '900')
+        if bits:
+            env['SET'] = bits
+        run(mesence, original, HERE / 'lua/dq5dbread.lua', dest, env, timeout=300)
+        for line in (dest / 'dbwin.txt').read_text(encoding='utf-8').split('\n'):
+            if line:
+                pc, p, count = line.split()
+                key = int(pc, 16), int(p, 16)
+                executed[key] = executed.get(key, 0) + int(count)
+    sites = {site for name in ('chest_maps', 'lower') for site, _ in ABS[name]}
+    rom_access, wram_access, unknown = [], [], []
+    for (pc, p), count in sorted(executed.items()):
+        op = decode(data, pc, m8=bool(p & 0x20), x8=bool(p & 0x10), mapper=mapper)[0][22:]
+        hit = DB_ABS.match(op)
+        if DB_INDIRECT.match(op):
+            unknown.append(f'{pc >> 16:02X}:{pc & 0xFFFF:04X} {op}')
+        elif hit and int(hit[1], 16) >= 0x8000:
+            rom_access.append(pc)
+        elif hit:
+            wram_access.append(f'{pc >> 16:02X}:{pc & 0xFFFF:04X} {op}')
+    require(executed, 'DB 창에서 실행한 명령이 없음')
+    require(not unknown, f'DB 로 간접 주소를 읽는 명령: {unknown}')
+    stray = sorted(f'{pc >> 16:02X}:{pc & 0xFFFF:04X}' for pc in set(rom_access) - sites)
+    require(not stray, f'표 읽기 밖에서 DB 로 롬에 닿는 명령: {stray}')
+    banks = sorted({f'{pc >> 16:02X}' for pc, _ in executed})
+    print(f'DB 창 명령 {len(executed)}개(뱅크 {" ".join(banks)}), DB 로 롬을 읽는 명령 {len(set(rom_access))}개는 모두 표 자리, '
+          f'WRAM abs {len(wram_access)}개: {", ".join(wram_access)}')
+    return {'instructions': len(executed), 'table_sites': len(set(rom_access)), 'wram_abs': wram_access}
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('rom', type=Path)
     p.add_argument('--state', type=Path, required=True)
     p.add_argument('--out', type=Path, default=Path('work/chest-check'))
     p.add_argument('--mesence', default=os.environ.get('MESENCE'))
-    p.add_argument('--case', choices=CASES, action='append', help='이 사례만(여러 번 줄 수 있음)')
+    p.add_argument('--case', choices=ALL, action='append', help='이 사례만(여러 번 줄 수 있음)')
+    p.add_argument('--audit', action='store_true', help='원본 롬의 DB 창 감사만 함')
     args = p.parse_args()
     if not args.mesence:
         p.error('MESENCE 또는 --mesence가 필요함')
@@ -264,17 +443,25 @@ def main():
         out = Path(tempfile.mkdtemp(prefix='run-', dir=args.out.resolve()))
         libdir = subprocess.check_output(['krpatch', 'sfc', 'lua'], text=True, timeout=30).strip()
         print(f'출력 {out}', flush=True)
-        cases = list(dict.fromkeys(args.case or CASES))
-        scenes = sorted({scene(name) for name in cases if name not in OWN_SCENE} - {START})
+        if args.audit:
+            result = audit(original, out, mesence, libdir, state)
+            (out / 'audit.json').write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
+            return 0
+        cases = list(dict.fromkeys(args.case or ALL))
+        scenes = sorted({scene(name) for name in cases if name in CASES and name not in OWN_SCENE} - {START})
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
             futures = {name: pool.submit(prepare, name, original, state, out, mesence, libdir)
                        for name in scenes}
             states = {name: future.result() for name, future in futures.items()} | {START: state}
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-            results = list(pool.map(lambda name: compare(name, states.get(scene(name)),
-                                                        original, out, mesence, libdir, state), cases))
+            results = list(pool.map(lambda name: compare(name, states.get(scene(name)), original, out, mesence, libdir,
+                                                         state) if name in CASES else
+                                    entry_compare(name, original, out, mesence, libdir, state) if name in ENTRY else
+                                    save_compare(original, out, mesence, libdir, state), cases))
         (out / 'results.json').write_text(json.dumps(results, indent=2) + '\n', encoding='utf-8')
-        print(f'{len(cases)}쌍/{2 * len(cases)}실행 통과: 보상·금화·새 열림 비트·기존 비트 보존')
+        pairs = [name for name in cases if name != 'past_save']
+        print(f'{len(pairs)}쌍/{2 * len(pairs)}실행 통과: 보상·금화·새 열림 비트·기존 비트 보존·들어갈 때 열린 상자'
+              + (', 기록·불러오기 1실행 통과' if 'past_save' in cases else ''))
         return 0
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         print(f'오류: {error}', file=sys.stderr)
