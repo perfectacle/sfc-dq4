@@ -30,8 +30,8 @@ from dq5mapwrite import Rom, encode, lorom, pointer_addr  # noqa: E402
 # block numbers or common tiles and would overwrite the new map. 08/00 is also out: the object
 # drawer 01:F3D9 sends it to its own routine 01:FCD5 instead of the table.
 TARGETS = {
-    "burland": (0x03, 0x00), "gardenburg": (0x16, 0x02), "stancia": (0x09, 0x00), "stancia-03": (0x09, 0x01),
-    "stancia-06": (0x09, 0x04), "mintos": (0x0A, 0x01), "imuru": (0x19, 0x02), "saran-04": (0x0A, 0x02),
+    "gardenburg": (0x16, 0x02), "stancia": (0x09, 0x00), "stancia-03": (0x09, 0x01),
+    "stancia-06": (0x09, 0x04), "mintos": (0x0A, 0x01), "saran-04": (0x0A, 0x02),
     "seaside": (0x0B, 0x01), "seaside-01": (0x0D, 0x03), "rosaryhill": (0x0D, 0x04), "rosaryhill-01": (0x0E, 0x01),
     "shrine-2a": (0x0E, 0x03), "konenbery-06": (0x12, 0x00), "attemut-05": (0x13, 0x00), "attemut-07": (0x16, 0x01),
     # One or two maps of each other town and castle sheet, picked for block coverage and few doors:
@@ -39,7 +39,7 @@ TARGETS = {
     "1A-01": (0x08, 0x02), "03-02": (0x08, 0x03), "17-00": (0x03, 0x0B), "0B-00": (0x03, 0x0E),
     "08-01": (0x03, 0x0F), "10-00": (0x03, 0x10), "16-00": (0x04, 0x01), "0F-00": (0x04, 0x08),
     "0A-00": (0x04, 0x09), "04-06": (0x0A, 0x06), "00-01": (0x04, 0x0B), "09-01": (0x04, 0x0C),
-    "00-00": (0x05, 0x00), "05-01": (0x06, 0x03), "02-01": (0x06, 0x06), "01-00": (0x08, 0x01),
+    "00-00": (0x05, 0x00), "05-01": (0x06, 0x03), "01-00": (0x08, 0x01),
     # Harbour, theatre and the smaller sheets; none of these has a door.
     "11-00": (0x03, 0x03), "1A-00": (0x03, 0x09), "0E-00": (0x04, 0x0A), "15-03": (0x0A, 0x08),
     "34-06": (0x0A, 0x0B), "2E-00": (0x0B, 0x03),
@@ -47,6 +47,13 @@ TARGETS = {
     "34-00": (0x0D, 0x01), "36-01": (0x0D, 0x02), "2F-00": (0x11, 0x01), "43-00": (0x12, 0x02),
     "46-00": (0x12, 0x04), "31-02": (0x12, 0x06), "48-01": (0x12, 0x07), "2D-00": (0x15, 0x00),
 }
+# Whole FC groups in new DQ5 groups, FC map order kept. dq5newmap.py adds these map numbers, so their
+# records go out as dq5map/1 documents for its `source` instead of being written here.
+GROUPS = {
+    "burland": (0x36, 0x00), "02-01": (0x36, 0x01), "02-02": (0x36, 0x02), "02-03": (0x36, 0x03),
+    "imuru": (0x37, 0x00), "12-01": (0x37, 0x01), "12-02": (0x37, 0x02),
+}
+MAPS = {**TARGETS, **GROUPS}
 # Further banks for map records once the first one reaches the library.
 MAPS_NEXT = (0x3E8000, 0x3F8000)
 CHR_BANK = 0x40
@@ -79,6 +86,11 @@ DOORS = {0x94, 0x95, 0x96}
 # 01:DCFC opens lock 1 with カギの技法 or a better key and lock 2 with まほうのカギ or さいごのカギ.
 LOCKS = {0x94: 0, 0x95: 1, 0x96: 2}
 GATE = 0xA0
+# FC stairs (08:$B22E destinations) of GROUPS maps become DQ5 exit blocks: block attribute 05 puts $85 in
+# +4 of the block's bottom-right cell, and 2A:F6B8 numbers exits by those cells in cell-buffer order.
+# Borrowed TARGETS slots keep plain stairs: an exit cell there would fire the DQ5 map's own exit list.
+STAIRS = {0x08, 0x09}
+STAIR_ATTR = 0x05
 OPENINGS = DOORS | {GATE}
 DOOR_KIND = 0x3B
 GATE_KIND = 0x48
@@ -118,10 +130,10 @@ def _planar(pixels):
 def build_graphics(prg, assets):
     """Deduplicate CHR (pattern + palette) and 2x2 blocks shared by both maps."""
     chr_ids, chr_data, chr_banks = {}, [], []
-    block_ids, block_words = {}, []
+    block_ids, block_words, block_attrs = {}, [], []
     maps = {}
     palette = None
-    for group, number, name, source, counts, prepared, palette in prepare_maps(prg, assets, TARGETS):
+    for group, number, name, source, counts, prepared, palette in prepare_maps(prg, assets, MAPS):
         local = {}
         for fc_block, (image, _) in prepared.items():
             words = []
@@ -136,15 +148,17 @@ def build_graphics(prg, assets):
                         chr_data.append(_planar(pixels))
                         chr_banks.append(bank)
                     words.append(chr_ids[key])
-            key = tuple(words)
+            attr = STAIR_ATTR if name in GROUPS and block_prop(source, fc_block) in STAIRS else 0
+            key = tuple(words), attr
             if key not in block_ids:
                 block_ids[key] = len(block_words)
-                block_words.append(key)
+                block_words.append(key[0])
+                block_attrs.append(attr)
             local[fc_block] = block_ids[key]
         maps[name] = (source, local)
     if len(chr_data) > 1024:
         raise ValueError(f"{len(chr_data)} CHR do not fit one bank")
-    return chr_data, chr_banks, block_words, maps, palette
+    return chr_data, chr_banks, block_words, block_attrs, maps, palette
 
 
 def water_block(source, local):
@@ -332,7 +346,7 @@ def engine_code(block_count, water_ids, palettes, entries, waters):
     reader 01:F3F9 indexes $D2FC,Y with the data bank at 01).
     waters: per target, whether the map has water.
     Returns (library bytes, bank-01 bytes, patched sites)."""
-    targets = list(TARGETS.values())
+    targets = list(MAPS.values())
     stubs = _Asm(HOOK_AT)
     stubs.label("s_load").long(0x22, "load").b(0x28, 0xAB, 0x60)
     stubs.label("s_pal").b(0x20, 0x6A, 0x99).long(0x22, "pal").b(0x60)
@@ -457,7 +471,7 @@ def build(dq5_path, dq4_path, out):
     dq5 = Path(dq5_path).read_bytes()
     prg = ines.prg(Path(dq4_path).read_bytes())
     assets = create_assets()
-    chr_data, chr_banks, block_words, maps, palette = build_graphics(prg, assets)
+    chr_data, chr_banks, block_words, block_attrs, maps, palette = build_graphics(prg, assets)
     water_blocks = {water_block(source, local) for source, local in maps.values()} - {None}
     if len(water_blocks) != 1:
         raise ValueError(f"expected one shared water block, got {water_blocks}")
@@ -468,9 +482,9 @@ def build(dq5_path, dq4_path, out):
     out.mkdir(parents=True, exist_ok=True)
 
     blocks, pointers = bytearray(), bytearray()
-    for words in block_words:
+    for words, attr in zip(block_words, block_attrs):
         pointers += (BLOCKS_AT + len(blocks)).to_bytes(2, "little")
-        blocks += bytes((0x09, 0x00, 0x00)) + b"".join(w.to_bytes(2, "little") for w in words)
+        blocks += bytes((0x09, 0x00, attr)) + b"".join(w.to_bytes(2, "little") for w in words)
     if BLOCKS_AT + len(blocks) > POINTERS_AT:
         raise ValueError("block definitions overflow into the pointer table")
     nibbles = bytearray((len(chr_banks) + 1) // 2)
@@ -485,9 +499,9 @@ def build(dq5_path, dq4_path, out):
     found = {name: objects(source) for name, (source, _) in maps.items()}
     lib_code, stub_code, sites = engine_code(
         len(block_words), water_ids,
-        [palette_at[map_palette(name, maps[name][0].t)] for name in TARGETS],
-        [object_entries(found[name]) for name in TARGETS],
-        [water_block(*maps[name]) is not None for name in TARGETS])
+        [palette_at[map_palette(name, maps[name][0].t)] for name in MAPS],
+        [object_entries(found[name]) for name in MAPS],
+        [water_block(*maps[name]) is not None for name in MAPS])
 
     (out / "chr.bin").write_bytes(b"".join(chr_data))
     (out / "blocks.bin").write_bytes(blocks)
@@ -509,11 +523,16 @@ def build(dq5_path, dq4_path, out):
     rom = Rom(dq5)
     at, spare = MAPS_AT, list(MAPS_NEXT)
     report = {"chr": len(chr_data), "blocks": len(block_words), "water_chr": list(water_ids),
-              "bank01_bytes": len(stub_code), "library_bytes": len(lib_code), "objects": found, "maps": {}}
+              "bank01_bytes": len(stub_code), "library_bytes": len(lib_code), "objects": found, "maps": {},
+              "group_maps": {}}
     for name, (source, local) in maps.items():
-        target = TARGETS[name]
+        target = MAPS[name]
         doc = map_document(name, source, local, target)
         (out / f"{name}.dq5map.json").write_text(json.dumps(doc, ensure_ascii=False) + "\n")
+        if name in GROUPS:
+            report["group_maps"][name] = {"map": doc["map"], "doc": f"{name}.dq5map.json",
+                                          "cells": [doc["width"], doc["height"]]}
+            continue
         record = encode(doc)
         (out / f"{name}.bin").write_bytes(record)
         if at < LIB_AT <= at + len(record) or (at & 0xFFFF) + len(record) > 0x10000:
@@ -528,6 +547,7 @@ def build(dq5_path, dq4_path, out):
                                 "record_bytes": len(record), "commands": len(doc["commands"]),
                                 "wall_entries": len(doc["passes"][0]["entries"]), "at": _cpu(at)}
         at += len(record)
+    report["records_end"] = _cpu(at)
     patch = {"format": "dq5patch/1", "name": "dq4-environment", "rom_size": 4, "writes": writes}
     (out / "dq4-environment.dq5patch.json").write_text(json.dumps(patch, ensure_ascii=False, indent=1) + "\n")
     (out / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n")
