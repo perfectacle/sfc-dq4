@@ -113,7 +113,7 @@ def map_writes(rom, doc, at, new_maps=NO_NEW_MAPS):
             raise ValueError(f'{label}: --with-patch 의 패치가 맵 {bc:02X}/{bd:02X} 의 포인터 자리나 값을 바꿈'
                              '(맵 포인터 목록을 옮긴 새 맵 패치와는 기존 맵에 블록을 놓을 수 없음)')
         src = extract(view, bc, bd)
-        sizes = block_sizes(view, False)
+        sizes = block_sizes(view, False, (bc, bd))
         for kind, rows, need in (('chests', boxes, BOX_FIELDS), ('furniture', furniture, FURNITURE_FIELDS)):
             for k, box in enumerate(rows):
                 where = f'{label}.{kind}[{k}]'

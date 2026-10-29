@@ -199,9 +199,73 @@ def map_pointer(rom, bc, bd):
     return rom.u24(table & 0xFF0000 | (spans[bc][0] + bd * 3))
 
 
-def block_table(rom, count=0x800):
-    """7EB000 표: 뱅크 $16 의 $8000 부터 블록을 차례로 놓은 포인터."""
-    ptrs, a = [], BLOCK_BANK << 16 | 0x8000
+# 그룹 50 미만 맵을 불러오는 01:92E2 는 01:92F4 LDA #$16 / STA $1823 으로 블록 정의 뱅크를 두고, 7E:B000 의 포인터
+# 표는 01:8CD8 이 01:8CDE LDA #$16(뱅크)·01:8CE6 LDA #$8000(시작)부터 블록을 이어 세어 만든다. 블록을 옮기는 패치
+# (dq5mapgfxwrite.py --blocks-at)는 이 즉값 셋을 바꾼다. 01:936E 는 그 루틴 끝의 PLP·PLB·RTS 다
+BANK_SITE, BUILDER_BANK_SITE, BUILDER_START_SITE = 0x0192F4, 0x018CDE, 0x018CE6
+LOAD_TAIL = 0x01936E
+LOAD_TAIL_ORIGINAL = bytes((0x28, 0xAB, 0x60))
+
+
+def _code(rom, addr, pattern, what):
+    """addr 의 바이트가 pattern(16진, ?? 는 아무 값) 꼴인지 보고 ?? 자리 바이트들을 돌려준다."""
+    tokens = pattern.split()
+    raw = bytes(rom.d[lorom(addr):lorom(addr) + len(tokens)])
+    if len(raw) != len(tokens) or any(t != '??' and raw[i] != int(t, 16) for i, t in enumerate(tokens)):
+        raise ValueError(f'{addr >> 16:02X}:{addr & 0xFFFF:04X}: {what} 꼴을 모름({raw.hex(" ")})')
+    return bytes(raw[i] for i, t in enumerate(tokens) if t == '??')
+
+
+def block_hook(rom):
+    """01:936E 의 맵마다 블록 표 훅 → None(훅 없음) 또는 (맵 목록 [(BC, BD)], 블록 정의 뱅크, 포인터 표 CPU 주소, 포인터 수).
+    꼴(코드 읽기): 01:936E JMP 스텁 → 스텁 JSL 로더 / PLP / PLB / RTS. 로더는 JSL 찾기 뒤 BCS 로 갈라지고, 찾기는
+    [BC][BD]…FF 목록을 LDA long,X 로 $BC·$BD 와 견준다. 찾으면 SEP #$20 / LDA #뱅크 / STA $1823 을 하고, 뒤의
+    LDA #(바이트 수-1) / LDX #포인터 표 / LDY #$B000 / MVN 7E,뱅크 로 포인터 표를 7E:B000 에 복사한다.
+    못 찾은 맵은 원래 표를 쓴다(로더가 7E:B002 를 보고 원래 표를 다시 만듦). 이 꼴이 아니면 오류로 멈춘다."""
+    tail = bytes(rom.d[lorom(LOAD_TAIL):lorom(LOAD_TAIL) + 3])
+    if tail == LOAD_TAIL_ORIGINAL:
+        return None
+    stub = 0x010000 | int.from_bytes(_code(rom, LOAD_TAIL, '4C ?? ??', '01:936E 훅(JMP)'), 'little')
+    loader = int.from_bytes(_code(rom, stub, '22 ?? ?? ?? 28 AB 60', '훅 스텁(JSL / PLP / PLB / RTS)'), 'little')
+    head = _code(rom, loader, '08 C2 30 48 DA 5A 22 ?? ?? ?? B0 ??', '훅 로더 머리(PHP·REP·PHA·PHX·PHY, JSL 찾기, BCS)')
+    find, rel = int.from_bytes(head[:3], 'little'), head[3]
+    hit = loader + 12 + (rel - 0x100 if rel & 0x80 else rel)
+    got = _code(rom, find, '08 E2 30 A2 00 BF ?? ?? ?? C9 FF F0 ?? C5 BC D0 ?? BF ?? ?? ?? C5 BD F0 ??', '훅 찾기 루틴')
+    targets, second = int.from_bytes(got[:3], 'little'), int.from_bytes(got[5:8], 'little')
+    if second != targets + 1:
+        raise ValueError(f'훅 찾기 루틴이 목록 {targets:06X} 의 둘째 바이트를 읽지 않음')
+    bank = _code(rom, hit, 'E2 20 A9 ?? 8D 23 18', '훅이 $1823 을 두는 곳')[0]
+    for at in range(hit + 7, hit + 64):
+        if bytes(rom.d[lorom(at):lorom(at) + 4]) == bytes((0xA0, 0x00, 0xB0, 0x54)):
+            break
+    else:
+        raise ValueError(f'{hit >> 16:02X}:{hit & 0xFFFF:04X}: 훅이 7E:B000 에 복사하는 MVN 을 찾지 못함')
+    raw =_code(rom, at - 6, 'A9 ?? ?? A2 ?? ?? A0 00 B0 54 7E ??', '훅의 포인터 표 복사')
+    size, source, src_bank = int.from_bytes(raw[0:2], 'little') + 1, int.from_bytes(raw[2:4], 'little'), raw[4]
+    if src_bank != bank or size % 2:
+        raise ValueError(f'훅의 포인터 표 복사가 블록 뱅크 {bank:02X} 의 2바이트 표가 아님')
+    maps, a = [], targets
+    while rom.u8(a) != 0xFF:
+        maps.append((rom.u8(a), rom.u8(a + 1)))
+        a += 2
+        if len(maps) > 0x400:
+            raise ValueError(f'{targets >> 16:02X}:{targets & 0xFFFF:04X}: 훅 맵 목록에 끝 FF 가 없음')
+    return maps, bank, bank << 16 | source, size // 2
+
+
+def block_table(rom, count=0x800, key=None):
+    """7EB000 표. key(BC, BD)를 주면 01:936E 훅이 그 맵에 두는 표를 따른다. 없으면 01:8CD8 이 만드는 표:
+    01:8CDE·01:8CE6 의 뱅크·시작부터 블록을 차례로 놓은 포인터."""
+    hook = block_hook(rom) if key is not None else None
+    if hook and tuple(key) in hook[0]:
+        _, bank, table, n = hook
+        return [bank << 16 | rom.u16(table + 2 * i) for i in range(n)]
+    bank = _code(rom, BANK_SITE, 'A9 ?? 8D 23 18', '01:92F4 블록 뱅크')[0]
+    builder = _code(rom, BUILDER_BANK_SITE, 'A9 ?? 85 AA', '01:8CDE 블록 표 뱅크')[0]
+    start = int.from_bytes(_code(rom, BUILDER_START_SITE, 'A9 ?? ??', '01:8CE6 블록 표 시작'), 'little')
+    if builder != bank:
+        raise ValueError(f'블록 표 뱅크 {builder:02X}(01:8CDF)와 블록 정의 뱅크 {bank:02X}(01:92F5)가 다름')
+    ptrs, a = [], bank << 16 | start
     for _ in range(count):
         ptrs.append(a)
         b0 = rom.u8(a)
@@ -375,10 +439,11 @@ def attribute_passes(rom, addr, width, buf, trace=None):
 
 
 class Decoder:
-    def __init__(self, rom, slot, high=False):
+    def __init__(self, rom, slot, high=False, key=None):
+        """key(BC, BD)를 주면 그 맵의 블록 표(01:936E 훅이 맵마다 바꾸는 것)를 쓴다."""
         self.rom = rom
         self.high = high
-        self.blocks = high_block_table(rom) if high else block_table(rom)
+        self.blocks = high_block_table(rom) if high else block_table(rom, key=key)
         self.chr_palette = HIGH_CHR_PALETTE if high else CHR_PALETTE
         self.slot = slot
         self.chr_map = {}
