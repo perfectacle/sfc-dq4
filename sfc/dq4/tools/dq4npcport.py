@@ -177,9 +177,10 @@ def dq5_codes(rom, messages):
                 codes.append(_code(m, unicodedata.normalize("NFC", pieces[k][1] + "\u3099")))
                 k += 1
             elif p in ("NOINDENT", "STOP") or p.startswith("SOUND:"):
-                # No sound control in DQ5 walking text, and FC STOP only comes right before END: the
-                # placeholder text goes without them.
-                pass
+                # No sound control in DQ5 walking text: the placeholder text goes without them. A STOP before
+                # more text would need a DQ5 wait, which these messages do not have.
+                if p == "STOP" and k < len(pieces) and pieces[k] != "END":
+                    raise ValueError(f"FC message {m:04X}: {{STOP}} before more text")
             elif p == "END":
                 break
             else:

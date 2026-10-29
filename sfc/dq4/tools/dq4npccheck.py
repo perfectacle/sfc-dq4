@@ -143,7 +143,7 @@ def main():
                          if walkable(source, p["x"] + dx, p["y"] + dy) and (p["x"] + dx, p["y"] + dy) not in occupied),
                         None)
             if side is None:
-                # A map with no exit that is no group arrival is entered only by an event (3A/04).
+                # A map with no exit that is no group arrival is entered only by an event (FC 3A/04).
                 closed = not dq4block.exit_cells(prg, source) and LINKS[group].get("map", 0) != number
                 jobs.append(("closed" if closed else "unreachable", f"talk-{m.replace('/', '')}-{i}", m, None, None,
                              p["night"], None))

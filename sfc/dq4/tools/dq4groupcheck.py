@@ -1,10 +1,11 @@
 """Walk the links of the new DQ4 groups built by dq4groupbuild.py in MesenCE.
 
   stairs  every FC stair: warp onto a walkable FC neighbour, step onto the stair, expect the destination
-          map and the cell of the linked stair (dq4groupbuild.cell)
+          map and the cell of the linked stair (dq4groupbuild.cell), or for a stair to the field the group's
+          aux entrance (X, Y+1)
   area    02/00 gate (open flags) up into 02/01, and 02/01 down off the bottom edge back to the gate.
           The bottom edge is one cell away, so a short press: a held key walks on after landing
-  exit    the map edge from each group's field arrival out to the field: the aux entrance (X, Y+1)
+  exit    from each group's field arrival, the way out (LINKS "out") to the field: the aux entrance (X, Y+1)
   stay    the field arrival with no input: the party stays (an arrival off the map leaves at once)
   enter   from the field save state (341,56), walk the group's path onto its aux entrance: the group arrival
 
@@ -112,7 +113,10 @@ def stair_scenes(prg):
                     raise ValueError(f"{fc_group:02X}/{number:02X} ({x:02X},{y:02X}): no walkable cell next to the stair")
                 dest = to[x, y]
                 if "field" in dest:
-                    continue  # the special exit 0: the exit scenes cover the field
+                    # The special exit 0 leaves by the group's aux entrance.
+                    fx, fy = link["field"]
+                    yield f"stair-{group:02X}{number:02X}-{i}", starts, {"field": [fx, fy + 1]}
+                    continue
                 there = next(g for g, other in LINKS.items() if other["fc"] == dest["group"])
                 yield (f"stair-{group:02X}{number:02X}-{i}", starts,
                        {"map": f"{there:02X}/{dest['index']:02X}", "cell": list(cell(dest["x"], dest["y"]))})

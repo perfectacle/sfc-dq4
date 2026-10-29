@@ -111,7 +111,8 @@ def exit_records(prg, group):
                 # 2A:F7B2 -> 2A:F425: out to the group's field entrance (aux entrance table).
                 rows.append({"kind": "special", "special": 0})
                 continue
-            if not dest or dest.get("group") not in dq5_group or "index" not in dest:
+            if not dest or dest.get("group") not in dq5_group or "index" not in dest or \
+                    dest["index"] not in fc_numbers(dq5_group[dest["group"]]):
                 raise ValueError(f"{fc_group:02X}/{number:02X} ({x:02X},{y:02X}): stair to an FC group not ported: {dest}")
             there = exit_order(prg, dest["group"], dest["index"])
             row = {"kind": "same-group", "destination_map": dest["index"], "exit": there.index((dest["x"], dest["y"]))}
