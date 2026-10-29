@@ -94,9 +94,21 @@ def block_tiles(rom, table, m):
     return [rom.u8(a + q) | (0x100 if hi & QUAD_BIT[q] else 0) for q in range(4)]
 
 
-def tile_word(rom, tile, upper):
+# dq5fieldgfxwrite.py --worlds-at 은 00:BBB4 등을 JSL 훅으로 바꾸고, 훅 안 LDA long,X 의 피연산자(훅 + 22)가
+# 세계마다 256바이트인 니블 표 넷의 시작이다.
+NIB_SITE, NIB_HOOK_TABLE = 0x00BBB4, 22
+
+
+def nibble_table(rom, world=0):
+    """00:BBAC 가 그 세계에서 읽는 니블 표 주소. 세계 훅이 없으면 세 세계 모두 2A:D712."""
+    if rom.u8(NIB_SITE) == 0x22:
+        return rom.u24(rom.u24(NIB_SITE + 1) + NIB_HOOK_TABLE) + (world & 3) * 0x100
+    return TILE_PALETTE
+
+
+def tile_word(rom, tile, upper, world=0):
     """00:BBAC: 타일 번호에 팔레트 비트를 붙인 타일맵 워드."""
-    nib = rom.u8(TILE_PALETTE + (tile >> 1))
+    nib = rom.u8(nibble_table(rom, world) + (tile >> 1))
     if upper:
         p = (nib & 0x0F) << 2 if tile & 1 else (nib & 0xF0) >> 2
     else:

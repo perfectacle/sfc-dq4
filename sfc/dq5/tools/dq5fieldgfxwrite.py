@@ -5,7 +5,7 @@ sfc/dq5/docs/dq5-build-format.md 「필드 그림 `dq5fieldgfx/1`」.
 
   dump   롬 → 폴더(-o). fieldgfx.json, tiles.bin(4bpp SNES 타일 512개), anim.bin(움직이는 타일 6개 × 8벌)
   patch  fieldgfx.json → 패치 목록(-o). 바뀐 것이 없으면 쓰기 0개. 다시 싼 RLE 가 원래보다 길면
-         --tiles-at·--anim-at BB:AAAA(30~3F, 한 뱅크 안)로 옮긴다. 움직이는 타일 벌 수를 바꾸면 --anim-at,
+         --tiles-at·--anim-at BB:AAAA(30~3F, 한 뱅크 안)로 옮긴다. 움직이는 타일 벌을 16개로 늘리면 --anim-at,
          세계 1·2 의 타일 벌(worlds)을 주면 --worlds-at 이 필요하다
   check  두 RLE 를 다시 싸서 풀기, 내보낸 그대로 patch 하면 쓰기 0개인지
 
@@ -23,7 +23,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from dq5field import FIELD_CHR, TILE_PALETTE, rle  # noqa: E402
+from dq5field import FIELD_CHR, TILE_PALETTE, nibble_table, rle  # noqa: E402
 from dq5gfx import FIELD_ANIM as ANIM, FIELD_ANIM_COUNT, FIELD_ANIM_SETS, FIELD_ANIM_TILE  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
 
@@ -183,13 +183,12 @@ def current(rom):
     anim_sets 는 $1C31 이 0 부터 도는 차례대로 DMA 로 올리는 192바이트."""
     out = {}
     if rom.d[lorom(LOAD_SITE)] == 0x22:
-        _, _, table, tables, _ = worlds_layout(rom.u24(LOAD_SITE + 1))
+        _, _, table, _, _ = worlds_layout(rom.u24(LOAD_SITE + 1))
         srcs = [rom.u8(table + w * 4 + 2) << 16 | rom.u16(table + w * 4) for w in range(3)]
-        nibs = [nibbles(rom, tables + w * 0x100) for w in range(3)]
     else:
         (bank_site, _), (addr_site, _) = SITES['tiles']
         srcs = [rom.u8(bank_site) << 16 | rom.u16(addr_site)] * 3
-        nibs = [nibbles(rom, TILE_PALETTE)] * 3
+    nibs = [nibbles(rom, nibble_table(rom, w)) for w in range(3)]
     out['worlds'] = {k: (planar_to_tiles(rle(rom, srcs[w])[0]), nibs[w]) for w, k in enumerate(WORLDS)}
     out['tiles'], out['tile_palettes'] = out['worlds']['world0']
     (bank_site, _), (addr_site, _) = SITES['anim']
@@ -270,8 +269,8 @@ def patch(rom, doc, folder, tiles_at=None, anim_at=None, name='field-gfx', world
     sets, rest = divmod(len(data['anim']), ANIM_SET)
     if rest or sets not in ANIM_COUNTS:
         raise ValueError(f'{doc["anim_file"]}: {ANIM_SET}바이트 벌 {ANIM_COUNTS} 개여야 함({len(data["anim"])}바이트)')
-    if sets != FIELD_ANIM_SETS and anim_at is None:
-        raise ValueError(f'움직이는 타일 벌 수를 {sets} 로 바꾸려면 --anim-at 이 필요함(벌 주소 표를 그 뒤에 둠)')
+    if sets > FIELD_ANIM_SETS and anim_at is None:
+        raise ValueError(f'움직이는 타일 벌을 {sets} 개로 늘리려면 --anim-at 이 필요함(벌 주소 표를 그 뒤에 둠)')
     nib = nibble_list(doc.get('tile_palettes'), 'tile_palettes')
     pals = doc.get('palettes')
     if not isinstance(pals, dict) or set(pals) != set(PALETTE_SETS) or \
@@ -321,7 +320,7 @@ def patch(rom, doc, folder, tiles_at=None, anim_at=None, name='field-gfx', world
                                  f'--{kind}-at 으로 옮겨야 함')
             write(SOURCES[kind], packed, f'{kind} RLE')
             continue
-        table = encode_anim_table(sets) if kind == 'anim' and sets != FIELD_ANIM_SETS else b''
+        table = encode_anim_table(sets) if kind == 'anim' and sets > FIELD_ANIM_SETS else b''
         place_in(at, len(packed) + len(table), f'--{kind}-at', placed)
         write(at, packed, f'{kind} RLE', orig=False)
         if kind == 'tiles':
@@ -336,7 +335,9 @@ def patch(rom, doc, folder, tiles_at=None, anim_at=None, name='field-gfx', world
             write(t, table, f'움직이는 타일 벌 {sets}개의 WRAM 주소 표', orig=False)
             write(ANIM_SITES['table'][0] + 1, long_addr(t), '벌 주소 표(하위 바이트)')
             write(ANIM_SITES['table_hi'][0] + 1, long_addr(t + 1), '벌 주소 표(상위 바이트)')
-            write(ANIM_SITES['mask'][0] + 1, bytes([sets - 1]), f'벌 돌리기 AND #${sets - 1:02X}')
+    if sets != FIELD_ANIM_SETS:
+        # 8벌보다 적으면 원래 표 02:AD89 의 앞 칸이 그대로 맞아 AND 만 바꾼다.
+        write(ANIM_SITES['mask'][0] + 1, bytes([sets - 1]), f'벌 돌리기 AND #${sets - 1:02X}')
     nib_bytes = bytes(nib[i] << 4 | nib[i + 1] for i in range(0, TILES, 2))
     old = rom.d[lorom(TILE_PALETTE):lorom(TILE_PALETTE) + len(nib_bytes)]
     for i in range(len(nib_bytes)):

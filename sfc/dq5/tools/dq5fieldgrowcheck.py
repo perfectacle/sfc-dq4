@@ -8,8 +8,10 @@ MesenCE 에서 확인한다.
   high-all  그룹 50 이상 CHR 628개를 모두 반전하고 블록 295개의 모든 칸을 좌우 반전해 --chr-at 41:8000 --blocks-at 34:8000
 장면
   세계 0 (341,56) 에서 $075E = 00F0 으로 두고 시간 멈춤(7E:2190 bit1)을 끈 채 서 있다가(움직이는 타일 벌을 매 프레임),
-  한 걸음 내려가 00F1(밤)이 된 뒤를 덤프. 세계 1·2 는 $1949 를 고정하고 (50,28). 그룹 50 이상 맵 18개는 순간이동해
-  맵별 루틴 직후(15:F7EE).
+  한 걸음 내려가 00F1(밤)이 된 뒤를 덤프. 세계 1·2 는 $1949 를 고정하고 (50,28). grow 롬으로 이벤트 전투를 이기고
+  돌아온 뒤, 배에 타고 돌다 내린 뒤에도 16벌이 차례로 도는지 보고, 그동안 7E:C000~DFFF 의 CPU 접근을
+  lua/dq5rangewatch.lua 로 모아 벌을 푼 뒤 7E:CE00~D3FF 를 DMA 말고 건드린 곳이 없는지 본다.
+  그룹 50 이상 맵 18개는 순간이동해 맵별 루틴 직후(15:F7EE).
 
   MESENCE=… python sfc/dq5/tools/dq5fieldgrowcheck.py rom/dq5.sfc --state work/state/ship.mss --out work/fieldgrowcheck
 """
@@ -29,6 +31,7 @@ sys.path.insert(0, str(HERE))
 import dq5fieldgfxcheck as fgc  # noqa: E402
 import dq5fieldgfxwrite as fgw  # noqa: E402
 import dq5gfxwritecheck as gwc  # noqa: E402
+from dq5field import tile_word  # noqa: E402
 from dq5map import Rom, map_pointer  # noqa: E402
 import dq5mapgfxwrite as mgw  # noqa: E402
 from dq5mapwrite import all_maps  # noqa: E402
@@ -43,6 +46,19 @@ SETS = 16
 DUSK = {'FIELD': '341,56', 'SET': '075E=F0;075F=00;2190&FD', 'SETTLE': '300', 'TEST': 'wait:300,down:16,wait:500',
         'EVERY': '1', 'FROM': '800', 'TO': '1040', 'DUMPF': '1100', 'MAXF': '2000'}
 DAY_FRAME, NIGHT_FRAME = 1000, 1100
+NIB_TILES = {1: WORLD_TILE, 2: 63}   # grow 롬에서 니블을 바꾸는 타일. 세계 2 의 (50,28) 에 보임
+# 16벌이 새로 쓰는 WRAM. 2B:8063 이 벌을 풀고, 00:8F75 의 DMA 가 VRAM 으로 읽는다.
+SPARE, ANIM_WRITER, ANIM_DMA = (0x7ECE00, 0x7ED3FF), '2B8063', '008F75'
+WATCH = {'WATCHR': '7EC000-7EDFFF'}
+# 이벤트 전투(스라임 하나)를 A 로 이겨 1,790프레임쯤 필드로 돌아온다. 그 뒤 이벤트 대사 동안(~1975)은 $7F 가 서서
+# 벌이 멈추므로, 다시 돌기 시작한 1975~2140 을 본다. 2,160프레임쯤 무작위 전투가 붙어 그 전에 끝낸다.
+BATTLE = {'FIELD': '341,56', 'BATTLE': '00:1', 'SETTLE': '300', 'MAXF': '2200', 'DUMPF': '500,1790',
+          'EVERY': '1', 'FROM': '1975', 'TO': '2140', **WATCH,
+          'TEST': 'wait:100,' + ','.join(['a:4,wait:30'] * 60) + ',wait:600'}
+# 세워 둔 배(dq5cdlsweep 의 ship-board)에 올라 바다를 돌고 내린 뒤 걸어서 선 동안(1110~1390).
+SHIP = {'FIELD': '328,39', 'SET': '21B5|80;21CD=48;21CE=01;21CF=25;21D0=00', 'SETTLE': '300', 'MAXF': '1500',
+        'DUMPF': '900', 'EVERY': '1', 'FROM': '1110', 'TO': '1390', **WATCH,
+        'TEST': 'up:60,wait:60,left:200,up:200,right:200,down:200,left:200,wait:300'}
 OBJ_PALETTES = 0x0496D6
 
 
@@ -56,9 +72,9 @@ def make_roms(original, out):
         t[WORLD_TILE * 32:WORLD_TILE * 32 + 32] = pattern
         (src / f'tiles-{key}.bin').write_bytes(t)
         nib = list(doc['tile_palettes'])
-        if key == 'world1':
-            require(nib[WORLD_TILE] in (0, 1), f'타일 {WORLD_TILE} 의 니블이 {nib[WORLD_TILE]}')
-            nib[WORLD_TILE] ^= 1
+        t = NIB_TILES[int(key[-1])]
+        require(nib[t] in (0, 1), f'타일 {t} 의 니블이 {nib[t]}')
+        nib[t] ^= 1
         doc.setdefault('worlds', {})[key] = {'tiles_file': f'tiles-{key}.bin', 'tile_palettes': nib}
     anim = (src / 'anim.bin').read_bytes()
     extra = bytearray(anim)
@@ -91,11 +107,18 @@ def person_colors(cg):
     return [fgc.cg_color(cg, row, c) for row in (11, 12) for c in range(1, 16)]
 
 
-def tile_word(nib, tile, upper):
-    """00:BBAC 를 니블 목록으로(dq5field.tile_word 와 같은 셈)."""
-    v = nib[tile]
-    p = (v if upper else v & 7) << 2
-    return tile | (p + 8) << 8
+def anim_order(name, dump, frames, sets):
+    """frames 마다 VRAM 타일 454~459 가 sets 의 몇째 벌인지, 바뀐 차례대로."""
+    order = []
+    for n in frames:
+        shown = b''.join(fgc.field_vram_tiles(frame(dump, n, 'vram'))[454:460])
+        require(shown in sets, f'{name}: {n}프레임 움직이는 타일 454~459 가 {len(sets)}벌 어디와도 다름')
+        k = sets.index(shown)
+        if not order or order[-1] != k:
+            order.append(k)
+    steps = [(b - a) % len(sets) for a, b in zip(order, order[1:])]
+    require(set(steps) == {1} and len(set(order)) == len(sets), f'{name}: 움직이는 타일 벌 차례 {order}')
+    return order
 
 
 def check_dusk(name, rom_path, dump):
@@ -105,16 +128,7 @@ def check_dusk(name, rom_path, dump):
     got = fgc.field_vram_tiles(frame(dump, DAY_FRAME, 'vram'))
     bad = [t for t in range(fgw.TILES) if t not in fgc.ANIM_TILES and got[t] != tiles[t * 32:t * 32 + 32]]
     require(not bad, f'{name}: 세계 0 타일 {len(bad)}개가 기대와 다름 {bad[:8]}')
-    sets, order = cur['anim_sets'], []
-    for n in range(int(DUSK['FROM']), int(DUSK['TO']) + 1):
-        shown = b''.join(fgc.field_vram_tiles(frame(dump, n, 'vram'))[454:460])
-        require(shown in sets, f'{name}: {n}프레임 움직이는 타일 454~459 가 {len(sets)}벌 어디와도 다름')
-        k = sets.index(shown)
-        if not order or order[-1] != k:
-            order.append(k)
-    steps = [(b - a) % len(sets) for a, b in zip(order, order[1:])]
-    require(set(steps) == {1} and len(set(order)) == len(sets),
-            f'{name}: 움직이는 타일 벌 차례 {order}')
+    order = anim_order(name, dump, range(int(DUSK['FROM']), int(DUSK['TO']) + 1), cur['anim_sets'])
     out = {'case': name, 'tiles': fgw.TILES - len(fgc.ANIM_TILES), 'anim_order': order}
     for when, n, want, key in (('day', DAY_FRAME, 0x00F0, 'day'), ('night', NIGHT_FRAME, 0x00F1, 'night')):
         w = frame(dump, n, 'wram')
@@ -126,34 +140,66 @@ def check_dusk(name, rom_path, dump):
     return out
 
 
-def check_world(name, rom_path, dump, orig_dump, world):
-    cur = fgw.current(Rom(rom_path.read_bytes()))
+def palette_cells(name, rom, vram, world, tile):
+    """그 타일을 쓰는 타일맵 칸이 모두 dq5field.tile_word(그 세계 니블 표)와 같은지. 칸 수를 돌려준다."""
+    words = fgc.tilemap_words(vram, tile)
+    require(words, f'{name}: 타일 {tile} 을 쓰는 타일맵 칸이 없음')
+    wrong = [v for upper, v in words if v & 0x1FFF != tile_word(rom, tile, upper, world) & 0x1FFF]
+    require(not wrong, f'{name}: 타일 {tile} 칸 {len(wrong)}개의 팔레트가 세계 {world} 니블과 다름')
+    return len(words)
+
+
+def check_world(name, rom_path, dump, orig, world):
+    """orig 는 (원본 롬, 원본 덤프) 또는 None. 고친 니블은 원본 덤프의 칸이 모두 원래 니블 워드이고 고친 덤프의 칸이
+    모두 새 니블 워드이며 두 니블이 다른 것으로 가린다."""
+    rom = Rom(rom_path.read_bytes())
+    cur = fgw.current(rom)
     tiles, nib = cur['worlds'][f'world{world}']
     w, vram = frame(dump, 900, 'wram'), frame(dump, 900, 'vram')
     require(w[0x1949] == world and not w[0xBE] & 0x80, f'{name}: 세계 {world} 필드에 서지 않음')
     got = fgc.field_vram_tiles(vram)
     bad = [t for t in range(fgw.TILES) if t not in fgc.ANIM_TILES and got[t] != tiles[t * 32:t * 32 + 32]]
     require(not bad, f'{name}: 타일 {len(bad)}개가 세계 {world} 벌과 다름 {bad[:8]}')
-    words = fgc.tilemap_words(vram, WORLD_TILE)
-    require(words, f'{name}: 타일 {WORLD_TILE} 을 쓰는 타일맵 칸이 없음')
-    wrong = [v for upper, v in words if v & 0x1FFF != tile_word(nib, WORLD_TILE, upper) & 0x1FFF]
-    require(not wrong, f'{name}: 타일 {WORLD_TILE} 칸의 팔레트가 세계 {world} 니블과 다름')
+    cells = {t: palette_cells(name, rom, vram, world, t) for t in sorted({WORLD_TILE, NIB_TILES[world]})}
     # 세계 1·2 에서는 01:9F4A 가 01:A04B 를 건너뛰어 11·12번 줄이 맵의 OBJ 팔레트 3·4 그대로다.
-    obj = [Rom(rom_path.read_bytes()).u16(OBJ_PALETTES + (row * 16 + c) * 2) for row in (3, 4) for c in range(1, 16)]
+    obj = [rom.u16(OBJ_PALETTES + (row * 16 + c) * 2) for row in (3, 4) for c in range(1, 16)]
     require(person_colors(frame(dump, 900, 'cgram')) == obj, f'{name}: 11·12번 줄이 04:96D6 의 OBJ 팔레트 3·4 와 다름')
-    out = {'case': name, 'tiles': fgw.TILES - len(fgc.ANIM_TILES), 'tilemap_cells_of_tile': len(words),
+    out = {'case': name, 'tiles': fgw.TILES - len(fgc.ANIM_TILES), 'tilemap_cells': cells,
            'rows_11_12': 'OBJ 팔레트 3·4(04:96D6)'}
-    if orig_dump is not None:
-        ov = frame(orig_dump, 900, 'vram')
+    if orig is not None:
+        orom, odump = orig
+        ov = frame(odump, 900, 'vram')
         pattern = STRIPE if world == 1 else DOTS
         require(got[WORLD_TILE] == pattern != fgc.field_vram_tiles(ov)[WORLD_TILE],
                 f'{name}: 고친 타일 {WORLD_TILE} 이 VRAM 에 없음')
         out['edited_tile'] = '줄무늬' if world == 1 else '점무늬'
-        if world == 1:
-            ow = dict(fgc.tilemap_words(ov, WORLD_TILE))
-            require(all(ow.get(u) != v for u, v in words), f'{name}: 고친 니블이 타일맵에 없음')
-            out['tile_palette'] = f'타일 {WORLD_TILE} 칸 {len(words)}개의 팔레트 줄이 바뀜'
+        t = NIB_TILES[world]
+        onib = fgw.current(orom)['worlds'][f'world{world}'][1]
+        require(onib[t] != nib[t], f'{name}: 타일 {t} 니블이 원본과 같음')
+        ocells = palette_cells(f'{name}(원본)', orom, ov, world, t)
+        out['tile_palette'] = f'타일 {t} 칸: 원본 {ocells}개 모두 니블 {onib[t]}, 고친 롬 {cells[t]}개 모두 니블 {nib[t]}'
     return out
+
+
+def check_scene(name, rom_path, dump, window, before, after):
+    """탈것·전투 뒤 서 있는 window 동안 16벌 차례와, 벌을 푼 뒤 7E:CE00~D3FF 를 건드린 것이 DMA(00:8F75)뿐인지.
+    before·after 는 (프레임, WRAM 검사 함수, 설명)."""
+    cur = fgw.current(Rom(rom_path.read_bytes()))
+    for n, test, what in (before, after):
+        w = frame(dump, n, 'wram')
+        require(test(w), f'{name}: {n}프레임에 {what} 아님')
+    for n in window:
+        w = frame(dump, n, 'wram')
+        require(not w[0xBE] & 0x80 and w[0x1954] == 0, f'{name}: {n}프레임에 걸어서 필드에 서지 않음')
+    order = anim_order(name, dump, window, cur['anim_sets'])
+    rows = [line.split() for line in (dump / 'rw.txt').read_text().splitlines()]
+    loads = [int(r[3]) for r in rows if r[:2] == ['w', ANIM_WRITER]]
+    require(loads, f'{name}: 벌을 푸는 {ANIM_WRITER} 의 쓰기가 없음')
+    late = [f'{r[0]} {r[1]}' for r in rows if int(r[3]) > max(loads) and int(r[5], 16) <= SPARE[1]
+            and int(r[6], 16) >= SPARE[0] and r[:2] != ['r', ANIM_DMA]]
+    require(not late, f'{name}: 벌을 푼 뒤 7E:CE00~D3FF 를 건드린 곳 {late}')
+    return {'case': name, 'window': f'{window[0]}~{window[-1]}', 'anim_order': order,
+            'after_load': f'7E:CE00~D3FF 접근은 {ANIM_DMA} DMA 읽기뿐(벌 풀기 마지막 {max(loads)}프레임)'}
 
 
 def check_high(name, rom_path, dump, orig_dump, bcbd):
@@ -197,13 +243,15 @@ def main():
         libdir = out / 'lib'
         shutil.copytree(krlua, libdir)
         shutil.copyfile(HERE / 'lua/dq5warp.lua', libdir / 'boot.lua')
-        gfx, atpc = HERE / 'lua/dq5gfxdump.lua', ROOT / 'tools/lua/atpc.lua'
+        gfx, atpc, watch = HERE / 'lua/dq5gfxdump.lua', ROOT / 'tools/lua/atpc.lua', HERE / 'lua/dq5rangewatch.lua'
         world = {w: {'FIELD': '50,28', 'POKE': f'7E1949={w:02X}', 'SETTLE': '900', 'DUMPF': '900', 'MAXF': '1800'}
                  for w in (1, 2)}
         rom = Rom(original.read_bytes())
         maps = [m for m in all_maps(rom) if m[0] >= 0x50]
         cases = [('dusk-orig', original, gfx, DUSK), ('dusk-grow', grow, gfx, DUSK),
-                 *[(f'world{w}-{k}', r, gfx, world[w]) for w in (1, 2) for k, r in (('orig', original), ('grow', grow))]]
+                 *[(f'world{w}-{k}', r, gfx, world[w]) for w in (1, 2) for k, r in (('orig', original), ('grow', grow))],
+                 ('battle-grow', grow, watch, dict(BATTLE, NEXT=str(gfx))),
+                 ('ship-grow', grow, watch, dict(SHIP, NEXT=str(gfx)))]
         for m in maps:
             a = map_pointer(rom, *m)
             env = {'TO': f'{m[0]:02X}/{m[1]:02X},{rom.u8(a + 1) // 2},{rom.u8(a + 2) // 2},1', 'AT': '15F7EE',
@@ -217,7 +265,13 @@ def main():
         require(results[0]['day']['first'] == f'{orig_person["day"][0]:04X}', 'dusk-orig: 낮 색이 01:A45E 가 아님')
         for w in (1, 2):
             results.append(check_world(f'world{w}-orig', original, dirs[f'world{w}-orig'], None, w))
-            results.append(check_world(f'world{w}-grow', grow, dirs[f'world{w}-grow'], dirs[f'world{w}-orig'], w))
+            results.append(check_world(f'world{w}-grow', grow, dirs[f'world{w}-grow'], (rom, dirs[f'world{w}-orig']), w))
+        results.append(check_scene('battle-grow', grow, dirs['battle-grow'], range(1975, 2141),
+                                   (500, lambda w: w[0x1001] == 0, '전투 전($1001 = 0)'),
+                                   (1790, lambda w: w[0x1001] != 0, '전투 뒤($1001 ≠ 0)')))
+        results.append(check_scene('ship-grow', grow, dirs['ship-grow'], range(1110, 1391),
+                                   (900, lambda w: w[0x1954] == 0x03, '배에 탐($1954 = 03)'),
+                                   (1110, lambda w: (w[0xB6], w[0xB8]) != (328 & 0xFF, 39), '배에서 내려 옮겨 감')))
         high_results = []
         for m in maps:
             key = f'high-{m[0]:02X}{m[1]:02X}'

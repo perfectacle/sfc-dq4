@@ -9,6 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import dq5fieldgfxwrite as fgw  # noqa: E402
+import dq5field  # noqa: E402
 from dq5field import rle  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
 import dq5mapgfxwrite as mgw  # noqa: E402
@@ -145,6 +146,17 @@ class FieldPatchTests(unittest.TestCase):
         path.write_bytes(bytes(range(256)) * 12)                                  # 16벌, 거의 글자 그대로
         with self.assertRaisesRegex(ValueError, '한 뱅크'):
             fgw.patch(self.rom, self.doc, self.tmp.name, anim_at=0x33F800)
+        path.write_bytes(bytes(fgw.ANIM_SET * 4))                                 # 4벌은 제자리, AND 만
+        m = fgw.patch(self.rom, self.doc, self.tmp.name)
+        self.assertEqual({w['note'] for w in m['writes']}, {'anim RLE', '벌 돌리기 AND #$03'})
+        self.assertEqual(next(w['at'] for w in m['writes'] if w['note'] == 'anim RLE'), '1E:D0FF')
+        self.assertNotIn('rom_size', m)
+        self.assertEqual(fgw.current(self.apply(m))['anim_sets'], [bytes(fgw.ANIM_SET)] * 4)
+        path.write_bytes(bytes(range(256)) * 3)                                   # 4벌이지만 원래 자리보다 김
+        with self.assertRaisesRegex(ValueError, '--anim-at'):
+            fgw.patch(self.rom, self.doc, self.tmp.name)
+        m = fgw.patch(self.rom, self.doc, self.tmp.name, anim_at=0x338000)
+        self.assertFalse([w for w in m['writes'] if '표' in w['note']])
         path.write_bytes(bytes(fgw.ANIM_SET * 8))                                 # 8벌을 옮기면 표는 그대로
         m = fgw.patch(self.rom, self.doc, self.tmp.name, anim_at=0x338000)
         self.assertFalse([w for w in m['writes'] if '벌' in w['note']])
@@ -186,6 +198,12 @@ class FieldPatchTests(unittest.TestCase):
         self.assertEqual(cur['worlds']['world1'], (bytes(w1), nib1))
         self.assertEqual(cur['worlds']['world0'], ((folder / 'tiles.bin').read_bytes(), self.doc['tile_palettes']))
         self.assertEqual(cur['worlds']['world2'], cur['worlds']['world0'])
+        self.assertEqual(fgw.nib_hook(0x123456)[dq5field.NIB_HOOK_TABLE:dq5field.NIB_HOOK_TABLE + 3],
+                         fgw.long_addr(0x123456))
+        patched = self.apply(m)                                                   # 디코더도 세계별 니블 표를 읽음
+        t0, t1 = dq5field.tile_word(patched, 63, True, 0), dq5field.tile_word(patched, 63, True, 1)
+        self.assertEqual((t0 >> 10 & 7, t1 >> 10 & 7), ((self.doc['tile_palettes'][63] + 2) & 7, (9 + 2) & 7))
+        self.assertEqual(dq5field.tile_word(self.rom, 63, True, 1), dq5field.tile_word(self.rom, 63, True, 0))
         _, _, table, _, _ = fgw.worlds_layout(0x348000)
         rom = self.apply(m)
         self.assertEqual([rom.u24(table + k * 4) for k in (0, 2, 3)], [fgw.FIELD_CHR] * 3)
