@@ -272,7 +272,7 @@ def plan(rom, doc, base):
     if not isinstance(doc, dict) or doc.keys() - {'format', 'pictures', 'monsters'} or doc.get('format') != FORMAT:
         raise ValueError(f'문서는 format={FORMAT}, pictures·monsters 만 담은 객체여야 함')
     used = set(used_pictures(rom))
-    pictures = {}
+    pictures, grown = {}, {}
     rows = doc.get('pictures', [])
     if not isinstance(rows, list):
         raise ValueError('pictures는 배열이어야 함')
@@ -289,9 +289,10 @@ def plan(rom, doc, base):
         grid = image_grid(base / row['image'], d['w'], d['h'])
         raw, pieces, tiles, bands = encode(rom, g, grid)
         limit = stats(d)
-        if pieces > limit[0] or tiles > limit[1] or any(a > b for a, b in zip(bands, limit[2])):
-            raise ValueError(f'{label}: 조각 {pieces}/{limit[0]}, 타일 {tiles}/{limit[1]}, 줄마다 타일 {bands}/{limit[2]} — '
-                             '원래 그림의 수를 넘음(전투 배치 한도 22:91DC·22:A119 와 VRAM 버퍼)')
+        if tiles > limit[1]:
+            raise ValueError(f'{label}: 타일 {tiles}/{limit[1]} — 원래 그림의 수를 넘음(7E:4000 타일 버퍼·VRAM 여유를 정하지 않음)')
+        if pieces > limit[0] or any(a > b for a, b in zip(bands, limit[2])):
+            grown[g] = (pieces, bands)
         pictures[g] = (grid, raw, pieces, tiles)
     # 같은 머리를 가리키는 그림 번호(00·11·29, 58·5E 등)는 자료가 하나라 함께 바뀐다.
     for g in list(pictures):
@@ -300,6 +301,8 @@ def plan(rom, doc, base):
                 if other in pictures and pictures[other][0] != pictures[g][0]:
                     raise ValueError(f'그림 {g:02X}·{other:02X} 는 같은 머리를 써서 다른 그림을 줄 수 없음')
                 pictures[other] = pictures[g]
+                if g in grown:
+                    grown[other] = grown[g]
     monsters = {}
     rows = doc.get('monsters', [])
     if not isinstance(rows, list):
@@ -338,6 +341,16 @@ def plan(rom, doc, base):
         top = max(max(row) for row in grid)
         if top > len(colors):
             raise ValueError(f'몬스터 {m:02X}: 그림 {g:02X} 가 색 번호 {top} 을 쓰는데 색은 {len(colors)}개')
+    # 조각·줄마다 타일이 원래보다 많은 그림은, 나올 수 있는 무리 조합마다 원래보다 덜 놓이는 몬스터가 없을 때만 받는다.
+    if grown:
+        from dq5monlimits import losses
+        swapped = {m: g for m, (g, _) in monsters.items() if g != M.monster(rom, m)[0]}
+        bad = losses(rom, grown, swapped)
+        if bad:
+            groups, old, new, where, why = bad[0]
+            shown = ' '.join(f'{m:02X}x{n}' for m, n, _ in groups)
+            raise ValueError(f'그림 {", ".join(f"{g:02X}" for g in sorted(grown))}: 조각·줄마다 타일이 원래보다 많아 '
+                             f'무리 조합 {len(bad)}개에 걸림. 첫째: {where} [{shown}] 놓이는 수 {old} → {new}, {why}')
     return pictures, monsters
 
 

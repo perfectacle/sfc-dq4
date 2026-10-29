@@ -1,6 +1,8 @@
 """DQ5 일행 작전 AI 의 행동·물건 AI 레코드, 작전 레코드, 학습 배율 표와 주문 내성 배율·갑옷 원소 표를 쓴다.
 
 모두 고정 길이 표이고 항목 수는 바꾸지 않는다. 받는 필드는 원래 롬과 견주어 게임에서 효과를 확인한 것뿐이다.
+행동 AI 표는 처음부터 행동 00~EF 240칸이고 물건 표가 바로 뒤에 붙는다(21:D19C 가 행동×5, 물건이면 +4B0). 그래서
+dq5spellgrow.py 가 더한 새 번호 C6~D4 의 레코드도 제자리에 쓴다. 새 번호는 copy 로 원래 행동의 5바이트를 베낀 뒤 덮는다.
 형식: sfc/dq5/docs/dq5-data-format.md 의 「작전 AI」·「주문과 행동」, sfc/dq5/docs/dq5-build-format.md 의 `dq5ai/1`.
 
   python sfc/dq5/tools/dq5aiwrite.py rom/dq5.sfc dump -o work/ai/dump.json
@@ -14,10 +16,13 @@ import sys
 from pathlib import Path
 
 from dq5map import Rom, lorom
+from dq5spellgrow import FIRST as NEW_FIRST, LAST as NEW_LAST
 
 FORMAT = 'dq5ai/1'
 ACTIONS, ACTION_COUNT = 0x21BC86, 0xAB
 ITEMS, ITEM_COUNT = 0x21C136, 0xD8
+# 새 번호 C6~D4 의 원래 레코드는 모두 11 00 30 00 FF 라, 베끼지 않으면 작전 AI 가 고르지 않는다.
+NEW_ACTIONS = range(NEW_FIRST, NEW_LAST + 1)
 BATTLE_MP = 0x268765
 TACTICS, TACTIC_COUNT, TACTIC_SIZE = 0x21D8BD, 5, 32
 # 작전 레코드에서 받는 칸: (이름, 위치, 바이트 수). +3~+5·+A·+12 는 게임에서 확인하지 않아 내보내지 않는다.
@@ -89,7 +94,7 @@ def decode_action(rom, n, rec):
 
 def dump(rom):
     out = {'format': FORMAT,
-           'actions': [decode_action(rom, n, record(rom, ACTIONS, n)) for n in range(ACTION_COUNT)],
+           'actions': [decode_action(rom, n, record(rom, ACTIONS, n)) for n in (*range(ACTION_COUNT), *NEW_ACTIONS)],
            'items': [{'item': f'{n:02X}', 'value': rec[1], 'branch': f'{rec[2]:02X}'}
                      for n, rec in ((n, record(rom, ITEMS, n)) for n in range(ITEM_COUNT))],
            'tactics': [], 'odds': {}, 'resist_rates': [u8(rom, RESIST + i) for i in range(4)],
@@ -118,7 +123,7 @@ def edits(rom, doc, original=None):
         require(wanted.get(addr, value) == value, f'{addr:06X}: 두 입력이 다른 값을 씀')
         wanted[addr], notes[addr] = value, note
 
-    def rows(section, key, count):
+    def rows(section, key, count, extra=()):
         value = doc.get(section, [])
         require(isinstance(value, list), f'{section}: 배열이어야 함')
         seen = set()
@@ -129,32 +134,38 @@ def edits(rom, doc, original=None):
                 n = integer(raw, 0, count - 1, key)
             else:
                 n = hexbyte(raw, f'{section} {key}')
-                require(n < count, f'{section}: {raw} 는 {count} 개 밖')
+                require(n < count or n in extra, f'{section}: {raw} 는 {count} 개 밖'
+                        + (f'(새 번호는 {extra[0]:02X}~{extra[-1]:02X})' if extra else ''))
             require(n not in seen, f'{section}: {raw} 를 두 번 지정함')
             seen.add(n)
             yield n, row
 
-    def branch(row, name, pool):
+    def branch(row, name, pool, current):
         value = hexbyte(row['branch'], f'{name} branch')
-        require(value in pool, f'{name}: 원래 표의 같은 종류 레코드에 없는 평가 갈래 {value:02X}')
+        require(value in pool or value == current, f'{name}: 원래 표의 같은 종류 레코드에 없는 평가 갈래 {value:02X}')
         return value
 
-    for n, row in rows('actions', 'action', ACTION_COUNT):
+    for n, row in rows('actions', 'action', ACTION_COUNT, NEW_ACTIONS):
         name = f'actions {n:02X}'
-        keys(row, ('action', 'kind', 'value', 'branch', 'mp', 'range', 'resist', 'battle_mp'), name)
-        old = decode_action(rom, n, record(rom, ACTIONS, n))
+        keys(row, ('action', 'copy', 'kind', 'value', 'branch', 'mp', 'range', 'resist', 'battle_mp'), name)
+        base = ACTIONS + n * 5
+        rec = record(rom, ACTIONS, n)
+        if 'copy' in row:
+            require(n in NEW_ACTIONS, f'{name}: copy 는 새 번호({NEW_FIRST:02X}~{NEW_LAST:02X})만 받음')
+            src = hexbyte(row['copy'], f'{name} copy')
+            require(src < ACTION_COUNT, f'{name} copy: 원래 행동 00~{ACTION_COUNT - 1:02X} 여야 함')
+            rec = record(original or rom, ACTIONS, src)
+        old = decode_action(rom, n, rec)
         if 'kind' in row:
             require(hexbyte(row['kind'], f'{name} kind') == int(old['kind'], 16), f'{name}: kind 는 읽기 전용')
         require(row.get('battle_mp', old['battle_mp']) == old['battle_mp'], f'{name}: battle_mp 는 읽기 전용')
-        base = ACTIONS + n * 5
         if 'value' in row:
             put(base + 1, integer(row['value'], 0, 255, f'{name} value'), f'행동 {n:02X} AI 기대 값')
         if 'branch' in row:
-            put(base + 2, branch(row, name, allowed[0]), f'행동 {n:02X} AI 평가 갈래')
+            put(base + 2, branch(row, name, allowed[0], rec[2]), f'행동 {n:02X} AI 평가 갈래')
         if 'mp' in row:
             put(base + 3, integer(row['mp'], 0, 255, f'{name} mp'), f'행동 {n:02X} AI MP')
         if 'range' in row or 'resist' in row:
-            rec = record(rom, ACTIONS, n)
             rng = rec[4] & 0xE0
             if 'range' in row:
                 value = hexbyte(row['range'], f'{name} range')
@@ -170,6 +181,11 @@ def edits(rom, doc, original=None):
                     require(0x50 <= kind <= 0x61 and kind != 0x5F, f'{name} resist: 50~61(5F 제외) 또는 null')
                     resist = kind - 0x50
             put(base + 4, rng | resist, f'행동 {n:02X} AI 범위·내성')
+        if 'copy' in row:
+            # 덮지 않은 칸은 베낀 레코드 값으로.
+            for i, v in enumerate(rec):
+                if base + i not in wanted:
+                    put(base + i, v, f'행동 {n:02X} AI 레코드({src:02X} 베낌)')
 
     for n, row in rows('items', 'item', ITEM_COUNT):
         name = f'items {n:02X}'
@@ -178,7 +194,7 @@ def edits(rom, doc, original=None):
         if 'value' in row:
             put(base + 1, integer(row['value'], 0, 255, f'{name} value'), f'물건 {n:02X} AI 기대 값')
         if 'branch' in row:
-            put(base + 2, branch(row, name, allowed[1]), f'물건 {n:02X} AI 평가 갈래')
+            put(base + 2, branch(row, name, allowed[1], record(rom, ITEMS, n)[2]), f'물건 {n:02X} AI 평가 갈래')
 
     for t, row in rows('tactics', 'tactic', TACTIC_COUNT):
         keys(row, ('tactic', *(f[0] for f in TACTIC_FIELDS)), f'tactics {t}')

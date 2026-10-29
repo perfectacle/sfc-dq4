@@ -121,6 +121,30 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(sorted(pictures), [0, 1])       # 같은 머리인 그림 01 도 함께
         self.assertEqual(monsters, {1: (0, [3] * 15), 2: (0, [3] * 15)})   # 레코드를 함께 쓰는 몬스터 2 도 함께
 
+    def test_more_pieces_need_group_check(self):
+        # 가로 4·세로 2 칸에 왼쪽 16x16 조각 하나(조각 1·타일 4)인 그림. 원래 배치 밖의 칸 셋을 그리면 8x8 조각 셋
+        # (조각 3·타일 3)이 되어 조각이 늘어난다.
+        rng = random.Random(3)
+        tiles = [bytes(rng.randrange(256) for _ in range(32)) for _ in range(4)]
+        raw = bytes([0, 0, 0, 1, 1, 0x31, 0x80, 0x20]) + b''.join(encode_tile(x) for x in tiles)
+        self.rom.d[lorom(0x258C99):lorom(0x258C99) + len(raw)] = raw
+        grid = [[0] * 32 for _ in range(16)]
+        for x, y, c in ((0, 0, 1), (16, 0, 2), (24, 8, 3)):
+            for dy in range(8):
+                grid[y + dy][x:x + 8] = [c] * 8
+        self.save('three.png', grid)
+        doc = {'pictures': [{'picture': '00', 'image': 'three.png'}]}
+        with mock('dq5monlimits.losses', return_value=[]) as seen:
+            pictures, _ = self.run_plan(**doc)
+        self.assertEqual(pictures[0][2:], (3, 3))
+        self.assertEqual(seen.call_args.args[1], {0: (3, [2, 1]), 1: (3, [2, 1])})   # 같은 머리인 그림 01 도
+        hit = [(((0, 8, 0),), [8], [6], '구역 05 칸 1', '덜 놓임')]
+        with mock('dq5monlimits.losses', return_value=hit), self.assertRaisesRegex(ValueError, '구역 05 칸 1'):
+            self.run_plan(**doc)
+        # 이 롬에는 무리 조합이 없어, 한도를 정할 수 없는 그림으로 거부한다.
+        with self.assertRaisesRegex(ValueError, '한도를 정할 수 없음'):
+            self.run_plan(**doc)
+
     def test_rejects(self):
         self.save('same.png', self.grid)
         self.save('wide.png', [[1] * 24 for _ in range(16)])
