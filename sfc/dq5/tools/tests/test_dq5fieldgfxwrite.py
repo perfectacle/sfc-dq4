@@ -9,6 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import dq5fieldgfxwrite as fgw  # noqa: E402
+import dq5field  # noqa: E402
 from dq5field import rle  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
 import dq5mapgfxwrite as mgw  # noqa: E402
@@ -44,10 +45,16 @@ class RleTests(unittest.TestCase):
 
 class FieldPatchTests(unittest.TestCase):
     def setUp(self):
-        d = bytearray(0x180000)
+        d = bytearray(0x200000)
         for sites in fgw.SITES.values():
             for at, want in sites:
                 put(d, at, want)
+        for at, want in fgw.ANIM_SITES.values():
+            put(d, at, want)
+        put(d, fgw.LOAD_SITE, fgw.LOAD_ORIG)
+        for at in fgw.NIB_SITES:
+            put(d, at, fgw.NIB_ORIG)
+        put(d, fgw.ANIM_TABLE, fgw.encode_anim_table(8))
         tiles = bytes((i // 32) & 0xFF if i % 3 else 0 for i in range(fgw.TILES * 32))
         put(d, fgw.FIELD_CHR, fgw.encode_rle(fgw.tiles_to_planar(tiles)))
         put(d, fgw.ANIM, fgw.encode_rle(bytes(fgw.ANIM_BYTES)))
@@ -108,6 +115,135 @@ class FieldPatchTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             fgw.patch(self.rom, self.doc, self.tmp.name)
 
+    def apply(self, manifest):
+        d = bytearray(self.data)
+        for w in manifest['writes']:
+            put(d, int(w['at'].replace(':', ''), 16), bytes.fromhex(w['hex']))
+        return Rom(bytes(d))
+
+    def test_anim_set_count(self):
+        path = Path(self.tmp.name) / 'anim.bin'
+        sets = [bytes([k + 1]) * fgw.ANIM_SET for k in range(16)]
+        path.write_bytes(b''.join(sets))
+        with self.assertRaisesRegex(ValueError, '--anim-at'):
+            fgw.patch(self.rom, self.doc, self.tmp.name)
+        m = fgw.patch(self.rom, self.doc, self.tmp.name, anim_at=0x338000)
+        notes = {w['note']: w for w in m['writes']}
+        rle_len = len(bytes.fromhex(notes['anim RLE']['hex']))
+        table = notes['움직이는 타일 벌 16개의 WRAM 주소 표']
+        self.assertEqual(table['at'], f'33:{0x8000 + rle_len:04X}')
+        self.assertEqual(bytes.fromhex(table['hex'])[-2:], (0xC800 + 15 * 192).to_bytes(2, 'little'))
+        self.assertEqual(notes['벌 돌리기 AND #$0F']['at'], '02:ACE8')
+        self.assertEqual(notes['벌 주소 표(상위 바이트)']['hex'], fgw.long_addr(0x338000 + rle_len + 1).hex(' '))
+        cur = fgw.current(self.apply(m))
+        self.assertEqual(cur['anim_sets'], sets)
+        path.write_bytes(bytes(fgw.ANIM_SET * 12))                                # 2의 거듭제곱이 아님
+        with self.assertRaisesRegex(ValueError, '벌'):
+            fgw.patch(self.rom, self.doc, self.tmp.name, anim_at=0x338000)
+        path.write_bytes(bytes(fgw.ANIM_SET * 32))
+        with self.assertRaises(ValueError):
+            fgw.patch(self.rom, self.doc, self.tmp.name, anim_at=0x338000)
+        path.write_bytes(bytes(range(256)) * 12)                                  # 16벌, 거의 글자 그대로
+        with self.assertRaisesRegex(ValueError, '한 뱅크'):
+            fgw.patch(self.rom, self.doc, self.tmp.name, anim_at=0x33F800)
+        path.write_bytes(bytes(fgw.ANIM_SET * 4))                                 # 4벌은 제자리, AND 만
+        m = fgw.patch(self.rom, self.doc, self.tmp.name)
+        self.assertEqual({w['note'] for w in m['writes']}, {'anim RLE', '벌 돌리기 AND #$03'})
+        self.assertEqual(next(w['at'] for w in m['writes'] if w['note'] == 'anim RLE'), '1E:D0FF')
+        self.assertNotIn('rom_size', m)
+        self.assertEqual(fgw.current(self.apply(m))['anim_sets'], [bytes(fgw.ANIM_SET)] * 4)
+        path.write_bytes(bytes(range(256)) * 3)                                   # 4벌이지만 원래 자리보다 김
+        with self.assertRaisesRegex(ValueError, '--anim-at'):
+            fgw.patch(self.rom, self.doc, self.tmp.name)
+        m = fgw.patch(self.rom, self.doc, self.tmp.name, anim_at=0x338000)
+        self.assertFalse([w for w in m['writes'] if '표' in w['note']])
+        path.write_bytes(bytes(fgw.ANIM_SET * 8))                                 # 8벌을 옮기면 표는 그대로
+        m = fgw.patch(self.rom, self.doc, self.tmp.name, anim_at=0x338000)
+        self.assertFalse([w for w in m['writes'] if '벌' in w['note']])
+
+    def test_person_palettes(self):
+        self.assertEqual(len(self.doc['person_palettes']['day']), 30)
+        del self.doc['person_palettes']                                           # 예전 문서도 그대로 받음
+        self.assertEqual(fgw.patch(self.rom, self.doc, self.tmp.name)['writes'], [])
+        self.doc['person_palettes'] = {'day': [0x7C00] * 30, 'night': [0] * 30}
+        m = fgw.patch(self.rom, self.doc, self.tmp.name)
+        self.assertEqual([w['at'] for w in m['writes']], ['01:A45E'])
+        self.assertEqual(fgw.current(self.apply(m))['person_palettes']['day'], [0x7C00] * 30)
+        self.doc['person_palettes']['night'] = [0x8000] + [0] * 29
+        with self.assertRaisesRegex(ValueError, '15비트'):
+            fgw.patch(self.rom, self.doc, self.tmp.name)
+        self.doc['person_palettes'] = {'day': [0] * 30}
+        with self.assertRaisesRegex(ValueError, 'person_palettes'):
+            fgw.patch(self.rom, self.doc, self.tmp.name)
+
+    def test_world_tiles(self):
+        folder = Path(self.tmp.name)
+        w1 = bytearray((folder / 'tiles.bin').read_bytes())
+        w1[63 * 32:64 * 32] = bytes(range(32))
+        (folder / 'w1.bin').write_bytes(w1)
+        nib1 = list(self.doc['tile_palettes'])
+        nib1[63] = 9
+        self.doc['worlds'] = {'world1': {'tiles_file': 'w1.bin', 'tile_palettes': nib1}}
+        with self.assertRaisesRegex(ValueError, '--worlds-at'):
+            fgw.patch(self.rom, self.doc, self.tmp.name)
+        with self.assertRaisesRegex(ValueError, '겹침'):
+            fgw.patch(self.rom, self.doc, self.tmp.name, tiles_at=0x348100, worlds_at=0x348000)
+        m = fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x348000)
+        sites = {w['at']: w for w in m['writes']}
+        self.assertEqual(sites['01:A4A7']['hex'], '22 00 80 34 80 04 ea ea ea ea')
+        nib_hook = fgw.long_addr(0x348000 + fgw.LOAD_LEN).hex(' ')
+        self.assertEqual([sites[a]['hex'] for a in ('00:BBB4', '00:BBBE', '00:BBDA', '00:BBE4')], [f'22 {nib_hook}'] * 4)
+        self.assertEqual(m['rom_size'], 2)
+        cur = fgw.current(self.apply(m))
+        self.assertEqual(cur['worlds']['world1'], (bytes(w1), nib1))
+        self.assertEqual(cur['worlds']['world0'], ((folder / 'tiles.bin').read_bytes(), self.doc['tile_palettes']))
+        self.assertEqual(cur['worlds']['world2'], cur['worlds']['world0'])
+        self.assertEqual(fgw.nib_hook(0x123456)[dq5field.NIB_HOOK_TABLE:dq5field.NIB_HOOK_TABLE + 3],
+                         fgw.long_addr(0x123456))
+        patched = self.apply(m)                                                   # 디코더도 세계별 니블 표를 읽음
+        t0, t1 = dq5field.tile_word(patched, 63, True, 0), dq5field.tile_word(patched, 63, True, 1)
+        self.assertEqual((t0 >> 10 & 7, t1 >> 10 & 7), ((self.doc['tile_palettes'][63] + 2) & 7, (9 + 2) & 7))
+        self.assertEqual(dq5field.tile_word(self.rom, 63, True, 1), dq5field.tile_word(self.rom, 63, True, 0))
+        _, _, table, _, _ = fgw.worlds_layout(0x348000)
+        rom = self.apply(m)
+        self.assertEqual([rom.u24(table + k * 4) for k in (0, 2, 3)], [fgw.FIELD_CHR] * 3)
+        m = fgw.patch(self.rom, self.doc, self.tmp.name, tiles_at=0x358000, worlds_at=0x348000)
+        notes = [w['note'] for w in m['writes']]
+        self.assertNotIn('tiles 뱅크', notes)                                     # 즉값 자리는 훅이 덮음
+        self.assertEqual(self.apply(m).u24(table), 0x358000)
+        self.doc['worlds'] = {'world3': {'tiles_file': 'w1.bin', 'tile_palettes': nib1}}
+        with self.assertRaisesRegex(ValueError, 'worlds'):
+            fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x348000)
+        self.doc['worlds'] = {'world2': {'tiles_file': 'w1.bin', 'tile_palettes': nib1[:-1]}}
+        with self.assertRaisesRegex(ValueError, 'tile_palettes'):
+            fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x348000)
+        del self.doc['worlds']
+        with self.assertRaisesRegex(ValueError, 'worlds 와 함께'):
+            fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x348000)
+
+
+    def test_world_drawing_uses_world_nibbles(self):
+        import dq5gfx
+        nib1 = list(self.doc['tile_palettes'])
+        nib1[1] ^= 1
+        self.doc['worlds'] = {'world1': {'tiles_file': 'tiles.bin', 'tile_palettes': nib1}}
+        d = bytearray(self.apply(fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x348000)).d)
+        put(d, dq5field.BLOCK_LOWER, b'\x01' * 4)                                   # 블록 0 아래층 네 칸을 타일 1 로
+        rom = Rom(bytes(d))
+        cg = b''.join(((k * 0x0421) & 0x7FFF).to_bytes(2, 'little') for k in range(256))
+        tiles = dq5gfx.field_tiles(rom)
+        b0, b1 = (dq5gfx.field_block_images(rom, cg, tiles, world=w)[0].tobytes() for w in (0, 1))
+        self.assertNotEqual(b0, b1)
+        plain = bytearray(self.data)
+        put(plain, dq5field.BLOCK_LOWER, b'\x01' * 4)
+        self.assertEqual(dq5gfx.field_block_images(Rom(bytes(plain)), cg, tiles, world=1)[0].tobytes(), b0)
+        vram = bytes(0x4000) + bytes(range(256)) * 64 + bytes(0x8000)
+        drawn = []
+        for w in (0, 1):
+            path = os.path.join(self.tmp.name, f'w{w}.png')
+            dq5field.render(rom, bytes(1), bytes(1), vram, cg, 0, 0, 1, 1, path, world_no=w)
+            drawn.append(Path(path).read_bytes())
+        self.assertNotEqual(*drawn)
 
 class HighSetTests(unittest.TestCase):
     def test_high_sites_and_no_palettes(self):

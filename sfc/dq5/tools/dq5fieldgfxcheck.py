@@ -223,11 +223,11 @@ def check_field(name, rom_path, dumps, orig_dump, info):
     want = [o['tiles'][t * 32:t * 32 + 32] for t in range(fgw.TILES)]
     bad = [t for t in range(fgw.TILES) if t not in ANIM_TILES and got[t] != want[t]]
     require(not bad, f'{name}: 필드 타일 {len(bad)}개가 기대와 다름 {bad[:8]}')
-    sets = [o['anim'][k * 192:(k + 1) * 192] for k in range(8)]
+    sets = o['anim_sets']                      # 02:ACE7 의 AND 와 벌 주소 표대로(벌 수를 바꾼 롬도)
     seen = set()
     for f in frames:
         shown = b''.join(field_vram_tiles((dump / f'f{f}.vram').read_bytes())[454:460])
-        require(shown in sets, f'{name}: {f}프레임 움직이는 타일 454~459 가 여덟 벌 어디와도 다름')
+        require(shown in sets, f'{name}: {f}프레임 움직이는 타일 454~459 가 {len(sets)}벌 어디와도 다름')
         seen.add(sets.index(shown))
     pal_set = check_palettes(name, cg, o['palettes']['world0'])
     wave = (cg_color(cg, 4, 1), cg_color(cg, 4, 2), cg_color(cg, 4, 3))
@@ -252,7 +252,7 @@ def check_field(name, rom_path, dumps, orig_dump, info):
             require(all(ow.get(u) != w for u, w in words), f'{name}: 고친 팔레트 니블이 타일맵에 없음')
             out['edited']['tile_palette'] = f'타일 {t} 칸 {len(words)}개의 팔레트 줄이 바뀜'
         if name == 'field-moved':
-            require(seen == set(range(8)), f'{name}: 64프레임 동안 본 벌이 {sorted(seen)}')
+            require(seen == set(range(len(sets))), f"{name}: 64프레임 동안 본 벌이 {sorted(seen)}")
             require(got[454] == DOTS != field_vram_tiles(ov)[454], f'{name}: 고친 움직이는 타일이 VRAM 에 없음')
             out['anim_tile_454'] = '점무늬(여덟 벌 모두 옮긴 자료와 같음)'
     return out

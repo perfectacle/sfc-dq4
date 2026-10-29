@@ -603,7 +603,8 @@ def field_tiles(rom):
     return [planar(chrs[i * 32:i * 32 + 32]) for i in range(512)]
 
 
-def field_block_images(rom, cgram, tiles, layers=('lower', 'upper')):
+def field_block_images(rom, cgram, tiles, layers=('lower', 'upper'), world=0):
+    """블록 511개 그림. world 는 니블 표를 고르는 세계 번호($1949, dq5fieldgfxwrite --worlds-at 롬이면 세계마다 다름)."""
     from dq5field import BLOCK_LOWER, BLOCK_UPPER, block_tiles, tile_word
     colors = cgram_colors(cgram)
     cache = {}
@@ -614,7 +615,7 @@ def field_block_images(rom, cgram, tiles, layers=('lower', 'upper')):
             if ('upper' if upper else 'lower') not in layers:
                 continue
             for q, t in enumerate(block_tiles(rom, table, m)):
-                word = tile_word(rom, t, upper)
+                word = tile_word(rom, t, upper, world)
                 k = (word & 0x3FF, (word >> 10) & 7)
                 if k not in cache:
                     cache[k] = tile_image(tiles[k[0]], colors[k[1] * 16:k[1] * 16 + 16])
@@ -962,7 +963,7 @@ def export_field(rom, out):
                  note=f'$075E 하한 {when}')
     worlds = {0: blocks_by[day]}
     for world in (1, 2):
-        worlds[world] = field_block_images(rom, field_cgram(rom, world), tiles)
+        worlds[world] = field_block_images(rom, field_cgram(rom, world), tiles, world=world)
         out.save(world_image(rom, world, worlds[world]), f'field/field{world}.png', 'field', f'세계 {world}',
                  '세계 지도', variant='낮', note=f'$1949 = {world}. 땅이 있는 왼쪽 위 128x128 블록')
     for world, blocks in worlds.items():
