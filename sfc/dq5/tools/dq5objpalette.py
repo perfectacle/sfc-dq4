@@ -192,6 +192,8 @@ def swap_routine(table):
     """03:D24D 가 JSL 로 부르는 루틴(8비트 M, 16비트 X). 그림 번호 $1EC0 을 세트로 바꿔 표를 찾고, FF 면 원래 명령.
     그림 표는 03:D202 의 피연산자(뱅크 → DB, 주소 + 그림 번호 → X)로 찾는다."""
     operand, bank = PICTURE_SITE + 1, PICTURE_SITE + 3
+    # 16비트 ADC 라 표 주소 + 그림 번호가 FFFF 를 넘으면 뱅크를 넘지 못한다(원래 LDA long,X 와 다름). 원래 표와
+    # dq5picturegrow.py 가 옮긴 표(뒤에 물체 표 256바이트가 붙고 --at 이 뱅크를 넘으면 거부)는 + FF 까지 뱅크 안이다.
     return (bytes.fromhex('da 8b af') + bank.to_bytes(3, 'little') +     # PHX / PHB / LDA 그림 표 뱅크
             bytes.fromhex('48 ab c2 20 af c0 1e 7e 29 ff 00 18 6f') +    # PHA / PLB / REP #$20 / LDA $7E1EC0 / AND #$00FF / CLC / ADC
             operand.to_bytes(3, 'little') +                              # 그림 표 주소(16비트)
