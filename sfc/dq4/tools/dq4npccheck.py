@@ -143,7 +143,10 @@ def main():
                          if walkable(source, p["x"] + dx, p["y"] + dy) and (p["x"] + dx, p["y"] + dy) not in occupied),
                         None)
             if side is None:
-                jobs.append(("unreachable", f"talk-{m.replace('/', '')}-{i}", m, None, None, p["night"], None))
+                # A map with no exit that is no group arrival is entered only by an event (3A/04).
+                closed = not dq4block.exit_cells(prg, source) and LINKS[group].get("map", 0) != number
+                jobs.append(("closed" if closed else "unreachable", f"talk-{m.replace('/', '')}-{i}", m, None, None,
+                             p["night"], None))
                 continue
             sx, sy, d = side
             to = f"{m},{','.join(map(str, cell(sx, sy)))}"
@@ -160,7 +163,7 @@ def main():
                              (int(p["message"], 16), None)))
 
     def scene(kind, name, to, test, night):
-        if kind == "unreachable":
+        if kind in ("unreachable", "closed"):
             return None, None, None
         if kind == "table":
             return run(mesence, rom_path, state, out, name, libdir, to, test, night) + (None,)
@@ -181,6 +184,8 @@ def main():
             wram, messages, timing = future.result()
             if kind == "unreachable":
                 results[name] = {"ok": False, "error": "no free walkable cell next to the person"}
+            elif kind == "closed":
+                results[name] = {"ok": True, "skipped": "map with no exit, entered only by an event"}
             elif kind == "shop":
                 items = [item for item, _ in messages or []]
                 results[name] = {"ok": items == want, "want": want, "got": messages, "timing": timing}

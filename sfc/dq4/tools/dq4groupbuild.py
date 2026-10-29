@@ -35,15 +35,29 @@ from dq4environmentrom import GROUPS, STAIRS  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
 
 # New DQ5 group -> FC group, the FC arrival from the field ($44/$45 after walking in from the field entrance;
-# fc/dq4/tools/dq4field.py entrances lists the same cells), the borrowed DQ5 map whose attributes (encounters, battle background, music) it takes,
-# the temporary field cell of its entrance, and the way out of the arrival to the field. "music" replaces the song
-# byte of the copied attributes (attribute +5): FC plays one song for the whole group (19:$803B, map branch $07BA),
-# and 02 バトランド plays FC song 03, 王宮のメヌエット, which the sound port puts in DQ5 song slot 01.
+# fc/dq4/tools/dq4field.py entrances lists the same cells) and its map ("map", 0 when absent), the borrowed DQ5 map whose attributes (encounters, battle background, music) it takes,
+# the temporary field cell of its entrance, the inputs that take the party from the arrival to the field, and a
+# walk from the field cell (341,56) onto the entrance that passes no other entrance. Field steps vary with the
+# ground, so the entrances sit where their walks end (measured). "music" replaces the song byte of the copied
+# attributes (attribute +5): FC plays one song for the whole group (19:$803B, map branch $07BA), and
+# 02 バトランド plays FC song 03, 王宮のメヌエット, which the sound port puts in DQ5 song slot 01.
 LINKS = {
-    0x36: {"fc": 0x02, "arrival": (0x00, 0x1D), "attrs": "03/00", "music": 0x01, "field": (345, 56), "out": "left"},
-    0x37: {"fc": 0x12, "arrival": (0x0D, 0x19), "attrs": "19/02", "field": (337, 56), "out": "down"},
+    0x36: {"fc": 0x02, "arrival": (0x00, 0x1D), "attrs": "03/00", "music": 0x01, "field": (345, 56), "out": "left:64", "walk": "right:64"},
+    0x37: {"fc": 0x12, "arrival": (0x0D, 0x19), "attrs": "19/02", "field": (337, 56), "out": "down:64", "walk": "left:64"},
+    # 古井戸の底, the tower of chapter 1's end, and the house of 41/00. Their attributes are a placeholder
+    # (the castle's: no encounters) until the DQ4 encounters and music are ported.
+    0x38: {"fc": 0x1C, "arrival": (0x0D, 0x10), "attrs": "03/00", "field": (332, 52), "out": "down:64", "walk": "up:64,wait:30,left:64"},
+    0x39: {"fc": 0x30, "arrival": (0x10, 0x21), "map": 3, "attrs": "03/00", "field": (349, 62), "out": "down:64",
+           "walk": "down:64,wait:30,right:64,wait:30,up:16"},
+    # 41/00's arrival is its stair to the field: step off and back on.
+    0x3A: {"fc": 0x41, "arrival": (0x03, 0x03), "attrs": "03/00", "field": (333, 64), "out": "down:32,wait:60,up:32",
+           "walk": "down:64,wait:30,left:64"},
+    # Below 古井戸の底: no field entrance; its group arrival is the cell the well's stair leads to (3A/02).
+    0x3B: {"fc": 0x3A, "arrival": (0x03, 0x02), "map": 2, "attrs": "03/00", "field": None, "out": None},
 }
-NEWMAP_AT = ("--entrance-table-at", "3C:C000", "--records-at", "34:8000", "--door-bank", "3B")
+# The attribute table grows by 6 bytes a map and outgrows its own bank (108 spare bytes), so it moves whole.
+NEWMAP_AT = ("--entrance-table-at", "3C:C000", "--records-at", "34:8000", "--door-bank", "3B",
+             "--attr-table-at", "3C:D000")
 EXIT_AT = ("--exits-at", "2A:D812", "--records-at", "3C:A000")
 ENTRANCES_AT = ("--entrances-at", "3C:8000")
 # dq5textwrite writes the whole walking text again, so it takes banks of its own.
@@ -76,8 +90,10 @@ def exit_order(prg, fc_group, number):
 
 
 def exit_records(prg, group):
-    """dq5exittables/1 exit lists of the group's maps from the FC stair links."""
+    """dq5exittables/1 exit lists of the group's maps from the FC stair links. A stair to another ported FC
+    group is an other-group exit, one to the field the special exit 0."""
     fc_group = LINKS[group]["fc"]
+    dq5_group = {link["fc"]: g for g, link in LINKS.items()}
     numbers = fc_numbers(group)
     order = {n: exit_order(prg, fc_group, n) for n in numbers}
     cache = {}
@@ -91,10 +107,17 @@ def exit_records(prg, group):
         rows = []
         for x, y in order[number]:
             dest = to[x, y]
-            if not dest or dest.get("group") != fc_group or dest.get("index") not in order:
-                raise ValueError(f"{fc_group:02X}/{number:02X} ({x:02X},{y:02X}): stair leaves the group: {dest}")
-            rows.append({"kind": "same-group", "destination_map": dest["index"],
-                         "exit": order[dest["index"]].index((dest["x"], dest["y"]))})
+            if dest and "field" in dest:
+                # 2A:F7B2 -> 2A:F425: out to the group's field entrance (aux entrance table).
+                rows.append({"kind": "special", "special": 0})
+                continue
+            if not dest or dest.get("group") not in dq5_group or "index" not in dest:
+                raise ValueError(f"{fc_group:02X}/{number:02X} ({x:02X},{y:02X}): stair to an FC group not ported: {dest}")
+            there = exit_order(prg, dest["group"], dest["index"])
+            row = {"kind": "same-group", "destination_map": dest["index"], "exit": there.index((dest["x"], dest["y"]))}
+            if dest["group"] != fc_group:
+                row = {**row, "kind": "other-group", "group": dq5_group[dest["group"]]}
+            rows.append(row)
         records[f"{group:02X}/{number:02X}"] = rows or [{"kind": "special", "special": 0}]
     return records
 
@@ -187,7 +210,8 @@ def build(dq5, dq4, out):
     newmap = {"format": "dq5newmap/1", "groups": [], "maps": []}
     for group, link in LINKS.items():
         x, y = cell(*link["arrival"])
-        newmap["groups"].append({"group": f"{group:02X}", "entrance": {"bytes": [WORLD_CODE << 5, x, y, LAYER, 0]}})
+        newmap["groups"].append({"group": f"{group:02X}",
+                                 "entrance": {"bytes": [WORLD_CODE << 5 | link.get("map", 0), x, y, LAYER, 0]}})
     for m in new_maps:
         group = int(m[:2], 16)
         newmap["maps"].append({"map": m, "record": {"source": f"env/{names[m]}.dq5map.json"},
@@ -236,7 +260,8 @@ def build(dq5, dq4, out):
     _run(DQ5_TOOLS / "dq5fieldtables.py", dq5, "dump", "-o", out / "fieldtables-orig.json")
     tables = json.loads((out / "fieldtables-orig.json").read_text(encoding="utf-8"))
     aux = [{k: e[k] for k in ("group", "x", "y")} for e in tables["entrances"] if e["table"] == "aux"]
-    aux += [{"group": group, "x": link["field"][0], "y": link["field"][1]} for group, link in LINKS.items()]
+    aux += [{"group": group, "x": link["field"][0], "y": link["field"][1]} for group, link in LINKS.items()
+            if link["field"]]
     step("dq5fieldtables.py", "entrances", {"format": "dq5fieldtables/1", "entrance_tables": {"aux": aux}}, dq5,
          *ENTRANCES_AT, *new_map_args)
 
@@ -246,7 +271,7 @@ def build(dq5, dq4, out):
     for tool, source, args in checks:
         _run(DQ5_TOOLS / tool, rom if tool == "dq5newmap.py" else dq5, "check", source, *args)
     summary = {"rom": str(rom), "maps": new_maps, "exits": ours, "areas": areas,
-               "fields": {f"{g:02X}": link["field"] for g, link in LINKS.items()},
+               "fields": {f"{g:02X}": link["field"] for g, link in LINKS.items() if link["field"]},
                "records_end": report["records_end"], "bank01_bytes": report["bank01_bytes"]}
     _save(out / "groups.json", summary)
     return summary

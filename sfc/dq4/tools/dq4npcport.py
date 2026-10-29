@@ -59,6 +59,11 @@ PICTURES = {
     0x25: 0x26,  # dog
     0x28: 0x19,  # woman
     0x36: 0x05,  # nun
+    0x27: 0x4E,  # fire (48 is on the list of pictures nobody talks to, 05:862F)
+    0x40: 0x42,  # old man
+    0x41: 0x9B,  # purple monster
+    0x45: 0x1F,  # wizard
+    0x3D: 0x5B,  # heal slime
 }
 FACING = ("up", "right", "down", "left")
 # Placeholder line for a person whose FC talk shows nothing at the start of chapter 1.
@@ -171,7 +176,9 @@ def dq5_codes(rom, messages):
                     raise ValueError(f"FC message {m:04X}: dakuten mark without a character")
                 codes.append(_code(m, unicodedata.normalize("NFC", pieces[k][1] + "\u3099")))
                 k += 1
-            elif p == "NOINDENT":
+            elif p in ("NOINDENT", "STOP") or p.startswith("SOUND:"):
+                # No sound control in DQ5 walking text, and FC STOP only comes right before END: the
+                # placeholder text goes without them.
                 pass
             elif p == "END":
                 break
