@@ -28,6 +28,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
         sys.path.insert(0, str(path))
 
 import dq4block  # noqa: E402
+import dq4talk  # noqa: E402
 from dq4environmentmap import block_prop  # noqa: E402
 from dq4environmentrom import GATE_KIND, objects  # noqa: E402
 from dq4groupbuild import LINKS, cell, exit_order, fc_numbers  # noqa: E402
@@ -101,14 +102,16 @@ def stair_scenes(prg):
             source = dq4block.Map(prg, fc_group, number)
             to = {(e["x"], e["y"]): e["to"] for e in dq4block.exit_links(prg, fc_group, number, cache)}
             for i, (x, y) in enumerate(order[number]):
-                start = next((((x - dx, y - dy), d) for (dx, dy), d in DIRS.items()
-                              if walkable(source, x - dx, y - dy) and (x - dx, y - dy) not in order[number]), None)
-                if start is None:
+                # Every walkable neighbour, then later starts: a wandering person can stand on the stair or in
+                # the way (FC starts some walking people on a stair).
+                starts = [(f"{group:02X}/{number:02X},{','.join(map(str, cell(x - dx, y - dy)))}",
+                           f"wait:{late},{d}:{PRESS},wait:400" if late else f"{d}:{PRESS},wait:400")
+                          for late in range(0, 1200, 120) for (dx, dy), d in DIRS.items()
+                          if walkable(source, x - dx, y - dy) and (x - dx, y - dy) not in order[number]]
+                if not starts:
                     raise ValueError(f"{fc_group:02X}/{number:02X} ({x:02X},{y:02X}): no walkable cell next to the stair")
-                (sx, sy), direction = start
                 dest = to[x, y]
-                yield (f"stair-{group:02X}{number:02X}-{i}", f"{group:02X}/{number:02X},{','.join(map(str, cell(sx, sy)))}",
-                       f"{direction}:{PRESS},wait:400",
+                yield (f"stair-{group:02X}{number:02X}-{i}", starts,
                        {"map": f"{group:02X}/{dest['index']:02X}", "cell": list(cell(dest["x"], dest["y"]))})
 
 
@@ -128,11 +131,11 @@ def main():
     rom, state = args.rom.resolve(), args.state.resolve()
     prg = ines.prg(args.dq4.read_bytes())
 
-    jobs = [(name, {"TO": to, "TEST": test}, want) for name, to, test, want in stair_scenes(prg)]
+    jobs = [(name, [{"TO": to, "TEST": test} for to, test in starts], want) for name, starts, want in stair_scenes(prg)]
     for group, link in LINKS.items():
         x, y = cell(*link["arrival"])
         fx, fy = link["field"]
-        jobs.append((f"exit-{group:02X}", {"TO": f"{group:02X}/00,{x},{y}", "TEST": f"{link['out']}:{PRESS * 2},wait:400"},
+        jobs.append((f"exit-{group:02X}", [{"TO": f"{group:02X}/00,{x},{y}", "TEST": f"{link['out']}:{PRESS * 2},wait:400"}],
                      {"field": [fx, fy + 1]}))
     results = {}
     # Entering from the field starts on the free field cell (341,56) of --field-state: dq5warp's FIELD
@@ -147,20 +150,30 @@ def main():
                    f"{step}:{abs(fx - FIELD_START[0]) * 16},wait:400")
         want = {"map": f"{group:02X}/00", "cell": [x, y]}
         results[f"enter-{group:02X}"] = {"got": got, "want": want, "ok": same_place(got, want)}
+    def tries(name, starts, want):
+        for n, extra in enumerate(starts):
+            got = scene(mesence, rom, state, out, f"{name}-{n}" if n else name, **extra)
+            if same_place(got, want):
+                break
+        return got, n
+
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
-        futures = {pool.submit(scene, mesence, rom, state, out, name, **extra): (name, want)
-                   for name, extra, want in jobs}
+        futures = {pool.submit(tries, name, starts, want): (name, want) for name, starts, want in jobs}
         for future in concurrent.futures.as_completed(futures):
             name, want = futures[future]
-            got = future.result()
-            results[name] = {"got": got, "want": want, "ok": same_place(got, want)}
+            got, n = future.result()
+            results[name] = {"got": got, "want": want, "ok": same_place(got, want), "start": n}
 
     # Area moves: the gate's open flag is cleared on a group change, so set it from another map of the group.
     source = dq4block.Map(prg, LINKS[0x36]["fc"], 0)
     gx, gy, _, _ = next(o for o in objects(source) if o[2] == GATE_KIND)
+    # The hop cell needs a free cell below: the warp steps down from it, or up when that is blocked (off the
+    # top row of the map that is the field).
     other = dq4block.Map(prg, LINKS[0x36]["fc"], 3)
-    hx, hy = cell(*next((x, y) for y in range(other.h) for x in range(other.w)
-                        if walkable(other, x, y) and walkable(other, x + 1, y)))
+    people = {dq4talk.pos(r, n) for n in (False, True) for r in dq4talk.npc_list(prg, LINKS[0x36]["fc"], 3, n)}
+    hx, hy = cell(*next((x, y) for y in range(1, other.h) for x in range(other.w)
+                        if all(walkable(other, x + dx, y + dy) and (x + dx, y + dy) not in people
+                               for dx, dy in ((0, 0), (1, 0), (0, 1), (1, 1)))))
     side = scene(mesence, rom, state, out, "area-hop", TO=f"36/03,{hx},{hy}", SAVE="hop.mss")
     hop = out / "area-hop" / "hop.mss"
     area = [("area-up", {"TO": f"36/00,{gx},{gy + 5}", "SET": "21C2=FF", "TEST": f"up:{PRESS},wait:400"},

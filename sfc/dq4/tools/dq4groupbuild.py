@@ -3,7 +3,8 @@
 Order matters (sfc/dq4/docs/dq4-environment-format.md, 「그룹 연결」):
   1. dq4environmentrom.py patch -> env ROM. The door table copy made in 2 must contain its bank-01 tail.
   2. dq5newmap.py from the env ROM: new groups, maps (records from the dq5map/1 documents of 1), arrivals.
-  3. dq5exitreloc.py, dq5npcrelocate.py, dq5fieldtables.py from the original ROM with --new-map.
+  3. dq5exitreloc.py, dq5npcrelocate.py (the FC people of dq4npcport.py), dq5fieldtables.py from the original
+     ROM with --new-map, and dq5textwrite.py with their Japanese FC text.
   4. dq5build.py on the original ROM with 1, 2 and 3.
 
 FC stairs (08:$B22E) become same-group exits, FC exit-table cells ($05A0) become area moves, and the map
@@ -39,9 +40,11 @@ LINKS = {
     0x36: {"fc": 0x02, "arrival": (0x00, 0x1D), "attrs": "03/00", "field": (345, 56), "out": "left"},
     0x37: {"fc": 0x12, "arrival": (0x0D, 0x19), "attrs": "19/02", "field": (337, 56), "out": "down"},
 }
-NEWMAP_AT = ("--entrance-table-at", "3C:C000", "--records-at", "3A:8000", "--door-bank", "3B")
+NEWMAP_AT = ("--entrance-table-at", "3C:C000", "--records-at", "34:8000", "--door-bank", "3B")
 EXIT_AT = ("--exits-at", "2A:D812", "--records-at", "3C:A000")
 ENTRANCES_AT = ("--entrances-at", "3C:8000")
+# dq5textwrite writes the whole walking text again, so it takes banks of its own.
+TEXT_AT = ("--at", "35:8000")
 LAYER = 1
 WORLD_CODE = 1
 AREA_FLAGS = 0x80
@@ -178,12 +181,17 @@ def build(dq5, dq4, out):
         manifest = out / f"{name}.dq5patch.json"
         _run(DQ5_TOOLS / tool, base, "patch", source, "-o", manifest, *args)
         manifests.append(manifest)
-        return source, args
+        return tool, source, args
 
     checks = [step("dq5newmap.py", "newmap", newmap, env_rom, *NEWMAP_AT)]
-    _run(DQ5_TOOLS / "dq5npcrelocate.py", dq5, "patch", _save(out / "npc.json", {"format": "dq5npcrelocate/1", "scripts": []}),
-         "-o", out / "npc.dq5patch.json", *new_map_args)
+    import dq4npcport  # imports this module
+    lists, messages, people = dq4npcport.port(dq5, dq4)
+    _save(out / "npc-report.json", people)
+    _run(DQ5_TOOLS / "dq5npcrelocate.py", dq5, "patch",
+         _save(out / "npc.json", {"format": "dq5npcrelocate/1", "scripts": [], "lists": lists}),
+         "-o", out / "npc.dq5patch.json", "--report", out / "npc-layout.json", *new_map_args)
     manifests.append(out / "npc.dq5patch.json")
+    checks.append(step("dq5textwrite.py", "text", {"format": "dq5text/1", "messages": messages}, dq5, *TEXT_AT))
 
     _run(DQ5_TOOLS / "dq5exitreloc.py", dq5, "dump", "-o", out / "exits-orig.json", *new_map_args)
     exits = json.loads((out / "exits-orig.json").read_text(encoding="utf-8"))
@@ -211,9 +219,9 @@ def build(dq5, dq4, out):
 
     rom = out / "groups.sfc"
     _run(DQ5_TOOLS / "dq5build.py", dq5, "build", *manifests, "--size", 4, "-o", rom, "--ips", out / "groups.ips")
-    # dq5newmap checks the built ROM; dq5exitreloc builds its own from the original.
-    for tool, base, (source, args) in zip(("dq5newmap.py", "dq5exitreloc.py"), (rom, dq5), checks):
-        _run(DQ5_TOOLS / tool, base, "check", source, *args)
+    # dq5newmap checks the built ROM; dq5exitreloc and dq5textwrite build their own from the original.
+    for tool, source, args in checks:
+        _run(DQ5_TOOLS / tool, rom if tool == "dq5newmap.py" else dq5, "check", source, *args)
     summary = {"rom": str(rom), "maps": new_maps, "exits": ours, "areas": areas,
                "fields": {f"{g:02X}": link["field"] for g, link in LINKS.items()},
                "records_end": report["records_end"], "bank01_bytes": report["bank01_bytes"]}
