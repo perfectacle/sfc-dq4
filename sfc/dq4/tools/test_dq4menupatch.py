@@ -72,7 +72,8 @@ class BuildTests(unittest.TestCase):
         cls.out, cls.atlas, cls.records = mp.build(cls.rom, mp.Font('galmuri9'), mp.Font('galmuri7'))
 
     def test_base_is_overture_build(self):
-        self.assertEqual(hashlib.sha1(self.rom).hexdigest(), mp.BASE_SHA1)
+        self.assertIsNone(mp.base_problem(self.rom))
+        self.assertIsNotNone(mp.base_problem(self.out))
 
     def test_static_atlas_leaves_list_and_input_name_tiles_empty(self):
         self.assertLessEqual(len(self.atlas.cols), 0xD0)

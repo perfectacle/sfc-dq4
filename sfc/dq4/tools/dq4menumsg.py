@@ -39,7 +39,11 @@ GLYPH_START = 0x07D77C     # 원래 보행 모드 메시지 3,200개의 시작(�
 GLYPH_BANKS = range(0x07, 0x0B)
 READ_SLACK = 2              # 글자 한 줄을 3바이트로 읽으므로 묶음 끝 뒤 2바이트도 같은 뱅크 안이어야 한다
 CELL_W, CELL_H = 12, 11     # 가나 ぼ(높이 11)와 같은 바닥. 묶음은 13줄 칸의 아래에 맞춰 그린다(24:A6DA)
-PUNCT = ('.', '?')
+PUNCT = ('.', '?', '!', ',')
+# 부호 앞 빈 점. Galmuri11 부호는 앞 여백이 없어 「다.」처럼 앞 글자 ㅏ 곁줄기에 붙어 보였다(MesenCE 화면).
+PUNCT_PAD = 1
+# 1점짜리 마침표·쉼표는 SFC 화면에서 거의 보이지 않아 2점 굵기로 다시 그린다. 아래 줄이 기준선이다.
+PUNCT_ROWS = {'.': ('##', '##'), ',': ('##', '.#', '#.')}
 CHARS = ne.GLYPHS + list(PUNCT)
 
 LINE, END, PAUSE, SLOT = 0x1000, 0x1001, 0x1006, 0x1004
@@ -81,6 +85,37 @@ def glyph_rows(font, ch, w, h):
     return [''.join(r) for r in rows]
 
 
+def widen_tick(rows):
+    """오른쪽 세로획 바로 옆 1점 곁줄기(ㅏ·ㅑ·ㅘ 등)를 빈 오른쪽 열로 1점 늘린다.
+
+    Galmuri11 은 곁줄기가 1점이라 SFC 화면에서 「리」·「라」가 거의 같아 보였다. 글자 칸의 마지막 열은
+    글자 사이 틈이라, 늘린 줄에서만 다음 글자와 틈이 없어진다.
+    """
+    w = len(rows[0])
+    counts = [sum(r[x] == '#' for r in rows) for x in range(w)]
+    v = max(range(w // 2, w), key=lambda x: counts[x])
+    if counts[v] < 6 or v + 2 >= w:
+        return rows
+    return [r[:v + 2] + '#' + r[v + 3:] if r[v + 1] == '#' and r[v + 2] == '.' else r for r in rows]
+
+
+def hangul_rows(font, ch):
+    rows = glyph_rows(font, ch, CELL_W, CELL_H)
+    return widen_tick(rows) if '가' <= ch <= '힣' else rows
+
+
+def punct_rows(font, ch):
+    """부호 하나의 (폭, 줄 목록). 앞에 PUNCT_PAD 점을 비운다."""
+    if ch in PUNCT_ROWS:
+        shape = PUNCT_ROWS[ch]
+        w = PUNCT_PAD + len(shape[0]) + 1
+        rows = ['.' * w] * (CELL_H - len(shape)) + ['.' * PUNCT_PAD + r + '.' for r in shape]
+        return w, rows
+    g = font.glyphs[ch]
+    w = g['adv'] + PUNCT_PAD
+    return w, ['.' * PUNCT_PAD + r for r in glyph_rows(font, ch, g['adv'], CELL_H)]
+
+
 def plan_groups(sizes, start=GLYPH_START):
     """(글자 수, 폭, 높이) 목록 → 묶음마다 (글자 수, 폭, 높이, 주소). 뱅크를 넘는 묶음은 나눈다."""
     if start & 0xFFFF < 0x8000:
@@ -110,12 +145,17 @@ def index_entry(stream, bit):
     return cpu_to_bytes((cpu - (INDEX_BANK << 16)) << 3 | bit & 7)
 
 
-def apply(data, font):
-    """메뉴 롬 바이트 → 메시지를 바꾼 롬 바이트와 설명 줄."""
+def apply(data, font, extra=None):
+    """메뉴 롬 바이트 → 메시지를 바꾼 롬 바이트와 설명 줄. extra 는 {메시지 번호: 부분 목록}(dq4chapter1.py 등)."""
     d = bytearray(data)
     rom = Rom(bytes(data))
     msgs = [message(rom, m) for m in range(MESSAGES)]
-    for m, parts in TEXTS.items():
+    clash = set(TEXTS) & set(extra or {})
+    if clash:
+        raise ValueError(f'메뉴 메시지와 겹치는 번호: {sorted(f"{m:03X}" for m in clash)}')
+    for m, parts in {**TEXTS, **(extra or {})}.items():
+        if not 0 <= m < MESSAGES:
+            raise ValueError(f'메시지 {m:X}: 0~{MESSAGES - 1:X} 밖')
         msgs[m] = codes(parts)
     freq = {}
     for m in msgs:
@@ -124,8 +164,8 @@ def apply(data, font):
     tree, nodes, root = build_tree(freq)
     blob, starts = encode(tree, msgs)
 
-    hangul = [glyph_rows(font, ch, CELL_W, CELL_H) for ch in ne.GLYPHS]
-    punct = [(font.glyphs[ch]['adv'], glyph_rows(font, ch, font.glyphs[ch]['adv'], CELL_H)) for ch in PUNCT]
+    hangul = [hangul_rows(font, ch) for ch in ne.GLYPHS]
+    punct = [punct_rows(font, ch) for ch in PUNCT]
     sizes = [(len(hangul), CELL_W, CELL_H)] + [(1, w, CELL_H) for w, _ in punct]
     groups = plan_groups(sizes)
     pictures = list(hangul) + [rows for _, rows in punct]
@@ -196,7 +236,7 @@ def preview(font, path, scale=3):
     from PIL import Image
 
     def cell(c):
-        return None if c in ' 1' else (font.glyphs[c]['adv'] if c in PUNCT else CELL_W)
+        return None if c in ' 1' else (punct_rows(font, c)[0] if c in PUNCT else CELL_W)
     lines = [[]]
     for parts in TEXTS.values():
         for p in parts:
@@ -214,7 +254,7 @@ def preview(font, path, scale=3):
         for c in line:
             w = cell(c)
             if w:
-                for ry, row in enumerate(glyph_rows(font, c, w, CELL_H)):
+                for ry, row in enumerate(punct_rows(font, c)[1] if c in PUNCT else hangul_rows(font, c)):
                     for rx, v in enumerate(row):
                         if v == '#':
                             img.putpixel((x + rx, 4 + y * 13 + 2 + ry), (255, 255, 255))
