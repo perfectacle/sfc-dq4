@@ -31,6 +31,9 @@ SHOP_MEMBERS = 0x3A
 # 대열 바꾸기 창(46 왼쪽 DF 줄, 45 오른쪽 F1 줄). 줄마다 「번호 이름 Lv:」 라 이름 다섯째 칸 뒤로 미는 만큼 한 칸씩 넓힌다.
 # 46 은 왼쪽으로 옮기고 45 는 오른쪽으로만 넓혀 둘이 겹치지 않게 한다
 FORMATION = ((0x46, bytes((0x42, 0x04, 0x0E)), True), (0x45, bytes((0x10, 0x84, 0x0E)), False))
+# 「HP와 MP」 창(03 은 앞 세 사람, 04 는 넷째부터). 너비가 한 사람 몫(6)이라 이름 다섯째 칸이 열 사이 빈칸에 걸치고,
+# 맨 오른쪽 사람은 오른쪽 테두리를 덮었다. 상태 창처럼 한 사람 몫을 7 로
+HP_WINDOWS = (0x03, 0x04)
 # 가나 이름(몬스터 동료 등)의 바이트 → 글리프 번호 표(평 · 탁점 84 · 반탁점 83, 바이트마다 16비트, FFFF = 없음).
 # 필드에서는 가나 칸을 슬롯으로 돌려 써 원래 가나 타일로 찍은 이름이 깨지므로, 한글 이름처럼 Galmuri9 가나로 그린다
 KANA_TABLE = 0x60E800
@@ -94,6 +97,11 @@ def apply(data, font=None, asar=None):
     if d[o + 2] & 0x1F != 6:
         raise ValueError(f'창 {STATUS_WINDOW:02X} 머리 {d[o:o + 4].hex()}: 너비가 6 이 아님')
     d[o + 2] = (d[o + 2] & 0xE0) | 7
+    for w in HP_WINDOWS:
+        o = lorom(dq4menupatch.window_addr(d, w))
+        if d[o + 2] & 0x1F != 6 or d[o + 4:o + 6] != bytes((0x00, 0x89 if w == 4 else 0x8B)):
+            raise ValueError(f'창 {w:02X} 머리 {d[o:o + 8].hex()}: HP와 MP 창 모양이 아님')
+        d[o + 2] += 1
     for w in NAME_LISTS:
         o = lorom(dq4menupatch.window_addr(d, w))
         if d[o + 2] & 0x1F not in (8, 9) or d[o] & 0x1F == 0 or 0xD0 not in d[o + 4:o + 10]:
