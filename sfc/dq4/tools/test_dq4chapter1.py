@@ -38,6 +38,13 @@ class MessageTests(unittest.TestCase):
         self.assertEqual(ch._codes('하자고, @.'), ['하자고, ', ch.HERO, '.'])
         self.assertEqual(ch._codes('걸까요……'), ['걸까요', ch.DOTS, ch.DOTS])
 
+    def test_narration_repeats_code_after_each_page(self):
+        parts = ch.TEXTS[ch.MSG_NARRATION]
+        self.assertEqual(parts[0], ch.NARR)
+        for i, p in enumerate(parts):
+            if p == ch.PAGE:
+                self.assertEqual(parts[i + 1], ch.NARR)
+
     def test_too_long_line_is_refused(self):
         with self.assertRaises(ValueError):
             ch.say('가' * (ch.LINE_COLS + 1))
@@ -61,6 +68,15 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual(len(guards), 2)
         for gx in guards:
             self.assertTrue(all(gx != x for x in lanes))
+
+    def test_king_calls_box_then_reveal(self):
+        import dq4chapterbox
+        doc = ch.npc_doc({'overrides': []})
+        ops = [(c['op'], c['args']) for c in doc['scripts'][0]['commands']]
+        calls = [a for op, a in ops if op == '37']
+        want = dq4chapterbox.entry_points()
+        self.assertEqual(calls, [[v & 0xFF, v >> 8 & 0xFF, v >> 16] for v in (want['box'], want['reveal'])])
+        self.assertLess(ops.index(('37', calls[0])), ops.index(('21', [ch.MSG_NARRATION & 0xFF, ch.MSG_NARRATION >> 8])))
 
     def test_override_comes_first(self):
         doc = ch.npc_doc({'overrides': [{'map': '01/00', 'flag': 0, 'when': 'on', 'mask': 128, 'list': '10:8674'}]})

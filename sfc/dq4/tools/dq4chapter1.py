@@ -28,14 +28,13 @@ from dq5build import load  # noqa: E402
 LINE, END, PAGE, SPEAK, NARR, HERO = 0x1000, 0x1001, 0x1002, 0x1003, 0x1006, 0x1012
 Q = 0x363      # 「 (DQ5 글자)
 DOTS = 0x366   # …
-ONE = 0x2DD    # １
 
 EVENT_FLAG = (0x0E, 0x04)       # 7E:219E & 04. 원래 태어나는 장면이 켜는 비트라 새 게임 첫 맵에서는 꺼져 있다
 THRONE, FRONT = '36/01', '36/00'
 START = (THRONE, 32, 42)       # FC (10,15): 줄 선 전사들 사이의 빈 자리
 
 # 연출 메시지: 태어나는 장면 메시지 자리(시작 지점을 바꿔 나오지 않음)
-MSG_CHAPTER, MSG_MINISTER, MSG_KING = 0x1D1, 0x1D2, 0x1D3
+MSG_NARRATION, MSG_MINISTER, MSG_KING = 0x1D1, 0x1D2, 0x1D3
 
 
 # DQ5 메시지 창은 한 쪽에 4줄, 한 줄은 ＊「·들여쓰기 2칸 뒤 한글 14자까지(실측: 15자째에서 넘쳐 깨짐).
@@ -111,8 +110,21 @@ def say(*pages):
     return _message(pages)
 
 
+def narrate(*pages):
+    """서술문({1006}): ＊「 도 들여쓰기도 없다. 줄 너비는 대사와 같은 14칸으로 둔다. 서술은 해라체(「~다.」)로 쓴다."""
+    out = [NARR]
+    for part in _message(pages):
+        out.append(part)
+        if part == PAGE:        # 쪽이 바뀌면 첫 코드를 다시 본다(실측: 빼면 ＊「 가 붙음)
+            out.append(NARR)
+    return out
+
+
 TEXTS = {
-    MSG_CHAPTER: [NARR, '　　　　　　제', ONE, '장', LINE, LINE, '　　　　왕궁의 전사들', END],
+    # FC 는 검은 화면에 장 제목 상자(dq4chapterbox.py)를 띄운 뒤, 검은 화면의 메시지 창에 이 서술을 쓴다
+    MSG_NARRATION: narrate('이것은 바트랜드라는/작은 나라의 왕궁 전사의/이야기다.',
+                           '@, 즉 당신도/그 왕궁 전사의/한 사람이었다.',
+                           '어느 날 아침, 임금님은/전사들을 성의 넓은 방에/불러 모았다……'),
     MSG_MINISTER: speak('대신', '이제부터 임금님께서/그대들에게 하실 말씀이/있다. 명심하여 듣도록.'),
     MSG_KING: speak('왕',
                     '모두 편히 하라.',
@@ -218,6 +230,8 @@ def walk_out(address, path):
 
 def npc_doc(records, ported=()):
     """ported: dq4npcport.port 의 인물 목록. 왕좌의 방만 이 연출 배치로 바꾼다."""
+    import dq4chapterbox
+    native = {k: [v & 0xFF, v >> 8 & 0xFF, v >> 16] for k, v in dq4chapterbox.entry_points().items()}
     flag, mask = EVENT_FLAG
     staff = [entry(STATIC, x, y, g, f, t) for x, y, g, f, t in STAFF]
     king = entry(STATIC, *KING_AT, KING, 'down', T_KING)
@@ -231,7 +245,10 @@ def npc_doc(records, ported=()):
     scripts = [
         {"address": "05:A84F", "commands": [
             {"op": "3F", "args": []},
-            {"op": "21", "args": [lo(MSG_CHAPTER), hi(MSG_CHAPTER)]},
+            # 맵은 검은 채로 불러온다(dq4chapterbox 의 맵 훅). 상자 → 서술 → 맵을 밝힘
+            {"op": "37", "args": native['box']},
+            {"op": "21", "args": [lo(MSG_NARRATION), hi(MSG_NARRATION)]},
+            {"op": "37", "args": native['reveal']},
             {"op": "21", "args": [lo(MSG_MINISTER), hi(MSG_MINISTER)]},
             {"op": "13", "args": [KING_DOWN[0] * 2, KING_DOWN[1] * 2]},
             {"op": "14", "args": []},
@@ -338,6 +355,9 @@ def build(rom, dq5, dq4, work):
              '-o', work / 'npc.dq5patch.json')
     out = bytearray(apply_writes(rom, original, [work / 'groups' / p for p in GROUP_PATCHES] +
                                  [work / 'npc.dq5patch.json']))
+    import dq4chapterbox
+    import dq4menupatch
+    out = bytearray(dq4chapterbox.apply(out, dq4.read_bytes(), dq4menupatch.Font('galmuri11')))
     o = lorom(START_TABLE)
     if out[o:o + 6] != START_ORIG:
         raise SystemExit(f'{START_TABLE:06X}: 새 게임 첫 맵 표가 원래 값이 아님 {out[o:o + 6].hex()}')
