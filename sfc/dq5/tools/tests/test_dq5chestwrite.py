@@ -180,6 +180,10 @@ class ChestWriteTests(unittest.TestCase):
                        {'reward': 0xD000}, {'reward': True}, {'layer': 1}):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 encode_field(raw, change, lambda x, y: 0)
+        self.assertEqual(encode_field(raw, {'x': 24}, lambda x, y: 511)[FIELD_TEMPLATE.index('b1')], 1)
+        # 10번째 비트가 켜진 칸은 00:CF50 이 되돌리지 못한다
+        with self.assertRaisesRegex(ValueError, '512 이상'):
+            encode_field(raw, {'x': 24}, lambda x, y: 512)
 
     @mock('dq5chestwrite.map_ids', return_value=[(0, i) for i in range(86)])
     @mock('dq5chestwrite.world_block', return_value=0x55)

@@ -38,7 +38,6 @@ from dq5map import Rom  # noqa: E402
 from dq5mongfx import Stream, pixels, rgb, tile  # noqa: E402
 
 NUMBERS = 0x228983
-TERRAIN = 0x03CC48
 COUNT = 0x31
 PICS = 0x2882F9
 LISTS = 0x28C9C2
@@ -47,16 +46,15 @@ ALT_LIST2 = 0x28FD64
 
 
 def terrain(rom, block):
-    """03:CB1B. 필드 블록 번호(9비트) → 지형 값 = 필드 배경 번호. 03:CC48 의 니블(짝수 블록은 상위)."""
-    v = rom.u8(TERRAIN + (block >> 1))
-    return v >> 4 if block % 2 == 0 else v & 15
+    """03:CB1B. 필드 블록 번호 → 지형 값 = 필드 배경 번호. 03:CC48(블록을 늘린 롬이면 옮긴 표)의 니블(짝수 블록은 상위)."""
+    from dq5field import terrain as block_terrain
+    return block_terrain(rom, block)
 
 
 def field_terrain(rom, x, y, world=0):
     """필드 좌표($B6, $B8)의 지형 값. 01:84CF 가 걸음마다 이 값을 $1AA0 에 쓴다."""
-    from dq5field import WORLDS, block_number, rle
-    w, e = (rle(rom, a)[0] for a in WORLDS[world])
-    return terrain(rom, block_number(w, e, x >> 1, y >> 1))
+    from dq5field import world_blocks
+    return terrain(rom, world_blocks(rom, world)[(y >> 1) * 256 + (x >> 1)])
 
 
 def entry(rom, n):

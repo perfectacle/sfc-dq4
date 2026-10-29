@@ -71,10 +71,9 @@ DOOR_TABLE_SELECT = {0xF7F7: ({0x3E: 0xFD9F, 0x3C: 0xFDAB, 0x3B: 0xFDB7, 0x3D: 0
                      0xF7D6: ({0x48: 0xFE8F, 0x49: 0xFE2F, 0x42: 0xFE4F}, 0xFE6F),
                      0xF7C8: ({0x3F: 0xFDFF}, 0xFE17)}
 # 03:C8B3: たびびとのちず 를 쓰면 모드 7 로 띄우는 세계 지도. 03:CAC2 가 VRAM 워드마다 타일맵 바이트와 점 하나를 만든다.
-# 점은 필드 좌표($CE,$D0, 처음 0·10)의 블록 번호 → 03:CC48 의 니블 + 20(색 번호), 좌표는 03:CD48·03:CD58 표만큼 나아간다.
+# 점은 필드 좌표($CE,$D0, 처음 0·10)의 블록 번호 → 지형 니블(03:CC48, dq5field.terrain) + 20(색 번호), 좌표는 03:CD48·03:CD58 표만큼 나아간다.
 # 색 20~2F 는 03:CC2C. 타일맵은 16x15 타일(128x120 점)만 쓴다.
 WORLD_SCREEN_COLORS = 0x03CC2C
-WORLD_SCREEN_BLOCK_COLOR = 0x03CC48
 WORLD_SCREEN_STEP_X, WORLD_SCREEN_STEP_Y = 0x03CD48, 0x03CD58
 # 1E:D7E3: 타이틀 화면 글자(ENIX PRESENTS ~ DRAGON QUEST V)의 2bpp 타일. 필드 RLE(01:A64F)와 같은 꼴이고,
 # 앞 16바이트(빈 타일 하나)를 더해 위·아래로 짝지으면 대부분 8x16 글자 하나지만, 타일을 나눠 쓰는 글자(D·E·M·W 등)도 있다.
@@ -610,11 +609,11 @@ def field_tiles(rom, world=0):
 
 def field_block_images(rom, cgram, tiles, layers=('lower', 'upper'), world=0):
     """블록 511개 그림. world 는 니블 표를 고르는 세계 번호($1949, dq5fieldgfxwrite --worlds-at 롬이면 세계마다 다름)."""
-    from dq5field import BLOCK_LOWER, BLOCK_UPPER, block_tiles, tile_word
+    from dq5field import BLOCK_LOWER, BLOCK_UPPER, block_count, block_tiles, tile_word
     colors = cgram_colors(cgram)
     cache = {}
     out = []
-    for m in range(511):
+    for m in range(block_count(rom)):
         img = Image.new('RGBA', (16, 16), colors[0] + (255,))
         for upper, table in ((False, BLOCK_LOWER), (True, BLOCK_UPPER)):
             if ('upper' if upper else 'lower') not in layers:
@@ -985,7 +984,8 @@ def export_field(rom, out):
         out.save(img, f'field/field{world}-annot.png', 'field', f'세계 {world}', '세계 지도', variant='주석',
                  entrances=el, note='노랑 = 04:FD97 입구(그룹 번호와 이름)')
     cg = field_cgram(rom, 0, day)
-    labels = [f'{m:03X}' for m in range(511)]
+    from dq5field import block_count
+    labels = [f'{m:03X}' for m in range(block_count(rom))]
     for layers, stem in ((('lower', 'upper'), 'field'), (('lower',), 'field-lower'), (('upper',), 'field-upper')):
         imgs = field_block_images(rom, cg, tiles, layers)
         out.save(sheet(imgs, 16, 20, 16, labels, label_h=10, below=True), f'gfx/blocks/{stem}.png', 'blocks',
@@ -1196,15 +1196,12 @@ def export_ui(rom, out):
 
 def world_screen(rom, world=0):
     """たびびとのちず 화면의 128x120 색 번호 격자. 03:CAC2 를 옮긴 것. 블록은 그때 풀려 있는 세계($1949) 지도에서 읽는다."""
-    from dq5field import WORLDS, block_number, rle
-    wmap, _ = rle(rom, WORLDS[world][0])
-    hib, _ = rle(rom, WORLDS[world][1])
+    from dq5field import terrain, world_blocks
+    blocks = world_blocks(rom, world)
     ce, d0 = 0, 0x10
     chars = bytearray(0x4000)
     for y in range(0x4000):
-        b = block_number(wmap, hib, (ce >> 1) & 255, (d0 >> 1) & 255)
-        nib = rom.u8(WORLD_SCREEN_BLOCK_COLOR + (b >> 1))
-        chars[y] = (nib & 15 if b & 1 else nib >> 4) + 0x20
+        chars[y] = terrain(rom, blocks[((d0 >> 1) & 255) * 256 + ((ce >> 1) & 255)]) + 0x20
         x, z = 0, y + 1
         if z & 0x3FF:
             x += 2
@@ -1232,17 +1229,14 @@ def export_world_screen(rom, out):
             p[x, y] = colors[v - 0x20]
     out.save(img, 'gfx/screens/world-map.png', 'screens', 'たびびとのちず 세계 지도(모드 7, $1949=0)', '세계 지도',
              note='03:CAC2 가 필드 블록마다 03:CC48 의 색으로 찍는 128x120, 색 03:CC2C')
-    from dq5field import WORLDS, block_number, rle
+    from dq5field import terrain, world_blocks
     for world in (1, 2):
-        wmap, _ = rle(rom, WORLDS[world][0])
-        hib, _ = rle(rom, WORLDS[world][1])
+        blocks = world_blocks(rom, world)
         img = Image.new('RGB', (256, 256))
         p = img.load()
         for v in range(256):
             for u in range(256):
-                b = block_number(wmap, hib, u >> 1, v >> 1)
-                nib = rom.u8(WORLD_SCREEN_BLOCK_COLOR + (b >> 1))
-                p[u, v] = colors[(nib & 15 if b & 1 else nib >> 4)]
+                p[u, v] = colors[terrain(rom, blocks[(v >> 1) * 256 + (u >> 1)])]
         out.save(img, f'gfx/screens/world-map-{world}.png', 'screens', f'たびびとのちず 세계 지도($1949={world}, 전체)',
                  '세계 지도', note='$1EBE bit7 갈래: 게임은 주인공 필드 좌표($1EC4,$1EC6)를 가운데로 이 그림의 128x120 만 '
                  '보여 줌(1점 = 필드 좌표 1, 03:CD50 걸음 표)')

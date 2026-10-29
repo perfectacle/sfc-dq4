@@ -120,10 +120,22 @@ class BlockGrowTests(unittest.TestCase):
             self.assertIn('--blocks-at 으로', r.stderr)
 
 
+# 원본의 00:CF50 즉값: x0 x1·y0 y1 은 8픽셀 칸, n 은 되풀이 횟수 − 1.
+CELL_VALUES = {0x01A01B: {'x': 0x16, 'y': 0xA6}, 0x12EFC1: {'x': 0x16, 'y': 0xA6}, 0x03BB3C: {'x': 0x22, 'y': 0xF8},
+               0x05EF0F: {'x': 0x1C4, 'y': 0xEE, 'n': 2}}
+
+
+def put_cells(d, values=CELL_VALUES):
+    for at, text in fw.CHANGED_SITES:
+        v = values[at]
+        put(d, at, bytes(v[t[0]] >> 8 * int(t[1]) & 0xFF if t[0] in 'xyn' else int(t, 16) for t in text.split()))
+
+
 def bit9_rom(planes):
     d = bytearray(0x200000)
     put(d, 0x00BCA0, bytes([0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01]))
     put(d, 0x308000, fw.bit9_hook(planes))
+    put_cells(d)
     return d
 
 
@@ -148,16 +160,28 @@ class Bit9HookTests(unittest.TestCase):
             put(d, site, want)
         rom = Rom(bytes(d))
         grid = [600] * fw.SIZE
-        for x, y in fw.CHANGED_CELLS:
+        self.assertEqual(sorted(fw.changed_cells(rom)), sorted([(0x0B, 0x53)] * 2 + [(0x11, 0x7C), (0xE2, 0x75),
+                                                                (0xE2, 0x76), (0xE2, 0x77)]))
+        for x, y in fw.changed_cells(rom):
             grid[y * 256 + x] = 5
         out, size = fw.plane_writes(rom, bytes(d), {0: grid, 2: [3] * fw.SIZE}, 0x618000)
         self.assertEqual([w['at'] for w in out], ['61:8000', '61:804E', '00:BC33', '00:BE06'])
         self.assertEqual(size, 4)
         self.assertEqual(fw.plane_writes(rom, bytes(d), {0: [3] * fw.SIZE}, None), ([], 2))
+        with self.assertRaisesRegex(ValueError, '한 뱅크'):
+            fw.plane_writes(rom, bytes(d), {0: grid}, 0x61FFE0)
         for grids, at, message in (({0: grid}, None, '--planes-at'), ({0: [3] * fw.SIZE}, 0x618000, '512 이상'),
                                    ({1: [600] * fw.SIZE}, 0x618000, '00:CF50')):
             with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
                 fw.plane_writes(rom, bytes(d), grids, at)
+        moved = bytearray(d)
+        put_cells(moved, {**CELL_VALUES, 0x01A01B: {'x': 0x40, 'y': 0x20}})
+        with self.assertRaisesRegex(ValueError, r'\(32, 16\)'):
+            fw.plane_writes(Rom(bytes(moved)), bytes(moved), {0: grid}, 0x618000)
+        broken = bytearray(d)
+        put(broken, 0x03BB3C, b'\xa9')
+        with self.assertRaisesRegex(ValueError, '03:BB3C'):
+            fw.changed_cells(Rom(bytes(broken)))
         hooked = bytearray(d)
         put(hooked, dq5field.BIT9_SITES[0], b'\x22\x00\x80\x30')
         with self.assertRaisesRegex(ValueError, '이미 10번째 비트'):
