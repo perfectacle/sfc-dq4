@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 
 from dq5build import PatchError, build
-from dq5map import PALSET_LISTS, PALSET_TABLE, Rom, group_spans, lorom, palset_table
+from dq5map import PALSET_TABLE, Rom, group_spans, lorom, palset_lists, palset_table
 
 FORMAT = 'dq5palset/1'
 HIGH_FIRST = 0x50
@@ -48,11 +48,13 @@ def hex_key(value, name, size=2):
 
 
 def set_count(rom):
-    """목록 표 10:DFE4 의 세트 수. 첫 목록이 표 바로 뒤에서 시작한다(원본 69세트)."""
-    first = rom.u16(PALSET_LISTS)
-    if first <= PALSET_LISTS & 0xFFFF or (first - (PALSET_LISTS & 0xFFFF)) % 4:
-        raise ValueError(f'{cpu(PALSET_LISTS)}: 팔레트 목록 표의 첫 포인터가 맞지 않음')
-    return (first - (PALSET_LISTS & 0xFFFF)) // 4
+    """목록 표 10:DFE4 의 세트 수. 첫 목록이 표 바로 뒤에서 시작한다(원본 69세트). dq5mapgfxwrite.py --sets-at 으로
+    옮긴 롬이면 옮긴 표를 센다."""
+    table = palset_lists(rom)
+    first = rom.u16(table)
+    if first <= table & 0xFFFF or (first - (table & 0xFFFF)) % 4:
+        raise ValueError(f'{cpu(table)}: 팔레트 목록 표의 첫 포인터가 맞지 않음')
+    return (first - (table & 0xFFFF)) // 4
 
 
 def parse_table(rom, at):

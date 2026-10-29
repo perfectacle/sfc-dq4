@@ -2,7 +2,8 @@
 
 블록 표(00:BC4E)는 아래층 2A:A32C, 위층 2A:AD27 에 각각 511항목이다.
 번호 511은 다음 표·세계 1 RLE와 겹치므로 쓰지 않는다. 블록 상위 비트 바이트의
-하위 니블은 원본에서 보존한다. 입구(2A:F247·FDCB)와 도착(2A:F384)도 고정 슬롯만
+하위 니블은 원본에서 보존한다. dq5fieldgfxwrite.py 의 타일 늘리기 패치를 넣은 롬(00:BC80 이 JSL)이면
+그 니블을 10번째 비트로 써서 타일 번호를 1023 까지 받는다. 입구(2A:F247·FDCB)와 도착(2A:F384)도 고정 슬롯만
 고치며 종료자·항목 순서·특수 그룹 도착 코드는 바꾸지 않는다.
 
   python sfc/dq5/tools/dq5fieldtables.py rom/dq5.sfc dump -o work/fieldtables.json
@@ -30,7 +31,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from dq5field import BLOCK_LOWER, BLOCK_UPPER, ENTRANCES, GROUP_ARRIVAL, QUAD_BIT  # noqa: E402
+from dq5field import BLOCK_HOOK_SITE, BLOCK_LOWER, BLOCK_UPPER, ENTRANCES, GROUP_ARRIVAL, QUAD_BIT, QUAD_BIT10  # noqa: E402
 from dq5map import Rom, group_spans, lorom  # noqa: E402
 from dq5newmap import entrance_table  # noqa: E402
 
@@ -120,18 +121,40 @@ def check_layout(rom, groups):
             group_number(record(rom, start + i * 5)[0], groups)
 
 
-def block_tiles(raw):
-    return [raw[i] | (256 if raw[4] & bit else 0) for i, bit in enumerate(QUAD_BIT)]
+def wide_tiles(rom):
+    """타일 늘리기 훅이 블록의 10번째 비트를 읽는 롬인지."""
+    return rom.u8(BLOCK_HOOK_SITE) == 0x22
 
 
-def encode_block(raw, tiles):
+def block_tiles(raw, wide=False):
+    return [raw[i] | (256 if raw[4] & bit else 0) | (512 if wide and raw[4] & bit10 else 0)
+            for i, (bit, bit10) in enumerate(zip(QUAD_BIT, QUAD_BIT10))]
+
+
+def tile_limit(rom):
+    """블록 칸이 쓸 수 있는 가장 큰 타일 번호. 블록 표는 세 세계가 함께 쓰므로 타일이 가장 적은 세계를 따른다."""
+    if not wide_tiles(rom):
+        return 511
+    from dq5fieldgfxwrite import tile_counts
+    return min(tile_counts(rom)) - 1
+
+
+def encode_block(raw, tiles, wide=False, limit=None):
     if not isinstance(tiles, list) or len(tiles) != 4:
         raise ValueError('블록 층은 타일 번호 네 개의 배열이어야 함')
-    values = [integer(v, 511, '타일') for v in tiles]
-    high = raw[4] & 0x0F
-    for value, bit in zip(values, QUAD_BIT):
+    if not wide and any(type(v) is int and 512 <= v <= 1023 for v in tiles):
+        raise ValueError('타일 512 이상은 dq5fieldgfxwrite.py 의 타일 늘리기(--extra-at) 패치를 넣은 롬으로 만들어야 함')
+    limit = (1023 if wide else 511) if limit is None else limit
+    if any(type(v) is int and limit < v <= 1023 for v in tiles):
+        raise ValueError(f'블록은 세 세계가 함께 쓰므로 모든 세계에 그 타일을 둘 것(타일이 가장 적은 세계가 '
+                         f'{limit + 1}개)')
+    values = [integer(v, limit, '타일') for v in tiles]
+    high = 0 if wide else raw[4] & 0x0F
+    for value, bit, bit10 in zip(values, QUAD_BIT, QUAD_BIT10):
         if value & 256:
             high |= bit
+        if value & 512:
+            high |= bit10
     return bytes([*(v & 255 for v in values), high])
 
 
@@ -232,8 +255,9 @@ def dump(rom):
     table, count = arrivals(rom)
     return {
         'format': FORMAT,
-        'blocks': [{'index': i, 'lower': block_tiles(record(rom, BLOCK_LOWER + i * 5)),
-                    'upper': block_tiles(record(rom, BLOCK_UPPER + i * 5))} for i in range(BLOCK_COUNT)],
+        'blocks': [{'index': i, 'lower': block_tiles(record(rom, BLOCK_LOWER + i * 5), wide_tiles(rom)),
+                    'upper': block_tiles(record(rom, BLOCK_UPPER + i * 5), wide_tiles(rom))}
+                   for i in range(BLOCK_COUNT)],
         'entrances': [{'table': name, 'index': i, **entrance_fields(record(rom, start + i * 5))}
                       for name, (start, count) in ENTRANCE_TABLES.items() for i in range(count)],
         'arrivals': [{'group': i, **arrival_fields(record(rom, table + i * 5))} for i in range(count)],
@@ -252,6 +276,7 @@ def edits(rom, doc, entrances_at=None, new_maps=()):
     groups = interior_groups(rom, new_maps)
     check_layout(rom, groups)
     arrival_at, arrival_count = arrivals(rom)
+    limit = tile_limit(rom)
     out = []
     for section in ('blocks', 'entrances', 'arrivals'):
         rows = doc.get(section, [])
@@ -266,7 +291,8 @@ def edits(rom, doc, entrances_at=None, new_maps=()):
                     if layer in row:
                         addr = start + key * 5
                         raw = record(rom, addr)
-                        out.append((addr, encode_block(raw, row[layer]), raw, f'블록 {key} {layer}'))
+                        out.append((addr, encode_block(raw, row[layer], wide_tiles(rom), limit), raw,
+                                    f'블록 {key} {layer}'))
             elif section == 'entrances':
                 fields(row, {'table', 'index', 'group', 'x', 'y'}, section)
                 table = row.get('table')

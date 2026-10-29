@@ -54,6 +54,17 @@ class FieldPatchTests(unittest.TestCase):
         put(d, fgw.LOAD_SITE, fgw.LOAD_ORIG)
         for at in fgw.NIB_SITES:
             put(d, at, fgw.NIB_ORIG)
+        for at, (want, _, _) in fgw.BLOCK_SITES.items():
+            put(d, at, want)
+        put(d, fgw.REDRAW_SITE, fgw.REDRAW_ORIG)
+        put(d, fgw.REDRAW_RTL, b'\x6b')
+        for at, want in (fgw.SEARCH_SITE, fgw.PTR_SITE, fgw.NIGHT_SITE, fgw.PAL_BANK_SITE, fgw.WAVE_SITE,
+                         *fgw.ATTR_SITES.items()):
+            put(d, at, want)
+        # 원래 롬의 시간대 표(01:A16B)
+        for i, (lo, k) in enumerate(((0, 4), (1, 3), (2, 2), (0xEE, 3), (0xEF, 4), (0xF0, 5), (0xF1, 6), (0xF2, 7),
+                                     (0x1FD, 6), (0x1FE, 5))):
+            put(d, fgw.TIMES + i * 3, lo.to_bytes(2, 'little') + bytes([k * 2]))
         put(d, fgw.ANIM_TABLE, fgw.encode_anim_table(8))
         tiles = bytes((i // 32) & 0xFF if i % 3 else 0 for i in range(fgw.TILES * 32))
         put(d, fgw.FIELD_CHR, fgw.encode_rle(fgw.tiles_to_planar(tiles)))

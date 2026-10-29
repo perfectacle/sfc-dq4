@@ -36,6 +36,10 @@ BLOCK_UPPER = 0x2AAD27
 # 타일 2개당 1바이트. 니블이 팔레트(00:BBAC): 위층 표는 4비트, 아래층은 3비트.
 TILE_PALETTE = 0x2AD712
 QUAD_BIT = (0x80, 0x40, 0x20, 0x10)
+# dq5fieldgfxwrite.py 의 타일 늘리기는 00:BC80·BC8D 를 JSL 로 바꿔 상위 비트 바이트의 하위 니블(00:BCA4 의 08>>칸)을
+# 10번째 비트로 읽는다. 원래 롬의 블록 1,022개는 이 니블이 모두 0 이다.
+BLOCK_HOOK_SITE = 0x00BC80
+QUAD_BIT10 = (0x08, 0x04, 0x02, 0x01)
 
 
 def rle(rom, a):
@@ -88,21 +92,26 @@ def block_number(world, hibits, x, y):
 
 
 def block_tiles(rom, table, m):
-    """블록 m 의 네 칸 타일 번호(9비트)."""
+    """블록 m 의 네 칸 타일 번호(9비트, 타일 늘리기 훅이 있으면 10비트)."""
     a = table + m * 5
     hi = rom.u8(a + 4)
-    return [rom.u8(a + q) | (0x100 if hi & QUAD_BIT[q] else 0) for q in range(4)]
+    wide = rom.u8(BLOCK_HOOK_SITE) == 0x22
+    return [rom.u8(a + q) | (0x100 if hi & QUAD_BIT[q] else 0) | (0x200 if wide and hi & QUAD_BIT10[q] else 0)
+            for q in range(4)]
 
 
 # dq5fieldgfxwrite.py --worlds-at 은 00:BBB4 등을 JSL 훅으로 바꾸고, 훅 안 LDA long,X 의 피연산자(훅 + 22)가
-# 세계마다 256바이트인 니블 표 넷의 시작이다.
-NIB_SITE, NIB_HOOK_TABLE = 0x00BBB4, 22
+# 세계마다 256바이트인 니블 표 넷의 시작이다. 타일을 512개 넘게 늘린 훅은 훅 + 13 의 CLC 자리가 ASL A 라
+# 세계마다 512바이트다.
+NIB_SITE, NIB_HOOK_TABLE, NIB_HOOK_STRIDE = 0x00BBB4, 22, 13
 
 
 def nibble_table(rom, world=0):
     """00:BBAC 가 그 세계에서 읽는 니블 표 주소. 세계 훅이 없으면 세 세계 모두 2A:D712."""
     if rom.u8(NIB_SITE) == 0x22:
-        return rom.u24(rom.u24(NIB_SITE + 1) + NIB_HOOK_TABLE) + (world & 3) * 0x100
+        hook = rom.u24(NIB_SITE + 1)
+        stride = 0x200 if rom.u8(hook + NIB_HOOK_STRIDE) == 0x0A else 0x100
+        return rom.u24(hook + NIB_HOOK_TABLE) + (world & 3) * stride
     return TILE_PALETTE
 
 
