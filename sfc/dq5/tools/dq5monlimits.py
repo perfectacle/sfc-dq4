@@ -1,15 +1,17 @@
 """전투 무리 조합마다 몬스터 그림의 조각 합(22:91DC, 100 미만)·화면 줄마다 타일 합(22:A119, 28 미만) 한도를 센다.
 
-나올 수 있는 무리 조합을 모두 늘어놓는다. 구역 레코드(23:96F3)의 칸 5~9 한 종 무리·칸 0~4 여러 종 무리(종 수 2~4,
+나올 수 있는 무리 조합을 모두 늘어놓는다. 구역 레코드(23:96F3, 옮겼으면 dq5progresswrite.table_bases 가 읽는 자리)의 칸 5~9 한 종 무리·칸 0~4 여러 종 무리(종 수 2~4,
 나머지 종은 칸 0~4 에서 다시 뽑음)·칸 10 고정 무리(23:B04B)를 마릿수 범위의 값마다, 이벤트 무리(23:D757) 64개를 그대로.
 첫 무리가 E7·EA 인 조합은 22:89E5 가 무리를 더하므로 세지 않고, 6A 는 마릿수가 짝수면 하나 뺀다.
 배치는 dq5mongfx.place(줄 폭 28·조각 합·줄마다 타일 합으로 마릿수를 자름)로 센다.
+무리·구역은 입력 롬에서 읽는다. 같은 빌드에서 dq5encounterwrite.py·dq5progresswrite.py 로 무리·구역을 바꾸면 그 패치를
+먼저 넣은 롬을 주고, 구역 수를 늘렸으면 --progress(그 패치 목록) 또는 --areas 로 준다.
 
   report  그림마다, 다른 그림을 그대로 둘 때 어느 조합에서도 원래보다 덜 놓이지 않는 여유.
           pieces = 조각을 몇 개 더 늘릴 수 있는지, bands = 8픽셀 줄마다 타일을 몇 개 더 늘릴 수 있는지
   losses  바꾼 그림의 조각 수·줄마다 타일 수로 다시 세어, 원래보다 덜 놓이는 무리가 있는 조합(dq5monwrite.py 가 씀)
 
-  python sfc/dq5/tools/dq5monlimits.py rom/dq5.sfc report [-o work/monlimits.json]
+  python sfc/dq5/tools/dq5monlimits.py rom/dq5.sfc report [-o work/monlimits.json] [--progress progress.dq5patch.json]
 """
 import argparse
 import itertools
@@ -30,9 +32,28 @@ def counts(span):
     return range(span[0], span[1] + 1)
 
 
-def compositions(rom):
-    """{((몬스터, 마릿수, 무리 값), …): 처음 나온 곳} 과 세지 않은 조합 수."""
+def area_base(rom):
+    """구역 표 자리. dq5progresswrite.py 가 옮겼으면 읽는 명령의 피연산자를 따른다."""
+    from dq5progresswrite import table_bases
+    return table_bases(rom)['area']
+
+
+def area_count(progress=None, areas=None):
+    """구역 수. --areas 를 주면 그 값, dq5progresswrite.py 패치 목록을 주면 거기서 읽고, 아니면 원래 85개."""
+    if areas is not None:
+        return areas
+    if progress is not None:
+        from dq5encounterwrite import areas_in
+        return areas_in(json.loads(Path(progress).read_text(encoding='utf-8')))
+    return AREA_COUNT
+
+
+def compositions(rom, areas=None):
+    """{((몬스터, 마릿수, 무리 값), …): 처음 나온 곳} 과 세지 않은 조합 수. areas 는 구역 수(없으면 원래 85개)."""
     found, skipped = {}, 0
+    base = area_base(rom)
+    if areas is None:
+        areas = AREA_COUNT
 
     def add(groups, where):
         nonlocal skipped
@@ -46,8 +67,8 @@ def compositions(rom):
             groups[0] = (groups[0][0], groups[0][1] - 1, groups[0][2])
         found.setdefault(tuple(groups), where)
 
-    for n in range(AREA_COUNT):
-        ar = area(rom, n)
+    for n in range(areas):
+        ar = area(rom, n, base)
         mixed = [s for s in range(5) if ar['weights'][s]]
         for s in range(11):
             if not ar['weights'][s]:
@@ -95,24 +116,25 @@ class Pictures:
     def place(self, groups):
         return M.place([(m, n, flag, *self.stats(self.picture(m))) for m, n, flag in groups])
 
+    def head(self, g):
+        return M.head(self.rom, g)
+
     def listed(self, groups):
         """조합의 그림마다 한 번씩 푼 조각 수의 합. 풀 때 조각마다 7E:5800 에 4바이트씩 적는다(22:9DB0)."""
         return sum(self.stats(g)[1] for g in {self.picture(m) for m, _, _ in groups})
 
 
-def losses(rom, pictures=None, monsters=None, found=None):
+def losses(rom, pictures=None, monsters=None, found=None, areas=None):
     """바꾼 그림·그림 번호로 다시 세어 걸리는 조합 [(조합, 원래 수, 바뀐 수, 나온 곳, 까닭)].
     까닭은 원래보다 덜 놓이는 무리가 있음, 또는 조합의 그림 조각 합(7E:5800 목록)이 원래 롬의 모든 조합 중 가장 큰 값을
     넘음이다. 조각 목록 자리의 끝은 확인하지 않아, 원래 게임이 이미 쓰는 크기까지만 받는다."""
-    found = found if found is not None else compositions(rom)[0]
+    found = found if found is not None else compositions(rom, areas)[0]
     before, after = Pictures(rom), Pictures(rom, pictures, monsters)
     most = max((before.listed(groups) for groups in found), default=0)
     changed = set(monsters or ()) | {m for m in range(M.COUNT) if before.picture(m) in (pictures or {})}
     out = []
     shown = {before.picture(m) for groups in found for m, _, _ in groups}
     for g in sorted(set(pictures or ()) - shown):
-        out.append(((), [], [], f'그림 {g:02X}', '세는 조합에 나오지 않아 한도를 정할 수 없음'))
-    for g in sorted(set((monsters or {}).values()) - shown):
         out.append(((), [], [], f'그림 {g:02X}', '세는 조합에 나오지 않아 한도를 정할 수 없음'))
     for groups, where in found.items():
         if not changed & {m for m, _, _ in groups}:
@@ -129,32 +151,37 @@ def losses(rom, pictures=None, monsters=None, found=None):
 def budgets(rom, found=None):
     """그림마다 {pieces: 더 늘릴 수 있는 조각 수, bands: 8픽셀 줄마다 더 늘릴 수 있는 타일 수, compositions: 나온 조합 수}.
     한 그림만 바꿀 때 이 안이면 losses() 에 걸리는 조합이 없다(마지막 합 + 늘린 양이 한도 밑이면 도중의 합도 밑이고,
-    조각 목록 합도 원래 가장 큰 값 안)."""
+    조각 목록 합도 원래 가장 큰 값 안). 같은 머리를 쓰는 그림 번호(00·11·29 등)는 함께 바뀌므로 머리마다 합쳐 세고,
+    그 번호들에 같은 값을 준다."""
     found = found if found is not None else compositions(rom)[0]
     pics = Pictures(rom)
     most = max((pics.listed(groups) for groups in found), default=0)
-    out = {}
+    table, members = {}, {}
     for groups in found:
         kept, pieces, bands = pics.place(groups)
         spare = most - pics.listed(groups)
-        by_picture = {}
+        by_head = {}
         for m, j, hd, row, y, k in kept:
             g = pics.picture(m)
-            entry = by_picture.setdefault(g, [0, 0, []])
+            key = pics.head(g)
+            members.setdefault(key, set()).add(g)
+            entry = by_head.setdefault(key, [0, 0, [], set(), g])
             entry[0] += k
             entry[1] += j
+            entry[3].add(g)
             if j:
                 entry[2].append((y >> 3) - 7)
-        for g, (counted, placed, starts) in by_picture.items():
-            row = out.setdefault(g, {'pieces': None, 'bands': [None] * pics.stats(g)[0]['h'], 'compositions': 0})
+        for key, (counted, placed, starts, numbers, g) in by_head.items():
+            row = table.setdefault(key, {'pieces': None, 'bands': [None] * pics.stats(g)[0]['h'], 'compositions': 0})
             row['compositions'] += 1
-            row['pieces'] = least(row['pieces'], spare)
+            # 조각 목록에는 그림 번호마다 한 번씩 들어가므로, 같은 머리 번호가 둘이면 늘린 양도 두 번 든다.
+            row['pieces'] = least(row['pieces'], spare // len(numbers))
             if counted:
                 row['pieces'] = least(row['pieces'], (PIECE_LIMIT - 1 - pieces) // counted)
             for b in starts:
                 for r in range(len(row['bands'])):
                     row['bands'][r] = least(row['bands'][r], (BAND_LIMIT - 1 - bands[b + r]) // placed)
-    return out
+    return {g: table[key] for key, gs in members.items() for g in gs}
 
 
 def least(a, b):
@@ -165,11 +192,14 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('rom', type=Path)
     sub = ap.add_subparsers(dest='command', required=True)
-    sub.add_parser('report').add_argument('-o', '--out', type=Path)
+    report = sub.add_parser('report')
+    report.add_argument('-o', '--out', type=Path)
+    report.add_argument('--progress', type=Path, help='구역 수를 읽을 dq5progresswrite.py 패치 목록(구역 표를 옮겼을 때)')
+    report.add_argument('--areas', type=int, help='구역 수(기본 85)')
     args = ap.parse_args()
     try:
         rom = Rom(args.rom.read_bytes())
-        found, skipped = compositions(rom)
+        found, skipped = compositions(rom, area_count(args.progress, args.areas))
         table = budgets(rom, found)
         pics = Pictures(rom)
         rows = []

@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 from dq5map import Rom, lorom
-from dq5spellgrow import FIRST as NEW_FIRST, LAST as NEW_LAST
+from dq5spellgrow import FIRST as NEW_FIRST, LAST as NEW_LAST, WIDE
 
 FORMAT = 'dq5ai/1'
 ACTIONS, ACTION_COUNT = 0x21BC86, 0xAB
@@ -244,6 +244,31 @@ def edits(rom, doc, original=None):
     return wanted, notes
 
 
+def copy_warnings(spells, doc):
+    """새 번호의 copy 가 dq5spellgrow.py 가 베낀 행동과 다른지. spells 는 그 패치를 넣은 롬.
+    실행 루틴·둘째 실행 표·처리 루틴(26:8865·26:8565·20:B7F9)이 copy 원본과 다르면 경고 문장을 돌려준다(쓰기는 막지 않음).
+    세 칸이 같은 다른 행동을 베꼈으면 알아차리지 못한다."""
+    out = []
+    for row in doc.get('actions', []):
+        if not isinstance(row, dict) or 'copy' not in row:
+            continue
+        n, src = int(row['action'], 16), int(row['copy'], 16)
+        if n not in NEW_ACTIONS:
+            continue
+        for name in ('handler', 'executor', 'executor_alt'):
+            base, size, empty = WIDE[name]
+            got = [int.from_bytes(spells.d[lorom(base + k * size):lorom(base + k * size) + size], 'little') for k in (n, src)]
+            # 둘째 실행 표는 원래 행동에도 빈 값이 흔해, 비었는지는 처리 루틴으로만 본다.
+            if name == 'handler' and got[0] == empty:
+                out.append(f'actions {n:02X}: dq5spellgrow.py 롬에서 {name} 칸이 비어 있음(그 번호를 더하지 않음)')
+                break
+            if got[0] != got[1]:
+                out.append(f'actions {n:02X}: AI copy {src:02X} 와 dq5spellgrow.py 가 베낀 행동의 {name} 칸이 다름 '
+                           f'({got[1]:04X} / {got[0]:04X})')
+                break
+    return out
+
+
 def patch(rom, doc, original=None):
     wanted, notes = edits(rom, doc, original)
     changed = sorted(a for a, v in wanted.items() if u8(rom, a) != v)
@@ -283,11 +308,17 @@ def main():
     write = sub.add_parser('patch')
     write.add_argument('source', type=Path)
     write.add_argument('-o', '--out', type=Path)
-    sub.add_parser('check').add_argument('source', type=Path, nargs='?')
+    verify = sub.add_parser('check')
+    verify.add_argument('source', type=Path, nargs='?')
+    for p in (write, verify):
+        p.add_argument('--spells-from', type=Path, help='dq5spellgrow.py 패치를 넣은 롬. 새 번호의 copy 가 그쪽과 다르면 경고')
     args = parser.parse_args()
     try:
         rom = Rom(args.rom.read_bytes())
         doc = json.loads(args.source.read_text(encoding='utf-8')) if getattr(args, 'source', None) else None
+        if doc is not None and getattr(args, 'spells_from', None):
+            for warning in copy_warnings(Rom(args.spells_from.read_bytes()), doc):
+                print(f'경고: {warning}', file=sys.stderr)
         if args.command == 'check':
             check(rom, doc)
             return 0

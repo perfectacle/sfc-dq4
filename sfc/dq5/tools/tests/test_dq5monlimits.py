@@ -10,7 +10,8 @@ import dq5mongfx as M  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
 
 # 그림 0: 2x2 칸, 조각 1, 줄마다 타일 2. 그림 1: 4x4 칸, 조각 6, 줄마다 타일 4.
-SHAPES = {0: (2, 2, 1, [2, 2]), 1: (4, 4, 6, [4, 4, 4, 4])}
+SHAPES = {0: (2, 2, 1, [2, 2]), 1: (4, 4, 6, [4, 4, 4, 4]), 2: (2, 2, 1, [1, 1]), 3: (2, 2, 1, [2, 2])}
+HEADS = {0: 0, 1: 1, 2: 2, 3: 3}
 FOUND = {((0, 8, 0),): 'a', ((0, 4, 0), (1, 1, 0)): 'b'}
 
 
@@ -24,6 +25,7 @@ class Fakes:
                       mock('dq5monlimits.M.decode', side_effect=lambda rom, g: {'pieces': [None] * SHAPES[g][2], 'g': g}),
                       mock('dq5monlimits.M.band_counts', side_effect=lambda d: list(SHAPES[d['g']][3])),
                       mock('dq5monlimits.M.header', side_effect=lambda rom, g: head(*SHAPES[g][:2])),
+                      mock('dq5monlimits.M.head', side_effect=lambda rom, g: HEADS[g]),
                       mock('dq5monlimits.M.COUNT', 2)]
         for m in self.mocks:
             m.start()
@@ -63,10 +65,22 @@ class LimitTests(unittest.TestCase):
             listed = L.losses(None, {0: (2, [2, 2])}, found=FOUND)
             missing = L.losses(None, {5: (1, [1])}, found=FOUND)
             swapped = L.losses(None, monsters={0: 1}, found=FOUND)
+            # 조합에 나오지 않는 그림 2 로 바꾼 몬스터가 있어도, 늘린 그림 0 만 한도를 따진다.
+            unshown = L.losses(None, {0: (1, [2, 2])}, monsters={1: 2}, found=FOUND)
         self.assertEqual(band, [(((0, 8, 0),), [8], [6], 'a', '덜 놓임')])
         self.assertEqual([(x[3], x[4]) for x in listed], [('b', '조각 목록 8개 > 7개')])
         self.assertEqual([x[4] for x in missing], ['세는 조합에 나오지 않아 한도를 정할 수 없음'])
         self.assertEqual([x[3] for x in swapped], ['a'])   # 8 × 가로 4 칸이 줄 폭 28 을 넘음
+        self.assertEqual(unshown, [])
+
+    def test_budgets_merge_same_head(self):
+        # 몬스터 1 이 그림 3(그림 0 과 같은 머리)을 쓰면, 두 번호의 여유는 함께 센 하나다.
+        found = {((0, 4, 0), (1, 4, 0)): 'c', ((0, 2, 0),): 'd'}
+        with Fakes(), mock.dict(HEADS, {3: 0}), mock('dq5monlimits.M.monster', side_effect=lambda rom, m: ([0, 3][m], [])):
+            got = L.budgets(None, found)
+        # 조각: 조각 목록 합이 가장 큰 c(번호 둘, 2)에서 남는 0. 줄: c 는 같은 줄에 8마리라 (27 - 16) // 8 = 1.
+        self.assertEqual(got[0], got[3])
+        self.assertEqual(got[0], {'pieces': 0, 'bands': [1, 1], 'compositions': 2})
 
     def test_compositions(self):
         data = bytearray(0x180000)
@@ -77,11 +91,13 @@ class LimitTests(unittest.TestCase):
             data[at:at + len(raw)] = bytes(raw)
         record = {'weights': [1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1], 'count_codes': [0] * 11,
                   'species_weights': [1, 0, 0], 'monsters': [0x10, 0x11, 0, 0, 0, 0x15, 0, 0, 0, 0], 'fixed_group': 3}
-        with mock('dq5monlimits.AREA_COUNT', 1), mock('dq5monlimits.EVENT_COUNT', 2), \
+        with mock('dq5monlimits.area_base', return_value=0x239000), mock('dq5monlimits.EVENT_COUNT', 2), \
                 mock('dq5monlimits.area', return_value=record), \
                 mock('dq5monlimits.count_range', side_effect=lambda rom, code: (1, 2) if code == 7 else (1, 1)), \
                 mock('dq5monlimits.fixed_group', return_value=[(0x20, (1, 1), 1)]):
-            found, skipped = L.compositions(Rom(bytes(data)))
+            found, skipped = L.compositions(Rom(bytes(data)), areas=1)
+            seen = L.area.call_args.args
+        self.assertEqual(seen[1:], (0, 0x239000))
         self.assertEqual(skipped, 1)
         self.assertEqual(len(found), 19)
         self.assertIn(((0x10, 2, 0), (0x11, 1, 0)), found)

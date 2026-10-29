@@ -118,6 +118,23 @@ class AiWriteTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             ai.check(r, doc(actions=[{'action': 'C6', 'copy': '04', 'value': 1}, {'action': '04', 'value': 2}]))
 
+    def test_copy_warnings(self):
+        data = bytearray(0x180000)
+        for name, (base, size, empty) in ai.WIDE.items():
+            for n in range(0x100):
+                v = (empty if n >= ai.NEW_FIRST else n + 0x100) & (0xFF if size == 1 else 0xFFFF)
+                data[lorom(base) + n * size:lorom(base) + (n + 1) * size] = v.to_bytes(size, 'little')
+        # dq5spellgrow.py 가 C6 에 04 를 베낀 롬.
+        for name, (base, size, _) in ai.WIDE.items():
+            data[lorom(base) + 0xC6 * size:lorom(base) + 0xC7 * size] = (0x104 & (0xFF if size == 1 else 0xFFFF)).to_bytes(size, 'little')
+        spells = Rom(bytes(data))
+        self.assertEqual(ai.copy_warnings(spells, doc(actions=[{'action': 'C6', 'copy': '04'}])), [])
+        got = ai.copy_warnings(spells, doc(actions=[{'action': 'C6', 'copy': '27'}, {'action': 'C7', 'copy': '04'},
+                                                    {'action': '04', 'value': 1}]))
+        self.assertEqual(len(got), 2)
+        self.assertIn('copy 27', got[0])
+        self.assertIn('C7', got[1])
+
     def test_check_through_builder(self):
         r = rom()
         with contextlib.redirect_stdout(io.StringIO()):

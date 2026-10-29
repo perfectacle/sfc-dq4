@@ -141,8 +141,11 @@ class PlanTests(unittest.TestCase):
         hit = [(((0, 8, 0),), [8], [6], '구역 05 칸 1', '덜 놓임')]
         with mock('dq5monlimits.losses', return_value=hit), self.assertRaisesRegex(ValueError, '구역 05 칸 1'):
             self.run_plan(**doc)
-        # 이 롬에는 무리 조합이 없어, 한도를 정할 수 없는 그림으로 거부한다.
-        with self.assertRaisesRegex(ValueError, '한도를 정할 수 없음'):
+        # 이 롬에는 무리 조합이 없어, 한도를 정할 수 없는 그림으로 거부한다(구역 표는 원래 자리로 봄).
+        with mock('dq5monlimits.area_base', return_value=0x2396F3), self.assertRaisesRegex(ValueError, '한도를 정할 수 없음'):
+            self.run_plan(**doc)
+        # 구역 표를 읽는 명령이 없는 롬이면 구역 표 자리를 알 수 없어 거부한다.
+        with self.assertRaisesRegex(ValueError, '표를 읽는 명령'):
             self.run_plan(**doc)
 
     def test_rejects(self):

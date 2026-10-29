@@ -76,8 +76,8 @@ def count_range(rom, code):
     return (base, base) if width == 1 else (base, base + width - 1)
 
 
-def area(rom, n):
-    a = AREAS + n * AREA_SIZE
+def area(rom, n, base=AREAS):
+    a = base + n * AREA_SIZE
     raw = [rom.u8(a + i) for i in range(AREA_SIZE)]
     slots = raw[1:1 + SLOTS]
     mons = raw[1 + SLOTS:]
