@@ -77,6 +77,16 @@ class PortTest(unittest.TestCase):
                 self.assertIn(talk + port.TALK_MESSAGE, ids)
         self.assertEqual(len(ids), len(messages))
 
+    def test_pool_leaves_out_script_messages(self):
+        from dq5map import Rom
+        from unittest import mock
+        shown = port.script_messages(Rom(DQ5.read_bytes()))
+        # 26D: パパス in the first event script (15:F17A, op 60); 2F2: an inline 21 op of a 01/02 person.
+        self.assertTrue({0x26D, 0x2F2} <= shown)
+        pool = port.message_pool(str(DQ5))
+        with mock.patch.object(port, "script_messages", return_value={pool[0]}):
+            self.assertNotIn(pool[0], port.message_pool(str(DQ5)))
+
 
 if __name__ == "__main__":
     unittest.main()

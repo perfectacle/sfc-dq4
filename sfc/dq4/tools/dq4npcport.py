@@ -76,6 +76,8 @@ POOL_GROUPS = {0x0C, 0x10, 0x11, 0x18, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x22,
 TALK_MESSAGE = 0x3C6
 TALK_FIRST = 0x26D
 LINE, PAGE, END = 0x1000, 0x1002, 0x1001
+# Inline script ops that show the message in their two operand bytes (dq5-map-format 「인라인 스크립트」).
+INLINE_MESSAGE = {0x21, 0x30, 0x31, 0x32}
 NIGHT = 0x78
 
 
@@ -194,11 +196,32 @@ def nothing_codes():
     return [CODE_OF[c] for c in NOTHING] + [END]
 
 
+def script_messages(rom):
+    """Messages shown by DQ5 event scripts (op 60, dq5event) and person inline scripts (21, 30, 31, 32, 01:C800)."""
+    import dq5event
+    import dq5npc
+    out = set()
+    for _, start, _ in dq5event.all_starts(rom):
+        out.update(raw[1] | raw[2] << 8 for _, raw, _ in dq5event.decode(rom, start)[0] if raw[0] == 0x60)
+    for start in dq5event.all_scripts(rom):
+        out.update(raw[1] | raw[2] << 8 for _, raw, _ in dq5event.decode(rom, start)[0] if raw[0] == 0x60)
+    for a, _ in dq5npc.all_lists(rom):
+        for entry, _ in dq5npc.list_entries(rom, a):
+            for night in (False, True):
+                script = dq5npc.script_address(rom, entry, night)
+                if script is not None:
+                    out.update(raw[1] | raw[2] << 8 for _, raw, _ in dq5npc.script_ops(dq5npc.script_bytes(rom, script))
+                               if raw[0] in INLINE_MESSAGE)
+    return out
+
+
 def message_pool(dq5_rom_path):
-    """DQ5 messages >= 633 shown directly by exactly one map's people in POOL_GROUPS and by no talk script."""
+    """DQ5 messages >= 633 shown directly by exactly one map's people in POOL_GROUPS and by no talk, event or
+    inline script."""
+    from dq5map import Rom
     out = subprocess_json(["dq5npcrecord.py", dq5_rom_path, "dump"])
     scripts = subprocess_json(["dq5talkwrite.py", dq5_rom_path, "dump"])
-    in_scripts = set()
+    in_scripts = script_messages(Rom(Path(dq5_rom_path).read_bytes()))
 
     def walk(body):
         for op in body:
