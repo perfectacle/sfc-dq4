@@ -17,10 +17,13 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from dq5map import Rom  # noqa: E402
+from dq5map import Rom, group_spans, lorom  # noqa: E402
 
 NPC_BANK = 0x05
 NPC_GROUPS = 0x05D4B2
+GROUP_COUNT = 0x36
+# 12:8020 LDA #$05(목록 뱅크)·12:8050 LDA $D4B2,Y(그룹 포인터 표). dq5npcrelocate.py 가 옮긴 롬은 두 피연산자가 새 자리다.
+BANK_SITE, GROUP_SITE = 0x128020, 0x128050
 FIELDS = ('talk', 'misc', 'x', 'y', 'gfx', 'move')
 # 두 벌짜리(C0) 엔트리에서 각 필드가 한 값뿐임을 나타내는 마스크 비트(12:81C6~8206 순서).
 SHARED_BITS = (0x40, 0x04, 0x20, 0x10, 0x08, 0x02)
@@ -322,14 +325,40 @@ def format_op(off, raw, name):
     return f'+{off:02X} {raw.hex(" "):12} {name} {detail}'.rstrip()
 
 
+def group_pointers(rom):
+    """(목록 뱅크, 그룹 포인터 표 자리, 그룹마다 첫 목록 주소). 원본은 05:D4B2 의 54그룹이고 표가 목록 바로 뒤에 있다.
+    옮긴 표는 [그룹마다 포인터][목록…] 꼴이라 가장 앞 목록 앞까지가 표다. 코드 자리가 모두 0 인 합성 롬은 원본 자리로 본다."""
+    code = bytes(rom.d[lorom(BANK_SITE):lorom(BANK_SITE) + 2]), bytes(rom.d[lorom(GROUP_SITE):lorom(GROUP_SITE) + 3])
+    if code == (bytes(2), bytes(3)) or (code[0] == bytes([0xA9, NPC_BANK]) and code[1] == bytes([0xB9, 0xB2, 0xD4])):
+        bank, table, count = NPC_BANK, NPC_GROUPS, GROUP_COUNT
+    elif code[0][0] == 0xA9 and code[1][0] == 0xB9:
+        bank = code[0][1]
+        table, count, first = bank << 16 | int.from_bytes(code[1][1:], 'little'), 0, 0x10000
+        while (table & 0xFFFF) + count * 2 < first:
+            first = min(first, rom.u16(table + count * 2))
+            count += 1
+            if count > 0x50:
+                raise ValueError('옮긴 인물 그룹 포인터 표의 끝을 찾지 못함')
+    else:
+        raise ValueError('12:8020·8050 이 인물 목록을 읽는 원래 명령 꼴이 아님')
+    return bank, table, [bank << 16 | rom.u16(table + g * 2) for g in range(count)]
+
+
 def all_lists(rom):
-    """기본 목록(05:8651~D4B1, 맵 346개)과 대체 목록(10:8000~DDB1, 293개)의 시작 주소. [(주소, 이름)]."""
+    """기본 목록(원본 05:8651~D4B1, 맵 346개)과 대체 목록(10:8000~DDB1, 293개)의 시작 주소. [(주소, 이름)].
+    그룹 수와 자리는 group_pointers 로 읽어, dq5npcrelocate.py --new-map 으로 더한 그룹(36~)도 든다. 그룹마다 다음
+    그룹의 첫 목록(원본 마지막 그룹은 그룹 표)까지 세고, 옮긴 표의 맨 뒤 그룹은 맵 포인터 그룹의 맵 수만큼 센다."""
     out = []
-    for bc in range(0x36):
-        a = NPC_BANK << 16 | rom.u16(NPC_GROUPS + bc * 2)
-        end = NPC_BANK << 16 | (rom.u16(NPC_GROUPS + bc * 2 + 2) if bc < 0x35 else NPC_GROUPS & 0xFFFF)
+    _, table, starts = group_pointers(rom)
+    for bc, a in enumerate(starts):
+        later = [p for p in starts + [table] if p > a]
+        if later:
+            end, count = min(later), None
+        else:
+            spans = group_spans(rom)[0]
+            end, count = 0x1000000, (spans[bc][1] - spans[bc][0]) // 3 if bc < len(spans) else 1
         bd = 0
-        while a < end:
+        while a < end and (count is None or bd < count):
             out.append((a, f'{bc:02X}/{bd:02X}'))
             while rom.u8(a):
                 a += entry_size(rom, a)
@@ -411,7 +440,7 @@ def list_address(rom, bc, bd, flags):
 
 
 def map_list(rom, bc, bd):
-    a = NPC_BANK << 16 | rom.u16(NPC_GROUPS + bc * 2)
+    a = group_pointers(rom)[2][bc]
     for _ in range(bd):
         while rom.u8(a):
             a += entry_size(rom, a)
@@ -430,7 +459,7 @@ def list_entries(rom, a):
 
 def map_entries(rom, bc, bd):
     """(주소, 크기) 목록. 12:803F: 그룹 포인터에서 맵마다 00 으로 끝나는 목록을 bd 개 건너뛴다."""
-    a = NPC_BANK << 16 | rom.u16(NPC_GROUPS + bc * 2)
+    a = group_pointers(rom)[2][bc]
     for _ in range(bd):
         while rom.u8(a):
             a += entry_size(rom, a)

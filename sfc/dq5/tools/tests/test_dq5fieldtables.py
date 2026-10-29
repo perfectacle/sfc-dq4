@@ -8,7 +8,8 @@ from dq5field import BLOCK_LOWER, BLOCK_UPPER, GROUP_ARRIVAL, block_tiles  # noq
 from dq5fieldtables import (ARRIVAL_COUNT, BLOCK_COUNT, ENTRANCE_POINTERS, ENTRANCE_REFS, ENTRANCE_TABLES,  # noqa: E402
                             FORMAT, dump, edits, patch)
 from dq5build import PatchError, check as build_check, parse_at, unhex  # noqa: E402
-from dq5map import Rom, lorom  # noqa: E402
+from dq5map import GROUP_TABLE, POINTER_SITE, TABLE_KINDS, Rom, lorom  # noqa: E402
+from dq5newmap import ENTRANCE_SITES  # noqa: E402
 
 
 def document(**parts):
@@ -36,6 +37,14 @@ def fixture():
     raw[lorom(0x2585D5):lorom(0x2585D5) + 22] = bytes(range(22))
     off = lorom(ENTRANCE_POINTERS)
     raw[off:off + 6] = ENTRANCE_TABLES['main'][0].to_bytes(3, 'little') + ENTRANCE_TABLES['aux'][0].to_bytes(3, 'little')
+    # 맵 포인터 그룹 표(그룹마다 맵 하나). 표를 읽는 코드 자리가 0 이면 dq5map 이 원래 자리로 읽는다.
+    for addr, size in ((POINTER_SITE - 1, 3), (TABLE_KINDS['pointer']['db'] - 1, 2)):
+        raw[lorom(addr):lorom(addr) + size] = bytes(size)
+    start = (GROUP_TABLE & 0xFFFF) - ARRIVAL_COUNT * 3
+    off = lorom(GROUP_TABLE)
+    raw[off:off + ARRIVAL_COUNT * 2] = b''.join((start + g * 3).to_bytes(2, 'little') for g in range(ARRIVAL_COUNT))
+    for site, plus in ENTRANCE_SITES:
+        raw[lorom(site) - 1:lorom(site) + 3] = bytes([0xBF]) + (GROUP_ARRIVAL + plus).to_bytes(3, 'little')
     return bytes(raw)
 
 
@@ -135,6 +144,65 @@ class FieldTableTests(unittest.TestCase):
             raw[lorom(addr)] = 0
             with self.assertRaises(ValueError):
                 patch(Rom(raw), document())
+
+
+class NewGroupTest(unittest.TestCase):
+    """새 그룹(36~)의 입구와 dq5newmap.py 가 옮긴 도착 표."""
+
+    def setUp(self):
+        self.data = fixture()
+        self.rom = Rom(self.data)
+
+    def aux(self):
+        return [{k: e[k] for k in ('group', 'x', 'y')} for e in dump(self.rom)['entrances'] if e['table'] == 'aux']
+
+    def test_new_group_entrance_needs_new_map(self):
+        doc = document(entrance_tables={'aux': self.aux() + [{'group': 0x36, 'x': 345, 'y': 56}]})
+        with self.assertRaises(ValueError):
+            patch(self.rom, doc, entrances_at='68:8000')
+        manifest = patch(self.rom, doc, entrances_at='68:8000', new_maps=[(0x36, 0)])
+        body = bytes.fromhex(next(w['hex'] for w in manifest['writes'] if w['at'] == '68:8000'))
+        self.assertEqual(body[-6:], bytes([0x36, 0x59, 1, 56, 0, 255]))
+        in_place = patch(self.rom, document(entrances=[{'table': 'aux', 'index': 0, 'group': 0x37}]),
+                         new_maps=[(0x36, 0), (0x37, 0)])
+        self.assertEqual(in_place['writes'][0]['hex'][:2], '37')
+
+    def test_new_group_numbers_must_follow_last_group(self):
+        doc = document(entrances=[{'table': 'aux', 'index': 0, 'group': 0x37}])
+        self.assertEqual(patch(self.rom, document(), new_maps=[(0x50, 0x52)])['writes'], [])
+        for maps in ([(0x37, 0)], [(0x36, 0), (0x38, 0)], [(0x4F, 0)]):
+            with self.subTest(maps=maps), self.assertRaises(ValueError):
+                patch(self.rom, doc, new_maps=maps)
+        with self.assertRaises(ValueError):
+            patch(self.rom, document(entrances=[{'table': 'aux', 'index': 0, 'group': 0x37}]), new_maps=[(0x36, 0)])
+
+    def moved_arrivals(self):
+        """도착 표를 3E:C000 으로 옮기고 그룹 하나(36)를 더한 꼴: 맵 포인터 그룹 표도 [시작…][끝][0000] 로 옮긴다."""
+        raw = bytearray(self.data) + bytes(0x200000 - len(self.data))
+        at = 0x3EC000
+        rows = self.data[lorom(GROUP_ARRIVAL):lorom(GROUP_ARRIVAL) + ARRIVAL_COUNT * 5] + bytes([1, 2, 3, 4, 5])
+        raw[lorom(at):lorom(at) + len(rows)] = rows
+        for site, plus in ENTRANCE_SITES:
+            raw[lorom(site):lorom(site) + 3] = (at + plus).to_bytes(3, 'little')
+        start = (GROUP_TABLE & 0xFFFF) - ARRIVAL_COUNT * 3
+        table = 0x0FFF50
+        values = [start + g * 3 for g in range(ARRIVAL_COUNT + 1)] + [start + (ARRIVAL_COUNT + 1) * 3, 0]
+        raw[lorom(table):lorom(table) + len(values) * 2] = b''.join(v.to_bytes(2, 'little') for v in values)
+        raw[lorom(POINTER_SITE) - 1:lorom(POINTER_SITE) + 2] = bytes([0xBC]) + (table & 0xFFFF).to_bytes(2, 'little')
+        db = TABLE_KINDS['pointer']['db']
+        raw[lorom(db) - 1:lorom(db) + 1] = bytes([0xA9, 0x0F])
+        return Rom(bytes(raw))
+
+    def test_moved_arrival_table_is_read_but_not_written(self):
+        rom = self.moved_arrivals()
+        doc = dump(rom)
+        self.assertEqual(len(doc['arrivals']), ARRIVAL_COUNT + 1)
+        self.assertEqual(doc['arrivals'][-1]['x'], 2)
+        self.assertEqual(patch(rom, doc)['writes'], [])
+        with self.assertRaises(ValueError):
+            patch(rom, document(arrivals=[{'group': 0x36, 'x': 9}]))
+        manifest = patch(rom, document(entrances=[{'table': 'aux', 'index': 0, 'group': 0x36}]))
+        self.assertEqual(manifest['writes'][0]['hex'][:2], '36')
 
 
 class EntranceRelocateTest(unittest.TestCase):

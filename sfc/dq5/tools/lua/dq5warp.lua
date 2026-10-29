@@ -30,7 +30,7 @@
 --   POKE, ROMPATCH           walk.lua 와 같다(POKE 는 매 프레임 고정, ROMPATCH 는 파일 오프셋=바이트)
 --   TEST="left:40,up:40"     도착 후 이 입력을 눌러 조작되는지 본다(좌표가 바뀌면 moved=yes). 세이브는 TEST 전에 한다
 --   SAVE="town.mss"          도착하고 SETTLE(기본 150) 프레임 뒤 SHOT_DIR 에 세이브스테이트와 그림(.png)을 저장
--- 결과: SHOT_DIR/warp.txt(맵, 셀·필드 좌표, $BE, 플래그), end.png. 선실 세이브스테이트가 아닌 곳에서는 사다리 경로가 맞지 않는다.
+-- 결과: SHOT_DIR/warp.txt(맵, 셀·필드 좌표, $BE, 플래그), end.png, 끝 프레임의 WRAM(final.wram)·CGRAM(final.cgram). 선실 세이브스테이트가 아닌 곳에서는 사다리 경로가 맞지 않는다.
 package.path = os.getenv("LIBDIR") .. "/?.lua;" .. package.path
 local L = require("lib")
 L.loadState(os.getenv("STATE"))
@@ -189,6 +189,8 @@ local function finish()
   log[#log + 1] = "flags 7E2190: " .. table.concat(t, " ")
   L.write("warp.txt", table.concat(log, "\n") .. "\n")
   L.shot("end.png")
+  L.dump("final.wram", emu.memType.snesWorkRam, 0x20000)
+  L.dump("final.cgram", emu.memType.snesCgRam, 0x200)
   emu.stop(0)
 end
 
