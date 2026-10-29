@@ -18,7 +18,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from dq5map import Rom  # noqa: E402
+from dq5map import Rom, lorom  # noqa: E402
 
 WORLD = 0x179A59
 FIELD_E000 = 0x2A8D3E
@@ -92,12 +92,75 @@ def block_number(world, hibits, x, y):
 
 
 def block_tiles(rom, table, m):
-    """블록 m 의 네 칸 타일 번호(9비트, 타일 늘리기 훅이 있으면 10비트)."""
-    a = table + m * 5
+    """블록 m 의 네 칸 타일 번호(9비트, 타일 늘리기 훅이 있으면 10비트). m 이 511 이상이면 옮긴 표에서 읽는다."""
+    a = block_entry(rom, table == BLOCK_UPPER, m)
     hi = rom.u8(a + 4)
-    wide = rom.u8(BLOCK_HOOK_SITE) == 0x22
+    wide = rom.u8(BLOCK_HOOK_SITE) == 0x22 or m >= 511
     return [rom.u8(a + q) | (0x100 if hi & QUAD_BIT[q] else 0) | (0x200 if wide and hi & QUAD_BIT10[q] else 0)
             for q in range(4)]
+
+
+# 블록 번호 511 이상(dq5fieldtables.py --blocks-at): 00:BC4E 를 JML 로 바꿔 511 이상이면 옮긴 표에서 읽는다.
+# 훅은 BRA 로 건너뛰는 머리 [아래층 표][위층 표 24비트씩][블록 수 16비트] 로 시작하고, 두 표는 번호 511 부터 5바이트씩이다.
+BLOCK_GROW_SITE = 0x00BC4E
+# 지형 표(03:CB1B 가 블록 >> 1 로 니블을 읽음). 블록을 늘리면 두 읽기의 피연산자를 512바이트 표로 바꾼다.
+TERRAIN = 0x03CC48
+TERRAIN_SITES = (0x03CB2A, 0x03CB36)
+# 블록 번호 10번째 비트(dq5fieldwrite.py --planes-at): 00:BBF7·00:BDC5 의 9번째 비트 읽기(00:BC33·00:BE06)를 JSL 로 바꿔
+# 세계마다 롬의 8KB 평면(칸마다 1비트, 7E:E000 과 같은 꼴)을 함께 읽는다. 훅은 BRA 로 건너뛰는 머리 [세계 0·1·2 평면 24비트씩,
+# 0 이면 없음]로 시작한다.
+BIT9_SITES = (0x00BC33, 0x00BE06)
+
+
+def grown_blocks(rom):
+    """블록 늘리기 훅이 있으면 (아래층 표, 위층 표, 블록 수). 표는 번호 511 부터. 없으면 None."""
+    if rom.u8(BLOCK_GROW_SITE) != 0x5C:
+        return None
+    hook = rom.u24(BLOCK_GROW_SITE + 1)
+    return rom.u24(hook + 2), rom.u24(hook + 5), rom.u16(hook + 8)
+
+
+def block_count(rom):
+    g = grown_blocks(rom)
+    return g[2] if g else 511
+
+
+def block_entry(rom, upper, m):
+    """블록 m 의 그 층 5바이트 항목 주소."""
+    g = grown_blocks(rom)
+    if g and m >= 511:
+        return g[1 if upper else 0] + (m - 511) * 5
+    return (BLOCK_UPPER if upper else BLOCK_LOWER) + m * 5
+
+
+def terrain_table(rom):
+    return rom.u24(TERRAIN_SITES[0] + 1)
+
+
+def terrain(rom, m):
+    """03:CB1B. 블록 m 의 지형 니블(짝수 블록은 위 니블)."""
+    v = rom.u8(terrain_table(rom) + (m >> 1))
+    return v & 0x0F if m & 1 else v >> 4
+
+
+def bit9_planes(rom):
+    """세계 0·1·2 의 10번째 비트 평면 주소(없으면 None). 훅이 없으면 모두 None."""
+    if rom.u8(BIT9_SITES[0]) != 0x22:
+        return [None] * 3
+    hook = rom.u24(BIT9_SITES[0] + 1)
+    return [rom.u24(hook + 2 + w * 3) or None for w in range(3)]
+
+
+def world_blocks(rom, world, sources=None):
+    """세계 지도 65,536칸의 블록 번호(y*256+x). 10번째 비트 평면이 있으면 더한다.
+    sources 는 (지도, 9번째 비트) RLE 주소로, 주지 않으면 원래 자리다."""
+    src_w, src_e = sources or WORLDS[world]
+    low, _ = rle(rom, src_w)
+    hi, _ = rle(rom, src_e)
+    plane = bit9_planes(rom)[world]
+    p = rom.d[lorom(plane):lorom(plane) + 0x2000] if plane else bytes(0x2000)
+    return [low[i] | ((hi[i >> 3] >> (7 - (i & 7))) & 1) << 8 | ((p[i >> 3] >> (7 - (i & 7))) & 1) << 9
+            for i in range(65536)]
 
 
 # dq5fieldgfxwrite.py --worlds-at 은 00:BBB4 등을 JSL 훅으로 바꾸고, 훅 안 LDA long,X 의 피연산자(훅 + 22)가

@@ -1,7 +1,8 @@
 """DQ5 필드 블록·입구·도착 표 쓰기. 형식은 sfc/dq5/docs/dq5-field-format.md.
 
 블록 표(00:BC4E)는 아래층 2A:A32C, 위층 2A:AD27 에 각각 511항목이다.
-번호 511은 다음 표·세계 1 RLE와 겹치므로 쓰지 않는다. 블록 상위 비트 바이트의
+번호 511은 다음 표·세계 1 RLE와 겹치므로 제자리에는 쓰지 않는다. --blocks-at 을 주면 번호 511~1023 을 그 자리의 두 표로
+더하고 00:BC4E 를 그 표도 읽는 훅으로, 지형 표(03:CC48)를 512바이트로 옮긴다(블록마다 terrain). 블록 상위 비트 바이트의
 하위 니블은 원본에서 보존한다. dq5fieldgfxwrite.py 의 타일 늘리기 패치를 넣은 롬(00:BC80 이 JSL)이면
 그 니블을 10번째 비트로 써서 타일 번호를 1023 까지 받는다. check 는 롬의 블록 표가 타일이 가장 적은 세계의 타일 수
 이상을 쓰면 실패한다(그림 쪽 타일 수를 바꾸면 이 도구의 패치를 다시 만들 것). 입구(2A:F247·FDCB)와 도착(2A:F384)도 고정 슬롯만
@@ -32,12 +33,17 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from dq5field import BLOCK_HOOK_SITE, BLOCK_LOWER, BLOCK_UPPER, ENTRANCES, GROUP_ARRIVAL, QUAD_BIT, QUAD_BIT10  # noqa: E402
+from dq5field import (BLOCK_GROW_SITE, BLOCK_HOOK_SITE, BLOCK_LOWER, BLOCK_UPPER, ENTRANCES, GROUP_ARRIVAL,  # noqa: E402
+                      QUAD_BIT, QUAD_BIT10, TERRAIN_SITES, block_count, block_entry, grown_blocks, terrain_table)
 from dq5map import Rom, group_spans, lorom  # noqa: E402
 from dq5newmap import entrance_table  # noqa: E402
 
 FORMAT = 'dq5fieldtables/1'
 BLOCK_COUNT = 511
+# --blocks-at 으로 늘릴 수 있는 블록 수. 지도의 블록 번호는 10비트까지다(10번째 비트는 dq5fieldwrite.py --planes-at).
+BLOCK_MAX = 1024
+BLOCK_GROW_ORIG = bytes.fromhex('c2308500')
+TERRAIN_ORIG = bytes.fromhex('bf48cc03')
 # 원본 롬의 도착 항목 수(그룹 00~35). 늘린 롬은 arrivals() 가 센다.
 ARRIVAL_COUNT = 0x36
 ENTRANCE_TABLES = {'main': (ENTRANCES, 47), 'aux': (0x04FE83, 14)}
@@ -183,14 +189,14 @@ def encode_arrival(raw, changes):
     return bytes([head, integer(v['x'], 255, 'x'), integer(v['y'], 255, 'y'), integer(v['layer'], 255, 'layer'), tail])
 
 
-def lorom_cpu(at):
+def lorom_cpu(at, option='--entrances-at'):
     bank, _, addr = at.partition(':')
     try:
         b, a = int(bank, 16), int(addr, 16)
     except ValueError:
         b = a = -1
     if not (0 <= b <= 0x7D and 0x8000 <= a <= 0xFFFF):
-        raise ValueError(f'--entrances-at {at!r}: BB:AAAA(뱅크 00~7D, AAAA 8000~FFFF) 여야 함')
+        raise ValueError(f'{option} {at!r}: BB:AAAA(뱅크 00~7D, AAAA 8000~FFFF) 여야 함')
     return b << 16 | a
 
 
@@ -251,21 +257,30 @@ def relocate(rom, tables, at, groups):
     return out
 
 
+def terrains(rom):
+    """지형 니블을 블록 번호 차례로(원래 표는 512블록 몫 256바이트)."""
+    off = lorom(terrain_table(rom))
+    raw = rom.d[off:off + (BLOCK_MAX if grown_blocks(rom) else 512) // 2]
+    return [v for b in raw for v in (b >> 4, b & 15)]
+
+
 def dump(rom):
     check_layout(rom, interior_groups(rom))
     table, count = arrivals(rom)
+    land, wide = terrains(rom), wide_tiles(rom)
     return {
         'format': FORMAT,
-        'blocks': [{'index': i, 'lower': block_tiles(record(rom, BLOCK_LOWER + i * 5), wide_tiles(rom)),
-                    'upper': block_tiles(record(rom, BLOCK_UPPER + i * 5), wide_tiles(rom))}
-                   for i in range(BLOCK_COUNT)],
+        'blocks': [{'index': i, 'lower': block_tiles(record(rom, block_entry(rom, False, i)), wide or i >= BLOCK_COUNT),
+                    'upper': block_tiles(record(rom, block_entry(rom, True, i)), wide or i >= BLOCK_COUNT),
+                    'terrain': land[i]}
+                   for i in range(block_count(rom))],
         'entrances': [{'table': name, 'index': i, **entrance_fields(record(rom, start + i * 5))}
                       for name, (start, count) in ENTRANCE_TABLES.items() for i in range(count)],
         'arrivals': [{'group': i, **arrival_fields(record(rom, table + i * 5))} for i in range(count)],
     }
 
 
-def edits(rom, doc, entrances_at=None, new_maps=()):
+def edits(rom, doc, entrances_at=None, new_maps=(), blocks_at=None):
     """검사한 항목을 (주소, 새 값, 원본, 설명)으로 돌려준다. 원본이 None 이면 orig 없이 쓰는 새 자리."""
     fields(doc, {'format', 'blocks', 'entrances', 'arrivals', 'entrance_tables'}, '문서')
     if ('entrance_tables' in doc) != (entrances_at is not None):
@@ -278,6 +293,12 @@ def edits(rom, doc, entrances_at=None, new_maps=()):
     check_layout(rom, groups)
     arrival_at, arrival_count = arrivals(rom)
     limit = tile_limit(rom)
+    grown = grown_blocks(rom)
+    if blocks_at is not None and grown:
+        raise ValueError('이미 블록을 늘린 롬(00:BC4E 가 JML)이라 --blocks-at 을 다시 쓸 수 없음; 원래 롬으로 만들 것')
+    count = grown[2] if grown else BLOCK_MAX if blocks_at is not None else BLOCK_COUNT
+    land, new_blocks = terrains(rom), {}
+    land += [0] * (count - len(land))
     out = []
     for section in ('blocks', 'entrances', 'arrivals'):
         rows = doc.get(section, [])
@@ -286,14 +307,24 @@ def edits(rom, doc, entrances_at=None, new_maps=()):
         seen = set()
         for row in rows:
             if section == 'blocks':
-                fields(row, {'index', 'lower', 'upper'}, section)
-                key = integer(row.get('index'), BLOCK_COUNT - 1, 'index')
-                for layer, start in (('lower', BLOCK_LOWER), ('upper', BLOCK_UPPER)):
-                    if layer in row:
-                        addr = start + key * 5
+                fields(row, {'index', 'lower', 'upper', 'terrain'}, section)
+                if blocks_at is None and not grown and type(row.get('index')) is int and \
+                        BLOCK_COUNT <= row['index'] < BLOCK_MAX:
+                    raise ValueError(f'블록 {row["index"]}: 번호 {BLOCK_COUNT} 이상은 --blocks-at 으로 블록 표를 늘려야 함')
+                key = integer(row.get('index'), count - 1, 'index')
+                if 'terrain' in row:
+                    land[key] = integer(row['terrain'], 15, 'terrain')
+                if key >= BLOCK_COUNT and not grown:
+                    if row.keys() != {'index', 'lower', 'upper', 'terrain'}:
+                        raise ValueError(f'블록 {key}: 새 블록은 lower·upper·terrain 을 모두 적어야 함')
+                    new_blocks[key] = b''.join(encode_block(bytes(5), row[layer], True, limit)
+                                               for layer in ('lower', 'upper'))
+                for layer, upper in (('lower', False), ('upper', True)):
+                    if layer in row and (key < BLOCK_COUNT or grown):
+                        addr = block_entry(rom, upper, key)
                         raw = record(rom, addr)
-                        out.append((addr, encode_block(raw, row[layer], wide_tiles(rom), limit), raw,
-                                    f'블록 {key} {layer}'))
+                        out.append((addr, encode_block(raw, row[layer], wide_tiles(rom) or key >= BLOCK_COUNT, limit),
+                                    raw, f'블록 {key} {layer}'))
             elif section == 'entrances':
                 fields(row, {'table', 'index', 'group', 'x', 'y'}, section)
                 table = row.get('table')
@@ -323,14 +354,90 @@ def edits(rom, doc, entrances_at=None, new_maps=()):
             if key in seen:
                 raise ValueError(f'{section}: 중복 항목 {key}')
             seen.add(key)
+    out += terrain_edits(rom, land, blocks_at is not None)
+    if blocks_at is not None:
+        out += grow_blocks(rom, new_blocks, blocks_at, land)
     if entrances_at is not None:
         out += relocate(rom, doc['entrance_tables'], entrances_at, groups)
     return out
 
 
-def patch(rom, doc, name='field-tables', entrances_at=None, new_maps=()):
+def terrain_edits(rom, land, moving):
+    """지형 니블 변경을 지금 표 자리의 바이트 쓰기로. 블록 표를 늘리면 표 전체를 grow_blocks 가 옮기므로 쓰지 않는다."""
+    if moving:
+        return []
+    table, out = terrain_table(rom), []
+    for i in range(0, len(land) // 2 * 2, 2):
+        raw = record_byte(rom, table + i // 2)
+        new = bytes([land[i] << 4 | land[i + 1]])
+        if new != raw:
+            out.append((table + i // 2, new, raw, f'블록 {i}·{i + 1} 지형'))
+    return out
+
+
+def record_byte(rom, addr):
+    off = lorom(addr)
+    return bytes(rom.d[off:off + 1])
+
+
+def block_hook(lower, upper, count, masks):
+    """00:BC4E 대신(JML 로 들어옴, M·X 는 아무것이나). 번호가 511 미만이면 원래처럼 STA $00 뒤 00:BC52 로 돌아가고,
+    511 이상이면 옮긴 두 표(번호 511 부터)에서 원래와 같이 $94~$97 을 채운 뒤 00:BC47 의 RTS 로 부른 곳에 돌아간다.
+    칸 타일의 10번째 비트(상위 비트 바이트의 하위 니블)도 읽는다. masks 는 80>>칸 4개와 08>>칸 4개이고
+    DB 를 훅 뱅크로 두고 읽는다."""
+    def layer(table, dp):
+        return (b'\xbf' + long3(table + 4) + b'\x39' + (masks + 4 & 0xFFFF).to_bytes(2, 'little') + b'\xc9\x01\xa9\x00\x2a\xeb'
+                + b'\xbf' + long3(table + 4) + b'\x39' + (masks & 0xFFFF).to_bytes(2, 'little') + b'\xc9\x01\xeb\x2a'
+                + bytes([0x85, dp]))
+    return (b'\x80\x08' + long3(lower) + long3(upper) + count.to_bytes(2, 'little')
+            + b'\xc2\x30\xc9\xff\x01\xb0\x06\x85\x00\x5c\x52\xbc\x00'
+            + b'\x38\xe9\xff\x01\x85\x00\x0a\x0a\x18\x65\x00\x85\x02'
+            + b'\xa5\x90\x29\x01\x00\x85\x00\xa5\x92\x29\x01\x00\x0a\x05\x00\xa8\x18\x65\x02\xaa'
+            + b'\x8b\x4b\xab\xe2\x20' + b'\xbf' + long3(lower) + b'\x85\x94' + b'\xbf' + long3(upper) + b'\x85\x96'
+            + b'\xa6\x02' + layer(lower, 0x95) + layer(upper, 0x97) + b'\xab\x5c\x47\xbc\x00')
+
+
+def long3(a):
+    return a.to_bytes(3, 'little')
+
+
+BLOCK_HOOK_LEN = len(block_hook(0, 0, 0, 0))
+MASKS = bytes([0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01])
+
+
+def grow_blocks(rom, new_blocks, at, land):
+    """블록 511 이상을 at 에 [훅][칸 마스크 8][아래층 표][위층 표][지형 512바이트] 로 두고 00:BC4E·03:CB1B 의 두 읽기를 바꾼다."""
+    if not new_blocks:
+        raise ValueError('--blocks-at 은 번호 511 이상의 블록을 더할 때만')
+    n = max(new_blocks) + 1
+    missing = [i for i in range(BLOCK_COUNT, n) if i not in new_blocks]
+    if missing:
+        raise ValueError(f'새 블록은 {BLOCK_COUNT} 부터 빈 번호 없이 적어야 함(빠진 번호 {missing[0]})')
+    for site, want in ((BLOCK_GROW_SITE, BLOCK_GROW_ORIG), *((t, TERRAIN_ORIG) for t in TERRAIN_SITES)):
+        if bytes(rom.d[lorom(site):lorom(site) + 4]) != want:
+            raise ValueError(f'{site >> 16:02X}:{site & 0xFFFF:04X}: 원래 롬의 블록·지형 읽기가 아님')
+    masks = at + BLOCK_HOOK_LEN
+    lower = masks + len(MASKS)
+    upper = lower + (n - BLOCK_COUNT) * 5
+    terrain = upper + (n - BLOCK_COUNT) * 5
+    end = terrain + BLOCK_MAX // 2
+    bank = at >> 16
+    if not 0x30 <= bank <= 0x7D or at & 0xFFFF < 0x8000 or (end - 1) >> 16 != bank:
+        raise ValueError(f'--blocks-at 은 30~7D 뱅크의 8000~FFFF 한 뱅크 안({end - at}바이트)')
+    body = (block_hook(lower, upper, n, masks) + MASKS
+            + b''.join(new_blocks[i][:5] for i in range(BLOCK_COUNT, n))
+            + b''.join(new_blocks[i][5:] for i in range(BLOCK_COUNT, n))
+            + bytes(land[i] << 4 | land[i + 1] for i in range(0, BLOCK_MAX, 2)))
+    out = [(at, body, None, f'블록 {BLOCK_COUNT}~{n - 1} 훅·표와 지형 표')]
+    out.append((BLOCK_GROW_SITE, b'\x5c' + long3(at), BLOCK_GROW_ORIG, '블록 표 읽기(00:BC4E)를 늘리기 훅으로'))
+    for site in TERRAIN_SITES:
+        out.append((site, b'\xbf' + long3(terrain), TERRAIN_ORIG, '지형 표 읽기를 512바이트 표로'))
+    return out
+
+
+def patch(rom, doc, name='field-tables', entrances_at=None, new_maps=(), blocks_at=None):
     writes, size = [], 0
-    for addr, new, old, note in edits(rom, doc, entrances_at, new_maps):
+    for addr, new, old, note in edits(rom, doc, entrances_at, new_maps, blocks_at):
         if new != old:
             write = {'at': f'{addr >> 16:02X}:{addr & 0xFFFF:04X}', 'hex': new.hex(' '), 'note': note}
             if old is not None:
@@ -348,8 +455,8 @@ def block_overflow(rom):
     """롬의 블록 표에서 타일 수가 가장 적은 세계의 타일 수 이상을 쓰는 칸 [(블록, 층, 타일)]. 그림 쪽 타일 수를 블록 패치를
     만든 뒤에 줄여 빌드하면 패치를 만들 때의 검사가 다시 돌지 않으므로, 빌드한 롬에서 이것으로 다시 본다."""
     limit, wide = tile_limit(rom), wide_tiles(rom)
-    return [(i, layer, v) for i in range(BLOCK_COUNT) for layer, start in (('lower', BLOCK_LOWER), ('upper', BLOCK_UPPER))
-            for v in block_tiles(record(rom, start + i * 5), wide) if v > limit]
+    return [(i, layer, v) for i in range(block_count(rom)) for layer, upper in (('lower', False), ('upper', True))
+            for v in block_tiles(record(rom, block_entry(rom, upper, i)), wide or i >= BLOCK_COUNT) if v > limit]
 
 
 def check(rom):
@@ -361,7 +468,7 @@ def check(rom):
         return True
     rows = edits(rom, dump(rom))
     bad = sum(new != old for _, new, old, _ in rows)
-    print(f'블록 {BLOCK_COUNT}개 × 2층, 입구 61개, 도착 {arrivals(rom)[1]}개: '
+    print(f'블록 {block_count(rom)}개 × 2층, 입구 61개, 도착 {arrivals(rom)[1]}개: '
           f'{sum(len(old) for _, _, old, _ in rows)}바이트, 다른 항목 {bad}개')
     return bool(bad)
 
@@ -383,6 +490,7 @@ def main():
     write.add_argument('-o', '--out', required=True)
     write.add_argument('--name', default='field-tables')
     write.add_argument('--entrances-at', help='entrance_tables 를 쓸 자리(BB:AAAA). 다른 패치와 겹치지 않게 고름')
+    write.add_argument('--blocks-at', help='번호 511 이상의 블록 표·훅·지형 표를 둘 자리(BB:AAAA, 30~7D)')
     write.add_argument('--new-map', action='append', default=[], type=new_map,
                        help='dq5newmap.py 로 함께 더하는 새 맵 GG/MM(새 그룹의 입구를 받게 함)')
     subs.add_parser('check')
@@ -396,7 +504,8 @@ def main():
             result = dump(rom)
         else:
             with open(args.source, encoding='utf-8') as f:
-                result = patch(rom, json.load(f), args.name, args.entrances_at, args.new_map)
+                result = patch(rom, json.load(f), args.name, args.entrances_at, args.new_map,
+                               None if args.blocks_at is None else lorom_cpu(args.blocks_at, '--blocks-at'))
         os.makedirs(os.path.dirname(args.out) or '.', exist_ok=True)
         with open(args.out, 'w', encoding='utf-8') as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
