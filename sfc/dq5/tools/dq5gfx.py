@@ -33,7 +33,7 @@ from PIL import Image, ImageDraw
 sys.path.insert(0, os.path.dirname(__file__))
 from dq5exit import apply_hook, exit_attrs  # noqa: E402
 from dq5map import (CHR_PALETTE, HIGH_CHR_PALETTE, PALETTES, PALSET_LISTS, Decoder,  # noqa: E402
-                    Rom, chr_pixels, group_spans, lorom, map_cgram, map_pointer)
+                    Rom, chr_pixels, door_table, group_spans, lorom, map_cgram, map_pointer)
 
 SLOT = 0xBE
 # 01:9771: 맵을 들어갈 때 10:DE0B 로 고른 팔레트 세트를 플래그에 따라 바꾸는 표. [BC][BD|FF][플래그|FF][마스크][세트], FF 로 끝.
@@ -64,7 +64,6 @@ COMMON_TILES = ((0x001, 0x04826E, 'rle'), (0x09E, 0x049287, 'rle'), (0x0A0, 0x04
 COMMON_TILES_5352 = 0x0492C7  # 53/52 만 슬롯 09E 를 이것으로
 # 01:F3C9: 맵을 푼 뒤 01:D2FC 표의 물체(닫힌 문 등)를 셀 위층에 그린다. 그룹마다·맵마다 [X][Y][종류][플래그][…] 5바이트,
 # 항목 끝 바이트가 80 이상이면 그 맵 끝, C0 이상이면 그룹 끝(빈 맵은 그 바이트 하나).
-DOOR_TABLE = 0x01D2FC
 # 종류 → 그리는 루틴(01:F4AF). 없는 종류는 01:F635. 루틴이 쓰는 타일 워드 표(01 뱅크)는 아래 둘이 종류로 고른다.
 DOOR_ROUTINES = {0x44: 0x01F6B1, 0x43: 0x01F5CA, 0x3F: 0x01F727, 0x40: 0x01F727, 0x49: 0x01F4E6, 0x42: 0x01F4E6,
                  0x41: 0x01F4E6, 0x48: 0x01F4E6, 0x46: 0x01F69E}
@@ -250,7 +249,7 @@ def common_tiles(rom, bc, bd):
 
 def door_entries(rom):
     """01:D2FC 표: {(BC, BD): [[X, Y, 종류, 플래그, 끝 바이트]]}."""
-    out, a, y, g, m = {}, DOOR_TABLE, 0, 0, 0
+    out, a, y, g, m = {}, door_table(rom), 0, 0, 0
     while g < GROUPS:
         b = rom.u8(a + y)
         if b < 0x80:
