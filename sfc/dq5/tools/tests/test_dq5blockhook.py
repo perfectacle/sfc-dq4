@@ -10,7 +10,7 @@ from dq5chestplace import furniture_cells
 from dq5map import LOAD_TAIL, Decoder, Rom, block_hook, block_table, lorom
 from test_dq5chestwrite import ROM
 
-STUB, LOADER, FIND, TARGETS, HIT = 0x01FF00, 0x3BE100, 0x3BE000, 0x3BD000, 0x3BE140
+STUB, LOADER, FIND, TARGETS, HIT, REBUILD = 0x01FF00, 0x3BE100, 0x3BE000, 0x3BD000, 0x3BE140, 0x01FF10
 
 
 def put(data, addr, raw):
@@ -24,7 +24,9 @@ def hook(data, maps, bank, table, count, probe=0x800B):
     rel = HIT - (LOADER + 12)
     put(data, LOADER, bytes((0x08, 0xC2, 0x30, 0x48, 0xDA, 0x5A, 0x22, *FIND.to_bytes(3, 'little'), 0xB0, rel)))
     # 못 찾은 길: 7E:B002 가 probe(훅 표 1번)이면 원래 표를 다시 만든다
-    put(data, LOADER + 12, bytes((0xC2, 0x20, 0xAF, 0x02, 0xB0, 0x7E, 0xC9, probe & 0xFF, probe >> 8, 0xD0, 0x00)))
+    put(data, LOADER + 12, bytes((0xC2, 0x20, 0xAF, 0x02, 0xB0, 0x7E, 0xC9, probe & 0xFF, probe >> 8, 0xD0, 0x04,
+                                  0x22, *REBUILD.to_bytes(3, 'little'))))
+    put(data, REBUILD, bytes((0x20, 0xD8, 0x8C, 0x6B)))
     put(data, FIND, bytes((0x08, 0xE2, 0x30, 0xA2, 0x00, 0xBF, *TARGETS.to_bytes(3, 'little'), 0xC9, 0xFF, 0xF0, 0x10,
                            0xC5, 0xBC, 0xD0, 0x08, 0xBF, *(TARGETS + 1).to_bytes(3, 'little'), 0xC5, 0xBD, 0xF0, 0x07,
                            0xE8, 0xE8, 0x80, 0xE8, 0x28, 0x18, 0x6B, 0x28, 0x38, 0x6B)))
@@ -69,7 +71,7 @@ class BlockHookTests(unittest.TestCase):
 
     def test_unknown_hook_shapes_stop(self):
         for addr, value, message in ((LOAD_TAIL, 0x20, '01:936E'), (STUB + 4, 0xEA, '스텁'), (FIND + 13, 0xC6, '찾기'), (FIND + 31, 0x18, '찾기'),
-                                     (HIT + 4, 0x8E, '\\$1823'), (HIT + 18, 0x44, 'MVN'), (HIT + 20, 0x3C, '포인터 표')):
+                                     (HIT + 4, 0x8E, '\\$1823'), (LOADER + 26, 0x02, '뱅크 01'), (REBUILD + 1, 0xD9, 'JSR'), (HIT + 18, 0x44, 'MVN'), (HIT + 20, 0x3C, '포인터 표')):
             data = blank()
             put(data, 0x3D8C00, bytes((0x00, 0x80, 0x0B, 0x80)))
             hook(data, [(0x16, 2)], 0x3D, 0x8C00, 150)

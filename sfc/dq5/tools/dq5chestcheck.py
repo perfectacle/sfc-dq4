@@ -31,9 +31,8 @@ from dq5chestwrite import FORMAT
 from dq5exitcheck import DB_ABS, DB_INDIRECT, warp_exit
 from dq5chest import chests
 from dq5map import Rom, block_hook, block_table
-from dq5mapwrite import all_maps
 from dq5mapcompile import compile_places, extract
-from dq5mapwrite import dumps
+from dq5mapwrite import all_maps, dumps
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]

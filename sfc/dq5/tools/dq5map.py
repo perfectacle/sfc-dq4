@@ -245,10 +245,14 @@ def block_hook(rom):
     size, source, src_bank = int.from_bytes(raw[0:2], 'little') + 1, int.from_bytes(raw[2:4], 'little'), raw[4]
     if src_bank != bank or size % 2:
         raise ValueError(f'훅의 포인터 표 복사가 블록 뱅크 {bank:02X} 의 2바이트 표가 아님')
-    # 못 찾은 맵: 로더는 7E:B002 가 CMP #값 과 같을 때만 원래 표를 다시 만든다. 디코더는 목록 밖 맵이 늘 원래 표를 쓴다고
-    # 보므로, 그 값이 훅 표의 1번이고 원래 표의 1번과 달라야 한다(같으면 앞서 다녀온 맵에 따라 훅 표가 남음)
-    probe = int.from_bytes(_code(rom, loader + 12, 'C2 20 AF 02 B0 7E C9 ?? ?? D0', '훅 로더의 못 찾은 길(7E:B002 견주기)'),
-                           'little')
+    # 못 찾은 맵: 로더는 7E:B002 가 CMP #값 과 같을 때만 JSL 스텁(JSR $8CD8)으로 원래 표를 다시 만든다. 디코더는 목록 밖
+    # 맵이 늘 원래 표를 쓴다고 보므로, 그 값이 훅 표의 1번이고 원래 표의 1번과 달라야 한다(같으면 앞서 다녀온 맵에 따라
+    # 훅 표가 남음)
+    raw = _code(rom, loader + 12, 'C2 20 AF 02 B0 7E C9 ?? ?? D0 ?? 22 ?? ?? ??', '훅 로더의 못 찾은 길(7E:B002 견주기)')
+    probe, rebuild = int.from_bytes(raw[:2], 'little'), int.from_bytes(raw[3:6], 'little')
+    if rebuild >> 16 != 0x01:
+        raise ValueError(f'훅 로더가 원래 표를 다시 만들려 부르는 {rebuild:06X} 가 뱅크 01 이 아님')
+    _code(rom, rebuild, '20 D8 8C', '원래 표를 다시 만드는 스텁(JSR $8CD8)')
     original = original_block_table(rom, count=2)[1] & 0xFFFF
     if probe != rom.u16((bank << 16 | source) + 2) or probe == original:
         raise ValueError(f'훅 로더가 견주는 7E:B002 값 {probe:04X} 가 훅 표 1번 {rom.u16((bank << 16 | source) + 2):04X} 과 '
