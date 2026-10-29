@@ -237,7 +237,7 @@ def estimate(path, max_rate, seconds):
 
 
 def build_bank(score, asset_root, *, start_id=0x26, max_rate=8000, cache_dir=None, budget=None, max_samples=14,
-               rates=RATES):
+               rates=RATES, keep_regions=()):
     """(resources, program_map, report). sample은 DQ5 전역 번호.
 
     budget(바이트)·max_samples(곡 묶음 칸)를 넘으면 손실이 가장 작은 줄이기를 하나씩 고른다.
@@ -300,6 +300,9 @@ def build_bank(score, asset_root, *, start_id=0x26, max_rate=8000, cache_dir=Non
         options = []
         for key in set(target.values()):
             program = key[0]
+            # keep_regions 의 프로그램은 영역을 합치지 않는다. 한 샘플을 넓은 음역에 늘려 쓰면 오르간처럼 튀었다(곡 04 의 54)
+            if program in keep_regions:
+                continue
             mates = sorted({target[k] for k in regions if k[0] == program and target[k] != key}, key=lambda m: abs(m[1] - key[1]))
             if not mates:
                 continue
