@@ -1020,6 +1020,9 @@ uv run --locked python sfc/dq5/tools/dq5chestplace.py rom/dq5.sfc check work/pla
 | 사례 | 장면 | 원본 | 패치 |
 | --- | --- | --- | --- |
 | `place_furniture` | 01/02 의 (40,24) 에 블록 204, (40,27) 에서 위 | 12B·12C | 12F, 765G, `2237 & 02` |
+| `place_jar` | 블록 없이 17/00 (2,4) 에 가구만, 선실 (1,5) 에서 위 | 12F·130 | 12F, 345G, `2237 & 01` |
+| `place_unlisted` | 블록 없이 19/00 의 상자 칸 다섯, (5,46) 에서 위 | 12B·12C | 131, 789G, `2224 & 08`(상자 164) |
+| `place_unlisted_entry` | 위 롬에서 `2224 & 08` 을 켜고 19/00 에 들어감 | 그대로 | 열린 상자 타일 넷 |
 
 ### 새 맵의 상자 (`--new-map`)
 
