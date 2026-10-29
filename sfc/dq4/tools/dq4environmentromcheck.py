@@ -24,10 +24,11 @@ for path in (TOOLS, DQ5_TOOLS):
         sys.path.insert(0, str(path))
 
 import dq5map  # noqa: E402
+from dq5exitcheck import dp86_allowed, warp_exit  # noqa: E402
 from dq4environmentart import create_assets  # noqa: E402
 from dq4environmentmap import prepare_maps, render_maps  # noqa: E402
 from dq4environmentmap import block_prop  # noqa: E402
-from dq4environmentrom import (DOOR_KIND, FLOOR, GATE_KIND, OPENINGS, door_floor, TARGETS, WALL, WATER_SLOT, water_block,  # noqa: E402
+from dq4environmentrom import (DOOR_KIND, FLOOR, GATE_KIND, OPENINGS, door_floor, MAPS, WALL, WATER_SLOT, water_block,  # noqa: E402
                                WATER_FRAMES, WATER_PERIOD, build_graphics, objects, water_frames)
 
 OBJECT_SIZE = {DOOR_KIND: (2, 3), GATE_KIND: (4, 4)}  # noqa: E402
@@ -36,9 +37,10 @@ WARP = DQ5_TOOLS / "lua" / "dq5warp.lua"
 DUMP = TOOLS / "lua" / "dq4environmentdump.lua"
 # An untouched map with no animation, reached after leaving a replaced map.
 CONTROL = (0x01, 0x03)
-# Untouched maps whose door entries sit more than 0x100 bytes after 01:D2FC: the object hook must keep
-# the high byte of Y, or their doors are read from the wrong place and vanish.
-FAR_DOORS = ((0x1A, 0x00), (0x19, 0x00))
+# Untouched maps compared with the original ROM: 1A/00 and 19/00 have their door entries more than 0x100
+# bytes after 01:D2FC (the object hook must keep the high byte of Y, or those doors vanish); 03/00, 19/02
+# and 06/06 held FC maps before those moved to new groups.
+UNTOUCHED = ((0x1A, 0x00), (0x19, 0x00), (0x03, 0x00), (0x19, 0x02), (0x06, 0x06))
 
 
 def _run(mesence, rom, script, env):
@@ -50,7 +52,9 @@ def _run(mesence, rom, script, env):
 def warp(mesence, rom, state, to, out, name, test=False, **extra):
     """Warp in and save; with test, also press each direction after saving (dq5warp TEST)."""
     out.mkdir(parents=True, exist_ok=True)
-    env = {"STATE": state, "TO": to, "SHOT_DIR": out, "SAVE": f"{name}.mss", "MAXF": 1500, **extra}
+    # dq5warp overwrites the ship ladder's exit entry, which moves with the exit tables.
+    env = {"STATE": state, "TO": to, "SHOT_DIR": out, "SAVE": f"{name}.mss", "MAXF": 1500,
+           "WARPEXIT": f"{warp_exit(rom):X}", "DP86OK": dp86_allowed(rom), **extra}
     if test:
         env.setdefault("TEST", "left:40,up:40,right:40,down:40")
     _run(mesence, rom, WARP, env)
@@ -229,15 +233,15 @@ def main():
         return with_floor_doors(image, sources[name], prepared[name])
 
     sources, prepared = {}, {}
-    for _, _, name, source, _, tiles, _ in prepare_maps(prg, assets, TARGETS):
+    for _, _, name, source, _, tiles, _ in prepare_maps(prg, assets, MAPS):
         sources[name], prepared[name] = source, tiles
-    chr_data, _, block_words, built, _ = build_graphics(prg, assets)
+    chr_data, _, block_words, _, built, _ = build_graphics(prg, assets)
     known = set(chr_data)
     water_ids = block_words[next(w for w in (water_block(*b) for b in built.values()) if w is not None)]
     frames = water_frames(assets, chr_data, water_ids)
     results = {"maps": {}}
     states = {}
-    for name, (group, number) in TARGETS.items():
+    for name, (group, number) in MAPS.items():
         x, y = _arrival(sources[name])
         to = f"{group:02X}/{number:02X},{x},{y}"
         states[name], moved = warp(mesence, args.rom.resolve(), args.state.resolve(), to, out / name, name, True)
@@ -259,7 +263,7 @@ def main():
         results["maps"][name] = {"target": f"{group:02X}/{number:02X}", "arrival": [x, y], "moved": moved, **result}
     cx, cy = _control_cell(args.orig.read_bytes())
     to = f"{CONTROL[0]:02X}/{CONTROL[1]:02X},{cx},{cy}"
-    first = next(iter(TARGETS))
+    first = next(iter(MAPS))
     base, _ = warp(mesence, args.orig.resolve(), args.state.resolve(), to, out / "control-orig", "control")
     after, _ = warp(mesence, args.rom.resolve(), states[first], to, out / "control-after", "control")
     w0, _, _ = dump(mesence, args.orig.resolve(), base, out / "control-orig" / "dump")
@@ -271,8 +275,8 @@ def main():
         "block_table_equal": w0[0xB000:0xC000] == w1[0xB000:0xC000],
         "chr_bank_equal": w0[0x1823:0x1827] == w1[0x1823:0x1827],
     }
-    for group, number in FAR_DOORS:
-        name = f"doors-{group:02X}{number:02X}"
+    for group, number in UNTOUCHED:
+        name = f"orig-{group:02X}{number:02X}"
         fx, fy = _control_cell(args.orig.read_bytes(), (group, number))
         to = f"{group:02X}/{number:02X},{fx},{fy}"
         dumps = []
@@ -283,19 +287,21 @@ def main():
         results["control"][f"{name}_cell_buffer_equal"] = (
             _static_cells(dumps[0], width, height) == _static_cells(dumps[1], width, height))
     # Open state: object flags 7E:21C2- are cleared on a group change, so visit another map of the
-    # Burland target's group, set every flag there, come back and walk up through the gate.
-    group = TARGETS["burland"][0]
+    # Burland group, set every flag there, come back and walk up through the gate. Past the gate the
+    # castle door's area move takes the party to 02/01.
+    group = MAPS["burland"][0]
     gx, gy, _, _ = next(o for o in objects(sources["burland"]) if o[2] == GATE_KIND)
-    hop = (group, 0x01)
-    hx, hy = _control_cell(args.orig.read_bytes(), hop)
-    side, _ = warp(mesence, args.rom.resolve(), states["burland"], f"{group:02X}/01,{hx},{hy}",
+    hx, hy = _arrival(sources["02-01"])
+    side, _ = warp(mesence, args.rom.resolve(), states["burland"], f"{group:02X}/01,{hx},{hy + 1}",
                    out / "open-hop", "hop", ANYWHERE=1)
     back, _ = warp(mesence, args.rom.resolve(), side, f"{group:02X}/00,{gx},{gy + 9}", out / "open-gate", "gate",
                    True, ANYWHERE=1, SET="21C2=FF", TEST="up:150", MAXF=1700)
-    end = (out / "open-gate" / "warp.txt").read_text().split("test cell ")[-1].split(" ->")[1].split()[1]
+    log = (out / "open-gate" / "warp.txt").read_text()
+    end = log.split("test cell ")[-1].split(" ->")[1].split()[1]
     reached = int(end.split(",")[1])
+    inside = f"end map {group:02X}/01" in log
     results["gate_open"] = {"flags": "7E:21C2=FF", "start": [gx, gy + 9], "reached_row": reached,
-                            "passed_gate_row": reached <= gy + 3}
+                            "entered_castle": inside, "passed_gate_row": inside or reached <= gy + 3}
 
     ok = results["gate_open"]["passed_gate_row"] and all(m.get("pixel_differences") == 0 and m.get("walk_layer_mismatches") == 0 and m["moved"]
              and m["objects_drawn"].split("/")[0] == m["objects_drawn"].split("/")[1]
