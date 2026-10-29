@@ -15,8 +15,20 @@ local function push(i, cmd, arg)
   emu.write(0x7E1D95 + i, cmd, m); emu.write(0x7E1DA5 + i, arg, m)
   emu.write(0x7E1DB5 + i, 0, m); emu.write(0x7E1DC5 + i, 0x05, m)
 end
+-- 드라이버의 자료 받기 입구(SPC 1046, 3바이트)만 롬 것으로. 드라이버 블록(2B:C4DB)에는 실행 중 바뀌는 자료가 있어
+-- 통째로 쓰면 전송이 멈췄다. SPC 가 그 3바이트를 실행하는 중이면 명령 한가운데를 바꾸게 되므로 다음 프레임으로 미룬다
+local entryPending = false
+local function writeEntry()
+  local pc = emu.getState()['spc.pc']
+  if pc and pc >= 0x1046 and pc <= 0x1048 then return end
+  for i = 0, 2 do
+    emu.write(0x1046 + i, emu.read(0x2BC4DB + 4 + (0x1046 - 0x0750) + i, m), emu.memType.spcRam)
+  end
+  entryPending = false
+end
 emu.addEventCallback(function()
   n = n + 1
+  if entryPending then writeEntry() end
   if not queued and n > at and emu.read(0x7E1D91, m) == emu.read(0x7E1D93, m) then
     -- 24:FF83 처럼 빈 대기열에서는 쓰기 자리 다음 칸부터 넣고 읽기 자리를 그 칸으로 맞춘다
     local i = emu.read(0x7E1D91, m) + 1
@@ -26,12 +38,18 @@ emu.addEventCallback(function()
     queued = true
   end
   if n ~= at then return end
+  -- 표 블록 뒤에 붙인 블록(빠른 받기 코드 FF00 등)도 끝 표시(크기 0)까지 쓴다
   local base = 0x2BE676
-  local size = emu.read(base, m) | emu.read(base + 1, m) << 8
-  local dest = emu.read(base + 2, m) | emu.read(base + 3, m) << 8
-  for i = 0, size - 1 do
-    emu.write(dest + i, emu.read(base + 4 + i, m), emu.memType.spcRam)
+  while true do
+    local size = emu.read(base, m) | emu.read(base + 1, m) << 8
+    if size == 0 then break end
+    local dest = emu.read(base + 2, m) | emu.read(base + 3, m) << 8
+    for i = 0, size - 1 do
+      emu.write(dest + i, emu.read(base + 4 + i, m), emu.memType.spcRam)
+    end
+    base = base + 4 + size
   end
+  entryPending = true
   local pinned, a = {}, 0x2BC429
   while emu.read(a, m) ~= 0xFF do pinned[emu.read(a, m)] = true; a = a + 1 end
   for song = 0, 0x63 do

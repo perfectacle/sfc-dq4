@@ -36,6 +36,13 @@ SPC_CAPACITY = SPC_END - 0x2A5D
 RESIDENT_SAMPLE_LOAD = 0x2BBFDF
 RESIDENT_SAMPLE_LIST = CODE + 0x200
 SAMPLE_SLOTS = 0x14
+# 드라이버 코드 IPL 블록(SPC 0750~28E6). 1046 은 자료 받기 상태(80)의 처리, 곡 묶음 표 블록 뒤에 붙이는 빠른 받기 코드는
+# 메아리 버퍼(D700~FEFF) 뒤 FF00 에 올린다. 샘플 자리가 아니라 자리 정리(0A)에 덮이지 않는다.
+DRIVER_BLOCK = 0x2BC4DB
+DRIVER_RECEIVE = 0x1046
+FAST_RECEIVE = 0xFF00
+FAST_RECEIVE_TRIPLETS = 4
+FAST_RECEIVE_POLLS = 32
 
 
 @dataclass(frozen=True)
@@ -51,6 +58,8 @@ def read_sets(data):
         size = data[pos] + 2
         records.append(bytes(data[pos:pos + size]))
         pos += size
+    if int.from_bytes(data[pos + 2:pos + 4], 'little') == FAST_RECEIVE:
+        pos += 4 + int.from_bytes(data[pos:pos + 2], 'little')
     if data[pos:pos + 4] != IPL_END:
         raise ValueError('song set table has no IPL end marker')
     return records
@@ -201,6 +210,41 @@ def transition_code():
     return cleanup, start
 
 
+def fast_receive_code(triplets=FAST_RECEIVE_TRIPLETS, polls=FAST_RECEIVE_POLLS):
+    """SPC 자료 받기(상태 80)를 3바이트 묶음 하나마다 대기 고리(0F6D)로 돌아가지 않고 triplets 개까지 이어 받는 코드.
+
+    원래는 묶음마다 대기 고리·상태 비교·곡 처리(1091)를 거쳐 전원 미리듣기에서 프레임당 최대 71묶음이었다(88 로 늘어남).
+    묶음을 받으면 1080 으로 답하고 $F4 bit0 이 바뀌기를 polls 번까지 기다린다. 256번(약 4ms)이면 그동안 곡 처리가
+    밀려 미리듣기 시각 잔차가 커졌다(곡 28 2.91 → 3.47프레임). 오지 않거나 명령(bit7 꺼짐)이면
+    CLRC·RET 으로 원래 고리로 돌아가 곡 처리를 한다. 길이가 다 차면 원래 끝 처리(103A)로 간다.
+    """
+    h = bytes.fromhex
+
+    def store(port):
+        return h(f'8D 00 E5 {port:02X} 00 D7 80 3A 80 1A 82')  # MOV Y,#0 / MOV A,!port / MOV [$80]+Y,A / INCW / DECW
+
+    return _asm([
+        h('CD') + bytes([triplets]),
+        ('label', 'next'),
+        store(0xF5), ('b', 0xF0, 'end'),
+        store(0xF6), ('b', 0xF0, 'end'),
+        store(0xF7), ('b', 0xF0, 'end'),
+        h('3F 80 10 1D'), ('b', 0xF0, 'out'),       # CALL $1080 / DEC X / BEQ out
+        h('8D') + bytes([polls & 0xFF]),            # MOV Y,#polls
+        ('label', 'wait'),
+        h('E5 F4 00 65 F4 00'), ('b', 0xD0, 'retry'),
+        h('44 8E 28 01'), ('b', 0xD0, 'got'),       # EOR A,$8E / AND A,#1 / BNE got
+        ('label', 'retry'),
+        ('b', 0xFE, 'wait'),                        # DBNZ Y,wait
+        ('b', 0x2F, 'out'),
+        ('label', 'got'),
+        h('E5 F4 00'), ('b', 0x10, 'out'),          # MOV A,$00F4 / BPL out
+        ('b', 0x2F, 'next'),
+        ('label', 'end'), h('5F 3A 10'),            # JMP $103A
+        ('label', 'out'), h('60 6F'),               # CLRC / RET
+    ])
+
+
 def pinned_sequences(data):
     pos = lorom(RESIDENT_SEQUENCES)
     end = data.index(0xFF, pos)
@@ -269,9 +313,10 @@ def write_resident_samples(data, ids):
 
 
 def install(base, replacements, *, sample_resources=None, map_fades=False, preview=None, pinned=(),
-            resident=None, set_records=None):
+            resident=None, set_records=None, fast_receive=False):
     """pinned 는 늘 두는 시퀀스 목록에 남길 바꾸는 곡(나머지 바꾸는 곡은 목록에서 뺌). resident 는 새 늘 두는 샘플 목록
     전체(주지 않으면 그대로). set_records 는 바꾸지 않는 곡의 곡 묶음 레코드 {곡: (k, 샘플…)}.
+    fast_receive 는 SPC 자료 받기를 묶음 여러 개 이어 받게 바꾼다(fast_receive_code).
     """
     if len(base) not in (0x180000, 0x200000, 0x400000):
         raise ValueError('base must be a headerless 1.5MB, 2MB or 4MB DQ5 build')
@@ -296,6 +341,9 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
         write(0x2BC3AB, hook)
     else:
         raise ValueError('unsupported sequence relocation hook')
+    drv = lorom(DRIVER_BLOCK) + 4 + DRIVER_RECEIVE - 0x0750
+    if data[drv] == 0x5F:
+        raise ValueError('base already has the fast receive patch; build from the ROM before it')
     records = read_sets(data)
     old_size = sum(map(len, records))
     if not set(pinned) <= set(replacements) or not set(pinned) <= set(pinned_sequences(data)):
@@ -358,6 +406,15 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
         raise ValueError('IPL block length does not end at song table boundary')
     write(IPL_BLOCK, (block_size + len(table) - old_size).to_bytes(2, 'little'))
     write(SONG_SETS, table + IPL_END + bytes(max(0, old_size - len(table))))
+    if fast_receive:
+        code = fast_receive_code()
+        block = len(code).to_bytes(2, 'little') + FAST_RECEIVE.to_bytes(2, 'little') + code + IPL_END
+        at = lorom(SONG_SETS) + len(table)
+        if any(data[max(at + 4, end):at + len(block)]):
+            raise ValueError('fast receive block would overwrite nonzero ROM data')
+        data[at:at + len(block)] = block
+        write(DRIVER_BLOCK + 4 + DRIVER_RECEIVE - 0x0750, bytes([0x5F]) + FAST_RECEIVE.to_bytes(2, 'little'),
+              bytes.fromhex('CD 00 E5'))
     for allocation, (song, item) in zip(allocations, sorted(replacements.items())):
         allocation['spc_budget'] = memory_budget(data, song, item)
     if map_fades:
@@ -380,7 +437,7 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
                     'unpinned_sequences': [f'{x:02X}' for x in unpinned],
                     'pinned_sequences': [f'{x:02X}' for x in pinned_sequences(result)],
                     'resident_samples': [f'{x:02X}' for x in resident_samples(result)],
-                    'map_fades': map_fades, 'preview': preview,
+                    'map_fades': map_fades, 'preview': preview, 'fast_receive': fast_receive,
                     'limitations': ['Map fades apply only to the ordinary DQ5 map-song calls; battle and event timing is unchanged.',
                                     'The early fade-out is skipped when the sound queue is busy at load time; the original 1A cleanup still runs.',
                                     'SPC budget is a conservative static check, not a runtime allocation proof.',
