@@ -11,6 +11,7 @@ cells-dump·cells-rewrite 는 15:FF5C 의 둘째 표(맵마다 셀 읽기 루틴
   python sfc/dq5/tools/dq5maphook.py rom/dq5.sfc rewrite work/maphook/table.json --at 15:FF80 -o work/build/maphook.dq5patch.json
   python sfc/dq5/tools/dq5maphook.py rom/dq5.sfc check [work/maphook/edit.json] [--at 15:FF80]
   python sfc/dq5/tools/dq5maphook.py rom/dq5.sfc rewrite work/maphook/table.json --at 3F:8000 --stub-at 15:FFF0 -o …
+  python sfc/dq5/tools/dq5maphook.py rom/dq5.sfc rewrite … --new-map 36/01   # dq5newmap.py 로 더하는 맵을 항목에 씀
   python sfc/dq5/tools/dq5maphook.py rom/dq5.sfc cells-dump -o work/maphook/cells.json
   python sfc/dq5/tools/dq5maphook.py rom/dq5.sfc cells-rewrite work/maphook/cells.json --at 15:FF80 -o …
   python sfc/dq5/tools/dq5maphook.py rom/dq5.sfc cells-check [work/maphook/cells.json] [--at 15:FF80]
@@ -23,6 +24,7 @@ from pathlib import Path
 
 from dq5map import Rom, lorom
 from dq5mapwrite import all_maps
+from dq5palsetwrite import new_map
 
 FORMAT = 'dq5maphook/1'
 CELL_FORMAT = 'dq5cellhook/1'
@@ -161,10 +163,14 @@ def routines(rows):
 
 
 class Context:
-    def __init__(self, rom, allowed=None, raw_routines=False):
+    def __init__(self, rom, allowed=None, raw_routines=False, new_maps=()):
         self.base = table_base(rom)
         self.rows = read_table(rom, self.base)
         self.known = set(all_maps(rom))
+        for bc, bd in new_maps:
+            require(bc < 0x50 and bd != 0xFF, f'--new-map {bc:02X}/{bd:02X}: 그룹 50 미만, 맵 FF 아닌 번호만 받음')
+            require((bc, bd) not in self.known, f'--new-map {bc:02X}/{bd:02X}: 이미 롬에 있는 맵')
+        self.known |= set(new_maps)
         self.allowed = allowed or routines(self.rows)
         if allowed is None and self.base != SPANS[0][0]:
             # 표를 옮겨도 이 도구는 옛 자리를 지우지 않으므로, 남아 있으면 그 루틴도 받는다.
@@ -259,10 +265,10 @@ def warn(rows, known=()):
         print(f'경고: 항목 {j} 는 앞의 조건 없는 항목이 먼저 잡아 불리지 않음', file=sys.stderr)
 
 
-def patch(rom, doc, allowed=None, raw_routines=False, quiet=False):
+def patch(rom, doc, allowed=None, raw_routines=False, quiet=False, new_maps=()):
     keys(doc, ('format', 'table', 'entries'), '문서')
     require(doc.get('format') == FORMAT and isinstance(doc.get('entries'), list), 'format/entries 가 잘못됨')
-    ctx = Context(rom, allowed, raw_routines)
+    ctx = Context(rom, allowed, raw_routines, new_maps)
     if 'table' in doc:
         require(address(doc['table'], 'table') == ctx.base, f'table 이 롬의 표 자리 {text(ctx.base)} 와 다름')
     rows, seen = list(ctx.rows), set()
@@ -279,10 +285,10 @@ def patch(rom, doc, allowed=None, raw_routines=False, quiet=False):
     return result(runs(rom, wanted, '맵별 루틴 항목'))
 
 
-def rewrite(rom, doc, at=None, allowed=None, raw_routines=False, quiet=False, stub_at=None):
+def rewrite(rom, doc, at=None, allowed=None, raw_routines=False, quiet=False, stub_at=None, new_maps=()):
     keys(doc, ('format', 'table', 'entries'), '문서')
     require(doc.get('format') == FORMAT and isinstance(doc.get('entries'), list), 'format/entries 가 잘못됨')
-    ctx = Context(rom, allowed, raw_routines)
+    ctx = Context(rom, allowed, raw_routines, new_maps)
     base = ctx.base if at is None else at
     if 'table' in doc:
         require(address(doc['table'], 'table') == base, f'table 이 쓸 자리 {text(base)} 와 다름(자리는 --at 으로 정함)')
@@ -426,13 +432,13 @@ def cells_check(rom, doc=None, at=None, raw_routines=False):
     print(f'둘째 표 항목 {len(strip)}개(표 {again["table"]}), 쓰기 {len(made["writes"])}개 검사 통과')
 
 
-def check(rom, doc=None, at=None, raw_routines=False, stub_at=None):
+def check(rom, doc=None, at=None, raw_routines=False, stub_at=None, new_maps=()):
     from dq5build import build, parse_at
     original = dump(rom)
     source = original if doc is None else doc
     allowed = routines(Context(rom).rows)
-    make = (lambda r, d, q=True: rewrite(r, d, at, allowed, raw_routines, q, stub_at)) if at is not None else (
-        lambda r, d, q=True: patch(r, d, allowed, raw_routines, q))
+    make = (lambda r, d, q=True: rewrite(r, d, at, allowed, raw_routines, q, stub_at, new_maps)) if at is not None else (
+        lambda r, d, q=True: patch(r, d, allowed, raw_routines, q, new_maps))
     writes = make(rom, source, False)['writes']
     require(doc is not None or not writes, '원본 왕복 쓰기가 0개가 아님')
     made = make(rom, source)
@@ -442,7 +448,7 @@ def check(rom, doc=None, at=None, raw_routines=False, stub_at=None):
     after = Rom(rebuilt)
     require(not make(after, source)['writes'], '빌더 적용 후 같은 입력을 다시 패치하면 쓰기가 남음')
     again = dump(after)
-    require(not patch(after, again, allowed, True, True)['writes'], '빌드한 롬을 다시 읽고 인코딩한 결과가 다름')
+    require(not patch(after, again, allowed, True, True, new_maps)['writes'], '빌드한 롬을 다시 읽고 인코딩한 결과가 다름')
     if at is not None:
         require(again['table'] == text(at), '빌드한 롬의 로더가 새 자리를 가리키지 않음')
         require(len(again['entries']) == len(source['entries']), '빌드한 롬의 항목 수가 입력과 다름')
@@ -465,6 +471,9 @@ def main():
         p.add_argument('--at', help='rewrite·check: 맵별 루틴 표를 둘 자리 BB:AAAA(뱅크 15, 또는 00~3F·80~BF 와 --stub-at). '
                        'cells-rewrite·cells-check: 둘째 표 자리(15:FF5C 또는 15:FF80~). 빼면 지금 자리')
         p.add_argument('--raw-routines', action='store_true', help='원래 표에 없는 루틴 주소도 받음')
+        if name in ('patch', 'rewrite', 'check'):
+            p.add_argument('--new-map', action='append', default=[], type=new_map,
+                           help='dq5newmap.py 로 함께 더하는 새 맵 GG/MM(항목의 맵으로 받음)')
         p.add_argument('--stub-at', help='rewrite·check: 표를 뱅크 15 밖에 둘 때 로더 DB 를 바꾸는 스텁(10바이트)의 자리. 뱅크 15 의 빈 자리(15:FF80~)')
     args = parser.parse_args()
     try:
@@ -474,8 +483,9 @@ def main():
         stub_at = address(args.stub_at, '--stub-at') if getattr(args, 'stub_at', None) else None
         require(args.command in ('rewrite', 'check') or stub_at is None, '--stub-at 은 rewrite·check 에만')
         require(args.command != 'patch' or at is None, 'patch 는 --at 을 받지 않음(표 자리를 옮기려면 rewrite)')
+        new_maps = getattr(args, 'new_map', [])
         if args.command == 'check':
-            check(rom, doc, at, args.raw_routines, stub_at)
+            check(rom, doc, at, args.raw_routines, stub_at, new_maps)
             return 0
         if args.command == 'cells-check':
             cells_check(rom, doc, at, args.raw_routines)
@@ -487,9 +497,9 @@ def main():
         elif args.command == 'cells-rewrite':
             out = cells_rewrite(rom, doc, at, args.raw_routines)
         elif args.command == 'patch':
-            out = patch(rom, doc, raw_routines=args.raw_routines)
+            out = patch(rom, doc, raw_routines=args.raw_routines, new_maps=new_maps)
         else:
-            out = rewrite(rom, doc, at, raw_routines=args.raw_routines, stub_at=stub_at)
+            out = rewrite(rom, doc, at, raw_routines=args.raw_routines, stub_at=stub_at, new_maps=new_maps)
         body = json.dumps(out, ensure_ascii=False, indent=2) + '\n'
         if args.out:
             args.out.parent.mkdir(parents=True, exist_ok=True)

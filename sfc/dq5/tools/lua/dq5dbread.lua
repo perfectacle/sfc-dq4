@@ -46,8 +46,10 @@ end
 -- SHOT_DIR/dbwin.txt 에 cover.lua 꼴("PC P 횟수")로 적는다. DB 가 DBMISS(기본 5000) 명령 넘게 다른 값이면 창을 닫는다.
 -- 모든 명령에 콜백을 거는 동안은 느리므로 창을 연 동안만 건다. 창 안에서 부른 JSL·JSR·BRK 가 길어 창이 닫혀도
 -- 돌아오는 자리에서 DB 가 같으면 창을 다시 연다(돌아온 뒤의 명령을 놓치지 않게).
+-- 창 안의 BRK 가 돌아온 자리는 SHOT_DIR/dbbrk.txt 에 "BRK 자리 돌아온 자리 횟수" 로 적는다.
 local win = os.getenv("DBWIN")
 local cover = {}
+local brkBack = {}
 if win then
   local db, miss, execCb = nil, 0, nil
   local missLimit = tonumber(os.getenv("DBMISS") or "5000")
@@ -57,25 +59,55 @@ if win then
     db, miss = value, 0
     if not execCb then execCb = emu.addMemoryCallback(onExec, emu.callbackType.exec, 0, 0xFFFFFF) end
   end
-  -- 부른 뒤 돌아오는 자리. BRK 는 서명 바이트 뒤 인자 둘을 처리기가 건너뛴다(BRK 0B mask idx)
-  local CALL = {[0x22] = 4, [0x20] = 3, [0xFC] = 3, [0x00] = 4}
+  -- 부른 뒤 돌아오는 자리. BRK 는 서비스마다 인자 수가 다르고(dq5talk.brk_args, 80~93 은 롬 표) 처리기(00:8F80)가
+  -- 스택의 PC 를 인자만큼 옮기므로, 처리기의 RTI 가 꺼내는 PC 를 돌아오는 자리로 본다.
+  local CALL = {[0x22] = 4, [0x20] = 3, [0xFC] = 3}
+  local function watch(back, want)
+    local key = back * 256 + want
+    if returns[key] then return end
+    returns[key] = true
+    emu.addMemoryCallback(function()
+      if dbr(emu.getState()) == want then open(want) end
+    end, emu.callbackType.exec, back, back)
+  end
+  -- BRK 를 실행할 때의 SP - 4(P·PC·K 를 쌓은 뒤)를 열쇠로, 그 SP 에서 도는 RTI 를 기다린다.
+  -- 창이 닫혀도 비우지 않는다. 메시지 BRK(95·98 등)는 처리 중 DB 가 바뀌어 창이 닫힌 뒤에 돌아온다.
+  local brks = {}
+  local brkCount = 0
+  local BRK_MAX_BACK = 4
+  local function onRti()
+    if brkCount == 0 then return end
+    local sp = emu.getState()["cpu.sp"]
+    local b = brks[sp]
+    if b == nil then return end
+    local back = emu.read(sp + 4, m) << 16 | emu.read(sp + 3, m) << 8 | emu.read(sp + 2, m)
+    -- 같은 SP 의 다른 RTI(인터럽트 등)를 BRK 의 것으로 보지 않게, BRK 뒤 인자 0~2개 자리로 돌아올 때만 받는다
+    local skip = (back & 0xFFFF) - (b.pc & 0xFFFF)
+    if back >> 16 ~= b.pc >> 16 or skip < 2 or skip > BRK_MAX_BACK then return end
+    brks[sp], brkCount = nil, brkCount - 1
+    local key = string.format("%06X %06X", b.pc, back)
+    brkBack[key] = (brkBack[key] or 0) + 1
+    watch(back, b.db)
+  end
+  -- SlowROM 이라 BRK 벡터가 처리기 00:8F80 으로 가므로, 뱅크 00 의 8000~FFFF 에 있는 40 바이트(RTI 후보)마다 건다.
+  -- 명령 중간의 40 은 실행되지 않는다.
+  for a = 0x8000, 0xFFFF do
+    if emu.read(a, m) == 0x40 then emu.addMemoryCallback(onRti, emu.callbackType.exec, a, a) end
+  end
   onExec = function(addr)
     local st = emu.getState()
     if dbr(st) == db then
       miss = 0
       local k = addr * 256 + (st["cpu.ps"] & 0x30)
       cover[k] = (cover[k] or 0) + 1
-      local size = CALL[emu.read(addr, m)]
+      local op = emu.read(addr, m)
+      local size = CALL[op]
       if size then
-        local back = (addr & 0xFF0000) | ((addr + size) & 0xFFFF)
-        local key = back * 256 + db
-        if not returns[key] then
-          returns[key] = true
-          local want = db
-          emu.addMemoryCallback(function()
-            if dbr(emu.getState()) == want then open(want) end
-          end, emu.callbackType.exec, back, back)
-        end
+        watch((addr & 0xFF0000) | ((addr + size) & 0xFFFF), db)
+      elseif op == 0x00 then
+        local sp = (st["cpu.sp"] - 4) & 0xFFFF
+        if brks[sp] == nil then brkCount = brkCount + 1 end
+        brks[sp] = {db = db, pc = addr}
       end
     else
       miss = miss + 1
@@ -104,5 +136,9 @@ emu.addEventCallback(function()
   for k, n in pairs(cover) do t[#t + 1] = string.format("%06X %02X %d", k >> 8, k & 0xFF, n) end
   table.sort(t)
   f = assert(io.open(out .. "/dbwin.txt", "w")); f:write(table.concat(t, "\n") .. "\n"); f:close()
+  t = {}
+  for k, n in pairs(brkBack) do t[#t + 1] = string.format("%s %d", k, n) end
+  table.sort(t)
+  f = assert(io.open(out .. "/dbbrk.txt", "w")); f:write(table.concat(t, "\n") .. "\n"); f:close()
 end, emu.eventType.endFrame)
 dofile(os.getenv("DRIVER"))

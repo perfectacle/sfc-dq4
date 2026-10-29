@@ -596,10 +596,15 @@ def field_cgram(rom, world, rows23=None, wave=0, base=(0x01, 0x00)):
     return bytes(cg)
 
 
-def field_tiles(rom):
-    """필드 타일 512개의 8x8 색 번호. 팔레트는 층마다 다르므로(00:BBAC) 칠하는 것은 부르는 쪽."""
-    from dq5field import field_chr
-    chrs = field_chr(rom)
+def field_tiles(rom, world=0):
+    """필드 타일 512개의 8x8 색 번호. 팔레트는 층마다 다르므로(00:BBAC) 칠하는 것은 부르는 쪽.
+    world 1·2 는 dq5fieldgfxwrite --worlds-at 롬이면 그 세계의 타일 벌을 읽는다."""
+    if world:
+        from dq5fieldgfxwrite import WORLDS, current
+        chrs = current(rom)['worlds'][WORLDS[world]][0]
+    else:
+        from dq5field import field_chr
+        chrs = field_chr(rom)
     return [planar(chrs[i * 32:i * 32 + 32]) for i in range(512)]
 
 
@@ -963,7 +968,7 @@ def export_field(rom, out):
                  note=f'$075E 하한 {when}')
     worlds = {0: blocks_by[day]}
     for world in (1, 2):
-        worlds[world] = field_block_images(rom, field_cgram(rom, world), tiles, world=world)
+        worlds[world] = field_block_images(rom, field_cgram(rom, world), field_tiles(rom, world), world=world)
         out.save(world_image(rom, world, worlds[world]), f'field/field{world}.png', 'field', f'세계 {world}',
                  '세계 지도', variant='낮', note=f'$1949 = {world}. 땅이 있는 왼쪽 위 128x128 블록')
     for world, blocks in worlds.items():
