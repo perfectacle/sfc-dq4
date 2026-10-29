@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dq5map import (ATTR_SITES, ATTR_TABLE, DOOR_ENTRIES, GROUP_TABLE, GROUPS, POINTER_SITE, Rom, door_groups, door_table,
                     group_spans, lorom, map_pointer)
 from dq5mapwrite import all_maps
-from dq5newmap import DOOR_TABLE, ENTRANCE_SITES, FORMAT, STUB_SIZES, check, writes_for
+from dq5newmap import DOOR_TABLE, ENTRANCE_SITES, FORMAT, STUB_SIZES, check, stale_arrivals, writes_for
 
 # 그룹마다 맵 수. 그룹 01 은 둘, 나머지는 하나.
 COUNTS = [2 if g == 1 else 1 for g in range(GROUPS)]
@@ -200,6 +200,28 @@ class GrowTests(unittest.TestCase):
             writes_for(self.rom, empty, at={'entrance': 0x3E9000})
         with self.assertRaisesRegex(ValueError, '두 번'):
             writes_for(self.rom, dict(value, groups=value['groups'] * 2), at={'entrance': 0x3E9000}, allow_doors=True)
+
+    def test_check_refuses_stale_original_arrivals(self):
+        # 새 그룹으로 도착 표를 옮긴 롬에서 다른 도구가 원래 자리 0F:EA97 의 도착을 고치면 게임에는 반영되지 않으므로 check 가 실패한다.
+        value = doc({'map': '36/00', 'record': {'copy': '01/00'}, 'attrs': {'copy': '02/00'}})
+        value['groups'] = [{'group': '36', 'entrance': {'copy': '0D'}}]
+        at = {'entrance': 0x3E9000}
+        with mock('builtins.print'):
+            check(self.rom, value, at=at, allow_doors=True)
+        moved = apply(self.rom, writes_for(self.rom, value, at=at, allow_doors=True)[0])
+        self.assertEqual(stale_arrivals(moved), [])
+        data = bytearray(moved.d)
+        write(data, 0x0FEA97 + 1 * 5, bytes([9, 9, 9, 9, 9]))
+        stale = Rom(data)
+        self.assertEqual(stale_arrivals(stale), [1])
+        self.assertEqual(stale_arrivals(stale, skip={1}), [])
+        self.assertEqual(stale_arrivals(self.rom), [])
+        with mock('builtins.print'), self.assertRaisesRegex(ValueError, '원래 도착 표가 옮긴 표와 다름'):
+            check(stale, value, at=at, allow_doors=True)
+        # 입력이 그 그룹의 들어가는 곳을 직접 고치면 옮긴 표가 입력대로 바뀌므로 거부하지 않는다.
+        fixed = dict(value, groups=value['groups'] + [{'group': '01', 'entrance': {'bytes': [9, 9, 9, 9, 9]}}])
+        with mock('builtins.print'):
+            check(stale, fixed, at=at, allow_doors=True)
 
     def test_high_group_map(self):
         value = doc({'map': '50/51', 'record': {'copy': '50/50'}})

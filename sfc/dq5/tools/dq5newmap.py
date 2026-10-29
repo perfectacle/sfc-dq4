@@ -48,6 +48,7 @@ DEFAULT_TABLE = {'pointer': 0x0FFF50, 'attr': 0x23FF20, 'high': 0x1FFE30}
 ENTRANCE_SITES = ((0x2AF394, 0), (0x2AF39C, 1), (0x2AF3A2, 2), (0x2AF3A8, 3), (0x2AF3AE, 4),
                   (0x2AFD90, 4), (0x2AFD9B, 0), (0x2AFF13, 0))
 ENTRANCE_SIZE = 5
+ORIGINAL_ENTRANCES, ORIGINAL_GROUPS = 0x0FEA97, 0x36
 # 01:F3F9: 문 표. 그룹은 C0 이상 바이트로, 그룹 안 맵은 80 이상 바이트로 끝나고 $BC·$BD 만큼 건너뛰어 찾는다.
 DOOR_END = 0x01D8C2
 # 뱅크 01 끝 빈 자리는 비워 둔다. 다른 패치가 거기 둔 자료도 문 루틴이 같은 DB 로 읽을 수 있어 복사본에 함께 든다.
@@ -447,6 +448,16 @@ def patch(rom, doc, base=Path('.'), at=None, allow_doors=False):
     return result
 
 
+def stale_arrivals(rom, skip=()):
+    """도착(들어가는 곳) 표를 옮긴 롬에서 원래 자리 0F:EA97 과 옮긴 표의 앞 54그룹이 다른 그룹. skip 은 입력이 고치는 그룹.
+    다른 도구(dq5fieldtables.py 의 arrivals)가 원래 자리에 쓴 도착은 옮긴 표가 읽히므로 게임에 반영되지 않는다."""
+    table = entrance_table(rom)
+    if table == ORIGINAL_ENTRANCES:
+        return []
+    return [g for g in range(ORIGINAL_GROUPS) if g not in skip and
+            read(rom, ORIGINAL_ENTRANCES + g * ENTRANCE_SIZE, ENTRANCE_SIZE) != read(rom, table + g * ENTRANCE_SIZE, ENTRANCE_SIZE)]
+
+
 def check(rom, doc, base=Path('.'), at=None, allow_doors=False):
     from dq5mapwrite import all_maps
     manifest = patch(rom, doc, base, at, allow_doors)
@@ -480,6 +491,12 @@ def check(rom, doc, base=Path('.'), at=None, allow_doors=False):
     table = entrance_table(built)
     if [read(built, table + g * ENTRANCE_SIZE, ENTRANCE_SIZE) for g in range(len(plan.entrances))] != plan.entrances:
         raise ValueError('들어가는 곳 표가 입력과 다름')
+    skip = {int(row['group'], 16) for row in doc.get('groups', [])}
+    for name, made in (('입력 롬', rom), ('만든 롬', built)):
+        stale = stale_arrivals(made, skip)
+        if stale:
+            raise ValueError(f'{name}: 원래 도착 표가 옮긴 표와 다름(도착은 dq5newmap groups[].entrance 로 씀): 그룹 '
+                             + ' '.join(f'{g:02X}' for g in stale))
     if door_table(built) != DOOR_TABLE or door_table(rom) != DOOR_TABLE:
         doors = door_groups(built, len(plan.pointers))
         old = door_groups(rom, len(group_spans(rom)[0]))
