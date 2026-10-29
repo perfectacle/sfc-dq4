@@ -87,6 +87,35 @@ def set_record(rom, s):
             'cells': b[3:51], 'tiles': b[51], 'layout': 'overlap' if s & 0x80 else 'simple'}
 
 
+# 세트 팔레트 표 훅(dq5objpalette.py --at). 1F:CFC8·1F:D0FB 의 「레코드 +2 bit6-7 → $01」 을 JSL 로 바꾸고, 그 루틴이
+# 표[세트] 를 OBJ 팔레트(0~7)로 쓴다. 표 값이 FF(bit7)면 원래처럼 레코드의 팔레트를 쓴다.
+SET_PALETTE_SITES = (0x1FCFC8, 0x1FD0FB)
+SET_PALETTE_ROUTINE = bytes.fromhex('a0 02 a6 0c bf')   # LDY #$02 / LDX $0C / LDA 표,X
+
+
+def set_palette_table(rom):
+    """세트 팔레트 표 주소(256칸). 훅이 없는 롬은 None."""
+    site = SET_PALETTE_SITES[0]
+    if rom.u8(site) != 0x22:
+        return None
+    routine = rom.u24(site + 1)
+    if bytes(rom.u8(routine + i) for i in range(len(SET_PALETTE_ROUTINE))) != SET_PALETTE_ROUTINE or \
+            any(rom.u8(a) != 0x22 or rom.u24(a + 1) != routine for a in SET_PALETTE_SITES):
+        raise ValueError(f'{site >> 16:02X}:{site & 0xFFFF:04X}: 세트 팔레트 훅이 dq5objpalette.py 의 꼴이 아님')
+    return rom.u24(routine + len(SET_PALETTE_ROUTINE))
+
+
+def set_obj_palette(rom, s, table=None):
+    """세트가 OAM 에 쓰는 OBJ 팔레트(0~7). 훅이 있으면 표 값, 표 값이 FF 이거나 훅이 없으면 레코드 +2 bit6-7."""
+    rec = set_record(rom, s)
+    table = set_palette_table(rom) if table is None else table
+    v = rom.u8(table + s) if table else 0xFF
+    if 8 <= v < 0xFF:
+        # 루틴은 bit7 만 보고 08~7F 를 ASL 해 다른 비트까지 OAM 속성에 넣는다. 그런 표는 이 도구가 쓰지 않는다.
+        raise ValueError(f'세트 팔레트 표 {table >> 16:02X}:{(table + s) & 0xFFFF:04X}: 세트 {s:02X} 값 {v:02X} 는 0~7·FF 가 아님')
+    return v if v < 8 else rec['palette']
+
+
 def unpack(rom, a, bank_skip=True):
     """1F:D2DB. (풀린 바이트, 다음 줄기 주소). bank_skip=False 는 1F:D28B(7F 도 그대로 128바이트)."""
     out = bytearray()
@@ -431,6 +460,10 @@ VEHICLES = (
          'vflip': bytes.fromhex('1c1e24262c2e30323436383a3c3e404244464c4e54565c5e'), 'at': (8, 56)})},  # 01:C160
 )
 MAP_PALETTES = 0x019A12
+# dq5objpalette.py 가 표를 늘려 옮기면 01:996A 는 JSL 옮긴 루틴 / RTS 이다. 옮긴 루틴은 원래 루틴을 그대로 옮긴 것이라
+# 첫 표 읽기(원래 01:997F LDA $9A12,X)의 피연산자가 루틴 +16 에 있다.
+MAP_PALETTE_LOADER = 0x01996A
+MAP_PALETTE_OPERAND = 0x16
 MAP_OBJECT_PLACES = 0x16F862
 
 
@@ -474,12 +507,20 @@ def map_line_colors(rom, bc, bd, line):
 def map_palettes(rom):
     """01:996A. 맵마다 덮는 16색 줄. 0x23바이트 항목 [BC(FE 면 필드)][BD(FF 면 그룹 전부, 필드면 세계)]
     [플래그 번호(FF 면 늘)][마스크][CGRAM 16색 줄 번호][색 1~15], FF 로 끝. 0 번 색은 0. 줄 0B 가 OBJ 팔레트 3."""
-    out, a = [], MAP_PALETTES
+    out, a = [], map_palette_table(rom)
     while rom.u8(a) != 0xFF:
         out.append({'entry': a, 'bc': rom.u8(a), 'bd': rom.u8(a + 1), 'flag': rom.u8(a + 2), 'mask': rom.u8(a + 3),
                     'line': rom.u8(a + 4), 'colors': [0] + [rom.u16(a + 5 + i * 2) for i in range(15)]})
         a += 0x23
     return out
+
+
+def map_palette_table(rom):
+    """01:9A12, 옮긴 롬이면 옮긴 루틴이 읽는 표."""
+    if rom.u8(MAP_PALETTE_LOADER) != 0x22:
+        return MAP_PALETTES
+    routine = rom.u24(MAP_PALETTE_LOADER + 1)
+    return routine & 0xFF0000 | rom.u16(routine + MAP_PALETTE_OPERAND)
 
 
 def map_obj_palette3(rom, bc, bd):
@@ -941,6 +982,7 @@ def compare(rom, wram, vram, oam, cgram, stats, verbose=True):
     그 세트 타일을 쓰는 OAM 묶음이 디코더 프레임 하나와 픽셀째로 같은지. 결과는 stats 에 더한다."""
     w16 = lambda a: wram[a] | wram[a + 1] << 8
     pals = obj_palettes(rom)
+    table = set_palette_table(rom)
     cg = [cgram[256 + i * 2] | cgram[257 + i * 2] << 8 for i in range(64)]
     pal_ok = [all(cg[p * 16 + i] == pals[p][i] for i in range(1, 16)) for p in range(4)]
     stats['palette'] = stats.get('palette', []) + [pal_ok]
@@ -997,7 +1039,7 @@ def compare(rom, wram, vram, oam, cgram, stats, verbose=True):
                     if (not b and not got) or b and {(x - b[0], y - b[1]): v for (x, y), v in want.items()} == \
                             {k: pv[1] for k, pv in got.items()}:
                         hit = f'{d}{f} {len(want)}px'
-                        if pals_seen and pals_seen != {rec['palette']}:
+                        if pals_seen and pals_seen != {set_obj_palette(rom, s, table)}:
                             hit += f' 팔레트 {"·".join(map(str, sorted(pals_seen)))}'
                             stats['other_palette'] = stats.get('other_palette', 0) + 1
                         stats.setdefault('frames', set()).add((s, d, f))
