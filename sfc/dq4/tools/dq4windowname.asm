@@ -1648,6 +1648,16 @@ WqNmiGate:
     BEQ .done
     LDA.l $000BEC
     BEQ +
+    ; 전투 NMI 작업은 00:8DED 를 요청이 있을 때 한 번만 돌아, 미룬 요청을 다음 NMI 에 되돌려도 보내지 않는다.
+    ; 전투에서는 우리 대기열 쪽을 다음 NMI 로 미룬다
+    LDA.l $001945
+    CMP #$89
+    BNE ++
+    LDA.l $001944
+    CMP #$52
+    BEQ .done
+++
+    LDA.l $000BEC
     ORA.l $7E0000|!wq_defer
     STA.l $7E0000|!wq_defer
     LDA #$00
