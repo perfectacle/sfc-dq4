@@ -124,14 +124,18 @@ org $24A5E9
 !wn_bnext = $1D40           ; 다음에 내줄 전투 이름 자리
 !wn_attr  = $1D42           ; 이름 줄 타일맵 높은 바이트(색). 0 이면 버퍼에 있던 것을 살림
 !wt_stack = $1D83           ; 전용 스택 맨 위(1D44~1D83). 협동식 작업마다 낮은 WRAM 에 작은 스택이 있어, 그 스택을 깊게 쓰지 않는다
-!wt_keys  = $3D70           ; 슬롯 수만큼 워드(7E, 30개까지): 슬롯마다 버퍼 자리(!wt_buf + Y)
+!wt_keys  = $3D70           ; 슬롯 수만큼 워드(7E, 30개): 슬롯마다 버퍼 자리(!wt_buf + Y)
 !wt_ages  = $3D14           ; 슬롯 수만큼 워드(30개까지): 마지막으로 쓴 때, 0 = 빈 슬롯
 !wt_need  = $3D6C           ; 0 = 작은 슬롯(네 열까지), 1 = 중간(일곱 열까지), 2 = 큰 슬롯
 !wt_first = $3D6E           ; 빈 슬롯·오래된 슬롯을 찾기 시작할 자리(슬롯 × 2)
 !wt_buf   = $3DD0           ; 타일맵 버퍼 포인터: 목록·창 본문은 $E0, 창 제목은 $DC
 !wt_field = $3DD2           ; 0 = 전투(NMI 작업 $1944 = 00:8952). 필드 전용 슬롯을 쓸지
-!wt_nslot = 26
-!wt_kana_end = $0096          ; 이 칸 아래의 슬롯은 가나 칸
+!wt_nslot = 30
+!wt_nkana = 12              ; 앞 12개는 가나 칸을 길이만큼 잘라 쓰는 항목(첫 칸·칸 수는 RAM), 뒤 18개는 캔버스 안 고정 슬롯
+!wt_kbase = $3DD8           ; 가나 항목마다 1바이트: 첫 칸
+!wt_klen  = $3DE4           ; 가나 항목마다 1바이트: 칸 수(열 수 × 2)
+!wt_occ   = $3DF0           ; 13바이트: 가나 칸 010~077 의 쓰는 칸 비트(WtOcc 가 그때그때 만듦)
+!wt_tmp   = $3DFE           ; WtAlloc 안에서만: 찾는 칸 수, 찾은 첫 칸
 !wt_slot2 = $3D56           ; 이번에 쓴 슬롯 × 2, FFFF = 명령 창 전용 칸
 !wt_k     = $3D58           ; 그리는 고정 문구 번호
 !wt_dirty = $3DD4           ; 2 워드: 슬롯마다 1비트, 메시지 캔버스 안에 그림을 올린 슬롯
@@ -145,8 +149,8 @@ org $24A5E9
 !wt_len   = $1D8A           ; 원래 문자열 길이($00)
 !wq_count = $3D62           ; 우리 전송 대기열 항목 수(7E, NMI 가 보내고 0 으로)
 !wq_off   = $3D64           ; 대기열에 다음으로 쓸 자리
-!wt_vis   = $3DA4           ; 슬롯마다 1바이트: 마지막 창 타일맵 전송 때 보였거나 그 뒤에 그렸으면 1
-!wt_xfer  = $3DBE           ; 1바이트: 이번 NMI 에 게임이 보낼 창 타일맵 줄($0BEC 의 bit7·6), NMI 끝에서 WtVis 가 씀
+!wt_vis   = $3DAC           ; 슬롯마다 1바이트: 마지막 창 타일맵 전송 때 보였거나 그 뒤에 그렸으면 1
+!wt_xfer  = $3DCA           ; 1바이트: 이번 NMI 에 게임이 보낼 창 타일맵 줄($0BEC 의 bit7·6), NMI 끝에서 WtVis 가 씀
 !wq_rd    = $3D5C           ; NMI 가 다음으로 보낼 항목 자리. VBlank 가 끝나 가면 남은 항목을 다음 NMI 로 넘긴다
 !wq_defer = $3D5A           ; 1바이트: bit7·6 = 다음 NMI 로 미룬 게임의 창 타일맵 전송 요청($0BEC),
                             ; bit1·0 = 전투에 들어가면 되돌릴 가나 칸 덩이 수(필드에서 가나 칸 슬롯을 쓰면 3)
@@ -201,8 +205,10 @@ WnName:
 ; 04:AB73. A 의 높은 바이트에 $ED 가 들어 있고, 원래는 글자마다 16비트로 ($DC),Y 에 쓴 뒤 04:ABF4 로 간다.
 WnNameAttr:
     LDA.b $01
-    CMP #!wn_hi_base
+    CMP #$10
     BCC .original
+    CMP #!wn_hi_base
+    BCC .kana                   ; 가나 이름
     CMP #!wn_hi_base+!wn_hi_count
     BCS .original
     LDA.b $02
@@ -210,6 +216,7 @@ WnNameAttr:
     BCC .original
     CMP #$10+111
     BCS .original
+.kana
     REP #$20
     LDA.b $DC
     STA.l $7E0000|!wn_ptr
@@ -1232,11 +1239,16 @@ WtAlloc:
     INX
     CPX.w #!wt_nslot*2
     BCC -
-    ; 들어갈 크기 가운데 빈 슬롯, 이미 안 보이는 슬롯, 가장 오래된 슬롯 순. 오래된 순만 보면 전투처럼 슬롯이 모자란 곳에서
-    ; 아직 보이는 작전 창을 밀어내고 닫힌 창의 슬롯을 남겼다. 안 보이는지는 지금 버퍼가 아니라 WtVis 가 창 타일맵을 보낸
-    ; NMI 에 잰 표시로 본다. 게임이 뒤 창을 버퍼에 다시 그리고 앞 창(강함 보기)은 저장해 둔 타일맵으로 되돌리거나, 가게에서
-    ; 버퍼를 비우고 다른 창을 미리 그리는 동안 지금 버퍼만 보면 보이는 슬롯을 안 보인다고 여겨 내주었다
-    LDX.w !wt_first
+    ; 필드에서는 가나 칸에서 열 수만큼 잘라 쓴다. 가나 칸은 메시지 캔버스 밖이라 메시지와 함께 뜨는 목록이 비치지 않는다
+    LDA.w !wt_field
+    BEQ +
+    JSR WtKana
+    BCS .found
++
+    ; 캔버스 안 고정 슬롯: 들어갈 크기 가운데 빈 슬롯, 이미 안 보이는 슬롯, 가장 오래된 슬롯 순. 오래된 순만 보면 전투처럼
+    ; 슬롯이 모자란 곳에서 아직 보이는 작전 창을 밀어내고 닫힌 창의 슬롯을 남겼다. 안 보이는지는 지금 버퍼가 아니라 WtVis
+    ; 가 창 타일맵을 보낸 NMI 에 잰 표시로 본다(게임이 뒤 창을 다시 그리거나 버퍼를 비우는 동안 버퍼만 보면 틀렸다)
+    LDX.w #!wt_nkana*2
     LDY #$0000
     STZ.w !wn_c
 -
@@ -1288,13 +1300,48 @@ WtAlloc:
     STA.w !wt_vis,X
     REP #$20
     PLX
-    LDA.l WtSlot,X
+    JSR WtBaseOf
     STA.w !wt_base
     CLC
     RTS
 
-; 슬롯 X 가 이번 크기에 맞고 이 장면에서 쓸 수 있으면 C = 1
+; 슬롯 X 의 첫 칸(A). 가나 항목은 RAM, 캔버스 슬롯은 WtSlot
+WtBaseOf:
+    CPX.w #!wt_nkana*2
+    BCS +
+    PHX
+    TXA
+    LSR
+    TAX
+    LDA.w !wt_kbase,X
+    PLX
+    AND #$00FF
+    RTS
++
+    LDA.l WtSlot,X
+    RTS
+
+; 슬롯 X 가 이번 크기에 맞고 이 장면에서 쓸 수 있으면 C = 1. 가나 항목은 필드에서 칸 수가 열 수 × 2 이상이면
 WtFits:
+    CPX.w #!wt_nkana*2
+    BCS .fixed
+    LDA.w !wt_field
+    BEQ ++
+    LDA.w !wt_cols
+    ASL
+    STA.w !wt_tmp
+    PHX
+    TXA
+    LSR
+    TAX
+    LDA.w !wt_klen,X
+    PLX
+    AND #$00FF
+    CMP.w !wt_tmp
+    BCC ++
+    SEC
+    RTS
+.fixed
     LDA.l WtClass,X
     CMP #$0010
     BCC +
@@ -1311,6 +1358,180 @@ WtFits:
     CLC
     RTS
 
+; 가나 칸 010~077 에서 열 수 × 2 칸이 이어 빈 자리를 처음부터 찾아 빈 가나 항목에 준다. 자리나 빈 항목이 없으면 안 보이는
+; 항목 가운데 가장 오래된 것을 비우고 다시 찾는다. 안 보이는 항목도 없으면 C = 0(캔버스 슬롯으로). 찾으면 C = 1, X = 슬롯.
+WtKana:
+.retry
+    JSR WtOcc
+    LDA.w !wt_cols
+    ASL
+    STA.w !wt_tmp
+    ; 이어 빈 칸 세기
+    LDX #$0000
+    STZ.w !wn_r
+-
+    PHX
+    TXA
+    AND #$0007
+    TAX
+    LDA.l WtOccBit,X
+    AND #$00FF
+    STA.w !wn_k
+    PLX
+    TXA
+    LSR
+    LSR
+    LSR
+    TAY
+    LDA.w !wt_occ,Y
+    AND.w !wn_k
+    BEQ +
+    LDY #$0000
+    STY.w !wn_r
+    BRA ++
++
+    INC.w !wn_r
+    LDA.w !wn_r
+    CMP.w !wt_tmp
+    BCS .room
+++
+    INX
+    CPX #$0068
+    BCC -
+    BRA .evict
+.room
+    ; 첫 칸 = X − 칸 수 + 1 + 010
+    TXA
+    SEC
+    SBC.w !wt_tmp
+    CLC
+    ADC #$0011
+    STA.w !wn_r
+    LDX #$0000
+-
+    LDA.w !wt_ages,X
+    BEQ .use
+    INX
+    INX
+    CPX.w #!wt_nkana*2
+    BCC -
+    JSR WtKEvict
+    BCS .retry
+    CLC
+    RTS
+.use
+    LDA.w !wn_key
+    STA.w !wt_keys,X
+    PHX
+    TXA
+    LSR
+    TAX
+    SEP #$20
+    LDA.w !wn_r
+    STA.w !wt_kbase,X
+    LDA.w !wt_tmp
+    STA.w !wt_klen,X
+    REP #$20
+    PLX
+    SEC
+    RTS
+.evict
+    JSR WtKEvict
+    BCC +
+    JMP .retry
++
+    RTS
+
+; 안 보이는 가나 항목 가운데 가장 오래된 것을 비운다. 비우면 C = 1
+WtKEvict:
+    LDX #$0000
+    LDY #$FFFF
+    STZ.w !wn_c
+-
+    LDA.w !wt_ages,X
+    BEQ .next
+    PHX
+    TXA
+    LSR
+    TAX
+    LDA.w !wt_vis,X
+    PLX
+    AND #$00FF
+    BNE .next
+    LDA.w !wt_age
+    SEC
+    SBC.w !wt_ages,X
+    CMP.w !wn_c
+    BCC .next
+    STA.w !wn_c
+    TXY
+.next
+    INX
+    INX
+    CPX.w #!wt_nkana*2
+    BCC -
+    CPY #$FFFF
+    BEQ +
+    TYX
+    STZ.w !wt_keys,X
+    STZ.w !wt_ages,X
+    SEC
+    RTS
++
+    CLC
+    RTS
+
+; !wt_occ 에 살아 있는 가나 항목이 쓰는 칸을 켠다
+WtOcc:
+    LDX #$000C
+-
+    STZ.w !wt_occ,X
+    DEX
+    BPL -
+    LDX #$0000
+.entry
+    LDA.w !wt_ages,X
+    BEQ .next
+    PHX
+    TXA
+    LSR
+    TAX
+    LDA.w !wt_kbase,X
+    AND #$00FF
+    SEC
+    SBC #$0010
+    STA.w !wn_c
+    LDA.w !wt_klen,X
+    AND #$00FF
+    STA.w !wn_r
+-
+    LDA.w !wn_c
+    LSR
+    LSR
+    LSR
+    TAY
+    LDA.w !wn_c
+    AND #$0007
+    TAX
+    SEP #$20
+    LDA.w !wt_occ,Y
+    ORA.l WtOccBit,X
+    STA.w !wt_occ,Y
+    REP #$20
+    INC.w !wn_c
+    DEC.w !wn_r
+    BNE -
+    PLX
+.next
+    INX
+    INX
+    CPX.w #!wt_nkana*2
+    BCC .entry
+    RTS
+
+WtOccBit:
+    db $01, $02, $04, $08, $10, $20, $40, $80
+
 ; 슬롯 첫 칸과 등급. 0 = 작은 슬롯 8칸(네 열), 1 = 중간 슬롯 14칸(일곱 열), 2 = 큰 슬롯 20칸(열 열), $10 을 더하면 필드에서만
 ; 쓰는 슬롯. 맞는 크기가 모자라면 더 큰 슬롯을 빌리고, 빈 슬롯은 표 순서로 고른다. 가나 칸(010~073) 슬롯을 크기와 상관없이
 ; 모두 앞에 둔다. 가나 칸은 메시지 캔버스 밖이라 메시지와 함께 뜨는 창(교회·가게 팔기 목록 등)의 글자가 메시지 창에 비치지
@@ -1319,26 +1540,26 @@ WtFits:
 ; 글자 칸이라 필드 전용. 캔버스 안에서는 작은 것부터, 같은 크기면 높은 칸부터: 메시지는 캔버스를 096 부터 채워, 낮은
 ; 칸일수록 메시지 글자에 덮이기 쉽다. 전투 공격 연출은 B0~122 를 덮는다.
 WtSlot:
-    dw $0010, $0018, $0020, $0028, $0036, $0044, $0052, $0060
+    dw 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
     dw $0174, $016C, $0164, $015C, $0154, $014C, $00A6, $009E, $0096
     dw $013E, $0130, $0122, $0114
     dw $0100, $00EC, $00D8, $00C4, $00B0
 WtClass:
-    dw $10, $10, $10, $11, $11, $11, $11, $12
+    dw $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
     dw 0, 0, 0, 0, 0, 0, $10, $10, $10
     dw 1, 1, 1, 1
     dw 2, 2, 2, 2, 2
-; 슬롯 × 2 → !wt_dirty 의 비트(낮은 워드, 높은 워드). 슬롯 i 는 비트 i 이고, 캔버스 밖 가나 칸 슬롯은 0
+; 슬롯 × 2 → !wt_dirty 의 비트(낮은 워드, 높은 워드). 슬롯 i 는 비트 i 이고, 캔버스 밖 가나 항목은 0
 WtBitLo:
-    dw 0, 0, 0, 0, 0, 0, 0, 0
-    dw $0100, $0200, $0400, $0800, $1000, $2000, $4000, $8000, 0
+    dw 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    dw $1000, $2000, $4000, $8000, 0, 0, 0, 0, 0
     dw 0, 0, 0, 0
     dw 0, 0, 0, 0, 0
 WtBitHi:
-    dw 0, 0, 0, 0, 0, 0, 0, 0
-    dw 0, 0, 0, 0, 0, 0, 0, 0, $0001
-    dw $0002, $0004, $0008, $0010
-    dw $0020, $0040, $0080, $0100, $0200
+    dw 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    dw 0, 0, 0, 0, $0001, $0002, $0004, $0008, $0010
+    dw $0020, $0040, $0080, $0100
+    dw $0200, $0400, $0800, $1000, $2000
 
 ; 04:B11E(JSL, A = 창 바이트 8비트, X = 레코드에서 그다음 바이트 자리 16비트, DB = 04, Y = $E0 기준 자리). 9E k 면
 ; 고정 문구 k 를 그리고, 원래 접두 처리처럼 C = 1 로 돌아간다. 칸 셈 $0ADE 는 접두 바이트에서 하나 셌으므로 열 수 − 1 을
@@ -1723,8 +1944,7 @@ WtQueue:
     STY.w !wq_off
     LDX.w !wt_slot2
     BMI +
-    LDA.l WtSlot,X
-    CMP.w #!wt_kana_end
+    CPX.w #!wt_nkana*2
     BCS ++
     SEP #$20
     LDA #$03
@@ -1871,7 +2091,9 @@ WtVis:
     LDY.w !wq_len
     LDA.w $5000,Y
     AND #$03FF
-    CMP.l WtSlot,X
+    STA.w !wq_left
+    JSR WtBaseOf
+    CMP.w !wq_left
     PHP
     TXA
     LSR
