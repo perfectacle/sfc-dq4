@@ -237,6 +237,24 @@ class DoorTests(unittest.TestCase):
         self.assertEqual(bytes(moved.d[lorom(0x3D8000):lorom(0x3D8000) + 0x52FC]), bytes(self.rom.d[lorom(0x018000):lorom(0x01D2FC)]))
         self.assertEqual(writes_for(moved, value, at=at)[0], [])
         self.assertEqual(writes_for(moved, value)[0], [])
+        # 이미 늘린 롬에 맵을 더 붙이면 옮긴 표만 다시 쓰고, 복사본·스텁은 그대로 둔다.
+        value['maps'].append({'map': '01/04', 'record': {'copy': '01/00'}, 'attrs': {'copy': '01/00'}})
+        writes = writes_for(moved, value)[0]
+        self.assertFalse([note for _, _, _, note in writes if '스텁' in note or '복사본' in note or '입구' in note])
+        again = apply(moved, writes)
+        self.assertEqual(door_table(again), 0x3DD2FC)
+        self.assertEqual(door_groups(again, GROUPS + 1)[1][2:], [b'\x80', b'\x80', b'\xc0'])
+        self.assertEqual(door_groups(again, GROUPS + 1)[3], before[3])
+        self.assertEqual(writes_for(again, value)[0], [])
+
+    def test_readthrough_group_rejected(self):
+        value = doc({'map': '36/00', 'record': {'copy': '01/00'}, 'attrs': {'copy': '01/00'}})
+        value['groups'] = [{'group': '36', 'entrance': {'copy': '0D'}}]
+        # 표 뒤 입구 01:D8C2 의 PHP·PHB·PHK·PLB 와 다음 바이트 C0 이 새 그룹의 문 항목 하나로 읽힌다.
+        write(self.rom.d, 0x01D8C6, b'\xc0')
+        made = apply(self.rom, writes_for(self.rom, value, at={'entrance': 0x3E9000}, allow_doors=True)[0])
+        with self.assertRaisesRegex(ValueError, '넘어 읽힘'):
+            writes_for(made, value, at={'door_bank': 0x3D})
 
     def moved(self):
         value = doc({'map': '01/02', 'record': {'copy': '01/00'}, 'attrs': {'copy': '01/00'}})
@@ -268,8 +286,17 @@ class DoorTests(unittest.TestCase):
     def test_stale_door_graphics_rejected(self):
         value, moved = self.moved()
         write(moved.d, 0x01FD9F, b'\x12')
-        with self.assertRaisesRegex(ValueError, 'FD97~FEB6'):
+        with self.assertRaisesRegex(ValueError, 'FD9F 가 뱅크 01 과 다름'):
             writes_for(moved, value)
+
+    def test_stale_copy_elsewhere_rejected(self):
+        value, moved = self.moved()
+        write(moved.d, 0x01F0A0, b'\x12')
+        with self.assertRaisesRegex(ValueError, 'F0A0 가 뱅크 01 과 다름'):
+            writes_for(moved, value)
+        _, moved = self.moved()
+        with self.assertRaisesRegex(ValueError, '스텁은 이미'):
+            writes_for(moved, value, at={'door_stub': 0x01FF20})
 
 
 if __name__ == '__main__':

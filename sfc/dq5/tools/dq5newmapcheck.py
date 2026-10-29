@@ -37,6 +37,11 @@ dq5exitcheck.STALE['doors'] = '01D2FC-01D8C1'
 DOOR_CMD = 'up:4,wait:20,a:6,wait:60,down:6,wait:15,down:6,wait:15,down:6,wait:15,a:6,wait:250'
 # 같은 문에서 どうぐ(오른쪽 열 둘째)로 첫 칸의 ラインハットのカギ(C9)를 つかう. 11:8E54 의 JSL 로 입구 01:D97B 를 지나 문이 열림
 # (메시지 1A2). 이 입구가 옛 문 표를 읽으면 STALE 감시가 잡는다.
+# 01/00 성문 (31,51) 을 이벤트 명령 C4(입구 01:D915)로 열고, 이어 C5(01:F117)로 닫는다. 명령을 7E:1A0D 에 두고
+# $19B3 으로 건다.
+EVENT = '{},19B3=0D,19B4=1A,19B5=00,19AE|80'
+OPEN = EVENT.format('1A0D=C4,1A0E=1F,1A0F=33,1A10=02,1A11=FF')
+CLOSE = EVENT.format('1A0D=C4,1A0E=1F,1A0F=33,1A10=02,1A11=C5,1A12=1F,1A13=33,1A14=02,1A15=FF')
 KEY_CMD = 'up:4,wait:20,a:6,wait:60,right:6,wait:15,down:6,wait:15,a:6,wait:60,a:6,wait:60,a:6,wait:120,a:6,wait:250'
 VARIANTS = {
     'n': ({'format': 'dq5newmap/1', 'maps': [{'map': '0D/05', **COPY_0D02}]}, [], ['0D/05'], ('0D/05', 'same-group')),
@@ -103,6 +108,15 @@ CASES = [
       'cell_unlike': 'doors-lock-original'}),
     ('doors-key-original', 'original', '01/04,48,2,1', KEY_CMD, ('01/04', (48, 2), None, None, None),
      {'late': '2056=C9', 'msglog': True, 'cell': '48,1', 'msgs': '1A2'}),
+    ('doors-open', 'doors', '01/00,31,54,1', 'wait:400', ('01/00', (31, 54), None, None, None),
+     {'late': OPEN, 'cell': '31,51', 'cell_like': 'doors-open-original', 'cell_unlike': 'doors-gate-original'}),
+    ('doors-open-original', 'original', '01/00,31,54,1', 'wait:400', ('01/00', (31, 54), None, None, None),
+     {'late': OPEN, 'cell': '31,51'}),
+    ('doors-close', 'doors', '01/00,31,54,1', 'wait:500', ('01/00', (31, 54), None, None, None),
+     {'late': CLOSE, 'cell': '31,51', 'cell_like': 'doors-close-original', 'cell_unlike': 'doors-open-original'}),
+    ('doors-close-original', 'original', '01/00,31,54,1', 'wait:500', ('01/00', (31, 54), None, None, None),
+     {'late': CLOSE, 'cell': '31,51'}),
+    ('doors-gate-original', 'original', '01/00,31,54,1', 'wait:400', ('01/00', (31, 54), None, None, None), {'cell': '31,51'}),
     ('doors-room', 'doors', '01/03,14,8,1', 'wait:10', ('01/03', (14, 8), None, None, None),
      {'cell': '14,7', 'cell_like': 'doors-room-original'}),
     ('doors-room-original', 'original', '01/03,14,8,1', 'wait:10', ('01/03', (14, 8), None, None, None), {'cell': '14,7'}),

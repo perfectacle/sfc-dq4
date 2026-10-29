@@ -52,9 +52,10 @@ ENTRANCE_SIZE = 5
 DOOR_END = 0x01D8C2
 DOOR_STUB = 0x01FED0
 STUB_SIZE = 11
-# 문 루틴이 문 표와 같은 DB 로 읽는 뱅크 01 의 그림 표(01:DE7F·F496 LDA $FD97,X/Y). 복사본의 이 자리가 뱅크 01 과
-# 같아야 문이 원래 그림으로 그려진다. 늘린 문 표는 이 앞에서 끝나야 한다.
-DOOR_SHARED = (0xFD97, 0xFEB7)
+# 문 루틴이 문 표 밖에서 같은 DB 로 읽은 뱅크 01 자료가 든 구간(01:E5EA LDA ($0E) 가 C4·C5 에서 F097~F0D6, 그림
+# 표 FD97~FEB6). 늘린 문 표는 이 앞에서 끝나야 하고, 복사본의 이 구간은 뱅크 01 과 같아야 한다. 구간 안의 코드도
+# 함께 견주므로 문 루틴을 고치는 다른 패치(01:F42D 훅 등)를 복사 뒤에 넣으면 거부된다.
+DOOR_DATA = (0xF097, 0xFEB7)
 
 
 def cpu(addr):
@@ -297,9 +298,13 @@ def door_writes(rom, plan, at):
     """새 맵·새 그룹에 빈 문 목록을 끼운 문 표. 처음 늘릴 때는 뱅크 01 전체를 door_bank 에 복사하고 그 복사본의
     D2FC 에 표를 둔 뒤, 여섯 입구를 JML 로 스텁에 보내 DB 를 door_bank 로 둔다(문 루틴이 DB 로 읽는 뱅크 01 의 다른
     자료도 복사본에서 같은 값으로 읽힌다). door_bank 는 비어 있어야 하고(롬 끝 너머이거나 모두 0), 이미 늘린 롬은
-    복사본의 DOOR_SHARED 가 뱅크 01 과 같을 때만 다시 쓴다."""
+    복사본의 DOOR_DATA(입구 머리 제외)가 뱅크 01 과 같을 때만 다시 쓴다."""
     table = door_table(rom)
     groups = door_groups(rom, len(group_spans(rom)[0]))
+    size = sum(len(m) for maps in groups for m in maps)
+    if table == DOOR_TABLE and DOOR_TABLE + size > DOOR_END:
+        # --allow-door-readthrough 로 만든 새 그룹은 표 뒤 코드를 문 목록으로 읽는다. 그대로 옮기면 그 바이트가 문이 된다.
+        raise ValueError(f'문 표가 {cpu(DOOR_END)} 를 넘어 읽힘(문 표를 늘리지 않고 더한 그룹이 있음)')
     for g, maps in enumerate(plan.pointers):
         have = len(groups[g]) if g < len(groups) else 0
         if len(maps) <= have:
@@ -312,15 +317,21 @@ def door_writes(rom, plan, at):
         else:
             groups.append(add)
     blob = b''.join(b''.join(maps) for maps in groups)
-    if (DOOR_TABLE & 0xFFFF) + len(blob) > DOOR_SHARED[0]:
-        raise ValueError(f'문 표 {len(blob)}바이트가 복사본의 그림 표 {DOOR_SHARED[0]:04X} 를 덮음')
+    if (DOOR_TABLE & 0xFFFF) + len(blob) > DOOR_DATA[0]:
+        raise ValueError(f'문 표 {len(blob)}바이트가 복사본에서 문 루틴이 읽는 {DOOR_DATA[0]:04X} 를 덮음')
     if table != DOOR_TABLE:
         if at.get('door_bank') not in (None, table >> 16):
             raise ValueError(f'문 표는 이미 뱅크 {table >> 16:02X} 에 있음')
-        size = DOOR_SHARED[1] - DOOR_SHARED[0]
-        if read(rom, table & 0xFF0000 | DOOR_SHARED[0], size) != read(rom, 0x010000 | DOOR_SHARED[0], size):
-            raise ValueError(f'뱅크 {table >> 16:02X} 복사본의 {DOOR_SHARED[0]:04X}~{DOOR_SHARED[1] - 1:04X} 가 뱅크 01 과 다름'
-                             '(복사 뒤 다른 패치가 뱅크 01 의 문 그림 표를 고침)')
+        jml = read(rom, DOOR_ENTRIES[-1], 4)
+        stub = (0x010000 | jml[1] | jml[2] << 8) - (len(DOOR_ENTRIES) - 1) * STUB_SIZE
+        if at.get('door_stub') not in (None, stub):
+            raise ValueError(f'문 표 스텁은 이미 {cpu(stub)} 에 있음')
+        lo, n = DOOR_DATA[0], DOOR_DATA[1] - DOOR_DATA[0]
+        copy, here = read(rom, table & 0xFF0000 | lo, n), read(rom, 0x010000 | lo, n)
+        for a in range(lo, lo + n):
+            if copy[a - lo] != here[a - lo] and not any(e & 0xFFFF <= a < (e & 0xFFFF) + 4 for e in DOOR_ENTRIES):
+                raise ValueError(f'뱅크 {table >> 16:02X} 복사본의 {a:04X} 가 뱅크 01 과 다름(복사 뒤 다른 패치가 뱅크 01 을 '
+                                 '고침. 그 패치를 먼저 넣은 롬에서 문 표 패치를 다시 만듦)')
         return [(table, blob, '문 표')]
     bank = at['door_bank']
     if not 0x30 <= bank <= 0x3F:

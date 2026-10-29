@@ -147,7 +147,7 @@ def door_table(rom):
     banks = set()
     for entry in DOOR_ENTRIES:
         head = bytes(rom.u8(entry + i) for i in range(4))
-        if head in (b'\x8b\x4b\xab\x20' if entry == 0x01F3C9 else b'\x08\x8b\x4b\xab', bytes(4)):
+        if head == (b'\x8b\x4b\xab\x20' if entry == 0x01F3C9 else b'\x08\x8b\x4b\xab'):
             banks.add(None)
             continue
         if head[0] != 0x5C or head[3] != 0x01:
