@@ -276,10 +276,12 @@ class Layout:
 
     def code(self, a):
         # 새 게임 시작(시작 지점 표를 읽은 뒤): 21A5.6 이 켜져 있으면 맵을 불러올 때 곡을 바꾸지 않는다(00:CE6B).
-        # 새 게임을 고를 때 서곡이 멈추므로 상자·서술 동안 곡이 없다
+        # 메뉴 곡은 여기서 끈다
         start = (bytes((0xA9, 0x80, 0x85, 0xBE)) +                    # 원래: LDA #$80 / STA $BE
                  if_pending(bytes((0xAF, *le(SKIP_SONG[0], 3), 0x09, SKIP_SONG[1],   # LDA $7E21A5 / ORA #$40
-                                   0x8F, *le(SKIP_SONG[0], 3)))) +                    # STA $7E21A5
+                                   0x8F, *le(SKIP_SONG[0], 3),                        # STA $7E21A5
+                                   # 메뉴 곡 끄기(1A). 새 게임이 지우는 $1D8B 만으로는 곡이 그대로 울렸다(KON 실측)
+                                   0xDA, 0x5A, 0x22, 0x91, 0xFE, 0x24, 0x7A, 0xFA))) +  # PHX / PHY / JSL $24FE91 / PLY / PLX
                  bytes((0xA9, 0x80, 0x6B)))                            # LDA #$80 / RTL
         # 맵을 불러올 때: 연출 전이면 주화면을 BG3 만으로
         hook = (if_pending(bytes((0xA9, 0x04)), bytes((0xA9, 0x17))) +
