@@ -131,7 +131,8 @@ def song_score(score, drop_tracks=(), drop_programs=(), track_db=None):
 
 def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_fades=False, preview=None,
           stream=None, stream_ticks=None, budgets=None, pinned=(), resident_from=None, drop_resident=(), lanes=None, drop_tracks=None,
-          level_db=None, programs=None, set_records=None, keep_regions=None, track_db=None):
+          level_db=None, programs=None, set_records=None, keep_regions=None, track_db=None,
+          fast_receive=False):
     """stream 은 {곡 자리: 곡 앞 샘플 바이트 상한}. 그 곡은 샘플 일부를 곡이 울리는 동안 보낸다(transfer_plan).
 
     stream_ticks 는 {곡 자리: 틱}. 곡 앞 바이트 상한을 곡이 처음 그 틱 안에 쓰는 샘플의 합으로 정하고, 도착 어림보다
@@ -282,7 +283,8 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
                                    'bank': bank_report, 'conversion': conversion.report, 'stream': plan}
     rom, install_report = patch.install(base, replacements, sample_resources=resources, map_fades=map_fades,
                                         preview=preview, pinned=tuple(pinned),
-                                        resident=resident if resident_plan else None, set_records=set_records)
+                                        resident=resident if resident_plan else None, set_records=set_records,
+                                        fast_receive=fast_receive)
     # 바꾸지 않은 DQ5 곡도 늘 두는 목록이 바뀐 뒤의 SPC 에 드는지 본다. 넘치는 곡은 그 까닭을 남긴다.
     sets, unreplaced = patch.read_sets(rom), {}
     for song in range(1, 0x32):
@@ -333,6 +335,8 @@ def main():
                     help='never merge the key regions of this NDS program when shrinking samples')
     ap.add_argument('--track-db', action='append', default=[], metavar='DQ5_SLOT=TRACK:DB',
                     help='scale the note velocity of one NDS track (or TRACK@PROGRAM), e.g. 09=track6:-4 or 09=track8@45:-6')
+    ap.add_argument('--fast-receive', action='store_true',
+                    help='let the SPC driver take several 3-byte groups per handshake loop (dq4soundpatch.fast_receive_code)')
     ap.add_argument('--record', action='append', default=[], metavar='DQ5_SLOT=K:SAMPLE,...',
                     help='song set record of an unreplaced song')
     args = ap.parse_args()
@@ -371,7 +375,7 @@ def main():
                         lanes={slot: json.loads(value) for slot, value in per_slot(args.lanes)},
                         drop_tracks=drop_tracks, level_db={slot: float(v) for slot, v in per_slot(args.level_db)},
                         programs=programs, set_records=records, keep_regions=keep,
-                        track_db=track_db)
+                        track_db=track_db, fast_receive=args.fast_receive)
     from dq5build import make_ips
     from kr_patch import ips
     patch_bytes = make_ips(base, rom)

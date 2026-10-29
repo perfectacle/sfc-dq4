@@ -82,6 +82,22 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(patch.read_sets(out)[0x1D], bytes([2, 2, 0x1F, 0x05]))
         self.assertEqual(report['songs'][0]['spc_budget']['streamed_while_playing'], [])
 
+    def test_fast_receive_adds_ff00_block_and_driver_jump(self):
+        out, report = patch.install(self.base, {0x02: patch.Replacement(melody(), (0x03,))}, fast_receive=True)
+        self.assertTrue(report['fast_receive'])
+        records = patch.read_sets(out)
+        self.assertEqual(records[0x02], bytes([1, 1, 0x03]))
+        at = lorom(patch.SONG_SETS) + sum(map(len, records))
+        code = patch.fast_receive_code()
+        self.assertEqual(out[at:at + 4], len(code).to_bytes(2, 'little') + bytes([0x00, 0xFF]))
+        self.assertEqual(out[at + 4:at + 4 + len(code)], code)
+        self.assertEqual(out[at + 4 + len(code):at + 8 + len(code)], patch.IPL_END)
+        drv = lorom(patch.DRIVER_BLOCK) + 4 + patch.DRIVER_RECEIVE - 0x0750
+        self.assertEqual(out[drv:drv + 3], bytes([0x5F, 0x00, 0xFF]))
+        self.assertEqual(self.base[drv:drv + 3], bytes.fromhex('CD 00 E5'))
+        with self.assertRaisesRegex(ValueError, 'already has the fast receive'):
+            patch.install(out, {0x02: patch.Replacement(melody(), (0x03,))})
+
     def test_rejects_title_replacement(self):
         with self.assertRaisesRegex(ValueError, 'protected title'):
             patch.install(self.base, {0x10: self.item})
