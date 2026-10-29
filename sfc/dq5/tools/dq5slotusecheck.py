@@ -5,6 +5,10 @@
   ev3       06/08 이벤트 3((37,16)-(38,21) 에 들어섬) → 06:D704 → 04:FB1C
   talk23a   선실 パパス 대화 번호를 23A(06/00 의 マスタードラゴン 대화)로 → 06:B4F7 → 01:BA95
   overflow  같은 장면에 시작 때 7E:1983 = 1E 를 두어, 01:BA95 가 슬롯 20·21 을 쓰게 함
+  alt0605   06/05 대체 목록 10:AB3A(7E:2190 bit7)의 10:ABB5 스크립트 → 05:E931 → 01:BA95. 기다리는 7E:21A1 bit6 을 켜 둠
+  map1100   11/00 기본 목록 05:A3D2 스크립트(7E:219F bit7 을 기다림) → 05:E72A → 05:E838·05:E7EC → 04:FB1C 두 번.
+            05:E72A 는 인물 01·02 가 일행에 살아 있을 때만 슬롯을 만들므로, 도착 뒤 일행 레코드 1·2 에
+            인물 레코드 표(23:C014)의 01·02 를 베낌
 
 장면마다 부르는 곳을 지날 때의 $1983·Y(슬롯), 메시지 번호, 끝의 $1995(OBJ VRAM 다음 타일)를 적는다(lua/dq5slotuse.lua).
 원본 롬·선실 상태는 읽기만 하고 출력은 --out 의 새 하위 폴더에 둔다.
@@ -30,9 +34,54 @@ INN = {'DRIVER': 'dq5warp.lua', 'TO': '1A/02,12,14', 'SET': '2195|0C', 'MAXF': '
 EV3 = {'DRIVER': 'dq5warp.lua', 'TO': '06/08,36,18', 'MAXF': '4000', 'SETTLE': '120', 'TEST': 'right:20,wait:2500'}
 T23A = {'DRIVER': 'dq5msg.lua', 'MAXF': '1200', 'POKE': '7E36EB=3A;7E370B=02',
         'PRE': TALK + ',a:4,wait:200' * 5}
-SCENES = {'inn': ('original', INN), 'inn-grown': ('grown', INN), 'ev3': ('original', EV3),
-          'talk23a': ('original', T23A), 'overflow': ('original', dict(T23A, SET='1983=1E'))}
+PRESS20 = 'wait:30,' + 'a:4,wait:150,' * 20 + 'wait:1500'
+ALT0605 = {'DRIVER': 'dq5warp.lua', 'TO': '06/05,25,23', 'SET': '2190|80;21A1|40;219F&BF', 'MAXF': '6000',
+           'SETTLE': '120', 'TEST': PRESS20}
 INN_LIST = '10:B7BA'
+PERSONS = 0x23C014          # 인물 레코드 표, 42바이트씩(일행 레코드 7E:2040 + i×42 와 같은 꼴)
+
+
+def party_sets(rom):
+    """일행을 주인공·인물 01·인물 02 셋으로 두고 11/00 장면을 거는 LATESET."""
+    data = rom.read_bytes()
+    at = (PERSONS >> 16 & 0x7F) * 0x8000 + (PERSONS & 0x7FFF)
+    sets = [f'{0x2040 + i * 42 + k:04X}={b:02X}' for i in (1, 2) for k, b in enumerate(data[at + i * 42:at + i * 42 + 42])]
+    return ';'.join(sets + ['201D=03', '201E=03', '201F=03', '2020=00', '2021=01', '2022=02', '219F|98'])
+
+
+# 슬롯을 더 쓰는 루틴과 스크립트가 부르는 그 앞 루틴. 롬 전체에서 부르는 바이트 꼴을 찾아 아래와 같아야 한다.
+CALLERS = {
+    0x04FB1C: {('JSL', '02:AE7B'), ('JSL', '02:AFB8'), ('JSL', '02:AFE5'), ('JSL', '02:B0F3'), ('JSL', '05:E806'),
+               ('JSL', '05:E852'), ('JSL', '06:D716')},
+    0x01BA95: {('JSL', '05:E931'), ('JSL', '06:B52D')},
+    0x05E931: {('스크립트 37', '10:ABD1')},
+    0x05E72A: {('스크립트 37', '05:A3E5')},
+}
+
+
+def callers(data, target):
+    """target 을 부르는 곳. 긴 호출(JSL·JML, 인물 스크립트 05·37, 이벤트 스크립트 A0)은 롬 전체,
+    같은 뱅크 호출(JSR·JMP·JSR (a,X)·JMP (a,X), 뱅크 06 이면 대화 스크립트 00)은 그 뱅크에서 찾는다."""
+    def name(o):
+        return f'{o // 0x8000:02X}:{0x8000 | o % 0x8000:04X}'
+    long = {0x22: 'JSL', 0x5C: 'JML', 0x05: '스크립트 05', 0x37: '스크립트 37', 0xA0: '이벤트 A0'}
+    near = {0x20: 'JSR', 0x4C: 'JMP', 0xFC: 'JSR', 0x7C: 'JMP'} | ({0x00: '대화 00'} if target >> 16 == 6 else {})
+    out = {(long[data[m.start() - 1]], name(m.start() - 1))
+           for m in re.finditer(re.escape(bytes([target & 0xFF, target >> 8 & 0xFF, target >> 16])), data)
+           if m.start() and data[m.start() - 1] in long}
+    base = (target >> 16 & 0x7F) * 0x8000
+    for m in re.finditer(re.escape(bytes([target & 0xFF, target >> 8 & 0xFF])), data[base:base + 0x8000]):
+        if m.start() and data[base + m.start() - 1] in near:
+            out.add((near[data[base + m.start() - 1]], name(base + m.start() - 1)))
+    return out
+
+
+def scenes(rom):
+    map1100 = dict(ALT0605, TO='11/00,100,67', LATESET=party_sets(rom))
+    del map1100['SET']
+    return {'inn': ('original', INN), 'inn-grown': ('grown', INN), 'ev3': ('original', EV3),
+            'talk23a': ('original', T23A), 'overflow': ('original', dict(T23A, SET='1983=1E')),
+            'alt0605': ('original', ALT0605), 'map1100': ('original', map1100)}
 
 
 def grow_document():
@@ -93,13 +142,17 @@ def main():
         libdir = subprocess.run(['krpatch', 'sfc', 'lua'], capture_output=True, text=True,
                                 check=True, timeout=30).stdout.strip()
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-            futures = {n: pool.submit(scene, n, roms[r], o, state, out, mesence, libdir) for n, (r, o) in SCENES.items()}
+            futures = {n: pool.submit(scene, n, roms[r], o, state, out, mesence, libdir)
+                       for n, (r, o) in scenes(original).items()}
             seen = {n: f.result() for n, f in futures.items()}
 
         def made(name, site):
             return [(f, y) for pc, f, _, y in seen[name]['calls'] if pc == site]
 
+        data = original.read_bytes()
+        found = {f'{t:06X}': sorted(callers(data, t)) for t in CALLERS}
         checks = {
+            'callers': all(callers(data, t) == want for t, want in CALLERS.items()),
             'inn': made('inn', '02B3B4') == [(0x0E, 0x0D)] and '77F' in seen['inn']['messages']
             and seen['inn']['free'] == 0x0E,
             'inn-grown': made('inn-grown', '02B3B4') == [(0x20, 0x1F)] and seen['inn-grown']['free'] == 0x20
@@ -110,15 +163,24 @@ def main():
             and all(f == 0x0D for f, _ in made('talk23a', '02B3B4')) and not overwritten(out, 'talk23a'),
             'overflow': [y for _, y in made('overflow', '02B3B4')] == [0x1E, 0x1F, 0x20, 0x21]
             and len(overwritten(out, 'overflow')) > 0,
+            # 01:BA95 는 $1983 부터 넷을 쓰고 $1983 은 그대로. 그 뒤의 02:B3B4 는 일행 슬롯으로 되돌려 베끼는 것.
+            'alt0605': [y - f for f, y in made('alt0605', '02B3B4')[:4]] == [0, 1, 2, 3]
+            and any(pc == '05E931' for pc, *_ in seen['alt0605']['calls'])
+            and seen['alt0605']['free'] == made('alt0605', '02B3B4')[0][0],
+            'map1100': [pc for pc, *_ in seen['map1100']['calls'] if pc in ('05E852', '05E806')] == ['05E852', '05E806']
+            and len(made('map1100', '02B3B4')) == 2 and all(f == y + 1 for f, y in made('map1100', '02B3B4'))
+            and seen['map1100']['free'] == made('map1100', '02B3B4')[0][1] + 2,
         }
         results = {n: {**v, 'calls': [(pc, f'{f:02X}', f'{t:04X}', f'{y:02X}') for pc, f, t, y in v['calls']]}
                    for n, v in seen.items()}
         results['overflow']['slot01_changed'] = overwritten(out, 'overflow')
         results['refuse'] = refused.stderr.strip().splitlines()[-1:] if refused.stderr else []
-        save_json(out / 'results.json', {'scenes': results, 'checks': checks})
+        save_json(out / 'results.json', {'scenes': results, 'callers': found, 'checks': checks})
         for n, v in seen.items():
             print(f'{n}: 맵 {v["map"]} 슬롯 쓰기 {[(f"{f:02X}", f"{y:02X}") for f, y in made(n, "02B3B4")]} '
                   f'끝 $1983 {v["free"]:02X} $1995 {v["obj_tiles"]:04X}')
+        for t, sites in found.items():
+            print(f'{t} 부르는 곳: {sites}')
         print(f'overflow: 슬롯 0·1 자리가 바뀐 바이트 {len(results["overflow"]["slot01_changed"])}개')
         for key, ok in checks.items():
             print(f'{key}: {"통과" if ok else "불일치"}')

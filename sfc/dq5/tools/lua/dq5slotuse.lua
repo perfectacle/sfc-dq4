@@ -4,7 +4,7 @@ package.path = os.getenv('LIBDIR') .. '/?.lua;' .. package.path
 local L = require('lib')
 local m = emu.memType.snesMemory
 local log, n = {}, 0
-local SITES = {0x02B3B4, 0x04FB1C, 0x01BA95, 0x02AE7B, 0x02AFB8, 0x02AFE5, 0x02B0F3, 0x05E806, 0x05E852, 0x06D716, 0x05E931, 0x06B52D}
+local SITES = {0x02B3B4, 0x04FB1C, 0x01BA95, 0x02AE7B, 0x02AFB8, 0x02AFE5, 0x02B0F3, 0x05E806, 0x05E852, 0x06D716, 0x05E931, 0x06B52D, 0x05E72A, 0x05E796, 0x05E7B1}
 for _, pc in ipairs(SITES) do
   emu.addMemoryCallback(function()
     if #log >= 400 then return end
