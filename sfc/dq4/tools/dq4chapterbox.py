@@ -43,7 +43,9 @@ FADE_STEP = 1       # 밝기 한 단계 프레임
 HOLD = 60           # 상자를 다 밝힌 채 두는 프레임(FC 는 페이드까지 75~90프레임쯤)
 REVEAL_STEP = 1
 SONG_WAIT_MAX = 300  # 맵 곡이 시작되기를 기다리는 상한(프레임). FC 는 서술 창이 닫히고 67프레임 뒤 성 곡
-OPENING_SONG = 0x23  # 사운드 세트(dq4soundset.py)의 インテルメッツォ 자리. FC 는 이름 입력부터 서술까지 이 곡(FC 1F)
+# 맵 곡 건너뛰기 비트(7E:21A5 bit6). 원래 롬에서는 03:C729 만 켠다. 켜져 있으면 01:C2FA 가 동료 자리 맞추기(00:D515)도
+# 건너뛰지만, 새 게임부터 맵을 밝힐 때까지 01:C2FA·00:D515 는 한 번도 돌지 않았다(실측)
+SKIP_SONG = (0x7E21A5, 0x40)
 
 
 def fc_tile(nes, n):
@@ -273,9 +275,11 @@ class Layout:
             raise ValueError('뱅크를 넘음')
 
     def code(self, a):
-        # 새 게임 시작(시작 지점 표를 읽은 뒤): 이벤트 곡(7E:21DF bit7)을 두면 맵을 불러올 때 맵 곡 대신 그 곡을 튼다
+        # 새 게임 시작(시작 지점 표를 읽은 뒤): 21A5.6 이 켜져 있으면 맵을 불러올 때 곡을 바꾸지 않는다(00:CE6B).
+        # 새 게임을 고를 때 서곡이 멈추므로 상자·서술 동안 곡이 없다
         start = (bytes((0xA9, 0x80, 0x85, 0xBE)) +                    # 원래: LDA #$80 / STA $BE
-                 if_pending(bytes((0xA9, 0x80 | OPENING_SONG, 0x8F, 0xDF, 0x21, 0x7E))) +   # STA $7E21DF
+                 if_pending(bytes((0xAF, *le(SKIP_SONG[0], 3), 0x09, SKIP_SONG[1],   # LDA $7E21A5 / ORA #$40
+                                   0x8F, *le(SKIP_SONG[0], 3)))) +                    # STA $7E21A5
                  bytes((0xA9, 0x80, 0x6B)))                            # LDA #$80 / RTL
         # 맵을 불러올 때: 연출 전이면 주화면을 BG3 만으로
         hook = (if_pending(bytes((0xA9, 0x04)), bytes((0xA9, 0x17))) +
@@ -312,7 +316,9 @@ class Layout:
                      0xF0, 0x03, 0xCA))                                    # BEQ 끝 / DEX
         song_wait = (bytes((0xA2, *le(SONG_WAIT_MAX, 2))) + song_wait +
                      bytes((0xD0, -(len(song_wait) + 2) & 0xFF)))          # LDX #max / … / BNE 고리
-        reveal = (ENTER + bytes((0x22, 0x8F, 0xFE, 0x23)) + song_wait +   # JSL $23FE8F(맵 곡을 틀고 21DF 를 지움)
+        reveal = (ENTER + bytes((0xAF, *le(SKIP_SONG[0], 3), 0x29, ~SKIP_SONG[1] & 0xFF,   # LDA / AND #$BF
+                                 0x8F, *le(SKIP_SONG[0], 3))) +                       # STA $7E21A5
+                  bytes((0x22, 0x8F, 0xFE, 0x23)) + song_wait +          # JSL $23FE8F(맵 곡을 틀고 21DF 를 지움)
                   bytes((0x9C, 0x1D, 0x00)) + wait(1) +                # 밝기 0 이 걸린 뒤 맵 층을 켠다
                   # NMI 는 $0733 을 늘 $212C 로 쓰지 않으므로(실측) 맵을 불러올 때처럼 직접 쓴다
                   bytes((0xA9, 0x17, 0x8D, 0x33, 0x07, 0x8D, 0x2C, 0x21, 0x8D, 0x2D, 0x21)) +
