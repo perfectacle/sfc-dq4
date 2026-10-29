@@ -160,7 +160,7 @@ def door_table(rom):
         bank = code[3 if entry != 0x01F3C9 else 2] if len(code) == size else None
         if bank is None or code != door_stub(entry, bank):
             raise ValueError(f'{stub >> 16:02X}:{stub & 0xFFFF:04X} 이 {entry >> 16:02X}:{entry & 0xFFFF:04X} 의 문 표 스텁 꼴이 '
-                             '아님')
+                             '아님(옛 도구로 만든 롬이면 원래 롬에서 다시 만듦)')
         banks.add(bank)
     if len(banks) != 1:
         raise ValueError('문 표 입구가 원래 꼴과 스텁으로 섞였거나 스텁의 뱅크가 다름')

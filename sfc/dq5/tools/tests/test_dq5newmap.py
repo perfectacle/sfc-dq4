@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dq5map import (ATTR_SITES, ATTR_TABLE, DOOR_ENTRIES, GROUP_TABLE, GROUPS, POINTER_SITE, Rom, door_groups, door_table,
                     group_spans, lorom, map_pointer)
 from dq5mapwrite import all_maps
-from dq5newmap import DOOR_TABLE, ENTRANCE_SITES, FORMAT, check, writes_for
+from dq5newmap import DOOR_TABLE, ENTRANCE_SITES, FORMAT, STUB_SIZES, check, writes_for
 
 # 그룹마다 맵 수. 그룹 01 은 둘, 나머지는 하나.
 COUNTS = [2 if g == 1 else 1 for g in range(GROUPS)]
@@ -262,14 +262,14 @@ class DoorTests(unittest.TestCase):
 
     def test_every_entry_jumps_to_its_stub(self):
         _, moved = self.moved()
-        for i, entry in enumerate(DOOR_ENTRIES):
-            stub = 0x22FF30 + i * 11
+        starts = [0x22FF30 + sum(STUB_SIZES[:i]) for i in range(len(DOOR_ENTRIES))]
+        for entry, stub in zip(DOOR_ENTRIES, starts):
             self.assertEqual(bytes(moved.d[lorom(entry):lorom(entry) + 4]), bytes([0x5C, *stub.to_bytes(3, 'little')]))
         # 11:8E54 의 JSL 이 부르는 입구. PLB 뒤 01:D97F 로 돌아간다.
-        stub = 0x22FF30 + DOOR_ENTRIES.index(0x01D97B) * 11
+        stub = starts[DOOR_ENTRIES.index(0x01D97B)]
         self.assertEqual(bytes(moved.d[lorom(stub):lorom(stub) + 11]), bytes.fromhex('08 8b f4 3d 3d ab ab 5c 7f d9 01'))
         # 01:F3C9 는 JSR 대신 복귀 주소 F3CE 를 쌓고 F3D1 로 간다. 입구의 PLB·RTL 은 남는다.
-        stub = 0x22FF30 + DOOR_ENTRIES.index(0x01F3C9) * 11
+        stub = starts[DOOR_ENTRIES.index(0x01F3C9)]
         self.assertEqual(bytes(moved.d[lorom(stub):lorom(stub) + 13]),
                          bytes.fromhex('8b f4 3d 3d ab ab f4 ce f3 5c d1 f3 01'))
         self.assertEqual(bytes(moved.d[lorom(0x01F3CF):lorom(0x01F3D1)]), bytes.fromhex('ab 6b'))
@@ -315,6 +315,15 @@ class DoorTests(unittest.TestCase):
         moved = apply(self.rom, writes_for(self.rom, value, at={'door_bank': 0x3D, 'door_stub': 0x01FED0})[0])
         self.assertEqual(door_table(moved), 0x3DD2FC)
         self.assertEqual(writes_for(moved, value)[0], [])
+
+    def test_old_jsr_stub_rejected_with_hint(self):
+        # 01:FED0 뒤의 11바이트 JSR 꼴 01:F3C9 스텁. 지금 도구는 이 꼴을 만들지 않는다
+        _, moved = self.moved()
+        old = 0x01FED0 + 5 * 11
+        write(moved.d, 0x01F3C9, bytes([0x5C, *old.to_bytes(3, 'little')]))
+        write(moved.d, old, bytes.fromhex('8b f4 3d 3d ab ab 20 d1 f3 ab 6b'))
+        with self.assertRaisesRegex(ValueError, '스텁 꼴이 아님\\(옛 도구로 만든 롬이면 원래 롬에서 다시 만듦\\)'):
+            door_table(moved)
 
     def test_mixed_entries_rejected(self):
         _, moved = self.moved()
