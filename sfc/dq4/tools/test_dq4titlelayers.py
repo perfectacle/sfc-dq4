@@ -88,6 +88,8 @@ class LayerTests(unittest.TestCase):
         edges = [int(np.argmax(mask[y, 192:])) for y in range(176, 192)]
         self.assertEqual(edges, sorted(edges))
         self.assertGreater(len(set(edges)), 6)
+        # The castle and cloud bank outlines once kept a static column of source sky beside the subtitle ornament.
+        self.assertFalse(np.any((mask & ~glyphs)[170:186, 183:190]))
 
     def test_subtitle_box_shows_only_the_redrawn_subtitle(self):
         art = layers.subtitle()
