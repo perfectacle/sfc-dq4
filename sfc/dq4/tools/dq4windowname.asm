@@ -3,7 +3,7 @@
 ;
 ; 04:ABCF(일행 열 창)와 04:B79B(목록·つよさ 류의 공통 출력)는 이름 4바이트를 그대로 BG3 타일로 찍는다. 한글 표시 바이트(85~9A, 10~7E)면 대신 Galmuri9 글리프(뱅크 62~,
 ; dq4nameentry 의 16×16 칸)를 10점 간격으로 40점 띠에 겹쳐, 이름 줄 5칸과 그 위 테두리 줄 5칸(글자 맨 윗줄을 테두리 타일
-; 7줄째에 합성)을 BG3 글자 칸 180~1CF 에 그려 NMI 전송 목록으로 올린다. 칸은 타일맵 버퍼 자리마다 열 개씩, 여덟 자리를
+; 7줄째에 합성)을 BG3 글자 칸 180~1CF 에 그려 우리 전송 대기열로 올린다. 칸은 타일맵 버퍼 자리마다 열 개씩, 여덟 자리를
 ; 돌려 쓴다.
 
 lorom
@@ -46,12 +46,12 @@ org $24A4E0
 org $00887C
     JMP $FFA1
 org $00FFA1
-    LDA.l $7E3D62               ; !wq_count(아래 정의). M = 8. 비어 있으면 바로 넘겨 NMI 시간을 거의 늘리지 않는다
-    ORA.l $7E3D5A               ; !wq_defer
-    BEQ +
-    JSL WqNmiGate
-+
+    JML WqNmiEntry
     JMP ($1944)
+; NMI 끝(작업들이 VBlank 일을 마친 뒤 모이는 00:887F 다음). LDA $1E / STA $4200 자리
+org $008885
+    JML WtVisTail
+    NOP
 
 ; 석 자 출력 D1(강함 보기의 성별, 이름 표 2)의 끝 PHX / LDX #$0000 / LDA #$03 / STA $00 / BRL $B7A3 을, 길이 3 으로
 ; 04:B808 이름 표 길에 넘긴다. 두 고리 모두 PLX / BRL $BFF2 로 끝난다.
@@ -124,13 +124,13 @@ org $24A5E9
 !wn_bnext = $1D40           ; 다음에 내줄 전투 이름 자리
 !wn_attr  = $1D42           ; 이름 줄 타일맵 높은 바이트(색). 0 이면 버퍼에 있던 것을 살림
 !wt_stack = $1D83           ; 전용 스택 맨 위(1D44~1D83). 협동식 작업마다 낮은 WRAM 에 작은 스택이 있어, 그 스택을 깊게 쓰지 않는다
-!wt_keys  = $3D70           ; 24 워드(7E): 슬롯마다 버퍼 자리(!wt_buf + Y)
-!wt_ages  = $3DA0           ; 24 워드: 마지막으로 쓴 때, 0 = 빈 슬롯
+!wt_keys  = $3D70           ; 슬롯 수만큼 워드(7E, 30개까지): 슬롯마다 버퍼 자리(!wt_buf + Y)
+!wt_ages  = $3D14           ; 슬롯 수만큼 워드(30개까지): 마지막으로 쓴 때, 0 = 빈 슬롯
 !wt_need  = $3D6C           ; 0 = 작은 슬롯(네 열까지), 1 = 중간(일곱 열까지), 2 = 큰 슬롯
 !wt_first = $3D6E           ; 빈 슬롯·오래된 슬롯을 찾기 시작할 자리(슬롯 × 2)
 !wt_buf   = $3DD0           ; 타일맵 버퍼 포인터: 목록·창 본문은 $E0, 창 제목은 $DC
 !wt_field = $3DD2           ; 0 = 전투(NMI 작업 $1944 = 00:8952). 필드 전용 슬롯을 쓸지
-!wt_nslot = 24
+!wt_nslot = 26
 !wt_kana_end = $0096          ; 이 칸 아래의 슬롯은 가나 칸
 !wt_slot2 = $3D56           ; 이번에 쓴 슬롯 × 2, FFFF = 명령 창 전용 칸
 !wt_k     = $3D58           ; 그리는 고정 문구 번호
@@ -145,6 +145,8 @@ org $24A5E9
 !wt_len   = $1D8A           ; 원래 문자열 길이($00)
 !wq_count = $3D62           ; 우리 전송 대기열 항목 수(7E, NMI 가 보내고 0 으로)
 !wq_off   = $3D64           ; 대기열에 다음으로 쓸 자리
+!wt_vis   = $3DA4           ; 슬롯마다 1바이트: 마지막 창 타일맵 전송 때 보였거나 그 뒤에 그렸으면 1
+!wt_xfer  = $3DBE           ; 1바이트: 이번 NMI 에 게임이 보낼 창 타일맵 줄($0BEC 의 bit7·6), NMI 끝에서 WtVis 가 씀
 !wq_rd    = $3D5C           ; NMI 가 다음으로 보낼 항목 자리. VBlank 가 끝나 가면 남은 항목을 다음 NMI 로 넘긴다
 !wq_defer = $3D5A           ; 1바이트: bit7·6 = 다음 NMI 로 미룬 게임의 창 타일맵 전송 요청($0BEC),
                             ; bit1·0 = 전투에 들어가면 되돌릴 가나 칸 덩이 수(필드에서 가나 칸 슬롯을 쓰면 3)
@@ -166,8 +168,6 @@ org $24A5E9
 
 !wn_stage = $3E00           ; 올릴 160바이트를 먼저 만드는 자리(7E:3D14~3FFF 는 실행한 장면에서 접근 없음)
 
-!list_count  = $0758        ; NMI 전송 목록(00:8CF9) 항목 수
-!list_offset = $0759        ; 쓸 자리(16비트), 목록은 7E:4000~
 
 org !wn_code
 WnName:
@@ -327,13 +327,17 @@ WnList:
 +
     STA.l $7E0000|!wn_attr
     ; X 는 창 문자열(뱅크 04)에서 D0 다음 바이트. 「누구」 고르기 창은 이름 뒤 DD(상태 표시 한 칸)가 오고 창을 한 칸
-    ; 넓혀 두었으므로 5칸 나아간다. 다른 창(HPとMP 등)은 뒤 내용의 자리가 정해져 있어 원래처럼 4칸.
+    ; 넓혀 두었으므로 5칸 나아간다. 가게 동료 창(3A)의 이름 뒤 CC(「もっていない」 등)도 다섯째 칸을 덮지 않게 5칸.
+    ; 다른 창(HPとMP 등)은 뒤 내용의 자리가 정해져 있어 원래처럼 4칸.
     LDA #$0008
     STA.l $7E0000|!wn_step
     SEP #$20
     LDA.l $040000,X
     CMP #$DD
+    BEQ ++
+    CMP #$CC
     BNE +
+++
     LDA #$0A
     STA.l $7E0000|!wn_step
 +
@@ -800,59 +804,77 @@ WnUpload:
     LDA.w !wn_c
     CMP #$0005
     BCC .above
-    ; 목록에 한 항목으로. 붙이는 동안 NMI 가 목록을 비우면 항목이 엉키므로 NMI 를 잠시 끈다(그림자 $1E).
-    SEP #$20
-    LDA.b $1E
-    AND #$7F
-    STA.l $004200
-    LDA.w !list_count
-    BNE +
-    REP #$20
-    STZ.w !list_offset
-+
-    REP #$20
-    LDY.w !list_offset
-    SEP #$20
-    LDA #$80
-    STA.w $4000,Y
-    REP #$20
+    ; 우리 대기열로 보낸다. 게임 NMI 전송 목록(7E:4000~)은 가게가 창 상태($0A00~0B17)를 잠시 두는 자리이기도 해,
+    ; 동료 창의 이름을 거기 붙이자 되돌린 창 번호가 바뀌어 없는 창(FF)을 열고 멈췄다
     LDA.w !wn_tile
     ASL
     ASL
     ASL
     CLC
     ADC #$1000
-    STA.w $4001,Y
-    LDA #$0050
-    STA.w $4003,Y
+    JSR WqStage
+    REP #$30
+    RTS
+
+; !wn_stage 의 160바이트(10칸, 두 평면)를 VRAM 워드 A 로 보내는 대기열 항목. DB = 7E, M = X = 16.
+WqStage:
+    STA.w !wn_k
+    SEP #$20
+    LDA.b $1E
+    AND #$7F
+    STA.l $004200
+    REP #$20
+    LDA.w !wq_count
+    AND #$00FF
+    BNE +
+    STZ.w !wq_off
+    STZ.w !wq_rd
++
+    LDA.w !wq_off
+    CLC
+    ADC #$00A4
+    CMP #!wq_size+1
+    BCC .room
+    ; 대기열이 차면 WtQueue 처럼 NMI 를 끈 채 VBlank 마다 직접 보낸다
+    SEP #$20
+--
+    LDA.l $004212
+    BMI --
+-
+    LDA.l $004212
+    BPL -
+    JSL WqNmi
+    SEP #$20
+    LDA.l $004210
+    LDA.w !wq_count
+    BNE --
+    REP #$20
+    STZ.w !wq_off
+    STZ.w !wq_rd
+.room
+    LDY.w !wq_off
+    LDA.w !wn_k
+    STA.w !wq_buf,Y
+    LDA #$0A00              ; 방식 0(두 평면), 10칸
+    STA.w !wq_buf+2,Y
     TYA
     CLC
-    ADC #$4005
+    ADC.w #!wq_buf+4
     TAY
     LDX.w #!wn_stage
     LDA #$009F
     db $54,$7E,$7E          ; MVN 7E → 7E, 160바이트
     TYA
     SEC
-    SBC #$4000
-    STA.w !list_offset
+    SBC.w #!wq_buf
+    STA.w !wq_off
     SEP #$20
-    LDA.w !list_count
+    LDA.w !wq_count
     INC
-    STA.w !list_count
-    LDA #$80
-    TSB.b $1A
+    STA.w !wq_count
     LDA.b $1E
     STA.l $004200
-    ; 04:9D41 이 매 프레임 $19 워드를 AND #$7FFF 로 써 $1A bit7 을 지우므로, 붙인 자리에서 NMI 가 보낼 때까지 기다린다.
-    ; 00:958A 는 저 RAM 을 절대 주소로 읽을 수 있어 DB = 00 으로 부른다(뱅크 60 에는 저 RAM 미러가 없음).
-    PHB
-    LDA #$00
-    PHA
-    PLB
-    JSL $00958A
-    PLB
-    REP #$30
+    REP #$20
     RTS
 
 ; !wn_base 타일의 줄 !wn_r 을 A = p0 | p1 << 8 로. 가나 칸 01~8A 는 1bpp(둘째 평면 FF), 테두리 8B~95 는 두 평면.
@@ -1147,8 +1169,10 @@ WtAlloc:
     INX
     CPX.w #!wt_nslot*2
     BCC -
-    ; 들어갈 크기 가운데 빈 슬롯, 이미 안 보이는 슬롯(그 슬롯을 그린 버퍼 자리의 타일이 더는 그 슬롯이 아님), 가장 오래된
-    ; 슬롯 순. 오래된 순만 보면 전투처럼 슬롯이 모자란 곳에서 아직 보이는 작전 창을 밀어내고 닫힌 창의 슬롯을 남겼다
+    ; 들어갈 크기 가운데 빈 슬롯, 이미 안 보이는 슬롯, 가장 오래된 슬롯 순. 오래된 순만 보면 전투처럼 슬롯이 모자란 곳에서
+    ; 아직 보이는 작전 창을 밀어내고 닫힌 창의 슬롯을 남겼다. 안 보이는지는 지금 버퍼가 아니라 WtVis 가 창 타일맵을 보낸
+    ; NMI 에 잰 표시로 본다. 게임이 뒤 창을 버퍼에 다시 그리고 앞 창(강함 보기)은 저장해 둔 타일맵으로 되돌리거나, 가게에서
+    ; 버퍼를 비우고 다른 창을 미리 그리는 동안 지금 버퍼만 보면 보이는 슬롯을 안 보인다고 여겨 내주었다
     LDX.w !wt_first
     LDY #$0000
     STZ.w !wn_c
@@ -1160,14 +1184,14 @@ WtAlloc:
     TXY
     BRA .pick
 +
-    LDA.w !wt_keys,X
     PHX
+    TXA
+    LSR
     TAX
-    LDA.w $0000,X
+    LDA.w !wt_vis,X
     PLX
-    AND #$03FF
-    CMP.l WtSlot,X
-    BEQ +
+    AND #$00FF
+    BNE +
     TXY
     BRA .pick
 +
@@ -1192,6 +1216,15 @@ WtAlloc:
     STX.w !wt_slot2
     LDA.w !wt_age
     STA.w !wt_ages,X
+    PHX
+    TXA
+    LSR
+    TAX
+    SEP #$20
+    LDA #$01
+    STA.w !wt_vis,X
+    REP #$20
+    PLX
     LDA.l WtSlot,X
     STA.w !wt_base
     CLC
@@ -1218,31 +1251,31 @@ WtFits:
 ; 슬롯 첫 칸과 등급. 0 = 작은 슬롯 8칸(네 열), 1 = 중간 슬롯 14칸(일곱 열), 2 = 큰 슬롯 20칸(열 열), $10 을 더하면 필드에서만
 ; 쓰는 슬롯. 맞는 크기가 모자라면 더 큰 슬롯을 빌리고, 빈 슬롯은 표 순서로 고른다. 가나 칸(010~073) 슬롯을 크기와 상관없이
 ; 모두 앞에 둔다. 가나 칸은 메시지 캔버스 밖이라 메시지와 함께 뜨는 창(교회·가게 팔기 목록 등)의 글자가 메시지 창에 비치지
-; 않는다. 가나 칸은 DQ4 물건 이름(6~7열이 가장 많음)에 맞춰 중간을 많이 두고, 강함 보기(문구 20개 남짓)가 들어가게 슬롯 수는 24개를 지킨다. 전투 메시지와 몬스터 목록이 가나 1바이트
+; 않는다. 가나 칸은 DQ4 물건 이름(6~7열이 가장 많음)에 맞춰 중간을 많이 두고, 「누구의」 창 뒤 강함 보기(문구 25개 남짓)가 들어가게 캔버스 안은 작은 슬롯을 늘려 모두 26개. 전투 메시지와 몬스터 목록이 가나 1바이트
 ; 타일을 써서 가나 칸은 전투에서 못 쓰고, 전투에 들어가면 WqKana 가 원래 그림으로 되돌린다. 096~0AD 는 전투에서 전투
 ; 글자 칸이라 필드 전용. 캔버스 안에서는 작은 것부터, 같은 크기면 높은 칸부터: 메시지는 캔버스를 096 부터 채워, 낮은
 ; 칸일수록 메시지 글자에 덮이기 쉽다. 전투 공격 연출은 B0~122 를 덮는다.
 WtSlot:
     dw $0010, $0018, $0020, $0028, $0036, $0044, $0052, $0060
-    dw $0176, $016E, $00A6, $009E, $0096
-    dw $0160, $0152, $0144, $0136, $0128
-    dw $0114, $0100, $00EC, $00D8, $00C4, $00B0
+    dw $0174, $016C, $0164, $015C, $0154, $014C, $00A6, $009E, $0096
+    dw $013E, $0130, $0122, $0114
+    dw $0100, $00EC, $00D8, $00C4, $00B0
 WtClass:
     dw $10, $10, $10, $11, $11, $11, $11, $12
-    dw 0, 0, $10, $10, $10
-    dw 1, 1, 1, 1, 1
-    dw 2, 2, 2, 2, 2, 2
+    dw 0, 0, 0, 0, 0, 0, $10, $10, $10
+    dw 1, 1, 1, 1
+    dw 2, 2, 2, 2, 2
 ; 슬롯 × 2 → !wt_dirty 의 비트(낮은 워드, 높은 워드). 슬롯 i 는 비트 i 이고, 캔버스 밖 가나 칸 슬롯은 0
 WtBitLo:
     dw 0, 0, 0, 0, 0, 0, 0, 0
-    dw $0100, $0200, $0400, $0800, $1000
-    dw $2000, $4000, $8000, 0, 0
-    dw 0, 0, 0, 0, 0, 0
+    dw $0100, $0200, $0400, $0800, $1000, $2000, $4000, $8000, 0
+    dw 0, 0, 0, 0
+    dw 0, 0, 0, 0, 0
 WtBitHi:
     dw 0, 0, 0, 0, 0, 0, 0, 0
-    dw 0, 0, 0, 0, 0
-    dw 0, 0, 0, $0001, $0002
-    dw $0004, $0008, $0010, $0020, $0040, $0080
+    dw 0, 0, 0, 0, 0, 0, 0, 0, $0001
+    dw $0002, $0004, $0008, $0010
+    dw $0020, $0040, $0080, $0100, $0200
 
 ; 04:B11E(JSL, A = 창 바이트 8비트, X = 레코드에서 그다음 바이트 자리 16비트, DB = 04, Y = $E0 기준 자리). 9E k 면
 ; 고정 문구 k 를 그리고, 원래 접두 처리처럼 C = 1 로 돌아간다. 칸 셈 $0ADE 는 접두 바이트에서 하나 셌으므로 열 수 − 1 을
@@ -1298,8 +1331,23 @@ WnTitle:
 
 ; 04:AA79(장비 비교 창 제목의 물건 이름, M = 8, X = 16, PHX 뒤 BRK 88 로 $42·$43 의 이름을 $01~ 에 받은 뒤).
 ; 원래는 PHB / DB = 7E / LDX #0 / BRL $ABD6 로 제목 줄에 찍고 PLB / PLX / INX / BRL $AA10.
+; 제목 코드 E4(가게의 「どうぐ」 등)도 JSR $C25D 로 장비 비교 라벨을 $01~ 에 베껴 여기로 온다. 라벨은 9E k 로 바꿔 두었다.
 WnTitleName:
     REP #$30
+    LDA.b $01
+    AND #$00FF
+    CMP.w #!wt_fixed
+    BNE +
+    LDA.b $DC
+    STA.l $7E0000|!wt_buf
+    LDA.b $02
+    AND #$00FF
+    JSR WtFixedDraw
+    SEP #$20
+    PLX
+    INX
+    JML $04AA10
++
     LDA.b $43
     AND #$00FF
     CMP #$0008
@@ -1673,9 +1721,118 @@ WqNmiGate:
     LDA #$00
     STA.l $000BEC
 +
+    JSR WtXfer
     JMP WqNmi
 .done
+    JSR WtXfer
     RTL
+
+WtXfer:
+    LDA.l $000BEC
+    ORA.l $7E0000|!wt_xfer
+    STA.l $7E0000|!wt_xfer
+    RTS
+
+; 00:8885(NMI 끝, M = 8, DB = 00, D = 0). VRAM 을 건드리지 않는 WtVis 를 VBlank 일 뒤에서 돌린다. NMI 앞에서 돌리자 슬롯
+; 26개를 재는 시간만큼 게임의 창 타일맵 DMA 가 밀려 메시지 창 아래쪽 줄이 화면으로 가지 않았다
+WtVisTail:
+    PHP
+    LDA.l $7E0000|!wt_xfer
+    BEQ +
+    PHX
+    PHY
+    JSR WtVis
+    PLY
+    PLX
++
+    PLP
+    LDA.b $1E
+    STA.l $004200
+    JML $00888A
+; 00:FFA1 받침에서 JML(NMI, M = 8). 우리 대기열·미룬 요청·게임의 창 타일맵 요청 가운데 하나라도 있으면 게이트를 부르고
+; 00:FFA5(JMP ($1944))로 돌아간다. 창 타일맵 요청만 있어도 부르는 것은 WtVis 가 그 전송 때의 버퍼를 재기 위해서다
+; X·Y 는 지킨다. 원래 받침은 A 만 바꿨고, 게임 NMI 는 들어올 때의 X·Y 를 이어 쓴다(창 타일맵을 보내는 NMI 마다 WtVis 가
+; X·Y 를 바꾸자 메시지 창 아래쪽 줄이 화면으로 가지 않았다).
+WqNmiEntry:
+    LDA.l $7E0000|!wq_count
+    ORA.l $7E0000|!wq_defer
+    ORA.l $000BEC
+    BEQ +
+    PHX
+    PHY
+    JSL WqNmiGate
+    PLY
+    PLX
++
+    JML $00FFA5
+
+; 이 NMI 에 게임이 창 타일맵을 보냈으면(!wt_xfer: bit7 = 7E:5000 전체, bit6 = 0~6줄과 21~29줄), 보낸 줄에 키가 있는
+; 슬롯마다 키 자리의 타일이 그 슬롯인지 재 !wt_vis 에 둔다. 화면은 보낸 버퍼대로라 이때의 버퍼가 화면과 같다. M = 8.
+WtVis:
+    PHP
+    PHB
+    REP #$30
+    PEA $7E7E
+    PLB
+    PLB
+    LDA.w !wt_xfer
+    AND #$00C0
+    STA.w !wq_head
+    LDX #$0000
+.slot
+    LDA.w !wt_ages,X
+    BEQ .next
+    LDA.w !wt_keys,X
+    SEC
+    SBC #$5000
+    CMP #$0800
+    BCS .next
+    STA.w !wq_len
+    LDA.w !wq_head
+    AND #$0080
+    BNE .check
+    LDA.w !wq_len
+    LSR
+    LSR
+    LSR
+    LSR
+    LSR
+    LSR
+    CMP #$0007
+    BCC .check
+    CMP #$0015
+    BCC .next
+    CMP #$001E
+    BCS .next
+.check
+    LDY.w !wq_len
+    LDA.w $5000,Y
+    AND #$03FF
+    CMP.l WtSlot,X
+    PHP
+    TXA
+    LSR
+    TAY
+    PLP
+    SEP #$20
+    BEQ +
+    LDA #$00
+    BRA ++
++
+    LDA #$01
+++
+    STA.w !wt_vis,Y
+    REP #$20
+.next
+    INX
+    INX
+    CPX.w #!wt_nslot*2
+    BCC .slot
+    SEP #$20
+    STZ.w !wt_xfer
+    PLB
+    PLP
+    RTS
 
 ; 전투 NMI 작업($1944 = 00:8952)이면 가나 칸 한 덩이(35칸)를 롬의 1bpp 그림(04:E5A0~, 칸 10~)으로 되돌린다. 게임은 가나
 ; 칸을 평면 0 = 1bpp, 평면 1 = FF 로 올리고(VRAM 덤프 105칸 일치) 전투에 들어갈 때 다시 올리지 않는다. 한 NMI 에 다 보내지

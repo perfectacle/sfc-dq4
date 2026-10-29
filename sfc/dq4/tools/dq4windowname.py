@@ -18,7 +18,7 @@ CODE = 0x60C000
 CODE_END = 0x60E000
 STATUS_WINDOW = 0x02
 LIST_HOOK = 0x04B79B
-NMI_STUB = 0x00FFA1               # NMI 00:887C 가 들르는 받침(대기열이 있으면 JSL WqNmi, 이어서 JMP ($1944))
+NMI_STUB = 0x00FFA1               # NMI 00:887C 가 들르는 받침(JML WqNmiEntry, 이어서 JMP ($1944))
 # 이름 하나를 04:B79B 로 찍는 「누구」 고르기 창(본문에 D0 자리 표시). 이름 칸 5칸을 담게 한 칸 왼쪽으로 옮겨 넓힌다.
 # 오른쪽에는 이어서 열리는 창(도구·주문 목록 등)이 붙어 있어 오른쪽으로는 넓히지 않는다.
 NAME_LISTS = (0x0C, 0x0E, 0x11, 0x13, 0x2C, 0x36, 0x38, 0x3D, 0x4A, 0x4F, 0x6F, 0x7A, 0x7F)
@@ -26,6 +26,8 @@ NAME_LISTS = (0x0C, 0x0E, 0x11, 0x13, 0x2C, 0x36, 0x38, 0x3D, 0x4A, 0x4F, 0x6F, 
 SPELL_WINDOW = 0x28
 # 전투 작전 창(머리 17 82 06 05). 두 줄 한글(줄마다 다섯 칸까지)이 들어가게 한 칸 왼쪽으로 옮겨 넓힌다
 TACTIC_WINDOW = 0x16
+# 가게 동료 창(머리 02 0F 1C, 줄마다 이름 EF + 상태 CC). 이름 다섯째 칸 뒤로 상태를 미는 만큼 한 칸 왼쪽으로 옮겨 넓힌다
+SHOP_MEMBERS = 0x3A
 PREFIX_HOOK = 0x04B11E            # 창 바이트 갈래(메뉴 패치가 JSL 로 바꿔 둔 자리). 고정 문구 접두를 먼저 가른다
 
 
@@ -57,6 +59,11 @@ def apply(data, font=None, asar=None):
     if d[o + 2] & 0x1F != 8 or d[o + 4:o + 9] != bytes((0x00, 0x81, 0xFE, 0xD6, 0xFF)):
         raise ValueError(f'창 {SPELL_WINDOW:02X} 머리 {d[o:o + 9].hex()}: 주문 목록 창 모양이 아님')
     d[o + 2] += 2
+    o = lorom(dq4menupatch.window_addr(d, SHOP_MEMBERS))
+    if d[o:o + 3] != bytes((0x02, 0x0F, 0x1C)) or bytes((0xEF, 0xCC)) not in d[o:o + 12]:
+        raise ValueError(f'창 {SHOP_MEMBERS:02X} 머리 {d[o:o + 12].hex()}: 가게 동료 창 모양이 아님')
+    d[o] -= 1
+    d[o + 2] += 1
     o = lorom(dq4menupatch.window_addr(d, TACTIC_WINDOW))
     if d[o:o + 4] != bytes((0x17, 0x82, 0x06, 0x05)):
         raise ValueError(f'창 {TACTIC_WINDOW:02X} 머리 {d[o:o + 8].hex()}: 전투 작전 창 모양이 아님')
