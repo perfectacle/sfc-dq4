@@ -177,8 +177,8 @@ class NewMapRomTests(unittest.TestCase):
                 place.plan(self.rom, doc, None, self.AT, None, self.new)
         with self.assertRaisesRegex(ValueError, '그룹 50 미만'):
             place.plan(self.rom, one(chests=[box, other]), None, self.AT)
-        # 바탕 표에 이미 있는 새 맵은 한 입력에 모두 적으라고 거부한다
-        with self.assertRaisesRegex(ValueError, '바탕 표에 이미 있는'):
+        # 바탕 표에 이미 상자 연결이 있는 새 맵은 한 입력에 모두 적으라고 거부한다
+        with self.assertRaisesRegex(ValueError, '바탕 표에 이미 상자 연결이'):
             place.plan(self.rom, one(chests=[box, other]), None, self.AT, self.tables(), self.new)
 
     def test_place_mixed_and_existing_cell_entries(self):
@@ -189,8 +189,40 @@ class NewMapRomTests(unittest.TestCase):
         # 블록 없이 적은 기존 맵은 레코드에 있는 칸에 보상을 단다. 표에 이미 있는 맵이면 한 입력에 모두 적으라고 거부한다
         listed = {'format': place.FORMAT, 'maps': [{'map': '31/03', 'chests': [
             {'x': 8, 'y': 17, 'reward': 1}, {'x': 10, 'y': 17, 'reward': 2}]}]}
-        with self.assertRaisesRegex(ValueError, '바탕 표에 이미 있는'):
+        with self.assertRaisesRegex(ValueError, '바탕 표에 이미 상자 연결이'):
             place.plan(self.rom, listed, None, self.AT)
+
+    def test_place_cells_of_unlisted_map(self):
+        # 상자 표에 없는 19/00 의 상자 칸 다섯을 블록 없이 모두 적으면 맵 연결을 끝에 붙이고 셀 순서로 번호를 매긴다
+        cells = place.chest_cells(self.rom, 0x19, 0)
+        self.assertEqual(len(cells), 5)
+        doc = {'format': place.FORMAT, 'maps': [{'map': '19/00', 'chests': [
+            {'x': x, 'y': y, 'reward': 0x100 + k} for k, (x, y) in enumerate(reversed(cells))]}]}
+        at = {'chests': 0x3F8000, 'chest_maps': 0x3F9000}
+        _, _, _, tables, new = place.plan(self.rom, doc, None, at)
+        self.assertEqual(tables['chest_maps'][-1], {'group': 0x19, 'map': 0, 'count': 5})
+        self.assertEqual([xy for _, _, xy, _ in new], cells)
+        self.assertEqual(tables['chests'][-5:], [{'reward': 0x104 - k} for k in range(5)])
+        with contextlib.redirect_stdout(io.StringIO()):
+            place.check(self.rom, doc, None, at)
+        short = {'format': place.FORMAT, 'maps': [{'map': '19/00', 'chests': doc['maps'][0]['chests'][1:]}]}
+        with self.assertRaisesRegex(ValueError, '모두 한 번씩'):
+            place.plan(self.rom, short, None, at)
+
+    def test_place_furniture_only_on_map_with_search_rows(self):
+        # 선실 17/00 은 タンス (4,4) 가 서랍 표에 있다. 가구만 적으면 (2,4) 를 서랍 표 끝에 붙인다
+        def jar(x):
+            return {'format': place.FORMAT, 'maps': [{'map': '17/00', 'furniture': [
+                {'x': x, 'y': 4, 'reward': 0x100 + 111, 'flag_index': 0x0B, 'mask': 0x01}]}]}
+        _, _, _, tables, new = place.plan(self.rom, jar(2), None, {'search': 0x3FA000})
+        self.assertEqual(new, [])
+        self.assertEqual(tables['search'][-1], {'group': 0x17, 'map': 0, 'x': 2, 'y': 4, 'unused': 1,
+                                                'reward': 0x100 + 111, 'flag_index': 0x0B, 'mask': 0x01})
+        self.assertEqual(tables['chest_maps'], reloc.parse(self.rom)['chest_maps'])
+        with contextlib.redirect_stdout(io.StringIO()):
+            place.check(self.rom, jar(2), None, {'search': 0x3FA000})
+        with self.assertRaisesRegex(ValueError, '이미 서랍 항목이 있음'):
+            place.plan(self.rom, jar(4), None, {'search': 0x3FA000})
 
     def test_place_cells_on_extended_rom(self):
         # 새 맵을 이미 붙인 롬에서는 --new-map 없이 블록을 뺀 항목으로 같은 표가 나온다
