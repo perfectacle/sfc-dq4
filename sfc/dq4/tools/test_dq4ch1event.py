@@ -66,6 +66,22 @@ class FlyTest(unittest.TestCase):
         (g,) = ev.encounter_doc()["event_groups"]
         self.assertEqual((g["index"], g["flags"] & 0x40), (ev.BOSS_GROUP, 0x40))
 
+    def test_king_checks_report_then_kids(self):
+        m = ev.message_ids(0xD00)
+        (top,) = ev.talk_scripts(0xD00)[ev.TALKS.index('king')]
+        self.assertEqual((top["cond"]["index"], top["cond"]["mask"]), ev.REPORTED)
+        self.assertEqual(top["then"]["id"], f"{m['king_farewell']:03X}")
+        (kids,) = top["else"]
+        self.assertEqual((kids["cond"]["index"], kids["cond"]["mask"]), ev.KIDS_FOLLOW)
+        self.assertEqual([o.get("id") for o in kids["else"]], [f"{m['king_praise']:03X}", f"{m['king_farewell']:03X}", None])
+
+    def test_chapter_end_box_comes_after_the_narration(self):
+        (end,) = [x for x in ev.scripts(0xD00, 0x5F9000) if x["address"] == ev.ENDER_SCRIPT]
+        ops = [c["op"] for c in end["commands"]]
+        self.assertLess(ops.index('21'), [i for i, c in enumerate(end["commands"]) if c["args"] == [0x00, 0x90, 0x5F]][0])
+        self.assertNotIn('40', ops)          # 1장 끝에서 멈춘다
+        self.assertEqual([x for x in ev.scripts(0xD00) if x["address"] == ev.ENDER_SCRIPT], [])
+
     def test_apply_refuses_other_bytes(self):
         with self.assertRaises(SystemExit):
             ev.apply(bytes(0x400000))

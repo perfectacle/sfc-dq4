@@ -77,7 +77,7 @@ class LayoutTests(unittest.TestCase):
         doc = ch.npc_doc({'overrides': []})
         ops = [(c['op'], c['args']) for c in doc['scripts'][0]['commands']]
         calls = [a for op, a in ops if op == '37']
-        want = dq4chapterbox.entry_points()
+        want = dq4chapterbox.entry_points(ch.scenes(False))
         self.assertEqual(calls, [[v & 0xFF, v >> 8 & 0xFF, v >> 16] for v in (want['box'], want['reveal'])])
         self.assertLess(ops.index(('37', calls[0])), ops.index(('21', [ch.MSG_NARRATION & 0xFF, ch.MSG_NARRATION >> 8])))
 
