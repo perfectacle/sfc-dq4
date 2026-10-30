@@ -91,23 +91,31 @@ def cell(x, y):
 def layout(links, fc_maps):
     """{(FC group, FC map): (DQ5 group, DQ5 map)}: a DQ5 group's FC groups in `links` order, each one's maps
     (fc_maps[FC group]) in FC order on consecutive DQ5 map numbers from 0."""
-    place = {}
+    place, seen = {}, set()
     for group, parts in links.items():
         number = 0
         for part in parts:
-            if any(g == part["fc"] for g, _ in place):
-                raise ValueError(f"FC group {part['fc']:02X} is in two DQ5 groups")
+            if part["fc"] in seen:
+                raise ValueError(f"FC group {part['fc']:02X} is listed twice")
+            seen.add(part["fc"])
             for k in sorted(fc_maps.get(part["fc"], ())):
+                # The engine keeps the map number in 5 bits (2A:F397 AND #$1F).
+                if number > 0x1F:
+                    raise ValueError(f"DQ5 group {group:02X}: FC {part['fc']:02X}/{k:02X} would be map {number:02X}")
                 place[part["fc"], k] = (group, number)
                 number += 1
     return place
 
 
 @functools.cache
+def _fc_names(prg):
+    return {name: (g, k) for g, k, _, name in all_maps(prg)}
+
+
 def placement(prg):
     """layout of LINKS for the GROUPS maps. GROUPS must put every map where layout does: dq4environmentrom
     builds each map where GROUPS says, and exits, people and chests read from its FC map go where this says."""
-    fc = {name: (g, k) for g, k, _, name in all_maps(prg)}
+    fc = _fc_names(prg)
     fc_maps = {}
     for name in GROUPS:
         if name not in fc:
@@ -122,7 +130,10 @@ def placement(prg):
 
 def fc_map(prg, group, number):
     """(FC group, FC map) put on DQ5 map group/number."""
-    return next(k for k, v in placement(prg).items() if v == (group, number))
+    found = [k for k, v in placement(prg).items() if v == (group, number)]
+    if not found:
+        raise ValueError(f"{group:02X}/{number:02X}: no FC map is placed there")
+    return found[0]
 
 
 def fc_numbers(prg, fc_group):
@@ -160,12 +171,42 @@ def exit_order(prg, fc_group, number):
     return sorted(found, key=lambda c: (c[1], c[0]))
 
 
+def exit_rows(group, parts, place, stairs, order):
+    """dq5exittables/1 exit lists of DQ5 group `group` holding FC groups `parts`. stairs[(FC group, FC map)]:
+    [(x, y, FC destination)] in DQ5 exit order; order(FC group, FC map): a map's stair cells in that order. A
+    stair to a map of another DQ5 group is an other-group exit, one to the field the special exit 0."""
+    records = {}
+    for part in parts:
+        fc_group = part["fc"]
+        for fc_number in sorted(k for g, k in place if g == fc_group):
+            rows = []
+            for x, y, dest in stairs[fc_group, fc_number]:
+                if dest and "field" in dest:
+                    # 2A:F425 leaves by the entrance of the FC group the map belongs to (hook_rows); a part
+                    # without one would leave by another FC group's entrance.
+                    if not part["field"] and len(parts) > 1:
+                        raise ValueError(f"{fc_group:02X}/{fc_number:02X} ({x:02X},{y:02X}): stair to the field "
+                                         f"from FC group {fc_group:02X} with no field entrance in DQ5 group {group:02X}")
+                    # 2A:F7B2 -> 2A:F425: out to the group's field entrance (aux entrance table).
+                    rows.append({"kind": "special", "special": 0})
+                    continue
+                if not dest or (dest.get("group"), dest.get("index")) not in place:
+                    raise ValueError(f"{fc_group:02X}/{fc_number:02X} ({x:02X},{y:02X}): stair to an FC map not ported: {dest}")
+                there_group, there_number = place[dest["group"], dest["index"]]
+                there = order(dest["group"], dest["index"])
+                row = {"kind": "same-group", "destination_map": there_number, "exit": there.index((dest["x"], dest["y"]))}
+                if there_group != group:
+                    row = {**row, "kind": "other-group", "group": there_group}
+                rows.append(row)
+            records[f"{group:02X}/{place[fc_group, fc_number][1]:02X}"] = rows or [{"kind": "special", "special": 0}]
+    return records
+
+
 def exit_records(prg, group):
-    """dq5exittables/1 exit lists of the group's maps from the FC stair links. A stair to a map of another DQ5
-    group is an other-group exit, one to the field the special exit 0."""
+    """exit_rows of a LINKS group from the FC stair links."""
     place = placement(prg)
     cache = {}
-    records = {}
+    stairs = {}
     for fc_group in (part["fc"] for part in LINKS[group]):
         for fc_number in fc_numbers(prg, fc_group):
             links = dq4block.exit_links(prg, fc_group, fc_number, cache)
@@ -173,23 +214,8 @@ def exit_records(prg, group):
             if other:
                 raise ValueError(f"{fc_group:02X}/{fc_number:02X}: FC exit kinds {[f'{p:02X}' for p in other]} have no DQ5 exit yet")
             to = {(e["x"], e["y"]): e["to"] for e in links}
-            rows = []
-            for x, y in exit_order(prg, fc_group, fc_number):
-                dest = to[x, y]
-                if dest and "field" in dest:
-                    # 2A:F7B2 -> 2A:F425: out to the group's field entrance (aux entrance table).
-                    rows.append({"kind": "special", "special": 0})
-                    continue
-                if not dest or (dest.get("group"), dest.get("index")) not in place:
-                    raise ValueError(f"{fc_group:02X}/{fc_number:02X} ({x:02X},{y:02X}): stair to an FC map not ported: {dest}")
-                there_group, there_number = place[dest["group"], dest["index"]]
-                there = exit_order(prg, dest["group"], dest["index"])
-                row = {"kind": "same-group", "destination_map": there_number, "exit": there.index((dest["x"], dest["y"]))}
-                if there_group != group:
-                    row = {**row, "kind": "other-group", "group": there_group}
-                rows.append(row)
-            records[f"{group:02X}/{place[fc_group, fc_number][1]:02X}"] = rows or [{"kind": "special", "special": 0}]
-    return records
+            stairs[fc_group, fc_number] = [(x, y, to[x, y]) for x, y in exit_order(prg, fc_group, fc_number)]
+    return exit_rows(group, LINKS[group], place, stairs, lambda g, k: exit_order(prg, g, k))
 
 
 def area_records(prg, group):
@@ -201,29 +227,36 @@ def area_records(prg, group):
     walking direction (2A:F69F), which carries the party off a destination cell that is itself an exit
     (02/01 -> the 02/00 gate)."""
     place = placement(prg)
+    cells = {(part["fc"], k): list(dq4map.exits(prg, part["fc"], k))
+             for part in LINKS[group] for k in fc_numbers(prg, part["fc"])}
+    return area_rows(group, place, cells)
+
+
+def area_rows(group, place, cells):
+    """area_records of DQ5 group `group` from cells[(FC group, FC map)]: FC exit-table cells (x, y, FC group,
+    FC map, arrival x, arrival y, flag). The destination may be any FC map placed in the same DQ5 group."""
     out = {}
-    for fc_group, number in ((part["fc"], k) for part in LINKS[group] for k in fc_numbers(prg, part["fc"])):
-        cells = sorted(dq4map.exits(prg, fc_group, number), key=lambda e: (e[1], e[0]))
+    for (fc_group, number), found in cells.items():
         runs = []
-        for x, y, dg, dk, ax, ay, flag in cells:
-            if dg != fc_group or (dg, dk) not in place:
+        for x, y, dg, dk, ax, ay, flag in sorted(found, key=lambda e: (e[1], e[0])):
+            if place.get((dg, dk), (None,))[0] != group:
                 raise ValueError(f"{fc_group:02X}/{number:02X} ({x:02X},{y:02X}) leaves the group")
             last = runs[-1] if runs else None
-            if last and last["y"] == y and last["x1"] + 1 == x and last["to"] == (dk, ay, flag) \
+            if last and last["y"] == y and last["x1"] + 1 == x and last["to"] == (dg, dk, ay, flag) \
                     and last["ax1"] + 1 == ax:
                 last["x1"], last["ax1"] = x, ax
             else:
-                runs.append({"x0": x, "x1": x, "y": y, "to": (dk, ay, flag), "ax0": ax, "ax1": ax})
+                runs.append({"x0": x, "x1": x, "y": y, "to": (dg, dk, ay, flag), "ax0": ax, "ax1": ax})
         rows = []
         for run in runs:
-            dk, ay, flag = run["to"]
+            dg, dk, ay, flag = run["to"]
             if flag & 3 not in ENTRY_ROW:
                 raise ValueError(f"{fc_group:02X}/{number:02X}: sideways exit needs a vertical area rect")
             left, row = run["x0"] * 2, run["y"] * 2 + ENTRY_ROW[flag & 3]
             right, _ = cell(run["x1"], run["y"])
             dx, dy = cell(run["ax0"], ay)
             rows.append({"rect": [left, row, right + 1, row + 1], "source_layer": LAYER, "flags": AREA_FLAGS,
-                         "destination_group": group, "destination_map": place[fc_group, dk][1], "x": dx, "y": dy,
+                         "destination_group": group, "destination_map": place[dg, dk][1], "x": dx, "y": dy,
                          "span_raw": right - left + 1, "destination_layer": LAYER})
         if rows:
             out[f"{group:02X}/{place[fc_group, number][1]:02X}"] = rows

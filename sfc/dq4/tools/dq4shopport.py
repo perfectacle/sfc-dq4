@@ -123,6 +123,9 @@ def port(dq5_path, dq4_path, inn_at):
                 price = dq4shop.inn_price(prg, fc_group, fc_number)
                 if price is None or price > 0x7F:
                     raise ValueError(f"{fc_group:02X}/{fc_number:02X}: inn price {price}")
+                # The inn table is keyed by DQ5 group ($BC): FC groups bundled into one share one price.
+                if inns.get(group, price) != price:
+                    raise ValueError(f"{group:02X}: inn prices {inns[group]} and {price} ({fc_group:02X}/{fc_number:02X})")
                 inns[group] = price
     report["inns"] = {f"{g:02X}": p for g, p in inns.items()}
     original = bytes(rom.u8(INN_TABLE + i) for i in range(INN_ENTRIES * 2))

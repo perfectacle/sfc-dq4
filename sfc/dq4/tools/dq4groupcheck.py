@@ -114,7 +114,10 @@ def stair_scenes(prg):
                     raise ValueError(f"{fc_group:02X}/{fc_number:02X} ({x:02X},{y:02X}): no walkable cell next to the stair")
                 dest = to[x, y]
                 if "field" in dest:
-                    # The special exit 0 leaves by the group's aux entrance.
+                    # The special exit 0 leaves by the FC group's aux entrance. Without one there is no field
+                    # cell to expect (dq4groupbuild.exit_rows refuses it in a group of several FC groups).
+                    if not link["field"]:
+                        continue
                     fx, fy = link["field"]
                     yield f"stair-{group:02X}{number:02X}-{i}", starts, {"field": [fx, fy + 1]}
                     continue
@@ -176,24 +179,27 @@ def main():
             results[name] = {"got": got, "want": want, "ok": same_place(got, want), "start": n}
 
     # Area moves: the gate's open flag is cleared on a group change, so set it from another map of the group.
-    source = dq4block.Map(prg, LINKS[0x36][0]["fc"], 0)
+    # FC 02 バトランド: the gate (02/00) and the area moves between 02/00 and 02/01.
+    castle = 0x02
+    front, throne, side_map = (f"{g:02X}/{n:02X}" for g, n in (placement(prg)[castle, k] for k in (0, 1, 3)))
+    source = dq4block.Map(prg, castle, 0)
     gx, gy, _, _ = next(o for o in objects(source) if o[2] == GATE_KIND)
     # The hop cell needs a free cell below: the warp steps down from it, or up when that is blocked (off the
     # top row of the map that is the field).
-    other = dq4block.Map(prg, LINKS[0x36][0]["fc"], 3)
-    people = {dq4talk.pos(r, n) for n in (False, True) for r in dq4talk.npc_list(prg, LINKS[0x36][0]["fc"], 3, n)}
+    other = dq4block.Map(prg, castle, 3)
+    people = {dq4talk.pos(r, n) for n in (False, True) for r in dq4talk.npc_list(prg, castle, 3, n)}
     hx, hy = cell(*next((x, y) for y in range(1, other.h) for x in range(other.w)
                         if all(walkable(other, x + dx, y + dy) and (x + dx, y + dy) not in people
                                for dx, dy in ((0, 0), (1, 0), (0, 1), (1, 1)))))
-    side = scene(mesence, rom, state, out, "area-hop", TO=f"36/03,{hx},{hy}", SAVE="hop.mss")
+    side = scene(mesence, rom, state, out, "area-hop", TO=f"{side_map},{hx},{hy}", SAVE="hop.mss")
     hop = out / "area-hop" / "hop.mss"
-    area = [("area-up", {"TO": f"36/00,{gx},{gy + 5}", "SET": "21C2=FF", "TEST": f"up:{PRESS},wait:400"},
-             {"map": "36/01", "cell": list(cell(0x0F, 0x23))}),
+    area = [("area-up", {"TO": f"{front},{gx},{gy + 5}", "SET": "21C2=FF", "TEST": f"up:{PRESS},wait:400"},
+             {"map": throne, "cell": list(cell(0x0F, 0x23))}),
             # The right end of the three-cell rect maps to the right end of the arrival (2A:F650).
-            ("area-up-right", {"TO": f"36/00,{gx + 2},{gy + 5}", "SET": "21C2=FF", "TEST": f"up:{PRESS},wait:400"},
-             {"map": "36/01", "cell": list(cell(0x10, 0x23))}),
-            ("area-down", {"TO": "36/01,30,71", "TEST": "down:8,wait:400"},
-             {"map": "36/00", "cell": list(cell(0x12, 0x0B))})]
+            ("area-up-right", {"TO": f"{front},{gx + 2},{gy + 5}", "SET": "21C2=FF", "TEST": f"up:{PRESS},wait:400"},
+             {"map": throne, "cell": list(cell(0x10, 0x23))}),
+            ("area-down", {"TO": f"{throne},{','.join(map(str, cell(0x0F, 0x23)))}", "TEST": "down:8,wait:400"},
+             {"map": front, "cell": list(cell(0x12, 0x0B))})]
     for name, extra, want in area:
         got = scene(mesence, rom, hop if hop.exists() else state, out, name, ANYWHERE=1, **extra)
         results[name] = {"got": got, "want": want, "ok": same_place(got, want)}

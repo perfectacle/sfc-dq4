@@ -22,6 +22,7 @@ HERE = Path(__file__).resolve().parent
 DQ5_TOOLS = HERE.parents[1] / 'dq5' / 'tools'
 sys.path[:0] = [str(HERE), str(DQ5_TOOLS)]
 
+from dq4environmentrom import GROUPS  # noqa: E402
 from dq4romassets import ips_patch, set_checksum  # noqa: E402
 from dq5build import load  # noqa: E402
 
@@ -30,7 +31,8 @@ Q = 0x363      # 「 (DQ5 글자)
 DOTS = 0x366   # …
 
 EVENT_FLAG = (0x0E, 0x04)       # 7E:219E & 04. 원래 태어나는 장면이 켜는 비트라 새 게임 첫 맵에서는 꺼져 있다
-THRONE, FRONT = '36/01', '36/00'
+# バトランド 성 FC 02/01(왕좌)·02/00(성 앞)이 놓인 DQ5 맵
+THRONE, FRONT = (f'{g:02X}/{n:02X}' for g, n in (GROUPS['02-01'], GROUPS['burland']))
 START = (THRONE, 32, 42)       # FC (10,15): 줄 선 전사들 사이의 빈 자리
 
 # 연출 메시지: 태어나는 장면 메시지 자리(시작 지점을 바꿔 나오지 않음)
@@ -354,7 +356,6 @@ GROUP_PATCHES = ('env/dq4-environment.dq5patch.json', 'newmap.dq5patch.json', 'e
 def build(rom, dq5, dq4, work):
     """메뉴 빌드 롬(dq4menupatch.py build --messages) → 1장 첫머리 롬."""
     import dq4groupbuild
-    from dq4environmentrom import GROUPS
     original = dq5.read_bytes()
     # 원래 롬에서는 새 맵 레코드를 34 에 두지만 통합 롬의 34 는 타이틀 자료다
     dq4groupbuild.NEWMAP_AT = tuple('3A:8000' if a == '34:8000' else a for a in dq4groupbuild.NEWMAP_AT)

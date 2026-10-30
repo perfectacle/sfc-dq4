@@ -33,9 +33,45 @@ class BundleTest(unittest.TestCase):
         self.assertEqual([self.place[0x11, k] for k in range(2)], [(0x40, 3), (0x40, 4)])
         self.assertEqual(self.place[0x12, 0], (0x41, 0))
 
-    def test_exit_into_second_fc_group(self):
-        # An FC stair to 11/01 goes to the second FC group's second map.
-        self.assertEqual(self.place[0x11, 1], (0x40, 4))
+    # Stair cells of each FC destination map, in DQ5 exit order.
+    ORDER = {(0x11, 1): [(4, 4), (5, 6)], (0x12, 0): [(3, 3)]}
+
+    def stairs(self, first):
+        found = {k: [] for k in self.place}
+        found[0x10, 0] = first
+        return found
+
+    def test_stairs(self):
+        first = [(1, 1, {"group": 0x11, "index": 1, "x": 5, "y": 6}),
+                 (2, 2, {"group": 0x12, "index": 0, "x": 3, "y": 3}),
+                 (3, 3, {"field": True})]
+        records = build.exit_rows(0x40, self.LINKS[0x40], self.place, self.stairs(first),
+                                  lambda g, k: self.ORDER[g, k])
+        self.assertEqual(records["40/00"], [
+            {"kind": "same-group", "destination_map": 4, "exit": 1},
+            {"kind": "other-group", "group": 0x41, "destination_map": 0, "exit": 0},
+            {"kind": "special", "special": 0}])
+        self.assertEqual(sorted(records), [f"40/{n:02X}" for n in range(5)])
+
+    def test_field_stair_of_part_without_entrance(self):
+        links = [{**self.LINKS[0x40][0], "field": None}, self.LINKS[0x40][1]]
+        with self.assertRaises(ValueError):
+            build.exit_rows(0x40, links, self.place, self.stairs([(3, 3, {"field": True})]), self.ORDER.get)
+
+    def test_area_move_across_fc_groups(self):
+        # FC 10/00 (1,2) walking down (flag 2) -> FC 11/01 (4,5).
+        rows = build.area_rows(0x40, self.place, {(0x10, 0): [(1, 2, 0x11, 1, 4, 5, 2)]})
+        self.assertEqual(rows, {"40/00": [{"rect": [2, 4, 3, 5], "source_layer": build.LAYER, "flags": build.AREA_FLAGS,
+                                           "destination_group": 0x40, "destination_map": 4, "x": 8, "y": 11,
+                                           "span_raw": 1, "destination_layer": build.LAYER}]})
+        for dg, dk in ((0x12, 0), (0x11, 5)):
+            with self.assertRaises(ValueError):
+                build.area_rows(0x40, self.place, {(0x10, 0): [(1, 2, dg, dk, 4, 5, 2)]})
+
+    def test_map_numbers_fit_five_bits(self):
+        build.layout({0x40: [{"fc": 0x10}]}, {0x10: range(0x20)})
+        with self.assertRaises(ValueError):
+            build.layout({0x40: [{"fc": 0x10}, {"fc": 0x11}]}, {0x10: range(0x20), 0x11: [0]})
 
     def test_hook_rows(self):
         arrivals, leaving = build.hook_rows(self.LINKS, self.place)
@@ -49,6 +85,9 @@ class BundleTest(unittest.TestCase):
     def test_fc_group_in_two_dq5_groups(self):
         with self.assertRaises(ValueError):
             build.layout({0x40: [{"fc": 0x10}], 0x41: [{"fc": 0x10}]}, self.FC_MAPS)
+        # Also when the FC group has no ported maps.
+        with self.assertRaises(ValueError):
+            build.layout({0x40: [{"fc": 0x13}], 0x41: [{"fc": 0x13}]}, self.FC_MAPS)
 
 
 @unittest.skipUnless(ROM.is_file(), "local source ROM not present")
