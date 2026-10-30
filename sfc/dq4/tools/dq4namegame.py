@@ -63,7 +63,7 @@ def apply(data):
     if ROUTINE + len(code) > ROUTINE_END:
         raise ValueError('이름 루틴이 비운 디코더 자리를 넘음')
     o = lorom(mm.DECODER)
-    if bytes(d[o:o + 4]) != bytes((0x22, *mm.cpu_to_bytes(mm.BASE))):
+    if bytes(d[o:o + 4]) != bytes((0x22, *mm.cpu_to_bytes(mm.HEAD))):
         raise ValueError('메시지 디코더가 옮겨지지 않은 롬')
     o = lorom(ROUTINE)
     if bytes(d[o:o + len(code)]) != MOVED_DECODER_TAIL[:len(code)]:

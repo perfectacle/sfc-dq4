@@ -3,9 +3,9 @@
 새 글자를 메시지에 쓰려면 허프만 트리를 다시 만들어야 하고, 커진 트리와 메시지는 제자리에 들어가지 않는다.
 DQ5 트랙 dq5hangul.py retree(2MB, 뱅크 30)와 같은 방법을 4MB 통합 롬의 빈 뱅크에 맞춘 것이다.
 
-  65:8000~  보행 모드 디코더(24:9E02~9E46 사본, 표 피연산자와 끝 RTL 만 바꿈), 비트 마스크, 트리 1·0, 폰트 묶음 표,
-            그 뒤 메시지 3,200개. 뱅크 69 끝까지. 3200 이상을 덧붙이면 색인 표를 트리 뒤(폰트 묶음 표 앞)에 둔다
-  24:9E02   JSL 65:8000 / RTS
+  5A:8000~  보행 모드 디코더(24:9E02~9E46 사본, 표 피연산자와 끝 RTL 만 바꿈), 비트 마스크, 트리 1·0, 폰트 묶음 표
+  65:8000~  메시지 3,200개(와 덧붙인 것). 뱅크 69 끝까지. 3200 이상을 덧붙이면 색인 표는 59:8000
+  24:9E02   JSL 5A:8000 / RTS
   24:9E07   JSR 8C8D / LDA $F2 / ORA #$60 / STA $F2 / RTS — 색인은 21비트라 뱅크를 60 아래로 적고 풀 때 OR 한다.
             24:8C8D 는 전투 메시지(24:8C60)도 부르므로 그 안은 고치지 않는다
   24:8BD7   JSR 8C8D → JSR 9E07
@@ -14,7 +14,7 @@ DQ5 트랙 dq5hangul.py retree(2MB, 뱅크 30)와 같은 방법을 4MB 통합 �
   07:D77C~  옮긴 메시지가 비운 자리. 한글 글자 그림(12×11 1bpp)
 
 글자 코드는 3DB + 이름 입력 글리프 번호(dq4nameentry.GLYPHS: 호환 자모 51, 완성형 2,350, ＊, 전각 공백)이고,
-그 뒤에 문장 부호와 숫자가 이어진다. 글자 그림을 읽는 24:A6C1~ 은 묶음 주소에 비트 위치를 더한 뒤 뱅크 바이트만 따로 올려
+그 뒤에 문장 부호와 숫자·로마자 대문자가 이어진다. 글자 그림을 읽는 24:A6C1~ 은 묶음 주소에 비트 위치를 더한 뒤 뱅크 바이트만 따로 올려
 데이터 뱅크로 삼으므로, 묶음 하나가 뱅크 경계를 넘으면 안 된다. 묶음 +4 의 뱅크는 07 + 2비트라 07~0A 에만 둔다.
 형식은 sfc/dq4/docs/dq4-menu-format.md.
 """
@@ -33,6 +33,10 @@ from dq5map import Rom, lorom  # noqa: E402
 from dq5text import FONT_GROUPS, FONT_TABLE_OPERANDS, GLYPHS, INDEX, font_groups, message  # noqa: E402
 from dq5textwrite import INDEX_LOAD, INDEX_LOAD_CODE, MAX_MESSAGES  # noqa: E402
 
+# 디코더 사본·트리 표·글자 묶음 표(머리)는 HEAD 뱅크에, 메시지는 BASE~LIMIT 에 둔다. 디코더가 PHK/PLB 로 자기 뱅크에서
+# 트리를 읽으므로 머리는 한 뱅크 안이어야 한다. 머리(약 10KB)를 메시지 덩어리 앞에 두면 3장 대사까지 넣은 뒤 덩어리가
+# 넘쳐서, 아무도 쓰지 않는 5A 로 옮겼다
+HEAD = 0x5A8000
 BASE = 0x658000
 LIMIT = 0x6A0000            # 65~69 다섯 뱅크. 70 은 서곡 재배치 표, 6A~6F·72~7D 는 소리 이식이 쓴다
 INDEX_BANK = 0x60
@@ -48,9 +52,10 @@ PUNCT = ('.', '?', '!', ',')
 PUNCT_PAD = 1
 # 1점짜리 마침표·쉼표는 SFC 화면에서 거의 보이지 않아 2점 굵기로 다시 그린다. 아래 줄이 기준선이다.
 PUNCT_ROWS = {'.': ('##', '##'), ',': ('##', '.#', '#.')}
-# 숫자는 Galmuri11 그대로, 앞 여백 없이(자기 폭에 여백이 있음)
+# 숫자·로마자 대문자는 Galmuri11 그대로, 앞 여백 없이(자기 폭에 여백이 있음)
 DIGITS = tuple('0123456789')
-SIGNS = PUNCT + DIGITS
+LETTERS = tuple('ABCDEFGHIJKLMNOPQRSTUVWXYZ')
+SIGNS = PUNCT + DIGITS + LETTERS
 CHARS = ne.GLYPHS + list(SIGNS)
 
 LINE, END, PAUSE, SLOT = 0x1000, 0x1001, 0x1006, 0x1004
@@ -207,7 +212,7 @@ def apply(data, font, extra=None):
 
     decoder = bytearray(rom.d[lorom(DECODER):lorom(DECODER_END)])
     mask = bytes(1 << b for b in range(8))
-    mask_at = BASE + len(decoder)
+    mask_at = HEAD + len(decoder)
     t1_at = mask_at + len(mask)
     t0_at = t1_at + len(nodes) * 2
     index_at = INDEX_AT
@@ -221,17 +226,20 @@ def apply(data, font, extra=None):
     t1 = b''.join(n[0].to_bytes(2, 'little') for n in nodes)
     t0 = b''.join(n[1].to_bytes(2, 'little') for n in nodes)
     head = bytes(decoder) + mask + t1 + t0 + bytes(table)
-    if (BASE & 0xFFFF) + len(head) > 0x10000:
-        raise ValueError('디코더와 트리 표가 뱅크 65 를 넘음')
-    stream = head + bytes(blob)
+    if (HEAD & 0xFFFF) + len(head) > 0x10000:
+        raise ValueError(f'디코더와 트리 표가 뱅크 {HEAD >> 16:02X} 를 넘음')
+    if any(d[lorom(HEAD):lorom(HEAD) + len(head)]):
+        raise ValueError(f'{HEAD:06X}~ 가 비어 있지 않음')
+    d[lorom(HEAD):lorom(HEAD) + len(head)] = head
+    stream = bytes(blob)
     o = lorom(BASE)
     if lorom(BASE) + len(stream) > lorom(LIMIT - 1) + 1:
-        raise ValueError(f'메시지가 {LIMIT:06X} 을 넘음')
+        raise ValueError(f'메시지가 {LIMIT:06X} 을 넘음({lorom(BASE) + len(stream) - lorom(LIMIT - 1) - 1}바이트)')
     if any(d[o:o + len(stream)]):
         raise ValueError(f'{BASE:06X}~ 가 비어 있지 않음')
     d[o:o + len(stream)] = stream
 
-    index = b''.join(index_entry(o + len(head), starts[m]) for m in range(0, total, 16))
+    index = b''.join(index_entry(o, starts[m]) for m in range(0, total, 16))
     index_table = index_at if grown else INDEX
     if grown and ((INDEX_AT & 0xFFFF) + len(index) > 0x10000 or any(d[lorom(INDEX_AT):lorom(INDEX_AT) + len(index)])):
         raise ValueError(f'{INDEX_AT:06X}~ 색인 {len(index)}바이트 자리가 비어 있지 않거나 뱅크를 넘음')
@@ -248,7 +256,7 @@ def apply(data, font, extra=None):
 
     stub = bytes((0x20, 0x8D, 0x8C, 0xA5, 0xF2, 0x09, INDEX_BANK, 0x85, 0xF2, 0x60))
     for addr, new, old in (
-            (DECODER, bytes((0x22, *cpu_to_bytes(BASE), 0x60)), bytes.fromhex('088b4bab')),
+            (DECODER, bytes((0x22, *cpu_to_bytes(HEAD), 0x60)), bytes.fromhex('088b4bab')),
             (WALK_INDEX_STUB, stub, bytes.fromhex('20c21064f4a2ba07e220')),
             (WALK_INDEX_CALL, (WALK_INDEX_STUB & 0xFFFF).to_bytes(2, 'little'), bytes.fromhex('8d8c'))):
         p = lorom(addr)
@@ -261,12 +269,12 @@ def apply(data, font, extra=None):
         d[lorom(a):lorom(a) + 3] = cpu_to_bytes(font_at + k)
 
     out = bytes(d)
-    again = decode_check(out, BASE, INDEX_BANK, index=index_table, count=total)
+    again = decode_check(out, HEAD, INDEX_BANK, index=index_table, count=total)
     for m in range(total):
         if again[m] != msgs[m]:
             raise ValueError(f'메시지 {m:03X}: 다시 풀기가 다름')
     info = [(f'잎 {len(tree)}, 노드 {len(nodes)}, 최장 부호 {max(map(len, tree.values()))}비트, '
-             f'메시지 {len(blob)}바이트 {BASE:06X}~(머리 {len(head)}바이트)'),
+             f'메시지 {len(blob)}바이트 {BASE:06X}~(머리 {len(head)}바이트 {HEAD:06X}~)'),
             '글자 묶음 ' + ', '.join(f'{n}자 {w}×{h} {at:06X}' for n, w, h, at in groups)]
     return out, info
 
