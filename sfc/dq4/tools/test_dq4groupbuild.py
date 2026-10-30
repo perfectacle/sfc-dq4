@@ -99,6 +99,30 @@ class BundleTest(unittest.TestCase):
             build.layout({0x40: [{"fc": 0x13}], 0x41: [{"fc": 0x13}]}, self.FC_MAPS)
 
 
+class RecordAreasTest(unittest.TestCase):
+    AREAS = ((0x348000, 0x348010), (0x318000, 0x318008))
+
+    def test_records_go_on_in_the_next_area(self):
+        self.assertEqual(build.record_areas([8, 8, 4, 4], self.AREAS), [0, 0, 1, 1])
+        # A record that does not fit the rest of an area starts the next one; the next does not go back.
+        self.assertEqual(build.record_areas([10, 7, 1], self.AREAS), [0, 1, 1])
+        with self.assertRaises(ValueError):
+            build.record_areas([10, 7, 4], self.AREAS)
+
+    def test_area_in_one_bank_of_30_3f(self):
+        for area in ((0x408000, 0x408010), (0x34F000, 0x358010), (0x340000, 0x340010)):
+            with self.assertRaises(ValueError):
+                build.record_areas([1], (area,))
+
+    def test_splice_lays_pointers_into_the_first_list(self):
+        first = [{"at": "0F:8ED7", "hex": "00 00 00 00 00 00"}]
+        rest = build.splice(first, [{"at": "0F:8EDA", "hex": "01 80 31"}, {"at": "31:8000", "hex": "AA"}])
+        self.assertEqual(first[0]["hex"], "00 00 00 01 80 31")
+        self.assertEqual(rest, [{"at": "31:8000", "hex": "AA"}])
+        with self.assertRaises(ValueError):
+            build.splice(first, [{"at": "0F:8EDB", "hex": "01 02 03 04 05"}])
+
+
 @unittest.skipUnless(ROM.is_file(), "local source ROM not present")
 class RecordsTest(unittest.TestCase):
     @classmethod

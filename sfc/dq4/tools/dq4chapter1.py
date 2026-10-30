@@ -431,15 +431,19 @@ GROUP_PATCHES = ('env/dq4-environment.dq5patch.json', 'newmap.dq5patch.json', 'e
                  'entrance-hook.dq5patch.json', 'field-gfx.dq5patch.json', 'field-blocks.dq5patch.json',
                  'field.dq5patch.json', 'talk.dq5patch.json', 'travel.dq5patch.json', 'names.dq5patch.json',
                  'zones.dq5patch.json', 'grids.dq5patch.json', 'rates.dq5patch.json')
-# 원래 롬에서는 새 맵 레코드를 34 에 두지만 통합 롬의 34 는 타이틀 자료라 3A 로 돌린다. 3A 는 그 레코드로 차서,
+# 원래 롬에서는 새 맵 레코드를 34 에 두지만 통합 롬의 34 는 타이틀 자료라 3A 로 돌린다. 3A 가 차면 다음 레코드는
+# 타이틀 뱅크 30·31 에서 타이틀 자료 사이의 빈 곳(메뉴 롬에서 0 이거나 원본 20·21 의 거울 그대로인 곳)으로 간다.
+# 그룹 빌드 안에서는 30:E000 의 필드 그림 패치 앞이다.
 # 필드 지도(덩어리 둘 약 12KB, 필드 로더의 DB 때문에 30~3F)는 타이틀 자료가 34:BFD1 에서 끝난 뒤에 둔다. 비어 있지 않으면 apply_writes 가 멈춘다.
-NEWMAP_RECORDS_AT, FIELD_AT = '3A:8000', '34:C000'
+RECORDS_AT = ((0x3A8000, 0x3B0000), (0x308370, 0x30A000), (0x30A900, 0x30E000), (0x31B760, 0x31D002),
+              (0x31ECFF, 0x320000))
+FIELD_AT = '34:C000'
 
 
 def group_build(dq5, dq4, out):
     """통합 롬 자리로 돌린 dq4groupbuild.build. 그 안의 dq5build 가 패치끼리의 겹침을 거부한다."""
     import dq4groupbuild
-    dq4groupbuild.NEWMAP_AT = tuple(NEWMAP_RECORDS_AT if a == '34:8000' else a for a in dq4groupbuild.NEWMAP_AT)
+    dq4groupbuild.RECORDS_AT = RECORDS_AT
     dq4groupbuild.FIELD_AT = FIELD_AT
     return dq4groupbuild.build(dq5, dq4, out)
 
@@ -448,7 +452,7 @@ def build(rom, dq5, dq4, work, prologue=True):
     """메뉴 빌드 롬(dq4menupatch.py build --messages) → 1장 첫머리 롬. prologue 면 새 게임이 서장으로 시작해
     서장 끝에서 1장 첫머리로 넘어간다."""
     original = dq5.read_bytes()
-    group_build(dq5, dq4, work / 'groups')
+    summary = group_build(dq5, dq4, work / 'groups')
     ported, ported_messages, report = port(dq5, dq4)
     new_maps = [a for g, n in sorted(GROUPS.values()) for a in ('--new-map', f'{g:02X}/{n:02X}')]
     run_tool(DQ5_TOOLS / 'dq5npcrecord.py', dq5, 'dump', '-o', work / 'npc-records.json')
@@ -464,8 +468,8 @@ def build(rom, dq5, dq4, work, prologue=True):
     (work / 'boss-monsters.json').write_text(json.dumps(dq4ch1event.monster_doc(ines.prg(dq4.read_bytes())),
                                                         ensure_ascii=False))
     run_tool(DQ5_TOOLS / 'dq5tables.py', dq5, 'patch', work / 'boss-monsters.json', '-o', work / 'boss-monsters.dq5patch.json')
-    patches = [work / 'groups' / p for p in GROUP_PATCHES] + [work / 'npc.dq5patch.json', work / 'boss.dq5patch.json',
-                                                               work / 'boss-monsters.dq5patch.json']
+    patches = [work / 'groups' / p for p in (*GROUP_PATCHES, *summary['record_patches'])] + [
+        work / 'npc.dq5patch.json', work / 'boss.dq5patch.json', work / 'boss-monsters.dq5patch.json']
     out = bytearray(apply_writes(rom, original, patches))
     import dq4chapterbox
     import dq4menupatch

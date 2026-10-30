@@ -80,8 +80,13 @@ LINKS = {
            {"fc": 0x0F, "arrival": (0x16, 0x00), "attrs": "03/00", "field": [(0x60, 0x28)], "out": "up:64"}],
 }
 # The attribute table grows by 6 bytes a map and outgrows its own bank (108 spare bytes), so it moves whole.
-NEWMAP_AT = ("--entrance-table-at", "3C:C000", "--records-at", "34:8000", "--door-bank", "3B",
-             "--attr-table-at", "3C:D000")
+NEWMAP_AT = ("--entrance-table-at", "3C:C000", "--door-bank", "3B", "--attr-table-at", "3C:D000")
+# New-map records, [start, end) areas in banks 30-3F: the map loader reads a record with DB set to its bank and
+# reads low WRAM meanwhile. One dq5newmap call puts all its records in one bank, so the records that do not fit the
+# first area go to the next areas in later calls (record_areas, records_pass).
+RECORDS_AT = ((0x348000, 0x350000), (0x318000, 0x320000))
+# The record a new map points at until a later call gives it its own: any original map.
+RECORD_PLACEHOLDER = "03/00"
 EXIT_AT = ("--exits-at", "2A:D812", "--records-at", "3C:A000")
 ENTRANCES_AT = ("--entrances-at", "3C:8000")
 # dq5textwrite writes the whole walking text again, so it takes banks of its own.
@@ -369,6 +374,63 @@ def fall_records(prg, group):
     return out
 
 
+def record_areas(sizes, areas):
+    """Area index of each record (sizes in map order): records follow one another, and one that does not fit the
+    rest of its area starts the next area."""
+    for start, end in areas:
+        if not (0x30 <= start >> 16 <= 0x3F and start & 0xFFFF >= 0x8000 and start < end <= (start | 0xFFFF) + 1):
+            raise ValueError(f"records area {_cpu(start)}-{_cpu(end - 1)}: needs one bank of 30-3F")
+    out, k, at = [], 0, areas[0][0]
+    for size in sizes:
+        while at + size > areas[k][1]:
+            k += 1
+            if k == len(areas):
+                raise ValueError(f"new-map records: {sum(sizes)} bytes do not fit the areas")
+            at = areas[k][0]
+        out.append(k)
+        at += size
+    return out
+
+
+def _span(write):
+    bank, addr = (int(v, 16) for v in write["at"].split(":"))
+    return bank << 16 | addr, (bank << 16 | addr) + len(bytes.fromhex(write["hex"]))
+
+
+def splice(writes, extra):
+    """Lay each write of `extra` that falls inside one of `writes` over its bytes there (dq5patch/1 write lists,
+    `writes` changed in place): a later dq5newmap call rewrites map pointers inside the first call's pointer list,
+    which dq5build would refuse as an overlap. Returns the writes of `extra` that touch none of `writes`."""
+    rest = []
+    for w in extra:
+        lo, hi = _span(w)
+        inside = [v for v in writes if _span(v)[0] <= lo and hi <= _span(v)[1]]
+        if not inside:
+            if any(_span(v)[0] < hi and lo < _span(v)[1] for v in writes):
+                raise ValueError(f"{w['at']} {w.get('note', '')}: overlaps an earlier write without lying inside it")
+            rest.append(w)
+            continue
+        v = inside[0]
+        data = bytearray.fromhex(v["hex"])
+        data[lo - _span(v)[0]:hi - _span(v)[0]] = bytes.fromhex(w["hex"])
+        v["hex"] = data.hex(" ").upper()
+    return rest
+
+
+def check_records(rom, records):
+    """Each new map's pointer in the built ROM leads to its record (records {(group, map): bytes})."""
+    from dq5map import Rom, lorom, map_pointer
+    built = Rom(rom)
+    for (group, number), record in records.items():
+        at = map_pointer(built, group, number)
+        if rom[lorom(at):lorom(at) + len(record)] != record:
+            raise ValueError(f"{group:02X}/{number:02X}: the map pointer {_cpu(at)} does not lead to its record")
+
+
+def _cpu(addr):
+    return f"{addr >> 16:02X}:{addr & 0xFFFF:04X}"
+
+
 def check_door_copy(rom, door_bank):
     """The door routines read bank 01's FD97-FEB6 from DOOR_BANK on our maps, and dq4environmentrom copies them
     from the original ROM: the built ROM must still have the same bytes in both banks. dq5newmap's --door-bank must
@@ -409,6 +471,26 @@ def map_attrs(dq5, link):
     return {"bytes": row}
 
 
+def records_pass(dq5, out, manifests, k, sources):
+    """dq5newmap call k (1-): the records {map: dq5map/1 document} at RECORDS_AT[k], made on the ROM of
+    `manifests` (the environment and the earlier calls). Its pointer writes go into the first call's list (splice).
+    Appends its patch to `manifests`; returns its check."""
+    base = out / f"newmap-{k}.sfc"
+    _run(DQ5_TOOLS / "dq5build.py", dq5, "build", *manifests, "--size", 4, "-o", base)
+    source = _save(out / f"newmap-{k}.json", {"format": "dq5newmap/1", "maps": [
+        {"map": m, "record": {"source": doc}} for m, doc in sources.items()]})
+    args = ("--records-at", _cpu(RECORDS_AT[k][0]))
+    patch = out / f"newmap-{k}.dq5patch.json"
+    _run(DQ5_TOOLS / "dq5newmap.py", base, "patch", source, "-o", patch, *args)
+    first = json.loads((out / "newmap.dq5patch.json").read_text(encoding="utf-8"))
+    doc = json.loads(patch.read_text(encoding="utf-8"))
+    doc["writes"] = splice(first["writes"], doc["writes"])
+    _save(out / "newmap.dq5patch.json", first)
+    _save(patch, doc)
+    manifests.append(patch)
+    return "dq5newmap.py", source, args
+
+
 def build(dq5, dq4, out, with_people=True):
     out.mkdir(parents=True, exist_ok=True)
     prg = ines.prg(dq4.read_bytes())
@@ -421,6 +503,9 @@ def build(dq5, dq4, out, with_people=True):
     new_maps = [f"{g:02X}/{n:02X}" for g, n in sorted(GROUPS.values())]
     new_map_args = [a for m in new_maps for a in ("--new-map", m)]
     names = {f"{g:02X}/{n:02X}": name for name, (g, n) in GROUPS.items()}
+    from dq5mapwrite import encode
+    records = {m: encode(json.loads((env / f"{names[m]}.dq5map.json").read_text(encoding="utf-8"))) for m in new_maps}
+    area = dict(zip(new_maps, record_areas([len(records[m]) for m in new_maps], RECORDS_AT)))
     newmap = {"format": "dq5newmap/1", "groups": [], "maps": []}
     for group, (first, *_) in LINKS.items():
         x, y = cell(*first["arrival"])
@@ -430,8 +515,8 @@ def build(dq5, dq4, out, with_people=True):
     part_of = {part["fc"]: part for parts in LINKS.values() for part in parts}
     for m in new_maps:
         fc_group, _ = fc_map(prg, int(m[:2], 16), int(m[3:], 16))
-        newmap["maps"].append({"map": m, "record": {"source": f"env/{names[m]}.dq5map.json"},
-                               "attrs": map_attrs(dq5, part_of[fc_group])})
+        record = {"source": f"env/{names[m]}.dq5map.json"} if area[m] == 0 else {"copy": RECORD_PLACEHOLDER}
+        newmap["maps"].append({"map": m, "record": record, "attrs": map_attrs(dq5, part_of[fc_group])})
     manifests = [env / "dq4-environment.dq5patch.json"]
 
     def step(tool, name, doc, base, *args):
@@ -441,7 +526,12 @@ def build(dq5, dq4, out, with_people=True):
         manifests.append(manifest)
         return tool, source, args
 
-    checks = [step("dq5newmap.py", "newmap", newmap, env_rom, *NEWMAP_AT)]
+    checks = [step("dq5newmap.py", "newmap", newmap, env_rom, *NEWMAP_AT, "--records-at", _cpu(RECORDS_AT[0][0]))]
+    record_patches = []
+    for k in range(1, max(area.values()) + 1):
+        checks.append(records_pass(dq5, out, manifests, k, {m: f"env/{names[m]}.dq5map.json"
+                                                            for m in new_maps if area[m] == k}))
+        record_patches.append(manifests[-1].name)
     import dq4npcport  # imports this module
     lists, messages, people = dq4npcport.port(dq5, dq4, with_people)
     _save(out / "npc-report.json", people)
@@ -521,13 +611,15 @@ def build(dq5, dq4, out, with_people=True):
     rom = out / "groups.sfc"
     _run(DQ5_TOOLS / "dq5build.py", dq5, "build", *manifests, "--size", 4, "-o", rom, "--ips", out / "groups.ips")
     check_door_copy(rom.read_bytes(), int(NEWMAP_AT[NEWMAP_AT.index("--door-bank") + 1], 16))
+    check_records(rom.read_bytes(), {(int(m[:2], 16), int(m[3:], 16)): r for m, r in records.items()})
     # dq5newmap checks the built ROM; the others build their own from the original.
     for tool, source, args in checks:
         _run(DQ5_TOOLS / tool, rom if tool == "dq5newmap.py" else dq5, "check", source, *args)
     summary = {"rom": str(rom), "maps": new_maps, "exits": ours, "areas": areas,
                "fields": {tag(g, part): {"entrances": found[part["fc"]][0], "leave": found[part["fc"]][1]}
                           for g, parts in LINKS.items() for part in parts if part["field"]},
-               "ruler": destinations,
+               "ruler": destinations, "record_patches": record_patches,
+               "record_areas": {m: _cpu(RECORDS_AT[k][0]) for m, k in area.items()},
                "records_end": report["records_end"], "bank01_bytes": report["bank01_bytes"]}
     _save(out / "groups.json", summary)
     return summary
