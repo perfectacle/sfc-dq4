@@ -1619,7 +1619,8 @@ def _dungeon_assets():
               for name, image in assets.items()}
     assets.update({
         "boulder_wall": _boulder_wall(), "ice_wall": _ice_wall(), "ice_floor": _ice_floor(),
-        "wood_grain": _wood_grain(), "cloud": _cloud(), "fountain": _fountain(), "sandstone": _sandstone(), "ladder": _ladder(),
+        "wood_grain": _wood_grain(), "cloud": _cloud(), "fountain": _fountain(), "sandstone": _sandstone(),
+        "ladder": _ladder(),
         "stone_steps": _stone_steps(), "lift": _lift(), "mine_beam": _mine_beam(), "rock_pile": _rock_pile(),
         "pit": _pit(), "grate": _grate(),
     })
