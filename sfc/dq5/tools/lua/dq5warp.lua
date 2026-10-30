@@ -182,7 +182,7 @@ local function play(seq)
   if s[1] ~= "wait" and s[1] ~= "idle" then local t = {}; for b in s[1]:gmatch("[^+]+") do t[b] = true end; L.press(t) end
   left = left - 1
   if left <= 0 then
-    if s[1] == "idle" and not idleOk then log[#log + 1] = string.format("f%05d idle timeout", n) end
+    if s[1] == "idle" and not idleOk then log[#log + 1] = string.format("f%05d idle expired", n) end
     si = si + 1; left = nil; idleOk = false
   end
   return false
