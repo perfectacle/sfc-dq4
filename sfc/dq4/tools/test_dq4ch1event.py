@@ -131,7 +131,7 @@ class FlyTest(unittest.TestCase):
         branch = next(c for c in cmds if c["op"] == '06' and c["args"] == [0x80 | ev.KIDS_FOLLOW[0], ev.KIDS_FOLLOW[1]])
         self.assertEqual(branch["target"], "praise")
         calls = [c["args"] for c in cmds if c["op"] == '37']
-        want = ['walk_in', 'gift', 'level_up'] + [f'stat_{k}' for k, _ in ev.STATS] + ['walk_back', 'walk_out']
+        want = ['walk_in', 'status_count', 'level_up'] + [f'stat_{k}' for k, _ in ev.STATS] + ['walk_back', 'walk_out']
         self.assertEqual(calls, [ev._long(at[n]) for n in want])
         self.assertIn({"op": "10", "args": list(ev.REPORTED)}, cmds)
 
@@ -144,6 +144,14 @@ class FlyTest(unittest.TestCase):
                 dx += {ev.RIGHT: n, ev.LEFT: -n}.get(d, 0)
             self.assertEqual(x + dx, ev.AISLE_X)
             self.assertEqual(code[-3:], bytes((ev.UP, ev.KING_STEPS, 0xFF)))
+
+    def test_status_window_opens_without_brk(self):
+        code = ev._status_count()
+        self.assertNotIn(bytes((0x00, 0x95)), code)              # BRK 95 는 DB 가 뱅크 5E 라 롬에 씀
+        self.assertIn(bytes((0xA9, 0x08, 0x8D, 0x00, 0x0A)), code)
+        self.assertIn(bytes((0x22, *ev._long(ev.WINDOW_SET))), code)
+        self.assertIn(bytes((0x22, *ev._long(ev.SEND_ROWS))), code)
+        self.assertEqual(ev.GIFT_EXP % ev.GIFT_STEP, 0)
 
     def test_stat_messages_print_the_number(self):
         m = ev.MESSAGES

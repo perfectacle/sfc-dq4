@@ -152,8 +152,6 @@ MESSAGES = {
     'chapter_end': ch1.narrate('이리하여 이 땅/어딘가에 있는 용사를/찾아 @의 여행이/시작되었다……'),
     # 보스 뒤 왕좌의 방 문지기(FC 0609)
     'guard_wait': say('자!/임금님께서 기다리고/계십니다!'),
-    # FC 는 말 없이 강함 창의 경험치가 3000 까지 오른다. 창 대신 서술로 알린다
-    'gift': ch1.narrate('@의 경험치가/3000 포인트 올랐다!'),
     # FC 「ライアンは レベルが あがった！」. 이름 뒤 조사를 피해 옮김. 레벨업 줄은 한 창에 이어 쓰고 줄마다 ▼ 로 기다린다
     'level_up': ch1.narrate('@의 레벨이 올랐다!')[:-1] + [WAIT_END],
     # 오른 능력치(FC 「ちからが 3ポイント あがった！」). 수는 {1004} 가 $F5~$F7 에서 찍는다
@@ -370,13 +368,76 @@ def _at(x, y, x_from=False, away=False):
     return first + second + near + far
 
 
-def _gift():
-    """주인공 경험치에 GIFT_EXP 를 더한다."""
-    from dq4chapterbox import ENTER, LEAVE
-    lo, hi = GIFT_EXP & 0xFF, GIFT_EXP >> 8
-    body = (bytes((0xC2, 0x20, 0xAF)) + _al(HERO_EXP) + bytes((0x18, 0x69, lo, hi, 0x8F)) + _al(HERO_EXP) +
-            bytes((0xE2, 0x20, 0xAF)) + _al(HERO_EXP + 2) + bytes((0x69, 0x00, 0x8F)) + _al(HERO_EXP + 2))
-    return ENTER + body + LEAVE
+WINDOW_SET = 0x049905           # $0A48·$0A47·$0A00 의 창 셋을 연다(상태 보기 06·07·08, 00:9477)
+
+
+def _window(*numbers):
+    """창 셋 열기($0A48·$0A47·$0A00 → WINDOW_SET). BRK 95 핸들러처럼 직접 페이지 $00~$0F 를 지킨다. M 8·X 16·DB 0 에서."""
+    out = bytearray(bytes((0xE2, 0x10)) + DP_SAVE + bytes((0xC2, 0x10)))
+    for addr, n in zip((0x0A48, 0x0A47, 0x0A00), numbers):
+        out += bytes((0xA9, n, 0x8D, addr & 0xFF, addr >> 8))
+    out += bytes((0x22, *_long(WINDOW_SET)))
+    return bytes(out + bytes((0xE2, 0x10)) + DP_RESTORE + bytes((0xC2, 0x10)))
+
+
+# 능력치 창(07)의 경험치 일곱 자리: 창 타일맵 버퍼 7E:5000(32 × 32 칸)의 25행 24~30열(실측). 숫자 타일은 값 + 2, 빈칸 01.
+# 높은 바이트(팔레트)는 창이 활성이면 20, 아니면 2C 라 같은 줄 「:」(22열)의 것을 쓴다. 이 줄은 04:9D5E(04:991D)가 거는
+# 부분 전송(21~29번째 줄, $0BEC bit6)에 들어간다
+EXP_ROW, EXP_COL, EXP_DIGITS, EXP_COLON = 25, 24, 7, 22
+TILE_BLANK, TILE_ZERO = 0x01, 0x02
+TILEMAP = 0x7E5000
+SEND_ROWS = 0x04991D
+GIFT_STEP = 20                  # 한 단계가 2프레임(BRK 09 01 과 전송)이라 FC(프레임마다 10, 300프레임)와 같은 시간
+
+
+def _exp_digits():
+    """주인공 경험치(24비트)를 10진 일곱 자리로 능력치 창 버퍼에 쓴다(앞의 0 은 빈칸). M·X 8 에서.
+    SCRATCH+0~2 = 남은 값, +3 = 자릿값, +4 = 숫자가 시작됐는지, +5~6 = 빼 본 값."""
+    t, d, started, r = SCRATCH, SCRATCH + 3, SCRATCH + 4, SCRATCH + 5
+    out = bytearray()
+    for k in range(3):
+        out += bytes((0xAF,)) + _al(HERO_EXP + k) + bytes((0x8F,)) + _al(t + k)
+    out += bytes((0xA9, 0x00, 0x8F)) + _al(started)
+    for k in range(EXP_DIGITS):
+        p = 10 ** (EXP_DIGITS - 1 - k)
+        out += bytes((0xA9, 0x00, 0x8F)) + _al(d)
+        trial = (bytes((0x38, 0xAF)) + _al(t) + bytes((0xE9, p & 0xFF, 0x8F)) + _al(r) +
+                 bytes((0xAF,)) + _al(t + 1) + bytes((0xE9, p >> 8 & 0xFF, 0x8F)) + _al(r + 1) +
+                 bytes((0xAF,)) + _al(t + 2) + bytes((0xE9, p >> 16)))
+        keep = (bytes((0x8F,)) + _al(t + 2) + bytes((0xAF,)) + _al(r + 1) + bytes((0x8F,)) + _al(t + 1) +
+                bytes((0xAF,)) + _al(r) + bytes((0x8F,)) + _al(t) +
+                bytes((0xAF,)) + _al(d) + bytes((0x1A, 0x8F)) + _al(d))
+        body = trial + bytes((0x90, len(keep) + 2)) + keep
+        out += body + bytes((0x80, (-(len(body) + 2)) & 0xFF))
+        cell = TILEMAP + (EXP_ROW * 32 + EXP_COL + k) * 2
+        # 숫자가 0 이고 아직 시작 전이며 마지막 자리가 아니면 빈칸
+        digit = (bytes((0xA9, 0x01, 0x8F)) + _al(started) + bytes((0xAF,)) + _al(d) +
+                 bytes((0x18, 0x69, TILE_ZERO, 0x8F)) + _al(cell))
+        blank = bytes((0xA9, TILE_BLANK, 0x8F)) + _al(cell)
+        if k < EXP_DIGITS - 1:
+            test = bytes((0xAF,)) + _al(d) + bytes((0xD0, len(blank) + 2 + 6)) + bytes((0xAF,)) + _al(started) + \
+                bytes((0xD0, len(blank) + 2))
+            out += test + blank + bytes((0x80, len(digit))) + digit
+        else:
+            out += digit
+        out += bytes((0xAF,)) + _al(TILEMAP + (EXP_ROW * 32 + EXP_COLON) * 2 + 1) + bytes((0x8F,)) + _al(cell + 1)
+    return bytes(out)
+
+
+def _status_count():
+    """상태 보기 창(06·07·08)을 열고, 경험치를 프레임마다 GIFT_STEP 씩 GIFT_EXP 만큼 올리며 능력치 창의 숫자를 고친다
+    (FC 1D 이벤트 37 의 300번 고리). 창은 열어 둔 채 돌아온다."""
+    from dq4chapterbox import ENTER, LEAVE, wait
+    count = SCRATCH + 8
+    loop = (bytes((0xC2, 0x20, 0xAF)) + _al(HERO_EXP) + bytes((0x18, 0x69, GIFT_STEP, 0x00, 0x8F)) + _al(HERO_EXP) +
+            bytes((0xE2, 0x20, 0xAF)) + _al(HERO_EXP + 2) + bytes((0x69, 0x00, 0x8F)) + _al(HERO_EXP + 2) +
+            bytes((0xE2, 0x30)) + _exp_digits() + bytes((0xC2, 0x10, 0x22)) + _al(SEND_ROWS) + wait(1) +
+            bytes((0xC2, 0x20, 0xAF)) + _al(count) + bytes((0x3A, 0x8F)) + _al(count) + bytes((0xE2, 0x20)))
+    back = -(len(loop) + 5)
+    loop += bytes((0xF0, 0x03, 0x82)) + (back & 0xFFFF).to_bytes(2, 'little')          # BEQ 끝 / BRL 처음
+    steps = GIFT_EXP // GIFT_STEP
+    return (ENTER + _window(0x06, 0x07, 0x08) + bytes((0xC2, 0x20, 0xA9, steps & 0xFF, steps >> 8, 0x8F)) + _al(count) +
+            bytes((0xE2, 0x20)) + loop + LEAVE)
 
 
 # 전투 끝의 레벨업 고리(25:8A91)가 한 번 오를 때 하는 일에서 메시지만 뺀 것. 그 고리의 메시지는 전투 메시지 길이라
@@ -531,7 +592,8 @@ def native(data=None):
                        ('king_row', _at(None, ch1_cell(0, KING_ROW)[1])),
                        ('king_away', _at(None, ch1_cell(0, KING_ROW)[1], away=True)),
                        ('cry_at', _at(*ch1_cell(CRY_FROM, CRY_ROW), x_from=True)),
-                       ('gift', _gift()), ('level_up', _level_up()), ('open_cage', _open_cage())):
+                       ('level_up', _level_up()), ('open_cage', _open_cage()),
+                       ('status_count', _status_count())):
         at[name] = CODE_AT + len(out)
         out += code
     events = {}
@@ -683,7 +745,7 @@ def _king_call(m, at):
         # 갈래는 상대 점프(-128~127)라, 아이들 갈래를 앞에 두고 깃발이 꺼져 있으면 칭찬으로 건너뛴다
         {**_cmd('06', 0x80 | KIDS_FOLLOW[0], KIDS_FOLLOW[1]), "target": "praise"},
         msg('king_back'), _cmd('40'), _cmd('05', *_long(at['king_away'])), {"op": "03", "args": [], "target": "wait"},
-        {**msg('king_praise'), "label": "praise"}, msg('gift'), call('gift'),
+        {**msg('king_praise'), "label": "praise"}, call('status_count'), _cmd('34'),
         # 한 번 오를 때마다 「레벨이 올랐다」 와 오른 능력치를 한 창에 잇는다. 더 오르지 않으면 level_up 이 보고 깃발을
         # 켜고, 능력치 줄은 오른 양이 0 이면 stat_k 가 보고 깃발을 켜 건너뛴다
         {**call('level_up'), "label": "grow"}, {**_cmd('06', *REPORTED), "target": "grown"},
