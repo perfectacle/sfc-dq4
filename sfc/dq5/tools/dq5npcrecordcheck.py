@@ -4,6 +4,8 @@
 다른 인물은 그림만)과 02/06 대체 목록 조건을 뒤집은 롬, 같은 문서를 dq5npcrelocate.py --records 로
 옮긴 롬을 원본과 함께 돌린다. 인물 목록 로더 직후(12:803C) WRAM 인물 표 23칸을 롬에서 예측한 값과 견주고,
 주인공이 위 칸에 말을 걸었을 때 메시지 루틴(24:8BAF)이 받은 번호를 본다.
+필드 입력은 7E:007F & 7 = 0 인 프레임에만 읽혀(00:8185) 4프레임짜리 A 는 그 창을 놓치면 버려진다. 도착 뒤 기다림(SETTLE)을
+바꿔 가며 짧은 wait 뒤의 A 는 말(명령 창 → はなす)이 되지 못하고 dq5warp.lua 의 idle 뒤의 A 는 늘 말이 되는지 본다.
 원본 롬·선실 상태는 읽기만 하고 출력은 --out 의 새 하위 폴더에 둔다.
   MESENCE=… python sfc/dq5/tools/dq5npcrecordcheck.py rom/dq5.sfc --state work/state/ship.mss
 """
@@ -32,6 +34,10 @@ ENTRIES = [{'list': '05:8CD4', 'index': 3, 'time': 'day',
             'fields': {'x': 24, 'y': 12, 'facing': 'down', 'gfx': 0x18, 'talk': TALK}},
            {'list': '05:8CD4', 'index': 1, 'fields': {'gfx': 0x18}}]
 TALK_TEST = 'up:40,wait:40,a:4,wait:60,a:4,wait:200'
+SHORT_TEST = 'up:8,wait:12,a:4,wait:60,a:4,wait:200'
+IDLE_TEST = 'up:8,idle:60,a:4,wait:60,a:4,wait:200'
+# 도착 뒤 기다리는 프레임. 입력이 읽히는 창은 16프레임 중 2프레임이라 2프레임 간격이면 모든 위상을 지난다
+PHASES = range(112, 128, 2)
 # (이름, 롬, 밤, TEST). edited 는 레코드만, relocated 는 같은 문서를 dq5npcrelocate.py --records 로,
 # condition 은 02/06 의 21AD bit4 대체 조건을 「꺼졌을 때」로 뒤집은 롬.
 CASES = [
@@ -43,6 +49,8 @@ CASES = [
     ('condition-original', 'original', False, ''),
     ('condition-edited', 'condition', False, ''),
 ]
+PHASE_CASES = [(f'{kind}-{settle}', 'edited', False, test, settle)
+               for kind, test in (('wait', SHORT_TEST), ('idle', IDLE_TEST)) for settle in PHASES]
 
 
 def require(ok, message):
@@ -71,7 +79,7 @@ def override_index(rom):
 
 
 def run(case, roms, state, out, mesence, libdir):
-    name, rom, night, test = case
+    name, rom, night, test, *settle = case
     dest = out / name
     dest.mkdir()
     to = HERO
@@ -79,7 +87,7 @@ def run(case, roms, state, out, mesence, libdir):
     env = {k: v for k, v in os.environ.items()
            if k not in ('ADULT', 'ANYWHERE', 'BATTLE', 'FIELD', 'GROUP', 'LATESET', 'PARTY', 'POKE',
                         'ROMPATCH', 'SAVE', 'SET', 'WAGON')}
-    env.update(LIBDIR=str(libdir), STATE=str(state), SHOT_DIR=str(dest), MAXF='1500', SETTLE='120',
+    env.update(LIBDIR=str(libdir), STATE=str(state), SHOT_DIR=str(dest), MAXF='1500', SETTLE=str(settle[0] if settle else 120),
                TO=to, TEST=f'{test},wait:30' if test else 'wait:30', CHECK_GROUP=bc, CHECK_MAP=bd)
     if night:
         env['POKE'] = '7E075E=F0;7E075F=00'
@@ -149,7 +157,9 @@ def main():
         shutil.copytree(krlua, libdir)
         shutil.copyfile(HERE / 'lua/dq5warp.lua', libdir / 'boot.lua')
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-            seen = list(pool.map(lambda case: run(case, roms, state, out, mesence, libdir), CASES))
+            seen = list(pool.map(lambda case: run(case, roms, state, out, mesence, libdir), CASES + PHASE_CASES))
+        phase = {case[0]: got[1] for case, got in zip(PHASE_CASES, seen[len(CASES):])}
+        seen = seen[:len(CASES)]
         models = {'original': base, 'edited': Rom(roms['edited'].read_bytes()),
                   'condition': Rom(roms['condition'].read_bytes())}
         # 옮긴 롬은 같은 문서를 넣은 edited 롬과 인물 표가 같아야 한다. 스크립트 포인터만 다르다.
@@ -180,6 +190,10 @@ def main():
             and by['night-original']['placed'] == [f'{NIGHT:06X}', f'{MOVED:06X}'],
             'condition': by['condition-edited']['list'] == '109B57' and by['condition-original']['list'] != '109B57',
             'tables': all(not r['table_mismatch'] for r in results),
+            # 첫 메시지 1D1 뒤에 말 메시지(대상이 없으면 129)가 오면 A 가 읽힌 것이다. idle 뒤에는 어느 위상에서도 읽히고,
+            # 짧은 wait 뒤에는 읽히지 않는 위상이 있다(있어야 이 검사가 의미가 있다)
+            'phase-idle': all(len(phase[f'idle-{s}']) >= 2 for s in PHASES),
+            'phase-wait': any(len(phase[f'wait-{s}']) < 2 for s in PHASES),
         }
         (out / 'results.json').write_text(json.dumps({'cases': results, 'checks': checks}, ensure_ascii=False,
                                                      indent=2) + '\n', encoding='utf-8')
@@ -188,8 +202,10 @@ def main():
                   f'메시지 {",".join(r["messages"]) or "-"}')
         for key, ok in checks.items():
             print(f'{key}: {"통과" if ok else "불일치"}')
+        print('A 가 읽힌 SETTLE: ' + '; '.join(
+            f'{kind} ' + ','.join(str(s) for s in PHASES if len(phase[f'{kind}-{s}']) >= 2) for kind in ('wait', 'idle')))
         require(all(checks.values()), '불일치: ' + ', '.join(k for k, ok in checks.items() if not ok))
-        print(f'{len(CASES)}개 장면, 검사 {len(checks)}개 통과')
+        print(f'{len(CASES) + len(PHASE_CASES)}개 장면, 검사 {len(checks)}개 통과')
         return 0
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f'오류: {error}', file=sys.stderr)
