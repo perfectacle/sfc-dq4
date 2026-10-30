@@ -74,11 +74,13 @@ class BundleTest(unittest.TestCase):
             build.layout({0x40: [{"fc": 0x10}, {"fc": 0x11}]}, {0x10: range(0x20), 0x11: [0]})
 
     def test_hook_rows(self):
-        arrivals, leaving = build.hook_rows(self.LINKS, self.place)
+        doors = {0x10: ([(100, 50), (101, 50)], (100, 53)), 0x11: ([(110, 60)], (110, 63)),
+                 0x12: ([(120, 70)], (118, 71))}
+        arrivals, leaving = build.hook_rows(self.LINKS, self.place, doors)
         layer = build.LAYER
-        self.assertEqual(arrivals, [(0x40, 100, 50, 1, 2, 5, layer, 0), (0x40, 110, 60, 4, 6, 9, layer, 0),
-                                    (0x41, 120, 70, 0, 10, 13, layer, 0)])
-        self.assertEqual(leaving, [(0x40, 0, 2, 100, 51), (0x40, 3, 4, 110, 61), (0x41, 0, 0x1F, 120, 71)])
+        self.assertEqual(arrivals, [(0x40, 100, 50, 1, 2, 5, layer, 0), (0x40, 101, 50, 1, 2, 5, layer, 0),
+                                    (0x40, 110, 60, 4, 6, 9, layer, 0), (0x41, 120, 70, 0, 10, 13, layer, 0)])
+        self.assertEqual(leaving, [(0x40, 0, 2, 100, 53), (0x40, 3, 4, 110, 63), (0x41, 0, 0x1F, 118, 71)])
         import dq4entrancehook
         dq4entrancehook.tables(arrivals, leaving)
 

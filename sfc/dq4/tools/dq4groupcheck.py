@@ -1,13 +1,14 @@
 """Walk the links of the new DQ4 groups built by dq4groupbuild.py in MesenCE.
 
   stairs  every FC stair: warp onto a walkable FC neighbour, step onto the stair, expect the destination
-          map and the cell of the linked stair (dq4groupbuild.cell), or for a stair to the field the group's
-          aux entrance (X, Y+1)
+          map and the cell of the linked stair (dq4groupbuild.cell), or for a stair to the field the cell the
+          group leaves onto (dq4groupbuild.doors)
   area    02/00 gate (open flags) up into 02/01, and 02/01 down off the bottom edge back to the gate.
           The bottom edge is one cell away, so a short press: a held key walks on after landing
-  exit    from each group's field arrival, the way out (LINKS "out") to the field: the aux entrance (X, Y+1)
+  exit    from each group's field arrival, the way out (LINKS "out") to the field: the cell it leaves onto
   stay    the field arrival with no input: the party stays (an arrival off the map leaves at once)
-  enter   from the field save state (341,56), walk the group's path onto its aux entrance: the group arrival
+  enter   on FC field 0: warp (dq5warp.lua FIELD) onto each walkable FC neighbour of each entrance block, on
+          either DQ5 row or column of it, and step onto the block: the group arrival
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4groupcheck.py --rom work/dq4-groups/groups.sfc \\
       --state work/state/ship.mss --out work/dq4-groups/check
@@ -30,16 +31,16 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
         sys.path.insert(0, str(path))
 
 import dq4block  # noqa: E402
+import dq4fieldport  # noqa: E402
 import dq4talk  # noqa: E402
 from dq4environmentmap import block_prop  # noqa: E402
 from dq4environmentrom import GATE_KIND, objects  # noqa: E402
-from dq4groupbuild import LINKS, cell, exit_order, fc_numbers, placement, tag  # noqa: E402
+from dq4groupbuild import LINKS, cell, doors, exit_order, fc_numbers, placement, tag  # noqa: E402
 from dq5exitcheck import dp86_allowed, warp_exit  # noqa: E402
 from dq5progresscheck import environment  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
 
 WARP = DQ5_TOOLS / "lua" / "dq5warp.lua"
-WALK = DQ5_TOOLS / "lua" / "dq5tablecheck.lua"
 DIRS = {(0, -1): "up", (1, 0): "right", (0, 1): "down", (-1, 0): "left"}
 END = re.compile(r"end map (\w\w)/(\w\w) (cell|field) (\d+),(\d+)")
 # Frames a direction is held: the party first turns, then moves 8 px (one cell) per 8 frames; an FC cell
@@ -65,19 +66,25 @@ def scene(mesence, rom, state, out, name, **extra):
     return where
 
 
-def walk(mesence, rom, state, out, name, pre):
-    """Play inputs from a saved state (dq5tablecheck.lua with the dq5msg.lua driver) and read where the
-    party ends from the final WRAM."""
-    dest = out / name
-    dest.mkdir(parents=True)
-    env = environment(os.environ["LIBDIR"], state, dest)
-    env.update(DRIVER=str(DQ5_TOOLS / "lua" / "dq5msg.lua"), MAXF="900", PRE=pre)
-    subprocess.run([str(mesence), "--testrunner", str(rom), str(WALK), "--Snes.DisableFrameSkipping=true"],
-                   env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300, check=False)
-    ram = (dest / "final.wram").read_bytes()
-    if ram[0xBE] & 0x80:
-        return {"map": f"{ram[0xBC]:02X}/{ram[0xBD]:02X}", "cell": [ram[0x3020], ram[0x3080]]}
-    return {"field": [int.from_bytes(ram[0xB6:0xB8], "little"), int.from_bytes(ram[0xB8:0xBA], "little")]}
+def field_scene(mesence, rom, state, out, name, x, y, test, **extra):
+    """scene from field cell (x, y): dq5warp.lua FIELD with the row of the moved entrance table it walks out by."""
+    return scene(mesence, rom, state, out, name, FIELD=f"{x},{y}",
+                 ROMPATCH=dq4fieldport.warp_patch(rom.read_bytes(), x, y), TEST=test, **extra)
+
+
+def enter_starts(props, blocks):
+    """(DQ5 start cell, direction) for each walkable FC neighbour of each FC entrance block in `blocks` that is not
+    itself one, twice: from either DQ5 row or column of the neighbour, so every DQ5 cell of the block is stepped on."""
+    for bx, by in blocks:
+        for (dx, dy), d in DIRS.items():
+            nx, ny = bx - dx, by - dy
+            if (nx, ny) in blocks or props(nx, ny) & 0x80:
+                continue
+            for k in (0, 1):
+                # DQ5 cells of the neighbour on the line through cell k of the entrance block's row or column.
+                sx = 2 * nx + (k if dx == 0 else (1 if dx > 0 else 0))
+                sy = 2 * ny + (k if dy == 0 else (1 if dy > 0 else 0))
+                yield (sx, sy), d
 
 
 def same_place(got, want):
@@ -95,6 +102,7 @@ def walkable(source, x, y):
 
 def stair_scenes(prg, groups):
     place = placement(prg)
+    found = doors(prg)
     for group, link in ((g, part) for g, parts in LINKS.items() if g in groups for part in parts):
         fc_group = link["fc"]
         cache = {}
@@ -118,8 +126,7 @@ def stair_scenes(prg, groups):
                     # cell to expect (dq4groupbuild.exit_rows refuses it in a group of several FC groups).
                     if not link["field"]:
                         continue
-                    fx, fy = link["field"]
-                    yield f"stair-{group:02X}{number:02X}-{i}", starts, {"field": [fx, fy + 1]}
+                    yield f"stair-{group:02X}{number:02X}-{i}", starts, {"field": list(found[fc_group][1])}
                     continue
                 there_group, there_number = place[dest["group"], dest["index"]]
                 yield (f"stair-{group:02X}{number:02X}-{i}", starts,
@@ -131,7 +138,6 @@ def main():
     ap.add_argument("--rom", required=True, type=Path)
     ap.add_argument("--dq4", default="rom/dq4.nes", type=Path)
     ap.add_argument("--state", default="work/state/ship.mss", type=Path)
-    ap.add_argument("--field-state", default="work/state/field-free.mss", type=Path, help="field (341,56)")
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--jobs", type=int, default=4)
     ap.add_argument("--groups", type=lambda v: {int(g, 16) for g in v.split(",")}, default=set(LINKS),
@@ -145,28 +151,33 @@ def main():
     prg = ines.prg(args.dq4.read_bytes())
 
     jobs = [(name, [{"TO": to, "TEST": test} for to, test in starts], want) for name, starts, want in stair_scenes(prg, args.groups)]
+    found = doors(prg)
+    _, props = dq4fieldport.fc_field(prg)
     for group, link in ((g, part) for g, parts in LINKS.items() if g in args.groups for part in parts):
         if not link["field"]:
             continue
         x, y = cell(*link["arrival"])
-        fx, fy = link["field"]
+        leave = list(found[link["fc"]][1])
         arrival = f"{group:02X}/{placement(prg)[link['fc'], link.get('map', 0)][1]:02X}"
         to = f"{arrival},{x},{y}"
         out_test = f"{link['out']},wait:400"
-        jobs.append((f"exit-{tag(group, link)}", [{"TO": to, "TEST": out_test}], {"field": [fx, fy + 1]}))
+        jobs.append((f"exit-{tag(group, link)}", [{"TO": to, "TEST": out_test}], {"field": leave}))
         # Without input the party stays: an arrival off the map steps onto the edge exit at once, and the exit
         # scene would pass without its inputs.
         jobs.append((f"stay-{tag(group, link)}", [{"TO": to, "TEST": "wait:400"}], {"map": arrival, "cell": [x, y]}))
-        # dq5warp stops its inputs at the map change, so entering walks from the field save state (341,56) along
-        # the FC group's path (dq4groupbuild.LINKS "walk"), which passes no other entrance.
-        jobs.append((f"enter-{tag(group, link)}", None, (link["walk"], {"map": arrival, "cell": [x, y]})))
+        # Every start must enter: each is a scene of its own, not a retry.
+        blocks = dq4fieldport.entrance_blocks(props, link["field"])
+        for (sx, sy), d in enter_starts(props, blocks):
+            jobs.append((f"enter-{tag(group, link)}-{sx},{sy}-{d}", [{"field": (sx, sy), "TEST": f"{d}:{PRESS},wait:400"}],
+                         {"map": arrival, "cell": [x, y]}))
     results = {}
     def tries(name, starts, want):
-        if starts is None:
-            path, want = want
-            return walk(mesence, rom, args.field_state.resolve(), out, name, f"{path},wait:400"), 0
         for n, extra in enumerate(starts):
-            got = scene(mesence, rom, state, out, f"{name}-{n}" if n else name, **extra)
+            sub = f"{name}-{n}" if n else name
+            if "field" in extra:
+                got = field_scene(mesence, rom, state, out, sub, *extra["field"], extra["TEST"])
+            else:
+                got = scene(mesence, rom, state, out, sub, **extra)
             if same_place(got, want):
                 break
         return got, n
@@ -176,8 +187,6 @@ def main():
         for future in concurrent.futures.as_completed(futures):
             name, want = futures[future]
             got, n = future.result()
-            if name.startswith("enter-"):
-                want = want[1]
             results[name] = {"got": got, "want": want, "ok": same_place(got, want), "start": n}
     if placement(prg)[0x02, 0][0] in args.groups:
         area_scenes(mesence, rom, prg, state, out, results)

@@ -9,10 +9,12 @@ Order matters (sfc/dq4/docs/dq4-environment-format.md, 「그룹 연결」):
      shop lists plus the inn price table and the per-FC-group shop key hook of dq4shopport.py.
   4. dq5chestplace.py from the original ROM with the patches of 1-3 (--with-patch): the FC chests and
      タンス·つぼ of dq4chestport.py on the cells 1 gave their DQ5 attributes.
-  5. dq5build.py on the original ROM with 1-4.
+  5. dq4fieldport.py: FC field 0 as DQ5 world 0 (dq5fieldwrite.py).
+  6. dq5build.py on the original ROM with 1-5.
 
 FC stairs (08:$B22E) become same-group exits, FC exit-table cells ($05A0) become area moves, and the map
-edge leads to the field through the aux entrance table. Field spots are temporary until the DQ4 field is in.
+edge leads to the field through the aux entrance table, onto the FC entrance of the group. The original DQ5
+entrances of world 0 move off the FC ground (dq4fieldport.park).
 
   python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups
 """
@@ -34,6 +36,8 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
 
 import dq4block  # noqa: E402
 import dq4entrancehook  # noqa: E402
+import dq4field  # noqa: E402
+import dq4fieldport  # noqa: E402
 import dq4map  # noqa: E402
 from dq4environmentmap import all_maps, block_prop  # noqa: E402
 from dq4environmentrom import DOOR_BANK, DOOR_TABLES, GROUPS, STAIRS  # noqa: E402
@@ -42,31 +46,29 @@ from kr_patch.fc import ines  # noqa: E402
 # New DQ5 group -> the FC groups it holds, in DQ5 map order (layout). Per FC group: the FC arrival from the
 # field ($44/$45 after walking in from the field entrance; fc/dq4/tools/dq4field.py entrances lists the same
 # cells) and its FC map ("map", 0 when absent), the borrowed DQ5 map whose attributes (encounters, battle
-# background, music) its maps take, the temporary field cell of its entrance, the inputs that take the party from
-# the arrival to the field, and a walk from the field cell (341,56) onto the entrance that passes no other
-# entrance. Field steps vary with the ground, so the entrances sit where their walks end (measured). "music"
-# replaces the song byte of the copied attributes (attribute +5): FC plays one song for the whole group
+# background, music) its maps take, its FC field-0 entrance blocks (dq4field.py entrances; the DQ5 world is FC
+# field 0 block for block, dq4fieldport.py), and the inputs that take the party from the arrival to the field.
+# "music" replaces the song byte of the copied attributes (attribute +5): FC plays one song for the whole group
 # (19:$803B, map branch $07BA), and 02 バトランド plays FC song 03, 王宮のメヌエット, which the sound port puts
 # in DQ5 song slot 01. The DQ5 group's own arrival (the dq5newmap entrance) is its first FC group's.
 LINKS = {
-    0x36: [{"fc": 0x02, "arrival": (0x00, 0x1D), "attrs": "03/00", "music": 0x01, "field": (345, 56), "out": "left:64",
-            "walk": "right:64"}],
-    0x37: [{"fc": 0x12, "arrival": (0x0D, 0x19), "attrs": "19/02", "field": (337, 56), "out": "down:64", "walk": "left:64"}],
+    0x36: [{"fc": 0x02, "arrival": (0x00, 0x1D), "attrs": "03/00", "music": 0x01, "field": [(0xA4, 0x2E)],
+            "out": "left:64"}],
+    0x37: [{"fc": 0x12, "arrival": (0x0D, 0x19), "attrs": "19/02", "field": [(0x9A, 0x16)], "out": "down:64"}],
     # 古井戸の底, the tower of chapter 1's end, and the house of 41/00. Their attributes are a placeholder
     # (the castle's: no encounters) until the DQ4 encounters and music are ported.
-    0x38: [{"fc": 0x1C, "arrival": (0x0D, 0x10), "attrs": "03/00", "field": (332, 52), "out": "down:64",
-            "walk": "up:64,wait:30,left:64"}],
-    0x39: [{"fc": 0x30, "arrival": (0x10, 0x21), "map": 3, "attrs": "03/00", "field": (349, 62), "out": "down:64",
-            "walk": "down:64,wait:30,right:64,wait:30,up:16"}],
-    # 41/00's arrival is its stair to the field: step off and back on.
-    0x3A: [{"fc": 0x41, "arrival": (0x03, 0x03), "attrs": "03/00", "field": (333, 64), "out": "down:32,wait:60,up:32",
-            "walk": "down:64,wait:30,left:64"}],
+    0x38: [{"fc": 0x1C, "arrival": (0x0D, 0x10), "attrs": "03/00", "field": [(0xA2, 0x1A)], "out": "down:64"}],
+    0x39: [{"fc": 0x30, "arrival": (0x10, 0x21), "map": 3, "attrs": "03/00", "field": [(0x88, 0x17)],
+            "out": "down:64"}],
+    # 41/00's arrival is its stair to the field: step off and back on. FC enters it from two caves.
+    0x3A: [{"fc": 0x41, "arrival": (0x03, 0x03), "attrs": "03/00", "field": [(0x8D, 0x1B), (0x8D, 0x1F)],
+            "out": "down:32,wait:60,up:32"}],
     # Below 古井戸の底: no field entrance; its group arrival is the cell the well's stair leads to (3A/02).
     0x3B: [{"fc": 0x3A, "arrival": (0x03, 0x02), "map": 2, "attrs": "03/00", "field": None, "out": None}],
     # The prologue's village (FC 14/00). The field leads to the ruined 14/02, so this arrival is the same cell
     # of 14/00. The prologue places its own people: the FC people of 14/00 belong to chapter 5's start.
-    0x3C: [{"fc": 0x14, "arrival": (0x0C, 0x18), "attrs": "19/02", "field": (337, 60), "out": "down:64",
-            "walk": "down:32,wait:30,left:32", "people": False}],
+    0x3C: [{"fc": 0x14, "arrival": (0x0C, 0x18), "attrs": "19/02", "field": [(0x91, 0x31)], "out": "down:64",
+            "people": False}],
 }
 # The attribute table grows by 6 bytes a map and outgrows its own bank (108 spare bytes), so it moves whole.
 NEWMAP_AT = ("--entrance-table-at", "3C:C000", "--records-at", "34:8000", "--door-bank", "3B",
@@ -81,6 +83,8 @@ ENTRANCE_HOOK_AT = 0x3CF800
 SHOP_KEY_AT = 0x3CFC00
 # The three tables chests and drawers grow; dq5chestplace reads chest_maps and search with DB, so bank 00-3F.
 CHEST_AT = ("--chests-at", "3C:8400", "--chest-maps-at", "3C:8800", "--search-at", "3C:8C00")
+# The field loader reads both RLE chunks with DB set to their bank, so 30-3F; bank 3A is free in this build.
+FIELD_AT = "3A:8000"
 LAYER = 1
 WORLD_CODE = 1
 AREA_FLAGS = 0x80
@@ -157,20 +161,39 @@ def tag(group, part):
     return f"{group:02X}" if len(LINKS[group]) == 1 else f"{group:02X}-{part['fc']:02X}"
 
 
-def hook_rows(links, place):
-    """dq4entrancehook (arrivals, leaving) of every FC group with a field entrance: its entrance leads to its
-    arrival, and its maps leave for its entrance. A DQ5 group of one FC group leaves from any map."""
+def doors(prg):
+    """{FC group: (DQ5 entrance cells, DQ5 cell it leaves onto)} of every LINKS part with a field entrance
+    (dq4fieldport.door on FC field 0). Each listed block must be an FC entrance of that group."""
+    fc_entrances = {(fx, fy): g for g, fx, fy, *rest in dq4field.entrances(prg) if (rest[-1] or 0) == 0}
+    _, props = dq4fieldport.fc_field(prg)
+    out = {}
+    for parts in LINKS.values():
+        for part in parts:
+            if not part["field"]:
+                continue
+            for fx, fy in part["field"]:
+                if fc_entrances.get((fx, fy)) != part["fc"]:
+                    raise ValueError(f"FC field ({fx:02X},{fy:02X}) is not an entrance of FC group {part['fc']:02X}")
+            out[part["fc"]] = dq4fieldport.door(props, part["field"])
+    return out
+
+
+def hook_rows(links, place, entrances):
+    """dq4entrancehook (arrivals, leaving) of every FC group with a field entrance: each of its entrance cells
+    (entrances[FC group] = (cells, leave cell), as doors) leads to its arrival, and its maps leave onto the leave
+    cell. A DQ5 group of one FC group leaves from any map."""
     arrivals, leaving = [], []
     for group, parts in links.items():
         for part in parts:
             if not part["field"]:
                 continue
-            fx, fy = part["field"]
-            arrivals.append((group, fx, fy, place[part["fc"], part.get("map", 0)][1], *cell(*part["arrival"]), LAYER, 0))
+            found, (lx, ly) = entrances[part["fc"]]
+            for fx, fy in found:
+                arrivals.append((group, fx, fy, place[part["fc"], part.get("map", 0)][1], *cell(*part["arrival"]),
+                                 LAYER, 0))
             numbers = [n for (g, _), (_, n) in place.items() if g == part["fc"]]
             first, last = (0, 0x1F) if len(parts) == 1 else (min(numbers), max(numbers))
-            # An aux entrance stands one cell below itself when the party leaves (2A:F466).
-            leaving.append((group, first, last, fx, fy + 1))
+            leaving.append((group, first, last, lx, ly))
     return arrivals, leaving
 
 
@@ -380,12 +403,15 @@ def build(dq5, dq4, out):
 
     _run(DQ5_TOOLS / "dq5fieldtables.py", dq5, "dump", "-o", out / "fieldtables-orig.json")
     tables = json.loads((out / "fieldtables-orig.json").read_text(encoding="utf-8"))
-    aux = [{k: e[k] for k in ("group", "x", "y")} for e in tables["entrances"] if e["table"] == "aux"]
-    aux += [{"group": group, "x": part["field"][0], "y": part["field"][1]} for group, parts in LINKS.items()
-            for part in parts if part["field"]]
-    step("dq5fieldtables.py", "entrances", {"format": "dq5fieldtables/1", "entrance_tables": {"aux": aux}}, dq5,
+    worlds = {a["group"]: a for a in tables["arrivals"]}
+    entrance_tables = {name: dq4fieldport.park([e for e in tables["entrances"] if e["table"] == name], worlds)
+                       for name in ("main", "aux")}
+    found = doors(prg)
+    entrance_tables["aux"] += [{"group": group, "x": x, "y": y} for group, parts in LINKS.items()
+                               for part in parts if part["field"] for x, y in found[part["fc"]][0]]
+    step("dq5fieldtables.py", "entrances", {"format": "dq5fieldtables/1", "entrance_tables": entrance_tables}, dq5,
          *ENTRANCES_AT, *new_map_args)
-    arrivals, leaving = hook_rows(LINKS, place)
+    arrivals, leaving = hook_rows(LINKS, place, found)
     manifests.append(_save(out / "entrance-hook.dq5patch.json", {
         "format": "dq5patch/1", "name": "dq4-entrance-hook",
         "writes": dq4entrancehook.writes(ENTRANCE_HOOK_AT, arrivals, leaving)}))
@@ -398,6 +424,7 @@ def build(dq5, dq4, out):
     with_patches = [a for m in manifests for a in ("--with-patch", m)]
     checks.append(step("dq5chestplace.py", "chests", place, dq5, *CHEST_AT, "--tables", _save(out / "chest-tables.json", base),
                        *new_map_args, *with_patches))
+    manifests.append(dq4fieldport.patch(dq5, prg, out / "field.dq5patch.json", FIELD_AT))
 
     rom = out / "groups.sfc"
     _run(DQ5_TOOLS / "dq5build.py", dq5, "build", *manifests, "--size", 4, "-o", rom, "--ips", out / "groups.ips")
@@ -406,7 +433,8 @@ def build(dq5, dq4, out):
     for tool, source, args in checks:
         _run(DQ5_TOOLS / tool, rom if tool == "dq5newmap.py" else dq5, "check", source, *args)
     summary = {"rom": str(rom), "maps": new_maps, "exits": ours, "areas": areas,
-               "fields": {tag(g, part): part["field"] for g, parts in LINKS.items() for part in parts if part["field"]},
+               "fields": {tag(g, part): {"entrances": found[part["fc"]][0], "leave": found[part["fc"]][1]}
+                          for g, parts in LINKS.items() for part in parts if part["field"]},
                "records_end": report["records_end"], "bank01_bytes": report["bank01_bytes"]}
     _save(out / "groups.json", summary)
     return summary
