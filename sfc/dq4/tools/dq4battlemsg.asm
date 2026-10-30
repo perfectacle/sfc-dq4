@@ -118,6 +118,33 @@ BmRun:
     INC.w !bm_p
     JMP .token
 .done
+    ; 끝 띄움 뒤에 구간이 아닌 것(이름 등)이 오면, 띄움을 뺀 칸 올림 틈이 3점 이상일 때 그 틈을 띄어쓰기로 쓴다.
+    ; 숫자는 원래 글자 칸이 바로 붙으므로 빼지 않는다. 줄 넘김 검사(BmCarryWrap)가 줄인 폭을 보도록 그보다 먼저
+    LDA.w !bm_tail
+    AND #$00FF
+    BEQ ++
+    CMP #$0080              ; 좁은 부호 뒤 당김(음수)은 띄움이 아니다. 빼면 !bm_x 가 FFxx 로 깨진다
+    BCS ++
+    STA.w !bm_s
+    LDX.w !bm_n
+    LDA.w !bm_buf+1,X       ; 구간 다음 바이트(버퍼를 당기기 전)
+    AND #$00FF
+    CMP #$00E3
+    BEQ ++
+    CMP #$00FB
+    BEQ ++
+    LDA.w !bm_x
+    SEC
+    SBC.w !bm_s
+    STA.w !bm_v
+    EOR #$FFFF
+    INC
+    AND #$0007
+    CMP #$0003
+    BCC ++
+    LDA.w !bm_v
+    STA.w !bm_x
+++
     JSR BmCarryWrap
     BCC +
     JMP .token
@@ -143,32 +170,6 @@ BmRun:
     INX
     CPX #$0080
     BCC -
-    ; 끝 띄움 뒤에 구간이 아닌 것(이름 등)이 오면, 띄움을 뺀 칸 올림 틈이 3점 이상일 때 그 틈을 띄어쓰기로 쓴다.
-    ; 숫자는 원래 글자 칸이 바로 붙으므로 빼지 않는다
-    LDA.w !bm_tail
-    AND #$00FF
-    BEQ +
-    CMP #$0080              ; 좁은 부호 뒤 당김(음수)은 띄움이 아니다. 빼면 !bm_x 가 FFxx 로 깨진다
-    BCS +
-    STA.w !bm_s
-    LDA.w !bm_buf
-    AND #$00FF
-    CMP #$00E3
-    BEQ +
-    CMP #$00FB
-    BEQ +
-    LDA.w !bm_x
-    SEC
-    SBC.w !bm_s
-    STA.w !bm_v
-    EOR #$FFFF
-    INC
-    AND #$0007
-    CMP #$0003
-    BCC +
-    LDA.w !bm_v
-    STA.w !bm_x
-+
     JSR BmEmit
     PLB
     JML $24872E
@@ -257,11 +258,25 @@ BmKana:
     BCC .unknown
     CMP #$000C
     BCS .kana
+    ; 숫자는 글리프 폭대로 붙인다(한글 간격이면 「1 0 0」처럼 벌어짐)
     SEC
     SBC #$0002
+    PHA
     CLC
     ADC.w #!bm_digit0
-    BRA .glyph
+    JSR BmGlyph
+    PLX
+    LDA.l BmDigitAdv,X
+    AND #$00FF
+    CMP #$0080
+    BCC +
+    ORA #$FF00
++
+    CLC
+    ADC.w !bm_x
+    STA.w !bm_x
+    PLX
+    BRL .byte
 .kana
     CMP #$0080
     BCS .unknown
@@ -275,14 +290,18 @@ BmKana:
 .glyph
     JSR BmGlyph
     PLX
-    BRA .byte
+    BRL .byte
 .unknown
     LDA.w !bm_x
     CLC
     ADC.w #!bm_space
     STA.w !bm_x
     PLX
-    BRA .byte
+    BRL .byte
+
+; 숫자 0~9 마다 글리프 폭 − 한글 간격(부호 있는 점 수)
+BmDigitAdv:
+    db !bm_digit_adv
 
 ; 직접 페이지 $00 = 길이, $01~ = 이름 바이트를 이름 표(!bm_names)에서 찾는다(DB = 7E, M = X = 16).
 ; 있으면 C = 0, !bm_p = 첫 토큰 자리, !bm_n = 토큰 수. 없으면 C = 1.

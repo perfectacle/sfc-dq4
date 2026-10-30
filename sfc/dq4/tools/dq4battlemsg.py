@@ -420,7 +420,7 @@ def apply(d, font, render, first_glyph):
             f'!bm_jong = ${at["jong"]:06X}\n!bm_charset = ${at["charset"]:06X}\n!bm_codes = ${at["codes"]:06X}\n!bm_code = ${CODE_AT:06X}\n!bm_count = {len(POOL)}\n'
             f'!bm_b0 = {b0}\n!bm_b1 = {b1}\n'
             f'!bm_run_stub = ${RUN_STUB:06X}\n!bm_run_table = ${RUN_TABLE:06X}\n!bm_space = {SPACE_PX}\n'
-            f'!bm_digit0 = {punct["0"][0]}\n!bm_glyph_px = {GLYPH_PX}\n!bm_glyphs = {len(ne.GLYPHS)}\n!bm_names = ${NAMES_AT:06X}\n'
+            f'!bm_digit0 = {punct["0"][0]}\n!bm_digit_adv = "{",".join(f"${(punct[str(d)][1] - GLYPH_PX) & 0xFF:02X}" for d in range(10))}"\n!bm_glyph_px = {GLYPH_PX}\n!bm_glyphs = {len(ne.GLYPHS)}\n!bm_names = ${NAMES_AT:06X}\n'
             f'!bm_appear = ${NAMES_AT + appear_at:06X}\n!bm_appear_count = {len(appear)}\n')
 
 
