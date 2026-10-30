@@ -70,12 +70,15 @@ def score_path(assets, ident):
 def provisional_map(score, envelope=False):
     """영역마다 다른 가짜 샘플 번호를 주어 시퀀스 크기와 곡 묶음 레코드 길이의 위한계를 어림한다."""
     counts, _ = bank.used_regions(score)
+    tunes = bank.region_tunes(score)
     mapping, ids = {}, {}
     for program, k in sorted(counts):
         region = score['instruments'][str(program)]['regions'][k]
         key = (region['sample'], region['base'], (bank.nds_adsr if envelope else bank.approximate_adsr)(region))
         ids.setdefault(key, 0x26 + len(ids))
         entry = {'lo': region['lo'], 'hi': region['hi'], 'sample': ids[key]}
+        if tunes.get((program, k)):
+            entry['tune'] = tunes[(program, k)]
         if envelope:
             entry |= {x: region[x] for x in ('attack', 'decay', 'sustain', 'release') if x in region}
             entry['header'] = list(key[2])
@@ -106,7 +109,8 @@ def transfer_plan(first_tick, notes, sizes, pre_bytes, lead_bytes=0):
 def sample_identity(detail):
     """표본율·자르기만 다르고 같은 NDS 샘플·기준음·ADSR·반복인 자원을 한 묶음으로 본다."""
     envelope = detail['envelope']
-    return detail['source'], detail['base_midi'], envelope['adsr1'], envelope['adsr2'], bool(detail['source_loop'])
+    return (detail['source'], detail['base_midi'], envelope['adsr1'], envelope['adsr2'], bool(detail['source_loop']),
+            detail.get('tune', 0))
 
 
 def share_samples(found, details, program_map, resources, known, next_id, *, budget=None, loose=False):

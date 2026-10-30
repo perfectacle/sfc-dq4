@@ -82,6 +82,13 @@ class LevelTests(unittest.TestCase):
         self.assertIn('release 16', text)
         self.assertEqual(text.count('adsr '), 2)  # 덮어쓴 음, 그리고 머리 값으로 되돌리기
 
+    def test_large_bend_becomes_fine_tune_and_small_is_dropped(self):
+        notes = score([(0, 24, 60, 100), (24, 24, 60, 100), (48, 24, 60, 100)])
+        for e, bend in zip(notes['timeline'], (-16, 3, -16)):
+            e['bend'], e['bend_range'] = bend, 2
+        text = port.convert(notes, voices=1).text
+        self.assertEqual([x.strip() for x in text.split('\n') if 'fine_tune' in x], ['fine_tune E0', 'fine_tune 00', 'fine_tune E0'])
+
     def test_audible_velocity_change_is_written(self):
         notes = [(0, 24, 60, 100), (24, 24, 60, 50)]
         result = port.convert(score(notes), voices=1)

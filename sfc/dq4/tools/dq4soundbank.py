@@ -8,6 +8,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import statistics
 import struct
 import sys
 import wave
@@ -245,6 +246,10 @@ def convert_sample(path, region, *, max_rate=12000, cache_dir=None, seconds=None
         partial.replace(cache)
     adsr1, adsr2 = (nds_adsr if envelope else approximate_adsr)(region)
     pitch = pitch_word(effective_rate, region['base'])
+    if region.get('tune'):
+        pitch = round(pitch * 2 ** (region['tune'] / 128 / 12))
+        if not 1 <= pitch <= 65535:
+            raise ValueError(f'DQ5 샘플 음높이 범위 초과: tune={region["tune"]}')
     result = brr.resource(encoded, (loop_start or 0) // 16, adsr1=adsr1, adsr2=adsr2, pitch=pitch)
     if len(result) - 2 > 65535:
         raise ValueError('샘플 자원 길이 16-bit 초과')
@@ -253,7 +258,7 @@ def convert_sample(path, region, *, max_rate=12000, cache_dir=None, seconds=None
         'effective_rate': round(effective_rate, 6), 'samples': len(converted),
         'source_loop': list(loop) if loop else None, 'loop_start': loop_start,
         'brr_bytes': len(encoded), 'resource_bytes': len(result), 'pitch': pitch,
-        'base_midi': region['base'], 'snr_db': round(hw_snr(converted, encoded), 3),
+        'base_midi': region['base'], 'tune': region.get('tune', 0), 'snr_db': round(hw_snr(converted, encoded), 3),
         'snr_reference': 'S-DSP BRR decode (dq5brr) vs resampled 15-bit PCM, before gaussian interpolation',
         'envelope': {'status': 'linear_parameter_approximation', 'adsr1': adsr1, 'adsr2': adsr2,
                      'nds_attack': region.get('attack'), 'nds_decay': region.get('decay'),
@@ -269,6 +274,34 @@ RATES = (8000, 6000, 4500, 3200)
 # 시퀀스가 커서 샘플 예산이 작은 곡이 RATES 로도 들지 않을 때만 쓴다. RATES 에 넣으면 고르는 순서가 바뀌어 다른 곡의 샘플도 달라진다.
 LOW_RATES = RATES + (2400,)
 ONE_SHOT_SECONDS = (None, 1.2, 0.6)
+
+
+BEND_MIN_UNITS = 10  # 1/128 반음 단위. 10 은 약 8센트
+
+
+def bend_units(note, drums=()):
+    """NDS 음마다 고정 벤드를 1/128 반음 단위로(NDS 벤드 b 는 b/128 × 범위 반음). 겹친 트랙을 맥놀이로 어긋내는 몇 센트와
+    드럼 세트의 벤드는 0 으로 본다."""
+    units = round((note.get('bend') or 0) * note.get('bend_range', 2))
+    return units if abs(units) >= BEND_MIN_UNITS and note['program'] not in drums else 0
+
+
+def drum_programs(score):
+    return {int(p) for p, ins in (score.get('instruments') or {}).items() if ins and ins.get('type') == '드럼 세트'}
+
+
+def region_tunes(score):
+    """영역마다 그 영역 음들의 고정 벤드 중앙값. 샘플 음높이에 미리 구워 음마다 미세 조정 명령을 쓰지 않게 한다."""
+    drums, units = drum_programs(score), {}
+    for e in score['timeline']:
+        instrument = e.get('op') == 'note' and score['instruments'].get(str(e['program']))
+        if not instrument:
+            continue
+        for k, region in enumerate(instrument['regions']):
+            if region['lo'] <= e['note'] <= region['hi']:
+                units.setdefault((e['program'], k), []).append(bend_units(e, drums))
+                break
+    return {key: round(statistics.median(v)) for key, v in units.items() if round(statistics.median(v))}
 
 
 def used_regions(score):
@@ -305,7 +338,8 @@ def build_bank(score, asset_root, *, start_id=0x26, max_rate=8000, cache_dir=Non
     budget(바이트)·max_samples(곡 묶음 칸)를 넘으면 손실이 가장 작은 줄이기를 하나씩 고른다.
     쓰이는 음이 적은 영역을 같은 프로그램의 이웃 영역 샘플로 합치기, 표본율 낮추기, 반복 없는 샘플 자르기.
     무엇을 줄였는지는 report['reductions']에 남긴다. envelope 이면 샘플 머리를 nds_adsr 로 하고, 프로그램 표에 영역의
-    엔벨로프 값과 머리 ADSR('header')을 담아 변환기가 음마다 adsr·release 를 쓰게 한다.
+    엔벨로프 값과 머리 ADSR('header')을 담아 변환기가 음마다 adsr·release 를 쓰게 한다. 영역 음들의 고정 벤드 중앙값
+    (region_tunes)은 샘플 음높이에 굽고 프로그램 표의 'tune' 에 남긴다.
     """
     adsr_of = nds_adsr if envelope else approximate_adsr
     if not 0x26 <= start_id < 0xC8:
@@ -313,6 +347,7 @@ def build_bank(score, asset_root, *, start_id=0x26, max_rate=8000, cache_dir=Non
     root = Path(asset_root)
     samples = root / 'nds/dq4/sound/samples'
     counts, silent = used_regions(score)
+    tunes = region_tunes(score)
     regions = {}
     for (program, k), n in counts.items():
         region = score['instruments'][str(program)]['regions'][k]
@@ -321,7 +356,8 @@ def build_bank(score, asset_root, *, start_id=0x26, max_rate=8000, cache_dir=Non
         path = samples / region['sample']
         if not path.resolve().is_relative_to(samples.resolve()):
             raise ValueError('sample path outside asset root')
-        regions[(program, k)] = (region, path, n)
+        tune = tunes.get((program, k))
+        regions[(program, k)] = (region | {'tune': tune} if tune else region, path, n)
     rates = [max_rate] + [r for r in rates if r < max_rate]
     looped = {}
 
@@ -335,7 +371,7 @@ def build_bank(score, asset_root, *, start_id=0x26, max_rate=8000, cache_dir=Non
 
     def identity(key):
         region = regions[key][0]
-        return region['sample'], region['base'], adsr_of(region)
+        return region['sample'], region['base'], adsr_of(region), region.get('tune', 0)
 
     sizes = {}
 
@@ -431,6 +467,8 @@ def build_bank(score, asset_root, *, start_id=0x26, max_rate=8000, cache_dir=Non
     for (program, k) in sorted(regions):
         region = regions[(program, k)][0]
         entry = {'lo': region['lo'], 'hi': region['hi'], 'sample': ids[identity(target[(program, k)])]}
+        if regions[target[(program, k)]][0].get('tune'):
+            entry['tune'] = regions[target[(program, k)]][0]['tune']
         if envelope:
             entry |= {x: region[x] for x in ('attack', 'decay', 'sustain', 'release') if x in region}
             entry['header'] = list(nds_adsr(regions[target[(program, k)]][0]))

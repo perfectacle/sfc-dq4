@@ -486,6 +486,15 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
     folded = []
     cc_emitted = 0
     level_skips, level_error = 0, 0.0
+    drums = bank.drum_programs(score)
+
+    def bend_units(note):
+        """샘플 음높이에 구운 영역 벤드(프로그램 표 'tune')를 뺀 나머지 E9 값. E9 의 1 은 1/128 반음."""
+        value = mapping[note['program']]
+        baked = next((r.get('tune', 0) for r in value if r['lo'] <= note['note'] <= r['hi']), 0) if isinstance(value, list) else 0
+        rest = bank.bend_units(note, drums) - baked
+        return rest if abs(rest) >= bank.BEND_MIN_UNITS else 0
+
     for lane_id, lane in enumerate(lanes):
         lines.append(f'Lvoice{lane_id}:')
         if hold is not None:
@@ -514,7 +523,9 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
                     previous = changed
         boundaries = sorted(cuts)
         current = 0
-        cache = {}
+        # 벤드를 쓰는 목소리는 앞 곡·루프 끝의 미세 조정이 남지 않게 처음과 루프 머리에서 다시 쓴다
+        tuned = any(bend_units(n) for n in lane)
+        cache = {'fine_tune': None} if tuned else {}
         last_note = None
         note_cc = {}
         for i, tick in enumerate(boundaries[:-1]):
@@ -525,6 +536,8 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
             if tick == loop_start:
                 lines.append(f'Lloop{lane_id}:')
                 cache.clear()
+                if tuned:
+                    cache['fine_tune'] = None
                 last_note = None
             if tick == split_tick:
                 lines.append(f'Lsplit{lane_id}:')
@@ -571,6 +584,11 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
                 if envelope and (cache.get('adsr') is None or _envelope_key(cache['adsr']) != _envelope_key(envelope[0])):
                     lines.append(f'  adsr {envelope[0][0]:02X} {envelope[0][1]:02X}')
                     cache['adsr'] = envelope[0]
+                tune = bend_units(note)
+                held = cache.get('fine_tune', 0)
+                if held is None or abs(held - tune) >= bank.BEND_MIN_UNITS or (tune == 0) != (held == 0):
+                    lines.append(f'  fine_tune {tune & 0xFF:02X}')
+                    cache['fine_tune'] = tune
                 release = envelope[1] if envelope else release_rate
                 if cache.get('release') is None or abs(cache['release'] - release) > 1:
                     setting('release', release)
