@@ -6,8 +6,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import dq5sprite as S  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
-from dq5objlayout import (FORMAT, TABLE, VEHICLE_PARTS, dump, normalized, object_entry, parse_token,  # noqa: E402
-                          patch, token)
+from dq5objlayout import (FORMAT, REGION_END, TABLE, VEHICLE_PARTS, address, dump, normalized,  # noqa: E402
+                          object_entry, parse_token, patch, token)
 
 
 def put(data, addr, raw):
@@ -53,9 +53,19 @@ class TokenTests(unittest.TestCase):
         for bad in ({'map': '04/06', 'x': 1, 'y': 1, 'cells': ['01', '01 02']},
                     {'map': 'FE/00', 'x': 1, 'y': 1, 'cells': ['01']},
                     {'map': '04/06', 'x': 512, 'y': 1, 'cells': ['01']},
-                    {'map': '04/06', 'x': 1, 'y': 1, 'cells': ['01'], 'cond': 'dusk'}):
+                    {'map': '04/06', 'x': 1, 'y': 1, 'cells': ['01'], 'cond': 'dusk'},
+):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 object_entry(bad, '')
+
+
+    def test_address(self):
+        self.assertEqual(address('16:FE10'), 0x16FE10)
+        # 원래 표에도 아래 바이트가 80 인 384 가 있어(필드 Y 는 128 로 읽힘) 그대로 받는다.
+        self.assertEqual(object_entry({'map': 'field0', 'x': 128, 'y': 384, 'cells': ['01']}, '')[0][2:7:4], b'\x80\x4e')
+        for bad in ('16FE10', '15:FE10', '16:7FFF', '16:FE1', None):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                address(bad)
 
 
 class PatchTests(unittest.TestCase):
@@ -90,6 +100,28 @@ class PatchTests(unittest.TestCase):
         self.assertNotIn('orig', w[1])
         with self.assertRaises(ValueError):
             self.writes(doc, at=0x168000 - 0x10000)
+
+    def test_table_limit(self):
+        most = (REGION_END - TABLE - 1) // 9
+        self.assertEqual(most, 159)
+        one = dict(self.doc['objects'][0], cells=['00'])
+        self.writes(dict(self.doc, objects=[one] * most), at=0x16FE10)
+        with self.assertRaises(ValueError):
+            self.writes(dict(self.doc, objects=[one] * (most + 1)), at=0x16FE10)
+
+    def test_at_past_bank_end(self):
+        doc = dict(self.doc, objects=self.doc['objects'] + [dict(self.doc['objects'][0], cells=['11 12 13 14'])])
+        self.writes(doc, at=0x16FFF5)
+        with self.assertRaises(ValueError):
+            self.writes(doc, at=0x16FFF8)
+
+    def test_reuses_remaining_region(self):
+        # 표 뒤 남은 구역에 같은 바이트가 있으면 --at 없이 그 자리를 가리킨다.
+        put(self.rom.d, TABLE + 0x100, bytes([0x21, 0x22]))
+        doc = dict(self.doc, objects=[self.doc['objects'][0], dict(self.doc['objects'][1], cells=['21 22'])])
+        w = self.writes(doc)
+        self.assertEqual([x['at'] for x in w], ['16:F862'])
+        self.assertEqual(bytes.fromhex(w[0]['hex'])[16:18], ((TABLE + 0x100) & 0xFFFF).to_bytes(2, 'little'))
 
     def test_vehicle_and_set_in_place(self):
         v = next(x for x in self.doc['vehicles'] if x['part'] == '80-2')
