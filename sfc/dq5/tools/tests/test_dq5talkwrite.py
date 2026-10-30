@@ -51,6 +51,9 @@ class EncodeTests(unittest.TestCase):
         self.assertEqual(encode_script([{'op': 'msg', 'id': '129'}], 'x'), bytes.fromhex('61 29 3f'))
         self.assertEqual(encode_script([{'op': 'msg', 'id': '615'}], 'x'), bytes.fromhex('40 00 3f'))
         self.assertEqual(encode_script([{'op': 'msg', 'id': 'C7F'}], 'x'), bytes.fromhex('46 6a 3f'))
+        # dq5textwrite 가 3200 이상을 덧붙인 롬을 위해 1FFF 까지 받는다(1000 이상은 4자리).
+        self.assertEqual(encode_script([{'op': 'msg', 'id': 'C80'}], 'x'), bytes.fromhex('46 6b 3f'))
+        self.assertEqual(encode_script([{'op': 'msg', 'id': '1FFF'}], 'x'), bytes.fromhex('59 ea 3f'))
 
     def test_other_ops(self):
         body = [{'op': 'flag-set', 'index': 0x60, 'value': 0x5A}, {'op': 'flag-off', 'index': 1, 'mask': 2},
@@ -61,7 +64,8 @@ class EncodeTests(unittest.TestCase):
     def test_invalid(self):
         msg = {'op': 'msg', 'id': '129'}
         cases = [
-            [], [{'op': 'msg', 'id': 'C80'}], [{'op': 'msg', 'id': 297}], [{'op': 'msg', 'id': '129', 'x': 1}],
+            [], [{'op': 'msg', 'id': '2000'}], [{'op': 'msg', 'id': '0C80'}], [{'op': 'msg', 'id': 297}],
+            [{'op': 'msg', 'id': '129', 'x': 1}],
             [{'op': 'jump'}], [{'op': 'flag-on', 'index': 256, 'mask': 1}], [{'op': 'flag-on', 'index': True, 'mask': 1}],
             [{'op': 'call', 'target': '7FFF'}],
             [{'op': 'if', 'cond': {'code': '16', 'index': 1}, 'then': msg}],

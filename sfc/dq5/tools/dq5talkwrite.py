@@ -34,7 +34,8 @@ GROUPS = (COUNT + 31) // 32
 # 원래 스크립트가 빈틈 없이 차지하는 자리. 06:8128 은 앞 코드의 RTL, 06:AEF8 은 묶음 표.
 REGION = (0x068129, TABLE)
 MAX_SCRIPT = 256
-MESSAGES = 3200
+# dq5textwrite 가 3200 이상을 덧붙일 수 있어, 메시지 명령 bit5 갈래(v & 1FFF)가 닿는 끝까지 받는다.
+MESSAGES = 0x2000
 # 조건 코드 → 인자 이름. 형식 문서에서 실측한 것만 받는다. 16 은 실행(06:B31F)이 3바이트, 건너뛰기(06:B27E)가 2바이트로
 # 길이가 어긋나고, 1C 는 코드 읽기뿐이라 받지 않는다.
 CONDS = {0x02: (), 0x03: ('member',), 0x05: (), 0x11: ('item',), 0x13: ('record',), 0x14: (),
@@ -238,7 +239,10 @@ def encode_op(value, where):
     op = value.get('op')
     if op == 'msg':
         fields(value, ('op', 'id'), (), where)
-        n = hexnum(value['id'], 0, MESSAGES - 1, 3, f'{where}.id')
+        ident = value['id']
+        n = hexnum(ident, 0, MESSAGES - 1, 4 if isinstance(ident, str) and len(ident) == 4 else 3, f'{where}.id')
+        if ident != f'{n:03X}':
+            raise ValueError(f'{where}.id: 1000 미만은 3자리, 이상은 4자리여야 함')
         v = n - MESSAGE_BASE if n >= MESSAGE_BASE else n | 0x2000
         return bytes([0x40 | v >> 8, v & 0xFF])
     if op == 'if':

@@ -432,7 +432,7 @@ class NpcJob(Job):
 
 class TextJob(Job):
     """dq5text/1 을 dq5textwrite.py patch --at 로. over 를 주면 그 고정 롬이 옮겨 둔 보행 메시지 묶음을 기준으로
-    고친 것만 바꾸고(--base) 그 묶음과 원본 훅 쓰기를 대신한다. 머리(디코더·트리·글자 묶음 표)는 한 뱅크 안."""
+    고친 것만 바꾸고(--base) 그 묶음과 원본 훅 쓰기를 대신한다. 머리(디코더·트리·옮긴 색인·글자 묶음 표)는 한 뱅크 안."""
 
     def prepare(self, out):
         import dq5textwrite as tw
@@ -451,7 +451,7 @@ class TextJob(Job):
             messages, font, glyphs = tw.read_messages(self.ctx.original), None, tw.GLYPHS
         self.messages = tw.overrides(messages, doc, glyphs)
         _, nodes, _ = tw.tree(self.messages, glyphs)
-        self.head = DECODER_END - DECODER + 8 + len(nodes) * 4 + len(font or b'')
+        self.head = DECODER_END - DECODER + 8 + len(nodes) * 4 + tw.index_size(self.messages) + len(font or b'')
 
     def run(self, out, at, alt=None):
         target = out / f'{self.name}.dq5patch.json'
