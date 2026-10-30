@@ -233,15 +233,7 @@ EXAMPLES = {
     (0x1E, 0x1B): ("cave_rock_red", "아래의 붉은 땅"),
     (0x1E, 0x0E): ("water0", "먼 물결"),
     (0x1E, 0x0F): ("water0", "먼 물결"),
-    (0x32, 0x15): ("cloud", "구름"),
-    (0x32, 0x16): ("cloud", "구름"),
-    (0x32, 0x17): ("cloud", "구름"),
-    (0x32, 0x18): ("cloud", "구름"),
-    (0x32, 0x19): ("cloud", "구름"),
-    (0x32, 0x1A): ("cloud", "구름"),
-    (0x32, 0x1B): ("cloud", "구름"),
-    (0x32, 0x1C): ("cloud", "구름"),
-    (0x32, 0x1D): ("cloud", "구름"),
+    (0x22, 0x09): ("stone_floor", "석상 밑 돌 바닥"),
     (0x1C, 0x02): ("altar", "금 제단"),
     (0x1C, 0x10): ("pot", "분홍 항아리"),
     (0x1E, 0x00): ("statue", "마물 석상"),
@@ -316,7 +308,7 @@ SHEET_STYLES = {
     0x1C: ("cave_rock_brown", "stone_floor", "sky"), 0x1D: ("cave_rock_brown", "cave_floor_brown"),
     0x1E: ("dark_void", "cave_floor_earth"), 0x1F: ("cave_rock_earth", "cave_floor_earth"),
     0x20: ("castle_wall", "stone_floor", "sky"), 0x21: ("castle_wall", "brick_paving", "sky"),
-    0x22: ("castle_wall", "cloud", "sky"), 0x23: ("wood_grain", "wood_floor"), 0x24: ("wood_grain", "wood_floor"),
+    0x22: ("castle_wall", "cloud", "sky_deep"), 0x23: ("wood_grain", "wood_floor"), 0x24: ("wood_grain", "wood_floor"),
     0x25: ("castle_wall", "grass"), 0x26: ("castle_wall", "red_paving"), 0x28: ("castle_wall", "stone_floor"),
     0x29: ("cave_rock_moss", "cave_floor_earth"), 0x2A: ("cave_rock_red", "cave_floor_brown"),
     0x2B: ("castle_wall", "red_paving"), 0x2D: ("stone_wall", "dirt"), 0x2E: ("wood_wall", "wood_floor"),
@@ -335,13 +327,15 @@ PROPERTY_ART = {
     0xAB: "wardrobe", 0xAA: "pot",
 }
 FALLING = (0x05, 0x0B)
-# Dungeon blocks whose shape matters: cliff tops, rock pillars, ledge and shore edges, tree-hollow rims.
+# Dungeon blocks whose shape matters: cliff tops, rock pillars, ledge, shore and cloud edges, tree-hollow rims.
 # "trace" keeps the FC block's black outline pixels and paints its sky and void areas, with the rest in the
 # sheet's wall or floor (or the asset after the colon). "slope" and "slope_r" are cave slopes that FC draws as
 # a one-colour floor triangle beside dithered rock, with no outline: the floor is the upper-left or upper-right
-# triangle.
+# triangle. "stripes" is a lit rock face FC draws as light bands running down to the right: here floor-coloured
+# bands two pixels wide every eight (so they continue across stacked blocks), each with an outline pixel after.
 SHAPES = {
-    0x11: {0x02: "slope", 0x03: "slope_r", 0x16: "slope", 0x17: "slope_r"},
+    0x11: {0x02: "slope", 0x03: "slope_r", 0x16: "slope", 0x17: "slope_r",
+           **{b: "stripes" for b in (0x07, 0x0B, 0x1E)}},
     0x13: {0x09: "trace"},
     0x17: {0x11: "trace"},
     0x18: {0x0C: "trace:water0", 0x0D: "trace:water0", 0x0E: "trace:water0", 0x10: "trace:water0",
@@ -351,14 +345,23 @@ SHAPES = {
     0x1C: {b: "trace" for b in (0x08, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
                                 0x1A, 0x1C, 0x1D)},
     0x1E: {b: "trace" for b in (0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x1C, 0x1D)},
+    0x22: {b: "trace:cloud" for b in (0x12, 0x13, 0x16, 0x17, 0x19, 0x1A, 0x1B, 0x1C)},
     0x23: {b: "trace" for b in (0x08, 0x09, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11)},
     0x24: {b: "trace" for b in (0x04, 0x05, 0x06, 0x09, 0x0A, 0x0B, 0x0C, 0x0D)},
-    0x2A: {0x12: "slope", 0x13: "slope_r"},
+    # 2A/11, 14 and 16 are the unlit faces (11/1F, 0A and 06 in brown), left as rock like those.
+    0x2A: {0x12: "slope", 0x13: "slope_r", **{b: "stripes" for b in (0x10, 0x15, 0x17)}},
     0x2D: {b: "trace" for b in (0x04, 0x05, 0x0B, 0x15, 0x19, 0x1A)},
+    0x32: {b: "trace:cloud" for b in range(0x15, 0x1E)},
 }
-# FC sky blues; the pale cyans 2C, 3C and 31 are cloud. A traced water base keeps these blues as its own
-# water (sheet 18 draws deep water in 01, 11 and 21).
-SKY = {0x01, 0x02, 0x11, 0x12, 0x21, 0x22}
+# FC sky blues: 21 and 22 are the sky, 12 the deep sky below the clouds of sheet 22; the pale cyans 2C, 3C and
+# 31 are cloud. A traced water base keeps these blues as its own water (sheet 18 draws deep water in 01, 11
+# and 21).
+SKY = {0x21, 0x22}
+DEEP_SKY = {0x12}
+WATER_BLUES = {0x01, 0x11, 0x21}
+# Line 7 holds the blues in colours 1-7 and, after them, the greens only the shore art uses; a shaped block over
+# water, sky or cloud takes its outline and moved colours from the blues, or its edges turn green.
+SHAPE_SPAN = {7: 8}
 
 
 def map_palette(name, sheet):
@@ -451,11 +454,14 @@ def fc_pixels(prg, t, block):
 
 
 def _shape_classes(prg, t, block, kind, base):
-    """16 rows of A (the base), S (sky), V (void), O (outline) and F (floor, slopes only)."""
+    """16 rows of A (the base), S (sky), D (deep sky), V (void), O (outline) and F (floor, slopes and stripes)."""
     if kind == "slope":
         return [["F" if x + y < 15 else "O" if x + y == 15 else "A" for x in range(16)] for y in range(16)]
     if kind == "slope_r":
         return [["F" if x > y else "O" if x == y else "A" for x in range(16)] for y in range(16)]
+    if kind == "stripes":
+        return [["F" if (x - y) % 8 in (0, 1) else "O" if (x - y) % 8 == 2 else "A" for x in range(16)]
+                for y in range(16)]
     if kind != "trace":
         raise ValueError(f"{t:02X}/{block:02X}: unknown shape {kind}")
     rows = fc_pixels(prg, t, block)
@@ -464,10 +470,12 @@ def _shape_classes(prg, t, block, kind, base):
         row = []
         for x in range(16):
             c = rows[y][x]
-            if c in SKY and not base.startswith("water"):
-                row.append("S")
-            elif c in SKY:
+            if c in WATER_BLUES and base.startswith("water"):
                 row.append("A")
+            elif c in SKY:
+                row.append("S")
+            elif c in DEEP_SKY:
+                row.append("D")
             elif c == 0x0F:
                 around = [rows[yy][xx] for yy in range(max(0, y - 1), min(16, y + 2))
                           for xx in range(max(0, x - 1), min(16, x + 2))]
@@ -479,9 +487,9 @@ def _shape_classes(prg, t, block, kind, base):
     return out
 
 
-def _nearest(palette, value, bank):
+def _nearest(palette, value, bank, span=16):
     rgb = palette[value * 3:value * 3 + 3]
-    return min(range(bank * 16 + 1, bank * 16 + 16),
+    return min(range(bank * 16 + 1, bank * 16 + span),
                key=lambda i: sum((palette[i * 3 + c] - rgb[c]) ** 2 for c in range(3)))
 
 
@@ -490,7 +498,7 @@ def _shape_tile(prg, assets, name, palette, t, block):
     colours from other banks move to the nearest colour of that bank, and the outline is its darkest."""
     kind, base = name.split(":")
     style = SHEET_STYLES[t]
-    layers = {"A": _tile(assets, base, palette, t, block)[0], "S": assets["sky"],
+    layers = {"A": _tile(assets, base, palette, t, block)[0], "S": assets["sky"], "D": assets["sky_deep"],
               "V": assets[style[2] if len(style) > 2 else "dark_void"], "F": _tile(assets, style[1], palette, t, block)[0]}
     classes = _shape_classes(prg, t, block, kind, base)
     result = layers["A"].copy()
@@ -498,13 +506,14 @@ def _shape_tile(prg, assets, name, palette, t, block):
     for qy in (0, 8):
         for qx in (0, 8):
             bank = layers["A"].getpixel((qx, qy)) >> 4
-            dark = min(range(bank * 16 + 1, bank * 16 + 16), key=lambda i: sum(palette[i * 3:i * 3 + 3]))
+            dark = min(range(bank * 16 + 1, bank * 16 + SHAPE_SPAN.get(bank, 16)),
+                       key=lambda i: sum(palette[i * 3:i * 3 + 3]))
             for y in range(qy, qy + 8):
                 for x in range(qx, qx + 8):
                     k = classes[y][x]
                     value = dark if k == "O" else layers[k].getpixel((x, y))
                     if value >> 4 != bank:
-                        value = _nearest(palette, value, bank)
+                        value = _nearest(palette, value, bank, SHAPE_SPAN.get(bank, 16))
                         remapped += 1
                     result.putpixel((x, y), value)
     return result, {"shape": kind, "background": None, "transparent_pixels_filled": 0,
