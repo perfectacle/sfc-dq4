@@ -130,6 +130,10 @@ class RecordsTest(unittest.TestCase):
         from kr_patch.fc import ines
         cls.prg = ines.prg(ROM.read_bytes())
 
+    # FC stairs that do not lead back. きたのどうくつ 3D/02 (3E/05) is the 3D/01 (3E/04) of after the fall: its stairs
+    # lead to 3D/00, whose stairs lead to 3D/01 until $62AA bit7 turns them to 3D/02 (08:$B397).
+    ONE_WAY = {"3E/05"}
+
     def test_stairs_lead_back(self):
         records = {}
         for group in build.LINKS:
@@ -137,7 +141,7 @@ class RecordsTest(unittest.TestCase):
         for name, rows in records.items():
             group, number = int(name[:2], 16), int(name[3:], 16)
             for i, row in enumerate(rows):
-                if row["kind"] == "special":
+                if row["kind"] == "special" or name in self.ONE_WAY:
                     continue
                 there = row.get("group", group)
                 back = records[f"{there:02X}/{row['destination_map']:02X}"][row["exit"]]
@@ -148,7 +152,8 @@ class RecordsTest(unittest.TestCase):
         areas = {}
         for group in build.LINKS:
             areas.update(build.area_records(self.prg, group))
-        self.assertEqual(sorted(areas), ["36/00", "36/01"])
+        # エンドール's 04/00 doors to 04/02-04/04 and 04/02's bottom edge back to 04/00 are FC exit-table cells too.
+        self.assertEqual(sorted(areas), ["36/00", "36/01", "40/00", "40/02", "40/03", "40/04"])
         for rows in areas.values():
             for row in rows:
                 x0, y0, x1, y1 = row["rect"]

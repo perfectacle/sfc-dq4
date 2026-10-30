@@ -32,16 +32,20 @@ from kr_patch.fc import ines  # noqa: E402
 
 # DQ5 has no luck stat, so ラックのたね becomes the seed that raises the stat DQ5 has instead. Items DQ5 lacks
 # take a DQ5 item of the same kind: a flute for the key item あやかしのふえ until DQ4 key items exist, a hat for
-# はねぼうし.
-SUBSTITUTE = {"ラックのたね": "ふしぎなきのみ", "あやかしのふえ": "はるかぜのフルート", "はねぼうし": "きのぼうし"}
+# はねぼうし, a dancer's outfit for ピンクのレオタード (DQ5's てんしのレオタード is a far stronger armour).
+SUBSTITUTE = {"ラックのたね": "ふしぎなきのみ", "あやかしのふえ": "はるかぜのフルート", "はねぼうし": "きのぼうし",
+              "ピンクのレオタード": "おどりこのふく"}
 GOLD = 0x100
 # FC special chest contents with a DQ5 reward of the same kind: FF, the empty chest (message 0297), is DQ5 FFFF
 # 「からっぽだった」.
 EMPTY = 0xFFFF
-SPECIAL = {0xFF: EMPTY}
-# DQ5 drawer open bits 7E:222C + flag_index: the original table ends at 2236 & FC, and 2238 (flag_index 0C)
-# is read outside the table (dq5-build-format 「보물상자·조사 보상」), so new entries start at 2237.
-FIRST_FLAG = 0x0B
+# EE is chapter 3's iron safe (きたのどうくつ 3D/06): FC sets $627D bit3 and turns the cell into block 19 (1E:$B81B).
+# DQ5 has no such item, so it opens empty until that event is ported.
+SPECIAL = {0xFF: EMPTY, 0xEE: EMPTY}
+# DQ5 drawer open bits 7E:222C + flag_index: the original table ends at 2236 & FC, 2238 (flag_index 0C) is read
+# outside the table and 223C- are the two-cells-ahead chests (dq5-build-format 「보물상자·조사 보상」), so new
+# entries take 2237 and 2239-223B.
+FLAG_BYTES = (0x0B, 0x0D, 0x0E, 0x0F)
 
 
 def _reward(names, items, content, gold=True):
@@ -81,7 +85,7 @@ def port(dq5_path, dq4_path):
             continue
         group, number = target[e["group"], e["index"]]
         entry = {"x": 2 * e["x"] + 1, "y": 2 * e["y"] + 1, "reward": _reward(names, items, e["item"], gold=False),
-                 "flag_index": FIRST_FLAG + flags // 8, "mask": 0x80 >> flags % 8}
+                 "flag_index": FLAG_BYTES[flags // 8], "mask": 0x80 >> flags % 8}
         flags += 1
         maps.setdefault((group, number), {"chests": [], "furniture": []})["furniture"].append(entry)
         report.append({"fc": f"{e['group']:02X}/{e['index']:02X} ({e['x']},{e['y']})", "map": f"{group:02X}/{number:02X}",

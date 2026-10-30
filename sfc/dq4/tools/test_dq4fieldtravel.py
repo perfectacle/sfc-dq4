@@ -66,7 +66,8 @@ class RomTest(unittest.TestCase):
         prg = ines.prg(DQ4.read_bytes())
         found = dq4groupbuild.doors(prg)
         dests = travel.destinations(prg, dq4groupbuild.LINKS, found)
-        self.assertEqual([d["group"] for d in dests], [0x3D, 0x36, 0x37, 0x3C])
+        # FC destination order: サントハイム, バトランド, エンドール, ボンモール, イムル, たびだちのむら, レイクナバ.
+        self.assertEqual([d["group"] for d in dests], [0x3D, 0x36, 0x40, 0x3F, 0x37, 0x3C, 0x3E])
         bat = dests[1]
         self.assertEqual((bat["land"], bat["row"]), ((328, 94), (328, 93)))
         for d in dests:

@@ -78,9 +78,23 @@ LINKS = {
     0x3D: [{"fc": 0x01, "arrival": (0x0F, 0x1B), "attrs": "03/00", "field": [(0x27, 0x49)], "out": "down:64"},
            {"fc": 0x0E, "arrival": (0x0A, 0x2C), "attrs": "03/00", "field": [(0x47, 0x39)], "out": "down:64"},
            {"fc": 0x0F, "arrival": (0x16, 0x00), "attrs": "03/00", "field": [(0x60, 0x28)], "out": "up:64"}],
+    # Chapter 3: レイクナバ and the cave where its iron safe lies (きたのどうくつ, arrival on its stair to the field),
+    # ボンモール, and エンドール. Each town leads a DQ5 group, so each takes a ルーラ slot (dq4fieldtravel). Their
+    # people and sellers are those of chapter 3's start ($615A = 2).
+    0x3E: [{"fc": 0x16, "arrival": (0x00, 0x0D), "attrs": "03/00", "field": [(0x68, 0x24)], "out": "left:64",
+            "chapter": 3},
+           {"fc": 0x3D, "arrival": (0x0B, 0x03), "attrs": "03/00", "field": [(0x71, 0x14)],
+            "out": "down:32,wait:60,up:32", "chapter": 3}],
+    0x3F: [{"fc": 0x05, "arrival": (0x11, 0x1F), "map": 1, "attrs": "03/00", "field": [(0x74, 0x46)], "out": "down:64",
+            "chapter": 3}],
+    0x40: [{"fc": 0x04, "arrival": (0x17, 0x20), "attrs": "03/00", "field": [(0x67, 0x65)], "out": "down:64",
+            "chapter": 3}],
 }
-# The attribute table grows by 6 bytes a map and outgrows its own bank (108 spare bytes), so it moves whole.
-NEWMAP_AT = ("--entrance-table-at", "3C:C000", "--door-bank", "3B", "--attr-table-at", "3C:D000")
+# The attribute table grows by 6 bytes a map and outgrows its own bank (108 spare bytes), so it moves whole; the
+# map pointer table (3 bytes a map) outgrew bank 0F with chapter 3's maps and moves the same way. The entrance and
+# pointer tables sit after the chest tables (3C:8400-), leaving 3C:A000-CFFF to the area moves.
+NEWMAP_AT = ("--entrance-table-at", "3C:9000", "--door-bank", "3B", "--attr-table-at", "3C:D000",
+             "--pointer-table-at", "3C:9200")
 # New-map records, [start, end) areas in banks 30-3F: the map loader reads a record with DB set to its bank and
 # reads low WRAM meanwhile. One dq5newmap call puts all its records in one bank, so the records that do not fit the
 # first area go to the next areas in later calls (record_areas, records_pass).
@@ -96,8 +110,9 @@ TEXT_AT = ("--at", "35:8000")
 TALK_AT = ("--extra-at", "3C:E800", "--hook-at", "06:FE10")
 SHOP_AT = ("--shop-at", "3C:E000")
 INN_AT = 0x3CF000
+# The entrance hook's table grows by 9 bytes an entrance cell and passes 3C:FC00 with chapter 3.
 ENTRANCE_HOOK_AT = 0x3CF800
-SHOP_KEY_AT = 0x3CFC00
+SHOP_KEY_AT = 0x3CFE00
 # The three tables chests and drawers grow; dq5chestplace reads chest_maps and search with DB, so bank 00-3F.
 CHEST_AT = ("--chests-at", "3C:8400", "--chest-maps-at", "3C:8800", "--search-at", "3C:8C00")
 # The field loader reads both RLE chunks with DB set to their bank, so 30-3F; bank 3A is free in this build.
@@ -172,6 +187,11 @@ def has_people(fc_group, with_people=True):
     """Whether the FC people and shops of an FC group are ported (LINKS "people", on by default; `with_people` False
     ports none)."""
     return with_people and all(part.get("people", True) for parts in LINKS.values() for part in parts if part["fc"] == fc_group)
+
+
+def chapter(fc_group):
+    """FC chapter whose start the FC people and sellers of an FC group show (LINKS "chapter", 1 by default)."""
+    return next((part.get("chapter", 1) for parts in LINKS.values() for part in parts if part["fc"] == fc_group), 1)
 
 
 def tag(group, part):
@@ -320,8 +340,10 @@ def area_rows(group, place, cells):
 
 
 FALL_PROPS = (0x05, 0x0B)
-# Groups whose falling cells are linked. The other chapters' holes come with their chapter's events.
-FALL_GROUPS = range(0x36, 0x3C)
+# Groups whose falling cells are linked. The other chapters' holes come with their chapter's events. In chapter 3's
+# きたのどうくつ the way to the iron safe is the hole of 3D/01 down to 3D/03 (FC then sets $62AA bit7, which turns the
+# stairs into 3D/01 to 3D/02; that flag is not ported).
+FALL_GROUPS = (*range(0x36, 0x3C), 0x3E, 0x40)
 # FC groups whose falls drop to the field: {FC group: (FC maps, FC field cell)}. FC moves the party from the field
 # cell it came in by (12:$B6DD, $42/$43): the tower 30 drops it 3 cells below where そらとぶくつ lands, (88,16),
 # past the moat around the island. Those maps have no other way to the field, so the hook's leave row for them

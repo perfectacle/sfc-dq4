@@ -11,6 +11,7 @@ the new keys added and the two operands that point at it (06:F567 bank, 06:F56D 
 """
 
 import argparse
+import functools
 import json
 import sys
 from pathlib import Path
@@ -26,7 +27,7 @@ import dq4shop  # noqa: E402
 import dq5item  # noqa: E402
 import dq4shopkey  # noqa: E402
 from dq4environmentrom import GROUPS  # noqa: E402
-from dq4groupbuild import fc_map, has_people, placement  # noqa: E402
+from dq4groupbuild import chapter, fc_map, has_people, placement  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
 
 # FC shop kind (dq4shop.KINDS) -> DQ5 shop list kind (04:FBD5: 0 item, 1 armor, 2 weapon).
@@ -40,6 +41,9 @@ SELLER_CONDITIONS = ("counter", "낮", "밤", "주인공 Y")
 # Story-flag person lists (dq4shop.npc_lists) are not the start of chapter 1.
 FLAG_LIST = "목록 플래그"
 STORY_FLAG = "flag& "
+# dq4talk condition 16: $615A == n - 1, so "chapter n" is chapter n.
+CHAPTER = "chapter "
+YES = "yes"
 INN, CHURCH = 6, 5
 INN_TABLE = 0x04FD6D
 INN_ENTRIES = 21
@@ -64,11 +68,27 @@ def dq5_items(rom):
     return out
 
 
-def merchants(prg, fc_group, number):
-    """{(x, y, night): FC service kind} for the base person list (no story-flag list)."""
+@functools.cache
+def _names(prg):
+    return dq4shop.item_names(prg)[0]
+
+
+def has_goods(prg, kind, fc_group, number, items):
+    """Whether an FC service sells anything DQ5 has: a list kind needs one DQ5 item (dq5_items) in its FC list."""
+    if kind not in LIST_KIND:
+        return True
+    names = _names(prg)
+    return any(_fold(names[i & 0x7F]) in items for i in dq4shop.lookup(prg, kind, fc_group, number))
+
+
+def merchants(prg, fc_group, number, items=None):
+    """{(x, y, night): FC service kind} for the base person list (no story-flag list). With `items` (dq5_items),
+    a seller whose list has no DQ5 item at all only talks: レイクナバ 16/01 sells nothing but うまのふん."""
     out = {}
     for x, y, _, kind, cond, _ in dq4shop.merchants(prg, fc_group, number):
         if any(FLAG_LIST in c for c in cond):
+            continue
+        if items is not None and not has_goods(prg, kind, fc_group, number, items):
             continue
         # Story flags are all off at the start of a chapter: a seller that needs one is not there yet, and one
         # that needs one off is. The skip comes before the condition check so that the other conditions of a
@@ -76,6 +96,16 @@ def merchants(prg, fc_group, number):
         if any(c.startswith(STORY_FLAG) for c in cond):
             continue
         cond = [c for c in cond if not c.startswith(f"아님({STORY_FLAG}")]
+        # The chapter is the one whose start the FC group shows (dq4groupbuild.chapter).
+        here = chapter(fc_group)
+        if any(c.startswith(CHAPTER) and int(c[len(CHAPTER):]) != here for c in cond) or \
+                any(c.startswith(f"아님({CHAPTER}") and int(c[len(CHAPTER) + 3:-1]) == here for c in cond):
+            continue
+        cond = [c for c in cond if not c.startswith((CHAPTER, f"아님({CHAPTER}"))]
+        # A seller behind a はい/いいえ question (レイクナバ's weapon shop, where chapter 3's job starts) waits for
+        # its event; until then the person only talks.
+        if YES in cond:
+            continue
         unknown = [c for c in cond if not any(c.startswith(k) for k in SELLER_CONDITIONS)]
         if unknown:
             raise ValueError(f"{fc_group:02X}/{number:02X} ({x:02X},{y:02X}): seller condition {unknown}")
@@ -93,13 +123,28 @@ def _cpu(addr):
     return f"{addr >> 16:02X}:{addr & 0xFFFF:04X}"
 
 
-def keys(place, sellers):
-    """dq4shopkey rows for the (DQ5 group, FC group) pairs in `sellers`, keys from KEY_FIRST up in that order:
-    (DQ5 group, first DQ5 map, last DQ5 map of the FC group, key)."""
-    rows = []
-    for key, (group, fc_group) in enumerate(sorted(sellers), dq4shopkey.KEY_FIRST):
-        numbers = [n for (g, _), (dg, n) in place.items() if g == fc_group and dg == group]
-        rows.append((group, min(numbers), max(numbers), key))
+def keys(place, kinds):
+    """dq4shopkey rows (DQ5 group, first DQ5 map, last DQ5 map, key), keys from KEY_FIRST up. kinds[(DQ5 group,
+    DQ5 map)]: the list kinds and inn of its sellers. Each FC group with any of them gets one row over all its maps,
+    split into consecutive runs where a map brings a kind the run already has: a key has one list per kind and one
+    inn price (エンドール sells armour on 04/00 and in 04/09)."""
+    spans = {}
+    for (fc_group, _), (group, number) in place.items():
+        spans.setdefault((group, fc_group), []).append(number)
+    rows, key = [], dq4shopkey.KEY_FIRST
+    for (group, _), numbers in sorted(spans.items()):
+        numbers = sorted(numbers)
+        if not any(kinds.get((group, n)) for n in numbers):
+            continue
+        first, seen = numbers[0], set()
+        for n in numbers:
+            here = kinds.get((group, n), set())
+            if here & seen:
+                rows.append((group, first, n - 1, key))
+                key, first, seen = key + 1, n, set()
+            seen |= here
+        rows.append((group, first, numbers[-1], key))
+        key += 1
     return rows
 
 
@@ -120,10 +165,10 @@ def port(dq5_path, dq4_path, inn_at, key_at, with_people=True):
     maps = sorted(GROUPS.values())
     for group, number in maps:
         fc_group, fc_number = fc_map(prg, group, number)
-        services[f"{group:02X}/{number:02X}"] = merchants(prg, fc_group, fc_number) if has_people(fc_group, with_people) else {}
-    sellers = {(group, fc_map(prg, group, number)[0]) for group, number in maps
-               if set(services[f"{group:02X}/{number:02X}"].values()) & {*LIST_KIND, INN}}
-    rows = keys(placement(prg), sellers)
+        services[f"{group:02X}/{number:02X}"] = (merchants(prg, fc_group, fc_number, items)
+                                                 if has_people(fc_group, with_people) else {})
+    rows = keys(placement(prg), {(group, number): set(services[f"{group:02X}/{number:02X}"].values()) & {*LIST_KIND, INN}
+                                 for group, number in maps})
     for group, number in maps:
         fc_group, fc_number = fc_map(prg, group, number)
         found = services[f"{group:02X}/{number:02X}"]
@@ -185,7 +230,7 @@ def main():
     ap.add_argument("--dq5", default="rom/dq5.sfc")
     ap.add_argument("--dq4", default="rom/dq4.nes")
     ap.add_argument("--inn-at", default="3C:F000")
-    ap.add_argument("--key-at", default="3C:FC00")
+    ap.add_argument("--key-at", default="3C:FE00")
     ap.add_argument("--out", required=True, type=Path)
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)

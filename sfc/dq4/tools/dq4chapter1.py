@@ -416,9 +416,10 @@ NPC_BANK, NPC_ALT = 0x3F, '39:9000'
 
 
 def npc_base(env_patch):
-    """기본 목록 자리: 환경 맵 레코드가 3F 에서 끝난 다음 0x100 경계. 환경 맵이 늘면 따라 밀린다."""
+    """기본 목록 자리: 환경 맵 레코드가 3F 에서 끝난 다음 0x100 경계(3F 에 닿지 않으면 3F:8000). 환경 맵이 늘면 따라 밀린다."""
     _, _, writes = load(str(env_patch))
-    end = max(off + len(payload) for off, payload, _, _ in writes if off // 0x8000 == NPC_BANK)
+    end = max((off + len(payload) for off, payload, _, _ in writes if off // 0x8000 == NPC_BANK),
+              default=NPC_BANK * 0x8000)
     at = (end + 0xFF) & ~0xFF
     return f'{NPC_BANK:02X}:{0x8000 + at % 0x8000:04X}'
 

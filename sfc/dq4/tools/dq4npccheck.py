@@ -164,9 +164,12 @@ def talk_side(source, x, y, occupied):
 
 
 # FC people placed where nobody can reach them: (FC group, FC map, x, y). テンペ's three stand on wall blocks, cut off
-# from the town; フレノール's two night people stand below the map (its height is 1B).
+# from the town; フレノール's two night people stand below the map (its height is 1B). レイクナバ 16/00 (30x30) has
+# people right of and below the map; エンドール's colosseum stands 04/07 three on the top wall row and one on floor
+# walled in on all four sides.
 STAGED = {(0x0E, 0, 0x15, 0x0D), (0x0E, 0, 0x16, 0x0D), (0x0E, 0, 0x17, 0x0D), (0x0F, 0, 0x00, 0x22),
-          (0x0F, 0, 0x00, 0x23)}
+          (0x0F, 0, 0x00, 0x23), (0x16, 0, 0x24, 0x00), (0x16, 0, 0x00, 0x25),
+          (0x04, 7, 0x01, 0x00), (0x04, 7, 0x02, 0x00), (0x04, 7, 0x03, 0x00), (0x04, 7, 0x19, 0x04)}
 
 
 def main():

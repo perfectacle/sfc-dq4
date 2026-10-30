@@ -36,9 +36,9 @@ TARGETS = {
     "shrine-2a": (0x0E, 0x03), "konenbery-06": (0x12, 0x00), "attemut-05": (0x13, 0x00), "attemut-07": (0x16, 0x01),
     # One or two maps of each other town and castle sheet, picked for block coverage and few doors.
     "1A-01": (0x08, 0x02), "03-02": (0x08, 0x03), "17-00": (0x03, 0x0B), "0B-00": (0x03, 0x0E),
-    "08-01": (0x03, 0x0F), "10-00": (0x03, 0x10), "16-00": (0x04, 0x01),
-    "0A-00": (0x04, 0x09), "04-06": (0x0A, 0x06), "00-01": (0x04, 0x0B), "09-01": (0x04, 0x0C),
-    "00-00": (0x05, 0x00), "05-01": (0x06, 0x03),
+    "08-01": (0x03, 0x0F), "10-00": (0x03, 0x10),
+    "0A-00": (0x04, 0x09), "00-01": (0x04, 0x0B), "09-01": (0x04, 0x0C),
+    "00-00": (0x05, 0x00),
     # Harbour, theatre and the smaller sheets; none of these has a door.
     "11-00": (0x03, 0x03), "1A-00": (0x03, 0x09), "15-03": (0x0A, 0x08),
     "34-06": (0x0A, 0x0B), "2E-00": (0x0B, 0x03),
@@ -63,6 +63,10 @@ GROUPS = {
     # Chapter 2's castle and two towns in one group: サントハイム, テンペ, フレノール.
     "01-00": (0x3D, 0x00), "01-01": (0x3D, 0x01), "01-02": (0x3D, 0x02), "0E-00": (0x3D, 0x03),
     "0F-00": (0x3D, 0x04), "0F-01": (0x3D, 0x05),
+    # Chapter 3: レイクナバ with the iron-safe cave north of it, ボンモール, and エンドール.
+    **{f"16-{k:02X}": (0x3E, k) for k in range(3)}, **{f"3D-{k:02X}": (0x3E, 3 + k) for k in range(7)},
+    "05-00": (0x3F, 0x00), "05-01": (0x3F, 0x01),
+    **{f"04-{k:02X}": (0x40, k) for k in range(15)},
 }
 MAPS = {**TARGETS, **GROUPS}
 # Further banks for map records once the first one reaches the library.
@@ -275,12 +279,14 @@ def object_entries(found):
 
 
 def chest_floor(source, x, y):
-    """FC block of the nearest walkable cell that is not a chest, above first on ties."""
+    """FC block of the nearest walkable cell that is not a chest or a stair, above first on ties. A stair block
+    carries the exit mark (+4 = 85), which would add an exit to the map's count under the chest (エンドール 04/03
+    (4,1), two cells from its stair)."""
     best = None
     for ny in range(max(0, y - 3), min(source.h, y + 4)):
         for nx in range(max(0, x - 3), min(source.w, x + 4)):
             prop = _prop(source, nx, ny)
-            if prop & 0x80 or prop & 0x7F == CHEST_KIND:
+            if prop & 0x80 or prop & 0x7F == CHEST_KIND or prop in STAIRS:
                 continue
             key = (abs(nx - x) + abs(ny - y), ny > y, abs(nx - x))
             if best is None or key < best[0]:
