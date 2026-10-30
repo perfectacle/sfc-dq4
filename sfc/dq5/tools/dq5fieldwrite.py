@@ -239,12 +239,15 @@ def fast_hook(at, nibbles, lower, upper, land):
 
     def number(base, xmask, zero, world, tail, rest=b''):
         """칸의 번호를 A 에 모으고 tail(others 길이 → 바이트)로 잇는다. 넷째 줄까지 A = i(칸 y*256+x), X = i, Y = i >> 1,
-        $02 = i >> 3 이고, 7F:0000 의 하위 8비트를 A 윗바이트에, C = i & 1 로 둔다."""
-        pre = (b'\xa5\x90\x05\x92\xc9\x00\x02\x90\x07\xa9\x00\x00\x5c' + zero.to_bytes(3, 'little')
-               + b'\xa5\x92\x4a\xeb\x85\x00\xa5\x90\x4a\x05\x00'
-               + b'\xaa\x4a\xa8\x4a\x4a\x85\x02\xe2\x20\xbf\x00\x00\x7f\xeb\x8a\x4a\xbb' + world)
+        $02 = i >> 3 이고, 7F:0000 의 하위 8비트를 A 윗바이트에, C = i & 1 로 둔다. zero 가 None 이면 좌표가 0200 이상일 때
+        A = 0 으로 tail 의 머리에 간다."""
+        def pre_to(z):
+            return (b'\xa5\x90\x05\x92\xc9\x00\x02\x90\x07\xa9\x00\x00\x5c' + z.to_bytes(3, 'little')
+                    + b'\xa5\x92\x4a\xeb\x85\x00\xa5\x90\x4a\x05\x00'
+                    + b'\xaa\x4a\xa8\x4a\x4a\x85\x02\xe2\x20\xbf\x00\x00\x7f\xeb\x8a\x4a\xbb' + world)
         join = b'\x85\x00\xa6\x02\xbf\x00\xe0\x7e\xe2\x10\xa6\x90\x3f' + xmask.to_bytes(3, 'little') + b'\xf0\x02\xa9\x01\x05\x00\xeb'
         a0 = arm(nibbles[0])
+        pre = pre_to(base + len(pre_to(0)) + 2 + len(a0) + len(join) if zero is None else zero)
         back = b'\x4c' + ((base + len(pre) + 2 + len(a0)) & 0xFFFF).to_bytes(2, 'little')
         w2, w1, w3 = arm(nibbles[2]) + back, arm(nibbles[1]) + back, b'\xa9\x00' + back
         # 세계는 DEC 로 가른다. CMP 는 C(칸이 홀수인지)를 지운다.
@@ -270,9 +273,7 @@ def fast_hook(at, nibbles, lower, upper, land):
         terrain = number(at + len(blocks), xmask, 0x00BE14, b'\xaf\x49\x19\x7e', lambda k: b'\x5c\x14\xbe\x00')
         # 좌표가 0200 이상이면 A = 0 으로 land_tail 에 간다(03:CAC2 는 $CE·$D0 을 01FF 로 자르므로 오지 않음).
         head = b'\xda\x5a\xa6\xce\x86\x90\xa6\xd0\x86\x92\xc2\x20'
-        base = at + len(blocks) + len(terrain) + len(head)
-        tail = number(base, xmask, 0, b'\xaf\x49\x19\x7e', land_tail).find(land_tail(0)[:7])
-        world_map = head + number(base, xmask, base + tail, b'\xaf\x49\x19\x7e', land_tail)
+        world_map = head + number(at + len(blocks) + len(terrain) + len(head), xmask, None, b'\xaf\x49\x19\x7e', land_tail)
         return blocks, terrain, world_map
     n = sum(map(len, code(0, 0)))
     blocks, terrain, world_map = code(at + n, at + n + len(XMASK))
