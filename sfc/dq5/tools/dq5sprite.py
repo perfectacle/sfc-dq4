@@ -450,7 +450,7 @@ VEHICLES = (
         {'rom': 0x0494CF, 'cols': 3, 'rows': 3, 'dir': 0x24, 'frame': 0x12, 'attr': 0x0000, 'vflip': (), 'at': (0, 0)},
         {'rom': 0x04955B, 'cols': 3, 'rows': 1, 'dir': 0x0C, 'frame': 0x06, 'attr': 0x0A00, 'vflip': (), 'at': (0, 24)})},
     {'id': 0x81, 'name': '天空城', 'what': '天空城', 'tiles': ((0x2B84F0, 0x14, 0x180),), 'parts': (
-        {'rom': 0x049634, 'cols': 4, 'rows': 4, 'dir': 0, 'frame': 0, 'attr': 0x0600, 'vflip': (), 'at': (0, 0)},
+        {'rom': 0x0496B6, 'cols': 4, 'rows': 4, 'dir': 0, 'frame': 0, 'attr': 0x0600, 'vflip': (), 'at': (0, 0)},
         {'rom': 0x0496C6, 'cols': 4, 'rows': 2, 'dir': 0, 'frame': 0, 'attr': 0x0A00,
          'vflip': (0x08, 0x0A, 0x0C, 0x0E, 0x18, 0x1A, 0x1C, 0x1E), 'at': (0, 48)})},  # 01:C42D
     {'id': 0x82, 'name': 'マスタードラゴン', 'what': 'マスタードラゴン',
