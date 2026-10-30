@@ -37,6 +37,12 @@ EXTRA_NAMES = {6: {'みんながんばれ': '모두 힘내자', 'じゅもんせ
                    'モンスターつかい': '몬스터 조련사', 'グランバニアおう': '그란바니아 왕', 'ようせいびと': '요정',
                    'グランバニアへいし': '그란바니아 병사', 'めしつかい': '하인', 'ゆうしゃのちちおや': '용사의 아버지',
                    'でんせつのゆうしゃ': '전설의 용사', 'おとこ': '남자', 'おんな': '여자'}}
+# 이름 표 번호로 덮는 이름: 1장 보스로 빌린 DQ5 몬스터 번호(dq4ch1event.BOSS_MONSTERS)
+def numbered_names():
+    import dq4ch1event
+    return {4: {n: ko for n, (_, ko) in dq4ch1event.BOSS_MONSTERS.items()}}
+
+
 # 전투 작전 창(16)은 작전 이름을 넉 자씩 두 줄로 찍는다(04:BB61). 한글은 띄어쓰기 자리에서 나눠 줄마다 고정 문구 하나
 TACTIC_LINES = (('한방에', '끝내자구'), ('모두', '힘내자'), ('주문', '아끼자'),
                 ('주문을', '쓰지마'), ('생명을', '소중히'), ('명령을', '내려줘'))
@@ -472,13 +478,15 @@ def build(data, font):
         index[FIXED_KIND * 0x200 + k * 2:FIXED_KIND * 0x200 + k * 2 + 2] = at.to_bytes(2, 'little')
         body += bytes((len(cols),)) + b''.join(cols)
     report[FIXED_KIND] = (len(phrases()), len(phrases()))
+    placed = {}
     for kind, (table, limit, strict) in KINDS.items():
         korean = adopted(table)
         korean.update({kana_key(jp): ko for jp, ko in EXTRA_NAMES.get(kind, {}).items()})
         names = rom_names(data, kind)
+        by_number = numbered_names().get(kind, {})
         done = 0
         for n, name in enumerate(names):
-            ko = korean.get(kana_key(name))
+            ko = by_number.get(n) or korean.get(kana_key(name))
             if not ko and kind in KANA_KINDS and name and all(0x3041 <= ord(c) <= 0x30FC for c in name):
                 ko = name
             if not ko:
@@ -488,9 +496,12 @@ def build(data, font):
                 if strict and ko != name:
                     raise ValueError(f'{ko!r}: {len(cols)}열, 창은 {limit}열')
                 continue
-            at = DATA + len(body)
-            index[kind * 0x200 + n * 2:kind * 0x200 + n * 2 + 2] = at.to_bytes(2, 'little')
-            body += bytes((len(cols),)) + b''.join(cols)
+            blob = bytes((len(cols),)) + b''.join(cols)
+            # 같은 그림(같은 이름)은 한 번만 두고 색인이 함께 가리킨다. 뱅크 하나에 다 넣어야 해서다
+            if blob not in placed:
+                placed[blob] = DATA + len(body)
+                body += blob
+            index[kind * 0x200 + n * 2:kind * 0x200 + n * 2 + 2] = placed[blob].to_bytes(2, 'little')
             done += 1
         report[kind] = (len(names), done)
     if DATA + len(body) > 0x10000:

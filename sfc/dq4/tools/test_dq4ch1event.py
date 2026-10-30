@@ -87,6 +87,18 @@ class FlyTest(unittest.TestCase):
             ev.apply(bytes(0x400000))
 
 
+@unittest.skipUnless(DQ4.is_file(), "local source ROM not present")
+class BossMonsterTest(unittest.TestCase):
+    def test_fc_boss_records(self):
+        from kr_patch.fc import ines
+        doc = ev.monster_doc(ines.prg(DQ4.read_bytes()))
+        tesaki, medama = doc["monsters"]
+        self.assertEqual((tesaki["id"], tesaki["HP"], tesaki["공격"], tesaki["수비"], tesaki["경험치"]), ("E2", 250, 52, 36, 73))
+        self.assertEqual([tesaki[f"행동{k}"] for k in range(1, 7)], ["39", "73", "8E", "3C", "73", "8E"])
+        self.assertEqual((medama["id"], medama["HP"], medama["경험치"]), ("52", 42, 27))
+        self.assertEqual(ev.BOSS_MEMBERS, ((0xE2, 1), (0x52, 1)))
+
+
 @unittest.skipUnless(DQ4.is_file() and DQ5.is_file(), "local source ROMs not present")
 class ListTest(unittest.TestCase):
     @classmethod
