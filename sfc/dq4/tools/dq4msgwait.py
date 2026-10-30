@@ -7,8 +7,9 @@ A 를 누르기 전에 밀려 올라간다. ▼ 대기 끝 1010 은 그 자리�
 
   대화(dq5talk/1 본문): 다음에 올 수 있는 것을 거꾸로 따라간다. 갈래(if) 중 하나라도 메시지로 시작하면 메시지가 온다.
                         조건 05 의 갈래는 예·아니요 창이라 그 앞 물음은 1001. 알 수 없는 명령(전투 call 등)은 1001 쪽
-  인물 스크립트: 메시지(21·30) 뒤로 40 이 다음 메시지보다 먼저 오면 1001, 아니면 1010(16 으로 끝나도 조작은 다른
-                 스크립트가 쥐고 있어 연출이 이어진다). 갈래·점프는 보지 않고 차례대로 본다
+  인물 스크립트: 메시지(21·30) 뒤로 다음 메시지가 40 보다 먼저 오면 1010, 아니면 1001. 메시지 없이 연출만 이어지다
+                 끝나도(16) 1001: 명령 21 이 창을 닫는 A 를 따로 받아, 1010 이면 ▼ 를 넘긴 뒤 같은 쪽에서 A 를 한 번
+                 더 받는다(실측: 신시아 사과 뒤 모샤스 돌기). 갈래·점프는 보지 않고 차례대로 본다
   이벤트 스크립트(토큰 목록): 메시지가 마지막 토큰이면 1001, 뒤에 무엇이든 있으면 1010
 """
 LINE_END, WAIT_END = 0x1001, 0x1010
@@ -49,7 +50,7 @@ def _script(commands, wait, keep):
             continue
         m = c['args'][0] | c['args'][1] << 8
         later = next((d['op'] for d in commands[i + 1:] if d['op'] in SCRIPT_MESSAGES | {UNLOCK}), None)
-        (keep if later == UNLOCK else wait).add(m)
+        (wait if later in SCRIPT_MESSAGES else keep).add(m)
 
 
 def _event(tokens, wait, keep):

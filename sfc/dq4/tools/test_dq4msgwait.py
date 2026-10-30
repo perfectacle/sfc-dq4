@@ -32,8 +32,8 @@ class PlanTests(unittest.TestCase):
 
     def test_script(self):
         script = [cmd('3F'), cmd('21', 1, 0), cmd('37', 0, 0, 0), cmd('21', 2, 0), cmd('13', 0, 0), cmd('40'),
-                  cmd('21', 3, 0), cmd('16')]
-        self.assertEqual(mw.plan(scripts=[script]), ({1, 3}, {2}))
+                  cmd('21', 3, 0), cmd('21', 4, 0), cmd('37', 0, 0, 0), cmd('16')]
+        self.assertEqual(mw.plan(scripts=[script]), ({1, 3}, {2, 4}))
 
     def test_event(self):
         tokens = [b'\x08\x04', ('msg', 1), ('msg', 2), b'\xff']
@@ -56,10 +56,10 @@ class GameTests(unittest.TestCase):
         first = 0xF00
         wait, keep = mw.plan(**ch.message_flow(first))
         m = ev.message_ids(first)
-        must_wait = {pro.M_FROG_YES, pro.M_FROG_NO, pro.M_MORPH, pro.M_MIMIC, pro.M_SORRY, pro.M_BYE,
+        must_wait = {pro.M_FROG_YES, pro.M_FROG_NO, pro.M_MORPH, pro.M_MIMIC, pro.M_BYE,
                      pro.M_STORY_BEGINS, ch.MSG_MINISTER, m['reunion'], m['king_praise'], *pro.M_SUPPER_LINES}
         self.assertLessEqual(must_wait, wait)
-        must_keep = {pro.M_CALL, pro.M_HELP, pro.M_FROG_ASK, pro.M_FROG_STORY, pro.M_SUPPER, ch.MSG_KING,
+        must_keep = {pro.M_SORRY, m['chapter_end'], pro.M_CALL, pro.M_HELP, pro.M_FROG_ASK, pro.M_FROG_STORY, pro.M_SUPPER, ch.MSG_KING,
                      m['hint'], m['king_farewell'], m['hoimin_ask']}
         self.assertLessEqual(must_keep, keep)
 
