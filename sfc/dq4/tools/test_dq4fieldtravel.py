@@ -25,12 +25,37 @@ class OrderTest(unittest.TestCase):
         dq5 = bytearray(0x200000)
         o = travel.lorom(travel.RULER_LIST)
         dq5[o:o + travel.RULER_COUNT] = range(1, travel.RULER_COUNT + 1)
-        (w,) = travel.writes(bytes(dq5), [{"slot": 1, "group": 0x36}])
+        w, *_ = travel.writes(bytes(dq5), [{"slot": 1, "group": 0x36, "ship": None}])
         self.assertEqual(w["at"], "25:85D5")
         new = bytes.fromhex(w["hex"])
         self.assertEqual(new[1], 0x36)
         self.assertEqual(new[0], 1)
         self.assertEqual(new[2:], bytes(range(3, travel.RULER_COUNT + 1)))
+
+    def test_ship_offsets(self):
+        dq5 = bytearray(0x200000)
+        for table in travel.SHIP_OFFSETS:
+            o = travel.lorom(table)
+            dq5[o:o + 2 * travel.SHIP_SLOTS] = b"\x07" * (2 * travel.SHIP_SLOTS)
+        dests = [{"slot": 1, "group": 0x36, "land": (328, 94), "ship": (315, 67)},
+                 {"slot": 2, "group": 0x37, "land": (308, 46), "ship": None}]
+        _, *tables = travel.writes(bytes(dq5), dests)
+        self.assertEqual([t["at"] for t in tables], ["23:E41E", "23:E438"])
+        for t in tables:
+            new = bytes.fromhex(t["hex"])
+            self.assertEqual(new[2:4], bytes((-13 & 0xFF, -27 & 0xFF)))
+            self.assertEqual(new[4:6], b"\x07\x07")
+        with self.assertRaises(ValueError):
+            travel.writes(bytes(dq5), [{"slot": 1, "group": 0x36, "name": "x", "land": (0, 0), "ship": (200, 0)}])
+
+    def test_ship_cell_boards_from_above_or_below(self):
+        # FC block (10,10) is sea with land only to its left (09,10) and above (10,0F).
+        def props(x, y):
+            return 0x00 if (x, y) in ((0x09, 0x10), (0x10, 0x0F)) else travel.SEA
+        self.assertEqual(travel.ship_cell(props, (0x10, 0x10), (0, 0)), (0x20, 0x20))
+        self.assertIsNone(travel.ship_cell(props, (0, 0), (0, 0)))
+        with self.assertRaises(ValueError):
+            travel.ship_cell(props, (0x09, 0x10), (0, 0))
 
 
 @unittest.skipUnless(DQ4.exists() and DQ5.exists(), "rom/dq4.nes and rom/dq5.sfc")
