@@ -66,7 +66,8 @@ class PrologueTests(unittest.TestCase):
         self.assertEqual(talks, list(range(0x900, 0x900 + len(talks))))
 
     def test_flags_are_distinct(self):
-        flags = [pro.DONE, pro.FROG_MET, pro.SHINSIA_START, pro.MORPH, pro.MORPH_BACK, pro.SHINSIA_MET, pro.DINNER]
+        flags = [pro.DONE, pro.FROG_MET, pro.SHINSIA_START, pro.MORPH, pro.MORPH_BACK, pro.SHINSIA_MET, pro.DINNER,
+                 pro.SUPPER]
         self.assertEqual(len(flags), len(set(flags)))
         for i, m in flags:
             self.assertEqual(bin(m).count('1'), 1)
@@ -95,6 +96,18 @@ class PrologueTests(unittest.TestCase):
         form = next(sc for sc in pro.scripts() if sc['address'] == pro.FORM_SCRIPT)
         ops = [c['op'] for c in form['commands']]
         self.assertEqual(ops[ops.index('51') + 1], '52')
+
+    def test_supper_seats_then_talks(self):
+        # 대화 903 은 묻고 SUPPER 만 켠다. 저녁 대사는 끝 이벤트가 주인공을 식탁에 앉힌 뒤 띄운다
+        body = next(sc for sc in pro.talk_doc()['scripts'] if int(sc['talk'], 16) == pro.T_FATHER_SUPPER)['body']
+        self.assertEqual(body[-1], {'op': 'flag-on', 'index': pro.SUPPER[0], 'mask': pro.SUPPER[1]})
+        code, at = pro.native()
+        ev = code[at['end_event'] - pro.CODE_AT:]
+        walk = bytes(b for d, k in pro.HERO_TO_SEAT for b in (d, k)) + bytes((0xC1, 0x40))
+        self.assertEqual(ev[:len(walk)], walk)
+        self.assertEqual(ev[len(walk)], 0x60)
+        father = next(sc for sc in pro.scripts() if sc['address'] == pro.FATHER_SCRIPT)['commands']
+        self.assertEqual(father[0], {'op': '09', 'args': [0x80 | pro.SUPPER[0], pro.SUPPER[1]]})
 
 
 if __name__ == '__main__':

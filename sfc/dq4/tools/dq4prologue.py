@@ -105,7 +105,8 @@ SHINSIA_START = (0x0C, 0x40)    # 7E:219C bit6  신시아에게 말을 걺 → �
 MORPH = (0x02, 0x10)            # 7E:2192 bit4  신시아가 개구리로
 MORPH_BACK = (0x04, 0x01)       # 7E:2194 bit0  개구리가 신시아로
 SHINSIA_MET = (0x01, 0x08)      # 7E:2191 bit3  신시아가 집으로 감
-DINNER = (0x01, 0x40)           # 7E:2191 bit6  저녁 대화가 끝남 → 1장으로
+DINNER = (0x01, 0x40)           # 7E:2191 bit6  저녁 대사가 끝남(끝 이벤트가 켬)
+SUPPER = (0x04, 0x02)           # 7E:2194 bit1  아버지에게 대답함 → 식탁에 앉음
 speak = ch1.speak
 narrate = ch1.narrate
 SHINSIA = '신시아'
@@ -132,7 +133,7 @@ M_SORRY = talk(speak(SHINSIA, '……라니, 미안해./실은 그다음 대사�
                      '놀랐지!/나 여러 가지로 모습을/바꿀 수 있는/모샤스 주문을 배웠어!')) + 0x3C6
 M_BYE = talk(speak(SHINSIA, '그럼 난 갈게!')) + 0x3C6
 M_SUPPER = talk(speak(SHINSIA, '아! 맞다!/너희 어머니가/부르셨어./벌써 저녁이래.', '그럼 @,/내일 봐!')) + 0x3C6
-# 저녁(집): 신시아를 만난 뒤 아버지에게 말을 걸면 묻고 저녁을 먹는다 → DINNER
+# 저녁(집): 신시아를 만난 뒤 아버지에게 말을 걸면 묻고(대화 903 → SUPPER), 식탁에 앉아 저녁을 먹는다(끝 이벤트)
 T_FATHER_SUPPER = 0x903
 M_FATHER_ASK = talk(say('음, @. 왔느냐?/그래, 신시아와는/만났느냐?')) + 0x3C6
 M_FATHER_YES = talk(say('그러냐. 그거/잘됐구나.')) + 0x3C6
@@ -160,6 +161,11 @@ FROG_SRC, FROG_SCRIPT = {"list": "05:B2EE", "index": 4}, "05:B352"
 SHINSIA_SRC, SHINSIA_SCRIPT = {"list": "05:B2EE", "index": 7}, "05:B386"
 FORM_SRC, FORM_SCRIPT = {"list": "05:B2EE", "index": 8}, "05:B3B3"
 FATHER_SRC, FATHER_SCRIPT = {"list": "05:B466", "index": 0}, "05:B46D"
+MOTHER_SRC, MOTHER_SCRIPT = {"list": "05:B48B", "index": 3}, "05:B4A7"
+# 집의 식탁 (4,11) 과 의자 (3,11)·(5,11). 아버지는 오른쪽, 어머니는 왼쪽 의자, 주인공은 식탁 위쪽 (4,10) 에서 아래를 봄
+FATHER_SEAT, MOTHER_PATH = (5, 0x11), [(3, 0x10), (3, 0x11)]
+# 주인공은 아버지 오른쪽 칸 (6,12) 에서 말을 건다. 거기서 위로 2칸, 왼쪽으로 2칸(DQ5 셀 4·4)
+HERO_TO_SEAT = ((0x08, 4), (0x02, 4))
 # 1장 왕좌의 방 첫 자리(dq4chapter1.START)와 같은 칸
 CHAPTER1_AT = (0x36, 0x01, 32, 42)
 
@@ -204,9 +210,13 @@ def native():
         put('darken', _darken())
         put('skip_song', _skip_song())
         g, n, x, y = CHAPTER1_AT
-        # 끝: 검은 화면 → 서술 → 곡 건너뛰기 → 1장 왕좌의 방으로(이벤트 명령 90, $198E = 80)
-        put('end_event', bytes((0xA0, *_long(at.get('darken', 0)), 0x60, M_STORY_BEGINS & 0xFF, M_STORY_BEGINS >> 8,
-                                0xA0, *_long(at.get('skip_song', 0)), 0x90, g, n, x, y, 0x01, 0x80, 0xFF)))
+        # 저녁: 주인공이 식탁에 앉아 아래를 봄(C1 40) → 저녁 대사 → 끝: 검은 화면 → 서술 → 곡 건너뛰기 →
+        # 1장 왕좌의 방으로(이벤트 명령 90, $198E = 80)
+        walk = bytes(b for d, k in HERO_TO_SEAT for b in (d, k)) + bytes((0xC1, 0x40))
+        lines = b''.join(bytes((0x60, m & 0xFF, m >> 8)) for m in M_SUPPER_LINES)
+        put('end_event', walk + lines + bytes((0x10, *DINNER, 0xA0, *_long(at.get('darken', 0)),
+                                               0x60, M_STORY_BEGINS & 0xFF, M_STORY_BEGINS >> 8,
+                                               0xA0, *_long(at.get('skip_song', 0)), 0x90, g, n, x, y, 0x01, 0x80, 0xFF)))
         put('end', _event_start(at.get('end_event', 0)))
         return bytes(out), a
     _, at = layout({})
@@ -230,8 +240,7 @@ def talk_doc():
         (T_ASK, _yes_no(M_ASK, M_YES, M_NO) + [_flag_on(DONE)]),
         (T_FROG, _yes_no(M_FROG_ASK, M_FROG_YES, M_FROG_NO) + [msg(M_FROG_STORY), _flag_on(FROG_MET)]),
         (T_SHINSIA, [msg(M_SHINSIA_MEET), _flag_on(SHINSIA_START)]),
-        (T_FATHER_SUPPER, _yes_no(M_FATHER_ASK, M_FATHER_YES, M_FATHER_NO) + [msg(m) for m in M_SUPPER_LINES] +
-         [_flag_on(DINNER)]),
+        (T_FATHER_SUPPER, _yes_no(M_FATHER_ASK, M_FATHER_YES, M_FATHER_NO) + [_flag_on(SUPPER)]),
     ]
     return {"format": "dq5talk/1", "scripts": [{"talk": f"{t:03X}", "body": body} for t, body in scripts]}
 
@@ -288,9 +297,13 @@ def scripts():
              _msg(M_MORPH), _msg(M_MIMIC), _msg(M_SORRY)] + _spin(at) +
             # 51 은 안 보이게만 해 말을 걸 수 있는 채로 남는다. 52 로 자리를 치운다
             [_cmd('51'), _cmd('52'), _cmd('10', *MORPH_BACK), _cmd('16')])
-    father = [_wait_on(DINNER), _cmd('3F'), _cmd('37', *_long(at['end'])), _cmd('16')]
+    # 대답하면 부모가 의자로 가고, 아버지가 저녁 이벤트를 건다(이벤트는 메인 문맥에서 주인공을 걷게 하고 대사를 띄움)
+    father = ([_wait_on(SUPPER), _cmd('3F')] + _walk([FATHER_SEAT]) + [_cmd('2F', 0x20), _cmd('37', *_long(at['wait'])),
+              _cmd('37', *_long(at['end'])), _cmd('16')])
+    mother = [_wait_on(SUPPER)] + _walk(MOTHER_PATH) + [_cmd('2F', 0x10), _cmd('16')]
     return [{"address": FROG_SCRIPT, "commands": frog}, {"address": SHINSIA_SCRIPT, "commands": shinsia},
-            {"address": FORM_SCRIPT, "commands": form}, {"address": FATHER_SCRIPT, "commands": father}]
+            {"address": FORM_SCRIPT, "commands": form}, {"address": FATHER_SCRIPT, "commands": father},
+            {"address": MOTHER_SCRIPT, "commands": mother}]
 
 
 def npc_lists():
@@ -301,6 +314,9 @@ def npc_lists():
     father = next(i for i, v in enumerate(VILLAGERS) if v[4] == T_FATHER)
     x, y, g, f, _ = VILLAGERS[father]
     supper = people[:father] + [ch1.entry(FATHER_SRC, x, y, g, f, T_FATHER_SUPPER)] + people[father + 1:]
+    mother = next(i for i, v in enumerate(VILLAGERS) if v[4] == T_MOTHER)
+    x, y, g, f, t = VILLAGERS[mother]
+    supper[mother] = ch1.entry(MOTHER_SRC, x, y, g, f, t)
     frog = ch1.entry(FROG_SRC, *FROG_AT, FROG, 'down', T_FROG)
     shinsia = [ch1.entry(SHINSIA_SRC, *SHINSIA_AT, GIRL, 'down', T_SHINSIA),
                ch1.entry(FORM_SRC, *SHINSIA_AT, FROG, 'down', T_SHINSIA)]
