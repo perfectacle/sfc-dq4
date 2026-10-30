@@ -47,6 +47,7 @@ def field_rom():
     put(d, fgw.BLOCK_READ, fgw.BLOCK_READ_ORIG)
     put(d, fgw.REDRAW_SITE, fgw.REDRAW_ORIG)
     put(d, fgw.REDRAW_RTL, b'\x6b')
+    put(d, fgw.WATER_SITE, fgw.WATER_ORIG)
     for at, want in (fgw.SEARCH_SITE, fgw.PTR_SITE, fgw.NIGHT_SITE, fgw.PAL_BANK_SITE, fgw.WAVE_SITE,
                      *fgw.ATTR_SITES.items(), fgw.REFRESH_SITE, *(x for pair in fgw.W12_LOAD.values() for x in pair)):
         put(d, at, want)

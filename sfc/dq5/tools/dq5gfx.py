@@ -680,13 +680,39 @@ def field_anim_sets(rom):
 
 
 def rotate_pair(a, b, k):
-    """01:C790 이 하는 일: 이웃한 두 타일의 줄마다(평면마다) 16비트를 k 픽셀 오른쪽으로 돌린다. 세계 1·2 는 왼쪽."""
+    """01:C790 이 하는 일: 이웃한 두 타일의 줄마다(평면마다) 16비트를 k 픽셀 오른쪽으로 돌린다. 세계 1 은 왼쪽(k 를 음수로),
+    세계 2 는 돌리지 않고 위로 민다(water_frames)."""
     oa, ob = bytearray(32), bytearray(32)
+    k %= 16
     for i in range(32):
         v = a[i] << 8 | b[i]
         v = (v >> k | v << (16 - k)) & 0xFFFF
         oa[i], ob[i] = v >> 8, v & 0xFF
     return bytes(oa), bytes(ob)
+
+
+def water_frames(src, world):
+    """01:C5C8 이 움직이는 바다 원본 src(타일 4·5·20·21, 128바이트)로 7E:C000 에 만드는 16벌(벌 k 는 원본을 k + 1 만큼 민 것,
+    마지막 벌이 원본). 세계 0 은 4·5 와 20·21 을 오른쪽으로(01:C746), 세계 1 은 왼쪽으로 한 픽셀씩 돌리고, 세계 2 는
+    4·5 위·20·21 아래의 16×16 을 위로 한 줄씩 민다(01:C66B, 맨 윗줄이 맨 아래로)."""
+    out = []
+    for k in range(1, 17):
+        if world == 2:
+            raw = bytearray(128)
+            for col in (0, 0x20):
+                for half in (0, 0x10):                  # 평면 0·1, 2·3
+                    rows = [src[t + col + half + r * 2:t + col + half + r * 2 + 2] for t in (0, 0x40) for r in range(8)]
+                    rows = rows[k % 16:] + rows[:k % 16]
+                    for i, row in enumerate(rows):
+                        t = 0x40 if i >= 8 else 0
+                        raw[t + col + half + (i % 8) * 2:t + col + half + (i % 8) * 2 + 2] = row
+            out.append(bytes(raw))
+            continue
+        shift = k if world == 0 else -k
+        a, b = rotate_pair(src[0:32], src[32:64], shift)
+        c, d = rotate_pair(src[64:96], src[96:128], shift)
+        out.append(a + b + c + d)
+    return out
 
 
 # ---------------------------------------------------------------- 덤프한 VRAM 에서 BG 그리기
