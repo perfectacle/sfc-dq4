@@ -1050,11 +1050,13 @@ def _bookshelf():
     return _finish(c, "책장", "interior")
 
 
-def _sky():
-    c = _Canvas(7, fill=7)
+def _sky(deep=False):
+    # FC sky is 21 (mid blue) except the castle in the clouds, whose sky below the clouds is 12 (deep blue);
+    # both stay darker than the pale cloud.
+    c = _Canvas(7, fill=4 if deep else 6)
     for x, y, length in ((1, 3, 5), (9, 7, 4), (4, 12, 6), (13, 13, 3)):
-        c.line((x, y, x + length, y), 6)
-    return _finish(c, "하늘(떨어지는 칸)")
+        c.line((x, y, x + length, y), 5 if deep else 7)
+    return _finish(c, "짙은 하늘(구름 아래)" if deep else "하늘(떨어지는 칸)")
 
 
 def _cabin(slats=False, post=None):
@@ -1326,7 +1328,7 @@ def _castle_town_assets():
     assets = {
         "iron_door": _iron_door(), "red_paving_cracked": _red_paving_cracked(), "brick_paving": _brick_paving(),
         "cloth_table": _cloth_table(), "potted_plant": _potted_plant(), "throne": _throne(),
-        "bookshelf": _bookshelf(), "sky": _sky(), "stump": _stump(), "log_pile": _log_pile(),
+        "bookshelf": _bookshelf(), "sky": _sky(), "sky_deep": _sky(True), "stump": _stump(), "log_pile": _log_pile(),
         "crops": _crops(), "signboard": _signboard(), "grave": _grave(), "stone_ledge": _stone_ledge(),
         "lion_statue": _lion_statue(), "swamp": _swamp(), "travel_door": _travel_door(),
         "rock_wall": _rock_wall(), "rock_wall_dark": _rock_wall(True), "blue_tile": _blue_tile(),
@@ -1484,11 +1486,10 @@ def _wood_grain():
 
 
 def _cloud():
-    c = _Canvas(7, fill=6)
-    for x, y, r in ((3, 4, 4), (11, 3, 4), (8, 10, 5), (1, 13, 3), (14, 12, 3)):
-        c.draw.ellipse((x - r, y - r, x + r, y + r), fill=c.c(7))
-    for x, y in ((5, 7), (12, 6), (10, 14)):
-        c.point((x, y), 5)
+    # Pale cloud over the deep sky; a few soft shade lines keep a large cloud field from looking flat.
+    c = _Canvas(7, fill=7)
+    for x, y, length in ((2, 5, 3), (10, 9, 3), (5, 13, 2)):
+        c.line((x, y, x + length, y), 6)
     return _finish(c, "구름")
 
 
