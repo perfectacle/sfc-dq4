@@ -1,14 +1,18 @@
-"""DQ4 art for the FC field in DQ5 world 0: field tiles, tile palettes and blocks from the dq4environmentart assets.
+"""DQ4 art for the FC fields in DQ5 worlds 0-2: field tiles, tile palettes and blocks from the dq4environmentart
+assets.
 
-Each FC field art (dq4environmentmap.FIELD_ART) becomes a DQ5 block of its own from 511 (dq4fieldport.OWN_BLOCKS),
-so DQ5's blocks stay as they are for worlds 1 and 2. A new block keeps the terrain nibble of the DQ5 block
-dq4fieldport.BLOCKS borrows, and each of its tiles the attribute of that block's tile in the same quarter, so
+Each FC field art (dq4environmentmap.FIELD_ART) with the DQ5 block it borrows becomes a DQ5 block of its own from
+511 (dq4fieldport.new_blocks), so DQ5's own blocks stay as they are. A new block keeps the terrain nibble of the
+DQ5 block it borrows (dq4fieldport.BLOCKS, FIELD_BLOCKS), and each of its tiles the attribute of that block's tile in the same quarter, so
 walking, ship and encounters stay those of the borrowed block. The art is drawn on the lower layer; the upper layer
 is empty (tile 0, 00:BCA8 then reads the lower tile's attribute).
 
 Colours are DQ5's own world-0 field palette: each 8x8 tile takes palette line 2 or 3 (nibble 0 or 1) and colours
 1-13 of it, whichever is nearer to the art. The time-of-day sets of DQ5 (01:A16B) then darken the field at night as
-they do DQ5's. Colours 14 and 15 are cycled by 02:ABEF, so they are left out.
+they do DQ5's. Colours 14 and 15 are cycled by 02:ABEF, so they are left out. The three worlds share the tiles and
+nibbles, and each world has its own lines 2 and 3 (01:A6A3): world 1 (FC field 1) takes the world-0 day colours
+1-13, as its own lines are DQ5's snow; world 2 (FC field 3, 闇の世界) keeps DQ5's dark lines, which colour the same
+indices darker.
 
 The sea stays DQ5's block 0 and its moving water: the game turns tiles 4, 5, 20 and 21 a pixel at a time from an
 uncompressed copy at 01:A719 (01:C5C8 points [$A5] there, 01:C746 makes 16 turns into 7E:C000), not from the field
@@ -161,12 +165,8 @@ def generate(rom):
             found[key] = TILES + len(found)
         return found[key]
 
-    blocks, done = [], set()
-    for kind, number in sorted(dq4fieldport.OWN_BLOCKS.items(), key=lambda kv: kv[1]):
-        if number in done or number < dq4fieldport.FIRST_BLOCK:
-            continue
-        done.add(number)
-        borrowed = dq4fieldport.BLOCKS[kind]
+    blocks = []
+    for number, kind, borrowed in dq4fieldport.new_blocks():
         lower, upper = block_tiles(r, BLOCK_LOWER, borrowed), block_tiles(r, BLOCK_UPPER, borrowed)
         quarter_attrs = [o["tile_attributes"][u or lo] for lo, u in zip(lower, upper)]
         if kind == REEF:
@@ -183,6 +183,13 @@ def generate(rom):
     return bytes(tiles), nibbles, attrs, blocks
 
 
+def world1_set(palettes):
+    """World 1's one set (30 colours, lines 2 and 3 colours 1-15): the world-0 day colours 1-13, world 1's own 14
+    and 15 (dq5fieldgfxwrite refuses changes there)."""
+    day, own = palettes["world0"][DAY_SET], palettes["world1"][0]
+    return [day[i] if i % 15 < 13 else own[i] for i in range(30)]
+
+
 def gfx_doc(dq5, folder):
     """dq5fieldgfx/1 document in folder (DQ5's dump with the tiles, nibbles and attributes of generate) and the
     dq5fieldtables/1 document of the new blocks. -> (gfx document path, blocks document path)."""
@@ -193,6 +200,7 @@ def gfx_doc(dq5, folder):
     (folder / "tiles.bin").write_bytes(tiles)
     # dq5fieldgfxwrite takes 1,024 attributes once tiles grow; past the tiles, those of tile − 512, as it fills them.
     doc.update(tile_palettes=nibbles, tile_attributes=attrs + attrs[len(attrs) - TILES:TILES])
+    doc["palettes"]["world1"] = [world1_set(doc["palettes"])]
     gfx = folder / "fieldgfx.json"
     gfx.write_text(json.dumps(doc) + "\n", encoding="utf-8")
     table = folder / "blocks.json"
@@ -207,21 +215,25 @@ def _run(tool, *args):
     return proc.stdout
 
 
-def render(rom, fc_grid, x0, y0, w, h):
+def render(rom, fc_grid, x0, y0, w, h, field=0):
     """RGB image of FC blocks (x0, y0)-(x0+w, y0+h) drawn from generate in the day colours, the way the field shows
     them (upper layer over lower, colour 0 of the upper layer transparent)."""
     from PIL import Image
     from dq5fieldgfxwrite import original
     from dq5map import Rom
     tiles, nibbles, _, blocks = generate(rom)
-    lines = line_colours(original(Rom(rom))["palettes"])
+    palettes = original(Rom(rom))["palettes"]
+    palettes = {**palettes, "world0": {DAY_SET: {0: palettes["world0"][DAY_SET], 1: world1_set(palettes),
+                                                 2: palettes["world2"][0]}[dq4fieldport.WORLDS[field]]}}
+    lines = line_colours(palettes)
+    own = dq4fieldport.own_blocks(field)
     by_number = {b["index"]: b for b in blocks}
     sea = {"lower": list(SEA_TILES), "upper": [0] * 4}
     image = Image.new("RGB", (w * 16, h * 16))
     for by in range(h):
         for bx in range(w):
             kind = fc_grid[y0 + by][x0 + bx]
-            block = by_number.get(dq4fieldport.OWN_BLOCKS[kind], sea)
+            block = by_number.get(own[kind], sea)
             for layer in ("lower", "upper"):
                 for q, t in enumerate(block[layer]):
                     if layer == "upper" and not t:
@@ -241,13 +253,14 @@ def main():
     ap.add_argument("--dq4", default="rom/dq4.nes", type=Path)
     ap.add_argument("--at", default="140,30", help="FC block x,y of the top-left corner (10진)")
     ap.add_argument("--size", default="40,30", help="blocks across, down")
+    ap.add_argument("--field", type=int, default=0, choices=sorted(dq4fieldport.WORLDS))
     ap.add_argument("-o", "--out", required=True, type=Path)
     args = ap.parse_args()
-    grid, _ = dq4fieldport.fc_field(ines.prg(args.dq4.read_bytes()))
+    grid, _ = dq4fieldport.fc_field(ines.prg(args.dq4.read_bytes()), args.field)
     x0, y0 = map(int, args.at.split(","))
     w, h = map(int, args.size.split(","))
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    render(args.dq5.read_bytes(), grid, x0, y0, w, h).resize((w * 32, h * 32)).save(args.out)
+    render(args.dq5.read_bytes(), grid, x0, y0, w, h, args.field).resize((w * 32, h * 32)).save(args.out)
     print(args.out)
 
 

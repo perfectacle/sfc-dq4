@@ -110,8 +110,9 @@ class GroupBuildTests(unittest.TestCase):
         for w in writes:
             at = int(w['at'].replace(':', ''), 16)
             if at >> 16 >= 0x40:
-                # The block number planes, outside the 30-3F the field loader's DB needs.
-                self.assertIn(at >> 16, (planes, planes + 1))
+                # The block number planes, outside the 30-3F the field loader's DB needs: the hook bank and one
+                # bank per world.
+                self.assertIn(at >> 16, range(planes, planes + 1 + len(dq4fieldport.WORLDS)))
             elif at >> 16 >= 0x30:
                 self.assertEqual(at >> 16, 0x34)
                 self.assertLessEqual(at + len(bytes.fromhex(w['hex'])), 0x350000)

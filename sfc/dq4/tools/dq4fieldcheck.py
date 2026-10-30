@@ -1,18 +1,20 @@
-"""Check the FC field in a groups ROM of dq4groupbuild.py (MesenCE headless, dq5warp.lua FIELD).
+"""Check the FC fields in a groups ROM of dq4groupbuild.py (MesenCE headless, dq5warp.lua FIELD).
 
+For each FC field (FIELDS) in its DQ5 world (dq4fieldport.WORLDS); worlds 1 and 2 hold $1949 by POKE, as the warp
+walks out of 01/00 into world 0:
   map      stand on the field: WRAM 7F:0000 (block numbers' low 8 bits) and 7E:E000 (9th bits) equal the map of
            dq4fieldport.world, byte for byte
-  terrain  for FC block kinds near バトランド: stand on a walkable FC neighbour and press towards a block of that
-           kind for two DQ5 cells; a walkable kind is entered, a blocked one (sea without a ship, mountain, reef,
-           signboard) keeps the party on the neighbour
-  gfx      stand at VIEWS, save and dump VRAM and CGRAM: the BG tilemap of both layers around the party is the
+  terrain  for FC block kinds near the field's centre: stand on a walkable FC neighbour and press towards a block
+           of that kind for two DQ5 cells; a walkable kind is entered, a blocked one (sea without a ship, mountain,
+           reef, signboard, field 3's hills) keeps the party on the neighbour
+  gfx      stand at the views, save and dump VRAM and CGRAM: the BG tilemap of both layers around the party is the
            blocks of dq4fieldport.world with dq4fieldgfx's tiles and palette nibbles; the field tiles in VRAM are
-           dq4fieldgfx's (the sea pairs 4·5 and 20·21 turned by the same pixels, as 01:C790 turns them; the
-           animated 454-459 left out); CGRAM lines 2 and 3 colours 1-13 are one of DQ5's world-0 sets
+           dq4fieldgfx's (the sea pairs 4·5 and 20·21 turned by the same pixels, as 01:C790 turns them, in worlds
+           0 and 1; the animated 454-459 left out); CGRAM lines 2 and 3 colours 1-13 are one of the world's sets
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4fieldcheck.py --rom work/dq4-groups/groups.sfc --out work/dq4-fieldcheck
 
-Each gfx view leaves its screen in <out>/gfx-<name>/end.png.
+Scenes of worlds 1 and 2 are named w1-…, w2-…. Each gfx view leaves its screen in <out>/[wN-]gfx-<name>/end.png.
 """
 
 import argparse
@@ -49,6 +51,19 @@ MAP_SCENE_CELL = (2 * 0xA4, 2 * 0x2F + 1)
 # Field cells to look at the art from: below バトランド castle, outside イムル, on a bridge, in the desert south of
 # the castle, by a reef of the western sea.
 VIEWS = {"castle": MAP_SCENE_CELL, "imuru": (308, 47), "bridge": (400, 145), "desert": (328, 149), "reef": (80, 49)}
+# Per FC field: the centre the terrain probes are chosen near, the kinds probed (whether the party walks onto them),
+# and the views, as FC entrance blocks whose leaving cell (dq4fieldport.door) the party stands on; the first is
+# also the map scene. Field 1: ゴットサイド town (1A), the tower (2C), the cave (3C). Field 3: the castle (45), the
+# western shrine (29) and the palace in the middle (43). The FC groups behind them are not ported yet.
+FIELDS = {
+    0: {"centre": CENTER, "kinds": KINDS},
+    1: {"centre": (0x20, 0x1C), "kinds": {0x01: True, 0x02: True, 0x03: True, 0x04: True, 0x05: True, 0x07: True,
+                                         0x00: False, 0x06: False},
+        "views": {"town": (0x20, 0x1C), "tower": (0x17, 0x2F), "cave": (0x11, 0x10)}},
+    # Field 3's hills (01) touch only mountains and sea, so no walk reaches them to probe.
+    3: {"centre": (0x23, 0x24), "kinds": {0x02: True, 0x03: True, 0x04: True, 0x07: True, 0x00: False, 0x06: False},
+        "views": {"castle": (0x23, 0x1F), "shrine": (0x11, 0x12), "palace": (0x23, 0x19)}},
+}
 # Cells around the party compared with the BG tilemap (the screen is 32x28 cells).
 AROUND = (range(-12, 12), range(-14, 16))
 LOWER, UPPER, TILES_AT, EXTRA_AT = 0x0000, 0x0800, 0x2000, 0x4000  # VRAM words (sfc/dq5/docs/dq5-field-format.md)
@@ -74,7 +89,7 @@ def rotation(got, want):
     return next((k for k in range(16) if all(g == w[k:] + w[:k] for g, w in rows)), None)
 
 
-def compare_gfx(vram, cgram, cell, world, generated, palettes):
+def compare_gfx(vram, cgram, cell, world, generated, palettes, sea_turns=True):
     """Results of a gfx view: tilemap cells that match, field tiles that match, sea turn, CGRAM set."""
     tiles, nibbles, _, blocks = generated
     defs = {b["index"]: b for b in blocks}
@@ -105,14 +120,15 @@ def compare_gfx(vram, cgram, cell, world, generated, palettes):
     lines = [cgram[(16 * line + i) * 2] | cgram[(16 * line + i) * 2 + 1] << 8 for line in (2, 3) for i in range(1, 14)]
     sets = [k for k, row in enumerate(palettes) if row[0:13] + row[15:28] == lines]
     return {"lower": [best[0], len(cells)], "upper": [upper, len(cells)], "tiles": [same, len(fixed)],
-            "sea_turn": turned, "world0_set": sets[0] if sets else None,
-            "ok": best[0] == upper == len(cells) and same == len(fixed) and turned is not None and bool(sets)}
+            "sea_turn": turned, "palette_set": sets[0] if sets else None,
+            "ok": best[0] == upper == len(cells) and same == len(fixed) and (turned is not None or not sea_turns)
+            and bool(sets)}
 
 
-def probes(grid, props, entrances):
-    """(kind, FC target block, FC start block, direction) nearest CENTER per KINDS kind."""
+def probes(grid, props, entrances, kinds=KINDS, centre=CENTER):
+    """(kind, FC target block, FC start block, direction) nearest centre per kind of kinds."""
     out = []
-    for kind in KINDS:
+    for kind in kinds:
         best = None
         for y, row in enumerate(grid):
             for x, v in enumerate(row):
@@ -124,7 +140,7 @@ def probes(grid, props, entrances):
                         continue
                     if props(*n) & 0x80 or props(*n) in (dq4fieldport.ENTRANCE, dq4fieldport.RIGHT_HALF):
                         continue
-                    score = abs(x - CENTER[0]) + abs(y - CENTER[1])
+                    score = abs(x - centre[0]) + abs(y - centre[1])
                     if best is None or score < best[0]:
                         best = (score, (x, y), n, d)
         if best is None:
@@ -148,42 +164,58 @@ def main():
         raise SystemExit(f"{out} is not empty")
     rom, state = args.rom.resolve(), args.state.resolve()
     prg = ines.prg(args.dq4.read_bytes())
-    grid, props = dq4fieldport.fc_field(prg)
     from dq4field import entrances
     taken = {(fx, fy) for _, fx, fy, *_ in entrances(prg)}
-
-    def run_map():
-        got = field_scene(mesence, rom, state, out, "map", *MAP_SCENE_CELL, "wait:30")
-        ram = (out / "map" / "final.wram").read_bytes()
-        low, high = split(dq4fieldport.world(grid))
-        same = {"7F:0000": ram[0x10000:0x20000] == low, "7E:E000": ram[0xE000:0x10000] == high}
-        return "map", {"got": got, "want": {"field": list(MAP_SCENE_CELL)}, "wram": same,
-                       "ok": got == {"field": list(MAP_SCENE_CELL)} and all(same.values())}
 
     from dq5fieldgfxwrite import original
     from dq5map import Rom
     generated = dq4fieldgfx.generate(args.dq5.read_bytes())
-    palettes = original(Rom(args.dq5.read_bytes()))["palettes"]["world0"]
-    world = dq4fieldport.world(grid)
+    palettes = original(Rom(args.dq5.read_bytes()))["palettes"]
+    world_sets = {0: palettes["world0"], 1: [dq4fieldgfx.world1_set(palettes)], 2: palettes["world2"]}
 
-    def run_view(name, cell):
-        scene = f"gfx-{name}"
-        got = field_scene(mesence, rom, state, out, scene, *cell, "wait:30", SAVE="field.mss")
-        if got != {"field": list(cell)}:
-            return scene, {"got": got, "ok": False}
-        _, vram, cgram = dump(mesence, rom, out / scene / "field.mss", out / scene / "dump")
-        return scene, {"got": got, **compare_gfx(vram, cgram, cell, world, generated, palettes)}
+    def scenes(field):
+        """(callable, args) of the scenes of an FC field."""
+        w = dq4fieldport.WORLDS[field]
+        grid, props = dq4fieldport.fc_field(prg, field)
+        world = dq4fieldport.world(grid, field)
+        conf = FIELDS[field]
+        prefix = f"w{w}-" if w else ""
+        extra = {"POKE": f"7E1949={w:02X}"} if w else {}
+        views = VIEWS if "views" not in conf else \
+            {name: dq4fieldport.door(props, [block])[1] for name, block in conf["views"].items()}
+        map_cell = MAP_SCENE_CELL if not w else next(iter(views.values()))
 
-    def run_probe(kind, target, start, d):
-        name = f"terrain-{kind:02X}-{d}"
-        got = field_scene(mesence, rom, state, out, name, *dq4fieldport.stand(*start), f"{ALIGN},{d}:{PRESS},wait:60")
-        want = list(target if KINDS[kind] else start)
-        block = [v // 2 for v in got.get("field", ())]
-        return name, {"got": got, "block": block, "want_block": want, "target": list(target), "ok": block == want}
+        def run_map():
+            scene = f"{prefix}map"
+            got = field_scene(mesence, rom, state, out, scene, *map_cell, "wait:30", **extra)
+            ram = (out / scene / "final.wram").read_bytes()
+            low, high = split(world)
+            same = {"7F:0000": ram[0x10000:0x20000] == low, "7E:E000": ram[0xE000:0x10000] == high}
+            return scene, {"got": got, "want": {"field": list(map_cell)}, "wram": same,
+                           "ok": got == {"field": list(map_cell)} and all(same.values())}
+
+        def run_view(name, cell):
+            scene = f"{prefix}gfx-{name}"
+            got = field_scene(mesence, rom, state, out, scene, *cell, "wait:30", SAVE="field.mss", **extra)
+            if got != {"field": list(cell)}:
+                return scene, {"got": got, "ok": False}
+            _, vram, cgram = dump(mesence, rom, out / scene / "field.mss", out / scene / "dump")
+            # World 2 turns its sea by another routine (01:C66B), not the pairs of 01:C790.
+            return scene, {"got": got, **compare_gfx(vram, cgram, cell, world, generated, world_sets[w], w != 2)}
+
+        def run_probe(kind, target, start, d):
+            name = f"{prefix}terrain-{kind:02X}-{d}"
+            got = field_scene(mesence, rom, state, out, name, *dq4fieldport.stand(*start),
+                              f"{ALIGN},{d}:{PRESS},wait:60", **extra)
+            want = list(target if conf["kinds"][kind] else start)
+            block = [v // 2 for v in got.get("field", ())]
+            return name, {"got": got, "block": block, "want_block": want, "target": list(target), "ok": block == want}
+
+        return [(run_map, ())] + [(run_probe, p) for p in probes(grid, props, taken, conf["kinds"], conf["centre"])] + \
+            [(run_view, v) for v in views.items()]
 
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
-        futures = [pool.submit(run_map)] + [pool.submit(run_probe, *p) for p in probes(grid, props, taken)] + \
-            [pool.submit(run_view, *v) for v in VIEWS.items()]
+        futures = [pool.submit(f, *a) for field in FIELDS for f, a in scenes(field)]
         results = dict(f.result() for f in futures)
     ok = all(r["ok"] for r in results.values())
     report = {"status": "passed" if ok else "failed", "scenes": dict(sorted(results.items()))}
