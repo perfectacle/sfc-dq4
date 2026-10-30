@@ -34,7 +34,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 from dq5field import (BLOCK_GROW_SITE, BLOCK_HOOK_SITE, BLOCK_LOWER, BLOCK_UPPER, ENTRANCES, GROUP_ARRIVAL,  # noqa: E402
-                      QUAD_BIT, QUAD_BIT10, TERRAIN_SITES, block_count, block_entry, grown_blocks, terrain_table)
+                      INDEX5, QUAD_BIT, QUAD_BIT10, TERRAIN_SITES, block_count, block_entry, grown_blocks, terrain_table)
 from dq5map import Rom, group_spans, lorom  # noqa: E402
 from dq5newmap import entrance_table  # noqa: E402
 
@@ -382,18 +382,19 @@ def record_byte(rom, addr):
 
 
 def block_hook(lower, upper, count, masks):
-    """00:BC4E 대신(JML 로 들어옴, M·X 는 아무것이나). 번호가 511 미만이면 원래처럼 STA $00 뒤 00:BC52 로 돌아가고,
+    """00:BC4E 대신(JML 로 들어옴, M·X 는 아무것이나). 번호가 511 미만이면 INDEX5 를 하고 00:BC6D 로 돌아가 원래 표를 읽고,
     511 이상이면 옮긴 두 표(번호 511 부터)에서 원래와 같이 $94~$97 을 채운 뒤 00:BC47 의 RTS 로 부른 곳에 돌아간다.
+    필드를 불러올 때 칸마다 불리므로, 511 미만 갈래가 원래 00:BC4E~BC6C 보다 몇 사이클만 길어도 불러오기가 한 프레임 늦어진다.
     칸 타일의 10번째 비트(상위 비트 바이트의 하위 니블)도 읽는다. masks 는 80>>칸 4개와 08>>칸 4개이고
     DB 를 훅 뱅크로 두고 읽는다."""
     def layer(table, dp):
         return (b'\xbf' + long3(table + 4) + b'\x39' + (masks + 4 & 0xFFFF).to_bytes(2, 'little') + b'\xc9\x01\xa9\x00\x2a\xeb'
                 + b'\xbf' + long3(table + 4) + b'\x39' + (masks & 0xFFFF).to_bytes(2, 'little') + b'\xc9\x01\xeb\x2a'
                 + bytes([0x85, dp]))
+    fast = INDEX5 + b'\x5c\x6d\xbc\x00'
     return (b'\x80\x08' + long3(lower) + long3(upper) + count.to_bytes(2, 'little')
-            + b'\xc2\x30\xc9\xff\x01\xb0\x06\x85\x00\x5c\x52\xbc\x00'
-            + b'\x38\xe9\xff\x01\x85\x00\x0a\x0a\x18\x65\x00\x85\x02'
-            + b'\xa5\x90\x29\x01\x00\x85\x00\xa5\x92\x29\x01\x00\x0a\x05\x00\xa8\x18\x65\x02\xaa'
+            + b'\xc2\x30\xc9\xff\x01\xb0' + bytes([len(fast)]) + fast
+            + b'\xe9\xff\x01' + INDEX5
             + b'\x8b\x4b\xab\xe2\x20' + b'\xbf' + long3(lower) + b'\x85\x94' + b'\xbf' + long3(upper) + b'\x85\x96'
             + b'\xa6\x02' + layer(lower, 0x95) + layer(upper, 0x97) + b'\xab\x5c\x47\xbc\x00')
 
