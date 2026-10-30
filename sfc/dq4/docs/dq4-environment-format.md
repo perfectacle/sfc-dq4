@@ -415,7 +415,7 @@ uv run --locked python sfc/dq4/tools/dq4groupcheck.py --rom work/dq4-links/group
 uv run --locked python sfc/dq4/tools/dq4environmentromcheck.py --rom work/dq4-groups/groups.sfc --out work/dq4-groups/envcheck
 ```
 
-빌드 순서는 [dq5 빌드 문서의 「새 그룹을 필드와 잇기」](../../dq5/docs/dq5-build-format.md#새-그룹을-필드와-잇기)를 따르되, `dq5newmap.py` 만 환경 패치를 넣은 롬에서 만듭니다. `dq5newmap.py check` 가 문 표 복사본 `3B` 의 `F037`~`FFFF` 이 뱅크 01 과 같은지 보기 때문입니다. 복사본에 뱅크 01 끝의 중계 코드가 들어가야 그 검사를 지나며, 게임은 복사본의 그 자리를 읽지 않습니다(중계 코드는 PB = `01` 로 돌고, 바꾼 맵의 물체 항목은 「[물체 항목 뱅크](#물체-항목-뱅크)」대로 `3D` 에서 읽음). [dq5 문서의 「dq4 환경 맵과 함께 쓰기」](../../dq5/docs/dq5-build-format.md#dq4-환경-맵과-함께-쓰기)는 항목을 뱅크 01 끝에 두던 때의 설명입니다.
+빌드 순서는 [dq5 빌드 문서의 「새 그룹을 필드와 잇기」](../../dq5/docs/dq5-build-format.md#새-그룹을-필드와-잇기)를 따르되, `dq5newmap.py` 만 환경 패치를 넣은 롬에서 만듭니다. `dq5newmap.py check` 가 문 표 복사본 `3B` 의 `F037`~`FFFF` 이 뱅크 01 과 같은지 보기 때문입니다. 복사본에 뱅크 01 끝의 중계 코드가 들어가야 그 검사를 지나며, 게임은 복사본의 그 자리를 읽지 않습니다(중계 코드는 PB = `01` 로 돌고, 바꾼 맵의 물체 항목은 「[물체 항목 뱅크](#물체-항목-뱅크)」대로 `3D` 에서 읽음). 같은 배치와 그 실측은 [dq5 문서의 「dq4 환경 맵과 함께 쓰기」](../../dq5/docs/dq5-build-format.md#dq4-환경-맵과-함께-쓰기)에도 있습니다. 거기서는 원래 롬에서 만든 문 표 패치로도 문이 그려지고 막히고 열렸으므로, 이 순서는 `dq5newmap.py check` 를 지나기 위한 것입니다.
 
 1. `dq4environmentrom.py` → 환경 패치. 새 그룹 맵은 레코드를 쓰지 않고 `dq5map/1` 문서만 냅니다.
 2. 환경 패치만 넣은 롬에서 `dq5newmap.py`: 새 그룹·맵(레코드는 1 의 문서를 `34:8000`~ 에), 그룹 도착, 문 표 복사본 `3B`, 도착 표 `3C:C000`.
