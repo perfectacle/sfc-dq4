@@ -84,8 +84,7 @@ ENTRANCES_AT = ("--entrances-at", "3C:8000")
 # dq5textwrite writes the whole walking text again, so it takes banks of its own.
 TEXT_AT = ("--at", "35:8000")
 # Talk scripts 900- (the prologue's and the ported people's, dq4npcport.talk_doc). Bank 30-3F: the hook reads
-# them with DB set to their bank. Between the shop lists and the inn table: in the chapter-1 ROM bank 3A is full of
-# new-map records.
+# them with DB set to their bank. Not 3A: the chapter-1 build fills it with new-map records.
 TALK_AT = ("--extra-at", "3C:E800", "--hook-at", "06:FE10")
 SHOP_AT = ("--shop-at", "3C:E000")
 INN_AT = 0x3CF000

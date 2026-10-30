@@ -28,6 +28,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
 import dq4talk  # noqa: E402
 import dq4text  # noqa: E402
 import dq5text  # noqa: E402
+from dq5hangul import MESSAGES  # noqa: E402
 from dq4environmentrom import GROUPS  # noqa: E402
 from dq4groupbuild import cell, fc_map, has_people  # noqa: E402
 import dq4shopport  # noqa: E402
@@ -127,11 +128,11 @@ PICTURES = {
 FACING = ("up", "right", "down", "left")
 # Placeholder line for a person whose FC talk shows nothing at the start of chapter 1.
 NOTHING = "＜なにもない＞"
-# Ported lines are new messages after DQ5's 3,200 (dq5textwrite appends them gap-free from the end).
-FIRST_MESSAGE = 0xC80
+# Ported lines are new messages after DQ5's own (dq5textwrite appends them gap-free from the end).
+FIRST_MESSAGE = MESSAGES
 # Talk numbers 900- run talk scripts appended by dq5talkwrite --extra-at, gap-free from 900: the prologue's
 # first (dq4prologue.talk_doc), then one `msg` script per ported message. A talk number T >= 26D shows message
-# T + 3C6 directly, but only T 8BA-8FF reach C80- before the scripts take over at 900: 70 messages.
+# T + 3C6 directly, but the talk numbers below 900 reach only a few of the new messages.
 SCRIPT_TALK = 0x900
 LINE, PAGE, END = 0x1000, 0x1002, 0x1001
 NIGHT = 0x78

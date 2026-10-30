@@ -12,9 +12,9 @@
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4npccheck.py --build work/dq4-groups --out work/dq4-groups/npccheck
 
---rom checks another ROM built with the same people (the chapter-1 ROM with dq4chapter1.py build --keep DIR and
---build DIR/groups); --maps limits the maps, and --no-tables leaves out the table scenes, whose list addresses
-are the plain build's.
+--rom checks another ROM built with the same people (the chapter-1 ROM with dq4chapter1.py build --keep DIR,
+--build DIR/groups and --texts its dq4chapter1.py messages JSON); --maps limits the maps, and --no-tables leaves
+out the table scenes, whose list addresses are the plain build's.
 """
 
 import argparse
@@ -136,6 +136,15 @@ def run(mesence, rom, state, out, name, libdir, to, test, night, shop=False, ret
     return wram, messages
 
 
+def expected_codes(path):
+    """{message: codes} the ROM was built with, from a dq5text/1 or a dq4messages/1 document."""
+    doc = json.loads(Path(path).read_text(encoding="utf-8"))
+    if doc.get("format") == "dq4messages/1":
+        import dq4menumsg
+        return {int(k, 16): dq4menumsg.codes(parts) for k, parts in doc["messages"].items()}
+    return {m["id"]: m["codes"] for m in doc["messages"]}
+
+
 def walkable(source, x, y):
     return 0 <= x < source.w and 0 <= y < source.h and not block_prop(source, source.cell(x, y) & 31) & 0x80
 
@@ -154,9 +163,10 @@ def talk_side(source, x, y, occupied):
     return None
 
 
-def staged(source, x, y):
-    """FC places some people out of reach, on a wall or off the map (event staging): nobody can talk to them."""
-    return not (0 <= x < source.w and 0 <= y < source.h) or bool(block_prop(source, source.cell(x, y) & 31) & 0x80)
+# FC people placed where nobody can reach them: (FC group, FC map, x, y). テンペ's three stand on wall blocks, cut off
+# from the town; フレノール's two night people stand below the map (its height is 1B).
+STAGED = {(0x0E, 0, 0x15, 0x0D), (0x0E, 0, 0x16, 0x0D), (0x0E, 0, 0x17, 0x0D), (0x0F, 0, 0x00, 0x22),
+          (0x0F, 0, 0x00, 0x23)}
 
 
 def main():
@@ -169,6 +179,8 @@ def main():
     ap.add_argument("--rom", type=Path, help="ROM to check (default BUILD/groups.sfc)")
     ap.add_argument("--maps", nargs="+", help="only these maps (GG/MM)")
     ap.add_argument("--no-tables", action="store_true", help="leave out the person table scenes")
+    ap.add_argument("--texts", type=Path, help="the ROM's messages: dq5text/1 (default BUILD/text.json) or "
+                    "dq4messages/1 (dq4chapter1.py messages, for the chapter-1 ROM)")
     args = ap.parse_args()
     mesence = Path(os.environ["MESENCE"])
     out = args.out.resolve()
@@ -181,8 +193,7 @@ def main():
     rom_path = (args.rom or args.build / "groups.sfc").resolve()
     built = Rom(rom_path.read_bytes())
     ret = decoder_return(built)
-    texts = {m["id"]: m["codes"] for m in
-             json.loads((args.build / "text.json").read_text(encoding="utf-8"))["messages"]}
+    texts = expected_codes(args.texts or args.build / "text.json")
     layout = json.loads((args.build / "npc-layout.json").read_text(encoding="utf-8"))
     people = json.loads((args.build / "npc-report.json").read_text(encoding="utf-8"))
     shop_report = json.loads((args.build / "shop-report.json").read_text(encoding="utf-8"))
@@ -196,7 +207,8 @@ def main():
         if args.maps and m not in args.maps:
             continue
         group, number = int(m[:2], 16), int(m[3:], 16)
-        source = dq4block.Map(prg, *fc_map(prg, group, number))
+        fc = fc_map(prg, group, number)
+        source = dq4block.Map(prg, *fc)
         occupied = {(p["x"], p["y"]) for p in persons}
         start = next((x, y) for y in range(source.h) for x in range(source.w)
                      if walkable(source, x, y) and (x, y) not in occupied)
@@ -211,7 +223,7 @@ def main():
             now = [q for q in persons if q["night"] == p["night"]]
             side = talk_side(source, p["x"], p["y"], {(q["x"], q["y"]) for q in now}) or \
                 talk_side(source, p["x"], p["y"], {(q["x"], q["y"]) for q in now if not q["interval"]})
-            if side is None and staged(source, p["x"], p["y"]):
+            if side is None and (*fc, p["x"], p["y"]) in STAGED:
                 jobs.append(("staged", f"talk-{m.replace('/', '')}-{i}", m, None, None, p["night"], None))
                 continue
             if side is None:
