@@ -1,6 +1,5 @@
 """Place original environment art on the FC maps' measured block grids."""
 
-import collections
 import hashlib
 import sys
 from collections import Counter
@@ -456,7 +455,8 @@ def fc_pixels(prg, t, block):
 
 
 def _shape_classes(prg, t, block, kind, base):
-    """16 rows of A (the base), S (sky), D (deep sky), V (void), O (outline) and F (floor, slopes and stripes)."""
+    """16 rows of A (the base), S (sky), D (deep sky), V (void), O (outline), F (floor, slopes and stripes) and
+    H (a relief's raised parts)."""
     if kind == "slope":
         return [["F" if x + y < 15 else "O" if x + y == 15 else "A" for x in range(16)] for y in range(16)]
     if kind == "slope_r":
@@ -469,7 +469,7 @@ def _shape_classes(prg, t, block, kind, base):
     rows = fc_pixels(prg, t, block)
     # A relief's raised parts are the FC colours a brightness row above the slab it is carved in (the most
     # common colour that is not black).
-    slab = collections.Counter(c for row in rows for c in row if c != 0x0F).most_common(1)[0][0]
+    slab = Counter(c for row in rows for c in row if c != 0x0F).most_common(1)[0][0]
     out = []
     for y in range(16):
         row = []
@@ -515,8 +515,10 @@ def _shape_tile(prg, assets, name, palette, t, block):
             bank = layers["A"].getpixel((qx, qy)) >> 4
             dark = min(range(bank * 16 + 1, bank * 16 + SHAPE_SPAN.get(bank, 16)),
                        key=lambda i: sum(palette[i * 3:i * 3 + 3]))
-            # Raised parts take the lightest colour the material already uses, so they stay in its range.
-            light = max(set(layers["A"].tobytes()), key=lambda i: sum(palette[i * 3:i * 3 + 3]))
+            # Raised parts take the lightest colour of this 8x8's bank that the material uses anywhere in the
+            # block, so all four quarters raise in the same colour.
+            used = {v for v in layers["A"].tobytes() if v >> 4 == bank}
+            light = max(used, key=lambda i: sum(palette[i * 3:i * 3 + 3]))
             for y in range(qy, qy + 8):
                 for x in range(qx, qx + 8):
                     k = classes[y][x]
