@@ -145,7 +145,8 @@ class PlanTests(unittest.TestCase):
             pictures, _ = self.run_plan(**doc)
         self.assertEqual(pictures[0][2:], (3, 3))
         # (조각, 줄마다 타일, 16x16 자리). 8x8 셋은 자리 하나를 나눠 쓴다. 같은 머리인 그림 01 도.
-        self.assertEqual(seen.call_args.args[1], {0: (3, [2, 1], 1), 1: (3, [2, 1], 1)})
+        self.assertEqual({g: v[:3] for g, v in seen.call_args.args[1].items()}, {0: (3, [2, 1], 1), 1: (3, [2, 1], 1)})
+        self.assertEqual({(v[3]['w'], v[3]['h']) for v in seen.call_args.args[1].values()}, {(4, 2)})
         hit = [(((0, 8, 0),), [8], [6], '구역 05 칸 1', '덜 놓임')]
         with mock('dq5monlimits.losses', return_value=hit), self.assertRaisesRegex(ValueError, '구역 05 칸 1'):
             self.run_plan(**doc)
@@ -190,6 +191,35 @@ class PlanTests(unittest.TestCase):
             self.assertEqual(pictures[0][3], 92)
             with self.assertRaisesRegex(ValueError, '타일 96개'):
                 self.run_plan(pictures=[{'picture': '00', 'image': 'broken.png'}])
+
+    def test_resize_and_header(self):
+        # 2x2 칸 그림을 3x4 칸으로 키우고 머리 +0~+4 를 바꾼다. 크기가 바뀌면 조합을 다시 센다(머리를 함께 넘김).
+        rng = random.Random(11)
+        grid = [[rng.randrange(1, 4) if 8 <= y < 24 and x < 16 else 0 for x in range(24)] for y in range(32)]
+        self.save('tall.png', grid)
+        header = {'float': True, 'raise': 1, 'shadow': 0, 'shadow_dx': -5, 'shadow_dy': 9, 'hit_x': 2, 'hit_y': 3}
+        with mock('dq5monlimits.losses', return_value=[]) as seen:
+            pictures, _ = self.run_plan(pictures=[{'picture': '00', 'image': 'tall.png', 'header': header}])
+        raw = pictures[0][1]
+        self.assertEqual(raw[:6], bytes([0xA0, 0xFB, 0x09, 2, 3, 0x23]))
+        self.assertEqual(decode_raw(raw, 3, 4), grid)
+        self.assertEqual(seen.call_args.args[1][0][3], M.parse_header(raw[:6]))
+        # 머리만 바꾸면 원래 배치 그대로이고, 크기·띄움·들어올림이 같으면 조합을 세지 않는다.
+        self.save('same.png', self.grid)
+        with mock('dq5monlimits.losses', return_value=[]) as seen:
+            pictures, _ = self.run_plan(pictures=[{'picture': '00', 'image': 'same.png', 'header': {'hit_x': 0}}])
+        self.assertFalse(seen.called)
+        self.assertEqual(pictures[0][1][3], 0)
+        self.assertEqual(pictures[0][1][5:], keep_layout(self.rom, 0, self.grid)[5:])
+        self.rom.d[lorom(W.SHADOWS) + 2:lorom(W.SHADOWS) + 4] = b'\xff\xff'   # 그림자 모양 1 은 자료 없음
+        for bad in ({'hit_x': 2}, {'hit_y': -1}, {'raise': 4}, {'float': 1}, {'shadow': 1}, {'shadow_dx': 128},
+                    {'size': 1}, []):
+            with self.subTest(header=bad), self.assertRaises(ValueError):
+                self.run_plan(pictures=[{'picture': '00', 'image': 'same.png', 'header': bad}])
+        for w, h in ((128, 16), (16, 136), (12, 16)):
+            self.save('odd.png', [[0] * w for _ in range(h)])
+            with self.subTest(size=(w, h)), self.assertRaisesRegex(ValueError, '팔레트 모드 PNG'):
+                self.run_plan(pictures=[{'picture': '00', 'image': 'odd.png'}])
 
     def test_rejects(self):
         self.save('same.png', self.grid)

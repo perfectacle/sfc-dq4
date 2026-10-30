@@ -92,6 +92,19 @@ class LimitTests(unittest.TestCase):
         self.assertEqual([(x[3], x[4]) for x in many], [('b', '16x16 자리 8개 > 7개')])
         self.assertEqual(loads, [(0, 0, 1), (1, 1, 6)])      # 그림 0 은 한 번만 푼다
 
+    def test_losses_size(self):
+        # 그림 1 을 4x14 칸으로 키우면 줄 0 의 상자 위가 $A0 - 112 = $30 이라 줄마다 타일 표(7E:2F00) 앞이다.
+        # 4x5 칸이면 위는 $78 이고, 세로 칸 합은 b 가 2 + 5 = 7 로 원래 가장 큰 6(b 의 2 + 4) 을 넘는다.
+        with Fakes():
+            high = L.losses(None, {1: (6, [4] * 14, 6, head(4, 14))}, found=FOUND)
+            rows = L.losses(None, {1: (6, [4] * 5, 6, head(4, 5))}, found=FOUND)
+            same = L.losses(None, {1: (6, [4] * 4, 6, head(4, 4))}, found=FOUND)
+            wide = L.losses(None, {0: (1, [2, 2], 1, head(4, 2))}, found=FOUND)
+        self.assertEqual([x[4] for x in high], ['몬스터 01 상자 위 y $30 < $38'])
+        self.assertEqual([x[4] for x in rows], ['그림 세로 칸 7개 > 6개'])
+        self.assertEqual(same, [])
+        self.assertEqual([(x[3], x[4]) for x in wide], [('a', '덜 놓임')])   # 가로 4칸 8마리는 줄 폭 28 을 넘음
+
     def test_slot_count(self):
         pieces = [(0, 0, True, [], False), (16, 0, True, [], False), (0, 0, True, [], True)] + \
                  [(0, 0, False, [], False)] * 5 + [(0, 0, False, [], True)] * 2
