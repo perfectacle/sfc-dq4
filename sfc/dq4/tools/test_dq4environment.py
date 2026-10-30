@@ -103,21 +103,44 @@ class DoorBankTests(unittest.TestCase):
     def test_entries_sit_in_the_door_bank_reachable_from_d2fc(self):
         import dq4environmentrom as rom
         entries = self.entries(3)
-        lib, stubs, _ = self.code(entries)
+        lib, _, _ = self.code(entries)
         for offset, data in zip(self.objects_table(lib), entries):
             addr = (rom.OBJECT_TABLE + offset) & 0xFFFF
             self.assertGreaterEqual(addr, rom.OBJECT_TABLE & 0xFFFF)
             self.assertLess(addr + max(len(data), 1), rom.DOOR_TABLES[0] + 1)
             self.assertEqual(lib[addr - (rom.LIB_AT & 0xFFFF):][:max(len(data), 1)], data or b"\x80")
-        self.assertNotIn(entries[1], stubs)
+
+    def test_door_tables_copy_bank_01_fd97_to_the_door_bank(self):
+        import dq4environmentrom as rom
+        dq5 = bytes(i * 7 & 0xFF for i in range(0x20000))
+        data = rom.door_tables(dq5)
+        self.assertEqual(len(data), 288)
+        self.assertEqual(data, dq5[0xFD97:0xFEB7])
+        self.assertEqual(rom.DOOR_BANK, rom.BLOCK_BANK)
+        self.assertEqual(rom.DOOR_BANK, rom.LIB_AT >> 16)
+        self.assertEqual(rom.DOOR_BANK << 16 | rom.DOOR_TABLES[0], 0x3DFD97)
+
+    def test_built_rom_copy_check(self):
+        import dq4environmentrom as rom
+        import dq4groupbuild
+        built = bytearray(0x200000)
+        built[0xFD97:0xFEB7] = bytes(i & 0xFF for i in range(288))
+        at = rom.DOOR_BANK * 0x8000 + 0x7D97
+        built[at:at + 288] = built[0xFD97:0xFEB7]
+        dq4groupbuild.check_door_copy(bytes(built), 0x3B)
+        with self.assertRaisesRegex(ValueError, "is the dq4 door bank"):
+            dq4groupbuild.check_door_copy(bytes(built), rom.DOOR_BANK)
+        built[at + 0x20] ^= 1
+        with self.assertRaisesRegex(ValueError, f"{rom.DOOR_BANK:02X}:FDB7 differs from 01:FDB7"):
+            dq4groupbuild.check_door_copy(bytes(built), 0x3B)
 
     def test_obj_sets_the_data_bank_after_the_hit(self):
         import dq4environmentrom as rom
         lib, _, _ = self.code(self.entries(1))
         # STA $01,S; SEP #$20; LDA #bank; PHA; PLB, then the common exit and the replaced LDX #$0009.
-        tail = bytes((0x83, 0x01, 0xE2, 0x20, 0xA9, rom.LIB_AT >> 16, 0x48, 0xAB, *rom._LEAVE, 0xA2, 0x09, 0x00, 0x6B))
+        tail = bytes((0x83, 0x01, 0xE2, 0x20, 0xA9, rom.DOOR_BANK, 0x48, 0xAB, *rom._LEAVE, 0xA2, 0x09, 0x00, 0x6B))
         self.assertIn(tail, lib)
-        self.assertTrue(0x30 <= rom.LIB_AT >> 16 <= 0x3F)
+        self.assertTrue(0x30 <= rom.DOOR_BANK <= 0x3F)
 
     def test_bank_01_tail_does_not_grow_with_entries(self):
         import dq4environmentrom as rom

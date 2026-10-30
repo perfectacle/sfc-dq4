@@ -90,7 +90,7 @@ LID_TICK = WATER_PERIOD // 2
 # The water routine uses these slots directly: a battle reuses 7E:6000 (CHR id -> slot) as work
 # memory, and reading it after a battle sent the water frames to slot 0, the blank BG1 tile.
 WATER_SLOT = 0xBE
-LIB_AT = 0x3DE000
+LIB_AT = BLOCK_BANK << 16 | 0xE000
 # FC door properties and the DQ5 objects (01:D2FC kinds) that replace them. The record under an
 # object is the map's floor so the cell is walkable once the object opens; closed objects block
 # their last row themselves (cell +1 bit7).
@@ -126,6 +126,7 @@ OBJECT_TABLE = 0x01D2FC
 # and a key, and a gate drawn open), so that range is copied to the same address of BLOCK_BANK. Entries are
 # read as $D2FC + Y and ($09) in that bank, so they must sit between $D2FC and the copy.
 DOOR_TABLES = (0xFD97, 0xFEB7)
+DOOR_BANK = BLOCK_BANK
 # Every caller of 15:F7D0, which picks the per-frame routine 7E:1AA5 after a map loads.
 ROUTINE_CALLS = (0x018F84, 0x0198FC, 0x019FD6)
 
@@ -470,7 +471,7 @@ def engine_code(block_count, water_ids, palettes, entries, waters, lids):
     # obj (01:F42D): Y = the target's object entries and DB = their bank, then the replaced LDX #$0009.
     # find's SEP #$30 clears the high byte of Y, so Y is saved and the hit overwrites the saved copy (STA $01,S).
     lib.label("obj").b(*_ENTER).long(0x22, "find").rel(0x90, "obj_keep")
-    lib.long(0xBF, "objects").b(0x83, 0x01, 0xE2, 0x20, 0xA9, LIB_AT >> 16, 0x48, 0xAB)
+    lib.long(0xBF, "objects").b(0x83, 0x01, 0xE2, 0x20, 0xA9, DOOR_BANK, 0x48, 0xAB)
     lib.label("obj_keep").b(*_LEAVE, 0xA2, 0x09, 0x00, 0x6B)
 
     # wrap (calls of 15:F7D0): after the original choice, a replaced map with water runs the water
@@ -530,7 +531,7 @@ def engine_code(block_count, water_ids, palettes, entries, waters, lids):
     end = (LIB_AT & 0xFFFF) + len(lib_code)
     if end > DOOR_TABLES[0]:
         raise ValueError(f"library and object entries overflow into the bank-01 table copy at "
-                         f"{LIB_AT >> 16:02X}:{DOOR_TABLES[0]:04X} by {end - DOOR_TABLES[0]} bytes")
+                         f"{DOOR_BANK:02X}:{DOOR_TABLES[0]:04X} by {end - DOOR_TABLES[0]} bytes")
     sites = [
         (0x01936E, bytes((0x28, 0xAB, 0x60)), bytes((0x4C,)) + (stub_labels["s_load"] & 0xFFFF).to_bytes(2, "little")),
         (0x0193B2, bytes((0x20, 0x6A, 0x99)), bytes((0x20,)) + (stub_labels["s_pal"] & 0xFFFF).to_bytes(2, "little")),
@@ -627,7 +628,7 @@ def build(dq5_path, dq4_path, out):
         {"at": _cpu(WATER_AT), "hex": _hex(water_frames(assets, chr_data, water_ids)), "note": "물 그림 3장"},
         {"at": _cpu(LID_AT), "hex": _hex(lid_tiles(assets)), "note": "열린 상자 타일 9E·9F(6번 줄)"},
         {"at": _cpu(LIB_AT), "hex": _hex(lib_code), "note": "바꾼 맵 표와 불러오기·팔레트·물체·물 루틴, 맵 위 물체 항목"},
-        {"at": _cpu(LIB_AT & 0xFF0000 | DOOR_TABLES[0]), "hex": _hex(door_tables(dq5)),
+        {"at": _cpu(DOOR_BANK << 16 | DOOR_TABLES[0]), "hex": _hex(door_tables(dq5)),
          "note": "문 루틴이 DB 로 읽는 뱅크 01 표의 복사"},
     ]
     for kind, at in palette_at.items():
