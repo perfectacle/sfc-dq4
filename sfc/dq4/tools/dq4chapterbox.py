@@ -27,6 +27,18 @@ BOX_COL, BOX_ROW, BOX_W, BOX_H = 3, 8, 26, 6
 TEXT_ROW = 2                                # 상자 안 글자 띠(16점)의 첫 행
 TITLE = '제1장   왕궁의 전사들'
 
+
+class Scene:
+    """장 제목 상자로 시작하는 장면: 그 맵(그룹, 번호)에서 깃발(7E 주소, 비트)이 꺼져 있는 동안 맵을 검게
+    불러오고, 그 맵 인물 스크립트가 상자(box_at)와 맵 밝히기(reveal)를 부른다."""
+
+    def __init__(self, name, where, flag, title):
+        self.name, self.where, self.flag, self.title = name, where, flag, title
+
+
+CHAPTER1 = Scene('box', (0x36, 0x01), (0x7E219E, 0x04), TITLE)
+PROLOGUE = Scene('box0', (0x3C, 0x01), (0x7E219E, 0x80), '서장')
+
 # FC 팔레트(MesenCE 색): 0 검정, 1 금색(테두리)·흰색(글자), 2 파랑, 3 흰색
 GOLD, BLUE, WHITE = (234, 158, 34), (20, 18, 167), (255, 254, 255)
 
@@ -112,20 +124,23 @@ def snes_tile(rows):
     return bytes(out)
 
 
-def box_data(nes, font, text=TITLE):
-    """(타일 바이트, 타일맵 26x6 워드 바이트). 같은 타일은 한 번만 둔다."""
-    img, pal = box_pixels(nes, font, text)
-    tiles, index, words = bytearray(), {}, bytearray()
-    for ty in range(BOX_H):
-        for tx in range(BOX_W):
-            t = snes_tile([img[ty * 8 + y][tx * 8:tx * 8 + 8] for y in range(8)])
-            if t not in index:
-                index[t] = CANVAS + len(index)
-                tiles += t
-            words += (0x2000 | pal[ty][tx] << 10 | index[t]).to_bytes(2, 'little')
+def box_data(nes, font, texts=(TITLE,)):
+    """(타일 바이트, 제목마다 타일맵 26x6 워드 바이트). 상자들은 캔버스를 함께 쓰고 같은 타일은 한 번만 둔다."""
+    tiles, index, maps = bytearray(), {}, []
+    for text in texts:
+        img, pal = box_pixels(nes, font, text)
+        words = bytearray()
+        for ty in range(BOX_H):
+            for tx in range(BOX_W):
+                t = snes_tile([img[ty * 8 + y][tx * 8:tx * 8 + 8] for y in range(8)])
+                if t not in index:
+                    index[t] = CANVAS + len(index)
+                    tiles += t
+                words += (0x2000 | pal[ty][tx] << 10 | index[t]).to_bytes(2, 'little')
+        maps.append(bytes(words))
     if CANVAS + len(index) > CANVAS_END:
         raise ValueError(f'상자 타일 {len(index)}장이 캔버스를 넘음')
-    return bytes(tiles), bytes(words)
+    return bytes(tiles), maps
 
 
 def bgr555(rgb):
@@ -238,40 +253,62 @@ def map_rows(src_of_row):
     return bytes(out) + DB0 + bytes((0xE2, 0x20))                   # SEP #$20
 
 
-def if_pending(then, other=b''):
-    """왕좌의 방(36/01)이고 연출이 아직이면(7E:219E & 04 꺼짐) then, 아니면 other. M 8, A 를 씀."""
-    checks = [bytes((0xAD, 0xBC, 0x00, 0xC9, 0x36, 0xD0)),      # LDA $00BC / CMP #$36 / BNE
-              bytes((0xAD, 0xBD, 0x00, 0xC9, 0x01, 0xD0)),      # LDA $00BD / CMP #$01 / BNE
-              bytes((0xAF, 0x9E, 0x21, 0x7E, 0x29, 0x04, 0xD0))]  # LDA $7E219E / AND #$04 / BNE
-    then = then + (bytes((0x80, len(other))) if other else b'')   # BRA 끝
-    total = sum(len(c) + 1 for c in checks)
-    out, end = bytearray(), 0
-    for c in checks:
-        end += len(c) + 1
-        out += c + bytes((total + len(then) - end,))
+def if_pending(scenes, then, other=b''):
+    """장면 가운데 하나의 맵이고 그 깃발이 아직 꺼져 있으면 then, 아니면 other. M 8, A 를 씀."""
+    def checks(scene):
+        (g, n), (addr, mask) = scene.where, scene.flag
+        return [bytes((0xAD, 0xBC, 0x00, 0xC9, g, 0xD0)),                 # LDA $00BC / CMP #g / BNE 다음
+                bytes((0xAD, 0xBD, 0x00, 0xC9, n, 0xD0)),                 # LDA $00BD / CMP #n / BNE 다음
+                bytes((0xAF, *le(addr, 3), 0x29, mask, 0xD0))]            # LDA flag / AND #m / BNE 다음
+    then = then + (bytes((0x80, len(other))) if other else b'')           # BRA 끝
+    # 장면마다 [검사 셋][BRA then]. 마지막 장면의 BRA 는 없고 then 이 바로 뒤
+    parts = []
+    for k, scene in enumerate(scenes):
+        cs = checks(scene)
+        last = k == len(scenes) - 1
+        parts.append((cs, last))
+    sizes = [sum(len(c) + 1 for c in cs) + (0 if last else 2) for cs, last in parts]
+    out = bytearray()
+    for k, (cs, last) in enumerate(parts):
+        block_end = sum(sizes[:k + 1])
+        then_at = sum(sizes)
+        miss = then_at + len(then) if last else block_end      # 맞지 않으면 다음 장면(마지막이면 other)
+        at = sum(sizes[:k])
+        for c in cs:
+            at += len(c) + 1
+            out += c + bytes(((miss - at) & 0xFF,))
+        if not last:
+            out += bytes((0x80, (then_at - (at + 2)) & 0xFF))  # BRA then
     return bytes(out) + then + other
 
 
 class Layout:
     """뱅크 하나에 코드·자료를 늘어놓는다."""
 
-    def __init__(self, base, tiles, tilemap, pal):
-        self.base, self.tiles, self.map, self.pal = base, tiles, tilemap, pal
+    def __init__(self, base, scenes, tiles, tilemaps, pal):
+        self.base, self.scenes, self.tiles, self.maps, self.pal = base, scenes, tiles, tilemaps, pal
         self.build()
 
     def build(self):
         # 코드 길이는 자료 주소에 따라 바뀌지 않으므로(즉값 폭 고정) 두 번 짜서 자리를 맞춘다
-        addr = {'tiles': 0, 'map': 0, 'pal': 0, 'blank': 0}
+        addr = {'tiles': 0, 'maps': [0] * len(self.maps), 'pal': 0, 'blank': 0}
         for _ in range(2):
-            start, hook, box, reveal = self.code(addr)
+            start, hook, boxes, reveal = self.code(addr)
             self.start_at = self.base
             self.hook_at = self.start_at + len(start)
-            self.box_at = self.hook_at + len(hook)
-            self.reveal_at = self.box_at + len(box)
+            at = self.hook_at + len(hook)
+            self.box_at = {}
+            for scene, box in zip(self.scenes, boxes):
+                self.box_at[scene.name] = at
+                at += len(box)
+            self.reveal_at = at
             data_at = self.reveal_at + len(reveal)
-            addr = {'blank': data_at, 'pal': data_at + 2, 'map': data_at + 2 + len(self.pal),
-                    'tiles': data_at + 2 + len(self.pal) + len(self.map)}
-        self.blob = start + hook + box + reveal + b'\x00\xff' + self.pal + self.map + self.tiles
+            maps_at = data_at + 2 + len(self.pal)
+            addr = {'blank': data_at, 'pal': data_at + 2,
+                    'maps': [maps_at + sum(map(len, self.maps[:k])) for k in range(len(self.maps))],
+                    'tiles': maps_at + sum(map(len, self.maps))}
+        self.blob = (start + hook + b''.join(boxes) + reveal + b'\x00\xff' + self.pal + b''.join(self.maps) +
+                     self.tiles)
         if (self.base & 0xFFFF) + len(self.blob) > 0x10000:
             raise ValueError('뱅크를 넘음')
 
@@ -279,13 +316,12 @@ class Layout:
         # 새 게임 시작(시작 지점 표를 읽은 뒤): 21A5.6 이 켜져 있으면 맵을 불러올 때 곡을 바꾸지 않는다(00:CE6B).
         # 이 표는 「모험의 서를 만든다」에서 이름 입력 전에도 읽으므로 곡을 끄는 일은 여기서 하지 않는다
         start = (bytes((0xA9, 0x80, 0x85, 0xBE)) +                    # 원래: LDA #$80 / STA $BE
-                 if_pending(bytes((0xAF, *le(SKIP_SONG[0], 3), 0x09, SKIP_SONG[1],   # LDA $7E21A5 / ORA #$40
-                                   0x8F, *le(SKIP_SONG[0], 3)))) +                    # STA $7E21A5
+                 if_pending(self.scenes, bytes((0xAF, *le(SKIP_SONG[0], 3), 0x09, SKIP_SONG[1],   # LDA / ORA #$40
+                                                0x8F, *le(SKIP_SONG[0], 3)))) +                 # STA $7E21A5
                  bytes((0xA9, 0x80, 0x6B)))                            # LDA #$80 / RTL
         # 맵을 불러올 때: 연출 전이면 주화면을 BG3 만으로. 메뉴 곡은 메뉴를 나갈 때 줄어든다(dq4overture.MENU_FADE)
-        hook = (if_pending(bytes((0xA9, 0x04)), bytes((0xA9, 0x17))) +
+        hook = (if_pending(self.scenes, bytes((0xA9, 0x04)), bytes((0xA9, 0x17))) +
                 bytes((0x8F, 0x33, 0x07, 0x7E, 0x6B)))                # STA $7E0733 / RTL
-        put_map = map_rows(lambda r: a['map'] + r * BOX_W * 2)
         clear_map = map_rows(lambda r: None)
         pal_off = (PAL_BORDER * 4) * 2
         n = len(self.pal)
@@ -298,18 +334,20 @@ class Layout:
         restore = bytes((0xC2, 0x30, 0x3B, 0x1A, 0xAA, 0xA0, *le((CGRAM_BUFFER + pal_off) & 0xFFFF, 2),
                          0xA9, *le(n - 1, 2), 0x54, CGRAM_BUFFER >> 16, 0x00,     # TSC / INC / TAX / LDY / MVN $7E,$00
                          0x3B, 0x18, 0x69, *le(n, 2), 0x1B)) + DB0 + bytes((0xE2, 0x20))  # TSC / CLC / ADC #n / TCS
-        box = (ENTER + save + bytes((0x9C, 0x1D, 0x00)) + screen_off() + bytes((0xC2, 0x10)) +   # STZ $001D
-               dma_vram(BG3_CHR + CANVAS * 8, a['tiles'], len(self.tiles)) +
-               dma_cgram(PAL_BORDER * 4, a['pal'], len(self.pal)) +
-               bytes((0xC2, 0x30)) + mvn(a['pal'], CGRAM_BUFFER + pal_off, len(self.pal)) + DB0 +
-               bytes((0xE2, 0x20)) + put_map +
-               dma_vram(BG3_MAP, MAP_BUFFER, 0x800) + screen_on() +
-               fade(1, 15, FADE_STEP) + wait(HOLD) + fade(14, 0, FADE_STEP) +
-               screen_off() + bytes((0xC2, 0x10)) + clear_map +
-               dma_vram(BG3_MAP, MAP_BUFFER, 0x800) +
-               fill_vram(BG3_CHR + CANVAS * 8, a['blank'], len(self.tiles) // 2) +
-               restore + dma_cgram(PAL_BORDER * 4, CGRAM_BUFFER + pal_off, n) +
-               bytes((0xA9, 0x0F, 0x8D, 0x1D, 0x00)) + screen_on() + LEAVE)      # 메시지 창은 밝은 채로
+        def box(map_at):
+            return (ENTER + save + bytes((0x9C, 0x1D, 0x00)) + screen_off() + bytes((0xC2, 0x10)) +   # STZ $001D
+                   dma_vram(BG3_CHR + CANVAS * 8, a['tiles'], len(self.tiles)) +
+                   dma_cgram(PAL_BORDER * 4, a['pal'], len(self.pal)) +
+                   bytes((0xC2, 0x30)) + mvn(a['pal'], CGRAM_BUFFER + pal_off, len(self.pal)) + DB0 +
+                   bytes((0xE2, 0x20)) + map_rows(lambda r: map_at + r * BOX_W * 2) +
+                   dma_vram(BG3_MAP, MAP_BUFFER, 0x800) + screen_on() +
+                   fade(1, 15, FADE_STEP) + wait(HOLD) + fade(14, 0, FADE_STEP) +
+                   screen_off() + bytes((0xC2, 0x10)) + clear_map +
+                   dma_vram(BG3_MAP, MAP_BUFFER, 0x800) +
+                   fill_vram(BG3_CHR + CANVAS * 8, a['blank'], len(self.tiles) // 2) +
+                   restore + dma_cgram(PAL_BORDER * 4, CGRAM_BUFFER + pal_off, n) +
+                   bytes((0xA9, 0x0F, 0x8D, 0x1D, 0x00)) + screen_on() + LEAVE)      # 메시지 창은 밝은 채로
+        boxes = [box(map_at) for map_at in a['maps']]
         # FC 는 서술 창이 닫히면 곡을 멈추고, 왕좌의 방이 밝아질 때 성 곡을 튼다
         # 곡 자료를 SPC 로 보내는 동안(소리 롬에서 약 160프레임) 화면을 검게 두고, 곡이 시작되면 밝힌다
         song_wait = bytes((0xDA,)) + wait(1) + bytes((0xFA,                 # PHX / BRK 09 01 / PLX
@@ -324,7 +362,7 @@ class Layout:
                   # NMI 는 $0733 을 늘 $212C 로 쓰지 않으므로(실측) 맵을 불러올 때처럼 직접 쓴다
                   bytes((0xA9, 0x17, 0x8D, 0x33, 0x07, 0x8D, 0x2C, 0x21, 0x8D, 0x2D, 0x21)) +
                   fade(1, 15, REVEAL_STEP) + LEAVE)
-        return start, hook, box, reveal
+        return start, hook, boxes, reveal
 
 
 START_AT = 0x25834A
@@ -334,25 +372,25 @@ HOOK_ORIG = bytes.fromhex('a9 17 8d 33 07')    # LDA #$17 / STA $0733, 뒤의 ST
 CODE_AT = 0x5F8000
 
 
-def entry_points():
-    """인물 스크립트가 부를 네이티브 주소 {'box', 'reveal'}. 코드가 자료보다 앞이라 자료 크기와 상관없다."""
-    lay = Layout(CODE_AT, b'', bytes(BOX_W * BOX_H * 2), palettes())
-    return {'box': lay.box_at, 'reveal': lay.reveal_at}
+def entry_points(scenes=(CHAPTER1,)):
+    """인물 스크립트가 부를 네이티브 주소 {장면 이름(상자), 'reveal'}. 코드가 자료보다 앞이라 자료 크기와 상관없다."""
+    lay = Layout(CODE_AT, scenes, b'', [bytes(BOX_W * BOX_H * 2)] * len(scenes), palettes())
+    return {**lay.box_at, 'reveal': lay.reveal_at}
 
 
-def writes(nes, font):
+def writes(nes, font, scenes=(CHAPTER1,)):
     """(롬 주소, 바이트, 원래 바이트 또는 None) 목록."""
-    lay = Layout(CODE_AT, *box_data(nes, font), palettes())
-    if {'box': lay.box_at, 'reveal': lay.reveal_at} != entry_points():
+    lay = Layout(CODE_AT, scenes, *box_data(nes, font, [s.title for s in scenes]), palettes())
+    if {**lay.box_at, 'reveal': lay.reveal_at} != entry_points(scenes):
         raise AssertionError('네이티브 주소가 자료 크기에 따라 바뀜')
     return [(START_AT, bytes((0x22, *le(lay.start_at, 3))), START_ORIG),
             (HOOK_AT, bytes((0x22, *le(lay.hook_at, 3), 0xEA)), HOOK_ORIG),
             (CODE_AT, lay.blob, None)]
 
 
-def apply(data, nes, font):
+def apply(data, nes, font, scenes=(CHAPTER1,)):
     d = bytearray(data)
-    ws = writes(nes, font)
+    ws = writes(nes, font, scenes)
     for addr, payload, orig in ws:
         o = lorom(addr)
         if orig is not None and bytes(d[o:o + len(orig)]) != orig:

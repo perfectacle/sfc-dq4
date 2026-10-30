@@ -16,7 +16,7 @@ def branch_target(code, at):
 class CodeTests(unittest.TestCase):
     def test_if_pending_branches_reach_other(self):
         then, other = bytes((0xA9, 0x04)), bytes((0xA9, 0x17))
-        code = box.if_pending(then, other)
+        code = box.if_pending((box.CHAPTER1,), then, other)
         skips = [i for i in range(len(code) - len(then) - len(other) - 2) if code[i] == 0xD0]
         self.assertEqual(len(skips), 3)
         other_at = len(code) - len(other)
@@ -28,9 +28,28 @@ class CodeTests(unittest.TestCase):
 
     def test_if_pending_without_other_falls_to_end(self):
         then = bytes((0xA9, 0xA3, 0x8F, 0xDF, 0x21, 0x7E))
-        code = box.if_pending(then)
+        code = box.if_pending((box.CHAPTER1,), then)
         for at in [i for i in range(len(code) - len(then)) if code[i] == 0xD0]:
             self.assertEqual(branch_target(code, at), len(code))
+
+    def test_if_pending_tries_each_scene(self):
+        # 장면마다 검사 셋. 맞지 않으면 다음 장면으로, 마지막 장면이 맞지 않으면 other. 앞 장면이 맞으면 BRA 로 then
+        then, other = bytes((0xA9, 0x04)), bytes((0xA9, 0x17))
+        code = box.if_pending((box.PROLOGUE, box.CHAPTER1), then, other)
+        then_at = len(code) - len(other) - 2 - len(then)
+        other_at = len(code) - len(other)
+        block = 6 + 1 + 6 + 1 + 7 + 1                       # LDA/CMP/BNE ×2, LDA long/AND/BNE
+        first = [6, 13, 21]                                  # 첫 장면 BNE 자리
+        for at in first:
+            self.assertEqual(code[at - 1], 0xD0)
+            self.assertEqual(branch_target(code, at - 1), block + 2)
+        self.assertEqual(code[block], 0x80)
+        self.assertEqual(branch_target(code, block), then_at)
+        for at in (block + 2 + 6, block + 2 + 13, block + 2 + 21):
+            self.assertEqual(branch_target(code, at - 1), other_at)
+        self.assertEqual(code[1:3], bytes((0xBC, 0x00)))
+        self.assertEqual(code[4], box.PROLOGUE.where[0])
+        self.assertEqual(code[block + 2 + 4], box.CHAPTER1.where[0])
 
     def test_fade_loop_jumps_back_to_store(self):
         code = box.fade(1, 15, 1)
@@ -40,10 +59,12 @@ class CodeTests(unittest.TestCase):
         self.assertEqual(box.fade(14, 0, 1)[-4:-2], bytes((0xC9, 0xFF)))
 
     def test_entry_points_do_not_depend_on_data(self):
-        a = box.Layout(box.CODE_AT, b'', bytes(box.BOX_W * box.BOX_H * 2), box.palettes())
-        b = box.Layout(box.CODE_AT, bytes(16 * 40), bytes(box.BOX_W * box.BOX_H * 2), box.palettes())
-        self.assertEqual((a.box_at, a.reveal_at), (b.box_at, b.reveal_at))
-        self.assertEqual(box.entry_points(), {'box': a.box_at, 'reveal': a.reveal_at})
+        blank = bytes(box.BOX_W * box.BOX_H * 2)
+        for scenes in ((box.CHAPTER1,), (box.PROLOGUE, box.CHAPTER1)):
+            a = box.Layout(box.CODE_AT, scenes, b'', [blank] * len(scenes), box.palettes())
+            b = box.Layout(box.CODE_AT, scenes, bytes(16 * 40), [blank] * len(scenes), box.palettes())
+            self.assertEqual((a.box_at, a.reveal_at), (b.box_at, b.reveal_at))
+            self.assertEqual(box.entry_points(scenes), {**a.box_at, 'reveal': a.reveal_at})
 
     def test_code_bank_is_not_a_sound_bank(self):
         # 사운드 세트는 이 롬 위에 얹으며 자기 뱅크가 비어 있어야 한다
@@ -71,9 +92,10 @@ class BoxTests(unittest.TestCase):
         self.assertEqual({v for row in box.fc_tile(self.nes, box.FC_FILL) for v in row}, {2})
 
     def test_box_fits_canvas(self):
-        tiles, words = box.box_data(self.nes, self.font)
+        # 서장과 1장 상자가 캔버스를 함께 쓴다
+        tiles, maps = box.box_data(self.nes, self.font, [box.PROLOGUE.title, box.CHAPTER1.title])
         self.assertLessEqual(box.CANVAS + len(tiles) // 16, box.CANVAS_END)
-        self.assertEqual(len(words), box.BOX_W * box.BOX_H * 2)
+        self.assertEqual([len(w) for w in maps], [box.BOX_W * box.BOX_H * 2] * 2)
 
 
 if __name__ == '__main__':
