@@ -432,7 +432,8 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
+                                 fromfile_prefix_chars='@')
     ap.add_argument('--base', type=Path, required=True)
     ap.add_argument('--assets', type=Path, required=True)
     ap.add_argument('--song', action='append', required=True, metavar='DQ5_SLOT=NDS_ID')
