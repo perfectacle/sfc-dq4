@@ -11,6 +11,14 @@ org !bm_run_table
     dw !bm_run_stub
 org !bm_run_stub
     JML BmRun
+; 줄 바꿈(24:A4F3, 셋째 줄이면 글을 올림)을 뱅크 60 에서 부르는 받침
+BmNewLine:
+    JSR $A4F3
+    RTL
+; 글자 하나 쓰기(24:A4A4, A = 바이트)
+BmPutChar:
+    JSR $A4A4
+    RTL
 ; 연출 끝(22:D796 LDA $19 / AND #$FD / STA $19). 큰 주문 연출이 덮은 풀 B 칸을 사본에서 다시 올린다.
 org $22D796
     JML BmRestore
@@ -44,6 +52,7 @@ BmRun:
     LDA #$0001
     STA.w !bm_p
     JSR BmClear
+    JSR BmCarrySave
 .token
     LDA.w !bm_p
     CMP.w !bm_n
@@ -109,6 +118,10 @@ BmRun:
     INC.w !bm_p
     JMP .token
 .done
+    JSR BmCarryWrap
+    BCC +
+    JMP .token
++
     ; 버퍼에서 구간(길이 바이트 + n)을 뺀다. BmEmit 이 다음 바이트를 보므로 먼저
     LDA.w !bm_n
     INC
@@ -135,6 +148,8 @@ BmRun:
     LDA.w !bm_tail
     AND #$00FF
     BEQ +
+    CMP #$0080              ; 좁은 부호 뒤 당김(음수)은 띄움이 아니다. 빼면 !bm_x 가 FFxx 로 깨진다
+    BCS +
     STA.w !bm_s
     LDA.w !bm_buf
     AND #$00FF
@@ -594,6 +609,152 @@ BmEncCell:
     REP #$20
     RTS
 
+; 앞 이름의 덜 찬 열을 이어 받았으면(줄 첫 칸이 아닐 때만) 그 점 자리·띠 첫 열·마지막 글리프를 둔다. 구간을 다 그린
+; 뒤 한 줄에 들지 않으면 BmCarryWrap 이 이 열만 앞 줄에 찍고 구간을 다음 줄 첫머리부터 다시 그린다. 폭을 미리 어림하지
+; 않고 실제로 그려서 재므로 글리프·띄움 폭이 바뀌어도 맞는다.
+BmCarrySave:
+    STZ.w !bm_cx
+    LDA.w !bm_x
+    BEQ +
+    LDA.w $0F0D
+    AND #$00FF
+    BEQ +
+    LDA.w !bm_x
+    STA.w !bm_cx
+    LDA.w !bm_last
+    STA.w !bm_cl
+    SEP #$20
+    LDX #$0000
+    LDY #$0000
+-
+    LDA.w !bm_band,X
+    STA.w !bm_col0,Y
+    REP #$20
+    TXA
+    CLC
+    ADC.w #!bm_w
+    TAX
+    SEP #$20
+    INY
+    CPY #$0009
+    BCC -
+    REP #$20
++
+    RTS
+
+; C = 1 이면 다시 그릴 준비를 마쳤다(!bm_p = 1, 띠 빔, 줄 바뀜).
+BmCarryWrap:
+    LDA.w !bm_cx
+    BNE +
+    CLC
+    RTS
++
+    STZ.w !bm_cx
+    LDA.w !bm_x
+    CLC
+    ADC #$0007
+    LSR
+    LSR
+    LSR
+    STA.w !bm_s
+    LDA.w $0F0D
+    AND #$00FF
+    CLC
+    ADC.w !bm_s
+    CMP #$001B
+    BCS +
+    CLC
+    RTS
++
+    ; 띠 첫 열을 이어 받은 그대로 되돌려 칸으로 올려 찍는다. 짝 위 칸은 WnBattleChar 가 큐 머리에서 꺼낸다
+    SEP #$20
+    LDX #$0000
+    LDY #$0000
+-
+    LDA.w !bm_col0,Y
+    STA.w !bm_band,X
+    REP #$20
+    TXA
+    CLC
+    ADC.w #!bm_w
+    TAX
+    SEP #$20
+    INY
+    CPY #$0009
+    BCC -
+    REP #$20
+    JSR BmMark
+    STZ.w !bm_c
+    JSR BmColumn
+    PHA
+    JSR BmDrain
+    PLA
+    SEP #$20
+    CMP #$01
+    BEQ +
+    STA.w !bm_pt+1
+    LDA.w !bm_upc
+    STA.w !bm_queue
+    LDA #$FF
+    STA.w !bm_queue+1
+    LDA #$24
+    PHA
+    PLB
+    LDA.l $7E0000|!bm_pt+1
+    JSL BmPutChar
+    LDA #$7E
+    PHA
+    PLB
++
+    LDA #$24
+    PHA
+    PLB
+    REP #$30
+    JSL BmNewLine
+    SEP #$20
+    LDA #$7E
+    PHA
+    PLB
+    STZ.w !bm_carry
+    REP #$30
+    JSR BmClear
+    LDA.w !bm_cl
+    STA.w !bm_last
+    LDA #$0001
+    STA.w !bm_p
+    SEC
+    RTS
+
+; 올린 칸 그림이 VRAM 에 닿을 때까지 기다린다(DB = 7E, M = X = 16). 전투 NMI 는 창 타일맵 요청($0BEC)이 있으면 우리
+; 대기열을 다음 NMI 로 미루므로(WqNmiGate), 기다리지 않고 글자를 격자에 쓰면 타일맵이 먼저 가 한 프레임 동안 새로 고른
+; 칸이 옛 그림으로 보였다. NMI 가 꺼져 있으면 BmQueueAt 처럼 VBlank 마다 직접 보내고, 켜져 있으면 약 10프레임까지만 돈다.
+BmDrain:
+    SEP #$20
+    LDA.b $1E
+    BPL .direct
+    LDX #$0000
+-
+    LDA.w !wq_count
+    BEQ .done
+    DEX
+    BNE -
+.done
+    REP #$20
+    RTS
+.direct
+    LDA.w !wq_count
+    BEQ .done
+-
+    LDA.l $004212
+    BMI -
+-
+    LDA.l $004212
+    BPL -
+    JSL WqNmi
+    SEP #$20
+    LDA.l $004210
+    BRA .direct
+
 ; 띠를 비우고 점 자리를 0 으로. 앞 이름이 덜 찬 마지막 열을 넘겼으면(!bm_carry) 그 열과 점 자리를 두고 잇는다.
 BmClear:
     SEP #$20
@@ -610,6 +771,10 @@ BmClear:
     DEX
     DEX
     BPL -
+    ; 띠가 홀수 바이트라 두 바이트씩 지우면 맨 앞 바이트(줄 0 열 0)가 남는다. 남으면 앞 띠의 점이 위 칸에 찍힌다
+    SEP #$20
+    STZ.w !bm_band
+    REP #$20
     STZ.w !bm_x
     RTS
 
@@ -733,6 +898,32 @@ BmGlyph:
 ; 띠를 열마다 칸으로 올리고 코드를 글 큐에 쓴 뒤 FF 로 끝낸다. 다음 바이트가 한글 구간(E3)이면 덜 찬 마지막 열은
 ; 올리지 않고 띠 첫 열로 옮겨 구간이 이어 그리게 한다(이름과 조사 사이가 벌어지지 않게).
 BmEmit:
+    ; 지금 칸 + 이 띠의 열 수가 한 줄(26칸)을 넘고 줄 첫 칸이 아니면 먼저 줄을 바꾼다(긴 이름). 줄이 바뀌면 첫 줄인지가
+    ; 달라지므로 칸 고르기보다 먼저
+    LDA.w $0F0D
+    AND #$00FF
+    BEQ .fit
+    STA.w !bm_v
+    LDA.w !bm_x
+    CLC
+    ADC #$0007
+    LSR
+    LSR
+    LSR
+    CLC
+    ADC.w !bm_v
+    CMP #$001B
+    BCC .fit
+    PHB
+    SEP #$20
+    LDA #$24
+    PHA
+    PLB
+    REP #$30
+    JSL BmNewLine
+    REP #$30
+    PLB
+.fit
     JSR BmMark
     STZ.w !bm_q
     STZ.w !bm_c
@@ -821,7 +1012,7 @@ BmEmit:
     AND #$0007
     STA.w !bm_x
 +
-    RTS
+    JMP BmDrain
 
 ; 격자와 큐에 있는 풀 코드를 쓰는 중으로 표시한다.
 BmMark:
