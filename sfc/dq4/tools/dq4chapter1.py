@@ -22,6 +22,7 @@ HERE = Path(__file__).resolve().parent
 DQ5_TOOLS = HERE.parents[1] / 'dq5' / 'tools'
 sys.path[:0] = [str(HERE), str(DQ5_TOOLS)]
 
+import dq4wrap  # noqa: E402
 from dq4environmentrom import GROUPS  # noqa: E402
 from dq4romassets import ips_patch, set_checksum  # noqa: E402
 from dq5build import load  # noqa: E402
@@ -49,27 +50,6 @@ def _width(word):
     return sum(NAME_COLS if c == NAME else 1 for c in word)
 
 
-def _wrap(text, first):
-    """'/' 로 나눈 줄, 없으면 낱말 단위로 나눈다. first 는 첫 줄에서 말하는 이 이름이 더 차지하는 칸."""
-    lines, cur = [], ''
-    if '/' in text:
-        lines = text.split('/')
-        cur = lines.pop()
-    for w in ([] if lines or '/' in text else text.split(' ')):
-        room = LINE_COLS - (first if not lines else 0)
-        cand = w if not cur else cur + ' ' + w
-        if cur and _width(cand) > room:
-            lines.append(cur)
-            cur = w
-        else:
-            cur = cand
-    lines.append(cur)
-    for n, line in enumerate(lines):
-        if _width(line) > LINE_COLS - (first if n == 0 else 0):
-            raise ValueError(f'한 줄에 안 들어감: {line}')
-    return lines
-
-
 def _codes(line):
     out = []
     for n, part in enumerate(line.split(NAME)):
@@ -88,10 +68,7 @@ def _message(pages, prefix=()):
     out = []
     first = max(0, len(prefix[1]) + 1 - 2) if prefix else 0
     for text in pages:
-        lines = _wrap(text, first)
-        if prefix and len(lines) > PAGE_LINES:
-            # 쪽을 더 나누면 말하는 이 이름이 다시 붙는데, 그 줄의 너비는 이름 없이 셈했다
-            raise ValueError(f'말하는 이가 있는 쪽은 {PAGE_LINES}줄까지: {text}')
+        lines = dq4wrap.wrap(text, _width, LINE_COLS, first, PAGE_LINES)
         for k in range(0, len(lines), PAGE_LINES):
             if out:
                 out.append(PAGE)
@@ -124,16 +101,16 @@ def narrate(*pages):
 
 TEXTS = {
     # FC 는 검은 화면에 장 제목 상자(dq4chapterbox.py)를 띄운 뒤, 검은 화면의 메시지 창에 이 서술을 쓴다
-    MSG_NARRATION: narrate('이것은 바트랜드라는/작은 나라의 왕궁 전사의/이야기다.',
-                           '@, 즉 당신도/그 왕궁 전사의/한 사람이었다.',
-                           '어느 날 아침, 임금님은/전사들을 성의 넓은 방에/불러 모았다……'),
-    MSG_MINISTER: speak('대신', '이제부터 임금님께서/그대들에게 하실 말씀이/있다. 명심하여 듣도록.'),
+    MSG_NARRATION: narrate('이것은 바트랜드라는 작은 나라의 왕궁 전사의 이야기다.',
+                           '@, 즉 당신도 그 왕궁 전사의 한 사람이었다.',
+                           '어느 날 아침, 임금님은 전사들을 성의 넓은 방에 불러 모았다……'),
+    MSG_MINISTER: speak('대신', '이제부터 임금님께서 그대들에게 하실 말씀이 있다. 명심하여 듣도록.'),
     MSG_KING: speak('왕',
                     '모두 편히 하라.',
-                    '요즘 아이들이/사라진다는 소문은/그대들도 들었으리라.',
-                    '오늘 아침에도/이무르 마을에서/어머니들이 눈물로/호소하러 왔노라.',
-                    '이 나라의 왕으로서/더는 두고 볼 수 없노라.',
-                    '일의 진상을 밝혀/이 짐에게 보고하라!/가라! 나의 전사들이여!'),
+                    '요즘 아이들이 사라진다는 소문은 그대들도 들었으리라.',
+                    '오늘 아침에도 이무르 마을에서 어머니들이 눈물로 호소하러 왔노라.',
+                    '이 나라의 왕으로서 더는 두고 볼 수 없노라.',
+                    '일의 진상을 밝혀 이 짐에게 보고하라! 가라! 나의 전사들이여!'),
 }
 
 # 대화 번호 T(26D 이상)는 메시지 T + 3C6 을 띄운다. 300 부터 차례로 쓴다. 덮는 자리는 DQ5 마을 대사라, 그 마을에 가면
@@ -149,42 +126,42 @@ def talk(parts):
     return t
 
 
-T_KING = talk(say('그대의 활약을 기대하고/있노라, @여.'))
-T_MINISTER = talk(say('자, 무얼 하는가./어서 가지 않고.'))
-T_EASY = talk(say('뭐, 느긋하게/하자고, @.'))
-T_MOTHER = talk(say('전사님!/부디 저희 아이를/찾아 주세요!', '그 아이는 살아 있어요./저는 알 수 있어요.'))
+T_KING = talk(say('그대의 활약을 기대하고 있노라, @여.'))
+T_MINISTER = talk(say('자, 무얼 하는가. 어서 가지 않고.'))
+T_EASY = talk(say('뭐, 느긋하게 하자고, @.'))
+T_MOTHER = talk(say('전사님! 부디 저희 아이를 찾아 주세요!', '그 아이는 살아 있어요. 저는 알 수 있어요.'))
 T_GATE1 = talk(say('여기는 바트랜드 성.'))
-T_SCHOLAR = talk(say('@ 공인가./아니, 마음에 걸리는 것이/있어서 조금/조사하고 있다네.'))
-T_GATE2 = talk(say('수상한 자는 한 발짝도/들이지 않겠다!'))
-T_NIGHT = talk(say('마을 밖으로 나가/계속 걷다 보면/이윽고 밤이 될 것입니다.'))
-T_CHILD = talk(say('괴물은 옛날부터 있었지만/요즘 들어 아이들이/모습을 감추기 시작했다./무슨 일이 있는 걸까?'))
-T_INN = talk(say('@ 공./싸우다 다치거든/마을로 돌아가/여관에 묵도록 하시오.'))
-T_RIVAL = talk(say('여어, @!/아직도 여기서 어정대다니/여전히 굼뜨구먼.', '다른 녀석들은 이무르/마을로 간 거 아니었어?'))
-T_MAID = talk(say('@ 님. 부디 다른/전사들에게 뒤지지 않도록/힘내 주세요.'))
-T_DAYTIME = talk(say('예전엔 밤에만 나오던/마물이 낮에도 나온다지./뒤숭숭한 세상이구먼.'))
-T_IMURU = talk(say('저희는 이무르 마을에서/왔습니다.'))
-T_HERB = talk(say('긴 여행이 될 것 같으면/마을에서 약초를/사 가시오.'))
+T_SCHOLAR = talk(say('@ 공인가. 아니, 마음에 걸리는 것이 있어서 조금 조사하고 있다네.'))
+T_GATE2 = talk(say('수상한 자는 한 발짝도 들이지 않겠다!'))
+T_NIGHT = talk(say('마을 밖으로 나가 계속 걷다 보면 이윽고 밤이 될 것입니다.'))
+T_CHILD = talk(say('괴물은 옛날부터 있었지만 요즘 들어 아이들이 모습을 감추기 시작했다. 무슨 일이 있는 걸까?'))
+T_INN = talk(say('@ 공. 싸우다 다치거든 마을로 돌아가 여관에 묵도록 하시오.'))
+T_RIVAL = talk(say('여어, @! 아직도 여기서 어정대다니 여전히 굼뜨구먼.', '다른 녀석들은 이무르 마을로 간 거 아니었어?'))
+T_MAID = talk(say('@ 님. 부디 다른 전사들에게 뒤지지 않도록 힘내 주세요.'))
+T_DAYTIME = talk(say('예전엔 밤에만 나오던 마물이 낮에도 나온다지. 뒤숭숭한 세상이구먼.'))
+T_IMURU = talk(say('저희는 이무르 마을에서 왔습니다.'))
+T_HERB = talk(say('긴 여행이 될 것 같으면 마을에서 약초를 사 가시오.'))
 # 밤(FC 밤 목록)
-T_N_MOTHER = talk(say('그 아이 생각을 하면/밤에도 잠이 오지/않아서……', '전사님, 부디/부디……'))
-T_N_ASLEEP = talk(say('임금님께서는 이미/잠자리에 드셨다.'))
-T_N_INN = talk(say('오늘 밤은 여관에라도/묵고 내일 다시/오는 게 좋겠다.'))
-T_N_SCHOLAR = talk(say('흐음……/조사하면 조사할수록/닮았어!',
-                       '요즘 날씨는/그 옛날 마물들이/날뛰던 시대와/꼭 닮았단 말이야.'))
-T_N_ROUND = talk(say('이거야 원./순찰도 쉽지 않군.'))
-T_N_BED = talk(say('자, 자야지 자야지./사람은 역시 잘 때가/제일 행복하다니까.'))
+T_N_MOTHER = talk(say('그 아이 생각을 하면 밤에도 잠이 오지 않아서……', '전사님, 부디 부디……'))
+T_N_ASLEEP = talk(say('임금님께서는 이미 잠자리에 드셨다.'))
+T_N_INN = talk(say('오늘 밤은 여관에라도 묵고 내일 다시 오는 게 좋겠다.'))
+T_N_SCHOLAR = talk(say('흐음…… 조사하면 조사할수록 닮았어!',
+                       '요즘 날씨는 그 옛날 마물들이 날뛰던 시대와 꼭 닮았단 말이야.'))
+T_N_ROUND = talk(say('이거야 원. 순찰도 쉽지 않군.'))
+T_N_BED = talk(say('자, 자야지 자야지. 사람은 역시 잘 때가 제일 행복하다니까.'))
 T_N_SNORE = talk(say('쿨쿨……'))
 
 # 성 앞(36/00)은 dq4npcport.py 가 FC 인물을 놓고 일본어 원문을 둔다. 그 가운데 옮긴 것은 FC 메시지 묶음으로 찾아
 # 같은 DQ5 메시지 번호의 글을 한글로 바꾼다.
 FRONT_TEXTS = {
-    (0x78C,): say('@ 공! 알고 있소?', '잠기지 않은 문도 있어서/열쇠 없이 열 수 있다네!'),
-    (0x5E3, 0x5E4): say('괴물이라도 마을 안까지는/들어오지 못해요.', '그럼 왜 아이들이/없어지는 걸까요……'),
-    (0x5E1,): say('바트랜드 왕은/사람이 좋아서/이 나라는 세금도 싸지.', '하지만 그만큼/무기나 방어구에도/돈을 못 들이는 거야.',
-                  '더 강한 무기가 필요하면/스스로 돈을 모아/바꿔 사는 게 좋을걸.', '새 무기나 방어구를 사면/다시 장비하는 걸/잊지 말라고!'),
-    (0x5E2,): say('이 성에서 서쪽 동굴을/빠져나가 바닷가를 따라/가면 이무르 마을이에요.'),
-    (0x5E5,): say('이무르 마을에 가면/뭔가 알 수 있을지도/모르겠네요.'),
-    (0x78D,): say('저는 프레아./남편 알렉스가 여행을/떠난 채 돌아오지 않아요.', '전사님! 여행길에 혹시/알렉스를 보시거든/알려 주세요!'),
-    (0x5E0,): say('여기는 바트랜드의/성 아래 마을입니다.'),
+    (0x78C,): say('@ 공! 알고 있소?', '잠기지 않은 문도 있어서 열쇠 없이 열 수 있다네!'),
+    (0x5E3, 0x5E4): say('괴물이라도 마을 안까지는 들어오지 못해요.', '그럼 왜 아이들이 없어지는 걸까요……'),
+    (0x5E1,): say('바트랜드 왕은 사람이 좋아서 이 나라는 세금도 싸지.', '하지만 그만큼 무기나 방어구에도 돈을 못 들이는 거야.',
+                  '더 강한 무기가 필요하면 스스로 돈을 모아 바꿔 사는 게 좋을걸.', '새 무기나 방어구를 사면 다시 장비하는 걸 잊지 말라고!'),
+    (0x5E2,): say('이 성에서 서쪽 동굴을 빠져나가 바닷가를 따라 가면 이무르 마을이에요.'),
+    (0x5E5,): say('이무르 마을에 가면 뭔가 알 수 있을지도 모르겠네요.'),
+    (0x78D,): say('저는 프레아. 남편 알렉스가 여행을 떠난 채 돌아오지 않아요.', '전사님! 여행길에 혹시 알렉스를 보시거든 알려 주세요!'),
+    (0x5E0,): say('여기는 바트랜드의 성 아래 마을입니다.'),
 }
 
 # 그림 번호(dq5sprite.py 시트에서 고름)
