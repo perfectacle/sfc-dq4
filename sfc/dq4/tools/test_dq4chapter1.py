@@ -142,5 +142,16 @@ class Chapter1TalkTests(unittest.TestCase):
         self.assertFalse(set(dq4ch1talk.TEXTS) & set(ch.FRONT_TEXTS))
 
 
+class PrologueEntryTest(unittest.TestCase):
+    def test_prologue_calls_the_built_box_and_reveal(self):
+        # 서장 스크립트가 부르는 상자·밝히기 주소가 서장 빌드의 장면 목록과 같아야 한다(2장 상자를 더해 어긋났음)
+        import dq4chapterbox
+        import dq4prologue
+        want = dq4chapterbox.entry_points(ch.scenes(True))
+        head = dq4prologue.master_script(dq4chapterbox.entry_points(dq4chapterbox.GAME_SCENES))['commands'][:3]
+        calls = [c['args'] for c in head if c.get('op') == '37']
+        self.assertEqual(calls, [[v & 0xFF, v >> 8 & 0xFF, v >> 16] for v in (want['box0'], want['reveal'])])
+
+
 if __name__ == '__main__':
     unittest.main()

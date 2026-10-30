@@ -41,7 +41,7 @@ class PrologueTests(unittest.TestCase):
     def test_master_waits_for_the_talk_then_leaves(self):
         lists, _, overrides, scripts = pro.npc_lists()
         ops = [(c['op'], c['args']) for c in scripts[0]['commands']]
-        points = box.entry_points((box.PROLOGUE, box.CHAPTER1))
+        points = box.entry_points(box.GAME_SCENES)
         calls = [a for op, a in ops if op == '37']
         self.assertEqual(calls[:2], [pro._long(points['box0']), pro._long(points['reveal'])])
         wait = ops.index(('09', [0x80 | pro.DONE[0], pro.DONE[1]]))

@@ -372,7 +372,7 @@ def npc_lists():
     overrides = [over(CELLAR, SHINSIA_MET, 'cellar_after'), over(CELLAR, FROG_MET, 'cellar_shinsia'),
                  over(CELLAR, DONE, 'cellar_after'),
                  over(VILLAGE, SHINSIA_MET, 'village_supper'), over(VILLAGE, FROG_MET, 'village_frog_gone')]
-    out_scripts = [master_script(box.entry_points((SCENE, box.CHAPTER1))),
+    out_scripts = [master_script(box.entry_points(box.GAME_SCENES)),
                    {"address": SLEEPER_SCRIPT, "commands": [_cmd('16')]}] + scripts()
     return lists, new_lists, overrides, out_scripts
 
