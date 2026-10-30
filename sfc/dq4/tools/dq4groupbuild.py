@@ -7,7 +7,9 @@ Order matters (sfc/dq4/docs/dq4-environment-format.md, 「그룹 연결」):
   3. dq5exitreloc.py, dq5npcrelocate.py (the FC people of dq4npcport.py), dq5fieldtables.py from the original
      ROM with --new-map, dq5textwrite.py with their Japanese FC text, and dq5progresswrite.py with the FC
      shop lists plus the inn price table and the per-FC-group shop key hook of dq4shopport.py, and
-     dq5talkwrite.py with the talk scripts that show the people's messages (dq4npcport.talk_doc).
+     dq5talkwrite.py with the talk scripts that show the people's messages (dq4npcport.talk_doc), and the
+     ルーラ list slots and names of the FC destinations (dq4fieldtravel.py, dq5namewrite.py), and the FC field
+     encounter zones (dq4fieldencounter.py: dq5progresswrite.py records, dq5encounterwrite.py grids).
   4. dq5chestplace.py from the original ROM with the patches of 1-3 (--with-patch): the FC chests and
      タンス·つぼ of dq4chestport.py on the cells 1 gave their DQ5 attributes.
   5. dq4fieldport.py: FC fields 0, 1 and 3 as DQ5 worlds 0-2 with the DQ4 field art (dq5fieldgfxwrite.py,
@@ -479,14 +481,30 @@ def build(dq5, dq4, out):
     entrance_tables = {name: dq4fieldport.park([e for e in tables["entrances"] if e["table"] == name], worlds)
                        for name in ("main", "aux")}
     found = doors(prg)
-    entrance_tables["aux"] += [{"group": group, "x": x, "y": y} for group, parts in LINKS.items()
-                               for part in parts if part["field"] for x, y in found[part["fc"]][0]]
+    import dq4fieldtravel
+    destinations = dq4fieldtravel.destinations(prg, LINKS, found)
+    entrance_tables["aux"] += dq4fieldtravel.landing_rows(
+        [{"group": group, "x": x, "y": y} for group, parts in LINKS.items()
+         for part in parts if part["field"] for x, y in found[part["fc"]][0]], destinations)
     step("dq5fieldtables.py", "entrances", {"format": "dq5fieldtables/1", "entrance_tables": entrance_tables}, dq5,
          *ENTRANCES_AT, *new_map_args)
     arrivals, leaving = hook_rows(LINKS, place, found)
     manifests.append(_save(out / "entrance-hook.dq5patch.json", {
         "format": "dq5patch/1", "name": "dq4-entrance-hook",
         "writes": dq4entrancehook.writes(ENTRANCE_HOOK_AT, arrivals, leaving)}))
+    manifests.append(_save(out / "travel.dq5patch.json", {
+        "format": "dq5patch/1", "name": "dq4-travel", "writes": dq4fieldtravel.writes(dq5.read_bytes(), destinations)}))
+    checks.append(step("dq5namewrite.py", "names", dq4fieldtravel.names_doc(dq5.read_bytes(), destinations), dq5))
+    import dq4fieldencounter
+    _run(DQ5_TOOLS / "dq5encounterwrite.py", dq5, "dump", "-o", out / "encounter-orig.json")
+    zones, grids, zone_report = dq4fieldencounter.docs(
+        prg, dq5.read_bytes(), json.loads((out / "encounter-orig.json").read_text(encoding="utf-8")))
+    _save(out / "zone-report.json", zone_report)
+    step("dq5progresswrite.py", "zones", zones, dq5)
+    step("dq5encounterwrite.py", "grids", grids, dq5)
+    manifests.append(_save(out / "rates.dq5patch.json", {
+        "format": "dq5patch/1", "name": "dq4-encounter-rates",
+        "writes": [dq4fieldencounter.terrain_rates(prg, dq5.read_bytes())]}))
 
     import dq4chestport  # imports this module
     place, chest_report = dq4chestport.port(dq5, dq4)
@@ -507,6 +525,7 @@ def build(dq5, dq4, out):
     summary = {"rom": str(rom), "maps": new_maps, "exits": ours, "areas": areas,
                "fields": {tag(g, part): {"entrances": found[part["fc"]][0], "leave": found[part["fc"]][1]}
                           for g, parts in LINKS.items() for part in parts if part["field"]},
+               "ruler": destinations,
                "records_end": report["records_end"], "bank01_bytes": report["bank01_bytes"]}
     _save(out / "groups.json", summary)
     return summary
