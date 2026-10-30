@@ -226,8 +226,22 @@ def allocate(score, voices, end, tail_ticks=0, lanes_for=None):
                    'peak_source_voices': peak, 'melody_channel': melody, 'bass_channel': bass}
 
 
+# SPC FLG 잡음 주파수 0~1F 의 Hz. NDS PSG 잡음은 음 번호의 사각파 주기 x 8 로 LFSR 을 돌린다고 보고 가장 가까운 것을 고른다.
+NOISE_HZ = (0, 16, 21, 25, 31, 42, 50, 63, 83, 100, 125, 167, 200, 250, 333, 400, 500, 667, 800, 1000,
+            1300, 1600, 2000, 2700, 3200, 4000, 5300, 6400, 8000, 10700, 16000, 32000)
+NOISE = 'noise'
+
+
+def noise_frequency(note):
+    """NDS 잡음 악기의 음 번호 → DQ5 잡음 트랙의 음 번호(FLG 잡음 주파수 1~1F)."""
+    clock = 8 * 440 * 2 ** ((note - 69) / 12)
+    return min(range(1, 32), key=lambda i: abs(math.log2(NOISE_HZ[i] / clock)))
+
+
 def resolve_sample(mapping, program, note):
     value = mapping[program]
+    if value == NOISE:
+        return None
     if isinstance(value, int):
         return value
     matches = [r['sample'] for r in value if r['lo'] <= note <= r['hi']]
@@ -397,7 +411,7 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
     missing = sorted(used - mapping.keys())
     if missing:
         raise ValueError(f'programs require explicit mapping: {missing}')
-    samples = sorted({resolve_sample(mapping, n['program'], n['note']) for lane in lanes for n in lane})
+    samples = sorted({resolve_sample(mapping, n['program'], n['note']) for lane in lanes for n in lane} - {None})
     if sample_order is not None:
         if sorted(sample_order) != samples:
             raise ValueError('sample_order must list exactly the samples the song uses')
@@ -405,8 +419,11 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
     usage = {}
     for lane in lanes:
         for n in lane:
-            first, count = usage.get(resolve_sample(mapping, n['program'], n['note']), (math.inf, 0))
-            usage[resolve_sample(mapping, n['program'], n['note'])] = (min(first, n['tick']), count + 1)
+            sample = resolve_sample(mapping, n['program'], n['note'])
+            if sample is None:
+                continue
+            first, count = usage.get(sample, (math.inf, 0))
+            usage[sample] = (min(first, n['tick']), count + 1)
     if any(not isinstance(n, int) or not 0 <= n < 0xC8 for n in samples):
         raise ValueError('sample ID outside DQ5 table')
     ccs, restored = controllers(score, end)
@@ -506,7 +523,11 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
                 for t, cc, value in events[bisect_right(times, note['tick']):bisect_right(times, tick)]:
                     note_cc[cc] = value
                 sample = resolve_sample(mapping, note['program'], note['note'])
-                index = samples.index(sample)
+                noisy = sample is None
+                if cache.get('noise', False) != noisy:
+                    lines.append('  noise_on' if noisy else '  noise_off')
+                    cache['noise'] = noisy
+                index = samples.index(sample) if not noisy else cache.get('instrument')
                 arrival = arrival_ticks.get(sample)
                 if fresh and arrival is not None and note['tick'] < arrival:
                     late_notes[sample] += 1
@@ -515,7 +536,7 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
                     if cache.get('instrument') == index:
                         reissued += 1
                     cache.pop('instrument', None)
-                if cache.get('instrument') != index:
+                if index is not None and cache.get('instrument') != index:
                     setting('instrument', index)
                     cache['instrument_at'] = tick
                 setting('release', release_rate)
@@ -529,13 +550,16 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
                     setting('volume2', level)
                 setting('pan', _pan(note_cc[10]))
                 midi = note['note']
-                while midi < 24:
-                    midi += 12
-                while midi > 101:
-                    midi -= 12
-                if fresh and midi != note['note']:
-                    folded.append({'source': note['uid'], 'from': note['note'], 'to': midi})
-                word = f'note {midi - 23:02X}' if fresh else 'tie'
+                if noisy:
+                    word = f'note {noise_frequency(midi):02X}' if fresh else 'tie'
+                else:
+                    while midi < 24:
+                        midi += 12
+                    while midi > 101:
+                        midi -= 12
+                    if fresh and midi != note['note']:
+                        folded.append({'source': note['uid'], 'from': note['note'], 'to': midi})
+                    word = f'note {midi - 23:02X}' if fresh else 'tie'
             else:
                 word = 'rest'
             remaining = stop - tick
