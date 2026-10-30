@@ -14,7 +14,7 @@ DQ5 트랙 dq5hangul.py retree(2MB, 뱅크 30)와 같은 방법을 4MB 통합 �
   07:D77C~  옮긴 메시지가 비운 자리. 한글 글자 그림(12×11 1bpp)
 
 글자 코드는 3DB + 이름 입력 글리프 번호(dq4nameentry.GLYPHS: 호환 자모 51, 완성형 2,350, ＊, 전각 공백)이고,
-그 뒤에 문장 부호가 이어진다. 글자 그림을 읽는 24:A6C1~ 은 묶음 주소에 비트 위치를 더한 뒤 뱅크 바이트만 따로 올려
+그 뒤에 문장 부호와 숫자가 이어진다. 글자 그림을 읽는 24:A6C1~ 은 묶음 주소에 비트 위치를 더한 뒤 뱅크 바이트만 따로 올려
 데이터 뱅크로 삼으므로, 묶음 하나가 뱅크 경계를 넘으면 안 된다. 묶음 +4 의 뱅크는 07 + 2비트라 07~0A 에만 둔다.
 형식은 sfc/dq4/docs/dq4-menu-format.md.
 """
@@ -48,7 +48,10 @@ PUNCT = ('.', '?', '!', ',')
 PUNCT_PAD = 1
 # 1점짜리 마침표·쉼표는 SFC 화면에서 거의 보이지 않아 2점 굵기로 다시 그린다. 아래 줄이 기준선이다.
 PUNCT_ROWS = {'.': ('##', '##'), ',': ('##', '.#', '#.')}
-CHARS = ne.GLYPHS + list(PUNCT)
+# 숫자는 Galmuri11 그대로, 앞 여백 없이(자기 폭에 여백이 있음)
+DIGITS = tuple('0123456789')
+SIGNS = PUNCT + DIGITS
+CHARS = ne.GLYPHS + list(SIGNS)
 
 LINE, END, PAUSE, SLOT = 0x1000, 0x1001, 0x1006, 0x1004
 # 원문(FC DQ4 그룹 1 「なまえ のぼうけんのしょを けします。いいですか？」 와 SFC 문장)을 옮겼다. {1004} 는 칸 번호(1~3)라
@@ -117,15 +120,15 @@ def hangul_rows(font, ch):
 
 
 def punct_rows(font, ch):
-    """부호 하나의 (폭, 줄 목록). 앞에 PUNCT_PAD 점을 비운다."""
+    """부호·숫자 하나의 (폭, 줄 목록). 부호는 앞에 PUNCT_PAD 점을 비운다."""
     if ch in PUNCT_ROWS:
         shape = PUNCT_ROWS[ch]
         w = PUNCT_PAD + len(shape[0]) + 1
         rows = ['.' * w] * (CELL_H - len(shape)) + ['.' * PUNCT_PAD + r + '.' for r in shape]
         return w, rows
     g = font.glyphs[ch]
-    w = g['adv'] + PUNCT_PAD
-    return w, ['.' * PUNCT_PAD + r for r in glyph_rows(font, ch, g['adv'], CELL_H)]
+    pad = PUNCT_PAD if ch in PUNCT else 0
+    return g['adv'] + pad, ['.' * pad + r for r in glyph_rows(font, ch, g['adv'], CELL_H)]
 
 
 def plan_groups(sizes, start=GLYPH_START):
@@ -189,7 +192,7 @@ def apply(data, font, extra=None):
     blob, starts = encode(tree, msgs)
 
     hangul = [hangul_rows(font, ch) for ch in ne.GLYPHS]
-    punct = [punct_rows(font, ch) for ch in PUNCT]
+    punct = [punct_rows(font, ch) for ch in SIGNS]
     sizes = [(len(hangul), CELL_W, CELL_H)] + [(1, w, CELL_H) for w, _ in punct]
     groups = plan_groups(sizes)
     pictures = list(hangul) + [rows for _, rows in punct]
@@ -273,7 +276,7 @@ def preview(font, path, scale=3):
     from PIL import Image
 
     def cell(c):
-        return None if c in ' 1' else (punct_rows(font, c)[0] if c in PUNCT else CELL_W)
+        return None if c in ' 1' else (punct_rows(font, c)[0] if c in SIGNS else CELL_W)
     lines = [[]]
     for parts in TEXTS.values():
         for p in parts:
@@ -291,7 +294,7 @@ def preview(font, path, scale=3):
         for c in line:
             w = cell(c)
             if w:
-                for ry, row in enumerate(punct_rows(font, c)[1] if c in PUNCT else hangul_rows(font, c)):
+                for ry, row in enumerate(punct_rows(font, c)[1] if c in SIGNS else hangul_rows(font, c)):
                     for rx, v in enumerate(row):
                         if v == '#':
                             img.putpixel((x + rx, 4 + y * 13 + 2 + ry), (255, 255, 255))

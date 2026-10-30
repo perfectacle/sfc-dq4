@@ -301,13 +301,15 @@ def npc_doc(records, ported=(), prologue=False, report=None, ported_messages=())
         import dq4ch1event
         import dq4npcport
         ported, more_new, more_overrides = dq4ch1event.npc_lists(ported, report, event_talk())
-        # 보스를 이긴 뒤의 왕좌의 방: 왕이 대신 옆으로 내려와 보고를 듣는다(FC 1C:$8184 의 왕 (10,13))
+        # 보스를 이긴 뒤의 왕좌의 방: 보고 전에는 병사들이 줄을 서고 왕이 말을 거는 목록(FC 1C:$8184), 보고 뒤에는
+        # 왕이 대신 옆 (10,13)에 내려와 있는 목록
         king_report = entry(STATIC, *KING_DOWN, KING, 'down', dq4ch1event.talk_numbers(event_talk())['king'])
         new_lists.append({"name": "throne_report", "entries": [king_report] + after[1:]})
-        flag_index, flag_mask = dq4ch1event.BOSS_WON
+        new_lists.append({"name": "throne_return", "entries": dq4ch1event.throne_return(event_talk())})
         new_lists += more_new
-        overrides = more_overrides + [{"map": THRONE, "flag": flag_index, "when": "on", "mask": flag_mask,
-                                       "list": "new:throne_report"}] + overrides
+        over = lambda flag, name: {"map": THRONE, "flag": flag[0], "when": "on", "mask": flag[1], "list": f"new:{name}"}  # noqa: E731
+        overrides = more_overrides + [over(dq4ch1event.REPORTED, 'throne_report'),
+                                      over(dq4ch1event.BOSS_WON, 'throne_return')] + overrides
         scripts += dq4ch1event.scripts(dq4npcport.FIRST_MESSAGE + len(ported_messages),
                                        dq4chapterbox.entry_points(scenes(prologue))['box2'])
     mine = {lst["map"] for lst in lists}

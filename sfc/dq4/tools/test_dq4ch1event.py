@@ -89,6 +89,58 @@ class FlyTest(unittest.TestCase):
         self.assertNotIn('40', ops)          # 1장 끝에서 멈춘다
         self.assertEqual([x for x in ev.scripts(0xD00) if x["address"] == ev.ENDER_SCRIPT], [])
 
+    def test_at_variants(self):
+        x, y = ev.ch1_cell(ev.CRY_FROM, ev.CRY_ROW)
+        code = ev._at(x, y, x_from=True)
+        self.assertEqual(code[3:9], bytes((0xAF, 0x20, 0x30, 0x7E, 0xC9, x)))
+        self.assertEqual(code[9], 0x90)                          # X 는 이상이면 지나감(BCC)
+        near, away = ev._at(None, y), ev._at(None, y, away=True)
+        self.assertEqual((near[-11], near[-4]), (0x00, 0x01))   # 그 줄이면 A = 0
+        self.assertEqual((away[-11], away[-4]), (0x01, 0x00))   # 떠나면 A = 0
+
+    def test_level_up_branches_land_on_the_two_paths(self):
+        from dq4chapterbox import ENTER, LEAVE
+        code = ev._level_up()
+        body = code[len(ENTER):-len(LEAVE)]
+        bcs = body.index(bytes((0xE2, 0x10, 0xB0))) + 2
+        up = bcs + 2 + body[bcs + 1]
+        self.assertEqual(body[up:up + 1], b'\xAF')                               # 깃발을 끄는 갈래
+        brl = up - 3
+        self.assertEqual(body[brl], 0x82)
+        self.assertEqual(brl + 3 + int.from_bytes(body[brl + 1:brl + 3], 'little'), len(body))  # 끝(LEAVE)으로
+        self.assertIn(bytes((0x22, *ev._long(ev.LEVEL_UP))), body)
+        self.assertIn(bytes((0xAF, *ev._long(ev.HERO_LEVEL), 0x1A)), body)      # 레벨은 직접 +1
+
+    def test_cage_copies_each_cell_from_the_floor_beside_it(self):
+        code = ev._open_cage()
+        x0, y0 = ev.CAGE[0] * 2, ev.CAGE[1] * 2
+        for y in range(y0, y0 + 4):
+            for x in range(x0, x0 + 4):
+                src = bytes((0xA2, x + ev.CAGE_FLOOR_DX * 2, 0xA0, y, 0x22))
+                dst = bytes((0xA2, x, 0xA0, y, 0x22))
+                self.assertLess(code.index(src), code.index(dst))
+        self.assertIn(ev.DP_SAVE, code)
+        self.assertLess(code.index(ev.DP_SAVE), code.index(ev.DP_RESTORE))
+
+    def test_king_calls_from_his_row(self):
+        (call,) = [x for x in ev.scripts(0xD00) if x["address"] == ev.KING_CALL_SCRIPT]
+        cmds = call["commands"]
+        _, at = ev.native()
+        self.assertEqual(cmds[2]["args"], ev._long(at['king_row']))
+        branch = next(c for c in cmds if c["op"] == '06' and c["args"] == list(ev.KIDS_FOLLOW))
+        self.assertEqual(branch["target"], "back")
+        calls = [c["args"] for c in cmds if c["op"] == '37']
+        self.assertEqual(calls, [ev._long(at['gift']), ev._long(at['level_up'])])
+        self.assertIn({"op": "10", "args": list(ev.REPORTED)}, cmds)
+
+    def test_throne_return_lines_up_eight_soldiers(self):
+        entries = ev.throne_return(0x904)
+        soldiers = [e for e in entries if e["from"] in [s for s, _ in ev.SOLDIER_SRCS]]
+        self.assertEqual(len(soldiers), 16)                          # 낮·밤
+        self.assertEqual(sum(e["from"] == ev.KING_CALL_SRC for e in entries), 2)
+        scripts = {x["address"] for x in ev.scripts(0xD00)}
+        self.assertLessEqual({a for _, a in ev.SOLDIER_SRCS}, scripts)
+
     def test_apply_refuses_other_bytes(self):
         with self.assertRaises(SystemExit):
             ev.apply(bytes(0x400000))
@@ -145,8 +197,11 @@ class ListTest(unittest.TestCase):
         (over,) = [o for o in self.over if o["map"] == ev.TOWER_TOP]
         self.assertEqual((over["flag"], over["mask"]), ev.BOSS_WON)
         (after,) = [lst["entries"] for lst in self.new if lst["name"] == "top_after"]
-        srcs = (ev.HIDE_ON_WIN_SRC, ev.RESCUED_SRC, ev.THANKS_SRC)
+        srcs = (ev.RESCUED_SRC, ev.RESCUED2_SRC, ev.THANKS_SRC, ev.CRY_SRC)
         self.assertFalse([e for e in after if e["from"] in srcs])
+        # 다시 들어오면 보이지 않는 인물 하나가 철창만 연다
+        opener = [e for e in after if e["from"] == ev.HIDE_ON_WIN_SRC]
+        self.assertEqual([(e["fields"]["gfx"], e["time"]) for e in opener], [(1, "day"), (1, "night")])
         top = self.entries(ev.TOWER_TOP)
         self.assertEqual(sum(e["from"] == ev.THANKS_SRC for e in top), 2)     # 낮·밤에 하나씩
 
@@ -159,10 +214,20 @@ class ListTest(unittest.TestCase):
         self.assertEqual(soldier, ["new:soldier_gone", f"new:{ev.alt_name(ev.AFTER_BOSS, ev.SOLDIER_MAP)}"])
         self.assertIn(ev.alt_name(ev.AFTER_BOSS, ev.KIDS_HOME_MAP), self.report)
 
+    def test_imuru_kids_walk_home_instead_of_the_fc_walkers(self):
+        (imuru,) = [lst["entries"] for lst in self.new if lst["name"] == ev.alt_name(ev.AFTER_BOSS, ev.KIDS_HOME_MAP)]
+        srcs = [e["from"] for e in imuru]
+        for src, _ in ev.HOME_KID_SRCS:
+            self.assertEqual(srcs.count(src), 1)
+        walkers = [p for p in self.report[ev.alt_name(ev.AFTER_BOSS, ev.KIDS_HOME_MAP)]
+                   if (p["x"], p["y"]) in ev.KIDS_FC_WALKERS]
+        self.assertEqual(len(imuru), len(self.report[ev.alt_name(ev.AFTER_BOSS, ev.KIDS_HOME_MAP)]) - len(walkers) + 2)
+
     def test_event_talks_replace_the_ported_ones(self):
         t = ev.talk_numbers(0x904)
         talks = {e["fields"]["talk"] for m in (ev.FRONT, ev.FRONT_NIGHT, ev.IMURU, ev.JAIL, ev.HOIMIN_ROOM, ev.TOWER_TOP)
-                 for e in self.entries(m)} | {e["fields"]["talk"] for lst in self.new for e in lst["entries"]}
+                 for e in self.entries(m)} | {e["fields"]["talk"] for lst in self.new for e in lst["entries"]} | \
+            {e["fields"]["talk"] for e in ev.throne_return(0x904)}
         self.assertLessEqual(set(t.values()), talks)
 
 
