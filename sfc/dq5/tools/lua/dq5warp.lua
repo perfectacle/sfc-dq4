@@ -170,16 +170,21 @@ local function patchEntrance(fx, fy)
   prgWrite(0x27E83, {bc, fx & 255, fx >> 8, fy & 255, fy >> 8})
   prgWrite(0x7EA97 + bc * 5, {((world + 1) << 5) | (bd & 0x1F), tx, ty, dir, 0x00})
 end
+local idleOk = false
 local function play(seq)
   if si > #seq then return true end
   local s = seq[si]
   if left == nil then left = s[2] end
-  -- idle:N 은 필드 입력이 읽히기 직전 프레임까지 최대 N프레임 기다린다. 00:8185 는 7E:007F & 7 = 0 인 프레임에만 입력을 읽는데
-  -- 7F 는 2프레임마다 1씩 늘어 16프레임 중 2프레임뿐이다. 그 앞 프레임(& 7 = 7)에서 누르면 4프레임짜리 a:4 도 창에 걸린다.
-  if s[1] == "idle" and rd(0x7E007F) & 7 == 7 and rd(0x7E007E) == 0 then left = 0 end
+  -- idle:N 은 필드 입력이 읽히기 직전 프레임까지 최대 N프레임 기다린다. 00:8185 는 7E:007F & 7 = 0 인 프레임에만 입력을 읽는다.
+  -- 36/01 에서 서 있을 때는 $7F 가 2프레임마다 1씩 늘어 16프레임 중 2프레임이고, 02/06 에서 막힌 up 뒤에는 프레임마다 1씩이라
+  -- 8프레임 중 1프레임이다. 그 앞 프레임(& 7 = 7)에서 누르면 4프레임짜리 a:4 도 창에 걸린다.
+  if s[1] == "idle" and rd(0x7E007F) & 7 == 7 and rd(0x7E007E) == 0 then left = 0; idleOk = true end
   if s[1] ~= "wait" and s[1] ~= "idle" then local t = {}; for b in s[1]:gmatch("[^+]+") do t[b] = true end; L.press(t) end
   left = left - 1
-  if left <= 0 then si = si + 1; left = nil end
+  if left <= 0 then
+    if s[1] == "idle" and not idleOk then log[#log + 1] = string.format("f%05d idle timeout", n) end
+    si = si + 1; left = nil; idleOk = false
+  end
   return false
 end
 local function pos()
