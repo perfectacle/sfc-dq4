@@ -367,6 +367,8 @@ class TileWordBoundaryTests(unittest.TestCase):
         worlds = [self.NIB, self.NIB[::-1], [n ^ 5 for n in self.NIB]]
         words = fgw.palette_world_words(worlds)
         self.assertEqual(len(words), 14 * 1024)
+        with self.assertRaisesRegex(ValueError, '세계 셋'):
+            fgw.palette_world_words(worlds + worlds[:1])
         put(d, 0x308000, words)
         rom = Rom(bytes(d))
         for w, nib in enumerate(worlds):

@@ -1,5 +1,5 @@
 -- 필드 세계 $1949 에 쓰는 곳과 값, 그리고 세계를 읽는 루틴(READPC, 기본 00:BBAC)에 들어갈 때의 $1949 를 모은 뒤 NEXT 를 부른다.
--- 쓰기는 WRAM 오프셋(snesWorkRam 1949)에 걸어 7E:1949·00:1949 등 거울 주소와 DMA·MVN 쓰기를 모두 잡는다.
+-- 쓰기는 WRAM 오프셋(snesWorkRam 1949)에 건다. CPU 주소에 건 감시와 달리 00:1949 거울·MVN·$2180 포트 DMA 쓰기도 잡힌다.
 -- 결과: SHOT_DIR/world.txt
 --   "write PC 값 첫프레임 횟수"  PC·값마다 한 줄
 --   "read PC 값 첫프레임 횟수"   READPC 에 들어갈 때의 $1949 값마다 한 줄

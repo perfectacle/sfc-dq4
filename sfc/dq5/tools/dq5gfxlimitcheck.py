@@ -235,12 +235,10 @@ def check_tiles(name, rom_path, dump, n, orig, world=0, grown=True):
             'tilemap_cells': len(cells), 'cells_using_512_up': high, 'same_as_original_game': len(stale)}
 
 
-def check_nibbles(name, dump, world, nib, n=SETTLE_FRAME):
-    """BG1·2 타일맵에서 늘린 타일(512 이상)로 그린 칸마다 팔레트 비트가 nib(그 세계에 준 니블, 위층 4비트·
-    아래층 3비트)로 셈한 값인지. 디코더를 거치지 않고 입력과 바로 견준다."""
+def nibble_cells(dump, nib, n=SETTLE_FRAME):
+    """BG1·2 타일맵에서 늘린 타일(512 이상)로 그린 칸 수와, 그 가운데 팔레트 비트가 nib(위층 4비트·아래층 3비트)로
+    셈한 값과 다른 칸 수."""
     vram = frame(dump, n, 'vram')
-    w = frame(dump, n, 'wram')
-    require(w[0x1949] == world and not w[0xBE] & 0x80, f'{name}: 세계 {world} 필드에 서지 않음')
     cells, wrong = 0, 0
     for base, mask in ((0, 7), (0x1000, 15)):
         for i in range(0x800):
@@ -249,6 +247,14 @@ def check_nibbles(name, dump, world, nib, n=SETTLE_FRAME):
             if t >= fgw.TILES:
                 cells += 1
                 wrong += v >> 10 & 7 != ((nib[t] & mask) + 2) & 7
+    return cells, wrong
+
+
+def check_nibbles(name, dump, world, nib, n=SETTLE_FRAME):
+    """늘린 타일 칸마다 팔레트 비트가 nib(그 세계에 준 니블)로 셈한 값인지. 디코더를 거치지 않고 입력과 바로 견준다."""
+    w = frame(dump, n, 'wram')
+    require(w[0x1949] == world and not w[0xBE] & 0x80, f'{name}: 세계 {world} 필드에 서지 않음')
+    cells, wrong = nibble_cells(dump, nib, n)
     require(cells and not wrong, f'{name}: 늘린 타일 칸 {cells}개 가운데 {wrong}개 팔레트가 입력 니블과 다름')
     return {'case': name, 'world': world, 'cells_using_512_up': cells, 'palette_from_input_nibble': cells - wrong}
 
@@ -279,13 +285,7 @@ def check_world(name, roms, dirs, frames, nibs, start=None):
         tiles = check_tiles(f'{name}-tiles', roms['tiles'], dirs['tiles'], n, dirs['orig'], w)
         res = check_tiles(name, roms['nibs'], dirs['nibs'], n, dirs['orig'], w)
         pal = check_nibbles(name, dirs['nibs'], w, nibs[w], n)
-        other = {}
-        for k in nibs.keys() - {w}:
-            try:
-                check_nibbles(name, dirs['nibs'], w, nibs[k], n)
-                other[k] = 0
-            except ValueError as error:
-                other[k] = int(str(error).split('가운데 ')[1].split('개')[0])
+        other = {k: nibble_cells(dirs['nibs'], nibs[k], n)[1] for k in nibs.keys() - {w}}
         require(all(v == pal['cells_using_512_up'] for v in other.values()),
                 f'{name}: 세계 {w} 칸이 다른 세계 니블과도 맞음 {other}')
         tv, nv = frame(dirs['tiles'], n, 'vram'), frame(dirs['nibs'], n, 'vram')
