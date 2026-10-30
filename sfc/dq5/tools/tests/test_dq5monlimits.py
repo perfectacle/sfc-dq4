@@ -54,6 +54,9 @@ class PlaceTests(unittest.TestCase):
         wide = (head(2, 2), 1, [9, 9])
         kept, pieces, bands = M.place([(0, 4, 0, *wide)])
         self.assertEqual((kept[0][1], kept[0][5], pieces, bands[11], bands[12]), (3, 4, 4, 27, 27))
+        # 4x14 칸이면 줄 0 의 상자 위가 $30 이라 첫 줄 번호가 -1 이다. 그 줄은 표 끝(31)에 돌아가 세지 않는다.
+        kept, _, bands = M.place([(0, 1, 0, head(4, 14), 1, [4] * 14)])
+        self.assertEqual((kept[0][4], kept[0][1], bands[31], bands[:13]), (0x30, 1, 0, [4] * 13))
 
 
 class LimitTests(unittest.TestCase):

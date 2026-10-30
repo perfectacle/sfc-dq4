@@ -152,9 +152,10 @@ def bit9_rom(planes, planes10=(None, None, None)):
     put(d, 0x00BCA0, bytes([0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01]))
     put(d, 0x308000, fw.bit9_hook(planes, planes10))
     put_cells(d)
-    # 11비트 훅은 JML 로 원래 다음 명령에 돌아간다. 해석기의 jsl 이 끝나도록 그 자리에 RTL 을 둔다.
-    for back in fw.BIT11_RETURNS:
-        put(d, back, b'\x6b')
+    # 11비트 훅은 JML 로 원래 다음 명령에 돌아간다. 해석기의 jsl 이 끝나도록 그 자리에 RTL 을 두고, 어느 자리로 돌아왔는지
+    # 보이게 앞에 자리마다 다른 INC $1000·INC $1002 를 둔다.
+    for k, back in enumerate(fw.BIT11_RETURNS):
+        put(d, back, bytes([0xEE, k * 2, 0x10, 0x6B]))
     return d
 
 
@@ -182,7 +183,7 @@ class Bit9HookTests(unittest.TestCase):
         put(d, 0x30B000 + 0x123, b'\xff')
         cases = ((0, 0x00, 0x6), (0, 0x20, 0x7), (1, 0x20, 0x1), (1, 0x00, 0x0), (2, 0x00, 0x2), (3, 0x20, 0x1))
         entries = fw.bit11_entries(fw.bit9_hook(planes, planes10))
-        for (world, e000, want), entry in ((c, e) for c in cases for e in entries):
+        for (world, e000, want), (k, entry) in ((c, e) for c in cases for e in enumerate(entries)):
             cpu = Cpu(bytes(d), bytes(0x20000))
             cpu.wram[0x1949] = world
             cpu.wram[0xE123] = e000
@@ -192,6 +193,7 @@ class Bit9HookTests(unittest.TestCase):
             cpu.jsl(0x308000 + entry)
             self.assertEqual(cpu.a & 0xFFFF, want << 8 | 0x5A, f'세계 {world} 몸통 {entry}')
             self.assertEqual((cpu.x, cpu.y, cpu.s), (2, 2, s), f'세계 {world} 몸통 {entry}')
+            self.assertEqual((cpu.wram[0x1000], cpu.wram[0x1002]), (k == 0, k == 1), f'세계 {world} 몸통 {entry}')
         put(d, dq5field.BIT9_SITES[0], b'\x22\x00\x80\x30')
         rom = Rom(bytes(d))
         self.assertEqual(dq5field.bit9_planes(rom), planes)

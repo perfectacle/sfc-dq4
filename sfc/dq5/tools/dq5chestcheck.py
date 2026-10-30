@@ -6,6 +6,8 @@ sfc/dq5/docs/dq5-map-format.md의 보물상자 형식. 입력 JSON→dq5patch→
 past_* 사례는 상자 194개·상자 맵 연결과 아래층 상자 표를 뱅크 3F 로 옮긴 롬에서 열기·들어갈 때 그리기·기록과 불러오기를 본다.
 wide_* 사례는 상자 번호 16비트 훅(dq5chestreloc.py --wide-at)으로 상자를 301개 둔 롬에서 상자 300 을 같은 셋으로 본다.
 wideitem_open 은 같은 롬에서 상자 300 의 보상만 물건으로 바꿔, 물건 길로 12:F839 에 가는지 본다.
+widelock_open·widefull_open 은 상자 300 을 잠긴 상자·가방이 가득한 물건으로 바꾼 롬에서 두 번 열어, 12:F839 를 지나지
+않은 보상이 남긴 넘길 마스크(7E:291B)를 다음 열기가 지우는지 본다(패치 롬만).
 new_* 사례는 원래 롬에 없는 새 그룹 맵 36/00(선실 17/00 에 상자 블록을 놓은 레코드)에 상자·タンス·두 칸 앞 항목을
 dq5chestreloc.py --new-map·--with-patch 로 넣은 롬을, 같은 새 맵 패치만 붙인 대조 롬과 견준다.
 blocks_* 사례는 --env 로 준 DQ4 환경 패치 폴더(sfc/dq4/tools/dq4environmentrom.py 출력)로 새 맵 36/00 을 만든다. 그 맵은
@@ -198,8 +200,14 @@ def wideitem_base(doc):
     doc['chests'][186] = {'reward': WIDE_ITEM}
 
 
+def widelock_base(doc):
+    wide_base(doc)
+    doc['chests'][186] = {'reward': 0xFFFC}
+
+
 BUILDS = {'past': (GROW_DOC, grow_base, GROW_AT), 'full': (FULL_DOC, full_base, FULL_AT),
-          'wide': (WIDE_DOC, wide_base, WIDE_AT), 'wideitem': (WIDE_DOC, wideitem_base, WIDE_AT)}
+          'wide': (WIDE_DOC, wide_base, WIDE_AT), 'wideitem': (WIDE_DOC, wideitem_base, WIDE_AT),
+          'widelock': (WIDE_DOC, widelock_base, WIDE_AT), 'widefull': (WIDE_DOC, wideitem_base, WIDE_AT)}
 GROW = {'past_open': (987, 0x2228, 0x80, 0x2228, 0x80, None, 0x131),
         # 아래층 상자 51/51 (19,35). 원본은 2228 & 08, 패치는 옮긴 표의 2229 & 08 을 켠다
         'past_lower': (None, 0x2229, 0x08, 0x2228, 0x08, 0xB1, 0x131),
@@ -260,8 +268,15 @@ ENTRY = {'past_entry': ({'TO': '19/00,5,46'}, '2228|80'), 'past_entry_lower': ({
 # SRAM 칸 1 은 7E:2000~ 을 70:0012~ 에 그대로 담는다(25:83CE)
 SAVES = {'past_save': {0x2228: 0x80, 0x2229: 0x08}, 'wide_save': {WIDE_FLAG[0]: WIDE_FLAG[1]}}
 SAVE_SLOT = 0x700012
+# 12:F839 를 지나지 않는 보상: 잠긴 상자(FFFC)와, 물건 12칸이 가득한데(7E:2056~2061 = A1) 버리기를 いいえ 로 거절한 물건.
+# 상자 300 을 두 번 연다. 19/00 의 (11,46) 은 가게 계산대 안이라 다른 상자로 걸어갈 수 없다. 첫 번째가 남긴 넘길 마스크
+# 291B 를 두 번째 열기 훅이 맵 안 순서를 세기(2A:F224) 전에 지우는지 본다. (보상, 장면에서 미리 고칠 WRAM, 상자 300 의
+# 메시지, 한 번 열 때의 입력). 버리기 물음(13D)에 B 를 누르면 いいえ 로 14B 가 나온다. 패치 롬만 돌린다
+STALE = {'widelock_open': (0xFFFC, '', [0x14E], INPUT),
+         'widefull_open': (WIDE_ITEM, ';'.join(f'{a:04X}=A1' for a in range(0x2056, 0x2062)), [0x12E, 0x14A, 0x13D, 0x14B],
+                           INPUT + ',wait:60,b:4,wait:300,b:4,wait:200')}
 SAVE_FRAMES = {'saved': 2600, 'reset': 2710, 'loaded': 6400}
-ALL = [*CASES, *ENTRY, *SAVES]
+ALL = [*CASES, *ENTRY, *SAVES, *STALE]
 # 조사 뒤 세계 지도 버퍼의 블록(블록 좌표 x, y, 원본, 패치). 밤이라 빛 블록 A7 이 놓인 자리를 본다
 # 필드에 들어갈 때 빛 블록을 놓으므로, 장면도 그 롬으로 만들어야 하는 사례
 OWN_SCENE = {'field_move', 'place_chest', 'place_shift', 'place_furniture', *NEWMAP}
@@ -641,6 +656,37 @@ def save_compare(name, original, out, mesence, libdir, start):
             'passed': True}
 
 
+def stale_compare(name, original, out, mesence, libdir, start):
+    reward, bits, messages, buttons = STALE[name]
+    dest = out / name
+    dest.mkdir()
+    patched = grow_rom(original, dest, name.split('_')[0])
+    run_dir = dest / 'patched'
+    run_dir.mkdir()
+    env = environment(libdir, start, run_dir)
+    env.update(TO='19/00,11,46', SET=bits, SETTLE='120', SAVE='scene.mss', MAXF='1500')
+    run(mesence, patched, HERE / 'lua/dq5warp.lua', run_dir, env)
+    require((run_dir / 'scene.mss').is_file(), f'{name}: 장면 세이브가 없음')
+    env = environment(libdir, run_dir / 'scene.mss', run_dir)
+    env.update(INPUT=f'{buttons},wait:30,{buttons}')
+    run(mesence, patched, HERE / 'lua/dq5chestcheck.lua', run_dir, env)
+    after = (run_dir / 'after.wram').read_bytes()
+    trace = (run_dir / 'trace.txt').read_text(encoding='utf-8')
+    opens = re.findall(r'open f=\d+ pend=([0-9A-F]+)', trace)
+    counts = re.findall(r'count f=\d+ pend=([0-9A-F]+)', trace)
+    rewards = [int(v, 16) for v in re.findall(r'reward .* value=([0-9A-F]+)', trace)]
+    shown = [int(v, 16) for v in re.findall(r'message .* value=([0-9A-F]+)', trace)]
+    # 잠긴 상자는 12:F43B 앞에서 끝나 보상 조회가 없다
+    require(rewards == ([] if reward == 0xFFFC else [reward] * 2), f'{name}: 실제 조회 보상 {rewards}')
+    require(all(shown.count(m) == 2 for m in messages), f'{name}: 상자 300 의 메시지 {messages} 가 두 번씩 없음({shown})')
+    require(not re.search(r'^set ', trace, re.M), f'{name}: 12:F839 에 들어감')
+    pend = f'{WIDE_FLAG[1]:02X}'
+    require(opens == ['00', pend], f'{name}: 열기 훅에 들어올 때의 291B {opens}')
+    require(counts == ['00', '00'], f'{name}: 2A:F224 를 부를 때의 291B {counts}')
+    require((after[WIDE_FLAG[0]], after[WIDE_PENDING]) == (0, WIDE_FLAG[1]), f'{name}: 28F8·291B 가 다름')
+    return {'case': name, 'opens': opens, 'counts': counts, 'messages': [f'{m:X}' for m in shown], 'passed': True}
+
+
 # --audit 장면: (dq5warp.lua 변수, 미리 켤 비트). 상자 방 01/02 에 들어가 상자를 열고(닫힘·열림 둘 다),
 # 그룹 50 이상 맵 51/51 에서 아래층 상자를 열고, 54/52 의 BRK 0B·0D 갈래(1F:FCCA)까지 지난다
 AUDIT = {'chest': ({'TO': '01/02,34,31', 'TEST': INPUT}, ''),
@@ -730,12 +776,15 @@ def main():
             results = list(pool.map(lambda name: compare(name, states.get(scene(name)), original, out, mesence, libdir,
                                                          state) if name in CASES else
                                     entry_compare(name, original, out, mesence, libdir, state) if name in ENTRY else
+                                    stale_compare(name, original, out, mesence, libdir, state) if name in STALE else
                                     save_compare(name, original, out, mesence, libdir, state), cases))
         (out / 'results.json').write_text(json.dumps(results, indent=2) + '\n', encoding='utf-8')
-        pairs = [name for name in cases if name not in SAVES]
-        saves = len(cases) - len(pairs)
+        pairs = [name for name in cases if name not in SAVES and name not in STALE]
+        saves = sum(name in SAVES for name in cases)
+        stale = sum(name in STALE for name in cases)
         print(f'{len(pairs)}쌍/{2 * len(pairs)}실행 통과: 보상·금화·새 열림 비트·기존 비트 보존·들어갈 때 열린 상자'
-              + (f', 기록·불러오기 {saves}실행 통과' if saves else ''))
+              + (f', 기록·불러오기 {saves}실행 통과' if saves else '')
+              + (f', 넘길 마스크 지우기 {stale}실행 통과' if stale else ''))
         return 0
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         print(f'오류: {error}', file=sys.stderr)
