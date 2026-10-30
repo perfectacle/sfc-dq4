@@ -23,6 +23,8 @@ class SameUntilTests(unittest.TestCase):
         self.assertEqual(same_until(long + ['', '900 EFF 0'], short), 610)
         self.assertEqual(same_until(short[:1], ['600 248C39 5', '650 24A519 1']), 650)
         self.assertEqual(same_until([], ['', '600 248C39 5']), 600)
+        # 짧은 기록이 610 에서 끝나도 긴 기록의 다음 줄이 700 이면 699 까지는 둘이 같다
+        self.assertEqual(same_until(short, short + ['700 24A569 0']), 700)
 
 
 if __name__ == '__main__':
