@@ -47,7 +47,18 @@ FAST_RECEIVE_POLLS = 32
 # 짝 표 71:8300(곡 → 본체, FF 없음), 2B:C1C1(곡이 시작한 뒤 곡 뒤 샘플 보내기 JSR C1DB)을 발판 2B:B780 으로.
 CHAIN_HANDLER = 0xFF54
 CHAIN_TABLE_ENTRY = 0x07CD
-FIRST_CHAIN_SONG = SEQUENCE_COUNT
+# 새 곡 번호: 47~4F 는 바꿔 넣는 곡(시나리오가 부를 고정 번호), 50~ 은 나눈 곡의 본체. SPC 색인 표(04C7)는 0x64칸.
+# 드라이버와 2B 는 「32 이상은 효과음」으로 보므로 47 이상을 곡으로 보는 범위 검사로 바꾼다(song_range_code).
+NEW_SONG_FIRST, NEW_SONG_LAST = SEQUENCE_COUNT, 0x4F
+FIRST_CHAIN_SONG = 0x50
+SONG_LIMIT = 0x64
+RECORD_COUNT = CODE + 0x3F0         # 곡 묶음 레코드 수(47 넘게 늘렸을 때만, 0 이면 원래 47개)
+# SPC 의 곡/효과음 판정(CMP A,$28EB, 문턱 32) 자리. 뒤는 모두 C 만 본다(1C5F 는 POP A / RET 로 C 를 돌려줌)
+SPC_EFFECT_COMPARES = (0x0AE8, 0x0B52, 0x0C45, 0x11D6, 0x130F, 0x1683, 0x1A2D, 0x1C5F)
+SPC_EFFECT_HELPER = bytes.fromhex('68 47 B0 03 68 32 6F 60 6F')  # C=1 ⇔ 32 <= A < 47
+# 2B 의 「지금 곡」($1D8B) 판정: BF5A(8비트, 곡이면 저장)·BFB4(16비트, C 판정). 도우미는 NMI 선점 범위(B741~B804) 안
+SONG_STORE_HELPER = 0x2BB770
+SONG_TEST_HELPER = 0x2BB7F8
 CHAIN_PAIRS = CODE + 0x300
 CHAIN_STEP = 0x2BB780
 # 본체를 곡 뒤 샘플 다음에 보낼 곡(순서 표 71:8380 = 1)은 샘플 보내기 고리 끝(2B:C20C, PLA·PLX·RTS)의 발판 2B:B7A0 에서
@@ -74,6 +85,15 @@ class Replacement:
 
 def read_sets(data):
     pos, records = lorom(SONG_SETS), []
+    at = lorom(RECORD_COUNT)
+    count = data[at] if at < len(data) else 0  # 2MB 롬에는 그 뱅크가 없다
+    if count:
+        # 표 뒤에는 SPC 판정 도우미와 FF00~ 블록이 붙는다
+        for _ in range(count):
+            size = data[pos] + 2
+            records.append(bytes(data[pos:pos + size]))
+            pos += size
+        return records
     for _ in range(SEQUENCE_COUNT):
         size = data[pos] + 2
         records.append(bytes(data[pos:pos + size]))
@@ -500,6 +520,35 @@ LOAD_FRAME_ENTER = 0x0085E5        # 원래 코드 JSR 969A / RTL: 코루틴으�
 LOAD_LINES = 12                    # IRQ 사이 줄 수. 줄마다 걸면 코루틴 전환이 끝나기 전에 다음 IRQ 가 와 늘 취소됐고, 3줄이면 처리기가 CPU 를 절반 먹어 검은 화면이 75프레임 늘었다
 
 
+NMI_RANGE_STUB = LOAD_STUB + 4
+
+
+def nmi_range_code():
+    """NMI 선점(00:88E2)이 2B:B741~B804(우리 코루틴 코드: 응답 판정·곡 틀기 문·나눈 곡 발판·곡 번호 도우미)도
+    코루틴으로 보게 하는 00:8004 발판. 빠뜨리면 그 안에서 NMI 가 와도 코루틴이 멈추지 않아 게임이 한 프레임 밀린다."""
+    h = bytes.fromhex
+    stub = _asm([
+        h('C9 CE BE'), ('b', 0xB0, 'orig'),
+        h('C9 41 B7'), ('b', 0x90, 'norm'),
+        h('C9 05 B8'), ('b', 0xB0, 'norm'),
+        h('4C EC 88'),
+        ('label', 'orig'), h('4C E7 88'),
+        ('label', 'norm'), h('4C 1E 89'),
+    ])
+    return {NMI_RANGE_STUB: (stub, None),
+            0x0088E2: (h('4C') + (NMI_RANGE_STUB & 0xFFFF).to_bytes(2, 'little') + h('EA EA'), h('C9 CE BE 90 37'))}
+
+
+def song_store_helper():
+    """2B:BF5A(8비트, A = 곡 번호) 대신: 32~46(효과음)이 아니면 $1D8B(지금 곡)에 둔다."""
+    return bytes.fromhex('C9 47 B0 04 C9 32 B0 03 8D 8B 1D 60')
+
+
+def song_test_helper():
+    """2B:BFB4(16비트 CMP #$0032 → BCS) 대신: C=1 ⇔ 32 <= A < 47."""
+    return bytes.fromhex('C9 47 00 B0 04 C9 32 00 60 18 60')
+
+
 def load_pump_code(lines=LOAD_LINES):
     """{롬 주소: (바이트, 원래 바이트 또는 None=빈 자리)}. 
 
@@ -589,15 +638,7 @@ def load_pump_code(lines=LOAD_LINES):
     # NMI 를 다시 켤 때(00:9664) 같은 자리의 I 를 켜 원래대로 둔다.
     nmi_off = h('09 20 8F 00 42 00 48 A9 FF 8F 01 42 00 A9 00 8F 09 42 00 8F 0A 42 00 A3 07 29 FB 83 07 68 6B')
     nmi_on = h('8F 00 42 00 48 AF 11 42 00 A3 07 09 04 83 07 68 6B')
-    stub = _asm([
-        h('5C') + LOAD_IRQ.to_bytes(3, 'little'),
-        h('C9 CE BE'), ('b', 0xB0, 'orig'),
-        h('C9 41 B7'), ('b', 0x90, 'norm'),
-        h('C9 05 B8'), ('b', 0xB0, 'norm'),
-        h('4C EC 88'),
-        ('label', 'orig'), h('4C E7 88'),
-        ('label', 'norm'), h('4C 1E 89'),
-    ])
+    stub = h('5C') + LOAD_IRQ.to_bytes(3, 'little')
     # CD48 은 PHP·PHB 뒤 NMI 를 끄고 PLB·PLP 로 끝나 I 를 다시 켠다. 불러오기 루틴들은 이 뒤의 I 를 이어받는다.
     exit_cli = h('22 DA AA 03 A3 05 29 FB 83 05 6B')
     return {
@@ -611,7 +652,7 @@ def load_pump_code(lines=LOAD_LINES):
         LOAD_NMI_ON: (nmi_on, None),
         LOAD_STUB: (stub, None),
         0x00FFEE: ((LOAD_STUB & 0xFFFF).to_bytes(2, 'little'), h('7F 8F')),
-        0x0088E2: (h('4C') + ((LOAD_STUB & 0xFFFF) + 4).to_bytes(2, 'little') + h('EA EA'), h('C9 CE BE 90 37')),
+        **nmi_range_code(),
         0x2BC298: (h('20') + (LOAD_POLL & 0xFFFF).to_bytes(2, 'little') + h('30 F5 EA EA'), h('D0 F8 4D DC 08 30 F3')),
         0x009691: (h('22') + LOAD_NMI_OFF.to_bytes(3, 'little'), h('8F 00 42 00')),
         0x009676: (h('22') + LOAD_NMI_ON.to_bytes(3, 'little'), h('8F 00 42 00')),
@@ -746,9 +787,19 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
         raise ValueError(f'reserved sound banks exhausted placing {what} '
                          f'({sum(0x10000 - x for x in free.values())} bytes left in fragments)')
 
+    chains = chains or {}
+    expand = bool(chains) or any(song >= NEW_SONG_FIRST for song in replacements)
+    if expand:
+        if len(records) != SEQUENCE_COUNT:
+            raise ValueError('base already has new song numbers; build from the ROM before them')
+        top = max([FIRST_CHAIN_SONG + len(chains)] if chains else []
+                  + [song + 1 for song in replacements if song >= NEW_SONG_FIRST])
+        if top > SONG_LIMIT:
+            raise ValueError('too many songs for the SPC sequence index')
+        records += [bytes(2)] * (top - len(records))
     for song, item in sorted(replacements.items()):
-        if not 0 <= song < SEQUENCE_COUNT or song == 0x10:
-            raise ValueError('target song must be 00..46 except the protected title 10')
+        if not (0 <= song < SEQUENCE_COUNT or NEW_SONG_FIRST <= song <= NEW_SONG_LAST) or song == 0x10:
+            raise ValueError('target song must be 00..46 or 47..4F, except the protected title 10')
         validate_replacement(item)
         payload = len(item.sequence).to_bytes(2, 'little') + item.sequence
         address = place(payload, f'sequence {song:02X}')
@@ -766,11 +817,8 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
         address = place(payload, f'sample {sample:02X}')
         write(address, payload, empty=True)
         write(RELOC_SMP_TABLE + sample * 3, address.to_bytes(3, 'little'))
-    chains = chains or {}
     chain_numbers = {}
     if chains:
-        if len(records) != SEQUENCE_COUNT:
-            raise ValueError('base already has chained songs; build from the ROM before them')
         if not set(chains) <= set(replacements):
             raise ValueError('chained songs must be replaced songs')
         anchor = resident_samples(data)[0]
@@ -783,7 +831,7 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
             write(address, payload, empty=True)
             write(RELOC_SEQ_TABLE + number * 3, address.to_bytes(3, 'little'))
             # 본체 레코드는 늘 두는 샘플 하나만(악기 번호는 앞부분 곡의 레코드를 씀)
-            records.append(bytes([1, 1, anchor]))
+            records[number] = bytes([1, 1, anchor])
             # 곡 뒤 샘플이 없으면 2B 가 곡 뒤 단계(C1BA)를 지나지 않아 본체를 보내지 않았다(곡 01·0C 가 앞부분만 울림).
             # 늘 두는 샘플 하나를 곡 뒤로 덧붙여 그 단계를 지나게 한다(이미 있어 보내지는 않음, 악기 번호는 그대로).
             size, first, *ids = records[song]
@@ -802,6 +850,21 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
         write(0x2BC1C1, bytes([0x20]) + (CHAIN_STEP & 0xFFFF).to_bytes(2, 'little'), bytes.fromhex('20 DB C1'))
         write(0x2BC20C, bytes([0x4C]) + (CHAIN_LATE_STEP & 0xFFFF).to_bytes(2, 'little'), bytes.fromhex('68 FA 60'))
     table = b''.join(records)
+    if expand:
+        # 판정 도우미는 표 바로 뒤(SPC 28EC + 표 길이)에 두고 자리 시작을 그만큼 민다
+        helper_at = 0x28EC + len(table)
+        table += SPC_EFFECT_HELPER
+        for site in SPC_EFFECT_COMPARES:
+            write(DRIVER_BLOCK + 4 + site - 0x0750, bytes([0x3F]) + helper_at.to_bytes(2, 'little'), bytes.fromhex('65 EB 28'))
+        write(SONG_STORE_HELPER, song_store_helper(), empty=True)
+        write(SONG_TEST_HELPER, song_test_helper(), empty=True)
+        write(0x2BBF5A, bytes([0x20]) + (SONG_STORE_HELPER & 0xFFFF).to_bytes(2, 'little') + bytes([0xEA] * 4),
+              bytes.fromhex('C9 32 B0 03 8D 8B 1D'))
+        write(0x2BBFB4, bytes([0x20]) + (SONG_TEST_HELPER & 0xFFFF).to_bytes(2, 'little'), bytes.fromhex('C9 32 00'))
+        write(RECORD_COUNT, bytes([len(records)]), empty=True)
+        if not load_pump:
+            for at, (payload, original) in nmi_range_code().items():
+                write(at, payload, original, empty=original is None)
     if 0x28EC + len(table) > 0x3000:
         raise ValueError(f'song sample table too large: {len(table)} bytes')
     if not 0x2A5D <= heap_start(data) < 0x3000:
@@ -890,6 +953,7 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
                     'resident_samples': [f'{x:02X}' for x in resident_samples(result)],
                     'map_fades': map_fades, 'preview': preview, 'fast_receive': fast_receive, 'hold': hold, 'early_song': early_song, 'load_pump': load_pump,
                     'chains': {f'{k:02X}': f'{v:02X}' for k, v in sorted(chain_numbers.items())},
+                    'song_records': len(read_sets(result)),
                     'chains_sent_after_samples': [f'{k:02X}' for k in sorted(chain_late)],
                     'limitations': ['Map fades apply only to the ordinary DQ5 map-song calls; battle and event timing is unchanged.',
                                     'The early fade-out is skipped when the sound queue is busy at load time; the original 1A cleanup still runs.',

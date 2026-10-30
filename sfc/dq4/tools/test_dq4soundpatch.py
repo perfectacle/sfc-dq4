@@ -230,6 +230,43 @@ class MapStartInstallTests(unittest.TestCase):
         for at, (payload, _) in patch.load_pump_code().items():
             self.assertEqual(out[lorom(at):lorom(at) + len(payload)], payload)
 
+class SongNumberCodeTests(unittest.TestCase):
+    def spc_effect(self, a):
+        # SPC 도우미를 흉내: CMP #47 / BCS 곡 / CMP #32 / RET(C) ; 곡: CLRC
+        return False if a >= 0x47 else a >= 0x32
+
+    def test_helpers_treat_only_32_to_46_as_effects(self):
+        self.assertEqual(patch.SPC_EFFECT_HELPER, bytes.fromhex('68 47 B0 03 68 32 6F 60 6F'))
+        self.assertEqual([self.spc_effect(a) for a in (0x01, 0x31, 0x32, 0x46, 0x47, 0x63)],
+                         [False, False, True, True, False, False])
+        self.assertEqual(patch.song_store_helper()[:2], bytes.fromhex('C9 47'))
+        self.assertEqual(patch.song_test_helper()[-3:], bytes.fromhex('60 18 60'))
+
+    def test_new_numbers_leave_room_for_chains(self):
+        self.assertLess(patch.NEW_SONG_LAST, patch.FIRST_CHAIN_SONG)
+        self.assertLessEqual(patch.SONG_STORE_HELPER + len(patch.song_store_helper()), 0x2BB780)
+        self.assertLessEqual(patch.SONG_TEST_HELPER + len(patch.song_test_helper()), 0x2BB805)
+
+
+@unittest.skipUnless(ROM.exists(), 'user-supplied DQ5 ROM required')
+class SongNumberInstallTests(unittest.TestCase):
+    def test_new_song_number_pads_records_and_patches_effect_tests(self):
+        base = ROM.read_bytes()
+        out, report = patch.install(base, {0x48: patch.Replacement(melody(), (0x03,))})
+        records = patch.read_sets(out)
+        self.assertEqual(len(records), 0x49)
+        self.assertEqual(records[0x47], bytes(2))
+        self.assertEqual(records[0x48], bytes([1, 1, 0x03]))
+        self.assertEqual(report['song_records'], 0x49)
+        helper = 0x28EC + sum(map(len, records))
+        self.assertEqual(patch.heap_start(out), helper + len(patch.SPC_EFFECT_HELPER))
+        drv = lorom(patch.DRIVER_BLOCK) + 4 - 0x0750
+        for site in patch.SPC_EFFECT_COMPARES:
+            self.assertEqual(out[drv + site:drv + site + 3], bytes([0x3F]) + helper.to_bytes(2, 'little'))
+        self.assertEqual(out[lorom(patch.NMI_RANGE_STUB)], 0xC9)
+        with self.assertRaisesRegex(ValueError, '47..4F'):
+            patch.install(base, {0x50: patch.Replacement(melody(), (0x03,))})
+
 
 if __name__ == '__main__':
     unittest.main()
