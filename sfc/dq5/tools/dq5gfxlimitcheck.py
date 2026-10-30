@@ -15,6 +15,8 @@
           (dq5mapgfxwrite --sets-at 37:8000, 그 롬으로 만든 dq5palsetwrite 패치)
 장면
   nibs: 세계 0 (341,56)·세계 1·2 (50,28) 에 서서 늘린 타일로 그린 칸의 팔레트가 그 세계에 준 니블인지.
+        세계를 오가는 장면(ルーラ 로 세계 0 → 1·2, 1 → 0, 1C/00·30/00 에서 걸어 나가 세계 2)도 nibs·tiles·원본 게임을
+        함께 돌려, 내린 뒤 같은 것을 보고 타일 번호·CGRAM·$1949 쓰기·00:BBAC 호출 기록(lua/dq5worldlog.lua)을 tiles 롬과 견준다.
   tiles: 세계 0 (341,56) 에 서기, 걷고 명령 창을 여닫은 뒤, 이벤트 전투(スライム 하나)를 이기고 돌아온 뒤, 세계 1·2 (50,28).
          01:A4A7 뒤 00:A788 앞에 VRAM 워드 4000~5FFF 를 지우고 다시 오는지(lua/dq5vramwipe.lua, 01:B4D5 를 원본으로
          되돌린 대조 롬은 비어 있어야 함), キメラのつばさ·ルーラ 앞뒤(그 사이 01:A4A7 실행 기록, 첫 칸 00 대조는 실패해야 함), 마법 융단을 펴고 탄 채 걷기.
@@ -74,6 +76,22 @@ ITEM_SCENES = {
     'empty': ({'SET': '2056=00', 'TEST': ITEM_MENU + 'wait:600'}, (900, 1000, 1300), 'empty'),
 }
 CARPET = 0x80
+# 세계를 오가는 장면(nibs 롬, 같은 니블인 tiles 롬, 원본 게임에서 함께 돌림). ルーラ 목적지 목록은 7E:2030~2032 의 비트이고
+# FIELD 로 01/00 을 지나면 bit0(ラインハット)이 켜지므로, 한 비트만 더 켜 두면 목록 둘째(down 한 번)가 그 목적지다.
+# 1C/00·30/00 은 아래로 걸어 나가 세계 2 필드에 선다. 이름 → (환경, [(덤프 프레임, 그때 세계)])
+RULA = 'a:8,wait:60,right:8,wait:40,a:8,wait:80,' + 'down:6,wait:12,' * 6 + 'a:8,wait:80,'
+RULA_SET = '2063=FF;2044=63;2050=63;2030=00;2032=00;2031='
+WORLD_SCENES = {
+    'rula-world1': ({'FIELD': '310,60', 'SET': RULA_SET + '20', 'MAXF': '1900',
+                     'TEST': RULA + 'down:6,wait:20,a:8,wait:700'}, [(1600, 1)]),
+    'rula-world2': ({'FIELD': '310,60', 'SET': RULA_SET + '80', 'MAXF': '1900',
+                     'TEST': RULA + 'down:6,wait:20,a:8,wait:700'}, [(1600, 2)]),
+    'walk-1C00': ({'TO': '1C/00,33,74,1', 'MAXF': '1500', 'TEST': 'down:60,wait:900'}, [(1400, 2)]),
+    'walk-3000': ({'TO': '30/00,13,25,1', 'MAXF': '1500', 'TEST': 'down:60,wait:900'}, [(1400, 2)]),
+    'rula-back': ({'FIELD': '310,60', 'SET': RULA_SET + '20', 'MAXF': '3000',
+                   'TEST': RULA + 'down:6,wait:20,a:8,wait:500,' + RULA + 'a:8,wait:700'}, [(1600, 1), (2500, 0)]),
+}
+WORLD_ROMS = ('orig', 'tiles', 'nibs')
 # nibs 롬: 세계마다 늘린 타일(512~1023) 니블을 tiles 롬의 것에서 더 뒤집는 비트. 아래층은 니블 3비트만 쓰므로
 # bit0~2 를 고른다.
 NIB_FLIPS = {'world1': 2, 'world2': 4}
@@ -217,11 +235,11 @@ def check_tiles(name, rom_path, dump, n, orig, world=0, grown=True):
             'tilemap_cells': len(cells), 'cells_using_512_up': high, 'same_as_original_game': len(stale)}
 
 
-def check_nibbles(name, dump, world, nib):
+def check_nibbles(name, dump, world, nib, n=SETTLE_FRAME):
     """BG1·2 타일맵에서 늘린 타일(512 이상)로 그린 칸마다 팔레트 비트가 nib(그 세계에 준 니블, 위층 4비트·
     아래층 3비트)로 셈한 값인지. 디코더를 거치지 않고 입력과 바로 견준다."""
-    vram = frame(dump, SETTLE_FRAME, 'vram')
-    w = frame(dump, SETTLE_FRAME, 'wram')
+    vram = frame(dump, n, 'vram')
+    w = frame(dump, n, 'wram')
     require(w[0x1949] == world and not w[0xBE] & 0x80, f'{name}: 세계 {world} 필드에 서지 않음')
     cells, wrong = 0, 0
     for base, mask in ((0, 7), (0x1000, 15)):
@@ -233,6 +251,56 @@ def check_nibbles(name, dump, world, nib):
                 wrong += v >> 10 & 7 != ((nib[t] & mask) + 2) & 7
     require(cells and not wrong, f'{name}: 늘린 타일 칸 {cells}개 가운데 {wrong}개 팔레트가 입력 니블과 다름')
     return {'case': name, 'world': world, 'cells_using_512_up': cells, 'palette_from_input_nibble': cells - wrong}
+
+
+def world_log(dump):
+    """lua/dq5worldlog.lua 의 world.txt: ($1949 쓰기 [(PC, 값, 첫 프레임, 횟수)], 00:BBAC 에 들어갈 때 [(값, 첫 프레임, 횟수)])."""
+    rows = [x.split() for x in (dump / 'world.txt').read_text().splitlines() if x]
+    writes = [(pc, int(v, 16), int(f), int(c)) for k, pc, v, f, c in rows if k == 'write']
+    reads = [(int(v, 16), int(f), int(c)) for k, _, v, f, c in rows if k == 'read']
+    return writes, reads
+
+
+def check_world(name, roms, dirs, frames, nibs, start=None):
+    """세계를 옮긴 뒤 nibs 롬의 늘린 타일 칸 팔레트가 그 세계 입력 니블과 같고(다른 세계 니블과는 모두 다름), 타일 번호·CGRAM 은
+    같은 니블 롬과 같은지. 두 롬과 원본 게임의 $1949 쓰기·00:BBAC 호출 기록과 걸은 결과도 견준다.
+    roms·dirs 는 WORLD_ROMS 이름 → 롬·덤프, frames 는 [(프레임, 세계)], nibs 는 세계 → 입력 니블,
+    start 는 장면을 시작할 때 서는 필드 세계(실내에서 시작하면 None)."""
+    logs = {r: world_log(dirs[r]) for r in WORLD_ROMS}
+    walks = {r: next(x for x in (dirs[r] / 'warp.txt').read_text().splitlines() if ' test ' in x) for r in WORLD_ROMS}
+    require(logs['tiles'] == logs['nibs'], f'{name}: $1949·00:BBAC 기록이 같은 니블 롬과 다름')
+    require(len(set(walks.values())) == 1, f'{name}: 걸은 결과가 롬마다 다름 {walks}')
+    want = {w for _, w in frames} | ({start} if start is not None else set())
+    for r, (writes, reads) in logs.items():
+        require({v for v, _, _ in reads} == want and all(v <= 2 for _, v, _, _ in writes),
+                f'{name} {r}: 00:BBAC 의 $1949 가 {sorted({v for v, _, _ in reads})}(기대 {sorted(want)})')
+    out = []
+    for n, w in frames:
+        tiles = check_tiles(f'{name}-tiles', roms['tiles'], dirs['tiles'], n, dirs['orig'], w)
+        res = check_tiles(name, roms['nibs'], dirs['nibs'], n, dirs['orig'], w)
+        pal = check_nibbles(name, dirs['nibs'], w, nibs[w], n)
+        other = {}
+        for k in nibs.keys() - {w}:
+            try:
+                check_nibbles(name, dirs['nibs'], w, nibs[k], n)
+                other[k] = 0
+            except ValueError as error:
+                other[k] = int(str(error).split('가운데 ')[1].split('개')[0])
+        require(all(v == pal['cells_using_512_up'] for v in other.values()),
+                f'{name}: 세계 {w} 칸이 다른 세계 니블과도 맞음 {other}')
+        tv, nv = frame(dirs['tiles'], n, 'vram'), frame(dirs['nibs'], n, 'vram')
+        moved = sum(nv[i:i + 2] != tv[i:i + 2] for i in range(0, 0x2000, 2)
+                    if (nv[i] | nv[i + 1] << 8) & 0x3FF != (tv[i] | tv[i + 1] << 8) & 0x3FF)
+        require(not moved, f'{name}: 타일 번호가 같은 니블 롬과 다른 칸 {moved}')
+        require(frame(dirs['tiles'], n, 'cgram') == frame(dirs['nibs'], n, 'cgram'), f'{name}: CGRAM 이 같은 니블 롬과 다름')
+        palette_diff = sum(nv[i:i + 2] != tv[i:i + 2] for i in range(0, 0x2000, 2))
+        require(palette_diff == (0 if w == 0 else pal['cells_using_512_up']),
+                f'{name}: 같은 니블 롬과 팔레트가 다른 칸 {palette_diff}')
+        out.append({'case': name, 'frame': n, 'world': w, 'cells_using_512_up': res['cells_using_512_up'],
+                    'palette_from_input_nibble': pal['palette_from_input_nibble'], 'other_world_mismatch': other,
+                    'tiles_rom_cells': tiles['cells_using_512_up'], 'palette_differs_from_tiles_rom': palette_diff})
+    return {'case': name, 'walk': walks['nibs'].split(' test ')[1], 'world_writes': logs['nibs'][0],
+            'bbac': logs['nibs'][1], 'orig_bbac': logs['orig'][1], 'frames': out}
 
 
 def check_battle(name, rom_path, dump, orig):
@@ -401,6 +469,13 @@ def main():
         for k, (env, frames, _) in ITEM_SCENES.items():
             cases.append((f'reload-{k}', tiles, dict(env, FIELD='310,60', SETTLE='60', MAXF='2000', EXECLOG='01A4A7',
                                                      NEXT=str(gfx), DUMPF=','.join(map(str, frames)))))
+        worldlog = HERE / 'lua/dq5worldlog.lua'
+        world_roms = {'orig': original, 'tiles': tiles, 'nibs': nibs}
+        for k, (env, frames) in WORLD_SCENES.items():
+            for r in WORLD_ROMS:
+                luas[f'{k}-{r}'] = worldlog
+                cases.append((f'{k}-{r}', world_roms[r], dict(env, SETTLE='60', NEXT=str(gfx),
+                                                                 DUMPF=','.join(str(n) for n, _ in frames))))
         cases += [('redraw-tiles', tiles, dict(WIPE, NEXT=str(gfx))),
                   ('redraw-control', control, dict(WIPE, NEXT=str(gfx)))]
         for t in TIME_CASES:
@@ -427,6 +502,10 @@ def main():
             want = nib['worlds'][f'world{w}']['tile_palettes'] if w else nib['tile_palettes']
             results.append(check_tiles(f'nibs-world{w}', nibs, dirs[f'nibs-{k}'], SETTLE_FRAME, d[k][1], w))
             results.append(check_nibbles(f'nibs-world{w}-palette', dirs[f'nibs-{k}'], w, want))
+        nibs_in = {w: nib['worlds'][f'world{w}']['tile_palettes'] if w else nib['tile_palettes'] for w in range(3)}
+        for k, (env, frames) in WORLD_SCENES.items():
+            results.append(check_world(k, world_roms, {r: dirs[f'{k}-{r}'] for r in WORLD_ROMS}, frames, nibs_in,
+                                       0 if 'FIELD' in env else None))
         results += [check_move('move-tiles', tiles, dirs['move-tiles'], True),
                     *(check_move(f'move-{v:02x}', out / f'wall-{v:02x}.sfc', dirs[f'move-{v:02x}'], ok)
                       for v, ok in WALLS.items()),

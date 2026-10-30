@@ -317,16 +317,22 @@ def palette_worlds(upper, lower):
             + b'\xbf' + long_addr(lower) + b'\x85\x94' + b'\x60')
 
 
+# palette_worlds 의 표 한 덩어리 안에서 아래층 표가 시작하는 곳. 위층은 세계 0·1·2 셋, 아래층은 세계 0·1·2·0 넷이다.
+# 필드에서 $1949 는 0~2 뿐이라 위층 넷째 칸(& 3 = 3)은 따로 두지 않고 아래층 세계 0 표와 겹친다. 그래도 3 이 되면
+# 두 층 모두 세계 0 의 타일 번호를 읽고, 위층 팔레트만 니블 3비트로 읽는다(표 밖으로 나가지 않음).
+WORD_LOWER = 3 * 0x800
+
+
 def palette_world_words(worlds):
-    """palette_worlds 의 (위층 표, 아래층 표). worlds 는 세계 0~3 의 니블 목록."""
-    out = []
-    for bits in (15, 7):
-        table = b''
-        for nib in worlds:
+    """palette_worlds 가 읽는 표(14KB, 아래층은 WORD_LOWER 부터). worlds 는 세계 0~2 의 니블 목록."""
+    def table(nibs, bits):
+        out = b''
+        for nib in nibs:
             nib = list(nib) + [0] * (MAX_TILES - len(nib))
-            table += b''.join((t | (((n & bits) << 2) + 8) << 8).to_bytes(2, 'little') for t, n in enumerate(nib))
-        out.append(table)
-    return tuple(out)
+            out += b''.join((t | (((n & bits) << 2) + 8) << 8).to_bytes(2, 'little') for t, n in enumerate(nib))
+        return out
+    worlds = list(worlds)
+    return table(worlds, 15) + table(worlds + worlds[:1], 7)
 
 
 GROW_LOAD_LEN = len(grow_load_hook(0, 0))
@@ -883,7 +889,7 @@ def write_grow(rom, at, extra_at, world0_at, full0, nib0, world_data, placed, wr
     """타일 늘리기. 세계마다 (앞 512개 RLE, 512개 뒤 늘린 타일, 니블 표 512바이트)를 고르기 표에 두고,
     훅 셋(불러오기·니블·다시 그리기)과 DMA 루틴을 at 에 놓고, 블록 표 읽기를 제자리에서 바꾼다. 세계 0 과 같은 앞 512개는
     세계 0 RLE 를 쓴다. 세 세계의 니블이 같으면 니블 훅 대신 00:BBAC 를 제자리에서 바꿔(palette_fast) 타일마다 1바이트 표를
-    읽고, 다르면 같은 자리를 palette_worlds 로 바꿔 세계마다 타일맵 워드 표(16KB, --extra-at 의 늘린 타일 뒤)를 읽는다.
+    읽고, 다르면 같은 자리를 palette_worlds 로 바꿔 세계마다 타일맵 워드 표(14KB, --extra-at 의 늘린 타일 뒤)를 읽는다.
     니블 훅은 자리 배치(rom_layout)가 그대로이게 남겨 두지만 부르는 곳은 없다."""
     lay = grow_layout(at)
     base0 = full0[:TILES * 32]
@@ -903,7 +909,7 @@ def write_grow(rom, at, extra_at, world0_at, full0, nib0, world_data, placed, wr
         n = list(n) + [0] * (MAX_TILES - len(n))
         nibs += bytes(n[i] << 4 | n[i + 1] for i in range(0, MAX_TILES, 2))
     shared = len({nibs[k:k + MAX_TILES // 2] for k in range(0, len(nibs), MAX_TILES // 2)}) == 1
-    words = b'' if shared else b''.join(palette_world_words([n for _, n in worlds]))
+    words = b'' if shared else palette_world_words([n for _, n in worlds[:3]])
     extras, after = place_extras(extra_at, [t[TILES * 32:] for t, _ in worlds], placed)
     # 워드 표는 늘린 타일과 바이트가 같아도 따로 둔다(같은 덩어리로 합치면 타일 주소를 덮어씀)
     words_at = place_extras(after, [words], placed)[0][words] if words else None
@@ -932,8 +938,8 @@ def write_grow(rom, at, extra_at, world0_at, full0, nib0, world_data, placed, wr
         write(PALETTE_READ, palette_fast(lay['palettes'], lay['palettes'] + MAX_TILES),
               '타일 팔레트 니블 읽기를 타일마다 1바이트 표로')
     else:
-        write(words_at, words, '세계마다 타일맵 워드 표(위층·아래층, 세계마다 2KB 씩)', orig=False)
-        write(PALETTE_READ, palette_worlds(words_at, words_at + len(words) // 2),
+        write(words_at, words, '세계마다 타일맵 워드 표(위층 세계 셋·아래층 세계 넷, 2KB 씩)', orig=False)
+        write(PALETTE_READ, palette_worlds(words_at, words_at + WORD_LOWER),
               '타일 팔레트 니블 읽기를 $1949 로 고르는 세계마다 타일맵 워드 표로')
     write(BLOCK_READ, block_read(lay['tile_bits']), '블록 칸 타일의 9·10번째 비트를 표로')
     write(REDRAW_SITE, b'\x5c' + long_addr(lay['redraw']), '타일맵 다시 그리기(전투 뒤·00:A771) 때 늘린 타일 다시 보내기')
