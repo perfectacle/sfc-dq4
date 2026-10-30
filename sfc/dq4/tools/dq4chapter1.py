@@ -353,7 +353,7 @@ def run_tool(*args):
 
 
 # 인물 목록은 30~3F 의 두 뱅크에 둬야 한다(데이터 뱅크를 목록 뱅크로 두고 낮은 WRAM 을 읽음). 30~39 는 타이틀,
-# 3A~3C 는 그룹 연결, 3D~3F 는 환경 맵이 쓴다. 남는 곳은 환경 맵 레코드 뒤 3F 와, 타이틀 layer-payload 가
+# 3A~3C 와 34:C000~ 는 그룹 연결(34 는 필드 지도, 아래 FIELD_AT), 3D~3F 는 환경 맵이 쓴다. 남는 곳은 환경 맵 레코드 뒤 3F 와, 타이틀 layer-payload 가
 # 39:8220 에서 끝난 뒤의 39(원본 29 의 거울)다.
 NPC_BANK, NPC_ALT = 0x3F, '39:9000'
 
@@ -366,18 +366,30 @@ def npc_base(env_patch):
     return f'{NPC_BANK:02X}:{0x8000 + at % 0x8000:04X}'
 
 
+# 입구별 도착 훅은 FC 그룹마다 필드로 나오는 칸을 고른다. 없으면 엔진이 보조 입구 (X, Y+1) 에 세우는데, 그 칸이
+# 입구 블록의 다른 칸이다(dq4fieldport.cells).
 GROUP_PATCHES = ('env/dq4-environment.dq5patch.json', 'newmap.dq5patch.json', 'exits.dq5patch.json',
-                 'entrances.dq5patch.json', 'shops.dq5patch.json', 'inn.dq5patch.json')
+                 'entrances.dq5patch.json', 'shops.dq5patch.json', 'inn.dq5patch.json',
+                 'entrance-hook.dq5patch.json', 'field.dq5patch.json')
+# 원래 롬에서는 새 맵 레코드를 34 에 두지만 통합 롬의 34 는 타이틀 자료라 3A 로 돌린다. 3A 는 그 레코드(약 24KB)와
+# 서장 대화(dq4prologue.TALK_AT, 3A:F000)로 차서, 필드 지도(덩어리 둘 약 14.5KB, 필드 로더의 DB 때문에 30~3F)는
+# 타이틀 자료가 34:BFD1 에서 끝난 뒤에 둔다. 비어 있지 않으면 apply_writes 가 멈춘다.
+NEWMAP_RECORDS_AT, FIELD_AT = '3A:8000', '34:C000'
+
+
+def group_build(dq5, dq4, out):
+    """통합 롬 자리로 돌린 dq4groupbuild.build. 그 안의 dq5build 가 패치끼리의 겹침을 거부한다."""
+    import dq4groupbuild
+    dq4groupbuild.NEWMAP_AT = tuple(NEWMAP_RECORDS_AT if a == '34:8000' else a for a in dq4groupbuild.NEWMAP_AT)
+    dq4groupbuild.FIELD_AT = FIELD_AT
+    return dq4groupbuild.build(dq5, dq4, out)
 
 
 def build(rom, dq5, dq4, work, prologue=True):
     """메뉴 빌드 롬(dq4menupatch.py build --messages) → 1장 첫머리 롬. prologue 면 새 게임이 서장으로 시작해
     서장 끝에서 1장 첫머리로 넘어간다."""
-    import dq4groupbuild
     original = dq5.read_bytes()
-    # 원래 롬에서는 새 맵 레코드를 34 에 두지만 통합 롬의 34 는 타이틀 자료다
-    dq4groupbuild.NEWMAP_AT = tuple('3A:8000' if a == '34:8000' else a for a in dq4groupbuild.NEWMAP_AT)
-    dq4groupbuild.build(dq5, dq4, work / 'groups')
+    group_build(dq5, dq4, work / 'groups')
     ported, _, _ = port(dq5, dq4)
     new_maps = [a for g, n in sorted(GROUPS.values()) for a in ('--new-map', f'{g:02X}/{n:02X}')]
     run_tool(DQ5_TOOLS / 'dq5npcrecord.py', dq5, 'dump', '-o', work / 'npc-records.json')

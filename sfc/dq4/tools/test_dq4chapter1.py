@@ -1,6 +1,10 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 import dq4chapter1 as ch
+import dq4prologue
 import dq4menumsg as mm
 
 
@@ -82,6 +86,32 @@ class LayoutTests(unittest.TestCase):
         doc = ch.npc_doc({'overrides': [{'map': '01/00', 'flag': 0, 'when': 'on', 'mask': 128, 'list': '10:8674'}]})
         self.assertEqual(doc['overrides'][0]['map'], ch.THRONE)
         self.assertEqual(doc['overrides'][0]['list'], 'new:after')
+
+
+ROOT = Path(__file__).resolve().parents[3]
+
+
+@unittest.skipUnless((ROOT / 'rom' / 'dq5.sfc').is_file() and (ROOT / 'rom' / 'dq4.nes').is_file(),
+                     'local source ROMs not present')
+class GroupBuildTests(unittest.TestCase):
+    def test_group_build_at_integrated_places_does_not_overlap(self):
+        # dq5build inside dq4groupbuild.build refuses overlapping writes (new-map records, field map, prologue room).
+        import dq4groupbuild
+        saved = dq4groupbuild.NEWMAP_AT, dq4groupbuild.FIELD_AT
+        try:
+            with tempfile.TemporaryDirectory() as out:
+                summary = ch.group_build(ROOT / 'rom' / 'dq5.sfc', ROOT / 'rom' / 'dq4.nes', Path(out))
+                writes = json.loads((Path(out) / 'field.dq5patch.json').read_text(encoding='utf-8'))['writes']
+        finally:
+            dq4groupbuild.NEWMAP_AT, dq4groupbuild.FIELD_AT = saved
+        self.assertTrue(summary['rom'])
+        talk = int(dq4prologue.TALK_AT[1].replace(':', ''), 16)
+        for w in writes:
+            at = int(w['at'].replace(':', ''), 16)
+            if at >> 16 >= 0x30:
+                self.assertEqual(at >> 16, 0x34)
+                self.assertLessEqual(at + len(bytes.fromhex(w['hex'])), 0x350000)
+                self.assertNotEqual(at >> 16, talk >> 16)
 
 
 if __name__ == '__main__':

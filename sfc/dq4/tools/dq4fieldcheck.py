@@ -31,10 +31,9 @@ from kr_patch.fc import ines  # noqa: E402
 KINDS = {0x02: True, 0x01: True, 0x03: True, 0x04: True, 0x05: True, 0x07: True, 0x16: True,
          0x00: False, 0x06: False, 0x0A: False, 0x15: False}
 CENTER = (0xA4, 0x2E)
-# Two DQ5 cells: the first press turns the party, then 8 frames a cell.
+# Two DQ5 cells, whether or not the party first turns (measured from field (341,56): right, up and down).
 PRESS = 18
-# Directions the party has to turn for (it faces down after the warp), so that PRESS is two cells.
-TOWARDS = {(1, 0): "right", (-1, 0): "left", (0, -1): "up"}
+TOWARDS = {(1, 0): "right", (-1, 0): "left", (0, -1): "up", (0, 1): "down"}
 MAP_SCENE_CELL = (2 * 0xA4, 2 * 0x2F + 1)
 
 
