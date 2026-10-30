@@ -450,8 +450,9 @@ def check_palset(name, rom_path, dump, bcbd, s, alt, orig_dump=None, same=None):
 
 def check_ending(name, roms, dirs):
     """엔딩의 필드 비행: 원본·tiles 롬 모두 02:B9D8 이 $1949 = 0 을 쓰고 01:A4A7 로 필드를 불러오며, BG3 글자 기준이 VRAM
-    워드 4000 이고 4000~5FFF 가 비어 있는지. tiles 롬은 블록이 늘린 타일을 쓰므로 그 칸이 빈 타일로 보인다(충돌)."""
-    out = {'case': name}
+    워드 4000 이고 4000~5FFF 가 비어 있는지. tiles 롬은 블록이 늘린 타일을 쓰므로 그 칸이 빈 타일로 보인다(충돌).
+    알려진 문제를 그대로 확인하는 검사다. 엔딩 비행에서 늘린 타일을 지키게 고치면 이 검사를 바꿀 것."""
+    out = {'case': name, 'known_issue': '엔딩 스태프 롤 준비(02:FA86)가 VRAM 4000~5FFF 를 지워 늘린 타일 칸이 빈 타일로 보임'}
     for r in ('orig', 'tiles'):
         d = dirs[r]
         writes, reads = world_log(d)
