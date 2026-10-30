@@ -14,9 +14,10 @@
     슬롯 9 칸 목록의 상하 반전 비트와 OAM 이 그대로인지(필드 (310,60), LATESET=1954=81).
   field: 어른 시절(ADULT=1, $1948 = 2)로 필드 (328,27)에 내려 세계 0 물체 11개가 슬롯 8~12 에 놓이는지, 물체를 13·14개
     더해 1983 = 20·21 일 때 주인공 슬롯이 그대로인지, 양탄자에 타면 슬롯 8·9 의 물체가 탈것 부분으로 바뀌는지 본다.
-    14개는 dq5objlayout.py 가 거부하므로 필드 슬롯 검사를 끈 채 만든다.
+    14개는 dq5objlayout.py 가 거부하므로 필드 슬롯 검사를 끈 채 만든다. 원래 물체가 없는 세계 1·2 는 필드 (174,110) 에서
+    7E:1949 를 고정해(POKE) 물체 24·25개(1983 = 20·21)로 같은 것을 본다.
   edge: 폭 128 인 실내 16/00 의 (126,40)·(127,42)·(128,44)·(129,46)에 1x1 물체를 두고 (124,42)에 서서, 128·129 도 그 칸에
-    놓여 OAM 에 나오는지 본다.
+    놓여 OAM 에 나오는지 본다. Y 는 높이 124 인 50/50 의 (28,126)·(30,127)·(32,128)·(34,129) 물체를 (30,120)에 서서 본다.
   MESENCE=… python sfc/dq5/tools/dq5oamlimitcheck.py rom/dq5.sfc --state work/state/ship.mss
 """
 import argparse
@@ -43,7 +44,10 @@ CARPET = {'FIELD': '328,27', 'LATESET': '1954=80'}
 OAM_ROMS = {'oam128': (3, 1), 'oam129': (4, 1), 'oam137': (12, 1)}
 EDGE = [(126, 40), (127, 42), (128, 44), (129, 46)]
 EDGE_HERO = (124, 42)
+EDGE_Y = [(28, 126), (30, 127), (32, 128), (34, 129)]
+EDGE_Y_HERO = (30, 120)
 FIELD_EXTRA = {'field20': 13, 'field21': 14}
+WORLD_EXTRA = {f'world{w}-{n:02X}': (w, n - 8) for w in (1, 2) for n in (0x08, 0x20, 0x21)}
 
 
 def carpet_doc(sizes, frames=1):
@@ -184,6 +188,9 @@ def main():
         field_docs = {k: {'format': L.FORMAT, 'objects': base_objects + [
             {'map': 'field0', 'x': 40 + 2 * i, 'y': 128, 'cells': ['42']} for i in range(n)]}
             for k, n in FIELD_EXTRA.items()}
+        world_docs = {k: {'format': L.FORMAT, 'objects': base_objects + [
+            {'map': f'field{w}', 'x': 40 + 2 * i, 'y': 128, 'cells': ['42']} for i in range(n)]}
+            for k, (w, n) in WORLD_EXTRA.items() if n}
         checks['tool-field'] = rejected(rom, field_docs['field20'], at=0x16FE10) is None and \
             'field0' in (rejected(rom, field_docs['field21'], at=0x16FE10) or '')
         edge_doc = {'format': L.FORMAT, 'objects': base_objects + [
@@ -195,7 +202,11 @@ def main():
         roms['vflip'] = build(rom, vflip_doc, out / 'vflip.sfc', 0x04FEE0)
         for k, doc in field_docs.items():
             roms[k] = build(rom, doc, out / f'{k}.sfc', at=0x16FE10, guard=False)
+        for k, doc in world_docs.items():
+            roms[k] = build(rom, doc, out / f'{k}.sfc', at=0x16FE10, guard=False)
         roms['edge'] = build(rom, edge_doc, out / 'edge.sfc', at=0x16FE10)
+        roms['edge-y'] = build(rom, {'format': L.FORMAT, 'objects': base_objects + [
+            {'map': '50/50', 'x': x, 'y': y, 'cells': ['00']} for x, y in EDGE_Y]}, out / 'edge-y.sfc', at=0x16FE10)
 
         krlua = Path(subprocess.run(['krpatch', 'sfc', 'lua'], capture_output=True, text=True,
                                     check=True, timeout=30).stdout.strip())
@@ -214,7 +225,10 @@ def main():
             'field': (original, adult),
             'field-carpet': (original, adult | {'LATESET': '1954=80'}),
             **{k: (roms[k], adult) for k in FIELD_EXTRA},
+            **{k: (roms.get(k, original), {'ADULT': '1', 'FIELD': '174,110', 'POKE': f'7E1949={w:02X}'})
+               for k, (w, _) in WORLD_EXTRA.items()},
             'edge': (roms['edge'], {'TO': '16/00,{},{}'.format(*EDGE_HERO)}),
+            'edge-y': (roms['edge-y'], {'TO': '50/50,{},{}'.format(*EDGE_Y_HERO)}),
         }
         with ThreadPoolExecutor(args.jobs) as pool:
             futures = {k: pool.submit(run, path, out / k, extra, state, mesence, libdir)
@@ -277,6 +291,15 @@ def main():
         checks['field-objects'] = (base[0x1982], base[0x1983]) == (8, 0x13)
         checks['field-20'] = got['field20']['wram'][0x1983] == 0x20 and slots(got['field20']['wram'], 0, 1)[0][3:] == hero
         checks['field-21'] = got['field21']['wram'][0x1983] == 0x21 and slots(got['field21']['wram'], 0, 1)[0][3:] != hero
+        for k, (world, _) in WORLD_EXTRA.items():
+            w = got[k]['wram']
+            print(f'{k}: 1949={w[0x1949]} 1983={w[0x1983]:02X} 주인공 칸 {slots(w, 0, 1)[0][3:]}')
+        for world in (1, 2):
+            w0, w20, w21 = (got[f'world{world}-{n:02X}']['wram'] for n in (0x08, 0x20, 0x21))
+            hero_w = slots(w0, 0, 1)[0][3:]
+            checks[f'world{world}'] = all(x[0x1949] == world for x in (w0, w20, w21)) and \
+                [x[0x1983] for x in (w0, w20, w21)] == [0x08, 0x20, 0x21] and \
+                slots(w20, 0, 1)[0][3:] == hero_w != slots(w21, 0, 1)[0][3:]
         before, after = slots(base, 8, 10), slots(got['field-carpet']['wram'], 8, 10)
         print(f'field 슬롯 8·9: {before} → 양탄자 {after}')
         checks['field-carpet'] = all(v[:3] == (0xFE, 1, 1) for v in before.values()) and \
@@ -292,6 +315,14 @@ def main():
         print(f'edge: 물체 슬롯 {[(v[3], v[4]) for v in placed.values()]}, 주인공 왼쪽 X {hero_x}, 물체 OAM X {xs}')
         checks['edge'] = [(v[3], v[4]) for v in placed.values()] == EDGE and \
             xs == [hero_x + (x - EDGE_HERO[0]) * 8 for x, _ in EDGE]
+        w = got['edge-y']['wram']
+        placed = slots(w, w[0x1982], w[0x1983])
+        shown = [e for e in oam(got['edge-y']) if e[2] < 0xE0]
+        hero_y = max(e[2] for e in shown if e[3] < 0x80)
+        ys = sorted(e[2] for e in shown if 0x80 <= e[3] < 0x180)
+        print(f'edge-y: 물체 슬롯 {[(v[3], v[4]) for v in placed.values()]}, 주인공 아래 줄 Y {hero_y}, 물체 OAM Y {ys}')
+        checks['edge-y'] = [(v[3], v[4]) for v in placed.values()] == EDGE_Y and \
+            ys == [hero_y + (y - EDGE_Y_HERO[1]) * 8 for _, y in EDGE_Y]
 
         for key, ok in checks.items():
             print(f'{key}: {"통과" if ok else "불일치"}')

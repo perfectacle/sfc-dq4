@@ -37,7 +37,8 @@ sfc/dq5/docs/dq5-graphics-format.md 의 「맵 OBJ 물체」·「탈것」·「�
    "sets": [{"set": "68", "cells": {"down0": "18 19 1a 1b 1c 1d", ...}}]}
 map 은 "04/06", 그룹 전체 "04/**", 필드 "field0"(세계). cond 는 null·"day"·"night"(+4 bit7·bit6, 21:8000 이 7E:075E >= F0 을
 밤으로 봄). 필드에서 y 의 아래 바이트가 80(128·384)이면 16:F741 이 위 바이트를 80 으로 두어 놓지 않고 스크립트가 놓는다.
-실내는 128 을 따로 보지 않아 그 셀에 그대로 놓인다(실내 맵은 폭 128·높이 124 이하라 맵 바로 밖이다).
+실내는 128 을 따로 보지 않아 그 셀에 그대로 놓인다(실내 맵은 폭 128·높이 124 이하라 맵 바로 밖이다. 16/00 의 X 128·
+129, 50/50 의 Y 128·129 물체가 그 칸에 그려졌다).
 bit7(+6 bit7)은 쓰임을 모르는 원래 값으로, 없으면 0.
 8타일 세트(80~)의 cells 는 "up-head" 같은 머리 4칸과 "up0"·"up1" 몸 4칸이다.
 """
@@ -241,7 +242,8 @@ def objects_on(heads, bc, bd, night):
 
 def check_field_slots(old_heads, new_heads):
     """필드 세계마다 물체가 늘었으면 8 + 물체(7E:1983)가 20 을 넘지 않는지. 세계 0 에 물체를 더해 1983 = 20 이면
-    주인공이 그대로이고 21 이면 슬롯 20(주인공 X·Y 칸)이 덮여 주인공이 사라졌다(dq5oamlimitcheck.py)."""
+    주인공이 그대로이고 21 이면 슬롯 20(주인공 X·Y 칸)이 덮여 주인공이 사라졌다(세계 0·1·2, dq5oamlimitcheck.py).
+    필드 장면이 물체 뒤에 더 쓰는 슬롯은 보지 않는다(실내의 SCENE_SLOTS 같은 표가 필드에는 없음)."""
     for world in sorted({h[1] for h in new_heads if h[0] == 0xFE}):
         for night in (False, True):
             count = objects_on(new_heads, 0xFE, world, night)
