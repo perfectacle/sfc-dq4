@@ -38,6 +38,8 @@ class Scene:
 
 CHAPTER1 = Scene('box', (0x36, 0x01), (0x7E219E, 0x04), TITLE)
 PROLOGUE = Scene('box0', (0x3C, 0x01), (0x7E219E, 0x80), '서장')
+# 1장 끝: 인물 스크립트가 서술 뒤에 상자만 띄운다. 맵을 검게 불러오지 않으므로 맵·깃발이 없다
+CHAPTER2 = Scene('box2', None, None, '제2장  말괄량이 공주의 모험')
 
 # FC 팔레트(MesenCE 색): 0 검정, 1 금색(테두리)·흰색(글자), 2 파랑, 3 흰색
 GOLD, BLUE, WHITE = (234, 158, 34), (20, 18, 167), (255, 254, 255)
@@ -256,7 +258,9 @@ def map_rows(src_of_row):
 
 
 def if_pending(scenes, then, other=b''):
-    """장면 가운데 하나의 맵이고 그 깃발이 아직 꺼져 있으면 then, 아니면 other. M 8, A 를 씀."""
+    """장면 가운데 하나의 맵이고 그 깃발이 아직 꺼져 있으면 then, 아니면 other. M 8, A 를 씀. 맵이 없는 장면은
+    보지 않는다."""
+    scenes = [scene for scene in scenes if scene.where]
     def checks(scene):
         (g, n), (addr, mask) = scene.where, scene.flag
         return [bytes((0xAD, 0xBC, 0x00, 0xC9, g, 0xD0)),                 # LDA $00BC / CMP #g / BNE 다음

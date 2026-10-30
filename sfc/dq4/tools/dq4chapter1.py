@@ -301,9 +301,15 @@ def npc_doc(records, ported=(), prologue=False, report=None, ported_messages=())
         import dq4ch1event
         import dq4npcport
         ported, more_new, more_overrides = dq4ch1event.npc_lists(ported, report, event_talk())
+        # 보스를 이긴 뒤의 왕좌의 방: 왕이 대신 옆으로 내려와 보고를 듣는다(FC 1C:$8184 의 왕 (10,13))
+        king_report = entry(STATIC, *KING_DOWN, KING, 'down', dq4ch1event.talk_numbers(event_talk())['king'])
+        new_lists.append({"name": "throne_report", "entries": [king_report] + after[1:]})
+        flag_index, flag_mask = dq4ch1event.BOSS_WON
         new_lists += more_new
-        overrides = more_overrides + overrides
-        scripts += dq4ch1event.scripts(dq4npcport.FIRST_MESSAGE + len(ported_messages))
+        overrides = more_overrides + [{"map": THRONE, "flag": flag_index, "when": "on", "mask": flag_mask,
+                                       "list": "new:throne_report"}] + overrides
+        scripts += dq4ch1event.scripts(dq4npcport.FIRST_MESSAGE + len(ported_messages),
+                                       dq4chapterbox.entry_points(scenes(prologue))['box2'])
     mine = {lst["map"] for lst in lists}
     return {"format": "dq5npcrelocate/1", "scripts": scripts,
             "lists": lists + [lst for lst in ported if "map" in lst and lst["map"] not in mine],
@@ -313,7 +319,8 @@ def npc_doc(records, ported=(), prologue=False, report=None, ported_messages=())
 def scenes(prologue):
     """장 제목 상자로 시작하는 장면. 서장이 있으면 서장 지하가 먼저다."""
     import dq4chapterbox
-    return (dq4chapterbox.PROLOGUE, dq4chapterbox.CHAPTER1) if prologue else (dq4chapterbox.CHAPTER1,)
+    first = (dq4chapterbox.PROLOGUE, dq4chapterbox.CHAPTER1) if prologue else (dq4chapterbox.CHAPTER1,)
+    return first + (dq4chapterbox.CHAPTER2,)
 
 
 # 새 게임 첫 맵: 25:8621 의 6바이트 표([$BC][$BD][$C1][$C2][$C3][$198E])는 저장 재개 자리 표이고, 새 게임은

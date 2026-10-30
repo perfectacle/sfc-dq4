@@ -30,6 +30,7 @@ BOSS_WON = (0x29, 0x40)         # 7E:21B9 bit6  탑 위 보스를 이김(FC $628
 KIDS_FOLLOW = (0x29, 0x80)      # 7E:21B9 bit7  구한 아이들이 따라옴(FC $6283&20). 이무르에 데려다주면 끈다
 # 아래는 DQ5 레ヌール城 04/05 의 인물 스크립트만 읽는 비트(이 해킹은 04/05 에 가지 않음, dq5flags.py)
 SOLDIER_LEFT = (0x06, 0x01)     # 7E:2196 bit0  탑의 병사가 먼저 돌아감(FC $6280&80)
+REPORTED = (0x07, 0x80)         # 7E:2197 bit7  왕에게 보고하고 여행을 허락받음(FC $6285&04)
 
 # 보스를 이긴 뒤 FC 가 바꾸는 인물 목록(1C:$841E 등, $6283&80 으로 고름). dq4npcport.port 가 이 상태로 뽑아
 # 「상태-맵」 이름의 새 목록으로 돌려주고, 보스 깃발에 그 목록을 쓴다. 왕좌의 방은 왕의 보고와 함께
@@ -101,6 +102,19 @@ MESSAGES = {
     'kids_thanks': say('와아! 아저씨/고마워!', '우리 돌아갈 수 있구나!/위에서 뛰어내리면/돌아갈 수 있대!'),
     'soldier_report': dq4ch1talk.TEXTS[(0x796,)],
     'kids_home': dq4ch1talk.TEXTS[(0x5F6,)],
+    # 왕(FC 1D 이벤트 37): 아이들이 아직 따라오면 0343, 아니면 0344 → 0345. FC 는 그 뒤 선물(경험치로 보임)을 준다
+    'king_back': say('오오, @!/잘 돌아왔다!', '자, 어서 아이들을/이무르 마을에/돌려보내 주어라!',
+                     '그대의 보고는/그 뒤에 듣겠노라!/가거라, @!'),
+    'king_praise': say('오오, @!/잘 돌아왔다!', '이번 그대의 공은/참으로 훌륭하였노라.',
+                       '그대 같은 신하를/두어 짐은 무척/자랑스럽구나!',
+                       '그렇지! 상을/내리겠노라!/무언가 바라는 것은/없느냐? 말해 보거라.',
+                       '뭐라? 여행을/떠나고 싶다고!?')[:-1] + [ch1.PAGE] + say('……………')[:-1] + [ch1.PAGE] +
+                   say('그렇다면 그대는/아직 아이인 용사를/찾아내어 지키고/싶다는 것이로구나……',
+                       '알겠노라!/그것이 그대의/바람이라면 더는/말리지 않겠노라!',
+                       '@!/이것은 짐이 주는/작별의 선물이니라!/받거라!'),
+    'king_farewell': say('@!/부디 조심해서/가거라!'),
+    # FC 0346(1A:$B829): 같은 방문에 성 앞에 들어서면. 이름 뒤 조사를 피해 옮김
+    'chapter_end': ch1.narrate('이리하여 이 땅/어딘가에 있는 용사를/찾아 @의 여행이/시작되었다……'),
 }
 
 
@@ -113,7 +127,7 @@ def texts(first):
     return {first + k: parts for k, parts in enumerate(MESSAGES.values())}
 
 
-TALKS = ('child', 'alex_night', 'flare_day', 'flare_night', 'hoimin', 'boss', 'soldier')
+TALKS = ('child', 'alex_night', 'flare_day', 'flare_night', 'hoimin', 'boss', 'soldier', 'king')
 
 
 def talk_numbers(first_talk):
@@ -149,6 +163,11 @@ def talk_scripts(first_message):
         [_msg(m['boss_taunt']), {"op": "call", "target": f"{BATTLE_AT & 0xFFFF:04X}"},
          {"op": "if", "cond": {"code": "1B", "index": BOSS_WON[0], "mask": BOSS_WON[1]}, "then": _msg(m['boss_dies'])}],
         [_msg(m['soldier_report']), _flag_on(SOLDIER_LEFT)],
+        [{"op": "if", "cond": {"code": "1B", "index": REPORTED[0], "mask": REPORTED[1]},
+          "then": _msg(m['king_farewell']),
+          "else": [{"op": "if", "cond": {"code": "1B", "index": KIDS_FOLLOW[0], "mask": KIDS_FOLLOW[1]},
+                    "then": _msg(m['king_back']),
+                    "else": [_msg(m['king_praise']), _msg(m['king_farewell']), _flag_on(REPORTED)]}]}],
     ]
 
 
@@ -165,6 +184,8 @@ RESCUED_SRC, RESCUED_SCRIPT = {"list": "05:9239", "index": 4}, "05:92B3"
 THANKS_SRC, THANKS_SCRIPT = {"list": "05:90D0", "index": 6}, "05:9102"
 SOLDIER_SRC, SOLDIER_SCRIPT = {"list": "05:90D0", "index": 7}, "05:910F"
 KIDS_HOME_SRC, KIDS_HOME_SCRIPT = {"list": "05:90D0", "index": 8}, "05:9126"
+ENDER_SRC, ENDER_SCRIPT = {"list": "05:90D0", "index": 9}, "05:9155"
+END_MAP = '36/00'               # 1장 끝은 보고한 뒤 성 앞에 들어설 때(FC 는 같은 방문 안, $6285 는 필드로 나가면 지워짐)
 # 탑 위 30/04 의 FC 인물 슬롯(06 부터 차례): 06 보스, 07·08 잡힌 아이, 09 마물은 이기면 숨고, 0C~0E 의 구한 아이는
 # 이기기 전에 숨는다(1C:$A266). 0C 가 고맙다고 말한다
 TOP_HIDE_ON_WIN, TOP_RESCUED = (0x06, 0x07, 0x08, 0x09), (0x0C, 0x0D, 0x0E)
@@ -275,6 +296,11 @@ def _fly(event):
     return ENTER + start + bytes((0xA9, TOWER, 0x8D, 0x54, 0x0B)) + LEAVE
 
 
+def _fade_out():
+    from dq4chapterbox import ENTER, LEAVE, FADE_STEP, fade
+    return ENTER + fade(14, 0, FADE_STEP) + LEAVE
+
+
 def native(data=None):
     """(바이트, {이름: 주소}). 기록 자료가 앞, 루틴이 뒤. 주소는 data(롬, 동료 표를 읽음)와 상관없다."""
     record = companion_record(data, HOIMIN_KIND) if data is not None else bytes(len(PARTY_TEMPLATE))
@@ -288,6 +314,11 @@ def native(data=None):
     out += _at(None, ch1_cell(0, KIDNAP_ROW)[1])
     at['kids_home_row'] = CODE_AT + len(out)
     out += _at(None, ch1_cell(0, KIDS_HOME_ROW)[1])
+    at['fade_out'] = CODE_AT + len(out)
+    out += _fade_out()
+    import dq4prologue
+    at['darken'] = CODE_AT + len(out)
+    out += dq4prologue._darken()       # 곡을 줄이고 주화면을 BG3 만으로: 상자가 1장 첫머리처럼 검은 화면에 뜬다
     at['fly_event'] = CODE_AT + len(out)
     number, x, y = TOWER_IN
     out += bytes((0x90, TOWER, number, *ch1_cell(x, y), 0x01, 0x80, 0xFF))
@@ -330,7 +361,8 @@ def _cmd(op, *args):
     return {"op": op, "args": list(args)}
 
 
-def scripts(first_message):
+def scripts(first_message, box_at=None):
+    """box_at: 2장 제목 상자 네이티브(dq4chapterbox.entry_points 의 box2)."""
     m = message_ids(first_message)
     _, at = native()
     lo, hi = lambda v: v & 0xFF, lambda v: v >> 8
@@ -372,7 +404,13 @@ def scripts(first_message):
             _cmd('28'), _cmd('52'), _cmd('09', 0x80 | KIDS_FOLLOW[0], KIDS_FOLLOW[1]),
             _cmd('05', *_long(at['kids_home_row'])), _cmd('3F'), _cmd('21', lo(m['kids_home']), hi(m['kids_home'])),
             _cmd('11', KIDS_FOLLOW[0], ~KIDS_FOLLOW[1] & 0xFF), _cmd('40'), _cmd('16')]},
-    ]
+    ] + ([
+        # 1장 끝: 서술 → 검은 화면 → 2장 제목 상자 → 어둡게. 조작은 풀지 않는다(2장은 아직 이어지지 않음)
+        {"address": ENDER_SCRIPT, "commands": [
+            _cmd('28'), _cmd('52'), _cmd('3F'), _cmd('21', lo(m['chapter_end']), hi(m['chapter_end'])),
+            _cmd('37', *_long(at['darken'])), _cmd('37', *_long(box_at)), _cmd('37', *_long(at['fade_out'])),
+            _cmd('16')]},
+    ] if box_at is not None else [])
 
 
 def _rescued(speak):
@@ -470,10 +508,14 @@ def npc_lists(ported, report, first_talk):
     alts[alt_name(AFTER_BOSS, KIDS_HOME_MAP)] += [{**home, "time": "day"}, {**home, "time": "night"}]
     new_lists += [{"name": name, "entries": entries} for name, entries in alts.items()]
     new_lists.append({"name": "soldier_gone", "entries": gone})
+    ender = {"from": ENDER_SRC, "fields": {"x": 0, "y": 1, "facing": "down", "talk": t['king'], "gfx": 0x01, "layer": 0}}
+    new_lists.append({"name": "chapter_end", "entries": alts[alt_name(AFTER_BOSS, END_MAP)] +
+                      [{**ender, "time": "day"}, {**ender, "time": "night"}]})
     over = lambda m, flag, name: {"map": m, "flag": flag[0], "when": "on", "mask": flag[1], "list": f"new:{name}"}  # noqa: E731
     # 앞에 둔 것부터 맞춰 본다
     overrides = [over(JAIL, REUNITED, 'jail_after'), over(JAIL, FLARE_FOLLOWS, 'jail_reunion'),
                  over(HOIMIN_ROOM, HOIMIN, 'hoimin_gone'), over(TOWER_HALL, KIDNAPPED, 'hall_empty'),
-                 over(TOWER_TOP, BOSS_WON, 'top_after'), over(SOLDIER_MAP, SOLDIER_LEFT, 'soldier_gone')]
+                 over(TOWER_TOP, BOSS_WON, 'top_after'), over(SOLDIER_MAP, SOLDIER_LEFT, 'soldier_gone'),
+                 over(END_MAP, REPORTED, 'chapter_end')]
     overrides += [over(m, BOSS_WON, alt_name(AFTER_BOSS, m)) for state, _, maps in ALT_STATES for m in maps]
     return [{"map": k, "entries": v} for k, v in lists.items()], new_lists, overrides

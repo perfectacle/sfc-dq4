@@ -100,3 +100,11 @@ class BoxTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class EndBoxTest(unittest.TestCase):
+    def test_a_box_without_a_map_never_darkens_a_map(self):
+        import dq4chapterbox as b
+        self.assertEqual(b.if_pending((b.CHAPTER1, b.CHAPTER2), b'T', b'O'), b.if_pending((b.CHAPTER1,), b'T', b'O'))
+        self.assertIn('box2', b.entry_points((b.CHAPTER1, b.CHAPTER2)))
+
