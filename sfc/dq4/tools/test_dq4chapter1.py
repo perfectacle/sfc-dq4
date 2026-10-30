@@ -16,7 +16,7 @@ class MessageTests(unittest.TestCase):
                     self.assertLessEqual(set(p), known, f'{m:03X}')
 
     def test_lines_and_pages_fit_the_window(self):
-        # 줄 너비는 _wrap 이 막는다. 여기서는 쪽마다 4줄을 넘지 않는지 본다.
+        # 줄 너비는 dq4wrap 이 막는다. 여기서는 쪽마다 4줄을 넘지 않는지 본다.
         for m, parts in ch.TEXTS.items():
             lines = 1
             for p in parts:

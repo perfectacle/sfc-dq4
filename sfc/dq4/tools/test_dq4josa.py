@@ -66,9 +66,13 @@ class MessageTests(unittest.TestCase):
         self.assertEqual(sysmsg.parts('{L}{은} 발밑')[0], [0x1011, 0x101E, ' 발밑'])
         self.assertEqual(sysmsg.parts('{I}{로}')[0], [0x100A, 0x1021])
 
-    def test_too_long_line_is_refused(self):
+    def test_lines_wrap_at_spaces_counting_slot_width(self):
+        # {P}{은} 5칸 + 띄어쓰기 + {I}{을} 10칸은 14칸을 넘어 둘째 줄로 간다
+        self.assertEqual(sysmsg.message('{P}{은} {I}{을}').count(sysmsg.LINE), 1)
+
+    def test_too_long_word_is_refused(self):
         with self.assertRaises(ValueError):
-            sysmsg.message('{P}{은} {I}{을}')
+            sysmsg.message('{P}{은}{I}{을}')
 
 
 if __name__ == '__main__':
