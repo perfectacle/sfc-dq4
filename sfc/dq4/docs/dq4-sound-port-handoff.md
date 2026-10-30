@@ -5,6 +5,8 @@
 ## 지금 상태와 이어서 할 일(2026-10-30, 빌드 설정)
 
 - 정식 빌드 인자는 저장소 `sfc/dq4/tools/dq4sound-game.args`([정식 빌드](dq4-sound-port-format.md#정식-빌드)). 로컬 `work/` 의 args 조각 파일은 더 쓰지 않음.
+- 새 곡 고정 번호는 `47`~`4B`(쓰는 것 `47`~`49`), 나눈 곡 본체 `4C`~`60`(보스 `16`·`18` 포함). SPC 색인(`04C7`, 0x64칸)을 늘리는 것은 샘플 칸을 깨뜨려 하지 않음([보스 곡 나누기](dq4-sound-port-format.md#보스-곡-나누기)).
+- 시간 실측은 전원부터: 원래 체크아웃 `work/sound/delay/pon.lua`(`STATE=` 비움, `AT2`·`IARG`·`ICMD`), 효과음·명령 차례는 `sfxon.lua`·`cmdseq.lua`. 승리 곡 FC `11` 비교 렌더 `work/sound/listen/v18-1F-victory-{dq5,fc11}.wav`(FC 판은 같은 음을 두 배 길게, `work/sound/victory/make.py`).
 
 ## 이전 상태(2026-10-30, 보스 곡)
 

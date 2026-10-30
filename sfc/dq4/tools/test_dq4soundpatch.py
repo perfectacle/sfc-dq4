@@ -264,8 +264,8 @@ class SongNumberInstallTests(unittest.TestCase):
         for site in patch.SPC_EFFECT_COMPARES:
             self.assertEqual(out[drv + site:drv + site + 3], bytes([0x3F]) + helper.to_bytes(2, 'little'))
         self.assertEqual(out[lorom(patch.NMI_RANGE_STUB)], 0xC9)
-        with self.assertRaisesRegex(ValueError, '47..4F'):
-            patch.install(base, {0x50: patch.Replacement(melody(), (0x03,))})
+        with self.assertRaisesRegex(ValueError, '47..4B'):
+            patch.install(base, {0x4C: patch.Replacement(melody(), (0x03,))})
 
 
 if __name__ == '__main__':

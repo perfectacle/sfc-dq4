@@ -47,10 +47,11 @@ FAST_RECEIVE_POLLS = 32
 # 짝 표 71:8300(곡 → 본체, FF 없음), 2B:C1C1(곡이 시작한 뒤 곡 뒤 샘플 보내기 JSR C1DB)을 발판 2B:B780 으로.
 CHAIN_HANDLER = 0xFF54
 CHAIN_TABLE_ENTRY = 0x07CD
-# 새 곡 번호: 47~4F 는 바꿔 넣는 곡(시나리오가 부를 고정 번호), 50~ 은 나눈 곡의 본체. SPC 색인 표(04C7)는 0x64칸.
+# 새 곡 번호: 47~4B 는 바꿔 넣는 곡(시나리오가 부를 고정 번호), 4C~ 은 나눈 곡의 본체. SPC 색인 표(04C7)는 0x64칸이고,
+# 그 뒤 052B~ 는 드라이버가 계산한 주소로 쓰여 색인을 늘리면 샘플 칸이 깨졌다(보스 곡까지 나눈 빌드의 미리듣기).
 # 드라이버와 2B 는 「32 이상은 효과음」으로 보므로 47 이상을 곡으로 보는 범위 검사로 바꾼다(song_range_code).
-NEW_SONG_FIRST, NEW_SONG_LAST = SEQUENCE_COUNT, 0x4F
-FIRST_CHAIN_SONG = 0x50
+NEW_SONG_FIRST, NEW_SONG_LAST = SEQUENCE_COUNT, 0x4B
+FIRST_CHAIN_SONG = 0x4C
 SONG_LIMIT = 0x64
 RECORD_COUNT = CODE + 0x3F0         # 곡 묶음 레코드 수(47 넘게 늘렸을 때만, 0 이면 원래 47개)
 # SPC 의 곡/효과음 판정(CMP A,$28EB, 문턱 32) 자리. 뒤는 모두 C 만 본다(1C5F 는 POP A / RET 로 C 를 돌려줌)
@@ -799,7 +800,7 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
         records += [bytes(2)] * (top - len(records))
     for song, item in sorted(replacements.items()):
         if not (0 <= song < SEQUENCE_COUNT or NEW_SONG_FIRST <= song <= NEW_SONG_LAST) or song == 0x10:
-            raise ValueError('target song must be 00..46 or 47..4F, except the protected title 10')
+            raise ValueError('target song must be 00..46 or 47..4B, except the protected title 10')
         validate_replacement(item)
         payload = len(item.sequence).to_bytes(2, 'little') + item.sequence
         address = place(payload, f'sequence {song:02X}')
