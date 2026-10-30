@@ -619,6 +619,15 @@ TO="18/00,30,50" SOUND_PROBE="$PWD/sfc/dq5/tools/lua/dq5sndlog.lua" LIBDIR="$LIB
 
 워프 드라이버는 [dq5warp.lua](../../dq5/tools/lua/dq5warp.lua)이고, `LIBDIR` 만드는 법은 [공통 도구](../../../tools/README.md)에 있습니다.
 
+## 정식 빌드
+
+지금 게임에 넣는 곡 설정(곡 대응, 예산, 늘 두기, 나누기·붙들기, 보스 곡, 맵 곡 시작 당기기)은 `sfc/dq4/tools/dq4sound-game.args` 한 파일에 줄마다 인자 하나로 둡니다. 기준 롬은 `dq4menupatch.py build` 결과(서곡 롬 위 메뉴·이름 입력 한글화)입니다. 이 파일로 만든 롬은 로컬 실험 스크립트로 만든 롬·미리듣기 롬 49개와 바이트까지 같았습니다. 설정을 바꾸면 이 파일을 고쳐 PR 로 올립니다.
+
+```sh
+uv run --locked python sfc/dq4/tools/dq4soundset.py --base <이름 입력 빌드 롬> --assets <자원 저장소> \
+  @sfc/dq4/tools/dq4sound-game.args --out work/sound/game.sfc --preview-dir work/sound/pv
+```
+
 ## 롬 삽입
 
 `dq4soundpatch.install(base, {곡자리: Replacement(sequence, samples)}, sample_resources=…, map_fades=…, preview=…)`는 4MB DQ5 통합 롬 위에 씁니다.
