@@ -9,8 +9,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dq5chestplace import FORMAT, check, map_key, patch, plan
 from dq5build import build, parse_at
 from dq5chest import LOWER_TABLE
-from dq5chestcheck import grow_chests
-from dq5chestreloc import parse
+from dq5chestcheck import NUMBERS, grow_chests, number_build
+from dq5chestreloc import address, parse
 from dq5map import Rom, lorom
 from test_dq5chestwrite import ROM
 
@@ -77,6 +77,22 @@ class ChestPlaceTests(unittest.TestCase):
         wrong['chests'].append({'reward': 1})
         with self.assertRaises(ValueError):
             plan(rom, doc(*boxes), 0x3E8000, at, wrong)
+
+    @unittest.skipUnless(ROM.is_file(), '롬 없음')
+    def test_wide_number_builds_put_chest_n_at_last_cell(self):
+        # dq5chestcheck 의 widenum_* 롬: 19/00 의 마지막 칸 (12,45) 가 상자 n 이고 내용물은 금화 n
+        rom = Rom(ROM.read_bytes())
+        for n in NUMBERS:
+            place_doc, edit, places = number_build(n)
+            base = parse(rom)
+            edit(base)
+            at = {places[k][2:-3].replace('-', '_'): address(places[k + 1]) for k in range(0, len(places), 2)}
+            map_at = at.pop('map')
+            with self.subTest(n=n):
+                _, _, _, tables, _ = plan(rom, place_doc, map_at, at, base)
+                self.assertEqual(tables['chest_maps'][-1], {'group': 0x19, 'map': 0, 'count': 5})
+                self.assertEqual(len(tables['chests']), n + 1)
+                self.assertEqual(tables['chests'][n], {'reward': 0x100 + n})
 
     @unittest.skipUnless(ROM.is_file(), '롬 없음')
     def test_patch_formats_and_check(self):
