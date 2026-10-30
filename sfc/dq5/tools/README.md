@@ -156,6 +156,8 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5objsweep.py rom 선실 OUT [--maps BC/BD,…]` | 실내 맵 346곳에 들어가 걷는 동안 OAM 팔레트별 수·인물 슬롯·`$1995`, 끝 CGRAM OBJ 줄 4~7 을 잼(`lua/dq5objsweep.lua`). `OUT/summary.json`. `MESENCE` 필요 |
 | `dq5objtiles.py rom dump -o 폴더\|patch\|check` | 맵 OBJ 타일(`1F:D59A` 의 17개 자료)·탈것 타일(4개 자료)을 타일 시트 PNG 에서 다시 압축(`1F:D28B` 꼴). 넘치면 `--at` 에 두고 항목 주소·`LDA`/`LDX` 피연산자를 고침. [쓰기 형식](../docs/dq5-build-format.md#맵-obj-타일탈것-타일-dq5objtiles1) |
 | `dq5objtilescheck.py rom --state 선실 --out 폴더` | 04/06 맵 OBJ·양탄자 타일을 옮긴 롬과 원본에서 VRAM 타일 비교(`FIELD`·`LATESET=1954=80`). `MESENCE` 필요 |
+| `dq5objlayout.py rom dump -o 파일\|patch\|check` | 맵 OBJ 물체(`16:F862`) 항목·칸 배치를 고치고 더함(표를 제자리에서 늘리고 덮인 칸 바이트는 `--at` 16 뱅크로), 탈것 부분(`04` 뱅크 칸 표)과 인물 세트(배 `68` 등)의 칸 바이트를 제자리에서 씀. [쓰기 형식](../docs/dq5-build-format.md#맵-obj-물체탈것세트-칸-배치-dq5objlayout1) |
+| `dq5objlayoutcheck.py rom --state 선실 --out 폴더` | 배 칸 배치·04/06 새 물체·양탄자 칸을 바꾼 롬과 원본에서 슬롯 칸 목록·OAM 자리·화면 픽셀 비교. `MESENCE` 필요 |
 | `dq5flags.py rom [2192.7]` | DQ5 이야기 플래그(`7E:2190`~`220F`) 비트·바이트마다 켜는 곳·끄는 곳·보는 곳(대화·인물 스크립트·인물 목록 표·맵별 루틴·맵 조건 표·이벤트 스크립트·네이티브 `BRK 0B`·`0C`·`0D`·롱 주소)과 문맥 메시지. `--source` 출처 고르기, `--check flagtrace.txt` 로 게임 기록과 대조 |
 | `dq5story.py rom` | DQ5 이야기 진행 지도. 사건마다 켜는 비트·거는 곳에 그 비트를 보는 인물 목록·맵 표를 붙인 표, `--lists` 로 조건 비트별 인물 목록 표([dq5-story.md](../docs/dq5-story.md)) |
 | `dq5event.py rom [주소]` | DQ5 이벤트 스크립트(`00:BEC3`). 이벤트 표 `23:E2C2` 10개의 목표 자리와 스크립트, 주소를 주면 그 스크립트, `--all` 로 `15:F150`~`F7CF` 의 86개, `--number N` 스크립트 번호 표(`23:E325`), `--starts` 번호 표·이벤트 표·코드·`02:B705` 직접 호출·점프에서 모은 106개, `--list` 시작 주소·부르는 곳(`LDA #n` + `JSL` 이나 받침 루틴 `JMP`)·첫 메시지 한 줄씩 |
