@@ -1,7 +1,7 @@
 -- 드라이버(boot.lua) 입력을 재생하면서 DUMPF 프레임마다 WRAM 128KB·CGRAM·VRAM·OAM·화면과 PPU 상태를 덤프한다.
 -- 그래픽 디코더 출력을 그 순간의 VRAM·CGRAM 과 비교하려고 쓴다. seqlib.sh 로 seqboot.lua 를 드라이버로 두면
 -- 세이브스테이트(STATE)에서 SEQ 입력을 누르며 찍는다.
---   DUMPF="5,300"   덤프할 프레임(쉼표로 여럿). EVERY 를 주면 DUMPF 대신 그 간격마다(FROM 부터, TO 까지)
+--   DUMPF="5,300"   덤프할 프레임(쉼표로 여럿). EVERY 를 주면 DUMPF 대신 그 간격마다(FROM 부터, TO 또는 EVERYTO 까지)
 -- 결과: fNNNNN.wram, .cgram, .vram, .oam, .png, .ppu.txt(emu.getState() 의 ppu 로 시작하는 값)
 package.path = os.getenv("LIBDIR") .. "/?.lua;" .. package.path
 local L = require("lib")
@@ -9,7 +9,8 @@ local dumpf = {}
 for a in string.gmatch(os.getenv("DUMPF") or "", "[^,]+") do dumpf[tonumber(a)] = true end
 local every = tonumber(os.getenv("EVERY") or "0")
 local from = tonumber(os.getenv("FROM") or "0")
-local to = tonumber(os.getenv("TO") or "0")
+-- dq5warp.lua 의 TO 는 맵 목적지라 숫자가 아니다. 그 장면에서는 EVERYTO 로 끝 프레임을 준다.
+local to = tonumber(os.getenv("EVERYTO") or os.getenv("TO") or "0") or 0
 local n = 0
 
 local function dump(tag)

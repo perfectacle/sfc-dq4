@@ -650,7 +650,12 @@ def palette_rows(rom):
 
 def map_cgram(rom, bc, bd, alt=False):
     """BG 팔레트 1~7번 줄과 배경색(0번 줄 색 0)을 채운 CGRAM 앞 256바이트. 나머지 줄은 0."""
-    s = palette_set(rom, bc, bd)
+    return set_cgram(rom, palette_set(rom, bc, bd), alt)
+
+
+def set_cgram(rom, s, alt=False):
+    """세트 s 의 낮(alt 면 밤) 목록으로 채운 map_cgram 과 같은 CGRAM. 플래그 팔레트 세트(10:DDCF)처럼 맵 → 세트 표를
+    거치지 않고 세트를 고르는 장면의 기대값이다."""
     table = palset_lists(rom)
     lst = (table & 0xFF0000) | rom.u16(table + s * 4 + (2 if alt else 0))
     rows = palette_rows(rom)
