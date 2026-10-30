@@ -25,10 +25,13 @@ NIGHT_TOLD = (0x07, 0x02)       # 7E:2197 bit1  이무르 밤에 알렉스 이�
 FLARE_FOLLOWS = (0x08, 0x04)    # 7E:2198 bit2  프레아가 따라옴(FC $627E&20)
 REUNITED = (0x22, 0x04)         # 7E:21B2 bit2  감옥에서 재회함(FC $627E&40)
 HOIMIN = (0x28, 0x01)           # 7E:21B8 bit0  호이민이 동료가 됨(FC $6281&40)
+KIDNAPPED = (0x28, 0x20)        # 7E:21B8 bit5  탑 입구에서 마물이 아이를 끌고 감(FC $627E&01)
 
 FRONT, FRONT_NIGHT, IMURU, JAIL = '36/00', '36/03', '37/00', '37/02'
 UNDER_WELL, HOIMIN_ROOM = '3B/00', '3B/03'
+TOWER_HALL = '39/00'
 # FC 대화 번호
+FC_KIDNAPPER = 0x45            # 탑 입구의 마물 그림(아이는 15)
 FC_CHILD, FC_ALEX_NIGHT, FC_FLARE_DAY, FC_FLARE_NIGHT, FC_JAIL_FLARE, FC_HOIMIN = 0x12, 0x13, 0x0F, 0x10, 0x17, 0x15
 
 
@@ -68,6 +71,8 @@ MESSAGES = {
                       '있잖아, 사람의/동료가 되면/사람이 될 수/있을까……?', '나를 동료로/삼아 줘!'),
     'hoimin_yes': say('야호! 고마워!')[:-1] + [ch1.PAGE] + ch1.narrate('호이민이 동료가 되었다!'),
     'hoimin_no': say('뭐? 안 된다고?/그래도 마음이 바뀌면/또 와 줘.'),
+    # FC 02F4
+    'kidnap': say('자, 따라와! 꼬마!', '으앙, 무서워!/놔 줘……!'),
 }
 
 
@@ -121,6 +126,10 @@ FLARE_SRC, FLARE_SCRIPT = {"list": "05:9180", "index": 0}, "05:9187"
 WALKER_SRC, WALKER_SCRIPT = {"list": "05:9180", "index": 1}, "05:919F"
 VOICE_SRCS = ({"list": "05:9180", "index": 2}, "05:91B7"), ({"list": "05:9180", "index": 3}, "05:91CF")
 HOIMIN_SRC, HOIMIN_SCRIPT = {"list": "05:9180", "index": 4}, "05:91EB"
+KIDNAPPER_SRC, KIDNAPPER_SCRIPT = {"list": "05:9180", "index": 5}, "05:9207"
+KID_SRC, KID_SCRIPT = {"list": "05:9239", "index": 1}, "05:9248"
+# 탑 입구 30/00: 주인공이 이 줄(FC Y)에 오면 마물이 아이를 데리고 계단(09,03) 쪽으로 간다(FC 1D 이벤트 02)
+KIDNAP_ROW, KIDNAP_TO = 0x09, 0x03
 # 목소리가 나는 칸(FC 칸)과 메시지. FC 는 그 칸에서 왼쪽(05)·오른쪽(0B)을 보고 있을 때이고, そらとぶくつ 를
 # 가졌으면 나지 않는다
 VOICES = ((UNDER_WELL, (0x14, 0x0C), 'voice_here'), (HOIMIN_ROOM, (0x14, 0x10), 'voice_not'))
@@ -178,12 +187,32 @@ def _join(record_at):
 
 
 def _at(x, y):
-    """인물 명령 05 가 부르는 루틴: 주인공(인물 표 슬롯 0, 7E:3020·3080)이 셀 (x, y) 이면 A = 0, 아니면 1."""
+    """인물 명령 05 가 부르는 루틴: 주인공(인물 표 슬롯 0, 7E:3020·3080)이 셀 (x, y) 이면 A = 0, 아니면 1.
+    x 가 None 이면 Y 만 본다."""
     near = bytes((0xC2, 0x30, 0xA9, 0x00, 0x00, 0x28, 0x6B))
     far = bytes((0xC2, 0x30, 0xA9, 0x01, 0x00, 0x28, 0x6B))
     second = bytes((0xAF, 0x80, 0x30, 0x7E, 0xC9, y, 0xD0, len(near)))
-    first = bytes((0x08, 0xE2, 0x20, 0xAF, 0x20, 0x30, 0x7E, 0xC9, x, 0xD0, len(second) + len(near)))
+    first = bytes((0x08, 0xE2, 0x20))
+    if x is not None:
+        first += bytes((0xAF, 0x20, 0x30, 0x7E, 0xC9, x, 0xD0, len(second) + len(near)))
     return first + second + near + far
+
+
+# そらとぶくつ: DQ5 의 처리(11:8D77)는 $0B54 = 24 와 필드 (017E,0170)를 두고 날기 루틴(11:80D3)으로 간다.
+# FC(12:$B14B)는 필드 (88,16)으로 날아간 뒤 탑 30/00 (09,0C)에 세운다. 첫 명령을 JSL 로 바꿔 이벤트(맵 옮기기)를
+# 걸고, 날아가는 곳을 탑 그룹과 그 필드 칸으로 한다
+FLY_AT = 0x118D77
+FLY_ORIG = bytes.fromhex('a9 24 8d 54 0b')          # LDA #$24 / STA $0B54
+FLY_X_AT, FLY_Y_AT = 0x118D7F, 0x118D87
+FLY_XY_ORIG = (bytes.fromhex('7e 01'), bytes.fromhex('70 01'))
+TOWER, TOWER_FIELD, TOWER_IN = 0x39, (0x88, 0x16), (0x00, 0x09, 0x0C)
+
+
+def _fly(event):
+    from dq4chapterbox import ENTER, LEAVE
+    import dq4prologue
+    start = dq4prologue._event_start(event)[len(ENTER):-len(LEAVE)]
+    return ENTER + start + bytes((0xA9, TOWER, 0x8D, 0x54, 0x0B)) + LEAVE
 
 
 def native(data=None):
@@ -195,6 +224,13 @@ def native(data=None):
     for m, (x, y), _ in VOICES:
         at[m] = CODE_AT + len(out)
         out += _at(*ch1_cell(x, y))
+    at['kidnap_row'] = CODE_AT + len(out)
+    out += _at(None, ch1_cell(0, KIDNAP_ROW)[1])
+    at['fly_event'] = CODE_AT + len(out)
+    number, x, y = TOWER_IN
+    out += bytes((0x90, TOWER, number, *ch1_cell(x, y), 0x01, 0x80, 0xFF))
+    at['fly'] = CODE_AT + len(out)
+    out += _fly(at['fly_event'])
     return bytes(out), at
 
 
@@ -210,6 +246,15 @@ def apply(data):
     if any(d[o:o + len(code)]):
         raise SystemExit(f'{CODE_AT:06X}: 비어 있지 않은 자리')
     d[o:o + len(code)] = code
+    _, at = native()
+    fx, fy = TOWER_FIELD[0] * 2, TOWER_FIELD[1] * 2      # FC 필드 칸 → DQ5 필드 좌표(그룹 연결의 필드 입구와 같은 셈)
+    for addr, orig, new in ((FLY_AT, FLY_ORIG, bytes((0x22, *_long(at['fly']), 0xEA))),
+                            (FLY_X_AT, FLY_XY_ORIG[0], fx.to_bytes(2, 'little')),
+                            (FLY_Y_AT, FLY_XY_ORIG[1], fy.to_bytes(2, 'little'))):
+        o = lorom(addr)
+        if bytes(d[o:o + len(orig)]) != orig:
+            raise SystemExit(f'{addr:06X}: 원래 바이트가 아님 {d[o:o + len(orig)].hex()}')
+        d[o:o + len(new)] = new
     return bytes(d)
 REUNION_AT = (0x04, 0x03)       # FC 슬롯 07 이 걸어가 서는 칸, 재회 뒤 슬롯 08 의 자리
 
@@ -240,7 +285,18 @@ def scripts(first_message):
         # 예라고 대답하면(합류 깃발) 일행 기록을 쓰고 사라진다
         {"address": HOIMIN_SCRIPT, "commands": [_cmd('09', 0x80 | HOIMIN[0], HOIMIN[1]), _cmd('37', *_long(at['join'])),
                                                 _cmd('28'), _cmd('52'), _cmd('16')]},
+    ] + [
+        # 마물이 말하고 납치 깃발을 켜면 아이도 함께 계단 쪽으로 걸어가 사라진다
+        {"address": KIDNAPPER_SCRIPT, "commands": [
+            _cmd('05', *_long(at['kidnap_row'])), _cmd('3F'), _cmd('21', lo(m['kidnap']), hi(m['kidnap'])),
+            _cmd('10', *KIDNAPPED)] + _walk_off(9) + [_cmd('40'), _cmd('16')]},
+        {"address": KID_SCRIPT, "commands": [_cmd('09', 0x80 | KIDNAPPED[0], KIDNAPPED[1])] + _walk_off(8) + [_cmd('16')]},
     ]
+
+
+def _walk_off(x):
+    """탑 입구에서 열 x 를 따라 KIDNAP_TO 줄까지 올라가 숨고 자리를 치운다."""
+    return [_cmd('13', x * 2, KIDNAP_TO * 2 + 1), _cmd('14'), _cmd('28'), _cmd('52')]
 
 
 def _same(entry, src, talk):
@@ -295,8 +351,14 @@ def npc_lists(ported, report, first_talk):
     for i in hoimins:
         room[i] = _same(room[i], HOIMIN_SRC, t['hoimin'])
     new_lists.append({"name": "hoimin_gone", "entries": gone})
+    # 탑 입구: 마물(그림 45)과 아이(15)를 스크립트 인물로, 끌고 간 뒤에는 빈 목록
+    hall = lists[TOWER_HALL]
+    for i, p in enumerate(report[TOWER_HALL]):
+        src = KIDNAPPER_SRC if p["picture"] == FC_KIDNAPPER else KID_SRC
+        hall[i] = _same(hall[i], src, hall[i]["fields"]["talk"])
+    new_lists.append({"name": "hall_empty", "entries": []})
     over = lambda m, flag, name: {"map": m, "flag": flag[0], "when": "on", "mask": flag[1], "list": f"new:{name}"}  # noqa: E731
     # 앞에 둔 것부터 맞춰 본다
     overrides = [over(JAIL, REUNITED, 'jail_after'), over(JAIL, FLARE_FOLLOWS, 'jail_reunion'),
-                 over(HOIMIN_ROOM, HOIMIN, 'hoimin_gone')]
+                 over(HOIMIN_ROOM, HOIMIN, 'hoimin_gone'), over(TOWER_HALL, KIDNAPPED, 'hall_empty')]
     return [{"map": k, "entries": v} for k, v in lists.items()], new_lists, overrides

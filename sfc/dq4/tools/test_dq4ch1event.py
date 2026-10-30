@@ -44,6 +44,25 @@ class NumberTest(unittest.TestCase):
 
 
 
+class FlyTest(unittest.TestCase):
+    def test_shoes_start_the_tower_event_and_fly_to_the_island(self):
+        data = bytearray(0x400000)
+        for addr, orig in ((ev.FLY_AT, ev.FLY_ORIG), (ev.FLY_X_AT, ev.FLY_XY_ORIG[0]), (ev.FLY_Y_AT, ev.FLY_XY_ORIG[1])):
+            data[ev.lorom(addr):ev.lorom(addr) + len(orig)] = orig
+        out = ev.apply(bytes(data))
+        _, at = ev.native()
+        o = ev.lorom(ev.FLY_AT)
+        self.assertEqual(out[o:o + 5], bytes((0x22, *ev._long(at['fly']), 0xEA)))
+        self.assertEqual(out[ev.lorom(ev.FLY_X_AT):][:2], (0x88 * 2).to_bytes(2, 'little'))
+        self.assertEqual(out[ev.lorom(ev.FLY_Y_AT):][:2], (0x16 * 2).to_bytes(2, 'little'))
+        e = ev.lorom(at['fly_event'])
+        self.assertEqual(out[e:e + 8], bytes((0x90, ev.TOWER, 0x00, 18, 25, 0x01, 0x80, 0xFF)))   # FC 30/00 (09,0C)
+
+    def test_apply_refuses_other_bytes(self):
+        with self.assertRaises(SystemExit):
+            ev.apply(bytes(0x400000))
+
+
 @unittest.skipUnless(DQ4.is_file() and DQ5.is_file(), "local source ROMs not present")
 class ListTest(unittest.TestCase):
     @classmethod
@@ -73,6 +92,11 @@ class ListTest(unittest.TestCase):
         self.assertEqual(over["list"], "new:hoimin_gone")
         (gone,) = [lst["entries"] for lst in self.new if lst["name"] == "hoimin_gone"]
         self.assertFalse([e for e in gone if e["from"] == ev.HOIMIN_SRC])
+
+    def test_tower_hall_empties_after_the_kidnap(self):
+        (over,) = [o for o in self.over if o["map"] == ev.TOWER_HALL]
+        self.assertEqual((over["flag"], over["mask"], over["list"]), (*ev.KIDNAPPED, "new:hall_empty"))
+        self.assertEqual(sorted(e["from"]["index"] for e in self.entries(ev.TOWER_HALL)), [1, 1, 5, 5])
 
     def test_event_talks_replace_the_ported_ones(self):
         t = ev.talk_numbers(0x904)

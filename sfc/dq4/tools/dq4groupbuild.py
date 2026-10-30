@@ -203,6 +203,10 @@ def hook_rows(links, place, entrances):
                                  LAYER, 0))
             numbers = [n for (g, _), (_, n) in place.items() if g == part["fc"]]
             first, last = (0, 0x1F) if len(parts) == 1 else (min(numbers), max(numbers))
+            if part["fc"] in FALL_FIELD and group in FALL_GROUPS:
+                # 2A:F425 takes the first row that matches, so the fall row goes first
+                (k0, k1), (fx, fy) = FALL_FIELD[part["fc"]]
+                leaving.append((group, place[part["fc"], k0][1], place[part["fc"], k1][1], fx * 2, fy * 2))
             leaving.append((group, first, last, lx, ly))
     return arrivals, leaving
 
@@ -310,6 +314,12 @@ def area_rows(group, place, cells):
 FALL_PROPS = (0x05, 0x0B)
 # Groups whose falling cells are linked. The other chapters' holes come with their chapter's events.
 FALL_GROUPS = range(0x36, 0x3C)
+# FC groups whose falls drop to the field: {FC group: (FC maps, FC field cell)}. FC moves the party from the field
+# cell it came in by (12:$B6DD, $42/$43): the tower 30 drops it 3 cells below where そらとぶくつ lands, (88,16),
+# past the moat around the island. Those maps have no other way to the field, so the hook's leave row for them
+# (hook_rows) stands there.
+FALL_FIELD = {0x30: ((0, 2), (0x88, 0x19))}
+FIELD_EXIT = {"destination_group": 0xFF, "destination_map": 0, "x": 0, "y": 0, "span_raw": 0, "destination_layer": 0}
 
 
 def fall_records(prg, group):
@@ -328,9 +338,12 @@ def fall_records(prg, group):
                     if m.blocks["prop"].get(m.buf[y * m.w + x] & 0x1F, 0) not in FALL_PROPS:
                         continue
                     to = dq4block.fall(prg, part["fc"], k, x, y)
-                    if "group" not in to or (to["group"], to["index"]) not in place:
+                    if "field" in to and part["fc"] in FALL_FIELD:
+                        key = "field"
+                    elif "group" not in to or (to["group"], to["index"]) not in place:
                         continue
-                    key = (to["group"], to["index"], to["x"], to["y"])
+                    else:
+                        key = (to["group"], to["index"], to["x"], to["y"])
                     last = runs[-1] if runs else None
                     if last and last["y"] == y and last["x1"] + 1 == x and last["to"] == key:
                         last["x1"] = x
@@ -338,10 +351,14 @@ def fall_records(prg, group):
                         runs.append({"x0": x, "x1": x, "y": y, "to": key})
             rows = []
             for run in runs:
+                rect = {"rect": [run["x0"] * 2, run["y"] * 2 + 1, run["x1"] * 2 + 1, run["y"] * 2 + 2],
+                        "source_layer": LAYER, "flags": AREA_FLAGS}
+                if run["to"] == "field":
+                    rows.append({**rect, **FIELD_EXIT})
+                    continue
                 dg, dk, ax, ay = run["to"]
                 dx, dy = cell(ax, ay)
-                rows.append({"rect": [run["x0"] * 2, run["y"] * 2 + 1, run["x1"] * 2 + 1, run["y"] * 2 + 2],
-                             "source_layer": LAYER, "flags": AREA_FLAGS, "destination_group": place[dg, dk][0],
+                rows.append({**rect, "destination_group": place[dg, dk][0],
                              "destination_map": place[dg, dk][1], "x": dx, "y": dy, "span_raw": 1,
                              "destination_layer": LAYER})
             if rows:
