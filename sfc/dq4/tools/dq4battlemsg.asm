@@ -3,7 +3,8 @@
 ;
 ; 전투 글은 바이트가 곧 BG3 타일 번호다. 구간(E3 n 바이트…)과 이름을 Galmuri9 띠로 그려, 칸 풀(코드 85개 ↔ 타일 85칸)에서
 ; 화면 격자와 글 큐에 없는 코드를 골라 올리고, 그 코드를 글 큐 0ECB 에 넣는다. 글자 맨 윗줄은 위 줄 칸 하나에 담기는
-; 1바이트 무늬라 같은 무늬는 위 줄 칸을 함께 쓴다. 아래 줄 코드마다 짝 위 줄 코드(!bm_up)는 WnBattleChar 가 쓴다.
+; 1바이트 무늬라 같은 무늬는 위 줄 칸을 함께 쓴다. 큐에는 아래 칸 코드와 짝 위 칸 코드(없으면 00)를 짝으로 넣고,
+; WnBattleChar 가 아래 칸을 쓸 때 짝을 꺼내 위 줄에 쓴다.
 
 ; 코드 E3 의 처리기. 24:86F2 표는 뱅크 24 안 주소라, 옮긴 디코더가 비운 트리 자리에 받침을 둔다.
 org !bm_run_table
@@ -20,6 +21,8 @@ org $22D796
 org $24A595
     JSL BmScroll
     BRA $24A5B2
+org $04BFF5
+    JML BmEncounter
 
 org !bm_code
 
@@ -182,6 +185,89 @@ BmNameLookup:
     PHA
     PLB
     REP #$30
+    JSR BmFind
+    BCS .none
+    JSR BmClear
+    JSR BmTokens
+    JSR BmEmit
+    PLB
+    PLP
+    JML $24A854
+.none
+    ; 가나 이름도 Galmuri 가나로 그린다. 원래 길은 가나 바이트를 격자에 쓰는데, 그 바이트는 칸 풀 코드로 쓴다
+    JSR BmClear
+    JSR BmKana
+    JSR BmEmit
+    PLB
+    PLP
+    JML $24A854
+
+; 직접 페이지 $00 = 길이, $01~ = 가나 이름 바이트를 띠에 그린다. 84·83 은 다음 바이트의 탁점·반탁점,
+; 02~0B 는 숫자. 가나 표(!wn_kana_table)에 없는 바이트는 띄움 하나로.
+BmKana:
+    LDA.b $00
+    AND #$00FF
+    STA.w !bm_n             ; BmGlyph 가 !bm_s 를 쓴다
+    LDX #$0000
+.byte
+    TXA
+    CMP.w !bm_n
+    BCC +
+    RTS
++
+    LDA.b $01,X
+    AND #$00FF
+    STZ.w !bm_r
+    CMP #$0084
+    BNE +
+    LDA #$0100
+    BRA ++
++
+    CMP #$0083
+    BNE +++
+    LDA #$0200
+++
+    STA.w !bm_r
+    INX
+    LDA.b $01,X
+    AND #$00FF
++++
+    INX
+    PHX
+    CMP #$0002
+    BCC .unknown
+    CMP #$000C
+    BCS .kana
+    SEC
+    SBC #$0002
+    CLC
+    ADC.w #!bm_digit0
+    BRA .glyph
+.kana
+    CMP #$0080
+    BCS .unknown
+    ASL
+    CLC
+    ADC.w !bm_r
+    TAX
+    LDA.l !wn_kana_table,X
+    CMP #$FFFF
+    BEQ .unknown
+.glyph
+    JSR BmGlyph
+    PLX
+    BRA .byte
+.unknown
+    LDA.w !bm_x
+    CLC
+    ADC.w #!bm_space
+    STA.w !bm_x
+    PLX
+    BRA .byte
+
+; 직접 페이지 $00 = 길이, $01~ = 이름 바이트를 이름 표(!bm_names)에서 찾는다(DB = 7E, M = X = 16).
+; 있으면 C = 0, !bm_p = 첫 토큰 자리, !bm_n = 토큰 수. 없으면 C = 1.
+BmFind:
     LDA.b $00
     AND #$00FF
     STA.w !bm_s
@@ -198,7 +284,8 @@ BmNameLookup:
     LDA.l !bm_names,X
     AND #$00FF
     BNE +
-    JMP .none
+    SEC
+    RTS
 +
     CMP.w !bm_s
     BNE .skip
@@ -214,41 +301,21 @@ BmNameLookup:
     INY
     CPY.w !bm_s
     BCC -
-    ; 같음: X = 첫 자리 + 길이, 글리프 수는 그 다음 바이트
+    ; 같음: X = 첫 자리 + 길이, 토큰 수는 그 다음 바이트
     LDA.l !bm_names+1,X
     AND #$00FF
     STA.w !bm_n
     INX
     INX
     STX.w !bm_p
-    JSR BmClear
-.token
-    LDX.w !bm_p
-    LDA.l !bm_names,X
-    BIT #$8000
-    BNE .space
-    JSR BmGlyph
-    BRA +
-.space
-    AND #$7FFF
     CLC
-    ADC.w !bm_x
-    STA.w !bm_x
-+
-    INC.w !bm_p
-    INC.w !bm_p
-    DEC.w !bm_n
-    BNE .token
-    JSR BmEmit
-    PLB
-    PLP
-    JML $24A854
+    RTS
 .miss
     LDX.w !bm_o
     LDA.l !bm_names,X
     AND #$00FF
 .skip
-    ; 다음 항목: 첫 자리 + 1 + 길이 + 1 + 글리프 수 × 2
+    ; 다음 항목: 첫 자리 + 1 + 길이 + 1 + 토큰 수 × 2
     STX.w !bm_o
     CLC
     ADC.w !bm_o
@@ -264,12 +331,264 @@ BmNameLookup:
     ADC.w !bm_v
     TAX
     JMP .entry
-.none
-    LDA #$FFFF
-    STA.w !bm_last          ; 가나 이름 뒤 조사는 받침 없는 쪽
+
+; !bm_names + !bm_p 의 토큰 !bm_n 개를 띠에 그린다. 토큰: 글리프, 8000 + 띄울 점(낮은 바이트, 부호 있음),
+; C000 + 조사 종류.
+BmTokens:
+    LDA.w !bm_n
+    BNE +
+    RTS
++
+    LDX.w !bm_p
+    LDA.l !bm_names,X
+    BIT #$8000
+    BNE .special
+    JSR BmGlyph
+    BRA .next
+.special
+    BIT #$4000
+    BEQ .space
+    AND #$00FF
+    JSR BmJosa
+    BRA .next
+.space
+    AND #$00FF
+    CMP #$0080
+    BCC +
+    ORA #$FF00
++
+    CLC
+    ADC.w !bm_x
+    STA.w !bm_x
+.next
+    INC.w !bm_p
+    INC.w !bm_p
+    DEC.w !bm_n
+    BRA BmTokens
+
+; 04:BFF5(PHP / PHX / REP #$20 자리, M = 8, X = 16). 전투 첫머리 창 25 의 한 줄 「(이름)が　あらわれた！」.
+; 이름이 이름 표에 있으면 「(이름){이} 나타났다!」를 띠로 그려, 줄 k = $0A4C / 2 마다 BG3 칸 B0 + k × 52 에서 아래 칸
+; 26·위 칸 26 을 쓴다. 전투가 막 시작해 연출이 B0~17F 를 아직 쓰지 않고, 이 창은 명령 창이 뜨기 전에 닫힌다.
+; 위 칸은 그 자리 타일(첫 줄은 창 위 테두리)에 글자 맨 윗줄을 겹친다. 끝나면 원래처럼 04:C044(창 전송·다음 줄)로.
+BmEncounter:
+    PHP
+    PHX
+    REP #$20
+    PHB
+    SEP #$20
+    LDA #$7E
+    PHA
+    PLB
+    REP #$30
+    JSR BmFind
+    BCC +
+    PLB
+    REP #$20
+    JML $04BFF9
++
+    SEP #$20
+    STZ.w !bm_carry
+    REP #$20
+    JSR BmClear
+    JSR BmTokens
+    LDA.w #!bm_appear-!bm_names
+    STA.w !bm_p
+    LDA.w #!bm_appear_count
+    STA.w !bm_n
+    JSR BmTokens
+    ; 줄 자리 Y = $0E0B + $0A4C × 40, 첫 칸 B0 + ($0A4C / 2) × 52
+    LDA.w $0E0B
+    LDX.w $0A4C
+    BEQ +
+-
+    CLC
+    ADC #$0040
+    DEX
+    BNE -
++
+    STA.w !bm_o
+    LDA.w $0A4C
+    LSR
+    STA.w !bm_s
+    ASL
+    ASL
+    CLC
+    ADC.w !bm_s             ; × 5
+    ASL
+    ASL                     ; × 20
+    STA.w !bm_v
+    LDA.w !bm_s
+    ASL
+    ASL
+    ASL
+    ASL
+    ASL                     ; × 32
+    CLC
+    ADC.w !bm_v             ; × 52
+    CLC
+    ADC #$00B0
+    STA.w !bm_g             ; 이 줄 첫 칸
+    STZ.w !bm_c
+.col
+    LDA.w !bm_x
+    CLC
+    ADC #$0007
+    LSR
+    LSR
+    LSR
+    CMP #$001A
+    BCC +
+    LDA #$001A
++
+    CMP.w !bm_c
+    BEQ .done
+    BCC .done
+    JSR BmEncCol
+    INC.w !bm_c
+    BRA .col
+.done
     PLB
     SEP #$20
-    JML $24A841
+    REP #$10
+    JML $04C044
+
+; 첫머리 줄의 열 !bm_c. 아래 칸 = !bm_g + 열, 위 칸 = !bm_g + 26 + 열. 타일맵 버퍼($E0 + 줄 자리)의 낮은 바이트와 bit8.
+BmEncCol:
+    LDX.w !bm_c
+    LDY #$0000
+    STZ.w !bm_v
+-
+    TXA
+    CLC
+    ADC.w #!bm_w
+    TAX
+    SEP #$20
+    LDA.w !bm_band,X
+    STA.w !bm_t8,Y
+    ORA.w !bm_v
+    STA.w !bm_v
+    REP #$20
+    INY
+    CPY #$0008
+    BCC -
+    LDX.w !bm_c
+    SEP #$20
+    LDA.w !bm_band,X
+    STA.w !bm_pt
+    REP #$20
+    LDA.w !bm_v
+    AND #$00FF
+    BEQ .upper
+    LDA.w !bm_g
+    CLC
+    ADC.w !bm_c
+    PHA
+    ASL
+    ASL
+    ASL
+    CLC
+    ADC #$1000
+    STA.w !bm_v
+    LDA #$0101
+    STA.w !bm_r
+    LDA.w #!bm_t8
+    JSR BmQueueAt
+    PLA
+    PHA
+    LDA.w !bm_c
+    ASL
+    CLC
+    ADC.w !bm_o
+    CLC
+    ADC.b $E0
+    TAY
+    PLA
+    JSR BmEncCell
+.upper
+    LDA.w !bm_pt
+    AND #$00FF
+    BNE +
+    RTS
++
+    ; 위 칸 바탕: 그 자리의 지금 타일
+    LDA.w !bm_c
+    ASL
+    CLC
+    ADC.w !bm_o
+    SEC
+    SBC #$0040
+    CLC
+    ADC.b $E0               ; 첫 줄은 Y - 40 이 음수라 ($E0),Y 로는 뱅크를 넘는다. 16비트로 더해 7E 안에서
+    TAX
+    LDA.w $0000,X
+    AND #$03FF
+    STA.w !wn_base
+    STZ.w !wn_r
+-
+    JSR WnBaseRow           ; A = p0 | p1 << 8
+    PHA
+    LDA.w !wn_r
+    CMP #$0007
+    BNE +
+    PLA
+    SEP #$20
+    ORA.w !bm_pt
+    XBA
+    ORA.w !bm_pt
+    XBA
+    REP #$20
+    PHA
++
+    LDA.w !wn_r
+    ASL
+    TAX
+    PLA
+    STA.w !wn_stage,X
+    INC.w !wn_r
+    LDA.w !wn_r
+    CMP #$0008
+    BCC -
+    LDA.w !bm_g
+    CLC
+    ADC #$001A
+    CLC
+    ADC.w !bm_c
+    PHA
+    ASL
+    ASL
+    ASL
+    CLC
+    ADC #$1000
+    STA.w !bm_v
+    LDA #$0100
+    STA.w !bm_r
+    LDA.w #!wn_stage
+    JSR BmQueueAt
+    LDA.w !bm_c
+    ASL
+    CLC
+    ADC.w !bm_o
+    SEC
+    SBC #$0040
+    CLC
+    ADC.b $E0
+    TAY
+    PLA
+    ; 이어서 BmEncCell
+
+; A = 타일 번호를 7E:Y 낱말에. 높은 바이트는 bit8 만 바꾸고 나머지(우선·팔레트)는 둔다.
+BmEncCell:
+    SEP #$20
+    STA.w $0000,Y
+    XBA
+    AND #$01
+    STA.w !bm_pt+1
+    LDA.w $0001,Y
+    AND #$FE
+    ORA.w !bm_pt+1
+    STA.w $0001,Y
+    REP #$20
+    RTS
 
 ; 띠를 비우고 점 자리를 0 으로. 앞 이름이 덜 찬 마지막 열을 넘겼으면(!bm_carry) 그 열과 점 자리를 두고 잇는다.
 BmClear:
@@ -445,11 +764,18 @@ BmEmit:
     LDX.w !bm_q
     SEP #$20
     STA.w !bm_queue,X
+    INX
+    CMP #$01
+    BEQ +
+    LDA.w !bm_upc           ; 풀 코드 뒤에는 늘 짝 위 칸 코드
+    STA.w !bm_queue,X
+    INX
++
     REP #$20
-    INC.w !bm_q
+    STX.w !bm_q
     INC.w !bm_c
     LDA.w !bm_q
-    CMP #$003F
+    CMP #$003E
     BCC .col
 .end
     LDX.w !bm_q
@@ -495,13 +821,12 @@ BmEmit:
 
 ; 격자와 큐에 있는 풀 코드를 쓰는 중으로 표시한다.
 BmMark:
-    LDX.w #!bm_count-1
-    SEP #$20
+    LDX.w #!bm_bits-2
 -
     STZ.w !bm_used,X
     DEX
+    DEX
     BPL -
-    REP #$20
     LDY #$0000
 -
     LDA.w !bm_grid,Y
@@ -525,16 +850,83 @@ BmMark:
     CMP #$00FF
     BEQ +
     TAX
-    SEP #$20
-    LDA #$01
-    STA.w !bm_used,X
-    REP #$20
+    JSR BmUsedSet
 +
     RTS
 
-; 열 !bm_c 하나. 돌려주는 A = 코드(빈 열이거나 풀이 모자라면 빈칸 01).
+; 풀 번호 X 의 비트: Y = 바이트 자리, A = 마스크(Y·X 는 BmUsed*·BmBase* 가 지킨다).
+BmBit:
+    TXA
+    LSR
+    LSR
+    LSR
+    TAY
+    TXA
+    AND #$0007
+    PHX
+    TAX
+    LDA.l BmMasks,X
+    AND #$00FF
+    PLX
+    RTS
+BmMasks:
+    db $01,$02,$04,$08,$10,$20,$40,$80
+
+; 쓰는 중 비트. BmUsedGet 은 Z = 1 이면 비어 있음.
+BmUsedGet:
+    PHY
+    JSR BmBit
+    AND.w !bm_used,Y
+    PLY
+    AND #$00FF
+    RTS
+BmUsedSet:
+    PHY
+    JSR BmBit
+    ORA.w !bm_used,Y
+    STA.w !bm_used,Y
+    PLY
+    RTS
+
+; 위 칸 바탕 비트(1 = 창 위 테두리). BmBaseGet 은 A = 0 또는 1. BmBaseSet 은 !bm_bs 대로.
+BmBaseGet:
+    PHY
+    JSR BmBit
+    AND.w !bm_base,Y
+    PLY
+    AND #$00FF
+    BEQ +
+    LDA #$0001
++
+    RTS
+BmBaseSet:
+    PHY
+    JSR BmBit
+    PHA
+    EOR #$FFFF
+    AND.w !bm_base,Y
+    STA.w !bm_base,Y
+    PLA
+    PHA
+    LDA.w !bm_bs
+    AND #$00FF
+    BEQ +
+    PLA
+    ORA.w !bm_base,Y
+    STA.w !bm_base,Y
+    PLY
+    RTS
++
+    PLA
+    PLY
+    RTS
+
+; 열 !bm_c 하나. 돌려주는 A = 아래 칸 코드(빈 열이거나 풀이 모자라면 빈칸 01), !bm_upc = 짝 위 칸 코드(없으면 00).
 BmColumn:
     ; 아래 줄 8바이트(띠 줄 1~8)와 위 줄 무늬(띠 줄 0)
+    SEP #$20
+    STZ.w !bm_upc
+    REP #$20
     LDX.w !bm_c
     LDY #$0000
     STZ.w !bm_v
@@ -572,7 +964,6 @@ BmColumn:
     SEP #$20
     LDA #$00
     STA.w !bm_pat,X
-    STA.w !bm_up,X
     REP #$20
     JSR BmSend
     ; 위 줄 무늬가 있으면 위 칸(첫 줄이면 창 테두리 바탕)을 함께 쓰거나 새로
@@ -596,7 +987,7 @@ BmColumn:
     STX.w !bm_k
     BCS .code               ; 위 칸이 모자라면 아래 칸만
     SEP #$20
-    STA.w !bm_up,X
+    STA.w !bm_upc
     REP #$20
 .code
     LDX.w !bm_k
@@ -611,19 +1002,15 @@ BmColumn:
 BmFree:
     LDX #$0000
 -
-    SEP #$20
-    LDA.w !bm_used,X
+    JSR BmUsedGet
     BEQ +
-    REP #$20
     INX
     CPX.w #!bm_count
     BCC -
     SEC
     RTS
 +
-    LDA #$01
-    STA.w !bm_used,X
-    REP #$20
+    JSR BmUsedSet
     TXA
     CLC
     RTS
@@ -633,17 +1020,19 @@ BmFree:
 BmUpper:
     LDX #$0000
 -
-    SEP #$20
-    LDA.w !bm_used,X
+    JSR BmUsedGet
     BEQ +
+    SEP #$20
     LDA.w !bm_pat,X
     CMP.w !bm_pt
+    REP #$20
     BNE +
-    LDA.w !bm_up,X
+    JSR BmBaseGet
+    SEP #$20
     CMP.w !bm_bs
+    REP #$20
     BEQ .found
 +
-    REP #$20
     INX
     CPX.w #!bm_count
     BCC -
@@ -656,9 +1045,8 @@ BmUpper:
     SEP #$20
     LDA.w !bm_pt
     STA.w !bm_pat,X
-    LDA.w !bm_bs
-    STA.w !bm_up,X          ; 위 칸은 짝 코드 대신 바탕
     REP #$20
+    JSR BmBaseSet
     JSR BmSendUpper
     LDX.w !bm_k
 .found
@@ -675,9 +1063,8 @@ BmSendUpper:
     SEP #$20
     LDA.w !bm_pat,X
     STA.w !bm_pt
-    LDA.w !bm_up,X
     REP #$20
-    AND #$00FF
+    JSR BmBaseGet
     BNE .border
     LDX #$0006
 -
@@ -760,7 +1147,7 @@ BmSend:
 ; 우리 대기열 항목 [VRAM 워드][방식 · 칸 1]![그림]. A = 그림 자리(7E), !bm_r = 방식 낱말(0101 = 평면 0 8바이트,
 ; 0100 = 두 평면 16바이트), 칸은 풀 번호 !bm_k. WqStage 처럼 NMI 를 잠시 끄고 쓴다.
 BmQueue:
-    STA.w !bm_o
+    PHA
     LDA.w !bm_k
     ASL
     TAX
@@ -771,6 +1158,12 @@ BmQueue:
     CLC
     ADC #$1000
     STA.w !bm_v
+    PLA
+    ; 이어서 BmQueueAt
+
+; A = 그림 자리, !bm_v = VRAM 워드, !bm_r = 방식 낱말.
+BmQueueAt:
+    STA.w !wn_k             ; 창 이름 임시(이름 그리기가 끝난 뒤라 비어 있음)
     LDA #$0010
     STA.w !bm_s
     LDA.w !bm_r
@@ -818,7 +1211,7 @@ BmQueue:
     STA.w !wq_buf,Y
     LDA.w !bm_r
     STA.w !wq_buf+2,Y
-    LDX.w !bm_o
+    LDX.w !wn_k
 -
     LDA.w $0000,X
     STA.w !wq_buf+4,Y
@@ -863,10 +1256,7 @@ BmRestore:
     STA.w !bm_k
 -
     LDX.w !bm_k
-    SEP #$20
-    LDA.w !bm_used,X
-    REP #$20
-    AND #$00FF
+    JSR BmUsedGet
     BEQ +
     SEP #$20
     LDA.w !bm_pat,X
@@ -942,8 +1332,10 @@ BmScroll:
     LDA.w !bm_pat,X
     BEQ .skip
     STA.w !bm_pt
-    LDA.w !bm_up,X
+    REP #$20
+    JSR BmBaseGet
     BNE .skip               ; 이미 테두리 바탕
+    SEP #$20
     LDA #$01
     STA.w !bm_bs
     REP #$20

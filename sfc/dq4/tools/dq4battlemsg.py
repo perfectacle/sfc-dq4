@@ -38,22 +38,30 @@ LINE_CELLS = 26
 NAME_CELLS = 7
 NUMBER_CELLS = 3
 BUFFER = 128
-PUNCT = '!?.,…「」~'
+PUNCT = '!?.,…「」~0123456789'     # 숫자는 이름 안 숫자(가나 이름의 02~0B)를 그릴 때
 # 전투 메시지가 이름을 찍는 표: 주문·특기 3, 몬스터 4, 물건 5(dq5battletext.CONTROLS 의 F4·F6·F5, F7 의 몬스터 무리)
 NAME_TABLES = (3, 4, 5)
-NAMES_AT = 0x4D9000
+NAMES_AT = 0x4DA000
+# 전투 첫머리 창 25 의 「(이름)が　あらわれた！」(04:BFF5 가 이름 뒤에 04:C05B 의 9바이트를 찍음)를 바꾼 이름 뒤 말
+APPEAR = '{이} 나타났다!'
 GROUP_NAME, GROUP_NAME_LEN = 0x248950, 6
 
 # 칸 풀. A 는 전투 연출이 덮지 않는 칸(원래 BG3 타일맵 자리였던 1D0~1FF 와, 연출이 덮지 않은 163~165·17D~17F),
 # B 는 큰 주문(ベギラゴン·バギクロス·メガンテ·メガザル 등) 연출만 덮는 칸이라 연출이 끝나면 사본에서 다시 올린다.
 POOL_A = list(range(0x1D0, 0x200)) + [0x163, 0x164, 0x165, 0x17D, 0x17E, 0x17F]
 POOL_B = list(range(0x144, 0x163))
-POOL = POOL_A + POOL_B
+# C 는 전투 중 BG3 타일맵이 가리키지 않고 큰 주문 연출만 덮는 칸. 사본을 둘 WRAM 이 없어 복원하지 않으므로 맨 나중에 쓴다
+# (한 화면에 85칸 넘게 쓸 때만). 096~098 은 전투 화면이 쓰는 칸이라 뺐다.
+POOL_C = list(range(0x099, 0x0B0)) + list(range(0x123, 0x144)) + list(range(0x166, 0x17D))
+POOL = POOL_A + POOL_B + POOL_C
 # 원래 전투 글(메시지 432개·이름 표·탁점 92/93·숫자·채움 8D)이 격자에 쓰지 않는 바이트. 글자 H M P G(0C~0F)·6E·
 # ▼ 둘레(7B~7F)는 코드가 따로 쓸 수 있어 뺐다.
+# 가나 바이트 10~7A 는 이름을 모두 Galmuri 로 그리므로(BmKana) 격자에 오지 않아 함께 쓴다.
 CODES = ([0x80, 0x81, 0x82, 0x85, 0x86, 0x88, 0x8A, 0x8B, 0x8C, 0x8E, 0x8F, 0x90, 0x91, 0x94, 0x95, 0x96, 0x97, 0x98,
           0x99, 0x9B, 0x9E, 0x9F, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA8, 0xA9, 0xAA, 0xAB, 0xAD, 0xAE]
-         + list(range(0xB0, 0xE2)))
+         + list(range(0xB0, 0xE2)) + [b for b in range(0x10, 0x7B) if b != 0x6E])[:len(POOL)]
+# 번역하지 않는 번호 가운데 끝 부호 앞까지 쓰레기 바이트인 것(가나 바이트가 들어 있어 코드와 겹치지만 띄우지 않음)
+UNUSED = range(0x1A3, 0x1B0)
 TILES = {'＊': 0x89, **{str(d): 0x02 + d for d in range(10)}}
 PAIRS = {'MP': (0xAC, 0xAF), 'HP': (0xA7, 0xAF)}      # 원래 글자 두 칸으로 된 표시
 JOSA = (('은', '는'), ('이', '가'), ('을', '를'), ('으로', '로'), ('과', '와'), ('아', '야'), ('이여', '여'))
@@ -72,9 +80,10 @@ WRAM = '''!bm_last   = $A5F2          ; 마지막에 그린 글리프(조사용)
 !bm_c      = $A5FC          ; 열
 !bm_k      = $A5FE          ; 풀 번호
 !bm_shadow = $A600          ; 풀 B 칸마다 평면 0 8바이트
-!bm_up     = $A6F8          ; 풀 번호마다: 아래 칸이면 짝 위 칸 코드(0 = 없음), 위 칸이면 바탕
-!bm_pat    = $A750          ; 풀 번호마다 위 줄 무늬(0 = 아래 줄 칸)
-!bm_used   = $A7A8          ; 풀 번호마다 1 = 화면 격자나 큐에 있음
+!bm_pat    = $A6F8          ; 풀 번호마다 위 칸 무늬(0 = 아래 칸), 164바이트
+!bm_used   = $A79C          ; 풀 번호마다 1비트: 화면 격자나 큐에 있음(끝에 1바이트 여유)
+!bm_base   = $A7B2          ; 풀 번호마다 1비트: 위 칸 바탕이 창 위 테두리(끝에 1바이트 여유)
+!bm_bits   = 22             ; 비트 표 바이트 수
 !bm_band   = $A800          ; 띠 9줄 × !bm_w 바이트(줄 0 = 글자 맨 윗줄)
 !bm_carry  = $A905          ; 1바이트: 1 = 앞 이름의 덜 찬 마지막 열을 띠 첫 열에 남김
 !bm_bs     = $A906          ; 1바이트: 찾는 위 칸 바탕(0 빈칸, 1 창 위 테두리)
@@ -85,6 +94,7 @@ WRAM = '''!bm_last   = $A5F2          ; 마지막에 그린 글리프(조사용)
 !bm_s      = $A914
 !bm_o      = $A916
 !bm_sh     = $A918          ; 3바이트: 민 글자 줄
+!bm_upc    = $A91B          ; 1바이트: BmColumn 이 고른 짝 위 칸 코드
 !bm_g      = $A91C          ; 글리프 높은 바이트, BmEmit 에서는 올릴 열 수
 !bm_pt     = $A91E          ; 1바이트: 찾는 위 줄 무늬
 !bm_w      = 29             ; 26칸 + 밀린 글리프 몫
@@ -239,17 +249,15 @@ def lorom(a):
 
 
 def original_bytes(rom):
-    """원래 전투 글이 격자에 쓸 수 있는 바이트(메시지·이름 표·탁점·숫자·채움)."""
+    """번역한 뒤에도 원래 전투 글이 격자에 쓸 수 있는 바이트: 원문으로 둔 메시지(UNUSED 빼고)·숫자·채움 8D·빈칸.
+    이름은 모두 BmKana·이름 표로 그리므로 이름 바이트는 격자에 오지 않는다."""
     import dq5battletext as bt
-    import dq5namewrite as nw
     from dq5map import Rom
     r = Rom(bytes(rom))
-    used = {0x01, 0x8D, 0x92, 0x93, *range(0x02, 0x0C)}
+    used = {0x01, 0x8D, *range(0x02, 0x0C)}
     for n in range(bt.COUNT):
-        used |= {b for b in bt.message(r, n) if b < 0xE2}
-    for names in nw.read_tables(bytes(rom)).values():
-        for name in names:
-            used |= set(name)
+        if n not in SOURCE and n not in UNUSED:
+            used |= {b for b in bt.message(r, n) if b < 0xE2}
     return used
 
 
@@ -321,13 +329,34 @@ def name_entries(d):
     return entries
 
 
-def name_blob(entries):
-    """[길이][이름 바이트…][글리프 수][16비트…] 를 잇고 길이 0 으로 끝낸다."""
+def tokens(text, punct):
+    """이름 표 꼴 토큰: 글리프, 8000 + 띄울 점(낮은 바이트, 부호 있음), C000 + 조사 종류."""
+    out = []
+    for t in items(text, punct):
+        if t[0] == 'g':
+            out.append(t[1])
+            if t[2] != GLYPH_PX:
+                out.append(0x8000 | (t[2] - GLYPH_PX) & 0xFF)
+        elif t[0] == 'adv':
+            out.append(0x8000 | t[1])
+        elif t[0] == 'josa':
+            out.append(0xC000 | t[1])
+        else:
+            raise ValueError(f'{text!r}: 이름 표 토큰에는 글자 타일을 쓸 수 없음')
+    return out
+
+
+def name_blob(entries, appear):
+    """[길이][이름 바이트…][토큰 수][16비트…] 를 잇고 길이 0 으로 끝낸 뒤, 첫머리 말 토큰을 붙인다.
+    돌려주는 것: 바이트, 첫머리 말의 자리(블롭 안)."""
     out = bytearray()
-    for name, tokens in entries:
-        out += bytes((len(name),)) + name + bytes((len(tokens),))
-        out += b''.join(t.to_bytes(2, 'little') for t in tokens)
-    return bytes(out + b'\0')
+    for name, toks in entries:
+        out += bytes((len(name),)) + name + bytes((len(toks),))
+        out += b''.join(t.to_bytes(2, 'little') for t in toks)
+    out += b'\0'
+    at = len(out)
+    out += b''.join(t.to_bytes(2, 'little') for t in appear)
+    return bytes(out), at
 
 
 def apply(d, font, render, first_glyph):
@@ -354,11 +383,14 @@ def apply(d, font, render, first_glyph):
             raise ValueError(f'{w["at"]}: 전투 메시지 쓰기 자리가 예상과 다름')
         d[o:o + len(raw)] = raw
     blob, at = tables(chars)
+    if TABLE_AT + len(blob) > NAMES_AT:
+        raise ValueError('표가 이름 표 자리를 넘음')
     o = lorom(TABLE_AT)
     if any(d[o:o + len(blob)]):
         raise ValueError(f'{TABLE_AT:06X} 가 비어 있지 않음')
     d[o:o + len(blob)] = blob
-    names = name_blob(entries)
+    appear = tokens(APPEAR, punct)
+    names, appear_at = name_blob(entries, appear)
     o = lorom(NAMES_AT)
     if any(d[o:o + len(names)]) or (NAMES_AT & 0xFFFF) + len(names) > 0x10000:
         raise ValueError(f'{NAMES_AT:06X}: 이름 표 자리가 비어 있지 않거나 뱅크를 넘음')
@@ -370,7 +402,8 @@ def apply(d, font, render, first_glyph):
             f'!bm_jong = ${at["jong"]:06X}\n!bm_charset = ${at["charset"]:06X}\n!bm_codes = ${at["codes"]:06X}\n!bm_code = ${CODE_AT:06X}\n!bm_count = {len(POOL)}\n'
             f'!bm_b0 = {POOL.index(POOL_B[0])}\n!bm_b1 = {POOL.index(POOL_B[0]) + len(POOL_B)}\n'
             f'!bm_run_stub = ${RUN_STUB:06X}\n!bm_run_table = ${RUN_TABLE:06X}\n!bm_space = {SPACE_PX}\n'
-            f'!bm_glyph_px = {GLYPH_PX}\n!bm_glyphs = {len(ne.GLYPHS)}\n!bm_names = ${NAMES_AT:06X}\n')
+            f'!bm_digit0 = {punct["0"][0]}\n!bm_glyph_px = {GLYPH_PX}\n!bm_glyphs = {len(ne.GLYPHS)}\n!bm_names = ${NAMES_AT:06X}\n'
+            f'!bm_appear = ${NAMES_AT + appear_at:06X}\n!bm_appear_count = {len(appear)}\n')
 
 
 if __name__ == '__main__':
