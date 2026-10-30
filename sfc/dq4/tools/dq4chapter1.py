@@ -460,7 +460,12 @@ def build(rom, dq5, dq4, work, prologue=True):
     import dq4ch1event
     (work / 'boss.json').write_text(json.dumps(dq4ch1event.encounter_doc()))
     run_tool(DQ5_TOOLS / 'dq5encounterwrite.py', dq5, 'patch', work / 'boss.json', '-o', work / 'boss.dq5patch.json')
-    patches = [work / 'groups' / p for p in GROUP_PATCHES] + [work / 'npc.dq5patch.json', work / 'boss.dq5patch.json']
+    from kr_patch.fc import ines
+    (work / 'boss-monsters.json').write_text(json.dumps(dq4ch1event.monster_doc(ines.prg(dq4.read_bytes())),
+                                                        ensure_ascii=False))
+    run_tool(DQ5_TOOLS / 'dq5tables.py', dq5, 'patch', work / 'boss-monsters.json', '-o', work / 'boss-monsters.dq5patch.json')
+    patches = [work / 'groups' / p for p in GROUP_PATCHES] + [work / 'npc.dq5patch.json', work / 'boss.dq5patch.json',
+                                                               work / 'boss-monsters.dq5patch.json']
     out = bytearray(apply_writes(rom, original, patches))
     import dq4chapterbox
     import dq4menupatch

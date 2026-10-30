@@ -190,12 +190,34 @@ END_MAP = '36/00'               # 1장 끝은 보고한 뒤 성 앞에 들어설
 # 이기기 전에 숨는다(1C:$A266). 0C 가 고맙다고 말한다
 TOP_HIDE_ON_WIN, TOP_RESCUED = (0x06, 0x07, 0x08, 0x09), (0x0C, 0x0D, 0x0E)
 FIRST_SLOT = 0x06
-# 보스 전투: DQ5 빈 이벤트 무리 30 에 DQ5 몬스터를 임시로(FC 무리 05 = ピサロのてさき·おおめだま 한 마리씩).
+# 보스 전투: DQ5 빈 이벤트 무리 30 에 FC 무리 05(ピサロのてさき·おおめだま 한 마리씩).
 # 01:868B 는 전투 뒤 01:8715 로 가서, 지면(A = 80) 보통 전투처럼 전멸 처리(01:88ED)를 한다
 BOSS_GROUP = 0x30
-BOSS_MEMBERS = ((0xE2, 1), (0x18, 1))       # ザイル(HP 160·공격 42), ドラキーマ(HP 30·공격 25)
+# FC 몬스터를 DQ5 이벤트 보스 번호에 덮는다. 둘 다 이 해킹에서 나오지 않는 DQ5 이벤트 전투에만 쓰이고, 필드 조우
+# (dq4fieldencounter.MONSTERS)에도 없다. 그림은 DQ5 그림 그대로
+BOSS_MONSTERS = {0xE2: (0xB3, '피사로의 부하'),     # ザイル 자리에 ピサロのてさき
+                 0x52: (0x29, '큰 눈알')}           # ゴンズ 자리에 おおめだま
+BOSS_MEMBERS = tuple((dq5, 1) for dq5 in BOSS_MONSTERS)
+# FC 행동 번호(dq4-data-format 「몬스터 행동 번호」) → DQ5 행동: 00 メラ, 03 ギラ, 32 공격, 3C 불 숨결(4D),
+# 58 「かおいろが かわった」(69, 메시지만) → ようすをみる, 30 みをまもっている(41)
+FC_ACTIONS = {0x00: '39', 0x03: '3C', 0x32: '73', 0x3C: '8E', 0x58: '66', 0x30: '71'}
 BOSS_FLAGS = 0x40 | 0x02                    # 도망칠 수 없음, 보스 곡
 BATTLE_AT = 0x06FF00                        # 대화 스크립트의 네이티브는 뱅크 06 안(06:FE10~ 의 덧붙인 대화 훅 뒤)
+
+
+def fc_monster(prg, fc_id):
+    """FC 몬스터 레코드(18:$8046 + 22 × ID)에서 DQ5 몬스터 표(dq5tables)의 필드."""
+    import dq4data
+    r = next(rec for i, _, _, _, rec in dq4data.monsters(prg) if i == fc_id)
+    ten = lambda lo, hi: r[lo] | (r[hi] & 3) << 8  # noqa: E731
+    return {"HP": ten(4, 15), "MP": r[3], "민첩": r[2], "공격": ten(5, 16), "수비": ten(6, 17),
+            "경험치": r[0] | r[1] << 8, "금화": ten(7, 18), "행동수": 0, "재생": 0, "동료확률": 0, "드롭": "FF",
+            **{f"행동{k + 1}": FC_ACTIONS[r[9 + k] & 0x7F] for k in range(6)}}
+
+
+def monster_doc(prg):
+    return {"format": "dq5tables/1", "monsters": [{"id": f"{dq5:02X}", **fc_monster(prg, fc)}
+                                                  for dq5, (fc, _) in BOSS_MONSTERS.items()]}
 
 
 def encounter_doc():
