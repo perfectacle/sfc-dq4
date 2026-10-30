@@ -530,6 +530,7 @@ def build(rom, dq5, dq4, work, prologue=True):
     from kr_patch.fc import ines
     work.mkdir(parents=True, exist_ok=True)
     (work / 'boss.json').write_text(json.dumps(dq4ch1event.encounter_doc()))
+    (work / 'learn.json').write_text(json.dumps(dq4ch1event.learn_doc()))
     (work / 'boss-monsters.json').write_text(json.dumps(dq4ch1event.monster_doc(ines.prg(dq4.read_bytes())),
                                                         ensure_ascii=False))
     # 원래 롬만 읽는 도구는 그룹 빌드와 함께 돌린다
@@ -538,7 +539,9 @@ def build(rom, dq5, dq4, work, prologue=True):
                 pool.submit(run_tool, DQ5_TOOLS / 'dq5encounterwrite.py', dq5, 'patch', work / 'boss.json',
                             '-o', work / 'boss.dq5patch.json'),
                 pool.submit(run_tool, DQ5_TOOLS / 'dq5tables.py', dq5, 'patch', work / 'boss-monsters.json',
-                            '-o', work / 'boss-monsters.dq5patch.json')]
+                            '-o', work / 'boss-monsters.dq5patch.json'),
+                pool.submit(run_tool, DQ5_TOOLS / 'dq5learnwrite.py', dq5, 'patch', work / 'learn.json',
+                            '-o', work / 'learn.dq5patch.json')]
         summary = group_build(dq5, dq4, work / 'groups')
         for f in side:
             f.result()
@@ -550,7 +553,8 @@ def build(rom, dq5, dq4, work, prologue=True):
     run_tool(DQ5_TOOLS / 'dq5npcrelocate.py', dq5, 'patch', work / 'npc.json', '--base', base, '--alt', NPC_ALT,
              '--allow-growth', *new_maps, '-o', work / 'npc.dq5patch.json')
     patches = [work / 'groups' / p for p in (*GROUP_PATCHES, *summary['record_patches'])] + [
-        work / 'npc.dq5patch.json', work / 'boss.dq5patch.json', work / 'boss-monsters.dq5patch.json']
+        work / 'npc.dq5patch.json', work / 'boss.dq5patch.json', work / 'boss-monsters.dq5patch.json',
+        work / 'learn.dq5patch.json']
     out = bytearray(apply_writes(clear_mirror(rom, original, group_ranges()), original, patches))
     import dq4chapterbox
     import dq4menupatch

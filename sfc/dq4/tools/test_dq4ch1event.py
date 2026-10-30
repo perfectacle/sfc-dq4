@@ -184,6 +184,25 @@ class BossMonsterTest(unittest.TestCase):
         self.assertEqual(ev.BOSS_MEMBERS, ((0xE2, 1), (0x52, 1)))
 
 
+@unittest.skipUnless(DQ5.is_file(), "local source ROM not present")
+class LearnTest(unittest.TestCase):
+    def test_hero_learns_nothing_and_others_keep_theirs(self):
+        sys.path.insert(0, str(ROOT / "sfc" / "dq5" / "tools"))
+        import dq5learnwrite as lw
+        from dq5map import Rom, lorom
+        data = bytearray(DQ5.read_bytes())
+        before = lw.dump(Rom(bytes(data)))["characters"]
+        for w in lw.patch(Rom(bytes(data)), ev.learn_doc())["writes"]:
+            bank, addr = (int(v, 16) for v in w["at"].split(":"))
+            o = lorom(bank << 16 | addr)
+            new = bytes.fromhex(w["hex"])
+            data[o:o + len(new)] = new
+        after = lw.dump(Rom(bytes(data)))["characters"]
+        self.assertTrue(before[0]["learn"])
+        self.assertEqual(after[0]["learn"], [])
+        self.assertEqual(before[1:], after[1:])
+
+
 @unittest.skipUnless(DQ4.is_file() and DQ5.is_file(), "local source ROMs not present")
 class ListTest(unittest.TestCase):
     @classmethod

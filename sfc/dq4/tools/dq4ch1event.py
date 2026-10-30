@@ -287,6 +287,12 @@ def monster_doc(prg):
                                                   for dq5, (fc, _) in BOSS_MONSTERS.items()]}
 
 
+# FC ライアン 은 주문을 배우지 않는다(fc dq4-data-format 「주문이 없는 トルネコ·ライアン·アリーナ」). DQ5 주인공 습득 표를
+# 그대로 두면 선물 레벨업(1 → 9)만으로 필드 2·전투 4개를 말없이 배웠다(실측)
+def learn_doc():
+    return {"format": "dq5learn/1", "characters": [{"kind": "person", "index": 0, "learn": []}]}
+
+
 def encounter_doc():
     return {"format": "dq5encounter/1", "event_groups": [
         {"index": BOSS_GROUP, "flags": BOSS_FLAGS, "members": [{"monster": k, "count": n} for k, n in BOSS_MEMBERS]}]}
