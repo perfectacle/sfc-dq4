@@ -450,12 +450,14 @@ def build(rom, dq5, dq4, work, prologue=True):
     base = npc_base(work / 'groups' / GROUP_PATCHES[0])
     run_tool(DQ5_TOOLS / 'dq5npcrelocate.py', dq5, 'patch', work / 'npc.json', '--base', base, '--alt', NPC_ALT,
              '--allow-growth', *new_maps, '-o', work / 'npc.dq5patch.json')
-    patches = [work / 'groups' / p for p in GROUP_PATCHES] + [work / 'npc.dq5patch.json']
+    import dq4ch1event
+    (work / 'boss.json').write_text(json.dumps(dq4ch1event.encounter_doc()))
+    run_tool(DQ5_TOOLS / 'dq5encounterwrite.py', dq5, 'patch', work / 'boss.json', '-o', work / 'boss.dq5patch.json')
+    patches = [work / 'groups' / p for p in GROUP_PATCHES] + [work / 'npc.dq5patch.json', work / 'boss.dq5patch.json']
     out = bytearray(apply_writes(rom, original, patches))
     import dq4chapterbox
     import dq4menupatch
     out = bytearray(dq4chapterbox.apply(out, dq4.read_bytes(), dq4menupatch.Font('galmuri11'), scenes(prologue)))
-    import dq4ch1event
     out = bytearray(dq4ch1event.apply(out))
     import dq4josa
     out = bytearray(dq4josa.apply(out))

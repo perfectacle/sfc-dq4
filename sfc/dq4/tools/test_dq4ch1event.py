@@ -58,6 +58,14 @@ class FlyTest(unittest.TestCase):
         e = ev.lorom(at['fly_event'])
         self.assertEqual(out[e:e + 8], bytes((0x90, ev.TOWER, 0x00, 18, 25, 0x01, 0x80, 0xFF)))   # FC 30/00 (09,0C)
 
+    def test_boss_battle_sets_the_flag_only_on_a_win(self):
+        code = ev._battle()
+        self.assertEqual(code[2:8], bytes((0xA9, ev.BOSS_GROUP, 0x22, 0x8B, 0x86, 0x01)))   # JSL $01868B
+        self.assertEqual(code[8:12], bytes((0xC9, 0x80, 0xF0, len(code) - 13)))              # 지면 깃발을 건너뜀
+        self.assertEqual(code[-1], 0x60)
+        (g,) = ev.encounter_doc()["event_groups"]
+        self.assertEqual((g["index"], g["flags"] & 0x40), (ev.BOSS_GROUP, 0x40))
+
     def test_apply_refuses_other_bytes(self):
         with self.assertRaises(SystemExit):
             ev.apply(bytes(0x400000))
@@ -98,9 +106,18 @@ class ListTest(unittest.TestCase):
         self.assertEqual((over["flag"], over["mask"], over["list"]), (*ev.KIDNAPPED, "new:hall_empty"))
         self.assertEqual(sorted(e["from"]["index"] for e in self.entries(ev.TOWER_HALL)), [1, 1, 5, 5])
 
+    def test_tower_top_after_the_boss(self):
+        (over,) = [o for o in self.over if o["map"] == ev.TOWER_TOP]
+        self.assertEqual((over["flag"], over["mask"]), ev.BOSS_WON)
+        (after,) = [lst["entries"] for lst in self.new if lst["name"] == "top_after"]
+        srcs = (ev.HIDE_ON_WIN_SRC, ev.RESCUED_SRC, ev.THANKS_SRC)
+        self.assertFalse([e for e in after if e["from"] in srcs])
+        top = self.entries(ev.TOWER_TOP)
+        self.assertEqual(sum(e["from"] == ev.THANKS_SRC for e in top), 2)     # 낮·밤에 하나씩
+
     def test_event_talks_replace_the_ported_ones(self):
         t = ev.talk_numbers(0x904)
-        talks = {e["fields"]["talk"] for m in (ev.FRONT, ev.FRONT_NIGHT, ev.IMURU, ev.JAIL, ev.HOIMIN_ROOM)
+        talks = {e["fields"]["talk"] for m in (ev.FRONT, ev.FRONT_NIGHT, ev.IMURU, ev.JAIL, ev.HOIMIN_ROOM, ev.TOWER_TOP)
                  for e in self.entries(m)}
         self.assertLessEqual(set(t.values()), talks)
 

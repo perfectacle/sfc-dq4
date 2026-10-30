@@ -26,10 +26,12 @@ FLARE_FOLLOWS = (0x08, 0x04)    # 7E:2198 bit2  프레아가 따라옴(FC $627E&
 REUNITED = (0x22, 0x04)         # 7E:21B2 bit2  감옥에서 재회함(FC $627E&40)
 HOIMIN = (0x28, 0x01)           # 7E:21B8 bit0  호이민이 동료가 됨(FC $6281&40)
 KIDNAPPED = (0x28, 0x20)        # 7E:21B8 bit5  탑 입구에서 마물이 아이를 끌고 감(FC $627E&01)
+BOSS_WON = (0x29, 0x40)         # 7E:21B9 bit6  탑 위 보스를 이김(FC $6283&80)
+KIDS_FOLLOW = (0x29, 0x80)      # 7E:21B9 bit7  구한 아이들이 따라옴(FC $6283&20)
 
 FRONT, FRONT_NIGHT, IMURU, JAIL = '36/00', '36/03', '37/00', '37/02'
 UNDER_WELL, HOIMIN_ROOM = '3B/00', '3B/03'
-TOWER_HALL = '39/00'
+TOWER_HALL, TOWER_TOP = '39/00', '39/04'
 # FC 대화 번호
 FC_KIDNAPPER = 0x45            # 탑 입구의 마물 그림(아이는 15)
 FC_CHILD, FC_ALEX_NIGHT, FC_FLARE_DAY, FC_FLARE_NIGHT, FC_JAIL_FLARE, FC_HOIMIN = 0x12, 0x13, 0x0F, 0x10, 0x17, 0x15
@@ -73,6 +75,12 @@ MESSAGES = {
     'hoimin_no': say('뭐? 안 된다고?/그래도 마음이 바뀌면/또 와 줘.'),
     # FC 02F4
     'kidnap': say('자, 따라와! 꼬마!', '으앙, 무서워!/놔 줘……!'),
+    # 탑 위 보스: 079C → 전투 → 0320. 구한 아이: 0321
+    'boss_taunt': say('목숨 아까운 줄/모르는 녀석!/그렇게 죽고 싶다면/소원을 들어주마!'),
+    'boss_dies': say('이 몸이 지다니……',
+                     '하지만 다른 마물들이/반드시 용사를/찾아내어 그 숨통을/끊어 놓을 것이다……',
+                     '너희 인간들은 머지않아/제왕님의 제물이/될 것이다.', '지옥에서 기다리마……/크윽!'),
+    'kids_thanks': say('와아! 아저씨/고마워!', '우리 돌아갈 수 있구나!/위에서 뛰어내리면/돌아갈 수 있대!'),
 }
 
 
@@ -85,7 +93,7 @@ def texts(first):
     return {first + k: parts for k, parts in enumerate(MESSAGES.values())}
 
 
-TALKS = ('child', 'alex_night', 'flare_day', 'flare_night', 'hoimin')
+TALKS = ('child', 'alex_night', 'flare_day', 'flare_night', 'hoimin', 'boss')
 
 
 def talk_numbers(first_talk):
@@ -117,6 +125,9 @@ def talk_scripts(first_message):
         # 예면 합류 깃발. 일행 기록은 호이민 인물 스크립트가 그 깃발을 보고 쓴다(대화 네이티브는 뱅크 06 안이어야 함)
         [_msg(m['hoimin_ask']), {"op": "if", "cond": {"code": "05"},
                                  "then": [_msg(m['hoimin_yes']), _flag_on(HOIMIN)], "else": _msg(m['hoimin_no'])}],
+        # 전투는 뱅크 06 의 BATTLE_AT 이 건다. 이기면 그 루틴이 보스 깃발을 켠다
+        [_msg(m['boss_taunt']), {"op": "call", "target": f"{BATTLE_AT & 0xFFFF:04X}"},
+         {"op": "if", "cond": {"code": "1B", "index": BOSS_WON[0], "mask": BOSS_WON[1]}, "then": _msg(m['boss_dies'])}],
     ]
 
 
@@ -128,6 +139,32 @@ VOICE_SRCS = ({"list": "05:9180", "index": 2}, "05:91B7"), ({"list": "05:9180", 
 HOIMIN_SRC, HOIMIN_SCRIPT = {"list": "05:9180", "index": 4}, "05:91EB"
 KIDNAPPER_SRC, KIDNAPPER_SCRIPT = {"list": "05:9180", "index": 5}, "05:9207"
 KID_SRC, KID_SCRIPT = {"list": "05:9239", "index": 1}, "05:9248"
+HIDE_ON_WIN_SRC, HIDE_ON_WIN_SCRIPT = {"list": "05:9239", "index": 3}, "05:927B"
+RESCUED_SRC, RESCUED_SCRIPT = {"list": "05:9239", "index": 4}, "05:92B3"
+THANKS_SRC, THANKS_SCRIPT = {"list": "05:90D0", "index": 6}, "05:9102"
+# 탑 위 30/04 의 FC 인물 슬롯(06 부터 차례): 06 보스, 07·08 잡힌 아이, 09 마물은 이기면 숨고, 0C~0E 의 구한 아이는
+# 이기기 전에 숨는다(1C:$A266). 0C 가 고맙다고 말한다
+TOP_HIDE_ON_WIN, TOP_RESCUED = (0x06, 0x07, 0x08, 0x09), (0x0C, 0x0D, 0x0E)
+FIRST_SLOT = 0x06
+# 보스 전투: DQ5 빈 이벤트 무리 30 에 DQ5 몬스터를 임시로(FC 무리 05 = ピサロのてさき·おおめだま 한 마리씩).
+# 01:868B 는 전투 뒤 01:8715 로 가서, 지면(A = 80) 보통 전투처럼 전멸 처리(01:88ED)를 한다
+BOSS_GROUP = 0x30
+BOSS_MEMBERS = ((0xE2, 1), (0x18, 1))       # ザイル(HP 160·공격 42), ドラキーマ(HP 30·공격 25)
+BOSS_FLAGS = 0x40 | 0x02                    # 도망칠 수 없음, 보스 곡
+BATTLE_AT = 0x06FF00                        # 대화 스크립트의 네이티브는 뱅크 06 안(06:FE10~ 의 덧붙인 대화 훅 뒤)
+
+
+def encounter_doc():
+    return {"format": "dq5encounter/1", "event_groups": [
+        {"index": BOSS_GROUP, "flags": BOSS_FLAGS, "members": [{"monster": k, "count": n} for k, n in BOSS_MEMBERS]}]}
+
+
+def _battle():
+    flag = 0x7E2190 + BOSS_WON[0]
+    return bytes((0x00, 0x0E, 0xA9, BOSS_GROUP, 0x22, 0x8B, 0x86, 0x01,       # BRK 0E / LDA #무리 / JSL $01868B
+                  0xC9, 0x80, 0xF0, 0x0A, 0xAF)) + _al(flag) + bytes((0x09, BOSS_WON[1], 0x8F)) + _al(flag) + b'\x60'
+
+
 # 탑 입구 30/00: 주인공이 이 줄(FC Y)에 오면 마물이 아이를 데리고 계단(09,03) 쪽으로 간다(FC 1D 이벤트 02)
 KIDNAP_ROW, KIDNAP_TO = 0x09, 0x03
 # 목소리가 나는 칸(FC 칸)과 메시지. FC 는 그 칸에서 왼쪽(05)·오른쪽(0B)을 보고 있을 때이고, そらとぶくつ 를
@@ -234,6 +271,13 @@ def native(data=None):
     return bytes(out), at
 
 
+def _put(d, addr, code):
+    o = lorom(addr)
+    if any(d[o:o + len(code)]):
+        raise SystemExit(f'{addr:06X}: 비어 있지 않은 자리')
+    d[o:o + len(code)] = code
+
+
 def ch1_cell(x, y):
     """FC 칸에 선 주인공의 DQ5 셀."""
     return x * 2, y * 2 + 1
@@ -242,10 +286,8 @@ def ch1_cell(x, y):
 def apply(data):
     d = bytearray(data)
     code, _ = native(data)
-    o = lorom(CODE_AT)
-    if any(d[o:o + len(code)]):
-        raise SystemExit(f'{CODE_AT:06X}: 비어 있지 않은 자리')
-    d[o:o + len(code)] = code
+    _put(d, CODE_AT, code)
+    _put(d, BATTLE_AT, _battle())
     _, at = native()
     fx, fy = TOWER_FIELD[0] * 2, TOWER_FIELD[1] * 2      # FC 필드 칸 → DQ5 필드 좌표(그룹 연결의 필드 입구와 같은 셈)
     for addr, orig, new in ((FLY_AT, FLY_ORIG, bytes((0x22, *_long(at['fly']), 0xEA))),
@@ -291,7 +333,18 @@ def scripts(first_message):
             _cmd('05', *_long(at['kidnap_row'])), _cmd('3F'), _cmd('21', lo(m['kidnap']), hi(m['kidnap'])),
             _cmd('10', *KIDNAPPED)] + _walk_off(9) + [_cmd('40'), _cmd('16')]},
         {"address": KID_SCRIPT, "commands": [_cmd('09', 0x80 | KIDNAPPED[0], KIDNAPPED[1])] + _walk_off(8) + [_cmd('16')]},
+        {"address": HIDE_ON_WIN_SCRIPT, "commands": [_cmd('09', 0x80 | BOSS_WON[0], BOSS_WON[1]), _cmd('28'), _cmd('52'),
+                                                     _cmd('16')]},
+        # 구한 아이: 이기기 전에는 숨어 있다가 나타나고, 따라오기로 하면 숨는다(FC 는 일행 뒤를 따라 걷는 그림)
+        {"address": RESCUED_SCRIPT, "commands": _rescued([])},
+        {"address": THANKS_SCRIPT, "commands": _rescued([_cmd('3F'), _cmd('21', lo(m['kids_thanks']), hi(m['kids_thanks'])),
+                                                         _cmd('10', *KIDS_FOLLOW), _cmd('40')])},
     ]
+
+
+def _rescued(speak):
+    return ([_cmd('28'), _cmd('09', 0x80 | BOSS_WON[0], BOSS_WON[1]), _cmd('53'), _cmd('4F')] + speak +
+            [_cmd('09', 0x80 | KIDS_FOLLOW[0], KIDS_FOLLOW[1]), _cmd('28'), _cmd('52'), _cmd('16')])
 
 
 def _walk_off(x):
@@ -357,8 +410,24 @@ def npc_lists(ported, report, first_talk):
         src = KIDNAPPER_SRC if p["picture"] == FC_KIDNAPPER else KID_SRC
         hall[i] = _same(hall[i], src, hall[i]["fields"]["talk"])
     new_lists.append({"name": "hall_empty", "entries": []})
+    # 탑 위
+    top = lists[TOWER_TOP]
+    keep = []
+    for i, (e, p) in enumerate(zip(top, report[TOWER_TOP])):
+        # 낮·밤 목록이 이어져 있어, 같은 시간대의 앞 인물 수가 그 목록 안의 차례다
+        slot = FIRST_SLOT + [q["night"] for q in report[TOWER_TOP][:i]].count(p["night"])
+        if slot == FIRST_SLOT:
+            top[i] = _same(e, HIDE_ON_WIN_SRC, t['boss'])
+        elif slot in TOP_HIDE_ON_WIN:
+            top[i] = _same(e, HIDE_ON_WIN_SRC, e["fields"]["talk"])
+        elif slot in TOP_RESCUED:
+            top[i] = _same(e, THANKS_SRC if slot == TOP_RESCUED[0] else RESCUED_SRC, e["fields"]["talk"])
+        else:
+            keep.append(e)
+    new_lists.append({"name": "top_after", "entries": keep})
     over = lambda m, flag, name: {"map": m, "flag": flag[0], "when": "on", "mask": flag[1], "list": f"new:{name}"}  # noqa: E731
     # 앞에 둔 것부터 맞춰 본다
     overrides = [over(JAIL, REUNITED, 'jail_after'), over(JAIL, FLARE_FOLLOWS, 'jail_reunion'),
-                 over(HOIMIN_ROOM, HOIMIN, 'hoimin_gone'), over(TOWER_HALL, KIDNAPPED, 'hall_empty')]
+                 over(HOIMIN_ROOM, HOIMIN, 'hoimin_gone'), over(TOWER_HALL, KIDNAPPED, 'hall_empty'),
+                 over(TOWER_TOP, BOSS_WON, 'top_after')]
     return [{"map": k, "entries": v} for k, v in lists.items()], new_lists, overrides
