@@ -31,6 +31,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
         sys.path.insert(0, str(path))
 
 import dq4block  # noqa: E402
+import dq4entrancehook  # noqa: E402
 import dq4map  # noqa: E402
 from dq4environmentmap import all_maps, block_prop  # noqa: E402
 from dq4environmentrom import GROUPS, STAIRS  # noqa: E402
@@ -66,6 +67,7 @@ ENTRANCES_AT = ("--entrances-at", "3C:8000")
 TEXT_AT = ("--at", "35:8000")
 SHOP_AT = ("--shop-at", "3C:E000")
 INN_AT = 0x3CF000
+ENTRANCE_HOOK_AT = 0x3CF800
 # The three tables chests and drawers grow; dq5chestplace reads chest_maps and search with DB, so bank 00-3F.
 CHEST_AT = ("--chests-at", "3C:8400", "--chest-maps-at", "3C:8800", "--search-at", "3C:8C00")
 LAYER = 1
@@ -269,6 +271,14 @@ def build(dq5, dq4, out):
             if link["field"]]
     step("dq5fieldtables.py", "entrances", {"format": "dq5fieldtables/1", "entrance_tables": {"aux": aux}}, dq5,
          *ENTRANCES_AT, *new_map_args)
+    fields = {group: link["field"] for group, link in LINKS.items() if link["field"]}
+    arrivals = [(group, fx, fy, LINKS[group].get("map", 0), *cell(*LINKS[group]["arrival"]), LAYER, 0)
+                for group, (fx, fy) in fields.items()]
+    # An aux entrance stands one cell below itself when the party leaves (2A:F466).
+    leaving = [(group, 0, 0x1F, fx, fy + 1) for group, (fx, fy) in fields.items()]
+    manifests.append(_save(out / "entrance-hook.dq5patch.json", {
+        "format": "dq5patch/1", "name": "dq4-entrance-hook",
+        "writes": dq4entrancehook.writes(ENTRANCE_HOOK_AT, arrivals, leaving)}))
 
     import dq4chestport  # imports this module
     place, chest_report = dq4chestport.port(dq5, dq4)
