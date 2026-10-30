@@ -44,7 +44,7 @@ FAST_RECEIVE = 0xFF00
 FAST_RECEIVE_TRIPLETS = 4
 FAST_RECEIVE_POLLS = 32
 # 나눈 곡(앞부분 → 본체): 드라이버 명령 F7(표 07CD, 원래 아무것도 안 함)을 CHAIN 처리기로, 본체는 시퀀스 번호 47~,
-# 짝 표 71:8300(곡 → 본체, FF 없음), 2B:C1C1(곡이 시작한 뒤 곡 뒤 샘플 보내기 JSR C1DB)을 발판 2B:B780 으로.
+# 짝 표 71:8300(곡 → 본체, 00 없음), 2B:C1C1(곡이 시작한 뒤 곡 뒤 샘플 보내기 JSR C1DB)을 발판 2B:B780 으로.
 CHAIN_HANDLER = 0xFF54
 CHAIN_TABLE_ENTRY = 0x07CD
 # 새 곡 번호: 47~4B 는 바꿔 넣는 곡(시나리오가 부를 고정 번호), 4C~ 은 나눈 곡의 본체. SPC 색인 표(04C7)는 0x64칸이고,
@@ -369,7 +369,7 @@ def chain_step_code():
         h('DA 48 AA BF') + CHAIN_ORDER.to_bytes(3, 'little'),  # PHX / PHA / TAX / LDA 순서,X
         h('29 FF 00'), ('b', 0xD0, 'skip'),                   # 나중에 보낼 곡이면 건너뜀
         h('BF') + CHAIN_PAIRS.to_bytes(3, 'little'),          # LDA 짝,X
-        h('29 FF 00 C9 FF 00'), ('b', 0xF0, 'skip'),
+        h('29 FF 00'), ('b', 0xF0, 'skip'),
         h('20 2C C2'),                                         # JSR $C22C(시퀀스 보내기, A = 번호)
         ('label', 'skip'), h('68 FA 4C DB C1'),                # PLA / PLX / JMP $C1DB
     ])
@@ -381,22 +381,27 @@ def chained_song(data, song):
     if hook != bytes([0x20]) + (CHAIN_STEP & 0xFFFF).to_bytes(2, 'little'):
         return None
     number = data[lorom(CHAIN_PAIRS) + song]
-    return None if number == 0xFF else number
+    return number or None
 
 
 def chain_late_step_code():
     """2B:C20C(샘플 보내기 고리 끝 PLA·PLX·RTS)를 대신해, 곡 뒤 단계(대기열 칸 bit6)이고 순서 표가 1 인 곡이면 본체를
-    보낸 뒤 돌아간다. 곡 앞 샘플 고리(C1C8)도 같은 끝을 지나지만 그때 칸은 bit6 이 꺼져 있다."""
+    보낸 뒤 돌아간다. 곡 앞 샘플 고리(C1C8)도 같은 끝을 지나지만 그때 칸은 bit6 이 꺼져 있다.
+
+    곡이 바뀌어 1A 가 그 칸을 지웠으면(FF) 보내지 않는다. FF 도 bit6 이 켜져 있어, 떠난 맵의 본체가 정리 뒤에 올라와
+    SPC 에 남고 다음 곡의 본체가 자리를 얻지 못했다(성에서 필드로 나가면 필드 곡이 앞부분 뒤 멈춤).
+    응답 판정(LOAD_POLL)이 바로 뒤라 48바이트 안에 넣는다: 스택의 곡(1,S)·칸(3,S)을 바로 읽는다."""
     h = bytes.fromhex
     return _asm([
-        h('68 FA 48 DA'),                                      # PLA(곡) / PLX(대기열 칸) / PHA / PHX
-        h('BD 95 1D 29 40 00'), ('b', 0xF0, 'done'),          # LDA $1D95,X / AND #$0040
-        h('A3 03 AA BF') + CHAIN_ORDER.to_bytes(3, 'little'), # LDA 3,S / TAX / LDA 순서,X
+        h('A3 03 AA'),                                         # LDA 3,S / TAX(대기열 칸)
+        h('BD 95 1D 29 FF 00 C9 FF 00'), ('b', 0xF0, 'done'), # 칸이 지워졌으면(FF) 그만
+        h('29 40 00'), ('b', 0xF0, 'done'),                   # 곡 뒤 단계(bit6)가 아니면 그만
+        h('A3 01 AA BF') + CHAIN_ORDER.to_bytes(3, 'little'), # LDA 1,S / TAX(곡) / LDA 순서,X
         h('29 FF 00'), ('b', 0xF0, 'done'),
         h('BF') + CHAIN_PAIRS.to_bytes(3, 'little'),
-        h('29 FF 00 C9 FF 00'), ('b', 0xF0, 'done'),
+        h('29 FF 00'), ('b', 0xF0, 'done'),
         h('20 2C C2'),                                         # JSR $C22C
-        ('label', 'done'), h('FA 68 60'),                      # PLX / PLA / RTS
+        ('label', 'done'), h('68 FA 60'),                      # PLA / PLX / RTS
     ])
 
 
@@ -824,7 +829,7 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
         if not set(chains) <= set(replacements):
             raise ValueError('chained songs must be replaced songs')
         anchor = resident_samples(data)[0]
-        pairs = bytearray(b'\xff' * 0x64)
+        pairs = bytearray(0x64)
         for number, (song, main) in enumerate(sorted(chains.items()), FIRST_CHAIN_SONG):
             if number >= 0x64:
                 raise ValueError('too many chained songs for the SPC sequence index')
