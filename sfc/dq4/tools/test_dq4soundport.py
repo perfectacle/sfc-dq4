@@ -67,6 +67,11 @@ class LevelTests(unittest.TestCase):
         self.assertGreater(result.report['level_changes_merged'], 0)
         self.assertLessEqual(result.report['level_max_error_db'], 1.0)
 
+    def test_voice_volume_sets_every_voice(self):
+        notes = [(0, 24, 60, 100)]
+        self.assertIn('volume 30', port.convert(score(notes), voices=1).text)
+        self.assertIn('volume 60', port.convert(score(notes), voices=1, voice_volume=0x60).text)
+
     def test_audible_velocity_change_is_written(self):
         notes = [(0, 24, 60, 100), (24, 24, 60, 50)]
         result = port.convert(score(notes), voices=1)

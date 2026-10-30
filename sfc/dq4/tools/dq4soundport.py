@@ -371,7 +371,7 @@ def seconds_to_tick(tempos, seconds):
 
 def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_tolerance_db=1.0,
             tail_ticks=12, release_rate=0x1C, sample_order=None, arrivals=None, lanes_for=None,
-            split_tick=None, chain_song=None, hold=None, cache_dir=None):
+            split_tick=None, chain_song=None, hold=None, cache_dir=None, voice_volume=0x30):
     """악보 → 글·바이너리·곡 묶음의 DQ5 샘플 번호·손실 보고서.
 
     시퀀스만 만들며 ROM/SPC 공간 검사는 삽입기가 맡는다. 8번째 목소리를 BGM에서 쓰지 않지만
@@ -392,6 +392,7 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
     를 둔다. 그 샘플을 받는 동안 곡을 틀고 문턱만큼 오면 곡이 나아간다. 붙들기는 그 틱의 나머지 트랙을 막지 못하므로 모든
     트랙을 1틱 쉼으로 시작한다(그 틱에 instrument 가 오면 아직 없는 샘플로 보아 트랙이 조용해진다).
     cache_dir 는 시퀀스 묶기 결과를 둘 곳(dq4soundcompact.compact 참고).
+    voice_volume 은 목소리마다 처음에 두는 음량(ED)이다. 곡 전체 세기를 올리고 내릴 때 바꾼다.
     """
     if not 1 <= voices <= 7:
         raise ValueError('BGM voices must be between 1 and 7')
@@ -468,7 +469,7 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
             if lane_id == 0:
                 lines += [f'  db F7 FE {hold[0]:02X}', f'  db F7 FF {hold[1]:02X}']
             lines.append('  rest len 01')
-        lines += ['  volume 30', f'  release {release_rate:02X}', '  echo_on']
+        lines += [f'  volume {voice_volume:02X}', f'  release {release_rate:02X}', '  echo_on']
         cuts = {0, end}
         if loop_start is not None:
             cuts.add(loop_start)

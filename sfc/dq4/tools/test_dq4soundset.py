@@ -90,6 +90,16 @@ class SongScoreTests(unittest.TestCase):
         self.assertEqual([e['velocity'] for e in out['timeline']], [50, 100, 10])
 
 
+class VoiceVolumeTests(unittest.TestCase):
+    def test_zero_db_keeps_the_default(self):
+        self.assertEqual(soundset.voice_volume(0), 0x30)
+
+    def test_db_scales_the_volume_and_clamps(self):
+        self.assertEqual(soundset.voice_volume(6), round(0x30 * 10 ** 0.3))
+        self.assertEqual(soundset.voice_volume(40), 0xFF)
+        self.assertEqual(soundset.voice_volume(-80), 1)
+
+
 class HoldUnitsTests(unittest.TestCase):
     def test_slow_playback_needs_only_the_rounding_unit(self):
         # 8kHz 기준음은 프레임당 약 75바이트라 받기 59 보다 느리지 않으면 앞부분만 있으면 된다

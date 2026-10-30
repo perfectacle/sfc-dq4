@@ -144,6 +144,11 @@ def share_samples(found, details, program_map, resources, known, next_id, *, bud
     return out, mapping, remap, shared
 
 
+def voice_volume(db):
+    """곡 전체 세기를 db 만큼 바꾼 목소리 음량(ED). 드라이버가 음량을 곱으로 쓰므로 기본 0x30 에 배율을 곱한다."""
+    return max(1, min(0xFF, round(0x30 * 10 ** (db / 20))))
+
+
 def song_score(score, drop_tracks=(), drop_programs=(), track_db=None):
     """drop_tracks(트랙 이름)·drop_programs 의 음을 빼고, track_db({트랙 또는 트랙@프로그램: dB}) 음의 세기를 바꾼 악보."""
     if not drop_tracks and not drop_programs and not track_db:
@@ -163,7 +168,7 @@ def song_score(score, drop_tracks=(), drop_programs=(), track_db=None):
 
 def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_fades=False, preview=None,
           stream=None, stream_ticks=None, budgets=None, pinned=(), resident_from=None, drop_resident=(), lanes=None, drop_tracks=None,
-          level_db=None, programs=None, set_records=None, keep_regions=None, track_db=None,
+          level_db=None, programs=None, set_records=None, keep_regions=None, track_db=None, gain_db=None,
           fast_receive=False, chains=(), holds=(), early_song=False, load_pump=False, vehicle_song=False,
           keep_samples=False, prefetch=None, release_failed=False, unpin=(), effects=None):
     """stream 은 {곡 자리: 곡 앞 샘플 바이트 상한}. 그 곡은 샘플 일부를 곡이 울리는 동안 보낸다(transfer_plan).
@@ -181,7 +186,7 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
     lanes·drop_tracks·level_db 는 곡마다 convert 의 lanes_for·뺄 트랙·level_tolerance_db, programs 는
     {곡: {프로그램: 이미 넣은 전역 샘플}} 로 그 프로그램을 새로 만들지 않고 그 샘플로 울린다. keep_regions 는
     {곡: {프로그램}} 으로 샘플을 줄일 때 그 프로그램의 음역 영역을 합치지 않는다. track_db 는 {곡: {트랙: dB}} 로
-    그 트랙 음의 세기(velocity)를 바꾼다. chains 는 앞부분·본체로 나눌 곡 자리(stream_ticks 를 준 곡)로, 앞부분 길이는
+    그 트랙 음의 세기(velocity)를 바꾼다. gain_db 는 {곡: dB} 로 목소리 음량(ED)을 바꿔 곡 전체 세기를 맞춘다. chains 는 앞부분·본체로 나눌 곡 자리(stream_ticks 를 준 곡)로, 앞부분 길이는
     본체 도착 어림 + CHAIN_SLACK_SECONDS 로 정한다. holds 는 곡 붙들기를 쓸 곡 자리(stream_ticks 를 준 곡)로, 곡 앞
     샘플 하나를 곡 뒤 맨 앞으로 돌리고 그 샘플이 hold_units 만큼 오면 곡을 나아가게 한다(아끼는 바이트가 가장 큰 것).
     set_records 는 바꾸지 않는 곡의 곡 묶음 레코드(install 과 같음). cache_dir 는 BRR(brr/)·시퀀스 묶기(compact/) 결과를
@@ -189,6 +194,7 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
     """
     stream, stream_ticks, budgets, lanes = stream or {}, stream_ticks or {}, budgets or {}, lanes or {}
     drop_tracks, level_db, programs = drop_tracks or {}, level_db or {}, programs or {}
+    gain_db = gain_db or {}
     keep_regions, track_db = keep_regions or {}, track_db or {}
     brr_cache = None if cache_dir is None else Path(cache_dir) / 'brr'
     data = bytes(base)
@@ -201,7 +207,8 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
     resident_plan = bool(pinned or resident_from is not None or drop_resident)
 
     def convert_args(slot):
-        return {'lanes_for': lanes.get(slot), 'level_tolerance_db': level_db.get(slot, 1.0), 'cache_dir': cache_dir}
+        return {'lanes_for': lanes.get(slot), 'level_tolerance_db': level_db.get(slot, 1.0), 'cache_dir': cache_dir,
+                'voice_volume': voice_volume(gain_db.get(slot, 0.0))}
 
     if not set(chains) <= set(stream_ticks):
         raise ValueError('chained songs must use stream_ticks')
@@ -559,6 +566,8 @@ def main():
                     help='play this NDS program with an already built sample (hex ID) instead of its own')
     ap.add_argument('--keep-regions', action='append', default=[], metavar='DQ5_SLOT=PROGRAM',
                     help='never merge the key regions of this NDS program when shrinking samples')
+    ap.add_argument('--gain-db', action='append', default=[], metavar='DQ5_SLOT=DB',
+                    help='raise or lower the whole song by DB through the voice volume (ED), e.g. 27=4')
     ap.add_argument('--track-db', action='append', default=[], metavar='DQ5_SLOT=TRACK:DB',
                     help='scale the note velocity of one NDS track (or TRACK@PROGRAM), e.g. 09=track6:-4 or 09=track8@45:-6')
     ap.add_argument('--fast-receive', action='store_true',
@@ -621,6 +630,7 @@ def main():
                         drop_resident=[int(x, 16) for x in args.drop_resident],
                         lanes={slot: json.loads(value) for slot, value in per_slot(args.lanes)},
                         drop_tracks=drop_tracks, level_db={slot: float(v) for slot, v in per_slot(args.level_db)},
+                        gain_db={slot: float(v) for slot, v in per_slot(args.gain_db)},
                         programs=programs, set_records=records, keep_regions=keep,
                         track_db=track_db, fast_receive=args.fast_receive,
                         chains=[int(x, 16) for x in args.chain], holds=[int(x, 16) for x in args.hold],
