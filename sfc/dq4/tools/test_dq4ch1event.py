@@ -148,8 +148,8 @@ class FlyTest(unittest.TestCase):
     def test_status_window_opens_without_brk(self):
         code = ev._status_count()
         self.assertNotIn(bytes((0x00, 0x95)), code)              # BRK 95 는 DB 가 뱅크 5E 라 롬에 씀
-        self.assertIn(bytes((0xA9, 0x08, 0x8D, 0x00, 0x0A)), code)
-        self.assertIn(bytes((0x22, *ev._long(ev.WINDOW_SET))), code)
+        self.assertIn(bytes((0xA9, ev.STATS_WINDOW, 0x8D, 0x00, 0x0A)), code)
+        self.assertIn(bytes((0x22, *ev._long(ev.WINDOW_ONE))), code)
         self.assertIn(bytes((0x22, *ev._long(ev.SEND_ROWS))), code)
         self.assertEqual(ev.GIFT_EXP % ev.GIFT_STEP, 0)
 
