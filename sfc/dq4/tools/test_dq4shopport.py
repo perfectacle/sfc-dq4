@@ -22,23 +22,26 @@ class FoldTest(unittest.TestCase):
 class PortTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.services, cls.shops, cls.writes, cls.report = shopport.port(str(DQ5), str(DQ4), 0x3CF000)
+        cls.services, cls.shops, cls.writes, cls.report = shopport.port(str(DQ5), str(DQ4), 0x3CF000, 0x3CFC00)
 
     def test_sellers(self):
         # Burland's armor seller opens across the counter through talk script 00D; Imuru's inn through 011.
         self.assertEqual(self.services["36/00"][(0x1F, 0x16, False)], 3)
         self.assertEqual(self.services["37/00"][(0x11, 0x12, False)], 6)
 
-    def test_lists_keyed_by_group(self):
-        weapons = next(s for s in self.shops if s["key"] == 0x36 and s["kind"] == 2)
+    def test_lists_keyed_by_fc_group(self):
+        self.assertEqual(self.report["keys"], {"36/00-03": "60", "37/00-02": "61"})
+        weapons = next(s for s in self.shops if s["key"] == 0x60 and s["kind"] == 2)
         self.assertEqual(weapons["items"], [0x02, 0x06, 0x1C, 0x07])  # いばらのむち = DQ5 いばらのムチ
         self.assertIn("37/00 てつのやり", self.report["missing_items"])
 
     def test_inn_table_and_operands(self):
-        table, bank, addr = self.writes
+        table, bank, addr, _, shop_site, inn_site = self.writes
         data = bytes.fromhex(table["hex"].replace(" ", ""))
         self.assertEqual(len(data), (shopport.INN_ENTRIES + 2) * 2)
-        self.assertEqual(data[-4:], bytes((0x36, 4, 0x37, 6)))
+        self.assertEqual(data[-4:], bytes((0x60, 4, 0x61, 6)))
+        self.assertEqual(self.report["inns"], {"36/00": 4, "37/00": 6})
+        self.assertEqual((shop_site["at"], inn_site["at"]), ("06:DC37", "06:F576"))
         self.assertEqual((bank["hex"], addr["hex"]), ("3C", "00 F0"))
 
 

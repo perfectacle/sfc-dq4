@@ -124,7 +124,7 @@ def main():
     people = json.loads((args.build / "npc-report.json").read_text(encoding="utf-8"))
     shop_report = json.loads((args.build / "shop-report.json").read_text(encoding="utf-8"))
     shop_items = {(s["map"], s["kind"]): s["dq5"] for s in shop_report["shops"]}
-    inns = {int(g, 16): price for g, price in shop_report["inns"].items()}
+    inns = shop_report["inns"]
     prg = ines.prg(args.dq4.read_bytes())
     state = args.state.resolve()
 
@@ -160,7 +160,7 @@ def main():
             elif service is not None:
                 first = NIGHT_MESSAGE.get(service, SERVICE_MESSAGE[service]) if p["night"] else SERVICE_MESSAGE[service]
                 jobs.append(("inn" if service == INN else "talk", f"talk-{m.replace('/', '')}-{i}", m, to, d,
-                             p["night"], (first, inns.get(group) if service == INN else None)))
+                             p["night"], (first, inns.get(m) if service == INN else None)))
             else:
                 jobs.append(("talk", f"talk-{m.replace('/', '')}-{i}", m, to, d, p["night"],
                              (int(p["message"], 16), None)))

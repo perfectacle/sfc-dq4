@@ -5,7 +5,7 @@ Order matters (sfc/dq4/docs/dq4-environment-format.md, 「그룹 연결」):
   2. dq5newmap.py from the env ROM: new groups, maps (records from the dq5map/1 documents of 1), arrivals.
   3. dq5exitreloc.py, dq5npcrelocate.py (the FC people of dq4npcport.py), dq5fieldtables.py from the original
      ROM with --new-map, dq5textwrite.py with their Japanese FC text, and dq5progresswrite.py with the FC
-     shop lists plus the inn price table of dq4shopport.py.
+     shop lists plus the inn price table and the per-FC-group shop key hook of dq4shopport.py.
   4. dq5chestplace.py from the original ROM with the patches of 1-3 (--with-patch): the FC chests and
      タンス·つぼ of dq4chestport.py on the cells 1 gave their DQ5 attributes.
   5. dq5build.py on the original ROM with 1-4.
@@ -73,6 +73,7 @@ TEXT_AT = ("--at", "35:8000")
 SHOP_AT = ("--shop-at", "3C:E000")
 INN_AT = 0x3CF000
 ENTRANCE_HOOK_AT = 0x3CF800
+SHOP_KEY_AT = 0x3CFC00
 # The three tables chests and drawers grow; dq5chestplace reads chest_maps and search with DB, so bank 00-3F.
 CHEST_AT = ("--chests-at", "3C:8400", "--chest-maps-at", "3C:8800", "--search-at", "3C:8C00")
 LAYER = 1
@@ -330,10 +331,10 @@ def build(dq5, dq4, out):
     manifests.append(out / "npc.dq5patch.json")
     checks.append(step("dq5textwrite.py", "text", {"format": "dq5text/1", "messages": messages}, dq5, *TEXT_AT))
     import dq4shopport  # imports this module
-    _, shops, inn_writes, shop_report = dq4shopport.port(dq5, dq4, INN_AT)
+    _, shops, inn_writes, shop_report = dq4shopport.port(dq5, dq4, INN_AT, SHOP_KEY_AT)
     _save(out / "shop-report.json", shop_report)
     step("dq5progresswrite.py", "shops", {"format": "dq5progress/1", "shops": shops}, dq5, *SHOP_AT)
-    manifests.append(_save(out / "inn.dq5patch.json", {"format": "dq5patch/1", "name": "dq4-inns", "writes": inn_writes}))
+    manifests.append(_save(out / "inn.dq5patch.json", {"format": "dq5patch/1", "name": "dq4-inns-shop-keys", "writes": inn_writes}))
 
     _run(DQ5_TOOLS / "dq5exitreloc.py", dq5, "dump", "-o", out / "exits-orig.json", *new_map_args)
     exits = json.loads((out / "exits-orig.json").read_text(encoding="utf-8"))
