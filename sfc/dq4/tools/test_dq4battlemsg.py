@@ -58,6 +58,10 @@ class TableTests(unittest.TestCase):
             self.assertFalse(0x180 <= t < 0x1D0 or 0xB0 <= t <= 0x122 or t < 0x99, hex(t))
         self.assertEqual(bm.POOL[:len(bm.POOL_A)], bm.POOL_A)
 
+    def test_pool_keeps_the_tiles_messages_draw(self):
+        drawn = set(bm.TILES.values()) | {b for pair in bm.PAIRS.values() for b in pair}
+        self.assertFalse(drawn & set(bm.POOL), sorted(hex(t) for t in drawn & set(bm.POOL)))
+
     def test_codes_are_not_ends_digits_or_blank(self):
         for c in bm.CODES:
             self.assertFalse(c in bm.ENDS or 0x01 <= c <= 0x0B or c >= 0xE2 or c in (0x83, 0x84, 0x8D), hex(c))
