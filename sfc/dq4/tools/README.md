@@ -46,6 +46,7 @@
 | `lua/dq4soundstate.lua` | 세이브스테이트를 불러온 뒤 롬의 드라이버 IPL 블록(곡 묶음 표)을 SPC RAM 에 다시 쓰고 `SOUND_PROBE` 를 돌림. 롬 목록에 없는데 상태에 고정된 시퀀스는 고정을 풂. 곡 묶음을 바꾼 롬을 세이브스테이트로 시험할 때 필요. 표 블록 뒤의 IPL 블록(`FF00` 빠른 받기)과 드라이버 `1046` 3바이트도 씀. `RESIDENT=1` 이면 늘 두는 샘플·시퀀스를 모두 풀고 `1A FF`·`8B 00`·`93 00` 으로 롬 목록대로 다시 올림. `AT` 사용 |
 | `lua/dq4soundload.lua` | `SOUND_PROBE` 로 걸어, 샘플이 SPC 에 다 받아진 프레임(`SAMPLES`), 목소리마다 울리기 시작한 프레임과 SRCN, 곡(`SONGS`)이 오르내린 프레임을 `load.txt` 로. 이어서 `NEXT_PROBE` 를 돌림 |
 | `lua/dq4soundcmdlog.lua` | 전원부터 `INPUT`(버튼@프레임:길이)·`AFTER`(A 연타 간격)로 진행하며 소리 대기열 명령·부른 자리와 300프레임마다 화면을 남김. `OUT`, `MAXF`, `AFTERFROM` 사용 |
+| `lua/dq4shipstate.lua` | 사운드 롬으로 전원부터 배 선실(17/00)까지 가 세이브스테이트 `SAVE` 를 남김(한글 이름 입력은 Y 로 끝냄). 곡 번호를 늘린 롬은 원본 DQ5 로 만든 상태로 재면 틀리므로 재는 롬마다 새로 만듦. `LIBDIR`(lib.lua), `SHOT_DIR`, `PERIOD`, `TAPUNTIL` 사용 |
 | `lua/dq4overturespc.lua` | 서곡 롬을 전원부터 돌려 곡 10 이 시작한 뒤의 SPC 상태와 DSP 쓰기(`dspw.txt`), 곡 시작·샘플 도착(`events.txt`)을 남김. `OUT`, `MAXF`, `SONG`, `SEQ`, `DUMPAT`, `QUIET` 사용 |
 | `lua/dq4titleintegrationcheck.lua` | 통합 롬의 화면·VRAM·음악·메뉴 진입 관찰. `OUT`, `MAXF`, `EVERY`, `FROM`, `SEQ`, `RESETAT`, `TRACE_DMA`, `MOTION_PC` 사용 |
 | `lua/dq4titlecheck.lua` | 독립 미리보기의 화면·VRAM·CGRAM 관찰. `OUT`, `FRAME` 사용 |
