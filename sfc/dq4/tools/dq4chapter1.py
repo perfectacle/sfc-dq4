@@ -288,10 +288,13 @@ def messages(lists, ported_messages, report):
         key = tuple(m for m in person["shows"] if m is not None)
         if key in FRONT_TEXTS:
             out[int(person["message"], 16)] = FRONT_TEXTS[key]
-    clash = set(out) & set(TEXTS)
-    if clash:
-        raise ValueError(f'dq4npcport 메시지와 겹치는 번호: {sorted(f"{m:03X}" for m in clash)}')
-    return {**out, **TEXTS}
+    import dq4sysmsg
+    for name, texts in (('1장', TEXTS), ('시스템', dq4sysmsg.TEXTS)):
+        clash = set(out) & set(texts)
+        if clash:
+            raise ValueError(f'{name} 메시지와 겹치는 번호: {sorted(f"{m:03X}" for m in clash)}')
+        out.update(texts)
+    return out
 
 
 def port(dq5, dq4):
@@ -369,6 +372,8 @@ def build(rom, dq5, dq4, work):
     import dq4chapterbox
     import dq4menupatch
     out = bytearray(dq4chapterbox.apply(out, dq4.read_bytes(), dq4menupatch.Font('galmuri11')))
+    import dq4josa
+    out = bytearray(dq4josa.apply(out))
     o = lorom(START_TABLE)
     if out[o:o + 6] != START_ORIG:
         raise SystemExit(f'{START_TABLE:06X}: 새 게임 첫 맵 표가 원래 값이 아님 {out[o:o + 6].hex()}')

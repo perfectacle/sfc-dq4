@@ -18,6 +18,7 @@
 | `dq4titlepreview.py --input 폴더 --out 롬 [--asar 실행파일]` | 타이틀 에셋으로 독립 64KiB SFC 미리보기 롬 생성. DQ5 삽입본과 구분 |
 | `dq4overture.py text\|build\|tempo-map\|render` | FC 서곡 악보를 NDS 템포·DQ5 악기로 편곡해 타이틀 롬의 시퀀스 10 에 갈래로 넣음(4MB 롬·IPS). `tempo-map` 은 NDS 녹음과 DTW 로 템포 지도를 다시 잼, `render` 는 프로브 결과를 .spc·.wav 로. [타이틀 서곡](../docs/dq4-overture-format.md) |
 | `dq4menupatch.py build\|sheet` | 서곡 롬 위에 모험의 서 메뉴·조합형 이름 입력·메뉴 메시지를 한글로(4MB 롬·IPS). `DQ4_GALMURI` 의 Galmuri BDF 와 `ASAR` 실행 파일 필요. `--messages` 로 다른 보행 메시지도 바꿈(`dq4messages/1`). `sheet` 는 문구 열 그림. [메뉴 한글화](../docs/dq4-menu-format.md), [이름 입력](../docs/dq4-name-entry-format.md) |
+| `dq4josa.py`·`dq4sysmsg.py` | 받침을 보고 조사를 고르는 메시지 코드(`101E`~`1024`)와 DQ5 필드 시스템 메시지 81개의 한글. `dq4chapter1.py` 가 얹음. [조사 코드](../docs/dq4-josa-format.md) |
 | `dq4chapterbox.py preview --out PNG` | 1장 시작의 검은 화면 금테 장 제목 상자 미리보기. 상자 타일은 `rom/dq4.nes` 에서, 제목은 `DQ4_GALMURI` 의 Galmuri11 로. 맵 훅·네이티브 루틴은 `dq4chapter1.py build` 가 얹음. [1장 첫머리](../docs/dq4-chapter1-format.md#검은-화면과-장-제목-상자) |
 | `dq4chapter1.py messages\|build` | DQ4 1장 첫머리: `messages` 는 `dq4menupatch.py build --messages` 에 줄 한글 대사 JSON, `build --rom 메뉴롬 --out 롬` 은 `dq4groupbuild.py` 의 맵·출구 패치와 1장 인물·연출을 메뉴 롬 위에 얹고 새 게임 첫 맵을 `36/01` 로. [1장 첫머리](../docs/dq4-chapter1-format.md) |
 | `dq4menumsg.py [그림]` | `dq4menupatch.py build` 가 부르는 메뉴 메시지 모듈. 보행 메시지를 새 허프만 트리로 뱅크 `65`~ 에 옮기고 한글 글자를 넣음. 직접 실행하면 세 메시지 미리보기. [메뉴 메시지](../docs/dq4-menu-format.md#메뉴-메시지) |
