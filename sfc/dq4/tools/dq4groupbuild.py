@@ -521,8 +521,27 @@ def records_pass(dq5, out, manifests, k, sources):
 
 def build(dq5, dq4, out, with_people=True):
     out.mkdir(parents=True, exist_ok=True)
-    with ThreadPoolExecutor(os.cpu_count()) as pool:
-        return _build(pool, dq5, dq4, out, with_people)
+    with _Pool(os.cpu_count()) as pool:
+        try:
+            return _build(pool, dq5, dq4, out, with_people)
+        except BaseException as e:
+            # 남은 도구는 돌리지 않고, 함께 실패했지만 아무도 result() 를 부르지 않은 호출도 알린다
+            pool.shutdown(cancel_futures=True)
+            for f in pool.futures:
+                if f.done() and not f.cancelled() and f.exception() not in (None, e):
+                    e.add_note(f"also failed: {f.exception()}")
+            raise
+
+
+class _Pool(ThreadPoolExecutor):
+    def __init__(self, workers):
+        super().__init__(workers)
+        self.futures = []
+
+    def submit(self, *args, **kwargs):
+        f = super().submit(*args, **kwargs)
+        self.futures.append(f)
+        return f
 
 
 def _build(pool, dq5, dq4, out, with_people):

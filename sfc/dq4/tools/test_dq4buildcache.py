@@ -1,3 +1,4 @@
+import io
 import json
 import os
 from pathlib import Path
@@ -104,6 +105,39 @@ class BuildCacheTests(unittest.TestCase):
         cache.run(tool, 'v1', '-o', fresh)
         self.assertEqual((fresh / 'made.txt').read_text(), 'v1')
         self.assertFalse((fresh / 'old.txt').exists())
+
+    def test_joined_output_flag_is_not_cached(self):
+        src = self.root / 'in.txt'
+        src.write_text('a')
+        tool = self.root / 'eqtool.py'
+        tool.write_text('import os, sys\nfrom pathlib import Path\n'
+                        'Path(sys.argv[2].split("=", 1)[1]).write_text(Path(sys.argv[1]).read_text())\n'
+                        'open(os.environ["RUNS"], "a").write("run\\n")\n')
+        for _ in range(2):
+            cache.run(tool, src, f'--out={self.root / "out.txt"}')
+        self.assertEqual(self.count(), 2)
+
+    def test_side_files_next_to_the_output_come_back_on_a_hit(self):
+        tool = self.root / 'sidetool.py'
+        tool.write_text('import sys\nfrom pathlib import Path\n'
+                        'out = Path(sys.argv[sys.argv.index("-o") + 1])\n'
+                        'out.write_text("main")\n'
+                        'out.with_name(out.stem + ".000.bin").write_text("side")\n')
+        (self.root / 'one').mkdir()
+        cache.run(tool, 'x', '-o', self.root / 'one' / 'list.json')
+        (self.root / 'two').mkdir()
+        cache.run(tool, 'x', '-o', self.root / 'two' / 'list.json')
+        self.assertEqual((self.root / 'two' / 'list.000.bin').read_text(), 'side')
+
+    def test_stderr_is_echoed_on_a_hit_when_asked(self):
+        tool = self.root / 'warntool.py'
+        tool.write_text('import sys\nfrom pathlib import Path\n'
+                        'Path(sys.argv[sys.argv.index("-o") + 1]).write_text("x")\n'
+                        'sys.stderr.write("warning: look\\n")\n')
+        cache.run(tool, '-o', self.root / 'out.txt')
+        with mock.patch('sys.stderr', new_callable=io.StringIO) as err:
+            cache.run(tool, '-o', self.root / 'out.txt', echo_stderr=True)
+        self.assertEqual(err.getvalue(), 'warning: look\n')
 
     def test_failure_raises_with_stderr(self):
         bad = self.root / 'bad.py'
