@@ -45,7 +45,9 @@ class PrologueTests(unittest.TestCase):
         calls = [a for op, a in ops if op == '37']
         self.assertEqual(calls[:2], [pro._long(points['box0']), pro._long(points['reveal'])])
         wait = ops.index(('09', [0x80 | pro.DONE[0], pro.DONE[1]]))
-        self.assertEqual(ops[wait - 1], ('40', []))
+        # 말을 걸기 전에 저절로 대화를 연다(37 → 이벤트 A0 → 06:AF1C)
+        _, at = pro.native()
+        self.assertEqual(ops[wait - 1], ('37', pro._long(at['talk_here'])))
         self.assertLess(wait, ops.index(('28', [])))
         self.assertEqual(overrides[0]['map'], pro.CELLAR)
         self.assertEqual(lists[0]['entries'][0]['fields']['talk'], pro.T_ASK)
@@ -108,6 +110,22 @@ class PrologueTests(unittest.TestCase):
         self.assertEqual(ev[len(walk)], 0x60)
         father = next(sc for sc in pro.scripts() if sc['address'] == pro.FATHER_SCRIPT)['commands']
         self.assertEqual(father[0], {'op': '09', 'args': [0x80 | pro.SUPPER[0], pro.SUPPER[1]]})
+
+    def test_talk_event_calls_the_field_talk(self):
+        code, at = pro.native()
+        ev = code[at['talk_event'] - pro.CODE_AT:][:5]
+        self.assertEqual(ev, bytes((0xA0, *pro._long(at['talk_slot']), 0xFF)))
+        slot = code[at['talk_slot'] - pro.CODE_AT:]
+        self.assertIn(bytes((0x22, *pro.TALK_TO.to_bytes(3, 'little'))), slot)
+
+    def test_near_branches_land_on_the_tails(self):
+        # 축마다 BCS 가 '멂' 꼬리(LDA #1)로, 둘 다 지나면 '가까움' 꼬리(LDA #0)로 간다
+        code = pro._near(4)
+        near = code.index(bytes((0xA9, 0x00, 0x00)))
+        far = code.index(bytes((0xA9, 0x01, 0x00)))
+        for at in [i for i in range(len(code) - 1) if code[i] == 0xB0]:
+            self.assertEqual(at + 2 + code[at + 1], far - 5)
+        self.assertLess(near, far)
 
 
 if __name__ == '__main__':

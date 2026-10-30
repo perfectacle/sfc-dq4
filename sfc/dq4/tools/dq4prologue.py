@@ -113,6 +113,8 @@ SHINSIA = '신시아'
 
 # 개구리(마을): 말을 걸면 묻고, 대답에 따라 한마디 → 공주 이야기 → FROG_MET
 T_FROG = 0x901
+M_CALL = talk(say('용사님 용사님……')) + 0x3C6
+M_HELP = talk(say('용사님 제발/도와주세요……')) + 0x3C6
 M_FROG_ASK = talk(say('아! 놀라지 마세요……/저는 개구리가/아니랍니다.', '아! 지금 아무리 봐도/개구리라고/생각하셨죠?')) + 0x3C6
 M_FROG_YES = talk(say('당신은 정직한/분이군요. 그 정직함을/믿고 부탁이/있어요.')) + 0x3C6
 M_FROG_NO = talk(say('당신은 상냥한/분이군요. 그 상냥함을/믿고 부탁이/있어요.')) + 0x3C6
@@ -197,6 +199,40 @@ def _skip_song():
             box.LEAVE)
 
 
+NEAR = (4, 8, 12)    # 다가왔다고 볼 거리(DQ5 셀). 개구리 목소리 두 번(12·8)과 말 걸기(4), 신시아(4)
+TALKER = 0x7E1BC4   # 말을 걸 인물 슬롯. 7E:1BBE~ 79바이트는 DQ5 가 쓰지 않는 자리(dq4josa 가 1BC0 을 씀)
+TALK_TO = 0x06AF1C  # 06:AF1C: JSR $AF20 / RTL. A = 인물 슬롯으로 필드 「대화」(05:D596)와 같은 대화를 돌린다
+
+
+def _talk_here(event):
+    """인물 스크립트(명령 37)에서: 이 인물의 슬롯($90, 01:C800 의 LDY $90)을 TALKER 에 적고 대화 이벤트를 건다."""
+    return (box.ENTER + bytes((0xA5, 0x90, 0x8F, *TALKER.to_bytes(3, 'little'))) +
+            _event_start(event)[len(box.ENTER):])
+
+
+def _talk_slot():
+    """이벤트 명령 A0(메인 문맥)에서: TALKER 의 인물과 대화. 06:AF20 은 끝에 그 인물의 자세(7E:3240·3260,X)를
+    $195F·$1960 으로 되돌리므로 지금 값을 넣어 둔다(필드 「대화」 는 인물을 주인공 쪽으로 돌리기 전에 넣음)."""
+    return (box.ENTER + bytes((0xAF, *TALKER.to_bytes(3, 'little'), 0xC2, 0x20, 0x29, 0xFF, 0x00, 0xAA, 0xE2, 0x20,
+                               0xBF, 0x40, 0x32, 0x7E, 0x8D, 0x5F, 0x19, 0xBF, 0x60, 0x32, 0x7E, 0x8D, 0x60, 0x19,
+                               0xAF, *TALKER.to_bytes(3, 'little'), 0x22, *TALK_TO.to_bytes(3, 'little'))) + box.LEAVE)
+
+
+def _near(cells):
+    """인물 명령 05 가 부르는 루틴: 주인공(슬롯 0)과 이 인물(슬롯 $90)의 X·Y 가 둘 다 cells 셀 안이면 A = 0
+    (05 가 다음 명령으로), 아니면 A = 1(다음 프레임에 다시). 7E:3020·3080 은 인물 표의 X·Y."""
+    def axis(table, far):
+        return bytes((0xAF, table & 0xFF, table >> 8, 0x7E, 0x38, 0xFF, table & 0xFF, table >> 8, 0x7E,   # LDA 주인공 / SEC / SBC 인물,X
+                      0x10, 0x03, 0x49, 0xFF, 0x1A,                                                       # 음수면 부호를 뒤집음
+                      0xC9, cells + 1, 0xB0, far))                                                        # CMP / BCS 멂
+    head = bytes((0x08, 0xC2, 0x30, 0xDA, 0x5A, 0x8B, 0xE2, 0x30, 0xA6, 0x90))  # PHP / REP / PHX / PHY / PHB / SEP / LDX $90
+    tail_far = bytes((0xC2, 0x30, 0xAB, 0x7A, 0xFA, 0xA9, 0x01, 0x00, 0x28, 0x6B))   # REP / PLB / PLY / PLX / LDA #1 / PLP / RTL
+    tail_near = bytes((0xC2, 0x30, 0xAB, 0x7A, 0xFA, 0xA9, 0x00, 0x00, 0x28, 0x6B))
+    y_part = axis(0x3080, len(tail_near))
+    x_part = axis(0x3020, len(y_part) + len(tail_near))
+    return head + x_part + y_part + tail_near + tail_far
+
+
 def native():
     """(바이트, {이름: 주소}). 인물 스크립트 명령 37 이 JSL 로 부르는 루틴과 이벤트 스크립트."""
     def layout(at):
@@ -208,6 +244,11 @@ def native():
         put('wait', box.ENTER + box.wait(20) + box.LEAVE)
         put('wait6', box.ENTER + box.wait(6) + box.LEAVE)
         put('darken', _darken())
+        put('talk_slot', _talk_slot())
+        put('talk_event', bytes((0xA0, *_long(at.get('talk_slot', 0)), 0xFF)))
+        put('talk_here', _talk_here(at.get('talk_event', 0)))
+        for cells in NEAR:
+            put(f'near{cells}', _near(cells))
         put('skip_song', _skip_song())
         g, n, x, y = CHAPTER1_AT
         # 저녁: 주인공이 식탁에 앉아 아래를 봄(C1 40) → 저녁 대사 → 끝: 검은 화면 → 서술 → 곡 건너뛰기 →
@@ -279,7 +320,7 @@ def master_script(boxes):
     head = [_cmd('3F'), _cmd('37', *_long(boxes[SCENE.name])), _cmd('37', *_long(boxes['reveal'])),
             _cmd('02', 3), _cmd('37', *_long(at['wait'])), _cmd('20', *SWORD), _cmd('01'),
             _cmd('37', *_long(at['wait'])),
-            _cmd('40'), _wait_on(DONE), _cmd('3F')]
+            _cmd('37', *_long(at['talk_here'])), _wait_on(DONE)]
     tail = [_msg(M_AFTER)] + _walk(MASTER_OUT) + [_cmd('28'), _cmd('40'), _cmd('16')]
     return {"address": MASTER_SCRIPT, "commands": head + tail}
 
@@ -287,12 +328,17 @@ def master_script(boxes):
 def scripts():
     """서장 뒤쪽 인물 스크립트: 개구리 퇴장, 신시아·개구리 꼴의 모샤스, 아버지의 끝."""
     _, at = native()
-    frog = [_wait_on(FROG_MET), _cmd('3F')] + _walk(FROG_OUT) + [_cmd('28'), _cmd('40'), _cmd('16')]
+    near = lambda cells: _cmd('05', *_long(at[f'near{cells}']))  # noqa: E731
+    # 주인공이 다가오면 목소리 둘(NDS 의 깃발 6·7 자리) → 더 다가오면 개구리가 말을 건다
+    frog = ([near(12), _cmd('3F'), _msg(M_CALL), _cmd('40'), near(8), _cmd('3F'), _msg(M_HELP), _cmd('40'),
+             near(4), _cmd('37', *_long(at['talk_here'])), _wait_on(FROG_MET), _cmd('3F')] + _walk(FROG_OUT) +
+            [_cmd('28'), _cmd('40'), _cmd('16')])
     sx, sy = SHINSIA_AT
-    shinsia = ([_wait_on(SHINSIA_START), _cmd('3F'), _cmd('20', 0x37, 0)] + _spin(at) +
+    shinsia = ([near(4), _cmd('37', *_long(at['talk_here'])), _wait_on(SHINSIA_START), _cmd('3F'), _cmd('20', 0x37, 0)] + _spin(at) +
                [_cmd('51'), _cmd('10', *MORPH), _wait_on(MORPH_BACK),
                 _cmd('50', sx * 2, sy * 2), _cmd('53'), _cmd('4F'), _msg(M_MORPH), _msg(M_BYE), _msg(M_SUPPER)] +
-               _walk(SHINSIA_OUT) + [_cmd('28'), _cmd('10', *SHINSIA_MET), _cmd('40'), _cmd('16')])
+               # 주인공이 문틈 (4,0D) 쪽에서 다가오면 나가는 길에 선 채 말이 걸리므로, 주인공을 지나 걷는다(1C)
+               [_cmd('1C')] + _walk(SHINSIA_OUT) + [_cmd('28'), _cmd('10', *SHINSIA_MET), _cmd('40'), _cmd('16')])
     form = ([_cmd('27'), _wait_on(MORPH), _cmd('50', sx * 2, sy * 2), _cmd('53'), _cmd('4F'),
              _msg(M_MORPH), _msg(M_MIMIC), _msg(M_SORRY)] + _spin(at) +
             # 51 은 안 보이게만 해 말을 걸 수 있는 채로 남는다. 52 로 자리를 치운다
