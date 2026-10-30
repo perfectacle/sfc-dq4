@@ -63,6 +63,10 @@ LINKS = {
             "walk": "down:64,wait:30,left:64"}],
     # Below 古井戸の底: no field entrance; its group arrival is the cell the well's stair leads to (3A/02).
     0x3B: [{"fc": 0x3A, "arrival": (0x03, 0x02), "map": 2, "attrs": "03/00", "field": None, "out": None}],
+    # The prologue's village (FC 14/00). The field leads to the ruined 14/02, so this arrival is the same cell
+    # of 14/00. The prologue places its own people: the FC people of 14/00 belong to chapter 5's start.
+    0x3C: [{"fc": 0x14, "arrival": (0x0C, 0x18), "attrs": "19/02", "field": (337, 60), "out": "down:64",
+            "walk": "down:32,wait:30,left:32", "people": False}],
 }
 # The attribute table grows by 6 bytes a map and outgrows its own bank (108 spare bytes), so it moves whole.
 NEWMAP_AT = ("--entrance-table-at", "3C:C000", "--records-at", "34:8000", "--door-bank", "3B",
@@ -141,6 +145,11 @@ def fc_map(prg, group, number):
 def fc_numbers(prg, fc_group):
     """Ported FC map numbers of an FC group."""
     return sorted(k for g, k in placement(prg) if g == fc_group)
+
+
+def has_people(fc_group):
+    """Whether the FC people and shops of an FC group are ported (LINKS "people", on by default)."""
+    return all(part.get("people", True) for parts in LINKS.values() for part in parts if part["fc"] == fc_group)
 
 
 def tag(group, part):
@@ -408,7 +417,13 @@ def main():
     ap.add_argument("--dq5", default="rom/dq5.sfc", type=Path)
     ap.add_argument("--dq4", default="rom/dq4.nes", type=Path)
     ap.add_argument("--out", required=True, type=Path)
+    ap.add_argument("--no-people", action="store_true",
+                    help="no FC people or shops: a ROM for dq4groupcheck, where wandering people block stairs")
     args = ap.parse_args()
+    if args.no_people:
+        for parts in LINKS.values():
+            for part in parts:
+                part["people"] = False
     print(json.dumps(build(args.dq5, args.dq4, args.out), ensure_ascii=False))
 
 

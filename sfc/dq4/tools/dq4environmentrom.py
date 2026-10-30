@@ -57,6 +57,9 @@ GROUPS = {
     "30-04": (0x39, 0x04), "30-05": (0x39, 0x05),
     "41-00": (0x3A, 0x00),
     **{f"3A-{k:02X}": (0x3B, k) for k in range(7)},
+    # The prologue's village before the attack (14/00, reached by events only) and its cellar. 14/02, the
+    # ruined village the field leads to, waits for chapter 5.
+    "14-00": (0x3C, 0x00), "14-01": (0x3C, 0x01),
 }
 MAPS = {**TARGETS, **GROUPS}
 # Further banks for map records once the first one reaches the library.

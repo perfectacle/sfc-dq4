@@ -93,9 +93,9 @@ def walkable(source, x, y):
     return 0 <= x < source.w and 0 <= y < source.h and not block_prop(source, source.cell(x, y) & 31) & 0x80
 
 
-def stair_scenes(prg):
+def stair_scenes(prg, groups):
     place = placement(prg)
-    for group, link in ((g, part) for g, parts in LINKS.items() for part in parts):
+    for group, link in ((g, part) for g, parts in LINKS.items() if g in groups for part in parts):
         fc_group = link["fc"]
         cache = {}
         for fc_number in fc_numbers(prg, fc_group):
@@ -134,6 +134,8 @@ def main():
     ap.add_argument("--field-state", default="work/state/field-free.mss", type=Path, help="field (341,56)")
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--jobs", type=int, default=4)
+    ap.add_argument("--groups", type=lambda v: {int(g, 16) for g in v.split(",")}, default=set(LINKS),
+                    help="DQ5 groups to walk (hex, comma-separated); all by default")
     args = ap.parse_args()
     mesence = Path(os.environ["MESENCE"])
     out = args.out.resolve()
@@ -142,8 +144,8 @@ def main():
     rom, state = args.rom.resolve(), args.state.resolve()
     prg = ines.prg(args.dq4.read_bytes())
 
-    jobs = [(name, [{"TO": to, "TEST": test} for to, test in starts], want) for name, starts, want in stair_scenes(prg)]
-    for group, link in ((g, part) for g, parts in LINKS.items() for part in parts):
+    jobs = [(name, [{"TO": to, "TEST": test} for to, test in starts], want) for name, starts, want in stair_scenes(prg, args.groups)]
+    for group, link in ((g, part) for g, parts in LINKS.items() if g in args.groups for part in parts):
         if not link["field"]:
             continue
         x, y = cell(*link["arrival"])
@@ -177,7 +179,17 @@ def main():
             if name.startswith("enter-"):
                 want = want[1]
             results[name] = {"got": got, "want": want, "ok": same_place(got, want), "start": n}
+    if placement(prg)[0x02, 0][0] in args.groups:
+        area_scenes(mesence, rom, prg, state, out, results)
+    ok = all(r["ok"] for r in results.values())
+    report = {"status": "passed" if ok else "failed", "scenes": dict(sorted(results.items()))}
+    (out / "results.json").write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n")
+    print(json.dumps(report, ensure_ascii=False))
+    return 0 if ok else 1
 
+
+def area_scenes(mesence, rom, prg, state, out, results):
+    """The only FC exit-table cells of the ported groups: 02/00's gate into 02/01 and back."""
     # Area moves: the gate's open flag is cleared on a group change, so set it from another map of the group.
     # FC 02 バトランド: the gate (02/00) and the area moves between 02/00 and 02/01.
     castle = 0x02
@@ -204,11 +216,6 @@ def main():
         got = scene(mesence, rom, hop if hop.exists() else state, out, name, ANYWHERE=1, **extra)
         results[name] = {"got": got, "want": want, "ok": same_place(got, want)}
     results["area-hop"] = {"got": side, "ok": "map" in side}
-    ok = all(r["ok"] for r in results.values())
-    report = {"status": "passed" if ok else "failed", "scenes": dict(sorted(results.items()))}
-    (out / "results.json").write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n")
-    print(json.dumps(report, ensure_ascii=False))
-    return 0 if ok else 1
 
 
 if __name__ == "__main__":
