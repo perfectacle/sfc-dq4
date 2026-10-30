@@ -136,6 +136,8 @@ FIRST_MESSAGE = MESSAGES
 # T + 3C6 directly, but the talk numbers below 900 reach only a few of the new messages.
 SCRIPT_TALK = 0x900
 LINE, PAGE, END = 0x1000, 0x1002, 0x1001
+# FC F4 는 30프레임 쉼(16:$80E9), DQ5 100D 는 31프레임 멈춤(24:84E9).
+PAUSE = 0x100D
 NIGHT = 0x78
 MAX_CELL = 0x7F
 
@@ -234,6 +236,8 @@ def dq5_codes(rom, messages):
                 codes.append(_code(m, p[1]))
             elif p == "LINE":
                 codes.append(LINE)
+            elif p == "PAUSE":
+                codes.append(PAUSE)
             elif p == "WAIT":
                 page()
                 k = _skip_speaker(pieces, k)

@@ -534,8 +534,9 @@ GROUP_PATCHES = ('env/dq4-environment.dq5patch.json', 'newmap.dq5patch.json', 'e
 # 그룹 빌드 안에서는 30:E000 의 필드 그림 패치 앞이다.
 # 필드 지도(덩어리 둘 약 12KB, 필드 로더의 DB 때문에 30~3F)는 타이틀 자료가 34:BFD1 에서 끝난 뒤에 둔다. 비어 있지 않으면 apply_writes 가 멈춘다.
 # 30:8370·31:D000~D001·31:ECFF 는 타이틀 빌드가 0 으로 쓴 바이트라(거울 값이 0 이 아님) 자리에서 뺐다.
+# 32:C400~ 는 타이틀 전경 CHR(32:8000~C3BF) 뒤, 39:8400~ 는 타이틀 자료(39:8220 까지)와 인물 대체 목록(NPC_ALT) 사이.
 RECORDS_AT = ((0x3A8000, 0x3B0000), (0x308371, 0x30A000), (0x30A900, 0x30E000), (0x31B760, 0x31D000),
-              (0x31ED00, 0x320000))
+              (0x31ED00, 0x320000), (0x32C400, 0x330000), (0x398400, 0x399000))
 # 그룹 빌드는 늘린 뱅크가 0 인 원래 롬에서 패치를 만들고, dq5newmap 은 바탕과 같은 앞뒤 바이트(0)를 쓰지 않는다.
 # 메뉴 롬의 30~3F 는 원본 20~2F 의 거울이라, 그대로 얹으면 표 끝의 0000 같은 바이트 자리에 거울 값이 남는다.
 # 그래서 그룹 빌드가 쓰는 뱅크 3A~3F 와 레코드 자리의 거울 바이트를 먼저 0 으로 둔다.
@@ -548,6 +549,10 @@ def group_build(dq5, dq4, out):
     import dq4groupbuild
     dq4groupbuild.RECORDS_AT = RECORDS_AT
     dq4groupbuild.FIELD_AT = FIELD_AT
+    # 그룹 빌드의 인물·보행 대사 패치는 1장 빌드에 얹지 않지만(npc_doc 과 메뉴 빌드가 다시 만든다), 그룹 빌드 안에서
+    # 32:C400~·39:8400~ 레코드와 겹치지 않아야 한다.
+    dq4groupbuild.NPC_AT = ('--base', '33:8000', '--alt', '39:9000')
+    dq4groupbuild.TEXT_AT = ('--at', '60:8000')
     return dq4groupbuild.build(dq5, dq4, out)
 
 

@@ -100,6 +100,18 @@ LINKS = {
             "chapter": 3}],
     0x40: [{"fc": 0x04, "arrival": (0x17, 0x20), "attrs": "03/00", "field": [(0x67, 0x65)], "out": "down:64",
             "chapter": 3}],
+    # 4장: モンバーバラ, コーミズ 와 그 서쪽 동굴(にしのどうくつ, 도착은 필드로 나가는 계단 위), ハバリア, キングレオ 성.
+    # 인물과 판매자는 4장 시작 상태($615A = 3)의 것.
+    0x41: [{"fc": 0x15, "arrival": (0x13, 0x1B), "attrs": "03/00", "field": [(0x39, 0xE6)], "out": "down:64",
+            "chapter": 4}],
+    0x42: [{"fc": 0x17, "arrival": (0x00, 0x10), "attrs": "03/00", "field": [(0x33, 0xBD)], "out": "left:64",
+            "chapter": 4},
+           {"fc": 0x38, "arrival": (0x11, 0x24), "attrs": "03/00", "field": [(0x1F, 0xBA)],
+            "out": "down:32,wait:60,up:32", "chapter": 4}],
+    0x43: [{"fc": 0x11, "arrival": (0x26, 0x25), "attrs": "03/00", "field": [(0x42, 0x9A)], "out": "down:64",
+            "chapter": 4}],
+    0x44: [{"fc": 0x00, "arrival": (0x0F, 0x1A), "attrs": "03/00", "field": [(0x40, 0xA6)], "out": "down:64",
+            "chapter": 4}],
 }
 # The attribute table grows by 6 bytes a map and outgrows its own bank (108 spare bytes), so it moves whole; the
 # map pointer table (3 bytes a map) outgrew bank 0F with chapter 3's maps and moves the same way. The entrance and
@@ -109,7 +121,8 @@ NEWMAP_AT = ("--entrance-table-at", "3C:9000", "--door-bank", "3B", "--attr-tabl
 # New-map records, [start, end) areas in banks 30-3F: the map loader reads a record with DB set to its bank and
 # reads low WRAM meanwhile. One dq5newmap call puts all its records in one bank, so the records that do not fit the
 # first area go to the next areas in later calls (record_areas, records_pass).
-RECORDS_AT = ((0x348000, 0x350000), (0x318000, 0x320000))
+# 3F 는 환경 맵 레코드가 3E 에서 끝나 비어 있다(1장 빌드는 이 표를 dq4chapter1.RECORDS_AT 로 바꾼다).
+RECORDS_AT = ((0x348000, 0x350000), (0x318000, 0x320000), (0x3F8000, 0x400000))
 # The record a new map points at until a later call gives it its own: any original map.
 RECORD_PLACEHOLDER = "03/00"
 EXIT_AT = ("--exits-at", "2A:D812", "--records-at", "3C:A000")
@@ -129,6 +142,8 @@ WELL_SWITCH_AT = 0x3CFF00
 CHEST_AT = ("--chests-at", "3C:8400", "--chest-maps-at", "3C:8800", "--search-at", "3C:8C00")
 # The field loader reads both RLE chunks with DB set to their bank, so 30-3F; bank 3A is free in this build.
 FIELD_AT = "3A:8000"
+# dq5npcrelocate 의 기본 목록·대체 목록 자리(비우면 그 도구의 기본값 32:8000·33:8000).
+NPC_AT = ()
 LAYER = 1
 WORLD_CODE = 1
 # Group arrival +4 bit2-6 -> $194A bit0-4 (2A:FD7E): 4 counts steps for encounters indoors (00:8340), as in the
@@ -137,6 +152,9 @@ INDOOR_ENCOUNTERS = 0x04
 AREA_FLAGS = 0x80
 # FC direction (0 up, 2 down) -> the DQ5 row of an FC cell the party first steps onto.
 ENTRY_ROW = {0: 1, 2: 0}
+# 옆으로 걷는 FC 방향(1 오른쪽, 3 왼쪽) → 일행이 먼저 밟는 열. 일행은 블록의 아래 줄(cell)로만 걸으므로 한 칸이면 된다.
+ENTRY_COLUMN = {1: 0, 3: 1}
+
 # Companion monster names (name table 0A, kind * 4 + name number) in the name-entry display bytes, so the status and
 # battle windows, battle messages and field messages print them through the same Korean path as the hero's name.
 # The tables are packed in place with no spare byte, and other patches write item names inside the later tables, so
@@ -342,9 +360,15 @@ def exit_rows(group, parts, place, stairs, order):
                     raise ValueError(f"{fc_group:02X}/{fc_number:02X} ({x:02X},{y:02X}): stair to an FC map not ported: {dest}")
                 there_group, there_number = place[dest["group"], dest["index"]]
                 there = order(dest["group"], dest["index"])
-                row = {"kind": "same-group", "destination_map": there_number, "exit": there.index((dest["x"], dest["y"]))}
-                if there_group != group:
-                    row = {**row, "kind": "other-group", "group": there_group}
+                if (dest["x"], dest["y"]) in there:
+                    row = {"kind": "same-group", "destination_map": there_number, "exit": there.index((dest["x"], dest["y"]))}
+                    if there_group != group:
+                        row = {**row, "kind": "other-group", "group": there_group}
+                else:
+                    # 출구 표가 정한 목적지가 계단 칸이 아니면(キングレオ 00/04 → 00/00 (0A,13)) 좌표 출구로 선다.
+                    x, y = cell(dest["x"], dest["y"])
+                    row = {"kind": "position", "destination_map": there_number, "x": x, "y": y, "layer": LAYER,
+                           "group": there_group}
                 rows.append(row)
             records[f"{group:02X}/{place[fc_group, fc_number][1]:02X}"] = rows or [{"kind": "special", "special": 0}]
     return records
@@ -398,11 +422,17 @@ def area_rows(group, place, cells):
         rows = []
         for run in runs:
             dg, dk, ay, flag = run["to"]
-            if flag & 3 not in ENTRY_ROW:
-                raise ValueError(f"{fc_group:02X}/{number:02X}: sideways exit needs a vertical area rect")
+            dx, dy = cell(run["ax0"], ay)
+            if flag & 3 in ENTRY_COLUMN:
+                if run["x0"] != run["x1"]:
+                    raise ValueError(f"{fc_group:02X}/{number:02X}: sideways exit across {run['x1'] - run['x0'] + 1} cells")
+                left, row = run["x0"] * 2 + ENTRY_COLUMN[flag & 3], cell(run["x0"], run["y"])[1]
+                rows.append({"rect": [left, row, left + 1, row + 1], "source_layer": LAYER, "flags": AREA_FLAGS,
+                             "destination_group": group, "destination_map": place[dg, dk][1], "x": dx, "y": dy,
+                             "span_raw": 1, "destination_layer": LAYER})
+                continue
             left, row = run["x0"] * 2, run["y"] * 2 + ENTRY_ROW[flag & 3]
             right, _ = cell(run["x1"], run["y"])
-            dx, dy = cell(run["ax0"], ay)
             rows.append({"rect": [left, row, right + 1, row + 1], "source_layer": LAYER, "flags": AREA_FLAGS,
                          "destination_group": group, "destination_map": place[dg, dk][1], "x": dx, "y": dy,
                          "span_raw": right - left + 1, "destination_layer": LAYER})
@@ -705,7 +735,7 @@ def _build(pool, dq5, dq4, out, with_people):
         _run, DQ5_TOOLS / "dq5npcrelocate.py", dq5, "patch",
         _save(out / "npc.json", {"format": "dq5npcrelocate/1", "scripts": [],
                                  "lists": [lst for lst in lists if "map" in lst]}),
-        "-o", out / "npc.dq5patch.json", "--report", out / "npc-layout.json", *new_map_args))
+        "-o", out / "npc.dq5patch.json", "--report", out / "npc-layout.json", *NPC_AT, *new_map_args))
     manifests.append(out / "npc.dq5patch.json")
     checks.append(step("dq5textwrite.py", "text", {"format": "dq5text/1", "messages": messages}, dq5, *TEXT_AT))
     checks.append(step("dq5talkwrite.py", "talk", dq4npcport.talk_doc(messages), dq5, *TALK_AT))

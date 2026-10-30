@@ -34,7 +34,10 @@ from kr_patch.fc import ines  # noqa: E402
 # take a DQ5 item of the same kind: a flute for the key item あやかしのふえ until DQ4 key items exist, a hat for
 # はねぼうし, a dancer's outfit for ピンクのレオタード (DQ5's てんしのレオタード is a far stronger armour).
 SUBSTITUTE = {"ラックのたね": "ふしぎなきのみ", "あやかしのふえ": "はるかぜのフルート", "はねぼうし": "きのぼうし",
-              "ピンクのレオタード": "おどりこのふく"}
+              "ピンクのレオタード": "おどりこのふく", "せいじゃくのたま": "まふうじのつえ"}
+# せいじゃくのたま 와 まふうじのつえ 는 둘 다 쓰면 マホトーン 이 걸린다. じょうせんけん(ハバリア 의 배를 타는 표)은 DQ5 에
+# 같은 것이 없고 쓸 곳(배 이벤트)도 아직 없어, 그 이벤트를 옮길 때까지 빈 상자로 둔다.
+LATER = {"じょうせんけん"}
 GOLD = 0x100
 # FC special chest contents with a DQ5 reward of the same kind: FF, the empty chest (message 0297), is DQ5 FFFF
 # 「からっぽだった」.
@@ -42,6 +45,8 @@ EMPTY = 0xFFFF
 # EE is chapter 3's iron safe (きたのどうくつ 3D/06): FC sets $627D bit3 and turns the cell into block 19 (1E:$B81B).
 # DQ5 has no such item, so it opens empty until that event is ported.
 SPECIAL = {0xFF: EMPTY, 0xEE: EMPTY}
+# E3 은 4장에서 やみのランプ 만 준다(1E:$B9ED, 5장이면 메시지와 이벤트가 이어짐). DQ5 에 같은 이름이 있다.
+SPECIAL_ITEMS = {0xE3: "やみのランプ"}
 # DQ5 drawer open bits 7E:222C + flag_index: the original table ends at 2236 & FC, 2238 (flag_index 0C) is read
 # outside the table and 223C- are the two-cells-ahead chests (dq5-build-format 「보물상자·조사 보상」), so new
 # entries take 2237 and 2239-223B.
@@ -54,6 +59,8 @@ def _reward(names, items, content, gold=True):
             raise ValueError(f"FC drawer item {content:02X} is not an item number")
         return GOLD + (content & 0x7F) * 40
     name = names[content]
+    if name in LATER:
+        return EMPTY
     name = SUBSTITUTE.get(name, name)
     if _fold(name) not in items:
         raise ValueError(f"no DQ5 item named {name}")
@@ -71,6 +78,8 @@ def port(dq5_path, dq4_path):
         for _, x, y, content, desc in dq4chest.chests(prg, g, k):
             if content in SPECIAL:
                 reward = SPECIAL[content]
+            elif content in SPECIAL_ITEMS:
+                reward = items[_fold(SPECIAL_ITEMS[content])]
             elif content in dq4chest.special_codes(prg, dq4chest.SPECIAL_CHEST):
                 raise ValueError(f"{g:02X}/{k:02X} ({x},{y}): special chest {desc}")
             else:

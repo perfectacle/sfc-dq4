@@ -47,9 +47,10 @@ class LayoutTests(unittest.TestCase):
 
     def test_index_entry_crosses_lorom_bank(self):
         from dq5map import lorom
-        o = lorom(mm.BASE)
-        self.assertEqual(mm.index_entry(o, 0), (0x058000 << 3).to_bytes(3, 'little'))
-        self.assertEqual(mm.index_entry(o, 0x8000 * 8 + 5), (0x068000 << 3 | 5).to_bytes(3, 'little'))
+        o = lorom(mm.BASE & 0xFF8000)
+        start = ((mm.BASE >> 16) - mm.INDEX_BANK) << 16 | 0x8000
+        self.assertEqual(mm.index_entry(o, 0), (start << 3).to_bytes(3, 'little'))
+        self.assertEqual(mm.index_entry(o, 0x8000 * 8 + 5), ((start + 0x10000) << 3 | 5).to_bytes(3, 'little'))
 
     def test_groups_refuse_overflow(self):
         with self.assertRaises(ValueError):

@@ -35,12 +35,11 @@ TARGETS = {
     "seaside": (0x0B, 0x01), "seaside-01": (0x0D, 0x03), "rosaryhill": (0x0D, 0x04), "rosaryhill-01": (0x0E, 0x01),
     "shrine-2a": (0x0E, 0x03), "konenbery-06": (0x12, 0x00), "attemut-05": (0x13, 0x00), "attemut-07": (0x16, 0x01),
     # One or two maps of each other town and castle sheet, picked for block coverage and few doors.
-    "1A-01": (0x08, 0x02), "03-02": (0x08, 0x03), "17-00": (0x03, 0x0B), "0B-00": (0x03, 0x0E),
+    "1A-01": (0x08, 0x02), "03-02": (0x08, 0x03), "0B-00": (0x03, 0x0E),
     "08-01": (0x03, 0x0F), "10-00": (0x03, 0x10),
-    "0A-00": (0x04, 0x09), "00-01": (0x04, 0x0B), "09-01": (0x04, 0x0C),
-    "00-00": (0x05, 0x00),
+    "0A-00": (0x04, 0x09), "09-01": (0x04, 0x0C),
     # Harbour, theatre and the smaller sheets; none of these has a door.
-    "11-00": (0x03, 0x03), "1A-00": (0x03, 0x09), "15-03": (0x0A, 0x08),
+    "1A-00": (0x03, 0x09),
     "34-06": (0x0A, 0x0B), "2E-00": (0x0B, 0x03),
     # One doorless map of several dungeon and tower families.
     "34-00": (0x0D, 0x01), "36-01": (0x0D, 0x02), "2F-00": (0x11, 0x01), "43-00": (0x12, 0x02),
@@ -67,6 +66,11 @@ GROUPS = {
     **{f"16-{k:02X}": (0x3E, k) for k in range(3)}, **{f"3D-{k:02X}": (0x3E, 3 + k) for k in range(7)},
     "05-00": (0x3F, 0x00), "05-01": (0x3F, 0x01),
     **{f"04-{k:02X}": (0x40, k) for k in range(15)},
+    # 4장: モンバーバラ, コーミズ 와 그 서쪽 동굴, ハバリア, キングレオ 성.
+    **{f"15-{k:02X}": (0x41, k) for k in range(4)},
+    "17-00": (0x42, 0x00), "17-01": (0x42, 0x01), **{f"38-{k:02X}": (0x42, 2 + k) for k in range(5)},
+    **{f"11-{k:02X}": (0x43, k) for k in range(6)},
+    **{f"00-{k:02X}": (0x44, k) for k in range(5)},
 }
 MAPS = {**TARGETS, **GROUPS}
 # Further banks for map records once the first one reaches the library.
@@ -125,7 +129,8 @@ GATE = 0xA0
 # FC stairs (08:$B22E destinations) of GROUPS maps become DQ5 exit blocks: block attribute 05 puts $85 in
 # +4 of the block's bottom-right cell, and 2A:F6B8 numbers exits by those cells in cell-buffer order.
 # Borrowed TARGETS slots keep plain stairs: an exit cell there would fire the DQ5 map's own exit list.
-STAIRS = {0x08, 0x09}
+# 리프트(0F, 1E:$89C8 의 짝 칸)도 밟으면 짝 칸으로 옮기는 출구로 넣는다. FC 처럼 아래에서 올라오는 연출은 없다.
+STAIRS = {0x08, 0x09, 0x0F}
 STAIR_ATTR = 0x05
 # FC chests (block kind 04) and the FC search cells of 1E:$BC7A (タンス AB, つぼ AA) become the DQ5 cells
 # 12:E4C9 searches. A block's attribute lands in +7 when its last row is on the upper layer (block +1 bit4-7 =

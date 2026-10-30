@@ -182,7 +182,8 @@ class RecordsTest(unittest.TestCase):
 
     # FC stairs that do not lead back. きたのどうくつ 3D/02 (3E/05) is the 3D/01 (3E/04) of after the fall: its stairs
     # lead to 3D/00, whose stairs lead to 3D/01 until $62AA bit7 turns them to 3D/02 (08:$B397).
-    ONE_WAY = {"3E/05"}
+    # モンバーバラ 15/03(41/03)은 공연 중인 15/02 라, 계단은 15/00 으로 가지만 15/00 의 계단은 15/02 로 돌아온다.
+    ONE_WAY = {"3E/05", "41/03"}
 
     def test_stairs_lead_back(self):
         records = {}
@@ -191,10 +192,14 @@ class RecordsTest(unittest.TestCase):
         for name, rows in records.items():
             group, number = int(name[:2], 16), int(name[3:], 16)
             for i, row in enumerate(rows):
-                if row["kind"] == "special" or name in self.ONE_WAY:
+                if row["kind"] in ("special", "position") or name in self.ONE_WAY:
                     continue
                 there = row.get("group", group)
                 back = records[f"{there:02X}/{row['destination_map']:02X}"][row["exit"]]
+                # 출구 표가 정한 칸으로 돌아오는 계단(position)은 같은 맵으로만 오면 된다.
+                if back["kind"] == "position":
+                    self.assertEqual((back["group"], back["destination_map"]), (group, number), f"{name} exit {i}")
+                    continue
                 self.assertEqual((back.get("group", there), back["destination_map"], back["exit"]), (group, number, i),
                                  f"{name} exit {i}")
 
@@ -203,12 +208,15 @@ class RecordsTest(unittest.TestCase):
         for group in build.LINKS:
             areas.update(build.area_records(self.prg, group))
         # エンドール's 04/00 doors to 04/02-04/04 and 04/02's bottom edge back to 04/00 are FC exit-table cells too.
-        self.assertEqual(sorted(areas), ["36/00", "36/01", "40/00", "40/02", "40/03", "40/04"])
+        # ハバリア(43)·キングレオ(44)도 출구 표 칸이 있다. 43/00 (13,08) 은 왼쪽으로 걸어 들어가는 칸이다.
+        self.assertEqual(sorted(areas), ["36/00", "36/01", "40/00", "40/02", "40/03", "40/04", "43/00", "43/03",
+                                         "43/05", "44/00", "44/01", "44/02"])
         for rows in areas.values():
             for row in rows:
                 x0, y0, x1, y1 = row["rect"]
                 self.assertEqual(y1 - y0, 1)
                 self.assertEqual(row["span_raw"], x1 - x0)
+        self.assertEqual(areas["43/00"][0]["rect"], [0x13 * 2 + 1, 0x08 * 2 + 1, 0x13 * 2 + 2, 0x08 * 2 + 2])
         # 02/00's castle door is entered walking up (bottom row of its FC cell), 02/01's exit below the
         # map is entered walking down (top row of the first outside FC row).
         self.assertEqual(areas["36/00"][0]["rect"], [36, 21, 39, 22])
