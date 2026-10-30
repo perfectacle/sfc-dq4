@@ -1,6 +1,10 @@
 """NDS 악보 변환의 템포·세기 합치기와 시퀀스 시각을 검사한다."""
+from pathlib import Path
+import tempfile
 import unittest
+from unittest import mock
 
+import dq4soundcompact as compaction
 import dq4soundport as port
 from dq5song import assemble
 from dq4soundport import DQ5_TICKS_PER_SECOND_PER_TEMPO as RATE
@@ -161,6 +165,19 @@ class CompactTests(unittest.TestCase):
         lines = port.compact(body(voice0, voice1))
         self.assertTrue(all(_depth(lines, label) <= port.MAX_CALL_DEPTH
                             for label in {ln[:-1] for ln in lines if ln.startswith('Lphrase')}))
+
+    def test_cache_returns_the_same_lines_and_follows_the_tool_hash(self):
+        lines = body(['  instrument 01', '  note 30 len 0C', '  note 32', '  note 34', '  tie len 18'] * 6)
+        with tempfile.TemporaryDirectory() as root:
+            first = compaction.compact(lines, root)
+            self.assertEqual(first, compaction.compact(lines))
+            files = list(Path(root).rglob('*.json.gz'))
+            self.assertEqual(len(files), 1)
+            with mock.patch.object(compaction, '_compact', side_effect=AssertionError('cache miss')):
+                self.assertEqual(first, compaction.compact(lines, root))
+            with mock.patch.object(compaction, 'COMPACT_HASH', 'other tool source'):
+                self.assertEqual(first, compaction.compact(lines, root))
+            self.assertEqual(len(list(Path(root).rglob('*.json.gz'))), 2)
 
     def test_rest_after_note_is_not_split_by_call(self):
         # 음 뒤가 쉼이면 15E5 가 KOF 를 걸지 않는다. 그 사이에 F8·F9 가 끼면 KOF 가 생기므로 묶지 않아야 한다.
