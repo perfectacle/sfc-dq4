@@ -147,8 +147,9 @@ def look_shadow(rom, dest, plain, groups):
         # oam_grid 의 줄은 OAM y + 1 이라 스크린샷 y 는 그보다 SHOT_TOP + 1 작다.
         covered = {(x, y - SHOT_TOP - 1) for y in range(224) for x in range(256) if grid[y][x]}
         hidden = {p for p in want - seen if p not in covered and p[1] < WINDOW_TOP}
-        out[name] = {'seen': len(seen), 'want': len({p for p in want if p[1] < WINDOW_TOP}), 'outside': len(seen - want), 'under_obj': len(want & covered - seen),
-                     'missing': len(hidden), 'match': bool(seen) and seen <= want and not hidden}
+        out[name] = {'seen': len(seen), 'want': len({p for p in want if p[1] < WINDOW_TOP}), 'outside': len(seen - want),
+                     'under_obj': len(want & covered - seen), 'missing': len(hidden),
+                     'match': bool(seen) and seen <= want and not hidden}
     return out
 
 

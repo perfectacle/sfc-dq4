@@ -103,7 +103,7 @@ class LimitTests(unittest.TestCase):
     def test_losses_size(self):
         # 그림 1 을 4x14 칸으로 키우면 줄 0 의 상자 위가 $A0 - 112 = $30 이라 줄마다 타일 표(7E:2F00) 앞이다.
         # 4x5 칸이면 위는 $78 이고, 세로 칸 합은 b 가 2 + 5 = 7 이다. 한도를 7 로 두면 받고, 몬스터 0 이 그림 2(2칸)·
-        # 3(2칸)의 몬스터를 부르면 빈 무리 칸 둘에 둘 다 올 수 있어 7 + 4 = 11 이 된다.
+        # 3(2칸)의 몬스터를 부르면 둘 다 올 수 있어 7 + 4 = 11 이 된다.
         with Fakes(), mock('dq5monlimits.ROW_LIMIT', 7):
             high = L.losses(None, {1: (6, [4] * 14, 6, head(4, 14))}, found=FOUND)
             fits = L.losses(None, {1: (6, [4] * 5, 6, head(4, 5))}, found=FOUND)
@@ -116,6 +116,21 @@ class LimitTests(unittest.TestCase):
         self.assertEqual([x[4] for x in rows], ['그림 세로 칸 11개 > 7개'])
         self.assertEqual(same, [])
         self.assertEqual([(x[3], x[4]) for x in wide], [('a', '덜 놓임')])   # 가로 4칸 8마리는 줄 폭 28 을 넘음
+
+    def test_band_rows_summons(self):
+        # 그림 번호 = 몬스터 번호. 그림 4 는 2x3 칸.
+        with Fakes(), mock.dict(SHAPES, {4: (2, 3, 1, [1, 1, 1])}), mock.dict(SLOTS, {4: 1}), \
+                mock.dict(HEADS, {4: 4}):
+            # 0 → 2 → 3 으로 거듭 부르면 2·3 그림을 모두 푼다: 2 + 2 + 2.
+            with mock.dict(SUMMONS, {0: (2,), 2: (3,)}):
+                chain = L.Pictures(None).band_rows(((0, 1, 0),))
+            # 무리 넷이 다 차 있어도 죽은 무리 칸에 4 가 올 수 있다: 2 + 4 + 2 + 2 + 3.
+            with mock.dict(SUMMONS, {3: (4,)}):
+                full = L.Pictures(None).band_rows(((0, 1, 0), (1, 1, 0), (2, 1, 0), (3, 1, 0)))
+            # 부르는 몬스터 1 의 그림은 이미 풀려 있어 더하지 않는다: 2 + 4.
+            with mock.dict(SUMMONS, {0: (1,)}):
+                loaded = L.Pictures(None).band_rows(((0, 1, 0), (1, 1, 0)))
+        self.assertEqual((chain, full, loaded), (6, 13, 6))
 
     def test_summoned(self):
         # 몬스터 1 의 행동 여섯(23:8000 + 25 + 11~16)에 AE·B5 와 부르기가 아닌 AD·B6 이 섞여 있다.

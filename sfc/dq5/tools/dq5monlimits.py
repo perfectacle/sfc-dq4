@@ -30,10 +30,10 @@ PIECE_LIMIT, BAND_LIMIT = 100, 0x1C
 TOP = 0x38                      # 줄마다 타일 합 표 7E:2F00 의 첫 줄(22:A177 의 (y >> 3) - 7)
 # 줄 목록 사슬 7E:5B20 은 64칸이다. 그림의 마지막 줄이 64번째 칸에 들면 다음 빈 칸 찾기(22:ADA1)가 FF 를 못 찾아
 # 멈추므로, 한 번에 풀려 있는 그림의 세로 칸 합은 63 까지다. 그중 16칸은 재지 않은 싸우는 도중의 풀기
-# (パルプンテ 22:D45D, モシャス 22:D3B9, がったい 22:D2FE)가 그림 하나(세로 16칸까지)를 더 풀 몫으로 남긴다.
+# (パルプンテ 22:D45D, モシャス 22:D3B9, がったい 22:D2FE)가 그림 하나(세로 16칸까지)만 더 푼다고 보고 남긴 몫이다.
+# 이 가정은 증명하지 않았다: モシャス 는 몬스터마다 걸려 여럿이 그림을 풀 수 있고, がったい·パルプンテ 의 푸는 차례는 재지 않았다.
 ROW_LIMIT = 0x40 - 1 - 16
 FIRST_SUMMON, SUMMONED = 0xAE, (0x1E, 0x27, 0x1B, 0x61, 0x67, 0x8C, 0xB2, 0xCF)   # 행동 AE~B5 가 부르는 몬스터(20:D9D6)
-GROUP_SLOTS = 4                 # 부른 몬스터가 새 종이면 무리 칸(7E:117C 넷)에 빈 곳이 있을 때만 온다(20:DA67)
 SKIP_FIRST = (0xE7, 0xEA)
 # 22:89E5·22:8A57·22:8A85 가 무리를 더하거나 합치는 ミルドラース 와 그 둘째 무리. 이 셈으로는 배치를 셀 수 없다.
 UNCOUNTED = range(0xE7, 0xEC)
@@ -167,24 +167,24 @@ class Pictures:
 
     def band_rows(self, groups):
         """조합에서 푼 그림의 세로 칸 수 합. 풀 때 8픽셀 줄마다 줄 목록 사슬 7E:5B20(64칸)의 한 칸을 쓴다(22:AD73).
-        싸우는 도중 부르기로 새 종이 오면 그 그림도 풀므로, 빈 무리 칸 수만큼 부를 수 있는 그림 가운데 키 큰 것부터 더한다."""
-        loads = self.loads(groups)
-        loaded = {g for g, _, _ in loads}
-        species = {m for m, _, _ in groups if self.picture(m) in loaded}
-        called = {}
-        for m in species:
-            for s in summoned(self.rom, m):
-                g = self.picture(s)
-                if g not in loaded:
-                    called[g] = self.stats(g)[0]['h']
-        extra = sorted(called.values(), reverse=True)[:max(0, GROUP_SLOTS - len(species))]
-        return sum(self.stats(g)[0]['h'] for g in loaded) + sum(extra)
-
+        싸우는 도중 부르기로 새 종이 오면 그 그림도 푼다. 부른 몬스터가 다시 부를 수 있고(27 → 1E), 무리가 넷이면
+        22:D322 가 몬스터 없는 무리를 지우고 실패하지만 그 그림은 풀어 두며(95A1 을 부르지 않음), 다음 부르기는 새 그림을
+        먼저 풀고(22:D388) 나서 푼 그림을 정리한다(22:D3A1, 모두 코드 읽기). 그래서 빈 무리 칸 수로 자르지 않고
+        부르기를 거듭해 닿는 그림을 모두 더한다."""
+        loaded = {g for g, _, _ in self.loads(groups)}
+        seen = {m for m, _, _ in groups if self.picture(m) in loaded}
+        todo = list(seen)
+        while todo:
+            for s in summoned(self.rom, todo.pop()):
+                if s not in seen:
+                    seen.add(s)
+                    todo.append(s)
+        return sum(self.stats(g)[0]['h'] for g in loaded | {self.picture(m) for m in seen})
 
 def losses(rom, pictures=None, monsters=None, found=None, areas=None):
     """바꾼 그림·그림 번호로 다시 세어 걸리는 조합 [(조합, 원래 수, 바뀐 수, 나온 곳, 까닭)].
     까닭은 원래보다 덜 놓이는 무리가 있음, 조합의 그림 조각 합(7E:5800 목록)·16x16 자리 합이 원래 롬의 모든 조합 중
-    가장 큰 값을 넘음, 그림 세로 칸 합(줄 목록 7E:5B20, 부르기로 올 그림 포함)이 ROW_LIMIT 를 넘음, 바꾼 그림의
+    가장 큰 값을 넘음, 그림 세로 칸 합(줄 목록 7E:5B20, 부르기를 거듭해 올 그림 포함)이 ROW_LIMIT 를 넘음, 바꾼 그림의
     상자 위가 y $38 보다 위임이다.
     자리는 연출의 OBJ 그림(22:BB3D)도 같은 128개에서 받으므로, 원래 게임이 이미 쓰는 합까지만 받는다. 줄마다 타일 합은
     7E:2F00 + (y >> 3) - 7 에 세는데(22:A177) X 가 8비트라, y 가 $38 보다 작으면 X 가 $F9~$FF 로 돌아
