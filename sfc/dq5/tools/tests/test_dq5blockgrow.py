@@ -314,8 +314,9 @@ class Bit9HookTests(unittest.TestCase):
             land = Cpu(bytes(d), bytes(wram))
             land.dbr = 0x01
             land.jsl(0x039020)
-            self.assertEqual((land.a & 0xFFFF, land.x, land.y, land.s, land.dbr),
-                             (dq5field.terrain(rom, n), 0x07FE, 0x03FF, s, 0x01), f'세계 {world} ({x},{y}) 지형 루틴')
+            # 훅은 M 8비트로 끝나므로 M·X 16비트가 돌아온 것은 PLP 가 부른 쪽의 P 를 되돌린 것이다
+            self.assertEqual((land.a & 0xFFFF, land.x, land.y, land.s, land.dbr, land.p & 0x30),
+                             (dq5field.terrain(rom, n), 0x07FE, 0x03FF, s, 0x01, 0), f'세계 {world} ({x},{y}) 지형 루틴')
             if n < 511:
                 self.assertEqual((cpu.x, cpu.y), (n * 5 + q, q), f'세계 {world} ({x},{y}) 번호 {n}')
                 checked['narrow'] += 1
