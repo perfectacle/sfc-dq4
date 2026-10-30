@@ -307,6 +307,48 @@ def area_rows(group, place, cells):
     return out
 
 
+FALL_PROPS = (0x05, 0x0B)
+# Groups whose falling cells are linked. The other chapters' holes come with their chapter's events.
+FALL_GROUPS = range(0x36, 0x3C)
+
+
+def fall_records(prg, group):
+    """FC falling cells (1E:$8676 -> 12:$B6DD, dq4block.fall) whose destination is a map placed in any new DQ5
+    group, as area moves {DQ5 map: rows}. One row per run of falling cells on an FC row with the same destination.
+    span_raw 1 makes the arrival X the same wherever the party steps in (2A:F650 scales by span - 1). Falls to
+    the field are left out."""
+    place = placement(prg)
+    out = {}
+    for part in LINKS[group]:
+        for k in fc_numbers(prg, part["fc"]):
+            m = dq4block.Map(prg, part["fc"], k)
+            runs = []
+            for y in range(m.h):
+                for x in range(m.w):
+                    if m.blocks["prop"].get(m.buf[y * m.w + x] & 0x1F, 0) not in FALL_PROPS:
+                        continue
+                    to = dq4block.fall(prg, part["fc"], k, x, y)
+                    if "group" not in to or (to["group"], to["index"]) not in place:
+                        continue
+                    key = (to["group"], to["index"], to["x"], to["y"])
+                    last = runs[-1] if runs else None
+                    if last and last["y"] == y and last["x1"] + 1 == x and last["to"] == key:
+                        last["x1"] = x
+                    else:
+                        runs.append({"x0": x, "x1": x, "y": y, "to": key})
+            rows = []
+            for run in runs:
+                dg, dk, ax, ay = run["to"]
+                dx, dy = cell(ax, ay)
+                rows.append({"rect": [run["x0"] * 2, run["y"] * 2 + 1, run["x1"] * 2 + 1, run["y"] * 2 + 2],
+                             "source_layer": LAYER, "flags": AREA_FLAGS, "destination_group": place[dg, dk][0],
+                             "destination_map": place[dg, dk][1], "x": dx, "y": dy, "span_raw": 1,
+                             "destination_layer": LAYER})
+            if rows:
+                out[f"{group:02X}/{place[part['fc'], k][1]:02X}"] = rows
+    return out
+
+
 def check_door_copy(rom, door_bank):
     """The door routines read bank 01's FD97-FEB6 from DOOR_BANK on our maps, and dq4environmentrom copies them
     from the original ROM: the built ROM must still have the same bytes in both banks. dq5newmap's --door-bank must
@@ -402,6 +444,8 @@ def build(dq5, dq4, out):
     for group in LINKS:
         ours.update(exit_records(prg, group))
         areas.update(area_records(prg, group))
+        for m, rows in (fall_records(prg, group) if group in FALL_GROUPS else {}).items():
+            areas[m] = areas.get(m, []) + rows
     for row in exits["exits"]:
         if row["map"] in ours:
             row["records"] = ours[row["map"]]

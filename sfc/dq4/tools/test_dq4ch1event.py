@@ -28,7 +28,20 @@ class NumberTest(unittest.TestCase):
         self.assertEqual(day["else"]["id"], f"{m['flare_day']:03X}")
 
     def test_flags_are_distinct(self):
-        self.assertEqual(len({ev.NIGHT_TOLD, ev.FLARE_FOLLOWS, ev.REUNITED}), 3)
+        self.assertEqual(len({ev.NIGHT_TOLD, ev.FLARE_FOLLOWS, ev.REUNITED, ev.HOIMIN}), 4)
+
+    def test_hoimin_record_comes_from_the_companion_table(self):
+        data = bytearray(0x400000)
+        o = ev.lorom(ev.COMPANION + ev.HOIMIN_KIND * 9)
+        data[o:o + 9] = bytes((1, 99, 2, 3, 4, 5, 6, 7, 0))
+        r = ev.companion_record(bytes(data), ev.HOIMIN_KIND)
+        self.assertEqual((r[0], r[0x12], r[0x13], r[7:11], r[2], r[0xE], r[4], r[0x10]),
+                         (0x85, 1, 99, bytes((2, 3, 4, 5)), 6, 6, 7, 7))
+        code, at = ev.native(bytes(data))
+        self.assertEqual(at, ev.native()[1])     # 주소는 롬 자료에 따라 바뀌지 않는다
+        self.assertEqual(code[:42], r)
+
+
 
 
 @unittest.skipUnless(DQ4.is_file() and DQ5.is_file(), "local source ROMs not present")
@@ -47,16 +60,24 @@ class ListTest(unittest.TestCase):
         self.assertEqual(len(self.entries(ev.JAIL)), len(self.report[ev.JAIL]) - flares)
 
     def test_reunion_is_checked_before_following(self):
-        self.assertEqual([o["list"] for o in self.over], ["new:jail_after", "new:jail_reunion"])
+        jail = [o["list"] for o in self.over if o["map"] == ev.JAIL]
+        self.assertEqual(jail, ["new:jail_after", "new:jail_reunion"])
         walkers = [e for lst in self.new if lst["name"] == "jail_reunion" for e in lst["entries"]
                    if e["from"] == ev.WALKER_SRC]
         self.assertEqual(sorted(e["time"] for e in walkers), ["day", "night"])
         # 간격 0 을 받으면 스크립트가 돌지 않으므로 빌린 인물의 움직임을 쓴다
         self.assertTrue(all("interval" not in e["fields"] for e in walkers))
 
+    def test_hoimin_leaves_the_room_after_joining(self):
+        (over,) = [o for o in self.over if o["map"] == ev.HOIMIN_ROOM]
+        self.assertEqual(over["list"], "new:hoimin_gone")
+        (gone,) = [lst["entries"] for lst in self.new if lst["name"] == "hoimin_gone"]
+        self.assertFalse([e for e in gone if e["from"] == ev.HOIMIN_SRC])
+
     def test_event_talks_replace_the_ported_ones(self):
         t = ev.talk_numbers(0x904)
-        talks = {e["fields"]["talk"] for m in (ev.FRONT, ev.FRONT_NIGHT, ev.IMURU, ev.JAIL) for e in self.entries(m)}
+        talks = {e["fields"]["talk"] for m in (ev.FRONT, ev.FRONT_NIGHT, ev.IMURU, ev.JAIL, ev.HOIMIN_ROOM)
+                 for e in self.entries(m)}
         self.assertLessEqual(set(t.values()), talks)
 
 

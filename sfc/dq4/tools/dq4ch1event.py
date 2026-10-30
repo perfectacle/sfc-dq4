@@ -24,10 +24,12 @@ say, speak = ch1.say, ch1.speak
 NIGHT_TOLD = (0x07, 0x02)       # 7E:2197 bit1  이무르 밤에 알렉스 이름을 들음(FC $6281&80)
 FLARE_FOLLOWS = (0x08, 0x04)    # 7E:2198 bit2  프레아가 따라옴(FC $627E&20)
 REUNITED = (0x22, 0x04)         # 7E:21B2 bit2  감옥에서 재회함(FC $627E&40)
+HOIMIN = (0x28, 0x01)           # 7E:21B8 bit0  호이민이 동료가 됨(FC $6281&40)
 
 FRONT, FRONT_NIGHT, IMURU, JAIL = '36/00', '36/03', '37/00', '37/02'
+UNDER_WELL, HOIMIN_ROOM = '3B/00', '3B/03'
 # FC 대화 번호
-FC_CHILD, FC_ALEX_NIGHT, FC_FLARE_DAY, FC_FLARE_NIGHT, FC_JAIL_FLARE = 0x12, 0x13, 0x0F, 0x10, 0x17
+FC_CHILD, FC_ALEX_NIGHT, FC_FLARE_DAY, FC_FLARE_NIGHT, FC_JAIL_FLARE, FC_HOIMIN = 0x12, 0x13, 0x0F, 0x10, 0x17, 0x15
 
 
 def _pages(*lines):
@@ -58,6 +60,14 @@ MESSAGES = {
                       ('알렉스', '거기 전사님./정말 고맙습니다.'),
                       ('알렉스', '아, 그렇지./이건 아이들한테/들은 이야기인데요……')),
     'hint': dq4ch1talk.TEXTS[(0x342,)],
+    # 우물 아래의 아이 목소리(FC 1D 이벤트 05·0B, 02EC·02EE)
+    'voice_here': say('이쪽으로 와……'),
+    'voice_not': say('그쪽이 아니야.'),
+    # FC 0793 → 예 0794(합류 서술) / 아니요 0795
+    'hoimin_ask': say('나는 호이민./지금은 호이미/슬라임이지만/사람이 되는 게 꿈이야.',
+                      '있잖아, 사람의/동료가 되면/사람이 될 수/있을까……?', '나를 동료로/삼아 줘!'),
+    'hoimin_yes': say('야호! 고마워!')[:-1] + [ch1.PAGE] + ch1.narrate('호이민이 동료가 되었다!'),
+    'hoimin_no': say('뭐? 안 된다고?/그래도 마음이 바뀌면/또 와 줘.'),
 }
 
 
@@ -70,7 +80,7 @@ def texts(first):
     return {first + k: parts for k, parts in enumerate(MESSAGES.values())}
 
 
-TALKS = ('child', 'alex_night', 'flare_day', 'flare_night')
+TALKS = ('child', 'alex_night', 'flare_day', 'flare_night', 'hoimin')
 
 
 def talk_numbers(first_talk):
@@ -99,6 +109,9 @@ def talk_scripts(first_message):
         [_msg(m['alex_night']), _flag_on(NIGHT_TOLD)],
         _flare(m, 'flare_day'),
         _flare(m, 'flare_night'),
+        # 예면 합류 깃발. 일행 기록은 호이민 인물 스크립트가 그 깃발을 보고 쓴다(대화 네이티브는 뱅크 06 안이어야 함)
+        [_msg(m['hoimin_ask']), {"op": "if", "cond": {"code": "05"},
+                                 "then": [_msg(m['hoimin_yes']), _flag_on(HOIMIN)], "else": _msg(m['hoimin_no'])}],
     ]
 
 
@@ -106,6 +119,98 @@ def talk_scripts(first_message):
 # 두 벌 인물은 한 시간대에만 둘 수 없다(dq5npcrelocate 가 거부)
 FLARE_SRC, FLARE_SCRIPT = {"list": "05:9180", "index": 0}, "05:9187"
 WALKER_SRC, WALKER_SCRIPT = {"list": "05:9180", "index": 1}, "05:919F"
+VOICE_SRCS = ({"list": "05:9180", "index": 2}, "05:91B7"), ({"list": "05:9180", "index": 3}, "05:91CF")
+HOIMIN_SRC, HOIMIN_SCRIPT = {"list": "05:9180", "index": 4}, "05:91EB"
+# 목소리가 나는 칸(FC 칸)과 메시지. FC 는 그 칸에서 왼쪽(05)·오른쪽(0B)을 보고 있을 때이고, そらとぶくつ 를
+# 가졌으면 나지 않는다
+VOICES = ((UNDER_WELL, (0x14, 0x0C), 'voice_here'), (HOIMIN_ROOM, (0x14, 0x10), 'voice_not'))
+
+CODE_AT = 0x5ED000              # 서장 코드(5E:C000) 뒤의 빈 자리
+COMPANION = 0x23AED1            # 동료 표: 종류마다 9바이트(처음 레벨, 최대 레벨, 능력치 넷, HP, MP, 장비 갈래)
+HOIMIN_KIND = 0x05              # ホイミスライム. 이름 0 이 「ホイミン」
+SCRATCH = 0x7E1BC6              # 7E:1BBE~ 의 DQ5 가 쓰지 않는 자리(서장이 1BC4 까지 씀)
+# 동료가 된 スライム 의 일행 기록(sfc/dq5/tools/lua/dq5warp.lua 의 PARTY_TEMPLATE, 그 밖의 바이트는 동료 표에서)
+PARTY_TEMPLATE = bytes((
+    0x82, 0x80, 0x08, 0x00, 0x00, 0x00, 0x03, 0x08, 0x05, 0x01, 0x03, 0x00, 0x00, 0x00, 0x08, 0x00,
+    0x00, 0x00, 0x01, 0x63, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x4B, 0x00, 0x00, 0x02))
+
+
+def lorom(addr):
+    return (addr >> 16 & 0x7F) * 0x8000 + (addr & 0x7FFF)
+
+
+def companion_record(data, kind):
+    """동료 표의 처음 값으로 채운 일행 기록 42바이트."""
+    c = data[lorom(COMPANION + kind * 9):][:9]
+    r = bytearray(PARTY_TEMPLATE)
+    r[0] = 0x80 | kind
+    r[0x12], r[0x13] = c[0], c[1]
+    r[7:11] = c[2:6]
+    r[2] = r[0xE] = c[6]
+    r[4] = r[0x10] = c[7]
+    return bytes(r)
+
+
+def _long(a):
+    return [a & 0xFF, a >> 8 & 0xFF, a >> 16]
+
+
+def _al(a):
+    return bytes(_long(a))
+
+
+def _join(record_at):
+    """일행 끝(7E:201D 번째)에 record_at 의 기록을 넣고 수·순서를 고친다. 순서 7E:2020·2028 은 기록 번호,
+    걷는 수 7E:201E 는 3 까지(넷째부터 마차). 7E:29EA + 종류 는 그 종류의 쓴 이름 비트로 읽음(코드 읽기)."""
+    from dq4chapterbox import ENTER, LEAVE
+    lo = record_at & 0xFFFF
+    body = (bytes((0xC2, 0x30, 0xAF)) + _al(0x7E201D) + bytes((0x29, 0xFF, 0x00, 0x48,   # REP / LDA 수 / AND / PHA
+            0x0A, 0x8F)) + _al(SCRATCH) + bytes((0x0A, 0x0A, 0x8F)) + _al(SCRATCH + 2) +   # 2n, 8n
+            bytes((0x0A, 0x0A, 0x18, 0x6F)) + _al(SCRATCH) + bytes((0x6F,)) + _al(SCRATCH + 2) +  # 32n + 2n + 8n
+            bytes((0x18, 0x69, 0x40, 0x20, 0xA8,                                         # + 2040 / TAY
+                   0xA2, lo & 0xFF, lo >> 8, 0xA9, 41, 0x00, 0x54, 0x7E, record_at >> 16,  # LDX / LDA #41 / MVN
+                   0x68, 0xE2, 0x20, 0xAA, 0x9F)) + _al(0x7E2020) + bytes((0x9F,)) + _al(0x7E2028) +  # PLA / SEP / TAX
+            bytes((0x1A, 0x8F)) + _al(0x7E201D) + bytes((0x8F,)) + _al(0x7E201F) +       # INC / 수 둘
+            bytes((0xC9, 0x04, 0x90, 0x02, 0xA9, 0x03, 0x8F)) + _al(0x7E201E) +           # 걷는 수
+            bytes((0xAF,)) + _al(0x7E29EA + HOIMIN_KIND) + bytes((0x09, 0x01, 0x8F)) + _al(0x7E29EA + HOIMIN_KIND))
+    return ENTER + body + LEAVE
+
+
+def _at(x, y):
+    """인물 명령 05 가 부르는 루틴: 주인공(인물 표 슬롯 0, 7E:3020·3080)이 셀 (x, y) 이면 A = 0, 아니면 1."""
+    near = bytes((0xC2, 0x30, 0xA9, 0x00, 0x00, 0x28, 0x6B))
+    far = bytes((0xC2, 0x30, 0xA9, 0x01, 0x00, 0x28, 0x6B))
+    second = bytes((0xAF, 0x80, 0x30, 0x7E, 0xC9, y, 0xD0, len(near)))
+    first = bytes((0x08, 0xE2, 0x20, 0xAF, 0x20, 0x30, 0x7E, 0xC9, x, 0xD0, len(second) + len(near)))
+    return first + second + near + far
+
+
+def native(data=None):
+    """(바이트, {이름: 주소}). 기록 자료가 앞, 루틴이 뒤. 주소는 data(롬, 동료 표를 읽음)와 상관없다."""
+    record = companion_record(data, HOIMIN_KIND) if data is not None else bytes(len(PARTY_TEMPLATE))
+    out, at = bytearray(record), {'record': CODE_AT}
+    at['join'] = CODE_AT + len(out)
+    out += _join(CODE_AT)
+    for m, (x, y), _ in VOICES:
+        at[m] = CODE_AT + len(out)
+        out += _at(*ch1_cell(x, y))
+    return bytes(out), at
+
+
+def ch1_cell(x, y):
+    """FC 칸에 선 주인공의 DQ5 셀."""
+    return x * 2, y * 2 + 1
+
+
+def apply(data):
+    d = bytearray(data)
+    code, _ = native(data)
+    o = lorom(CODE_AT)
+    if any(d[o:o + len(code)]):
+        raise SystemExit(f'{CODE_AT:06X}: 비어 있지 않은 자리')
+    d[o:o + len(code)] = code
+    return bytes(d)
 REUNION_AT = (0x04, 0x03)       # FC 슬롯 07 이 걸어가 서는 칸, 재회 뒤 슬롯 08 의 자리
 
 
@@ -115,6 +220,7 @@ def _cmd(op, *args):
 
 def scripts(first_message):
     m = message_ids(first_message)
+    _, at = native()
     lo, hi = lambda v: v & 0xFF, lambda v: v >> 8
     return [
         # 따라오기로 하면 사라진다. 다시 들어와도 곧바로 숨는다
@@ -125,6 +231,15 @@ def scripts(first_message):
             _cmd('3F'), _cmd('13', REUNION_AT[0] * 2, REUNION_AT[1] * 2 + 1), _cmd('14'),
             _cmd('21', lo(m['reunion']), hi(m['reunion'])), _cmd('21', lo(m['hint']), hi(m['hint'])),
             _cmd('10', *REUNITED), _cmd('40'), _cmd('16')]},
+    ] + [
+        # 보이지 않는 인물이 칸을 기다렸다가 목소리를 띄운다. 52 로 자리를 치워 길을 막지 않는다
+        {"address": script, "commands": [_cmd('28'), _cmd('52'), _cmd('05', *_long(at[where])), _cmd('3F'),
+                                         _cmd('21', lo(m[msg]), hi(m[msg])), _cmd('40'), _cmd('16')]}
+        for (_, script), (where, _, msg) in zip(VOICE_SRCS, VOICES)
+    ] + [
+        # 예라고 대답하면(합류 깃발) 일행 기록을 쓰고 사라진다
+        {"address": HOIMIN_SCRIPT, "commands": [_cmd('09', 0x80 | HOIMIN[0], HOIMIN[1]), _cmd('37', *_long(at['join'])),
+                                                _cmd('28'), _cmd('52'), _cmd('16')]},
     ]
 
 
@@ -168,7 +283,20 @@ def npc_lists(ported, report, first_talk):
     lists[JAIL] = alex
     new_lists = [{"name": "jail_reunion", "entries": alex + both(walker)},
                  {"name": "jail_after", "entries": after_alex + both(stand)}]
-    over = lambda flag, name: {"map": JAIL, "flag": flag[0], "when": "on", "mask": flag[1], "list": f"new:{name}"}  # noqa: E731
+    # 우물 아래: 목소리 인물을 더하고, 호이민은 합류하면 빠진 목록으로
+    for (src, _), (where, (x, y), _) in zip(VOICE_SRCS, VOICES):
+        cx, cy = ch1_cell(x, y)
+        voice = {"from": src, "fields": {"x": cx, "y": cy, "facing": "down", "talk": t['hoimin'], "gfx": 0x01,
+                                         "layer": 0}}
+        lists[where] += [{**voice, "time": "day"}, {**voice, "time": "night"}]
+    room = lists[HOIMIN_ROOM]
+    hoimins = [i for i, p in enumerate(report[HOIMIN_ROOM]) if p["talk"] == FC_HOIMIN]
+    gone = [e for i, e in enumerate(room) if i not in hoimins]
+    for i in hoimins:
+        room[i] = _same(room[i], HOIMIN_SRC, t['hoimin'])
+    new_lists.append({"name": "hoimin_gone", "entries": gone})
+    over = lambda m, flag, name: {"map": m, "flag": flag[0], "when": "on", "mask": flag[1], "list": f"new:{name}"}  # noqa: E731
     # 앞에 둔 것부터 맞춰 본다
-    overrides = [over(REUNITED, 'jail_after'), over(FLARE_FOLLOWS, 'jail_reunion')]
+    overrides = [over(JAIL, REUNITED, 'jail_after'), over(JAIL, FLARE_FOLLOWS, 'jail_reunion'),
+                 over(HOIMIN_ROOM, HOIMIN, 'hoimin_gone')]
     return [{"map": k, "entries": v} for k, v in lists.items()], new_lists, overrides
