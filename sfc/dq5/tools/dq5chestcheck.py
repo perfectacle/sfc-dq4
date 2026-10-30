@@ -8,6 +8,8 @@ wide_* 사례는 상자 번호 16비트 훅(dq5chestreloc.py --wide-at)으로 �
 wideitem_open 은 같은 롬에서 상자 300 의 보상만 물건으로 바꿔, 물건 길로 12:F839 에 가는지 본다.
 widelock_open·widefull_open 은 상자 300 을 잠긴 상자·가방이 가득한 물건으로 바꾼 롬에서 두 번 열어, 12:F839 를 지나지
 않은 보상이 남긴 넘길 마스크(7E:291B)를 다음 열기가 지우는지 본다(패치 롬만).
+widenum_* 은 상자를 576개까지 놓은 롬에서 19/00 의 (12,45) 를 상자 256·263·264·421·575 로 두고 열어 비트 자리·다른 바이트
+보존·다시 들어갈 때 그리기를, widemon_* 은 상자 300 을 상자 몬스터로 바꿔 이기거나 전멸한 뒤의 비트와 291B 를 본다(패치 롬만).
 new_* 사례는 원래 롬에 없는 새 그룹 맵 36/00(선실 17/00 에 상자 블록을 놓은 레코드)에 상자·タンス·두 칸 앞 항목을
 dq5chestreloc.py --new-map·--with-patch 로 넣은 롬을, 같은 새 맵 패치만 붙인 대조 롬과 견준다.
 blocks_* 사례는 --env 로 준 DQ4 환경 패치 폴더(sfc/dq4/tools/dq4environmentrom.py 출력)로 새 맵 36/00 을 만든다. 그 맵은
@@ -205,9 +207,47 @@ def widelock_base(doc):
     doc['chests'][186] = {'reward': 0xFFFC}
 
 
+# 상자 몬스터(FFFD: 이벤트 전투 무리 0D, ひとくいばこ 하나). 이기는 사례는 만든 롬에서 그 무리의 몬스터 칸(23:D801)을
+# スライム(00)으로 바꾼다. 상자를 연 뒤 12:F4A4 → 01:868B → 12:F4A8 의 길은 같다
+MON_GROUP, MON_SLOT = 0x0D, (0x11D801, 0x36, 0x00)
+
+
+def widemon_base(doc):
+    wide_base(doc)
+    doc['chests'][186] = {'reward': 0xFFFD}
+
+
+# 상자 576개 롬. 상자 301개 롬의 블록 뒤에 01/02 의 (0~90, 24~38) 블록 139개(맵 상자 255개, 맵 연결 count 한도)와
+# 16/00 의 (0~126, 30~34) 블록 136개를 더 놓는다. 01/02 의 원래 상자 (35,29)·(39,29) 를 덮는 (34,28)·(38,28) 은 뺀다.
+# 두 맵 모두 맵 연결 표에서 19/00 보다 앞이라, 블록을 앞에서 K개만 놓으면 19/00 의 (12,45) 가 상자 186 + K 다
+NUM_PLACES = [('01/02', x, y) for y in range(24, 40, 2) for x in range(0, 92, 2) if (x, y) not in ((34, 28), (38, 28))][:139] + \
+    [('16/00', x, y) for y in (30, 32, 34) for x in range(0, 128, 2)][:136]
+# 첫 번호, 바이트 28F3 의 끝 비트와 다음 바이트 28F4 의 첫 비트, 가운데(2907 & 04), 마지막(291A & 01)
+NUMBERS = (256, 263, 264, 421, 575)
+
+
+def number_bit(n):
+    return WIDE_BITS + (n - 256) // 8, 0x80 >> (n & 7)
+
+
+def number_build(n):
+    rows = [('01/02', row) for row in WIDE_DOC['maps'][0]['chests']] + [
+        (key, {'x': x, 'y': y, 'block': 384, 'reward': 0x100 + 800 + k}) for k, (key, x, y) in enumerate(NUM_PLACES)]
+    maps = {}
+    for key, row in rows[:n - 186]:
+        maps.setdefault(key, []).append(row)
+
+    def edit(doc):
+        full_base(doc)
+        doc['chests'][186] = {'reward': 0x100 + n}
+    return {'format': 'dq5chestplace/1', 'maps': [{'map': key, 'chests': rows} for key, rows in maps.items()]}, edit, WIDE_AT
+
+
 BUILDS = {'past': (GROW_DOC, grow_base, GROW_AT), 'full': (FULL_DOC, full_base, FULL_AT),
           'wide': (WIDE_DOC, wide_base, WIDE_AT), 'wideitem': (WIDE_DOC, wideitem_base, WIDE_AT),
-          'widelock': (WIDE_DOC, widelock_base, WIDE_AT), 'widefull': (WIDE_DOC, wideitem_base, WIDE_AT)}
+          'widelock': (WIDE_DOC, widelock_base, WIDE_AT), 'widefull': (WIDE_DOC, wideitem_base, WIDE_AT),
+          'widemon': (WIDE_DOC, widemon_base, WIDE_AT),
+          **{f'widenum{n}': number_build(n) for n in NUMBERS}}
 GROW = {'past_open': (987, 0x2228, 0x80, 0x2228, 0x80, None, 0x131),
         # 아래층 상자 51/51 (19,35). 원본은 2228 & 08, 패치는 옮긴 표의 2229 & 08 을 켠다
         'past_lower': (None, 0x2229, 0x08, 0x2228, 0x08, 0xB1, 0x131),
@@ -276,7 +316,14 @@ STALE = {'widelock_open': (0xFFFC, '', [0x14E], INPUT),
          'widefull_open': (WIDE_ITEM, ';'.join(f'{a:04X}=A1' for a in range(0x2056, 0x2062)), [0x12E, 0x14A, 0x13D, 0x14B],
                            INPUT + ',wait:60,b:4,wait:300,b:4,wait:200')}
 SAVE_FRAMES = {'saved': 2600, 'reset': 2710, 'loaded': 6400}
-ALL = [*CASES, *ENTRY, *SAVES, *STALE]
+# 상자 번호 256~575 의 비트. 상자를 열고, 연 뒤의 비트로 19/00 에 다시 들어온다. 8비트 번호(n & FF)의 원래 상자 비트를
+# 미리 켜 둔다(패치 롬만)
+NUMBER = {f'widenum_{n}': n for n in NUMBERS}
+# 상자 몬스터. 이김: 12:F4A8 로 돌아와 12:F839 에서 비트를 켬. 전멸: 교회에서 되살아나 기록까지 하고(A 를 거듭 누름),
+# 01/02 의 상자 2 (35,29) 를 열어 다음 열기가 남은 291B 를 지우는지 본다
+MONSTER = {'widemon_win': INPUT + ',' + ','.join(['a:4,wait:40'] * 60),
+           'widemon_lose': INPUT + ',' + ','.join(['a:4,wait:40'] * 45) + ',wait:200,a:4,wait:400'}
+ALL = [*CASES, *ENTRY, *SAVES, *STALE, *NUMBER, *MONSTER]
 # 조사 뒤 세계 지도 버퍼의 블록(블록 좌표 x, y, 원본, 패치). 밤이라 빛 블록 A7 이 놓인 자리를 본다
 # 필드에 들어갈 때 빛 블록을 놓으므로, 장면도 그 롬으로 만들어야 하는 사례
 OWN_SCENE = {'field_move', 'place_chest', 'place_shift', 'place_furniture', *NEWMAP}
@@ -687,6 +734,117 @@ def stale_compare(name, original, out, mesence, libdir, start):
     return {'case': name, 'opens': opens, 'counts': counts, 'messages': [f'{m:X}' for m in shown], 'passed': True}
 
 
+def warp(rom, state, dest, to, mesence, libdir, bits=''):
+    env = environment(libdir, state, dest)
+    env.update(TO=to, SETTLE='120', SAVE='scene.mss', MAXF='2500')
+    if bits:
+        env['SET'] = bits
+    run(mesence, rom, HERE / 'lua/dq5warp.lua', dest, env)
+    require((dest / 'scene.mss').is_file(), f'{dest.name}: {to} 장면 세이브가 없음')
+    return dest / 'scene.mss'
+
+
+def open_chest(rom, state, dest, buttons, mesence, libdir, flag=None):
+    """state 에서 buttons 를 눌러 dq5chestcheck.lua 로 열고 (전 WRAM, 뒤 WRAM, 기록). 끝 세이브는 dest/end.mss."""
+    env = environment(libdir, state, dest)
+    env.update(INPUT=buttons, SAVE='end.mss')
+    if flag is not None:
+        env['FLAG'] = f'7E{flag:04X}'
+    run(mesence, rom, HERE / 'lua/dq5chestcheck.lua', dest, env, timeout=600)
+    require((dest / 'end.mss').is_file(), f'{dest.name}: 끝 세이브가 없음')
+    return [(dest / f'{when}.wram').read_bytes() for when in ('before', 'after')] + [
+        (dest / 'trace.txt').read_text(encoding='utf-8')]
+
+
+def sets_in(trace):
+    return re.findall(r'set .* index=([0-9A-F]+) mask=([0-9A-F]+) pend=([0-9A-F]+) ret=([0-9A-F]+)', trace)
+
+
+def saved_diff(before, after):
+    return sorted(a for a in range(0x2000, 0x2AA0) if before[a] != after[a])
+
+
+def number_compare(name, original, out, mesence, libdir, start):
+    n = NUMBER[name]
+    flag, mask = number_bit(n)
+    alias = (0x2210 + ((n & 0xFF) >> 3), 0x80 >> (n & 7))
+    dest = out / name
+    dest.mkdir()
+    patched = grow_rom(original, dest, f'widenum{n}')
+    steps = {k: dest / k for k in ('scene', 'open', 'back', 'look')}
+    for d in steps.values():
+        d.mkdir()
+    scene_state = warp(patched, start, steps['scene'], '19/00,11,46', mesence, libdir, f'{alias[0]:04X}|{alias[1]:02X}')
+    before, after, trace = open_chest(patched, scene_state, steps['open'], INPUT, mesence, libdir, flag)
+    rewards = [int(v, 16) for v in re.findall(r'reward .* value=([0-9A-F]+)', trace)]
+    require(rewards == [0x100 + n], f'{name}: 실제 조회 보상 {rewards}')
+    require(gold(after) == 100 + n, f'{name}: 금화 {gold(after)}')
+    require(after[flag] == mask and after[WIDE_PENDING] == 0, f'{name}: 7E:{flag:04X} = {after[flag]:02X}, '
+            f'291B = {after[WIDE_PENDING]:02X}')
+    require(before[alias[0]] & alias[1] and after[alias[0]] == before[alias[0]], f'{name}: 8비트 번호의 비트가 바뀜')
+    # 기록 범위에서 바뀐 것은 금화와 그 상자의 비트뿐이어야 한다
+    changed = saved_diff(before, after)
+    coins = {0x2019 + k for k in range(3) if (100 >> 8 * k) & 0xFF != (100 + n >> 8 * k) & 0xFF}
+    require(changed == sorted(coins | {flag}), f'{name}: 기록 범위에서 바뀐 바이트 {[f"{a:04X}" for a in changed]}')
+    sets = sets_in(trace)
+    require([v[:3] for v in sets] == [(f'{flag - WIDE_BITS:02X}', '00', f'{mask:02X}')], f'{name}: 12:F839 진입 {sets}')
+    # 다시 들어올 때 1F:FC50 이 상자 칸을 열린 상자 타일로 그리는지 본다. (11,46) 은 가게 계산대 안이라 걸어 나갈 수 없으므로
+    # 연 뒤의 그 바이트를 선실에서 켜고 19/00 에 들어간다(wide_entry 와 같은 길)
+    back = warp(patched, start, steps['back'], '19/00,11,46', mesence, libdir,
+                f'{flag:04X}={after[flag]:02X};{alias[0]:04X}|{alias[1]:02X}')
+    seen, _, _ = open_chest(patched, back, steps['look'], 'wait:3', mesence, libdir)
+    require(seen[flag] == mask, f'{name}: 다시 들어온 뒤 비트가 꺼짐')
+    words = opened_tiles(before, seen)
+    require(words >= 2, f'{name}: 다시 들어왔을 때 열린 상자 타일 {words}개')
+    return {'case': name, 'chest': n, 'flag': f'7E:{flag:04X}', 'mask': f'{mask:02X}', 'changed': [f'{a:04X}' for a in changed],
+            'sets': sets, 'opened_tile_words': words, 'passed': True}
+
+
+def monster_compare(name, original, out, mesence, libdir, start):
+    dest = out / name
+    dest.mkdir()
+    patched = grow_rom(original, dest, 'widemon')
+    win = name.endswith('_win')
+    if win:
+        data = bytearray(patched.read_bytes())
+        at, old, new = MON_SLOT
+        require(data[at] == old, f'{name}: 무리 {MON_GROUP:02X} 의 몬스터 칸이 {old:02X} 가 아님')
+        data[at] = new
+        patched.write_bytes(data)
+    steps = {k: dest / k for k in ('scene', 'open', 'next', 'reopen')}
+    for d in steps.values():
+        d.mkdir()
+    scene_state = warp(patched, start, steps['scene'], '19/00,11,46', mesence, libdir)
+    before, after, trace = open_chest(patched, scene_state, steps['open'], MONSTER[name], mesence, libdir, WIDE_FLAG[0])
+    require(re.findall(r'reward .* value=([0-9A-F]+)', trace) == ['FFFD'], f'{name}: 보상 조회가 FFFD 하나가 아님')
+    require(re.findall(r'battle f=\d+ group=([0-9A-F]+)', trace) == [f'{MON_GROUP:02X}'], f'{name}: 전투 무리가 다름')
+    backs = re.findall(r'back f=\d+ pend=([0-9A-F]+)', trace)
+    sets = sets_in(trace)
+    result = {'case': name, 'back': backs, 'sets': sets, 'gold': [gold(before), gold(after)],
+              'after': {f'{a:04X}': f'{after[a]:02X}' for a in (WIDE_FLAG[0], WIDE_PENDING, 0x1E80, 0x1E81)}}
+    if win:
+        require(backs == [f'{WIDE_FLAG[1]:02X}'], f'{name}: 12:F4A8 로 돌아온 기록 {backs}')
+        require(sets == [('05', '00', f'{WIDE_FLAG[1]:02X}', 'F4AA')], f'{name}: 12:F839 진입 {sets}')
+        require((after[WIDE_FLAG[0]], after[WIDE_PENDING]) == (WIDE_FLAG[1], 0), f'{name}: 28F8·291B {result["after"]}')
+        return result | {'passed': True}
+    # 전멸하면 12:F4A8 로 돌아오지 않아 비트는 꺼진 채이고 넘길 마스크가 남는다. 금화는 반이 된다
+    require(not backs and not sets, f'{name}: 전멸 뒤 12:F4A8·12:F839 에 들어감 {backs} {sets}')
+    require(gold(after) == gold(before) // 2, f'{name}: 금화 {gold(before)} → {gold(after)}')
+    require((after[WIDE_FLAG[0]], after[WIDE_PENDING], after[0x1E80], after[0x1E81]) == (0, WIDE_FLAG[1], 5, 0),
+            f'{name}: 전멸 뒤 {result["after"]}')
+    state = warp(patched, steps['open'] / 'end.mss', steps['next'], '01/02,34,31', mesence, libdir)
+    _, again, trace = open_chest(patched, state, steps['reopen'], INPUT, mesence, libdir)
+    opens = re.findall(r'open f=\d+ pend=([0-9A-F]+)', trace)
+    counts = re.findall(r'count f=\d+ pend=([0-9A-F]+)', trace)
+    reopen_sets = sets_in(trace)
+    require(opens == [f'{WIDE_FLAG[1]:02X}'] and counts == ['00'], f'{name}: 다음 열기의 291B {opens} → {counts}')
+    # 01/02 의 상자 2 는 256 미만이라 $1E81 에 마스크를 두고 원래 길로 켠다
+    require(len(reopen_sets) == 1 and reopen_sets[0][1] != '00' and reopen_sets[0][2] == '00',
+            f'{name}: 다음 열기의 12:F839 {reopen_sets}')
+    require(again[WIDE_PENDING] == 0 and again[WIDE_FLAG[0]] == 0, f'{name}: 다음 열기 뒤 291B {again[WIDE_PENDING]:02X}')
+    return result | {'reopen': {'opens': opens, 'counts': counts, 'sets': reopen_sets}, 'passed': True}
+
+
 # --audit 장면: (dq5warp.lua 변수, 미리 켤 비트). 상자 방 01/02 에 들어가 상자를 열고(닫힘·열림 둘 다),
 # 그룹 50 이상 맵 51/51 에서 아래층 상자를 열고, 54/52 의 BRK 0B·0D 갈래(1F:FCCA)까지 지난다
 AUDIT = {'chest': ({'TO': '01/02,34,31', 'TEST': INPUT}, ''),
@@ -777,14 +935,21 @@ def main():
                                                          state) if name in CASES else
                                     entry_compare(name, original, out, mesence, libdir, state) if name in ENTRY else
                                     stale_compare(name, original, out, mesence, libdir, state) if name in STALE else
+                                    number_compare(name, original, out, mesence, libdir, state) if name in NUMBER else
+                                    monster_compare(name, original, out, mesence, libdir, state) if name in MONSTER else
                                     save_compare(name, original, out, mesence, libdir, state), cases))
         (out / 'results.json').write_text(json.dumps(results, indent=2) + '\n', encoding='utf-8')
-        pairs = [name for name in cases if name not in SAVES and name not in STALE]
+        pairs = [name for name in cases if name not in SAVES and name not in STALE and name not in NUMBER
+                 and name not in MONSTER]
         saves = sum(name in SAVES for name in cases)
         stale = sum(name in STALE for name in cases)
-        print(f'{len(pairs)}쌍/{2 * len(pairs)}실행 통과: 보상·금화·새 열림 비트·기존 비트 보존·들어갈 때 열린 상자'
-              + (f', 기록·불러오기 {saves}실행 통과' if saves else '')
-              + (f', 넘길 마스크 지우기 {stale}실행 통과' if stale else ''))
+        numbers = sum(name in NUMBER for name in cases)
+        monsters = sum(name in MONSTER for name in cases)
+        print((f'{len(pairs)}쌍/{2 * len(pairs)}실행 통과: 보상·금화·새 열림 비트·기존 비트 보존·들어갈 때 열린 상자'
+               if pairs else '통과') + (f', 기록·불러오기 {saves}실행 통과' if saves else '')
+              + (f', 넘길 마스크 지우기 {stale}실행 통과' if stale else '')
+              + (f', 상자 번호 {numbers}개 열기·다시 들어오기 통과' if numbers else '')
+              + (f', 상자 몬스터 {monsters}사례 통과' if monsters else ''))
         return 0
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         print(f'오류: {error}', file=sys.stderr)
