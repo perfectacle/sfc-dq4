@@ -94,7 +94,7 @@ class BuildTests(unittest.TestCase):
 
     def test_messages_decode_from_new_bank(self):
         from dq5hangul import decode_check
-        msgs = decode_check(self.out, mm.BASE, mm.INDEX_BANK)
+        msgs = decode_check(self.out, mm.HEAD, mm.INDEX_BANK)
         for m, parts in mm.TEXTS.items():
             self.assertEqual(msgs[m], mm.codes(parts))
 

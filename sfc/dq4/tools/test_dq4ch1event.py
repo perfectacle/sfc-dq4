@@ -126,12 +126,30 @@ class FlyTest(unittest.TestCase):
         (call,) = [x for x in ev.scripts(0xD00) if x["address"] == ev.KING_CALL_SCRIPT]
         cmds = call["commands"]
         _, at = ev.native()
-        self.assertEqual(cmds[2]["args"], ev._long(at['king_row']))
-        branch = next(c for c in cmds if c["op"] == '06' and c["args"] == list(ev.KIDS_FOLLOW))
-        self.assertEqual(branch["target"], "back")
+        waits = [c["args"] for c in cmds if c["op"] == '05']
+        self.assertEqual(waits[:2], [ev._long(at['lineup_row']), ev._long(at['king_row'])])
+        branch = next(c for c in cmds if c["op"] == '06' and c["args"] == [0x80 | ev.KIDS_FOLLOW[0], ev.KIDS_FOLLOW[1]])
+        self.assertEqual(branch["target"], "praise")
         calls = [c["args"] for c in cmds if c["op"] == '37']
-        self.assertEqual(calls, [ev._long(at['gift']), ev._long(at['level_up'])])
+        want = ['walk_in', 'gift', 'level_up'] + [f'stat_{k}' for k, _ in ev.STATS] + ['walk_back', 'walk_out']
+        self.assertEqual(calls, [ev._long(at[n]) for n in want])
         self.assertIn({"op": "10", "args": list(ev.REPORTED)}, cmds)
+
+    def test_walk_in_lands_in_the_aisle(self):
+        for x in (ev.AISLE_X - 2, ev.AISLE_X - 1, ev.AISLE_X, ev.AISLE_X + 1):
+            code = ev._walk_in_event(x)
+            self.assertEqual(code[:ev.LINEUP_WAIT], bytes((0xC2,)) * ev.LINEUP_WAIT)
+            dx = 0
+            for d, n in zip(code[ev.LINEUP_WAIT:-1:2], code[ev.LINEUP_WAIT + 1:-1:2]):
+                dx += {ev.RIGHT: n, ev.LEFT: -n}.get(d, 0)
+            self.assertEqual(x + dx, ev.AISLE_X)
+            self.assertEqual(code[-3:], bytes((ev.UP, ev.KING_STEPS, 0xFF)))
+
+    def test_stat_messages_print_the_number(self):
+        m = ev.MESSAGES
+        for k, _ in ev.STATS:
+            self.assertIn(ev.NUMBER, m[f'stat_{k}'])
+            self.assertEqual(m[f'stat_{k}'][-1], ev.WAIT_END)
 
     def test_throne_return_lines_up_eight_soldiers(self):
         entries = ev.throne_return(0x904)

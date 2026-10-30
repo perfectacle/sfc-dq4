@@ -65,6 +65,10 @@ THRONE_SOLDIERS = (
     ((0x0F, 0x18), ((0x0F, 0x17), (0x0E, 0x17)), 0x11), ((0x10, 0x18), ((0x10, 0x17), (0x11, 0x17)), 0x22),
     ((0x0F, 0x16), ((0x0F, 0x15), (0x0E, 0x15)), 0x11), ((0x10, 0x16), ((0x10, 0x15), (0x11, 0x15)), 0x22),
     ((0x11, 0x18), (), 0x22), ((0x11, 0x16), (), 0x22), ((0x0E, 0x18), (), 0x11), ((0x0E, 0x16), (), 0x11))
+# 레벨이 오를 때 띄우는 능력치: (23:EB50 이 오른 양을 두는 $00~ 의 자리, 이름). FC 차례(ちから·すばやさ·たいりょく·
+# かしこさ·うんのよさ·さいだいHP·さいだいMP)를 따르되 たいりょく 자리에 DQ5 의 みのまもり. 이름은 전투 메시지 C0~C6 과 같게
+STATS = ((2, '힘이'), (3, '민첩성이'), (6, '몸 지키기가'), (4, '영리함이'), (5, '운이'), (0, '최대 HP가'), (1, '최대 MP가'))
+NUMBER, WAIT_END = 0x1004, 0x1010
 GIFT_EXP = 3000                 # FC 1D 이벤트 37: 경험치를 프레임마다 10씩 300번 더함(실측: ライアン 0 → 3000)
 HERO_EXP = 0x7E204B             # 일행 첫 기록 +B~+D
 HERO_LEVEL = 0x7E2052           # 일행 첫 기록 +12
@@ -150,8 +154,10 @@ MESSAGES = {
     'guard_wait': say('자!/임금님께서 기다리고/계십니다!'),
     # FC 는 말 없이 강함 창의 경험치가 3000 까지 오른다. 창 대신 서술로 알린다
     'gift': ch1.narrate('@의 경험치가/3000 포인트 올랐다!'),
-    # FC 「ライアンは レベルが あがった！」. 이름 뒤 조사를 피해 옮김
-    'level_up': ch1.narrate('@의 레벨이 올랐다!'),
+    # FC 「ライアンは レベルが あがった！」. 이름 뒤 조사를 피해 옮김. 레벨업 줄은 한 창에 이어 쓰고 줄마다 ▼ 로 기다린다
+    'level_up': ch1.narrate('@의 레벨이 올랐다!')[:-1] + [WAIT_END],
+    # 오른 능력치(FC 「ちからが 3ポイント あがった！」). 수는 {1004} 가 $F5~$F7 에서 찍는다
+    **{f'stat_{k}': [ch1.NARR, f'{name} ', NUMBER, '포인트 올랐다!', WAIT_END] for k, name in STATS},
     # FC 02F5
     'cry': say('으앙, 으앙……/살려 줘!'),
 }
@@ -412,6 +418,47 @@ DP_SAVE = bytes((0xA2, 0x0F, 0xB5, 0x00, 0x48, 0xCA, 0x10, 0xFA))               
 DP_RESTORE = bytes((0xA2, 0x00, 0x68, 0x95, 0x00, 0xE8, 0xE0, 0x10, 0xD0, 0xF8))  # LDX #0 / PLA / STA $00,X / INX / CPX / BNE
 
 
+# 왕의 귀환에서 일행을 걷게 하는 이벤트(dq5-event-format 「명령」 의 00~0F d n: 01 오른쪽, 02 왼쪽, 04 아래, 08 위).
+# FC 는 Y=19 줄에서 (10,19)로 옮긴 뒤 (10,15)까지 올라가고(1D 이벤트 38, 일행 움직임 패턴 11·12), 왕의 말 뒤 아래로
+# 걸어 (10,19)에서 0345 를 띄우고 그대로 출구로 나간다
+AISLE_X = 0x10 * 2                # FC X=10 에 선 주인공의 셀(ch1_cell)
+LINEUP_WAIT = 8                 # 가운데 병사가 통로를 비울 때까지 쉬는 걸음 수(C2 하나 8프레임)
+UP, DOWN, RIGHT, LEFT = 0x08, 0x04, 0x01, 0x02
+KING_STEPS = 2 * (LINEUP_ROW - KING_ROW)
+EXIT_ROW = 0x23
+OUT_STEPS = 2 * (EXIT_ROW - LINEUP_ROW) + 2   # 출구 줄(셀 71)에서 한 칸 더 내려서야 성 앞으로 나간다(실측)
+
+
+def _walk_in_event(x):
+    dx = AISLE_X - x
+    side = bytes((RIGHT, dx)) if dx > 0 else bytes((LEFT, -dx)) if dx < 0 else b''
+    return bytes((0xC2,)) * LINEUP_WAIT + side + bytes((UP, KING_STEPS, 0xFF))
+
+
+def _walk_in(events):
+    """주인공 X(7E:3020)에 맞는 이벤트를 건다. events: {X: 이벤트 주소}, 첫 것이 그 밖의 X."""
+    from dq4chapterbox import ENTER, LEAVE
+
+    def load(a):
+        return bytes((0xA9, a & 0xFF, 0x8D, 0xB3, 0x19, 0xA9, a >> 8 & 0xFF, 0x8D, 0xB4, 0x19, 0xA9, a >> 16, 0x8D, 0xB5, 0x19))
+    tail = bytes((0xAD, 0xAE, 0x19, 0x09, 0x80, 0x8D, 0xAE, 0x19))
+    xs = list(events)
+    body = load(events[xs[0]])
+    for x in reversed(xs[1:]):
+        branch = load(events[x]) + bytes((0x80, len(body)))
+        body = bytes((0xC9, x, 0xD0, len(branch))) + branch + body
+    return ENTER + bytes((0xAF, 0x20, 0x30, 0x7E)) + body + tail + LEAVE
+
+
+def _stat(k):
+    """오른 양 SCRATCH+k 를 메시지 수 자리 $F5~$F7 에 둔다. 0 이면 보고 깃발을 켜서 스크립트가 그 줄을 건너뛰게 한다."""
+    from dq4chapterbox import ENTER, LEAVE
+    flag = 0x7E2190 + REPORTED[0]
+    on = bytes((0xAF,)) + _al(flag) + bytes((0x09, REPORTED[1], 0x8F)) + _al(flag)
+    off = bytes((0x85, 0xF5, 0x64, 0xF6, 0x64, 0xF7, 0xAF)) + _al(flag) + bytes((0x29, ~REPORTED[1] & 0xFF, 0x8F)) + _al(flag)
+    return ENTER + bytes((0xAF,)) + _al(SCRATCH + k) + bytes((0xF0, len(off) + 2)) + off + bytes((0x80, len(on))) + on + LEAVE
+
+
 CELL_AT = 0x25FA15              # X·Y(8비트) 셀의 셀 버퍼 주소를 [$00] 에(맵 폭 $BF)
 REDRAW_LOWER, REDRAW_UPPER = 0x01ED56, 0x01EDF0   # (X, Y) 부터 $1E82×$1E83 셀을 다시 그림(문 열기가 쓰는 것)
 
@@ -485,6 +532,18 @@ def native(data=None):
                        ('king_away', _at(None, ch1_cell(0, KING_ROW)[1], away=True)),
                        ('cry_at', _at(*ch1_cell(CRY_FROM, CRY_ROW), x_from=True)),
                        ('gift', _gift()), ('level_up', _level_up()), ('open_cage', _open_cage())):
+        at[name] = CODE_AT + len(out)
+        out += code
+    events = {}
+    for x in (AISLE_X - 2, AISLE_X - 1, AISLE_X, AISLE_X + 1):
+        events[x] = CODE_AT + len(out)
+        out += _walk_in_event(x)
+    for name, code in (('ev_back', bytes((DOWN, KING_STEPS, 0xFF))), ('ev_out', bytes((DOWN, OUT_STEPS, 0xFF)))):
+        at[name] = CODE_AT + len(out)
+        out += code
+    for name, code in (('walk_in', _walk_in(events)), ('walk_back', dq4prologue._event_start(at['ev_back'])),
+                       ('walk_out', dq4prologue._event_start(at['ev_out'])),
+                       *((f'stat_{k}', _stat(k)) for k, _ in STATS)):
         at[name] = CODE_AT + len(out)
         out += code
     return bytes(out), at
@@ -592,18 +651,7 @@ def scripts(first_message, box_at=None):
     ] + [
         # 왕: 주인공이 왕 앞 줄에 오면 스스로 말을 건다. 아이들이 아직 따라오면 돌려보내라 하고, 그 줄을 떠났다 오면
         # 다시 말한다. 아니면 칭찬 → 선물(경험치·레벨업) → 작별, 보고 깃발
-        {"address": KING_CALL_SCRIPT, "commands": [
-            _cmd('28'), _cmd('52'), {**_cmd('05', *_long(at['king_row'])), "label": "wait"}, _cmd('3F'),
-            {**_cmd('06', *KIDS_FOLLOW), "target": "back"},
-            _cmd('21', lo(m['king_praise']), hi(m['king_praise'])), _cmd('21', lo(m['gift']), hi(m['gift'])),
-            _cmd('37', *_long(at['gift'])),
-            # 한 번 오를 때마다 「레벨이 올랐다」. 더 오르지 않으면 level_up 이 보고 깃발을 켠다
-            {**_cmd('37', *_long(at['level_up'])), "label": "grow"}, {**_cmd('06', *REPORTED), "target": "grown"},
-            _cmd('21', lo(m['level_up']), hi(m['level_up'])), {"op": "03", "args": [], "target": "grow"},
-            {**_cmd('21', lo(m['king_farewell']), hi(m['king_farewell'])), "label": "grown"},
-            _cmd('10', *REPORTED), _cmd('40'), _cmd('16'),
-            {**_cmd('21', lo(m['king_back']), hi(m['king_back'])), "label": "back"}, _cmd('40'),
-            _cmd('05', *_long(at['king_away'])), {"op": "03", "args": [], "target": "wait"}]},
+        {"address": KING_CALL_SCRIPT, "commands": _king_call(m, at)},
     ] + ([
         # 1장 끝: 서술 → 검은 화면 → 2장 제목 상자 → 어둡게. 조작은 풀지 않는다(2장은 아직 이어지지 않음)
         {"address": ENDER_SCRIPT, "commands": [
@@ -611,6 +659,39 @@ def scripts(first_message, box_at=None):
             _cmd('37', *_long(at['darken'])), _cmd('37', *_long(box_at)), _cmd('37', *_long(at['fade_out'])),
             _cmd('16')]},
     ] if box_at is not None else [])
+
+
+def _king_call(m, at):
+    """왕: 주인공이 Y=19 줄에 오면 왕 앞까지 걷게 하고, 왕 앞 줄에서 말을 건다. 아이들이 아직 따라오면 돌려보내라
+    하고, 그 줄을 떠났다 오면 다시 말한다. 아니면 칭찬 → 선물(경험치·레벨업과 오른 능력치) → 그 줄로 물러나 작별 →
+    보고 깃발 → 출구로 걸어 나간다."""
+    lo, hi = (lambda v: v & 0xFF), (lambda v: v >> 8)
+
+    def msg(name, op='21'):
+        return _cmd(op, lo(m[name]), hi(m[name]))
+
+    def call(name):
+        return _cmd('37', *_long(at[name]))
+    stats = []
+    for i, (k, _) in enumerate(STATS):
+        skip = f"stat{i + 1}" if i + 1 < len(STATS) else "next"
+        stats += [{**call(f'stat_{k}'), "label": f"stat{i}"}, {**_cmd('06', *REPORTED), "target": skip},
+                  msg(f'stat_{k}', '30')]
+    return [
+        _cmd('28'), _cmd('52'), _cmd('05', *_long(at['lineup_row'])), call('walk_in'),
+        {**_cmd('05', *_long(at['king_row'])), "label": "wait"}, _cmd('3F'),
+        # 갈래는 상대 점프(-128~127)라, 아이들 갈래를 앞에 두고 깃발이 꺼져 있으면 칭찬으로 건너뛴다
+        {**_cmd('06', 0x80 | KIDS_FOLLOW[0], KIDS_FOLLOW[1]), "target": "praise"},
+        msg('king_back'), _cmd('40'), _cmd('05', *_long(at['king_away'])), {"op": "03", "args": [], "target": "wait"},
+        {**msg('king_praise'), "label": "praise"}, msg('gift'), call('gift'),
+        # 한 번 오를 때마다 「레벨이 올랐다」 와 오른 능력치를 한 창에 잇는다. 더 오르지 않으면 level_up 이 보고 깃발을
+        # 켜고, 능력치 줄은 오른 양이 0 이면 stat_k 가 보고 깃발을 켜 건너뛴다
+        {**call('level_up'), "label": "grow"}, {**_cmd('06', *REPORTED), "target": "grown"},
+        msg('level_up', '30')] + stats + [
+        {"op": "03", "args": [], "target": "grow", "label": "next"},
+        # 레벨업 줄을 띄운 창은 명령 34 로 닫는다. 같은 일(BRK 95 FF)을 네이티브에서 하면 멈췄다
+        {**_cmd('34'), "label": "grown"}, call('walk_back'), _cmd('05', *_long(at['lineup_row'])),
+        msg('king_farewell'), _cmd('10', *REPORTED), call('walk_out'), _cmd('40'), _cmd('16')]
 
 
 def _rescued(speak, slot):
