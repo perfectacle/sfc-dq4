@@ -9,6 +9,8 @@ sfc/dq5/docs/dq5-graphics-format.md 의 「맵 OBJ 물체」·「탈것」·「�
     칸 바이트와 바꾼 칸 바이트는 16 뱅크 안의 같은 바이트를 찾아 가리키거나 --at(16 뱅크)에 놓는다.
     물체마다 인물 슬롯($81)을 하나 쓴다. 물체가 늘어난 실내 맵은 8 + 인물(그 맵 목록 가운데 가장 많은 수) + 물체에
     장면이 더 쓰는 슬롯(dq5npclists.SCENE_SLOTS)을 더해 20 을 넘으면 거부한다(슬롯 20 은 인물 표 다음 칸의 슬롯 0).
+    필드는 00:E1A9 가 $81 을 8 로 두고 그 세계($1949)의 물체만 놓으므로 8 + 물체가 20 을 넘으면 거부한다. 필드 물체의
+    첫 두 슬롯(8·9)은 탈것이 덮어쓴다(양탄자 1·8·9, 天空城 8·9, マスタードラゴン 7·8).
   탈것: 01:BD29(양탄자)·01:C436(天空城)·01:C087(マスタードラゴン)이 부분마다 LDY #칸 표 / JSL 16:F7D9 를 부른다.
     가로·세로 칸 수·방향·프레임 간격·옮겨 쓰는 블록 수($06)와 프레임 수(7E:32A0 bit0-3 = 마지막 프레임)는 같은 루틴의
     즉값이다. 칸 수·프레임 수가 그대로면 칸 바이트만 제자리에 쓴다. 바꾸면 그 탈것의 부분 모두의 칸 표를
@@ -18,6 +20,8 @@ sfc/dq5/docs/dq5-graphics-format.md 의 「맵 OBJ 물체」·「탈것」·「�
     그려(SCENES) 문서에 land0·land1·tenkuu0~3 열쇠로 둔다. 칸 수·프레임 수를 바꾸면 이 블록을 걷기 블록 뒤에 겹치지
     않게 두고 두 루틴의 프레임·간격 즉값을 고친다. 상하 반전은 01:C42D·01:C160 표가 슬롯 칸 목록에 나중에 더하므로
     칸 수가 그대로면 바꿀 수 없고, 바꾸면 표를 다시 쓴다(원래 표보다 길면 --vehicle-at 뒤에 두고 읽는 곳을 고침).
+    필드 OAM 은 00:EB3F 가 128장 한도를 보지 않고 이어 써 129장째부터 7E:0500 높은 표를 덮으므로, 칸 수를 바꾼 탈것은
+    부분마다 한 블록의 칸 수 합 + 주인공(RIDER)이 128 을 넘으면 거부한다.
   인물 세트(배 68 등): 세트 레코드 +3~+50 의 칸 48개(1F:CFC8·1F:D0FB 가 칸 목록으로 옮김). 자리는 00:F071(6타일)·
     00:F7AA(8타일)가 정한다. 타일 번호는 그 세트의 타일 수(+51)보다 작아야 한다.
 
@@ -32,7 +36,9 @@ sfc/dq5/docs/dq5-graphics-format.md 의 「맵 OBJ 물체」·「탈것」·「�
    "vehicles": [{"part": "80-1", "size": "3x2", "frames": 2, "cells": {"down0": ["09 0a 0b", "0c 0d h0c"], ...}}],
    "sets": [{"set": "68", "cells": {"down0": "18 19 1a 1b 1c 1d", ...}}]}
 map 은 "04/06", 그룹 전체 "04/**", 필드 "field0"(세계). cond 는 null·"day"·"night"(+4 bit7·bit6, 21:8000 이 7E:075E >= F0 을
-밤으로 봄). x·y 가 128 이면 스크립트가 놓는다. bit7(+6 bit7)은 쓰임을 모르는 원래 값으로, 없으면 0.
+밤으로 봄). 필드에서 y 의 아래 바이트가 80(128·384)이면 16:F741 이 위 바이트를 80 으로 두어 놓지 않고 스크립트가 놓는다.
+실내는 128 을 따로 보지 않아 그 셀에 그대로 놓인다(실내 맵은 폭 128·높이 124 이하라 맵 바로 밖이다).
+bit7(+6 bit7)은 쓰임을 모르는 원래 값으로, 없으면 0.
 8타일 세트(80~)의 cells 는 "up-head" 같은 머리 4칸과 "up0"·"up1" 몸 4칸이다.
 """
 import argparse
@@ -85,6 +91,9 @@ VEHICLE_FRAMES = {0x80: 0x01BD57, 0x81: None, 0x82: 0x01C0AA}
 # 06/00·06/05)가 37C7 = S(stride)·32A7 = 83(last)으로 프레임 0~3 을 그려 첫 칸 = (3 × S + 프레임 × 프레임 간격) / 2.
 SCENES = {'82-1': {'land': {'frame': 0x01BF86, 'last': 0x01BF81}, 'tenkuu': {'stride': 0x01BBB4, 'last': 0x01BBB9}}}
 TURN = 3
+# 탈것에 탄 채 함께 그려지는 주인공 OBJ 수의 최댓값(양탄자에 탄 어린 주인공 8, 어른 6, 天空城·マスタードラゴン 0).
+RIDER = 8
+OAM_LIMIT = 128
 TOKEN = re.compile(r'(h?)(v?)([0-9A-Fa-f]{2})')
 
 
@@ -222,16 +231,31 @@ def map_people(rom):
 
 
 def objects_on(heads, bc, bd, night):
-    """16:F60D 가 실내 맵 bc/bd 에 놓는 물체 수(+4 bit7 이면 낮밤으로 고르고 bit6 이 밤)."""
+    """16:F60D 가 실내 맵 bc/bd(bc = FE 면 필드 세계 bd)에 놓는 물체 수(+4 bit7 이면 낮밤으로 고르고 bit6 이 밤).
+    필드 항목은 +1 을 $1949 와 그대로 견준다(16:F685)."""
+    if bc == 0xFE:
+        return sum(h[0] == 0xFE and h[1] == bd and (not h[4] & 0x80 or bool(h[4] & 0x40) == night) for h in heads)
     return sum(h[0] == bc and h[1] & 0x7F in (0x7F, bd) and (not h[4] & 0x80 or bool(h[4] & 0x40) == night)
                for h in heads)
 
 
+def check_field_slots(old_heads, new_heads):
+    """필드 세계마다 물체가 늘었으면 8 + 물체(7E:1983)가 20 을 넘지 않는지. 세계 0 에 물체를 더해 1983 = 20 이면
+    주인공이 그대로이고 21 이면 슬롯 20(주인공 X·Y 칸)이 덮여 주인공이 사라졌다(dq5oamlimitcheck.py)."""
+    for world in sorted({h[1] for h in new_heads if h[0] == 0xFE}):
+        for night in (False, True):
+            count = objects_on(new_heads, 0xFE, world, night)
+            used = SLOT_FIRST + count
+            if count > objects_on(old_heads, 0xFE, world, night) and used > SLOT_END:
+                raise ValueError(f'field{world} {"밤" if night else "낮"}: 물체 뒤 슬롯 {used:#04x} 이 {SLOT_END:#04x} 를 넘음')
+
+
 def check_slots(rom, old_heads, new_heads):
     """물체가 늘어난 실내 맵마다 8 + 인물 + 물체(물체를 다 놓은 뒤의 7E:1983)에 장면이 더 쓰는 슬롯을 더해 20 을
-    넘으면 거부한다. 슬롯 20 은 인물 표 다음 칸의 슬롯 0(주인공)이다. 필드(FE)는 보지 않는다.
+    넘으면 거부한다. 슬롯 20 은 인물 표 다음 칸의 슬롯 0(주인공)이다. 필드(FE)는 check_field_slots 가 본다.
     dq5npclists 의 SLOT_LIMIT(1F)는 인물을 늘릴 때 원본 최댓값까지만 여는 기준이고, 여기서는 19/02 에서 $1983 = 20
     까지 그대로임을 잰 SLOT_END 를 쓴다."""
+    check_field_slots(old_heads, new_heads)
     maps = {(h[0], h[1] & 0x7F) for h in new_heads if h[0] != 0xFE}
     grown = [(bc, bd, night) for bc, bd in sorted(maps) for night in (False, True)
              if objects_on(new_heads, bc, bd, night) > objects_on(old_heads, bc, bd, night)]
@@ -424,6 +448,10 @@ def plan_vehicles(rom, rows, at=None):
             changed = (cols, rows_, dir_, frame) != (cur[n]['cols'], cur[n]['rows'], cur[n]['dir'], cur[n]['frame'])
             layout[n] = {'cols': cols, 'rows': rows_, 'dir': dir_, 'frame': frame, 'changed': changed}
         moved = any(v['changed'] for v in layout.values())
+        drawn = sum(v['cols'] * v['rows'] for v in layout.values())
+        if moved and drawn + RIDER > OAM_LIMIT:
+            raise ValueError(f'탈것 {vid:02X}: 부분마다 한 블록의 칸 {drawn}장 + 주인공 {RIDER}장이 OAM {OAM_LIMIT}장을 넘음'
+                             '(00:EB3F 가 넘친 OBJ 를 7E:0500 높은 표에 써 앞 OBJ 의 크기·X 위 비트가 깨짐)')
         if not moved:
             writes += plan_vehicle_cells(rom, names, by_part, cur)
             continue
@@ -661,7 +689,8 @@ def built(rom, manifest):
     from dq5build import REACHABLE, build, parse_at
     lists = [(parse_at(w['at'])[0], bytes.fromhex(w['hex']), bytes.fromhex(w['orig']) if 'orig' in w else None, w['note'])
              for w in manifest['writes']]
-    end = max(lorom(a) + len(d) for a, d, _, _ in lists) if lists else 0
+    # parse_at 이 이미 파일 위치를 돌려주므로 lorom 을 다시 거치면 롬 밖(뱅크 30~) 쓰기를 롬 안으로 잘못 본다.
+    end = max(a + len(d) for a, d, _, _ in lists) if lists else 0
     fits = [m for m, top in REACHABLE.items() if end <= top]
     if end > len(rom.d) and not fits:
         raise PatchError(f'쓰기 끝 {end:#x} 가 늘릴 수 있는 롬 크기를 넘음')

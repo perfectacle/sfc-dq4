@@ -157,11 +157,21 @@ class PatchTests(unittest.TestCase):
     def test_table_limit(self):
         most = (REGION_END - TABLE - 1) // 9
         self.assertEqual(most, 159)
-        # 필드 물체는 슬롯 한도를 보지 않아 표 한도만 걸린다.
+        # 필드 물체를 세계 열 곳에 나눠(세계마다 16개, 슬롯 8 + 16 = 0x18) 표 한도만 걸리게 한다.
         one = dict(self.doc['objects'][1], cells=['00'])
-        self.assertEqual([x['at'] for x in self.writes(dict(self.doc, objects=[one] * most))], ['16:F862'])
+        rows = [dict(one, map=f'field{i % 10}') for i in range(most + 1)]
+        self.assertEqual([x['at'] for x in self.writes(dict(self.doc, objects=rows[:most]))], ['16:F862'])
         with self.assertRaises(ValueError):
-            self.writes(dict(self.doc, objects=[one] * (most + 1)), at=0x16FE10)
+            self.writes(dict(self.doc, objects=rows), at=0x16FE10)
+
+    def test_field_slot_limit(self):
+        # 필드는 슬롯 8 부터 그 세계의 물체만 놓는다. 세계 0 에 낮 물체 24개(8 + 24 = 0x20)는 받고 25개는 거부한다.
+        one = dict(self.doc['objects'][1], cells=['00'])
+        self.writes(dict(self.doc, objects=[one] * 24))
+        with self.assertRaisesRegex(ValueError, 'field0 낮'):
+            self.writes(dict(self.doc, objects=[one] * 25))
+        # 다른 세계·밤 전용 물체는 세계 0 낮 수에 들지 않는다.
+        self.writes(dict(self.doc, objects=[one] * 24 + [dict(one, map='field1'), dict(one, cond='night')]))
 
     def test_at_past_bank_end(self):
         doc = dict(self.doc, objects=self.doc['objects'] + [dict(self.doc['objects'][0], cells=['11 12 13 14'])])
@@ -405,14 +415,38 @@ class VehicleLayoutTests(unittest.TestCase):
 
     def test_vflip_offset_limit(self):
         # 상하 반전 칸 오프셋은 칸 × 2 한 바이트라 칸 127(FE)까지다. 12x11 의 칸 130 은 거부한다.
+        # 한 블록 132칸은 OAM 한도에도 걸리므로 그 검사를 늦춰 이 규칙만 본다(여러 블록을 옮기는 82-2 는 OAM 안에서 닿음).
         cells = [' '.join(('v' if r * 12 + c == 130 else '') + f'{(r * 12 + c) % 0x80:02X}' for c in range(12))
                  for r in range(11)]
         doc = {'format': FORMAT, 'vehicles': [{'part': '81-2', 'size': '12x11', 'cells': {'all': cells}}]}
-        with self.assertRaisesRegex(ValueError, 'FE'):
-            patch(self.rom, doc, vehicle_at=0x04FEE0)
-        cells[10] = cells[10].replace('v', '')
-        cells[0] = 'v' + cells[0]
-        self.assertTrue(patch(self.rom, doc, vehicle_at=0x04FEE0)['writes'])
+        with mock.patch('dq5objlayout.OAM_LIMIT', 0x200):
+            with self.assertRaisesRegex(ValueError, 'FE'):
+                patch(self.rom, doc, vehicle_at=0x04FEE0)
+            cells[10] = cells[10].replace('v', '')
+            cells[0] = 'v' + cells[0]
+            self.assertTrue(patch(self.rom, doc, vehicle_at=0x04FEE0)['writes'])
+
+    def test_oam_limit(self):
+        # 칸 수를 바꾼 탈것은 부분마다 한 블록의 칸 합 + 주인공 8 이 128 을 넘으면 거부한다(1프레임 12x9 + 3x3 + 3x1 = 120).
+        def doc(size3):
+            out = []
+            for part, (c, r) in (('80-1', (12, 9)), ('80-2', (3, 3)), ('80-3', size3)):
+                rows = [' '.join(f'{(i * c + j) % 0x30:02x}' for j in range(c)) for i in range(r)]
+                out.append({'part': part, 'size': f'{c}x{r}', 'frames': 1,
+                            'cells': {f'{d}0': rows for d in ('up', 'right', 'down', 'left')}})
+            return {'format': FORMAT, 'vehicles': out}
+        self.assertTrue(patch(self.rom, doc((3, 1)), vehicle_at=0x0BFBB0)['writes'])
+        with self.assertRaisesRegex(ValueError, 'OAM'):
+            patch(self.rom, doc((4, 1)), vehicle_at=0x0BFBB0)
+
+    def test_vehicle_at_past_rom_end(self):
+        # 1.5MB 롬에서 --vehicle-at 30:8000 이면 롬을 2MB 로 늘려 빌드한다.
+        from dq5objlayout import built
+        rom = Rom(bytes(self.rom.d[:0x180000]))
+        after = built(rom, patch(rom, carpet_doc(rom, 3), vehicle_at=0x308000))
+        self.assertEqual(len(after.d), 0x200000)
+        self.assertEqual(vehicle_part(after, '80-1')['table'], 0x308000)
+        self.assertEqual(dump(after)['vehicles'], normalized(carpet_doc(rom, 3), rom)['vehicles'])
 
     def test_two_vehicles_in_one_doc(self):
         # 탈것 번호 차례로 --vehicle-at 뒤에 이어 둔다: 양탄자 3프레임(216칸) 다음에 天空城 부분 1(32칸)·2(12칸).
