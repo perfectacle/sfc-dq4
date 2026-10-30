@@ -29,7 +29,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from dq5field import BIT9_SITES, WORLDS, bit9_planes, block_count, rle, world_blocks  # noqa: E402
+from dq5field import BIT9_SITES, BIT11_BODY, WORLDS, bit9_planes, block_count, rle, world_blocks  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
 
 LOADERS = (0x01A5C2, 0x01A5F1, 0x01A620)
@@ -116,6 +116,8 @@ def changed_cells(rom):
             out.append((v['x'] >> 1, (v['y'] - 2 * k) >> 1))
     return out
 BIT9_ORIG = (bytes.fromhex('bf00e07ee210bb3fa0bc00f002a901eb'), bytes.fromhex('bf00e07ee21039a0bcf002a901eb'))
+# 11비트 훅이 JML 로 돌아갈 자리: 두 자리의 원래 9번째 비트 읽기(XBA 까지) 바로 다음 명령(00:BC43 JSR $BC4E 등).
+BIT11_RETURNS = tuple(site + len(orig) for site, orig in zip(BIT9_SITES, BIT9_ORIG))
 PLANE = SIZE // 8
 
 
@@ -143,27 +145,39 @@ def read_grid(path, count=BLOCK_COUNT):
 
 
 def bit9_hook(planes, planes10=(None, None, None)):
-    """00:BC33·00:BE06 대신(JSL, A 8비트, X 16비트 = 9번째 비트 바이트 자리, Y 아랫바이트 = 칸의 비트 0~7, A 윗바이트 = 번호 하위
-    8비트). planes·planes10 은 세계 0·1·2 의 10·11번째 비트 평면 주소(None 이면 그 비트는 0). 7E:E000 과 두 평면의 바이트를
-    스택에 쌓고, 11번째 비트부터 꺼내 Y 에 ROL 로 모은다. 나갈 때 A 아랫바이트 = 하위 8비트, 윗바이트 = 비트10 << 2 | 비트9 << 1
-    | 비트8 로 원래 루틴의 XBA 뒤와 같고, X·Y 는 원래처럼 칸의 비트 자리다. Y 의 윗바이트는 M 8비트·X 16비트의 TAY(00:BC32)가
-    A 윗바이트를 함께 옮긴 것이라, 원래 루틴처럼 SEP #$10 으로 지운 뒤 TYX 한다. 마스크는 원래처럼 00:BCA0 을 긴 주소로 읽는다.
-    11번째 비트 평면이 없으면 10번째 비트만 읽는 짧은 훅을 낸다. 이 훅은 명령이 22개에서 35개로 늘어 세계 0 의 움직이는 타일
-    위상과 세계 2 의 첫걸음이 원본 게임보다 늦어지므로 쓰지 않을 때는 피한다."""
+    """00:BC33·00:BE06 대신(A 8비트, X 16비트 = 9번째 비트 바이트 자리, Y 아랫바이트 = 칸의 비트 0~7, A 윗바이트 = 번호 하위
+    8비트). planes·planes10 은 세계 0·1·2 의 10·11번째 비트 평면 주소(None 이면 그 비트는 0). 7E:E000 과 10번째 비트 평면
+    바이트를 스택에 쌓고 11번째 비트 평면 바이트는 A 에 둔 채, 11번째 비트부터 Y 에 모은다. 나갈 때 A 아랫바이트 = 하위
+    8비트, 윗바이트 = 비트10 << 2 | 비트9 << 1 | 비트8 로 원래 루틴의 XBA 뒤와 같고, X·Y 는 원래처럼 칸의 비트 자리다. Y 의
+    윗바이트는 M 8비트·X 16비트의 TAY(00:BC32)가 A 윗바이트를 함께 옮긴 것이라, 원래 루틴처럼 SEP #$10 으로 지운 뒤 TYX 한다.
+    마스크는 원래처럼 00:BCA0 을 긴 주소로 읽는다. 11번째 비트 평면이 없으면 10번째 비트만 읽는 짧은 훅(JSL)을 낸다.
+    필드를 불러오고 걸을 때 화면 칸마다 불려(필드에 내려 네 방향으로 걷는 동안 1,090번), 몇 사이클만 길어도 불러오기가
+    한 프레임 늦어진다. 그래서 두 자리마다 몸통을 따로 두고 JML 로 들어가 JML 로 원래 다음 명령(BIT11_RETURNS)에 돌아가며
+    (JSL·RTL·BRA 대신), 세계마다 마무리를 따로 붙여 BRA 를 없애고, 평면이 없는 비트는 LDA #0 만 쓴다.
+    [BRA][평면 18바이트][00:BC33 몸통][00:BE06 몸통] 이고 둘째 몸통 자리는 bit11_entries 가 준다."""
     if not any(planes10):
         return bit10_hook(planes)
-    read = lambda p: b'\xbf' + p.to_bytes(3, 'little') if p else b'\xa9\x00\xea\xea'
-    last = read(None) + b'\x48' + read(None) + b'\x48'
-    arms = b''
-    for k in range(3):
-        arms += read(planes[k]) + b'\x48' + read(planes10[k]) + b'\x48' + b'\x80' + bytes([(2 - k) * 12 + len(last)])
-    # 세계 0·1·2 의 갈래는 12바이트씩이고 넷째 세계(0)는 BRA 없이 tail 로 이어진다.
-    head = (b'\xbf\x00\xe0\x7e\x48\xaf\x49\x19\x7e\x29\x03'
-            + b'\xf0\x08\x3a\xf0\x11\x3a\xf0\x1a\x80\x24')
-    bit = b'\x68\x3f\xa0\xbc\x00\xc9\x01\x98\x2a\xa8'
-    tail = b'\xe2\x10\xbb\xa0\x00' + bit * 3 + b'\x9b\xeb\x6b'
-    return (bytes([0x80, 18]) + b''.join((p or 0).to_bytes(3, 'little') for p in (*planes, *planes10))
-            + head + arms + last + tail)
+    read = lambda p: b'\xbf' + p.to_bytes(3, 'little') if p else b'\xa9\x00'  # noqa: E731
+    arm = [read(planes[k]) + b'\x48' + read(planes10[k]) for k in range(3)]
+    # 비트마다 AND 마스크 뒤 0 이 아니면 Y 에 4·2·1 을 더한다(CMP·ROL 로 모으는 것보다 빠름).
+    mask = b'\x3f\xa0\xbc\x00'
+    bits = (b'\xe2\x10\xbb' + mask + b'\xf0\x02\xa9\x04\xa8'
+            + b'\x68' + mask + b'\xf0\x02\xc8\xc8' + b'\x68' + mask + b'\xf0\x01\xc8' + b'\x98\x9b\xeb')
+    # 세계는 짧은 주소로 읽는다. 두 자리에서 DB 는 00(00:BE06 의 원래 AND $BCA0,Y 가 전제)이거나 7E 라 $1949 가 WRAM 이다.
+    head = b'\xbf\x00\xe0\x7e\x48\xad\x49\x19'
+    bodies = b''
+    for back in BIT11_RETURNS:
+        tail = bits + b'\x5c' + back.to_bytes(3, 'little')
+        # 세계 0 은 분기 없이 이어지고, 나머지는 CMP #2 한 번으로 1(BCC)·2(이어짐)·3 이상(BNE, 평면 없음)을 가른다.
+        w0, w2, w1, zero = arm[0] + tail, arm[2] + tail, arm[1] + tail, b'\xa9\x00\x48' + tail
+        bodies += head + b'\xd0' + bytes([len(w0)]) + w0
+        bodies += b'\xc9\x02\x90' + bytes([2 + len(w2) + len(zero)]) + b'\xd0' + bytes([len(w2)]) + w2 + zero + w1
+    return bytes([0x80, 18]) + b''.join((p or 0).to_bytes(3, 'little') for p in (*planes, *planes10)) + bodies
+
+
+def bit11_entries(hook):
+    """11비트 훅 안 두 몸통의 자리(훅 처음에서 센 바이트). 두 몸통은 길이가 같다."""
+    return BIT11_BODY, BIT11_BODY + (len(hook) - BIT11_BODY) // 2
 
 
 def bit10_hook(planes):
@@ -221,7 +235,7 @@ def plane_writes(rom, data, grids, at):
         return [], 2
     if at is None:
         raise ValueError(f'세계 {sorted(wide)} 가 번호 512 이상을 씀: --planes-at 으로 10·11번째 비트 평면 자리를 줄 것')
-    if rom.u8(BIT9_SITES[0]) == 0x22 or any(bit9_planes(rom)):
+    if rom.u8(BIT9_SITES[0]) in (0x22, 0x5C) or any(bit9_planes(rom)):
         raise ValueError('이미 10번째 비트 훅이 있는 롬: 평면을 쓰는 세계를 모두 한 번에, 훅이 없는 롬으로 만들 것')
     for site, want in zip(BIT9_SITES, BIT9_ORIG):
         if data[lorom(site):lorom(site) + len(want)] != want:
@@ -231,13 +245,14 @@ def plane_writes(rom, data, grids, at):
         bad = [(x, y) for x, y in cells if g[y * 256 + x] >> 9]
         if bad:
             raise ValueError(f'세계 {w} 블록 칸 {bad[0]}: 게임이 00:CF50 으로 바꾸는 칸이라 10·11번째 비트를 쓸 수 없음(512 미만만)')
-    eleven = any(v >> 10 for g in wide.values() for v in g)
-    size = len(bit9_hook([None] * 3, [0x8000 if eleven else None] * 3))
+    # 11비트 훅은 평면이 없는 세계의 읽기를 짧게 내므로, 길이는 실제로 둘 평면과 같은 자리에 아무 주소를 넣어 센다.
+    used = {bit: [w in wide and any(v >> bit & 1 for v in wide[w]) for w in range(3)] for bit in (9, 10)}
+    size = len(bit9_hook(*([0x8000 if u else None for u in used[bit]] for bit in (9, 10))))
     if (at & 0xFFFF) + size > 0x10000:
         raise ValueError(f'--planes-at: 훅 {size}바이트가 한 뱅크 안에 들어가지 않음')
     planes, a, out = {9: [None] * 3, 10: [None] * 3}, at + size, []
     for w, bit in ((w, bit) for w in sorted(wide) for bit in (9, 10)):
-        if not any(v >> bit & 1 for v in wide[w]):
+        if not used[bit][w]:
             continue
         # 훅이나 앞 평면이 뱅크 끝에 딱 맞으면 a 가 다음 뱅크 0000 이 되는데, 그 자리는 LoROM 의 롬이 아니다
         if a & 0xFFFF < 0x8000:
@@ -252,9 +267,14 @@ def plane_writes(rom, data, grids, at):
         a += PLANE
     hook = bit9_hook(planes[9], planes[10])
     out.insert(0, {'at': f'{at >> 16:02X}:{at & 0xFFFF:04X}', 'hex': hook.hex(' '), 'note': '블록 번호 10·11번째 비트 훅'})
-    for site, want in zip(BIT9_SITES, BIT9_ORIG):
-        skip = len(want) - 6
-        raw = b'\x22' + at.to_bytes(3, 'little') + b'\x80' + bytes([skip]) + b'\xea' * skip
+    entries = bit11_entries(hook) if any(planes[10]) else (0, 0)
+    for site, want, entry in zip(BIT9_SITES, BIT9_ORIG, entries):
+        if any(planes[10]):
+            # 11비트 훅은 JML 로 들어가 원래 다음 명령으로 JML 해 돌아오므로 뒤 바이트는 실행되지 않는다.
+            raw = b'\x5c' + (at + entry).to_bytes(3, 'little') + b'\xea' * (len(want) - 4)
+        else:
+            skip = len(want) - 6
+            raw = b'\x22' + at.to_bytes(3, 'little') + b'\x80' + bytes([skip]) + b'\xea' * skip
         out.append({'at': f'{site >> 16:02X}:{site & 0xFFFF:04X}', 'hex': raw.hex(' '), 'orig': want.hex(' '),
                     'note': '9번째 비트 읽기를 10·11번째 비트 훅으로'})
     end = lorom(a - 1) + 1
