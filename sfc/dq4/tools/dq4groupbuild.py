@@ -54,7 +54,8 @@ from kr_patch.fc import ines  # noqa: E402
 LINKS = {
     0x36: [{"fc": 0x02, "arrival": (0x00, 0x1D), "attrs": "03/00", "music": 0x01, "field": [(0xA4, 0x2E)],
             "out": "left:64"}],
-    0x37: [{"fc": 0x12, "arrival": (0x0D, 0x19), "attrs": "19/02", "field": [(0x9A, 0x16)], "out": "down:64"}],
+    # 마을 곡: 19/02 의 곡 바이트 07 은 사운드 포팅에서 楽しいカジノ 자리라, FC 마을 곡 0C 街でのひととき 가 든 06 으로
+    0x37: [{"fc": 0x12, "arrival": (0x0D, 0x19), "attrs": "19/02", "music": 0x06, "field": [(0x9A, 0x16)], "out": "down:64"}],
     # 古井戸の底, the tower of chapter 1's end, and the house of 41/00. Their attributes are a placeholder
     # (the castle's: no encounters) until the DQ4 encounters and music are ported.
     0x38: [{"fc": 0x1C, "arrival": (0x0D, 0x10), "attrs": "03/00", "field": [(0xA2, 0x1A)], "out": "down:64"}],
@@ -67,7 +68,7 @@ LINKS = {
     0x3B: [{"fc": 0x3A, "arrival": (0x03, 0x02), "map": 2, "attrs": "03/00", "field": None, "out": None}],
     # The prologue's village (FC 14/00). The field leads to the ruined 14/02, so this arrival is the same cell
     # of 14/00. The prologue places its own people: the FC people of 14/00 belong to chapter 5's start.
-    0x3C: [{"fc": 0x14, "arrival": (0x0C, 0x18), "attrs": "19/02", "field": [(0x91, 0x31)], "out": "down:64",
+    0x3C: [{"fc": 0x14, "arrival": (0x0C, 0x18), "attrs": "19/02", "music": 0x06, "field": [(0x91, 0x31)], "out": "down:64",
             "people": False}],
 }
 # The attribute table grows by 6 bytes a map and outgrows its own bank (108 spare bytes), so it moves whole.
