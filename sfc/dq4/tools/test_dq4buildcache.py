@@ -34,7 +34,7 @@ class BuildCacheTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         self.addCleanup(self.tmp.cleanup)
-        for f in (cache._tool_hash, cache._refs, cache._digest):
+        for f in (cache._tool_hash, cache._refs, cache._digest, cache._toolkit_hash):
             f.cache_clear()
 
     def call(self, src, out):
@@ -75,7 +75,7 @@ class BuildCacheTests(unittest.TestCase):
         src.write_text('a')
         self.call(src, self.root / 'out.txt')
         self.tool.write_text(TOOL + '# changed\n')
-        for f in (cache._tool_hash, cache._refs, cache._digest):
+        for f in (cache._tool_hash, cache._refs, cache._digest, cache._toolkit_hash):
             f.cache_clear()
         self.call(src, self.root / 'out.txt')
         self.assertEqual(self.count(), 2)
@@ -88,6 +88,22 @@ class BuildCacheTests(unittest.TestCase):
             self.call(src, self.root / 'out.txt')
         self.assertEqual(self.count(), 2)
         self.assertFalse((self.root / 'cache').exists())
+
+    def test_folder_output_keeps_only_files_the_tool_wrote(self):
+        tool = self.root / 'dirtool.py'
+        tool.write_text('import sys\nfrom pathlib import Path\n'
+                        '(Path(sys.argv[sys.argv.index("-o") + 1]) / "made.txt").write_text(sys.argv[1])\n')
+        out = self.root / 'folder'
+        out.mkdir()
+        (out / 'old.txt').write_text('left over')
+        cache.run(tool, 'v1', '-o', out)
+        entry = next(p for p in (self.root / 'cache' / 'calls').iterdir() if not p.name.startswith('.'))
+        self.assertEqual(sorted(p.name for p in (entry / 'out0').iterdir()), ['made.txt'])
+        fresh = self.root / 'fresh'
+        fresh.mkdir()
+        cache.run(tool, 'v1', '-o', fresh)
+        self.assertEqual((fresh / 'made.txt').read_text(), 'v1')
+        self.assertFalse((fresh / 'old.txt').exists())
 
     def test_failure_raises_with_stderr(self):
         bad = self.root / 'bad.py'
