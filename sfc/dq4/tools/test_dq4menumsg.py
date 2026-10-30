@@ -14,7 +14,7 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual(mm.code('ㄱ'), 0x3DB)
         self.assertEqual(mm.code('가'), 0x3DB + len(ne.JAMO))
         self.assertEqual(mm.code(' '), 0)
-        self.assertLess(mm.code(mm.PUNCT[-1]), 0x1000)       # 24:81B0 은 1000 미만만 글자로 봄
+        self.assertLess(mm.code(mm.SIGNS[-1]), 0x1000)       # 24:81B0 은 1000 미만만 글자로 봄
 
     def test_texts_keep_slot_variable_and_end(self):
         for parts in mm.TEXTS.values():
@@ -81,15 +81,15 @@ class BuildTests(unittest.TestCase):
         from dq5text import FONT_TABLE_OPERANDS, glyph
         rom = Rom(self.out)
         table, groups, start = rom.u24(FONT_TABLE_OPERANDS[0][0]), [], 0
-        while start <= mm.code(mm.PUNCT[-1]):
+        while start <= mm.code(mm.SIGNS[-1]):
             count, b4 = rom.u16(table) & 0xFFF, rom.u8(table + 4)
             groups.append((start, count, rom.u8(table + 1) >> 4, b4 >> 2 & 0xF, ((b4 & 3) + 7) << 16 | rom.u16(table + 2)))
             start += count
             table += 5
-        for ch in ('ㄱ', ne.GLYPHS[627], ne.GLYPHS[628], '힝', ne.GLYPHS[-1], *mm.PUNCT):
+        for ch in ('ㄱ', ne.GLYPHS[627], ne.GLYPHS[628], '힝', ne.GLYPHS[-1], *mm.SIGNS):
             w, h, rows = glyph(rom, mm.code(ch), groups)
             pic = [''.join('#' if v else '.' for v in r) for r in rows]
-            want = mm.punct_rows(self.font, ch) if ch in mm.PUNCT else (w, mm.hangul_rows(self.font, ch))
+            want = mm.punct_rows(self.font, ch) if ch in mm.SIGNS else (w, mm.hangul_rows(self.font, ch))
             self.assertEqual((w, pic), (want[0], want[1]), ch)
 
     def test_messages_decode_from_new_bank(self):

@@ -47,6 +47,37 @@ def alt_name(state, m):
 FC_SOLDIER = 0x148
 SOLDIER_PATH = ((0x0E, 0x18), (0x0E, 0x16), (0x0B, 0x16), (0x0B, 0x14))
 KIDS_HOME_ROW = 0x17            # FC 1D 이벤트 33: 12/00 에서 일행이 이 줄에 오면 아이들이 엄마에게 간다
+# 엄마 곁의 두 아이(FC 12/00 슬롯 19·13)는 따라옴 깃발이 꺼질 때 일행 뒤에서 나타나 집으로 걷는다(FC 레코드 09·17 의
+# 길). FC 는 일행 그림 자리에 세우지만 여기서는 통로 아래 칸에서 나타나고, 주인공을 지나가도록 1C 를 켠다.
+# (FC 집 칸, 나타나는 칸, 길, 마지막 방향)
+KIDS_WALK_HOME = (((0x0E, 0x12), (0x0E, 0x19), ((0x0E, 0x12),), 0x22),
+                  ((0x0C, 0x11), (0x0D, 0x19), ((0x0D, 0x13), (0x0C, 0x13), (0x0C, 0x11)), 0x22))
+KIDS_FC_WALKERS = ((0x17, 0x1A), (0x16, 0x1A))  # FC 가 일행 자리로 옮겨 걷게 하는 슬롯 0F·17. 여기서는 집의 아이가 걷는다
+
+# 보스 뒤 왕좌의 방(FC 1C:$8184). 병사 8명이 카펫에 두 줄로 섰다가 주인공이 Y=19 줄에 오면(1D 이벤트 36) 통로 양옆으로
+# 갈라서고, 주인공이 (10,15)에 오면 왕이 말을 건다(1D 이벤트 37). FC 는 일행을 (10,15)까지 자동으로 걷게 하지만 여기서는
+# 걷는 것은 플레이어가 하고 그 줄에 오면 왕이 말한다. 병사·왕·대신은 말을 걸면 아무도 없다(FC 02F0)
+THRONE_KING, THRONE_MINISTER = (0x10, 0x13), (0x0F, 0x13)
+THRONE_GUARDS = (((0x0E, 0x1A), 'right'), ((0x11, 0x1A), 'left'))   # FC 대화 26A(0609)
+LINEUP_ROW, KING_ROW = 0x19, 0x15
+# (처음 칸, 길, 마지막 방향 31E0). 옆으로만 가면 이웃 병사에 막히므로 한 칸 올라선 뒤 옆으로 간다
+THRONE_SOLDIERS = (
+    ((0x0F, 0x18), ((0x0F, 0x17), (0x0E, 0x17)), 0x11), ((0x10, 0x18), ((0x10, 0x17), (0x11, 0x17)), 0x22),
+    ((0x0F, 0x16), ((0x0F, 0x15), (0x0E, 0x15)), 0x11), ((0x10, 0x16), ((0x10, 0x15), (0x11, 0x15)), 0x22),
+    ((0x11, 0x18), (), 0x22), ((0x11, 0x16), (), 0x22), ((0x0E, 0x18), (), 0x11), ((0x0E, 0x16), (), 0x11))
+GIFT_EXP = 3000                 # FC 1D 이벤트 37: 경험치를 프레임마다 10씩 300번 더함(실측: ライアン 0 → 3000)
+HERO_EXP = 0x7E204B             # 일행 첫 기록 +B~+D
+HERO_LEVEL = 0x7E2052           # 일행 첫 기록 +12
+
+# 탑 위 30/04: 주인공이 X≥16, Y=12 에 오면 잡힌 아이(슬롯 08, (17,0D))가 (17,11)까지 와서 운다(1D 이벤트 04, 02F5).
+# 이기면 철창(블록 12·13·16·17, (10~11,0C~0D))을 바닥으로 바꾸고(슬롯 0D·0E 의 BRK 1E 09) 아이들이 걸어 나온다
+CRY_FROM, CRY_ROW, CRY_TO = 0x16, 0x12, (0x17, 0x11)
+CAGE, CAGE_FLOOR_DX = (0x10, 0x0C), 2   # 철창 왼쪽 위 FC 칸, 같은 줄에서 바닥 블록 06 이 있는 칸까지(FC 칸)
+# 구한 아이(슬롯 0C·0D·0E)가 걸어 나가 서는 길. FC 는 0D 가 (13,0D)→(17,0E), 0E 가 (17,0C) 이지만 두 길이 엇갈려,
+# 한 줄씩 곧장 나오게 바꿨다
+# (처음 칸, 길)
+RESCUED_PATHS = {0x0C: ((0x17, 0x13), ((0x17, 0x0F),)), 0x0D: ((0x0F, 0x0C), ((0x17, 0x0C),)),
+                 0x0E: ((0x0F, 0x0D), ((0x17, 0x0D), (0x17, 0x0E)))}
 
 FRONT, FRONT_NIGHT, IMURU, JAIL = '36/00', '36/03', '37/00', '37/02'
 UNDER_WELL, HOIMIN_ROOM = '3B/00', '3B/03'
@@ -115,6 +146,14 @@ MESSAGES = {
     'king_farewell': say('@!/부디 조심해서/가거라!'),
     # FC 0346(1A:$B829): 같은 방문에 성 앞에 들어서면. 이름 뒤 조사를 피해 옮김
     'chapter_end': ch1.narrate('이리하여 이 땅/어딘가에 있는 용사를/찾아 @의 여행이/시작되었다……'),
+    # 보스 뒤 왕좌의 방 문지기(FC 0609)
+    'guard_wait': say('자!/임금님께서 기다리고/계십니다!'),
+    # FC 는 말 없이 강함 창의 경험치가 3000 까지 오른다. 창 대신 서술로 알린다
+    'gift': ch1.narrate('@의 경험치가/3000 포인트 올랐다!'),
+    # FC 「ライアンは レベルが あがった！」. 이름 뒤 조사를 피해 옮김
+    'level_up': ch1.narrate('@의 레벨이 올랐다!'),
+    # FC 02F5
+    'cry': say('으앙, 으앙……/살려 줘!'),
 }
 
 
@@ -127,7 +166,7 @@ def texts(first):
     return {first + k: parts for k, parts in enumerate(MESSAGES.values())}
 
 
-TALKS = ('child', 'alex_night', 'flare_day', 'flare_night', 'hoimin', 'boss', 'soldier', 'king')
+TALKS = ('child', 'alex_night', 'flare_day', 'flare_night', 'hoimin', 'boss', 'soldier', 'king', 'guard')
 
 
 def talk_numbers(first_talk):
@@ -181,6 +220,7 @@ def talk_scripts(first_message):
           "else": [{"op": "if", "cond": {"code": "1B", "index": KIDS_FOLLOW[0], "mask": KIDS_FOLLOW[1]},
                     "then": _msg(m['king_back']),
                     "else": [_msg(m['king_praise']), _msg(m['king_farewell']), _flag_on(REPORTED)]}]}],
+        [_msg(m['guard_wait'])],
     ]
 
 
@@ -198,10 +238,20 @@ THANKS_SRC, THANKS_SCRIPT = {"list": "05:90D0", "index": 6}, "05:9102"
 SOLDIER_SRC, SOLDIER_SCRIPT = {"list": "05:90D0", "index": 7}, "05:910F"
 KIDS_HOME_SRC, KIDS_HOME_SCRIPT = {"list": "05:90D0", "index": 8}, "05:9126"
 ENDER_SRC, ENDER_SCRIPT = {"list": "05:90D0", "index": 9}, "05:9155"
+# 03/05 의 남은 한 벌 스크립트 인물
+_SPARE = ((5, "05:9304"), (7, "05:9358"), (8, "05:93A9"), (15, "05:9421"), (16, "05:942C"), (17, "05:9479"),
+          (18, "05:94CB"), (19, "05:94E6"), (20, "05:94F1"), (21, "05:951D"))
+_SPARE = [({"list": "05:9239", "index": i}, at) for i, at in _SPARE]
+# 병사: 걷는 넷은 하나씩, 돌기만 하는 넷은 방향마다 하나
+SOLDIER_SRCS = _SPARE[:4] + [_SPARE[4], _SPARE[4], _SPARE[5], _SPARE[5]]
+KING_CALL_SRC, KING_CALL_SCRIPT = _SPARE[6]
+CRY_SRC, CRY_SCRIPT = _SPARE[7]
+RESCUED2_SRC, RESCUED2_SCRIPT = _SPARE[8]
+HOME_KID_SRCS = (_SPARE[9], ({"list": "05:9768", "index": 0}, "05:976F"))
 END_MAP = '36/00'               # 1장 끝은 보고한 뒤 성 앞에 들어설 때(FC 는 같은 방문 안, $6285 는 필드로 나가면 지워짐)
 # 탑 위 30/04 의 FC 인물 슬롯(06 부터 차례): 06 보스, 07·08 잡힌 아이, 09 마물은 이기면 숨고, 0C~0E 의 구한 아이는
 # 이기기 전에 숨는다(1C:$A266). 0C 가 고맙다고 말한다
-TOP_HIDE_ON_WIN, TOP_RESCUED = (0x06, 0x07, 0x08, 0x09), (0x0C, 0x0D, 0x0E)
+TOP_HIDE_ON_WIN, TOP_RESCUED, CRY_SLOT = (0x06, 0x07, 0x08, 0x09), (0x0C, 0x0D, 0x0E), 0x08
 FIRST_SLOT = 0x06
 # 보스 전투: DQ5 빈 이벤트 무리 30 에 FC 무리 05(ピサロのてさき·おおめだま 한 마리씩).
 # 01:868B 는 전투 뒤 01:8715 로 가서, 지면(A = 80) 보통 전투처럼 전멸 처리(01:88ED)를 한다
@@ -302,16 +352,87 @@ def _join(record_at):
     return ENTER + body + LEAVE
 
 
-def _at(x, y):
+def _at(x, y, x_from=False, away=False):
     """인물 명령 05 가 부르는 루틴: 주인공(인물 표 슬롯 0, 7E:3020·3080)이 셀 (x, y) 이면 A = 0, 아니면 1.
-    x 가 None 이면 Y 만 본다."""
-    near = bytes((0xC2, 0x30, 0xA9, 0x00, 0x00, 0x28, 0x6B))
-    far = bytes((0xC2, 0x30, 0xA9, 0x01, 0x00, 0x28, 0x6B))
+    x 가 None 이면 Y 만 보고, x_from 이면 X 는 x 이상인지 본다. away 면 0 과 1 을 바꾼다(그 자리를 떠날 때까지)."""
+    near = bytes((0xC2, 0x30, 0xA9, int(away), 0x00, 0x28, 0x6B))
+    far = bytes((0xC2, 0x30, 0xA9, int(not away), 0x00, 0x28, 0x6B))
     second = bytes((0xAF, 0x80, 0x30, 0x7E, 0xC9, y, 0xD0, len(near)))
     first = bytes((0x08, 0xE2, 0x20))
     if x is not None:
-        first += bytes((0xAF, 0x20, 0x30, 0x7E, 0xC9, x, 0xD0, len(second) + len(near)))
+        first += bytes((0xAF, 0x20, 0x30, 0x7E, 0xC9, x, 0x90 if x_from else 0xD0, len(second) + len(near)))
     return first + second + near + far
+
+
+def _gift():
+    """주인공 경험치에 GIFT_EXP 를 더한다."""
+    from dq4chapterbox import ENTER, LEAVE
+    lo, hi = GIFT_EXP & 0xFF, GIFT_EXP >> 8
+    body = (bytes((0xC2, 0x20, 0xAF)) + _al(HERO_EXP) + bytes((0x18, 0x69, lo, hi, 0x8F)) + _al(HERO_EXP) +
+            bytes((0xE2, 0x20, 0xAF)) + _al(HERO_EXP + 2) + bytes((0x69, 0x00, 0x8F)) + _al(HERO_EXP + 2))
+    return ENTER + body + LEAVE
+
+
+# 전투 끝의 레벨업 고리(25:8A91)가 한 번 오를 때 하는 일에서 메시지만 뺀 것. 그 고리의 메시지는 전투 메시지 길이라
+# 필드 창에서는 글자가 깨지고 멈췄다(실측). 23:EB50 은 오른 양을 $00~$09 에 둘 뿐 레벨은 올리지 않아(레벨 1 그대로
+# 능력치만 끝없이 올랐음), 기록 +12 를 직접 올린다. 25:8B07 의 BRK 89 80 29 를 따라 부르면 남은 $43~$45 가 경험치를
+# 덮었다. 25:8B2F~8BAD 는
+# 오른 양마다 BRK 8D 80 필드로 기록에 더하고(둘은 16비트라 $44 를 0 으로), 배운 주문 비트를 BRK 89 80 D2 로 쓴다.
+# 21:805A 가 다음 레벨 경험치를 다시 셈하고, 25:8B07 은 팡파르 21 을 울린다(24:FF0F, 20:8218)
+LEVEL_UP = 0x23EB50
+GROWTH = ((0, 0x06, True), (1, 0x0E, True), (2, 0x1D, False), (3, 0x18, False), (6, 0x1F, False), (4, 0x21, False),
+          (5, 0x23, False))
+
+
+def _level_up():
+    """주인공이 경험치로 한 레벨 오를 수 있으면 올리고 보고 깃발을 끄고, 아니면 보고 깃발을 켠다(스크립트가 이 깃발로
+    「레벨이 올랐다」를 되풀이할지 고른다)."""
+    from dq4chapterbox import ENTER, LEAVE
+    flag = 0x7E2190 + REPORTED[0]
+    done = bytes((0xAF,)) + _al(flag) + bytes((0x09, REPORTED[1], 0x8F)) + _al(flag)
+    up = bytearray(bytes((0xAF,)) + _al(flag) + bytes((0x29, ~REPORTED[1] & 0xFF, 0x8F)) + _al(flag))
+    up += bytes((0xA2, 0x09, 0xB5, 0x00, 0x9F)) + _al(SCRATCH) + bytes((0xCA, 0x10, 0xF7))   # $00~$09 를 SCRATCH 로
+    up += bytes((0xAF,)) + _al(HERO_LEVEL) + bytes((0x1A, 0x8F)) + _al(HERO_LEVEL)          # 레벨 +1
+    for k, field, wide in GROWTH:
+        add = bytes((0x85, 0xF5, 0xEB, 0xA9, 0x00)) + (bytes((0x64, 0x44)) if wide else b'') + bytes((0x00, 0x8D, 0x80, field))
+        up += bytes((0xAF,)) + _al(SCRATCH + k) + bytes((0xF0, len(add))) + add
+    for k in range(3):
+        up += bytes((0xAF,)) + _al(SCRATCH + 7 + k) + bytes((0x85, 0x43 + k))
+    up += bytes((0x64, 0x42, 0x00, 0x89, 0x80, 0xD2,                                         # STZ $42 / BRK 89 80 D2
+                 0xA9, 0x00, 0x22, 0x5A, 0x80, 0x21,                                         # LDA #0 / JSL 21:805A
+                 0xA9, 0x21, 0x22, 0x0F, 0xFF, 0x24, 0x22, 0x18, 0x82, 0x20))                # 팡파르
+    body = (bytes((0xE2, 0x20, 0xC2, 0x10, 0xA9, 0x00, 0x22)) + _al(LEVEL_UP) +            # SEP / REP / LDA #0 / JSL
+            bytes((0xE2, 0x10, 0xB0, len(done) + 3)) + done + bytes((0x82, *len(up).to_bytes(2, 'little'))) + bytes(up))
+    return ENTER + body + LEAVE
+
+
+# 01:C800 의 인물 스크립트 고리가 직접 페이지 앞자리를 쓰므로, 그 자리를 덮는 루틴(25:FA15, 23:EB50 등)을 부르는
+# 네이티브는 $00~$0F 를 스택에 두었다가 되돌린다. M·X 8비트에서
+DP_SAVE = bytes((0xA2, 0x0F, 0xB5, 0x00, 0x48, 0xCA, 0x10, 0xFA))                 # LDX #$0F / LDA $00,X / PHA / DEX / BPL
+DP_RESTORE = bytes((0xA2, 0x00, 0x68, 0x95, 0x00, 0xE8, 0xE0, 0x10, 0xD0, 0xF8))  # LDX #0 / PLA / STA $00,X / INX / CPX / BNE
+
+
+CELL_AT = 0x25FA15              # X·Y(8비트) 셀의 셀 버퍼 주소를 [$00] 에(맵 폭 $BF)
+REDRAW_LOWER, REDRAW_UPPER = 0x01ED56, 0x01EDF0   # (X, Y) 부터 $1E82×$1E83 셀을 다시 그림(문 열기가 쓰는 것)
+
+
+def _open_cage():
+    """철창 4×4 셀을 같은 줄 오른쪽 바닥 셀의 +1~+7 로 덮고(+0 의 구역·차지 비트는 둠) 다시 그린다."""
+    from dq4chapterbox import ENTER, LEAVE
+    x0, y0 = CAGE[0] * 2, CAGE[1] * 2
+    dx = CAGE_FLOOR_DX * 2
+    body = bytearray((0xE2, 0x30)) + DP_SAVE                                  # SEP #$30
+    for y in range(y0, y0 + 4):
+        for x in range(x0, x0 + 4):
+            body += bytes((0xA2, x + dx, 0xA0, y, 0x22)) + _al(CELL_AT)           # LDX / LDY / JSL
+            body += bytes((0xA0, 0x07, 0xB7, 0x00, 0xBB, 0x9F)) + _al(SCRATCH) + bytes((0x88, 0xD0, 0xF6))
+            body += bytes((0xA2, x, 0xA0, y, 0x22)) + _al(CELL_AT)
+            body += bytes((0xA0, 0x07, 0xBB, 0xBF)) + _al(SCRATCH) + bytes((0x97, 0x00, 0x88, 0xD0, 0xF6))
+    body += bytes((0xA9, 0x04, 0x8D, 0x82, 0x1E, 0x8D, 0x83, 0x1E))                  # 크기 4×4
+    for redraw in (REDRAW_LOWER, REDRAW_UPPER):
+        body += bytes((0xA2, x0, 0xA0, y0, 0x22)) + _al(redraw)
+    body += bytes((0xE2, 0x30)) + DP_RESTORE
+    return ENTER + bytes(body) + LEAVE
 
 
 # そらとぶくつ: DQ5 의 처리(11:8D77)는 $0B54 = 24 와 필드 (017E,0170)를 두고 날기 루틴(11:80D3)으로 간다.
@@ -359,6 +480,13 @@ def native(data=None):
     out += bytes((0x90, TOWER, number, *ch1_cell(x, y), 0x01, 0x80, 0xFF))
     at['fly'] = CODE_AT + len(out)
     out += _fly(at['fly_event'])
+    for name, code in (('lineup_row', _at(None, ch1_cell(0, LINEUP_ROW)[1])),
+                       ('king_row', _at(None, ch1_cell(0, KING_ROW)[1])),
+                       ('king_away', _at(None, ch1_cell(0, KING_ROW)[1], away=True)),
+                       ('cry_at', _at(*ch1_cell(CRY_FROM, CRY_ROW), x_from=True)),
+                       ('gift', _gift()), ('level_up', _level_up()), ('open_cage', _open_cage())):
+        at[name] = CODE_AT + len(out)
+        out += code
     return bytes(out), at
 
 
@@ -425,12 +553,21 @@ def scripts(first_message, box_at=None):
             _cmd('05', *_long(at['kidnap_row'])), _cmd('3F'), _cmd('21', lo(m['kidnap']), hi(m['kidnap'])),
             _cmd('10', *KIDNAPPED)] + _walk_off(9) + [_cmd('40'), _cmd('16')]},
         {"address": KID_SCRIPT, "commands": [_cmd('09', 0x80 | KIDNAPPED[0], KIDNAPPED[1])] + _walk_off(8) + [_cmd('16')]},
-        {"address": HIDE_ON_WIN_SCRIPT, "commands": [_cmd('09', 0x80 | BOSS_WON[0], BOSS_WON[1]), _cmd('28'), _cmd('52'),
+        # 이기면 철창을 열고 숨는다. 이긴 뒤 다시 들어오면 이 인물 하나가 철창만 연다
+        {"address": HIDE_ON_WIN_SCRIPT, "commands": [_cmd('09', 0x80 | BOSS_WON[0], BOSS_WON[1]),
+                                                     _cmd('37', *_long(at['open_cage'])), _cmd('28'), _cmd('52'),
                                                      _cmd('16')]},
-        # 구한 아이: 이기기 전에는 숨어 있다가 나타나고, 따라오기로 하면 숨는다(FC 는 일행 뒤를 따라 걷는 그림)
-        {"address": RESCUED_SCRIPT, "commands": _rescued([])},
+        # 잡힌 아이: 주인공이 다가오면 그 앞까지 와서 울고, 이기면 숨는다
+        {"address": CRY_SCRIPT, "commands": [
+            _cmd('05', *_long(at['cry_at'])), _cmd('3F')] + _walk(CRY_TO) + [
+            _cmd('21', lo(m['cry']), hi(m['cry'])), _cmd('40'), _cmd('09', 0x80 | BOSS_WON[0], BOSS_WON[1]),
+            _cmd('28'), _cmd('52'), _cmd('16')]},
+        # 구한 아이: 이기기 전에는 숨어 있다가 나타나 열린 철창 밖으로 걸어 나오고, 따라오기로 하면 숨는다
+        # (FC 는 일행 뒤를 따라 걷는 그림)
+        {"address": RESCUED_SCRIPT, "commands": _rescued([], 0x0D)},
+        {"address": RESCUED2_SCRIPT, "commands": _rescued([], 0x0C)},
         {"address": THANKS_SCRIPT, "commands": _rescued([_cmd('3F'), _cmd('21', lo(m['kids_thanks']), hi(m['kids_thanks'])),
-                                                         _cmd('10', *KIDS_FOLLOW), _cmd('40')])},
+                                                         _cmd('10', *KIDS_FOLLOW), _cmd('40')], 0x0E)},
         {"address": SOLDIER_SCRIPT, "commands": [_cmd('09', 0x80 | SOLDIER_LEFT[0], SOLDIER_LEFT[1]), _cmd('3F')] +
          [c for x, y in SOLDIER_PATH for c in (_cmd('13', *ch1_cell(x, y)), _cmd('14'))] +
          [_cmd('28'), _cmd('52'), _cmd('40'), _cmd('16')]},
@@ -439,6 +576,34 @@ def scripts(first_message, box_at=None):
             _cmd('28'), _cmd('52'), _cmd('09', 0x80 | KIDS_FOLLOW[0], KIDS_FOLLOW[1]),
             _cmd('05', *_long(at['kids_home_row'])), _cmd('3F'), _cmd('21', lo(m['kids_home']), hi(m['kids_home'])),
             _cmd('11', KIDS_FOLLOW[0], ~KIDS_FOLLOW[1] & 0xFF), _cmd('40'), _cmd('16')]},
+    ] + [
+        # 엄마 곁의 아이: 따라오는 중에 들어오면 숨었다가, 따라옴 깃발이 꺼지면 통로 아래에서 나타나 집으로 걷는다
+        {"address": script, "commands": [
+            {**_cmd('06', 0x80 | KIDS_FOLLOW[0], KIDS_FOLLOW[1]), "target": "stay"}, _cmd('28'), _cmd('52'),
+            _cmd('09', *KIDS_FOLLOW), _cmd('50', *_npc(*start)), _cmd('1C'), _cmd('53'), _cmd('4F'),
+            _cmd('1E', WALK_SPEED)] + _walk(*path) +
+            [_cmd('22'), _cmd('2F', facing), {**_cmd('16'), "label": "stay"}]}
+        for (_, script), (_, start, path, facing) in zip(HOME_KID_SRCS, KIDS_WALK_HOME)
+    ] + [
+        # 보스 뒤 왕좌의 방: 병사는 주인공이 줄에 오면 통로 양옆으로 갈라선다. 말을 걸 수 없다(FC 02F0)
+        {"address": script, "commands": [_cmd('44'), _cmd('05', *_long(at['lineup_row']))] + _walk(*path, half=0) +
+         [_cmd('2F', facing), _cmd('16')]}
+        for (_, script), (_, path, facing) in _distinct(zip(SOLDIER_SRCS, THRONE_SOLDIERS))
+    ] + [
+        # 왕: 주인공이 왕 앞 줄에 오면 스스로 말을 건다. 아이들이 아직 따라오면 돌려보내라 하고, 그 줄을 떠났다 오면
+        # 다시 말한다. 아니면 칭찬 → 선물(경험치·레벨업) → 작별, 보고 깃발
+        {"address": KING_CALL_SCRIPT, "commands": [
+            _cmd('28'), _cmd('52'), {**_cmd('05', *_long(at['king_row'])), "label": "wait"}, _cmd('3F'),
+            {**_cmd('06', *KIDS_FOLLOW), "target": "back"},
+            _cmd('21', lo(m['king_praise']), hi(m['king_praise'])), _cmd('21', lo(m['gift']), hi(m['gift'])),
+            _cmd('37', *_long(at['gift'])),
+            # 한 번 오를 때마다 「레벨이 올랐다」. 더 오르지 않으면 level_up 이 보고 깃발을 켠다
+            {**_cmd('37', *_long(at['level_up'])), "label": "grow"}, {**_cmd('06', *REPORTED), "target": "grown"},
+            _cmd('21', lo(m['level_up']), hi(m['level_up'])), {"op": "03", "args": [], "target": "grow"},
+            {**_cmd('21', lo(m['king_farewell']), hi(m['king_farewell'])), "label": "grown"},
+            _cmd('10', *REPORTED), _cmd('40'), _cmd('16'),
+            {**_cmd('21', lo(m['king_back']), hi(m['king_back'])), "label": "back"}, _cmd('40'),
+            _cmd('05', *_long(at['king_away'])), {"op": "03", "args": [], "target": "wait"}]},
     ] + ([
         # 1장 끝: 서술 → 검은 화면 → 2장 제목 상자 → 어둡게. 조작은 풀지 않는다(2장은 아직 이어지지 않음)
         {"address": ENDER_SCRIPT, "commands": [
@@ -448,14 +613,59 @@ def scripts(first_message, box_at=None):
     ] if box_at is not None else [])
 
 
-def _rescued(speak):
-    return ([_cmd('28'), _cmd('09', 0x80 | BOSS_WON[0], BOSS_WON[1]), _cmd('53'), _cmd('4F')] + speak +
+def _rescued(speak, slot):
+    start, path = RESCUED_PATHS[slot]
+    return ([_cmd('28'), _cmd('09', 0x80 | BOSS_WON[0], BOSS_WON[1]), _cmd('50', *_npc(*start)), _cmd('53'), _cmd('4F'),
+             _cmd('1E', WALK_SPEED), _cmd('1C')] + _walk(*path) + [_cmd('22')] + speak +
             [_cmd('09', 0x80 | KIDS_FOLLOW[0], KIDS_FOLLOW[1]), _cmd('28'), _cmd('52'), _cmd('16')])
+
+
+# 깜빡이며 나타난 인물은 속도(3360)가 0 이라 걷기를 켜도 제자리였다(실측). 한 칸 8프레임
+WALK_SPEED = 0x01
+
+
+def _npc(x, y, half=1):
+    """FC 칸에 선 인물의 DQ5 자리. 옮긴 인물(dq4npcport)은 Y 가 2y+1 이고, 1장 첫머리 왕좌의 방 인물
+    (dq4chapter1.entry)은 2y 라 그 방에서는 half=0 으로 맞춘다."""
+    return x * 2, y * 2 + half
+
+
+def _walk(*points, half=1):
+    return [c for p in points for c in (_cmd('13', *_npc(*p, half)), _cmd('14'))]
+
+
+def _distinct(pairs):
+    """같은 원본(같은 스크립트)을 쓰는 인물은 스크립트를 한 번만."""
+    seen, out = set(), []
+    for src, row in pairs:
+        if src[1] not in seen:
+            seen.add(src[1])
+            out.append((src, row))
+    return out
 
 
 def _walk_off(x):
     """탑 입구에서 열 x 를 따라 KIDNAP_TO 줄까지 올라가 숨고 자리를 치운다."""
     return [_cmd('13', x * 2, KIDNAP_TO * 2 + 1), _cmd('14'), _cmd('28'), _cmd('52')]
+
+
+def _invisible(src, talk):
+    """스크립트만 돌리는 보이지 않는 인물(낮·밤 하나씩). 스크립트가 숨긴다."""
+    e = {"from": src, "fields": {"x": 0, "y": 1, "facing": "down", "talk": talk, "gfx": 0x01, "layer": 0}}
+    return [{**e, "time": "day"}, {**e, "time": "night"}]
+
+
+def throne_return(first_talk):
+    """보스를 이기고 보고하기 전의 왕좌의 방 목록(FC 1C:$8184): 왕·대신, 문지기 둘, 병사 8명, 왕이 말을 거는 보이지
+    않는 인물."""
+    t = talk_numbers(first_talk)
+    static = [ch1.entry(ch1.STATIC, *THRONE_KING, ch1.KING, 'down', t['king']),
+              ch1.entry(ch1.STATIC, *THRONE_MINISTER, ch1.MINISTER, 'down', t['guard'])] + \
+        [ch1.entry(ch1.STATIC, x, y, ch1.GUARD, facing, t['guard']) for (x, y), facing in THRONE_GUARDS]
+    soldiers = [ch1.entry(src, x, y, ch1.WARRIOR, 'down', t['guard'])
+                for src, ((x, y), _, _) in zip((s for s, _ in SOLDIER_SRCS), THRONE_SOLDIERS)]
+    day = static + soldiers
+    return day + [{**e, "time": "night"} for e in day] + _invisible(KING_CALL_SRC, t['king'])
 
 
 def _same(entry, src, talk):
@@ -525,22 +735,34 @@ def npc_lists(ported, report, first_talk):
         slot = FIRST_SLOT + [q["night"] for q in report[TOWER_TOP][:i]].count(p["night"])
         if slot == FIRST_SLOT:
             top[i] = _same(e, HIDE_ON_WIN_SRC, t['boss'])
+        elif slot == CRY_SLOT:
+            top[i] = _same(e, CRY_SRC, e["fields"]["talk"])
         elif slot in TOP_HIDE_ON_WIN:
             top[i] = _same(e, HIDE_ON_WIN_SRC, e["fields"]["talk"])
         elif slot in TOP_RESCUED:
-            top[i] = _same(e, THANKS_SRC if slot == TOP_RESCUED[0] else RESCUED_SRC, e["fields"]["talk"])
+            # 고맙다는 말은 길이 가장 긴 0E 가 다 걸어 나온 뒤에(FC 는 0D·0E 가 0321)
+            src = {TOP_RESCUED[0]: RESCUED2_SRC, TOP_RESCUED[1]: RESCUED_SRC, TOP_RESCUED[2]: THANKS_SRC}[slot]
+            top[i] = _same(e, src, e["fields"]["talk"])
         else:
             keep.append(e)
-    new_lists.append({"name": "top_after", "entries": keep})
+    opener = _invisible(HIDE_ON_WIN_SRC, t['boss'])
+    new_lists.append({"name": "top_after", "entries": keep + opener})
     # 보스 뒤 목록: 탑의 병사는 보고하고 걸어 나가며, 이무르에는 아이들을 엄마에게 보내는 보이지 않는 인물
     soldier_list = alts[alt_name(AFTER_BOSS, SOLDIER_MAP)]
     for i, p in enumerate(report[alt_name(AFTER_BOSS, SOLDIER_MAP)]):
         if p["talk"] == FC_SOLDIER:
             soldier_list[i] = _same(soldier_list[i], SOLDIER_SRC, t['soldier'])
     gone = [e for e in soldier_list if e["from"] != SOLDIER_SRC]
-    home = {"from": KIDS_HOME_SRC, "fields": {"x": 0, "y": 1, "facing": "down", "talk": t['soldier'], "gfx": 0x01,
-                                              "layer": 0}}
-    alts[alt_name(AFTER_BOSS, KIDS_HOME_MAP)] += [{**home, "time": "day"}, {**home, "time": "night"}]
+    # 이무르: 집의 아이 둘이 따라옴 깃발이 꺼질 때 걸어오고, FC 가 일행 자리로 옮기는 두 아이는 뺀다
+    imuru = alt_name(AFTER_BOSS, KIDS_HOME_MAP)
+    homes = {home: src for (src, _), (home, *_) in zip(HOME_KID_SRCS, KIDS_WALK_HOME)}
+    kids = []
+    for e, p in zip(alts[imuru], report[imuru]):
+        if (p["x"], p["y"]) in KIDS_FC_WALKERS:
+            continue
+        src = homes.get((p["x"], p["y"]))
+        kids.append(_same(e, src, e["fields"]["talk"]) if src else e)
+    alts[imuru] = kids + _invisible(KIDS_HOME_SRC, t['soldier'])
     new_lists += [{"name": name, "entries": entries} for name, entries in alts.items()]
     new_lists.append({"name": "soldier_gone", "entries": gone})
     ender = {"from": ENDER_SRC, "fields": {"x": 0, "y": 1, "facing": "down", "talk": t['king'], "gfx": 0x01, "layer": 0}}
