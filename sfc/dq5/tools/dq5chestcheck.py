@@ -4,6 +4,7 @@ sfc/dq5/docs/dq5-map-format.md의 보물상자 형식. 입력 JSON→dq5patch→
 선실에서 걸어가거나 dq5warp.lua 로 그 자리에 내려선 뒤 컨트롤러로 조사한다. 금화·조회된 보상·열림 비트·
 기존 비트 보존을 확인한다. 원본 롬/세이브는 읽기만 하고 --out 아래 새 폴더에 저장한다.
 past_* 사례는 상자 194개·상자 맵 연결과 아래층 상자 표를 뱅크 3F 로 옮긴 롬에서 열기·들어갈 때 그리기·기록과 불러오기를 본다.
+wide_* 사례는 상자 번호 16비트 훅(dq5chestreloc.py --wide-at)으로 상자를 301개 둔 롬에서 상자 300 을 같은 셋으로 본다.
 new_* 사례는 원래 롬에 없는 새 그룹 맵 36/00(선실 17/00 에 상자 블록을 놓은 레코드)에 상자·タンス·두 칸 앞 항목을
 dq5chestreloc.py --new-map·--with-patch 로 넣은 롬을, 같은 새 맵 패치만 붙인 대조 롬과 견준다.
 blocks_* 사례는 --env 로 준 DQ4 환경 패치 폴더(sfc/dq4/tools/dq4environmentrom.py 출력)로 새 맵 36/00 을 만든다. 그 맵은
@@ -26,7 +27,7 @@ import tempfile
 from kr_patch.sfc.dis65816 import decode
 from kr_patch.sfc.mapper import LoROM
 
-from dq5chestreloc import ABS
+from dq5chestreloc import ABS, WIDE_PENDING
 from dq5chestwrite import FORMAT
 from dq5exitcheck import DB_ABS, DB_INDIRECT, warp_exit
 from dq5chest import chests
@@ -170,11 +171,32 @@ def full_base(doc):
         row['flag_index'] = moved.get(row['flag_index'], row['flag_index'])
 
 
-BUILDS = {'past': (GROW_DOC, grow_base, GROW_AT), 'full': (FULL_DOC, full_base, FULL_AT)}
+# 상자 번호 16비트 롬(dq5chestreloc --wide-at). 상자 256개 롬에 01/02 의 (16~90, 8)·(16~28, 10) 블록 45개를 더 놓아 301개다.
+# 19/00 의 첫 칸이 상자 296 이고 마지막 칸 (12,45) 가 상자 300(7E:28F3 + 44/8 = 28F8 & 08)이다. 300 의 아래 8비트 44 는
+# 원래 상자 44(7E:2215 & 08)와 같다
+WIDE_DOC = {'format': 'dq5chestplace/1', 'maps': [{'map': '01/02', 'chests': FULL_DOC['maps'][0]['chests'] + [
+    {'x': x, 'y': y, 'block': 384, 'reward': 0x100 + 700 + k} for k, (x, y) in enumerate(
+        [(x, 8) for x in range(16, 92, 2)] + [(x, 10) for x in range(16, 30, 2)])]}]}
+WIDE_AT = FULL_AT + ('--wide-at', '3F:E000')
+WIDE_FLAG = (0x28F8, 0x08)
+# 상자 300 을 열거나 기록해도 바뀌지 않아야 하는 원래 상자 1·44 의 바이트
+WIDE_KEEP = (0x2210, 0x2215)
+
+
+def wide_base(doc):
+    full_base(doc)
+    doc['chests'][186] = {'reward': 0x100 + 300}
+
+
+BUILDS = {'past': (GROW_DOC, grow_base, GROW_AT), 'full': (FULL_DOC, full_base, FULL_AT),
+          'wide': (WIDE_DOC, wide_base, WIDE_AT)}
 GROW = {'past_open': (987, 0x2228, 0x80, 0x2228, 0x80, None, 0x131),
         # 아래층 상자 51/51 (19,35). 원본은 2228 & 08, 패치는 옮긴 표의 2229 & 08 을 켠다
         'past_lower': (None, 0x2229, 0x08, 0x2228, 0x08, 0xB1, 0x131),
-        'full_open': (255, 0x222F, 0x01, 0x222F, 0x01, None, 0x131)}
+        'full_open': (255, 0x222F, 0x01, 0x222F, 0x01, None, 0x131),
+        'wide_open': (300, *WIDE_FLAG, *WIDE_FLAG, None, 0x131),
+        # 상자 1·44 를 연 채로 상자 300 을 연다. 8비트로 읽었다면 300 이 44 로 보여 이미 열린 상자가 된다
+        'wide_alias': (300, *WIDE_FLAG, *WIDE_FLAG, None, 0x131)}
 CASES.update({name: (None, *values) for name, values in GROW.items()})
 # 새 그룹 맵 36/00: 선실 17/00 의 레코드에 상자 블록 384 를 (6,4) 에 놓아 상자 칸 (7,5) 를 만든다. タンス 칸 (4,4) 와
 # 두 칸 앞 자리 (9,9) 는 선실과 같다. 들어가는 곳 표·문 표·새 레코드·출구는 새 맵 도구들이, 상자 표 넷은 뱅크 3B 로 옮긴다.
@@ -216,18 +238,18 @@ for _name, (_amount, _flag, _mask, _message, _kind, _none) in NEWMAP.items():
     CASES[_name] = (None, _amount, _flag, _mask, _flag, _mask, None, _message)
     ORIGINAL_KIND[_name] = _kind
 PATCHED_REWARD = {'place_shift': 0x33, 'past_lower': 0xB1, 'field_world1_day': None, 'field_world2_day': None}
-ORIGINAL_KIND.update(past_open=0x12B, full_open=0x12B)
+ORIGINAL_KIND.update(past_open=0x12B, full_open=0x12B, wide_open=0x12B, wide_alias=0x12B)
 # 맵에 들어갈 때 열린 상자를 그리는 사례: (장면, 미리 켤 비트). 원본은 그 비트를 상자로 보지 않아 그대로 두고,
 # 패치는 1F:FC50 이 옮긴 표에서 그 상자를 찾아 열린 상자 타일(9E·9F)로 바꾼다
 ENTRY = {'past_entry': ({'TO': '19/00,5,46'}, '2228|80'), 'past_entry_lower': ({'TO': '51/51,18,37,2'}, '2229|08'),
-         'full_entry': ({'TO': '19/00,11,46'}, '222F|01'), 'new_entry': ({'TO': '36/00,6,7'}, '2224|40'),
+         'full_entry': ({'TO': '19/00,11,46'}, '222F|01'), 'wide_entry': ({'TO': '19/00,11,46'}, '28F8|08'), 'new_entry': ({'TO': '36/00,6,7'}, '2224|40'),
          'place_unlisted_entry': ({'TO': '19/00,5,46'}, '2224|08'), 'blocks_entry': ({'TO': '36/00,68,44'}, '2210|80')}
 # 열림 비트를 켠 채 교회에 기록하고 리셋해 불러오는 사례(dq5cdlsweep.py 의 church-save-load 와 같은 입력).
 # SRAM 칸 1 은 7E:2000~ 을 70:0012~ 에 그대로 담는다(25:83CE)
-SAVE_BITS = {0x2228: 0x80, 0x2229: 0x08}
+SAVES = {'past_save': {0x2228: 0x80, 0x2229: 0x08}, 'wide_save': {WIDE_FLAG[0]: WIDE_FLAG[1]}}
 SAVE_SLOT = 0x700012
 SAVE_FRAMES = {'saved': 2600, 'reset': 2710, 'loaded': 6400}
-ALL = [*CASES, *ENTRY, 'past_save']
+ALL = [*CASES, *ENTRY, *SAVES]
 # 조사 뒤 세계 지도 버퍼의 블록(블록 좌표 x, y, 원본, 패치). 밤이라 빛 블록 A7 이 놓인 자리를 본다
 # 필드에 들어갈 때 빛 블록을 놓으므로, 장면도 그 롬으로 만들어야 하는 사례
 OWN_SCENE = {'field_move', 'place_chest', 'place_shift', 'place_furniture', *NEWMAP}
@@ -247,7 +269,8 @@ SCENES = {'chest': {'TO': '01/02,34,31'}, 'search': None, 'foot': None, 'ahead':
           'grow_ahead': START, 'move_lower': 'lower', 'place_chest': {'TO': '01/02,36,29'},
           'place_shift': {'TO': '01/02,34,31'}, 'place_furniture': {'TO': '01/02,40,27'},
           'place_jar': 'grow_search', 'place_unlisted': 'grow_chests',
-          'past_open': 'grow_chests', 'past_lower': 'lower', 'full_open': {'TO': '19/00,11,46'},
+          'past_open': 'grow_chests', 'past_lower': 'lower', 'full_open': {'TO': '19/00,11,46'}, 'wide_open': 'full_open',
+          'wide_alias': {'TO': '19/00,11,46', 'SET': '2210|40;2215|08'},
           'blocks_chest': {'TO': '36/00,68,44'},
           'new_chest': {'TO': '36/00,6,7'}, 'new_search': {'TO': '36/00,3,5'}, 'new_ahead': {'TO': '36/00,9,12'}}
 # 필드 조사는 선 자리를 보므로 걷지 않고 바로 명령 창을 연다
@@ -380,6 +403,9 @@ def compare(name, state, original, out, mesence, libdir, start):
             require(after[flag] == mask, f'{name}: 새 열림 비트가 다름')
             if old_flag != flag:
                 require(after[old_flag] == 0, f'{name}: 원래 열림 비트까지 바뀜')
+            if name.startswith('wide_'):
+                require(all(after[a] == before[a] for a in WIDE_KEEP), f'{name}: 원래 상자 1·44 의 비트가 바뀜')
+                require(after[WIDE_PENDING] == 0, f'{name}: 넘길 마스크 칸이 0 으로 돌아오지 않음')
         else:
             require(after[old_flag] == (0 if old_reward is None else old_mask), f'{name}: 원본 열림 비트가 다름')
             if old_flag != flag:
@@ -569,19 +595,20 @@ def entry_compare(name, original, out, mesence, libdir, start):
     return {'case': name, 'bits': bits, 'opened_tile_words': words, 'passed': True}
 
 
-def save_compare(original, out, mesence, libdir, start):
-    dest = out / 'past_save'
+def save_compare(name, original, out, mesence, libdir, start):
+    bits = SAVES[name]
+    dest = out / name
     dest.mkdir()
-    patched = grow_rom(original, dest)
+    patched = grow_rom(original, dest, name.split('_')[0])
     talk = 'b:4,wait:40,up:3,wait:20,' + ','.join(['a:4,wait:60'] * 40)
     env = environment(libdir, start, dest)
-    span = max(SAVE_BITS) - min(SAVE_BITS) + 1
-    slot = SAVE_SLOT + min(SAVE_BITS) - 0x2000
-    dumps = [f'{SAVE_FRAMES[k]}:7E{min(SAVE_BITS):04X}:{span}' for k in SAVE_FRAMES]
+    span = max(bits) - min(bits) + 1
+    slot = SAVE_SLOT + min(bits) - 0x2000
+    dumps = [f'{SAVE_FRAMES[k]}:7E{min(bits):04X}:{span}' for k in SAVE_FRAMES]
     dumps.append(f'{SAVE_FRAMES["saved"]}:{slot:06X}:{span}')
     env.update(NEXT=str(HERE / 'lua/dq5msg.lua'), POKE='7E36EB=05;7E370B=00', RESETAT=str(SAVE_FRAMES['reset'] - 10),
                PRE=talk + ',wait:300,' + ','.join(['start:4,wait:200'] * 3 + ['a:4,wait:120'] * 12),
-               SET=';'.join(f'{a:04X}|{m:02X}' for a, m in SAVE_BITS.items()), DUMP=';'.join(dumps),
+               SET=';'.join(f'{a:04X}|{m:02X}' for a, m in bits.items()), DUMP=';'.join(dumps),
                MAXF=str(SAVE_FRAMES['loaded'] + 100))
     run(mesence, patched, HERE / 'lua/dq5cdldump.lua', dest, env, timeout=600)
     got = {}
@@ -589,12 +616,12 @@ def save_compare(original, out, mesence, libdir, start):
         hit = re.match(r'(\d+) dump ([0-9A-F]{6}) (.*)', line)
         if hit:
             got[int(hit[1]), int(hit[2], 16)] = bytes.fromhex(hit[3])
-    want = bytes(SAVE_BITS.get(min(SAVE_BITS) + k, 0) for k in range(span))
-    wram = 0x7E0000 | min(SAVE_BITS)
-    require(got.get((SAVE_FRAMES['saved'], slot)) == want, f'past_save: SRAM 칸 1 이 {want.hex()} 가 아님')
-    require(got.get((SAVE_FRAMES['reset'], wram)) == bytes(span), 'past_save: 리셋 뒤 WRAM 이 지워지지 않음')
-    require(got.get((SAVE_FRAMES['loaded'], wram)) == want, 'past_save: 불러온 뒤 열림 비트가 다름')
-    return {'case': 'past_save', 'dumps': {f'{f}:{a:06X}': v.hex() for (f, a), v in sorted(got.items())},
+    want = bytes(bits.get(min(bits) + k, 0) for k in range(span))
+    wram = 0x7E0000 | min(bits)
+    require(got.get((SAVE_FRAMES['saved'], slot)) == want, f'{name}: SRAM 칸 1 이 {want.hex()} 가 아님')
+    require(got.get((SAVE_FRAMES['reset'], wram)) == bytes(span), f'{name}: 리셋 뒤 WRAM 이 지워지지 않음')
+    require(got.get((SAVE_FRAMES['loaded'], wram)) == want, f'{name}: 불러온 뒤 열림 비트가 다름')
+    return {'case': name, 'dumps': {f'{f}:{a:06X}': v.hex() for (f, a), v in sorted(got.items())},
             'passed': True}
 
 
@@ -687,11 +714,12 @@ def main():
             results = list(pool.map(lambda name: compare(name, states.get(scene(name)), original, out, mesence, libdir,
                                                          state) if name in CASES else
                                     entry_compare(name, original, out, mesence, libdir, state) if name in ENTRY else
-                                    save_compare(original, out, mesence, libdir, state), cases))
+                                    save_compare(name, original, out, mesence, libdir, state), cases))
         (out / 'results.json').write_text(json.dumps(results, indent=2) + '\n', encoding='utf-8')
-        pairs = [name for name in cases if name != 'past_save']
+        pairs = [name for name in cases if name not in SAVES]
+        saves = len(cases) - len(pairs)
         print(f'{len(pairs)}쌍/{2 * len(pairs)}실행 통과: 보상·금화·새 열림 비트·기존 비트 보존·들어갈 때 열린 상자'
-              + (', 기록·불러오기 1실행 통과' if 'past_save' in cases else ''))
+              + (f', 기록·불러오기 {saves}실행 통과' if saves else ''))
         return 0
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         print(f'오류: {error}', file=sys.stderr)

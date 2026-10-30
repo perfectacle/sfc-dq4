@@ -10,6 +10,7 @@ sfc/dq5/docs/dq5-build-format.md 의 「보물상자 놓기」. 맵마다 상자
       --map-at BB:AAAA [--chests-at BB:AAAA] [--chest-maps-at BB:AAAA]
   python sfc/dq5/tools/dq5chestplace.py rom/dq5.sfc check work/place.json --map-at … [같은 자리 선택]
 --tables 로 dq5chestreloc.py dump 를 고친 표(표에 없던 맵의 상자 연결, 옮긴 열림 비트 등)를 바탕으로 줄 수 있다.
+--wide-at 은 dq5chestreloc.py 와 같이 상자 번호 16비트 훅을 그 자리에 두고 상자를 256개 넘게 쓴다.
 
 입력 format=dq5chestplace/1, maps[{map:"GG/MM", chests[{x,y,block,reward}],
 furniture[{x,y,block,reward,flag_index,mask[,unused]}]}]. x·y 는 블록 원점(왼쪽 위), block 은 실내 맵 블록 번호다.
@@ -186,7 +187,7 @@ def plan(rom, doc, map_at, at=None, base=None, new_maps=NO_NEW_MAPS):
         view if new_maps.keys else middle
     if base is not None:
         # 바탕 표는 원래 롬의 맵 칸과 맞아야 상자 내용물을 칸으로 따라가게 할 수 있다
-        reloc.serialize(rom, base, new_maps)
+        reloc.serialize(rom, base, new_maps, bool((at or {}).get('wide')))
         reloc.check_cells(rom, base, new_maps)
     tables = json.loads(json.dumps(base)) if base is not None else reloc.parse(rom)
     rewards = cell_rewards(rom, tables, new_maps)
@@ -362,6 +363,8 @@ def main():
         p.add_argument('--tables', type=Path, help='롬의 표 대신 바탕으로 삼을 dq5chesttables/1(dq5chestreloc.py dump 를 고친 것)')
         for name in reloc.ORIGINAL:
             p.add_argument(f'--{name.replace("_", "-")}-at', dest=f'{name}_at', type=reloc.address)
+        p.add_argument('--wide-at', type=reloc.address,
+                       help=f'상자 번호 16비트 훅 자리(dq5chestreloc.py 와 같음). 상자를 {reloc.MAX_WIDE}개까지 씀')
         p.add_argument('--new-map', action='append', default=[], type=reloc.new_map,
                        help='dq5newmap.py 로 함께 더하는 새 맵 GG/MM(여럿이면 되풀이)')
         p.add_argument('--with-patch', action='append', default=[], type=Path,
@@ -370,7 +373,7 @@ def main():
     try:
         rom = Rom(args.rom.read_bytes())
         doc = json.loads(args.source.read_text(encoding='utf-8'))
-        at = {k: getattr(args, f'{k}_at') for k in reloc.ORIGINAL}
+        at = {k: getattr(args, f'{k}_at') for k in (*reloc.ORIGINAL, 'wide')}
         base = json.loads(args.tables.read_text(encoding='utf-8')) if args.tables else None
         new_maps = NewMaps(rom, args.new_map, args.with_patch)
         if args.command == 'check':
