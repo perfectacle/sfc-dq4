@@ -314,6 +314,11 @@ START_TABLE = 0x258621
 START_ORIG = bytes.fromhex('02 06 26 0e 01 80')
 # DQ5 유년기는 필드 시간을 멈춘다(7E:2190 bit1, 00:82D3). 저장을 불러오면 00:A72A 가 bit6(청년기)이 꺼져 있을 때
 # BRK 0C 로 다시 켜므로, 그 명령을 지워 FC 처럼 필드를 걸으면 밤이 오게 한다
+# 저장·전멸 뒤 다시 시작 자리: 01:899F 는 칸 표 25:85D5 의 그룹을 이 표에서 찾고, 없으면 항목 0(새 게임 자리)으로
+# 간다. 그룹 빌드가 칸 0~6 을 DQ4 그룹으로 바꾸므로 그대로면 교회에서 저장하거나 전멸해도 서장 지하로 돌아갔다(실측).
+# 그래서 칸에서 빠진 DQ5 그룹의 항목 자리에 DQ4 그룹마다 FC 귀환 자리(1E:$A76D)의 첫 것을 쓴다
+SLOT_TABLE, SLOT_COUNT = 0x2585D5, 0x16       # 25:857C 가 찾는 칸 수
+FC_PLACES, FC_PLACE_COUNT = (0x1E, 0xA76D), 22
 TIME_FREEZE = 0x00A738
 TIME_FREEZE_ORIG = bytes.fromhex('00 0c 02 00')
 
@@ -523,6 +528,36 @@ def group_build(dq5, dq4, out):
     return dq4groupbuild.build(dq5, dq4, out)
 
 
+def return_places(out, original, dq4):
+    """다시 시작 자리 표(START_TABLE)에 칸 표의 DQ4 그룹 항목을 넣은 롬. 항목은 [그룹][맵][X][Y][층 1][80]."""
+    import dq4groupbuild
+    from kr_patch.fc import ines
+    prg = ines.prg(dq4)
+    o = lorom(SLOT_TABLE)
+    now, before = set(out[o:o + SLOT_COUNT]), set(original[o:o + SLOT_COUNT])
+    o = lorom(START_TABLE)
+    rows = []
+    while out[o + 6 * len(rows)] != 0xFF:
+        rows.append(o + 6 * len(rows))
+    have = {out[r] for r in rows}
+    free = [r for r in rows if out[r] in before - now]
+    place = dq4groupbuild.placement(prg)
+    first = {}
+    for i in range(FC_PLACE_COUNT):
+        a = FC_PLACES[1] - 0x8000 + 5 * i + FC_PLACES[0] * 0x4000
+        fc_group, fc_number, x, y = prg[a:a + 4]
+        if (fc_group, fc_number) in place:
+            group, number = place[fc_group, fc_number]
+            first.setdefault(group, (number, *dq4groupbuild.cell(x, y)))
+    need = sorted(g for g in now - have if g in first)
+    if len(need) > len(free):
+        raise SystemExit(f'다시 시작 자리 표에 빈 항목이 모자람: {len(need)} > {len(free)}')
+    for g, r in zip(need, free):
+        number, x, y = first[g]
+        out[r:r + 6] = bytes((g, number, x, y, 1, 0x80))
+    return out
+
+
 def build(rom, dq5, dq4, work, prologue=True):
     """메뉴 빌드 롬(dq4menupatch.py build --messages) → 1장 첫머리 롬. prologue 면 새 게임이 서장으로 시작해
     서장 끝에서 1장 첫머리로 넘어간다."""
@@ -580,6 +615,7 @@ def build(rom, dq5, dq4, work, prologue=True):
         start = dq4prologue.START
     group, number = (int(v, 16) for v in start[0].split('/'))
     out[o:o + 4] = bytes((group, number, start[1], start[2]))
+    out = bytearray(return_places(out, original, dq4.read_bytes()))
     out = set_checksum(out)
     group_patches = [work / 'groups' / p for p in (*GROUP_PATCHES, *summary['record_patches'])]
     verify_groups(bytes(out), (work / 'groups' / 'groups.sfc').read_bytes(), group_patches, work / 'groups' / 'env')
