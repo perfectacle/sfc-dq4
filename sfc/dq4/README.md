@@ -5,7 +5,7 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 ## 문서
 
 - [docs/dq4-environment-format.md](docs/dq4-environment-format.md): FC 원작의 색 역할과 DQ5 색·도트 구조로 새로 그린 환경 타일, FC 배치 비교 맵과 SFC 표시 검증
-- [docs/dq4-field-format.md](docs/dq4-field-format.md): FC 필드 0 을 DQ5 세계 0 에(블록 대응, 입구 자리, DQ5 원래 입구 옮기기, 지도·지형 실측)
+- [docs/dq4-field-format.md](docs/dq4-field-format.md): FC 필드 0·1·3 을 DQ5 세계 0·1·2 에(블록 대응, 그림·세계별 팔레트, 입구 자리, DQ5 원래 입구 옮기기, 지도·지형 실측)
 - [handoff.md](handoff.md): 포팅용 그래픽 시작점(타이틀·일러스트 보존, 스프라이트 거절 사유·참고 사이트·후속 제작 방향)
 - [docs/dq4-graphics.md](docs/dq4-graphics.md): 포팅용 스프라이트·샘플 맵·한글 타이틀·일러스트와 SFC 변환 규격
 - [docs/dq4-sprite-format.md](docs/dq4-sprite-format.md): SFC DQ5 필드 인물 실측(크기·색·눈·보행 프레임)과 그 규칙으로 그린 DQ4 인물 9명 스프라이트, MesenCE 표시 실험
@@ -195,3 +195,4 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [2026-10-30-47: 2장 성과 두 마을을 한 그룹에, 대사는 3200 뒤에](journal/2026-10-30-47-ch2-bundle.md)
 - [2026-10-30-48: 필드를 DQ4 그림으로](journal/2026-10-30-48-field-gfx.md)
 - [2026-10-30-49: 맵을 옮기면 곡이 앞부분 뒤 멈추던 버그](journal/2026-10-30-49-sound-chainfix.md)
+- [2026-10-30-50: FC 필드 1·3 을 DQ5 세계 1·2 에](journal/2026-10-30-50-field-worlds12.md)

@@ -1,14 +1,16 @@
-"""FC field 0 as DQ5 world 0: block numbers for dq5fieldwrite.py, and the field cells of FC entrances.
+"""FC fields 0, 1 and 3 as DQ5 worlds 0, 1 and 2: block numbers for dq5fieldwrite.py, and the field cells of FC
+entrances.
 
-FC block (x, y) of field 0 is DQ5 block (x, y) of world 0, so a DQ5 field cell ($B6, $B8, 8 px) is FC block
-(x >> 1, y >> 1). FC field 0 is 250x250 blocks read at 3..252 (fc/dq4/tools/dq4field.py: rows and columns 0-2
-read as sea); the DQ5 world is 256x256, and the rest is sea except a mountain island in the far corner where the
-original DQ5 entrances of world 0 are parked (sfc/dq4/docs/dq4-field-format.md).
+FC block (x, y) of a field is DQ5 block (x, y) of its world (WORLDS), so a DQ5 field cell ($B6, $B8, 8 px) is FC
+block (x >> 1, y >> 1). FC field 0 is 250x250 blocks read at 3..252 (fc/dq4/tools/dq4field.py: rows and columns
+0-2 read as sea); the DQ5 world is 256x256, of which worlds 1 and 2 show only the top-left 128x128. The rest is sea
+except a mountain island in the far corner of each world where its original DQ5 entrances are parked
+(sfc/dq4/docs/dq4-field-format.md).
 
 Each FC block kind has a DQ5 block of its own (OWN_BLOCKS, from 511) drawn with the DQ4 art (dq4fieldgfx.py) and
 taking the terrain of the DQ5 field block BLOCKS borrows (walk, ship, encounter terrain). The sea is DQ5's block 0.
 
-  python sfc/dq4/tools/dq4fieldport.py map -o work/field/w0.bin
+  python sfc/dq4/tools/dq4fieldport.py map -o work/field/w0.bin [--field 1]
   python sfc/dq4/tools/dq4fieldport.py patch -o work/field/field.dq5patch.json --at 3A:8000
 """
 
@@ -28,6 +30,8 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
 SIZE = 256
 SEA = 0
 MOUNTAIN = 9
+# FC field -> DQ5 world ($1949).
+WORLDS = {0: 0, 1: 1, 3: 2}
 # FC field block -> DQ5 world-0 block of the same terrain (DQ5 tile attribute 2A:D512 for walking, terrain nibble
 # 03:CC48 for encounters and battle backgrounds). See the block table in sfc/dq4/docs/dq4-field-format.md.
 BLOCKS = {
@@ -58,33 +62,65 @@ BLOCKS = {
     0x1D: 5,
     0x1E: 5,
 }
+# Per FC field, kinds whose terrain differs from BLOCKS. Field 3 makes its hills impassable (08:$8A34 gives block 01
+# property 80), so they take the mountain's terrain and keep the hill art.
+FIELD_BLOCKS = {3: {0x01: MOUNTAIN}}
 # Places of the field graphics (dq4fieldgfx.py), free in both the dq4groupbuild ROM and the chapter-1 ROM
 # (dq4chapter1.py): the tile hooks and tables in one bank of 30-3F (01:A4A7 reads with DB set to it), the rest in
-# 30-7D. The planes take the bank of "planes" and the next one.
-GFX_AT = {"worlds": "30:E000", "extra": "54:8000", "blocks": "54:C000", "planes": "55:8000"}
+# 30-7D. The planes take the bank of "planes" (hooks and the 1-bit planes) and one bank per world after it; the
+# chapter-1 menu ROM already uses bank 58.
+GFX_AT = {"worlds": "30:E000", "extra": "54:8000", "blocks": "54:C000", "planes": "50:8000"}
 # First DQ5 block dq5fieldtables --blocks-at adds: 511 shares its slot with upper-layer block 0 in the original table.
 FIRST_BLOCK = 511
 
 
-def own_blocks():
-    """FC block kind -> its own DQ5 block: one per FIELD_ART asset and borrowed block, numbered from FIRST_BLOCK in FC
-    kind order. The sea keeps DQ5's block 0, whose tiles take the DQ4 water (dq4fieldgfx)."""
+def borrowed(field, kind):
+    return FIELD_BLOCKS.get(field, {}).get(kind, BLOCKS[kind])
+
+
+@functools.cache
+def _numbers():
+    """(FIELD_ART asset, borrowed block) -> own DQ5 block, numbered from FIRST_BLOCK: field 0's kinds in FC kind
+    order (BLOCKS), then the FIELD_BLOCKS ones, so field 0 keeps its numbers when a field adds a block."""
     from dq4environmentmap import FIELD_ART
-    out, numbers = {}, {}
+    numbers = {}
+    pairs = [(kind, BLOCKS[kind]) for kind in sorted(BLOCKS)]
+    pairs += [(kind, m) for field in sorted(FIELD_BLOCKS) for kind, m in sorted(FIELD_BLOCKS[field].items())]
+    for kind, m in pairs:
+        if m != SEA:
+            numbers.setdefault((FIELD_ART[kind][0], m), FIRST_BLOCK + len(numbers))
+    return numbers
+
+
+def own_blocks(field=0):
+    """FC block kind -> its own DQ5 block on FC field `field`: one per FIELD_ART asset and borrowed block. The sea
+    keeps DQ5's block 0 and its moving water (dq4fieldgfx)."""
+    from dq4environmentmap import FIELD_ART
+    out = {}
     for kind in sorted(BLOCKS):
-        if BLOCKS[kind] == SEA:
-            out[kind] = SEA
-            continue
-        key = (FIELD_ART[kind][0], BLOCKS[kind])
-        out[kind] = numbers.setdefault(key, FIRST_BLOCK + len(numbers))
+        m = borrowed(field, kind)
+        out[kind] = SEA if m == SEA else _numbers()[FIELD_ART[kind][0], m]
     return out
 
 
+def new_blocks():
+    """[(own DQ5 block, an FC kind drawn on it, borrowed DQ5 block)] of every own block, by number."""
+    from dq4environmentmap import FIELD_ART
+    kinds = {}
+    for field in [0, *sorted(FIELD_BLOCKS)]:
+        for kind in sorted(BLOCKS):
+            m = borrowed(field, kind)
+            if m != SEA:
+                kinds.setdefault(_numbers()[FIELD_ART[kind][0], m], (kind, m))
+    return [(n, *kinds[n]) for n in sorted(kinds)]
+
+
 OWN_BLOCKS = own_blocks()
-# The original DQ5 entrances of world 0 move inside a 3x3 mountain island beyond the FC map: no walk or ship
-# reaches it, so DQ5 towns are never entered from FC ground.
-ISLAND = (253, 253)
-PARK = (2 * ISLAND[0] + 3, 2 * ISLAND[1] + 3)
+# The original DQ5 entrances of each world move inside a 3x3 mountain island beyond the FC map: no walk or ship
+# reaches it, so DQ5 towns are never entered from FC ground. Worlds 1 and 2 show only their top-left 128x128.
+ISLANDS = {0: (253, 253), 1: (125, 125), 2: (125, 125)}
+PARKS = {w: (2 * x + 3, 2 * y + 3) for w, (x, y) in ISLANDS.items()}
+ISLAND, PARK = ISLANDS[0], PARKS[0]
 # FC exit block properties: 06 is an entrance, 07 the right half of a two-block entrance, which the game takes as
 # the block to its left ($42 one less, measured on 02's castle and 41's cave).
 ENTRANCE, RIGHT_HALF = 0x06, 0x07
@@ -95,20 +131,23 @@ MAIN_TABLE_REF = 0x2AF250
 WARP_GROUP = 0x01
 
 
-def world(fc_grid):
-    """DQ5 world-0 block numbers (row-major 256x256) of an FC field grid (rows of FC blocks, as dq4field.decode)."""
-    unknown = sorted({v for row in fc_grid for v in row} - OWN_BLOCKS.keys())
+def world(fc_grid, field=0):
+    """DQ5 block numbers (row-major 256x256) of the world of FC field `field` from its grid (rows of FC blocks, as
+    fc_field)."""
+    own = own_blocks(field)
+    unknown = sorted({v for row in fc_grid for v in row} - own.keys())
     if unknown:
         raise ValueError(f"FC field blocks without a DQ5 block: {[f'{v:02X}' for v in unknown]}")
-    if len(fc_grid) > ISLAND[1] or any(len(row) > ISLAND[0] for row in fc_grid):
+    island = ISLANDS[WORLDS[field]]
+    if len(fc_grid) > island[1] or any(len(row) > island[0] for row in fc_grid):
         raise ValueError("the FC field reaches the parking island")
     grid = [SEA] * (SIZE * SIZE)
     for y, row in enumerate(fc_grid):
         for x, v in enumerate(row):
-            grid[y * SIZE + x] = OWN_BLOCKS[v]
-    for y in range(ISLAND[1], ISLAND[1] + 3):
-        for x in range(ISLAND[0], ISLAND[0] + 3):
-            grid[y * SIZE + x] = OWN_BLOCKS[0x06]
+            grid[y * SIZE + x] = own[v]
+    for y in range(island[1], island[1] + 3):
+        for x in range(island[0], island[0] + 3):
+            grid[y * SIZE + x] = own[0x06]
     return grid
 
 
@@ -165,13 +204,14 @@ def world_of(group, arrivals):
 
 
 def park(entries, arrivals):
-    """Entrance table rows ({group, x, y}) with those entering in world 0 moved onto PARK. The rows stay, so
-    every ルーラ group still has one (dq5fieldtables RULER_GROUPS)."""
+    """Entrance table rows ({group, x, y}) with each moved onto the PARKS cell of the world it enters in (group 54
+    never enters and stays). The rows stay, so every ルーラ group still has one (dq5fieldtables RULER_GROUPS)."""
     out = []
     for e in entries:
         row = {k: e[k] for k in ("group", "x", "y")}
-        if world_of(e["group"], arrivals) == 0:
-            row["x"], row["y"] = PARK
+        w = world_of(e["group"], arrivals)
+        if w is not None:
+            row["x"], row["y"] = PARKS[w]
         out.append(row)
     return out
 
@@ -192,17 +232,21 @@ def warp_patch(rom, x, y):
 
 
 @functools.cache
-def fc_field(prg):
-    """(FC field 0 grid, property lookup) from the FC PRG."""
+def fc_field(prg, field=0):
+    """(FC field grid, property lookup) from the FC PRG. The grid stops where the row data does
+    (dq4field.extent): field 3's width and height bytes are code (250x164) and past its 62x54 the game reads the
+    next rows' data, all beyond its impassable hills."""
     import dq4block
-    source = dq4block.Map(prg, field=0)
-    grid = source.field
+    import dq4field
+    source = dq4block.Map(prg, field=field)
+    w, h = dq4field.extent(prg, field)
+    grid = [row[:w] for row in source.field[:h]]
     return grid, lambda x, y: source.blocks["prop"].get(source.cell(x, y) & 0x1F, 0)
 
 
-def write_map(prg, path):
+def write_map(prg, path, field=0):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(pack(world(fc_field(prg)[0])))
+    path.write_bytes(pack(world(fc_field(prg, field)[0], field)))
     return path
 
 
@@ -214,8 +258,9 @@ def _run(tool, *args):
 
 def patch(dq5, prg, path, at, gfx_at=GFX_AT):
     """Patch lists of the field, in build order: the DQ4 tiles (dq5fieldgfxwrite.py), their blocks (dq5fieldtables.py
-    --blocks-at, made from a ROM with the tiles: block tiles from 512 need the tile hooks) and world 0
-    (dq5fieldwrite.py, made from a ROM with both: blocks from 511 need the moved block table). path names the map's
+    --blocks-at, made from a ROM with the tiles: block tiles from 512 need the tile hooks) and the three worlds
+    (dq5fieldwrite.py, made from a ROM with both: blocks from 511 need the moved block table; one call, as the
+    plane hook is shared). path names the map's
     list; the others sit next to it. The original ROM's cells that 00:CF50 changes are all sea (block 0) on the FC
     map, and the chest patch does not move them, so the ROMs need no chest patch."""
     import dq4fieldgfx
@@ -230,9 +275,9 @@ def patch(dq5, prg, path, at, gfx_at=GFX_AT):
          "--name", "dq4-field-blocks")
     with_blocks = folder / "blocks.sfc"
     _run("dq5build.py", dq5, "build", *lists[:2], "--size", 4, "-o", with_blocks)
-    grid = path.with_suffix(".bin")
-    write_map(prg, grid)
-    _run("dq5fieldwrite.py", with_blocks, "patch", "--world", "0", grid, "-o", path, "--at", at,
+    grids = [write_map(prg, path.with_name(f"{path.stem}-w{w}.bin"), field) for field, w in WORLDS.items()]
+    worlds = [a for w in WORLDS.values() for a in ("--world", w)]
+    _run("dq5fieldwrite.py", with_blocks, "patch", *grids, *worlds, "-o", path, "--at", at,
          "--planes-at", gfx_at["planes"], "--name", "dq4-field")
     return lists
 
@@ -245,10 +290,11 @@ def main():
     ap.add_argument("--dq4", default="rom/dq4.nes", type=Path)
     ap.add_argument("-o", "--out", required=True, type=Path)
     ap.add_argument("--at", default="3A:8000")
+    ap.add_argument("--field", type=int, default=0, choices=sorted(WORLDS))
     args = ap.parse_args()
     prg = ines.prg(args.dq4.read_bytes())
     if args.cmd == "map":
-        print(write_map(prg, args.out))
+        print(write_map(prg, args.out, args.field))
     else:
         print(*patch(args.dq5, prg, args.out, args.at))
 

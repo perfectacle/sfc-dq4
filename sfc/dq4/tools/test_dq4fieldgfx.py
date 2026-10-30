@@ -15,6 +15,14 @@ ROM = Path(__file__).resolve().parents[3] / "rom" / "dq5.sfc"
 LINES = {0: {1: (0, 0, 0), 2: (0, 160, 0), 3: (0, 0, 200)}, 1: {1: (200, 0, 0), 2: (0, 160, 0), 3: (250, 250, 250)}}
 
 
+class PaletteTest(unittest.TestCase):
+    def test_world1_takes_the_day_colours(self):
+        palettes = {"world0": [[0] * 30, [0] * 30, list(range(30))], "world1": [list(range(100, 130))]}
+        got = gfx.world1_set(palettes)
+        self.assertEqual(got[0:13] + got[15:28], list(range(13)) + list(range(15, 28)))
+        self.assertEqual(got[13:15] + got[28:30], [113, 114, 128, 129])
+
+
 class TileTest(unittest.TestCase):
     def test_encode_decode(self):
         indices = [(i * 7) % 16 for i in range(64)]
@@ -79,11 +87,11 @@ class GenerateTest(unittest.TestCase):
 
     def test_blocks_keep_the_borrowed_terrain_and_attributes(self):
         by_number = {b["index"]: b for b in self.blocks}
-        self.assertEqual(sorted(by_number), sorted(set(port.OWN_BLOCKS.values()) - {port.SEA}))
-        for kind, number in port.OWN_BLOCKS.items():
-            if number == port.SEA:
-                continue
-            lower, upper, ground = self.dq5(port.BLOCKS[kind])
+        self.assertEqual(sorted(by_number), [n for n, _, _ in port.new_blocks()])
+        for field in port.WORLDS:
+            self.assertTrue(set(port.own_blocks(field).values()) - {port.SEA} <= set(by_number))
+        for number, kind, borrowed in port.new_blocks():
+            lower, upper, ground = self.dq5(borrowed)
             block = by_number[number]
             self.assertEqual(block["terrain"], ground)
             want = [self.original["tile_attributes"][u or lo] for lo, u in zip(lower, upper)]
