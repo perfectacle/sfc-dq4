@@ -331,9 +331,19 @@ def run_tool(*args):
 
 
 # 인물 목록은 30~3F 의 두 뱅크에 둬야 한다(데이터 뱅크를 목록 뱅크로 두고 낮은 WRAM 을 읽음). 30~39 는 타이틀,
-# 3A~3C 는 그룹 연결, 3D~3F 는 환경 맵이 쓴다. 남는 곳은 환경 맵 레코드 뒤 3F(약 25KB)와, 타이틀 layer-payload
-# 가 39:8220 에서 끝난 뒤의 39(원본 29 의 거울)다.
-NPC_AT = ('--base', '3F:9C00', '--alt', '39:9000')
+# 3A~3C 는 그룹 연결, 3D~3F 는 환경 맵이 쓴다. 남는 곳은 환경 맵 레코드 뒤 3F 와, 타이틀 layer-payload 가
+# 39:8220 에서 끝난 뒤의 39(원본 29 의 거울)다.
+NPC_BANK, NPC_ALT = 0x3F, '39:9000'
+
+
+def npc_base(env_patch):
+    """기본 목록 자리: 환경 맵 레코드가 3F 에서 끝난 다음 0x100 경계. 환경 맵이 늘면 따라 밀린다."""
+    _, _, writes = load(str(env_patch))
+    end = max(off + len(payload) for off, payload, _, _ in writes if off // 0x8000 == NPC_BANK)
+    at = (end + 0xFF) & ~0xFF
+    return f'{NPC_BANK:02X}:{0x8000 + at % 0x8000:04X}'
+
+
 GROUP_PATCHES = ('env/dq4-environment.dq5patch.json', 'newmap.dq5patch.json', 'exits.dq5patch.json',
                  'entrances.dq5patch.json', 'shops.dq5patch.json', 'inn.dq5patch.json')
 
@@ -351,8 +361,9 @@ def build(rom, dq5, dq4, work):
     run_tool(DQ5_TOOLS / 'dq5npcrecord.py', dq5, 'dump', '-o', work / 'npc-records.json')
     records = json.loads((work / 'npc-records.json').read_text())
     (work / 'npc.json').write_text(json.dumps(npc_doc(records, ported), ensure_ascii=False, indent=1))
-    run_tool(DQ5_TOOLS / 'dq5npcrelocate.py', dq5, 'patch', work / 'npc.json', *NPC_AT, '--allow-growth', *new_maps,
-             '-o', work / 'npc.dq5patch.json')
+    base = npc_base(work / 'groups' / GROUP_PATCHES[0])
+    run_tool(DQ5_TOOLS / 'dq5npcrelocate.py', dq5, 'patch', work / 'npc.json', '--base', base, '--alt', NPC_ALT,
+             '--allow-growth', *new_maps, '-o', work / 'npc.dq5patch.json')
     out = bytearray(apply_writes(rom, original, [work / 'groups' / p for p in GROUP_PATCHES] +
                                  [work / 'npc.dq5patch.json']))
     import dq4chapterbox

@@ -22,7 +22,8 @@ FC_NO_SHADOW = (0x1D, 0x20, 0xA1, 0xA8)    # 이 두 묶음은 plane 1 이 모�
 # 1장 제목 상자의 nametable(열 4~29, 행 8~13). 바깥 줄이 테두리, 안이 바탕 9A
 FC_BORDER = {'tl': 0xA1, 't': 0xA2, 'tr': 0xA3, 'l': 0xA4, 'r': 0xA5, 'bl': 0xA6, 'b': 0xA7, 'br': 0xA8}
 FC_FILL = 0x9A
-BOX_COL, BOX_ROW, BOX_W, BOX_H = 4, 8, 26, 6
+# FC 는 열 4~29(왼쪽 여백 32, 오른쪽 16)지만 SFC 는 256점이 다 보여 한쪽으로 쏠려 보이므로 열 3 에 둔다
+BOX_COL, BOX_ROW, BOX_W, BOX_H = 3, 8, 26, 6
 TEXT_ROW = 2                                # 상자 안 글자 띠(16점)의 첫 행
 TITLE = '제1장   왕궁의 전사들'
 
