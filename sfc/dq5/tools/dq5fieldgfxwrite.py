@@ -17,7 +17,8 @@ sfc/dq5/docs/dq5-build-format.md 「필드 그림 `dq5fieldgfx/1`」.
 DMA 레지스터를 절대 주소로 쓰는 루틴(01:A64F·2B:8039)이 읽으므로 30~3F 의 한 뱅크 안에만 옮긴다.
 벌은 02:ACD5 가 $1C31 로 02:AD89 의 WRAM 주소 표를 골라 넘기고 02:ACE7 의 AND #$07 로 돈다.
 세계마다 타일 벌: 01:A4A7(10바이트)을 JSL 로 바꿔 $1949 로 [주소][뱅크] 표를 고르고, 니블을 읽는 00:BBB4·BBBE·BBDA·BBE4 의
-LDA $2AD712,X 를 세계마다 256바이트 표를 읽는 JSL 로 바꾼다.
+LDA $2AD712,X 를 세계마다 256바이트 표를 읽는 JSL 로 바꾼다. 타일을 512개 넘게 늘린 롬은 니블 훅 대신 00:BBAC 를
+제자리에서 바꾼다(세 세계 니블이 같으면 palette_fast, 다르면 palette_worlds).
 움직이는 바다: 01:C5C8 이 01:A719 의 128바이트로 16벌을 만든다. 세 세계가 같으면 제자리에 쓰고, 다르면 01:C5CB 의
 원본 포인터 즉값을 $1949 로 고르는 JSL 로 바꾼다.
 """
@@ -456,7 +457,7 @@ def current(rom):
     out = {}
     extras, tables = [b''] * 3, None
     if rom.d[lorom(LOAD_SITE)] == 0x22 and is_grow_hook(rom, rom.u24(LOAD_SITE + 1)):
-        # 타일 늘리기는 니블 훅 대신 00:BBAC 를 바꿨을 수도 있어(palette_fast) 니블 표를 자리로 읽는다
+        # 타일 늘리기는 니블 훅 대신 00:BBAC 를 바꿨을 수도 있어(palette_fast·palette_worlds) 니블 표를 자리로 읽는다
         table, tables = (rom_layout(rom)[k] for k in ('table', 'tables'))
         entries = [table + w * GROW_ENTRY for w in range(3)]
         srcs = [rom.u8(e + 2) << 16 | rom.u16(e) for e in entries]
@@ -867,6 +868,8 @@ def place_extras(at, chunks, placed):
         place_in_any(a, len(chunk), '--extra-at', placed)
         out[chunk] = a
         a += len(chunk)
+        if not a & 0xFFFF:
+            a |= 0x8000                                      # 뱅크 끝까지 채웠으면 다음 뱅크 8000
     return out
 
 
@@ -901,8 +904,11 @@ def write_grow(rom, at, extra_at, world0_at, full0, nib0, world_data, placed, wr
         nibs += bytes(n[i] << 4 | n[i + 1] for i in range(0, MAX_TILES, 2))
     shared = len({nibs[k:k + MAX_TILES // 2] for k in range(0, len(nibs), MAX_TILES // 2)}) == 1
     words = b'' if shared else b''.join(palette_world_words([n for _, n in worlds]))
-    extras = place_extras(extra_at, [t[TILES * 32:] for t, _ in worlds] + [words], placed)
-    words_at = extras.pop(words, None)
+    extras = place_extras(extra_at, [t[TILES * 32:] for t, _ in worlds], placed)
+    # 워드 표는 늘린 타일과 바이트가 같아도 따로 둔다(같은 덩어리로 합치면 타일 주소를 덮어씀)
+    after = max((a + len(c) for c, a in extras.items()), default=extra_at)
+    after |= 0x8000 if not after & 0xFFFF else 0
+    words_at = place_extras(after, [words], placed)[words] if words else None
     blob, srcs = bytearray(), []
     for tiles, _ in worlds:
         base = tiles[:TILES * 32]
