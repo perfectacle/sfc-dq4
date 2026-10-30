@@ -8,7 +8,7 @@ from dq5build import build  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
 from dq5talk import ORIGINAL_SITES, SITES, extra_config  # noqa: E402
 from dq5talkwrite import (COUNT, FORMAT, REGION, TABLE, bank06, check, dump, edits, encode_script,  # noqa: E402
-                          patch, skip_length)
+                          patch, read_op, skip_length)
 
 PAPAS = [{'op': 'if', 'cond': {'code': '1B', 'index': 1, 'mask': 1},
           'then': [{'op': 'msg', 'id': '74F'}, {'op': 'flag-on', 'index': 2, 'mask': 128}],
@@ -54,6 +54,17 @@ class EncodeTests(unittest.TestCase):
         # dq5textwrite 가 3200 이상을 덧붙인 롬을 위해 1FFF 까지 받는다(1000 이상은 4자리).
         self.assertEqual(encode_script([{'op': 'msg', 'id': 'C80'}], 'x'), bytes.fromhex('46 6b 3f'))
         self.assertEqual(encode_script([{'op': 'msg', 'id': '1FFF'}], 'x'), bytes.fromhex('59 ea 3f'))
+
+    def test_message_decode_round_trip(self):
+        """읽는 쪽도 1FFF 까지: 59 EA 는 bit13 이 꺼져 v + 615 갈래로 1FFF."""
+        data = bytearray(0x180000)
+        for ident, code in (('615', '40 00'), ('C7F', '46 6a'), ('C80', '46 6b'), ('1FFF', '59 ea'), ('129', '61 29')):
+            data[lorom(0x068000):lorom(0x068000) + 2] = bytes.fromhex(code)
+            self.assertEqual(read_op(Rom(data), 0x068000), ({'op': 'msg', 'id': ident}, 0x068002))
+            self.assertEqual(encode_script([read_op(Rom(data), 0x068000)[0]], 'x'), bytes.fromhex(code + ' 3f'))
+        data[lorom(0x068000):lorom(0x068000) + 2] = bytes.fromhex('59 eb')     # 2000: 메시지 번호 끝을 넘음
+        with self.assertRaises(ValueError):
+            read_op(Rom(data), 0x068000)
 
     def test_other_ops(self):
         body = [{'op': 'flag-set', 'index': 0x60, 'value': 0x5A}, {'op': 'flag-off', 'index': 1, 'mask': 2},

@@ -175,6 +175,10 @@ class TextWriteTests(unittest.TestCase):
             self.assertEqual(decoded_messages(rebuilt), messages)
             index, count = index_table(rebuilt, 0x20 if at.startswith('38') else 0x60)
             self.assertEqual((index >> 16, count), (int(at[:2], 16), 3232))
+            bad = bytearray(rebuilt)
+            bad[lorom(index) + 3:lorom(index) + 6] = bad[lorom(index):lorom(index) + 3]
+            with self.assertRaisesRegex(ValueError, '앞으로 가지 않음'):
+                index_table(bytes(bad), 0x20 if at.startswith('38') else 0x60)
         again = overrides(messages, {'format': FORMAT, 'messages': [{'id': 3232, 'codes': [0x1010]}]})
         self.assertEqual(len(again), 3248)
         most = [[0x1001] for _ in range(MAX_MESSAGES)]
@@ -189,6 +193,37 @@ class TextWriteTests(unittest.TestCase):
         bad[lorom(INDEX_LOAD) + 2] = 0xEA
         with self.assertRaises(ValueError):
             compile_messages(bytes(bad), messages)
+
+    def test_exact_group_is_not_padded(self):
+        doc = {'format': FORMAT, 'messages': [{'id': 3200 + i, 'codes': [i, 0x1001]} for i in range(16)]}
+        messages = overrides(self.messages, doc)
+        self.assertEqual(len(messages), 3216)
+        self.assertEqual(messages[3200:], [[i, 0x1001] for i in range(16)])
+        rebuilt = rebuild(self.data, compile_messages(self.data, messages, '38:8000'), 4)
+        self.assertEqual(decoded_messages(rebuilt), messages)
+        self.assertEqual(index_table(rebuilt, 0x20)[1], 3216)
+
+    def test_portbuild_head_matches_written_head(self):
+        """dq5portbuild TextJob 이 배치에 넘기는 머리 크기가 compile_messages 가 실제로 둔 머리(메시지 0 앞)와 같은지."""
+        import json
+        import tempfile
+        from types import SimpleNamespace
+        from unittest import mock
+        import dq5portbuild
+        import dq5textwrite
+        for extra, at, mask in ((0, '38:8000', 0x20), (17, '38:8000', 0x20), (17, '65:8000', 0x60)):
+            doc = {'format': FORMAT, 'messages': [{'id': 3200 + i, 'codes': [i, 0x1001]} for i in range(extra)]}
+            with tempfile.TemporaryDirectory() as tmp:
+                Path(tmp, 'text.json').write_text(json.dumps(doc), encoding='utf-8')
+                job = dq5portbuild.TextJob({'name': 't', 'kind': 'text', 'input': 'text.json'}, Path(tmp),
+                                           SimpleNamespace(original=self.data, fixed=[]))
+                with mock.patch.object(dq5textwrite, 'read_messages', return_value=self.messages):
+                    job.prepare(Path(tmp))
+            rebuilt = rebuild(self.data, compile_messages(self.data, job.messages, at), 4)
+            rom = Rom(rebuilt)
+            index, _ = index_table(rebuilt, mask)
+            first = lorom((rom.u24(index) >> 3) | mask << 16)
+            self.assertEqual(first - lorom(parse_at(at)), job.head, f'덧붙인 {extra}개, {at}')
 
     def test_base_package_with_extra_messages_and_font_table(self):
         data = bytearray(self.data)
