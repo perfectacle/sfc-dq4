@@ -454,6 +454,8 @@ def build(rom, dq5, dq4, work, prologue=True):
     import dq4chapterbox
     import dq4menupatch
     out = bytearray(dq4chapterbox.apply(out, dq4.read_bytes(), dq4menupatch.Font('galmuri11'), scenes(prologue)))
+    import dq4ch1event
+    out = bytearray(dq4ch1event.apply(out))
     import dq4josa
     out = bytearray(dq4josa.apply(out))
     import dq4msgnames
