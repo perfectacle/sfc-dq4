@@ -384,6 +384,71 @@ def messages_doc(dq5, dq4):
     return {"format": "dq4messages/1", "messages": {f'{m:03X}': parts for m, parts in sorted(found.items())}}
 
 
+def clear_mirror(data, original, ranges):
+    """ranges [(시작, 끝)] 파일 위치 안의 거울 바이트(원본 20~2F 와 같은 값)를 0 으로. 0 도 거울도 아닌 바이트가
+    있으면 멈춘다(다른 자료가 그 자리를 씀)."""
+    d = bytearray(data)
+    for lo, hi in ranges:
+        for o in range(lo, hi):
+            if d[o] and d[o] != original[o - 0x80000]:
+                raise SystemExit(f'{o:#x}: 그룹 빌드 자리에 다른 자료가 있음')
+            d[o] = 0
+    return bytes(d)
+
+
+def group_ranges():
+    """clear_mirror 할 파일 위치 범위: 뱅크 3A~3F 전체와 3A 밖의 새 맵 레코드 자리."""
+    ranges = [(b * 0x8000, (b + 1) * 0x8000) for b in GROUP_BANKS]
+    ranges += [(lorom(lo), lorom(hi - 1) + 1) for lo, hi in RECORDS_AT if lo >> 16 not in GROUP_BANKS]
+    return ranges
+
+
+def owned_spans(groups, patches, env):
+    """그룹 빌드 롬(groups)에서 1장 빌드가 같은 바이트여야 하는 파일 위치 범위: 얹은 패치의 30~3F 쓰기와, 쓰기에서
+    잘린 앞뒤 0 까지 든 표의 끝(맵 포인터·속성 목록과 그룹 표의 0000, 들어가는 곳 표), 새 맵 레코드, 문 표 복사본 3B."""
+    import dq4groupbuild
+    from dq5map import Rom, group_spans, map_pointer
+    from dq5newmap import entrance_table
+    spans = []
+    for path in patches:
+        _, _, writes = load(str(path))
+        spans += [(off, off + len(payload)) for off, payload, _, _ in writes if 0x30 <= off // 0x8000 < 0x40]
+    rom = Rom(groups)
+    for kind in ('pointer', 'attr'):
+        found, table = group_spans(rom, kind=kind)
+        bank = table & 0xFF0000
+        spans.append((lorom(bank | found[0][0]), lorom(bank | found[-1][1] - 1) + 1))
+        spans.append((lorom(table), lorom(table) + 2 * (len(found) + 1) + 2))
+    count = len(group_spans(rom, kind='pointer')[0])
+    spans.append((lorom(entrance_table(rom)), lorom(entrance_table(rom)) + 5 * count))
+    records = dq4groupbuild.new_map_records(env)
+    spans += [(lorom(map_pointer(rom, g, n)), lorom(map_pointer(rom, g, n)) + len(r)) for (g, n), r in records.items()]
+    spans.append((0x3B * 0x8000, 0x3C * 0x8000))
+    return spans, records
+
+
+def verify_groups(out, groups, patches, env):
+    """1장 롬이 그룹 빌드 롬과 그룹 빌드 자리에서 같고, 표·레코드가 읽히는지."""
+    import dq4groupbuild
+    from dq5map import Rom, group_spans
+    from dq5newmap import entrance_table
+    spans, records = owned_spans(groups, patches, env)
+    for lo, hi in spans:
+        if out[lo:hi] != groups[lo:hi]:
+            at = next(o for o in range(lo, hi) if out[o] != groups[o])
+            raise SystemExit(f'{at // 0x8000:02X}:{0x8000 + at % 0x8000:04X}: 그룹 빌드 롬과 다름 '
+                             f'({out[at]:02X}, 그룹 빌드 {groups[at]:02X})')
+    for kind in ('pointer', 'attr'):
+        if group_spans(Rom(out), kind=kind) != group_spans(Rom(groups), kind=kind):
+            raise SystemExit(f'{kind} 그룹 표가 그룹 빌드 롬과 다름')
+    if entrance_table(Rom(out)) != entrance_table(Rom(groups)):
+        raise SystemExit('들어가는 곳 표 자리가 그룹 빌드 롬과 다름')
+    try:
+        dq4groupbuild.check_records(out, records)
+    except ValueError as error:
+        raise SystemExit(str(error))
+
+
 def apply_writes(data, original, paths):
     """dq5patch/1 목록들을 이미 4MB 로 늘린 롬 위에 얹는다. orig 가 있으면 확인하고, 없으면 0 이 아닌 자료를
     덮지 않는다. 타이틀 롬은 2MB 로 늘릴 때 30~3F 를 원본 20~2F 의 거울로 채우므로, 거울 그대로인 바이트는
@@ -436,8 +501,13 @@ GROUP_PATCHES = ('env/dq4-environment.dq5patch.json', 'newmap.dq5patch.json', 'e
 # 타이틀 뱅크 30·31 에서 타이틀 자료 사이의 빈 곳(메뉴 롬에서 0 이거나 원본 20·21 의 거울 그대로인 곳)으로 간다.
 # 그룹 빌드 안에서는 30:E000 의 필드 그림 패치 앞이다.
 # 필드 지도(덩어리 둘 약 12KB, 필드 로더의 DB 때문에 30~3F)는 타이틀 자료가 34:BFD1 에서 끝난 뒤에 둔다. 비어 있지 않으면 apply_writes 가 멈춘다.
-RECORDS_AT = ((0x3A8000, 0x3B0000), (0x308370, 0x30A000), (0x30A900, 0x30E000), (0x31B760, 0x31D002),
-              (0x31ECFF, 0x320000))
+# 30:8370·31:D000~D001·31:ECFF 는 타이틀 빌드가 0 으로 쓴 바이트라(거울 값이 0 이 아님) 자리에서 뺐다.
+RECORDS_AT = ((0x3A8000, 0x3B0000), (0x308371, 0x30A000), (0x30A900, 0x30E000), (0x31B760, 0x31D000),
+              (0x31ED00, 0x320000))
+# 그룹 빌드는 늘린 뱅크가 0 인 원래 롬에서 패치를 만들고, dq5newmap 은 바탕과 같은 앞뒤 바이트(0)를 쓰지 않는다.
+# 메뉴 롬의 30~3F 는 원본 20~2F 의 거울이라, 그대로 얹으면 표 끝의 0000 같은 바이트 자리에 거울 값이 남는다.
+# 그래서 그룹 빌드가 쓰는 뱅크 3A~3F 와 레코드 자리의 거울 바이트를 먼저 0 으로 둔다.
+GROUP_BANKS = range(0x3A, 0x40)
 FIELD_AT = '34:C000'
 
 
@@ -471,7 +541,7 @@ def build(rom, dq5, dq4, work, prologue=True):
     run_tool(DQ5_TOOLS / 'dq5tables.py', dq5, 'patch', work / 'boss-monsters.json', '-o', work / 'boss-monsters.dq5patch.json')
     patches = [work / 'groups' / p for p in (*GROUP_PATCHES, *summary['record_patches'])] + [
         work / 'npc.dq5patch.json', work / 'boss.dq5patch.json', work / 'boss-monsters.dq5patch.json']
-    out = bytearray(apply_writes(rom, original, patches))
+    out = bytearray(apply_writes(clear_mirror(rom, original, group_ranges()), original, patches))
     import dq4chapterbox
     import dq4menupatch
     out = bytearray(dq4chapterbox.apply(out, dq4.read_bytes(), dq4menupatch.Font('galmuri11'), scenes(prologue)))
@@ -495,7 +565,10 @@ def build(rom, dq5, dq4, work, prologue=True):
         start = dq4prologue.START
     group, number = (int(v, 16) for v in start[0].split('/'))
     out[o:o + 4] = bytes((group, number, start[1], start[2]))
-    return set_checksum(out)
+    out = set_checksum(out)
+    group_patches = [work / 'groups' / p for p in (*GROUP_PATCHES, *summary['record_patches'])]
+    verify_groups(bytes(out), (work / 'groups' / 'groups.sfc').read_bytes(), group_patches, work / 'groups' / 'env')
+    return out
 
 
 def main():

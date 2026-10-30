@@ -439,6 +439,13 @@ def splice(writes, extra):
     return rest
 
 
+def new_map_records(env):
+    """{(DQ5 group, map): record bytes} of the GROUPS maps from dq4environmentrom's documents in `env`."""
+    from dq5mapwrite import encode
+    return {(group, number): encode(json.loads((env / f"{name}.dq5map.json").read_text(encoding="utf-8")))
+            for name, (group, number) in GROUPS.items()}
+
+
 def check_records(rom, records):
     """Each new map's pointer in the built ROM leads to its record (records {(group, map): bytes})."""
     from dq5map import Rom, lorom, map_pointer
@@ -525,8 +532,7 @@ def build(dq5, dq4, out, with_people=True):
     new_maps = [f"{g:02X}/{n:02X}" for g, n in sorted(GROUPS.values())]
     new_map_args = [a for m in new_maps for a in ("--new-map", m)]
     names = {f"{g:02X}/{n:02X}": name for name, (g, n) in GROUPS.items()}
-    from dq5mapwrite import encode
-    records = {m: encode(json.loads((env / f"{names[m]}.dq5map.json").read_text(encoding="utf-8"))) for m in new_maps}
+    records = {f"{g:02X}/{n:02X}": r for (g, n), r in new_map_records(env).items()}
     area = dict(zip(new_maps, record_areas([len(records[m]) for m in new_maps], RECORDS_AT)))
     newmap = {"format": "dq5newmap/1", "groups": [], "maps": []}
     for group, (first, *_) in LINKS.items():
@@ -548,6 +554,8 @@ def build(dq5, dq4, out, with_people=True):
         manifests.append(manifest)
         return tool, source, args
 
+    # The check of the first call rebuilds its own placeholders, so the maps of later areas are covered only by
+    # check_records on the built ROM.
     checks = [step("dq5newmap.py", "newmap", newmap, env_rom, *NEWMAP_AT, "--records-at", _cpu(RECORDS_AT[0][0]))]
     record_patches = []
     for k in range(1, max(area.values()) + 1):
