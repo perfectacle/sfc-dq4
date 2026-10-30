@@ -118,16 +118,6 @@ class PrologueTests(unittest.TestCase):
         slot = code[at['talk_slot'] - pro.CODE_AT:]
         self.assertIn(bytes((0x22, *pro.TALK_TO.to_bytes(3, 'little'))), slot)
 
-    def test_near_branches_land_on_the_tails(self):
-        # 축마다 BCS 가 '멂' 꼬리(LDA #1)로, 둘 다 지나면 '가까움' 꼬리(LDA #0)로 간다
-        code = pro._near(4)
-        near = code.index(bytes((0xA9, 0x00, 0x00)))
-        far = code.index(bytes((0xA9, 0x01, 0x00)))
-        for at in [i for i in range(len(code) - 1) if code[i] == 0xB0]:
-            self.assertEqual(at + 2 + code[at + 1], far - 5)
-        self.assertLess(near, far)
-
-
     def test_inside_is_a_rectangle(self):
         # 65816 을 흉내 내지 않고 비교·분기만 따라가 사각형 안이면 LDA #0, 밖이면 LDA #1 에 닿는지 본다
         def run(x, y):

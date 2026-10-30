@@ -207,8 +207,6 @@ def _skip_song():
             box.LEAVE)
 
 
-# 다가왔다고 볼 거리(DQ5 셀). 신시아는 4셀 안에서 말을 건다
-NEAR = (4,)
 TALKER = 0x7E1BC4   # 말을 걸 인물 슬롯. 7E:1BBE~ 79바이트는 DQ5 가 쓰지 않는 자리(dq4josa 가 1BC0 을 씀)
 TALK_TO = 0x06AF1C  # 06:AF1C: JSR $AF20 / RTL. A = 인물 슬롯으로 필드 「대화」(05:D596)와 같은 대화를 돌린다
 
@@ -227,21 +225,6 @@ def _talk_slot():
                                0xAF, *TALKER.to_bytes(3, 'little'), 0x22, *TALK_TO.to_bytes(3, 'little'))) + box.LEAVE)
 
 
-def _near(cells):
-    """인물 명령 05 가 부르는 루틴: 주인공(슬롯 0)과 이 인물(슬롯 $90)의 X·Y 가 둘 다 cells 셀 안이면 A = 0
-    (05 가 다음 명령으로), 아니면 A = 1(다음 프레임에 다시). 7E:3020·3080 은 인물 표의 X·Y."""
-    def axis(table, far):
-        return bytes((0xAF, table & 0xFF, table >> 8, 0x7E, 0x38, 0xFF, table & 0xFF, table >> 8, 0x7E,   # LDA 주인공 / SEC / SBC 인물,X
-                      0x10, 0x03, 0x49, 0xFF, 0x1A,                                                       # 음수면 부호를 뒤집음
-                      0xC9, cells + 1, 0xB0, far))                                                        # CMP / BCS 멂
-    head = bytes((0x08, 0xC2, 0x30, 0xDA, 0x5A, 0x8B, 0xE2, 0x30, 0xA6, 0x90))  # PHP / REP / PHX / PHY / PHB / SEP / LDX $90
-    tail_far = bytes((0xC2, 0x30, 0xAB, 0x7A, 0xFA, 0xA9, 0x01, 0x00, 0x28, 0x6B))   # REP / PLB / PLY / PLX / LDA #1 / PLP / RTL
-    tail_near = bytes((0xC2, 0x30, 0xAB, 0x7A, 0xFA, 0xA9, 0x00, 0x00, 0x28, 0x6B))
-    y_part = axis(0x3080, len(tail_near))
-    x_part = axis(0x3020, len(y_part) + len(tail_near))
-    return head + x_part + y_part + tail_near + tail_far
-
-
 def _inside(x0, y0, x1, y1):
     """인물 명령 05 가 부르는 루틴: 주인공(슬롯 0) X·Y 가 사각형 안이면 A = 0, 아니면 1(다음 프레임에 다시)."""
     far = bytes((0xC2, 0x30, 0xA9, 0x01, 0x00, 0x28, 0x6B))      # REP / LDA #1 / PLP / RTL
@@ -254,9 +237,11 @@ def _inside(x0, y0, x1, y1):
     return bytes((0x08, 0xE2, 0x30)) + body + near + far
 
 
-def _hero_face(pose):
-    """주인공(슬롯 0) 자세를 pose 로(00:EE8C: 0 위, 1 오른쪽, 4 아래, 2 왼쪽 쪽 그림)."""
-    return box.ENTER + bytes((0xA9, pose, 0x8F, 0x40, 0x32, 0x7E, 0x8F, 0x60, 0x32, 0x7E)) + box.LEAVE
+def _hero_face(facing):
+    """주인공(슬롯 0)을 facing(31E0 꼴: 88 위, 11 오른쪽, 44 아래, 22 왼쪽)으로 돌린다. 고정하지 않은 인물의 그림은
+    31E0 위 니블을 따르므로 자세(3240·3260)만 바꾸면 그대로였다."""
+    return box.ENTER + bytes((0xA9, facing, 0x8F, 0xE0, 0x31, 0x7E, 0x29, 0x0F,
+                              0x8F, 0x40, 0x32, 0x7E, 0x8F, 0x60, 0x32, 0x7E)) + box.LEAVE
 
 
 def native():
@@ -273,11 +258,9 @@ def native():
         put('talk_slot', _talk_slot())
         put('talk_event', bytes((0xA0, *_long(at.get('talk_slot', 0)), 0xFF)))
         put('talk_here', _talk_here(at.get('talk_event', 0)))
-        for cells in NEAR:
-            put(f'near{cells}', _near(cells))
         for name, rect in (('voice_hut', VOICE_HUT), ('voice_bridge', VOICE_BRIDGE), ('frog_call', FROG_CALL)):
             put(name, _inside(*rect))
-        put('hero_right', _hero_face(0x01))
+        put('hero_right', _hero_face(0x11))
         put('skip_song', _skip_song())
         # 저녁: 주인공이 식탁에 앉아 아래를 봄(C1 40) → 저녁 대사 → 끝: 검은 화면 → 서술 → 곡 건너뛰기 →
         # 1장 왕좌의 방으로(이벤트 명령 90, $198E = 80)
@@ -363,7 +346,6 @@ def master_script(boxes):
 def scripts():
     """서장 뒤쪽 인물 스크립트: 개구리 퇴장, 신시아·개구리 꼴의 모샤스, 아버지의 끝."""
     _, at = native()
-    near = lambda cells: _cmd('05', *_long(at[f'near{cells}']))  # noqa: E731
     call = lambda name: _cmd('37', *_long(at[name]))  # noqa: E731
     inside = lambda name: _cmd('05', *_long(at[name]))  # noqa: E731
     fx, fy = FROG_AT
@@ -383,7 +365,8 @@ def scripts():
              _cmd('20', *JUMP), _cmd('2F', 0x10)] + hops +
             [_cmd('38'), _cmd('20', *STAIRS), _cmd('51'), _cmd('52'), _cmd('40'), _cmd('16')])
     sx, sy = SHINSIA_AT
-    shinsia = ([near(4), _cmd('37', *_long(at['talk_here'])), _wait_on(SHINSIA_START), _cmd('3F'), _cmd('20', 0x37, 0)] + _spin(at) +
+    # NDS mlb1a 처럼 말을 걸어야 시작한다(대화 902 가 신시아 시작 깃발을 켬)
+    shinsia = ([_wait_on(SHINSIA_START), _cmd('3F'), _cmd('20', 0x37, 0)] + _spin(at) +
                [_cmd('51'), _cmd('10', *MORPH), _wait_on(MORPH_BACK),
                 _cmd('50', sx * 2, sy * 2), _cmd('53'), _cmd('4F'), _msg(M_MORPH), _msg(M_BYE), _msg(M_SUPPER)] +
                # 주인공이 문틈 (4,0D) 쪽에서 다가오면 나가는 길에 선 채 말이 걸리므로, 주인공을 지나 걷는다(1C)
