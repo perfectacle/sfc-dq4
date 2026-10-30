@@ -70,7 +70,7 @@ def main():
         for save in a.saves:
             for k, pre in enumerate(presses):
                 todo.append(('saves', f'{os.path.splitext(os.path.basename(save))[0]}-{k}',
-                             {'NEXT': walk, 'STATE_OVERRIDE': os.path.abspath(save), 'PRE': pre, 'MAXF': '900'}))
+                             {'NEXT': walk, 'STATE_OVERRIDE': os.path.abspath(save), 'PRE': pre, 'MAXF': '900', 'CDLEVERY': '20'}))
 
     if 'effects' in kinds:
         import tempfile
