@@ -7,12 +7,12 @@ sfc/dq5/docs/dq5-build-format.md.
 DB를 바꾼 뒤 01:A668의 LDX $00A5와 01:A67D의 STA $420B도 같은 뱅크를 쓰므로, 확장 영역 중 30~3F만 허용한다.
 
 지도 파일(.bin)은 칸마다 16비트 리틀 엔디언 블록 번호(0~510)를 y*256+x 순서로 둔 128KB 다. dq5fieldtables.py --blocks-at 으로
-블록을 늘린 롬에서 만들면 그 블록 수(1,024개까지)를 받는다. 512 이상이 있는 세계는 10번째 비트를 압축하지 않은 8KB 평면으로
---planes-at(30~7D)에 두고, 00:BBF7·00:BDC5 의 9번째 비트 읽기(00:BC33·00:BE06)를 평면도 함께 읽는 훅으로 바꾼다.
-평면은 롬이라 게임이 칸을 바꾸는 00:CF50(밤에 빛나는 풀 등, 부르는 곳 넷이 칸과 번호를 즉값으로 줌)은 10번째 비트를 바꾸지
-못한다. 그래서 그 칸들(즉값을 롬에서 읽으므로 dq5chestwrite.py 의 field 로 옮긴 빛 칸도 따름)에 512 이상을 두면
+블록을 늘린 롬에서 만들면 그 블록 수(2,048개까지)를 받는다. 512 이상이 있는 세계는 10번째 비트를, 1,024 이상이 있는 세계는
+11번째 비트도 압축하지 않은 8KB 평면으로 --planes-at(30~7D)에 두고, 00:BBF7·00:BDC5 의 9번째 비트 읽기(00:BC33·00:BE06)를
+평면도 함께 읽는 훅으로 바꾼다. 평면은 롬이라 게임이 칸을 바꾸는 00:CF50(밤에 빛나는 풀 등, 부르는 곳 넷이 칸과 번호를
+즉값으로 줌)은 10·11번째 비트를 바꾸지 못한다. 그래서 그 칸들(즉값을 롬에서 읽으므로 dq5chestwrite.py 의 field 로 옮긴 빛 칸도 따름)에 512 이상을 두면
 거부한다. 지도 패치는 상자 패치를 넣은 롬에서 만든다(반대 순서는 dq5chestwrite.py 가 512 이상 칸을 거부).
-10번째 비트 평면을 쓰는 세계는 한 번의 patch 에 함께 준다(훅이 하나다).
+10·11번째 비트 평면을 쓰는 세계는 한 번의 patch 에 함께 준다(훅이 하나다).
 
   dump   세계 N 의 지도 → .bin(-o)
   check  세계 셋을 풀어 다시 싸고 풀면 같은지, 크기는 원래와 얼마나 다른지
@@ -142,11 +142,32 @@ def read_grid(path, count=BLOCK_COUNT):
     return grid
 
 
-def bit9_hook(planes):
+def bit9_hook(planes, planes10=(None, None, None)):
     """00:BC33·00:BE06 대신(JSL, A 8비트, X 16비트 = 9번째 비트 바이트 자리, Y 아랫바이트 = 칸의 비트 0~7, A 윗바이트 = 번호 하위
-    8비트). planes 는 세계 0·1·2 의 평면 주소(None 이면 그 세계는 10번째 비트 0). 나갈 때 A 아랫바이트 = 하위 8비트,
-    윗바이트 = 비트9 << 1 | 비트8 로 원래 루틴의 XBA 뒤와 같다. Y 의 윗바이트는 M 8비트·X 16비트의 TAY(00:BC32)가 A 윗바이트를
-    함께 옮긴 것이라, 원래 루틴처럼 SEP #$10 으로 지운 뒤 TYX 한다. 마스크는 원래처럼 00:BCA0 을 긴 주소로 읽는다."""
+    8비트). planes·planes10 은 세계 0·1·2 의 10·11번째 비트 평면 주소(None 이면 그 비트는 0). 7E:E000 과 두 평면의 바이트를
+    스택에 쌓고, 11번째 비트부터 꺼내 Y 에 ROL 로 모은다. 나갈 때 A 아랫바이트 = 하위 8비트, 윗바이트 = 비트10 << 2 | 비트9 << 1
+    | 비트8 로 원래 루틴의 XBA 뒤와 같고, X·Y 는 원래처럼 칸의 비트 자리다. Y 의 윗바이트는 M 8비트·X 16비트의 TAY(00:BC32)가
+    A 윗바이트를 함께 옮긴 것이라, 원래 루틴처럼 SEP #$10 으로 지운 뒤 TYX 한다. 마스크는 원래처럼 00:BCA0 을 긴 주소로 읽는다.
+    11번째 비트 평면이 없으면 10번째 비트만 읽는 짧은 훅을 낸다. 이 훅은 명령이 22개에서 35개로 늘어 세계 0 의 움직이는 타일
+    위상과 세계 2 의 첫걸음이 원본 게임보다 늦어지므로 쓰지 않을 때는 피한다."""
+    if not any(planes10):
+        return bit10_hook(planes)
+    read = lambda p: b'\xbf' + p.to_bytes(3, 'little') if p else b'\xa9\x00\xea\xea'
+    last = read(None) + b'\x48' + read(None) + b'\x48'
+    arms = b''
+    for k in range(3):
+        arms += read(planes[k]) + b'\x48' + read(planes10[k]) + b'\x48' + b'\x80' + bytes([(2 - k) * 12 + len(last)])
+    # 세계 0·1·2 의 갈래는 12바이트씩이고 넷째 세계(0)는 BRA 없이 tail 로 이어진다.
+    head = (b'\xbf\x00\xe0\x7e\x48\xaf\x49\x19\x7e\x29\x03'
+            + b'\xf0\x08\x3a\xf0\x11\x3a\xf0\x1a\x80\x24')
+    bit = b'\x68\x3f\xa0\xbc\x00\xc9\x01\x98\x2a\xa8'
+    tail = b'\xe2\x10\xbb\xa0\x00' + bit * 3 + b'\x9b\xeb\x6b'
+    return (bytes([0x80, 18]) + b''.join((p or 0).to_bytes(3, 'little') for p in (*planes, *planes10))
+            + head + arms + last + tail)
+
+
+def bit10_hook(planes):
+    """10번째 비트만 읽는 훅. 머리는 [세계 0·1·2 평면 24비트씩]이고, 나갈 때 A 윗바이트 = 비트9 << 1 | 비트8 이다."""
     slot = [b'\xbf' + p.to_bytes(3, 'little') if p else b'\xa9\x00\xea\xea' for p in planes]
     tail = (b'\x48\xbf\x00\xe0\x7e\xe2\x10\xbb\x3f\xa0\xbc\x00\xc9\x01\x68\x08'
             + b'\x3f\xa0\xbc\x00\xc9\x01\xa9\x00\x2a\x28\x2a\xeb\x6b')
@@ -159,10 +180,10 @@ def bit9_hook(planes):
     return b'\x80\x09' + b''.join((p or 0).to_bytes(3, 'little') for p in planes) + head + arms + tail
 
 
-def plane_bits(grid):
+def plane_bits(grid, bit=9):
     out = bytearray(PLANE)
     for i, v in enumerate(grid):
-        if v >> 9 & 1:
+        if v >> bit & 1:
             out[i >> 3] |= 0x80 >> (i & 7)
     return bytes(out)
 
@@ -191,14 +212,15 @@ def parse_any(value, option):
 
 
 def plane_writes(rom, data, grids, at):
-    """번호 512 이상이 있는 세계의 10번째 비트 평면과 훅 쓰기, 롬 크기(MB). 평면은 뱅크를 넘지 않게 8KB 씩."""
+    """번호 512 이상이 있는 세계의 10·11번째 비트 평면과 훅 쓰기, 롬 크기(MB). 평면은 비트마다 그 비트를 쓰는 세계만,
+    뱅크를 넘지 않게 8KB 씩."""
     wide = {w: g for w, g in grids.items() if any(v >> 9 for v in g)}
     if not wide:
         if at is not None:
             raise ValueError('--planes-at 은 번호 512 이상의 블록을 쓰는 세계가 있을 때만')
         return [], 2
     if at is None:
-        raise ValueError(f'세계 {sorted(wide)} 가 번호 512 이상을 씀: --planes-at 으로 10번째 비트 평면 자리를 줄 것')
+        raise ValueError(f'세계 {sorted(wide)} 가 번호 512 이상을 씀: --planes-at 으로 10·11번째 비트 평면 자리를 줄 것')
     if rom.u8(BIT9_SITES[0]) == 0x22 or any(bit9_planes(rom)):
         raise ValueError('이미 10번째 비트 훅이 있는 롬: 평면을 쓰는 세계를 모두 한 번에, 훅이 없는 롬으로 만들 것')
     for site, want in zip(BIT9_SITES, BIT9_ORIG):
@@ -208,12 +230,15 @@ def plane_writes(rom, data, grids, at):
     for w, g in wide.items():
         bad = [(x, y) for x, y in cells if g[y * 256 + x] >> 9]
         if bad:
-            raise ValueError(f'세계 {w} 블록 칸 {bad[0]}: 게임이 00:CF50 으로 바꾸는 칸이라 10번째 비트를 쓸 수 없음(512 미만만)')
-    size = len(bit9_hook([None] * 3))
+            raise ValueError(f'세계 {w} 블록 칸 {bad[0]}: 게임이 00:CF50 으로 바꾸는 칸이라 10·11번째 비트를 쓸 수 없음(512 미만만)')
+    eleven = any(v >> 10 for g in wide.values() for v in g)
+    size = len(bit9_hook([None] * 3, [0x8000 if eleven else None] * 3))
     if (at & 0xFFFF) + size > 0x10000:
         raise ValueError(f'--planes-at: 훅 {size}바이트가 한 뱅크 안에 들어가지 않음')
-    planes, a, out = [None] * 3, at + size, []
-    for w in sorted(wide):
+    planes, a, out = {9: [None] * 3, 10: [None] * 3}, at + size, []
+    for w, bit in ((w, bit) for w in sorted(wide) for bit in (9, 10)):
+        if not any(v >> bit & 1 for v in wide[w]):
+            continue
         # 훅이나 앞 평면이 뱅크 끝에 딱 맞으면 a 가 다음 뱅크 0000 이 되는데, 그 자리는 LoROM 의 롬이 아니다
         if a & 0xFFFF < 0x8000:
             a |= 0x8000
@@ -221,17 +246,17 @@ def plane_writes(rom, data, grids, at):
             a = ((a >> 16) + 1) << 16 | 0x8000
         if a >> 16 > 0x7D:
             raise ValueError('--planes-at: 평면이 뱅크 7D 를 넘음')
-        planes[w] = a
-        out.append({'at': f'{a >> 16:02X}:{a & 0xFFFF:04X}', 'hex': plane_bits(wide[w]).hex(' '),
-                    'note': f'세계 {w} 블록 번호 10번째 비트 평면'})
+        planes[bit][w] = a
+        out.append({'at': f'{a >> 16:02X}:{a & 0xFFFF:04X}', 'hex': plane_bits(wide[w], bit).hex(' '),
+                    'note': f'세계 {w} 블록 번호 {bit + 1}번째 비트 평면'})
         a += PLANE
-    hook = bit9_hook(planes)
-    out.insert(0, {'at': f'{at >> 16:02X}:{at & 0xFFFF:04X}', 'hex': hook.hex(' '), 'note': '블록 번호 10번째 비트 훅'})
+    hook = bit9_hook(planes[9], planes[10])
+    out.insert(0, {'at': f'{at >> 16:02X}:{at & 0xFFFF:04X}', 'hex': hook.hex(' '), 'note': '블록 번호 10·11번째 비트 훅'})
     for site, want in zip(BIT9_SITES, BIT9_ORIG):
         skip = len(want) - 6
         raw = b'\x22' + at.to_bytes(3, 'little') + b'\x80' + bytes([skip]) + b'\xea' * skip
         out.append({'at': f'{site >> 16:02X}:{site & 0xFFFF:04X}', 'hex': raw.hex(' '), 'orig': want.hex(' '),
-                    'note': '9번째 비트 읽기를 10번째 비트 훅으로'})
+                    'note': '9번째 비트 읽기를 10·11번째 비트 훅으로'})
     end = lorom(a - 1) + 1
     return out, 4 if end > 0x300000 else 3 if end > 0x200000 else 2
 
@@ -257,7 +282,7 @@ def main():
     ap.add_argument('--world', type=int, action='append', choices=(0, 1, 2))
     ap.add_argument('-o', '--out')
     ap.add_argument('--at', default='34:8000', help='CPU 주소 BB:AAAA, 뱅크 30~3F만 허용')
-    ap.add_argument('--planes-at', help='번호 512 이상이 있는 세계의 10번째 비트 평면·훅 자리(BB:AAAA, 30~7D)')
+    ap.add_argument('--planes-at', help='번호 512 이상이 있는 세계의 10·11번째 비트 평면·훅 자리(BB:AAAA, 30~7D)')
     ap.add_argument('--name', default='field')
     a = ap.parse_args()
     data = open(a.rom, 'rb').read()

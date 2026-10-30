@@ -14,6 +14,10 @@
   세계 0 (341,56) 에 서기·네 방향으로 32프레임씩 걷기, 세계 1·2 (50,28) 에 서기(원본 롬과 견줌).
   w12pal: 세계 1·2 에 서서 $075E 를 매 프레임 고정하고(불러올 때 0 으로 두므로) 2·3번 줄 색 1~13 이 고른 벌인지,
           원본 롬은 그대로인지
+--bits 11
+  same·swap·wall-lower·wall-upper 를 블록 2,047개로 만든다. 블록 1024+b·1536+b 가 블록 b 를 따르고(511~1023 은 블록 0),
+  지도의 칸 b 를 칸 좌표 x+y 가 짝수면 b+1024(11번째 비트만), 홀수면 b+1536(10·11번째 비트)으로 바꾼다.
+  세 세계 모두 서기와 걷기를 본다(세계 1·2 는 (50,28) 에 서고, 세계 2 걷기는 바다 (62,64) 에서 왼쪽 해안까지). w12pal 은 돌리지 않는다
 
   MESENCE=… python sfc/dq5/tools/dq5blockgrowcheck.py rom/dq5.sfc --state work/state/ship.mss --out work/blockgrowcheck
 """
@@ -58,7 +62,22 @@ def swapped(layer):
     return [layer[1], layer[0], layer[3], layer[2]]
 
 
-def make_roms(original, out):
+def offset(bits, i):
+    """칸 i 의 블록 번호에 더하는 값."""
+    if bits == 10:
+        return 512
+    return 1024 if (i % 256 + i // 256) % 2 == 0 else 1536
+
+
+def source_block(bits, n):
+    """새 블록 n 이 따르는 원래 블록 번호. 원래 블록은 0~510 이라 그 밖(1535 등)은 블록 0."""
+    for base in ((1536, 1024) if bits == 11 else (512,)):
+        if n >= base:
+            return n - base if n - base < 511 else 0
+    return 0
+
+
+def make_roms(original, out, bits=10):
     rom = Rom(original.read_bytes())
     command('dq5fieldtables.py', original, 'dump', '-o', out / 'tables.json')
     blocks = json.loads((out / 'tables.json').read_text(encoding='utf-8'))['blocks']
@@ -74,12 +93,12 @@ def make_roms(original, out):
     for w in range(3):
         g = fw.world_grid(rom, w)
         keep = {y * 256 + x for x, y in fw.changed_cells(rom)}
-        grids[w] = [v if i in keep else v + 512 for i, v in enumerate(g)]
+        grids[w] = [v if i in keep else v + offset(bits, i) for i, v in enumerate(g)]
         (out / f'w{w}.bin').write_bytes(b''.join(v.to_bytes(2, 'little') for v in grids[w]))
     for name, make in variants.items():
         new = []
-        for n in range(511, 1023):
-            lower, upper, land = make(blocks[n - 512] if n >= 512 else blocks[0])
+        for n in range(511, 1023 if bits == 10 else 2047):
+            lower, upper, land = make(blocks[source_block(bits, n)])
             new.append({'index': n, 'lower': lower, 'upper': upper, 'terrain': land})
         (out / f'{name}-tables.json').write_text(json.dumps({'format': 'dq5fieldtables/1', 'blocks': new}), encoding='utf-8')
         command('dq5fieldtables.py', original, 'patch', out / f'{name}-tables.json', '-o', out / f'{name}-blocks.json',
@@ -89,6 +108,8 @@ def make_roms(original, out):
                 *(out / f'w{w}.bin' for w in range(3)), '--planes-at', '3D:8000', '-o', out / f'{name}-map.json')
         command('dq5build.py', original, 'build', out / f'{name}-blocks.json', out / f'{name}-map.json', '--size', '4',
                 '-o', out / f'{name}.sfc', '--ips', out / f'{name}.ips')
+    if bits == 11:
+        return wall
     src = out / 'w12-src'
     doc = fgw.dump(rom, src)
     for k, (times, _) in W12.items():
@@ -150,7 +171,7 @@ def check_same(name, dump, orig, n, world, swap=False):
             'swapped': swap, 'field_tiles_same': tiles, 'hero_block': [bx, by]}
 
 
-def check_walk(name, rom_path, dump, orig, want):
+def check_walk(name, rom_path, dump, orig, want, world=0):
     """걷기 뒤 좌표·지형. want 가 'same' 이면 원본 게임과 같은 자리·지형, 'swap' 이면 같은 자리에 지형 0D,
     'wall' 이면 한 칸도 못 감."""
     line = next(x for x in (dump / 'warp.txt').read_text().splitlines() if ' test ' in x)
@@ -163,8 +184,9 @@ def check_walk(name, rom_path, dump, orig, want):
         land = SWAP_TERRAIN if want == 'swap' else ow[0x1AA0]
         require(w[0x1AA0] == land, f'{name}: 지형 $1AA0 = {w[0x1AA0]:02X}({land:02X} 이어야 함)')
     rom = Rom(rom_path.read_bytes())
-    b = fw.world_grid(rom, 0)[((w[0xB8] | w[0xB9] << 8) >> 1) * 256 + ((w[0xB6] | w[0xB7] << 8) >> 1)]
-    return {'case': name, 'walk': line.split(' test ')[1], 'terrain': f'{w[0x1AA0]:02X}', 'block_here': b,
+    require(w[0x1949] == world, f'{name}: 걸은 뒤 세계가 {w[0x1949]}')
+    b = fw.world_grid(rom, world)[((w[0xB8] | w[0xB9] << 8) >> 1) * 256 + ((w[0xB6] | w[0xB7] << 8) >> 1)]
+    return {'case': name, 'world': world, 'walk': line.split(' test ')[1], 'terrain': f'{w[0x1AA0]:02X}', 'block_here': b,
             'block_terrain': terrain(rom, b)}
 
 
@@ -195,6 +217,7 @@ def main():
     ap.add_argument('--state', type=Path, required=True)
     ap.add_argument('--mesence', default=os.environ.get('MESENCE'))
     ap.add_argument('--out', type=Path, default=Path('work/blockgrowcheck'))
+    ap.add_argument('--bits', type=int, choices=(10, 11), default=10, help='시험 롬의 블록 번호 비트 수')
     args = ap.parse_args()
     if not args.mesence:
         ap.error('--mesence 또는 MESENCE 가 필요함')
@@ -205,13 +228,15 @@ def main():
         args.out.mkdir(parents=True, exist_ok=True)
         out = Path(tempfile.mkdtemp(prefix='run-', dir=args.out.resolve()))
         print(f'실행 출력: {out}', flush=True)
-        wall = make_roms(original, out)
+        wall = make_roms(original, out, args.bits)
         krlua = Path(subprocess.run(['krpatch', 'sfc', 'lua'], capture_output=True, text=True, check=True,
                                     timeout=30).stdout.strip())
         libdir = out / 'lib'
         shutil.copytree(krlua, libdir)
         shutil.copyfile(HERE / 'lua/dq5warp.lua', libdir / 'boot.lua')
         gfx = HERE / 'lua/dq5gfxdump.lua'
+        if args.bits == 11:
+            return main11(args, out, original, state, mesence, libdir, gfx, wall)
         roms = {k: out / f'{k}.sfc' for k in ('same', 'swap', 'wall-lower', 'wall-upper', 'w12pal')}
         cases = []
         for scene, env in (('stand', STAND), ('world1', WORLD[1]), ('world2', WORLD[2]), ('move', MOVE)):
@@ -248,6 +273,45 @@ def main():
         if isinstance(error, subprocess.CalledProcessError) and error.stderr:
             print(error.stderr, file=sys.stderr)
         return 1
+
+
+def main11(args, out, original, state, mesence, libdir, gfx, wall):
+    variants = ('same', 'swap', 'wall-lower', 'wall-upper')
+    roms = {k: out / f'{k}.sfc' for k in variants}
+    moves = {0: MOVE, **{w: dict(MOVE, FIELD=WORLD[w]['FIELD'], POKE=WORLD[w]['POKE']) for w in (1, 2)}}
+    # 세계 2 (50,28) 은 배가 뭍에 있어 원본 게임도 걷지 못한다. 바다 (62,64) 에서 왼쪽 해안 (52,64) 에 닿을 때까지 민다.
+    # 이 장면은 블록을 늘린 롬이 원본보다 한 걸음(8프레임) 늦게 떠나서, 걸음 수가 아니라 막히는 자리로 견준다
+    moves[2].update(FIELD='62,64', TEST='wait:60,left:120,wait:60')
+    stands = {0: STAND, **WORLD}
+    cases = []
+    for world in range(3):
+        cases += [(f'stand{world}-{k}', r, stands[world]) for k, r in (('orig', original), ('same', roms['same']),
+                                                                         ('swap', roms['swap']))]
+        cases += [(f'move{world}-{k}', r, moves[world]) for k, r in (('orig', original), *roms.items())]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        dirs = dict(zip([c[0] for c in cases], pool.map(
+            lambda c: gwc.run(mesence, c[1], gfx, c[2], out / c[0], libdir, state), cases)))
+    results = []
+    for world in range(3):
+        for k in ('same', 'swap'):
+            r = check_same(f'stand{world}-{k}', dirs[f'stand{world}-{k}'], dirs[f'stand{world}-orig'], STAND_FRAME,
+                           world, k == 'swap')
+            bx, by = r['hero_block']
+            r['hero_block_number'] = fw.world_grid(Rom(roms[k].read_bytes()), world)[by * 256 + bx]
+            require(r['hero_block_number'] >= 1024, f'stand{world}-{k}: 주인공 칸 블록 {r["hero_block_number"]}')
+            results.append(r)
+        results.append(check_same(f'move{world}-same', dirs[f'move{world}-same'], dirs[f'move{world}-orig'], MOVE_FRAME,
+                                  world))
+        for k, want in (('same', 'same'), ('swap', 'swap'), ('wall-lower', 'wall'), ('wall-upper', 'wall')):
+            r = check_walk(f'move{world}-{k}', roms[k], dirs[f'move{world}-{k}'], dirs[f'move{world}-orig'], want, world)
+            if want != 'wall':
+                require(r['block_here'] >= 1024, f'move{world}-{k}: 걸은 뒤 칸 블록 {r["block_here"]}')
+            results.append(r)
+    results.append({'wall_tile': wall, 'bits': 11})
+    (out / 'results.json').write_text(json.dumps(results, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
+    print(f'{len(results) - 1}건 통과')
+    print(json.dumps(results, ensure_ascii=False))
+    return 0
 
 
 if __name__ == '__main__':
