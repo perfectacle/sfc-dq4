@@ -474,7 +474,7 @@ def apply_writes(data, original, paths):
 
 def run_tool(tool, *args):
     import dq4buildcache
-    dq4buildcache.run(tool, *args)
+    dq4buildcache.run(tool, *args, echo_stderr=True)
 
 
 # 인물 목록은 30~3F 의 두 뱅크에 둬야 한다(데이터 뱅크를 목록 뱅크로 두고 낮은 WRAM 을 읽음). 30~39 는 타이틀,
