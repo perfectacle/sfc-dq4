@@ -164,6 +164,15 @@ T_MAID = talk(say('@ 님. 부디 다른/전사들에게 뒤지지 않도록/힘�
 T_DAYTIME = talk(say('예전엔 밤에만 나오던/마물이 낮에도 나온다지./뒤숭숭한 세상이구먼.'))
 T_IMURU = talk(say('저희는 이무르 마을에서/왔습니다.'))
 T_HERB = talk(say('긴 여행이 될 것 같으면/마을에서 약초를/사 가시오.'))
+# 밤(FC 밤 목록)
+T_N_MOTHER = talk(say('그 아이 생각을 하면/밤에도 잠이 오지/않아서……', '전사님, 부디/부디……'))
+T_N_ASLEEP = talk(say('임금님께서는 이미/잠자리에 드셨다.'))
+T_N_INN = talk(say('오늘 밤은 여관에라도/묵고 내일 다시/오는 게 좋겠다.'))
+T_N_SCHOLAR = talk(say('흐음……/조사하면 조사할수록/닮았어!',
+                       '요즘 날씨는/그 옛날 마물들이/날뛰던 시대와/꼭 닮았단 말이야.'))
+T_N_ROUND = talk(say('이거야 원./순찰도 쉽지 않군.'))
+T_N_BED = talk(say('자, 자야지 자야지./사람은 역시 잘 때가/제일 행복하다니까.'))
+T_N_SNORE = talk(say('쿨쿨……'))
 
 # 성 앞(36/00)은 dq4npcport.py 가 FC 인물을 놓고 일본어 원문을 둔다. 그 가운데 옮긴 것은 FC 메시지 묶음으로 찾아
 # 같은 DQ5 메시지 번호의 글을 한글로 바꾼다.
@@ -197,6 +206,18 @@ STAFF = [
     (0x16, 0x09, MAN, 'down', T_DAYTIME),
     (0x1C, 0x11, VILLAGER, 'down', T_IMURU),
     (0x11, 0x12, GUARD, 'down', T_HERB),
+]
+# 밤에는 연출 뒤에만 온다. 문지기는 낮과 같은 자리
+NIGHT_STAFF = [
+    (0x1B, 0x0E, WOMAN, 'left', T_N_MOTHER),
+    (0x0E, 0x1F, GUARD, 'down', T_GATE1),
+    (0x1D, 0x16, SCHOLAR, 'down', T_N_SCHOLAR),
+    (0x11, 0x1F, GUARD, 'down', T_GATE2),
+    (0x17, 0x09, GUARD, 'down', T_N_ROUND),
+    (0x0F, 0x11, GUARD, 'down', T_N_ASLEEP),
+    (0x10, 0x11, GUARD, 'down', T_N_INN),
+    (0x01, 0x1C, GUARD, 'down', T_N_SNORE),
+    (0x01, 0x1F, GUARD, 'down', T_N_BED),
 ]
 KING_AT = (0x10, 0x0D)
 # 연설이 끝나면 전사들이 두 줄로 아래 출구 (0F~10,23)까지 걸어가 빠진다(FC 인물 블록 레코드 12~19 와 같은 길).
@@ -242,7 +263,8 @@ def npc_doc(records, ported=(), prologue=False):
     lineup = [entry(HIDER if x <= 0x0F else HIDER2, x, y, WARRIOR, 'up', T_EASY) for x, y in LINEUP]
     before = [entry(SCRIPTED, *KING_AT, KING, 'down', T_KING),
               entry(STATIC, *MINISTER_AT, MINISTER, 'right', T_MINISTER), easy] + lineup + staff
-    after = [king, entry(STATIC, *MINISTER_AT, MINISTER, 'right', T_MINISTER), easy] + staff
+    after = [king, entry(STATIC, *MINISTER_AT, MINISTER, 'right', T_MINISTER), easy] + staff + \
+        [{**entry(STATIC, x, y, g, f, t), "time": "night"} for x, y, g, f, t in NIGHT_STAFF]
     lo, hi = lambda m: m & 0xFF, lambda m: m >> 8
     scripts = [
         {"address": "05:A84F", "commands": [
