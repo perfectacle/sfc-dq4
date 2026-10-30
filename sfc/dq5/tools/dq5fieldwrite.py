@@ -163,7 +163,7 @@ def bit9_hook(planes, planes10=(None, None, None)):
     mask = b'\x3f\xa0\xbc\x00'
     bits = (b'\xe2\x10\xbb' + mask + b'\xf0\x02\xa9\x04\xa8'
             + b'\x68' + mask + b'\xf0\x02\xc8\xc8' + b'\x68' + mask + b'\xf0\x01\xc8' + b'\x98\x9b\xeb')
-    # 세계는 짧은 주소로 읽는다. 두 자리에서 DB 는 00(00:BE06 의 원래 AND $BCA0,Y 가 전제)이거나 7E 라 $1949 가 WRAM 이다.
+    # 세계는 짧은 주소로 읽는다. DB 가 00~3F·80~BF·7E 면 $1949 는 WRAM 이다(00:BE06 은 원래 AND $BCA0,Y 가 DB 00 을 전제).
     head = b'\xbf\x00\xe0\x7e\x48\xad\x49\x19'
     bodies = b''
     for back in BIT11_RETURNS:
