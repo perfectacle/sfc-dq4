@@ -264,9 +264,27 @@ class WindowWriteTests(unittest.TestCase):
         for row, at in cases:
             with self.subTest(row=row, at=at), self.assertRaises(ValueError):
                 edits(self.rom, {'format': FORMAT, 'windows': [{'index': '18', **row}]}, at=at)
-        # DQ4 메뉴 빌드처럼 24:A5E9 를 바꾼 롬은 X 만 옮겨도 멈춘다.
+        # 격자 루틴 앞을 바꾼 롬은 X 만 옮겨도 멈춘다.
         with self.assertRaises(ValueError):
             edits(Rom(self.with_byte(0x24A5E9, 0x22)), {'format': FORMAT, 'windows': [{'index': '25', 'x': 4}]})
+
+    def test_dq4_hooks(self):
+        """DQ4 메뉴 빌드(sfc/dq4/tools/dq4windowname.asm)는 24:A4E0 에 JML, 24:A5E9 에 JSL 을 건다. 18·25 를 그대로 두면
+        check·dump → patch 는 0 이고, X 만 옮기면 원래 도구처럼 24:A5EC 꼴에서, 모양을 바꾸면 격자 루틴 꼴에서 멈춘다."""
+        data = bytearray(self.data)
+        data[lorom(0x24A4E0):lorom(0x24A4E0) + 6] = bytes.fromhex('5c 00 81 30 ea ea')
+        data[lorom(0x24A5E9):lorom(0x24A5E9) + 7] = bytes.fromhex('22 00 80 30 ea ea ea')
+        rom = Rom(bytes(data))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertFalse(check(rom))
+        self.assertEqual(patch(rom, dump(rom))['writes'], [])
+        with self.assertRaisesRegex(ValueError, '24:A5EC'):
+            edits(rom, {'format': FORMAT, 'windows': [{'index': '25', 'x': 4}]})
+        data[lorom(0x24A5E9):lorom(0x24A5E9) + 7] = self.data[lorom(0x24A5E9):lorom(0x24A5E9) + 7]
+        with self.assertRaisesRegex(ValueError, '격자 루틴'):
+            edits(Rom(bytes(data)), {'format': FORMAT, 'windows': [{'index': '25', 'x': 4}]})
+        with self.assertRaisesRegex(ValueError, '격자 루틴'):
+            edits(Rom(bytes(data)), {'format': FORMAT, 'windows': [{'index': '18', 'w': 30}]}, at=0x16FE10)
 
     def test_message_code_runs(self):
         """옮긴 격자 루틴을 해석기로 돌려 원래 루틴과 같은 일을 하는지 본다: 채우기, 글자·탁점, 줄 지우기, 줄 올리기, 효과 층 크기."""

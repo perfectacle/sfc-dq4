@@ -4,8 +4,8 @@
 +2 아래 5비트 너비, +3 아래 4비트 높이(타일)만 바꾸고 나머지 비트와 내용은 그대로 둔다.
 전투 메시지 창 둘(18 턴 메시지, 25 「…が あらわれた！」)은 글자·▼ 칸이 코드에 박혀 있어 두 레코드를 함께 옮기고 그 코드
 피연산자도 고친다. X 만 바꾸면 피연산자만 고친다. 너비·높이를 바꾸면 글자 격자(원래 7E:1DD5, 26칸 × 6줄)를 GRID 로
-옮기고 격자 루틴 넷(24:87AA·A4A4·A569·A5D9)과 24:813B 를 --message-at 에 두는 새 코드로 돌린다. 너비는 28~32(글자 칸
-26~30), 높이는 7~13 의 홀수(글자 줄 3~6)이고 창 아래 끝은 원래처럼 27줄이라 Y = 28 - 높이다. 21줄보다 위로 올라가면
+옮기고 격자 루틴 넷(24:87AA·A4A4·A569·A5D9)과 24:813B 를 --message-at 에 두는 새 코드로 돌린다. 너비는 28~31(글자 칸
+26~29), 높이는 7~13 의 홀수(글자 줄 3~6)이고 창 아래 끝은 원래처럼 27줄이라 Y = 28 - 높이다. 21줄보다 위로 올라가면
 메시지 동안의 BG3 부분 전송(00:8E70)을 창 맨 위 줄부터로 넓히고, 공격·주문 효과 층(VRAM 1CE0, 00:FD75)은 창 위 줄까지만
 올린다(00:FD92 → 새 코드). 글자는 줄을 저절로 바꾸지 않으므로 넓힌 칸·늘린 줄은 메시지 쪽이 채워야 한다.
 
@@ -278,7 +278,6 @@ def message_edits(rom, table, sharing, rows, at=None):
     if current is not None and at is not None and at != current:
         raise ValueError(f'새 코드가 이미 {current >> 16:02X}:{current & 0xFFFF:04X} 에 있음(--message-at 을 같게 두거나 뺌)')
     at = current if current is not None else at
-    state = routine_state(rom, current)
     if want == base:
         return []
     if want['w'] < MESSAGE_W:
@@ -292,7 +291,7 @@ def message_edits(rom, table, sharing, rows, at=None):
                          '창 맨 위 줄부터 높이 - 1 줄을 채움')
     if want['x'] + want['w'] > MAP_W:
         raise ValueError('창 18·25: BG3 타일맵 32칸 밖')
-    shaped = (want['w'], want['h']) != (MESSAGE_W, MESSAGE_H) or state == 'hooked'
+    shaped = (want['w'], want['h']) != (MESSAGE_W, MESSAGE_H) or current is not None
     if shaped and at is None:
         raise ValueError('창 18·25 너비·높이를 바꾸려면 새 격자 루틴을 둘 자리(--message-at BB:AAAA)가 필요함')
     if (want['w'] - 2) * (want['h'] - 1) > GRID_SIZE:
@@ -310,6 +309,9 @@ def message_edits(rom, table, sharing, rows, at=None):
             raise ValueError(f'{addr >> 16:02X}:{addr & 0xFFFF:04X}: {note} 코드가 원래 꼴이 아님')
         if after != before:
             out.append((addr + 1, after.to_bytes(size, 'little'), old[1:1 + size], f'message window: {note}'))
+    # 옮길 때만 본다. 18·25 를 그대로 두면 DQ4 메뉴 빌드처럼 격자 루틴에 다른 고리를 건 롬도 dump → patch·check 가 0 이어야
+    # 한다. 피연산자 꼴을 먼저 봐, 24:A5E9 고리가 덮은 24:A5EC 는 X 만 옮길 때 원래 도구와 같은 오류로 멈춘다.
+    routine_state(rom, current)
     if not shaped:
         return out
     code, labels = assemble(message_items(**want), at)
