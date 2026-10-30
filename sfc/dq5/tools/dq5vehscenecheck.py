@@ -100,6 +100,9 @@ def run(rom, name, extra, out, state, mesence, libdir):
                                   timeout=600)
         if (dest / 'warp.txt').exists():
             return dest
+        if done.returncode != 255:
+            break
+        print(f'{name}: MesenCE 가 {done.returncode} 로 끝나 한 번 더 돌림', file=sys.stderr)
     raise ValueError(f'{name}: MesenCE 가 끝나지 않음({done.returncode})')
 
 
@@ -266,9 +269,8 @@ def main():
                     checks[f'{scene}-{k}'] = same_motion(o, res[(scene, k)])
             if scene == 'carpet0':
                 blocks = results['carpet0-original']['blocks']
-                frames = vehicle_part(base, '80-1')['frames']
                 checks['carpet0-blocks'] = set(blocks) == {'80-1', '80-2', '80-3'} and \
-                    all(max(v) < 4 * frames for v in blocks.values())
+                    all(max(v) < 4 * vehicle_part(base, k)['frames'] for k, v in blocks.items())
                 checks['carpet0-ride'] = vehicle_values(o) == ['00', '80', '00'] and runs_of(o, '01BBD4') == 1
             if scene in ('carpet1', 'carpet2'):
                 o = res[(scene, 'original')]

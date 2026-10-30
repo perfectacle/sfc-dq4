@@ -6,7 +6,7 @@
 --   4. 프레임마다 $1954(탈것)·$BC/$BD·$1949(세계)·$B6·$B8(필드 좌표)이 바뀐 프레임을 state.txt 에 적는다.
 --   5. SHOTS 의 프레임에는 화면(fNNNNN.png)과 WRAM(fNNNNN.wram)·OAM(fNNNNN.oam)을 남긴다. SHOTLAG=N 이면 1 의 줄을
 --      처음 센 프레임 + N 에도 남긴다.
--- 결과는 EVERY(기본 100) 프레임마다 다시 쓴다: SHOT_DIR/blocks.txt, calls.txt
+-- 결과는 EVERY(기본 100) 프레임마다, 그리고 드라이버가 멈출 때 다시 쓴다: SHOT_DIR/blocks.txt, calls.txt
 -- 「cb1b 부른곳 횟수 첫프레임 끝프레임 A값들」·「exec PC 횟수 첫프레임 끝프레임」, state.txt 「프레임 1954 BC/BD 1949 B6,B8」.
 package.path = os.getenv("LIBDIR") .. "/?.lua;" .. package.path
 local L = require("lib")
@@ -97,6 +97,9 @@ emu.addEventCallback(function()
   end
   if n % every == 0 then report() end
 end, emu.eventType.endFrame)
+-- 드라이버는 끝나는 프레임에 emu.stop 을 부르므로, 그 앞에 마지막 기록을 쓴다(EVERY 사이의 프레임이 빠지지 않게).
+local stop = emu.stop
+emu.stop = function(...) report(); return stop(...) end
 dofile(os.getenv("LIBDIR") .. "/boot.lua")
 -- FLEE=1: 무작위 전투(01:8677 JSL $208001 ~ 01:867B)에서는 드라이버 입력 대신 60프레임마다 아래·A 로 にげる 를 고른다
 -- (dq5battleflee.lua 와 같은 입력). 전투 중 $1001 은 0 이라 전투 진입·복귀 주소로 가린다. 드라이버 입력보다 뒤에 걸어야
