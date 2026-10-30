@@ -29,6 +29,11 @@ class PortTest(unittest.TestCase):
         self.assertEqual(self.services["36/00"][(0x1F, 0x16, False)], 3)
         self.assertEqual(self.services["37/00"][(0x11, 0x12, False)], 6)
 
+    def test_story_flag_sellers_at_chapter_start(self):
+        # テンペ (0C,18): the church needs flag 06 10 off and is kept; the version that needs it on is not there.
+        found = shopport.merchants(shopport.ines.prg(DQ4.read_bytes()), 0x0E, 0)
+        self.assertEqual(found[0x0C, 0x18, False], 5)
+
     def test_lists_keyed_by_fc_group(self):
         self.assertEqual(self.report["keys"], {"36/00-03": "60", "37/00-02": "61"})
         weapons = next(s for s in self.shops if s["key"] == 0x60 and s["kind"] == 2)
