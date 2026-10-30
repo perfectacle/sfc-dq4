@@ -1,7 +1,7 @@
 """전투 메시지 창(18·25) 자리·크기 쓰기를 MesenCE 전투에서 VRAM BG3 타일맵과 화면으로 확인한다.
 
-dq5windowwrite.py 로 고친 롬과 원래 롬을 같은 입력으로 돌린다. 경우는 다섯이다. left·right 는 두 창의 X 만 0·4 로,
-wide 는 (0,21) 31 × 7(글자 29칸), tall 은 (2,17) 28 × 11(글자 5줄), both 는 (1,15) 31 × 13(29칸 6줄)이다. 모양을 바꾸는
+dq5windowwrite.py 로 고친 롬과 원래 롬을 같은 입력으로 돌린다. 경우는 여섯이다. left·right 는 두 창의 X 만 0·4 로,
+wide 는 (0,21) 31 × 7(글자 29칸), h9 는 (2,19) 28 × 9, tall 은 (2,17) 28 × 11(글자 5줄), both 는 (1,15) 31 × 13(29칸 6줄)이다. 모양을 바꾸는
 셋은 --message-at 의 새 코드(기본 16:FE10)로 글자 격자를 옮긴다. 장면은 셋이다. one 은 スライム 하나와 싸우며 공격
 메시지 05E 를 긴 메시지 006·118·191 로, 피해 069 를 006 으로 바꾸고, 20:C62B 의 BRK A4 를 BRK 9E 로 바꿔(파일 오프셋
 10462C, 모든 롬) 셋째 줄 다음에 줄을 올리게 한다. 주인공의 공격 효과(BG3 효과 층)가 창이 떠 있는 동안 돈다. four 는
@@ -18,6 +18,10 @@ wide 는 (0,21) 31 × 7(글자 29칸), tall 은 (2,17) 28 × 11(글자 5줄), bo
   프레임이 이어 다름). 원래 롬도 같은 잣대로 본다. (3) 접근 카운터로 옛 격자 7E:1DD5~1E70 에 쓰기가 없고 새 격자를 쓴다.
 - field: 전투가 끝나고 필드 메시지(파파스)의 40번째 글자(24:9E94)에서 맵·필드 좌표와 7E:1E71~1EFF(필드 변수)가
   원래 롬과 같다.
+- event·party·papasNN: 이벤트 전투(무리 1E ジャミ), 동료 ホイミン·マーリン 과 ラリホー 슬라임, 손님 파파스(무리 01 둘째 판)가
+  주문 NN(PAPAS_SPELLS)만 거는 전투. 모양을 바꾼 롬은 위 (1)~(3)에 더해 00:FDA1 전송 크기(효과 층 1CE0 만 (Y - 7) × 64),
+  스크린샷의 창 테두리·창 안 다른 색 점, 원래 롬의 효과 층 줄·OBJ 상자 아래 끝을 적는다. 높인 창이 주문 연출에 깨지는 것은
+  알려진 문제라 결과에 세기만 한다. --hlog 는 원래 롬 실행에서 연출마다 줄마다 쓰는 PPU 레지스터를 모은다.
 원래 롬과 선실 상태는 읽기만 하며 롬·기록은 --out 의 새 폴더에 쓴다.
   MESENCE=… python sfc/dq5/tools/dq5msgwindowcheck.py rom/dq5.sfc --state work/state/ship.mss
 """
@@ -39,23 +43,45 @@ from dq5windowwrite import GRID, GRID_SIZE  # noqa: E402
 LEFT, TOP = 2, 21
 WIDTH, HEIGHT = 28, 7
 CORNERS = (0x8B, 0x8C)
-CASES = {'left': {'x': 0}, 'right': {'x': 4}, 'wide': {'x': 0, 'w': 31}, 'tall': {'h': 11},
+BORDER_SIDE, BORDER_BOTTOM = 0x8E, 0x97
+CASES = {'left': {'x': 0}, 'right': {'x': 4}, 'wide': {'x': 0, 'w': 31}, 'h9': {'h': 9}, 'tall': {'h': 11},
          'both': {'x': 1, 'w': 31, 'h': 13}}
+# 손님 파파스의 행동 여섯 칸(파일 오프셋 11958D)에 넣는 주문. 연출(22:D73C)이 BG3·HDMA·색 더하기를 쓰는 것과 쓰지 않는
+# 보조·회복 주문을 고루 둔다. ミナデイン·スカラ 는 이 장면에서 파파스가 걸지 않아 뺐다.
+PAPAS_SPELLS = ('01', '03', '04', '06', '09', '0B', '0C', '0D', '0F', '10', '11', '1F', '22', '2A')
 TAPS = ','.join(['wait:400'] + ['a:8,wait:24'] * 110)
 SCENES = {
     'one': {'BATTLE': '00:1', 'SWAP': '05E:006,118,191;069:006', 'ROMPATCH': '10462C=9E', 'SET': '2035=07', 'MAXF': '3400'},
     'four': {'BATTLE': '00:1,01:1,02:1,03:1', 'SET': '2035=07', 'MAXF': '3400'},
     'field': {'BATTLE': '00:1', 'MAXF': '3000', 'FIELDSNAP': '40'},
+    'event': {'GROUP': '1E', 'SET': '2035=07', 'MAXF': '3400'},
+    'party': {'BATTLE': '00:3', 'PARTY': '05,04', 'SET': '2035=07;2073=63;209D=63;208E=FF;20B8=FF;2034=00;2042=02',
+              'ROMPATCH': '118003=C8;118004=63;118011=4B4B4B4B4B4B', 'MAXF': '3400'},
+    **{f'papas{a}': {'GROUP': '01', 'SET': '2035=07;101A=01', 'ROMPATCH': f'118003=C8;11958D={a * 6}', 'MAXF': '3400'}
+       for a in PAPAS_SPELLS},
 }
 # 견주는 구간에서 지나야 하는 곳: 메시지·FD ▼·줄 올리기·셋째 줄 끝 ▼·효과 층 전송, 무리 넷이면 넷째 줄 끝 ▼.
 # 모양을 바꾼 롬은 줄이 늘어 줄 올리기·▼ 때가 달라, 지나야 하는 곳만 따로 둔다.
+# 새 장면(이벤트·동료·주문)은 메시지와 글자만 지나면 된다. 주문 효과는 FX 기록으로 따로 센다.
 COVER = {'one': {'248C39', '24880A', '24A569', '24A519', 'EFF'}, 'four': {'248C39', '24A519', '24A523'}}
 SHAPED_COVER = {'one': {'248C39', '24A4A4', '24A569', 'EFF'}, 'four': {'248C39', '24A519', '24A523'}}
+for _scene in SCENES:
+    COVER.setdefault(_scene, {'248C39'})
+    SHAPED_COVER.setdefault(_scene, {'248C39', '24A4A4'})
+EFFECT_TOP, EFFECT_DEST = 7, 0x1CE0
+COVER_TOPS = (21, 19, 17, 15)
+# OBSEL 위 3비트 → (작은 OBJ, 큰 OBJ) 점 수
+OBJ_SIZES = {0: (8, 16), 1: (8, 32), 2: (8, 64), 3: (16, 32), 4: (16, 64), 5: (32, 64), 6: (16, 32), 7: (16, 32)}
+SHOT_SHIFT = 7
+WINDOW_GRAY, WINDOW_WHITE = (49, 49, 41), (247, 247, 239)
+# 원래 장면(one·four)은 메시지 열이 앞에서부터 같아야 한다.
+PREFIX_SCENES = ('one', 'four')
 OLD_GRID, FIELD_VARS = '1DD5-1E70', (0x1E71, 0x1EFF)
 NEW_GRID = f'{GRID & 0xFFFF:04X}-{(GRID & 0xFFFF) + GRID_SIZE - 1:04X}'
 ACC = f'{OLD_GRID},{FIELD_VARS[0]:04X}-{FIELD_VARS[1]:04X},{NEW_GRID}'
 FROM, STEP, SHOTEVERY = 560, 1, 16
 LAG = 8
+RETRIES = 3
 
 
 def require(condition, message):
@@ -97,8 +123,156 @@ def window(dump, x, y, h, w=WIDTH):
     return [[word(dump, x + c, y + r) for c in range(w)] for r in range(h)]
 
 
-def chunks(data):
-    return [data[i:i + 0x800] for i in range(0, len(data), 0x800)]
+def chunks(data, size=0x800):
+    return [data[i:i + size] for i in range(0, len(data), size)]
+
+
+def effect_log(calls):
+    """실행 기록의 FX 줄 → [(프레임, VRAM 자리, 크기, 그림이 있는 첫 줄, 끝 줄, 그 앞 마지막 연출 번호)]. 줄은 그림이 없으면 None."""
+    out, fxid = [], None
+    for line in calls:
+        parts = line.split()
+        if len(parts) == 3 and parts[1] == 'FXID':
+            fxid = parts[2]
+        elif len(parts) >= 5 and parts[1] == 'FX':
+            rows = (int(parts[4]), int(parts[5])) if parts[4] != '-' else (None, None)
+            out.append((int(parts[0]), int(parts[2], 16), int(parts[3], 16), *rows, fxid))
+    return out
+
+
+def transfer_sizes(scene, name, y, calls):
+    """00:FDA1 에 닿은 전송마다 크기가 그 롬에서 와야 할 값인지 본다. 창이 21줄보다 위면 BG3 효과 층(1CE0)만
+    (Y - 7) × 64, 나머지 자리(BG1·BG2 전투 배경, 18E0 글자 자리)와 원래 높이는 0x380."""
+    rows = effect_log(calls)
+    want_effect = (y - EFFECT_TOP) * 64 if y < TOP else 0x380
+    bad = [(f, d, n) for f, d, n, *_ in rows if n != (want_effect if d == EFFECT_DEST else 0x380)]
+    require(not bad, f'{scene}/{name}: 전송 크기가 다름 {bad[:3]}')
+    dests = {}
+    for _, d, *_ in rows:
+        dests[f'{d:04X}'] = dests.get(f'{d:04X}', 0) + 1
+    return {'transfers': dests, 'effect_size': want_effect, 'fxid': sorted({r[5] for r in rows if r[5]})}
+
+
+def obj_boxes(oam):
+    """OAM 544바이트 + 크기 모드 1바이트 → 보이는 OBJ 의 (x, y, 크기). y 가 E0 이상인 OBJ 는 화면 밖으로 본다."""
+    small, large = OBJ_SIZES[oam[0x220]]
+    out = []
+    for i in range(128):
+        x, y = oam[i * 4], oam[i * 4 + 1]
+        hi = oam[0x200 + i // 4] >> (i % 4 * 2) & 3
+        x |= (hi & 1) << 8
+        size = large if hi & 2 else small
+        if y >= 0xE0 or 256 <= x < 512 - size:
+            continue
+        out.append((x - 512 if x >= 256 else x, y, size))
+    return out
+
+
+def hdma_ranges(calls, text):
+    """HLOG 기록(hdma.txt) → {연출 번호: {레지스터: [첫 줄, 끝 줄]}}. 연출 시작(FXID)부터 그 뒤 둘째 메시지까지를 그 연출의
+    구간으로 보고, 연출 밖 전투 프레임에서도 같은 범위로 쓰는 레지스터(전투 배경 BG1·BG2 세로 스크롤 등)는 뺀다."""
+    starts, messages = [], []
+    for line in calls:
+        parts = line.split()
+        if len(parts) == 3 and parts[1] == 'FXID':
+            starts.append((int(parts[0]), parts[2]))
+        elif len(parts) == 3 and parts[1] == '248C39':
+            messages.append(int(parts[0]))
+    spans = []
+    for frame, number in starts:
+        later = [m for m in messages if m > frame]
+        spans.append((frame, later[1] if len(later) > 1 else frame + 200, number))
+    battle = min((m for m in messages), default=0)
+    base, per = {}, {}
+    for line in text.split('\n'):
+        if not line:
+            continue
+        frame, reg, first, last, _ = line.split()
+        frame, first, last = int(frame), int(first), int(last)
+        if frame < battle:
+            continue
+        owner = next((number for a, b, number in spans if a <= frame < b), None)
+        table = base if owner is None else per.setdefault(owner, {})
+        lo, hi = table.get(reg, (first, last))
+        table[reg] = (min(lo, first), max(hi, last))
+    return {number: {reg: list(r) for reg, r in sorted(regs.items()) if base.get(reg) != r}
+            for number, regs in sorted(per.items())}
+
+
+def coverage(scene, seen):
+    """원래 롬에서 창 18·25 의 맨 위 줄을 Y 로 올렸다면 무엇이 그 아래에 들어가는지 잰다. BG3 효과 층은 1CE0 전송마다
+    그림이 있는 줄로 (아래쪽이 Y 줄 이상인 전송, 모두 Y 줄 이상인 전송), OBJ(몬스터)는 메시지 창이 떠 있는 덤프마다 OBJ
+    상자 아래 끝이 Y 줄 위 점을 넘는 덤프 수와 가장 많이 넘은 점 수. OBJ 상자는 투명한 점을 포함한다."""
+    dumps, _, calls, _, _, oams, hlog = seen[('original', scene)]
+    effects = [r for r in effect_log(calls) if r[1] == EFFECT_DEST and r[3] is not None]
+    out = {'effect_transfers': len(effects), 'effect_rows': sorted({(r[3], r[4]) for r in effects}),
+           'effect_fxid': sorted({r[5] for r in effects if r[5]})}
+    frames, bottoms = 0, []
+    for k, (dump, oam) in enumerate(zip(dumps, oams)):
+        if not (word(dump, LEFT, TOP) & 0xFF in CORNERS and word(dump, LEFT + WIDTH - 1, TOP) & 0xFF in CORNERS):
+            continue
+        frames += 1
+        boxes = [b for b in obj_boxes(oam) if b[0] + b[2] > LEFT * 8 and b[0] < (LEFT + WIDTH) * 8]
+        bottoms.append(max((b[1] + b[2] for b in boxes), default=0))
+    if hlog:
+        out['hdma'] = hdma_ranges(calls, hlog)
+    out['window_dumps'] = frames
+    out['obj_bottom'] = max(bottoms, default=0)
+    for top in COVER_TOPS:
+        out[f'y{top}'] = {'effect_part': sum(r[4] >= top for r in effects),
+                          'effect_all': sum(r[3] >= top for r in effects),
+                          'obj_dumps': sum(b > top * 8 for b in bottoms),
+                          'obj_rows': max((b - top * 8 for b in bottoms), default=0)}
+    return out
+
+
+def complete(dump, x, y, w, h):
+    """VRAM 에 창 테두리 양옆 세로줄이 위 모서리·세로 테두리·아래 모서리로 다 있는지. 창이 열리거나 닫히는 동안은 줄이 빈다."""
+    for col in (x, x + w - 1):
+        tiles = [word(dump, col, r) & 0xFF for r in range(y, y + h)]
+        if tiles[0] not in CORNERS or tiles[-1] != BORDER_BOTTOM or any(t != BORDER_SIDE for t in tiles[1:-1]):
+            return False
+    return True
+
+
+def border_gaps(image, x, y, h):
+    """화면 창 왼쪽 테두리 세로줄(점 x × 8 + 1, 위 테두리 아래부터 아래 테두리까지)에서 흰 점이 아닌 줄 수."""
+    top, bottom = y * 8 - SHOT_SHIFT, min(224, (y + h - 1) * 8 - SHOT_SHIFT + 2)
+    return sum(image.getpixel((x * 8 + 1, row)) != WINDOW_WHITE for row in range(top + 2, bottom))
+
+
+def screen_window(scene, name, shape, seen, out):
+    """스크린샷이 있는 프레임 가운데 VRAM 에 창 테두리가 그 프레임과 앞 두 덤프 내리 다 있는 때, 화면 창 왼쪽 테두리
+    세로줄(점 x × 8 + 1)이 창 높이 내내 흰 점인지와, 창 안쪽에 창 바탕·글자 색이 아닌 점(앞으로 나온 OBJ·효과)이 몇 개인지
+    센다. 스크린샷 y 는 BG3 타일맵 점 y 보다 SHOT_SHIFT 위다. 화면이 어두워지는 장면 전환에도 테두리가 흰색이 아니게 된다.
+    창을 21줄 위로 올리면 주문 연출이 줄마다 바꾸는 BG3 가로 스크롤·색 더하기와 앞으로 올린 몬스터 OBJ 가 창에 닿는다."""
+    dumps = seen[(name, scene)][0]
+    x, y, w, h = shape['x'], shape['y'], shape['w'], shape['h']
+    frames = broken = worst = foreign = foreign_shots = 0
+    first = None
+    for k in range(2, len(dumps)):
+        frame = FROM + k * STEP
+        shot = out / scene / name / f'f{frame:05d}.png'
+        if (frame - FROM) % SHOTEVERY or not shot.is_file():
+            continue
+        if not all(complete(dumps[j], x, y, w, h) for j in (k - 2, k - 1, k)):
+            continue
+        frames += 1
+        image = Image.open(shot).convert('RGB')
+        gaps = border_gaps(image, x, y, h)
+        # 피해 흔들림은 화면 전체를 1~2점 위아래로 옮겨 테두리 끝 두 줄까지만 빈다(원래 롬도 같음).
+        if gaps > 2:
+            broken += 1
+            worst = max(worst, gaps)
+            first = first or frame
+            continue
+        top, bottom = y * 8 - SHOT_SHIFT, min(224, (y + h - 1) * 8 - SHOT_SHIFT + 2)
+        inside = image.crop((x * 8 + 4, top + 4, (x + w) * 8 - 4, bottom - 3)).get_flattened_data()
+        count = sum(p not in (WINDOW_GRAY, WINDOW_WHITE) for p in inside)
+        foreign += count
+        foreign_shots += count > 0
+    return {'shots': frames, 'border_broken': broken, 'worst_gap': worst, 'first_broken': first,
+            'foreign_pixels': foreign, 'foreign_shots': foreign_shots}
 
 
 def compare_moved(scene, name, x, seen, out):
@@ -135,6 +309,9 @@ def compare_moved(scene, name, x, seen, out):
         moved_box = (x * 8, box[1], (x + WIDTH) * 8, box[3])
         # 턴이 바뀌는 몇 프레임은 화면에 BG3 가 나오지 않는다. 그때는 옮기기 전 자리의 두 화면이 같다.
         if before.crop(box).tobytes() == after.crop(box).tobytes():
+            continue
+        # 전투가 끝나 어두워지는 동안과 피해 흔들림(화면이 1~2점 위아래로)은 원래 롬 창의 왼쪽 테두리가 제자리에서 희지 않다.
+        if border_gaps(before, LEFT, top, h) > 0:
             continue
         require(before.crop(box).tobytes() == after.crop(moved_box).tobytes(),
                 f'{scene}/{name} f{frame}: 화면 창 사각형이 원래 롬과 다름')
@@ -189,10 +366,23 @@ def compare_shaped(scene, name, shape, seen):
             break
         same += 1
         chars += len(text)
+    # 이벤트·동료 장면은 창이 커지면 「あらわれた」의 ▼ 기다림부터 난수가 갈려 첫 턴 메시지부터 다를 수 있다.
+    # 그래서 메시지 번호가 같은 첫 메시지끼리도 글자를 견준다(피해 수·대상이 든 메시지는 다를 수 있음).
+    firsts = {}
+    for number, text in original_runs:
+        firsts.setdefault(number, [c for c, _, _ in text])
+    by_number = {}
+    for number, text in runs:
+        if number in firsts and number not in by_number:
+            by_number[number] = [c for c, _, _ in text] == firsts[number]
+    same_number = sum(by_number.values())
     for _, text in runs:
         for c, line, col in text:
             require(line < (h - 1) // 2 and col < w - 2, f'{scene}/{name}: 글자 {c} 가 격자 밖({line}줄 {col}칸)')
-    require(same >= 3, f'{scene}/{name}: 원래 롬과 글자까지 같은 메시지가 {same}개뿐')
+    if scene in PREFIX_SCENES:
+        require(same >= 3, f'{scene}/{name}: 원래 롬과 글자까지 같은 메시지가 {same}개뿐')
+    else:
+        require(same_number >= 3, f'{scene}/{name}: 원래 롬과 번호·글자가 같은 메시지가 {same_number}개뿐')
     frames, differ, longest, first = consistency(dumps, bufs, x, y, w, h)
     require(frames and longest <= 1, f'{scene}/{name}: VRAM 창이 버퍼와 {longest}덤프 이어 다름(f{first}부터)')
     kinds = {line.split()[1] for line in calls if line}
@@ -201,7 +391,7 @@ def compare_shaped(scene, name, shape, seen):
     require(acc[OLD_GRID][1] == 0 and acc[NEW_GRID][1] > 0 and original_acc[OLD_GRID][1] > 0,
             f'{scene}/{name}: 옛 격자 쓰기 {acc[OLD_GRID][1]}, 새 격자 쓰기 {acc[NEW_GRID][1]}, '
             f'원래 롬 옛 격자 쓰기 {original_acc[OLD_GRID][1]}')
-    return {'messages': common, 'same_text': same, 'chars': chars, 'frames': frames, 'differ': differ, 'longest': longest,
+    return {'messages': common, 'same_text': same, 'same_number': f'{same_number}/{len(by_number)}', 'chars': chars, 'frames': frames, 'differ': differ, 'longest': longest,
             'effects': effects, 'old_grid_writes': acc[OLD_GRID][1], 'grid_writes': acc[NEW_GRID][1],
             'calls': sorted(kinds)}
 
@@ -225,6 +415,7 @@ def main():
     ap.add_argument('--cases', default=','.join(CASES))
     ap.add_argument('--scenes', default=','.join(SCENES))
     ap.add_argument('--jobs', type=int, default=4)
+    ap.add_argument('--hlog', action='store_true', help='원래 롬 실행에서 보이는 줄의 PPU 레지스터 쓰기를 모은다(느림)')
     args = ap.parse_args()
     if not args.mesence:
         ap.error('--mesence 또는 MESENCE가 필요함')
@@ -259,20 +450,30 @@ def main():
         libdir = subprocess.run(['krpatch', 'sfc', 'lua'], check=True, capture_output=True, text=True,
                                 timeout=30).stdout.strip()
 
+        retried = []
+
         def run(job):
             rom, scene = job
             dest = out / scene / rom
             dest.mkdir(parents=True)
             env = os.environ.copy()
-            for key in ('PARTY', 'SET', 'POKE', 'ROMPATCH', 'TO', 'LATESET', 'SWAP'):
+            for key in ('PARTY', 'SET', 'POKE', 'ROMPATCH', 'TO', 'LATESET', 'SWAP', 'GROUP', 'BATTLE', 'FIELDSNAP'):
                 env.pop(key, None)
             env.update(LIBDIR=libdir, STATE=str(state), SHOT_DIR=str(dest), DRIVER=str(HERE / 'lua/dq5warp.lua'),
                        FIELD='341,56', TEST=TAPS, FROM=str(FROM), STEP=str(STEP), SHOTEVERY=str(SHOTEVERY), ACC=ACC,
-                       **SCENES[scene])
-            with (dest / 'mesen.log').open('w') as log:
-                subprocess.run([str(mesence), '--testrunner', str(roms[rom]), str(HERE / 'lua/dq5msgwindowcheck.lua'),
-                                '--Snes.DisableFrameSkipping=true', '--timeout=900'], env=env, stdout=log,
-                               stderr=subprocess.STDOUT, check=True, timeout=1000)
+                       HLOG='1' if args.hlog and rom == 'original' else '0', **SCENES[scene])
+            # MesenCE 를 여럿 함께 띄우면 가끔 시작하자마자 255 로 끝나거나, 선실 상태에서 순간이동하지 못하고 느리게
+            # 돌아 전투 메시지가 하나도 없다. 같은 입력을 혼자 다시 돌리면 늘 전투가 붙으므로 그런 실행만 다시 돌린다.
+            for attempt in range(RETRIES):
+                with (dest / 'mesen.log').open('w') as log:
+                    done = subprocess.run([str(mesence), '--testrunner', str(roms[rom]),
+                                           str(HERE / 'lua/dq5msgwindowcheck.lua'), '--Snes.DisableFrameSkipping=true',
+                                           '--timeout=900'], env=env, stdout=log, stderr=subprocess.STDOUT, timeout=1000)
+                calls = (dest / 'exec.txt').read_text() if (dest / 'exec.txt').is_file() else ''
+                if done.returncode == 0 and ' 248C39 ' in calls:
+                    break
+                require(attempt + 1 < RETRIES, f'{scene}/{rom}: MesenCE {done.returncode}, 전투 메시지 없음')
+                retried.append(f'{scene}/{rom}')
             acc = {}
             for line in (dest / 'acc.txt').read_text().split('\n'):
                 if line:
@@ -280,7 +481,9 @@ def main():
                     acc[key] = (int(reads), int(writes))
             field = (dest / 'field.txt').read_text() if (dest / 'field.txt').is_file() else ''
             return (chunks((dest / 'bg3.bin').read_bytes()), chunks((dest / 'buf.bin').read_bytes()),
-                    (dest / 'exec.txt').read_text().split('\n'), acc, field)
+                    (dest / 'exec.txt').read_text().split('\n'), acc, field,
+                    chunks((dest / 'oam.bin').read_bytes(), 0x221),
+                    (dest / 'hdma.txt').read_text() if (dest / 'hdma.txt').is_file() else '')
 
         jobs = [(rom, scene) for scene in scenes for rom in roms]
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
@@ -289,17 +492,24 @@ def main():
         for scene in scenes:
             if scene != 'field':
                 frames, differ, longest, first = consistency(*seen[('original', scene)][:2], LEFT, TOP, WIDTH, HEIGHT)
+                original_shape = {'x': LEFT, 'y': TOP, 'w': WIDTH, 'h': HEIGHT}
                 results.append({'scene': scene, 'case': 'original', 'frames': frames, 'differ': differ,
-                                'longest': longest})
+                                'longest': longest, **transfer_sizes(scene, 'original', TOP, seen[('original', scene)][2]),
+                                'screen': screen_window(scene, 'original', original_shape, seen, out),
+                                'cover': coverage(scene, seen)})
                 require(frames and longest <= 1, f'{scene}/original: VRAM 창이 버퍼와 {longest}덤프 이어 다름(f{first}부터)')
             for name, row in cases.items():
                 if scene == 'field':
                     result = compare_field(name, seen)
                 elif name in shapes:
-                    result = compare_shaped(scene, name, shapes[name], seen)
+                    result = {**compare_shaped(scene, name, shapes[name], seen),
+                              **transfer_sizes(scene, name, shapes[name]['y'], seen[(name, scene)][2]),
+                              'screen': screen_window(scene, name, shapes[name], seen, out)}
                 else:
-                    result = compare_moved(scene, name, row['x'], seen, out)
+                    result = {**compare_moved(scene, name, row['x'], seen, out),
+                              **transfer_sizes(scene, name, TOP, seen[(name, scene)][2])}
                 results.append({'scene': scene, 'case': name, **result})
+        results.append({'retried': retried})
         (out / 'results.json').write_text(json.dumps(results, ensure_ascii=False, indent=2) + '\n')
         print(json.dumps(results, ensure_ascii=False))
         return 0

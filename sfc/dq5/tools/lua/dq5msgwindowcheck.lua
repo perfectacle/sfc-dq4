@@ -4,6 +4,9 @@
 -- SWAP="05E:006,118;069:006" 은 24:8C39 에 들어온 메시지 번호(A)를 차례로 바꾼다.
 -- exec.txt 에는 24:A519·24:A523(▼ 기다림)·24:880A(FD ▼)·24:A569(줄 올리기)·24:8C39(메시지 번호)에 들어온 프레임,
 -- 24:A4A4(글자 하나) 의 글자·줄($0F0E)·칸($0F0D), 00:FDA1 에서 $0F5E 가 1CE0(BG3 효과 층)인 전송(EFF)을 적는다.
+-- 00:FDA1 의 모든 전송은 FX 줄(VRAM 자리 $0F5E, 크기 $4375, 1CE0 이면 7E:8A1D 에서 0 이 아닌 워드가 있는 첫·끝 BG3 줄)로,
+-- 연출 시작 22:D73C 의 A 는 FXID 줄로, 행동 결정 20:8846 의 행동자 $1200·행동 $1201 은 ACT 줄로 적는다.
+-- OAM(544바이트)과 OBJ 크기 모드(OBSEL 위 3비트) 1바이트는 덤프 프레임마다 oam.bin 에 이어 붙인다.
 -- FIELDSNAP=N 이면 첫 전투 메시지 뒤 필드 메시지 글자(24:9E94)가 N 번째일 때 그 프레임·맵·필드 좌표와 7E:1E71~1EFF 를
 -- field.txt 에 적는다(전투가 끝나고 필드로 돌아온 때).
 -- acc.txt 에는 3프레임째부터 MAXF-2 프레임까지 WRAM 범위 ACC="1DD5-1E70,…" 마다 읽기·쓰기 횟수 합(접근 카운터)을 적는다.
@@ -20,7 +23,7 @@ for src, list in string.gmatch(os.getenv('SWAP') or '', '(%x+):([%x,]+)') do
 end
 local ranges = {}
 for lo, hi in string.gmatch(os.getenv('ACC') or '', '(%x+)-(%x+)') do ranges[#ranges + 1] = {tonumber(lo, 16), tonumber(hi, 16)} end
-local n, log, dumps, bufs = 0, {}, {}, {}
+local n, log, dumps, bufs, oams = 0, {}, {}, {}, {}
 local battled, fieldchars, fieldsnap = false, 0, tonumber(os.getenv('FIELDSNAP') or '0')
 emu.addMemoryCallback(function()
   local s = emu.getState()
@@ -52,8 +55,55 @@ emu.addMemoryCallback(function()
     emu.read(0x7E0F0D, m))
 end, emu.callbackType.exec, 0x24A4A4, 0x24A4A4)
 emu.addMemoryCallback(function()
-  if emu.read(0x7E0F5E, m) == 0xE0 and emu.read(0x7E0F5F, m) == 0x1C then log[#log + 1] = string.format('%d EFF', n) end
+  local dest = emu.read(0x7E0F5E, m) | emu.read(0x7E0F5F, m) << 8
+  local size = emu.read(0x4375, m) | emu.read(0x4376, m) << 8
+  local rows = '-'
+  if dest == 0x1CE0 then
+    log[#log + 1] = string.format('%d EFF', n)
+    local top, bot
+    for r = 0, 13 do
+      for c = 0, 63 do
+        if emu.read(0x7E8A1D + r * 64 + c, m) ~= 0 then
+          top, bot = top or r + 7, r + 7
+          break
+        end
+      end
+    end
+    if top then rows = string.format('%d %d', top, bot) end
+  end
+  log[#log + 1] = string.format('%d FX %04X %04X %s', n, dest, size, rows)
 end, emu.callbackType.exec, 0x00FDA1, 0x00FDA1)
+emu.addMemoryCallback(function()
+  log[#log + 1] = string.format('%d FXID %02X', n, emu.getState()['cpu.a'] & 0xFF)
+end, emu.callbackType.exec, 0x22D73C, 0x22D73C)
+emu.addMemoryCallback(function()
+  log[#log + 1] = string.format('%d ACT %02X %02X', n, emu.read(0x7E1200, m), emu.read(0x7E1201, m))
+end, emu.callbackType.exec, 0x208846, 0x208846)
+-- HLOG=1 이면 보이는 줄(ppu.scanline 1~224)에서 PPU 레지스터 $2105~$2112·$2121·$2123~$2133 에 쓴 것(HDMA 쓰기도 걸림)을
+-- 프레임·레지스터마다 첫·끝 줄과 횟수로 모아 hdma.txt 에 "프레임 레지스터 첫줄 끝줄 횟수" 로 적는다. 레지스터는 거울 뱅크
+-- 00~3F·80~BF 어디로도 쓸 수 있다. 쓰기마다 상태를 읽어 실행이 열 배 넘게 느려지므로 따로 켠다. VRAM·CGRAM 데이터
+-- 포트($2118·$2119·$2122)는 DMA 로 바이트마다 걸려 뺀다.
+local hlogon = os.getenv('HLOG') == '1'
+local lines = {}
+local function pcb(addr)
+  local sl = emu.getState()['ppu.scanline']
+  if sl < 1 or sl > 224 then return end
+  local r = addr & 0xFFFF
+  local e = lines[r]
+  if e then
+    e[1], e[2], e[3] = math.min(e[1], sl), math.max(e[2], sl), e[3] + 1
+  else
+    lines[r] = {sl, sl, 1}
+  end
+end
+for bank = 0, 0xBF do
+  if hlogon and (bank < 0x40 or bank >= 0x80) then
+    for _, r in ipairs({{0x2105, 0x2112}, {0x2121, 0x2121}, {0x2123, 0x2133}}) do
+      emu.addMemoryCallback(pcb, emu.callbackType.write, bank * 0x10000 + r[1], bank * 0x10000 + r[2])
+    end
+  end
+end
+local hlog = {}
 local base_r, base_w
 local function counts()
   local w = emu.memType.snesWorkRam
@@ -65,16 +115,21 @@ local function block(addr, size, mem)
   return table.concat(t)
 end
 emu.addEventCallback(function()
+  for r, e in pairs(lines) do hlog[#hlog + 1] = string.format('%d %04X %d %d %d', n, r, e[1], e[2], e[3]) end
+  lines = {}
   n = n + 1
   if n == 3 and #ranges > 0 then base_r, base_w = counts() end
   if n >= from and (n - from) % step == 0 and n <= last then
     dumps[#dumps + 1] = block(0x3800, 0x800, emu.memType.snesVideoRam)
     bufs[#bufs + 1] = block(0x7E5000, 0x800, m)
+    oams[#oams + 1] = block(0, 0x220, emu.memType.snesSpriteRam) .. string.char(emu.getState()['ppu.oamMode'])
     if shotevery > 0 and (n - from) % shotevery == 0 then L.shot(string.format('f%05d.png', n)) end
   end
   if n == last then
     L.write('bg3.bin', table.concat(dumps))
     L.write('buf.bin', table.concat(bufs))
+    L.write('oam.bin', table.concat(oams))
+    if hlogon then L.write('hdma.txt', table.concat(hlog, '\n') .. '\n') end
     L.write('exec.txt', table.concat(log, '\n') .. '\n')
     if base_r then
       local rc, wc = counts()

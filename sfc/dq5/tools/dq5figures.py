@@ -714,6 +714,19 @@ def fig_talkwrite():
     save(out, 'dq5-talkwrite.webp')
 
 
+def fig_battlewin3():
+    """높인 전투 메시지 창이 주문 연출에 깨진 화면 셋(아래 반쪽). バギクロス 의 both (1,15) 31x13, ベギラゴン 의 h9 (2,19) 28x9,
+    ヒャダルコ 의 tall (2,17) 28x11. dq5msgwindowcheck.py 실행 폴더의 papas0F/both/f02160.png·papas06/h9/f02144.png·
+    papas0B/tall/f02144.png 를 work/battlewin3/ 에 0F-both.png·06-h9.png·0B-tall.png 로 둔다(sfc/dq5/journal/ 의 battlewin3 일지)."""
+    cols = [('0F-both', 'baguikurosu both'), ('06-h9', 'begiragon h9'), ('0B-tall', 'hyadaruko tall')]
+    out = Image.new('RGB', (len(cols) * 260 - 4, 112), (24, 24, 24))
+    for i, (name, text) in enumerate(cols):
+        im = Image.open(f'work/battlewin3/{name}.png').convert('RGB').crop((0, 100, 256, 212))
+        label(im, text)
+        out.paste(im, (i * 260, 0))
+    save(out, 'dq5-battlewin3.webp')
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     rom = Rom(open('rom/dq5.sfc', 'rb').read())
@@ -752,6 +765,7 @@ def main():
     fig_exflags3()
     fig_party6()
     fig_talkwrite()
+    fig_battlewin3()
     os.remove(TMP)
 
 
