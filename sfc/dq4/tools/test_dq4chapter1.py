@@ -114,5 +114,28 @@ class GroupBuildTests(unittest.TestCase):
                 self.assertNotEqual(at >> 16, talk >> 16)
 
 
+
+class Chapter1TalkTests(unittest.TestCase):
+    def test_talk_texts_fit_and_use_known_glyphs(self):
+        import dq4ch1talk
+        known = set(mm.CHARS) | {' '}
+        for key, parts in dq4ch1talk.TEXTS.items():
+            lines = 1
+            for p in parts:
+                if isinstance(p, str):
+                    self.assertLessEqual(set(p), known, key)
+                elif p == ch.LINE:
+                    lines += 1
+                elif p in (ch.PAGE, ch.END):
+                    self.assertLessEqual(lines, ch.PAGE_LINES, key)
+                    lines = 1
+            self.assertEqual(parts[-1], ch.END)
+            self.assertEqual(parts.count(ch.END), 1, key)
+
+    def test_talk_keys_do_not_overlap_the_front(self):
+        import dq4ch1talk
+        self.assertFalse(set(dq4ch1talk.TEXTS) & set(ch.FRONT_TEXTS))
+
+
 if __name__ == '__main__':
     unittest.main()
