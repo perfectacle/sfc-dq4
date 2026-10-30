@@ -153,6 +153,39 @@ def pitch_word(rate, base):
     return value
 
 
+# S-DSP 엔벨로프 속도 번호(0~31)마다 몇 표본에 한 걸음 가는지. 줄어드는 걸음은 지금 값의 1/256(약 0.034dB).
+SNES_RATE_PERIODS = (None, 2048, 1536, 1280, 1024, 768, 640, 512, 384, 320, 256, 192, 160, 128, 96, 80,
+                     64, 48, 40, 32, 24, 20, 16, 12, 10, 8, 6, 5, 4, 3, 2, 1)
+SNES_STEP_DB = -20 * math.log10(1 - 1 / 256)
+NDS_ENVELOPE_HZ = 192  # NDS 엔벨로프 갱신 빈도. 감쇠 단위 1 = 1/1280 dB(0 ~ -723*128 이 0 ~ -72.3dB)
+
+
+def nds_fall_db_per_second(value):
+    """NDS 감쇠·릴리스 값(0~127)이 1초에 줄이는 dB. 127 은 바로 끝남(inf)."""
+    if value >= 127:
+        return math.inf
+    rate = 0x3C00 if value == 126 else value * 2 + 1 if value < 50 else 0x1E00 / (126 - value)
+    return rate * NDS_ENVELOPE_HZ / 1280
+
+
+def nds_sustain_db(value):
+    """NDS 서스테인 값의 dB. 세기 값처럼 제곱으로 줄어든다."""
+    return 0.0 if value >= 127 else -math.inf if value <= 0 else 40 * math.log10(value / 127)
+
+
+def snes_rate(db_per_second, choices=range(1, 32)):
+    """1초에 db_per_second 만큼 줄어드는 데 가장 가까운 S-DSP 속도 번호(choices 안에서)."""
+    if db_per_second <= 0:
+        return 0
+    want = 32000 * SNES_STEP_DB / db_per_second
+    return min(choices, key=lambda i: abs(math.log(SNES_RATE_PERIODS[i] / want)))
+
+
+def nds_release_rate(value):
+    """NDS 릴리스 값을 DQ5 release 명령(ADSR2 하위 5비트, 소리 길이 뒤 줄어드는 속도)으로."""
+    return snes_rate(nds_fall_db_per_second(value)) if value < 127 else 0x1F
+
+
 def approximate_adsr(region):
     attack = min(15, max(0, round(region.get('attack', 127) * 15 / 127)))
     decay = min(7, max(0, round(region.get('decay', 127) * 7 / 127)))
@@ -160,7 +193,34 @@ def approximate_adsr(region):
     return 0x80 | decay << 4 | attack, sustain << 5
 
 
-def convert_sample(path, region, *, max_rate=12000, cache_dir=None, seconds=None):
+def nds_adsr(region):
+    """NDS 영역의 attack·decay·sustain 을 ADSR1·ADSR2 로. decay 는 dB/초가 같은 DR, sustain 은 가장 가까운 SL 이며,
+    SL 의 바닥(-18dB)보다 낮은 sustain 은 SR 로 decay 와 같은 빠르기로 계속 줄여 붙들린 음으로 남지 않게 한다."""
+    attack = min(15, max(0, round(region.get('attack', 127) * 15 / 127)))
+    fall = nds_fall_db_per_second(region.get('decay', 127))
+    decay = 7 if math.isinf(fall) else (snes_rate(fall, range(16, 31, 2)) - 16) // 2
+    level = nds_sustain_db(region.get('sustain', 127))
+    levels = [20 * math.log10((n + 1) / 8) for n in range(8)]
+    sustain = min(range(8), key=lambda n: abs(levels[n] - level)) if level > levels[0] else 0
+    keep = 0 if level > levels[0] - 3 else 0x1F if math.isinf(fall) else snes_rate(fall)
+    return 0x80 | decay << 4 | attack, sustain << 5 | keep
+
+
+def treble(pcm, db, loop_start=None):
+    """고음 올리기: x + k·(x - [1/4 1/2 1/4]·x). 나이퀴스트에서 db, 표본율의 1/4 에서 약 db/2 오른다. S-DSP 가우스 보간이
+    고음을 깎는 것을 바이트를 늘리지 않고 메운다. 반복 구간은 끝과 처음을 이어 걸러 반복 이음매가 바뀌지 않는다."""
+    k = 10 ** (db / 20) - 1
+
+    def boost(x, periodic):
+        before, after = (np.roll(x, 1), np.roll(x, -1)) if periodic else (np.r_[x[:1], x[:-1]], np.r_[x[1:], x[-1:]])
+        return x + k * (x - (before + 2 * x + after) / 4)
+
+    if loop_start is None:
+        return boost(pcm, False)
+    return np.concatenate((boost(pcm[:loop_start], False) if loop_start else pcm[:0], boost(pcm[loop_start:], True)))
+
+
+def convert_sample(path, region, *, max_rate=12000, cache_dir=None, seconds=None, envelope=False, treble_db=0.0):
     pcm, rate, loop = read_wave(path)
     if seconds is not None and loop is None:
         # 반복 없는 긴 샘플은 끝을 잘라 짧게 사라지게 한다(꼬리 20% 를 선형으로 줄임).
@@ -168,6 +228,8 @@ def convert_sample(path, region, *, max_rate=12000, cache_dir=None, seconds=None
         fade = max(1, len(pcm) // 5)
         pcm[-fade:] *= np.linspace(1, 0, fade)
     converted, effective_rate, loop_start = prepare_pcm(pcm, rate, loop, max_rate)
+    if treble_db:
+        converted = treble(converted, treble_db, loop_start)
     # DQ5 샘플처럼 무음 블록으로 시작한다. KON 직후 보간 버퍼에 앞 음 표본이 남아 첫 블록이 크면 음머리가 튄다.
     converted = np.concatenate((np.zeros(16), np.clip(np.rint(converted), -16384, 16383))).astype('<i2')
     if loop_start is not None:
@@ -181,7 +243,7 @@ def convert_sample(path, region, *, max_rate=12000, cache_dir=None, seconds=None
         partial = cache.with_suffix('.tmp')
         partial.write_bytes(encoded)
         partial.replace(cache)
-    adsr1, adsr2 = approximate_adsr(region)
+    adsr1, adsr2 = (nds_adsr if envelope else approximate_adsr)(region)
     pitch = pitch_word(effective_rate, region['base'])
     result = brr.resource(encoded, (loop_start or 0) // 16, adsr1=adsr1, adsr2=adsr2, pitch=pitch)
     if len(result) - 2 > 65535:
@@ -237,13 +299,15 @@ def estimate(path, max_rate, seconds):
 
 
 def build_bank(score, asset_root, *, start_id=0x26, max_rate=8000, cache_dir=None, budget=None, max_samples=14,
-               rates=RATES, keep_regions=()):
+               rates=RATES, keep_regions=(), envelope=False, treble_db=0.0):
     """(resources, program_map, report). sample은 DQ5 전역 번호.
 
     budget(바이트)·max_samples(곡 묶음 칸)를 넘으면 손실이 가장 작은 줄이기를 하나씩 고른다.
     쓰이는 음이 적은 영역을 같은 프로그램의 이웃 영역 샘플로 합치기, 표본율 낮추기, 반복 없는 샘플 자르기.
-    무엇을 줄였는지는 report['reductions']에 남긴다.
+    무엇을 줄였는지는 report['reductions']에 남긴다. envelope 이면 샘플 머리를 nds_adsr 로 하고, 프로그램 표에 영역의
+    엔벨로프 값과 머리 ADSR('header')을 담아 변환기가 음마다 adsr·release 를 쓰게 한다.
     """
+    adsr_of = nds_adsr if envelope else approximate_adsr
     if not 0x26 <= start_id < 0xC8:
         raise ValueError('custom sample IDs must start in 26..C7')
     root = Path(asset_root)
@@ -271,7 +335,7 @@ def build_bank(score, asset_root, *, start_id=0x26, max_rate=8000, cache_dir=Non
 
     def identity(key):
         region = regions[key][0]
-        return region['sample'], region['base'], approximate_adsr(region)
+        return region['sample'], region['base'], adsr_of(region)
 
     sizes = {}
 
@@ -358,15 +422,19 @@ def build_bank(score, asset_root, *, start_id=0x26, max_rate=8000, cache_dir=Non
         if identifier >= 0xC8:
             raise ValueError('sample ID table exhausted')
         region, path, _ = regions[key]
-        resource, detail = convert_sample(path, region, max_rate=rates[rate.get(ident, 0)],
+        resource, detail = convert_sample(path, region, max_rate=rates[rate.get(ident, 0)], envelope=envelope,
+                                          treble_db=treble_db,
                                           cache_dir=cache_dir, seconds=ONE_SHOT_SECONDS[cut.get(ident, 0)])
         resources[identifier], details[f'{identifier:02X}'] = resource, detail
         ids[ident] = identifier
     mapping = {}
     for (program, k) in sorted(regions):
         region = regions[(program, k)][0]
-        mapping.setdefault(program, []).append({'lo': region['lo'], 'hi': region['hi'],
-                                                'sample': ids[identity(target[(program, k)])]})
+        entry = {'lo': region['lo'], 'hi': region['hi'], 'sample': ids[identity(target[(program, k)])]}
+        if envelope:
+            entry |= {x: region[x] for x in ('attack', 'decay', 'sustain', 'release') if x in region}
+            entry['header'] = list(nds_adsr(regions[target[(program, k)]][0]))
+        mapping.setdefault(program, []).append(entry)
     return resources, mapping, {
         'samples': details, 'sample_count': len(resources),
         'resource_bytes': sum(map(len, resources.values())),

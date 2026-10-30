@@ -72,6 +72,16 @@ class LevelTests(unittest.TestCase):
         self.assertIn('volume 30', port.convert(score(notes), voices=1).text)
         self.assertIn('volume 60', port.convert(score(notes), voices=1, voice_volume=0x60).text)
 
+    def test_nds_envelope_writes_release_and_audible_overrides(self):
+        notes = score([(0, 24, 60, 100), (24, 24, 60, 100), (48, 24, 60, 100)])
+        notes['timeline'][1]['adsr'] = [None, 20, 0, None]   # decay·sustain 덮어쓰기: 들리는 차이
+        notes['timeline'][2]['adsr'] = [120, None, None, None]  # attack 120: 거의 같은 빠르기
+        region = {'lo': 0, 'hi': 127, 'sample': 0x26, 'attack': 127, 'decay': 127, 'sustain': 127, 'release': 110}
+        mapping = {0: [region | {'header': [0xFF, 0xE0]}]}
+        text = port.convert(notes, voices=1, program_map=mapping).text
+        self.assertIn('release 16', text)
+        self.assertEqual(text.count('adsr '), 2)  # 덮어쓴 음, 그리고 머리 값으로 되돌리기
+
     def test_audible_velocity_change_is_written(self):
         notes = [(0, 24, 60, 100), (24, 24, 60, 50)]
         result = port.convert(score(notes), voices=1)

@@ -21,6 +21,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path[:0] = [str(ROOT / 'sfc/dq5/tools'), str(ROOT / 'nds/dq4/tools')]
 
+import dq4soundbank as bank  # noqa: E402
 from dq4soundcompact import MAX_CALL_DEPTH, compact  # noqa: E402
 from dq5song import assemble, header, listing, step, walk  # noqa: E402
 
@@ -248,6 +249,28 @@ def resolve_sample(mapping, program, note):
     if len(matches) != 1:
         raise ValueError(f'program {program} key {note}: expected one sample region, got {len(matches)}')
     return matches[0]
+
+
+def resolve_region(mapping, program, note):
+    """그 음을 울리는 NDS 영역(엔벨로프 값이 든 dict). 잡음·번호만 준 프로그램, 엔벨로프 값이 없는 표는 None."""
+    value = mapping[program]
+    if not isinstance(value, list) or not any('header' in r for r in value):
+        return None
+    return next(r for r in value if r['lo'] <= note <= r['hi'])
+
+
+def note_envelope(region, note):
+    """음마다 덮어쓴 NDS ADSR 을 반영한 (ADSR1, ADSR2, release 명령 값)과 샘플 머리의 (ADSR1, ADSR2)."""
+    override = dict(zip(('attack', 'decay', 'sustain', 'release'), note.get('adsr') or ()))
+    merged = region | {k: v for k, v in override.items() if v is not None}
+    return bank.nds_adsr(merged), bank.nds_release_rate(merged.get('release', 127)), tuple(region['header'])
+
+
+def _envelope_key(adsr):
+    """귀로 구별되는 ADSR 만 남긴 값. attack 11 이상은 거의 바로 차오르고, SR 한 칸은 빠르기 1.3배 안팎이다."""
+    a1, a2 = adsr
+    attack = a1 & 0x0F
+    return min(attack, 11), a1 >> 4 & 7, a2 >> 5, (a2 & 0x1F) // 2
 
 
 def _pan(value):
@@ -537,10 +560,20 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
                     if cache.get('instrument') == index:
                         reissued += 1
                     cache.pop('instrument', None)
+                region = None if noisy else resolve_region(mapping, note['program'], note['note'])
+                envelope = note_envelope(region, note) if region else None
                 if index is not None and cache.get('instrument') != index:
                     setting('instrument', index)
                     cache['instrument_at'] = tick
-                setting('release', release_rate)
+                    # instrument 가 샘플 머리의 ADSR 을 다시 쓴다
+                    cache['adsr'] = envelope[2] if envelope else None
+                # 들리지 않는 엔벨로프 차이까지 옮기면 음마다 명령이 붙어 곡 앞 바이트(곡 시작 지연)가 는다
+                if envelope and (cache.get('adsr') is None or _envelope_key(cache['adsr']) != _envelope_key(envelope[0])):
+                    lines.append(f'  adsr {envelope[0][0]:02X} {envelope[0][1]:02X}')
+                    cache['adsr'] = envelope[0]
+                release = envelope[1] if envelope else release_rate
+                if cache.get('release') is None or abs(cache['release'] - release) > 1:
+                    setting('release', release)
                 level = _level(note, note_cc[7], note_cc[11], score.get('volume', 127))
                 held = cache.get('volume2')
                 # 사람이 거의 못 듣는 세기 차이까지 옮기면 음마다 명령이 붙어 SPC 메모리를 넘는다.
