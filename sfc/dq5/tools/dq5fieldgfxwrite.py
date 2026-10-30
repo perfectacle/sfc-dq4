@@ -332,6 +332,8 @@ def palette_world_words(worlds):
             out += b''.join((t | (((n & bits) << 2) + 8) << 8).to_bytes(2, 'little') for t, n in enumerate(nib))
         return out
     worlds = list(worlds)
+    if len(worlds) != 3:
+        raise ValueError(f'세계 셋의 니블이 필요함({len(worlds)}개)')
     return table(worlds, 15) + table(worlds + worlds[:1], 7)
 
 
