@@ -1,7 +1,8 @@
 """DQ5 전투 몬스터 그림·색 쓰기. 읽기 형식은 sfc/dq5/docs/dq5-graphics-format.md 의 「그림 형식」·「타일」.
 
-그림 번호 하나를 색 번호 PNG(팔레트 모드, 픽셀 값 = OBJ 팔레트 색 번호 0~15, 0 투명, 크기는 원래 그림의
-가로 칸 × 8, 세로 칸 × 8)로 받아 머리(+0~+4 는 원래 값)·칸 비트맵·조각 니블·타일을 다시 만든다.
+그림 번호 하나를 색 번호 PNG(팔레트 모드, 픽셀 값 = OBJ 팔레트 색 번호 0~15, 0 투명, 크기는 가로 칸 × 8,
+세로 칸 × 8)로 받아 머리·칸 비트맵·조각 니블·타일을 다시 만든다. 가로 칸은 1~15 또는 19(머리 +5 니블 F),
+세로 칸은 1~16 이고, 원래 크기와 달라도 된다(+5 를 새로 씀). 머리 +0~+4 는 원래 값이고 "header" 로 바꾼다.
 조각은 8픽셀 칸마다 자르고, 네 칸이 모두 그려진 2x2 는 16x16 조각으로, 앞 조각을 좌우로 뒤집은 것과 같으면
 반전 복사(니블 4·6)로 쓴다. 타일은 평면마다 그대로/마스크 압축 중 짧은 쪽을 고른다(22:992A).
 몬스터 레코드(27:E5DC)의 그림 번호와 색도 고친다.
@@ -13,10 +14,16 @@
 
 문서(dq5monster/1):
   {"format": "dq5monster/1",
-   "pictures": [{"picture": "02", "image": "02.png"}],
+   "pictures": [{"picture": "02", "image": "02.png",
+                 "header": {"float": false, "raise": 0, "shadow": 6, "shadow_dx": -4, "shadow_dy": 11,
+                            "hit_x": 1, "hit_y": 1}}],
    "monsters": [{"monster": "00", "picture": "02", "colors": [32767, 0, 31]}]}
 
-조각·줄마다 타일·16x16 자리(22:91F7)가 원래보다 많은 그림은 입력 롬의 무리·구역으로 센 조합 검사(dq5monlimits.py)를 거친다. 같은 빌드에서
+"header" 의 키는 모두 고르는 것이다. float·raise·shadow 는 +0 의 bit7·bit5-6·bit0-4, shadow_dx·shadow_dy 는 +1·+2
+(부호 있는 바이트), hit_x·hit_y 는 +3·+4(상자 안 8픽셀 칸이라 가로·세로 칸 수보다 작게). shadow 는 0(없음)이거나
+22:B4FE 표의 칸이 FFFF 가 아닌 번호여야 한다.
+
+크기·띄움·들어올림을 바꾸었거나 조각·줄마다 타일·16x16 자리(22:91F7)가 원래보다 많은 그림은 입력 롬의 무리·구역으로 센 조합 검사(dq5monlimits.py)를 거친다. 같은 빌드에서
 무리·구역을 바꾸면 그 패치를 먼저 넣은 롬을 입력으로 주고, 구역 수를 늘렸으면 --progress 또는 --areas 를 준다.
 
 새 그림이 원래 자리보다 길면 --at 에 놓는다. 머리 포인터 표는 그림 번호 구간마다 뱅크 25·26·27 의 16비트라,
@@ -54,6 +61,10 @@ MAX_COLORS = 15                 # OBJ 팔레트 1~15. 22:A5A4 는 색 수 0 이�
 # 그림 하나의 타일은 풀고 난 다음 NMI 한 번(00:FD4A)에 VRAM 으로 보내, 많으면 화면 기간에 걸린 뒤쪽이 VRAM 에 닿지 않는다.
 # 원래 그림 가운데 한 번에 보내는 가장 많은 수가 그림 70(EA)의 91개다. 110개인 그림 6C 는 E4 일 때 22:90FA 가 나눠 보낸다.
 TILE_LIMIT = 91
+WIDTHS = (*range(1, 16), 0x13)  # 머리 +5 상위 니블 0~E → 1~15, F → 19
+HEIGHTS = range(1, 17)
+SHADOWS = 0x22B4FE              # 그림자 모양 표(22:B44A). 번호 × 2 의 칸이 FFFF 면 그림자 자료가 없음
+HEADER_KEYS = ('float', 'raise', 'shadow', 'shadow_dx', 'shadow_dy', 'hit_x', 'hit_y')
 ORIGINAL_SIZE = 0x180000        # 원래 롬. 이 안의 옮긴 자료는 빈 자리 지도(dq5build.free_ranges) 안이어야 한다
 
 
@@ -187,6 +198,8 @@ def keep_layout(rom, g, grid):
     그 배치로 다시 그린 것이 입력과 같을 때만 바이트를 돌려준다(None 이면 배치를 새로 짠다)."""
     prefix, refs, d = original_layout(rom, g)
     W, H = d['w'] * 8, d['h'] * 8
+    if (len(grid[0]), len(grid)) != (W, H):
+        return None
     pieces, data = [], bytearray()
     for (x0, y0, big, _, _), ref in zip(d['pieces'], refs):
         if ref is not None:
@@ -210,24 +223,55 @@ def stats(d):
     return len(d['pieces']), sum(len(p[3]) for p in d['pieces'] if not p[4]), M.band_counts(d)
 
 
-def encode(rom, g, grid):
-    """원래 배치로 되면 그것을, 아니면 새 배치. (바이트, 조각 수, 타일 수, 줄마다 타일 수)."""
-    raw = keep_layout(rom, g, grid)
+def size_byte(w, h):
+    return (0xF if w == 0x13 else w - 1) << 4 | (h - 1)
+
+
+def encode(rom, g, grid, head5=None):
+    """원래 배치로 되면 그것을, 아니면 새 배치. (바이트, 조각 수, 타일 수, 줄마다 타일 수).
+    head5 는 머리 +0~+4(없으면 원래 값), 크기 +5 는 grid 의 크기."""
     d = decode(rom, g)
+    head5 = bytes(head5) if head5 is not None else bytes(rom.u8(d['head'] + k) for k in range(5))
+    raw = keep_layout(rom, g, grid)
     if raw is not None:
-        return (raw, *stats(d))
-    return encode_picture(grid, d['w'], d['h'], [rom.u8(d['head'] + k) for k in range(6)])
+        return (head5 + raw[5:], *stats(d))
+    w, h = len(grid[0]) // 8, len(grid) // 8
+    return encode_picture(grid, w, h, head5 + bytes([size_byte(w, h)]))
 
 
-def image_grid(path, w, h):
+def image_grid(path, w=None, h=None):
+    """색 번호 격자. w·h 를 주면 그 크기만, 없으면 그림 상자로 쓸 수 있는 크기(WIDTHS × HEIGHTS)를 받는다."""
     with Image.open(path) as opened:
         image = opened.copy()
-    if image.mode != 'P' or image.size != (w * 8, h * 8):
+    if w is not None and image.size != (w * 8, h * 8):
         raise ValueError(f'{path}: {w * 8}x{h * 8} 팔레트 모드 PNG 여야 함(지금 {image.mode} {image.size[0]}x{image.size[1]})')
+    W, H = image.size
+    if image.mode != 'P' or W % 8 or H % 8 or W // 8 not in WIDTHS or H // 8 not in HEIGHTS:
+        raise ValueError(f'{path}: 가로 8·16·…·120·152, 세로 8~128 픽셀(8의 배수) 팔레트 모드 PNG 여야 함'
+                         f'(지금 {image.mode} {W}x{H})')
     data = list(image.tobytes())
     if max(data) > 15:
         raise ValueError(f'{path}: 색 번호는 0~15 여야 함')
-    return [data[y * w * 8:(y + 1) * w * 8] for y in range(h * 8)]
+    return [data[y * W:(y + 1) * W] for y in range(H)]
+
+
+def header_bytes(rom, g, row, w, h, label):
+    """머리 +0~+4. row 는 문서의 "header"(없으면 원래 값). 크기를 바꾸면 원래 값도 새 크기로 검사한다."""
+    b = [rom.u8(head_of(rom, g) + k) for k in range(5)]
+    row = {} if row is None else row
+    if not isinstance(row, dict) or row.keys() - set(HEADER_KEYS):
+        raise ValueError(f'{label}: {", ".join(HEADER_KEYS)} 만 받음')
+    hd = dict(M.parse_header(b + [size_byte(w, h)]), **row)
+    if type(hd['float']) is not bool:
+        raise ValueError(f'{label}.float: true/false')
+    for key, low, high in (('raise', 0, 3), ('shadow', 0, 31), ('shadow_dx', -128, 127), ('shadow_dy', -128, 127),
+                           ('hit_x', 0, w - 1), ('hit_y', 0, h - 1)):
+        if type(hd[key]) is not int or not low <= hd[key] <= high:
+            raise ValueError(f'{label}.{key}: {low}~{high} 정수')
+    if hd['shadow'] and rom.u16(SHADOWS + hd['shadow'] * 2) == 0xFFFF:
+        raise ValueError(f'{label}.shadow: 그림자 모양 {hd["shadow"]} 은 22:B4FE 표에 자료가 없음')
+    return bytes([hd['float'] << 7 | hd['raise'] << 5 | hd['shadow'], hd['shadow_dx'] & 0xFF, hd['shadow_dy'] & 0xFF,
+                  hd['hit_x'], hd['hit_y']])
 
 
 def head_of(rom, g):
@@ -307,24 +351,30 @@ def plan(rom, doc, base, areas=None):
         raise ValueError('pictures는 배열이어야 함')
     for i, row in enumerate(rows):
         label = f'pictures[{i}]'
-        if not isinstance(row, dict) or row.keys() != {'picture', 'image'} or not isinstance(row['image'], str):
-            raise ValueError(f'{label}: picture·image 만 받음')
+        if not isinstance(row, dict) or not {'picture', 'image'} <= row.keys() <= {'picture', 'image', 'header'} \
+                or not isinstance(row['image'], str):
+            raise ValueError(f'{label}: picture·image 와 header 만 받음')
         g = hexbyte(row['picture'], f'{label}.picture')
         if g not in used:
             raise ValueError(f'{label}: 그림 {g:02X}는 몬스터가 쓰는 그림이 아님(빈 번호는 다른 그림의 머리를 가리킴)')
         if g in pictures:
             raise ValueError(f'{label}: 그림 {g:02X}를 두 번 지정함')
         d = decode(rom, g)
-        grid = image_grid(base / row['image'], d['w'], d['h'])
-        raw, pieces, tiles, bands = encode(rom, g, grid)
+        grid = image_grid(base / row['image'])
+        head5 = header_bytes(rom, g, row.get('header'), len(grid[0]) // 8, len(grid) // 8, f'{label}.header')
+        raw, pieces, tiles, bands = encode(rom, g, grid, head5)
         limit = stats(d)
         slots = M.slot_count(decode_bytes(raw))
+        hd, old = M.parse_header(raw[:6]), M.parse_header([rom.u8(head_of(rom, g) + k) for k in range(6)])
         # 그림 6C(110개)는 22:90FA 가 정해진 6타일을 다시 보내 버티므로, 원래 배치 그대로일 때만 91개를 넘겨 받는다.
         if tiles > TILE_LIMIT and keep_layout(rom, g, grid) is None:
             raise ValueError(f'{label}: 타일 {tiles}개 — 한 그림의 타일은 NMI 한 번에 VRAM 으로 보내므로 {TILE_LIMIT}개까지'
                              f'(원래 배치를 그대로 쓰면 원래 {limit[1]}개까지)')
-        if pieces > limit[0] or slots > M.slot_count(d) or any(a > b for a, b in zip(bands, limit[2])):
-            grown[g] = (pieces, bands, slots)
+        # 크기·띄움·들어올림은 줄·y·가로 자리를 바꾸므로(22:A001·22:9284) 조합을 다시 센다.
+        if pieces > limit[0] or slots > M.slot_count(d) or len(bands) > len(limit[2]) or \
+                any(a > b for a, b in zip(bands, limit[2])) or \
+                any(hd[k] != old[k] for k in ('w', 'h', 'float', 'raise')):
+            grown[g] = (pieces, bands, slots, hd)
         pictures[g] = (grid, raw, pieces, tiles)
     # 같은 머리를 가리키는 그림 번호(00·11·29, 58·5E 등)는 자료가 하나라 함께 바뀐다.
     for g in list(pictures):
@@ -384,7 +434,7 @@ def plan(rom, doc, base, areas=None):
         if bad:
             groups, old, new, where, why = bad[0]
             shown = ' '.join(f'{m:02X}x{n}' for m, n, _ in groups)
-            raise ValueError(f'그림 {", ".join(f"{g:02X}" for g in sorted(grown))}: 조각·줄마다 타일·자리가 원래보다 많아 '
+            raise ValueError(f'그림 {", ".join(f"{g:02X}" for g in sorted(grown))}: 크기·띄움·들어올림을 바꾸었거나 조각·줄마다 타일·자리가 원래보다 많아 '
                              f'무리 조합 {len(bad)}개에 걸림. 첫째: {where} [{shown}] 놓이는 수 {old} → {new}, {why}')
     return pictures, monsters
 
@@ -415,7 +465,7 @@ def patch(rom, doc, base=Path('.'), at=None, areas=None, records_at=None):
             continue
         done.add(head_of(rom, g))
         grid, raw, pieces, tiles = pictures[g]
-        if grid == picture_grid(rom, g)[0]:
+        if grid == picture_grid(rom, g)[0] and raw[:6] == bytes(rom.u8(head_of(rom, g) + k) for k in range(6)):
             continue
         h = head_of(rom, g)
         if h + len(raw) <= places[h][1]:
@@ -551,6 +601,8 @@ def check_in(rom, doc, base, at, folder, areas=None, records_at=None):
         want = pictures[g][0] if g in pictures else picture_grid(rom, g)[0]
         if picture_grid(after, g)[0] != want:
             raise ValueError(f'그림 {g:02X}: 빌드한 롬이 기대한 그림으로 풀리지 않음')
+        if g in pictures and bytes(after.u8(head_of(after, g) + k) for k in range(6)) != pictures[g][1][:6]:
+            raise ValueError(f'그림 {g:02X}: 빌드한 롬의 머리 +0~+5 가 기대와 다름')
     for m in range(M.COUNT):
         if M.monster(after, m) != monsters.get(m, M.monster(rom, m)):
             raise ValueError(f'몬스터 {m:02X}: 레코드가 기대와 다름')
@@ -602,7 +654,9 @@ def main():
             if g not in used_pictures(rom):
                 raise ValueError(f'그림 {g:02X}는 몬스터가 쓰는 그림이 아님')
             d, m = dump_image(rom, g, args.out, hexbyte(args.monster, 'monster') if args.monster else None)
+            hd = M.parse_header([rom.u8(head_of(rom, g) + k) for k in range(6)])
             print(f'그림 {g:02X} {d["w"]}x{d["h"]}칸 (몬스터 {m:02X} 색) → {args.out}')
+            print('header: ' + json.dumps({k: hd[k] for k in HEADER_KEYS}))
             return 0
         doc = json.loads(args.source.read_text(encoding='utf-8')) if getattr(args, 'source', None) else None
         base = args.source.parent if getattr(args, 'source', None) else Path('.')

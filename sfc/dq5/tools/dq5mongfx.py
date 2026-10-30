@@ -232,7 +232,11 @@ def match_oam(rom, m, oam, vram):
 
 def header(rom, g):
     """머리 +0~+5. 그림자 모양(22:B4FE 표 번호)·띄움·높임과 그림자·타격 효과 기준점."""
-    b = [rom.u8(head(rom, g) + i) for i in range(6)]
+    return parse_header([rom.u8(head(rom, g) + i) for i in range(6)])
+
+
+def parse_header(b):
+    """머리 6바이트 → header() 와 같은 사전."""
     sb = lambda v: v - 256 if v & 0x80 else v  # noqa: E731
     return {'float': bool(b[0] & 0x80), 'raise': b[0] >> 5 & 3, 'shadow': b[0] & 0x1F,
             'shadow_dx': sb(b[1]), 'shadow_dy': sb(b[2]), 'hit_x': b[3], 'hit_y': b[4],

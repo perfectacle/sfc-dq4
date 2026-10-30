@@ -26,6 +26,7 @@ from dq5encounter import AREA_COUNT, AREAS, EVENT_COUNT, EVENT_GROUPS, EVENT_SIZ
 from dq5map import Rom
 
 PIECE_LIMIT, BAND_LIMIT = 100, 0x1C
+TOP = 0x38                      # 줄마다 타일 합 표 7E:2F00 의 첫 줄(22:A177 의 (y >> 3) - 7)
 SKIP_FIRST = (0xE7, 0xEA)
 # 22:89E5·22:8A57·22:8A85 가 무리를 더하거나 합치는 ミルドラース 와 그 둘째 무리. 이 셈으로는 배치를 셀 수 없다.
 UNCOUNTED = range(0xE7, 0xEC)
@@ -109,8 +110,8 @@ def compositions(rom, areas=None):
 
 
 class Pictures:
-    """그림마다 머리·조각 수·줄마다 타일 수·16x16 자리 수. pictures = {그림: (조각 수, 줄마다 타일 수[, 자리 수])} 로
-    바꾼 그림을, monsters = {몬스터: 그림} 으로 바꾼 그림 번호를 덮는다."""
+    """그림마다 머리·조각 수·줄마다 타일 수·16x16 자리 수. pictures = {그림: (조각 수, 줄마다 타일 수[, 자리 수[, 머리]])}
+    로 바꾼 그림을, monsters = {몬스터: 그림} 으로 바꾼 그림 번호를 덮는다. 머리는 dq5mongfx.header 꼴(크기·띄움·들어올림)."""
 
     def __init__(self, rom, pictures=None, monsters=None):
         self.rom, self.pictures, self.monsters, self.cache = rom, pictures or {}, monsters or {}, {}
@@ -121,8 +122,9 @@ class Pictures:
     def stats(self, g):
         if g not in self.cache:
             d = M.decode(self.rom, g)
-            size, bands, *slots = self.pictures.get(g, (len(d['pieces']), M.band_counts(d)))
-            self.cache[g] = (M.header(self.rom, g), size, list(bands), slots[0] if slots else M.slot_count(d))
+            size, bands, *rest = self.pictures.get(g, (len(d['pieces']), M.band_counts(d)))
+            self.cache[g] = (rest[1] if len(rest) > 1 else M.header(self.rom, g), size, list(bands),
+                             rest[0] if rest else M.slot_count(d))
         return self.cache[g][:3]
 
     def slots(self, g):
@@ -150,16 +152,24 @@ class Pictures:
                 cursor += self.slots(g)
         return out
 
+    def band_rows(self, groups):
+        """조합에서 푼 그림의 세로 칸 수 합. 풀 때 8픽셀 줄마다 줄 목록 사슬 7E:5B20(64칸)의 한 칸을 쓴다(22:AD73)."""
+        return sum(self.stats(g)[0]['h'] for g, _, _ in self.loads(groups))
+
 
 def losses(rom, pictures=None, monsters=None, found=None, areas=None):
     """바꾼 그림·그림 번호로 다시 세어 걸리는 조합 [(조합, 원래 수, 바뀐 수, 나온 곳, 까닭)].
-    까닭은 원래보다 덜 놓이는 무리가 있음, 또는 조합의 그림 조각 합(7E:5800 목록)이나 16x16 자리 합이 원래 롬의 모든
-    조합 중 가장 큰 값을 넘음이다. 자리는 연출의 OBJ 그림(22:BB3D)도 같은 128개에서 받으므로, 원래 게임이 이미 쓰는
-    합까지만 받는다."""
+    까닭은 원래보다 덜 놓이는 무리가 있음, 조합의 그림 조각 합(7E:5800 목록)·16x16 자리 합·그림 세로 칸 합(줄 목록
+    7E:5B20)이 원래 롬의 모든 조합 중 가장 큰 값을 넘음, 바꾼 그림의 상자 위가 y $38 보다 위임이다.
+    자리는 연출의 OBJ 그림(22:BB3D)도 같은 128개에서 받으므로, 원래 게임이 이미 쓰는 합까지만 받는다. 줄 목록은 남은 수
+    $0D2B 를 보지 않고 64칸을 넘어 이어 쓰므로(22:AD84) 이것도 원래 합까지만 받는다. 줄마다 타일 합은
+    7E:2F00 + (y >> 3) - 7 에 세는데(22:A177) X 가 8비트라, y 가 $38 보다 작으면 X 가 $F9~$FF 로 돌아
+    7E:2FF9~ 를 고친다(코드 읽기)."""
     found = found if found is not None else compositions(rom, areas)[0]
     before, after = Pictures(rom), Pictures(rom, pictures, monsters)
     most = max((before.listed(groups) for groups in found), default=0)
     most_slots = max((sum(s for _, _, s in before.loads(groups)) for groups in found), default=0)
+    most_rows = max((before.band_rows(groups) for groups in found), default=0)
     changed = set(monsters or ()) | {m for m in range(M.COUNT) if before.picture(m) in (pictures or {})}
     out = []
     # 바꾼 뒤 기준으로, 늘린 그림을 쓰는 몬스터가 센 조합에 하나도 없거나 ミルドラース(E7~EB)면 셀 수 없다.
@@ -174,13 +184,19 @@ def losses(rom, pictures=None, monsters=None, found=None, areas=None):
         if not changed & {m for m, _, _ in groups}:
             continue
         old = [k[1] for k in before.place(groups)[0]]
-        new = [k[1] for k in after.place(groups)[0]]
-        if any(b < a for a, b in zip(old, new)):
+        kept = after.place(groups)[0]
+        new = [k[1] for k in kept]
+        high = [(m, y) for m, _, _, _, y, k in kept if k and m in changed and y < TOP]
+        if high:
+            out.append((groups, old, new, where, f'몬스터 {high[0][0]:02X} 상자 위 y ${high[0][1]:02X} < ${TOP:02X}'))
+        elif any(b < a for a, b in zip(old, new)):
             out.append((groups, old, new, where, '덜 놓임'))
         elif after.listed(groups) > most:
             out.append((groups, old, new, where, f'조각 목록 {after.listed(groups)}개 > {most}개'))
         elif sum(s for _, _, s in after.loads(groups)) > most_slots:
             out.append((groups, old, new, where, f'16x16 자리 {sum(s for _, _, s in after.loads(groups))}개 > {most_slots}개'))
+        elif after.band_rows(groups) > most_rows:
+            out.append((groups, old, new, where, f'그림 세로 칸 {after.band_rows(groups)}개 > {most_rows}개'))
     return out
 
 
