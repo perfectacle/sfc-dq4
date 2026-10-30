@@ -1485,6 +1485,20 @@ def _wood_grain():
     return _finish(c, "나이테 나무벽", "town")
 
 
+def _fountain():
+    # The town fountain stands in the middle of a pond (water all round it in FC), so it is drawn in the water
+    # line over the water's main colour: a pale jet whose drops fall to both sides into a ripple ring.
+    c = _Canvas(7, fill=3)
+    for x, y, length in ((1, 2, 3), (12, 1, 3), (0, 14, 4), (11, 13, 4)):
+        c.line((x, y, x + length, y), 6)
+    c.draw.ellipse((2, 7, 13, 14), outline=c.c(5))
+    c.draw.ellipse((5, 9, 10, 12), fill=c.c(4))
+    c.rect((7, 2, 8, 10), 7)
+    for x, y in ((6, 3), (9, 3), (5, 5), (10, 5), (4, 7), (11, 7)):
+        c.point((x, y), 7)
+    return _finish(c, "분수")
+
+
 def _cloud():
     # Pale cloud over the deep sky; a few soft shade lines keep a large cloud field from looking flat.
     c = _Canvas(7, fill=7)
@@ -1605,7 +1619,7 @@ def _dungeon_assets():
               for name, image in assets.items()}
     assets.update({
         "boulder_wall": _boulder_wall(), "ice_wall": _ice_wall(), "ice_floor": _ice_floor(),
-        "wood_grain": _wood_grain(), "cloud": _cloud(), "sandstone": _sandstone(), "ladder": _ladder(),
+        "wood_grain": _wood_grain(), "cloud": _cloud(), "fountain": _fountain(), "sandstone": _sandstone(), "ladder": _ladder(),
         "stone_steps": _stone_steps(), "lift": _lift(), "mine_beam": _mine_beam(), "rock_pile": _rock_pile(),
         "pit": _pit(), "grate": _grate(),
     })
