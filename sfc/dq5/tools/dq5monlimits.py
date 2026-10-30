@@ -163,7 +163,8 @@ def losses(rom, pictures=None, monsters=None, found=None, areas=None):
     7E:5B20)이 원래 롬의 모든 조합 중 가장 큰 값을 넘음, 바꾼 그림의 상자 위가 y $38 보다 위임이다.
     자리는 연출의 OBJ 그림(22:BB3D)도 같은 128개에서 받으므로, 원래 게임이 이미 쓰는 합까지만 받는다. 줄 목록은 남은 수
     $0D2B 를 보지 않고 64칸을 넘어 이어 쓰므로(22:AD84) 이것도 원래 합까지만 받는다. 줄마다 타일 합은
-    7E:2F00 + (y >> 3) - 7 에 세므로(22:A177) y 가 $38 보다 작으면 표 앞을 고친다."""
+    7E:2F00 + (y >> 3) - 7 에 세는데(22:A177) X 가 8비트라, y 가 $38 보다 작으면 X 가 $F9~$FF 로 돌아
+    7E:2FF9~ 를 고친다(코드 읽기)."""
     found = found if found is not None else compositions(rom, areas)[0]
     before, after = Pictures(rom), Pictures(rom, pictures, monsters)
     most = max((before.listed(groups) for groups in found), default=0)

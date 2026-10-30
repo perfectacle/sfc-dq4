@@ -256,10 +256,9 @@ def image_grid(path, w=None, h=None):
 
 
 def header_bytes(rom, g, row, w, h, label):
-    """머리 +0~+4. row 는 문서의 "header"(없으면 원래 값 그대로)."""
+    """머리 +0~+4. row 는 문서의 "header"(없으면 원래 값). 크기를 바꾸면 원래 값도 새 크기로 검사한다."""
     b = [rom.u8(head_of(rom, g) + k) for k in range(5)]
-    if row is None:
-        return bytes(b)
+    row = {} if row is None else row
     if not isinstance(row, dict) or row.keys() - set(HEADER_KEYS):
         raise ValueError(f'{label}: {", ".join(HEADER_KEYS)} 만 받음')
     hd = dict(M.parse_header(b + [size_byte(w, h)]), **row)
@@ -435,7 +434,7 @@ def plan(rom, doc, base, areas=None):
         if bad:
             groups, old, new, where, why = bad[0]
             shown = ' '.join(f'{m:02X}x{n}' for m, n, _ in groups)
-            raise ValueError(f'그림 {", ".join(f"{g:02X}" for g in sorted(grown))}: 조각·줄마다 타일·자리가 원래보다 많아 '
+            raise ValueError(f'그림 {", ".join(f"{g:02X}" for g in sorted(grown))}: 크기·띄움·들어올림을 바꾸었거나 조각·줄마다 타일·자리가 원래보다 많아 '
                              f'무리 조합 {len(bad)}개에 걸림. 첫째: {where} [{shown}] 놓이는 수 {old} → {new}, {why}')
     return pictures, monsters
 

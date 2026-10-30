@@ -216,6 +216,11 @@ class PlanTests(unittest.TestCase):
                     {'size': 1}, []):
             with self.subTest(header=bad), self.assertRaises(ValueError):
                 self.run_plan(pictures=[{'picture': '00', 'image': 'same.png', 'header': bad}])
+        # 머리를 주지 않아도 바꾼 크기로 원래 머리를 검사한다: 원래 타격 기준점 x 1 은 가로 1칸 그림 밖
+        self.rom.d[lorom(W.head_of(self.rom, 0)) + 3] = 1
+        self.save('one.png', [[1] * 8 for _ in range(8)])
+        with self.assertRaisesRegex(ValueError, 'hit_x'):
+            self.run_plan(pictures=[{'picture': '00', 'image': 'one.png'}])
         for w, h in ((128, 16), (16, 136), (12, 16)):
             self.save('odd.png', [[0] * w for _ in range(h)])
             with self.subTest(size=(w, h)), self.assertRaisesRegex(ValueError, '팔레트 모드 PNG'):
