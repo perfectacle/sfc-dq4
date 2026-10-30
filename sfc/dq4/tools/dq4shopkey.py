@@ -30,10 +30,17 @@ ROW_SIZE = 4
 
 def table(rows):
     """rows: (DQ5 group, first map, last map, key)."""
-    out, keys = bytearray(), set()
+    out, keys, spans = bytearray(), set(), []
     for group, first, last, key in rows:
         if not first <= last <= 0x1F:
             raise ValueError(f"{group:02X}: map range {first:02X}-{last:02X}")
+        # A map that falls back to its group number as key must not meet an assigned key.
+        if group >= KEY_FIRST:
+            raise ValueError(f"{group:02X}: group number reaches the assigned keys")
+        # The hook takes the first row that holds the map, so overlapping rows would hide one silently.
+        if any(g == group and first <= b and a <= last for g, a, b in spans):
+            raise ValueError(f"{group:02X}: map range {first:02X}-{last:02X} overlaps another row")
+        spans.append((group, first, last))
         if not KEY_FIRST <= key <= KEY_LAST or key in keys:
             raise ValueError(f"{group:02X} {first:02X}-{last:02X}: key {key:02X}")
         keys.add(key)

@@ -107,6 +107,13 @@ class ShopKeyTest(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 hook.table(bad)
 
+    def test_overlapping_rows_and_high_groups_stop(self):
+        with self.assertRaises(ValueError):
+            hook.table([(0x40, 0, 3, 0x60), (0x40, 3, 5, 0x61)])
+        hook.table([(0x40, 0, 2, 0x60), (0x40, 3, 5, 0x61), (0x41, 0, 5, 0x62)])
+        with self.assertRaises(ValueError):
+            hook.table([(0x60, 0, 0, 0x61)])
+
     def test_sites_keep_their_length(self):
         _, shop, inn = hook.writes(AT, ROWS)
         self.assertEqual(len(bytes.fromhex(shop["hex"])), len(hook.SHOP_ORIG))
