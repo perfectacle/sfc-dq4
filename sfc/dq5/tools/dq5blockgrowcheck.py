@@ -84,7 +84,8 @@ def source_block(bits, n):
     return 0
 
 
-def make_roms(original, out, bits=10):
+def make_roms(original, out, bits=10, only=None):
+    """only 를 주면 그 변형(예: ('same',))만 만들고 w12pal 은 만들지 않는다."""
     rom = Rom(original.read_bytes())
     command('dq5fieldtables.py', original, 'dump', '-o', out / 'tables.json')
     blocks = json.loads((out / 'tables.json').read_text(encoding='utf-8'))['blocks']
@@ -103,6 +104,8 @@ def make_roms(original, out, bits=10):
         grids[w] = [v if i in keep else v + offset(bits, i) for i, v in enumerate(g)]
         (out / f'w{w}.bin').write_bytes(b''.join(v.to_bytes(2, 'little') for v in grids[w]))
     for name, make in variants.items():
+        if only and name not in only:
+            continue
         new = []
         for n in range(511, 1023 if bits == 10 else 2047):
             lower, upper, land = make(blocks[source_block(bits, n)])
@@ -115,7 +118,7 @@ def make_roms(original, out, bits=10):
                 *(out / f'w{w}.bin' for w in range(3)), '--planes-at', '3D:8000', '-o', out / f'{name}-map.json')
         command('dq5build.py', original, 'build', out / f'{name}-blocks.json', out / f'{name}-map.json', '--size', '4',
                 '-o', out / f'{name}.sfc', '--ips', out / f'{name}.ips')
-    if bits == 11:
+    if bits == 11 or only:
         return wall
     src = out / 'w12-src'
     doc = fgw.dump(rom, src)

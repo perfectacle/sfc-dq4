@@ -5,11 +5,13 @@
   - 04/06 에 새 맵 OBJ 물체 하나를 더한다(원래 물체 0C 와 같은 2x4 칸을 좌우로 뒤집어 (36,9) 에). 표가 9바이트
     늘어 칸 바이트 일부가 --at 으로 옮겨진다.
   - 마법의 양탄자 부분 2(3x3)의 아래 방향 두 프레임을 좌우로 뒤집는다.
-세 장면(필드의 배, 04/06, 필드의 양탄자)을 원본 롬과 함께 dq5gfxdump.lua 로 덤프하고 이렇게 본다.
+다섯 장면(필드의 배, 04/06, 필드의 양탄자, 칸 바이트가 옮겨진 물체가 있는 52/50·53/52)을 원본 롬과 함께 dq5gfxdump.lua 로
+덤프하고 이렇게 본다.
   - 배: 주인공 슬롯 칸 목록이 세트 칸 + 첫 타일과 같고, 화면의 OAM 6장이 그 아래 방향 블록 그대로(자리·타일·반전)인지.
   - 물체: 슬롯 칸 목록과 OAM 묶음이 표대로이고, 새 물체의 OAM 자리가 원래 물체 0C 자리 + 8 × (셀 차이)인지.
   - 양탄자: dq5sprite.compare 가 부분 2 의 OAM 묶음을 고친 롬의 프레임으로 맞추는지.
   - 화면: 찾은 OAM 묶음을 덤프 VRAM·CGRAM 으로 칠한 픽셀이 스크린샷과 같은지.
+  - 52/50·53/52: 놓이는 물체마다 슬롯 칸 목록·OAM 이 표대로이고, 고친 롬의 결과(슬롯·자리·화면 픽셀)가 원본과 같은지.
   MESENCE=… python sfc/dq5/tools/dq5objlayoutcheck.py rom/dq5.sfc --state work/state/ship.mss --at 16:FE10
 """
 import argparse
@@ -33,7 +35,11 @@ SHIP_SET = '68'
 OLD_OBJECT, NEW_AT = 0x0C, (36, 9)
 SCENES = [('ship', {'FIELD': '328,39', 'SET': '21BF|10'}),
           ('map', {'TO': '04/06,38,11,1'}),
-          ('carpet', {'FIELD': '341,56', 'LATESET': '1954=80'})]
+          ('carpet', {'FIELD': '341,56', 'LATESET': '1954=80'}),
+          ('map5250', {'TO': '52/50,22,18'}),
+          ('map5352', {'TO': '53/52,40,27'})]
+# 칸 바이트가 옮겨지는 물체가 있는 맵. X·Y 의 아래 바이트가 80 인 물체는 스크립트가 놓아 이 장면에는 나오지 않는다.
+MOVED_MAPS = {'map5250': (0x52, 0x50), 'map5352': (0x53, 0x52)}
 # 프레임 f 끝에 덤프한 OAM 은 f+1 의 화면에 나오므로 다음 프레임 스크린샷도 남긴다.
 DUMPF = (700, 800)
 
@@ -151,14 +157,14 @@ def ship_scene(rom, d):
     return {'set': SHIP_SET, 'cells': cells_ok, 'frame': None}
 
 
-def object_scene(rom, d):
-    """04/06 의 물체마다 슬롯 칸 목록·OAM 자리·화면."""
+def object_scene(rom, d, bc=0x04, bd=0x06):
+    """맵(기본 04/06)의 물체마다 슬롯 칸 목록·OAM 자리·화면. 놓지 않는 물체(X·Y 아래 바이트 80)는 뺀다."""
     w = d['wram']
     base = w16(w, 0x1997)
     items = S.oam_groups(d['oam'])
     out = {}
     for k, mp in enumerate(S.map_object_places(rom)):
-        if (mp['bc'], mp['bd']) != (0x04, 0x06):
+        if (mp['bc'], mp['bd']) != (bc, bd) or 0x80 in (mp['x'] & 0xFF, mp['y'] & 0xFF):
             continue
         n = mp['cols'] * mp['rows']
         want = [base + (b & 0x7F) | (0x4000 if b & 0x80 else 0) | mp['palette'] << 9 for b in mp['cells']]
@@ -214,7 +220,9 @@ def main():
             rom = Rom(path.read_bytes())
             for scene, extra in SCENES:
                 dest = run(path, f'{rom_name}-{scene}', extra, out, state, mesence, libdir)
-                fn = {'ship': ship_scene, 'map': object_scene, 'carpet': carpet_scene}[scene]
+                fn = {'ship': ship_scene, 'map': object_scene, 'carpet': carpet_scene}.get(scene)
+                if scene in MOVED_MAPS:
+                    fn = lambda r, d, m=MOVED_MAPS[scene]: object_scene(r, d, *m)  # noqa: E731
                 results[f'{rom_name}-{scene}'] = [fn(rom, d) for d in frames(dest)]
         new = len(S.map_object_places(Rom(edited.read_bytes()))) - 1
         full = lambda s: s[0] == s[1] and s[1] > 0  # noqa: E731
@@ -232,6 +240,18 @@ def main():
             'new-object': all(new in m and m[new]['at'] == e for m, e in zip(maps, expect)),
             'carpet': all(r.get('80-2', [0, 0])[1] > 0 for r in results['original-carpet'] + results['edited-carpet']),
         }
+        # 옮긴 칸 바이트를 읽는 물체(52/50·53/52)가 두 롬에서 같은 슬롯·자리에 표대로 놓이고 화면도 같은지.
+        moved = {k for k, (a, b) in enumerate(zip(S.map_object_places(base), S.map_object_places(Rom(edited.read_bytes()))))
+                 if a['cells_at'] != b['cells_at']}
+        print(f'칸 바이트를 옮긴 물체: {sorted(moved)}')
+        for scene in MOVED_MAPS:
+            rows = results[f'original-{scene}'] + results[f'edited-{scene}']
+            # 53/52 는 물체 우선순위가 낮아 BG 에 가리는 픽셀이 있고, 03:8421 이 8프레임마다 슬롯의 그림을 맞바꿔 한 덤프에
+            # 안 나오는 물체도 있다. 화면은 원본 게임과 같은지(-same)로 보고, 여기서는 모든 물체가 어느 덤프엔가 표대로 놓였는지만 본다.
+            checks[scene] = all(r['slot'] is not None for m in rows for r in m.values()) and \
+                all(any(m[k]['at'] for m in rows) for k in rows[0])
+            shown = {k for m in results[f'edited-{scene}'] for k in m}
+            checks[f'{scene}-same'] = results[f'original-{scene}'] == results[f'edited-{scene}'] and bool(shown & moved)
         (out / 'results.json').write_text(json.dumps({'results': results, 'checks': checks}, ensure_ascii=False,
                                                      indent=1, default=str) + '\n', encoding='utf-8')
         for case, rows in results.items():
