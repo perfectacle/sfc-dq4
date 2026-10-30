@@ -154,8 +154,17 @@ M_SUPPER_LINES = [talk(say(*pages)) + 0x3C6 for pages in (
 M_STORY_BEGINS = talk(narrate('이야기는 이렇게 시작된다……')) + 0x3C6
 
 FROG, GIRL = 0x50, 0x0E         # 개구리 그림이 DQ5 에 없어 슬라임, 신시아는 DQ5 소녀(임시)
-FROG_AT = (0x0F, 0x0C)
-FROG_OUT = [(0x10, 0x0C), (0x10, 0x0A)]
+# NDS mlout1: 개구리는 맵에 서 있지 않고 다리 남쪽 연못에 숨어 있다가, 주인공이 다리 가운데에 오면 떠올라 다리로
+# 뛰어오르고(주인공 뒤 동쪽), 이야기를 마치면 동쪽으로 다리를 벗어나 지하 오두막 계단으로 들어간다
+FROG_AT = (0x13, 0x07)          # 연못
+FROG_JUMP = [((0x13, 0x06), 6), ((0x13, 0x05), 10), ((0x13, 0x04), 4)]   # (FC 칸, 그림을 띄울 점)
+FROG_OUT = [(0x14, 0x04), (0x15, 0x04), (0x15, 0x03), (0x15, 0x02)]      # 다리 동쪽 → 오두막 계단
+# 주인공 자리(인물 표 3020·3080, FC 칸 (x, y) 는 (2x, 2y+1))의 사각형. 지하에서 나오면 (42,5), 다리 줄은 y 9, 다리는 x 34~35
+VOICE_HUT = (40, 7, 44, 8)      # 오두막을 나섬: 「용사님 용사님……」
+VOICE_BRIDGE = (37, 8, 38, 10)  # 다리 동쪽 끝: 같은 말
+FROG_CALL = (34, 8, 35, 10)     # 다리 위: 「용사님 제발 도와주세요……」 → 개구리가 나타남
+SPLASH = JUMP = (0x37, 0x03)    # NDS EVE_3_08·EVE_JUMP 는 PCM 샘플을 써서 DQ5 효과음으로 둔다
+STAIRS = (0x34, 0x02)           # 계단(NDS 階段 으로 바뀐 갈래)
 SHINSIA_AT = (3, 0x0E)          # 수련하던 자리
 SHINSIA_OUT = [(4, 0x0E), (4, 0x07), (3, 0x07)]
 FROG_SRC, FROG_SCRIPT = {"list": "05:B2EE", "index": 4}, "05:B352"
@@ -198,9 +207,8 @@ def _skip_song():
             box.LEAVE)
 
 
-# 다가왔다고 볼 거리(DQ5 셀). 개구리 목소리 두 번(12·8)과 말 걸기(2), 신시아(4). 개구리는 바로 옆에서 말을 건다:
-# 4셀이면 위에서 다가온 주인공의 4셀 아래라 화면 아래 메시지 창에 가려 보이지 않았다
-NEAR = (2, 4, 8, 12)
+# 다가왔다고 볼 거리(DQ5 셀). 신시아는 4셀 안에서 말을 건다
+NEAR = (4,)
 TALKER = 0x7E1BC4   # 말을 걸 인물 슬롯. 7E:1BBE~ 79바이트는 DQ5 가 쓰지 않는 자리(dq4josa 가 1BC0 을 씀)
 TALK_TO = 0x06AF1C  # 06:AF1C: JSR $AF20 / RTL. A = 인물 슬롯으로 필드 「대화」(05:D596)와 같은 대화를 돌린다
 
@@ -234,6 +242,23 @@ def _near(cells):
     return head + x_part + y_part + tail_near + tail_far
 
 
+def _inside(x0, y0, x1, y1):
+    """인물 명령 05 가 부르는 루틴: 주인공(슬롯 0) X·Y 가 사각형 안이면 A = 0, 아니면 1(다음 프레임에 다시)."""
+    far = bytes((0xC2, 0x30, 0xA9, 0x01, 0x00, 0x28, 0x6B))      # REP / LDA #1 / PLP / RTL
+    near = bytes((0xC2, 0x30, 0xA9, 0x00, 0x00, 0x28, 0x6B))
+    body = b''
+    for table, lo, hi in ((0x3080, y0, y1), (0x3020, x0, x1)):
+        tail = len(body) + len(near)
+        body = bytes((0xAF, table & 0xFF, table >> 8, 0x7E, 0x29, 0x7F,       # LDA 주인공 / AND #$7F
+                      0xC9, lo, 0x90, 4 + tail, 0xC9, hi + 1, 0xB0, tail)) + body   # 작으면·크면 멂
+    return bytes((0x08, 0xE2, 0x30)) + body + near + far
+
+
+def _hero_face(pose):
+    """주인공(슬롯 0) 자세를 pose 로(00:EE8C: 0 위, 1 오른쪽, 4 아래, 2 왼쪽 쪽 그림)."""
+    return box.ENTER + bytes((0xA9, pose, 0x8F, 0x40, 0x32, 0x7E, 0x8F, 0x60, 0x32, 0x7E)) + box.LEAVE
+
+
 def native():
     """(바이트, {이름: 주소}). 인물 스크립트 명령 37 이 JSL 로 부르는 루틴과 이벤트 스크립트."""
     def layout(at):
@@ -250,6 +275,9 @@ def native():
         put('talk_here', _talk_here(at.get('talk_event', 0)))
         for cells in NEAR:
             put(f'near{cells}', _near(cells))
+        for name, rect in (('voice_hut', VOICE_HUT), ('voice_bridge', VOICE_BRIDGE), ('frog_call', FROG_CALL)):
+            put(name, _inside(*rect))
+        put('hero_right', _hero_face(0x01))
         put('skip_song', _skip_song())
         # 저녁: 주인공이 식탁에 앉아 아래를 봄(C1 40) → 저녁 대사 → 끝: 검은 화면 → 서술 → 곡 건너뛰기 →
         # 1장 왕좌의 방으로(이벤트 명령 90, $198E = 80)
@@ -336,11 +364,24 @@ def scripts():
     """서장 뒤쪽 인물 스크립트: 개구리 퇴장, 신시아·개구리 꼴의 모샤스, 아버지의 끝."""
     _, at = native()
     near = lambda cells: _cmd('05', *_long(at[f'near{cells}']))  # noqa: E731
-    # 주인공이 다가오면 목소리 둘(NDS 의 깃발 6·7 자리) → 더 다가오면 개구리가 말을 건다
-    # 바로 옆에서 말을 걸어 주인공이 나가는 길에 서 있을 수 있다. 막히면 개구리가 멈추고 조작도 묶이므로 지나 걷는다(1C)
-    frog = ([near(12), _cmd('3F'), _msg(M_CALL), _cmd('40'), near(8), _cmd('3F'), _msg(M_HELP), _cmd('40'),
-             near(2), _cmd('37', *_long(at['talk_here'])), _wait_on(FROG_MET), _cmd('3F'), _cmd('1C')] + _walk(FROG_OUT) +
-            [_cmd('28'), _cmd('40'), _cmd('16')])
+    call = lambda name: _cmd('37', *_long(at[name]))  # noqa: E731
+    inside = lambda name: _cmd('05', *_long(at[name]))  # noqa: E731
+    fx, fy = FROG_AT
+    jump = [c for (x, y), lift in FROG_JUMP for c in (_cmd('39', lift), _cmd('13', x * 2, y * 2), _cmd('14'))]
+    hops = [c for k, (x, y) in enumerate(FROG_OUT)
+            for c in (_cmd('39', 4 if k % 2 == 0 else 0), _cmd('13', x * 2, y * 2), _cmd('14'))]
+    # 연못에 숨어 있다가 오두막을 나설 때·다리 동쪽 끝에서 목소리, 다리 위에서 도와 달라는 말 뒤 떠올라 다리로 뛰어오른다.
+    # 물 위와 주인공 곁을 지나므로 1C. 착지 뒤 주인공 쪽(서쪽)을 보고 주인공을 동쪽으로 돌려세운 뒤 말을 건다
+    frog = ([_cmd('27'),
+             inside('voice_hut'), _cmd('3F'), _msg(M_CALL), _cmd('40'),
+             inside('voice_bridge'), _cmd('3F'), _msg(M_CALL), _cmd('40'),
+             inside('frog_call'), _cmd('3F'), _msg(M_HELP),
+             _cmd('20', *SPLASH), _cmd('50', fx * 2, fy * 2), _cmd('53'), _cmd('4F'), call('wait'),
+             _cmd('1C'), _cmd('1E', 0x02), _cmd('2F', 0x80)] + jump +
+            [_cmd('38'), _cmd('2F', 0x20), call('wait'), call('hero_right'), call('wait6'),
+             call('talk_here'), _wait_on(FROG_MET), _cmd('3F'),
+             _cmd('20', *JUMP), _cmd('2F', 0x10)] + hops +
+            [_cmd('38'), _cmd('20', *STAIRS), _cmd('51'), _cmd('52'), _cmd('40'), _cmd('16')])
     sx, sy = SHINSIA_AT
     shinsia = ([near(4), _cmd('37', *_long(at['talk_here'])), _wait_on(SHINSIA_START), _cmd('3F'), _cmd('20', 0x37, 0)] + _spin(at) +
                [_cmd('51'), _cmd('10', *MORPH), _wait_on(MORPH_BACK),
@@ -372,6 +413,9 @@ def npc_lists():
     x, y, g, f, t = VILLAGERS[mother]
     supper[mother] = ch1.entry(MOTHER_SRC, x, y, g, f, t)
     frog = ch1.entry(FROG_SRC, *FROG_AT, FROG, 'down', T_FROG)
+    # 인물 스크립트는 이동 간격(3300 위 니블)마다 돈다. 빌린 칸의 간격이면 명령 05 의 자리 판정이 약 120프레임에 한 번이라
+    # 걸어 지나가는 주인공을 놓쳤다
+    frog["fields"]["interval"] = 1
     shinsia = [ch1.entry(SHINSIA_SRC, *SHINSIA_AT, GIRL, 'down', T_SHINSIA),
                ch1.entry(FORM_SRC, *SHINSIA_AT, FROG, 'down', T_SHINSIA)]
     lists = [{"map": CELLAR, "entries": [master]}, {"map": VILLAGE, "entries": people + [frog]}]
