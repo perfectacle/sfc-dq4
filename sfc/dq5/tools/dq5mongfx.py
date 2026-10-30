@@ -22,6 +22,7 @@ RECORDS = 0x27E5DC
 TABLE_SIZE = 256                # 몬스터 번호 칸. EC~FF 는 몬스터 00 의 레코드를 가리킨다
 COUNT = 236
 HEADS = ((0x00, 0x258C45), (0x2A, 0x268F99), (0x57, 0x2782E4))
+LOWERED = 0xE4                  # 22:930A: 이 몬스터는 들어올림 × 8(7E:0C5B)에서 2 를 더 빼 상자가 2 아래에 놓인다
 # 22:9003 LDA $27E5DC,X 와 22:900B LDA #$27. dq5monwrite.py --records-at 이 표·뱅크를 바꾼다.
 RECORD_READ, RECORD_BANK = 0x229003, 0x22900B
 
@@ -281,6 +282,8 @@ def place(groups):
             y = 0x58 - min(hd['h'] * 4, 0x18) - hd['raise'] * 8
         else:
             y = (0x88 if row == 1 else 0xA0) - hd['h'] * 8 - hd['raise'] * 8
+        if m == LOWERED:
+            y += 2
         placed.append((m, k, hd, row, y, cnt))
     bands = [0] * 32
     kept = []
@@ -304,6 +307,7 @@ def layout(rom, groups):
 
     줄은 셋이다(22:B00F): 머리 +0 bit7(띄움) 또는 무리 값 bit7 → 2, 무리 값 1 → 1, 그 밖 → 0.
     y(22:A084·A09C): 줄 0 은 $A0 - 8h - 8·높임, 줄 1 은 $88 - 8h - 8·높임, 줄 2 는 $58 - min(4h, 24) - 8·높임.
+    몬스터 E4 는 어느 줄이든 y 가 2 크다(22:930A).
     마릿수 제한: 줄마다 가로 칸 수 합이 28 미만(22:9284), 조각 수 합이 100 미만(22:91DC),
     화면 8픽셀 줄마다 모든 몬스터의 OBJ 타일 수 합이 28 미만(22:A119, 줄당 OBJ 한도를 넘지 않게). 넘치는 몬스터부터 그 무리는 그만 놓는다.
     한 줄에서 무리는 차례로 왼쪽부터, 무리 안 몬스터는 가로 칸 수 × 8 간격, 무리 사이는 8픽셀,
