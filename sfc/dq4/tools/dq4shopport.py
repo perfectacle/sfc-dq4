@@ -26,7 +26,7 @@ import dq4shop  # noqa: E402
 import dq5item  # noqa: E402
 import dq4shopkey  # noqa: E402
 from dq4environmentrom import GROUPS  # noqa: E402
-from dq4groupbuild import fc_map, placement  # noqa: E402
+from dq4groupbuild import fc_map, has_people, placement  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
 
 # FC shop kind (dq4shop.KINDS) -> DQ5 shop list kind (04:FBD5: 0 item, 1 armor, 2 weapon).
@@ -118,7 +118,8 @@ def port(dq5_path, dq4_path, inn_at, key_at):
     services, shops, inns, report = {}, [], {}, {"shops": [], "missing_items": [], "inns": {}, "keys": {}}
     maps = sorted(GROUPS.values())
     for group, number in maps:
-        services[f"{group:02X}/{number:02X}"] = merchants(prg, *fc_map(prg, group, number))
+        fc_group, fc_number = fc_map(prg, group, number)
+        services[f"{group:02X}/{number:02X}"] = merchants(prg, fc_group, fc_number) if has_people(fc_group) else {}
     sellers = {(group, fc_map(prg, group, number)[0]) for group, number in maps
                if set(services[f"{group:02X}/{number:02X}"].values()) & {*LIST_KIND, INN}}
     rows = keys(placement(prg), sellers)

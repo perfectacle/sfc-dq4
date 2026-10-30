@@ -32,7 +32,7 @@ import dq4talk  # noqa: E402
 import dq4text  # noqa: E402
 import dq5text  # noqa: E402
 from dq4environmentrom import GROUPS  # noqa: E402
-from dq4groupbuild import cell, fc_map  # noqa: E402
+from dq4groupbuild import cell, fc_map, has_people  # noqa: E402
 import dq4shopport  # noqa: E402
 from dq4shopport import merchants  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
@@ -323,7 +323,7 @@ def port(dq5_path, dq4_path):
         fc_group, fc_number = fc_map(prg, group, number)
         entries, people = [], []
         shops = merchants(prg, fc_group, fc_number)
-        for night in (False, True):
+        for night in (False, True) if has_people(fc_group) else ():
             for p in fc_people(prg, fc_group, fc_number, night):
                 shows = [m for m in p["shows"] if m is not None]
                 predicted = [m - dq4talk.SERVICE for m in shows if m >= dq4talk.SERVICE]
