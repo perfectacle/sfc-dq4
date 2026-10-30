@@ -84,9 +84,9 @@ ACC = f'{OLD_GRID},{FIELD_VARS[0]:04X}-{FIELD_VARS[1]:04X},{NEW_GRID}'
 FROM, STEP, SHOTEVERY = 560, 1, 16
 LAG = 8
 RETRIES = 3
-# 원래 창 위 테두리(스크린샷 y = TOP × 8 - SHOT_SHIFT = 161)가 그려지는 ppu.scanline. OBJ 가 OAM y + 1 줄에 그려지고 스크린샷
-# y 는 OAM y - 7 이라(dq5monsizecheck.py) 스크린샷 y + 8 = scanline 이다.
-HLOG_TAIL = TOP * 8 - SHOT_SHIFT + 8
+# 원래 창 위 테두리(스크린샷 y = TOP × 8 - SHOT_SHIFT = 161)에 닿는 HDMA 쓰기 줄. HDMA 로 줄 S 에 쓴 값은 다음 줄부터
+# 보여 스크린샷 y = S - 7 부터 적용된다(マヒャド 의 $2132 쓰기 줄과 매 프레임 스크린샷으로 잼).
+HLOG_TAIL = TOP * 8 - SHOT_SHIFT + 7
 
 
 def require(condition, message):
