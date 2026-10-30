@@ -552,11 +552,26 @@ def vehicle_song_code():
 # 다시 받았다. 배에서 내리면 배 곡과 필드 곡이 함께 쓰는 샘플까지 다시 받아 원본보다 오래 조용했다.
 # 곡 뒤 단계를 끝까지 마친 곡을 KEEP_SONG 에 적어 두고, 16 과 0A 사이에서 그 곡과 다음 곡이 함께 쓰는 샘플을
 # 2B:C21E(샘플 하나 보내기: 있으면 참조 수만 올림)로 다시 표시해 0A 에서 살린다.
-KEEP_CODE = 0x2BEA50               # 2B 의 빈 자리 끝 쪽. 앞(~EA01)은 IPL 꼬리라 빌드가 커지면 뒤로 는다
+KEEP_CODE = 0x2BEA48               # 2B 의 빈 자리 끝 쪽. 앞(~EA01)은 IPL 꼬리라 빌드가 커지면 뒤로 는다
 KEEP_SONG = 0x1A96                 # 낮은 WRAM. 전원부터 선실·배·융단·전투·마을까지 7E:1A86~1A97 에 접근 없음. 0 = 없음
 KEEP_DONE_SITE = 0x2BC1C5          # 곡 뒤 단계 끝의 JMP C184(칸 비우기)
 KEEP_MARK_SITE = 0x2BC0AD          # 1A 끝의 JSR C32F(16 의 대답) / LDA #0A / JSR C112
-COROUTINE_EXTRA = KEEP_CODE & 0xFFFF   # 2B:EA50~FFFF 도 코루틴 코드로 본다(EB00~ 는 샘플 자료라 주 스레드 코드가 없음)
+# 01·0C 가 샘플 자리를 얻지 못하면 2B 는 $1DC5 번 0A·다시 보내기를 되풀이하다 그만두는데(2B:BF8F, 원본도 빈 NOP),
+# 그동안 SPC 칸 플래그의 낮은 셈이 올라 그 시퀀스는 정리에서도 버려지지 않고 시퀀스 칸을 잡은 채 남았다.
+# 타는 동안처럼 시퀀스 칸이 하나 남은 때 큰 효과음이 실패하면, 뒤에 부른 효과음이 칸을 얻지 못해 울리지 않았다.
+RELEASE_SITE = 0x2BBF8F
+
+
+def release_failed_code():
+    """2B:BF8F(8비트 A, X = 대기열 칸)에서 불린다. 앞 명령의 대답을 소비하고 SPC 11 n(칸 플래그 0)·0A(정리)를 보낸다.
+    그만두는 곡은 연주기에 오르지 않았으므로 멈추지 않고 버려도 된다."""
+    return bytes.fromhex('08 C2 30 DA BD A5 1D 29 FF 00 48'
+                         ' 20 2F C3 A9 11 00 20 17 C3 A3 01 20 1F C3 20 5F C3'
+                         ' 20 2F C3 A9 0A 00 20 12 C1 68 FA 28 60')
+
+
+RELEASE_CODE = KEEP_CODE - len(release_failed_code())
+COROUTINE_EXTRA = RELEASE_CODE & 0xFFFF   # 2B:RELEASE_CODE~FFFF 도 코루틴 코드로 본다(EB00~ 는 샘플 자료라 주 스레드 코드가 없음)
 
 
 def keep_samples_code():
@@ -567,7 +582,9 @@ def keep_samples_code():
     song = KEEP_SONG.to_bytes(2, 'little')
     done = _asm([
         h('08 C2 30 BD 95 1D 29 FF 00 C9 FF 00'), ('b', 0xF0, 'skip'),   # 칸이 지워졌으면(1A 가 끊음) 적지 않음
-        h('BD A5 1D 29 FF 00 8D') + song,
+        h('BD A5 1D 29 FF 00 C9 32 00'), ('b', 0x90, 'store'),           # 효과음(32~46)은 맵 곡 기록을 덮지 않게 건너뜀
+        h('C9 47 00'), ('b', 0x90, 'skip'),
+        ('label', 'store'), h('8D') + song,
         ('label', 'skip'), h('28 4C 84 C1'),                              # PLP / JMP $C184
     ])
     mark = _asm([
@@ -805,7 +822,7 @@ def write_resident_samples(data, ids):
 
 def install(base, replacements, *, sample_resources=None, map_fades=False, preview=None, pinned=(),
             resident=None, set_records=None, fast_receive=False, chains=None, chain_late=(), hold=False, early_song=False, load_pump=False,
-            vehicle_song=False, keep_samples=False):
+            vehicle_song=False, keep_samples=False, release_failed=False, unpin=()):
     """pinned 는 늘 두는 시퀀스 목록에 남길 바꾸는 곡(나머지 바꾸는 곡은 목록에서 뺌). resident 는 새 늘 두는 샘플 목록
     전체(주지 않으면 그대로). set_records 는 바꾸지 않는 곡의 곡 묶음 레코드 {곡: (k, 샘플…)}.
     fast_receive 는 SPC 자료 받기를 묶음 여러 개 이어 받게 바꾼다(fast_receive_code). chains 는 {곡: 본체 시퀀스} 로,
@@ -815,6 +832,8 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
     load_pump 는 NMI 를 끈 동안(맵 불러오기)에도 IRQ 로 곡 앞 자료를 보낸다(load_pump_code, early_song 필요).
     vehicle_song 은 マスタードラゴン 에서 내릴 때 울리던 맵 곡을 다시 보내지 않고 잇는다(vehicle_song_code).
     keep_samples 는 1A 의 정리에서 앞 곡과 다음 곡이 함께 쓰는 샘플을 버리지 않는다(keep_samples_code, load_pump 필요).
+    release_failed 는 자리를 얻지 못해 그만둔 곡·효과음의 시퀀스를 SPC 에서 치운다(release_failed_code, load_pump 필요).
+    unpin 은 바꾸지 않았어도 늘 두는 시퀀스 목록에서 뺄 곡(부를 때마다 올림).
     """
     if len(base) not in (0x180000, 0x200000, 0x400000):
         raise ValueError('base must be a headerless 1.5MB, 2MB or 4MB DQ5 build')
@@ -846,7 +865,7 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
     old_size = sum(map(len, records))
     if not set(pinned) <= set(replacements) or not set(pinned) <= set(pinned_sequences(data)):
         raise ValueError('pinned songs must be replaced songs already in the resident sequence list')
-    unpinned = unpin_sequences(data, set(replacements) - set(pinned))
+    unpinned = unpin_sequences(data, (set(replacements) - set(pinned)) | set(unpin))
     if resident is not None:
         write_resident_samples(data, list(resident))
     for song, (first, *ids) in (set_records or {}).items():
@@ -1011,6 +1030,11 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
             raise ValueError('load_pump needs early_song (the request must be queued before the map load)')
         for at, (payload, original) in load_pump_code().items():
             write(at, payload, original, empty=original is None)
+    if release_failed:
+        if not load_pump:
+            raise ValueError('release_failed needs load_pump (its code is preempted through the NMI range stub)')
+        write(RELEASE_CODE, release_failed_code(), empty=True)
+        write(RELEASE_SITE, bytes([0x20]) + (RELEASE_CODE & 0xFFFF).to_bytes(2, 'little'), bytes.fromhex('EA EA EA'))
     if keep_samples:
         if not load_pump:
             raise ValueError('keep_samples needs load_pump (its code is preempted through the NMI range stub)')

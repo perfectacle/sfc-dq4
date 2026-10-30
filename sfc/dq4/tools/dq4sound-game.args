@@ -267,6 +267,9 @@
 --load-pump
 --vehicle-song
 --keep-samples
+--release-failed
+--unpin
+00
 --prefetch
 03=02
 --prefetch

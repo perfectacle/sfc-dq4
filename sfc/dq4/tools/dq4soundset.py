@@ -164,7 +164,7 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
           stream=None, stream_ticks=None, budgets=None, pinned=(), resident_from=None, drop_resident=(), lanes=None, drop_tracks=None,
           level_db=None, programs=None, set_records=None, keep_regions=None, track_db=None,
           fast_receive=False, chains=(), holds=(), early_song=False, load_pump=False, vehicle_song=False,
-          keep_samples=False, prefetch=None):
+          keep_samples=False, prefetch=None, release_failed=False, unpin=()):
     """stream 은 {곡 자리: 곡 앞 샘플 바이트 상한}. 그 곡은 샘플 일부를 곡이 울리는 동안 보낸다(transfer_plan).
 
     stream_ticks 는 {곡 자리: 틱}. 곡 앞 바이트 상한을 곡이 처음 그 틱 안에 쓰는 샘플의 합으로 정하고, 도착 어림보다
@@ -227,7 +227,8 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
     resident = [x for x in patch.resident_samples(data) if x not in drop_resident]
     resident_sizes = {x: patch.sample_size(data, x) for x in resident}
     resident_done = resident_from is None
-    pinned_sizes = {x: len(patch.sequence_bytes(data, x)) for x in patch.pinned_sequences(data) if x not in replaced}
+    pinned_sizes = {x: len(patch.sequence_bytes(data, x)) for x in patch.pinned_sequences(data)
+                    if x not in replaced and x not in unpin}
     pinned_sizes |= {slot: size + MARGIN for slot, _, _, _, size, _ in plans if slot in pinned}
 
     def make_bank(score, budget, limit, loose, overrides, keep=()):
@@ -478,7 +479,8 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
                              resident=resident if resident_plan else None, set_records=set_records,
                              fast_receive=fast_receive, chains=mains, chain_late=chain_late,
                              hold=bool(holds), early_song=early_song, load_pump=load_pump,
-                             vehicle_song=vehicle_song, keep_samples=keep_samples)
+                             vehicle_song=vehicle_song, keep_samples=keep_samples,
+                             release_failed=release_failed, unpin=tuple(unpin))
 
     rom, install_report = install()
     # 넣은 롬의 실제 자리로 덧붙일 샘플을 다시 고른다. 앞부분은 처음 고른 바이트(상한)를 받는 길이로 나눴으므로 그 안에서만
@@ -561,6 +563,10 @@ def main():
     ap.add_argument('--prefetch', action='append', default=[], metavar='VEHICLE=MAP',
                     help='append front samples of MAP song to VEHICLE song record so they load while riding and survive dismount '
                          '(needs --keep-samples)')
+    ap.add_argument('--unpin', action='append', default=[], metavar='SONG',
+                    help='drop an unreplaced sequence from the pinned list so it loads when played (frees an SPC sequence slot)')
+    ap.add_argument('--release-failed', action='store_true',
+                    help='free the SPC sequence of a song or effect that gave up for lack of room (dq4soundpatch.release_failed_code)')
     ap.add_argument('--keep-samples', action='store_true',
                     help='keep samples shared by the finished song and the next one through the 1A cleanup (dq4soundpatch.keep_samples_code)')
     ap.add_argument('--load-pump', action='store_true',
@@ -609,6 +615,7 @@ def main():
                         chains=[int(x, 16) for x in args.chain], holds=[int(x, 16) for x in args.hold],
                         early_song=args.early_song, load_pump=args.load_pump,
                         vehicle_song=args.vehicle_song, keep_samples=args.keep_samples,
+                        release_failed=args.release_failed, unpin=[int(x, 16) for x in args.unpin],
                         prefetch={int(v, 16): int(m, 16) for v, m in (x.split('=') for x in args.prefetch)})
     from dq5build import make_ips
     from kr_patch import ips

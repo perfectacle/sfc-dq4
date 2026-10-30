@@ -248,7 +248,8 @@ class EngineCodeTests(unittest.TestCase):
 
     def test_keep_samples_code_fits_in_the_coroutine_range(self):
         done, mark = patch.keep_samples_code()
-        self.assertEqual(patch.KEEP_CODE & 0xFFFF, patch.COROUTINE_EXTRA)
+        self.assertEqual(patch.RELEASE_CODE & 0xFFFF, patch.COROUTINE_EXTRA)
+        self.assertEqual(patch.RELEASE_CODE + len(patch.release_failed_code()), patch.KEEP_CODE)
         self.assertLessEqual((patch.KEEP_CODE + len(done) + len(mark)) & 0xFFFF, 0xEB00)
 
     def test_keep_samples_marks_before_the_cleanup(self):
