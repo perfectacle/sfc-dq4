@@ -28,6 +28,7 @@ CODE_AT = 0x5EC000
 SWORD = (0x37, 0x00)                                 # 효과음 37(공격이 맞을 때)
 
 say = ch1.say
+waited = ch1.waited
 # 서장 메시지. dq4chapter1.messages 가 1장 메시지와 합친다. dq4chapter1 을 스크립트로 돌리면 이 모듈이 import 하는
 # dq4chapter1 은 다른 사본이라, 그쪽 TEXTS 에 넣으면 메시지 문서에 들어가지 않는다
 TEXTS = {}
@@ -115,8 +116,8 @@ T_FROG = 0x901
 M_CALL = talk(say('용사님 용사님……')) + 0x3C6
 M_HELP = talk(say('용사님 제발 도와주세요……')) + 0x3C6
 M_FROG_ASK = talk(say('아! 놀라지 마세요…… 저는 개구리가 아니랍니다.', '아! 지금 아무리 봐도 개구리라고 생각하셨죠?')) + 0x3C6
-M_FROG_YES = talk(say('당신은 정직한 분이군요. 그 정직함을 믿고 부탁이 있어요.')) + 0x3C6
-M_FROG_NO = talk(say('당신은 상냥한 분이군요. 그 상냥함을 믿고 부탁이 있어요.')) + 0x3C6
+M_FROG_YES = talk(waited(say('당신은 정직한 분이군요. 그 정직함을 믿고 부탁이 있어요.'))) + 0x3C6
+M_FROG_NO = talk(waited(say('당신은 상냥한 분이군요. 그 상냥함을 믿고 부탁이 있어요.'))) + 0x3C6
 M_FROG_STORY = talk(say('이미 눈치채셨겠지만 실은 저는 어느 나라의 공주였답니다.',
                         '하지만 나쁜 마법사에게 저주를 받아 이런 모습이 되어 버렸지요.',
                         '뭐, 이렇게 된 건 어쩔 수 없고 개구리도 생각만큼 나쁘진 않아요.',
@@ -127,19 +128,19 @@ T_SHINSIA = 0x902
 M_SHINSIA_MEET = talk(speak(SHINSIA, '아, @. 검술 수련 벌써 끝났나 보네.', '응? 무슨 일 있어? 뭐? 커다란 개구리? 무슨 소리야……',
                             '나는 계속 여기 있었는데 개구리 같은 건 못 봤……', '모, 못 봤……',
                             '풉! 아하하하 아하하…… 이제 못 참겠어!!', '네가 본 건 이 개구리지?')) + 0x3C6
-M_MORPH = talk(narrate('신시아는 모샤스를 외웠다!!')) + 0x3C6
-M_MIMIC = talk(speak(SHINSIA, '태평하게 지내고 있었는데 곤란한 일이 생겼어요. 그건……', '그건…………')) + 0x3C6
-M_SORRY = talk(speak(SHINSIA, '……라니, 미안해. 실은 그다음 대사가 떠오르지 않았어.',
+M_MORPH = talk(waited(narrate('신시아는 모샤스를 외웠다!!'))) + 0x3C6
+M_MIMIC = talk(waited(speak(SHINSIA, '태평하게 지내고 있었는데 곤란한 일이 생겼어요. 그건……', '그건…………'))) + 0x3C6
+M_SORRY = talk(waited(speak(SHINSIA, '……라니, 미안해. 실은 그다음 대사가 떠오르지 않았어.',
                      '좀 더 제대로 뒷이야기 까지 생각하고 할 걸 그랬는데, 너한테 빨리 보여 주고 싶었거든.',
-                     '놀랐지! 나 여러 가지로 모습을 바꿀 수 있는 모샤스 주문을 배웠어!')) + 0x3C6
-M_BYE = talk(speak(SHINSIA, '그럼 난 갈게!')) + 0x3C6
+                     '놀랐지! 나 여러 가지로 모습을 바꿀 수 있는 모샤스 주문을 배웠어!'))) + 0x3C6
+M_BYE = talk(waited(speak(SHINSIA, '그럼 난 갈게!'))) + 0x3C6
 M_SUPPER = talk(speak(SHINSIA, '아! 맞다! 너희 어머니가 부르셨어. 벌써 저녁이래.', '그럼 @, 내일 봐!')) + 0x3C6
 # 저녁(집): 신시아를 만난 뒤 아버지에게 말을 걸면 묻고(대화 903 → SUPPER), 식탁에 앉아 저녁을 먹는다(끝 이벤트)
 T_FATHER_SUPPER = 0x903
 M_FATHER_ASK = talk(say('음, @. 왔느냐? 그래, 신시아와는 만났느냐?')) + 0x3C6
 M_FATHER_YES = talk(say('그러냐. 그거 잘됐구나.')) + 0x3C6
 M_FATHER_NO = talk(say('그러냐…… 포기하고 돌아갔는지도 모르겠구나. 뭐, 괜찮겠지.')) + 0x3C6
-M_SUPPER_LINES = [talk(say(*pages)) + 0x3C6 for pages in (
+M_SUPPER_LINES = [talk(waited(say(*pages))) + 0x3C6 for pages in (
     ('좋아! 여보, 슬슬 밥 먹읍시다! 배가 등에 붙었구먼.',),
     ('네네. 지금 차려요.',),
     ('자, @. 너도 자리에 앉으렴.',),
@@ -151,7 +152,7 @@ M_SUPPER_LINES = [talk(say(*pages)) + 0x3C6 for pages in (
     ('당신도 참, 무슨 말을 하나 했더니! 밥 먹다가 쓸쓸해지는 얘기는 그만해요.',
      '이 아이는 계속 우리와 함께 사는 거예요. 무슨 일이 있어도요!'),
     ('오오, 그랬지! 이거 내가 그만…… 와하하하하!',))]
-M_STORY_BEGINS = talk(narrate('이야기는 이렇게 시작된다……')) + 0x3C6
+M_STORY_BEGINS = talk(waited(narrate('이야기는 이렇게 시작된다……'))) + 0x3C6
 
 FROG, GIRL = 0x50, 0x0E         # 개구리 그림이 DQ5 에 없어 슬라임, 신시아는 DQ5 소녀(임시)
 FROG_AT = (0x0F, 0x0C)
@@ -331,8 +332,9 @@ def scripts():
     _, at = native()
     near = lambda cells: _cmd('05', *_long(at[f'near{cells}']))  # noqa: E731
     # 주인공이 다가오면 목소리 둘(NDS 의 깃발 6·7 자리) → 더 다가오면 개구리가 말을 건다
+    # 바로 옆에서 말을 걸어 주인공이 나가는 길에 서 있을 수 있다. 막히면 개구리가 멈추고 조작도 묶이므로 지나 걷는다(1C)
     frog = ([near(12), _cmd('3F'), _msg(M_CALL), _cmd('40'), near(8), _cmd('3F'), _msg(M_HELP), _cmd('40'),
-             near(2), _cmd('37', *_long(at['talk_here'])), _wait_on(FROG_MET), _cmd('3F')] + _walk(FROG_OUT) +
+             near(2), _cmd('37', *_long(at['talk_here'])), _wait_on(FROG_MET), _cmd('3F'), _cmd('1C')] + _walk(FROG_OUT) +
             [_cmd('28'), _cmd('40'), _cmd('16')])
     sx, sy = SHINSIA_AT
     shinsia = ([near(4), _cmd('37', *_long(at['talk_here'])), _wait_on(SHINSIA_START), _cmd('3F'), _cmd('20', 0x37, 0)] + _spin(at) +

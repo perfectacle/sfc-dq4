@@ -28,6 +28,7 @@ from dq4romassets import ips_patch, set_checksum  # noqa: E402
 from dq5build import load  # noqa: E402
 
 LINE, END, PAGE, SPEAK, NARR, HERO = 0x1000, 0x1001, 0x1002, 0x1003, 0x1006, 0x1012
+WAIT_END = 0x1010
 Q = 0x363      # 「 (DQ5 글자)
 DOTS = 0x366   # …
 
@@ -99,12 +100,20 @@ def narrate(*pages):
     return out
 
 
+def waited(parts):
+    """끝 코드 1001 을 ▼ 대기 끝 1010 으로. 1001 은 버튼을 기다리지 않아, 스크립트나 대화가 곧바로 다음 메시지를
+    띄우면 이 메시지의 마지막 쪽이 A 를 누르기 전에 밀려 올라간다. 다음 메시지가 이어지는 메시지에 쓴다."""
+    if parts[-1] != END:
+        raise ValueError('끝 코드가 1001 이 아님')
+    return parts[:-1] + [WAIT_END]
+
+
 TEXTS = {
     # FC 는 검은 화면에 장 제목 상자(dq4chapterbox.py)를 띄운 뒤, 검은 화면의 메시지 창에 이 서술을 쓴다
     MSG_NARRATION: narrate('이것은 바트랜드라는 작은 나라의 왕궁 전사의 이야기다.',
                            '@, 즉 당신도 그 왕궁 전사의 한 사람이었다.',
                            '어느 날 아침, 임금님은 전사들을 성의 넓은 방에 불러 모았다……'),
-    MSG_MINISTER: speak('대신', '이제부터 임금님께서 그대들에게 하실 말씀이 있다. 명심하여 듣도록.'),
+    MSG_MINISTER: waited(speak('대신', '이제부터 임금님께서 그대들에게 하실 말씀이 있다. 명심하여 듣도록.')),
     MSG_KING: speak('왕',
                     '모두 편히 하라.',
                     '요즘 아이들이 사라진다는 소문은 그대들도 들었으리라.',
