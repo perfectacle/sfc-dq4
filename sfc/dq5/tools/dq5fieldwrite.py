@@ -270,7 +270,9 @@ def fast_hook(at, nibbles, lower, upper, land):
                 + b'\x4a\x4a\x4a\x4a' + back + b'\x29\x0f' + back)
 
     def land_return(k):
-        """번호(A)에서 03:CB1B 의 지형을 내고, A 윗바이트를 0 으로 둔 채 PLY / PLX / PLP / RTL."""
+        """번호(A)에서 03:CB1B 의 지형을 내고, A 윗바이트를 0 으로 둔 채 PLY / PLX / PLP / RTL.
+        DP 의 $00·$02 는 원래 루틴과 다른 값으로 남지만, 01:81D6·84E0·BE8E 에서 돌아온 뒤 $00~$03 은 쓰기 전에
+        읽히지 않았다(MesenCE, 원본 롬의 걷기·배·융단·天空城·マスタードラゴン 장면. 00:908C 의 DP 저장·되돌리기는 뺌)."""
         back = b'\x7a\xfa\x28\x6b'
         return (b'\xc2\x30\x4a\xaa\xa9\x00\x00\xe2\x20\xbf' + land.to_bytes(3, 'little') + b'\xb0' + bytes([4 + len(back)])
                 + b'\x4a\x4a\x4a\x4a' + back + b'\x29\x0f' + back)
