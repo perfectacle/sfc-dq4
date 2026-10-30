@@ -20,7 +20,11 @@ org $22D796
 ; 빈 바탕 위 칸도 같은 무늬의 테두리 바탕 칸으로 바꾼다.
 org $24A595
     JSL BmScroll
-    BRA $24A5B2
+    BRA BmScrolled
+; 24:A569 는 JSR 로 불리므로 원래 고리 끝(A5B2)으로 가야 한다. 근처 24:A54D 는 PLP/RTL 꼬리라 거기로 가면 스택이 한 바이트
+; 어긋난다. 24비트 숫자 주소로 BRA 를 쓰면 asar 가 낮은 바이트를 거리로 넣으므로 라벨로 둔다
+org $24A5B2
+BmScrolled:
 org $04BFF5
     JML BmEncounter
 
