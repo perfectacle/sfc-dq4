@@ -24,9 +24,10 @@ entrances of every world move off the FC ground (dq4fieldport.park).
 """
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import functools
 import json
-import subprocess
+import os
 import sys
 from pathlib import Path
 
@@ -39,6 +40,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
         sys.path.insert(0, str(path))
 
 import dq4block  # noqa: E402
+import dq4buildcache  # noqa: E402
 import dq4entrancehook  # noqa: E402
 import dq4field  # noqa: E402
 import dq4fieldport  # noqa: E402
@@ -476,10 +478,7 @@ def check_door_copy(rom, door_bank):
 
 
 def _run(tool, *args):
-    proc = subprocess.run([sys.executable, str(tool), *map(str, args)], capture_output=True, text=True)
-    if proc.returncode:
-        raise RuntimeError(f"{Path(tool).name} {' '.join(map(str, args[:2]))}: {proc.stderr[-1500:]}")
-    return proc.stdout
+    return dq4buildcache.run(tool, *args)
 
 
 def _save(path, doc):
@@ -522,15 +521,34 @@ def records_pass(dq5, out, manifests, k, sources):
 
 def build(dq5, dq4, out, with_people=True):
     out.mkdir(parents=True, exist_ok=True)
+    with ThreadPoolExecutor(os.cpu_count()) as pool:
+        return _build(pool, dq5, dq4, out, with_people)
+
+
+def _build(pool, dq5, dq4, out, with_people):
+    """Tool calls that need only the original ROM run in `pool` while the others go on; drain() waits for the
+    patch lists that a later call reads (a base ROM, --with-patch) or builds."""
     prg = ines.prg(dq4.read_bytes())
     place = placement(prg)
+    new_maps = [f"{g:02X}/{n:02X}" for g, n in sorted(GROUPS.values())]
+    new_map_args = [a for m in new_maps for a in ("--new-map", m)]
+    dumps = {name: pool.submit(_run, DQ5_TOOLS / tool, dq5, "dump", "-o", out / f"{name}.json", *extra)
+             for name, tool, extra in (("exits-orig", "dq5exitreloc.py", new_map_args),
+                                       ("fieldtables-orig", "dq5fieldtables.py", ()),
+                                       ("encounter-orig", "dq5encounterwrite.py", ()),
+                                       ("chest-tables-orig", "dq5chestreloc.py", ()))}
+    pending = []
+
+    def drain():
+        for f in pending:
+            f.result()
+        pending.clear()
+
     env = out / "env"
     report = json.loads(_run(TOOLS / "dq4environmentrom.py", "--dq5", dq5, "--dq4", dq4, "--out", env))
     env_rom = out / "env.sfc"
     _run(DQ5_TOOLS / "dq5build.py", dq5, "build", env / "dq4-environment.dq5patch.json", "--size", 4, "-o", env_rom)
 
-    new_maps = [f"{g:02X}/{n:02X}" for g, n in sorted(GROUPS.values())]
-    new_map_args = [a for m in new_maps for a in ("--new-map", m)]
     names = {f"{g:02X}/{n:02X}": name for name, (g, n) in GROUPS.items()}
     records = {f"{g:02X}/{n:02X}": r for (g, n), r in new_map_records(env).items()}
     area = dict(zip(new_maps, record_areas([len(records[m]) for m in new_maps], RECORDS_AT)))
@@ -550,13 +568,14 @@ def build(dq5, dq4, out, with_people=True):
     def step(tool, name, doc, base, *args):
         source = _save(out / f"{name}.json", doc)
         manifest = out / f"{name}.dq5patch.json"
-        _run(DQ5_TOOLS / tool, base, "patch", source, "-o", manifest, *args)
+        pending.append(pool.submit(_run, DQ5_TOOLS / tool, base, "patch", source, "-o", manifest, *args))
         manifests.append(manifest)
         return tool, source, args
 
     # The check of the first call rebuilds its own placeholders, so the maps of later areas are covered only by
     # check_records on the built ROM.
     checks = [step("dq5newmap.py", "newmap", newmap, env_rom, *NEWMAP_AT, "--records-at", _cpu(RECORDS_AT[0][0]))]
+    drain()
     record_patches = []
     for k in range(1, max(area.values()) + 1):
         checks.append(records_pass(dq5, out, manifests, k, {m: f"env/{names[m]}.dq5map.json"
@@ -565,10 +584,11 @@ def build(dq5, dq4, out, with_people=True):
     import dq4npcport  # imports this module
     lists, messages, people = dq4npcport.port(dq5, dq4, with_people)
     _save(out / "npc-report.json", people)
-    _run(DQ5_TOOLS / "dq5npcrelocate.py", dq5, "patch",
-         _save(out / "npc.json", {"format": "dq5npcrelocate/1", "scripts": [],
-                                  "lists": [lst for lst in lists if "map" in lst]}),
-         "-o", out / "npc.dq5patch.json", "--report", out / "npc-layout.json", *new_map_args)
+    pending.append(pool.submit(
+        _run, DQ5_TOOLS / "dq5npcrelocate.py", dq5, "patch",
+        _save(out / "npc.json", {"format": "dq5npcrelocate/1", "scripts": [],
+                                 "lists": [lst for lst in lists if "map" in lst]}),
+        "-o", out / "npc.dq5patch.json", "--report", out / "npc-layout.json", *new_map_args))
     manifests.append(out / "npc.dq5patch.json")
     checks.append(step("dq5textwrite.py", "text", {"format": "dq5text/1", "messages": messages}, dq5, *TEXT_AT))
     checks.append(step("dq5talkwrite.py", "talk", dq4npcport.talk_doc(messages), dq5, *TALK_AT))
@@ -578,7 +598,7 @@ def build(dq5, dq4, out, with_people=True):
     step("dq5progresswrite.py", "shops", {"format": "dq5progress/1", "shops": shops}, dq5, *SHOP_AT)
     manifests.append(_save(out / "inn.dq5patch.json", {"format": "dq5patch/1", "name": "dq4-inns-shop-keys", "writes": inn_writes}))
 
-    _run(DQ5_TOOLS / "dq5exitreloc.py", dq5, "dump", "-o", out / "exits-orig.json", *new_map_args)
+    dumps["exits-orig"].result()
     exits = json.loads((out / "exits-orig.json").read_text(encoding="utf-8"))
     ours = {}
     areas = {}
@@ -597,7 +617,7 @@ def build(dq5, dq4, out, with_people=True):
     exits["triggers"] += [{"map": m, "records": r} for m, r in areas.items() if m not in have]
     checks.append(step("dq5exitreloc.py", "exits", exits, dq5, *new_map_args, *EXIT_AT))
 
-    _run(DQ5_TOOLS / "dq5fieldtables.py", dq5, "dump", "-o", out / "fieldtables-orig.json")
+    dumps["fieldtables-orig"].result()
     tables = json.loads((out / "fieldtables-orig.json").read_text(encoding="utf-8"))
     worlds = {a["group"]: a for a in tables["arrivals"]}
     entrance_tables = {name: dq4fieldport.park([e for e in tables["entrances"] if e["table"] == name], worlds)
@@ -618,7 +638,7 @@ def build(dq5, dq4, out, with_people=True):
         "format": "dq5patch/1", "name": "dq4-travel", "writes": dq4fieldtravel.writes(dq5.read_bytes(), destinations)}))
     checks.append(step("dq5namewrite.py", "names", dq4fieldtravel.names_doc(dq5.read_bytes(), destinations), dq5))
     import dq4fieldencounter
-    _run(DQ5_TOOLS / "dq5encounterwrite.py", dq5, "dump", "-o", out / "encounter-orig.json")
+    dumps["encounter-orig"].result()
     zones, grids, zone_report = dq4fieldencounter.docs(
         prg, dq5.read_bytes(), json.loads((out / "encounter-orig.json").read_text(encoding="utf-8")))
     _save(out / "zone-report.json", zone_report)
@@ -631,20 +651,22 @@ def build(dq5, dq4, out, with_people=True):
     import dq4chestport  # imports this module
     place, chest_report = dq4chestport.port(dq5, dq4)
     _save(out / "chest-report.json", chest_report)
-    _run(DQ5_TOOLS / "dq5chestreloc.py", dq5, "dump", "-o", out / "chest-tables-orig.json")
+    dumps["chest-tables-orig"].result()
+    drain()
     base = dq4chestport.base_tables(json.loads((out / "chest-tables-orig.json").read_text(encoding="utf-8")))
     with_patches = [a for m in manifests for a in ("--with-patch", m)]
     checks.append(step("dq5chestplace.py", "chests", place, dq5, *CHEST_AT, "--tables", _save(out / "chest-tables.json", base),
                        *new_map_args, *with_patches))
     manifests += dq4fieldport.patch(dq5, prg, out / "field.dq5patch.json", FIELD_AT)
+    drain()
 
     rom = out / "groups.sfc"
     _run(DQ5_TOOLS / "dq5build.py", dq5, "build", *manifests, "--size", 4, "-o", rom, "--ips", out / "groups.ips")
     check_door_copy(rom.read_bytes(), int(NEWMAP_AT[NEWMAP_AT.index("--door-bank") + 1], 16))
     check_records(rom.read_bytes(), {(int(m[:2], 16), int(m[3:], 16)): r for m, r in records.items()})
     # dq5newmap checks the built ROM; the others build their own from the original.
-    for tool, source, args in checks:
-        _run(DQ5_TOOLS / tool, rom if tool == "dq5newmap.py" else dq5, "check", source, *args)
+    list(pool.map(lambda c: _run(DQ5_TOOLS / c[0], rom if c[0] == "dq5newmap.py" else dq5, "check", c[1], *c[2]),
+                  checks))
     summary = {"rom": str(rom), "maps": new_maps, "exits": ours, "areas": areas,
                "fields": {tag(g, part): {"entrances": found[part["fc"]][0], "leave": found[part["fc"]][1]}
                           for g, parts in LINKS.items() for part in parts if part["field"]},

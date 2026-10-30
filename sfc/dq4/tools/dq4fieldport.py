@@ -16,7 +16,6 @@ taking the terrain of the DQ5 field block BLOCKS borrows (walk, ship, encounter 
 
 import argparse
 import functools
-import subprocess
 import sys
 from pathlib import Path
 
@@ -251,9 +250,8 @@ def write_map(prg, path, field=0):
 
 
 def _run(tool, *args):
-    proc = subprocess.run([sys.executable, str(DQ5_TOOLS / tool), *map(str, args)], capture_output=True, text=True)
-    if proc.returncode:
-        raise RuntimeError(f"{tool}: {proc.stderr[-1500:]}")
+    import dq4buildcache
+    dq4buildcache.run(DQ5_TOOLS / tool, *args)
 
 
 def patch(dq5, prg, path, at, gfx_at=GFX_AT):

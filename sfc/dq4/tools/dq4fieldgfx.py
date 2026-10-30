@@ -24,7 +24,6 @@ so the water goes in as dq5fieldgfxwrite's water_files. The reef is the DQ4 rock
 import argparse
 import functools
 import json
-import subprocess
 import sys
 from pathlib import Path
 
@@ -224,10 +223,8 @@ def gfx_doc(dq5, folder):
 
 
 def _run(tool, *args):
-    proc = subprocess.run([sys.executable, str(DQ5_TOOLS / tool), *map(str, args)], capture_output=True, text=True)
-    if proc.returncode:
-        raise RuntimeError(f"{tool} {' '.join(map(str, args[:2]))}: {proc.stderr[-1500:]}")
-    return proc.stdout
+    import dq4buildcache
+    return dq4buildcache.run(DQ5_TOOLS / tool, *args)
 
 
 def render(rom, fc_grid, x0, y0, w, h, field=0):

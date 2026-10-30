@@ -216,12 +216,11 @@ def port(dq5_path, dq4_path, inn_at, key_at, with_people=True):
 
 
 def _dump_progress(dq5_path):
-    import subprocess
     import tempfile
+    import dq4buildcache
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "progress.json"
-        subprocess.run([sys.executable, str(DQ5_TOOLS / "dq5progresswrite.py"), str(dq5_path), "dump", "-o", str(out)],
-                       check=True, capture_output=True)
+        dq4buildcache.run(DQ5_TOOLS / "dq5progresswrite.py", dq5_path, "dump", "-o", out)
         return out.read_text(encoding="utf-8")
 
 

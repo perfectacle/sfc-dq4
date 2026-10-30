@@ -26,6 +26,7 @@
 | `dq4ch1event.py` | 1장 진행 사건(이무르 밤의 아이 → 프레아 → 감옥 재회, 우물 아래 목소리, 호이민 합류, そらとぶくつ 로 탑에, 아이 납치, 탑 위 보스, 보스 뒤 목록·병사·아이 귀가, 왕에게 보고·1장 끝)의 깃발·덧붙인 대화·인물 스크립트·메시지·네이티브(`5E:D000`·전투 `06:FF00`). `dq4chapter1.py`·`dq4npcport.py` 가 씀. [진행 사건](../docs/dq4-chapter1-format.md#진행-사건) |
 | `dq4chapter1.py messages\|build` | DQ4 1장 첫머리: `messages` 는 `dq4menupatch.py build --messages` 에 줄 한글 대사 JSON, `build --rom 메뉴롬 --out 롬 [--no-prologue]` 은 `dq4groupbuild.py` 의 맵·출구 패치와 1장 인물·연출을 메뉴 롬 위에 얹고 새 게임 첫 맵을 서장 `3C/01` 로(`--no-prologue` 면 1장 `36/01`). [1장 첫머리](../docs/dq4-chapter1-format.md) |
 | `dq4prologue.py` | NDS 서장(수련·개구리·신시아·저녁·1장으로 넘기기)의 대사·인물·연출·덧붙인 대화. `dq4chapter1.py build` 가 얹음. [서장](../docs/dq4-prologue-format.md) |
+| `dq4buildcache.py` | 그룹 빌드(`dq4groupbuild.py`)·`dq4chapter1.py build` 가 부르는 도구 하위 프로세스를 입력·도구 소스 해시를 키로 저장해 다시 씀. 키는 도구가 import·이름으로 부르는 도구 폴더 파일, `uv.lock`, 인자 파일 내용(JSON 안의 상대 경로가 가리키는 파일 포함). 기본 자리는 원래 체크아웃의 `work/cache/calls` 라 워크트리끼리 함께 씀. `DQ4_BUILD_CACHE=폴더` 로 자리를 바꾸고 `DQ4_BUILD_CACHE=off` 로 끔. 롬 파생 자료라 커밋하지 않고, 통째로 지워도 됨 |
 | `dq4prologuecheck.py --rom 롬 --out 폴더` | 새 게임부터 서장 끝(1장 왕좌의 방)까지 한 번에 걷는 MesenCE 헤드리스 검사. `MESENCE`·`LIBDIR` 필요. [서장 검증](../docs/dq4-prologue-format.md#검증) |
 | `dq4menumsg.py [그림]` | `dq4menupatch.py build` 가 부르는 메뉴 메시지 모듈. 보행 메시지를 새 허프만 트리로 뱅크 `65`~ 에 옮기고 한글 글자를 넣음. 직접 실행하면 세 메시지 미리보기. [메뉴 메시지](../docs/dq4-menu-format.md#메뉴-메시지) |
 | `dq4nameentrycheck.py --rom 롬 --symbols 심볼 --out 새폴더` | MesenCE에서 조합·삭제·Y 완료·새 게임 이름을 검사하고 입력 칸 VRAM을 비교. `MESENCE` 실행 파일 필요. [재현](../docs/dq4-name-entry-format.md#재현) |

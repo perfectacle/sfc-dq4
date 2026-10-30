@@ -11,10 +11,10 @@ FC 블록 (x, y) 는 DQ5 셀 (2x, 2y). 원작이 「ライアン」 으로 박�
   python sfc/dq4/tools/dq4chapter1.py build --rom work/ch1/menu.sfc --out work/ch1/dq4-ch1.sfc
 """
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 from pathlib import Path
-import subprocess
 import sys
 import tempfile
 
@@ -472,8 +472,9 @@ def apply_writes(data, original, paths):
     return bytes(d)
 
 
-def run_tool(*args):
-    subprocess.run([sys.executable, *map(str, args)], check=True, stdout=subprocess.DEVNULL)
+def run_tool(tool, *args):
+    import dq4buildcache
+    dq4buildcache.run(tool, *args)
 
 
 # 인물 목록은 30~3F 의 두 뱅크에 둬야 한다(데이터 뱅크를 목록 뱅크로 두고 낮은 WRAM 을 읽음). 30~39 는 타이틀,
@@ -525,22 +526,29 @@ def build(rom, dq5, dq4, work, prologue=True):
     """메뉴 빌드 롬(dq4menupatch.py build --messages) → 1장 첫머리 롬. prologue 면 새 게임이 서장으로 시작해
     서장 끝에서 1장 첫머리로 넘어간다."""
     original = dq5.read_bytes()
-    summary = group_build(dq5, dq4, work / 'groups')
+    import dq4ch1event
+    from kr_patch.fc import ines
+    work.mkdir(parents=True, exist_ok=True)
+    (work / 'boss.json').write_text(json.dumps(dq4ch1event.encounter_doc()))
+    (work / 'boss-monsters.json').write_text(json.dumps(dq4ch1event.monster_doc(ines.prg(dq4.read_bytes())),
+                                                        ensure_ascii=False))
+    # 원래 롬만 읽는 도구는 그룹 빌드와 함께 돌린다
+    with ThreadPoolExecutor() as pool:
+        side = [pool.submit(run_tool, DQ5_TOOLS / 'dq5npcrecord.py', dq5, 'dump', '-o', work / 'npc-records.json'),
+                pool.submit(run_tool, DQ5_TOOLS / 'dq5encounterwrite.py', dq5, 'patch', work / 'boss.json',
+                            '-o', work / 'boss.dq5patch.json'),
+                pool.submit(run_tool, DQ5_TOOLS / 'dq5tables.py', dq5, 'patch', work / 'boss-monsters.json',
+                            '-o', work / 'boss-monsters.dq5patch.json')]
+        summary = group_build(dq5, dq4, work / 'groups')
+        for f in side:
+            f.result()
     ported, ported_messages, report = port(dq5, dq4)
     new_maps = [a for g, n in sorted(GROUPS.values()) for a in ('--new-map', f'{g:02X}/{n:02X}')]
-    run_tool(DQ5_TOOLS / 'dq5npcrecord.py', dq5, 'dump', '-o', work / 'npc-records.json')
     records = json.loads((work / 'npc-records.json').read_text())
     (work / 'npc.json').write_text(json.dumps(npc_doc(records, ported, prologue, report, ported_messages), ensure_ascii=False, indent=1))
     base = npc_base(work / 'groups' / GROUP_PATCHES[0])
     run_tool(DQ5_TOOLS / 'dq5npcrelocate.py', dq5, 'patch', work / 'npc.json', '--base', base, '--alt', NPC_ALT,
              '--allow-growth', *new_maps, '-o', work / 'npc.dq5patch.json')
-    import dq4ch1event
-    (work / 'boss.json').write_text(json.dumps(dq4ch1event.encounter_doc()))
-    run_tool(DQ5_TOOLS / 'dq5encounterwrite.py', dq5, 'patch', work / 'boss.json', '-o', work / 'boss.dq5patch.json')
-    from kr_patch.fc import ines
-    (work / 'boss-monsters.json').write_text(json.dumps(dq4ch1event.monster_doc(ines.prg(dq4.read_bytes())),
-                                                        ensure_ascii=False))
-    run_tool(DQ5_TOOLS / 'dq5tables.py', dq5, 'patch', work / 'boss-monsters.json', '-o', work / 'boss-monsters.dq5patch.json')
     patches = [work / 'groups' / p for p in (*GROUP_PATCHES, *summary['record_patches'])] + [
         work / 'npc.dq5patch.json', work / 'boss.dq5patch.json', work / 'boss-monsters.dq5patch.json']
     out = bytearray(apply_writes(clear_mirror(rom, original, group_ranges()), original, patches))
