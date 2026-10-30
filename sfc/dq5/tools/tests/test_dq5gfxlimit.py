@@ -207,6 +207,56 @@ class TileGrowTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '30~7D'):
             fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x348000, extra_at=0x7E8000)
 
+    def world_doc(self, key, extra, nib):
+        (self.folder / f'{key}.bin').write_bytes((self.folder / 'tiles.bin').read_bytes()[:fgw.TILES * 32] + extra)
+        self.doc.setdefault('worlds', {})[key] = {'tiles_file': f'{key}.bin', 'tile_palettes': nib}
+
+    def word_notes(self, m):
+        return [w['at'] for w in m['writes'] if w['note'].startswith('세계마다 타일맵 워드 표')]
+
+    def test_word_table_same_bytes_as_tiles(self):
+        # 워드 표 16KB 와 바이트가 같은 늘린 타일 512개를 세계 1 에 두어도 타일 주소와 표 주소가 따로다.
+        nib0 = self.doc['tile_palettes']
+        nib1 = nib0[:fgw.TILES] + [3] * fgw.TILES
+        words = b''.join(fgw.palette_world_words([nib0, nib1, nib0, nib0]))
+        self.world_doc('world1', words, nib1)
+        m = fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x348000, extra_at=0x358000)
+        rom = Rom(apply(self.data, m))
+        self.assertEqual(fgw.current(rom)['worlds']['world1'][0][fgw.TILES * 32:], words)
+        self.assertEqual(self.word_notes(m), ['36:8000'])
+        self.assertEqual(dq5field.tile_word(rom, 1023, True, 1), 1023 | (3 * 4 + 8) << 8)
+
+    def test_word_table_moves_to_next_bank(self):
+        nib1 = list(self.doc['tile_palettes'])
+        nib1[600] ^= 1
+        self.world_doc('world1', self.extra, nib1)
+        m = fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x348000, extra_at=0x35C000)
+        # 늘린 타일 9,600바이트(35:C000~E57F) 뒤에 16KB 가 들어가지 않아 36:8000 으로
+        self.assertEqual(self.word_notes(m), ['36:8000'])
+        rom = Rom(apply(self.data, m))
+        self.assertEqual(dq5field.tile_word(rom, 600, True, 1) >> 10 & 15, (nib1[600] + 2) & 15)
+        with self.assertRaisesRegex(ValueError, '30~7D'):
+            fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x348000, extra_at=0x7DC000)
+
+    def test_three_extras_and_word_table(self):
+        nib0 = self.doc['tile_palettes']
+        w1, w2 = bytes([0x11]) * (32 * 512), bytes([0x22]) * (32 * 512)
+        nib1, nib2 = nib0[:fgw.TILES] + [5] * fgw.TILES, nib0[:fgw.TILES] + [9] * fgw.TILES
+        self.world_doc('world1', w1, nib1)
+        self.world_doc('world2', w2, nib2)
+        m = fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x348000, extra_at=0x358000)
+        notes = [w['at'] for w in m['writes'] if w['note'].startswith('늘린 타일')]
+        # 9,600바이트·16KB 는 35:8000·35:A580, 셋째 16KB 는 36:8000, 표는 36:C000~FFFF 에 꼭 들어감
+        self.assertEqual(notes, ['35:8000', '35:A580', '36:8000'])
+        self.assertEqual(self.word_notes(m), ['36:C000'])
+        rom = Rom(apply(self.data, m))
+        cur = fgw.current(rom)
+        self.assertEqual([cur['worlds'][f'world{w}'][0][fgw.TILES * 32:] for w in (1, 2)], [w1, w2])
+        for w, nib in enumerate((nib0, nib1, nib2)):
+            for upper in (True, False):
+                self.assertEqual(dq5field.tile_word(rom, 700, upper, w),
+                                 700 | ((nib[700] & (15 if upper else 7)) * 4 + 8) << 8)
+
     def test_world_counts_limit_blocks(self):
         w1 = (self.folder / 'tiles.bin').read_bytes()[:fgw.TILES * 32] + bytes(32 * 100)
         (self.folder / 'w1.bin').write_bytes(w1)
