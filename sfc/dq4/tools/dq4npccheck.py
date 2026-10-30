@@ -184,6 +184,8 @@ def main():
     ap.add_argument("--no-tables", action="store_true", help="leave out the person table scenes")
     ap.add_argument("--texts", type=Path, help="the ROM's messages: dq5text/1 (default BUILD/text.json) or "
                     "dq4messages/1 (dq4chapter1.py messages, for the chapter-1 ROM)")
+    ap.add_argument("--chapter1", action="store_true",
+                    help="the ROM is the chapter-1 build: people its events change answer as dq4ch1event says")
     args = ap.parse_args()
     mesence = Path(os.environ["MESENCE"])
     out = args.out.resolve()
@@ -204,6 +206,14 @@ def main():
     inns = shop_report["inns"]
     prg = ines.prg(args.dq4.read_bytes())
     state = args.state.resolve()
+
+    events = {}
+    if args.chapter1:
+        import dq4ch1event
+        import dq4npcport
+        ported = json.loads((args.build / "text.json").read_text(encoding="utf-8"))["messages"]
+        first = dq4npcport.FIRST_MESSAGE + sum(1 for e in ported if e["id"] >= dq4npcport.FIRST_MESSAGE)
+        events = dq4ch1event.start_messages(first)
 
     jobs, later = [], []
     for m, persons in people.items():
@@ -252,8 +262,9 @@ def main():
                 jobs.append(("inn" if service == INN else "talk", f"talk-{m.replace('/', '')}-{i}", m, to, d,
                              p["night"], (first, inns.get(m) if service == INN else None)))
             else:
+                message = events.get((m, p["talk"], p["night"]), events.get((m, p["talk"], None)))
                 jobs.append(("talk", f"talk-{m.replace('/', '')}-{i}", m, to, d, p["night"],
-                             (int(p["message"], 16), None)))
+                             (int(p["message"], 16) if message is None else message, None)))
 
     def scene(kind, name, to, test, night):
         if kind in ("unreachable", "closed", "staged"):
