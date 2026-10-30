@@ -225,6 +225,10 @@ class TileGrowTests(unittest.TestCase):
         self.assertEqual(fgw.current(rom)['worlds']['world1'][0][fgw.TILES * 32:], words)
         self.assertEqual(self.word_notes(m), ['36:8000'])
         self.assertEqual(dq5field.tile_word(rom, 1023, True, 1), 1023 | (3 * 4 + 8) << 8)
+        # 세계 1 의 16KB 가 35:C000~FFFF 에 꼭 맞으면 표는 다음 뱅크 8000 에 둔다
+        m = fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x348000, extra_at=0x359A80)
+        self.assertEqual([w['at'] for w in m['writes'] if w['note'].startswith('늘린 타일')], ['35:9A80', '35:C000'])
+        self.assertEqual(self.word_notes(m), ['36:8000'])
 
     def test_word_table_moves_to_next_bank(self):
         nib1 = list(self.doc['tile_palettes'])

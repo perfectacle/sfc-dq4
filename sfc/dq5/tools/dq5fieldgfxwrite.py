@@ -856,7 +856,7 @@ def write_world12(at, worlds, placed, write):
 
 def place_extras(at, chunks, placed):
     """늘린 타일 덩어리(세계마다, 같은 것은 하나)를 at 부터 차례로 둔다. DMA 가 뱅크를 넘지 못하므로 덩어리가
-    뱅크 끝을 넘으면 다음 뱅크 8000 으로 넘긴다. 덩어리 → 긴 주소."""
+    뱅크 끝을 넘으면 다음 뱅크 8000 으로 넘긴다. (덩어리 → 긴 주소, 다음 덩어리를 둘 자리)."""
     out, a = {}, at
     for chunk in chunks:
         if not chunk or chunk in out:
@@ -870,7 +870,7 @@ def place_extras(at, chunks, placed):
         a += len(chunk)
         if not a & 0xFFFF:
             a |= 0x8000                                      # 뱅크 끝까지 채웠으면 다음 뱅크 8000
-    return out
+    return out, a
 
 
 def place_in_any(at, size, option, placed):
@@ -904,11 +904,9 @@ def write_grow(rom, at, extra_at, world0_at, full0, nib0, world_data, placed, wr
         nibs += bytes(n[i] << 4 | n[i + 1] for i in range(0, MAX_TILES, 2))
     shared = len({nibs[k:k + MAX_TILES // 2] for k in range(0, len(nibs), MAX_TILES // 2)}) == 1
     words = b'' if shared else b''.join(palette_world_words([n for _, n in worlds]))
-    extras = place_extras(extra_at, [t[TILES * 32:] for t, _ in worlds], placed)
+    extras, after = place_extras(extra_at, [t[TILES * 32:] for t, _ in worlds], placed)
     # 워드 표는 늘린 타일과 바이트가 같아도 따로 둔다(같은 덩어리로 합치면 타일 주소를 덮어씀)
-    after = max((a + len(c) for c, a in extras.items()), default=extra_at)
-    after |= 0x8000 if not after & 0xFFFF else 0
-    words_at = place_extras(after, [words], placed)[words] if words else None
+    words_at = place_extras(after, [words], placed)[0][words] if words else None
     blob, srcs = bytearray(), []
     for tiles, _ in worlds:
         base = tiles[:TILES * 32]
