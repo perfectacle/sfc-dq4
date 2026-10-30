@@ -445,7 +445,8 @@ def build(dq5, dq4, out):
     lists, messages, people = dq4npcport.port(dq5, dq4)
     _save(out / "npc-report.json", people)
     _run(DQ5_TOOLS / "dq5npcrelocate.py", dq5, "patch",
-         _save(out / "npc.json", {"format": "dq5npcrelocate/1", "scripts": [], "lists": lists}),
+         _save(out / "npc.json", {"format": "dq5npcrelocate/1", "scripts": [],
+                                  "lists": [lst for lst in lists if "map" in lst]}),
          "-o", out / "npc.dq5patch.json", "--report", out / "npc-layout.json", *new_map_args)
     manifests.append(out / "npc.dq5patch.json")
     checks.append(step("dq5textwrite.py", "text", {"format": "dq5text/1", "messages": messages}, dq5, *TEXT_AT))

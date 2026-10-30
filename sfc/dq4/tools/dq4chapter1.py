@@ -306,7 +306,7 @@ def npc_doc(records, ported=(), prologue=False, report=None, ported_messages=())
         scripts += dq4ch1event.scripts(dq4npcport.FIRST_MESSAGE + len(ported_messages))
     mine = {lst["map"] for lst in lists}
     return {"format": "dq5npcrelocate/1", "scripts": scripts,
-            "lists": lists + [lst for lst in ported if lst["map"] not in mine],
+            "lists": lists + [lst for lst in ported if "map" in lst and lst["map"] not in mine],
             "new_lists": new_lists, "overrides": overrides}
 
 

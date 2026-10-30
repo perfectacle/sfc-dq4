@@ -115,10 +115,19 @@ class ListTest(unittest.TestCase):
         top = self.entries(ev.TOWER_TOP)
         self.assertEqual(sum(e["from"] == ev.THANKS_SRC for e in top), 2)     # 낮·밤에 하나씩
 
+    def test_after_boss_lists_switch_on_the_boss_flag(self):
+        for m in ev.ALT_STATES[0][2]:
+            names = [o["list"] for o in self.over if o["map"] == m]
+            self.assertIn(f"new:{ev.alt_name(ev.AFTER_BOSS, m)}", names)
+        # 병사가 떠난 목록이 보스 뒤 목록보다 먼저
+        soldier = [o["list"] for o in self.over if o["map"] == ev.SOLDIER_MAP]
+        self.assertEqual(soldier, ["new:soldier_gone", f"new:{ev.alt_name(ev.AFTER_BOSS, ev.SOLDIER_MAP)}"])
+        self.assertIn(ev.alt_name(ev.AFTER_BOSS, ev.KIDS_HOME_MAP), self.report)
+
     def test_event_talks_replace_the_ported_ones(self):
         t = ev.talk_numbers(0x904)
         talks = {e["fields"]["talk"] for m in (ev.FRONT, ev.FRONT_NIGHT, ev.IMURU, ev.JAIL, ev.HOIMIN_ROOM, ev.TOWER_TOP)
-                 for e in self.entries(m)}
+                 for e in self.entries(m)} | {e["fields"]["talk"] for lst in self.new for e in lst["entries"]}
         self.assertLessEqual(set(t.values()), talks)
 
 

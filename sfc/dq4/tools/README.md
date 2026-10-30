@@ -21,7 +21,7 @@
 | `dq4msgnames.py` | 메시지의 물건·주문 이름(`{100A}`·`{100B}`)을 adopt 표의 한글로. `dq4chapter1.py` 가 얹음. [조사 코드의 이름](../docs/dq4-josa-format.md#이름) |
 | `dq4josa.py`·`dq4sysmsg.py` | 받침을 보고 조사를 고르는 메시지 코드(`101E`~`1024`)와 DQ5 필드 시스템 메시지 81개의 한글. `dq4chapter1.py` 가 얹음. [조사 코드](../docs/dq4-josa-format.md) |
 | `dq4chapterbox.py preview --out PNG` | 1장 시작의 검은 화면 금테 장 제목 상자 미리보기. 상자 타일은 `rom/dq4.nes` 에서, 제목은 `DQ4_GALMURI` 의 Galmuri11 로. 맵 훅·네이티브 루틴은 `dq4chapter1.py build` 가 얹음. [1장 첫머리](../docs/dq4-chapter1-format.md#검은-화면과-장-제목-상자) |
-| `dq4ch1event.py` | 1장 진행 사건(이무르 밤의 아이 → 프레아 → 감옥 재회, 우물 아래 목소리, 호이민 합류, そらとぶくつ 로 탑에, 아이 납치, 탑 위 보스)의 깃발·덧붙인 대화·인물 스크립트·메시지·네이티브(`5E:D000`·전투 `06:FF00`). `dq4chapter1.py`·`dq4npcport.py` 가 씀. [진행 사건](../docs/dq4-chapter1-format.md#진행-사건) |
+| `dq4ch1event.py` | 1장 진행 사건(이무르 밤의 아이 → 프레아 → 감옥 재회, 우물 아래 목소리, 호이민 합류, そらとぶくつ 로 탑에, 아이 납치, 탑 위 보스, 보스 뒤 목록·병사·아이 귀가)의 깃발·덧붙인 대화·인물 스크립트·메시지·네이티브(`5E:D000`·전투 `06:FF00`). `dq4chapter1.py`·`dq4npcport.py` 가 씀. [진행 사건](../docs/dq4-chapter1-format.md#진행-사건) |
 | `dq4chapter1.py messages\|build` | DQ4 1장 첫머리: `messages` 는 `dq4menupatch.py build --messages` 에 줄 한글 대사 JSON, `build --rom 메뉴롬 --out 롬 [--no-prologue]` 은 `dq4groupbuild.py` 의 맵·출구 패치와 1장 인물·연출을 메뉴 롬 위에 얹고 새 게임 첫 맵을 서장 `3C/01` 로(`--no-prologue` 면 1장 `36/01`). [1장 첫머리](../docs/dq4-chapter1-format.md) |
 | `dq4prologue.py` | NDS 서장(수련·개구리·신시아·저녁·1장으로 넘기기)의 대사·인물·연출·덧붙인 대화. `dq4chapter1.py build` 가 얹음. [서장](../docs/dq4-prologue-format.md) |
 | `dq4prologuecheck.py --rom 롬 --out 폴더` | 새 게임부터 서장 끝(1장 왕좌의 방)까지 한 번에 걷는 MesenCE 헤드리스 검사. `MESENCE`·`LIBDIR` 필요. [서장 검증](../docs/dq4-prologue-format.md#검증) |

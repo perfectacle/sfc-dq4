@@ -139,18 +139,22 @@ LINE, PAGE, END = 0x1000, 0x1002, 0x1001
 NIGHT = 0x78
 
 
-def fc_state(night):
-    """Chapter 1 at the start: $615A = 0, no flags or party, $62ED day or night."""
+def fc_state(night, flags=None):
+    """Chapter 1 at the start: $615A = 0, no flags or party, $62ED day or night. flags {address: value} sets
+    event flags for a later state."""
     ram = bytearray(0x8000)
     ram[0x62ED] = NIGHT if night else 0
+    for a, v in (flags or {}).items():
+        ram[a] = v
     return dq4talk.State(ram)
 
 
-def fc_people(prg, fc_group, number, night):
-    """FC person records of a map at that time: FC cell, facing, step interval, picture, messages."""
-    state = fc_state(night)
+def fc_people(prg, fc_group, number, night, flags=None):
+    """FC person records of a map at that time: FC cell, facing, step interval, picture, messages. With flags
+    the list is the one FC picks for those event flags (dq4map.place_records)."""
+    state = fc_state(night, flags)
     out = []
-    for rec in dq4talk.npc_list(prg, fc_group, number, night):
+    for rec in dq4talk.npc_list(prg, fc_group, number, night, ram=state.ram if flags else None):
         x, y = dq4talk.pos(rec, night)
         step = rec[2] & 0x0F if night else rec[2] >> 4
         # Facing comes from the picture's byte: byte 3, or byte 7 at night when F bit0 is off (1C:$99B3).
@@ -288,18 +292,21 @@ def talk_doc(messages):
 
 
 def port(dq5_path, dq4_path):
-    """(dq5npcrelocate lists, dq5text messages, report)."""
+    """(dq5npcrelocate lists, dq5text messages, report). After the maps' own lists come the lists of later
+    states (dq4ch1event.ALT_STATES) as {"name": dq4ch1event.alt_name(state, map), "entries": …}, reported under the same name;
+    their new lines get message numbers after the start state's."""
+    import dq4ch1event
     data = Path(dq4_path).read_bytes()
     prg, rom = ines.prg(data), dq4text.Rom(data)
     first = first_talk()
     texts = {}
     lists, report = [], {}
-    for name, (group, number) in sorted(GROUPS.items(), key=lambda kv: kv[1]):
-        fc_group, fc_number = fc_map(prg, group, number)
+
+    def people_of(name, fc_group, fc_number, flags=None):
         entries, people = [], []
         shops = merchants(prg, fc_group, fc_number)
         for night in (False, True) if has_people(fc_group) else ():
-            for p in fc_people(prg, fc_group, fc_number, night):
+            for p in fc_people(prg, fc_group, fc_number, night, flags):
                 shows = [m for m in p["shows"] if m is not None]
                 predicted = [m - dq4talk.SERVICE for m in shows if m >= dq4talk.SERVICE]
                 service = shops.get((p["x"], p["y"], night))
@@ -323,8 +330,20 @@ def port(dq5_path, dq4_path):
                                 "fields": fields})
                 people.append({**p, "night": night, "service": service,
                                "message": None if message is None else f"{message:03X}", "dq5": fields})
-        lists.append({"map": f"{group:02X}/{number:02X}", "entries": entries})
-        report[f"{group:02X}/{number:02X}"] = people
+        return entries, people
+
+    for name, (group, number) in sorted(GROUPS.items(), key=lambda kv: kv[1]):
+        fc_group, fc_number = fc_map(prg, group, number)
+        m = f"{group:02X}/{number:02X}"
+        entries, people = people_of(name, fc_group, fc_number)
+        lists.append({"map": m, "entries": entries})
+        report[m] = people
+    for state, flags, maps in dq4ch1event.ALT_STATES:
+        for m in maps:
+            group, number = (int(v, 16) for v in m.split("/"))
+            entries, people = people_of(m, *fc_map(prg, group, number), flags)
+            lists.append({"name": dq4ch1event.alt_name(state, m), "entries": entries})
+            report[dq4ch1event.alt_name(state, m)] = people
     messages = [{"id": m, "codes": codes} for m, codes in sorted(texts.values())]
     return lists, messages, report
 
