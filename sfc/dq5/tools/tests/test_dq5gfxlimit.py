@@ -63,6 +63,36 @@ def field_rom():
     return bytes(d)
 
 
+def old_block_hook(table):
+    """블록 표 읽기를 제자리에서 바꾸기 전 판이 00:BC80·BC8D 의 JSL 로 부르던 훅(9·10번째 비트를 마스크 둘로 읽음)."""
+    return (b'\xbf' + fgw.long_addr(table) + b'\x39\xa4\xbc' + b'\xc9\x01' + b'\xa9\x00' + b'\x2a' + b'\xeb'
+            + b'\xbf' + fgw.long_addr(table) + b'\x39\x9c\xbc' + b'\xc9\x01' + b'\xeb' + b'\x2a' + b'\x6b')
+
+
+def old_grow_rom(data, at):
+    """지금 판으로 타일을 늘린 롬을 그 전 판(블록 훅 둘·니블 훅 넷, 칸 비트 표·팔레트 표 없음)이 쓰던 꼴로 바꾼다.
+    고르기 표·니블 표·속성은 그대로 옮긴다."""
+    new, old = fgw.grow_layout(at), fgw.grow_layout(at, block_hooks=True)
+    d = bytearray(data)
+    o = lorom(new['table'])
+    tables = bytes(d[o:o + new['tile_bits'] - new['table']])
+    o = lorom(at)
+    d[o:o + new['rles'] - at] = bytes(new['rles'] - at)
+    put(d, at, fgw.grow_load_hook(old['table'], old['dma']) + fgw.nib_hook(old['tables'], wide=True)
+        + old_block_hook(dq5field.BLOCK_LOWER + 4) + old_block_hook(dq5field.BLOCK_UPPER + 4)
+        + fgw.redraw_hook(old['dma']) + fgw.dma_sub(old['table']) + tables)
+    put(d, fgw.LOAD_SITE + 1, fgw.long_addr(old['load']))
+    put(d, fgw.PALETTE_READ, fgw.PALETTE_READ_ORIG)
+    put(d, fgw.BLOCK_READ, fgw.BLOCK_READ_ORIG)
+    for site in fgw.NIB_SITES:
+        put(d, site, b'\x22' + fgw.long_addr(old['nib']))
+    for site, key, dp in ((0x00BC80, 'block_lower', 0x95), (0x00BC8D, 'block_upper', 0x97)):
+        put(d, site, b'\x22' + fgw.long_addr(old[key]) + bytes([0x85, dp]) + b'\xea' * 7)
+    put(d, fgw.REDRAW_SITE + 1, fgw.long_addr(old['redraw']))
+    put(d, 0x00BCBE, fgw.long_addr(old['attrs']))
+    return bytes(d)
+
+
 class TileGrowTests(unittest.TestCase):
     def setUp(self):
         self.data = field_rom()
@@ -120,6 +150,25 @@ class TileGrowTests(unittest.TestCase):
         self.assertEqual(dq5field.tile_word(rom, 811, True, 2), dq5field.tile_word(rom, 811, True, 0))
         self.assertEqual(m['rom_size'], 2)
 
+    def test_old_block_hook_rom(self):
+        """그 전 판(00:BC80·BC8D 의 JSL 블록 훅)으로 만든 롬도 10번째 비트·고르기 표·니블 표를 읽는다."""
+        d = bytearray(apply(self.data, fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x348000,
+                                                 extra_at=0x358000)))
+        put(d, dq5field.BLOCK_LOWER + 7 * 5, ft.encode_block(bytes(5), [811, 0, 0, 0], wide=True))
+        new, old = Rom(bytes(d)), Rom(old_grow_rom(bytes(d), 0x348000))
+        self.assertEqual((old.u8(dq5field.BLOCK_READ_SITE), old.u8(dq5field.BLOCK_HOOK_SITE)), (0x8B, 0x22))
+        self.assertEqual(fgw.rom_layout(old), fgw.grow_layout(0x348000, block_hooks=True))
+        self.assertEqual(fgw.rom_layout(new), fgw.grow_layout(0x348000))
+        self.assertTrue(dq5field.wide_tiles(old))
+        self.assertEqual(dq5field.block_tiles(old, dq5field.BLOCK_LOWER, 7), [811, 0, 0, 0])   # 9비트로 읽으면 299
+        self.assertEqual((fgw.tile_counts(old), ft.tile_limit(old)), ([812] * 3, 811))
+        cur_old, cur_new = fgw.current(old), fgw.current(new)
+        self.assertEqual(cur_old['worlds'], cur_new['worlds'])
+        self.assertEqual(cur_old['tile_attributes'], cur_new['tile_attributes'])
+        for t in (0, 511, 512, 811):
+            for upper in (True, False):
+                self.assertEqual(dq5field.tile_word(old, t, upper), dq5field.tile_word(new, t, upper))
+
     def test_wide_nibble_hook_clears_high_byte(self):
         """00:BBAC 는 LDA $94 / LSR 의 윗바이트를 XBA 로 타일맵 워드에 넣으므로 넓은 훅은 윗바이트를 0 으로 돌려준다."""
         narrow, wide = fgw.nib_hook(0x123456), fgw.nib_hook(0x123456, wide=True)
@@ -137,9 +186,18 @@ class TileGrowTests(unittest.TestCase):
         notes = [w for w in m['writes'] if w['note'].startswith('늘린 타일')]
         # 세계 0 의 9,600바이트는 35:C000 에, 세계 1 의 16KB 는 뱅크 끝을 넘으므로 36:8000 에
         self.assertEqual([w['at'] for w in notes], ['35:C000', '36:8000'])
-        cur = fgw.current(Rom(apply(self.data, m)))
+        rom = Rom(apply(self.data, m))
+        cur = fgw.current(rom)
         self.assertEqual(cur['worlds']['world1'], (bytes(w1), [3] * 1024))
         self.assertEqual(cur['worlds']['world2'], cur['worlds']['world0'])
+        # 세계 1 의 니블이 다르면 00:BBAC 는 그대로 두고 니블 읽기 네 자리를 세계마다 512바이트 훅으로 바꾼다.
+        lay = fgw.grow_layout(0x348000)
+        for site in fgw.NIB_SITES:
+            self.assertEqual(rom.d[lorom(site):lorom(site) + 4], b'\x22' + fgw.long_addr(lay['nib']))
+        self.assertEqual(rom.d[lorom(fgw.PALETTE_READ):lorom(fgw.PALETTE_READ) + 8], fgw.PALETTE_READ_ORIG[:8])
+        for upper in (True, False):
+            self.assertEqual(dq5field.tile_word(rom, 811, upper, 1), 811 | (3 * 4 + 8) << 8)
+        self.assertEqual(dq5field.tile_word(rom, 811, True, 0), 811 | (299 % 16 * 4 + 8) << 8)
         with self.assertRaisesRegex(ValueError, '겹침'):
             fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x358000, extra_at=0x358100)
         with self.assertRaisesRegex(ValueError, '30~7D'):
@@ -227,6 +285,37 @@ class BlockBitTests(unittest.TestCase):
         self.assertEqual(dq5field.block_tiles(Rom(bytes(d)), dq5field.BLOCK_LOWER, 0), [1, 2, 3, 4])
         put(d, dq5field.BLOCK_READ_SITE, b'\xe2')
         self.assertEqual(dq5field.block_tiles(Rom(bytes(d)), dq5field.BLOCK_LOWER, 0), [513, 514, 515, 516])
+
+
+class TileWordBoundaryTests(unittest.TestCase):
+    """타일 511·512·1023 의 타일맵 워드를 타일마다 1바이트 표(00:BBAC 를 바꾼 롬)와 세계마다 512바이트 니블 훅 둘로 낸다."""
+    NIB = [(i * 5 + 3) % 16 for i in range(1024)]
+
+    def word(self, t, upper, nib):
+        return t | ((nib[t] if upper else nib[t] & 7) * 4 + 8) << 8
+
+    def test_palette_tables(self):
+        d = bytearray(0x200000)
+        put(d, dq5field.PALETTE_SITE, fgw.palette_fast(0x308000, 0x308400))
+        put(d, 0x308000, b''.join(fgw.palette_bytes(self.NIB)))
+        rom = Rom(bytes(d))
+        for t in (511, 512, 1023):
+            for upper in (True, False):
+                self.assertEqual(dq5field.tile_word(rom, t, upper, 2), self.word(t, upper, self.NIB))
+
+    def test_wide_nibble_hook(self):
+        d = bytearray(0x200000)
+        put(d, dq5field.PALETTE_SITE, fgw.PALETTE_READ_ORIG)
+        put(d, dq5field.NIB_SITE, b'\x22' + fgw.long_addr(0x308000))
+        put(d, 0x308000, fgw.nib_hook(0x318000, wide=True))
+        worlds = [self.NIB, self.NIB[::-1]]
+        for w, nib in enumerate(worlds):
+            put(d, 0x318000 + w * 0x200, bytes(nib[i] << 4 | nib[i + 1] for i in range(0, 1024, 2)))
+        rom = Rom(bytes(d))
+        for w, nib in enumerate(worlds):
+            for t in (511, 512, 1023):
+                for upper in (True, False):
+                    self.assertEqual(dq5field.tile_word(rom, t, upper, w), self.word(t, upper, nib))
 
 
 class FieldPaletteTests(unittest.TestCase):

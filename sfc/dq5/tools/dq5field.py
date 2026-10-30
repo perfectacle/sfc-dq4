@@ -39,6 +39,8 @@ QUAD_BIT = (0x80, 0x40, 0x20, 0x10)
 # dq5fieldgfxwrite.py 의 타일 늘리기는 블록 표 읽기 00:BC6D(원래 PHB)를 SEP #$20 으로 시작하는 코드로 바꿔 상위 비트 바이트의
 # 하위 니블(00:BCA4 의 08>>칸)을 10번째 비트로 읽는다. 원래 롬의 블록 1,022개는 이 니블이 모두 0 이다.
 BLOCK_READ_SITE = 0x00BC6D
+# 그 전 판은 00:BC80·BC8D 의 비트 읽기를 JSL 훅으로 바꿔 같은 니블을 읽었다(00:BC6D 는 원래 PHB). 그렇게 만든 롬도 읽는다.
+BLOCK_HOOK_SITE = 0x00BC80
 QUAD_BIT10 = (0x08, 0x04, 0x02, 0x01)
 
 
@@ -93,7 +95,7 @@ def block_number(world, hibits, x, y):
 
 def wide_tiles(rom):
     """타일 늘리기 패치가 블록의 10번째 비트를 읽는 롬인지."""
-    return rom.u8(BLOCK_READ_SITE) == 0xE2
+    return rom.u8(BLOCK_READ_SITE) == 0xE2 or rom.u8(BLOCK_HOOK_SITE) == 0x22
 
 
 def block_tiles(rom, table, m):

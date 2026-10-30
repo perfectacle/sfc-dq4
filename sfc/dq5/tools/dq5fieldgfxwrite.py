@@ -205,7 +205,7 @@ BLOCK_READ_ORIG = bytes.fromhex('8b4babe220bf2ca32a8594bf27ad2a8596a602bf30a32a3
                                 'bf2bad2a399cbcf002a9018597ab60')
 PALETTE_READ = 0x00BBAC
 PALETTE_READ_ORIG = bytes.fromhex('a5964aaae220b00abf12d72a29f04a4a8008bf12d72a290f0a0a186908c220eb059605c68596'
-                                  'a5944aaae220b00abf12d72a29704a4a8008bf12d72a29070a0a186908c220eb05948594 60'.replace(' ', ''))
+                                  'a5944aaae220b00abf12d72a29704a4a8008bf12d72a29070a0a186908c220eb0594859460')
 # 01:B4D5 는 JSR $B50A / RTL 이다. 4바이트 JML 이 그 RTL 까지 덮으므로, 훅은 끝에 뱅크 01 의 다른 RTL(01:8A87 의 끝
 # 01:8ABA)을 돌아올 자리로 PEA 하고 JML $01B50A 로 간다. B50A 의 RTS 가 그 RTL 로 가서 부른 곳에 돌아간다.
 REDRAW_SITE, REDRAW_ORIG = 0x01B4D5, bytes.fromhex('200ab56b')
@@ -279,27 +279,40 @@ def palette_bytes(nib):
 GROW_LOAD_LEN = len(grow_load_hook(0, 0))
 DMA_LEN, REDRAW_LEN = len(dma_sub(0)), len(redraw_hook(0))
 GROW_ENTRY = 8
+# 블록 표 읽기를 제자리에서 바꾸기 전 판은 00:BC80·BC8D 를 JSL 훅 둘(25바이트씩, LDA long 으로 시작)로 바꾸고 그 훅을
+# 니블 훅 바로 뒤에 두었으며 칸 비트 표·팔레트 표가 없었다. 그렇게 만든 롬도 읽는다.
+OLD_BLOCK_HOOK_LEN = 25
 
 
-def grow_layout(at):
+def grow_layout(at, block_hooks=False):
     """타일 늘리기 --worlds-at 자리. 이름 → 주소: 불러오기 훅·니블 훅·다시 그리기 훅·DMA·고르기 표(세계 넷 × 8바이트:
     [RLE 주소 16][RLE 뱅크][늘린 타일 뱅크][주소 16][크기 16])·니블 표(4 × 512바이트)·타일 속성(1,024바이트)·
-    블록 칸 9·10번째 비트 표(TILE_BITS)·palette_fast 의 위층·아래층 표(1,024바이트씩)·그 뒤 세계 1·2 RLE."""
+    블록 칸 9·10번째 비트 표(TILE_BITS)·palette_fast 의 위층·아래층 표(1,024바이트씩)·그 뒤 세계 1·2 RLE.
+    block_hooks 면 예전 판: 니블 훅 뒤에 블록 훅 둘(block_lower·block_upper)이 있고 칸 비트 표·팔레트 표가 없다."""
+    hooks = (('block_lower', OLD_BLOCK_HOOK_LEN), ('block_upper', OLD_BLOCK_HOOK_LEN)) if block_hooks else ()
+    tail = () if block_hooks else (('tile_bits', len(TILE_BITS)), ('palettes', MAX_TILES * 2))
     out, a = {}, at
-    for name, n in (('load', GROW_LOAD_LEN), ('nib', len(nib_hook(0, wide=True))),
+    for name, n in (('load', GROW_LOAD_LEN), ('nib', len(nib_hook(0, wide=True))), *hooks,
                     ('redraw', REDRAW_LEN), ('dma', DMA_LEN), ('table', GROW_ENTRY * 4), ('tables', 0x800),
-                    ('attrs', MAX_TILES), ('tile_bits', len(TILE_BITS)), ('palettes', MAX_TILES * 2)):
+                    ('attrs', MAX_TILES), *tail):
         out[name] = a
         a += n
     out['rles'] = a
     return out
 
 
+def rom_layout(rom):
+    """01:A4A7 의 JSL 이 가리키는 타일 늘리기 자리(grow_layout). 니블 훅 바로 뒤가 LDA long(BF)이면 예전 블록 훅 판이다
+    (지금 판은 그 자리가 다시 그리기 훅의 PHP(08))."""
+    at = rom.u24(LOAD_SITE + 1)
+    return grow_layout(at, block_hooks=rom.u8(at + GROW_LOAD_LEN + len(nib_hook(0, wide=True))) == 0xBF)
+
+
 def tile_counts(rom):
     """세계 0·1·2 가 VRAM 에 올리는 타일 수. 타일 늘리기 훅이 없으면 모두 512."""
     if rom.u8(LOAD_SITE) != 0x22 or not is_grow_hook(rom, rom.u24(LOAD_SITE + 1)):
         return [TILES] * 3
-    table = grow_layout(rom.u24(LOAD_SITE + 1))['table']
+    table = rom_layout(rom)['table']
     return [TILES + rom.u16(table + w * GROW_ENTRY + 6) // 32 for w in range(3)]
 
 
@@ -391,7 +404,7 @@ def current(rom):
     extras, tables = [b''] * 3, None
     if rom.d[lorom(LOAD_SITE)] == 0x22 and is_grow_hook(rom, rom.u24(LOAD_SITE + 1)):
         # 타일 늘리기는 니블 훅 대신 00:BBAC 를 바꿨을 수도 있어(palette_fast) 니블 표를 자리로 읽는다
-        table, tables = (grow_layout(rom.u24(LOAD_SITE + 1))[k] for k in ('table', 'tables'))
+        table, tables = (rom_layout(rom)[k] for k in ('table', 'tables'))
         entries = [table + w * GROW_ENTRY for w in range(3)]
         srcs = [rom.u8(e + 2) << 16 | rom.u16(e) for e in entries]
         extras = [bytes(rom.d[lorom(rom.u8(e + 3) << 16 | rom.u16(e + 4)):][:rom.u16(e + 6)]) for e in entries]
