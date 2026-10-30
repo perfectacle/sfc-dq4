@@ -10,6 +10,7 @@ dq4soundbank.build_bank 가 그 안으로 샘플을 줄인 뒤 dq4soundport 로 
     --level-db 17=2 --program 21=56:3C --record 1D=2:1F,05]
 """
 import argparse
+import itertools
 import json
 import math
 from pathlib import Path
@@ -163,7 +164,7 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
           stream=None, stream_ticks=None, budgets=None, pinned=(), resident_from=None, drop_resident=(), lanes=None, drop_tracks=None,
           level_db=None, programs=None, set_records=None, keep_regions=None, track_db=None,
           fast_receive=False, chains=(), holds=(), early_song=False, load_pump=False, vehicle_song=False,
-          keep_samples=False):
+          keep_samples=False, prefetch=None):
     """stream 은 {곡 자리: 곡 앞 샘플 바이트 상한}. 그 곡은 샘플 일부를 곡이 울리는 동안 보낸다(transfer_plan).
 
     stream_ticks 는 {곡 자리: 틱}. 곡 앞 바이트 상한을 곡이 처음 그 틱 안에 쓰는 샘플의 합으로 정하고, 도착 어림보다
@@ -203,6 +204,8 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
 
     if not set(chains) <= set(stream_ticks):
         raise ValueError('chained songs must use stream_ticks')
+    if prefetch and not keep_samples:
+        raise ValueError('prefetch needs keep_samples (the appended samples would be dropped on dismount)')
     chain_numbers = {slot: patch.FIRST_CHAIN_SONG + i for i, slot in enumerate(sorted(chains))}
     replacements, resources, reports, known, mains, chain_late = {}, {}, {}, {}, {}, set()
     next_id = 0x26
@@ -248,6 +251,36 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
                                                       next_id, budget=budget, loose=loose)
         report['samples'] = {f'{x:02X}': known[x][3] for x in sorted(found)}
         return found, program_map, report, shared, snapshot
+
+    prefetch_caps, prefetch_own = {}, {}
+
+    def prefetch_pick(slot, own, room):
+        """탈것 곡 slot 에 덧붙일 맵 곡 샘플. 맵 곡의 곡 앞 샘플과 붙든 샘플 가운데 이 곡이 쓰지 않고 늘 두지 않는 것을
+        room 바이트 안에서, 내린 뒤 맵 곡이 소리 나기 전에 받을 바이트를 가장 많이 덜게 고른다(곡 앞 샘플은 크기 전체,
+        붙든 샘플은 문턱만큼)."""
+        song = prefetch[slot]
+        if song not in replacements or song >= slot:
+            raise ValueError(f'{slot:02X}: prefetch map song {song:02X} must be an earlier replaced song')
+        item, stream_report = replacements[song], reports[f'{song:02X}']['stream'] or {}
+        front = list(item.samples[:item.send_first if item.send_first is not None else len(item.samples)])
+        hold = stream_report.get('hold') or {}
+        held = int(hold['sample'], 16) if hold else None
+        candidates = [x for x in front + ([held] if hold else []) if x not in own and x not in resident]
+        saves = {x: hold['bytes'] if x == held else len(resources[x]) for x in candidates}
+        slots = patch.SAMPLE_SLOTS - len(set(own) | set(resident))
+        best, best_saves = (), 0
+        for size in range(1, min(len(candidates), slots) + 1):
+            for pick in itertools.combinations(candidates, size):
+                if sum(len(resources[x]) for x in pick) <= room and sum(saves[x] for x in pick) > best_saves:
+                    best, best_saves = pick, sum(saves[x] for x in pick)
+        return [x for x in candidates if x in best]
+
+    def prefetch_room(slot, conversion, found):
+        """이 곡이 울리는 동안 남는 SPC 자리(여유 512 는 남김). 곡 묶음 표 증가는 어림이라 실제보다 조금 작다."""
+        sequence = len(conversion.sequence) + len(conversion.chain or b'')
+        return (patch.sample_budget(data, slot, sequence, extra_table=max(0, growth), resident=resident_sizes,
+                                    pinned=pinned_sizes)
+                - sum(len(found[x]) for x in set(conversion.samples) if x not in resident))
 
     for slot, ident, path, score, sequence_size, _ in plans:
         if slot not in budgets and not resident_done:
@@ -297,6 +330,11 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
         bank_report['shared_other_rate'] = loose
         bank_report['resource_bytes'] = sum(map(len, found.values()))
         send_first, plan = None, None
+        # 나눈 곡은 앞부분이 덧붙인 샘플까지 받는 시간만큼 길어야 하므로, 먼저 넉넉히 골라 그 길이로 나누고
+        # 나눈 뒤의 실제 시퀀스로 다시 고른다(덜 붙이면 앞부분이 남을 뿐 본체는 늦지 않음)
+        extras = prefetch_pick(slot, conversion.samples, prefetch_room(slot, conversion, found)) if slot in (prefetch or {}) else []
+        tail = sum(len(resources[x]) for x in extras)
+        prefetch_caps[slot] = tail
         if slot in stream or slot in stream_ticks:
             if set(conversion.samples) - found.keys():
                 raise ValueError('streamed songs must use only their own converted samples')
@@ -371,7 +409,7 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
                         new_arrivals[y] = (sent / STREAM_BYTES_PER_FRAME + ARRIVAL_SLACK_FRAMES) / FRAME_RATE
                     split = {}
                     if slot in chains:
-                        after = sum(sizes[y] for y in new_order[new_first:])
+                        after = sum(sizes[y] for y in new_order[new_first:]) + tail
                         split = split_at(after + main) if late else split_at(main)
                     result = port.convert(score, program_map=program_map, sample_order=new_order, arrivals=new_arrivals,
                                           hold=(x, units), **convert_args(slot), **split)
@@ -390,7 +428,7 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
                 cap, order, send_first, arrivals, result = stream_plan(main, split_at(main))
                 options.append((False, cap, order, send_first, arrivals, result))
                 cap, order, send_first, arrivals, _ = stream_plan(0, {})
-                after = sum(sizes[x] for x in order[send_first:])
+                after = sum(sizes[x] for x in order[send_first:]) + tail
                 late_split = split_at(after + main)
                 result = port.convert(score, program_map=program_map, sample_order=order, arrivals=arrivals,
                                       **convert_args(slot), **late_split)
@@ -415,7 +453,12 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
                 resident_done = True
         if slot in pinned:
             pinned_sizes[slot] = len(conversion.sequence)
-        replacements[slot] = patch.Replacement(conversion.sequence, tuple(conversion.samples), send_first)
+        if extras:
+            extras = prefetch_pick(slot, conversion.samples, min(tail, prefetch_room(slot, conversion, found)))
+            tail = sum(len(resources[x]) for x in extras)
+        # 덧붙인 샘플은 레코드 끝이라 악기 번호는 그대로이고, 곡 뒤 단계가 곡 뒤 샘플 다음에 보낸다
+        replacements[slot] = patch.Replacement(conversion.sequence, tuple(conversion.samples) + tuple(extras), send_first)
+        prefetch_own[slot] = tuple(conversion.samples)
         if conversion.chain is not None:
             mains[slot] = conversion.chain
         resources.update(found)
@@ -424,14 +467,36 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
               f'sequence {len(conversion.sequence)}', file=sys.stderr, flush=True)
         reports[f'{slot:02X}'] = {'nds_song': ident.upper(), 'score': path.name, 'sample_budget': budget,
                                    'bank': bank_report, 'conversion': conversion.report, 'stream': plan}
+        if slot in (prefetch or {}):
+            reports[f'{slot:02X}']['prefetch'] = {'map_song': f'{prefetch[slot]:02X}', 'samples': [f'{x:02X}' for x in extras],
+                                                  'bytes': tail}
     if sorted(mains) != sorted(chains):
         raise ValueError('every chained song must be a replaced song (install numbers the bodies in slot order)')
-    rom, install_report = patch.install(base, replacements, sample_resources=resources, map_fades=map_fades,
-                                        preview=preview, pinned=tuple(pinned),
-                                        resident=resident if resident_plan else None, set_records=set_records,
-                                        fast_receive=fast_receive, chains=mains, chain_late=chain_late,
-                                        hold=bool(holds), early_song=early_song, load_pump=load_pump,
-                                        vehicle_song=vehicle_song, keep_samples=keep_samples)
+    def install():
+        return patch.install(base, replacements, sample_resources=resources, map_fades=map_fades,
+                             preview=preview, pinned=tuple(pinned),
+                             resident=resident if resident_plan else None, set_records=set_records,
+                             fast_receive=fast_receive, chains=mains, chain_late=chain_late,
+                             hold=bool(holds), early_song=early_song, load_pump=load_pump,
+                             vehicle_song=vehicle_song, keep_samples=keep_samples)
+
+    rom, install_report = install()
+    # 넣은 롬의 실제 자리로 덧붙일 샘플을 다시 고른다. 앞부분은 처음 고른 바이트(상한)를 받는 길이로 나눴으므로 그 안에서만
+    changed = False
+    for slot in sorted(prefetch or {}):
+        own = prefetch_own[slot]
+        current = list(replacements[slot].samples[len(own):])
+        free = next(a['spc_budget']['free_while_playing'] for a in install_report['songs'] if a['song'] == f'{slot:02X}')
+        room = min(prefetch_caps[slot], free - patch.SPC_MARGIN + sum(len(resources[x]) for x in current))
+        better = prefetch_pick(slot, own, room)
+        if better != current:
+            item = replacements[slot]
+            replacements[slot] = patch.Replacement(item.sequence, own + tuple(better), item.send_first)
+            reports[f'{slot:02X}']['prefetch'].update(samples=[f'{x:02X}' for x in better],
+                                                      bytes=sum(len(resources[x]) for x in better))
+            changed = True
+    if changed:
+        rom, install_report = install()
     # 바꾸지 않은 DQ5 곡도 늘 두는 목록이 바뀐 뒤의 SPC 에 드는지 본다. 넘치는 곡은 그 까닭을 남긴다.
     sets, unreplaced = patch.read_sets(rom), {}
     for song in range(1, 0x32):
@@ -493,6 +558,9 @@ def main():
                     help='request the destination map song before the exit fade-out (dq4soundpatch.early_song_code)')
     ap.add_argument('--vehicle-song', action='store_true',
                     help='keep the playing field song when dismounting the dragon instead of resending it (dq4soundpatch.vehicle_song_code)')
+    ap.add_argument('--prefetch', action='append', default=[], metavar='VEHICLE=MAP',
+                    help='append front samples of MAP song to VEHICLE song record so they load while riding and survive dismount '
+                         '(needs --keep-samples)')
     ap.add_argument('--keep-samples', action='store_true',
                     help='keep samples shared by the finished song and the next one through the 1A cleanup (dq4soundpatch.keep_samples_code)')
     ap.add_argument('--load-pump', action='store_true',
@@ -540,7 +608,8 @@ def main():
                         track_db=track_db, fast_receive=args.fast_receive,
                         chains=[int(x, 16) for x in args.chain], holds=[int(x, 16) for x in args.hold],
                         early_song=args.early_song, load_pump=args.load_pump,
-                        vehicle_song=args.vehicle_song, keep_samples=args.keep_samples)
+                        vehicle_song=args.vehicle_song, keep_samples=args.keep_samples,
+                        prefetch={int(v, 16): int(m, 16) for v, m in (x.split('=') for x in args.prefetch)})
     from dq5build import make_ips
     from kr_patch import ips
     patch_bytes = make_ips(base, rom)

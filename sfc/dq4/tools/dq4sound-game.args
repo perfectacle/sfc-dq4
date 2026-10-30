@@ -267,3 +267,7 @@
 --load-pump
 --vehicle-song
 --keep-samples
+--prefetch
+03=02
+--prefetch
+04=02

@@ -36,6 +36,7 @@ SPC_CAPACITY = SPC_END - 0x2A5D
 RESIDENT_SAMPLE_LOAD = 0x2BBFDF
 RESIDENT_SAMPLE_LIST = CODE + 0x200
 SAMPLE_SLOTS = 0x14
+SPC_MARGIN = 512                   # 곡이 쓰는 SPC 자리 밖에 남겨 두는 바이트(슬롯 관리·정렬과 잔향 버퍼 사이)
 # 드라이버 코드 IPL 블록(SPC 0750~28E6). 1046 은 자료 받기 상태(80)의 처리, 곡 묶음 표 블록 뒤에 붙이는 빠른 받기 코드는
 # 메아리 버퍼(D700~FEFF) 뒤 FF00 에 올린다. 샘플 자리가 아니라 자리 정리(0A)에 덮이지 않는다.
 DRIVER_BLOCK = 0x2BC4DB
@@ -189,7 +190,7 @@ def sample_budget(data, song, sequence_size, extra_table=0, resident=None, pinne
     resident_bytes = sum(resident.values())
     resident_sequences = sum(size for i, size in pinned.items() if i != song)
     capacity = SPC_END - max(heap_start(data), 0x28EC + sum(map(len, read_sets(data))) + extra_table)
-    return capacity - resident_bytes - resident_sequences - sequence_size - 512
+    return capacity - resident_bytes - resident_sequences - sequence_size - SPC_MARGIN
 
 
 def memory_budget(data, song, item, extra_sequences=()):
@@ -200,11 +201,11 @@ def memory_budget(data, song, item, extra_sequences=()):
     sample_bytes = sum(sample_size(data, i) for i in used_samples)
     sequence_size = sum(len(sequence_bytes(data, i)) for i in used_sequences)
     # 슬롯 관리·정렬과 잔향 버퍼 사이에 여유를 둔다. 전환은 이전 곡 자료를 정리한 뒤 로드한다.
-    required = sample_bytes + sequence_size + 512
+    required = sample_bytes + sequence_size + SPC_MARGIN
     capacity = SPC_END - heap_start(data)
     if len(used_samples) > SAMPLE_SLOTS or len(used_sequences) > 20 or required > capacity:
         raise ValueError(f'song {song:02X}: SPC budget exceeded ({required}/{capacity} bytes)')
-    free = capacity - required + 512
+    free = capacity - required + SPC_MARGIN
     # 늘 두지 않는 효과음(3E~45 등)은 부를 때 시퀀스와 샘플을 올린다. 곡이 남긴 자리보다 크면 시퀀스 칸만 잡히고
     # 샘플이 오지 않아 소리가 나지 않는다(필드 곡 02 에서 0C 42 실측). 원래 DQ5 곡 자리에서는 울렸다.
     no_room = {}
