@@ -9,8 +9,9 @@ walks out of 01/00 into world 0:
            reef, signboard, field 3's hills) keeps the party on the neighbour
   gfx      stand at the views, save and dump VRAM and CGRAM: the BG tilemap of both layers around the party is the
            blocks of dq4fieldport.world with dq4fieldgfx's tiles and palette nibbles; the field tiles in VRAM are
-           dq4fieldgfx's (the sea pairs 4·5 and 20·21 turned by the same pixels, as 01:C790 turns them, in worlds
-           0 and 1; the animated 454-459 left out); CGRAM lines 2 and 3 colours 1-13 are one of the world's sets
+           dq4fieldgfx's (the animated 454-459 left out); the sea tiles 4·5·20·21 are one of the 16 frames
+           01:C5C8 makes of dq4fieldgfx.water in that world (dq5gfx.water_frames); CGRAM lines 2 and 3 colours
+           1-13 are one of the world's sets
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4fieldcheck.py --rom work/dq4-groups/groups.sfc --out work/dq4-fieldcheck
 
@@ -35,6 +36,7 @@ import dq4fieldport  # noqa: E402
 from dq4environmentromcheck import dump  # noqa: E402
 from dq4groupcheck import field_scene  # noqa: E402
 from dq5fieldwrite import split  # noqa: E402
+from dq5gfx import water_frames  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
 
 # FC block kind -> whether the party walks onto it from land.
@@ -76,21 +78,13 @@ def _word(vram, base, col, row):
     return vram[i * 2] | vram[i * 2 + 1] << 8
 
 
-def _rows(tile):
-    pixels = dq4fieldgfx.decode(tile)
-    return [pixels[r * 8:r * 8 + 8] for r in range(8)]
+def sea_frame(got, frames):
+    """Index of the frame (128 bytes: tiles 4, 5, 20, 21) the VRAM sea tiles got show; None when none."""
+    return frames.index(got) if got in frames else None
 
 
-def rotation(got, want):
-    """Pixels k (0-15) by which every 16-pixel row of the tile pairs in got is turned from want (lists of (left,
-    right) 32-byte tiles); None when no k fits them all."""
-    rows = [(g1 + g2, w1 + w2) for (ga, gb), (wa, wb) in zip(got, want)
-            for g1, g2, w1, w2 in zip(_rows(ga), _rows(gb), _rows(wa), _rows(wb))]
-    return next((k for k in range(16) if all(g == w[k:] + w[:k] for g, w in rows)), None)
-
-
-def compare_gfx(vram, cgram, cell, world, generated, palettes, sea_turns=True):
-    """Results of a gfx view: tilemap cells that match, field tiles that match, sea turn, CGRAM set."""
+def compare_gfx(vram, cgram, cell, world, generated, palettes, frames):
+    """Results of a gfx view: tilemap cells that match, field tiles that match, sea frame, CGRAM set."""
     tiles, nibbles, _, blocks = generated
     defs = {b["index"]: b for b in blocks}
     defs[dq4fieldport.SEA] = {"lower": list(dq4fieldgfx.SEA_TILES), "upper": [0] * 4}
@@ -115,14 +109,12 @@ def compare_gfx(vram, cgram, cell, world, generated, palettes, sea_turns=True):
 
     fixed = [t for t in range(len(tiles) // 32) if t not in dq4fieldgfx.SEA_TILES and t not in ANIMATED]
     same = sum(vtile(t) == tiles[t * 32:t * 32 + 32] for t in fixed)
-    pairs = ((4, 5), (20, 21))
-    turned = rotation([tuple(vtile(t) for t in p) for p in pairs], [tuple(tiles[t * 32:t * 32 + 32] for t in p) for p in pairs])
+    sea = sea_frame(b"".join(vtile(t) for t in dq4fieldgfx.SEA_TILES), frames)
     lines = [cgram[(16 * line + i) * 2] | cgram[(16 * line + i) * 2 + 1] << 8 for line in (2, 3) for i in range(1, 14)]
     sets = [k for k, row in enumerate(palettes) if row[0:13] + row[15:28] == lines]
     return {"lower": [best[0], len(cells)], "upper": [upper, len(cells)], "tiles": [same, len(fixed)],
-            "sea_turn": turned, "palette_set": sets[0] if sets else None,
-            "ok": best[0] == upper == len(cells) and same == len(fixed) and (turned is not None or not sea_turns)
-            and bool(sets)}
+            "sea_frame": sea, "palette_set": sets[0] if sets else None,
+            "ok": best[0] == upper == len(cells) and same == len(fixed) and sea is not None and bool(sets)}
 
 
 def probes(grid, props, entrances, kinds=KINDS, centre=CENTER):
@@ -172,6 +164,7 @@ def main():
     generated = dq4fieldgfx.generate(args.dq5.read_bytes())
     palettes = original(Rom(args.dq5.read_bytes()))["palettes"]
     world_sets = {0: palettes["world0"], 1: [dq4fieldgfx.world1_set(palettes)], 2: palettes["world2"]}
+    sea = dq4fieldgfx.water(palettes)
 
     def scenes(field):
         """(callable, args) of the scenes of an FC field."""
@@ -200,8 +193,8 @@ def main():
             if got != {"field": list(cell)}:
                 return scene, {"got": got, "ok": False}
             _, vram, cgram = dump(mesence, rom, out / scene / "field.mss", out / scene / "dump")
-            # World 2 turns its sea by another routine (01:C66B), not the pairs of 01:C790.
-            return scene, {"got": got, **compare_gfx(vram, cgram, cell, world, generated, world_sets[w], w != 2)}
+            return scene, {"got": got, **compare_gfx(vram, cgram, cell, world, generated, world_sets[w],
+                                                     water_frames(sea, w))}
 
         def run_probe(kind, target, start, d):
             name = f"{prefix}terrain-{kind:02X}-{d}"

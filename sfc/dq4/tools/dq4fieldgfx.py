@@ -14,9 +14,9 @@ nibbles, and each world has its own lines 2 and 3 (01:A6A3): world 1 (FC field 1
 1-13, as its own lines are DQ5's snow; world 2 (FC field 3, 闇の世界) keeps DQ5's dark lines, which colour the same
 indices darker.
 
-The sea stays DQ5's block 0 and its moving water: the game turns tiles 4, 5, 20 and 21 a pixel at a time from an
-uncompressed copy at 01:A719 (01:C5C8 points [$A5] there, 01:C746 makes 16 turns into 7E:C000), not from the field
-tiles, and dq5fieldgfxwrite.py does not write that copy. The reef is the DQ4 rocks on the upper layer over that sea.
+The sea stays DQ5's block 0, and its moving water is the DQ4 water asset (water()): the game makes tiles 4, 5,
+20 and 21 from an uncompressed source at 01:A719 (01:C5C8 makes 16 frames into 7E:C000), not from the field tiles,
+so the water goes in as dq5fieldgfxwrite's water_files. The reef is the DQ4 rocks on the upper layer over that sea.
 
   python sfc/dq4/tools/dq4fieldgfx.py preview -o work/fieldgfx/preview.png
 """
@@ -42,6 +42,7 @@ DAY_SET = 2
 LINES = (0, 1)  # nibble n is palette line n + 2
 COLOURS = range(1, 14)
 SEA_TILES = (4, 5, 20, 21)
+WATER_FILE = "sea-dq4.bin"
 REEF = 0x0A
 # Art colours (drawn for town maps) moved onto DQ5 field colours before the nearest colour is taken; key None is for
 # every asset. The green ramp (dq4environmentart bank 1) goes one step darker onto DQ5's four field greens, so grass
@@ -49,7 +50,10 @@ REEF = 0x0A
 # pale grey and reads as snow, so the sand takes DQ5's sand ramp.
 TONES = {None: {"102900": "003800", "054600": "003800", "007200": "006800", "0ba100": "006800",
                 "3fb800": "00a000", "2dff39": "00a000", "20e30e": "00f818", "9cff8c": "00f818"},
-         "dirt": {"f7f7d6": "d8c068", "e2cd7a": "b09848", "cda23c": "907020"}}
+         "dirt": {"f7f7d6": "d8c068", "e2cd7a": "b09848", "cda23c": "907020"},
+         # Both specks of the water are nearest to the blue of its ground and would vanish into it; they take DQ5's
+         # darker and lighter sea blues.
+         "water0": {"0042ff": "0000ce", "0073ff": "00bdff"}}
 
 
 def _rgb(colour):
@@ -144,6 +148,14 @@ def rocks():
     return [[s if s != w else None for s, w in zip(srow, wrow)] for srow, wrow in zip(shoal, water)]
 
 
+def water(palettes):
+    """Moving-sea source (dq5fieldgfxwrite water_files: tiles 4, 5, 20 and 21, 128 bytes) of the DQ4 water asset
+    on line 2 (the sea tiles' nibble 0) of the world-0 day colours. The asset wraps at 16 pixels both ways, so
+    world 0's turn right, world 1's turn left and world 2's push up all run without a seam."""
+    sea = {0: line_colours(palettes)[0]}
+    return b"".join(encode(quantize(q, sea)[1]) for q in quarters(_pixels(assets()["water0"], "water0")))
+
+
 def generate(rom):
     """(tiles, tile palette nibbles, tile attributes, dq5fieldtables blocks) for a DQ5 ROM: its 512 field tiles,
     then the new tiles; and the DQ5 blocks of dq4fieldport.OWN_BLOCKS."""
@@ -201,6 +213,9 @@ def gfx_doc(dq5, folder):
     # dq5fieldgfxwrite takes 1,024 attributes once tiles grow; past the tiles, those of tile − 512, as it fills them.
     doc.update(tile_palettes=nibbles, tile_attributes=attrs + attrs[len(attrs) - TILES:TILES])
     doc["palettes"]["world1"] = [world1_set(doc["palettes"])]
+    # One source for the three worlds: dq5fieldgfxwrite writes it in place at 01:A719, with no world hook.
+    (folder / WATER_FILE).write_bytes(water(doc["palettes"]))
+    doc["water_files"] = {k: WATER_FILE for k in doc["water_files"]}
     gfx = folder / "fieldgfx.json"
     gfx.write_text(json.dumps(doc) + "\n", encoding="utf-8")
     table = folder / "blocks.json"
@@ -223,6 +238,9 @@ def render(rom, fc_grid, x0, y0, w, h, field=0):
     from dq5map import Rom
     tiles, nibbles, _, blocks = generate(rom)
     palettes = original(Rom(rom))["palettes"]
+    tiles, sea = bytearray(tiles), water(palettes)
+    for i, t in enumerate(SEA_TILES):
+        tiles[t * 32:t * 32 + 32] = sea[i * 32:i * 32 + 32]
     palettes = {**palettes, "world0": {DAY_SET: {0: palettes["world0"][DAY_SET], 1: world1_set(palettes),
                                                  2: palettes["world2"][0]}[dq4fieldport.WORLDS[field]]}}
     lines = line_colours(palettes)
