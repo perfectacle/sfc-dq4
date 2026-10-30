@@ -46,6 +46,10 @@ END = re.compile(r"end map (\w\w)/(\w\w) (cell|field) (\d+),(\d+)")
 # Frames a direction is held: the party first turns, then moves 8 px (one cell) per 8 frames; an FC cell
 # is two cells.
 PRESS = 32
+# FC door block property 97, the highest lock of the doors 94-97 (fc/dq4/docs/dq4-block-format.md). The port draws
+# it as a barred door and never opens it, so a stair
+# reached only through one (エンドール 04/01 (04,06)·(0C,06)) has no start; it is reported as skipped.
+LAST_KEY_DOOR = 0x97
 
 
 def scene(mesence, rom, state, out, name, **extra):
@@ -119,6 +123,10 @@ def stair_scenes(prg, groups):
                           for late in range(0, 1200, 120) for (dx, dy), d in DIRS.items()
                           if walkable(source, x - dx, y - dy) and (x - dx, y - dy) not in order]
                 if not starts:
+                    if any(0 <= x - dx < source.w and 0 <= y - dy < source.h
+                           and block_prop(source, source.cell(x - dx, y - dy) & 31) == LAST_KEY_DOOR for dx, dy in DIRS):
+                        yield f"stair-{group:02X}{number:02X}-{i}", None, "behind a door 97, never opened in this port"
+                        continue
                     raise ValueError(f"{fc_group:02X}/{fc_number:02X} ({x:02X},{y:02X}): no walkable cell next to the stair")
                 dest = to[x, y]
                 if "field" in dest:
@@ -150,7 +158,10 @@ def main():
     rom, state = args.rom.resolve(), args.state.resolve()
     prg = ines.prg(args.dq4.read_bytes())
 
-    jobs = [(name, [{"TO": to, "TEST": test} for to, test in starts], want) for name, starts, want in stair_scenes(prg, args.groups)]
+    stairs = list(stair_scenes(prg, args.groups))
+    skipped = {name: why for name, starts, why in stairs if starts is None}
+    jobs = [(name, [{"TO": to, "TEST": test} for to, test in starts], want) for name, starts, want in stairs
+            if starts is not None]
     found = doors(prg)
     _, props = dq4fieldport.fc_field(prg)
     for group, link in ((g, part) for g, parts in LINKS.items() if g in args.groups for part in parts):
@@ -191,7 +202,7 @@ def main():
     if placement(prg)[0x02, 0][0] in args.groups:
         area_scenes(mesence, rom, prg, state, out, results)
     ok = all(r["ok"] for r in results.values())
-    report = {"status": "passed" if ok else "failed", "scenes": dict(sorted(results.items()))}
+    report = {"status": "passed" if ok else "failed", "scenes": dict(sorted(results.items())), "skipped": skipped}
     (out / "results.json").write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n")
     print(json.dumps(report, ensure_ascii=False))
     return 0 if ok else 1

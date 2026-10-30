@@ -164,9 +164,12 @@ def talk_side(source, x, y, occupied):
 
 
 # FC people placed where nobody can reach them: (FC group, FC map, x, y). テンペ's three stand on wall blocks, cut off
-# from the town; フレノール's two night people stand below the map (its height is 1B).
+# from the town; フレノール's two night people stand below the map (its height is 1B). レイクナバ 16/00 (30x30) has
+# people right of and below the map; エンドール's colosseum stands 04/07 three on the top wall row and one on floor
+# walled in on all four sides.
 STAGED = {(0x0E, 0, 0x15, 0x0D), (0x0E, 0, 0x16, 0x0D), (0x0E, 0, 0x17, 0x0D), (0x0F, 0, 0x00, 0x22),
-          (0x0F, 0, 0x00, 0x23)}
+          (0x0F, 0, 0x00, 0x23), (0x16, 0, 0x24, 0x00), (0x16, 0, 0x00, 0x25),
+          (0x04, 7, 0x01, 0x00), (0x04, 7, 0x02, 0x00), (0x04, 7, 0x03, 0x00), (0x04, 7, 0x19, 0x04)}
 
 
 def main():
@@ -202,8 +205,13 @@ def main():
     prg = ines.prg(args.dq4.read_bytes())
     state = args.state.resolve()
 
-    jobs = []
+    jobs, later = [], []
     for m, persons in people.items():
+        if not re.fullmatch(r"[0-9A-F]{2}/[0-9A-F]{2}", m):
+            # A later state's list (dq4ch1event.ALT_STATES, named by alt_name): its people stand only after their
+            # event, and these scenes walk the start-of-chapter maps.
+            later.append(m)
+            continue
         if args.maps and m not in args.maps:
             continue
         group, number = int(m[:2], 16), int(m[3:], 16)
@@ -300,7 +308,7 @@ def main():
                 results[name] = {"ok": ok, "want": f"{message:03X}", "got": [f"{v:03X}" for v in messages or []][:4],
                                  "timing": timing, **({"price": got_price, "want_price": price} if price is not None else {})}
     ok = all(r["ok"] for r in results.values())
-    report = {"status": "passed" if ok else "failed", "scenes": dict(sorted(results.items()))}
+    report = {"status": "passed" if ok else "failed", "scenes": dict(sorted(results.items())), "later_states": later}
     (out / "results.json").write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n")
     print(json.dumps({"status": report["status"], "scenes": len(results),
                       "failed": {k: v for k, v in results.items() if not v["ok"]}}, ensure_ascii=False))

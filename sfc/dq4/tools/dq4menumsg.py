@@ -36,6 +36,9 @@ from dq5textwrite import INDEX_LOAD, INDEX_LOAD_CODE, MAX_MESSAGES  # noqa: E402
 BASE = 0x658000
 LIMIT = 0x6A0000            # 65~69 다섯 뱅크. 70 은 서곡 재배치 표, 6A~6F·72~7D 는 소리 이식이 쓴다
 INDEX_BANK = 0x60
+# 3200 이상을 덧붙일 때의 색인(16개마다 3바이트). 메시지 덩어리(BASE~LIMIT)가 3장 대사까지 차서 덩어리 밖에 둔다.
+# 24:8BC3 이 DB 를 이 뱅크로 두고 abs 로 읽으므로(65 와 같이 WRAM 거울 없는 뱅크) 59 도 같다.
+INDEX_AT = 0x598000
 GLYPH_START = 0x07D77C     # 원래 보행 모드 메시지 3,200개의 시작(끝은 0C:8020). 그림은 뱅크 0A 까지만
 GLYPH_BANKS = range(0x07, 0x0B)
 READ_SLACK = 2              # 글자 한 줄을 3바이트로 읽으므로 묶음 끝 뒤 2바이트도 같은 뱅크 안이어야 한다
@@ -204,9 +207,8 @@ def apply(data, font, extra=None):
     mask_at = BASE + len(decoder)
     t1_at = mask_at + len(mask)
     t0_at = t1_at + len(nodes) * 2
-    index_at = t0_at + len(nodes) * 2
-    index_size = total // 16 * 3 if grown else 0
-    font_at = index_at + index_size
+    index_at = INDEX_AT
+    font_at = t0_at + len(nodes) * 2
     for at, v in ((NODES_1_OPERAND, t1_at), (NODES_0_OPERAND, t0_at), (MASK_OPERAND, mask_at)):
         decoder[at - DECODER:at - DECODER + 2] = (v & 0xFFFF).to_bytes(2, 'little')
     decoder[ROOT_OPERAND - DECODER:ROOT_OPERAND - DECODER + 2] = (root * 2).to_bytes(2, 'little')
@@ -215,7 +217,7 @@ def apply(data, font, extra=None):
     decoder[-1] = 0x6B
     t1 = b''.join(n[0].to_bytes(2, 'little') for n in nodes)
     t0 = b''.join(n[1].to_bytes(2, 'little') for n in nodes)
-    head = bytes(decoder) + mask + t1 + t0 + bytes(index_size) + bytes(table)
+    head = bytes(decoder) + mask + t1 + t0 + bytes(table)
     if (BASE & 0xFFFF) + len(head) > 0x10000:
         raise ValueError('디코더와 트리 표가 뱅크 65 를 넘음')
     stream = head + bytes(blob)
@@ -228,6 +230,8 @@ def apply(data, font, extra=None):
 
     index = b''.join(index_entry(o + len(head), starts[m]) for m in range(0, total, 16))
     index_table = index_at if grown else INDEX
+    if grown and ((INDEX_AT & 0xFFFF) + len(index) > 0x10000 or any(d[lorom(INDEX_AT):lorom(INDEX_AT) + len(index)])):
+        raise ValueError(f'{INDEX_AT:06X}~ 색인 {len(index)}바이트 자리가 비어 있지 않거나 뱅크를 넘음')
     d[lorom(index_table):lorom(index_table) + len(index)] = index
     if grown:
         load = bytearray(INDEX_LOAD_CODE)

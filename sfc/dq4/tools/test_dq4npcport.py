@@ -116,6 +116,13 @@ class PortTest(unittest.TestCase):
                 if p["message"] is not None:
                     self.assertEqual(shows[p["dq5"]["talk"]], p["message"])
 
+    def test_without_people(self):
+        # dq4groupbuild.py --no-people: the ROM dq4groupcheck walks, where wandering people would block stairs.
+        lists, messages, report = port.port(str(DQ5), str(DQ4), with_people=False)
+        self.assertEqual(messages, [])
+        self.assertTrue(lists and all(not e["entries"] for e in lists))
+        self.assertTrue(report and all(not people for people in report.values()))
+
 
 if __name__ == "__main__":
     unittest.main()

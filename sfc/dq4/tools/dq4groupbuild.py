@@ -78,10 +78,29 @@ LINKS = {
     0x3D: [{"fc": 0x01, "arrival": (0x0F, 0x1B), "attrs": "03/00", "field": [(0x27, 0x49)], "out": "down:64"},
            {"fc": 0x0E, "arrival": (0x0A, 0x2C), "attrs": "03/00", "field": [(0x47, 0x39)], "out": "down:64"},
            {"fc": 0x0F, "arrival": (0x16, 0x00), "attrs": "03/00", "field": [(0x60, 0x28)], "out": "up:64"}],
+    # Chapter 3: レイクナバ and the cave where its iron safe lies (きたのどうくつ, arrival on its stair to the field),
+    # ボンモール, and エンドール. Each town leads a DQ5 group, so each takes a ルーラ slot (dq4fieldtravel). Their
+    # people and sellers are those of chapter 3's start ($615A = 2).
+    0x3E: [{"fc": 0x16, "arrival": (0x00, 0x0D), "attrs": "03/00", "field": [(0x68, 0x24)], "out": "left:64",
+            "chapter": 3},
+           {"fc": 0x3D, "arrival": (0x0B, 0x03), "attrs": "03/00", "field": [(0x71, 0x14)],
+            "out": "down:32,wait:60,up:32", "chapter": 3}],
+    0x3F: [{"fc": 0x05, "arrival": (0x11, 0x1F), "map": 1, "attrs": "03/00", "field": [(0x74, 0x46)], "out": "down:64",
+            "chapter": 3}],
+    0x40: [{"fc": 0x04, "arrival": (0x17, 0x20), "attrs": "03/00", "field": [(0x67, 0x65)], "out": "down:64",
+            "chapter": 3}],
 }
-# The attribute table grows by 6 bytes a map and outgrows its own bank (108 spare bytes), so it moves whole.
-NEWMAP_AT = ("--entrance-table-at", "3C:C000", "--records-at", "34:8000", "--door-bank", "3B",
-             "--attr-table-at", "3C:D000")
+# The attribute table grows by 6 bytes a map and outgrows its own bank (108 spare bytes), so it moves whole; the
+# map pointer table (3 bytes a map) outgrew bank 0F with chapter 3's maps and moves the same way. The entrance and
+# pointer tables sit after the chest tables (3C:8400-), leaving 3C:A000-CFFF to the area moves.
+NEWMAP_AT = ("--entrance-table-at", "3C:9000", "--door-bank", "3B", "--attr-table-at", "3C:D000",
+             "--pointer-table-at", "3C:9200")
+# New-map records, [start, end) areas in banks 30-3F: the map loader reads a record with DB set to its bank and
+# reads low WRAM meanwhile. One dq5newmap call puts all its records in one bank, so the records that do not fit the
+# first area go to the next areas in later calls (record_areas, records_pass).
+RECORDS_AT = ((0x348000, 0x350000), (0x318000, 0x320000))
+# The record a new map points at until a later call gives it its own: any original map.
+RECORD_PLACEHOLDER = "03/00"
 EXIT_AT = ("--exits-at", "2A:D812", "--records-at", "3C:A000")
 ENTRANCES_AT = ("--entrances-at", "3C:8000")
 # dq5textwrite writes the whole walking text again, so it takes banks of its own.
@@ -91,8 +110,9 @@ TEXT_AT = ("--at", "35:8000")
 TALK_AT = ("--extra-at", "3C:E800", "--hook-at", "06:FE10")
 SHOP_AT = ("--shop-at", "3C:E000")
 INN_AT = 0x3CF000
+# The entrance hook's table grows by 9 bytes an entrance cell and passes 3C:FC00 with chapter 3.
 ENTRANCE_HOOK_AT = 0x3CF800
-SHOP_KEY_AT = 0x3CFC00
+SHOP_KEY_AT = 0x3CFE00
 # The three tables chests and drawers grow; dq5chestplace reads chest_maps and search with DB, so bank 00-3F.
 CHEST_AT = ("--chests-at", "3C:8400", "--chest-maps-at", "3C:8800", "--search-at", "3C:8C00")
 # The field loader reads both RLE chunks with DB set to their bank, so 30-3F; bank 3A is free in this build.
@@ -163,9 +183,15 @@ def fc_numbers(prg, fc_group):
     return sorted(k for g, k in placement(prg) if g == fc_group)
 
 
-def has_people(fc_group):
-    """Whether the FC people and shops of an FC group are ported (LINKS "people", on by default)."""
-    return all(part.get("people", True) for parts in LINKS.values() for part in parts if part["fc"] == fc_group)
+def has_people(fc_group, with_people=True):
+    """Whether the FC people and shops of an FC group are ported (LINKS "people", on by default; `with_people` False
+    ports none)."""
+    return with_people and all(part.get("people", True) for parts in LINKS.values() for part in parts if part["fc"] == fc_group)
+
+
+def chapter(fc_group):
+    """FC chapter whose start the FC people and sellers of an FC group show (LINKS "chapter", 1 by default)."""
+    return next((part.get("chapter", 1) for parts in LINKS.values() for part in parts if part["fc"] == fc_group), 1)
 
 
 def tag(group, part):
@@ -314,8 +340,10 @@ def area_rows(group, place, cells):
 
 
 FALL_PROPS = (0x05, 0x0B)
-# Groups whose falling cells are linked. The other chapters' holes come with their chapter's events.
-FALL_GROUPS = range(0x36, 0x3C)
+# Groups whose falling cells are linked. The other chapters' holes come with their chapter's events. In chapter 3's
+# きたのどうくつ the way to the iron safe is the hole of 3D/01 down to 3D/03 (FC then sets $62AA bit7, which turns the
+# stairs into 3D/01 to 3D/02; that flag is not ported).
+FALL_GROUPS = (*range(0x36, 0x3C), 0x3E, 0x40)
 # FC groups whose falls drop to the field: {FC group: (FC maps, FC field cell)}. FC moves the party from the field
 # cell it came in by (12:$B6DD, $42/$43): the tower 30 drops it 3 cells below where そらとぶくつ lands, (88,16),
 # past the moat around the island. Those maps have no other way to the field, so the hook's leave row for them
@@ -368,6 +396,70 @@ def fall_records(prg, group):
     return out
 
 
+def record_areas(sizes, areas):
+    """Area index of each record (sizes in map order): records follow one another, and one that does not fit the
+    rest of its area starts the next area."""
+    for start, end in areas:
+        if not (0x30 <= start >> 16 <= 0x3F and start & 0xFFFF >= 0x8000 and start < end <= (start | 0xFFFF) + 1):
+            raise ValueError(f"records area {_cpu(start)}-{_cpu(end - 1)}: needs one bank of 30-3F")
+    out, k, at = [], 0, areas[0][0]
+    for size in sizes:
+        while at + size > areas[k][1]:
+            k += 1
+            if k == len(areas):
+                raise ValueError(f"new-map records: {sum(sizes)} bytes do not fit the areas")
+            at = areas[k][0]
+        out.append(k)
+        at += size
+    return out
+
+
+def _span(write):
+    bank, addr = (int(v, 16) for v in write["at"].split(":"))
+    return bank << 16 | addr, (bank << 16 | addr) + len(bytes.fromhex(write["hex"]))
+
+
+def splice(writes, extra):
+    """Lay each write of `extra` that falls inside one of `writes` over its bytes there (dq5patch/1 write lists,
+    `writes` changed in place): a later dq5newmap call rewrites map pointers inside the first call's pointer list,
+    which dq5build would refuse as an overlap. Returns the writes of `extra` that touch none of `writes`."""
+    rest = []
+    for w in extra:
+        lo, hi = _span(w)
+        inside = [v for v in writes if _span(v)[0] <= lo and hi <= _span(v)[1]]
+        if not inside:
+            if any(_span(v)[0] < hi and lo < _span(v)[1] for v in writes):
+                raise ValueError(f"{w['at']} {w.get('note', '')}: overlaps an earlier write without lying inside it")
+            rest.append(w)
+            continue
+        v = inside[0]
+        data = bytearray.fromhex(v["hex"])
+        data[lo - _span(v)[0]:hi - _span(v)[0]] = bytes.fromhex(w["hex"])
+        v["hex"] = data.hex(" ").upper()
+    return rest
+
+
+def new_map_records(env):
+    """{(DQ5 group, map): record bytes} of the GROUPS maps from dq4environmentrom's documents in `env`."""
+    from dq5mapwrite import encode
+    return {(group, number): encode(json.loads((env / f"{name}.dq5map.json").read_text(encoding="utf-8")))
+            for name, (group, number) in GROUPS.items()}
+
+
+def check_records(rom, records):
+    """Each new map's pointer in the built ROM leads to its record (records {(group, map): bytes})."""
+    from dq5map import Rom, lorom, map_pointer
+    built = Rom(rom)
+    for (group, number), record in records.items():
+        at = map_pointer(built, group, number)
+        if rom[lorom(at):lorom(at) + len(record)] != record:
+            raise ValueError(f"{group:02X}/{number:02X}: the map pointer {_cpu(at)} does not lead to its record")
+
+
+def _cpu(addr):
+    return f"{addr >> 16:02X}:{addr & 0xFFFF:04X}"
+
+
 def check_door_copy(rom, door_bank):
     """The door routines read bank 01's FD97-FEB6 from DOOR_BANK on our maps, and dq4environmentrom copies them
     from the original ROM: the built ROM must still have the same bytes in both banks. dq5newmap's --door-bank must
@@ -408,7 +500,27 @@ def map_attrs(dq5, link):
     return {"bytes": row}
 
 
-def build(dq5, dq4, out):
+def records_pass(dq5, out, manifests, k, sources):
+    """dq5newmap call k (1-): the records {map: dq5map/1 document} at RECORDS_AT[k], made on the ROM of
+    `manifests` (the environment and the earlier calls). Its pointer writes go into the first call's list (splice).
+    Appends its patch to `manifests`; returns its check."""
+    base = out / f"newmap-{k}.sfc"
+    _run(DQ5_TOOLS / "dq5build.py", dq5, "build", *manifests, "--size", 4, "-o", base)
+    source = _save(out / f"newmap-{k}.json", {"format": "dq5newmap/1", "maps": [
+        {"map": m, "record": {"source": doc}} for m, doc in sources.items()]})
+    args = ("--records-at", _cpu(RECORDS_AT[k][0]))
+    patch = out / f"newmap-{k}.dq5patch.json"
+    _run(DQ5_TOOLS / "dq5newmap.py", base, "patch", source, "-o", patch, *args)
+    first = json.loads((out / "newmap.dq5patch.json").read_text(encoding="utf-8"))
+    doc = json.loads(patch.read_text(encoding="utf-8"))
+    doc["writes"] = splice(first["writes"], doc["writes"])
+    _save(out / "newmap.dq5patch.json", first)
+    _save(patch, doc)
+    manifests.append(patch)
+    return "dq5newmap.py", source, args
+
+
+def build(dq5, dq4, out, with_people=True):
     out.mkdir(parents=True, exist_ok=True)
     prg = ines.prg(dq4.read_bytes())
     place = placement(prg)
@@ -420,6 +532,8 @@ def build(dq5, dq4, out):
     new_maps = [f"{g:02X}/{n:02X}" for g, n in sorted(GROUPS.values())]
     new_map_args = [a for m in new_maps for a in ("--new-map", m)]
     names = {f"{g:02X}/{n:02X}": name for name, (g, n) in GROUPS.items()}
+    records = {f"{g:02X}/{n:02X}": r for (g, n), r in new_map_records(env).items()}
+    area = dict(zip(new_maps, record_areas([len(records[m]) for m in new_maps], RECORDS_AT)))
     newmap = {"format": "dq5newmap/1", "groups": [], "maps": []}
     for group, (first, *_) in LINKS.items():
         x, y = cell(*first["arrival"])
@@ -429,8 +543,8 @@ def build(dq5, dq4, out):
     part_of = {part["fc"]: part for parts in LINKS.values() for part in parts}
     for m in new_maps:
         fc_group, _ = fc_map(prg, int(m[:2], 16), int(m[3:], 16))
-        newmap["maps"].append({"map": m, "record": {"source": f"env/{names[m]}.dq5map.json"},
-                               "attrs": map_attrs(dq5, part_of[fc_group])})
+        record = {"source": f"env/{names[m]}.dq5map.json"} if area[m] == 0 else {"copy": RECORD_PLACEHOLDER}
+        newmap["maps"].append({"map": m, "record": record, "attrs": map_attrs(dq5, part_of[fc_group])})
     manifests = [env / "dq4-environment.dq5patch.json"]
 
     def step(tool, name, doc, base, *args):
@@ -440,9 +554,16 @@ def build(dq5, dq4, out):
         manifests.append(manifest)
         return tool, source, args
 
-    checks = [step("dq5newmap.py", "newmap", newmap, env_rom, *NEWMAP_AT)]
+    # The check of the first call rebuilds its own placeholders, so the maps of later areas are covered only by
+    # check_records on the built ROM.
+    checks = [step("dq5newmap.py", "newmap", newmap, env_rom, *NEWMAP_AT, "--records-at", _cpu(RECORDS_AT[0][0]))]
+    record_patches = []
+    for k in range(1, max(area.values()) + 1):
+        checks.append(records_pass(dq5, out, manifests, k, {m: f"env/{names[m]}.dq5map.json"
+                                                            for m in new_maps if area[m] == k}))
+        record_patches.append(manifests[-1].name)
     import dq4npcport  # imports this module
-    lists, messages, people = dq4npcport.port(dq5, dq4)
+    lists, messages, people = dq4npcport.port(dq5, dq4, with_people)
     _save(out / "npc-report.json", people)
     _run(DQ5_TOOLS / "dq5npcrelocate.py", dq5, "patch",
          _save(out / "npc.json", {"format": "dq5npcrelocate/1", "scripts": [],
@@ -452,7 +573,7 @@ def build(dq5, dq4, out):
     checks.append(step("dq5textwrite.py", "text", {"format": "dq5text/1", "messages": messages}, dq5, *TEXT_AT))
     checks.append(step("dq5talkwrite.py", "talk", dq4npcport.talk_doc(messages), dq5, *TALK_AT))
     import dq4shopport  # imports this module
-    _, shops, inn_writes, shop_report = dq4shopport.port(dq5, dq4, INN_AT, SHOP_KEY_AT)
+    _, shops, inn_writes, shop_report = dq4shopport.port(dq5, dq4, INN_AT, SHOP_KEY_AT, with_people)
     _save(out / "shop-report.json", shop_report)
     step("dq5progresswrite.py", "shops", {"format": "dq5progress/1", "shops": shops}, dq5, *SHOP_AT)
     manifests.append(_save(out / "inn.dq5patch.json", {"format": "dq5patch/1", "name": "dq4-inns-shop-keys", "writes": inn_writes}))
@@ -520,13 +641,15 @@ def build(dq5, dq4, out):
     rom = out / "groups.sfc"
     _run(DQ5_TOOLS / "dq5build.py", dq5, "build", *manifests, "--size", 4, "-o", rom, "--ips", out / "groups.ips")
     check_door_copy(rom.read_bytes(), int(NEWMAP_AT[NEWMAP_AT.index("--door-bank") + 1], 16))
+    check_records(rom.read_bytes(), {(int(m[:2], 16), int(m[3:], 16)): r for m, r in records.items()})
     # dq5newmap checks the built ROM; the others build their own from the original.
     for tool, source, args in checks:
         _run(DQ5_TOOLS / tool, rom if tool == "dq5newmap.py" else dq5, "check", source, *args)
     summary = {"rom": str(rom), "maps": new_maps, "exits": ours, "areas": areas,
                "fields": {tag(g, part): {"entrances": found[part["fc"]][0], "leave": found[part["fc"]][1]}
                           for g, parts in LINKS.items() for part in parts if part["field"]},
-               "ruler": destinations,
+               "ruler": destinations, "record_patches": record_patches,
+               "record_areas": {m: _cpu(RECORDS_AT[k][0]) for m, k in area.items()},
                "records_end": report["records_end"], "bank01_bytes": report["bank01_bytes"]}
     _save(out / "groups.json", summary)
     return summary
@@ -540,11 +663,7 @@ def main():
     ap.add_argument("--no-people", action="store_true",
                     help="no FC people or shops: a ROM for dq4groupcheck, where wandering people block stairs")
     args = ap.parse_args()
-    if args.no_people:
-        for parts in LINKS.values():
-            for part in parts:
-                part["people"] = False
-    print(json.dumps(build(args.dq5, args.dq4, args.out), ensure_ascii=False))
+    print(json.dumps(build(args.dq5, args.dq4, args.out, with_people=not args.no_people), ensure_ascii=False))
 
 
 if __name__ == "__main__":

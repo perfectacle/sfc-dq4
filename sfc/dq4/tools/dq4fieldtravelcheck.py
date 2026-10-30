@@ -135,7 +135,9 @@ def main():
         name = f"sail-{d['slot']}"
         (sx, sy), (nx, ny), board, away = sail_moves(props, d["ship"])
         place = ";".join(f"{a:04X}={v & 0xFF:02X};{a + 1:04X}={v >> 8:02X}" for a, v in ((SHIP_X, sx), (SHIP_Y, sy)))
-        got = field_scene(mesence, rom, state, out, name, nx, ny, f"idle:16,{board}:24,{away}:40,wait:30",
+        # A short push away: the ship crosses 5-6 cells in 40 frames, and エンドール's inlet has 5 sea cells below the
+        # ship before the party would step off onto land.
+        got = field_scene(mesence, rom, state, out, name, nx, ny, f"idle:16,{board}:24,{away}:16,wait:30",
                           SET=f"{SHIP_SHOWN};{place}", MAXF="3000")
         ram = (out / name / "final.wram").read_bytes()
         cell = got.get("field", [nx, ny])

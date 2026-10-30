@@ -30,7 +30,7 @@ import dq4text  # noqa: E402
 import dq5text  # noqa: E402
 from dq5hangul import MESSAGES  # noqa: E402
 from dq4environmentrom import GROUPS  # noqa: E402
-from dq4groupbuild import cell, fc_map, has_people  # noqa: E402
+from dq4groupbuild import cell, chapter, fc_map, has_people  # noqa: E402
 import dq4shopport  # noqa: E402
 from dq4shopport import merchants  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
@@ -137,12 +137,14 @@ FIRST_MESSAGE = MESSAGES
 SCRIPT_TALK = 0x900
 LINE, PAGE, END = 0x1000, 0x1002, 0x1001
 NIGHT = 0x78
+MAX_CELL = 0x7F
 
 
-def fc_state(night, flags=None):
-    """Chapter 1 at the start: $615A = 0, no flags or party, $62ED day or night. flags {address: value} sets
-    event flags for a later state."""
+def fc_state(night, flags=None, chapter_number=1):
+    """A chapter at its start: $615A = chapter - 1, no flags or party, $62ED day or night. flags {address: value}
+    sets event flags for a later state."""
     ram = bytearray(0x8000)
+    ram[0x615A] = chapter_number - 1
     ram[0x62ED] = NIGHT if night else 0
     for a, v in (flags or {}).items():
         ram[a] = v
@@ -152,7 +154,7 @@ def fc_state(night, flags=None):
 def fc_people(prg, fc_group, number, night, flags=None):
     """FC person records of a map at that time: FC cell, facing, step interval, picture, messages. With flags
     the list is the one FC picks for those event flags (dq4map.place_records)."""
-    state = fc_state(night, flags)
+    state = fc_state(night, flags, chapter(fc_group))
     out = []
     for rec in dq4talk.npc_list(prg, fc_group, number, night, ram=state.ram if flags else None):
         x, y = dq4talk.pos(rec, night)
@@ -291,12 +293,13 @@ def talk_doc(messages):
     return doc
 
 
-def port(dq5_path, dq4_path):
-    """(dq5npcrelocate lists, dq5text messages, report). After the maps' own lists come the lists of later
-    states (dq4ch1event.ALT_STATES) as {"name": dq4ch1event.alt_name(state, map), "entries": …}, reported under the same name;
-    their new lines get message numbers after the start state's."""
+def port(dq5_path, dq4_path, with_people=True):
+    """(dq5npcrelocate lists, dq5text messages, report); `with_people` False ports no FC people. After the maps'
+    own lists come the lists of later states (dq4ch1event.ALT_STATES) as {"name": dq4ch1event.alt_name(state, map),
+    "entries": …}, reported under the same name; their new lines get message numbers after the start state's."""
     import dq4ch1event
     data = Path(dq4_path).read_bytes()
+    items = dq4shopport.dq5_items(dq4shopport.dq5item.Rom(Path(dq5_path).read_bytes()))
     prg, rom = ines.prg(data), dq4text.Rom(data)
     first = first_talk()
     texts = {}
@@ -304,13 +307,17 @@ def port(dq5_path, dq4_path):
 
     def people_of(name, fc_group, fc_number, flags=None):
         entries, people = [], []
-        shops = merchants(prg, fc_group, fc_number)
-        for night in (False, True) if has_people(fc_group) else ():
+        shops = merchants(prg, fc_group, fc_number, items)
+        for night in (False, True) if has_people(fc_group, with_people) else ():
             for p in fc_people(prg, fc_group, fc_number, night, flags):
+                if max(cell(p["x"], p["y"])) > MAX_CELL:
+                    # Parked far off the map until an event brings them (エンドール 04/02 night, (1A,7F)·(1B,7F)):
+                    # the DQ5 person record holds 7-bit cells.
+                    continue
                 shows = [m for m in p["shows"] if m is not None]
                 predicted = [m - dq4talk.SERVICE for m in shows if m >= dq4talk.SERVICE]
                 service = shops.get((p["x"], p["y"], night))
-                if service is None and predicted:
+                if service is None and predicted and dq4shopport.has_goods(prg, predicted[0], fc_group, fc_number, items):
                     service = dq4shopport.SERVICE[predicted[0]]
                 message = None
                 if service is not None:
@@ -318,6 +325,8 @@ def port(dq5_path, dq4_path):
                     talk = service
                     p = {**p, "interval": 0}
                 else:
+                    # A seller with nothing DQ5 has (has_goods) keeps the lines before its service.
+                    shows = [m for m in shows if m < dq4talk.SERVICE]
                     message = allocate(texts, tuple(shows),
                                        lambda: dq5_codes(rom, shows) if shows else nothing_codes())
                     talk = first + message - FIRST_MESSAGE

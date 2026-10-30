@@ -37,6 +37,9 @@ CHECK = DQ5_TOOLS / "lua" / "dq5chestcheck.lua"
 # The command window, then しらべる (dq5chestcheck.INPUT without its first step up).
 SEARCH = ("a:8,wait:60,down:6,wait:25,down:6,wait:25,down:6,wait:25,"
           "right:6,wait:25,a:8,wait:200,a:4,wait:150,a:4,wait:150,b:4,wait:220")
+# DQ5 item B5 ちいさなメダル shows one more message (0167) after the reward, and the open bit is set only after it.
+MEDAL = 0xB5
+SEARCH_MEDAL = SEARCH.replace("a:4,wait:150,b:4", "a:4,wait:150,a:4,wait:150,b:4")
 # Hero facing byte 7E:31E0 (slot 0 of the people table) for an FC neighbour below, left, right or above.
 FACING = {(0, 1): 0x88, (-1, 0): 0x11, (1, 0): 0x22, (0, -1): 0x44}
 CHEST_MESSAGE = 0x131
@@ -77,7 +80,7 @@ def run_entry(mesence, rom, state, out, name, to, facing, reward, message, drawe
     dest = out / name / "search"
     dest.mkdir()
     env = environment(os.environ["LIBDIR"], saved, dest)
-    env.update(INPUT=SEARCH)
+    env.update(INPUT=SEARCH_MEDAL if reward == MEDAL else SEARCH)
     try:
         subprocess.run([str(mesence), "--testrunner", str(rom), str(CHECK), "--Snes.DisableFrameSkipping=true"],
                        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300, check=False)
