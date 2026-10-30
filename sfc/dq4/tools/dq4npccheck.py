@@ -205,8 +205,13 @@ def main():
     prg = ines.prg(args.dq4.read_bytes())
     state = args.state.resolve()
 
-    jobs = []
+    jobs, later = [], []
     for m, persons in people.items():
+        if not re.fullmatch(r"[0-9A-F]{2}/[0-9A-F]{2}", m):
+            # A later state's list (dq4ch1event.ALT_STATES, named by alt_name): its people stand only after their
+            # event, and these scenes walk the start-of-chapter maps.
+            later.append(m)
+            continue
         if args.maps and m not in args.maps:
             continue
         group, number = int(m[:2], 16), int(m[3:], 16)
@@ -303,7 +308,7 @@ def main():
                 results[name] = {"ok": ok, "want": f"{message:03X}", "got": [f"{v:03X}" for v in messages or []][:4],
                                  "timing": timing, **({"price": got_price, "want_price": price} if price is not None else {})}
     ok = all(r["ok"] for r in results.values())
-    report = {"status": "passed" if ok else "failed", "scenes": dict(sorted(results.items()))}
+    report = {"status": "passed" if ok else "failed", "scenes": dict(sorted(results.items())), "later_states": later}
     (out / "results.json").write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n")
     print(json.dumps({"status": report["status"], "scenes": len(results),
                       "failed": {k: v for k, v in results.items() if not v["ok"]}}, ensure_ascii=False))
