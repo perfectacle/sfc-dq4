@@ -128,5 +128,40 @@ class PrologueTests(unittest.TestCase):
         self.assertLess(near, far)
 
 
+    def test_inside_is_a_rectangle(self):
+        # 65816 을 흉내 내지 않고 비교·분기만 따라가 사각형 안이면 LDA #0, 밖이면 LDA #1 에 닿는지 본다
+        def run(x, y):
+            code, pc, a = pro._inside(34, 8, 35, 10), 3, 0
+            while True:
+                op = code[pc]
+                if op == 0xAF:
+                    a = {0x3020: x, 0x3080: y}[code[pc + 1] | code[pc + 2] << 8]
+                    pc += 4
+                elif op == 0x29:
+                    a &= code[pc + 1]
+                    pc += 2
+                elif op == 0xC9:
+                    carry = a >= code[pc + 1]
+                    pc += 2
+                elif op in (0x90, 0xB0):
+                    pc += 2 + (code[pc + 1] if (op == 0xB0) == carry else 0)
+                elif op == 0xC2:
+                    return code[pc + 3]
+        for x, y, want in ((34, 9, 0), (35, 8, 0), (35, 10, 0), (33, 9, 1), (36, 9, 1), (34, 7, 1), (34, 11, 1)):
+            self.assertEqual(run(x, y), want, (x, y))
+
+    def test_frog_waits_hidden_and_triggers_in_order(self):
+        _, at = pro.native()
+        frog = next(s for s in pro.scripts() if s["address"] == pro.FROG_SCRIPT)["commands"]
+        self.assertEqual(frog[0]["op"], '27')
+        calls = [c["args"] for c in frog if c["op"] == '05']
+        want = [at[n] for n in ('voice_hut', 'voice_bridge', 'frog_call')]
+        self.assertEqual([a[0] | a[1] << 8 | a[2] << 16 for a in calls], want)
+        self.assertEqual(frog[-1]["op"], '16')
+        lists = pro.npc_lists()[0]
+        village = next(x for x in lists if x["map"] == pro.VILLAGE)["entries"]
+        self.assertEqual(village[-1]["fields"]["interval"], 1)
+
+
 if __name__ == '__main__':
     unittest.main()
