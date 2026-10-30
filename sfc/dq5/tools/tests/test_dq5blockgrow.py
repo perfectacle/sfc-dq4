@@ -152,6 +152,9 @@ def bit9_rom(planes, planes10=(None, None, None)):
     put(d, 0x00BCA0, bytes([0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01]))
     put(d, 0x308000, fw.bit9_hook(planes, planes10))
     put_cells(d)
+    # 11비트 훅은 JML 로 원래 다음 명령에 돌아간다. 해석기의 jsl 이 끝나도록 그 자리에 RTL 을 둔다.
+    for back in fw.BIT11_RETURNS:
+        put(d, back, b'\x6b')
     return d
 
 
@@ -178,16 +181,17 @@ class Bit9HookTests(unittest.TestCase):
         put(d, 0x30C000 + 0x123, b'\xdf')            # 세계 1: 비트 2 만 끔
         put(d, 0x30B000 + 0x123, b'\xff')
         cases = ((0, 0x00, 0x6), (0, 0x20, 0x7), (1, 0x20, 0x1), (1, 0x00, 0x0), (2, 0x00, 0x2), (3, 0x20, 0x1))
-        for world, e000, want in cases:
+        entries = fw.bit11_entries(fw.bit9_hook(planes, planes10))
+        for (world, e000, want), entry in ((c, e) for c in cases for e in entries):
             cpu = Cpu(bytes(d), bytes(0x20000))
             cpu.wram[0x1949] = world
             cpu.wram[0xE123] = e000
             cpu.p = 0x20
             cpu.a, cpu.x, cpu.y = 0x5A00, 0x123, 0x5A02
             s = cpu.s
-            cpu.jsl(0x308000)
-            self.assertEqual(cpu.a & 0xFFFF, want << 8 | 0x5A, f'세계 {world}')
-            self.assertEqual((cpu.x, cpu.y, cpu.s), (2, 2, s), f'세계 {world}')
+            cpu.jsl(0x308000 + entry)
+            self.assertEqual(cpu.a & 0xFFFF, want << 8 | 0x5A, f'세계 {world} 몸통 {entry}')
+            self.assertEqual((cpu.x, cpu.y, cpu.s), (2, 2, s), f'세계 {world} 몸통 {entry}')
         put(d, dq5field.BIT9_SITES[0], b'\x22\x00\x80\x30')
         rom = Rom(bytes(d))
         self.assertEqual(dq5field.bit9_planes(rom), planes)
@@ -209,7 +213,7 @@ class Bit9HookTests(unittest.TestCase):
         other = [1100] * fw.SIZE
         for x, y in fw.changed_cells(rom):
             grid[y * 256 + x] = other[y * 256 + x] = 5
-        hook = len(fw.bit9_hook([None] * 3, [1] * 3))
+        hook = len(fw.bit9_hook([1, None, None], [1, 1, None]))
         out, _ = fw.plane_writes(rom, bytes(d), {0: grid, 1: other}, 0x318000)
         a = 0x318000 + hook
         self.assertEqual([w['at'] for w in out], [f'31:{x & 0xFFFF:04X}' for x in (0x318000, a, a + 0x2000, a + 0x4000)]
@@ -225,6 +229,16 @@ class Bit9HookTests(unittest.TestCase):
         plane = r.d[lorom(a + 0x2000):lorom(a + 0x2000) + 0x2000]
         self.assertEqual(plane[0x10], 0xFF)
         self.assertEqual(r.d[lorom(a) + 0x10], 0x55)
+        # 지도(블록 하위 8비트 = 6)·9번째 비트(0)를 원래 자리에 두면 world_blocks 가 평면까지 더해 1030·1542 를 돌려준다.
+        for src, part in zip(dq5field.WORLDS[0], (bytes([6]) * fw.SIZE, bytes(fw.PLANE))):
+            put(hooked, src, fw.encode_rle(part))
+        blocks = dq5field.world_blocks(Rom(bytes(hooked)), 0)
+        cells = set(fw.changed_cells(rom))
+        self.assertEqual([blocks[i] for i in range(fw.SIZE) if (i % 256, i // 256) not in cells],
+                         [grid[i] for i in range(fw.SIZE) if (i % 256, i // 256) not in cells])
+        self.assertEqual(blocks[:2], [1030, 1542])
+        with self.assertRaises(ValueError):
+            dq5field.bit9_planes(r, 11)
         with self.assertRaisesRegex(ValueError, '00:CF50'):
             fw.plane_writes(rom, bytes(d), {2: [1100] * fw.SIZE}, 0x318000)
 
