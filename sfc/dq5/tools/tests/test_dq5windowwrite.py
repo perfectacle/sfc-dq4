@@ -1,12 +1,19 @@
 """창 레코드 자리·크기 쓰기를 원본 롬 없이 검사한다."""
+import contextlib
+import hashlib
+import io
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dq5map import Rom, lorom  # noqa: E402
+from w65816 import Cpu  # noqa: E402
 from dq5text import WINDOWS  # noqa: E402
-from dq5windowwrite import FORMAT, dump, edits, message_sites, patch, records  # noqa: E402
+import dq5windowwrite  # noqa: E402
+from dq5windowwrite import (EFFECT_ORIG, EFFECT_SITE, FORMAT, GRID, ROUTINES, STUBS, assemble, check, dump, edits,  # noqa: E402
+                            message_at, message_items, message_sites, patch, records)
 
 COUNT = 0x30
 # 원본처럼 진짜 창 뒤에 첫 레코드까지 창이 아닌 포인터가 남는다.
@@ -38,7 +45,39 @@ def fixture():
         data[lorom(addr):lorom(addr) + 1 + size] = bytes([op]) + value.to_bytes(size, 'little')
         if op == 0x9F:
             data[lorom(addr) + 1 + size] = 0x7E
+    # 격자 루틴 자리는 원본 바이트 대신 자리마다 다른 바이트로 채우고, 그 해시를 ROUTINES 로 쓴다(routines()).
+    for addr, (size, _, _) in ROUTINES.items():
+        for i in range(size):
+            if not 0x24A5EC <= addr + i < 0x24A5F0:
+                data[lorom(addr) + i] = (addr + i * 7) & 0xFF
+    data[lorom(EFFECT_SITE):lorom(EFFECT_SITE) + len(EFFECT_ORIG)] = EFFECT_ORIG
     return bytes(data)
+
+
+def routines(data):
+    """fixture 의 격자 루틴 자리에 맞춘 ROUTINES(앞 바이트 sha1, 원래 X 를 박은 24:A5ED·A5EE 를 0 으로 친 나머지 sha1)."""
+    out = {}
+    for addr, (size, _, _) in ROUTINES.items():
+        raw = bytearray(data[lorom(addr):lorom(addr) + size])
+        n = 6 if addr == 0x24813B else 5
+        for m in (0x24A5ED, 0x24A5EE):
+            if addr <= m < addr + size:
+                raw[m - addr] = 0
+        head, raw[:n] = bytes(raw[:n]), bytes(n)
+        out[addr] = (size, hashlib.sha1(head).hexdigest()[:12], hashlib.sha1(bytes(raw)).hexdigest()[:12])
+    return out
+
+
+def apply_new(data, manifest):
+    """orig 가 없는 쓰기(새 코드)도 붙인다."""
+    out = bytearray(data)
+    for w in manifest['writes']:
+        off = lorom(int(w['at'].replace(':', ''), 16))
+        raw = bytes.fromhex(w['hex'])
+        if 'orig' in w:
+            assert out[off:off + len(raw)] == bytes.fromhex(w['orig'])
+        out[off:off + len(raw)] = raw
+    return bytes(out)
 
 
 def apply(data, manifest):
@@ -57,6 +96,12 @@ class WindowWriteTests(unittest.TestCase):
         cls.data = fixture()
         cls.rom = Rom(cls.data)
         cls.first = cls.rom.u16(WINDOWS) | 0x040000
+        cls.routines = mock.patch.dict(dq5windowwrite.ROUTINES, routines(cls.data))
+        cls.routines.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.routines.stop()
 
     def with_byte(self, addr, value):
         data = bytearray(self.data)
@@ -177,6 +222,128 @@ class WindowWriteTests(unittest.TestCase):
         moved = Rom(self.with_byte(self.first + 0x18 * 8, 0x04))
         with self.assertRaises(ValueError):
             edits(moved, {'format': FORMAT, 'windows': [{'index': '25', 'x': 3}]})
+
+    def shaped(self, row, at=0x16FE10):
+        return patch(self.rom, {'format': FORMAT, 'windows': [{'index': '18', **row}]}, at=at)
+
+    def test_message_window_shape(self):
+        manifest = self.shaped({'x': 0, 'w': 31, 'h': 11})
+        writes = {w['at']: w for w in manifest['writes']}
+        table = records(self.rom)
+        self.assertEqual(writes[f'04:{table[0x18] & 0xFFFF:04X}']['hex'], '00 91 1f 0b')
+        self.assertEqual(writes[f'04:{table[0x25] & 0xFFFF:04X}']['hex'], '40 11 1f 0b')
+        self.assertNotIn('orig', writes['16:FE10'])
+        # 줄 수 5, 마지막 줄 4. 부분 전송은 17줄(1E20)부터 13줄, 효과 층은 7~16줄(0x280 바이트).
+        self.assertEqual({k: writes[k]['hex'] for k in ('24:85FB', '24:8614', '24:864D', '24:8678', '24:A4FB',
+                                                       '00:8E73', '00:8E7A', '00:8E82', '04:BCF1', '04:BCF5')},
+                         {'24:85FB': '05', '24:8614': '04', '24:864D': '05', '24:8678': '05', '24:A4FB': '05',
+                          '00:8E73': '20 1e', '00:8E7A': 'a0 01', '00:8E82': '40 54', '04:BCF1': '11', '04:BCF5': '12'})
+        # ▼ 는 마지막 줄(26)·무리 넷(27)의 29칸, FD ▼ 는 1 + 13칸.
+        self.assertEqual(writes['24:A51F']['hex'], 'ba 06')
+        self.assertEqual(writes['24:A529']['hex'], 'fa 06')
+        self.assertEqual(writes['24:8820']['hex'], '1a 00')
+        self.assertEqual(writes['00:FD92']['hex'][:2], '22')
+        rom = Rom(apply_new(self.data, manifest))
+        self.assertEqual(message_at(rom), 0x16FE10)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertFalse(check(rom))
+        self.assertEqual(edits(rom, {'format': FORMAT, 'windows': [{'index': '25', 'h': 11}]}), [])
+        # 새 코드가 있는 롬은 --message-at 없이 다시 고치고, 원래 모양으로도 되돌린다(새 코드는 그대로).
+        again = patch(rom, {'format': FORMAT, 'windows': [{'index': '25', 'x': 2, 'w': 28, 'h': 7}]})
+        back = {w['at']: w['hex'] for w in again['writes']}
+        self.assertEqual(back['24:A4FB'], '03')
+        self.assertEqual(back['00:FD92'], 'a9 80 03 8d 75 43')
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertFalse(check(Rom(apply_new(apply_new(self.data, manifest), again))))
+        with self.assertRaises(ValueError):
+            edits(rom, {'format': FORMAT, 'windows': [{'index': '25', 'w': 30}]}, at=0x15FE10)
+
+    def test_message_window_shape_rejects(self):
+        cases = [({'w': 30}, None), ({'h': 9, 'y': 21}, 0x16FE10), ({'h': 8}, 0x16FE10), ({'h': 15}, 0x16FE10),
+                 ({'w': 27}, 0x16FE10), ({'x': 3, 'w': 30}, 0x16FE10), ({'h': 5}, 0x16FE10), ({'w': 30}, 0x16FFF0)]
+        for row, at in cases:
+            with self.subTest(row=row, at=at), self.assertRaises(ValueError):
+                edits(self.rom, {'format': FORMAT, 'windows': [{'index': '18', **row}]}, at=at)
+        # 격자 루틴 앞을 바꾼 롬은 X 만 옮겨도 멈춘다.
+        with self.assertRaises(ValueError):
+            edits(Rom(self.with_byte(0x24A5E9, 0x22)), {'format': FORMAT, 'windows': [{'index': '25', 'x': 4}]})
+
+    def test_dq4_hooks(self):
+        """DQ4 메뉴 빌드(sfc/dq4/tools/dq4windowname.asm)는 24:A4E0 에 JML, 24:A5E9 에 JSL 을 건다. 18·25 를 그대로 두면
+        check·dump → patch 는 0 이고, X 만 옮기면 원래 도구처럼 24:A5EC 꼴에서, 모양을 바꾸면 격자 루틴 꼴에서 멈춘다."""
+        data = bytearray(self.data)
+        data[lorom(0x24A4E0):lorom(0x24A4E0) + 6] = bytes.fromhex('5c 00 81 30 ea ea')
+        data[lorom(0x24A5E9):lorom(0x24A5E9) + 7] = bytes.fromhex('22 00 80 30 ea ea ea')
+        rom = Rom(bytes(data))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertFalse(check(rom))
+        self.assertEqual(patch(rom, dump(rom))['writes'], [])
+        with self.assertRaisesRegex(ValueError, '24:A5EC'):
+            edits(rom, {'format': FORMAT, 'windows': [{'index': '25', 'x': 4}]})
+        data[lorom(0x24A5E9):lorom(0x24A5E9) + 7] = self.data[lorom(0x24A5E9):lorom(0x24A5E9) + 7]
+        with self.assertRaisesRegex(ValueError, '격자 루틴'):
+            edits(Rom(bytes(data)), {'format': FORMAT, 'windows': [{'index': '25', 'x': 4}]})
+        with self.assertRaisesRegex(ValueError, '격자 루틴'):
+            edits(Rom(bytes(data)), {'format': FORMAT, 'windows': [{'index': '18', 'w': 30}]}, at=0x16FE10)
+
+    def test_message_code_runs(self):
+        """옮긴 격자 루틴을 해석기로 돌려 원래 루틴과 같은 일을 하는지 본다: 채우기, 글자·탁점, 줄 지우기, 줄 올리기, 효과 층 크기."""
+        x, y, w, h = 1, 15, 31, 13
+        cols, rows, grid = w - 2, h - 1, GRID & 0xFFFF
+        at = 0x16FE10
+        code, labels = assemble(message_items(x, y, w, h), at)
+        rom = bytearray(0x180000)
+        rom[lorom(at):lorom(at) + len(code)] = code
+        cpu = Cpu(bytes(rom), bytearray(0x20000))
+        for wait in (0x04991D, 0x00950E):
+            rom[lorom(wait)] = 0x6B
+        cpu.rom = bytes(rom)
+        cpu.dbr = 0x24
+
+        def call(name, a=0, p=0x20):
+            cpu.p, cpu.a, dbr = p, a, cpu.dbr
+            cpu.jsl(labels[name])
+            self.assertEqual(cpu.dbr, dbr)
+
+        def cell(row, col):
+            return cpu.wram[grid + row * cols + col]
+
+        def screen(row, col):
+            return cpu.wram[0x5000 + ((y + row) * 32 + x + 1 + col) * 2]
+
+        call('fill')
+        self.assertEqual([cell(0, c) for c in range(cols)], [0x8D] * cols)
+        self.assertEqual({cell(r, c) for r in range(1, rows) for c in range(cols)}, {0x01})
+        self.assertEqual(cpu.wram[grid + cols * rows], 0)
+        cpu.wram[0x0F0D] = cpu.wram[0x0F0E] = 0
+        for ch in (0x84, 0x20, 0x21):
+            call('put', ch, 0x30)
+        self.assertEqual((cell(0, 0), cell(1, 0), cell(1, 1), cpu.wram[0x0F0D]), (0x92, 0x20, 0x21, 2))
+        self.assertEqual(screen(1, 1), 0x21)
+        cpu.wram[0x0F0E], cpu.wram[0x0F0D] = 5, cols - 1
+        call('put', 0x83, 0x30)
+        call('put', 0x30, 0x30)
+        self.assertEqual((cell(10, cols - 1), cell(11, cols - 1)), (0x83, 0x30))
+        self.assertEqual((screen(10, cols - 1), screen(11, cols - 1)), (0x83, 0x30))
+        # 줄 올리기: 줄 1(행 2·3)에 탁점 84 를 두면 올린 뒤 위 테두리에 92 로 얹힌다.
+        cpu.wram[grid + 2 * cols + 3] = 0x84
+        cpu.wram[grid + 3 * cols + 3] = 0x44
+        call('scroll')
+        self.assertEqual((cell(0, 3), cell(1, 3), cell(9, cols - 1), cell(11, cols - 1)), (0x92, 0x44, 0x30, 0x01))
+        self.assertEqual(screen(1, 3), 0x44)
+        cpu.wram[0x0F0E] = 1
+        call('line', p=0x20)
+        self.assertEqual({cell(r, c) for r in (2, 3) for c in range(cols)}, {0x01})
+        cpu.wram[0x0F0E] = 0
+        call('line', p=0x20)
+        self.assertEqual(([cell(0, c) for c in range(cols)], cell(1, 3)), ([0x8D] * cols, 0x01))
+        for vram, size in ((0x1CE0, (y - 7) * 64), (0x0CC0, 0x380)):
+            cpu.wram[0x0F5E:0x0F60] = vram.to_bytes(2, 'little')
+            cpu.io_writes.clear()
+            cpu.dbr = 0
+            call('eff', p=0x00)
+            self.assertEqual([v for a, v in cpu.io_writes if a in (0x4375, 0x4376)], list(size.to_bytes(2, 'little')))
+            cpu.dbr = 0x24
 
 
 if __name__ == '__main__':
