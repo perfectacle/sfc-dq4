@@ -2384,7 +2384,7 @@ MESENCE=… uv run --locked python sfc/dq5/tools/dq5blockgrowcheck.py rom/dq5.sf
 
 ### 블록 2,048개 실측
 
-`dq5blockgrowcheck.py --bits 11` 이 시험 롬 넷을 원본에서 만들어 원본과 같은 장면을 돌립니다. 21건이 통과했습니다([일지](../journal/2026-10-30-14-block2k.md)). `--bits` 없이 돌린 10비트 시험도 13건이 통과했고 VRAM 필드 타일이 원본 게임과 같았습니다.
+`dq5blockgrowcheck.py --bits 11` 이 시험 롬 넷을 원본에서 만들어 원본과 같은 장면을 돌립니다. 21건이 통과했습니다([일지](../journal/2026-10-30-15-block2k.md)). `--bits` 없이 돌린 10비트 시험도 13건이 통과했고 VRAM 필드 타일이 원본 게임과 같았습니다.
 
 ```sh
 MESENCE=… uv run --locked python sfc/dq5/tools/dq5blockgrowcheck.py rom/dq5.sfc --state work/state/ship.mss --out work/blockgrowcheck --bits 11
