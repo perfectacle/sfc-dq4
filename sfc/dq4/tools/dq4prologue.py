@@ -28,7 +28,6 @@ CODE_AT = 0x5EC000
 SWORD = (0x37, 0x00)                                 # 효과음 37(공격이 맞을 때)
 
 say = ch1.say
-waited = ch1.waited
 # 서장 메시지. dq4chapter1.messages 가 1장 메시지와 합친다. dq4chapter1 을 스크립트로 돌리면 이 모듈이 import 하는
 # dq4chapter1 은 다른 사본이라, 그쪽 TEXTS 에 넣으면 메시지 문서에 들어가지 않는다
 TEXTS = {}
@@ -116,8 +115,8 @@ T_FROG = 0x901
 M_CALL = talk(say('용사님 용사님……')) + 0x3C6
 M_HELP = talk(say('용사님 제발 도와주세요……')) + 0x3C6
 M_FROG_ASK = talk(say('아! 놀라지 마세요…… 저는 개구리가 아니랍니다.', '아! 지금 아무리 봐도 개구리라고 생각하셨죠?')) + 0x3C6
-M_FROG_YES = talk(waited(say('당신은 정직한 분이군요. 그 정직함을 믿고 부탁이 있어요.'))) + 0x3C6
-M_FROG_NO = talk(waited(say('당신은 상냥한 분이군요. 그 상냥함을 믿고 부탁이 있어요.'))) + 0x3C6
+M_FROG_YES = talk(say('당신은 정직한 분이군요. 그 정직함을 믿고 부탁이 있어요.')) + 0x3C6
+M_FROG_NO = talk(say('당신은 상냥한 분이군요. 그 상냥함을 믿고 부탁이 있어요.')) + 0x3C6
 M_FROG_STORY = talk(say('이미 눈치채셨겠지만 실은 저는 어느 나라의 공주였답니다.',
                         '하지만 나쁜 마법사에게 저주를 받아 이런 모습이 되어 버렸지요.',
                         '뭐, 이렇게 된 건 어쩔 수 없고 개구리도 생각만큼 나쁘진 않아요.',
@@ -128,19 +127,19 @@ T_SHINSIA = 0x902
 M_SHINSIA_MEET = talk(speak(SHINSIA, '아, @. 검술 수련 벌써 끝났나 보네.', '응? 무슨 일 있어? 뭐? 커다란 개구리? 무슨 소리야……',
                             '나는 계속 여기 있었는데 개구리 같은 건 못 봤……', '모, 못 봤……',
                             '풉! 아하하하 아하하…… 이제 못 참겠어!!', '네가 본 건 이 개구리지?')) + 0x3C6
-M_MORPH = talk(waited(narrate('신시아는 모샤스를 외웠다!!'))) + 0x3C6
-M_MIMIC = talk(waited(speak(SHINSIA, '태평하게 지내고 있었는데 곤란한 일이 생겼어요. 그건……', '그건…………'))) + 0x3C6
-M_SORRY = talk(waited(speak(SHINSIA, '……라니, 미안해. 실은 그다음 대사가 떠오르지 않았어.',
+M_MORPH = talk(narrate('신시아는 모샤스를 외웠다!!')) + 0x3C6
+M_MIMIC = talk(speak(SHINSIA, '태평하게 지내고 있었는데 곤란한 일이 생겼어요. 그건……', '그건…………')) + 0x3C6
+M_SORRY = talk(speak(SHINSIA, '……라니, 미안해. 실은 그다음 대사가 떠오르지 않았어.',
                      '좀 더 제대로 뒷이야기 까지 생각하고 할 걸 그랬는데, 너한테 빨리 보여 주고 싶었거든.',
-                     '놀랐지! 나 여러 가지로 모습을 바꿀 수 있는 모샤스 주문을 배웠어!'))) + 0x3C6
-M_BYE = talk(waited(speak(SHINSIA, '그럼 난 갈게!'))) + 0x3C6
+                     '놀랐지! 나 여러 가지로 모습을 바꿀 수 있는 모샤스 주문을 배웠어!')) + 0x3C6
+M_BYE = talk(speak(SHINSIA, '그럼 난 갈게!')) + 0x3C6
 M_SUPPER = talk(speak(SHINSIA, '아! 맞다! 너희 어머니가 부르셨어. 벌써 저녁이래.', '그럼 @, 내일 봐!')) + 0x3C6
 # 저녁(집): 신시아를 만난 뒤 아버지에게 말을 걸면 묻고(대화 903 → SUPPER), 식탁에 앉아 저녁을 먹는다(끝 이벤트)
 T_FATHER_SUPPER = 0x903
 M_FATHER_ASK = talk(say('음, @. 왔느냐? 그래, 신시아와는 만났느냐?')) + 0x3C6
 M_FATHER_YES = talk(say('그러냐. 그거 잘됐구나.')) + 0x3C6
 M_FATHER_NO = talk(say('그러냐…… 포기하고 돌아갔는지도 모르겠구나. 뭐, 괜찮겠지.')) + 0x3C6
-M_SUPPER_LINES = [talk(waited(say(*pages))) + 0x3C6 for pages in (
+M_SUPPER_LINES = [talk(say(*pages)) + 0x3C6 for pages in (
     ('좋아! 여보, 슬슬 밥 먹읍시다! 배가 등에 붙었구먼.',),
     ('네네. 지금 차려요.',),
     ('자, @. 너도 자리에 앉으렴.',),
@@ -152,7 +151,7 @@ M_SUPPER_LINES = [talk(waited(say(*pages))) + 0x3C6 for pages in (
     ('당신도 참, 무슨 말을 하나 했더니! 밥 먹다가 쓸쓸해지는 얘기는 그만해요.',
      '이 아이는 계속 우리와 함께 사는 거예요. 무슨 일이 있어도요!'),
     ('오오, 그랬지! 이거 내가 그만…… 와하하하하!',))]
-M_STORY_BEGINS = talk(waited(narrate('이야기는 이렇게 시작된다……'))) + 0x3C6
+M_STORY_BEGINS = talk(narrate('이야기는 이렇게 시작된다……')) + 0x3C6
 
 FROG, GIRL = 0x50, 0x0E         # 개구리 그림이 DQ5 에 없어 슬라임, 신시아는 DQ5 소녀(임시)
 FROG_AT = (0x0F, 0x0C)
@@ -252,18 +251,24 @@ def native():
         for cells in NEAR:
             put(f'near{cells}', _near(cells))
         put('skip_song', _skip_song())
-        g, n, x, y = CHAPTER1_AT
         # 저녁: 주인공이 식탁에 앉아 아래를 봄(C1 40) → 저녁 대사 → 끝: 검은 화면 → 서술 → 곡 건너뛰기 →
         # 1장 왕좌의 방으로(이벤트 명령 90, $198E = 80)
-        walk = bytes(b for d, k in HERO_TO_SEAT for b in (d, k)) + bytes((0xC1, 0x40))
-        lines = b''.join(bytes((0x60, m & 0xFF, m >> 8)) for m in M_SUPPER_LINES)
-        put('end_event', walk + lines + bytes((0x10, *DINNER, 0xA0, *_long(at.get('darken', 0)),
-                                               0x60, M_STORY_BEGINS & 0xFF, M_STORY_BEGINS >> 8,
-                                               0xA0, *_long(at.get('skip_song', 0)), 0x90, g, n, x, y, 0x01, 0x80, 0xFF)))
+        put('end_event', b''.join(bytes((0x60, t[1] & 0xFF, t[1] >> 8)) if isinstance(t, tuple) else t
+                                  for t in end_event(at)))
         put('end', _event_start(at.get('end_event', 0)))
         return bytes(out), a
     _, at = layout({})
     return layout(at)
+
+
+def end_event(at):
+    """저녁 끝 이벤트의 토큰 목록: 바이트, 또는 메시지(이벤트 명령 60)는 ('msg', 번호). dq4msgwait 가 메시지 끝 코드를
+    고를 때도 이 목록을 본다."""
+    g, n, x, y = CHAPTER1_AT
+    return ([bytes(b for d, k in HERO_TO_SEAT for b in (d, k)) + bytes((0xC1, 0x40))] +
+            [('msg', m) for m in M_SUPPER_LINES] +
+            [bytes((0x10, *DINNER, 0xA0, *_long(at.get('darken', 0)))), ('msg', M_STORY_BEGINS),
+             bytes((0xA0, *_long(at.get('skip_song', 0)), 0x90, g, n, x, y, 0x01, 0x80, 0xFF))])
 
 
 def _yes_no(ask, yes, no):

@@ -28,7 +28,6 @@ from dq4romassets import ips_patch, set_checksum  # noqa: E402
 from dq5build import load  # noqa: E402
 
 LINE, END, PAGE, SPEAK, NARR, HERO = 0x1000, 0x1001, 0x1002, 0x1003, 0x1006, 0x1012
-WAIT_END = 0x1010
 Q = 0x363      # 「 (DQ5 글자)
 DOTS = 0x366   # …
 
@@ -100,20 +99,12 @@ def narrate(*pages):
     return out
 
 
-def waited(parts):
-    """끝 코드 1001 을 ▼ 대기 끝 1010 으로. 1001 은 버튼을 기다리지 않아, 스크립트나 대화가 곧바로 다음 메시지를
-    띄우면 이 메시지의 마지막 쪽이 A 를 누르기 전에 밀려 올라간다. 다음 메시지가 이어지는 메시지에 쓴다."""
-    if parts[-1] != END:
-        raise ValueError('끝 코드가 1001 이 아님')
-    return parts[:-1] + [WAIT_END]
-
-
 TEXTS = {
     # FC 는 검은 화면에 장 제목 상자(dq4chapterbox.py)를 띄운 뒤, 검은 화면의 메시지 창에 이 서술을 쓴다
     MSG_NARRATION: narrate('이것은 바트랜드라는 작은 나라의 왕궁 전사의 이야기다.',
                            '@, 즉 당신도 그 왕궁 전사의 한 사람이었다.',
                            '어느 날 아침, 임금님은 전사들을 성의 넓은 방에 불러 모았다……'),
-    MSG_MINISTER: waited(speak('대신', '이제부터 임금님께서 그대들에게 하실 말씀이 있다. 명심하여 듣도록.')),
+    MSG_MINISTER: speak('대신', '이제부터 임금님께서 그대들에게 하실 말씀이 있다. 명심하여 듣도록.'),
     MSG_KING: speak('왕',
                     '모두 편히 하라.',
                     '요즘 아이들이 사라진다는 소문은 그대들도 들었으리라.',
@@ -237,6 +228,25 @@ def walk_out(address, path):
         [{"op": "28", "args": []}, {"op": "16", "args": []}]}
 
 
+def throne_script(native):
+    """왕좌의 방 연출(왕의 인물 스크립트). native: dq4chapterbox 진입점 {이름: 3바이트}."""
+    flag, mask = EVENT_FLAG
+    lo, hi = lambda m: m & 0xFF, lambda m: m >> 8
+    return {"address": "05:A84F", "commands": [
+        {"op": "3F", "args": []},
+        # 맵은 검은 채로 불러온다(dq4chapterbox 의 맵 훅). 상자 → 서술 → 맵을 밝힘
+        {"op": "37", "args": native['box']},
+        {"op": "21", "args": [lo(MSG_NARRATION), hi(MSG_NARRATION)]},
+        {"op": "37", "args": native['reveal']},
+        {"op": "21", "args": [lo(MSG_MINISTER), hi(MSG_MINISTER)]},
+        {"op": "13", "args": [KING_DOWN[0] * 2, KING_DOWN[1] * 2]},
+        {"op": "14", "args": []},
+        {"op": "21", "args": [lo(MSG_KING), hi(MSG_KING)]},
+        {"op": "10", "args": [flag, mask]},
+        {"op": "40", "args": []},
+        {"op": "16", "args": []}]}
+
+
 def npc_doc(records, ported=(), prologue=False, report=None, ported_messages=()):
     """ported·report·ported_messages: dq4npcport.port 의 인물 목록·보고·메시지. 왕좌의 방은 이 연출 배치로 바꾸고,
     report 가 있으면 1장 진행 사건(dq4ch1event)의 인물을 고친다. prologue 면 서장 맵의 인물을 더한다."""
@@ -252,21 +262,8 @@ def npc_doc(records, ported=(), prologue=False, report=None, ported_messages=())
               entry(STATIC, *MINISTER_AT, MINISTER, 'right', T_MINISTER), easy] + lineup + staff
     after = [king, entry(STATIC, *MINISTER_AT, MINISTER, 'right', T_MINISTER), easy] + staff + \
         [{**entry(STATIC, x, y, g, f, t), "time": "night"} for x, y, g, f, t in NIGHT_STAFF]
-    lo, hi = lambda m: m & 0xFF, lambda m: m >> 8
     scripts = [
-        {"address": "05:A84F", "commands": [
-            {"op": "3F", "args": []},
-            # 맵은 검은 채로 불러온다(dq4chapterbox 의 맵 훅). 상자 → 서술 → 맵을 밝힘
-            {"op": "37", "args": native['box']},
-            {"op": "21", "args": [lo(MSG_NARRATION), hi(MSG_NARRATION)]},
-            {"op": "37", "args": native['reveal']},
-            {"op": "21", "args": [lo(MSG_MINISTER), hi(MSG_MINISTER)]},
-            {"op": "13", "args": [KING_DOWN[0] * 2, KING_DOWN[1] * 2]},
-            {"op": "14", "args": []},
-            {"op": "21", "args": [lo(MSG_KING), hi(MSG_KING)]},
-            {"op": "10", "args": [flag, mask]},
-            {"op": "40", "args": []},
-            {"op": "16", "args": []}]},
+        throne_script(native),
         # 주인공 통과(1C)를 켜면 주인공 옆 전사가 반 칸 어긋나 멈춰서(실측), 오른쪽 무리는 먼저 곧장 내려가
         # 가운데 선 주인공을 지나지 않게 한다.
         walk_out("05:A899", EXIT_LEFT),
@@ -344,14 +341,32 @@ def messages(ported_messages, report):
     import dq4prologue
     import dq4ch1event
     import dq4npcport
-    events = dq4ch1event.texts(dq4npcport.FIRST_MESSAGE + len(ported_messages))
+    first = dq4npcport.FIRST_MESSAGE + len(ported_messages)
+    events = dq4ch1event.texts(first)
     for name, texts in (('1장', TEXTS), ('서장', dq4prologue.TEXTS), ('시스템', dq4sysmsg.TEXTS),
                         ('1장 사건', events)):
         clash = set(out) & set(texts)
         if clash:
             raise ValueError(f'{name} 메시지와 겹치는 번호: {sorted(f"{m:03X}" for m in clash)}')
         out.update(texts)
-    return out
+    import dq4msgwait
+    wait, _ = dq4msgwait.plan(**message_flow(first))
+    return dq4msgwait.apply(out, wait)
+
+
+def message_flow(first_message):
+    """메시지를 띄우는 대화·인물 스크립트·이벤트 스크립트(dq4msgwait.plan 의 인자). 서장은 늘 넣는다(메시지
+    단계에는 서장 옵션이 없음). first_message 는 1장 사건 메시지의 첫 번호."""
+    import dq4ch1event
+    import dq4chapterbox
+    import dq4prologue
+    points = dq4chapterbox.entry_points(scenes(True))
+    native = {k: [v & 0xFF, v >> 8 & 0xFF, v >> 16] for k, v in points.items()}
+    scripts = ([throne_script(native)] + dq4prologue.npc_lists()[3] +
+               dq4ch1event.scripts(first_message, points['box2']))
+    talks = ([s["body"] for s in dq4prologue.talk_doc()["scripts"]] + dq4ch1event.talk_scripts(first_message))
+    _, at = dq4prologue.native()
+    return {"talks": talks, "scripts": [s["commands"] for s in scripts], "events": [dq4prologue.end_event(at)]}
 
 
 def event_talk():
