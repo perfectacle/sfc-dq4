@@ -727,6 +727,22 @@ def fig_battlewin3():
     save(out, 'dq5-battlewin3.webp')
 
 
+def fig_battlewinfix():
+    """높인 전투 메시지 창이 주문 연출에 깨진 화면(위, 고치기 전 도구)과 고친 화면(아래)의 아래 반쪽. バギクロス 의 both
+    (1,15) 31x13 2192프레임, ベギラゴン 의 h9 (2,19) 28x9 2176프레임, ヒャダルコ 의 tall (2,17) 28x11 2176프레임(파파스
+    장면, 난수 고정). dq5msgwindowcheck.py 실행 폴더의 papasNN/<경우>/fNNNNN.png 를 work/battlewinfix/<NN>-<경우>-after.png 로,
+    고치기 전 dq5windowwrite.py 로 만든 롬을 같은 입력으로 돌린 같은 프레임을 -before.png 로 둔다
+    (sfc/dq5/journal/ 의 battlewinfix 일지)."""
+    cols = [('0F-both', 'baguikurosu both'), ('06-h9', 'begiragon h9'), ('0B-tall', 'hyadaruko tall')]
+    out = Image.new('RGB', (len(cols) * 260 - 4, 2 * 116 - 4), (24, 24, 24))
+    for i, (name, text) in enumerate(cols):
+        for j, when in enumerate(('before', 'after')):
+            im = Image.open(f'work/battlewinfix/{name}-{when}.png').convert('RGB').crop((0, 100, 256, 212))
+            label(im, f'{text} {when}')
+            out.paste(im, (i * 260, j * 116))
+    save(out, 'dq5-battlewinfix.webp')
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     rom = Rom(open('rom/dq5.sfc', 'rb').read())
@@ -766,6 +782,7 @@ def main():
     fig_party6()
     fig_talkwrite()
     fig_battlewin3()
+    fig_battlewinfix()
     os.remove(TMP)
 
 

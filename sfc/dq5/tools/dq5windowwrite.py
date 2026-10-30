@@ -7,10 +7,12 @@
 옮기고 격자 루틴 넷(24:87AA·A4A4·A569·A5D9)과 24:813B 를 --message-at 에 두는 새 코드로 돌린다. 너비는 28~31(글자 칸
 26~29), 높이는 7~13 의 홀수(글자 줄 3~6)이고 창 아래 끝은 원래처럼 27줄이라 Y = 28 - 높이다. 21줄보다 위로 올라가면
 메시지 동안의 BG3 부분 전송(00:8E70)을 창 맨 위 줄부터로 넓히고, 공격·주문 효과 층(VRAM 1CE0, 00:FD75)은 창 위 줄까지만
-올린다(00:FD92 → 새 코드). 글자는 줄을 저절로 바꾸지 않으므로 넓힌 칸·늘린 줄은 메시지 쪽이 채워야 한다.
+올린다(00:FD92 → 새 코드). 그때는 주문 연출이 창 줄의 색 더하기·BG3 가로 스크롤을 바꾸지 않게 --effects-at 의 새 코드와
+훅(effect_edits)을 더한다. 글자는 줄을 저절로 바꾸지 않으므로 넓힌 칸·늘린 줄은 메시지 쪽이 채워야 한다.
 
   python sfc/dq5/tools/dq5windowwrite.py rom/dq5.sfc dump -o work/windows.json
-  python sfc/dq5/tools/dq5windowwrite.py rom/dq5.sfc patch work/windows.json -o work/windows.dq5patch.json [--message-at BB:AAAA]
+  python sfc/dq5/tools/dq5windowwrite.py rom/dq5.sfc patch work/windows.json -o work/windows.dq5patch.json \
+      [--message-at BB:AAAA] [--effects-at BB:AAAA]
   python sfc/dq5/tools/dq5windowwrite.py rom/dq5.sfc check
 
 JSON: {"format":"dq5windows/1", "windows":[{"index":"19","x":12,"y":14}]}. index 는 창 번호(16진 문자열),
@@ -52,6 +54,32 @@ MASKED = (0x24A5ED, 0x24A5EE)
 # 원래 자리 → 새 코드 입구. 24:813B 는 그 자리에서 채우기만 부르고 원래 24:8151(JSR $811D)로 건너뛴다.
 STUBS = {0x24813B: 'fill', 0x2487AA: 'line', 0x24A4A4: 'put', 0x24A569: 'scroll', 0x24A5D9: 'copylong'}
 EFFECT_SITE, EFFECT_ORIG = 0x00FD92, bytes.fromhex('a9 80 03 8d 75 43')
+# 창을 21줄 위로 올리면 주문 연출이 줄마다 바꾸는 BG3 가로 스크롤·색 더하기가 창 줄에 닿는다(dq5-build-format.md
+# 「높인 창과 주문 연출」). --effects-at 의 새 코드로 막는 자리: (원래 바이트, 새 코드 입구).
+#   물결: ベギラゴン·バギクロス 의 BG3 가로 스크롤 간접 HDMA 표 머리(7E:5C80, 22:8EC1 이 만듦)는 0~54줄 0x100, 55줄부터
+#   112줄 물결(7E:5D00·5E00), 그 뒤 72줄 0x100 이다. 물결 줄 수와 뒤 줄 수(LDA # 두 자리)를 창 맨 위 줄에서 끊는다.
+#   색 더하기: 연출이 $2131 에 쓰는 자리(STA long). 값과 BG3 비트를 뺀 값을 EFFECT_RAM 의 HDMA 표에 둔다.
+#   HDMA: 채널 7 이 창 맨 위 줄에 $2131 의 BG3 비트를 뺀 값을 쓴다. 채널 1~6 은 연출·전투 배경이 다 쓰고(ベギラゴン)
+#   연출의 채널 고르기(22:8FBF)는 7 을 고르지 않는다. 게임은 IRQ 를 켜지 않고, 전투 중 프레임 끝의 CPU I 플래그가 거의
+#   늘 1 이라 IRQ 로는 줄을 잡을 수 없다.
+WAVE_OPERANDS = {0x228EC6: 0xF0, 0x228ECB: 0x48}
+COLOR_SITES = (0x228673, 0x22C0F8, 0x22CFCD, 0x22D0AB, 0x22E175, 0x22E199, 0x22E1B2, 0x22E1D8, 0x22E1FE, 0x22E219,
+               0x22E290, 0x22E2B1, 0x22E2D2, 0x22E2F3, 0x22E30E, 0x22E332, 0x22EE96, 0x22EF84, 0x22F009, 0x22F66E,
+               0x22F6CF, 0x22F705, 0x2BBE48, 0x0FFECF)
+COLOR_ORIG = bytes.fromhex('8f 31 21 00')
+# 전투를 열 때 등 STA abs 로 $2131 에 쓰는 자리: 원래 바이트(값 읽기 + STA $2131). 값 읽기를 새 코드로 옮겨 color 로 간다.
+COLOR_LOADS = {0x2B82A3: bytes.fromhex('a9 00 8d 31 21'), 0x2B82F7: bytes.fromhex('a9 50 8d 31 21'),
+               0x008AD3: bytes.fromhex('ad 38 07 8d 31 21')}
+# NMI 의 GP DMA 루틴 넷(00:FCF0·FD32·FD75·FDB0, $0DF3 으로 고르는 VRAM·CGRAM 전송)이 채널 7 을 쓴다. 높인 창에서는 채널
+# 7 을 HDMA 로 쓰므로 이 넷을 채널 0(NMI 의 OAM·BG3 부분 전송과 같은 채널, 차례로 쓰므로 겹치지 않음)으로 옮긴다:
+# 레지스터 자리($437x → $430x)와 $420B 에 쓰는 값(80 → 01). 00:FD95 의 $4375 는 eff 가 대신 쓴다. NMI 에 코드를 더해
+# 채널 7 을 끄고 켜면 그 몇십 사이클로 전투 메시지·연출이 한 프레임씩 밀렸다.
+DMA_REGS = (0x00FCFB, 0x00FD00, 0x00FD05, 0x00FD0F, 0x00FD15, 0x00FD3D, 0x00FD42, 0x00FD47, 0x00FD51, 0x00FD57,
+            0x00FD83, 0x00FD88, 0x00FD8D, 0x00FD9B, 0x00FDBE, 0x00FDC3, 0x00FDC8, 0x00FDD0, 0x00FDD6)
+DMA_STARTS = (0x00FD25, 0x00FD68, 0x00FDA6, 0x00FDDE)
+# 채널 7 HDMA 표(7바이트까지, effect_items). GRID 뒤 장면 770개에서 접근이 없던 자리.
+EFFECT_RAM = 0x7EA900
+WAVE_FIRST_LINE, WAVE_END = 55, 239
 # +0 bit6 창은 04:9FD3 이 높이를 다시 센다. bit5 가 켜지면 일행 수(4까지) × 2 + 3, 꺼지면 메뉴마다 달라 4비트 최대로 본다.
 PARTY_HEIGHT = 4 * 2 + 3
 MENU_HEIGHT = 0x0F
@@ -128,13 +156,16 @@ def message_sites(x, y, w=MESSAGE_W, h=MESSAGE_H):
 
 
 def assemble(items, at):
-    """[바이트 | ('label', 이름) | ('br', 옵코드, 이름) | ('jsr', 이름)] → (코드, 이름별 CPU 주소). at 은 첫 바이트의 CPU 주소."""
+    """[바이트 | ('label', 이름) | ('br', 옵코드, 이름) | ('jsr', 이름) | ('jml', 이름)] → (코드, 이름별 CPU 주소).
+    at 은 첫 바이트의 CPU 주소."""
     labels, pos = {}, 0
     for item in items:
         if isinstance(item, bytes):
             pos += len(item)
         elif item[0] == 'label':
             labels[item[1]] = at + pos
+        elif item[0] == 'jml':
+            pos += 4
         else:
             pos += 2 if item[0] == 'br' else 3
     code = bytearray()
@@ -148,6 +179,8 @@ def assemble(items, at):
             code += bytes([item[1], delta & 0xFF])
         elif item[0] == 'jsr':
             code += b'\x20' + (labels[item[1]] & 0xFFFF).to_bytes(2, 'little')
+        elif item[0] == 'jml':
+            code += b'\x5c' + labels[item[1]].to_bytes(3, 'little')
     if (at & 0xFFFF) + len(code) > 0x10000:
         raise ValueError(f'{at >> 16:02X}:{at & 0xFFFF:04X}: 새 코드 {len(code)}바이트가 뱅크 끝을 넘음')
     return bytes(code), labels
@@ -214,8 +247,71 @@ def message_items(x, y, w, h):
         ('label', 'copylong'), ('jsr', 'copy'), b('6b')]
     if y < MESSAGE_Y:
         # 00:FD92(NMI, M 16, 데이터 뱅크 00). BG3 효과 층(1CE0)이면 창 위 줄까지만, 전투 배경(BG1·BG2)은 원래 0x380.
+        # 이 GP DMA 는 채널 0 으로 옮겨 둔다(DMA_REGS).
         items += [('label', 'eff'), b('ad 5e 0f c9 e0 1c'), ('br', 0xD0, 'e1'), b('a9') + w16((y - EFFECT_TOP) * 64),
-                  ('br', 0x80, 'e2'), ('label', 'e1'), b('a9 80 03'), ('label', 'e2'), b('8d 75 43 6b')]
+                  ('br', 0x80, 'e2'), ('label', 'e1'), b('a9 80 03'), ('label', 'e2'), b('8d 05 43 6b')]
+    return items
+
+
+def window_line(y):
+    """창 맨 위 타일 줄 y 의 첫 점 줄에 닿는 HDMA 줄. 창 타일은 스크린샷 y × 8 - 8 에 어두운 줄, 그 아래 두 줄이 흰
+    테두리이고(원래 21줄 창: 160·161·162), HDMA 로 줄 S 에 쓴 값은 스크린샷 S - 7 부터 보인다."""
+    return y * 8 - 1
+
+
+def effect_items(y):
+    """창 맨 위 줄 y(< 21)를 주문 연출에서 지키는 새 코드. HDMA 로 줄 S 에 쓴 값은 스크린샷 y = S - 7 부터 보이고, 창
+    타일 줄의 첫 점 줄(어두운 줄, 스크린샷 y × 8 - 8)은 줄 window_line(y) 의 값으로 그려진다."""
+    b = bytes.fromhex
+    first = window_line(y)
+
+    def w16(v):
+        return v.to_bytes(2, 'little')
+
+    def long(v):
+        return v.to_bytes(3, 'little')
+
+    # 채널 7 표(직접, $2131 한 바이트씩)를 EFFECT_RAM 에 둔다: 0줄(창 줄이 127 보다 아래면 창 줄 - 127 줄에도)에 원래 값,
+    # 창 맨 위 줄에 BG3 비트를 뺀 값을 한 번 쓰고 끝낸다. 그 아래 줄에서 연출이 쓰는 $2131 은 color 가 BG3 비트를 뺀다.
+    # HDMA 를 줄마다·여러 번 쓸수록 CPU 시간을 먹어 큰 연출이 한 프레임 늦어질 수 있다(h9 의 マヒャド).
+    table, slots = bytearray(), []
+    counts = [first] if first <= 0x7F else [first - 0x7F, 0x7F]
+    for n in counts:
+        slots.append(('full', len(table) + 1))
+        table += bytes([n, 0])
+    slots.append(('masked', len(table) + 1))
+    table += b'\x01\x00\x00'
+    masked = EFFECT_RAM + slots[-1][1]
+    # $2131 쓰기(부른 쪽의 폭 그대로, 16비트면 $2132 도). 표에 값과 BG3 비트를 뺀 값을 둔다.
+    #   BG3 비트가 있으면 채널 7 레지스터를 두고 $0D83(연출이 22:8B21 에서 $420C 에 쓰는 HDMA 켜기 값, 연출의 채널
+    #   고르기 22:8FBF 는 1~6 만 씀)에 채널 7 비트를 더한다. vblank 안($4212 bit7)이면 $420C 에도 바로 쓴다. 화면을 그리는
+    #   중이고 지금 줄($213D)이 창 맨 위 줄보다 아래면(ベギラゴン 은 130~173줄에서 씀) BG3 비트를 뺀 값을 쓰고, 아니면
+    #   원래 값을 쓴다(창 줄은 채널 7 이 BG3 비트를 뺀다).
+    #   BG3 비트가 없어도 채널 7 은 켜 둔다(표의 두 값이 같아 그대로). 연출이 BG3 비트를 껐다 켰다 하면(メラゾーマ) 다시
+    #   켜는 프레임에 채널 7 이 없어 창 위 줄까지 BG3 비트를 빼야 했다. $0D83 은 전투 연출을 처음 둘 때(22:8424·84CB)
+    #   0 이 되고, 전투가 끝나면 게임이 $420C 를 다시 써 채널 7 이 꺼진다.
+    #   처음 켜는 쓰기가 화면을 그리는 중이면 이 프레임에는 채널 7 이 없어 바로 BG3 비트를 뺀다.
+    fill = b''
+    for i, v in enumerate(table):
+        if all(i != at for _, at in slots):
+            fill += b('a9') + bytes([v]) + b('8f') + long(EFFECT_RAM + i)
+    store = b''.join(b('8f') + long(EFFECT_RAM + at) for kind, at in slots if kind == 'full')
+    items = [('label', 'color'), b('08 c2 20 48 e2 20') + fill + b('a3 01') + store + b('29 fb 8f') + long(masked)
+             + b('a3 01 29 04'), ('br', 0xF0, 'plain'),
+             b('a9 00 8f 70 43 00 a9 31 8f 71 43 00 a9') + bytes([EFFECT_RAM & 0xFF]) + b('8f 72 43 00 a9')
+             + bytes([EFFECT_RAM >> 8 & 0xFF]) + b('8f 73 43 00 a9 7e 8f 74 43 00'),
+             b('af 12 42 00'), ('br', 0x10, 'mid'),
+             b('af 83 0d 7e 09 80 8f 83 0d 7e 8f 0c 42 00'), ('br', 0x80, 'plain'),
+             ('label', 'mid'), b('af 83 0d 7e 30 08 09 80 8f 83 0d 7e'), ('br', 0x80, 'mask'),
+             b('af 37 21 00 af 3f 21 00 af 3d 21 00 eb af 3d 21 00 29 01 eb c2 20 c9') + w16(first + 1),
+             b('e2 20'), ('br', 0x90, 'plain'),
+             ('label', 'mask'),
+             # BG3 비트를 뺀 값을 $2131 에, 부른 쪽이 16비트(스택의 P bit5 가 0)면 높은 바이트를 $2132 에.
+             b('af') + long(masked) + b('8f 31 21 00 a3 03 29 20'), ('br', 0xD0, 'm8'),
+             b('a3 02 8f 32 21 00'), ('label', 'm8'), b('c2 20 68 28 6b'),
+             ('label', 'plain'), b('c2 20 68 28 8f 31 21 00 6b')]
+    for addr, orig in COLOR_LOADS.items():
+        items += [('label', f'load{addr:06X}'), orig[:-3], ('jml', 'color')]
     return items
 
 
@@ -258,8 +354,66 @@ def routine_state(rom, at):
     return states.pop()
 
 
-def message_edits(rom, table, sharing, rows, at=None):
-    """창 18·25 를 같은 자리·크기로 바꾸는 쓰기. rows 는 {창: 문서 줄}, at 은 새 코드 자리(--message-at)."""
+def effect_hooks(labels):
+    """[(자리, 원래 바이트, 새 바이트)]. labels 가 None 이면 새 바이트도 원래 바이트(창을 21줄로 되돌릴 때)."""
+    out = []
+
+    def jsl(name, size):
+        return b'\x22' + labels[name].to_bytes(3, 'little') + b'\xea' * (size - 4)
+
+    for addr in COLOR_SITES:
+        out.append((addr, COLOR_ORIG, jsl('color', 4) if labels else COLOR_ORIG))
+    for addr, orig in COLOR_LOADS.items():
+        out.append((addr, orig, jsl(f'load{addr:06X}', len(orig)) if labels else orig))
+    return out
+
+
+def effects_at(rom):
+    """22:E175(연출의 $2131 쓰기 하나)가 이 도구의 JSL 이면 연출 막기 코드 자리, 원래 꼴이면 None."""
+    head = read(rom, COLOR_SITES[4], 4)
+    if head == COLOR_ORIG:
+        return None
+    if head[0] != 0x22:
+        raise ValueError('22:E175: $2131 쓰기가 원래 꼴도, 이 도구의 JSL 도 아님')
+    _, labels = assemble(effect_items(MESSAGE_Y - 2), 0)
+    return int.from_bytes(head[1:4], 'little') - labels['color']
+
+
+def effect_edits(rom, y, at):
+    """창 맨 위 줄 y 에 맞춘 연출 막기 코드와 훅. y 가 21 이면 훅 자리를 원래 바이트로 둔다."""
+    out, labels = [], None
+    if y < MESSAGE_Y:
+        code, labels = assemble(effect_items(y), at)
+        out.append((at, code, None, 'message window: 높인 창을 주문 연출에서 지킴'))
+    for addr, orig, new in effect_hooks(labels):
+        old = read(rom, addr, len(orig))
+        if old != orig and not (old[0] == 0x22 and set(old[4:]) <= {0xEA}):
+            raise ValueError(f'{addr >> 16:02X}:{addr & 0xFFFF:04X}: 연출 막기 훅 자리가 원래 꼴이 아님')
+        out.append((addr, new, old, 'message window: 연출 막기 훅'))
+    for addr in DMA_REGS:
+        old = read(rom, addr, 3)
+        if old[0] not in (0x8D, 0x9C) or old[2] != 0x43 or old[1] & 0xF0 not in (0x00, 0x70):
+            raise ValueError(f'{addr >> 16:02X}:{addr & 0xFFFF:04X}: NMI GP DMA 레지스터 코드가 원래 꼴이 아님')
+        reg = old[1] & 0x0F | (0x00 if y < MESSAGE_Y else 0x70)
+        out.append((addr + 1, bytes([reg]), old[1:2], 'message window: NMI GP DMA 채널'))
+    for addr in DMA_STARTS:
+        old = read(rom, addr, 5)
+        if old[0] != 0xA9 or old[1] not in (0x01, 0x80) or old[2:] != bytes.fromhex('8d 0b 42'):
+            raise ValueError(f'{addr >> 16:02X}:{addr & 0xFFFF:04X}: NMI GP DMA 시작 코드가 원래 꼴이 아님')
+        out.append((addr + 1, bytes([0x01 if y < MESSAGE_Y else 0x80]), old[1:2], 'message window: NMI GP DMA 채널'))
+    first = window_line(y)
+    wave = (0x80 | first - WAVE_FIRST_LINE, WAVE_END - first) if y < MESSAGE_Y else tuple(WAVE_OPERANDS.values())
+    for (addr, orig), value in zip(WAVE_OPERANDS.items(), wave):
+        old = read(rom, addr, 2)
+        if old[0] != 0xA9:
+            raise ValueError(f'{addr >> 16:02X}:{addr & 0xFFFF:04X}: 물결 HDMA 표 머리 코드가 원래 꼴이 아님')
+        out.append((addr + 1, bytes([value]), old[1:], 'message window: 물결 HDMA 줄 수'))
+    return out
+
+
+def message_edits(rom, table, sharing, rows, at=None, fx_at=None):
+    """창 18·25 를 같은 자리·크기로 바꾸는 쓰기. rows 는 {창: 문서 줄}, at 은 새 코드 자리(--message-at), fx_at 은
+    창을 21줄 위로 올릴 때 주문 연출에서 창을 지키는 코드 자리(--effects-at)."""
     olds = {n: read(rom, table[n], 4) for n in MESSAGES}
     base = header(olds[MESSAGES[0]])
     for n, old in olds.items():
@@ -278,6 +432,11 @@ def message_edits(rom, table, sharing, rows, at=None):
     if current is not None and at is not None and at != current:
         raise ValueError(f'새 코드가 이미 {current >> 16:02X}:{current & 0xFFFF:04X} 에 있음(--message-at 을 같게 두거나 뺌)')
     at = current if current is not None else at
+    fx_current = effects_at(rom)
+    if fx_current is not None and fx_at is not None and fx_at != fx_current:
+        raise ValueError(f'연출 막기 코드가 이미 {fx_current >> 16:02X}:{fx_current & 0xFFFF:04X} 에 있음'
+                         '(--effects-at 을 같게 두거나 뺌)')
+    fx_at = fx_current if fx_current is not None else fx_at
     if want == base:
         return []
     if want['w'] < MESSAGE_W:
@@ -294,6 +453,8 @@ def message_edits(rom, table, sharing, rows, at=None):
     shaped = (want['w'], want['h']) != (MESSAGE_W, MESSAGE_H) or current is not None
     if shaped and at is None:
         raise ValueError('창 18·25 너비·높이를 바꾸려면 새 격자 루틴을 둘 자리(--message-at BB:AAAA)가 필요함')
+    if want['y'] < MESSAGE_Y and fx_at is None:
+        raise ValueError('창 18·25 를 21줄 위로 올리려면 주문 연출에서 창을 지키는 코드 자리(--effects-at BB:AAAA)가 필요함')
     if (want['w'] - 2) * (want['h'] - 1) > GRID_SIZE:
         raise ValueError('글자 격자가 GRID 자리보다 큼')
     out = []
@@ -324,6 +485,8 @@ def message_edits(rom, table, sharing, rows, at=None):
     if effect != EFFECT_ORIG and not (effect[0] == 0x22 and effect[4:] == b'\xea\xea'):
         raise ValueError('00:FD92: 효과 층 전송 크기 코드가 원래 꼴이 아님')
     out.append((EFFECT_SITE, hook, effect, 'message window: 효과 층 전송 크기'))
+    if fx_at is not None:
+        out += effect_edits(rom, want['y'], fx_at)
     return out
 
 
@@ -336,7 +499,7 @@ def dump(rom):
     return {'format': FORMAT, 'windows': out}
 
 
-def edits(rom, doc, at=None):
+def edits(rom, doc, at=None, fx_at=None):
     fields(doc, {'format', 'windows'}, '문서')
     if doc.get('format') != FORMAT or not isinstance(doc.get('windows'), list):
         raise ValueError(f'format={FORMAT}과 windows 배열이 필요함')
@@ -379,16 +542,20 @@ def edits(rom, doc, at=None):
             raise ValueError(f'창 {n:02X}: +0 bit6 창은 높이를 04:9FD3 이 일행에 맞춰 정해 h 를 받지 않음')
         out.append((addr, bytes(new), old, f'window {n:02X}'))
     if pair:
-        out += message_edits(rom, table, sharing, pair, at)
+        out += message_edits(rom, table, sharing, pair, at, fx_at)
     return out
 
 
-def patch(rom, doc, name='windows', at=None):
+def patch(rom, doc, name='windows', at=None, fx_at=None):
     """새 코드(orig 없음)는 빌더가 원래 롬의 빈 자리나 늘린 자리인지 본다."""
-    return {'format': 'dq5patch/1', 'name': name, 'writes': [
+    writes = [(a, new, old, note) for a, new, old, note in edits(rom, doc, at, fx_at) if new != old]
+    # 늘린 뱅크(30~)에 둔 새 코드면 빌더가 롬을 그만큼 늘리게 크기를 적는다.
+    top = max((a >> 16 for a, *_ in writes), default=0)
+    size = next((mb for mb, last in ((2, 0x3F), (3, 0x5F), (4, 0x7D)) if top <= last), 4) if top >= 0x30 else 0
+    return {'format': 'dq5patch/1', 'name': name, **({'rom_size': size} if size else {}), 'writes': [
         {'at': f'{a >> 16:02X}:{a & 0xFFFF:04X}', 'hex': new.hex(' '), **({'orig': old.hex(' ')} if old is not None else {}),
          'note': note}
-        for a, new, old, note in edits(rom, doc, at) if new != old]}
+        for a, new, old, note in writes]}
 
 
 def check(rom):
@@ -405,6 +572,11 @@ def check(rom):
         changed += sum(read(rom, addr, len(stub(name, labels))) != stub(name, labels) for addr, name in STUBS.items())
         hook = b'\x22' + labels['eff'].to_bytes(3, 'little') + b'\xea\xea' if 'eff' in labels else EFFECT_ORIG
         changed += read(rom, EFFECT_SITE, len(hook)) != hook
+    fx = effects_at(rom)
+    if fx is not None:
+        y = header(read(rom, records(rom)[MESSAGES[0]], 4))['y']
+        for addr, new, old, _ in effect_edits(rom, y, fx):
+            changed += read(rom, addr, len(new)) != new
     print(f'창 {len(doc["windows"])}개: 다른 쓰기 {changed}개' + (f', 격자 루틴 {at >> 16:02X}:{at & 0xFFFF:04X}' if at else ''))
     return bool(changed)
 
@@ -431,6 +603,8 @@ def main():
     write.add_argument('--name', default='windows')
     write.add_argument('--message-at', type=address,
                        help='창 18·25 너비·높이를 바꿀 때 옮긴 글자 격자 루틴을 둘 자리(빈 롬 자리, 약 400바이트)')
+    write.add_argument('--effects-at', type=address,
+                       help='창 18·25 를 21줄 위로 올릴 때 주문 연출에서 창을 지키는 코드를 둘 자리(빈 롬 자리, 약 320바이트)')
     sub.add_parser('check')
     args = parser.parse_args()
     try:
@@ -442,7 +616,7 @@ def main():
             result = dump(rom)
         else:
             with open(args.source, encoding='utf-8') as f:
-                result = patch(rom, json.load(f), args.name, args.message_at)
+                result = patch(rom, json.load(f), args.name, args.message_at, args.effects_at)
         os.makedirs(os.path.dirname(args.out) or '.', exist_ok=True)
         with open(args.out, 'w', encoding='utf-8') as f:
             json.dump(result, f, ensure_ascii=False, indent=2)

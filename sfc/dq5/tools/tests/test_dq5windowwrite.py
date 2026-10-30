@@ -12,8 +12,9 @@ from dq5map import Rom, lorom  # noqa: E402
 from w65816 import Cpu  # noqa: E402
 from dq5text import WINDOWS  # noqa: E402
 import dq5windowwrite  # noqa: E402
-from dq5windowwrite import (EFFECT_ORIG, EFFECT_SITE, FORMAT, GRID, ROUTINES, STUBS, assemble, check, dump, edits,  # noqa: E402
-                            message_at, message_items, message_sites, patch, records)
+from dq5windowwrite import (COLOR_ORIG, COLOR_SITES, EFFECT_ORIG, EFFECT_RAM, EFFECT_SITE, FORMAT, GRID,  # noqa: E402
+                            COLOR_LOADS, DMA_REGS, DMA_STARTS, ROUTINES, STUBS, WAVE_OPERANDS, assemble, check, dump,
+                            edits, effect_items, effects_at, message_at, message_items, message_sites, patch, records)
 
 COUNT = 0x30
 # 원본처럼 진짜 창 뒤에 첫 레코드까지 창이 아닌 포인터가 남는다.
@@ -51,6 +52,12 @@ def fixture():
             if not 0x24A5EC <= addr + i < 0x24A5F0:
                 data[lorom(addr) + i] = (addr + i * 7) & 0xFF
     data[lorom(EFFECT_SITE):lorom(EFFECT_SITE) + len(EFFECT_ORIG)] = EFFECT_ORIG
+    sites = [(a, bytes([0xA9, v])) for a, v in WAVE_OPERANDS.items()] + [(a, COLOR_ORIG) for a in COLOR_SITES] + list(COLOR_LOADS.items())
+    # NMI GP DMA 레지스터 자리는 채널 7 의 $4370~$4375 를 돌려 가며 둔다.
+    sites += [(a, bytes([0x8D, 0x70 + i % 6, 0x43])) for i, a in enumerate(DMA_REGS)]
+    sites += [(a, bytes.fromhex('a9 80 8d 0b 42')) for a in DMA_STARTS]
+    for addr, orig in sites:
+        data[lorom(addr):lorom(addr) + len(orig)] = orig
     return bytes(data)
 
 
@@ -223,8 +230,8 @@ class WindowWriteTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             edits(moved, {'format': FORMAT, 'windows': [{'index': '25', 'x': 3}]})
 
-    def shaped(self, row, at=0x16FE10):
-        return patch(self.rom, {'format': FORMAT, 'windows': [{'index': '18', **row}]}, at=at)
+    def shaped(self, row, at=0x16FE10, fx_at=0x0BFC00):
+        return patch(self.rom, {'format': FORMAT, 'windows': [{'index': '18', **row}]}, at=at, fx_at=fx_at)
 
     def test_message_window_shape(self):
         manifest = self.shaped({'x': 0, 'w': 31, 'h': 11})
@@ -342,8 +349,70 @@ class WindowWriteTests(unittest.TestCase):
             cpu.io_writes.clear()
             cpu.dbr = 0
             call('eff', p=0x00)
-            self.assertEqual([v for a, v in cpu.io_writes if a in (0x4375, 0x4376)], list(size.to_bytes(2, 'little')))
+            self.assertEqual([v for a, v in cpu.io_writes if a in (0x4305, 0x4306)], list(size.to_bytes(2, "little")))
             cpu.dbr = 0x24
+
+
+    def test_effect_hooks(self):
+        """창을 21줄 위로 올리면 연출 막기 훅을 걸고, 21줄로 되돌리면 원래 바이트로 둔다."""
+        manifest = self.shaped({'h': 11})
+        writes = {w['at']: w['hex'] for w in manifest['writes']}
+        rom = Rom(apply_new(self.data, manifest))
+        self.assertEqual(effects_at(rom), 0x0BFC00)
+        _, labels = assemble(effect_items(17), 0x0BFC00)
+        jsl = '22 ' + labels['color'].to_bytes(3, 'little').hex(' ')
+        self.assertEqual({writes[f'{a >> 16:02X}:{a & 0xFFFF:04X}'] for a in COLOR_SITES}, {jsl})
+        # 물결 표 머리: 55줄부터 창 맨 위 줄(17 × 8 - 1 = 135) 앞까지 80줄, 그 뒤 239 - 135 줄.
+        self.assertEqual((writes['22:8EC7'], writes['22:8ECC']), ('d0', '68'))
+        # NMI GP DMA 넷은 채널 7 → 0.
+        self.assertEqual({writes[f'00:{a + 1 & 0xFFFF:04X}'] for a in DMA_STARTS}, {'01'})
+        self.assertEqual(writes[f'00:{DMA_REGS[1] + 1 & 0xFFFF:04X}'], '01')
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertFalse(check(rom))
+        back = {w['at']: w['hex'] for w in patch(rom, {'format': FORMAT, 'windows': [{'index': '25', 'h': 7}]})['writes']}
+        self.assertEqual((back['22:E175'], back['22:8EC7'], back[f'00:{DMA_REGS[1] + 1 & 0xFFFF:04X}']),
+                         ('8f 31 21 00', 'f0', '71'))
+        restored = Rom(apply_new(apply_new(self.data, manifest),
+                                 patch(rom, {'format': FORMAT, 'windows': [{'index': '25', 'h': 7}]})))
+        self.assertIsNone(effects_at(restored))
+        with self.assertRaises(ValueError):
+            self.shaped({'h': 11}, fx_at=None)
+
+    def test_effect_code_runs(self):
+        """$2131 쓰기 훅을 해석기로 돌린다: 표(직접 HDMA)·채널 7·$0D83, 화면 중간에 처음 켤 때 BG3 비트를 뺀 값을 쓰고,
+        켜 둔 뒤에는 창 위 줄이면 원래 값(16비트면 $2132 도), 창 줄이면 BG3 비트를 뺀 값을 쓴다."""
+        at, y = 0x0BFC00, 17
+        code, labels = assemble(effect_items(y), at)
+        rom = bytearray(0x180000)
+        rom[lorom(at):lorom(at) + len(code)] = code
+        cpu = Cpu(bytes(rom), bytearray(0x20000))
+        line = {'v': 0}
+        plain_read = cpu.read
+
+        def read(a):
+            if a & 0xFFFF == 0x213D:
+                v, line['v'] = line['v'] & 0xFF, line['v'] >> 8
+                return v
+            return plain_read(a)
+        cpu.read = read
+
+        def call(a, p, v=0):
+            line['v'] = v
+            cpu.io_writes.clear()
+            cpu.p, cpu.a = p, a
+            cpu.jsl(labels['color'])
+            return [(r, x) for r, x in cpu.io_writes if r in (0x2131, 0x2132, 0x420C)]
+
+        ram = EFFECT_RAM & 0xFFFF
+        self.assertEqual(call(0x47, 0x20), [(0x2131, 0x43)])
+        self.assertEqual(bytes(cpu.wram[ram:ram + 7]), bytes([8, 0x47, 0x7F, 0x47, 1, 0x43, 0]))
+        self.assertEqual(cpu.wram[0x0D83], 0x80)
+        self.assertEqual([cpu.reg[0x4370 + i] for i in range(5)], [0x00, 0x31, ram & 0xFF, ram >> 8, 0x7E])
+        self.assertEqual(call(0x00C3, 0x00, 100), [(0x2131, 0xC3), (0x2132, 0x00)])
+        self.assertEqual(call(0x47, 0x20, 136), [(0x2131, 0x43)])
+        self.assertEqual(call(0x0047, 0x00, 200), [(0x2131, 0x43), (0x2132, 0x00)])
+        self.assertEqual(call(0x03, 0x20, 200), [(0x2131, 0x03)])
+        self.assertEqual(cpu.wram[0x0D83], 0x80)
 
 
 if __name__ == '__main__':
