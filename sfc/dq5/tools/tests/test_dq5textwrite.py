@@ -13,7 +13,8 @@ from dq5map import Rom, lorom  # noqa: E402
 from dq5text import NODES_0, NODES_1, ROOT  # noqa: E402
 from dq5text import FONT_GROUPS, FONT_TABLE_OPERANDS, GLYPHS  # noqa: E402
 from dq5textwrite import (  # noqa: E402
-    FORMAT, base_package, compile_messages, decoded_messages, overrides, parse_at, patch, tree, valid_message,
+    FORMAT, INDEX_LOAD, INDEX_LOAD_CODE, MAX_MESSAGES, base_package, compile_messages, decoded_messages, index_table,
+    overrides, parse_at, patch, tree, valid_message,
 )
 
 
@@ -29,6 +30,8 @@ def source_fixture():
         data[off - 1:off + 2] = bytes([opcode]) + value.to_bytes(2, 'little')
     off = lorom(WALK_INDEX_CALL - 1)
     data[off:off + 3] = bytes.fromhex('20 8d 8c')
+    off = lorom(INDEX_LOAD)
+    data[off:off + len(INDEX_LOAD_CODE)] = INDEX_LOAD_CODE
     return bytes(data)
 
 
@@ -92,7 +95,7 @@ class TextWriteTests(unittest.TestCase):
     def test_bad_overrides(self):
         cases = [None, [], {}, {'format': FORMAT}, {'format': FORMAT, 'messages': None},
                  {'format': FORMAT, 'messages': [], 'text': ''}, {'format': FORMAT, 'messages': [None]}]
-        for ident in (True, -1, 3200, '129'):
+        for ident in (True, -1, 3201, MAX_MESSAGES, '129'):
             cases.append({'format': FORMAT, 'messages': [{'id': ident, 'codes': [0x1001]}]})
         cases.append({'format': FORMAT, 'messages': [{'id': 0, 'codes': [0x1001]}] * 2})
         cases.append({'format': FORMAT, 'messages': [{'id': 0, 'codes': [0x1001], 'text': 'x'}]})
@@ -153,6 +156,56 @@ class TextWriteTests(unittest.TestCase):
             base_package(bytes(data))
         bad = bytearray(base)
         bad[lorom(0x249E07) + 6] = 0x40
+        with self.assertRaises(ValueError):
+            base_package(bytes(bad))
+
+    def test_extra_messages_move_index_into_head(self):
+        doc = {'format': FORMAT, 'messages': [{'id': 3200 + i, 'codes': [i, 0x1001]} for i in range(17)]}
+        messages = overrides(self.messages, doc)
+        self.assertEqual(len(messages), 3232)
+        self.assertEqual(messages[3216], [16, 0x1001])
+        self.assertEqual(messages[3217:], [[0x1001]] * 15)
+        for at in ('38:8000', '65:8000'):
+            manifest = compile_messages(self.data, messages, at)
+            notes = [w['note'] for w in manifest['writes']]
+            self.assertNotIn('보행 메시지 색인', notes)
+            load = next(w for w in manifest['writes'] if w['at'] == '24:8BC3')
+            self.assertEqual(bytes.fromhex(load['orig']), INDEX_LOAD_CODE)
+            rebuilt = rebuild(self.data, manifest, 4)
+            self.assertEqual(decoded_messages(rebuilt), messages)
+            index, count = index_table(rebuilt, 0x20 if at.startswith('38') else 0x60)
+            self.assertEqual((index >> 16, count), (int(at[:2], 16), 3232))
+        again = overrides(messages, {'format': FORMAT, 'messages': [{'id': 3232, 'codes': [0x1010]}]})
+        self.assertEqual(len(again), 3248)
+        most = [[0x1001] for _ in range(MAX_MESSAGES)]
+        most[-1] = [1, 0x1001]
+        manifest = compile_messages(self.data, most, '30:8000')
+        self.assertEqual(decoded_messages(rebuild(self.data, manifest)), most)
+        with self.assertRaises(ValueError):
+            compile_messages(self.data, most + [[0x1001]] * 16)
+        with self.assertRaises(ValueError):
+            compile_messages(self.data, messages[:3201])
+        bad = bytearray(self.data)
+        bad[lorom(INDEX_LOAD) + 2] = 0xEA
+        with self.assertRaises(ValueError):
+            compile_messages(bytes(bad), messages)
+
+    def test_base_package_with_extra_messages_and_font_table(self):
+        data = bytearray(self.data)
+        groups = bytes((0xDB, 0x03, 0, 0, 0)) + bytes((0x10, 0x00, 0, 0, 0))
+        for at, k in FONT_TABLE_OPERANDS:
+            data[lorom(at):lorom(at) + 3] = (FONT_GROUPS + k).to_bytes(3, 'little')
+        grown = [[GLYPHS + i % 16, 0x1001] for i in range(MESSAGES + 32)]
+        manifest = compile_messages(bytes(data), grown, '65:8000', font=groups, glyphs=GLYPHS + 16)
+        base = rebuild(bytes(data), manifest, 4)
+        messages, font, glyphs, _ = base_package(base)
+        self.assertEqual((messages, font, glyphs), (grown, groups, GLYPHS + 16))
+        edited = patch(bytes(data), {'format': FORMAT, 'messages': [{'id': MESSAGES + 32, 'codes': [0x1018]}]},
+                       '30:8000', base=base)
+        again = decoded_messages(rebuild(bytes(data), edited, 4))
+        self.assertEqual(again, grown + [[0x1018]] + [[0x1001]] * 15)
+        bad = bytearray(base)
+        bad[lorom(INDEX_LOAD) + 10] ^= 1
         with self.assertRaises(ValueError):
             base_package(bytes(bad))
 

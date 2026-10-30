@@ -378,8 +378,9 @@ def wintest(data):
     return checksum(d), [f'창 접두 {WIN_PREFIX:02X}: 훅 {WIN_HOOK:06X}, 글자 {len(WINTEST_TEXT)}개 {WIN_GLYPHS:06X}, VRAM 타일 {WIN_TILE:02X}']
 
 
-def decode_check(data, decoder=None, bank_mask=0x20, with_end=False):
+def decode_check(data, decoder=None, bank_mask=0x20, with_end=False, index=INDEX, count=MESSAGES):
     """디코더의 트리 피연산자와 색인을 따라 메시지 전체를 푼다. 기본값은 retree 배치다.
+    index·count 는 색인 표 CPU 주소와 메시지 수(16의 배수)다.
     with_end 면 (메시지, 마지막 메시지의 마지막 비트가 든 바이트 다음 CPU 주소)를 돌려준다."""
     rom = Rom(data)
     decoder = NEW_BANK << 16 | 0x8000 if decoder is None else decoder
@@ -389,8 +390,8 @@ def decode_check(data, decoder=None, bank_mask=0x20, with_end=False):
     root = rom.u16(decoder + ROOT_OPERAND - DECODER)
     out = []
     remaining_bits = len(data) * 8
-    for g in range(MESSAGES // 16):
-        v = rom.u24(INDEX + g * 3)
+    for g in range(count // 16):
+        v = rom.u24(index + g * 3)
         addr, bit = (v >> 3) | (bank_mask << 16), v & 7
         for _m in range(16):
             msg = []

@@ -1,4 +1,4 @@
-"""DQ5 보행 메시지 3,200개를 코드 목록으로 내보내고 허프만 트리와 함께 다시 넣는다.
+"""DQ5 보행 메시지 3,200개를 코드 목록으로 내보내고 허프만 트리와 함께 다시 넣는다. 3200 이상 번호를 덧붙일 수 있다.
 
 형식은 sfc/dq5/docs/dq5-text-format.md. 24:9E02 디코더 사본과 트리는 한 뱅크에,
 메시지는 뒤에 연속 배치한다. 24:AF1E의 21비트 주소에는 뱅크 20을 빼서 넣고
@@ -18,6 +18,9 @@ codes는 정수 배열: 원래 글자 000~3DA, 제어 1000~101D·1100~1118(16진
 --base 롬은 이미 보행 메시지를 옮긴 롬(DQ4 메뉴 빌드 등)이다. 그 롬의 디코더·색인으로 메시지를 읽어 고친 것만
 바꾸고, 그 롬의 글자 묶음 표(늘린 한글 글자 포함)를 새 머리에 옮겨 표 피연산자도 고친다. 패치는 여전히
 원래 롬 기준(orig)이며, 옛 메시지 묶음과 같은 원본 자리 쓰기를 대신한다(sfc/dq5/docs/dq5-build-format.md).
+id 가 지금 끝(원본은 3200) 이상이면 빈 번호 없이 이어 덧붙이고, 16개 묶음 끝까지 {1001} 한 코드 메시지로 채운다.
+최대 id 는 1FFF(8191). 덧붙이면 색인 표를 머리(트리 뒤, 글자 묶음 표 앞)로 옮기고 24:8BC3 의 색인 읽기
+뱅크·주소를 고친다. 3,200개만이면 쓰기는 예전과 같다.
 """
 import argparse
 from collections import Counter
@@ -36,6 +39,12 @@ from dq5text import ENDS, FONT_GROUPS, FONT_TABLE_OPERANDS, GLYPHS, INDEX, NODES
 
 FORMAT = 'dq5text/1'
 BANK = 0x8000
+# 24:8BAF 는 번호를 16비트로 받아 (번호 >> 4) * 3 을 X 로 이 코드의 표를 읽는다. 표를 옮길 때 뱅크와 세 주소만 바꾼다.
+INDEX_LOAD = 0x248BC3
+INDEX_LOAD_CODE = bytes.fromhex('a9 24 48 ab bd 1e af 85 00 bd 1f af 85 01 bd 20 af')
+# 대화 스크립트 메시지 명령(06:B070)의 bit5 갈래가 v & 1FFF 라 이 수까지 받는다.
+MAX_MESSAGES = 0x2000
+PAD = [0x1001]
 # 색인은 21비트라 훅이 뱅크 바이트에 창의 첫 뱅크를 OR 한다. 디코더 사본은 PHK·PLB 로 자기 뱅크만 읽으므로
 # 낮은 WRAM 거울이 없는 60~ 에서도 돈다(DQ4 메뉴가 65:8000 에서 실측). 7E·7F 는 WRAM 이라 7D 까지.
 WINDOWS = {0x20: (0x30, 0x3F), 0x60: (0x60, 0x7D)}
@@ -62,17 +71,28 @@ def overrides(original, doc, glyphs=GLYPHS):
     if doc.get('format') != FORMAT or not isinstance(doc.get('messages'), list):
         raise ValueError(f'format={FORMAT}과 messages 배열이 필요함')
     messages = list(original)
-    if len(messages) != MESSAGES:
-        raise ValueError(f'원본 메시지는 {MESSAGES}개여야 함')
-    seen = set()
+    count(messages)
+    rows = {}
     for row in doc['messages']:
         keys(row, {'id', 'codes'}, '메시지')
         index = row.get('id')
-        if type(index) is not int or not 0 <= index < MESSAGES or index in seen:
-            raise ValueError('id는 중복 없는 0~3199 정수여야 함')
-        seen.add(index)
-        messages[index] = valid_message(row.get('codes'), glyphs)
-    return messages
+        if type(index) is not int or not 0 <= index < MAX_MESSAGES or index in rows:
+            raise ValueError(f'id는 중복 없는 0~{MAX_MESSAGES - 1} 정수여야 함')
+        rows[index] = row.get('codes')
+    added = sorted(i for i in rows if i >= len(messages))
+    if added != list(range(len(messages), len(messages) + len(added))):
+        raise ValueError(f'{len(messages)} 이상 id 는 {len(messages)} 부터 빈 번호 없이 이어져야 함')
+    messages += [None] * len(added)
+    for index, codes in rows.items():
+        messages[index] = valid_message(codes, glyphs)
+    return messages + [PAD] * (-len(messages) % 16)
+
+
+def count(messages):
+    """메시지 수를 검사해 덧붙였는지(3,200개 초과) 돌려준다."""
+    if not MESSAGES <= len(messages) <= MAX_MESSAGES or len(messages) % 16:
+        raise ValueError(f'메시지는 {MESSAGES}~{MAX_MESSAGES}개, 16의 배수여야 함')
+    return len(messages) > MESSAGES
 
 
 def parse_at(value):
@@ -121,6 +141,31 @@ def read_messages(data):
     return messages
 
 
+def index_table(data, mask):
+    """보행 색인 표의 (CPU 주소, 메시지 수). 24:8BC3 이 원래 코드면 24:AF1E 의 3,200개다. 옮긴 표는 머리 끝의
+    글자 묶음 표(옮기지 않았으면 메시지 0) 바로 앞에서 끝나므로 그 사이를 세 바이트씩 센다."""
+    rom = Rom(data)
+    at = lorom(INDEX_LOAD)
+    code = data[at:at + len(INDEX_LOAD_CODE)]
+    if code == INDEX_LOAD_CODE:
+        return INDEX, MESSAGES
+    index = code[1] << 16 | rom.u16(INDEX_LOAD + 5)
+    expected = bytearray(INDEX_LOAD_CODE)
+    expected[1] = code[1]
+    for k, off in enumerate((5, 10, 15)):
+        expected[off:off + 2] = ((index & 0xFFFF) + k).to_bytes(2, 'little')
+    if code != expected:
+        raise ValueError('지원하는 보행 색인 읽기 코드(24:8BC3)가 아님')
+    end = lorom((rom.u24(index) >> 3) | mask << 16)
+    table = lorom(rom.u24(FONT_TABLE_OPERANDS[0][0]))
+    if lorom(index) < table < end:
+        end = table
+    size = end - lorom(index)
+    if size % 3 or not MESSAGES < size // 3 * 16 <= MAX_MESSAGES:
+        raise ValueError('옮긴 보행 색인 표의 끝을 찾지 못함')
+    return index, size // 3 * 16
+
+
 def relocated(data):
     """보행 메시지를 옮긴 롬의 (디코더 주소, 색인 창 OR 값). 옮기지 않았으면 오류."""
     rom = Rom(data)
@@ -139,15 +184,16 @@ def base_package(base):
     글자 묶음 표는 표 피연산자부터 메시지 0 의 첫 바이트까지다(DQ4 메뉴가 머리 끝에 둔 꼴)."""
     rom = Rom(base)
     decoder, mask = relocated(base)
+    index, total = index_table(base, mask)
     try:
-        messages, end = decode_check(base, decoder=decoder, bank_mask=mask, with_end=True)
+        messages, end = decode_check(base, decoder=decoder, bank_mask=mask, with_end=True, index=index, count=total)
     except IndexError:
         raise ValueError('기준 롬의 메시지·트리 주소가 롬 범위를 벗어남') from None
     table = rom.u24(FONT_TABLE_OPERANDS[0][0])
     for at, k in FONT_TABLE_OPERANDS:
         if rom.u24(at) != table + k:
             raise ValueError(f'{at:06X}: 글자 묶음 표 피연산자가 서로 맞지 않음')
-    first = (rom.u24(INDEX) >> 3) | mask << 16
+    first = (rom.u24(index) >> 3) | mask << 16
     if table == FONT_GROUPS:
         font, glyphs = None, GLYPHS
     else:
@@ -168,8 +214,7 @@ def export(data, base=None):
 
 
 def tree(messages, glyphs=GLYPHS):
-    if len(messages) != MESSAGES:
-        raise ValueError(f'메시지는 {MESSAGES}개여야 함')
+    count(messages)
     freq = Counter(c for codes in messages for c in valid_message(codes, glyphs))
     if not freq:
         raise ValueError('빈 허프만 트리는 만들 수 없음')
@@ -187,12 +232,16 @@ def compile_messages(data, messages, at='38:8000', name='walk-text', font=None, 
         raise ValueError('메시지 배치가 입력 롬과 겹침; 원본 롬과 확장 뱅크를 사용해야 함')
     code = decoder_code(data)
     codes, nodes, root = tree(messages, glyphs)
+    grown = count(messages)
+    if grown and data[lorom(INDEX_LOAD):lorom(INDEX_LOAD) + len(INDEX_LOAD_CODE)] != INDEX_LOAD_CODE:
+        raise ValueError('원래 보행 색인 읽기 코드(24:8BC3)가 아님')
     mask = bytes(1 << i for i in range(8))
     mask_at = base + len(code)
     t1_at = mask_at + len(mask)
     t0_at = t1_at + len(nodes) * 2
-    font_at = t0_at + len(nodes) * 2
-    head_size = len(code) + len(mask) + len(nodes) * 4 + len(font or b'')
+    index_at = t0_at + len(nodes) * 2
+    font_at = index_at + index_size(messages)
+    head_size = len(code) + len(mask) + len(nodes) * 4 + index_size(messages) + len(font or b'')
     if len(nodes) > 0x2000 or (base & 0xFFFF) + head_size > 0x10000:
         raise ValueError('디코더·마스크·트리가 한 뱅크를 넘음')
     bits = sum(len(codes[c]) for message_codes in messages for c in message_codes)
@@ -204,12 +253,9 @@ def compile_messages(data, messages, at='38:8000', name='walk-text', font=None, 
         code[operand - DECODER:operand - DECODER + 2] = (target & 0xFFFF).to_bytes(2, 'little')
     code[ROOT_OPERAND - DECODER:ROOT_OPERAND - DECODER + 2] = (root * 2).to_bytes(2, 'little')
     code[-1] = 0x6B
-    head = code + mask + b''.join(n[0].to_bytes(2, 'little') for n in nodes) + \
-        b''.join(n[1].to_bytes(2, 'little') for n in nodes) + (font or b'')
     blob, starts = encode(codes, messages)
-    stream = bytes(head + blob)
     index = bytearray()
-    for m in range(0, MESSAGES, 16):
+    for m in range(0, len(messages), 16):
         bit = starts[m]
         off = start + head_size + (bit >> 3)
         cpu = (off // BANK) << 16 | 0x8000 | off % BANK
@@ -217,6 +263,9 @@ def compile_messages(data, messages, at='38:8000', name='walk-text', font=None, 
         if not 0 <= value < 1 << 24:
             raise ValueError('메시지 색인 24비트 범위 초과')
         index += cpu_to_bytes(value)
+    head = code + mask + b''.join(n[0].to_bytes(2, 'little') for n in nodes) + \
+        b''.join(n[1].to_bytes(2, 'little') for n in nodes) + (index if grown else b'') + (font or b'')
+    stream = bytes(head + blob)
     writes = []
     pos = 0
     while pos < len(stream):
@@ -227,7 +276,15 @@ def compile_messages(data, messages, at='38:8000', name='walk-text', font=None, 
                        'note': '보행 디코더·허프만 트리·메시지'})
         pos += len(part)
     stub = bytes((0x20, 0x8D, 0x8C, 0xA5, 0xF2, 0x09, bank_or, 0x85, 0xF2, 0x60))
-    originals = [(INDEX, index, '보행 메시지 색인'),
+    if grown:
+        load = bytearray(INDEX_LOAD_CODE)
+        load[1] = index_at >> 16
+        for k, off in enumerate((5, 10, 15)):
+            load[off:off + 2] = ((index_at & 0xFFFF) + k).to_bytes(2, 'little')
+        table = (INDEX_LOAD, bytes(load), '보행 메시지 색인 읽기(머리로 옮긴 표)')
+    else:
+        table = (INDEX, index, '보행 메시지 색인')
+    originals = [table,
                  (DECODER, bytes([0x22]) + cpu_to_bytes(base) + b'\x60', '보행 디코더 호출'),
                  (WALK_INDEX_STUB, stub, '보행 색인 뱅크 훅'),
                  (WALK_INDEX_CALL, (WALK_INDEX_STUB & 0xFFFF).to_bytes(2, 'little'), '보행 색인 호출')]
@@ -240,6 +297,11 @@ def compile_messages(data, messages, at='38:8000', name='walk-text', font=None, 
     return {'format': 'dq5patch/1', 'name': name, 'rom_size': 2 if bank_or == 0x20 else 4, 'writes': writes}
 
 
+def index_size(messages):
+    """머리에 둘 색인 표 바이트 수. 3,200개면 원래 24:AF1E 를 덮어 쓰므로 0."""
+    return len(messages) // 16 * 3 if count(messages) else 0
+
+
 def patch(data, doc, at='38:8000', name='walk-text', base=None):
     if base is None:
         return compile_messages(data, overrides(read_messages(data), doc), at, name)
@@ -249,8 +311,9 @@ def patch(data, doc, at='38:8000', name='walk-text', base=None):
 
 def decoded_messages(data):
     decoder, mask = relocated(data)
+    index, total = index_table(data, mask)
     try:
-        return decode_check(data, decoder=decoder, bank_mask=mask)
+        return decode_check(data, decoder=decoder, bank_mask=mask, index=index, count=total)
     except IndexError:
         raise ValueError('메시지·트리 주소가 롬 범위를 벗어남') from None
 
@@ -269,7 +332,7 @@ def check(data, doc, at, base=None):
     decoded = decoded_messages(rebuilt)
     different = sum(a != b for a, b in zip(messages, decoded))
     print(f'보행 메시지 {len(decoded)}개, 코드 {sum(map(len, messages))}개, 다른 메시지 {different}개')
-    return bool(different or len(decoded) != MESSAGES)
+    return bool(different or len(decoded) != len(messages))
 
 
 def main():
