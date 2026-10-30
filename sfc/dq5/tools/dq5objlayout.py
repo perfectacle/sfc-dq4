@@ -14,9 +14,10 @@ sfc/dq5/docs/dq5-graphics-format.md 의 「맵 OBJ 물체」·「탈것」·「�
     즉값이다. 칸 수·프레임 수가 그대로면 칸 바이트만 제자리에 쓴다. 바꾸면 그 탈것의 부분 모두의 칸 표를
     --vehicle-at 에 차례로 두고 즉값을 고친다(바꾼 부분은 그리는 블록만 옮겨 쓰게 한다). 한 즉값을 함께 쓰는 값
     (80-2·81-1·82-1·82-2 의 가로·세로, 한 탈것의 프레임 수)은 같아야 하고, 天空城 은 간격·프레임 주기가 STZ 라
-    프레임 수를 바꿀 수 없다. マスタードラゴン 은 착륙·이륙과 天空城 장면이 원래 간격·프레임을 고정값으로 두고 82-1 의
-    블록 12~16 을 그려 칸 수·프레임 수를 바꿀 수 없다(SCENE_BLOCKS). 상하 반전은 01:C42D·01:C160 표가 슬롯 칸
-    목록에 나중에 더하므로 칸 수가 그대로면 바꿀 수 없고, 바꾸면 표를 원래 칸 수 안에서 다시 쓴다.
+    프레임 수를 바꿀 수 없다. マスタードラゴン 부분 1 은 착륙·이륙(01:BF7C)과 天空城 장면(01:BB7C)이 걷기 밖 블록을
+    그려(SCENES) 문서에 land0·land1·tenkuu0~3 열쇠로 둔다. 칸 수·프레임 수를 바꾸면 이 블록을 걷기 블록 뒤에 겹치지
+    않게 두고 두 루틴의 프레임·간격 즉값을 고친다. 상하 반전은 01:C42D·01:C160 표가 슬롯 칸 목록에 나중에 더하므로
+    칸 수가 그대로면 바꿀 수 없고, 바꾸면 표를 다시 쓴다(원래 표보다 길면 --vehicle-at 뒤에 두고 읽는 곳을 고침).
   인물 세트(배 68 등): 세트 레코드 +3~+50 의 칸 48개(1F:CFC8·1F:D0FB 가 칸 목록으로 옮김). 자리는 00:F071(6타일)·
     00:F7AA(8타일)가 정한다. 타일 번호는 그 세트의 타일 수(+51)보다 작아야 한다.
 
@@ -58,7 +59,7 @@ DIRS = ('up', 'right', 'down', 'left')     # 00:EE7C 차례(방향 번호 0~3)
 # 탈것 부분. 01:BD29(양탄자)·01:C087(マスタードラゴン)·01:C436(天空城)이 슬롯마다 LDA #즉값 / STA 로 두는 값의
 # 피연산자 주소: ldy 칸 표(LDY #), bank 칸 표 뱅크(LDA #$04 / PHA / PLB, 한 탈것의 부분이 같이 씀), cols·rows 가로·세로
 # 칸 수(7E:34E0·3500, 같은 주소면 한 즉값을 둘이 씀), dir·frame 방향·프레임 간격(7E:37C0·37E0, None 이면 STZ 라 0),
-# count 옮겨 쓰는 블록 수 − 1($06), vflip 상하 반전 칸 오프셋 표(FF 로 끝).
+# count 옮겨 쓰는 블록 수 − 1($06), vflip 상하 반전 칸 오프셋 표(FF 로 끝)를 읽는 LDA long 의 피연산자.
 VEHICLE_PARTS = {
     '80-1': {'vid': 0x80, 'ldy': 0x01BDA5, 'bank': 0x01BDA8, 'cols': 0x01BD40, 'rows': 0x01BD45, 'dir': 0x01BD4A,
              'frame': 0x01BD4F, 'count': 0x01BDB1},
@@ -69,20 +70,21 @@ VEHICLE_PARTS = {
     '81-1': {'vid': 0x81, 'ldy': 0x01C48E, 'bank': 0x01C491, 'cols': 0x01C44D, 'rows': 0x01C44D, 'dir': None,
              'frame': None, 'count': 0x01C4A0},
     '81-2': {'vid': 0x81, 'ldy': 0x01C4AA, 'bank': 0x01C491, 'cols': 0x01C47D, 'rows': 0x01C482, 'dir': None,
-             'frame': None, 'count': 0x01C4B2, 'vflip': 0x01C42D},
+             'frame': None, 'count': 0x01C4B2, 'vflip': 0x01C40E},
     '82-1': {'vid': 0x82, 'ldy': 0x01C0EB, 'bank': 0x01C0EE, 'cols': 0x01C092, 'rows': 0x01C092, 'dir': 0x01C09A,
              'frame': 0x01C09F, 'count': 0x01C0F7},
     '82-2': {'vid': 0x82, 'ldy': 0x01C106, 'bank': 0x01C0EE, 'cols': 0x01C0C0, 'rows': 0x01C0C0, 'dir': 0x01C0C8,
-             'frame': 0x01C0CD, 'count': 0x01C10E, 'vflip': 0x01C160},
+             'frame': 0x01C0CD, 'count': 0x01C10E, 'vflip': 0x01C133},
 }
 # 7E:32A0 즉값(탈것의 부분 모두에 같은 값). bit6-7 은 그리기 루틴(00:EC82, 80 = 00:FBEB), bit0-3 은 00:EDD0 이
 # 프레임을 0 으로 되돌리는 마지막 프레임 번호다. 天空城 은 32E0(프레임 주기)·37C0·37E0 을 STZ 로 두어 프레임이 늘 0 이다.
 VEHICLE_FRAMES = {0x80: 0x01BD57, 0x81: None, 0x82: 0x01C0AA}
-# 걷기 밖에서 즉값 대신 고정값으로 간격·프레임을 두고 그리는 블록. 01:BF7C(착륙·이륙)는 슬롯 7 에 32A7 = 87·3287 = 7 을
-# 두고 6 까지 세어 블록 16·15 를, 01:BB7C(天空城 06/00·06/05, 7E:2190 bit7)는 37C7 = 80·32A7 = 83 으로 블록 12~15 를
-# 그린다. 둘 다 82-1 의 원래 칸 수·간격을 전제로 하므로 82 는 칸 수·프레임 수를 바꿀 수 없고, 다른 부분의 칸을 제자리에
-# 쓸 때 이 블록을 덮으면 거부한다.
-SCENE_BLOCKS = {'82-1': range(12, 17)}
+# 걷기 밖 장면이 슬롯 7(82-1)에 두는 값의 피연산자 주소. 둘 다 31E7 = 20 이라 00:FC08 이 방향 자리를 00:EE7C[2] = 3
+# 으로 잡는다(TURN). land: 01:BF7C(착륙 01:C200·이륙 01:BF47)가 3287 = X(frame)·32A7 = 8X(last)로 그리고 X − 1 로 한 번
+# 내린다. 37C7·37E7 은 걷기 값 그대로라 첫 칸 = (3 × 방향 간격 + X × 프레임 간격) / 2. tenkuu: 01:BB7C(天空城
+# 06/00·06/05)가 37C7 = S(stride)·32A7 = 83(last)으로 프레임 0~3 을 그려 첫 칸 = (3 × S + 프레임 × 프레임 간격) / 2.
+SCENES = {'82-1': {'land': {'frame': 0x01BF86, 'last': 0x01BF81}, 'tenkuu': {'stride': 0x01BBB4, 'last': 0x01BBB9}}}
+TURN = 3
 TOKEN = re.compile(r'(h?)(v?)([0-9A-Fa-f]{2})')
 
 
@@ -316,6 +318,22 @@ def vflip_offsets(rom, at):
     return out
 
 
+def vflip_at(rom, site):
+    """상하 반전 표 주소(01:C132·01:C40D 의 LDA long 피연산자)."""
+    return rom.u24(site['vflip'])
+
+
+def scene_blocks(rom, name, cols, rows, dir_, frame):
+    """걷기 밖 장면이 그리는 블록마다 칸 번호(SCENES). land0 이 먼저(프레임 X), land1 이 다음(X − 1)."""
+    if name not in SCENES:
+        return {}
+    land, tenkuu = SCENES[name]['land'], SCENES[name]['tenkuu']
+    per, x, stride = cols * rows, rom.u8(land['frame']), rom.u8(tenkuu['stride'])
+    starts = {'land0': TURN * dir_ + x * frame, 'land1': TURN * dir_ + (x - 1) * frame}
+    starts |= {f'tenkuu{f}': TURN * stride + f * frame for f in range((rom.u8(tenkuu['last']) & 0x0F) + 1)}
+    return {k: list(range(v // 2, v // 2 + per)) for k, v in starts.items()}
+
+
 def vehicle_part(rom, name):
     site = VEHICLE_PARTS[name]
     cols, rows = rom.u8(site['cols']), rom.u8(site['rows'])
@@ -324,18 +342,20 @@ def vehicle_part(rom, name):
     frames = vehicle_frames(rom, site['vid'])
     table = rom.u8(site['bank']) << 16 | rom.u16(site['ldy'])
     blocks = vehicle_blocks(cols, rows, dir_, frame, frames)
-    used = max(i for b in blocks.values() for i in b) + 1
+    scene = scene_blocks(rom, name, cols, rows, dir_, frame)
+    used = max(i for b in (*blocks.values(), *scene.values()) for i in b) + 1
     copied = (rom.u8(site['count']) + 1) * cols * rows
-    vflip = {off // 2 for off in vflip_offsets(rom, site['vflip'])} if site.get('vflip') else set()
+    vflip = {off // 2 for off in vflip_offsets(rom, vflip_at(rom, site))} if site.get('vflip') else set()
     return {'cols': cols, 'rows': rows, 'dir': dir_, 'frame': frame, 'frames': frames, 'table': table, 'blocks': blocks,
-            'vflip': vflip, 'used': used, 'copied': copied, 'bytes': bytes(rom.u8(table + i) for i in range(used))}
+            'scene': scene, 'vflip': vflip, 'used': used, 'copied': copied,
+            'bytes': bytes(rom.u8(table + i) for i in range(used))}
 
 
 def vehicle_doc(rom, name):
     p = vehicle_part(rom, name)
     cols = p['cols']
     cells = {}
-    for key, idx in p['blocks'].items():
+    for key, idx in (p['blocks'] | p['scene']).items():
         toks = [token((p['bytes'][i], i in p['vflip'])) for i in idx]
         cells[key] = [' '.join(toks[r * cols:(r + 1) * cols]) for r in range(p['rows'])]
     return {'part': name, 'size': f'{cols}x{p["rows"]}', 'frames': p['frames'], 'cells': cells}
@@ -400,10 +420,6 @@ def plan_vehicles(rom, rows, at=None):
         if not moved:
             writes += plan_vehicle_cells(rom, names, by_part, cur)
             continue
-        fixed = [n for n in names if n in SCENE_BLOCKS]
-        if fixed:
-            raise ValueError(f'탈것 {vid:02X}: 착륙·이륙(01:BF7C)과 天空城 장면(01:BB7C)이 {fixed[0]} 의 원래 간격으로 '
-                             f'블록 {SCENE_BLOCKS[fixed[0]][0]}~{SCENE_BLOCKS[fixed[0]][-1]} 을 그려 칸 수·프레임 수를 바꿀 수 없음')
         if at is None:
             raise ValueError(f'탈것 {vid:02X}: 칸 수·프레임 수를 바꾸면 칸 표를 옮겨야 해 --vehicle-at 이 필요함')
         w = plan_vehicle_layout(rom, vid, names, by_part, cur, layout, frames, at)
@@ -413,63 +429,109 @@ def plan_vehicles(rom, rows, at=None):
 
 
 def plan_vehicle_cells(rom, names, by_part, cur):
-    """칸 수·프레임 수 그대로: 칸 바이트만 제자리에."""
-    writes = []
+    """칸 수·프레임 수 그대로: 칸 바이트만 제자리에. 같은 바이트를 두 블록(82-1 의 tenkuu3·land1 은 원래 같은 블록)이나
+    두 부분이 쓰면 값이 같아야 하고, 문서에 없는 블록이 그리는 칸은 바꿀 수 없다."""
+    want, given = {}, set()
     for n in names:
         if n not in by_part:
             continue
         label, row = by_part[n]
         p = cur[n]
-        data = bytearray(p['bytes'])
-        if row['cells'].keys() - p['blocks'].keys():
-            raise ValueError(f'{label}: cells 의 열쇠는 {" ".join(p["blocks"])} 중 하나')
+        keys = p['blocks'] | p['scene']
+        if row['cells'].keys() - keys.keys():
+            raise ValueError(f'{label}: cells 의 열쇠는 {" ".join(keys)} 중 하나')
         for key, cells in row['cells'].items():
             toks = vehicle_cells(cells, key, p['rows'], p['cols'] * p['rows'], label, True)
-            for i_, (b, v) in zip(p['blocks'][key], toks):
+            for i_, (b, v) in zip(keys[key], toks):
                 if v != (i_ in p['vflip']):
                     raise ValueError(f'{label} {key}: 상하 반전 칸은 01:C42D·01:C160 표가 정해 칸 수가 그대로면 바꿀 수 없음')
-                data[i_] = b
-        if bytes(data) != p['bytes']:
-            writes.append((p['table'], bytes(data), True, f'탈것 {n} 칸 {len(data)}개'))
-    for n, blocks in SCENE_BLOCKS.items():
-        if n not in cur:
-            continue
-        per = cur[n]['cols'] * cur[n]['rows']
-        start, end = cur[n]['table'] + blocks[0] * per, cur[n]['table'] + (blocks[-1] + 1) * per
-        for at, data, _, note in writes:
-            hit = [a for a in range(max(at, start), min(at + len(data), end)) if data[a - at] != rom.u8(a)]
+                addr = p['table'] + i_
+                if want.setdefault(addr, (b, f'{label} {key}'))[0] != b:
+                    raise ValueError(f'{label} {key}: {cpu(addr)} 을 {want[addr][1]} 이 다른 값으로 씀')
+            given.add((n, key))
+    changed = sorted(a for a, (b, _) in want.items() if rom.u8(a) != b)
+    for n in names:
+        p = cur[n]
+        for key, idx in (p['blocks'] | p['scene']).items():
+            hit = [a for a in changed if a - p['table'] in idx and (n, key) not in given]
             if hit:
-                raise ValueError(f'{note}: {cpu(hit[0])} 이 {n} 블록 {blocks[0]}~{blocks[-1]}(착륙·이륙·天空城 장면)을 덮음')
-    return writes
+                raise ValueError(f'{want[hit[0]][1]}: {cpu(hit[0])} 이 문서에 없는 {n} {key} 의 칸을 덮음')
+    # 부분마다 그리는 범위를 쓰고, 겹치는 범위는 하나로 합친다(빌더는 겹친 쓰기를 거부).
+    spans = sorted([cur[n]['table'], cur[n]['table'] + cur[n]['used'], [n]] for n in names
+                   if any(cur[n]['table'] <= a < cur[n]['table'] + cur[n]['used'] for a in changed))
+    merged = []
+    for span in spans:
+        if merged and span[0] <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], span[1])
+            merged[-1][2] += span[2]
+        else:
+            merged.append(span)
+    return [(start, bytes(want.get(a, (rom.u8(a),))[0] for a in range(start, end)), True,
+             f'탈것 {"·".join(parts)} 칸 {end - start}개') for start, end, parts in merged]
+
+
+def scene_layout(rom, name, frames, per):
+    """걷기 블록(0 ~ 4 × frames − 1) 뒤에 착륙 두 블록과 天空城 블록을 겹치지 않게 두는 (X, S, 블록 수) 가운데 블록 수가
+    가장 적은 것. 착륙은 블록 3 × frames + X − 1·X, 天空城 은 3 × S / (칸 수 × 2) 부터다(X ≤ 15, S ≤ 255)."""
+    tenkuu = (rom.u8(SCENES[name]['tenkuu']['last']) & 0x0F) + 1
+    walk = set(range(4 * frames))
+    best = None
+    for k in range(0x100 // (per * 2) + 1):
+        if k * per * 2 > 0xFF:
+            break
+        sit = set(range(3 * k, 3 * k + tenkuu))
+        for x in range(1, 16):
+            land = {3 * frames + x - 1, 3 * frames + x}
+            if walk & sit or walk & land or sit & land:
+                continue
+            total = max(walk | sit | land) + 1
+            if best is None or total < best[2]:
+                best = (x, k * per * 2, total)
+    if best is None:
+        raise ValueError(f'{name}: {frames}프레임 × {per}칸이면 天空城 장면 간격(37C7, 3 × 블록이 걷기 블록 뒤)이 '
+                         f'한 바이트를 넘거나 착륙 프레임(32A7)이 15 를 넘음')
+    return best
 
 
 def plan_vehicle_layout(rom, vid, names, by_part, cur, layout, frames, at):
     """칸 수·프레임 수를 바꾼 탈것: 부분 모두의 칸 표를 at 에 차례로 두고 즉값을 고친다. 바꾼 부분은 그리는 블록만
-    옮겨 쓰게($06 = 블록 수 − 1) 하고 모든 블록의 칸을 받는다. 그대로인 부분은 원래 옮기던 범위를 그대로 베낀다."""
+    옮겨 쓰게($06 = 블록 수 − 1) 하고 모든 블록의 칸을 받는다. 그대로인 부분은 원래 옮기던 범위를 그대로 베낀다.
+    걷기 밖 장면 블록(SCENES)은 scene_layout 자리에 두고, 원래 표보다 긴 상하 반전 표는 칸 표 뒤에 둔다."""
     if at & 0xFFFF < 0x8000:
         raise ValueError(f'--vehicle-at {cpu(at)}: 칸 표는 LDY # 로 읽어 뱅크의 8000~FFFF 여야 함')
-    blob, imm = bytearray(), []
+    blob, imm, tables = bytearray(), [], []
     for n in names:
         site, p, new = VEHICLE_PARTS[n], cur[n], layout[n]
         label, row = by_part.get(n, (n, {'cells': {}}))
         start = at + len(blob)
         if not new['changed']:
+            keys = p['blocks'] | p['scene']
             data = bytearray(rom.u8(p['table'] + i) for i in range(p['copied']))
             for key, cells in row['cells'].items():
-                if key not in p['blocks']:
-                    raise ValueError(f'{label}: cells 의 열쇠는 {" ".join(p["blocks"])} 중 하나')
+                if key not in keys:
+                    raise ValueError(f'{label}: cells 의 열쇠는 {" ".join(keys)} 중 하나')
                 toks = vehicle_cells(cells, key, p['rows'], p['cols'] * p['rows'], label, True)
-                for i_, (b, v) in zip(p['blocks'][key], toks):
+                for i_, (b, v) in zip(keys[key], toks):
                     if v != (i_ in p['vflip']):
                         raise ValueError(f'{label} {key}: 상하 반전 칸은 01:C42D·01:C160 표가 정해 칸 수가 그대로면 바꿀 수 없음')
                     data[i_] = b
         else:
             blocks = vehicle_blocks(new['cols'], new['rows'], new['dir'], new['frame'], frames)
             per = new['cols'] * new['rows']
+            count = len(blocks)
+            if n in SCENES:
+                x, stride, count = scene_layout(rom, n, frames, per)
+                land, tenkuu = SCENES[n]['land'], SCENES[n]['tenkuu']
+                imm += [(land['frame'], bytes([x]), f'탈것 {n} 착륙 프레임'),
+                        (land['last'], bytes([rom.u8(land['last']) & 0xF0 | x]), f'탈것 {n} 착륙 마지막 프레임'),
+                        (tenkuu['stride'], bytes([stride]), f'탈것 {n} 天空城 간격')]
+                first = {'land0': 3 * frames + x, 'land1': 3 * frames + x - 1}
+                first |= {f'tenkuu{f}': 3 * stride // (per * 2) + f for f in range((rom.u8(tenkuu['last']) & 0x0F) + 1)}
+                blocks |= {k: list(range(b * per, b * per + per)) for k, b in first.items()}
             missing = blocks.keys() - row['cells'].keys()
             if missing or row['cells'].keys() - blocks.keys():
                 raise ValueError(f'{label}: 칸 수·프레임 수를 바꾸면 cells 에 {" ".join(blocks)} 를 모두 주어야 함')
-            data = bytearray(len(blocks) * per)
+            data = bytearray(count * per)
             flips = []
             for key, idx in blocks.items():
                 toks = vehicle_cells(row['cells'][key], key, new['rows'], per, label, bool(site.get('vflip')))
@@ -478,19 +540,24 @@ def plan_vehicle_layout(rom, vid, names, by_part, cur, layout, frames, at):
                     if v:
                         flips.append(i_ * 2)
             if site.get('vflip'):
-                room = len(vflip_offsets(rom, site['vflip']))
-                if len(flips) > room or any(off >= 0xFF for off in flips):
-                    raise ValueError(f'{label}: 상하 반전 칸 {len(flips)}개(표 {cpu(site["vflip"])} 는 {room}칸, 오프셋은 FE 까지)')
+                if any(off > 0xFE for off in flips):
+                    raise ValueError(f'{label}: 상하 반전 칸 오프셋은 FE(칸 127)까지')
                 table = bytes(sorted(flips)) + b'\xff'
-                old = bytes(rom.u8(site['vflip'] + i) for i in range(len(table)))
-                if table != old:
-                    imm.append((site['vflip'], table, f'탈것 {n} 상하 반전 표'))
+                old_at = vflip_at(rom, site)
+                if len(table) <= len(vflip_offsets(rom, old_at)) + 1:
+                    if bytes(rom.u8(old_at + i) for i in range(len(table))) != table:
+                        imm.append((old_at, table, f'탈것 {n} 상하 반전 표'))
+                else:
+                    tables.append((site['vflip'], table, f'탈것 {n} 상하 반전 표'))
             for key, val in (('cols', new['cols']), ('rows', new['rows']), ('dir', new['dir']), ('frame', new['frame']),
-                             ('count', len(blocks) - 1)):
+                             ('count', count - 1)):
                 if site[key] and rom.u8(site[key]) != val:
                     imm.append((site[key], bytes([val]), f'탈것 {n} {key}'))
         blob += data
         imm.append((site['ldy'], (start & 0xFFFF).to_bytes(2, 'little'), f'탈것 {n} 칸 표 주소'))
+    for operand, table, note in tables:
+        imm.append((operand, (at + len(blob)).to_bytes(3, 'little'), f'{note} 주소'))
+        blob += table
     if (at & 0xFFFF) + len(blob) > 0x10000:
         raise ValueError(f'--vehicle-at {cpu(at)} 뒤 칸 표 {len(blob)}바이트가 뱅크를 넘음')
     bank = VEHICLE_PARTS[names[0]]['bank']
