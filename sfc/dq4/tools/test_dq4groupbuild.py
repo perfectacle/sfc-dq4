@@ -84,6 +84,13 @@ class BundleTest(unittest.TestCase):
         import dq4entrancehook
         dq4entrancehook.tables(arrivals, leaving)
 
+    def test_fall_maps_leave_before_the_group(self):
+        # 떨어지는 맵의 나가기 행이 그 그룹의 행보다 앞에 있어야 2A:F425 가 그 행을 고른다
+        links = {0x39: [{"fc": 0x30, "field": [(0x88, 0x17)], "arrival": (1, 1)}]}
+        place = {(0x30, k): (0x39, k) for k in range(6)}
+        _, leaving = build.hook_rows(links, place, {0x30: ([(272, 46)], (270, 47))})
+        self.assertEqual(leaving, [(0x39, 0, 2, 0x88 * 2, 0x19 * 2), (0x39, 0, 0x1F, 270, 47)])
+
     def test_fc_group_in_two_dq5_groups(self):
         with self.assertRaises(ValueError):
             build.layout({0x40: [{"fc": 0x10}], 0x41: [{"fc": 0x10}]}, self.FC_MAPS)
