@@ -24,7 +24,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
 import dq4shop  # noqa: E402
 import dq5item  # noqa: E402
 from dq4environmentrom import GROUPS  # noqa: E402
-from dq4groupbuild import LINKS  # noqa: E402
+from dq4groupbuild import fc_map  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
 
 # FC shop kind (dq4shop.KINDS) -> DQ5 shop list kind (04:FBD5: 0 item, 1 armor, 2 weapon).
@@ -97,14 +97,14 @@ def port(dq5_path, dq4_path, inn_at):
     counts = {k: sum(1 for s in progress["shops"] if s["kind"] == k) for k in range(4)}
     services, shops, inns, report = {}, [], {}, {"shops": [], "missing_items": [], "inns": {}}
     for name, (group, number) in sorted(GROUPS.items(), key=lambda kv: kv[1]):
-        fc_group = LINKS[group]["fc"]
-        found = merchants(prg, fc_group, number)
+        fc_group, fc_number = fc_map(prg, group, number)
+        found = merchants(prg, fc_group, fc_number)
         services[f"{group:02X}/{number:02X}"] = found
         for kind in sorted(set(found.values())):
             if kind in LIST_KIND:
                 if any(s["key"] == group and s["kind"] == LIST_KIND[kind] for s in shops):
                     raise ValueError(f"{group:02X}: two {dq4shop.KINDS[kind]} lists under one key")
-                fc_items = dq4shop.lookup(prg, kind, fc_group, number)
+                fc_items = dq4shop.lookup(prg, kind, fc_group, fc_number)
                 picked = []
                 for i in fc_items:
                     item = names[i & 0x7F]
@@ -120,9 +120,9 @@ def port(dq5_path, dq4_path, inn_at):
                 report["shops"].append({"map": f"{group:02X}/{number:02X}", "kind": dq4shop.KINDS[kind],
                                         "fc": [names[i & 0x7F] for i in fc_items], "dq5": picked})
             elif kind == INN:
-                price = dq4shop.inn_price(prg, fc_group, number)
+                price = dq4shop.inn_price(prg, fc_group, fc_number)
                 if price is None or price > 0x7F:
-                    raise ValueError(f"{fc_group:02X}/{number:02X}: inn price {price}")
+                    raise ValueError(f"{fc_group:02X}/{fc_number:02X}: inn price {price}")
                 inns[group] = price
     report["inns"] = {f"{g:02X}": p for g, p in inns.items()}
     original = bytes(rom.u8(INN_TABLE + i) for i in range(INN_ENTRIES * 2))

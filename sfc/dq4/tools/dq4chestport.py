@@ -25,8 +25,8 @@ import dq4block  # noqa: E402
 import dq4chest  # noqa: E402
 import dq4shop  # noqa: E402
 import dq5item  # noqa: E402
-from dq4environmentmap import all_maps  # noqa: E402
-from dq4environmentrom import GROUPS, TARGETS  # noqa: E402
+from dq4environmentrom import TARGETS  # noqa: E402
+from dq4groupbuild import placement  # noqa: E402
 from dq4shopport import _fold, dq5_items  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
 
@@ -55,7 +55,7 @@ def port(dq5_path, dq4_path):
     prg = ines.prg(Path(dq4_path).read_bytes())
     items = dq5_items(dq5item.Rom(Path(dq5_path).read_bytes()))
     names, _ = dq4shop.item_names(prg)
-    target = {(g, k): GROUPS[name] for g, k, _, name in all_maps(prg) if name in GROUPS}
+    target = placement(prg)
     maps, report = {}, []
     for (g, k), (group, number) in sorted(target.items(), key=lambda kv: kv[1]):
         for _, x, y, content, desc in dq4chest.chests(prg, g, k):

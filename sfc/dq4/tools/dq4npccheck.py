@@ -30,7 +30,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
 
 import dq4block  # noqa: E402
 from dq4environmentmap import block_prop  # noqa: E402
-from dq4groupbuild import LINKS, cell  # noqa: E402
+from dq4groupbuild import LINKS, cell, fc_map, placement  # noqa: E402
 from dq5exitcheck import dp86_allowed, warp_exit  # noqa: E402
 from dq5map import Rom  # noqa: E402
 from dq5npc import list_entries, parse, table_values  # noqa: E402
@@ -131,7 +131,7 @@ def main():
     jobs = []
     for m, persons in people.items():
         group, number = int(m[:2], 16), int(m[3:], 16)
-        source = dq4block.Map(prg, LINKS[group]["fc"], number)
+        source = dq4block.Map(prg, *fc_map(prg, group, number))
         occupied = {(p["x"], p["y"]) for p in persons}
         start = next((x, y) for y in range(source.h) for x in range(source.w)
                      if walkable(source, x, y) and (x, y) not in occupied)
@@ -146,7 +146,8 @@ def main():
                         None)
             if side is None:
                 # A map with no exit that is no group arrival is entered only by an event (FC 3A/04).
-                closed = not dq4block.exit_cells(prg, source) and LINKS[group].get("map", 0) != number
+                arrivals = {placement(prg)[part["fc"], part.get("map", 0)][1] for part in LINKS[group]}
+                closed = not dq4block.exit_cells(prg, source) and number not in arrivals
                 jobs.append(("closed" if closed else "unreachable", f"talk-{m.replace('/', '')}-{i}", m, None, None,
                              p["night"], None))
                 continue

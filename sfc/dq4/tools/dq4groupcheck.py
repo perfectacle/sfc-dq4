@@ -33,7 +33,7 @@ import dq4block  # noqa: E402
 import dq4talk  # noqa: E402
 from dq4environmentmap import block_prop  # noqa: E402
 from dq4environmentrom import GATE_KIND, objects  # noqa: E402
-from dq4groupbuild import LINKS, cell, exit_order, fc_numbers  # noqa: E402
+from dq4groupbuild import LINKS, cell, exit_order, fc_numbers, placement, tag  # noqa: E402
 from dq5exitcheck import dp86_allowed, warp_exit  # noqa: E402
 from dq5progresscheck import environment  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
@@ -94,32 +94,33 @@ def walkable(source, x, y):
 
 
 def stair_scenes(prg):
-    for group, link in LINKS.items():
+    place = placement(prg)
+    for group, link in ((g, part) for g, parts in LINKS.items() for part in parts):
         fc_group = link["fc"]
-        numbers = fc_numbers(group)
-        order = {n: exit_order(prg, fc_group, n) for n in numbers}
         cache = {}
-        for number in numbers:
-            source = dq4block.Map(prg, fc_group, number)
-            to = {(e["x"], e["y"]): e["to"] for e in dq4block.exit_links(prg, fc_group, number, cache)}
-            for i, (x, y) in enumerate(order[number]):
+        for fc_number in fc_numbers(prg, fc_group):
+            number = place[fc_group, fc_number][1]
+            order = exit_order(prg, fc_group, fc_number)
+            source = dq4block.Map(prg, fc_group, fc_number)
+            to = {(e["x"], e["y"]): e["to"] for e in dq4block.exit_links(prg, fc_group, fc_number, cache)}
+            for i, (x, y) in enumerate(order):
                 # Every walkable neighbour, then later starts: a wandering person can stand on the stair or in
                 # the way (FC starts some walking people on a stair).
                 starts = [(f"{group:02X}/{number:02X},{','.join(map(str, cell(x - dx, y - dy)))}",
                            f"wait:{late},{d}:{PRESS},wait:400" if late else f"{d}:{PRESS},wait:400")
                           for late in range(0, 1200, 120) for (dx, dy), d in DIRS.items()
-                          if walkable(source, x - dx, y - dy) and (x - dx, y - dy) not in order[number]]
+                          if walkable(source, x - dx, y - dy) and (x - dx, y - dy) not in order]
                 if not starts:
-                    raise ValueError(f"{fc_group:02X}/{number:02X} ({x:02X},{y:02X}): no walkable cell next to the stair")
+                    raise ValueError(f"{fc_group:02X}/{fc_number:02X} ({x:02X},{y:02X}): no walkable cell next to the stair")
                 dest = to[x, y]
                 if "field" in dest:
                     # The special exit 0 leaves by the group's aux entrance.
                     fx, fy = link["field"]
                     yield f"stair-{group:02X}{number:02X}-{i}", starts, {"field": [fx, fy + 1]}
                     continue
-                there = next(g for g, other in LINKS.items() if other["fc"] == dest["group"])
+                there_group, there_number = place[dest["group"], dest["index"]]
                 yield (f"stair-{group:02X}{number:02X}-{i}", starts,
-                       {"map": f"{there:02X}/{dest['index']:02X}", "cell": list(cell(dest["x"], dest["y"]))})
+                       {"map": f"{there_group:02X}/{there_number:02X}", "cell": list(cell(dest["x"], dest["y"]))})
 
 
 def main():
@@ -139,22 +140,21 @@ def main():
     prg = ines.prg(args.dq4.read_bytes())
 
     jobs = [(name, [{"TO": to, "TEST": test} for to, test in starts], want) for name, starts, want in stair_scenes(prg)]
-    for group, link in LINKS.items():
+    for group, link in ((g, part) for g, parts in LINKS.items() for part in parts):
         if not link["field"]:
             continue
         x, y = cell(*link["arrival"])
         fx, fy = link["field"]
-        to = f"{group:02X}/{link.get('map', 0):02X},{x},{y}"
+        arrival = f"{group:02X}/{placement(prg)[link['fc'], link.get('map', 0)][1]:02X}"
+        to = f"{arrival},{x},{y}"
         out_test = f"{link['out']},wait:400"
-        jobs.append((f"exit-{group:02X}", [{"TO": to, "TEST": out_test}], {"field": [fx, fy + 1]}))
+        jobs.append((f"exit-{tag(group, link)}", [{"TO": to, "TEST": out_test}], {"field": [fx, fy + 1]}))
         # Without input the party stays: an arrival off the map steps onto the edge exit at once, and the exit
         # scene would pass without its inputs.
-        jobs.append((f"stay-{group:02X}", [{"TO": to, "TEST": "wait:400"}],
-                     {"map": f"{group:02X}/{link.get('map', 0):02X}", "cell": [x, y]}))
+        jobs.append((f"stay-{tag(group, link)}", [{"TO": to, "TEST": "wait:400"}], {"map": arrival, "cell": [x, y]}))
         # dq5warp stops its inputs at the map change, so entering walks from the field save state (341,56) along
-        # the group's path (dq4groupbuild.LINKS "walk"), which passes no other entrance.
-        jobs.append((f"enter-{group:02X}", None, (link["walk"], {"map": f"{group:02X}/{link.get('map', 0):02X}",
-                                                                 "cell": [x, y]})))
+        # the FC group's path (dq4groupbuild.LINKS "walk"), which passes no other entrance.
+        jobs.append((f"enter-{tag(group, link)}", None, (link["walk"], {"map": arrival, "cell": [x, y]})))
     results = {}
     def tries(name, starts, want):
         if starts is None:
@@ -176,12 +176,12 @@ def main():
             results[name] = {"got": got, "want": want, "ok": same_place(got, want), "start": n}
 
     # Area moves: the gate's open flag is cleared on a group change, so set it from another map of the group.
-    source = dq4block.Map(prg, LINKS[0x36]["fc"], 0)
+    source = dq4block.Map(prg, LINKS[0x36][0]["fc"], 0)
     gx, gy, _, _ = next(o for o in objects(source) if o[2] == GATE_KIND)
     # The hop cell needs a free cell below: the warp steps down from it, or up when that is blocked (off the
     # top row of the map that is the field).
-    other = dq4block.Map(prg, LINKS[0x36]["fc"], 3)
-    people = {dq4talk.pos(r, n) for n in (False, True) for r in dq4talk.npc_list(prg, LINKS[0x36]["fc"], 3, n)}
+    other = dq4block.Map(prg, LINKS[0x36][0]["fc"], 3)
+    people = {dq4talk.pos(r, n) for n in (False, True) for r in dq4talk.npc_list(prg, LINKS[0x36][0]["fc"], 3, n)}
     hx, hy = cell(*next((x, y) for y in range(1, other.h) for x in range(other.w)
                         if all(walkable(other, x + dx, y + dy) and (x + dx, y + dy) not in people
                                for dx, dy in ((0, 0), (1, 0), (0, 1), (1, 1)))))

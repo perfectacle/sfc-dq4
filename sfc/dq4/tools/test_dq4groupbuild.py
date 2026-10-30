@@ -1,4 +1,5 @@
-"""Without a ROM, the FC -> DQ5 cell rule; with rom/dq4.nes, the exit and area records of the new groups."""
+"""Without a ROM, the FC -> DQ5 cell rule and map layout; with rom/dq4.nes, the exit and area records of the new
+groups."""
 
 import sys
 import unittest
@@ -15,6 +16,39 @@ class CellTest(unittest.TestCase):
     def test_stands_on_bottom_left_cell(self):
         self.assertEqual(build.cell(0x0F, 0x23), (30, 71))
         self.assertEqual(build.cell(0, 0), (0, 1))
+
+
+class BundleTest(unittest.TestCase):
+    """Two FC groups in one DQ5 group, and one FC group alone."""
+    LINKS = {0x40: [{"fc": 0x10, "arrival": (1, 2), "map": 1, "field": (100, 50)},
+                    {"fc": 0x11, "arrival": (3, 4), "map": 1, "field": (110, 60)}],
+             0x41: [{"fc": 0x12, "arrival": (5, 6), "field": (120, 70)}]}
+    FC_MAPS = {0x10: [2, 0, 1], 0x11: [1, 0], 0x12: [0]}
+
+    def setUp(self):
+        self.place = build.layout(self.LINKS, self.FC_MAPS)
+
+    def test_maps_follow_one_another(self):
+        self.assertEqual([self.place[0x10, k] for k in range(3)], [(0x40, 0), (0x40, 1), (0x40, 2)])
+        self.assertEqual([self.place[0x11, k] for k in range(2)], [(0x40, 3), (0x40, 4)])
+        self.assertEqual(self.place[0x12, 0], (0x41, 0))
+
+    def test_exit_into_second_fc_group(self):
+        # An FC stair to 11/01 goes to the second FC group's second map.
+        self.assertEqual(self.place[0x11, 1], (0x40, 4))
+
+    def test_hook_rows(self):
+        arrivals, leaving = build.hook_rows(self.LINKS, self.place)
+        layer = build.LAYER
+        self.assertEqual(arrivals, [(0x40, 100, 50, 1, 2, 5, layer, 0), (0x40, 110, 60, 4, 6, 9, layer, 0),
+                                    (0x41, 120, 70, 0, 10, 13, layer, 0)])
+        self.assertEqual(leaving, [(0x40, 0, 2, 100, 51), (0x40, 3, 4, 110, 61), (0x41, 0, 0x1F, 120, 71)])
+        import dq4entrancehook
+        dq4entrancehook.tables(arrivals, leaving)
+
+    def test_fc_group_in_two_dq5_groups(self):
+        with self.assertRaises(ValueError):
+            build.layout({0x40: [{"fc": 0x10}], 0x41: [{"fc": 0x10}]}, self.FC_MAPS)
 
 
 @unittest.skipUnless(ROM.is_file(), "local source ROM not present")
