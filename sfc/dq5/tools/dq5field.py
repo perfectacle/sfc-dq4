@@ -198,6 +198,8 @@ PALETTE_SITE, PALETTE_UPPER, PALETTE_LOWER = 0x00BBAC, 0x00BBB1, 0x00BBC6
 
 def nibble_table(rom, world=0):
     """00:BBAC 가 그 세계에서 읽는 니블 표 주소. 세계 훅이 없으면 세 세계 모두 2A:D712."""
+    if rom.u8(PALETTE_SITE + 2) == 0xAA:
+        raise ValueError('00:BBAC 가 타일마다 1바이트 팔레트 표를 읽는 롬이라 니블 표가 없음(tile_word 를 쓸 것)')
     if rom.u8(NIB_SITE) == 0x22:
         hook = rom.u24(NIB_SITE + 1)
         stride = 0x200 if rom.u8(hook + NIB_HOOK_STRIDE) == 0x0A else 0x100

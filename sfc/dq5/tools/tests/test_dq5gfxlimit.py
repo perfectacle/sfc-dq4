@@ -148,6 +148,9 @@ class TileGrowTests(unittest.TestCase):
         self.assertEqual(dq5field.tile_word(rom, 811, True) >> 10 & 7, (299 % 16 + 2) & 7)
         self.assertEqual(dq5field.tile_word(rom, 811, False), 811 | (((299 % 16) & 7) * 4 + 8) << 8)
         self.assertEqual(dq5field.tile_word(rom, 811, True, 2), dq5field.tile_word(rom, 811, True, 0))
+        # 이 롬에는 니블 표가 없어 2A:D712 를 내지 않고 멈춘다.
+        with self.assertRaises(ValueError):
+            dq5field.nibble_table(rom)
         self.assertEqual(m['rom_size'], 2)
 
     def test_old_block_hook_rom(self):
