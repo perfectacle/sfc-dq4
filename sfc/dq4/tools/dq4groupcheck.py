@@ -35,7 +35,7 @@ import dq4fieldport  # noqa: E402
 import dq4talk  # noqa: E402
 from dq4environmentmap import block_prop  # noqa: E402
 from dq4environmentrom import GATE_KIND, objects  # noqa: E402
-from dq4groupbuild import LINKS, cell, doors, exit_order, fc_numbers, placement, tag  # noqa: E402
+from dq4groupbuild import LINKS, cell, doors, entrance_doors, exit_order, fc_numbers, placement, tag  # noqa: E402
 from dq5exitcheck import dp86_allowed, warp_exit  # noqa: E402
 from dq5progresscheck import environment  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
@@ -107,6 +107,7 @@ def walkable(source, x, y):
 def stair_scenes(prg, groups):
     place = placement(prg)
     found = doors(prg)
+    each = entrance_doors(prg)
     for group, link in ((g, part) for g, parts in LINKS.items() if g in groups for part in parts):
         fc_group = link["fc"]
         cache = {}
@@ -134,7 +135,9 @@ def stair_scenes(prg, groups):
                     # cell to expect (dq4groupbuild.exit_rows refuses it in a group of several FC groups).
                     if not link["field"]:
                         continue
-                    yield f"stair-{group:02X}{number:02X}-{i}", starts, {"field": list(found[fc_group][1])}
+                    by_stair = {s: b for b, s in link.get("stairs", {}).items()}
+                    leave = each[(fc_group, *by_stair[x, y])][1] if (x, y) in by_stair else found[fc_group][1]
+                    yield f"stair-{group:02X}{number:02X}-{i}", starts, {"field": list(leave)}
                     continue
                 there_group, there_number = place[dest["group"], dest["index"]]
                 yield (f"stair-{group:02X}{number:02X}-{i}", starts,
@@ -177,10 +180,13 @@ def main():
         # scene would pass without its inputs.
         jobs.append((f"stay-{tag(group, link)}", [{"TO": to, "TEST": "wait:400"}], {"map": arrival, "cell": [x, y]}))
         # Every start must enter: each is a scene of its own, not a retry.
-        blocks = dq4fieldport.entrance_blocks(props, link["field"])
-        for (sx, sy), d in enter_starts(props, blocks):
-            jobs.append((f"enter-{tag(group, link)}-{sx},{sy}-{d}", [{"field": (sx, sy), "TEST": f"{d}:{PRESS},wait:400"}],
-                         {"map": arrival, "cell": [x, y]}))
+        stairs = link.get("stairs", {})
+        for part in [[b] for b in link["field"]] if stairs else [link["field"]]:
+            blocks = dq4fieldport.entrance_blocks(props, part)
+            ex, ey = cell(*stairs[part[0]]) if stairs else (x, y)
+            for (sx, sy), d in enter_starts(props, blocks):
+                jobs.append((f"enter-{tag(group, link)}-{sx},{sy}-{d}", [{"field": (sx, sy), "TEST": f"{d}:{PRESS},wait:400"}],
+                             {"map": arrival, "cell": [ex, ey]}))
     results = {}
     def tries(name, starts, want):
         for n, extra in enumerate(starts):

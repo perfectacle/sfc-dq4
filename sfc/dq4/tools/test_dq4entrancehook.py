@@ -13,7 +13,7 @@ from w65816 import Cpu  # noqa: E402
 
 AT = 0x3CF800
 ARRIVALS = [(0x36, 345, 56, 0, 0, 59, 1, 0), (0x36, 360, 70, 3, 12, 34, 1, 2)]
-FIELDS = [(0x36, 0, 2, 345, 57), (0x36, 3, 5, 360, 71)]
+FIELDS = [(0x36, 0, 2, 345, 57), (0x36, 3, 5, 360, 71), (0x38, 0, 0, 400, 20, 7, 7), (0x38, 0, 0, 400, 30)]
 
 
 def rom_with_hooks():
@@ -56,8 +56,8 @@ class EntranceHookTest(unittest.TestCase):
         cpu.jsr(0x2AF286, max_steps=2000)
         return cpu.wram[0xBD], cpu.wram[0xC1], cpu.wram[0xC2], cpu.wram[0xC3], cpu.wram[0x198E], cpu.x & 0xFF
 
-    def leave(self, group, number):
-        cpu = self.cpu(_BC=group, _BD=number, _B6=0xAAAA, _B8=0xBBBB)
+    def leave(self, group, number, row=0):
+        cpu = self.cpu(_BC=group, _BD=number, _B6=0xAAAA, _B8=0xBBBB, _3080=row)
         cpu.jsr(hook.LEAVE_SITE, max_steps=2000)
         return cpu.wram[0xC0], cpu.r16(0xB6), cpu.r16(0xB8)
 
@@ -86,13 +86,20 @@ class EntranceHookTest(unittest.TestCase):
         self.assertEqual(self.leave(0x36, 3), (1, 360, 71))
         self.assertEqual(self.leave(0x36, 5), (1, 360, 71))
 
+    def test_leaving_picks_the_stair_by_the_hero_row(self):
+        self.assertEqual(self.leave(0x38, 0, row=7), (1, 400, 20))
+        self.assertEqual(self.leave(0x38, 0, row=97), (1, 400, 30))
+        self.assertEqual(self.leave(0x38, 0, row=6), (1, 400, 30))
+
     def test_leaving_unlisted_maps_searches_the_entrance_tables(self):
         self.assertEqual(self.leave(0x36, 6), (2, 0xAAAA, 0xBBBB))
         self.assertEqual(self.leave(0x37, 0), (2, 0xAAAA, 0xBBBB))
 
     def test_tables_end_and_ranges(self):
         arr, out = hook.tables(ARRIVALS, FIELDS)
-        self.assertEqual((len(arr), len(out)), (2 * hook.ARRIVAL_SIZE + 1, 2 * hook.FIELD_SIZE + 1))
+        self.assertEqual((len(arr), len(out)), (2 * hook.ARRIVAL_SIZE + 1, 4 * hook.FIELD_SIZE + 1))
+        with self.assertRaises(ValueError):
+            hook.tables([], [(0x36, 0, 0, 0, 0, 9, 8)])
         with self.assertRaises(ValueError):
             hook.tables([], [(0x36, 4, 2, 0, 0)])
         with self.assertRaises(ValueError):
