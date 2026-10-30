@@ -234,9 +234,37 @@ class LayerTests(unittest.TestCase):
             source = self.copy_pack(directory)
             data = bytearray((source / 'dragon-dma.bin').read_bytes())
             data[:256] = bytes(256)
-            data[:8] = (0x6000).to_bytes(2, 'little') + (0x8000).to_bytes(2, 'little') + (109 * 32).to_bytes(2, 'little') + bytes((0x36, 0))
+            data[:8] = (0x6000).to_bytes(2, 'little') + (0x8000).to_bytes(2, 'little') + (109 * 32).to_bytes(2, 'little') + bytes((layers.CLOUD_BANK, 0))
             self.replace_blob(source, 'dragon-dma.bin', bytes(data))
             with self.assertRaisesRegex(ValueError, 'DMA budget'):
+                layers.read_pack(source)
+
+    def test_each_transfer_is_stored_once(self):
+        blobs, _ = layers.read_pack(self.pack)
+        sources = layers.transfer_sources(blobs)
+        reads = {}
+        for phase in range(layers.PHASES):
+            for cursor in range(phase * 256, phase * 256 + 256, 8):
+                _, address, length = np.frombuffer(blobs['dragon-dma.bin'][cursor:cursor + 6], dtype='<u2').tolist()
+                if not length:
+                    break
+                bank = blobs['dragon-dma.bin'][cursor + 6]
+                data = sources[bank][address - 0x8000:address - 0x8000 + length]
+                reads.setdefault(data, set()).add((bank, address))
+            pointer = blobs['oam-pointers.bin'][phase * 4:phase * 4 + 4]
+            address = int.from_bytes(pointer[:2], 'little')
+            reads.setdefault(sources[pointer[2]][address - 0x8000:address - 0x8000 + 544], set()).add((pointer[2], address))
+        self.assertTrue(all(len(places) == 1 for places in reads.values()))
+        self.assertLessEqual(len(blobs['layer-payload.bin']), sum(map(len, reads)))
+
+    def test_descriptor_rejects_transfer_from_descriptor_list(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = self.copy_pack(directory)
+            data = bytearray((source / 'dragon-dma.bin').read_bytes())
+            data[2:4] = (0x8000).to_bytes(2, 'little')
+            data[6] = layers.DMA_BANK
+            self.replace_blob(source, 'dragon-dma.bin', bytes(data))
+            with self.assertRaisesRegex(ValueError, 'differs|overlaps'):
                 layers.read_pack(source)
 
     def test_descriptor_rejects_visible_page_and_bank_crossing(self):
