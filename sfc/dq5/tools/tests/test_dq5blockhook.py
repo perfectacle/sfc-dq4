@@ -69,6 +69,15 @@ class BlockHookTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '그룹 50 이상'):
             Decoder(Rom(data), 0xBE, True, (0x51, 0x51))
 
+    def test_rebuild_stub_at_bank_end(self):
+        # 스텁 4바이트가 01:FFFC~FFFF 에 꼭 들어가면 받는다
+        data = blank()
+        put(data, 0x3D8C00, bytes((0x00, 0x80, 0x0B, 0x80)))
+        hook(data, [(0x16, 2)], 0x3D, 0x8C00, 150)
+        put(data, LOADER + 24, bytes((0xFC,)))
+        put(data, 0x01FFFC, bytes((0x20, 0xD8, 0x8C, 0x6B)))
+        self.assertEqual(block_hook(Rom(data)), ([(0x16, 2)], 0x3D, 0x3D8C00, 150))
+
     def test_unknown_hook_shapes_stop(self):
         for addr, value, message in ((LOAD_TAIL, 0x20, '01:936E'), (STUB + 4, 0xEA, '스텁'), (FIND + 13, 0xC6, '찾기'), (FIND + 31, 0x18, '찾기'),
                                      (HIT + 4, 0x8E, '\\$1823'), (LOADER + 26, 0x02, '뱅크 01'), (REBUILD + 1, 0xD9, 'JSR'),
