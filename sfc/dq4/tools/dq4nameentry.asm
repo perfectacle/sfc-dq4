@@ -33,15 +33,16 @@ incsrc "dq4nameentry-defs.asm"
 !ne_active = $F072
 !ne_move = $F07A
 ; 방향 입력 상태는 게임 안의 메뉴도 쓴다. 7F:F000~ 은 게임 안에서 세계 지도가 덮을 수 있어 DQ5 가 쓰지 않는
-; 7E:1BBE~ 79바이트의 끝에 둔다(josa·서장·1장 이벤트가 1BC0~1BD6 을 씀). 훅은 DB = 04 라 낮은 WRAM 거울로 읽는다.
-!in_direction = $1C00       ; 고른 방향 하나
-!in_raw = $1C01             ; 지난 프레임의 실제 패드($0749 & 1F)
-!in_pending = $1C02         ; 1 이면 다음 입력 대기에서 기다리지 않고 $24 를 바로 쓴다
-!in_edge = $1C03            ; 이번 표본에 새로 누른 방향이 있음
-!in_delay = $1C04
-!in_buttons = $1C05
-!in_pressed = $1C06
-!in_steady = $1C07          ; 1 이면 반복해도 $0ADA 를 0 으로 둔다(원래 04:D27A 갈래)
+; 7E:1BBE~ 79바이트 안에 둔다. josa·서장·1장 이벤트가 1BC0~1BCF 를, DQ5 바위 자리(03:8030)가 1BFF~ 를 쓴다.
+; 훅은 DB = 04 라 낮은 WRAM 거울로 읽는다.
+!in_direction = $1BE0       ; 고른 방향 하나
+!in_raw = $1BE1             ; 지난 프레임의 실제 패드($0749 & 1F)
+!in_pending = $1BE2         ; 1 이면 다음 입력 대기에서 기다리지 않고 $24 를 바로 쓴다
+!in_edge = $1BE3            ; 이번 표본에 새로 누른 방향이 있음
+!in_delay = $1BE4
+!in_buttons = $1BE5
+!in_pressed = $1BE6
+!in_steady = $1BE7          ; 1 이면 반복해도 $0ADA 를 0 으로 둔다(원래 04:D27A 갈래)
 !ne_tiles = $F100           ; 이름 칸 2bpp: 글자 줄 8타일(128바이트), 이어서 아래 줄 8타일
 
 org $038B72
@@ -1025,12 +1026,12 @@ NePollHook:
     BEQ .wait
     LDA #$00
     STA !in_pending
-    BRA .ready
+    BRA .sample             ; 같은 프레임에 다시 떠도 $0749 기준이라 결과가 같고, $24 가 걸러지지 않았어도 거른다
 .wait
     JSL !ne_blink
     JSL !ne_wait
+.sample
     JSR NeSampleInput
-.ready
     LDA.b $24
     STA $0ADB
     STZ $0ADA
