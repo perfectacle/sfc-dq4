@@ -78,6 +78,14 @@ FLOOR = 1
 WATER_FRAMES = ("water0", "water1", "water2")
 WATER_AT = 0x41F000
 WATER_PERIOD = 24
+# The engine draws an opened chest (12:EEF7, and 1F:FC50 on entering) with the common tiles 9E (top) and 9F
+# (bottom) and their mirror, in palette line 6. In a replaced map that line is the environment's red-and-pink
+# bank, so the map routine of a new-group map reloads those two slots with the left half of chest_open in
+# bank 6 colours, halfway through each water period (the water frames use the same NMI DMA list).
+LID_SLOT = 0x9E
+LID_LINE = 6
+LID_AT = 0x41F180
+LID_TICK = WATER_PERIOD // 2
 # Water is block 0 (CHR 0-3), and the CHR loader puts it in slots BE-C1 in every map that has it.
 # The water routine uses these slots directly: a battle reuses 7E:6000 (CHR id -> slot) as work
 # memory, and reading it after a battle sent the water frames to slot 0, the blank BG1 tile.
@@ -96,6 +104,17 @@ GATE = 0xA0
 # Borrowed TARGETS slots keep plain stairs: an exit cell there would fire the DQ5 map's own exit list.
 STAIRS = {0x08, 0x09}
 STAIR_ATTR = 0x05
+# FC chests (block kind 04) and the FC search cells of 1E:$BC7A (タンス AB, つぼ AA) become the DQ5 cells
+# 12:E4C9 searches. A block's attribute lands in +7 when its last row is on the upper layer (block +1 bit4-7 =
+# upper rows), else in +4. The chest search 12:E63B and the ツボ attribute A7 read +7 only; タンス 93 is a +4
+# attribute in DQ5 too. Chests stay walkable as in FC, so the party can open one in a row of chests from the next;
+# block +0 bit6 (cell +1 bit4, as DQ5 chest block 384) draws the party in front of the upper layer, without which
+# a hero standing on a chest disappears under it.
+CHEST_KIND = 0x04
+UPPER = 0x20
+FRONT = 0x40
+CHEST_HEAD = FRONT, UPPER, 0x04
+FURNITURE = {0xAB: (0, 0x00, 0x13), 0xAA: (0, UPPER, 0x27)}
 OPENINGS = DOORS | {GATE}
 DOOR_KIND = 0x3B
 GATE_KIND = 0x48
@@ -135,7 +154,7 @@ def _planar(pixels):
 def build_graphics(prg, assets):
     """Deduplicate CHR (pattern + palette) and 2x2 blocks shared by both maps."""
     chr_ids, chr_data, chr_banks = {}, [], []
-    block_ids, block_words, block_attrs = {}, [], []
+    block_ids, block_words, block_heads = {}, [], []
     maps = {}
     palette = None
     for group, number, name, source, counts, prepared, palette in prepare_maps(prg, assets, MAPS):
@@ -153,17 +172,29 @@ def build_graphics(prg, assets):
                         chr_data.append(_planar(pixels))
                         chr_banks.append(bank)
                     words.append(chr_ids[key])
-            attr = STAIR_ATTR if name in GROUPS and block_prop(source, fc_block) in STAIRS else 0
-            key = tuple(words), attr
+            key = tuple(words), block_head(name, source, fc_block)
             if key not in block_ids:
                 block_ids[key] = len(block_words)
                 block_words.append(key[0])
-                block_attrs.append(attr)
+                block_heads.append(key[1])
             local[fc_block] = block_ids[key]
         maps[name] = (source, local)
     if len(chr_data) > 1024:
         raise ValueError(f"{len(chr_data)} CHR do not fit one bank")
-    return chr_data, chr_banks, block_words, block_attrs, maps, palette
+    return chr_data, chr_banks, block_words, block_heads, maps, palette
+
+
+def block_head(name, source, fc_block):
+    """(+0 flags, +1 layer byte, attribute) of the DQ5 block for an FC block; only GROUPS maps get exits and search
+    cells."""
+    if name not in GROUPS:
+        return 0, 0, 0
+    prop = block_prop(source, fc_block)
+    if prop in STAIRS:
+        return 0, 0, STAIR_ATTR
+    if prop & 0x7F == CHEST_KIND:
+        return CHEST_HEAD
+    return FURNITURE.get(prop, (0, 0, 0))
 
 
 def water_block(source, local):
@@ -221,6 +252,22 @@ def object_entries(found):
     return bytes(out)
 
 
+def chest_floor(source, x, y):
+    """FC block of the nearest walkable cell that is not a chest, above first on ties."""
+    best = None
+    for ny in range(max(0, y - 3), min(source.h, y + 4)):
+        for nx in range(max(0, x - 3), min(source.w, x + 4)):
+            prop = _prop(source, nx, ny)
+            if prop & 0x80 or prop & 0x7F == CHEST_KIND:
+                continue
+            key = (abs(nx - x) + abs(ny - y), ny > y, abs(nx - x))
+            if best is None or key < best[0]:
+                best = (key, source.cell(nx, ny) & 31)
+    if best is None:
+        raise ValueError(f"({x},{y}): no floor near the chest")
+    return best[1]
+
+
 def map_document(name, source, local, target):
     """FC layout as DQ5 commands; blocked FC cells become wall cells via attribute pass 1."""
     width, height = source.w * 2, source.h * 2
@@ -230,20 +277,30 @@ def map_document(name, source, local, target):
     def blocked(x, y):
         prop = _prop(source, x, y)
         return prop & 0x80 and prop not in OPENINGS
+    # A chest block is all upper layer, so the floor goes under it first: an opened chest's transparent
+    # pixels show the lower layer, and the chest, placed last, keeps its cell +1 flags.
+    chests = {(x, y) for y in range(source.h) for x in range(source.w)
+              if name in GROUPS and _prop(source, x, y) & 0x7F == CHEST_KIND}
+    under = {(x, y): local[chest_floor(source, x, y)] for x, y in chests}
+    chest_blocks = {block_at(x, y) for x, y in chests}
+
+    def covers(x, y, block):
+        return block_at(x, y) == block or under.get((x, y)) == block
     bits = max(10, (width * height - 1).bit_length())
     if bits > 14:
         raise ValueError(f"{name}: {width}x{height} cells exceed 14 position bits")
     commands = []
-    for block in sorted({block_at(x, y) for y in range(source.h) for x in range(source.w)}):
+    used = {block_at(x, y) for y in range(source.h) for x in range(source.w)} | set(under.values())
+    for block in sorted(used, key=lambda b: (b in chest_blocks, b)):
         commands.append(["block", block])
         for y in range(source.h):
             x = 0
             while x < source.w:
-                if block_at(x, y) != block:
+                if not covers(x, y, block):
                     x += 1
                     continue
                 end = x
-                while end + 1 < source.w and block_at(end + 1, y) == block:
+                while end + 1 < source.w and covers(end + 1, y, block):
                     end += 1
                 if end - x >= 2:
                     commands.append(["fill", x * 2, y * 2, end * 2, y * 2])
@@ -343,13 +400,14 @@ _ENTER = (0x08, 0xC2, 0x30, 0x48, 0xDA, 0x5A)
 _LEAVE = (0xC2, 0x30, 0x7A, 0xFA, 0x68, 0x28)
 
 
-def engine_code(block_count, water_ids, palettes, entries, waters):
+def engine_code(block_count, water_ids, palettes, entries, waters, lids):
     """Routines in BLOCK_BANK (LIB_AT) and the bank-01 stubs that call them.
 
     palettes: per target, the bank-GFX address of its 224-byte BG palette.
     entries: per target, its 01:D2FC-format object entries (placed in bank 01, since the object
     reader 01:F3F9 indexes $D2FC,Y with the data bank at 01).
     waters: per target, whether the map has water.
+    lids: per target, whether its map routine reloads the opened-chest tiles (new-group maps).
     Returns (library bytes, bank-01 bytes, patched sites)."""
     targets = list(MAPS.values())
     stubs = _Asm(HOOK_AT)
@@ -371,6 +429,9 @@ def engine_code(block_count, water_ids, palettes, entries, waters):
         lib.b(address & 0xFF, address >> 8)
     lib.label("waters")
     for flag in waters:
+        lib.b(int(flag), 0)
+    lib.label("lids")
+    for flag in lids:
         lib.b(int(flag), 0)
     lib.label("objects")
     for i, data in enumerate(entries):
@@ -413,8 +474,12 @@ def engine_code(block_count, water_ids, palettes, entries, waters):
     # wrap (calls of 15:F7D0): after the original choice, a replaced map with water runs the water
     # routine. Without water its CHR have no slot (7E:6000 reads 0), and the routine would write
     # them over slot 0, the blank tile that fills BG1.
+    # A dry new-group map runs the lid routine; the DQ5 routine of a borrowed slot is kept.
     lib.label("wrap").b(0x22, 0xD0, 0xF7, 0x15, *_ENTER).long(0x22, "find")
-    lib.rel(0x90, "wrap_out").long(0xBF, "waters").rel(0xF0, "wrap_out").b(0xC2, 0x20).word(0xA9, "water").b(0x8F, 0xA6, 0x1A, 0x7E, 0xE2, 0x20)
+    lib.rel(0x90, "wrap_out").long(0xBF, "waters").rel(0xF0, "wrap_lid").b(0xC2, 0x20).word(0xA9, "water")
+    lib.rel(0x80, "wrap_set")
+    lib.label("wrap_lid").long(0xBF, "lids").rel(0xF0, "wrap_out").b(0xC2, 0x20).word(0xA9, "lid")
+    lib.label("wrap_set").b(0x8F, 0xA6, 0x1A, 0x7E, 0xE2, 0x20)
     lib.b(0xA9, LIB_AT >> 16, 0x8F, 0xA8, 0x1A, 0x7E, 0xA9, 0x00)
     for counter in (0x1ECE, 0x1ECF, 0x1EC2, 0x1EC3):
         lib.b(0x8F, counter & 0xFF, counter >> 8, 0x7E)
@@ -423,7 +488,8 @@ def engine_code(block_count, water_ids, palettes, entries, waters):
     # water: every WATER_PERIOD frames queue the next water frame's four CHR on the NMI DMA list
     # (00:8F53: VRAM word 1C1C+2i, bytes 1C26+2i, source 1C0D+3i, count $BA) that 03:D4B5 uses.
     tick, frame = 0x7E1ECE, 0x7E1EC2
-    lib.label("water").b(0x08, 0xC2, 0x30, 0xAF, *tick.to_bytes(3, "little"), 0x1A, 0xC9, WATER_PERIOD, 0x00)
+    lib.label("water").b(0x08, 0xC2, 0x30, 0xAF, *tick.to_bytes(3, "little"), 0x1A).word(0x20, "lid_queue")
+    lib.b(0xC9, WATER_PERIOD, 0x00)
     lib.b(0xB0, 0x03).word(0x4C, "water_store")
     lib.b(0xAF, *frame.to_bytes(3, "little"), 0x1A, 0xC9, len(WATER_FRAMES), 0x00, 0x90, 0x03, 0xA9, 0x00, 0x00,
           0x8F, *frame.to_bytes(3, "little"), *(0x0A,) * 7, 0xAA)
@@ -436,6 +502,18 @@ def engine_code(block_count, water_ids, palettes, entries, waters):
               0xE2, 0x20, 0xA9, WATER_AT >> 16, 0x8F, 0x0F + 3 * k, 0x1C, 0x00, 0xC2, 0x20)
     lib.b(0xE2, 0x20, 0xA9, len(water_ids), 0x85, 0xBA, 0xC2, 0x20, 0xA9, 0x00, 0x00)
     lib.label("water_store").b(0x8F, *tick.to_bytes(3, "little"), 0x28, 0x6B)
+
+    # lid: the water routine's tick without water.
+    lib.label("lid").b(0x08, 0xC2, 0x30, 0xAF, *tick.to_bytes(3, "little"), 0x1A).word(0x20, "lid_queue")
+    lib.b(0xC9, WATER_PERIOD, 0x00).rel(0x90, "lid_store").b(0xA9, 0x00, 0x00)
+    lib.label("lid_store").b(0x8F, *tick.to_bytes(3, "little"), 0x28, 0x6B)
+    # lid_queue (16-bit A = tick, kept): at LID_TICK queue both lid tiles as the DMA list's only entry.
+    vram = 0x2000 + LID_SLOT * 16
+    lib.label("lid_queue").b(0xC9, LID_TICK, 0x00).rel(0xD0, "lid_queue_out").b(
+        0x48, 0xA9, vram & 0xFF, vram >> 8, 0x8F, 0x1C, 0x1C, 0x00, 0xA9, 0x40, 0x00, 0x8F, 0x26, 0x1C, 0x00,
+        0xA9, LID_AT & 0xFF, LID_AT >> 8 & 0xFF, 0x8F, 0x0D, 0x1C, 0x00,
+        0xE2, 0x20, 0xA9, LID_AT >> 16, 0x8F, 0x0F, 0x1C, 0x00, 0xA9, 0x01, 0x85, 0xBA, 0xC2, 0x20, 0x68)
+    lib.label("lid_queue_out").b(0x60)
 
     _, stub_labels = stubs.assemble({"load": 0, "pal": 0, "obj": 0})
     lib_code, lib_labels = lib.assemble(stub_labels)
@@ -472,11 +550,26 @@ def water_frames(assets, chr_data, water_ids):
     return b"".join(b"".join(f) for f in frames)
 
 
+def lid_tiles(assets):
+    """Planar CHR of slots 9E and 9F: the left half of chest_open, each colour moved to the nearest of line 6."""
+    image = assets["chest_open"]
+    flat = image.getpalette()
+    base = LID_LINE * 16
+    def nearest(v):
+        rgb = flat[v * 3:v * 3 + 3]
+        return min(range(1, 16), key=lambda i: sum((flat[(base + i) * 3 + c] - rgb[c]) ** 2 for c in range(3)))
+    out = b""
+    for y in (0, 8):
+        tile = image.crop((0, y, 8, y + 8)).tobytes()
+        out += _planar(bytes(nearest(v) if v else 0 for v in tile))
+    return out
+
+
 def build(dq5_path, dq4_path, out):
     dq5 = Path(dq5_path).read_bytes()
     prg = ines.prg(Path(dq4_path).read_bytes())
     assets = create_assets()
-    chr_data, chr_banks, block_words, block_attrs, maps, palette = build_graphics(prg, assets)
+    chr_data, chr_banks, block_words, block_heads, maps, palette = build_graphics(prg, assets)
     water_blocks = {water_block(source, local) for source, local in maps.values()} - {None}
     if len(water_blocks) != 1:
         raise ValueError(f"expected one shared water block, got {water_blocks}")
@@ -487,9 +580,9 @@ def build(dq5_path, dq4_path, out):
     out.mkdir(parents=True, exist_ok=True)
 
     blocks, pointers = bytearray(), bytearray()
-    for words, attr in zip(block_words, block_attrs):
+    for words, (flags, layer, attr) in zip(block_words, block_heads):
         pointers += (BLOCKS_AT + len(blocks)).to_bytes(2, "little")
-        blocks += bytes((0x09, 0x00, attr)) + b"".join(w.to_bytes(2, "little") for w in words)
+        blocks += bytes((0x09 | flags, layer, attr)) + b"".join(w.to_bytes(2, "little") for w in words)
     if BLOCKS_AT + len(blocks) > POINTERS_AT:
         raise ValueError("block definitions overflow into the pointer table")
     nibbles = bytearray((len(chr_banks) + 1) // 2)
@@ -506,7 +599,8 @@ def build(dq5_path, dq4_path, out):
         len(block_words), water_ids,
         [palette_at[map_palette(name, maps[name][0].t)] for name in MAPS],
         [object_entries(found[name]) for name in MAPS],
-        [water_block(*maps[name]) is not None for name in MAPS])
+        [water_block(*maps[name]) is not None for name in MAPS],
+        [name in GROUPS for name in MAPS])
 
     (out / "chr.bin").write_bytes(b"".join(chr_data))
     (out / "blocks.bin").write_bytes(blocks)
@@ -517,6 +611,7 @@ def build(dq5_path, dq4_path, out):
         {"at": _cpu(GFX_BANK << 16 | NIBBLES_AT), "hex": _hex(nibbles), "note": "CHR 팔레트 니블"},
         {"at": _cpu(HOOK_AT), "hex": _hex(stub_code), "note": "엔진 훅 중계 코드와 맵 위 물체 항목"},
         {"at": _cpu(WATER_AT), "hex": _hex(water_frames(assets, chr_data, water_ids)), "note": "물 그림 3장"},
+        {"at": _cpu(LID_AT), "hex": _hex(lid_tiles(assets)), "note": "열린 상자 타일 9E·9F(6번 줄)"},
         {"at": _cpu(LIB_AT), "hex": _hex(lib_code), "note": "바꾼 맵 표와 불러오기·팔레트·물체·물 루틴"},
     ]
     for kind, at in palette_at.items():

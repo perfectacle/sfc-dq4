@@ -54,9 +54,11 @@ NIGHT_POKE = "7E075E=F0;7E075F=00"
 SIDES = ((0, 1, "up"), (0, -1, "down"), (1, 0, "left"), (-1, 0, "right"))
 # Inputs to talk: turn, A for the command window, A for はなす. A standing party gets the status window and
 # the tactics name window after a while (04:B912); an A pressed while those are drawn is lost (30 frames after
-# turning, in 37/00 and 37/01), and the command window opens at different speeds. The timings are tried in
+# turning, in 37/00 and 37/01), and the command window opens at different speeds. The field reads input only
+# when 7E:007F & 7 = 0 and $7E = 0 (00:8185), so the turn waits with idle (dq5warp.lua) up to the frame before
+# that window: a fixed wait misses it when a map takes a few frames longer to load. The timings are tried in
 # order until a message shows.
-TALKS = tuple(f"{{dir}}:20,wait:{turn},a:4,wait:{window},a:4,wait:300"
+TALKS = tuple(f"{{dir}}:20,idle:{turn},a:4,wait:{window},a:4,wait:300"
               for turn, window in ((10, 40), (30, 90), (60, 150), (300, 90)))
 TALK_MESSAGE = 0x3C6
 
