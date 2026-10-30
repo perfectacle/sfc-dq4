@@ -3,7 +3,7 @@
 블록 표(00:BC4E)는 아래층 2A:A32C, 위층 2A:AD27 에 각각 511항목이다.
 번호 511은 다음 표·세계 1 RLE와 겹치므로 제자리에는 쓰지 않는다. --blocks-at 을 주면 번호 511~2047 을 그 자리의 두 표로
 더하고 00:BC4E 를 그 표도 읽는 훅으로, 지형 표(03:CC48)를 1,024바이트로 옮긴다(블록마다 terrain). 블록 상위 비트 바이트의
-하위 니블은 원본에서 보존한다. dq5fieldgfxwrite.py 의 타일 늘리기 패치를 넣은 롬(00:BC80 이 JSL)이면
+하위 니블은 원본에서 보존한다. dq5fieldgfxwrite.py 의 타일 늘리기 패치를 넣은 롬(00:BC6D 를 바꿈)이면
 그 니블을 10번째 비트로 써서 타일 번호를 1023 까지 받는다. check 는 롬의 블록 표가 타일이 가장 적은 세계의 타일 수
 이상을 쓰면 실패한다(그림 쪽 타일 수를 바꾸면 이 도구의 패치를 다시 만들 것). 입구(2A:F247·FDCB)와 도착(2A:F384)도 고정 슬롯만
 고치며 종료자·항목 순서·특수 그룹 도착 코드는 바꾸지 않는다.
@@ -33,8 +33,9 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from dq5field import (BLOCK_GROW_SITE, BLOCK_HOOK_SITE, BLOCK_LOWER, BLOCK_UPPER, ENTRANCES, GROUP_ARRIVAL,  # noqa: E402
-                      INDEX5, QUAD_BIT, QUAD_BIT10, TERRAIN_SITES, block_count, block_entry, grown_blocks, terrain_table)
+from dq5field import (BLOCK_GROW_SITE, BLOCK_LOWER, BLOCK_UPPER, ENTRANCES, GROUP_ARRIVAL,  # noqa: E402
+                      INDEX5, QUAD_BIT, QUAD_BIT10, TERRAIN_SITES, block_count, block_entry, grown_blocks, terrain_table,
+                      wide_tiles)
 from dq5map import Rom, group_spans, lorom  # noqa: E402
 from dq5newmap import entrance_table  # noqa: E402
 
@@ -126,11 +127,6 @@ def check_layout(rom, groups):
             raise ValueError(f'{name} 입구 표의 고정 종료자가 FF 가 아님')
         for i in range(count):
             group_number(record(rom, start + i * 5)[0], groups)
-
-
-def wide_tiles(rom):
-    """타일 늘리기 훅이 블록의 10번째 비트를 읽는 롬인지."""
-    return rom.u8(BLOCK_HOOK_SITE) == 0x22
 
 
 def block_tiles(raw, wide=False):

@@ -36,9 +36,9 @@ BLOCK_UPPER = 0x2AAD27
 # 타일 2개당 1바이트. 니블이 팔레트(00:BBAC): 위층 표는 4비트, 아래층은 3비트.
 TILE_PALETTE = 0x2AD712
 QUAD_BIT = (0x80, 0x40, 0x20, 0x10)
-# dq5fieldgfxwrite.py 의 타일 늘리기는 00:BC80·BC8D 를 JSL 로 바꿔 상위 비트 바이트의 하위 니블(00:BCA4 의 08>>칸)을
-# 10번째 비트로 읽는다. 원래 롬의 블록 1,022개는 이 니블이 모두 0 이다.
-BLOCK_HOOK_SITE = 0x00BC80
+# dq5fieldgfxwrite.py 의 타일 늘리기는 블록 표 읽기 00:BC6D(원래 PHB)를 SEP #$20 으로 시작하는 코드로 바꿔 상위 비트 바이트의
+# 하위 니블(00:BCA4 의 08>>칸)을 10번째 비트로 읽는다. 원래 롬의 블록 1,022개는 이 니블이 모두 0 이다.
+BLOCK_READ_SITE = 0x00BC6D
 QUAD_BIT10 = (0x08, 0x04, 0x02, 0x01)
 
 
@@ -91,11 +91,16 @@ def block_number(world, hibits, x, y):
     return world[i] | ((hibits[i >> 3] >> (7 - (i & 7))) & 1) << 8
 
 
+def wide_tiles(rom):
+    """타일 늘리기 패치가 블록의 10번째 비트를 읽는 롬인지."""
+    return rom.u8(BLOCK_READ_SITE) == 0xE2
+
+
 def block_tiles(rom, table, m):
     """블록 m 의 네 칸 타일 번호(9비트, 타일 늘리기 훅이 있으면 10비트). m 이 511 이상이면 옮긴 표에서 읽는다."""
     a = block_entry(rom, table == BLOCK_UPPER, m)
     hi = rom.u8(a + 4)
-    wide = rom.u8(BLOCK_HOOK_SITE) == 0x22 or m >= 511
+    wide = wide_tiles(rom) or m >= 511
     return [rom.u8(a + q) | (0x100 if hi & QUAD_BIT[q] else 0) | (0x200 if wide and hi & QUAD_BIT10[q] else 0)
             for q in range(4)]
 
@@ -184,6 +189,9 @@ def world_blocks(rom, world, sources=None):
 # 세계마다 256바이트인 니블 표 넷의 시작이다. 타일을 512개 넘게 늘린 훅은 훅 + 13 의 CLC 자리가 ASL A 라
 # 세계마다 512바이트다.
 NIB_SITE, NIB_HOOK_TABLE, NIB_HOOK_STRIDE = 0x00BBB4, 22, 13
+# 타일을 늘리고 세 세계의 니블이 같으면 훅 없이 00:BBAC 를 바꿔(LDA $96 / TAX, 원래는 그 사이에 LSR) 타일맵 워드 윗바이트를
+# 타일마다 1바이트 표에서 읽는다. 위층 표는 00:BBB1, 아래층 표는 00:BBC6 의 LDA long,X 가 읽는다.
+PALETTE_SITE, PALETTE_UPPER, PALETTE_LOWER = 0x00BBAC, 0x00BBB1, 0x00BBC6
 
 
 def nibble_table(rom, world=0):
@@ -197,6 +205,8 @@ def nibble_table(rom, world=0):
 
 def tile_word(rom, tile, upper, world=0):
     """00:BBAC: 타일 번호에 팔레트 비트를 붙인 타일맵 워드."""
+    if rom.u8(PALETTE_SITE + 2) == 0xAA:
+        return tile | rom.u8(rom.u24((PALETTE_UPPER if upper else PALETTE_LOWER) + 1) + tile) << 8
     nib = rom.u8(nibble_table(rom, world) + (tile >> 1))
     if upper:
         p = (nib & 0x0F) << 2 if tile & 1 else (nib & 0xF0) >> 2

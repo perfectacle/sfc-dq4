@@ -43,10 +43,8 @@ def field_rom():
     for at, want in fgw.ANIM_SITES.values():
         put(d, at, want)
     put(d, fgw.LOAD_SITE, fgw.LOAD_ORIG)
-    for at in fgw.NIB_SITES:
-        put(d, at, fgw.NIB_ORIG)
-    for at, (want, _, _) in fgw.BLOCK_SITES.items():
-        put(d, at, want)
+    put(d, fgw.PALETTE_READ, fgw.PALETTE_READ_ORIG)
+    put(d, fgw.BLOCK_READ, fgw.BLOCK_READ_ORIG)
     put(d, fgw.REDRAW_SITE, fgw.REDRAW_ORIG)
     put(d, fgw.REDRAW_RTL, b'\x6b')
     for at, want in (fgw.SEARCH_SITE, fgw.PTR_SITE, fgw.NIGHT_SITE, fgw.PAL_BANK_SITE, fgw.WAVE_SITE,
@@ -99,8 +97,9 @@ class TileGrowTests(unittest.TestCase):
         sites = {w['at']: w for w in m['writes']}
         lay = fgw.grow_layout(0x348000)
         self.assertEqual(sites['01:A4A7']['hex'], f'22 {fgw.long_addr(lay["load"]).hex(" ")} 80 04 ea ea ea ea')
-        self.assertEqual(sites['00:BC80']['hex'], f'22 {fgw.long_addr(lay["block_lower"]).hex(" ")} 85 95' + ' ea' * 7)
-        self.assertEqual(sites['00:BC8D']['hex'], f'22 {fgw.long_addr(lay["block_upper"]).hex(" ")} 85 97' + ' ea' * 7)
+        self.assertEqual(sites['00:BC6D']['hex'], fgw.block_read(lay['tile_bits']).hex(' '))
+        self.assertEqual(sites['00:BBAC']['hex'], fgw.palette_fast(lay['palettes'], lay['palettes'] + 1024).hex(' '))
+        self.assertNotIn('00:BBB4', sites)
         self.assertEqual(sites['01:B4D5']['hex'], f'5c {fgw.long_addr(lay["redraw"]).hex(" ")}')
         self.assertEqual(fgw.redraw_hook(0)[-7:], bytes.fromhex('f4 b9 8a 5c 0a b5 01'))
         self.assertEqual((sites['00:BCB0']['hex'], sites['00:BCB7']['hex']), ('29 ff 03', '29 ff 03'))
@@ -115,9 +114,10 @@ class TileGrowTests(unittest.TestCase):
         self.assertEqual(cur['worlds']['world1'], cur['worlds']['world0'])
         # 늘린 타일의 속성은 따로 주지 않으면 타일 - 512 의 것(원래 AND #$01FF 와 같음)
         self.assertEqual(cur['tile_attributes'], self.doc['tile_attributes'] * 2)
-        # 디코더는 세계마다 512바이트 니블 표를 읽고, 타일 812 의 팔레트를 그 니블로 낸다.
-        self.assertEqual(dq5field.nibble_table(rom, 1) - dq5field.nibble_table(rom, 0), 0x200)
+        # 세 세계의 니블이 같으면 디코더는 00:BBAC 가 읽는 타일마다 1바이트 표로 타일 812 의 팔레트를 낸다(아래층은 3비트).
         self.assertEqual(dq5field.tile_word(rom, 811, True) >> 10 & 7, (299 % 16 + 2) & 7)
+        self.assertEqual(dq5field.tile_word(rom, 811, False), 811 | (((299 % 16) & 7) * 4 + 8) << 8)
+        self.assertEqual(dq5field.tile_word(rom, 811, True, 2), dq5field.tile_word(rom, 811, True, 0))
         self.assertEqual(m['rom_size'], 2)
 
     def test_wide_nibble_hook_clears_high_byte(self):
@@ -162,9 +162,9 @@ class TileGrowTests(unittest.TestCase):
     def test_rejects_blocks_beyond_a_world(self):
         """블록 표가 이미 512 이상을 쓰는데 타일이 그보다 적은 세계가 있으면 거부한다."""
         d = bytearray(self.data)
-        put(d, dq5field.BLOCK_HOOK_SITE, b'\x22')
+        put(d, dq5field.BLOCK_READ_SITE, b'\xe2')
         put(d, dq5field.BLOCK_LOWER, bytes([0xF0, 0, 0, 0, 0x80 | 0x08]))           # 타일 1008(세계는 812개)
-        # check_sites 가 00:BC80 을 보므로 디코더만 넓게 읽는 롬을 따로 쓰지 않고 write_grow 를 바로 부른다.
+        # check_sites 가 00:BC6D 를 보므로 디코더만 넓게 읽는 롬을 따로 쓰지 않고 write_grow 를 바로 부른다.
         rom = Rom(bytes(d))
         tiles = (self.folder / 'tiles.bin').read_bytes()
         with self.assertRaisesRegex(ValueError, '모든 세계에 그 타일을 둘 것'):
@@ -225,7 +225,7 @@ class BlockBitTests(unittest.TestCase):
         d = bytearray(0x180000)
         put(d, dq5field.BLOCK_LOWER, bytes([1, 2, 3, 4, 0x0F]))
         self.assertEqual(dq5field.block_tiles(Rom(bytes(d)), dq5field.BLOCK_LOWER, 0), [1, 2, 3, 4])
-        put(d, dq5field.BLOCK_HOOK_SITE, b'\x22')
+        put(d, dq5field.BLOCK_READ_SITE, b'\xe2')
         self.assertEqual(dq5field.block_tiles(Rom(bytes(d)), dq5field.BLOCK_LOWER, 0), [513, 514, 515, 516])
 
 

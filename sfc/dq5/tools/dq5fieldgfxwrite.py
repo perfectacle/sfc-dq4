@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from dq5field import (BLOCK_LOWER, BLOCK_UPPER, FIELD_CHR, TILE_PALETTE, block_count, block_tiles,  # noqa: E402
                       nibble_table, rle)
 from dq5gfx import FIELD_ANIM as ANIM, FIELD_ANIM_COUNT, FIELD_ANIM_SETS, FIELD_ANIM_TILE  # noqa: E402
+from dq5fieldwrite import TILE_BITS  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
 
 FORMAT = 'dq5fieldgfx/1'
@@ -70,7 +71,8 @@ def check_sites(rom):
     sites = [(at, want, kind) for kind, ss in SITES.items() for at, want in ss]
     sites += [(at, want, 'anim') for at, want in ANIM_SITES.values()]
     sites += [(LOAD_SITE, LOAD_ORIG, 'tiles'), *((at, NIB_ORIG, 'tile_palettes') for at in NIB_SITES)]
-    sites += [(at, want, 'blocks') for at, (want, _, _) in BLOCK_SITES.items()] + [(REDRAW_SITE, REDRAW_ORIG, 'redraw')]
+    sites += [(BLOCK_READ, BLOCK_READ_ORIG, 'blocks'), (PALETTE_READ, PALETTE_READ_ORIG, 'tile_palettes')]
+    sites += [(REDRAW_SITE, REDRAW_ORIG, 'redraw')]
     sites += [(at, want, 'palettes') for at, want in (SEARCH_SITE, PTR_SITE, NIGHT_SITE, PAL_BANK_SITE, WAVE_SITE)]
     sites += [(at, want, 'tile_attributes') for at, want in ATTR_SITES.items()] + [(REDRAW_RTL, b'\x6b', 'redraw')]
     sites += [(at, want, 'palettes') for pair in W12_LOAD.values() for at, want in pair] + [(*REFRESH_SITE, 'palettes')]
@@ -195,8 +197,15 @@ def worlds_layout(at):
 # 전투 뒤 맵 화면을 되살리는 01:8A87(01:8AA8)과 화면 다시 그리기 00:A771(00:A788) 둘이라 부르는 곳이 아닌 01:B4D5 를 훅으로 둔다. 블록의 10번째 비트는 상위 비트 바이트의 하위 니블(원래 롬에서 모두 0)이다.
 MAX_TILES = 1024
 EXTRA_VRAM = 0x4000
-BLOCK_SITES = {0x00BC80: (bytes.fromhex('bf30a32a399cbcf002a9018595'), 0x2AA330, 0x95),
-               0x00BC8D: (bytes.fromhex('bf2bad2a399cbcf002a9018597'), 0x2AAD2B, 0x97)}
+# 블록 표 읽기 00:BC6D~BC9B(PHB / PHK / PLB 부터 RTS 까지)와 타일에 팔레트 비트를 붙이는 00:BBAC~BBF6. 필드를 불러올 때
+# 화면 칸마다 하나씩 불려, 칸마다 몇 사이클만 길어도 불러오기가 프레임 단위로 늦어진다. 그래서 훅으로 빼지 않고 제자리에서
+# 같은 길이 안에 바꾼다(block_read·palette_fast).
+BLOCK_READ = 0x00BC6D
+BLOCK_READ_ORIG = bytes.fromhex('8b4babe220bf2ca32a8594bf27ad2a8596a602bf30a32a399cbcf002a9018595'
+                                'bf2bad2a399cbcf002a9018597ab60')
+PALETTE_READ = 0x00BBAC
+PALETTE_READ_ORIG = bytes.fromhex('a5964aaae220b00abf12d72a29f04a4a8008bf12d72a290f0a0a186908c220eb059605c68596'
+                                  'a5944aaae220b00abf12d72a29704a4a8008bf12d72a29070a0a186908c220eb05948594 60'.replace(' ', ''))
 # 01:B4D5 는 JSR $B50A / RTL 이다. 4바이트 JML 이 그 RTL 까지 덮으므로, 훅은 끝에 뱅크 01 의 다른 RTL(01:8A87 의 끝
 # 01:8ABA)을 돌아올 자리로 PEA 하고 JML $01B50A 로 간다. B50A 의 RTS 가 그 RTL 로 가서 부른 곳에 돌아간다.
 REDRAW_SITE, REDRAW_ORIG = 0x01B4D5, bytes.fromhex('200ab56b')
@@ -239,26 +248,47 @@ def redraw_hook(dma):
             + b'\xf4' + (REDRAW_RTL - 1 & 0xFFFF).to_bytes(2, 'little') + b'\x5c' + long_addr(REDRAW_BODY))
 
 
-def block_hook(table):
-    """00:BC80·BC8D 대신(M 8비트, X 16비트, DB = 00). 블록 상위 비트 바이트에서 그 칸(Y)의 9·10번째 비트를
-    A = 비트9 << 1 | 비트8 로 돌려준다. 00:BC9C 는 80>>칸, 00:BCA4 는 08>>칸 마스크다."""
-    return (b'\xbf' + long_addr(table) + b'\x39\xa4\xbc' + b'\xc9\x01' + b'\xa9\x00' + b'\x2a' + b'\xeb'
-            + b'\xbf' + long_addr(table) + b'\x39\x9c\xbc' + b'\xc9\x01' + b'\xeb' + b'\x2a' + b'\x6b')
+def block_read(bits):
+    """00:BC6D 대신(M·X 16비트, X = 번호 × 5 + 칸, Y = 칸, $02 = 번호 × 5). 원래처럼 $94·$96 에 두 층 타일의 하위
+    8비트를 두고, $95·$97 에는 상위 비트 바이트의 그 칸 9·10번째 비트(00:BC9C 의 80>>칸, 00:BCA4 의 08>>칸)를
+    TILE_BITS(bits) 한 번으로 읽어 둔다. 칸을 A 윗바이트에 두고 상위 비트 바이트를 아랫바이트로 읽어 TAX 하면 그 표의
+    색인이 된다. 긴 주소로만 읽어 DB 를 바꾸지 않는다. 원래보다 짧아 00:BC9B 앞에서 RTS 한다."""
+    def bits_of(table, dp):
+        return b'\xa6\x02\xbf' + long_addr(table + 4) + b'\xaa\xbf' + long_addr(bits) + bytes([0x85, dp])
+    return (b'\xe2\x20' + b'\xbf' + long_addr(BLOCK_LOWER) + b'\x85\x94' + b'\xbf' + long_addr(BLOCK_UPPER) + b'\x85\x96'
+            + b'\x98\xeb' + bits_of(BLOCK_LOWER, 0x95) + bits_of(BLOCK_UPPER, 0x97) + b'\x60')
+
+
+def palette_fast(upper, lower):
+    """00:BBAC~BBF6 대신(M·X 16비트, 원래보다 짧아 BBF6 앞에서 RTS). 원래는 위층 $96·아래층 $94 타일을 >> 1 해 니블
+    (짝수 타일은 위 니블)을 고르고 (니블 × 4 + 8)을 타일맵 워드 윗바이트에 붙인다(위층 니블 4비트·아래층 3비트, 위층에만
+    $C6 을 ORA). 여기서는 그 윗바이트를 타일마다 1바이트 표(upper·lower, 1,024바이트씩)에서 타일 번호로 바로 읽어
+    $97·$95 에 ORA 한다. 나갈 때 A 는 원래처럼 $94 다(00:B769·B7B5 가 그대로 타일맵에 씀).
+    원래 롬은 LSR 뒤 A 윗바이트(타일 >> 9)가 XBA 로 타일맵 워드의 아랫바이트에 섞이는데 타일이 512 미만이라 늘 0 이었다."""
+    def layer(dp, table):
+        return bytes([0xA5, dp]) + b'\xaa\xe2\x20\xbf' + long_addr(table) + bytes([0x05, dp + 1, 0x85, dp + 1]) + b'\xc2\x20'
+    return layer(0x96, upper) + b'\xa5\x96\x05\xc6\x85\x96' + layer(0x94, lower) + b'\xa5\x94\x60'
+
+
+def palette_bytes(nib):
+    """palette_fast 의 (위층 표, 아래층 표). nib 는 타일마다 니블."""
+    nib = list(nib) + [0] * (MAX_TILES - len(nib))
+    return bytes(((n & 15) << 2) + 8 for n in nib), bytes(((n & 7) << 2) + 8 for n in nib)
 
 
 GROW_LOAD_LEN = len(grow_load_hook(0, 0))
-DMA_LEN, REDRAW_LEN, BLOCK_LEN = len(dma_sub(0)), len(redraw_hook(0)), len(block_hook(0))
+DMA_LEN, REDRAW_LEN = len(dma_sub(0)), len(redraw_hook(0))
 GROW_ENTRY = 8
 
 
 def grow_layout(at):
-    """타일 늘리기 --worlds-at 자리. 이름 → 주소: 불러오기 훅·니블 훅·블록 훅 둘·다시 그리기 훅·DMA·고르기 표(세계 넷 × 8바이트:
+    """타일 늘리기 --worlds-at 자리. 이름 → 주소: 불러오기 훅·니블 훅·다시 그리기 훅·DMA·고르기 표(세계 넷 × 8바이트:
     [RLE 주소 16][RLE 뱅크][늘린 타일 뱅크][주소 16][크기 16])·니블 표(4 × 512바이트)·타일 속성(1,024바이트)·
-    그 뒤 세계 1·2 RLE."""
+    블록 칸 9·10번째 비트 표(TILE_BITS)·palette_fast 의 위층·아래층 표(1,024바이트씩)·그 뒤 세계 1·2 RLE."""
     out, a = {}, at
-    for name, n in (('load', GROW_LOAD_LEN), ('nib', len(nib_hook(0, wide=True))), ('block_lower', BLOCK_LEN), ('block_upper', BLOCK_LEN),
+    for name, n in (('load', GROW_LOAD_LEN), ('nib', len(nib_hook(0, wide=True))),
                     ('redraw', REDRAW_LEN), ('dma', DMA_LEN), ('table', GROW_ENTRY * 4), ('tables', 0x800),
-                    ('attrs', MAX_TILES)):
+                    ('attrs', MAX_TILES), ('tile_bits', len(TILE_BITS)), ('palettes', MAX_TILES * 2)):
         out[name] = a
         a += n
     out['rles'] = a
@@ -358,9 +388,10 @@ def current(rom):
     """패치한 롬에서 지금 읽히는 것. 검사 도구가 쓴다. worlds 는 세계마다 (타일, 니블),
     anim_sets 는 $1C31 이 0 부터 도는 차례대로 DMA 로 올리는 192바이트."""
     out = {}
-    extras = [b''] * 3
+    extras, tables = [b''] * 3, None
     if rom.d[lorom(LOAD_SITE)] == 0x22 and is_grow_hook(rom, rom.u24(LOAD_SITE + 1)):
-        table = grow_layout(rom.u24(LOAD_SITE + 1))['table']
+        # 타일 늘리기는 니블 훅 대신 00:BBAC 를 바꿨을 수도 있어(palette_fast) 니블 표를 자리로 읽는다
+        table, tables = (grow_layout(rom.u24(LOAD_SITE + 1))[k] for k in ('table', 'tables'))
         entries = [table + w * GROW_ENTRY for w in range(3)]
         srcs = [rom.u8(e + 2) << 16 | rom.u16(e) for e in entries]
         extras = [bytes(rom.d[lorom(rom.u8(e + 3) << 16 | rom.u16(e + 4)):][:rom.u16(e + 6)]) for e in entries]
@@ -371,7 +402,7 @@ def current(rom):
         (bank_site, _), (addr_site, _) = SITES['tiles']
         srcs = [rom.u8(bank_site) << 16 | rom.u16(addr_site)] * 3
     counts = [TILES + len(e) // 32 for e in extras]
-    nibs = [nibbles(rom, nibble_table(rom, w), counts[w]) for w in range(3)]
+    nibs = [nibbles(rom, tables + w * 0x200 if tables else nibble_table(rom, w), counts[w]) for w in range(3)]
     out['worlds'] = {k: (planar_to_tiles(rle(rom, srcs[w])[0]) + extras[w], nibs[w]) for w, k in enumerate(WORLDS)}
     out['tiles'], out['tile_palettes'] = out['worlds']['world0']
     (bank_site, _), (addr_site, _) = SITES['anim']
@@ -738,7 +769,9 @@ def place_in_any(at, size, option, placed):
 
 def write_grow(rom, at, extra_at, world0_at, full0, nib0, world_data, placed, write, attrs):
     """타일 늘리기. 세계마다 (앞 512개 RLE, 512개 뒤 늘린 타일, 니블 표 512바이트)를 고르기 표에 두고,
-    훅 다섯(불러오기·니블·블록 둘·다시 그리기)과 DMA 루틴을 at 에 놓는다. 세계 0 과 같은 앞 512개는 세계 0 RLE 를 쓴다."""
+    훅 셋(불러오기·니블·다시 그리기)과 DMA 루틴을 at 에 놓고, 블록 표 읽기를 제자리에서 바꾼다. 세계 0 과 같은 앞 512개는
+    세계 0 RLE 를 쓴다. 세 세계의 니블이 같으면 니블 훅 대신 00:BBAC 를 제자리에서 바꿔(palette_fast) 타일마다 1바이트 표를
+    읽는다."""
     lay = grow_layout(at)
     base0 = full0[:TILES * 32]
     worlds = [(full0, nib0)] + [world_data.get(k, (full0, nib0)) for k in WORLDS[1:]] + [(full0, nib0)]
@@ -771,19 +804,21 @@ def write_grow(rom, at, extra_at, world0_at, full0, nib0, world_data, placed, wr
         n = list(n) + [0] * (MAX_TILES - len(n))
         nibs += bytes(n[i] << 4 | n[i + 1] for i in range(0, MAX_TILES, 2))
     code = (grow_load_hook(lay['table'], lay['dma']) + nib_hook(lay['tables'], wide=True)
-            + b''.join(block_hook(BLOCK_SITES[s][1]) for s in sorted(BLOCK_SITES))
             + redraw_hook(lay['dma']) + dma_sub(lay['table']))
-    body = code + table + nibs + attrs + bytes(blob)
+    shared = len({nibs[k:k + MAX_TILES // 2] for k in range(0, len(nibs), MAX_TILES // 2)}) == 1
+    body = code + table + nibs + attrs + TILE_BITS + b''.join(palette_bytes(nib0)) + bytes(blob)
     place_in(at, len(body), '--worlds-at', placed)
-    write(at, body, '타일 늘리기: 훅 다섯·DMA·고르기 표·니블 표 넷·세계 1·2 RLE', orig=False)
+    write(at, body, '타일 늘리기: 훅 셋·DMA·고르기 표·니블 표 넷·블록 칸 비트 표·팔레트 표 둘·세계 1·2 RLE', orig=False)
     for chunk, a in extras.items():
         write(a, chunk, f'늘린 타일 {len(chunk) // 32}개(VRAM 워드 {EXTRA_VRAM:04X}~)', orig=False)
     write(LOAD_SITE, b'\x22' + long_addr(lay['load']) + b'\x80\x04' + b'\xea' * 4, '타일 불러오기를 늘리기 훅으로')
-    for site in NIB_SITES:
-        write(site, b'\x22' + long_addr(lay['nib']), '타일 팔레트 니블 읽기를 세계마다 512바이트 훅으로')
-    for (site, (orig, _, dp)), key in zip(sorted(BLOCK_SITES.items()), ('block_lower', 'block_upper')):
-        write(site, b'\x22' + long_addr(lay[key]) + bytes([0x85, dp]) + b'\xea' * (len(orig) - 6),
-              f'블록 {key[6:]} 층 9·10번째 비트')
+    if shared:
+        write(PALETTE_READ, palette_fast(lay['palettes'], lay['palettes'] + MAX_TILES),
+              '타일 팔레트 니블 읽기를 타일마다 1바이트 표로')
+    else:
+        for site in NIB_SITES:
+            write(site, b'\x22' + long_addr(lay['nib']), '타일 팔레트 니블 읽기를 세계마다 512바이트 훅으로')
+    write(BLOCK_READ, block_read(lay['tile_bits']), '블록 칸 타일의 9·10번째 비트를 표로')
     write(REDRAW_SITE, b'\x5c' + long_addr(lay['redraw']), '타일맵 다시 그리기(전투 뒤·00:A771) 때 늘린 타일 다시 보내기')
     for site, orig in ATTR_SITES.items():
         if orig[0] == 0x29:
