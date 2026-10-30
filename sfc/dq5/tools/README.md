@@ -146,6 +146,7 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5titlefx.py rom` | DQ5 오프닝 타이틀의 바다 물결 HDMA 표(`7E:A007`~), BG4 가로 HDMA 표(`7E:A4DC`), 링 반짝이 OBJ 를 롬만으로 계산. `--check` 는 `lua/dq5titlefx.lua` 덤프와 프레임마다 견줌 |
 | `lua/dq5battledump.lua` | 전투 그림 실험: `AT` 실행 때 WRAM(`at.bin`), `DUMPF` 프레임에 WRAM·VRAM·CGRAM·OAM·화면, `FROM`~`TO` DMA 기록. `boot.lua`(walk.lua) 뒤에 붙여 씀 |
 | `lua/dq5framelog.lua` | 프레임마다 `$7F`·`$BE`·필드 좌표 `$B6`·`$B8`·세계 `$1949` 를 `frames.txt` 로(둘 다 그대로인 프레임 = 불러오는 동안 멈춘 프레임). `NEXT`(보통 `dq5gfxdump.lua`)를 이어 부름 |
+| `lua/dq5mapdots.lua` | たびびとのちず 세계 지도 화면에서 점 하나(`03:CAC5`~`CAC8`)·`00:BDC5` 를 부를 때마다 마스터 클록을 더해 `mapdots.txt` 에 「이름 횟수 첫프레임 끝프레임 합」으로. `DUMPF` 프레임에 WRAM·VRAM·CGRAM·화면. `boot.lua`(dq5warp.lua) 뒤에 붙여 씀 |
 | `lua/dq5hdma.lua` | `DUMPF` 프레임에 `$420C`·DMA 채널 레지스터(`hNNNNN.txt`), WRAM, 화면. `boot.lua`(walk.lua) 뒤에 붙여 씀 |
 | `lua/dq5msgswap.lua` | 전투 메시지 루틴 `24:8C39` 에 들어올 때 A 가 `FROMMSG` 이면 `TOMSG` 를 차례로 넣어 아무 메시지나 전투 창에 띄우고 `SHOTS` 프레임에 화면을 찍음. 메시지 번호 기록 `msg.txt` |
 | `lua/dq5sndlog.lua` | 소리 명령 대기열 `24:FF83` 에 들어오는 명령·인자·부른 곳을 `snd.txt` 로, `SHOTS` 프레임에 화면, `DSP=1` 이면 프레임마다 DSP 레지스터를 `dsp.txt` 로. `HCMD`·`HARG`·`HX` 로 메뉴 효과음 등 한 명령을 다른 명령으로 바꿔 보내기, `WATCH` 로 주소 실행 프레임, `SPCDUMP` 로 SPC RAM·DSP 덤프(커밋 금지). 소리 서비스 `BRK` 로 온 명령에는 `brk=BRK 자리 X=둘째 인자`, `24:FEAC` 를 바로 부른 명령 `0C` 에는 `X=` 레지스터(갈래) |
