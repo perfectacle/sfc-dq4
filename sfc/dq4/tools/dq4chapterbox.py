@@ -59,6 +59,8 @@ SONG_WAIT_MAX = 300  # 맵 곡이 시작되기를 기다리는 상한(프레임)
 # 맵 곡 건너뛰기 비트(7E:21A5 bit6). 원래 롬에서는 03:C729 만 켠다. 켜져 있으면 01:C2FA 가 동료 자리 맞추기(00:D515)도
 # 건너뛰지만, 새 게임부터 맵을 밝힐 때까지 01:C2FA·00:D515 는 한 번도 돌지 않았다(실측)
 SKIP_SONG = (0x7E21A5, 0x40)
+# DQ5 첫 필드 이벤트(파파스와 슬라임 전투, 필드 루틴 15:F907 의 FE 항목)는 이 비트가 꺼져 있으면 걸린다
+FIELD_EVENT_DONE = (0x7E2194, 0x80)
 
 
 def fc_tile(nes, n):
@@ -318,6 +320,8 @@ class Layout:
         start = (bytes((0xA9, 0x80, 0x85, 0xBE)) +                    # 원래: LDA #$80 / STA $BE
                  if_pending(self.scenes, bytes((0xAF, *le(SKIP_SONG[0], 3), 0x09, SKIP_SONG[1],   # LDA / ORA #$40
                                                 0x8F, *le(SKIP_SONG[0], 3)))) +                 # STA $7E21A5
+                 bytes((0xAF, *le(FIELD_EVENT_DONE[0], 3), 0x09, FIELD_EVENT_DONE[1],          # LDA / ORA #$80
+                        0x8F, *le(FIELD_EVENT_DONE[0], 3))) +                                # STA $7E2194
                  bytes((0xA9, 0x80, 0x6B)))                            # LDA #$80 / RTL
         # 맵을 불러올 때: 연출 전이면 주화면을 BG3 만으로. 메뉴 곡은 메뉴를 나갈 때 줄어든다(dq4overture.MENU_FADE)
         hook = (if_pending(self.scenes, bytes((0xA9, 0x04)), bytes((0xA9, 0x17))) +

@@ -131,7 +131,8 @@ NOTHING = "＜なにもない＞"
 # Ported lines are new messages after DQ5's own (dq5textwrite appends them gap-free from the end).
 FIRST_MESSAGE = MESSAGES
 # Talk numbers 900- run talk scripts appended by dq5talkwrite --extra-at, gap-free from 900: the prologue's
-# first (dq4prologue.talk_doc), then one `msg` script per ported message. A talk number T >= 26D shows message
+# first (dq4prologue.talk_doc), then chapter 1's event talks (dq4ch1event), then one `msg` script per ported
+# message. A talk number T >= 26D shows message
 # T + 3C6 directly, but the talk numbers below 900 reach only a few of the new messages.
 SCRIPT_TALK = 0x900
 LINE, PAGE, END = 0x1000, 0x1002, 0x1001
@@ -254,9 +255,10 @@ def nothing_codes():
 
 
 def first_talk():
-    """Talk number of the first ported message's script: the prologue's scripts come first."""
+    """Talk number of the first ported message's script: the prologue's and chapter 1's event scripts come first."""
+    import dq4ch1event
     import dq4prologue
-    return SCRIPT_TALK + len(dq4prologue.talk_doc()["scripts"])
+    return SCRIPT_TALK + len(dq4prologue.talk_doc()["scripts"]) + len(dq4ch1event.TALKS)
 
 
 def allocate(texts, key, codes):
@@ -267,14 +269,19 @@ def allocate(texts, key, codes):
 
 
 def talk_doc(messages):
-    """dq5talk/1: the prologue's appended scripts and, after them, one script per ported message in id order,
-    so message FIRST_MESSAGE + k has talk number first_talk() + k."""
+    """dq5talk/1: the prologue's appended scripts, chapter 1's event scripts, and then one script per ported
+    message in id order, so message FIRST_MESSAGE + k has talk number first_talk() + k. The event scripts show
+    messages right after the ported ones (dq4ch1event.MESSAGES)."""
+    import dq4ch1event
     import dq4prologue
     doc = dq4prologue.talk_doc()
     first = first_talk()
     ids = [m["id"] for m in messages]
     if ids != list(range(FIRST_MESSAGE, FIRST_MESSAGE + len(ids))):
         raise ValueError("ported messages must run gap-free from C80")
+    events = dq4ch1event.talk_numbers(SCRIPT_TALK + len(doc["scripts"]))
+    doc["scripts"] += [{"talk": f"{events[name]:03X}", "body": body}
+                       for name, body in zip(dq4ch1event.TALKS, dq4ch1event.talk_scripts(FIRST_MESSAGE + len(ids)))]
     doc["scripts"] += [{"talk": f"{first + k:03X}", "body": [{"op": "msg", "id": f"{m:03X}"}]}
                        for k, m in enumerate(ids)]
     return doc
