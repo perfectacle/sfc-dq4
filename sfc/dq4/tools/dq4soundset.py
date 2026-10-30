@@ -325,29 +325,14 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
                 tick = min(port.seconds_to_tick(tempos, seconds), plain.report['end_tick'] - 1)
                 return {'split_tick': tick, 'chain_song': chain_numbers[slot]}
 
-            if slot in chains:
-                # 본체를 곡 뒤 샘플보다 먼저(곧 쓸 샘플이 곡 앞으로 당겨짐) 또는 나중(앞부분이 길어짐) 보내는 두 길 중
-                # 곡 앞에 보낼 바이트(곡 앞 샘플 + 앞부분 시퀀스)가 적은 쪽을 고른다.
-                main = len(plain.sequence)
-                options = []
-                cap, order, send_first, arrivals, result = stream_plan(main, split_at(main))
-                options.append((cap + len(result.sequence), False, cap, order, send_first, arrivals, result))
-                cap, order, send_first, arrivals, _ = stream_plan(0, {})
-                after = sum(sizes[x] for x in order[send_first:])
-                late_split = split_at(after + main)
-                result = port.convert(score, program_map=program_map, sample_order=order, arrivals=arrivals,
-                                      **convert_args(slot), **late_split)
-                options.append((cap + len(result.sequence), True, cap, order, send_first, arrivals, result))
-                _, late, cap, order, send_first, arrivals, conversion = min(options, key=lambda o: o[0])
-                if late:
-                    chain_late.add(slot)
-            else:
-                cap, order, send_first, arrivals, conversion = stream_plan(0, {})
-            held = None
-            if slot in holds and send_first:
+            def hold_plan(late, order, send_first, arrivals, conversion):
+                """곡 붙들기를 걸 수 있으면 건 계획과, 소리 나기 전에 받아야 할 붙든 샘플 바이트(본체가 먼저면 본체 포함)."""
+                held, wait = None, 0
+                if slot not in holds or not send_first:
+                    return order, send_first, arrivals, conversion, held, wait
                 main = len(plain.sequence)
                 # 본체를 먼저 보내는 나눈 곡은 붙든 샘플이 본체 뒤에 온다
-                lead = main if slot in chains and slot not in chain_late else 0
+                lead = main if slot in chains and not late else 0
                 timed = check.expected_notes(conversion.sequence, port.seconds_to_tick(tempos, 30), conversion.chain)
                 details = bank_report['samples']
                 first_seconds = {}
@@ -386,12 +371,40 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
                     split = {}
                     if slot in chains:
                         after = sum(sizes[y] for y in new_order[new_first:])
-                        split = split_at(after + main) if slot in chain_late else split_at(main)
+                        split = split_at(after + main) if late else split_at(main)
                     result = port.convert(score, program_map=program_map, sample_order=new_order, arrivals=new_arrivals,
                                           hold=(x, units), **convert_args(slot), **split)
                     if not any(result.report['late_notes'].values()):
                         order, send_first, arrivals, conversion = new_order, new_first, new_arrivals, result
                         held = {'sample': f'{x:02X}', 'bytes': units * 256, 'saved_bytes': max(candidates)[0]}
+                        wait = lead + units * 256
+                return order, send_first, arrivals, conversion, held, wait
+
+            if slot in chains:
+                # 본체를 곡 뒤 샘플보다 먼저(곧 쓸 샘플이 곡 앞으로 당겨짐) 또는 나중(앞부분이 길어짐) 보내는 두 길 중
+                # 소리가 나기 전에 받을 바이트(곡 앞 샘플 + 앞부분 시퀀스 + 붙든 샘플의 문턱)가 적은 쪽을 고른다.
+                # 붙들기를 빼고 견주면 본체를 먼저 보내는 쪽이 붙들기를 못 걸어 오히려 늦었다(보스 18 +125 → +113).
+                main = len(plain.sequence)
+                options = []
+                cap, order, send_first, arrivals, result = stream_plan(main, split_at(main))
+                options.append((False, cap, order, send_first, arrivals, result))
+                cap, order, send_first, arrivals, _ = stream_plan(0, {})
+                after = sum(sizes[x] for x in order[send_first:])
+                late_split = split_at(after + main)
+                result = port.convert(score, program_map=program_map, sample_order=order, arrivals=arrivals,
+                                      **convert_args(slot), **late_split)
+                options.append((True, cap, order, send_first, arrivals, result))
+                planned = []
+                for late, cap, order, send_first, arrivals, result in options:
+                    order, send_first, arrivals, result, held, wait = hold_plan(late, order, send_first, arrivals, result)
+                    cost = sum(sizes[x] for x in order[:send_first]) + len(result.sequence) + wait
+                    planned.append((cost, late, cap, order, send_first, arrivals, result, held))
+                _, late, cap, order, send_first, arrivals, conversion, held = min(planned, key=lambda o: o[0])
+                if late:
+                    chain_late.add(slot)
+            else:
+                cap, order, send_first, arrivals, conversion = stream_plan(0, {})
+                order, send_first, arrivals, conversion, held, _ = hold_plan(False, order, send_first, arrivals, conversion)
             plan = {'pre_bytes_cap': cap, 'send_first': send_first, 'chain_after_samples': slot in chain_late, 'hold': held,
                     'pre_sample_bytes': sum(len(found[s]) for s in order[:send_first]),
                     'arrival_seconds': {f'{s:02X}': round(t, 3) for s, t in arrivals.items()}}
