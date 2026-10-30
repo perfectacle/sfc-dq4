@@ -230,10 +230,10 @@ def walk_out(address, path):
         [{"op": "28", "args": []}, {"op": "16", "args": []}]}
 
 
-def npc_doc(records, ported=()):
-    """ported: dq4npcport.port 의 인물 목록. 왕좌의 방만 이 연출 배치로 바꾼다."""
+def npc_doc(records, ported=(), prologue=False):
+    """ported: dq4npcport.port 의 인물 목록. 왕좌의 방만 이 연출 배치로 바꾼다. prologue 면 서장 맵의 인물을 더한다."""
     import dq4chapterbox
-    native = {k: [v & 0xFF, v >> 8 & 0xFF, v >> 16] for k, v in dq4chapterbox.entry_points().items()}
+    native = {k: [v & 0xFF, v >> 8 & 0xFF, v >> 16] for k, v in dq4chapterbox.entry_points(scenes(prologue)).items()}
     flag, mask = EVENT_FLAG
     staff = [entry(STATIC, x, y, g, f, t) for x, y, g, f, t in STAFF]
     king = entry(STATIC, *KING_AT, KING, 'down', T_KING)
@@ -265,10 +265,25 @@ def npc_doc(records, ported=()):
     ]
     overrides = [{"map": THRONE, "flag": flag, "when": "on", "mask": mask, "list": "new:after"}] + \
         [{k: o[k] for k in ("map", "flag", "when", "mask", "list")} for o in records["overrides"]]
+    lists = [{"map": THRONE, "entries": before}]
+    new_lists = [{"name": "after", "entries": after}]
+    if prologue:
+        import dq4prologue
+        more_lists, more_new, more_overrides, more_scripts = dq4prologue.npc_lists()
+        lists += more_lists
+        new_lists += more_new
+        overrides = more_overrides + overrides
+        scripts += more_scripts
+    mine = {lst["map"] for lst in lists}
     return {"format": "dq5npcrelocate/1", "scripts": scripts,
-            "lists": [{"map": THRONE, "entries": before}] + [lst for lst in ported if lst["map"] != THRONE],
-            "new_lists": [{"name": "after", "entries": after}],
-            "overrides": overrides}
+            "lists": lists + [lst for lst in ported if lst["map"] not in mine],
+            "new_lists": new_lists, "overrides": overrides}
+
+
+def scenes(prologue):
+    """장 제목 상자로 시작하는 장면. 서장이 있으면 서장 지하가 먼저다."""
+    import dq4chapterbox
+    return (dq4chapterbox.PROLOGUE, dq4chapterbox.CHAPTER1) if prologue else (dq4chapterbox.CHAPTER1,)
 
 
 # 새 게임 첫 맵: 25:8621 의 6바이트 표([$BC][$BD][$C1][$C2][$C3][$198E])는 저장 재개 자리 표이고, 새 게임은
@@ -291,7 +306,9 @@ def messages(lists, ported_messages, report):
         if key in FRONT_TEXTS:
             out[int(person["message"], 16)] = FRONT_TEXTS[key]
     import dq4sysmsg
-    for name, texts in (('1장', TEXTS), ('시스템', dq4sysmsg.TEXTS)):
+    # 서장 메시지는 빌드에서 서장을 켜지 않아도 넣는다(메시지 단계에는 옵션이 없음)
+    import dq4prologue
+    for name, texts in (('1장', TEXTS), ('서장', dq4prologue.TEXTS), ('시스템', dq4sysmsg.TEXTS)):
         clash = set(out) & set(texts)
         if clash:
             raise ValueError(f'{name} 메시지와 겹치는 번호: {sorted(f"{m:03X}" for m in clash)}')
@@ -353,8 +370,8 @@ GROUP_PATCHES = ('env/dq4-environment.dq5patch.json', 'newmap.dq5patch.json', 'e
                  'entrances.dq5patch.json', 'shops.dq5patch.json', 'inn.dq5patch.json')
 
 
-def build(rom, dq5, dq4, work):
-    """메뉴 빌드 롬(dq4menupatch.py build --messages) → 1장 첫머리 롬."""
+def build(rom, dq5, dq4, work, prologue=False):
+    """메뉴 빌드 롬(dq4menupatch.py build --messages) → 1장 첫머리 롬. prologue 면 새 게임이 서장으로 시작한다."""
     import dq4groupbuild
     original = dq5.read_bytes()
     # 원래 롬에서는 새 맵 레코드를 34 에 두지만 통합 롬의 34 는 타이틀 자료다
@@ -364,15 +381,21 @@ def build(rom, dq5, dq4, work):
     new_maps = [a for g, n in sorted(GROUPS.values()) for a in ('--new-map', f'{g:02X}/{n:02X}')]
     run_tool(DQ5_TOOLS / 'dq5npcrecord.py', dq5, 'dump', '-o', work / 'npc-records.json')
     records = json.loads((work / 'npc-records.json').read_text())
-    (work / 'npc.json').write_text(json.dumps(npc_doc(records, ported), ensure_ascii=False, indent=1))
+    (work / 'npc.json').write_text(json.dumps(npc_doc(records, ported, prologue), ensure_ascii=False, indent=1))
     base = npc_base(work / 'groups' / GROUP_PATCHES[0])
     run_tool(DQ5_TOOLS / 'dq5npcrelocate.py', dq5, 'patch', work / 'npc.json', '--base', base, '--alt', NPC_ALT,
              '--allow-growth', *new_maps, '-o', work / 'npc.dq5patch.json')
-    out = bytearray(apply_writes(rom, original, [work / 'groups' / p for p in GROUP_PATCHES] +
-                                 [work / 'npc.dq5patch.json']))
+    patches = [work / 'groups' / p for p in GROUP_PATCHES] + [work / 'npc.dq5patch.json']
+    if prologue:
+        import dq4prologue
+        (work / 'talk.json').write_text(json.dumps(dq4prologue.talk_doc(), ensure_ascii=False, indent=1))
+        run_tool(DQ5_TOOLS / 'dq5talkwrite.py', dq5, 'patch', work / 'talk.json', *dq4prologue.TALK_AT,
+                 '-o', work / 'talk.dq5patch.json')
+        patches.append(work / 'talk.dq5patch.json')
+    out = bytearray(apply_writes(rom, original, patches))
     import dq4chapterbox
     import dq4menupatch
-    out = bytearray(dq4chapterbox.apply(out, dq4.read_bytes(), dq4menupatch.Font('galmuri11')))
+    out = bytearray(dq4chapterbox.apply(out, dq4.read_bytes(), dq4menupatch.Font('galmuri11'), scenes(prologue)))
     import dq4josa
     out = bytearray(dq4josa.apply(out))
     import dq4msgnames
@@ -380,8 +403,13 @@ def build(rom, dq5, dq4, work):
     o = lorom(START_TABLE)
     if out[o:o + 6] != START_ORIG:
         raise SystemExit(f'{START_TABLE:06X}: 새 게임 첫 맵 표가 원래 값이 아님 {out[o:o + 6].hex()}')
-    group, number = (int(v, 16) for v in START[0].split('/'))
-    out[o:o + 4] = bytes((group, number, START[1], START[2]))
+    start = START
+    if prologue:
+        import dq4prologue
+        out = bytearray(dq4prologue.apply(out))
+        start = dq4prologue.START
+    group, number = (int(v, 16) for v in start[0].split('/'))
+    out[o:o + 4] = bytes((group, number, start[1], start[2]))
     return set_checksum(out)
 
 
@@ -398,6 +426,7 @@ def main():
     b.add_argument('--dq4', default='rom/dq4.nes', type=Path)
     b.add_argument('--out', required=True, type=Path)
     b.add_argument('--keep', type=Path, help='중간 패치 목록을 남길 폴더')
+    b.add_argument('--prologue', action='store_true', help='새 게임을 NDS 서장(dq4prologue.py)으로 시작')
     args = ap.parse_args()
     if args.cmd == 'messages':
         args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -408,10 +437,10 @@ def main():
     rom = args.rom.read_bytes()
     if args.keep:
         args.keep.mkdir(parents=True, exist_ok=True)
-        out = build(rom, args.dq5, args.dq4, args.keep)
+        out = build(rom, args.dq5, args.dq4, args.keep, args.prologue)
     else:
         with tempfile.TemporaryDirectory() as t:
-            out = build(rom, args.dq5, args.dq4, Path(t))
+            out = build(rom, args.dq5, args.dq4, Path(t), args.prologue)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_bytes(out)
     args.out.with_suffix('.ips').write_bytes(ips_patch(rom, out))

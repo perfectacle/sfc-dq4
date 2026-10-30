@@ -21,7 +21,8 @@
 | `dq4msgnames.py` | 메시지의 물건·주문 이름(`{100A}`·`{100B}`)을 adopt 표의 한글로. `dq4chapter1.py` 가 얹음. [조사 코드의 이름](../docs/dq4-josa-format.md#이름) |
 | `dq4josa.py`·`dq4sysmsg.py` | 받침을 보고 조사를 고르는 메시지 코드(`101E`~`1024`)와 DQ5 필드 시스템 메시지 81개의 한글. `dq4chapter1.py` 가 얹음. [조사 코드](../docs/dq4-josa-format.md) |
 | `dq4chapterbox.py preview --out PNG` | 1장 시작의 검은 화면 금테 장 제목 상자 미리보기. 상자 타일은 `rom/dq4.nes` 에서, 제목은 `DQ4_GALMURI` 의 Galmuri11 로. 맵 훅·네이티브 루틴은 `dq4chapter1.py build` 가 얹음. [1장 첫머리](../docs/dq4-chapter1-format.md#검은-화면과-장-제목-상자) |
-| `dq4chapter1.py messages\|build` | DQ4 1장 첫머리: `messages` 는 `dq4menupatch.py build --messages` 에 줄 한글 대사 JSON, `build --rom 메뉴롬 --out 롬` 은 `dq4groupbuild.py` 의 맵·출구 패치와 1장 인물·연출을 메뉴 롬 위에 얹고 새 게임 첫 맵을 `36/01` 로. [1장 첫머리](../docs/dq4-chapter1-format.md) |
+| `dq4chapter1.py messages\|build` | DQ4 1장 첫머리: `messages` 는 `dq4menupatch.py build --messages` 에 줄 한글 대사 JSON, `build --rom 메뉴롬 --out 롬 [--prologue]` 은 `dq4groupbuild.py` 의 맵·출구 패치와 1장 인물·연출을 메뉴 롬 위에 얹고 새 게임 첫 맵을 `36/01` 로(`--prologue` 면 서장 `3C/01`). [1장 첫머리](../docs/dq4-chapter1-format.md) |
+| `dq4prologue.py` | NDS 서장(지하 검술 수련과 마을 사람)의 대사·인물·연출·검사의 묻기 대화. `dq4chapter1.py build --prologue` 가 얹음. [서장](../docs/dq4-prologue-format.md) |
 | `dq4menumsg.py [그림]` | `dq4menupatch.py build` 가 부르는 메뉴 메시지 모듈. 보행 메시지를 새 허프만 트리로 뱅크 `65`~ 에 옮기고 한글 글자를 넣음. 직접 실행하면 세 메시지 미리보기. [메뉴 메시지](../docs/dq4-menu-format.md#메뉴-메시지) |
 | `dq4nameentrycheck.py --rom 롬 --symbols 심볼 --out 새폴더` | MesenCE에서 조합·삭제·Y 완료·새 게임 이름을 검사하고 입력 칸 VRAM을 비교. `MESENCE` 실행 파일 필요. [재현](../docs/dq4-name-entry-format.md#재현) |
 | `dq4namecursorcheck.py --rom 롬 --symbols 심볼 --out 새폴더` | MesenCE 실제 입력으로 빠른 방향 전환·겹침·반복·빈칸 경계와 Start 이동을 검사. `MESENCE` 실행 파일 필요. [재현](../docs/dq4-name-entry-format.md#재현) |

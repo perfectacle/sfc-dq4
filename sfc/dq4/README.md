@@ -19,6 +19,7 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [docs/dq4-title-format.md](docs/dq4-title-format.md): 정지 한글 타이틀, NDS 오프닝 관찰과 초기 SFC 연결 기록
 - [docs/dq4-josa-format.md](docs/dq4-josa-format.md): 받침을 보고 고르는 조사 코드와 필드 시스템 메시지 81개
 - [docs/dq4-chapter1-format.md](docs/dq4-chapter1-format.md): 1장 첫머리(새 게임 첫 맵, 왕좌의 방 연출, 한글 대사, 인물 배치, 바트랜드 성 곡)
+- [docs/dq4-prologue-format.md](docs/dq4-prologue-format.md): NDS 서장(지하 검술 수련, 예·아니요 대화, 마을 사람)
 - [todo.md](todo.md): 남은 일
 - [references.md](references.md): 참고 자료
 - [tools/README.md](tools/README.md): 도구 사용법
@@ -175,3 +176,4 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [2026-10-30-29: 서장의 산골 마을을 새 그룹 3C 로](journal/2026-10-30-29-prologue-village.md)
 - [2026-10-30-30: 동굴 바닥의 마물 부조](journal/2026-10-30-30-floor-relief.md)
 - [2026-10-30-31: 사운드 빌드 캐시](journal/2026-10-30-31-sound-buildcache.md)
+- [2026-10-30-32: 서장의 수련과 마을 사람](journal/2026-10-30-32-prologue-events.md)
