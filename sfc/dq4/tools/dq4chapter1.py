@@ -251,8 +251,9 @@ def walk_out(address, path):
         [{"op": "28", "args": []}, {"op": "16", "args": []}]}
 
 
-def npc_doc(records, ported=(), prologue=False):
-    """ported: dq4npcport.port 의 인물 목록. 왕좌의 방만 이 연출 배치로 바꾼다. prologue 면 서장 맵의 인물을 더한다."""
+def npc_doc(records, ported=(), prologue=False, report=None, ported_messages=()):
+    """ported·report·ported_messages: dq4npcport.port 의 인물 목록·보고·메시지. 왕좌의 방은 이 연출 배치로 바꾸고,
+    report 가 있으면 1장 진행 사건(dq4ch1event)의 인물을 고친다. prologue 면 서장 맵의 인물을 더한다."""
     import dq4chapterbox
     native = {k: [v & 0xFF, v >> 8 & 0xFF, v >> 16] for k, v in dq4chapterbox.entry_points(scenes(prologue)).items()}
     flag, mask = EVENT_FLAG
@@ -296,6 +297,13 @@ def npc_doc(records, ported=(), prologue=False):
         new_lists += more_new
         overrides = more_overrides + overrides
         scripts += more_scripts
+    if report is not None:
+        import dq4ch1event
+        import dq4npcport
+        ported, more_new, more_overrides = dq4ch1event.npc_lists(ported, report, event_talk())
+        new_lists += more_new
+        overrides = more_overrides + overrides
+        scripts += dq4ch1event.scripts(dq4npcport.FIRST_MESSAGE + len(ported_messages))
     mine = {lst["map"] for lst in lists}
     return {"format": "dq5npcrelocate/1", "scripts": scripts,
             "lists": lists + [lst for lst in ported if lst["map"] not in mine],
@@ -312,6 +320,10 @@ def scenes(prologue):
 # 25:82D2 에서 항목 0 을 쓴다(실측: 원래 02/06 (38,14)).
 START_TABLE = 0x258621
 START_ORIG = bytes.fromhex('02 06 26 0e 01 80')
+# DQ5 유년기는 필드 시간을 멈춘다(7E:2190 bit1, 00:82D3). 저장을 불러오면 00:A72A 가 bit6(청년기)이 꺼져 있을 때
+# BRK 0C 로 다시 켜므로, 그 명령을 지워 FC 처럼 필드를 걸으면 밤이 오게 한다
+TIME_FREEZE = 0x00A738
+TIME_FREEZE_ORIG = bytes.fromhex('00 0c 02 00')
 
 
 def lorom(addr):
@@ -335,12 +347,23 @@ def messages(ported_messages, report):
     import dq4sysmsg
     # 서장 메시지는 빌드에서 서장을 켜지 않아도 넣는다(메시지 단계에는 옵션이 없음)
     import dq4prologue
-    for name, texts in (('1장', TEXTS), ('서장', dq4prologue.TEXTS), ('시스템', dq4sysmsg.TEXTS)):
+    import dq4ch1event
+    import dq4npcport
+    events = dq4ch1event.texts(dq4npcport.FIRST_MESSAGE + len(ported_messages))
+    for name, texts in (('1장', TEXTS), ('서장', dq4prologue.TEXTS), ('시스템', dq4sysmsg.TEXTS),
+                        ('1장 사건', events)):
         clash = set(out) & set(texts)
         if clash:
             raise ValueError(f'{name} 메시지와 겹치는 번호: {sorted(f"{m:03X}" for m in clash)}')
         out.update(texts)
     return out
+
+
+def event_talk():
+    """1장 진행 사건의 첫 대화 번호: 덧붙인 대화에서 서장 스크립트 바로 뒤(dq4npcport.talk_doc)."""
+    import dq4npcport
+    import dq4prologue
+    return dq4npcport.SCRIPT_TALK + len(dq4prologue.talk_doc()["scripts"])
 
 
 def port(dq5, dq4):
@@ -418,11 +441,11 @@ def build(rom, dq5, dq4, work, prologue=True):
     서장 끝에서 1장 첫머리로 넘어간다."""
     original = dq5.read_bytes()
     group_build(dq5, dq4, work / 'groups')
-    ported, _, _ = port(dq5, dq4)
+    ported, ported_messages, report = port(dq5, dq4)
     new_maps = [a for g, n in sorted(GROUPS.values()) for a in ('--new-map', f'{g:02X}/{n:02X}')]
     run_tool(DQ5_TOOLS / 'dq5npcrecord.py', dq5, 'dump', '-o', work / 'npc-records.json')
     records = json.loads((work / 'npc-records.json').read_text())
-    (work / 'npc.json').write_text(json.dumps(npc_doc(records, ported, prologue), ensure_ascii=False, indent=1))
+    (work / 'npc.json').write_text(json.dumps(npc_doc(records, ported, prologue, report, ported_messages), ensure_ascii=False, indent=1))
     base = npc_base(work / 'groups' / GROUP_PATCHES[0])
     run_tool(DQ5_TOOLS / 'dq5npcrelocate.py', dq5, 'patch', work / 'npc.json', '--base', base, '--alt', NPC_ALT,
              '--allow-growth', *new_maps, '-o', work / 'npc.dq5patch.json')
@@ -438,6 +461,11 @@ def build(rom, dq5, dq4, work, prologue=True):
     o = lorom(START_TABLE)
     if out[o:o + 6] != START_ORIG:
         raise SystemExit(f'{START_TABLE:06X}: 새 게임 첫 맵 표가 원래 값이 아님 {out[o:o + 6].hex()}')
+    o = lorom(TIME_FREEZE)
+    if out[o:o + 4] != TIME_FREEZE_ORIG:
+        raise SystemExit(f'{TIME_FREEZE:06X}: 시간 멈춤 명령이 원래 값이 아님 {out[o:o + 4].hex()}')
+    out[o:o + 4] = b'\xea' * 4
+    o = lorom(START_TABLE)
     start = START
     if prologue:
         import dq4prologue

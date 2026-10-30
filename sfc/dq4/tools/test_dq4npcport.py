@@ -24,15 +24,19 @@ class AllocationTest(unittest.TestCase):
         self.assertEqual(made, [(1,), (2, 3), ()])  # codes are made once per line
 
     def test_talk_scripts_follow_the_prologue_gap_free(self):
+        import dq4ch1event
         import dq4prologue
         prologue = dq4prologue.talk_doc()["scripts"]
+        events = len(dq4ch1event.TALKS)
         messages = [{"id": 0xC80 + k, "codes": [port.END]} for k in range(3)]
         scripts = port.talk_doc(messages)["scripts"]
         talks = [int(s["talk"], 16) for s in scripts]
-        self.assertEqual(talks, list(range(port.SCRIPT_TALK, port.SCRIPT_TALK + len(prologue) + 3)))
+        self.assertEqual(talks, list(range(port.SCRIPT_TALK, port.SCRIPT_TALK + len(prologue) + events + 3)))
         self.assertEqual(scripts[:len(prologue)], prologue)
+        self.assertEqual([s["body"] for s in scripts[len(prologue):len(prologue) + events]],
+                         dq4ch1event.talk_scripts(0xC83))   # 사건 메시지는 옮긴 메시지 바로 뒤
         first = port.first_talk()
-        for k, s in enumerate(scripts[len(prologue):]):
+        for k, s in enumerate(scripts[len(prologue) + events:]):
             # Talk first_talk() + k shows message C80 + k, as port gives the people.
             self.assertEqual(int(s["talk"], 16), first + k)
             self.assertEqual(s["body"], [{"op": "msg", "id": f"{0xC80 + k:03X}"}])
@@ -98,7 +102,7 @@ class PortTest(unittest.TestCase):
         lists, messages, report = port.port(str(DQ5), str(DQ4))
         ids = [m["id"] for m in messages]
         self.assertEqual(ids, list(range(port.FIRST_MESSAGE, port.FIRST_MESSAGE + len(ids))))
-        shows = {int(s["talk"], 16): s["body"][0]["id"] for s in port.talk_doc(messages)["scripts"]}
+        shows = {int(s["talk"], 16): s["body"][0].get("id") for s in port.talk_doc(messages)["scripts"]}
         for entries in lists:
             for e in entries["entries"]:
                 talk = e["fields"]["talk"]
