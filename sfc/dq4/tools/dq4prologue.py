@@ -198,7 +198,9 @@ def _skip_song():
             box.LEAVE)
 
 
-NEAR = (4, 8, 12)    # 다가왔다고 볼 거리(DQ5 셀). 개구리 목소리 두 번(12·8)과 말 걸기(4), 신시아(4)
+# 다가왔다고 볼 거리(DQ5 셀). 개구리 목소리 두 번(12·8)과 말 걸기(2), 신시아(4). 개구리는 바로 옆에서 말을 건다:
+# 4셀이면 위에서 다가온 주인공의 4셀 아래라 화면 아래 메시지 창에 가려 보이지 않았다
+NEAR = (2, 4, 8, 12)
 TALKER = 0x7E1BC4   # 말을 걸 인물 슬롯. 7E:1BBE~ 79바이트는 DQ5 가 쓰지 않는 자리(dq4josa 가 1BC0 을 씀)
 TALK_TO = 0x06AF1C  # 06:AF1C: JSR $AF20 / RTL. A = 인물 슬롯으로 필드 「대화」(05:D596)와 같은 대화를 돌린다
 
@@ -330,7 +332,7 @@ def scripts():
     near = lambda cells: _cmd('05', *_long(at[f'near{cells}']))  # noqa: E731
     # 주인공이 다가오면 목소리 둘(NDS 의 깃발 6·7 자리) → 더 다가오면 개구리가 말을 건다
     frog = ([near(12), _cmd('3F'), _msg(M_CALL), _cmd('40'), near(8), _cmd('3F'), _msg(M_HELP), _cmd('40'),
-             near(4), _cmd('37', *_long(at['talk_here'])), _wait_on(FROG_MET), _cmd('3F')] + _walk(FROG_OUT) +
+             near(2), _cmd('37', *_long(at['talk_here'])), _wait_on(FROG_MET), _cmd('3F')] + _walk(FROG_OUT) +
             [_cmd('28'), _cmd('40'), _cmd('16')])
     sx, sy = SHINSIA_AT
     shinsia = ([near(4), _cmd('37', *_long(at['talk_here'])), _wait_on(SHINSIA_START), _cmd('3F'), _cmd('20', 0x37, 0)] + _spin(at) +

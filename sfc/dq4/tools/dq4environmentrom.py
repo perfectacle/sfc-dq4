@@ -91,6 +91,11 @@ FLOOR = 1
 COUNTER_PROP = 0xA7
 COUNTER_PASS = 4
 COUNTER_ATTR = 0x15
+# An opened 2x3 door keeps its top row on the upper layer and 01:FC1E fills one more row above it with upper
+# words; in DQ5 those rows are the wall over the door. FC doors with floor above (14/01 (3,6)) left the party
+# under the floor there, from the floor row above down to the door cell. Attribute pass 2 bit0 (cell +0 bit3) draws a
+# person standing on those cells in front.
+FRONT_PASS = 1
 WATER_FRAMES = ("water0", "water1", "water2")
 WATER_AT = 0x41F000
 WATER_PERIOD = 24
@@ -307,8 +312,17 @@ def map_document(name, source, local, target):
         prop = _prop(source, x, y)
         return WALL if prop & 0x80 and prop not in OPENINGS | {COUNTER_PROP} else None
 
-    def counter(x, y):
-        return COUNTER_PASS if _prop(source, x, y) == COUNTER_PROP else None
+    front = set()
+    for x, y in ((x, y) for y in range(1, source.h) for x in range(source.w) if _prop(source, x, y) in DOORS):
+        if not _prop(source, x, y - 1) & 0x80:
+            front |= {(cx, cy) for cy in (y * 2 - 2, y * 2 - 1) for cx in range(x * 2 - 1, x * 2 + 3)
+                      if 0 <= cx < width and not _prop(source, cx // 2, cy // 2) & 0x80}
+            front |= {(cx, cy) for cy in (y * 2, y * 2 + 1) for cx in (x * 2, x * 2 + 1)}
+
+    def pass2(cx, cy):
+        value = (COUNTER_PASS if _prop(source, cx // 2, cy // 2) == COUNTER_PROP else 0) | \
+                (FRONT_PASS if (cx, cy) in front else 0)
+        return value or None
     # A chest block is all upper layer, so the floor goes under it first: an opened chest's transparent
     # pixels show the lower layer, and the chest, placed last, keeps its cell +1 flags.
     chests = {(x, y) for y in range(source.h) for x in range(source.w)
@@ -345,12 +359,12 @@ def map_document(name, source, local, target):
         for y in range(height):
             x = 0
             while x < width:
-                value = value_of(x // 2, y // 2)
+                value = value_of(x, y)
                 if value is None:
                     x += 1
                     continue
                 end = x
-                while end + 1 < width and value_of((end + 1) // 2, y // 2) == value:
+                while end + 1 < width and value_of(end + 1, y) == value:
                     end += 1
                 run = end - x + 1
                 while run:
@@ -369,8 +383,8 @@ def map_document(name, source, local, target):
         "background_hi": 0, "background_lo": 0,
         "commands": commands,
         "passes": [
-            {"vertical": False, "entries": pass_entries(blocked)},
-            {"vertical": False, "entries": pass_entries(counter)},
+            {"vertical": False, "entries": pass_entries(lambda cx, cy: blocked(cx // 2, cy // 2))},
+            {"vertical": False, "entries": pass_entries(pass2)},
             {"vertical": True, "entries": []},
         ],
     }
