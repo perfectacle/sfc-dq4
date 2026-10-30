@@ -3,8 +3,8 @@
 DQ5 keeps one arrival per group (the entrance table of dq5newmap) and, leaving for the field, stands on the
 first field entrance of the group (2A:F425). A DQ5 group that holds several FC groups needs both per entrance:
 
-  enter  2A:F28D (the per-map exceptions, run after 2A:F384 set the group's arrival on both the main and the
-         aux entrance paths) first looks up (group $BC, field $B6, $B8) and overwrites $BD, $C1, $C2, $C3, $198E.
+  enter  2A:F28D (the per-map exceptions, run after 2A:F384 set the group's arrival on the main and the aux
+         entrance paths, and by the indoor day/night redraw 2A:F363) first looks up (group $BC, field $B6, $B8) and overwrites $BD, $C1, $C2, $C3, $198E.
   leave  2A:F425 first looks up (group $BC, map $BD in [first, last]) and stands on its field cell.
 
 Entries not in a table keep the original behaviour.
@@ -29,6 +29,9 @@ def tables(arrivals, fields):
     """arrivals: (group, field x, field y, map, x, y, layer, $198E); fields: (group, first map, last map, x, y)."""
     arr = bytearray()
     for group, fx, fy, number, x, y, layer, facing in arrivals:
+        # The original masks both (2A:F397 AND #$1F, 2A:F3B1 AND #$83); the hook stores them as given.
+        if number > 0x1F or facing & ~0x83:
+            raise ValueError(f"{group:02X} ({fx},{fy}): map {number:02X} or facing {facing:02X} out of range")
         arr += bytes((group,)) + fx.to_bytes(2, "little") + fy.to_bytes(2, "little") + bytes((number, x, y, layer, facing))
     out = bytearray()
     for group, first, last, fx, fy in fields:
@@ -41,7 +44,7 @@ def tables(arrivals, fields):
 def code(at, arrivals, fields):
     """(bytes at `at`, labels): both routines, then both tables."""
     asm = _Asm(at)
-    # enter: called with 8-bit A and X (2A:F286 SEP #$30); X is the caller's entrance index, kept.
+    # enter: any M/X width (2A:F286 sets both 8-bit, 2A:F379 has 16-bit X); P and the full X are kept.
     asm.label("enter").b(0x08, 0xC2, 0x10, 0xE2, 0x20, 0xDA, 0xA2, 0x00, 0x00)
     asm.label("e_loop").long(0xBF, "arr").b(0xC9, 0xFF).rel(0xF0, "e_done").b(0xC5, 0xBC).rel(0xD0, "e_next")
     asm.b(0xC2, 0x20).long(0xBF, "arr", 1).b(0xC5, 0xB6).rel(0xD0, "e_next")
