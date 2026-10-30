@@ -2,12 +2,13 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import dq5sprite as S  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
-from dq5objlayout import (FORMAT, REGION_END, TABLE, VEHICLE_PARTS, address, dump, normalized,  # noqa: E402
-                          object_entry, parse_token, patch, token)
+from dq5objlayout import (FORMAT, REGION_END, TABLE, VEHICLE_FRAMES, VEHICLE_PARTS, address, dump,  # noqa: E402
+                          normalized, object_entry, parse_token, patch, token, vehicle_part)
 
 
 def put(data, addr, raw):
@@ -21,12 +22,23 @@ def fake_rom():
     put(data, TABLE, bytes([0x04, 0x06, 39, 9, 2, 2, 0x4C, cells_a & 0xFF, cells_a >> 8 & 0xFF,
                             0xFE, 0x00, 10, 20, 0x81, 1, 0x6C, cells_b & 0xFF, cells_b >> 8 & 0xFF, 0xFF]))
     put(data, cells_a, bytes([0, 1, 2, 3, 0x85]))
-    for name, (vid, k, ldy, bank) in VEHICLE_PARTS.items():
+    for name, site in VEHICLE_PARTS.items():
+        vid, k = site['vid'], int(name[-1]) - 1
         part = next(v for v in S.VEHICLES if v['id'] == vid)['parts'][k]
         table = 0x048000 + (vid & 0x0F) * 0x400 + k * 0x200
-        put(data, ldy, (table & 0xFFFF).to_bytes(2, 'little'))
-        put(data, bank, b'\x04')
+        put(data, site['ldy'], (table & 0xFFFF).to_bytes(2, 'little'))
+        put(data, site['bank'], b'\x04')
         put(data, table, bytes(i % 0x40 for i in range(0x200)))
+        for key in ('cols', 'rows', 'dir', 'frame'):
+            if site[key]:
+                put(data, site[key], bytes([part[key]]))
+        per = part['cols'] * part['rows']
+        put(data, site['count'], bytes([part['dir'] * 2 // per if part['dir'] else 1]))
+        if site.get('vflip'):
+            put(data, site['vflip'], bytes(part['vflip']) + b'\xff')
+    for vid, at in VEHICLE_FRAMES.items():
+        if at:
+            put(data, at, bytes([0x81 if vid == 0x80 else 0x82]))
     put(data, S.SET_TABLE_SITES[0], S.SET_POINTERS.to_bytes(3, 'little'))
     put(data, S.SET_BANK_SITES[0], b'\x1f')
     put(data, S.SET_POINTERS, b'\xff\xff' * S.TABLE_ENTRIES)
@@ -83,7 +95,8 @@ class PatchTests(unittest.TestCase):
         self.assertEqual(self.doc['objects'][1]['cond'], 'day')
         self.assertEqual(self.writes(self.doc), [])
 
-    def test_new_object_grows_table_and_moves_cells(self):
+    @mock.patch('dq5objlayout.map_people', return_value={})
+    def test_new_object_grows_table_and_moves_cells(self, _):
         doc = dict(self.doc, objects=self.doc['objects'] + [dict(self.doc['objects'][0], x=36, cells=['h01 h00'])])
         with self.assertRaises(ValueError):
             self.writes(doc)
@@ -103,10 +116,32 @@ class PatchTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.writes(doc, at=0x168000 - 0x10000)
 
+    def test_slot_limit(self):
+        # 04/06 낮에 인물 22명: 물체 0(1개) + 새 물체 1개 → 8 + 22 + 2 = 0x20 은 받고, 하나 더면 0x21 이라 거부.
+        new = dict(self.doc['objects'][0], cells=['00'])
+        with mock.patch('dq5objlayout.map_people', return_value={(0x04, 0x06, False): 22}):
+            self.writes(dict(self.doc, objects=self.doc['objects'] + [new]), at=0x16FE10)
+            with self.assertRaises(ValueError):
+                self.writes(dict(self.doc, objects=self.doc['objects'] + [new, new]), at=0x16FE10)
+            # 밤 전용 물체는 낮 수에 들지 않는다.
+            self.writes(dict(self.doc, objects=self.doc['objects'] + [new, dict(new, cond='night')]), at=0x16FE10)
+        # 장면이 슬롯을 더 쓰는 맵은 그만큼 한도가 줄어든다(06/00 은 넷).
+        six = dict(new, map='06/00')
+        with mock.patch('dq5objlayout.map_people', return_value={(0x06, 0x00, False): 19}):
+            self.writes(dict(self.doc, objects=self.doc['objects'] + [six]), at=0x16FE10)
+            with self.assertRaises(ValueError):
+                self.writes(dict(self.doc, objects=self.doc['objects'] + [six, six]), at=0x16FE10)
+        # 그룹 전체(7F) 물체는 그 그룹의 모든 맵에 센다.
+        group = dict(new, map='06/**')
+        with mock.patch('dq5objlayout.map_people', return_value={(0x06, 0x03, True): 24}), \
+                self.assertRaises(ValueError):
+            self.writes(dict(self.doc, objects=self.doc['objects'] + [group]), at=0x16FE10)
+
     def test_table_limit(self):
         most = (REGION_END - TABLE - 1) // 9
         self.assertEqual(most, 159)
-        one = dict(self.doc['objects'][0], cells=['00'])
+        # 필드 물체는 슬롯 한도를 보지 않아 표 한도만 걸린다.
+        one = dict(self.doc['objects'][1], cells=['00'])
         self.assertEqual([x['at'] for x in self.writes(dict(self.doc, objects=[one] * most))], ['16:F862'])
         with self.assertRaises(ValueError):
             self.writes(dict(self.doc, objects=[one] * (most + 1)), at=0x16FE10)
@@ -142,6 +177,102 @@ class PatchTests(unittest.TestCase):
                     {'sets': [{'set': '02', 'cells': {}}]}):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 self.writes({'format': FORMAT, **bad})
+
+
+
+def carpet_doc(rom, frames=3, size3=None):
+    """양탄자 부분 셋의 모든 블록. 새 프레임은 프레임 0 의 칸, size3 이면 부분 3 줄마다 첫 칸을 더한다."""
+    out = []
+    for v in dump(rom)['vehicles']:
+        if not v['part'].startswith('80'):
+            continue
+        cells = {}
+        for d in ('up', 'right', 'down', 'left'):
+            for f in range(frames):
+                rows = v['cells'][f'{d}{min(f, 1) if f < 2 else 0}']
+                if size3 and v['part'] == '80-3':
+                    rows = [r + ' ' + r.split()[0] for r in rows]
+                cells[f'{d}{f}'] = rows
+        row = {'part': v['part'], 'frames': frames, 'cells': cells}
+        if size3 and v['part'] == '80-3':
+            row['size'] = size3
+        out.append(row)
+    return {'format': FORMAT, 'vehicles': out}
+
+
+class VehicleLayoutTests(unittest.TestCase):
+    def setUp(self):
+        self.rom = fake_rom()
+
+    def build(self, doc, at=0x04FEE0):
+        from dq5objlayout import built
+        return built(self.rom, patch(self.rom, doc, vehicle_at=at))
+
+    def test_frames_and_size(self):
+        doc = carpet_doc(self.rom, 3, '4x1')
+        with self.assertRaises(ValueError):
+            patch(self.rom, doc)
+        after = self.build(doc)
+        p1, p3 = vehicle_part(after, '80-1'), vehicle_part(after, '80-3')
+        self.assertEqual((p1['frames'], p1['dir'], p1['frame']), (3, 3 * 6 * 2, 6 * 2))
+        self.assertEqual((p3['cols'], p3['rows'], p3['dir'], p3['frame'], p3['copied']), (4, 1, 24, 8, 12 * 4))
+        self.assertEqual(p1['table'], 0x04FEE0)
+        self.assertEqual(vehicle_part(after, '80-2')['table'], 0x04FEE0 + 12 * 6)
+        self.assertEqual(after.u8(VEHICLE_FRAMES[0x80]), 0x82)
+        self.assertEqual(normalized(doc, self.rom)['vehicles'], dump(after)['vehicles'])
+        # 다른 탈것은 그대로.
+        self.assertEqual(vehicle_part(after, '82-1')['table'], vehicle_part(self.rom, '82-1')['table'])
+
+    def test_size_only_copies_other_parts(self):
+        v = next(x for x in dump(self.rom)['vehicles'] if x['part'] == '80-3')
+        doc = {'format': FORMAT, 'vehicles': [{'part': '80-3', 'size': '4x1', 'cells': {
+            k: [r + ' 00' for r in rows] for k, rows in v['cells'].items()}}]}
+        after = self.build(doc)
+        for n in ('80-1', '80-2'):
+            old, new = vehicle_part(self.rom, n), vehicle_part(after, n)
+            self.assertEqual(new['bytes'], old['bytes'])
+            self.assertEqual(new['copied'], old['copied'])
+        self.assertEqual(vehicle_part(after, '80-3')['cols'], 4)
+
+    def test_rejects(self):
+        base = carpet_doc(self.rom, 3)
+        cases = {
+            'shared-immediate': {'vehicles': [dict(base['vehicles'][1], size='3x2')]},
+            'missing-part': {'vehicles': base['vehicles'][:2]},
+            'missing-block': {'vehicles': [dict(r, cells={k: c for k, c in r['cells'].items() if k != 'up2'})
+                                           for r in base['vehicles']]},
+            'frames-differ': {'vehicles': [base['vehicles'][0], dict(base['vehicles'][1], frames=2),
+                                           base['vehicles'][2]]},
+            'tenkuu-frames': {'vehicles': [{'part': '81-1', 'frames': 2, 'cells': {}}]},
+            'stride-byte': {'vehicles': [dict(r, frames=16) for r in base['vehicles']]},
+        }
+        for name, extra in cases.items():
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                patch(self.rom, {'format': FORMAT, **extra}, vehicle_at=0x04FEE0)
+        with self.assertRaises(ValueError):
+            patch(self.rom, base, vehicle_at=0x047F00)
+
+    def dragon(self, frames):
+        out = []
+        for v in dump(self.rom)['vehicles']:
+            if v['part'].startswith('82'):
+                cells = {f'{d}{f}': v['cells'][f'{d}{min(f, 2)}'] for d in ('up', 'right', 'down', 'left')
+                         for f in range(frames)}
+                out.append({'part': v['part'], 'frames': frames, 'cells': cells})
+        return {'format': FORMAT, 'vehicles': out}
+
+    def test_vflip_table_rewritten(self):
+        # マスタードラゴン 그림자(82-2)의 상하 반전 칸은 새 블록 자리로 01:C160 표를 다시 쓴다. 표는 24칸이다.
+        doc = self.dragon(2)
+        after = self.build(doc)
+        self.assertEqual(dump(after)['vehicles'][-2:], normalized(doc, self.rom)['vehicles'][-2:])
+        p = vehicle_part(after, '82-2')
+        flips = sum(t.startswith(('v', 'hv')) for r in doc['vehicles'][1]['cells'].values() for row in r
+                    for t in row.split())
+        self.assertEqual(len(p['vflip']), flips)
+        self.assertLessEqual(flips, 24)
+        with self.assertRaises(ValueError):
+            patch(self.rom, self.dragon(4), vehicle_at=0x04FEE0)
 
 
 if __name__ == '__main__':
