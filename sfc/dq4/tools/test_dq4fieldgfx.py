@@ -103,6 +103,18 @@ class GenerateTest(unittest.TestCase):
         sea = {v for t in gfx.SEA_TILES for v in gfx.decode(self.original["tiles"][t * 32:t * 32 + 32])}
         self.assertEqual(used, sea)
 
+    def test_sea_frames_move_and_differ_from_dq5(self):
+        # sea_frame accepts any of the 16 frames, so a frozen or unpatched sea must be ruled out here.
+        sys.path.insert(0, str(gfx.DQ5_TOOLS))
+        from dq5gfx import water_frames
+        raw = gfx.water(self.original["palettes"])
+        at = 1 << 15 | 0xA719 & 0x7FFF
+        dq5 = ROM.read_bytes()[at:at + 128]
+        for world in (0, 1, 2):
+            frames = water_frames(raw, world)
+            self.assertEqual(len(set(frames)), 16, f"world {world}")
+            self.assertIsNone(check.sea_frame(dq5, frames), f"world {world}")
+
     def test_reef_is_rocks_over_the_sea(self):
         block = next(b for b in self.blocks if b["index"] == port.OWN_BLOCKS[gfx.REEF])
         self.assertEqual(block["lower"], list(gfx.SEA_TILES))
