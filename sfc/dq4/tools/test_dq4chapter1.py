@@ -4,7 +4,6 @@ import unittest
 from pathlib import Path
 
 import dq4chapter1 as ch
-import dq4prologue
 import dq4menumsg as mm
 
 
@@ -105,7 +104,7 @@ class GroupBuildTests(unittest.TestCase):
         finally:
             dq4groupbuild.NEWMAP_AT, dq4groupbuild.FIELD_AT = saved
         self.assertTrue(summary['rom'])
-        talk = int(dq4prologue.TALK_AT[1].replace(':', ''), 16)
+        talk = int(dq4groupbuild.TALK_AT[1].replace(':', ''), 16)
         for w in writes:
             at = int(w['at'].replace(':', ''), 16)
             if at >> 16 >= 0x30:

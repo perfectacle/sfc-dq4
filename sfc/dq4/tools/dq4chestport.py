@@ -30,9 +30,15 @@ from dq4groupbuild import placement  # noqa: E402
 from dq4shopport import _fold, dq5_items  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
 
-# DQ5 has no luck stat, so ラックのたね becomes the seed that raises the stat DQ5 has instead.
-SUBSTITUTE = {"ラックのたね": "ふしぎなきのみ"}
+# DQ5 has no luck stat, so ラックのたね becomes the seed that raises the stat DQ5 has instead. Items DQ5 lacks
+# take a DQ5 item of the same kind: a flute for the key item あやかしのふえ until DQ4 key items exist, a hat for
+# はねぼうし.
+SUBSTITUTE = {"ラックのたね": "ふしぎなきのみ", "あやかしのふえ": "はるかぜのフルート", "はねぼうし": "きのぼうし"}
 GOLD = 0x100
+# FC special chest contents with a DQ5 reward of the same kind: FF, the empty chest (message 0297), is DQ5 FFFF
+# 「からっぽだった」.
+EMPTY = 0xFFFF
+SPECIAL = {0xFF: EMPTY}
 # DQ5 drawer open bits 7E:222C + flag_index: the original table ends at 2236 & FC, and 2238 (flag_index 0C)
 # is read outside the table (dq5-build-format 「보물상자·조사 보상」), so new entries start at 2237.
 FIRST_FLAG = 0x0B
@@ -59,9 +65,13 @@ def port(dq5_path, dq4_path):
     maps, report = {}, []
     for (g, k), (group, number) in sorted(target.items(), key=lambda kv: kv[1]):
         for _, x, y, content, desc in dq4chest.chests(prg, g, k):
-            if content in dq4chest.special_codes(prg, dq4chest.SPECIAL_CHEST):
+            if content in SPECIAL:
+                reward = SPECIAL[content]
+            elif content in dq4chest.special_codes(prg, dq4chest.SPECIAL_CHEST):
                 raise ValueError(f"{g:02X}/{k:02X} ({x},{y}): special chest {desc}")
-            entry = {"x": 2 * x + 1, "y": 2 * y + 1, "reward": _reward(names, items, content)}
+            else:
+                reward = _reward(names, items, content)
+            entry = {"x": 2 * x + 1, "y": 2 * y + 1, "reward": reward}
             maps.setdefault((group, number), {"chests": [], "furniture": []})["chests"].append(entry)
             report.append({"fc": f"{g:02X}/{k:02X} ({x},{y})", "map": f"{group:02X}/{number:02X}", "kind": "chest",
                            "fc_item": desc, "reward": entry["reward"]})

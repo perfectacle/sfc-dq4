@@ -1,6 +1,7 @@
 """SFC serialization contracts independent of the environment drawings."""
 
 import unittest
+from pathlib import Path
 
 from dq4environment import decode_image, encode_image, indexed_canvas
 
@@ -155,6 +156,31 @@ class DoorBankTests(unittest.TestCase):
         per_map = free // (5 * (len(rom.MAPS) // 2)) + 1
         with self.assertRaisesRegex(ValueError, "overflow into the bank-01 table copy"):
             self.code(self.entries(per_map))
+
+
+ROOT = Path(__file__).resolve().parents[3]
+
+
+@unittest.skipUnless((ROOT / "rom" / "dq4.nes").is_file(), "local source ROM not present")
+class CounterTests(unittest.TestCase):
+    def test_counters_are_floor_cells_with_bit7_and_the_counter_attribute(self):
+        # テンペ (FC 0E/00): the inn keeper (8,40) stands behind the counter (8,41).
+        import sys
+        sys.path.insert(0, str(ROOT / "fc" / "dq4" / "tools"))
+        import dq4block
+        import dq4environmentrom as rom
+        from dq4environmentmap import block_prop
+        from kr_patch.fc import ines
+        source = dq4block.Map(ines.prg((ROOT / "rom" / "dq4.nes").read_bytes()), 0x0E, 0)
+        doc = rom.map_document("0E-00", source, {b: b for b in range(32)}, rom.GROUPS["0E-00"])
+        walls, counters = ({(x + k, y) for x, y, n, value, _ in doc["passes"][i]["entries"] for k in range(n)}
+                           for i in (0, 1))
+        self.assertTrue({(16, 82), (17, 82), (16, 83), (17, 83)} <= counters)
+        self.assertFalse(counters & walls)
+        self.assertEqual({v for *_, v, _ in doc["passes"][1]["entries"]}, {rom.COUNTER_PASS})
+        counter = source.cell(8, 41) & 31
+        self.assertEqual(block_prop(source, counter), rom.COUNTER_PROP)
+        self.assertEqual(rom.block_head("0E-00", source, counter), (0, 0, rom.COUNTER_ATTR))
 
 
 if __name__ == "__main__":

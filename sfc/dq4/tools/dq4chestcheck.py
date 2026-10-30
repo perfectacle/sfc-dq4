@@ -42,7 +42,8 @@ FACING = {(0, 1): 0x88, (-1, 0): 0x11, (1, 0): 0x22, (0, -1): 0x44}
 CHEST_MESSAGE = 0x131
 # dq4environmentrom.FURNITURE: FC タンス AB is DQ5 タンス, FC つぼ AA is DQ5 ツボ.
 DRAWER_MESSAGE = {0xAB: 0x12F, 0xAA: 0x135}
-GOLD = 0x100
+# Rewards 0100-CFFF are gold (value - 100); D000- are special (FFFF the empty chest) and add none.
+GOLD, SPECIAL = 0x100, 0xD000
 OPEN_BITS = range(0x2210, 0x2250)
 CHEST_BITS = range(0x2210, 0x2228)
 DRAWER_BITS = 0x222C
@@ -88,7 +89,7 @@ def run_entry(mesence, rom, state, out, name, to, facing, reward, message, drawe
     rewards = [int(v, 16) for v in re.findall(r"reward .* value=([0-9A-F]+)", trace)]
     before, after = (dest / "before.wram").read_bytes(), (dest / "after.wram").read_bytes()
     added = gold(after) - gold(before)
-    want_gold = reward - GOLD if reward >= GOLD else 0
+    want_gold = reward - GOLD if GOLD <= reward < SPECIAL else 0
     bits = opened(before, after)
     if drawer is None:
         bit_ok = len(bits) == 1 and bits[0][0] in CHEST_BITS and bin(bits[0][1]).count("1") == 1

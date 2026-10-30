@@ -28,7 +28,7 @@ from dq5exitcheck import dp86_allowed, warp_exit  # noqa: E402
 from dq4environmentart import create_assets  # noqa: E402
 from dq4environmentmap import prepare_maps, render_maps  # noqa: E402
 from dq4environmentmap import block_prop  # noqa: E402
-from dq4environmentrom import (DOOR_KIND, FLOOR, GATE_KIND, OPENINGS, door_floor, GROUPS, MAPS, STAIRS, WALL, WATER_SLOT, water_block,  # noqa: E402
+from dq4environmentrom import (COUNTER_PROP, DOOR_KIND, FLOOR, GATE_KIND, OPENINGS, door_floor, GROUPS, MAPS, STAIRS, WALL, WATER_SLOT, water_block,  # noqa: E402
                                WATER_FRAMES, WATER_PERIOD, build_graphics, objects, water_frames)
 
 OBJECT_SIZE = {DOOR_KIND: (2, 3), GATE_KIND: (4, 4)}  # noqa: E402
@@ -160,8 +160,10 @@ def check_map(name, wram, vram, cgram, expected, source, known):
     for i, value in enumerate(layers):
         x, y = i % width, i // width
         prop = block_prop(source, source.cell(x // 2, y // 2) & 31)
-        blocked = prop & 0x80 and prop not in OPENINGS
-        if value != (WALL if blocked else FLOOR):
+        blocked = prop & 0x80 and prop not in OPENINGS | {COUNTER_PROP}
+        # A counter is a floor cell that +1 bit7 blocks.
+        counter = bool(wram[0xC000 + i * 8 + 1] & 0x80) if prop == COUNTER_PROP else None
+        if value != (WALL if blocked else FLOOR) or counter is False:
             wrong += 1
     return {"pixels": len(a) // 3, "object_cells_skipped": len(covered), "pixel_differences": differences,
             "objects_drawn": f"{sum(placed)}/{len(placed)}", "cells": len(layers), "exit_cells": exits,

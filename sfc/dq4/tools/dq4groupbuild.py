@@ -6,7 +6,8 @@ Order matters (sfc/dq4/docs/dq4-environment-format.md, 「그룹 연결」):
   2. dq5newmap.py from the env ROM: new groups, maps (records from the dq5map/1 documents of 1), arrivals.
   3. dq5exitreloc.py, dq5npcrelocate.py (the FC people of dq4npcport.py), dq5fieldtables.py from the original
      ROM with --new-map, dq5textwrite.py with their Japanese FC text, and dq5progresswrite.py with the FC
-     shop lists plus the inn price table and the per-FC-group shop key hook of dq4shopport.py.
+     shop lists plus the inn price table and the per-FC-group shop key hook of dq4shopport.py, and
+     dq5talkwrite.py with the talk scripts that show the people's messages (dq4npcport.talk_doc).
   4. dq5chestplace.py from the original ROM with the patches of 1-3 (--with-patch): the FC chests and
      タンス·つぼ of dq4chestport.py on the cells 1 gave their DQ5 attributes.
   5. dq4fieldport.py: FC field 0 as DQ5 world 0 (dq5fieldwrite.py).
@@ -70,6 +71,10 @@ LINKS = {
     # of 14/00. The prologue places its own people: the FC people of 14/00 belong to chapter 5's start.
     0x3C: [{"fc": 0x14, "arrival": (0x0C, 0x18), "attrs": "19/02", "music": 0x06, "field": [(0x91, 0x31)], "out": "down:64",
             "people": False}],
+    # Chapter 2: サントハイム castle, テンペ and フレノール. フレノール's FC arrival is on the map's top row.
+    0x3D: [{"fc": 0x01, "arrival": (0x0F, 0x1B), "attrs": "03/00", "field": [(0x27, 0x49)], "out": "down:64"},
+           {"fc": 0x0E, "arrival": (0x0A, 0x2C), "attrs": "03/00", "field": [(0x47, 0x39)], "out": "down:64"},
+           {"fc": 0x0F, "arrival": (0x16, 0x00), "attrs": "03/00", "field": [(0x60, 0x28)], "out": "up:64"}],
 }
 # The attribute table grows by 6 bytes a map and outgrows its own bank (108 spare bytes), so it moves whole.
 NEWMAP_AT = ("--entrance-table-at", "3C:C000", "--records-at", "34:8000", "--door-bank", "3B",
@@ -78,6 +83,10 @@ EXIT_AT = ("--exits-at", "2A:D812", "--records-at", "3C:A000")
 ENTRANCES_AT = ("--entrances-at", "3C:8000")
 # dq5textwrite writes the whole walking text again, so it takes banks of its own.
 TEXT_AT = ("--at", "35:8000")
+# Talk scripts 900- (the prologue's and the ported people's, dq4npcport.talk_doc). Bank 30-3F: the hook reads
+# them with DB set to their bank. Between the shop lists and the inn table: in the chapter-1 ROM bank 3A is full of
+# new-map records.
+TALK_AT = ("--extra-at", "3C:E800", "--hook-at", "06:FE10")
 SHOP_AT = ("--shop-at", "3C:E000")
 INN_AT = 0x3CF000
 ENTRANCE_HOOK_AT = 0x3CF800
@@ -379,6 +388,7 @@ def build(dq5, dq4, out):
          "-o", out / "npc.dq5patch.json", "--report", out / "npc-layout.json", *new_map_args)
     manifests.append(out / "npc.dq5patch.json")
     checks.append(step("dq5textwrite.py", "text", {"format": "dq5text/1", "messages": messages}, dq5, *TEXT_AT))
+    checks.append(step("dq5talkwrite.py", "talk", dq4npcport.talk_doc(messages), dq5, *TALK_AT))
     import dq4shopport  # imports this module
     _, shops, inn_writes, shop_report = dq4shopport.port(dq5, dq4, INN_AT, SHOP_KEY_AT)
     _save(out / "shop-report.json", shop_report)
@@ -430,7 +440,7 @@ def build(dq5, dq4, out):
     rom = out / "groups.sfc"
     _run(DQ5_TOOLS / "dq5build.py", dq5, "build", *manifests, "--size", 4, "-o", rom, "--ips", out / "groups.ips")
     check_door_copy(rom.read_bytes(), int(NEWMAP_AT[NEWMAP_AT.index("--door-bank") + 1], 16))
-    # dq5newmap checks the built ROM; dq5exitreloc, dq5textwrite and dq5chestplace build their own from the original.
+    # dq5newmap checks the built ROM; the others build their own from the original.
     for tool, source, args in checks:
         _run(DQ5_TOOLS / tool, rom if tool == "dq5newmap.py" else dq5, "check", source, *args)
     summary = {"rom": str(rom), "maps": new_maps, "exits": ours, "areas": areas,
