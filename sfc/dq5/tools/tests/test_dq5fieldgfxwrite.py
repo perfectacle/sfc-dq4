@@ -52,10 +52,8 @@ class FieldPatchTests(unittest.TestCase):
         for at, want in fgw.ANIM_SITES.values():
             put(d, at, want)
         put(d, fgw.LOAD_SITE, fgw.LOAD_ORIG)
-        for at in fgw.NIB_SITES:
-            put(d, at, fgw.NIB_ORIG)
-        for at, (want, _, _) in fgw.BLOCK_SITES.items():
-            put(d, at, want)
+        put(d, fgw.PALETTE_READ, fgw.PALETTE_READ_ORIG)
+        put(d, fgw.BLOCK_READ, fgw.BLOCK_READ_ORIG)
         put(d, fgw.REDRAW_SITE, fgw.REDRAW_ORIG)
         put(d, fgw.REDRAW_RTL, b'\x6b')
         for at, want in (fgw.SEARCH_SITE, fgw.PTR_SITE, fgw.NIGHT_SITE, fgw.PAL_BANK_SITE, fgw.WAVE_SITE,

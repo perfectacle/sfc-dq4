@@ -303,7 +303,7 @@ class BuiltRomBlockLimitTest(unittest.TestCase):
         for base in (BLOCK_LOWER, BLOCK_UPPER):
             for i in range(BLOCK_COUNT):
                 raw[lorom(base + i * 5):lorom(base + i * 5) + 5] = bytes([i & 255, 1, 2, 3, 0])
-        raw[lorom(dq5field.BLOCK_HOOK_SITE)] = 0x22
+        raw[lorom(dq5field.BLOCK_READ_SITE)] = 0xE2
         hook = 0x2B8000
         raw[lorom(fgw.LOAD_SITE):lorom(fgw.LOAD_SITE) + 4] = b'\x22' + hook.to_bytes(3, 'little')
         raw[lorom(hook):lorom(hook) + 10] = fgw.grow_load_hook(0, 0)[:10]
