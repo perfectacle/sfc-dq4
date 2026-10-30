@@ -27,8 +27,8 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
         sys.path.insert(0, str(path))
 
 import dq4block  # noqa: E402
-from dq4environmentmap import all_maps, block_prop  # noqa: E402
-from dq4environmentrom import GROUPS  # noqa: E402
+from dq4environmentmap import block_prop  # noqa: E402
+from dq4groupbuild import placement  # noqa: E402
 from dq4groupcheck import same_place, scene  # noqa: E402
 from dq5chestcheck import environment, gold  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
@@ -49,9 +49,8 @@ DRAWER_BITS = 0x222C
 
 
 def fc_maps(prg):
-    """DQ5 map "GG/MM" -> FC dq4block.Map of the GROUPS map put there."""
-    return {f"{GROUPS[name][0]:02X}/{GROUPS[name][1]:02X}": dq4block.Map(prg, g, k)
-            for g, k, _, name in all_maps(prg) if name in GROUPS}
+    """DQ5 map "GG/MM" -> FC dq4block.Map put there (dq4groupbuild.placement)."""
+    return {f"{group:02X}/{number:02X}": dq4block.Map(prg, g, k) for (g, k), (group, number) in placement(prg).items()}
 
 
 def stand(source, x, y):

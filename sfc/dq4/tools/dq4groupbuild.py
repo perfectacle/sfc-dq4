@@ -1,4 +1,4 @@
-"""Build the DQ4 environment maps with whole FC groups as new DQ5 groups, linked by their FC exits.
+"""Build the DQ4 environment maps with whole FC groups in new DQ5 groups, linked by their FC exits.
 
 Order matters (sfc/dq4/docs/dq4-environment-format.md, 「그룹 연결」):
   1. dq4environmentrom.py patch -> env ROM. The door table copy made in 2 must contain its bank-01 tail.
@@ -17,6 +17,7 @@ edge leads to the field through the aux entrance table. Field spots are temporar
 """
 
 import argparse
+import functools
 import json
 import subprocess
 import sys
@@ -37,26 +38,30 @@ from dq4environmentmap import all_maps, block_prop  # noqa: E402
 from dq4environmentrom import GROUPS, STAIRS  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
 
-# New DQ5 group -> FC group, the FC arrival from the field ($44/$45 after walking in from the field entrance;
-# fc/dq4/tools/dq4field.py entrances lists the same cells) and its map ("map", 0 when absent), the borrowed DQ5 map whose attributes (encounters, battle background, music) it takes,
-# the temporary field cell of its entrance, the inputs that take the party from the arrival to the field, and a
-# walk from the field cell (341,56) onto the entrance that passes no other entrance. Field steps vary with the
-# ground, so the entrances sit where their walks end (measured). "music" replaces the song byte of the copied
-# attributes (attribute +5): FC plays one song for the whole group (19:$803B, map branch $07BA), and
-# 02 バトランド plays FC song 03, 王宮のメヌエット, which the sound port puts in DQ5 song slot 01.
+# New DQ5 group -> the FC groups it holds, in DQ5 map order (layout). Per FC group: the FC arrival from the
+# field ($44/$45 after walking in from the field entrance; fc/dq4/tools/dq4field.py entrances lists the same
+# cells) and its FC map ("map", 0 when absent), the borrowed DQ5 map whose attributes (encounters, battle
+# background, music) its maps take, the temporary field cell of its entrance, the inputs that take the party from
+# the arrival to the field, and a walk from the field cell (341,56) onto the entrance that passes no other
+# entrance. Field steps vary with the ground, so the entrances sit where their walks end (measured). "music"
+# replaces the song byte of the copied attributes (attribute +5): FC plays one song for the whole group
+# (19:$803B, map branch $07BA), and 02 バトランド plays FC song 03, 王宮のメヌエット, which the sound port puts
+# in DQ5 song slot 01. The DQ5 group's own arrival (the dq5newmap entrance) is its first FC group's.
 LINKS = {
-    0x36: {"fc": 0x02, "arrival": (0x00, 0x1D), "attrs": "03/00", "music": 0x01, "field": (345, 56), "out": "left:64", "walk": "right:64"},
-    0x37: {"fc": 0x12, "arrival": (0x0D, 0x19), "attrs": "19/02", "field": (337, 56), "out": "down:64", "walk": "left:64"},
+    0x36: [{"fc": 0x02, "arrival": (0x00, 0x1D), "attrs": "03/00", "music": 0x01, "field": (345, 56), "out": "left:64",
+            "walk": "right:64"}],
+    0x37: [{"fc": 0x12, "arrival": (0x0D, 0x19), "attrs": "19/02", "field": (337, 56), "out": "down:64", "walk": "left:64"}],
     # 古井戸の底, the tower of chapter 1's end, and the house of 41/00. Their attributes are a placeholder
     # (the castle's: no encounters) until the DQ4 encounters and music are ported.
-    0x38: {"fc": 0x1C, "arrival": (0x0D, 0x10), "attrs": "03/00", "field": (332, 52), "out": "down:64", "walk": "up:64,wait:30,left:64"},
-    0x39: {"fc": 0x30, "arrival": (0x10, 0x21), "map": 3, "attrs": "03/00", "field": (349, 62), "out": "down:64",
-           "walk": "down:64,wait:30,right:64,wait:30,up:16"},
+    0x38: [{"fc": 0x1C, "arrival": (0x0D, 0x10), "attrs": "03/00", "field": (332, 52), "out": "down:64",
+            "walk": "up:64,wait:30,left:64"}],
+    0x39: [{"fc": 0x30, "arrival": (0x10, 0x21), "map": 3, "attrs": "03/00", "field": (349, 62), "out": "down:64",
+            "walk": "down:64,wait:30,right:64,wait:30,up:16"}],
     # 41/00's arrival is its stair to the field: step off and back on.
-    0x3A: {"fc": 0x41, "arrival": (0x03, 0x03), "attrs": "03/00", "field": (333, 64), "out": "down:32,wait:60,up:32",
-           "walk": "down:64,wait:30,left:64"},
+    0x3A: [{"fc": 0x41, "arrival": (0x03, 0x03), "attrs": "03/00", "field": (333, 64), "out": "down:32,wait:60,up:32",
+            "walk": "down:64,wait:30,left:64"}],
     # Below 古井戸の底: no field entrance; its group arrival is the cell the well's stair leads to (3A/02).
-    0x3B: {"fc": 0x3A, "arrival": (0x03, 0x02), "map": 2, "attrs": "03/00", "field": None, "out": None},
+    0x3B: [{"fc": 0x3A, "arrival": (0x03, 0x02), "map": 2, "attrs": "03/00", "field": None, "out": None}],
 }
 # The attribute table grows by 6 bytes a map and outgrows its own bank (108 spare bytes), so it moves whole.
 NEWMAP_AT = ("--entrance-table-at", "3C:C000", "--records-at", "34:8000", "--door-bank", "3B",
@@ -83,8 +88,79 @@ def cell(x, y):
     return x * 2, y * 2 + 1
 
 
-def fc_numbers(group):
-    return sorted(number for g, number in GROUPS.values() if g == group)
+def layout(links, fc_maps):
+    """{(FC group, FC map): (DQ5 group, DQ5 map)}: a DQ5 group's FC groups in `links` order, each one's maps
+    (fc_maps[FC group]) in FC order on consecutive DQ5 map numbers from 0."""
+    place, seen = {}, set()
+    for group, parts in links.items():
+        number = 0
+        for part in parts:
+            if part["fc"] in seen:
+                raise ValueError(f"FC group {part['fc']:02X} is listed twice")
+            seen.add(part["fc"])
+            for k in sorted(fc_maps.get(part["fc"], ())):
+                # The engine keeps the map number in 5 bits (2A:F397 AND #$1F).
+                if number > 0x1F:
+                    raise ValueError(f"DQ5 group {group:02X}: FC {part['fc']:02X}/{k:02X} would be map {number:02X}")
+                place[part["fc"], k] = (group, number)
+                number += 1
+    return place
+
+
+@functools.cache
+def _fc_names(prg):
+    return {name: (g, k) for g, k, _, name in all_maps(prg)}
+
+
+def placement(prg):
+    """layout of LINKS for the GROUPS maps. GROUPS must put every map where layout does: dq4environmentrom
+    builds each map where GROUPS says, and exits, people and chests read from its FC map go where this says."""
+    fc = _fc_names(prg)
+    fc_maps = {}
+    for name in GROUPS:
+        if name not in fc:
+            raise ValueError(f"{name}: no FC map")
+        fc_maps.setdefault(fc[name][0], []).append(fc[name][1])
+    place = layout(LINKS, fc_maps)
+    for name, there in GROUPS.items():
+        if place.get(fc[name]) != there:
+            raise ValueError(f"{name}: FC map {fc[name]} goes to {place.get(fc[name])}, GROUPS says {there}")
+    return place
+
+
+def fc_map(prg, group, number):
+    """(FC group, FC map) put on DQ5 map group/number."""
+    found = [k for k, v in placement(prg).items() if v == (group, number)]
+    if not found:
+        raise ValueError(f"{group:02X}/{number:02X}: no FC map is placed there")
+    return found[0]
+
+
+def fc_numbers(prg, fc_group):
+    """Ported FC map numbers of an FC group."""
+    return sorted(k for g, k in placement(prg) if g == fc_group)
+
+
+def tag(group, part):
+    """Name of an FC group's entrance: the DQ5 group, with the FC group when the DQ5 group holds several."""
+    return f"{group:02X}" if len(LINKS[group]) == 1 else f"{group:02X}-{part['fc']:02X}"
+
+
+def hook_rows(links, place):
+    """dq4entrancehook (arrivals, leaving) of every FC group with a field entrance: its entrance leads to its
+    arrival, and its maps leave for its entrance. A DQ5 group of one FC group leaves from any map."""
+    arrivals, leaving = [], []
+    for group, parts in links.items():
+        for part in parts:
+            if not part["field"]:
+                continue
+            fx, fy = part["field"]
+            arrivals.append((group, fx, fy, place[part["fc"], part.get("map", 0)][1], *cell(*part["arrival"]), LAYER, 0))
+            numbers = [n for (g, _), (_, n) in place.items() if g == part["fc"]]
+            first, last = (0, 0x1F) if len(parts) == 1 else (min(numbers), max(numbers))
+            # An aux entrance stands one cell below itself when the party leaves (2A:F466).
+            leaving.append((group, first, last, fx, fy + 1))
+    return arrivals, leaving
 
 
 def exit_order(prg, fc_group, number):
@@ -95,38 +171,51 @@ def exit_order(prg, fc_group, number):
     return sorted(found, key=lambda c: (c[1], c[0]))
 
 
-def exit_records(prg, group):
-    """dq5exittables/1 exit lists of the group's maps from the FC stair links. A stair to another ported FC
-    group is an other-group exit, one to the field the special exit 0."""
-    fc_group = LINKS[group]["fc"]
-    dq5_group = {link["fc"]: g for g, link in LINKS.items()}
-    numbers = fc_numbers(group)
-    order = {n: exit_order(prg, fc_group, n) for n in numbers}
-    cache = {}
+def exit_rows(group, parts, place, stairs, order):
+    """dq5exittables/1 exit lists of DQ5 group `group` holding FC groups `parts`. stairs[(FC group, FC map)]:
+    [(x, y, FC destination)] in DQ5 exit order; order(FC group, FC map): a map's stair cells in that order. A
+    stair to a map of another DQ5 group is an other-group exit, one to the field the special exit 0."""
     records = {}
-    for number in numbers:
-        links = dq4block.exit_links(prg, fc_group, number, cache)
-        other = sorted({e["prop"] & 0x7F for e in links} - STAIRS)
-        if other:
-            raise ValueError(f"{fc_group:02X}/{number:02X}: FC exit kinds {[f'{p:02X}' for p in other]} have no DQ5 exit yet")
-        to = {(e["x"], e["y"]): e["to"] for e in links}
-        rows = []
-        for x, y in order[number]:
-            dest = to[x, y]
-            if dest and "field" in dest:
-                # 2A:F7B2 -> 2A:F425: out to the group's field entrance (aux entrance table).
-                rows.append({"kind": "special", "special": 0})
-                continue
-            if not dest or dest.get("group") not in dq5_group or "index" not in dest or \
-                    dest["index"] not in fc_numbers(dq5_group[dest["group"]]):
-                raise ValueError(f"{fc_group:02X}/{number:02X} ({x:02X},{y:02X}): stair to an FC group not ported: {dest}")
-            there = exit_order(prg, dest["group"], dest["index"])
-            row = {"kind": "same-group", "destination_map": dest["index"], "exit": there.index((dest["x"], dest["y"]))}
-            if dest["group"] != fc_group:
-                row = {**row, "kind": "other-group", "group": dq5_group[dest["group"]]}
-            rows.append(row)
-        records[f"{group:02X}/{number:02X}"] = rows or [{"kind": "special", "special": 0}]
+    for part in parts:
+        fc_group = part["fc"]
+        for fc_number in sorted(k for g, k in place if g == fc_group):
+            rows = []
+            for x, y, dest in stairs[fc_group, fc_number]:
+                if dest and "field" in dest:
+                    # 2A:F425 leaves by the entrance of the FC group the map belongs to (hook_rows); a part
+                    # without one would leave by another FC group's entrance.
+                    if not part["field"] and len(parts) > 1:
+                        raise ValueError(f"{fc_group:02X}/{fc_number:02X} ({x:02X},{y:02X}): stair to the field "
+                                         f"from FC group {fc_group:02X} with no field entrance in DQ5 group {group:02X}")
+                    # 2A:F7B2 -> 2A:F425: out to the group's field entrance (aux entrance table).
+                    rows.append({"kind": "special", "special": 0})
+                    continue
+                if not dest or (dest.get("group"), dest.get("index")) not in place:
+                    raise ValueError(f"{fc_group:02X}/{fc_number:02X} ({x:02X},{y:02X}): stair to an FC map not ported: {dest}")
+                there_group, there_number = place[dest["group"], dest["index"]]
+                there = order(dest["group"], dest["index"])
+                row = {"kind": "same-group", "destination_map": there_number, "exit": there.index((dest["x"], dest["y"]))}
+                if there_group != group:
+                    row = {**row, "kind": "other-group", "group": there_group}
+                rows.append(row)
+            records[f"{group:02X}/{place[fc_group, fc_number][1]:02X}"] = rows or [{"kind": "special", "special": 0}]
     return records
+
+
+def exit_records(prg, group):
+    """exit_rows of a LINKS group from the FC stair links."""
+    place = placement(prg)
+    cache = {}
+    stairs = {}
+    for fc_group in (part["fc"] for part in LINKS[group]):
+        for fc_number in fc_numbers(prg, fc_group):
+            links = dq4block.exit_links(prg, fc_group, fc_number, cache)
+            other = sorted({e["prop"] & 0x7F for e in links} - STAIRS)
+            if other:
+                raise ValueError(f"{fc_group:02X}/{fc_number:02X}: FC exit kinds {[f'{p:02X}' for p in other]} have no DQ5 exit yet")
+            to = {(e["x"], e["y"]): e["to"] for e in links}
+            stairs[fc_group, fc_number] = [(x, y, to[x, y]) for x, y in exit_order(prg, fc_group, fc_number)]
+    return exit_rows(group, LINKS[group], place, stairs, lambda g, k: exit_order(prg, g, k))
 
 
 def area_records(prg, group):
@@ -137,33 +226,40 @@ def area_records(prg, group):
     on that first outside row, before the field exit 2A:F425); X holds the party's left cell on the cells. The arrival is the FC arrival cell; the engine then takes one more step in the
     walking direction (2A:F69F), which carries the party off a destination cell that is itself an exit
     (02/01 -> the 02/00 gate)."""
-    fc_group = LINKS[group]["fc"]
+    place = placement(prg)
+    cells = {(part["fc"], k): list(dq4map.exits(prg, part["fc"], k))
+             for part in LINKS[group] for k in fc_numbers(prg, part["fc"])}
+    return area_rows(group, place, cells)
+
+
+def area_rows(group, place, cells):
+    """area_records of DQ5 group `group` from cells[(FC group, FC map)]: FC exit-table cells (x, y, FC group,
+    FC map, arrival x, arrival y, flag). The destination may be any FC map placed in the same DQ5 group."""
     out = {}
-    for number in fc_numbers(group):
-        cells = sorted(dq4map.exits(prg, fc_group, number), key=lambda e: (e[1], e[0]))
+    for (fc_group, number), found in cells.items():
         runs = []
-        for x, y, dg, dk, ax, ay, flag in cells:
-            if dg != fc_group:
+        for x, y, dg, dk, ax, ay, flag in sorted(found, key=lambda e: (e[1], e[0])):
+            if place.get((dg, dk), (None,))[0] != group:
                 raise ValueError(f"{fc_group:02X}/{number:02X} ({x:02X},{y:02X}) leaves the group")
             last = runs[-1] if runs else None
-            if last and last["y"] == y and last["x1"] + 1 == x and last["to"] == (dk, ay, flag) \
+            if last and last["y"] == y and last["x1"] + 1 == x and last["to"] == (dg, dk, ay, flag) \
                     and last["ax1"] + 1 == ax:
                 last["x1"], last["ax1"] = x, ax
             else:
-                runs.append({"x0": x, "x1": x, "y": y, "to": (dk, ay, flag), "ax0": ax, "ax1": ax})
+                runs.append({"x0": x, "x1": x, "y": y, "to": (dg, dk, ay, flag), "ax0": ax, "ax1": ax})
         rows = []
         for run in runs:
-            dk, ay, flag = run["to"]
+            dg, dk, ay, flag = run["to"]
             if flag & 3 not in ENTRY_ROW:
                 raise ValueError(f"{fc_group:02X}/{number:02X}: sideways exit needs a vertical area rect")
             left, row = run["x0"] * 2, run["y"] * 2 + ENTRY_ROW[flag & 3]
             right, _ = cell(run["x1"], run["y"])
             dx, dy = cell(run["ax0"], ay)
             rows.append({"rect": [left, row, right + 1, row + 1], "source_layer": LAYER, "flags": AREA_FLAGS,
-                         "destination_group": group, "destination_map": dk, "x": dx, "y": dy,
+                         "destination_group": group, "destination_map": place[dg, dk][1], "x": dx, "y": dy,
                          "span_raw": right - left + 1, "destination_layer": LAYER})
         if rows:
-            out[f"{group:02X}/{number:02X}"] = rows
+            out[f"{group:02X}/{place[fc_group, number][1]:02X}"] = rows
     return out
 
 
@@ -192,20 +288,10 @@ def map_attrs(dq5, link):
     return {"bytes": row}
 
 
-def check_groups(prg):
-    """GROUPS must keep the FC map number as the DQ5 map number of the group's LINKS entry: exits are
-    written with FC map numbers."""
-    fc = {name: (g, k) for g, k, _, name in all_maps(prg)}
-    for name, (group, number) in GROUPS.items():
-        want = (LINKS[group]["fc"], number) if group in LINKS else None
-        if fc.get(name) != want:
-            raise ValueError(f"{name}: FC map {fc.get(name)} is not {want} for group {group:02X}")
-
-
 def build(dq5, dq4, out):
     out.mkdir(parents=True, exist_ok=True)
     prg = ines.prg(dq4.read_bytes())
-    check_groups(prg)
+    place = placement(prg)
     env = out / "env"
     report = json.loads(_run(TOOLS / "dq4environmentrom.py", "--dq5", dq5, "--dq4", dq4, "--out", env))
     env_rom = out / "env.sfc"
@@ -215,14 +301,16 @@ def build(dq5, dq4, out):
     new_map_args = [a for m in new_maps for a in ("--new-map", m)]
     names = {f"{g:02X}/{n:02X}": name for name, (g, n) in GROUPS.items()}
     newmap = {"format": "dq5newmap/1", "groups": [], "maps": []}
-    for group, link in LINKS.items():
-        x, y = cell(*link["arrival"])
+    for group, (first, *_) in LINKS.items():
+        x, y = cell(*first["arrival"])
+        number = place[first["fc"], first.get("map", 0)][1]
         newmap["groups"].append({"group": f"{group:02X}",
-                                 "entrance": {"bytes": [WORLD_CODE << 5 | link.get("map", 0), x, y, LAYER, 0]}})
+                                 "entrance": {"bytes": [WORLD_CODE << 5 | number, x, y, LAYER, 0]}})
+    part_of = {part["fc"]: part for parts in LINKS.values() for part in parts}
     for m in new_maps:
-        group = int(m[:2], 16)
+        fc_group, _ = fc_map(prg, int(m[:2], 16), int(m[3:], 16))
         newmap["maps"].append({"map": m, "record": {"source": f"env/{names[m]}.dq5map.json"},
-                               "attrs": map_attrs(dq5, LINKS[group])})
+                               "attrs": map_attrs(dq5, part_of[fc_group])})
     manifests = [env / "dq4-environment.dq5patch.json"]
 
     def step(tool, name, doc, base, *args):
@@ -267,15 +355,11 @@ def build(dq5, dq4, out):
     _run(DQ5_TOOLS / "dq5fieldtables.py", dq5, "dump", "-o", out / "fieldtables-orig.json")
     tables = json.loads((out / "fieldtables-orig.json").read_text(encoding="utf-8"))
     aux = [{k: e[k] for k in ("group", "x", "y")} for e in tables["entrances"] if e["table"] == "aux"]
-    aux += [{"group": group, "x": link["field"][0], "y": link["field"][1]} for group, link in LINKS.items()
-            if link["field"]]
+    aux += [{"group": group, "x": part["field"][0], "y": part["field"][1]} for group, parts in LINKS.items()
+            for part in parts if part["field"]]
     step("dq5fieldtables.py", "entrances", {"format": "dq5fieldtables/1", "entrance_tables": {"aux": aux}}, dq5,
          *ENTRANCES_AT, *new_map_args)
-    fields = {group: link["field"] for group, link in LINKS.items() if link["field"]}
-    arrivals = [(group, fx, fy, LINKS[group].get("map", 0), *cell(*LINKS[group]["arrival"]), LAYER, 0)
-                for group, (fx, fy) in fields.items()]
-    # An aux entrance stands one cell below itself when the party leaves (2A:F466).
-    leaving = [(group, 0, 0x1F, fx, fy + 1) for group, (fx, fy) in fields.items()]
+    arrivals, leaving = hook_rows(LINKS, place)
     manifests.append(_save(out / "entrance-hook.dq5patch.json", {
         "format": "dq5patch/1", "name": "dq4-entrance-hook",
         "writes": dq4entrancehook.writes(ENTRANCE_HOOK_AT, arrivals, leaving)}))
@@ -295,7 +379,7 @@ def build(dq5, dq4, out):
     for tool, source, args in checks:
         _run(DQ5_TOOLS / tool, rom if tool == "dq5newmap.py" else dq5, "check", source, *args)
     summary = {"rom": str(rom), "maps": new_maps, "exits": ours, "areas": areas,
-               "fields": {f"{g:02X}": link["field"] for g, link in LINKS.items() if link["field"]},
+               "fields": {tag(g, part): part["field"] for g, parts in LINKS.items() for part in parts if part["field"]},
                "records_end": report["records_end"], "bank01_bytes": report["bank01_bytes"]}
     _save(out / "groups.json", summary)
     return summary

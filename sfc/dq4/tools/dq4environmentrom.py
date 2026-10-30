@@ -47,7 +47,8 @@ TARGETS = {
     "34-00": (0x0D, 0x01), "36-01": (0x0D, 0x02), "2F-00": (0x11, 0x01), "43-00": (0x12, 0x02),
     "46-00": (0x12, 0x04), "31-02": (0x12, 0x06), "48-01": (0x12, 0x07), "2D-00": (0x15, 0x00),
 }
-# Whole FC groups in new DQ5 groups, FC map order kept. dq5newmap.py adds these map numbers, so their
+# Whole FC groups in new DQ5 groups, numbered as dq4groupbuild.layout lays out LINKS (placement checks it):
+# each FC group's maps in FC order after the previous FC group's. dq5newmap.py adds these map numbers, so their
 # records go out as dq5map/1 documents for its `source` instead of being written here.
 GROUPS = {
     "burland": (0x36, 0x00), "02-01": (0x36, 0x01), "02-02": (0x36, 0x02), "02-03": (0x36, 0x03),
