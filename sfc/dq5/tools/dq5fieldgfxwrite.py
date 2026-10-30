@@ -759,7 +759,7 @@ def write_water(orig, files, folder, at, placed, write):
         if raw not in uniq:
             uniq.append(raw)
         addrs.append(table + 12 + uniq.index(raw) * WATER_BYTES)
-    addrs.append(addrs[0])                                    # $1949 & 3 = 3 은 세계 0 과 같게
+    addrs.append(addrs[0])                                    # $1949 & 3 = 3(쓰이지 않음)은 원본만 세계 0 것을 고름
     body = water_hook(table) + bytes(a >> s & 0xFF for s in (0, 8, 16) for a in addrs) + b''.join(uniq)
     place_in(at, len(body), '--water-at', placed)
     write(at, body, '세계마다 움직이는 바다 원본: 고르기 훅·고르기 표·원본', orig=False)

@@ -271,7 +271,7 @@ def fast_hook(at, nibbles, lower, upper, land):
         blocks = number(at, xmask, 0x00BC43, b'\xad\x49\x19',
                         lambda k: b'\xc2\x30\xc9\xff\x01\xb0' + bytes([len(fast) + k]) + fast, slow)
         terrain = number(at + len(blocks), xmask, 0x00BE14, b'\xaf\x49\x19\x7e', lambda k: b'\x5c\x14\xbe\x00')
-        # 좌표가 0200 이상이면 A = 0 으로 land_tail 에 간다(03:CAC2 는 $CE·$D0 을 01FF 로 자르므로 오지 않음).
+        # 03:CAC2 가 $CE·$D0 을 01FF 로 자르므로 좌표 0200 이상 갈래는 실제로 오지 않는다.
         head = b'\xda\x5a\xa6\xce\x86\x90\xa6\xd0\x86\x92\xc2\x20'
         world_map = head + number(at + len(blocks) + len(terrain) + len(head), xmask, None, b'\xaf\x49\x19\x7e', land_tail)
         return blocks, terrain, world_map

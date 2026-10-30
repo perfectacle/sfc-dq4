@@ -163,6 +163,10 @@ def index_table(data, mask):
     size = end - lorom(index)
     if size % 3 or not MESSAGES < size // 3 * 16 <= MAX_MESSAGES:
         raise ValueError('옮긴 보행 색인 표의 끝을 찾지 못함')
+    # 끝을 머리 배치로 세므로, 색인과 메시지 0 사이에 다른 자료가 끼면 묶음 비트 자리가 앞으로 가지 않는 것으로 알아챈다
+    bits = [rom.u24(index + 3 * k) for k in range(size // 3)]
+    if any(a >= b for a, b in zip(bits, bits[1:])):
+        raise ValueError('옮긴 보행 색인 표의 항목이 앞으로 가지 않음(색인과 메시지 0 사이에 다른 자료가 낀 것으로 보임)')
     return index, size // 3 * 16
 
 

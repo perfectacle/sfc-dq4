@@ -175,6 +175,10 @@ class TextWriteTests(unittest.TestCase):
             self.assertEqual(decoded_messages(rebuilt), messages)
             index, count = index_table(rebuilt, 0x20 if at.startswith('38') else 0x60)
             self.assertEqual((index >> 16, count), (int(at[:2], 16), 3232))
+            bad = bytearray(rebuilt)
+            bad[lorom(index) + 3:lorom(index) + 6] = bad[lorom(index):lorom(index) + 3]
+            with self.assertRaisesRegex(ValueError, '앞으로 가지 않음'):
+                index_table(bytes(bad), 0x20 if at.startswith('38') else 0x60)
         again = overrides(messages, {'format': FORMAT, 'messages': [{'id': 3232, 'codes': [0x1010]}]})
         self.assertEqual(len(again), 3248)
         most = [[0x1001] for _ in range(MAX_MESSAGES)]

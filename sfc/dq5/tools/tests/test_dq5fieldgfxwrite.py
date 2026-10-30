@@ -323,6 +323,58 @@ class FieldPatchTests(unittest.TestCase):
         self.assertEqual(fgw.current(self.apply(m))['water'], {'world0': sea, 'world1': sea2, 'world2': sea})
 
 
+class WaterFramesTests(unittest.TestCase):
+    """dq5gfx.water_frames 를 롬 없이: 세계 0 은 오른쪽, 세계 1 은 왼쪽으로 돌리고, 세계 2 는 위로 민다."""
+
+    def setUp(self):
+        from dq5gfx import water_frames
+        self.frames = water_frames
+        self.src = bytes(random.Random(5).randrange(256) for _ in range(fgw.WATER_BYTES))
+
+    def test_last_set_is_source(self):
+        for world in range(3):
+            frames = self.frames(self.src, world)
+            self.assertEqual(len(frames), 16)
+            self.assertEqual(frames[15], self.src, f'세계 {world}')
+
+    def test_worlds_0_and_1_turn_opposite_ways(self):
+        right, left = self.frames(self.src, 0), self.frames(self.src, 1)
+        for k in range(15):
+            self.assertEqual(left[k], right[14 - k])
+        src = bytearray(fgw.WATER_BYTES)
+        src[32] = src[96] = 0x01                     # 타일 5·21 의 첫 줄 평면 0 맨 오른쪽 점
+        self.assertEqual((self.frames(src, 0)[0][0], self.frames(src, 0)[0][32]), (0x80, 0x00))
+        self.assertEqual((self.frames(src, 0)[0][64], self.frames(src, 0)[0][96]), (0x80, 0x00))
+        self.assertEqual((self.frames(src, 1)[0][0], self.frames(src, 1)[0][32]), (0x00, 0x02))
+
+    def test_world_2_pushes_up(self):
+        def at(row, col, half):                    # 16×16 의 줄 row: 0~7 은 타일 4·5, 8~15 는 20·21
+            return (0x40 if row >= 8 else 0) + col + half + row % 8 * 2
+        cells = [(col, half) for col in (0, 0x20) for half in (0, 0x10)]
+        src = bytearray(fgw.WATER_BYTES)
+        for n, (col, half) in enumerate(cells):
+            for row in range(16):
+                src[at(row, col, half)], src[at(row, col, half) + 1] = row, n
+        frames = self.frames(bytes(src), 2)
+        for k, frame in enumerate(frames):
+            for n, (col, half) in enumerate(cells):
+                for row in range(16):
+                    self.assertEqual(frame[at(row, col, half):at(row, col, half) + 2],
+                                     bytes([(row + k + 1) % 16, n]), f'벌 {k} 줄 {row}')
+        self.assertEqual(frames[0][14:16], src[0x40:0x42])  # 타일 4 맨 아랫줄에 타일 20 첫 줄
+        self.assertEqual(frames[0][0x4E:0x50], src[0:2])    # 타일 20 맨 아랫줄에 타일 4 첫 줄
+
+
+class PlaceExtrasTests(unittest.TestCase):
+    def test_words_after_no_extras_need_upper_half(self):
+        """늘린 타일 덩어리가 없으면 다음 자리는 --extra-at 그대로라, 하위 16비트가 0000 이면 워드 표를 둘 수 없다."""
+        out, after = fgw.place_extras(0x350000, [b'', b''], [])
+        self.assertEqual((out, after), ({}, 0x350000))
+        with self.assertRaisesRegex(ValueError, '--extra-at'):
+            fgw.place_extras(after, [b'\x01' * 16], [])
+        self.assertEqual(fgw.place_extras(0x358000, [b'\x01' * 16], [])[0], {b'\x01' * 16: 0x358000})
+
+
 class HighSetTests(unittest.TestCase):
     def test_high_sites_and_no_palettes(self):
         d = bytearray(0x180000)
