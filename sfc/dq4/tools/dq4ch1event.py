@@ -27,7 +27,25 @@ REUNITED = (0x22, 0x04)         # 7E:21B2 bit2  감옥에서 재회함(FC $627E&
 HOIMIN = (0x28, 0x01)           # 7E:21B8 bit0  호이민이 동료가 됨(FC $6281&40)
 KIDNAPPED = (0x28, 0x20)        # 7E:21B8 bit5  탑 입구에서 마물이 아이를 끌고 감(FC $627E&01)
 BOSS_WON = (0x29, 0x40)         # 7E:21B9 bit6  탑 위 보스를 이김(FC $6283&80)
-KIDS_FOLLOW = (0x29, 0x80)      # 7E:21B9 bit7  구한 아이들이 따라옴(FC $6283&20)
+KIDS_FOLLOW = (0x29, 0x80)      # 7E:21B9 bit7  구한 아이들이 따라옴(FC $6283&20). 이무르에 데려다주면 끈다
+# 아래는 DQ5 레ヌール城 04/05 의 인물 스크립트만 읽는 비트(이 해킹은 04/05 에 가지 않음, dq5flags.py)
+SOLDIER_LEFT = (0x06, 0x01)     # 7E:2196 bit0  탑의 병사가 먼저 돌아감(FC $6280&80)
+
+# 보스를 이긴 뒤 FC 가 바꾸는 인물 목록(1C:$841E 등, $6283&80 으로 고름). dq4npcport.port 가 이 상태로 뽑아
+# 「상태-맵」 이름의 새 목록으로 돌려주고, 보스 깃발에 그 목록을 쓴다. 왕좌의 방은 왕의 보고와 함께
+AFTER_BOSS = 'after_boss'
+ALT_STATES = ((AFTER_BOSS, {0x6283: 0x80, 0x6288: 0x80}, ('36/00', '36/03', '37/00', '37/01', '39/01', '39/03')),)
+SOLDIER_MAP, KIDS_HOME_MAP = '39/01', '37/00'
+
+
+def alt_name(state, m):
+    """ALT_STATES 목록의 이름(dq5npcrelocate 의 새 목록 이름은 영문·숫자·_- 만)."""
+    return f"{state}-{m.replace('/', '')}"
+
+
+FC_SOLDIER = 0x148
+SOLDIER_PATH = ((0x0E, 0x18), (0x0E, 0x16), (0x0B, 0x16), (0x0B, 0x14))
+KIDS_HOME_ROW = 0x17            # FC 1D 이벤트 33: 12/00 에서 일행이 이 줄에 오면 아이들이 엄마에게 간다
 
 FRONT, FRONT_NIGHT, IMURU, JAIL = '36/00', '36/03', '37/00', '37/02'
 UNDER_WELL, HOIMIN_ROOM = '3B/00', '3B/03'
@@ -81,6 +99,8 @@ MESSAGES = {
                      '하지만 다른 마물들이/반드시 용사를/찾아내어 그 숨통을/끊어 놓을 것이다……',
                      '너희 인간들은 머지않아/제왕님의 제물이/될 것이다.', '지옥에서 기다리마……/크윽!'),
     'kids_thanks': say('와아! 아저씨/고마워!', '우리 돌아갈 수 있구나!/위에서 뛰어내리면/돌아갈 수 있대!'),
+    'soldier_report': dq4ch1talk.TEXTS[(0x796,)],
+    'kids_home': dq4ch1talk.TEXTS[(0x5F6,)],
 }
 
 
@@ -93,7 +113,7 @@ def texts(first):
     return {first + k: parts for k, parts in enumerate(MESSAGES.values())}
 
 
-TALKS = ('child', 'alex_night', 'flare_day', 'flare_night', 'hoimin', 'boss')
+TALKS = ('child', 'alex_night', 'flare_day', 'flare_night', 'hoimin', 'boss', 'soldier')
 
 
 def talk_numbers(first_talk):
@@ -128,6 +148,7 @@ def talk_scripts(first_message):
         # 전투는 뱅크 06 의 BATTLE_AT 이 건다. 이기면 그 루틴이 보스 깃발을 켠다
         [_msg(m['boss_taunt']), {"op": "call", "target": f"{BATTLE_AT & 0xFFFF:04X}"},
          {"op": "if", "cond": {"code": "1B", "index": BOSS_WON[0], "mask": BOSS_WON[1]}, "then": _msg(m['boss_dies'])}],
+        [_msg(m['soldier_report']), _flag_on(SOLDIER_LEFT)],
     ]
 
 
@@ -142,6 +163,8 @@ KID_SRC, KID_SCRIPT = {"list": "05:9239", "index": 1}, "05:9248"
 HIDE_ON_WIN_SRC, HIDE_ON_WIN_SCRIPT = {"list": "05:9239", "index": 3}, "05:927B"
 RESCUED_SRC, RESCUED_SCRIPT = {"list": "05:9239", "index": 4}, "05:92B3"
 THANKS_SRC, THANKS_SCRIPT = {"list": "05:90D0", "index": 6}, "05:9102"
+SOLDIER_SRC, SOLDIER_SCRIPT = {"list": "05:90D0", "index": 7}, "05:910F"
+KIDS_HOME_SRC, KIDS_HOME_SCRIPT = {"list": "05:90D0", "index": 8}, "05:9126"
 # 탑 위 30/04 의 FC 인물 슬롯(06 부터 차례): 06 보스, 07·08 잡힌 아이, 09 마물은 이기면 숨고, 0C~0E 의 구한 아이는
 # 이기기 전에 숨는다(1C:$A266). 0C 가 고맙다고 말한다
 TOP_HIDE_ON_WIN, TOP_RESCUED = (0x06, 0x07, 0x08, 0x09), (0x0C, 0x0D, 0x0E)
@@ -263,6 +286,8 @@ def native(data=None):
         out += _at(*ch1_cell(x, y))
     at['kidnap_row'] = CODE_AT + len(out)
     out += _at(None, ch1_cell(0, KIDNAP_ROW)[1])
+    at['kids_home_row'] = CODE_AT + len(out)
+    out += _at(None, ch1_cell(0, KIDS_HOME_ROW)[1])
     at['fly_event'] = CODE_AT + len(out)
     number, x, y = TOWER_IN
     out += bytes((0x90, TOWER, number, *ch1_cell(x, y), 0x01, 0x80, 0xFF))
@@ -339,6 +364,14 @@ def scripts(first_message):
         {"address": RESCUED_SCRIPT, "commands": _rescued([])},
         {"address": THANKS_SCRIPT, "commands": _rescued([_cmd('3F'), _cmd('21', lo(m['kids_thanks']), hi(m['kids_thanks'])),
                                                          _cmd('10', *KIDS_FOLLOW), _cmd('40')])},
+        {"address": SOLDIER_SCRIPT, "commands": [_cmd('09', 0x80 | SOLDIER_LEFT[0], SOLDIER_LEFT[1]), _cmd('3F')] +
+         [c for x, y in SOLDIER_PATH for c in (_cmd('13', *ch1_cell(x, y)), _cmd('14'))] +
+         [_cmd('28'), _cmd('52'), _cmd('40'), _cmd('16')]},
+        # 보이지 않는 인물: 아이들이 따라오는 동안 이 줄에 오면 엄마 곁으로 보내고 따라옴 깃발을 끈다(11 은 AND)
+        {"address": KIDS_HOME_SCRIPT, "commands": [
+            _cmd('28'), _cmd('52'), _cmd('09', 0x80 | KIDS_FOLLOW[0], KIDS_FOLLOW[1]),
+            _cmd('05', *_long(at['kids_home_row'])), _cmd('3F'), _cmd('21', lo(m['kids_home']), hi(m['kids_home'])),
+            _cmd('11', KIDS_FOLLOW[0], ~KIDS_FOLLOW[1] & 0xFF), _cmd('40'), _cmd('16')]},
     ]
 
 
@@ -364,7 +397,8 @@ def _same(entry, src, talk):
 def npc_lists(ported, report, first_talk):
     """(옮긴 목록을 고친 것, new_lists, overrides). ported·report 는 dq4npcport.port 의 것."""
     t = talk_numbers(first_talk)
-    lists = {lst["map"]: [dict(e) for e in lst["entries"]] for lst in ported}
+    lists = {lst["map"]: [dict(e) for e in lst["entries"]] for lst in ported if "map" in lst}
+    alts = {lst["name"]: [dict(e) for e in lst["entries"]] for lst in ported if "name" in lst}
 
     def where(m, fc_talk, night):
         return [i for i, p in enumerate(report[m]) if p["talk"] == fc_talk and p["night"] == night]
@@ -425,9 +459,21 @@ def npc_lists(ported, report, first_talk):
         else:
             keep.append(e)
     new_lists.append({"name": "top_after", "entries": keep})
+    # 보스 뒤 목록: 탑의 병사는 보고하고 걸어 나가며, 이무르에는 아이들을 엄마에게 보내는 보이지 않는 인물
+    soldier_list = alts[alt_name(AFTER_BOSS, SOLDIER_MAP)]
+    for i, p in enumerate(report[alt_name(AFTER_BOSS, SOLDIER_MAP)]):
+        if p["talk"] == FC_SOLDIER:
+            soldier_list[i] = _same(soldier_list[i], SOLDIER_SRC, t['soldier'])
+    gone = [e for e in soldier_list if e["from"] != SOLDIER_SRC]
+    home = {"from": KIDS_HOME_SRC, "fields": {"x": 0, "y": 1, "facing": "down", "talk": t['soldier'], "gfx": 0x01,
+                                              "layer": 0}}
+    alts[alt_name(AFTER_BOSS, KIDS_HOME_MAP)] += [{**home, "time": "day"}, {**home, "time": "night"}]
+    new_lists += [{"name": name, "entries": entries} for name, entries in alts.items()]
+    new_lists.append({"name": "soldier_gone", "entries": gone})
     over = lambda m, flag, name: {"map": m, "flag": flag[0], "when": "on", "mask": flag[1], "list": f"new:{name}"}  # noqa: E731
     # 앞에 둔 것부터 맞춰 본다
     overrides = [over(JAIL, REUNITED, 'jail_after'), over(JAIL, FLARE_FOLLOWS, 'jail_reunion'),
                  over(HOIMIN_ROOM, HOIMIN, 'hoimin_gone'), over(TOWER_HALL, KIDNAPPED, 'hall_empty'),
-                 over(TOWER_TOP, BOSS_WON, 'top_after')]
+                 over(TOWER_TOP, BOSS_WON, 'top_after'), over(SOLDIER_MAP, SOLDIER_LEFT, 'soldier_gone')]
+    overrides += [over(m, BOSS_WON, alt_name(AFTER_BOSS, m)) for state, _, maps in ALT_STATES for m in maps]
     return [{"map": k, "entries": v} for k, v in lists.items()], new_lists, overrides
