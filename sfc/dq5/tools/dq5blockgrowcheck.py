@@ -12,12 +12,14 @@
           (dq5fieldgfxwrite --palettes-at 36:8000)
 장면
   세계 0 (341,56) 에 서기·네 방향으로 32프레임씩 걷기, 세계 1·2 (50,28) 에 서기(원본 롬과 견줌).
+  융단: 세계 0 (310,60) 에서 まほうのじゅうたん(CC)을 펴고 세 방향으로 걷기(same 롬, 원본 게임과 같은 자리·지형에 융단을
+        탄 채($1954 = 80) 서는지). 융단의 다음 칸 검사 01:81D6 이 03:CB1B 의 A 를 16비트로 쓴다
   w12pal: 세계 1·2 에 서서 $075E 를 매 프레임 고정하고(불러올 때 0 으로 두므로) 2·3번 줄 색 1~13 이 고른 벌인지,
           원본 롬은 그대로인지
 --bits 11
   same·swap·wall-lower·wall-upper 를 블록 2,047개로 만든다. 블록 1024+b·1536+b 가 블록 b 를 따르고(511~1023 은 블록 0),
   지도의 칸 b 를 칸 좌표 x+y 가 짝수면 b+1024(11번째 비트만), 홀수면 b+1536(10·11번째 비트)으로 바꾼다.
-  세 세계 모두 서기와 걷기를 본다(세계 1·2 는 (50,28) 에 서고, 세계 2 걷기는 바다 (62,64) 에서 왼쪽 해안까지). w12pal 은 돌리지 않는다
+  세 세계 모두 서기와 걷기를 본다(세계 1·2 는 (50,28) 에 서고, 세계 2 걷기는 바다 (62,64) 에서 왼쪽 해안까지). 융단도 보고, w12pal 은 돌리지 않는다
 
   MESENCE=… python sfc/dq5/tools/dq5blockgrowcheck.py rom/dq5.sfc --state work/state/ship.mss --out work/blockgrowcheck
 """
@@ -50,6 +52,11 @@ WORLD = {w: {'FIELD': '50,28', 'POKE': f'7E1949={w:02X}', 'SETTLE': str(STAND_FR
 MOVE_FRAME = 700
 MOVE = {'FIELD': '341,56', 'SETTLE': '300', 'MAXF': '1300', 'DUMPF': str(MOVE_FRAME),
         'TEST': 'wait:60,left:32,up:32,right:32,down:32,wait:60'}
+# dq5gfxlimitcheck 의 carpet 과 같은 입력이다.
+CARPET = {'FIELD': '310,60', 'SET': '2056=CC', 'SETTLE': '60', 'MAXF': '1700',
+          'TEST': 'a:8,wait:60,right:8,wait:40,down:8,wait:40,a:8,wait:80,a:8,wait:80,a:8,'
+                  'wait:300,left:32,up:32,right:32,wait:300'}
+ON_CARPET = 0x80
 SWAP_TERRAIN = 0x0D
 WALL = 0x80
 # 세계 1·2 의 벌과 시간대 표. 하한 위의 $075E 값 → 고르는 벌.
@@ -190,6 +197,14 @@ def check_walk(name, rom_path, dump, orig, want, world=0):
             'block_terrain': terrain(rom, b)}
 
 
+def check_carpet(name, rom_path, dump, orig):
+    r = check_walk(name, rom_path, dump, orig, 'same')
+    w = (dump / 'final.wram').read_bytes()
+    require(w[0x1954] == ON_CARPET, f'{name}: 걸은 뒤 $1954 = {w[0x1954]:02X}(융단 {ON_CARPET:02X} 이어야 함)')
+    require(r['block_here'] >= 512, f'{name}: 걸은 뒤 칸 블록 {r["block_here"]}')
+    return r
+
+
 def rows23(cg):
     return [fgc.cg_color(cg, row, c) for row in (2, 3) for c in range(1, 14)]
 
@@ -243,6 +258,7 @@ def main():
             cases += [(f'{scene}-orig', original, env), (f'{scene}-same', roms['same'], env),
                       (f'{scene}-swap', roms['swap'], env)]
         cases += [(f'move-{k}', roms[k], MOVE) for k in ('wall-lower', 'wall-upper')]
+        cases += [('carpet-orig', original, CARPET), ('carpet-same', roms['same'], CARPET)]
         for world, (_, picks) in W12.items():
             for t in picks:
                 env = dict(WORLD[world], SETTLE=str(PAL_FRAME), DUMPF=str(PAL_FRAME), MAXF='1200',
@@ -259,6 +275,7 @@ def main():
         results.append(check_same('move-same', dirs['move-same'], dirs['move-orig'], MOVE_FRAME, 0))
         for k, want in (('same', 'same'), ('swap', 'swap'), ('wall-lower', 'wall'), ('wall-upper', 'wall')):
             results.append(check_walk(f'move-{k}', roms[k], dirs[f'move-{k}'], dirs['move-orig'], want))
+        results.append(check_carpet('carpet-same', roms['same'], dirs['carpet-same'], dirs['carpet-orig']))
         for world, (_, picks) in W12.items():
             results.append(check_w12(f'w12pal-world{world}', roms['w12pal'],
                                      {t: dirs[f'pal{world}-{t:04X}-grow'] for t in picks},
@@ -288,6 +305,7 @@ def main11(args, out, original, state, mesence, libdir, gfx, wall):
         cases += [(f'stand{world}-{k}', r, stands[world]) for k, r in (('orig', original), ('same', roms['same']),
                                                                          ('swap', roms['swap']))]
         cases += [(f'move{world}-{k}', r, moves[world]) for k, r in (('orig', original), *roms.items())]
+    cases += [('carpet-orig', original, CARPET), ('carpet-same', roms['same'], CARPET)]
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
         dirs = dict(zip([c[0] for c in cases], pool.map(
             lambda c: gwc.run(mesence, c[1], gfx, c[2], out / c[0], libdir, state), cases)))
@@ -307,6 +325,7 @@ def main11(args, out, original, state, mesence, libdir, gfx, wall):
             if want != 'wall':
                 require(r['block_here'] >= 1024, f'move{world}-{k}: 걸은 뒤 칸 블록 {r["block_here"]}')
             results.append(r)
+    results.append(check_carpet('carpet-same', roms['same'], dirs['carpet-same'], dirs['carpet-orig']))
     results.append({'wall_tile': wall, 'bits': 11})
     (out / 'results.json').write_text(json.dumps(results, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
     print(f'{len(results) - 1}건 통과')
