@@ -181,11 +181,13 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
     그 트랙 음의 세기(velocity)를 바꾼다. chains 는 앞부분·본체로 나눌 곡 자리(stream_ticks 를 준 곡)로, 앞부분 길이는
     본체 도착 어림 + CHAIN_SLACK_SECONDS 로 정한다. holds 는 곡 붙들기를 쓸 곡 자리(stream_ticks 를 준 곡)로, 곡 앞
     샘플 하나를 곡 뒤 맨 앞으로 돌리고 그 샘플이 hold_units 만큼 오면 곡을 나아가게 한다(아끼는 바이트가 가장 큰 것).
-    set_records 는 바꾸지 않는 곡의 곡 묶음 레코드(install 과 같음).
+    set_records 는 바꾸지 않는 곡의 곡 묶음 레코드(install 과 같음). cache_dir 는 BRR(brr/)·시퀀스 묶기(compact/) 결과를
+    두는 곳으로, 키가 입력과 도구 소스의 해시라 다른 워크트리와 함께 써도 된다.
     """
     stream, stream_ticks, budgets, lanes = stream or {}, stream_ticks or {}, budgets or {}, lanes or {}
     drop_tracks, level_db, programs = drop_tracks or {}, level_db or {}, programs or {}
     keep_regions, track_db = keep_regions or {}, track_db or {}
+    brr_cache = None if cache_dir is None else Path(cache_dir) / 'brr'
     data = bytes(base)
     records = patch.read_sets(data)
     if len({slot for slot, _ in songs}) != len(songs):
@@ -196,7 +198,7 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
     resident_plan = bool(pinned or resident_from is not None or drop_resident)
 
     def convert_args(slot):
-        return {'lanes_for': lanes.get(slot), 'level_tolerance_db': level_db.get(slot, 1.0)}
+        return {'lanes_for': lanes.get(slot), 'level_tolerance_db': level_db.get(slot, 1.0), 'cache_dir': cache_dir}
 
     if not set(chains) <= set(stream_ticks):
         raise ValueError('chained songs must use stream_ticks')
@@ -232,13 +234,13 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
         snapshot = dict(known)
         try:
             found, program_map, report = bank.build_bank(bank_score, assets, start_id=0x26, max_rate=max_rate,
-                                                         cache_dir=cache_dir, budget=budget, max_samples=limit,
+                                                         cache_dir=brr_cache, budget=budget, max_samples=limit,
                                                          keep_regions=keep)
         except ValueError as exc:
             if 'cannot fit samples' not in str(exc):
                 raise
             found, program_map, report = bank.build_bank(bank_score, assets, start_id=0x26, max_rate=max_rate,
-                                                         cache_dir=cache_dir, budget=budget, max_samples=limit,
+                                                         cache_dir=brr_cache, budget=budget, max_samples=limit,
                                                          rates=bank.LOW_RATES, keep_regions=keep)
             report['low_rates'] = True
         found, program_map, _, shared = share_samples(found, report['samples'], program_map, resources, known,
@@ -435,6 +437,8 @@ def main():
     ap.add_argument('--assets', type=Path, required=True)
     ap.add_argument('--song', action='append', required=True, metavar='DQ5_SLOT=NDS_ID')
     ap.add_argument('--out', type=Path, required=True)
+    ap.add_argument('--cache-dir', type=Path,
+                    help='BRR and sequence compaction cache (default: ASSETS/sfc/dq4/cache/sound, keyed by input and tool source hashes)')
     ap.add_argument('--max-rate', type=int, default=8000)
     ap.add_argument('--max-samples', type=int, default=14)
     ap.add_argument('--map-fades', action='store_true')
@@ -504,7 +508,7 @@ def main():
     for slot, value in per_slot(args.record):
         first, ids = value.split(':')
         records[slot] = (int(first), *(int(x, 16) for x in ids.split(',')))
-    rom, report = build(base, args.assets, songs, cache_dir=args.out.parent / 'brr-cache', max_rate=args.max_rate,
+    rom, report = build(base, args.assets, songs, cache_dir=args.cache_dir or args.assets / 'sfc/dq4/cache/sound', max_rate=args.max_rate,
                         max_samples=args.max_samples, map_fades=args.map_fades, preview=args.preview, stream=stream,
                         stream_ticks={slot: int(v) for slot, v in per_slot(args.stream_ticks)},
                         budgets=budgets, pinned=[int(x, 16) for x in args.pin],

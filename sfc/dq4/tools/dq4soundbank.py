@@ -20,7 +20,7 @@ import dq5brr  # noqa: E402
 import dq5brrenc as brr  # noqa: E402
 
 PITCH_C = 8372  # DQ5 SPC 07E5 표의 C. 음 n=1일 때 표의 두 번째 원소를 쓴다.
-ENCODER_HASH = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+ENCODER_HASH = hashlib.sha256(Path(__file__).read_bytes() + Path(dq5brr.__file__).read_bytes()).hexdigest()
 
 
 def hw_sample(nib, shift, filt, p1, p2):
