@@ -90,5 +90,22 @@ class SongScoreTests(unittest.TestCase):
         self.assertEqual([e['velocity'] for e in out['timeline']], [50, 100, 10])
 
 
+class HoldUnitsTests(unittest.TestCase):
+    def test_slow_playback_needs_only_the_rounding_unit(self):
+        # 8kHz 기준음은 프레임당 약 75바이트라 받기 59 보다 느리지 않으면 앞부분만 있으면 된다
+        self.assertEqual(soundset.hold_units(4000, [(0.0, 48)], 8000, 60, bytes_per_frame=200), 1)
+
+    def test_fast_playback_needs_the_bytes_it_would_overtake(self):
+        size, rate = 4096, 8000
+        speed = rate * 2 * 9 / 16 / soundset.FRAME_RATE  # 한 옥타브 위
+        need = size * (1 - 59 / speed)
+        self.assertEqual(soundset.hold_units(size, [(0.0, 72)], rate, 60, bytes_per_frame=59), -(-int(need) // 256) + 1)
+
+    def test_later_notes_need_less(self):
+        early = soundset.hold_units(4096, [(0.0, 72)], 8000, 60)
+        late = soundset.hold_units(4096, [(0.5, 72)], 8000, 60)
+        self.assertLess(late, early)
+
+
 if __name__ == '__main__':
     unittest.main()

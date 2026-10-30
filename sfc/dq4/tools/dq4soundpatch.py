@@ -45,7 +45,7 @@ FAST_RECEIVE_TRIPLETS = 4
 FAST_RECEIVE_POLLS = 32
 # 나눈 곡(앞부분 → 본체): 드라이버 명령 F7(표 07CD, 원래 아무것도 안 함)을 CHAIN 처리기로, 본체는 시퀀스 번호 47~,
 # 짝 표 71:8300(곡 → 본체, FF 없음), 2B:C1C1(곡이 시작한 뒤 곡 뒤 샘플 보내기 JSR C1DB)을 발판 2B:B780 으로.
-CHAIN_HANDLER = 0xFF60
+CHAIN_HANDLER = 0xFF54
 CHAIN_TABLE_ENTRY = 0x07CD
 FIRST_CHAIN_SONG = SEQUENCE_COUNT
 CHAIN_PAIRS = CODE + 0x300
@@ -54,11 +54,11 @@ CHAIN_STEP = 0x2BB780
 CHAIN_ORDER = CODE + 0x380
 CHAIN_LATE_STEP = 0x2BB7A0
 # 곡 붙들기(F7 FE 샘플 / F7 FF X): 그 샘플을 X x 256 바이트 받을 때까지 곡의 연주기를 템포 0 처럼 건너뛰고, 받는 중인
-# 그 샘플을 instrument(182E)가 있는 것으로 본다. 변수 FF5B~FF5F, 연주기 판정 FFC1~(IPL ROM 이 꺼져 있어 RAM),
+# 그 샘플을 instrument(182E)가 있는 것으로 본다. 변수 FF4F~FF53, 연주기 판정 FFC0~(IPL ROM 이 꺼져 있어 RAM),
 # instrument 판정·받기 끝 정리는 빠른 받기로 쓰지 않게 된 1049~106A 에 둔다.
-HOLD_VARS = 0xFF5B
+HOLD_VARS = 0xFF4F
 HOLD_PLAYER, HOLD_SAMPLE, HOLD_BYTES, HOLD_TICKS, HOLD_PARTIAL = range(HOLD_VARS, HOLD_VARS + 5)
-HOLD_CHECK = 0xFFC1
+HOLD_CHECK = 0xFFC0
 HOLD_SPARE = 0x1049
 HOLD_TICK_SITE = 0x146C
 HOLD_INSTRUMENT_SITE = 0x1861
@@ -279,7 +279,9 @@ def chain_code():
     h = bytes.fromhex
     return _asm([
         h('3F BD 19 68 80'), ('b', 0xB0, 'hold'),               # CALL $19BD / CMP #$80 / BCS hold
-        h('FD F6 C7 04 68 FF'), ('b', 0xF0, 'miss'),           # MOV Y,A / MOV A,$04C7+Y / CMP #$FF
+        # 드라이버는 받기를 시작할 때 칸(04C7+m)을 먼저 쓰므로, m 을 받는 중($018A = 80, $0185 = m)이면 없는 것으로 본다
+        h('FD E5 8A 01 68 80'), ('b', 0xD0, 'have'), h('5E 85 01'), ('b', 0xF0, 'miss'),
+        ('label', 'have'), h('F6 C7 04 68 FF'), ('b', 0xF0, 'miss'),  # MOV A,$04C7+Y / CMP #$FF
         h('8F D5 A0 8F 05 A1 8D 06 CF 7A A0 DA A0'),           # $A0 = 05D5 + 칸 x 6
         h('8D 01 F7 A0 2D FC F7 A0 C4 A1 AE C4 A0'),           # $A0 = 시퀀스 주소
         h('3F BD 19 1C 60 88 02 FD'),                          # Y = 2 + 2t
@@ -548,20 +550,26 @@ def load_pump_code(lines=LOAD_LINES):
         ('b', 0x80, 'norm16'),
         ('label', 'tonmi'), h('5C A3 88 00'),               # 코루틴·전환 중이면 NMI 의 선점(저장하거나 전환 취소)
         ('label', 'exit'), h('C2 30 7A FA 68 2B AB 40'),
-        ('label', 'not2b'), h('C9 7F'), ('b', 0xF0, 'norm8'),
+        # 주 스레드가 소리 대기열을 고치는 중(24:FE00~, 24:FF83 넣기 등)이면 코루틴을 돌리지 않는다
+        ('label', 'not2b'), h('C9 24'), ('b', 0xD0, 'not24'),
+        h('C2 20 A3 0B C9 00 FE E2 20'), ('b', 0xB0, 'exit'),
+        ('label', 'not24'), h('C9 7F'), ('b', 0xF0, 'norm8'),
         h('C2 20 A3 0B C9 13 09'), ('b', 0xB0, 'norm16'), h('C9 EF 08'), ('b', 0xB0, 'tonmi'),
         ('label', 'norm16'), h('E2 20'),
-        ('label', 'norm8'), h('A5 19'), ('b', 0x10, 'exit'),
+        ('label', 'norm8'), h('A5 19'), ('b', 0x10, 'exit2'),
         # 대기열이 비었거나 지금 칸이 곡 뒤 단계(bit6, 곡이 이미 시작)면 IRQ 를 끈다. 곡 뒤 자료까지 불러오기 중에
         # 보내면 곡은 화면보다 40프레임 넘게 먼저 나오는데 검은 화면만 늘었다.
         h('AD 91 1D CD 93 1D'), ('b', 0xF0, 'stop'),
-        h('C2 20 AD 93 1D 29 FF 00 AA E2 20 BD 95 1D 29 40'), ('b', 0xF0, 'pump'),
-        ('label', 'stop'), h('A5 1E 8D 00 42'), ('jmp', 'exit'),
+        # 곡 요청(01)이 아닌 칸에서 코루틴에 들어가면 NMI 가 꺼진 동안 돌아올 길이 없다(C32F 등은 양보하지 않음)
+        h('C2 20 AD 93 1D 29 FF 00 AA E2 20 BD 95 1D 29 40'), ('b', 0xD0, 'stop'),
+        h('BD 95 1D 29 3F C9 01'), ('b', 0xF0, 'pump'),
+        ('label', 'stop'), h('A5 1E 8D 00 42'),
+        ('label', 'exit2'), ('jmp', 'exit'),
         ('label', 'pump'),
         h('AD E0 08 C9 2B'), ('b', 0xD0, 'go'),
         h('C2 20 AD DE 08 C9') + gate_cont.to_bytes(2, 'little') + h('E2 20'), ('b', 0xF0, 'stop'),
         h('C2 20 AD DE 08 C9') + poll_cont.to_bytes(2, 'little') + h('E2 20'), ('b', 0xD0, 'go'),
-        h('AD 40 21 CD 40 21'), ('b', 0xD0, 'exit'), h('4D DC 08'), ('b', 0x30, 'exit'),
+        h('AD 40 21 CD 40 21'), ('b', 0xD0, 'exit2'), h('4D DC 08'), ('b', 0x30, 'exit2'),
         # 응답 판정에서 멈춘 코루틴의 고리(2B:C29F~C2FC) 한 바퀴를 저장된 Y(08E5)·X(08E3)로 대신 돈다. 코루틴으로
         # 넘어가면 전환만 수백 사이클이라 불러오기가 75% 늘었다. 고리가 끝나는 바퀴(X-3 < 0)와 묶음 사이의 대기열
         # 처리(BED5)는 코루틴에 맡긴다(불러오는 동안은 새 칸이 없다).
@@ -780,7 +788,9 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
             # 늘 두는 샘플 하나를 곡 뒤로 덧붙여 그 단계를 지나게 한다(이미 있어 보내지는 않음, 악기 번호는 그대로).
             size, first, *ids = records[song]
             if first == size:
-                extra = next(x for x in resident_samples(data) if x not in ids)
+                extra = next((x for x in resident_samples(data) if x not in ids), None)
+                if extra is None:
+                    raise ValueError(f'chained song {song:02X} uses every resident sample; nothing to append')
                 records[song] = bytes([size + 1, first, *ids, extra])
             pairs[song] = number
             chain_numbers[song] = number

@@ -36,6 +36,8 @@ FRAME_RATE = 60.0988
 # 곡 붙들기: 붙든 샘플의 남은 바이트가 오는 속도. 곡 뒤 샘플 어림과 같은 늦은 값으로 잡아, 실제 전송이 이보다 느리지
 # 않으면 재생이 받은 끝을 앞지르지 않는다(앞지르면 덜 온 자리의 옛 바이트가 잡음으로 울린다).
 HOLD_BYTES_PER_FRAME = STREAM_BYTES_PER_FRAME
+HOLD_TIMEOUT_FRAMES = 70  # SPC 가 255틱(1.27초, 76프레임) 뒤 놓으므로 그 안에 문턱이 와야 한다
+HOLD_ARRIVAL_BYTES_PER_FRAME = 126  # 붙드는 동안(그 곡을 처리하지 않음) 실측
 BRR_HEADER_BYTES = 9  # 자원 [길이 2][반복 2][ADSR1][ADSR2][GAIN][음높이 2] 는 DIR 자리에 오르지 않는다
 
 
@@ -362,6 +364,8 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
                             continue
                         need = sent - (first_seconds[y] * FRAME_RATE - ARRIVAL_SLACK_FRAMES) * STREAM_BYTES_PER_FRAME
                         units = max(units, math.ceil(need / 256) + 1)
+                    if (lead + units * 256) / HOLD_ARRIVAL_BYTES_PER_FRAME > HOLD_TIMEOUT_FRAMES:
+                        continue
                     candidates.append((sizes[x] - lead - units * 256, x, units))
                 if candidates and max(candidates)[0] > 0:
                     _, x, units = max(candidates)
@@ -399,6 +403,8 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
               f'sequence {len(conversion.sequence)}', file=sys.stderr, flush=True)
         reports[f'{slot:02X}'] = {'nds_song': ident.upper(), 'score': path.name, 'sample_budget': budget,
                                    'bank': bank_report, 'conversion': conversion.report, 'stream': plan}
+    if sorted(mains) != sorted(chains):
+        raise ValueError('every chained song must be a replaced song (install numbers the bodies in slot order)')
     rom, install_report = patch.install(base, replacements, sample_resources=resources, map_fades=map_fades,
                                         preview=preview, pinned=tuple(pinned),
                                         resident=resident if resident_plan else None, set_records=set_records,
