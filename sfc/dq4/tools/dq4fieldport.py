@@ -61,7 +61,7 @@ BLOCKS = {
 # Places of the field graphics (dq4fieldgfx.py), free in both the dq4groupbuild ROM and the chapter-1 ROM
 # (dq4chapter1.py): the tile hooks and tables in one bank of 30-3F (01:A4A7 reads with DB set to it), the rest in
 # 30-7D. The planes take the bank of "planes" and the next one.
-GFX_AT = {"worlds": "30:F000", "extra": "54:8000", "blocks": "54:C000", "planes": "55:8000"}
+GFX_AT = {"worlds": "30:E000", "extra": "54:8000", "blocks": "54:C000", "planes": "55:8000"}
 # First DQ5 block dq5fieldtables --blocks-at adds: 511 shares its slot with upper-layer block 0 in the original table.
 FIRST_BLOCK = 511
 
