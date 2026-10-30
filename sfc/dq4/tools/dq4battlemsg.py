@@ -52,8 +52,10 @@ GROUP_NAME, GROUP_NAME_LEN = 0x248950, 6
 POOL_A = list(range(0x1D0, 0x200)) + [0x163, 0x164, 0x165, 0x17D, 0x17E, 0x17F]
 POOL_B = list(range(0x144, 0x163))
 # C 는 전투 중 BG3 타일맵이 가리키지 않고 큰 주문 연출만 덮는 칸. B 와 같이 연출 끝에 다시 올린다. 맨 나중에 쓴다
-# (한 화면에 85칸 넘게 쓸 때만). 096~098 은 전투 화면이 쓰는 칸이라 뺐다.
-POOL_C = list(range(0x099, 0x0B0)) + list(range(0x123, 0x144)) + list(range(0x166, 0x17D))
+# (한 화면에 85칸 넘게 쓸 때만). 096~098 은 전투 화면이 쓰는 칸이라 뺐다. 0A7·0AC·0AF 는 HP·MP(PAIRS)가 격자에 쓰는
+# 원래 글자 칸이라 뺀다(넣으면 그 자리에 한글 칸 그림이 찍혔다).
+POOL_C = ([t for t in range(0x099, 0x0B0) if t not in (0xA7, 0xAC, 0xAF)] + list(range(0x123, 0x144))
+          + list(range(0x166, 0x17D)))
 POOL = POOL_A + POOL_B + POOL_C
 # 원래 전투 글(메시지 432개·이름 표·탁점 92/93·숫자·채움 8D)이 격자에 쓰지 않는 바이트. 글자 H M P G(0C~0F)·6E·
 # ▼ 둘레(7B~7F)는 코드가 따로 쓸 수 있어 뺐다.
