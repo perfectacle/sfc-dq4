@@ -374,6 +374,8 @@ def build(rom, dq5, dq4, work):
     out = bytearray(dq4chapterbox.apply(out, dq4.read_bytes(), dq4menupatch.Font('galmuri11')))
     import dq4josa
     out = bytearray(dq4josa.apply(out))
+    import dq4msgnames
+    out = bytearray(dq4msgnames.apply(out))
     o = lorom(START_TABLE)
     if out[o:o + 6] != START_ORIG:
         raise SystemExit(f'{START_TABLE:06X}: 새 게임 첫 맵 표가 원래 값이 아님 {out[o:o + 6].hex()}')
