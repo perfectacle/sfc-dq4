@@ -253,8 +253,9 @@ def block_hook(rom):
     # BNE 는 값이 다를 때 다시 만들기(JSL 4바이트)를 건너뛰어야 한다
     if not 4 <= skip < 0x80:
         raise ValueError(f'훅 로더의 BNE 거리 {skip:02X} 가 다시 만들기 JSL 을 건너뛰지 않음')
-    if rebuild >> 16 != 0x01 or rebuild & 0xFFFF < 0x8000:
-        raise ValueError(f'훅 로더가 원래 표를 다시 만들려 부르는 {rebuild:06X} 가 뱅크 01 의 롬(8000~)이 아님')
+    # 스텁 4바이트가 뱅크 끝을 넘으면 CPU 는 같은 뱅크 0000 으로 돌아가지만 lorom() 은 다음 뱅크를 읽는다
+    if rebuild >> 16 != 0x01 or not 0x8000 <= rebuild & 0xFFFF <= 0xFFFC:
+        raise ValueError(f'훅 로더가 원래 표를 다시 만들려 부르는 {rebuild:06X} 가 뱅크 01 의 롬(8000~FFFC)이 아님')
     _code(rom, rebuild, '20 D8 8C 6B', '원래 표를 다시 만드는 스텁(JSR $8CD8 / RTL)')
     original = original_block_table(rom, count=2)[1] & 0xFFFF
     if probe != rom.u16((bank << 16 | source) + 2) or probe == original:
