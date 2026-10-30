@@ -62,9 +62,10 @@ class TableTests(unittest.TestCase):
         for c in bm.CODES:
             self.assertFalse(c in bm.ENDS or 0x01 <= c <= 0x0B or c >= 0xE2 or c in (0x83, 0x84, 0x8D), hex(c))
 
-    def test_pool_b_is_one_block(self):
-        b0 = bm.POOL.index(bm.POOL_B[0])
-        self.assertEqual(bm.POOL[b0:b0 + len(bm.POOL_B)], bm.POOL_B)
+    def test_restored_pools_are_one_block_and_fit_the_shadow(self):
+        b0, b1 = bm.restored()
+        self.assertEqual(set(bm.POOL[b0:b1]), set(bm.POOL_B + bm.POOL_C))
+        self.assertLessEqual((b1 - b0) * 8, bm.SHADOW_BYTES)
 
     def test_jong(self):
         self.assertEqual(bm.jong('라'), 0)

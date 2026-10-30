@@ -42,6 +42,7 @@ PUNCT = '!?.,…「」~0123456789'     # 숫자는 이름 안 숫자(가나 이�
 # 전투 메시지가 이름을 찍는 표: 주문·특기 3, 몬스터 4, 물건 5(dq5battletext.CONTROLS 의 F4·F6·F5, F7 의 몬스터 무리)
 NAME_TABLES = (3, 4, 5)
 NAMES_AT = 0x4DA000
+SHADOW_BYTES = 26 * 56
 # 전투 첫머리 창 25 의 「(이름)が　あらわれた！」(04:BFF5 가 이름 뒤에 04:C05B 의 9바이트를 찍음)를 바꾼 이름 뒤 말
 APPEAR = '{이} 나타났다!'
 GROUP_NAME, GROUP_NAME_LEN = 0x248950, 6
@@ -50,7 +51,7 @@ GROUP_NAME, GROUP_NAME_LEN = 0x248950, 6
 # B 는 큰 주문(ベギラゴン·バギクロス·メガンテ·メガザル 등) 연출만 덮는 칸이라 연출이 끝나면 사본에서 다시 올린다.
 POOL_A = list(range(0x1D0, 0x200)) + [0x163, 0x164, 0x165, 0x17D, 0x17E, 0x17F]
 POOL_B = list(range(0x144, 0x163))
-# C 는 전투 중 BG3 타일맵이 가리키지 않고 큰 주문 연출만 덮는 칸. 사본을 둘 WRAM 이 없어 복원하지 않으므로 맨 나중에 쓴다
+# C 는 전투 중 BG3 타일맵이 가리키지 않고 큰 주문 연출만 덮는 칸. B 와 같이 연출 끝에 다시 올린다. 맨 나중에 쓴다
 # (한 화면에 85칸 넘게 쓸 때만). 096~098 은 전투 화면이 쓰는 칸이라 뺐다.
 POOL_C = list(range(0x099, 0x0B0)) + list(range(0x123, 0x144)) + list(range(0x166, 0x17D))
 POOL = POOL_A + POOL_B + POOL_C
@@ -79,7 +80,8 @@ WRAM = '''!bm_last   = $A5F2          ; 마지막에 그린 글리프(조사용)
 !bm_q      = $A5FA          ; 글 큐 쓸 자리
 !bm_c      = $A5FC          ; 열
 !bm_k      = $A5FE          ; 풀 번호
-!bm_shadow = $A600          ; 풀 B 칸마다 평면 0 8바이트
+!bm_shadow = $2332          ; 풀 B·C 칸마다 평면 0 8바이트(110칸 880바이트). DQ5 「맡긴 동료」 칸(7E:2332~, 26바이트 × 56)으로
+                            ; DQ4 에는 몬스터 동료·モンスターじいさん 이 없어 쓰이지 않는다
 !bm_pat    = $A6F8          ; 풀 번호마다 위 칸 무늬(0 = 아래 칸), 164바이트
 !bm_used   = $A79C          ; 풀 번호마다 1비트: 화면 격자나 큐에 있음(끝에 1바이트 여유)
 !bm_base   = $A7B2          ; 풀 번호마다 1비트: 위 칸 바탕이 창 위 테두리(끝에 1바이트 여유)
@@ -359,6 +361,14 @@ def name_blob(entries, appear):
     return bytes(out), at
 
 
+def restored():
+    """연출 끝에 다시 올리는 풀 번호 범위(B·C, 이어져 있어야 함)."""
+    idx = sorted(POOL.index(t) for t in POOL_B + POOL_C)
+    if idx != list(range(idx[0], idx[0] + len(idx))):
+        raise ValueError('풀 B·C 가 이어져 있지 않음')
+    return idx[0], idx[0] + len(idx)
+
+
 def apply(d, font, render, first_glyph):
     """d(bytearray)에 메시지 흐름·표를 쓰고 asm 정의를 돌려준다. 원래 전투 글이 풀 코드를 쓰면 거부한다."""
     import dq5battletextwrite as bw
@@ -398,9 +408,12 @@ def apply(d, font, render, first_glyph):
     o = lorom(RUN_TABLE)
     if d[o:o + 2] != bytes.fromhex('d386'):
         raise ValueError(f'{RUN_TABLE:06X}: 코드 E3 처리기가 빈 처리기가 아님')
+    b0, b1 = restored()
+    if (b1 - b0) * 8 > SHADOW_BYTES:
+        raise ValueError('사본이 맡긴 동료 칸을 넘음')
     return (WRAM + f'!bm_index = ${at["index"]:06X}\n!bm_tile = ${at["tile"]:06X}\n!bm_josa = ${at["josa"]:06X}\n'
             f'!bm_jong = ${at["jong"]:06X}\n!bm_charset = ${at["charset"]:06X}\n!bm_codes = ${at["codes"]:06X}\n!bm_code = ${CODE_AT:06X}\n!bm_count = {len(POOL)}\n'
-            f'!bm_b0 = {POOL.index(POOL_B[0])}\n!bm_b1 = {POOL.index(POOL_B[0]) + len(POOL_B)}\n'
+            f'!bm_b0 = {b0}\n!bm_b1 = {b1}\n'
             f'!bm_run_stub = ${RUN_STUB:06X}\n!bm_run_table = ${RUN_TABLE:06X}\n!bm_space = {SPACE_PX}\n'
             f'!bm_digit0 = {punct["0"][0]}\n!bm_glyph_px = {GLYPH_PX}\n!bm_glyphs = {len(ne.GLYPHS)}\n!bm_names = ${NAMES_AT:06X}\n'
             f'!bm_appear = ${NAMES_AT + appear_at:06X}\n!bm_appear_count = {len(appear)}\n')
