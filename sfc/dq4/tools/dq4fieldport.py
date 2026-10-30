@@ -94,7 +94,7 @@ def _numbers():
 
 def own_blocks(field=0):
     """FC block kind -> its own DQ5 block on FC field `field`: one per FIELD_ART asset and borrowed block. The sea
-    keeps DQ5's block 0 and its moving water (dq4fieldgfx)."""
+    keeps DQ5's block 0, drawn with the DQ4 moving water (dq4fieldgfx)."""
     from dq4environmentmap import FIELD_ART
     out = {}
     for kind in sorted(BLOCKS):

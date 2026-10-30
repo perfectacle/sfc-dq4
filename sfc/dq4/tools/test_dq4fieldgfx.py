@@ -1,5 +1,5 @@
-"""Without a ROM, the 4bpp tile coding, the colour choice and the sea turn check; with rom/dq5.sfc, the generated
-tiles and blocks keep DQ5's tiles, terrain and attributes."""
+"""Without a ROM, the 4bpp tile coding, the colour choice and the sea frame check; with rom/dq5.sfc, the generated
+tiles and blocks keep DQ5's tiles, terrain and attributes, and the sea takes DQ5's sea colours."""
 
 import sys
 import unittest
@@ -51,16 +51,14 @@ class TileTest(unittest.TestCase):
         q = gfx.quarters(image)
         self.assertEqual((q[0][0], q[1][0], q[2][0], q[3][63]), ((0, 0, 0), (8, 0, 0), (0, 8, 0), (15, 15, 0)))
 
-    def test_sea_turn(self):
-        left, right = gfx.encode(list(range(16)) * 4), gfx.encode([0] * 64)
-        rows = [list(range(8)) + [0] * 8, list(range(8, 16)) + [0] * 8] * 4
-
-        def turned(k):
-            out = [r[k:] + r[:k] for r in rows]
-            return gfx.encode([v for r in out for v in r[:8]]), gfx.encode([v for r in out for v in r[8:]])
-
-        self.assertEqual(check.rotation([turned(3)], [(left, right)]), 3)
-        self.assertIsNone(check.rotation([(right, left[::-1])], [(left, right)]))
+    def test_sea_frame(self):
+        sys.path.insert(0, str(gfx.DQ5_TOOLS))
+        from dq5gfx import water_frames
+        src = b"".join(gfx.encode([(i + q) % 16 for i in range(64)]) for q in range(4))
+        for world in (0, 1, 2):
+            frames = water_frames(src, world)
+            self.assertEqual(check.sea_frame(frames[4], frames), 4)
+        self.assertIsNone(check.sea_frame(bytes(128), water_frames(src, 0)))
 
 
 @unittest.skipUnless(ROM.is_file(), "local source ROM not present")
@@ -97,6 +95,25 @@ class GenerateTest(unittest.TestCase):
             want = [self.original["tile_attributes"][u or lo] for lo, u in zip(lower, upper)]
             got = [self.attrs[u or lo] for lo, u in zip(block["lower"], block["upper"])]
             self.assertEqual(got, want, f"{kind:02X}")
+
+    def test_sea_takes_dq5_sea_colours(self):
+        raw = gfx.water(self.original["palettes"])
+        self.assertEqual(len(raw), 128)
+        used = {v for q in range(4) for v in gfx.decode(raw[q * 32:q * 32 + 32])}
+        sea = {v for t in gfx.SEA_TILES for v in gfx.decode(self.original["tiles"][t * 32:t * 32 + 32])}
+        self.assertEqual(used, sea)
+
+    def test_sea_frames_move_and_differ_from_dq5(self):
+        # sea_frame accepts any of the 16 frames, so a frozen or unpatched sea must be ruled out here.
+        sys.path.insert(0, str(gfx.DQ5_TOOLS))
+        from dq5gfx import water_frames
+        raw = gfx.water(self.original["palettes"])
+        at = 1 << 15 | 0xA719 & 0x7FFF
+        dq5 = ROM.read_bytes()[at:at + 128]
+        for world in (0, 1, 2):
+            frames = water_frames(raw, world)
+            self.assertEqual(len(set(frames)), 16, f"world {world}")
+            self.assertIsNone(check.sea_frame(dq5, frames), f"world {world}")
 
     def test_reef_is_rocks_over_the_sea(self):
         block = next(b for b in self.blocks if b["index"] == port.OWN_BLOCKS[gfx.REEF])
