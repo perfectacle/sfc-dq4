@@ -5,6 +5,7 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 ## 문서
 
 - [docs/dq4-environment-format.md](docs/dq4-environment-format.md): FC 원작의 색 역할과 DQ5 색·도트 구조로 새로 그린 환경 타일, FC 배치 비교 맵과 SFC 표시 검증
+- [docs/dq4-field-format.md](docs/dq4-field-format.md): FC 필드 0 을 DQ5 세계 0 에(블록 대응, 입구 자리, DQ5 원래 입구 옮기기, 지도·지형 실측)
 - [handoff.md](handoff.md): 포팅용 그래픽 시작점(타이틀·일러스트 보존, 스프라이트 거절 사유·참고 사이트·후속 제작 방향)
 - [docs/dq4-graphics.md](docs/dq4-graphics.md): 포팅용 스프라이트·샘플 맵·한글 타이틀·일러스트와 SFC 변환 규격
 - [docs/dq4-sprite-format.md](docs/dq4-sprite-format.md): SFC DQ5 필드 인물 실측(크기·색·눈·보행 프레임)과 그 규칙으로 그린 DQ4 인물 9명 스프라이트, MesenCE 표시 실험
@@ -183,3 +184,4 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [2026-10-30-36: 서장을 한 번에 걷는 검사](journal/2026-10-30-36-prologue-walk.md)
 - [2026-10-30-37: 세이브스테이트에서만 본 소리 문제를 전원부터 다시 재기](journal/2026-10-30-37-sound-poweron.md)
 - [2026-10-30-38: 저녁 식탁에 앉기와 명령 08](journal/2026-10-30-38-prologue-supper.md)
+- [2026-10-30-39: FC 필드 0 을 DQ5 세계 0 에](journal/2026-10-30-39-field-world0.md)
