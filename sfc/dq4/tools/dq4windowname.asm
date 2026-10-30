@@ -252,45 +252,52 @@ WnBattle:
 .original
     JML BmNameLookup
 
-; 24:A4E0. A = 글 바이트(M = 8), X = 줄 자리 + 칸. 전투 글 칸 풀의 코드면 짝 위 줄 코드를 위 줄(1DD5)에도 쓴다.
-; 한 줄 26칸을 넘는 글자는 버린다(긴 한글 이름). 넘겨 쓰면 다음 줄 위 칸을 덮는다.
+; 24:A4E0. A = 글 바이트(M = 8), X = 줄 자리 + 칸. 전투 글 칸 풀의 코드면 글 큐 머리에 짝 위 칸 코드(00 = 없음)가 있어,
+; 꺼내 위 줄(1DD5)에 쓴다. 한 줄 26칸을 넘는 글자는 버린다(긴 한글 이름). 넘겨 쓰면 다음 줄 위 칸을 덮는다.
 WnBattleChar:
-    PHA
-    LDA $0F0D
-    CMP #$1A
-    PLA
-    BCC +
-    JML $24A4EE
-+
-    STA $1DEF,X
     PHA
     PHX
     REP #$20
     AND #$00FF
     TAX
     LDA.l !bm_index,X
-    AND #$00FF
-    CMP #$00FF
-    BEQ .plain
-    TAX
-    LDA.l $7E0000|!bm_up,X
-    PLX
     SEP #$20
-    CMP #$00
+    CMP #$FF
+    BEQ .plain
+    ; 짝을 꺼내고 큐를 한 칸 당긴다
+    LDA $0ECB
+    PHA
+    LDX #$0000
+-
+    LDA $0ECC,X
+    STA $0ECB,X
+    INX
+    CPX #$003F
+    BCC -
+    STZ $0F0A
+    PLA
+    BRA .write
+.plain
+    LDA #$00
+.write
+    PLX
+    XBA                     ; 높은 바이트 = 위 칸 코드
+    LDA $0F0D
+    CMP #$1A
+    BCC +
+    PLA
+    JML $24A4EE
++
+    PLA
+    STA $1DEF,X
+    XBA
     BEQ +
     STA $1DD5,X
 +
-    PLA
-    INC $0F0D
-    JML $24A4EE
-.plain
-    PLX
-    SEP #$20
-    PLA
     INC $0F0D
     JML $24A4EE
 
-; 24:A5E9(JSL, DB = 24, M = 8). 글 바이트 하나를 타일맵 낱말로. 풀 코드면 그 칸(타일 100~1FF)을 가리키게 타일 bit8 을 켜고,
+; 24:A5E9(JSL, DB = 24, M = 8). 글 바이트 하나를 타일맵 낱말로. 풀 코드면 그 칸을 가리키게 타일 bit8 을 칸 번호대로,
 ; 아니면 끈다(줄이 올라가며 같은 자리에 다른 글자가 올 수 있음).
 WnBattleCell:
     LDA $1DD5,Y
@@ -308,8 +315,11 @@ WnBattleCell:
     PLX
     SEP #$20
     STA.l $7E5546,X
+    XBA
+    STA.l $7E0000|!bm_pt+1  ; 타일 bit8(풀 C 의 099~0AF 는 0)
     LDA.l $7E5547,X
-    ORA #$01
+    AND #$FE
+    ORA.l $7E0000|!bm_pt+1
     STA.l $7E5547,X
     RTL
 .plain
