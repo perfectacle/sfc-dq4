@@ -426,6 +426,24 @@ class VehicleLayoutTests(unittest.TestCase):
             cells[0] = 'v' + cells[0]
             self.assertTrue(patch(self.rom, doc, vehicle_at=0x04FEE0)['writes'])
 
+    def test_vflip_offset_limit_dragon(self):
+        # 여러 블록을 옮기는 82-2 는 OAM 한도 안에서 칸 127 을 넘는다. 9프레임(82-1 3x3, 82-2 2x2)이면 그림자 칸은
+        # 4 × 9 × 4 = 144 이고, left5 의 셋째 칸이 칸 130 이다(방향 간격 36칸, 프레임 간격 4칸).
+        def doc(v_key):
+            rows = []
+            for part, n in (('82-1', 3), ('82-2', 2)):
+                keys = [f'{d}{f}' for d in ('up', 'right', 'down', 'left') for f in range(9)]
+                if part == '82-1':
+                    keys += ['land0', 'land1', 'tenkuu0', 'tenkuu1', 'tenkuu2', 'tenkuu3']
+                cells = {k: [' '.join(f'{(r * n + c) % 0x10:02X}' for c in range(n)) for r in range(n)] for k in keys}
+                if part == '82-2':
+                    cells[v_key] = ['00 01', 'v02 03']
+                rows.append({'part': part, 'size': f'{n}x{n}', 'frames': 9, 'cells': cells})
+            return {'format': FORMAT, 'vehicles': rows}
+        with self.assertRaisesRegex(ValueError, 'FE'):
+            patch(self.rom, doc('left5'), vehicle_at=0x0BFBB0)
+        self.assertTrue(patch(self.rom, doc('up0'), vehicle_at=0x0BFBB0)['writes'])
+
     def test_oam_limit(self):
         # 칸 수를 바꾼 탈것은 부분마다 한 블록의 칸 합 + 주인공 8 이 128 을 넘으면 거부한다(1프레임 12x9 + 3x3 + 3x1 = 120).
         def doc(size3):
