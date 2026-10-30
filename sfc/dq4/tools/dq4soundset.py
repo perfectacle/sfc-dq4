@@ -22,6 +22,7 @@ import dq4soundbank as bank  # noqa: E402
 import dq4soundcheck as check  # noqa: E402
 import dq4soundpatch as patch  # noqa: E402
 import dq4soundport as port  # noqa: E402
+import dq4soundsfx as sfx_port  # noqa: E402
 
 MARGIN = 128  # 어림한 시퀀스와 실제 시퀀스의 악기 명령 차이
 # 곡이 울리는 동안 보내는 샘플은 샘플 사이에 0~40프레임씩 쉬어, 전투 시작 실측에서 평균 프레임당 약 59바이트였다
@@ -164,7 +165,7 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
           stream=None, stream_ticks=None, budgets=None, pinned=(), resident_from=None, drop_resident=(), lanes=None, drop_tracks=None,
           level_db=None, programs=None, set_records=None, keep_regions=None, track_db=None,
           fast_receive=False, chains=(), holds=(), early_song=False, load_pump=False, vehicle_song=False,
-          keep_samples=False, prefetch=None, release_failed=False, unpin=()):
+          keep_samples=False, prefetch=None, release_failed=False, unpin=(), effects=None):
     """stream 은 {곡 자리: 곡 앞 샘플 바이트 상한}. 그 곡은 샘플 일부를 곡이 울리는 동안 보낸다(transfer_plan).
 
     stream_ticks 는 {곡 자리: 틱}. 곡 앞 바이트 상한을 곡이 처음 그 틱 안에 쓰는 샘플의 합으로 정하고, 도착 어림보다
@@ -230,6 +231,9 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
     pinned_sizes = {x: len(patch.sequence_bytes(data, x)) for x in patch.pinned_sequences(data)
                     if x not in replaced and x not in unpin}
     pinned_sizes |= {slot: size + MARGIN for slot, _, _, _, size, _ in plans if slot in pinned}
+    # 바꾼 효과음 시퀀스는 늘 두는 채로 커지므로, 곡 예산을 셈하기 전에 그 크기를 넣는다
+    effect_sequences, effect_report = sfx_port.build_effects(data, assets, effects, patch.sequence_bytes) if effects else ({}, {})
+    pinned_sizes |= {seq: len(new) for seq, new in effect_sequences.items()}
 
     def make_bank(score, budget, limit, loose, overrides, keep=()):
         bank_score = song_score(score, drop_programs=set(overrides))
@@ -473,6 +477,11 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
                                                   'bytes': tail}
     if sorted(mains) != sorted(chains):
         raise ValueError('every chained song must be a replaced song (install numbers the bodies in slot order)')
+    for seq, new in effect_sequences.items():
+        size, first, *ids = records[seq]
+        replacements[seq] = patch.Replacement(new, tuple(ids), first)
+    pinned = list(pinned) + list(effect_sequences)
+
     def install():
         return patch.install(base, replacements, sample_resources=resources, map_fades=map_fades,
                              preview=preview, pinned=tuple(pinned),
@@ -510,7 +519,7 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
         except ValueError as exc:
             unreplaced[f'{song:02X}'] = {'error': str(exc)}
     install_report['unreplaced_songs'] = unreplaced
-    return rom, {'install': install_report, 'songs': reports}
+    return rom, {'install': install_report, 'songs': reports, 'effects': effect_report}
 
 
 def main():
@@ -563,6 +572,8 @@ def main():
     ap.add_argument('--prefetch', action='append', default=[], metavar='VEHICLE=MAP',
                     help='append front samples of MAP song to VEHICLE song record so they load while riding and survive dismount '
                          '(needs --keep-samples)')
+    ap.add_argument('--sfx', action='append', default=[], metavar='SEQ-BRANCH=NDS',
+                    help='replace a DQ5 sound effect branch (0C SEQ BRANCH) with an NDS noise sound effect (dq4soundsfx)')
     ap.add_argument('--unpin', action='append', default=[], metavar='SONG',
                     help='drop an unreplaced sequence from the pinned list so it loads when played (frees an SPC sequence slot)')
     ap.add_argument('--release-failed', action='store_true',
@@ -616,6 +627,8 @@ def main():
                         early_song=args.early_song, load_pump=args.load_pump,
                         vehicle_song=args.vehicle_song, keep_samples=args.keep_samples,
                         release_failed=args.release_failed, unpin=[int(x, 16) for x in args.unpin],
+                        effects={(int(k.split('-')[0], 16), int(k.split('-')[1], 16)): v
+                                 for k, v in (x.split('=') for x in args.sfx)},
                         prefetch={int(v, 16): int(m, 16) for v, m in (x.split('=') for x in args.prefetch)})
     from dq5build import make_ips
     from kr_patch import ips
