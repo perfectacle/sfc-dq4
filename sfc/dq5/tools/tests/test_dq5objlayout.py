@@ -8,7 +8,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import dq5sprite as S  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
 from dq5objlayout import (FORMAT, REGION_END, SCENES, TABLE, VEHICLE_FRAMES, VEHICLE_PARTS, address,  # noqa: E402
-                          dump, normalized, object_entry, parse_token, patch, token, vehicle_part)
+                          dump, normalized, object_entry, parse_token, patch, scene_layout, token, vehicle_part)
+
+ROM = Path(__file__).resolve().parents[4] / 'rom' / 'dq5.sfc'
 
 
 def put(data, addr, raw):
@@ -86,6 +88,15 @@ class TokenTests(unittest.TestCase):
         for bad in ('16FE10', '15:FE10', '16:7FFF', '16:FE1', None):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 address(bad)
+
+    def test_vehicle_bank(self):
+        # 탈것 루틴은 칸 표 뱅크를 데이터 뱅크로 두고 STX $1997 을 써서 7E:1997 이 비치는 뱅크만 받는다.
+        for ok in ('04:FEE0', '3F:8000', '84:8000', 'BF:FFFF'):
+            with self.subTest(ok=ok):
+                self.assertEqual(address(ok, any_bank=True), int(ok.replace(':', ''), 16))
+        for bad in ('40:8000', '7D:FEE0', '7E:8000', 'C0:8000', '04:7FFF'):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                address(bad, any_bank=True)
 
 
 class PatchTests(unittest.TestCase):
@@ -255,8 +266,9 @@ class VehicleLayoutTests(unittest.TestCase):
         for name, extra in cases.items():
             with self.subTest(name=name), self.assertRaises(ValueError):
                 patch(self.rom, {'format': FORMAT, **extra}, vehicle_at=0x04FEE0)
-        with self.assertRaises(ValueError):
-            patch(self.rom, base, vehicle_at=0x047F00)
+        for at in (0x047F00, 0x408000, 0x7DFEE0):
+            with self.subTest(at=hex(at)), self.assertRaises(ValueError):
+                patch(self.rom, base, vehicle_at=at)
 
     def dragon(self, frames, size=None):
         """マスタードラゴン 두 부분. 새 프레임은 프레임 2 의 칸, size 면 부분 1 줄마다 첫 칸을 더하고 마지막 줄을 한 번 더."""
@@ -302,6 +314,23 @@ class VehicleLayoutTests(unittest.TestCase):
         self.assertEqual(dump(after)['vehicles'], normalized(doc, self.rom)['vehicles'])
         # 프레임 수가 그대로면 제자리에 쓴다.
         self.assertEqual(len(patch(self.rom, self.dragon(3))['writes']), 0)
+
+    def test_relocated_round_trip_is_empty(self):
+        # 칸 표를 옮긴 롬에 그 롬의 dump 나 같은 문서를 다시 넣으면 칸 수가 그대로라 제자리 쓰기 0개다.
+        doc = self.dragon(4)
+        after = self.build(doc, 0x0BFBB0)
+        self.assertEqual(patch(after, dump(after))['writes'], [])
+        self.assertEqual(patch(after, doc, vehicle_at=0x0BFBB0)['writes'], [])
+
+    @unittest.skipUnless(ROM.is_file(), '롬 없음')
+    def test_scene_layout_real_rom(self):
+        # 4x4 マスタードラゴン: 프레임 수마다 착륙 X·天空城 간격 S. 6프레임이면 S 가 한 바이트를 넘는다.
+        rom = Rom(ROM.read_bytes())
+        for frames, want in ((1, (2, 0x40)), (2, (8, 0x60)), (4, (5, 0xC0)), (5, (0xB, 0xE0))):
+            with self.subTest(frames=frames):
+                self.assertEqual(scene_layout(rom, '82-1', frames, 16)[:2], want)
+        with self.assertRaises(ValueError):
+            scene_layout(rom, '82-1', 6, 16)
 
     def test_dragon_size(self):
         # 5x5 · 3프레임: 天空城 37C7 = C8(블록 12~15), 착륙 X = 8(블록 17·16).
@@ -373,6 +402,17 @@ class VehicleLayoutTests(unittest.TestCase):
         self.assertEqual(vehicle_part(after, '81-2')['vflip'], set(range(12)))
         self.assertEqual(after.u24(VEHICLE_PARTS['81-2']['vflip']), 0x04FEE0 + 32 + 12)
         self.assertEqual(dump(after)['vehicles'], normalized(doc, self.rom)['vehicles'])
+
+    def test_vflip_offset_limit(self):
+        # 상하 반전 칸 오프셋은 칸 × 2 한 바이트라 칸 127(FE)까지다. 12x11 의 칸 130 은 거부한다.
+        cells = [' '.join(('v' if r * 12 + c == 130 else '') + f'{(r * 12 + c) % 0x80:02X}' for c in range(12))
+                 for r in range(11)]
+        doc = {'format': FORMAT, 'vehicles': [{'part': '81-2', 'size': '12x11', 'cells': {'all': cells}}]}
+        with self.assertRaisesRegex(ValueError, 'FE'):
+            patch(self.rom, doc, vehicle_at=0x04FEE0)
+        cells[10] = cells[10].replace('v', '')
+        cells[0] = 'v' + cells[0]
+        self.assertTrue(patch(self.rom, doc, vehicle_at=0x04FEE0)['writes'])
 
     def test_two_vehicles_in_one_doc(self):
         # 탈것 번호 차례로 --vehicle-at 뒤에 이어 둔다: 양탄자 3프레임(216칸) 다음에 天空城 부분 1(32칸)·2(12칸).

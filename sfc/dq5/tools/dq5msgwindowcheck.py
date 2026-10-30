@@ -42,10 +42,15 @@ def require(condition, message):
 
 
 def same_until(calls, moved):
-    """두 롬의 실행 기록이 처음 갈리는 프레임. 같은 입력이라도 몇 턴 뒤 갈릴 수 있어 그 앞까지만 견준다."""
+    """두 롬의 실행 기록이 처음 갈리는 프레임. 같은 입력이라도 몇 턴 뒤 갈릴 수 있어 그 앞까지만 견준다.
+    한쪽 기록이 먼저 끝나면 그 뒤는 견줄 수 없어 짧은 기록의 마지막 프레임까지로 한다."""
+    calls, moved = [line for line in calls if line], [line for line in moved if line]
     for a, b in zip(calls, moved):
         if a != b:
-            return min(int(a.split()[0]) if a else MAXF, int(b.split()[0]) if b else MAXF)
+            return min(int(a.split()[0]), int(b.split()[0]))
+    if len(calls) != len(moved):
+        short = min(calls, moved, key=len)
+        return int(short[-1].split()[0]) if short else 0
     return MAXF
 
 

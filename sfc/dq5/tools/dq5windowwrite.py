@@ -78,7 +78,8 @@ def header(raw):
 
 def message_sites(x, y):
     """메시지 창 X·Y 에 맞춘 코드 피연산자: (명령 주소, 여는 바이트, 피연산자 크기, 값, 설명).
-    BG3 타일맵 버퍼(7E:5000) 안 바이트 위치이고, 원래 롬(2,21)의 값과 같다. ▼ 는 오른쪽 테두리 바로 안 칸."""
+    BG3 타일맵 버퍼(7E:5000) 안 바이트 위치이고, 원래 롬(2,21)의 값과 같다. ▼ 는 오른쪽 테두리 바로 안 칸.
+    STA long(9F)은 아래 두 바이트만 고치고, 뱅크 바이트 7E 는 원래 꼴인지 볼 때만 쓴다."""
 
     def at(row, col):
         return (row * 32 + col) * 2
@@ -122,11 +123,12 @@ def message_edits(rom, table, sharing, rows):
         out.append((table[n], bytes(new), olds[n], f'window {n:02X}'))
     for (addr, op, size, before, note), (_, _, _, after, _) in zip(message_sites(base['x'], base['y']),
                                                                   message_sites(want['x'], base['y'])):
-        old = read(rom, addr, 1 + size)
-        if old[0] != op or int.from_bytes(old[1:], 'little') != before:
+        long = op == 0x9F
+        old = read(rom, addr, 1 + size + long)
+        if old[0] != op or int.from_bytes(old[1:1 + size], 'little') != before or long and old[-1] != 0x7E:
             raise ValueError(f'{addr >> 16:02X}:{addr & 0xFFFF:04X}: {note} 코드가 원래 꼴이 아님')
         if after != before:
-            out.append((addr + 1, after.to_bytes(size, 'little'), old[1:], f'message window: {note}'))
+            out.append((addr + 1, after.to_bytes(size, 'little'), old[1:1 + size], f'message window: {note}'))
     return out
 
 

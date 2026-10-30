@@ -97,8 +97,7 @@ def address(value, any_bank=False):
         raise ValueError('주소는 BB:AAAA 문자열이어야 함')
     bank, low = (int(p, 16) for p in value.split(':'))
     if any_bank:
-        if low < 0x8000 or bank >= 0x7E:
-            raise ValueError('--vehicle-at 은 뱅크 00~7D 의 8000~FFFF 여야 함(칸 표를 LDY # 와 데이터 뱅크로 읽음)')
+        vehicle_bank(bank << 16 | low)
         return bank << 16 | low
     if bank != BANK or low < 0x8000:
         raise ValueError(f'--at 은 {BANK:02X} 뱅크 8000~FFFF 여야 함(표와 칸 바이트를 PHK·PLB 로 읽음)')
@@ -296,6 +295,14 @@ def plan_objects(rom, rows, at):
 
 # --- 탈것 ----------------------------------------------------------------------------------------------------------
 
+def vehicle_bank(at):
+    """칸 표는 LDY # 로 읽고, 세 탈것 루틴은 PLB 로 칸 표 뱅크를 데이터 뱅크로 둔 채 STX $1997 을 쓴다(01:BDB7·01:C0FD·
+    01:C49C). 40~7D 뱅크면 그 쓰기가 롬으로 가 타일 첫 자리가 깨진다."""
+    if at & 0xFFFF < 0x8000 or at >> 16 & 0x7F >= 0x40:
+        raise ValueError(f'--vehicle-at {cpu(at)}: 칸 표는 7E:1997 이 비치는 뱅크 00~3F·80~BF 의 8000~FFFF 여야 함'
+                         '(탈것 루틴이 칸 표 뱅크를 데이터 뱅크로 두고 STX $1997 을 씀)')
+
+
 def vehicle_frames(rom, vid):
     at = VEHICLE_FRAMES[vid]
     return (rom.u8(at) & 0x0F) + 1 if at else 1
@@ -444,7 +451,7 @@ def plan_vehicle_cells(rom, names, by_part, cur):
             toks = vehicle_cells(cells, key, p['rows'], p['cols'] * p['rows'], label, True)
             for i_, (b, v) in zip(keys[key], toks):
                 if v != (i_ in p['vflip']):
-                    raise ValueError(f'{label} {key}: 상하 반전 칸은 01:C42D·01:C160 표가 정해 칸 수가 그대로면 바꿀 수 없음')
+                    raise ValueError(f'{label} {key}: 상하 반전 칸은 상하 반전 표가 정해 칸 수가 그대로면 바꿀 수 없음')
                 addr = p['table'] + i_
                 if want.setdefault(addr, (b, f'{label} {key}'))[0] != b:
                     raise ValueError(f'{label} {key}: {cpu(addr)} 을 {want[addr][1]} 이 다른 값으로 씀')
@@ -497,8 +504,7 @@ def plan_vehicle_layout(rom, vid, names, by_part, cur, layout, frames, at):
     """칸 수·프레임 수를 바꾼 탈것: 부분 모두의 칸 표를 at 에 차례로 두고 즉값을 고친다. 바꾼 부분은 그리는 블록만
     옮겨 쓰게($06 = 블록 수 − 1) 하고 모든 블록의 칸을 받는다. 그대로인 부분은 원래 옮기던 범위를 그대로 베낀다.
     걷기 밖 장면 블록(SCENES)은 scene_layout 자리에 두고, 원래 표보다 긴 상하 반전 표는 칸 표 뒤에 둔다."""
-    if at & 0xFFFF < 0x8000:
-        raise ValueError(f'--vehicle-at {cpu(at)}: 칸 표는 LDY # 로 읽어 뱅크의 8000~FFFF 여야 함')
+    vehicle_bank(at)
     blob, imm, tables = bytearray(), [], []
     for n in names:
         site, p, new = VEHICLE_PARTS[n], cur[n], layout[n]
@@ -513,7 +519,7 @@ def plan_vehicle_layout(rom, vid, names, by_part, cur, layout, frames, at):
                 toks = vehicle_cells(cells, key, p['rows'], p['cols'] * p['rows'], label, True)
                 for i_, (b, v) in zip(keys[key], toks):
                     if v != (i_ in p['vflip']):
-                        raise ValueError(f'{label} {key}: 상하 반전 칸은 01:C42D·01:C160 표가 정해 칸 수가 그대로면 바꿀 수 없음')
+                        raise ValueError(f'{label} {key}: 상하 반전 칸은 상하 반전 표가 정해 칸 수가 그대로면 바꿀 수 없음')
                     data[i_] = b
         else:
             blocks = vehicle_blocks(new['cols'], new['rows'], new['dir'], new['frame'], frames)

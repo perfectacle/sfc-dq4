@@ -36,6 +36,8 @@ def fixture():
         data[at:at + 4] = bytes([head, 0x95 if n == 0x18 else 0x15, 0x1C, 0x07])
     for addr, op, size, value, _ in message_sites(2, 21):
         data[lorom(addr):lorom(addr) + 1 + size] = bytes([op]) + value.to_bytes(size, 'little')
+        if op == 0x9F:
+            data[lorom(addr) + 1 + size] = 0x7E
     return bytes(data)
 
 
@@ -168,9 +170,10 @@ class WindowWriteTests(unittest.TestCase):
         for windows in rows:
             with self.subTest(windows=windows), self.assertRaises(ValueError):
                 edits(self.rom, {'format': FORMAT, 'windows': windows})
-        broken = Rom(self.with_byte(0x24A5EC, 0x8F))
-        with self.assertRaises(ValueError):
-            edits(broken, {'format': FORMAT, 'windows': [{'index': '25', 'x': 4}]})
+        # 여는 바이트, 피연산자(24:A51F = B9), STA long 의 뱅크(24:A5EF = 7F)가 원래 꼴이 아니면 멈춘다.
+        for addr, value in ((0x24A5EC, 0x8F), (0x24A51F, 0xB9), (0x24A5EF, 0x7F), (0x248852, 0x00)):
+            with self.subTest(addr=hex(addr)), self.assertRaises(ValueError):
+                edits(Rom(self.with_byte(addr, value)), {'format': FORMAT, 'windows': [{'index': '25', 'x': 4}]})
         moved = Rom(self.with_byte(self.first + 0x18 * 8, 0x04))
         with self.assertRaises(ValueError):
             edits(moved, {'format': FORMAT, 'windows': [{'index': '25', 'x': 3}]})
