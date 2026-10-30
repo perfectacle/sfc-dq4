@@ -195,9 +195,9 @@ class TileGrowTests(unittest.TestCase):
         self.assertEqual(cur['worlds']['world1'], (bytes(w1), [3] * 1024))
         self.assertEqual(cur['worlds']['world2'], cur['worlds']['world0'])
         # 세계 1 의 니블이 다르면 니블 훅 대신 00:BBAC 를 $1949 로 세계마다 워드 표를 고르는 코드로 바꾼다.
-        # 표 16KB 는 늘린 타일 뒤(36:C000)에 둔다.
+        # 표 14KB 는 늘린 타일 뒤(36:C000)에 두고, 아래층 표는 위층 세계 셋 뒤(36:D800)에서 시작한다.
         self.assertEqual(rom.d[lorom(fgw.PALETTE_READ):lorom(fgw.PALETTE_READ) + 38],
-                         fgw.palette_worlds(0x36C000, 0x36E000))
+                         fgw.palette_worlds(0x36C000, 0x36D800))
         self.assertEqual([w['at'] for w in m['writes'] if w['note'].startswith('세계마다 타일맵 워드 표')], ['36:C000'])
         for upper in (True, False):
             self.assertEqual(dq5field.tile_word(rom, 811, upper, 1), 811 | (3 * 4 + 8) << 8)
@@ -215,17 +215,17 @@ class TileGrowTests(unittest.TestCase):
         return [w['at'] for w in m['writes'] if w['note'].startswith('세계마다 타일맵 워드 표')]
 
     def test_word_table_same_bytes_as_tiles(self):
-        # 워드 표 16KB 와 바이트가 같은 늘린 타일 512개를 세계 1 에 두어도 타일 주소와 표 주소가 따로다.
+        # 워드 표 14KB 와 바이트가 같은 늘린 타일 448개를 세계 1 에 두어도 타일 주소와 표 주소가 따로다.
         nib0 = self.doc['tile_palettes']
-        nib1 = nib0[:fgw.TILES] + [3] * fgw.TILES
-        words = b''.join(fgw.palette_world_words([nib0, nib1, nib0, nib0]))
+        nib1 = nib0[:fgw.TILES] + [3] * 448
+        words = fgw.palette_world_words([nib0, nib1, nib0])
         self.world_doc('world1', words, nib1)
         m = fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x348000, extra_at=0x358000)
         rom = Rom(apply(self.data, m))
         self.assertEqual(fgw.current(rom)['worlds']['world1'][0][fgw.TILES * 32:], words)
         self.assertEqual(self.word_notes(m), ['36:8000'])
-        self.assertEqual(dq5field.tile_word(rom, 1023, True, 1), 1023 | (3 * 4 + 8) << 8)
-        # 세계 1 의 16KB 가 35:C000~FFFF 에 꼭 맞으면 표는 다음 뱅크 8000 에 둔다
+        self.assertEqual(dq5field.tile_word(rom, 959, True, 1), 959 | (3 * 4 + 8) << 8)
+        # 세계 1 의 14KB(35:C000~F7FF) 뒤에 표가 들어가지 않으면 다음 뱅크 8000 에 둔다
         m = fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x348000, extra_at=0x359A80)
         self.assertEqual([w['at'] for w in m['writes'] if w['note'].startswith('늘린 타일')], ['35:9A80', '35:C000'])
         self.assertEqual(self.word_notes(m), ['36:8000'])
@@ -250,7 +250,7 @@ class TileGrowTests(unittest.TestCase):
         self.world_doc('world2', w2, nib2)
         m = fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x348000, extra_at=0x358000)
         notes = [w['at'] for w in m['writes'] if w['note'].startswith('늘린 타일')]
-        # 9,600바이트·16KB 는 35:8000·35:A580, 셋째 16KB 는 36:8000, 표는 36:C000~FFFF 에 꼭 들어감
+        # 9,600바이트·16KB 는 35:8000·35:A580, 셋째 16KB 는 36:8000, 표 14KB 는 36:C000~F7FF
         self.assertEqual(notes, ['35:8000', '35:A580', '36:8000'])
         self.assertEqual(self.word_notes(m), ['36:C000'])
         rom = Rom(apply(self.data, m))
@@ -363,14 +363,20 @@ class TileWordBoundaryTests(unittest.TestCase):
 
     def test_world_word_tables(self):
         d = bytearray(0x200000)
-        put(d, dq5field.PALETTE_SITE, fgw.palette_worlds(0x308000, 0x30A000))
-        worlds = [self.NIB, self.NIB[::-1], [n ^ 5 for n in self.NIB], self.NIB]
-        put(d, 0x308000, b''.join(fgw.palette_world_words(worlds)))
+        put(d, dq5field.PALETTE_SITE, fgw.palette_worlds(0x308000, 0x308000 + fgw.WORD_LOWER))
+        worlds = [self.NIB, self.NIB[::-1], [n ^ 5 for n in self.NIB]]
+        words = fgw.palette_world_words(worlds)
+        self.assertEqual(len(words), 14 * 1024)
+        put(d, 0x308000, words)
         rom = Rom(bytes(d))
         for w, nib in enumerate(worlds):
             for t in (0, 511, 512, 1023):
                 for upper in (True, False):
                     self.assertEqual(dq5field.tile_word(rom, t, upper, w), self.word(t, upper, nib))
+        # $1949 & 3 = 3 이어도 표 안(아래층 세계 0)을 읽어 세계 0 의 타일 번호가 나온다. 위층 팔레트는 니블 3비트.
+        for t in (0, 511, 512, 1023):
+            self.assertEqual(dq5field.tile_word(rom, t, False, 3), self.word(t, False, self.NIB))
+            self.assertEqual(dq5field.tile_word(rom, t, True, 3), self.word(t, False, self.NIB))
         with self.assertRaisesRegex(ValueError, '니블 표가 없음'):
             dq5field.nibble_table(rom)
 
