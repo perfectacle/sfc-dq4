@@ -254,13 +254,14 @@ class Bit9HookTests(unittest.TestCase):
             put(d, site, want)
         put(d, 0x00BBF7, b'\x08' + fw.FAST_ORIG)
         put(d, 0x00BDC5, b'\x08\x8b\xc2\x30' + fw.FAST_ORIG)
+        put(d, fw.MAP_SITE, fw.MAP_ORIG)
         d = apply(d, ft.edits(Rom(bytes(d)), document(blocks=new_blocks(1600)), blocks_at=0x3C8000))
         rom = Rom(bytes(d))
         cells = {y * 256 + x for x, y in fw.changed_cells(rom)}
         grids = {0: [5 if i in cells else (i * 37 + i // 256) % 1600 for i in range(fw.SIZE)],
                  1: [5 if i in cells else (i * 11) % 1024 for i in range(fw.SIZE)]}
         out, _ = fw.plane_writes(rom, bytes(d), grids, 0x318000)
-        self.assertEqual([w['at'] for w in out[-2:]], ['00:BBF8', '00:BDC9'])
+        self.assertEqual([w['at'] for w in out[-3:]], ['00:BBF8', '00:BDC9', '03:CB07'])
         self.assertEqual([w['at'] for w in out if '반 바이트' in w['note']], ['32:8000', '33:8000'])
         for w in out:
             put(d, int(w['at'][:2], 16) << 16 | int(w['at'][3:], 16), bytes.fromhex(w['hex']))
@@ -270,6 +271,10 @@ class Bit9HookTests(unittest.TestCase):
         put(d, 0x00BC46, b'\x28\x60')
         put(d, 0x00BC6D, b'\x60')
         put(d, 0x00BC43, b'\x20\x6d\xbc')
+        # 세계 지도 화면의 점: M 8비트·X 16비트(X = 07FE, Y = 03FF)로 03:CB07 을 JSR 하고, 03:CB15 는 원래처럼
+        # CLC / ADC #$20 / STA $CD / RTS.
+        put(d, 0x039000, b'\xe2\x20\xc2\x10\xa2\xfe\x07\xa0\xff\x03\x20\x07\xcb\x6b')
+        put(d, 0x03CB15, b'\x18\x69\x20\x85\xcd\x60')
         rom = Rom(bytes(d))
         checked = {'wide': 0, 'narrow': 0}
         for world, (x, y) in ((w, (x, y)) for w in (0, 1, 3) for x, y in ((0, 0), (1, 1), (37, 300), (300, 37), (511, 2),
@@ -293,6 +298,15 @@ class Bit9HookTests(unittest.TestCase):
             terrain.dbr = 0x01
             terrain.jsl(0x009010)
             self.assertEqual((terrain.a & 0xFFFF, terrain.dbr, terrain.s), (n, 0x01, s), f'세계 {world} ({x},{y}) 지형')
+            # 03:CB07: $CE·$D0 을 $90·$92 에 두고 지형 + 20 을 $CD 에, X 는 그대로
+            if x < 0x200 and y < 0x200:
+                dot = Cpu(bytes(d), bytes(wram))
+                dot.wram[0xCE], dot.wram[0xCF], dot.wram[0xD0], dot.wram[0xD1] = x & 0xFF, x >> 8, y & 0xFF, y >> 8
+                dot.dbr = 0x03
+                dot.jsl(0x039000)
+                self.assertEqual((dot.wram[0xCD], dot.x, dot.y, dot.s, bytes(dot.wram[0x90:0x94])),
+                                 (dq5field.terrain(rom, n) + 0x20, 0x07FE, 0x03FF, s, bytes(wram[0x90:0x94])),
+                                 f'세계 {world} ({x},{y}) 점')
             if n < 511:
                 self.assertEqual((cpu.x, cpu.y), (n * 5 + q, q), f'세계 {world} ({x},{y}) 번호 {n}')
                 checked['narrow'] += 1
@@ -308,6 +322,10 @@ class Bit9HookTests(unittest.TestCase):
         cpu.wram[0x90], cpu.wram[0x91], cpu.a = 0x00, 0x02, 0x1234
         cpu.jsl(0x009000)
         self.assertEqual(cpu.a & 0xFFFF, 0)
+        dot = Cpu(bytes(d), bytes(0x20000))
+        dot.wram[0xCE], dot.wram[0xCF], dot.wram[0x10000] = 0x00, 0x02, 0x33
+        dot.jsl(0x039000)
+        self.assertEqual((dot.wram[0xCD], dot.x, dot.y), (dq5field.terrain(rom, 0) + 0x20, 0x07FE, 0x03FF))
         self.assertEqual(fw.nibble_plane([0, 512, 1024, 1536])[:2], bytes([0x20, 0x64]))
 
     def test_plane_writes_rejects(self):
