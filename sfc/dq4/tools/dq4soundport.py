@@ -44,6 +44,7 @@ class Conversion:
     sequence: bytes
     samples: list[int]
     report: dict
+    chain: bytes | None = None  # split_tick 를 주면 본체 시퀀스(sequence 는 앞부분)
 
 
 def dq5_tempo(value):
@@ -534,13 +535,16 @@ def compact(lines):
     return head + program.lines()
 
 
-def execution_trace(seq, ticks, peek=False):
+def execution_trace(seq, ticks, peek=False, chain=None):
     """생성한 명령의 실행 시각·순서를 기록해 서브루틴·되풀이 치환을 검산한다.
 
     peek 이면 음표(00~9F) 사건마다 15E5 가 실제 자리에서 미리 보는 다음 바이트가 쉼인지를 셋째 값으로 붙인다.
+    chain(본체 시퀀스)을 주면 F7 m t 에서 본체의 t 번째 트랙 머리로 넘어간다(본체가 이미 있다고 봄).
     """
     tracks = []
-    for start in header(seq)[1]:
+    top = seq
+    for start in header(top)[1]:
+        seq = top
         pc, tick, duration, stack, events = start, 0, 0, [], []
         counter = 0
         guard = 0
@@ -549,6 +553,14 @@ def execution_trace(seq, ticks, peek=False):
             if guard > max(10000, ticks * 100):
                 raise ValueError('sequence does not advance')
             op = seq[pc]
+            if op == 0xF7:
+                # dq5song.step 은 F7 을 1바이트(원래 드라이버에서 아무것도 안 함)로 읽지만, 고친 드라이버는 F7 m t 를 읽는다.
+                # m < 80 은 나눈 곡의 본체로 넘어감, FE·FF 는 곡 붙들기(시각에 영향 없음)
+                if chain is not None and seq[pc + 1] < 0x80:
+                    pc, seq = header(chain)[1][seq[pc + 2]], chain
+                else:
+                    pc += 3
+                continue
             nxt, _, target, _ = step(seq, pc)
             if op == 0xEA:
                 pc = target
@@ -615,7 +627,8 @@ def seconds_to_tick(tempos, seconds):
 
 
 def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_tolerance_db=1.0,
-            tail_ticks=12, release_rate=0x1C, sample_order=None, arrivals=None, lanes_for=None):
+            tail_ticks=12, release_rate=0x1C, sample_order=None, arrivals=None, lanes_for=None,
+            split_tick=None, chain_song=None, hold=None):
     """악보 → 글·바이너리·곡 묶음의 DQ5 샘플 번호·손실 보고서.
 
     시퀀스만 만들며 ROM/SPC 공간 검사는 삽입기가 맡는다. 8번째 목소리를 BGM에서 쓰지 않지만
@@ -626,6 +639,15 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
     instrument(F0, SPC 182E)에서 그 트랙의 KON 을 막고(02CB+X bit7), 샘플이 있을 때의 instrument 만
     풀어 준다. 그래서 그 샘플의 음마다 도착 어림 시각까지 instrument 를 다시 쓴다. 도착 전 음은 울리지 않는다.
     lanes_for 는 allocate 의 트랙별 목소리 고정이다.
+
+    split_tick 만 주면 그 지점에서 자르기만 한다(나눈 곡을 견줄 기준). split_tick·chain_song 을 주면 곡을 앞부분([0, split_tick))과 본체로 나눈다. 앞부분 트랙은 끝에서 드라이버 명령
+    F7 chain_song 트랙(dq4soundpatch.chain_code)으로 본체 시퀀스의 같은 트랙 머리로 넘어가고, 본체가 아직 SPC 에
+    없으면 1틱 쉬고 다시 시도한다. 본체 트랙 머리는 split_tick 지점을 가리키며(루프 시작이 그 앞이면 루프 부분도
+    둠), 앞부분이 실행한 악기·세기·팬 상태를 이어 쓴다. 이어지는 음은 비율 00 붙임이라 다시 치지 않는다.
+
+    hold 는 (샘플, 256바이트 단위 문턱)으로, 트랙 0 머리에 곡 붙들기(F7 FE 샘플 / F7 FF 문턱, dq4soundpatch.hold_check_code)
+    를 둔다. 그 샘플을 받는 동안 곡을 틀고 문턱만큼 오면 곡이 나아간다. 붙들기는 그 틱의 나머지 트랙을 막지 못하므로 모든
+    트랙을 1틱 쉼으로 시작한다(그 틱에 instrument 가 오면 아직 없는 샘플로 보아 트랙이 조용해진다).
     """
     if not 1 <= voices <= 7:
         raise ValueError('BGM voices must be between 1 and 7')
@@ -694,10 +716,17 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
     cc_emitted = 0
     level_skips, level_error = 0, 0.0
     for lane_id, lane in enumerate(lanes):
-        lines += [f'Lvoice{lane_id}:', '  volume 30', f'  release {release_rate:02X}', '  echo_on']
+        lines.append(f'Lvoice{lane_id}:')
+        if hold is not None:
+            if lane_id == 0:
+                lines += [f'  db F7 FE {hold[0]:02X}', f'  db F7 FF {hold[1]:02X}']
+            lines.append('  rest len 01')
+        lines += ['  volume 30', f'  release {release_rate:02X}', '  echo_on']
         cuts = {0, end}
         if loop_start is not None:
             cuts.add(loop_start)
+        if split_tick is not None:
+            cuts.add(split_tick)
         if lane_id == 0:
             cuts.update(tempos)
         for note in lane:
@@ -726,6 +755,10 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
                 lines.append(f'Lloop{lane_id}:')
                 cache.clear()
                 last_note = None
+            if tick == split_tick:
+                lines.append(f'Lsplit{lane_id}:')
+                # 앞부분의 다시 시도 쉼(1틱)이 길이를 바꿀 수 있어 본체 첫 음은 길이를 다시 쓴다
+                cache.pop('duration', None)
             if lane_id == 0 and tick in tempos:
                 lines.append(f'  tempo {tempos[tick]:02X}')
             def setting(name, value):
@@ -795,25 +828,57 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
             lines += ['  rest len 30', '  end']
         else:
             lines.append(f'  jump -> Lloop{lane_id}')
-    uncompressed = assemble(lines)
-    lines = compact(lines)
-    seq = assemble(lines)
-    if execution_trace(uncompressed, end * 2 + 49, peek=True) != execution_trace(seq, end * 2 + 49, peek=True):
-        raise ValueError('sequence compression changed timed commands or KOF look-ahead')
-    if len(seq) >= 65536:
-        raise ValueError(f'sequence exceeds 16-bit offsets: {len(seq)}')
-    for start in header(seq)[1]:
-        _, problems = walk(seq, start)
-        if problems:
-            raise ValueError(f'invalid sequence: {problems}')
-    if assemble(listing(seq)) != seq:
-        raise ValueError('sequence listing round trip failed')
+    def pack(part):
+        raw = assemble(part)
+        part = compact(part)
+        out = assemble(part)
+        if execution_trace(raw, end * 2 + 49, peek=True) != execution_trace(out, end * 2 + 49, peek=True):
+            raise ValueError('sequence compression changed timed commands or KOF look-ahead')
+        if len(out) >= 65536:
+            raise ValueError(f'sequence exceeds 16-bit offsets: {len(out)}')
+        for start in header(out)[1]:
+            _, problems = walk(out, start)
+            if problems:
+                raise ValueError(f'invalid sequence: {problems}')
+        if assemble(listing(out)) != out:
+            raise ValueError('sequence listing round trip failed')
+        return raw, part, out
+
+    chain = None
+    if split_tick is not None and not 0 < split_tick < end:
+        raise ValueError('split_tick must be inside the song')
+    if split_tick is not None and chain_song is not None:
+        if not 0 <= chain_song < 0x64:
+            raise ValueError('chain_song must be a sequence number')
+        intro_lines, main_lines = list(lines[:1 + voices]), list(lines[:1 + voices])
+        bodies, name = {}, None
+        for line in lines[1 + voices:]:
+            if line.startswith('Lvoice') and line.endswith(':'):
+                name = int(line[6:-1])
+                bodies[name] = []
+            else:
+                bodies[name].append(line)
+        for lane_id in range(voices):
+            body = bodies[lane_id]
+            cut = body.index(f'Lsplit{lane_id}:')
+            intro_lines += [f'Lvoice{lane_id}:', *body[:cut], f'Lchain{lane_id}:',
+                            f'  db F7 {chain_song:02X} {lane_id:02X}', '  rest len 01', f'  jump -> Lchain{lane_id}']
+            loop = f'Lloop{lane_id}:'
+            start = body.index(loop) if loop in body and body.index(loop) < cut else cut
+            main_lines += [f'Lvoice{lane_id}:', f'  jump -> Lsplit{lane_id}', *body[start:]]
+        _, intro_lines, seq = pack(intro_lines)
+        uncompressed, main_lines, chain = pack(main_lines)
+        lines = intro_lines + ['# chain'] + main_lines
+    else:
+        uncompressed, lines, seq = pack(lines)
     boundary_clips = [n['uid'] for lane in lanes for n in lane if n['tick'] + n['gate'] > end]
     report |= {
         'id': score.get('id'), 'title': score.get('title', score.get('name')),
         'status': 'arrangement-draft', 'source': 'NDS DQ4 score', 'voices': voices,
         'undefined_program_notes': len(undefined),
         'sequence_bytes': len(seq), 'uncompressed_bytes': len(uncompressed), 'sequence_sha256': hashlib.sha256(seq).hexdigest(),
+        'hold': None if hold is None else {'sample': f'{hold[0]:02X}', 'bytes': hold[1] * 256},
+        'split_tick': split_tick, 'chain_song': chain_song, 'chain_bytes': None if chain is None else len(chain),
         'samples': samples, 'send_first': len(samples), 'end_tick': end,
         'sample_first_tick': {f'{k:02X}': v[0] for k, v in sorted(usage.items())},
         'sample_notes': {f'{k:02X}': v[1] for k, v in sorted(usage.items())},
@@ -840,7 +905,7 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
             'SPC memory, sample transfer and voice arbitration require ROM runtime verification.',
         ],
     }
-    return Conversion('\n'.join(lines) + '\n', seq, samples, report)
+    return Conversion('\n'.join(lines) + '\n', seq, samples, report, chain)
 
 
 def export(assets, out, *, voices=7, program_map=None):

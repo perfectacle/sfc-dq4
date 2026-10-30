@@ -15,14 +15,21 @@ local function push(i, cmd, arg)
   emu.write(0x7E1D95 + i, cmd, m); emu.write(0x7E1DA5 + i, arg, m)
   emu.write(0x7E1DB5 + i, 0, m); emu.write(0x7E1DC5 + i, 0x05, m)
 end
--- 드라이버의 자료 받기 입구(SPC 1046, 3바이트)만 롬 것으로. 드라이버 블록(2B:C4DB)에는 실행 중 바뀌는 자료가 있어
--- 통째로 쓰면 전송이 멈췄다. SPC 가 그 3바이트를 실행하는 중이면 명령 한가운데를 바꾸게 되므로 다음 프레임으로 미룬다
+-- 드라이버 블록(2B:C4DB)에서 고친 자리만 롬 것으로 쓴다. 블록에는 실행 중 바뀌는 자료가 있어 통째로 쓰면 전송이 멈췄다.
+-- 자료 받기 입구(1046), F7 처리 표 칸(07CD, CHAIN·곡 붙들기 처리기), 곡 붙들기의 빈 자리(1049~1069, 입구를 바꿔 쓰지 않게 된 곳)와
+-- 부르는 자리(146C 연주기 템포, 1861 instrument, 103A 받기 끝). 빈 자리를 먼저 써야 부르는 자리가 빈 코드로 뛰지 않는다.
+-- SPC 가 쓰려는 자리를 실행하는 중이면 명령 한가운데를 바꾸게 되므로 다음 프레임으로 미룬다
+local sites = {{0x1049, 33}, {0x1046, 3}, {0x07CD, 2}, {0x146C, 3}, {0x1861, 3}, {0x103A, 3}}
 local entryPending = false
 local function writeEntry()
   local pc = emu.getState()['spc.pc']
-  if pc and pc >= 0x1046 and pc <= 0x1048 then return end
-  for i = 0, 2 do
-    emu.write(0x1046 + i, emu.read(0x2BC4DB + 4 + (0x1046 - 0x0750) + i, m), emu.memType.spcRam)
+  for _, site in ipairs(sites) do
+    if pc and pc >= site[1] and pc < site[1] + site[2] then return end
+  end
+  for _, site in ipairs(sites) do
+    for i = 0, site[2] - 1 do
+      emu.write(site[1] + i, emu.read(0x2BC4DB + 4 + (site[1] - 0x0750) + i, m), emu.memType.spcRam)
+    end
   end
   entryPending = false
 end
