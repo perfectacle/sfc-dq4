@@ -352,6 +352,5 @@ org $358000
 incbin "cloud-oam.bin"
 assert pc() == $360000
 org $368000
-check bankcross off
 incbin "layer-payload.bin"
-check bankcross full
+assert pc() <= $370000

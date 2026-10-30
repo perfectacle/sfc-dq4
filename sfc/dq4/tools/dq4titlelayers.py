@@ -11,6 +11,8 @@ from dq4titleanimation import ART, connected_poses, cloud_strip
 from dq4titleassets import DEFAULT_SOURCE, APPROVED_SOURCE_SHA256, native_title
 
 PHASES = 128
+# LoROM banks the title reads its OBJ data from; dq4titlelayers.asm and dq4titlelayerpatch.PLACEMENTS must agree.
+FOREGROUND_BANK, DMA_BANK, INITIAL_BANK, CLOUD_BANK, PAYLOAD_BANK = 0x32, 0x33, 0x34, 0x35, 0x36
 CLOUD_Y = 168
 CLOUD_SPRITES = 9
 CLOUD_PERIOD = 256
@@ -380,36 +382,72 @@ def cloud_oam():
     return bytes(records)
 
 
-def pack_payload(pages):
-    payload = bytearray()
-    descriptors = bytearray(32768)
-    pointers = bytearray()
-    stats = []
+def pack_payload(pages, fixed=()):
+    """Place each distinct transfer once and point every descriptor and OAM pointer at that copy.
 
-    def store(data):
-        physical = 0x1B0000 + len(payload)
-        if physical % 0x8000 + len(data) > 0x8000:
-            payload.extend(bytes(0x8000 - physical % 0x8000))
-            physical = 0x1B0000 + len(payload)
-        payload.extend(data)
-        return 0x8000 | physical % 0x8000, physical // 0x8000
-
+    `fixed` lists (bank, offset, data) already in ROM that a transfer may read as is. Other data goes into the free
+    tail of a phase's descriptor slot when it fits, else into the payload at the start of PAYLOAD_BANK.
+    """
+    phases = []
     for phase in range(PHASES):
         runs = delta_runs(pages[(phase - 2) % PHASES], pages[phase])
         if len(runs) > 31:
             raise ValueError('dragon delta exceeds descriptor run limit')
-        total = sum(len(data) for _, data in runs)
-        if total + 612 > 4096:
+        if sum(len(data) for _, data in runs) + 612 > 4096:
             raise ValueError('dragon delta and OAM exceed per-frame transfer budget')
+        phases.append(runs)
+    descriptors = bytearray(32768)
+    payload = bytearray()
+    # Motion stops at the zero-length terminator, so the rest of a phase's 256-byte slot is never read as descriptors.
+    gaps = [[phase * 256 + (len(runs) + 1) * 8] * 2 + [(phase + 1) * 256] for phase, runs in enumerate(phases)]
+    oam = [oam_frame(phase) for phase in range(PHASES)]
+    placed = {}
+
+    def locate(data):
+        regions = [*fixed, (PAYLOAD_BANK, 0, payload)]
+        regions += [(DMA_BANK, start, descriptors[start:fill]) for start, fill, _ in gaps]
+        for bank, offset, blob in regions:
+            found = bytes(blob).find(data)
+            if found >= 0:
+                return 0x8000 + offset + found, bank
+        return None
+
+    # Longest first, so shorter transfers can be found inside data already placed.
+    for data in sorted({data for runs in phases for _, data in runs} | set(oam), key=lambda item: (-len(item), item)):
+        where = locate(data)
+        if where is None:
+            fitting = [gap for gap in gaps if gap[2] - gap[1] >= len(data)]
+            if fitting:
+                gap = min(fitting, key=lambda gap: (gap[2] - gap[1], gap[1]))
+                descriptors[gap[1]:gap[1] + len(data)] = data
+                where = 0x8000 + gap[1], DMA_BANK
+                gap[1] += len(data)
+            else:
+                where = 0x8000 + len(payload), PAYLOAD_BANK
+                payload.extend(data)
+                if len(payload) > 0x8000:
+                    raise ValueError('layer payload overflows its bank')
+        placed[data] = where
+    pointers = bytearray()
+    stats = []
+    for phase, runs in enumerate(phases):
         for i, (offset, data) in enumerate(runs):
-            address, bank = store(data)
+            address, bank = placed[data]
             destination = 0x6000 + phase % 2 * 0x1000 + offset // 2
             record = destination.to_bytes(2, 'little') + address.to_bytes(2, 'little') + len(data).to_bytes(2, 'little') + bytes((bank, 0))
             descriptors[phase * 256 + i * 8:phase * 256 + i * 8 + 8] = record
-        address, bank = store(oam_frame(phase))
+        address, bank = placed[oam[phase]]
         pointers.extend(address.to_bytes(2, 'little') + bytes((bank, 0)))
-        stats.append({'phase': phase, 'runs': len(runs), 'bytes': total, 'chr_sha256': __import__('hashlib').sha256(pages[phase]).hexdigest()})
+        stats.append({'phase': phase, 'runs': len(runs), 'bytes': sum(len(data) for _, data in runs),
+                      'chr_sha256': __import__('hashlib').sha256(pages[phase]).hexdigest()})
     return bytes(payload), bytes(descriptors), bytes(pointers), stats
+
+
+def transfer_sources(blobs):
+    """ROM banks a dragon transfer or OAM frame may be read from, each as the bytes from $8000."""
+    return {FOREGROUND_BANK: blobs['foreground.chr'], DMA_BANK: blobs['dragon-dma.bin'],
+            INITIAL_BANK: blobs['dragon-initial.chr'], CLOUD_BANK: blobs['cloud-oam.bin'],
+            PAYLOAD_BANK: blobs['layer-payload.bin']}
 
 
 def write_pack(out):
@@ -422,11 +460,13 @@ def write_pack(out):
     frames, obj_palette = quantize_dragon(dragon_frames())
     cloud, cloud_palette = cloud_assets()
     pages = [add_cloud_tiles(obj_chr(frame), cloud, i % 2) for i, frame in enumerate(frames)]
-    payload, descriptors, pointers, stats = pack_payload(pages)
+    initial, clouds = pages[0] + pages[-1], cloud_oam()
+    payload, descriptors, pointers, stats = pack_payload(
+        pages, [(INITIAL_BANK, 0, initial), (CLOUD_BANK, 0, clouds), (FOREGROUND_BANK, 0, fg)])
     blobs = {'background.chr': bg, 'foreground.chr': fg, 'background.map': bgmap,
              'foreground.map': fgmap, 'background.pal': snes_palette(palette),
              'dragon.pal': snes_palette(obj_palette), 'cloud.pal': snes_palette(cloud_palette.reshape(-1, 3)),
-             'cloud-oam.bin': cloud_oam(), 'dragon-initial.chr': pages[0] + pages[-1],
+             'cloud-oam.bin': clouds, 'dragon-initial.chr': initial,
              'oam-pointers.bin': pointers, 'dragon-dma.bin': descriptors, 'layer-payload.bin': payload,
              'foreground-mask.bin': bytes(mask.tobytes())}
     outputs = [out / name for name in (*blobs, 'layers.json', 'title.png', 'animation.gif', 'frame-0064.png', 'frame-0128.png', 'frame-0192.png')]
@@ -545,22 +585,26 @@ def read_pack(source):
     mapping = np.frombuffer(blobs['background.map'], dtype='<u2')
     if np.any((mapping & 1023) >= len(blobs['background.chr']) // 32) or np.any(mapping & 0xE000):
         raise ValueError('background map exceeds its tile range or priority')
-    payload = blobs['layer-payload.bin']
-    if not payload or 0x1B0000 + len(payload) > 0x200000:
-        raise ValueError('layer payload exceeds expanded ROM')
+    sources = transfer_sources(blobs)
+    if any(len(data) > 0x8000 for data in sources.values()):
+        raise ValueError('layer payload overflows its bank')
+    descriptor_reads = []
 
     def extract(address, bank, length):
         if address < 0x8000 or address + length > 0x10000:
             raise ValueError('asset transfer crosses a LoROM bank')
-        offset = bank * 0x8000 + address - 0x8000 - 0x1B0000
-        if offset < 0 or offset + length > len(payload):
+        data = sources.get(bank)
+        if data is None or address - 0x8000 + length > len(data):
             raise ValueError('asset transfer is outside packed payload')
-        return payload[offset:offset + length]
+        if bank == DMA_BANK:
+            descriptor_reads.append((address - 0x8000, length))
+        return data[address - 0x8000:address - 0x8000 + length]
 
     pages = [bytearray(blobs['dragon-initial.chr'][:8192]), bytearray(blobs['dragon-initial.chr'][8192:])]
     frames = report.get('frames', [])
     if len(frames) != PHASES:
         raise ValueError('phase verification records missing')
+    descriptor_ends = []
     for turn in range(PHASES * 2):
         phase = turn % PHASES
         record = blobs['dragon-dma.bin'][phase * 256:(phase + 1) * 256]
@@ -569,8 +613,10 @@ def read_pack(source):
             dest, address, length = np.frombuffer(record[cursor:cursor + 6], dtype='<u2').tolist()
             bank, pad = record[cursor + 6:cursor + 8]
             if not length:
-                if any(record[cursor:]):
+                # The slot after the terminator may hold transfer data, which Motion never parses.
+                if any(record[cursor:cursor + 8]):
                     raise ValueError('nonzero descriptor terminator padding')
+                descriptor_ends.append(phase * 256 + cursor + 8)
                 ended = True
                 break
             offset = (dest - (0x6000 + phase % 2 * 0x1000)) * 2
@@ -589,6 +635,9 @@ def read_pack(source):
         pointer = blobs['oam-pointers.bin'][phase * 4:phase * 4 + 4]
         if pointer[3] or extract(int.from_bytes(pointer[:2], 'little'), pointer[2], 544) != oam_frame(phase):
             raise ValueError('OAM phase or page selection mismatch')
+    for offset, length in descriptor_reads:
+        if any(offset < end and (end - 1) // 256 * 256 < offset + length for end in descriptor_ends[:PHASES]):
+            raise ValueError('transfer data overlaps a descriptor list')
     return blobs, report
 
 
