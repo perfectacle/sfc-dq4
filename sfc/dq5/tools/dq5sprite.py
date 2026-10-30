@@ -588,7 +588,7 @@ def vehicle_parts(rom, v):
         site = OL.VEHICLE_PARTS[name]
         out.append(part | {'rom': p['table'], 'cols': p['cols'], 'rows': p['rows'], 'dir': p['dir'],
                            'frame': p['frame'], 'frames': p['frames'], 'copied': p['copied'],
-                           'vflip': tuple(OL.vflip_offsets(rom, site['vflip'])) if site.get('vflip') else ()})
+                           'vflip': tuple(OL.vflip_offsets(rom, OL.vflip_at(rom, site))) if site.get('vflip') else ()})
     return out
 
 
