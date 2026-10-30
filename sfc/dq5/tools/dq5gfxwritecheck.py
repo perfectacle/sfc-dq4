@@ -146,22 +146,28 @@ def make_roms(original, out):
         'bg-inplace': inplace_tile, 'bg-repack': STRIPE, 'bg-moved': STRIPE, 'bg-tables': STRIPE}}
 
 
-# sfc/dq5/tools/lua 의 프로브가 os.getenv 로 읽는 키(LIBDIR·STATE·SHOT_DIR 는 run 이 둠). 셸에 남은 값이 장면에 섞이지 않게
-# 모두 지운 뒤 env_extra 만 넣는다. 프로브에 새 키를 더하면 여기에도 더할 것.
+# 프로브(sfc/dq5/tools/lua, tools/lua)와 드라이버(dq5warp.lua, krpatch sfc lua 의 boot·lib)가 os.getenv 로 읽는 키
+# (LIBDIR·STATE·SHOT_DIR 는 run 이 둠). 셸에 남은 값이 장면에 섞이지 않게 모두 지운 뒤 env_extra 만 넣는다.
+# 그 Lua 들에 새 키를 더하면 여기에도 더할 것.
 LUA_ENV = (
-    'ACCESS', 'ACCRANGE', 'ADULT', 'ANYWHERE', 'AT', 'BATTLE', 'BBUS', 'BOOT', 'BUDGET', 'CALLS', 'CAP', 'CDL',
-    'CDLEVERY', 'CGW', 'CHECKAT', 'CMDS', 'COUNT', 'COVER', 'COVHI', 'COVLO', 'DBMISS', 'DBREAD', 'DBWIN', 'DELAY',
-    'DRIVER', 'DSP', 'DSPFROM', 'DUMP', 'DUMPER', 'DUMPF', 'DUMPFROM', 'DUMPTO', 'ENVLOG', 'EVERY', 'EVERYTO',
-    'EXEC', 'EXECLOG', 'FIELD', 'FIELDT', 'FLEE', 'FORCE', 'FREE', 'FREEWATCH', 'FROM', 'FROMMSG', 'FULLSET', 'GAP',
-    'GROUP', 'HARG', 'HCMD', 'HFROM_ARG', 'HFROM_CMD', 'HI', 'HOLD', 'HOOK', 'HX', 'JITTER', 'LATE', 'LATESET', 'LO',
-    'LOG', 'LOGEVERY', 'LOGFROM', 'LOOP', 'MAXCALL', 'MAXF', 'MAXK', 'MAXN', 'NAME', 'NEXT', 'ONLY', 'OUT', 'PARTY',
-    'PEEK', 'PERIOD', 'POKE', 'POKEAT', 'POKEONCE', 'POSFILE', 'POST', 'PRE', 'RANGE', 'READPC', 'RESETAT', 'RNGLOG',
-    'ROMPATCH', 'ROMREAD', 'RWATCH', 'RWLOG', 'SAVE', 'SAVEAT', 'SAVENAME', 'SEED', 'SEQ', 'SET', 'SETTLE',
-    'SHOTDELAY', 'SHOTMSG', 'SHOTS', 'SPCDUMP', 'SPINS', 'SSADDR', 'SSAT', 'SSCRIPT', 'SSFROM', 'SSROMPATCH', 'STEP',
-    'STOPF', 'TAPUNTIL', 'TARGET', 'TEST', 'TO', 'TOMSG', 'TRACE', 'UNTIL', 'VFRAMES', 'VHI', 'VLO', 'VMADD',
-    'VMDUMP', 'VMSCREENS', 'VMWRAM', 'VRAMDUMP', 'WAGON', 'WAITSONG', 'WARPEXIT', 'WARPLUA', 'WATCH', 'WATCHR',
-    'WATCHW', 'WAYPOINTS', 'WFROM', 'WIPE', 'WIPEF', 'WLOG', 'WR', 'WRAMWATCH', 'WRAMWATCHBY', 'WRAMWATCHREAD',
-    'WRN', 'WW', 'WWATCH', 'WWFROM', 'WWRANGE',
+    'A0', 'ACC', 'ACCESS', 'ACCRANGE', 'ADULT', 'AFTER', 'ANYWHERE', 'APUF', 'APUPORTS', 'AT', 'AUDIT', 'AUDITMISS',
+    'AUDITOPEN', 'BATTLE', 'BBUS', 'BG3FONT', 'BOOT', 'BUDGET', 'CALLS', 'CAP', 'CDL', 'CDLEVERY', 'CELL', 'CGF',
+    'CGW', 'CHANGES', 'CHECKAT', 'CHECK_GROUP', 'CHECK_MAP', 'CMDS', 'COUNT', 'COVER', 'COVHI', 'COVLO', 'DBMISS',
+    'DBREAD', 'DBWIN', 'DELAY', 'DP86OK', 'DRIVER', 'DSP', 'DSPFROM', 'DUMP', 'DUMPAT', 'DUMPER', 'DUMPF',
+    'DUMPFROM', 'DUMPTO', 'ENVLOG', 'EVERY', 'EVERYTO', 'EXEC', 'EXECLOG', 'EXECS', 'FIELD', 'FIELDSNAP', 'FIELDT',
+    'FLAG', 'FLEE', 'FORCE', 'FRAMES', 'FREE', 'FREEWATCH', 'FROM', 'FROMMSG', 'FULLSET', 'GAP', 'GRIDDELAY',
+    'GROUP', 'HARG', 'HCMD', 'HFROM_ARG', 'HFROM_CMD', 'HI', 'HOLD', 'HOOK', 'HX', 'INIT', 'INNER', 'INPUT',
+    'JITTER', 'LAST', 'LATE', 'LATESET', 'LEARNED', 'LIMIT', 'LO', 'LOG', 'LOGEVERY', 'LOGFROM', 'LOOP', 'LVLUP',
+    'MAXCALL', 'MAXF', 'MAXK', 'MAXN', 'MEM', 'MESSAGE', 'MODE', 'MSGLOG', 'NAME', 'NEXT', 'OLD_FLAG', 'ONLY', 'OUT',
+    'PARTY', 'PEEK', 'PEEKF', 'PERIOD', 'PF', 'POKE', 'POKE1', 'POKEAT', 'POKEONCE', 'POSFILE', 'POST', 'PRE',
+    'PREPARE', 'RANGE', 'READPC', 'READS', 'RESETAT', 'RETURN_PC', 'RNGLOG', 'ROMPATCH', 'ROMREAD', 'RWATCH',
+    'RWLOG', 'SAVE', 'SAVEAT', 'SAVENAME', 'SCRIPT', 'SEED', 'SEQ', 'SET', 'SETTLE', 'SFROM', 'SHADOW', 'SHOTDELAY',
+    'SHOTEVERY', 'SHOTMSG', 'SHOTS', 'SLOT', 'SPCDUMP', 'SPINS', 'SRAMAT', 'SRM', 'SSADDR', 'SSAT', 'SSCRIPT',
+    'SSFROM', 'SSROMPATCH', 'STALE', 'STEP', 'STO', 'STOPF', 'SWAP', 'SWF', 'TAIL', 'TAP', 'TAPUNTIL', 'TARGET',
+    'TEST', 'TO', 'TOMSG', 'TRACE', 'UNTIL', 'VFRAMES', 'VHI', 'VLO', 'VMADD', 'VMDUMP', 'VMSCREENS', 'VMWRAM',
+    'VRAMDUMP', 'VSTEP', 'WADDR', 'WAGON', 'WAITSONG', 'WARPEXIT', 'WARPLUA', 'WATCH', 'WATCHR', 'WATCHW',
+    'WATCH_FMT', 'WATCH_WRAM', 'WAYPOINTS', 'WF', 'WFROM', 'WIPE', 'WIPEF', 'WLEN', 'WLOG', 'WR', 'WRAMWATCH',
+    'WRAMWATCHBY', 'WRAMWATCHREAD', 'WRN', 'WSTART', 'WT', 'WW', 'WWATCH', 'WWFROM', 'WWRANGE',
 )
 
 
