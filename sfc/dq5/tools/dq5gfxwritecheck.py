@@ -146,12 +146,31 @@ def make_roms(original, out):
         'bg-inplace': inplace_tile, 'bg-repack': STRIPE, 'bg-moved': STRIPE, 'bg-tables': STRIPE}}
 
 
+# sfc/dq5/tools/lua 의 프로브가 os.getenv 로 읽는 키(LIBDIR·STATE·SHOT_DIR 는 run 이 둠). 셸에 남은 값이 장면에 섞이지 않게
+# 모두 지운 뒤 env_extra 만 넣는다. 프로브에 새 키를 더하면 여기에도 더할 것.
+LUA_ENV = (
+    'ACCESS', 'ACCRANGE', 'ADULT', 'ANYWHERE', 'AT', 'BATTLE', 'BBUS', 'BOOT', 'BUDGET', 'CALLS', 'CAP', 'CDL',
+    'CDLEVERY', 'CGW', 'CHECKAT', 'CMDS', 'COUNT', 'COVER', 'COVHI', 'COVLO', 'DBMISS', 'DBREAD', 'DBWIN', 'DELAY',
+    'DRIVER', 'DSP', 'DSPFROM', 'DUMP', 'DUMPER', 'DUMPF', 'DUMPFROM', 'DUMPTO', 'ENVLOG', 'EVERY', 'EVERYTO',
+    'EXEC', 'EXECLOG', 'FIELD', 'FIELDT', 'FLEE', 'FORCE', 'FREE', 'FREEWATCH', 'FROM', 'FROMMSG', 'FULLSET', 'GAP',
+    'GROUP', 'HARG', 'HCMD', 'HFROM_ARG', 'HFROM_CMD', 'HI', 'HOLD', 'HOOK', 'HX', 'JITTER', 'LATE', 'LATESET', 'LO',
+    'LOG', 'LOGEVERY', 'LOGFROM', 'LOOP', 'MAXCALL', 'MAXF', 'MAXK', 'MAXN', 'NAME', 'NEXT', 'ONLY', 'OUT', 'PARTY',
+    'PEEK', 'PERIOD', 'POKE', 'POKEAT', 'POKEONCE', 'POSFILE', 'POST', 'PRE', 'RANGE', 'READPC', 'RESETAT', 'RNGLOG',
+    'ROMPATCH', 'ROMREAD', 'RWATCH', 'RWLOG', 'SAVE', 'SAVEAT', 'SAVENAME', 'SEED', 'SEQ', 'SET', 'SETTLE',
+    'SHOTDELAY', 'SHOTMSG', 'SHOTS', 'SPCDUMP', 'SPINS', 'SSADDR', 'SSAT', 'SSCRIPT', 'SSFROM', 'SSROMPATCH', 'STEP',
+    'STOPF', 'TAPUNTIL', 'TARGET', 'TEST', 'TO', 'TOMSG', 'TRACE', 'UNTIL', 'VFRAMES', 'VHI', 'VLO', 'VMADD',
+    'VMDUMP', 'VMSCREENS', 'VMWRAM', 'VRAMDUMP', 'WAGON', 'WAITSONG', 'WARPEXIT', 'WARPLUA', 'WATCH', 'WATCHR',
+    'WATCHW', 'WAYPOINTS', 'WFROM', 'WIPE', 'WIPEF', 'WLOG', 'WR', 'WRAMWATCH', 'WRAMWATCHBY', 'WRAMWATCHREAD',
+    'WRN', 'WW', 'WWATCH', 'WWFROM', 'WWRANGE',
+)
+
+
 def run(mesence, rom, lua, env_extra, dest, libdir, state):
     dest.mkdir()
     copy = dest / f'{dest.name}.sfc'
     shutil.copyfile(rom, copy)
     env = os.environ.copy()
-    for key in ('ROMPATCH', 'POKE', 'SET', 'TEST', 'TO', 'FIELD', 'BATTLE', 'AT', 'FROM', 'DUMPF', 'EVERY'):
+    for key in LUA_ENV:
         env.pop(key, None)
     env.update(LIBDIR=str(libdir), STATE=str(state), SHOT_DIR=str(dest), **env_extra)
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:

@@ -292,6 +292,32 @@ def check_high(name, rom_path, dump, orig_dump, bcbd):
     return out
 
 
+def dump_frames(env):
+    """lua/dq5gfxdump.lua 가 이 환경으로 덤프할 프레임."""
+    if env.get('EVERY'):
+        end = int(env.get('EVERYTO') or env.get('TO') or 0)
+        return list(range(int(env.get('FROM', 0)), end + 1, int(env['EVERY'])))
+    return [int(n) for n in env.get('DUMPF', '').split(',') if n]
+
+
+def run_case(mesence, case, out, libdir, state):
+    """gwc.run 뒤 덤프할 프레임의 파일이 모두 있는지 보고, 빠졌으면 한 번 다시 돌린다. 그래도 빠지면 mesen.log 끝을 붙여 멈춘다."""
+    name, rom, lua, env = case
+    want, dest = dump_frames(env), out / name
+    for attempt in (1, 2):
+        if dest.exists():
+            shutil.rmtree(dest)
+        gwc.run(mesence, rom, lua, env, dest, libdir, state)
+        missing = sorted({n for n in want for ext in ('wram', 'vram', 'cgram')
+                          if not (dest / f'f{n:05d}.{ext}').is_file()})
+        if not missing:
+            return dest
+        print(f'{name}: {attempt}번째 실행에서 덤프 {missing[:8]} 빠짐', file=sys.stderr, flush=True)
+    log = (dest / 'mesen.log').read_text(encoding='utf-8', errors='replace').splitlines()
+    log = [x for x in log if 'Uninitialized memory read' not in x][-20:]
+    raise RuntimeError(f'{name}: 두 번 돌려도 덤프 {missing[:8]} 가 없음\n' + '\n'.join(log))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('rom', type=Path)
@@ -335,7 +361,7 @@ def main():
             cases += [(f'high-{m[0]:02X}{m[1]:02X}-{k}', r, atpc, env) for k, r in (('orig', original), ('all', high))]
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
             dirs = dict(zip([c[0] for c in cases], pool.map(
-                lambda c: gwc.run(mesence, c[1], c[2], c[3], out / c[0], libdir, state), cases)))
+                lambda c: run_case(mesence, c, out, libdir, state), cases)))
         results = [check_dusk('dusk-orig', original, dirs['dusk-orig']), check_dusk('dusk-grow', grow, dirs['dusk-grow'])]
         orig_person = fgw.current(rom)['person_palettes']
         require(results[0]['day']['first'] == f'{orig_person["day"][0]:04X}', 'dusk-orig: 낮 색이 01:A45E 가 아님')
