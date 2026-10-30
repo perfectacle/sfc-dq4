@@ -26,8 +26,13 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 TOOL_DIRS = (HERE, ROOT / 'sfc' / 'dq5' / 'tools', ROOT / 'fc' / 'dq4' / 'tools')
 FILE_NAME = re.compile(r'[\w.-]+\.\w+')
+DIR_NAME = re.compile(r'[A-Za-z]\w{2,}')
 # 도구가 결과를 쓰는 인자. 이 뒤의 경로는 키에 넣지 않고(빌드마다 임시 폴더가 다름) 결과로 저장한다.
 OUT_FLAGS = ('-o', '--out', '--ips', '--report')
+# 도구가 읽는 환경 변수. 값이 가리키는 파일·폴더 내용을 키에 넣는다
+ENV_INPUTS = ('ASAR', 'DQ4_GALMURI', 'NDS_FS')
+# 켜면 도구가 출력 인자 밖에 파일을 쓰는 환경 변수. 켜져 있으면 캐시하지 않는다
+ENV_OUTPUTS = ('DQ4_NAMEENTRY_SYMBOLS', 'DQ4_WINDOWNAME_SYMBOLS')
 # 이만큼 쓰이지 않은 칸은 새 칸을 넣을 때 지운다
 KEEP_SECONDS = 7 * 24 * 3600
 
@@ -41,11 +46,19 @@ def _resolve(name):
 
 
 @functools.cache
+def _resolve_dir(name):
+    for d in TOOL_DIRS:
+        if (d / name).is_dir():
+            return d / name
+    return None
+
+
+@functools.cache
 def _refs(path):
     """path 가 import 하거나 이름으로 부르는 도구 폴더 파일. 함수 안의 import 와 'dq5build.py' 같은 이름 문자열도 든다."""
     if path.suffix != '.py':
         return ()
-    refs = []
+    refs, dirs = [], []
     for node in ast.walk(ast.parse(path.read_bytes())):
         if isinstance(node, ast.Import):
             refs += [a.name.split('.')[0] + '.py' for a in node.names]
@@ -53,7 +66,10 @@ def _refs(path):
             refs.append(node.module.split('.')[0] + '.py')
         elif isinstance(node, ast.Constant) and isinstance(node.value, str) and FILE_NAME.fullmatch(node.value):
             refs.append(node.value)
-    return tuple(p for p in map(_resolve, dict.fromkeys(refs)) if p)
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and DIR_NAME.fullmatch(node.value):
+            dirs.append(node.value)
+    return (tuple(p for p in map(_resolve, dict.fromkeys(refs)) if p)
+            + tuple(p for p in map(_resolve_dir, dict.fromkeys(dirs)) if p))
 
 
 @functools.cache
@@ -90,7 +106,9 @@ def _toolkit_hash():
 def _tool_hash(tool):
     h = hashlib.sha256((ROOT / 'uv.lock').read_bytes() + sys.version.encode() + _toolkit_hash())
     for path in sources(tool):
-        h.update(path.name.encode() + b'\0' + _digest(path))
+        # 'dq4art' 처럼 이름으로 부르는 도구 폴더 안 자료 폴더는 안의 파일 전부
+        for f in (sorted(p for p in path.rglob('*') if p.is_file()) if path.is_dir() else [path]):
+            h.update(str(f.relative_to(path.parent)).encode() + b'\0' + _digest(f))
     return h.hexdigest()
 
 
@@ -138,7 +156,14 @@ def _key(tool, args):
     """(키, 출력 경로). --out=경로·-o경로 처럼 붙여 쓴 출력은 알아보지 못하니 None(캐시하지 않음)."""
     if any(a.startswith(tuple(f + '=' for f in OUT_FLAGS)) or (a.startswith('-o') and a != '-o') for a in args):
         return None, []
+    if any(os.environ.get(name) for name in ENV_OUTPUTS):
+        return None, []
     h = hashlib.sha256(_tool_hash(tool).encode() + Path(tool).name.encode())
+    for name in ENV_INPUTS:
+        value = os.environ.get(name, '')
+        h.update(f'\0env {name}={value}'.encode())
+        if value and Path(value).exists():
+            _content(Path(value), h, set())
     outs = []
     for i, a in enumerate(args):
         if i and args[i - 1] in OUT_FLAGS:
