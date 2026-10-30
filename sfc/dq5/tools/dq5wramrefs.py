@@ -220,14 +220,12 @@ def decoded_ranges(d):
     for a in dq5map.block_table(rom):
         b0 = rom.u8(a)
         out.append(('실내 맵 블록', off(a), off(a) + 3 + ((b0 & 7) + 1) * (((b0 >> 3) & 7) + 1) * 2))
-    # 탈것 그림(dq5sprite.VEHICLES): 압축 타일과 칸 표
+    # 탈것 그림(dq5sprite.VEHICLES): 압축 타일과 칸 표(16:F7D9 가 WRAM 으로 옮기는 범위, 그리는 블록보다 길다)
     for v in dq5sprite.VEHICLES:
         for a, _, _ in v['tiles']:
             out.append(('탈것 타일', off(a), off(dq5sprite.unpack(rom, a, False)[1])))
-        for part in v['parts']:
-            frames = max(1, part['dir'] // part['frame']) if part['frame'] else 1
-            n = part['cols'] * part['rows'] * frames * (4 if part['dir'] else 1)
-            out.append(('탈것 칸 표', off(part['rom']), off(part['rom']) + n))
+        for part in dq5sprite.vehicle_parts(rom, v):
+            out.append(('탈것 칸 표', off(part['rom']), off(part['rom']) + part['copied']))
     # 상자·조사 보상 고정 표(dq5chestwrite.TABLES, 끝의 FFFF 포함)
     import dq5chestwrite
     for name, (start, count, size) in dq5chestwrite.TABLES.items():

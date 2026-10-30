@@ -6,6 +6,9 @@
   - lua/dq5gfxdump.lua: 걷는 동안 20번 WRAM·VRAM·OAM·CGRAM 과 다음 프레임 화면을 덤프한다(양탄자만).
 원본 롬: 부분마다 그린 블록이 방향 4 × 프레임 수(天空城 은 0 하나)와 같은지, 옮긴 블록($06 + 1) 가운데 나머지는
   그려지지 않는지 본다.
+マスタードラゴン 의 걷기 밖 장면(원본 롬): 필드 (341,56) 에서 내려가 멈춘 자리에서 좌·우로 돌고 A 로 착륙, 필드
+  (251,200) 에서 그룹 03 에 내린 뒤 (251,216) 으로 걸어 나와 이륙(7E:2190 bit5), 天空城 06/00 (7E:2190 bit7).
+  착륙·이륙은 32A0 = 87 인 82-1 블록이 15·16, 天空城 은 37C0 = 80·32A0 = 83 인 블록이 12~15 인지 본다.
 고친 롬: 양탄자를 3프레임으로, 부분 3 을 3x1 → 4x1 로 바꾸고(프레임 2 는 프레임 0 을 좌우로 뒤집은 칸, 부분 3 의
   넷째 칸은 첫 칸) 칸 표를 --vehicle-at 에 옮긴다. 그린 블록이 새 간격의 12블록과 같은지, 슬롯 칸 목록이 문서와 같은지,
   OAM 에 부분마다 문서의 블록이 그대로(자리·타일·반전·팔레트) 놓였는지, 부분 1·2 를 덤프 VRAM·CGRAM 으로 칠한
@@ -37,6 +40,17 @@ FROM, UNTIL = 560, 1375
 DUMPF = tuple(range(600, 1361, 40))
 ATTR = {'80-1': 0x0000, '80-2': 0x0000, '80-3': 0x0A00}
 FRAMES = 3
+# マスタードラゴン 의 걷기 밖 장면: (환경, 그 장면의 37C0·32A0, 그려야 할 82-1 블록). TEST 는 셀 끝(UNTIL)보다 길다.
+DRAGON_SCENES = {
+    'land-right': ({'FIELD': '341,56', 'LATESET': '1954=82', 'TEST': 'wait:150,right:4,wait:10,a:6,wait:700'},
+                   (0x60, 0x87), {15, 16}),
+    'land-left': ({'FIELD': '341,56', 'LATESET': '1954=82', 'TEST': 'wait:150,left:4,wait:10,a:6,wait:700'},
+                  (0x60, 0x87), {15, 16}),
+    'takeoff': ({'FIELD': '251,200', 'SET': '2190|20', 'LATESET': '1954=82', 'TEST': 'wait:300,down:200,wait:400'},
+                (0x60, 0x87), {15, 16}),
+    'tenkuu-0600': ({'TO': '06/00,37,58', 'SET': '2190|80', 'TEST': 'wait:900'}, (0x80, 0x83), {12, 13, 14, 15}),
+}
+SCENE_FROM, SCENE_UNTIL = 300, 1300
 
 
 def mirror(rows):
@@ -74,7 +88,8 @@ def run(rom, name, lua, extra, out, state, mesence, libdir):
     env = {k: v for k, v in os.environ.items()
            if k not in ('ADULT', 'ANYWHERE', 'BATTLE', 'FIELD', 'GROUP', 'LATESET', 'PARTY', 'POKE', 'TO',
                         'ROMPATCH', 'SAVE', 'SET', 'WAGON', 'EVERY', 'DUMPF', 'FROM', 'UNTIL')}
-    env.update(LIBDIR=str(libdir), STATE=str(state), SHOT_DIR=str(dest), MAXF='2000', SETTLE='120', TEST=WALK, **extra)
+    env.update({'LIBDIR': str(libdir), 'STATE': str(state), 'SHOT_DIR': str(dest), 'MAXF': '2000', 'SETTLE': '120',
+                'TEST': WALK} | extra)
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
         subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua' / lua),
                         '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
@@ -90,6 +105,18 @@ def drawn(dest):
         cols, rows = map(int, size.split('x'))
         key = (cols, rows, int(d, 16), int(f, 16))
         out.setdefault(key, (int(a0, 16), set()))[1].add(int(off))
+    return out
+
+
+def scene_blocks(rom, dest, stride, a0):
+    """blocks.txt 에서 82-1 크기 슬롯이 37C0 = stride, 32A0 = a0 로 그린 블록."""
+    p = vehicle_part(rom, '82-1')
+    per = p['cols'] * p['rows']
+    out = set()
+    for line in (dest / 'blocks.txt').read_text().splitlines():
+        _, _, size, d, _, got, off, *_ = line.split()
+        if size == f'{p["cols"]}x{p["rows"]}' and (int(d, 16), int(got, 16)) == (stride, a0):
+            out.add(int(off) // 2 // per)
     return out
 
 
@@ -197,6 +224,12 @@ def main():
                 checks[f'{name}-oam'] = all(r['slot'] is not None and r['cells'] and r['block'] and
                                             (n == '80-3' or full(r['screen'])) for row in rows for n, r in row.items())
                 checks[f'{name}-a0'] = {a0 for a0, _ in seen.values()} == {0x80 | (vehicle_part(rom, '80-1')['frames'] - 1)}
+        for name, (extra, (stride, a0), want) in DRAGON_SCENES.items():
+            dest = run(original, f'dragon-{name}', 'dq5vehicleblocks.lua',
+                       extra | {'FROM': str(SCENE_FROM), 'UNTIL': str(SCENE_UNTIL)}, out, state, mesence, libdir)
+            got = scene_blocks(base, dest, stride, a0)
+            results[f'dragon-{name}'] = sorted(got)
+            checks[f'dragon-{name}'] = got == want
         edited_rom = Rom(edited.read_bytes())
         checks['edited-size'] = vehicle_part(edited_rom, '80-3')['cols'] == 4 and \
             all(results['edited-80-blocks'][n]['drawn'] == list(range(4 * FRAMES)) for n in ('80-1', '80-2', '80-3'))
@@ -206,7 +239,10 @@ def main():
         (out / 'results.json').write_text(json.dumps({'results': results, 'checks': checks}, ensure_ascii=False,
                                                      indent=1, default=str) + '\n', encoding='utf-8')
         for case, rows in results.items():
-            if case.endswith('-blocks'):
+            if case.startswith('dragon-'):
+                p = vehicle_part(base, '82-1')
+                print(f'{case} 82-1: 그린 블록 {rows} / 옮긴 블록 {p["copied"] // (p["cols"] * p["rows"])}')
+            elif case.endswith('-blocks'):
                 for n, r in rows.items():
                     print(f'{case} {n}: 그린 블록 {r["drawn"]} / 옮긴 블록 {r["copied"]}')
             else:

@@ -261,18 +261,63 @@ class VehicleLayoutTests(unittest.TestCase):
                 out.append({'part': v['part'], 'frames': frames, 'cells': cells})
         return {'format': FORMAT, 'vehicles': out}
 
+    def test_dragon_layout_rejected(self):
+        # 착륙·이륙과 天空城 장면이 82-1 의 원래 간격으로 블록 12~16 을 그려 マスタードラゴン 은 칸 수·프레임 수를 못 바꾼다.
+        shadow = next(v for v in dump(self.rom)['vehicles'] if v['part'] == '82-2')
+        for doc in (self.dragon(2), self.dragon(4),
+                    {'format': FORMAT, 'vehicles': [{'part': '82-2', 'size': '3x3', 'cells': {
+                        k: [r + ' 00' for r in rows] + ['00 00 00'] for k, rows in shadow['cells'].items()}}]}):
+            with self.subTest(doc=doc['vehicles'][0].get('frames')), self.assertRaises(ValueError):
+                patch(self.rom, doc, vehicle_at=0x04FEE0)
+        # 프레임 수가 그대로면 제자리에 쓴다.
+        self.assertEqual(len(patch(self.rom, self.dragon(3))['writes']), 0)
+
+    def test_in_place_keeps_scene_blocks(self):
+        # 82-2 칸 표가 82-1 블록 12~16 에 걸치면 그 칸을 바꾸는 제자리 쓰기를 거부하고, 블록 17 부터면 받는다.
+        site, head = VEHICLE_PARTS['82-2'], vehicle_part(self.rom, '82-1')['table']
+        for block, ok in ((16, False), (17, True)):
+            put(self.rom.d, site['ldy'], ((head + block * 16) & 0xFFFF).to_bytes(2, 'little'))
+            v = next(x for x in dump(self.rom)['vehicles'] if x['part'] == '82-2')
+            row = v['cells']['up0'][0].split()
+            row[0] = 'h3F' if row[0] != 'h3F' else '3F'
+            cells = {'up0': [' '.join(row)] + v['cells']['up0'][1:]}
+            doc = {'format': FORMAT, 'vehicles': [{'part': '82-2', 'cells': cells}]}
+            with self.subTest(block=block):
+                if ok:
+                    self.assertEqual(len(patch(self.rom, doc)['writes']), 1)
+                else:
+                    with self.assertRaises(ValueError):
+                        patch(self.rom, doc)
+
+    def tenkuu_shadow(self):
+        """天空城 그림자(81-2)를 4x2 에서 4x3 으로. 상하 반전 칸 셋(0·1·6)."""
+        return {'part': '81-2', 'size': '4x3', 'cells': {'all': ['v00 hv01 02 03', '04 05 v06 07', '08 09 0a 0b']}}
+
     def test_vflip_table_rewritten(self):
-        # マスタードラゴン 그림자(82-2)의 상하 반전 칸은 새 블록 자리로 01:C160 표를 다시 쓴다. 표는 24칸이다.
-        doc = self.dragon(2)
+        # 칸 수를 바꾸면 01:C42D 표를 새 칸 오프셋(칸 × 2)으로 다시 쓰고 FF 로 끝낸다. 표는 8칸이다.
+        doc = {'format': FORMAT, 'vehicles': [self.tenkuu_shadow()]}
+        w = patch(self.rom, doc, vehicle_at=0x04FEE0)['writes']
+        table = next(x for x in w if x['at'] == '01:C42D')
+        self.assertEqual(bytes.fromhex(table['hex']), bytes([0, 2, 12, 0xFF]))
         after = self.build(doc)
-        self.assertEqual(dump(after)['vehicles'][-2:], normalized(doc, self.rom)['vehicles'][-2:])
-        p = vehicle_part(after, '82-2')
-        flips = sum(t.startswith(('v', 'hv')) for r in doc['vehicles'][1]['cells'].values() for row in r
-                    for t in row.split())
-        self.assertEqual(len(p['vflip']), flips)
-        self.assertLessEqual(flips, 24)
+        self.assertEqual(vehicle_part(after, '81-2')['vflip'], {0, 1, 6})
+        self.assertEqual(dump(after)['vehicles'], normalized(doc, self.rom)['vehicles'])
+        many = dict(self.tenkuu_shadow(), cells={'all': [' '.join(f'v{i:02X}' for i in range(r * 4, r * 4 + 4))
+                                                         for r in range(3)]})
         with self.assertRaises(ValueError):
-            patch(self.rom, self.dragon(4), vehicle_at=0x04FEE0)
+            patch(self.rom, {'format': FORMAT, 'vehicles': [many]}, vehicle_at=0x04FEE0)
+
+    def test_two_vehicles_in_one_doc(self):
+        # 탈것 번호 차례로 --vehicle-at 뒤에 이어 둔다: 양탄자 3프레임(216칸) 다음에 天空城 부분 1(32칸)·2(12칸).
+        doc = carpet_doc(self.rom, 3)
+        doc['vehicles'].append(self.tenkuu_shadow())
+        after = self.build(doc)
+        self.assertEqual(vehicle_part(after, '80-1')['table'], 0x04FEE0)
+        self.assertEqual(vehicle_part(after, '81-1')['table'], 0x04FEE0 + 216)
+        self.assertEqual(vehicle_part(after, '81-2')['table'], 0x04FEE0 + 216 + 32)
+        self.assertEqual(vehicle_part(after, '81-1')['bytes'], vehicle_part(self.rom, '81-1')['bytes'])
+        self.assertEqual(dump(after)['vehicles'], normalized(doc, self.rom)['vehicles'])
+        self.assertEqual(vehicle_part(after, '82-1')['table'], vehicle_part(self.rom, '82-1')['table'])
 
 
 if __name__ == '__main__':

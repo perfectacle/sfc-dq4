@@ -14,8 +14,9 @@ sfc/dq5/docs/dq5-graphics-format.md 의 「맵 OBJ 물체」·「탈것」·「�
     즉값이다. 칸 수·프레임 수가 그대로면 칸 바이트만 제자리에 쓴다. 바꾸면 그 탈것의 부분 모두의 칸 표를
     --vehicle-at 에 차례로 두고 즉값을 고친다(바꾼 부분은 그리는 블록만 옮겨 쓰게 한다). 한 즉값을 함께 쓰는 값
     (80-2·81-1·82-1·82-2 의 가로·세로, 한 탈것의 프레임 수)은 같아야 하고, 天空城 은 간격·프레임 주기가 STZ 라
-    프레임 수를 바꿀 수 없다. 상하 반전은 01:C42D·01:C160 표가 슬롯 칸 목록에 나중에 더하므로 칸 수가 그대로면
-    바꿀 수 없고, 바꾸면 표를 원래 칸 수 안에서 다시 쓴다.
+    프레임 수를 바꿀 수 없다. マスタードラゴン 은 착륙·이륙과 天空城 장면이 원래 간격·프레임을 고정값으로 두고 82-1 의
+    블록 12~16 을 그려 칸 수·프레임 수를 바꿀 수 없다(SCENE_BLOCKS). 상하 반전은 01:C42D·01:C160 표가 슬롯 칸
+    목록에 나중에 더하므로 칸 수가 그대로면 바꿀 수 없고, 바꾸면 표를 원래 칸 수 안에서 다시 쓴다.
   인물 세트(배 68 등): 세트 레코드 +3~+50 의 칸 48개(1F:CFC8·1F:D0FB 가 칸 목록으로 옮김). 자리는 00:F071(6타일)·
     00:F7AA(8타일)가 정한다. 타일 번호는 그 세트의 타일 수(+51)보다 작아야 한다.
 
@@ -77,6 +78,11 @@ VEHICLE_PARTS = {
 # 7E:32A0 즉값(탈것의 부분 모두에 같은 값). bit6-7 은 그리기 루틴(00:EC82, 80 = 00:FBEB), bit0-3 은 00:EDD0 이
 # 프레임을 0 으로 되돌리는 마지막 프레임 번호다. 天空城 은 32E0(프레임 주기)·37C0·37E0 을 STZ 로 두어 프레임이 늘 0 이다.
 VEHICLE_FRAMES = {0x80: 0x01BD57, 0x81: None, 0x82: 0x01C0AA}
+# 걷기 밖에서 즉값 대신 고정값으로 간격·프레임을 두고 그리는 블록. 01:BF7C(착륙·이륙)는 슬롯 7 에 32A7 = 87·3287 = 7 을
+# 두고 6 까지 세어 블록 16·15 를, 01:BB7C(天空城 06/00·06/05, 7E:2190 bit7)는 37C7 = 80·32A7 = 83 으로 블록 12~15 를
+# 그린다. 둘 다 82-1 의 원래 칸 수·간격을 전제로 하므로 82 는 칸 수·프레임 수를 바꿀 수 없고, 다른 부분의 칸을 제자리에
+# 쓸 때 이 블록을 덮으면 거부한다.
+SCENE_BLOCKS = {'82-1': range(12, 17)}
 TOKEN = re.compile(r'(h?)(v?)([0-9A-Fa-f]{2})')
 
 
@@ -222,7 +228,9 @@ def objects_on(heads, bc, bd, night):
 
 def check_slots(rom, old_heads, new_heads):
     """물체가 늘어난 실내 맵마다 8 + 인물 + 물체(물체를 다 놓은 뒤의 7E:1983)에 장면이 더 쓰는 슬롯을 더해 20 을
-    넘으면 거부한다. 슬롯 20 은 인물 표 다음 칸의 슬롯 0(주인공)이다. 필드(FE)는 보지 않는다."""
+    넘으면 거부한다. 슬롯 20 은 인물 표 다음 칸의 슬롯 0(주인공)이다. 필드(FE)는 보지 않는다.
+    dq5npclists 의 SLOT_LIMIT(1F)는 인물을 늘릴 때 원본 최댓값까지만 여는 기준이고, 여기서는 19/02 에서 $1983 = 20
+    까지 그대로임을 잰 SLOT_END 를 쓴다."""
     maps = {(h[0], h[1] & 0x7F) for h in new_heads if h[0] != 0xFE}
     grown = [(bc, bd, night) for bc, bd in sorted(maps) for night in (False, True)
              if objects_on(new_heads, bc, bd, night) > objects_on(old_heads, bc, bd, night)]
@@ -392,6 +400,10 @@ def plan_vehicles(rom, rows, at=None):
         if not moved:
             writes += plan_vehicle_cells(rom, names, by_part, cur)
             continue
+        fixed = [n for n in names if n in SCENE_BLOCKS]
+        if fixed:
+            raise ValueError(f'탈것 {vid:02X}: 착륙·이륙(01:BF7C)과 天空城 장면(01:BB7C)이 {fixed[0]} 의 원래 간격으로 '
+                             f'블록 {SCENE_BLOCKS[fixed[0]][0]}~{SCENE_BLOCKS[fixed[0]][-1]} 을 그려 칸 수·프레임 수를 바꿀 수 없음')
         if at is None:
             raise ValueError(f'탈것 {vid:02X}: 칸 수·프레임 수를 바꾸면 칸 표를 옮겨야 해 --vehicle-at 이 필요함')
         w = plan_vehicle_layout(rom, vid, names, by_part, cur, layout, frames, at)
@@ -419,6 +431,15 @@ def plan_vehicle_cells(rom, names, by_part, cur):
                 data[i_] = b
         if bytes(data) != p['bytes']:
             writes.append((p['table'], bytes(data), True, f'탈것 {n} 칸 {len(data)}개'))
+    for n, blocks in SCENE_BLOCKS.items():
+        if n not in cur:
+            continue
+        per = cur[n]['cols'] * cur[n]['rows']
+        start, end = cur[n]['table'] + blocks[0] * per, cur[n]['table'] + (blocks[-1] + 1) * per
+        for at, data, _, note in writes:
+            hit = [a for a in range(max(at, start), min(at + len(data), end)) if data[a - at] != rom.u8(a)]
+            if hit:
+                raise ValueError(f'{note}: {cpu(hit[0])} 이 {n} 블록 {blocks[0]}~{blocks[-1]}(착륙·이륙·天空城 장면)을 덮음')
     return writes
 
 
@@ -568,7 +589,10 @@ def built(rom, manifest):
     lists = [(parse_at(w['at'])[0], bytes.fromhex(w['hex']), bytes.fromhex(w['orig']) if 'orig' in w else None, w['note'])
              for w in manifest['writes']]
     end = max(lorom(a) + len(d) for a, d, _, _ in lists) if lists else 0
-    mb = 0 if end <= len(rom.d) else next(m for m, top in REACHABLE.items() if end <= top)
+    fits = [m for m, top in REACHABLE.items() if end <= top]
+    if end > len(rom.d) and not fits:
+        raise PatchError(f'쓰기 끝 {end:#x} 가 늘릴 수 있는 롬 크기를 넘음')
+    mb = 0 if end <= len(rom.d) else fits[0]
     data, _ = build(rom.d, [('obj-layout', 0, lists)], mb)
     return Rom(data)
 
