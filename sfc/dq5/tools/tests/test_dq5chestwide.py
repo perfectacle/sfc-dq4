@@ -1,8 +1,11 @@
 """상자 번호 16비트 훅(dq5chestreloc --wide-at): 원본 롬에 훅을 붙여 65816 해석기로 열기·들어갈 때·켜기를 돌려 보고,
 훅 롬의 표 자리 찾기와 입력 검사를 본다."""
+import io
 import json
 import sys
 import unittest
+from contextlib import redirect_stdout
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -106,7 +109,9 @@ class ChestWideTests(unittest.TestCase):
         self.assertEqual((got['name'], got['a'] & 0xFF, got['p'] & 0x30), ('below', 4, 0x30))
         self.assertEqual(open_chest(hooked(index=55), 0x03, 0x00)['a'] & 0xFF, 0xFF)   # 200 + 55 = 255
         self.assertEqual(open_chest(hooked(index=56), 0x03, 0x00)['wram'][0x1E80], 0)   # 256
-        self.assertEqual(open_chest(rom, 0x05, 0x00)['name'], 'none')
+        # 표에 없는 맵(12:E669 로)도 앞 상자가 남긴 마스크를 지운다
+        got = open_chest(rom, 0x05, 0x00, w291B=0x04)
+        self.assertEqual((got['name'], got['wram'][0x291B], got['s']), ('none', 0, 0x1FF))
 
     def test_entry(self):
         rom = hooked()
@@ -127,6 +132,10 @@ class ChestWideTests(unittest.TestCase):
         cpu = cpu_for(rom, 0, 0, w1E80=6, w1E81=0, w291B=0x08, w28F9=0x01)
         cpu.jsl(label('set'), max_steps=1_000)
         self.assertEqual((cpu.wram[0x28F9], cpu.wram[0x291B], cpu.p & 1), (0x09, 0, 0))
+        # 28F3~291A 의 마지막 바이트(27)까지는 켠다
+        cpu = cpu_for(rom, 0, 0, w1E80=0x27, w1E81=0, w291B=0x08)
+        cpu.jsl(label('set'), max_steps=1_000)
+        self.assertEqual((cpu.wram[0x291A], cpu.wram[0x291B], cpu.wram[0x2190 + 0x27]), (0x08, 0, 0))
         # 다른 보상은 원래처럼 2190 + $1E80 에 OR
         cpu = cpu_for(rom, 0, 0, w1E80=0x80, w1E81=0x20, w291B=0x08)
         cpu.jsl(label('set'), max_steps=1_000)
@@ -180,6 +189,21 @@ class ChestWideTests(unittest.TestCase):
         self.assertEqual(reloc.wide_at(built), 0x3FD000)
         with self.assertRaises(ValueError):
             reloc.writes_for(rom, json.loads(json.dumps(doc)) | {'chests': doc['chests'] * 2}, {})
+
+    def test_check_rejects_other_wide_place(self):
+        # 만든 롬의 12:E66F 가 --wide-at 이 아닌 곳(그곳에도 훅이 온전히 있음)을 가리키면 check 가 거부한다
+        rom = Rom(Path(ROM).read_bytes())
+        at = dict.fromkeys(reloc.ORIGINAL) | {'wide': 0x3FD000}
+        real = reloc.patch
+
+        def elsewhere(rom, doc, at=None, new_maps=reloc.NO_NEW_MAPS):
+            if at and at.get('wide'):
+                at = dict(at, wide=at['wide'] + 0x800)
+            return real(rom, doc, at, new_maps)
+        with mock.patch.object(reloc, 'patch', elsewhere), self.assertRaisesRegex(ValueError, '--wide-at 자리'):
+            reloc.check(rom, None, at)
+        with redirect_stdout(io.StringIO()):
+            reloc.check(rom, None, at)
 
     def test_chestwrite_on_hooked_rom(self):
         # 표를 옮기지 않고 훅만 넣은 롬에서도 고정 표 쓰기가 같은 표를 읽고 쓴다

@@ -53,16 +53,18 @@ class TokenTests(unittest.TestCase):
         for bad in ({'map': '04/06', 'x': 1, 'y': 1, 'cells': ['01', '01 02']},
                     {'map': 'FE/00', 'x': 1, 'y': 1, 'cells': ['01']},
                     {'map': '04/06', 'x': 512, 'y': 1, 'cells': ['01']},
-                    {'map': '04/06', 'x': 1, 'y': 1, 'cells': ['01'], 'cond': 'dusk'},
-):
+                    {'map': '04/06', 'x': 1, 'y': 1, 'cells': ['01'], 'cond': 'dusk'}):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 object_entry(bad, '')
 
+    def test_field_y_low_byte_80(self):
+        # 원래 표에도 아래 바이트가 80 인 384 가 있어(필드 Y 는 128 로 읽힘) 그대로 받는다.
+        head = object_entry({'map': 'field0', 'x': 1, 'y': 384, 'cells': ['01']}, '')[0]
+        self.assertEqual(head[3], 0x80)
+        self.assertTrue(head[6] & 2)
 
     def test_address(self):
         self.assertEqual(address('16:FE10'), 0x16FE10)
-        # 원래 표에도 아래 바이트가 80 인 384 가 있어(필드 Y 는 128 로 읽힘) 그대로 받는다.
-        self.assertEqual(object_entry({'map': 'field0', 'x': 128, 'y': 384, 'cells': ['01']}, '')[0][2:7:4], b'\x80\x4e')
         for bad in ('16FE10', '15:FE10', '16:7FFF', '16:FE1', None):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 address(bad)
@@ -105,7 +107,7 @@ class PatchTests(unittest.TestCase):
         most = (REGION_END - TABLE - 1) // 9
         self.assertEqual(most, 159)
         one = dict(self.doc['objects'][0], cells=['00'])
-        self.writes(dict(self.doc, objects=[one] * most), at=0x16FE10)
+        self.assertEqual([x['at'] for x in self.writes(dict(self.doc, objects=[one] * most))], ['16:F862'])
         with self.assertRaises(ValueError):
             self.writes(dict(self.doc, objects=[one] * (most + 1)), at=0x16FE10)
 

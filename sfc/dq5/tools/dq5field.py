@@ -111,8 +111,8 @@ TERRAIN_SITES = (0x03CB2A, 0x03CB36)
 # [세계 0·1·2 의 10번째 비트 평면][세계 0·1·2 의 11번째 비트 평면](24비트씩, 0 이면 없음)로 시작한다. 10번째 비트만 읽던 훅은
 # 머리가 앞의 9바이트뿐이라 BRA 의 거리(09)로 가른다.
 BIT9_SITES = (0x00BC33, 0x00BE06)
-BIT11_HEAD = 0x12
-BIT11_BODY = 2 + 18
+BIT11_HEAD = 18
+BIT11_BODY = 2 + BIT11_HEAD
 
 
 def grown_blocks(rom):
@@ -147,7 +147,8 @@ def terrain(rom, m):
 
 
 def bit9_planes(rom, bit=9):
-    """세계 0·1·2 의 bit(9 = 10번째, 10 = 11번째) 비트 평면 주소(없으면 None). 훅이 없으면 모두 None."""
+    """세계 0·1·2 의 bit(9 = 10번째, 10 = 11번째) 비트 평면 주소(없으면 None). 훅이 없으면 모두 None.
+    bit 가 9·10 이 아니면 ValueError."""
     if bit not in (9, 10):
         raise ValueError(f'bit 는 9(10번째 비트)·10(11번째 비트)만: {bit}')
     # 10비트 훅은 JSL 로 머리(BRA)에, 11비트 훅은 JML 로 머리 20바이트 뒤 첫 몸통에 들어간다.

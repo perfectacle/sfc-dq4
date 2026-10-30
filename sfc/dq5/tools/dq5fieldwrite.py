@@ -29,7 +29,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from dq5field import BIT9_SITES, BIT11_BODY, WORLDS, bit9_planes, block_count, rle, world_blocks  # noqa: E402
+from dq5field import BIT9_SITES, BIT11_BODY, BIT11_HEAD, WORLDS, bit9_planes, block_count, rle, world_blocks  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
 
 LOADERS = (0x01A5C2, 0x01A5F1, 0x01A620)
@@ -172,7 +172,7 @@ def bit9_hook(planes, planes10=(None, None, None)):
         w0, w2, w1, zero = arm[0] + tail, arm[2] + tail, arm[1] + tail, b'\xa9\x00\x48' + tail
         bodies += head + b'\xd0' + bytes([len(w0)]) + w0
         bodies += b'\xc9\x02\x90' + bytes([2 + len(w2) + len(zero)]) + b'\xd0' + bytes([len(w2)]) + w2 + zero + w1
-    return bytes([0x80, 18]) + b''.join((p or 0).to_bytes(3, 'little') for p in (*planes, *planes10)) + bodies
+    return bytes([0x80, BIT11_HEAD]) + b''.join((p or 0).to_bytes(3, 'little') for p in (*planes, *planes10)) + bodies
 
 
 def bit11_entries(hook):

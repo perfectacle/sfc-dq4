@@ -286,12 +286,14 @@ def place(groups):
     kept = []
     for m, k, hd, row, y, cnt in placed:
         j = 0
+        # y 가 $38 보다 작으면 줄 번호가 음수다. 게임은 X 8비트라 7E:2FF9~ 에 세므로(코드 읽기) 이 표에 넣지 않는다.
+        # 원래 롬에는 그런 배치가 없고, dq5monlimits.losses 가 바꾼 그림의 그런 배치를 따로 거부한다.
+        rows = [((y >> 3) - 7 + r, c) for r, c in enumerate(cnt) if (y >> 3) - 7 + r >= 0]
         while j < k:
-            b = (y >> 3) - 7
-            if any(bands[b + r] + c >= 0x1C for r, c in enumerate(cnt)):
+            if any(bands[b] + c >= 0x1C for b, c in rows):
                 break
-            for r, c in enumerate(cnt):
-                bands[b + r] += c
+            for b, c in rows:
+                bands[b] += c
             j += 1
         kept.append((m, j, hd, row, y, k))
     return kept, pieces, bands

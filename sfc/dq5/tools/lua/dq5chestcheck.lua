@@ -34,6 +34,14 @@ emu.addMemoryCallback(function()
   local s = emu.getState()
   log[#log + 1] = string.format('message f=%d value=%04X', n, s['cpu.a'])
 end, emu.callbackType.exec, 0x248BAF, 0x248BAF)
+-- 상자 열기 12:E66F(상자 번호 16비트 훅이면 그 JML). pend 는 들어올 때의 넘길 마스크 칸 7E:291B
+emu.addMemoryCallback(function()
+  log[#log + 1] = string.format('open f=%d pend=%02X pos=%d,%d', n, b(0x7E291B), b(0x7E3020), b(0x7E3080))
+end, emu.callbackType.exec, 0x12E66F, 0x12E66F)
+-- 맵 안 순서를 세는 2A:F224. 상자 번호 16비트 훅은 291B 를 지운 뒤에 부른다
+emu.addMemoryCallback(function()
+  log[#log + 1] = string.format('count f=%d pend=%02X', n, b(0x7E291B))
+end, emu.callbackType.exec, 0x2AF224, 0x2AF224)
 -- 보상 뒤 열림 비트를 켜는 12:F839. ret 는 스택 맨 위의 돌아갈 주소(JSR 이면 부른 명령 + 2)
 emu.addMemoryCallback(function()
   local sp = emu.getState()['cpu.sp']

@@ -226,6 +226,38 @@ class PlanTests(unittest.TestCase):
             with self.subTest(size=(w, h)), self.assertRaisesRegex(ValueError, '팔레트 모드 PNG'):
                 self.run_plan(pictures=[{'picture': '00', 'image': 'odd.png'}])
 
+    def test_widest_picture(self):
+        # 가로 19칸(152 픽셀)은 머리 +5 상위 니블 F 로 적는다
+        self.assertEqual((W.size_byte(19, 2), W.size_byte(15, 16), W.size_byte(1, 1)), (0xF1, 0xEF, 0x00))
+        rng = random.Random(12)
+        grid = [[rng.randrange(1, 4) if x >= 136 else 0 for x in range(152)] for _ in range(16)]
+        self.save('widest.png', grid)
+        with mock('dq5monlimits.losses', return_value=[]):
+            pictures, _ = self.run_plan(pictures=[{'picture': '00', 'image': 'widest.png'}])
+        raw = pictures[0][1]
+        self.assertEqual(raw[5], 0xF1)
+        self.assertEqual((M.parse_header(raw[:6])['w'], M.parse_header(raw[:6])['h']), (19, 2))
+        self.assertEqual(decode_raw(raw, 19, 2), grid)
+
+    def test_swap_to_resized_picture(self):
+        # 그림 01 을 따로 1x1 칸 그림으로 둔다. 몬스터 02 를 그림 00 으로 바꾸면 원래 그림 00(2x2)은 01 보다 크지만,
+        # 같은 문서에서 그림 00 을 1x1 로 줄였으면 줄인 크기로 견주어 받는다.
+        one = [[1] * 8 for _ in range(8)]
+        raw = encode_picture(one, 1, 1, bytes(6))[0]
+        self.rom.d[lorom(0x259000):lorom(0x259000) + len(raw)] = raw
+        self.rom.d[lorom(0x258C47):lorom(0x258C47) + 2] = (0x9000).to_bytes(2, 'little')
+        self.save('one.png', one)
+        self.save('tall.png', [[1] * 16 for _ in range(24)])
+        small = {'picture': '00', 'image': 'one.png', 'header': {'hit_x': 0, 'hit_y': 0}}
+        swap = [{'monster': '02', 'picture': '00'}]
+        with self.assertRaisesRegex(ValueError, '전투 배치 한도'):
+            self.run_plan(monsters=swap)
+        with mock('dq5monlimits.losses', return_value=[]):
+            _, monsters = self.run_plan(pictures=[small], monsters=swap)
+            self.assertEqual(monsters[2][0], 0)
+            with self.assertRaisesRegex(ValueError, '전투 배치 한도'):
+                self.run_plan(pictures=[{'picture': '00', 'image': 'tall.png'}], monsters=swap)
+
     def test_rejects(self):
         self.save('same.png', self.grid)
         self.save('wide.png', [[1] * 24 for _ in range(16)])

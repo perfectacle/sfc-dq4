@@ -345,7 +345,7 @@ def plan(rom, doc, base, areas=None):
     if records_moved(rom):
         raise ValueError('몬스터 레코드를 이미 옮긴 롬(22:9003)은 받지 않음 — 레코드를 옮기기 전 롬을 입력으로 줌')
     used = set(used_pictures(rom))
-    pictures, grown = {}, {}
+    pictures, grown, limits = {}, {}, {}
     rows = doc.get('pictures', [])
     if not isinstance(rows, list):
         raise ValueError('pictures는 배열이어야 함')
@@ -376,6 +376,7 @@ def plan(rom, doc, base, areas=None):
                 any(hd[k] != old[k] for k in ('w', 'h', 'float', 'raise')):
             grown[g] = (pieces, bands, slots, hd)
         pictures[g] = (grid, raw, pieces, tiles)
+        limits[g] = (pieces, tiles, len(grid[0]) // 8, len(grid) // 8, max(bands))
     # 같은 머리를 가리키는 그림 번호(00·11·29, 58·5E 등)는 자료가 하나라 함께 바뀐다.
     for g in list(pictures):
         for other in used:
@@ -383,6 +384,7 @@ def plan(rom, doc, base, areas=None):
                 if other in pictures and pictures[other][0] != pictures[g][0]:
                     raise ValueError(f'그림 {g:02X}·{other:02X} 는 같은 머리를 써서 다른 그림을 줄 수 없음')
                 pictures[other] = pictures[g]
+                limits[other] = limits[g]
                 if g in grown:
                     grown[other] = grown[g]
     monsters = {}
@@ -405,7 +407,8 @@ def plan(rom, doc, base, areas=None):
                 any(type(c) is not int or not 0 <= c <= 0x7FFF for c in colors):
             raise ValueError(f'{label}.colors: 0~7FFF 정수 1~{MAX_COLORS}개(원래 {len(colors0)}개보다 많으면 --records-at)')
         if g != g0:
-            old, new = picture_limits(rom, g0), picture_limits(rom, g)
+            # 같은 문서에서 바꾼 그림이면 바꾼 크기로 견준다
+            old, new = picture_limits(rom, g0), limits.get(g) or picture_limits(rom, g)
             if any(a > b for a, b in zip(new, old)):
                 raise ValueError(f'{label}.picture: 그림 {g:02X} 의 조각·타일·가로·세로·줄 최대 타일 {new} 가 원래 그림 {g0:02X} 의 '
                                  f'{old} 를 넘음(전투 배치 한도)')
