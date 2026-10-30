@@ -207,6 +207,13 @@ class EngineCodeTests(unittest.TestCase):
         self.assertIn(guard, code)
         self.assertLess(code.index(guard), code.index(bytes.fromhex('29 40 00')))
 
+    def test_vehicle_song_skips_both_commands_for_the_same_song(self):
+        code = patch.vehicle_song_code()
+        self.assertTrue(code.startswith(bytes.fromhex('48 AD 8B 1D CD 4B 19 F0')))
+        same = code[9 + code[8]:]
+        self.assertEqual(same, bytes.fromhex('68 6B'))  # 같으면 PLA / RTL 만
+        self.assertIn(bytes.fromhex('22 91 FE 24 AD 4B 19 22 9A FE 24'), code)
+
     def test_far_branch_out_of_range_is_rejected(self):
         with self.assertRaisesRegex(ValueError, 'out of range'):
             patch._asm_far([('b', 0x80, 'far'), bytes(200), ('label', 'far')], 0x718000)

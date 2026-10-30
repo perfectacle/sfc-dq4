@@ -530,6 +530,23 @@ LOAD_LINES = 8                     # IRQ 사이 줄 수. 줄마다 걸면 코루
 NMI_RANGE_STUB = LOAD_STUB + 4
 
 
+# マスタードラゴン 에서 내리기(01:C213)는 1A 와 맵 곡 01 을 보낸다. 타는 동안 필드 곡이 그대로 울리므로 같은 곡을
+# 정리했다 다시 보내게 되어, 곡 앞 샘플이 많은 옮긴 필드 곡은 명령 뒤 +87프레임 조용했다(원본 +37).
+VEHICLE_SONG = CODE + 0x800
+VEHICLE_SONG_SITE = 0x01C213
+
+
+def vehicle_song_code():
+    """01:C213 의 JSL 24:FE91(1A) / LDA $194B / JSL 24:FE9A(01) 대신 불린다(8비트 A). 지금 곡($1D8B)이 맵 곡($194B)이면
+    둘 다 건너뛰어 울리던 곡을 잇고, 다르면 원래대로 보낸다."""
+    h = bytes.fromhex
+    return _asm([
+        h('48 AD 8B 1D CD 4B 19'), ('b', 0xF0, 'same'),       # PHA / LDA $1D8B / CMP $194B
+        h('68 22 91 FE 24 AD 4B 19 22 9A FE 24 6B'),          # PLA / JSL 1A / LDA $194B / JSL 01 / RTL
+        ('label', 'same'), h('68 6B'),                         # PLA / RTL
+    ])
+
+
 def nmi_range_code():
     """NMI 선점(00:88E2)이 2B:B741~B804(우리 코루틴 코드: 응답 판정·곡 틀기 문·나눈 곡 발판·곡 번호 도우미)도
     코루틴으로 보게 하는 00:8004 발판. 빠뜨리면 그 안에서 NMI 가 와도 코루틴이 멈추지 않아 게임이 한 프레임 밀린다."""
@@ -734,7 +751,8 @@ def write_resident_samples(data, ids):
 
 
 def install(base, replacements, *, sample_resources=None, map_fades=False, preview=None, pinned=(),
-            resident=None, set_records=None, fast_receive=False, chains=None, chain_late=(), hold=False, early_song=False, load_pump=False):
+            resident=None, set_records=None, fast_receive=False, chains=None, chain_late=(), hold=False, early_song=False, load_pump=False,
+            vehicle_song=False):
     """pinned 는 늘 두는 시퀀스 목록에 남길 바꾸는 곡(나머지 바꾸는 곡은 목록에서 뺌). resident 는 새 늘 두는 샘플 목록
     전체(주지 않으면 그대로). set_records 는 바꾸지 않는 곡의 곡 묶음 레코드 {곡: (k, 샘플…)}.
     fast_receive 는 SPC 자료 받기를 묶음 여러 개 이어 받게 바꾼다(fast_receive_code). chains 는 {곡: 본체 시퀀스} 로,
@@ -742,6 +760,7 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
     본체를 곡 뒤 샘플 다음에 보낸다(chain_late_step_code). hold 는 곡 붙들기(F7 FE·FF)를 드라이버에 넣는다(빠른 받기 필요).
     early_song 은 계단·문 출구에서 페이드 아웃 전에 목적지 맵 곡을 요청한다(early_song_code).
     load_pump 는 NMI 를 끈 동안(맵 불러오기)에도 IRQ 로 곡 앞 자료를 보낸다(load_pump_code, early_song 필요).
+    vehicle_song 은 マスタードラゴン 에서 내릴 때 울리던 맵 곡을 다시 보내지 않고 잇는다(vehicle_song_code).
     """
     if len(base) not in (0x180000, 0x200000, 0x400000):
         raise ValueError('base must be a headerless 1.5MB, 2MB or 4MB DQ5 build')
@@ -938,6 +957,10 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
             raise ValueError('load_pump needs early_song (the request must be queued before the map load)')
         for at, (payload, original) in load_pump_code().items():
             write(at, payload, original, empty=original is None)
+    if vehicle_song:
+        write(VEHICLE_SONG, vehicle_song_code(), empty=True)
+        write(VEHICLE_SONG_SITE, bytes([0x22]) + VEHICLE_SONG.to_bytes(3, 'little') + bytes([0xEA] * 7),
+              bytes.fromhex('22 91 FE 24 AD 4B 19 22 9A FE 24'))
     if map_fades:
         cleanup, start = transition_code()
         write(CODE, cleanup, empty=True)
