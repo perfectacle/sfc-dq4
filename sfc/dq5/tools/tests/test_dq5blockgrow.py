@@ -55,19 +55,20 @@ class BlockGrowTests(unittest.TestCase):
         self.assertEqual(doc['blocks'][4]['terrain'], 9)
         self.assertEqual(sum(new != old for _, new, old, _ in ft.edits(rom, doc)), 0)
         self.assertFalse(ft.check(rom))
-        # 훅: 블록 601, 칸 (1, 1)(오른쪽 아래). 00:BC52 에는 RTS 를, 00:BC47 에도 RTS 를 둔다.
+        # 훅: 블록 601, 칸 (1, 1)(오른쪽 아래). 00:BC6D 에는 RTS 를, 00:BC47 에도 RTS 를 둔다.
         data = bytearray(rom.d)
-        put(data, 0x00BC52, b'\x60')
+        put(data, 0x00BC6D, b'\x60')
         put(data, 0x00BC47, b'\x60')
         for block, quad, want in ((601, 3, (601 & 255, 0, 1, 0)), (511, 0, (511 & 255, 0, 0, 0)),
-                                  (300, 0, None)):
+                                  (300, 0, None), (300, 3, None)):
             cpu = Cpu(bytes(data), bytes(0x20000))
             cpu.p = 0x30
             cpu.wram[0x90], cpu.wram[0x92] = quad & 1, quad >> 1
             cpu.a = block
             cpu.jsr(dq5field.BLOCK_GROW_SITE)
             if want is None:
-                self.assertEqual(cpu.wram[0] | cpu.wram[1] << 8, 300)          # 원래 갈래: STA $00 뒤 00:BC52
+                # 원래 갈래: 00:BC50~BC6C 와 같은 X = 번호 × 5 + 칸, Y = 칸, $02 = 번호 × 5 로 00:BC6D
+                self.assertEqual((cpu.x, cpu.y, cpu.wram[2] | cpu.wram[3] << 8), (1500 + quad, quad, 1500))
                 continue
             entry = [rom.u8(dq5field.block_entry(rom, u, block) + i) for u in (False, True) for i in (quad, 4)]
             self.assertEqual(tuple(cpu.wram[0x94:0x98]), (entry[0], entry[1] >> 7 - quad & 1, entry[2],
@@ -243,6 +244,71 @@ class Bit9HookTests(unittest.TestCase):
             dq5field.bit9_planes(r, 11)
         with self.assertRaisesRegex(ValueError, '00:CF50'):
             fw.plane_writes(rom, bytes(d), {2: [1100] * fw.SIZE}, 0x318000)
+
+    def test_fast_hook_matches_tables(self):
+        # 블록을 1,600개로 늘린 롬에 세계 0(11번째 비트까지)·1(10번째 비트만) 지도를 쓰고, 00:BBF7 을 부르는 짧은 루틴으로
+        # 빠른 훅을 돌린다. 00:BC6D 에는 RTS 를 둬 511 미만 갈래가 INDEX5 를 마친 X·Y 를 보고, 00:BC46 은 PLP / RTS 다.
+        d = grow_fixture()
+        put_cells(d)
+        for site, want in zip(dq5field.BIT9_SITES, fw.BIT9_ORIG):
+            put(d, site, want)
+        put(d, 0x00BBF7, b'\x08' + fw.FAST_ORIG)
+        put(d, 0x00BDC5, b'\x08\x8b\xc2\x30' + fw.FAST_ORIG)
+        d = apply(d, ft.edits(Rom(bytes(d)), document(blocks=new_blocks(1600)), blocks_at=0x3C8000))
+        rom = Rom(bytes(d))
+        cells = {y * 256 + x for x, y in fw.changed_cells(rom)}
+        grids = {0: [5 if i in cells else (i * 37 + i // 256) % 1600 for i in range(fw.SIZE)],
+                 1: [5 if i in cells else (i * 11) % 1024 for i in range(fw.SIZE)]}
+        out, _ = fw.plane_writes(rom, bytes(d), grids, 0x318000)
+        self.assertEqual([w['at'] for w in out[-2:]], ['00:BBF8', '00:BDC9'])
+        self.assertEqual([w['at'] for w in out if '반 바이트' in w['note']], ['32:8000', '33:8000'])
+        for w in out:
+            put(d, int(w['at'][:2], 16) << 16 | int(w['at'][3:], 16), bytes.fromhex(w['hex']))
+        put(d, 0x009000, b'\xc2\x30\x20\xf7\xbb\x6b')
+        put(d, 0x009010, b'\xc2\x30\x20\xc5\xbd\x6b')
+        put(d, 0x00BE14, b'\xab\x28\x60')
+        put(d, 0x00BC46, b'\x28\x60')
+        put(d, 0x00BC6D, b'\x60')
+        put(d, 0x00BC43, b'\x20\x6d\xbc')
+        rom = Rom(bytes(d))
+        checked = {'wide': 0, 'narrow': 0}
+        for world, (x, y) in ((w, (x, y)) for w in (0, 1, 3) for x, y in ((0, 0), (1, 1), (37, 300), (300, 37), (511, 2),
+                                                                              (2, 511), (130, 77), (131, 77), (64, 65))):
+            grid = grids.get(world, grids[0])
+            wram = bytearray(0x20000)
+            for i, v in enumerate(grid):
+                wram[0x10000 + i] = v & 0xFF
+                wram[0xE000 + (i >> 3)] |= (v >> 8 & 1) << (7 - (i & 7))
+            wram[0x1949] = world
+            wram[0x90], wram[0x91], wram[0x92], wram[0x93] = x & 0xFF, x >> 8, y & 0xFF, y >> 8
+            cpu = Cpu(bytes(d), bytes(wram))
+            cpu.dbr = 0x7E
+            s = cpu.s
+            cpu.jsl(0x009000)
+            n = grid[(y >> 1) * 256 + (x >> 1)] & (0x1FF if world == 3 else 0xFFFF)
+            q = (x & 1) | (y & 1) << 1
+            self.assertEqual(cpu.s, s, f'세계 {world} ({x},{y})')
+            # 00:BDC5(번호만): 00:BE14 의 PLB / PLP / RTS 로 돌아와 A = 번호, DB 는 그대로
+            terrain = Cpu(bytes(d), bytes(wram))
+            terrain.dbr = 0x01
+            terrain.jsl(0x009010)
+            self.assertEqual((terrain.a & 0xFFFF, terrain.dbr, terrain.s), (n, 0x01, s), f'세계 {world} ({x},{y}) 지형')
+            if n < 511:
+                self.assertEqual((cpu.x, cpu.y), (n * 5 + q, q), f'세계 {world} ({x},{y}) 번호 {n}')
+                checked['narrow'] += 1
+                continue
+            entry = [rom.u8(dq5field.block_entry(rom, u, n) + i) for u in (False, True) for i in (q, 4)]
+            want = (entry[0], entry[1] >> 7 - q & 1 | (entry[1] >> 3 - q & 1) << 1,
+                    entry[2], entry[3] >> 7 - q & 1 | (entry[3] >> 3 - q & 1) << 1)
+            self.assertEqual(tuple(cpu.wram[0x94:0x98]), want, f'세계 {world} ({x},{y}) 번호 {n}')
+            checked['wide'] += 1
+        self.assertTrue(checked['wide'] and checked['narrow'])
+        # 좌표가 0200 이상이면 원래처럼 A = 0 으로 00:BC43 에 간다(여기서는 JSR $BC6D 로 바꿔 둠).
+        cpu = Cpu(bytes(d), bytes(0x20000))
+        cpu.wram[0x90], cpu.wram[0x91], cpu.a = 0x00, 0x02, 0x1234
+        cpu.jsl(0x009000)
+        self.assertEqual(cpu.a & 0xFFFF, 0)
+        self.assertEqual(fw.nibble_plane([0, 512, 1024, 1536])[:2], bytes([0x20, 0x64]))
 
     def test_plane_writes_rejects(self):
         d = bit9_rom([None] * 3)
