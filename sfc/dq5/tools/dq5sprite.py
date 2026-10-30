@@ -443,7 +443,8 @@ def obj_stem(m):
 # 7F 도 그대로)을 4bpp 그대로 풀어 VRAM 타일 180 부터 올리고, 칸은 16:F7DD 가 04 뱅크의 바이트(bit7 좌우 반전,
 # bit0-6 + 7E:1997(=180))로 만든다. 그리는 것은 00:FC08: 가로 cols × 세로 rows 칸, 프레임 오프셋 = 프레임 × 37E0,
 # 방향 오프셋 = 00:EE7C[방향] × 37C0(바이트). 칸 값의 팔레트는 $00(attr). 상하 반전 칸은 01:C42D·01:C160 표가
-# 칸 바이트 오프셋으로 더한다. 팔레트 5 는 색이 모두 0 인 그림자(색 연산)다.
+# 칸 바이트 오프셋으로 더한다. 팔레트 5 는 색이 모두 0 인 그림자(색 연산)다. rom·cols·rows·dir·frame·vflip 은 원본
+# 값이고, 롬을 읽을 때는 vehicle_parts 가 즉값에서 다시 읽는다.
 VEHICLES = (
     {'id': 0x80, 'name': 'まほうのじゅうたん', 'what': '마법의 양탄자', 'tiles': ((0x16E7BD, 0x2F, 0x180),), 'parts': (
         {'rom': 0x04952A, 'cols': 3, 'rows': 2, 'dir': 0x18, 'frame': 0x0C, 'attr': 0x0000, 'vflip': (), 'at': (0, 8)},
@@ -576,9 +577,24 @@ def vehicle_tiles(rom, v):
     return tiles
 
 
+def vehicle_parts(rom, v):
+    """VEHICLES 의 부분에 칸 표 주소·칸 수·간격·프레임 수·상하 반전을 롬의 즉값으로 덮어쓴 것.
+    dq5objlayout.py --vehicle-at 으로 옮기거나 칸 수를 바꾼 롬도 읽는다(attr·at 는 VEHICLES 그대로)."""
+    import dq5objlayout as OL
+    out = []
+    for k, part in enumerate(v['parts']):
+        name = f'{v["id"]:02X}-{k + 1}'
+        p = OL.vehicle_part(rom, name)
+        site = OL.VEHICLE_PARTS[name]
+        out.append(part | {'rom': p['table'], 'cols': p['cols'], 'rows': p['rows'], 'dir': p['dir'],
+                           'frame': p['frame'], 'frames': p['frames'], 'copied': p['copied'],
+                           'vflip': tuple(OL.vflip_offsets(rom, site['vflip'])) if site.get('vflip') else ()})
+    return out
+
+
 def vehicle_part_cells(rom, part):
     """칸 값 목록(OAM 이름+속성 16비트). 상하 반전 표를 반영."""
-    frames = max(1, part['dir'] // part['frame']) if part['frame'] else 1
+    frames = part['frames'] if part['dir'] else 1
     n = part['cols'] * part['rows'] * frames * (4 if part['dir'] else 1)
     out = []
     for i in range(n):
@@ -595,7 +611,7 @@ def vehicle_frames(rom, v):
     tiles = vehicle_tiles(rom, v)
     pix = {t: pixels(b) for t, b in tiles.items()}
     out = []
-    for part in v['parts']:
+    for part in vehicle_parts(rom, v):
         cells, frames = vehicle_part_cells(rom, part)
         W, H = part['cols'] * 8, part['rows'] * 8
         fr = {}
@@ -720,9 +736,9 @@ def export_all(rom, outdir, scale=1, grid=False, index=True):
         for idx in ((False, True) if index else (False,)):
             e = save(vehicle_composite(frs, vpals, scale, idx), stem + ('-index' if idx else '') + '.png')
             e.update({'group': '탈것' + (' 색 번호' if idx else ''), 'title': f'{v["what"]} 전체', 'vehicle': v['id'],
-                      'vehicle_name': v['name'], 'part': 0, 'rom': f'{v["parts"][0]["rom"]:06X}',
+                      'vehicle_name': v['name'], 'part': 0, 'rom': f'{frs[0]["part"]["rom"]:06X}',
                       'tile_data': [f'{a:06X}' for a, _, _ in v['tiles']], 'cols': None, 'rows': None,
-                      'frames_per_dir': frs[0]['nframes'], 'directional': bool(v['parts'][0]['dir']),
+                      'frames_per_dir': frs[0]['nframes'], 'directional': bool(frs[0]['part']['dir']),
                       'obj_palette': None, 'scale': scale,
                       'note': '부분을 덤프에서 잰 자리에 겹친 한 장. 행 아래·왼쪽·오른쪽·위, 열 프레임'})
             entries.append(e)
