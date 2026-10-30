@@ -196,6 +196,17 @@ class EngineCodeTests(unittest.TestCase):
         poll = patch.load_pump_code()[patch.LOAD_POLL][0]
         self.assertLess(patch.LOAD_POLL + len(poll), 0x2BB805)  # NMI 선점 범위 안
 
+    def test_chain_steps_fit_before_the_poll(self):
+        self.assertLessEqual(patch.CHAIN_STEP + len(patch.chain_step_code()), patch.CHAIN_LATE_STEP)
+        self.assertLessEqual(patch.CHAIN_LATE_STEP + len(patch.chain_late_step_code()), patch.LOAD_POLL)
+
+    def test_late_step_skips_a_cleared_queue_slot(self):
+        # 1A 가 지운 칸(FF)도 bit6 이 켜져 있어, bit6 만 보면 떠난 곡의 본체를 보냈다
+        code = patch.chain_late_step_code()
+        guard = bytes.fromhex('BD 95 1D 29 FF 00 C9 FF 00 F0')
+        self.assertIn(guard, code)
+        self.assertLess(code.index(guard), code.index(bytes.fromhex('29 40 00')))
+
     def test_far_branch_out_of_range_is_rejected(self):
         with self.assertRaisesRegex(ValueError, 'out of range'):
             patch._asm_far([('b', 0x80, 'far'), bytes(200), ('label', 'far')], 0x718000)
