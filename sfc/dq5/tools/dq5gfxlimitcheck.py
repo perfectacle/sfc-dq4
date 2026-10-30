@@ -4,6 +4,8 @@
   tiles   타일 512~1023 을 타일 0~511 의 비트 반전으로, 니블을 0~511 니블의 bit0 반전으로 두고(dq5fieldgfxwrite
           --worlds-at 34:8000 --extra-at 60:8000), 그 롬으로 만든 dq5fieldtables 패치로 블록 511개 두 층의 칸 타일
           번호에 512 를 더함(위층 타일 0 은 그대로). 블록에서 그린 필드 칸이 모두 늘린 타일을 써야 맞다
+  nibs    tiles 와 같되 세계 1·2 의 늘린 타일 니블만 bit1·bit2 를 더 뒤집음(worlds 로 니블만 다르게 줌. 00:BBAC 가
+          $1949 로 세계마다 타일맵 워드 표를 고름)
   wall-XX tiles 와 같되 늘린 타일을 35:8000 에 두고, 타일 512~1023 의 속성(00:BCA8 이 읽는 표)을 모두 XX(80·82·95·45·00)로.
           원래 속성 그대로인 tiles 롬과 45·00 에서는
           걷고, 80·82·95 에서는 못 걸어야 늘린 속성 표를 읽는 것이다. 걷기 앞 VRAM 으로 35:8000·60:8000 자리도 견준다
@@ -12,6 +14,7 @@
   indoor  실내 BG 팔레트 세트를 70개로(새 세트 69 의 낮 목록은 새 목록, 밤 목록은 세트 0 의 것), 01/01 을 세트 69 로
           (dq5mapgfxwrite --sets-at 37:8000, 그 롬으로 만든 dq5palsetwrite 패치)
 장면
+  nibs: 세계 0 (341,56)·세계 1·2 (50,28) 에 서서 늘린 타일로 그린 칸의 팔레트가 그 세계에 준 니블인지.
   tiles: 세계 0 (341,56) 에 서기, 걷고 명령 창을 여닫은 뒤, 이벤트 전투(スライム 하나)를 이기고 돌아온 뒤, 세계 1·2 (50,28).
          01:A4A7 뒤 00:A788 앞에 VRAM 워드 4000~5FFF 를 지우고 다시 오는지(lua/dq5vramwipe.lua, 01:B4D5 를 원본으로
          되돌린 대조 롬은 비어 있어야 함), キメラのつばさ·ルーラ 앞뒤(그 사이 01:A4A7 실행 기록, 첫 칸 00 대조는 실패해야 함), 마법 융단을 펴고 탄 채 걷기.
@@ -71,6 +74,9 @@ ITEM_SCENES = {
     'empty': ({'SET': '2056=00', 'TEST': ITEM_MENU + 'wait:600'}, (900, 1000, 1300), 'empty'),
 }
 CARPET = 0x80
+# nibs 롬: 세계마다 늘린 타일(512~1023) 니블을 tiles 롬의 것에서 더 뒤집는 비트. 아래층은 니블 3비트만 쓰므로
+# bit0~2 를 고른다.
+NIB_FLIPS = {'world1': 2, 'world2': 4}
 # 속성 값 → 걸을 수 있는지. 늘린 타일 자리(VRAM)도 걷기 앞(700프레임)에 견준다.
 WALLS = {0x80: False, 0x82: False, 0x95: False, 0x45: True, 0x00: True}
 MOVE = {'FIELD': '341,56', 'SETTLE': '300', 'MAXF': '1300', 'DUMPF': '700',
@@ -106,6 +112,13 @@ def make_roms(original, out):
     (src / 'fieldgfx.json').write_text(json.dumps(doc), encoding='utf-8')
     command('dq5fieldgfxwrite.py', original, 'patch', src / 'fieldgfx.json', '-o', out / 'tiles-gfx.json',
             '--worlds-at', '34:8000', '--extra-at', '60:8000')
+    nib = doc['tile_palettes']
+    doc['worlds'] = {k: {'tiles_file': 'tiles.bin', 'tile_palettes': nib[:fgw.TILES] + [n ^ x for n in nib[fgw.TILES:]]}
+                     for k, x in NIB_FLIPS.items()}
+    (src / 'nibs.json').write_text(json.dumps(doc), encoding='utf-8')
+    command('dq5fieldgfxwrite.py', original, 'patch', src / 'nibs.json', '-o', out / 'nibs-gfx.json',
+            '--worlds-at', '34:8000', '--extra-at', '60:8000')
+    del doc['worlds']
     attrs = doc['tile_attributes']
     for v in WALLS:
         doc['tile_attributes'] = attrs + [v] * fgw.TILES
@@ -150,6 +163,7 @@ def make_roms(original, out):
     (out / 'palset.json').write_text(json.dumps(p), encoding='utf-8')
     command('dq5palsetwrite.py', out / 'indoor-step.sfc', 'patch', out / 'palset.json', '-o', out / 'indoor-map.json')
     for name, lists in (('tiles', ['tiles-gfx.json', 'tiles-blocks.json']),
+                        ('nibs', ['nibs-gfx.json', 'tiles-blocks.json']),
                         *((f'wall-{v:02x}', [f'wall-{v:02x}-gfx.json', 'tiles-blocks.json']) for v in WALLS),
                         ('fieldpal', ['fieldpal.json']),
                         ('indoor', ['indoor-sets.json', 'indoor-map.json'])):
@@ -201,6 +215,24 @@ def check_tiles(name, rom_path, dump, n, orig, world=0, grown=True):
     require(high == (len(cells) if grown else 0), f'{name}: 타일 512 이상을 쓰는 칸 {high}/{len(cells)}')
     return {'case': name, 'frame': n, 'world': world, 'vram_tiles': count - len(fgc.ANIM_TILES),
             'tilemap_cells': len(cells), 'cells_using_512_up': high, 'same_as_original_game': len(stale)}
+
+
+def check_nibbles(name, dump, world, nib):
+    """BG1·2 타일맵에서 늘린 타일(512 이상)로 그린 칸마다 팔레트 비트가 nib(그 세계에 준 니블, 위층 4비트·
+    아래층 3비트)로 셈한 값인지. 디코더를 거치지 않고 입력과 바로 견준다."""
+    vram = frame(dump, SETTLE_FRAME, 'vram')
+    w = frame(dump, SETTLE_FRAME, 'wram')
+    require(w[0x1949] == world and not w[0xBE] & 0x80, f'{name}: 세계 {world} 필드에 서지 않음')
+    cells, wrong = 0, 0
+    for base, mask in ((0, 7), (0x1000, 15)):
+        for i in range(0x800):
+            v = vram[base + i * 2] | vram[base + i * 2 + 1] << 8
+            t = v & 0x3FF
+            if t >= fgw.TILES:
+                cells += 1
+                wrong += v >> 10 & 7 != ((nib[t] & mask) + 2) & 7
+    require(cells and not wrong, f'{name}: 늘린 타일 칸 {cells}개 가운데 {wrong}개 팔레트가 입력 니블과 다름')
+    return {'case': name, 'world': world, 'cells_using_512_up': cells, 'palette_from_input_nibble': cells - wrong}
 
 
 def check_battle(name, rom_path, dump, orig):
@@ -357,6 +389,8 @@ def main():
         scenes = {'stand': stand, 'walk': WALK, 'battle': BATTLE, 'world1': world[1], 'world2': world[2]}
         cases = [(f'tiles-{k}-{r}', path, env) for k, env in scenes.items()
                  for r, path in (('orig', original), ('grow', tiles))]
+        nibs = out / 'nibs.sfc'
+        cases += [(f'nibs-{k}', nibs, env) for k, env in (('stand', stand), ('world1', world[1]), ('world2', world[2]))]
         cases += [('move-tiles', tiles, MOVE), *((f'move-{v:02x}', out / f'wall-{v:02x}.sfc', MOVE) for v in WALLS)]
         control = out / 'redraw-control.sfc'
         data = bytearray(tiles.read_bytes())
@@ -388,6 +422,11 @@ def main():
                    check_battle('tiles-battle', tiles, *d['battle']),
                    *(check_tiles(f'tiles-world{w}', tiles, d[f'world{w}'][0], SETTLE_FRAME, d[f'world{w}'][1], w)
                      for w in (1, 2))]
+        nib = json.loads((out / 'tiles-src' / 'nibs.json').read_text(encoding='utf-8'))
+        for w, k in enumerate(('stand', 'world1', 'world2')):
+            want = nib['worlds'][f'world{w}']['tile_palettes'] if w else nib['tile_palettes']
+            results.append(check_tiles(f'nibs-world{w}', nibs, dirs[f'nibs-{k}'], SETTLE_FRAME, d[k][1], w))
+            results.append(check_nibbles(f'nibs-world{w}-palette', dirs[f'nibs-{k}'], w, want))
         results += [check_move('move-tiles', tiles, dirs['move-tiles'], True),
                     *(check_move(f'move-{v:02x}', out / f'wall-{v:02x}.sfc', dirs[f'move-{v:02x}'], ok)
                       for v, ok in WALLS.items()),

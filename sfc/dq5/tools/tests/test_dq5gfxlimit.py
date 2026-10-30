@@ -194,11 +194,11 @@ class TileGrowTests(unittest.TestCase):
         cur = fgw.current(rom)
         self.assertEqual(cur['worlds']['world1'], (bytes(w1), [3] * 1024))
         self.assertEqual(cur['worlds']['world2'], cur['worlds']['world0'])
-        # 세계 1 의 니블이 다르면 00:BBAC 는 그대로 두고 니블 읽기 네 자리를 세계마다 512바이트 훅으로 바꾼다.
-        lay = fgw.grow_layout(0x348000)
-        for site in fgw.NIB_SITES:
-            self.assertEqual(rom.d[lorom(site):lorom(site) + 4], b'\x22' + fgw.long_addr(lay['nib']))
-        self.assertEqual(rom.d[lorom(fgw.PALETTE_READ):lorom(fgw.PALETTE_READ) + 8], fgw.PALETTE_READ_ORIG[:8])
+        # 세계 1 의 니블이 다르면 니블 훅 대신 00:BBAC 를 $1949 로 세계마다 워드 표를 고르는 코드로 바꾼다.
+        # 표 16KB 는 늘린 타일 뒤(36:C000)에 둔다.
+        self.assertEqual(rom.d[lorom(fgw.PALETTE_READ):lorom(fgw.PALETTE_READ) + 38],
+                         fgw.palette_worlds(0x36C000, 0x36E000))
+        self.assertEqual([w['at'] for w in m['writes'] if w['note'].startswith('세계마다 타일맵 워드 표')], ['36:C000'])
         for upper in (True, False):
             self.assertEqual(dq5field.tile_word(rom, 811, upper, 1), 811 | (3 * 4 + 8) << 8)
         self.assertEqual(dq5field.tile_word(rom, 811, True, 0), 811 | (299 % 16 * 4 + 8) << 8)
@@ -306,6 +306,19 @@ class TileWordBoundaryTests(unittest.TestCase):
         for t in (511, 512, 1023):
             for upper in (True, False):
                 self.assertEqual(dq5field.tile_word(rom, t, upper, 2), self.word(t, upper, self.NIB))
+
+    def test_world_word_tables(self):
+        d = bytearray(0x200000)
+        put(d, dq5field.PALETTE_SITE, fgw.palette_worlds(0x308000, 0x30A000))
+        worlds = [self.NIB, self.NIB[::-1], [n ^ 5 for n in self.NIB], self.NIB]
+        put(d, 0x308000, b''.join(fgw.palette_world_words(worlds)))
+        rom = Rom(bytes(d))
+        for w, nib in enumerate(worlds):
+            for t in (0, 511, 512, 1023):
+                for upper in (True, False):
+                    self.assertEqual(dq5field.tile_word(rom, t, upper, w), self.word(t, upper, nib))
+        with self.assertRaisesRegex(ValueError, '니블 표가 없음'):
+            dq5field.nibble_table(rom)
 
     def test_wide_nibble_hook(self):
         d = bytearray(0x200000)

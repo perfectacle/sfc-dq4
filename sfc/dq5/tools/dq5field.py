@@ -194,12 +194,24 @@ NIB_SITE, NIB_HOOK_TABLE, NIB_HOOK_STRIDE = 0x00BBB4, 22, 13
 # 타일을 늘리고 세 세계의 니블이 같으면 훅 없이 00:BBAC 를 바꿔(LDA $96 / TAX, 원래는 그 사이에 LSR) 타일맵 워드 윗바이트를
 # 타일마다 1바이트 표에서 읽는다. 위층 표는 00:BBB1, 아래층 표는 00:BBC6 의 LDA long,X 가 읽는다.
 PALETTE_SITE, PALETTE_UPPER, PALETTE_LOWER = 0x00BBAC, 0x00BBB1, 0x00BBC6
+# 세 세계의 니블이 다르면 00:BBAC 를 LDA $7E1949 로 시작하는 코드로 바꿔, 세계마다 2KB 인 타일맵 워드 표(색인
+# 세계 << 11 | 타일 << 1)를 위층은 00:BBBA, 아래층은 00:BBCB 의 LDA long,X 로 읽는다.
+PALETTE_WORLD_UPPER, PALETTE_WORLD_LOWER = 0x00BBBA, 0x00BBCB
+
+
+def palette_kind(rom):
+    """00:BBAC 가 원래 니블 루틴이면 None, 타일마다 1바이트 표면 'shared', 세계마다 워드 표면 'worlds'."""
+    if rom.u8(PALETTE_SITE + 2) == 0xAA:
+        return 'shared'
+    if rom.u8(PALETTE_SITE) == 0xAF:
+        return 'worlds'
+    return None
 
 
 def nibble_table(rom, world=0):
     """00:BBAC 가 그 세계에서 읽는 니블 표 주소. 세계 훅이 없으면 세 세계 모두 2A:D712."""
-    if rom.u8(PALETTE_SITE + 2) == 0xAA:
-        raise ValueError('00:BBAC 가 타일마다 1바이트 팔레트 표를 읽는 롬이라 니블 표가 없음(tile_word 를 쓸 것)')
+    if palette_kind(rom):
+        raise ValueError('00:BBAC 가 타일마다 팔레트 표를 읽는 롬이라 니블 표가 없음(tile_word 를 쓸 것)')
     if rom.u8(NIB_SITE) == 0x22:
         hook = rom.u24(NIB_SITE + 1)
         stride = 0x200 if rom.u8(hook + NIB_HOOK_STRIDE) == 0x0A else 0x100
@@ -209,8 +221,12 @@ def nibble_table(rom, world=0):
 
 def tile_word(rom, tile, upper, world=0):
     """00:BBAC: 타일 번호에 팔레트 비트를 붙인 타일맵 워드."""
-    if rom.u8(PALETTE_SITE + 2) == 0xAA:
+    kind = palette_kind(rom)
+    if kind == 'shared':
         return tile | rom.u8(rom.u24((PALETTE_UPPER if upper else PALETTE_LOWER) + 1) + tile) << 8
+    if kind == 'worlds':
+        table = rom.u24((PALETTE_WORLD_UPPER if upper else PALETTE_WORLD_LOWER) + 1)
+        return rom.u16(table + ((world & 3) << 11 | tile << 1))
     nib = rom.u8(nibble_table(rom, world) + (tile >> 1))
     if upper:
         p = (nib & 0x0F) << 2 if tile & 1 else (nib & 0xF0) >> 2
