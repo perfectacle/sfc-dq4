@@ -547,20 +547,71 @@ def vehicle_song_code():
     ])
 
 
+# 1A 는 앞 곡을 줄인 뒤 16(참조 수 지움)·0A(참조 없는 샘플·시퀀스 버림)를 보내, 다음 곡과 함께 쓰는 샘플도 버렸다가
+# 다시 받았다. 배에서 내리면 배 곡과 필드 곡이 함께 쓰는 샘플까지 다시 받아 원본보다 오래 조용했다.
+# 곡 뒤 단계를 끝까지 마친 곡을 KEEP_SONG 에 적어 두고, 16 과 0A 사이에서 그 곡과 다음 곡이 함께 쓰는 샘플을
+# 2B:C21E(샘플 하나 보내기: 있으면 참조 수만 올림)로 다시 표시해 0A 에서 살린다.
+KEEP_CODE = 0x2BEA50               # 2B 의 빈 자리 끝 쪽. 앞(~EA01)은 IPL 꼬리라 빌드가 커지면 뒤로 는다
+KEEP_SONG = 0x1A96                 # 낮은 WRAM. 전원부터 선실·배·융단·전투·마을까지 7E:1A86~1A97 에 접근 없음. 0 = 없음
+KEEP_DONE_SITE = 0x2BC1C5          # 곡 뒤 단계 끝의 JMP C184(칸 비우기)
+KEEP_MARK_SITE = 0x2BC0AD          # 1A 끝의 JSR C32F(16 의 대답) / LDA #0A / JSR C112
+COROUTINE_EXTRA = KEEP_CODE & 0xFFFF   # 2B:EA50~FFFF 도 코루틴 코드로 본다(EB00~ 는 샘플 자료라 주 스레드 코드가 없음)
+
+
+def keep_samples_code():
+    """(곡 뒤 단계 끝 코드, 1A 의 표시 코드). 둘 다 16비트 A·X 문맥이고, 표시 코드는 C0A3 이 쌓은 1A 의 칸 번호를
+    스택에서 읽는다. 표시는 C21E 가 첫머리 C32F 로 앞 명령의 대답을 소비하므로 16 의 대답을 기다리기 전에 들어간다.
+    적은 곡이 다 실려 있지 않아도(다른 길로 16·0A 가 지나감) C21E 는 없는 샘플을 보내므로 결과는 원래와 같다."""
+    h = bytes.fromhex
+    song = KEEP_SONG.to_bytes(2, 'little')
+    done = _asm([
+        h('08 C2 30 BD 95 1D 29 FF 00 C9 FF 00'), ('b', 0xF0, 'skip'),   # 칸이 지워졌으면(1A 가 끊음) 적지 않음
+        h('BD A5 1D 29 FF 00 8D') + song,
+        ('label', 'skip'), h('28 4C 84 C1'),                              # PLP / JMP $C184
+    ])
+    mark = _asm([
+        h('08 C2 30 AD') + song + h('29 FF 00'), ('b', 0xF0, 'done'),
+        h('A3 04'),                                                       # 1A 의 칸
+        ('label', 'scan'), h('1A 29 0F 00 AA E2 20 CD 91 1D C2 20'), ('b', 0xF0, 'done'),
+        h('BD 95 1D 29 FF 00 C9 01 00'), ('b', 0xF0, 'found'),            # 아직 시작하지 않은 01·03·0C
+        h('C9 03 00'), ('b', 0xF0, 'found'),
+        h('C9 0C 00'), ('b', 0xF0, 'found'),
+        h('8A'), ('b', 0x80, 'scan'),
+        ('label', 'found'), h('BD A5 1D 29 FF 00 20 CB C3'),             # 다음 곡의 레코드
+        h('BF 7D E6 2B 29 FF 00'), ('b', 0xF0, 'done'),
+        h('A8'),
+        ('label', 'new'), h('5A DA BF 7F E6 2B 29 FF 00 C9 80 00'), ('b', 0xB0, 'next'),   # 고정 샘플은 건너뜀
+        h('48 AD') + song + h('29 FF 00 20 CB C3 BF 7D E6 2B 29 FF 00 A8'), ('b', 0xF0, 'miss'),
+        ('label', 'old'), h('BF 7F E6 2B 29 FF 00 C3 01'), ('b', 0xF0, 'hit'),
+        h('E8 88'), ('b', 0xD0, 'old'),
+        ('label', 'miss'), h('68'), ('b', 0x80, 'next'),
+        ('label', 'hit'), h('68 20 1E C2'),                              # JSR $C21E
+        ('label', 'next'), h('FA 7A E8 88'), ('b', 0xD0, 'new'),
+        ('label', 'done'), h('9C') + song,                              # 0A 뒤에는 다 실려 있지 않다
+        h('28 20 2F C3 A9 0A 00 4C 12 C1'),                               # PLP / JSR C32F / LDA #0A / JMP C112
+    ])
+    return done, mark
+
+
 def nmi_range_code():
     """NMI 선점(00:88E2)이 2B:B741~B804(우리 코루틴 코드: 응답 판정·곡 틀기 문·나눈 곡 발판·곡 번호 도우미)도
     코루틴으로 보게 하는 00:8004 발판. 빠뜨리면 그 안에서 NMI 가 와도 코루틴이 멈추지 않아 게임이 한 프레임 밀린다."""
     h = bytes.fromhex
     stub = _asm([
-        h('C9 CE BE'), ('b', 0xB0, 'orig'),
+        h('C9 CE BE'), ('b', 0xB0, 'high'),
         h('C9 41 B7'), ('b', 0x90, 'norm'),
         h('C9 05 B8'), ('b', 0xB0, 'norm'),
-        h('4C EC 88'),
-        ('label', 'orig'), h('4C E7 88'),
+        ('label', 'co'), h('4C EC 88'),
+        ('label', 'high'), h('C9 22 C4'), ('b', 0x90, 'co'),
         ('label', 'norm'), h('4C 1E 89'),
     ])
+    if len(stub) > 0x1C:
+        raise ValueError('NMI range stub overflows 00:8004-801F')
+    # 88E2 에서 먼저 COROUTINE_EXTRA 위를 코루틴으로 보고, 나머지는 발판이 판정한다(88E7 의 C422 판정은 발판이 대신함)
+    entry = (h('C9') + COROUTINE_EXTRA.to_bytes(2, 'little') + h('B0 05 4C') + (NMI_RANGE_STUB & 0xFFFF).to_bytes(2, 'little')
+             + h('EA EA'))
     return {NMI_RANGE_STUB: (stub, None),
-            0x0088E2: (h('4C') + (NMI_RANGE_STUB & 0xFFFF).to_bytes(2, 'little') + h('EA EA'), h('C9 CE BE 90 37'))}
+            0x0088E2: (entry, h('C9 CE BE 90 37 C9 22 C4 B0 32'))}
 
 
 def song_store_helper():
@@ -616,7 +667,8 @@ def load_pump_code(lines=LOAD_LINES):
         h('C9 06 01'), ('b', 0x90, 'vt'), h('E9 06 01'),
         ('label', 'vt'), h('8D 09 42 E2 20'),
         h('A3 0D C9 2B'), ('b', 0xD0, 'not2b'),
-        h('C2 20 A3 0B C9 41 B7'), ('b', 0x90, 'norm16'),
+        h('C2 20 A3 0B C9') + COROUTINE_EXTRA.to_bytes(2, 'little'), ('b', 0xB0, 'tonmi'),
+        h('C9 41 B7'), ('b', 0x90, 'norm16'),
         h('C9 05 B8'), ('b', 0x90, 'tonmi'),
         h('C9 CE BE'), ('b', 0x90, 'norm16'),
         h('C9 B1 C4'), ('b', 0x90, 'tonmi'),
@@ -752,7 +804,7 @@ def write_resident_samples(data, ids):
 
 def install(base, replacements, *, sample_resources=None, map_fades=False, preview=None, pinned=(),
             resident=None, set_records=None, fast_receive=False, chains=None, chain_late=(), hold=False, early_song=False, load_pump=False,
-            vehicle_song=False):
+            vehicle_song=False, keep_samples=False):
     """pinned 는 늘 두는 시퀀스 목록에 남길 바꾸는 곡(나머지 바꾸는 곡은 목록에서 뺌). resident 는 새 늘 두는 샘플 목록
     전체(주지 않으면 그대로). set_records 는 바꾸지 않는 곡의 곡 묶음 레코드 {곡: (k, 샘플…)}.
     fast_receive 는 SPC 자료 받기를 묶음 여러 개 이어 받게 바꾼다(fast_receive_code). chains 는 {곡: 본체 시퀀스} 로,
@@ -761,6 +813,7 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
     early_song 은 계단·문 출구에서 페이드 아웃 전에 목적지 맵 곡을 요청한다(early_song_code).
     load_pump 는 NMI 를 끈 동안(맵 불러오기)에도 IRQ 로 곡 앞 자료를 보낸다(load_pump_code, early_song 필요).
     vehicle_song 은 マスタードラゴン 에서 내릴 때 울리던 맵 곡을 다시 보내지 않고 잇는다(vehicle_song_code).
+    keep_samples 는 1A 의 정리에서 앞 곡과 다음 곡이 함께 쓰는 샘플을 버리지 않는다(keep_samples_code, load_pump 필요).
     """
     if len(base) not in (0x180000, 0x200000, 0x400000):
         raise ValueError('base must be a headerless 1.5MB, 2MB or 4MB DQ5 build')
@@ -957,6 +1010,17 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
             raise ValueError('load_pump needs early_song (the request must be queued before the map load)')
         for at, (payload, original) in load_pump_code().items():
             write(at, payload, original, empty=original is None)
+    if keep_samples:
+        if not load_pump:
+            raise ValueError('keep_samples needs load_pump (its code is preempted through the NMI range stub)')
+        done, mark = keep_samples_code()
+        mark_at = KEEP_CODE + len(done)
+        if (mark_at + len(mark)) & 0xFFFF > 0xEB00:
+            raise ValueError('keep_samples code overflows 2B:EB00')
+        write(KEEP_CODE, done + mark, empty=True)
+        write(KEEP_DONE_SITE, bytes([0x4C]) + (KEEP_CODE & 0xFFFF).to_bytes(2, 'little'), bytes.fromhex('4C 84 C1'))
+        write(KEEP_MARK_SITE, bytes([0x20]) + (mark_at & 0xFFFF).to_bytes(2, 'little') + bytes([0xEA] * 6),
+              bytes.fromhex('20 2F C3 A9 0A 00 20 12 C1'))
     if vehicle_song:
         write(VEHICLE_SONG, vehicle_song_code(), empty=True)
         write(VEHICLE_SONG_SITE, bytes([0x22]) + VEHICLE_SONG.to_bytes(3, 'little') + bytes([0xEA] * 7),
