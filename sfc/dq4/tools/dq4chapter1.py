@@ -301,10 +301,16 @@ def messages(lists, ported_messages, report):
     바꾸므로 그 방 인물만 쓰던 메시지는 뺀다."""
     used = {e["fields"]["talk"] + 0x3C6 for lst in lists if lst["map"] != THRONE for e in lst["entries"]}
     out = {m["id"]: m["codes"] for m in ported_messages if m["id"] in used}
-    for person in report.get(FRONT, []):
-        key = tuple(m for m in person["shows"] if m is not None)
-        if key in FRONT_TEXTS:
-            out[int(person["message"], 16)] = FRONT_TEXTS[key]
+    # 1장 그룹 인물(왕좌의 방은 이 연출 배치로 바꿈)의 일본어 원문을 FC 메시지 묶음으로 찾아 한글로
+    import dq4ch1talk
+    korean = {**dq4ch1talk.TEXTS, **FRONT_TEXTS}
+    for m, people in report.items():
+        if m == THRONE:
+            continue
+        for person in people:
+            key = tuple(x for x in person["shows"] if x is not None)
+            if person.get("message") and key in korean:
+                out[int(person["message"], 16)] = korean[key]
     import dq4sysmsg
     # 서장 메시지는 빌드에서 서장을 켜지 않아도 넣는다(메시지 단계에는 옵션이 없음)
     import dq4prologue
