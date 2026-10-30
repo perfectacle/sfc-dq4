@@ -212,7 +212,12 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
                       len(port.convert(score, program_map=mapping, **convert_args(slot)).sequence),
                       min(regions, max_samples)))
     # 표는 모든 곡을 넣은 뒤의 길이로 늘어나므로, 곡마다 예산에 전체 증가분을 쓴다.
-    growth = sum(2 + slots - len(records[slot]) for slot, _, _, _, _, slots in plans)
+    growth = sum(2 + slots - (len(records[slot]) if slot < len(records) else 0) for slot, _, _, _, _, slots in plans)
+    if chains or any(slot >= patch.NEW_SONG_FIRST for slot, _ in songs):
+        # 빈 번호 레코드(2바이트씩)·나눈 곡 본체 레코드(3바이트씩)·SPC 판정 도우미
+        top = max([patch.FIRST_CHAIN_SONG + len(chains)] if chains else []
+                  + [slot + 1 for slot, _ in songs if slot >= patch.NEW_SONG_FIRST])
+        growth += 2 * (top - len(records)) + len(chains) + len(patch.SPC_EFFECT_HELPER)
     resident = [x for x in patch.resident_samples(data) if x not in drop_resident]
     resident_sizes = {x: patch.sample_size(data, x) for x in resident}
     resident_done = resident_from is None

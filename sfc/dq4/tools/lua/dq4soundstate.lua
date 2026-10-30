@@ -19,7 +19,9 @@ end
 -- 자료 받기 입구(1046), F7 처리 표 칸(07CD, CHAIN·곡 붙들기 처리기), 곡 붙들기의 빈 자리(1049~1069, 입구를 바꿔 쓰지 않게 된 곳)와
 -- 부르는 자리(146C 연주기 템포, 1861 instrument, 103A 받기 끝). 빈 자리를 먼저 써야 부르는 자리가 빈 코드로 뛰지 않는다.
 -- SPC 가 쓰려는 자리를 실행하는 중이면 명령 한가운데를 바꾸게 되므로 다음 프레임으로 미룬다
-local sites = {{0x1049, 33}, {0x1046, 3}, {0x07CD, 2}, {0x146C, 3}, {0x1861, 3}, {0x103A, 3}}
+-- 곡/효과음 판정(CMP A,$28EB) 8곳은 곡 번호를 47 넘게 늘린 롬에서 표 뒤 도우미를 부른다
+local sites = {{0x1049, 33}, {0x1046, 3}, {0x07CD, 2}, {0x146C, 3}, {0x1861, 3}, {0x103A, 3},
+  {0x0AE8, 3}, {0x0B52, 3}, {0x0C45, 3}, {0x11D6, 3}, {0x130F, 3}, {0x1683, 3}, {0x1A2D, 3}, {0x1C5F, 3}}
 local entryPending = false
 local function writeEntry()
   local pc = emu.getState()['spc.pc']
@@ -33,9 +35,19 @@ local function writeEntry()
   end
   entryPending = false
 end
+-- 세이브스테이트의 SPC 는 옛 샘플 자리 기준으로 자료를 옮기거나 다시 올리며 늘어난 표·판정 도우미를 덮는다.
+-- 표 블록(2B:E676, SPC $28E7~)을 매 프레임 롬과 견주어 다시 쓴다(전원부터 켜면 생기지 않는 실험용 보정)
+local function keepTable()
+  local size = emu.read(0x2BE676, m) | emu.read(0x2BE677, m) << 8
+  for i = 0, size - 1 do
+    local v = emu.read(0x2BE67A + i, m)
+    if emu.read(0x28E7 + i, spc) ~= v then emu.write(0x28E7 + i, v, spc) end
+  end
+end
 emu.addEventCallback(function()
   n = n + 1
   if entryPending then writeEntry() end
+  if n > at then keepTable() end
   if not queued and n > at and emu.read(0x7E1D91, m) == emu.read(0x7E1D93, m) then
     -- 24:FF83 처럼 빈 대기열에서는 쓰기 자리 다음 칸부터 넣고 읽기 자리를 그 칸으로 맞춘다
     local i = emu.read(0x7E1D91, m) + 1
@@ -56,6 +68,12 @@ emu.addEventCallback(function()
     end
     base = base + 4 + size
   end
+  -- 드라이버는 샘플 자리 시작($28E7)을 켤 때만 읽어 $0100(시작)·$0102(D6F6 - 시작)에 둔다. 표가 늘어난 롬에서는
+  -- 옛 시작부터 샘플을 다시 올려 표 뒤 판정 도우미를 덮었으므로(SPC 가 샘플 자리를 실행) 롬 값으로 맞춘다
+  local heap = emu.read(0x2BE67A, m) | emu.read(0x2BE67B, m) << 8
+  local size = 0xD6F6 - heap
+  emu.write(0x0100, heap & 0xFF, spc); emu.write(0x0101, heap >> 8, spc)
+  emu.write(0x0102, size & 0xFF, spc); emu.write(0x0103, size >> 8, spc)
   entryPending = true
   local pinned, a = {}, 0x2BC429
   while emu.read(a, m) ~= 0xFF do pinned[emu.read(a, m)] = true; a = a + 1 end
