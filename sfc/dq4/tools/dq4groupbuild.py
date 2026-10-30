@@ -1,7 +1,8 @@
 """Build the DQ4 environment maps with whole FC groups in new DQ5 groups, linked by their FC exits.
 
 Order matters (sfc/dq4/docs/dq4-environment-format.md, 「그룹 연결」):
-  1. dq4environmentrom.py patch -> env ROM. The door table copy made in 2 must contain its bank-01 tail.
+  1. dq4environmentrom.py patch -> env ROM. dq5newmap.py check wants the door table copy made in 2 to match
+     bank 01 from 01:F037 on, so the copy must contain the hook stubs of the bank-01 tail.
   2. dq5newmap.py from the env ROM: new groups, maps (records from the dq5map/1 documents of 1), arrivals.
   3. dq5exitreloc.py, dq5npcrelocate.py (the FC people of dq4npcport.py), dq5fieldtables.py from the original
      ROM with --new-map, dq5textwrite.py with their Japanese FC text, and dq5progresswrite.py with the FC
@@ -35,7 +36,7 @@ import dq4block  # noqa: E402
 import dq4entrancehook  # noqa: E402
 import dq4map  # noqa: E402
 from dq4environmentmap import all_maps, block_prop  # noqa: E402
-from dq4environmentrom import GROUPS, STAIRS  # noqa: E402
+from dq4environmentrom import DOOR_BANK, DOOR_TABLES, GROUPS, STAIRS  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
 
 # New DQ5 group -> the FC groups it holds, in DQ5 map order (layout). Per FC group: the FC arrival from the
@@ -264,6 +265,21 @@ def area_rows(group, place, cells):
     return out
 
 
+def check_door_copy(rom, door_bank):
+    """The door routines read bank 01's FD97-FEB6 from DOOR_BANK on our maps, and dq4environmentrom copies them
+    from the original ROM: the built ROM must still have the same bytes in both banks. dq5newmap's --door-bank must
+    be another bank, since it copies all of bank 01 there."""
+    if door_bank == DOOR_BANK:
+        raise ValueError(f"dq5newmap --door-bank {door_bank:02X} is the dq4 door bank")
+    lo, hi = DOOR_TABLES
+    here = rom[0x8000 + (lo & 0x7FFF):0x8000 + (hi - 1 & 0x7FFF) + 1]
+    there = rom[DOOR_BANK * 0x8000 + (lo & 0x7FFF):DOOR_BANK * 0x8000 + (hi - 1 & 0x7FFF) + 1]
+    if here != there:
+        at = next(i for i in range(len(here)) if here[i] != there[i]) + lo
+        raise ValueError(f"{DOOR_BANK:02X}:{at:04X} differs from 01:{at:04X}: a patch changed bank 01's door tables "
+                         "after dq4environmentrom copied them")
+
+
 def _run(tool, *args):
     proc = subprocess.run([sys.executable, str(tool), *map(str, args)], capture_output=True, text=True)
     if proc.returncode:
@@ -376,6 +392,7 @@ def build(dq5, dq4, out):
 
     rom = out / "groups.sfc"
     _run(DQ5_TOOLS / "dq5build.py", dq5, "build", *manifests, "--size", 4, "-o", rom, "--ips", out / "groups.ips")
+    check_door_copy(rom.read_bytes(), int(NEWMAP_AT[NEWMAP_AT.index("--door-bank") + 1], 16))
     # dq5newmap checks the built ROM; dq5exitreloc, dq5textwrite and dq5chestplace build their own from the original.
     for tool, source, args in checks:
         _run(DQ5_TOOLS / tool, rom if tool == "dq5newmap.py" else dq5, "check", source, *args)

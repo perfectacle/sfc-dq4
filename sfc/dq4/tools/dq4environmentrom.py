@@ -34,8 +34,7 @@ TARGETS = {
     "stancia-06": (0x09, 0x04), "mintos": (0x0A, 0x01), "saran-04": (0x0A, 0x02),
     "seaside": (0x0B, 0x01), "seaside-01": (0x0D, 0x03), "rosaryhill": (0x0D, 0x04), "rosaryhill-01": (0x0E, 0x01),
     "shrine-2a": (0x0E, 0x03), "konenbery-06": (0x12, 0x00), "attemut-05": (0x13, 0x00), "attemut-07": (0x16, 0x01),
-    # One or two maps of each other town and castle sheet, picked for block coverage and few doors:
-    # door objects must fit the bank 01 tail.
+    # One or two maps of each other town and castle sheet, picked for block coverage and few doors.
     "1A-01": (0x08, 0x02), "03-02": (0x08, 0x03), "17-00": (0x03, 0x0B), "0B-00": (0x03, 0x0E),
     "08-01": (0x03, 0x0F), "10-00": (0x03, 0x10), "16-00": (0x04, 0x01), "0F-00": (0x04, 0x08),
     "0A-00": (0x04, 0x09), "04-06": (0x0A, 0x06), "00-01": (0x04, 0x0B), "09-01": (0x04, 0x0C),
@@ -91,7 +90,7 @@ LID_TICK = WATER_PERIOD // 2
 # The water routine uses these slots directly: a battle reuses 7E:6000 (CHR id -> slot) as work
 # memory, and reading it after a battle sent the water frames to slot 0, the blank BG1 tile.
 WATER_SLOT = 0xBE
-LIB_AT = 0x3DE000
+LIB_AT = BLOCK_BANK << 16 | 0xE000
 # FC door properties and the DQ5 objects (01:D2FC kinds) that replace them. The record under an
 # object is the map's floor so the cell is walkable once the object opens; closed objects block
 # their last row themselves (cell +1 bit7).
@@ -120,6 +119,14 @@ OPENINGS = DOORS | {GATE}
 DOOR_KIND = 0x3B
 GATE_KIND = 0x48
 OBJECT_TABLE = 0x01D2FC
+# The object entries of our maps live after the library in BLOCK_BANK, the dq4 bank that every build keeps for
+# itself. The object hook sets DB to that bank; each entry path of the door routines pushed DB before and pulls
+# it on return, so the switch ends there. After the hook the routines read, with DB, only bank 01's bit and tile
+# tables (01:FD97-FEB6, read watch of the bank-01 copy 3B with every object drawn, a door opened with とびら
+# and a key, and a gate drawn open), so that range is copied to the same address of BLOCK_BANK. Entries are
+# read as $D2FC + Y and ($09) in that bank, so they must sit between $D2FC and the copy.
+DOOR_TABLES = (0xFD97, 0xFEB7)
+DOOR_BANK = BLOCK_BANK
 # Every caller of 15:F7D0, which picks the per-frame routine 7E:1AA5 after a map loads.
 ROUTINE_CALLS = (0x018F84, 0x0198FC, 0x019FD6)
 
@@ -405,21 +412,16 @@ def engine_code(block_count, water_ids, palettes, entries, waters, lids):
     """Routines in BLOCK_BANK (LIB_AT) and the bank-01 stubs that call them.
 
     palettes: per target, the bank-GFX address of its 224-byte BG palette.
-    entries: per target, its 01:D2FC-format object entries (placed in bank 01, since the object
-    reader 01:F3F9 indexes $D2FC,Y with the data bank at 01).
+    entries: per target, its 01:D2FC-format object entries (placed after the library; see DOOR_TABLES).
     waters: per target, whether the map has water.
     lids: per target, whether its map routine reloads the opened-chest tiles (new-group maps).
-    Returns (library bytes, bank-01 bytes, patched sites)."""
+    Returns (library bytes with the entries, bank-01 bytes, patched sites)."""
     targets = list(MAPS.values())
     stubs = _Asm(HOOK_AT)
     stubs.label("s_load").long(0x22, "load").b(0x28, 0xAB, 0x60)
     stubs.label("s_pal").b(0x20, 0x6A, 0x99).long(0x22, "pal").b(0x60)
     stubs.label("s_obj").long(0x22, "obj").b(0x60)
     stubs.label("s_rebuild").b(0x20, 0xD8, 0x8C, 0x6B)
-    stubs.label("no_objects").b(0x80)
-    for i, data in enumerate(entries):
-        if data:
-            stubs.label(f"objects{i}").b(*data)
 
     lib = _Asm(LIB_AT)
     lib.label("targets")
@@ -466,10 +468,10 @@ def engine_code(block_count, water_ids, palettes, entries, waters, lids):
                                  0x54, 0x7E, GFX_BANK)
     lib.label("pal_done").b(*_LEAVE, 0x6B)
 
-    # obj (01:F42D): Y = the target's object entries, then the replaced LDX #$0009. find's SEP #$30
-    # clears the high byte of Y, so Y is saved and the hit overwrites the saved copy (STA $01,S).
+    # obj (01:F42D): Y = the target's object entries and DB = their bank, then the replaced LDX #$0009.
+    # find's SEP #$30 clears the high byte of Y, so Y is saved and the hit overwrites the saved copy (STA $01,S).
     lib.label("obj").b(*_ENTER).long(0x22, "find").rel(0x90, "obj_keep")
-    lib.long(0xBF, "objects").b(0x83, 0x01)
+    lib.long(0xBF, "objects").b(0x83, 0x01, 0xE2, 0x20, 0xA9, DOOR_BANK, 0x48, 0xAB)
     lib.label("obj_keep").b(*_LEAVE, 0xA2, 0x09, 0x00, 0x6B)
 
     # wrap (calls of 15:F7D0): after the original choice, a replaced map with water runs the water
@@ -516,13 +518,20 @@ def engine_code(block_count, water_ids, palettes, entries, waters, lids):
         0xE2, 0x20, 0xA9, LID_AT >> 16, 0x8F, 0x0F, 0x1C, 0x00, 0xA9, 0x01, 0x85, 0xBA, 0xC2, 0x20, 0x68)
     lib.label("lid_queue_out").b(0x60)
 
+    lib.label("no_objects").b(0x80)
+    for i, data in enumerate(entries):
+        if data:
+            lib.label(f"objects{i}").b(*data)
+
     _, stub_labels = stubs.assemble({"load": 0, "pal": 0, "obj": 0})
     lib_code, lib_labels = lib.assemble(stub_labels)
     stub_code, stub_labels = stubs.assemble(lib_labels)
     if HOOK_AT + len(stub_code) > HOOK_END:
         raise ValueError(f"bank 01 tail overflows by {HOOK_AT + len(stub_code) - HOOK_END} bytes")
-    if LIB_AT + len(lib_code) > (LIB_AT | 0xFFFF) + 1:
-        raise ValueError("library overflows its bank")
+    end = (LIB_AT & 0xFFFF) + len(lib_code)
+    if end > DOOR_TABLES[0]:
+        raise ValueError(f"library and object entries overflow into the bank-01 table copy at "
+                         f"{DOOR_BANK:02X}:{DOOR_TABLES[0]:04X} by {end - DOOR_TABLES[0]} bytes")
     sites = [
         (0x01936E, bytes((0x28, 0xAB, 0x60)), bytes((0x4C,)) + (stub_labels["s_load"] & 0xFFFF).to_bytes(2, "little")),
         (0x0193B2, bytes((0x20, 0x6A, 0x99)), bytes((0x20,)) + (stub_labels["s_pal"] & 0xFFFF).to_bytes(2, "little")),
@@ -530,6 +539,11 @@ def engine_code(block_count, water_ids, palettes, entries, waters, lids):
     ] + [(at, bytes((0x22, 0xD0, 0xF7, 0x15)), bytes((0x22,)) + lib_labels["wrap"].to_bytes(3, "little"))
          for at in ROUTINE_CALLS]
     return lib_code, stub_code, sites
+
+
+def door_tables(dq5):
+    """Bank-01 bytes of DOOR_TABLES, copied to the same address of the entries' bank."""
+    return dq5[_off(0x010000 | DOOR_TABLES[0]):_off(0x010000 | DOOR_TABLES[1])]
 
 
 def _hex(data):
@@ -610,10 +624,12 @@ def build(dq5_path, dq4_path, out):
         {"at": _cpu(BLOCK_BANK << 16 | BLOCKS_AT), "file": "blocks.bin", "note": f"2x2 블록 {len(block_words)}개"},
         {"at": _cpu(BLOCK_BANK << 16 | POINTERS_AT), "hex": _hex(pointers), "note": "7E:B000 에 복사할 블록 포인터"},
         {"at": _cpu(GFX_BANK << 16 | NIBBLES_AT), "hex": _hex(nibbles), "note": "CHR 팔레트 니블"},
-        {"at": _cpu(HOOK_AT), "hex": _hex(stub_code), "note": "엔진 훅 중계 코드와 맵 위 물체 항목"},
+        {"at": _cpu(HOOK_AT), "hex": _hex(stub_code), "note": "엔진 훅 중계 코드"},
         {"at": _cpu(WATER_AT), "hex": _hex(water_frames(assets, chr_data, water_ids)), "note": "물 그림 3장"},
         {"at": _cpu(LID_AT), "hex": _hex(lid_tiles(assets)), "note": "열린 상자 타일 9E·9F(6번 줄)"},
-        {"at": _cpu(LIB_AT), "hex": _hex(lib_code), "note": "바꾼 맵 표와 불러오기·팔레트·물체·물 루틴"},
+        {"at": _cpu(LIB_AT), "hex": _hex(lib_code), "note": "바꾼 맵 표와 불러오기·팔레트·물체·물 루틴, 맵 위 물체 항목"},
+        {"at": _cpu(DOOR_BANK << 16 | DOOR_TABLES[0]), "hex": _hex(door_tables(dq5)),
+         "note": "문 루틴이 DB 로 읽는 뱅크 01 표의 복사"},
     ]
     for kind, at in palette_at.items():
         flat = palette_variant(kind)
@@ -624,7 +640,8 @@ def build(dq5_path, dq4_path, out):
     rom = Rom(dq5)
     at, spare = MAPS_AT, list(MAPS_NEXT)
     report = {"chr": len(chr_data), "blocks": len(block_words), "water_chr": list(water_ids),
-              "bank01_bytes": len(stub_code), "library_bytes": len(lib_code), "objects": found, "maps": {},
+              "bank01_bytes": len(stub_code), "library_bytes": len(lib_code),
+              "door_bank_free": DOOR_TABLES[0] - (LIB_AT & 0xFFFF) - len(lib_code), "objects": found, "maps": {},
               "group_maps": {}}
     for name, (source, local) in maps.items():
         target = MAPS[name]
