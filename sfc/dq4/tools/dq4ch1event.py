@@ -368,15 +368,17 @@ def _at(x, y, x_from=False, away=False):
     return first + second + near + far
 
 
+WINDOW_ONE = 0x0498FD           # $0A00 의 창 하나를 연다
 WINDOW_SET = 0x049905           # $0A48·$0A47·$0A00 의 창 셋을 연다(상태 보기 06·07·08, 00:9477)
 
 
 def _window(*numbers):
-    """창 셋 열기($0A48·$0A47·$0A00 → WINDOW_SET). BRK 95 핸들러처럼 직접 페이지 $00~$0F 를 지킨다. M 8·X 16·DB 0 에서."""
+    """창 열기: 번호 하나면 $0A00 → WINDOW_ONE, 셋이면 $0A48·$0A47·$0A00 → WINDOW_SET. BRK 95 핸들러처럼 직접 페이지
+    $00~$0F 를 지킨다. M 8·X 16·DB 0 에서."""
     out = bytearray(bytes((0xE2, 0x10)) + DP_SAVE + bytes((0xC2, 0x10)))
-    for addr, n in zip((0x0A48, 0x0A47, 0x0A00), numbers):
+    for addr, n in zip((0x0A48, 0x0A47, 0x0A00)[-len(numbers):], numbers):
         out += bytes((0xA9, n, 0x8D, addr & 0xFF, addr >> 8))
-    out += bytes((0x22, *_long(WINDOW_SET)))
+    out += bytes((0x22, *_long(WINDOW_SET if len(numbers) == 3 else WINDOW_ONE)))
     return bytes(out + bytes((0xE2, 0x10)) + DP_RESTORE + bytes((0xC2, 0x10)))
 
 
@@ -387,6 +389,9 @@ EXP_ROW, EXP_COL, EXP_DIGITS, EXP_COLON = 25, 24, 7, 22
 TILE_BLANK, TILE_ZERO = 0x01, 0x02
 TILEMAP = 0x7E5000
 SEND_ROWS = 0x04991D
+# FC 처럼 능력치 창(07) 하나만 연다. 상태 보기 셋(06·07·08)을 열면 라벨이 20개 남짓이라 창 글자 엔진의 가나 칸이 모자라
+# 캔버스 슬롯을 쓰고, 레벨업 메시지 창이 그 칸을 덮어 라벨이 지워지고 메시지 창에 라벨 그림이 비쳤다(실측)
+STATS_WINDOW = 0x07
 GIFT_STEP = 20                  # 한 단계가 2프레임(BRK 09 01 과 전송)이라 FC(프레임마다 10, 300프레임)와 같은 시간
 
 
@@ -425,7 +430,7 @@ def _exp_digits():
 
 
 def _status_count():
-    """상태 보기 창(06·07·08)을 열고, 경험치를 프레임마다 GIFT_STEP 씩 GIFT_EXP 만큼 올리며 능력치 창의 숫자를 고친다
+    """능력치 창(STATS_WINDOW)을 열고, 경험치를 프레임마다 GIFT_STEP 씩 GIFT_EXP 만큼 올리며 능력치 창의 숫자를 고친다
     (FC 1D 이벤트 37 의 300번 고리). 창은 열어 둔 채 돌아온다."""
     from dq4chapterbox import ENTER, LEAVE, wait
     count = SCRATCH + 8
@@ -436,7 +441,7 @@ def _status_count():
     back = -(len(loop) + 5)
     loop += bytes((0xF0, 0x03, 0x82)) + (back & 0xFFFF).to_bytes(2, 'little')          # BEQ 끝 / BRL 처음
     steps = GIFT_EXP // GIFT_STEP
-    return (ENTER + _window(0x06, 0x07, 0x08) + bytes((0xC2, 0x20, 0xA9, steps & 0xFF, steps >> 8, 0x8F)) + _al(count) +
+    return (ENTER + _window(STATS_WINDOW) + bytes((0xC2, 0x20, 0xA9, steps & 0xFF, steps >> 8, 0x8F)) + _al(count) +
             bytes((0xE2, 0x20)) + loop + LEAVE)
 
 
@@ -745,7 +750,8 @@ def _king_call(m, at):
         # 갈래는 상대 점프(-128~127)라, 아이들 갈래를 앞에 두고 깃발이 꺼져 있으면 칭찬으로 건너뛴다
         {**_cmd('06', 0x80 | KIDS_FOLLOW[0], KIDS_FOLLOW[1]), "target": "praise"},
         msg('king_back'), _cmd('40'), _cmd('05', *_long(at['king_away'])), {"op": "03", "args": [], "target": "wait"},
-        {**msg('king_praise'), "label": "praise"}, call('status_count'), _cmd('34'),
+        # 상태 창은 레벨업 줄 동안 열어 두고(FC 와 같음) 마지막에 명령 34 로 함께 닫는다
+        {**msg('king_praise'), "label": "praise"}, call('status_count'),
         # 한 번 오를 때마다 「레벨이 올랐다」 와 오른 능력치를 한 창에 잇는다. 더 오르지 않으면 level_up 이 보고 깃발을
         # 켜고, 능력치 줄은 오른 양이 0 이면 stat_k 가 보고 깃발을 켜 건너뛴다
         {**call('level_up'), "label": "grow"}, {**_cmd('06', *REPORTED), "target": "grown"},
