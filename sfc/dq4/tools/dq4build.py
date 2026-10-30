@@ -1,0 +1,55 @@
+"""1장 통합 롬을 처음부터 만든다: 타이틀 레이어 → 타이틀 롬 → 서곡 → 메뉴 → 1장 첫머리.
+
+단계마다 dq4buildcache.run 으로 불러, 도구·입력이 바뀌지 않은 단계는 캐시에서 꺼낸다. 서로 기다릴 필요가 없는
+타이틀 레이어와 1장 메시지는 함께 돌린다. ASAR·DQ4_GALMURI 가 필요하다(dq4menupatch.py).
+
+  python sfc/dq4/tools/dq4build.py --out work/ch1 [--no-prologue]
+"""
+import argparse
+import hashlib
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+import sys
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+
+import dq4buildcache  # noqa: E402
+
+
+def step(tool, *args):
+    # 표준 출력은 찍지 않는다: 캐시에서 나오면 처음 만든 워크트리의 경로가 들어 있다
+    dq4buildcache.run(HERE / tool, *args, echo_stderr=True)
+
+
+def build(out, dq5, dq4, prologue=True):
+    out.mkdir(parents=True, exist_ok=True)
+    with ThreadPoolExecutor() as pool:
+        layers = pool.submit(step, 'dq4titlelayers.py', '--out', out / 'title')
+        messages = pool.submit(step, 'dq4chapter1.py', 'messages', '--dq5', dq5, '--dq4', dq4,
+                               '-o', out / 'messages.json')
+        layers.result()
+        step('dq4titlelayerpatch.py', '--rom', dq5, '--input', out / 'title', '--out', out / 'title.sfc')
+        step('dq4overture.py', 'build', '--nes', dq4, '--rom', dq5, '--title', out / 'title.sfc',
+             '--out', out / 'overture.sfc')
+        messages.result()
+    step('dq4menupatch.py', 'build', '--rom', out / 'overture.sfc', '--messages', out / 'messages.json',
+         '--out', out / 'menu.sfc')
+    step('dq4chapter1.py', 'build', '--rom', out / 'menu.sfc', '--dq5', dq5, '--dq4', dq4,
+         '--out', out / 'dq4-ch1.sfc', *([] if prologue else ['--no-prologue']))
+    return out / 'dq4-ch1.sfc'
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('--out', required=True, type=Path, help='중간 롬과 dq4-ch1.sfc 를 둘 폴더')
+    ap.add_argument('--dq5', default='rom/dq5.sfc', type=Path)
+    ap.add_argument('--dq4', default='rom/dq4.nes', type=Path)
+    ap.add_argument('--no-prologue', action='store_true', help='NDS 서장 없이 새 게임을 1장으로 시작')
+    args = ap.parse_args()
+    rom = build(args.out, args.dq5, args.dq4, not args.no_prologue)
+    print(f'{rom} sha1={hashlib.sha1(rom.read_bytes()).hexdigest()}')
+
+
+if __name__ == '__main__':
+    main()

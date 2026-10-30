@@ -35,7 +35,7 @@ class BuildCacheTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         self.addCleanup(self.tmp.cleanup)
-        for f in (cache._tool_hash, cache._refs, cache._digest, cache._toolkit_hash):
+        for f in (cache._tool_hash, cache._refs, cache._digest, cache._toolkit_hash, cache._resolve_dir):
             f.cache_clear()
 
     def call(self, src, out):
@@ -76,7 +76,7 @@ class BuildCacheTests(unittest.TestCase):
         src.write_text('a')
         self.call(src, self.root / 'out.txt')
         self.tool.write_text(TOOL + '# changed\n')
-        for f in (cache._tool_hash, cache._refs, cache._digest, cache._toolkit_hash):
+        for f in (cache._tool_hash, cache._refs, cache._digest, cache._toolkit_hash, cache._resolve_dir):
             f.cache_clear()
         self.call(src, self.root / 'out.txt')
         self.assertEqual(self.count(), 2)
@@ -138,6 +138,27 @@ class BuildCacheTests(unittest.TestCase):
         with mock.patch('sys.stderr', new_callable=io.StringIO) as err:
             cache.run(tool, '-o', self.root / 'out.txt', echo_stderr=True)
         self.assertEqual(err.getvalue(), 'warning: look\n')
+
+    def test_content_behind_an_input_environment_variable_is_part_of_the_key(self):
+        src = self.root / 'in.txt'
+        src.write_text('a')
+        font = self.root / 'font'
+        font.mkdir()
+        (font / 'f.bdf').write_text('1')
+        with mock.patch.dict(os.environ, {'DQ4_GALMURI': str(font)}):
+            self.call(src, self.root / 'out.txt')
+            self.call(src, self.root / 'out.txt')
+            (font / 'f.bdf').write_text('2')
+            self.call(src, self.root / 'out.txt')
+        self.assertEqual(self.count(), 2)
+
+    def test_symbol_output_variable_turns_the_cache_off(self):
+        src = self.root / 'in.txt'
+        src.write_text('a')
+        with mock.patch.dict(os.environ, {'DQ4_NAMEENTRY_SYMBOLS': str(self.root / 'sym')}):
+            self.call(src, self.root / 'out.txt')
+            self.call(src, self.root / 'out.txt')
+        self.assertEqual(self.count(), 2)
 
     def test_failure_raises_with_stderr(self):
         bad = self.root / 'bad.py'
