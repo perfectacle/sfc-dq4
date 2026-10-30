@@ -1,5 +1,6 @@
 """Place original environment art on the FC maps' measured block grids."""
 
+import collections
 import hashlib
 import sys
 from collections import Counter
@@ -336,10 +337,11 @@ FALLING = (0x05, 0x0B)
 SHAPES = {
     0x11: {0x02: "slope", 0x03: "slope_r", 0x16: "slope", 0x17: "slope_r",
            **{b: "stripes" for b in (0x07, 0x0B, 0x1E)}},
-    0x13: {0x09: "trace"},
+    0x13: {0x09: "trace", **{b: "relief" for b in (0x0C, 0x0D, 0x10, 0x11)}},
     0x17: {0x11: "trace"},
     0x18: {0x0C: "trace:water0", 0x0D: "trace:water0", 0x0E: "trace:water0", 0x10: "trace:water0",
            0x11: "trace:water0", 0x12: "trace:water0", 0x1B: "trace", 0x1D: "trace", 0x1E: "trace", 0x1F: "trace"},
+    0x1A: {b: "relief" for b in (0x12, 0x13, 0x16, 0x17)},
     0x1B: {b: "trace" for b in (0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0D, 0x0E, 0x10, 0x11, 0x14, 0x15, 0x16, 0x17,
                                 0x18)},
     0x1C: {b: "trace" for b in (0x08, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
@@ -434,7 +436,7 @@ def sheet_art(prg, t):
             raise ValueError(f"{t:02X}/{block:02X}: SHAPES would replace {out[block][0]}")
         kind, _, base = shape.partition(":")
         base = base or out[block][0]
-        out[block] = (f"{kind}:{base}", "벼랑·비탈(FC 모양)")
+        out[block] = (f"{kind}:{base}", "바닥 부조(FC 모양)" if kind == "relief" else "벼랑·비탈(FC 모양)")
     return out
 
 
@@ -462,9 +464,12 @@ def _shape_classes(prg, t, block, kind, base):
     if kind == "stripes":
         return [["F" if (x - y) % 8 in (0, 1) else "O" if (x - y) % 8 == 2 else "A" for x in range(16)]
                 for y in range(16)]
-    if kind != "trace":
+    if kind not in ("trace", "relief"):
         raise ValueError(f"{t:02X}/{block:02X}: unknown shape {kind}")
     rows = fc_pixels(prg, t, block)
+    # A relief's raised parts are the FC colours a brightness row above the slab it is carved in (the most
+    # common colour that is not black).
+    slab = collections.Counter(c for row in rows for c in row if c != 0x0F).most_common(1)[0][0]
     out = []
     for y in range(16):
         row = []
@@ -481,6 +486,8 @@ def _shape_classes(prg, t, block, kind, base):
                           for xx in range(max(0, x - 1), min(16, x + 2))]
                 # A black pixel inside a black area is the void around a cliff, not its outline.
                 row.append("V" if all(v == 0x0F for v in around) else "O")
+            elif kind == "relief" and c >> 4 > slab >> 4:
+                row.append("H")
             else:
                 row.append("A")
         out.append(row)
@@ -508,10 +515,12 @@ def _shape_tile(prg, assets, name, palette, t, block):
             bank = layers["A"].getpixel((qx, qy)) >> 4
             dark = min(range(bank * 16 + 1, bank * 16 + SHAPE_SPAN.get(bank, 16)),
                        key=lambda i: sum(palette[i * 3:i * 3 + 3]))
+            # Raised parts take the lightest colour the material already uses, so they stay in its range.
+            light = max(set(layers["A"].tobytes()), key=lambda i: sum(palette[i * 3:i * 3 + 3]))
             for y in range(qy, qy + 8):
                 for x in range(qx, qx + 8):
                     k = classes[y][x]
-                    value = dark if k == "O" else layers[k].getpixel((x, y))
+                    value = dark if k == "O" else light if k == "H" else layers[k].getpixel((x, y))
                     if value >> 4 != bank:
                         value = _nearest(palette, value, bank, SHAPE_SPAN.get(bank, 16))
                         remapped += 1

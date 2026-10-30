@@ -88,6 +88,17 @@ class TraceTests(unittest.TestCase):
                         self.assertEqual(len(banks), 1, f"{t:02X}/{block:02X} at {x},{y}")
                         self.assertNotIn(0, banks)
 
+    def test_relief_raises_the_figure_in_the_floors_light_colour(self):
+        # The carved demon of 13/0C-11 and 1A/12-17: its bright FC parts become the floor's lightest colour.
+        for t, block in ((0x13, 0x0C), (0x1A, 0x12)):
+            classes = em._shape_classes(self.prg, t, block, "relief", "cave_floor_earth")
+            self.assertGreater(sum(row.count("H") for row in classes), 20, f"{t:02X}/{block:02X}")
+            floor = self.assets["cave_floor_earth"].tobytes()
+            light = max(set(floor), key=lambda i: sum(self.palette[i * 3:i * 3 + 3]))
+            image, _ = em._shape_tile(self.prg, self.assets, "relief:cave_floor_earth", self.palette, t, block)
+            raised = [image.getpixel((x, y)) for y in range(16) for x in range(16) if classes[y][x] == "H"]
+            self.assertEqual(set(raised), {light}, f"{t:02X}/{block:02X}")
+
     def test_water_edges_stay_blue(self):
         art = em.sheet_art(self.prg, 0x18)
         for block, shape in em.SHAPES[0x18].items():
