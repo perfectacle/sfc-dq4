@@ -1,7 +1,8 @@
 """Build the DQ4 environment maps with whole FC groups in new DQ5 groups, linked by their FC exits.
 
 Order matters (sfc/dq4/docs/dq4-environment-format.md, 「그룹 연결」):
-  1. dq4environmentrom.py patch -> env ROM. The door table copy made in 2 must contain its bank-01 tail.
+  1. dq4environmentrom.py patch -> env ROM. dq5newmap.py check wants the door table copy made in 2 to match
+     bank 01 from 01:F037 on, so the copy must contain the hook stubs of the bank-01 tail.
   2. dq5newmap.py from the env ROM: new groups, maps (records from the dq5map/1 documents of 1), arrivals.
   3. dq5exitreloc.py, dq5npcrelocate.py (the FC people of dq4npcport.py), dq5fieldtables.py from the original
      ROM with --new-map, dq5textwrite.py with their Japanese FC text, and dq5progresswrite.py with the FC
