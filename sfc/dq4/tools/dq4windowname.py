@@ -85,6 +85,7 @@ def kana_glyphs(d, font, render):
 
 
 def apply(data, font=None, asar=None):
+    import dq4battlemsg
     import dq4menupatch
     import dq4nameentry as ne
     import dq4windowtext
@@ -160,10 +161,12 @@ def apply(data, font=None, asar=None):
             f'!wt_fixed = ${dq4windowtext.FIXED_PREFIX:02X}\n!wt_fixed_kind = {dq4windowtext.FIXED_KIND}\n!wt_safe = ${dq4windowtext.SAFE:04X}\n'
             f'!wt_tactic = {dq4windowtext.tactic_first()}\n!wt_tactic_count = {len(dq4windowtext.TACTIC_LINES)}\n'
             f'!wn_kana_table = ${KANA_TABLE:06X}\n!wt_empty_slot = {numbers[dq4windowtext.EMPTY_SLOT]}\n')
-    del kana
+    defs += dq4battlemsg.apply(d, font or dq4menupatch.Font('galmuri9'), dq4menupatch.render,
+                               len(ne.GLYPHS) + len(kana))
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
-        (tmp / 'main.asm').write_text(defs + (HERE / 'dq4windowname.asm').read_text())
+        (tmp / 'main.asm').write_text(defs + (HERE / 'dq4windowname.asm').read_text()
+                                      + (HERE / 'dq4battlemsg.asm').read_text())
         (tmp / 'rom.sfc').write_bytes(bytes(d))
         sym = os.environ.get('DQ4_WINDOWNAME_SYMBOLS')
         extra = ['--symbols=wla', f'--symbols-path={sym}'] if sym else []

@@ -124,8 +124,6 @@ org $24A5E9
 !wn_ptr   = $1D18           ; 타일맵 버퍼 포인터: 일행 열 창은 $DC, 목록은 $E0
 !wn_mode  = $1D1A           ; 0 = 일행 열 창(04:ABF4 로), 1 = 목록(04:BFF2 로)
 !wn_step  = $1D1C           ; 목록에서 이름 뒤 Y 를 나아갈 바이트 수
-!wn_bkeys = $1D20           ; 전투 이름 4자리 × 8바이트: 자리마다 이름 바이트
-!wn_bnext = $1D40           ; 다음에 내줄 전투 이름 자리
 !wn_attr  = $1D42           ; 이름 줄 타일맵 높은 바이트(색). 0 이면 버퍼에 있던 것을 살림
 !wt_stack = $1D83           ; 전용 스택 맨 위(1D44~1D83). 협동식 작업마다 낮은 WRAM 에 작은 스택이 있어, 그 스택을 깊게 쓰지 않는다
 !wt_keys  = $3D70           ; 슬롯 수만큼 워드(7E, 30개): 슬롯마다 버퍼 자리(!wt_buf + Y)
@@ -166,14 +164,8 @@ org $24A5E9
 !wq_len   = $3D6A           ; NMI 안에서만: 그림 바이트 수
 
 ; 칸 풀: 1FF~1D0, 이어서 17F~B0 을 위에서부터 빌린다. 096~0AF 는 전투 글자, 180~1CF 는 상태 창 이름 자리라 넣지 않는다.
-; 걷는 메시지 캔버스는 096 부터 위로 채우므로 위에서부터 빌리면 겹치기 어렵다. 전투 연출(B0~122)과 전투 이름(1D0~1F7)은
-; 목록 창이 닫힌 뒤에 쓰인다.
-
-; 전투 글은 바이트가 곧 BG3 타일 번호(낮은 8비트)이고 E2 이상은 제어 코드다. 공격 연출이 BG3 칸 B0~122 를 덮으므로
-; 이름 그림은 칸 1D0~1F7 에 두고, 글에는 코드 B0~D7(1D0 - 120 ~)을 쓴다. 이름 4자리 × 10칸(아래 줄 5 + 위 줄 5).
-; 큐에는 아래 줄 코드만 넣고, 위 줄 코드(아래 + 5)는 WnBattleChar 가, 타일 bit8 은 WnBattleCell 이 붙인다.
-!wn_btile = $B0
-!wn_bvram = $1D0
+; 걷는 메시지 캔버스는 096 부터 위로 채우므로 위에서부터 빌리면 겹치기 어렵다. 전투 연출(B0~122)과 전투 글 칸 풀
+; (dq4battlemsg.asm)은 목록 창이 닫힌 뒤에 쓰인다.
 
 !wn_stage = $3E00           ; 올릴 160바이트를 먼저 만드는 자리(7E:3D14~3FFF 는 실행한 장면에서 접근 없음)
 
@@ -258,52 +250,72 @@ WnBattle:
     STA.l $7E0000|!wn_mode
     JMP WnKorean
 .original
-    JML $24A841
+    JML BmNameLookup
 
-; 24:A4E0. A = 글 바이트, X = 줄 자리 + 칸. 이름 아래 줄 타일이면 위 줄(1DD5)에 짝 타일을 함께 쓴다.
+; 24:A4E0. A = 글 바이트(M = 8), X = 줄 자리 + 칸. 전투 글 칸 풀의 코드면 짝 위 줄 코드를 위 줄(1DD5)에도 쓴다.
+; 한 줄 26칸을 넘는 글자는 버린다(긴 한글 이름). 넘겨 쓰면 다음 줄 위 칸을 덮는다.
 WnBattleChar:
-    CMP #!wn_btile
-    BCC .write
-    CMP #!wn_btile+40
-    BCS .write
     PHA
-    SEC
-    SBC #!wn_btile
--
-    CMP #10
-    BCC +
-    SBC #10
-    BRA -
-+
-    CMP #5
+    LDA $0F0D
+    CMP #$1A
     PLA
-    BCS .write
-    CLC
-    ADC #5
-    STA $1DD5,X
-    SEC
-    SBC #5
-.write
+    BCC +
+    JML $24A4EE
++
     STA $1DEF,X
+    PHA
+    PHX
+    REP #$20
+    AND #$00FF
+    TAX
+    LDA.l !bm_index,X
+    AND #$00FF
+    CMP #$00FF
+    BEQ .plain
+    TAX
+    LDA.l $7E0000|!bm_up,X
+    PLX
+    SEP #$20
+    CMP #$00
+    BEQ +
+    STA $1DD5,X
++
+    PLA
+    INC $0F0D
+    JML $24A4EE
+.plain
+    PLX
+    SEP #$20
+    PLA
     INC $0F0D
     JML $24A4EE
 
-; 24:A5E9(JSL, DB = 24). 글 바이트 하나를 타일맵 낱말의 낮은 바이트로. 이름 코드면 타일 bit8 을 켜고, 아니면 끈다
-; (줄이 올라가며 같은 자리에 다른 글자가 올 수 있음).
+; 24:A5E9(JSL, DB = 24, M = 8). 글 바이트 하나를 타일맵 낱말로. 풀 코드면 그 칸(타일 100~1FF)을 가리키게 타일 bit8 을 켜고,
+; 아니면 끈다(줄이 올라가며 같은 자리에 다른 글자가 올 수 있음).
 WnBattleCell:
     LDA $1DD5,Y
-    CMP #!wn_btile
-    BCC .plain
-    CMP #!wn_btile+40
-    BCS .plain
-    CLC
-    ADC.b #!wn_bvram-!wn_btile
+    PHX
+    REP #$20
+    AND #$00FF
+    TAX
+    LDA.l !bm_index,X
+    AND #$00FF
+    CMP #$00FF
+    BEQ .plain
+    ASL
+    TAX
+    LDA.l !bm_tile,X
+    PLX
+    SEP #$20
     STA.l $7E5546,X
     LDA.l $7E5547,X
     ORA #$01
     STA.l $7E5547,X
     RTL
 .plain
+    PLX
+    SEP #$20
+    LDA $1DD5,Y
     STA.l $7E5546,X
     LDA.l $7E5547,X
     AND #$FE
@@ -578,113 +590,6 @@ WnKorean:
     REP #$10
     PLX
     JML $04BFF2
-
-; 전투 이름: 이름 바이트가 같은 자리를 찾거나 돌려 쓰고, 열 칸을 올린 뒤 큐에 아래 줄 타일을 넣는다.
-WnBattleDraw:
-    LDX #$0000
-.find
-    LDY #$0000
--
-    LDA.w !wn_bkeys,X
-    CMP.b $01,Y
-    BNE .next
-    INX
-    INX
-    INY
-    INY
-    CPY #$0008
-    BCC -
-    TXA
-    SEC
-    SBC #$0008
-    BRA .found
-.next
-    TXA
-    AND #$FFF8
-    CLC
-    ADC #$0008
-    TAX
-    CPX #$0020
-    BCC .find
-    LDA.w !wn_bnext
-    AND #$0003
-    ASL
-    ASL
-    ASL
-    PHA
-    LDA.w !wn_bnext
-    INC
-    STA.w !wn_bnext
-    PLX
-    PHX
-    LDY #$0000
--
-    LDA.b $01,Y
-    STA.w !wn_bkeys,X
-    INX
-    INX
-    INY
-    INY
-    CPY #$0008
-    BCC -
-    PLA
-.found
-    LSR
-    LSR
-    LSR                     ; 자리 0~3
-    STA.w !wn_c
-    ASL
-    ASL
-    CLC
-    ADC.w !wn_c
-    ASL                     ; × 10
-    CLC
-    ADC.w #!wn_bvram
-    STA.w !wn_tile
-    JSR WnUpload
-    ; 글자 수 k 면 타일 (10k + 7) / 8 칸
-    LDX #$0000
--
-    LDA.w !wn_glyph,X
-    CMP #$FFFF
-    BEQ +
-    INX
-    INX
-    CPX #$0008
-    BCC -
-+
-    TXA
-    LSR
-    STA.w !wn_c
-    ASL
-    ASL
-    CLC
-    ADC.w !wn_c
-    ASL
-    CLC
-    ADC #$0007
-    LSR
-    LSR
-    LSR
-    STA.w !wn_r
-    LDX #$0000
-    LDA.w !wn_tile
-    SEC
-    SBC.w #!wn_bvram-!wn_btile
-    SEP #$20
--
-    STA.w $0ECB,X
-    INC
-    INX
-    CPX.w !wn_r
-    BCC -
-    LDA #$FF
-    STA.w $0ECB,X
-    REP #$20
-    PLB
-    PLP
-    PLP
-    JML $24A854
 
 ; 글리프 A 의 32바이트를 !wn_cell 로. 뱅크 62 + n / 1024, 주소 8000 + (n % 1024) × 32. 끝나면 DB = 7E.
 WnFetch:
