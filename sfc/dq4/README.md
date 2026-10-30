@@ -19,6 +19,7 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [docs/dq4-window-text-format.md](docs/dq4-window-text-format.md): 게임 안 창 한글 조사(이름이 지나는 루틴, 장면마다 빈 BG3 타일, 가나 칸 재사용, 글꼴 크기와 타일 수)와 BG3 타일맵 옮기기
 - [docs/dq4-title-format.md](docs/dq4-title-format.md): 정지 한글 타이틀, NDS 오프닝 관찰과 초기 SFC 연결 기록
 - [docs/dq4-josa-format.md](docs/dq4-josa-format.md): 받침을 보고 고르는 조사 코드와 필드 시스템 메시지 81개
+- [docs/dq4-battle-text-format.md](docs/dq4-battle-text-format.md): 전투 메시지 432개 한글(전투 중 빈 BG3 칸 풀, 한글 구간·글자 표, 이름·조사, 창 테두리·줄 올림)
 - [docs/dq4-chapter1-format.md](docs/dq4-chapter1-format.md): 1장 첫머리(새 게임 첫 맵, 왕좌의 방 연출, 한글 대사, 인물 배치, 바트랜드 성 곡)
 - [docs/dq4-prologue-format.md](docs/dq4-prologue-format.md): NDS 서장(지하 검술 수련, 개구리, 신시아의 모샤스, 저녁, 1장으로 넘기기)
 - [todo.md](todo.md): 남은 일
@@ -211,3 +212,4 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [2026-10-30-63: 1장 보스를 FC 원작 몬스터로](journal/2026-10-30-63-ch1-bossmon.md)
 - [2026-10-30-64: 3장 마을 셋을 새 그룹에, 새 맵 레코드는 여러 자리에](journal/2026-10-30-64-ch3-bundle.md)
 - [2026-10-30-65: 효과음이 시퀀스 칸을 얻지 못하던 것](journal/2026-10-30-65-sound-sfxslot.md)
+- [2026-10-30-66: 전투 메시지 한글](journal/2026-10-30-66-battle-text.md)

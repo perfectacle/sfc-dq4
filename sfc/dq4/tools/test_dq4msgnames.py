@@ -11,7 +11,7 @@ def target(code, at):
 class HookTests(unittest.TestCase):
     def setUp(self):
         self.hook = names.Layout({k: {0: '곤봉'} for k in names.KINDS}).hook({k: 0x9100 for k in names.KINDS})
-        self.none = self.hook.index(bytes((0x28, 0xA5, 0x43)))
+        self.none = self.hook.index(bytes((0x28, 0xA5, 0xF5, 0x48)))
         self.found = self.hook.index(bytes((0xA0, 0x00, 0x00)))
 
     def test_mode_check_goes_to_original_path(self):
@@ -29,6 +29,12 @@ class HookTests(unittest.TestCase):
             self.assertEqual(target(self.hook, beq + 9), self.found)
             at = nxt
         self.assertEqual(at, self.none)
+
+    def test_none_path_pops_the_number_and_returns_after_the_hook(self):
+        # 89BB~89BF 는 훅의 JML·NOP 이라, 덮인 JSR $889F 를 대신하고 그 다음 24:89C0 으로 간다
+        none = self.hook[self.none:self.found]
+        self.assertEqual(none[-4:], bytes((0x5C, *names.le(0x2489C0, 3))))
+        self.assertIn(bytes((0xA5, 0xF6, 0x85, 0xF5)), none)
 
     def test_copy_loop_returns_to_load(self):
         bne = self.hook.index(bytes((0xC9, 0xFF, 0xFF, 0xD0)), self.found) + 3

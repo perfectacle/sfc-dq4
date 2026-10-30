@@ -18,7 +18,8 @@ from dq5map import lorom  # noqa: E402
 KINDS = (5, 3)
 HOOK_AT = 0x2489BB
 HOOK_ORIG = bytes.fromhex('85 43 20 9f 88')     # STA $43 / JSR $889F(이름 번호를 $F5 에서 꺼냄)
-BACK = 0x2489BD                                 # 원래 JSR $889F
+# 한글이 없을 때 돌아갈 곳: 원래 JSR $889F 다음(STA $42 / BRK 88 2B). 89BB~89BF 는 훅의 JML·NOP 이라 JSR 은 훅이 대신한다
+BACK = 0x2489C0
 QUEUE_RUN = 0x248275
 QUEUE = 0x7E0ECB
 CODE_AT = 0x5E9000
@@ -72,7 +73,9 @@ class Layout:
 
     def hook(self, tables):
         """M 8, A = 이름 종류. 같은 직접 페이지에서 $F5 를 읽고 민다(24:889F 와 같은 일)."""
-        back = bytes((0x5C, *le(BACK, 3)))                                # JML 24:89BD
+        back = bytes((0xA5, 0xF5, 0x48,                                   # 24:889F 처럼 $F5 를 꺼내고 민다 / LDA $F5 / PHA
+                      0xA5, 0xF6, 0x85, 0xF5, 0xA5, 0xF7, 0x85, 0xF6, 0xA5, 0xF8, 0x85, 0xF7, 0x64, 0xF8,
+                      0x68, 0x5C, *le(BACK, 3)))                          # PLA / JML 24:89C0
         found = bytes((
             0xA0, 0x00, 0x00,                                             # LDY #0
             0xBF, *le(CODE_AT & 0xFF0000, 3),                             # loop: LDA $5E0000,X
@@ -98,7 +101,7 @@ class Layout:
             branches.append(('found', len(out) - 1))
             out[bne_at] = len(out) - (bne_at + 1)
         none_at = len(out)
-        out += bytes((0x28, 0xA5, 0x43)) + back                           # 없음: PLP / LDA $43 / JML 89BD
+        out += bytes((0x28,)) + back                                      # 없음: PLP(M 8) / 번호 꺼내기 / JML 89C0
         out[bmi_at] = none_at - (bmi_at + 1)
         found_at = len(out)
         out += found
