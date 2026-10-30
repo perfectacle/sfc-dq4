@@ -43,6 +43,26 @@ DRIVER_RECEIVE = 0x1046
 FAST_RECEIVE = 0xFF00
 FAST_RECEIVE_TRIPLETS = 4
 FAST_RECEIVE_POLLS = 32
+# 나눈 곡(앞부분 → 본체): 드라이버 명령 F7(표 07CD, 원래 아무것도 안 함)을 CHAIN 처리기로, 본체는 시퀀스 번호 47~,
+# 짝 표 71:8300(곡 → 본체, FF 없음), 2B:C1C1(곡이 시작한 뒤 곡 뒤 샘플 보내기 JSR C1DB)을 발판 2B:B780 으로.
+CHAIN_HANDLER = 0xFF54
+CHAIN_TABLE_ENTRY = 0x07CD
+FIRST_CHAIN_SONG = SEQUENCE_COUNT
+CHAIN_PAIRS = CODE + 0x300
+CHAIN_STEP = 0x2BB780
+# 본체를 곡 뒤 샘플 다음에 보낼 곡(순서 표 71:8380 = 1)은 샘플 보내기 고리 끝(2B:C20C, PLA·PLX·RTS)의 발판 2B:B7A0 에서
+CHAIN_ORDER = CODE + 0x380
+CHAIN_LATE_STEP = 0x2BB7A0
+# 곡 붙들기(F7 FE 샘플 / F7 FF X): 그 샘플을 X x 256 바이트 받을 때까지 곡의 연주기를 템포 0 처럼 건너뛰고, 받는 중인
+# 그 샘플을 instrument(182E)가 있는 것으로 본다. 변수 FF4F~FF53, 연주기 판정 FFC0~(IPL ROM 이 꺼져 있어 RAM),
+# instrument 판정·받기 끝 정리는 빠른 받기로 쓰지 않게 된 1049~106A 에 둔다.
+HOLD_VARS = 0xFF4F
+HOLD_PLAYER, HOLD_SAMPLE, HOLD_BYTES, HOLD_TICKS, HOLD_PARTIAL = range(HOLD_VARS, HOLD_VARS + 5)
+HOLD_CHECK = 0xFFC0
+HOLD_SPARE = 0x1049
+HOLD_TICK_SITE = 0x146C
+HOLD_INSTRUMENT_SITE = 0x1861
+HOLD_END_SITE = 0x103A
 
 
 @dataclass(frozen=True)
@@ -58,7 +78,12 @@ def read_sets(data):
         size = data[pos] + 2
         records.append(bytes(data[pos:pos + size]))
         pos += size
-    if int.from_bytes(data[pos + 2:pos + 4], 'little') == FAST_RECEIVE:
+    # 나눈 곡의 본체 레코드(47~)가 뒤에 이어질 수 있다. 그 뒤 SPC FF00~ 으로 올라가는 블록(빠른 받기·CHAIN)은 건너뛴다.
+    while data[pos:pos + 4] != IPL_END and data[pos + 3] != 0xFF:
+        size = data[pos] + 2
+        records.append(bytes(data[pos:pos + size]))
+        pos += size
+    while data[pos:pos + 4] != IPL_END and data[pos + 3] == 0xFF:
         pos += 4 + int.from_bytes(data[pos:pos + 2], 'little')
     if data[pos:pos + 4] != IPL_END:
         raise ValueError('song set table has no IPL end marker')
@@ -146,11 +171,11 @@ def sample_budget(data, song, sequence_size, extra_table=0, resident=None, pinne
     return capacity - resident_bytes - resident_sequences - sequence_size - 512
 
 
-def memory_budget(data, song, item):
+def memory_budget(data, song, item, extra_sequences=()):
     resident = set(resident_samples(data))
     resident_sequences = set(pinned_sequences(data))
     used_samples = resident | set(item.samples)
-    used_sequences = resident_sequences | {song}
+    used_sequences = resident_sequences | {song} | set(extra_sequences)
     sample_bytes = sum(sample_size(data, i) for i in used_samples)
     sequence_size = sum(len(sequence_bytes(data, i)) for i in used_sequences)
     # 슬롯 관리·정렬과 잔향 버퍼 사이에 여유를 둔다. 전환은 이전 곡 자료를 정리한 뒤 로드한다.
@@ -245,6 +270,354 @@ def fast_receive_code(triplets=FAST_RECEIVE_TRIPLETS, polls=FAST_RECEIVE_POLLS):
     ])
 
 
+def chain_code():
+    """SPC 명령 F7 m t: 시퀀스 m 이 SPC 에 있으면 이 트랙의 읽기 자리($00+X)를 m 의 t 번째 트랙 머리로 옮긴다.
+
+    11CA 처럼 04C7+m → 칸 → 05D5+칸*6 의 [주소 2] 로 시퀀스 첫 바이트를 찾는다. 없으면 t 만 읽고 돌아가며, 앞부분은
+    그 뒤에 1틱 쉼과 F7 로 돌아가는 점프를 두어 다음 틱에 다시 시도한다. 처리기는 트랙 처리 중(CLRP)에 불린다.
+    """
+    h = bytes.fromhex
+    return _asm([
+        h('3F BD 19 68 80'), ('b', 0xB0, 'hold'),               # CALL $19BD / CMP #$80 / BCS hold
+        # 드라이버는 받기를 시작할 때 칸(04C7+m)을 먼저 쓰므로, m 을 받는 중($018A = 80, $0185 = m)이면 없는 것으로 본다
+        h('FD E5 8A 01 68 80'), ('b', 0xD0, 'have'), h('5E 85 01'), ('b', 0xF0, 'miss'),
+        ('label', 'have'), h('F6 C7 04 68 FF'), ('b', 0xF0, 'miss'),  # MOV A,$04C7+Y / CMP #$FF
+        h('8F D5 A0 8F 05 A1 8D 06 CF 7A A0 DA A0'),           # $A0 = 05D5 + 칸 x 6
+        h('8D 01 F7 A0 2D FC F7 A0 C4 A1 AE C4 A0'),           # $A0 = 시퀀스 주소
+        h('3F BD 19 1C 60 88 02 FD'),                          # Y = 2 + 2t
+        h('F7 A0 2D FC F7 A0 FD AE 7A A0'),                    # YA = 주소 + 오프셋
+        h('D4 00 DB 01 6F'),                                   # MOV $00+X,A / MOV $01+X,Y / RET
+        ('label', 'miss'), h('3F BD 19 6F'),
+        # F7 FE n: 붙들 샘플 n. F7 FF x: 문턱 x(256바이트 단위)를 두고 이 트랙의 연주기를 붙든다(255틱 = 1.27초 뒤엔 놓음)
+        ('label', 'hold'), h('FD 3F BD 19 AD FE'), ('b', 0xD0, 'arm'),
+        h('C5') + _abs(HOLD_SAMPLE) + h('6F'),
+        ('label', 'arm'), h('C5') + _abs(HOLD_BYTES),
+        h('E8 FF C5') + _abs(HOLD_TICKS),
+        h('F5 A3 02 C5') + _abs(HOLD_PLAYER) + h('6F'),
+    ])
+
+
+def _abs(addr):
+    return addr.to_bytes(2, 'little')
+
+
+def hold_check_code():
+    """1458 의 연주기 고리에서 MOV A,$03B7+X(템포)를 대신한다. 붙든 연주기면 샘플이 문턱만큼 올 때까지 0 을 돌려준다.
+
+    받은 바이트는 쓸 주소($0180)와 DIR 시작(0700+칸*4)의 위 바이트 차라 실제보다 255바이트까지 많게 잡힌다. 다 받았거나
+    (받는 중이 아님) 255틱이 지나면 놓는다. 받는 중에 문턱을 넘으면 그 샘플을 HOLD_PARTIAL 에 적어 instrument 가 쓰게 한다.
+    """
+    h = bytes.fromhex
+    return _asm([
+        h('1E') + _abs(HOLD_PLAYER), ('b', 0xD0, 'norm'),
+        h('E5') + _abs(HOLD_SAMPLE) + h('FD F6 FF 03 68 FF'), ('b', 0xF0, 'wait'),
+        h('5E 84 01'), ('b', 0xD0, 'ready'),                  # CMP Y,$0184: 받는 중이 아니면 다 받음
+        h('1C 1C FD E5 81 01 80 B6 01 07 65') + _abs(HOLD_BYTES), ('b', 0x90, 'wait'),
+        h('E5') + _abs(HOLD_SAMPLE) + h('C5') + _abs(HOLD_PARTIAL),
+        ('label', 'ready'), h('E8 FF C5') + _abs(HOLD_PLAYER),
+        ('label', 'norm'), h('F5 B7 03 6F'),
+        ('label', 'wait'), h('8C') + _abs(HOLD_TICKS), ('b', 0xF0, 'ready'),
+        h('E8 00 6F'),
+    ])
+
+
+def hold_spare_code():
+    """(instrument 판정, 받기 끝 정리). 판정은 182E 의 CMP A,$0184 를 대신해, 받는 중인 샘플이 HOLD_PARTIAL 이면 Z=0
+    (있음)을 낸다. 받기 끝(103A)은 원래 일 뒤에 HOLD_PARTIAL 을 지워, 같은 샘플을 나중에 다시 받을 때 처음부터
+    있는 것으로 보지 않게 한다."""
+    h = bytes.fromhex
+    check = _asm([
+        h('65 84 01'), ('b', 0xD0, 'out'),
+        h('65') + _abs(HOLD_PARTIAL), ('b', 0xD0, 'absent'),
+        h('68 FF 6F'),                                         # 샘플 번호는 FF 가 아니므로 Z=0
+        ('label', 'absent'), h('65 84 01'),
+        ('label', 'out'), h('6F'),
+    ])
+    end = h('8F 00 8A 8F FF 84 2D E8 FF C5') + _abs(HOLD_PARTIAL) + h('AE 5F 35 10')
+    return check, end
+
+
+def chain_step_code():
+    """2B:C1C1(곡이 시작한 뒤 JSR C1DB)을 대신해, 짝 표에 본체가 있으면 C22C 로 본체 시퀀스를 먼저 보낸 뒤 C1DB 로 간다.
+
+    대기열 01 처리기는 시퀀스가 없으면 그 칸을 미루고 다음 칸을 먼저 처리하므로, 본체를 대기열(94)로 넣으면 앞부분보다
+    먼저 올라갔다. 스택 깊이는 원래 JSR C1DB 와 같다(C1DB 의 C20F 가 스택으로 대기열 칸을 읽음).
+    """
+    h = bytes.fromhex
+    return _asm([
+        h('DA 48 AA BF') + CHAIN_ORDER.to_bytes(3, 'little'),  # PHX / PHA / TAX / LDA 순서,X
+        h('29 FF 00'), ('b', 0xD0, 'skip'),                   # 나중에 보낼 곡이면 건너뜀
+        h('BF') + CHAIN_PAIRS.to_bytes(3, 'little'),          # LDA 짝,X
+        h('29 FF 00 C9 FF 00'), ('b', 0xF0, 'skip'),
+        h('20 2C C2'),                                         # JSR $C22C(시퀀스 보내기, A = 번호)
+        ('label', 'skip'), h('68 FA 4C DB C1'),                # PLA / PLX / JMP $C1DB
+    ])
+
+
+def chained_song(data, song):
+    """나눈 곡이면 본체 시퀀스 번호, 아니면 None(2B:C1C1 이 발판을 부를 때만 짝 표를 본다)."""
+    hook = data[lorom(0x2BC1C1):lorom(0x2BC1C1) + 3]
+    if hook != bytes([0x20]) + (CHAIN_STEP & 0xFFFF).to_bytes(2, 'little'):
+        return None
+    number = data[lorom(CHAIN_PAIRS) + song]
+    return None if number == 0xFF else number
+
+
+def chain_late_step_code():
+    """2B:C20C(샘플 보내기 고리 끝 PLA·PLX·RTS)를 대신해, 곡 뒤 단계(대기열 칸 bit6)이고 순서 표가 1 인 곡이면 본체를
+    보낸 뒤 돌아간다. 곡 앞 샘플 고리(C1C8)도 같은 끝을 지나지만 그때 칸은 bit6 이 꺼져 있다."""
+    h = bytes.fromhex
+    return _asm([
+        h('68 FA 48 DA'),                                      # PLA(곡) / PLX(대기열 칸) / PHA / PHX
+        h('BD 95 1D 29 40 00'), ('b', 0xF0, 'done'),          # LDA $1D95,X / AND #$0040
+        h('A3 03 AA BF') + CHAIN_ORDER.to_bytes(3, 'little'), # LDA 3,S / TAX / LDA 순서,X
+        h('29 FF 00'), ('b', 0xF0, 'done'),
+        h('BF') + CHAIN_PAIRS.to_bytes(3, 'little'),
+        h('29 FF 00 C9 FF 00'), ('b', 0xF0, 'done'),
+        h('20 2C C2'),                                         # JSR $C22C
+        ('label', 'done'), h('FA 68 60'),                      # PLX / PLA / RTS
+    ])
+
+
+# 출구를 밟아 페이드 아웃하기 전에 목적지 맵 곡을 요청한다(early_song_code). 맵 불러오기 동안은 NMI 가 꺼져 대기열이
+# 멈추므로, 페이드 아웃 16프레임 동안 곡 앞 자료를 보내 둔다. 맵 불러오기의 곡 요청은 같은 곡이라 건너뛴다.
+EARLY_SONG = CODE + 0x400
+EARLY_SONG_SITE = 0x00CD3F        # 출구 처리기들이 부르는 페이드 아웃(JSL 00:CE49 / RTS)
+EARLY_SONG_CALLER = 0xCA41        # 계단·문 출구(00:C99E)의 JSR CD3F 가 남기는 돌아갈 주소
+EXIT_INDEX_STUB = 0x2AFFE6        # JSR 2A:FC16(출구 번호) / RTL
+
+
+def _asm_far(items, base):
+    """_asm 에 ('jmp', 이름)(같은 뱅크 JMP 절대)과 ('jsr', 이름)을 더한 것. base 는 코드가 놓일 롬 주소."""
+    for final in (False, True):
+        out, now = bytearray(), {}
+        for it in items:
+            if isinstance(it, bytes):
+                out += it
+            elif it[0] == 'label':
+                now[it[1]] = len(out)
+            elif it[0] in ('jmp', 'jsr'):
+                target = (base + labels[it[1]]) & 0xFFFF if final else 0
+                out += bytes([0x4C if it[0] == 'jmp' else 0x20]) + target.to_bytes(2, 'little')
+            else:
+                rel = (labels[it[2]] - (len(out) + 2)) if final else 0
+                if final and not -128 <= rel <= 127:
+                    raise ValueError(f'branch to {it[2]} out of range')
+                out += bytes([it[1], rel & 0xFF])
+        labels = now
+    return bytes(out)
+
+
+def early_song_code(base=EARLY_SONG):
+    """(코드, 들어가는 자리). 00:CD3F 의 JSL CE49 대신 불린다. 계단·문 출구에서만, 맵 불러오기의 목적지 계산(2A:F6FD:
+    2A:ED61 표를 지금 BC 로 찾고 BD·출구 번호만큼 건너뜀)을 읽기만 하는 꼴로 따라 해 목적지 BC/BD 를 구하고, 01:83F0 처럼
+    23:FD6A 맵 머리의 곡 번호(+5)를 읽는다. $194B 를 잠시 그 곡으로 두고 맵 곡 루틴 00:CE61 을 불러 앞 곡 정리·새 곡
+    요청을 원래와 같은 판정(이벤트 깃발·배)으로 한다. 필드로 나가는 출구(종류 00), BC 50 이상(필드 쪽 계산), BC 04
+    (01:8460 의 깃발 예외)는 그대로 둔다. 쓰는 직접 페이지($00~$0B·$84·$A5~$A7)는 되돌린다.
+    """
+    h = bytes.fromhex
+    saved = (0x00, 0x02, 0x04, 0x06, 0x08, 0x0A, 0x84, 0xA5, 0xA7)
+    tail = h('AB 7A FA 68 28 5C 49 CE 00')                     # PLB / PLY / PLX / PLA / PLP / JML 00:CE49
+    items = [
+        # 2A:FBA9 와 같음: 표 칸 종류(A)만큼 $84 를 넘김
+        ('label', 'skip_entry'), h('29 60'), ('b', 0xF0, 'one'), h('C9 20'), ('b', 0xF0, 'three'),
+        h('C9 40'), ('b', 0xF0, 'two'), h('A9 05'), ('b', 0x80, 'add'),
+        ('label', 'one'), h('A9 01'), ('b', 0x80, 'add'),
+        ('label', 'two'), h('A9 02'), ('b', 0x80, 'add'),
+        ('label', 'three'), h('A9 03'),
+        ('label', 'add'), h('18 65 84 85 84'), ('b', 0x90, 'added'), h('E6 85'),
+        ('label', 'added'), h('60'),
+        ('label', 'entry'),
+        h('08 C2 30 48 DA 5A 8B A3 0C C9') + EARLY_SONG_CALLER.to_bytes(2, 'little'), ('b', 0xF0, 'go'),
+        tail,
+        ('label', 'go'),
+        b''.join(h(f'A5 {a:02X} 48') for a in saved),
+        h('E2 30 22') + EXIT_INDEX_STUB.to_bytes(3, 'little') + h('AA A9 2A 48 AB'),
+        h('A9 61 85 84 A9 ED 85 85'),
+        ('label', 'scan'), h('B2 84 C9 FF'), ('b', 0xD0, 'scan2'), ('jmp', 'bail'),
+        ('label', 'scan2'), h('C5 BC'), ('b', 0xF0, 'found'),
+        ('label', 'skip'), h('B2 84 E6 84'), ('b', 0xD0, 'skip2'), h('E6 85'),
+        ('label', 'skip2'), h('C9 FF'), ('b', 0xD0, 'skip'), ('b', 0x80, 'scan'),
+        ('label', 'found'), h('E6 84'), ('b', 0xD0, 'found2'), h('E6 85'),
+        ('label', 'found2'), h('A5 BD'), ('b', 0xF0, 'index'), h('85 01'),
+        ('label', 'floor'), h('B2 84 48'), ('jsr', 'skip_entry'), h('68'), ('b', 0x30, 'floor_end'), ('b', 0x80, 'floor'),
+        ('label', 'floor_end'), h('C6 01'), ('b', 0xD0, 'floor'),
+        ('label', 'index'), h('E0 00'), ('b', 0xF0, 'got'),
+        ('label', 'next'), h('B2 84'), ('jsr', 'skip_entry'), h('CA'), ('b', 0xD0, 'next'),
+        ('label', 'got'), h('B2 84 85 01 29 1F 85 03 A5 01 29 60'),
+        h('C9 60'), ('b', 0xD0, 't40'), h('A0 04 B1 84 85 02'), ('b', 0x80, 'have'),
+        ('label', 't40'), h('C9 40'), ('b', 0xD0, 't20'), h('A5 BC 85 02'), ('b', 0x80, 'have'),
+        ('label', 't20'), h('C9 20'), ('b', 0xF0, 't20b'), ('jmp', 'bail'),
+        ('label', 't20b'), h('A0 02 B1 84 85 02'),
+        ('label', 'have'), h('A5 02 C9 50'), ('b', 0xB0, 'bail_near'), h('C9 04'), ('b', 0xF0, 'bail_near'),
+        h('C2 30 A5 02 29 FF 00 0A AA BF 6A FD 23 85 A5'),        # $A5 = 23:FD6A[BC]
+        h('A5 03 29 FF 00 0A 85 00 0A 18 65 00 18 65 A5 85 A5'),  # + BD x 6
+        h('E2 30 A9 23 85 A7 A0 05 B7 A5'),                       # 곡 번호
+        h('EB AF 4B 19 7E 48 EB 8F 4B 19 7E'),                    # 옛 $194B 를 쌓고 곡 번호를 둠
+        h('A9 00 48 AB 22 61 CE 00'),                             # DB=00 / JSL 00:CE61
+        h('68 8F 4B 19 7E'),
+        ('label', 'bail_near'),
+        ('label', 'bail'), h('C2 30'),
+        b''.join(h(f'68 85 {a:02X}') for a in reversed(saved)),
+        tail,
+    ]
+    code = _asm_far(items, base)
+    entry = base + _asm_far(items[:items.index(('label', 'entry'))], base).__len__()
+    return code, entry
+
+
+EARLY_SONG_SKIP = CODE + 0x560    # 맵 불러오기의 앞 곡 정리(MAP_CLEANUP)·곡 요청(MAP_START) 대신, 둘에 하나씩
+
+
+def early_skip_code(original):
+    """맵 곡 루틴의 정리·요청(JSL original, A = 곡) 대신 불린다. 대기열에 같은 곡의 01(보내는 중 81·곡 뒤 단계 41 포함)이 남아 있으면
+    아무것도 하지 않는다. 출구에서 미리 요청한 곡을 보내는 중이면 원래 판정($1D8B = 지금 곡)은 아직 다른 곡이라, 두 번째
+    01 이 앞 곡 정리(1A)와 함께 들어가 처음부터 다시 보냈다."""
+    h = bytes.fromhex
+    jml = bytes([0x5C]) + original.to_bytes(3, 'little')
+    return _asm([
+        h('08 E2 30 DA 48 AF 93 1D 7E AA'),
+        ('label', 'loop'), h('8A CF 91 1D 7E'), ('b', 0xF0, 'none'),
+        h('BF 95 1D 7E 29 3F C9 01'), ('b', 0xD0, 'next'),
+        h('BF A5 1D 7E C3 01'), ('b', 0xF0, 'found'),
+        ('label', 'next'), h('E8 8A 29 0F AA'), ('b', 0x80, 'loop'),
+        ('label', 'none'), h('68 FA 28') + jml,
+        ('label', 'found'), h('68 FA 28 6B'),
+    ])
+
+
+# 맵 불러오기처럼 NMI 를 끈 동안에도 소리 일(2B:BECE 코루틴)을 돌린다(load_pump). 원래는 NMI 가 꺼지면 코루틴이 멈춰
+# 불러오기 70프레임 동안 전송이 0 이었다. NMI 를 끌 때 V-IRQ 를 켜 LOAD_LINES 줄마다 다시 걸고, IRQ 처리기가 SPC 가 받을 준비가 됐을 때만
+# 코루틴을 잠깐 돌린다. 코루틴은 2B:C292 응답 기다림에서 준비가 안 됐으면 NMI 의 선점과 같은 꼴로 바로 양보한다.
+LOAD_IRQ = CODE + 0x600            # IRQ 처리기
+LOAD_NMI_OFF = CODE + 0x780        # 00:9691 STA $4200(NMI 끔) 대신: V-IRQ 를 함께 켬
+LOAD_EXIT_CLI = CODE + 0x7C0       # 00:CD5B(출구 뒤 NMI 끄는 루틴 CD48 안 JSL 03AADA) 대신
+LOAD_NMI_ON = CODE + 0x7A0         # 00:9676 STA $4200(NMI 켬) 대신: 걸려 있는 IRQ 를 지움
+LOAD_GATE = 0x2BB741               # C169(SPC 명령 보내기) 첫머리 대신: NMI 가 꺼져 있으면 곡 틀기(01)를 미룬다
+LOAD_POLL = 0x2BB7D0               # C298 의 응답 판정. NMI 선점 범위(00:8004 발판)에 든다
+LOAD_STUB = 0x008000               # IRQ 벡터 받침(JML LOAD_IRQ)과 NMI 선점 범위 발판. 원래 0 이고 부르는 곳 없음
+LOAD_FRAME_ENTER = 0x0085E5        # 원래 코드 JSR 969A / RTL: 코루틴으로 넘어갔다가 양보하면 돌아옴
+LOAD_LINES = 12                    # IRQ 사이 줄 수. 줄마다 걸면 코루틴 전환이 끝나기 전에 다음 IRQ 가 와 늘 취소됐고, 3줄이면 처리기가 CPU 를 절반 먹어 검은 화면이 75프레임 늘었다
+
+
+def load_pump_code(lines=LOAD_LINES):
+    """{롬 주소: (바이트, 원래 바이트 또는 None=빈 자리)}. 
+
+    NMI 선점(00:88A3)은 2B:BECE~C422 의 PC 만 코루틴으로 본다. 응답 판정을 둘 2B:B7D0 과 나눈 곡의 발판(B780·B7A0)도
+    코루틴 코드이므로 00:88E2 를 발판으로 돌려 2B:B741~B804 도 선점 범위로 넣는다(B805~ 는 주 스레드 코드).
+    """
+    h = bytes.fromhex
+    poll_cont = (LOAD_POLL & 0xFFFF) + 0  # 아래에서 채움
+    poll_items = [
+        ('b', 0xD0, 'not_ready'),                     # C295 CMP $2140 의 결과(JSR 은 플래그를 바꾸지 않음)
+        h('4D DC 08'), ('b', 0x30, 'not_ready'),
+        h('60'),
+        ('label', 'not_ready'), h('A5 19'), ('b', 0x10, 'spin'),   # NMI 가 켜져 있으면 원래처럼 돈다
+        h('4B F4 00 00'),                             # PHK / PEA cont (자리는 뒤에서 채움)
+        h('08 C2 30 8B 0B 48 DA 5A A9 00 00 5B E2 20 48 AB 5C EC 88 00'),
+        ('label', 'spin'), h('A9 80 60'),             # 다시 판정(N=1 → BMI C292)
+    ]
+    poll = bytearray(_asm(poll_items))
+    cont = poll.index(h('A9 80 60'))
+    pea = poll.index(h('4B F4 00 00')) + 2
+    poll[pea:pea + 2] = ((LOAD_POLL & 0xFFFF) + cont).to_bytes(2, 'little')
+    poll_cont = (LOAD_POLL & 0xFFFF) + cont
+    # 곡 틀기는 자료를 다 올린 뒤 다시 보내는 01 이다. 불러오는 동안 보내면 화면이 밝아지기 전에 곡이 울렸다.
+    yield_frame = h('08 C2 30 8B 0B 48 DA 5A A9 00 00 5B E2 20 48 AB 5C EC 88 00')
+    gate_items = [
+        ('label', 'top'), h('BD 95 1D 29 3F 00 C9 01 00'), ('b', 0xD0, 'done'),
+        h('A5 19 29 80 00'), ('b', 0xF0, 'done'),
+        h('4B F4 00 00') + yield_frame,
+        ('label', 'cont'), ('b', 0x80, 'top'),
+        ('label', 'done'), h('4C 2F C3'),
+    ]
+    gate = bytearray(_asm(gate_items))
+    gate_cont_off = len(gate) - 5  # cont: BRA top(2) 뒤 done: JMP C32F(3)
+    gate_cont = (LOAD_GATE & 0xFFFF) + gate_cont_off
+    pea = gate.index(h('4B F4 00 00')) + 2
+    gate[pea:pea + 2] = gate_cont.to_bytes(2, 'little')
+    irq = _asm_far([
+        h('C2 30 8B 0B 48 DA 5A A9 00 00 5B E2 20 48 AB AD 11 42'),
+        # 다음 IRQ 를 지금 줄 + LOAD_LINES 에(262줄에서 돌아감)
+        h('AD 3F 21 AD 37 21 AD 3D 21 EB AD 3D 21 29 01 EB C2 20 18 69') + lines.to_bytes(2, 'little'),
+        h('C9 06 01'), ('b', 0x90, 'vt'), h('E9 06 01'),
+        ('label', 'vt'), h('8D 09 42 E2 20'),
+        h('A3 0D C9 2B'), ('b', 0xD0, 'not2b'),
+        h('C2 20 A3 0B C9 41 B7'), ('b', 0x90, 'norm16'),
+        h('C9 05 B8'), ('b', 0x90, 'tonmi'),
+        h('C9 CE BE'), ('b', 0x90, 'norm16'),
+        h('C9 B1 C4'), ('b', 0x90, 'tonmi'),
+        ('b', 0x80, 'norm16'),
+        ('label', 'tonmi'), h('5C A3 88 00'),               # 코루틴·전환 중이면 NMI 의 선점(저장하거나 전환 취소)
+        ('label', 'exit'), h('C2 30 7A FA 68 2B AB 40'),
+        # 주 스레드가 소리 대기열을 고치는 중(24:FE00~, 24:FF83 넣기 등)이면 코루틴을 돌리지 않는다
+        ('label', 'not2b'), h('C9 24'), ('b', 0xD0, 'not24'),
+        h('C2 20 A3 0B C9 00 FE E2 20'), ('b', 0xB0, 'exit'),
+        ('label', 'not24'), h('C9 7F'), ('b', 0xF0, 'norm8'),
+        h('C2 20 A3 0B C9 13 09'), ('b', 0xB0, 'norm16'), h('C9 EF 08'), ('b', 0xB0, 'tonmi'),
+        ('label', 'norm16'), h('E2 20'),
+        ('label', 'norm8'), h('A5 19'), ('b', 0x10, 'exit2'),
+        # 대기열이 비었거나 지금 칸이 곡 뒤 단계(bit6, 곡이 이미 시작)면 IRQ 를 끈다. 곡 뒤 자료까지 불러오기 중에
+        # 보내면 곡은 화면보다 40프레임 넘게 먼저 나오는데 검은 화면만 늘었다.
+        h('AD 91 1D CD 93 1D'), ('b', 0xF0, 'stop'),
+        # 곡 요청(01)이 아닌 칸에서 코루틴에 들어가면 NMI 가 꺼진 동안 돌아올 길이 없다(C32F 등은 양보하지 않음)
+        h('C2 20 AD 93 1D 29 FF 00 AA E2 20 BD 95 1D 29 40'), ('b', 0xD0, 'stop'),
+        h('BD 95 1D 29 3F C9 01'), ('b', 0xF0, 'pump'),
+        ('label', 'stop'), h('A5 1E 8D 00 42'),
+        ('label', 'exit2'), ('jmp', 'exit'),
+        ('label', 'pump'),
+        h('AD E0 08 C9 2B'), ('b', 0xD0, 'go'),
+        h('C2 20 AD DE 08 C9') + gate_cont.to_bytes(2, 'little') + h('E2 20'), ('b', 0xF0, 'stop'),
+        h('C2 20 AD DE 08 C9') + poll_cont.to_bytes(2, 'little') + h('E2 20'), ('b', 0xD0, 'go'),
+        h('AD 40 21 CD 40 21'), ('b', 0xD0, 'exit2'), h('4D DC 08'), ('b', 0x30, 'exit2'),
+        # 응답 판정에서 멈춘 코루틴의 고리(2B:C29F~C2FC) 한 바퀴를 저장된 Y(08E5)·X(08E3)로 대신 돈다. 코루틴으로
+        # 넘어가면 전환만 수백 사이클이라 불러오기가 75% 늘었다. 고리가 끝나는 바퀴(X-3 < 0)와 묶음 사이의 대기열
+        # 처리(BED5)는 코루틴에 맡긴다(불러오는 동안은 새 칸이 없다).
+        h('C2 30 AD E3 08 38 E9 03 00'), ('b', 0x10, 'fast'),
+        ('label', 'go16'), h('E2 20'),
+        ('label', 'go'), h('22') + LOAD_FRAME_ENTER.to_bytes(3, 'little'), h('A5 19 29 FE 85 19'),
+        ('jmp', 'exit'),
+        ('label', 'fast'),
+        h('E2 20 AD DC 08 49 80 8D DC 08 AC E5 08'),
+        b''.join(h(f'B7 FB 8D {port:02X} 21 C8') + bytes([0xD0, 0x07]) + h('A0 00 80 64 FB E6 FD') for port in (0x41, 0x42, 0x43)),
+        h('A9 80 0D DA 08 49 01 8D 40 21 29 01 8D DA 08 8C E5 08'),
+        h('C2 20 AD E3 08 38 E9 03 00 8D E3 08 8D 8D 1D'),
+        ('jmp', 'exit'),
+    ], LOAD_IRQ)
+    # $2137 로 줄 번호를 잡으려면 $4201 bit7 이 켜져 있어야 한다. 게임은 IRQ 를 쓰지 않아 I 를 켠 채로 돌므로
+    # (불러오기 70프레임 가운데 54프레임), 00:967F 가 PLP 로 되돌릴 호출자의 P(스택 7번째)에서 I 를 끈다.
+    # NMI 를 다시 켤 때(00:9664) 같은 자리의 I 를 켜 원래대로 둔다.
+    nmi_off = h('09 20 8F 00 42 00 48 A9 FF 8F 01 42 00 A9 00 8F 09 42 00 8F 0A 42 00 A3 07 29 FB 83 07 68 6B')
+    nmi_on = h('8F 00 42 00 48 AF 11 42 00 A3 07 09 04 83 07 68 6B')
+    stub = _asm([
+        h('5C') + LOAD_IRQ.to_bytes(3, 'little'),
+        h('C9 CE BE'), ('b', 0xB0, 'orig'),
+        h('C9 41 B7'), ('b', 0x90, 'norm'),
+        h('C9 05 B8'), ('b', 0xB0, 'norm'),
+        h('4C EC 88'),
+        ('label', 'orig'), h('4C E7 88'),
+        ('label', 'norm'), h('4C 1E 89'),
+    ])
+    # CD48 은 PHP·PHB 뒤 NMI 를 끄고 PLB·PLP 로 끝나 I 를 다시 켠다. 불러오기 루틴들은 이 뒤의 I 를 이어받는다.
+    exit_cli = h('22 DA AA 03 A3 05 29 FB 83 05 6B')
+    return {
+        LOAD_EXIT_CLI: (exit_cli, None),
+        0x00CD5B: (h('22') + LOAD_EXIT_CLI.to_bytes(3, 'little'), h('22 DA AA 03')),
+        LOAD_POLL: (bytes(poll), None),
+        LOAD_GATE: (bytes(gate), None),
+        0x2BC169: (h('20') + (LOAD_GATE & 0xFFFF).to_bytes(2, 'little'), h('20 2F C3')),
+        LOAD_IRQ: (irq, None),
+        LOAD_NMI_OFF: (nmi_off, None),
+        LOAD_NMI_ON: (nmi_on, None),
+        LOAD_STUB: (stub, None),
+        0x00FFEE: ((LOAD_STUB & 0xFFFF).to_bytes(2, 'little'), h('7F 8F')),
+        0x0088E2: (h('4C') + ((LOAD_STUB & 0xFFFF) + 4).to_bytes(2, 'little') + h('EA EA'), h('C9 CE BE 90 37')),
+        0x2BC298: (h('20') + (LOAD_POLL & 0xFFFF).to_bytes(2, 'little') + h('30 F5 EA EA'), h('D0 F8 4D DC 08 30 F3')),
+        0x009691: (h('22') + LOAD_NMI_OFF.to_bytes(3, 'little'), h('8F 00 42 00')),
+        0x009676: (h('22') + LOAD_NMI_ON.to_bytes(3, 'little'), h('8F 00 42 00')),
+    }
+
+
 def pinned_sequences(data):
     pos = lorom(RESIDENT_SEQUENCES)
     end = data.index(0xFF, pos)
@@ -313,10 +686,14 @@ def write_resident_samples(data, ids):
 
 
 def install(base, replacements, *, sample_resources=None, map_fades=False, preview=None, pinned=(),
-            resident=None, set_records=None, fast_receive=False):
+            resident=None, set_records=None, fast_receive=False, chains=None, chain_late=(), hold=False, early_song=False, load_pump=False):
     """pinned 는 늘 두는 시퀀스 목록에 남길 바꾸는 곡(나머지 바꾸는 곡은 목록에서 뺌). resident 는 새 늘 두는 샘플 목록
     전체(주지 않으면 그대로). set_records 는 바꾸지 않는 곡의 곡 묶음 레코드 {곡: (k, 샘플…)}.
-    fast_receive 는 SPC 자료 받기를 묶음 여러 개 이어 받게 바꾼다(fast_receive_code).
+    fast_receive 는 SPC 자료 받기를 묶음 여러 개 이어 받게 바꾼다(fast_receive_code). chains 는 {곡: 본체 시퀀스} 로,
+    곡의 시퀀스는 앞부분이고 본체를 47 부터 차례로 번호를 매겨 둔다(chain_code·chain_step_code). chain_late 의 곡은
+    본체를 곡 뒤 샘플 다음에 보낸다(chain_late_step_code). hold 는 곡 붙들기(F7 FE·FF)를 드라이버에 넣는다(빠른 받기 필요).
+    early_song 은 계단·문 출구에서 페이드 아웃 전에 목적지 맵 곡을 요청한다(early_song_code).
+    load_pump 는 NMI 를 끈 동안(맵 불러오기)에도 IRQ 로 곡 앞 자료를 보낸다(load_pump_code, early_song 필요).
     """
     if len(base) not in (0x180000, 0x200000, 0x400000):
         raise ValueError('base must be a headerless 1.5MB, 2MB or 4MB DQ5 build')
@@ -389,6 +766,41 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
         address = place(payload, f'sample {sample:02X}')
         write(address, payload, empty=True)
         write(RELOC_SMP_TABLE + sample * 3, address.to_bytes(3, 'little'))
+    chains = chains or {}
+    chain_numbers = {}
+    if chains:
+        if len(records) != SEQUENCE_COUNT:
+            raise ValueError('base already has chained songs; build from the ROM before them')
+        if not set(chains) <= set(replacements):
+            raise ValueError('chained songs must be replaced songs')
+        anchor = resident_samples(data)[0]
+        pairs = bytearray(b'\xff' * 0x64)
+        for number, (song, main) in enumerate(sorted(chains.items()), FIRST_CHAIN_SONG):
+            if number >= 0x64:
+                raise ValueError('too many chained songs for the SPC sequence index')
+            payload = len(main).to_bytes(2, 'little') + main
+            address = place(payload, f'chained sequence {number:02X}')
+            write(address, payload, empty=True)
+            write(RELOC_SEQ_TABLE + number * 3, address.to_bytes(3, 'little'))
+            # 본체 레코드는 늘 두는 샘플 하나만(악기 번호는 앞부분 곡의 레코드를 씀)
+            records.append(bytes([1, 1, anchor]))
+            # 곡 뒤 샘플이 없으면 2B 가 곡 뒤 단계(C1BA)를 지나지 않아 본체를 보내지 않았다(곡 01·0C 가 앞부분만 울림).
+            # 늘 두는 샘플 하나를 곡 뒤로 덧붙여 그 단계를 지나게 한다(이미 있어 보내지는 않음, 악기 번호는 그대로).
+            size, first, *ids = records[song]
+            if first == size:
+                extra = next((x for x in resident_samples(data) if x not in ids), None)
+                if extra is None:
+                    raise ValueError(f'chained song {song:02X} uses every resident sample; nothing to append')
+                records[song] = bytes([size + 1, first, *ids, extra])
+            pairs[song] = number
+            chain_numbers[song] = number
+        write(CHAIN_PAIRS, bytes(pairs), empty=True)
+        write(CHAIN_ORDER, bytes(int(x in chain_late) for x in range(0x64)), empty=True)
+        step_code, late_code = chain_step_code(), chain_late_step_code()
+        write(CHAIN_STEP, step_code, bytes(len(step_code)))
+        write(CHAIN_LATE_STEP, late_code, bytes(len(late_code)))
+        write(0x2BC1C1, bytes([0x20]) + (CHAIN_STEP & 0xFFFF).to_bytes(2, 'little'), bytes.fromhex('20 DB C1'))
+        write(0x2BC20C, bytes([0x4C]) + (CHAIN_LATE_STEP & 0xFFFF).to_bytes(2, 'little'), bytes.fromhex('68 FA 60'))
     table = b''.join(records)
     if 0x28EC + len(table) > 0x3000:
         raise ValueError(f'song sample table too large: {len(table)} bytes')
@@ -406,17 +818,56 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
         raise ValueError('IPL block length does not end at song table boundary')
     write(IPL_BLOCK, (block_size + len(table) - old_size).to_bytes(2, 'little'))
     write(SONG_SETS, table + IPL_END + bytes(max(0, old_size - len(table))))
+    blocks = []
     if fast_receive:
-        code = fast_receive_code()
-        block = len(code).to_bytes(2, 'little') + FAST_RECEIVE.to_bytes(2, 'little') + code + IPL_END
-        at = lorom(SONG_SETS) + len(table)
-        if any(data[max(at + 4, end):at + len(block)]):
-            raise ValueError('fast receive block would overwrite nonzero ROM data')
-        data[at:at + len(block)] = block
+        blocks.append((FAST_RECEIVE, fast_receive_code()))
         write(DRIVER_BLOCK + 4 + DRIVER_RECEIVE - 0x0750, bytes([0x5F]) + FAST_RECEIVE.to_bytes(2, 'little'),
               bytes.fromhex('CD 00 E5'))
+    if chains or hold:
+        code = chain_code()
+        blocks.append((CHAIN_HANDLER, code))
+        write(DRIVER_BLOCK + 4 + CHAIN_TABLE_ENTRY - 0x0750, CHAIN_HANDLER.to_bytes(2, 'little'), bytes.fromhex('2D 19'))
+    if hold:
+        if not fast_receive:
+            raise ValueError('hold needs fast_receive (its code reuses the replaced receive loop)')
+
+        def driver(addr, payload, expected):
+            write(DRIVER_BLOCK + 4 + addr - 0x0750, payload, bytes.fromhex(expected))
+
+        spare_check, spare_end = hold_spare_code()
+        driver(HOLD_SPARE, spare_check + spare_end, 'F5 00 C7 80 3A 80 1A 82 F0 E7 E5 F6 00 C7 80 3A 80 1A 82 F0 DC '
+                                        'E5 F7 00 C7 80 3A 80 1A 82 D0 CC 2F')
+        driver(HOLD_TICK_SITE, bytes([0x3F]) + _abs(HOLD_CHECK), 'F5 B7 03')
+        driver(HOLD_INSTRUMENT_SITE, bytes([0x3F]) + _abs(HOLD_SPARE), '65 84 01')
+        driver(HOLD_END_SITE, bytes([0x5F]) + _abs(HOLD_SPARE + len(spare_check)), '8F 00 8A')
+        blocks.append((HOLD_VARS, bytes([0xFF, 0xFF, 0, 0, 0xFF])))
+        blocks.append((HOLD_CHECK, hold_check_code()))
+    if blocks:
+        out = b''.join(len(c).to_bytes(2, 'little') + dest.to_bytes(2, 'little') + c for dest, c in blocks) + IPL_END
+        at = lorom(SONG_SETS) + len(table)
+        if any(data[max(at + 4, end):at + len(out)]):
+            raise ValueError('SPC code blocks would overwrite nonzero ROM data')
+        data[at:at + len(out)] = out
     for allocation, (song, item) in zip(allocations, sorted(replacements.items())):
-        allocation['spc_budget'] = memory_budget(data, song, item)
+        extra = (chain_numbers[song],) if song in chain_numbers else ()
+        allocation['spc_budget'] = memory_budget(data, song, item, extra)
+        if extra:
+            allocation['chain_song'] = f'{extra[0]:02X}'
+    if early_song:
+        if map_fades:
+            raise ValueError('early_song and map_fades both replace the map song calls')
+        code, entry = early_song_code()
+        write(EARLY_SONG, code, empty=True)
+        write(EXIT_INDEX_STUB, bytes.fromhex('20 16 FC 6B'), empty=True)
+        write(EARLY_SONG_SITE, bytes([0x22]) + entry.to_bytes(3, 'little'), bytes.fromhex('22 49 CE 00'))
+        for at, original, site in ((EARLY_SONG_SKIP, 0x24FE91, MAP_CLEANUP), (EARLY_SONG_SKIP + 0x40, 0x24FE9A, MAP_START)):
+            write(at, early_skip_code(original), empty=True)
+            write(site, bytes([0x22]) + at.to_bytes(3, 'little'), bytes([0x22]) + original.to_bytes(3, 'little'))
+    if load_pump:
+        if not early_song:
+            raise ValueError('load_pump needs early_song (the request must be queued before the map load)')
+        for at, (payload, original) in load_pump_code().items():
+            write(at, payload, original, empty=original is None)
     if map_fades:
         cleanup, start = transition_code()
         write(CODE, cleanup, empty=True)
@@ -437,7 +888,9 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
                     'unpinned_sequences': [f'{x:02X}' for x in unpinned],
                     'pinned_sequences': [f'{x:02X}' for x in pinned_sequences(result)],
                     'resident_samples': [f'{x:02X}' for x in resident_samples(result)],
-                    'map_fades': map_fades, 'preview': preview, 'fast_receive': fast_receive,
+                    'map_fades': map_fades, 'preview': preview, 'fast_receive': fast_receive, 'hold': hold, 'early_song': early_song, 'load_pump': load_pump,
+                    'chains': {f'{k:02X}': f'{v:02X}' for k, v in sorted(chain_numbers.items())},
+                    'chains_sent_after_samples': [f'{k:02X}' for k in sorted(chain_late)],
                     'limitations': ['Map fades apply only to the ordinary DQ5 map-song calls; battle and event timing is unchanged.',
                                     'The early fade-out is skipped when the sound queue is busy at load time; the original 1A cleanup still runs.',
                                     'SPC budget is a conservative static check, not a runtime allocation proof.',

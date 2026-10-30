@@ -16,10 +16,10 @@ import sys
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path[:0] = [str(HERE), str(ROOT / 'sfc/dq5/tools')]
-from dq4soundpatch import read_sets, sequence_bytes  # noqa: E402
+from dq4soundpatch import chained_song, read_sets, sequence_bytes  # noqa: E402
 from dq4soundport import DQ5_TICKS_PER_SECOND_PER_TEMPO, execution_trace  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
-from dq5song import RELOC_SMP_TABLE, read_kon  # noqa: E402
+from dq5song import RELOC_SMP_TABLE, header, read_kon  # noqa: E402
 from dq5spc import (SPC_DIR, SPC_SAMPLE_INDEX, SPC_SAMPLE_SLOTS, SPC_SEQUENCE_INDEX,  # noqa: E402
                     SPC_SEQUENCE_SLOTS, samples)
 
@@ -61,9 +61,9 @@ def memory(data, spc, song):
     return seq, result
 
 
-def expected_notes(seq, ticks):
-    """트랙마다 [(초, 음 번호, 곡 묶음 안 악기 번호)]. 템포는 트랙 0 의 EB 를 따른다."""
-    tracks = execution_trace(seq, ticks)
+def expected_notes(seq, ticks, chain=None):
+    """트랙마다 [(초, 음 번호, 곡 묶음 안 악기 번호)]. 템포는 트랙 0 의 EB 를 따른다. chain 은 나눈 곡의 본체."""
+    tracks = execution_trace(seq, ticks, chain=chain)
     tempos = [(0, seq[0])] + [(t, b[1]) for t, b in tracks[0] if b[0] == 0xEB]
     tempos.sort()
 
@@ -135,7 +135,7 @@ def blocked(note_seconds, sample, start, arrivals):
     return sample in arrivals and start + 1 + note_seconds * NTSC_FPS < arrivals[sample] + ARRIVAL_MARGIN_FRAMES
 
 
-def timing(seq, run, start, slots, record, arrivals=None):
+def timing(seq, run, start, slots, record, arrivals=None, chain=None):
     """KON 을 예상 음과 순서대로 짝짓고, 전 목소리 공통의 시작·속도 비를 최소제곱으로 맞춘 잔차를 본다.
 
     APU 발진기는 공칭 32kHz 보다 조금 빨라(실기·MesenCE 모두 약 32.04kHz) 공칭 속도로는 시간에 비례해 어긋난다.
@@ -143,7 +143,14 @@ def timing(seq, run, start, slots, record, arrivals=None):
     kon, src = read_kon(run / 'dspw.txt'), read_srcn(run / 'dspw.txt')
     last = max(int(line.split()[0]) for line in open(run / 'dspw.txt'))
     ticks = math.ceil((last - start) / NTSC_FPS * 255 * DQ5_TICKS_PER_SECOND_PER_TEMPO) + 1
-    notes = expected_notes(seq, ticks)
+    notes = expected_notes(seq, ticks, chain)
+    first = header(seq)[1][0]
+    if seq[first:first + 2] == bytes([0xF7, 0xFE]):
+        # 곡 붙들기: 곡이 오른 뒤 샘플을 기다린 만큼 음이 늦으므로, 첫 KON 에서 첫 예상 음 시각을 뺀 프레임을 시작으로 본다
+        heard = min((f for voice in kon for f, _, _ in voice if f >= start - 1), default=start)
+        start = max(start, round(heard - min(n[0] for v in notes for n in v) * NTSC_FPS) - 1)
+        # 붙든 샘플은 다 받기 전에 울리는 것이 정상이다
+        arrivals = {k: v for k, v in (arrivals or {}).items() if k != seq[first + 2]}
     horizon = (last - start - 2) / NTSC_FPS
     pairs, voices = [], []
     for voice, expected in enumerate(notes):
@@ -188,10 +195,12 @@ def main():
     start, arrivals = read_events(args.run / 'events.txt')
     seq, mem = memory(data, spc, args.song)
     record = read_sets(data)[args.song][2:]
+    number = chained_song(data, args.song)
+    chain = None if number is None else sequence_bytes(data, number)
     slots = {int(k, 16): v['slot'] for k, v in mem['samples'].items()}
     report = {'song': f'{args.song:02X}', 'tracks': seq[1], 'memory': mem,
               'arrivals': {f'{k:02X}': v for k, v in sorted(arrivals.items()) if k in record},
-              'timing': timing(seq, args.run, start, slots, record, arrivals)}
+              'timing': timing(seq, args.run, start, slots, record, arrivals, chain)}
     print(json.dumps(report, indent=2))
     speed = report['timing']['speed_ratio']
     ok = (0.995 < speed < 1.005 and mem['sequence_ok'] and all(v['ok'] for v in mem['samples'].values())

@@ -188,6 +188,25 @@ def _depth(lines, label, seen=()):
     return 1 + max((_depth(lines, c) for c in calls), default=0)
 
 
+class HoldTests(unittest.TestCase):
+    MAP = {0: 0x0A, 1: 0x18}
+
+    def test_hold_heads_track_zero_and_rests_every_track_one_tick(self):
+        plain = port.convert(two_program_score([(0, 0), (24, 1)]), voices=2, program_map=self.MAP)
+        held = port.convert(two_program_score([(0, 0), (24, 1)]), voices=2, program_map=self.MAP, hold=(0x18, 3))
+        first = port.header(held.sequence)[1][0]
+        self.assertEqual(held.sequence[first:first + 6], bytes.fromhex('F7 FE 18 F7 FF 03'))
+        self.assertEqual(held.report['hold'], {'sample': '18', 'bytes': 768})
+        # 붙들기 명령은 시각에 영향이 없고, 모든 음이 1틱 늦는다
+        def keyed(seq):
+            # 음표(00~9F) 가운데 쉼(00·4F, 50 위쪽도 같음)은 뺀다
+            return [[t for t, raw in track if raw[0] < 0xA0 and raw[0] % 0x50 not in (0, 0x4F)]
+                    for track in port.execution_trace(seq, 400)]
+
+        before, after = keyed(plain.sequence), keyed(held.sequence)
+        self.assertEqual([[t + 1 for t in ts] for ts in before], [ts[:len(b)] for ts, b in zip(after, before)])
+
+
 if __name__ == '__main__':
     unittest.main()
 

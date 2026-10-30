@@ -11,12 +11,14 @@ dq4soundbank.build_bank 가 그 안으로 샘플을 줄인 뒤 dq4soundport 로 
 """
 import argparse
 import json
+import math
 from pathlib import Path
 import sys
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import dq4soundbank as bank  # noqa: E402
+import dq4soundcheck as check  # noqa: E402
 import dq4soundpatch as patch  # noqa: E402
 import dq4soundport as port  # noqa: E402
 
@@ -26,7 +28,34 @@ MARGIN = 128  # 어림한 시퀀스와 실제 시퀀스의 악기 명령 차이
 # 그 트랙이 다음 악기 바꿈까지 막힌다. 늦게 잡으면 instrument 가 몇 개 더 들 뿐이다.
 STREAM_BYTES_PER_FRAME = 59
 ARRIVAL_SLACK_FRAMES = 30
+# 나눈 곡의 앞부분 길이: 본체 도착 어림보다 이만큼 길게(본체가 늦으면 앞부분 끝에서 1틱씩 쉬며 기다림)
+CHAIN_SLACK_SECONDS = 0.5
+# 나눈 곡은 앞부분 시퀀스도 SPC 에 있으므로 샘플 예산에서 이만큼 더 뺀다(앞부분은 19곡에서 232~873바이트, 나중 순서면 더 김)
+CHAIN_INTRO_BYTES = 1536
 FRAME_RATE = 60.0988
+# 곡 붙들기: 붙든 샘플의 남은 바이트가 오는 속도. 곡 뒤 샘플 어림과 같은 늦은 값으로 잡아, 실제 전송이 이보다 느리지
+# 않으면 재생이 받은 끝을 앞지르지 않는다(앞지르면 덜 온 자리의 옛 바이트가 잡음으로 울린다).
+HOLD_BYTES_PER_FRAME = STREAM_BYTES_PER_FRAME
+HOLD_TIMEOUT_FRAMES = 70  # SPC 가 255틱(1.27초, 76프레임) 뒤 놓으므로 그 안에 문턱이 와야 한다
+HOLD_ARRIVAL_BYTES_PER_FRAME = 126  # 붙드는 동안(그 곡을 처리하지 않음) 실측
+BRR_HEADER_BYTES = 9  # 자원 [길이 2][반복 2][ADSR1][ADSR2][GAIN][음높이 2] 는 DIR 자리에 오르지 않는다
+
+
+def hold_units(size, notes, rate, base_midi, bytes_per_frame=HOLD_BYTES_PER_FRAME):
+    """붙든 샘플을 몇 x 256 바이트 받은 뒤 곡을 나아가게 할지. notes 는 곡이 나아간 뒤의 [(초, MIDI 음)].
+
+    받은 끝은 X + v t, 음 j 의 재생 자리는 t_j 부터 P_j (t - t_j) 로 늘어 샘플 끝(size)에서 반복 구간으로 돌아간다
+    (반복 구간은 끝보다 앞이라 그때는 이미 받음). 끝에 닿는 순간이 가장 빠듯하므로 X >= size (1 - v / P_j) - v t_j.
+    SPC 는 받은 바이트를 위 바이트 차로 재 255바이트까지 많게 보므로 한 단위를 더한다.
+    """
+    need = 0.0
+    for seconds, midi in notes:
+        frames = seconds * FRAME_RATE
+        if frames * bytes_per_frame >= size:
+            continue
+        speed = rate * 2 ** ((midi - base_midi) / 12) * 9 / 16 / FRAME_RATE
+        need = max(need, size * (1 - bytes_per_frame / speed) - bytes_per_frame * frames)
+    return math.ceil(need / 256) + 1
 
 
 def score_path(assets, ident):
@@ -48,18 +77,19 @@ def provisional_map(score):
     return mapping, len(ids)
 
 
-def transfer_plan(first_tick, notes, sizes, pre_bytes):
+def transfer_plan(first_tick, notes, sizes, pre_bytes, lead_bytes=0):
     """곡 묶음의 샘플 순서·곡 앞 샘플 수 k·곡 뒤 샘플의 도착 어림(곡 시작부터 초)을 정한다.
 
     먼저 쓰이는 샘플(같으면 음이 많은 것)부터 늘어놓고, 앞에서부터 pre_bytes 안에 드는 만큼을
-    곡 앞(시퀀스와 함께 곡을 틀기 전에 보냄)으로, 나머지는 곡이 울리는 동안 이 순서로 보낸다.
+    곡 앞(시퀀스와 함께 곡을 틀기 전에 보냄)으로, 나머지는 곡이 울리는 동안 이 순서로 보낸다. lead_bytes 는 곡이 시작한
+    뒤 샘플보다 먼저 보내는 바이트(나눈 곡의 본체 시퀀스)다.
     """
     order = sorted(sizes, key=lambda s: (first_tick[s], -notes[s], s))
     k, used = 0, 0
     while k < len(order) and used + sizes[order[k]] <= pre_bytes:
         used += sizes[order[k]]
         k += 1
-    arrivals, sent = {}, 0
+    arrivals, sent = {}, lead_bytes
     for s in order[k:]:
         sent += sizes[s]
         frames = sent / STREAM_BYTES_PER_FRAME + ARRIVAL_SLACK_FRAMES
@@ -132,7 +162,7 @@ def song_score(score, drop_tracks=(), drop_programs=(), track_db=None):
 def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_fades=False, preview=None,
           stream=None, stream_ticks=None, budgets=None, pinned=(), resident_from=None, drop_resident=(), lanes=None, drop_tracks=None,
           level_db=None, programs=None, set_records=None, keep_regions=None, track_db=None,
-          fast_receive=False):
+          fast_receive=False, chains=(), holds=(), early_song=False, load_pump=False):
     """stream 은 {곡 자리: 곡 앞 샘플 바이트 상한}. 그 곡은 샘플 일부를 곡이 울리는 동안 보낸다(transfer_plan).
 
     stream_ticks 는 {곡 자리: 틱}. 곡 앞 바이트 상한을 곡이 처음 그 틱 안에 쓰는 샘플의 합으로 정하고, 도착 어림보다
@@ -148,7 +178,9 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
     lanes·drop_tracks·level_db 는 곡마다 convert 의 lanes_for·뺄 트랙·level_tolerance_db, programs 는
     {곡: {프로그램: 이미 넣은 전역 샘플}} 로 그 프로그램을 새로 만들지 않고 그 샘플로 울린다. keep_regions 는
     {곡: {프로그램}} 으로 샘플을 줄일 때 그 프로그램의 음역 영역을 합치지 않는다. track_db 는 {곡: {트랙: dB}} 로
-    그 트랙 음의 세기(velocity)를 바꾼다.
+    그 트랙 음의 세기(velocity)를 바꾼다. chains 는 앞부분·본체로 나눌 곡 자리(stream_ticks 를 준 곡)로, 앞부분 길이는
+    본체 도착 어림 + CHAIN_SLACK_SECONDS 로 정한다. holds 는 곡 붙들기를 쓸 곡 자리(stream_ticks 를 준 곡)로, 곡 앞
+    샘플 하나를 곡 뒤 맨 앞으로 돌리고 그 샘플이 hold_units 만큼 오면 곡을 나아가게 한다(아끼는 바이트가 가장 큰 것).
     set_records 는 바꾸지 않는 곡의 곡 묶음 레코드(install 과 같음).
     """
     stream, stream_ticks, budgets, lanes = stream or {}, stream_ticks or {}, budgets or {}, lanes or {}
@@ -166,7 +198,10 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
     def convert_args(slot):
         return {'lanes_for': lanes.get(slot), 'level_tolerance_db': level_db.get(slot, 1.0)}
 
-    replacements, resources, reports, known = {}, {}, {}, {}
+    if not set(chains) <= set(stream_ticks):
+        raise ValueError('chained songs must use stream_ticks')
+    chain_numbers = {slot: patch.FIRST_CHAIN_SONG + i for i, slot in enumerate(sorted(chains))}
+    replacements, resources, reports, known, mains, chain_late = {}, {}, {}, {}, {}, set()
     next_id = 0x26
     plans = []
     for slot, ident in songs:
@@ -215,12 +250,12 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
         if slot in budgets:
             budget = budgets[slot]
         elif resident_plan:
-            budget = patch.sample_budget(data, slot, sequence_size + MARGIN, extra_table=max(0, growth),
-                                         resident=resident_sizes, pinned=pinned_sizes)
+            budget = patch.sample_budget(data, slot, sequence_size + MARGIN + (CHAIN_INTRO_BYTES if slot in chains else 0),
+                                         extra_table=max(0, growth), resident=resident_sizes, pinned=pinned_sizes)
         else:
             budget = patch.sample_budget(data, slot, sequence_size + MARGIN, extra_table=max(0, growth))
-        limit, rebate = max_samples, 0
-        for attempt in range(4):
+        limit, rebate, settle = max_samples, 0, False
+        for attempt in range(5):
             found, program_map, bank_report, loose, snapshot = make_bank(score, budget + rebate, limit,
                                                                          slot not in budgets, overrides,
                                                                          keep_regions.get(slot, ()))
@@ -231,9 +266,16 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
             used = set(conversion.samples)
             shared_resident = sum(resident_sizes[x] for x in used & set(found) if x in resident_sizes)
             over = len(used | set(resident)) - patch.SAMPLE_SLOTS
-            if over <= 0 and shared_resident == rebate:
+            if over <= 0 and (shared_resident == rebate or settle):
                 break
-            if attempt == 3 or (over > 0 and len(found) <= over):
+            if over <= 0 and attempt >= 2:
+                # 돌려받은 예산으로 늘 두는 샘플을 함께 쓰지 않게 되고, 돌려받지 않으면 다시 함께 쓰며 오갔다(곡 04).
+                # 예산을 넘기지 않는 쪽(돌려받지 않음)으로 정한다.
+                known.clear()
+                known.update(snapshot)
+                rebate, settle = 0, True
+                continue
+            if attempt == 4 or (over > 0 and len(found) <= over):
                 raise ValueError(f'{slot:02X}: cannot settle resident sharing ({shared_resident} bytes, rebate {rebate}) '
                                  f'and sample slots ({over} over); map programs to resident samples with --program')
             known.clear()
@@ -254,18 +296,96 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
             first = {int(k, 16): v for k, v in usage['sample_first_tick'].items()}
             notes = {int(k, 16): v for k, v in usage['sample_notes'].items()}
             sizes = {x: len(found[x]) for x in conversion.samples}
-            cap = stream[slot] if slot in stream else sum(sizes[x] for x in conversion.samples
-                                                          if first[x] <= stream_ticks[slot])
-            while True:
-                order, send_first, arrivals = transfer_plan(first, notes, sizes, cap)
-                conversion = port.convert(score, program_map=program_map, sample_order=order, arrivals=arrivals,
-                                          **convert_args(slot))
-                # stream_ticks 곡은 도착 전이라 빠지는 음이 없을 때까지 곡 앞 샘플을 하나씩 늘린다(빠진 음은 어색하게 들림)
-                if (slot not in stream_ticks or send_first == len(order)
-                        or not any(conversion.report['late_notes'].values())):
-                    break
-                cap = sum(sizes[x] for x in order[:send_first + 1])
-            plan = {'pre_bytes_cap': cap, 'send_first': send_first,
+            cap0 = stream[slot] if slot in stream else sum(sizes[x] for x in conversion.samples
+                                                           if first[x] <= stream_ticks[slot])
+            plain = conversion
+            tempos = dict(plain.report['tempo_changes'])
+
+            def stream_plan(lead, split):
+                cap = cap0
+                while True:
+                    order, send_first, arrivals = transfer_plan(first, notes, sizes, cap, lead_bytes=lead)
+                    result = port.convert(score, program_map=program_map, sample_order=order, arrivals=arrivals,
+                                          **convert_args(slot), **split)
+                    # stream_ticks 곡은 도착 전이라 빠지는 음이 없을 때까지 곡 앞 샘플을 하나씩 늘린다(빠진 음은 어색하게 들림)
+                    if (slot not in stream_ticks or send_first == len(order)
+                            or not any(result.report['late_notes'].values())):
+                        return cap, order, send_first, arrivals, result
+                    cap = sum(sizes[x] for x in order[:send_first + 1])
+
+            def split_at(sent_bytes):
+                seconds = (sent_bytes / STREAM_BYTES_PER_FRAME + ARRIVAL_SLACK_FRAMES) / FRAME_RATE + CHAIN_SLACK_SECONDS
+                tick = min(port.seconds_to_tick(tempos, seconds), plain.report['end_tick'] - 1)
+                return {'split_tick': tick, 'chain_song': chain_numbers[slot]}
+
+            if slot in chains:
+                # 본체를 곡 뒤 샘플보다 먼저(곧 쓸 샘플이 곡 앞으로 당겨짐) 또는 나중(앞부분이 길어짐) 보내는 두 길 중
+                # 곡 앞에 보낼 바이트(곡 앞 샘플 + 앞부분 시퀀스)가 적은 쪽을 고른다.
+                main = len(plain.sequence)
+                options = []
+                cap, order, send_first, arrivals, result = stream_plan(main, split_at(main))
+                options.append((cap + len(result.sequence), False, cap, order, send_first, arrivals, result))
+                cap, order, send_first, arrivals, _ = stream_plan(0, {})
+                after = sum(sizes[x] for x in order[send_first:])
+                late_split = split_at(after + main)
+                result = port.convert(score, program_map=program_map, sample_order=order, arrivals=arrivals,
+                                      **convert_args(slot), **late_split)
+                options.append((cap + len(result.sequence), True, cap, order, send_first, arrivals, result))
+                _, late, cap, order, send_first, arrivals, conversion = min(options, key=lambda o: o[0])
+                if late:
+                    chain_late.add(slot)
+            else:
+                cap, order, send_first, arrivals, conversion = stream_plan(0, {})
+            held = None
+            if slot in holds and send_first:
+                main = len(plain.sequence)
+                # 본체를 먼저 보내는 나눈 곡은 붙든 샘플이 본체 뒤에 온다
+                lead = main if slot in chains and slot not in chain_late else 0
+                timed = check.expected_notes(conversion.sequence, port.seconds_to_tick(tempos, 30), conversion.chain)
+                details = bank_report['samples']
+                first_seconds = {}
+                for track in timed:
+                    for t, _, i in track:
+                        first_seconds[conversion.samples[i]] = min(t, first_seconds.get(conversion.samples[i], math.inf))
+                candidates = []
+                for x in order[:send_first]:
+                    detail = details.get(f'{x:02X}')
+                    if detail is None:
+                        continue
+                    index = conversion.samples.index(x)
+                    notes_x = [(t, n + 23) for track in timed for t, n, i in track if i == index]
+                    units = hold_units(sizes[x] - BRR_HEADER_BYTES, notes_x, detail['effective_rate'], detail['base_midi'])
+                    # 붙드는 동안 받는 바이트가 많을수록 곡 뒤 샘플이 일찍 온다. 곡 뒤 샘플이 처음 쓰이기 전에 오도록 문턱을 키운다
+                    # (곡이 울리면 SPC 가 곡을 처리하느라 받기가 반쯤 느려지지만, 붙드는 동안은 그 곡을 처리하지 않는다).
+                    sent = lead + sizes[x]
+                    for y in order[send_first:]:
+                        sent += sizes[y]
+                        if y not in first_seconds:
+                            continue
+                        need = sent - (first_seconds[y] * FRAME_RATE - ARRIVAL_SLACK_FRAMES) * STREAM_BYTES_PER_FRAME
+                        units = max(units, math.ceil(need / 256) + 1)
+                    if (lead + units * 256) / HOLD_ARRIVAL_BYTES_PER_FRAME > HOLD_TIMEOUT_FRAMES:
+                        continue
+                    candidates.append((sizes[x] - lead - units * 256, x, units))
+                if candidates and max(candidates)[0] > 0:
+                    _, x, units = max(candidates)
+                    new_order = [y for y in order[:send_first] if y != x] + [x] + list(order[send_first:])
+                    new_first = send_first - 1
+                    # 붙들기가 풀릴 때 SPC 는 문턱보다 255바이트까지 덜 받았을 수 있다
+                    sent, new_arrivals = lead + sizes[x] - (units - 1) * 256, {}
+                    for y in new_order[new_first + 1:]:
+                        sent += sizes[y]
+                        new_arrivals[y] = (sent / STREAM_BYTES_PER_FRAME + ARRIVAL_SLACK_FRAMES) / FRAME_RATE
+                    split = {}
+                    if slot in chains:
+                        after = sum(sizes[y] for y in new_order[new_first:])
+                        split = split_at(after + main) if slot in chain_late else split_at(main)
+                    result = port.convert(score, program_map=program_map, sample_order=new_order, arrivals=new_arrivals,
+                                          hold=(x, units), **convert_args(slot), **split)
+                    if not any(result.report['late_notes'].values()):
+                        order, send_first, arrivals, conversion = new_order, new_first, new_arrivals, result
+                        held = {'sample': f'{x:02X}', 'bytes': units * 256, 'saved_bytes': max(candidates)[0]}
+            plan = {'pre_bytes_cap': cap, 'send_first': send_first, 'chain_after_samples': slot in chain_late, 'hold': held,
                     'pre_sample_bytes': sum(len(found[s]) for s in order[:send_first]),
                     'arrival_seconds': {f'{s:02X}': round(t, 3) for s, t in arrivals.items()}}
             if slot == resident_from:
@@ -275,16 +395,21 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
         if slot in pinned:
             pinned_sizes[slot] = len(conversion.sequence)
         replacements[slot] = patch.Replacement(conversion.sequence, tuple(conversion.samples), send_first)
+        if conversion.chain is not None:
+            mains[slot] = conversion.chain
         resources.update(found)
         next_id = max(resources) + 1
         print(f'{slot:02X} <- NDS {ident.upper()}: {len(found)} samples ({len(bank_report["shared_samples"])} shared), '
               f'sequence {len(conversion.sequence)}', file=sys.stderr, flush=True)
         reports[f'{slot:02X}'] = {'nds_song': ident.upper(), 'score': path.name, 'sample_budget': budget,
                                    'bank': bank_report, 'conversion': conversion.report, 'stream': plan}
+    if sorted(mains) != sorted(chains):
+        raise ValueError('every chained song must be a replaced song (install numbers the bodies in slot order)')
     rom, install_report = patch.install(base, replacements, sample_resources=resources, map_fades=map_fades,
                                         preview=preview, pinned=tuple(pinned),
                                         resident=resident if resident_plan else None, set_records=set_records,
-                                        fast_receive=fast_receive)
+                                        fast_receive=fast_receive, chains=mains, chain_late=chain_late,
+                                        hold=bool(holds), early_song=early_song, load_pump=load_pump)
     # 바꾸지 않은 DQ5 곡도 늘 두는 목록이 바뀐 뒤의 SPC 에 드는지 본다. 넘치는 곡은 그 까닭을 남긴다.
     sets, unreplaced = patch.read_sets(rom), {}
     for song in range(1, 0x32):
@@ -337,6 +462,14 @@ def main():
                     help='scale the note velocity of one NDS track (or TRACK@PROGRAM), e.g. 09=track6:-4 or 09=track8@45:-6')
     ap.add_argument('--fast-receive', action='store_true',
                     help='let the SPC driver take several 3-byte groups per handshake loop (dq4soundpatch.fast_receive_code)')
+    ap.add_argument('--chain', action='append', default=[], metavar='DQ5_SLOT',
+                    help='split this streamed song into a short intro and a main sequence sent after it starts')
+    ap.add_argument('--early-song', action='store_true',
+                    help='request the destination map song before the exit fade-out (dq4soundpatch.early_song_code)')
+    ap.add_argument('--load-pump', action='store_true',
+                    help='keep sending the early song data while NMI is off during map loads (dq4soundpatch.load_pump_code)')
+    ap.add_argument('--hold', action='append', default=[], metavar='DQ5_SLOT',
+                    help='start this streamed song while its last early sample is still arriving (dq4soundpatch.hold_check_code)')
     ap.add_argument('--record', action='append', default=[], metavar='DQ5_SLOT=K:SAMPLE,...',
                     help='song set record of an unreplaced song')
     args = ap.parse_args()
@@ -375,7 +508,9 @@ def main():
                         lanes={slot: json.loads(value) for slot, value in per_slot(args.lanes)},
                         drop_tracks=drop_tracks, level_db={slot: float(v) for slot, v in per_slot(args.level_db)},
                         programs=programs, set_records=records, keep_regions=keep,
-                        track_db=track_db, fast_receive=args.fast_receive)
+                        track_db=track_db, fast_receive=args.fast_receive,
+                        chains=[int(x, 16) for x in args.chain], holds=[int(x, 16) for x in args.hold],
+                        early_song=args.early_song, load_pump=args.load_pump)
     from dq5build import make_ips
     from kr_patch import ips
     patch_bytes = make_ips(base, rom)

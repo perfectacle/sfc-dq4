@@ -178,5 +178,58 @@ class IntegratedTests(unittest.TestCase):
             self.assertEqual(out[pos:pos + size], base[pos:pos + size])
 
 
+class EngineCodeTests(unittest.TestCase):
+    def test_spc_hold_code_fits_its_ram(self):
+        self.assertLessEqual(patch.HOLD_VARS + 5, patch.CHAIN_HANDLER)
+        self.assertLessEqual(patch.CHAIN_HANDLER + len(patch.chain_code()), patch.HOLD_CHECK)
+        self.assertLessEqual(patch.HOLD_CHECK + len(patch.hold_check_code()), 0x10000)
+        check, end = patch.hold_spare_code()
+        self.assertLessEqual(len(check) + len(end), 0x106B - patch.HOLD_SPARE)
+        self.assertLessEqual(patch.FAST_RECEIVE + len(patch.fast_receive_code()), patch.HOLD_VARS)
+
+    def test_load_pump_sites_do_not_overlap(self):
+        spans = sorted((at, at + len(payload)) for at, (payload, _) in patch.load_pump_code().items())
+        for (_, end), (start, _) in zip(spans, spans[1:]):
+            self.assertLessEqual(end, start)
+        stub = patch.load_pump_code()[patch.LOAD_STUB][0]
+        self.assertLessEqual(len(stub), 0x20)
+        poll = patch.load_pump_code()[patch.LOAD_POLL][0]
+        self.assertLess(patch.LOAD_POLL + len(poll), 0x2BB805)  # NMI 선점 범위 안
+
+    def test_far_branch_out_of_range_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'out of range'):
+            patch._asm_far([('b', 0x80, 'far'), bytes(200), ('label', 'far')], 0x718000)
+
+    def test_early_song_entry_is_after_the_skip_subroutine(self):
+        code, entry = patch.early_song_code()
+        self.assertEqual(code[entry - patch.EARLY_SONG], 0x08)  # PHP
+        self.assertEqual(code[-4:], bytes.fromhex('5C 49 CE 00'))
+
+
+@unittest.skipUnless(ROM.exists(), 'user-supplied DQ5 ROM required')
+class MapStartInstallTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.base = ROM.read_bytes()
+        cls.item = {0x02: patch.Replacement(melody(), (0x03,))}
+
+    def test_hold_needs_fast_receive_and_pump_needs_early_song(self):
+        with self.assertRaisesRegex(ValueError, 'fast_receive'):
+            patch.install(self.base, self.item, hold=True)
+        with self.assertRaisesRegex(ValueError, 'early_song'):
+            patch.install(self.base, self.item, load_pump=True)
+
+    def test_all_map_start_patches_install(self):
+        out, report = patch.install(self.base, self.item, fast_receive=True, hold=True, early_song=True, load_pump=True)
+        self.assertTrue(report['hold'] and report['early_song'] and report['load_pump'])
+        drv = lorom(patch.DRIVER_BLOCK) + 4 - 0x0750
+        self.assertEqual(out[drv + patch.HOLD_TICK_SITE:drv + patch.HOLD_TICK_SITE + 3], bytes([0x3F]) + patch.HOLD_CHECK.to_bytes(2, 'little'))
+        site = lorom(patch.EARLY_SONG_SITE)
+        self.assertEqual(out[site], 0x22)
+        self.assertEqual(out[lorom(0x00FFEE):lorom(0x00FFEE) + 2], bytes([0x00, 0x80]))
+        for at, (payload, _) in patch.load_pump_code().items():
+            self.assertEqual(out[lorom(at):lorom(at) + len(payload)], payload)
+
+
 if __name__ == '__main__':
     unittest.main()
