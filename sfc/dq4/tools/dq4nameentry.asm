@@ -31,14 +31,17 @@ incsrc "dq4nameentry-defs.asm"
 !ne_blank = $F070
 !ne_vowel = $F06A
 !ne_active = $F072
-!ne_direction = $F073
-!ne_raw = $F074
-!ne_pending = $F075
-!ne_edge = $F076
-!ne_delay = $F077
-!ne_buttons = $F078
-!ne_pressed = $F079
 !ne_move = $F07A
+; 방향 입력 상태는 게임 안의 메뉴도 쓴다. 7F:F000~ 은 게임 안에서 세계 지도가 덮을 수 있어 DQ5 가 쓰지 않는
+; 7E:1BBE~ 79바이트의 끝에 둔다(josa·서장·1장 이벤트가 1BC0~1BD6 을 씀). 훅은 DB = 04 라 낮은 WRAM 거울로 읽는다.
+!in_direction = $1C00       ; 고른 방향 하나
+!in_raw = $1C01             ; 지난 프레임의 실제 패드($0749 & 1F)
+!in_pending = $1C02         ; 1 이면 다음 입력 대기에서 기다리지 않고 $24 를 바로 쓴다
+!in_edge = $1C03            ; 이번 표본에 새로 누른 방향이 있음
+!in_delay = $1C04
+!in_buttons = $1C05
+!in_pressed = $1C06
+!in_steady = $1C07          ; 1 이면 반복해도 $0ADA 를 0 으로 둔다(원래 04:D27A 갈래)
 !ne_tiles = $F100           ; 이름 칸 2bpp: 글자 줄 8타일(128바이트), 이어서 아래 줄 8타일
 
 org $038B72
@@ -58,6 +61,8 @@ org $04D1DE
     JML NePollHook
 org $04D222
     JML NeRepeatHook
+org $04D209
+    JML NeEdgeHook
 org $04D584
     JML NeUpHook
 org $04D68C
@@ -87,11 +92,11 @@ NeKorean:
     REP #$30
     STZ !ne_n
     STZ !ne_sp
-    STZ !ne_raw
-    STZ !ne_pending
-    STZ !ne_delay
+    LDA #$0000
+    STA.l !in_direction
+    STA.l !in_pending
+    STA.l !in_delay
     SEP #$30
-    STZ !ne_direction
     LDA #$01
     STA !ne_active
     LDA.b #!ne_cursor
@@ -931,8 +936,8 @@ NeListHook:
     JMP .original
 
 
-; 첫 메뉴 밖의 선택·보행 입력은 원래 루틴으로 간다.
-macro NameGuard(original, mover)
+; 자모판 밖의 커서 이동은 원래 루틴으로 간다.
+macro NameGuard(original)
     PHP
     REP #$20
     PHA
@@ -948,12 +953,7 @@ macro NameGuard(original, mover)
     PLA
     PLP
     PHP
-    if <mover>
-        LDA $0AD7
-    else
-        PHB
-        REP #$30
-    endif
+    LDA $0AD7
     JML <original>+4
 ?name:
     REP #$20
@@ -972,19 +972,19 @@ macro NameGuard(original, mover)
 endmacro
 
 NeUpHook:
-    %NameGuard($04D584, 1)
+    %NameGuard($04D584)
     LDA #$00
     JMP NeMoveCursor
 NeDownHook:
-    %NameGuard($04D68C, 1)
+    %NameGuard($04D68C)
     LDA #$2C
     JMP NeMoveCursor
 NeLeftHook:
-    %NameGuard($04D794, 1)
+    %NameGuard($04D794)
     LDA #$58
     JMP NeMoveCursor
 NeRightHook:
-    %NameGuard($04D82E, 1)
+    %NameGuard($04D82E)
     LDA #$84
 NeMoveCursor:
     REP #$30
@@ -999,17 +999,32 @@ NeMoveCursor:
     LDA.l NeNavigation,X
     STA $0AD7
     LDA #$00
-    STA.l $7FF075
+    STA !in_pending
     JSL !ne_row
     JML $04CEBF
 
+; 입력 대기·반복 처리는 모든 창에서 이쪽으로 온다. 원래 선택 고리는 위·아래·왼쪽·오른쪽을 차례로 보므로,
+; 두 방향을 함께 누르면 한 번에 두 칸을, 하나를 먼저 떼면 남은 방향으로 또 한 칸을 움직였다.
+macro InputHook()
+    PHP
+    PHB
+    REP #$30
+    PHA
+    PHX
+    PHY
+    SEP #$20
+    LDA #$04
+    PHA
+    PLB
+endmacro
+
 ; 커서를 그리는 동안 들어온 입력은 다음 선택 고리에서 기다리지 않고 먼저 쓴다.
 NePollHook:
-    %NameGuard($04D1DE, 0)
-    LDA.l $7FF075
+    %InputHook()
+    LDA !in_pending
     BEQ .wait
     LDA #$00
-    STA.l $7FF075
+    STA !in_pending
     BRA .ready
 .wait
     JSL !ne_blink
@@ -1022,33 +1037,84 @@ NePollHook:
     JML $04CEBF
 
 ; 한 방향만 고른 뒤 반복 대기를 센다. 다른 방향을 떼는 것은 새 누름이 아니다.
+; 대기 프레임은 원래 04:D22B~D282 처럼 $0AEA·$0A50 으로 줄인다.
 NeRepeatHook:
-    %NameGuard($04D222, 0)
+    %InputHook()
     JSR NeSampleInput
     JSR NeInputReady
     BCS .return
+    LDA #$00
+    STA !in_steady
     LDA $0ADA
     BEQ .first
     LDA #$07
-    BRA .delay
+    BRA .adjust
 .first
     LDA #$10
+.adjust
+    BIT $0AEA
+    BMI .shorter
+    BVC .delay
+    PHA
+    LDA $0A50
+    CMP #$04
+    BCC .steady
+    CMP #$07
+    PLA
+    BCC .shorter
+    DEC
+    DEC
+.shorter
+    DEC
+    BRA .delay
+.steady
+    LDA #$01
+    STA !in_steady
+    PLA
 .delay
-    STA.l $7FF077
+    STA !in_delay
 .wait
     JSL !ne_wait
     JSR NeSampleInput
     JSR NeInputReady
     BCS .return
-    LDA.l $7FF077
+    LDA !in_delay
     DEC
-    STA.l $7FF077
+    STA !in_delay
     BNE .wait
-    LDA #$01
+    LDA !in_steady
+    BNE .repeat
+    LDA #$FF                ; bit7 = 반복 중. 좌우 끝에서 돌아가지 않고 멈추는 창(04:C9C4)이 본다
     STA $0ADA
+.repeat
+    LDA #$01
     STA $0B4C
-    STA.l $7FF075
-    BRA .return
+    STA !in_pending
+.return
+    JML $04CEBF
+
+; 끝 칸에 닿은 이동 루틴이 부르는 04:D1FA 의 대기 고리. 방향이 바뀌거나 버튼을 누를 때까지 기다린다.
+; 걸러 쓴 $0ADB 를 걸러지지 않은 $24 와 견주면 두 방향을 누른 채로는 곧바로 빠져나간다.
+NeEdgeHook:
+    LDA #$04
+    PHA
+    PLB
+.wait
+    JSL !ne_blink
+    JSL !ne_wait
+    JSR NeSampleInput
+    LDA.b $24
+    AND #$E0
+    BNE .return
+    LDA.b $24
+    CMP $0ADB
+    BEQ .wait
+    LDA !in_edge            ; 새로 누른 방향은 이어지는 반복 처리에서도 새 누름으로 보이게 지난 패드에서 뺀다
+    BEQ .return
+    LDA !in_direction
+    EOR #$FF
+    AND !in_raw
+    STA !in_raw
 .return
     JML $04CEBF
 
@@ -1061,40 +1127,43 @@ NeInputReady:
     LDA.b $24
     AND #$0F
     BEQ .released
-    LDA.l $7FF076
+    LDA !in_edge
     BNE .direction
     CLC
     RTS
 .direction
     LDA #$01
     STA $0B4C
-    STA.l $7FF075
+    STA !in_pending
     STZ $0ADA
     SEC
     RTS
 .button
     LDA #$01
-    STA.l $7FF075
+    STA !in_pending
 .released
     STZ $0B4C
     STZ $0ADA
     SEC
     RTS
 
-; $0749 는 실제 패드 상위 바이트다. Start 는 DQ5 의 $24 로 옮겨지지 않는다.
+; $0749 는 실제 패드 상위 바이트다. Start 는 DQ5 의 $24 로 옮겨지지 않는다. 방향도 $24 가 아니라 여기서 읽어야
+; 걸러 쓴 $24 를 다시 읽어도(프레임을 기다리지 않은 표본) 같은 결과가 된다.
 NeSampleInput:
     SEP #$20
     LDA #$00
-    STA.l $7FF076
+    STA !in_edge
     LDA.b $24
     AND #$F0
-    STA.l $7FF078
+    STA !in_buttons
     LDA $0749
     AND #$1F
     PHA
     AND #$10
     BEQ .directions
-    LDA.l $7FF074
+    JSR NeBoardActive
+    BCC .directions
+    LDA !in_raw
     AND #$10
     BNE .startHeld
     LDA.b #!ne_last
@@ -1116,38 +1185,52 @@ NeSampleInput:
     PLB
 .startHeld
     PLA
-    STA.l $7FF074
+    STA !in_raw
     LDA #$00
-    STA.l $7FF073
+    STA !in_direction
     STA.b $24
     RTS
 .directions
     PLA
     PHA
     AND #$0F
-    STA.l $7FF079
-    LDA.l $7FF074
+    STA !in_pressed
+    LDA !in_raw
     EOR #$FF
-    AND.l $7FF079
+    AND !in_pressed
     BEQ .held
     JSR NeChooseDirection
-    STA.l $7FF073
+    STA !in_direction
     LDA #$01
-    STA.l $7FF076
+    STA !in_edge
     BRA .emit
 .held
-    LDA.l $7FF073
-    AND.l $7FF079
+    LDA !in_direction
+    AND !in_pressed
     BNE .emit
-    LDA.l $7FF079
+    LDA !in_pressed
     JSR NeChooseDirection
-    STA.l $7FF073
+    STA !in_direction
 .emit
     PLA
-    STA.l $7FF074
-    LDA.l $7FF073
-    ORA.l $7FF078
+    STA !in_raw
+    LDA !in_direction
+    ORA !in_buttons
     STA.b $24
+    RTS
+
+; C=1 이면 첫 메뉴의 한글 자모판
+NeBoardActive:
+    LDA.l !flag
+    CMP #$A5
+    BNE .no
+    LDA.l $7FF072
+    CMP #$01
+    BNE .no
+    SEC
+    RTS
+.no
+    CLC
     RTS
 
 ; 동시에 누른 방향에 순서가 없으면 위·아래·왼쪽·오른쪽 순으로 고른다.
@@ -1170,7 +1253,7 @@ NeChooseDirection:
     AND #$01
     RTS
 
-assert pc() <= $30C000
+assert pc() <= $30A900   ; 30:A900~ 은 1장 레코드(dq4chapter1.py RECORDS_AT)
 
 org $618000
 NeTables:
