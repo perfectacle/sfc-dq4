@@ -56,6 +56,7 @@ class FieldPatchTests(unittest.TestCase):
         put(d, fgw.BLOCK_READ, fgw.BLOCK_READ_ORIG)
         put(d, fgw.REDRAW_SITE, fgw.REDRAW_ORIG)
         put(d, fgw.REDRAW_RTL, b'\x6b')
+        put(d, fgw.WATER_SITE, fgw.WATER_ORIG)
         for at, want in (fgw.SEARCH_SITE, fgw.PTR_SITE, fgw.NIGHT_SITE, fgw.PAL_BANK_SITE, fgw.WAVE_SITE,
                          *fgw.ATTR_SITES.items(), fgw.REFRESH_SITE, *(x for pair in fgw.W12_LOAD.values() for x in pair)):
             put(d, at, want)
@@ -267,6 +268,59 @@ class FieldPatchTests(unittest.TestCase):
         self.assertNotEqual(t0[63], t1[63])
         self.assertEqual((t0[:63], t2), (t1[:63], t0))
         self.assertEqual(dq5gfx.field_tiles(self.rom, 1), dq5gfx.field_tiles(self.rom, 0))  # 훅 없는 롬은 세 세계가 같음
+
+    def test_water_in_place(self):
+        folder = Path(self.tmp.name)
+        orig = bytes(fgw.WATER_BYTES)
+        self.assertEqual(((folder / 'water.bin').read_bytes(), self.doc['water_files']),
+                         (orig, {k: 'water.bin' for k in fgw.WORLDS}))
+        self.doc.pop('water_files')                                             # 예전 JSON 은 원래 원본
+        self.assertEqual(fgw.patch(self.rom, self.doc, self.tmp.name)['writes'], [])
+        sea = bytes(range(fgw.WATER_BYTES))
+        (folder / 'sea.bin').write_bytes(sea)
+        self.doc['water_files'] = {k: 'sea.bin' for k in fgw.WORLDS}
+        m = fgw.patch(self.rom, self.doc, self.tmp.name)
+        self.assertEqual([(w['at'], w['hex']) for w in m['writes']], [('01:A719', sea.hex(' '))])
+        self.assertEqual(fgw.current(self.apply(m))['water'], {k: sea for k in fgw.WORLDS})
+        with self.assertRaisesRegex(ValueError, '--water-at'):
+            fgw.patch(self.rom, self.doc, self.tmp.name, water_at=0x358000)
+        (folder / 'short.bin').write_bytes(sea[:64])
+        self.doc['water_files'] = {'world0': 'short.bin'}
+        with self.assertRaisesRegex(ValueError, '128바이트'):
+            fgw.patch(self.rom, self.doc, self.tmp.name)
+        self.doc['water_files'] = {'world3': 'sea.bin'}
+        with self.assertRaisesRegex(ValueError, 'water_files'):
+            fgw.patch(self.rom, self.doc, self.tmp.name)
+
+    def test_water_per_world(self):
+        from w65816 import Cpu
+        folder = Path(self.tmp.name)
+        sea, sea2 = bytes(range(fgw.WATER_BYTES)), bytes([0x5A]) * fgw.WATER_BYTES
+        (folder / 'sea.bin').write_bytes(sea)
+        (folder / 'sea2.bin').write_bytes(sea2)
+        self.doc['water_files'] = {'world0': 'sea.bin'}
+        with self.assertRaisesRegex(ValueError, '--water-at'):
+            fgw.patch(self.rom, self.doc, self.tmp.name)
+        m = fgw.patch(self.rom, self.doc, self.tmp.name, water_at=0x358000)
+        sites = {w['at']: w['hex'] for w in m['writes']}
+        self.assertEqual(sites['01:C5CB'], '22 00 80 35 80 06 ea ea ea ea ea ea')
+        self.assertNotIn('01:A719', sites)                                     # 세계 1·2 는 원래 자리를 그대로 읽음
+        rom = self.apply(m)
+        self.assertEqual(fgw.current(rom)['water'], {'world0': sea, 'world1': bytes(128), 'world2': bytes(128)})
+        first = 0x358000 + fgw.WATER_HOOK_LEN + 12
+        for world, want in ((0, first), (1, fgw.WATER), (2, fgw.WATER), (3, first)):
+            cpu = Cpu(rom.d, bytes(0x20000))
+            cpu.wram[0x1949] = world
+            cpu.p = 0x30
+            cpu.jsl(0x358000)
+            self.assertEqual(cpu.wram[0xA5] | cpu.wram[0xA6] << 8 | cpu.wram[0xA7] << 16, want, f'세계 {world}')
+            self.assertEqual(cpu.p, 0x30)
+        # 같은 원본은 하나만 둔다
+        self.doc['water_files'] = {'world0': 'sea.bin', 'world1': 'sea2.bin', 'world2': 'sea.bin'}
+        m = fgw.patch(self.rom, self.doc, self.tmp.name, water_at=0x358000)
+        body = next(w for w in m['writes'] if w['at'] == '35:8000')['hex']
+        self.assertEqual(len(bytes.fromhex(body)), fgw.WATER_HOOK_LEN + 12 + 2 * fgw.WATER_BYTES)
+        self.assertEqual(fgw.current(self.apply(m))['water'], {'world0': sea, 'world1': sea2, 'world2': sea})
 
 
 class HighSetTests(unittest.TestCase):

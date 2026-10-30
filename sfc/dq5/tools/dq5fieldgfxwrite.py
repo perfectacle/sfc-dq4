@@ -1,14 +1,15 @@
 """DQ5(SFC) 필드(세계 지도) 그림 쓰기. 타일(512~1,024개)·타일 팔레트 니블·타일 속성·필드 팔레트 2·3번 줄·물결 색·
-움직이는 타일 벌·세계 0 낮밤 인물 팔레트(11·12번 줄)를 내보내고 고친 것을 넣는다. 블록 정의(2A:A32C·AD27)는 dq5fieldtables.py,
+움직이는 타일 벌·움직이는 바다 원본(타일 4·5·20·21)·세계 0 낮밤 인물 팔레트(11·12번 줄)를 내보내고 고친 것을 넣는다. 블록 정의(2A:A32C·AD27)는 dq5fieldtables.py,
 지도는 dq5fieldwrite.py 가 쓴다. 형식은 sfc/dq5/docs/dq5-field-format.md 의 「타일 그래픽과 팔레트」「팔레트」, 입력은
 sfc/dq5/docs/dq5-build-format.md 「필드 그림 `dq5fieldgfx/1`」.
 
-  dump   롬 → 폴더(-o). fieldgfx.json, tiles.bin(4bpp SNES 타일 512개), anim.bin(움직이는 타일 6개 × 8벌)
+  dump   롬 → 폴더(-o). fieldgfx.json, tiles.bin(4bpp SNES 타일 512개), anim.bin(움직이는 타일 6개 × 8벌),
+         water.bin(움직이는 바다 원본, 타일 4·5·20·21 차례로 128바이트)
   patch  fieldgfx.json → 패치 목록(-o). 바뀐 것이 없으면 쓰기 0개. 다시 싼 RLE 가 원래보다 길면
          --tiles-at·--anim-at BB:AAAA(30~3F, 한 뱅크 안)로 옮긴다. 움직이는 타일 벌을 16개로 늘리면 --anim-at,
          세계 1·2 의 타일 벌(worlds)을 주면 --worlds-at 이 필요하다. 타일을 512개 넘게 쓰면 --worlds-at 과
          --extra-at(늘린 타일, 30~7D), 세계 0 의 2·3번 줄 벌 수·시간대 표·밤 시작이나 세계 1·2 의 벌 수·시간대 표를
-         바꾸면 --palettes-at(30~3F)
+         바꾸면 --palettes-at(30~3F), 움직이는 바다 원본을 세계마다 다르게 주면 --water-at(30~3F)
   check  두 RLE 를 다시 싸서 풀기, 내보낸 그대로 patch 하면 쓰기 0개인지
 
 타일: 12:B1A8 의 RLE(01:A4A7 이 뱅크, 01:A4AE 가 주소 즉값)를 7E:C000 에 풀면 평면 0~3 이 4KB 씩.
@@ -17,6 +18,8 @@ DMA 레지스터를 절대 주소로 쓰는 루틴(01:A64F·2B:8039)이 읽으�
 벌은 02:ACD5 가 $1C31 로 02:AD89 의 WRAM 주소 표를 골라 넘기고 02:ACE7 의 AND #$07 로 돈다.
 세계마다 타일 벌: 01:A4A7(10바이트)을 JSL 로 바꿔 $1949 로 [주소][뱅크] 표를 고르고, 니블을 읽는 00:BBB4·BBBE·BBDA·BBE4 의
 LDA $2AD712,X 를 세계마다 256바이트 표를 읽는 JSL 로 바꾼다.
+움직이는 바다: 01:C5C8 이 01:A719 의 128바이트로 16벌을 만든다. 세 세계가 같으면 제자리에 쓰고, 다르면 01:C5CB 의
+원본 포인터 즉값을 $1949 로 고르는 JSL 로 바꾼다.
 """
 import argparse
 import json
@@ -61,6 +64,11 @@ LOAD_SITE, LOAD_ORIG = 0x01A4A7, bytes.fromhex('a9128d744348aba2a8b1')
 NIB_SITES = (0x00BBB4, 0x00BBBE, 0x00BBDA, 0x00BBE4)
 NIB_ORIG = bytes.fromhex('bf12d72a')
 WORLDS = ('world0', 'world1', 'world2')
+# 움직이는 바다: 필드를 불러올 때(01:9FD2) 한 번 불리는 01:C5C8 이 01:A719 의 128바이트(타일 4·5·20·21, 4bpp)를 원본으로
+# 7E:C000~C7FF 에 16벌을 만든다. 세계 0 은 두 타일씩 이은 줄을 오른쪽으로, 세계 1 은 왼쪽으로 한 픽셀씩 돌리고, 세계 2 는
+# 16×16 을 위로 한 줄씩 민다(dq5gfx.water_frames). 몇 프레임마다 00:8F75 의 DMA 가 한 벌을 VRAM 워드 2040·2140 에 올린다.
+WATER, WATER_BYTES, WATER_TILES = 0x01A719, 128, (4, 5, 20, 21)
+WATER_SITE, WATER_ORIG = 0x01C5CB, bytes.fromhex('a91985a5a9a785a6a90185a7')
 
 
 def cpu(a):
@@ -72,7 +80,7 @@ def check_sites(rom):
     sites += [(at, want, 'anim') for at, want in ANIM_SITES.values()]
     sites += [(LOAD_SITE, LOAD_ORIG, 'tiles'), *((at, NIB_ORIG, 'tile_palettes') for at in NIB_SITES)]
     sites += [(BLOCK_READ, BLOCK_READ_ORIG, 'blocks'), (PALETTE_READ, PALETTE_READ_ORIG, 'tile_palettes')]
-    sites += [(REDRAW_SITE, REDRAW_ORIG, 'redraw')]
+    sites += [(REDRAW_SITE, REDRAW_ORIG, 'redraw'), (WATER_SITE, WATER_ORIG, 'water')]
     sites += [(at, want, 'palettes') for at, want in (SEARCH_SITE, PTR_SITE, NIGHT_SITE, PAL_BANK_SITE, WAVE_SITE)]
     sites += [(at, want, 'tile_attributes') for at, want in ATTR_SITES.items()] + [(REDRAW_RTL, b'\x6b', 'redraw')]
     sites += [(at, want, 'palettes') for pair in W12_LOAD.values() for at, want in pair] + [(*REFRESH_SITE, 'palettes')]
@@ -107,6 +115,27 @@ def nib_hook(tables, wide=False):
 
 
 LOAD_LEN, NIB_LEN = len(load_hook(0)), len(nib_hook(0))
+
+
+def water_hook(table):
+    """01:C5CB 의 LDA #/STA $A5~$A7(원본 포인터 01:A719) 대신(A·X 8비트). $1949(& 3)로 table 의 [하위 바이트 4]
+    [상위 바이트 4][뱅크 4] 에서 그 세계 원본 주소를 골라 $A5~$A7 에 둔다. X 는 부른 쪽이 다시 두기 전에 읽지 않는다
+    (01:C746·C66B 는 LDX 로 먼저 둠, 코드 읽기)."""
+    pick = b''.join(b'\xbf' + long_addr(table + 4 * i) + bytes([0x85, 0xA5 + i]) for i in range(3))
+    return b'\xaf\x49\x19\x7e' + b'\x29\x03' + b'\xaa' + pick + b'\x6b'
+
+
+WATER_HOOK_LEN = len(water_hook(0))
+
+
+def water_sources(rom):
+    """세계마다 움직이는 바다 원본 128바이트. 01:C5CB 가 JSL 이면 훅의 고르기 표를, 아니면 즉값 셋을 읽는다."""
+    if rom.u8(WATER_SITE) == 0x22:
+        table = rom.u24(rom.u24(WATER_SITE + 1) + 8)             # 훅의 첫 LDA long 이 하위 바이트 표
+        addrs = [rom.u8(table + w) | rom.u8(table + 4 + w) << 8 | rom.u8(table + 8 + w) << 16 for w in range(3)]
+    else:
+        addrs = [rom.u8(WATER_SITE + 1) | rom.u8(WATER_SITE + 5) << 8 | rom.u8(WATER_SITE + 9) << 16] * 3
+    return {k: bytes(rom.d[lorom(a):lorom(a) + WATER_BYTES]) for k, a in zip(WORLDS, addrs)}
 
 # 세계 0 의 2·3번 줄 벌 늘리기(--palettes-at). 01:A132 가 [하한 16비트][색인] 10항목(01:A16B)을 뒤에서부터 보아
 # $075E 이상인 첫 항목의 색인(벌 번호 × 2)으로 01:A189 의 포인터를 고르고, 01:A090 이 그 벌을 DMA 로(뱅크 즉값 01:A0B1)
@@ -394,7 +423,8 @@ def original(rom):
             'person_palettes': {k: colors(rom, a, 30) for k, a in PERSON.items()},
             'world0_times': [[rom.u16(TIMES + i * 3), rom.u8(TIMES + i * 3 + 2) // 2] for i in range(TIME_COUNT)],
             'world0_night_from': NIGHT_FROM,
-            'tile_attributes': list(rom.d[lorom(TILE_ATTR):lorom(TILE_ATTR) + TILES])}
+            'tile_attributes': list(rom.d[lorom(TILE_ATTR):lorom(TILE_ATTR) + TILES]),
+            'water': bytes(rom.d[lorom(WATER):lorom(WATER) + WATER_BYTES])}
 
 
 def current(rom):
@@ -445,6 +475,7 @@ def current(rom):
         out['world0_night_from'] = rom.u8(NIGHT_SITE[0]) // 2
     for k, (sets, times) in read_world12(rom).items():
         out['palettes'][f'world{k}'], out[f'world{k}_times'] = sets, times
+    out['water'] = water_sources(rom)
     return out
 
 
@@ -455,7 +486,10 @@ def dump(rom, out):
         f.write(o['tiles'])
     with open(os.path.join(out, 'anim.bin'), 'wb') as f:
         f.write(o['anim'])
+    with open(os.path.join(out, 'water.bin'), 'wb') as f:
+        f.write(o['water'])
     doc = {'format': FORMAT, 'tiles_file': 'tiles.bin', 'anim_file': 'anim.bin',
+           'water_files': {k: 'water.bin' for k in WORLDS},
            'tile_palettes': o['tile_palettes'], 'palettes': o['palettes'], 'wave': o['wave'],
            'person_palettes': o['person_palettes'], 'world0_times': o['world0_times'],
            'world0_night_from': o['world0_night_from'], 'tile_attributes': o['tile_attributes']}
@@ -492,10 +526,11 @@ def tile_count(raw, name):
 
 
 def warn_anim_slots(tiles, orig, name):
-    changed = [t for t in ANIM_SLOTS if tiles[t * 32:t * 32 + 32] != orig[t * 32:t * 32 + 32]]
-    if changed:
-        print(f'경고: {name} 타일 {changed} 은 움직이는 타일 벌이 늘 덮어 보이지 않음(anim.bin 을 고칠 것)',
-              file=sys.stderr)
+    for slots, fix in ((ANIM_SLOTS, '움직이는 타일 벌이 늘 덮어 보이지 않음(anim.bin 을 고칠 것)'),
+                       (WATER_TILES, '움직이는 바다가 늘 덮어 보이지 않음(water_files 를 고칠 것)')):
+        changed = [t for t in slots if tiles[t * 32:t * 32 + 32] != orig[t * 32:t * 32 + 32]]
+        if changed:
+            print(f'경고: {name} 타일 {changed} 은 {fix}', file=sys.stderr)
 
 
 def place_in(at, size, option, placed):
@@ -508,10 +543,10 @@ def place_in(at, size, option, placed):
 
 
 def patch(rom, doc, folder, tiles_at=None, anim_at=None, name='field-gfx', worlds_at=None, extra_at=None,
-          palettes_at=None):
+          palettes_at=None, water_at=None):
     o = original(rom)
     keys = {'format', 'tiles_file', 'anim_file', 'tile_palettes', 'palettes', 'wave', 'person_palettes', 'worlds',
-            'world0_times', 'world0_night_from', 'tile_attributes', 'world1_times', 'world2_times'}
+            'world0_times', 'world0_night_from', 'tile_attributes', 'world1_times', 'world2_times', 'water_files'}
     if not isinstance(doc, dict) or doc.get('format') != FORMAT or set(doc) - keys:
         raise ValueError(f'format={FORMAT} 와 {sorted(keys - {"format"})} 만')
     data = {'tiles': read_file(folder, doc.get('tiles_file'), 'tiles_file'),
@@ -662,11 +697,49 @@ def patch(rom, doc, folder, tiles_at=None, anim_at=None, name='field-gfx', world
         new = color_list(person[key], 30, f'person_palettes.{key}')
         if new != o['person_palettes'][key]:
             write(a, b''.join(c.to_bytes(2, 'little') for c in new), f'세계 0 {key} 인물 팔레트(11·12번 줄)')
+    write_water(o['water'], doc.get('water_files'), folder, water_at, placed, write)
     manifest = {'format': 'dq5patch/1', 'name': name, 'writes': writes}
     if placed:
         end = max(lorom(e - 1) + 1 for _, e, _ in placed)
         manifest['rom_size'] = 4 if end > 0x300000 else 3 if end > 0x200000 else 2
     return manifest
+
+
+def write_water(orig, files, folder, at, placed, write):
+    """움직이는 바다 원본. files 는 {세계: 파일}(없는 세계는 원래 원본). 세 세계가 같으면 01:A719 에 제자리로 쓰고,
+    다르면 at 에 [훅][고르기 표 12바이트][원래와 다른 원본, 같은 것은 하나] 를 두고 01:C5CB 를 JSL 로 바꾼다."""
+    if files is None:
+        files = {}
+    if not isinstance(files, dict) or set(files) - set(WORLDS):
+        raise ValueError(f'water_files 는 {list(WORLDS)} 마다 파일 이름(없는 세계는 원래 원본)')
+    srcs = []
+    for k in WORLDS:
+        raw = read_file(folder, files[k], f'water_files.{k}') if k in files else orig
+        if len(raw) != WATER_BYTES:
+            raise ValueError(f'water_files.{k}: 타일 4·5·20·21 4bpp {WATER_BYTES}바이트여야 함({len(raw)}바이트)')
+        srcs.append(raw)
+    if len(set(srcs)) == 1:
+        if at is not None:
+            raise ValueError('--water-at 은 세계마다 움직이는 바다 원본이 다를 때만')
+        if srcs[0] != orig:
+            write(WATER, srcs[0], '움직이는 바다 원본(타일 4·5·20·21)')
+        return
+    if at is None:
+        raise ValueError('세계마다 움직이는 바다 원본을 다르게 주려면 --water-at 이 필요함')
+    table = at + WATER_HOOK_LEN
+    uniq, addrs = [], []
+    for raw in srcs:
+        if raw == orig:
+            addrs.append(WATER)
+            continue
+        if raw not in uniq:
+            uniq.append(raw)
+        addrs.append(table + 12 + uniq.index(raw) * WATER_BYTES)
+    addrs.append(addrs[0])                                    # $1949 & 3 = 3 은 세계 0 과 같게
+    body = water_hook(table) + bytes(a >> s & 0xFF for s in (0, 8, 16) for a in addrs) + b''.join(uniq)
+    place_in(at, len(body), '--water-at', placed)
+    write(at, body, '세계마다 움직이는 바다 원본: 고르기 훅·고르기 표·원본', orig=False)
+    write(WATER_SITE, b'\x22' + long_addr(at) + b'\x80\x06' + b'\xea' * 6, '움직이는 바다 원본 고르기를 세계 훅으로')
 
 
 def encode_anim_table(sets):
@@ -877,6 +950,7 @@ def main():
     ap.add_argument('--worlds-at')
     ap.add_argument('--extra-at')
     ap.add_argument('--palettes-at')
+    ap.add_argument('--water-at')
     ap.add_argument('--name', default='field-gfx')
     a = ap.parse_args()
     try:
@@ -898,7 +972,7 @@ def main():
         manifest = patch(rom, doc, os.path.dirname(os.path.abspath(a.source)),
                          parse_at(a.tiles_at, '--tiles-at'), parse_at(a.anim_at, '--anim-at'), a.name,
                          parse_at(a.worlds_at, '--worlds-at'), parse_at(a.extra_at, '--extra-at'),
-                         parse_at(a.palettes_at, '--palettes-at'))
+                         parse_at(a.palettes_at, '--palettes-at'), parse_at(a.water_at, '--water-at'))
         os.makedirs(os.path.dirname(a.out) or '.', exist_ok=True)
         with open(a.out, 'w', encoding='utf-8') as f:
             json.dump(manifest, f, ensure_ascii=False, indent=1)
