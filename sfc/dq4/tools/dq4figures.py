@@ -76,12 +76,14 @@ def environment_towns_figure(folder, names=TOWN_SHOTS):
 
 
 FIELD_VIEWS = ("castle", "imuru", "bridge", "desert", "reef")
+# 세계 1(FC 필드 1)과 세계 2(FC 필드 3)의 dq4fieldcheck 그림 장면.
+WORLD12_VIEWS = ("w1-gfx-town", "w1-gfx-tower", "w1-gfx-cave", "w2-gfx-castle", "w2-gfx-shrine", "w2-gfx-palace")
 
 
-def field_gfx_figure(folder):
-    """DQ4 그림으로 바꾼 필드의 MesenCE 화면 다섯(dq4fieldcheck.VIEWS)을 3×2 로 2배. 화면은
-    dq4fieldcheck.py --out work/dq4-fieldcheck 가 남긴 gfx-<이름>/end.png 다. 없으면 None."""
-    paths = [folder / f"gfx-{name}" / "end.png" for name in FIELD_VIEWS]
+def field_gfx_figure(folder, scenes=tuple(f"gfx-{name}" for name in FIELD_VIEWS)):
+    """DQ4 그림으로 바꾼 필드의 MesenCE 화면(dq4fieldcheck 의 그림 장면)을 3×2 로 2배. 화면은
+    dq4fieldcheck.py --out work/dq4-fieldcheck 가 남긴 <장면>/end.png 다. 없으면 None."""
+    paths = [folder / scene / "end.png" for scene in scenes]
     if not all(path.exists() for path in paths):
         return None
     sheet = Image.new("RGB", (3 * 260 - 4, 2 * 228 - 4), (24, 24, 24))
@@ -214,6 +216,11 @@ def main():
         print("work/dq4-fieldcheck 에 필드 화면이 없어 dq4-field-gfx.webp 는 건너뜀")
     else:
         field_gfx.save(output / "dq4-field-gfx.webp", lossless=True)
+    worlds = field_gfx_figure(ROOT / "work" / "dq4-fieldcheck", WORLD12_VIEWS)
+    if worlds is None:
+        print("work/dq4-fieldcheck 에 세계 1·2 화면이 없어 dq4-field-worlds12.webp 는 건너뜀")
+    else:
+        worlds.save(output / "dq4-field-worlds12.webp", lossless=True)
     sprite_gallery(images).save(output / "dq4-sprites-gallery.webp", lossless=True)
     draft_figure().save(output / "dq4-sprite-drafts.webp", lossless=True)
     field = field_figure(ROOT / "work" / "dq4-sprites")

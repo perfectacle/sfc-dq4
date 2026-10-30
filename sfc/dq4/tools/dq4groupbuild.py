@@ -10,13 +10,13 @@ Order matters (sfc/dq4/docs/dq4-environment-format.md, 「그룹 연결」):
      dq5talkwrite.py with the talk scripts that show the people's messages (dq4npcport.talk_doc).
   4. dq5chestplace.py from the original ROM with the patches of 1-3 (--with-patch): the FC chests and
      タンス·つぼ of dq4chestport.py on the cells 1 gave their DQ5 attributes.
-  5. dq4fieldport.py: FC field 0 as DQ5 world 0 with the DQ4 field art (dq5fieldgfxwrite.py, dq5fieldtables.py,
-     dq5fieldwrite.py).
+  5. dq4fieldport.py: FC fields 0, 1 and 3 as DQ5 worlds 0-2 with the DQ4 field art (dq5fieldgfxwrite.py,
+     dq5fieldtables.py, dq5fieldwrite.py).
   6. dq5build.py on the original ROM with 1-5.
 
 FC stairs (08:$B22E) become same-group exits, FC exit-table cells ($05A0) become area moves, and the map
 edge leads to the field through the aux entrance table, onto the FC entrance of the group. The original DQ5
-entrances of world 0 move off the FC ground (dq4fieldport.park).
+entrances of every world move off the FC ground (dq4fieldport.park).
 
   python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups
 """

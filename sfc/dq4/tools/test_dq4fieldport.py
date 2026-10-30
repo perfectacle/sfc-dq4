@@ -1,5 +1,5 @@
 """Without a ROM, the FC block -> DQ5 block map, the map file, entrance cells and parking; with rom/dq4.nes, FC
-field 0 and the entrances of the ported groups."""
+fields 0, 1 and 3 and the entrances of the ported groups."""
 
 import sys
 import unittest
@@ -30,6 +30,26 @@ class MapTest(unittest.TestCase):
         self.assertEqual((port.PARK[0] >> 1, port.PARK[1] >> 1), (x + 1, y + 1))
         with self.assertRaises(ValueError):
             port.world([[0x02] * (x + 1)])
+
+    def test_worlds_1_and_2_park_inside_128(self):
+        for field in (1, 3):
+            w = port.WORLDS[field]
+            x, y = port.ISLANDS[w]
+            self.assertLessEqual(x + 3, 128)
+            grid = port.world([[0x02]], field)
+            self.assertEqual(grid[(y + 1) * port.SIZE + x + 1], port.own_blocks(field)[0x06])
+            self.assertEqual((port.PARKS[w][0] >> 1, port.PARKS[w][1] >> 1), (x + 1, y + 1))
+            with self.assertRaises(ValueError):
+                port.world([[0x02] * (x + 1)], field)
+
+    def test_field_3_hills_are_mountains(self):
+        own0, own3 = port.own_blocks(0), port.own_blocks(3)
+        self.assertNotEqual(own3[0x01], own0[0x01])
+        self.assertNotIn(own3[0x01], own0.values())
+        self.assertEqual({k: v for k, v in own3.items() if k != 0x01}, {k: v for k, v in own0.items() if k != 0x01})
+        self.assertIn((own3[0x01], 0x01, port.MOUNTAIN), port.new_blocks())
+        # Field 0 keeps its numbers: the added block comes after them.
+        self.assertEqual(own3[0x01], max(own0.values()) + 1)
 
     def test_unknown_block(self):
         with self.assertRaises(ValueError):
@@ -99,11 +119,13 @@ class ParkTest(unittest.TestCase):
         self.assertEqual(port.world_of(0x52, self.ARRIVALS), 0)
         self.assertIsNone(port.world_of(0x54, self.ARRIVALS))
 
-    def test_only_world_zero_moves(self):
+    def test_each_world_moves_to_its_island(self):
         rows = [{"table": "main", "index": 0, "group": 0x01, "x": 331, "y": 67},
-                {"table": "main", "index": 1, "group": 0x09, "x": 22, "y": 93}]
+                {"table": "main", "index": 1, "group": 0x09, "x": 22, "y": 93},
+                {"table": "main", "index": 2, "group": 0x54, "x": 10, "y": 20}]
         self.assertEqual(port.park(rows, self.ARRIVALS), [{"group": 0x01, "x": port.PARK[0], "y": port.PARK[1]},
-                                                          {"group": 0x09, "x": 22, "y": 93}])
+                                                          {"group": 0x09, "x": port.PARKS[1][0], "y": port.PARKS[1][1]},
+                                                          {"group": 0x54, "x": 10, "y": 20}])
 
 
 class WarpPatchTest(unittest.TestCase):
@@ -130,6 +152,16 @@ class FieldTest(unittest.TestCase):
         self.assertEqual((len(grid[0]), len(grid)), (253, 253))
         world = port.world(grid)
         self.assertEqual(world[0x2E * port.SIZE + 0xA4], port.OWN_BLOCKS[0x12])
+
+    def test_fields_1_and_3_fit(self):
+        for field, size in ((1, (64, 64)), (3, (62, 54))):
+            grid, props = port.fc_field(self.prg, field)
+            self.assertEqual((len(grid[0]), len(grid)), size)
+            port.world(grid, field)
+        # Field 3's hills are blocked (08:$8A34) and fill its edge.
+        grid, props = port.fc_field(self.prg, 3)
+        self.assertEqual(props(3, 3), 0x80)
+        self.assertEqual(grid[3][61], 0x01)
 
     def test_port_entrances(self):
         import dq4groupbuild
