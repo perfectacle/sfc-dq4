@@ -27,6 +27,13 @@ class NumberTest(unittest.TestCase):
         self.assertEqual(day["then"][1]["mask"], ev.FLARE_FOLLOWS[1])
         self.assertEqual(day["else"]["id"], f"{m['flare_day']:03X}")
 
+    def test_start_messages_are_the_first_message_or_nobody(self):
+        m = ev.message_ids(0xD80)
+        got = ev.start_messages(0xD80)
+        self.assertEqual(got[ev.JAIL, ev.FC_ALEX_NIGHT, True], m['alex_night'])
+        self.assertEqual(got[ev.JAIL, ev.FC_JAIL_FLARE, None], ev.NOBODY)
+        self.assertEqual(got[ev.HOIMIN_ROOM, ev.FC_HOIMIN, None], m['hoimin_ask'])
+
     def test_flags_are_distinct(self):
         self.assertEqual(len({ev.NIGHT_TOLD, ev.FLARE_FOLLOWS, ev.REUNITED, ev.HOIMIN}), 4)
 

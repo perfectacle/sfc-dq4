@@ -135,6 +135,19 @@ def talk_numbers(first_talk):
     return {name: first_talk + k for k, name in enumerate(TALKS)}
 
 
+# DQ5 「その方向には誰もいない。」: the answer when the person talked to is hidden.
+NOBODY = 0x129
+
+
+def start_messages(first_message):
+    """{(map, FC talk, night or None for both): first message} of the people this module changes, at the start
+    of chapter 1 (no event flag on): the talk scripts show their first message, and the jail's Flares hide."""
+    m = message_ids(first_message)
+    return {(IMURU, FC_CHILD, True): m['child'], (JAIL, FC_ALEX_NIGHT, True): m['alex_night'],
+            (FRONT, FC_FLARE_DAY, False): m['flare_day'], (FRONT_NIGHT, FC_FLARE_NIGHT, True): m['flare_night'],
+            (JAIL, FC_JAIL_FLARE, None): NOBODY, (HOIMIN_ROOM, FC_HOIMIN, None): m['hoimin_ask']}
+
+
 def _msg(m):
     return {"op": "msg", "id": f"{m:03X}"}
 
