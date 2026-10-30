@@ -255,13 +255,14 @@ class Bit9HookTests(unittest.TestCase):
         put(d, 0x00BBF7, b'\x08' + fw.FAST_ORIG)
         put(d, 0x00BDC5, b'\x08\x8b\xc2\x30' + fw.FAST_ORIG)
         put(d, fw.MAP_SITE, fw.MAP_ORIG)
+        put(d, fw.LAND_SITE - 1, b'\x08' + fw.LAND_ORIG)
         d = apply(d, ft.edits(Rom(bytes(d)), document(blocks=new_blocks(1600)), blocks_at=0x3C8000))
         rom = Rom(bytes(d))
         cells = {y * 256 + x for x, y in fw.changed_cells(rom)}
         grids = {0: [5 if i in cells else (i * 37 + i // 256) % 1600 for i in range(fw.SIZE)],
                  1: [5 if i in cells else (i * 11) % 1024 for i in range(fw.SIZE)]}
         out, _ = fw.plane_writes(rom, bytes(d), grids, 0x318000)
-        self.assertEqual([w['at'] for w in out[-3:]], ['00:BBF8', '00:BDC9', '03:CB07'])
+        self.assertEqual([w['at'] for w in out[-4:]], ['00:BBF8', '00:BDC9', '03:CB07', '03:CB1C'])
         self.assertEqual([w['at'] for w in out if '반 바이트' in w['note']], ['32:8000', '33:8000'])
         for w in out:
             put(d, int(w['at'][:2], 16) << 16 | int(w['at'][3:], 16), bytes.fromhex(w['hex']))
@@ -275,6 +276,9 @@ class Bit9HookTests(unittest.TestCase):
         # CLC / ADC #$20 / STA $CD / RTS.
         put(d, 0x039000, b'\xe2\x20\xc2\x10\xa2\xfe\x07\xa0\xff\x03\x20\x07\xcb\x6b')
         put(d, 0x03CB15, b'\x18\x69\x20\x85\xcd\x60')
+        # 지형 루틴: 01:81D4 처럼 M·X 16비트로 A 윗바이트를 채운 채 03:CB1B 를 JSL 하고, 원래처럼 A = 지형(윗바이트 0)으로
+        # 돌아오는지. 01:81DA 가 이 A 를 16비트 TAX 로 01:81FD 를 읽는다.
+        put(d, 0x039020, b'\xc2\x30\xa9\xff\xff\xa2\xfe\x07\xa0\xff\x03\x22\x1b\xcb\x03\x6b')
         rom = Rom(bytes(d))
         checked = {'wide': 0, 'narrow': 0}
         for world, (x, y) in ((w, (x, y)) for w in (0, 1, 3) for x, y in ((0, 0), (1, 1), (37, 300), (300, 37), (511, 2),
@@ -307,6 +311,11 @@ class Bit9HookTests(unittest.TestCase):
                 self.assertEqual((dot.wram[0xCD], dot.x, dot.y, dot.s, bytes(dot.wram[0x90:0x94])),
                                  (dq5field.terrain(rom, n) + 0x20, 0x07FE, 0x03FF, s, bytes(wram[0x90:0x94])),
                                  f'세계 {world} ({x},{y}) 점')
+            land = Cpu(bytes(d), bytes(wram))
+            land.dbr = 0x01
+            land.jsl(0x039020)
+            self.assertEqual((land.a & 0xFFFF, land.x, land.y, land.s, land.dbr),
+                             (dq5field.terrain(rom, n), 0x07FE, 0x03FF, s, 0x01), f'세계 {world} ({x},{y}) 지형 루틴')
             if n < 511:
                 self.assertEqual((cpu.x, cpu.y), (n * 5 + q, q), f'세계 {world} ({x},{y}) 번호 {n}')
                 checked['narrow'] += 1
