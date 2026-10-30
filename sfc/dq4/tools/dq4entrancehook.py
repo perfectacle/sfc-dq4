@@ -5,7 +5,9 @@ first field entrance of the group (2A:F425). A DQ5 group that holds several FC g
 
   enter  2A:F28D (the per-map exceptions, run after 2A:F384 set the group's arrival on the main and the aux
          entrance paths, and by the indoor day/night redraw 2A:F363) first looks up (group $BC, field $B6, $B8) and overwrites $BD, $C1, $C2, $C3, $198E.
-  leave  2A:F425 first looks up (group $BC, map $BD in [first, last]) and stands on its field cell.
+  leave  2A:F425 first looks up (group $BC, map $BD in [first, last], the hero's cell row 7E:3080 in
+         [row min, row max]) and stands on its field cell. The row range picks the stair of a map with two
+         stairs to the field.
 
 Entries not in a table keep the original behaviour.
 """
@@ -22,11 +24,12 @@ from dq4environmentrom import _Asm  # noqa: E402
 ENTER_SITE, ENTER_ORIG, ENTER_BACK = 0x2AF28D, bytes((0xA5, 0xBC, 0xC9, 0x16)), 0x2AF291
 # 2A:F429 (the REP's operand) stays: the hook never returns before 2A:F42A.
 LEAVE_SITE, LEAVE_ORIG, LEAVE_ON, LEAVE_BACK = 0x2AF425, bytes((0x08, 0xE2, 0x20, 0xC2)), 0x2AF475, 0x2AF42A
-ARRIVAL_SIZE, FIELD_SIZE = 10, 7
+ARRIVAL_SIZE, FIELD_SIZE = 10, 9
 
 
 def tables(arrivals, fields):
-    """arrivals: (group, field x, field y, map, x, y, layer, $198E); fields: (group, first map, last map, x, y)."""
+    """arrivals: (group, field x, field y, map, x, y, layer, $198E); fields: (group, first map, last map, x, y
+    [, row min, row max]), the row range 00-FF when left out."""
     arr = bytearray()
     for group, fx, fy, number, x, y, layer, facing in arrivals:
         # The original masks both (2A:F397 AND #$1F, 2A:F3B1 AND #$83); the hook stores them as given.
@@ -34,10 +37,11 @@ def tables(arrivals, fields):
             raise ValueError(f"{group:02X} ({fx},{fy}): map {number:02X} or facing {facing:02X} out of range")
         arr += bytes((group,)) + fx.to_bytes(2, "little") + fy.to_bytes(2, "little") + bytes((number, x, y, layer, facing))
     out = bytearray()
-    for group, first, last, fx, fy in fields:
-        if not first <= last <= 0x1F:
-            raise ValueError(f"{group:02X}: map range {first:02X}-{last:02X}")
-        out += bytes((group, first, last)) + fx.to_bytes(2, "little") + fy.to_bytes(2, "little")
+    for group, first, last, fx, fy, *rows in fields:
+        low, high = rows or (0, 0xFF)
+        if not first <= last <= 0x1F or not low <= high <= 0xFF:
+            raise ValueError(f"{group:02X}: map range {first:02X}-{last:02X} or row range {low:02X}-{high:02X}")
+        out += bytes((group, first, last)) + fx.to_bytes(2, "little") + fy.to_bytes(2, "little") + bytes((low, high))
     return bytes(arr) + b"\xFF", bytes(out) + b"\xFF"
 
 
@@ -60,7 +64,9 @@ def code(at, arrivals, fields):
     asm.label("l_loop").long(0xBF, "out").b(0xC9, 0xFF).rel(0xF0, "l_back").b(0xC5, 0xBC).rel(0xD0, "l_next")
     asm.b(0xA5, 0xBD, 0x29, 0x1F).long(0xDF, "out", 1).rel(0x90, "l_next").long(0xDF, "out", 2)
     asm.rel(0xF0, "l_hit").rel(0xB0, "l_next")
-    asm.label("l_hit").b(0xC2, 0x20).long(0xBF, "out", 3).b(0x85, 0xB6).long(0xBF, "out", 5).b(0x85, 0xB8)
+    asm.label("l_hit").b(0xAF, 0x80, 0x30, 0x7E).long(0xDF, "out", 7).rel(0x90, "l_next").long(0xDF, "out", 8)
+    asm.rel(0xF0, "l_row").rel(0xB0, "l_next")
+    asm.label("l_row").b(0xC2, 0x20).long(0xBF, "out", 3).b(0x85, 0xB6).long(0xBF, "out", 5).b(0x85, 0xB8)
     asm.b(0x5C, *LEAVE_ON.to_bytes(3, "little"))
     asm.label("l_next").b(*(0xE8,) * FIELD_SIZE).rel(0x80, "l_loop")
     asm.label("l_back").b(0x5C, *LEAVE_BACK.to_bytes(3, "little"))

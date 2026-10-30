@@ -67,9 +67,11 @@ LINKS = {
     0x38: [{"fc": 0x1C, "arrival": (0x0D, 0x10), "attrs": "03/00", "field": [(0xA2, 0x1A)], "out": "down:64"}],
     0x39: [{"fc": 0x30, "arrival": (0x10, 0x21), "map": 3, "attrs": "03/00", "field": [(0x88, 0x17)],
             "out": "down:64"}],
-    # 41/00's arrival is its stair to the field: step off and back on. FC enters it from two caves.
+    # 41/00's arrival is its stair to the field: step off and back on. FC enters it from two caves, each onto
+    # its own stair, and each stair leaves by its cave (08:$B2EC). Bataland's land reaches only (8D,1F) and
+    # イムル's only (8D,1B), so one arrival and one way out made the cave one-way.
     0x3A: [{"fc": 0x41, "arrival": (0x03, 0x03), "attrs": "03/00", "field": [(0x8D, 0x1B), (0x8D, 0x1F)],
-            "out": "down:32,wait:60,up:32"}],
+            "stairs": {(0x8D, 0x1B): (0x03, 0x03), (0x8D, 0x1F): (0x0E, 0x30)}, "out": "down:32,wait:60,up:32"}],
     # Below 古井戸の底: no field entrance; its group arrival is the cell the well's stair leads to (3A/02).
     0x3B: [{"fc": 0x3A, "arrival": (0x03, 0x02), "map": 2, "attrs": "03/00", "field": None, "out": None}],
     # The prologue's village (FC 14/00). The field leads to the ruined 14/02, so this arrival is the same cell
@@ -218,19 +220,36 @@ def doors(prg):
     return out
 
 
-def hook_rows(links, place, entrances):
+def entrance_doors(prg):
+    """{(FC group, FC field x, y): doors value of that one entrance} of the LINKS parts with "stairs"."""
+    _, props = dq4fieldport.fc_field(prg)
+    return {(part["fc"], *b): dq4fieldport.door(props, [b])
+            for parts in LINKS.values() for part in parts for b in part.get("stairs", {})}
+
+
+def hook_rows(links, place, entrances, each=None):
     """dq4entrancehook (arrivals, leaving) of every FC group with a field entrance: each of its entrance cells
     (entrances[FC group] = (cells, leave cell), as doors) leads to its arrival, and its maps leave onto the leave
-    cell. A DQ5 group of one FC group leaves from any map."""
+    cell. A DQ5 group of one FC group leaves from any map. A part with "stairs" ({FC field entrance: FC stair})
+    enters each entrance onto its stair and leaves each stair by its entrance (each = entrance_doors); other
+    hero rows of its maps leave onto the leave cell."""
     arrivals, leaving = [], []
     for group, parts in links.items():
         for part in parts:
             if not part["field"]:
                 continue
             found, (lx, ly) = entrances[part["fc"]]
+            stairs = part.get("stairs", {})
+            number = place[part["fc"], part.get("map", 0)][1]
+            for b, stair in stairs.items():
+                cells, (sx, sy) = each[(part["fc"], *b)]
+                arrivals += [(group, fx, fy, number, *cell(*stair), LAYER, 0) for fx, fy in cells]
+                row = cell(*stair)[1]
+                leaving.append((group, number, number, sx, sy, row, row))
+            done = {(r[1], r[2]) for r in arrivals if r[0] == group}
             for fx, fy in found:
-                arrivals.append((group, fx, fy, place[part["fc"], part.get("map", 0)][1], *cell(*part["arrival"]),
-                                 LAYER, 0))
+                if (fx, fy) not in done:
+                    arrivals.append((group, fx, fy, number, *cell(*part["arrival"]), LAYER, 0))
             numbers = [n for (g, _), (_, n) in place.items() if g == part["fc"]]
             first, last = (0, 0x1F) if len(parts) == 1 else (min(numbers), max(numbers))
             if part["fc"] in FALL_FIELD and group in FALL_GROUPS:
@@ -649,7 +668,7 @@ def _build(pool, dq5, dq4, out, with_people):
          for part in parts if part["field"] for x, y in found[part["fc"]][0]], destinations)
     step("dq5fieldtables.py", "entrances", {"format": "dq5fieldtables/1", "entrance_tables": entrance_tables}, dq5,
          *ENTRANCES_AT, *new_map_args)
-    arrivals, leaving = hook_rows(LINKS, place, found)
+    arrivals, leaving = hook_rows(LINKS, place, found, entrance_doors(prg))
     manifests.append(_save(out / "entrance-hook.dq5patch.json", {
         "format": "dq5patch/1", "name": "dq4-entrance-hook",
         "writes": dq4entrancehook.writes(ENTRANCE_HOOK_AT, arrivals, leaving)}))
