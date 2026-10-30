@@ -1,6 +1,6 @@
 # DQ4 필드를 DQ5 세계 0 에
 
-FC 「드래곤 퀘스트 IV」 필드 0(세계 지도)의 지형을 DQ5 필드 엔진의 세계 0 에 넣은 방법과 실측입니다. 넣는 도구는 [sfc/dq4/tools/dq4fieldport.py](../tools/dq4fieldport.py), 검사는 [sfc/dq4/tools/dq4fieldcheck.py](../tools/dq4fieldcheck.py)입니다. 과정은 [2026-10-30-34 일지](../journal/2026-10-30-34-field-world0.md)에 있습니다. FC 필드 형식은 [fc/dq4/docs/dq4-field-format.md](../../../fc/dq4/docs/dq4-field-format.md), DQ5 필드 형식은 [sfc/dq5/docs/dq5-field-format.md](../../dq5/docs/dq5-field-format.md)를 따릅니다.
+FC 「드래곤 퀘스트 IV」 필드 0(세계 지도)의 지형을 DQ5 필드 엔진의 세계 0 에 넣은 방법과 실측입니다. 넣는 도구는 [sfc/dq4/tools/dq4fieldport.py](../tools/dq4fieldport.py), 검사는 [sfc/dq4/tools/dq4fieldcheck.py](../tools/dq4fieldcheck.py)입니다. 과정은 [2026-10-30-38 일지](../journal/2026-10-30-39-field-world0.md)에 있습니다. FC 필드 형식은 [fc/dq4/docs/dq4-field-format.md](../../../fc/dq4/docs/dq4-field-format.md), DQ5 필드 형식은 [sfc/dq5/docs/dq5-field-format.md](../../dq5/docs/dq5-field-format.md)를 따릅니다.
 
 블록 그림은 아직 DQ5 그림입니다. 지형(걷기·배·조우 지형)만 FC 와 맞추고, 그림은 다음 단계에서 DQ4 그림으로 바꿉니다.
 
