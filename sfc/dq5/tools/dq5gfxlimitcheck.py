@@ -21,8 +21,14 @@
          01:A4A7 뒤 00:A788 앞에 VRAM 워드 4000~5FFF 를 지우고 다시 오는지(lua/dq5vramwipe.lua, 01:B4D5 를 원본으로
          되돌린 대조 롬은 비어 있어야 함), キメラのつばさ·ルーラ 앞뒤(그 사이 01:A4A7 실행 기록, 첫 칸 00 대조는 실패해야 함), 마법 융단을 펴고 탄 채 걷기.
          VRAM 워드 2000~3FFF·4000~5FFF 의 타일과 BG1·2 타일맵의 채운 칸을 디코더(dq5field)와 견준다
+        세계를 오가는 장면은 ルーラ 1 → 2, キメラのつばさ(세계 2 → 0 → 2), 天空城 이륙(06/08, 02:9779), 52/50 석상
+        이벤트(30/00 에서 걸어 나가 세계 2), 27/00 에서 $1949 = FF 를 쓴 뒤 ルーラ·FF 를 가진 채 1C/00 에서 걸어 나가기도 있다.
+  ending: 엔딩 필드 비행(02:B9D8)에서 원본·tiles 롬의 $1949·BG3 글자 기준·VRAM 워드 4000~5FFF(스태프 롤이 지움)
+  clock: 원본·nibs 롬. 세계 0 밤에 ルーラ 로 세계 1·2 에 내려 걷고 ラナルータ, 세계 0 으로 돌아와 걷고 ラナルータ.
+         $075E 쓰기(lua/dq5worldlog.lua 의 WATCHW)와 덤프마다 2·3번 줄
   fieldpal: (341,56) 에서 $075E 를 여섯 값으로 두고 2·3번 줄 색 1~13 과 11·12번 줄(낮·밤 인물 팔레트)
-  indoor: 01/01 과 세트를 그대로 둔 맵 셋(원본 게임과도 견줌)에서 BG 1~7번 줄
+  indoor: 01/01 과 세트를 그대로 둔 맵 셋(원본 게임과도 견줌)에서 BG 1~7번 줄. 01/01 은 밤에도(새 세트의 밤 목록),
+          06/00 은 플래그 팔레트 세트(2A:8690, 7E:21D4 bit2 → 세트 36 을 10:DDCF 로)와 그 항목을 새 세트 69 로 바꾼 낮·밤
 
   MESENCE=… python sfc/dq5/tools/dq5gfxlimitcheck.py rom/dq5.sfc --state work/state/ship.mss --out work/gfxlimitcheck
 """
@@ -78,23 +84,78 @@ ITEM_SCENES = {
 CARPET = 0x80
 # 세계를 오가는 장면(nibs 롬, 같은 니블인 tiles 롬, 원본 게임에서 함께 돌림). ルーラ 목적지 목록은 7E:2030~2032 의 비트이고
 # FIELD 로 01/00 을 지나면 bit0(ラインハット)이 켜지므로, 한 비트만 더 켜 두면 목록 둘째(down 한 번)가 그 목적지다.
-# 1C/00·30/00 은 아래로 걸어 나가 세계 2 필드에 선다. 이름 → (환경, [(덤프 프레임, 그때 세계)])
+# 1C/00·30/00 은 아래로 걸어 나가 세계 2 필드에 선다. 이름 → (환경, [(덤프 프레임, 그때 세계)], $1949 를 써야 하는 PC).
+# 쓰는 PC 는 lua/dq5worldlog.lua 가 잡는 다음 명령 자리다(2A:FEEC → 2AFEEF, 11:819A → 11819D, 02:9779 → 02977C,
+# 02:B9D8 → 02B9DB, 03:C684 → 03C687).
 RULA = 'a:8,wait:60,right:8,wait:40,a:8,wait:80,' + 'down:6,wait:12,' * 6 + 'a:8,wait:80,'
 RULA_SET = '2063=FF;2044=63;2050=63;2030=00;2032=00;2031='
+DIALOG = 'a:4,wait:60,' * 20
 WORLD_SCENES = {
     'rula-world1': ({'FIELD': '310,60', 'SET': RULA_SET + '20', 'MAXF': '1900',
-                     'TEST': RULA + 'down:6,wait:20,a:8,wait:700'}, [(1600, 1)]),
+                     'TEST': RULA + 'down:6,wait:20,a:8,wait:700'}, [(1600, 1)], {'2AFEEF', '11819D'}),
     'rula-world2': ({'FIELD': '310,60', 'SET': RULA_SET + '80', 'MAXF': '1900',
-                     'TEST': RULA + 'down:6,wait:20,a:8,wait:700'}, [(1600, 2)]),
-    'walk-1C00': ({'TO': '1C/00,33,74,1', 'MAXF': '1500', 'TEST': 'down:60,wait:900'}, [(1400, 2)]),
-    'walk-3000': ({'TO': '30/00,13,25,1', 'MAXF': '1500', 'TEST': 'down:60,wait:900'}, [(1400, 2)]),
+                     'TEST': RULA + 'down:6,wait:20,a:8,wait:700'}, [(1600, 2)], {'2AFEEF', '11819D'}),
+    'walk-1C00': ({'TO': '1C/00,33,74,1', 'MAXF': '1500', 'TEST': 'down:60,wait:900'}, [(1400, 2)], {'2AFEEF'}),
+    'walk-3000': ({'TO': '30/00,13,25,1', 'MAXF': '1500', 'TEST': 'down:60,wait:900'}, [(1400, 2)], {'2AFEEF'}),
     'rula-back': ({'FIELD': '310,60', 'SET': RULA_SET + '20', 'MAXF': '3000',
-                   'TEST': RULA + 'down:6,wait:20,a:8,wait:500,' + RULA + 'a:8,wait:700'}, [(1600, 1), (2500, 0)]),
+                   'TEST': RULA + 'down:6,wait:20,a:8,wait:500,' + RULA + 'a:8,wait:700'}, [(1600, 1), (2500, 0)],
+                  {'2AFEEF', '11819D'}),
+    # ルーラ 로 세계 1(22) 에 내린 뒤 다시 ルーラ 로 세계 2(1C, 목록 셋째).
+    'rula-1to2': ({'FIELD': '310,60', 'SET': RULA_SET + 'A0', 'MAXF': '2700',
+                   'TEST': RULA + 'down:6,wait:20,a:8,wait:500,' + RULA + 'down:6,wait:20,down:6,wait:20,a:8,wait:700'},
+                  [(1600, 1), (2500, 2)], {'2AFEEF', '11819D'}),
+    # 1C/00 에서 걸어 나가 세계 2, ルーラ 로 ラインハット(세계 0), キメラのつばさ 로 마지막에 들른 1C(세계 2). 7E:2194 bit7 은
+    # ラインハット 필드에 내릴 때 첫 필드 이벤트 전투가 붙지 않게 켠다.
+    'chimera-cross': ({'TO': '1C/00,33,74,1', 'MAXF': '3600',
+                       'SET': '2056=A4;2063=FF;2044=63;2050=63;2030=01;2031=00;2032=00;2194|80',
+                       'TEST': 'down:60,wait:600,' + RULA + 'a:8,wait:700,' + ITEM_MENU + 'wait:900'},
+                      [(1000, 2), (2200, 0), (3300, 2)], {'2AFEEF', '11819D'}),
+    # 06/08(天空城 조종 방) (24,9) 에 서면 맵별 루틴 02:9754 가 7E:21D4 bit2(성이 뭍에 앉음)를 보고 02:9779 에서 $1949 = 0,
+    # $1954 = 81 로 두고 필드로 날아오른다. 7E:21DB·21DD 는 성의 필드 자리. (341,56) 은 첫 필드 이벤트 자리라 7E:2194 bit7 로 끈다.
+    'castle-0608': ({'TO': '06/08,24,9,1', 'SET': '21D4|04;21DB=55;21DC=01;21DD=38;21DE=00;2194|80', 'MAXF': '1400',
+                     'TEST': 'wait:800'}, [(700, 0)], {'02977C'}),
+    # 52/50 석상 이벤트(세 반지)로 30/00 (13,12) 에 간 뒤 대화를 넘기고 아래로 걸어 나가 세계 2 필드. 52/50 바닥은 층 2.
+    'statue-5250': ({'TO': '52/50,24,17,2', 'SET': '2190|40;21D8=01;21D9=01;21DA=01', 'MAXF': '4600',
+                     'TEST': 'wait:20,up:80,wait:200,' + DIALOG + 'down:200,wait:100,' + 'a:4,wait:60,' * 10
+                             + 'b:4,wait:30,b:4,wait:30,down:400,wait:600'}, [(3900, 2)], {'2AFEEF'}),
+    # 27/00(그룹 27, 세계 FF): X 로 지도를 여는 00:8134 의 $1954 bit7 갈래(BMI)를 BRA 로 바꿔 실내에서 03:C688 을 부르면
+    # 03:C684 가 $1949 = FF 를 쓴다. 그 뒤 ルーラ 로 세계 1 에 내린다.
+    'ship27-ff': ({'TO': '27/00,12,7,1', 'ROMPATCH': '000137=80', 'SET': RULA_SET + '20', 'MAXF': '2400',
+                   'TEST': 'wait:20,x:12,wait:300,b:4,wait:60,b:4,wait:60,b:4,wait:60,' + RULA
+                           + 'down:6,wait:20,a:8,wait:700'}, [(2000, 1)], {'03C687', '11819D'}),
+    # $1949 = FF 를 가진 채 실내(1C/00)에서 걸어 나가기.
+    'walk-1C00-ff': ({'TO': '1C/00,33,74,1', 'SET': '1949=FF', 'MAXF': '1500', 'TEST': 'down:60,wait:900'},
+                     [(1400, 2)], {'2AFEEF'}),
 }
+# 엔딩 준비 02:F974 를 02/06 인물 스크립트 첫머리(10:9B89)에 걸어 7E:21EA bit7 을 켜면, 맵을 나갈 때 00:CBFA 가
+# 02:B9C3 으로 필드 (399,387)·$1949 = 0 에 둔다(02:B9D8 의 STZ). 01:A4A7 이 필드를 불러 늘린 타일도 보내지만, 그 뒤
+# 스태프 롤 준비 02:FA86 이 BG3 글자 자리 VRAM 워드 4000~5FFF 를 DMA 로 지우고 BG3 글자 기준을 4000 에 둔다. 원본 롬과
+# tiles 롬으로 돌려 그 충돌을 잰다.
+ENDING = {'TO': '02/06,39,9,1', 'SET': '2190|80', 'ROMPATCH': '081B89=3774F902', 'MAXF': '1100', 'TEST': 'wait:900',
+          'READPC': '00BBAC,01A4A7', 'DUMPF': '1000'}
+ENDING_FRAME, ENDING_WRITE = 1000, '02B9DB'
+# $1949 에 3 이상을 써도 되는 장면과 그 PC. 00:BBAC 가 읽는 값은 이 장면에서도 0~2 여야 한다.
+WORLD_FF = {'ship27-ff': '03C687'}
 WORLD_ROMS = ('orig', 'tiles', 'nibs')
 # nibs 롬: 세계마다 늘린 타일(512~1023) 니블을 tiles 롬의 것에서 더 뒤집는 비트. 아래층은 니블 3비트만 쓰므로
 # bit0~2 를 고른다.
 NIB_FLIPS = {'world1': 2, 'world2': 4}
+# 세계 1·2 의 시계(원본 게임과 nibs 롬). 세계 0 에서 밤($075E = 0120, 시간 멈춤 7E:2190 bit1 끔)에 ルーラ 로 그 세계에 내려
+# 걷고 ラナルータ 를 외운 뒤, ルーラ 로 ラインハット(세계 0)에 돌아와 걷고 다시 ラナルータ 를 외운다. ラナルータ 는 주인공 필드
+# 주문 목록(23:BE28) 다섯째 칸(파일 오프셋 11BE2C)을 37 로 바꿔 외우게 한다. 걷는 동안 무작위 전투가 붙지 않게 조우 판정
+# 23:E7C2(00:82B4 가 부름, carry 면 전투)를 CLC / RTL 로 둔다. 시계 00:82C6 은 그 뒤라 그대로 돈다.
+LANA = 'a:8,wait:60,right:8,wait:40,a:8,wait:80,' + 'down:6,wait:12,' * 4 + 'a:8,wait:400,' + 'b:4,wait:30,' * 3 + 'wait:70,'
+CLOCK_SCENES = {
+    f'clock-world{w}': ({'FIELD': '310,60', 'SET': RULA_SET + f'{0x20 if w == 1 else 0x80:02X};075E=20;075F=01;2190&FD',
+                         'ROMPATCH': '11BE2C=37;11E7C2=186B', 'MAXF': '4900', 'WATCHW': '075E,075F',
+                         'READPC': '00BBAC,11826F,11829B', 'DUMPF': ','.join(str(n) for n in range(500, 4801, 100)),
+                         'TEST': RULA + 'down:6,wait:20,a:8,wait:500,left:64,down:64,right:64,up:64,wait:60,' + LANA
+                                 + RULA + 'a:8,wait:500,left:64,right:64,wait:60,' + LANA + 'wait:200'}, w)
+    for w in (1, 2)}
+CLOCK_ROMS = ('orig', 'nibs')
+# 세계를 불러올 때 $075E 를 0 으로 두는 곳(01:9F86·9FA0 의 STX 다음 명령), 시계(00:82C6 갈래의 STA 다음), ラナルータ 가 쓰는 곳.
+CLOCK_RESET = {1: '019F8C', 2: '019FA6'}
+CLOCK_TICK, RANARUTA_WRITE, RANARUTA, RANARUTA_SET = '0082DF', '1182A7', '11826F', '11829B'
 # 속성 값 → 걸을 수 있는지. 늘린 타일 자리(VRAM)도 걷기 앞(700프레임)에 견준다.
 WALLS = {0x80: False, 0x82: False, 0x95: False, 0x45: True, 0x00: True}
 MOVE = {'FIELD': '341,56', 'SETTLE': '300', 'MAXF': '1300', 'DUMPF': '700',
@@ -118,6 +179,12 @@ NEW_MAP = (0x01, 0x01)      # 세트 표에 원래 맵 항목이 있어 표 크�
 SAME_MAPS = [(0x01, 0x00), (0x02, 0x00), (0x21, 0x02)]
 NEW_SET = 69
 INDOOR_FRAME = 700
+# 밤: $075E = 0120 으로 맵에 들어가면 10:DE47 의 JSL $218000 이 밤을 돌려줘 세트의 밤 목록을 읽는다.
+NIGHT_SET = '075E=20;075F=01'
+# 플래그 팔레트 세트 표 2A:8690 의 06/00 항목 [06][00][44][04][24]: 7E:21D4 bit2(天空城 이 뭍에 앉음)면 세트 36 을
+# 10:DDCF 로 부르고 맵 → 세트 표(06/00 은 35)는 건너뛴다. ROMPATCH 로 이 항목의 세트를 새 세트로 바꿔 본다.
+FLAG_MAP, FLAG_ENTRY, FLAG_SET = (0x06, 0x00), 0x2A86A4, 0x24
+FLAG_ON = '21D4|04'
 
 
 def make_roms(original, out):
@@ -267,19 +334,24 @@ def world_log(dump):
     return writes, reads
 
 
-def check_world(name, roms, dirs, frames, nibs, start=None):
+def check_world(name, roms, dirs, frames, nibs, start=None, writers=(), ff=None):
     """세계를 옮긴 뒤 nibs 롬의 늘린 타일 칸 팔레트가 그 세계 입력 니블과 같고(다른 세계 니블과는 모두 다름), 타일 번호·CGRAM 은
     같은 니블 롬과 같은지. 두 롬과 원본 게임의 $1949 쓰기·00:BBAC 호출 기록과 걸은 결과도 견준다.
     roms·dirs 는 WORLD_ROMS 이름 → 롬·덤프, frames 는 [(프레임, 세계)], nibs 는 세계 → 입력 니블,
-    start 는 장면을 시작할 때 서는 필드 세계(실내에서 시작하면 None)."""
+    start 는 장면을 시작할 때 서는 필드 세계(실내에서 시작하면 None), writers 는 $1949 를 써야 하는 PC 들,
+    ff 는 3 이상을 써도 되는 PC(쓰기는 있어야 함). 00:BBAC 가 읽는 값은 늘 0~2 다."""
     logs = {r: world_log(dirs[r]) for r in WORLD_ROMS}
     walks = {r: next(x for x in (dirs[r] / 'warp.txt').read_text().splitlines() if ' test ' in x) for r in WORLD_ROMS}
     require(logs['tiles'] == logs['nibs'], f'{name}: $1949·00:BBAC 기록이 같은 니블 롬과 다름')
     require(len(set(walks.values())) == 1, f'{name}: 걸은 결과가 롬마다 다름 {walks}')
     want = {w for _, w in frames} | ({start} if start is not None else set())
     for r, (writes, reads) in logs.items():
-        require({v for v, _, _ in reads} == want and all(v <= 2 for _, v, _, _ in writes),
+        require({v for v, _, _ in reads} == want,
                 f'{name} {r}: 00:BBAC 의 $1949 가 {sorted({v for v, _, _ in reads})}(기대 {sorted(want)})')
+        high = {pc for pc, v, _, _ in writes if v > 2}
+        require(high == ({ff} if ff else set()), f'{name} {r}: $1949 에 3 이상을 쓴 PC {sorted(high)}(기대 {ff})')
+        missing = set(writers) - {pc for pc, _, _, _ in writes}
+        require(not missing, f'{name} {r}: $1949 를 쓰지 않은 PC {sorted(missing)}')
     out = []
     for n, w in frames:
         tiles = check_tiles(f'{name}-tiles', roms['tiles'], dirs['tiles'], n, dirs['orig'], w)
@@ -301,6 +373,103 @@ def check_world(name, roms, dirs, frames, nibs, start=None):
                     'tiles_rom_cells': tiles['cells_using_512_up'], 'palette_differs_from_tiles_rom': palette_diff})
     return {'case': name, 'walk': walks['nibs'].split(' test ')[1], 'world_writes': logs['nibs'][0],
             'bbac': logs['nibs'][1], 'orig_bbac': logs['orig'][1], 'frames': out}
+
+
+def time_set(times, t):
+    """세계 0 시간대 표([[하한, 벌], …], 하한 차례)에서 $075E = t 가 고르는 벌."""
+    return [k for low, k in times if low <= t][-1]
+
+
+def check_clock(name, rom_path, dumps, world):
+    """세계 world 에 들어가면 $075E 가 0 이 되고 걸어도 ラナルータ 를 외워도 그대로이며 2·3번 줄이 그 세계 한 벌인지,
+    세계 0 으로 돌아오면 0 에서 시계가 다시 가고 ラナルータ 가 듣는지. dumps 는 CLOCK_ROMS 이름 → 덤프."""
+    rom = Rom(rom_path.read_bytes())
+    cur = fgw.current(rom)
+    rows = {r: [x.split() for x in (d / 'world.txt').read_text().splitlines() if x] for r, d in dumps.items()}
+    clock = {r: [x for x in v if x[0] in ('w075E', 'w075F')] for r, v in rows.items()}
+    require(clock['orig'] == clock['nibs'], f'{name}: $075E 쓰기가 원본 게임과 다름')
+    log = rows['orig']
+    resets = {(x[1], x[2]) for x in log if x[0] == 'w075E' and x[1] == CLOCK_RESET[world]}
+    require(resets == {(CLOCK_RESET[world], '00')}, f'{name}: 세계 {world} 불러오기의 $075E = 0 쓰기가 없음')
+    casts = {int(x[2], 16) for x in log if x[0] == 'read' and x[1] == RANARUTA}
+    sets = {int(x[2], 16) for x in log if x[0] == 'read' and x[1] == RANARUTA_SET}
+    require(casts == {world, 0} and sets == {0}, f'{name}: ラナルータ 가 세계 {sorted(casts)} 에서 돌고 {sorted(sets)} 에서 바꿈')
+    writers = {x[1] for x in log if x[0] == 'w075E'}
+    require(writers == {CLOCK_RESET[world], CLOCK_TICK, RANARUTA_WRITE},
+            f'{name}: $075E 를 쓴 곳 {sorted(writers)}')
+    d = dumps['orig']
+    seen = {0: [], world: []}
+    for f in sorted(d.glob('f[0-9]*.wram')):
+        w = f.read_bytes()
+        n = int(f.stem[1:])
+        # 화면이 어두운 프레임(불러오기·ラナルータ 의 페이드)은 팔레트를 옮기는 도중일 수 있어 뺀다.
+        ppu = dict(x.split('=', 1) for x in (d / f'f{n:05d}.ppu.txt').read_text().split())
+        if w[0xBE] & 0x80 or w[0x1001] or w[0x1949] not in seen or ppu['ppu.screenBrightness'] != '15':
+            continue
+        t = w[0x75E] | w[0x75F] << 8
+        got = rows23(frame(d, n, 'cgram'))
+        if w[0x1949] == world:
+            want = cur['palettes'][f'world{world}'][0]
+            require(t == 0, f'{name}: {n}프레임 세계 {world} 에서 $075E = {t:04X}')
+        else:
+            want = cur['palettes']['world0'][time_set(cur['world0_times'], t)]
+        require(got == [want[i] for i in range(30) if i % 15 < 13], f'{name}: {n}프레임 2·3번 줄이 $075E {t:04X} 벌과 다름')
+        seen[w[0x1949]].append((n, t, w[0xB6] | w[0xB7] << 8, w[0xB8] | w[0xB9] << 8))
+    there = seen[world]
+    require(len({(x, y) for _, _, x, y in there}) > 1, f'{name}: 세계 {world} 에서 걸은 덤프가 없음')
+    times0 = [t for _, t, _, _ in seen[0]]
+    require(times0[0] == 0x0120 and times0[-1] == 0x0190 and len(set(times0)) > 3,
+            f'{name}: 세계 0 의 $075E 가 {[f"{t:04X}" for t in times0]}')
+    return {'case': name, 'world': world, 'dumps_in_world': len(there),
+            'positions_in_world': len({(x, y) for _, _, x, y in there}),
+            'world0_075E': [f'{t:04X}' for t in dict.fromkeys(times0)], '075E_writers': sorted(writers),
+            'ranaruta_in_world': sorted(casts), 'ranaruta_changed_in': sorted(sets)}
+
+
+def check_palset(name, rom_path, dump, bcbd, s, alt, orig_dump=None, same=None):
+    """맵에 선 뒤 BG 1~7번 줄이 세트 s 의 낮(alt 면 밤) 목록이고, 그 세트의 다른 쪽 목록·맵 → 세트 표의 세트와는 다른지.
+    orig_dump 를 주면 원본 게임과 같은지(same) 다른지도 본다."""
+    rom = Rom(rom_path.read_bytes())
+    w, cg = frame(dump, INDOOR_FRAME, 'wram'), frame(dump, INDOOR_FRAME, 'cgram')
+    require(w[0xBC:0xBE] == bytes(bcbd) and w[0xBE] & 0x80, f'{name}: 맵이 {w[0xBC]:02X}/{w[0xBD]:02X}')
+    want = dq5map.set_cgram(rom, s, alt)[0x20:0x100]
+    require(cg[0x20:0x100] == want, f'{name}: BG 1~7번 줄이 세트 {s} 의 {"밤" if alt else "낮"} 목록과 다름')
+    other = dq5map.set_cgram(rom, s, not alt)[0x20:0x100]
+    table = dq5map.palette_set(rom, *bcbd)
+    require(other != want or s == table, f'{name}: 세트 {s} 의 낮·밤 목록이 같아 가를 수 없음')
+    if s != table:
+        require(dq5map.set_cgram(rom, table, alt)[0x20:0x100] != want, f'{name}: 맵 표의 세트 {table} 와 같아 가를 수 없음')
+    out = {'case': name, 'map': f'{bcbd[0]:02X}/{bcbd[1]:02X}', 'set': s, 'night': alt, 'map_table_set': table,
+           '075E': f'{w[0x75E] | w[0x75F] << 8:04X}'}
+    if orig_dump is not None:
+        eq = cg[0x20:0x100] == frame(orig_dump, INDOOR_FRAME, 'cgram')[0x20:0x100]
+        require(eq == same, f'{name}: 원본 게임과 {"같음" if eq else "다름"}')
+        out['same_as_original'] = eq
+    return out
+
+
+def check_ending(name, roms, dirs):
+    """엔딩의 필드 비행: 원본·tiles 롬 모두 02:B9D8 이 $1949 = 0 을 쓰고 01:A4A7 로 필드를 불러오며, BG3 글자 기준이 VRAM
+    워드 4000 이고 4000~5FFF 가 비어 있는지. tiles 롬은 블록이 늘린 타일을 쓰므로 그 칸이 빈 타일로 보인다(충돌)."""
+    out = {'case': name}
+    for r in ('orig', 'tiles'):
+        d = dirs[r]
+        writes, reads = world_log(d)
+        require({(pc, v) for pc, v, _, _ in writes} == {('2AFEEF', 0), (ENDING_WRITE, 0)} or
+                {(pc, v) for pc, v, _, _ in writes} == {(ENDING_WRITE, 0)}, f'{name} {r}: $1949 쓰기 {writes}')
+        w, vram = frame(d, ENDING_FRAME, 'wram'), frame(d, ENDING_FRAME, 'vram')
+        ppu = dict(x.split('=', 1) for x in (d / f'f{ENDING_FRAME:05d}.ppu.txt').read_text().split())
+        require(w[0x21EA] & 0x80 and not w[0xBE] & 0x80 and w[0x1949] == 0, f'{name} {r}: 엔딩 필드가 아님')
+        require(ppu['ppu.layers[2].chrAddress'] == str(0x4000), f'{name} {r}: BG3 글자 기준 {ppu["ppu.layers[2].chrAddress"]}')
+        require(not any(vram[0x8000:0xC000]), f'{name} {r}: VRAM 워드 4000~5FFF 가 비어 있지 않음')
+        cells = sum((vram[i] | vram[i + 1] << 8) & 0x3FF >= fgw.TILES for i in range(0, 0x2000, 2))
+        out[r] = {'1949_writes': [x[:2] for x in writes], 'bbac': reads, 'bg3_chr': '4000',
+                  'cells_using_512_up': cells}
+    loads = [x for x in (dirs['tiles'] / 'world.txt').read_text().split('\n') if x.startswith('read 01A4A7')]
+    require(loads, f'{name}: tiles 롬에서 01:A4A7 이 돌지 않음')
+    require(out['orig']['cells_using_512_up'] == 0 and out['tiles']['cells_using_512_up'],
+            f'{name}: 늘린 타일 칸 원본 {out["orig"]["cells_using_512_up"]}·tiles {out["tiles"]["cells_using_512_up"]}')
+    return out
 
 
 def check_battle(name, rom_path, dump, orig):
@@ -471,11 +640,18 @@ def main():
                                                      NEXT=str(gfx), DUMPF=','.join(map(str, frames)))))
         worldlog = HERE / 'lua/dq5worldlog.lua'
         world_roms = {'orig': original, 'tiles': tiles, 'nibs': nibs}
-        for k, (env, frames) in WORLD_SCENES.items():
+        for k, (env, frames, _) in WORLD_SCENES.items():
             for r in WORLD_ROMS:
                 luas[f'{k}-{r}'] = worldlog
                 cases.append((f'{k}-{r}', world_roms[r], dict(env, SETTLE='60', NEXT=str(gfx),
                                                                  DUMPF=','.join(str(n) for n, _ in frames))))
+        for r in ('orig', 'tiles'):
+            luas[f'ending-{r}'] = worldlog
+            cases.append((f'ending-{r}', world_roms[r], dict(ENDING, SETTLE='60', NEXT=str(gfx))))
+        for k, (env, _) in CLOCK_SCENES.items():
+            for r in CLOCK_ROMS:
+                luas[f'{k}-{r}'] = worldlog
+                cases.append((f'{k}-{r}', world_roms[r], dict(env, SETTLE='60', NEXT=str(gfx))))
         cases += [('redraw-tiles', tiles, dict(WIPE, NEXT=str(gfx))),
                   ('redraw-control', control, dict(WIPE, NEXT=str(gfx)))]
         for t in TIME_CASES:
@@ -487,6 +663,18 @@ def main():
             env = {'TO': f'{m[0]:02X}/{m[1]:02X},{rom.u8(a + 1) // 2},{rom.u8(a + 2) // 2},1',
                    'DUMPF': str(INDOOR_FRAME), 'SETTLE': '400', 'MAXF': '1100'}
             cases += [(f'indoor-{m[0]:02X}{m[1]:02X}-{k}', r, env) for k, r in (('orig', original), ('grow', indoor))]
+            if m == NEW_MAP:
+                cases += [(f'night-{m[0]:02X}{m[1]:02X}-{k}', r, dict(env, SET=NIGHT_SET))
+                          for k, r in (('orig', original), ('grow', indoor))]
+        a = map_pointer(rom, *FLAG_MAP)
+        require(rom.d[lorom(FLAG_ENTRY):lorom(FLAG_ENTRY) + 5] == bytes([*FLAG_MAP, 0x44, 0x04, FLAG_SET]),
+                f'2A:8690 의 06/00 항목이 {rom.d[lorom(FLAG_ENTRY):lorom(FLAG_ENTRY) + 5].hex()}')
+        flag = {'TO': f'{FLAG_MAP[0]:02X}/{FLAG_MAP[1]:02X},{rom.u8(a + 1) // 2},{rom.u8(a + 2) // 2},1',
+                'DUMPF': str(INDOOR_FRAME), 'SETTLE': '400', 'MAXF': '1100', 'SET': FLAG_ON}
+        newset = f'{lorom(FLAG_ENTRY + 4):X}={NEW_SET:02X}'
+        cases += [('flag-orig', original, flag), ('flag-grow', indoor, flag),
+                  ('flag-new', indoor, dict(flag, ROMPATCH=newset)),
+                  ('flag-new-night', indoor, dict(flag, ROMPATCH=newset, SET=f'{FLAG_ON};{NIGHT_SET}'))]
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
             dirs = dict(zip([c[0] for c in cases], pool.map(
                 lambda c: gwc.run(mesence, c[1], luas.get(c[0], gfx), c[2], out / c[0], libdir, state), cases)))
@@ -503,9 +691,9 @@ def main():
             results.append(check_tiles(f'nibs-world{w}', nibs, dirs[f'nibs-{k}'], SETTLE_FRAME, d[k][1], w))
             results.append(check_nibbles(f'nibs-world{w}-palette', dirs[f'nibs-{k}'], w, want))
         nibs_in = {w: nib['worlds'][f'world{w}']['tile_palettes'] if w else nib['tile_palettes'] for w in range(3)}
-        for k, (env, frames) in WORLD_SCENES.items():
+        for k, (env, frames, writers) in WORLD_SCENES.items():
             results.append(check_world(k, world_roms, {r: dirs[f'{k}-{r}'] for r in WORLD_ROMS}, frames, nibs_in,
-                                       0 if 'FIELD' in env else None))
+                                       0 if 'FIELD' in env else None, writers, WORLD_FF.get(k)))
         results += [check_move('move-tiles', tiles, dirs['move-tiles'], True),
                     *(check_move(f'move-{v:02x}', out / f'wall-{v:02x}.sfc', dirs[f'move-{v:02x}'], ok)
                       for v, ok in WALLS.items()),
@@ -518,6 +706,18 @@ def main():
         for m in [NEW_MAP] + SAME_MAPS:
             key = f'indoor-{m[0]:02X}{m[1]:02X}'
             results.append(check_indoor(key, indoor, dirs[f'{key}-grow'], dirs[f'{key}-orig'], m, m == NEW_MAP))
+        results.append(check_palset('night-0101-orig', original, dirs['night-0101-orig'], NEW_MAP,
+                                    dq5map.palette_set(rom, *NEW_MAP), True))
+        results.append(check_palset('night-0101', indoor, dirs['night-0101-grow'], NEW_MAP, NEW_SET, True,
+                                    dirs['night-0101-orig'], False))
+        results.append(check_palset('flag-orig', original, dirs['flag-orig'], FLAG_MAP, FLAG_SET, False))
+        results.append(check_palset('flag', indoor, dirs['flag-grow'], FLAG_MAP, FLAG_SET, False, dirs['flag-orig'], True))
+        results.append(check_palset('flag-new', indoor, dirs['flag-new'], FLAG_MAP, NEW_SET, False, dirs['flag-orig'],
+                                    False))
+        results.append(check_palset('flag-new-night', indoor, dirs['flag-new-night'], FLAG_MAP, NEW_SET, True))
+        results.append(check_ending('ending', world_roms, {r: dirs[f'ending-{r}'] for r in ('orig', 'tiles')}))
+        for k, (_, w) in CLOCK_SCENES.items():
+            results.append(check_clock(k, original, {r: dirs[f'{k}-{r}'] for r in CLOCK_ROMS}, w))
         (out / 'results.json').write_text(json.dumps(results, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
         print(f'{len(results)}/{len(results)} 통과')
         print(json.dumps(results, ensure_ascii=False))

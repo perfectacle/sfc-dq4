@@ -11,6 +11,9 @@ MesenCE 에서 확인한다.
   한 걸음 내려가 00F1(밤)이 된 뒤를 덤프. 세계 1·2 는 $1949 를 고정하고 (50,28). grow 롬으로 이벤트 전투를 이기고
   돌아온 뒤, 배에 타고 돌다 내린 뒤에도 16벌이 차례로 도는지 보고, 그동안 7E:C000~DFFF 의 CPU 접근을
   lua/dq5rangewatch.lua 로 모아 벌을 푼 뒤 7E:CE00~D3FF 를 DMA 말고 건드린 곳이 없는지 본다.
+  세계를 옮기는 장면(ルーラ 0 → 1 → 2·1 → 0, キメラのつばさ 2 → 0 → 2, 52/50 석상 이벤트, 융단, 天空城 이륙)도 grow 롬으로
+  돌려 내린 뒤 창마다 VRAM 타일이 그 세계 벌이고 16벌이 차례로 도는지, 필드를 불러올 때마다 벌을 푼 뒤 7E:CE00~D3FF 에
+  DMA 말고 닿은 것이 없는지(RWLOG) 본다.
   그룹 50 이상 맵 18개는 순간이동해 맵별 루틴 직후(15:F7EE).
 
   MESENCE=… python sfc/dq5/tools/dq5fieldgrowcheck.py rom/dq5.sfc --state work/state/ship.mss --out work/fieldgrowcheck
@@ -30,6 +33,7 @@ ROOT = HERE.parents[2]
 sys.path.insert(0, str(HERE))
 import dq5fieldgfxcheck as fgc  # noqa: E402
 import dq5fieldgfxwrite as fgw  # noqa: E402
+import dq5gfxlimitcheck as glc  # noqa: E402
 import dq5gfxwritecheck as gwc  # noqa: E402
 from dq5field import tile_word  # noqa: E402
 from dq5map import Rom, map_pointer  # noqa: E402
@@ -61,6 +65,19 @@ SHIP = {'FIELD': '328,39', 'SET': '21B5|80;21CD=48;21CE=01;21CF=25;21D0=00', 'SE
         'DUMPF': '900', 'EVERY': '1', 'FROM': '1110', 'TO': '1290', **WATCH,
         'TEST': 'up:60,wait:60,left:200,up:200,right:200,down:200,left:200,wait:300'}
 OBJ_PALETTES = 0x0496D6
+# 세계를 옮기는 장면(dq5gfxlimitcheck 의 세계 장면과 같은 입력). grow 롬으로 돌리며 7E:C000~DFFF 의 접근을 프레임마다 모으고
+# (RWLOG), 내린 뒤 서 있는 창마다 매 프레임 덤프한다. 이름 → (환경, [(창 시작, 끝, 세계)], 그때 $1954).
+MOVES = {
+    'rula-1to2': (glc.WORLD_SCENES['rula-1to2'][0], [(1200, 1360, 1), (2200, 2360, 2)], 0),
+    'rula-back': (glc.WORLD_SCENES['rula-back'][0], [(1200, 1360, 1), (2300, 2460, 0)], 0),
+    'chimera-cross': (glc.WORLD_SCENES['chimera-cross'][0], [(700, 860, 2), (1900, 2060, 0), (2900, 3060, 2)], 0),
+    'statue-5250': (glc.WORLD_SCENES['statue-5250'][0], [(3400, 3560, 2)], 0),
+    'carpet': ({'FIELD': '310,60', 'SET': '2056=CC', 'MAXF': '2000',
+                'TEST': glc.ITEM_MENU + 'wait:300,left:32,up:32,right:32,wait:300'}, [(1100, 1260, 0)], 0x80),
+    'castle-0608': (glc.WORLD_SCENES['castle-0608'][0], [(600, 760, 0)], 0x81),
+}
+# 움직이는 타일 벌을 푸는 2B:8039~ 는 롬 → $2180 DMA 라 쓰기 PC 가 DMA 를 건 자리 언저리(2B:8040·8063·8082)로 잡힌다.
+ANIM_UNPACK = {'2B8040', ANIM_WRITER, '2B8082'}
 
 
 def make_roms(original, out):
@@ -206,6 +223,57 @@ def check_scene(name, rom_path, dump, window, before, after):
             'after_load': f'7E:CE00~D3FF 접근은 {ANIM_DMA} DMA 읽기뿐(벌 풀기 마지막 {max(loads)}프레임)'}
 
 
+def spare_loads(name, dump):
+    """lua/dq5rangewatch.lua 의 rwlog.txt 에서 필드를 불러올 때마다 움직이는 타일 벌을 푼 프레임 묶음과, 7E:CE00~D3FF 에 닿은
+    DMA 읽기·벌 풀기 말고의 접근이 모두 어느 벌 풀기보다 앞서는지. 실내 셀 버퍼·타일 RLE 풀기도 이 자리를 쓰므로,
+    필드에 올라선 뒤 벌을 다시 풀기 전에 다른 것이 닿으면 안 된다."""
+    rows = [x.split() for x in (dump / 'rwlog.txt').read_text().splitlines() if x]
+    ev = [(int(r[0]), r[1], r[2]) for r in rows if int(r[3], 16) <= SPARE[1] and int(r[4], 16) >= SPARE[0]]
+    unpack = sorted({n for n, k, pc in ev if k == 'w' and pc in ANIM_UNPACK})
+    loads = []
+    for n in unpack:
+        if loads and n - loads[-1][1] <= 2:
+            loads[-1][1] = n
+        else:
+            loads.append([n, n])
+    other = [(n, k, pc) for n, k, pc in ev if not (k == 'w' and pc in ANIM_UNPACK) and (k, pc) != ('r', ANIM_DMA)]
+    late = [e for e in other if not any(a > e[0] for a, _ in loads)]
+    require(loads and not late, f'{name}: 벌을 푼 뒤 7E:CE00~D3FF 에 닿은 것 {late[:5]}')
+    return loads, len({pc for _, _, pc in other})
+
+
+def check_move(name, rom_path, dump, windows, vehicle):
+    """세계를 옮긴 뒤 서 있는 창마다 VRAM 타일이 그 세계 벌(다른 세계 벌과는 다름)이고 니블을 바꾼 타일 칸이 그 세계 니블의
+    디코더 워드이며, 16벌이 차례로 도는지. 7E:CE00~D3FF 는 spare_loads."""
+    rom = Rom(rom_path.read_bytes())
+    cur = fgw.current(rom)
+    out = []
+    for lo, hi, world in windows:
+        for n in (lo, hi):
+            w = frame(dump, n, 'wram')
+            require(w[0x1949] == world and not w[0xBE] & 0x80 and w[0x1954] == vehicle and w[0x1001] == 0,
+                    f'{name}: {n}프레임이 세계 {world} 필드·$1954 {vehicle:02X} 가 아님')
+        vram = frame(dump, lo, 'vram')
+        got = fgc.field_vram_tiles(vram)
+        diff = {k: sum(got[t] != v[0][t * 32:t * 32 + 32] for t in range(fgw.TILES) if t not in fgc.ANIM_TILES)
+                for k, v in cur['worlds'].items()}
+        require(diff[f'world{world}'] == 0 and all(v for k, v in diff.items() if k != f'world{world}'),
+                f'{name}: {lo}프레임 타일이 세계 벌과 다른 수 {diff}')
+        # 타일맵 전체는 天空城 그림·실내에서 남은 가장자리 줄 같은 필드 밖 칸이 섞여 디코더와 견줄 수 없다. 세계마다 니블을
+        # 바꾼 타일 칸만 본다(화면에 없으면 0칸).
+        cells = {t: sum(v & 0x1FFF == tile_word(rom, t, u, world) & 0x1FFF for u, v in fgc.tilemap_words(vram, t))
+                 for t in sorted({WORLD_TILE, *NIB_TILES.values()})}
+        shown = {t: len(fgc.tilemap_words(vram, t)) for t in cells}
+        require(cells == shown, f'{name}: {lo}프레임 니블을 바꾼 타일 칸 {shown} 가운데 세계 {world} 워드 {cells}')
+        row = {'window': f'{lo}~{hi}', 'world': world, 'tiles_differ_from_other_worlds':
+               {k: v for k, v in diff.items() if k != f'world{world}'}, 'nibble_tile_cells': shown}
+        row['anim_order'] = anim_order(name, dump, range(lo, hi + 1), cur['anim_sets'])
+        out.append(row)
+    loads, others = spare_loads(name, dump)
+    return {'case': name, 'vehicle': f'{vehicle:02X}', 'windows': out, 'anim_loads': [a for a, _ in loads],
+            'other_pcs_before_unpack': others}
+
+
 def check_high(name, rom_path, dump, orig_dump, bcbd):
     rom = Rom(rom_path.read_bytes())
     buf, chr_map, bank = fgc.expect_map(rom, bcbd, False)
@@ -256,6 +324,10 @@ def main():
                  *[(f'world{w}-{k}', r, gfx, world[w]) for w in (1, 2) for k, r in (('orig', original), ('grow', grow))],
                  ('battle-grow', grow, watch, dict(BATTLE, NEXT=str(gfx))),
                  ('ship-grow', grow, watch, dict(SHIP, NEXT=str(gfx)))]
+        for k, (env, windows, _) in MOVES.items():
+            dumpf = ','.join(str(n) for lo, hi, _ in windows for n in range(lo, hi + 1))
+            cases.append((f'move-{k}', grow, watch, dict(env, WATCHR=WATCH['WATCHR'], RWLOG='1', SETTLE='60',
+                                                          DUMPF=dumpf, NEXT=str(gfx))))
         for m in maps:
             a = map_pointer(rom, *m)
             env = {'TO': f'{m[0]:02X}/{m[1]:02X},{rom.u8(a + 1) // 2},{rom.u8(a + 2) // 2},1', 'AT': '15F7EE',
@@ -276,6 +348,8 @@ def main():
         results.append(check_scene('ship-grow', grow, dirs['ship-grow'], range(1110, 1291),
                                    (900, lambda w: w[0x1954] == 0x03, '배에 탐($1954 = 03)'),
                                    (1110, lambda w: (w[0xB6], w[0xB8]) != (328 & 0xFF, 39), '배에서 내려 옮겨 감')))
+        for k, (_, windows, vehicle) in MOVES.items():
+            results.append(check_move(k, grow, dirs[f'move-{k}'], windows, vehicle))
         high_results = []
         for m in maps:
             key = f'high-{m[0]:02X}{m[1]:02X}'
