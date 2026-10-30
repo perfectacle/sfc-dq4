@@ -19,6 +19,7 @@ SHAPES = {0: (2, 2, 1, [2, 2]), 1: (4, 4, 6, [4, 4, 4, 4]), 2: (2, 2, 1, [1, 1])
 HEADS = {0: 0, 1: 1, 2: 2, 3: 3}
 SLOTS = {0: 1, 1: 6, 2: 1, 3: 1}
 FOUND = {((0, 8, 0),): 'a', ((0, 4, 0), (1, 1, 0)): 'b'}
+SUMMONS = {}                    # 몬스터 → 부르기로 부르는 몬스터
 
 
 def head(w, h):
@@ -33,6 +34,7 @@ class Fakes:
                       mock('dq5monlimits.M.slot_count', side_effect=lambda d: SLOTS[d['g']]),
                       mock('dq5monlimits.M.header', side_effect=lambda rom, g: head(*SHAPES[g][:2])),
                       mock('dq5monlimits.M.head', side_effect=lambda rom, g: HEADS[g]),
+                      mock('dq5monlimits.summoned', side_effect=lambda rom, m: list(SUMMONS.get(m, ()))),
                       mock('dq5monlimits.M.COUNT', 2)]
         for m in self.mocks:
             m.start()
@@ -57,6 +59,9 @@ class PlaceTests(unittest.TestCase):
         # 4x14 칸이면 줄 0 의 상자 위가 $30 이라 첫 줄 번호가 -1 이다. 그 줄은 표 끝(31)에 돌아가 세지 않는다.
         kept, _, bands = M.place([(0, 1, 0, head(4, 14), 1, [4] * 14)])
         self.assertEqual((kept[0][4], kept[0][1], bands[31], bands[:13]), (0x30, 1, 0, [4] * 13))
+        # 몬스터 E4 는 들어올림에서 2 를 더 빼(22:930A) 어느 줄이든 상자가 2 아래다.
+        self.assertEqual([M.place([(m, 1, flag, head(14, 9), 1, [1] * 9)])[0][0][4]
+                          for m in (0xE3, 0xE4) for flag in (0, 1, 0x80)], [0x58, 0x40, 0x40, 0x5A, 0x42, 0x42])
 
 
 class LimitTests(unittest.TestCase):
@@ -97,16 +102,28 @@ class LimitTests(unittest.TestCase):
 
     def test_losses_size(self):
         # 그림 1 을 4x14 칸으로 키우면 줄 0 의 상자 위가 $A0 - 112 = $30 이라 줄마다 타일 표(7E:2F00) 앞이다.
-        # 4x5 칸이면 위는 $78 이고, 세로 칸 합은 b 가 2 + 5 = 7 로 원래 가장 큰 6(b 의 2 + 4) 을 넘는다.
-        with Fakes():
+        # 4x5 칸이면 위는 $78 이고, 세로 칸 합은 b 가 2 + 5 = 7 이다. 한도를 7 로 두면 받고, 몬스터 0 이 그림 2(2칸)·
+        # 3(2칸)의 몬스터를 부르면 빈 무리 칸 둘에 둘 다 올 수 있어 7 + 4 = 11 이 된다.
+        with Fakes(), mock('dq5monlimits.ROW_LIMIT', 7):
             high = L.losses(None, {1: (6, [4] * 14, 6, head(4, 14))}, found=FOUND)
-            rows = L.losses(None, {1: (6, [4] * 5, 6, head(4, 5))}, found=FOUND)
+            fits = L.losses(None, {1: (6, [4] * 5, 6, head(4, 5))}, found=FOUND)
+            with mock.dict(SUMMONS, {0: (2, 3, 2)}), mock('dq5monlimits.M.COUNT', 4):
+                rows = L.losses(None, {1: (6, [4] * 5, 6, head(4, 5))}, found=FOUND)
             same = L.losses(None, {1: (6, [4] * 4, 6, head(4, 4))}, found=FOUND)
             wide = L.losses(None, {0: (1, [2, 2], 1, head(4, 2))}, found=FOUND)
         self.assertEqual([x[4] for x in high], ['몬스터 01 상자 위 y $30 < $38'])
-        self.assertEqual([x[4] for x in rows], ['그림 세로 칸 7개 > 6개'])
+        self.assertEqual(fits, [])
+        self.assertEqual([x[4] for x in rows], ['그림 세로 칸 11개 > 7개'])
         self.assertEqual(same, [])
         self.assertEqual([(x[3], x[4]) for x in wide], [('a', '덜 놓임')])   # 가로 4칸 8마리는 줄 폭 28 을 넘음
+
+    def test_summoned(self):
+        # 몬스터 1 의 행동 여섯(23:8000 + 25 + 11~16)에 AE·B5 와 부르기가 아닌 AD·B6 이 섞여 있다.
+        data = bytearray(lorom(0x238000) + 25 * 2)
+        at = lorom(0x238000) + 25 + 0x11
+        data[at:at + 6] = bytes([0xAD, 0xAE, 0x00, 0xB5, 0xB6, 0xAE])
+        self.assertEqual(L.summoned(Rom(bytes(data)), 1), [0x1E, 0xCF, 0x1E])
+        self.assertEqual(L.summoned(Rom(bytes(data)), 0), [])
 
     def test_slot_count(self):
         pieces = [(0, 0, True, [], False), (16, 0, True, [], False), (0, 0, True, [], True)] + \

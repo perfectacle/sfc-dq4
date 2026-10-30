@@ -13,6 +13,12 @@
   무리 표    7E:0C3D(가로 칸)·0C42(세로 칸 × 8)·0C5B(들어올림 × 8)·0C2E·0C33(그림자 보정)·0C38(그림자 모양)·
              0C51·0C56(타격 기준점)이 그 롬의 머리와 같은지(22:92C2)
   자리·줄 목록 7E:0D3D(그림)·0D4D(첫 16x16 자리)·0D6D(줄 목록 첫 칸)가 그림을 푸는 차례대로 0 부터 이어지는지
+  그림자     같은 전투를 그림자 모양을 0 으로 덮은 롬에서도 싸워, 두 화면이 다른 픽셀이 모두 그래픽 형식 「그림자」의 식
+             (스크린샷 y = 상자 위 + 8h + (+2) - 24 + dy, x = 상자 왼쪽 + 4w + (+1) + 1 + 구간 x)의 자리이고, 식의 자리 가운데
+             안 보인 픽셀은 몬스터 OBJ 아래인지. 아래 창(스크린샷 y 152 부터)은 견주지 않는다
+타격 효과는 큰 몬스터 1마리·작은 몬스터 1마리 전투에서 따로 본다(dq5hitlog.lua, A 를 눌러 싸우고 주인공 HP 를 999 로 고정).
+  기준 칸    22:DB3D 가 7E:9E78·9E79 에 둔 값이 layout 의 상자로 센 (x / 8 + (+3), y / 8 + (+4) - 7)과 같은지
+  효과 그림  두 프레임 뒤 BG3 타일맵에서 바뀐 칸을 기준 칸에서 잰 자리가 원본 롬과 고친 롬에서 같은지(같은 차례의 타격끼리)
 
   MESENCE=… python sfc/dq5/tools/dq5monsizecheck.py rom/dq5.sfc --state work/state/ship.mss
 """
@@ -30,13 +36,18 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dq5mongfx as M  # noqa: E402
-from dq5map import Rom  # noqa: E402
+from dq5map import Rom, lorom  # noqa: E402
 from dq5monlimits import Pictures  # noqa: E402
 from dq5monwrite import FORMAT, following_table, picture_grid  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 BIG, SMALL, PLAIN = (0x4F, 0xE2), (0x1C, 0xE6), 0x00     # (그림, 몬스터), 고치지 않는 몬스터(スライム)
 DUMPF = '1200,1400'
+SHOT_TOP = 7                    # MesenCE 스크린샷 y = OAM y - 7
+WINDOW_TOP = 152                # 이 전투에서 아래 창이 덮기 시작하는 스크린샷 y
+SHADOWS = 0x22B4FE
+HIT_SET, HIT_MAXF = 0x22DB6D, 2200                        # 22:DB6A STA $9E79 다음 PC, dq5hitlog.lua 를 멈출 프레임
+ATTACK = 'wait:300,' + 'a:8,wait:40,' * 25
 GROUP_TABLE = {'w': 0x0C3D, 'h8': 0x0C42, 'raise8': 0x0C5B, 'shadow_dx': 0x0C2E, 'shadow_dy': 0x0C33,
                'shadow': 0x0C38, 'hit_x': 0x0C51, 'hit_y': 0x0C56}
 
@@ -77,7 +88,7 @@ def tool(name, *args):
                    timeout=600)
 
 
-def run(rom, name, groups, out, state, mesence, libdir):
+def run(rom, name, groups, out, state, mesence, libdir, lua='dq5gfxdump.lua', **extra):
     dest = out / name
     dest.mkdir()
     env = {k: v for k, v in os.environ.items()
@@ -85,11 +96,82 @@ def run(rom, name, groups, out, state, mesence, libdir):
                         'WAGON', 'EVERY', 'TO')}
     env.update(LIBDIR=str(libdir), STATE=str(state), SHOT_DIR=str(dest), MAXF='1600', SETTLE='300',
                FIELD='341,56', BATTLE=','.join(f'{m:02X}:{n}' for m, n, _ in groups), TEST='wait:900', DUMPF=DUMPF)
+    env.update(extra)
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5gfxdump.lua'),
+        subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua' / lua),
                         '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
                        check=True, timeout=240)
     return dest
+
+
+def shadowless(rom_path, dest):
+    """머리 +0 의 그림자 모양(bit0-4)을 그림 BIG·SMALL·고치지 않는 몬스터의 그림 모두 0 으로 덮은 롬."""
+    data = bytearray(rom_path.read_bytes())
+    rom = Rom(bytes(data))
+    with following_table():
+        for g in (BIG[0], SMALL[0], M.monster(rom, PLAIN)[0]):
+            data[lorom(M.head(rom, g))] &= 0xE0
+    dest.write_bytes(bytes(data))
+    return dest
+
+
+def shadow_pixels(rom, groups):
+    """layout 의 상자마다 그림자 모양의 가로 구간을 스크린샷 좌표로 늘어놓은 픽셀 모음."""
+    out = set()
+    with following_table():
+        for m, bx, by in M.layout(rom, list(groups)):
+            hd = M.header(rom, M.monster(rom, m)[0])
+            if not hd['shadow']:
+                continue
+            a = 0x220000 | rom.u16(SHADOWS + hd['shadow'] * 2)
+            for i in range(rom.u8(a)):
+                dy, left, right = (rom.u8(a + 1 + i * 3 + j) for j in range(3))
+                y = by + 8 * hd['h'] + hd['shadow_dy'] - 24 + dy
+                x = bx + 4 * hd['w'] + hd['shadow_dx'] + 1
+                out.update((x + k, y) for k in range(left, right))
+    return out
+
+
+def look_shadow(rom, dest, plain, groups):
+    """그림자 있는 전투(dest)와 그림자 모양 0 인 전투(plain)의 화면 차이를 식의 자리와 견준다."""
+    want = shadow_pixels(rom, groups)
+    out = {}
+    for tag in DUMPF.split(','):
+        name = f'f{int(tag):05d}'
+        a = Image.open(dest / f'{name}.png').convert('RGB')
+        b = Image.open(plain / f'{name}.png').convert('RGB')
+        pa, pb = a.load(), b.load()
+        # 창 안(커서 깜빡임 등)은 두 실행이 어긋날 수 있고 그림자도 그 아래에 있으면 보이지 않으므로 창 위만 견준다.
+        seen = {(x, y) for y in range(WINDOW_TOP) for x in range(a.size[0]) if pa[x, y] != pb[x, y]}
+        grid = M.oam_grid((dest / f'{name}.oam').read_bytes(), (dest / f'{name}.vram').read_bytes())
+        # oam_grid 의 줄은 OAM y + 1 이라 스크린샷 y 는 그보다 SHOT_TOP + 1 작다.
+        covered = {(x, y - SHOT_TOP - 1) for y in range(224) for x in range(256) if grid[y][x]}
+        hidden = {p for p in want - seen if p not in covered and p[1] < WINDOW_TOP}
+        out[name] = {'seen': len(seen), 'want': len({p for p in want if p[1] < WINDOW_TOP}), 'outside': len(seen - want), 'under_obj': len(want & covered - seen),
+                     'missing': len(hidden), 'match': bool(seen) and seen <= want and not hidden}
+    return out
+
+
+def hits(dest):
+    """dq5hitlog.lua 결과 → [(프레임, (x, y), 기준 칸에서 잰 BG3 바뀐 칸들)]. 22:DB3D 가 쓴 것만."""
+    changed = {}
+    for line in (dest / 'bg3.txt').read_text(encoding='utf-8').split('\n'):
+        if line.strip():
+            h, col, row, value = line.split()
+            changed.setdefault(int(h), []).append((int(col), int(row), value))
+    out = []
+    for line in (dest / 'hits.txt').read_text(encoding='utf-8').split('\n'):
+        if not line.strip():
+            continue
+        n, x, y, pc = line.split()
+        bank, addr = pc.split(':')
+        if int(bank, 16) << 16 | int(addr, 16) != HIT_SET:
+            continue
+        x, y = int(x, 16), int(y, 16)
+        # 창 글자(위 상태 창·아래 창)도 BG3 라, 몬스터가 있는 줄 5~19 만 본다.
+        rel = sorted((c - x, r - y, v) for c, r, v in changed.get(int(n), []) if 5 <= r < 20 and v != '0000')
+        out.append((int(n), (x, y), rel))
+    return out
 
 
 def predicted(rom, groups):
@@ -160,6 +242,8 @@ def look(rom, dest, groups):
 
 
 def passed(result):
+    if not all(v['match'] for v in result['shadow'].values()):
+        return False
     for tag in DUMPF.split(','):
         r = result[f'f{int(tag):05d}']
         if not (r['objs_match'] and r['loaded_match'] and all(t['match'] for t in r['table'].values())
@@ -205,16 +289,45 @@ def main():
         shutil.copytree(krlua, libdir)
         shutil.copyfile(HERE / 'lua/dq5warp.lua', libdir / 'boot.lua')
         results, failed = {'sizes': sizes}, []
+        roms = (('original', original, shadowless(original, out / 'original-noshadow.sfc')),
+                ('edited', edited, shadowless(edited, out / 'edited-noshadow.sfc')))
         for case, groups in battles.items():
-            for kind, rom in (('original', original), ('edited', edited)):
+            for kind, rom, plain in roms:
                 name = f'{case}-{kind}'
-                results[name] = look(Rom(rom.read_bytes()), run(rom, name, groups, out, state, mesence, libdir), groups)
+                read = Rom(rom.read_bytes())
+                dest = run(rom, name, groups, out, state, mesence, libdir)
+                results[name] = look(read, dest, groups)
+                results[name]['shadow'] = look_shadow(read, dest, run(plain, f'{name}-noshadow', groups, out, state,
+                                                                      mesence, libdir), groups)
                 if not passed(results[name]):
                     failed.append(name)
+        for case, m in (('hit-big', BIG[1]), ('hit-small', SMALL[1])):
+            got = {}
+            for kind, rom, _ in roms:
+                read = Rom(rom.read_bytes())
+                with following_table():
+                    (_, bx, by), = M.layout(read, [(m, 1, 0)])
+                    hd = M.header(read, M.monster(read, m)[0])
+                want = (bx // 8 + hd['hit_x'], by // 8 + hd['hit_y'] - 7)
+                got[kind] = hits(run(rom, f'{case}-{kind}', ((m, 1, 0),), out, state, mesence, libdir, 'dq5hitlog.lua',
+                                     TEST=ATTACK, MAXF=str(HIT_MAXF), POKE='7E2042=E7,7E2043=03'))
+                results[f'{case}-{kind}'] = {'want': want, 'hits': [[n, list(at), len(rel)] for n, at, rel in got[kind]],
+                                             'match': bool(got[kind]) and all(at == want for _, at, _ in got[kind])}
+            same = len(got['original']) == len(got['edited']) and all(
+                a[2] == b[2] for a, b in zip(got['original'], got['edited']))
+            for kind in ('original', 'edited'):
+                results[f'{case}-{kind}']['same_effect'] = same
+                if not (results[f'{case}-{kind}']['match'] and same):
+                    failed.append(f'{case}-{kind}')
         (out / 'results.json').write_text(json.dumps(results, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
         print('크기(원래 → 고침): ' + ', '.join(f'그림 {g} {a[0]}x{a[1]} → {b[0]}x{b[1]}' for g, (a, b) in sizes.items()))
         for name, r in results.items():
             if name == 'sizes':
+                continue
+            if name.startswith('hit-'):
+                print(f'{name}: 기준 칸 예측 {r["want"]}, 타격 {len(r["hits"])}번 '
+                      + ' '.join(f'{n}:{tuple(at)}' for n, at, _ in r['hits'])
+                      + f' {"같음" if r["match"] else "다름"}; 효과 그림 자리 원본과 {"같음" if r["same_effect"] else "다름"}')
                 continue
             last = r[f'f{int(DUMPF.split(",")[-1]):05d}']
             print(f'{name}: 상자 {r["boxes"]}; OBJ {last["objs"][0]}/{last["objs"][1]} '
@@ -222,10 +335,13 @@ def main():
                   + '; '.join(f'{m} OBJ {p["oam"][0]}/{p["oam"][1]} @({p["at"][0]},{p["at"][1]}) VRAM {p["vram"][0]}/{p["vram"][1]}'
                               for m, p in last['monsters'].items())
                   + f'; 무리 표 {"같음" if all(t["match"] for t in last["table"].values()) else "다름"}'
-                  + f'; 그림·자리·줄 목록 {last["loaded"]} {"같음" if last["loaded_match"] else "다름"}')
+                  + f'; 그림·자리·줄 목록 {last["loaded"]} {"같음" if last["loaded_match"] else "다름"}'
+                  + '; 그림자 ' + ', '.join(f'{v["seen"]}/{v["want"]}(OBJ 아래 {v["under_obj"]}) '
+                                          f'{"같음" if v["match"] and not v["outside"] else "다름"}'
+                                          for v in r['shadow'].values()))
         if failed:
             raise ValueError('불일치: ' + ', '.join(failed))
-        print(f'전투 {len(battles) * 2}개가 예측과 같음')
+        print(f'전투 {len(battles) * 4 + 4}개가 예측과 같음')
         return 0
     except (OSError, ValueError, KeyError, IndexError, subprocess.SubprocessError) as error:
         print(f'오류: {error}', file=sys.stderr)
