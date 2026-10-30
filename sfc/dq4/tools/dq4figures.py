@@ -93,6 +93,16 @@ def field_gfx_figure(folder, scenes=tuple(f"gfx-{name}" for name in FIELD_VIEWS)
     return sheet.resize((sheet.width * 2, sheet.height * 2), Image.Resampling.NEAREST)
 
 
+def ruler_figure(folder):
+    """dq4fieldtravelcheck 의 ルーラ 목록 화면(<out>/list/end.png)을 2배. 없으면 None."""
+    path = folder / "list" / "end.png"
+    if not path.exists():
+        return None
+    with Image.open(path) as shot:
+        image = shot.convert("RGB")
+    return image.resize((image.width * 2, image.height * 2), Image.Resampling.NEAREST)
+
+
 def sprite_gallery(images):
     """인물마다 남 정지·보행, 서 정지·보행, 동, 북 정지·보행을 풀색 위에 6배로 늘어놓는다."""
     cells = ((0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (3, 0), (3, 1))
@@ -221,6 +231,11 @@ def main():
         print("work/dq4-fieldcheck 에 세계 1·2 화면이 없어 dq4-field-worlds12.webp 는 건너뜀")
     else:
         worlds.save(output / "dq4-field-worlds12.webp", lossless=True)
+    ruler = ruler_figure(ROOT / "work" / "dq4-travelcheck")
+    if ruler is None:
+        print("work/dq4-travelcheck 에 ルーラ 목록 화면이 없어 dq4-field-ruler.webp 는 건너뜀")
+    else:
+        ruler.save(output / "dq4-field-ruler.webp", lossless=True)
     sprite_gallery(images).save(output / "dq4-sprites-gallery.webp", lossless=True)
     draft_figure().save(output / "dq4-sprite-drafts.webp", lossless=True)
     field = field_figure(ROOT / "work" / "dq4-sprites")
