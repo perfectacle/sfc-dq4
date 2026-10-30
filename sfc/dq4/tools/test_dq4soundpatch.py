@@ -214,6 +214,53 @@ class EngineCodeTests(unittest.TestCase):
         self.assertEqual(same, bytes.fromhex('68 6B'))  # 같으면 PLA / RTL 만
         self.assertIn(bytes.fromhex('22 91 FE 24 AD 4B 19 22 9A FE 24'), code)
 
+    def test_nmi_range_sees_every_coroutine_range(self):
+        # 88E2 진입과 00:8004 발판의 CMP #imm16 / BCS / BCC / JMP 만 따라가 PC 가 코루틴(88EC)인지 주 스레드(891E)인지 본다
+        code = {}
+        for at, (payload, _) in patch.nmi_range_code().items():
+            for i, b in enumerate(payload):
+                code[(at & 0xFFFF) + i] = b
+
+        def classify(pc):
+            at, carry = 0x88E2, None
+            for _ in range(32):
+                op = code.get(at)
+                if at in (0x88EC, 0x891E):
+                    return at == 0x88EC
+                if op == 0xC9:
+                    carry = pc >= code[at + 1] | code[at + 2] << 8
+                    at += 3
+                elif op in (0xB0, 0x90):
+                    rel = code[at + 1] - 256 * (code[at + 1] > 127)
+                    taken = carry if op == 0xB0 else not carry
+                    at += 2 + (rel if taken else 0)
+                elif op == 0x4C:
+                    at = code[at + 1] | code[at + 2] << 8
+                else:
+                    self.fail(f'unexpected byte {op} at {at:04X}')
+            self.fail('no exit')
+
+        expect = {0x8000: False, 0xB740: False, 0xB741: True, 0xB804: True, 0xB805: False, 0xBECD: False,
+                  0xBECE: True, 0xC421: True, 0xC422: False, patch.COROUTINE_EXTRA - 1: False,
+                  patch.COROUTINE_EXTRA: True, 0xEAFF: True}
+        for pc, co in expect.items():
+            self.assertEqual(classify(pc), co, f'{pc:04X}')
+
+    def test_keep_samples_code_fits_in_the_coroutine_range(self):
+        done, mark = patch.keep_samples_code()
+        self.assertEqual(patch.KEEP_CODE & 0xFFFF, patch.COROUTINE_EXTRA)
+        self.assertLessEqual((patch.KEEP_CODE + len(done) + len(mark)) & 0xFFFF, 0xEB00)
+
+    def test_keep_samples_marks_before_the_cleanup(self):
+        done, mark = patch.keep_samples_code()
+        # 지워진 칸(1A 가 끊은 곡)은 다 실린 곡으로 적지 않는다
+        self.assertTrue(done.startswith(bytes.fromhex('08 C2 30 BD 95 1D 29 FF 00 C9 FF 00 F0')))
+        self.assertTrue(done.endswith(bytes.fromhex('28 4C 84 C1')))
+        # C21E 가 앞 명령(16)의 대답을 소비하므로, 표시가 끝난 뒤에야 C32F 로 대답을 기다리고 0A 를 보낸다
+        self.assertTrue(mark.endswith(bytes.fromhex('28 20 2F C3 A9 0A 00 4C 12 C1')))
+        self.assertLess(mark.index(bytes.fromhex('20 1E C2')), len(mark) - 10)
+        self.assertNotIn(bytes.fromhex('20 2F C3'), mark[:-10])
+
     def test_far_branch_out_of_range_is_rejected(self):
         with self.assertRaisesRegex(ValueError, 'out of range'):
             patch._asm_far([('b', 0x80, 'far'), bytes(200), ('label', 'far')], 0x718000)

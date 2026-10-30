@@ -162,7 +162,8 @@ def song_score(score, drop_tracks=(), drop_programs=(), track_db=None):
 def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_fades=False, preview=None,
           stream=None, stream_ticks=None, budgets=None, pinned=(), resident_from=None, drop_resident=(), lanes=None, drop_tracks=None,
           level_db=None, programs=None, set_records=None, keep_regions=None, track_db=None,
-          fast_receive=False, chains=(), holds=(), early_song=False, load_pump=False, vehicle_song=False):
+          fast_receive=False, chains=(), holds=(), early_song=False, load_pump=False, vehicle_song=False,
+          keep_samples=False):
     """stream 은 {곡 자리: 곡 앞 샘플 바이트 상한}. 그 곡은 샘플 일부를 곡이 울리는 동안 보낸다(transfer_plan).
 
     stream_ticks 는 {곡 자리: 틱}. 곡 앞 바이트 상한을 곡이 처음 그 틱 안에 쓰는 샘플의 합으로 정하고, 도착 어림보다
@@ -430,7 +431,7 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
                                         resident=resident if resident_plan else None, set_records=set_records,
                                         fast_receive=fast_receive, chains=mains, chain_late=chain_late,
                                         hold=bool(holds), early_song=early_song, load_pump=load_pump,
-                                        vehicle_song=vehicle_song)
+                                        vehicle_song=vehicle_song, keep_samples=keep_samples)
     # 바꾸지 않은 DQ5 곡도 늘 두는 목록이 바뀐 뒤의 SPC 에 드는지 본다. 넘치는 곡은 그 까닭을 남긴다.
     sets, unreplaced = patch.read_sets(rom), {}
     for song in range(1, 0x32):
@@ -492,6 +493,8 @@ def main():
                     help='request the destination map song before the exit fade-out (dq4soundpatch.early_song_code)')
     ap.add_argument('--vehicle-song', action='store_true',
                     help='keep the playing field song when dismounting the dragon instead of resending it (dq4soundpatch.vehicle_song_code)')
+    ap.add_argument('--keep-samples', action='store_true',
+                    help='keep samples shared by the finished song and the next one through the 1A cleanup (dq4soundpatch.keep_samples_code)')
     ap.add_argument('--load-pump', action='store_true',
                     help='keep sending the early song data while NMI is off during map loads (dq4soundpatch.load_pump_code)')
     ap.add_argument('--hold', action='append', default=[], metavar='DQ5_SLOT',
@@ -537,7 +540,7 @@ def main():
                         track_db=track_db, fast_receive=args.fast_receive,
                         chains=[int(x, 16) for x in args.chain], holds=[int(x, 16) for x in args.hold],
                         early_song=args.early_song, load_pump=args.load_pump,
-                        vehicle_song=args.vehicle_song)
+                        vehicle_song=args.vehicle_song, keep_samples=args.keep_samples)
     from dq5build import make_ips
     from kr_patch import ips
     patch_bytes = make_ips(base, rom)
