@@ -60,6 +60,42 @@ class PrologueTests(unittest.TestCase):
         with_prologue = ch.npc_doc({'overrides': []}, prologue=True)
         self.assertIn(pro.CELLAR, [lst['map'] for lst in with_prologue['lists']])
 
+    def test_added_talks_are_consecutive_from_900(self):
+        # dq5talkwrite 는 덧붙인 대화를 900 부터 빈 번호 없이 받는다
+        talks = [int(sc['talk'], 16) for sc in pro.talk_doc()['scripts']]
+        self.assertEqual(talks, list(range(0x900, 0x900 + len(talks))))
+
+    def test_flags_are_distinct(self):
+        flags = [pro.DONE, pro.FROG_MET, pro.SHINSIA_START, pro.MORPH, pro.MORPH_BACK, pro.SHINSIA_MET, pro.DINNER]
+        self.assertEqual(len(flags), len(set(flags)))
+        for i, m in flags:
+            self.assertEqual(bin(m).count('1'), 1)
+
+    def test_overrides_put_later_story_first(self):
+        # 대체 목록은 앞에 둔 것부터 맞춰 본다: 신시아를 만난 뒤 > 개구리를 만난 뒤 > 수련 뒤
+        _, _, overrides, _ = pro.npc_lists()
+        cellar = [(o['flag'], o['mask']) for o in overrides if o['map'] == pro.CELLAR]
+        self.assertEqual(cellar, [pro.SHINSIA_MET, pro.FROG_MET, pro.DONE])
+        village = [(o['flag'], o['mask']) for o in overrides if o['map'] == pro.VILLAGE]
+        self.assertEqual(village, [pro.SHINSIA_MET, pro.FROG_MET])
+
+    def test_end_event_moves_to_the_throne_room(self):
+        code, at = pro.native()
+        ev = code[at['end_event'] - pro.CODE_AT:]
+        move = ev.index(0x90)
+        g, n, x, y = pro.CHAPTER1_AT
+        self.assertEqual(ev[move:move + 8], bytes((0x90, g, n, x, y, 0x01, 0x80, 0xFF)))
+        self.assertEqual(f'{g:02X}/{n:02X}', ch.THRONE)
+        self.assertEqual((x, y), ch.START[1:])
+        # 서술을 띄운 뒤 곡 건너뛰기를 켜고 옮긴다
+        self.assertLess(ev.index(0x60), move)
+
+    def test_frog_form_clears_its_cell(self):
+        # 51 은 안 보이게만 해서 말을 걸 수 있는 채로 남는다. 52 로 자리를 치운다
+        form = next(sc for sc in pro.scripts() if sc['address'] == pro.FORM_SCRIPT)
+        ops = [c['op'] for c in form['commands']]
+        self.assertEqual(ops[ops.index('51') + 1], '52')
+
 
 if __name__ == '__main__':
     unittest.main()

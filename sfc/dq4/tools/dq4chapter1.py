@@ -370,8 +370,9 @@ GROUP_PATCHES = ('env/dq4-environment.dq5patch.json', 'newmap.dq5patch.json', 'e
                  'entrances.dq5patch.json', 'shops.dq5patch.json', 'inn.dq5patch.json')
 
 
-def build(rom, dq5, dq4, work, prologue=False):
-    """메뉴 빌드 롬(dq4menupatch.py build --messages) → 1장 첫머리 롬. prologue 면 새 게임이 서장으로 시작한다."""
+def build(rom, dq5, dq4, work, prologue=True):
+    """메뉴 빌드 롬(dq4menupatch.py build --messages) → 1장 첫머리 롬. prologue 면 새 게임이 서장으로 시작해
+    서장 끝에서 1장 첫머리로 넘어간다."""
     import dq4groupbuild
     original = dq5.read_bytes()
     # 원래 롬에서는 새 맵 레코드를 34 에 두지만 통합 롬의 34 는 타이틀 자료다
@@ -426,7 +427,7 @@ def main():
     b.add_argument('--dq4', default='rom/dq4.nes', type=Path)
     b.add_argument('--out', required=True, type=Path)
     b.add_argument('--keep', type=Path, help='중간 패치 목록을 남길 폴더')
-    b.add_argument('--prologue', action='store_true', help='새 게임을 NDS 서장(dq4prologue.py)으로 시작')
+    b.add_argument('--no-prologue', action='store_true', help='NDS 서장(dq4prologue.py) 없이 새 게임을 1장으로 시작')
     args = ap.parse_args()
     if args.cmd == 'messages':
         args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -437,10 +438,10 @@ def main():
     rom = args.rom.read_bytes()
     if args.keep:
         args.keep.mkdir(parents=True, exist_ok=True)
-        out = build(rom, args.dq5, args.dq4, args.keep, args.prologue)
+        out = build(rom, args.dq5, args.dq4, args.keep, not args.no_prologue)
     else:
         with tempfile.TemporaryDirectory() as t:
-            out = build(rom, args.dq5, args.dq4, Path(t), args.prologue)
+            out = build(rom, args.dq5, args.dq4, Path(t), not args.no_prologue)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_bytes(out)
     args.out.with_suffix('.ips').write_bytes(ips_patch(rom, out))
