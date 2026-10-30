@@ -105,9 +105,14 @@ class GroupBuildTests(unittest.TestCase):
             dq4groupbuild.NEWMAP_AT, dq4groupbuild.FIELD_AT = saved
         self.assertTrue(summary['rom'])
         talk = int(dq4groupbuild.TALK_AT[1].replace(':', ''), 16)
+        import dq4fieldport
+        planes = int(dq4fieldport.GFX_AT['planes'][:2], 16)
         for w in writes:
             at = int(w['at'].replace(':', ''), 16)
-            if at >> 16 >= 0x30:
+            if at >> 16 >= 0x40:
+                # The block number planes, outside the 30-3F the field loader's DB needs.
+                self.assertIn(at >> 16, (planes, planes + 1))
+            elif at >> 16 >= 0x30:
                 self.assertEqual(at >> 16, 0x34)
                 self.assertLessEqual(at + len(bytes.fromhex(w['hex'])), 0x350000)
                 self.assertNotEqual(at >> 16, talk >> 16)

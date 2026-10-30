@@ -398,9 +398,10 @@ def npc_base(env_patch):
 # 함께 덧붙인 것이다(dq4npcport.talk_doc). 서장을 빼도 넣는다: 옮긴 인물의 대화 번호가 서장 스크립트 뒤라서다.
 GROUP_PATCHES = ('env/dq4-environment.dq5patch.json', 'newmap.dq5patch.json', 'exits.dq5patch.json',
                  'entrances.dq5patch.json', 'shops.dq5patch.json', 'inn.dq5patch.json',
-                 'entrance-hook.dq5patch.json', 'field.dq5patch.json', 'talk.dq5patch.json')
+                 'entrance-hook.dq5patch.json', 'field-gfx.dq5patch.json', 'field-blocks.dq5patch.json',
+                 'field.dq5patch.json', 'talk.dq5patch.json')
 # 원래 롬에서는 새 맵 레코드를 34 에 두지만 통합 롬의 34 는 타이틀 자료라 3A 로 돌린다. 3A 는 그 레코드로 차서,
-# 필드 지도(덩어리 둘 약 14.5KB, 필드 로더의 DB 때문에 30~3F)는 타이틀 자료가 34:BFD1 에서 끝난 뒤에 둔다. 비어 있지 않으면 apply_writes 가 멈춘다.
+# 필드 지도(덩어리 둘 약 12KB, 필드 로더의 DB 때문에 30~3F)는 타이틀 자료가 34:BFD1 에서 끝난 뒤에 둔다. 비어 있지 않으면 apply_writes 가 멈춘다.
 NEWMAP_RECORDS_AT, FIELD_AT = '3A:8000', '34:C000'
 
 
