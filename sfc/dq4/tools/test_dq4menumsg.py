@@ -55,6 +55,16 @@ class LayoutTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             mm.plan_groups([(0x8000, 12, 11)])
 
+    def test_message_count_appends_gap_free_in_blocks_of_16(self):
+        self.assertEqual(mm.message_count({0x1CE: []}), mm.MESSAGES)
+        self.assertEqual(mm.message_count({0xC80: [], 0xC81: []}), mm.MESSAGES + 16)
+        self.assertEqual(mm.message_count({m: [] for m in range(0xC80, 0xC90)}), mm.MESSAGES + 16)
+        self.assertEqual(mm.message_count({m: [] for m in range(0xC80, 0xC91)}), mm.MESSAGES + 32)
+        with self.assertRaises(ValueError):
+            mm.message_count({0xC81: []})
+        with self.assertRaises(ValueError):
+            mm.message_count({m: [] for m in range(0xC80, 0x2001)})
+
 
 @unittest.skipUnless(BASE.exists() and os.environ.get('DQ4_GALMURI') and os.environ.get('ASAR'),
                      'work/base 의 서곡 채택본 롬과 DQ4_GALMURI(Galmuri BDF), ASAR 가 필요')
@@ -85,6 +95,17 @@ class BuildTests(unittest.TestCase):
     def test_messages_decode_from_new_bank(self):
         from dq5hangul import decode_check
         msgs = decode_check(self.out, mm.BASE, mm.INDEX_BANK)
+        for m, parts in mm.TEXTS.items():
+            self.assertEqual(msgs[m], mm.codes(parts))
+
+    def test_appended_messages_read_through_moved_index(self):
+        from dq5textwrite import decoded_messages
+        extra = {0xC80: [mm.PAUSE, '가', mm.END], 0xC81: [mm.PAUSE, '나', mm.END]}
+        out, _ = mm.apply(BASE.read_bytes(), self.font, extra)
+        msgs = decoded_messages(out)
+        self.assertEqual(len(msgs), mm.MESSAGES + 16)
+        self.assertEqual(msgs[0xC81], mm.codes(extra[0xC81]))
+        self.assertEqual(msgs[0xC82], [mm.END])
         for m, parts in mm.TEXTS.items():
             self.assertEqual(msgs[m], mm.codes(parts))
 

@@ -1,4 +1,5 @@
-"""With rom/dq4.nes, the FC text -> DQ5 codes rule; with both ROMs, the ported people and messages."""
+"""Message allocation; with rom/dq4.nes, the FC text -> DQ5 codes rule; with both ROMs, the ported people and
+messages."""
 
 import sys
 import unittest
@@ -11,6 +12,36 @@ import dq4npcport as port  # noqa: E402
 ROOT = Path(__file__).resolve().parents[3]
 DQ4 = ROOT / "rom" / "dq4.nes"
 DQ5 = ROOT / "rom" / "dq5.sfc"
+
+
+class AllocationTest(unittest.TestCase):
+    def test_lines_get_new_ids_in_order_of_first_use(self):
+        texts = {}
+        made = []
+        ids = [port.allocate(texts, key, lambda key=key: made.append(key) or [port.END])
+               for key in ((1,), (2, 3), (1,), (), (2, 3))]
+        self.assertEqual(ids, [0xC80, 0xC81, 0xC80, 0xC82, 0xC81])
+        self.assertEqual(made, [(1,), (2, 3), ()])  # codes are made once per line
+
+    def test_talk_scripts_follow_the_prologue_gap_free(self):
+        import dq4prologue
+        prologue = dq4prologue.talk_doc()["scripts"]
+        messages = [{"id": 0xC80 + k, "codes": [port.END]} for k in range(3)]
+        scripts = port.talk_doc(messages)["scripts"]
+        talks = [int(s["talk"], 16) for s in scripts]
+        self.assertEqual(talks, list(range(port.SCRIPT_TALK, port.SCRIPT_TALK + len(prologue) + 3)))
+        self.assertEqual(scripts[:len(prologue)], prologue)
+        first = port.first_talk()
+        for k, s in enumerate(scripts[len(prologue):]):
+            # Talk first_talk() + k shows message C80 + k, as port gives the people.
+            self.assertEqual(int(s["talk"], 16), first + k)
+            self.assertEqual(s["body"], [{"op": "msg", "id": f"{0xC80 + k:03X}"}])
+
+    def test_talk_scripts_refuse_a_gap(self):
+        with self.assertRaises(ValueError):
+            port.talk_doc([{"id": 0xC80, "codes": [port.END]}, {"id": 0xC82, "codes": [port.END]}])
+        with self.assertRaises(ValueError):
+            port.talk_doc([{"id": 0xC7F, "codes": [port.END]}])
 
 
 @unittest.skipUnless(DQ4.is_file(), "local source ROM not present")
@@ -65,27 +96,21 @@ class NightFacingTest(unittest.TestCase):
 class PortTest(unittest.TestCase):
     def test_talk_numbers_show_messages(self):
         lists, messages, report = port.port(str(DQ5), str(DQ4))
-        ids = {m["id"] for m in messages}
+        ids = [m["id"] for m in messages]
+        self.assertEqual(ids, list(range(port.FIRST_MESSAGE, port.FIRST_MESSAGE + len(ids))))
+        shows = {int(s["talk"], 16): s["body"][0]["id"] for s in port.talk_doc(messages)["scripts"]}
         for entries in lists:
             for e in entries["entries"]:
                 talk = e["fields"]["talk"]
                 if talk <= 6:  # a DQ5 shop, inn, church or deposit (06:DBD2)
                     self.assertEqual(e["fields"]["interval"], 0)
                     continue
-                self.assertGreaterEqual(talk, port.TALK_FIRST)
-                self.assertLess(talk, 0x900)
-                self.assertIn(talk + port.TALK_MESSAGE, ids)
-        self.assertEqual(len(ids), len(messages))
-
-    def test_pool_leaves_out_script_messages(self):
-        from dq5map import Rom
-        from unittest import mock
-        shown = port.script_messages(Rom(DQ5.read_bytes()))
-        # 26D: パパス in the first event script (15:F17A, op 60); 2F2: an inline 21 op of a 01/02 person.
-        self.assertTrue({0x26D, 0x2F2} <= shown)
-        pool = port.message_pool(str(DQ5))
-        with mock.patch.object(port, "script_messages", return_value={pool[0]}):
-            self.assertNotIn(pool[0], port.message_pool(str(DQ5)))
+                self.assertGreaterEqual(talk, port.first_talk())
+                self.assertIn(int(shows[talk], 16), ids)
+        for people in report.values():
+            for p in people:
+                if p["message"] is not None:
+                    self.assertEqual(shows[p["dq5"]["talk"]], p["message"])
 
 
 if __name__ == "__main__":

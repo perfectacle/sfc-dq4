@@ -4,12 +4,12 @@
 DQ5 트랙 dq5hangul.py retree(2MB, 뱅크 30)와 같은 방법을 4MB 통합 롬의 빈 뱅크에 맞춘 것이다.
 
   65:8000~  보행 모드 디코더(24:9E02~9E46 사본, 표 피연산자와 끝 RTL 만 바꿈), 비트 마스크, 트리 1·0, 폰트 묶음 표,
-            그 뒤 메시지 3,200개. 뱅크 69 끝까지
+            그 뒤 메시지 3,200개. 뱅크 69 끝까지. 3200 이상을 덧붙이면 색인 표를 트리 뒤(폰트 묶음 표 앞)에 둔다
   24:9E02   JSL 65:8000 / RTS
   24:9E07   JSR 8C8D / LDA $F2 / ORA #$60 / STA $F2 / RTS — 색인은 21비트라 뱅크를 60 아래로 적고 풀 때 OR 한다.
             24:8C8D 는 전투 메시지(24:8C60)도 부르므로 그 안은 고치지 않는다
   24:8BD7   JSR 8C8D → JSR 9E07
-  24:AF1E   새 색인
+  24:AF1E   새 색인(3,200개일 때). 덧붙이면 24:8BC3 의 색인 읽기 뱅크·주소를 머리의 표로 바꾼다
   24:A63C·A660·A6C2·A673  폰트 묶음 표 피연산자 → 65 의 새 표
   07:D77C~  옮긴 메시지가 비운 자리. 한글 글자 그림(12×11 1bpp)
 
@@ -31,6 +31,7 @@ from dq5hangul import (DECODER, DECODER_END, MASK_OPERAND, MESSAGES, NODES_0_OPE
                        encode, glyph_bits)
 from dq5map import Rom, lorom  # noqa: E402
 from dq5text import FONT_GROUPS, FONT_TABLE_OPERANDS, GLYPHS, INDEX, font_groups, message  # noqa: E402
+from dq5textwrite import INDEX_LOAD, INDEX_LOAD_CODE, MAX_MESSAGES  # noqa: E402
 
 BASE = 0x658000
 LIMIT = 0x6A0000            # 65~69 다섯 뱅크. 70 은 서곡 재배치 표, 6A~6F·72~7D 는 소리 이식이 쓴다
@@ -153,17 +154,29 @@ def index_entry(stream, bit):
     return cpu_to_bytes((cpu - (INDEX_BANK << 16)) << 3 | bit & 7)
 
 
+def message_count(ids):
+    """메시지 수: 3200 이상 번호는 3200 부터 빈 번호 없이 이어야 하고, 색인이 16개마다 하나라 16의 배수로 올린다."""
+    more = sorted(m for m in ids if m >= MESSAGES)
+    if more != list(range(MESSAGES, MESSAGES + len(more))):
+        raise ValueError(f'3200 이상 메시지는 {MESSAGES:X} 부터 빈 번호 없이 이어야 함')
+    total = (MESSAGES + len(more) + 15) // 16 * 16
+    if any(m < 0 for m in ids) or total > MAX_MESSAGES:
+        raise ValueError(f'메시지 번호는 0~{MAX_MESSAGES - 1:X}')
+    return total
+
+
 def apply(data, font, extra=None):
-    """메뉴 롬 바이트 → 메시지를 바꾼 롬 바이트와 설명 줄. extra 는 {메시지 번호: 부분 목록}(dq4chapter1.py 등)."""
+    """메뉴 롬 바이트 → 메시지를 바꾼 롬 바이트와 설명 줄. extra 는 {메시지 번호: 부분 목록}(dq4chapter1.py 등).
+    3200 이상 번호는 덧붙이고, 마지막 16개 묶음의 남는 자리는 끝 코드 하나로 채운다."""
     d = bytearray(data)
     rom = Rom(bytes(data))
-    msgs = [message(rom, m) for m in range(MESSAGES)]
     clash = set(TEXTS) & set(extra or {})
     if clash:
         raise ValueError(f'메뉴 메시지와 겹치는 번호: {sorted(f"{m:03X}" for m in clash)}')
+    total = message_count(extra or {})
+    grown = total > MESSAGES
+    msgs = [message(rom, m) for m in range(MESSAGES)] + [[END]] * (total - MESSAGES)
     for m, parts in {**TEXTS, **(extra or {})}.items():
-        if not 0 <= m < MESSAGES:
-            raise ValueError(f'메시지 {m:X}: 0~{MESSAGES - 1:X} 밖')
         msgs[m] = codes(parts)
     freq = {}
     for m in msgs:
@@ -191,7 +204,9 @@ def apply(data, font, extra=None):
     mask_at = BASE + len(decoder)
     t1_at = mask_at + len(mask)
     t0_at = t1_at + len(nodes) * 2
-    font_at = t0_at + len(nodes) * 2
+    index_at = t0_at + len(nodes) * 2
+    index_size = total // 16 * 3 if grown else 0
+    font_at = index_at + index_size
     for at, v in ((NODES_1_OPERAND, t1_at), (NODES_0_OPERAND, t0_at), (MASK_OPERAND, mask_at)):
         decoder[at - DECODER:at - DECODER + 2] = (v & 0xFFFF).to_bytes(2, 'little')
     decoder[ROOT_OPERAND - DECODER:ROOT_OPERAND - DECODER + 2] = (root * 2).to_bytes(2, 'little')
@@ -200,7 +215,7 @@ def apply(data, font, extra=None):
     decoder[-1] = 0x6B
     t1 = b''.join(n[0].to_bytes(2, 'little') for n in nodes)
     t0 = b''.join(n[1].to_bytes(2, 'little') for n in nodes)
-    head = bytes(decoder) + mask + t1 + t0 + bytes(table)
+    head = bytes(decoder) + mask + t1 + t0 + bytes(index_size) + bytes(table)
     if (BASE & 0xFFFF) + len(head) > 0x10000:
         raise ValueError('디코더와 트리 표가 뱅크 65 를 넘음')
     stream = head + bytes(blob)
@@ -211,8 +226,18 @@ def apply(data, font, extra=None):
         raise ValueError(f'{BASE:06X}~ 가 비어 있지 않음')
     d[o:o + len(stream)] = stream
 
-    index = b''.join(index_entry(o + len(head), starts[m]) for m in range(0, MESSAGES, 16))
-    d[lorom(INDEX):lorom(INDEX) + len(index)] = index
+    index = b''.join(index_entry(o + len(head), starts[m]) for m in range(0, total, 16))
+    index_table = index_at if grown else INDEX
+    d[lorom(index_table):lorom(index_table) + len(index)] = index
+    if grown:
+        load = bytearray(INDEX_LOAD_CODE)
+        load[1] = index_at >> 16
+        for k, off in enumerate((5, 10, 15)):
+            load[off:off + 2] = ((index_at & 0xFFFF) + k).to_bytes(2, 'little')
+        p = lorom(INDEX_LOAD)
+        if bytes(rom.d[p:p + len(load)]) != INDEX_LOAD_CODE:
+            raise ValueError(f'{INDEX_LOAD:06X}: 예상한 원래 바이트가 아님')
+        d[p:p + len(load)] = load
 
     stub = bytes((0x20, 0x8D, 0x8C, 0xA5, 0xF2, 0x09, INDEX_BANK, 0x85, 0xF2, 0x60))
     for addr, new, old in (
@@ -229,8 +254,8 @@ def apply(data, font, extra=None):
         d[lorom(a):lorom(a) + 3] = cpu_to_bytes(font_at + k)
 
     out = bytes(d)
-    again = decode_check(out, BASE, INDEX_BANK)
-    for m in range(MESSAGES):
+    again = decode_check(out, BASE, INDEX_BANK, index=index_table, count=total)
+    for m in range(total):
         if again[m] != msgs[m]:
             raise ValueError(f'메시지 {m:03X}: 다시 풀기가 다름')
     info = [(f'잎 {len(tree)}, 노드 {len(nodes)}, 최장 부호 {max(map(len, tree.values()))}비트, '

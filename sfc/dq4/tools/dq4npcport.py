@@ -1,23 +1,20 @@
 """FC DQ4 town people of the new DQ5 groups (dq4environmentrom.GROUPS) as dq5npcrelocate/1 lists and
-their Japanese FC text as dq5text/1 messages over DQ5 messages of later towns.
+their Japanese FC text as dq5text/1 messages appended after DQ5's 3,200 walking messages.
 
 Each FC person record of the day and the night list becomes one DQ5 entry of that time. It copies a DQ5
 template entry: a standing one, or one that wanders (script 19 03 03) with the FC step interval. The
 picture is a placeholder DQ5 townsperson of the same role (PICTURES) until DQ4 sprites exist. The talk is
 the FC talk of chapter 1 at the start (dq4talk.predict with chapter 0, no flags, no party): the messages it
-shows are joined into one DQ5 message, shown by talk number m - 3C6. People who open a shop, an inn, a
-church or the deposit in FC take the DQ5 talk number of the same service instead (dq4shopport).
+shows are joined into one new DQ5 message (C80-, gap-free), shown by an appended talk script (talk_doc).
+People who open a shop, an inn, a church or the deposit in FC take the DQ5 talk number of the same service
+instead (dq4shopport).
 
   python sfc/dq4/tools/dq4npcport.py --out work/dq4-npcs
 """
 
 import argparse
-import collections
 import json
-import re
-import subprocess
 import sys
-import tempfile
 import unicodedata
 from pathlib import Path
 
@@ -31,6 +28,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
 import dq4talk  # noqa: E402
 import dq4text  # noqa: E402
 import dq5text  # noqa: E402
+from dq5hangul import MESSAGES  # noqa: E402
 from dq4environmentrom import GROUPS  # noqa: E402
 from dq4groupbuild import cell, fc_map, has_people  # noqa: E402
 import dq4shopport  # noqa: E402
@@ -130,16 +128,13 @@ PICTURES = {
 FACING = ("up", "right", "down", "left")
 # Placeholder line for a person whose FC talk shows nothing at the start of chapter 1.
 NOTHING = "＜なにもない＞"
-# DQ5 groups whose people's direct messages may be overwritten: later towns. Left out: the ship 17 and the
-# early or often tested groups 00-0B, 0D-0F, 12-16, 19-1A, 21.
-POOL_GROUPS = {0x0C, 0x10, 0x11, 0x18, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x22, 0x23, 0x25, 0x26, 0x27, 0x29,
-               0x2B, 0x2C, 0x2D, 0x31, 0x34, 0x35}
-# DQ5 talk numbers 26D- show message T + 3C6 (06:AFFB).
-TALK_MESSAGE = 0x3C6
-TALK_FIRST = 0x26D
+# Ported lines are new messages after DQ5's own (dq5textwrite appends them gap-free from the end).
+FIRST_MESSAGE = MESSAGES
+# Talk numbers 900- run talk scripts appended by dq5talkwrite --extra-at, gap-free from 900: the prologue's
+# first (dq4prologue.talk_doc), then one `msg` script per ported message. A talk number T >= 26D shows message
+# T + 3C6 directly, but the talk numbers below 900 reach only a few of the new messages.
+SCRIPT_TALK = 0x900
 LINE, PAGE, END = 0x1000, 0x1002, 0x1001
-# Inline script ops that show the message in their two operand bytes (dq5-map-format 「인라인 스크립트」).
-INLINE_MESSAGE = {0x21, 0x30, 0x31, 0x32}
 NIGHT = 0x78
 
 
@@ -258,65 +253,38 @@ def nothing_codes():
     return [CODE_OF[c] for c in NOTHING] + [END]
 
 
-def script_messages(rom):
-    """Messages shown by DQ5 event scripts (op 60, dq5event) and person inline scripts (21, 30, 31, 32, 01:C800)."""
-    import dq5event
-    import dq5npc
-    out = set()
-    for _, start, _ in dq5event.all_starts(rom):
-        out.update(raw[1] | raw[2] << 8 for _, raw, _ in dq5event.decode(rom, start)[0] if raw[0] == 0x60)
-    for start in dq5event.all_scripts(rom):
-        out.update(raw[1] | raw[2] << 8 for _, raw, _ in dq5event.decode(rom, start)[0] if raw[0] == 0x60)
-    for a, _ in dq5npc.all_lists(rom):
-        for entry, _ in dq5npc.list_entries(rom, a):
-            for night in (False, True):
-                script = dq5npc.script_address(rom, entry, night)
-                if script is not None:
-                    out.update(raw[1] | raw[2] << 8 for _, raw, _ in dq5npc.script_ops(dq5npc.script_bytes(rom, script))
-                               if raw[0] in INLINE_MESSAGE)
-    return out
+def first_talk():
+    """Talk number of the first ported message's script: the prologue's scripts come first."""
+    import dq4prologue
+    return SCRIPT_TALK + len(dq4prologue.talk_doc()["scripts"])
 
 
-def message_pool(dq5_rom_path):
-    """DQ5 messages >= 633 shown directly by exactly one map's people in POOL_GROUPS and by no talk, event or
-    inline script."""
-    from dq5map import Rom
-    out = subprocess_json(["dq5npcrecord.py", dq5_rom_path, "dump"])
-    scripts = subprocess_json(["dq5talkwrite.py", dq5_rom_path, "dump"])
-    in_scripts = script_messages(Rom(Path(dq5_rom_path).read_bytes()))
-
-    def walk(body):
-        for op in body:
-            if op.get("op") == "msg":
-                in_scripts.add(op["id"])
-            for key in ("then", "else", "body"):
-                if isinstance(op.get(key), list):
-                    walk(op[key])
-    for s in scripts["scripts"]:
-        walk(s["body"])
-    users = collections.defaultdict(set)
-    for e in out["entries"]:
-        for f in [e["fields"]] if "fields" in e else [e["day"], e["night"]]:
-            if TALK_FIRST <= f["talk"] < 0x900:
-                users[f["talk"] + TALK_MESSAGE].add(e["name"].split()[0])
-    return sorted(m for m, names in users.items()
-                  if len(names) == 1 and re.fullmatch(r"[0-9A-F]{2}/[0-9A-F]{2}", name := next(iter(names)))
-                  and int(name[:2], 16) in POOL_GROUPS and m not in in_scripts)
+def allocate(texts, key, codes):
+    """Message number of a line (key = the FC messages it shows), a new one in order of first use."""
+    if key not in texts:
+        texts[key] = (FIRST_MESSAGE + len(texts), codes())
+    return texts[key][0]
 
 
-def subprocess_json(args):
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "out.json"
-        subprocess.run([sys.executable, str(DQ5_TOOLS / args[0]), *args[1:], "-o", str(path)], check=True,
-                       capture_output=True)
-        return json.loads(path.read_text(encoding="utf-8"))
+def talk_doc(messages):
+    """dq5talk/1: the prologue's appended scripts and, after them, one script per ported message in id order,
+    so message FIRST_MESSAGE + k has talk number first_talk() + k."""
+    import dq4prologue
+    doc = dq4prologue.talk_doc()
+    first = first_talk()
+    ids = [m["id"] for m in messages]
+    if ids != list(range(FIRST_MESSAGE, FIRST_MESSAGE + len(ids))):
+        raise ValueError("ported messages must run gap-free from C80")
+    doc["scripts"] += [{"talk": f"{first + k:03X}", "body": [{"op": "msg", "id": f"{m:03X}"}]}
+                       for k, m in enumerate(ids)]
+    return doc
 
 
 def port(dq5_path, dq4_path):
     """(dq5npcrelocate lists, dq5text messages, report)."""
     data = Path(dq4_path).read_bytes()
     prg, rom = ines.prg(data), dq4text.Rom(data)
-    pool = message_pool(dq5_path)
+    first = first_talk()
     texts = {}
     lists, report = [], {}
     for name, (group, number) in sorted(GROUPS.items(), key=lambda kv: kv[1]):
@@ -336,13 +304,9 @@ def port(dq5_path, dq4_path):
                     talk = service
                     p = {**p, "interval": 0}
                 else:
-                    key = tuple(shows)
-                    if key not in texts:
-                        if len(texts) == len(pool):
-                            raise ValueError(f"DQ5 message pool of {len(pool)} is used up")
-                        texts[key] = (pool[len(texts)], dq5_codes(rom, shows) if shows else nothing_codes())
-                    message = texts[key][0]
-                    talk = message - TALK_MESSAGE
+                    message = allocate(texts, tuple(shows),
+                                       lambda: dq5_codes(rom, shows) if shows else nothing_codes())
+                    talk = first + message - FIRST_MESSAGE
                 if p["picture"] not in PICTURES:
                     raise ValueError(f"{name}: FC picture {p['picture']:02X} has no DQ5 picture")
                 x, y = cell(p["x"], p["y"])

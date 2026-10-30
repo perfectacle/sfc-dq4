@@ -318,11 +318,10 @@ def lorom(addr):
     return (addr >> 16 & 0x7F) * 0x8000 + (addr & 0x7FFF)
 
 
-def messages(lists, ported_messages, report):
-    """dq4npcport 의 일본어 메시지에 성 앞의 한글과 1장 메시지를 덮은 {번호: 부분 목록}. 왕좌의 방은 이 연출 배치로
-    바꾸므로 그 방 인물만 쓰던 메시지는 뺀다."""
-    used = {e["fields"]["talk"] + 0x3C6 for lst in lists if lst["map"] != THRONE for e in lst["entries"]}
-    out = {m["id"]: m["codes"] for m in ported_messages if m["id"] in used}
+def messages(ported_messages, report):
+    """dq4npcport 의 일본어 메시지(3200 뒤에 덧붙임)에 1장 그룹 인물의 한글과 1장 메시지를 덮은 {번호: 부분 목록}.
+    덧붙인 번호는 빈 번호 없이 이어야 하므로, 왕좌의 방을 이 연출 배치로 바꿔 쓰지 않게 된 메시지도 남긴다."""
+    out = {m["id"]: m["codes"] for m in ported_messages}
     # 1장 그룹 인물(왕좌의 방은 이 연출 배치로 바꿈)의 일본어 원문을 FC 메시지 묶음으로 찾아 한글로
     import dq4ch1talk
     korean = {**dq4ch1talk.TEXTS, **FRONT_TEXTS}
@@ -350,8 +349,8 @@ def port(dq5, dq4):
 
 
 def messages_doc(dq5, dq4):
-    lists, ported, report = port(dq5, dq4)
-    found = messages(lists, ported, report)
+    _, ported, report = port(dq5, dq4)
+    found = messages(ported, report)
     return {"format": "dq4messages/1", "messages": {f'{m:03X}': parts for m, parts in sorted(found.items())}}
 
 
@@ -395,13 +394,13 @@ def npc_base(env_patch):
 
 
 # 입구별 도착 훅은 FC 그룹마다 필드로 나오는 칸을 고른다. 없으면 엔진이 보조 입구 (X, Y+1) 에 세우는데, 그 칸이
-# 입구 블록의 다른 칸이다(dq4fieldport.cells).
+# 입구 블록의 다른 칸이다(dq4fieldport.cells). 대화 스크립트(talk)는 서장 스크립트와 옮긴 인물의 메시지 스크립트를
+# 함께 덧붙인 것이다(dq4npcport.talk_doc). 서장을 빼도 넣는다: 옮긴 인물의 대화 번호가 서장 스크립트 뒤라서다.
 GROUP_PATCHES = ('env/dq4-environment.dq5patch.json', 'newmap.dq5patch.json', 'exits.dq5patch.json',
                  'entrances.dq5patch.json', 'shops.dq5patch.json', 'inn.dq5patch.json',
-                 'entrance-hook.dq5patch.json', 'field.dq5patch.json')
-# 원래 롬에서는 새 맵 레코드를 34 에 두지만 통합 롬의 34 는 타이틀 자료라 3A 로 돌린다. 3A 는 그 레코드(약 24KB)와
-# 서장 대화(dq4prologue.TALK_AT, 3A:F000)로 차서, 필드 지도(덩어리 둘 약 14.5KB, 필드 로더의 DB 때문에 30~3F)는
-# 타이틀 자료가 34:BFD1 에서 끝난 뒤에 둔다. 비어 있지 않으면 apply_writes 가 멈춘다.
+                 'entrance-hook.dq5patch.json', 'field.dq5patch.json', 'talk.dq5patch.json')
+# 원래 롬에서는 새 맵 레코드를 34 에 두지만 통합 롬의 34 는 타이틀 자료라 3A 로 돌린다. 3A 는 그 레코드로 차서,
+# 필드 지도(덩어리 둘 약 14.5KB, 필드 로더의 DB 때문에 30~3F)는 타이틀 자료가 34:BFD1 에서 끝난 뒤에 둔다. 비어 있지 않으면 apply_writes 가 멈춘다.
 NEWMAP_RECORDS_AT, FIELD_AT = '3A:8000', '34:C000'
 
 
@@ -427,12 +426,6 @@ def build(rom, dq5, dq4, work, prologue=True):
     run_tool(DQ5_TOOLS / 'dq5npcrelocate.py', dq5, 'patch', work / 'npc.json', '--base', base, '--alt', NPC_ALT,
              '--allow-growth', *new_maps, '-o', work / 'npc.dq5patch.json')
     patches = [work / 'groups' / p for p in GROUP_PATCHES] + [work / 'npc.dq5patch.json']
-    if prologue:
-        import dq4prologue
-        (work / 'talk.json').write_text(json.dumps(dq4prologue.talk_doc(), ensure_ascii=False, indent=1))
-        run_tool(DQ5_TOOLS / 'dq5talkwrite.py', dq5, 'patch', work / 'talk.json', *dq4prologue.TALK_AT,
-                 '-o', work / 'talk.dq5patch.json')
-        patches.append(work / 'talk.dq5patch.json')
     out = bytearray(apply_writes(rom, original, patches))
     import dq4chapterbox
     import dq4menupatch

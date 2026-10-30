@@ -3,12 +3,18 @@
   table  every new map by day and by night (7E:075E = F0): the person table right after the list loader
          (12:803C) equals what the built ROM's list predicts (dq5npc.table_values)
   talk   every standing person: stand on the FC cell next to it, face it, press A; the first message the
-         message routine 24:8BAF gets is the person's message (talk + 3C6), or for a church, an inn or the
-         deposit the first message of that DQ5 service (an inn also leaves its price for one in 7E:0F28)
+         message routine 24:8BAF gets is the person's message (dq4npcport: an appended message C80- shown by an
+         appended talk script) and the first codes the decoder gives for it (24:8B98, dq5textgrowcheck.lua) are
+         the codes the build wrote (text.json), or for a church, an inn or the deposit the first message of that
+         DQ5 service (an inn also leaves its price for one in 7E:0F28)
   shop   every weapon, item and armor seller: talk, then かう; the items the list window shows
          (dq5progresscheck.lua, MODE=shop) are the group's list from dq4shopport.py
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4npccheck.py --build work/dq4-groups --out work/dq4-groups/npccheck
+
+--rom checks another ROM built with the same people (the chapter-1 ROM with dq4chapter1.py build --keep DIR,
+--build DIR/groups and --texts its dq4chapter1.py messages JSON); --maps limits the maps, and --no-tables leaves
+out the table scenes, whose list addresses are the plain build's.
 """
 
 import argparse
@@ -30,6 +36,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
 
 import dq4block  # noqa: E402
 from dq4environmentmap import block_prop  # noqa: E402
+from dq4environmentrom import COUNTER_PROP  # noqa: E402
 from dq4groupbuild import LINKS, cell, fc_map, placement  # noqa: E402
 from dq5exitcheck import dp86_allowed, warp_exit  # noqa: E402
 from dq5map import Rom  # noqa: E402
@@ -39,6 +46,7 @@ from kr_patch.fc import ines  # noqa: E402
 
 PROBE = DQ5_TOOLS / "lua" / "dq5npcrecordcheck.lua"
 SHOP_PROBE = DQ5_TOOLS / "lua" / "dq5progresscheck.lua"
+DECODE_PROBE = DQ5_TOOLS / "lua" / "dq5textgrowcheck.lua"
 # First message of each DQ5 service (06:DBD2, sfc/dq5/docs/dq5-data-format.md 「가게 종류」). At night the
 # inn opens with 071 and the church with 080 (measured on 36/00 and 37/00).
 SERVICE_MESSAGE = {1: 0x002, 2: 0x000, 3: 0x001, 4: 0x0B9, 5: 0x07E, 6: 0x070}
@@ -60,10 +68,34 @@ SIDES = ((0, 1, "up"), (0, -1, "down"), (1, 0, "left"), (-1, 0, "right"))
 # order until a message shows.
 TALKS = tuple(f"{{dir}}:20,idle:{turn},a:4,wait:{window},a:4,wait:300"
               for turn, window in ((10, 40), (30, 90), (60, 150), (300, 90)))
-TALK_MESSAGE = 0x3C6
+# The decoder copy's RTL (24:9E02 JSLs to the copy; dq5textgrowcheck.lua reads A there).
+DECODER_CALL, DECODER_RTL = 0x249E02, 0x44
 
 
-def run(mesence, rom, state, out, name, libdir, to, test, night, shop=False):
+def decoder_return(rom):
+    """CPU address of the walking decoder copy's RTL in a ROM with the walking text moved."""
+    if rom.u8(DECODER_CALL) != 0x22:
+        raise ValueError("24:9E02 is not a JSL to a moved decoder")
+    return rom.u24(DECODER_CALL + 1) + DECODER_RTL
+
+
+def decoded(text):
+    """dq5textgrowcheck.lua decoded.txt rows: (message, codes)."""
+    rows = []
+    for line in text.split("\n"):
+        if line:
+            n, _, *codes = line.split()
+            rows.append((int(n, 16), [int(c, 16) for c in codes]))
+    return rows
+
+
+def codes_match(rows, message, want):
+    """The first decode of `message` gave the first codes of `want` (64 at most)."""
+    row = next((codes for n, codes in rows if n == message), None)
+    return row is not None and row[:min(len(want), 64)] == want[:64]
+
+
+def run(mesence, rom, state, out, name, libdir, to, test, night, shop=False, ret=None):
     dest = out / name
     dest.mkdir(parents=True)
     group, number = to.split(",")[0].split("/")
@@ -77,9 +109,12 @@ def run(mesence, rom, state, out, name, libdir, to, test, night, shop=False):
         env["POKE"] = NIGHT_POKE
     if shop:
         env.update(MODE="shop", DRIVER=str(DQ5_TOOLS / "lua" / "dq5warp.lua"))
+    elif ret is not None:
+        env.update(INNER=str(PROBE), RETURN_PC=f"{ret:06X}")
+    probe = SHOP_PROBE if shop else PROBE if ret is None else DECODE_PROBE
     with (dest / "mesen.log").open("w", encoding="utf-8") as log:
         try:
-            subprocess.run([str(mesence), "--testrunner", str(rom), str(SHOP_PROBE if shop else PROBE),
+            subprocess.run([str(mesence), "--testrunner", str(rom), str(probe),
                             "--Snes.DisableFrameSkipping=true"],
                            env=env, stdout=log, stderr=subprocess.STDOUT, timeout=300, check=False)
         except subprocess.TimeoutExpired:
@@ -95,11 +130,43 @@ def run(mesence, rom, state, out, name, libdir, to, test, night, shop=False):
     wram = (dest / "npc.bin").read_bytes() if (dest / "npc.bin").exists() else None
     if final.exists() and wram is not None:
         wram = (wram, final.read_bytes())
+    if ret is not None:
+        rows = dest / "decoded.txt"
+        messages = (messages, decoded(rows.read_text(encoding="utf-8")) if rows.exists() else [])
     return wram, messages
+
+
+def expected_codes(path):
+    """{message: codes} the ROM was built with, from a dq5text/1 or a dq4messages/1 document."""
+    doc = json.loads(Path(path).read_text(encoding="utf-8"))
+    if doc.get("format") == "dq4messages/1":
+        import dq4menumsg
+        return {int(k, 16): dq4menumsg.codes(parts) for k, parts in doc["messages"].items()}
+    return {m["id"]: m["codes"] for m in doc["messages"]}
 
 
 def walkable(source, x, y):
     return 0 <= x < source.w and 0 <= y < source.h and not block_prop(source, source.cell(x, y) & 31) & 0x80
+
+
+def talk_side(source, x, y, occupied):
+    """(x, y, direction key) of a free walkable FC cell to talk to the person at (x, y) from: a neighbour, or the
+    cell beyond a counter (FC and DQ5 both talk across one). None if there is none."""
+    for dx, dy, d in SIDES:
+        if walkable(source, x + dx, y + dy) and (x + dx, y + dy) not in occupied:
+            return x + dx, y + dy, d
+    for dx, dy, d in SIDES:
+        nx, ny = x + dx, y + dy
+        if 0 <= nx < source.w and 0 <= ny < source.h and block_prop(source, source.cell(nx, ny) & 31) == COUNTER_PROP \
+                and walkable(source, nx + dx, ny + dy) and (nx + dx, ny + dy) not in occupied:
+            return nx + dx, ny + dy, d
+    return None
+
+
+# FC people placed where nobody can reach them: (FC group, FC map, x, y). テンペ's three stand on wall blocks, cut off
+# from the town; フレノール's two night people stand below the map (its height is 1B).
+STAGED = {(0x0E, 0, 0x15, 0x0D), (0x0E, 0, 0x16, 0x0D), (0x0E, 0, 0x17, 0x0D), (0x0F, 0, 0x00, 0x22),
+          (0x0F, 0, 0x00, 0x23)}
 
 
 def main():
@@ -109,6 +176,11 @@ def main():
     ap.add_argument("--state", default="work/state/ship.mss", type=Path)
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--jobs", type=int, default=4)
+    ap.add_argument("--rom", type=Path, help="ROM to check (default BUILD/groups.sfc)")
+    ap.add_argument("--maps", nargs="+", help="only these maps (GG/MM)")
+    ap.add_argument("--no-tables", action="store_true", help="leave out the person table scenes")
+    ap.add_argument("--texts", type=Path, help="the ROM's messages: dq5text/1 (default BUILD/text.json) or "
+                    "dq4messages/1 (dq4chapter1.py messages, for the chapter-1 ROM)")
     args = ap.parse_args()
     mesence = Path(os.environ["MESENCE"])
     out = args.out.resolve()
@@ -118,8 +190,10 @@ def main():
     libdir = out / "lib"
     shutil.copytree(os.environ["LIBDIR"], libdir)
     shutil.copyfile(DQ5_TOOLS / "lua" / "dq5warp.lua", libdir / "boot.lua")
-    rom_path = (args.build / "groups.sfc").resolve()
+    rom_path = (args.rom or args.build / "groups.sfc").resolve()
     built = Rom(rom_path.read_bytes())
+    ret = decoder_return(built)
+    texts = expected_codes(args.texts or args.build / "text.json")
     layout = json.loads((args.build / "npc-layout.json").read_text(encoding="utf-8"))
     people = json.loads((args.build / "npc-report.json").read_text(encoding="utf-8"))
     shop_report = json.loads((args.build / "shop-report.json").read_text(encoding="utf-8"))
@@ -130,20 +204,28 @@ def main():
 
     jobs = []
     for m, persons in people.items():
+        if args.maps and m not in args.maps:
+            continue
         group, number = int(m[:2], 16), int(m[3:], 16)
-        source = dq4block.Map(prg, *fc_map(prg, group, number))
+        fc = fc_map(prg, group, number)
+        source = dq4block.Map(prg, *fc)
         occupied = {(p["x"], p["y"]) for p in persons}
         start = next((x, y) for y in range(source.h) for x in range(source.w)
                      if walkable(source, x, y) and (x, y) not in occupied)
-        for night in (False, True):
+        for night in () if args.no_tables else (False, True):
             jobs.append(("table", f"table-{m.replace('/', '')}-{'night' if night else 'day'}", m,
                          f"{m},{','.join(map(str, cell(*start)))}", "wait:60", night, None))
         for i, p in enumerate(persons):
             if p["interval"]:
                 continue
-            side = next(((p["x"] + dx, p["y"] + dy, d) for dx, dy, d in SIDES
-                         if walkable(source, p["x"] + dx, p["y"] + dy) and (p["x"] + dx, p["y"] + dy) not in occupied),
-                        None)
+            # People of the other time are not there. A walking person's start cell is the last resort: the hero
+            # warps onto it before that person walks off.
+            now = [q for q in persons if q["night"] == p["night"]]
+            side = talk_side(source, p["x"], p["y"], {(q["x"], q["y"]) for q in now}) or \
+                talk_side(source, p["x"], p["y"], {(q["x"], q["y"]) for q in now if not q["interval"]})
+            if side is None and (*fc, p["x"], p["y"]) in STAGED:
+                jobs.append(("staged", f"talk-{m.replace('/', '')}-{i}", m, None, None, p["night"], None))
+                continue
             if side is None:
                 # A map with no exit that is no group arrival is entered only by an event (FC 3A/04).
                 arrivals = {placement(prg)[part["fc"], part.get("map", 0)][1] for part in LINKS[group]}
@@ -166,15 +248,16 @@ def main():
                              (int(p["message"], 16), None)))
 
     def scene(kind, name, to, test, night):
-        if kind in ("unreachable", "closed"):
+        if kind in ("unreachable", "closed", "staged"):
             return None, None, None
         if kind == "table":
             return run(mesence, rom_path, state, out, name, libdir, to, test, night) + (None,)
         shop = kind == "shop"
         for n, talk in enumerate(TALKS):
             wram, messages = run(mesence, rom_path, state, out, f"{name}-{n}", libdir, to,
-                                 talk.format(dir=test) + (BUY if shop else STAY if kind == "inn" else ""), night, shop)
-            if messages:
+                                 talk.format(dir=test) + (BUY if shop else STAY if kind == "inn" else ""), night, shop,
+                                 None if shop else ret)
+            if messages and (shop or messages[0]):
                 return wram, messages, n
         return wram, messages, None
 
@@ -189,6 +272,8 @@ def main():
                 results[name] = {"ok": False, "error": "no free walkable cell next to the person"}
             elif kind == "closed":
                 results[name] = {"ok": True, "skipped": "map with no exit, entered only by an event"}
+            elif kind == "staged":
+                results[name] = {"ok": True, "skipped": "FC places the person on a wall or off the map"}
             elif kind == "shop":
                 items = [item for item, _ in messages or []]
                 results[name] = {"ok": items == want, "want": want, "got": messages, "timing": timing}
@@ -204,7 +289,10 @@ def main():
                 results[name] = {"ok": not bad, "people": len(placed), "mismatch": bad[:10]}
             else:
                 message, price = want
+                messages, rows = messages or (None, [])
                 ok = bool(messages) and messages[0] == message
+                if message in texts:
+                    ok = ok and codes_match(rows, message, texts[message])
                 got_price = None
                 if price is not None:
                     got_price = wram[1][INN_PRICE] if isinstance(wram, tuple) else None

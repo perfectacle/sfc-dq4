@@ -36,11 +36,11 @@ TARGETS = {
     "shrine-2a": (0x0E, 0x03), "konenbery-06": (0x12, 0x00), "attemut-05": (0x13, 0x00), "attemut-07": (0x16, 0x01),
     # One or two maps of each other town and castle sheet, picked for block coverage and few doors.
     "1A-01": (0x08, 0x02), "03-02": (0x08, 0x03), "17-00": (0x03, 0x0B), "0B-00": (0x03, 0x0E),
-    "08-01": (0x03, 0x0F), "10-00": (0x03, 0x10), "16-00": (0x04, 0x01), "0F-00": (0x04, 0x08),
+    "08-01": (0x03, 0x0F), "10-00": (0x03, 0x10), "16-00": (0x04, 0x01),
     "0A-00": (0x04, 0x09), "04-06": (0x0A, 0x06), "00-01": (0x04, 0x0B), "09-01": (0x04, 0x0C),
-    "00-00": (0x05, 0x00), "05-01": (0x06, 0x03), "01-00": (0x08, 0x01),
+    "00-00": (0x05, 0x00), "05-01": (0x06, 0x03),
     # Harbour, theatre and the smaller sheets; none of these has a door.
-    "11-00": (0x03, 0x03), "1A-00": (0x03, 0x09), "0E-00": (0x04, 0x0A), "15-03": (0x0A, 0x08),
+    "11-00": (0x03, 0x03), "1A-00": (0x03, 0x09), "15-03": (0x0A, 0x08),
     "34-06": (0x0A, 0x0B), "2E-00": (0x0B, 0x03),
     # One doorless map of several dungeon and tower families.
     "34-00": (0x0D, 0x01), "36-01": (0x0D, 0x02), "2F-00": (0x11, 0x01), "43-00": (0x12, 0x02),
@@ -60,6 +60,9 @@ GROUPS = {
     # The prologue's village before the attack (14/00, reached by events only) and its cellar. 14/02, the
     # ruined village the field leads to, waits for chapter 5.
     "14-00": (0x3C, 0x00), "14-01": (0x3C, 0x01),
+    # Chapter 2's castle and two towns in one group: サントハイム, テンペ, フレノール.
+    "01-00": (0x3D, 0x00), "01-01": (0x3D, 0x01), "01-02": (0x3D, 0x02), "0E-00": (0x3D, 0x03),
+    "0F-00": (0x3D, 0x04), "0F-01": (0x3D, 0x05),
 }
 MAPS = {**TARGETS, **GROUPS}
 # Further banks for map records once the first one reaches the library.
@@ -78,6 +81,12 @@ BLOCK_TABLE = 0x7EB000
 PALETTE_LINE1 = 0x3934
 WALL = 8
 FLOOR = 1
+# FC counters (block property A7) are made like DQ5's shop counters (01/0C: +1 = 91, +4 = 15): floor cells with
+# +1 bit7 (attribute pass 2 bit2), which blocks walking, and attribute 15, which lets はなす reach the person
+# behind (without it the game answered 129 「その方向には　誰もいない。」 across a counter).
+COUNTER_PROP = 0xA7
+COUNTER_PASS = 4
+COUNTER_ATTR = 0x15
 WATER_FRAMES = ("water0", "water1", "water2")
 WATER_AT = 0x41F000
 WATER_PERIOD = 24
@@ -205,6 +214,8 @@ def block_head(name, source, fc_block):
         return 0, 0, STAIR_ATTR
     if prop & 0x7F == CHEST_KIND:
         return CHEST_HEAD
+    if prop == COUNTER_PROP:
+        return 0, 0, COUNTER_ATTR
     return FURNITURE.get(prop, (0, 0, 0))
 
 
@@ -280,14 +291,18 @@ def chest_floor(source, x, y):
 
 
 def map_document(name, source, local, target):
-    """FC layout as DQ5 commands; blocked FC cells become wall cells via attribute pass 1."""
+    """FC layout as DQ5 commands; blocked FC cells become wall cells via attribute pass 1, counters get +1 bit7
+    via attribute pass 2."""
     width, height = source.w * 2, source.h * 2
     def block_at(x, y):
         return local[door_floor(source, x, y) if _prop(source, x, y) in OPENINGS else source.cell(x, y) & 31]
 
     def blocked(x, y):
         prop = _prop(source, x, y)
-        return prop & 0x80 and prop not in OPENINGS
+        return WALL if prop & 0x80 and prop not in OPENINGS | {COUNTER_PROP} else None
+
+    def counter(x, y):
+        return COUNTER_PASS if _prop(source, x, y) == COUNTER_PROP else None
     # A chest block is all upper layer, so the floor goes under it first: an opened chest's transparent
     # pixels show the lower layer, and the chest, placed last, keeps its cell +1 flags.
     chests = {(x, y) for y in range(source.h) for x in range(source.w)
@@ -319,34 +334,37 @@ def map_document(name, source, local, target):
                     commands.extend(["put", cx * 2, y * 2] for cx in range(x, end + 1))
                 x = end + 1
     commands.append(["end"])
-    entries = []
-    for y in range(height):
-        x = 0
-        while x < width:
-            if not blocked(x // 2, y // 2):
-                x += 1
-                continue
-            end = x
-            while end + 1 < width and blocked((end + 1) // 2, y // 2):
-                end += 1
-            run = end - x + 1
-            while run:
-                n = min(run, 257)
-                if n == 1:
-                    entries.append([x, y, 1, WALL, "one"])
-                else:
-                    entries.append([x, y, n, WALL, "short" if n <= 17 else "long"])
-                x += n
-                run -= n
-            x = end + 1
+    def pass_entries(value_of):
+        entries = []
+        for y in range(height):
+            x = 0
+            while x < width:
+                value = value_of(x // 2, y // 2)
+                if value is None:
+                    x += 1
+                    continue
+                end = x
+                while end + 1 < width and value_of((end + 1) // 2, y // 2) == value:
+                    end += 1
+                run = end - x + 1
+                while run:
+                    n = min(run, 257)
+                    if n == 1:
+                        entries.append([x, y, 1, value, "one"])
+                    else:
+                        entries.append([x, y, n, value, "short" if n <= 17 else "long"])
+                    x += n
+                    run -= n
+                x = end + 1
+        return entries
     return {
         "format": "dq5map/1", "map": f"{target[0]:02X}/{target[1]:02X}",
         "kind": 1, "width": width, "height": height, "outside": 0, "zone": 0, "attr": FLOOR, "bits": bits,
         "background_hi": 0, "background_lo": 0,
         "commands": commands,
         "passes": [
-            {"vertical": False, "entries": entries},
-            {"vertical": False, "entries": []},
+            {"vertical": False, "entries": pass_entries(blocked)},
+            {"vertical": False, "entries": pass_entries(counter)},
             {"vertical": True, "entries": []},
         ],
     }

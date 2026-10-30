@@ -92,7 +92,7 @@ FC 는 이름 입력 뒤 검은 화면에 금테 상자 「第一章　王宮の
 
 ### 두는 자리
 
-인물 목록은 데이터 뱅크를 목록 뱅크로 두고 낮은 WRAM 을 읽으므로 `30`~`3F` 의 서로 다른 두 뱅크에 둬야 합니다. 통합 롬에서 `30`~`39` 는 타이틀, `3A`~`3C` 는 그룹 연결, `3D`~`3F` 는 환경 맵이 씁니다. 원래 롬에서 빌드하는 `dq4groupbuild.py` 는 새 맵 레코드를 `34:8000` 에 두지만 통합 롬의 `34` 는 타이틀 자료라, 1장 빌드는 `3A:8000` 으로 돌립니다. `3A` 는 그 레코드와 서장 대화(`3A:F000`)로 차서, 그룹 빌드의 필드 지도(약 14.5KB, [DQ4 필드](dq4-field-format.md))는 타이틀 자료가 끝난 뒤 `34:C000`~`34:F8CB` 에 둡니다(`dq4chapter1.FIELD_AT`). 1장 빌드는 그룹 빌드의 입구별 도착 훅과 필드 패치도 함께 얹습니다. `test_dq4chapter1.py` 가 이 자리로 그룹 빌드를 돌려 패치끼리 겹치지 않는지 봅니다.
+인물 목록은 데이터 뱅크를 목록 뱅크로 두고 낮은 WRAM 을 읽으므로 `30`~`3F` 의 서로 다른 두 뱅크에 둬야 합니다. 통합 롬에서 `30`~`39` 는 타이틀, `3A`~`3C` 는 그룹 연결, `3D`~`3F` 는 환경 맵이 씁니다. 원래 롬에서 빌드하는 `dq4groupbuild.py` 는 새 맵 레코드를 `34:8000` 에 두지만 통합 롬의 `34` 는 타이틀 자료라, 1장 빌드는 `3A:8000` 으로 돌립니다. `3A` 는 그 레코드(2장 묶음까지 `3A:FFA4`)로 차서, 대화 스크립트는 그룹 빌드가 `3C:E800` 에 두고, 그룹 빌드의 필드 지도(약 14.5KB, [DQ4 필드](dq4-field-format.md))는 타이틀 자료가 끝난 뒤 `34:C000`~`34:F8CB` 에 둡니다(`dq4chapter1.FIELD_AT`). 1장 빌드는 그룹 빌드의 입구별 도착 훅과 필드 패치도 함께 얹습니다. `test_dq4chapter1.py` 가 이 자리로 그룹 빌드를 돌려 패치끼리 겹치지 않는지 봅니다.
 
 | 목록 | 자리 | 크기 | 남은 자리 |
 | --- | --- | --- | --- |
@@ -160,7 +160,7 @@ uv run --locked python sfc/dq4/tools/dq4chapter1.py build --rom work/ch1/menu.sf
 uv run --locked python -m unittest discover -s sfc/dq4/tools -p 'test_dq4chapter*.py'
 ```
 
-`dq4chapter1.py build` 는 `dq4groupbuild.py` 를 돌려 환경·새 맵·출구·입구·가게·여관 패치를 얻고, 그 인물 패치 대신 왕좌의 방을 바꾼 인물 패치(`dq5npcrelocate.py --new-map …`)를 만들어 메뉴 롬 위에 얹습니다. 메뉴 4초, 1장 7초쯤 걸립니다. 그다음 시작 연출 코드(`dq4chapterbox.py`, `rom/dq4.nes` 의 상자 타일과 `DQ4_GALMURI` 의 Galmuri11 을 씀)를 얹고, 새 게임 첫 맵 표를 바꾸고, 체크섬을 맞춥니다. `--keep 폴더` 를 주면 중간 패치 목록을 남깁니다. 소리는 이 롬을 `dq4soundset.py --base` 로 넘겨 얹습니다([사운드 포팅](dq4-sound-port-format.md)).
+`dq4chapter1.py build` 는 `dq4groupbuild.py` 를 돌려 환경·새 맵·출구·입구·가게·여관·대화 스크립트 패치를 얻고(대화 스크립트는 서장 스크립트 `900`~`903` 과 옮긴 인물의 메시지 스크립트, [인물](dq4-environment-format.md#인물)), 그 인물 패치 대신 왕좌의 방을 바꾼 인물 패치(`dq5npcrelocate.py --new-map …`)를 만들어 메뉴 롬 위에 얹습니다. 메뉴 4초, 1장 7초쯤 걸립니다. 그다음 시작 연출 코드(`dq4chapterbox.py`, `rom/dq4.nes` 의 상자 타일과 `DQ4_GALMURI` 의 Galmuri11 을 씀)를 얹고, 새 게임 첫 맵 표를 바꾸고, 체크섬을 맞춥니다. `--keep 폴더` 를 주면 중간 패치 목록을 남깁니다. 소리는 이 롬을 `dq4soundset.py --base` 로 넘겨 얹습니다([사운드 포팅](dq4-sound-port-format.md)).
 
 ## 검증
 
