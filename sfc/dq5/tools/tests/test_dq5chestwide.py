@@ -68,6 +68,11 @@ def open_chest(rom, group, number, **wram):
         return hit
     for name, addr in (('none', 0x12E669), ('below', 0x12E675), ('opened', 0x12E68B), ('reward', 0x12E6A7)):
         cpu.hooks[addr] = stop(name)
+
+    def counted(c):
+        # 2A:F224 는 맵 안 순서를 DP $00·$01 의 좌표로 센다. 훅이 $1E71 을 그 자리에 옮겨 두었는지 본다
+        seen['dp'] = bytes(c.wram[c.d:c.d + 2])
+    cpu.hooks[0x2AF224] = counted
     cpu.pbr, cpu.pc = CODE >> 16, label('open') & 0xFFFF
     try:
         cpu.run(max_steps=10_000)
@@ -83,15 +88,19 @@ class ChestWideTests(unittest.TestCase):
     def test_open_branches(self):
         rom = hooked(index=4)
         # 19/00 의 맵 안 순서 4 = 상자 304: 바이트 28F3 + 48/8 = 28F9, 마스크 80
-        got = open_chest(rom, 0x19, 0x00, w291B=0)
+        got = open_chest(rom, 0x19, 0x00, w291B=0, w1E71=0x0C, w1E72=0x2D)
         self.assertEqual(got['name'], 'reward')
+        self.assertEqual(got['dp'], bytes((0x0C, 0x2D)))
         self.assertEqual(got['y'], 304)
         self.assertEqual(got['p'] & 0x30, 0)
         self.assertEqual((got['wram'][0x1E80], got['wram'][0x1E81], got['wram'][0x291B]), (6, 0, 0x80))
         self.assertEqual(got['s'], 0x1FF)
-        got = open_chest(rom, 0x19, 0x00, w28F9=0x80)
+        # 12:F839 를 거치지 않은 보상이 남긴 마스크는 열 때 지운다
+        got = open_chest(rom, 0x19, 0x00, w28F9=0x80, w291B=0x04)
         self.assertEqual(got['name'], 'opened')
-        self.assertEqual(got['s'], 0x1FF)
+        self.assertEqual((got['s'], got['wram'][0x291B]), (0x1FF, 0))
+        got = open_chest(rom, 0x01, 0x02, w291B=0x04)
+        self.assertEqual((got['name'], got['wram'][0x291B]), ('below', 0))
         # 01/02 의 순서 4 는 256 미만이라 원래 루틴(A = 4)으로
         got = open_chest(rom, 0x01, 0x02)
         self.assertEqual((got['name'], got['a'] & 0xFF, got['p'] & 0x30), ('below', 4, 0x30))
@@ -126,6 +135,12 @@ class ChestWideTests(unittest.TestCase):
         cpu = cpu_for(rom, 0, 0, w1E80=6, w1E81=0)
         cpu.jsl(label('set'), max_steps=1_000)
         self.assertEqual(sum(cpu.wram[0x2190:0x2A00]), 0)
+        # 남은 마스크가 있어도 $1E80 이 28F3~291A 의 바이트 번호가 아니면 원래 길(마스크 0 을 OR)로 간다
+        for index in (0x28, 0x80, 0xFF):
+            cpu = cpu_for(rom, 0, 0, w1E80=index, w1E81=0, w291B=0x08)
+            cpu.jsl(label('set'), max_steps=1_000)
+            self.assertEqual(sum(cpu.wram[0x28F3:0x291B]) + sum(cpu.wram[0x294A:0x2A00]), 0, hex(index))
+            self.assertEqual((cpu.wram[0x2190 + index], cpu.wram[0x291B], cpu.p & 1), (0, 0x08, 0))
 
     def test_locate_and_limits(self):
         rom = hooked()
@@ -140,12 +155,20 @@ class ChestWideTests(unittest.TestCase):
         bits = reloc.flag_bits(dict(doc, chests=doc['chests'][:576]))
         self.assertEqual(bits[0x291A, 0x01], '일반 상자 575')
         self.assertEqual(bits[0x28F3, 0x80], '일반 상자 256')
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, '576개까지'):
             reloc.flag_bits(doc)
         # 다른 표의 비트는 늘린 뒤에도 2210~224F 안이어야 함
         lower = {'group': 0x51, 'map': 0x51, 'x': 1, 'y': 1, 'reward': 1, 'flag_index': 0x7F, 'mask': 1}
         with self.assertRaises(ValueError):
             reloc.flag_bits(dict(doc, chests=[], lower=[lower]))
+        # 상자 비트가 아닌 항목은 28F3~ 에 둘 수 없음
+        with self.assertRaisesRegex(ValueError, '2210~224F 밖'):
+            reloc.flag_bits(dict(doc, chests=[], search=[
+                {'group': 0x17, 'map': 0, 'x': 2, 'y': 4, 'unused': 1, 'reward': 1, 'flag_index': 0xFF, 'mask': 1}]))
+        # 마스크 0 인 항목은 --wide-at 에서 거부
+        reloc.flag_bits(dict(doc, chests=[], lower=[dict(lower, flag_index=0, mask=0)]))
+        with self.assertRaisesRegex(ValueError, 'mask'):
+            reloc.flag_bits(dict(doc, chests=[], lower=[dict(lower, flag_index=0, mask=0)]), wide=True)
 
     def test_patch_writes_hooks(self):
         rom = Rom(Path(ROM).read_bytes())
@@ -153,6 +176,8 @@ class ChestWideTests(unittest.TestCase):
         writes, mb = reloc.writes_for(rom, doc, {'chest_maps': 0x3FC000, 'wide': 0x3FD000})
         sites = {addr for addr, *_ in writes}
         self.assertTrue({0x12E66F, 0x1FFDD0, 0x12F839, 0x3FD000} <= sites)
+        built = Rom(build(rom.d, [('wide', mb, [(lorom(a), n, o, note) for a, n, o, note in writes])], mb)[0])
+        self.assertEqual(reloc.wide_at(built), 0x3FD000)
         with self.assertRaises(ValueError):
             reloc.writes_for(rom, json.loads(json.dumps(doc)) | {'chests': doc['chests'] * 2}, {})
 
