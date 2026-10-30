@@ -163,9 +163,10 @@ def fc_numbers(prg, fc_group):
     return sorted(k for g, k in placement(prg) if g == fc_group)
 
 
-def has_people(fc_group):
-    """Whether the FC people and shops of an FC group are ported (LINKS "people", on by default)."""
-    return all(part.get("people", True) for parts in LINKS.values() for part in parts if part["fc"] == fc_group)
+def has_people(fc_group, with_people=True):
+    """Whether the FC people and shops of an FC group are ported (LINKS "people", on by default; `with_people` False
+    ports none)."""
+    return with_people and all(part.get("people", True) for parts in LINKS.values() for part in parts if part["fc"] == fc_group)
 
 
 def tag(group, part):
@@ -408,7 +409,7 @@ def map_attrs(dq5, link):
     return {"bytes": row}
 
 
-def build(dq5, dq4, out):
+def build(dq5, dq4, out, with_people=True):
     out.mkdir(parents=True, exist_ok=True)
     prg = ines.prg(dq4.read_bytes())
     place = placement(prg)
@@ -442,7 +443,7 @@ def build(dq5, dq4, out):
 
     checks = [step("dq5newmap.py", "newmap", newmap, env_rom, *NEWMAP_AT)]
     import dq4npcport  # imports this module
-    lists, messages, people = dq4npcport.port(dq5, dq4)
+    lists, messages, people = dq4npcport.port(dq5, dq4, with_people)
     _save(out / "npc-report.json", people)
     _run(DQ5_TOOLS / "dq5npcrelocate.py", dq5, "patch",
          _save(out / "npc.json", {"format": "dq5npcrelocate/1", "scripts": [],
@@ -452,7 +453,7 @@ def build(dq5, dq4, out):
     checks.append(step("dq5textwrite.py", "text", {"format": "dq5text/1", "messages": messages}, dq5, *TEXT_AT))
     checks.append(step("dq5talkwrite.py", "talk", dq4npcport.talk_doc(messages), dq5, *TALK_AT))
     import dq4shopport  # imports this module
-    _, shops, inn_writes, shop_report = dq4shopport.port(dq5, dq4, INN_AT, SHOP_KEY_AT)
+    _, shops, inn_writes, shop_report = dq4shopport.port(dq5, dq4, INN_AT, SHOP_KEY_AT, with_people)
     _save(out / "shop-report.json", shop_report)
     step("dq5progresswrite.py", "shops", {"format": "dq5progress/1", "shops": shops}, dq5, *SHOP_AT)
     manifests.append(_save(out / "inn.dq5patch.json", {"format": "dq5patch/1", "name": "dq4-inns-shop-keys", "writes": inn_writes}))
@@ -540,11 +541,7 @@ def main():
     ap.add_argument("--no-people", action="store_true",
                     help="no FC people or shops: a ROM for dq4groupcheck, where wandering people block stairs")
     args = ap.parse_args()
-    if args.no_people:
-        for parts in LINKS.values():
-            for part in parts:
-                part["people"] = False
-    print(json.dumps(build(args.dq5, args.dq4, args.out), ensure_ascii=False))
+    print(json.dumps(build(args.dq5, args.dq4, args.out, with_people=not args.no_people), ensure_ascii=False))
 
 
 if __name__ == "__main__":

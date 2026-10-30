@@ -103,8 +103,9 @@ def keys(place, sellers):
     return rows
 
 
-def port(dq5_path, dq4_path, inn_at, key_at):
-    """(service kinds per person, dq5progress shops, patch writes of the inn table and the key hook, report).
+def port(dq5_path, dq4_path, inn_at, key_at, with_people=True):
+    """(service kinds per person, dq5progress shops, patch writes of the inn table and the key hook, report);
+    `with_people` False ports no sellers.
     The inn table bank must show the low WRAM: 06:F563 keeps the table bank in DB and writes $0F28-$0F36 with
     absolute addresses."""
     if not inn_at >> 16 <= 0x3F:
@@ -119,7 +120,7 @@ def port(dq5_path, dq4_path, inn_at, key_at):
     maps = sorted(GROUPS.values())
     for group, number in maps:
         fc_group, fc_number = fc_map(prg, group, number)
-        services[f"{group:02X}/{number:02X}"] = merchants(prg, fc_group, fc_number) if has_people(fc_group) else {}
+        services[f"{group:02X}/{number:02X}"] = merchants(prg, fc_group, fc_number) if has_people(fc_group, with_people) else {}
     sellers = {(group, fc_map(prg, group, number)[0]) for group, number in maps
                if set(services[f"{group:02X}/{number:02X}"].values()) & {*LIST_KIND, INN}}
     rows = keys(placement(prg), sellers)

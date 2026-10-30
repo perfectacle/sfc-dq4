@@ -291,10 +291,10 @@ def talk_doc(messages):
     return doc
 
 
-def port(dq5_path, dq4_path):
-    """(dq5npcrelocate lists, dq5text messages, report). After the maps' own lists come the lists of later
-    states (dq4ch1event.ALT_STATES) as {"name": dq4ch1event.alt_name(state, map), "entries": …}, reported under the same name;
-    their new lines get message numbers after the start state's."""
+def port(dq5_path, dq4_path, with_people=True):
+    """(dq5npcrelocate lists, dq5text messages, report); `with_people` False ports no FC people. After the maps'
+    own lists come the lists of later states (dq4ch1event.ALT_STATES) as {"name": dq4ch1event.alt_name(state, map),
+    "entries": …}, reported under the same name; their new lines get message numbers after the start state's."""
     import dq4ch1event
     data = Path(dq4_path).read_bytes()
     prg, rom = ines.prg(data), dq4text.Rom(data)
@@ -305,7 +305,7 @@ def port(dq5_path, dq4_path):
     def people_of(name, fc_group, fc_number, flags=None):
         entries, people = [], []
         shops = merchants(prg, fc_group, fc_number)
-        for night in (False, True) if has_people(fc_group) else ():
+        for night in (False, True) if has_people(fc_group, with_people) else ():
             for p in fc_people(prg, fc_group, fc_number, night, flags):
                 shows = [m for m in p["shows"] if m is not None]
                 predicted = [m - dq4talk.SERVICE for m in shows if m >= dq4talk.SERVICE]
