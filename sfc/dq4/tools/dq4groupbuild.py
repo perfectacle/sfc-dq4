@@ -10,7 +10,8 @@ Order matters (sfc/dq4/docs/dq4-environment-format.md, 「그룹 연결」):
      dq5talkwrite.py with the talk scripts that show the people's messages (dq4npcport.talk_doc).
   4. dq5chestplace.py from the original ROM with the patches of 1-3 (--with-patch): the FC chests and
      タンス·つぼ of dq4chestport.py on the cells 1 gave their DQ5 attributes.
-  5. dq4fieldport.py: FC field 0 as DQ5 world 0 (dq5fieldwrite.py).
+  5. dq4fieldport.py: FC field 0 as DQ5 world 0 with the DQ4 field art (dq5fieldgfxwrite.py, dq5fieldtables.py,
+     dq5fieldwrite.py).
   6. dq5build.py on the original ROM with 1-5.
 
 FC stairs (08:$B22E) become same-group exits, FC exit-table cells ($05A0) become area moves, and the map
@@ -434,7 +435,7 @@ def build(dq5, dq4, out):
     with_patches = [a for m in manifests for a in ("--with-patch", m)]
     checks.append(step("dq5chestplace.py", "chests", place, dq5, *CHEST_AT, "--tables", _save(out / "chest-tables.json", base),
                        *new_map_args, *with_patches))
-    manifests.append(dq4fieldport.patch(dq5, prg, out / "field.dq5patch.json", FIELD_AT))
+    manifests += dq4fieldport.patch(dq5, prg, out / "field.dq5patch.json", FIELD_AT)
 
     rom = out / "groups.sfc"
     _run(DQ5_TOOLS / "dq5build.py", dq5, "build", *manifests, "--size", 4, "-o", rom, "--ips", out / "groups.ips")

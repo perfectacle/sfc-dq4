@@ -75,6 +75,22 @@ def environment_towns_figure(folder, names=TOWN_SHOTS):
     return sheet.resize((sheet.width * 2, sheet.height * 2), Image.Resampling.NEAREST)
 
 
+FIELD_VIEWS = ("castle", "imuru", "bridge", "desert", "reef")
+
+
+def field_gfx_figure(folder):
+    """DQ4 그림으로 바꾼 필드의 MesenCE 화면 다섯(dq4fieldcheck.VIEWS)을 3×2 로 2배. 화면은
+    dq4fieldcheck.py --out work/dq4-fieldcheck 가 남긴 gfx-<이름>/end.png 다. 없으면 None."""
+    paths = [folder / f"gfx-{name}" / "end.png" for name in FIELD_VIEWS]
+    if not all(path.exists() for path in paths):
+        return None
+    sheet = Image.new("RGB", (3 * 260 - 4, 2 * 228 - 4), (24, 24, 24))
+    for i, path in enumerate(paths):
+        with Image.open(path) as shot:
+            sheet.paste(shot.convert("RGB"), ((i % 3) * 260, (i // 3) * 228))
+    return sheet.resize((sheet.width * 2, sheet.height * 2), Image.Resampling.NEAREST)
+
+
 def sprite_gallery(images):
     """인물마다 남 정지·보행, 서 정지·보행, 동, 북 정지·보행을 풀색 위에 6배로 늘어놓는다."""
     cells = ((0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (3, 0), (3, 1))
@@ -193,6 +209,11 @@ def main():
     dungeons = environment_towns_figure(ROOT / "work" / "dq4-environment-rom" / "check", DUNGEON_SHOTS)
     if dungeons is not None:
         dungeons.save(output / "dq4-environment-dungeons.webp", lossless=True)
+    field_gfx = field_gfx_figure(ROOT / "work" / "dq4-fieldcheck")
+    if field_gfx is None:
+        print("work/dq4-fieldcheck 에 필드 화면이 없어 dq4-field-gfx.webp 는 건너뜀")
+    else:
+        field_gfx.save(output / "dq4-field-gfx.webp", lossless=True)
     sprite_gallery(images).save(output / "dq4-sprites-gallery.webp", lossless=True)
     draft_figure().save(output / "dq4-sprite-drafts.webp", lossless=True)
     field = field_figure(ROOT / "work" / "dq4-sprites")

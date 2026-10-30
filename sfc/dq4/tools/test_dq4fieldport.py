@@ -15,8 +15,9 @@ ROM = Path(__file__).resolve().parents[3] / "rom" / "dq4.nes"
 class MapTest(unittest.TestCase):
     def test_blocks_follow_fc_and_the_rest_is_sea(self):
         grid = port.world([[0x00, 0x02, 0x06], [0x04, 0x10, 0x16]])
-        self.assertEqual(grid[0:3], [port.SEA, 2, port.MOUNTAIN])
-        self.assertEqual(grid[port.SIZE:port.SIZE + 3], [354, 18, 22])
+        own = port.OWN_BLOCKS
+        self.assertEqual(grid[0:3], [port.SEA, own[0x02], own[0x06]])
+        self.assertEqual(grid[port.SIZE:port.SIZE + 3], [own[0x04], own[0x10], own[0x16]])
         self.assertEqual(grid[3], port.SEA)
         self.assertEqual(grid[2 * port.SIZE], port.SEA)
         self.assertEqual(len(grid), port.SIZE * port.SIZE)
@@ -25,7 +26,7 @@ class MapTest(unittest.TestCase):
         grid = port.world([[0x02]])
         x, y = port.ISLAND
         island = [grid[(y + dy) * port.SIZE + x + dx] for dy in range(3) for dx in range(3)]
-        self.assertEqual(island, [port.MOUNTAIN] * 9)
+        self.assertEqual(island, [port.OWN_BLOCKS[0x06]] * 9)
         self.assertEqual((port.PARK[0] >> 1, port.PARK[1] >> 1), (x + 1, y + 1))
         with self.assertRaises(ValueError):
             port.world([[0x02] * (x + 1)])
@@ -34,9 +35,21 @@ class MapTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             port.world([[0x18]])
 
-    def test_blocks_stay_below_512(self):
-        # dq5fieldwrite needs --planes-at and the chest patch's glow cell from 512 up.
-        self.assertLess(max(port.BLOCKS.values()), 512)
+    def test_borrowed_blocks_stay_below_511(self):
+        # Their terrain and attributes come from DQ5's own block table.
+        self.assertLess(max(port.BLOCKS.values()), port.FIRST_BLOCK)
+
+    def test_own_blocks(self):
+        own = port.OWN_BLOCKS
+        self.assertEqual(own.keys(), port.BLOCKS.keys())
+        self.assertEqual(own[0x00], port.SEA)
+        numbers = sorted(set(own.values()) - {port.SEA})
+        self.assertEqual(numbers, list(range(port.FIRST_BLOCK, port.FIRST_BLOCK + len(numbers))))
+        # One block per art and borrowed block: the cave mouths share one, the castle halves do not.
+        self.assertEqual(own[0x08], own[0x09])
+        self.assertEqual(own[0x0E], own[0x1E])
+        self.assertNotEqual(own[0x12], own[0x13])
+        self.assertNotEqual(own[0x05], own[0x0E])
 
     def test_pack(self):
         grid = [0] * (port.SIZE * port.SIZE)
@@ -116,7 +129,7 @@ class FieldTest(unittest.TestCase):
         grid, _ = port.fc_field(self.prg)
         self.assertEqual((len(grid[0]), len(grid)), (253, 253))
         world = port.world(grid)
-        self.assertEqual(world[0x2E * port.SIZE + 0xA4], port.BLOCKS[0x12])
+        self.assertEqual(world[0x2E * port.SIZE + 0xA4], port.OWN_BLOCKS[0x12])
 
     def test_port_entrances(self):
         import dq4groupbuild

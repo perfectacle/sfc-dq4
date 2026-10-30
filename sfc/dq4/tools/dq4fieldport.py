@@ -5,8 +5,8 @@ FC block (x, y) of field 0 is DQ5 block (x, y) of world 0, so a DQ5 field cell (
 read as sea); the DQ5 world is 256x256, and the rest is sea except a mountain island in the far corner where the
 original DQ5 entrances of world 0 are parked (sfc/dq4/docs/dq4-field-format.md).
 
-The blocks are DQ5's own field blocks with the terrain of the FC block (walk, ship, encounter terrain); their
-art stays DQ5's until the DQ4 art replaces it.
+Each FC block kind has a DQ5 block of its own (OWN_BLOCKS, from 511) drawn with the DQ4 art (dq4fieldgfx.py) and
+taking the terrain of the DQ5 field block BLOCKS borrows (walk, ship, encounter terrain). The sea is DQ5's block 0.
 
   python sfc/dq4/tools/dq4fieldport.py map -o work/field/w0.bin
   python sfc/dq4/tools/dq4fieldport.py patch -o work/field/field.dq5patch.json --at 3A:8000
@@ -58,6 +58,29 @@ BLOCKS = {
     0x1D: 5,
     0x1E: 5,
 }
+# Places of the field graphics (dq4fieldgfx.py), free in both the dq4groupbuild ROM and the chapter-1 ROM
+# (dq4chapter1.py): the tile hooks and tables in one bank of 30-3F (01:A4A7 reads with DB set to it), the rest in
+# 30-7D. The planes take the bank of "planes" and the next one.
+GFX_AT = {"worlds": "30:F000", "extra": "54:8000", "blocks": "54:C000", "planes": "55:8000"}
+# First DQ5 block dq5fieldtables --blocks-at adds: 511 shares its slot with upper-layer block 0 in the original table.
+FIRST_BLOCK = 511
+
+
+def own_blocks():
+    """FC block kind -> its own DQ5 block: one per FIELD_ART asset and borrowed block, numbered from FIRST_BLOCK in FC
+    kind order. The sea keeps DQ5's block 0, whose tiles take the DQ4 water (dq4fieldgfx)."""
+    from dq4environmentmap import FIELD_ART
+    out, numbers = {}, {}
+    for kind in sorted(BLOCKS):
+        if BLOCKS[kind] == SEA:
+            out[kind] = SEA
+            continue
+        key = (FIELD_ART[kind][0], BLOCKS[kind])
+        out[kind] = numbers.setdefault(key, FIRST_BLOCK + len(numbers))
+    return out
+
+
+OWN_BLOCKS = own_blocks()
 # The original DQ5 entrances of world 0 move inside a 3x3 mountain island beyond the FC map: no walk or ship
 # reaches it, so DQ5 towns are never entered from FC ground.
 ISLAND = (253, 253)
@@ -74,7 +97,7 @@ WARP_GROUP = 0x01
 
 def world(fc_grid):
     """DQ5 world-0 block numbers (row-major 256x256) of an FC field grid (rows of FC blocks, as dq4field.decode)."""
-    unknown = sorted({v for row in fc_grid for v in row} - BLOCKS.keys())
+    unknown = sorted({v for row in fc_grid for v in row} - OWN_BLOCKS.keys())
     if unknown:
         raise ValueError(f"FC field blocks without a DQ5 block: {[f'{v:02X}' for v in unknown]}")
     if len(fc_grid) > ISLAND[1] or any(len(row) > ISLAND[0] for row in fc_grid):
@@ -82,10 +105,10 @@ def world(fc_grid):
     grid = [SEA] * (SIZE * SIZE)
     for y, row in enumerate(fc_grid):
         for x, v in enumerate(row):
-            grid[y * SIZE + x] = BLOCKS[v]
+            grid[y * SIZE + x] = OWN_BLOCKS[v]
     for y in range(ISLAND[1], ISLAND[1] + 3):
         for x in range(ISLAND[0], ISLAND[0] + 3):
-            grid[y * SIZE + x] = MOUNTAIN
+            grid[y * SIZE + x] = OWN_BLOCKS[0x06]
     return grid
 
 
@@ -183,16 +206,35 @@ def write_map(prg, path):
     return path
 
 
-def patch(dq5, prg, path, at):
-    """dq5fieldwrite.py patch of world 0. Every block is below 512, so dq5fieldwrite needs no planes and never reads
-    the glow cell a chest patch moves: the original ROM makes the same patch as the ROM with the chest patch."""
+def _run(tool, *args):
+    proc = subprocess.run([sys.executable, str(DQ5_TOOLS / tool), *map(str, args)], capture_output=True, text=True)
+    if proc.returncode:
+        raise RuntimeError(f"{tool}: {proc.stderr[-1500:]}")
+
+
+def patch(dq5, prg, path, at, gfx_at=GFX_AT):
+    """Patch lists of the field, in build order: the DQ4 tiles (dq5fieldgfxwrite.py), their blocks (dq5fieldtables.py
+    --blocks-at, made from a ROM with the tiles: block tiles from 512 need the tile hooks) and world 0
+    (dq5fieldwrite.py, made from a ROM with both: blocks from 511 need the moved block table). path names the map's
+    list; the others sit next to it. The original ROM's cells that 00:CF50 changes are all sea (block 0) on the FC
+    map, and the chest patch does not move them, so the ROMs need no chest patch."""
+    import dq4fieldgfx
+    folder = path.parent / "fieldgfx"
+    gfx, table = dq4fieldgfx.gfx_doc(dq5, folder)
+    lists = [path.with_name("field-gfx.dq5patch.json"), path.with_name("field-blocks.dq5patch.json"), path]
+    _run("dq5fieldgfxwrite.py", dq5, "patch", gfx, "-o", lists[0], "--worlds-at", gfx_at["worlds"],
+         "--extra-at", gfx_at["extra"], "--name", "dq4-field-gfx")
+    with_gfx = folder / "gfx.sfc"
+    _run("dq5build.py", dq5, "build", lists[0], "--size", 4, "-o", with_gfx)
+    _run("dq5fieldtables.py", with_gfx, "patch", table, "-o", lists[1], "--blocks-at", gfx_at["blocks"],
+         "--name", "dq4-field-blocks")
+    with_blocks = folder / "blocks.sfc"
+    _run("dq5build.py", dq5, "build", *lists[:2], "--size", 4, "-o", with_blocks)
     grid = path.with_suffix(".bin")
     write_map(prg, grid)
-    proc = subprocess.run([sys.executable, str(DQ5_TOOLS / "dq5fieldwrite.py"), str(dq5), "patch", "--world", "0",
-                           str(grid), "-o", str(path), "--at", at, "--name", "dq4-field"], capture_output=True, text=True)
-    if proc.returncode:
-        raise RuntimeError(f"dq5fieldwrite.py: {proc.stderr[-1500:]}")
-    return path
+    _run("dq5fieldwrite.py", with_blocks, "patch", "--world", "0", grid, "-o", path, "--at", at,
+         "--planes-at", gfx_at["planes"], "--name", "dq4-field")
+    return lists
 
 
 def main():
@@ -208,7 +250,7 @@ def main():
     if args.cmd == "map":
         print(write_map(prg, args.out))
     else:
-        print(patch(args.dq5, prg, args.out, args.at))
+        print(*patch(args.dq5, prg, args.out, args.at))
 
 
 if __name__ == "__main__":
