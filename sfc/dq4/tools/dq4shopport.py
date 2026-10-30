@@ -39,7 +39,7 @@ SERVICE = {0: 5, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6}
 SELLER_CONDITIONS = ("counter", "낮", "밤", "주인공 Y")
 # Story-flag person lists (dq4shop.npc_lists) are not the start of chapter 1.
 FLAG_LIST = "목록 플래그"
-STORY_FLAG = "flag&"
+STORY_FLAG = "flag& "
 INN, CHURCH = 6, 5
 INN_TABLE = 0x04FD6D
 INN_ENTRIES = 21
@@ -71,7 +71,8 @@ def merchants(prg, fc_group, number):
         if any(FLAG_LIST in c for c in cond):
             continue
         # Story flags are all off at the start of a chapter: a seller that needs one is not there yet, and one
-        # that needs one off is. The talk answer that also gates such a seller is then never asked.
+        # that needs one off is. The skip comes before the condition check so that the other conditions of a
+        # seller who is not there yet (a talk answer, day) do not stop the build.
         if any(c.startswith(STORY_FLAG) for c in cond):
             continue
         cond = [c for c in cond if not c.startswith(f"아님({STORY_FLAG}")]
