@@ -43,7 +43,8 @@ def run(mesence, libdir, rom, state, out, ids):
     env.update(LIBDIR=str(libdir), STATE=str(state), SHOT_DIR=str(out), DRIVER=str(WARP_LUA),
                WARPEXIT=f'{nc.warp_exit(rom):X}', DP86OK=nc.dp86_allowed(rom), TO=BOSS_CELL, SET=HERO,
                SETTLE='120', TEST=TAPS, MAXF=str(MAXF), SWAP=','.join(f'{n:03X}' for n in ids),
-               POOLCODES=','.join(f'{c:02X}' for c in dq4battlemsg.CODES))
+               POOLCODES=','.join(f'{c:02X}' for c in dq4battlemsg.CODES),
+               LATECODES=','.join(f'{c:02X}' for c in dq4battlemsg.CODES[dq4battlemsg.POOL.index(dq4battlemsg.POOL_C[0]):]))
     with (out / 'mesen.log').open('w') as log:
         try:
             subprocess.run([str(mesence), '--testrunner', str(rom), str(SWAP_LUA), '--Snes.DisableFrameSkipping=true'],
@@ -106,10 +107,13 @@ def main():
         sheet(d, ids, out / f'sheet-{d.name}.png')
     used = [int(line.split()[1]) for d in out.glob('r*') if (d / 'used.txt').exists()
             for line in (d / 'used.txt').read_text().splitlines() if line.strip()]
+    effects = [int(line.split()[1]) for d in out.glob('r*') if (d / 'effects.txt').exists()
+               for line in (d / 'effects.txt').read_text().splitlines() if line.strip()]
     report = {'status': 'passed' if not stalled and not todo else 'failed',
               'shown': len(shown), 'stalled': [f'{n:03X}' for n in stalled], 'unreached': [f'{n:03X}' for n in todo],
               'skipped': {f'{n:03X}': why for n, why in SKIP.items()},
-              'pool': len(dq4battlemsg.CODES), 'pool_used_max': max(used, default=0)}
+              'pool': len(dq4battlemsg.CODES), 'pool_used_max': max(used, default=0),
+              'effects': len(effects), 'effects_with_late_tiles': sum(1 for c in effects if c)}
     (out / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=1))
     print(json.dumps(report, ensure_ascii=False))
     return 0 if report['status'] == 'passed' else 1

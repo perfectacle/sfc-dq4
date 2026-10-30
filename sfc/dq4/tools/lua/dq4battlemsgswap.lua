@@ -1,7 +1,8 @@
 -- 전투 메시지 바꿔 띄우기(dq4battlemsgcheck.py 가 부름). DRIVER(dq5warp.lua)로 전투를 붙이고, 24:8C39 에 들어올 때마다
 -- A(메시지 번호)를 SWAP 목록의 다음 번호로 바꾼다. 바꾼 뒤 SHOTDELAY(기본 40) 프레임에 화면을 m<번호>.png 로 찍고,
 -- 번호를 바꾼 프레임을 swap.txt 에 "프레임 번호" 로 적는다. POOLCODES(16진 목록)를 주면 찍을 때 글자 격자(7E:1DD5, 156바이트)에
--- 든 풀 코드 수를 그 줄 끝에 붙인다.
+-- 든 풀 코드 수를 used.txt 에 적는다. LATECODES(16진 목록, 복원하지 않는 풀 C 의 코드)를 주면 연출이 시작할 때(22:D73C)
+-- 격자에 그 코드가 있는지를 effects.txt 에 "프레임 개수" 로 적는다.
 package.path = os.getenv('LIBDIR') .. '/?.lua;' .. package.path
 local L = require('lib')
 local list = {}
@@ -9,7 +10,16 @@ for a in string.gmatch(os.getenv('SWAP') or '', '%x+') do list[#list + 1] = tonu
 local delay = tonumber(os.getenv('SHOTDELAY') or '40')
 local pool = {}
 for a in string.gmatch(os.getenv('POOLCODES') or '', '%x+') do pool[tonumber(a, 16)] = true end
-local n, k, log, shots, used = 0, 1, {}, {}, {}
+local late = {}
+for a in string.gmatch(os.getenv('LATECODES') or '', '%x+') do late[tonumber(a, 16)] = true end
+local n, k, log, shots, used, fx = 0, 1, {}, {}, {}, {}
+emu.addMemoryCallback(function()
+  local c = 0
+  for i = 0, 155 do
+    if late[emu.read(0x7E1DD5 + i, emu.memType.snesMemory)] then c = c + 1 end
+  end
+  fx[#fx + 1] = string.format('%d %d', n, c)
+end, emu.callbackType.exec, 0x22D73C, 0x22D73C)
 emu.addMemoryCallback(function()
   if k > #list then return end
   local s = emu.getState()
@@ -36,6 +46,7 @@ L.write = function(name, data)
   if name == 'warp.txt' then
     write('swap.txt', table.concat(log, '\n') .. '\n')
     write('used.txt', table.concat(used, '\n') .. '\n')
+    write('effects.txt', table.concat(fx, '\n') .. '\n')
   end
   return write(name, data)
 end
