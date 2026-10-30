@@ -6,8 +6,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PIL import Image  # noqa: E402
 
-from dq5msgwindowcheck import (WINDOW_WHITE, border_gaps, complete, effect_log, hdma_ranges, obj_boxes,  # noqa: E402
-                               same_until, transfer_sizes)
+import tempfile  # noqa: E402
+
+from dq5msgwindowcheck import (WINDOW_WHITE, border_gaps, border_rows, complete, effect_log, hdma_ranges,  # noqa: E402
+                               number_matches, obj_boxes, safe, same_until, transfer_sizes, with_retries)
 
 
 class SameUntilTests(unittest.TestCase):
@@ -69,9 +71,10 @@ class ObjTests(unittest.TestCase):
 class HdmaTests(unittest.TestCase):
     def test_effect_registers_minus_battle(self):
         calls = ['1000 248C39 05E', '1050 FXID 0F', '1060 248C39 070', '1120 248C39 069', '1200 248C39 05E']
-        text = '\n'.join(['990 2111 1 1 1', '1001 210E 51 168 4', '1055 210E 51 168 4', '1055 2111 55 167 226',
-                           '1100 2132 54 168 4', '1130 2111 60 61 2', ''])
-        self.assertEqual(hdma_ranges(calls, text), {'0F': {'2111': [55, 167], '2132': [54, 168]}})
+        text = '\n'.join(['990 2111 1 1 1 -', '1001 210E 51 168 4 00', '1055 210E 51 168 4 00',
+                           '1055 2111 55 167 226 00,01', '1056 2111 55 167 226 00,FF', '1100 2132 54 168 4 E0',
+                           '1130 2111 60 61 2 -', ''])
+        self.assertEqual(hdma_ranges(calls, text), {'0F': {'2111': [55, 167, '00,01,FF'], '2132': [54, 168, 'E0']}})
 
 
 class ScreenTests(unittest.TestCase):
@@ -95,6 +98,52 @@ class ScreenTests(unittest.TestCase):
         self.assertEqual(border_gaps(image, 2, 21, 7), 0)
         image.putpixel((17, 180), (0, 0, 0))
         self.assertEqual(border_gaps(image, 2, 21, 7), 1)
+
+
+class NumberMatchTests(unittest.TestCase):
+    @staticmethod
+    def run_of(number, text):
+        return (number, [(c, 0, i) for i, c in enumerate(text)])
+
+    def test_first_of_each_number(self):
+        original = [self.run_of('03B', 'AB'), self.run_of('06A', 'CD'), self.run_of('03B', 'XX')]
+        runs = [self.run_of('070', 'ZZ'), self.run_of('06A', 'CD'), self.run_of('03B', 'AB'), self.run_of('03B', 'QQ')]
+        # 070 은 원래 롬에 없어 견주지 않고, 03B 는 둘 다 첫 메시지끼리 견준다
+        self.assertEqual(number_matches(runs, original), (2, 2))
+        self.assertEqual(number_matches([self.run_of('06A', 'CE')], original), (0, 1))
+
+
+class RetryTests(unittest.TestCase):
+    def test_retries_until_battle_message(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / 'run'
+            dest.mkdir()
+            results = iter([(255, ''), (0, '600 FX 0CC0 0380 -\n'), (0, '700 248C39 05E\n')])
+
+            def launch():
+                (dest / 'stale.png').write_bytes(b'')
+                code, calls = next(results)
+                if calls:
+                    (dest / 'exec.txt').write_text(calls)
+                return code
+            self.assertEqual(with_retries(launch, dest, 's/r'), 2)
+            # 실패한 시도의 파일은 지우고 다시 돈다
+            self.assertEqual(sorted(p.name for p in dest.iterdir()), ['exec.txt', 'stale.png'])
+
+    def test_gives_up(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / 'run'
+            dest.mkdir()
+            with self.assertRaises(ValueError):
+                with_retries(lambda: 255, dest, 's/r', retries=2)
+
+
+class SafeTests(unittest.TestCase):
+    def test_safe(self):
+        self.assertTrue(safe({'border_broken': 0, 'foreign_shots': 0, 'faded': 3}))
+        self.assertFalse(safe({'border_broken': 1, 'foreign_shots': 0}))
+        self.assertFalse(safe({'border_broken': 0, 'foreign_shots': 2}))
+        self.assertEqual(len(border_rows(21, 7)), 48)
 
 
 if __name__ == '__main__':

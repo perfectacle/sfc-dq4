@@ -80,12 +80,14 @@ emu.addMemoryCallback(function()
   log[#log + 1] = string.format('%d ACT %02X %02X', n, emu.read(0x7E1200, m), emu.read(0x7E1201, m))
 end, emu.callbackType.exec, 0x208846, 0x208846)
 -- HLOG=1 이면 보이는 줄(ppu.scanline 1~224)에서 PPU 레지스터 $2105~$2112·$2121·$2123~$2133 에 쓴 것(HDMA 쓰기도 걸림)을
--- 프레임·레지스터마다 첫·끝 줄과 횟수로 모아 hdma.txt 에 "프레임 레지스터 첫줄 끝줄 횟수" 로 적는다. 레지스터는 거울 뱅크
+-- 프레임·레지스터마다 첫·끝 줄과 횟수, HLOGTAIL(기본 150) 줄부터 쓴 값(겹치지 않게, 16진, 없으면 -)으로 모아 hdma.txt 에
+-- "프레임 레지스터 첫줄 끝줄 횟수 값,…" 으로 적는다. 레지스터는 거울 뱅크
 -- 00~3F·80~BF 어디로도 쓸 수 있다. 쓰기마다 상태를 읽어 실행이 열 배 넘게 느려지므로 따로 켠다. VRAM·CGRAM 데이터
 -- 포트($2118·$2119·$2122)는 DMA 로 바이트마다 걸려 뺀다.
 local hlogon = os.getenv('HLOG') == '1'
+local hlogtail = tonumber(os.getenv('HLOGTAIL') or '150')
 local lines = {}
-local function pcb(addr)
+local function pcb(addr, value)
   local sl = emu.getState()['ppu.scanline']
   if sl < 1 or sl > 224 then return end
   local r = addr & 0xFFFF
@@ -93,8 +95,17 @@ local function pcb(addr)
   if e then
     e[1], e[2], e[3] = math.min(e[1], sl), math.max(e[2], sl), e[3] + 1
   else
-    lines[r] = {sl, sl, 1}
+    e = {sl, sl, 1, {}}
+    lines[r] = e
   end
+  if sl >= hlogtail then e[4][value] = true end
+end
+local function tail(set)
+  local t = {}
+  for v in pairs(set) do t[#t + 1] = v end
+  table.sort(t)
+  for i, v in ipairs(t) do t[i] = string.format('%02X', v) end
+  return #t > 0 and table.concat(t, ',') or '-'
 end
 for bank = 0, 0xBF do
   if hlogon and (bank < 0x40 or bank >= 0x80) then
@@ -115,7 +126,7 @@ local function block(addr, size, mem)
   return table.concat(t)
 end
 emu.addEventCallback(function()
-  for r, e in pairs(lines) do hlog[#hlog + 1] = string.format('%d %04X %d %d %d', n, r, e[1], e[2], e[3]) end
+  for r, e in pairs(lines) do hlog[#hlog + 1] = string.format('%d %04X %d %d %d %s', n, r, e[1], e[2], e[3], tail(e[4])) end
   lines = {}
   n = n + 1
   if n == 3 and #ranges > 0 then base_r, base_w = counts() end

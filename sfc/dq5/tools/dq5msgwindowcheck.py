@@ -30,6 +30,7 @@ import concurrent.futures
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -76,12 +77,16 @@ SHOT_SHIFT = 7
 WINDOW_GRAY, WINDOW_WHITE = (49, 49, 41), (247, 247, 239)
 # 원래 장면(one·four)은 메시지 열이 앞에서부터 같아야 한다.
 PREFIX_SCENES = ('one', 'four')
+NUMBER_MISS = 3
 OLD_GRID, FIELD_VARS = '1DD5-1E70', (0x1E71, 0x1EFF)
 NEW_GRID = f'{GRID & 0xFFFF:04X}-{(GRID & 0xFFFF) + GRID_SIZE - 1:04X}'
 ACC = f'{OLD_GRID},{FIELD_VARS[0]:04X}-{FIELD_VARS[1]:04X},{NEW_GRID}'
 FROM, STEP, SHOTEVERY = 560, 1, 16
 LAG = 8
 RETRIES = 3
+# 원래 창 위 테두리(스크린샷 y = TOP × 8 - SHOT_SHIFT = 161)가 그려지는 ppu.scanline. OBJ 가 OAM y + 1 줄에 그려지고 스크린샷
+# y 는 OAM y - 7 이라(dq5monsizecheck.py) 스크린샷 y + 8 = scanline 이다.
+HLOG_TAIL = TOP * 8 - SHOT_SHIFT + 8
 
 
 def require(condition, message):
@@ -169,8 +174,9 @@ def obj_boxes(oam):
 
 
 def hdma_ranges(calls, text):
-    """HLOG 기록(hdma.txt) → {연출 번호: {레지스터: [첫 줄, 끝 줄]}}. 연출 시작(FXID)부터 그 뒤 둘째 메시지까지를 그 연출의
-    구간으로 보고, 연출 밖 전투 프레임에서도 같은 범위로 쓰는 레지스터(전투 배경 BG1·BG2 세로 스크롤 등)는 뺀다."""
+    """HLOG 기록(hdma.txt) → {연출 번호: {레지스터: [첫 줄, 끝 줄, HLOGTAIL 줄부터 쓴 값]}}. 연출 시작(FXID)부터 그 뒤 둘째
+    메시지까지를 그 연출의 구간으로 보고, 연출 밖 전투 프레임에서도 같은 범위로 쓰는 레지스터(전투 배경 BG1·BG2 세로
+    스크롤 등)는 뺀다. 연출 밖 전투 프레임이 없는 장면(one·event)은 그런 레지스터도 남는다."""
     starts, messages = [], []
     for line in calls:
         parts = line.split()
@@ -183,11 +189,11 @@ def hdma_ranges(calls, text):
         later = [m for m in messages if m > frame]
         spans.append((frame, later[1] if len(later) > 1 else frame + 200, number))
     battle = min((m for m in messages), default=0)
-    base, per = {}, {}
+    base, per, tails = {}, {}, {}
     for line in text.split('\n'):
         if not line:
             continue
-        frame, reg, first, last, _ = line.split()
+        frame, reg, first, last, _, *rest = line.split()
         frame, first, last = int(frame), int(first), int(last)
         if frame < battle:
             continue
@@ -195,7 +201,10 @@ def hdma_ranges(calls, text):
         table = base if owner is None else per.setdefault(owner, {})
         lo, hi = table.get(reg, (first, last))
         table[reg] = (min(lo, first), max(hi, last))
-    return {number: {reg: list(r) for reg, r in sorted(regs.items()) if base.get(reg) != r}
+        if owner is not None and rest and rest[0] != '-':
+            tails.setdefault((owner, reg), set()).update(rest[0].split(','))
+    return {number: {reg: [*r, ','.join(sorted(tails.get((number, reg), ()))) or '-']
+                     for reg, r in sorted(regs.items()) if base.get(reg) != r}
             for number, regs in sorted(per.items())}
 
 
@@ -235,10 +244,19 @@ def complete(dump, x, y, w, h):
     return True
 
 
+def border_rows(y, h):
+    """화면 창 왼쪽 테두리 세로줄에서 보는 줄(위 테두리 아래부터 아래 테두리까지)의 스크린샷 y 범위."""
+    return range(y * 8 - SHOT_SHIFT + 2, min(224, (y + h - 1) * 8 - SHOT_SHIFT + 2))
+
+
 def border_gaps(image, x, y, h):
-    """화면 창 왼쪽 테두리 세로줄(점 x × 8 + 1, 위 테두리 아래부터 아래 테두리까지)에서 흰 점이 아닌 줄 수."""
-    top, bottom = y * 8 - SHOT_SHIFT, min(224, (y + h - 1) * 8 - SHOT_SHIFT + 2)
-    return sum(image.getpixel((x * 8 + 1, row)) != WINDOW_WHITE for row in range(top + 2, bottom))
+    """화면 창 왼쪽 테두리 세로줄(점 x × 8 + 1)에서 흰 점이 아닌 줄 수."""
+    return sum(image.getpixel((x * 8 + 1, row)) != WINDOW_WHITE for row in border_rows(y, h))
+
+
+def safe(screen):
+    """screen_window 결과에서 창이 화면에서 깨진 스크린샷(어두워지는 화면·피해 흔들림 말고)과 창 안 다른 색 점이 없는지."""
+    return screen['border_broken'] == 0 and screen['foreign_shots'] == 0
 
 
 def screen_window(scene, name, shape, seen, out):
@@ -248,7 +266,7 @@ def screen_window(scene, name, shape, seen, out):
     창을 21줄 위로 올리면 주문 연출이 줄마다 바꾸는 BG3 가로 스크롤·색 더하기와 앞으로 올린 몬스터 OBJ 가 창에 닿는다."""
     dumps = seen[(name, scene)][0]
     x, y, w, h = shape['x'], shape['y'], shape['w'], shape['h']
-    frames = broken = worst = foreign = foreign_shots = 0
+    frames = broken = faded = worst = foreign = foreign_shots = 0
     first = None
     for k in range(2, len(dumps)):
         frame = FROM + k * STEP
@@ -260,6 +278,10 @@ def screen_window(scene, name, shape, seen, out):
         frames += 1
         image = Image.open(shot).convert('RGB')
         gaps = border_gaps(image, x, y, h)
+        # 전투가 끝나 어두워지는 화면은 테두리 전체가 흰색이 아니다(원래 롬도 같으나 롬마다 때가 어긋남).
+        if gaps >= len(border_rows(y, h)):
+            faded += 1
+            continue
         # 피해 흔들림은 화면 전체를 1~2점 위아래로 옮겨 테두리 끝 두 줄까지만 빈다(원래 롬도 같음).
         if gaps > 2:
             broken += 1
@@ -271,7 +293,7 @@ def screen_window(scene, name, shape, seen, out):
         count = sum(p not in (WINDOW_GRAY, WINDOW_WHITE) for p in inside)
         foreign += count
         foreign_shots += count > 0
-    return {'shots': frames, 'border_broken': broken, 'worst_gap': worst, 'first_broken': first,
+    return {'shots': frames, 'faded': faded, 'border_broken': broken, 'worst_gap': worst, 'first_broken': first,
             'foreign_pixels': foreign, 'foreign_shots': foreign_shots}
 
 
@@ -348,6 +370,20 @@ def consistency(dumps, bufs, x, y, w, h):
     return frames, differ, longest, first
 
 
+def number_matches(runs, original_runs):
+    """이벤트·동료 장면은 창이 커지면 「あらわれた」의 ▼ 기다림부터 난수가 갈려 첫 턴 메시지부터 다를 수 있다.
+    그래서 메시지 번호가 같은 첫 메시지끼리 글자를 견준다. → (글자까지 같은 수, 견준 수). 피해 수·대상이 든 메시지는
+    난수에 따라 다를 수 있어, 견준 것의 1/NUMBER_MISS 까지는 달라도 된다."""
+    firsts = {}
+    for number, text in original_runs:
+        firsts.setdefault(number, [c for c, _, _ in text])
+    by_number = {}
+    for number, text in runs:
+        if number in firsts and number not in by_number:
+            by_number[number] = [c for c, _, _ in text] == firsts[number]
+    return sum(by_number.values()), len(by_number)
+
+
 def compare_shaped(scene, name, shape, seen):
     """모양을 바꾼 롬: 글자 열, VRAM 과 버퍼, 접근 카운터."""
     dumps, bufs, calls, acc = seen[(name, scene)][:4]
@@ -366,23 +402,15 @@ def compare_shaped(scene, name, shape, seen):
             break
         same += 1
         chars += len(text)
-    # 이벤트·동료 장면은 창이 커지면 「あらわれた」의 ▼ 기다림부터 난수가 갈려 첫 턴 메시지부터 다를 수 있다.
-    # 그래서 메시지 번호가 같은 첫 메시지끼리도 글자를 견준다(피해 수·대상이 든 메시지는 다를 수 있음).
-    firsts = {}
-    for number, text in original_runs:
-        firsts.setdefault(number, [c for c, _, _ in text])
-    by_number = {}
-    for number, text in runs:
-        if number in firsts and number not in by_number:
-            by_number[number] = [c for c, _, _ in text] == firsts[number]
-    same_number = sum(by_number.values())
+    same_number, compared = number_matches(runs, original_runs)
     for _, text in runs:
         for c, line, col in text:
             require(line < (h - 1) // 2 and col < w - 2, f'{scene}/{name}: 글자 {c} 가 격자 밖({line}줄 {col}칸)')
     if scene in PREFIX_SCENES:
         require(same >= 3, f'{scene}/{name}: 원래 롬과 글자까지 같은 메시지가 {same}개뿐')
     else:
-        require(same_number >= 3, f'{scene}/{name}: 원래 롬과 번호·글자가 같은 메시지가 {same_number}개뿐')
+        require(same_number >= 3 and compared - same_number <= compared // NUMBER_MISS,
+                f'{scene}/{name}: 원래 롬과 번호가 같은 메시지 {compared}개 중 글자까지 같은 것이 {same_number}개')
     frames, differ, longest, first = consistency(dumps, bufs, x, y, w, h)
     require(frames and longest <= 1, f'{scene}/{name}: VRAM 창이 버퍼와 {longest}덤프 이어 다름(f{first}부터)')
     kinds = {line.split()[1] for line in calls if line}
@@ -391,7 +419,7 @@ def compare_shaped(scene, name, shape, seen):
     require(acc[OLD_GRID][1] == 0 and acc[NEW_GRID][1] > 0 and original_acc[OLD_GRID][1] > 0,
             f'{scene}/{name}: 옛 격자 쓰기 {acc[OLD_GRID][1]}, 새 격자 쓰기 {acc[NEW_GRID][1]}, '
             f'원래 롬 옛 격자 쓰기 {original_acc[OLD_GRID][1]}')
-    return {'messages': common, 'same_text': same, 'same_number': f'{same_number}/{len(by_number)}', 'chars': chars, 'frames': frames, 'differ': differ, 'longest': longest,
+    return {'messages': common, 'same_text': same, 'same_number': f'{same_number}/{compared}', 'chars': chars, 'frames': frames, 'differ': differ, 'longest': longest,
             'effects': effects, 'old_grid_writes': acc[OLD_GRID][1], 'grid_writes': acc[NEW_GRID][1],
             'calls': sorted(kinds)}
 
@@ -403,6 +431,22 @@ def compare_field(name, seen):
     require(original.split('\n')[1:] == moved.split('\n')[1:] and original.split(' ', 1)[1] == moved.split(' ', 1)[1],
             f'field/{name}: 필드로 돌아온 뒤 자리·7E:{FIELD_VARS[0]:04X}~{FIELD_VARS[1]:04X} 가 원래 롬과 다름')
     return {'field': moved.split('\n')[0], 'acc': seen[(name, 'field')][3]}
+
+
+def with_retries(launch, dest, name, retries=RETRIES):
+    """MesenCE 를 여럿 함께 띄우면 가끔 시작하자마자 255 로 끝나거나, 선실 상태에서 순간이동하지 못하고 느리게 돌아 전투
+    메시지가 하나도 없다. 같은 입력을 혼자 다시 돌리면 늘 전투가 붙으므로 그런 실행만 dest 를 비우고 다시 돌린다.
+    launch() 는 종료 코드를 돌려준다. → 다시 돌린 횟수."""
+    for attempt in range(retries):
+        code = launch()
+        calls = (dest / 'exec.txt').read_text() if (dest / 'exec.txt').is_file() else ''
+        if code == 0 and ' 248C39 ' in calls:
+            return attempt
+        require(attempt + 1 < retries, f'{name}: MesenCE {code}, 전투 메시지 없음({retries}번)')
+        print(f'{name}: MesenCE {code}, 전투 메시지 없음 — 다시 돌림({attempt + 2}/{retries})', file=sys.stderr, flush=True)
+        shutil.rmtree(dest)
+        dest.mkdir(parents=True)
+    return retries
 
 
 def main():
@@ -461,19 +505,15 @@ def main():
                 env.pop(key, None)
             env.update(LIBDIR=libdir, STATE=str(state), SHOT_DIR=str(dest), DRIVER=str(HERE / 'lua/dq5warp.lua'),
                        FIELD='341,56', TEST=TAPS, FROM=str(FROM), STEP=str(STEP), SHOTEVERY=str(SHOTEVERY), ACC=ACC,
-                       HLOG='1' if args.hlog and rom == 'original' else '0', **SCENES[scene])
-            # MesenCE 를 여럿 함께 띄우면 가끔 시작하자마자 255 로 끝나거나, 선실 상태에서 순간이동하지 못하고 느리게
-            # 돌아 전투 메시지가 하나도 없다. 같은 입력을 혼자 다시 돌리면 늘 전투가 붙으므로 그런 실행만 다시 돌린다.
-            for attempt in range(RETRIES):
+                       HLOG='1' if args.hlog and rom == 'original' else '0', HLOGTAIL=str(HLOG_TAIL), **SCENES[scene])
+            def launch():
                 with (dest / 'mesen.log').open('w') as log:
-                    done = subprocess.run([str(mesence), '--testrunner', str(roms[rom]),
+                    return subprocess.run([str(mesence), '--testrunner', str(roms[rom]),
                                            str(HERE / 'lua/dq5msgwindowcheck.lua'), '--Snes.DisableFrameSkipping=true',
-                                           '--timeout=900'], env=env, stdout=log, stderr=subprocess.STDOUT, timeout=1000)
-                calls = (dest / 'exec.txt').read_text() if (dest / 'exec.txt').is_file() else ''
-                if done.returncode == 0 and ' 248C39 ' in calls:
-                    break
-                require(attempt + 1 < RETRIES, f'{scene}/{rom}: MesenCE {done.returncode}, 전투 메시지 없음')
-                retried.append(f'{scene}/{rom}')
+                                           '--timeout=900'], env=env, stdout=log, stderr=subprocess.STDOUT,
+                                          timeout=1000).returncode
+
+            retried.extend(f'{scene}/{rom}' for _ in range(with_retries(launch, dest, f'{scene}/{rom}')))
             acc = {}
             for line in (dest / 'acc.txt').read_text().split('\n'):
                 if line:
@@ -493,10 +533,11 @@ def main():
             if scene != 'field':
                 frames, differ, longest, first = consistency(*seen[('original', scene)][:2], LEFT, TOP, WIDTH, HEIGHT)
                 original_shape = {'x': LEFT, 'y': TOP, 'w': WIDTH, 'h': HEIGHT}
+                original_screen = screen_window(scene, 'original', original_shape, seen, out)
                 results.append({'scene': scene, 'case': 'original', 'frames': frames, 'differ': differ,
                                 'longest': longest, **transfer_sizes(scene, 'original', TOP, seen[('original', scene)][2]),
-                                'screen': screen_window(scene, 'original', original_shape, seen, out),
-                                'cover': coverage(scene, seen)})
+                                'screen': original_screen, 'cover': coverage(scene, seen)})
+                require(safe(original_screen), f'{scene}/original: 화면 창이 깨짐 {original_screen}')
                 require(frames and longest <= 1, f'{scene}/original: VRAM 창이 버퍼와 {longest}덤프 이어 다름(f{first}부터)')
             for name, row in cases.items():
                 if scene == 'field':
@@ -505,6 +546,10 @@ def main():
                     result = {**compare_shaped(scene, name, shapes[name], seen),
                               **transfer_sizes(scene, name, shapes[name]['y'], seen[(name, scene)][2]),
                               'screen': screen_window(scene, name, shapes[name], seen, out)}
+                    # 21줄 창(넓히기만)은 원래 창처럼 안전해야 한다. 21줄 위로 높인 창이 주문 연출에 깨지는 것은
+                    # 알려진 문제라 세기만 한다(dq5-build-format.md).
+                    if shapes[name]['y'] == TOP:
+                        require(safe(result['screen']), f'{scene}/{name}: 21줄 창이 화면에서 깨짐 {result["screen"]}')
                 else:
                     result = {**compare_moved(scene, name, row['x'], seen, out),
                               **transfer_sizes(scene, name, TOP, seen[(name, scene)][2])}
