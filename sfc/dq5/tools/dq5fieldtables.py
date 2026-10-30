@@ -1,8 +1,8 @@
 """DQ5 필드 블록·입구·도착 표 쓰기. 형식은 sfc/dq5/docs/dq5-field-format.md.
 
 블록 표(00:BC4E)는 아래층 2A:A32C, 위층 2A:AD27 에 각각 511항목이다.
-번호 511은 다음 표·세계 1 RLE와 겹치므로 제자리에는 쓰지 않는다. --blocks-at 을 주면 번호 511~1023 을 그 자리의 두 표로
-더하고 00:BC4E 를 그 표도 읽는 훅으로, 지형 표(03:CC48)를 512바이트로 옮긴다(블록마다 terrain). 블록 상위 비트 바이트의
+번호 511은 다음 표·세계 1 RLE와 겹치므로 제자리에는 쓰지 않는다. --blocks-at 을 주면 번호 511~2047 을 그 자리의 두 표로
+더하고 00:BC4E 를 그 표도 읽는 훅으로, 지형 표(03:CC48)를 1,024바이트로 옮긴다(블록마다 terrain). 블록 상위 비트 바이트의
 하위 니블은 원본에서 보존한다. dq5fieldgfxwrite.py 의 타일 늘리기 패치를 넣은 롬(00:BC80 이 JSL)이면
 그 니블을 10번째 비트로 써서 타일 번호를 1023 까지 받는다. check 는 롬의 블록 표가 타일이 가장 적은 세계의 타일 수
 이상을 쓰면 실패한다(그림 쪽 타일 수를 바꾸면 이 도구의 패치를 다시 만들 것). 입구(2A:F247·FDCB)와 도착(2A:F384)도 고정 슬롯만
@@ -40,8 +40,8 @@ from dq5newmap import entrance_table  # noqa: E402
 
 FORMAT = 'dq5fieldtables/1'
 BLOCK_COUNT = 511
-# --blocks-at 으로 늘릴 수 있는 블록 수. 지도의 블록 번호는 10비트까지다(10번째 비트는 dq5fieldwrite.py --planes-at).
-BLOCK_MAX = 1024
+# --blocks-at 으로 늘릴 수 있는 블록 수. 지도의 블록 번호는 11비트까지다(10·11번째 비트는 dq5fieldwrite.py --planes-at).
+BLOCK_MAX = 2048
 BLOCK_GROW_ORIG = bytes.fromhex('c2308500')
 TERRAIN_ORIG = bytes.fromhex('bf48cc03')
 # 원본 롬의 도착 항목 수(그룹 00~35). 늘린 롬은 arrivals() 가 센다.
@@ -258,9 +258,10 @@ def relocate(rom, tables, at, groups):
 
 
 def terrains(rom):
-    """지형 니블을 블록 번호 차례로(원래 표는 512블록 몫 256바이트)."""
+    """지형 니블을 블록 번호 차례로(원래 표는 512블록 몫 256바이트). 블록을 1,024개까지 늘리던 롬은 옮긴 표가 512바이트라
+    블록 수만큼만 읽는다."""
     off = lorom(terrain_table(rom))
-    raw = rom.d[off:off + (BLOCK_MAX if grown_blocks(rom) else 512) // 2]
+    raw = rom.d[off:off + (max(512, block_count(rom)) + 1) // 2]
     return [v for b in raw for v in (b >> 4, b & 15)]
 
 
@@ -406,7 +407,7 @@ MASKS = bytes([0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01])
 
 
 def grow_blocks(rom, new_blocks, at, land):
-    """블록 511 이상을 at 에 [훅][칸 마스크 8][아래층 표][위층 표][지형 512바이트] 로 두고 00:BC4E·03:CB1B 의 두 읽기를 바꾼다."""
+    """블록 511 이상을 at 에 [훅][칸 마스크 8][아래층 표][위층 표][지형 1,024바이트] 로 두고 00:BC4E·03:CB1B 의 두 읽기를 바꾼다."""
     if not new_blocks:
         raise ValueError('--blocks-at 은 번호 511 이상의 블록을 더할 때만')
     n = max(new_blocks) + 1
@@ -431,7 +432,7 @@ def grow_blocks(rom, new_blocks, at, land):
     out = [(at, body, None, f'블록 {BLOCK_COUNT}~{n - 1} 훅·표와 지형 표')]
     out.append((BLOCK_GROW_SITE, b'\x5c' + long3(at), BLOCK_GROW_ORIG, '블록 표 읽기(00:BC4E)를 늘리기 훅으로'))
     for site in TERRAIN_SITES:
-        out.append((site, b'\xbf' + long3(terrain), TERRAIN_ORIG, '지형 표 읽기를 512바이트 표로'))
+        out.append((site, b'\xbf' + long3(terrain), TERRAIN_ORIG, '지형 표 읽기를 옮긴 표로'))
     return out
 
 

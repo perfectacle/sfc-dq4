@@ -103,13 +103,15 @@ def block_tiles(rom, table, m):
 # 블록 번호 511 이상(dq5fieldtables.py --blocks-at): 00:BC4E 를 JML 로 바꿔 511 이상이면 옮긴 표에서 읽는다.
 # 훅은 BRA 로 건너뛰는 머리 [아래층 표][위층 표 24비트씩][블록 수 16비트] 로 시작하고, 두 표는 번호 511 부터 5바이트씩이다.
 BLOCK_GROW_SITE = 0x00BC4E
-# 지형 표(03:CB1B 가 블록 >> 1 로 니블을 읽음). 블록을 늘리면 두 읽기의 피연산자를 512바이트 표로 바꾼다.
+# 지형 표(03:CB1B 가 블록 >> 1 을 16비트 X 로 니블을 읽음). 블록을 늘리면 두 읽기의 피연산자를 옮긴 표로 바꾼다.
 TERRAIN = 0x03CC48
 TERRAIN_SITES = (0x03CB2A, 0x03CB36)
-# 블록 번호 10번째 비트(dq5fieldwrite.py --planes-at): 00:BBF7·00:BDC5 의 9번째 비트 읽기(00:BC33·00:BE06)를 JSL 로 바꿔
-# 세계마다 롬의 8KB 평면(칸마다 1비트, 7E:E000 과 같은 꼴)을 함께 읽는다. 훅은 BRA 로 건너뛰는 머리 [세계 0·1·2 평면 24비트씩,
-# 0 이면 없음]로 시작한다.
+# 블록 번호 10·11번째 비트(dq5fieldwrite.py --planes-at): 00:BBF7·00:BDC5 의 9번째 비트 읽기(00:BC33·00:BE06)를 JSL 로 바꿔
+# 세계마다 롬의 8KB 평면(칸마다 1비트, 7E:E000 과 같은 꼴)을 비트마다 하나씩 함께 읽는다. 훅은 BRA 로 건너뛰는 머리
+# [세계 0·1·2 의 10번째 비트 평면][세계 0·1·2 의 11번째 비트 평면](24비트씩, 0 이면 없음)로 시작한다. 10번째 비트만 읽던 훅은
+# 머리가 앞의 9바이트뿐이라 BRA 의 거리(09)로 가른다.
 BIT9_SITES = (0x00BC33, 0x00BE06)
+BIT11_HEAD = 0x12
 
 
 def grown_blocks(rom):
@@ -143,23 +145,27 @@ def terrain(rom, m):
     return v & 0x0F if m & 1 else v >> 4
 
 
-def bit9_planes(rom):
-    """세계 0·1·2 의 10번째 비트 평면 주소(없으면 None). 훅이 없으면 모두 None."""
+def bit9_planes(rom, bit=9):
+    """세계 0·1·2 의 bit(9 = 10번째, 10 = 11번째) 비트 평면 주소(없으면 None). 훅이 없으면 모두 None."""
     if rom.u8(BIT9_SITES[0]) != 0x22:
         return [None] * 3
     hook = rom.u24(BIT9_SITES[0] + 1)
-    return [rom.u24(hook + 2 + w * 3) or None for w in range(3)]
+    if bit == 10 and rom.u8(hook + 1) != BIT11_HEAD:
+        return [None] * 3
+    return [rom.u24(hook + 2 + (bit - 9) * 9 + w * 3) or None for w in range(3)]
 
 
 def world_blocks(rom, world, sources=None):
-    """세계 지도 65,536칸의 블록 번호(y*256+x). 10번째 비트 평면이 있으면 더한다.
+    """세계 지도 65,536칸의 블록 번호(y*256+x). 10·11번째 비트 평면이 있으면 더한다.
     sources 는 (지도, 9번째 비트) RLE 주소로, 주지 않으면 원래 자리다."""
     src_w, src_e = sources or WORLDS[world]
     low, _ = rle(rom, src_w)
     hi, _ = rle(rom, src_e)
-    plane = bit9_planes(rom)[world]
-    p = rom.d[lorom(plane):lorom(plane) + 0x2000] if plane else bytes(0x2000)
-    return [low[i] | ((hi[i >> 3] >> (7 - (i & 7))) & 1) << 8 | ((p[i >> 3] >> (7 - (i & 7))) & 1) << 9
+    planes = [hi]
+    for bit in (9, 10):
+        plane = bit9_planes(rom, bit)[world]
+        planes.append(rom.d[lorom(plane):lorom(plane) + 0x2000] if plane else bytes(0x2000))
+    return [low[i] | sum(((p[i >> 3] >> (7 - (i & 7))) & 1) << (8 + k) for k, p in enumerate(planes))
             for i in range(65536)]
 
 
