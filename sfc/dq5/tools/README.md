@@ -40,8 +40,9 @@ MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) �
 | `dq5textgrowcheck.py rom --state 상태 --out 폴더` | 3200~`1FFF` 를 덧붙인 롬에서 대화 번호·대화 스크립트·이벤트 명령 `60`·인물 인라인 `21` 로 덧붙인 메시지를, 대화 번호로 원래 메시지 셋을 띄워 디코더가 푼 64코드를 입력·원본 롬과 대조(17건). `MESENCE` 필요 |
 | `dq5battletextwrite.py rom export\|patch\|check --at BB:AAAA` | 전투 메시지 432개 1바이트 부호 목록 `dq5battletext/1`. 일부 메시지만 고치고 전체 허프만 재압축, 디코더 사본·트리·메시지를 `--at`(필수, 30~7D)에 두고 색인 훅으로 뱅크를 OR. [쓰기 형식](../docs/dq5-build-format.md#전투-메시지-일괄-쓰기-dq5battletext1) |
 | `dq5namewrite.py rom export\|patch\|check [--at BB:AAAA]` | 이름 문자열 표 아홉 개 `dq5names/1`. 이름 길이 0~24(`7A` 로 시작하면 0~12) 바꾸기, 원래 자리에 다시 채우거나 `--at` 으로 옮기고 `21:959B` 포인터 고침. [쓰기 형식](../docs/dq5-build-format.md#이름-문자열-표-쓰기-dq5names1). `--append` 로 원래 항목 수 뒤에 이름을 덧붙임(`--at` 과 함께) |
-| `dq5windowwrite.py rom dump\|patch\|check` | 창 레코드(`04:EB48`, 전투 창 포함)의 X·Y·너비·높이 `dq5windows/1`. 창 `00`~`93`, 다른 비트·내용은 그대로. 전투 메시지 창 25, 함께 쓰는 레코드(`89`~`8C`), `+0` bit6 창의 높이는 받지 않음. [쓰기 형식](../docs/dq5-build-format.md#창-자리크기-dq5windows1) |
+| `dq5windowwrite.py rom dump\|patch\|check` | 창 레코드(`04:EB48`, 전투 창 포함)의 X·Y·너비·높이 `dq5windows/1`. 창 `00`~`93`, 다른 비트·내용은 그대로. 전투 메시지 창 18·25 는 X 만 함께 옮기고 글자·▼ 칸 코드 여섯 곳도 고침(너비·Y·높이는 받지 않음). 함께 쓰는 레코드(`89`~`8C`), `+0` bit6 창의 높이는 받지 않음. [쓰기 형식](../docs/dq5-build-format.md#창-자리크기-dq5windows1) |
 | `dq5windowcheck.py rom --state 상태 --out 폴더` | MesenCE 전투에서 창 17·1B·87·1E 를 옮긴 롬과 원래 롬의 BG3 타일맵 버퍼 모서리 타일을 비교. `MESENCE` 필요 |
+| `dq5msgwindowcheck.py rom --state 상태 --out 폴더` | MesenCE 전투(긴 메시지·줄 올리기·무리 넷·▼ 기다림)에서 메시지 창 18·25 의 X 를 0·4 로 옮긴 롬과 원래 롬의 VRAM BG3 타일맵 창 사각형과 화면을 비교. `MESENCE` 필요 |
 | `dq5battletextcheck.py rom --state 상태 --out 폴더` | MesenCE 전투에서 원본·원문 재배치·고침·옮김 4건의 푼 버퍼(`7E:0E4B`)와 글자 격자(`7E:1DD5`)의 몬스터 이름·메시지를 대조. `MESENCE` 필요 |
 | `dq5eventwrite.py rom dump\|encode\|patch\|check` | 이벤트 명령 JSON(`dq5event/1`). `dump --event N` 또는 `--number HEX`, `patch 입력 -o 목록`으로 지정한 표 항목을 확장 뱅크 스크립트에 연결. 기본 `60:8000`, 내부 라벨은 배치 주소로 계산. [쓰기 형식](../docs/dq5-build-format.md#이벤트-스크립트-dq5event1) |
 | `dq5npcwrite.py rom dump\|encode\|patch\|check` | 인물 인라인 JSON(`dq5npcscript/1`). `dump BB:AAAA -o 입력`은 길이 바이트 주소를 받음. `patch 입력 -o 목록`은 원본 슬롯 크기를 유지하고 남는 부분을 `00`으로 채움. 상대 분기는 라벨 지원. [쓰기 형식](../docs/dq5-build-format.md#인물-스크립트-dq5npcscript1) |
@@ -205,6 +206,7 @@ uv run --locked python sfc/dq5/tools/dq5assets.py rom/dq5.sfc --out "$ASSETS/sfc
 | `lua/dq5textgrowcheck.lua` | `24:8BAF` 가 받은 번호마다 스트림 주소와 첫 64코드를 기록하고 `INNER` 프로브(`dq5msg.lua`·`dq5scriptcheck.lua`)를 그대로 돌림. `dq5textgrowcheck.py`가 준비 | `RETURN_PC`, `INNER` | `decoded.txt` |
 | `lua/dq5battletextcheck.lua` | 전투 메시지 번호·비트 위치·푼 버퍼·글자 격자를 기록. `dq5battletextcheck.py`가 드라이버(`dq5warp.lua`)와 환경을 준비 | `DRIVER`, `GRIDDELAY` | `battletext.txt`, `fNNNNN.png` |
 | `lua/dq5windowcheck.lua` | `FRAMES` 마다 BG3 타일맵 버퍼 `7E:5000`~`57FF` 와 화면을 남김. `dq5windowcheck.py` 가 드라이버를 준비 | `DRIVER`, `FRAMES` | `bg3-fNNNNN.bin`, `fNNNNN.png` |
+| `lua/dq5msgwindowcheck.lua` | `FROM` 부터 `STEP` 프레임마다 VRAM BG3 타일맵(워드 `1C00`~)을 이어 남기고, `SWAP` 대로 전투 메시지 번호(`24:8C39` 의 A)를 바꿈. ▼·줄 올리기·메시지에 들어온 프레임 기록. `dq5msgwindowcheck.py` 가 드라이버를 준비 | `DRIVER`, `FROM`, `STEP`, `SHOTEVERY`, `SWAP`, `MAXF` | `bg3.bin`, `exec.txt`, `fNNNNN.png` |
 | `lua/dq5namelive.lua` | 이름 문자열을 복사한 뒤(`21:959A`) 그 프레임 끝까지 직접 페이지 `$00`~`$3F` 에서 처음 접근이 읽기인 이름 뒤 주소를 기록 | `DRIVER` | `live.txt` |
 | `lua/dq5npcrelocatecheck.lua` | 인물 배치 직후 `12:803C`에서 목적지 맵의 WRAM을 저장. `dq5npcrelocatecheck.py`가 드라이버와 환경을 준비 | `CHECK_GROUP`, `CHECK_MAP`, `DRIVER` | `npc.bin` |
 | `lua/dq5slotuse.lua` | `04:FB1C`·`01:BA95`·`02:B3B4` 와 그 부르는 곳을 지날 때 맵·`$1982`·`$1983`·`$1995`·Y 를, 메시지 번호와 함께 `slots.txt` 에 적고 `01:BA95` 앞뒤 WRAM 을 남김. `dq5slotusecheck.py`가 준비 | `DRIVER`, 드라이버 변수 | `slots.txt`, `ba95-before.wram`, `ba95-after.wram`, `final.wram` |

@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dq5map import Rom, lorom  # noqa: E402
 from dq5text import WINDOWS  # noqa: E402
-from dq5windowwrite import FORMAT, dump, edits, patch, records  # noqa: E402
+from dq5windowwrite import FORMAT, dump, edits, message_sites, patch, records  # noqa: E402
 
 COUNT = 0x30
 # 원본처럼 진짜 창 뒤에 첫 레코드까지 창이 아닌 포인터가 남는다.
@@ -30,6 +30,12 @@ def fixture():
     data[alias:alias + 3] = bytes([0x80, 0, 2])
     data[lorom(0x040000 | first + 5 * 8)] = 0x42
     pointer(data, 7, first + 6 * 8)
+    # 전투 메시지 창 18·25 는 원본처럼 (2,21) 28 × 7 이고, 글자·▼ 칸을 박아 둔 코드도 원본 값으로 둔다.
+    for n, head in ((0x18, 0x02), (0x25, 0x42)):
+        at = lorom(0x040000 | first + n * 8)
+        data[at:at + 4] = bytes([head, 0x95 if n == 0x18 else 0x15, 0x1C, 0x07])
+    for addr, op, size, value, _ in message_sites(2, 21):
+        data[lorom(addr):lorom(addr) + 1 + size] = bytes([op]) + value.to_bytes(size, 'little')
     return bytes(data)
 
 
@@ -137,7 +143,37 @@ class WindowWriteTests(unittest.TestCase):
         for doc in cases:
             with self.subTest(doc=doc), self.assertRaises(ValueError):
                 edits(self.rom, doc)
-        self.assertEqual(len(edits(self.rom, {'format': FORMAT, 'windows': [{'index': '25', 'y': 20}]})), 1)
+        self.assertEqual(edits(self.rom, {'format': FORMAT, 'windows': [{'index': '25', 'y': 21}]}), [])
+
+    def test_message_window_x(self):
+        manifest = patch(self.rom, {'format': FORMAT, 'windows': [{'index': '25', 'x': 4}]})
+        writes = {w['at']: w['hex'] for w in manifest['writes']}
+        table = records(self.rom)
+        self.assertEqual(writes[f'04:{table[0x18] & 0xFFFF:04X}'], '04 95 1c 07')
+        self.assertEqual(writes[f'04:{table[0x25] & 0xFFFF:04X}'], '44 15 1c 07')
+        # 원본 7E:5546·5586·06B8·06F8·3 이 두 칸 오른쪽으로.
+        self.assertEqual({k: v for k, v in writes.items() if not k.startswith('04:') or k == '04:BCF9'},
+                         {'24:A5ED': '4a 55', '24:883C': '8a 55', '24:8850': '8a 55', '24:A51F': 'bc 06',
+                          '24:A529': 'fc 06', '04:BCF9': '05'})
+        rom = Rom(apply(self.data, manifest))
+        self.assertEqual(edits(rom, {'format': FORMAT, 'windows': [{'index': '18', 'x': 4}]}), [])
+        self.assertEqual(len(edits(rom, {'format': FORMAT, 'windows': [{'index': '18', 'x': 2}]})), 8)
+        self.assertEqual(len(edits(self.rom, {'format': FORMAT, 'windows': [{'index': '18', 'x': 0},
+                                                                            {'index': '25', 'x': 0}]})), 8)
+
+    def test_message_window_rejects(self):
+        rows = [[{'index': '25', 'y': 14}], [{'index': '18', 'h': 8}], [{'index': '25', 'y': 20, 'h': 8}],
+                [{'index': '25', 'x': 1, 'w': 30}], [{'index': '25', 'w': 26}], [{'index': '25', 'x': 5}],
+                [{'index': '18', 'x': 0}, {'index': '25', 'x': 4}]]
+        for windows in rows:
+            with self.subTest(windows=windows), self.assertRaises(ValueError):
+                edits(self.rom, {'format': FORMAT, 'windows': windows})
+        broken = Rom(self.with_byte(0x24A5EC, 0x8F))
+        with self.assertRaises(ValueError):
+            edits(broken, {'format': FORMAT, 'windows': [{'index': '25', 'x': 4}]})
+        moved = Rom(self.with_byte(self.first + 0x18 * 8, 0x04))
+        with self.assertRaises(ValueError):
+            edits(moved, {'format': FORMAT, 'windows': [{'index': '25', 'x': 3}]})
 
 
 if __name__ == '__main__':
