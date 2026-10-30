@@ -138,7 +138,9 @@ def wide_items():
     """상자 번호 16비트 훅 셋(open·entry·set). 맵 앞 상자 수를 16비트로 더하고, 256 이상이면 WIDE_BITS 의 비트를 쓴다.
     open 은 12:E66F 에서 JML 로 와서 원래 루틴의 갈래(E669 없음, E675 256 미만, E68B 이미 열림, E6A7 보상)로 JML 한다.
     256 이상이면 $1E80 = 바이트 번호, $1E81 = 0, 마스크는 WIDE_PENDING 에 두고, set(12:F839)은 $1E81 = 0 이고
-    WIDE_PENDING 이 0 이 아닐 때만 그 비트를 켠다. 다른 보상은 마스크가 0 이 아니므로 원래 길로 간다.
+    WIDE_PENDING 이 0 이 아니고 $1E80 이 WIDE_BITS 안의 바이트 번호일 때만 그 비트를 켠다. 다른 보상은 마스크가 0 이
+    아니므로 원래 길로 간다. 잠긴 상자처럼 12:F839 를 거치지 않는 보상은 WIDE_PENDING 을 남기므로 open 이 들어올 때
+    지운다.
     entry 는 1F:FDD0 자리(맵에 들어갈 때, A = 맵 안 순서)에서 열렸으면 C 를 켠다."""
     b = bytes.fromhex
     pend, bits = long(0x7E0000 | WIDE_PENDING), long(0x7E0000 | WIDE_BITS)
@@ -148,7 +150,7 @@ def wide_items():
         return [b('f4 00 00 a2 00 00'), ('label', f'{tag}loop'), ('table', 0xBF, 0), b('c5 bc'), ('br', 0xF0, f'{tag}found'),
                 b('c9 ff ff'), ('br', 0xF0, f'{tag}none'), ('table', 0xBF, 2), b('29 ff 00 18 63 01 83 01 e8 e8 e8'),
                 ('br', 0x80, f'{tag}loop')]
-    return [('label', 'open'), b('c2 30 af 71 1e 7e 85 00'), *prefix('o'),
+    return [('label', 'open'), b('e2 20 a9 00 8f') + pend + b('c2 30 af 71 1e 7e 85 00'), *prefix('o'),
             ('label', 'onone'), b('68 e2 30 5c 69 e6 12'),
             # 맵 안 순서는 원래처럼 2A:F224 가 $00(= $1E71) 로 셈
             ('label', 'ofound'), b('e2 30 22 24 f2 2a c2 30 29 ff 00 18 63 01 83 01 c9 00 01'), ('br', 0xB0, 'oext'),
@@ -165,7 +167,9 @@ def wide_items():
             ('label', 'eext'), b('e9 00 01 4a 4a 4a aa e2 20 bf') + bits,
             ('label', 'etest'), b('25 06 85 06 c2 30 68 e2 30 fa 68 a4 06 c0 01 6b'),
             ('label', 'set'), b('08 e2 30 af 81 1e 7e'), ('br', 0xD0, 'sorig'), b('af') + pend, ('br', 0xF0, 'sorig'),
-            b('af 80 1e 7e aa af') + pend + b('1f') + bits + b('9f') + bits + b('a9 00 8f') + pend, ('br', 0x80, 'send'),
+            # 남은 마스크와 다른 보상의 $1E81 = 0 이 겹쳐도 28F3~291A 밖(294A 사람 동료 칸 등)에 쓰지 않는다
+            b('af 80 1e 7e c9') + bytes((WIDE_PENDING - WIDE_BITS,)), ('br', 0xB0, 'sorig'),
+            b('aa af') + pend + b('1f') + bits + b('9f') + bits + b('a9 00 8f') + pend, ('br', 0x80, 'send'),
             ('label', 'sorig'), b('af 80 1e 7e aa bf 90 21 7e 0f 81 1e 7e 9f 90 21 7e'),
             ('label', 'send'), b('28 18 6b')]
 
@@ -296,17 +300,17 @@ def serialize(rom, doc, new_maps=NO_NEW_MAPS, wide=False):
     if total > most or len(doc['chests']) != total:
         raise ValueError(f'chests: 상자 수는 chest_maps 의 count 합({total})과 같고 {most} 이하여야 함'
                          + ('' if wide else '(257개부터는 --wide-at)'))
-    flag_bits(doc)
+    flag_bits(doc, wide)
     return blobs
 
 
-def flag_bits(doc):
+def flag_bits(doc, wide=False):
     """다섯 표의 열림 비트 → {(WRAM 주소, 비트): 항목 이름}. 두 항목이 한 비트를 나눠 쓰면 하나를 열 때 다른 것도 열린다."""
     owner = {}
     keep = {place: bit for bit, (_, place) in RESERVED.items() if place}
 
-    def claim(addr, mask, label, place=None):
-        if not FLAG_AREA[0] <= addr < FLAG_AREA[1] and not (label.startswith('일반') and WIDE_BITS <= addr < WIDE_PENDING):
+    def claim(addr, mask, label, place=None, allow_wide=False):
+        if not (FLAG_AREA[0] <= addr < FLAG_AREA[1] or allow_wide and WIDE_BITS <= addr < WIDE_PENDING):
             raise ValueError(f'{label}: 열림 비트 7E:{addr:04X} 가 상자 비트 자리 7E:2210~224F 밖')
         for bit in (0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01):
             if mask & bit:
@@ -316,13 +320,18 @@ def flag_bits(doc):
                     raise ValueError(f'{label}: 열림 비트 7E:{addr:04X} & {bit:02X} 는 {RESERVED[addr, bit][0]} 가 '
                                      '직접 보는 비트라 쓸 수 없음')
                 owner[addr, bit] = label
+    if len(doc['chests']) > MAX_WIDE:
+        raise ValueError(f'chests: 상자는 {MAX_WIDE}개까지(비트 7E:{WIDE_BITS:04X}~{WIDE_PENDING - 1:04X})')
     for n in range(len(doc['chests'])):
         # 256 이상은 --wide-at 훅이 WIDE_BITS 에 둔다. 다른 표의 비트는 2210~224F 안이라 닿지 않는다
-        claim((0x2210 if n < 256 else WIDE_BITS - 32) + (n >> 3), 0x80 >> (n & 7), f'일반 상자 {n}')
+        claim((0x2210 if n < 256 else WIDE_BITS - 32) + (n >> 3), 0x80 >> (n & 7), f'일반 상자 {n}', allow_wide=n >= 256)
     for name, (base, limit) in FLAG_BASE.items():
         for i, row in enumerate(doc[name]):
             if row['flag_index'] > limit:
                 raise ValueError(f'{name}[{i}]: flag_index 는 {limit:02X} 이하여야 함')
+            # 12:F839 훅은 $1E81 = 0 을 상자 256 이상의 표시로 본다
+            if wide and row['mask'] == 0:
+                raise ValueError(f'{name}[{i}]: --wide-at 에서는 mask 가 0 이 아니어야 함')
             place = (row['group'], row['map'], row['x'], row['y']) if name == 'ahead' else None
             if place in keep and (base + row['flag_index'], row['mask']) != keep[place]:
                 addr, bit = keep[place]
@@ -496,8 +505,8 @@ def check(rom, doc=None, at=None, new_maps=NO_NEW_MAPS):
         raise ValueError('만든 롬을 코드가 가리키는 자리에서 다시 읽은 결과가 입력과 다름')
     check_cells(moved, source)
     wide = (at or {}).get('wide')
-    if (wide_at(moved) is not None) != bool(wide):
-        raise ValueError('만든 롬의 12:E66F 가 --wide-at 과 맞지 않음')
+    if wide_at(moved) != (wide or None):
+        raise ValueError('만든 롬의 12:E66F 가 --wide-at 자리를 가리키지 않음')
     if any(read(moved, loc[name], len(blob)) != blob for name, blob in serialize(moved, source, new_maps, bool(wide)).items()):
         raise ValueError('만든 롬의 표 바이트가 입력을 다시 직렬화한 것과 다름')
     counts = ', '.join(f'{name} {len(source[name])}' for name in ORIGINAL)

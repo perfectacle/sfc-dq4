@@ -34,6 +34,12 @@ emu.addMemoryCallback(function()
   local s = emu.getState()
   log[#log + 1] = string.format('message f=%d value=%04X', n, s['cpu.a'])
 end, emu.callbackType.exec, 0x248BAF, 0x248BAF)
+-- 보상 뒤 열림 비트를 켜는 12:F839. ret 는 스택 맨 위의 돌아갈 주소(JSR 이면 부른 명령 + 2)
+emu.addMemoryCallback(function()
+  local sp = emu.getState()['cpu.sp']
+  log[#log + 1] = string.format('set f=%d index=%02X mask=%02X pend=%02X ret=%04X', n, b(0x7E1E80), b(0x7E1E81),
+    b(0x7E291B), w(sp + 1))
+end, emu.callbackType.exec, 0x12F839, 0x12F839)
 emu.addEventCallback(function()
   n = n + 1
   if n == 1 then

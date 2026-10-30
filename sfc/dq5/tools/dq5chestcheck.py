@@ -5,6 +5,7 @@ sfc/dq5/docs/dq5-map-format.md의 보물상자 형식. 입력 JSON→dq5patch→
 기존 비트 보존을 확인한다. 원본 롬/세이브는 읽기만 하고 --out 아래 새 폴더에 저장한다.
 past_* 사례는 상자 194개·상자 맵 연결과 아래층 상자 표를 뱅크 3F 로 옮긴 롬에서 열기·들어갈 때 그리기·기록과 불러오기를 본다.
 wide_* 사례는 상자 번호 16비트 훅(dq5chestreloc.py --wide-at)으로 상자를 301개 둔 롬에서 상자 300 을 같은 셋으로 본다.
+wideitem_open 은 같은 롬에서 상자 300 의 보상만 물건으로 바꿔, 물건 길로 12:F839 에 가는지 본다.
 new_* 사례는 원래 롬에 없는 새 그룹 맵 36/00(선실 17/00 에 상자 블록을 놓은 레코드)에 상자·タンス·두 칸 앞 항목을
 dq5chestreloc.py --new-map·--with-patch 로 넣은 롬을, 같은 새 맵 패치만 붙인 대조 롬과 견준다.
 blocks_* 사례는 --env 로 준 DQ4 환경 패치 폴더(sfc/dq4/tools/dq4environmentrom.py 출력)로 새 맵 36/00 을 만든다. 그 맵은
@@ -27,7 +28,7 @@ import tempfile
 from kr_patch.sfc.dis65816 import decode
 from kr_patch.sfc.mapper import LoROM
 
-from dq5chestreloc import ABS, WIDE_PENDING
+from dq5chestreloc import ABS, WIDE_BITS, WIDE_PENDING
 from dq5chestwrite import FORMAT
 from dq5exitcheck import DB_ABS, DB_INDIRECT, warp_exit
 from dq5chest import chests
@@ -188,15 +189,25 @@ def wide_base(doc):
     doc['chests'][186] = {'reward': 0x100 + 300}
 
 
+# 상자 300 의 보상을 물건 33 으로. 금화(12:F490 의 BRL)와 달리 물건은 12:F6E4 를 지나 12:F70C 의 BRL 로 12:F839 에 간다
+WIDE_ITEM = 0x33
+
+
+def wideitem_base(doc):
+    wide_base(doc)
+    doc['chests'][186] = {'reward': WIDE_ITEM}
+
+
 BUILDS = {'past': (GROW_DOC, grow_base, GROW_AT), 'full': (FULL_DOC, full_base, FULL_AT),
-          'wide': (WIDE_DOC, wide_base, WIDE_AT)}
+          'wide': (WIDE_DOC, wide_base, WIDE_AT), 'wideitem': (WIDE_DOC, wideitem_base, WIDE_AT)}
 GROW = {'past_open': (987, 0x2228, 0x80, 0x2228, 0x80, None, 0x131),
         # 아래층 상자 51/51 (19,35). 원본은 2228 & 08, 패치는 옮긴 표의 2229 & 08 을 켠다
         'past_lower': (None, 0x2229, 0x08, 0x2228, 0x08, 0xB1, 0x131),
         'full_open': (255, 0x222F, 0x01, 0x222F, 0x01, None, 0x131),
         'wide_open': (300, *WIDE_FLAG, *WIDE_FLAG, None, 0x131),
         # 상자 1·44 를 연 채로 상자 300 을 연다. 8비트로 읽었다면 300 이 44 로 보여 이미 열린 상자가 된다
-        'wide_alias': (300, *WIDE_FLAG, *WIDE_FLAG, None, 0x131)}
+        'wide_alias': (300, *WIDE_FLAG, *WIDE_FLAG, None, 0x131),
+        'wideitem_open': (None, *WIDE_FLAG, *WIDE_FLAG, None, 0x131)}
 CASES.update({name: (None, *values) for name, values in GROW.items()})
 # 새 그룹 맵 36/00: 선실 17/00 의 레코드에 상자 블록 384 를 (6,4) 에 놓아 상자 칸 (7,5) 를 만든다. タンス 칸 (4,4) 와
 # 두 칸 앞 자리 (9,9) 는 선실과 같다. 들어가는 곳 표·문 표·새 레코드·출구는 새 맵 도구들이, 상자 표 넷은 뱅크 3B 로 옮긴다.
@@ -237,8 +248,9 @@ NEWMAP['blocks_chest'] = (246, 0x2210, 0x80, 0x131, 0x12B, 0x12C)
 for _name, (_amount, _flag, _mask, _message, _kind, _none) in NEWMAP.items():
     CASES[_name] = (None, _amount, _flag, _mask, _flag, _mask, None, _message)
     ORIGINAL_KIND[_name] = _kind
-PATCHED_REWARD = {'place_shift': 0x33, 'past_lower': 0xB1, 'field_world1_day': None, 'field_world2_day': None}
-ORIGINAL_KIND.update(past_open=0x12B, full_open=0x12B, wide_open=0x12B, wide_alias=0x12B)
+PATCHED_REWARD = {'place_shift': 0x33, 'wideitem_open': WIDE_ITEM, 'past_lower': 0xB1, 'field_world1_day': None,
+                  'field_world2_day': None}
+ORIGINAL_KIND.update(past_open=0x12B, full_open=0x12B, wide_open=0x12B, wide_alias=0x12B, wideitem_open=0x12B)
 # 맵에 들어갈 때 열린 상자를 그리는 사례: (장면, 미리 켤 비트). 원본은 그 비트를 상자로 보지 않아 그대로 두고,
 # 패치는 1F:FC50 이 옮긴 표에서 그 상자를 찾아 열린 상자 타일(9E·9F)로 바꾼다
 ENTRY = {'past_entry': ({'TO': '19/00,5,46'}, '2228|80'), 'past_entry_lower': ({'TO': '51/51,18,37,2'}, '2229|08'),
@@ -270,6 +282,7 @@ SCENES = {'chest': {'TO': '01/02,34,31'}, 'search': None, 'foot': None, 'ahead':
           'place_shift': {'TO': '01/02,34,31'}, 'place_furniture': {'TO': '01/02,40,27'},
           'place_jar': 'grow_search', 'place_unlisted': 'grow_chests',
           'past_open': 'grow_chests', 'past_lower': 'lower', 'full_open': {'TO': '19/00,11,46'}, 'wide_open': 'full_open',
+          'wideitem_open': 'full_open',
           'wide_alias': {'TO': '19/00,11,46', 'SET': '2210|40;2215|08'},
           'blocks_chest': {'TO': '36/00,68,44'},
           'new_chest': {'TO': '36/00,6,7'}, 'new_search': {'TO': '36/00,3,5'}, 'new_ahead': {'TO': '36/00,9,12'}}
@@ -403,9 +416,12 @@ def compare(name, state, original, out, mesence, libdir, start):
             require(after[flag] == mask, f'{name}: 새 열림 비트가 다름')
             if old_flag != flag:
                 require(after[old_flag] == 0, f'{name}: 원래 열림 비트까지 바뀜')
-            if name.startswith('wide_'):
+            if name.startswith('wide'):
                 require(all(after[a] == before[a] for a in WIDE_KEEP), f'{name}: 원래 상자 1·44 의 비트가 바뀜')
                 require(after[WIDE_PENDING] == 0, f'{name}: 넘길 마스크 칸이 0 으로 돌아오지 않음')
+                # 12:F839 에 상자 300 의 바이트 번호(28F8 - 28F3)와 넘길 마스크를 들고 한 번 들어가야 한다
+                sets = re.findall(r'set .* index=([0-9A-F]+) mask=([0-9A-F]+) pend=([0-9A-F]+)', trace)
+                require(sets == [(f'{flag - WIDE_BITS:02X}', '00', f'{mask:02X}')], f'{name}: 12:F839 진입 {sets}')
         else:
             require(after[old_flag] == (0 if old_reward is None else old_mask), f'{name}: 원본 열림 비트가 다름')
             if old_flag != flag:
