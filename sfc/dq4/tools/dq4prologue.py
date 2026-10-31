@@ -248,6 +248,26 @@ def _hero_face(facing):
                               0x8F, 0x40, 0x32, 0x7E, 0x8F, 0x60, 0x32, 0x7E)) + box.LEAVE
 
 
+def _face_hero():
+    """인물 스크립트(명령 37)에서: 이 인물($90 슬롯)을 주인공(슬롯 0) 쪽으로 돌린다. X·Y 차가 큰 축(같으면 가로)을 본다.
+    DQ5 의 「대화」 는 말을 걸 때만 인물을 돌리므로, 연출 중에 돈 인물은 이것으로 되돌린다."""
+    def diff(table):        # 스택 1,S 에 주인공 - 인물(0~7F 칸) 차를 남긴다
+        return bytes((0xBF, table & 0xFF, table >> 8, 0x7E, 0x29, 0x7F, 0x48,      # LDA 인물,X / AND #$7F / PHA
+                      0xAF, table & 0xFF, table >> 8, 0x7E, 0x29, 0x7F,             # LDA 주인공 / AND #$7F
+                      0x38, 0xE3, 0x01, 0x83, 0x01))                               # SEC / SBC 1,S / STA 1,S
+    absolute = bytes((0x10, 0x03, 0x49, 0xFF, 0x1A))                              # BPL +3 / EOR #$FF / INC
+    store = bytes((0x9F, 0xE0, 0x31, 0x7E, 0x29, 0x0F, 0x9F, 0x40, 0x32, 0x7E, 0x9F, 0x60, 0x32, 0x7E,
+                   0x68, 0x68, 0x68))                                              # 31E0·3240·3260,X / PLA ×3
+    pick = lambda plus, minus: bytes((0x30, 0x04, 0xA9, plus, 0x80, 0x02, 0xA9, minus))  # noqa: E731
+    vertical = bytes((0xA3, 0x02)) + pick(0x44, 0x88)                              # LDA 2,S(dy)
+    horizontal = bytes((0xA3, 0x03)) + pick(0x11, 0x22)                            # LDA 3,S(dx)
+    body = (bytes((0xE2, 0x30, 0xA6, 0x90)) + diff(0x3020) + diff(0x3080) + bytes((0xA3, 0x01)) + absolute +
+            bytes((0x48, 0xA3, 0x03)) + absolute +                                # PHA |dy| / LDA 3,S(dx) / |dx|
+            bytes((0xC3, 0x01, 0xB0, len(vertical) + 2)) + vertical +            # CMP 1,S / BCS 가로
+            bytes((0x80, len(horizontal))) + horizontal + store)
+    return box.ENTER + body + box.LEAVE
+
+
 def native():
     """(바이트, {이름: 주소}). 인물 스크립트 명령 37 이 JSL 로 부르는 루틴과 이벤트 스크립트."""
     def layout(at):
@@ -258,6 +278,8 @@ def native():
             out.extend(code)
         put('wait', box.ENTER + box.wait(20) + box.LEAVE)
         put('wait6', box.ENTER + box.wait(6) + box.LEAVE)
+        put('wait2', box.ENTER + box.wait(2) + box.LEAVE)
+        put('face_hero', _face_hero())
         put('darken', _darken())
         put('talk_slot', _talk_slot())
         put('talk_event', bytes((0xA0, *_long(at.get('talk_slot', 0)), 0xFF)))
@@ -330,10 +352,10 @@ def _walk(path):
 
 
 def _spin(at):
-    """모샤스: 한 바퀴 반 돌기(NDS 는 6프레임마다 방향을 바꿈)."""
+    """모샤스: 두 바퀴 돌기. 6프레임마다 바꾸면 명령을 읽는 틈까지 더해져 느려 보여 2프레임으로 줄였다."""
     out = []
     for d in (0x40, 0x20, 0x80, 0x10) * 2:
-        out += [_cmd('2F', d), _cmd('37', *_long(at['wait6']))]
+        out += [_cmd('2F', d), _cmd('37', *_long(at['wait2']))]
     return out
 
 
@@ -373,7 +395,9 @@ def scripts():
     # NDS mlb1a 처럼 말을 걸어야 시작한다(대화 902 가 신시아 시작 깃발을 켬)
     shinsia = ([_wait_on(SHINSIA_START), _cmd('3F'), _cmd('20', 0x37, 0)] + _spin(at) +
                [_cmd('51'), _cmd('10', *MORPH), _wait_on(MORPH_BACK),
-                _cmd('50', sx * 2, sy * 2), _cmd('53'), _cmd('4F'), _msg(M_MORPH), _msg(M_BYE), _msg(M_SUPPER)] +
+                # 돌기는 오른쪽 보기로 끝나므로, 주인공 쪽을 보고 다시 나타나 말한다
+                _cmd('50', sx * 2, sy * 2), _cmd('37', *_long(at['face_hero'])), _cmd('53'), _cmd('4F'), _msg(M_MORPH), _msg(M_BYE),
+                _msg(M_SUPPER)] +
                # 주인공이 문틈 (4,0D) 쪽에서 다가오면 나가는 길에 선 채 말이 걸리므로, 주인공을 지나 걷는다(1C)
                [_cmd('1C')] + _walk(SHINSIA_OUT) + [_cmd('28'), _cmd('10', *SHINSIA_MET), _cmd('40'), _cmd('16')])
     form = ([_cmd('27'), _wait_on(MORPH), _cmd('50', sx * 2, sy * 2), _cmd('53'), _cmd('4F'),
