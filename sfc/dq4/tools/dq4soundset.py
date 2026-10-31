@@ -182,7 +182,7 @@ def song_score(score, drop_tracks=(), drop_programs=(), track_db=None, yield_tra
 def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_fades=False, preview=None,
           stream=None, stream_ticks=None, budgets=None, pinned=(), resident_from=None, drop_resident=(), lanes=None, drop_tracks=None,
           level_db=None, programs=None, set_records=None, keep_regions=None, track_db=None, yield_tracks=None, gain_db=None, gain_all=0.0,
-          nds_envelope=(), nds_release=(), treble_db=None,
+          nds_envelope=(), nds_release=(), treble_db=None, sample_rates=None,
           fast_receive=False, chains=(), holds=(), early_song=False, load_pump=False, vehicle_song=False,
           keep_samples=False, prefetch=None, release_failed=False, unpin=(), effects=None):
     """stream 은 {곡 자리: 곡 앞 샘플 바이트 상한}. 그 곡은 샘플 일부를 곡이 울리는 동안 보낸다(transfer_plan).
@@ -202,7 +202,8 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
     {곡: {프로그램}} 으로 샘플을 줄일 때 그 프로그램의 음역 영역을 합치지 않는다. track_db 는 {곡: {트랙: dB}} 로
     그 트랙 음의 세기(velocity)를 바꾸고, yield_tracks 는 {곡: {트랙}} 으로 목소리가 모자랄 때 그 트랙 음을 먼저 버린다.
     gain_db 는 {곡: dB} 로 목소리 음량(ED)을 바꿔 곡 전체 세기를 맞추고, gain_all 은 모든 곡에 더하는 dB 다.
-    treble_db 는 {곡: dB} 로 샘플 고음을 올린다(dq4soundbank.treble, 바이트는 같음).
+    treble_db 는 {곡: dB} 로 샘플 고음을 올린다(dq4soundbank.treble, 바이트는 같음). sample_rates 는
+    {곡: {NDS 샘플 파일: Hz}} 로 그 샘플의 첫 표본율을 정한다(build_bank).
     nds_envelope 는 NDS 엔벨로프(decay·sustain·release, 음마다 덮어쓴 값)를 옮길 곡 자리로, 시퀀스가 조금 커진다.
     nds_release 는 샘플 머리를 다른 곡과 나눠 쓰는 그대로 두고 음마다 NDS release 만 옮길 곡 자리다. chains 는 앞부분·본체로 나눌 곡 자리(stream_ticks 를 준 곡)로, 앞부분 길이는
     본체 도착 어림 + CHAIN_SLACK_SECONDS 로 정한다. holds 는 곡 붙들기를 쓸 곡 자리(stream_ticks 를 준 곡)로, 곡 앞
@@ -264,7 +265,7 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
     effect_sequences, effect_report = sfx_port.build_effects(data, assets, effects, patch.sequence_bytes) if effects else ({}, {})
     pinned_sizes |= {seq: len(new) for seq, new in effect_sequences.items()}
 
-    def make_bank(score, budget, limit, loose, overrides, keep=(), envelope=False, treble=0.0):
+    def make_bank(score, budget, limit, loose, overrides, keep=(), envelope=False, treble=0.0, rates_of=None):
         bank_score = song_score(score, drop_programs=set(overrides))
         if not bank.used_regions(bank_score)[0]:
             report = {'samples': {}, 'sample_count': 0, 'reductions': []}
@@ -273,13 +274,15 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
         try:
             found, program_map, report = bank.build_bank(bank_score, assets, start_id=0x26, max_rate=max_rate,
                                                          cache_dir=brr_cache, budget=budget, max_samples=limit,
-                                                         keep_regions=keep, envelope=envelope, treble_db=treble)
+                                                         keep_regions=keep, envelope=envelope, treble_db=treble,
+                                                         sample_rates=rates_of)
         except ValueError as exc:
             if 'cannot fit samples' not in str(exc):
                 raise
             found, program_map, report = bank.build_bank(bank_score, assets, start_id=0x26, max_rate=max_rate,
                                                          cache_dir=brr_cache, budget=budget, max_samples=limit,
-                                                         rates=bank.LOW_RATES, keep_regions=keep, envelope=envelope, treble_db=treble)
+                                                         rates=bank.LOW_RATES, keep_regions=keep, envelope=envelope, treble_db=treble,
+                                                         sample_rates=rates_of)
             report['low_rates'] = True
         found, program_map, _, shared = share_samples(found, report['samples'], program_map, resources, known,
                                                       next_id, budget=budget, loose=loose)
@@ -346,7 +349,8 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
                                                                          slot not in budgets, overrides,
                                                                          keep_regions.get(slot, ()),
                                                                          envelope_of(slot),
-                                                                         treble_db.get(slot, 0.0))
+                                                                         treble_db.get(slot, 0.0),
+                                                                         (sample_rates or {}).get(slot))
             program_map |= {p: override_regions(score, p, x, envelope_of(slot)) for p, x in overrides.items()}
             conversion = port.convert(score, program_map=program_map, **convert_args(slot))
             if not resident_done or slot in budgets:
@@ -611,6 +615,8 @@ def main():
                     help='carry the NDS decay/sustain/release (and per-note overrides) into this song')
     ap.add_argument('--nds-release', action='append', default=[], metavar='DQ5_SLOT',
                     help='carry only the NDS release per note into this song, keeping shared sample headers')
+    ap.add_argument('--sample-rate', action='append', default=[], metavar='DQ5_SLOT=SAMPLE:HZ',
+                    help='first sample rate for that NDS sample in that song instead of --max-rate, e.g. 23=02-6B:22050')
     ap.add_argument('--treble-db', action='append', default=[], metavar='DQ5_SLOT=DB',
                     help='boost the high end of this song\'s samples by DB at Nyquist (same bytes), e.g. 23=6')
     ap.add_argument('--track-db', action='append', default=[], metavar='DQ5_SLOT=TRACK:DB',
@@ -662,6 +668,10 @@ def main():
     for slot, value in per_slot(args.track_db):
         track, db = value.split(':')
         track_db.setdefault(slot, {})[track] = float(db)
+    sample_rates = {}
+    for slot, value in per_slot(args.sample_rate):
+        name, hz = value.split(':')
+        sample_rates.setdefault(slot, {})[name if name.endswith('.wav') else name + '.wav'] = int(hz)
     yield_tracks = {}
     for slot, track in per_slot(args.yield_track):
         yield_tracks.setdefault(slot, set()).add(track)
@@ -681,6 +691,7 @@ def main():
                         gain_db={slot: float(v) for slot, v in per_slot(args.gain_db)}, gain_all=args.gain_all,
                         nds_envelope={int(x, 16) for x in args.nds_envelope},
                         nds_release={int(x, 16) for x in args.nds_release},
+                        sample_rates=sample_rates,
                         treble_db={slot: float(v) for slot, v in per_slot(args.treble_db)},
                         programs=programs, set_records=records, keep_regions=keep,
                         track_db=track_db, yield_tracks=yield_tracks, fast_receive=args.fast_receive,

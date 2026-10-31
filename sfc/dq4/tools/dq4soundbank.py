@@ -289,6 +289,27 @@ def bend_units(note, drums=()):
     return units if abs(units) >= BEND_MIN_UNITS and note['program'] not in drums else 0
 
 
+def gliding_bends(timeline):
+    """벤드가 앞뒤(다른 틱) 음과 다른 음의 색인. NDS 는 음 안에서 벤드를 조금씩 바꿔 끌어올리기·떨어뜨리기를 하는데
+    악보에는 음이 시작할 때의 값만 남는다. 그 값을 음 내내 붙들면 음이 틀려 들리므로, 앞이나 뒤 음과 같은 벤드만
+    고정 벤드로 보고, 나머지는 그 영역의 흔한 벤드(region_tunes)로 울린다."""
+    ticks = {}
+    for i, e in enumerate(timeline):
+        if e.get('op') == 'note':
+            ticks.setdefault(e.get('ch'), {}).setdefault(e.get('tick', i), []).append(i)
+    out = set()
+    for by_tick in ticks.values():
+        order = sorted(by_tick)
+        for k, tick in enumerate(order):
+            near = [timeline[j].get('bend') or 0 for t in order[max(0, k - 1):k] + order[k + 1:k + 2] for j in by_tick[t]]
+            for i in by_tick[tick]:
+                e = timeline[i]
+                b, scale = e.get('bend') or 0, e.get('bend_range', 2)
+                if b and all(abs((x - b) * scale) >= BEND_MIN_UNITS for x in near):
+                    out.add(i)
+    return out
+
+
 def drum_programs(score):
     return {int(p) for p, ins in (score.get('instruments') or {}).items() if ins and ins.get('type') == '드럼 세트'}
 
@@ -296,13 +317,15 @@ def drum_programs(score):
 def region_tunes(score):
     """영역마다 그 영역 음들의 고정 벤드 중앙값. 샘플 음높이에 미리 구워 음마다 미세 조정 명령을 쓰지 않게 한다."""
     drums, units = drum_programs(score), {}
-    for e in score['timeline']:
+    gliding = gliding_bends(score['timeline'])
+    for i, e in enumerate(score['timeline']):
         instrument = e.get('op') == 'note' and score['instruments'].get(str(e['program']))
         if not instrument:
             continue
         for k, region in enumerate(instrument['regions']):
             if region['lo'] <= e['note'] <= region['hi']:
-                units.setdefault((e['program'], k), []).append(bend_units(e, drums))
+                if i not in gliding:
+                    units.setdefault((e['program'], k), []).append(bend_units(e, drums))
                 break
     return {key: round(statistics.median(v)) for key, v in units.items() if round(statistics.median(v))}
 
@@ -335,7 +358,7 @@ def estimate(path, max_rate, seconds):
 
 
 def build_bank(score, asset_root, *, start_id=0x26, max_rate=8000, cache_dir=None, budget=None, max_samples=14,
-               rates=RATES, keep_regions=(), envelope=False, treble_db=0.0):
+               rates=RATES, keep_regions=(), envelope=False, treble_db=0.0, sample_rates=None):
     """(resources, program_map, report). sample은 DQ5 전역 번호.
 
     budget(바이트)·max_samples(곡 묶음 칸)를 넘으면 손실이 가장 작은 줄이기를 하나씩 고른다.
@@ -343,9 +366,16 @@ def build_bank(score, asset_root, *, start_id=0x26, max_rate=8000, cache_dir=Non
     무엇을 줄였는지는 report['reductions']에 남긴다. envelope 이면 샘플 머리를 nds_adsr 로 하고, 프로그램 표에 영역의
     엔벨로프 값과 머리 ADSR('header')을 담아 변환기가 음마다 adsr·release 를 쓰게 한다. envelope 가 RELEASE_ONLY 면
     샘플 머리는 그대로(다른 곡과 같은 샘플을 나눠 쓴다) 두고 음마다 release 만 쓰게 한다. 영역 음들의 고정 벤드 중앙값
-    (region_tunes)은 샘플 음높이에 굽고 프로그램 표의 'tune' 에 남긴다.
+    (region_tunes)은 샘플 음높이에 굽고 프로그램 표의 'tune' 에 남긴다. sample_rates({NDS 샘플 파일: Hz})는 그 샘플의
+    첫 표본율을 max_rate 대신 그 값으로 한다(소리가 높은 음역에만 있는 짧은 타악기).
     """
     full = envelope is True
+    sample_rates = sample_rates or {}
+
+    def hz(ident):
+        level = rate.get(ident, 0)
+        return sample_rates.get(ident[0], rates[0]) if level == 0 else rates[level]
+
     adsr_of = nds_adsr if full else approximate_adsr
     if not 0x26 <= start_id < 0xC8:
         raise ValueError('custom sample IDs must start in 26..C7')
@@ -384,7 +414,7 @@ def build_bank(score, asset_root, *, start_id=0x26, max_rate=8000, cache_dir=Non
         key = (ident, rate.get(ident, 0), cut.get(ident, 0))
         if key not in sizes:
             seconds = ONE_SHOT_SECONDS[cut.get(ident, 0)]
-            sizes[key] = estimate(path, rates[rate.get(ident, 0)], seconds)
+            sizes[key] = estimate(path, hz(ident), seconds)
         return sizes[key]
 
     def active():
@@ -463,7 +493,7 @@ def build_bank(score, asset_root, *, start_id=0x26, max_rate=8000, cache_dir=Non
         if identifier >= 0xC8:
             raise ValueError('sample ID table exhausted')
         region, path, _ = regions[key]
-        resource, detail = convert_sample(path, region, max_rate=rates[rate.get(ident, 0)], envelope=full,
+        resource, detail = convert_sample(path, region, max_rate=hz(ident), envelope=full,
                                           treble_db=treble_db,
                                           cache_dir=cache_dir, seconds=ONE_SHOT_SECONDS[cut.get(ident, 0)])
         resources[identifier], details[f'{identifier:02X}'] = resource, detail

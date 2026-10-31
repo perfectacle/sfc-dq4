@@ -488,11 +488,14 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
     cc_emitted = 0
     level_skips, level_error = 0, 0.0
     drums = bank.drum_programs(score)
+    gliding = bank.gliding_bends(score['timeline'])
 
     def bend_units(note):
         """샘플 음높이에 구운 영역 벤드(프로그램 표 'tune')를 뺀 나머지 E9 값. E9 의 1 은 1/128 반음."""
         value = mapping[note['program']]
         baked = next((r.get('tune', 0) for r in value if r['lo'] <= note['note'] <= r['hi']), 0) if isinstance(value, list) else 0
+        if note['uid'] in gliding:
+            return 0
         rest = bank.bend_units(note, drums) - baked
         return rest if abs(rest) >= bank.BEND_MIN_UNITS else 0
 

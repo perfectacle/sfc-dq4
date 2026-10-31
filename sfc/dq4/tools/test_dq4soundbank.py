@@ -109,6 +109,14 @@ class FitTests(unittest.TestCase):
     def tearDown(self):
         self.directory.cleanup()
 
+    def test_sample_rate_raises_only_that_sample(self):
+        _, _, plain = bank.build_bank(self.score, self.root)
+        _, _, raised = bank.build_bank(self.score, self.root, sample_rates={'c.wav': 16000})
+        rate = {d['source']: round(d['effective_rate']) for d in raised['samples'].values()}
+        self.assertGreater(rate['c.wav'], 8000)
+        self.assertEqual({k: v for k, v in rate.items() if k != 'c.wav'},
+                         {d['source']: round(d['effective_rate']) for d in plain['samples'].values() if d['source'] != 'c.wav'})
+
     def test_slot_limit_merges_least_used_region(self):
         _, mapping, report = bank.build_bank(self.score, self.root, max_samples=3)
         self.assertEqual(report['sample_count'], 3)

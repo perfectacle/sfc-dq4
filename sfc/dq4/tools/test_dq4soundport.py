@@ -92,11 +92,17 @@ class LevelTests(unittest.TestCase):
         self.assertNotIn('adsr ', text)
 
     def test_large_bend_becomes_fine_tune_and_small_is_dropped(self):
-        notes = score([(0, 24, 60, 100), (24, 24, 60, 100), (48, 24, 60, 100)])
-        for e, bend in zip(notes['timeline'], (-16, 3, -16)):
+        notes = score([(i * 24, 24, 60 + i % 2, 100) for i in range(6)])
+        for e, bend in zip(notes['timeline'], (-16, -16, 3, 3, -16, -16)):
             e['bend'], e['bend_range'] = bend, 2
         text = port.convert(notes, voices=1).text
         self.assertEqual([x.strip() for x in text.split('\n') if 'fine_tune' in x], ['fine_tune E0', 'fine_tune 00', 'fine_tune E0'])
+
+    def test_bend_only_at_a_note_start_is_a_glide_and_is_not_held(self):
+        # NDS 는 음 안에서 벤드를 0 으로 되돌린다(끌어올리기). 시작 값을 음 내내 붙들면 반음 가까이 낮게 들린다
+        notes = score([(0, 24, 60, 100), (24, 24, 62, 100), (48, 24, 64, 100)])
+        notes['timeline'][1]['bend'], notes['timeline'][1]['bend_range'] = -44, 2
+        self.assertNotIn('fine_tune', port.convert(notes, voices=1).text)
 
     def test_audible_velocity_change_is_written(self):
         notes = [(0, 24, 60, 100), (24, 24, 60, 50)]
