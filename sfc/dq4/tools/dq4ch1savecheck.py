@@ -27,6 +27,7 @@ HERE = Path(__file__).resolve().parent
 DQ5_TOOLS = HERE.parents[1] / 'dq5' / 'tools'
 sys.path[:0] = [str(HERE), str(DQ5_TOOLS)]
 
+import dq4mesen as mesen  # noqa: E402
 import dq4ch1walkcheck as walk  # noqa: E402
 import dq4dungeonencountercheck as enc  # noqa: E402
 import dq4groupcheck  # noqa: E402
@@ -78,7 +79,17 @@ def used_talks(got, at):
     return [f'{table[0x20 + n]:X}{table[n]:02X}' for n in range(8, min(used, 0x20))] if table else None
 
 
+def free(mesence, rom, state, dest):
+    """걷기 구간이 남은 A 로 명령 창을 연 채 끝났으면 닫은 세이브스테이트. dq5warp.lua 는 자유 이동을 기다리며 창을 닫지 않는다."""
+    maxf = walk.frames(walk.pc.CLOSE) + 60
+    walk.run(mesence, rom, walk.WALK_STATE, dest, {'STATE': str(state), 'WALK': str(walk.WALK),
+                                                   'WAYPOINTS': walk.pc.CLOSE, 'SAVE': 'free.mss', 'MAXF': str(maxf),
+                                                   'ROMPATCH': walk.NO_ENCOUNTERS}, 120)
+    return dest / 'free.mss'
+
+
 def church(mesence, rom, state, dest):
+    state = free(mesence, rom, state, dest / 'free')
     walk.run(mesence, rom, walk.WARP, dest, {'STATE': str(state), 'TO': CHURCH, 'SAVE': 'church.mss', 'SETTLE': '120',
                                              'MAXF': '1500', 'WARPEXIT': f'{warp_exit(rom):X}',
                                              'ANYWHERE': '1', 'ROMPATCH': walk.NO_ENCOUNTERS}, 300)
@@ -88,8 +99,6 @@ def church(mesence, rom, state, dest):
 
 
 def save_continue(mesence, rom, state, dest):
-    copy = dest / f'{dest.name}-{os.getpid()}.sfc'      # MesenCE 는 배터리 기록을 롬 파일 이름으로 둔다
-    shutil.copyfile(rom, copy)
     # 길이는 10진
     dumps = [f'{SAVED - 50}:7E2000:{well.SAVE_SIZE}', f'{SAVED}:700000:{SRAM_SIZE}',
              f'{LOADED}:7E2000:{well.SAVE_SIZE}', f'{LOADED}:7E00BC:2', f'{LOADED}:7E3020:1', f'{LOADED}:7E3080:1']
@@ -99,10 +108,8 @@ def save_continue(mesence, rom, state, dest):
                PRE=f'{TALK},wait:400,{well.CONTINUE}', RESETAT=str(RESET), MAXF=str(SHOT + 10),
                CALLS=f'{CONTINUE_PATH},{LOGO},{MESSAGE}', ROMPATCH=walk.NO_ENCOUNTERS, SHOTS=f'{SAVED - 50},{SHOT}',
                DUMP=';'.join(dumps))
-    subprocess.run([str(mesence), '--testrunner', str(copy), str(DQ5_TOOLS / 'lua' / 'dq5cdldump.lua'),
-                    '--Snes.DisableFrameSkipping=true'], env=env, stdout=subprocess.DEVNULL,
-                   stderr=subprocess.DEVNULL, timeout=900, check=False)
-    copy.unlink()
+    mesen.run(mesence, rom, DQ5_TOOLS / 'lua' / 'dq5cdldump.lua', folder=dest, env=env, stdout=subprocess.DEVNULL,
+              stderr=subprocess.DEVNULL, timeout=900, check=False)
     text = (dest / 'msg.txt').read_text(encoding='utf-8') if (dest / 'msg.txt').exists() else ''
     got = {(int(m[1]), int(m[2], 16)): bytes.fromhex(m[3])
            for m in re.finditer(r'(\d+) dump ([0-9A-F]{6}) ([0-9A-F ]+)', text)}

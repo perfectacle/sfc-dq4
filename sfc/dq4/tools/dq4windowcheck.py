@@ -20,8 +20,9 @@ import os
 from pathlib import Path
 import random
 import re
-import shutil
 import subprocess
+
+import dq4mesen as mesen
 
 HERE = Path(__file__).resolve().parent
 PROBE = HERE.parents[1] / 'dq5' / 'tools' / 'lua' / 'dq5msg.lua'
@@ -115,8 +116,6 @@ def slot_table(rom, sym):
 def run(mesence, libdir, rom_path, rom, folder, scene):
     name, state, poke, patch, pre, frames = scene
     folder.mkdir(parents=True)
-    probe = folder / f'windowcheck-{name}.sfc'
-    shutil.copyfile(rom_path, probe)
     o = lorom(SHARED_JP)
     # 선실 세이브스테이트는 BG3 타일맵을 옮기기 전 것이라 실내 자리(3C)로 맞춘다. 일행 세이브스테이트는 필드에 서 있어
     # 그대로 둔다(3C 로 두면 타일맵이 필드 그림 자리에 놓여 화면 위쪽이 깨진다)
@@ -132,9 +131,9 @@ def run(mesence, libdir, rom_path, rom, folder, scene):
         env['POKE'] = poke
     if patch:
         env['ROMPATCH'] = patch
-    subprocess.run([mesence, '--testrunner', str(probe), str(PROBE)], env=env, check=False, timeout=1800,
-                   stdout=(folder / 'log.txt').open('w'), stderr=subprocess.STDOUT)
-    probe.unlink()
+    with (folder / 'log.txt').open('w') as log:
+        mesen.run(mesence, rom_path, PROBE, folder=folder, tag='windowcheck', extra=(), env=env, check=False,
+                  timeout=1800, stdout=log, stderr=subprocess.STDOUT)
 
 
 def dumps(folder):

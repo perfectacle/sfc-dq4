@@ -7,9 +7,9 @@ import argparse
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 
+import dq4mesen as mesen
 import dq4nameentry as ne
 
 HERE = Path(__file__).resolve().parent
@@ -78,15 +78,13 @@ def main():
     result = out / 'composition.txt'
     if result.exists():
         parser.error('--out 은 이전 검사 결과가 없는 폴더를 주세요')
-    probe_rom = out / ('name-entry-' + out.name + '.sfc')
-    shutil.copyfile(args.rom, probe_rom)
     cfg = out / 'cases.lua'
     config(cfg, args.symbols)
     env = dict(os.environ, SHOT_DIR=str(out), NAME_ENTRY_CASES=str(cfg))
     if not env.get('LIBDIR'):
         env['LIBDIR'] = subprocess.check_output(['uv', 'run', '--locked', 'krpatch', 'sfc', 'lua'], text=True).strip()
-    subprocess.run([mesence, '--testrunner', str(probe_rom), str(HERE / 'lua/dq4nameentrycheck.lua')],
-                   env=env, check=True, timeout=180)
+    mesen.run(mesence, args.rom, HERE / 'lua/dq4nameentrycheck.lua', folder=out, tag='name-entry', extra=(), env=env,
+              check=True, timeout=180)
     report = result.read_text()
     print(report, end='')
     if 'FAIL' in report or 'TIMEOUT' in report or report.count('PASS') != len(CASES) + 2:

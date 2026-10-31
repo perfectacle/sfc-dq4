@@ -6,9 +6,9 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
-import shutil
 import subprocess
 
+import dq4mesen as mesen
 import dq4nameentry as ne
 
 HERE = Path(__file__).resolve().parent
@@ -74,8 +74,6 @@ def main():
     def run(case):
         folder = output / case['name']
         folder.mkdir()
-        rom = folder / (output.name + '-' + case['name'] + '.sfc')
-        shutil.copyfile(args.rom, rom)
         cfg = folder / 'case.lua'
         events = [(600, 3, 'a'), (900, 3, 'a'), (1100, 3, 'a')]
         if case['typed']:
@@ -85,8 +83,8 @@ def main():
                        + ',finish=' + str(symbols['NeReturn']) + ',events={'
                        + ','.join('{%d,%d,"%s"}' % e for e in events) + '}}')
         env = dict(os.environ, LIBDIR=lib, SHOT_DIR=str(folder), NAME_CURSOR_CASE=str(cfg))
-        subprocess.run([mesence, '--testrunner', str(rom), str(HERE / 'lua/dq4namecursorcheck.lua')],
-                       env=env, check=True, timeout=120)
+        mesen.run(mesence, args.rom, HERE / 'lua/dq4namecursorcheck.lua', folder=folder, tag=case['name'], extra=(),
+                  env=env, check=True, timeout=120)
         rows = (folder / 'cursor.txt').read_text().splitlines()
         moves = [tuple(map(int, row.split()[1:])) for row in rows if row.startswith('MOVE ')]
         positions = [m[2] for m in moves]
