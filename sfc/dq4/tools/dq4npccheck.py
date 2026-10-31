@@ -8,7 +8,7 @@
          the codes the build wrote (text.json), or for a church, an inn or the deposit the first message of that
          DQ5 service (an inn also leaves its price for one in 7E:0F28)
   shop   every weapon, item and armor seller: talk, then かう; the items the list window shows
-         (dq5progresscheck.lua, MODE=shop) are the group's list from dq4shopport.py
+         (dq5progresscheck.lua, MODE=shop) are the group's list from dq4shopport.py, at its FC prices
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4npccheck.py --build work/dq4-groups --out work/dq4-groups/npccheck
 
@@ -203,6 +203,7 @@ def main():
     people = json.loads((args.build / "npc-report.json").read_text(encoding="utf-8"))
     shop_report = json.loads((args.build / "shop-report.json").read_text(encoding="utf-8"))
     shop_items = {(s["map"], s["kind"]): s["dq5"] for s in shop_report["shops"]}
+    shop_prices = {int(k.split()[0], 16): v for k, v in shop_report["prices"].items()}
     inns = shop_report["inns"]
     prg = ines.prg(args.dq4.read_bytes())
     state = args.state.resolve()
@@ -295,7 +296,10 @@ def main():
                 results[name] = {"ok": True, "skipped": "FC places the person on a wall or off the map"}
             elif kind == "shop":
                 items = [item for item, _ in messages or []]
-                results[name] = {"ok": items == want, "want": want, "got": messages, "timing": timing}
+                prices = [price for _, price in messages or []]
+                want_prices = [shop_prices[item] for item in want]
+                results[name] = {"ok": items == want and prices == want_prices, "want": want,
+                                 "want_prices": want_prices, "got": messages, "timing": timing}
             elif kind == "table":
                 if wram is None:
                     results[name] = {"ok": False, "error": "no npc.bin"}

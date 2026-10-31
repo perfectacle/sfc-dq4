@@ -42,10 +42,21 @@ class PortTest(unittest.TestCase):
                                                "3E/00-02": "64", "3F/00-01": "65", "40/00-08": "66", "40/09-0E": "67"})
         weapons = next(s for s in self.shops if s["key"] == 0x60 and s["kind"] == 2)
         self.assertEqual(weapons["items"], [0x02, 0x06, 0x1C, 0x07])  # いばらのむち = DQ5 いばらのムチ
-        self.assertIn("37/00 てつのやり", self.report["missing_items"])
+        # てつのやり sells in DQ5 slot 01 (dq4itemport.BORROWED), after くさりがま as in FC.
+        imle = next(s for s in self.shops if s["key"] == 0x61 and s["kind"] == 2)
+        self.assertEqual(imle["items"], [0x06, 0x1C, 0x21, 0x07, 0x01])
+        self.assertNotIn("37/00 てつのやり", self.report["missing_items"])
+
+    def test_fc_prices(self):
+        prices = self.report["prices"]
+        self.assertEqual((prices["02 こんぼう"], prices["06 どうのつるぎ"], prices["07 くさりがま"], prices["01 てつのやり"]),
+                         (30, 100, 550, 880))
+        at = {w["at"]: w["hex"] for w in self.writes}
+        self.assertEqual((at["23:B083"], at["23:B15B"]), ("1E", "00"))  # こんぼう 30 x 1
+        self.assertEqual((at["23:B082"], at["23:B15A"], at["23:B4BA"]), ("58", "01", "1C"))  # てつのやり 88 x 10, power 28
 
     def test_inn_table_and_operands(self):
-        table, bank, addr, _, shop_site, inn_site = self.writes
+        table, bank, addr, _, shop_site, inn_site = self.writes[:6]
         data = bytes.fromhex(table["hex"].replace(" ", ""))
         self.assertEqual(len(data), (shopport.INN_ENTRIES + 6) * 2)
         self.assertEqual(data[-12:], bytes((0x60, 4, 0x61, 6, 0x62, 3, 0x65, 10, 0x66, 6, 0x67, 8)))

@@ -4,7 +4,8 @@ People who open a shop in FC (fc/dq4/tools/dq4shop.merchants, on the base person
 number of the same service (06:DBD2: 01 weapon, 02 item, 03 armor, 04 deposit, 05 church, 06 inn; SERVICE). Every FC group
 with a shop list or an inn gets its own key (dq4shopkey: 06:DC37 and 06:F576 read it in place of $BC).
 Weapon, item and armor lists go to the DQ5 shop lists (dq5progress/1 `shops`) under that key, with FC items
-matched to DQ5 items by name. The inn price table 04:FD6D has no end mark and no room, so it is copied with
+matched to DQ5 items by name (an FC item DQ5 lacks may take a borrowed DQ5 slot, dq4itemport.BORROWED); every item a
+list sells gets its FC price (dq4itemport.writes). The inn price table 04:FD6D has no end mark and no room, so it is copied with
 the new keys added and the two operands that point at it (06:F567 bank, 06:F56D address) are changed.
 
   python sfc/dq4/tools/dq4shopport.py --out work/dq4-shops
@@ -23,6 +24,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+import dq4itemport  # noqa: E402
 import dq4shop  # noqa: E402
 import dq5item  # noqa: E402
 import dq4shopkey  # noqa: E402
@@ -59,9 +61,10 @@ def _fold(name):
 
 
 def dq5_items(rom):
+    """Folded name -> DQ5 item, with the borrowed slots under their FC names."""
     out = {}
     for i in range(216):
-        name = _fold(dq5item.item_name(rom, i))
+        name = _fold(dq4itemport.BORROWED.get(i) or dq5item.item_name(rom, i))
         if name in out:
             raise ValueError(f"DQ5 items {out[name]:02X} and {i:02X} share the name {name}")
         out[name] = i
@@ -161,7 +164,8 @@ def port(dq5_path, dq4_path, inn_at, key_at, with_people=True):
     names, _ = dq4shop.item_names(prg)
     progress = json.loads(_dump_progress(dq5_path))
     counts = {k: sum(1 for s in progress["shops"] if s["kind"] == k) for k in range(4)}
-    services, shops, inns, report = {}, [], {}, {"shops": [], "missing_items": [], "inns": {}, "keys": {}}
+    services, shops, inns, prices = {}, [], {}, {}
+    report = {"shops": [], "missing_items": [], "inns": {}, "keys": {}, "prices": {}}
     maps = sorted(GROUPS.values())
     for group, number in maps:
         fc_group, fc_number = fc_map(prg, group, number)
@@ -183,6 +187,9 @@ def port(dq5_path, dq4_path, inn_at, key_at, with_people=True):
                     item = names[i & 0x7F]
                     if _fold(item) in items:
                         picked.append(items[_fold(item)])
+                        price = dq4shop.price(prg, fc_group, fc_number, i & 0x7F)
+                        if prices.setdefault(picked[-1], price) != price:
+                            raise ValueError(f"{item}: FC prices {prices[picked[-1]]} and {price}")
                     else:
                         report["missing_items"].append(f"{group:02X}/{number:02X} {item}")
                 if len(picked) > MAX_ITEMS:
@@ -211,7 +218,10 @@ def port(dq5_path, dq4_path, inn_at, key_at, with_people=True):
         {"at": _cpu(INN_ADDR_OPERAND), "hex": f"{inn_at & 0xFF:02X} {inn_at >> 8 & 0xFF:02X}", "orig": "6D FD",
          "note": "여관 표 주소"},
         *dq4shopkey.writes(key_at, rows),
+        *dq4itemport.writes(rom, prg, prices),
     ]
+    report["prices"] = {f"{i:02X} {dq4itemport.BORROWED.get(i) or dq5item.item_name(rom, i)}": p
+                        for i, p in sorted(prices.items())}
     return services, shops, writes, report
 
 

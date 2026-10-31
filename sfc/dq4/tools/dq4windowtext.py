@@ -19,6 +19,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 DQ5_TOOLS = HERE.parents[1] / 'dq5' / 'tools'
 ADOPT = ROOT / 'nds' / 'dq4' / 'tables' / 'adopt.tsv'
+FC_NOTE = 'FC:'
 
 TEXT_BANK = 0x58
 INDEX = 0x8000
@@ -37,10 +38,12 @@ EXTRA_NAMES = {6: {'みんながんばれ': '모두 힘내자', 'じゅもんせ
                    'モンスターつかい': '몬스터 조련사', 'グランバニアおう': '그란바니아 왕', 'ようせいびと': '요정',
                    'グランバニアへいし': '그란바니아 병사', 'めしつかい': '하인', 'ゆうしゃのちちおや': '용사의 아버지',
                    'でんせつのゆうしゃ': '전설의 용사', 'おとこ': '남자', 'おんな': '여자'}}
-# 이름 표 번호로 덮는 이름: 1장 보스로 빌린 DQ5 몬스터 번호(dq4ch1event.BOSS_MONSTERS)
+# 이름 표 번호로 덮는 이름: 1장 보스로 빌린 DQ5 몬스터 번호(dq4ch1event.BOSS_MONSTERS)와 FC 물건에 빌려준 DQ5 물건
+# 번호(dq4itemport.BORROWED). 이 표를 만드는 롬에는 아직 DQ5 이름이 있다
 def numbered_names():
     import dq4ch1event
-    return {4: {n: ko for n, (_, ko) in dq4ch1event.BOSS_MONSTERS.items()}}
+    import dq4itemport
+    return {4: {n: ko for n, (_, ko) in dq4ch1event.BOSS_MONSTERS.items()}, 5: dq4itemport.korean_names()}
 
 
 # 전투 작전 창(16)은 작전 이름을 넉 자씩 두 줄로 찍는다(04:BB61). 한글은 띄어쓰기 자리에서 나눠 줄마다 고정 문구 하나
@@ -158,9 +161,15 @@ def rom_names(data, table, count=256):
 
 
 def adopted(table):
+    """가나 키 → 채택 이름. DS 가 FC 이름을 바꾼 줄(근거 「FC:いばらのむち」)은 FC 이름으로도 찾는다. 롬의 이름은 FC 이름을
+    따르기 때문이다(DQ5 いばらのムチ). DS 이름이 같은 키를 가지면 DS 줄을 쓴다."""
     with open(ADOPT, encoding='utf-8') as f:
-        return {kana_key(r['DS 일본어']): r['채택'] for r in csv.DictReader(f, delimiter='\t')
-                if r['표'] == table and r['채택']}
+        rows = [r for r in csv.DictReader(f, delimiter='\t') if r['표'] == table and r['채택']]
+    out = {kana_key(r['DS 일본어']): r['채택'] for r in rows}
+    for r in rows:
+        if r['근거'].startswith(FC_NOTE):
+            out.setdefault(kana_key(r['근거'][len(FC_NOTE):]), r['채택'])
+    return out
 
 
 def columns(font, text):
