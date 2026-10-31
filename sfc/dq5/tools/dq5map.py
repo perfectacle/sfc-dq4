@@ -230,8 +230,10 @@ def block_hook(rom):
     head = _code(rom, loader, '08 C2 30 48 DA 5A 22 ?? ?? ?? B0 ??', '훅 로더 머리(PHP·REP·PHA·PHX·PHY, JSL 찾기, BCS)')
     find, rel = int.from_bytes(head[:3], 'little'), head[3]
     hit = loader + 12 + (rel - 0x100 if rel & 0x80 else rel)
-    got = _code(rom, find, '08 E2 30 A2 00 BF ?? ?? ?? C9 FF F0 ?? C5 BC D0 ?? BF ?? ?? ?? C5 BD F0 ?? '
-                           'E8 E8 80 E8 28 18 6B 28 38 6B', '훅 찾기 루틴(돌기·못 찾음·찾음까지)')
+    # X 8비트 꼴은 목록을 127맵까지만 돈다. dq4 는 맵이 그보다 많으면 A 8비트·X 16비트 꼴(LDX #$0000)로 쓰고, 그 뒤는 같다
+    body = 'BF ?? ?? ?? C9 FF F0 ?? C5 BC D0 ?? BF ?? ?? ?? C5 BD F0 ?? E8 E8 80 E8 28 18 6B 28 38 6B'
+    head = '08 E2 20 C2 10 A2 00 00' if bytes(rom.d[lorom(find) + 1:lorom(find) + 3]) == b'\xe2\x20' else '08 E2 30 A2 00'
+    got = _code(rom, find, f'{head} {body}', '훅 찾기 루틴(돌기·못 찾음·찾음까지)')
     targets, second = int.from_bytes(got[:3], 'little'), int.from_bytes(got[5:8], 'little')
     if second != targets + 1:
         raise ValueError(f'훅 찾기 루틴이 목록 {targets:06X} 의 둘째 바이트를 읽지 않음')
