@@ -2,7 +2,7 @@
 clears $6E05 (MesenCE headless, ship cabin savestate).
 
   wipe   warp into the well bottom with the switch on, the hero's HP at 1 and every step fighting (the dungeon
-         check's RATES), and let the fight end the party: the switch is on when the wipe-out starts (01:88EF) and
+         check's rates), and let the fight end the party: the switch is on when the wipe-out starts (01:88EF) and
          off once the party stands again. "36" first sets the restart slot $195E to 36, whose way back goes by
          01:899F to バトランド's church; the ship state's own slot 02 goes back without it. "-unhooked" puts
          01:88EF back and keeps the switch on
@@ -56,7 +56,7 @@ def wipe(mesence, rom, state, out, name):
     orig = ";{:X}={}".format(lorom(dq4wellswitch.WIPE), dq4wellswitch.WIPE_ORIG.hex().upper()) if unhooked else ""
     got = dq4groupcheck.scene(mesence, rom, state, out, name, TO="3B/00,6,43", MAXF="6000", TEST=WIPE_TEST,
                               SET=f"{FLAG:04X}|{BIT:02X};2042=01;2043=00{WIPES[name]}",
-                              ROMPATCH=dq4dungeonencountercheck.RATES + orig, TRACE="0188EF,01899F",
+                              ROMPATCH=dq4dungeonencountercheck.rates(rom.read_bytes()) + orig, TRACE="0188EF,01899F",
                               LOG=f"7E{FLAG:04X}")
     rows = list(dq4dungeonencountercheck.lines(out / name / "trace.txt"))
     start = [int(kv[f"7E{FLAG:04X}"], 16) & BIT for _, pc, kv in rows if pc == "0188EF"]

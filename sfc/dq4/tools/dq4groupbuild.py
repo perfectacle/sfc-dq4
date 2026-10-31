@@ -150,6 +150,7 @@ INN_AT = 0x3CF000
 ENTRANCE_HOOK_AT = 0x5B8000
 SHOP_KEY_AT = 0x3CFE00
 WELL_SWITCH_AT = 0x3CFF00
+DUNGEON_RATE_AT = 0x578000   # a bank of its own: no other tool writes 57
 # The three tables chests and drawers grow; dq5chestplace reads chest_maps and search with DB, so bank 00-3F.
 CHEST_AT = ("--chests-at", "3C:8400", "--chest-maps-at", "3C:8800", "--search-at", "3C:8C00")
 # The field loader reads both RLE chunks with DB set to their bank, so 30-3F; bank 3A is free in this build.
@@ -809,11 +810,13 @@ def _build(pool, dq5, dq4, out, with_people):
     _save(out / "zone-report.json", zone_report)
     step("dq5progresswrite.py", "zones", zones, dq5)
     step("dq5encounterwrite.py", "grids", grids, dq5)
+    import dq4dungeonrate
     import dq4wellswitch
     manifests.append(_save(out / "rates.dq5patch.json", {
         "format": "dq5patch/1", "name": "dq4-encounter-rates",
         "writes": [dq4fieldencounter.terrain_rates(prg, dq5.read_bytes()),
-                   *dq4wellswitch.writes(WELL_SWITCH_AT, prg, placement(prg))]}))
+                   *dq4wellswitch.writes(WELL_SWITCH_AT, prg, placement(prg)),
+                   *dq4dungeonrate.writes(DUNGEON_RATE_AT, prg, placement(prg), dq5_zone, fc_zones)]}))
 
     import dq4chestport  # imports this module
     place, chest_report = dq4chestport.port(dq5, dq4)
