@@ -118,12 +118,12 @@ PEOPLE = (
     Person((0x15,), None, 'h021', '신부'),
     Person((0x05,), None, 'h022', '수녀'),
     Person((0x1F,), None, 'h033', '학자'),
-    Person((0x42,), None, 'h010', '여행 상인'),
-    Person((0x20,), None, 'h044', '개', anim='frames'),
+    Person((0x42,), None, 'h010', '여행 상인', spare=0x89),
+    Person((0x20,), None, 'h044', '개', anim='frames', spare=0x75),
     Person((0x19,), None, 'h003', '아주머니'),
     Person((0x07,), None, 'h011', '거친 남자'),
-    Person((0x82,), None, 'h029', '하녀'),
-    Person((0x0C,), None, 'h031', '시인'),
+    Person((0x82,), None, 'h029', '하녀', spare=0x5D),
+    Person((0x0C,), None, 'h031', '시인', spare=0x92),
     Person((0x40,), None, 'h009', '상인'),
     # 2장 일행. 크리프트·브라이는 사람 동료 그림 표(COMPANION_PICTURES)의 인물 09·05 칸이 그림을 고른다
     Person((ALENA_PICTURE,), None, 'h109', '아리나', main=True, palette=7, flag=CHAPTER2, leader=True),
@@ -131,10 +131,10 @@ PEOPLE = (
     Person((BREY_PICTURE,), None, 'h115', '브라이', main=True, palette=5, flag=CHAPTER2),
     # 2장 그룹(3D·45)의 인물. 시트는 NDS 스크립트 오브젝트의 모습 번호(= 시트 번호)와 그 대사의 화자 이름으로 골랐다
     Person((0x0E,), None, 'h035', '공주', main=True),
-    Person((0x3D,), None, 'h013', '죄수'),
+    Person((0x3D,), None, 'h013', '죄수', spare=0x9E),
     Person((0x45,), None, 'h071', '호빗'),
-    Person((0x1A,), None, 'h009', '초록 모자 상인'),
-    Person((0x26,), None, 'h048', '말', anim='frames'),
+    Person((0x1A,), None, 'h009', '초록 모자 상인', spare=0x70),
+    Person((0x26,), None, 'h048', '말', anim='frames', spare=0x5E),
 )
 SHARED_LINES = (0, 1, 2, 4)
 HOOK_SITES = ('1F:CF45', '03:D202')
