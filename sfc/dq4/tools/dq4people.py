@@ -190,6 +190,71 @@ def shrink(f):
     return out
 
 
+def is_face(c):
+    return 45 <= lab(c)[0] <= 90 and c[0] > c[2] and not is_white(c)
+
+
+def is_white(c):
+    return lab(c)[0] > 88 and max(c) - min(c) < 50
+
+
+def find_eyes(f, side=False):
+    """NDS 프레임의 눈동자: 머리 쪽(위 60%)에서 흰자 바로 옆의 어두운 점. 세로로 이어진 점을 한 눈으로 묶는다.
+    [(x, 가운데 y, 색)]. NDS 인물 눈은 흰자 1칸 + 눈동자 1x2 꼴이다."""
+    px = f.load()
+    lit = lambda x, y: 0 <= x < f.width and px[x, y][3] and is_white(px[x, y][:3])  # noqa: E731
+    pupils = {(x, y) for y in range(f.height * 3 // 5) for x in range(2, f.width - 2)
+              if px[x, y][3] and lab(px[x, y][:3])[0] < 28}
+    eyes = []
+    for x in sorted({q[0] for q in pupils}):
+        ys = sorted(y for q, y in pupils if q == x)
+        runs = [[ys[0]]]
+        for y in ys[1:]:
+            (runs[-1].append(y) if y == runs[-1][-1] + 1 else runs.append([y]))
+        for r in runs:
+            if len(r) != 2 or r[0] == 0 or r[-1] + 1 >= f.height:
+                continue
+            if not any(lit(x - 1, y) or lit(x + 1, y) for y in r):
+                continue
+            if not (px[x, r[-1] + 1][3] and lab(px[x, r[-1] + 1][:3])[0] >= 45):
+                continue
+            lights = sum(lit(x + d, y) for d in (-1, 1) for y in r)
+            eyes.append((x, sum(r) / len(r), Counter(px[x, y][:3] for y in r).most_common(1)[0][0], lights))
+    # 옆모습은 흰자가 가장 많이 붙은 하나, 앞모습은 같은 높이에서 서로 가장 가까운 둘
+    if side:
+        return [max(eyes, key=lambda e: e[3])[:3]] if eyes else []
+    pairs = [(abs(a[0] - b[0]), a, b) for i, a in enumerate(eyes) for b in eyes[i + 1:]
+             if a[1] == b[1] and 2 <= abs(a[0] - b[0]) <= 5]
+    return [e[:3] for e in min(pairs, key=lambda t: t[0])[1:]] if pairs else []
+
+
+def sharpen_eyes(f, s, name):
+    """줄인 얼굴의 눈 줄에서 번진 흰자·눈동자를 살색으로 지우고, NDS 눈동자 자리마다 그림에서 가장 어두운 색으로
+    1x2 점을 찍는다(DQ5 인물 눈 실측 1x2). 갈색 눈동자를 그대로 쓰면 22줄에서 흐려 보인다."""
+    if name == 'up':
+        return
+    eyes = find_eyes(f, side=name != 'down')
+    if not eyes:
+        return
+    px = s.load()
+    sx, sy = s.width / f.width, s.height / f.height
+    spots = [(min(s.width - 1, int((x + 0.5) * sx)), min(s.height - 2, int(y * sy))) for x, y, _ in eyes]
+    face = [px[x, y][:3] for y in range(s.height * 3 // 5) for x in range(s.width)
+            if px[x, y][3] and lab(px[x, y][:3])[0] >= 45 and not is_white(px[x, y][:3])]
+    ink = min((px[x, y][:3] for y in range(s.height) for x in range(s.width) if px[x, y][3]), key=lambda c: lab(c)[0])
+    for x, y in spots:
+        for cy in (y, y + 1):
+            for cx in (x - 1, x + 1):
+                if 0 < cx < s.width - 1 and px[cx, cy][3] and px[cx - 1, cy][3] and px[cx + 1, cy][3] \
+                        and (cx, cy) not in spots and (cx, cy - 1) not in spots \
+                        and (lab(px[cx, cy][:3])[0] < 35 or is_white(px[cx, cy][:3])):
+                    near = [px[cx, cy + d][:3] for d in (-1, 2, -2) if 0 <= cy + d < s.height and px[cx, cy + d][3]]
+                    near = [c for c in near if c in face] or face
+                    if near:
+                        px[cx, cy] = Counter(near).most_common(1)[0][0] + (255,)
+        px[x, y] = px[x, y + 1] = ink + (255,)
+
+
 def rgb_frames(person, assets):
     """{방향: [16x24 RGBA 걸음 0, 걸음 1]}. 걸음 규칙까지 들어간 것."""
     out = {}
@@ -197,6 +262,7 @@ def rgb_frames(person, assets):
         cells = []
         for f in pair:
             s = shrink(f)
+            sharpen_eyes(f, s, name)
             cut, ox = max(0, s.width - WIDTH) // 2, (WIDTH - min(WIDTH, s.width)) // 2
             c = Image.new('RGBA', (16, 24))
             c.paste(s.crop((cut, 0, cut + min(WIDTH, s.width), s.height)), (ox, BOTTOM - s.height))

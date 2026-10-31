@@ -4,6 +4,8 @@ import dq4chapter1 as ch
 import dq4chapterbox as box
 import dq4menumsg as mm
 import dq4prologue as pro
+from dq4chapter1 import lorom
+from w65816 import Cpu
 
 
 class PrologueTests(unittest.TestCase):
@@ -159,3 +161,23 @@ class PrologueTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class FaceHeroTests(unittest.TestCase):
+    def facing(self, hero, npc):
+        at = 0x3E8000
+        rom = bytearray(0x400000)
+        code = pro._face_hero()
+        rom[lorom(at):lorom(at) + len(code)] = code
+        cpu = Cpu(bytes(rom), bytearray(0x20000))
+        cpu.wram[0x90] = 3
+        cpu.wram[0x3020], cpu.wram[0x3080] = hero
+        cpu.wram[0x3023], cpu.wram[0x3083] = npc[0] | 0x80, npc[1]
+        cpu.jsl(at)
+        return cpu.wram[0x31E3], cpu.wram[0x3243], cpu.wram[0x3263], cpu.wram[0x31E0]
+
+    def test_turns_to_the_larger_axis(self):
+        self.assertEqual(self.facing((12, 10), (10, 11)), (0x11, 0x01, 0x01, 0))
+        self.assertEqual(self.facing((8, 10), (10, 10)), (0x22, 0x02, 0x02, 0))
+        self.assertEqual(self.facing((10, 14), (10, 11)), (0x44, 0x04, 0x04, 0))
+        self.assertEqual(self.facing((11, 6), (10, 11)), (0x88, 0x08, 0x08, 0))

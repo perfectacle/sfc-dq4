@@ -591,6 +591,21 @@ def block_prop(source, block):
     return source.blocks["prop"].get(block, UNDEFINED)
 
 
+# FC 원작과 다르게 칸을 바꾼 곳 {(그룹, 번호): {(x, y): 블록}}. 서장 마을 다리 동쪽의 수풀은 개구리가 착지해
+# 지하 계단으로 뛰어가는 길이라, 초록 개구리가 나뭇잎에 묻히지 않게 잔디로 둔다(둘 다 지나갈 수 있는 블록).
+CELL_EDITS = {(0x14, 0x00): {(0x13, 0x04): 0x01, (0x14, 0x04): 0x01, (0x15, 0x04): 0x01, (0x15, 0x03): 0x01}}
+
+
+def edit_cells(source, group, number):
+    if (group, number) in CELL_EDITS:
+        source.buf = bytearray(source.buf)
+    for (x, y), block in CELL_EDITS.get((group, number), {}).items():
+        old = source.buf[y * source.w + x]
+        if block_prop(source, old & 31) != block_prop(source, block):
+            raise ValueError(f"{group:02X}/{number:02X} ({x},{y}): 지나가기 속성이 다른 블록으로 바꿈")
+        source.buf[y * source.w + x] = old & ~31 | block
+
+
 def prepare_maps(prg, assets, names=None):
     """Yield each FC map with its block counts and composited 16x16 block art."""
     if not assets:
@@ -601,6 +616,7 @@ def prepare_maps(prg, assets, names=None):
     arts = {}
     for group, number, expected_type, name in all_maps(prg) if names is None else [m for m in all_maps(prg) if m[3] in names]:
         source = dq4block.Map(prg, group, number)
+        edit_cells(source, group, number)
         if source.t != expected_type:
             raise ValueError(f"{group:02X}/{number:02X}: expected map type {expected_type:02X}, got {source.t:02X}")
         counts = Counter(value & 31 for value in source.buf)
