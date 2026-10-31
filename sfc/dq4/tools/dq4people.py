@@ -124,8 +124,9 @@ SHARED_LINES = (0, 1, 2, 4)
 HOOK_SITES = ('1F:CF45', '03:D202')
 LOAD_SET = bytes.fromhex('bf d0 86 25')                  # LDA $2586D0,X
 MAP_GROUP = 0x7E00BC
-# 원래 자리에 들어가지 않는 타일 자료를 나눠 담는 곳(뱅크 3F 이하여야 레코드가 가리킴). 곡 롬의 0 끝 줄 안
-TILE_AREAS = (('3E:D700', 0xFC00 - 0xD700), ('3F:EAE0', 0x10000 - 0xEAE0))
+# 원래 자리에 들어가지 않는 타일 자료를 나눠 담는 곳(뱅크 3F 이하여야 레코드가 가리킴). 곡 롬의 0 끝 줄 안. 3F 는 앞쪽을
+# 인물 목록(dq4chapter1.NPC_BANK, 인라인 스크립트 포함)이 쓰므로 그 끝과 겹치지 않게 띄운다
+TILE_AREAS = (('3E:D700', 0xFC00 - 0xD700), ('3F:EB80', 0x10000 - 0xEB80))
 PALETTES_AT, HOOK_AT = '3D:EA00', '3E:FC00'
 
 

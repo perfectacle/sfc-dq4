@@ -10,7 +10,8 @@ A 를 누르기 전에 밀려 올라간다. ▼ 대기 끝 1010 은 그 자리�
                         하나라도 메시지로 시작하면 메시지가 온다. 조건 05 의 갈래는 예·아니요 창이라 그 앞 물음은 1001.
                         알 수 없는 명령(전투 call 등)은 1001 쪽
   인물 스크립트: 명령 21·32 는 띄운 뒤 닫기 대기를 하므로 늘 1001. 명령 30 은 창을 남기고 바로 다음으로 가므로, 다음
-                 메시지(21·30·32)가 조작 풀기(40)보다 먼저 오면 1010. 갈래·점프는 보지 않고 차례대로 본다
+                 메시지(21·30·32)가 조작 풀기(40)보다 먼저 오면 1010. 다만 그 다음 메시지가 글 없이 ▼ 만 기다리는
+                 메시지(pauses)면 1001. 갈래·점프는 보지 않고 차례대로 본다
   이벤트 스크립트(토큰 목록): 명령 60 도 닫기 대기를 하므로 늘 1001
 """
 LINE_END, WAIT_END = 0x1001, 0x1010
@@ -46,7 +47,7 @@ def _talk(ops, after, wait, keep):
     return after
 
 
-def _script(commands, wait, keep):
+def _script(commands, wait, keep, pauses=()):
     for i, c in enumerate(commands):
         if c['op'] not in SCRIPT_MESSAGES:
             continue
@@ -54,8 +55,9 @@ def _script(commands, wait, keep):
         if c['op'] != OPEN_MESSAGE:
             keep.add(m)
             continue
-        later = next((d['op'] for d in commands[i + 1:] if d['op'] in SCRIPT_MESSAGES | {UNLOCK}), None)
-        (wait if later in SCRIPT_MESSAGES else keep).add(m)
+        later = next((d for d in commands[i + 1:] if d['op'] in SCRIPT_MESSAGES | {UNLOCK}), None)
+        shown = later and later['op'] in SCRIPT_MESSAGES and later['args'][0] | later['args'][1] << 8 not in pauses
+        (wait if shown else keep).add(m)
 
 
 def _event(tokens, wait, keep):
@@ -64,13 +66,13 @@ def _event(tokens, wait, keep):
             keep.add(t[1])
 
 
-def plan(talks=(), scripts=(), events=()):
+def plan(talks=(), scripts=(), events=(), pauses=()):
     """(1010 으로 끝낼 메시지, 1001 로 둘 메시지). 한 메시지가 두 쪽에 다 쓰이면 어느 끝 코드든 한 자리가 틀리므로 멈춘다."""
     wait, keep = set(), set()
     for body in talks:
         _talk(body, 'end', wait, keep)
     for commands in scripts:
-        _script(commands, wait, keep)
+        _script(commands, wait, keep, pauses)
     for tokens in events:
         _event(tokens, wait, keep)
     both = wait & keep
