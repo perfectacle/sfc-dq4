@@ -109,7 +109,7 @@ SEGMENTS = [
     ('reunion', 'walk', 'wait:300;' + taps(30, 60) + ';' + pc.CLOSE, {'want': ['REUNITED']}),
     ('well', 'warp', '3B/00,46,5', {'map': '3B/00'}),
     ('hoimin_side', 'warp', '3B/03,6,28', {'map': '3B/03'}),
-    ('hoimin', 'walk', talk('left', 12), {'want': ['HOIMIN']}),
+    ('hoimin', 'walk', talk('left', 12) + ';wait:300;' + taps(4) + ';' + pc.CLOSE, {'want': ['HOIMIN']}),
     # 같은 맵 안의 순간이동은 dq5warp.lua 가 도착을 알아보지 못해 이웃 맵을 거친다
     ('well_hole', 'warp', '3B/02,10,15', {'map': '3B/02'}),
     ('shoes_chest', 'warp', '3B/03,14,14', {'map': '3B/03'}),
@@ -121,7 +121,7 @@ SEGMENTS = [
     ('tower_top', 'warp', '39/04,46,40', {'map': '39/04'}),
     # 잡힌 아이가 (46,35)까지 걸어와 그 줄을 막으므로 한 칸 옆 열로 오른다
     ('boss', 'walk', '44,41;44,37;' + taps(4) + ';' + pc.CLOSE + ';44,25;46,25;46,23;' + talk('up', 4) + ';' +
-     taps(60, 40) + ';wait:600;' + taps(10) + ';' + pc.CLOSE,
+     taps(110, 40) + ';wait:600;' + taps(10) + ';' + pc.CLOSE,
      {'boss': True, 'poke': HERO_HP, 'want': ['BOSS_WON', 'KIDS_FOLLOW']}),
     ('tower_soldier', 'warp', '39/01,36,50', {'map': '39/01'}),
     ('soldier', 'walk', talk('up', 6) + ';wait:300', {'want': ['SOLDIER']}),

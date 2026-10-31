@@ -552,8 +552,14 @@ def vehicle_song_code():
 # 다시 받았다. 배에서 내리면 배 곡과 필드 곡이 함께 쓰는 샘플까지 다시 받아 원본보다 오래 조용했다.
 # 곡 뒤 단계를 끝까지 마친 곡을 KEEP_SONG 에 적어 두고, 16 과 0A 사이에서 그 곡과 다음 곡이 함께 쓰는 샘플을
 # 2B:C21E(샘플 하나 보내기: 있으면 참조 수만 올림)로 다시 표시해 0A 에서 살린다.
-KEEP_CODE = 0x2BEA48               # 2B 의 빈 자리 끝 쪽. 앞(~EA01)은 IPL 꼬리라 빌드가 커지면 뒤로 는다
+KEEP_CODE = 0x2BEA30               # 2B 의 빈 자리 끝 쪽. 앞(~EA03)은 IPL 꼬리라 빌드가 커지면 뒤로 는다
 KEEP_SONG = 0x1A96                 # 낮은 WRAM. 전원부터 선실·배·융단·전투·마을까지 7E:1A86~1A97 에 접근 없음. 0 = 없음
+KEEP_BUSY = 0x1A94                 # 같은 빈 자리(2바이트). 표시 코드가 도는 동안 0 이 아님
+# 샘플 보내기(C21E)는 한 번 보낼 때마다 대기열 루프 BED5 를 불러 다른 칸을 돌린다(2B:C2E6). 표시 코드 안에서 그러면
+# 16 과 0A 사이에 남아 있는 1A 칸이 C0BB 부터 다시 돌아 다시 표시 코드로 들어갔다. 함께 쓰는 샘플이 많으면 깊이마다
+# 스택이 1C 씩 쌓여 소리 변수 $08DA·$08DC 까지 덮고 RTS 가 엉뚱한 데로 갔다(1장 보스를 이긴 뒤 멈춤). 대기열 칸을
+# 바꾸면 본 스레드가 1A 를 못 찾아 또 넣으므로, 표시하는 동안만 그 부르기를 건너뛴다
+KEEP_LOOP_SITE = 0x2BC2E6          # C21E 안의 JSR BED5
 KEEP_DONE_SITE = 0x2BC1C5          # 곡 뒤 단계 끝의 JMP C184(칸 비우기)
 KEEP_MARK_SITE = 0x2BC0AD          # 1A 끝의 JSR C32F(16 의 대답) / LDA #0A / JSR C112
 # 01·0C 가 샘플 자리를 얻지 못하면 2B 는 $1DC5 번 0A·다시 보내기를 되풀이하다 그만두는데(2B:BF8F, 원본도 빈 NOP),
@@ -587,8 +593,10 @@ def keep_samples_code():
         ('label', 'store'), h('8D') + song,
         ('label', 'skip'), h('28 4C 84 C1'),                              # PLP / JMP $C184
     ])
+    busy = KEEP_BUSY.to_bytes(2, 'little')
     mark = _asm([
         h('08 C2 30 AD') + song + h('29 FF 00'), ('b', 0xF0, 'done'),
+        h('A9 01 00 8D') + busy,                                          # C21E 가 대기열 루프를 부르지 않게
         h('A3 04'),                                                       # 1A 의 칸
         ('label', 'scan'), h('1A 29 0F 00 AA E2 20 CD 91 1D C2 20'), ('b', 0xF0, 'done'),
         h('BD 95 1D 29 FF 00 C9 01 00'), ('b', 0xF0, 'found'),            # 아직 시작하지 않은 01·03·0C
@@ -605,10 +613,15 @@ def keep_samples_code():
         ('label', 'miss'), h('68'), ('b', 0x80, 'next'),
         ('label', 'hit'), h('68 20 1E C2'),                              # JSR $C21E
         ('label', 'next'), h('FA 7A E8 88'), ('b', 0xD0, 'new'),
-        ('label', 'done'), h('9C') + song,                              # 0A 뒤에는 다 실려 있지 않다
+        ('label', 'done'), h('9C') + busy + h('9C') + song,             # 0A 뒤에는 다 실려 있지 않다
         h('28 20 2F C3 A9 0A 00 4C 12 C1'),                               # PLP / JSR C32F / LDA #0A / JMP C112
     ])
     return done, mark
+
+
+def keep_loop_code():
+    """2B:C2E6(8비트 A, JSR BED5 자리)에서 불린다. 표시 코드가 돌고 있으면 대기열 루프를 건너뛴다. A 는 뒤에서 쓰지 않는다(LDX $08D4)."""
+    return bytes.fromhex('AD') + KEEP_BUSY.to_bytes(2, 'little') + bytes.fromhex('D0 03 4C D5 BE 60')
 
 
 def nmi_range_code():
@@ -1040,9 +1053,11 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
             raise ValueError('keep_samples needs load_pump (its code is preempted through the NMI range stub)')
         done, mark = keep_samples_code()
         mark_at = KEEP_CODE + len(done)
-        if (mark_at + len(mark)) & 0xFFFF > 0xEB00:
+        loop_at = mark_at + len(mark)
+        if (loop_at + len(keep_loop_code())) & 0xFFFF > 0xEB00:
             raise ValueError('keep_samples code overflows 2B:EB00')
-        write(KEEP_CODE, done + mark, empty=True)
+        write(KEEP_CODE, done + mark + keep_loop_code(), empty=True)
+        write(KEEP_LOOP_SITE, bytes([0x20]) + (loop_at & 0xFFFF).to_bytes(2, 'little'), bytes.fromhex('20 D5 BE'))
         write(KEEP_DONE_SITE, bytes([0x4C]) + (KEEP_CODE & 0xFFFF).to_bytes(2, 'little'), bytes.fromhex('4C 84 C1'))
         write(KEEP_MARK_SITE, bytes([0x20]) + (mark_at & 0xFFFF).to_bytes(2, 'little') + bytes([0xEA] * 6),
               bytes.fromhex('20 2F C3 A9 0A 00 20 12 C1'))
