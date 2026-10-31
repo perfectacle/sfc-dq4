@@ -85,8 +85,9 @@ class AiWriteTests(unittest.TestCase):
                {'tactics': [{'tactic': 5, 'danger': 1}]}, {'tactics': [{'tactic': 0, 'heal': 1}]},
                {'tactics': [{'tactic': '0', 'danger': 1}]}, {'tactics': [{'tactic': 0, 'mp_penalty': 0x10000}]},
                {'odds': {'normal': [[0] * 4] * 3}}, {'odds': {'other': []}}, {'resist_rates': [1, 2, 3]},
-               {'armor': [{'index': 2, 'reduce': 1}]}, {'armor': [{'index': 0, 'element': '01'}]},
-               {'armor': [{'index': 0, 'reduce': 128}]}, {'armor': [{'index': 0, 'item': '56'}]},
+               {'armor': [{'index': 2, 'reduce': 1}]}, {'armor': [{'index': 0, 'element': '00'}]},
+               {'armor': [{'index': 0, 'reduce': 128}]}, {'armor': [{'index': 0, 'item': '5'}]},
+               {'resist_rates_high': [1, 2, 3]}, {'resist_rates_high': [1, 2, 3, 256]},
                {'actions': [{'action': '04', 'range': 'C0'}]}, {'actions': [{'action': '04', 'range': 'E0'}]},
                {'actions': [{'action': '04', 'kind': '08'}]}, {'tactics': [{'tactic': 0, 'heal_damage': 1}]},
                {'tactics': [{'tactic': 0, 'damage_weight': 1}]}, {'tactics': [{'tactic': 0, 'dragoram': 1}]},
@@ -98,6 +99,10 @@ class AiWriteTests(unittest.TestCase):
         self.assertEqual(ai.patch(r, doc(actions=[{'action': '04', 'kind': '01', 'range': '20'}]))['writes'], [])
         self.assertEqual(writes(ai.patch(r, doc(actions=[{'action': '04', 'range': '80'}])))[0][1], '81')
         self.assertEqual(writes(ai.patch(r, doc(actions=[{'action': '04', 'range': 'A0'}])))[0][1], 'a1')
+        # 갑옷 원소 표의 원소·물건 칸, 높은 레벨 내성 배율 27:8059
+        self.assertEqual(writes(ai.patch(r, doc(armor=[{'index': 0, 'element': '10', 'item': '57'}]))),
+                         [('27:80FC', '10', '0f'), ('27:80FD', '57', '80')])
+        self.assertEqual(writes(ai.patch(r, doc(resist_rates_high=[0x80, 255, 169, 0])))[0][:2], ('27:8059', '80 ff a9'))
         # 작전 +3(회복 값 무게)·+4(회복 MP 무게)
         self.assertEqual(writes(ai.patch(r, doc(tactics=[{'tactic': 1, 'heal_value': 0, 'heal_mp': 9}]))),
                          [('21:D8E0', '00', 'ff'), ('21:D8E1', '09', '64')])

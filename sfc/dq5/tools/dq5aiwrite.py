@@ -31,6 +31,8 @@ TACTIC_FIELDS = (('per_mp', 0, 1), ('flat', 1, 1), ('mp_ratio', 2, 1), ('heal_va
 # 27:8228 이 고르는 학습 배율 표 셋. [갈래 0~2][라운드 수 0~3][내성 단계 0~3].
 ODDS = {'normal': 0x278254, 'easy': 0x278284, 'saving': 0x2782B4}
 RESIST = 0x278055
+# 주인공 레벨 - 10 이 구역 레벨($100F) 이상일 때 주문 피해(20:ABBA)·ニフラム 등(20:AF22, 레벨 검사 없이 ルカニ)이 쓰는 표.
+RESIST_HIGH = 0x278059
 ARMOR = 0x2780FC
 NO_RESIST = 0x1F
 # A0 은 공격 평가(21:DD47)·회복 평가(21:EF05) 어느 갈래에도 들지 않아 보통 평가에서 빠진다. C0·E0 도 같은
@@ -100,6 +102,7 @@ def dump(rom):
            'items': [{'item': f'{n:02X}', 'value': rec[1], 'branch': f'{rec[2]:02X}'}
                      for n, rec in ((n, record(rom, ITEMS, n)) for n in range(ITEM_COUNT))],
            'tactics': [], 'odds': {}, 'resist_rates': [u8(rom, RESIST + i) for i in range(4)],
+           'resist_rates_high': [u8(rom, RESIST_HIGH + i) for i in range(4)],
            'armor': []}
     for t in range(TACTIC_COUNT):
         base = TACTICS + t * TACTIC_SIZE
@@ -116,7 +119,7 @@ def dump(rom):
 
 
 def edits(rom, doc, original=None):
-    keys(doc, ('format', 'actions', 'items', 'tactics', 'odds', 'resist_rates', 'armor'), '문서')
+    keys(doc, ('format', 'actions', 'items', 'tactics', 'odds', 'resist_rates', 'resist_rates_high', 'armor'), '문서')
     require(doc.get('format') == FORMAT, 'format 이 잘못됨')
     allowed = branches(original or rom)
     wanted, notes = {}, {}
@@ -218,6 +221,11 @@ def edits(rom, doc, original=None):
                     put(ODDS[table] + g * 16 + r * 4 + s, integer(value[g][r][s], 0, 255, f'odds {table}'),
                         f'학습 배율 {table}')
 
+    if 'resist_rates_high' in doc:
+        rates = doc['resist_rates_high']
+        require(isinstance(rates, list) and len(rates) == 4, 'resist_rates_high: 4개 배열이어야 함')
+        for i, v in enumerate(rates):
+            put(RESIST_HIGH + i, integer(v, 0, 255, 'resist_rates_high'), '내성 단계 배율(높은 레벨)')
     if 'resist_rates' in doc:
         rates = doc['resist_rates']
         require(isinstance(rates, list) and len(rates) == 4, 'resist_rates: 4개 배열이어야 함')
@@ -235,10 +243,13 @@ def edits(rom, doc, original=None):
         require(i not in seen, f'armor: {i} 를 두 번 지정함')
         seen.add(i)
         addr = entries[i][0]
-        # 원소·물건 칸은 바꾼 실측이 없어 읽기 전용이다.
+        # 원소 칸은 20:ABDC 가 행동 원소 비트(27:80E3)와 AND 하는 비트이고, 00 이면 표의 끝이 되므로 받지 않는다.
+        # 물건 칸은 맞는 쪽이 장비한 갑옷·방패 번호와 견주는 값이다.
         for at, field in ((0, 'element'), (1, 'item')):
             if field in row:
-                require(hexbyte(row[field], f'armor {field}') == old[at], f'armor {i}: {field} 는 읽기 전용')
+                value = hexbyte(row[field], f'armor {field}')
+                require(field != 'element' or value != 0, f'armor {i}: element 00 은 표의 끝이라 받지 않음')
+                put(addr + at, value, f'갑옷 원소 {i} {field}')
         if 'reduce' in row:
             reduce = integer(row['reduce'], -128, 127, 'armor reduce')
             put(addr + 2, reduce & 0xFF, f'갑옷 원소 {i}')

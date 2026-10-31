@@ -3,7 +3,10 @@
   ai      주인공·ホイミン(01)·マーリン(02) 과 슬라임 셋(HP 200)의 필드 전투. 동료 かしこさ 99, 전투 주문 칸 8~15 를 모두
           배움. 20:8846 에서 행동자·행동을 모아, 작전(7E:2034)·주인공 HP·가진 물건을 POKE 로 둔 같은 입력으로 견줌
   papas   파파스가 슬라임 셋에게 メラ. 내성 단계 0 배율 27:8055 FF → 80
-  armor   슬라임이 まほうのよろい 를 입은 주인공에게 メラミ(3A). 갑옷 원소 표 まほうのよろい 항목 10 → 48
+  armor   슬라임이 まほうのよろい 를 입은 주인공에게 メラミ(3A). 갑옷 원소 표 まほうのよろい 항목 10 → 48,
+          그 항목의 원소 0F → 10(숨만)·물건 56 → 57 이면 항목이 맞지 않아(20:AC46 에 닿지 않고 20:AC6E) 줄지 않음
+  papas-high 주인공 레벨 11(7E:2052)이면 20:ABB5 의 레벨 검사로 주문 피해가 27:8059 를 씀. 27:8059 단계 0 FF → 80 이면
+          피해가 반으로, 27:8055 를 바꾼 롬은 그대로
   menu_mp 작전 3 의 MP 거름(21:DA58). 주문 목록 창의 MP 표 21:9BB4 의 メラ(01) 칸을 0 으로 둔 롬으로 전투를 시작해,
           マーリン 의 メラ 가 거름 뒤 후보 넣기(21:DA77)에 닿는지 원본과 견줌. 거름은 BRK 88 85(21:9BAD 가 LDA $219BB4,X)가
           $47 에 둔 값을 보므로 AI 레코드 +3 이나 전투 MP(26:8765)와 상관없다
@@ -60,6 +63,10 @@ def cases(rom):
         **{f'odds_{name}': {'odds': {name: zero_group0(odds[name])}} for name in ODDS},
         'rates': {'resist_rates': [0x80, 205, 84, 0]},
         'armor': {'armor': [{'index': 2, 'reduce': 48}]},
+        'rates_high': {'resist_rates_high': [0x80, 255, 169, 0]},
+        # まほうのよろい(56) 항목의 원소를 숨(10)만으로, 또는 물건을 다른 갑옷(57)으로 바꾸면 メラミ 를 줄이지 않는다.
+        'armor_element': {'armor': [{'index': 2, 'element': '10'}]},
+        'armor_item': {'armor': [{'index': 2, 'item': '57'}]},
         # 대조용: 이 장면에서 아무도 갖지 않은 물건(00 ひのきのぼう)의 AI 기대 값만 바꾼다. 결정이 원본과 같아야 한다.
         'control': {'items': [{'item': '00', 'value': 1}]},
     }
@@ -95,8 +102,10 @@ AI_CASES = [
 ]
 # 사다리 출구를 첫 필드 이벤트 자리로 덮고, 슬라임 MP 99·행동 여섯을 몬스터 メラミ(3A)로.
 ARMOR_SCENE = dict(PAPAS, ROMPATCH='156FF5=E0253C0103;118004=63;118011=3A3A3A3A3A3A', POKE='7E2056=56',
-                   READS='278104', EXECS='20AC54,20AC57', MAXF='2400')
+                   READS='278104', EXECS='20AC54,20AC57,20AC46,20AC6E', MAXF='2400')
 PAPAS_SCENE = dict(PAPAS, READS='278055-278058')
+# 레벨 11 이면 구역 레벨 1 이하에서 높은 레벨 표를 쓴다. 슬라임이 일찍 달아나 파파스의 メラ 는 한 번만 본다.
+PAPAS_HIGH = dict(PAPAS, READS='278055-27805C', POKE='7E2052=0B')
 
 
 def build(original, out):
@@ -184,7 +193,11 @@ def main():
                 ('menu-original', original, battle), ('menu-patched', out / 'menu_mp.sfc', menu_battle))}
             texts = {k: pool.submit(scene_run, k, rom, opts, state, out, mesence, libdir) for k, rom, opts in (
                 ('papas-original', original, PAPAS_SCENE), ('papas-rates', out / 'rates.sfc', PAPAS_SCENE),
-                ('armor-original', original, ARMOR_SCENE), ('armor-armor', out / 'armor.sfc', ARMOR_SCENE))}
+                ('armor-original', original, ARMOR_SCENE), ('armor-armor', out / 'armor.sfc', ARMOR_SCENE),
+                ('armor-armor_element', out / 'armor_element.sfc', ARMOR_SCENE),
+                ('armor-armor_item', out / 'armor_item.sfc', ARMOR_SCENE),
+                ('papas-high-original', original, PAPAS_HIGH), ('papas-high-rates', out / 'rates.sfc', PAPAS_HIGH),
+                ('papas-high-rates_high', out / 'rates_high.sfc', PAPAS_HIGH))}
             seen = {k: f.result() for k, f in futures.items()}
             observed = {k: f.result() for k, f in texts.items()}
             for f in filters.values():
@@ -223,11 +236,25 @@ def main():
         armor_ok = (armor['original'] and armor['armor'] and all(d == 10 for _, d in armor['original'])
                     and all(d == 48 for _, d in armor['armor']))
         results['armor'] = {'original': armor['original'], 'patched': armor['armor'], 'passed': bool(armor_ok)}
+        hits = {c: (observed[f'armor-{c}'].count('pc=20AC46'), observed[f'armor-{c}'].count('pc=20AC6E'))
+                for c in ('original', 'armor_element', 'armor_item')}
+        for c in ('armor_element', 'armor_item'):
+            results[c] = {'original': hits['original'], 'patched': hits[c],
+                          'passed': hits['original'][0] > 0 and hits[c][0] == 0 and hits[c][1] > 0}
+        high = {c: casts(out, f'papas-high-{c}') for c in ('original', 'rates', 'rates_high')}
+        results['rates_high'] = {'original': high['original'], 'patched': high['rates_high'], 'low_table': high['rates'],
+                                 'passed': len(high['original']) >= 1 and len(high['rates_high']) >= 1
+                                 and all(len(h) == 1 and 12 <= h[0][1] <= 15 for h in high['original'] + high['rates'])
+                                 and all(len(h) == 1 and 6 <= h[0][1] <= 7 for h in high['rates_high'])
+                                 and 'read 278059=FF' in observed['papas-high-original']
+                                 and 'read 278059=80' in observed['papas-high-rates_high']
+                                 and 'read 278055' not in observed['papas-high-rates_high']}
         passes = {k: len(re.findall(r'probe 21DA77 dp42=02 \w\w 00 00 01 ', (out / k / 'decisions.txt').read_text()))
                   for k in ('menu-original', 'menu-patched')}
         results['menu_mp'] = {'original': passes['menu-original'], 'patched': passes['menu-patched'],
                               'passed': passes['menu-original'] == 0 and passes['menu-patched'] > 0}
-        failed += [k for k in ('rates', 'armor', 'menu_mp') if not results[k]['passed']]
+        failed += [k for k in ('rates', 'armor', 'menu_mp', 'armor_element', 'armor_item', 'rates_high')
+                   if not results[k]['passed']]
         save_json(out / 'results.json', results)
         for name, r in results.items():
             print(f'{name}: {"통과" if r["passed"] else "불일치"} 원본 {r["original"]} 변경 {r["patched"]}')
