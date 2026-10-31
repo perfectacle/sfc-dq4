@@ -42,6 +42,14 @@ description: 분석·코드·문서를 바꾸기 전에(워크트리·브랜치)
    ```
    `git worktree remove` 가 커밋 안 된 변경 때문에 거부하면 `--force` 를 쓰지 않는다. 무엇이 남았는지 보고 사용자에게 알린다. 롬·세이브스테이트 링크와 `work/` 는 추적되지 않는 파일이라 지울 때 함께 사라진다(링크 대상은 남는다).
    완료: `git worktree list` 와 `git branch --list <브랜치>` 에 더는 없다.
+7. **1장 IPS 를 다시 만든다** — 원래 체크아웃이 최신 main 이 된 뒤 `check` 가 뒤처졌다고 하면 다시 만들어 비공개 에셋 저장소에 넣는다. 빌드 입력(`dq4build.py` 에서 닿는 도구 파일, `uv.lock`)을 건드리지 않은 PR 이면 `check` 가 통과해 아무것도 하지 않는다.
+   ```sh
+   cd "$MAIN"
+   uv run --locked python sfc/dq4/tools/dq4publish.py check || \
+     GH_TOKEN=$(gh auth token -u perfectacle) uv run --locked python sfc/dq4/tools/dq4publish.py build --commit
+   ```
+   `DQ4_ASSETS`(에셋 저장소 체크아웃), `ASAR`, `DQ4_GALMURI` 가 필요하다. 빌드가 실패하면 IPS 는 그대로 두고 원인을 사용자에게 알린다.
+   완료: `check` 가 「IPS 가 최신」.
 
 ## 규칙
 
