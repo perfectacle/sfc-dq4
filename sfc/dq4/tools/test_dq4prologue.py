@@ -60,6 +60,18 @@ class PrologueTests(unittest.TestCase):
         self.assertEqual(overrides[0]['map'], pro.CELLAR)
         self.assertEqual(lists[0]['entries'][0]['fields']['talk'], pro.T_ASK)
 
+    def test_spar_effects_skip_brk(self):
+        # BRK 16 은 DB 를 뱅크 5E 로 두어 24:FE44 가 대기열 대신 5E:1D91 을 읽는다(snes9x 에서 끝나지 않음)
+        _, at = pro.native()
+        code = pro._spar(at)
+        self.assertNotIn(bytes((0x00, 0x16)), code)
+        # 저장·DB 0·D 0·A = 효과음(8비트)·X = 갈래(16비트)·넣고 기다리기·거꾸로 되돌리기
+        self.assertEqual(pro._effect(0x40, 0x01), bytes.fromhex(
+            '08 8B 0B C2 30 48 DA 5A F4 00 00 AB AB F4 00 00 2B E2 20 A9 40 A2 01 00'
+            '22 AC FE 24 22 44 FE 24 C2 30 7A FA 68 2B AB 28'))
+        # 효과 자료가 있을 때와 없을 때의 두 길에 합마다 하나
+        self.assertEqual(code.count(bytes((0x22, 0xAC, 0xFE, 0x24))), 2 * len(pro.SPAR))
+
     def test_reveal_and_hold_are_one_call(self):
         # 인물 스크립트는 37 마다 다음 차례를 기다리므로 밝히기와 기다리기를 한 루틴에 둔다
         code = pro._reveal_hold()
