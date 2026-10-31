@@ -55,18 +55,19 @@ def keys(value, allowed, name):
         raise ValueError(f'{name}: 허용한 필드 {sorted(allowed)}만 있는 JSON 객체여야 함')
 
 
-def valid_message(codes, glyphs=GLYPHS):
+def valid_message(codes, glyphs=GLYPHS, controls=()):
     if not isinstance(codes, list) or not codes:
         raise ValueError('codes는 비어 있지 않은 정수 배열이어야 함')
     for c in codes:
-        if type(c) is not int or not (0 <= c < glyphs or 0x1000 <= c <= 0x101D or 0x1100 <= c <= 0x1118):
+        if type(c) is not int or not (0 <= c < glyphs or 0x1000 <= c <= 0x101D or 0x1100 <= c <= 0x1118
+                                      or c in controls):
             raise ValueError(f'지원하지 않는 글자·제어 코드: {c!r}')
     if codes[-1] not in ENDS or any(c in ENDS for c in codes[:-1]):
         raise ValueError('끝 코드 1001·1010·1018은 마지막에 한 번만 있어야 함')
     return codes
 
 
-def overrides(original, doc, glyphs=GLYPHS):
+def overrides(original, doc, glyphs=GLYPHS, controls=()):
     keys(doc, {'format', 'messages'}, '문서')
     if doc.get('format') != FORMAT or not isinstance(doc.get('messages'), list):
         raise ValueError(f'format={FORMAT}과 messages 배열이 필요함')
@@ -84,7 +85,7 @@ def overrides(original, doc, glyphs=GLYPHS):
         raise ValueError(f'{len(messages)} 이상 id 는 {len(messages)} 부터 빈 번호 없이 이어져야 함')
     messages += [None] * len(added)
     for index, codes in rows.items():
-        messages[index] = valid_message(codes, glyphs)
+        messages[index] = valid_message(codes, glyphs, controls)
     return messages + [PAD] * (-len(messages) % 16)
 
 
@@ -143,7 +144,9 @@ def read_messages(data):
 
 def index_table(data, mask):
     """보행 색인 표의 (CPU 주소, 메시지 수). 24:8BC3 이 원래 코드면 24:AF1E 의 3,200개다. 옮긴 표는 머리 끝의
-    글자 묶음 표(옮기지 않았으면 메시지 0) 바로 앞에서 끝나므로 그 사이를 세 바이트씩 센다."""
+    글자 묶음 표(옮기지 않았으면 메시지 0) 바로 앞에서 끝나므로 그 사이를 세 바이트씩 센다.
+    색인이 디코더와 다른 뱅크에 따로 있으면(DQ4 메뉴의 59:8000) 끝을 알려 주는 자료가 뒤에 없으므로,
+    항목이 앞으로 가는 동안을 센다."""
     rom = Rom(data)
     at = lorom(INDEX_LOAD)
     code = data[at:at + len(INDEX_LOAD_CODE)]
@@ -156,6 +159,11 @@ def index_table(data, mask):
         expected[off:off + 2] = ((index & 0xFFFF) + k).to_bytes(2, 'little')
     if code != expected:
         raise ValueError('지원하는 보행 색인 읽기 코드(24:8BC3)가 아님')
+    if index >> 16 != rom.u24(DECODER + 1) >> 16:
+        groups = separate_index_groups(rom, index)
+        if not MESSAGES < groups * 16 <= MAX_MESSAGES:
+            raise ValueError('따로 둔 보행 색인 표의 끝을 찾지 못함')
+        return index, groups * 16
     end = lorom((rom.u24(index) >> 3) | mask << 16)
     table = lorom(rom.u24(FONT_TABLE_OPERANDS[0][0]))
     if lorom(index) < table < end:
@@ -168,6 +176,18 @@ def index_table(data, mask):
     if any(a >= b for a, b in zip(bits, bits[1:])):
         raise ValueError('옮긴 보행 색인 표의 항목이 앞으로 가지 않음(색인과 메시지 0 사이에 다른 자료가 낀 것으로 보임)')
     return index, size // 3 * 16
+
+
+def separate_index_groups(rom, index):
+    """머리 밖에 따로 둔 색인 표의 묶음 수. 표는 한 뱅크 안이고, 뒤는 0 이라 앞으로 가지 않는 첫 항목에서 끝난다."""
+    n, last = 0, -1
+    while (index & 0xFFFF) + 3 * n + 3 <= 0x10000:
+        v = rom.u24(index + 3 * n)
+        if v <= last:
+            break
+        last = v
+        n += 1
+    return n
 
 
 def relocated(data):
@@ -184,8 +204,12 @@ def relocated(data):
 
 
 def base_package(base):
-    """옮긴 롬의 메시지 묶음: (메시지, 글자 묶음 표 바이트, 글자 수, 묶음 시작·끝 파일 위치).
-    글자 묶음 표는 표 피연산자부터 메시지 0 의 첫 바이트까지다(DQ4 메뉴가 머리 끝에 둔 꼴)."""
+    """옮긴 롬의 메시지 묶음: (메시지, 글자 묶음 표 바이트, 글자 수, 묶음이 차지한 파일 구간 목록, 더 받는 제어 코드).
+    글자 묶음 표는 표 피연산자부터 메시지 0 의 첫 바이트까지다(머리 끝에 두고 메시지를 바로 이은 꼴). 메시지 0 이
+    머리 뒤에 바로 오지 않으면(DQ4 메뉴: 머리 5A:8000, 메시지 64:C400) 표는 0 이 아닌 5바이트 항목이 이어지는 데까지이고,
+    구간은 머리·따로 둔 색인·메시지 셋이다. 그 사이의 다른 자료는 구간에 넣지 않는다.
+    원래 표 밖의 1000 번대 제어 코드(101E~10FF)는 기준 롬의 메시지가 쓰고 있으면 그 롬이 처리하는 것으로 보고 받는다
+    (DQ4 1장 빌드의 조사 코드 101E~1024 는 24:81D1 을 고치는 dq4josa 가 처리하는데, 메뉴 롬에는 그 훅이 아직 없다)."""
     rom = Rom(base)
     decoder, mask = relocated(base)
     index, total = index_table(base, mask)
@@ -198,18 +222,36 @@ def base_package(base):
         if rom.u24(at) != table + k:
             raise ValueError(f'{at:06X}: 글자 묶음 표 피연산자가 서로 맞지 않음')
     first = (rom.u24(index) >> 3) | mask << 16
+    head_end = lorom(first)
     if table == FONT_GROUPS:
         font, glyphs = None, GLYPHS
     else:
         # 머리가 뱅크 끝에 꼭 맞으면 메시지 0 은 다음 뱅크 첫머리라 CPU 주소가 아니라 파일 위치로 견준다.
         size = lorom(first) - lorom(table)
         if not 0 < size <= BANK or size % 5:
-            raise ValueError('글자 묶음 표가 메시지 묶음 머리 끝에 있지 않음')
-        font = bytes(base[lorom(table):lorom(first)])
+            if table >> 16 != decoder >> 16:
+                raise ValueError('글자 묶음 표가 메시지 묶음 머리 끝에 있지 않음')
+            size = 0
+            while (table & 0xFFFF) + size + 5 <= 0x10000 and any(base[lorom(table) + size:lorom(table) + size + 5]):
+                size += 5
+            if not size:
+                raise ValueError('글자 묶음 표가 메시지 묶음 머리 끝에 있지 않음')
+            head_end = lorom(table) + size
+            if sum(int.from_bytes(base[lorom(table) + i:lorom(table) + i + 2], 'little') & 0xFFF
+                   for i in range(0, size, 5)) < GLYPHS:
+                raise ValueError('따로 둔 글자 묶음 표의 글자 수가 원래보다 적음')
+        font = bytes(base[lorom(table):lorom(table) + size])
         glyphs = sum(int.from_bytes(font[i:i + 2], 'little') & 0xFFF for i in range(0, len(font), 5))
+    controls = frozenset(c for codes in messages for c in codes if 0x101E <= c <= 0x10FF)
     for codes in messages:
-        valid_message(codes, glyphs)
-    return messages, font, glyphs, (lorom(decoder), lorom(end))
+        valid_message(codes, glyphs, controls)
+    if head_end == lorom(first):
+        extents = [(lorom(decoder), lorom(end))]
+    else:
+        extents = [(lorom(decoder), head_end), (lorom(first), lorom(end))]
+    if index >> 16 != decoder >> 16 and index != INDEX:
+        extents.insert(1, (lorom(index), lorom(index) + total // 16 * 3))
+    return messages, font, glyphs, extents, controls
 
 
 def export(data, base=None):
@@ -217,9 +259,9 @@ def export(data, base=None):
     return {'format': FORMAT, 'messages': [{'id': i, 'codes': codes} for i, codes in enumerate(messages)]}
 
 
-def tree(messages, glyphs=GLYPHS):
+def tree(messages, glyphs=GLYPHS, controls=()):
     count(messages)
-    freq = Counter(c for codes in messages for c in valid_message(codes, glyphs))
+    freq = Counter(c for codes in messages for c in valid_message(codes, glyphs, controls))
     if not freq:
         raise ValueError('빈 허프만 트리는 만들 수 없음')
     if len(freq) == 1:
@@ -228,14 +270,15 @@ def tree(messages, glyphs=GLYPHS):
     return build_tree(freq)
 
 
-def compile_messages(data, messages, at='38:8000', name='walk-text', font=None, glyphs=GLYPHS):
-    """font 는 머리 끝에 옮겨 둘 글자 묶음 표(base_package). None 이면 원래 표 24:B176 을 그대로 쓴다."""
+def compile_messages(data, messages, at='38:8000', name='walk-text', font=None, glyphs=GLYPHS, controls=()):
+    """font 는 머리 끝에 옮겨 둘 글자 묶음 표(base_package). None 이면 원래 표 24:B176 을 그대로 쓴다.
+    controls 는 기준 롬이 더 받는 제어 코드(base_package)."""
     base = parse_at(at)
     start = lorom(base)
     if start < len(data):
         raise ValueError('메시지 배치가 입력 롬과 겹침; 원본 롬과 확장 뱅크를 사용해야 함')
     code = decoder_code(data)
-    codes, nodes, root = tree(messages, glyphs)
+    codes, nodes, root = tree(messages, glyphs, controls)
     grown = count(messages)
     if grown and data[lorom(INDEX_LOAD):lorom(INDEX_LOAD) + len(INDEX_LOAD_CODE)] != INDEX_LOAD_CODE:
         raise ValueError('원래 보행 색인 읽기 코드(24:8BC3)가 아님')
@@ -309,8 +352,8 @@ def index_size(messages):
 def patch(data, doc, at='38:8000', name='walk-text', base=None):
     if base is None:
         return compile_messages(data, overrides(read_messages(data), doc), at, name)
-    messages, font, glyphs, _ = base_package(base)
-    return compile_messages(data, overrides(messages, doc, glyphs), at, name, font, glyphs)
+    messages, font, glyphs, _, controls = base_package(base)
+    return compile_messages(data, overrides(messages, doc, glyphs, controls), at, name, font, glyphs, controls)
 
 
 def decoded_messages(data):
@@ -325,11 +368,11 @@ def decoded_messages(data):
 def check(data, doc, at, base=None):
     from dq5build import build, parse_at as patch_at
     if base is None:
-        messages, font, glyphs = overrides(read_messages(data), doc), None, GLYPHS
+        messages, font, glyphs, controls = overrides(read_messages(data), doc), None, GLYPHS, ()
     else:
-        messages, font, glyphs, _ = base_package(base)
-        messages = overrides(messages, doc, glyphs)
-    manifest = compile_messages(data, messages, at, font=font, glyphs=glyphs)
+        messages, font, glyphs, _, controls = base_package(base)
+        messages = overrides(messages, doc, glyphs, controls)
+    manifest = compile_messages(data, messages, at, font=font, glyphs=glyphs, controls=controls)
     writes = [(patch_at(w['at'])[0], bytes.fromhex(w['hex']), bytes.fromhex(w['orig']) if 'orig' in w else None,
                w['note']) for w in manifest['writes']]
     rebuilt, _ = build(data, [(manifest['name'], manifest['rom_size'], writes)], manifest['rom_size'])

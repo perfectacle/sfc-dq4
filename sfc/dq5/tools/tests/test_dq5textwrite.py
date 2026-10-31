@@ -139,8 +139,8 @@ class TextWriteTests(unittest.TestCase):
         hangul = [[GLYPHS + i % 16, 0x1001] for i in range(MESSAGES)]
         manifest = compile_messages(bytes(data), hangul, '65:8000', font=groups, glyphs=GLYPHS + 16)
         base = rebuild(bytes(data), manifest, 4)
-        messages, font, glyphs, (start, end) = base_package(base)
-        self.assertEqual((messages, font, glyphs), (hangul, groups, GLYPHS + 16))
+        messages, font, glyphs, [(start, end)], controls = base_package(base)
+        self.assertEqual((messages, font, glyphs, controls), (hangul, groups, GLYPHS + 16, frozenset()))
         self.assertEqual(start, lorom(0x658000))
         self.assertEqual(end, start + sum(len(bytes.fromhex(w['hex'])) for w in manifest['writes'] if 'orig' not in w))
         with self.assertRaises(ValueError):
@@ -233,7 +233,7 @@ class TextWriteTests(unittest.TestCase):
         grown = [[GLYPHS + i % 16, 0x1001] for i in range(MESSAGES + 32)]
         manifest = compile_messages(bytes(data), grown, '65:8000', font=groups, glyphs=GLYPHS + 16)
         base = rebuild(bytes(data), manifest, 4)
-        messages, font, glyphs, _ = base_package(base)
+        messages, font, glyphs, _, _ = base_package(base)
         self.assertEqual((messages, font, glyphs), (grown, groups, GLYPHS + 16))
         edited = patch(bytes(data), {'format': FORMAT, 'messages': [{'id': MESSAGES + 32, 'codes': [0x1018]}]},
                        '30:8000', base=base)
@@ -243,6 +243,56 @@ class TextWriteTests(unittest.TestCase):
         bad[lorom(INDEX_LOAD) + 10] ^= 1
         with self.assertRaises(ValueError):
             base_package(bytes(bad))
+
+    def test_base_package_reads_split_head_index_and_messages(self):
+        """DQ4 메뉴 꼴: 머리(디코더·트리·글자 묶음 표)는 5A:8000, 색인은 59:8000, 메시지는 다른 뱅크에 따로 있다."""
+        data = bytearray(self.data)
+        groups = bytes((0xDB, 0x03, 0, 0, 0)) + bytes((0x10, 0x00, 0, 0, 0))
+        for at, k in FONT_TABLE_OPERANDS:
+            data[lorom(at):lorom(at) + 3] = (FONT_GROUPS + k).to_bytes(3, 'little')
+        grown = [[GLYPHS + i % 16, 0x1001] for i in range(MESSAGES + 32)]
+        grown[5] = [GLYPHS, 0x101E, 0x1001]                                   # 기준 롬이 더 받는 조사 코드
+        with self.assertRaises(ValueError):
+            compile_messages(bytes(data), grown, '65:8000', font=groups, glyphs=GLYPHS + 16)
+        manifest = compile_messages(bytes(data), grown, '65:8000', font=groups, glyphs=GLYPHS + 16,
+                                    controls={0x101E})
+        base = bytearray(rebuild(bytes(data), manifest, 4))
+        rom = Rom(bytes(base))
+        index, total = index_table(bytes(base), 0x60)
+        first = lorom((rom.u24(index) >> 3) | 0x60 << 16)
+        head = lorom(0x658000)
+        table = lorom(rom.u24(FONT_TABLE_OPERANDS[0][0]))
+        index_bytes = bytes(base[lorom(index):lorom(index) + total // 16 * 3])
+        # 머리를 5A 로 옮김: 트리 피연산자는 뱅크 안 주소라 같은 자리로 옮기면 그대로 돈다.
+        moved = lorom(0x5A8000)
+        base[moved:moved + table + len(groups) - head] = base[head:table + len(groups)]
+        base[head:first] = bytes(first - head)
+        base[lorom(DECODER) + 1:lorom(DECODER) + 4] = (0x5A8000).to_bytes(3, 'little')
+        for at, k in FONT_TABLE_OPERANDS:
+            base[lorom(at):lorom(at) + 3] = (table - head + 0x5A8000 + k).to_bytes(3, 'little')
+        base[lorom(0x598000):lorom(0x598000) + len(index_bytes)] = index_bytes
+        load = lorom(INDEX_LOAD)
+        base[load + 1] = 0x59
+        for k, off in enumerate((5, 10, 15)):
+            base[load + off:load + off + 2] = (0x8000 + k).to_bytes(2, 'little')
+        base = bytes(base)
+        self.assertEqual(index_table(base, 0x60), (0x598000, MESSAGES + 32))
+        messages, font, glyphs, extents, controls = base_package(base)
+        self.assertEqual((messages, font, glyphs, controls), (grown, groups, GLYPHS + 16, frozenset({0x101E})))
+        end = head + sum(len(bytes.fromhex(w['hex'])) for w in manifest['writes'] if 'orig' not in w)
+        self.assertEqual(extents, [(moved, moved + table + len(groups) - head),
+                                   (lorom(0x598000), lorom(0x598000) + len(index_bytes)), (first, end)])
+        edited = patch(bytes(data), {'format': FORMAT, 'messages': [{'id': 6, 'codes': [GLYPHS + 15, 0x101E, 0x1001]}]},
+                       '70:8000', base=base)
+        again = decoded_messages(rebuild(bytes(data), edited, 4))
+        self.assertEqual(again, grown[:6] + [[GLYPHS + 15, 0x101E, 0x1001]] + grown[7:])
+        with self.assertRaises(ValueError):
+            patch(bytes(data), {'format': FORMAT, 'messages': [{'id': 6, 'codes': [0x101F, 0x1001]}]}, '70:8000',
+                  base=base)
+        broken = bytearray(base)
+        broken[lorom(0x598000) + 3:lorom(0x598000) + len(index_bytes)] = bytes(len(index_bytes) - 3)
+        with self.assertRaisesRegex(ValueError, '따로 둔 보행 색인 표'):
+            base_package(bytes(broken))
 
     def test_malformed_tree_does_not_loop(self):
         manifest = compile_messages(self.data, [[0, 0x1001] for _ in range(MESSAGES)])

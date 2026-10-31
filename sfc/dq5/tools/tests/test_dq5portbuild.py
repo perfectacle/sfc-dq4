@@ -119,6 +119,7 @@ class FixedTests(unittest.TestCase):
         rom[0x1A0010] ^= 0xFF                                               # 다른 단계가 거울 안에 쓴 1바이트
         rom[0x300000:0x300004] = b'\x00\x00\x12\x00'                        # 60 뱅크 자료(첫 0 포함)
         rom[0x318000:0x318008] = bytes(8)                                   # 63 뱅크: 표지만 지운 빈 뱅크
+        rom[0x1B8000:0x1C0000] = bytes(BANK)                                # 37 뱅크: 거울을 0 으로 지운 자리
         return bytes(rom)
 
     def test_mirror_is_freed_but_declared_and_other_writes_held(self):
@@ -134,6 +135,8 @@ class FixedTests(unittest.TestCase):
         self.assertIn((0x300000, 0x308000), occ)                            # 쓴 바이트가 있는 뱅크 전체
         self.assertFalse(any(s <= 0x318000 < e for s, e in occ))            # 표지만 다른 빈 뱅크는 비어 있음
         self.assertFalse(any(s <= 0x1B0000 < e for s, e in occ))
+        self.assertTrue(any(s <= 0x1B8000 and 0x1C0000 <= e for s, e in hold))  # 0 으로 지운 거울도 예약하고
+        self.assertEqual(mask[0x1B8000:0x1B8008], b'\1' * 5 + bytes(3))     # 결과 롬의 표지 자리를 0 으로 씀
 
     def test_superseded_range_is_not_occupied(self):
         rom = self.title_rom()
@@ -148,7 +151,8 @@ class FixedTests(unittest.TestCase):
         self.assertIsNone(hold)
         self.assertEqual(freed, 0)
         occ = occupied(mask, hold)
-        self.assertIn((0x180000, 0x200000), occ)                            # 거울 구간도 뱅크 단위로 전부
+        self.assertIn((0x180000, 0x1B8000), occ)                            # 거울 구간도 뱅크 단위로 전부
+        self.assertIn((0x1C0000, 0x200000), occ)                            # keep 이 없으면 모두 0 인 37 은 빈 뱅크
         with self.assertRaises(ValueError):
             fixed_mask(self.original, rom[:0x180000 + 5])
 
