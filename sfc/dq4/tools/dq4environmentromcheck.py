@@ -250,6 +250,11 @@ def main():
         x, y = _arrival(sources[name])
         to = f"{group:02X}/{number:02X},{x},{y}"
         states[name], moved = warp(mesence, args.rom.resolve(), args.state.resolve(), to, out / name, name, True)
+        # TEST 는 처음과 끝 칸만 견주므로 네 방향을 오가다 제자리로 돌아오면 moved=no 다. 직각 두 방향씩 다시 누르면 상쇄되지 않는다.
+        for n, test in enumerate(("left:40,up:40", "right:40,down:40")):
+            if not moved:
+                _, moved = warp(mesence, args.rom.resolve(), args.state.resolve(), to, out / name / f"test{n}", name,
+                                True, TEST=test)
         wram, vram, cgram = dump(mesence, args.rom.resolve(), states[name], out / name / "dump")
         later = [dump(mesence, args.rom.resolve(), states[name], out / name / f"dump{n}", 10 + n * WATER_PERIOD)
                  for n in (1, 2)]

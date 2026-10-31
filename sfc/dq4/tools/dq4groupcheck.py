@@ -50,6 +50,9 @@ PRESS = 32
 # it as a barred door and never opens it, so a stair
 # reached only through one (エンドール 04/01 (04,06)·(0C,06)) has no start; it is reported as skipped.
 LAST_KEY_DOOR = 0x97
+# 벽에 둘러싸여 이벤트로만 오는 계단: キングレオ 00/00 (1F,12) 는 감옥 00/04 로 가는 칸이고, FC 는 キングレオ 에게
+# 진 일행을 이벤트로 그곳에 보낸다(fc/dq4/docs/dq4-story-format.md 의 4장 4).
+EVENT_STAIRS = {(0x00, 0x00, 0x1F, 0x12)}
 
 
 def scene(mesence, rom, state, out, name, **extra):
@@ -123,6 +126,9 @@ def stair_scenes(prg, groups):
                            f"wait:{late},{d}:{PRESS},wait:400" if late else f"{d}:{PRESS},wait:400")
                           for late in range(0, 1200, 120) for (dx, dy), d in DIRS.items()
                           if walkable(source, x - dx, y - dy) and (x - dx, y - dy) not in order]
+                if not starts and (fc_group, fc_number, x, y) in EVENT_STAIRS:
+                    yield f"stair-{group:02X}{number:02X}-{i}", None, "walled in, reached by an event only"
+                    continue
                 if not starts:
                     if any(0 <= x - dx < source.w and 0 <= y - dy < source.h
                            and block_prop(source, source.cell(x - dx, y - dy) & 31) == LAST_KEY_DOOR for dx, dy in DIRS):

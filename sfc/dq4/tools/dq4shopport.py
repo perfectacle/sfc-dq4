@@ -45,6 +45,10 @@ FLAG_LIST = "목록 플래그"
 STORY_FLAG = "flag& "
 # dq4talk condition 16: $615A == n - 1, so "chapter n" is chapter n.
 CHAPTER = "chapter "
+# dq4talk 조건 03: 걷는 일행에 FC 인물 n 이 있다. 장 초기화(12:$913E)는 선두 하나만 둔다(86 87 85 83 80):
+# 1장 ライアン, 2장 アリーナ, 3장 トルネコ, 4장 マーニャ, 5장 勇者.
+PARTY = "party "
+START_LEAD = {1: 6, 2: 7, 3: 5, 4: 3, 5: 0}
 YES = "yes"
 INN, CHURCH = 6, 5
 INN_TABLE = 0x04FD6D
@@ -105,6 +109,12 @@ def merchants(prg, fc_group, number, items=None):
                 any(c.startswith(f"아님({CHAPTER}") and int(c[len(CHAPTER) + 3:-1]) == here for c in cond):
             continue
         cond = [c for c in cond if not c.startswith((CHAPTER, f"아님({CHAPTER}"))]
+        # 일행 조건은 그 장 시작의 선두로 본다: コーミズ 17/00 의 판매자는 ミネア·マーニャ 가 없을 때만 있다.
+        lead = START_LEAD[here]
+        if any(c.startswith(PARTY) and int(c[len(PARTY):], 16) != lead for c in cond) or \
+                any(c.startswith(f"아님({PARTY}") and int(c[len(PARTY) + 3:-1], 16) == lead for c in cond):
+            continue
+        cond = [c for c in cond if not c.startswith((PARTY, f"아님({PARTY}"))]
         # A seller behind a はい/いいえ question (レイクナバ's weapon shop, where chapter 3's job starts) waits for
         # its event; until then the person only talks.
         if YES in cond:

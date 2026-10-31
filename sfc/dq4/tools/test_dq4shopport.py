@@ -55,7 +55,8 @@ class PortTest(unittest.TestCase):
         # エンドール (40) sells armour on 40/00 and 40/09 and has inns on 40/00 and 40/0E: two keys, split at 40/09.
         # レイクナバ's 16/01 seller has only うまのふん, which DQ5 lacks, so 3E keeps one key.
         self.assertEqual(self.report["keys"], {"36/00-03": "60", "37/00-02": "61", "3D/03-03": "62", "3D/04-05": "63",
-                                               "3E/00-02": "64", "3F/00-01": "65", "40/00-08": "66", "40/09-0E": "67"})
+                                               "3E/00-02": "64", "3F/00-01": "65", "40/00-08": "66", "40/09-0E": "67",
+                                               "41/00-03": "68", "42/00-01": "69", "43/00-05": "6A"})
         weapons = next(s for s in self.shops if s["key"] == 0x60 and s["kind"] == 2)
         self.assertEqual(weapons["items"], [0x02, 0x06, 0x1C, 0x07])  # いばらのむち = DQ5 いばらのムチ
         # てつのやり sells in DQ5 slot 01 (dq4itemport.BORROWED), after くさりがま as in FC.
@@ -74,9 +75,10 @@ class PortTest(unittest.TestCase):
     def test_inn_table_and_operands(self):
         table, bank, addr, _, shop_site, inn_site = self.writes[:6]
         data = bytes.fromhex(table["hex"].replace(" ", ""))
-        self.assertEqual(len(data), (shopport.INN_ENTRIES + 6) * 2)
-        self.assertEqual(data[-12:], bytes((0x60, 4, 0x61, 6, 0x62, 3, 0x65, 10, 0x66, 6, 0x67, 8)))
-        self.assertEqual(self.report["inns"], {"36/00": 4, "37/00": 6, "3D/03": 3, "3F/01": 10, "40/00": 6, "40/0E": 8})
+        self.assertEqual(len(data), (shopport.INN_ENTRIES + 8) * 2)
+        self.assertEqual(data[-16:], bytes((0x60, 4, 0x61, 6, 0x62, 3, 0x65, 10, 0x66, 6, 0x67, 8, 0x68, 3, 0x6A, 6)))
+        self.assertEqual(self.report["inns"], {"36/00": 4, "37/00": 6, "3D/03": 3, "3F/01": 10, "40/00": 6, "40/0E": 8,
+                                               "41/00": 3, "43/00": 6})
         self.assertEqual((shop_site["at"], inn_site["at"]), ("06:DC37", "06:F576"))
         self.assertEqual((bank["hex"], addr["hex"]), ("3C", "00 F0"))
 

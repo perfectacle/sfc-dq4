@@ -80,6 +80,12 @@ class OrderTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             travel.name_bytes(dq5, "ラ")
 
+    def test_ship_cell_keeps_sea_on_its_right(self):
+        # 바다 블록 (10,10) 은 오른쪽 (11,10)·아래 (10,11) 이 땅이다. 내리는 칸이 오른쪽이어도 왼쪽 칸을 고른다.
+        def props(x, y):
+            return 0x00 if (x, y) in ((0x11, 0x10), (0x10, 0x11)) else travel.SEA
+        self.assertEqual(travel.ship_cell(props, (0x10, 0x10), (0x40, 0x40)), (0x20, 0x21))
+
 
 @unittest.skipUnless(DQ4.exists() and DQ5.exists(), "rom/dq4.nes and rom/dq5.sfc")
 class RomTest(unittest.TestCase):
@@ -89,9 +95,10 @@ class RomTest(unittest.TestCase):
         prg = ines.prg(DQ4.read_bytes())
         found = dq4groupbuild.doors(prg)
         dests = travel.destinations(prg, dq4groupbuild.LINKS, found)
-        # FC destination order: サントハイム, バトランド, エンドール, ボンモール, イムル, たびだちのむら, レイクナバ.
-        self.assertEqual([d["group"] for d in dests], [0x3D, 0x36, 0x40, 0x3F, 0x37, 0x3C, 0x3E])
-        bat = dests[1]
+        # FC destination order: キングレオ, サントハイム, バトランド, エンドール, ボンモール, ハバリア, イムル,
+        # たびだちのむら, モンバーバラ, レイクナバ, コーミズ.
+        self.assertEqual([d["group"] for d in dests], [0x44, 0x3D, 0x36, 0x40, 0x3F, 0x43, 0x37, 0x3C, 0x41, 0x3E, 0x42])
+        bat = dests[2]
         self.assertEqual((bat["land"], bat["row"]), ((328, 94), (328, 93)))
         for d in dests:
             self.assertIn(d["row"], found[d["fc"]][0])
