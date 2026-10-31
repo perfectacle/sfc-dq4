@@ -8,9 +8,9 @@ from PIL import Image  # noqa: E402
 
 import tempfile  # noqa: E402
 
-from dq5msgwindowcheck import (EFFECT_SWAPS, FIXED_RNG, MONSTER_SPELLS, SCENES, WINDOW_WHITE, border_gaps,  # noqa: E402
+from dq5msgwindowcheck import (EFFECT_SWAPS, FIXED_RNG, MONSTER_SPELLS, NO_EFFECT, SCENES, WINDOW_WHITE, border_gaps,  # noqa: E402
                                border_rows, complete, effect_log, hdma_ranges, number_matches, obj_boxes, safe, same_until,
-                               transfer_sizes, with_retries)
+                               spell_ran, transfer_sizes, with_retries)
 
 
 class SameUntilTests(unittest.TestCase):
@@ -171,6 +171,35 @@ class SceneTests(unittest.TestCase):
         for name in ('mon3B', 'fx21'):
             self.assertTrue(SCENES[name]['ROMPATCH'].endswith(FIXED_RNG))
             self.assertEqual(SCENES[name]['SET'], '2035=07;101A=01')
+
+
+class SpellRanTests(unittest.TestCase):
+    CALLS = ['1110 248C39 05E', '1130 FXID 73', '1195 248C39 070', '1200 FXID 40', '1259 248C39 070', '1264 FXID 40', '']
+
+    def test_effect_ran(self):
+        self.assertEqual(spell_ran('mon40', 'original', self.CALLS), {'runs': 2})
+        self.assertEqual(spell_ran('fx12', 'h9', ['1200 FXID 12', '1300 FXID 12']), {'runs': 2})
+        self.assertEqual(spell_ran('papas01', 'tall', ['900 FXID 01']), {'runs': 1})
+
+    def test_effect_missing(self):
+        # 공격 연출(73)만 돌았다면 그 주문 연출이 돈 것이 아니다
+        only_attack = ['1110 248C39 05E', '1130 FXID 73', '']
+        for scene in ('mon40', 'fx21', 'papas0C'):
+            with self.assertRaises(ValueError):
+                spell_ran(scene, 'original', only_attack)
+        # 번호가 다른 연출은 세지 않는다
+        with self.assertRaises(ValueError):
+            spell_ran('mon41', 'both', self.CALLS)
+
+    def test_no_effect_spell_needs_cast(self):
+        self.assertEqual(NO_EFFECT, ('22', '2A'))
+        self.assertEqual(spell_ran('papas2A', 'original', ['1500 248C39 070', '1520 248C39 094']), {'casts': 1})
+        with self.assertRaises(ValueError):
+            spell_ran('papas22', 'original', ['1110 248C39 05E', '1130 FXID 73'])
+
+    def test_other_scenes(self):
+        for scene in ('one', 'four', 'event', 'party'):
+            self.assertIsNone(spell_ran(scene, 'original', []))
 
 
 if __name__ == '__main__':
