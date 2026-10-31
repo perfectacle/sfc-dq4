@@ -1116,8 +1116,10 @@ def _king_call(m, at):
         # 갈래는 상대 점프(-128~127)라, 아이들 갈래를 앞에 두고 깃발이 꺼져 있으면 칭찬으로 건너뛴다
         {**_cmd('06', 0x80 | KIDS_FOLLOW[0], KIDS_FOLLOW[1]), "target": "praise"},
         msg('king_back'), _cmd('40'), _cmd('05', *_long(at['king_away'])), {"op": "03", "args": [], "target": "wait"},
-        # 상태 창은 레벨업 줄 동안 열어 두고(FC 와 같음) 마지막에 명령 34 로 함께 닫는다
-        {**msg('king_praise'), "label": "praise"}, call('status_count'),
+        # 상태 창은 레벨업 줄 동안 열어 두고(FC 와 같음) 마지막에 명령 34 로 함께 닫는다. 칭찬도 30 으로 창을 남겨
+        # 레벨업 줄을 그 창에 잇는다. 대화(보고 깃발 전)에서도 칭찬 뒤 작별이 이어져 끝 코드가 ▼ 대기(1010)라, 닫기
+        # 대기를 하는 21 로 띄우면 마지막 쪽에서 A 를 두 번 받는다
+        {**msg('king_praise', '30'), "label": "praise"}, call('status_count'),
         # 한 번 오를 때마다 「레벨이 올랐다」 와 오른 능력치를 한 창에 잇는다. 더 오르지 않으면 level_up 이 보고 깃발을
         # 켜고, 능력치 줄은 오른 양이 0 이면 stat_k 가 보고 깃발을 켜 건너뛴다
         {**call('level_up'), "label": "grow"}, {**_cmd('06', *REPORTED), "target": "grown"},
