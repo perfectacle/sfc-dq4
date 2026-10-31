@@ -14,21 +14,22 @@ from dq4titleassets import DEFAULT_SOURCE
 from dq4titlelayers import read_pack
 from dq4titlepatch import HOOK, MUSIC_HOOK, NEW_HOOK, NEW_MUSIC_HOOK, ORIGINAL_HOOK, ORIGINAL_MUSIC_HOOK, protect_outputs
 
-PLACEMENTS = {'background.chr': 0x188000, 'background.map': 0x18D000,
-              'foreground.map': 0x18E000, 'background.pal': 0x18E800,
-              'dragon.pal': 0x18E900, 'cloud.pal': 0x18E920, 'oam-pointers.bin': 0x18EB00,
-              'cloud-oam.bin': 0x1A8000,
-              'foreground.chr': 0x190000, 'dragon-dma.bin': 0x198000,
-              'dragon-initial.chr': 0x1A0000, 'layer-payload.bin': 0x1B0000}
-# dq4titlelayers.asm 의 MenuInit: 구름 팔레트와 OAM 포인터 사이 빈 곳
-MENU_INIT = (0x18E9A0, 0x18EB00)
+# 그림 자료는 42~47 에 둔다. 낮은 WRAM 을 읽는 동안 DB 를 자기 뱅크로 두는 자료(새 맵 레코드·인물 목록)는 30~3F 에만 둘 수
+# 있어, 타이틀이 그 뱅크를 비워 준다. 타이틀은 자료를 DMA 와 long 으로만 읽으므로 뱅크를 가리지 않는다.
+PLACEMENTS = {'background.chr': 0x210000, 'background.map': 0x215000,
+              'foreground.map': 0x216000, 'background.pal': 0x216800,
+              'dragon.pal': 0x216900, 'cloud.pal': 0x216920, 'oam-pointers.bin': 0x216B00,
+              'cloud-oam.bin': 0x230000,
+              'foreground.chr': 0x218000, 'dragon-dma.bin': 0x220000,
+              'dragon-initial.chr': 0x228000, 'layer-payload.bin': 0x238000}
+ROM_SIZE = 0x400000
 
 
 def verify_layout(original, rom, blobs):
-    if len(rom) != 0x200000 or rom[0x7FD7] != 0x0B or rom[HOOK:HOOK + 5] != NEW_HOOK or rom[MUSIC_HOOK:MUSIC_HOOK + 3] != NEW_MUSIC_HOOK:
+    if len(rom) != ROM_SIZE or rom[0x7FD7] != 0x0C or rom[HOOK:HOOK + 5] != NEW_HOOK or rom[MUSIC_HOOK:MUSIC_HOOK + 3] != NEW_MUSIC_HOOK:
         raise ValueError('unexpected ROM layout, header or hooks')
-    ranges = [(0x7FDC, 0x7FE0), (HOOK, HOOK + 5),
-              (MUSIC_HOOK, MUSIC_HOOK + 3), (0x180000, 0x181000), MENU_INIT]
+    ranges = [(0x7FD7, 0x7FD8), (0x7FDC, 0x7FE0), (HOOK, HOOK + 5),
+              (MUSIC_HOOK, MUSIC_HOOK + 3), (0x180000, 0x181000)]
     ranges += [(offset, offset + len(blobs[name])) for name, offset in PLACEMENTS.items()]
     merged = []
     for lo, hi in sorted(ranges):
@@ -37,7 +38,7 @@ def verify_layout(original, rom, blobs):
         else:
             merged.append([lo, hi])
     ranges = merged
-    mirrored = original + original[0x100000:]
+    mirrored = original + original[0x100000:] + bytes(ROM_SIZE - 0x200000)
     for start, data in differences(mirrored, rom):
         if not any(lo <= start and start + len(data) <= hi for lo, hi in ranges):
             raise ValueError(f'assembler wrote outside reserved ranges: {start:06X}')
@@ -72,7 +73,8 @@ def build(rom_path, source, output, asar):
         defines = f'!background_chr_size = {len(blobs["background.chr"])}\n!foreground_chr_size = {len(blobs["foreground.chr"])}\n'
         (temp / 'patch.asm').write_text(defines + assembly)
         target = temp / 'title.sfc'
-        expanded = original + original[0x100000:]
+        expanded = bytearray(original + original[0x100000:] + bytes(ROM_SIZE - 0x200000))
+        expanded[0x7FD7] = 0x0C
         target.write_bytes(expanded)
         result = subprocess.run([executable, '--no-title-check', str(temp / 'patch.asm'), str(target)], capture_output=True, text=True)
         if result.returncode:

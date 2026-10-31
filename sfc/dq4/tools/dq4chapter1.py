@@ -457,8 +457,8 @@ def clear_mirror(data, original, ranges):
 
 
 def group_ranges():
-    """clear_mirror 할 파일 위치 범위: 뱅크 3A~3F 전체와 3A 밖의 새 맵 레코드 자리."""
-    ranges = [(b * 0x8000, (b + 1) * 0x8000) for b in GROUP_BANKS]
+    """clear_mirror 할 파일 위치 범위: 뱅크 3A~3F 전체, 인물 기본 목록 뱅크, 3A 밖의 새 맵 레코드 자리."""
+    ranges = [(b * 0x8000, (b + 1) * 0x8000) for b in (*GROUP_BANKS, NPC_BANK)]
     ranges += [(lorom(lo), lorom(hi - 1) + 1) for lo, hi in RECORDS_AT if lo >> 16 not in GROUP_BANKS]
     return ranges
 
@@ -536,15 +536,15 @@ def run_tool(tool, *args):
     dq4buildcache.run(tool, *args, echo_stderr=True)
 
 
-# 인물 목록은 30~3F 의 두 뱅크에 둬야 한다(데이터 뱅크를 목록 뱅크로 두고 낮은 WRAM 을 읽음). 30~36 은 타이틀,
-# 3A~3C 와 34:C000~ 는 그룹 연결(34 는 필드 지도, 아래 FIELD_AT), 3D~3F 는 환경 맵이 쓴다. 남는 곳은 환경 맵 레코드 뒤 3F 와,
-# 타이틀이 36:9DBF 에서 끝나 비는 37~39(원본 27~29 의 거울)다. 대체 목록은 한 뱅크를 통째로 쓰는 38 에 두고,
-# 36:9E00~·37·39 는 새 맵 레코드가 쓴다(RECORDS_AT).
-NPC_BANK, NPC_ALT = 0x3F, '38:8000'
+# 인물 목록은 30~3F 의 두 뱅크에 둬야 한다(데이터 뱅크를 목록 뱅크로 두고 낮은 WRAM 을 읽음). 타이틀 그림 자료는 42~47 에
+# 있어 30 의 타이틀 코드 말고는 31~39 가 비고(원본 21~29 의 거울), 3A~3C 와 34:C000~ 는 그룹 연결(34 는 필드 지도, 아래
+# FIELD_AT), 3D~3F 는 환경 맵이 쓴다. 기본 목록은 통째로 빈 35 에, 대체 목록은 38 에 둔다. 나머지 빈 뱅크는 새 맵
+# 레코드(RECORDS_AT)가 쓴다.
+NPC_BANK, NPC_ALT = 0x35, '38:8000'
 
 
 def npc_base(env_patch):
-    """기본 목록 자리: 환경 맵 레코드가 3F 에서 끝난 다음 0x100 경계(3F 에 닿지 않으면 3F:8000). 환경 맵이 늘면 따라 밀린다."""
+    """기본 목록 자리: 환경 맵 레코드가 NPC_BANK 에서 끝난 다음 0x100 경계(닿지 않으면 그 뱅크 8000)."""
     _, _, writes = load(str(env_patch))
     end = max((off + len(payload) for off, payload, _, _ in writes if off // 0x8000 == NPC_BANK),
               default=NPC_BANK * 0x8000)
@@ -561,16 +561,14 @@ GROUP_PATCHES = ('env/dq4-environment.dq5patch.json', 'doors.dq5patch.json', 'ne
                  'field.dq5patch.json', 'talk.dq5patch.json', 'travel.dq5patch.json', 'names.dq5patch.json',
                  'companion-names.dq5patch.json', 'person-names.dq5patch.json',
                  'zones.dq5patch.json', 'grids.dq5patch.json', 'rates.dq5patch.json', 'chests.dq5patch.json')
-# 원래 롬에서는 새 맵 레코드를 34 에 두지만 통합 롬의 34 는 타이틀 자료라 3A 로 돌린다. 3A 가 차면 다음 레코드는
-# 타이틀 뱅크 30·31 에서 타이틀 자료 사이의 빈 곳(메뉴 롬에서 0 이거나 원본 20·21 의 거울 그대로인 곳)으로 간다.
-# 그룹 빌드 안에서는 30:E000 의 필드 그림 패치 앞이다.
-# 필드 지도(덩어리 둘 약 12KB, 필드 로더의 DB 때문에 30~3F)는 타이틀 자료가 34:BFD1 에서 끝난 뒤에 둔다. 비어 있지 않으면 apply_writes 가 멈춘다.
-# 30:8370·31:D000~D001·31:ECFF 는 타이틀 빌드가 0 으로 쓴 바이트라(거울 값이 0 이 아님) 자리에서 뺐다.
-# 32:C400~ 는 타이틀 전경 CHR(32:8000~C3BF) 뒤, 36:9E00~ 는 타이틀 차분 자료(36:9DBF 까지) 뒤. 38 은 인물 대체
-# 목록(NPC_ALT)이 쓴다.
-RECORDS_AT = ((0x3A8000, 0x3B0000), (0x308371, 0x30A000), (0x30A900, 0x30E000), (0x31B760, 0x31D000),
-              (0x31ED00, 0x320000), (0x32C400, 0x330000), (0x369E00, 0x370000), (0x378000, 0x380000),
-              (0x398000, 0x3A0000))
+# 원래 롬에서는 새 맵 레코드를 34 에 두지만 통합 롬의 34 는 필드 지도(34:C000~)가 쓰므로 3A 로 돌린다. 3A 가 차면 30 의
+# 타이틀 코드·서곡 사이 빈 곳(메뉴 롬에서 0 이거나 원본 20 의 거울 그대로인 곳), 그다음 통째로 빈 31~33·34 앞쪽·36·37·39
+# 로 간다. 그룹 빌드 안에서는 30:E000 의 필드 그림 패치 앞이다. 30:8000~8FFF 는 타이틀 코드(메뉴 준비
+# 포함) 몫이라 뺐다. 필드 지도(덩어리 둘 약 12KB, 필드 로더의 DB 때문에 30~3F)가 34:C000 에 있고, 35 는 인물 기본
+# 목록(NPC_BANK), 38 은 대체 목록(NPC_ALT)이 쓴다. 비어 있지 않으면 apply_writes 가 멈춘다.
+RECORDS_AT = ((0x3A8000, 0x3B0000), (0x309000, 0x30A000), (0x30A900, 0x30E000), (0x318000, 0x320000),
+              (0x328000, 0x330000), (0x338000, 0x340000), (0x348000, 0x34C000), (0x368000, 0x370000),
+              (0x378000, 0x380000), (0x398000, 0x3A0000))
 # 그룹 빌드는 늘린 뱅크가 0 인 원래 롬에서 패치를 만들고, dq5newmap 은 바탕과 같은 앞뒤 바이트(0)를 쓰지 않는다.
 # 메뉴 롬의 30~3F 는 원본 20~2F 의 거울이라, 그대로 얹으면 표 끝의 0000 같은 바이트 자리에 거울 값이 남는다.
 # 그래서 그룹 빌드가 쓰는 뱅크 3A~3F 와 레코드 자리의 거울 바이트를 먼저 0 으로 둔다.

@@ -29,7 +29,7 @@ from dq5spc import SONG_SETS  # noqa: E402
 
 SONG = 0x10                 # DQ5 타이틀 곡. 타이틀 패치가 타이틀에 들어올 때 01 10 을 보낸다
 FC_SONG = 0x02
-TITLE_SIZE = 0x200000
+TITLE_SIZE = 0x400000       # 타이틀 단계가 그림 자료를 42~47 에 두려고 4MB 로 늘린다
 OUT_SIZE = 0x400000         # patch_reloc 은 뱅크 70(파일 0x380000)을 쓴다
 FC_FPS = 60.0988
 
@@ -457,7 +457,7 @@ def build(nes, rom_path, title_path, out):
         raise ValueError('source ROM SHA-1 mismatch')
     title = Path(title_path).read_bytes()
     if len(title) != TITLE_SIZE:
-        raise ValueError('title ROM must be the 2MB layered title build')
+        raise ValueError('title ROM must be the 4MB layered title build')
     score = fc_score(nes)
     rom = Rom(original)
     lines = arrange(score, reference_snare(rom), original_listing(rom))
@@ -615,7 +615,7 @@ def main():
     s = sub.add_parser('build')
     s.add_argument('--nes', default='rom/dq4.nes')
     s.add_argument('--rom', default='rom/dq5.sfc')
-    s.add_argument('--title', required=True, help='dq4titlelayerpatch.py 가 만든 2MB 타이틀 롬')
+    s.add_argument('--title', required=True, help='dq4titlelayerpatch.py 가 만든 4MB 타이틀 롬')
     s.add_argument('--out', required=True)
     s = sub.add_parser('tempo-map')
     s.add_argument('--nes', default='rom/dq4.nes')
