@@ -1,6 +1,7 @@
 """DQ5 전투 행동의 처리 루틴 연결·처리 루틴 첫머리 값과 필드 주문의 처리기·MP·회복량을 쓴다.
 
-전투: 20:B7F9[행동*2] 의 처리 루틴과, 처리 루틴 첫머리 `SEP #$30 / LDX #내성 / LDA #값 / JMP 공통 루틴` 의 두 즉값.
+전투: 20:B7F9[행동*2] 의 처리 루틴과, 처리 루틴 첫머리 `SEP #$30 / LDX #내성 / LDA #값 / JMP 공통 루틴` 의 두 즉값
+(JMP 없이 바로 공통 루틴으로 이어지는 첫머리도).
 필드: 11:8024[주문-27] 의 처리기와, 처리기 안 MP 검사·빼기(11:87DF·87F4, 11:8048)와 ホイミ·ベホイミ 회복량의 즉값.
 기존 코드 길이 안에서 즉값과 표만 바꾼다. 형식: sfc/dq5/docs/dq5-build-format.md 의 `dq5spellfx/1`.
 
@@ -20,11 +21,12 @@ FORMAT = 'dq5spellfx/1'
 ACTIONS = 0xAB
 HANDLERS = 0x20B7F9
 EXECUTORS = 0x268865
-# 공통 루틴과 첫머리 LDA # 의 뜻. B307 은 주문 피해, AB70 은 회복·양 번호, AE41 은 상태 주문.
-AMOUNT = {0xB307: 'damage', 0xAB70: 'amount'}
-CHANCE = {0xAE41: 'status'}
+# 공통 루틴과 첫머리 LDA # 의 뜻. B307 은 주문 피해, B657 은 숨 피해, AB70 은 회복·양 번호,
+# AE41·AEC6·AEFF 는 상태 주문(우리 쪽에게는 난수 0~7 < 값). B301·B651 은 JMP 없이 B307·B657 로 이어진다.
+AMOUNT = {0xB307: 'damage', 0xB657: 'damage', 0xAB70: 'amount'}
+CHANCE = {0xAE41: 'status', 0xAEC6: 'status', 0xAEFF: 'status'}
 # 내성 칸(LDX #)을 공통 루틴이 그대로 쓰는 것. AB70 은 X 를 받지 않는다.
-RESIST_USERS = {0xB307, 0xAE41}
+RESIST_USERS = {0xB307, 0xB657, 0xAE41, 0xAEC6, 0xAEFF}
 RESISTS = set(range(0x50, 0x62)) - {0x5F}
 FIELD_TABLE = 0x118024
 FIELD_FIRST = 0x27
@@ -76,7 +78,7 @@ def u16(rom, addr):
 
 
 def stub(rom, handler):
-    """처리 루틴 첫머리. E2 30 뒤 LDX #·LDA # (순서 무관, 각 한 번), 그 뒤 JMP·JSR 공통 루틴.
+    """처리 루틴 첫머리. E2 30 뒤 LDX #·LDA # (순서 무관, 각 한 번), 그 뒤 JMP·JSR 공통 루틴이거나 바로 공통 루틴.
     맞으면 {'target', 'lda', 'ldx'}(값은 피연산자 주소), 아니면 None."""
     a = 0x200000 | handler
     if (u8(rom, a), u8(rom, a + 1)) != (0xE2, 0x30):
@@ -89,9 +91,14 @@ def stub(rom, handler):
             break
         found[name] = p + 1
         p += 2
-    if u8(rom, p) not in (0x4C, 0x20) or 'lda' not in found:
+    if 'lda' not in found:
         return None
-    target = u16(rom, p + 1)
+    if p & 0xFFFF in AMOUNT or p & 0xFFFF in CHANCE:
+        target = p & 0xFFFF
+    elif u8(rom, p) in (0x4C, 0x20):
+        target = u16(rom, p + 1)
+    else:
+        return None
     if target not in AMOUNT and target not in CHANCE:
         return None
     return {'target': target, 'lda': found['lda'], 'ldx': found.get('ldx')}
