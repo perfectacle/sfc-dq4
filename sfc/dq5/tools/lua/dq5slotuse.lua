@@ -4,7 +4,7 @@ package.path = os.getenv('LIBDIR') .. '/?.lua;' .. package.path
 local L = require('lib')
 local m = emu.memType.snesMemory
 local log, n = {}, 0
-local SITES = {0x02B3B4, 0x04FB1C, 0x01BA95, 0x02AE7B, 0x02AFB8, 0x02AFE5, 0x02B0F3, 0x05E806, 0x05E852, 0x06D716, 0x05E931, 0x06B52D, 0x05E72A, 0x05E796, 0x05E7B1, 0x06B83C, 0x1EDDB3}
+local SITES = {0x02B3B4, 0x04FB1C, 0x01BA95, 0x02AE7B, 0x02AFB8, 0x02AFE5, 0x02B0F3, 0x05E806, 0x05E852, 0x06D716, 0x05E931, 0x06B52D, 0x05E72A, 0x05E796, 0x05E7B1, 0x06B83C, 0x1EDDB3, 0x02AF66, 0x02AF9B, 0x02B0DC, 0x02AFA3, 0x02AFBC, 0x02AF73, 0x02AF80, 0x02B0FF, 0x06CACD}
 for _, pc in ipairs(SITES) do
   emu.addMemoryCallback(function()
     if #log >= 400 then return end
@@ -21,9 +21,13 @@ emu.addMemoryCallback(function() L.dump('ba95-before.wram', emu.memType.snesWork
   emu.callbackType.exec, 0x01BA95, 0x01BA95)
 emu.addMemoryCallback(function() L.dump('ba95-after.wram', emu.memType.snesWorkRam, 0x20000) end,
   emu.callbackType.exec, 0x01BAC7, 0x01BAC7)
--- 메시지 루틴(24:8BAF)이 받은 번호도 적어, 장면이 어디까지 갔는지 본다.
+-- 메시지 루틴(24:8BAF)이 받은 번호도 적어, 장면이 어디까지 갔는지 본다. 스택 위 24바이트(돌아갈 주소들)도 함께 적는다.
 emu.addMemoryCallback(function()
-  if #log < 400 then log[#log + 1] = string.format('f%d msg %03X', n, emu.getState()['cpu.a'] & 0xFFFF) end
+  if #log >= 400 then return end
+  local st = emu.getState()
+  local bytes = {}
+  for i = 1, 24 do bytes[i] = string.format('%02X', emu.read((st['cpu.sp'] + i) & 0xFFFF, m)) end
+  log[#log + 1] = string.format('f%d msg %03X st=%s', n, st['cpu.a'] & 0xFFFF, table.concat(bytes))
 end, emu.callbackType.exec, 0x248BAF, 0x248BAF)
 emu.addEventCallback(function() n = n + 1 end, emu.eventType.endFrame)
 local write = L.write

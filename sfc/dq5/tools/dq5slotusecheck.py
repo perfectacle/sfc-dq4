@@ -13,7 +13,14 @@
             기다림) → 1E:DDB3 → 05:E830·05:E7E4 → 04:FB1C 두 번. 06:B83C 는 일행의 인물 01·02 마다 7E:21D2 bit2·bit1 을
             켜므로 map1100 과 같은 일행을 두고 219F bit1 을 켜 둠
 
-장면마다 부르는 곳을 지날 때의 $1983·Y(슬롯), 메시지 번호, 끝의 $1995(OBJ VRAM 다음 타일)를 적는다(lua/dq5slotuse.lua).
+  talk04d   선실 パパス 대화 번호를 04D(22/00 ポワン)로, 7E:219A bit5 를 켜고 2190 bit5 를 끔 → 메시지 25E → 06:C00A →
+            02:B0DC → 04:FB1C 한 번
+  map0600   06/00 대체 목록 10:AA73(7E:2190 bit7) 의 (37,51) 대화 점 아래 (37,54) 에서 위를 보고 대화 23A → 01:BA95
+  enter0206 02/06 에 들어서기만 함. 메시지 1D1 을 띄운 인라인 스크립트 자리를 스택(01:CEA9 가 넣은 $AE~$B0·$90)에서 읽음
+  morning1a00  1A/00 대체 목록 10:B4E3(7E:2198 bit6). 아침 장면(메시지 23C~241) 뒤 06:CAC8 → 02:AF66 이 슬롯 08 을 슬롯 02 로
+            베낌. 끝의 인물 표로 02:AF9B 의 LDX #$13·#$12 가 가리키는 인물을 봄
+
+장면마다 부르는 곳을 지날 때의 $1983·Y(슬롯), 메시지 번호(와 스택 24바이트), 끝의 $1995(OBJ VRAM 다음 타일)를 적는다(lua/dq5slotuse.lua).
 원본 롬·선실 상태는 읽기만 하고 출력은 --out 의 새 하위 폴더에 둔다.
   MESENCE=… python sfc/dq5/tools/dq5slotusecheck.py rom/dq5.sfc --state work/state/ship.mss
 """
@@ -40,6 +47,13 @@ T23A = {'DRIVER': 'dq5msg.lua', 'MAXF': '1200', 'POKE': '7E36EB=3A;7E370B=02',
 PRESS20 = 'wait:30,' + 'a:4,wait:150,' * 20 + 'wait:1500'
 ALT0605 = {'DRIVER': 'dq5warp.lua', 'TO': '06/05,25,23', 'SET': '2190|80;21A1|40;219F&BF', 'MAXF': '6000',
            'SETTLE': '120', 'TEST': PRESS20}
+PRESS30 = 'wait:30,' + 'a:4,wait:150,' * 30 + 'wait:2000'
+T04D = dict(T23A, POKE='7E36EB=4D;7E370B=00', SET='219A|20;2190&DF', MAXF='2400', PRE=TALK + ',a:4,wait:200' * 10)
+MAP0600 = {'DRIVER': 'dq5warp.lua', 'TO': '06/00,37,54', 'SET': '2190|80', 'MAXF': '5000', 'SETTLE': '120',
+           'TEST': 'up:3,' + 'a:4,wait:150,' * 15 + 'wait:1500'}
+ENTER0206 = {'DRIVER': 'dq5warp.lua', 'TO': '02/06,24,14', 'MAXF': '1500', 'SETTLE': '120', 'TEST': 'wait:300'}
+MORNING1A00 = {'DRIVER': 'dq5warp.lua', 'TO': '1A/00,38,35', 'SET': '2198|40', 'MAXF': '9000', 'SETTLE': '120',
+               'TEST': PRESS30}
 INN_LIST = '10:B7BA'
 PERSONS = 0x23C014          # 인물 레코드 표, 42바이트씩(일행 레코드 7E:2040 + i×42 와 같은 꼴)
 
@@ -92,7 +106,8 @@ def scenes(rom):
     return {'inn': ('original', INN), 'inn-grown': ('grown', INN), 'ev3': ('original', EV3),
             'talk23a': ('original', T23A), 'overflow': ('original', dict(T23A, SET='1983=1E')),
             'alt0605': ('original', ALT0605), 'map1100': ('original', map1100),
-            'map0109': ('original', map0109)}
+            'map0109': ('original', map0109), 'talk04d': ('original', T04D), 'map0600': ('original', MAP0600),
+            'enter0206': ('original', ENTER0206), 'morning1a00': ('original', MORNING1A00)}
 
 
 def grow_document():
@@ -112,7 +127,23 @@ def scene(name, rom, options, state, out, mesence, libdir):
              re.finditer(r'pc (\w{6}) map \S+ 1982=\w\w 1983=(\w\w) 1995=(\w{4}) X=\w\w Y=(\w\w)', text)]
     end = re.search(r'end f\d+ map (\S+) 1982=(\w\w) 1983=(\w\w) 1995=(\w{4})', text)
     return {'calls': calls, 'messages': re.findall(r'msg (\w{3})', text), 'map': end[1],
+            'stacks': dict(re.findall(r'msg (\w{3}) st=(\w+)', text)),
             'placed': int(end[2], 16), 'free': int(end[3], 16), 'obj_tiles': int(end[4], 16)}
+
+
+def script_of(stack):
+    """메시지 루틴 24:8BAF 에 들어설 때 스택에서, 인라인 스크립트 명령(01:CEA9)이 부른 것이면 (명령 자리, 슬롯).
+    위에서부터 JSR 돌아갈 곳 2·Y·X·A 6·B·P 2·24:815A 2·JSL 돌아갈 곳 3·B 1·$B0·$AF·$AE·$90."""
+    b = bytes.fromhex(stack)
+    if b[12:15] != bytes.fromhex('b9ce01'):
+        return None
+    return f'{b[16]:02X}:{b[17]:02X}{b[18]:02X}', b[19]
+
+
+def slot_table(out, name, slots):
+    """끝 WRAM 인물 표의 슬롯마다 (X, Y, 그림)."""
+    w = (out / name / 'final.wram').read_bytes()
+    return {s: (w[0x3020 + s], w[0x3080 + s], w[0x3220 + s]) for s in slots}
 
 
 def overwritten(out, name):
@@ -185,6 +216,16 @@ def main():
             == ['06B83C', '1EDDB3', '05E852', '05E806']
             and len(made('map0109', '02B3B4')) == 2 and all(f == y + 1 for f, y in made('map0109', '02B3B4'))
             and seen['map0109']['free'] == made('map0109', '02B3B4')[0][1] + 2,
+            'talk04d': [pc for pc, *_ in seen['talk04d']['calls'] if pc in ('02B0F3', '04FB1C')] == ['02B0F3', '04FB1C']
+            and made('talk04d', '02B3B4') == [(0x0E, 0x0D)] and '25E' in seen['talk04d']['messages'],
+            'map0600': [y for _, y in made('map0600', '02B3B4')] == [0x0C, 0x0D, 0x0E, 0x0F]
+            and all(f == 0x0C for f, _ in made('map0600', '02B3B4'))
+            and [pc for pc, *_ in seen['map0600']['calls']][:2] == ['06B52D', '01BA95'],
+            'enter0206': script_of(seen['enter0206']['stacks'].get('1D1', '')) == ('05:8D25', 0x09),
+            'morning1a00': [pc for pc, *_ in seen['morning1a00']['calls'] if pc == '02AF66'] == ['02AF66']
+            and '241' in seen['morning1a00']['messages']
+            and slot_table(out, 'morning1a00', (0x02, 0x12, 0x13)) == {0x02: (22, 68, 0x32), 0x12: (84, 2, 0x30),
+                                                                         0x13: (37, 71, 0x08)},
         }
         results = {n: {**v, 'calls': [(pc, f'{f:02X}', f'{t:04X}', f'{y:02X}') for pc, f, t, y in v['calls']]}
                    for n, v in seen.items()}

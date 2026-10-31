@@ -12,6 +12,7 @@
 --                           바이트(exec.txt, 파일 오프셋). 콜백이 없어 긴 실행에도 쓸 수 있음
 --   VMADD=1                 VMADD($2116/2117)를 쓴 PC·주소와 MDMAEN($420B) 때 채널 설정을 모아 vmadd.txt 로
 --   VRAMDUMP="300,400"      그 프레임에 VRAM 64KB 를 vNNNNN.bin 으로
+--   OAMDUMP="300"           그 프레임에 OAM 544바이트를 oNNNNN.bin 으로
 --   BG3FONT="26528:8A"      2프레임째에 롬(파일 오프셋)의 1bpp 글자 n 개를 전원을 켤 때(04:E17D)처럼 둘째 평면 FF 로 BG3 타일 1~ 에
 --                           다시 써 넣는다(세이브스테이트의 VRAM 에는 고친 롬의 창 글자가 없으므로)
 -- STATE 가 없으면 전원을 켠 상태에서 시작한다. MAXF 프레임에 SHOT_DIR/msg.txt 와 end.png 를 쓰고 멈춘다.
@@ -34,6 +35,8 @@ for a in string.gmatch(os.getenv("LOG") or "", "[^,]+") do extra[#extra + 1] = a
 local log, n, si, left = {}, 0, 1, nil
 local vdumps = {}
 for a in string.gmatch(os.getenv("VRAMDUMP") or "", "%d+") do vdumps[tonumber(a)] = true end
+local odumps = {}
+for a in string.gmatch(os.getenv("OAMDUMP") or "", "%d+") do odumps[tonumber(a)] = true end
 local font = os.getenv("BG3FONT")
 for a in string.gmatch(os.getenv("CALLS") or "", "[^,]+") do
   local addr = tonumber(a, 16)
@@ -179,6 +182,7 @@ emu.addEventCallback(function()
   end
   if shots[n] then L.shot(string.format("s%05d.png", n)) end
   if vdumps[n] then L.dump(string.format("v%05d.bin", n), emu.memType.snesVideoRam, 0x10000) end
+  if odumps[n] then L.dump(string.format("o%05d.bin", n), emu.memType.snesSpriteRam, 0x220) end
   for _, d in ipairs(dumps) do
     if d[1] == n then
       local t = {}
