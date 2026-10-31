@@ -31,7 +31,7 @@ from dq5mapwrite import Rom, encode, lorom, pointer_addr  # noqa: E402
 # drawer 01:F3D9 sends it to its own routine 01:FCD5 instead of the table.
 TARGETS = {
     "gardenburg": (0x16, 0x02), "stancia": (0x09, 0x00), "stancia-03": (0x09, 0x01),
-    "stancia-06": (0x09, 0x04), "mintos": (0x0A, 0x01), "saran-04": (0x0A, 0x02),
+    "stancia-06": (0x09, 0x04), "mintos": (0x0A, 0x01),
     "seaside": (0x0B, 0x01), "seaside-01": (0x0D, 0x03), "rosaryhill": (0x0D, 0x04), "rosaryhill-01": (0x0E, 0x01),
     "shrine-2a": (0x0E, 0x03), "konenbery-06": (0x12, 0x00), "attemut-05": (0x13, 0x00), "attemut-07": (0x16, 0x01),
     # One or two maps of each other town and castle sheet, picked for block coverage and few doors.
@@ -40,7 +40,7 @@ TARGETS = {
     "0A-00": (0x04, 0x09), "09-01": (0x04, 0x0C),
     # Harbour, theatre and the smaller sheets; none of these has a door.
     "1A-00": (0x03, 0x09),
-    "34-06": (0x0A, 0x0B), "2E-00": (0x0B, 0x03),
+    "34-06": (0x0A, 0x0B),
     # One doorless map of several dungeon and tower families.
     "34-00": (0x0D, 0x01), "36-01": (0x0D, 0x02), "2F-00": (0x11, 0x01), "43-00": (0x12, 0x02),
     "46-00": (0x12, 0x04), "31-02": (0x12, 0x06), "48-01": (0x12, 0x07), "2D-00": (0x15, 0x00),
@@ -71,6 +71,9 @@ GROUPS = {
     "17-00": (0x42, 0x00), "17-01": (0x42, 0x01), **{f"38-{k:02X}": (0x42, 2 + k) for k in range(5)},
     **{f"11-{k:02X}": (0x43, k) for k in range(6)},
     **{f"00-{k:02X}": (0x44, k) for k in range(5)},
+    # Chapter 2's サラン, desert bazaar, 西の塔 and the cave south of フレノール.
+    **{f"13-{k:02X}": (0x45, k) for k in range(4)}, "saran-04": (0x45, 4), "0C-00": (0x45, 5),
+    **{f"2E-{k:02X}": (0x45, 6 + k) for k in range(6)}, **{f"39-{k:02X}": (0x45, 12 + k) for k in range(2)},
 }
 MAPS = {**TARGETS, **GROUPS}
 # Further banks for map records once the first one reaches the library.

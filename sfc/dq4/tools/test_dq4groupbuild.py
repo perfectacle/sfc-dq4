@@ -169,7 +169,9 @@ class DungeonZonesTest(unittest.TestCase):
         zones = build.dungeon_zones(ines.prg(ROM.read_bytes()))
         # The tower's two top floors and 古井戸の底 (1C) have no zone.
         want = {(0x30, 0): 0x42, (0x30, 1): 0x42, (0x30, 2): 0x43, (0x30, 3): 0x43, (0x41, 0): 0x40,
-                **{(0x3A, k): 0x41 for k in range(7)}}
+                **{(0x3A, k): 0x41 for k in range(7)},
+                # Chapter 2: 西の塔 (its top 2E/00 and the inn floor 2E/04 have none) and the cave south of フレノール.
+                (0x2E, 1): 0x4F, (0x2E, 2): 0x4E, (0x2E, 3): 0x4E, (0x2E, 5): 0x4F, (0x39, 0): 0x4D, (0x39, 1): 0x4C}
         self.assertEqual(zones, want)
 
 
@@ -211,7 +213,7 @@ class RecordsTest(unittest.TestCase):
         # エンドール's 04/00 doors to 04/02-04/04 and 04/02's bottom edge back to 04/00 are FC exit-table cells too.
         # ハバリア(43)·キングレオ(44)도 출구 표 칸이 있다. 43/00 (13,08) 은 왼쪽으로 걸어 들어가는 칸이다.
         self.assertEqual(sorted(areas), ["36/00", "36/01", "40/00", "40/02", "40/03", "40/04", "43/00", "43/03",
-                                         "43/05", "44/00", "44/01", "44/02"])
+                                         "43/05", "44/00", "44/01", "44/02", "45/00", "45/02", "45/03", "45/04"])
         for rows in areas.values():
             for row in rows:
                 x0, y0, x1, y1 = row["rect"]

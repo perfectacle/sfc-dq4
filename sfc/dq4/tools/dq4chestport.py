@@ -32,9 +32,11 @@ from kr_patch.fc import ines  # noqa: E402
 
 # DQ5 has no luck stat, so ラックのたね becomes the seed that raises the stat DQ5 has instead. Items DQ5 lacks
 # take a DQ5 item of the same kind: a flute for the key item あやかしのふえ until DQ4 key items exist, a hat for
-# はねぼうし, a dancer's outfit for ピンクのレオタード (DQ5's てんしのレオタード is a far stronger armour).
+# はねぼうし, a dancer's outfit for ピンクのレオタード (DQ5's てんしのレオタード is a far stronger armour), an orb for the
+# key item おうごんのうでわ (DQ5's bracelets are strong accessories), and the commonest herb for the joke うまのふん.
 SUBSTITUTE = {"ラックのたね": "ふしぎなきのみ", "あやかしのふえ": "はるかぜのフルート", "はねぼうし": "きのぼうし",
-              "ピンクのレオタード": "おどりこのふく", "せいじゃくのたま": "まふうじのつえ"}
+              "ピンクのレオタード": "おどりこのふく", "せいじゃくのたま": "まふうじのつえ",
+              "おうごんのうでわ": "ゴールドオーブ", "うまのふん": "やくそう"}
 # せいじゃくのたま 와 まふうじのつえ 는 둘 다 쓰면 マホトーン 이 걸린다. じょうせんけん(ハバリア 의 배를 타는 표)은 DQ5 에
 # 같은 것이 없고 쓸 곳(배 이벤트)도 아직 없어, 그 이벤트를 옮길 때까지 빈 상자로 둔다.
 LATER = {"じょうせんけん"}
@@ -67,6 +69,12 @@ def _reward(names, items, content, gold=True):
     return items[_fold(name)]
 
 
+# Groups whose chests wait: DQ5 numbers ordinary chests across the table and keeps their open bits from 7E:2210, so
+# with chapters 1-4 placed, chapter 2's group 45 would push chest numbers onto the open bits the two-cells-ahead table
+# uses from 7E:2228 (dq5chestplace refuses). They come with freeing the chest counts of DQ5 maps this hack never uses.
+NO_CHESTS = {0x45}
+
+
 def port(dq5_path, dq4_path):
     """(dq5chestplace/1 document, report rows)."""
     prg = ines.prg(Path(dq4_path).read_bytes())
@@ -75,6 +83,8 @@ def port(dq5_path, dq4_path):
     target = placement(prg)
     maps, report = {}, []
     for (g, k), (group, number) in sorted(target.items(), key=lambda kv: kv[1]):
+        if group in NO_CHESTS:
+            continue
         for _, x, y, content, desc in dq4chest.chests(prg, g, k):
             if content in SPECIAL:
                 reward = SPECIAL[content]

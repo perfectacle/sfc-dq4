@@ -439,7 +439,8 @@ def owned_spans(groups, patches, env):
     spans = []
     for path in patches:
         _, _, writes = load(str(path))
-        spans += [(off, off + len(payload)) for off, payload, _, _ in writes if 0x30 <= off // 0x8000 < 0x40]
+        spans += [(off, off + len(payload)) for off, payload, _, _ in writes
+                  if 0x30 <= off // 0x8000 < 0x40 or off // 0x8000 == ENTRANCE_HOOK_BANK]
     rom = Rom(groups)
     for kind in ('pointer', 'attr'):
         found, table = group_spans(rom, kind=kind)
@@ -542,6 +543,7 @@ RECORDS_AT = ((0x3A8000, 0x3B0000), (0x308371, 0x30A000), (0x30A900, 0x30E000), 
 # 그래서 그룹 빌드가 쓰는 뱅크 3A~3F 와 레코드 자리의 거울 바이트를 먼저 0 으로 둔다.
 GROUP_BANKS = range(0x3A, 0x40)
 FIELD_AT = '34:C000'
+ENTRANCE_HOOK_BANK = 0x5B        # 입구별 도착 훅(dq4groupbuild.ENTRANCE_HOOK_AT)의 뱅크. 그룹 빌드 롬과 같은지 볼 쓰기에 넣는다
 
 
 def group_build(dq5, dq4, out):
