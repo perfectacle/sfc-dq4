@@ -35,6 +35,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+import dq4dungeonrate  # noqa: E402
 import dq4fieldencounter  # noqa: E402
 import dq4fieldport  # noqa: E402
 import dq4groupcheck  # noqa: E402
@@ -44,20 +45,24 @@ from dq4groupbuild import LINKS, dungeon_zones, placement  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
 
 # Scene set-up, not what is checked: every coefficient FF and the indoor rate 01:8522 LDY #7 at 40, so
-# 255 x 40 >> 6 fights on every step past the engine's first three.
+# 255 x 40 >> 6 fights on every step past the engine's first three; in the FC dungeon zones (dq4dungeonrate) every
+# chance FF, so every new block fights. CALM makes every chance 0. STEP gives each step count its own small chance
+# (1 to 4) and keeps the region chance, so the walk seldom stops and $00 tells which branch the hook took.
 RATES = "11EA44=FFFFFFFFFFFFFFFF;8523=40"
 CALM = "11EA44=0000000000000000"
+STEP_CHANCES = [1, 2, 3, 4]
 SIDEWAYS = ",".join(["left:24,right:24"] * 16)
 UPDOWN = ",".join(["up:24,down:24"] * 16)
-TRACE = "0082AF,23E9B0,23EA40,23E98F,00CEA2"
+TRACE = "0082AF,23E9B0,23EA40,23E98F,00CEA2,23E8BB"
 FLAG = f"7E{dq4wellswitch.FLAG[0] & 0xFFFF:04X}"
-LOG = f"7E1001,7E1003,7E1005,7E1007,7E00BC,7E00BD,7E00BE,7E194A,7E1D8B,{FLAG},7E3020,7E3080"
+LOG = f"7E1001,7E1003,7E1005,7E1007,7E00BC,7E00BD,7E00BE,7E194A,7E1D8B,{FLAG},7E3020,7E3080,7E0000,7E1A9A"
 SWITCH_ON = f"{dq4wellswitch.FLAG[0] & 0xFFFF:04X}|{dq4wellswitch.FLAG[1]:02X}"
 EXITS = {"23E9B0": "single", "23EA40": "mixed", "23E98F": "fixed"}
 # Scene -> (how it comes in, walk): ("field", DQ5 group) walks in from the group's first field entrance, ("to", warp
 # TO) warps there, ("stair", warp TO, input) warps beside an FC stair (dq4groupcheck stair_scenes) and takes it.
-# The walk keeps off the stair beside the warp. A third item: "on" sets the well's switch before the warp, "calm"
-# warps with every coefficient 0 (CALM) to walk the switch cells without a fight stopping the walk.
+# The walk keeps off the stair beside the warp. Further items: "on" sets the well's switch before the warp, "calm"
+# warps with every chance 0 (CALM) to walk the switch cells without a fight stopping the walk, "step" warps with
+# STEP_CHANCES.
 SCENES = {
     "38-00-field": (("field", 0x38), SIDEWAYS), "38-01": (("to", "38/01,12,9"), SIDEWAYS),
     "39-03-field": (("field", 0x39), SIDEWAYS), "39-00-stair": (("stair", "39/01,30,31", "up:32"), SIDEWAYS),
@@ -74,7 +79,20 @@ SCENES = {
     # voices (dq4ch1event) open a window.
     "3B-00-switch": (("to", "3B/00,4,43"), "down:88", "calm"),
     "3B-03-switch": (("to", "3B/03,46,33"), "left:56", "calm"),
+    # STEP_CHANCES walks: the chance of every step must be the hook's, across the region edges these walks cross.
+    "39-01-step": (("to", "39/01,30,31"), SIDEWAYS + "," + UPDOWN, "step"),
+    "3A-00-step": (("to", "3A/00,8,11"), UPDOWN + "," + SIDEWAYS, "step"),
+    "3B-03-step": (("to", "3B/03,10,83"), SIDEWAYS + "," + UPDOWN, "step", "on"),
+    # Across a region edge between two floor blocks: FC 3A/03 (6,13) region 2 to (6,14) region 1, and FC 30/01
+    # (10,9) region 0 to (10,10) region 2.
+    "3B-03-region": (("to", "3B/03,12,24"), "down:96,up:96,down:96", "step", "on"),
+    "39-01-region": (("to", "39/01,20,16"), "down:96,up:96,down:96", "step"),
 }
+
+
+def rates(rom):
+    """RATES with every chance of the FC dungeon step hook in the ROM bytes `rom` FF."""
+    return f"{RATES};" + dq4dungeonrate.rom_patch(rom, dq4groupbuild.DUNGEON_RATE_AT, [0xFF] * dq4dungeonrate.STEPS)
 
 
 def byte(kv, key):
@@ -125,6 +143,16 @@ def main():
             fc = fc_zones.get((fc_group, k))
             want_of[f"{group:02X}/{number:02X}"] = {"fc_zone": None if fc is None else f"{fc:02X}",
                                                     "zone": dq5_zone.get(fc), "song": part["music"]}
+    zones, region_maps = dq4dungeonrate.rows(prg, placement(prg), dq5_zone, fc_zones)
+
+    def chances(steps, region=None):
+        return dq4dungeonrate.rom_patch(data, dq4groupbuild.DUNGEON_RATE_AT, steps, region)
+
+    patches = {None: rates(data), "calm": f"{CALM};{chances([0] * dq4dungeonrate.STEPS, 0)}",
+               "step": f"{CALM};{chances(STEP_CHANCES)}"}
+    walks = {None: [0xFF] * dq4dungeonrate.STEPS, "calm": [0] * dq4dungeonrate.STEPS, "step": STEP_CHANCES}
+    region_chances = {None: dq4dungeonrate.REGION_CHANCE, "field": dq4dungeonrate.REGION_CHANCE, "calm": 0,
+                      "step": dq4dungeonrate.REGION_CHANCE}
     dq4groupcheck.WARP = DQ5_TOOLS / "lua" / "dq5warptrace.lua"
     _, props = dq4fieldport.fc_field(prg)
 
@@ -135,10 +163,14 @@ def main():
     def run(name):
         how, walk, *option = SCENES[name]
         extra = {"MAXF": "3600", "TRACE": TRACE, "LOG": LOG}
-        switch = option == ["on"]
+        switch = "on" in option
         if switch:
             extra["SET"] = SWITCH_ON
-        calm = option == ["calm"]
+        calm = "calm" in option
+        mode = "field" if how[0] == "field" else next((o for o in option if o in ("calm", "step")), None)
+        walk_sim = dq4dungeonrate.Walk(zones if mode == "field" else [(area, walks[mode]) for area, _ in zones],
+                                       region_maps, region_chances[mode])
+        chance = {"steps": 0, "blocks": 0, "regions": 0, "bad": []}
         if how[0] == "field":
             link = LINKS[how[1]][0]
             blocks = dq4fieldport.entrance_blocks(props, [link["field"][0]])
@@ -148,7 +180,7 @@ def main():
                                       TEST=f"{d}:{dq4groupcheck.PRESS},wait:60,{walk}", **extra)
         else:
             test = f"{how[2]},wait:60,{walk}" if how[0] == "stair" else f"wait:60,{walk}"
-            got = dq4groupcheck.scene(mesence, rom, state, out, name, TO=how[1], ROMPATCH=CALM if calm else RATES,
+            got = dq4groupcheck.scene(mesence, rom, state, out, name, TO=how[1], ROMPATCH=patches[mode],
                                       TEST=test, **extra)
         maps, here = {}, None
         well = {"steps": 0, "on_steps": 0, "flips": [], "bad": []}
@@ -158,6 +190,16 @@ def main():
                 continue
             group, number = byte(kv, "7E00BC"), byte(kv, "7E00BD")
             here = f"{group:02X}/{number:02X}"
+            if pc == "23E8BB":
+                want = walk_sim.step(group, number, byte(kv, "7E1A9A"), byte(kv, "7E3020"), byte(kv, "7E3080"),
+                                     int(kv["X"], 16))
+                if want is not None:
+                    chance["steps"] += 1
+                    chance["blocks"] += want != 0
+                    chance["regions"] += mode != "calm" and want == region_chances[mode]
+                    if byte(kv, "7E0000") != want:
+                        chance["bad"].append([here, byte(kv, "7E3020"), byte(kv, "7E3080"), byte(kv, "7E0000"), want])
+                continue
             seen = maps.setdefault(here, {"steps": 0, "zones": set(), "y": set(), "fights": [], "songs": set(),
                                           "194A": set(), "playing": set(), "off_zones": set(), "off_fights": 0})
             seen["194A"].add(byte(kv, "7E194A"))
@@ -200,8 +242,8 @@ def main():
             if want["zone"] is None:
                 good = seen["zones"] <= {0xFF} and not seen["fights"]
             else:
-                good = (not counted or seen["zones"] == {want["zone"]}) and \
-                    (how[0] == "field" or calm or m != got.get("map") or not counted or bool(seen["fights"])) and \
+                must_fight = how[0] != "field" and mode is None and m == got.get("map") and counted
+                good = (not counted or seen["zones"] == {want["zone"]}) and (not must_fight or bool(seen["fights"])) and \
                     all((kind != "fixed" or fixed) and {mon for mon, _ in g} <= allowed for kind, g in seen["fights"])
             good = good and seen["off_zones"] <= {0xFF} and not seen["off_fights"]
             good = good and seen["songs"] <= {want["song"]} and seen["194A"] == {dq4groupbuild.INDOOR_ENCOUNTERS}
@@ -212,12 +254,16 @@ def main():
                               "want": want, "ok": good}
         # Every scene's first dungeon map is the one it came to: its arrival must ask for the song.
         first = next((m for m in maps if m in want_of), None)
-        ok = ok and first is not None and bool(maps[first]["songs"]) and not well["bad"]
+        ok = ok and first is not None and bool(maps[first]["songs"]) and not well["bad"] and not chance["bad"]
+        if mode == "step":
+            ok = ok and chance["blocks"] > 0
+        if name.endswith("-region"):
+            ok = ok and chance["regions"] > 0
         if name.endswith("-switch"):
             ok = ok and len(well["flips"]) >= 2 and well["on_steps"] > 0 and well["steps"] > well["on_steps"]
         if name.endswith("-off"):
             ok = ok and well["steps"] > 0 and well["on_steps"] == 0
-        return name, {"got": got, "maps": report_maps, "well": well, "ok": ok}
+        return name, {"got": got, "maps": report_maps, "well": well, "chance": chance, "ok": ok}
 
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
         results = dict(pool.map(run, SCENES))
