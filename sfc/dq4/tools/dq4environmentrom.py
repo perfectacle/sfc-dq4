@@ -118,6 +118,12 @@ LID_SLOT = 0x9E
 LID_LINE = 6
 LID_AT = 0x41F180
 LID_TICK = WATER_PERIOD // 2
+# The fountain in the middle of a pond swaps with the water. The CHR loader gives slots to a map's blocks in block
+# order, so the fountain is block 1 with CHR 4-7 (seeded right after the water's): a map with the fountain (always
+# inside water) loads them into the slots after the water's, C2-C5.
+FOUNTAIN_FRAMES = ("fountain", "fountain1", "fountain2")
+FOUNTAIN_AT = 0x41F1C0
+FOUNTAIN_SLOT = 0xC2
 # Water is block 0 (CHR 0-3), and the CHR loader puts it in slots BE-C1 in every map that has it.
 # The water routine uses these slots directly: a battle reuses 7E:6000 (CHR id -> slot) as work
 # memory, and reading it after a battle sent the water frames to slot 0, the blank BG1 tile.
@@ -200,6 +206,15 @@ def build_graphics(prg, assets):
     block_ids, block_words, block_heads = {}, [], []
     maps = {}
     palette = None
+    for name in (WATER_FRAMES[0], FOUNTAIN_FRAMES[0]):
+        for ty in (0, 8):
+            for tx in (0, 8):
+                pixels, bank = _tiles(assets[name], tx, ty)
+                key = (pixels, bank or 1)
+                if key not in chr_ids:
+                    chr_ids[key] = len(chr_data)
+                    chr_data.append(_planar(pixels))
+                    chr_banks.append(key[1])
     for group, number, name, source, counts, prepared, palette in prepare_maps(prg, assets, MAPS):
         local = {}
         for fc_block, (image, _) in prepared.items():
@@ -247,6 +262,12 @@ def water_block(source, local):
     found = {local[b] for b, (asset, _) in sheet_art(source.prg, source.t).items() if asset == WATER_FRAMES[0] and b in local}
     if len(found) > 1:
         raise ValueError(f"{len(found)} water blocks in one map")
+    return found.pop() if found else None
+
+
+def fountain_block(source, local):
+    """New block id of the map's fountain, or None."""
+    found = {local[b] for b, (asset, _) in sheet_art(source.prg, source.t).items() if asset == FOUNTAIN_FRAMES[0] and b in local}
     return found.pop() if found else None
 
 
@@ -475,7 +496,7 @@ def engine_code(block_count, water_ids, palettes, entries, waters, lids):
 
     palettes: per target, the bank-GFX address of its 224-byte BG palette.
     entries: per target, its 01:D2FC-format object entries (placed after the library; see DOOR_TABLES).
-    waters: per target, whether the map has water.
+    waters: per target, 0 without water, 1 with water, 2 with water and the fountain.
     lids: per target, whether its map routine reloads the opened-chest tiles (new-group maps).
     Returns (library bytes with the entries, bank-01 bytes, patched sites)."""
     targets = list(MAPS.values())
@@ -541,9 +562,11 @@ def engine_code(block_count, water_ids, palettes, entries, waters, lids):
     # routine. Without water its CHR have no slot (7E:6000 reads 0), and the routine would write
     # them over slot 0, the blank tile that fills BG1.
     # A dry new-group map runs the lid routine; the DQ5 routine of a borrowed slot is kept.
+    # _ENTER leaves A 16-bit, so the flag compare takes a 16-bit immediate.
     lib.label("wrap").b(0x22, 0xD0, 0xF7, 0x15, *_ENTER).long(0x22, "find")
-    lib.rel(0x90, "wrap_out").long(0xBF, "waters").rel(0xF0, "wrap_lid").b(0xC2, 0x20).word(0xA9, "water")
-    lib.rel(0x80, "wrap_set")
+    lib.rel(0x90, "wrap_out").long(0xBF, "waters").rel(0xF0, "wrap_lid").b(0xC9, 0x02, 0x00)
+    lib.rel(0xF0, "wrap_fountain").word(0xA9, "water").rel(0x80, "wrap_set")
+    lib.label("wrap_fountain").word(0xA9, "fountain").rel(0x80, "wrap_set")
     lib.label("wrap_lid").long(0xBF, "lids").rel(0xF0, "wrap_out").b(0xC2, 0x20).word(0xA9, "lid")
     lib.label("wrap_set").b(0x8F, 0xA6, 0x1A, 0x7E, 0xE2, 0x20)
     lib.b(0xA9, LIB_AT >> 16, 0x8F, 0xA8, 0x1A, 0x7E, 0xA9, 0x00)
@@ -551,23 +574,26 @@ def engine_code(block_count, water_ids, palettes, entries, waters, lids):
         lib.b(0x8F, counter & 0xFF, counter >> 8, 0x7E)
     lib.label("wrap_out").b(*_LEAVE, 0x6B)
 
-    # water: every WATER_PERIOD frames queue the next water frame's four CHR on the NMI DMA list
-    # (00:8F53: VRAM word 1C1C+2i, bytes 1C26+2i, source 1C0D+3i, count $BA) that 03:D4B5 uses.
+    # water / fountain: every WATER_PERIOD frames queue the next frame on the NMI DMA list
+    # (00:8F53: VRAM word 1C1C+2i, bytes 1C26+2i, source 1C0D+3i, count $BA) that 03:D4B5 uses. The list holds
+    # five entries before the VRAM words run into the byte counts, so each picture's four CHR (slots and source
+    # both contiguous) go as one 128-byte entry.
     tick, frame = 0x7E1ECE, 0x7E1EC2
-    lib.label("water").b(0x08, 0xC2, 0x30, 0xAF, *tick.to_bytes(3, "little"), 0x1A).word(0x20, "lid_queue")
-    lib.b(0xC9, WATER_PERIOD, 0x00)
-    lib.b(0xB0, 0x03).word(0x4C, "water_store")
-    lib.b(0xAF, *frame.to_bytes(3, "little"), 0x1A, 0xC9, len(WATER_FRAMES), 0x00, 0x90, 0x03, 0xA9, 0x00, 0x00,
-          0x8F, *frame.to_bytes(3, "little"), *(0x0A,) * 7, 0xAA)
-    for k, _ in enumerate(water_ids):
-        source = (WATER_AT & 0xFFFF) + k * 32
-        vram = 0x2000 + (WATER_SLOT + k) * 16
-        lib.b(0xA9, vram & 0xFF, vram >> 8, 0x8F, 0x1C + 2 * k, 0x1C, 0x00,
-              0xA9, 0x20, 0x00, 0x8F, 0x26 + 2 * k, 0x1C, 0x00,
-              0x8A, 0x18, 0x69, source & 0xFF, source >> 8, 0x8F, 0x0D + 3 * k, 0x1C, 0x00,
-              0xE2, 0x20, 0xA9, WATER_AT >> 16, 0x8F, 0x0F + 3 * k, 0x1C, 0x00, 0xC2, 0x20)
-    lib.b(0xE2, 0x20, 0xA9, len(water_ids), 0x85, 0xBA, 0xC2, 0x20, 0xA9, 0x00, 0x00)
-    lib.label("water_store").b(0x8F, *tick.to_bytes(3, "little"), 0x28, 0x6B)
+    for name, sends in (("water", ((WATER_SLOT, WATER_AT),)),
+                        ("fountain", ((WATER_SLOT, WATER_AT), (FOUNTAIN_SLOT, FOUNTAIN_AT)))):
+        lib.label(name).b(0x08, 0xC2, 0x30, 0xAF, *tick.to_bytes(3, "little"), 0x1A).word(0x20, "lid_queue")
+        lib.b(0xC9, WATER_PERIOD, 0x00)
+        lib.b(0xB0, 0x03).word(0x4C, f"{name}_store")
+        lib.b(0xAF, *frame.to_bytes(3, "little"), 0x1A, 0xC9, len(WATER_FRAMES), 0x00, 0x90, 0x03, 0xA9, 0x00, 0x00,
+              0x8F, *frame.to_bytes(3, "little"), *(0x0A,) * 7, 0xAA)
+        for k, (slot, at) in enumerate(sends):
+            vram = 0x2000 + slot * 16
+            lib.b(0xA9, vram & 0xFF, vram >> 8, 0x8F, 0x1C + 2 * k, 0x1C, 0x00,
+                  0xA9, 0x80, 0x00, 0x8F, 0x26 + 2 * k, 0x1C, 0x00,
+                  0x8A, 0x18, 0x69, at & 0xFF, at >> 8 & 0xFF, 0x8F, 0x0D + 3 * k, 0x1C, 0x00,
+                  0xE2, 0x20, 0xA9, at >> 16, 0x8F, 0x0F + 3 * k, 0x1C, 0x00, 0xC2, 0x20)
+        lib.b(0xE2, 0x20, 0xA9, len(sends), 0x85, 0xBA, 0xC2, 0x20, 0xA9, 0x00, 0x00)
+        lib.label(f"{name}_store").b(0x8F, *tick.to_bytes(3, "little"), 0x28, 0x6B)
 
     # lid: the water routine's tick without water.
     lib.label("lid").b(0x08, 0xC2, 0x30, 0xAF, *tick.to_bytes(3, "little"), 0x1A).word(0x20, "lid_queue")
@@ -628,6 +654,14 @@ def water_frames(assets, chr_data, water_ids):
     return b"".join(b"".join(f) for f in frames)
 
 
+def fountain_frames(assets, chr_data):
+    """Planar CHR of each fountain frame in quadrant order; frame 0 must be CHR 4-7."""
+    frames = [[_planar(_tiles(assets[name], x, y)[0]) for y in (0, 8) for x in (0, 8)] for name in FOUNTAIN_FRAMES]
+    if chr_data[4:8] != frames[0]:
+        raise ValueError("CHR 4-7 are not the first fountain frame")
+    return b"".join(b"".join(f) for f in frames)
+
+
 def lid_tiles(assets):
     """Planar CHR of slots 9E and 9F: the left half of chest_open, each colour moved to the nearest of line 6."""
     image = assets["chest_open"]
@@ -655,6 +689,25 @@ def build(dq5_path, dq4_path, out):
     water_ids = block_words[water_block_id]
     if water_block_id != 0 or tuple(water_ids) != (0, 1, 2, 3):
         raise ValueError("the water block must be block 0 with CHR 0-3 so it takes the first slots")
+    fountain_blocks = {fountain_block(source, local) for source, local in maps.values()} - {None}
+    if len(fountain_blocks) > 1:
+        raise ValueError(f"expected one shared fountain block, got {fountain_blocks}")
+    if fountain_blocks and fountain_blocks != {1}:
+        # The CHR loader gives slots to a map's blocks in block order, so block 1 takes the slots after the water's.
+        old = fountain_blocks.pop()
+        swap = {old: 1, 1: old}
+        block_words[1], block_words[old] = block_words[old], block_words[1]
+        block_heads[1], block_heads[old] = block_heads[old], block_heads[1]
+        for _, local in maps.values():
+            for fc, b in local.items():
+                local[fc] = swap.get(b, b)
+        fountain_blocks = {1}
+    fountain_ids = [block_words[b] for b in fountain_blocks]
+    if any(tuple(ids) != (4, 5, 6, 7) for ids in fountain_ids):
+        raise ValueError(f"the fountain must be CHR 4-7 so it takes the slots after the water: {fountain_ids}")
+    for name, (source, local) in maps.items():
+        if fountain_block(source, local) is not None and water_block(source, local) is None:
+            raise ValueError(f"{name}: a fountain without water would not get slots C2-C5")
     out.mkdir(parents=True, exist_ok=True)
 
     blocks, pointers = bytearray(), bytearray()
@@ -677,7 +730,7 @@ def build(dq5_path, dq4_path, out):
         len(block_words), water_ids,
         [palette_at[map_palette(name, maps[name][0].t)] for name in MAPS],
         [object_entries(found[name]) for name in MAPS],
-        [water_block(*maps[name]) is not None for name in MAPS],
+        [(water_block(*maps[name]) is not None) + (fountain_block(*maps[name]) is not None) for name in MAPS],
         [name in GROUPS for name in MAPS])
 
     (out / "chr.bin").write_bytes(b"".join(chr_data))
@@ -690,6 +743,7 @@ def build(dq5_path, dq4_path, out):
         {"at": _cpu(HOOK_AT), "hex": _hex(stub_code), "note": "엔진 훅 중계 코드"},
         {"at": _cpu(WATER_AT), "hex": _hex(water_frames(assets, chr_data, water_ids)), "note": "물 그림 3장"},
         {"at": _cpu(LID_AT), "hex": _hex(lid_tiles(assets)), "note": "열린 상자 타일 9E·9F(6번 줄)"},
+        {"at": _cpu(FOUNTAIN_AT), "hex": _hex(fountain_frames(assets, chr_data)), "note": "분수 그림 3장"},
         {"at": _cpu(LIB_AT), "hex": _hex(lib_code), "note": "바꾼 맵 표와 불러오기·팔레트·물체·물 루틴, 맵 위 물체 항목"},
         {"at": _cpu(DOOR_BANK << 16 | DOOR_TABLES[0]), "hex": _hex(door_tables(dq5)),
          "note": "문 루틴이 DB 로 읽는 뱅크 01 표의 복사"},
