@@ -327,8 +327,10 @@ def effect_items(y):
     # 00:87EA(00:87E6 이 $70 bit7 로 NMI 를 전투·필드로 고르는 곳, M·X 를 두는 SEP/REP 자리): 필드로 돌아갈 때 켜 둔
     # 채널 7 을 끈다. 전투가 끝난 뒤 필드 쪽 GP DMA(1F:D2AD 등)가 채널 7 을 쓰는데, $420C 에 채널 7 이 남으면 다음
     # 프레임 HDMA 가 그 레지스터로 낡은 표를 읽는다. 전투 중 $420C 쓰기는 모두 $0D83 과 같았다.
+    # $420C 에는 0 을 쓴다. 게임도 전투 끝에 22:8B21 로 0 을 쓰고, 필드는 제 HDMA 를 스스로 다시 켠다.
+    # $0D83 의 남은 채널 1~6 을 쓰면 필드에서 연출 표를 다시 읽는다.
     items += [('label', 'leave'), b('e2 20 c2 10 a5 70'), ('br', 0x30, 'l9'), b('af 83 0d 7e'), ('br', 0x10, 'l9'),
-              b('29 7f 8f 83 0d 7e 8f 0c 42 00'), ('label', 'l9'), b('6b')]
+              b('29 7f 8f 83 0d 7e a9 00 8f 0c 42 00'), ('label', 'l9'), b('6b')]
     for addr, orig in COLOR_LOADS.items():
         items += [('label', f'load{addr:06X}'), orig[:-3], ('jml', 'color')]
     return items
