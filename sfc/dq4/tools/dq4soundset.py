@@ -187,7 +187,7 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
           keep_samples=False, prefetch=None, release_failed=False, release_pending=False, tick_scan=False, unpin=(), effects=None, effect_waves=None,
           effect_gain_db=None, spare_effects=None, spare_carriers=None, spare_keep=None,
           spare_rate=8000, weapon_sounds=None, weapon_songs=(), effect_calls=None, spare_substitutes=None, silent_songs=(),
-          resident_pcm=None):
+          resident_pcm=None, reserve=()):
     """stream 은 {곡 자리: 곡 앞 샘플 바이트 상한}. 그 곡은 샘플 일부를 곡이 울리는 동안 보낸다(transfer_plan).
 
     stream_ticks 는 {곡 자리: 틱}. 곡 앞 바이트 상한을 곡이 처음 그 틱 안에 쓰는 샘플의 합으로 정하고, 도착 어림보다
@@ -272,6 +272,9 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
     pinned_sizes = {x: len(patch.sequence_bytes(data, x)) for x in patch.pinned_sequences(data)
                     if x not in replaced and x not in unpin}
     pinned_sizes |= {slot: size + MARGIN for slot, _, _, _, size, _ in plans if slot in pinned}
+    # 바꾸며 늘 두는 목록에서 뺀 곡도 DQ5 의 늘 두는 크기를 예산에 남겨, 다른 곡의 예산(곧 샘플)이 바뀌지 않게 한다
+    pinned_sizes |= {x: len(patch.sequence_bytes(data, x)) for x in reserve
+                     if x in patch.pinned_sequences(data) and x not in pinned_sizes}
     # 바꾼 효과음 시퀀스는 늘 두는 채로 커지므로, 곡 예산을 셈하기 전에 그 크기를 넣는다
     wave_payloads, waves, wave_report = sfx_port.wave_resources(assets, effect_waves) if effect_waves else ({}, {}, {})
     resident_sizes |= {x: len(p) - 2 for x, p in wave_payloads.items() if x in resident_sizes}
@@ -734,6 +737,8 @@ def main():
                     help='put the NDS sound effect as heard (cut to SECONDS) into that resident sample, no larger than it; '
                          'a --sfx-pcm branch NDS! then plays that resident sample')
     ap.add_argument('--sfx-pcm-rate', type=int, default=8000, help='upper sample rate of --sfx-pcm samples')
+    ap.add_argument('--reserve', action='append', default=[], metavar='SONG',
+                    help='keep the DQ5 pinned size of that replaced, unpinned sequence in song budgets so other songs stay')
     ap.add_argument('--unpin', action='append', default=[], metavar='SONG',
                     help='drop an unreplaced sequence from the pinned list so it loads when played (frees an SPC sequence slot)')
     ap.add_argument('--release-failed', action='store_true',
@@ -808,6 +813,7 @@ def main():
                         vehicle_song=args.vehicle_song, keep_samples=args.keep_samples,
                         release_failed=args.release_failed, release_pending=args.release_pending, tick_scan=args.tick_scan,
                         unpin=[int(x, 16) for x in args.unpin],
+                        reserve=[int(x, 16) for x in args.reserve],
                         effects={(int(k.split('-')[0], 16), int(k.split('-')[1], 16)): v
                                  for k, v in (x.split('=') for x in args.sfx)},
                         effect_gain_db={(int(k.split('-')[0], 16), int(k.split('-')[1], 16)): float(v)
