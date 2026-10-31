@@ -5,7 +5,7 @@
          모험을 한다 → 칸 1 로 잇는다. 이어 하기 루틴(25:824F)이 돌고 DQ5 로고 장면(0F:D93A)은 불리지 않는지,
          불러온 7E:2000~2A9F 가 기록 칸과 같은지(다른 바이트를 적음), 1장 깃발과 맵의 인물 대화 번호(7E:36E0~)가 저장할 때와
          같은지 본다. 리셋 뒤 뜬 메시지 번호와 저장할 때·이어 한 뒤의 화면(sNNNNN.png)을 남긴다
-  wipe   호이민 합류 뒤 우물 아래 3B/00 으로 가 일행 HP 를 1, 걸음마다 전투(dq4dungeonencountercheck.RATES)로 두고
+  wipe   호이민 합류 뒤 우물 아래 3B/00 으로 가 일행 HP 를 1, 걸음마다 전투(dq4dungeonencountercheck.rates)로 두고
          싸워 전멸한다. 1장 귀환 자리(교회 신부 앞) 하나로 돌아오는지, 깃발이 그대로인지, 금화가 반이 되는지 본다
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4ch1walkcheck.py --rom work/ch1/dq4-ch1.sfc --out work/ch1walk
@@ -159,7 +159,7 @@ def wipe_scene(mesence, rom, states, out):
     # 일행 레코드는 7E:2040 부터 42바이트씩, 지금 HP 는 +2
     hp = ';'.join(f'{0x2042 + 42 * n:04X}=01;{0x2043 + 42 * n:04X}=00' for n in range(2))
     got = dq4groupcheck.scene(mesence, rom, states / 'hoimin' / 'end.mss', out, name, TO=WIPE_TO, MAXF='6000',
-                              TEST=well.WIPE_TEST, SET=f'{gold};{hp};{WELL:04X}|{dq4wellswitch.FLAG[1]:02X}', ROMPATCH=enc.RATES, TRACE='0188EF',
+                              TEST=well.WIPE_TEST, SET=f'{gold};{hp};{WELL:04X}|{dq4wellswitch.FLAG[1]:02X}', ROMPATCH=enc.rates(rom.read_bytes()), TRACE='0188EF',
                               LOG='7E201D')
     rows = list(enc.lines(out / name / 'trace.txt')) if (out / name / 'trace.txt').exists() else []
     ram = (out / name / 'final.wram').read_bytes() if (out / name / 'final.wram').exists() else bytes(0x20000)

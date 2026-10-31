@@ -151,8 +151,8 @@ def main():
     patches = {None: rates(data), "calm": f"{CALM};{chances([0] * dq4dungeonrate.STEPS, 0)}",
                "step": f"{CALM};{chances(STEP_CHANCES)}"}
     walks = {None: [0xFF] * dq4dungeonrate.STEPS, "calm": [0] * dq4dungeonrate.STEPS, "step": STEP_CHANCES}
-    region_chances = {None: dq4dungeonrate.REGION_CHANCE, "field": dq4dungeonrate.REGION_CHANCE, "calm": 0,
-                      "step": dq4dungeonrate.REGION_CHANCE}
+    region_chances = {None: dq4dungeonrate.PORT_REGION_CHANCE, "field": dq4dungeonrate.PORT_REGION_CHANCE, "calm": 0,
+                      "step": dq4dungeonrate.PORT_REGION_CHANCE}
     dq4groupcheck.WARP = DQ5_TOOLS / "lua" / "dq5warptrace.lua"
     _, props = dq4fieldport.fc_field(prg)
 

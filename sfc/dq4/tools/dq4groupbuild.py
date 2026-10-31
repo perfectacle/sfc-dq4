@@ -810,13 +810,15 @@ def _build(pool, dq5, dq4, out, with_people):
     _save(out / "zone-report.json", zone_report)
     step("dq5progresswrite.py", "zones", zones, dq5)
     step("dq5encounterwrite.py", "grids", grids, dq5)
+    import dq4balance
     import dq4dungeonrate
     import dq4wellswitch
     manifests.append(_save(out / "rates.dq5patch.json", {
         "format": "dq5patch/1", "name": "dq4-encounter-rates",
         "writes": [dq4fieldencounter.terrain_rates(prg, dq5.read_bytes()),
                    *dq4wellswitch.writes(WELL_SWITCH_AT, prg, placement(prg)),
-                   *dq4dungeonrate.writes(DUNGEON_RATE_AT, prg, placement(prg), dq5_zone, fc_zones)]}))
+                   *dq4dungeonrate.writes(DUNGEON_RATE_AT, prg, placement(prg), dq5_zone, fc_zones),
+                   *dq4balance.writes()]}))
 
     import dq4chestport  # imports this module
     place, chest_report = dq4chestport.port(dq5, dq4)

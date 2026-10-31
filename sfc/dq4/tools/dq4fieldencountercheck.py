@@ -6,7 +6,7 @@ dq5warp.lua FIELD with dq5warptrace.lua).
          of that FC zone, and every group 23:E7C2 picks is made of the monsters that zone's record weighs. The
          walk stops at the first fight, so each zone is walked after three different waits (DELAYS)
   rate   the same walk at the ROM's own rates: every step 23:E7C2's Y is the day or night FC terrain factor of
-         the FC block, the zone's coefficient is the one dq4fieldencounter.field_rate_index picks, and the chance
+         the FC block times dq4balance.ENCOUNTER, the zone's coefficient is the one dq4fieldencounter.field_rate_index picks, and the chance
          23:E8B7 gets is dq4fieldencounter.dq5_chance of the coefficient, Y and the steps since the last fight
          ($1A9A). The report gives each walked kind's mean cells to a fight in DQ5 (dq5_steps) and twice FC's mean
          steps (fc_steps)
@@ -29,6 +29,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+import dq4balance  # noqa: E402
 import dq4encounter  # noqa: E402
 import dq4fieldencounter  # noqa: E402
 import dq4fieldport  # noqa: E402
@@ -148,8 +149,8 @@ def main():
 
     def rate_report(data, prg, grid, fc, zone, rows):
         """Per walked FC block kind: 23:E7C2's Y and FC's day and night factors, the steps, and the mean cells to a
-        fight in DQ5 and FC; ok when every step's Y is a factor of its kind and its chance at 23:E8B7 is
-        dq5_chance."""
+        fight in DQ5 and FC; ok when every step's Y is a factor of its kind times dq4balance.ENCOUNTER and its chance
+        at 23:E8B7 is dq5_chance."""
         import dq5encounter
         from dq5map import Rom
         coef = dq5encounter.area(Rom(data), zone)["coef"]
@@ -165,12 +166,15 @@ def main():
             kind = grid[int(step["7E00B8"], 16) >> 1][int(step["7E00B6"], 16) >> 1]
             y, s = int(step["Y"], 16) & 0xFF, int(step["7E1A9A"], 16) & 0xFF
             factors = [dq4encounter.rd(prg, t + kind) for t in (TERRAIN_DAY, TERRAIN_NIGHT)]
+            ours = [dq4balance.chance(f) for f in factors]
+            fc_factor = factors[ours.index(y)] if y in ours else y
             row = seen.setdefault(f"{kind:02X}", {"y": y, "fc_day": factors[0], "fc_night": factors[1], "steps": 0,
                                                   "dq5_cells": round(dq4fieldencounter.dq5_steps(coef, y), 1),
-                                                  "fc_cells": round(2 * dq4fieldencounter.fc_steps(prg, base, y), 1)})
+                                                  "fc_cells": round(2 * dq4fieldencounter.fc_steps(prg, base, fc_factor),
+                                                                    1)})
             row["steps"] += 1
             chance = int(kv["7E0000"], 16) & 0xFF
-            if y not in factors or y != row["y"] or chance != dq4fieldencounter.dq5_chance(coef, y, s):
+            if y not in ours or y != row["y"] or chance != dq4fieldencounter.dq5_chance(coef, y, s):
                 wrong.append({"kind": kind, "y": y, "1A9A": s, "chance": chance})
             step = None
         return {"coefficient": coef, "fc_base": base, "chances": seen, "wrong": wrong[:10],

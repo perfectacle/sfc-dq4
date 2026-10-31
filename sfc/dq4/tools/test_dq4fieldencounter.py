@@ -33,7 +33,8 @@ class GridTest(unittest.TestCase):
 class TerrainRateTest(unittest.TestCase):
     def test_terrain_rates_are_fc_factors(self):
         # Made-up FC factors, kind k day 10 + k / night 20 + k, and a made-up DQ5 terrain of each borrowed block:
-        # the blocks of FC kinds 0-7 get terrains 0-7 in reverse, every other block terrain D.
+        # the blocks of FC kinds 0-7 get terrains 0-7 in reverse, every other block terrain D. Each rate is three
+        # quarters of the FC factor (dq4balance).
         from unittest import mock
         import dq4encounter
         import dq4fieldport
@@ -50,7 +51,8 @@ class TerrainRateTest(unittest.TestCase):
             self.assertEqual(w["at"], "23:F1E0")
             new = bytes.fromhex(w["hex"])
             for k in range(enc.FC_TERRAINS):
-                self.assertEqual((new[7 - k], new[enc.TERRAINS + 7 - k]), (0x10 + k, 0x20 + k))
+                self.assertEqual((new[7 - k], new[enc.TERRAINS + 7 - k]),
+                                 ((3 * (0x10 + k) + 2) // 4, (3 * (0x20 + k) + 2) // 4))
             self.assertEqual((new[0x0D], new[enc.TERRAINS + 0x0D]), (0, 0))   # only kinds 8 and up
             self.assertEqual(new[0x0A], 0xEE)                                  # no kind borrows it
             terrains[dq4fieldport.BLOCKS[1]] = terrains[dq4fieldport.BLOCKS[2]]
@@ -155,9 +157,9 @@ class RomTest(unittest.TestCase):
     def test_terrain_rates_are_fc_factors(self):
         w = enc.terrain_rates(self.prg, self.dq5)
         new = bytes.fromhex(w["hex"])
-        # DQ5 grass (terrain 6) and hill (2): FC grass 0B / 0F, hill 1A / 20, day / night.
-        self.assertEqual((new[6], new[enc.TERRAINS + 6]), (0x0B, 0x0F))
-        self.assertEqual((new[2], new[enc.TERRAINS + 2]), (0x1A, 0x20))
+        # DQ5 grass (terrain 6) and hill (2): FC grass 0B / 0F, hill 1A / 20, day / night, three quarters each.
+        self.assertEqual((new[6], new[enc.TERRAINS + 6]), (8, 11))
+        self.assertEqual((new[2], new[enc.TERRAINS + 2]), (20, 24))
         self.assertEqual(new[0x0C], 0)
 
 
