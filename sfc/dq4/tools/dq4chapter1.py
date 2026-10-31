@@ -555,8 +555,8 @@ def npc_base(env_patch):
 # 입구별 도착 훅은 FC 그룹마다 필드로 나오는 칸을 고른다. 없으면 엔진이 보조 입구 (X, Y+1) 에 세우는데, 그 칸이
 # 입구 블록의 다른 칸이다(dq4fieldport.cells). 대화 스크립트(talk)는 서장 스크립트와 옮긴 인물의 메시지 스크립트를
 # 함께 덧붙인 것이다(dq4npcport.talk_doc). 서장을 빼도 넣는다: 옮긴 인물의 대화 번호가 서장 스크립트 뒤라서다.
-GROUP_PATCHES = ('env/dq4-environment.dq5patch.json', 'newmap.dq5patch.json', 'exits.dq5patch.json',
-                 'entrances.dq5patch.json', 'shops.dq5patch.json', 'inn.dq5patch.json',
+GROUP_PATCHES = ('env/dq4-environment.dq5patch.json', 'doors.dq5patch.json', 'newmap.dq5patch.json',
+                 'exits.dq5patch.json', 'entrances.dq5patch.json', 'shops.dq5patch.json', 'inn.dq5patch.json',
                  'entrance-hook.dq5patch.json', 'field-gfx.dq5patch.json', 'field-blocks.dq5patch.json',
                  'field.dq5patch.json', 'talk.dq5patch.json', 'travel.dq5patch.json', 'names.dq5patch.json',
                  'companion-names.dq5patch.json', 'person-names.dq5patch.json',
