@@ -10,7 +10,9 @@ and below and above half a block to the right (+half). Half a block up beside a 
 stopped at all (the object blocks only its bottom row; the ROM before dq4door does the same), so that is not walked.
 
 A door of lock 0 must open (a bit of 7E:21C2-21C5 set). A locked door must stay shut without a key, and open from
-below with the thieves' key level (2199.1, as 01:DCFC reads it).
+below with the thieves' key level (2199.1, as 01:DCFC reads it). Without the key its message (01:D8FC) shows once per
+push: pushing on through closing it (A held with the direction) shows it no more, stepping back and pushing again
+shows it again.
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4doorcheck.py --rom work/ch1/dq4-ch1.sfc \\
       --state work/ch1walk/throne_out/end.mss --out work/doorcheck
@@ -68,9 +70,12 @@ def cases(prg):
                     continue
                 base = {"map": f"{g:02X}/{n:02X}", "door": [ex, ey], "lock": lock, "from": name,
                         "cell": [ex + hx, ey + hy], "press": press}
-                out.append({**base, "key": False, "open": lock == 0})
+                out.append({**base, "key": False, "open": lock == 0, "shown": 0 if lock == 0 else 1})
                 if lock and name == "below":
-                    out.append({**base, "key": True, "open": True})
+                    out.append({**base, "key": True, "open": True, "shown": 0})
+                    back = {"up": "down", "down": "up", "left": "right", "right": "left"}[press]
+                    out.append({**base, "from": "below-again", "key": False, "open": False, "shown": 2,
+                                "input": f"{press}:60,{press}+a:8,{press}:60,{back}:12,{press}:60"})
     return out
 
 
@@ -99,16 +104,20 @@ def one(mesence, rom, state, out, k, case, hop):
         start = via and warp(mesence, rom, via, dest / "warp", case["map"], x, y)
     if start is None:
         return {**case, "ok": False, "problem": "순간이동 실패"}
-    run(mesence, rom, WALK, dest, {"STATE": str(start), "INPUT": f"wait:20,{case['press']}:{HOLD}",
+    p = case["press"]
+    press = case.get("input") or (f"{p}:60,{p}+a:8,{p}:{HOLD}" if case["shown"] else f"{p}:{HOLD}")
+    run(mesence, rom, WALK, dest, {"STATE": str(start), "INPUT": f"wait:20,{press}",
                                    "SET": KEY if case["key"] else ""})
     text = (dest / "door.txt").read_text() if (dest / "door.txt").exists() else ""
     rows = dict(line.split(" ", 1) for line in text.splitlines())
-    if not {"start", "end", "seen"} <= rows.keys():
+    if not {"start", "end", "seen", "shown"} <= rows.keys():
         return {**case, "ok": False, "problem": "결과 없음"}
     begin, flags0 = rows["start"].split()
     end = rows["end"].split()[0]
     opened = int(rows["seen"], 16) & ~int(flags0, 16) != 0
-    result = {**case, "start": begin, "end": end, "opened": opened, "ok": opened == case["open"]}
+    shown = int(rows["shown"])
+    result = {**case, "start": begin, "end": end, "opened": opened, "shown_got": shown,
+              "ok": opened == case["open"] and shown == case["shown"]}
     if begin != f"{x},{y}":
         result.update(ok=False, problem=f"시작 칸이 {begin}")
     return result
@@ -136,6 +145,7 @@ def main():
     for r in results:
         print(f"{'ok  ' if r['ok'] else 'FAIL'} {r['map']} {r['door']} 잠금{r['lock']} {r['from']}"
               f"{' 열쇠' if r['key'] else ''}: {r.get('start')} -> {r.get('end')} 열림={r.get('opened')} "
+              f"메시지={r.get('shown_got')} "
               f"{r.get('problem', '')}")
     print(report["status"])
     return 0 if report["status"] == "passed" else 1

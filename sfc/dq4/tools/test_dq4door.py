@@ -53,6 +53,9 @@ class FindTest(unittest.TestCase):
         self.assertEqual(labels["auto"], door.AUTO_AT)
         self.assertLessEqual(door.AUTO_AT + len(auto), door.AUTO_END)
         self.assertEqual(dq4environmentrom.HOOK_END, door.AUTO_AT)
+        # A locked door shows the door command's message once per push: $1958 (bumped directions) gates it.
+        self.assertIn(bytes((0xAD, 0x58, 0x19, 0x25, 0xC4)), auto)
+        self.assertIn(bytes((0x0C, 0x58, 0x19, 0x8A, 0x20, 0xFC, 0xD8)), auto)
 
     def test_writes(self):
         w = {x["at"]: x for x in door.writes()}

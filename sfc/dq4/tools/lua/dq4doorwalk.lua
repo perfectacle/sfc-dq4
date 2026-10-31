@@ -1,7 +1,8 @@
 -- STATE 세이브스테이트에서 INPUT("up:100" 또는 "a:8,wait:60,..." 꼴)을 차례로 누르고, 문 열림 flag(7E:21C2~21C5)와
 -- 주인공 셀($C1,$C2)을 처음과 끝에 적는다. SET="2199|02" 는 시작할 때 WRAM(7E 뱅크 하위 16비트 주소)을 고친다.
 -- 결과: SHOT_DIR/door.txt("start x,y flags", "end x,y flags", "seen flags": 걷는 동안 한 번이라도 켜진 비트), end.png.
--- 열린 문을 지나 다른 그룹(필드 등)으로 나가면 flag 가 지워지므로 seen 으로 본다.
+-- 열린 문을 지나 다른 그룹(필드 등)으로 나가면 flag 가 지워지므로 seen 으로 본다. "shown N" 은 잠긴 문 메시지 갈래
+-- 01:D8FC 가 돈 횟수다.
 package.path = os.getenv("LIBDIR") .. "/?.lua;" .. package.path
 local L = require("lib")
 L.loadState(os.getenv("STATE"))
@@ -15,7 +16,8 @@ end
 local total = 0
 for _, s in ipairs(seq) do total = total + s[2] end
 local endf = total + 40
-local n, si, left, log, seen = 0, 1, nil, {}, 0
+local n, si, left, log, seen, shown = 0, 1, nil, {}, 0, 0
+emu.addMemoryCallback(function() shown = shown + 1 end, emu.callbackType.exec, 0x01D8FC, 0x01D8FC)
 local function line(tag)
   log[#log + 1] = string.format("%s %d,%d %02X%02X%02X%02X", tag, b(0x7E00C1), b(0x7E00C2),
     b(0x7E21C2), b(0x7E21C3), b(0x7E21C4), b(0x7E21C5))
@@ -46,6 +48,7 @@ emu.addEventCallback(function()
   if n == endf then
     line("end")
     log[#log + 1] = string.format("seen %08X", seen)
+    log[#log + 1] = string.format("shown %d", shown)
     L.shot("end.png")
     L.write("door.txt", table.concat(log, "\n") .. "\n")
     emu.stop(0)

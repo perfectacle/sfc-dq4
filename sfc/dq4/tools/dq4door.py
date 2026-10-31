@@ -21,10 +21,11 @@ DQ5 maps 23/00 and 18/00, no door above row 20 for a hero on floor 1) is kept in
 With AUTO_OPEN, a deliberate change from FC DQ4 (sfc/dq4/docs/dq4-chapter1-format.md 「사용자 결정에 의한 원작과의
 차이」): when a step is blocked indoors on foot (00:81B7, after 00:A97D said blocked and 81F1 put the pressed
 direction in 7E:31E0, which D9CE copies to 1E8F), AUTO runs the door finders of D9E5 except the water gate (D7) and
-the counter (4A, CA), and opens the door with 01:DFAB (sound and picture as the command) when 01:DCFC says open.
-Doors of lock kind 4 and up (special story doors, whose lock code prints messages) and locked doors without the key
-stay shut without a message; the door command still says why. When it opened nothing, AUTO goes on with 00:83B4
-(the bump sound) as before.
+the counter (4A, CA), and opens the door with 01:DFAB (sound and picture as the command) when 01:DCFC says open. A locked door without the key
+shows the door command's message (01:D8FC) once per push, as NDS shows 「トビラには カギが かかっている！」 and stops
+the hero: $1958, the directions already bumped that 00:83B4 keeps for its sound, says whether this push showed it.
+Doors of lock kind 4 and up (special story doors, whose lock code prints messages itself) stay shut without a message.
+When it opened nothing and showed nothing, AUTO goes on with 00:83B4 (the bump sound) as before.
 """
 
 import sys
@@ -112,12 +113,12 @@ def auto_code(at=AUTO_AT):
     asm = _Asm(at)
     word = lambda v: (v & 0xFF, v >> 8 & 0xFF)  # noqa: E731
     asm.label("auto").b(0x08, 0x8B, 0x4B, 0xAB, 0xC2, 0x30, 0x48, 0xDA, 0x5A, 0xE2, 0x30)
-    asm.b(0x20).word(None, "try").rel(0xB0, "opened")                  # JSR try / BCS opened
+    asm.b(0x20).word(None, "try").rel(0xB0, "opened")                  # JSR try / BCS opened (or told)
     # JSR to BUMP from bank 01: its RTS lands on RTL00, whose RTL comes back to "opened".
     asm.b(0x4B, 0xF4).word(None, "opened", -1).b(0xF4, *word(RTL00 - 1), 0x5C, *BUMP.to_bytes(3, "little"))
     asm.label("opened").b(0xE2, 0x30, 0xA9, 0x00, 0x8F, *_long(0x195A))   # SEP #$30 / STZ $195A as BLOCKED did
     asm.b(0xC2, 0x30, 0x7A, 0xFA, 0x68, 0xAB, 0x28, 0x6B)
-    # try: carry set when a door opened. M/X 8-bit, DB 01 (the door routines' own).
+    # try: carry set when a door opened or its lock message showed. M/X 8-bit, DB 01 (the door routines' own).
     asm.label("try").b(0xA5, 0xBE).rel(0x10, "shut")                   # indoors ($BE bit7)
     asm.b(0xAD, 0x54, 0x19).rel(0xD0, "shut")                           # on foot ($1954 = 0)
     asm.b(0x20, 0xCE, 0xD9)                                              # JSR $D9CE (hero cell, facing)
@@ -129,7 +130,11 @@ def auto_code(at=AUTO_AT):
     asm.b(0xAE, 0x8B, 0x1E, 0xDA, 0x20, 0x49, 0xDE, 0xA8, 0xFA, 0x8E, 0x8B, 0x1E)
     asm.b(0xC0, 0x04).rel(0xB0, "shut")
     asm.b(0xAD, 0x76, 0x1E, 0x20, 0xFC, 0xDC, 0xE2, 0x30).rel(0x90, "shut")   # LDA $1E76 / JSR $DCFC
-    asm.b(0xAA).rel(0xD0, "shut").b(0x20, 0xAB, 0xDF, 0xE2, 0x30, 0x38, 0x60)  # TAX / BNE / JSR $DFAB / SEC
+    asm.b(0xAA).rel(0xD0, "locked").b(0x20, 0xAB, 0xDF, 0xE2, 0x30, 0x38, 0x60)  # TAX / BNE / JSR $DFAB / SEC
+    # Locked: the door command's message for the result (01:D8FC: 1 -> 187, 2 -> 188, 3 -> 315), once per push. $1958
+    # holds the directions already bumped (00:83B4 sounds the bump only for a new one; walking on clears it).
+    asm.label("locked").b(0xAD, 0x58, 0x19, 0x25, 0xC4).rel(0xD0, "shut")      # LDA $1958 / AND $C4 / BNE shut
+    asm.b(0xA5, 0xC4, 0x0C, 0x58, 0x19, 0x8A, 0x20, 0xFC, 0xD8, 0xE2, 0x30, 0x38, 0x60)   # TSB $1958 / TXA / JSR $D8FC
     asm.label("shut").b(0xE2, 0x30, 0x18, 0x60)
     return asm.assemble()
 
