@@ -80,6 +80,12 @@ class OrderTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             travel.name_bytes(dq5, "ラ")
 
+    def test_ship_cell_keeps_sea_on_its_right(self):
+        # 바다 블록 (10,10) 은 오른쪽 (11,10)·아래 (10,11) 이 땅이다. 내리는 칸이 오른쪽이어도 왼쪽 칸을 고른다.
+        def props(x, y):
+            return 0x00 if (x, y) in ((0x11, 0x10), (0x10, 0x11)) else travel.SEA
+        self.assertEqual(travel.ship_cell(props, (0x10, 0x10), (0x40, 0x40)), (0x20, 0x21))
+
 
 @unittest.skipUnless(DQ4.exists() and DQ5.exists(), "rom/dq4.nes and rom/dq5.sfc")
 class RomTest(unittest.TestCase):

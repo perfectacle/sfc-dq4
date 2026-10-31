@@ -101,6 +101,8 @@ def ship_cell(props, block, land):
     """DQ5 cell of the FC ship block next to a walkable FC block, so the party can walk onto it: one with land
     above or below first (walking onto the ship from its left did not board it in the game), then nearest `land`.
     None for an FC record without a ship (00 00)."""
+    # 오른쪽 칸이 땅인 배 칸에서는 배가 위아래로 나아가지 못했다(ハバリア (131,309)·コーミズ (71,366), 같은 블록의
+    # 왼쪽 칸 (130,309) 은 위로 나아감). 그래서 오른쪽 칸도 바다인 칸을 먼저 고른다.
     sx, sy = block
     if (sx, sy) == (0, 0):
         return None
@@ -110,10 +112,11 @@ def ship_cell(props, block, land):
     for cx, cy in ((2 * sx + dx, 2 * sy + dy) for dy in (0, 1) for dx in (0, 1)):
         sides = [n for n in ((0, -1), (0, 1), (1, 0), (-1, 0)) if not props((cx + n[0]) >> 1, (cy + n[1]) >> 1) & 0x80]
         if sides:
-            ok.append((sides[0][0] != 0, abs(cx - land[0]) + abs(cy - land[1]), cx, cy))
+            ok.append((props((cx + 1) >> 1, cy >> 1) != SEA, sides[0][0] != 0, abs(cx - land[0]) + abs(cy - land[1]),
+                       cx, cy))
     if not ok:
         raise ValueError(f"FC ship block ({sx:02X},{sy:02X}) has no cell next to land")
-    return min(ok)[2:]
+    return min(ok)[3:]
 
 
 def landing_rows(rows, dests):
