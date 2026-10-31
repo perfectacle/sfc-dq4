@@ -23,6 +23,7 @@ for path in (TOOLS, DQ5_TOOLS):
 
 from dq4environmentart import create_assets, palette_variant  # noqa: E402
 from dq4environmentmap import block_prop, map_palette, prepare_maps, sheet_art  # noqa: E402
+import dq4outside  # noqa: E402
 from dq5mapwrite import Rom, encode, lorom, pointer_addr  # noqa: E402
 
 # FC map name -> replaced DQ5 interior map. Targets must have no animated tiles,
@@ -421,7 +422,7 @@ def map_document(name, source, local, target):
         return entries
     return {
         "format": "dq5map/1", "map": f"{target[0]:02X}/{target[1]:02X}",
-        "kind": 1, "width": width, "height": height, "outside": 0, "zone": 0, "attr": FLOOR, "bits": bits,
+        "kind": 1, "width": width, "height": height, "outside": dq4outside.way(target, source), "zone": 0, "attr": FLOOR, "bits": bits,
         "background_hi": 0, "background_lo": 0,
         "commands": commands,
         "passes": [
@@ -766,7 +767,9 @@ def build(dq5_path, dq4_path, out):
         (out / f"{name}.dq5map.json").write_text(json.dumps(doc, ensure_ascii=False) + "\n")
         if name in GROUPS:
             report["group_maps"][name] = {"map": doc["map"], "doc": f"{name}.dq5map.json",
-                                          "cells": [doc["width"], doc["height"]]}
+                                          "cells": [doc["width"], doc["height"]],
+                                          "outside": (list(dq4outside.cell(source))
+                                                      if doc["outside"] == dq4outside.OUTSIDE_WAY else None)}
             continue
         record = encode(doc)
         (out / f"{name}.bin").write_bytes(record)
