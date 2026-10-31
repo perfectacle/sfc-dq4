@@ -14,7 +14,7 @@
 --                            04:FD97 의 01 항목을 이 좌표로 덮는다. 첫 필드 이벤트(파파스와 슬라임 전투)를 끄려고
 --                            7E:2194 bit7 을 켠다(필드 루틴 15:F907 의 FE 항목)
 --   BATTLE="00:3,0C:2"       FIELD 와 함께. 첫 필드 이벤트를 켠 채 그 이벤트 전투 무리(23:D757 의 1번)를 몬스터:마릿수(16진:10진,
---                            최대 4종)로 바꿔 전투를 붙인다
+--                            최대 4종)로 바꿔 전투를 붙인다. "00:3:02" 처럼 셋째 값(16진)을 주면 그 무리 값(+9~+C → $1009~)
 --   GROUP="2C"               FIELD 와 함께. 첫 필드 이벤트가 거는 무리 번호(02:A780 의 LDA #$01)를 바꿔 이벤트 전투 무리
 --                            표 23:D757 의 그 번호(16진)와 전투를 붙인다. BATTLE 과 함께 주면 그 번호의 무리를 덮는다
 --   SET="2194|80;1949=01"    시작할 때 한 번 WRAM(7E 뱅크 하위 16비트 주소)을 고친다. =는 값, |는 OR, &는 AND
@@ -108,8 +108,8 @@ if field then
   if battle then
     local e = {0xD0, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0}
     local i = 0
-    for id, cnt in string.gmatch(battle, "(%x+):(%d+)") do
-      e[2 + i] = tonumber(id, 16); e[6 + i] = tonumber(cnt); i = i + 1
+    for id, cnt, val in string.gmatch(battle, "(%x+):(%d+):?(%x*)") do
+      e[2 + i] = tonumber(id, 16); e[6 + i] = tonumber(cnt); e[10 + i] = tonumber(val, 16) or 0; i = i + 1
     end
     local t = {}
     for _, b in ipairs(e) do t[#t + 1] = string.format("%02X", b) end
