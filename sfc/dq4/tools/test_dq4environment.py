@@ -183,5 +183,22 @@ class CounterTests(unittest.TestCase):
         self.assertEqual(rom.block_head("0E-00", source, counter), (0, 0, rom.COUNTER_ATTR))
 
 
+class FrontTests(unittest.TestCase):
+    def test_cells_below_pots_draw_the_party_in_front(self):
+        # 산골 마을 지하 (FC 14/01): pots fill (1..2,9..C) and (3,A..B); (3,C) and (4,*) are floor.
+        import sys
+        sys.path.insert(0, str(ROOT / "fc" / "dq4" / "tools"))
+        import dq4block
+        import dq4environmentrom as rom
+        from kr_patch.fc import ines
+        source = dq4block.Map(ines.prg((ROOT / "rom" / "dq4.nes").read_bytes()), 0x14, 1)
+        doc = rom.map_document("14-01", source, {b: b for b in range(32)}, rom.GROUPS["14-01"])
+        walls, front = ({(x + k, y) for x, y, n, value, _ in doc["passes"][i]["entries"] for k in range(n)}
+                        for i in (0, 1))
+        self.assertTrue({(6, 24), (7, 24), (6, 25), (7, 25)} <= front)
+        self.assertNotIn((6, 26), front)
+        self.assertFalse(front & walls)
+
+
 if __name__ == "__main__":
     unittest.main()
