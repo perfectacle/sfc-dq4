@@ -64,11 +64,11 @@ MAX_COLORS = 15                 # OBJ 팔레트 1~15. 22:A5A4 는 색 수 0 이�
 # (dq5mongfx.nmi_tiles). 첫 자리가 자리 줄 어디에 오든 모두 닿아야 받고, 잰 가장 늦은 첫 DMA 에 타일 하나 몫을 남긴다.
 # 원래 그림 6C(110개)는 셈으로 뒤 5개가 닿지 않고, E4 일 때 22:90FA 가 한 프레임 뒤에 6개를 다시 보낸다.
 NMI_MARGIN = 264
-# 싸우는 도중에 그림을 푸는 NMI(부르기·がったい·パルプンテ·モシャス)는 재지 않았다. 그 프레임에는 00:89BB 의 OAM DMA
-# (544바이트)가 몬스터 목록보다 먼저 돌 수 있다고 보고(코드 읽기) 그만큼 더 일찍 끊는다. 22:ADE7 이 돌려받은 자리로
-# 사슬이 이어지지 않으면 목록 항목이 더 늘어나는데, 그 경우는 셈에 들어 있지 않다.
-OAM_DMA_MARGIN = 4500           # 544 × 8 마스터 주기와 그 사이 줄마다 새로 고침 40
-GATTAI, PARUPUNTE = 0x6B, 0x2D  # がったいだ 가 놓는 キングスライム(22:D2FE), パルプンテ 가 바꾸는 メタルスライム(22:D45D)
+# 싸우는 도중에 그림을 푸는 NMI 가운데 부르기(22:D2FE)·がったい(22:D2FE)·パルプンテ(22:D45D)는 $19 bit1 이 꺼져
+# 00:89BB 의 OAM DMA 없이 첫 DMA 가 전투 첫머리와 같은 241줄에 걸렸다(dq5monmidcheck.py). モシャス(22:D3B9)는 재지
+# 못해, 연출 중 OAM DMA 뒤에 목록을 보낸 NMI 에서 잰 첫 DMA(241줄 378 보다 4,768~4,814 늦음)보다 조금 더 일찍 끊는다.
+# 22:ADE7 이 돌려받은 자리로 사슬이 끊겨 이어지면 목록 항목이 더 늘어나는데, 그 경우는 셈에 들어 있지 않다.
+OAM_DMA_MARGIN = 4850
 WIDTHS = (*range(1, 16), 0x13)  # 머리 +5 상위 니블 0~E → 1~15, F → 19
 HEIGHTS = range(1, 17)
 SHADOWS = 0x22B4FE              # 그림자 모양 표(22:B44A). 번호 × 2 의 칸이 FFFF 면 그림자 자료가 없음
@@ -352,13 +352,11 @@ def nmi_short(d, margin=NMI_MARGIN):
 
 
 def midbattle_pictures(rom, monsters):
-    """싸우는 도중에 풀릴 수 있는 그림 번호: 부르기로 오는 몬스터(dq5monlimits.SUMMONED), がったい·パルプンテ 가 놓는
-    몬스터, モシャス 가 그림을 빌리는 동료 몬스터(레코드 +18 동료 종류가 0 이 아닌 몬스터). monsters 는 바꾼 {몬스터: (그림, 색)}."""
-    from dq5monlimits import SUMMONED
+    """OAM DMA 몫을 더 남길 그림 번호: モシャス 가 그림을 빌리는 동료 몬스터(레코드 +18 동료 종류가 0 이 아닌 몬스터)의 그림.
+    부르기·がったい·パルプンテ 로 푸는 그림은 잰 대로 전투 첫머리와 같은 한도를 쓴다. monsters 는 바꾼 {몬스터: (그림, 색)}."""
     from dq5monster import record
-    kinds = {m for m in range(M.COUNT) if record(rom, m)[0x18] & 0x7F}
-    users = set(SUMMONED) | {GATTAI, PARUPUNTE} | kinds
-    return {monsters[m][0] if m in monsters else M.monster(rom, m)[0] for m in users if m < M.COUNT}
+    users = {m for m in range(M.COUNT) if record(rom, m)[0x18] & 0x7F}
+    return {monsters[m][0] if m in monsters else M.monster(rom, m)[0] for m in users}
 
 
 def picture_limits(rom, g):
@@ -461,7 +459,7 @@ def plan_all(rom, doc, base, areas=None):
         if short:
             raise ValueError(f'{label}: 타일 {tiles}개 — 한 그림의 타일은 다음 NMI 한 번에 VRAM 으로 보내, 첫 자리가 '
                              f'{short[0]} 이면 {short[1]}개만 닿음'
-                             + ('(싸우는 도중에 풀릴 수 있는 그림이라 OAM DMA 몫을 더 남김)' if late else '')
+                             + ('(モシャス 로 싸우는 도중에 풀릴 수 있는 그림이라 OAM DMA 몫을 더 남김)' if late else '')
                              + f'(원래 배치를 그대로 쓰면 원래 {original}개까지)')
     if E4 in monsters and len(monsters[E4][1]) < E4_COLORS:
         raise ValueError(f'몬스터 {E4:02X}: 색 {len(monsters[E4][1])}개 — 02:F498 이 늘 {E4_COLORS}개를 읽으므로 '
