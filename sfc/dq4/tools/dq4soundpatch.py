@@ -83,6 +83,13 @@ HOLD_END_SITE = 0x103A
 # 지우므로 0A 에서도 버려지지 않고 샘플 칸을 잡은 채 남았다. 268A 에서 없는 샘플을 만나면 기다림 목록에서도 지운다.
 # 코드는 곡 묶음 표 뒤(판정 도우미처럼)에 붙인다.
 PENDING_RELEASE_SITE = 0x26A0      # 268A 고리의 MOV A,$03FF+X / CMP A,#FF(앞 MOV X,A 와 뒤 BEQ 26C3 은 그대로)
+# 곡 자리 하나가 틱을 맞을 때마다 1489~14B2 는 차례 Y(0~7)마다 트랙 10칸을 모두 훑어(80번) 그 자리·그 차례의 트랙을
+# 처리한다. 이 훑기만 곡이 울리는 동안 SPC 시간의 약 1/3 이라, 곡 음량 페이드(틱마다 트랙 음량을 모두 다시 셈)가 겹치면
+# 타이머 셈($FD)이 밀려 곡이 느려지고 음이 몰린다. 트랙 칸을 한 번만 훑게 바꾼다(tick_scan_code). 2B 는 IPL 꼬리 뒤에
+# 빈 자리가 없어 원래 고리 자리 안에 넣는다.
+TICK_SCAN_SITE, TICK_SCAN_END = 0x1489, 0x14B3
+TICK_SCAN_ORIGINAL = ('7D 8D 00 CD 00 75 A3 02 D0 15 2D CB A0 F5 7F 03 64 A0 D0 0A 4D 6D 3F 0E 15 3F E5 15 EE CE AE 3D 3D '
+                      'C8 14 90 E0 FC AD 08 90 D9')
 
 
 @dataclass(frozen=True)
@@ -689,6 +696,27 @@ def pending_release_code():
     return bytes.fromhex('F5 FF 03 68 FF D0 05 3F A5 27 E8 00 6F')
 
 
+def tick_scan_code():
+    """1489~14B2 자리에 그대로 넣는 곡 자리 틱 처리. 트랙 10칸을 한 번 훑으며 이 자리의 차례 8 미만 트랙마다 원래와 같은
+    레지스터(A = Y = $A0 = 차례, X = 트랙, 스택에 자리)로 150E·15E5 를 부른다. 원래는 차례 오름차순이고 이것은 트랙 칸
+    오름차순인데, 곡은 트랙 i 를 빈 칸 가운데 가장 낮은 칸에 차례로 앉히므로(1314) 두 순서가 같다. 효과음은 높은 칸부터
+    앉혀(1325) 트랙이 여럿이면 순서가 거꾸로가 된다. 끝은 원래처럼 A = 자리, Y = 8 로 14B3 에 간다."""
+    h = bytes.fromhex
+    code = _asm([
+        h('7D CD 00'),                                    # MOV A,X / MOV X,#0
+        ('label', 'scan'), h('75 A3 02'), ('b', 0xD0, 'next'),
+        h('2D F5 7F 03 68 08'), ('b', 0xB0, 'skip'),      # 차례 8 이상은 원래도 처리하지 않음
+        h('FD CB A0 4D 6D 3F 0E 15 3F E5 15 EE CE'),
+        ('label', 'skip'), h('AE'),
+        ('label', 'next'), h('3D 3D C8 14'), ('b', 0x90, 'scan'),
+        h('8D 08'),
+    ])
+    size = TICK_SCAN_END - TICK_SCAN_SITE
+    if len(code) > size:
+        raise ValueError('tick scan code overflows 1489-14B2')
+    return code + bytes(size - len(code))
+
+
 def nmi_range_code():
     """NMI 선점(00:88E2)이 2B:B741~B804(우리 코루틴 코드: 응답 판정·곡 틀기 문·나눈 곡 발판·곡 번호 도우미)도
     코루틴으로 보게 하는 00:8004 발판. 빠뜨리면 그 안에서 NMI 가 와도 코루틴이 멈추지 않아 게임이 한 프레임 밀린다."""
@@ -901,7 +929,7 @@ def write_resident_samples(data, ids):
 def install(base, replacements, *, sample_resources=None, map_fades=False, preview=None, pinned=(),
             resident=None, set_records=None, fast_receive=False, chains=None, chain_late=(), hold=False, early_song=False, load_pump=False,
             vehicle_song=False, keep_samples=False, release_failed=False, unpin=(), resident_waves=None, weapon_sounds=None,
-            effect_calls=None, release_pending=False):
+            effect_calls=None, release_pending=False, tick_scan=False):
     """pinned 는 늘 두는 시퀀스 목록에 남길 바꾸는 곡(나머지 바꾸는 곡은 목록에서 뺌). resident 는 새 늘 두는 샘플 목록
     전체(주지 않으면 그대로). set_records 는 바꾸지 않는 곡의 곡 묶음 레코드 {곡: (k, 샘플…)}.
     fast_receive 는 SPC 자료 받기를 묶음 여러 개 이어 받게 바꾼다(fast_receive_code). chains 는 {곡: 본체 시퀀스} 로,
@@ -919,6 +947,7 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
     그 갈래로 낸다(weapon_sound_code). 그 효과음 샘플을 곡들의 레코드에 붙이는 것은 replacements 몫이다.
     effect_calls 는 {롬 주소: (원래 효과음, 새 효과음)} 로, 그 자리의 효과음 부르기 BRK 16·19 n X 의 n 을 바꾼다.
     release_pending 은 곡 뒤 샘플이 오기 전에 끝난 곡의 샘플을 SPC 기다림 목록에서 지운다(pending_release_code).
+    tick_scan 은 곡 자리 틱마다 트랙을 차례 수만큼 다시 훑던 고리를 한 번 훑기로 바꾼다(tick_scan_code).
     """
     if len(base) not in (0x180000, 0x200000, 0x400000):
         raise ValueError('base must be a headerless 1.5MB, 2MB or 4MB DQ5 build')
@@ -1062,6 +1091,8 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
         table += pending_release_code()
         write(DRIVER_BLOCK + 4 + PENDING_RELEASE_SITE - 0x0750, bytes([0x3F]) + pending_at.to_bytes(2, 'little') + bytes(2),
               bytes.fromhex('F5 FF 03 68 FF'))
+    if tick_scan:
+        write(DRIVER_BLOCK + 4 + TICK_SCAN_SITE - 0x0750, tick_scan_code(), bytes.fromhex(TICK_SCAN_ORIGINAL))
     if 0x28EC + len(table) > 0x3000:
         raise ValueError(f'song sample table too large: {len(table)} bytes')
     if not 0x2A5D <= heap_start(data) < 0x3000:

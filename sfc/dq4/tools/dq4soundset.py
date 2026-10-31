@@ -184,7 +184,7 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
           level_db=None, programs=None, set_records=None, keep_regions=None, track_db=None, yield_tracks=None, gain_db=None, gain_all=0.0,
           nds_envelope=(), nds_release=(), treble_db=None, sample_rates=None,
           fast_receive=False, chains=(), holds=(), early_song=False, load_pump=False, vehicle_song=False,
-          keep_samples=False, prefetch=None, release_failed=False, release_pending=False, unpin=(), effects=None, effect_waves=None,
+          keep_samples=False, prefetch=None, release_failed=False, release_pending=False, tick_scan=False, unpin=(), effects=None, effect_waves=None,
           effect_gain_db=None, spare_effects=None, spare_carriers=None, spare_keep=None,
           spare_rate=8000, weapon_sounds=None, weapon_songs=(), effect_calls=None, spare_substitutes=None, silent_songs=()):
     """stream 은 {곡 자리: 곡 앞 샘플 바이트 상한}. 그 곡은 샘플 일부를 곡이 울리는 동안 보낸다(transfer_plan).
@@ -603,7 +603,8 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
                              vehicle_song=vehicle_song, keep_samples=keep_samples,
                              release_failed=release_failed, unpin=tuple(unpin), resident_waves=wave_payloads,
                              weapon_sounds=(weapon_sounds, tuple(weapon_songs)) if weapon_sounds else None,
-                             effect_calls=effect_calls, release_pending=release_pending)
+                             effect_calls=effect_calls, release_pending=release_pending,
+                             tick_scan=tick_scan)
 
     rom, install_report = install()
     # 넣은 롬의 실제 자리로 덧붙일 샘플을 다시 고른다. 앞부분은 처음 고른 바이트(상한)를 받는 길이로 나눴으므로 그 안에서만
@@ -731,6 +732,8 @@ def main():
                     help='free the SPC sequence of a song or effect that gave up for lack of room (dq4soundpatch.release_failed_code)')
     ap.add_argument('--release-pending', action='store_true',
                     help='drop late samples of a song that ended before they arrived from the SPC waiting list (dq4soundpatch.pending_release_code)')
+    ap.add_argument('--tick-scan', action='store_true',
+                    help='scan the tracks once per song tick instead of once per track order (dq4soundpatch.tick_scan_code)')
     ap.add_argument('--keep-samples', action='store_true',
                     help='keep samples shared by the finished song and the next one through the 1A cleanup (dq4soundpatch.keep_samples_code)')
     ap.add_argument('--load-pump', action='store_true',
@@ -795,7 +798,8 @@ def main():
                         chains=[int(x, 16) for x in args.chain], holds=[int(x, 16) for x in args.hold],
                         early_song=args.early_song, load_pump=args.load_pump,
                         vehicle_song=args.vehicle_song, keep_samples=args.keep_samples,
-                        release_failed=args.release_failed, release_pending=args.release_pending, unpin=[int(x, 16) for x in args.unpin],
+                        release_failed=args.release_failed, release_pending=args.release_pending, tick_scan=args.tick_scan,
+                        unpin=[int(x, 16) for x in args.unpin],
                         effects={(int(k.split('-')[0], 16), int(k.split('-')[1], 16)): v
                                  for k, v in (x.split('=') for x in args.sfx)},
                         effect_gain_db={(int(k.split('-')[0], 16), int(k.split('-')[1], 16)): float(v)
