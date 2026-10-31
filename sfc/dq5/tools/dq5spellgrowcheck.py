@@ -5,7 +5,11 @@
          + 주인공 필드 목록 첫 칸 C6, 전투 목록 첫 두 칸 C6·C7(dq5learnwrite.py --spells-from)
   skill  위와 같고 class 만 skill(66 경계를 그대로 둠)
   base   목록만 바꾼 대조 롬
-원본 롬과도 견준다(전투 목록 첫 칸 ホイミ 그대로). 원본 롬·선실 상태는 읽기만 한다.
+  mera   원본 롬에 전투 목록 첫 두 칸만 ホイミ·メラ 로 둔 대조 롬(マホカンタ)
+원본 롬과도 견준다(전투 목록 첫 칸 ホイミ 그대로). 세 경계 밖의 처리도 본다:
+  やまびこのぼうし(물건 93)를 장비하고 외우면 20:8EE8 경계 안(주문)일 때만 한 번 더 울림(메시지 1A1)
+  マホカンタ 가 걸린 슬라임에게 C7 을 외우면 class 와 관계없이 되튐(메시지 078, 26:838C 의 MP 칸으로 가름)
+원본 롬·선실 상태는 읽기만 한다.
 
   MESENCE=… python sfc/dq5/tools/dq5spellgrowcheck.py rom/dq5.sfc --state work/state/ship.mss
 """
@@ -35,6 +39,11 @@ ITEM_USE = 'a:4,wait:30,down:4,wait:10,down:4,wait:10,a:4,wait:40,down:4,wait:20
 BATTLE_SECOND = 'a:4,wait:30,down:4,wait:20,a:4,wait:40,right:4,wait:20,a:4,wait:40,a:4,wait:40,a:4,wait:200'
 # 주인공 상태: 7E:0765 bit4 マホトーン(주문 봉인), 7E:0768 bit2 저주(장비).
 SEALED, CURSED = '7E0765=10', '7E0768=04'
+# 주인공 물건 셋째 칸(7E:2058)에 やまびこのぼうし(93)를 두고 장비 비트(7E:2054)에 그 칸을 더한다.
+HAT = '7E2058=93,7E2054=07'
+# 슬라임(몬스터 슬롯 0, 7E:07C0)의 +0C bit6 = 상태 39(マホカンタ).
+REFLECT = '7E07CC=40'
+ECHO, REFLECTED = '1A1', '078'
 
 
 def build(original, out):
@@ -66,6 +75,11 @@ def build(original, out):
         command('dq5build.py', original, 'build', *[out / f'{p}.patch.json' for p in ('learn', f'grow-{kind}', 'names')],
                 '-o', out / f'{kind}.sfc', '--ips', out / f'{kind}.ips')
     command('dq5build.py', original, 'build', out / 'learn.patch.json', '-o', out / 'base.sfc', '--ips', out / 'base.ips')
+    mera = learn_dump(Rom(data))['characters'][0]
+    mera['battle'][:2] = list(COPY)
+    save_json(out / 'learn-mera.json', {'format': LEARN_FORMAT, 'characters': [mera]})
+    command('dq5learnwrite.py', original, 'patch', out / 'learn-mera.json', '-o', out / 'learn-mera.patch.json')
+    command('dq5build.py', original, 'build', out / 'learn-mera.patch.json', '-o', out / 'mera.sfc')
 
 
 def places():
@@ -84,7 +98,7 @@ def scene(name, rom, state, out, mesence, libdir, mode, driver, **options):
     env = environment(libdir, state, dest)
     env.update(MODE=mode, DRIVER=str(HERE / 'lua' / driver), **options,
                READS=','.join(f'{a:06X}' for addrs in places().values() for a in addrs),
-               EXECS=f'{FIELD_STUB:06X},248C39,248BAF,20A7C5')
+               EXECS=f'{FIELD_STUB:06X},248C39,248BAF,20A7C5,208EF1')
     run(mesence, rom, HERE / 'lua/dq5spellgrowcheck.lua', dest, env)
     text = (dest / 'observed.txt').read_text()
     require('truncated' not in text, f'{name}: 관측 기록이 잘림')
@@ -126,7 +140,7 @@ def main():
         battle = prep / 'battle.mss'
         require(battle.is_file(), '전투 상태 생성 실패')
         at = places()
-        roms = {k: out / f'{k}.sfc' for k in ('spell', 'skill', 'base')} | {'original': original}
+        roms = {k: out / f'{k}.sfc' for k in ('spell', 'skill', 'base', 'mera')} | {'original': original}
         results, runs = {}, 1
 
         for kind, message in (('spell', '0C7'), ('skill', '19F')):
@@ -185,6 +199,31 @@ def main():
                         f'{name}: 새 번호의 MP·실행·처리 칸을 읽지 않음')
             if name == 'spell-fire':
                 require(f'read {at["fx_party"][1]:06X}=' in text, 'C7: 옮긴 연출 표를 읽지 않음')
+        # 20:8EA9 는 행동 뒤 행동자의 장비(필드 3D)가 やまびこのぼうし 이고 행동($1073,X)이 65 이하면 $1016 bit4 를 켜고
+        # 같은 행동을 한 번 더 돌린다(20:84D5). 둘째는 MP 를 쓰지 않는다.
+        for rom in ('original', 'spell', 'skill'):
+            name = f'{rom}-echo'
+            text, _ = scene(name, roms[rom], battle, out, mesence, libdir, 'battle', 'dq5battle.lua', LEARNED='000300',
+                            MAXF='650', PRE=BATTLE_USE, LOOP='wait:500', PEEK='7E2040:42', POKE=HAT)
+            runs += 1
+            rows = fight(out, name)
+            codes = [m for m, _, _ in rows]
+            echoed = rom != 'skill'
+            want = ['070', '094', ECHO, '094'] if echoed else ['070', '094']
+            require(codes[:len(want)] == want and (ECHO in codes) == echoed and rows[len(want) - 1][2] == 97,
+                    f'{name}: 메시지 {codes}·MP {[r[2] for r in rows]}')
+            action = 0x27 if rom == 'original' else NEW[0]
+            require((f'pc=208EF1 A=00{action:02X}' in text) == echoed, f'{name}: 20:8EF1 경로가 다름')
+            results[name] = {'메시지': codes[:len(want)], 'HP': rows[len(want) - 1][1], 'MP': rows[len(want) - 1][2]}
+        for name, rom in (('mera-reflect', 'mera'), ('spell-reflect', 'spell'), ('skill-reflect', 'skill')):
+            scene(name, roms[rom], battle, out, mesence, libdir, 'battle', 'dq5battle.lua', LEARNED='000300',
+                  MAXF='650', PRE=BATTLE_SECOND, LOOP='wait:500', PEEK='7E2040:42', POKE=REFLECT)
+            runs += 1
+            rows = fight(out, name)
+            codes = [m for m, _, _ in rows]
+            require(codes[:3] == ['070', REFLECTED, '06A'] and rows[2][1] < 5 and rows[1][2] == 98,
+                    f'{name}: 되튀지 않음 {rows}')
+            results[name] = {'메시지': codes[:3], 'HP': rows[2][1], 'MP': rows[1][2]}
         # 전투 도구(행동 D5 이상)는 256칸 표의 원래 칸을 그대로 쓴다. やくそう 를 가진 물건 셋째 칸에 둔다.
         scene('spell-item', roms['spell'], battle, out, mesence, libdir, 'battle', 'dq5battle.lua', LEARNED='000000',
               MAXF='400', PRE=ITEM_USE, LOOP='wait:500', PEEK='7E2040:42', POKE='7E2058=A1')

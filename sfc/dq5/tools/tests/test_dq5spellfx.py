@@ -11,8 +11,12 @@ from dq5map import Rom, lorom
 
 STUBS = {0xB0E5: 'e2 30 a2 50 a9 01 4c 07 b3', 0xB136: 'e2 30 a2 53 a9 0a 4c 07 b3',
          0xB2C0: 'e2 30 a9 13 4c 70 ab', 0xB410: 'e2 30 a9 03 a2 57 4c 41 ae',
-         0xB301: 'e2 30 a2 50 a9 16 86 43 20 70 ab'}
-SLOTS = {1: (0xB0E5, 0x975F), 2: (0xB136, 0x975F), 3: (0xB2C0, 0x9824), 4: (0xB410, 0x9915), 5: (0xB301, 0x975F)}
+         0xB301: 'e2 30 a2 50 a9 16 86 43 20 70 ab', 0xB6E2: 'e2 30 a9 2a a2 51 4c 57 b6',
+         0xB718: 'e2 30 a9 03 a2 57 4c c6 ae', 0xB419: 'e2 30 a9 06 a2 57 4c ff ae',
+         # 바로 뒤가 공통 루틴 자리가 아닌 STX 꼴은 첫머리가 아님.
+         0xB5F1: 'e2 30 a2 50 a9 16 86 43 20 70 ab'}
+SLOTS = {1: (0xB0E5, 0x975F), 2: (0xB136, 0x975F), 3: (0xB2C0, 0x9824), 4: (0xB410, 0x9915), 5: (0xB301, 0x975F),
+         6: (0xB6E2, 0x975F), 7: (0xB718, 0x9915), 8: (0xB419, 0x9915), 9: (0xB5F1, 0x975F)}
 FIELD = [0x84FA, 0x85A5, 0x85DC, 0x8022, 0x8022, 0x865D, 0x86C7, 0x860C, 0x8636, 0x8022, 0x8022, 0x8056, 0x82B6,
          0x8797, 0x82E8, 0x877D, 0x826F, 0x8729]
 MP = {0x84FA: 3, 0x85A5: 5, 0x85DC: 7, 0x865D: 2, 0x86C7: 2, 0x860C: 10, 0x8636: 20, 0x8056: 8, 0x82B6: 8,
@@ -56,7 +60,14 @@ class SpellFxTests(unittest.TestCase):
         r = rom()
         out = fx.dump(r)
         handlers = {row['handler']: row for row in out['battle_handlers']}
-        self.assertEqual(set(handlers), {'B0E5', 'B136', 'B2C0', 'B410'})
+        self.assertEqual(set(handlers), {'B0E5', 'B136', 'B2C0', 'B410', 'B301', 'B6E2', 'B718', 'B419'})
+        self.assertEqual(handlers['B301'], {'handler': 'B301', 'routine': 'B307', 'users': ['05'],
+                                            'amount': '16', 'resist': '50'})
+        self.assertEqual(handlers['B6E2'], {'handler': 'B6E2', 'routine': 'B657', 'users': ['06'],
+                                            'amount': '2A', 'resist': '51'})
+        self.assertEqual((handlers['B718']['routine'], handlers['B718']['chance'], handlers['B718']['resist']),
+                         ('AEC6', 3, '57'))
+        self.assertEqual((handlers['B419']['routine'], handlers['B419']['chance']), ('AEFF', 6))
         self.assertEqual(handlers['B0E5'], {'handler': 'B0E5', 'routine': 'B307', 'users': ['01'],
                                             'amount': '01', 'resist': '50'})
         self.assertEqual(handlers['B410']['chance'], 3)
@@ -72,6 +83,13 @@ class SpellFxTests(unittest.TestCase):
                                                   {'handler': 'B410', 'chance': 0}]))
         self.assertEqual(writes(result), [('20:B0E8', '5b', '50'), ('20:B0EA', '02', '01'), ('20:B413', '00', '03'),
                                           ('20:B7FB', '36 b1', 'e5 b0')])
+        more = fx.patch(r, doc(battle_handlers=[{'handler': 'B301', 'amount': '02', 'resist': '5B'},
+                                                {'handler': 'B6E2', 'amount': '29', 'resist': '5B'},
+                                                {'handler': 'B718', 'chance': 0, 'resist': '5B'},
+                                                {'handler': 'B419', 'chance': 0}]))
+        self.assertEqual(writes(more), [('20:B304', '5b', '50'), ('20:B306', '02', '16'), ('20:B41C', '00', '06'),
+                                        ('20:B6E5', '29', '2a'), ('20:B6E7', '5b', '51'), ('20:B71B', '00', '03'),
+                                        ('20:B71D', '5b', '57')])
 
     def test_battle_guards(self):
         r = rom()
@@ -86,7 +104,9 @@ class SpellFxTests(unittest.TestCase):
                {'battle_handlers': [{'handler': 'B2C0', 'resist': '50'}]},
                {'battle_handlers': [{'handler': 'B410', 'chance': 9}]},
                {'battle_handlers': [{'handler': 'B410', 'amount': '01'}]},
-               {'battle_handlers': [{'handler': 'B301', 'amount': '01'}]},     # 86 43 이 끼면 첫머리로 보지 않음
+               {'battle_handlers': [{'handler': 'B5F1', 'amount': '01'}]},
+               {'battle_handlers': [{'handler': 'B6E2', 'chance': 1}]},
+               {'battle_handlers': [{'handler': 'B718', 'amount': '01'}]},
                {'battle_handlers': [{'handler': 'B0E5', 'routine': 'AB70'}]},
                {'battle_handlers': [{'handler': 'B0E5', 'amount': '01'}, {'handler': 'B0E5', 'resist': '51'}]},
                {'battle_slots': [{'action': '01', 'extra': 1}]}, {'unknown': []}]

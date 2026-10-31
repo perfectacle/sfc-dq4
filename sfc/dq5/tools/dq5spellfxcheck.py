@@ -7,6 +7,12 @@
   field   주인공이 필드에서 ホイミ(HP 5/200, MP 100). 처리기 84FA 의 MP 3 → 9, 회복 30+0~10 → 100+0,
           주문 27 의 처리기 84FA → 85DC(ベホマ)
   ranar   필드 주문 목록 첫 칸을 ラナルータ 로 두고 외움. 처리기 826F(11:8048 꼴)의 MP 4 → 12
+  슬라임 행동 여섯이나 파파스 행동 여섯을 한 행동으로 두고 첫머리 값을 바꾼다(우리 쪽이 맞는 값은 슬라임, 몬스터가
+  맞는 값은 파파스가 쓰는 장면):
+  sweet·psweet    あまいいき(95, B718 → AEC6). 성공 값 3 → 0, 내성 칸 57 → 5B
+  sleepm·psleepm  ラリホーマ(4C, B419 → AEFF). 성공 값 6 → 0, 내성 칸 57 → 5B
+  flame·pflame    かえんのいき(8F, B6E2 → B657). 양 번호 2A → 29(ひのいき 6~10), 내성 칸 51 → 5B
+  pmera           몬스터 メラ(39, B301 이 JMP 없이 B307 로 이어짐). 양 번호 16 → 02, 내성 칸 50 → 5B
 
 장면 준비용 ROMPATCH(전투로 순간이동, 슬라임 HP·행동, 파파스 행동, 주인공 필드 목록 첫 칸)는 확인하는 자리를 덮지 않는다.
 원본 롬·선실 상태는 읽기만 하고 출력은 --out 의 새 하위 폴더에 둔다.
@@ -37,6 +43,14 @@ EDITS = {
     'fheal': {'field_handlers': [{'handler': '84FA', 'heal': {'base': 100, 'spread': 1}}]},
     'fslot': {'field_slots': [{'spell': '27', 'handler': '85DC'}]},
     'fmp2': {'field_handlers': [{'handler': '826F', 'mp': 12}]},
+    'sweetchance': {'battle_handlers': [{'handler': 'B718', 'chance': 0}]},
+    'sweetresist': {'battle_handlers': [{'handler': 'B718', 'resist': '5B'}]},
+    'sleepmchance': {'battle_handlers': [{'handler': 'B419', 'chance': 0}]},
+    'sleepmresist': {'battle_handlers': [{'handler': 'B419', 'resist': '5B'}]},
+    'flameamount': {'battle_handlers': [{'handler': 'B6E2', 'amount': '29'}]},
+    'flameresist': {'battle_handlers': [{'handler': 'B6E2', 'resist': '5B'}]},
+    'meraamount': {'battle_handlers': [{'handler': 'B301', 'amount': '02'}]},
+    'meraresist': {'battle_handlers': [{'handler': 'B301', 'resist': '5B'}]},
 }
 PAPAS_SCENE = dict(PAPAS, READS='20B7FB')
 # 파파스 행동은 그대로 두고 슬라임(파일 118000~)의 MP 를 99, 행동 여섯을 ラリホー 로.
@@ -47,13 +61,33 @@ FIELD = dict(CAST, MODE='field', PRE='b:4,wait:40,a:4,wait:30,right:4,wait:20,a:
 HEAL = dict(CAST, MODE='battle', PRE='a:4,wait:30,down:4,wait:20,a:4,wait:40,a:4,wait:40,a:4,wait:200')
 # 주인공 필드 주문 목록(23:BE27 = [개수][주문 …])의 첫 칸을 ラナルータ 로. 표는 dq5learnwrite.py 의 것이라 확인 대상이 아니다.
 RANAR = dict(FIELD, ROMPATCH='11BE28=37', PRE='b:4,wait:40,a:4,wait:30,right:4,wait:20,a:4,wait:40,a:4,wait:200')
+
+
+def acting(actor, action):
+    """슬라임(23:8011~, MP 99) 또는 파파스(23:958D~)의 행동 여섯을 action 으로 둔 장면."""
+    six = f'{action:02X}' * 6
+    patch = (f'156FF5=E0253C0103;118004=63;118011={six};118003=C8' if actor == 'slime'
+             else f'156FF5=E0253C0103;11958D={six};118003=C8')
+    return dict(PAPAS, ROMPATCH=patch, READS='', MAXF='2400' if actor == 'slime' else '2700',
+                PEEK='7E07C0:64,7E2040:42')
+
+
 # 장면: (관측 lua, 드라이버, 환경, 시작 상태 이름, 고친 롬들)
 SCENES = {'papas': ('dq5tablecheck.lua', 'dq5battle.lua', PAPAS_SCENE, 'ship', ('amount', 'resist', 'slot')),
           'sleep': ('dq5tablecheck.lua', 'dq5battle.lua', SLEEP, 'ship', ('chance',)),
           'heal': ('dq5learncheck.lua', 'dq5battle.lua', HEAL, 'battle', ('heal',)),
           'field': ('dq5learncheck.lua', 'dq5msg.lua', FIELD, 'ship', ('fmp', 'fheal', 'fslot')),
-          'ranar': ('dq5learncheck.lua', 'dq5msg.lua', RANAR, 'ship', ('fmp2',))}
+          'ranar': ('dq5learncheck.lua', 'dq5msg.lua', RANAR, 'ship', ('fmp2',)),
+          'sweet': ('dq5tablecheck.lua', 'dq5battle.lua', acting('slime', 0x95), 'ship', ('sweetchance',)),
+          'psweet': ('dq5tablecheck.lua', 'dq5battle.lua', acting('papas', 0x95), 'ship', ('sweetresist',)),
+          'sleepm': ('dq5tablecheck.lua', 'dq5battle.lua', acting('slime', 0x4C), 'ship', ('sleepmchance',)),
+          'psleepm': ('dq5tablecheck.lua', 'dq5battle.lua', acting('papas', 0x4C), 'ship', ('sleepmresist',)),
+          'flame': ('dq5tablecheck.lua', 'dq5battle.lua', acting('slime', 0x8F), 'ship', ('flameamount',)),
+          'pflame': ('dq5tablecheck.lua', 'dq5battle.lua', acting('papas', 0x8F), 'ship', ('flameresist',)),
+          'pmera': ('dq5tablecheck.lua', 'dq5battle.lua', acting('papas', 0x39), 'ship', ('meraamount', 'meraresist'))}
+# 잠(우리 쪽 03E·몬스터 082), 잠들지 않음(03F), 「きかなかった」(079), パパス 합류(002), 숨(037).
 SLEPT, RESISTED = '03E', '079'
+MSLEPT, AWAKE, JOINED, BREATH = '082', '03F', '002', '037'
 
 
 def build(original, out):
@@ -109,6 +143,41 @@ def casts(out, name):
     return result
 
 
+def timeline(out, name):
+    """메시지마다 (번호, 슬라임 HP 셋, 주인공 HP)."""
+    rows = []
+    for line in (out / name / 'battle.txt').read_text().splitlines():
+        found = re.match(r'f\d+ msg ([0-9A-F]{3}) 7E07C0=([0-9A-F]+) 7E2040=([0-9A-F]+)', line)
+        if found:
+            slots, party = bytes.fromhex(found[2]), bytes.fromhex(found[3])
+            rows.append((found[1], [int.from_bytes(slots[a - 0x7C0:a - 0x7C0 + 2], 'little') for a in SLOT_HP],
+                         int.from_bytes(party[2:4], 'little')))
+    return rows
+
+
+def after_join(out, name):
+    codes = messages(out, name)
+    require(JOINED in codes, f'{name}: パパス 가 합류하지 않음')
+    return codes[codes.index(JOINED):]
+
+
+def breath_hits(out, name):
+    """숨(037) 뒤 슬라임마다 피해(069) 또는 079, 끝에서 잘린 숨은 뺀다."""
+    rows = timeline(out, name)
+    result = []
+    for i, (msg, _, _) in enumerate(rows):
+        if msg != BREATH:
+            continue
+        hits, j = [], i + 1
+        while j < len(rows) and rows[j][0] in ('069', RESISTED):
+            hits.append(RESISTED if rows[j][0] == RESISTED else
+                        sum(b - a for a, b in zip(rows[j][1], rows[j - 1][1])))
+            j += 1
+        if j < len(rows):
+            result.append(hits)
+    return result
+
+
 def messages(out, name):
     return [m[1] for m in re.finditer(r'f\d+ msg ([0-9A-F]{3})', (out / name / 'battle.txt').read_text())]
 
@@ -160,6 +229,50 @@ def verify(out):
     ranar = {c: hero(out, f'ranar-{c}')[1] for c in ('original', 'fmp2')}
     require(ranar == {'original': 96, 'fmp2': 88}, f'ラナルータ MP: {ranar}')
     results['ranar'] = ranar
+    hit = {c: messages(out, f'sweet-{c}') for c in ('original', 'sweetchance')}
+    require(SLEPT in hit['original'] and SLEPT not in hit['sweetchance'] and hit['sweetchance'].count(AWAKE) >= 3,
+            f'あまいいき 성공 값: {hit}')
+    results['sweet'] = {c: {'잠': v.count(SLEPT), '잠들지 않음': v.count(AWAKE)} for c, v in hit.items()}
+    hit = {c: after_join(out, f'psweet-{c}') for c in ('original', 'sweetresist')}
+    require(SLEPT in hit['original'] and SLEPT not in hit['sweetresist'] and hit['sweetresist'].count(AWAKE) >= 2,
+            f'あまいいき 내성 칸: {hit}')
+    results['psweet'] = {c: {'잠': v.count(SLEPT), '잠들지 않음': v.count(AWAKE)} for c, v in hit.items()}
+
+    hit = {c: messages(out, f'sleepm-{c}') for c in ('original', 'sleepmchance')}
+    require(SLEPT in hit['original'] and SLEPT not in hit['sleepmchance'] and hit['sleepmchance'].count(RESISTED) >= 2,
+            f'ラリホーマ 성공 값: {hit}')
+    results['sleepm'] = {c: {'잠': v.count(SLEPT), 'きかなかった': v.count(RESISTED)} for c, v in hit.items()}
+    hit = {c: after_join(out, f'psleepm-{c}') for c in ('original', 'sleepmresist')}
+    require(MSLEPT in hit['original'] and MSLEPT not in hit['sleepmresist'] and hit['sleepmresist'].count(RESISTED) >= 2,
+            f'ラリホーマ 내성 칸: {hit}')
+    results['psleepm'] = {c: {'잠': v.count(MSLEPT), 'きかなかった': v.count(RESISTED)} for c, v in hit.items()}
+
+    # 우리 쪽이 맞은 숨: 06A 마다 주인공 HP 가 줄어든 양. 0 이 된 것(남은 HP 로 잘림)은 뺀다.
+    burns = {}
+    for c in ('original', 'flameamount'):
+        rows = timeline(out, f'flame-{c}')
+        burns[c] = [(rows[i - 1][2] - r[2], r[2]) for i, r in enumerate(rows) if r[0] == '06A' and i > 0
+                    and rows[i - 1][0] == BREATH]
+    require(burns['original'] and burns['original'][0] == (24, 0), f'かえんのいき 원본: {burns["original"]}')
+    shown = [d for d, hp in burns['flameamount'] if hp > 0]
+    require(len(shown) >= 2 and all(6 <= d <= 10 for d in shown), f'かえんのいき 양 번호: {burns["flameamount"]}')
+    results['flame'] = burns
+    fire = {c: breath_hits(out, f'pflame-{c}') for c in ('original', 'flameresist')}
+    flat = {c: [h for hits in v for h in hits] for c, v in fire.items()}
+    require(len(flat['original']) >= 3 and all(isinstance(h, int) and 30 <= h <= 40 for h in flat['original']),
+            f'かえんのいき 원본(몬스터): {fire["original"]}')
+    require(len(flat['flameresist']) >= 3 and RESISTED in flat['flameresist']
+            and all(h == RESISTED or h <= 1 for h in flat['flameresist']), f'かえんのいき 내성 칸: {fire["flameresist"]}')
+    results['pflame'] = fire
+
+    mera = {c: casts(out, f'pmera-{c}') for c in ('original', 'meraamount', 'meraresist')}
+    require(len(mera['original']) >= 2 and all(len(h) == 1 and 7 <= h[0][1] <= 12 for h in mera['original']),
+            f'몬스터 メラ 원본: {mera["original"]}')
+    require(len(mera['meraamount']) >= 2 and all(len(h) == 1 and 70 <= h[0][1] <= 90 for h in mera['meraamount']),
+            f'몬스터 メラ 양 번호: {mera["meraamount"]}')
+    require(len(mera['meraresist']) >= 2 and all(h == [] for h in mera['meraresist'])
+            and after_join(out, 'pmera-meraresist').count(RESISTED) >= 2, f'몬스터 メラ 내성 칸: {mera["meraresist"]}')
+    results['pmera'] = mera
     save_json(out / 'results.json', results)
     return results
 
