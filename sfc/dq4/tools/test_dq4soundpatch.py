@@ -89,15 +89,6 @@ class SequenceValidationTests(unittest.TestCase):
         self.assertEqual(patch.unpin_sequences(data, {0x17, 0x02}), [0x17])
         self.assertEqual(bytes(data[pos:pos + 5]), bytes.fromhex('00 1D 32 FF FF'))
 
-    def test_unpin_adds_into_freed_entries_only(self):
-        data = bytearray(0x180000)
-        pos = lorom(patch.RESIDENT_SEQUENCES)
-        data[pos:pos + 5] = bytes.fromhex('00 17 1D 32 FF')
-        patch.unpin_sequences(data, {0x00}, add=(0x43,))
-        self.assertEqual(bytes(data[pos:pos + 5]), bytes.fromhex('17 1D 32 43 FF'))
-        with self.assertRaisesRegex(ValueError, 'no free entry'):
-            patch.unpin_sequences(data, set(), add=(0x44,))
-
     def test_rejects_eight_voice_bgm(self):
         with self.assertRaisesRegex(ValueError, '1..7 voices'):
             patch.validate_replacement(patch.Replacement(bytes([120, 8, 0, 0]), (0x18,)))
@@ -227,18 +218,28 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(out[lorom(patch.MAP_START):lorom(patch.MAP_START) + 4], bytes.fromhex('22 80 80 71'))
 
 
-    def test_effect_route_hooks_the_effect_entry_and_pins_the_new_sequence(self):
+    def test_weapon_sounds_hook_the_type_lookup_and_fill_both_tables(self):
         base = bytearray(self.base)
-        site = lorom(patch.EFFECT_ROUTE_SITE)
-        base[site:site + len(patch.EFFECT_ROUTE_ORIGINAL)] = patch.EFFECT_ROUTE_ORIGINAL
-        effect = patch.Replacement(melody(), (0x18,), 1)
-        out, report = patch.install(bytes(base), {2: self.item, 0x43: effect}, unpin=(0x17,), pin_new=(0x43,),
-                                    effect_routes=[(0x37, 0x43, {5, 7}, {0x17})])
-        self.assertEqual(out[site:site + 4], bytes([0x5C]) + patch.EFFECT_ROUTE.to_bytes(3, 'little'))
-        code = patch.effect_route_code([(0x37, 0x43, {5, 7}, {0x17})])
-        self.assertEqual(out[lorom(patch.EFFECT_ROUTE):lorom(patch.EFFECT_ROUTE) + len(code)], code)
-        self.assertIn(0x43, patch.pinned_sequences(out))
-        self.assertEqual(report['effect_routes'], [{'from': '37', 'to': '43', 'branches': ['05', '07'], 'songs': ['17']}])
+        site = lorom(patch.WEAPON_SOUND_SITE)
+        base[site:site + len(patch.WEAPON_SOUND_ORIGINAL)] = patch.WEAPON_SOUND_ORIGINAL
+        sounds = {0x06: (0x43, 0x04), 0x0C: (0x42, 0x02), patch.BARE_HANDS: (0x43, 0x00)}
+        out, report = patch.install(bytes(base), {2: self.item}, weapon_sounds=(sounds, (0x17,)))
+        self.assertEqual(out[site:site + 5], bytes([0x5C]) + patch.WEAPON_SOUND.to_bytes(3, 'little') + bytes([0xEA]))
+        seq = lorom(patch.WEAPON_SEQ_TABLE)
+        branch = lorom(patch.WEAPON_BRANCH_TABLE)
+        self.assertEqual((out[seq + 0x06], out[branch + 0x06]), (0x43, 0x04))
+        self.assertEqual((out[seq + 0x0C], out[branch + 0x0C]), (0x42, 0x02))
+        self.assertEqual(out[seq + 0x07], 0xFF)    # 표에 없는 무기는 DQ5 종류별 소리
+        self.assertEqual(report['weapon_sounds']['items']['80'], '43-00')
+
+    def test_effect_calls_change_only_the_effect_number_of_brk_calls(self):
+        base = bytearray(self.base)
+        at = lorom(0x2589C5)
+        base[at:at + 4] = bytes.fromhex('00 16 35 00')
+        out, _ = patch.install(bytes(base), {2: self.item}, effect_calls={0x2589C5: (0x35, 0x3F)})
+        self.assertEqual(out[at:at + 4], bytes.fromhex('00 16 3F 00'))
+        with self.assertRaises(ValueError):
+            patch.install(bytes(base), {2: self.item}, effect_calls={0x2589C5: (0x34, 0x3F)})
 
 
 @unittest.skipUnless(ROM.exists(), 'user-supplied DQ5 ROM required')
@@ -246,19 +247,19 @@ class RealRomInstallTests(InstallTests):
     load = staticmethod(ROM.read_bytes)
 
 
-class EffectRouteCodeTests(unittest.TestCase):
-    def test_route_code_ends_in_the_original_entry(self):
-        code = patch.effect_route_code([(0x37, 0x43, {5}, {0x17})])
-        # 원래 입구와 같은 PHP / SEP #20 / PHA / LDA #0C 뒤 JML 24:FF83
-        self.assertTrue(code.endswith(bytes.fromhex('08 E2 20 48 A9 0C 5C 83 FF 24')))
-        self.assertIn(bytes.fromhex('AF 8B 1D 7E'), code)   # 지금 곡은 긴 주소로(DB 를 모름)
-        self.assertIn(bytes.fromhex('A0 43'), code)
+class WeaponSoundCodeTests(unittest.TestCase):
+    def test_code_plays_through_the_original_call_or_resumes_the_type_lookup(self):
+        code = patch.weapon_sound_code((0x43, 0x00), [0x17])
+        self.assertIn(bytes.fromhex('AF 8B 1D 7E C9 17'), code)                          # 지금 곡이 17 일 때만
+        self.assertIn(bytes([0x5C]) + patch.WEAPON_PLAY.to_bytes(3, 'little'), code)     # 28:804A 로 소리
+        self.assertTrue(code.endswith(patch.WEAPON_SOUND_ORIGINAL + bytes([0x5C]) + patch.WEAPON_RESUME.to_bytes(3, 'little')))
+        self.assertIn(bytes.fromhex('A9 43 85 71 A9 00 85 72'), code)                    # 맨손
 
-    def test_route_rejects_branches_without_a_script_and_empty_routes(self):
+    def test_tables_reject_bare_hands_and_bad_branches(self):
         with self.assertRaises(ValueError):
-            patch.effect_route_code([(0x37, 0x43, {0x21}, {0x17})])
+            patch.weapon_tables({patch.BARE_HANDS: (0x43, 0)})
         with self.assertRaises(ValueError):
-            patch.effect_route_code([(0x37, 0x43, {5}, set())])
+            patch.weapon_tables({0x06: (0x43, 0x21)})
 
 
 class TransitionCodeTests(unittest.TestCase):

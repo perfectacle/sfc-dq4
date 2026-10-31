@@ -27,14 +27,14 @@ START = (CELLAR, 3 * 2, 0x0F * 2)                    # 지하 아래 방 (3,0F),
 CODE_AT = 0x5EC000
 # NDS mlb1a 의 수련: 검은 화면에서 칼 여섯 합(효과 0xAC + 효과음 0x62 + 기다리기 0x09), 그 뒤에 지하가 밝아진다.
 # (효과음, NDS 효과(dq4sparfx.EFFECTS 차례), 다음 합까지 프레임). 기다림은 NDS 스크립트 값(60fps).
-# 銅の剣 412 는 칼 갈래 37-06 이, 鋼の剣 416 은 롬에서 부르는 곳이 없는 칼 갈래 37-12 가 NDS 판으로 옮겨진다
-# (dq4sound-game.args 의 --sfx-pcm). 마지막 합(우리 편이 맞음 403)은 37-0D
+# 銅の剣 412·鋼の剣 416 은 DQ4 가 부르지 않는 효과음 40 의 갈래 01·02 에 옮겨 둔다(dq4sound-game.args 의 --sfx-pcm).
+# 마지막 합(우리 편이 맞음 403)은 37-0D
 # 합이 끝나면 NDS 는 지하를 90프레임에 걸쳐 밝히고(0x0E 90), 60·60프레임 기다린 뒤 검사가 묻는다
 REVEAL_STEP = 6     # 밝기 1 → 15 한 단계에 6프레임
 # NDS 는 지하에 들어오면 곡을 멈춘다(0x147 0). 무음 곡 4A(dq4sound-game.args 의 --silent-song)를 틀어 두면 그 곡에
-# 붙인 칼 효과음 샘플이 올라가, 곡 없이도 37 갈래가 NDS 판(43)으로 간다(--sfx-route 37=43@17,4A)
+# 붙인 칼 효과음 샘플이 미리 올라가(--sfx-carry 40=4A), 칼 소리를 부를 때 샘플을 받느라 늦지 않는다
 SILENT_SONG = 0x4A
-HERO_HIT, MASTER_HIT, LANDED = (0x37, 0x06), (0x37, 0x12), (0x37, 0x0D)
+HERO_HIT, MASTER_HIT, LANDED = (0x40, 0x01), (0x40, 0x02), (0x37, 0x0D)
 SPAR = [(HERO_HIT, 0, 30), (MASTER_HIT, 1, 60), (HERO_HIT, 0, 30), (MASTER_HIT, 1, 20), (MASTER_HIT, 1, 60),
         (LANDED, 1, 90)]
 

@@ -86,7 +86,7 @@ class WaveTests(unittest.TestCase):
         self.assertEqual(more, [0x22])
 
 
-class RoutedTests(unittest.TestCase):
+class SpareTests(unittest.TestCase):
     def test_one_base_keeps_pitch_and_splits_regions(self):
         score = {'instruments': {'57': {'type': 'PCM', 'regions': [
                     {'lo': 0, 'hi': 12, 'base': 8, 'sample': 'a.wav'},
@@ -103,10 +103,48 @@ class RoutedTests(unittest.TestCase):
             (region,) = out['instruments'][str(e['program'])]['regions']
             self.assertEqual((region['lo'], region['hi'], region['base']), (0, 127, sfx.BASE_KEY))
 
-    def test_routed_sequence_plays_only_its_branches(self):
+    def test_notes_above_the_pitch_limit_drop_by_octaves_and_slides_stop_at_it(self):
+        score = {'instruments': {'1': {'type': 'PCM', 'regions': [{'lo': 0, 'hi': 127, 'base': 60, 'sample': 'a.wav'}]}},
+                 'timeline': [{'op': 'note', 'program': 1, 'note': 110, 'bend': 0, 'slide': (20, 4)}]}
+        (note,) = sfx.one_base(score)['timeline']
+        self.assertEqual(note['note'], 110 - 24)
+        self.assertEqual(note['slide'], (sfx.BASE_KEY + sfx.MAX_SHIFT - note['note'], 4))
+
+    def test_bend_slides_follow_the_bends_written_while_the_note_sounds(self):
+        dump = """[track0] $9A58
+  9A58  C7 00         note-wait 0
+  9A63  C5 3C         bend-range 60
+  9A6A  C4 FE         bend -2
+  9A6C  47 7F 03      note B4(47) vel=127 gate=3
+  9A6F  C4 08         bend 8
+  9A75  80 01         rest len=1
+  9A85  C4 50         bend 80
+  9A87  80 02         rest len=2
+  9A89  4B 7F 04      note D#5(4B) vel=127 gate=4
+"""
+        score = {'timeline': [{'op': 'note', 'ch': 'track0', 'tick': 0, 'note': 71, 'gate': 3, 'bend': -2},
+                              {'op': 'note', 'ch': 'track0', 'tick': 3, 'note': 75, 'gate': 4, 'bend': 80}]}
+        first, second = sfx.bend_slides(score, dump)['timeline']
+        self.assertEqual(first['slide'], (round(82 * 60 / 128), 1))   # 틱 1 의 벤드 80 까지
+        self.assertNotIn('slide', second)
+
+    def test_slide_note_sounds_one_tick_then_slides_and_ties(self):
+        score = {'tempo': 120, 'ticks_per_quarter': 48, 'end_tick': 16, 'volume': 127,
+                 'timeline': [{'op': 'note', 'tick': 0, 'ch': 'track0', 'note': 60, 'velocity': 100, 'gate': 8,
+                               'program': 5, 'uid': 0, 'slide': (-12, 6)}],
+                 'instruments': {'5': {'type': 'PCM', 'regions': [{'lo': 0, 'hi': 127, 'sample': 'w.wav', 'base': 60}]}}}
+        _, body, _, _ = sfx.convert_branch(score, sfx.noise_program_map(score, {'w.wav': 0x22}), [0x22])
+        words = [ln.split() for ln in body]
+        at = next(i for i, w in enumerate(words) if w[:1] == ['note'])
+        self.assertEqual(words[at][2:], ['len', '01'])
+        self.assertEqual(words[at + 1], ['pitch_slide', 'F4', '06'])
+        self.assertEqual(next(w[0] for w in words[at + 2:] if w[0] != 'gate_preset'), 'tie')
+
+    def test_silent_branch_and_spare_sequence_play_only_their_branches(self):
         base = assemble(['tempo 3C', 'track Lnone', 'Lnone:', '  end'])
-        seq = sfx.splice(base, {7: (['L0006'], ['L0006:', '  note 30 len 02', '  end'])})
+        seq = sfx.splice(base, {7: (['L0006'], ['L0006:', '  note 30 len 02', '  end']), 3: ([], [])})
         self.assertEqual(notes(seq, 7), [[(0, 0x30, False)]])
+        self.assertEqual(notes(seq, 3), [[]])
         self.assertEqual(notes(seq, 0), [[]])
 
 
