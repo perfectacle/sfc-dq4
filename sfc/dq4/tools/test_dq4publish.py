@@ -11,7 +11,8 @@ import dq4publish as publish
 class StampTests(unittest.TestCase):
     def test_inputs_cover_build_steps_and_lock(self):
         names = {p.as_posix() for p in publish.inputs()}
-        for tool in ('dq4build.py', 'dq4chapter1.py', 'dq4menupatch.py', 'dq4overture.py', 'dq4titlelayerpatch.py'):
+        for tool in ('dq4build.py', 'dq4chapter1.py', 'dq4menupatch.py', 'dq4overture.py', 'dq4titlelayerpatch.py',
+                     'dq4soundset.py', 'dq4sound-game.args'):
             self.assertIn(f'sfc/dq4/tools/{tool}', names)
         self.assertIn('uv.lock', names)
         self.assertFalse(any('__pycache__' in n or n.startswith('rom/') or n.startswith('work/') for n in names))

@@ -1,14 +1,20 @@
-"""1장 통합 롬을 처음부터 만든다: 타이틀 레이어 → 타이틀 롬 → 서곡 → 메뉴 → 1장 첫머리.
+"""1장 통합 롬을 처음부터 만든다: 타이틀 레이어 → 타이틀 롬 → 서곡 → 메뉴 → 1장 첫머리 → 곡 묶음.
 
 단계마다 dq4buildcache.run 으로 불러, 도구·입력이 바뀌지 않은 단계는 캐시에서 꺼낸다. 서로 기다릴 필요가 없는
 타이틀 레이어와 1장 메시지는 함께 돌린다. ASAR·DQ4_GALMURI 가 필요하다(dq4menupatch.py).
 
-  python sfc/dq4/tools/dq4build.py --out work/ch1 [--no-prologue]
+곡 묶음은 1장 롬 위에 dq4soundset.py @dq4sound-game.args 로 얹는다. NDS 곡을 자원 저장소(--assets, 기본 DQ4_ASSETS)
+에서 읽으므로 그것이 없으면 곡 없이 끝난다. 이 단계는 dq4buildcache 를 거치지 않는다: 키가 자원 저장소 전체를
+해시하게 되고, dq4soundset 이 자원 저장소 안에 자기 캐시를 따로 둔다.
+
+  python sfc/dq4/tools/dq4build.py --out work/ch1 [--no-prologue] [--assets 폴더 | --no-sound]
 """
 import argparse
 import hashlib
+import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import subprocess
 import sys
 
 HERE = Path(__file__).resolve().parent
@@ -22,7 +28,7 @@ def step(tool, *args):
     dq4buildcache.run(HERE / tool, *args, echo_stderr=True)
 
 
-def build(out, dq5, dq4, prologue=True):
+def build(out, dq5, dq4, prologue=True, assets=None):
     out.mkdir(parents=True, exist_ok=True)
     with ThreadPoolExecutor() as pool:
         layers = pool.submit(step, 'dq4titlelayers.py', '--out', out / 'title')
@@ -37,7 +43,12 @@ def build(out, dq5, dq4, prologue=True):
          '--out', out / 'menu.sfc')
     step('dq4chapter1.py', 'build', '--rom', out / 'menu.sfc', '--dq5', dq5, '--dq4', dq4,
          '--out', out / 'dq4-ch1.sfc', *([] if prologue else ['--no-prologue']))
-    return out / 'dq4-ch1.sfc'
+    if assets is None:
+        return out / 'dq4-ch1.sfc'
+    subprocess.run([sys.executable, HERE / 'dq4soundset.py', '--base', out / 'dq4-ch1.sfc', '--assets', assets,
+                    f'@{HERE / "dq4sound-game.args"}', '--out', out / 'dq4-ch1-sound.sfc'],
+                   check=True, stdout=subprocess.DEVNULL)
+    return out / 'dq4-ch1-sound.sfc'
 
 
 def main():
@@ -46,8 +57,14 @@ def main():
     ap.add_argument('--dq5', default='rom/dq5.sfc', type=Path)
     ap.add_argument('--dq4', default='rom/dq4.nes', type=Path)
     ap.add_argument('--no-prologue', action='store_true', help='NDS 서장 없이 새 게임을 1장으로 시작')
+    ap.add_argument('--assets', type=Path, default=os.environ.get('DQ4_ASSETS'),
+                    help='곡 묶음의 NDS 곡을 읽을 자원 저장소(기본 DQ4_ASSETS)')
+    ap.add_argument('--no-sound', action='store_true', help='곡 묶음을 얹지 않음')
     args = ap.parse_args()
-    rom = build(args.out, args.dq5, args.dq4, not args.no_prologue)
+    assets = None if args.no_sound else args.assets
+    if assets is None and not args.no_sound:
+        print('자원 저장소(--assets, DQ4_ASSETS)가 없어 곡 묶음 없이 만든다', file=sys.stderr)
+    rom = build(args.out, args.dq5, args.dq4, not args.no_prologue, assets)
     print(f'{rom} sha1={hashlib.sha1(rom.read_bytes()).hexdigest()}')
 
 
