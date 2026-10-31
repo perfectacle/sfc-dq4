@@ -71,8 +71,9 @@ def opened(before, after):
     return [(a, after[a] & ~before[a]) for a in OPEN_BITS if after[a] & ~before[a]]
 
 
-def run_entry(mesence, rom, state, out, name, to, facing, reward, message, drawer):
-    where = scene(mesence, rom, state, out, name, TO=to, LATESET=f"31E0={facing:02X}", SAVE="scene.mss")
+def run_entry(mesence, rom, state, out, preset, name, to, facing, reward, message, drawer):
+    extra = {"SET": preset} if preset else {}
+    where = scene(mesence, rom, state, out, name, TO=to, LATESET=f"31E0={facing:02X}", SAVE="scene.mss", **extra)
     saved = out / name / "scene.mss"
     want = {"map": to.split(",")[0], "cell": [int(v) for v in to.split(",")[1:3]]}
     if not saved.is_file() or not same_place(where, want):
@@ -110,6 +111,8 @@ def main():
     ap.add_argument("--state", default="work/state/ship.mss", type=Path)
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--jobs", type=int, default=4)
+    ap.add_argument("--set", default="", help="WRAM writes before the warp (dq5warp.lua SET), e.g. 2199|01")
+    ap.add_argument("--maps", help="only these comma-separated maps, e.g. 36/01")
     args = ap.parse_args()
     mesence = Path(os.environ["MESENCE"])
     out = args.out.resolve()
@@ -120,7 +123,10 @@ def main():
     sources = fc_maps(ines.prg(args.dq4.read_bytes()))
     place = json.loads((args.build / "chests.json").read_text(encoding="utf-8"))
     jobs = []
+    only = set(args.maps.split(",")) if args.maps else None
     for row in place["maps"]:
+        if only and row["map"] not in only:
+            continue
         source = sources[row["map"]]
         for kind in ("chests", "furniture"):
             for e in row.get(kind, []):
@@ -132,7 +138,7 @@ def main():
                 jobs.append((name, f"{row['map']},{hx},{hy}", facing, e["reward"], message, drawer))
     with ThreadPoolExecutor(args.jobs) as pool:
         results = dict(zip((j[0] for j in jobs),
-                           pool.map(lambda j: run_entry(mesence, rom, state, out, *j), jobs)))
+                           pool.map(lambda j: run_entry(mesence, rom, state, out, args.set, *j), jobs)))
     failed = {k: v for k, v in results.items() if not v["passed"]}
     report = {"status": "failed" if failed else "passed", "entries": len(results), "failed": failed}
     (out / "results.json").write_text(json.dumps(results, indent=1) + "\n", encoding="utf-8")
