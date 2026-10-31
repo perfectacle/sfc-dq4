@@ -3,6 +3,7 @@ import io
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import dq4publish as publish
 
@@ -43,6 +44,17 @@ class CheckTests(unittest.TestCase):
     def test_missing_source_asks_for_first_build(self):
         with self.assertRaisesRegex(SystemExit, 'build --commit'):
             publish.check(Path(self.enterContext(tempfile.TemporaryDirectory())))
+
+
+class RemoteTests(unittest.TestCase):
+    def test_token_goes_through_environment_not_arguments(self):
+        with mock.patch.dict('os.environ', {'GH_TOKEN': 'secret-token'}), \
+                mock.patch.object(publish.subprocess, 'run') as run:
+            publish.remote(Path('.'), 'push', '-q', 'origin', 'HEAD')
+        args, kwargs = run.call_args
+        self.assertNotIn('secret-token', ' '.join(args[0]))
+        self.assertTrue(kwargs['env']['GIT_CONFIG_VALUE_0'].startswith('Authorization: Basic '))
+        self.assertNotIn('secret-token', kwargs['env']['GIT_CONFIG_VALUE_0'])
 
 
 if __name__ == '__main__':
