@@ -26,8 +26,8 @@ import dq4prologue as pro  # noqa: E402
 
 MKSTATE = ROOT / 'tools' / 'lua' / 'mkstate.lua'
 WALK = ROOT / 'tools' / 'lua' / 'walk.lua'
-START_AT = 1800     # 검사가 나가고 조작이 풀린 뒤
-TAP_UNTIL = 1700    # 그 앞까지 A 연타(물음은 예)
+START_AT = 2230     # 검사가 나가고 조작이 풀린 뒤
+TAP_UNTIL = 2130    # 그 앞까지 A 연타(물음은 예)
 
 
 def door(face):

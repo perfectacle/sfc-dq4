@@ -49,10 +49,12 @@ class PrologueTests(unittest.TestCase):
         ops = [(c['op'], c['args']) for c in scripts[0]['commands']]
         points = box.entry_points(box.GAME_SCENES)
         calls = [a for op, a in ops if op == '37']
-        self.assertEqual(calls[:2], [pro._long(points['box0']), pro._long(points['reveal'])])
+        _, at = pro.native()
+        # 무음 곡 → 상자 → 검은 화면의 칼 여섯 합 → 느린 밝히기(NDS 0x0E 90)
+        self.assertEqual(calls[:4], [pro._long(at['quiet']), pro._long(points['box0']), pro._long(at['spar']),
+                                     pro._long(at['reveal_slow'])])
         wait = ops.index(('09', [0x80 | pro.DONE[0], pro.DONE[1]]))
         # 말을 걸기 전에 저절로 대화를 연다(37 → 이벤트 A0 → 06:AF1C)
-        _, at = pro.native()
         self.assertEqual(ops[wait - 1], ('37', pro._long(at['talk_here'])))
         self.assertLess(wait, ops.index(('28', [])))
         self.assertEqual(overrides[0]['map'], pro.CELLAR)

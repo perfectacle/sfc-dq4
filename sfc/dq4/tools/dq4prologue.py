@@ -15,6 +15,7 @@ sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
 import dq4chapter1 as ch1  # noqa: E402
 import dq4chapterbox as box  # noqa: E402
+import dq4sparfx as fx  # noqa: E402
 from dq4environmentrom import GROUPS  # noqa: E402
 from dq5map import lorom  # noqa: E402
 
@@ -24,7 +25,18 @@ SCENE = box.PROLOGUE
 DONE = (SCENE.flag[0] - 0x7E2190, SCENE.flag[1])
 START = (CELLAR, 3 * 2, 0x0F * 2)                    # 지하 아래 방 (3,0F), 검사 바로 아래(말을 걸 수 있게)
 CODE_AT = 0x5EC000
-SWORD = (0x37, 0x00)                                 # 효과음 37(공격이 맞을 때)
+# NDS mlb1a 의 수련: 검은 화면에서 칼 여섯 합(효과 0xAC + 효과음 0x62 + 기다리기 0x09), 그 뒤에 지하가 밝아진다.
+# (효과음, NDS 효과(dq4sparfx.EFFECTS 차례), 다음 합까지 프레임). 기다림은 NDS 스크립트 값(60fps).
+# 銅の剣 412 는 칼 갈래 37-06 이, 鋼の剣 416 은 롬에서 부르는 곳이 없는 칼 갈래 37-12 가 NDS 판으로 옮겨진다
+# (dq4sound-game.args 의 --sfx-pcm). 마지막 합(우리 편이 맞음 403)은 37-0D
+# 합이 끝나면 NDS 는 지하를 90프레임에 걸쳐 밝히고(0x0E 90), 60·60프레임 기다린 뒤 검사가 묻는다
+REVEAL_STEP = 6     # 밝기 1 → 15 한 단계에 6프레임
+# NDS 는 지하에 들어오면 곡을 멈춘다(0x147 0). 무음 곡 4A(dq4sound-game.args 의 --silent-song)를 틀어 두면 그 곡에
+# 붙인 칼 효과음 샘플이 올라가, 곡 없이도 37 갈래가 NDS 판(43)으로 간다(--sfx-route 37=43@17,4A)
+SILENT_SONG = 0x4A
+HERO_HIT, MASTER_HIT, LANDED = (0x37, 0x06), (0x37, 0x12), (0x37, 0x0D)
+SPAR = [(HERO_HIT, 0, 30), (MASTER_HIT, 1, 60), (HERO_HIT, 0, 30), (MASTER_HIT, 1, 20), (MASTER_HIT, 1, 60),
+        (LANDED, 1, 90)]
 
 say = ch1.say
 # 서장 메시지. dq4chapter1.messages 가 1장 메시지와 합친다. dq4chapter1 을 스크립트로 돌리면 이 모듈이 import 하는
@@ -205,6 +217,91 @@ def _darken():
             bytes((0xA9, 0x0F, 0x8D, 0x1D, 0x00)) + box.LEAVE)
 
 
+def _rel(code, target):
+    """code 끝에 둘 2바이트 분기의 거리(code 다음 바이트 기준)."""
+    d = target - (len(code) + 2)
+    if not -128 <= d <= 127:
+        raise ValueError(f'분기가 멂: {d}')
+    return d & 0xFF
+
+
+def _fx_frames(addr):
+    """서브루틴(JSR, M 8·X 16, DB 00). X = 프레임 목록(뱅크 fx.BANK), Y = 올릴 프레임 수. 프레임마다 화면을 잠깐 끄고
+    그 레코드의 타일 행과 팔레트(BG3 팔레트 1 = CGRAM 4~7, 색 버퍼에도)를 올린 뒤 한 프레임 기다린다."""
+    bank = fx.BANK >> 16
+    long_x = lambda op, off: bytes((op, off & 0xFF, off >> 8 & 0xFF, bank))  # noqa: E731
+    body = (bytes((0x5A, 0xDA, 0xC2, 0x20)) + long_x(0xBF, 0) + bytes((0xAA, 0xE2, 0x20,          # PHY / PHX / LDA rec
+            0xA9, 0x80, 0x8D, 0x00, 0x21, 0x8D, 0x15, 0x21,                                    # 화면 끔 / $2115 = 80
+            0xA9, 0x01, 0x8D, 0x70, 0x43, 0xA9, 0x18, 0x8D, 0x71, 0x43, 0xA9, bank, 0x8D, 0x74, 0x43,
+            0xC2, 0x20)) + long_x(0xBF, 0) + bytes((0x8D, 0x16, 0x21)) +                        # VRAM 자리
+            long_x(0xBF, 2) + bytes((0x8D, 0x72, 0x43)) + long_x(0xBF, 4) + bytes((0x8D, 0x75, 0x43,
+            0xE2, 0x20, 0xA9, 0x80, 0x8D, 0x0B, 0x42,                                          # 타일 DMA
+            0xA9, 0x04, 0x8D, 0x21, 0x21, 0x9C, 0x70, 0x43, 0xA9, 0x22, 0x8D, 0x71, 0x43,
+            0xC2, 0x20)) + long_x(0xBF, 6) + bytes((0x8D, 0x72, 0x43, 0xA9, 0x08, 0x00, 0x8D, 0x75, 0x43,
+            0xE2, 0x20, 0xA9, 0x80, 0x8D, 0x0B, 0x42,                                          # 팔레트 DMA
+            0xC2, 0x20)) + long_x(0xBF, 6) + bytes((0xAA,)) +                                  # 색 버퍼에도
+            b''.join(long_x(0xBF, 2 * i) + bytes((0x8F, *(box.CGRAM_BUFFER + 8 + 2 * i).to_bytes(3, 'little')))
+                     for i in range(4)) +
+            bytes((0xE2, 0x20, 0xAD, 0x1D, 0x00, 0x8D, 0x00, 0x21)) + box.wait(1) +            # 화면 밝기 되돌림
+            bytes((0xFA, 0xE8, 0xE8, 0x7A, 0x88)))                                             # PLX / INX ×2 / PLY / DEY
+    return body + bytes((0xF0, 3, 0x4C, *(addr & 0xFFFF).to_bytes(2, 'little'), 0x60))      # BEQ / JMP 처음 / RTS
+
+
+def _fx_map(entry, step):
+    """BG3 타일맵 버퍼의 효과 자리(fx.COL·ROW, COLS x ROWS)를 entry 부터 칸마다 step 씩 늘린 값으로. M 8·X 16."""
+    out = bytearray((0xC2, 0x20, 0xA9, *entry.to_bytes(2, 'little')))
+    for r in range(fx.ROWS):
+        row = bytearray((0xA2, *(((fx.ROW + r) * 32 + fx.COL) * 2).to_bytes(2, 'little'), 0xA0, fx.COLS, 0x00))
+        loop = bytes((0x9F, *(box.MAP_BUFFER & 0xFFFF).to_bytes(2, 'little'), box.MAP_BUFFER >> 16)) + \
+            (bytes((0x1A,)) if step else b'') + bytes((0xE8, 0xE8, 0x88))
+        out += row + loop + bytes((0xD0, _rel(loop, 0)))
+    out += bytes((0xE2, 0x20))
+    return bytes(out)
+
+
+def _spar(at):
+    """장 제목 상자 뒤 검은 화면(주화면 BG3 만)에서 칼 여섯 합. 합마다 효과음(BRK 16 n X)을 내고, 칼 효과 자료
+    (dq4sparfx, 뱅크 fx.BANK)가 있으면 그 효과 프레임을 BG3 의 메시지 창 캔버스 타일에 올린다. 자료가 없으면 효과음과
+    기다리기만. 끝에 타일맵·캔버스·팔레트 1 을 되돌린다."""
+    me = at.get('spar', CODE_AT)
+    blank2 = at.get('blank2', 0)
+    plain = bytearray()
+    for (se, branch), _, gap in SPAR:
+        plain += bytes((0x00, 0x16, se, branch)) + box.wait(gap)
+    head = box.ENTER + bytes((0xAF, *fx.BANK.to_bytes(3, 'little'), 0xC9, fx.MAGIC[0]))       # LDA 표시 / CMP
+    save = bytes((0xC2, 0x20)) + b''.join(bytes((0xAF, *(box.CGRAM_BUFFER + 8 + 2 * i).to_bytes(3, 'little'), 0x48))
+                                          for i in range(4)) + bytes((0xE2, 0x20))
+    blank_out = bytes((0xA9, 0x80, 0x8D, 0x00, 0x21))
+    blank_in = bytes((0xAD, 0x1D, 0x00, 0x8D, 0x00, 0x21))
+    first = box.CANVAS
+    setup = (save + _fx_map(0x2000 | 1 << 10 | first, True) + blank_out +
+             box.dma_vram(box.BG3_MAP, box.MAP_BUFFER, 0x800) + blank_in)
+    teardown = (_fx_map(box.BLANK, False) + blank_out + box.dma_vram(box.BG3_MAP, box.MAP_BUFFER, 0x800) +
+                box.fill_vram(box.BG3_CHR + first * 8, blank2, fx.ROWS * fx.COLS * 8) + bytes((0xC2, 0x20)) +
+                b''.join(bytes((0x68, 0x8F, *(box.CGRAM_BUFFER + 8 + 2 * i).to_bytes(3, 'little')))
+                         for i in reversed(range(4))) + bytes((0xE2, 0x20)) +
+                box.dma_cgram(4, box.CGRAM_BUFFER + 8, 8) + blank_in)
+    # 자리: head, BNE plain, JMP fx, plain, JMP end, fx: setup, 합들, teardown, end: LEAVE, frames 서브루틴
+    fx_at = len(head) + 2 + 3 + len(plain) + 3
+    def strikes(sub):
+        out = bytearray()
+        for (se, branch), effect, gap in SPAR:
+            shown = min(fx.FRAMES, gap)
+            out += bytes((0x00, 0x16, se, branch, 0xC2, 0x20,
+                          0xAF, *(fx.BANK + 4 + 2 * effect).to_bytes(3, 'little'), 0xAA, 0xE2, 0x20,   # X = 목록
+                          0xA0, shown, 0x00, 0x20, *(sub & 0xFFFF).to_bytes(2, 'little')))             # LDY / JSR
+            if gap > shown:
+                out += box.wait(gap - shown)
+        return bytes(out)
+    end_at = fx_at + len(setup) + len(strikes(0)) + len(teardown)
+    sub_at = end_at + len(box.LEAVE)
+    fixed = strikes(me + sub_at)
+    code = (head + bytes((0xD0, 3, 0x4C, *((me + fx_at) & 0xFFFF).to_bytes(2, 'little'))) + bytes(plain) +
+            bytes((0x4C, *((me + end_at) & 0xFFFF).to_bytes(2, 'little'))) +
+            setup + fixed + teardown + box.LEAVE + _fx_frames(me + sub_at))
+    return code
+
+
 def _skip_song():
     """맵을 불러올 때 곡을 바꾸지 않게(7E:21A5 bit6). 1장 상자·서술 동안 곡이 없게, 새 게임 시작과 같은 값."""
     addr, bit = box.SKIP_SONG
@@ -280,6 +377,13 @@ def native():
         put('wait', box.ENTER + box.wait(20) + box.LEAVE)
         put('wait6', box.ENTER + box.wait(6) + box.LEAVE)
         put('wait2', box.ENTER + box.wait(2) + box.LEAVE)
+        put('blank2', bytes((0x00, 0xFF)))      # 빈 캔버스 줄(plane 0 = 00, plane 1 = FF, dq4chapterbox 와 같음)
+        put('quiet', box.ENTER + bytes((0xA9, SILENT_SONG, 0x22, 0x91, 0xFE, 0x24,      # 1A(앞 곡 정리)
+                                        0xA9, SILENT_SONG, 0x22, 0x9A, 0xFE, 0x24)) +   # 01(곡 틀기)
+            box.LEAVE)
+        put('spar', _spar(at))
+        put('reveal_slow', box.reveal_code(REVEAL_STEP))
+        put('wait60', box.ENTER + box.wait(60) + box.LEAVE)
         put('face_hero', _face_hero())
         put('darken', _darken())
         put('talk_slot', _talk_slot())
@@ -361,11 +465,10 @@ def _spin(at):
 
 
 def master_script(boxes):
-    """수련: 상자 → 밝히기 → 칼 소리 셋 → 조작을 풀고 주인공이 말을 걸어 대화가 끝날(깃발) 때까지 → 맺음말 → 나가기."""
+    """수련: 상자 → 검은 화면에서 칼 여섯 합 → 밝히기 → 조작을 풀고 주인공이 말을 걸어 대화가 끝날(깃발) 때까지 → 맺음말 → 나가기."""
     _, at = native()
-    head = [_cmd('3F'), _cmd('37', *_long(boxes[SCENE.name])), _cmd('37', *_long(boxes['reveal'])),
-            _cmd('02', 3), _cmd('37', *_long(at['wait'])), _cmd('20', *SWORD), _cmd('01'),
-            _cmd('37', *_long(at['wait'])),
+    head = [_cmd('3F'), _cmd('37', *_long(at['quiet'])), _cmd('37', *_long(boxes[SCENE.name])), _cmd('37', *_long(at['spar'])),
+            _cmd('37', *_long(at['reveal_slow'])), _cmd('37', *_long(at['wait60'])), _cmd('37', *_long(at['wait60'])),
             _cmd('37', *_long(at['talk_here'])), _wait_on(DONE)]
     tail = [_msg(M_AFTER)] + _walk(MASTER_OUT) + [_cmd('28'), _cmd('40'), _cmd('16')]
     return {"address": MASTER_SCRIPT, "commands": head + tail}

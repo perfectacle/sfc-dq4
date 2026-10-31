@@ -457,21 +457,26 @@ class Layout:
                     fade(1, 15, FADE_STEP) + wait_button() + fade(14, 0, FADE_STEP) + soft_reset())
         boxes = [ending(map_at, rows(scene.subtitle)) if scene.subtitle else box(map_at)
                  for scene, map_at in zip(self.scenes, a['maps'])]
-        # FC 는 서술 창이 닫히면 곡을 멈추고, 왕좌의 방이 밝아질 때 성 곡을 튼다
-        # 곡 자료를 SPC 로 보내는 동안(소리 롬에서 약 160프레임) 화면을 검게 두고, 곡이 시작되면 밝힌다
-        song_wait = bytes((0xDA,)) + wait(1) + bytes((0xFA,                 # PHX / BRK 09 01 / PLX
-                     0xAD, 0x4B, 0x19, 0x29, 0x7F, 0xCD, 0x8B, 0x1D,       # LDA $194B / AND #$7F / CMP $1D8B
-                     0xF0, 0x03, 0xCA))                                    # BEQ 끝 / DEX
-        song_wait = (bytes((0xA2, *le(SONG_WAIT_MAX, 2))) + song_wait +
-                     bytes((0xD0, -(len(song_wait) + 2) & 0xFF)))          # LDX #max / … / BNE 고리
-        reveal = (ENTER + bytes((0xAF, *le(SKIP_SONG[0], 3), 0x29, ~SKIP_SONG[1] & 0xFF,   # LDA / AND #$BF
-                                 0x8F, *le(SKIP_SONG[0], 3))) +                       # STA $7E21A5
-                  bytes((0x22, 0x8F, 0xFE, 0x23)) + song_wait +          # JSL $23FE8F(맵 곡을 틀고 21DF 를 지움)
-                  bytes((0x9C, 0x1D, 0x00)) + wait(1) +                # 밝기 0 이 걸린 뒤 맵 층을 켠다
-                  # NMI 는 $0733 을 늘 $212C 로 쓰지 않으므로(실측) 맵을 불러올 때처럼 직접 쓴다
-                  bytes((0xA9, 0x17, 0x8D, 0x33, 0x07, 0x8D, 0x2C, 0x21, 0x8D, 0x2D, 0x21)) +
-                  fade(1, 15, REVEAL_STEP) + LEAVE)
+        reveal = reveal_code()
         return start, hook, boxes, reveal, soft_boot()
+
+
+def reveal_code(step=REVEAL_STEP):
+    """맵 밝히기: 맵 곡을 틀고 곡이 시작되기를 기다린 뒤 맵 층을 켜고 밝기를 한 단계에 step 프레임씩 올린다.
+    FC 는 서술 창이 닫히면 곡을 멈추고, 왕좌의 방이 밝아질 때 성 곡을 튼다. 곡 자료를 SPC 로 보내는 동안(소리 롬에서
+    약 160프레임) 화면을 검게 두고, 곡이 시작되면 밝힌다."""
+    song_wait = bytes((0xDA,)) + wait(1) + bytes((0xFA,                 # PHX / BRK 09 01 / PLX
+                 0xAD, 0x4B, 0x19, 0x29, 0x7F, 0xCD, 0x8B, 0x1D,       # LDA $194B / AND #$7F / CMP $1D8B
+                 0xF0, 0x03, 0xCA))                                    # BEQ 끝 / DEX
+    song_wait = (bytes((0xA2, *le(SONG_WAIT_MAX, 2))) + song_wait +
+                 bytes((0xD0, -(len(song_wait) + 2) & 0xFF)))          # LDX #max / … / BNE 고리
+    return (ENTER + bytes((0xAF, *le(SKIP_SONG[0], 3), 0x29, ~SKIP_SONG[1] & 0xFF,   # LDA / AND #$BF
+                           0x8F, *le(SKIP_SONG[0], 3))) +                       # STA $7E21A5
+            bytes((0x22, 0x8F, 0xFE, 0x23)) + song_wait +          # JSL $23FE8F(맵 곡을 틀고 21DF 를 지움)
+            bytes((0x9C, 0x1D, 0x00)) + wait(1) +                # 밝기 0 이 걸린 뒤 맵 층을 켠다
+            # NMI 는 $0733 을 늘 $212C 로 쓰지 않으므로(실측) 맵을 불러올 때처럼 직접 쓴다
+            bytes((0xA9, 0x17, 0x8D, 0x33, 0x07, 0x8D, 0x2C, 0x21, 0x8D, 0x2D, 0x21)) +
+            fade(1, 15, step) + LEAVE)
 
 
 START_AT = 0x25834A

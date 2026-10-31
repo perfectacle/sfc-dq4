@@ -487,7 +487,9 @@
 --sfx-gain-db
 37-0D=-1.3
 --sfx-route
-37=43@17
+37=43@17,4A
+--silent-song
+4A
 --sfx-pcm
 37-05=1C4
 --sfx-pcm
@@ -503,7 +505,7 @@
 --sfx-pcm
 37-0F=19C
 --sfx-pcm
-37-12=19C
+37-12=1A0@4A
 --sfx-pcm
 37-14=19C
 --record
@@ -514,6 +516,8 @@
 42=0:
 --record
 45=0:
+--record
+3D=0:
 --sfx-gain-db
 37-05=-0.7
 --sfx-gain-db
