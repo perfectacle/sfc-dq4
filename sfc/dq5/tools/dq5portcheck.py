@@ -8,7 +8,8 @@
   npc    인물 표 23칸·스크립트 포인터(dq5npcrelocatecheck 의 장면), 입력이 긴 스크립트 시험과 같으면 실행 5건
   map    고친 맵에 들어가 속성 패스 끝 01:BA4C 의 셀 버퍼를 롬 디코더와(dq5map --compare 와 같은 비교)
   event  번호 표·이벤트 표 조회로 새 스크립트를 실행(dq5scriptcheck 의 장면, 호출 틀은 실행 때만 ROMPATCH)
-  patch  쓰기가 통합 롬에 그대로 있는지. dq5tablecheck 의 고친 값(칸·피해량)이 들어 있으면 그 장면을 통합 롬에서
+  patch  쓰기가 통합 롬에 그대로 있는지. dq5tablecheck 의 고친 값(칸·피해량)이 들어 있으면 그 장면도 통합 롬에서 돌린다
+
 npc 작업에 records 가 있으면 원래 롬에 레코드 패치만 넣은 롬으로 인물 표를 예측한다. 그 문서가 dq5npcrecordcheck 의
 문서면 옮긴 인물이 낮에 새 대화 번호로 서고 말을 걸면 그 메시지가 뜨는지도 통합 롬에서 돌린다.
 
