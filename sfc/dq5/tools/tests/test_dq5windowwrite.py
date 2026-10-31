@@ -425,7 +425,7 @@ class WindowWriteTests(unittest.TestCase):
         cpu.wram[0x0D83] = 0x0E
         self.assertEqual(call(0x47, 0x20, vblank=0x80), [(0x420C, 0x8E), (0x2131, 0x47)])
         self.assertEqual(cpu.wram[0x0D83], 0x8E)
-        # 필드로 돌아감($70 bit7 = 0): 채널 7 을 뺀다. 전투로 들어감($70 bit7 = 1)이면 그대로.
+        # 필드로 돌아감($70 bit7 = 0): $0D83 에서 채널 7 을 빼고 $420C 는 00. 전투로 들어감($70 bit7 = 1)이면 그대로.
         for mode, want in ((0x80, (0x8E, [])), (0x00, (0x0E, [(0x420C, 0x00)]))):
             cpu.wram[0x70] = mode
             cpu.io_writes.clear()
