@@ -87,8 +87,10 @@ WALL = 8
 FLOOR = 1
 # FC counters (block property A7) are made like DQ5's shop counters (01/0C: +1 = 91, +4 = 15): floor cells with
 # +1 bit7 (attribute pass 2 bit2), which blocks walking, and attribute 15, which lets はなす reach the person
-# behind (without it the game answered 129 「その方向には　誰もいない。」 across a counter).
-COUNTER_PROP = 0xA7
+# behind (without it the game answered 129 「その方向には　誰もいない。」 across a counter). FC 97 is a さいごのカギ door
+# that はなす also reaches across (1E:$80D8 checks the low 7 bits 17·27), like イムル's jail bars (12/02 (3,3)); it
+# becomes a counter too, since no key opens it before chapter 5 and DQ5 has no door one can talk across.
+COUNTER_PROPS = {0xA7, 0x97}
 COUNTER_PASS = 4
 COUNTER_ATTR = 0x15
 # An opened 2x3 door keeps its top row on the upper layer and 01:FC1E fills one more row above it with upper
@@ -223,7 +225,7 @@ def block_head(name, source, fc_block):
         return 0, 0, STAIR_ATTR
     if prop & 0x7F == CHEST_KIND:
         return CHEST_HEAD
-    if prop == COUNTER_PROP:
+    if prop in COUNTER_PROPS:
         return 0, 0, COUNTER_ATTR
     return FURNITURE.get(prop, (0, 0, 0))
 
@@ -310,7 +312,7 @@ def map_document(name, source, local, target):
 
     def blocked(x, y):
         prop = _prop(source, x, y)
-        return WALL if prop & 0x80 and prop not in OPENINGS | {COUNTER_PROP} else None
+        return WALL if prop & 0x80 and prop not in OPENINGS | COUNTER_PROPS else None
 
     front = set()
     for x, y in ((x, y) for y in range(1, source.h) for x in range(source.w) if _prop(source, x, y) in DOORS):
@@ -327,7 +329,7 @@ def map_document(name, source, local, target):
                   if 0 <= cx < width and not _prop(source, cx // 2, cy // 2) & 0x80}
 
     def pass2(cx, cy):
-        value = (COUNTER_PASS if _prop(source, cx // 2, cy // 2) == COUNTER_PROP else 0) | \
+        value = (COUNTER_PASS if _prop(source, cx // 2, cy // 2) in COUNTER_PROPS else 0) | \
                 (FRONT_PASS if (cx, cy) in front else 0)
         return value or None
     # A chest block is all upper layer, so the floor goes under it first: an opened chest's transparent

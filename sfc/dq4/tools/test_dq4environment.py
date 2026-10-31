@@ -179,7 +179,7 @@ class CounterTests(unittest.TestCase):
         self.assertFalse(counters & walls)
         self.assertEqual({v for *_, v, _ in doc["passes"][1]["entries"]}, {rom.COUNTER_PASS})
         counter = source.cell(8, 41) & 31
-        self.assertEqual(block_prop(source, counter), rom.COUNTER_PROP)
+        self.assertIn(block_prop(source, counter), rom.COUNTER_PROPS)
         self.assertEqual(rom.block_head("0E-00", source, counter), (0, 0, rom.COUNTER_ATTR))
 
 
