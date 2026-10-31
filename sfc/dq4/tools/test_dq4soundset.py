@@ -82,6 +82,14 @@ class SongScoreTests(unittest.TestCase):
         out = soundset.song_score(self.SCORE, drop_tracks={'track10'}, drop_programs={127})
         self.assertEqual(out['timeline'], [self.SCORE['timeline'][0], self.SCORE['timeline'][2]])
 
+    def test_drops_one_program_of_a_track(self):
+        out = soundset.song_score(self.SCORE, drop_tracks={'track10@64', 'track0@40'})
+        self.assertEqual(out['timeline'], [self.SCORE['timeline'][i] for i in (0, 2, 3)])
+
+    def test_yield_marks_only_that_track(self):
+        out = soundset.song_score(self.SCORE, yield_tracks={'track10'})
+        self.assertEqual([e.get('yield', False) for e in out['timeline']], [False, True, False, False])
+
     def test_track_db_scales_velocity_of_a_track_or_one_program_in_it(self):
         score = {'timeline': [{'op': 'note', 'ch': 'track6', 'program': 45, 'velocity': 100},
                               {'op': 'note', 'ch': 'track8', 'program': 40, 'velocity': 100},

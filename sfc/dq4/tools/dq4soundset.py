@@ -160,7 +160,7 @@ def voice_volume(db):
 
 
 def song_score(score, drop_tracks=(), drop_programs=(), track_db=None, yield_tracks=()):
-    """drop_tracks(트랙 이름)·drop_programs 의 음을 빼고, track_db({트랙 또는 트랙@프로그램: dB}) 음의 세기를 바꾸고,
+    """drop_tracks(트랙 또는 트랙@프로그램)·drop_programs 의 음을 빼고, track_db({트랙 또는 트랙@프로그램: dB}) 음의 세기를 바꾸고,
     yield_tracks 의 음은 목소리가 모자랄 때 다른 음에 자리를 내주게(yield) 한 악보."""
     if not drop_tracks and not drop_programs and not track_db and not yield_tracks:
         return score
@@ -168,7 +168,7 @@ def song_score(score, drop_tracks=(), drop_programs=(), track_db=None, yield_tra
     timeline = []
     for e in score['timeline']:
         if e.get('op') == 'note':
-            if e['ch'] in drop_tracks or e['program'] in drop_programs:
+            if e['ch'] in drop_tracks or f"{e['ch']}@{e['program']}" in drop_tracks or e['program'] in drop_programs:
                 continue
             g = gain.get(f"{e['ch']}@{e['program']}", gain.get(e['ch']))
             if g is not None:
