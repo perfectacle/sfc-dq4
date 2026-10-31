@@ -31,18 +31,17 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(mw.plan(talks=[body]), (set(), {1, 2}))
 
     def test_script(self):
-        script = [cmd('3F'), cmd('21', 1, 0), cmd('37', 0, 0, 0), cmd('21', 2, 0), cmd('13', 0, 0), cmd('40'),
-                  cmd('21', 3, 0), cmd('21', 4, 0), cmd('37', 0, 0, 0), cmd('16')]
-        self.assertEqual(mw.plan(scripts=[script]), ({1, 3}, {2, 4}))
+        script = [cmd('3F'), cmd('30', 1, 0), cmd('37', 0, 0, 0), cmd('21', 2, 0), cmd('13', 0, 0), cmd('40'),
+                  cmd('30', 3, 0), cmd('40'), cmd('21', 4, 0), cmd('32', 5, 0), cmd('37', 0, 0, 0), cmd('16')]
+        self.assertEqual(mw.plan(scripts=[script]), ({1}, {2, 3, 4, 5}))
 
     def test_event(self):
         tokens = [b'\x08\x04', ('msg', 1), ('msg', 2), b'\xff']
-        self.assertEqual(mw.plan(events=[tokens]), ({1, 2}, set()))
-        self.assertEqual(mw.plan(events=[[('msg', 1)]]), (set(), {1}))
+        self.assertEqual(mw.plan(events=[tokens]), (set(), {1, 2}))
 
     def test_conflict(self):
         with self.assertRaises(ValueError):
-            mw.plan(talks=[[msg(1)]], scripts=[[cmd('21', 1, 0), cmd('21', 2, 0)]])
+            mw.plan(talks=[[msg(1)]], scripts=[[cmd('30', 1, 0), cmd('21', 2, 0)]])
 
     def test_apply_keeps_other_ends(self):
         texts = {1: ['a', mw.LINE_END], 2: ['b', mw.WAIT_END]}
@@ -50,17 +49,19 @@ class PlanTests(unittest.TestCase):
 
 
 class GameTests(unittest.TestCase):
-    """서장·1장에서 A 없이 넘어가던 자리(헤드리스 실측)가 1010, 대화 끝·조작 풀기 앞은 1001."""
+    """서장·1장에서 A 없이 넘어가던 대화 속 자리(헤드리스 실측)가 1010, 대화 끝·조작 풀기 앞과 닫기 대기를 하는
+    인물 명령 21·이벤트 명령 60 의 메시지는 1001(실측: 1010 이면 A 를 두 번)."""
 
     def test_game_plan(self):
         first = 0xF00
         wait, keep = mw.plan(**ch.message_flow(first))
         m = ev.message_ids(first)
-        must_wait = {pro.M_FROG_YES, pro.M_FROG_NO, pro.M_MORPH, pro.M_MIMIC, pro.M_BYE,
-                     pro.M_STORY_BEGINS, ch.MSG_MINISTER, m['reunion'], m['king_praise'], *pro.M_SUPPER_LINES}
+        must_wait = {pro.M_FROG_YES, pro.M_FROG_NO, m['king_praise']}
         self.assertLessEqual(must_wait, wait)
         must_keep = {pro.M_SORRY, m['chapter_end'], pro.M_CALL, pro.M_HELP, pro.M_FROG_ASK, pro.M_FROG_STORY, pro.M_SUPPER, ch.MSG_KING,
-                     m['hint'], m['king_farewell'], m['hoimin_ask']}
+                     m['hint'], m['king_farewell'], m['hoimin_ask'], pro.M_MORPH, pro.M_MIMIC, pro.M_BYE,
+                     pro.M_STORY_BEGINS, ch.MSG_NARRATION, ch.MSG_MINISTER, m['reunion'],
+                     *pro.M_SUPPER_LINES}
         self.assertLessEqual(must_keep, keep)
 
 
