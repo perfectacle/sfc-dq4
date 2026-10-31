@@ -66,10 +66,11 @@ class PlaceTests(unittest.TestCase):
 
 class LimitTests(unittest.TestCase):
     def test_budgets(self):
-        with Fakes(), mock('dq5monlimits.PIECE_LIST_LIMIT', 7):
+        with Fakes(), mock('dq5monlimits.PIECE_LIST_LIMIT', 7), mock('dq5monlimits.SLOT_LIMIT', 13), \
+                mock('dq5monlimits.EFFECT_SLOTS', 0):
             got = L.budgets(None, FOUND)
         # 조각: 조각 목록 한도를 7 로 두면 b(1 + 6 = 7) 에 걸려 0. 줄: a 는 (27 - 16) // 8 = 1, b 는 (27 - 12) // 4 = 3.
-        # 자리: 합이 가장 큰 b(1 + 6 = 7) 에 걸려 0.
+        # 자리: 한도 13 에서 가장 큰 그림 1(6)을 남기면 b(1 + 6 = 7)에 걸려 0.
         self.assertEqual(got[0], {'pieces': 0, 'bands': [1, 1], 'slots': 0, 'compositions': 2})
         self.assertEqual(got[1], {'pieces': 0, 'bands': [23, 23, 15, 15], 'slots': 0, 'compositions': 1})
 
@@ -90,14 +91,18 @@ class LimitTests(unittest.TestCase):
         self.assertEqual(unshown, [])
 
     def test_losses_slots(self):
-        # c 는 자리 30 + 30 = 60 으로 원래 합이 가장 큰 조합. 그림 0 을 자리 2 로 늘리면 b 가 8 이 되지만 60 안이다.
+        # 자리 합(부르기로 올 그림 포함)에 연출 몫과 가장 큰 그림 하나를 더해 한도와 견준다. c 는 그림 30 + 30.
+        # 그림 0 을 자리 2 로 늘리면 b 는 2 + 6 = 8 에 가장 큰 30 을 더해 38 이라 90 안이고, 55 로 늘리면 가장 큰 그림도
+        # 55 가 되어 61 + 55 = 116 이라 넘는다(그림 0 하나인 a 도 55 + 55).
         found = {**FOUND, ((2, 1, 0), (3, 1, 0)): 'c'}
-        with Fakes(), mock.dict(SLOTS, {2: 30, 3: 30}):
+        with Fakes(), mock.dict(SLOTS, {2: 30, 3: 30}), mock('dq5monlimits.SLOT_LIMIT', 90), \
+                mock('dq5monlimits.EFFECT_SLOTS', 0):
             self.assertEqual(L.losses(None, {0: (1, [2, 2], 2)}, found=found), [])
-            self.assertEqual([x[3] for x in L.losses(None, {0: (1, [2, 2], 55)}, found=found)], ['b'])
+            self.assertEqual([x[3] for x in L.losses(None, {0: (1, [2, 2], 55)}, found=found)], ['a', 'b'])
+        with Fakes(), mock('dq5monlimits.SLOT_LIMIT', 13), mock('dq5monlimits.EFFECT_SLOTS', 0):
             many = L.losses(None, {0: (1, [2, 2], 2)}, found=FOUND)
             loads = L.Pictures(None).loads(((0, 4, 0), (1, 1, 0), (0, 1, 0)))
-        self.assertEqual([(x[3], x[4]) for x in many], [('b', '16x16 자리 8개 > 7개')])
+        self.assertEqual([(x[3], x[4]) for x in many], [('b', '16x16 자리 8개 + 연출·도중 풀기 6개 > 13개')])
         self.assertEqual(loads, [(0, 0, 1), (1, 1, 6)])      # 그림 0 은 한 번만 푼다
 
     def test_losses_size(self):
@@ -175,7 +180,7 @@ class LimitTests(unittest.TestCase):
         # 몬스터 1 이 그림 3(그림 0 과 같은 머리)을 쓰면, 두 번호의 여유는 함께 센 하나다.
         found = {((0, 4, 0), (1, 4, 0)): 'c', ((0, 2, 0),): 'd'}
         with Fakes(), mock.dict(HEADS, {3: 0}), mock('dq5monlimits.M.monster', side_effect=lambda rom, m: ([0, 3][m], [])), \
-                mock('dq5monlimits.PIECE_LIST_LIMIT', 2):
+                mock('dq5monlimits.PIECE_LIST_LIMIT', 2), mock('dq5monlimits.SLOT_LIMIT', 3), mock('dq5monlimits.EFFECT_SLOTS', 0):
             got = L.budgets(None, found)
         # 조각: 조각 목록 한도를 2 로 두면 c(번호 둘, 1 + 1)에서 남는 0. 줄: c 는 같은 줄에 8마리라 (27 - 16) // 8 = 1.
         self.assertEqual(got[0], got[3])
