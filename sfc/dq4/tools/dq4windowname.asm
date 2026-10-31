@@ -139,7 +139,7 @@ org $24A5E9
 !wt_occ   = $3DF0           ; 13바이트: 가나 칸 010~077 의 쓰는 칸 비트(WtOcc 가 그때그때 만듦)
 !wt_tmp   = $3DFE           ; WtAlloc 안에서만: 찾는 칸 수, 찾은 첫 칸
 !wt_slot2 = $3D56           ; 이번에 쓴 슬롯 × 2, FFFF = 명령 창 전용 칸
-!wt_fixkey = $3D5E          ; 명령 창·가게 창 전용 칸 문구를 마지막으로 그린 버퍼 자리, 0 = 그 창이 안 보임(WtVis)
+!wt_fixkeys = $3EA0         ; 8 워드: 전용 칸에 그린 명령 창·가게 창 문구의 버퍼 자리, 0 = 빈 칸. WtVis 가 안 보이는 것을 지움
 !wt_k     = $3D58           ; 그리는 고정 문구 번호
 !wt_dirty = $3DD4           ; 2 워드: 슬롯마다 1비트, 메시지 캔버스 안에 그림을 올린 슬롯
 !wt_age   = $3D50           ; 쓸 때마다 하나씩
@@ -158,8 +158,8 @@ org $24A5E9
 !wq_rd    = $3D5C           ; NMI 가 다음으로 보낼 항목 자리. VBlank 가 끝나 가면 남은 항목을 다음 NMI 로 넘긴다
 !wq_defer = $3D5A           ; 1바이트: bit7·6 = 다음 NMI 로 미룬 게임의 창 타일맵 전송 요청($0BEC),
                             ; bit1·0 = 전투에 들어가면 되돌릴 가나 칸 덩이 수(필드에서 가나 칸 슬롯을 쓰면 3)
-!wq_buf   = $3EA0           ; 대기열 7E:3EA0~3FFF. 항목 [VRAM 워드 2][방식 1][칸 수 1][그림]
-!wq_size  = $0160
+!wq_buf   = $3EB0           ; 대기열 7E:3EB0~3FFF. 항목 [VRAM 워드 2][방식 1][칸 수 1][그림]
+!wq_size  = $0150
 !wq_left  = $3D66           ; NMI 안에서만: 남은 항목 수
 !wq_head  = $3D68           ; NMI 안에서만: 방식·칸 수
 !wq_len   = $3D6A           ; NMI 안에서만: 그림 바이트 수
@@ -1269,12 +1269,23 @@ WtFits:
     BCC +
     LDA.w !wt_field
     BEQ ++
-    ; 캔버스 밖 1D0~1FF 의 빈 슬롯은 명령 창·가게 창 문구가 안 보일 때만. 그 창이 다시 그려지면 문구가 같은 칸을 덮는다
+    ; 캔버스 밖 1D0~1FF 의 슬롯은 전용 칸 문구가 하나도 안 보일 때만(일부만 가려진 명령 창의 문구를 덮지 않게)
     LDA.l WtClass,X
     AND #$0020
     BEQ .size
-    LDA.w !wt_fixkey
-    BNE ++
+    PHX
+    LDX #$000E
+-
+    LDA.w !wt_fixkeys,X
+    BNE .busy
+    DEX
+    DEX
+    BPL -
+    PLX
+    BRA .size
+.busy
+    PLX
+    BRA ++
 .size
     LDA.l WtClass,X
     AND #$000F
@@ -1682,6 +1693,86 @@ WnTactic:
 
 ; 고정 문구 A(16비트)를 Y 자리(!wt_buf 기준)에 그린다. REP #$30 으로 부르고, Y 를 열 수 × 2 나아가 A = 열 수로 돌려준다.
 ; DB 는 그대로 둔다.
+; 전용 칸 문구(!wt_base 부터 열 × 2 칸)를 그리기 전에 같은 칸을 빌린 슬롯을 본다. 그 슬롯이 보이면 C = 1(문구는 일반
+; 슬롯으로 그려, 보이는 빌린 글자를 덮지 않는다). 안 보이면 슬롯을 비우고, 문구 자리를 !wt_fixkeys 에 넣고 C = 0.
+; 빌려 주는 쪽(WtFits)은 !wt_fixkeys 가 하나라도 있으면 빌려 주지 않아, 일부만 가려진 창의 문구도 덮지 않는다
+WtFixLend:
+    LDA.w !wt_cols
+    ASL
+    CLC
+    ADC.w !wt_base
+    STA.w !wt_tmp
+    LDX.w #!wt_nkana*2
+.slot
+    LDA.l WtClass,X
+    AND #$0020
+    BEQ .next
+    LDA.w !wt_ages,X
+    BEQ .next
+    LDA.l WtSlot,X
+    CMP.w !wt_tmp
+    BCS .next
+    PHX
+    LDA.l WtClass,X
+    AND #$000F
+    ASL
+    TAX
+    LDA.l WtLen,X
+    PLX
+    CLC
+    ADC.l WtSlot,X
+    CMP.w !wt_base
+    BEQ .next
+    BCC .next
+    PHX
+    TXA
+    LSR
+    TAX
+    LDA.w !wt_vis,X
+    PLX
+    AND #$00FF
+    BEQ +
+    SEC
+    RTS
++
+    STZ.w !wt_keys,X
+    STZ.w !wt_ages,X
+.next
+    INX
+    INX
+    CPX.w #!wt_nslot*2
+    BCC .slot
+    LDA.w !wt_buf
+    CLC
+    ADC.w !wn_y
+    STA.w !wt_tmp
+    LDX #$000E
+-
+    LDA.w !wt_fixkeys,X
+    CMP.w !wt_tmp
+    BEQ .done
+    DEX
+    DEX
+    BPL -
+    LDX #$000E
+-
+    LDA.w !wt_fixkeys,X
+    BEQ +
+    DEX
+    DEX
+    BPL -
+    ; 가득 차면(안 보이는데 줄을 아직 재지 않은 자리) 마지막 칸을 덮는다
+    LDX #$000E
++
+    LDA.w !wt_tmp
+    STA.w !wt_fixkeys,X
+.done
+    CLC
+    RTS
+
+WtLen:
+    dw 8, 14, 20
+
 WtFixedDraw:
     PHB
     STA.l $7E0000|!wt_k
@@ -1732,10 +1823,8 @@ WtNameDraw:
     LDA.l (!wt_bank<<16)|!wt_safe,X
     BEQ +
     STA.w !wt_base
-    LDA.w !wt_buf
-    CLC
-    ADC.w !wn_y
-    STA.w !wt_fixkey
+    JSR WtFixLend
+    BCS +
     LDA #$FFFF
     STA.w !wt_slot2
     BRA ++
@@ -2089,9 +2178,11 @@ WtVis:
     INX
     CPX.w #!wt_nslot*2
     BCC .slot
-    ; 전용 칸 문구 자리도 같은 줄 거르기로 재, 그 자리가 더는 1D0~1FF 를 가리키지 않으면 창이 닫힌 것으로 본다
-    LDA.w !wt_fixkey
-    BEQ .fixdone
+    ; 전용 칸 문구 자리도 같은 줄 거르기로 재, 그 자리가 더는 1D0~1FF 를 가리키지 않으면 지운다
+    LDX #$000E
+.fix
+    LDA.w !wt_fixkeys,X
+    BEQ .fixnext
     SEC
     SBC #$5000
     CMP #$0800
@@ -2110,17 +2201,20 @@ WtVis:
     CMP #$0007
     BCC .fixcheck
     CMP #$0015
-    BCC .fixdone
+    BCC .fixnext
     CMP #$001E
-    BCS .fixdone
+    BCS .fixnext
 .fixcheck
     LDA.w $5000,Y
     AND #$03FF
     CMP #$01D0
-    BCS .fixdone
+    BCS .fixnext
 .fixgone
-    STZ.w !wt_fixkey
-.fixdone
+    STZ.w !wt_fixkeys,X
+.fixnext
+    DEX
+    DEX
+    BPL .fix
     SEP #$20
     STZ.w !wt_xfer
     PLB
