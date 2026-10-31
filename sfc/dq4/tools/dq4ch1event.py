@@ -636,22 +636,60 @@ def _level_up():
 OLD_MAN_INTERVAL = 0x30
 
 
+# 인물 걷기(00:D8D1)가 한 칸 내딛기 전에 부르는 검사. Y = 슬롯, 31E0 의 방향(위 니블 8 위·4 아래·1 오른쪽·2 왼쪽)으로
+# 내디딜 칸이 벽(+1 이 층 마스크와 안 맞거나 bit7)이거나 누가 선 칸(+0 & 층 마스크)이면 3280 bit7 을 끄고 C = 0.
+# RTS 로 끝나므로 00:E815 의 RTL 을 거쳐 돌아오게 부른다. 직접 페이지 $00~$08·$80~$82 를 쓰고 DB = 7E 를 바란다
+STEP_CHECK = 0x00DA86
+BANK0_RTL = 0x00E815
+
+
+def _branch(op, n):
+    """n 바이트 앞으로 가는 조건 분기. 멀면 반대 조건으로 BRL 을 건너뛴다(BRA 는 BRL 로)."""
+    if n < 0x80:
+        return bytes((op, n))
+    if op == 0x80:
+        return bytes((0x82, *n.to_bytes(2, 'little')))
+    return bytes((op ^ 0x20, 3, 0x82, *n.to_bytes(2, 'little')))
+
+
 def _old_man_step():
     """명령 37 이 부른다. 인물 슬롯($90)의 걸어갈 곳(7E:3560·3580·35A0·35C0, 명령 13 의 자리)을 지금 자리로 두고, 주인공과
-    X 가 2셀보다 멀면 X 로, 아니면 Y 가 2셀보다 멀 때 Y 로 2셀 옮긴다. 붙어 있으면 그 자리(명령 14 가 곧바로 지나감).
-    직접 페이지는 스크립트 고리가 쓰므로 건드리지 않는다."""
-    a = bytearray((0x08, 0xE2, 0x30, 0xA6, 0x90))                                     # PHP / SEP #$30 / LDX $90
+    X 가 2셀보다 멀면 X 로, 아니면·막혔으면 Y 가 2셀보다 멀 때 Y 로 옮긴다. 걷기는 한 셀마다 앞 셀 하나만 보므로 두 셀을
+    차례로 STEP_CHECK 로 본다. 첫 셀이 막혔으면 그 축을 건너뛰고, 둘째 셀만 막혔으면(홀수 셀에 선 주인공 등) 한 셀만 간다.
+    둘 다 못 가면 그 자리라 명령 14 가 곧바로 지나가고, 다음 차례에 다시 고른다(FC 의 1F:DC3E 도 차례마다 주인공 쪽
+    방향을 새로 고름). 둘째 셀을 보는 동안만 자리를 한 셀 옮겨 두었다 되돌린다. 직접 페이지는 스크립트 고리가 쓰므로
+    되돌려 둔다."""
+    a = bytearray((0x08, 0xE2, 0x30, 0x8B, 0xA9, 0x7E, 0x48, 0xAB)) + DP_SAVE     # PHP / SEP / PHB / DB = 7E
+    a += bytes((0xA5, 0x80, 0x48, 0xA5, 0x81, 0x48, 0xA5, 0x82, 0x48, 0xA6, 0x90))  # $80~$82 를 스택에 / LDX $90
     for here, there in ((0x3020, 0x3560), (0x3040, 0x3580), (0x3080, 0x35A0), (0x30A0, 0x35C0)):
         a += bytes((0xBF, *_long(0x7E0000 + here), 0x9F, *_long(0x7E0000 + there)))  # LDA 지금,X / STA 목표,X
-    out = bytes((0x28, 0x6B))                                                        # PLP / RTL
+    out = (bytes((0x68, 0x85, 0x82, 0x68, 0x85, 0x81, 0x68, 0x85, 0x80)) + DP_RESTORE +
+           bytes((0xAB, 0x28, 0x6B)))                                                  # PLB / PLP / RTL
 
-    def axis(here, there, tail):
-        add = bytes((0x18, 0x7F, *_long(0x7E0000 + there), 0x9F, *_long(0x7E0000 + there))) + out  # CLC / ADC / STA
-        neg = bytes((0xC9, 0xFE, 0xB0, 2 + len(add), 0xA9, 0xFE)) + add                  # -2·-1 이면 다음 축으로
-        pos = bytes((0xC9, 0x03, 0x90, 2 + len(add) + len(neg), 0xA9, 0x02)) + add       # 0~2 면 다음 축으로
-        return (bytes((0xAF, *_long(0x7E0000 + here), 0x38, 0xFF, *_long(0x7E0000 + here), 0x30, len(pos))) +
+    def call(direction):
+        return bytes((0xA9, direction, 0x9D, 0xE0, 0x31, 0x9B, 0x4B, 0x62, 0x06, 0x00,  # LDA #방향 / STA,X / TXY / PHK / PER
+                      0xF4, *((BANK0_RTL - 1) & 0xFFFF).to_bytes(2, 'little'),          # PEA RTL-1
+                      0x5C, *_long(STEP_CHECK), 0xA6, 0x90))                            # JML 검사 / LDX $90
+
+    def add(addr, d):
+        return bytes((0xBF, *_long(0x7E0000 + addr), 0x18, 0x69, d & 0xFF, 0x9F, *_long(0x7E0000 + addr)))
+
+    def walk(direction, here, there, d):
+        one, two = bytes((0x18, 0x69, d & 0xFF)), bytes((0x18, 0x69, 2 * d & 0xFF))
+        tail = (bytes((0x28, 0xBF, *_long(0x7E0000 + there), 0xB0, len(one) + 2)) + one + bytes((0x80, len(two))) + two +
+                bytes((0x9F, *_long(0x7E0000 + there))) + out)                         # PLP / LDA 목표,X / BCS 두 셀
+        rest = add(here, d) + call(direction) + bytes((0x08,)) + add(here, -d) + tail   # 한 셀 옮겨 보고 PHP / 되돌림
+        return call(direction) + _branch(0x90, len(rest)) + rest                      # 첫 셀이 막혔으면 다음 축으로
+
+    def axis(here, there, plus, minus, tail):
+        left = walk(minus, here, there, -1)
+        neg = bytes((0xC9, 0xFE)) + _branch(0xB0, len(left)) + left                  # -2·-1 이면 다음 축으로
+        right = walk(plus, here, there, 1)
+        right += _branch(0x80, len(neg))
+        pos = bytes((0xC9, 0x03)) + _branch(0x90, len(right) + len(neg)) + right
+        return (bytes((0xAF, *_long(0x7E0000 + here), 0x38, 0xFF, *_long(0x7E0000 + here))) + _branch(0x30, len(pos)) +
                 pos + neg + tail)                                    # LDA 주인공 / SEC / SBC 노인,X / BMI 음수
-    return bytes(a) + axis(0x3020, 0x3560, axis(0x3080, 0x35A0, out))
+    return bytes(a) + axis(0x3020, 0x3560, 0x10, 0x20, axis(0x3080, 0x35A0, 0x40, 0x80, out))
 
 
 # 01:C800 의 인물 스크립트 고리가 직접 페이지 앞자리를 쓰므로, 그 자리를 덮는 루틴(25:FA15, 23:EB50 등)을 부르는

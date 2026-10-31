@@ -25,20 +25,75 @@ def _hooked():
 
 
 
-def _run_step(code, ram, slot):
-    """_old_man_step 이 쓰는 명령만 도는 65816 흉내(M·X 8). 직접 페이지 $90 = slot. 돌린 뒤의 ram."""
-    ram, pc, a, x, carry, n = dict(ram), 0, 0, 0, 0, 0
+def _run_step(code, ram, slot, blocked=()):
+    """_old_man_step 이 쓰는 명령만 도는 65816 흉내(M·X 8). 직접 페이지 $90 = slot. 걸음 검사(STEP_CHECK)는 그 자리의
+    7E:31E0 방향으로 내디딜 셀(오른쪽 X+2, 왼쪽 X-1, 아래 Y+1, 위 Y-1)이 blocked 에 있으면 막힌 것으로 본다. 돌린 뒤의 ram."""
+    ram, pc, a, x, y, carry, z, neg, n, stack = dict(ram), 0, 0, 0, 0, 0, 0, 0, 0, []
     long_ = lambda: code[pc + 1] | code[pc + 2] << 8 | code[pc + 3] << 16  # noqa: E731
+
+    def nz(v):
+        return int(v == 0), v & 0x80
     while True:
         op = code[pc]
-        if op in (0x08, 0x28):
+        if op in (0x08, 0x8B, 0x4B):
+            stack.append(carry if op == 0x08 else 0)
+            pc += 1
+        elif op in (0x28, 0xAB):
+            v = stack.pop()
+            carry = v if op == 0x28 else carry
             pc += 1
         elif op == 0x6B:
+            if stack:
+                raise AssertionError(f'스택이 {len(stack)}바이트 남음')
             return ram
         elif op == 0xE2:
             pc += 2
+        elif op == 0x48:
+            stack.append(a)
+            pc += 1
+        elif op == 0x5A:
+            stack.append(y)
+            pc += 1
+        elif op == 0x68:
+            a = stack.pop()
+            (z, neg), pc = nz(a), pc + 1
+        elif op == 0x9B:
+            y, pc = x, pc + 1
+        elif op == 0x62:
+            stack += [0, 0]
+            pc += 3
+        elif op == 0xF4:
+            stack += [0, 0]
+            pc += 3
+        elif op == 0x5C:
+            if long_() != ev.STEP_CHECK or y != slot:
+                raise AssertionError('검사 호출')
+            cx, cy = ram.get(0x7E3020 + slot, 0), ram.get(0x7E3080 + slot, 0)
+            dx, dy = {0x10: (2, 0), 0x20: (-1, 0), 0x40: (0, 1), 0x80: (0, -1)}[ram[0x7E31E0 + slot]]
+            carry = int((cx + dx, cy + dy) not in blocked)
+            del stack[-5:]
+            pc += 4
         elif op == 0xA6:
-            x, pc = slot, pc + 2
+            x, pc = ram.get(code[pc + 1], 0) if code[pc + 1] != 0x90 else slot, pc + 2
+        elif op == 0xA2:
+            x, pc = code[pc + 1], pc + 2
+        elif op == 0xA0:
+            y, pc = code[pc + 1], pc + 2
+        elif op == 0xA5:
+            a, pc = ram.get(code[pc + 1], 0), pc + 2
+        elif op == 0x85:
+            ram[code[pc + 1]], pc = a, pc + 2
+        elif op == 0xB5:
+            a, pc = ram.get((code[pc + 1] + x) & 0xFF, 0), pc + 2
+        elif op == 0x95:
+            ram[(code[pc + 1] + x) & 0xFF], pc = a, pc + 2
+        elif op == 0x9D:
+            ram[0x7E0000 + (code[pc + 1] | code[pc + 2] << 8) + x], pc = a, pc + 3
+        elif op in (0xCA, 0xE8):
+            x = (x + (1 if op == 0xE8 else -1)) & 0xFF
+            (z, neg), pc = nz(x), pc + 1
+        elif op == 0xE0:
+            carry, (z, neg), pc = int(x >= code[pc + 1]), nz((x - code[pc + 1]) & 0xFF), pc + 2
         elif op == 0xBF:
             a, pc = ram.get(long_() + x, 0), pc + 4
         elif op == 0x9F:
@@ -52,20 +107,27 @@ def _run_step(code, ram, slot):
         elif op == 0xFF:
             v = a - ram.get(long_() + x, 0) - (1 - carry)
             a, carry, pc = v & 0xFF, int(v >= 0), pc + 4
+            z, neg = nz(a)
         elif op == 0x7F:
             v = a + ram.get(long_() + x, 0) + carry
             a, carry, pc = v & 0xFF, int(v > 0xFF), pc + 4
         elif op == 0xA9:
             a, pc = code[pc + 1], pc + 2
+        elif op == 0x69:
+            v = a + code[pc + 1] + carry
+            a, carry, pc = v & 0xFF, int(v > 0xFF), pc + 2
+        elif op == 0x82:
+            pc += 3 + int.from_bytes(code[pc + 1:pc + 3], 'little', signed=True)
         elif op == 0xC9:
             carry, pc = int(a >= code[pc + 1]), pc + 2
-        elif op in (0x30, 0x90, 0xB0):
-            take = {0x30: a & 0x80, 0x90: not carry, 0xB0: carry}[op]
-            pc += 2 + (code[pc + 1] if take else 0)
+        elif op in (0x30, 0x90, 0xB0, 0x10, 0xD0, 0x80):
+            take = {0x30: neg, 0x90: not carry, 0xB0: carry, 0x10: not neg, 0xD0: not z, 0x80: True}[op]
+            d = code[pc + 1] - (0x100 if code[pc + 1] & 0x80 else 0)
+            pc += 2 + (d if take else 0)
         else:
             raise AssertionError(f'{op:02X}')
         n += 1
-        if n > 200:
+        if n > 2000:
             raise AssertionError('끝나지 않음')
 
 
@@ -120,9 +182,12 @@ class NumberTest(unittest.TestCase):
         self.assertEqual(c[-1]["label"], "stay")
 
     def test_old_man_steps_one_tile_toward_the_hero(self):
-        def run(man, hero):
-            ram = {0x7E3020: hero[0], 0x7E3080: hero[1], 0x7E3020 + 0x10: man[0], 0x7E3080 + 0x10: man[1]}
-            target = _run_step(ev._old_man_step(), ram, 0x10)
+        def run(man, hero, blocked=()):
+            ram = {0x7E3020: hero[0], 0x7E3080: hero[1], 0x7E3020 + 0x10: man[0], 0x7E3080 + 0x10: man[1],
+                   **{k: 0x40 + k for k in range(0x10)}, 0x80: 1, 0x81: 2, 0x82: 3}
+            target = _run_step(ev._old_man_step(), ram, 0x10, blocked)
+            self.assertEqual([target[k] for k in (*range(0x10), 0x80, 0x81, 0x82)],
+                             [ram[k] for k in (*range(0x10), 0x80, 0x81, 0x82)])
             return target[0x7E3560 + 0x10], target[0x7E35A0 + 0x10]
         self.assertEqual(run((44, 25), (54, 25)), (46, 25))     # 오른쪽으로 2셀
         self.assertEqual(run((44, 25), (30, 31)), (42, 25))     # X 가 멀면 X 부터
@@ -130,6 +195,22 @@ class NumberTest(unittest.TestCase):
         self.assertEqual(run((44, 25), (44, 21)), (44, 23))
         self.assertEqual(run((44, 25), (46, 27)), (44, 25))     # 붙어 있으면 그 자리
         self.assertEqual(run((44, 25), (42, 23)), (44, 25))
+
+    def test_old_man_goes_around_a_blocked_cell(self):
+        def run(man, hero, blocked):
+            ram = {0x7E3020: hero[0], 0x7E3080: hero[1], 0x7E3020 + 0x10: man[0], 0x7E3080 + 0x10: man[1]}
+            target = _run_step(ev._old_man_step(), ram, 0x10, blocked)
+            self.assertEqual((target[0x7E3020 + 0x10], target[0x7E3080 + 0x10]), man)   # 자리는 되돌려 둠
+            return target[0x7E3560 + 0x10], target[0x7E35A0 + 0x10]
+        self.assertEqual(run((44, 25), (54, 31), {(46, 25)}), (44, 27))      # 오른쪽이 막히면 아래로
+        self.assertEqual(run((44, 25), (30, 19), {(43, 25)}), (44, 23))      # 왼쪽이 막히면 위로
+        self.assertEqual(run((44, 25), (54, 25), {(46, 25)}), (44, 25))      # 한 축뿐이고 막히면 그 자리
+        self.assertEqual(run((44, 25), (54, 31), {(46, 25), (44, 26)}), (44, 25))   # 둘 다 막히면 그 자리
+        self.assertEqual(run((44, 25), (54, 31), {(44, 26)}), (46, 25))      # 앞 축이 열려 있으면 그쪽
+        self.assertEqual(run((38, 25), (35, 25), {(36, 25)}), (37, 25))      # 둘째 셀만 막히면 한 셀(왼쪽)
+        self.assertEqual(run((44, 25), (49, 25), {(47, 25)}), (45, 25))      # 오른쪽
+        self.assertEqual(run((44, 25), (44, 30), {(44, 27)}), (44, 26))      # 아래
+
 
     def test_braggart_jokes_either_way(self):
         m = ev.message_ids(0xD00)
