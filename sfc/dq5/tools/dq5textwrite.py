@@ -160,7 +160,7 @@ def index_table(data, mask):
     if code != expected:
         raise ValueError('지원하는 보행 색인 읽기 코드(24:8BC3)가 아님')
     if index >> 16 != rom.u24(DECODER + 1) >> 16:
-        groups = separate_index_groups(rom, index)
+        groups = contiguous_groups(data, index, mask, separate_index_groups(rom, index))
         if not MESSAGES < groups * 16 <= MAX_MESSAGES:
             raise ValueError('따로 둔 보행 색인 표의 끝을 찾지 못함')
         return index, groups * 16
@@ -188,6 +188,23 @@ def separate_index_groups(rom, index):
         last = v
         n += 1
     return n
+
+
+def contiguous_groups(data, index, mask, groups):
+    """색인 항목 가운데 앞 묶음이 끝난 비트에서 다음 묶음이 시작하는 데까지의 묶음 수. 메시지는 비트로 이어 붙으므로
+    색인 뒤에 앞으로 가는 다른 자료가 이어져도 그 항목은 앞 묶음의 끝과 맞지 않아 여기서 잘린다."""
+    rom = Rom(data)
+    decoder = rom.u24(DECODER + 1)
+    for k in range(groups - 1):
+        try:
+            _, end = decode_check(data, decoder=decoder, bank_mask=mask, with_end=True, index=index + 3 * k, count=16)
+        except (IndexError, ValueError):
+            return k
+        v = rom.u24(index + 3 * k + 3)
+        start = lorom((v >> 3) | mask << 16)
+        if start != lorom(end) - (1 if v & 7 else 0):
+            return k + 1
+    return groups
 
 
 def relocated(data):
@@ -236,6 +253,9 @@ def base_package(base):
                 size += 5
             if not size:
                 raise ValueError('글자 묶음 표가 메시지 묶음 머리 끝에 있지 않음')
+            # 표 뒤가 0 인 항목으로 끝나야 표 밖의 자료까지 읽지 않은 것이다
+            if (table & 0xFFFF) + size + 5 > 0x10000:
+                raise ValueError('따로 둔 글자 묶음 표의 끝(0 인 항목)을 뱅크 안에서 찾지 못함')
             head_end = lorom(table) + size
             if sum(int.from_bytes(base[lorom(table) + i:lorom(table) + i + 2], 'little') & 0xFFF
                    for i in range(0, size, 5)) < GLYPHS:
@@ -243,6 +263,9 @@ def base_package(base):
         font = bytes(base[lorom(table):lorom(table) + size])
         glyphs = sum(int.from_bytes(font[i:i + 2], 'little') & 0xFFF for i in range(0, len(font), 5))
     controls = frozenset(c for codes in messages for c in codes if 0x101E <= c <= 0x10FF)
+    used = max((c for codes in messages for c in codes if c < 0x1000), default=0)
+    if used >= glyphs:
+        raise ValueError(f'메시지가 쓰는 글자 {used:03X} 가 글자 묶음 표의 글자 수 {glyphs:03X} 를 넘음')
     for codes in messages:
         valid_message(codes, glyphs, controls)
     if head_end == lorom(first):
