@@ -308,7 +308,17 @@ class EngineCodeTests(unittest.TestCase):
         done, mark = patch.keep_samples_code()
         self.assertEqual(patch.RELEASE_CODE & 0xFFFF, patch.COROUTINE_EXTRA)
         self.assertEqual(patch.RELEASE_CODE + len(patch.release_failed_code()), patch.KEEP_CODE)
-        self.assertLessEqual((patch.KEEP_CODE + len(done) + len(mark)) & 0xFFFF, 0xEB00)
+        self.assertLessEqual((patch.KEEP_CODE + len(done) + len(mark) + len(patch.keep_loop_code())) & 0xFFFF, 0xEB00)
+
+    def test_keep_samples_mark_holds_the_queue_loop(self):
+        done, mark = patch.keep_samples_code()
+        busy = patch.KEEP_BUSY.to_bytes(2, 'little')
+        # 표시하는 동안 C21E 가 대기열 루프를 부르면 남은 1A 칸이 다시 돌아 표시 코드로 겹겹이 들어갔다
+        self.assertLess(mark.index(bytes.fromhex('A9 01 00 8D') + busy), mark.index(bytes.fromhex('20 1E C2')))
+        self.assertIn(bytes.fromhex('9C') + busy, mark[mark.index(bytes.fromhex('20 1E C2')):])
+        loop = patch.keep_loop_code()
+        self.assertEqual(loop, bytes.fromhex('AD') + busy + bytes.fromhex('D0 03 4C D5 BE 60'))
+        self.assertNotIn(patch.KEEP_BUSY, range(patch.KEEP_SONG - 1, patch.KEEP_SONG + 2))
 
     def test_keep_samples_marks_before_the_cleanup(self):
         done, mark = patch.keep_samples_code()
