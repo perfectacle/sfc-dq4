@@ -101,6 +101,17 @@ SPELL_FIELDS = {
     '대상루틴': ('hex', [piece(1), piece(2)]),
 }
 
+# 주문 목록 창의 MP 숫자(21:9BAD 의 LDA $219BB4,X). 작전 AI 가 MP 가 모자란 주문과 작전 3 에서 MP 드는 주문을 빼는
+# 거름(21:DA58, BRK 88 85 의 $47)도 이 값을 본다. 원본은 모든 주문에서 menu_mp(전투 MP) 와 같으므로, 전투 MP 를
+# 바꾸면 이 칸도 같이 쓴다. 66 뒤 칸도 원본은 0 이고 그 행동들의 전투 MP 는 1F 다.
+MENU_MP = 0x219BB4
+
+
+def menu_mp(battle):
+    """전투 MP 5비트 → 창의 MP 칸. 1F(쓰지 않음)은 0, 1E 는 36, 1D(남은 MP 전부)는 FF."""
+    return {0x1F: 0, 0x1E: 36, 0x1D: 0xFF}.get(battle, battle)
+
+
 AMOUNT_COUNT = 0x40
 AMOUNT_FIELDS = {
     # FE 는 300 으로 읽는다(20:AB70).
@@ -239,7 +250,36 @@ def writes_for(docs, data):
                     if off in changed and changed[off][0] != x:
                         raise ValueError(f'{t.key} {n:02X}: 파일 {off:X} 를 다른 값으로 두 번 고침')
                     changed[off] = (x, y, f'{t.key} {n:02X}')
+    for n in range(SPELL_COUNT):
+        off = lorom(0x268765 + n)
+        if off not in changed:
+            continue
+        old, new = data[off] & 0x1F, changed[off][0] & 0x1F
+        menu = lorom(MENU_MP + n)
+        if old == new:
+            continue
+        if data[menu] != menu_mp(old):
+            raise ValueError(f'spells {n:02X}: 주문 목록 MP 칸 {cpu(menu)} = {data[menu]:02X} 가 전투 MP {old} 와 맞지 않는 롬'
+                             f'(원본에서 만들 것)')
+        if menu_mp(new) != data[menu]:
+            changed[menu] = (menu_mp(new), data[menu], f'spells {n:02X} 주문 목록 MP')
     return [(o, *changed[o]) for o in sorted(changed)]
+
+
+def field_mp_warnings(writes, data):
+    """전투 MP 를 바꾼 주문 가운데 필드에서도 외우는 것의 필드 MP(dq5spellfx.py 의 field_handlers, 뱅크 11 의 즉값)가
+    새 전투 MP 와 다르면 그 경고 문장들. 필드에서 외울 때는 그 즉값만큼 빼고, 창의 MP 숫자는 21:9BB4 를 보인다."""
+    from dq5spellfx import FIELD_COUNT, FIELD_FIRST, FIELD_MP, FIELD_TABLE
+    out = []
+    for off, new, old, label in writes:
+        n = next((n for n in range(SPELL_COUNT) if lorom(0x268765 + n) == off), None)
+        if n is None or not 0 <= n - FIELD_FIRST < FIELD_COUNT or (new ^ old) & 0x1F == 0:
+            continue
+        handler = int.from_bytes(data[lorom(FIELD_TABLE + (n - FIELD_FIRST) * 2):][:2], 'little')
+        if handler in FIELD_MP and data[lorom(FIELD_MP[handler][0])] != new & 0x1F:
+            out.append(f'경고: spells {n:02X} 의 필드 MP(처리기 11:{handler:04X})는 {data[lorom(FIELD_MP[handler][0])]} 그대로라 '
+                       f'필드에서 외우면 그만큼 뺌(창에는 {new & 0x1F}). dq5spellfx.py 의 field_handlers 에서 맞출 것')
+    return out
 
 
 def cpu(off):
@@ -278,6 +318,10 @@ def check(docs, data):
                         want = v if kind == 'int' else fmt(kind, t.fields[k][1], parse(kind, v))
                         if got[k] != want:
                             bad.append(f'{key} {entry["id"]} {k}: 적은 값 {v!r}, 읽은 값 {got[k]!r}')
+    for n in range(SPELL_COUNT):
+        battle = d[lorom(0x268765 + n)] & 0x1F
+        if d[lorom(MENU_MP + n)] != menu_mp(battle) and data[lorom(MENU_MP + n)] == menu_mp(data[lorom(0x268765 + n)] & 0x1F):
+            bad.append(f'spells {n:02X}: 주문 목록 MP {d[lorom(MENU_MP + n)]} 가 전투 MP {battle} 와 맞지 않음')
     return bad
 
 
@@ -314,6 +358,8 @@ def main():
             print(f'쓰기 {len(writes_for(docs, data))}바이트, 다시 읽어 틀린 값 {len(bad)}개')
             return 1 if bad else 0
         writes = writes_for(docs, data)
+        for line in field_mp_warnings(writes, data):
+            print(line, file=sys.stderr)
     except ValueError as e:
         print(f'오류: {e}', file=sys.stderr)
         return 1
