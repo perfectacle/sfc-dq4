@@ -110,7 +110,7 @@ VILLAGERS = [
     (0x02, 0x10, WOMAN, 'down', T_MOTHER),
     (0x05, 0x12, FATHER, 'left', T_FATHER),
 ]
-SLEEPER_AT = (0x13, 0x15)
+SLEEPER_AT = (0x13, 0x16)
 
 # 서장 뒤쪽 깃발. 모두 DQ5 롬에서 켜고 끄고 보는 곳이 없는 비트다(sfc/dq5/docs/dq5-flags.md). 앞 바이트 21C5 는 맵을
 # 옮길 때 8비트로만 지우고(00:A951), 21E1 은 바이트로 쓰는 곳이 없어 16비트 쓰기에 휩쓸리지 않는다
@@ -544,6 +544,7 @@ def npc_lists():
     """(lists, new_lists, overrides, scripts) 에 더할 것. 대체 목록은 앞에 둔 것부터 맞춰 본다."""
     master = ch1.entry(MASTER_SRC, *MASTER_AT, SWORDSMAN, 'down', T_ASK)
     sleeper = ch1.entry(SLEEPER_SRC, *SLEEPER_AT, MAN, 'down', T_SLEEPER)
+    sleeper['fields']['x'] += 1
     people = [ch1.entry(ch1.STATIC, x, y, g, f, t) for x, y, g, f, t in VILLAGERS] + [sleeper]
     father = next(i for i, v in enumerate(VILLAGERS) if v[4] == T_FATHER)
     x, y, g, f, _ = VILLAGERS[father]

@@ -30,6 +30,8 @@ import dq4text  # noqa: E402
 import dq5text  # noqa: E402
 from dq5hangul import MESSAGES  # noqa: E402
 from dq4environmentrom import GROUPS  # noqa: E402
+from dq4environmentmap import edit_cells, sheet_art  # noqa: E402
+import dq4block  # noqa: E402
 from dq4groupbuild import cell, chapter, fc_map, has_people  # noqa: E402
 import dq4shopport  # noqa: E402
 import dq4prologue  # noqa: E402
@@ -41,6 +43,10 @@ from kr_patch.fc import ines  # noqa: E402
 # 기타 bit4-5 가 00 이라 말을 걸면 주인공 쪽으로 돈다(05:86C5 1번은 30 이라 정면만 봄)
 STAND = {"list": "05:870A", "index": 2}
 WALK = {"list": "05:8857", "index": 6}
+# A person FC puts on a bed lies in it: a one-time entry with 기타 bit7 (lying, drawn rotated 8 px lower) and bit4
+# (does not turn when spoken to, which would swap the head to the foot of the bed), no script.
+LIE = {"list": "10:A4E9", "index": 14}
+LIE_GROUPS = range(0x36, 0x3D)    # 서장·1장 그룹. 2장 이후는 그 장을 옮길 때 화면으로 보고 넓힌다
 # FC picture (dq4talk.sprite without the 80 bit) -> DQ5 picture of a townsperson of the same role, chosen by
 # eye from the two sprite sheets (dq4fcsprite.py field, dq5sprite.py).
 PICTURES = {
@@ -157,6 +163,16 @@ def fc_state(night, flags=None, chapter_number=1):
     for a, v in (flags or {}).items():
         ram[a] = v
     return dq4talk.State(ram)
+
+
+def bed_cells(prg, fc_group, number):
+    """FC cells of a bed's foot (bed_left with bed_right on its right): a person FC puts there sleeps."""
+    source = dq4block.Map(prg, fc_group, number)
+    edit_cells(source, fc_group, number)
+    art = sheet_art(prg, source.t)
+    name = lambda x, y: art.get(source.cell(x, y) & 31, ("",))[0]  # noqa: E731
+    return {(x, y) for y in range(source.h) for x in range(source.w - 1)
+            if name(x, y) == "bed_left" and name(x + 1, y) == "bed_right"}
 
 
 def fc_people(prg, fc_group, number, night, flags=None):
@@ -327,6 +343,8 @@ def port(dq5_path, dq4_path, with_people=True):
     def people_of(name, fc_group, fc_number, flags=None):
         entries, people = [], []
         shops = merchants(prg, fc_group, fc_number, items)
+        group = int(name[:2], 16) if "/" in name else GROUPS[name][0]
+        beds = bed_cells(prg, fc_group, fc_number) if group in LIE_GROUPS else set()
         for night in (False, True) if has_people(fc_group, with_people) else ():
             for p in fc_people(prg, fc_group, fc_number, night, flags):
                 if max(cell(p["x"], p["y"])) > MAX_CELL:
@@ -354,8 +372,13 @@ def port(dq5_path, dq4_path, with_people=True):
                 x, y = cell(p["x"], p["y"])
                 fields = {"x": x, "y": y, "facing": p["facing"], "talk": talk,
                           "gfx": PICTURES[p["picture"]], "layer": 0, "interval": p["interval"]}
-                entries.append({"from": WALK if p["interval"] else STAND, "time": "night" if night else "day",
-                                "fields": fields})
+                template = WALK if p["interval"] else STAND
+                if (p["x"], p["y"]) in beds and service is None:
+                    # Lying on the bed's row, half a block right so the head (right when facing down) rests on
+                    # the pillow and the foot of the bed shows.
+                    fields.update(x=x + 1, y=y - 1, facing="down", interval=0)
+                    template = LIE
+                entries.append({"from": template, "time": "night" if night else "day", "fields": fields})
                 people.append({**p, "night": night, "service": service,
                                "message": None if message is None else f"{message:03X}", "dq5": fields})
         return entries, people
