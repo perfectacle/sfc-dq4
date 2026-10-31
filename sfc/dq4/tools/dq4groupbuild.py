@@ -737,7 +737,10 @@ def _build(pool, dq5, dq4, out, with_people):
                                  "lists": [lst for lst in lists if "map" in lst]}),
         "-o", out / "npc.dq5patch.json", "--report", out / "npc-layout.json", *NPC_AT, *new_map_args))
     manifests.append(out / "npc.dq5patch.json")
-    checks.append(step("dq5textwrite.py", "text", {"format": "dq5text/1", "messages": messages}, dq5, *TEXT_AT))
+    # dq5textwrite appends gap-free from 3200; the Korean chapter 1 and prologue lines before the ported ones go in only
+    # with the menu build's tree, so this ROM gets placeholders there
+    held = [{"id": m, "codes": dq4npcport.nothing_codes()} for m in range(dq4npcport.MESSAGES, dq4npcport.FIRST_MESSAGE)]
+    checks.append(step("dq5textwrite.py", "text", {"format": "dq5text/1", "messages": held + messages}, dq5, *TEXT_AT))
     checks.append(step("dq5talkwrite.py", "talk", dq4npcport.talk_doc(messages), dq5, *TALK_AT))
     import dq4shopport  # imports this module
     _, shops, inn_writes, shop_report = dq4shopport.port(dq5, dq4, INN_AT, SHOP_KEY_AT, with_people)

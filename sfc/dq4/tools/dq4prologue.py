@@ -20,8 +20,7 @@ from dq5map import lorom  # noqa: E402
 
 VILLAGE, CELLAR = (f'{g:02X}/{n:02X}' for g, n in (GROUPS['14-00'], GROUPS['14-01']))
 SCENE = box.PROLOGUE
-# 7E:219E & 80, 검사의 물음에 대답하면 켬. 원래 롬은 이 비트를 따로 켜거나 보지 않는다(바이트를 통째로 쓰는 곳은 있어
-# DQ5 중반 세이브에서는 켜져 있음). 새 게임에서는 꺼져 있다
+# 검사의 물음에 대답하면 켬. 자리는 dq4chapterbox.PROLOGUE
 DONE = (SCENE.flag[0] - 0x7E2190, SCENE.flag[1])
 START = (CELLAR, 3 * 2, 0x0F * 2)                    # 지하 아래 방 (3,0F), 검사 바로 아래(말을 걸 수 있게)
 CODE_AT = 0x5EC000
@@ -69,11 +68,11 @@ T_MERCHANT = talk(say('어라, 누군가 했더니 @ 씨군요. 아니, 잠깐 �
 T_MOTHER = talk(say('어머, 왔니, @. 배고프지? 금방 밥 차려 줄게.'))
 T_FATHER = talk(say('오오, 왔느냐, @. 그런데 신시아가 보이지 않는구나.', '아까 너를 부르러 간다고 나갔는데 어디서 엇갈린 게 아닌지 모르겠구나.',
                     '아직 너를 찾고 있다면 가엾으니 네가 이 근처를 찾아보고 오너라.'))
-# 문지기는 DQ5 묻기 대화(06:B34F): 메시지 T + 3C6 뒤 예·아니요, 예면 +1, 아니요면 +2
-T_GATE = 0x24F
-TEXTS[T_GATE + 0x3C6] = say('여기는 마을 입구. 수상한 놈이 들어오지 못하게 지키고 있다.', '그런데 @. 마을 밖으로 나가고 싶으냐?')
-TEXTS[T_GATE + 0x3C7] = say('하지만 아직 그때가 아니다. 지금의 너로는 아직 힘이 모자란다.')
-TEXTS[T_GATE + 0x3C8] = say('음, 그렇지. 마을을 떠나려면 너는 훨씬 더 강해져야 한단다.')
+# 문지기는 덧붙인 대화(묻고 예·아니요로 대답). DQ5 묻기 대화 24F~26C 는 DQ5 메시지를 덮어야 해서 쓰지 않는다
+T_GATE = 0x904
+M_GATE_ASK = talk(say('여기는 마을 입구. 수상한 놈이 들어오지 못하게 지키고 있다.', '그런데 @. 마을 밖으로 나가고 싶으냐?')) + 0x3C6
+M_GATE_YES = talk(say('하지만 아직 그때가 아니다. 지금의 너로는 아직 힘이 모자란다.')) + 0x3C6
+M_GATE_NO = talk(say('음, 그렇지. 마을을 떠나려면 너는 훨씬 더 강해져야 한단다.')) + 0x3C6
 
 # 그림 번호(dq5sprite.py 시트에서 고름, dq4npcport.PICTURES 와 같은 역할)
 SWORDSMAN, SOLDIER, FARMER, MAN, WIZARD, MERCHANT, WOMAN, FATHER = 0x08, 0x06, 0x29, 0x03, 0x1F, 0x40, 0x17, 0x09
@@ -98,14 +97,15 @@ VILLAGERS = [
 ]
 SLEEPER_AT = (0x13, 0x15)
 
-# 서장 뒤쪽 깃발. 모두 원래 롬이 비트로 켜거나 보지 않는 비트(sfc/dq5/docs/dq5-flags.md)
-FROG_MET = (0x0C, 0x08)         # 7E:219C bit3  개구리의 이야기를 들음
-SHINSIA_START = (0x0C, 0x40)    # 7E:219C bit6  신시아에게 말을 걺 → 모샤스
-MORPH = (0x02, 0x10)            # 7E:2192 bit4  신시아가 개구리로
-MORPH_BACK = (0x04, 0x01)       # 7E:2194 bit0  개구리가 신시아로
-SHINSIA_MET = (0x01, 0x08)      # 7E:2191 bit3  신시아가 집으로 감
-DINNER = (0x01, 0x40)           # 7E:2191 bit6  저녁 대사가 끝남(끝 이벤트가 켬)
-SUPPER = (0x04, 0x02)           # 7E:2194 bit1  아버지에게 대답함 → 식탁에 앉음
+# 서장 뒤쪽 깃발. 모두 DQ5 롬에서 켜고 끄고 보는 곳이 없는 비트다(sfc/dq5/docs/dq5-flags.md). 앞 바이트 21C5 는 맵을
+# 옮길 때 8비트로만 지우고(00:A951), 21E1 은 바이트로 쓰는 곳이 없어 16비트 쓰기에 휩쓸리지 않는다
+FROG_MET = (0x36, 0x01)         # 7E:21C6 bit0  개구리의 이야기를 들음
+SHINSIA_START = (0x36, 0x02)    # 7E:21C6 bit1  신시아에게 말을 걺 → 모샤스
+MORPH = (0x36, 0x04)            # 7E:21C6 bit2  신시아가 개구리로
+MORPH_BACK = (0x36, 0x08)       # 7E:21C6 bit3  개구리가 신시아로
+SHINSIA_MET = (0x36, 0x10)      # 7E:21C6 bit4  신시아가 집으로 감
+DINNER = (0x52, 0x02)           # 7E:21E2 bit1  저녁 대사가 끝남(끝 이벤트가 켬)
+SUPPER = (0x52, 0x08)           # 7E:21E2 bit3  아버지에게 대답함 → 식탁에 앉음
 speak = ch1.speak
 narrate = ch1.narrate
 SHINSIA = '신시아'
@@ -152,6 +152,10 @@ M_SUPPER_LINES = [talk(say(*pages)) + 0x3C6 for pages in (
      '이 아이는 계속 우리와 함께 사는 거예요. 무슨 일이 있어도요!'),
     ('오오, 그랬지! 이거 내가 그만…… 와하하하하!',))]
 M_STORY_BEGINS = talk(narrate('이야기는 이렇게 시작된다……')) + 0x3C6
+# 1장·서장이 받은 대화 번호의 끝. 옮긴 일본어 메시지는 메시지 TALK_END + 3C6 부터(dq4npcport.FIRST_MESSAGE)
+TALK_END = TALK_BASE + len(_talks)
+if TALK_END > 0x900:
+    raise ValueError(f'1장·서장 대화 번호가 덧붙인 대화 자리(900~)를 넘음: {TALK_END:X}')
 
 FROG, GIRL = 0x50, 0x0E         # 개구리 그림이 DQ5 에 없어 슬라임, 신시아는 DQ5 소녀(임시)
 # NDS mlout1: 개구리는 맵에 서 있지 않고 다리 남쪽 연못에 숨어 있다가, 주인공이 다리 가운데에 오면 떠올라 다리로
@@ -300,6 +304,7 @@ def talk_doc():
         (T_FROG, _yes_no(M_FROG_ASK, M_FROG_YES, M_FROG_NO) + [msg(M_FROG_STORY), _flag_on(FROG_MET)]),
         (T_SHINSIA, [msg(M_SHINSIA_MEET), _flag_on(SHINSIA_START)]),
         (T_FATHER_SUPPER, _yes_no(M_FATHER_ASK, M_FATHER_YES, M_FATHER_NO) + [_flag_on(SUPPER)]),
+        (T_GATE, _yes_no(M_GATE_ASK, M_GATE_YES, M_GATE_NO)),
     ]
     return {"format": "dq5talk/1", "scripts": [{"talk": f"{t:03X}", "body": body} for t, body in scripts]}
 
