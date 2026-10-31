@@ -161,6 +161,7 @@ FROG, GIRL = 0x50, 0x0E         # 개구리 그림이 DQ5 에 없어 슬라임, 
 # NDS mlout1: 개구리는 맵에 서 있지 않고 다리 남쪽 연못에 숨어 있다가, 주인공이 다리 가운데에 오면 떠올라 다리로
 # 뛰어오르고(주인공 뒤 동쪽), 이야기를 마치면 동쪽으로 다리를 벗어나 지하 오두막 계단으로 들어간다
 FROG_AT = (0x13, 0x07)          # 연못
+FROG_HIDDEN_X = 0x3F             # 맵(FC 폭 24) 밖. 인물 표 X 는 2배라 7E
 FROG_JUMP = [((0x13, 0x06), 6), ((0x13, 0x05), 10), ((0x13, 0x04), 4)]   # (FC 칸, 그림을 띄울 점)
 FROG_OUT = [(0x14, 0x04), (0x15, 0x04), (0x15, 0x03), (0x15, 0x02)]      # 다리 동쪽 → 오두막 계단
 # 주인공 자리(인물 표 3020·3080, FC 칸 (x, y) 는 (2x, 2y+1))의 사각형. 지하에서 나오면 (42,5), 다리 줄은 y 9, 다리는 x 34~35
@@ -424,7 +425,8 @@ def npc_lists():
     mother = next(i for i, v in enumerate(VILLAGERS) if v[4] == T_MOTHER)
     x, y, g, f, t = VILLAGERS[mother]
     supper[mother] = ch1.entry(MOTHER_SRC, x, y, g, f, t)
-    frog = ch1.entry(FROG_SRC, *FROG_AT, FROG, 'down', T_FROG)
+    # 맵에 들어온 첫 프레임엔 대본의 27(숨기)이 아직 돌지 않아 연못 자리에 잠깐 보였다. 맵 밖에 두고 50 으로 데려온다
+    frog = ch1.entry(FROG_SRC, FROG_HIDDEN_X, FROG_AT[1], FROG, 'down', T_FROG)
     # 인물 스크립트는 이동 간격(3300 위 니블)마다 돈다. 빌린 칸의 간격이면 명령 05 의 자리 판정이 약 120프레임에 한 번이라
     # 걸어 지나가는 주인공을 놓쳤다
     frog["fields"]["interval"] = 1
