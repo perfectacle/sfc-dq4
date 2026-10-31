@@ -11,6 +11,7 @@ build 는 origin/main 에 들어간 커밋에서, 추적 파일을 고치지 않
 IPS 는 SOURCE.txt 의 커밋으로 다시 만들 수 없기 때문이다.
 """
 import argparse
+import base64
 import hashlib
 import os
 from pathlib import Path
@@ -62,9 +63,13 @@ def merged_commit():
 
 
 def remote(assets, *args):
-    token = os.environ.get('GH_TOKEN')
-    auth = ['-c', f'http.extraHeader=Authorization: Bearer {token}'] if token else []
-    subprocess.run(['git', *auth, *args], cwd=assets, check=True)
+    # 토큰은 인자가 아니라 환경으로 넘긴다: 실패하면 CalledProcessError 가 인자를 그대로 찍는다
+    env = dict(os.environ)
+    if token := os.environ.get('GH_TOKEN'):
+        basic = base64.b64encode(f'x-access-token:{token}'.encode()).decode()
+        env.update(GIT_CONFIG_COUNT='1', GIT_CONFIG_KEY_0='http.extraHeader',
+                   GIT_CONFIG_VALUE_0=f'Authorization: Basic {basic}')
+    subprocess.run(['git', *args], cwd=assets, check=True, env=env)
 
 
 def build(assets, dq5, dq4, commit):
