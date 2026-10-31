@@ -54,7 +54,8 @@ class NumberTest(unittest.TestCase):
 class FlyTest(unittest.TestCase):
     def test_shoes_start_the_tower_event_and_fly_to_the_island(self):
         data = bytearray(0x400000)
-        for addr, orig in ((ev.FLY_AT, ev.FLY_ORIG), (ev.FLY_X_AT, ev.FLY_XY_ORIG[0]), (ev.FLY_Y_AT, ev.FLY_XY_ORIG[1])):
+        for addr, orig in ((ev.FLY_AT, ev.FLY_ORIG), (ev.FLY_X_AT, ev.FLY_XY_ORIG[0]), (ev.FLY_Y_AT, ev.FLY_XY_ORIG[1]),
+                           (ev.GUEST_AI_AT, ev.GUEST_AI_ORIG), (ev.GUEST_TARGET_AT, ev.GUEST_TARGET_ORIG)):
             data[ev.lorom(addr):ev.lorom(addr) + len(orig)] = orig
         out = ev.apply(bytes(data))
         _, at = ev.native()
@@ -64,6 +65,21 @@ class FlyTest(unittest.TestCase):
         self.assertEqual(out[ev.lorom(ev.FLY_Y_AT):][:2], (0x16 * 2).to_bytes(2, 'little'))
         e = ev.lorom(at['fly_event'])
         self.assertEqual(out[e:e + 8], bytes((0x90, ev.TOWER, 0x00, 18, 25, 0x01, 0x80, 0xFF)))   # FC 30/00 (09,0C)
+
+    def test_guest_ai_hooks_jump_to_the_native(self):
+        data = bytearray(0x400000)
+        for addr, orig in ((ev.FLY_AT, ev.FLY_ORIG), (ev.FLY_X_AT, ev.FLY_XY_ORIG[0]), (ev.FLY_Y_AT, ev.FLY_XY_ORIG[1]),
+                           (ev.GUEST_AI_AT, ev.GUEST_AI_ORIG), (ev.GUEST_TARGET_AT, ev.GUEST_TARGET_ORIG)):
+            data[ev.lorom(addr):ev.lorom(addr) + len(orig)] = orig
+        out = ev.apply(bytes(data))
+        _, at = ev.native()
+        self.assertEqual(out[ev.lorom(ev.GUEST_AI_AT):][:4], bytes((0x5C, *ev._long(at['guest_ai']))))
+        self.assertEqual(out[ev.lorom(ev.GUEST_TARGET_AT):][:5], bytes((0x22, *ev._long(at['guest_target']), 0xEA)))
+        # 손님이 아니면 덮은 두 ROL 을 하고 원래 고르기로 돌아간다
+        code, _, _ = ev._guest_ai(ev.CODE_AT)
+        self.assertIn(bytes((0x28, 0x2E, 0x0E, 0x11, 0x2E, 0x0F, 0x11, 0x5C, *ev._long(ev.GUEST_AI_BACK))), code)
+        # 가중치 합은 FC 고르는 법 2 의 칸 가중치 합(255)
+        self.assertEqual(sum(w for _, w in ev.GUEST_WEIGHTS), 255)
 
     def test_boss_battle_sets_the_flag_only_on_a_win(self):
         code = ev._battle()

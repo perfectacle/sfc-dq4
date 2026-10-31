@@ -662,6 +662,74 @@ def _fade_out():
     return ENTER + fade(14, 0, FADE_STEP) + LEAVE
 
 
+# 손님 호이민의 행동 고르기. FC 손님은 몬스터 AI 로, 호이민은 몬스터 레코드 C5(대화 148 의 「호이민이 일행에 있음」 이
+# 손님 바이트 5 = C5 에서 참). 행동 칸 ホイミ ×3·공격·방어·공격, 고르는 법 2(칸 가중치 209 29 10 4 2 1, 같은 행동은
+# 첫 칸에 합침), AI 2(ホイミ 칸은 같은 편 누군가 HP 가 최대의 절반 미만이고 MP 가 될 때만 남김, 10:B9E9·13:B915).
+# 곧 ホイミ 248·공격 5·방어 2, 남기지 않으면 공격 5·방어 2 에서 난수로.
+# ホイミ 의 대상은 절반 미만인 사람 가운데 HP 가 가장 낮은 사람으로 한다(FC 의 대상 고르기 10:B272~ 는 재지 않음).
+# 21:AED8 은 행동을 고른 뒤 21:AF6E 의 LDA #$01 을 대상 번호로 21:B199 에 넘겨, 그대로 두면 늘 자기를 고쳤다(실측)
+GUEST_AI_AT, GUEST_AI_ORIG = 0x21AF1B, bytes.fromhex('2e 0e 11 2e')   # ROL $110E / ROL $110F 의 앞 4바이트
+GUEST_AI_BACK, GUEST_AI_DONE = 0x21AF21, 0x21AF3B                     # 원래 고르기 / 고른 행동을 $10F7 에
+GUEST_TARGET_AT, GUEST_TARGET_ORIG = 0x21AF6E, bytes.fromhex('a9 01 0c 15 11')   # LDA #$01 / TSB $1115
+RANDOM = 0x00953A               # A = N 이면 0~N-1(8비트 난수 × N >> 8)
+HEAL, ATTACK, DEFEND = 0x27, 0x73, 0x71
+HEAL_MP = 3
+GUEST_WEIGHTS = ((HEAL, 248), (ATTACK, 5), (DEFEND, 2))
+WALKERS = 3                     # 전투에 나오는 걷는 일행(7E:201E) 최대 수
+
+
+def _guest_ai(origin):
+    """21:AED8(かしこさ 10 미만의 무작위 고르기)이 고르기 직전에 부르는 루틴. 행동자 $7B 의 일행 기록 +0 이 손님
+    몬스터 동료(C0 이 다 켜짐)면 FC 규칙으로 행동을 골라 21:AF3B 로, 아니면 원래 고르기로 돌아간다."""
+    import dq4environmentrom
+    hurt, mp, target, low = SCRATCH + 0x0A, SCRATCH + 0x0B, SCRATCH + 0x0C, SCRATCH + 0x0D
+    a = dq4environmentrom._Asm(origin)
+    # 대상 훅: 손님이 ホイミ 를 골랐으면 그 번호(target 은 번호 + 1, 0 은 없음. 켤 때 WRAM 0 이라)를, 아니면 원래의 1 을
+    a.label('pick').b(0x08, 0xE2, 0x20, 0xA9, 0x01, 0x0C, 0x15, 0x11).long(0xAF, 'target')
+    a.rel(0xD0, 'picked').b(0xA9, 0x01, 0x28, 0x6B)
+    a.label('picked').b(0x3A, 0x48, 0xA9, 0x00).long(0x8F, 'target').b(0x68, 0x28, 0x6B)
+    a.label('entry')
+    a.b(0x08, 0xE2, 0x30, 0xA5, 0x7B, 0x00, 0x8B, 0x80, 0x2A, 0xA5, 0x46, 0x29, GUEST, 0xC9, GUEST)  # BRK 8B 80 2A
+    a.rel(0xF0, 'guest')
+    a.b(0x28, 0x2E, 0x0E, 0x11, 0x2E, 0x0F, 0x11).long(0x5C, 'back')
+    a.label('guest').b(0xA9, 0x00).long(0x8F, 'hurt').long(0x8F, 'target').long(0x8F, 'mp')
+    a.b(0xA9, 0xFF).long(0x8F, 'low').long(0x8F, 'low', 1).b(0xC2, 0x10)
+    for k in range(WALKERS):
+        a.b(0xAF, 0x1E, 0x20, 0x7E, 0xC9, k + 1).rel(0x90, f'skip{k}')              # 걷는 수 < k+1
+        a.b(0xAF, 0x20 + k, 0x20, 0x7E, 0xC2, 0x20, 0x29, 0x07, 0x00, 0x0A, 0xAA).long(0xBF, 'offsets').b(0xAA)
+        a.b(0xE2, 0x20, 0xBF, 0x40, 0x20, 0x7E, 0x29, GUEST, 0xC9, GUEST).rel(0xD0, f'hp{k}')
+        a.b(0xBF, 0x44, 0x20, 0x7E).long(0x8F, 'mp')                                  # 손님의 MP
+        a.label(f'hp{k}').b(0xC2, 0x20, 0xBF, 0x42, 0x20, 0x7E).rel(0xF0, f'skip{k}')  # 쓰러짐
+        a.b(0x0A, 0xDF, 0x4E, 0x20, 0x7E).rel(0xB0, f'skip{k}')                       # 2 × HP >= 최대 HP
+        a.b(0xBF, 0x42, 0x20, 0x7E).long(0xCF, 'low').rel(0xB0, f'skip{k}')             # 앞서 본 사람보다 낮을 때만
+        a.long(0x8F, 'low').b(0xE2, 0x20, 0xA9, k + 1).long(0x8F, 'pending').b(0xA9, 0x01).long(0x8F, 'hurt')
+        a.label(f'skip{k}').b(0xE2, 0x20)
+    a.b(0xE2, 0x30).long(0xAF, 'hurt').rel(0xF0, 'calm').long(0xAF, 'mp').b(0xC9, HEAL_MP).rel(0x90, 'calm')
+    a.b(0xA9, sum(w for _, w in GUEST_WEIGHTS)).long(0x22, 'random')
+    total = 0
+    for act, w in GUEST_WEIGHTS[:-1]:
+        total += w
+        a.b(0xC9, total).rel(0x90, f'act{act:02X}')
+    a.rel(0x80, f'act{GUEST_WEIGHTS[-1][0]:02X}')
+    calm = GUEST_WEIGHTS[1:]
+    a.label('calm').b(0xA9, sum(w for _, w in calm)).long(0x22, 'random')
+    total = 0
+    for act, w in calm[:-1]:
+        total += w
+        a.b(0xC9, total).rel(0x90, f'act{act:02X}')
+    a.rel(0x80, f'act{calm[-1][0]:02X}')
+    for act, _ in GUEST_WEIGHTS:
+        a.label(f'act{act:02X}')
+        if act == HEAL:
+            a.long(0xAF, 'pending').long(0x8F, 'target')
+        a.b(0xA9, act).rel(0x80, 'done')
+    a.label('done').b(0x28).long(0x5C, 'finish')
+    a.label('offsets').b(*b''.join((42 * n).to_bytes(2, 'little') for n in range(8)))
+    code, labels = a.assemble({'back': GUEST_AI_BACK, 'finish': GUEST_AI_DONE, 'random': RANDOM, 'hurt': hurt,
+                               'mp': mp, 'target': target, 'low': low, 'pending': SCRATCH + 0x0F})
+    return code, labels['entry'], labels['pick']
+
+
 def native(data=None):
     """(바이트, {이름: 주소}). 기록 자료가 앞, 루틴이 뒤. 주소는 data(롬, 동료 표를 읽음)와 상관없다."""
     record = companion_record(data, HOIMIN_KIND) if data is not None else bytes(len(PARTY_TEMPLATE))
@@ -707,6 +775,8 @@ def native(data=None):
                        *((f'stat_{k}', _stat(k)) for k, _ in STATS)):
         at[name] = CODE_AT + len(out)
         out += code
+    code, at['guest_ai'], at['guest_target'] = _guest_ai(CODE_AT + len(out))
+    out += code
     return bytes(out), at
 
 
@@ -730,6 +800,8 @@ def apply(data):
     _, at = native()
     fx, fy = TOWER_FIELD[0] * 2, TOWER_FIELD[1] * 2      # FC 필드 칸 → DQ5 필드 좌표(그룹 연결의 필드 입구와 같은 셈)
     for addr, orig, new in ((FLY_AT, FLY_ORIG, bytes((0x22, *_long(at['fly']), 0xEA))),
+                            (GUEST_AI_AT, GUEST_AI_ORIG, bytes((0x5C, *_long(at['guest_ai'])))),
+                            (GUEST_TARGET_AT, GUEST_TARGET_ORIG, bytes((0x22, *_long(at['guest_target']), 0xEA))),
                             (FLY_X_AT, FLY_XY_ORIG[0], fx.to_bytes(2, 'little')),
                             (FLY_Y_AT, FLY_XY_ORIG[1], fy.to_bytes(2, 'little'))):
         o = lorom(addr)
