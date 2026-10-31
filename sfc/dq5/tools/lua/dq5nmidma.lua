@@ -1,7 +1,8 @@
 -- DQ5 전투 NMI 의 몬스터 타일 전송(00:FD4A, 목록 7E:0F5E) 시각을 재면서 드라이버(boot.lua, 보통 dq5warp.lua)를 돌린다.
 -- 목록 항목마다 DMA 를 거는 00:FD6A(STA $420B 직전)와 목록 끝 00:FD6F, NMI 첫머리 00:885D 의 줄·마스터 주기를 남긴다.
 --   dma.txt   "프레임 곳 줄 hClock 화면끔 Y 바이트 수 버퍼 주소 VRAM 워드 주소"   곳 = nmi·entry·end
---             nmi 는 그 프레임의 몬스터 타일 전송이 있을 때만 적는다. 화면끔은 ppu.forcedBlank
+--             nmi 는 그 프레임의 몬스터 타일 전송이 있을 때만 적는다. 화면끔은 ppu.forcedBlank. nmi 줄 끝에 그때의 $19 와,
+--             그 NMI 에서 00:89BB 의 OAM DMA(00:89DA STA $420B)가 돌았으면 "oam 줄 hClock" 을 붙인다
 --   DUMPF="1200,1600"  그 프레임 끝에 fNNNNN.vram·.wram 도 남긴다(dq5gfxdump.lua 와 같은 이름)
 --   PIECES=29          전투를 시작할 때 자리 사슬을 비운 뒤(22:ABE5) 조각 목록 사슬 7E:8480 의 앞 29칸을 이미 쓴 그림 하나로
 --                      채우고(남은 수 $0D27 = 128 - 29, 다음 칸 $0D25 = 29), 빈 칸 찾기(22:AD67)를 돈 횟수를 프레임마다
@@ -19,8 +20,12 @@ end
 
 emu.addMemoryCallback(function()
   local sl, h, fb = at()
-  nmi = string.format("%d nmi %d %d %d", n, sl, h, fb)
+  nmi = string.format("%d nmi %d %d %d 19=%02X", n, sl, h, fb, emu.read(0x7E0019, emu.memType.snesMemory))
 end, emu.callbackType.exec, 0x00885D, 0x00885D)
+emu.addMemoryCallback(function()
+  local sl, h = at()
+  if nmi then nmi = nmi .. string.format(" oam %d %d", sl, h) end
+end, emu.callbackType.exec, 0x0089DA, 0x0089DA)
 emu.addMemoryCallback(function()
   local sl, h, fb, y = at()
   -- 00:FD65 에서 Y 가 이미 다음 항목(+6)으로 갔다
