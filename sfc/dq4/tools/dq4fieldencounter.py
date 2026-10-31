@@ -5,7 +5,8 @@ An FC zone map cell is 16x16 FC blocks ((Y >> 4) * 16 + (X >> 4), fc/dq4/docs/dq
 grid cell is 32x32 field cells, also 16x16 blocks ((Y >> 5) * 17 + (X >> 5), 01:854F), so FC zone cell (c, r) is
 DQ5 grid cell (c, r). Each FC zone takes one DQ5 zone that only the field grids use (zones), whose record is
 rewritten in place with the FC zone's monsters through MONSTERS (record), and the four sea zones of 01:85D8 take
-FC zone 00, the zone FC uses on the ship. The DQ5 terrain rates become FC's terrain factors (terrain_rates).
+FC zone 00, the zone FC uses on the ship. The DQ5 terrain rates become FC's terrain factors (terrain_rates), and
+each zone's coefficient keeps FC's mean distance to a fight (field_rate_index).
 sfc/dq4/docs/dq4-field-format.md 「조우」.
 
   python sfc/dq4/tools/dq4fieldencounter.py -o work/encounter
@@ -14,6 +15,7 @@ sfc/dq4/docs/dq4-field-format.md 「조우」.
 import argparse
 import functools
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -134,18 +136,20 @@ SEA_AREAS = (81, 82, 83, 84)   # 01:85D8: the ship's two rectangles take these f
 # A DQ5 grid row is 16 blocks, so field 1's first row takes 35.
 FIELD1_TOP, FIELD1, FIELD3 = 0x35, 0x34, 0x36
 RATE_COEF = 0x23EA44
-# FC dungeons take terrain factor 0F on every tile (18:$9F9B) and DQ5 indoor maps rate 7 (01:8522). An FC step is
-# a 16-pixel block and a DQ5 step one 8-pixel cell (00:82AB runs for each), and the two engines scale a step's
-# chance by the steps since the last fight in different ways, so a dungeon zone takes the coefficient whose mean
-# cells to a fight are nearest twice FC's mean steps (dungeon_rate_index).
+# FC's chance per step is base x the step factor x the terrain factor >> 8 (18:$9CCC), 0F on every dungeon tile
+# (18:$9F9B); DQ5's is coefficient x Y' >> 6, Y' the rate scaled by the steps since the last fight (23:E7C2). An
+# FC step is a 16-pixel block and a DQ5 step one 8-pixel cell (00:82AB runs for each, indoors and on the field),
+# so a zone takes the coefficient whose mean cells to a fight are nearest twice FC's mean steps: indoors at the
+# DQ5 indoor rate 7 (01:8522, dungeon_rate_index), on the field with each terrain's rate at its FC factor
+# (terrain_rates, field_rate_index).
 FC_DUNGEON_TERRAIN, DQ5_INDOOR_RATE = 0x0F, 7
 MEAN_STEPS = 4096
-# DQ5 rate per terrain nibble (01:84CF's Y), day then night, 14 each. FC's chance per step is base x 16 x the
-# terrain factor >> 8 and DQ5's coefficient x Y >> 6, so with Y = the FC factor and coefficient = 4 x base
-# (rate_index) a DQ5 step has the FC chance. FC fights only on tiles below 8 ($9CB5).
+# DQ5 rate per terrain nibble (01:84CF's Y), day then night, 14 each. FC fights only on tiles below 8 ($9CB5).
 TERRAIN_RATES = 0x23F1E0
 TERRAINS = 14
 FC_TERRAINS = 8
+# FC kind 0 is the sea, walked only on the ship (the sea zones); the land zones are matched on the other kinds.
+SEA_KINDS, LAND_KINDS = (0,), tuple(range(1, FC_TERRAINS))
 
 
 @functools.cache
@@ -204,11 +208,8 @@ def grids(prg, assign):
     return out
 
 
-def rate_index(dq5, base):
-    """Index of the DQ5 rate coefficient (23:EA44) nearest 4 x FC's base rate: on the field, where Y is the FC
-    terrain factor (TERRAIN_RATES), a DQ5 step then has the chance of an FC step."""
-    coefs = dq5[_lorom(RATE_COEF):_lorom(RATE_COEF) + 8]
-    return min(range(8), key=lambda i: (abs(coefs[i] - 4 * base), i))
+def _coefs(dq5):
+    return dq5[_lorom(RATE_COEF):_lorom(RATE_COEF) + 8]
 
 
 def _mean(chances):
@@ -220,37 +221,58 @@ def _mean(chances):
     return mean
 
 
-def fc_dungeon_steps(prg, base):
-    """FC's mean steps to a fight in a dungeon zone of base rate `base`: base x the step factor (18:$A33D[$6E42],
-    the first three steps after a fight) x 0F >> 8 (18:$9CCC)."""
+@functools.cache
+def fc_steps(prg, base, terrain=FC_DUNGEON_TERRAIN):
+    """FC's mean steps to a fight in a zone of base rate `base` on tiles of terrain factor `terrain` (0F in a
+    dungeon): base x the step factor (18:$A33D[$6E42], the first three steps after a fight) x terrain >> 8
+    (18:$9CCC)."""
     enc = _fc(prg)
     after = [enc.rd(prg, enc.AFTER_BATTLE + n) for n in range(3)]
-    return _mean(base * (after[k] if k < 3 else 0x10) * FC_DUNGEON_TERRAIN >> 8 for k in range(MEAN_STEPS))
+    return _mean(base * (after[k] if k < 3 else 0x10) * terrain >> 8 for k in range(MEAN_STEPS))
 
 
+def dq5_chance(coef, rate, steps):
+    """DQ5's chance (out of 256) of a fight on a step for coefficient `coef` and rate Y (23:E7C2): with s = $1A9A,
+    the steps since the last fight counting this one (at most FF), and n = 256 / Y, Y is 0 below 3 and >> 6, >> 4,
+    >> 2, >> 1 below 5, 7, 9, 11, then (Y >> 1) + (Y >> 2) below n, Y + (Y >> 1) below 2n and 4Y after, at most
+    FF; the chance is coef x Y >> 6 (23:E898)."""
+    n, s = 0x100 // rate, min(steps, 0xFF)
+    if s < n:
+        y = (rate >> 1) + (rate >> 2)
+        for top, shift in ((3, 8), (5, 6), (7, 4), (9, 2), (11, 1)):
+            if s < top:
+                y = rate >> shift
+                break
+    else:
+        y = min(0xFF, rate + (rate >> 1) if s < 2 * n else 4 * rate)
+    return coef * y >> 6
+
+
+@functools.cache
 def dq5_steps(coef, rate):
-    """DQ5's mean steps to a fight for coefficient `coef` and rate Y (23:E7C2): with s = $1A9A, the steps since the
-    last fight counting this one, and n = 256 / Y, Y is 0 below 3 and >> 6, >> 4, >> 2, >> 1 below 5, 7, 9, 11, then
-    (Y >> 1) + (Y >> 2) below n, Y + (Y >> 1) below 2n and 4Y after, at most FF; the chance is coef x Y >> 6
-    (23:E898)."""
-    n = 0x100 // rate
-
-    def y(s):
-        if s < n:
-            for top, shift in ((3, 8), (5, 6), (7, 4), (9, 2), (11, 1)):
-                if s < top:
-                    return rate >> shift
-            return (rate >> 1) + (rate >> 2)
-        return min(0xFF, rate + (rate >> 1) if s < 2 * n else 4 * rate)
-    return _mean(coef * y(min(s, 0xFF)) >> 6 for s in range(1, MEAN_STEPS + 1))
+    """DQ5's mean steps to a fight for coefficient `coef` and rate Y (dq5_chance)."""
+    return _mean(dq5_chance(coef, rate, s) for s in range(1, MEAN_STEPS + 1))
 
 
 def dungeon_rate_index(prg, dq5, base):
     """Index of the DQ5 rate coefficient whose mean cells to a fight at the indoor rate is nearest two cells per FC
-    step of fc_dungeon_steps."""
-    coefs = dq5[_lorom(RATE_COEF):_lorom(RATE_COEF) + 8]
-    want = 2 * fc_dungeon_steps(prg, base)
+    step of fc_steps."""
+    coefs = _coefs(dq5)
+    want = 2 * fc_steps(prg, base)
     return min(range(8), key=lambda i: (abs(dq5_steps(coefs[i], DQ5_INDOOR_RATE) - want), i))
+
+
+def field_rate_index(prg, dq5, base, kinds=LAND_KINDS):
+    """Index of the DQ5 rate coefficient whose mean cells to a fight, the terrain rate being the FC factor
+    (terrain_rates), are nearest two cells per FC step of fc_steps on the FC kinds `kinds` by day and by night:
+    the least sum of the ratios' absolute logarithms. A factor of 0 fights in neither engine."""
+    enc = _fc(prg)
+    coefs = _coefs(dq5)
+    factors = [f for t in (enc.TERRAIN_DAY, enc.TERRAIN_NIGHT) for k in kinds if (f := enc.rd(prg, t + k))]
+
+    def error(coef):
+        return sum(abs(math.log(dq5_steps(coef, f) / (2 * fc_steps(prg, base, f)))) for f in factors)
+    return min(range(8), key=lambda i: (error(coefs[i]), i))
 
 
 def terrain_rates(prg, dq5):
@@ -309,10 +331,10 @@ def fixed_groups(prg, dq5, fixed):
     return out
 
 
-def record(prg, dq5, z, dungeon=None):
+def record(prg, dq5, z, dungeon=None, kinds=LAND_KINDS):
     """dq5progress/1 encounter fields of FC zone z (without its index) and the FC slots left out. `dungeon` is
     dungeon_fixed for a dungeon zone (None on the field): the rate is dungeon_rate_index, and slot 12 becomes DQ5
-    slot 10."""
+    slot 10. On the field the rate is field_rate_index on the FC kinds `kinds`."""
     enc = _fc(prg)
     rec = enc.zone(prg, z)
     s, w = rec["slots"], enc.weights(prg, rec["row"])
@@ -343,8 +365,9 @@ def record(prg, dq5, z, dungeon=None):
             dropped.append(i)
             continue
         slots[free[0]].update(weight=weight(i), count_code=0, monster=MONSTERS[s[i]])
+    rate = field_rate_index(prg, dq5, rec["rate"], kinds) if dungeon is None else dungeon_rate_index(prg, dq5, rec["rate"])
     return {"level": rec["b1"], "slots": list(slots.values()), "fixed": fixed_slot,
-            "species_weights": [3, 1 if w[14] else 0, 1 if w[15] else 0], "rate_index": rate_index(dq5, rec["rate"]) if dungeon is None else dungeon_rate_index(prg, dq5, rec["rate"]),
+            "species_weights": [3, 1 if w[14] else 0, 1 if w[15] else 0], "rate_index": rate,
             "flag_1000": 0, "flag_1010": False, "fixed_night_only": False}, dropped
 
 
@@ -365,7 +388,7 @@ def docs(prg, dq5, enc, dungeon=()):
             report[f"{fc:02X}"] = {"zone": area, "kind": kind, "level": fields["level"], "dropped_slots": dropped,
                                    "rate_index": fields["rate_index"], "fixed": fields["fixed"],
                                    "monsters": sorted(monsters)}
-    sea, _ = record(prg, dq5, SEA_ZONE)
+    sea, _ = record(prg, dq5, SEA_ZONE, kinds=SEA_KINDS)
     records += [{"index": area, **sea} for area in SEA_AREAS]
     return ({"format": "dq5progress/1", "encounters": records},
             {"format": "dq5encounter/1", "field_grids": grids(prg, assign), "fixed_groups": groups}, report)

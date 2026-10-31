@@ -98,14 +98,37 @@ class RomTest(unittest.TestCase):
     def test_dungeon_rate(self):
         # A DQ5 step is half an FC step. FC base 10 (caves) and 14 (tower) fight every 19.3 and 16.4 steps, that is
         # 38.6 and 32.7 cells; at the indoor rate 7 coefficient 50 fights every 40.4 cells and 80 every 31.6.
-        self.assertAlmostEqual(enc.fc_dungeon_steps(self.prg, 0x10), 19.32, places=2)
-        self.assertAlmostEqual(enc.fc_dungeon_steps(self.prg, 0x14), 16.37, places=2)
+        self.assertAlmostEqual(enc.fc_steps(self.prg, 0x10), 19.32, places=2)
+        self.assertAlmostEqual(enc.fc_steps(self.prg, 0x14), 16.37, places=2)
         self.assertAlmostEqual(enc.dq5_steps(0x50, 7), 40.44, places=2)
         self.assertAlmostEqual(enc.dq5_steps(0x80, 7), 31.64, places=2)
         want = {0x40: 4, 0x41: 4, 0x42: 7, 0x43: 7}
         for z in self.dungeon:
             self.assertEqual(self.report[f"{z:02X}"]["rate_index"], want[z])
-        self.assertEqual(enc.rate_index(self.dq5, 0x10), 3)
+
+    def test_field_rate(self):
+        import dq4encounter
+        # Base 16 on grass (factor 0B by day) fights every 25.5 FC steps, 51.1 cells; with the terrain rate at 0B,
+        # coefficient 10 fights every 55.4 cells and 40 (4 x base, the old pick) every 29.0.
+        self.assertAlmostEqual(2 * enc.fc_steps(self.prg, 0x10, 0x0B), 51.07, places=2)
+        self.assertAlmostEqual(enc.dq5_steps(0x10, 0x0B), 55.40, places=2)
+        self.assertAlmostEqual(enc.dq5_steps(0x40, 0x0B), 29.03, places=2)
+        # Land zones by base 16, 20, 24, 28 take coefficients 10, 16, 2B, 2B; the sea zones (zone 00, base 16, sea
+        # factor 04 / 05) 16.
+        want = {0x10: 0, 0x14: 1, 0x18: 2, 0x1C: 2}
+        for base, index in want.items():
+            self.assertEqual(enc.field_rate_index(self.prg, self.dq5, base), index)
+        for z in ("04", "05", "06", "09", "07", "08"):
+            self.assertEqual(self.report[z]["rate_index"], want[dq4encounter.zone(self.prg, int(z, 16))["rate"]])
+        sea = [r["rate_index"] for r in self.progress["encounters"] if r["index"] in enc.SEA_AREAS]
+        self.assertEqual(sea, [1] * len(enc.SEA_AREAS))
+
+    def test_dq5_chance(self):
+        # Measured at 23:E8B7 with coefficient 40 on grass (Y 0B) and hill (1A) for $1A9A as given.
+        got = {(0x0B, s): c for s, c in ((7, 2), (9, 5), (11, 7), (22, 7), (23, 0x10), (45, 0x10), (46, 0x2C))}
+        got |= {(0x1A, s): c for s, c in ((5, 1), (14, 0x27), (24, 0x68))}
+        for (rate, s), c in got.items():
+            self.assertEqual(enc.dq5_chance(0x40, rate, s), c, (rate, s))
 
     def test_tower_formations(self):
         # FC zones 42·43 slot 12: formations 00 and 01 as DQ5 fixed groups 0 and 1, the other zones none.
@@ -120,10 +143,10 @@ class RomTest(unittest.TestCase):
         self.assertNotIn(12, self.report["42"]["dropped_slots"])
 
     def test_castle_zone(self):
-        # FC zone 04 around バトランド: level 1, base rate 16 -> coefficient 40, スライム·バブルスライム kept.
+        # FC zone 04 around バトランド: level 1, base rate 16 -> coefficient 10, スライム·バブルスライム kept.
         rec = next(r for r in self.progress["encounters"] if r["index"] == self.report["04"]["zone"])
         self.assertEqual(rec["level"], 1)
-        self.assertEqual(rec["rate_index"], 3)
+        self.assertEqual(rec["rate_index"], 0)
         self.assertIn(0x00, self.report["04"]["monsters"])
         self.assertIn(0x09, self.report["04"]["monsters"])
         grid0 = self.grids["field_grids"][0]["rows"]
