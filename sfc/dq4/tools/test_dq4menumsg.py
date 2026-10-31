@@ -56,6 +56,23 @@ class LayoutTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             mm.plan_groups([(0x8000, 12, 11)])
 
+    def test_place_moves_whole_groups_to_the_next_segment(self):
+        from dq5map import lorom
+        # 묶음 셋(메시지 48개): 비트 0~82, 83~162(첫 바이트를 앞 묶음과 나눔), 163~239. 첫 자리 20바이트에는 첫 묶음만
+        # 들어가고(둘째 묶음이 바이트 21 까지), 나머지는 둘째 묶음의 첫 바이트(10)부터 다음 자리로 간다.
+        starts = [0] * 16 + [83] * 16 + [163] * 16
+        blob = bytes(range(1, 31))
+        d = bytearray(0x400000)
+        a, b = lorom(0x618000), lorom(0x619000)
+        origin = mm.place(d, blob, starts, 48, ((0x618000, 0x618014), (0x619000, 0x619100)))
+        self.assertEqual(origin, [a, b - 10, b - 10])
+        self.assertEqual(bytes(d[a:a + 11]), blob[:11])
+        self.assertEqual(bytes(d[b:b + 20]), blob[10:])
+        for k, g in enumerate((0, 16, 32)):
+            self.assertEqual(d[origin[k] + (starts[g] >> 3)], blob[starts[g] >> 3])
+        with self.assertRaises(ValueError):
+            mm.place(bytearray(0x400000), blob, starts, 48, ((0x618000, 0x618014),))
+
     def test_message_count_appends_gap_free_in_blocks_of_16(self):
         self.assertEqual(mm.message_count({0x1CE: []}), mm.MESSAGES)
         self.assertEqual(mm.message_count({0xC80: [], 0xC81: []}), mm.MESSAGES + 16)
