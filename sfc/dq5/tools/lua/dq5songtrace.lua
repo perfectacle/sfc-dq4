@@ -2,6 +2,7 @@
 --   24:FE9A(소리 명령 01, 곡 틀기) 실행: 프레임·곡 번호(A)·돌아갈 주소(JSL 이면 부른 곳, BRK 0F·11 이면 00:92A2·92AB)
 --   BRK 0F·11(곡 틀기 BRK)을 부른 자리: BRK 벡터 처리기 00:8F80 에 들어올 때 스택의 돌아갈 주소로 찾는다
 --   7E:21DF(맵을 옮겨도 남는 곡) 쓰기, 맵 번호($BC·$BD)가 바뀐 프레임
+--   25:FD00(짧게 트는 곡, 끝나면 맵 곡으로) 에 들어올 때의 곡 번호와 JSL 한 곳(short), 보행 메시지 24:8157 의 번호(msg)
 -- TO 나 FIELD 가 있으면 dq5warp.lua 로, 없으면 LIBDIR 의 boot.lua 로 돌고 끝날 때(없으면 MAXF 프레임) SHOT_DIR/songtrace.txt 를 쓴다.
 package.path = os.getenv("LIBDIR") .. "/?.lua;" .. package.path
 local L = require("lib")
@@ -15,6 +16,17 @@ emu.addMemoryCallback(function()
   local ret = emu.read(sp + 1, m) | emu.read(sp + 2, m) << 8 | emu.read(sp + 3, m) << 16
   log[#log + 1] = string.format("%d play %02X from %02X:%04X", f, st["cpu.a"] & 0xFF, ret >> 16, (ret & 0xFFFF) - 3)
 end, emu.callbackType.exec, 0x24FE9A, 0x24FE9A)
+
+emu.addMemoryCallback(function()
+  local st = emu.getState()
+  local sp = st["cpu.sp"]
+  local ret = emu.read(sp + 1, m) | emu.read(sp + 2, m) << 8 | emu.read(sp + 3, m) << 16
+  log[#log + 1] = string.format("%d short %02X from %02X:%04X", f, st["cpu.a"] & 0xFF, ret >> 16, (ret & 0xFFFF) - 3)
+end, emu.callbackType.exec, 0x25FD00, 0x25FD00)
+
+emu.addMemoryCallback(function()
+  log[#log + 1] = string.format("%d msg %04X", f, emu.getState()["cpu.a"] & 0xFFFF)
+end, emu.callbackType.exec, 0x248157, 0x248157)
 
 emu.addMemoryCallback(function()
   local st = emu.getState()
