@@ -47,6 +47,10 @@ class PlanTests(unittest.TestCase):
         texts = {1: ['a', mw.LINE_END], 2: ['b', mw.WAIT_END]}
         self.assertEqual(mw.apply(texts, {1, 2}), {1: ['a', mw.WAIT_END], 2: ['b', mw.WAIT_END]})
 
+    def test_apply_rejects_wait_in_kept(self):
+        with self.assertRaises(ValueError):
+            mw.apply({1: ['a', mw.WAIT_END]}, set(), {1})
+
 
 class GameTests(unittest.TestCase):
     """서장·1장에서 A 없이 넘어가던 대화 속 자리(헤드리스 실측)가 1010, 대화 끝·조작 풀기 앞과 닫기 대기를 하는
@@ -63,6 +67,16 @@ class GameTests(unittest.TestCase):
                      pro.M_STORY_BEGINS, ch.MSG_NARRATION, ch.MSG_MINISTER, m['reunion'],
                      *pro.M_SUPPER_LINES}
         self.assertLessEqual(must_keep, keep)
+
+    def test_game_texts_keep_single_wait(self):
+        """닫기 대기를 하는 명령(인물 21·32, 이벤트 60)이나 대화 끝에서 띄우는 메시지의 글이 1010 으로 끝나지 않는다."""
+        first = 0xF00
+        wait, keep = mw.plan(**ch.message_flow(first))
+        import dq4ch2event
+        import dq4sysmsg
+        texts = {**ch.TEXTS, **pro.TEXTS, **dq4sysmsg.TEXTS, **ev.texts(first),
+                 **dq4ch2event.texts(ch.chapter2_message(first))}
+        mw.apply(texts, wait, keep)
 
 
 if __name__ == '__main__':
