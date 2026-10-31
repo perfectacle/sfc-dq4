@@ -297,7 +297,7 @@ def npc_doc(records, ported=(), prologue=False, report=None, ported_messages=())
         import dq4ch2event
         first = dq4npcport.FIRST_MESSAGE + len(ported_messages)
         scripts += dq4ch1event.scripts(first, dq4ch2event.native()[1]['transfer'])
-        ch2_new, ch2_overrides = dq4ch2event.npc_lists(ported)
+        ported, ch2_new, ch2_overrides = dq4ch2event.npc_lists(ported, chapter2_talk())
         new_lists += ch2_new
         overrides = ch2_overrides + overrides
         scripts += dq4ch2event.scripts(chapter2_message(first), dq4chapterbox.entry_points(scenes(prologue)))
@@ -338,7 +338,8 @@ def messages(ported_messages, report):
     out = {m["id"]: m["codes"] for m in ported_messages}
     # 1장 그룹 인물(왕좌의 방은 이 연출 배치로 바꿈)의 일본어 원문을 FC 메시지 묶음으로 찾아 한글로
     import dq4ch1talk
-    korean = {**dq4ch1talk.TEXTS, **FRONT_TEXTS}
+    import dq4ch2talk
+    korean = {**dq4ch1talk.TEXTS, **FRONT_TEXTS, **dq4ch2talk.TEXTS}
     for m, people in report.items():
         if m == THRONE:
             continue
@@ -376,15 +377,23 @@ def message_flow(first_message):
     scripts = ([throne_script(native)] + dq4prologue.npc_lists()[3] +
                dq4ch1event.scripts(first_message, dq4ch2event.native()[1]['transfer']) +
                dq4ch2event.scripts(chapter2_message(first_message), points))
-    talks = ([s["body"] for s in dq4prologue.talk_doc()["scripts"]] + dq4ch1event.talk_scripts(first_message))
+    talks = ([s["body"] for s in dq4prologue.talk_doc()["scripts"]] + dq4ch1event.talk_scripts(first_message) +
+             dq4ch2event.talk_scripts(chapter2_message(first_message)))
     _, at = dq4prologue.native()
-    return {"talks": talks, "scripts": [s["commands"] for s in scripts], "events": [dq4prologue.end_event(at)]}
+    events = [dq4prologue.end_event(at), dq4ch2event.join_event(chapter2_message(first_message), dq4ch2event.native()[1])]
+    return {"talks": talks, "scripts": [s["commands"] for s in scripts], "events": events}
 
 
 def chapter2_message(first_message):
     """2장 메시지의 첫 번호: 1장 사건 메시지 바로 뒤."""
     import dq4ch1event
     return first_message + len(dq4ch1event.MESSAGES)
+
+
+def chapter2_talk():
+    """2장 사건의 첫 대화 번호: 1장 사건 대화 바로 뒤."""
+    import dq4ch1event
+    return event_talk() + len(dq4ch1event.TALKS)
 
 
 def event_talk():
@@ -518,7 +527,7 @@ GROUP_PATCHES = ('env/dq4-environment.dq5patch.json', 'newmap.dq5patch.json', 'e
                  'entrances.dq5patch.json', 'shops.dq5patch.json', 'inn.dq5patch.json',
                  'entrance-hook.dq5patch.json', 'field-gfx.dq5patch.json', 'field-blocks.dq5patch.json',
                  'field.dq5patch.json', 'talk.dq5patch.json', 'travel.dq5patch.json', 'names.dq5patch.json',
-                 'companion-names.dq5patch.json',
+                 'companion-names.dq5patch.json', 'person-names.dq5patch.json',
                  'zones.dq5patch.json', 'grids.dq5patch.json', 'rates.dq5patch.json', 'chests.dq5patch.json')
 # 원래 롬에서는 새 맵 레코드를 34 에 두지만 통합 롬의 34 는 타이틀 자료라 3A 로 돌린다. 3A 가 차면 다음 레코드는
 # 타이틀 뱅크 30·31 에서 타이틀 자료 사이의 빈 곳(메뉴 롬에서 0 이거나 원본 20·21 의 거울 그대로인 곳)으로 간다.
@@ -610,7 +619,9 @@ def build(rom, dq5, dq4, work, prologue=True):
     out = bytearray(dq4chapterbox.apply(out, dq4.read_bytes(), dq4menupatch.Font('galmuri11'), scenes(prologue)))
     out = bytearray(dq4ch1event.apply(out))
     import dq4ch2event
-    out = bytearray(dq4ch2event.apply(out, original))
+    import dq4npcport
+    out = bytearray(dq4ch2event.apply(out, original,
+                                      chapter2_message(dq4npcport.FIRST_MESSAGE + len(ported_messages))))
     import dq4josa
     out = bytearray(dq4josa.apply(out))
     import dq4msgnames

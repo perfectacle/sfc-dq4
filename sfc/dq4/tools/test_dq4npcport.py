@@ -27,14 +27,18 @@ class AllocationTest(unittest.TestCase):
         import dq4ch1event
         import dq4prologue
         prologue = dq4prologue.talk_doc()["scripts"]
-        events = len(dq4ch1event.TALKS)
+        import dq4ch2event
+        ch1 = len(dq4ch1event.TALKS)
+        events = ch1 + len(dq4ch2event.TALKS)
         messages = [{"id": 0xC80 + k, "codes": [port.END]} for k in range(3)]
         scripts = port.talk_doc(messages)["scripts"]
         talks = [int(s["talk"], 16) for s in scripts]
         self.assertEqual(talks, list(range(port.SCRIPT_TALK, port.SCRIPT_TALK + len(prologue) + events + 3)))
         self.assertEqual(scripts[:len(prologue)], prologue)
-        self.assertEqual([s["body"] for s in scripts[len(prologue):len(prologue) + events]],
+        self.assertEqual([s["body"] for s in scripts[len(prologue):len(prologue) + ch1]],
                          dq4ch1event.talk_scripts(0xC83))   # 사건 메시지는 옮긴 메시지 바로 뒤
+        self.assertEqual([s["body"] for s in scripts[len(prologue) + ch1:len(prologue) + events]],
+                         dq4ch2event.talk_scripts(0xC83 + len(dq4ch1event.MESSAGES)))   # 2장은 1장 사건 뒤
         first = port.first_talk()
         for k, s in enumerate(scripts[len(prologue) + events:]):
             # Talk first_talk() + k shows message C80 + k, as port gives the people.
