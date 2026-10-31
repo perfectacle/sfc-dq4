@@ -1,8 +1,8 @@
 """Build the DQ4 environment maps with whole FC groups in new DQ5 groups, linked by their FC exits.
 
 Order matters (sfc/dq4/docs/dq4-environment-format.md, 「그룹 연결」):
-  1. dq4environmentrom.py patch -> env ROM. dq5newmap.py check wants the door table copy made in 2 to match
-     bank 01 from 01:F037 on, so the copy must contain the hook stubs of the bank-01 tail.
+  1. dq4environmentrom.py patch and dq4door.py -> env ROM. dq5newmap.py check wants the door table copy made in 2
+     to match bank 01 from 01:F037 on, so the copy must contain the hook stubs and door code of the bank-01 tail.
   2. dq5newmap.py from the env ROM: new groups, maps (records from the dq5map/1 documents of 1), arrivals.
   3. dq5exitreloc.py, dq5npcrelocate.py (the FC people of dq4npcport.py), dq5fieldtables.py from the original
      ROM with --new-map, dq5textwrite.py with their Japanese FC text, and dq5progresswrite.py with the FC
@@ -700,7 +700,11 @@ def _build(pool, dq5, dq4, out, with_people):
     env = out / "env"
     report = json.loads(_run(TOOLS / "dq4environmentrom.py", "--dq5", dq5, "--dq4", dq4, "--out", env))
     env_rom = out / "env.sfc"
-    _run(DQ5_TOOLS / "dq5build.py", dq5, "build", env / "dq4-environment.dq5patch.json", "--size", 4, "-o", env_rom)
+    import dq4door
+    # dq4door writes bank 01 too: in the env ROM, so that dq5newmap's door bank copy has it.
+    door_patch = _save(out / "doors.dq5patch.json", {"format": "dq5patch/1", "name": "dq4-doors", "writes": dq4door.writes()})
+    _run(DQ5_TOOLS / "dq5build.py", dq5, "build", env / "dq4-environment.dq5patch.json", door_patch, "--size", 4,
+         "-o", env_rom)
 
     names = {f"{g:02X}/{n:02X}": name for name, (g, n) in GROUPS.items()}
     records = {f"{g:02X}/{n:02X}": r for (g, n), r in new_map_records(env).items()}
@@ -723,7 +727,7 @@ def _build(pool, dq5, dq4, out, with_people):
         record = {"source": f"env/{names[m]}.dq5map.json"} if area[m] == 0 else {"copy": RECORD_PLACEHOLDER}
         zone = dq5_zone.get(fc_zones.get((fc_group, fc_number)))
         newmap["maps"].append({"map": m, "record": record, "attrs": map_attrs(dq5, part_of[fc_group], zone)})
-    manifests = [env / "dq4-environment.dq5patch.json"]
+    manifests = [env / "dq4-environment.dq5patch.json", door_patch]
 
     def step(tool, name, doc, base, *args):
         source = _save(out / f"{name}.json", doc)
