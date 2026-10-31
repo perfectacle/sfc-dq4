@@ -119,6 +119,8 @@ def merchants(prg, fc_group, number, items=None):
         # its event; until then the person only talks.
         if YES in cond:
             continue
+        # The talk script's own time check (FC condition 14, dq4shop.DAY_CONDS) reads like the block's 낮/밤.
+        cond = [{"day": "낮", "아님(not day)": "낮", "not day": "밤", "아님(day)": "밤"}.get(c, c) for c in cond]
         unknown = [c for c in cond if not any(c.startswith(k) for k in SELLER_CONDITIONS)]
         if unknown:
             raise ValueError(f"{fc_group:02X}/{number:02X} ({x:02X},{y:02X}): seller condition {unknown}")

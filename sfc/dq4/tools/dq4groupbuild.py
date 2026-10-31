@@ -112,6 +112,17 @@ LINKS = {
             "chapter": 4}],
     0x44: [{"fc": 0x00, "arrival": (0x0F, 0x1A), "attrs": "03/00", "field": [(0x40, 0xA6)], "out": "down:64",
             "chapter": 4}],
+    # Chapter 2's other places in one group: サラン, the desert bazaar, the tower of the honey (西の塔) and the
+    # bracelet cave south of フレノール. The tower and the cave borrow the attributes of chapter 1's tower and cave.
+    # The travel-door shrine by エンドール (1E) waits: its travel door (FC exit kind 0A) has no DQ5 exit yet.
+    0x45: [{"fc": 0x13, "arrival": (0x0C, 0x19), "attrs": "03/00", "music": 0x06, "field": [(0x22, 0x49)],
+            "out": "down:64", "chapter": 2},
+           {"fc": 0x0C, "arrival": (0x1F, 0x0B), "attrs": "03/00", "field": [(0x3F, 0x4A)], "out": "right:64",
+            "chapter": 2},
+           {"fc": 0x2E, "arrival": (0x15, 0x1F), "map": 3, "attrs": "33/00", "music": 0x0A, "dungeon": True,
+            "field": [(0x24, 0x57)], "out": "down:64", "chapter": 2},
+           {"fc": 0x39, "arrival": (0x23, 0x08), "map": 1, "attrs": "21/02", "music": 0x09, "dungeon": True,
+            "field": [(0x58, 0x3C)], "out": "down:32,wait:60,up:32", "chapter": 2}],
 }
 # The attribute table grows by 6 bytes a map and outgrows its own bank (108 spare bytes), so it moves whole; the
 # map pointer table (3 bytes a map) outgrew bank 0F with chapter 3's maps and moves the same way. The entrance and
@@ -134,8 +145,9 @@ TEXT_AT = ("--at", "35:8000")
 TALK_AT = ("--extra-at", "3C:E800", "--hook-at", "06:FE10")
 SHOP_AT = ("--shop-at", "3C:E000")
 INN_AT = 0x3CF000
-# The entrance hook's table grows by 9 bytes an entrance cell and passes 3C:FC00 with chapter 3.
-ENTRANCE_HOOK_AT = 0x3CF800
+# The entrance hook's tables grow with every group; past chapters 2-4 they reached the shop-key routine at
+# 3C:FE00, so the hook has a bank of its own (5B: no other tool writes there).
+ENTRANCE_HOOK_AT = 0x5B8000
 SHOP_KEY_AT = 0x3CFE00
 WELL_SWITCH_AT = 0x3CFF00
 # The three tables chests and drawers grow; dq5chestplace reads chest_maps and search with DB, so bank 00-3F.

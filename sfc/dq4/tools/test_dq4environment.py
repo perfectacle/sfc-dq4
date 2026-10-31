@@ -145,8 +145,10 @@ class DoorBankTests(unittest.TestCase):
 
     def test_bank_01_tail_does_not_grow_with_entries(self):
         import dq4environmentrom as rom
+        # As many entries a map as fit before the table copy (the count shrinks as maps are added).
+        free = rom.DOOR_TABLES[0] - (rom.LIB_AT & 0xFFFF) - len(self.code(self.entries(0))[0])
         _, few, _ = self.code(self.entries(1))
-        _, many, _ = self.code(self.entries(20))
+        _, many, _ = self.code(self.entries(max(2, free // (5 * (len(rom.MAPS) // 2)) - 1)))
         self.assertEqual(len(few), len(many))
         self.assertLessEqual(rom.HOOK_AT + len(many), rom.HOOK_END)
 

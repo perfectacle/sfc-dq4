@@ -27,7 +27,8 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
 # FC monster -> DQ5 monster, a placeholder until the DQ4 monsters are ported: the DQ5 monster of the same name, or
 # else (marked ~) the first DQ5 monster, by number, of a DQ5 zone whose level is nearest the lowest level of the
 # FC zones the monster appears in (FC zones of fields 0, 1 and 3, then the dungeon zones; DQ5 zones as in the
-# original ROM).
+# original ROM). The monsters only chapter 2's tower and south cave bring take the placeholder of a monster of the
+# same FC zone.
 MONSTERS = {
     0x00: 0x00,  # スライム
     0x01: 0x03,  # ~ キリキリバッタ -> ドラキー
@@ -57,6 +58,7 @@ MONSTERS = {
     0x1C: 0x12,  # ~ あばれうしどり -> まほうつかい
     0x1D: 0x12,  # ~ べビーマジシャン -> まほうつかい
     0x1E: 0x12,  # ~ リリパット -> まほうつかい
+    0x1F: 0x1F,  # ~ きゅうけつこうもり -> わらいぐさ
     0x20: 0x1F,  # ~ とさかへび -> わらいぐさ
     0x21: 0x12,  # ~ おおにわとり -> まほうつかい
     0x22: 0x12,  # ~ ピクシー -> まほうつかい
@@ -66,13 +68,17 @@ MONSTERS = {
     0x26: 0x1F,  # ~ ラリホービートル -> わらいぐさ
     0x27: 0x1B,  # ~ メイジももんじゃ -> がいこつへい
     0x28: 0x1F,  # ~ サンドマスター -> わらいぐさ
+    0x2A: 0x3F,  # ~ ポイズンリザード -> インスペクター
     0x2C: 0x1F,  # ~ コドラ -> わらいぐさ
     0x2D: 0x1B,  # ~ ベロベロ -> がいこつへい
+    0x2E: 0x3F,  # ~ スペクテット -> インスペクター
     0x2F: 0x25,  # ~ しびれだんびら -> ダークアイ
     0x31: 0x29,  # ~ ダークドリアード -> エビルアップル
     0x32: 0x25,  # ~ エビルハムスター -> ダークアイ
+    0x33: 0x3F,  # ~ はえおとこ -> インスペクター
     0x34: 0x47,  # ~ くびながりゅう -> メタルライダー
     0x35: 0x47,  # ~ エビルアングラー -> メタルライダー
+    0x36: 0x3F,  # ~ ひとくいサーベル -> インスペクター
     0x38: 0x3F,  # ~ かまいたち -> インスペクター
     0x39: 0xC8,  # しびれくらげ
     0x3A: 0x47,  # ~ さつじんえい -> メタルライダー
@@ -80,6 +86,7 @@ MONSTERS = {
     0x3D: 0x29,  # ~ ひとつめピエロ -> エビルアップル
     0x3E: 0x3F,  # ~ プテラノドン -> インスペクター
     0x3F: 0x47,  # ~ トドマン -> メタルライダー
+    0x40: 0x3F,  # ~ ドラゴンバタフライ -> インスペクター
     0x45: 0x29,  # ~ とらおとこ -> エビルアップル
     0x46: 0x48,  # さまようよろい
     0x48: 0x3F,  # ~ がいこつけんし -> インスペクター
