@@ -10,9 +10,13 @@
 --regrow-at 으로 표를 다시 옮기며 새 세트 71(무늬, 팔레트 1)을 더해 그림 2B 를 잇는다.
 원본 롬과 고친 롬에서 dq5gfxdump.lua 로 WRAM·VRAM·OAM·CGRAM 을 덤프하고, 각 롬을 dq5sprite.py 의 비교(VRAM 타일·칸 목록·
 OAM 묶음 픽셀)로 본다. 시험 그림은 롬에서 뽑으므로 --out 의 새 하위 폴더에만 둔다.
+방향 롬(face-*)은 같은 둘을 이동 간격 0 으로 세워 위·왼쪽·오른쪽을 보게 하고, 누운 롬(lying-*)은 둘의 엔트리 기타 bit7 을
+켜(Y 바이트도 1 올림, 1E:DB44 가 빼는 몫) 네 방향으로 눕게 한다. 원본 롬과 edited 롬 위에 같은 엔트리 바이트를 써서
+서 있는 아래 아닌 방향과 누운 모양이 화면(OAM)에 디코더 그대로 나오는지 본다.
   MESENCE=… python sfc/dq5/tools/dq5spritewritecheck.py rom/dq5.sfc --state work/state/ship.mss
 """
 import argparse
+import concurrent.futures
 import json
 import os
 import shutil
@@ -25,7 +29,9 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dq5sprite as S  # noqa: E402
-from dq5map import Rom  # noqa: E402
+from dq5map import Rom, lorom  # noqa: E402
+from dq5npc import list_entries  # noqa: E402
+from dq5npcrecord import offsets  # noqa: E402
 from dq5spritewrite import FORMAT, apply, dump_image, patch  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
@@ -33,6 +39,10 @@ RECORDS = {'format': 'dq5npcrecord/1', 'entries': [
     {'list': '05:8CD4', 'index': 3, 'time': 'day', 'fields': {'x': 24, 'y': 12, 'facing': 'down'}},
     {'list': '05:8CD4', 'index': 2, 'time': 'day', 'fields': {'x': 28, 'y': 12, 'facing': 'down', 'gfx': 0x29}}]}
 SIMPLE, OVERLAP, NEW, NEW_GFX = 0x04, 0x84, 0x70, 0x2B
+NPC_LIST, NPC_INDEXES = 0x058CD4, (3, 2)
+# 이름: (방향, 누움). 둘 다 이동 간격 0 으로 세운다.
+POSES = {'face-up': ('up', False), 'face-left': ('left', False), 'face-right': ('right', False),
+         'lying-up': ('up', True), 'lying-down': ('down', True), 'lying-right': ('right', True), 'lying-left': ('left', True)}
 GROWN, GROWN_GFX, GROWN_PALETTE = 0xFF, 0x29, 2
 REGROWN, REGROWN_PALETTE = 0x71, 1
 
@@ -87,9 +97,30 @@ def run(rom, name, out, state, mesence, libdir):
     return dest
 
 
+def pose_records(facing):
+    return {'format': 'dq5npcrecord/1', 'entries': [
+        {**e, 'fields': {**e['fields'], 'facing': facing, 'interval': 0}} for e in RECORDS['entries']]}
+
+
+def lay_down(data):
+    """02/06 의 두 인물 엔트리(낮 필드)에 기타 bit7(누움)을 켜고 Y 바이트를 1 올린다(디코더 dq5npcrecord.decode 와 같은 셈)."""
+    out = bytearray(data)
+    rom = Rom(bytes(out))
+    entries = list_entries(rom, NPC_LIST)
+    for index in NPC_INDEXES:
+        at, size = entries[index]
+        where = offsets(bytes(out[lorom(at):lorom(at) + size]))['day']
+        misc, y = lorom(at) + where['misc'], lorom(at) + where['y']
+        if out[misc] & 0x80 or out[y] & 0x7F == 0x7F:
+            raise ValueError(f'{at:06X}: 이미 누웠거나 Y 를 올릴 수 없음')
+        out[misc] |= 0x80
+        out[y] = out[y] & 0x80 | (out[y] & 0x7F) + 1
+    return bytes(out)
+
+
 def compare(rom, dest):
     stats = {}
-    tags = sorted(p.stem for p in dest.glob('f*.wram'))
+    tags = sorted(p.stem for p in dest.glob('f[0-9]*.wram'))
     if not tags:
         raise ValueError(f'{dest.name}: 덤프가 없음')
     for tag in tags:
@@ -166,9 +197,20 @@ def main():
         libdir = out / 'lib'
         shutil.copytree(krlua, libdir)
         shutil.copyfile(HERE / 'lua/dq5warp.lua', libdir / 'boot.lua')
-        results = {}
-        for name, rom in roms.items():
-            results[name] = compare(Rom(rom.read_bytes()), run(rom, name, out, state, mesence, libdir))
+        for pose, (facing, lying) in POSES.items():
+            (out / f'{pose}.json').write_text(json.dumps(pose_records(facing), indent=1) + '\n', encoding='utf-8')
+            tool('dq5npcrecord.py', original, 'patch', out / f'{pose}.json', '-o', out / f'{pose}.dq5patch.json')
+            for kind, extra in (('original', []), ('edited', [out / 'sprite.dq5patch.json'])):
+                name = f'{pose}-{kind}'
+                roms[name] = out / f'{name}.sfc'
+                tool('dq5build.py', original, 'build', out / f'{pose}.dq5patch.json', *extra, '--size', '2',
+                     '-o', roms[name])
+                if lying:
+                    roms[name].write_bytes(lay_down(roms[name].read_bytes()))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            jobs = {name: pool.submit(lambda n, r: compare(Rom(r.read_bytes()), run(r, n, out, state, mesence, libdir)),
+                                      name, rom) for name, rom in roms.items()}
+            results = {name: job.result() for name, job in jobs.items()}
         edited = Rom(roms['edited'].read_bytes())
         changed = {}
         for s in (SIMPLE, OVERLAP, NEW):
@@ -183,7 +225,16 @@ def main():
 
         def shown(r, sets):
             return all(any(f.startswith(f'{s:02X} ') for f in r['frames']) for s in sets)
+        poses = {}
+        for pose, (facing, lying) in POSES.items():
+            want = {f'{s:02X} {facing}' + ('lying' if lying else '') for s in (SIMPLE, OVERLAP)}
+            seen = {name: {f.rsplit(' ', 1)[0] + ' ' + f.rsplit(' ', 1)[1].rstrip('01') for f in results[f'{pose}-{name}']['frames']}
+                    for name in ('original', 'edited')}
+            poses[pose] = all(want <= seen[name] for name in seen) and all(
+                results[f'{pose}-{name}']['groups'] == results[f'{pose}-{name}']['hits'] > 0 for name in seen) and same(
+                results[f'{pose}-edited'], (SIMPLE, OVERLAP))
         checks = {
+            'poses': all(poses.values()),
             'vram': same(mine, (SIMPLE, OVERLAP, NEW)),
             'oam': mine['groups'] == mine['hits'] > 0 and results['original']['groups'] == results['original']['hits'],
             'shown': shown(mine, (SIMPLE, OVERLAP, NEW)),
@@ -197,7 +248,7 @@ def main():
                        and S.set_record(regrown, REGROWN)['palette'] == REGROWN_PALETTE,
         }
         report = {'donors': {'simple': f'{simple:02X}', 'overlap': f'{overlap:02X}'}, 'results': results,
-                  'changed': changed, 'checks': checks}
+                  'changed': changed, 'poses': poses, 'checks': checks}
         (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
         for name, r in results.items():
             print(f'{name}: 덤프 {r["dumps"]}개, 세트 ' + ' '.join(f'{s} {v[0]}/{v[1]}' for s, v in sorted(r['sets'].items()))
