@@ -382,7 +382,7 @@ class WindowWriteTests(unittest.TestCase):
         """$2131 쓰기 훅을 해석기로 돌린다: 표(직접 HDMA)·채널 7·$0D83. 전투 NMI 가 아니면 원래 값만 쓴다. 화면 중간에
         처음 켤 때는 BG3 비트를 뺀 값을, 켜 둔 뒤에는 창 위 줄이면 원래 값(16비트면 $2132 도), 창 맨 위 줄은 수평 귀선
         안이면, 그 아래 줄이면 BG3 비트를 뺀 값을 쓴다. vblank 안이면 $420C 에 $0D83 을 바로 쓴다. 필드로 돌아가는
-        훅은 켜 둠을 풀고 $420C 에서 채널 7 을 뺀다."""
+        훅은 켜 둠을 풀고 $420C 를 0 으로 끈다(남은 채널 1~6 을 다시 켜지 않음)."""
         at, y = 0x0BFC00, 17
         first = y * 8 - 1
         code, labels = assemble(effect_items(y), at)
@@ -425,8 +425,8 @@ class WindowWriteTests(unittest.TestCase):
         cpu.wram[0x0D83] = 0x0E
         self.assertEqual(call(0x47, 0x20, vblank=0x80), [(0x420C, 0x8E), (0x2131, 0x47)])
         self.assertEqual(cpu.wram[0x0D83], 0x8E)
-        # 필드로 돌아감($70 bit7 = 0): 채널 7 을 뺀다. 전투로 들어감($70 bit7 = 1)이면 그대로.
-        for mode, want in ((0x80, (0x8E, [])), (0x00, (0x0E, [(0x420C, 0x0E)]))):
+        # 필드로 돌아감($70 bit7 = 0): $0D83 에서 채널 7 을 빼고 $420C 는 00. 전투로 들어감($70 bit7 = 1)이면 그대로.
+        for mode, want in ((0x80, (0x8E, [])), (0x00, (0x0E, [(0x420C, 0x00)]))):
             cpu.wram[0x70] = mode
             cpu.io_writes.clear()
             cpu.p = 0x30
