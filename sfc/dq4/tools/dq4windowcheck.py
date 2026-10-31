@@ -6,6 +6,8 @@
   가나: 칸이 가나 타일(010~078)을 가리키는데 그 그림이 롬 가나(04:E528)와 다르고, 우리 슬롯이 그린 자리(키의 글자 줄과
         그 위 줄)가 아니다. 필드에서 가나 칸 슬롯과 겹친 원래 가나 글자다.
   비침: 필드에서 칸이 살아 있는 캔버스 안 슬롯(096~17F)의 그림을 가리키는데 우리 자리가 아니다. 메시지 창이 우리 그림을 보인다.
+  덮임: 캔버스 밖 1D0~ 을 빌린 슬롯이 화면에 보이는데(키 자리가 그 슬롯 첫 칸), 같은 키·나이로 앞서 본 그림과 VRAM 이 다르다.
+        다시 그리지 않은 빌린 글자를 명령 창·가게 창 전용 칸 문구가 덮었다.
 
 걸린 프레임은 화면에 빨간 네모를 그려 sheet-*.png 로 모은다.
 
@@ -50,6 +52,13 @@ SHOP_WHO = ('wait:30,up:6,wait:30,a:4,wait:30,a:4,wait:90,a:4,wait:60,a:4,wait:6
             + 'a:4,wait:200,a:4,wait:300,' + 'a:4,wait:120,' * 4 + 'b:4,wait:120')
 
 
+# 09/00 크리프트 소지품 12칸을 긴 이름으로 채우고 도구 → 크리프트 → 셋째 물건. 목록이 가나 칸을 넘쳐 「어떻게 할까」 제목이
+# 1D0~ 을 빌리고, 「어떻게 할까」 를 열 때 게임이 뒤의 명령 창을 다시 그린다
+PARTY_ITEMS = ';'.join(f'7E{0x2056 + i:04X}={0x0C + i * 3:02X}' for i in range(12))
+PARTY_ITEMS_PRE = ('wait:150,a:6,wait:60,right:4,wait:30,down:4,wait:30,a:6,wait:90,a:6,wait:150,a:6,wait:150,'
+                   'b:6,wait:90,b:6,wait:90')
+
+
 def scenes(ship, party, shop=None):
     """(이름, 세이브스테이트, POKE, ROMPATCH, PRE, 프레임)."""
     out = []
@@ -60,6 +69,7 @@ def scenes(ship, party, shop=None):
         out.append((f'talk{n:02X}', ship, f'7E36EB={n:02X};7E370B=00', '35C37=A901', TALK, range(60, 1500, 30)))
     for seed in (1, 2, 3, 4):
         out.append((f'ship{seed}', ship, '', '', fuzz(seed), range(100, 8000, 50)))
+    out.append(('partyitems', party, PARTY_ITEMS, '', PARTY_ITEMS_PRE, range(60, 900, 30)))
     for seed in (21, 22):
         out.append((f'party{seed}', party, '', '', fuzz(seed), range(100, 8000, 50)))
     for seed in (11, 12):
@@ -127,7 +137,7 @@ def dumps(folder):
 def check(folder, rom, slots):
     """[(프레임, [(줄, 열, 규칙, 타일)])] 걸린 프레임만."""
     kana = {t: bytes(x for b in rom[KANA_ROM + (t - 1) * 8:KANA_ROM + t * 8] for x in (b, 0xFF)) for t in KANA}
-    out = []
+    out, seen = [], {}
     for frame, d in sorted(dumps(folder).items()):
         vram_path = folder / f'v{frame:05d}.bin'
         if not vram_path.exists() or len(d) < 5:
@@ -149,6 +159,19 @@ def check(folder, rom, slots):
                 live.update({t: i for t in range(tile, tile + size)})
         tilemap = (d[0x0725][0] & 0xFC) << 8
         bad = []
+        for i, (tile, size, field_only) in enumerate(table):
+            key = int.from_bytes(keys[2 * i:2 * i + 2], 'little')
+            age = int.from_bytes(ages[2 * i:2 * i + 2], 'little')
+            if tile < 0x1D0 or battle or not key or not age:
+                continue
+            c = (key - BUFFER) // 2
+            if not 0 <= c < 32 * 28:
+                continue
+            if int.from_bytes(vram[(tilemap + c) * 2:(tilemap + c) * 2 + 2], 'little') & 0x3FF != tile:
+                continue
+            art = vram[(0x1000 + tile * 8) * 2:(0x1000 + (tile + size) * 8) * 2]
+            if seen.setdefault((i, key, age), art) != art:
+                bad += [(c // 32, c % 32 + j, '덮임', tile + j) for j in range(size // 2)]
         for cell in range(32 * 28):         # 화면은 28줄(224점)
             if cell in mine:
                 continue
