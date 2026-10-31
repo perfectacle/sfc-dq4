@@ -507,7 +507,40 @@ def hook_patch(rom):
     brey = cpu(COMPANION_PICTURES) + 5
     writes.append({'at': f'{brey >> 16:02X}:{brey & 0xFFFF:04X}', 'hex': f'{BREY_PICTURE:02x}',
                    'orig': f'{rom[lorom(brey)]:02x}', 'note': '사람 동료 그림 표 인물 05(브라이) → 2C'})
+    # 일행 그림을 그 자리에서 다시 싣는 03:D2B9 는 레코드 +2 의 아래 4비트만 뱅크로 써서, TILE_AREAS(3C~3F)에 둔
+    # 세트를 0C~0F 에서 읽는다(맵에 들어올 때의 1F:D2DB 는 6비트를 다 쓴다). 위 2비트는 팔레트라 3F 로 거른다
+    mask = rom[lorom(BANK_MASK_SITE):lorom(BANK_MASK_SITE) + 2]
+    if mask != b'\x29\x0f':
+        raise SystemExit(f'03:D2C7: AND #$0F 가 아님 ({mask.hex(" ")})')
+    writes.append({'at': '03:D2C7', 'hex': '29 3f', 'orig': '29 0f', 'note': '일행 그림 다시 싣기의 타일 자료 뱅크 6비트'})
     return {'format': 'dq5patch/1', 'name': 'people-hook', 'writes': writes, 'rom_size': 2}
+
+
+BANK_MASK_SITE = 0x03D2C7
+SWAP_SITE = 0x03D24D
+SWAP_HEAD = 29                                    # swap_routine 의 머리(PHX … PLB). 뒤는 A = 세트로 표를 찾는다
+
+
+def swap_patch(rom):
+    """그림을 바꿀 때의 팔레트 루틴(03:D24D → dq5objpalette.swap_routine)이 세트를 인물 훅으로 찾게 한다.
+    그 루틴은 03:D202 의 LDA long 피연산자를 실행 중에 읽어 그림 표를 찾는데, 03:D202 가 인물 훅 JSL 이면
+    훅 코드 바이트를 세트로 읽어 팔레트 비트가 틀어진다(일행이 바뀐 뒤 주인공·동료 그림이 다른 팔레트·타일 줄로 깨짐).
+    머리를 「그림 번호 $1EC0 → X, JSL 인물 훅」으로 바꿔, 타일을 싣는 03:D202 와 같은 세트를 보게 한다."""
+    import dq5objpalette
+    site = lorom(SWAP_SITE)
+    if rom[site] != 0x22:
+        raise SystemExit('03:D24D: 세트 팔레트 훅(JSL)이 아님')
+    at = rom[site + 1] | rom[site + 2] << 8 | rom[site + 3] << 16
+    orig = dq5objpalette.swap_routine(0)[:SWAP_HEAD]
+    if rom[lorom(at):lorom(at) + SWAP_HEAD] != orig:
+        raise SystemExit(f'{at >> 16:02X}:{at & 0xFFFF:04X}: dq5objpalette.swap_routine 의 꼴이 아님')
+    hook_at = cpu(HOOK_AT)
+    head = (bytes.fromhex('da c2 20 af c0 1e 7e 29 ff 00 aa e2 20') +    # PHX / REP #$20 / LDA $7E1EC0 / AND #$FF / TAX / SEP #$20
+            bytes((0x22, hook_at & 0xFF, hook_at >> 8 & 0xFF, hook_at >> 16)))  # JSL 인물 훅 → A = 세트
+    head += b'\xea' * (SWAP_HEAD - len(head))
+    return {'format': 'dq5patch/1', 'name': 'people-swap', 'rom_size': 2,
+            'writes': [{'at': f'{at >> 16:02X}:{at & 0xFFFF:04X}', 'hex': head.hex(' '), 'orig': orig.hex(' '),
+                        'note': '그림 바꾸기 팔레트 루틴의 세트 찾기를 인물 훅으로'}]}
 
 
 def target(person, rom):
@@ -707,6 +740,9 @@ def build(base, dq5, assets, out, work):
     (work / 'hook.dq5patch.json').write_text(json.dumps(hook_patch(original), indent=1) + '\n')
     names = [f'sprite{k}' for k in range(len(sprites))] + ['palette', 'maps', 'hook']
     rom = apply_writes(base.read_bytes(), original, [work / f'{n}.dq5patch.json' for n in names])
+    # 팔레트 패치가 놓은 루틴을 고치므로 그 뒤에 얹는다
+    (work / 'swap.dq5patch.json').write_text(json.dumps(swap_patch(rom), indent=1) + '\n')
+    rom = apply_writes(rom, original, [work / 'swap.dq5patch.json'])
     out.write_bytes(set_checksum(rom))
     return rows
 

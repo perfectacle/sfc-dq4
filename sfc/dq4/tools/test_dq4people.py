@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import unittest.mock
 from collections import Counter
 from pathlib import Path
 
@@ -61,6 +62,61 @@ class HookTests(unittest.TestCase):
         cpu = run(0x9B, 0x36, p=0x20)
         self.assertEqual(cpu.p & 0x30, 0x20)
         self.assertEqual(cpu.x, 0x9B)
+
+
+PAL_TABLE, SWAP_AT = 0x3DEA55, 0x3DEA19
+
+
+def swap_rom():
+    """인물 훅·그림 표·세트 팔레트 표·그림 바꾸기 팔레트 루틴을 넣고 03:D202·03:D24D 를 JSL 로 돌린 롬."""
+    import dq5objpalette
+    rom = bytearray(0x400000)
+    at = P.cpu(P.HOOK_AT)
+    code = P.hook(ENTRIES)
+    rom[lorom(at):lorom(at) + len(code)] = code
+    for g in range(0x100):
+        rom[lorom(TABLE + g)] = g ^ 0x80
+        rom[lorom(PAL_TABLE + g)] = 0xFF
+    rom[lorom(PAL_TABLE + 0x71)], rom[lorom(PAL_TABLE + 0x20)] = 6, 5
+    routine = dq5objpalette.swap_routine(PAL_TABLE)
+    rom[lorom(SWAP_AT):lorom(SWAP_AT) + len(routine)] = routine
+    rom[lorom(0x03D202):lorom(0x03D202) + 4] = bytes((0x22, at & 0xFF, at >> 8 & 0xFF, at >> 16))
+    rom[lorom(P.SWAP_SITE):lorom(P.SWAP_SITE) + 4] = bytes((0x22, SWAP_AT & 0xFF, SWAP_AT >> 8 & 0xFF, SWAP_AT >> 16))
+    return rom
+
+
+def swap_run(rom, picture, group=0x36):
+    cpu = Cpu(bytes(rom), bytearray(0x20000))
+    cpu.wram[0xBC], cpu.wram[0x1EC0] = group, picture
+    cpu.x, cpu.p = 0x80C0, 0x20
+    cpu.jsl(SWAP_AT)
+    return cpu
+
+
+class SwapTests(unittest.TestCase):
+    def test_hooked_picture_site_breaks_the_plain_routine(self):
+        # 03:D202 가 JSL 이면 원래 루틴은 훅 코드 바이트를 세트로 읽는다
+        self.assertNotEqual(swap_run(swap_rom(), 0x2B).wram[0x08], 6 * 2)
+
+    def test_patched_routine_takes_the_hook_set(self):
+        rom = swap_rom()
+        write = P.swap_patch(bytes(rom))['writes'][0]
+        head = bytes.fromhex(write['hex'])
+        rom[lorom(SWAP_AT):lorom(SWAP_AT) + len(head)] = head
+        for picture, want in ((0x2B, 6), (0x5B, 5)):
+            cpu = swap_run(rom, picture)
+            self.assertEqual(cpu.wram[0x08], want * 2, f'{picture:02X}')
+            self.assertEqual((cpu.x, cpu.y, cpu.p & 0x30), (0x80C0, 2, 0x20))
+
+    def test_hook_patch_widens_the_reload_bank_mask(self):
+        rom = bytearray(0x400000)
+        for site in P.HOOK_SITES:
+            rom[lorom(P.cpu(site)):lorom(P.cpu(site)) + 4] = P.LOAD_SET
+        rom[lorom(P.BANK_MASK_SITE):lorom(P.BANK_MASK_SITE) + 2] = b'\x29\x0f'
+        with unittest.mock.patch.object(P, 'hook_entries', return_value=[]):
+            writes = P.hook_patch(bytes(rom))['writes']
+        self.assertIn({'at': '03:D2C7', 'hex': '29 3f', 'orig': '29 0f',
+                       'note': '일행 그림 다시 싣기의 타일 자료 뱅크 6비트'}, writes)
 
 
 def body(color=(200, 30, 30, 255)):
