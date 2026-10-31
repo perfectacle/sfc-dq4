@@ -40,6 +40,8 @@ MESSAGES = 0x2000
 # 길이가 어긋나 갈리지 않은 블록 안에서 모르는 명령 갈래(06:B10F)로 가므로 받지 않는다. 1C 는 mask | 7E:2190+index 가 0 이 아니면 참.
 CONDS = {0x02: (), 0x03: ('member',), 0x05: (), 0x11: ('item',), 0x13: ('record',), 0x14: (),
          0x1A: ('index', 'value'), 0x1B: ('index', 'mask'), 0x1C: ('index', 'mask'), 0x1E: (), 0x1F: (), 0x20: ()}
+# 명령 12 의 인자는 06:DBD2 의 06:DBDB 점프 표(대화 번호 000~010 의 처리기, 17칸) 번호
+SERVICES = 0x11
 FLAG_OPS = {0x17: ('flag-off', 'mask'), 0x18: ('flag-on', 'mask'), 0x19: ('flag-set', 'value')}
 FLAG_CODES = {name: (code, arg) for code, (name, arg) in FLAG_OPS.items()}
 
@@ -134,6 +136,10 @@ def read_op(rom, a):
         return {'op': name, 'index': rom.u8(a + 1), arg: rom.u8(a + 2)}, a + 3
     if b == 0x00:
         return {'op': 'call', 'target': f'{rom.u16(a + 1):04X}'}, a + 3
+    if b == 0x01:
+        return {'op': 'call', 'target': f'{rom.u16(a + 1):04X}', 'args': [rom.u8(a + 3), rom.u8(a + 4)]}, a + 5
+    if b == 0x12:
+        return {'op': 'service', 'index': rom.u8(a + 1)}, a + 2
     raise ValueError(f'{a:06X}: 받지 않는 명령 {b:02X}')
 
 
@@ -256,10 +262,23 @@ def encode_op(value, where):
         fields(value, ('op', 'index', arg), (), where)
         return bytes([code, byte(value['index'], f'{where}.index'), byte(value[arg], f'{where}.{arg}')])
     if op == 'call':
-        fields(value, ('op', 'target'), (), where)
+        fields(value, ('op', 'target'), ('args',), where)
         t = hexnum(value['target'], 0x8000, 0xFFFF, 4, f'{where}.target')
-        return bytes([0, t & 0xFF, t >> 8])
-    raise ValueError(f'{where}: 모르는 명령 {op!r}(msg·if·flag-off·flag-on·flag-set·call)')
+        if 'args' not in value:
+            return bytes([0, t & 0xFF, t >> 8])
+        # 01: 06:B143 이 뒤 두 바이트를 7E:0F30·0F31 에 두고 부름. 06:AFA9 는 01 을 1바이트로 세고 인자를 따로 읽으므로
+        # 경계는 아래 encode_script 의 건너뛰기 검사가 본다
+        args = value['args']
+        if not isinstance(args, list) or len(args) != 2:
+            raise ValueError(f'{where}.args: 0~255 정수 둘의 배열이어야 함')
+        return bytes([1, t & 0xFF, t >> 8, *(byte(v, f'{where}.args') for v in args)])
+    if op == 'service':
+        fields(value, ('op', 'index'), (), where)
+        index = byte(value['index'], f'{where}.index')
+        if index >= SERVICES:
+            raise ValueError(f'{where}.index: 06:DBDB 표는 00~{SERVICES - 1:02X}')
+        return bytes([0x12, index])
+    raise ValueError(f'{where}: 모르는 명령 {op!r}(msg·if·flag-off·flag-on·flag-set·call·service)')
 
 
 def encode_script(body, where):

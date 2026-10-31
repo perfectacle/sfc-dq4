@@ -39,11 +39,20 @@ LONG = [
     {'op': 'if', 'cond': {'code': '1B', 'index': 0x62, 'mask': 0xF0}, 'then': [{'op': 'msg', 'id': '129'}]},
     {'op': 'msg', 'id': '74F'},
 ]
+# 01(인자 있는 호출)·12(가게 처리기)를 도구로 쓴 스크립트. 선실 파파스의 조건(7E:2191 & 01)이 거짓이라 then 블록(01·12 가 든)은
+# 06:B23F 가 건너뛰고 else 블록의 01 이 돈다. 같은 묶음의 013·015 가 원본과 같으면 06:AFA9 찾기도 맞은 것이다
+ARGS = [{'op': 'if', 'cond': {'code': '1B', 'index': 1, 'mask': 1},
+         'then': [{'op': 'call', 'target': 'B3A0', 'args': [0x11, 0x22]}, {'op': 'service', 'index': 1},
+                  {'op': 'msg', 'id': '16B'}],
+         'else': [{'op': 'msg', 'id': '129'}, {'op': 'call', 'target': 'B3A0', 'args': [0x5A, 0xA5]},
+                  {'op': 'msg', 'id': '742'}]}]
 EDITS = {
     'cond': ([], [{'talk': '012', 'body': [{**PAPAS, 'cond': {**PAPAS['cond'], 'not': True}}]}]),
     'msg': ([], [{'talk': '012', 'body': [{**PAPAS, 'else': {'op': 'msg', 'id': '129'}}]}]),
     'long': (['--at', AT], [{'talk': '012', 'body': LONG}]),
     'repack': (['--at', AT, '--repack'], [{'talk': '012', 'body': LONG}]),
+    'args': (['--at', AT], [{'talk': '012', 'body': ARGS}]),
+    'service': ([], [{'talk': '012', 'body': [{'op': 'service', 'index': 1}]}]),
 }
 # 도구가 받지 않는 명령·조건을 원본 롬의 파파스 스크립트(대화 012, 06:812D)에 바이트로 덮어 쓴 롬. 뒤 스크립트(013~)는 깨져도
 # 이 실측은 012 만 건다. (바이트, 장면에서 7E:2191 에 둘 값). 61 6B / 61 29 는 메시지 16B / 129
@@ -94,6 +103,11 @@ CASES = [
     ('op01', 'op01', 0x012, 'yes', ['1CC', '129'], '8129', {0x0F30: 0x5A, 0x0F31: 0xA5}),
     # 무기점 첫 메시지 002 뒤, 같은 누름으로 가게 메뉴의 006·013 까지
     ('op12', 'op12', 0x012, 'yes', ['002', '006', '013'], '8129', {}),
+    ('args', 'args', 0x012, 'yes', ['129', '1CC', '742'], 'FE10', {0x0F30: 0x5A, 0x0F31: 0xA5}),
+    ('013-args', 'args', 0x013, 'yes', None, 'FE10', {}),
+    ('015-args', 'args', 0x015, 'yes', None, 'FE10', {}),
+    ('013-original', 'original', 0x013, 'yes', None, '8129', {}),
+    ('service', 'service', 0x012, 'yes', ['002', '006', '013'], '8129', {}),
 ]
 
 
