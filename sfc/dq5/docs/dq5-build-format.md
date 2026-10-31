@@ -3639,7 +3639,7 @@ MESENCE="$MESENCE" LIBDIR="$LIBDIR" uv run --locked python sfc/dq5/tools/dq5text
   work/ch1/dq4-ch1-full.sfc work/port/build/port.sfc --message CA8 --out work/textovercheck
 ```
 
-1장 롬은 IRQ 벡터 `00:FFEE` 를 `00:8000` 으로 바꿉니다([소리 이식](../../dq4/docs/dq4-sound-port-format.md)). 빌더가 머리 `7FB0`~`7FFF` 전체를 자기 몫으로 두던 때는 고정 패치가 이 벡터를 쓰지 않아, 결과 롬이 원래 벡터 `8F7F` 로 돌아가 켜면 화면이 까만 채로 멈췄습니다. 지금은 머리 가운데 이름·크기·체크섬(`7FB0`~`7FDF`)만 빌더가 쓰고, 벡터는 고정 패치에 `orig` 를 단 쓰기로 들어갑니다.
+1장 롬은 IRQ 벡터 `00:FFEE` 를 `00:8000` 으로 바꿉니다([소리 이식](../../dq4/docs/dq4-sound-port-format.md)). 빌더가 머리 `7FB0`~`7FFF` 전체를 자기 몫으로 두던 때는 고정 패치가 이 벡터를 쓰지 않아, 결과 롬이 원래 벡터 `8F7F` 로 돌아가 켜면 화면이 까만 채로 멈췄습니다. 지금은 머리 가운데 이름·크기·체크섬(`7FB0`~`7FDF`)만 빌더가 쓰고, 벡터는 고정 패치에 `orig` 를 단 쓰기로 들어갑니다. 그래서 벡터를 바꾼 고정 롬 둘을 함께 쓰거나, 고정 롬과 `patch` 작업이 같은 벡터를 쓰면 빌드가 「겹침」으로 멈춥니다(값이 같아도. 코드 읽기, 시험하지 않음).
 
 #### dq5 도구의 기본 자리와 겹침
 
