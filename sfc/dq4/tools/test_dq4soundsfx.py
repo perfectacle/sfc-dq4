@@ -110,6 +110,30 @@ class SpareTests(unittest.TestCase):
         self.assertEqual(note['note'], 110 - 24)
         self.assertEqual(note['slide'], (sfx.BASE_KEY + sfx.MAX_SHIFT - note['note'], 4))
 
+    def test_curve_splits_the_slide_where_the_bend_turns(self):
+        # NDS 47B EVE_JUMP: 범위 26 에서 0 → 76 으로 오른 뒤 18 로 내려온다
+        dump = """[track0] $6BA3
+  6BA3  C7 00         note-wait 0
+  6BAE  C5 1A         bend-range 26
+  6BB5  41 64 0C      note F4(41) vel=100 gate=12
+  6BBA  80 01         rest len=1
+  6BBC  C4 00         bend 0
+  6BBE  80 06         rest len=6
+  6BC0  C4 4C         bend 76
+  6BC2  80 03         rest len=3
+  6BC4  C4 2D         bend 45
+  6BC6  80 01         rest len=1
+  6BC8  C4 12         bend 18
+  6BCA  80 01         rest len=1
+"""
+        score = {'timeline': [{'op': 'note', 'ch': 'track0', 'tick': 0, 'note': 65, 'gate': 12, 'bend': 0}]}
+        (plain,) = sfx.bend_slides(score, dump)['timeline']
+        self.assertEqual(plain['slide'], (round(18 * 26 / 128), 11))
+        (curved,) = sfx.bend_slides(score, dump, curve=True)['timeline']
+        self.assertNotIn('slide', curved)
+        # 틱 1 에서 7 까지 +15, 그 뒤 지금 음높이에서 -11(끝 +4)
+        self.assertEqual(curved['slides'], [(1, 15, 6), (7, -11, 4)])
+
     def test_bend_slides_follow_the_bends_written_while_the_note_sounds(self):
         dump = """[track0] $9A58
   9A58  C7 00         note-wait 0

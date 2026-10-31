@@ -28,7 +28,7 @@ CODE_AT = 0x5EC000
 # NDS mlb1a 의 수련: 검은 화면에서 칼 여섯 합(효과 0xAC + 효과음 0x62 + 기다리기 0x09), 그 뒤에 지하가 밝아진다.
 # (효과음, NDS 효과(dq4sparfx.EFFECTS 차례), 다음 합까지 프레임). 기다림은 NDS 스크립트 값(60fps).
 # 銅の剣 412·鋼の剣 416 은 DQ4 가 부르지 않는 효과음 40 의 갈래 01·02 에 옮겨 둔다(dq4sound-game.args 의 --sfx-pcm).
-# 마지막 합(우리 편이 맞음 403)은 37-0D
+# 마지막 합(우리 편이 맞음 403)은 37-03
 # 합이 끝나면 NDS 는 지하를 90프레임에 걸쳐 밝히고(0x0E 90), 60·60프레임 기다린 뒤 검사가 묻는다
 REVEAL_STEP = 6     # 밝기 1 → 15 한 단계에 6프레임
 REVEAL_HOLD = (60, 60)
@@ -36,7 +36,7 @@ SPIN_SPEED, WALK_SPEED = 4, 1
 # NDS 는 지하에 들어오면 곡을 멈춘다(0x147 0). 무음 곡 4A(dq4sound-game.args 의 --silent-song)를 틀어 두면 그 곡에
 # 붙인 칼 효과음 샘플이 미리 올라가(--sfx-carry 40=4A), 칼 소리를 부를 때 샘플을 받느라 늦지 않는다
 SILENT_SONG = 0x4A
-HERO_HIT, MASTER_HIT, LANDED = (0x40, 0x01), (0x40, 0x02), (0x37, 0x0D)
+HERO_HIT, MASTER_HIT, LANDED = (0x40, 0x01), (0x40, 0x02), (0x37, 0x03)
 SPAR = [(HERO_HIT, 0, 30), (MASTER_HIT, 1, 60), (HERO_HIT, 0, 30), (MASTER_HIT, 1, 20), (MASTER_HIT, 1, 60),
         (LANDED, 1, 90)]
 
@@ -182,7 +182,7 @@ FROG_OUT = [(0x14, 0x04), (0x15, 0x04), (0x15, 0x03), (0x15, 0x02)]      # 다�
 VOICE_HUT = (40, 7, 44, 8)      # 오두막을 나섬: 「용사님 용사님……」
 VOICE_BRIDGE = (37, 8, 38, 10)  # 다리 동쪽 끝: 같은 말
 FROG_CALL = (34, 8, 35, 10)     # 다리 위: 「용사님 제발 도와주세요……」 → 개구리가 나타남
-SPLASH = JUMP = (0x37, 0x03)    # NDS EVE_3_08·EVE_JUMP 는 PCM 샘플을 써서 DQ5 효과음으로 둔다
+SPLASH = JUMP = (0x45, 0x00)    # NDS EVE_JUMP 를 옮긴 빈 효과음(dq4sound-game.args). 첨벙 EVE_3_08 도 이 소리로
 STAIRS = (0x34, 0x02)           # 계단(NDS 階段 으로 바뀐 갈래)
 SHINSIA_AT = (3, 0x0E)          # 수련하던 자리
 SHINSIA_OUT = [(4, 0x0E), (4, 0x07), (3, 0x07)]

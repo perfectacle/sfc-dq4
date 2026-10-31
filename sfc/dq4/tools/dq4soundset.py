@@ -186,7 +186,8 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
           fast_receive=False, chains=(), holds=(), early_song=False, load_pump=False, vehicle_song=False,
           keep_samples=False, prefetch=None, release_failed=False, release_pending=False, tick_scan=False, unpin=(), effects=None, effect_waves=None,
           effect_gain_db=None, spare_effects=None, spare_carriers=None, spare_keep=None,
-          spare_rate=8000, weapon_sounds=None, weapon_songs=(), effect_calls=None, spare_substitutes=None, silent_songs=()):
+          spare_rate=8000, weapon_sounds=None, weapon_songs=(), effect_calls=None, spare_substitutes=None, silent_songs=(),
+          resident_pcm=None, reserve=()):
     """stream 은 {곡 자리: 곡 앞 샘플 바이트 상한}. 그 곡은 샘플 일부를 곡이 울리는 동안 보낸다(transfer_plan).
 
     stream_ticks 는 {곡 자리: 틱}. 곡 앞 바이트 상한을 곡이 처음 그 틱 안에 쓰는 샘플의 합으로 정하고, 도착 어림보다
@@ -271,9 +272,16 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
     pinned_sizes = {x: len(patch.sequence_bytes(data, x)) for x in patch.pinned_sequences(data)
                     if x not in replaced and x not in unpin}
     pinned_sizes |= {slot: size + MARGIN for slot, _, _, _, size, _ in plans if slot in pinned}
+    # 바꾸며 늘 두는 목록에서 뺀 곡도 DQ5 의 늘 두는 크기를 예산에 남겨, 다른 곡의 예산(곧 샘플)이 바뀌지 않게 한다
+    pinned_sizes |= {x: len(patch.sequence_bytes(data, x)) for x in reserve
+                     if x in patch.pinned_sequences(data) and x not in pinned_sizes}
     # 바꾼 효과음 시퀀스는 늘 두는 채로 커지므로, 곡 예산을 셈하기 전에 그 크기를 넣는다
     wave_payloads, waves, wave_report = sfx_port.wave_resources(assets, effect_waves) if effect_waves else ({}, {}, {})
     resident_sizes |= {x: len(p) - 2 for x, p in wave_payloads.items() if x in resident_sizes}
+    # 늘 두는 샘플 자리에 넣는 NDS 소리는 원래 크기 이하로만 받으므로, 곡 예산은 원래 크기로 둔다(곡 샘플이 바뀌지 않게)
+    if resident_pcm:
+        pcm_payloads, pcm_waves, pcm_report = sfx_port.resident_pcm(assets, resident_pcm, spare_rate, brr_cache)
+        wave_payloads, waves, wave_report = wave_payloads | pcm_payloads, waves | pcm_waves, wave_report | pcm_report
     effect_sequences, effect_extras, effect_report = (
         sfx_port.build_effects(data, assets, effects, patch.sequence_bytes,
                                {seq: records[seq][2:] for seq, _ in effects}, waves,
@@ -709,7 +717,7 @@ def main():
                     help='change the voice volume (ED) of that converted sound effect branch by DB')
     ap.add_argument('--sfx', action='append', default=[], metavar='SEQ-BRANCH=NDS',
                     help='replace a DQ5 sound effect branch (0C SEQ BRANCH) with an NDS noise sound effect (dq4soundsfx)')
-    ap.add_argument('--sfx-pcm', action='append', default=[], metavar='SPARE-BRANCH=NDS|-',
+    ap.add_argument('--sfx-pcm', action='append', default=[], metavar='SPARE-BRANCH=NDS|NDS!|NDS!SECONDS|NDS~|-',
                     help='put an NDS sample sound effect (or - for a silent preload branch) into that branch of an effect '
                          'sequence DQ4 never calls; it loads its sequence and samples when called')
     ap.add_argument('--silent-song', action='append', default=[], metavar='SLOT',
@@ -725,7 +733,12 @@ def main():
     ap.add_argument('--sfx-weapon-songs', default='', metavar='SONG[,SONG...]')
     ap.add_argument('--sfx-call', action='append', default=[], metavar='ADDR=OLD:NEW',
                     help='make the effect call BRK 16/19 OLD X at that ROM address call effect NEW (a --sfx-pcm sequence)')
+    ap.add_argument('--resident-pcm', action='append', default=[], metavar='SAMPLE=NDS!SECONDS',
+                    help='put the NDS sound effect as heard (cut to SECONDS) into that resident sample, no larger than it; '
+                         'a --sfx-pcm branch NDS! then plays that resident sample')
     ap.add_argument('--sfx-pcm-rate', type=int, default=8000, help='upper sample rate of --sfx-pcm samples')
+    ap.add_argument('--reserve', action='append', default=[], metavar='SONG',
+                    help='keep the DQ5 pinned size of that replaced, unpinned sequence in song budgets so other songs stay')
     ap.add_argument('--unpin', action='append', default=[], metavar='SONG',
                     help='drop an unreplaced sequence from the pinned list so it loads when played (frees an SPC sequence slot)')
     ap.add_argument('--release-failed', action='store_true',
@@ -800,6 +813,7 @@ def main():
                         vehicle_song=args.vehicle_song, keep_samples=args.keep_samples,
                         release_failed=args.release_failed, release_pending=args.release_pending, tick_scan=args.tick_scan,
                         unpin=[int(x, 16) for x in args.unpin],
+                        reserve=[int(x, 16) for x in args.reserve],
                         effects={(int(k.split('-')[0], 16), int(k.split('-')[1], 16)): v
                                  for k, v in (x.split('=') for x in args.sfx)},
                         effect_gain_db={(int(k.split('-')[0], 16), int(k.split('-')[1], 16)): float(v)
@@ -808,6 +822,7 @@ def main():
                                       for k, v in (x.split('=') for x in args.sfx_wave)},
                         prefetch={int(v, 16): int(m, 16) for v, m in (x.split('=') for x in args.prefetch)},
                         spare_effects=spare_effects, spare_rate=args.sfx_pcm_rate,
+                        resident_pcm={int(k, 16): v for k, v in (x.split('=') for x in args.resident_pcm)},
                         spare_carriers={int(k, 16): [int(y, 16) for y in v.split(',')]
                                         for k, v in (x.split('=') for x in args.sfx_carry)},
                         spare_keep={int(k, 16): {y if y.endswith('.wav') else y + '.wav' for y in v.split(',') if y}
