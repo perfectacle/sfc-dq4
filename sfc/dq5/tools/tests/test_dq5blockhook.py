@@ -79,6 +79,13 @@ class BlockHookTests(unittest.TestCase):
         hook(data, maps, 0x3D, 0x8C00, 150, wide=True)
         self.assertEqual(block_hook(Rom(data)), (maps, 0x3D, 0x3D8C00, 150))
         self.assertEqual(block_table(Rom(data), key=maps[128])[:2], [0x3D8000, 0x3D800B])
+        # X 8비트 꼴로 128맵 이상이면 게임이 목록 끝을 못 만나므로 멈춘다
+        hook(data, maps, 0x3D, 0x8C00, 150)
+        with self.assertRaisesRegex(ValueError, '127'):
+            block_hook(Rom(data))
+        hook(data, maps[:127], 0x3D, 0x8C00, 150)
+        self.assertEqual(len(block_hook(Rom(data))[0]), 127)
+        hook(data, maps, 0x3D, 0x8C00, 150, wide=True)
         put(data, FIND + 8, bytes((0xAF,)))
         with self.assertRaisesRegex(ValueError, '찾기'):
             block_hook(Rom(data))
