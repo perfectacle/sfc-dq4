@@ -36,7 +36,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
 
 import dq4block  # noqa: E402
 from dq4environmentmap import block_prop  # noqa: E402
-from dq4environmentrom import COUNTER_PROP  # noqa: E402
+from dq4environmentrom import COUNTER_PROPS  # noqa: E402
 from dq4groupbuild import LINKS, cell, fc_map, placement  # noqa: E402
 from dq5exitcheck import dp86_allowed, warp_exit  # noqa: E402
 from dq5map import Rom  # noqa: E402
@@ -157,7 +157,7 @@ def talk_side(source, x, y, occupied):
             return x + dx, y + dy, d
     for dx, dy, d in SIDES:
         nx, ny = x + dx, y + dy
-        if 0 <= nx < source.w and 0 <= ny < source.h and block_prop(source, source.cell(nx, ny) & 31) == COUNTER_PROP \
+        if 0 <= nx < source.w and 0 <= ny < source.h and block_prop(source, source.cell(nx, ny) & 31) in COUNTER_PROPS \
                 and walkable(source, nx + dx, ny + dy) and (nx + dx, ny + dy) not in occupied:
             return nx + dx, ny + dy, d
     return None

@@ -37,6 +37,7 @@ REPORTED = (0x07, 0x80)         # 7E:2197 bit7  왕에게 보고하고 여행을
 CAVE_TALKED = (0x2E, 0x08)      # 7E:21BE bit3  (FC $6281&04)
 CAVE_STEP1 = (0x54, 0x08)       # 7E:21E4 bit3  차례 1(FC $6281&03 = 1)
 CAVE_STEP2 = (0x54, 0x10)       # 7E:21E4 bit4  차례 2
+OLD_MAN_TRIED = (0x06, 0x80)    # 7E:2196 bit7  성 앞 노인이 따라나섰다가 지침(FC $6289&10). DQ5 롬에 참조가 없는 비트
 
 # 보스를 이긴 뒤 FC 가 바꾸는 인물 목록(1C:$841E 등, $6283&80 으로 고름). dq4npcport.port 가 이 상태로 뽑아
 # 「상태-맵」 이름의 새 목록으로 돌려주고, 보스 깃발에 그 목록을 쓴다. 왕좌의 방은 왕의 보고와 함께
@@ -95,6 +96,7 @@ TOWER_HALL, TOWER_TOP = '39/00', '39/04'
 # FC 대화 번호
 FC_KIDNAPPER = 0x45            # 탑 입구의 마물 그림(아이는 15)
 FC_CHILD, FC_ALEX_NIGHT, FC_FLARE_DAY, FC_FLARE_NIGHT, FC_JAIL_FLARE, FC_HOIMIN = 0x12, 0x13, 0x0F, 0x10, 0x17, 0x15
+FC_OLD_MAN, FC_BRAGGART = 0x00A, 0x019   # 성 앞 노인(예·아니요), 보스 뒤 성 앞 사내(예·아니요 둘 다 079E)
 
 
 def _pages(*lines):
@@ -178,6 +180,14 @@ MESSAGES = {
     # 탑의 병사(FC 대화 148): 0797 뒤 호이민이 일행에 있으면 0798
     'tower_soldier': dq4ch1talk.TEXTS[(0x797,)],
     'tower_soldier_hoimin': dq4ch1talk.TEXTS[(0x797,)][:-1] + [ch1.PAGE] + say('자네가 부럽군.'),
+    # 성 앞 노인(FC 대화 00A): 0787 → 예 0788(깃발) / 아니요 078A. 깃발 뒤에는 0789
+    'old_man_ask': say('언제 보아도/참으로 훌륭한/성이로구먼.', '나도 성의 전사가/되어 보고 싶구먼./어떤가? 데려가/주지 않겠나?'),
+    'old_man_yes': say('오오, 정말인가!?/그럼 따라가기로/하지!'),
+    'old_man_no': say('역시 그렇겠지./허허, 무리한 부탁을/해서 미안하구먼.'),
+    'old_man_tired': say('헉헉……/역시 늙은이에게는/무리인 모양일세.', '신경 쓰지 말고/가 보게나.'),
+    # 보스 뒤 성 앞 사내(FC 대화 019): 079D → 예·아니요 어느 쪽이든 079E
+    'brag_ask': say('@! 해냈구나!/그런데 부탁이/있는데……', '아이들을 구한 건/이 몸이라는 걸로/하고 공을 양보해/주지 않겠나?'),
+    'brag_joke': say('와하하, 농담이야!/자넨 정말/사람이 좋구먼!'),
 }
 
 
@@ -191,7 +201,7 @@ def texts(first):
 
 
 TALKS = ('child', 'alex_night', 'flare_day', 'flare_night', 'hoimin', 'boss', 'soldier', 'king', 'guard',
-         'cave_soldier', 'king_room', 'tower_soldier')
+         'cave_soldier', 'king_room', 'tower_soldier', 'old_man', 'braggart')
 SKY_SHOES = 0xCD                # DQ5 ソラトブクツ(FC そらとぶくつ 6C 자리)
 
 
@@ -212,7 +222,7 @@ def start_messages(first_message):
             (FRONT, FC_FLARE_DAY, False): m['flare_day'], (FRONT_NIGHT, FC_FLARE_NIGHT, True): m['flare_night'],
             (JAIL, FC_JAIL_FLARE, None): NOBODY, (HOIMIN_ROOM, FC_HOIMIN, None): m['hoimin_ask'],
             (CAVE, FC_CAVE_SOLDIER, None): m['cave_0'], (KING_ROOM, FC_KING_ROOM, None): m['king_room'],
-            (SOLDIER_MAP, FC_SOLDIER, None): m['tower_soldier']}
+            (SOLDIER_MAP, FC_SOLDIER, None): m['tower_soldier'], (FRONT, FC_OLD_MAN, False): m['old_man_ask']}
 
 
 def _msg(m):
@@ -245,8 +255,11 @@ def talk_scripts(first_message):
         _flare(m, 'flare_day'),
         _flare(m, 'flare_night'),
         # 예면 합류 깃발. 일행 기록은 호이민 인물 스크립트가 그 깃발을 보고 쓴다(대화 네이티브는 뱅크 06 안이어야 함)
+        # 합류 팡파르는 FC 처럼 「동료가 되었다!」 를 띄운 채 울린다(FC 0794 끝의 {SOUND:1A}{STOP})
         [_msg(m['hoimin_ask']), {"op": "if", "cond": {"code": "05"},
-                                 "then": [_msg(m['hoimin_yes']), _flag_on(HOIMIN)], "else": _msg(m['hoimin_no'])}],
+                                 "then": [_msg(m['hoimin_yes']), {"op": "call", "target": f"{FANFARE_AT & 0xFFFF:04X}"},
+                                          _flag_on(HOIMIN)],
+                                 "else": _msg(m['hoimin_no'])}],
         # 전투는 뱅크 06 의 BATTLE_AT 이 건다. 이기면 그 루틴이 보스 깃발을 켠다
         [_msg(m['boss_taunt']), {"op": "call", "target": f"{BATTLE_AT & 0xFFFF:04X}"},
          {"op": "if", "cond": {"code": "1B", "index": BOSS_WON[0], "mask": BOSS_WON[1]}, "then": _msg(m['boss_dies'])}],
@@ -264,6 +277,13 @@ def talk_scripts(first_message):
           "else": _msg(m['king_room'])}],
         # FC 는 호이민이 일행에 있는지 보지만, 1장에서 호이민은 합류한 뒤 떠나지 않아 합류 깃발과 같다
         [_if(HOIMIN, _msg(m['tower_soldier_hoimin']), _msg(m['tower_soldier']))],
+        # FC 는 예면 깃발을 켜고 노인을 일행 쪽으로 걷게 한다(15:9D36, 슬롯 0E 의 간격 33). 여기서는 깃발만
+        [_if(OLD_MAN_TRIED, _msg(m['old_man_tired']),
+             [_msg(m['old_man_ask']), {"op": "if", "cond": {"code": "05"},
+                                      "then": [_flag_on(OLD_MAN_TRIED), _msg(m['old_man_yes'])],
+                                      "else": _msg(m['old_man_no'])}])],
+        [_msg(m['brag_ask']), {"op": "if", "cond": {"code": "05"}, "then": _msg(m['brag_joke']),
+                               "else": _msg(m['brag_joke'])}],
     ]
 
 
@@ -312,6 +332,8 @@ BOSS_MEMBERS = tuple((dq5, 1) for dq5 in BOSS_MONSTERS)
 FC_ACTIONS = {0x00: '39', 0x03: '3C', 0x32: '73', 0x3C: '8E', 0x58: '66', 0x30: '71'}
 BOSS_FLAGS = 0x40 | 0x02                    # 도망칠 수 없음, 보스 곡
 BATTLE_AT = 0x06FF00                        # 대화 스크립트의 네이티브는 뱅크 06 안(06:FE10~ 의 덧붙인 대화 훅 뒤)
+FANFARE_AT = 0x06FF40                       # 합류 팡파르. 같은 뱅크 06 의 BATTLE_AT 뒤
+JOIN_SONG = 0x26                            # 곡 자리 26 = NDS 「仲間が加わった」(dq4-sound-port-format)
 
 
 def fc_monster(prg, fc_id):
@@ -338,6 +360,17 @@ def learn_doc():
 def encounter_doc():
     return {"format": "dq5encounter/1", "event_groups": [
         {"index": BOSS_GROUP, "flags": BOSS_FLAGS, "members": [{"monster": k, "count": n} for k, n in BOSS_MEMBERS]}]}
+
+
+def _fanfare():
+    """곡을 틀고 끝날 때까지 기다린 뒤 맵 곡($194B)을 다시 튼다. DQ5 06:F79A 처럼 BRK 0F 로 틀고 24:FF0F(같은 곡 번호)로
+    끝나기를 기다린다. 24:FF0F 만 부르면 틀지 않은 곡이라 곧바로 돌아왔다. 맵 곡은 00:CE61(20:8218)이 아니라 24:FE9A 로
+    튼다: 팡파르가 끝나 지금 곡 $1D8B 가 FF 인 채 00:CE61 을 부르면 돌아오지 않았다(실측). BRK 는 DB 를 부른 뱅크로
+    두므로 WRAM 거울이 있는 뱅크 06 에서 부른다."""
+    return bytes((0x08, 0xE2, 0x20, 0x00, 0x0F, JOIN_SONG,                    # PHP / SEP #$20 / BRK 0F 곡
+                  0xA9, JOIN_SONG, 0x22, 0x0F, 0xFF, 0x24,                     # LDA #곡 / JSL 24:FF0F
+                  0xAD, 0x4B, 0x19, 0x29, 0x7F, 0x22, 0x9A, 0xFE, 0x24,        # LDA $194B / AND #$7F / JSL 24:FE9A
+                  0x28, 0x60))                                                 # PLP / RTS
 
 
 def _battle():
@@ -865,6 +898,7 @@ def apply(data):
     code, _ = native(data)
     _put(d, CODE_AT, code)
     _put(d, BATTLE_AT, _battle())
+    _put(d, FANFARE_AT, _fanfare())
     _, at = native()
     _put(d, COUNT_TAIL, _count_tail(at['followers']))
     fx, fy = TOWER_FIELD[0] * 2, TOWER_FIELD[1] * 2      # FC 필드 칸 → DQ5 필드 좌표(그룹 연결의 필드 입구와 같은 셈)
@@ -1121,6 +1155,14 @@ def npc_lists(ported, report, first_talk):
         for i in hits:
             lists[mp][i] = _same(lists[mp][i], lists[mp][i]["from"], t[name])
     lists[CAVE] += _invisible(CAVE_STEP_SRC, t['cave_soldier'])
+    # 예·아니요로 묻는 둘: 성 앞 노인, 보스 뒤 성 앞 사내
+    for m, lst, fc_talk, name in ((FRONT, lists[FRONT], FC_OLD_MAN, 'old_man'),
+                                  (alt_name(AFTER_BOSS, FRONT), alts[alt_name(AFTER_BOSS, FRONT)], FC_BRAGGART, 'braggart')):
+        hits = [i for i, p in enumerate(report[m]) if p["talk"] == fc_talk]
+        if not hits:
+            raise SystemExit(f'{m}: FC 대화 {fc_talk:03X} 인물이 없음')
+        for i in hits:
+            lst[i] = _same(lst[i], lst[i]["from"], t[name])
     room = lists[HOIMIN_ROOM]
     hoimins = [i for i, p in enumerate(report[HOIMIN_ROOM]) if p["talk"] == FC_HOIMIN]
     gone = [e for i, e in enumerate(room) if i not in hoimins]

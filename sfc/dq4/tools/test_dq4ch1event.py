@@ -44,9 +44,43 @@ class NumberTest(unittest.TestCase):
         self.assertEqual(got[ev.JAIL, ev.FC_ALEX_NIGHT, True], m['alex_night'])
         self.assertEqual(got[ev.JAIL, ev.FC_JAIL_FLARE, None], ev.NOBODY)
         self.assertEqual(got[ev.HOIMIN_ROOM, ev.FC_HOIMIN, None], m['hoimin_ask'])
+        self.assertEqual(got[ev.FRONT, ev.FC_OLD_MAN, False], m['old_man_ask'])
 
     def test_flags_are_distinct(self):
-        self.assertEqual(len({ev.NIGHT_TOLD, ev.FLARE_FOLLOWS, ev.REUNITED, ev.HOIMIN}), 4)
+        flags = (ev.NIGHT_TOLD, ev.FLARE_FOLLOWS, ev.REUNITED, ev.HOIMIN, ev.KIDNAPPED, ev.BOSS_WON, ev.KIDS_FOLLOW,
+                 ev.SOLDIER_LEFT, ev.REPORTED, ev.CAVE_TALKED, ev.CAVE_STEP1, ev.CAVE_STEP2, ev.OLD_MAN_TRIED)
+        self.assertEqual(len(set(flags)), len(flags))
+
+    def test_old_man_asks_until_he_tried(self):
+        m = ev.message_ids(0xD00)
+        (top,) = ev.talk_scripts(0xD00)[ev.TALKS.index('old_man')]
+        self.assertEqual((top["cond"]["index"], top["cond"]["mask"]), ev.OLD_MAN_TRIED)
+        self.assertEqual(top["then"]["id"], f"{m['old_man_tired']:03X}")
+        ask, yes_no = top["else"]
+        self.assertEqual(ask["id"], f"{m['old_man_ask']:03X}")
+        self.assertEqual(yes_no["cond"], {"code": "05"})
+        self.assertEqual(yes_no["then"], [ev._flag_on(ev.OLD_MAN_TRIED), ev._msg(m['old_man_yes'])])
+        self.assertEqual(yes_no["else"], ev._msg(m['old_man_no']))
+
+    def test_braggart_jokes_either_way(self):
+        m = ev.message_ids(0xD00)
+        ask, yes_no = ev.talk_scripts(0xD00)[ev.TALKS.index('braggart')]
+        self.assertEqual(ask, ev._msg(m['brag_ask']))
+        self.assertEqual((yes_no["cond"], yes_no["then"], yes_no["else"]),
+                         ({"code": "05"}, ev._msg(m['brag_joke']), ev._msg(m['brag_joke'])))
+
+    def test_hoimin_fanfare_plays_before_the_join_flag(self):
+        m = ev.message_ids(0xD00)
+        _, yes_no = ev.talk_scripts(0xD00)[ev.TALKS.index('hoimin')]
+        self.assertEqual(yes_no["then"], [ev._msg(m['hoimin_yes']), {"op": "call", "target": f"{ev.FANFARE_AT & 0xFFFF:04X}"},
+                                          ev._flag_on(ev.HOIMIN)])
+        self.assertEqual(ev.FANFARE_AT >> 16, ev.BATTLE_AT >> 16)
+        self.assertLessEqual(ev.BATTLE_AT + len(ev._battle()), ev.FANFARE_AT)
+        code = ev._fanfare()
+        self.assertEqual(code[3:6], bytes((0x00, 0x0F, ev.JOIN_SONG)))      # BRK 0F 로 틀어야 24:FF0F 가 기다린다
+        self.assertIn(bytes((0xAD, 0x4B, 0x19)), code)                      # 맵 곡 $194B 로 돌아감
+        self.assertNotIn(bytes((0x22, 0x18, 0x82, 0x20)), code)             # 20:8218(00:CE61)은 팡파르 뒤 멈춤
+        self.assertEqual(code[-1], 0x60)
 
     def test_hoimin_record_comes_from_the_companion_table(self):
         data = bytearray(0x400000)
@@ -354,6 +388,14 @@ class ListTest(unittest.TestCase):
         walkers = [p for p in self.report[ev.alt_name(ev.AFTER_BOSS, ev.KIDS_HOME_MAP)]
                    if (p["x"], p["y"]) in ev.KIDS_FC_WALKERS]
         self.assertEqual(len(imuru), len(self.report[ev.alt_name(ev.AFTER_BOSS, ev.KIDS_HOME_MAP)]) - len(walkers) + 2)
+
+    def test_yes_no_people_take_the_event_talks(self):
+        t = ev.talk_numbers(0x904)
+        old = [p for p in self.report[ev.FRONT] if p["talk"] == ev.FC_OLD_MAN]
+        self.assertEqual([p["dq5"]["talk"] != t['old_man'] for p in old], [True])
+        self.assertIn(t['old_man'], {e["fields"]["talk"] for e in self.entries(ev.FRONT)})
+        (after,) = [lst["entries"] for lst in self.new if lst["name"] == ev.alt_name(ev.AFTER_BOSS, ev.FRONT)]
+        self.assertIn(t['braggart'], {e["fields"]["talk"] for e in after})
 
     def test_event_talks_replace_the_ported_ones(self):
         t = ev.talk_numbers(0x904)

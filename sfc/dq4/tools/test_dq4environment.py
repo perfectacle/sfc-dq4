@@ -179,8 +179,25 @@ class CounterTests(unittest.TestCase):
         self.assertFalse(counters & walls)
         self.assertEqual({v for *_, v, _ in doc["passes"][1]["entries"]}, {rom.COUNTER_PASS})
         counter = source.cell(8, 41) & 31
-        self.assertEqual(block_prop(source, counter), rom.COUNTER_PROP)
+        self.assertIn(block_prop(source, counter), rom.COUNTER_PROPS)
         self.assertEqual(rom.block_head("0E-00", source, counter), (0, 0, rom.COUNTER_ATTR))
+
+    def test_jail_bars_are_a_counter(self):
+        # イムル's jail (FC 12/02): Alex (2,3) stands behind the bars (3,3), a さいごのカギ door FC talks across.
+        import sys
+        sys.path.insert(0, str(ROOT / "fc" / "dq4" / "tools"))
+        import dq4block
+        import dq4environmentrom as rom
+        from dq4environmentmap import block_prop
+        from kr_patch.fc import ines
+        source = dq4block.Map(ines.prg((ROOT / "rom" / "dq4.nes").read_bytes()), 0x12, 2)
+        bars = source.cell(3, 3) & 31
+        self.assertEqual(block_prop(source, bars), 0x97)
+        self.assertEqual(rom.block_head("12-02", source, bars), (0, 0, rom.COUNTER_ATTR))
+        doc = rom.map_document("12-02", source, {b: b for b in range(32)}, rom.GROUPS["12-02"])
+        walls, counters = ({(x + k, y) for x, y, n, value, _ in doc["passes"][i]["entries"] for k in range(n)}
+                           for i in (0, 1))
+        self.assertTrue({(6, 6), (7, 6), (6, 7), (7, 7)} <= counters - walls)
 
 
 @unittest.skipUnless((ROOT / "rom" / "dq4.nes").is_file(), "local source ROM not present")
