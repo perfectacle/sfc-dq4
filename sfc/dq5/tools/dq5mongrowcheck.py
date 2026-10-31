@@ -1,8 +1,8 @@
 """몬스터 그림의 16x16 자리를 원래보다 늘리고 레코드 색을 15개로 늘린 롬을 MesenCE 전투에서 원본과 견준다.
 
 첫 필드 이벤트 전투를 무리 0F(그림 00, 자리 7) 1 · 7E(그림 43) 1 · スライム(00, 그림 02) 1 로 붙인다(dq5warp.lua 의 BATTLE).
-  그림 43: 원래 그린 자리를 색 번호 1~15 의 무늬로 칠하고, 타일이 91개(NMI 한 번에 보내는 한도) 안이 될 때까지
-          아래 칸 줄부터 비운다. 반전 복사가 없어져 타일 53 → 90, 자리 14 → 23 이 된다.
+  그림 43: 원래 그린 자리를 색 번호 1~15 의 무늬로 칠하고, NMI 한 번에 모두 닿지 않으면(dq5monwrite.nmi_short)
+          아래 칸 줄부터 비운다. 반전 복사가 없어져 타일 53 → 98, 자리 14 → 25 가 되고 비우지 않는다.
   그림 02: 색 번호 1~15 를 섞은 무늬(원래 자리보다 길어 --at 으로 옮김).
 두 그림을 쓰는 몬스터(7E·スライム 등)의 색은 모두 15개로 늘린다.
 색이 원래보다 많아 레코드 표·레코드는 --records-at 으로 옮긴다. 원본 롬과 고친 롬에서 dq5gfxdump.lua 로 덤프하고,
@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dq5mongfx as M  # noqa: E402
 from dq5map import Rom  # noqa: E402
 from dq5monlimits import Pictures  # noqa: E402
-from dq5monwrite import FORMAT, TILE_LIMIT, encode, following_table, picture_grid, stats  # noqa: E402
+from dq5monwrite import FORMAT, decode_bytes, encode, following_table, nmi_short, picture_grid, stats  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 GROUPS = ((0x0F, 1, 0), (0x7E, 1, 0), (0x00, 1, 0))
@@ -128,7 +128,7 @@ def main():
         rng = random.Random(503)
         wide = [[rng.randrange(1, 16) if v else 0 for v in row] for row in picture_grid(base, WIDE)[0]]
         cut = len(wide)
-        while encode(base, WIDE, wide)[2] > TILE_LIMIT:
+        while nmi_short(decode_bytes(encode(base, WIDE, wide)[0])):
             cut -= 8
             wide = [row if y < cut else [0] * len(row) for y, row in enumerate(wide)]
         noise = [[rng.randrange(1, 16) if v else 0 for v in row] for row in picture_grid(base, NOISE)[0]]
@@ -158,9 +158,10 @@ def main():
         with following_table():
             grown = {'tiles': [stats(M.decode(base, WIDE))[1], stats(M.decode(patched, WIDE))[1]],
                      'slots': [M.slot_count(M.decode(base, WIDE)), M.slot_count(M.decode(patched, WIDE))]}
+            fits = not nmi_short(M.decode(patched, WIDE))
         print(f'그림 {WIDE:02X} 타일 {grown["tiles"][0]} → {grown["tiles"][1]}, 자리 {grown["slots"][0]} → {grown["slots"][1]}')
         checks = {'original': passed(results['original']), 'edited': passed(results['edited']),
-                  'grown': all(a < b for a, b in grown.values()) and grown['tiles'][1] <= TILE_LIMIT,
+                  'grown': all(a < b for a, b in grown.values()) and fits,
                   'colors': all(M.monster(patched, m)[1] == c for m, c in more.items())}
         (out / 'results.json').write_text(json.dumps({'results': results, 'checks': checks}, ensure_ascii=False, indent=1)
                                           + '\n', encoding='utf-8')
