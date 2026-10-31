@@ -381,7 +381,8 @@ def message_flow(first_message):
     _, at = dq4prologue.native()
     events = [dq4prologue.end_event(at), dq4ch2event.join_event(chapter2_message(first_message), dq4ch2event.native()[1]),
               dq4ch2event.altar_event(chapter2_message(first_message))]
-    return {"talks": talks, "scripts": [s["commands"] for s in scripts], "events": events}
+    return {"talks": talks, "scripts": [s["commands"] for s in scripts], "events": events,
+            "pauses": dq4ch1event.pauses(first_message)}
 
 
 def chapter2_message(first_message):

@@ -77,7 +77,7 @@ THRONE_SOLDIERS = (
 # 레벨이 오를 때 띄우는 능력치: (23:EB50 이 오른 양을 두는 $00~ 의 자리, 이름). FC 차례(ちから·すばやさ·たいりょく·
 # かしこさ·うんのよさ·さいだいHP·さいだいMP)를 따르되 たいりょく 자리에 DQ5 의 みのまもり. 이름은 전투 메시지 C0~C6 과 같게
 STATS = ((2, '힘이'), (3, '민첩성이'), (6, '몸 지키기가'), (4, '영리함이'), (5, '운이'), (0, '최대 HP가'), (1, '최대 MP가'))
-NUMBER, WAIT_END = 0x1004, 0x1010
+NUMBER, LINE_END, WAIT_END = 0x1004, 0x1001, 0x1010
 GIFT_EXP = 3000                 # FC 1D 이벤트 37: 경험치를 프레임마다 10씩 300번 더함(실측: ライアン 0 → 3000)
 HERO_EXP = 0x7E204B             # 일행 첫 기록 +B~+D
 HERO_LEVEL = 0x7E2052           # 일행 첫 기록 +12
@@ -163,10 +163,11 @@ MESSAGES = {
     'chapter_end': ch1.narrate('이리하여 이 땅/어딘가에 있는 용사를/찾아 @의 여행이/시작되었다……'),
     # 보스 뒤 왕좌의 방 문지기(FC 0609)
     'guard_wait': say('자!/임금님께서 기다리고/계십니다!'),
-    # FC 「ライアンは レベルが あがった！」. 이름 뒤 조사를 피해 옮김. 레벨업 줄은 한 창에 이어 쓰고 줄마다 ▼ 로 기다린다
-    'level_up': ch1.narrate('@의 레벨이 올랐다!')[:-1] + [WAIT_END],
+    # FC 「ライアンは レベルが あがった！」. 이름 뒤 조사를 피해 옮김. 레벨업 줄은 한 창에 이어 쓰고, 줄 끝이 아니라 다음
+    # 줄을 띄우기 전에 line_pause 로 ▼ 를 기다린다. 마지막 줄 뒤에는 창을 닫는 명령 34 가 기다린다
+    'level_up': ch1.narrate('@의 레벨이 올랐다!'),
     # 오른 능력치(FC 「ちからが 3ポイント あがった！」). 수는 {1004} 가 $F5~$F7 에서 찍는다
-    **{f'stat_{k}': [ch1.NARR, f'{name} ', NUMBER, '포인트 올랐다!', WAIT_END] for k, name in STATS},
+    **{f'stat_{k}': [ch1.NARR, f'{name} ', NUMBER, '포인트 올랐다!', LINE_END] for k, name in STATS},
     # FC 02F5
     'cry': say('으앙, 으앙……/살려 줘!'),
     # 41 동굴 병사(FC 대화 014): 차례 0·1·2 에 0790·0791·0792, 보스 뒤 079F
@@ -190,12 +191,19 @@ MESSAGES = {
     # 보스 뒤 성 앞 사내(FC 대화 019): 079D → 예·아니요 어느 쪽이든 079E
     'brag_ask': say('@! 해냈구나!/그런데 부탁이/있는데……', '아이들을 구한 건/이 몸이라는 걸로/하고 공을 양보해/주지 않겠나?'),
     'brag_joke': say('와하하, 농담이야!/자넨 정말/사람이 좋구먼!'),
+    # 글 없이 ▼ 만 기다린다(DQ5 메시지 013 과 같은 꼴). 끝 코드 1010 은 메시지를 끝내므로 글 앞에 둘 수 없어 따로 띄운다
+    'line_pause': [ch1.NARR, WAIT_END],
 }
 
 
 def message_ids(first):
     """{이름: 메시지 번호}. first 는 옮긴 메시지 다음 번호(dq4npcport.FIRST_MESSAGE + 옮긴 메시지 수)."""
     return {name: first + k for k, name in enumerate(MESSAGES)}
+
+
+def pauses(first):
+    """글 없이 ▼ 만 기다리는 메시지 번호(dq4msgwait.plan 의 pauses)."""
+    return {message_ids(first)['line_pause']}
 
 
 def texts(first):
@@ -1109,7 +1117,7 @@ def _king_call(m, at):
     for i, (k, _) in enumerate(STATS):
         skip = f"stat{i + 1}" if i + 1 < len(STATS) else "next"
         stats += [{**call(f'stat_{k}'), "label": f"stat{i}"}, {**_cmd('06', *REPORTED), "target": skip},
-                  msg(f'stat_{k}', '30')]
+                  msg('line_pause', '30'), msg(f'stat_{k}', '30')]
     return [
         _cmd('28'), _cmd('52'), _cmd('05', *_long(at['lineup_row'])), call('walk_in'),
         {**_cmd('05', *_long(at['king_row'])), "label": "wait"}, _cmd('3F'),
@@ -1121,11 +1129,14 @@ def _king_call(m, at):
         # 대기를 하는 21 로 띄우면 마지막 쪽에서 A 를 두 번 받는다
         {**msg('king_praise', '30'), "label": "praise"}, call('status_count'),
         # 한 번 오를 때마다 「레벨이 올랐다」 와 오른 능력치를 한 창에 잇는다. 더 오르지 않으면 level_up 이 보고 깃발을
-        # 켜고, 능력치 줄은 오른 양이 0 이면 stat_k 가 보고 깃발을 켜 건너뛴다
+        # 켜고, 능력치 줄은 오른 양이 0 이면 stat_k 가 보고 깃발을 켜 건너뛴다. 어느 줄이 마지막인지는 돌아 봐야 알므로
+        # 줄 끝이 아니라 다음 줄 앞에서 ▼ 를 기다린다(line_pause). 첫 줄 앞은 칭찬의 ▼ 가, 마지막 줄 뒤는 34 가 기다린다
         {**call('level_up'), "label": "grow"}, {**_cmd('06', *REPORTED), "target": "grown"},
-        msg('level_up', '30')] + stats + [
-        {"op": "03", "args": [], "target": "grow", "label": "next"},
-        # 레벨업 줄을 띄운 창은 명령 34 로 닫는다. 같은 일(BRK 95 FF)을 네이티브에서 하면 멈췄다
+        {**msg('level_up', '30'), "label": "line"}] + stats + [
+        {**call('level_up'), "label": "next"}, {**_cmd('06', *REPORTED), "target": "grown"},
+        msg('line_pause', '30'), {"op": "03", "args": [], "target": "line"},
+        # 레벨업 줄을 띄운 창은 명령 34 로 닫는다. 같은 일(BRK 95 FF)을 네이티브에서 하면 멈췄다(다시 실측: 상태 창만
+        # 닫히고 스크립트가 서서 왕좌의 방을 떠나지 않음)
         {**_cmd('34'), "label": "grown"}, call('walk_back'), _cmd('05', *_long(at['lineup_row'])),
         msg('king_farewell'), _cmd('10', *REPORTED), call('walk_out'), _cmd('40'), _cmd('16')]
 

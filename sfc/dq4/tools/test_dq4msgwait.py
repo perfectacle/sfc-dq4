@@ -35,6 +35,10 @@ class PlanTests(unittest.TestCase):
                   cmd('30', 3, 0), cmd('40'), cmd('21', 4, 0), cmd('32', 5, 0), cmd('37', 0, 0, 0), cmd('16')]
         self.assertEqual(mw.plan(scripts=[script]), ({1}, {2, 3, 4, 5}))
 
+    def test_script_pause(self):
+        script = [cmd('30', 1, 0), cmd('30', 9, 0), cmd('30', 2, 0), cmd('34')]
+        self.assertEqual(mw.plan(scripts=[script], pauses={9}), ({9}, {1, 2}))
+
     def test_event(self):
         tokens = [b'\x08\x04', ('msg', 1), ('msg', 2), b'\xff']
         self.assertEqual(mw.plan(events=[tokens]), (set(), {1, 2}))
@@ -67,6 +71,8 @@ class GameTests(unittest.TestCase):
                      pro.M_STORY_BEGINS, ch.MSG_NARRATION, ch.MSG_MINISTER, m['reunion'],
                      *pro.M_SUPPER_LINES}
         self.assertLessEqual(must_keep, keep)
+        # 레벨업 줄은 다음 줄 앞의 line_pause 가 ▼ 를 기다려, 마지막 줄 뒤 34 의 닫기 대기와 겹치지 않는다
+        self.assertLessEqual({m['level_up'], *(m[f'stat_{k}'] for k, _ in ev.STATS)}, keep)
 
     def test_game_texts_keep_single_wait(self):
         """닫기 대기를 하는 명령(인물 21·32, 이벤트 60)이나 대화 끝에서 띄우는 메시지의 글이 1010 으로 끝나지 않는다."""

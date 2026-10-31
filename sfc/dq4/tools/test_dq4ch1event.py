@@ -369,7 +369,8 @@ class FlyTest(unittest.TestCase):
         branch = next(c for c in cmds if c["op"] == '06' and c["args"] == [0x80 | ev.KIDS_FOLLOW[0], ev.KIDS_FOLLOW[1]])
         self.assertEqual(branch["target"], "praise")
         calls = [c["args"] for c in cmds if c["op"] == '37']
-        want = ['walk_in', 'status_count', 'level_up'] + [f'stat_{k}' for k, _ in ev.STATS] + ['walk_back', 'walk_out']
+        want = ['walk_in', 'status_count', 'level_up'] + [f'stat_{k}' for k, _ in ev.STATS] + ['level_up', 'walk_back',
+                                                                                         'walk_out']
         self.assertEqual(calls, [ev._long(at[n]) for n in want])
         self.assertIn({"op": "10", "args": list(ev.REPORTED)}, cmds)
 
@@ -395,7 +396,8 @@ class FlyTest(unittest.TestCase):
         m = ev.MESSAGES
         for k, _ in ev.STATS:
             self.assertIn(ev.NUMBER, m[f'stat_{k}'])
-            self.assertEqual(m[f'stat_{k}'][-1], ev.WAIT_END)
+            self.assertEqual(m[f'stat_{k}'][-1], ev.LINE_END)
+        self.assertEqual(m['line_pause'], [ev.ch1.NARR, ev.WAIT_END])
 
     def test_throne_return_lines_up_eight_soldiers(self):
         entries = ev.throne_return(0x904)
