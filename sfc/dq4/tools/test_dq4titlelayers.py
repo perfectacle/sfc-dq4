@@ -321,8 +321,10 @@ class LayerTests(unittest.TestCase):
             output = Path(directory) / 'title.sfc'
             first = patch.build(rom, self.pack, output, asar)
             data = output.read_bytes()
-            self.assertEqual(len(data), 0x200000)
-            self.assertEqual(data[0x7FD7], original[0x7FD7])
+            self.assertEqual(len(data), patch.ROM_SIZE)
+            self.assertEqual(data[0x7FD7], 0x0C)
+            # 그림 자료가 42~47 로 가 30~3F 는 원본 20~2F 의 거울 그대로(30:8000~ 의 타이틀 코드와 머리 바이트만 다름)
+            self.assertEqual(data[0x188000:0x1C0000], original[0x108000:0x140000])
             self.assertEqual(apply_ips(original, output.with_suffix('.ips').read_bytes()), data)
             second = patch.build(rom, self.pack, output, asar)
             self.assertEqual(first['rom_sha1'], second['rom_sha1'])

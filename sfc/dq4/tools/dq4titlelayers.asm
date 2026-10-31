@@ -66,18 +66,18 @@ Title:
   lda.b #$FF
   sta $210E
   sta $210E
-  %Upload($31, $8000, !background_chr_size, $0000)
-  %Upload($32, $8000, !foreground_chr_size, $3000)
-  %Upload($31, $D000, $1000, $2400)
-  %Upload($31, $E000, $0800, $2C00)
-  %Upload($34, $8000, $4000, $6000)
+  %Upload($42, $8000, !background_chr_size, $0000)
+  %Upload($43, $8000, !foreground_chr_size, $3000)
+  %Upload($42, $D000, $1000, $2400)
+  %Upload($42, $E000, $0800, $2C00)
+  %Upload($45, $8000, $4000, $6000)
   stz $2121
   stz $4300
   lda.b #$22
   sta $4301
   ldx.w #$E800
   stx $4302
-  lda.b #$31
+  lda.b #$42
   sta $4304
   ldx.w #$0100
   stx $4305
@@ -238,15 +238,15 @@ Motion:
   xba
   tax
 .next:
-  lda.l $338004,x
+  lda.l $448004,x
   beq .oam
   sta $4305
-  lda.l $338000,x
+  lda.l $448000,x
   sta $2116
-  lda.l $338002,x
+  lda.l $448002,x
   sta $4302
   sep #$20
-  lda.l $338006,x
+  lda.l $448006,x
   sta $4304
   lda.b #$01
   sta $420B
@@ -262,10 +262,10 @@ Motion:
   asl
   asl
   tax
-  lda.l $31EB00,x
+  lda.l $42EB00,x
   sta $4302
   sep #$20
-  lda.l $31EB02,x
+  lda.l $42EB02,x
   sta $4304
   stz $4300
   lda.b #$04
@@ -286,7 +286,7 @@ Motion:
   ora.w #$8000
   sta $4302
   sep #$20
-  lda.b #$35
+  lda.b #$46
   sta $4304
   lda.b #$1E
   sta $2102
@@ -320,27 +320,7 @@ Motion:
 
 TitleZero:
   db $00
-assert pc() <= $309000
-print "title_entry=",hex(Title)
-print "title_frame=",hex(Frame)
-print "title_exit=",hex(FadeOut)
-print "title_motion=",hex(Motion)
-
-org $318000
-incbin "background.chr"
-assert pc() <= $31C800
-org $31D000
-incbin "background.map"
-org $31E000
-incbin "foreground.map"
-org $31E800
-incbin "background.pal"
-org $31E900
-incbin "dragon.pal"
-org $31E920
-incbin "cloud.pal"
-
-org $31E9A0
+; 메뉴 준비는 낮은 WRAM 을 절대 주소로 쓰므로(phk/plb) 00~3F 에 둔다. 그림 자료와 함께 42 로 옮기지 않는다.
 MenuFadeTail = 17
 ; Same work as the native menu setup 02:F9E3, minus its frame waits. That routine fills
 ; 7E:A007 from the run-length table at 1E:D7E3 and waits a frame after every fill run
@@ -482,19 +462,37 @@ MenuInit:
   bne .tail
   plb
   rtl
-assert pc() <= $31EB00
-org $31EB00
+assert pc() <= $309000
+print "title_entry=",hex(Title)
+print "title_frame=",hex(Frame)
+print "title_exit=",hex(FadeOut)
+print "title_motion=",hex(Motion)
+
+org $428000
+incbin "background.chr"
+assert pc() <= $42C800
+org $42D000
+incbin "background.map"
+org $42E000
+incbin "foreground.map"
+org $42E800
+incbin "background.pal"
+org $42E900
+incbin "dragon.pal"
+org $42E920
+incbin "cloud.pal"
+org $42EB00
 incbin "oam-pointers.bin"
-org $328000
+org $438000
 incbin "foreground.chr"
-assert pc() <= $32E000
-org $338000
+assert pc() <= $43E000
+org $448000
 incbin "dragon-dma.bin"
-org $348000
+org $458000
 incbin "dragon-initial.chr"
-org $358000
+org $468000
 incbin "cloud-oam.bin"
-assert pc() == $360000
-org $368000
+assert pc() == $470000
+org $478000
 incbin "layer-payload.bin"
-assert pc() <= $370000
+assert pc() <= $480000

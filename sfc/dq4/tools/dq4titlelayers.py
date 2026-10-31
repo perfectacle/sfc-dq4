@@ -12,7 +12,7 @@ from dq4titleassets import DEFAULT_SOURCE, APPROVED_SOURCE_SHA256, native_title
 
 PHASES = 128
 # LoROM banks the title reads its OBJ data from; dq4titlelayers.asm and dq4titlelayerpatch.PLACEMENTS must agree.
-FOREGROUND_BANK, DMA_BANK, INITIAL_BANK, CLOUD_BANK, PAYLOAD_BANK = 0x32, 0x33, 0x34, 0x35, 0x36
+FOREGROUND_BANK, DMA_BANK, INITIAL_BANK, CLOUD_BANK, PAYLOAD_BANK = 0x43, 0x44, 0x45, 0x46, 0x47
 CLOUD_Y = 168
 CLOUD_SPRITES = 9
 CLOUD_PERIOD = 256
