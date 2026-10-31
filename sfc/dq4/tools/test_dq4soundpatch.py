@@ -89,6 +89,15 @@ class SequenceValidationTests(unittest.TestCase):
         self.assertEqual(patch.unpin_sequences(data, {0x17, 0x02}), [0x17])
         self.assertEqual(bytes(data[pos:pos + 5]), bytes.fromhex('00 1D 32 FF FF'))
 
+    def test_unpin_adds_into_freed_entries_only(self):
+        data = bytearray(0x180000)
+        pos = lorom(patch.RESIDENT_SEQUENCES)
+        data[pos:pos + 5] = bytes.fromhex('00 17 1D 32 FF')
+        patch.unpin_sequences(data, {0x00}, add=(0x43,))
+        self.assertEqual(bytes(data[pos:pos + 5]), bytes.fromhex('17 1D 32 43 FF'))
+        with self.assertRaisesRegex(ValueError, 'no free entry'):
+            patch.unpin_sequences(data, set(), add=(0x44,))
+
     def test_rejects_eight_voice_bgm(self):
         with self.assertRaisesRegex(ValueError, '1..7 voices'):
             patch.validate_replacement(patch.Replacement(bytes([120, 8, 0, 0]), (0x18,)))
@@ -218,9 +227,38 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(out[lorom(patch.MAP_START):lorom(patch.MAP_START) + 4], bytes.fromhex('22 80 80 71'))
 
 
+    def test_effect_route_hooks_the_effect_entry_and_pins_the_new_sequence(self):
+        base = bytearray(self.base)
+        site = lorom(patch.EFFECT_ROUTE_SITE)
+        base[site:site + len(patch.EFFECT_ROUTE_ORIGINAL)] = patch.EFFECT_ROUTE_ORIGINAL
+        effect = patch.Replacement(melody(), (0x18,), 1)
+        out, report = patch.install(bytes(base), {2: self.item, 0x43: effect}, unpin=(0x17,), pin_new=(0x43,),
+                                    effect_routes=[(0x37, 0x43, {5, 7}, {0x17})])
+        self.assertEqual(out[site:site + 4], bytes([0x5C]) + patch.EFFECT_ROUTE.to_bytes(3, 'little'))
+        code = patch.effect_route_code([(0x37, 0x43, {5, 7}, {0x17})])
+        self.assertEqual(out[lorom(patch.EFFECT_ROUTE):lorom(patch.EFFECT_ROUTE) + len(code)], code)
+        self.assertIn(0x43, patch.pinned_sequences(out))
+        self.assertEqual(report['effect_routes'], [{'from': '37', 'to': '43', 'branches': ['05', '07'], 'songs': ['17']}])
+
+
 @unittest.skipUnless(ROM.exists(), 'user-supplied DQ5 ROM required')
 class RealRomInstallTests(InstallTests):
     load = staticmethod(ROM.read_bytes)
+
+
+class EffectRouteCodeTests(unittest.TestCase):
+    def test_route_code_ends_in_the_original_entry(self):
+        code = patch.effect_route_code([(0x37, 0x43, {5}, {0x17})])
+        # 원래 입구와 같은 PHP / SEP #20 / PHA / LDA #0C 뒤 JML 24:FF83
+        self.assertTrue(code.endswith(bytes.fromhex('08 E2 20 48 A9 0C 5C 83 FF 24')))
+        self.assertIn(bytes.fromhex('AF 8B 1D 7E'), code)   # 지금 곡은 긴 주소로(DB 를 모름)
+        self.assertIn(bytes.fromhex('A0 43'), code)
+
+    def test_route_rejects_branches_without_a_script_and_empty_routes(self):
+        with self.assertRaises(ValueError):
+            patch.effect_route_code([(0x37, 0x43, {0x21}, {0x17})])
+        with self.assertRaises(ValueError):
+            patch.effect_route_code([(0x37, 0x43, {5}, set())])
 
 
 class TransitionCodeTests(unittest.TestCase):

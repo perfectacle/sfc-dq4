@@ -4,7 +4,8 @@ DQ5 효과음 시퀀스(32~46)는 트랙 첫머리의 if_flag(E0)로 갈래(명�
 dq4soundport.convert 로 바꾸고, 원래 시퀀스를 글(dq5song.listing)로 풀어 트랙 첫머리에 그 갈래로 뛰는 if_flag 를 더한 뒤
 다시 싼다(점프는 상대 주소라 글로 다루면 원래 갈래가 그대로 남는다).
 
-효과음 샘플은 늘 둬야 하는데 SPC 샘플 칸(20개)을 이미 다 쓰는 곡이 있어, 새 샘플이 드는 효과음은 받지 않는다.
+효과음 샘플을 늘 두면 SPC 샘플 칸(20개)을 이미 다 쓰는 곡이 있어, 갈래를 바꿔 끼우는 효과음(build_effects)은 새 샘플을 받지 않는다.
+샘플이 드는 효과음은 build_routed 가 빈 효과음 시퀀스 하나에 모으고, 부르는 쪽이 그 샘플을 자리가 남는 곡에만 붙인다.
 NDS PSG 잡음 악기만 쓰는 효과음은 DSP 잡음(E3)으로 옮기므로 샘플이 들지 않는다. 짧은 음정 파형만 쓰는 효과음은
 waves({NDS 샘플 파일: 늘 두는 샘플 번호})로 늘 두는 DQ5 효과음 파형 자리(20~22)에 넣은 한 주기 파형으로 울린다.
 """
@@ -184,3 +185,77 @@ def build_effects(data, assets, spec, sequence_bytes, records=None, waves=None, 
                                               'dropped_notes': dropped}
     sequences = {seq: splice(sequence_bytes(data, seq), branches) for seq, branches in by_seq.items()}
     return sequences, {seq: more for seq, more in extras.items() if more}, report
+
+
+BASE_KEY = 60
+
+
+def one_base(score):
+    """악기 영역마다 따로 된 프로그램(기준음 BASE_KEY, 음역 전체)으로 나누고 음을 그만큼 옮긴 악보. 같은 NDS 샘플을 다른 기준음으로
+    쓰는 효과음(19C 의 00-3C 는 기준음 60, 19F 는 32)도 같은 자원 하나로 울리게 한다. 음높이는 그대로다(벤드 나머지는
+    반음 1/128 단위로 반올림)."""
+    instruments, mapping = {}, {}
+    for program, instrument in (score.get('instruments') or {}).items():
+        for k, region in enumerate((instrument or {}).get('regions') or []):
+            new = int(program) * 16 + k
+            if k >= 16:
+                raise ValueError('more than 16 regions in one instrument')
+            mapping[(int(program), k)] = (new, BASE_KEY - region['base'])
+            instruments[str(new)] = instrument | {'regions': [region | {'lo': 0, 'hi': 127, 'base': BASE_KEY}]}
+    timeline = []
+    for e in score['timeline']:
+        if e.get('op') == 'note':
+            regions = score['instruments'][str(e['program'])]['regions']
+            k = next(i for i, r in enumerate(regions) if r['lo'] <= e['note'] <= r['hi'])
+            program, shift = mapping[(e['program'], k)]
+            # 고정 벤드의 온 반음도 음으로 옮긴다(벤드는 샘플 음높이에 구워져 같은 샘플이 다른 자원이 된다)
+            scale = e.get('bend_range', 2)
+            units = (e.get('bend') or 0) * scale
+            semis = round(units / 128)
+            if not 0 <= e['note'] + shift + semis <= 127:
+                raise ValueError('note leaves the MIDI range when moved to the common base key')
+            e = e | {'program': program, 'note': e['note'] + shift + semis,
+                     'bend': round((units - semis * 128) / scale) if scale else 0}
+        timeline.append(e)
+    return score | {'instruments': instruments, 'timeline': timeline}
+
+
+def build_routed(data, assets, spec, sequence_bytes, volumes=None, max_rate=8000, cache_dir=None):
+    """샘플이 드는 효과음을 빈 효과음 시퀀스 하나에 모은다. spec = {(원래 효과음, 갈래): NDS 번호}(원래 효과음은 하나).
+
+    원래 시퀀스의 갈래 번호(0C n X 의 X 는 21 보다 작아야 스크립트가 곡 변수를 둠)를 그대로 쓰고, 템포도 원래 시퀀스의 것을 쓴다.
+    샘플은 임시 번호(26~)로 돌려주고, 음높이만 다른 같은 샘플은 한 번만 둔다. 부를 수 있는 곡에 샘플을 붙이고 번호를 매기는 것은
+    부르는 쪽(dq4soundset) 몫이다. (시퀀스 바이트, {임시 번호: 자원}, 레코드 순서 [임시 번호], 보고서)."""
+    sources = {seq for seq, _ in spec}
+    if len(sources) != 1:
+        raise ValueError('a routed effect sequence takes branches of one DQ5 effect')
+    source = sources.pop()
+    lines = listing(sequence_bytes(data, source))
+    tempo = next(ln for ln in lines if ln and not ln[0].isspace() and not ln.endswith(':'))
+    resources, by_bytes, baked, order, branches, report = {}, {}, {}, [], {}, {}
+    for (seq, branch), ident in sorted(spec.items()):
+        score = one_base(json.loads(sfx_path(assets, ident).read_text()))
+        found, program_map, detail = bank.build_bank(score, assets, start_id=0x26, max_rate=max_rate, cache_dir=cache_dir)
+        remap = {}
+        for temp, payload in sorted(found.items()):
+            # 자원 머리 [길이 2][반복 2][ADSR 2][GAIN][음높이 2] 에서 음높이만 다르면(구운 벤드만 다름) 한 자원으로 울리고,
+            # 그 차이는 변환기가 음마다 미세 조정(E9)으로 낸다(프로그램 표 'tune' = 그 자원에 구운 벤드)
+            body = payload[:7] + payload[9:]
+            if body not in by_bytes:
+                by_bytes[body] = 0x26 + len(resources)
+                resources[by_bytes[body]] = payload
+                baked[by_bytes[body]] = detail['samples'][f'{temp:02X}'].get('tune', 0)
+            remap[temp] = by_bytes[body]
+        program_map = {p: [{k: v for k, v in r.items() if k != 'tune'} | {'sample': remap[r['sample']]}
+                           | ({'tune': baked[remap[r['sample']]]} if baked[remap[r['sample']]] else {})
+                           for r in regions] for p, regions in program_map.items()}
+        entries, text, dropped, more = convert_branch(score, program_map, order, (volumes or {}).get((seq, branch), 0x30))
+        order += more
+        branches[branch] = (entries, text)
+        report[f'{seq:02X}-{branch:02X}'] = {'nds': ident.upper(), 'title': score.get('title'), 'tracks': len(entries),
+                                              'dropped_notes': dropped,
+                                              'samples': {f'{remap[int(k, 16)]:02X}': {
+                                                  'source': v['source'], 'hz': round(v['effective_rate']),
+                                                  'brr_bytes': v['brr_bytes']} for k, v in detail['samples'].items()}}
+    base = assemble([tempo, 'track Lnone', 'Lnone:', '  end'])
+    return splice(base, branches), resources, order, report

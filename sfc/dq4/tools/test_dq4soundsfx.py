@@ -86,5 +86,29 @@ class WaveTests(unittest.TestCase):
         self.assertEqual(more, [0x22])
 
 
+class RoutedTests(unittest.TestCase):
+    def test_one_base_keeps_pitch_and_splits_regions(self):
+        score = {'instruments': {'57': {'type': 'PCM', 'regions': [
+                    {'lo': 0, 'hi': 12, 'base': 8, 'sample': 'a.wav'},
+                    {'lo': 25, 'hi': 36, 'base': 32, 'sample': 'b.wav'}]}},
+                 'timeline': [{'op': 'note', 'program': 57, 'note': 1, 'bend': 22, 'bend_range': 12},
+                              {'op': 'note', 'program': 57, 'note': 36, 'bend': 0, 'bend_range': 12}]}
+        out = sfx.one_base(score)
+        first, second = [e for e in out['timeline'] if e['op'] == 'note']
+        # 기준음 8 → 60(+52), 벤드 22×12 = 264 단위 중 256(2반음)은 음으로, 나머지 8 단위는 벤드 1(12 단위)로
+        self.assertEqual((first['note'], first['bend']), (1 + 52 + 2, 1))
+        self.assertEqual((second['note'], second['bend']), (36 + 28, 0))
+        self.assertNotEqual(first['program'], second['program'])
+        for e in (first, second):
+            (region,) = out['instruments'][str(e['program'])]['regions']
+            self.assertEqual((region['lo'], region['hi'], region['base']), (0, 127, sfx.BASE_KEY))
+
+    def test_routed_sequence_plays_only_its_branches(self):
+        base = assemble(['tempo 3C', 'track Lnone', 'Lnone:', '  end'])
+        seq = sfx.splice(base, {7: (['L0006'], ['L0006:', '  note 30 len 02', '  end'])})
+        self.assertEqual(notes(seq, 7), [[(0, 0x30, False)]])
+        self.assertEqual(notes(seq, 0), [[]])
+
+
 if __name__ == '__main__':
     unittest.main()
