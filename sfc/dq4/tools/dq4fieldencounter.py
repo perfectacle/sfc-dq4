@@ -102,11 +102,17 @@ MONSTERS = {
 }
 # FC slots: 0-4 a group plus more groups (DQ5 slots 0-4, several species), 6-10 one group of a count code (DQ5
 # slots 5-9, codes 0-7 of the same meaning but 4 and 5: FC 1-3 and 2-4, DQ5 2-3 and 3-4), 5 and 11 one monster (a
-# free DQ5 slot of 5-9 with code 0), 12-13 FC formations (not ported).
+# free DQ5 slot of 5-9 with code 0), 12-13 FC formations (in a dungeon zone, slot 12 is DQ5 slot 10's fixed group,
+# dungeon_fixed; on the field neither is ported).
 GROUP_SLOTS, SOLO_SLOTS, ONE_SLOTS = range(0, 5), range(6, 11), (5, 11)
 DQ5_SOLO = range(5, 10)
 GROUP_COUNT = 1          # DQ5 several-species count code 1: one of each (code + 7 = 8)
 DQ5_WEIGHT = 7
+FORMATION_SLOT = 12
+# DQ5 fixed groups (23:B04B, dq5encounterwrite fixed_groups): nine, three members each. Only ported zones are
+# reachable, so the DQ5 groups are taken from 0.
+FIXED_GROUPS, FIXED_MEMBERS = 9, 3
+COUNT_BASE, COUNT_WIDTH, COUNT_CODES = 0x23EA63, 0x23EA73, 15
 # DQ5 field grids (dq5encounterwrite field_grids, 01:A6D9): index -> ($1949 world, rows, the FC zone-map rows read
 # there). World 0 picks its grid by $1948 and 01:854F does not clamp the row, so with $1948 = 0 rows 7-15 of
 # grid 0 read rows 0-8 of grid 1: grid 1 holds FC rows 7-15 there and serves $1948 = 1 only from its row 9.
@@ -121,8 +127,12 @@ SEA_AREAS = (81, 82, 83, 84)   # 01:85D8: the ship's two rectangles take these f
 # A DQ5 grid row is 16 blocks, so field 1's first row takes 35.
 FIELD1_TOP, FIELD1, FIELD3 = 0x35, 0x34, 0x36
 RATE_COEF = 0x23EA44
-# FC dungeons take terrain factor 0F on every tile (18:$9F9B) and DQ5 indoor maps rate 7 (01:8522).
+# FC dungeons take terrain factor 0F on every tile (18:$9F9B) and DQ5 indoor maps rate 7 (01:8522). An FC step is
+# a 16-pixel block and a DQ5 step one 8-pixel cell (00:82AB runs for each), and the two engines scale a step's
+# chance by the steps since the last fight in different ways, so a dungeon zone takes the coefficient whose mean
+# cells to a fight are nearest twice FC's mean steps (dungeon_rate_index).
 FC_DUNGEON_TERRAIN, DQ5_INDOOR_RATE = 0x0F, 7
+MEAN_STEPS = 4096
 # DQ5 rate per terrain nibble (01:84CF's Y), day then night, 14 each. FC's chance per step is base x 16 x the
 # terrain factor >> 8 and DQ5's coefficient x Y >> 6, so with Y = the FC factor and coefficient = 4 x base
 # (rate_index) a DQ5 step has the FC chance. FC fights only on tiles below 8 ($9CB5).
@@ -187,12 +197,53 @@ def grids(prg, assign):
     return out
 
 
-def rate_index(dq5, base, dungeon=False):
-    """Index of the DQ5 rate coefficient (23:EA44) nearest FC's chance a step. On the field that is 4 x FC's base
-    rate (TERRAIN_RATES); in a dungeon FC's base x 16 x 0F >> 8 against DQ5's coefficient x 7 >> 6."""
+def rate_index(dq5, base):
+    """Index of the DQ5 rate coefficient (23:EA44) nearest 4 x FC's base rate: on the field, where Y is the FC
+    terrain factor (TERRAIN_RATES), a DQ5 step then has the chance of an FC step."""
     coefs = dq5[_lorom(RATE_COEF):_lorom(RATE_COEF) + 8]
-    want = base * 16 * FC_DUNGEON_TERRAIN / 4 / DQ5_INDOOR_RATE if dungeon else 4 * base
-    return min(range(8), key=lambda i: (abs(coefs[i] - want), i))
+    return min(range(8), key=lambda i: (abs(coefs[i] - 4 * base), i))
+
+
+def _mean(chances):
+    """Mean steps to a fight for the chances (out of 256) of steps 1, 2, ...."""
+    mean, left = 0.0, 1.0
+    for k, p in enumerate(chances, 1):
+        mean += k * left * min(p, 256) / 256
+        left *= 1 - min(p, 256) / 256
+    return mean
+
+
+def fc_dungeon_steps(prg, base):
+    """FC's mean steps to a fight in a dungeon zone of base rate `base`: base x the step factor (18:$A33D[$6E42],
+    the first three steps after a fight) x 0F >> 8 (18:$9CCC)."""
+    enc = _fc(prg)
+    after = [enc.rd(prg, enc.AFTER_BATTLE + n) for n in range(3)]
+    return _mean(base * (after[k] if k < 3 else 0x10) * FC_DUNGEON_TERRAIN >> 8 for k in range(MEAN_STEPS))
+
+
+def dq5_steps(coef, rate):
+    """DQ5's mean steps to a fight for coefficient `coef` and rate Y (23:E7C2): with s = $1A9A, the steps since the
+    last fight counting this one, and n = 256 / Y, Y is 0 below 3 and >> 6, >> 4, >> 2, >> 1 below 5, 7, 9, 11, then
+    (Y >> 1) + (Y >> 2) below n, Y + (Y >> 1) below 2n and 4Y after, at most FF; the chance is coef x Y >> 6
+    (23:E898)."""
+    n = 0x100 // rate
+
+    def y(s):
+        if s < n:
+            for top, shift in ((3, 8), (5, 6), (7, 4), (9, 2), (11, 1)):
+                if s < top:
+                    return rate >> shift
+            return (rate >> 1) + (rate >> 2)
+        return min(0xFF, rate + (rate >> 1) if s < 2 * n else 4 * rate)
+    return _mean(coef * y(min(s, 0xFF)) >> 6 for s in range(1, MEAN_STEPS + 1))
+
+
+def dungeon_rate_index(prg, dq5, base):
+    """Index of the DQ5 rate coefficient whose mean cells to a fight at the indoor rate is nearest two cells per FC
+    step of fc_dungeon_steps."""
+    coefs = dq5[_lorom(RATE_COEF):_lorom(RATE_COEF) + 8]
+    want = 2 * fc_dungeon_steps(prg, base)
+    return min(range(8), key=lambda i: (abs(dq5_steps(coefs[i], DQ5_INDOOR_RATE) - want), i))
 
 
 def terrain_rates(prg, dq5):
@@ -224,8 +275,37 @@ def _lorom(addr):
     return (addr >> 16 & 0x7F) * 0x8000 + (addr & 0x7FFF)
 
 
-def record(prg, dq5, z, dungeon=False):
-    """dq5progress/1 encounter fields of FC zone z (without its index) and the FC slots left out."""
+def dungeon_fixed(prg, fc):
+    """{FC formation: DQ5 fixed group} of the slot-12 formations of the FC dungeon zones `fc`, in formation order."""
+    enc = _fc(prg)
+    found = sorted({enc.zone(prg, z)["slots"][FORMATION_SLOT] for z in set(fc)} - {0xFF})
+    if len(found) > FIXED_GROUPS:
+        raise ValueError(f"{len(found)} FC formations, {FIXED_GROUPS} DQ5 fixed groups")
+    return {f: k for k, f in enumerate(found)}
+
+
+def fixed_groups(prg, dq5, fixed):
+    """dq5encounter/1 fixed_groups of the FC formations `fixed` (dungeon_fixed): each member's monster through
+    MONSTERS and the DQ5 count code of the same range."""
+    enc = _fc(prg)
+    base, width = (dq5[_lorom(t):_lorom(t) + COUNT_CODES] for t in (COUNT_BASE, COUNT_WIDTH))
+    codes = {(base[c], base[c] + max(width[c], 1) - 1): c for c in reversed(range(COUNT_CODES))}
+    out = []
+    for f, k in sorted(fixed.items(), key=lambda kv: kv[1]):
+        members = [(m, lo, hi) for m, lo, hi in enc.formation(prg, f) if m != 0xFF]
+        if len(members) > FIXED_MEMBERS:
+            raise ValueError(f"FC formation {f:02X}: {len(members)} groups, a DQ5 fixed group holds {FIXED_MEMBERS}")
+        if any((lo, hi) not in codes for _, lo, hi in members):
+            raise ValueError(f"FC formation {f:02X}: a count range no DQ5 count code has")
+        out.append({"index": k, "members": [{"monster": MONSTERS[m], "count_code": codes[lo, hi]}
+                                            for m, lo, hi in members]})
+    return out
+
+
+def record(prg, dq5, z, dungeon=None):
+    """dq5progress/1 encounter fields of FC zone z (without its index) and the FC slots left out. `dungeon` is
+    dungeon_fixed for a dungeon zone (None on the field): the rate is dungeon_rate_index, and slot 12 becomes DQ5
+    slot 10."""
     enc = _fc(prg)
     rec = enc.zone(prg, z)
     s, w = rec["slots"], enc.weights(prg, rec["row"])
@@ -244,6 +324,10 @@ def record(prg, dq5, z, dungeon=False):
         if s[i] != 0xFF:
             slots[i - 1].update(weight=weight(i), count_code=code16 >> 3 * (i - 6) & 7, monster=MONSTERS[s[i]])
     dropped = [i for i in (12, 13) if s[i] != 0xFF]
+    fixed_slot = {"weight": 0, "group": 0}
+    if dungeon is not None and s[FORMATION_SLOT] != 0xFF and w[FORMATION_SLOT]:
+        fixed_slot = {"weight": weight(FORMATION_SLOT), "group": dungeon[s[FORMATION_SLOT]]}
+        dropped.remove(FORMATION_SLOT)
     for i in ONE_SLOTS:
         if s[i] == 0xFF:
             continue
@@ -252,8 +336,8 @@ def record(prg, dq5, z, dungeon=False):
             dropped.append(i)
             continue
         slots[free[0]].update(weight=weight(i), count_code=0, monster=MONSTERS[s[i]])
-    return {"level": rec["b1"], "slots": list(slots.values()), "fixed": {"weight": 0, "group": 0},
-            "species_weights": [3, 1 if w[14] else 0, 1 if w[15] else 0], "rate_index": rate_index(dq5, rec["rate"], dungeon),
+    return {"level": rec["b1"], "slots": list(slots.values()), "fixed": fixed_slot,
+            "species_weights": [3, 1 if w[14] else 0, 1 if w[15] else 0], "rate_index": rate_index(dq5, rec["rate"]) if dungeon is None else dungeon_rate_index(prg, dq5, rec["rate"]),
             "flag_1000": 0, "flag_1010": False, "fixed_night_only": False}, dropped
 
 
@@ -261,18 +345,23 @@ def docs(prg, dq5, enc, dungeon=()):
     """(dq5progress/1, dq5encounter/1, report) for the FC field zones and the FC dungeon zones `dungeon`
     (dungeon_zones). The terrain rates are terrain_rates."""
     assign = zones(prg, enc)
+    fixed = dungeon_fixed(prg, dungeon)
+    groups = fixed_groups(prg, dq5, fixed)
     records, report = [], {}
     for kind, found in (("field", assign), ("dungeon", dungeon_zones(prg, enc, dungeon))):
         for fc, area in found.items():
-            fields, dropped = record(prg, dq5, fc, kind == "dungeon")
+            fields, dropped = record(prg, dq5, fc, fixed if kind == "dungeon" else None)
             records.append({"index": area, **fields})
+            monsters = {sl["monster"] for sl in fields["slots"] if sl["weight"]}
+            if fields["fixed"]["weight"]:
+                monsters |= {m["monster"] for m in groups[fields["fixed"]["group"]]["members"]}
             report[f"{fc:02X}"] = {"zone": area, "kind": kind, "level": fields["level"], "dropped_slots": dropped,
-                                   "rate_index": fields["rate_index"],
-                                   "monsters": sorted({sl["monster"] for sl in fields["slots"] if sl["weight"]})}
+                                   "rate_index": fields["rate_index"], "fixed": fields["fixed"],
+                                   "monsters": sorted(monsters)}
     sea, _ = record(prg, dq5, SEA_ZONE)
     records += [{"index": area, **sea} for area in SEA_AREAS]
     return ({"format": "dq5progress/1", "encounters": records},
-            {"format": "dq5encounter/1", "field_grids": grids(prg, assign)}, report)
+            {"format": "dq5encounter/1", "field_grids": grids(prg, assign), "fixed_groups": groups}, report)
 
 
 def main():

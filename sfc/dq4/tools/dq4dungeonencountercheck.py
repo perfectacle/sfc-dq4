@@ -7,8 +7,12 @@ step fight (RATES); the field scenes keep the ROM's rates, or the field walk to 
 
   zone   every step's 00:82AF A (01:84CF's zone) is the DQ5 zone of the map's FC zone, or FF for a map FC
          leaves without
-  fight  every group 23:E7C2 picks in a map is made of the monsters its zone's record weighs, a map without a
-         zone meets none, and in a warped scene the map it ends in meets one when it has a zone
+  fight  every group 23:E7C2 picks in a map is made of the monsters its zone's record weighs (a fixed group only
+         where the record has one), a map without a zone meets none, and in a warped scene the map it ends in
+         meets one when it has a zone
+  well   in the DQ5 group of FC group 3A (dq4wellswitch), the switch bit after each step is what FC's table
+         makes of the bit before and the step's FC cell (dq4encounter.toggle_after), and while it is off the
+         zone is FF and no group is picked; a scene whose switch ends off need not fight
   song   00:CEA2 (the map's song request on arrival) gets the LINKS "music" slot, and in a field scene the song
          playing ($1D8B) on the dungeon's steps is that slot. A warped scene starts from the ship state's SPC,
          whose song table is not this ROM's (dq4soundstate.lua), and its first map's song may not start
@@ -35,29 +39,41 @@ import dq4fieldencounter  # noqa: E402
 import dq4fieldport  # noqa: E402
 import dq4groupcheck  # noqa: E402
 import dq4groupbuild  # noqa: E402
+import dq4wellswitch  # noqa: E402
 from dq4groupbuild import LINKS, dungeon_zones, placement  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
 
 # Scene set-up, not what is checked: every coefficient FF and the indoor rate 01:8522 LDY #7 at 40, so
 # 255 x 40 >> 6 fights on every step past the engine's first three.
 RATES = "11EA44=FFFFFFFFFFFFFFFF;8523=40"
+CALM = "11EA44=0000000000000000"
 SIDEWAYS = ",".join(["left:24,right:24"] * 16)
 UPDOWN = ",".join(["up:24,down:24"] * 16)
 TRACE = "0082AF,23E9B0,23EA40,23E98F,00CEA2"
-LOG = "7E1001,7E1003,7E1005,7E1007,7E00BC,7E00BD,7E00BE,7E194A,7E1D8B"
+FLAG = f"7E{dq4wellswitch.FLAG[0] & 0xFFFF:04X}"
+LOG = f"7E1001,7E1003,7E1005,7E1007,7E00BC,7E00BD,7E00BE,7E194A,7E1D8B,{FLAG},7E3020,7E3080"
+SWITCH_ON = f"{dq4wellswitch.FLAG[0] & 0xFFFF:04X}|{dq4wellswitch.FLAG[1]:02X}"
 EXITS = {"23E9B0": "single", "23EA40": "mixed", "23E98F": "fixed"}
 # Scene -> (how it comes in, walk): ("field", DQ5 group) walks in from the group's first field entrance, ("to", warp
 # TO) warps there, ("stair", warp TO, input) warps beside an FC stair (dq4groupcheck stair_scenes) and takes it.
-# The walk keeps off the stair beside the warp.
+# The walk keeps off the stair beside the warp. A third item: "on" sets the well's switch before the warp, "calm"
+# warps with every coefficient 0 (CALM) to walk the switch cells without a fight stopping the walk.
 SCENES = {
     "38-00-field": (("field", 0x38), SIDEWAYS), "38-01": (("to", "38/01,12,9"), SIDEWAYS),
     "39-03-field": (("field", 0x39), SIDEWAYS), "39-00-stair": (("stair", "39/01,30,31", "up:32"), SIDEWAYS),
     "39-01": (("to", "39/01,30,31"), SIDEWAYS), "39-02": (("to", "39/02,50,11"), SIDEWAYS),
     "39-04": (("to", "39/04,10,39"), SIDEWAYS), "39-05": (("to", "39/05,14,31"), UPDOWN),
     "3A-00-field": (("field", 0x3A), UPDOWN), "3A-00": (("to", "3A/00,8,11"), UPDOWN),
-    "3B-02-stair": (("stair", "38/01,4,9", "up:32"), "down:48," + SIDEWAYS), "3B-00": (("to", "3B/00,6,43"), SIDEWAYS),
-    "3B-03": (("to", "3B/03,10,83"), SIDEWAYS), "3B-05": (("to", "3B/05,10,7"), SIDEWAYS),
-    "3B-06": (("to", "3B/06,54,7"), SIDEWAYS),
+    "3B-02-stair": (("stair", "38/01,4,9", "up:32"), "down:48," + SIDEWAYS),
+    "3B-02-stair-on": (("stair", "38/01,4,9", "up:32"), "down:48," + SIDEWAYS, "on"),
+    "3B-00": (("to", "3B/00,6,43"), SIDEWAYS, "on"), "3B-03": (("to", "3B/03,10,83"), SIDEWAYS, "on"),
+    "3B-05": (("to", "3B/05,10,7"), SIDEWAYS, "on"), "3B-06": (("to", "3B/06,54,7"), SIDEWAYS, "on"),
+    "3B-01-off": (("to", "3B/01,10,7"), SIDEWAYS),
+    # Down through the switch rows of 3B/00 (FC (02,18) on, (02,19) off), and left along 3B/03's row 10 across
+    # (15,10) on and (14,10) off. The walks keep from facing up on (02,19) and right on (14,10), where the well's
+    # voices (dq4ch1event) open a window.
+    "3B-00-switch": (("to", "3B/00,4,43"), "down:88", "calm"),
+    "3B-03-switch": (("to", "3B/03,46,33"), "left:56", "calm"),
 }
 
 
@@ -112,9 +128,17 @@ def main():
     dq4groupcheck.WARP = DQ5_TOOLS / "lua" / "dq5warptrace.lua"
     _, props = dq4fieldport.fc_field(prg)
 
+    well_group = dq4wellswitch.group(placement(prg))
+    switch_maps = {placement(prg)[dq4wellswitch.FC_GROUP, k][1]: k for k in dq4wellswitch.FC_MAPS}
+    import dq4encounter
+
     def run(name):
-        how, walk = SCENES[name]
+        how, walk, *option = SCENES[name]
         extra = {"MAXF": "3600", "TRACE": TRACE, "LOG": LOG}
+        switch = option == ["on"]
+        if switch:
+            extra["SET"] = SWITCH_ON
+        calm = option == ["calm"]
         if how[0] == "field":
             link = LINKS[how[1]][0]
             blocks = dq4fieldport.entrance_blocks(props, [link["field"][0]])
@@ -124,23 +148,43 @@ def main():
                                       TEST=f"{d}:{dq4groupcheck.PRESS},wait:60,{walk}", **extra)
         else:
             test = f"{how[2]},wait:60,{walk}" if how[0] == "stair" else f"wait:60,{walk}"
-            got = dq4groupcheck.scene(mesence, rom, state, out, name, TO=how[1], ROMPATCH=RATES, TEST=test, **extra)
+            got = dq4groupcheck.scene(mesence, rom, state, out, name, TO=how[1], ROMPATCH=CALM if calm else RATES,
+                                      TEST=test, **extra)
         maps, here = {}, None
+        well = {"steps": 0, "on_steps": 0, "flips": [], "bad": []}
         for _, pc, kv in lines(out / name / "trace.txt"):
             if not byte(kv, "7E00BE") & 0x80:
                 here = None
                 continue
-            here = f"{byte(kv, '7E00BC'):02X}/{byte(kv, '7E00BD'):02X}"
+            group, number = byte(kv, "7E00BC"), byte(kv, "7E00BD")
+            here = f"{group:02X}/{number:02X}"
             seen = maps.setdefault(here, {"steps": 0, "zones": set(), "y": set(), "fights": [], "songs": set(),
-                                          "194A": set(), "playing": set()})
+                                          "194A": set(), "playing": set(), "off_zones": set(), "off_fights": 0})
             seen["194A"].add(byte(kv, "7E194A"))
+            got_on = bool(byte(kv, FLAG) & dq4wellswitch.FLAG[1])
             if pc == "0082AF":
+                if group == well_group:
+                    x, y = byte(kv, "7E3020") >> 1, (byte(kv, "7E3080") - 1) >> 1
+                    k = switch_maps.get(number)
+                    want_on = dq4encounter.toggle_after(prg, k, x, y, switch) if k is not None else switch
+                    well["steps"] += 1
+                    well["on_steps"] += got_on
+                    if want_on != switch:
+                        well["flips"].append([here, x, y, want_on])
+                    if got_on != want_on:
+                        well["bad"].append([here, x, y, got_on])
+                    switch = got_on
+                if group == well_group and not got_on:
+                    seen["off_zones"].add(byte(kv, "A"))
+                    continue
                 seen["steps"] += 1
                 seen["zones"].add(byte(kv, "A"))
                 seen["y"].add(byte(kv, "Y"))
                 seen["playing"].add(byte(kv, "7E1D8B"))
             elif pc == "00CEA2":
                 seen["songs"].add(byte(kv, "A"))
+            elif group == well_group and not got_on:
+                seen["off_fights"] += 1
             else:
                 seen["fights"].append((EXITS[pc], groups(kv)))
         report_maps, ok = {}, bool(maps)
@@ -148,12 +192,18 @@ def main():
             want = want_of.get(m)
             if want is None:
                 continue
-            allowed = set(report[want["fc_zone"]]["monsters"]) if want["fc_zone"] else set()
+            zone = report[want["fc_zone"]] if want["fc_zone"] else None
+            allowed = set(zone["monsters"]) if zone else set()
+            fixed = bool(zone and zone["fixed"]["weight"])
+            # A well map walked with the switch off has no steps that count; it must still meet nothing.
+            counted = seen["steps"] > 0
             if want["zone"] is None:
                 good = seen["zones"] <= {0xFF} and not seen["fights"]
             else:
-                good = seen["zones"] == {want["zone"]} and (how[0] == "field" or m != got.get("map") or bool(seen["fights"])) and \
-                    all(kind != "fixed" and {mon for mon, _ in g} <= allowed for kind, g in seen["fights"])
+                good = (not counted or seen["zones"] == {want["zone"]}) and \
+                    (how[0] == "field" or calm or m != got.get("map") or not counted or bool(seen["fights"])) and \
+                    all((kind != "fixed" or fixed) and {mon for mon, _ in g} <= allowed for kind, g in seen["fights"])
+            good = good and seen["off_zones"] <= {0xFF} and not seen["off_fights"]
             good = good and seen["songs"] <= {want["song"]} and seen["194A"] == {dq4groupbuild.INDOOR_ENCOUNTERS}
             if how[0] == "field":
                 good = good and seen["playing"] == {want["song"]}
@@ -162,8 +212,12 @@ def main():
                               "want": want, "ok": good}
         # Every scene's first dungeon map is the one it came to: its arrival must ask for the song.
         first = next((m for m in maps if m in want_of), None)
-        ok = ok and first is not None and bool(maps[first]["songs"])
-        return name, {"got": got, "maps": report_maps, "ok": ok}
+        ok = ok and first is not None and bool(maps[first]["songs"]) and not well["bad"]
+        if name.endswith("-switch"):
+            ok = ok and len(well["flips"]) >= 2 and well["on_steps"] > 0 and well["steps"] > well["on_steps"]
+        if name.endswith("-off"):
+            ok = ok and well["steps"] > 0 and well["on_steps"] == 0
+        return name, {"got": got, "maps": report_maps, "well": well, "ok": ok}
 
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
         results = dict(pool.map(run, SCENES))
