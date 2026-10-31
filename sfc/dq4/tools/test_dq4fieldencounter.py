@@ -96,11 +96,28 @@ class RomTest(unittest.TestCase):
         self.assertFalse(dungeon & in_grids)
 
     def test_dungeon_rate(self):
-        # FC base 10 and 14 in a dungeon are 15/256 and 18.75/256 a step; DQ5's highest coefficient 80 x 7 >> 6
-        # is 14/256, the nearest.
+        # A DQ5 step is half an FC step. FC base 10 (caves) and 14 (tower) fight every 19.3 and 16.4 steps, that is
+        # 38.6 and 32.7 cells; at the indoor rate 7 coefficient 50 fights every 40.4 cells and 80 every 31.6.
+        self.assertAlmostEqual(enc.fc_dungeon_steps(self.prg, 0x10), 19.32, places=2)
+        self.assertAlmostEqual(enc.fc_dungeon_steps(self.prg, 0x14), 16.37, places=2)
+        self.assertAlmostEqual(enc.dq5_steps(0x50, 7), 40.44, places=2)
+        self.assertAlmostEqual(enc.dq5_steps(0x80, 7), 31.64, places=2)
+        want = {0x40: 4, 0x41: 4, 0x42: 7, 0x43: 7}
         for z in self.dungeon:
-            self.assertEqual(self.report[f"{z:02X}"]["rate_index"], 7)
+            self.assertEqual(self.report[f"{z:02X}"]["rate_index"], want[z])
         self.assertEqual(enc.rate_index(self.dq5, 0x10), 3)
+
+    def test_tower_formations(self):
+        # FC zones 42·43 slot 12: formations 00 and 01 as DQ5 fixed groups 0 and 1, the other zones none.
+        self.assertEqual(enc.dungeon_fixed(self.prg, self.dungeon), {0x00: 0, 0x01: 1})
+        self.assertEqual(self.report["42"]["fixed"]["group"], 0)
+        self.assertEqual(self.report["43"]["fixed"]["group"], 1)
+        self.assertTrue(self.report["42"]["fixed"]["weight"])
+        self.assertEqual(self.report["40"]["fixed"]["weight"], 0)
+        groups = {g["index"]: g["members"] for g in self.grids["fixed_groups"]}
+        self.assertEqual([m["count_code"] for m in groups[0]], [0, 0, 0])
+        self.assertEqual([m["count_code"] for m in groups[1]], [0, 0, 1])
+        self.assertNotIn(12, self.report["42"]["dropped_slots"])
 
     def test_castle_zone(self):
         # FC zone 04 around バトランド: level 1, base rate 16 -> coefficient 40, スライム·バブルスライム kept.
