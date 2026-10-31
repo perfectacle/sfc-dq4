@@ -15,8 +15,25 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # No ROM in CI: only checks that need none (journal names, links, personal paths, syntax).
+  # No ROM in CI: every job checks only what needs none.
   docs:
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: 0.13.1
+          enable-cache: true
+
+      - run: uv sync --locked
+
+      - run: uv run --frozen python tools/check_docs.py
+
+  syntax:
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 10
     steps:
@@ -39,7 +56,35 @@ jobs:
 
       - run: git ls-files -z '*.py' | xargs -0 uv run --frozen python -m compileall -q
 
-      - run: uv run --frozen python tools/check_docs.py
+  # Tests that need rom/ skip themselves; the rest run here. One job per track so a
+  # failure points at its owner (the suites take about 30 s each, so finer shards
+  # would spend more on runner setup than they save).
+  test:
+    name: test (${{ matrix.track }})
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - track: dq4
+            dir: sfc/dq4/tools
+          - track: dq5
+            dir: sfc/dq5/tools/tests
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: 0.13.1
+          enable-cache: true
+
+      - run: uv sync --locked
+
+      - run: uv run --frozen python -m unittest discover -p 'test_*.py'
+        working-directory: ${{ matrix.dir }}
 
   actionlint:
     runs-on: ubuntu-26.04-arm
@@ -70,7 +115,7 @@ jobs:
   # The one required status check on main: passes only when every job above passed.
   ci-ok:
     if: always()
-    needs: [docs, actionlint, zizmor]
+    needs: [docs, syntax, test, actionlint, zizmor]
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 2
     steps:
