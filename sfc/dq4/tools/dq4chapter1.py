@@ -360,8 +360,8 @@ def messages(ported_messages, report):
             raise ValueError(f'{name} 메시지와 겹치는 번호: {sorted(f"{m:03X}" for m in clash)}')
         out.update(texts)
     import dq4msgwait
-    wait, _ = dq4msgwait.plan(**message_flow(first))
-    return dq4msgwait.apply(out, wait)
+    wait, keep = dq4msgwait.plan(**message_flow(first))
+    return dq4msgwait.apply(out, wait, keep)
 
 
 def message_flow(first_message):

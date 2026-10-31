@@ -79,8 +79,12 @@ def plan(talks=(), scripts=(), events=()):
     return wait, keep
 
 
-def apply(texts, wait):
-    """texts {번호: 부분 목록} 중 wait 의 메시지 끝을 1010 으로. 이미 다른 끝 코드면 그대로 둔다."""
+def apply(texts, wait, keep=()):
+    """texts {번호: 부분 목록} 중 wait 의 메시지 끝을 1010 으로. 이미 다른 끝 코드면 그대로 둔다. keep 의 메시지가
+    글 자체에 1010 을 박고 끝나면 멈춘다: 닫기 대기를 하는 명령이 띄우면 A 를 두 번 받는다."""
+    stuck = sorted(m for m in keep if texts.get(m) and texts[m][-1] == WAIT_END)
+    if stuck:
+        raise ValueError(f'1001 이어야 하는데 1010 으로 끝나는 메시지: {[f"{m:03X}" for m in stuck]}')
     for m in wait:
         parts = texts.get(m)
         if parts and parts[-1] == LINE_END:
