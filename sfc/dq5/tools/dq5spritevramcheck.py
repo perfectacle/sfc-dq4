@@ -7,7 +7,9 @@
   over:  그림 08(19/00 인물). 19/00 은 원래 7E:1995 가 1FE 라 512타일을 넘는다. 도구는 이 문서를 거부하므로 vram=False 로 만든다
 02/06 과 19/00 에 dq5warp.lua 로 들어가 dq5gfxdump.lua 로 덤프하고, 7E:1995·VRAM 의 세트 타일·칸 목록을 본다.
 --sweep 에 dq5objsweep.py 의 출력 폴더를 주면 맵마다 그때 플래그로 고른 목록의 셈이 잰 $1995 최대와 같은지도 센다.
+--maps 로 준 맵은 원본 롬으로 다시 들어가 덤프 때의 $1995 를 셈과 견준다(훑기와 다른 맵을 다시 잴 때).
   MESENCE=… python sfc/dq5/tools/dq5spritevramcheck.py rom/dq5.sfc --state work/state/ship.mss [--sweep work/objsweep]
+      [--maps 0A/00,17/00]
 """
 import argparse
 import json
@@ -25,6 +27,7 @@ import dq5npc as N  # noqa: E402
 import dq5sprite as S  # noqa: E402
 import dq5spritewrite as W  # noqa: E402
 from dq5map import Rom  # noqa: E402
+from dq5mapmusic import entry_cells  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 NEW = 0x70
@@ -94,14 +97,14 @@ def measure(rom, dest, dumps):
 def predicted(rom, sets, mapping, bc, bd, flags, night):
     """그때 플래그로 고른 목록(12:8009)과 그 맵의 맵 OBJ 타일로 dq5spritewrite.vram_use 의 셈."""
     a = N.list_address(rom, bc, bd, flags)
-    gfx = {f['gfx'] for e, _ in (N.list_entries(rom, a) if a is not None else []) if (f := N.parse(rom, e, night))}
+    people = {(f['gfx'], bool(f['misc'] & 0x80)) for e, _ in (N.list_entries(rom, a) if a is not None else [])
+              if (f := N.parse(rom, e, night))}
     # 덤프 때의 7E:21B3 bit3 이 그림 9A 의 갈래를 정한다(1F:CF32). vram_use 는 모를 때 큰 쪽을 센다.
     wife = 0x2F if flags.get(0x7E21B3, 0) & 0x08 else 0x97
-    gfx = {wife if g == 0x9A else g for g in gfx}
-    reserve = sum(o['reserve'] for o in S.map_objects(rom) if o['bc'] == bc and o['bd'] & 0x7F in (bd, 0x7F))
+    people = {(wife if g == 0x9A else g, lying) for g, lying in people}
     final = {g: mapping.get(g, S.gfx_set(rom, g)) for g in range(S.GFX_COUNT)}
-    return W.vram_use([('', reserve, night, gfx)], final.get,
-                      lambda s: len(sets[s][1]) if s in sets else S.set_record(rom, s)['tiles'])[0]
+    return W.vram_use([('', W.map_reserve(S.map_objects(rom), bc, bd), night, people)], final.get,
+                      lambda s: W.set_tiles(rom, sets, s, True))[0]
 
 
 def sweep_model(rom, folder):
@@ -132,6 +135,7 @@ def main():
     ap.add_argument('--mesence', default=os.environ.get('MESENCE'))
     ap.add_argument('--out', type=Path, default='work/spritevramcheck')
     ap.add_argument('--sweep', type=Path, help='dq5objsweep.py 의 출력 폴더')
+    ap.add_argument('--maps', help='원본 롬으로 다시 잴 맵(쉼표로 구분한 BC/BD)')
     args = ap.parse_args()
     if not args.mesence:
         ap.error('--mesence 또는 MESENCE가 필요함')
@@ -182,6 +186,20 @@ def main():
         if args.sweep:
             same, other = sweep_model(base, args.sweep)
             print(f'objsweep 맵 {same + len(other)}곳 중 셈과 같은 곳 {same}, 다른 곳 {len(other)}: {", ".join(other)}')
+        if args.maps:
+            maps = args.maps.split(',')
+            cells = entry_cells(str(args.rom), maps, 6)
+            path = out / 'original.sfc'
+            again = []
+            for m in maps:
+                tag = f'again-{m.replace("/", "")}'
+                for row in measure(base, *run(path.resolve(), tag, f'{m},{cells[m][0]},{cells[m][1]}', out,
+                                               args.state.resolve(), Path(args.mesence), lib)):
+                    bc, bd = (int(v, 16) for v in row['map'].split('/'))
+                    again.append((m, row['map'], row['v1995'], predicted(base, {}, {}, bc, bd, row['flags'], row['night'])))
+            results['again'] = [list(r) for r in again]
+            checks['다시 잰 맵의 7E:1995 와 셈'] = all(m == got and v == want for m, got, v, want in again)
+            print('다시 잰 맵: ' + ', '.join(f'{m} 잼 {v:03X} 셈 {want:03X}' for m, _, v, want in again[1::2] or again))
         (out / 'results.json').write_text(json.dumps({'results': results, 'checks': checks}, ensure_ascii=False, indent=1)
                                           + '\n', encoding='utf-8')
         for key, ok in checks.items():

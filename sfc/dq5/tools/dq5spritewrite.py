@@ -229,9 +229,15 @@ def dump_image(rom, s, path):
     return rec
 
 
+def map_reserve(objects, bc, bd):
+    """1F:D4AF 가 맵 bc/bd 에 더 올리는 OBJ 타일 수. 표 순서로 첫 맞는 항목 하나만 올리고 돌아간다(1F:D4F6 → D508)."""
+    return next((o['reserve'] for o in objects if o['bc'] == bc and o['bd'] & 0x7F in (bd, 0x7F)), 0)
+
+
 def vram_lists(rom):
-    """[(맵 이름들, 맵 OBJ 타일 수, 밤인지, 놓이는 인물의 그림 번호들)]. 기본·대체 목록마다 낮·밤 한 줄씩.
-    맵 OBJ 타일(1F:D59A)은 그 목록을 쓰는 맵 가운데 가장 큰 것. 어느 맵도 가리키지 않는 숨은 목록은 뺀다."""
+    """[(맵 이름들, 맵 OBJ 타일 수, 밤인지, 놓이는 인물의 (그림 번호, 누웠는지)들)]. 기본·대체 목록마다 낮·밤 한 줄씩.
+    맵 OBJ 타일은 그 목록을 쓰는 맵 가운데 가장 큰 것. 어느 맵도 가리키지 않는 숨은 목록은 뺀다.
+    누운 인물(엔트리 기타 bit7)은 같은 세트라도 돌린 타일을 따로 올리므로 따로 센다."""
     maps = {}
     for a, name in N.all_lists(rom):
         if NAMED_LIST.fullmatch(name):
@@ -243,46 +249,61 @@ def vram_lists(rom):
     objects = S.map_objects(rom)
     out = []
     for a, where in sorted(maps.items()):
-        reserve = max(sum(o['reserve'] for o in objects if o['bc'] == bc and o['bd'] & 0x7F in (bd, 0x7F))
-                      for bc, bd in where)
+        reserve = max(map_reserve(objects, bc, bd) for bc, bd in where)
         entries = N.list_entries(rom, a)
         for night in (False, True):
-            gfx = {f['gfx'] for e, _ in entries if (f := N.parse(rom, e, night))}
-            if gfx:
-                out.append((' '.join(f'{bc:02X}/{bd:02X}' for bc, bd in sorted(where)) + f' 목록 {cpu(a)}', reserve, night, gfx))
+            people = {(f['gfx'], bool(f['misc'] & 0x80)) for e, _ in entries if (f := N.parse(rom, e, night))}
+            if people:
+                out.append((' '.join(f'{bc:02X}/{bd:02X}' for bc, bd in sorted(where)) + f' 목록 {cpu(a)}', reserve, night,
+                            people))
     return out
 
 
 def vram_use(lists, set_of, tiles_of):
     """목록마다 맵을 다 놓은 뒤의 7E:1995(다음 OBJ 타일). set_of(그림) → 세트, tiles_of(세트) → 타일 수.
-    그림 9A 는 7E:21B3 bit3 에 따라 그림 97 이나 2F 의 세트를 쓰므로(1F:CF32) 둘 가운데 큰 쪽을 센다."""
+    (세트, 누웠는지)마다 한 번 센다. 그림 9A 는 7E:21B3 bit3 에 따라 그림 97 이나 2F 의 세트를 쓰므로(1F:CF32)
+    둘 가운데 큰 쪽을 센다."""
     out = []
-    for maps, reserve, night, gfx in lists:
+    for maps, reserve, night, people in lists:
         total = []
-        for wife in ((0x97, 0x2F) if 0x9A in gfx else (None,)):
-            sets = {set_of(wife if g == 0x9A else g) for g in gfx}
-            total.append(sum(tiles_of(s) for s in sets if s is not None))
+        for wife in ((0x97, 0x2F) if any(g == 0x9A for g, _ in people) else (None,)):
+            sets = {(set_of(wife if g == 0x9A else g), lying) for g, lying in people}
+            total.append(sum(tiles_of(s) for s, _ in sets if s is not None))
         out.append(PARTY_TILES + reserve + max(total))
     return out
 
 
-def vram_rows(rom, sets, final):
+def vram_rows(rom, sets, final, lists=None):
     """[(목록 줄, 원래 7E:1995, sets·final(그림 → 세트)로 바꾼 뒤)]."""
-    lists = vram_lists(rom)
-
-    def tiles_of(s, mine):
-        if mine and s in sets:
-            return len(sets[s][1])
-        rec = S.set_record(rom, s)
-        return rec['tiles'] if rec is not None else 0
-    before = vram_use(lists, lambda g: S.gfx_set(rom, g) if g < S.GFX_COUNT else None, lambda s: tiles_of(s, False))
-    after = vram_use(lists, lambda g: final.get(g), lambda s: tiles_of(s, True))
+    lists = vram_lists(rom) if lists is None else lists
+    before = vram_use(lists, lambda g: S.gfx_set(rom, g) if g < S.GFX_COUNT else None, lambda s: set_tiles(rom, sets, s, False))
+    after = vram_use(lists, lambda g: final.get(g), lambda s: set_tiles(rom, sets, s, True))
     return list(zip(lists, before, after))
 
 
+def set_tiles(rom, sets, s, mine):
+    """세트 s 의 타일 수. mine 이면 문서가 바꾼 세트는 바꾼 뒤의 수."""
+    if mine and s in sets:
+        return len(sets[s][1])
+    rec = S.set_record(rom, s)
+    return rec['tiles'] if rec is not None else 0
+
+
 def vram_check(rom, sets, final):
-    """바꾼 뒤 512타일을 넘는 목록이 원래보다 늘었으면 거부한다. 원래부터 넘는 목록은 이 문서 탓이 아니므로 둔다."""
-    rows = vram_rows(rom, sets, final)
+    """바꾼 뒤 512타일을 넘는 목록이 원래보다 늘었으면 거부한다. 원래부터 넘는 목록은 이 문서 탓이 아니므로 둔다.
+    셈에 드는 목록에 한 번도 나오지 않는 그림은 장면 슬롯(04:FB1C·01:BA95·01:87BA·2B:83F5·2B:8402)·일행 슬롯
+    (00:E3DA·E43B, 00:E3F8 갈래)·필드로만 올라가 이 셈이 보지 못하므로, 원래 세트의 타일 수를 넘지 못하게 한다."""
+    lists = vram_lists(rom)
+    listed = {g for *_, people in lists for g, _ in people}
+    if 0x9A in listed:
+        listed |= {0x97, 0x2F}
+    for g, s in sorted(final.items()):
+        if g in listed or (old := S.set_record(rom, S.gfx_set(rom, g))) is None:
+            continue
+        if (count := set_tiles(rom, sets, s, True)) > old['tiles']:
+            raise ValueError(f'그림 {g:02X} → 세트 {s:02X} 타일 {count}개가 원래 세트의 {old["tiles"]}개를 넘음. 이 그림은 '
+                             '인물 목록에 없어 장면·일행 슬롯·필드로만 올라가므로 맵마다 OBJ VRAM 을 셀 수 없음')
+    rows = vram_rows(rom, sets, final, lists)
     over = [(row, b, n) for row, b, n in rows if n > OBJ_TILES and n > b]
     if over:
         shown = ', '.join(f'{row[0]} {"밤" if row[2] else "낮"} {n:03X}(원래 {b:03X})' for row, b, n in over[:6])
@@ -514,10 +535,13 @@ def vram_report(rom, doc=None, base=Path('.'), top=10, grown=False):
     sets, mapping = plan(rom, doc, base, grown, vram=False) if doc is not None else ({}, {})
     final = {g: mapping.get(g, S.gfx_set(rom, g)) for g in range(S.GFX_COUNT)}
     rows = sorted(vram_rows(rom, sets, final), key=lambda r: (-r[2], -r[1], r[0][0]))
-    for (maps, reserve, night, gfx), before, after in rows[:top]:
+    for (maps, reserve, night, people), before, after in rows[:top]:
         change = f' → {after:03X}' if after != before else ''
-        print(f'{maps} {"밤" if night else "낮"}: {before:03X}{change}, 남는 타일 {OBJ_TILES - after}'
-              f'(맵 OBJ {reserve}, 그림 {" ".join(f"{g:02X}" for g in sorted(gfx))})')
+        shown = ' '.join(f'{g:02X}{"(누움)" if lying else ""}' for g, lying in sorted(people))
+        print(f'{maps} {"밤" if night else "낮"}: {before:03X}{change}, 남는 타일 {OBJ_TILES - after}(맵 OBJ {reserve}, 그림 {shown})')
+    if not rows:
+        print('목록 0줄')
+        return rows
     over = [r for r in rows if r[2] > OBJ_TILES]
     print(f'목록 {len(rows)}줄, 가장 큰 7E:1995 {rows[0][2]:03X}({rows[0][0][0]}), {OBJ_TILES:03X} 을 넘는 줄 {len(over)}개'
           + (f'(그 가운데 원래보다 는 줄 {sum(r[2] > r[1] for r in over)}개)' if over else ''))

@@ -1,8 +1,10 @@
 """인물 스프라이트 쓰기: 타일·반전 합치기, 런 길이 압축과 뱅크 넘김, 그림 배치, 입력 검사."""
+import io
 import random
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch as mock
 
@@ -13,8 +15,10 @@ import dq5sprite as S  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
 from dq5spritewrite import (  # noqa: E402
     FORMAT, OBJ_TILES, PARTY_TILES, apply, cell_tiles, commands, decoded, deduplicate, grow_table, packed, patch, place, plan,
-    tile_bytes, vram_use,
+    map_reserve, tile_bytes, vram_report, vram_rows, vram_use,
 )
+
+ROM = Path(__file__).resolve().parents[4] / 'rom' / 'dq5.sfc'
 
 
 def rom_with(pieces, size=0x200000):
@@ -291,35 +295,84 @@ class PlanTests(unittest.TestCase):
 
     def test_growth_checks_obj_vram(self):
         # busy.png 는 세트 00(타일 3개)보다 타일이 많다. 그림 00 을 놓는 목록의 OBJ VRAM 이 512 를 넘을 때만 거부한다.
+        self.lists = [('01/00 목록 05:8000', 0, False, {(0, False)})]
         grown = len(self.run_plan(sets=[{'set': '00', 'image': 'busy.png'}])[0][0][1])
         self.assertGreater(grown, 3)
         full = OBJ_TILES - PARTY_TILES - 3
-        self.lists = [('01/00 목록 05:8000', full - 4, False, {1})]
+        self.lists = [('01/00 목록 05:8000', full - grown + 3, False, {(0, False)})]
         self.run_plan(sets=[{'set': '00', 'image': 'busy.png'}])
-        self.lists = [('01/00 목록 05:8000', full - grown + 3, False, {0})]
-        self.run_plan(sets=[{'set': '00', 'image': 'busy.png'}])
-        self.lists = [('01/00 목록 05:8000', full - grown + 4, True, {0, 1})]
+        self.lists = [('01/00 목록 05:8000', full - grown + 4, True, {(0, False), (1, False)})]
         with self.assertRaises(ValueError):
             self.run_plan(sets=[{'set': '00', 'image': 'busy.png'}])
-        # 그림 번호를 옮겨 그 목록에서 세트가 바뀌어도 같은 셈이다.
-        self.lists = [('01/00 목록 05:8000', full - grown + 4, False, {1})]
+        # 누운 인물은 같은 세트라도 따로 올린다.
+        self.lists = [('01/00 목록 05:8000', full - 2 * grown + 3, False, {(0, False), (0, True)})]
+        self.run_plan(sets=[{'set': '00', 'image': 'busy.png'}])
+        self.lists = [('01/00 목록 05:8000', full - 2 * grown + 4, False, {(0, False), (0, True)})]
+        with self.assertRaises(ValueError):
+            self.run_plan(sets=[{'set': '00', 'image': 'busy.png'}])
+        # 그림 번호를 옮겨 그 목록에서 세트가 바뀌어도 같은 셈이다(그림 01 은 원래 세트 80, 타일 4개).
+        self.lists = [('01/00 목록 05:8000', full - grown + 4, False, {(0, False), (1, False)})]
         with self.assertRaises(ValueError):
             self.run_plan(new_sets=[{'set': '70', 'image': 'busy.png', 'palette': 0}], gfx=[{'gfx': '01', 'set': '70'}])
 
+    def test_unlisted_gfx_keeps_original_limit(self):
+        # 목록에 없는 그림(장면·일행 슬롯·필드로만 올라감)은 원래 세트의 타일 수까지만 받는다.
+        self.lists = [('01/00 목록 05:8000', 0, False, {(1, False)})]
+        with self.assertRaises(ValueError):
+            self.run_plan(sets=[{'set': '00', 'image': 'busy.png'}])
+        self.run_plan(sets=[{'set': '00', 'image': 'flat.png'}])
+        with self.assertRaises(ValueError):
+            self.run_plan(new_sets=[{'set': '70', 'image': 'busy.png', 'palette': 0}], gfx=[{'gfx': '00', 'set': '70'}])
+        # 그림 01 은 목록에 있어 예산 안이면 늘려도 된다.
+        self.run_plan(new_sets=[{'set': '70', 'image': 'busy.png', 'palette': 0}], gfx=[{'gfx': '01', 'set': '70'}])
+        # 그림 9A 가 목록에 있으면 그것이 올리는 97·2F 도 목록에 있는 것으로 본다.
+        with mock('dq5spritewrite.S.GFX_COUNT', 0x9B), \
+                mock('dq5spritewrite.S.gfx_set', side_effect=lambda rom, g: 0x80 if g == 1 else 0):
+            self.lists = [('01/00 목록 05:8000', 0, False, {(g, False) for g in range(0x9B) if g not in (0x97, 0x2F, 0x9A)})]
+            with self.assertRaises(ValueError):
+                self.run_plan(new_sets=[{'set': '70', 'image': 'busy.png', 'palette': 0}], gfx=[{'gfx': '97', 'set': '70'}])
+            self.lists[0][3].add((0x9A, True))
+            self.run_plan(new_sets=[{'set': '70', 'image': 'busy.png', 'palette': 0}], gfx=[{'gfx': '97', 'set': '70'}])
+
     def test_original_overflow_is_not_blamed(self):
         # 원래부터 512 를 넘는 목록은 늘리지 않는 한 거부하지 않는다.
-        self.lists = [('01/00 목록 05:8000', OBJ_TILES, False, {0})]
+        self.lists = [('01/00 목록 05:8000', OBJ_TILES, False, {(0, False)})]
         self.run_plan(sets=[{'set': '00', 'image': 'flat.png'}])
         with self.assertRaises(ValueError):
             self.run_plan(sets=[{'set': '00', 'image': 'busy.png'}])
+
+    def test_report_without_lists(self):
+        with redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(vram_report(None), [])
+        self.assertIn('목록 0줄', out.getvalue())
 
 
 class VramUseTests(unittest.TestCase):
     def test_counts_each_set_once_and_wife_branch(self):
         sets = {0x00: 0x10, 0x01: 0x10, 0x02: 0x20, 0x97: 0x30, 0x2F: 0x31}
         tiles = {0x10: 30, 0x20: 7, 0x30: 26, 0x31: 35}
-        lists = [('a', 0, False, {0x00, 0x01, 0x02}), ('b', 5, True, {0x00, 0x9A}), ('c', 0, False, set())]
-        self.assertEqual(vram_use(lists, sets.get, tiles.get), [PARTY_TILES + 37, PARTY_TILES + 5 + 30 + 35, PARTY_TILES])
+        lists = [('a', 0, False, {(0x00, False), (0x01, False), (0x02, False)}),
+                 ('b', 5, True, {(0x00, False), (0x9A, False)}),
+                 ('c', 0, False, {(0x00, False), (0x01, True), (0x00, True)}), ('d', 0, False, set())]
+        self.assertEqual(vram_use(lists, sets.get, tiles.get),
+                         [PARTY_TILES + 37, PARTY_TILES + 5 + 30 + 35, PARTY_TILES + 60, PARTY_TILES])
+
+    def test_map_reserve_takes_first_match(self):
+        objects = [{'bc': 0x53, 'bd': 0x82, 'reserve': 10}, {'bc': 0x53, 'bd': 0xFF, 'reserve': 20},
+                   {'bc': 0x54, 'bd': 0x7F, 'reserve': 7}]
+        self.assertEqual([map_reserve(objects, *m) for m in ((0x53, 0x02), (0x53, 0x05), (0x54, 0x09), (0x55, 0))],
+                         [10, 20, 7, 0])
+
+
+@unittest.skipUnless(ROM.exists(), '롬이 없음(rom/dq5.sfc)')
+class RomVramTests(unittest.TestCase):
+    def test_original_rom_lists(self):
+        rom = Rom(ROM.read_bytes())
+        rows = vram_rows(rom, {}, {g: S.gfx_set(rom, g) for g in range(S.GFX_COUNT)})
+        self.assertEqual(len(rows), 818)
+        self.assertEqual(max(after for *_, after in rows), 0x1FF)
+        self.assertEqual(sum(after > OBJ_TILES for *_, after in rows), 0)
+        self.assertTrue(all(before == after for _, before, after in rows))
 
 
 if __name__ == '__main__':
