@@ -26,6 +26,10 @@ TALKED_KIRYL = (0x06, 0x08)    # 7E:2196 bit3
 READY = (0x07, 0x04)           # 7E:2197 bit2  셋 다 이야기함
 # 맵을 옮길 때 지워지는 칸(7E:21A3). 벽 앞의 물음에 대답했음: 인물 스크립트가 대화가 끝나기를 기다린다
 ANSWERED = (0x13, 0x01)
+# 텐페 제물 사건. DQ5 롬에서 켜는 곳도 끄는 곳도 보는 곳도 없는 비트(dq5flags.py)
+TEMPE_HEARD = (0x78, 0x01)     # 7E:2208 bit0  촌장의 부탁에 「예」(FC $6281&10)
+TEMPE_GONE = (0x78, 0x02)      # 7E:2208 bit1  신부에게 제물 대신 가겠다고 함(FC $6281&08)
+TEMPE_ALTAR = (0x78, 0x04)     # 7E:2208 bit2  바구니에 실려 제단 앞으로 옮겨짐. 다음 단계의 보스 전투가 볼 flag
 
 THRONE = '3D/01'               # FC 01/01 산트하임 왕좌의 방
 START_CELL = (0x09 * 2, 0x08 * 2 + 1)   # FC (09,08): 왕 앞
@@ -35,6 +39,16 @@ KING_CELL = (0x09 * 2, 0x07 * 2 + 1)    # FC (09,07), 옮긴 인물 자리(dq4np
 KING_SRC, KING_SCRIPT = {"list": "05:C6C3", "index": 0}, "05:C6CA"       # 21/09
 ASKER_SRC, ASKER_SCRIPT = {"list": "05:C433", "index": 7}, "05:C4BA"     # 21/00
 OPENER_SRC, OPENER_SCRIPT = {"list": "05:89A3", "index": 7}, "05:8A07"   # 01/05
+PRIEST_SRC, PRIEST_SCRIPT = {"list": "05:C433", "index": 0}, "05:C43A"   # 21/00
+
+# 텐페(FC 0E/00). 촌장(대화 02C)과 신부(대화 029). 신부는 처음에는 옮긴 교회 그대로이고, 촌장에게 「예」 한 뒤에는
+# 묻는 대화로 바뀐다. 「예」 하면 신부 자리의 스크립트가 바구니 이벤트를 걸어 제단 앞으로 옮긴다(FC 1C 이벤트 01)
+TEMPE = '3D/03'
+CHIEF = (0x15 * 2, 0x25 * 2 + 1)
+PRIEST = (0x0C * 2, 0x18 * 2 + 1)
+FC_CHIEF, FC_PRIEST = 0x02C, 0x029
+ALTAR_CELL = (0x16 * 2, 0x0F * 2 + 1)      # 제단(FC (15~18,0D)) 두 칸 아래
+NIGHT = 0x00F8
 
 # 왕의 방(FC 01/02): FC 는 (0D,04)에서 오른쪽을 보고 しらべる 하면 판자로 막은 벽 (0E,04)를 걷어찬다(1E:$B8AD).
 # DQ5 의 しらべる 는 앞의 인물을 부르지 않아(실측), 그 칸에서 오른쪽을 보면 보이지 않는 인물이 묻는다
@@ -295,13 +309,33 @@ def _event_bytes(tokens):
     return b''.join(bytes((0x60, t[1] & 0xFF, t[1] >> 8)) if isinstance(t, tuple) else t for t in tokens)
 
 
+def altar_event(first_message):
+    """바구니 이벤트 토큰: 신부·마을 사람의 배웅 → 서술 → 밤의 텐페 제단 앞으로(FC 1C 이벤트 01)."""
+    m = message_ids(first_message)
+    g, n = (int(v, 16) for v in TEMPE.split('/'))
+    return [('msg', m['basket']), bytes((0x90, g, n, *ALTAR_CELL, 0x01, 0x80, 0xFF))]
+
+
+def _night():
+    """필드 시간을 밤으로(M 8). 맵을 다시 불러올 때 밤 목록·밤 색이 된다."""
+    return bytes((0xA9, NIGHT & 0xFF, 0x8F)) + _al(TIME_AT) + bytes((0xA9, NIGHT >> 8, 0x8F)) + _al(TIME_AT + 1)
+
+
 def tail_native(first_message, data=None):
-    """native 뒤에 붙는 합류 이벤트와 걸음 훅. 메시지 번호가 이벤트 바이트에 들어가 native 와 따로 둔다."""
+    """native 뒤에 붙는 합류·바구니 이벤트와 걸음 훅. 메시지 번호가 이벤트 바이트에 들어가 native 와 따로 둔다."""
     code, at = native(data)
     base = CODE_AT + len(code)
-    event = _event_bytes(join_event(first_message, at))
-    step = _step(base)
-    return event + step, {'join_event': base, 'step': base + len(event)}
+    out = bytearray()
+    tail = {}
+
+    def put(name, b):
+        tail[name] = base + len(out)
+        out.extend(b)
+    put('join_event', _event_bytes(join_event(first_message, at)))
+    put('step', _step(tail['join_event']))
+    put('altar_event', _event_bytes(altar_event(first_message)))
+    put('altar_go', _event_call(tail['altar_event'], _night()))
+    return bytes(out), tail
 
 
 def _speaker_pages(name, *pages):
@@ -358,6 +392,26 @@ MESSAGES = {
     'king_ask': ch1.speak('왕', '어찌 그러느냐, 아리나?/아직도 밖에 나가고/싶다는 게냐?'),
     'king_yes': ch1.speak('왕', '안 된다, 안 돼!/어째서 너는 그리도/말괄량이란/말이냐……'),
     'king_no': ch1.speak('왕', '오오! 알아들었구나!/그래야 내 귀여운/딸이지./자, 방에서 쉬거라.'),
+    # 텐페 촌장 FC 07C2 → 예 07C3 / 아니요 07C4(NDS 3534~3539), 들은 뒤 NDS 3541·3542
+    'chief_ask': ch1.say('마을을 위해 딸 니나를/제물로 바쳐야만/합니다.',
+                         '오오! 어디 괴물을/물리쳐 줄 만한/강한 분이/안 계실까?'),
+    'chief_yes': ch1.say('아니, 당신들이!?', '보아하니 그리 강해/보이지는……/아니, 지금은 지푸라기라도/잡고 싶은 심정!',
+                         '그게 정말이라면/꼭 신부님을/만나 주십시오!'),
+    'chief_no': ch1.say('그렇겠지요……'),
+    'chief_after': ch1.say('괴물 퇴치를/맡아 주시다니/참으로 마음씨 고운/분들이시군요!',
+                           '자세한 것은 교회/신부님이 알고/계십니다.', '꼭 신부님을/만나 주십시오!'),
+    # 텐페 신부 FC 07C5 → 예 07C6 / 아니요 07C7(NDS 3548~3554), 대신 가기로 한 뒤 FC 0347(NDS 4006)
+    'priest_ask': ch1.say('뭐라, 괴물 퇴치를!?/하지만 괴물이/모습을 보이는 것은/제물을 바칠 때뿐……',
+                          '아니면 그대가/제물의 대역이/되어도 좋다고/말하는 겐가?'),
+    'priest_yes': ch1.say('오오, 그게 정말인가!?/참으로 고마운/일이로다!',
+                          '그럼 잠시/기다리시게./제물의 바구니가/곧 올 걸세.'),
+    'priest_no': ch1.say('그렇겠지./누구라도 제 목숨은/아까운 법.', '그건 그렇다 치고……'),
+    'priest_basket': ch1.say('자, 어서 저/바구니 안으로……'),
+    # 바구니 이벤트: NDS 4006·4012·4014, 끝 서술은 FC 1C 이벤트 01 의 자리 옮김을 말로
+    'basket': (ch1.speak('신부', '자, 어서 저/바구니 안으로……')[:-1] + [ch1.PAGE] +
+               ch1.speak('상인', '부디 몸조심하시게!')[:-1] + [ch1.PAGE] +
+               ch1.speak('남자', '이 은혜는 평생/잊지 않겠습니다!')[:-1] + [ch1.PAGE] +
+               ch1.narrate('아리나 일행을 태운/바구니는 마을 북쪽/제단으로 옮겨졌다.', '그리고 밤이 되었다……')),
 }
 
 
@@ -369,7 +423,7 @@ def texts(first):
     return {first + k: parts for k, parts in enumerate(MESSAGES.values())}
 
 
-TALKS = ('wall', 'gate', 'gate2', 'brey', 'kiryl', 'king', 'gate_back')
+TALKS = ('wall', 'gate', 'gate2', 'brey', 'kiryl', 'king', 'gate_back', 'chief', 'priest')
 
 
 def talk_numbers(first_talk):
@@ -387,7 +441,7 @@ def start_messages(first_message):
     m = message_ids(first_message)
     return {(CASTLE, FC_GATE, None): m['gate'], (CASTLE, FC_GATE2, None): m['gate2'],
             (BREY_AT[0], FC_BREY, None): m['brey'], (KIRYL_AT[0], FC_KIRYL, None): m['kiryl'],
-            (THRONE, FC_KING, False): m['king_ask']}
+            (THRONE, FC_KING, False): m['king_ask'], (TEMPE, FC_CHIEF, None): m['chief_ask']}
 
 
 def _flag_on(flag):
@@ -420,7 +474,21 @@ def talk_scripts(first_message):
         [msg('kiryl')] + _talked(TALKED_KIRYL),
         [msg('king_ask'), {"op": "if", "cond": {"code": "05"}, "then": msg('king_yes'), "else": msg('king_no')}],
         [msg('gate_back')],
+        [{"op": "if", "cond": _if_flag(TEMPE_HEARD, [])["cond"], "then": msg('chief_after'),
+          "else": [msg('chief_ask'), {"op": "if", "cond": {"code": "05"},
+                                      "then": [msg('chief_yes'), _flag_on(TEMPE_HEARD)], "else": msg('chief_no')}]}],
+        # 「예」 하면 신부 자리의 스크립트가 바구니 이벤트를 건다. 촌장에게 듣기 전과 「아니요」 뒤는 DQ5 교회
+        [{"op": "if", "cond": _if_flag(TEMPE_GONE, [])["cond"], "then": msg('priest_basket'),
+          "else": [{"op": "if", "cond": _if_flag(TEMPE_HEARD, [])["cond"],
+                    "then": [msg('priest_ask'), {"op": "if", "cond": {"code": "05"},
+                                                 "then": [msg('priest_yes'), _flag_on(TEMPE_GONE)],
+                                                 "else": [msg('priest_no'), CHURCH]}],
+                    "else": CHURCH}]}],
     ]
+
+
+# DQ5 교회 처리기(특수 대화 05, 06:DBDB 표). 대화 스크립트의 00 명령으로 부른다
+CHURCH = {"op": "call", "target": "E03E"}
 
 
 def _cmd(op, *args):
@@ -449,6 +517,10 @@ def scripts(first_message, native_points):
             {**_cmd('3F'), "label": "kick"}, call('open_wall'), call('kick'), _cmd('16')]},
         # 걷어찬 뒤 다시 들어오면 구멍을 연다
         {"address": OPENER_SCRIPT, "commands": [_cmd('28'), _cmd('52'), call('open_wall'), _cmd('16')]},
+        # 텐페 신부: 대신 가겠다고 하면 제단 깃발을 켜고 바구니 이벤트를 건다. 옮긴 뒤의 목록에는 이 스크립트가 없다
+        {"address": PRIEST_SCRIPT, "commands": [
+            _cmd('09', 0x80 | TEMPE_GONE[0], TEMPE_GONE[1]), _cmd('10', *TEMPE_ALTAR),
+            _cmd('37', *_al(tail_native(first_message)[1]['altar_go'])), _cmd('16')]},
     ]
 
 
@@ -482,6 +554,15 @@ def npc_lists(ported, first_talk):
     retalk(*BREY_AT, t['brey'])
     retalk(*KIRYL_AT, t['kiryl'])
     retalk(THRONE, KING_CELL, t['king'], 'day')
+    retalk(TEMPE, CHIEF, t['chief'])
+    retalk(TEMPE, PRIEST, t['priest'])
+    # 제단으로 옮긴 뒤의 신부는 스크립트 없이 대화만. 그 앞의 신부는 대신 감 flag 를 기다려 바구니 이벤트를 거는
+    # 스크립트를 빌린다
+    altar = list(lists[TEMPE]["entries"])
+    # 빌린 원본의 이동 간격이 0 이면 스크립트가 돌지 않아(실측) 1 이상으로 둔다
+    lists[TEMPE]["entries"] = [
+        {**e, "from": PRIEST_SRC, "fields": {**e["fields"], "interval": max(1, e["fields"].get("interval", 1))}}
+        if (e["fields"]["x"], e["fields"]["y"]) == PRIEST else e for e in altar]
     opening = []
     for e in lists[THRONE]["entries"]:
         f = e["fields"]
@@ -507,12 +588,14 @@ def npc_lists(ported, first_talk):
     on = lambda mp, flag, name: {"map": mp, "flag": flag[0], "when": "on", "mask": flag[1], "list": f"new:{name}"}  # noqa: E731
     over = [on(THRONE, OPENING, 'ch2_opening'), on(THRONE, JOINED, 'ch2_throne_joined'),
             on(CASTLE, JOINED, 'ch2_castle_joined'),
-            on(BEDROOM, KICKED, 'ch2_kicked'), on(BEDROOM, READY, 'ch2_ready')]
+            on(BEDROOM, KICKED, 'ch2_kicked'), on(BEDROOM, READY, 'ch2_ready'),
+            on(TEMPE, TEMPE_ALTAR, 'ch2_tempe_altar')]
     new = [{"name": "ch2_opening", "entries": opening},
            {"name": "ch2_throne_joined", "entries": without(*BREY_AT)},
            {"name": "ch2_castle_joined", "entries": [stand_aside(e) for e in without(*KIRYL_AT)]},
            {"name": "ch2_kicked", "entries": clear + _invisible(OPENER_SRC, t['wall'])},
-           {"name": "ch2_ready", "entries": clear + _invisible(ASKER_SRC, t['wall'])}]
+           {"name": "ch2_ready", "entries": clear + _invisible(ASKER_SRC, t['wall'])},
+           {"name": "ch2_tempe_altar", "entries": altar}]
     return ported, new, over
 
 

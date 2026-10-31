@@ -378,7 +378,8 @@ def message_flow(first_message):
     talks = ([s["body"] for s in dq4prologue.talk_doc()["scripts"]] + dq4ch1event.talk_scripts(first_message) +
              dq4ch2event.talk_scripts(chapter2_message(first_message)))
     _, at = dq4prologue.native()
-    events = [dq4prologue.end_event(at), dq4ch2event.join_event(chapter2_message(first_message), dq4ch2event.native()[1])]
+    events = [dq4prologue.end_event(at), dq4ch2event.join_event(chapter2_message(first_message), dq4ch2event.native()[1]),
+              dq4ch2event.altar_event(chapter2_message(first_message))]
     return {"talks": talks, "scripts": [s["commands"] for s in scripts], "events": events}
 
 
