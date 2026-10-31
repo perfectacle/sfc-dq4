@@ -293,6 +293,26 @@ class TextWriteTests(unittest.TestCase):
         broken[lorom(0x598000) + 3:lorom(0x598000) + len(index_bytes)] = bytes(len(index_bytes) - 3)
         with self.assertRaisesRegex(ValueError, '따로 둔 보행 색인 표'):
             base_package(bytes(broken))
+        # 색인 뒤에 앞으로 가는 다른 자료가 이어져도 앞 묶음의 끝과 맞지 않는 항목에서 잘린다
+        trailing = bytearray(base)
+        last = int.from_bytes(index_bytes[-3:], 'little')
+        tail = lorom(0x598000) + len(index_bytes)
+        for k in range(4):
+            trailing[tail + 3 * k:tail + 3 * k + 3] = (last + 0x400 * (k + 1)).to_bytes(3, 'little')
+        self.assertEqual(index_table(bytes(trailing), 0x60), (0x598000, MESSAGES + 32))
+        self.assertEqual(base_package(bytes(trailing))[0], grown)
+        font_at = moved + table - head
+        # 글자 묶음 표 뒤에 0 인 항목이 없이 뱅크 끝까지 이어지면 표 밖까지 읽은 것으로 보고 거부한다
+        unended = bytearray(base)
+        bank_end = lorom(0x5A8000) + 0x8000
+        unended[font_at + len(groups):bank_end] = b'\x01' * (bank_end - font_at - len(groups))
+        with self.assertRaisesRegex(ValueError, '끝\\(0 인 항목\\)'):
+            base_package(bytes(unended))
+        # 표의 글자 수(3DB + 8)보다 큰 글자(3DB + 15)를 메시지가 쓰면 거부한다
+        short = bytearray(base)
+        short[font_at + 5] = 0x08
+        with self.assertRaisesRegex(ValueError, '글자 묶음 표의 글자 수'):
+            base_package(bytes(short))
 
     def test_malformed_tree_does_not_loop(self):
         manifest = compile_messages(self.data, [[0, 0x1001] for _ in range(MESSAGES)])

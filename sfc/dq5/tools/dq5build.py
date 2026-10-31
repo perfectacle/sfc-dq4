@@ -28,8 +28,9 @@ from dq5hangul import HEADER, checksum, expand  # noqa: E402
 FORMAT = 'dq5patch/1'
 BANK = 0x8000
 ORIGINAL_SIZE = 0x180000
-# 머리(7FB0~7FFF)는 빌더가 고친다. 패치 목록은 쓸 수 없다.
-HEADER_RANGE = (0x7FB0, 0x8000)
+# 머리(7FB0~7FDF, 이름·크기·체크섬)는 빌더가 고친다. 패치 목록은 쓸 수 없다. 뒤의 벡터(7FE0~7FFF)는 고정 롬이
+# 바꾸기도 하므로(DQ4 소리 이식의 IRQ 벡터) orig 를 단 쓰기로 받는다.
+HEADER_RANGE = (0x7FB0, 0x7FE0)
 # 뱅크 끝 0 의 첫 바이트를 읽는 곳이 있다(2B:C2C7 이 2F:FF86 을 소리 자료로 보냄). 그만큼 띄우고 16바이트로 맞춘다.
 FREE_MARGIN = 16
 FREE_MIN = 32
@@ -128,7 +129,7 @@ def check(original, lists, mb):
             if end > limit:
                 raise PatchError(f'{label}: {cpu(off)} 이 롬 크기({mb or 1.5}MB)에서 CPU 로 보이는 자리를 넘음')
             if off < HEADER_RANGE[1] and end > HEADER_RANGE[0]:
-                raise PatchError(f'{label}: 머리 00:FFB0~FFFF 는 빌더가 쓴다')
+                raise PatchError(f'{label}: 머리 00:FFB0~FFDF 는 빌더가 쓴다')
             if off < ORIGINAL_SIZE:
                 if end > ORIGINAL_SIZE:
                     raise PatchError(f'{label}: 원래 롬과 늘린 자리에 걸침')

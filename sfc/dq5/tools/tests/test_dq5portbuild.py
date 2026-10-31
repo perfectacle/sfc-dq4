@@ -1,13 +1,15 @@
 """통합 포팅 빌드의 빈 자리·배치·고정 패치 예약을 원본 롬 없이 검사한다."""
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from dq5build import PatchError, build  # noqa: E402
 from dq5hangul import expand  # noqa: E402
 from dq5portbuild import (  # noqa: E402
-    BANK, AllocationError, Piece, Space, allocate, fit, fixed_mask, mask_ranges, occupied, split_banks, summary,
-    window_range,
+    BANK, AllocationError, Piece, Space, allocate, fit, fixed_mask, manifest_from_mask, mask_ranges, occupied,
+    split_banks, summary, window_range,
 )
 
 LOW, HIGH = window_range('low'), window_range('high')
@@ -155,6 +157,22 @@ class FixedTests(unittest.TestCase):
         self.assertIn((0x1C0000, 0x200000), occ)                            # keep 이 없으면 모두 0 인 37 은 빈 뱅크
         with self.assertRaises(ValueError):
             fixed_mask(self.original, rom[:0x180000 + 5])
+
+    def test_vector_changed_by_fixed_rom_is_written(self):
+        # 고정 롬이 IRQ 벡터(00:FFEE)를 바꾸면 그 바이트도 쓴다. 빠지면 결과 롬이 원래 벡터로 돌아가 켜지지 않는다
+        rom = bytearray(self.title_rom())
+        rom[0x7FEE:0x7FF0] = b'\x01\x80'
+        rom[0x7FC0] ^= 0xFF                                                 # 이름·크기·체크섬은 빌더 몫이라 빼고
+        mask, _, _ = fixed_mask(self.original, bytes(rom))
+        self.assertEqual(mask_ranges(mask[:0x8000]), [(0x7FEE, 0x7FF0)])
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = manifest_from_mask('fixed', self.original, bytes(rom), mask, 4, Path(tmp))
+        vector = [w for w in doc['writes'] if w['at'] == '00:FFEE']
+        self.assertEqual(vector, [{'at': '00:FFEE', 'orig': '00 00', 'hex': '01 80'}])
+        out, _ = build(self.original, [('fixed', 4, [(0x7FEE, b'\x00\x80', b'\x00\x00', 'fixed')])], 4)
+        self.assertEqual(out[0x7FEE:0x7FF0], b'\x00\x80')
+        with self.assertRaisesRegex(PatchError, '머리'):
+            build(self.original, [('fixed', 4, [(0x7FD0, b'\x01', b'\x00', 'fixed')])], 4)
 
 
 if __name__ == '__main__':
