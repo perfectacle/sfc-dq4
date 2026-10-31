@@ -193,13 +193,16 @@ def main():
             again = []
             for m in maps:
                 tag = f'again-{m.replace("/", "")}'
-                for row in measure(base, *run(path.resolve(), tag, f'{m},{cells[m][0]},{cells[m][1]}', out,
+                # entry_cells 는 (x, y[, 층]). 층을 빼면 dq5warp.lua 가 엉뚱한 층으로 내려놓을 수 있다.
+                for row in measure(base, *run(path.resolve(), tag, ','.join([m, *map(str, cells[m])]), out,
                                                args.state.resolve(), Path(args.mesence), lib)):
                     bc, bd = (int(v, 16) for v in row['map'].split('/'))
                     again.append((m, row['map'], row['v1995'], predicted(base, {}, {}, bc, bd, row['flags'], row['night'])))
             results['again'] = [list(r) for r in again]
             checks['다시 잰 맵의 7E:1995 와 셈'] = all(m == got and v == want for m, got, v, want in again)
-            print('다시 잰 맵: ' + ', '.join(f'{m} 잼 {v:03X} 셈 {want:03X}' for m, _, v, want in again[1::2] or again))
+            for m in maps:
+                rows = [r for r in again if r[0] == m]
+                print(f'다시 잰 맵 {m}: 덤프 {len(rows)}개 ' + ', '.join(f'{got} 잼 {v:03X} 셈 {want:03X}' for _, got, v, want in rows))
         (out / 'results.json').write_text(json.dumps({'results': results, 'checks': checks}, ensure_ascii=False, indent=1)
                                           + '\n', encoding='utf-8')
         for key, ok in checks.items():
