@@ -7,6 +7,8 @@ from unittest.mock import patch as mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dq5exitreloc import (
+    HIGH_NONE,
+    HIGH_NONE_ORIG,
     EXIT_INDEXED,
     EXIT_INIT,
     EXIT_SHORT,
@@ -80,6 +82,7 @@ def original_rom(doc):
     write(data, RECORD_LOW, b'\x12\xd8')
     write(data, RECORD_BANK, b'\x2a')
     write(data, HOOK_SITE, HOOK_ORIG)
+    write(data, HIGH_NONE, HIGH_NONE_ORIG)
     for site, at in zip(HIGH_SITES, HIGH_ORIGINAL):
         write(data, site, bytes([0xAF, *at.to_bytes(3, 'little'), 0x8D, 0x3D, 0x18, 0xA2,
                                  *(at + 1 & 0xFFFF).to_bytes(2, 'little'), 0x8E, 0x3A, 0x18, 0xA9, 0x01]))
@@ -260,14 +263,16 @@ class RelocTests(unittest.TestCase):
         self.assertEqual(parse(moved, locate(moved), KNOWN | set(new)), doc)
         table = hook_lists(moved)
         self.assertEqual(sorted(table), sorted(k for k in KNOWN | set(new) if k[0] in (0x51, 0x54)))
-        # 스텁만 돌린다: 01:94C9 는 STA $183C / RTS, 01:9540(다른 그룹)은 $183D 에 EE 를 둔다.
+        # 스텁만 돌린다: 01:94C9 는 STA $183C / RTS, 01:962F 는 STZ $183D / RTS, 01:9540(다른 그룹)은 $183D 에 EE 를 둔다.
         data = bytearray(moved.d)
         write(data, 0x0194C9, bytes.fromhex('8d 3c 18 60'))
+        write(data, HIGH_NONE, bytes.fromhex('9c 3d 18 60'))
         write(data, 0x019540, bytes.fromhex('a9 ee 8d 3d 18 60'))
 
         def run(bc, bd):
             wram = bytearray(0x20000)
             wram[0xBC], wram[0xBD] = bc, bd
+            wram[0x183C], wram[0x183D] = 0x77, 0x77
             cpu = Cpu(bytes(data), wram)
             cpu.p, cpu.a = 0x20, bc
             cpu.jsr(HOOK_SITE, max_steps=2000)
@@ -279,8 +284,14 @@ class RelocTests(unittest.TestCase):
             self.assertEqual(run(*key), (start + 1, moved.u8(start)), key)
         self.assertEqual(run(0x51, 0x58)[1], 2)
         self.assertEqual(run(0x51, 0x59)[1], 0)                     # 표에 없는 51 맵은 개수 0
+        self.assertEqual(run(0x54, 0x60)[0] >> 16, 0x77)            # 원래 01:962F 와 같이 $183C 는 그대로
         self.assertEqual(run(0x55, 0x50)[1], 0xEE)                  # 다른 그룹은 원래 갈래로
         self.assertEqual(writes_for(moved, doc, at, new), ([], 0))
+        # 표에 없는 맵이 갈 01:962F 가 원래 꼴이 아니면 스텁을 두지 않는다
+        broken = bytearray(self.rom.d)
+        write(broken, HIGH_NONE, b'\xea')
+        with self.assertRaisesRegex(ValueError, '01:962F'):
+            writes_for(Rom(bytes(broken)), doc, at, new)
         with self.assertRaises(Exception):
             new_map('52/51')
         self.assertEqual(new_map('54/54'), (0x54, 0x54))

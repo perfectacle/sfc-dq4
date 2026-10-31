@@ -12,7 +12,7 @@
   그룹 51·54 의 새 맵: 01:94B4 는 51·54 를 $BD 마다 즉값으로 견주고 맞는 것이 없으면 앞 맵의 개수를 남긴다.
                     --new-map 51/58 처럼 알리면 그 맵마다 목록을 하나씩 high_triggers 끝에 붙이고, 01:9510(CMP #$51 /
                     BNE)을 JML 로 바꿔 --high-hook-at 의 스텁이 51·54 의 모든 맵을 [BC][BD][개수][레코드 16비트][뱅크] 표로
-                    고르게 한다. 표에 없는 51·54 맵은 개수 0(다른 그룹이 가는 01:962D 와 같음).
+                    고르게 한다. 표에 없는 51·54 맵은 다른 그룹이 끝나는 01:962F(STZ $183D) 로 가 개수 0.
 형식: sfc/dq5/docs/dq5-build-format.md 의 「실내 출구·영역 이동 표 옮기기」.
 
   python sfc/dq5/tools/dq5exitreloc.py rom/dq5.sfc dump -o work/exit-tables.json [--new-map GG/MM …]
@@ -55,6 +55,9 @@ HOOK_SITE = 0x019510
 HOOK_ORIG = bytes.fromhex('c9 51 d0 2c')
 HOOK_OTHER = 0x019540           # 51 이 아닐 때 원래 가던 곳(BRL 01:95C9, 54 와 나머지 그룹)
 HIGH_STORE = 0x0194C9           # STA $183C / PLP / PLB / RTS. 목록마다 A = 뱅크로 여기에 온다
+# 다른 그룹이 끝나는 01:962D(CMP #$00) 다음 명령. 표에 없는 51·54 맵은 여기로 가 $183C 를 건드리지 않는다
+HIGH_NONE = 0x01962F
+HIGH_NONE_ORIG = bytes.fromhex('9c 3d 18 28 ab 60')   # STZ $183D / PLP / PLB / RTS
 HOOK_GROUPS = {0x51: 8, 0x54: 4}  # 원본 맵 수(BD 50~). 그 뒤 번호가 새 맵
 HOOK_ROW = 6
 # 원래 표가 차지하던 자리. 표를 옮기면 비므로 다른 표를 넣어도 된다.
@@ -112,7 +115,7 @@ def hook_code(at, table=None):
     found = (b'\xbf' + long(table + 2) + b'\x8f' + long(0x183D)                       # 개수
              + bytes.fromhex('c2 20') + b'\xbf' + long(table + 3) + b'\x8f' + long(0x183A) + bytes.fromhex('e2 20')
              + b'\xbf' + long(table + 5) + b'\x5c' + long(HIGH_STORE))                 # A = 뱅크
-    none = bytes.fromhex('a9 00') + b'\x8f' + long(0x183D) + bytes.fromhex('a9 01') + b'\x5c' + long(HIGH_STORE)
+    none = b'\x5c' + long(HIGH_NONE)
     loop = (b'\xbf' + long(table) + bytes.fromhex('c9 ff f0') + bytes([28 + len(found) - 8])   # LDA 표,X / 끝이면 없음
             + bytes.fromhex('c5 bc d0 08')                                                    # 그룹이 다르면 다음
             + b'\xbf' + long(table + 1) + bytes.fromhex('c5 bd f0 08')                        # 맵이 같으면 찾음
@@ -454,6 +457,8 @@ def writes_for(rom, doc, at=None, new=()):
     if len(lists) > len(HIGH_ORIGINAL):
         if hook_at is None:
             raise ValueError('그룹 51·54 새 맵은 01:94B4 가 고르지 못하므로 --high-hook-at 이 필요함')
+        if read(rom, HIGH_NONE, len(HIGH_NONE_ORIG)) != HIGH_NONE_ORIG:
+            raise ValueError(f'{cpu(HIGH_NONE)}: 표에 없는 맵이 갈 STZ $183D / PLP / PLB / RTS 가 아님')
         rows = [(*map_key(m, 'high'), start, blob[0]) for maps, start, blob in zip(lists, high, blobs['high'])
                 for m in maps if map_key(m, 'high')[0] in HOOK_GROUPS]
         stub_blob = hook_code(hook_at) + hook_table(sorted(rows))
