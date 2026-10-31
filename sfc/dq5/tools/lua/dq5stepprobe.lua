@@ -1,12 +1,17 @@
 -- 걸음 루틴 받침 감시: 00:C656~C686(뱅크 80 거울도, 기본 루틴 C687 앞까지)의 실행 PC 마다 횟수와 처음 프레임, 그 범위의 읽기 횟수를 센다.
 -- STEPBODY(16진 24비트)를 주면 그 자리에 들어올 때마다 P·DB·D·S·A·$00·$C1·$C2 와 스택의 돌아갈 자리 둘
--- (JSL 이 쌓은 24비트, 그 위의 16비트)을 처음 8번까지 적는다. 결과는 SHOT_DIR/step.txt(60프레임마다 다시 씀).
+-- (JSL 이 쌓은 24비트, 그 위의 16비트)을 처음 8번까지 적는다. 메시지 루틴 24:8BAF 에 들어갈 때의 A(메시지 번호)도
+-- 모은다. 결과는 SHOT_DIR/step.txt(60프레임마다 다시 씀).
 -- 드라이버(LIBDIR/boot.lua, 보통 dq5warp.lua) 뒤에 얹는다. dq5stepcheck.py 가 부른다.
 package.path = os.getenv("LIBDIR") .. "/?.lua;" .. package.path
 local L = require("lib")
 local m = emu.memType.snesMemory
 local n, reads, execs, order, entries = 0, 0, {}, {}, {}
 local body = tonumber(os.getenv("STEPBODY") or "", 16)
+local msgs = {}
+emu.addMemoryCallback(function()
+  msgs[#msgs + 1] = string.format("%03X", emu.getState()["cpu.a"] & 0xFFFF)
+end, emu.callbackType.exec, 0x248BAF, 0x248BAF)
 
 for _, base in ipairs({0, 0x800000}) do
   emu.addMemoryCallback(function()
@@ -42,6 +47,7 @@ emu.addEventCallback(function()
     local o = {string.format("frames=%d reads=%d", n, reads)}
     for _, pc in ipairs(order) do o[#o + 1] = string.format("exec %06X n=%d first=f%d", pc, execs[pc].n, execs[pc].f) end
     for _, line in ipairs(entries) do o[#o + 1] = line end
+    o[#o + 1] = "msgs " .. (#msgs > 0 and table.concat(msgs, ",") or "-")
     L.write("step.txt", table.concat(o, "\n") .. "\n")
   end
 end, emu.eventType.endFrame)

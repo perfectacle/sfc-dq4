@@ -9,11 +9,15 @@
   색인(01:9430):    DB 를 색인 뱅크로 두고 abs 로 읽는다. 같은 DB 로 MMIO 곱셈($4202~)과 $183A~ 를 쓰므로 뱅크 00~3F.
   레코드(01:94A2):  실행기 00:CDEC·2A:F4B9·2A:FD11 이 레코드 뱅크를 DB 로 두고 WRAM($1954·$1EAB·$198E)을 abs 로
                     쓰므로 뱅크 00~3F. 고층 목록도 같다(01:94B4 의 즉값 16벌).
+  그룹 51·54 의 새 맵: 01:94B4 는 51·54 를 $BD 마다 즉값으로 견주고 맞는 것이 없으면 앞 맵의 개수를 남긴다.
+                    --new-map 51/58 처럼 알리면 그 맵마다 목록을 하나씩 high_triggers 끝에 붙이고, 01:9510(CMP #$51 /
+                    BNE)을 JML 로 바꿔 --high-hook-at 의 스텁이 51·54 의 모든 맵을 [BC][BD][개수][레코드 16비트][뱅크] 표로
+                    고르게 한다. 표에 없는 51·54 맵은 개수 0(다른 그룹이 가는 01:962D 와 같음).
 형식: sfc/dq5/docs/dq5-build-format.md 의 「실내 출구·영역 이동 표 옮기기」.
 
-  python sfc/dq5/tools/dq5exitreloc.py rom/dq5.sfc dump -o work/exit-tables.json
+  python sfc/dq5/tools/dq5exitreloc.py rom/dq5.sfc dump -o work/exit-tables.json [--new-map GG/MM …]
   python sfc/dq5/tools/dq5exitreloc.py rom/dq5.sfc patch work/exit-tables.json -o work/exit-tables.dq5patch.json \\
-      [--exits-at BB:AAAA] [--records-at BB:AAAA] [--index-at BB:AAAA] [--high-at BB:AAAA]
+      [--exits-at BB:AAAA] [--records-at BB:AAAA] [--index-at BB:AAAA] [--high-at BB:AAAA] [--high-hook-at BB:AAAA]
   python sfc/dq5/tools/dq5exitreloc.py rom/dq5.sfc check [work/exit-tables.json] [같은 자리 선택]
 """
 import argparse
@@ -26,6 +30,7 @@ from dq5build import BANK, ORIGINAL_SIZE, build, free_ranges, parse_at
 from dq5exitwrite import TRIGGER_FIELDS, decode_exit, decode_trigger, high_list, map_name
 from dq5map import Rom, lorom
 from dq5mapwrite import all_maps
+from w65816 import Cpu
 
 FORMAT = 'dq5exittables/1'
 EXIT_GROUPS = 54
@@ -45,6 +50,13 @@ HIGH_SITES = (0x0194BA, 0x0194D9, 0x0194EA, 0x0194FF, 0x01951A, 0x01952F, 0x0195
 HIGH_ORIGINAL = (0x019635, 0x019642, 0x019667, 0x019680, 0x01968D, 0x01969A, 0x0196A7, 0x0196B4,
                  0x0196CD, 0x0196DA, 0x0196E7, 0x0196F4, 0x019701, 0x019732, 0x01974B, 0x019764)
 ORIGINAL = {'exits': 0x2AED61, 'records': 0x2AD812, 'index': 0x2AEB0E, 'high': 0x019635}
+# 01:9510 CMP #$51 / BNE $9540. A = $BC, M 8비트·X 16비트(01:94B4 의 REP #$10). 50·52·53 은 이 앞에서 끝난다.
+HOOK_SITE = 0x019510
+HOOK_ORIG = bytes.fromhex('c9 51 d0 2c')
+HOOK_OTHER = 0x019540           # 51 이 아닐 때 원래 가던 곳(BRL 01:95C9, 54 와 나머지 그룹)
+HIGH_STORE = 0x0194C9           # STA $183C / PLP / PLB / RTS. 목록마다 A = 뱅크로 여기에 온다
+HOOK_GROUPS = {0x51: 8, 0x54: 4}  # 원본 맵 수(BD 50~). 그 뒤 번호가 새 맵
+HOOK_ROW = 6
 # 원래 표가 차지하던 자리. 표를 옮기면 비므로 다른 표를 넣어도 된다.
 POOLS = ((0x2AD812, 0x2AF224), (0x019635, 0x019771))
 EXIT_FIELDS = {'same-group': ('destination_map', 'exit'), 'other-group': ('destination_map', 'exit', 'group'),
@@ -74,12 +86,64 @@ def stub(table):
                   0xA9, table >> 16, 0x85, 0x86, 0x6B])
 
 
+def extra_high(bc, bd):
+    """원본 16목록 밖의 그룹 51·54 새 맵인가."""
+    return bc in HOOK_GROUPS and bd - HIGH_FIRST >= HOOK_GROUPS[bc]
+
+
 def high_maps(known):
-    lists = {}
+    """목록마다 그 목록을 쓰는 맵. 원래 16목록 뒤에 그룹 51·54 새 맵마다 목록 하나."""
+    lists, extra = {}, []
     for bc, bd in sorted(known):
-        if bc >= HIGH_FIRST:
+        if extra_high(bc, bd):
+            extra.append([map_name(bc, bd)])
+        elif bc >= HIGH_FIRST:
             lists.setdefault(high_list(bc, bd), []).append(map_name(bc, bd))
-    return [lists[at] for at in HIGH_ORIGINAL]
+    return [lists[at] for at in HIGH_ORIGINAL] + extra
+
+
+def hook_code(at, table=None):
+    """01:9510 에서 JML 로 오는 스텁. 바로 뒤에 표 [BC][BD][개수][레코드 16비트][뱅크]…[FF] 가 붙는다."""
+    def long(addr):
+        return addr.to_bytes(3, 'little')
+    if table is None:
+        table = at + len(hook_code(at, 0))
+    head = bytes.fromhex('c9 51 f0 08 c9 54 f0 04') + b'\x5c' + long(HOOK_OTHER) + bytes.fromhex('a2 00 00')
+    found = (b'\xbf' + long(table + 2) + b'\x8f' + long(0x183D)                       # 개수
+             + bytes.fromhex('c2 20') + b'\xbf' + long(table + 3) + b'\x8f' + long(0x183A) + bytes.fromhex('e2 20')
+             + b'\xbf' + long(table + 5) + b'\x5c' + long(HIGH_STORE))                 # A = 뱅크
+    none = bytes.fromhex('a9 00') + b'\x8f' + long(0x183D) + bytes.fromhex('a9 01') + b'\x5c' + long(HIGH_STORE)
+    loop = (b'\xbf' + long(table) + bytes.fromhex('c9 ff f0') + bytes([28 + len(found) - 8])   # LDA 표,X / 끝이면 없음
+            + bytes.fromhex('c5 bc d0 08')                                                    # 그룹이 다르면 다음
+            + b'\xbf' + long(table + 1) + bytes.fromhex('c5 bd f0 08')                        # 맵이 같으면 찾음
+            + bytes.fromhex('e8 e8 e8 e8 e8 e8 80') + bytes([0x100 - 28]))                     # INX ×6 / BRA
+    assert len(loop) == 28
+    return head + loop + found + none
+
+
+def hook_table(rows):
+    """rows: [(bc, bd, 목록 자리)] 와 목록 개수 바이트 → 표 바이트."""
+    return b''.join(bytes([bc, bd, count, *(at + 1 & 0xFFFF).to_bytes(2, 'little'), at >> 16])
+                    for bc, bd, at, count in rows) + b'\xff'
+
+
+def hook_lists(rom):
+    """01:9510 이 이 도구의 스텁으로 가면 {(bc, bd): 목록 자리}, 아니면 None."""
+    site = read(rom, HOOK_SITE, 4)
+    if site == HOOK_ORIG:
+        return None
+    if site[0] != 0x5C:
+        raise ValueError(f'{cpu(HOOK_SITE)}: 원래 명령도 이 도구의 JML 도 아님')
+    at = int.from_bytes(site[1:], 'little')
+    size = len(hook_code(at))
+    if read(rom, at, size) != hook_code(at):
+        raise ValueError(f'{cpu(at)}: 고층 목록 고르기 스텁 꼴이 아님')
+    out, row = {}, at + size
+    while (bc := read(rom, row, 1)[0]) != 0xFF:
+        bd, _, low, high, bank = read(rom, row + 1, 5)
+        out[bc, bd] = (bank << 16 | high << 8 | low) - 1
+        row += HOOK_ROW
+    return out
 
 
 def locate(rom):
@@ -175,7 +239,11 @@ def parse(rom, loc=None, known=None):
             decode_trigger(read(rom, cursor + k * RECORD, RECORD)) for k in range(count)]})
         cursor += count * RECORD
         at += 3
-    for at, maps in zip(loc['high'], high_maps(known)):
+    hooked = hook_lists(rom) or {}
+    for i, maps in enumerate(high_maps(known)):
+        at = loc['high'][i] if i < len(loc['high']) else hooked.get(map_key(maps[0], 'high'))
+        if at is None:
+            raise ValueError(f'{maps[0]}: 고층 목록이 없음(--high-hook-at 으로 만든 롬이 아님)')
         count = read(rom, at, 1)[0]
         doc['high_triggers'].append({'maps': maps, 'records': [
             decode_trigger(read(rom, at + 1 + k * RECORD, RECORD)) for k in range(count)]})
@@ -319,9 +387,13 @@ def occupied(rom, known):
     loc = locate(rom)
     blobs = serialize(parse(rom, loc, known), known)
     exits = loc['exits'] if loc['exits'] >> 16 == 0x2A else loc['exits'] - STUB_SIZE
-    return [(exits, loc['exits'] + len(blobs['exits'])), (loc['index'], loc['index'] + len(blobs['index'])),
-            (loc['records'], loc['records'] + len(blobs['records'])),
-            (loc['high'][0], loc['high'][0] + sum(map(len, blobs['high'])))]
+    spans = [(exits, loc['exits'] + len(blobs['exits'])), (loc['index'], loc['index'] + len(blobs['index'])),
+             (loc['records'], loc['records'] + len(blobs['records'])),
+             (loc['high'][0], loc['high'][0] + sum(map(len, blobs['high'])))]
+    if hook_lists(rom) is not None:
+        at = int.from_bytes(read(rom, HOOK_SITE + 1, 3), 'little')
+        spans.append((at, at + len(hook_code(at)) + len(hook_lists(rom)) * HOOK_ROW + 1))
+    return spans
 
 
 def placement(original, sizes, at, current, extra=()):
@@ -364,7 +436,9 @@ def writes_for(rom, doc, at=None, new=()):
     loc = locate(rom)
     # 원래 꼴 롬이면 원래 표 자리(POOLS)가 이미 허용 목록에 있다.
     extra = [] if loc == {**ORIGINAL, 'high': HIGH_ORIGINAL} else occupied(rom, known)
-    at = placement(rom.d, sizes, at or {}, current_places(loc), extra)
+    at = dict(at or {})
+    hook_at = at.pop('hook', None)
+    at = placement(rom.d, sizes, at, current_places(loc), extra)
     short = at['exits'] >> 16 == 0x2A
     table = at['exits'] if short else at['exits'] + STUB_SIZE
     data = [(at['exits'], (b'' if short else stub(table)) + blobs['exits'], '출구 목적지 표'),
@@ -375,7 +449,27 @@ def writes_for(rom, doc, at=None, new=()):
         high.append(cursor)
         cursor += len(blob)
     data.append((at['high'], b''.join(blobs['high']), '고층 영역 이동 목록'))
-    code = [(EXIT_INIT, bytes([0xA9, table & 0xFF, 0x85, 0x84, 0xA9, table >> 8 & 0xFF, 0x85, 0x85]) if short
+    lists = high_maps(known)
+    code = []
+    if len(lists) > len(HIGH_ORIGINAL):
+        if hook_at is None:
+            raise ValueError('그룹 51·54 새 맵은 01:94B4 가 고르지 못하므로 --high-hook-at 이 필요함')
+        rows = [(*map_key(m, 'high'), start, blob[0]) for maps, start, blob in zip(lists, high, blobs['high'])
+                for m in maps if map_key(m, 'high')[0] in HOOK_GROUPS]
+        stub_blob = hook_code(hook_at) + hook_table(sorted(rows))
+        end = hook_at + len(stub_blob)
+        if not 0x8000 <= hook_at & 0xFFFF or end > (hook_at >> 16) + 1 << 16 or hook_at >> 16 > 0x7D:
+            raise ValueError(f'--high-hook-at {cpu(hook_at)}: {len(stub_blob)}바이트가 뱅크 00~7D 한 뱅크에 들지 않음')
+        if not any(lo <= hook_at and end <= hi for lo, hi in [*allowed(rom.d), *extra]):
+            raise ValueError(f'--high-hook-at {cpu(hook_at)}~ 가 원래 표 자리·빈 자리·늘린 뱅크 어디에도 들지 않음')
+        for addr, blob, name in data:
+            if addr < end and hook_at < addr + len(blob):
+                raise ValueError(f'--high-hook-at 이 {name} 자리와 겹침')
+        data.append((hook_at, stub_blob, '그룹 51·54 고층 목록 고르기 스텁·표'))
+        code.append((HOOK_SITE, b'\x5c' + hook_at.to_bytes(3, 'little'), '01:9510 을 고층 목록 고르기 스텁으로(JML)'))
+    elif hook_at is not None:
+        raise ValueError('--high-hook-at 은 그룹 51·54 새 맵이 있을 때만 씀')
+    code += [(EXIT_INIT, bytes([0xA9, table & 0xFF, 0x85, 0x84, 0xA9, table >> 8 & 0xFF, 0x85, 0x85]) if short
              else bytes([0x22, *at['exits'].to_bytes(3, 'little'), 0xEA, 0xEA, 0xEA, 0xEA]), '출구 표 자리')]
     code += [(a, bytes([0xB2 if short else 0xA7]), '출구 표 읽기 ($84)/[$84]') for a in EXIT_SHORT]
     code += [(a, bytes([0xB1 if short else 0xB7]), '출구 표 읽기 ($84),Y/[$84],Y') for a in EXIT_INDEXED]
@@ -416,6 +510,8 @@ def dump(rom, new=()):
     names = [map_name(*k) for k in sorted(known) if k[0] < HIGH_FIRST]
     rows = {r['map']: r for r in doc['exits']}
     doc['exits'] = [rows.get(n) or {'map': n, 'records': [{'kind': 'special', 'special': 0}]} for n in names]
+    have = {tuple(r['maps']) for r in doc['high_triggers']}
+    doc['high_triggers'] += [{'maps': maps, 'records': []} for maps in high_maps(known) if tuple(maps) not in have]
     return doc
 
 
@@ -463,6 +559,16 @@ def engine_triggers(rom, loc, bc, bd):
     return []
 
 
+def engine_high(rom, bc, bd):
+    """01:9430(그룹 50 이상이면 01:94B4)을 65816 해석기로 돌려 ($183A, $183C, $183D)."""
+    wram = bytearray(0x20000)
+    wram[0xBC], wram[0xBD] = bc, bd
+    machine = Cpu(rom.d, wram)
+    machine.jsr(0x019430, max_steps=20_000)
+    w = machine.wram
+    return w[0x183A] | w[0x183B] << 8 | w[0x183C] << 16, w[0x183C], w[0x183D]
+
+
 def check(rom, doc=None, at=None, new=()):
     if locate(rom) != {**ORIGINAL, 'high': HIGH_ORIGINAL}:
         raise ValueError('check 는 원래 롬에서 돌린다')
@@ -488,6 +594,11 @@ def check(rom, doc=None, at=None, new=()):
     for bc, bd in sorted(known):
         if bc < HIGH_FIRST and [decode_trigger(r) for r in engine_triggers(moved, loc, bc, bd)] != listed.get((bc, bd), []):
             raise ValueError(f'{map_name(bc, bd)}: 엔진 순서로 찾은 영역 이동이 입력과 다름')
+    for i, maps in enumerate(high_maps(known)):
+        for name in maps:
+            want = loc['high'][i] if i < len(loc['high']) else hook_lists(moved)[map_key(name, 'high')]
+            if engine_high(moved, *map_key(name, 'high')) != (want + 1, want >> 16, read(moved, want, 1)[0]):
+                raise ValueError(f'{name}: 01:9430 을 돌려 고른 고층 목록이 {cpu(want)} 가 아님')
     if patch(moved, source, at, new)['writes']:
         raise ValueError('만든 롬에 같은 입력을 다시 패치하면 쓰기가 남음')
     sizes = (sum(len(r['records']) for r in source['exits']), sum(len(r['records']) for r in source['triggers']),
@@ -512,8 +623,8 @@ def new_map(text):
         key = map_key(text, '--new-map')
     except ValueError as error:
         raise argparse.ArgumentTypeError(str(error)) from error
-    if key[0] >= HIGH_FIRST:
-        raise argparse.ArgumentTypeError('--new-map 은 그룹 50 미만만 받음(그룹 50 이상은 출구 표가 없음)')
+    if key[0] >= HIGH_FIRST and key[0] not in HOOK_GROUPS:
+        raise argparse.ArgumentTypeError('그룹 50 이상은 51·54 만 받음(50·52·53 새 맵은 그룹 목록을 같이 써서 알릴 것이 없음)')
     return key
 
 
@@ -531,13 +642,15 @@ def main():
     for p in (write, verify):
         for name in ORIGINAL:
             p.add_argument(f'--{name}-at', type=address, help=f'기본 {cpu(ORIGINAL[name])}')
+        p.add_argument('--high-hook-at', type=address, help='그룹 51·54 새 맵이 있을 때 고층 목록 고르기 스텁·표 자리')
     for p in (export, write, verify):
         p.add_argument('--new-map', action='append', default=[], type=new_map,
                        help='dq5newmap.py 로 더할 맵 GG/MM(여럿이면 되풀이)')
     args = parser.parse_args()
     try:
         rom = Rom(args.rom.read_bytes())
-        at = {k: getattr(args, f'{k}_at', None) for k in ORIGINAL}
+        at = {k: getattr(args, f'{k}_at', None) for k in (*ORIGINAL, 'high_hook')}
+        at['hook'] = at.pop('high_hook')
         doc = json.loads(args.source.read_text(encoding='utf-8')) if getattr(args, 'source', None) else None
         if args.command == 'check':
             check(rom, doc, at, args.new_map)

@@ -13,6 +13,8 @@
   left-orig 원본: 왼쪽으로 걸으면 움직임(대조)
   left-h    h: 왼쪽으로 걸으면 움직이고 받침 자리의 실행·읽기가 0
   other     f: 03/00 (38,60) 에서 걸은 뒤 $1AAD = C565(옮긴 표가 원래 그룹 03 항목을 지킴)
+  event     e: 몸통이 왼쪽에서 대화 창(BRK 95 00)에 메시지 2ED(BRK 99 ED)를 띄우고 BRK 0E 뒤 창을 닫고(BRK 95 FF)
+            캐리. 왼쪽을 누르고 A 한 번 뒤 오른쪽으로 걸으면 메시지 2ED 가 한 번 나오고 오른쪽으로 걸음
 
   MESENCE=… python sfc/dq5/tools/dq5stepcheck.py rom/dq5.sfc --state work/state/ship.mss
 """
@@ -33,11 +35,13 @@ from dq5progresscheck import environment
 HERE = Path(__file__).resolve().parent
 BODY_AT = '3C:B000'
 BODY = bytes.fromhex('a5 00 29 02 f0 02 38 6b 18 6b')
+# LDA $00 / AND #$02 / BEQ +13 / BRK 95 00 / BRK 99 ED / BRK 0E / BRK 95 FF / SEC / RTL / CLC / RTL
+EVENT_BODY = bytes.fromhex('a5 00 29 02 f0 0d 00 95 00 00 99 ed 00 0e 00 95 ff 38 6b 18 6b')
 TABLE_AT = ('--table-at', '3C:A000')
 START = '01/00,40,84,2'
 
 
-def build_rom(original, out, key, doc, body):
+def build_rom(original, out, key, doc, body=None):
     source, manifest = out / f'{key}-step.json', out / f'{key}-step.dq5patch.json'
     source.write_text(json.dumps(doc, ensure_ascii=False) + '\n', encoding='utf-8')
     command('dq5stepwrite.py', original, 'patch', source, '-o', manifest, *TABLE_AT)
@@ -46,7 +50,7 @@ def build_rom(original, out, key, doc, body):
     if body:
         extra = out / f'{key}-body.dq5patch.json'
         extra.write_text(json.dumps({'format': 'dq5patch/1', 'name': 'step-body', 'rom_size': 2,
-                                     'writes': [{'at': BODY_AT, 'hex': BODY.hex(' '), 'note': '시험 몸통'}]}) + '\n',
+                                     'writes': [{'at': BODY_AT, 'hex': body.hex(' '), 'note': '시험 몸통'}]}) + '\n',
                          encoding='utf-8')
         manifests.append(extra)
     built = out / f'{key}.sfc'
@@ -58,7 +62,7 @@ def run(rom, name, to, test, state, out, mesence, libdir):
     dest = out / name
     dest.mkdir()
     env = environment(libdir, state, dest)
-    env.update(TO=to, TEST=f'{test},wait:120', SETTLE='120', MAXF='900', WARPEXIT=f'{warp_exit(rom):X}',
+    env.update(TO=to, TEST=f'{test},wait:120', SETTLE='120', MAXF='1500', WARPEXIT=f'{warp_exit(rom):X}',
                DP86OK=dp86_allowed(rom), STEPBODY=BODY_AT.replace(':', ''))
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
         subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5stepprobe.lua'),
@@ -71,7 +75,7 @@ def run(rom, name, to, test, state, out, mesence, libdir):
             '1AAD': f'{ram[0x1AAE]:02X}{ram[0x1AAD]:02X}',
             'reads': int(re.search(r'reads=(\d+)', text).group(1)),
             'execs': {m[0]: int(m[1]) for m in re.findall(r'exec (\w+) n=(\d+)', text)},
-            'entries': re.findall(r'^entry .*$', text, re.M)}
+            'entries': re.findall(r'^entry .*$', text, re.M), 'msgs': re.search(r'^msgs (\S+)', text, re.M)[1]}
 
 
 def main():
@@ -90,9 +94,10 @@ def main():
         args.out.mkdir(parents=True, exist_ok=True)
         out = Path(tempfile.mkdtemp(prefix='run-', dir=args.out.resolve()))
         print(f'실행 출력: {out}', flush=True)
-        far = build_rom(original, out, 'f', {'format': 'dq5step/1', 'groups': [{'group': '01', 'routine': BODY_AT}]},
-                        True)
-        hooked = build_rom(original, out, 'h', {'format': 'dq5step/1', 'groups': []}, False)
+        group01 = {'format': 'dq5step/1', 'groups': [{'group': '01', 'routine': BODY_AT}]}
+        far = build_rom(original, out, 'f', group01, BODY)
+        event = build_rom(original, out, 'e', group01, EVENT_BODY)
+        hooked = build_rom(original, out, 'h', {'format': 'dq5step/1', 'groups': []})
         krlua = Path(subprocess.run(['krpatch', 'sfc', 'lua'], capture_output=True, text=True,
                                     check=True, timeout=30).stdout.strip())
         libdir = out / 'lib'
@@ -104,6 +109,7 @@ def main():
             'left-orig': (original, START, 'left:40'),
             'left-h': (hooked, START, 'left:40'),
             'other': (far, '03/00,38,60,1', 'left:40,right:40'),
+            'event': (event, START, 'left:12,wait:200,a:6,wait:120,right:24'),
         }
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
             seen = dict(zip(jobs, pool.map(lambda name: run(jobs[name][0], name, *jobs[name][1:], state, out, mesence,
@@ -119,12 +125,14 @@ def main():
             'left-h': seen['left-h']['cell'][0] < 40 and seen['left-h']['1AAD'] == 'C385'
             and not seen['left-h']['execs'] and seen['left-h']['reads'] == 0,
             'other': seen['other']['map'] == '03/00' and seen['other']['1AAD'] == 'C565',
+            'event': seen['event']['msgs'] == '2ED' and seen['event']['map'] == '01/00'
+            and seen['event']['cell'][0] > 40 and seen['event']['1AAD'] == 'C656',
         }
         (out / 'results.json').write_text(json.dumps({'seen': seen, 'checks': checks}, ensure_ascii=False, indent=2) + '\n',
                                           encoding='utf-8')
         for name, where in seen.items():
             print(f'{name}: {where["map"]} {tuple(where["cell"])} $1AAD={where["1AAD"]} 읽기 {where["reads"]} '
-                  f'실행 {where["execs"]}{"" if checks[name] else " 불일치"}')
+                  f'실행 {where["execs"]} 메시지 {where["msgs"]}{"" if checks[name] else " 불일치"}')
             for line in where['entries'][:2]:
                 print(f'  {line}')
         failed = [k for k, v in checks.items() if not v]

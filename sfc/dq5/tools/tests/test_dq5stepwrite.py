@@ -130,6 +130,14 @@ class StepRoutineTests(unittest.TestCase):
         self.assertEqual((cpu.wram[0x100], cpu.p & 1, cpu.s), (0x5A, 1, 0x1FF))
         got = {row['group']: row['routine'] for row in step.dump(moved)['groups']}
         self.assertEqual((got['01'], got['07'], got['36'], got['03']), ('3C:B000', '3C:B000', '21:8000', '00:C565'))
+        # 합성 롬은 2MB(뱅크 00~3F). 3C 에 찾기를 두면 2MB 그대로라 뱅크 40 이상 몸통은 롬 밖이다
+        with self.assertRaisesRegex(ValueError, '롬\\(2MB\\) 밖'):
+            step.writes_for(base, document(('01', '40:8000')), '3C:A000')
+        self.assertEqual(len(step.writes_for(base, document(('01', '40:8000')), '50:8000')), 3)
+        small = Rom(bytes(base.d[:0x180000]))                       # 1.5MB(뱅크 00~2F)
+        with self.assertRaisesRegex(ValueError, '롬\\(1.5MB\\) 밖'):
+            step.writes_for(small, document(('01', '30:8000')), '2F:8000')
+        self.assertEqual(len(step.writes_for(small, document(('01', '3F:8000')), '30:8000')), 3)
         many = document(*((f'{g:02X}', f'21:{0x8000 + g:04X}') for g in range(10)))
         with self.assertRaisesRegex(ValueError, '9개'):
             step.writes_for(base, many, '3C:A000')

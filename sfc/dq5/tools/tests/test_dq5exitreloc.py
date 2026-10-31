@@ -13,6 +13,8 @@ from dq5exitreloc import (
     FORMAT,
     HIGH_ORIGINAL,
     HIGH_SITES,
+    HOOK_ORIG,
+    HOOK_SITE,
     INDEX_BANK,
     INDEX_OPERANDS,
     ORIGINAL,
@@ -23,13 +25,16 @@ from dq5exitreloc import (
     engine_exits,
     engine_triggers,
     high_maps,
+    hook_lists,
     locate,
+    new_map,
     parse,
     serialize,
     writes_for,
 )
 from dq5exitwrite import HIGH_LISTS
 from dq5map import Rom, lorom
+from w65816 import Cpu
 
 HIGH = [(0x50, 0x50), (0x50, 0x51), *((0x51, 0x50 + i) for i in range(8)), (0x52, 0x50),
         *((0x53, 0x50 + i) for i in range(3)), *((0x54, 0x50 + i) for i in range(4))]
@@ -74,6 +79,7 @@ def original_rom(doc):
         write(data, at, (0xEB0E + plus).to_bytes(2, 'little'))
     write(data, RECORD_LOW, b'\x12\xd8')
     write(data, RECORD_BANK, b'\x2a')
+    write(data, HOOK_SITE, HOOK_ORIG)
     for site, at in zip(HIGH_SITES, HIGH_ORIGINAL):
         write(data, site, bytes([0xAF, *at.to_bytes(3, 'little'), 0x8D, 0x3D, 0x18, 0xA2,
                                  *(at + 1 & 0xFFFF).to_bytes(2, 'little'), 0x8E, 0x3A, 0x18, 0xA9, 0x01]))
@@ -232,6 +238,52 @@ class RelocTests(unittest.TestCase):
         self.assertEqual([r for _, r in engine_exits(moved, loc, 1, 3)], [bytes([0xC0, 0])])
         self.assertEqual(engine_triggers(moved, loc, 1, 3)[0][:4], bytes([3, 2, 4, 3]))
         self.assertEqual(writes_for(moved, doc, at, new), ([], 0))
+
+    def test_high_51_54_new_maps_through_hook(self):
+        new = [(0x51, 0x58), (0x54, 0x54)]
+        doc = dump(self.rom, new)
+        self.assertEqual(doc['high_triggers'][16:], [{'maps': ['51/58'], 'records': []},
+                                                     {'maps': ['54/54'], 'records': []}])
+        doc['high_triggers'][16]['records'] = [trigger(20), trigger(21)]
+        doc['high_triggers'][17]['records'] = [trigger(22)]
+        at = {'high': 0x3EA000}
+        with self.assertRaisesRegex(ValueError, '--high-hook-at'):
+            writes_for(self.rom, doc, at, new)
+        with self.assertRaisesRegex(ValueError, '그룹 51·54 새 맵이 있을 때만'):
+            writes_for(self.rom, dump(self.rom), {'high': 0x3EA000, 'hook': 0x3EF000})
+        with self.assertRaisesRegex(ValueError, '겹침'):
+            writes_for(self.rom, doc, {**at, 'hook': 0x3EA010}, new)
+        at['hook'] = 0x3EF000
+        writes, _ = writes_for(self.rom, doc, at, new)
+        self.assertIn((HOOK_SITE, bytes.fromhex('5c 00 f0 3e'), HOOK_ORIG), [w[:3] for w in writes])
+        moved = apply(self.rom.d, writes)
+        self.assertEqual(parse(moved, locate(moved), KNOWN | set(new)), doc)
+        table = hook_lists(moved)
+        self.assertEqual(sorted(table), sorted(k for k in KNOWN | set(new) if k[0] in (0x51, 0x54)))
+        # 스텁만 돌린다: 01:94C9 는 STA $183C / RTS, 01:9540(다른 그룹)은 $183D 에 EE 를 둔다.
+        data = bytearray(moved.d)
+        write(data, 0x0194C9, bytes.fromhex('8d 3c 18 60'))
+        write(data, 0x019540, bytes.fromhex('a9 ee 8d 3d 18 60'))
+
+        def run(bc, bd):
+            wram = bytearray(0x20000)
+            wram[0xBC], wram[0xBD] = bc, bd
+            cpu = Cpu(bytes(data), wram)
+            cpu.p, cpu.a = 0x20, bc
+            cpu.jsr(HOOK_SITE, max_steps=2000)
+            w = cpu.wram
+            return w[0x183A] | w[0x183B] << 8 | w[0x183C] << 16, w[0x183D]
+
+        for key in ((0x51, 0x58), (0x54, 0x54), (0x51, 0x50), (0x54, 0x53)):
+            start = table[key]
+            self.assertEqual(run(*key), (start + 1, moved.u8(start)), key)
+        self.assertEqual(run(0x51, 0x58)[1], 2)
+        self.assertEqual(run(0x51, 0x59)[1], 0)                     # 표에 없는 51 맵은 개수 0
+        self.assertEqual(run(0x55, 0x50)[1], 0xEE)                  # 다른 그룹은 원래 갈래로
+        self.assertEqual(writes_for(moved, doc, at, new), ([], 0))
+        with self.assertRaises(Exception):
+            new_map('52/51')
+        self.assertEqual(new_map('54/54'), (0x54, 0x54))
 
     def test_new_group_gets_exit_block(self):
         new = [(0x36, 0)]

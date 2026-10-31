@@ -177,6 +177,7 @@ def writes_for(rom, doc, table_at=None, new_maps=()):
     rows = merged(rom, doc, new_maps)
     if len(rows) > MAX_GROUPS:
         raise ValueError(f'걸음 루틴 표 {len(rows)}그룹이 8비트 색인 한도 {MAX_GROUPS}그룹을 넘음')
+    far = [r for _, r in rows if r >> 16]
     rows, stubs = far_layout(rows)
     blob = encode(rows)
     if stubs and table_at is None:
@@ -187,6 +188,12 @@ def writes_for(rom, doc, table_at=None, new_maps=()):
         old = rom.d[lorom(TABLE):lorom(TABLE) + len(blob)]
         return [(TABLE, blob, bytes(old), '걸음 루틴 표')]
     at = lorom_cpu(table_at)
+    # 몸통은 다른 패치가 쓰므로, 이 패치를 넣은 롬(원래 크기와 찾기 루틴 자리로 늘린 크기 가운데 큰 쪽) 안이어야 한다
+    limit = max(len(rom.d), rom_size(at >> 16) << 20)
+    for r in far:
+        if lorom(r) >= limit:
+            raise ValueError(f'루틴 {cpu(r)} 이 이 패치를 넣은 롬({limit / (1 << 20):g}MB) 밖. 몸통 뱅크까지 늘리는 '
+                             f'--table-at 이나 롬 안 자리를 적음')
     code = assemble(at)
     if (at & 0xFFFF) + len(code) + len(blob) > 0x10000:
         raise ValueError(f'찾기 루틴·표 {len(code) + len(blob)}바이트가 {table_at} 의 뱅크 끝을 넘음')
@@ -198,6 +205,11 @@ def writes_for(rom, doc, table_at=None, new_maps=()):
         old = rom.d[lorom(TRAMPOLINES):lorom(TRAMPOLINES) + len(stubs)]
         writes.append((TRAMPOLINES, stubs, bytes(old), f'뱅크 00 밖 걸음 루틴 받침 {len(stubs) // TRAMPOLINE_SIZE}개'))
     return writes
+
+
+def rom_size(bank):
+    """그 뱅크까지 쓰는 패치 목록의 rom_size(MB). 원래 크기(뱅크 2F 까지) 안이면 0."""
+    return 0 if bank < 0x30 else 2 if bank < 0x40 else 3 if bank < 0x60 else 4
 
 
 def patch(rom, doc, table_at=None, new_maps=()):
@@ -212,7 +224,7 @@ def patch(rom, doc, table_at=None, new_maps=()):
         writes.append(write)
         top = max(top, addr >> 16)
     result = {'format': 'dq5patch/1', 'name': 'step-routines', 'writes': writes}
-    size = 0 if top < 0x30 else 2 if top < 0x40 else 3 if top < 0x60 else 4
+    size = rom_size(top)
     if size:
         result['rom_size'] = size
     return result
