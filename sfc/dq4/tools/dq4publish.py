@@ -61,16 +61,19 @@ def merged_commit():
     return head
 
 
-def push(assets):
+def remote(assets, *args):
     token = os.environ.get('GH_TOKEN')
     auth = ['-c', f'http.extraHeader=Authorization: Bearer {token}'] if token else []
-    subprocess.run(['git', *auth, 'push', '-q', 'origin', 'HEAD'], cwd=assets, check=True)
+    subprocess.run(['git', *auth, *args], cwd=assets, check=True)
 
 
 def build(assets, dq5, dq4, commit):
     from kr_patch import ips
     import dq4build
     head = merged_commit()
+    if commit:
+        # 다른 세션이 먼저 넣었으면 그 위에 쌓아야 push 가 받아들여진다
+        remote(assets, 'pull', '-q', '--ff-only')
     rom = dq4build.build(ROOT / 'work' / 'publish', dq5, dq4)
     base, out = dq5.read_bytes(), rom.read_bytes()
     patch = ips.make(base, out, rle=True)
@@ -92,7 +95,7 @@ def build(assets, dq5, dq4, commit):
             print('IPS·SOURCE.txt 그대로: 커밋하지 않음')
             return
         git('commit', '-q', '-m', f'sfc/dq4: 1장 IPS (sfc-dq4 {head[:8]})', cwd=assets)
-        push(assets)
+        remote(assets, 'push', '-q', 'origin', 'HEAD')
         print(f'에셋 저장소에 커밋·push: {git("rev-parse", "--short", "HEAD", cwd=assets)}')
 
 
