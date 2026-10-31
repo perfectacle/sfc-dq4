@@ -10,8 +10,10 @@
              다시 그리는지
   picture    첫 필드 이벤트 전투(몬스터 11)가 끝난 뒤 02:C95D 가 03:D1C3 으로 일행 슬롯 0 의 그림을 다시 정하고 03:D202 가
              그림 표를 읽는지(X = 그림 2E)
+--sweep 은 위 대신 dq5freesweep.py 의 장면(실내 맵 346곳에 들어가 걷기, 첫 필드 이벤트 전투 236종, 세계 셋)마다 같은 프로브로
+12:8C9F·03:D1C3·03:D202·03:D24D 의 실행과 7E:3800 쓰기를 모아, 불린 맵(실행 줄의 map=)과 전투 끝의 7E:2192 bit3 별로 센다.
 원본 롬·선실 상태는 읽기만 하고, 입력·패치·롬·기록은 --out 의 새 하위 폴더에 둔다.
-  MESENCE=… python sfc/dq5/tools/dq5spritescenecheck.py rom/dq5.sfc --state work/state/ship.mss
+  MESENCE=… python sfc/dq5/tools/dq5spritescenecheck.py rom/dq5.sfc --state work/state/ship.mss [--sweep --jobs 10]
 """
 import argparse
 import collections
@@ -40,7 +42,7 @@ SCENES = {
     'land': ('original', {'FIELD': '341,56', 'LATESET': '1954=82', 'SETTLE': '120', 'VEHICLE': '1', 'FROM': '700',
                           'UNTIL': '800', 'EXEC': '01BFB1,01BFC1', 'TEST': 'wait:150,right:4,wait:10,a:6,wait:700',
                           'MAXF': '2000'}),
-    'picture': ('original', {'FIELD': '341,56', 'BATTLE': '11:1', 'EXEC': '03D1C3,03D202', 'TEST': FIGHT,
+    'picture': ('original', {'FIELD': '341,56', 'BATTLE': '11:1', 'EXEC': '03D1C3,03D202,03D24D', 'TEST': FIGHT,
                              'MAXF': '1300'}),
 }
 CLEAR = ('ADULT', 'ANYWHERE', 'BATTLE', 'FIELD', 'GROUP', 'LATESET', 'PARTY', 'POKE', 'TO', 'ROMPATCH', 'SAVE', 'SET',
@@ -101,6 +103,7 @@ def measure(name, lines, dest):
     if name == 'picture':
         out['picture'] = sorted({re.search(r'X=00(..)', line)[1] for line in calls if 'exec 03D202' in line})
         out['from_02C95D'] = all('7C C9 02' in line for line in calls if 'exec 03D1C3' in line)
+        out['d24d'] = sum('exec 03D24D' in line for line in calls)
     return out
 
 
@@ -114,8 +117,41 @@ EXPECT = {
     and not r['pal5_band'],
     'setpalette-1200': lambda r: r['calls'] == 0 and r['oam_palettes'].get(HERO_PALETTE) and r['pal5_band'],
     'land': lambda r: r['land1_draws'] == 1 and r.get('before_dma') not in (None, '1E0'),
-    'picture': lambda r: r['calls'] >= 2 and r['picture'] == ['2E'] and r['from_02C95D'],
+    'picture': lambda r: r['picture'] == ['2E'] and r['from_02C95D'] and r['d24d'] > 0,
 }
+
+
+def sweep(original, state, out, mesence, libdir, jobs):
+    """dq5freesweep.py 의 장면마다 프로브를 돌려 맵·전투별로 센다."""
+    from dq5freesweep import jobs as sweep_jobs
+    from dq5map import Rom
+    todo = sweep_jobs(str(original), Rom(original.read_bytes()), ['maps', 'battles', 'field'], jobs)
+    extra = {'EXEC': '128C9F,03D1C3,03D202,03D24D'}
+
+    def one(job):
+        kind, name, env = job
+        dest, lines = run(f'{kind}-{name}', original, out, mesence, libdir, state, extra | env)
+        wram = dest / 'final.wram'
+        return kind, name, lines, wram.read_bytes()[0x2192] if wram.is_file() else None
+    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
+        got = list(pool.map(one, todo))
+    calls, writes, battles = collections.defaultdict(set), collections.defaultdict(set), collections.Counter()
+    for kind, name, lines, flags in got:
+        for line in lines:
+            hit = re.search(r'exec 128C9F .* map=(\S+)', line)
+            if hit:
+                calls[hit[1]].add(f'{kind}/{name}')
+            hit = re.search(r'w7E38(..)=(..) map=(\S+)', line)
+            if hit:
+                writes[hit[3]].add(hit[2])
+        if kind == 'battles':
+            ran = any('exec 03D1C3' in line for line in lines)
+            battles['기록 없음' if flags is None else f'2192.3={flags >> 3 & 1} D1C3={int(ran)}'] += 1
+    result = {'runs': len(got), 'calls_8C9F': {k: sorted(v) for k, v in sorted(calls.items())},
+              'writes_3800': {k: sorted(v) for k, v in sorted(writes.items())}, 'battles': dict(sorted(battles.items()))}
+    (out / 'sweep.json').write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    print(json.dumps(result, ensure_ascii=False))
+    return 0
 
 
 def main():
@@ -125,6 +161,8 @@ def main():
     ap.add_argument('--mesence', default=os.environ.get('MESENCE'))
     ap.add_argument('--out', type=Path, default='work/spritescene')
     ap.add_argument('--at', default='3B:8000', help='세트 팔레트 표 자리(dq5objpalette.py --at)')
+    ap.add_argument('--sweep', action='store_true', help='dq5freesweep.py 의 장면으로 훑기만 함')
+    ap.add_argument('--jobs', type=int, default=4)
     args = ap.parse_args()
     if not args.mesence:
         ap.error('--mesence 또는 MESENCE가 필요함')
@@ -135,6 +173,10 @@ def main():
         args.out.mkdir(parents=True, exist_ok=True)
         out = Path(tempfile.mkdtemp(prefix='run-', dir=args.out.resolve()))
         print(f'실행 출력: {out}', flush=True)
+        libdir = subprocess.run(['krpatch', 'sfc', 'lua'], capture_output=True, text=True, check=True,
+                                timeout=30).stdout.strip()
+        if args.sweep:
+            return sweep(original, state, out, mesence, libdir, args.jobs)
         doc = {'format': 'dq5objpalette/1', 'palettes': [{'palette': HERO_PALETTE, 'colors': BAND}],
                'sets': [{'set': HERO_SET, 'palette': HERO_PALETTE}]}
         (out / 'palette.json').write_text(json.dumps(doc) + '\n', encoding='utf-8')
@@ -142,8 +184,6 @@ def main():
              '--at', args.at)
         roms = {'original': original, 'palette': out / 'palette.sfc'}
         tool('dq5build.py', original, 'build', out / 'palette.dq5patch.json', '-o', roms['palette'])
-        libdir = subprocess.run(['krpatch', 'sfc', 'lua'], capture_output=True, text=True, check=True,
-                                timeout=30).stdout.strip()
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
             jobs = {name: pool.submit(run, name, roms[rom], out, mesence, libdir, state, extra)
                     for name, (rom, extra) in SCENES.items()}

@@ -1,6 +1,6 @@
 -- 인물 스프라이트 장면 프로브. 드라이버(DRIVER, 보통 dq5warp.lua)를 돌리며 아래를 SHOT_DIR/scene.txt 에 한 줄씩 적는다.
 --   EXEC="128C9F,03D202"  그 PC 를 지날 때 프레임·주사선·A·X·Y·맵·스택 위 9바이트
---   7E:3800~381F 쓰기(0 이 아닌 값만), $212D·$2130·$2131 쓰기, OAM DMA($420B 로 B 버스 04 채널을 켬)
+--   7E:3800~381F 쓰기(0 이 아닌 값만, 그때의 맵), $212D·$2130·$2131 쓰기, OAM DMA($420B 로 B 버스 04 채널을 켬)
 --   VEHICLE=1             00:FC60 이 탈것 슬롯(7E:3220 = FE)을 그릴 때 슬롯·칸 오프셋·프레임(3280)·31E7
 --   FROM·UNTIL            위 둘(OAM DMA·탈것)을 적는 프레임 범위(기본 0~99999)
 --   DUMPAT=500            그 프레임 끝에 oam.bin(544바이트)·cgram.bin(512바이트)
@@ -29,7 +29,7 @@ for a in string.gmatch(os.getenv('EXEC') or '', '%x+') do
 end
 
 emu.addMemoryCallback(function(addr, value)
-  if (value or 0) ~= 0 then line(string.format('w%06X=%02X', addr, value)) end
+  if (value or 0) ~= 0 then line(string.format('w%06X=%02X map=%02X/%02X', addr, value, rd(0x7E00BC), rd(0x7E00BD))) end
 end, emu.callbackType.write, 0x7E3800, 0x7E381F)
 
 for _, a in ipairs({0x212D, 0x2130, 0x2131}) do
