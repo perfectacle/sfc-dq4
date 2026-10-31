@@ -1,6 +1,7 @@
 """맵을 놓은 뒤 7E:1983 부터 슬롯을 더 쓰는 장면(04:FB1C, 01:BA95)을 MesenCE 에서 잰다.
 
-  inn       1A/02 アルカパ 여관, 대체 목록 10:B7BA(7E:2195 bit3). パパス 에게 말을 걸어 번호 01 → 02:AE69 → 04:FB1C
+  inn       1A/02 アルカパ 여관, 대체 목록 10:B7BA(7E:2195 bit3). パパス 에게 말을 걸어 번호 01 → 02:AE69 → 04:FB1C.
+  inn-leave 같은 장면에 A 를 쉰 번 이어 넣음. 메시지 20C~20F·214~217(24:8BAF 에 들어선 번호) 뒤 1A/04 로 옮겨 감
   inn-grown 같은 장면, dq5npcrelocate.py --allow-growth 로 10:B7BA 를 인물 23명(슬롯 1F 까지)으로 늘린 롬
   ev3       06/08 이벤트 3((37,16)-(38,21) 에 들어섬) → 06:D704 → 04:FB1C
   talk23a   선실 パパス 대화 번호를 23A(06/00 의 マスタードラゴン 대화)로 → 06:B4F7 → 01:BA95
@@ -15,7 +16,8 @@
 
   talk04d   선실 パパス 대화 번호를 04D(22/00 ポワン)로, 7E:219A bit5 를 켜고 2190 bit5 를 끔 → 메시지 25E → 06:C00A →
             02:B0DC → 04:FB1C 한 번
-  map0600   06/00 대체 목록 10:AA73(7E:2190 bit7) 의 (37,51) 대화 점 아래 (37,54) 에서 위를 보고 대화 23A → 01:BA95
+  map0600   06/00 대체 목록 10:AA73(7E:2190 bit7) 의 (37,51) 대화 점 아래 (37,54) 에서 위를 보고 대화 23A → 01:BA95.
+            02:B3B4 가 베끼는 원본 슬롯 X = 07, 메시지 512~516 뒤 장면이 18/03 으로 옮겨 감
   enter0206 02/06 에 들어서기만 함. 메시지 1D1 을 띄운 인라인 스크립트 자리를 스택(01:CEA9 가 넣은 $AE~$B0·$90)에서 읽음
   morning1a00  1A/00 대체 목록 10:B4E3(7E:2198 bit6). 아침 장면(메시지 23C~241) 뒤 06:CAC8 → 02:AF66 이 슬롯 08 을 슬롯 02 로
             베낌. 끝의 인물 표로 02:AF9B 의 LDX #$13·#$12 가 가리키는 인물을 봄
@@ -52,6 +54,7 @@ T04D = dict(T23A, POKE='7E36EB=4D;7E370B=00', SET='219A|20;2190&DF', MAXF='2400'
 MAP0600 = {'DRIVER': 'dq5warp.lua', 'TO': '06/00,37,54', 'SET': '2190|80', 'MAXF': '5000', 'SETTLE': '120',
            'TEST': 'up:3,' + 'a:4,wait:150,' * 15 + 'wait:1500'}
 ENTER0206 = {'DRIVER': 'dq5warp.lua', 'TO': '02/06,24,14', 'MAXF': '1500', 'SETTLE': '120', 'TEST': 'wait:300'}
+INN_LEAVE = dict(INN, MAXF='10500', TEST='up:16,wait:30,' + 'a:4,wait:150,' * 50 + 'wait:2000')
 MORNING1A00 = {'DRIVER': 'dq5warp.lua', 'TO': '1A/00,38,35', 'SET': '2198|40', 'MAXF': '9000', 'SETTLE': '120',
                'TEST': PRESS30}
 INN_LIST = '10:B7BA'
@@ -103,7 +106,7 @@ def scenes(rom):
     del map1100['SET']
     map0109 = dict(ALT0605, TO='01/09,15,8', SET='2190|20', LATESET=party_sets(rom, '219F|02'), MAXF='9000',
                    TEST='wait:30,up:8,' + 'a:4,wait:150,' * 40 + 'wait:1500')
-    return {'inn': ('original', INN), 'inn-grown': ('grown', INN), 'ev3': ('original', EV3),
+    return {'inn': ('original', INN), 'inn-leave': ('original', INN_LEAVE), 'inn-grown': ('grown', INN), 'ev3': ('original', EV3),
             'talk23a': ('original', T23A), 'overflow': ('original', dict(T23A, SET='1983=1E')),
             'alt0605': ('original', ALT0605), 'map1100': ('original', map1100),
             'map0109': ('original', map0109), 'talk04d': ('original', T04D), 'map0600': ('original', MAP0600),
@@ -123,10 +126,12 @@ def scene(name, rom, options, state, out, mesence, libdir):
     env.update({k: v for k, v in options.items() if k != 'DRIVER'}, DRIVER=str(HERE / 'lua' / options['DRIVER']))
     run(mesence, rom, HERE / 'lua/dq5slotuse.lua', dest, env)
     text = (dest / 'slots.txt').read_text()
-    calls = [(m[1], int(m[2], 16), int(m[3], 16), int(m[4], 16)) for m in
-             re.finditer(r'pc (\w{6}) map \S+ 1982=\w\w 1983=(\w\w) 1995=(\w{4}) X=\w\w Y=(\w\w)', text)]
+    calls = [(m[1], int(m[2], 16), int(m[3], 16), int(m[5], 16)) for m in
+             re.finditer(r'pc (\w{6}) map \S+ 1982=\w\w 1983=(\w\w) 1995=(\w{4}) X=(\w\w) Y=(\w\w)', text)]
+    sources = [(m[1], int(m[2], 16)) for m in re.finditer(r'pc (\w{6}) map \S+ 1982=\w\w 1983=\w\w 1995=\w{4} '
+                                                           r'X=(\w\w) Y=\w\w', text)]
     end = re.search(r'end f\d+ map (\S+) 1982=(\w\w) 1983=(\w\w) 1995=(\w{4})', text)
-    return {'calls': calls, 'messages': re.findall(r'msg (\w{3})', text), 'map': end[1],
+    return {'calls': calls, 'sources': sources, 'messages': re.findall(r'msg (\w{3})', text), 'map': end[1],
             'stacks': dict(re.findall(r'msg (\w{3}) st=(\w+)', text)),
             'placed': int(end[2], 16), 'free': int(end[3], 16), 'obj_tiles': int(end[4], 16)}
 
@@ -199,6 +204,10 @@ def main():
             and seen['inn']['free'] == 0x0E,
             'inn-grown': made('inn-grown', '02B3B4') == [(0x20, 0x1F)] and seen['inn-grown']['free'] == 0x20
             and '20C' in seen['inn-grown']['messages'] and '20C' in seen['inn']['messages'],
+            # 대화 029 뒤 입력을 이어 넣으면 메시지 20C~20F·214~217 이 이어지고 1A/04 로 옮겨 가, 같은 방문에서 다시 걸 수 없다.
+            'inn-leave': {f'{m:03X}' for m in (*range(0x20C, 0x210), *range(0x214, 0x218))}
+            <= set(seen['inn-leave']['messages'])
+            and seen['inn-leave']['map'] == '1A/04',
             'refuse': refused.returncode != 0 and '한도' in refused.stderr,
             'ev3': made('ev3', '02B3B4') == [(0x0E, 0x0D)] and seen['ev3']['free'] == 0x0E,
             'talk23a': [y for _, y in made('talk23a', '02B3B4')] == [0x0D, 0x0E, 0x0F, 0x10]
@@ -220,15 +229,17 @@ def main():
             and made('talk04d', '02B3B4') == [(0x0E, 0x0D)] and '25E' in seen['talk04d']['messages'],
             'map0600': [y for _, y in made('map0600', '02B3B4')] == [0x0C, 0x0D, 0x0E, 0x0F]
             and all(f == 0x0C for f, _ in made('map0600', '02B3B4'))
-            and [pc for pc, *_ in seen['map0600']['calls']][:2] == ['06B52D', '01BA95'],
+            and [pc for pc, *_ in seen['map0600']['calls']][:2] == ['06B52D', '01BA95']
+            and {x for pc, x in seen['map0600']['sources'] if pc == '02B3B4'} == {0x07}
+            and seen['map0600']['map'] == '18/03',
             'enter0206': script_of(seen['enter0206']['stacks'].get('1D1', '')) == ('05:8D25', 0x09),
             'morning1a00': [pc for pc, *_ in seen['morning1a00']['calls'] if pc == '02AF66'] == ['02AF66']
             and '241' in seen['morning1a00']['messages']
             and slot_table(out, 'morning1a00', (0x02, 0x12, 0x13)) == {0x02: (22, 68, 0x32), 0x12: (84, 2, 0x30),
                                                                          0x13: (37, 71, 0x08)},
         }
-        results = {n: {**v, 'calls': [(pc, f'{f:02X}', f'{t:04X}', f'{y:02X}') for pc, f, t, y in v['calls']]}
-                   for n, v in seen.items()}
+        results = {n: {**v, 'calls': [(pc, f'{f:02X}', f'{t:04X}', f'{y:02X}') for pc, f, t, y in v['calls']],
+                       'sources': [(pc, f'{x:02X}') for pc, x in v['sources']]} for n, v in seen.items()}
         results['overflow']['slot01_changed'] = overwritten(out, 'overflow')
         results['refuse'] = refused.stderr.strip().splitlines()[-1:] if refused.stderr else []
         save_json(out / 'results.json', {'scenes': results, 'callers': found, 'checks': checks})

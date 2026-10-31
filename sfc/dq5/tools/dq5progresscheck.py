@@ -75,7 +75,7 @@ def environment(libdir, state, dest):
     for key in ('ADULT', 'ANYWHERE', 'BATTLE', 'FIELD', 'GROUP', 'LATESET', 'PARTY', 'POKE', 'ROMPATCH', 'SAVE',
                 'SET', 'TEST', 'TO', 'WAGON', 'PRE', 'LOOP', 'WAYPOINTS', 'PEEK', 'SHOTMSG', 'CALLS', 'WW',
                 'WWRANGE', 'WRAMWATCH', 'COVER', 'ACCESS', 'VMADD', 'SHOTS', 'DUMP', 'VRAMDUMP', 'BG3FONT',
-                'TRACE', 'LOG', 'RWATCH', 'WWATCH', 'LATE'):
+                'TRACE', 'LOG', 'RWATCH', 'WWATCH', 'LATE', 'OAMDUMP'):
         env.pop(key, None)
     env.update(LIBDIR=libdir, STATE=str(state), SHOT_DIR=str(dest))
     return env
