@@ -43,6 +43,19 @@ class HookTests(unittest.TestCase):
         for picture in (0x00, 0x06, 0x2C, 0xA8):
             self.assertEqual(run(picture, 0x3C).a & 0xFF, picture ^ 0x80)
 
+    def test_flag_entry_wins_only_when_the_flag_is_on(self):
+        entries = [(0x2B, None, (0x78, 0x10), 0x83)] + ENTRIES
+        for flag, want in ((0x10, 0x83), (0x00, 0x71)):
+            rom = bytearray(0x400000)
+            at = P.cpu(P.HOOK_AT)
+            code = P.hook(entries)
+            rom[lorom(at):lorom(at) + len(code)] = code
+            cpu = Cpu(bytes(rom), bytearray(0x20000))
+            cpu.wram[0xBC], cpu.wram[0x2190 + 0x78] = 0x3D, flag
+            cpu.x, cpu.p = 0x2B, 0x30
+            cpu.jsl(at)
+            self.assertEqual(cpu.a & 0xFF, want)
+
     def test_register_widths_come_back(self):
         # 03:D202 는 X 16비트(상위 0)로 부를 수 있다. PLP 가 폭을 되돌리고 X 는 그대로여야 한다
         cpu = run(0x9B, 0x36, p=0x20)
@@ -116,6 +129,10 @@ class SheetTests(unittest.TestCase):
             line, mapping = placed[p]
             for c, k in mapping.items():
                 self.assertEqual(board[(g, line)][k], c)
+
+    def test_pack_backtracks_when_largest_first_fragments(self):
+        bins = P.pack([('a', 6), ('b', 5), ('c', 5)], [10, 6])
+        self.assertEqual(sorted(sorted(b) for b in bins), [['a'], ['b', 'c']])
 
     def test_reduce_keeps_the_most_used_colors(self):
         hist = Counter({(k * 10, 0, 0): 100 - k for k in range(20)})

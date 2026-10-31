@@ -36,6 +36,7 @@ DQ5_TOOLS = HERE.parents[1] / 'dq5' / 'tools'
 sys.path[:0] = [str(HERE), str(DQ5_TOOLS)]
 
 import dq4chapterbox  # noqa: E402
+from dq4ch2event import ALENA_PICTURE, BREY_PICTURE, CHAPTER2, KIRYL_PICTURE  # noqa: E402
 from dq4chapter1 import apply_writes, lorom  # noqa: E402
 from dq4romassets import set_checksum  # noqa: E402
 import dq5npcrecord  # noqa: E402
@@ -50,6 +51,7 @@ ROWS4 = (('down', 2), ('left', 3), ('right', 1), ('up', 0))   # 4줄 시트는 1
 SCALE, BOTTOM, WIDTH = 22 / 28, 22, 16
 DARK_L, DARK_SHARE = 15, 0.34                    # Lab 밝기 15 아래를 눈·외곽선으로 봄(더 느슨하면 얼굴 그늘까지 검어짐)
 PROLOGUE = dq4chapterbox.PROLOGUE.where[0]       # 서장 마을(FC 14/00, 5장 첫머리도 같은 마을)
+COMPANION_PICTURES = '05:D9D5'                     # 사람 동료 그림 표(인물 번호 → 그림)
 LEADER_PICTURES = (0x2B, 0x2E)                     # 일행 0번: 실내 02:CA5A, 바깥 05:D98F
 
 
@@ -74,10 +76,13 @@ DEGRADE = (
 
 class Person:
     def __init__(self, pictures, group, sheet, role, anim='legs', main=False, palette=None, new_set=None, spare=None,
-                 allow=None, outline=False):
+                 allow=None, outline=False, flag=None, leader=False):
         self.pictures, self.group, self.sheet, self.role = pictures, group, sheet, role
         self.anim, self.main, self.palette, self.new_set, self.spare = anim, main, palette, new_set, spare
-        self.outline = outline
+        # flag = (7E:2190 바이트, 마스크): 그 깃발이 켜져 있을 때만 전용 팔레트 줄을 이 인물의 색으로 덮는다
+        self.outline, self.flag = outline, flag
+        # leader: 깃발이 켜져 있으면 일행 0번 그림(2B·2E)도 이 인물의 세트로(실내는 02:CA5A 가 늘 2B 를 둔다)
+        self.leader = leader
         # 타일이 모자랄 때 낮춰도 되는 단계(이름). 주요 인물은 기본으로 낮추지 않고 큰 세트로 옮긴다
         self.allow = allow if allow is not None else (() if main else tuple(n for n, _ in DEGRADE))
 
@@ -95,7 +100,7 @@ PEOPLE = (
     # 46타일이라 그런 자리가 없어 옆을 반전으로 나눠 쓴다(몬스터라 좌우 차이가 작다)
     Person((0x9B,), None, 'h153', '피사로의 부하', anim='frames', main=True, spare=0x6F,
            allow=('왼쪽=오른쪽 반전',)),
-    Person((0x0E,), None, 'h143', '신시아', main=True),
+    Person((0x0E,), PROLOGUE, 'h143', '신시아', main=True, spare=0x2D),
     Person((0x50,), None, 'h174', '개구리', anim='frames', main=True, outline=True),  # 풀·나뭇잎과 같은 초록이라
     Person((0x08,), PROLOGUE, 'h019', '검사', main=True, spare=0x90),
     Person((0x17,), PROLOGUE, 'h003', '어머니', spare=0x39),
@@ -120,6 +125,16 @@ PEOPLE = (
     Person((0x82,), None, 'h029', '하녀'),
     Person((0x0C,), None, 'h031', '시인'),
     Person((0x40,), None, 'h009', '상인'),
+    # 2장 일행. 크리프트·브라이는 사람 동료 그림 표(COMPANION_PICTURES)의 인물 09·05 칸이 그림을 고른다
+    Person((ALENA_PICTURE,), None, 'h109', '아리나', main=True, palette=7, flag=CHAPTER2, leader=True),
+    Person((KIRYL_PICTURE,), None, 'h112', '크리프트', main=True, palette=6, flag=CHAPTER2),
+    Person((BREY_PICTURE,), None, 'h115', '브라이', main=True, palette=5, flag=CHAPTER2),
+    # 2장 그룹(3D·45)의 인물. 시트는 NDS 스크립트 오브젝트의 모습 번호(= 시트 번호)와 그 대사의 화자 이름으로 골랐다
+    Person((0x0E,), None, 'h035', '공주', main=True),
+    Person((0x3D,), None, 'h013', '죄수'),
+    Person((0x45,), None, 'h071', '호빗'),
+    Person((0x1A,), None, 'h009', '초록 모자 상인'),
+    Person((0x26,), None, 'h048', '말', anim='frames'),
 )
 SHARED_LINES = (0, 1, 2, 4)
 HOOK_SITES = ('1F:CF45', '03:D202')
@@ -128,7 +143,10 @@ MAP_GROUP = 0x7E00BC
 DQ4_GROUPS = frozenset(range(0x36, 0x46))            # dq4groupbuild 가 만드는 DQ4 맵 그룹
 # 원래 자리에 들어가지 않는 타일 자료를 나눠 담는 곳(뱅크 3F 이하여야 레코드가 가리킴). 곡 롬의 0 끝 줄 안. 3F 는 앞쪽을
 # 인물 목록(dq4chapter1.NPC_BANK, 인라인 스크립트 포함)이 쓰므로 그 끝과 겹치지 않게 띄운다
-TILE_AREAS = (('3E:D700', 0xFC00 - 0xD700), ('3F:EB80', 0x10000 - 0xEB80))
+# 3C:F040~ 는 그룹 빌드(3A~3F)가 채운 뒤 남는 끝자리. 37·39·36:9E00~ 는 맵 레코드 자리(dq4chapter1.RECORDS_AT)라 쓰지 않는다
+# 3D:FA80~FD90 은 맵 팔레트 표(MAP_PALETTES_AT) 뒤의 남는 자리. 표가 자라 겹치면 apply_writes 가 멈춘다
+TILE_AREAS = (('3E:D700', 0xFC00 - 0xD700), ('3F:EB80', 0x10000 - 0xEB80), ('3C:F040', 0xFE00 - 0xF040),
+              ('3D:FA80', 0xFD90 - 0xFA80))
 PALETTES_AT, HOOK_AT = '3D:EA00', '3E:FC00'
 MAP_PALETTES_AT = '3D:EB60'                       # 맵 팔레트 줄 루틴·표를 옮길 곳(세트 팔레트 표 뒤 빈 자리)
 
@@ -443,16 +461,21 @@ def index_image(cells, pal, layout):
 
 
 def hook(entries):
-    """entries: [(그림 번호, 맵 그룹 또는 None, 세트)]. 맞는 첫 줄의 세트를, 없으면 원래 표를 싣는다. 부르는 곳의
-    A·X 폭이 달라 PHP·SEP #$30 … PLP 로 감싼다(두 곳 모두 뒤에서 N·Z 를 보지 않는다). 줄이 많으면 끝까지의
-    BRA 가 127바이트를 넘으므로 줄마다 PLP·RTL 로 바로 돌아간다."""
+    """entries: [(그림 번호, 맵 그룹 또는 None, 세트)] 또는 [(그림, 그룹, 깃발 (바이트, 마스크) 또는 None, 세트)].
+    맞는 첫 줄의 세트를, 없으면 원래 표를 싣는다. 부르는 곳의 A·X 폭이 달라 PHP·SEP #$30 … PLP 로 감싼다(두 곳
+    모두 뒤에서 N·Z 를 보지 않는다). 줄이 많으면 끝까지의 BRA 가 127바이트를 넘으므로 줄마다 PLP·RTL 로 바로 돌아간다."""
     code = bytearray(b'\x08\xe2\x30')                                   # PHP / SEP #$30
-    for picture, group, s in entries:
+    for entry in entries:
+        picture, group, flag, s = entry if len(entry) == 4 else (entry[0], entry[1], None, entry[2])
         code += bytes((0xE0, picture, 0xD0, 0))                           # CPX #p / BNE 다음 줄
         skip = [len(code) - 1]
         if group is not None:
             a = MAP_GROUP
             code += bytes((0xAF, a & 0xFF, a >> 8 & 0xFF, a >> 16, 0xC9, group, 0xD0, 0))   # LDA $BC / CMP / BNE
+            skip.append(len(code) - 1)
+        if flag is not None:
+            a = 0x7E2190 + flag[0]
+            code += bytes((0xAF, a & 0xFF, a >> 8 & 0xFF, a >> 16, 0x29, flag[1], 0xF0, 0))  # LDA 깃발 / AND / BEQ
             skip.append(len(code) - 1)
         code += bytes((0xA9, s, 0x28, 0x6B))                              # LDA #세트 / PLP / RTL
         for off in skip:
@@ -461,11 +484,14 @@ def hook(entries):
 
 
 def hook_entries(rom):
-    """원래 표와 다른 세트를 쓰는 인물의 (그림 번호, 맵 그룹, 세트). 맵 그룹을 보는 줄을 앞에 둔다."""
+    """원래 표와 다른 세트를 쓰는 인물의 (그림 번호, 맵 그룹, 깃발, 세트). 깃발·맵 그룹을 보는 줄을 앞에 둔다."""
     out = []
+    for p in PEOPLE:
+        if p.flag is not None and p.leader:
+            out += [(g, None, p.flag, target(p, rom)[0]) for g in LEADER_PICTURES]
     for p in sorted(PEOPLE, key=lambda p: p.group is None):
         if p.new_set is not None or p.spare is not None:
-            out += [(g, p.group, target(p, rom)[0]) for g in p.pictures]
+            out += [(g, p.group, None, target(p, rom)[0]) for g in p.pictures]
     return out
 
 
@@ -478,6 +504,9 @@ def hook_patch(rom):
             raise SystemExit(f'{site}: LDA $2586D0,X 가 아님 ({orig.hex(" ")})')
         writes.append({'at': site, 'hex': bytes((0x22, at & 0xFF, at >> 8 & 0xFF, at >> 16)).hex(' '),
                        'orig': orig.hex(' '), 'note': '그림 → 세트를 인물 훅으로(JSL)'})
+    brey = cpu(COMPANION_PICTURES) + 5
+    writes.append({'at': f'{brey >> 16:02X}:{brey & 0xFFFF:04X}', 'hex': f'{BREY_PICTURE:02x}',
+                   'orig': f'{rom[lorom(brey)]:02x}', 'note': '사람 동료 그림 표 인물 05(브라이) → 2C'})
     return {'format': 'dq5patch/1', 'name': 'people-hook', 'writes': writes, 'rom_size': 2}
 
 
@@ -494,6 +523,11 @@ def target(person, rom):
 def tiles(path, layout):
     cells = dq5spritewrite.cell_tiles(dq5spritewrite.image_grid(path, layout), layout)
     return len(dq5spritewrite.deduplicate(cells)[0])
+
+
+def chapter_groups(chapter):
+    import dq4groupbuild
+    return sorted(g for g, maps in dq4groupbuild.LINKS.items() if any(m.get('chapter') == chapter for m in maps))
 
 
 def usage(base):
@@ -571,9 +605,34 @@ def tile_areas(base):
     return tuple(out)
 
 
+def pack(items, room):
+    """[(세트, 바이트)] 를 자리 room(바이트 목록)에 나눠 담는 배치(자리마다 세트 목록). 큰 것부터 넣되 자리가
+    조각나면 되돌아가 다른 자리를 고른다(큰 것부터 가장 큰 자리에만 넣으면 남은 합이 넉넉해도 막혔다)."""
+    room, bins = list(room), [[] for _ in room]
+
+    def go(i):
+        if i == len(items):
+            return True
+        s, n = items[i]
+        tried = set()
+        for k in sorted(range(len(room)), key=lambda k: room[k]):
+            if room[k] >= n and room[k] not in tried:
+                tried.add(room[k])
+                room[k] -= n
+                bins[k].append(s)
+                if go(i + 1):
+                    return True
+                room[k] += n
+                bins[k].pop()
+        return False
+    if not go(0):
+        raise SystemExit(f'타일 자료 자리가 모자람: 세트·바이트 {items}, 자리 {room}')
+    return bins
+
+
 def split_patches(rom, doc, base, areas=TILE_AREAS):
     """원래 자리에 들어가지 않는 세트를 areas 에 나눠 담는 dq5spritewrite 패치들. 한 번 돌려 어느 세트가
-    얼마나 넘치는지 본 뒤, 큰 것부터 남은 자리가 가장 큰 곳에 넣고 자리마다 다시 만든다."""
+    얼마나 넘치는지 본 뒤, pack 으로 자리를 나누고 자리마다 다시 만든다."""
     first = cpu(areas[0][0])
     trial = dq5spritewrite.patch(rom, doc, base, first)
     size = Counter()
@@ -581,14 +640,12 @@ def split_patches(rom, doc, base, areas=TILE_AREAS):
         at = cpu(w['at'])
         if at >= first and '타일' in w['note']:
             size[w['note'].split()[1]] += len(w['hex'].split())
+    # 새 세트 레코드·그림 연결은 첫 패치만 실으므로 새 세트의 타일은 첫 자리에 둔다
+    fresh = {r['set'] for r in doc['new_sets']}
     room = [n for _, n in areas]
-    bins = [[] for _ in areas]
-    for s, n in sorted(size.items(), key=lambda t: -t[1]):
-        k = max(range(len(room)), key=lambda i: room[i])
-        if room[k] < n:
-            raise SystemExit(f'타일 자료 자리가 모자람: 세트 {s} {n}바이트, 남은 자리 {room}')
-        room[k] -= n
-        bins[k].append(s)
+    room[0] -= sum(n for s, n in size.items() if s in fresh)
+    bins = pack(sorted(((s, n) for s, n in size.items() if s not in fresh), key=lambda t: -t[1]), room)
+    bins[0] += sorted(fresh & set(size))
     out = []
     for k, (at, _) in enumerate(areas):
         if k == 0:
@@ -627,7 +684,7 @@ def build(base, dq5, assets, out, work):
                     '--size', '2', '-o', work / 'mid.sfc'], check=True, stdout=subprocess.DEVNULL)
     bgr = lambda pal: [0 if c is None else (c[2] >> 3) << 10 | (c[1] >> 3) << 5 | c[0] >> 3 for c in pal] + \
         [0] * (15 - len(pal))  # noqa: E731
-    fixed = {line: pal for p, _, _, _, _, _, line, pal in rows if p.palette is not None}
+    fixed = {line: pal for p, _, _, _, _, _, line, pal in rows if p.palette is not None and p.flag is None}
     # DQ4 그룹이 아닌 맵(필드 등)은 칸이 가장 많이 찬 그룹의 줄 색을 기본으로 둔다
     home = max({g for g, _ in board}, key=lambda g: sum(c is not None for (h, _), row in board.items() if h == g for c in row))
     base_lines = {line: board[(home, line)] for g, line in board if g == home}
@@ -638,6 +695,11 @@ def build(base, dq5, assets, out, work):
     map_doc = {'format': 'dq5objpalette/1',
                'new_map_palettes': [{'map': f'{g:02X}/FF', 'line': f'{0x08 + line:02X}', 'flag': 'FF', 'mask': '00',
                                      'colors': bgr(row)} for (g, line), row in sorted(board.items())]}
+    # 깃발이 붙은 전용 줄(2장 일행)은 그 장의 그룹과 필드 세계 셋에서 그 깃발이 켜졌을 때 덮는다
+    every = [f'{g:02X}/FF' for g in chapter_groups(2)] + [f'FE/{w:02X}' for w in range(3)]
+    map_doc['new_map_palettes'] += [{'map': m, 'line': f'{0x08 + line:02X}', 'flag': f'{p.flag[0]:02X}',
+                                     'mask': f'{p.flag[1]:02X}', 'colors': bgr(pal)}
+                                    for p, _, _, _, _, _, line, pal in rows if p.flag is not None for m in every]
     maps = dq5objpalette.patch(Rom(base.read_bytes()), map_doc, MAP_PALETTES_AT)
     (work / 'maps.dq5patch.json').write_text(json.dumps(maps, ensure_ascii=False, indent=1) + '\n')
     palettes = dq5objpalette.patch(Rom((work / 'mid.sfc').read_bytes()), pal_doc, PALETTES_AT)

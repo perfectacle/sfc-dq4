@@ -74,6 +74,9 @@ SET_NEXT_EXP = 0x21805A                            # A = 일행 번호: 다음 �
 
 CODE_AT = 0x5EF000             # 1장 사건 코드(5E:D000~) 뒤
 ALENA_PICTURE = 0x30           # 2장 동안 주인공 그림: DQ5 ビアンカ(인물 04) 그림을 대역으로
+# 크리프트·브라이의 그림. 사람 동료 그림 표(05:D9D5)의 인물 09 는 3B(ヘンリー), 05 는 29(サンチョ)인데 29 는 1장 농부도
+# 쓰므로 dq4people 이 05 칸을 쓰지 않는 그림 2C 로 돌린다. 합류 전 성 안의 두 사람도 같은 그림으로 세운다
+KIRYL_PICTURE, BREY_PICTURE = 0x3B, 0x2C
 HERO_PICTURE_AT = 0x05D9A1     # 05:D98F 의 주인공 갈래(그림 2E·2D·3A 를 고름). JSL + RTS 로 덮는다
 HERO_PICTURE_ORIG = bytes.fromhex('000b4000d003a92e60000b202ed003a93a60a92d60')
 
@@ -537,11 +540,11 @@ def npc_lists(ported, first_talk):
     t = talk_numbers(first_talk)
     lists = {lst["map"]: lst for lst in ported if "map" in lst}
 
-    def retalk(mp, cell, talk, time=None):
+    def retalk(mp, cell, talk, time=None, gfx=None):
         hit = 0
         for e in lists[mp]["entries"]:
             if (e["fields"]["x"], e["fields"]["y"]) == cell and time in (None, e["time"]):
-                e["fields"] = {**e["fields"], "talk": talk}
+                e["fields"] = {**e["fields"], "talk": talk, **({"gfx": gfx} if gfx is not None else {})}
                 hit += 1
         if not hit:
             raise SystemExit(f'{mp} {cell}: 2장 대화를 줄 인물이 없음')
@@ -551,8 +554,8 @@ def npc_lists(ported, first_talk):
     for e in lists[CASTLE]["entries"]:
         if (e["fields"]["x"], e["fields"]["y"]) in GATE:
             e["fields"] = {**e["fields"], "interval": 0}
-    retalk(*BREY_AT, t['brey'])
-    retalk(*KIRYL_AT, t['kiryl'])
+    retalk(*BREY_AT, t['brey'], gfx=BREY_PICTURE)
+    retalk(*KIRYL_AT, t['kiryl'], gfx=KIRYL_PICTURE)
     retalk(THRONE, KING_CELL, t['king'], 'day')
     retalk(TEMPE, CHIEF, t['chief'])
     retalk(TEMPE, PRIEST, t['priest'])
