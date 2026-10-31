@@ -86,8 +86,9 @@ class StepRoutineTests(unittest.TestCase):
         cases = [
             ({'format': 'x', 'groups': []}, 'format'),
             (document(('36', '00:C385')), '롬에 없음'),
-            (document(('01', '01:C385')), '뱅크 00'),
-            (document(('01', '00:7FFF')), '뱅크 00'),
+            (document(('01', '7E:C385')), '뱅크 00~7D'),
+            (document(('01', '00:7FFF')), '8000~FFFF'),
+            (document(('01', '3C:7FFF')), '8000~FFFF'),
             (document(('01', '00:C660')), '찾기 루틴 자리'),
             (document(('01', '00:c385')), '16진'),
             (document(('1', '00:C385')), '16진'),
@@ -108,6 +109,32 @@ class StepRoutineTests(unittest.TestCase):
             step.writes_for(Rom(bytes(data)), document())
         with self.assertRaisesRegex(ValueError, '뱅크 끝'):
             step.writes_for(self.rom, document(('01', '00:C385')), '3C:FFE0')
+
+    def test_far_routine_through_trampoline(self):
+        # 3C:B000: LDA #$5A / STA $7E0100 / SEC / RTL. 받침이 JSL 로 불러 RTS 로 캐리를 돌려준다
+        data = bytearray(self.rom.d)
+        put(data, 0x3CB000, bytes.fromhex('a9 5a 8f 00 01 7e 38 6b'))
+        base = Rom(bytes(data))
+        doc = document(('01', '3C:B000'), ('07', '3C:B000'), ('36', '21:8000'), ('03', '00:C565'))
+        with self.assertRaisesRegex(ValueError, '--table-at'):
+            step.writes_for(base, doc, new_maps=[(0x36, 0)])
+        writes = step.writes_for(base, doc, '3C:A000', [(0x36, 0)])
+        self.assertEqual(writes[2][:2], (step.TRAMPOLINES, bytes.fromhex('22 00 b0 3c 60 22 00 80 21 60')))
+        self.assertEqual(writes[2][2], LOOKUP_CODE[4:14])
+        moved = apply(base, writes)
+        self.assertEqual((routine(moved, 0x01), routine(moved, 0x07), routine(moved, 0x36), routine(moved, 0x03)),
+                         (0xC656, 0xC656, 0xC65B, 0xC565))
+        wram = bytearray(0x20000)
+        cpu = Cpu(moved.d, wram)
+        cpu.jsr(routine(moved, 0x01), max_steps=100)
+        self.assertEqual((cpu.wram[0x100], cpu.p & 1, cpu.s), (0x5A, 1, 0x1FF))
+        got = {row['group']: row['routine'] for row in step.dump(moved)['groups']}
+        self.assertEqual((got['01'], got['07'], got['36'], got['03']), ('3C:B000', '3C:B000', '21:8000', '00:C565'))
+        many = document(*((f'{g:02X}', f'21:{0x8000 + g:04X}') for g in range(10)))
+        with self.assertRaisesRegex(ValueError, '9개'):
+            step.writes_for(base, many, '3C:A000')
+        self.assertEqual(len(step.writes_for(base, document(*((f'{g:02X}', f'21:{0x8000 + g:04X}') for g in range(9))),
+                                             '3C:A000')[2][1]), 45)
 
     def test_max_groups(self):
         # 85그룹이면 끝 FF 가 X = 255 에 놓여 8비트 X 로 읽힌다. 86그룹부터는 X 가 0 으로 돌아 끝을 못 찾는다.

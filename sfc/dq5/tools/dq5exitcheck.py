@@ -121,10 +121,13 @@ CASES = [
     ('grow-high-51', 'g', '50/51,31,17,1', 'down:16', ('01/04', None, 1)),
     ('grow-edge', 'g', '01/06,0,10,1', 'left:24', ('01/04', (16, 8), 1)),
     ('place-kind', 'p', '01/01,13,8,1', 'up:24', ('01/04', ('arrival', 1, 4, 1), None)),
+    # 필드행 갈래: 03/00 은 2A:F52A 에 항목이 없어 2A:F425 로 필드에, 15/0A 왼쪽 출구는 2A:F52A 가 54/50 으로 돌린다.
+    ('field-original', 'original', '03/00,38,70,1', 'down:60', ('field', None, None)),
+    ('redirect-original', 'original', '15/0A,21,51,1', 'down:16', ('54/50', None, None)),
 ]
-# --audit 이 DB 창을 모으는 원본 롬 장면: 출구 세 종류, 영역 이동(효과음 갈래 포함)·고층·음수 가장자리.
+# --audit 이 DB 창을 모으는 원본 롬 장면: 출구 세 종류, 영역 이동(효과음 갈래 포함)·고층·음수 가장자리·필드행 두 갈래.
 AUDIT = ('same-original', 'other-original', 'position-original', 'rect-old-original', 'high-original',
-         'edge-original', 'sound-original', 'stair33-opened')
+         'edge-original', 'sound-original', 'stair33-opened', 'field-original', 'redirect-original')
 ENV_CLEAR = ('ADULT', 'ANYWHERE', 'AUDIT', 'AUDITOPEN', 'BATTLE', 'FIELD', 'GROUP', 'LATESET', 'PARTY', 'POKE',
              'CELL', 'DP86OK', 'MSGLOG', 'ROMPATCH', 'SAVE', 'SET', 'STALE', 'WAGON', 'WARPEXIT')
 # r 롬은 네 표를 모두 옮겼으므로 옛 자리(일반 표 2A:D812~F223, 고층 01:9635~9770)를 읽는 곳이 없어야 한다.
