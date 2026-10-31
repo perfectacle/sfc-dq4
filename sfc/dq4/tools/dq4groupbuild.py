@@ -86,9 +86,9 @@ LINKS = {
     0x3C: [{"fc": 0x14, "arrival": (0x0C, 0x18), "attrs": "19/02", "music": 0x06, "field": [(0x91, 0x31)], "out": "down:64",
             "people": False}],
     # Chapter 2: サントハイム castle, テンペ and フレノール. フレノール's FC arrival is on the map's top row.
-    0x3D: [{"fc": 0x01, "arrival": (0x0F, 0x1B), "attrs": "03/00", "field": [(0x27, 0x49)], "out": "down:64"},
-           {"fc": 0x0E, "arrival": (0x0A, 0x2C), "attrs": "03/00", "field": [(0x47, 0x39)], "out": "down:64"},
-           {"fc": 0x0F, "arrival": (0x16, 0x00), "attrs": "03/00", "field": [(0x60, 0x28)], "out": "up:64"}],
+    0x3D: [{"fc": 0x01, "arrival": (0x0F, 0x1B), "attrs": "03/00", "field": [(0x27, 0x49)], "out": "down:64", "chapter": 2},
+           {"fc": 0x0E, "arrival": (0x0A, 0x2C), "attrs": "03/00", "field": [(0x47, 0x39)], "out": "down:64", "chapter": 2},
+           {"fc": 0x0F, "arrival": (0x16, 0x00), "attrs": "03/00", "field": [(0x60, 0x28)], "out": "up:64", "chapter": 2}],
     # Chapter 3: レイクナバ and the cave where its iron safe lies (きたのどうくつ, arrival on its stair to the field),
     # ボンモール, and エンドール. Each town leads a DQ5 group, so each takes a ルーラ slot (dq4fieldtravel). Their
     # people and sellers are those of chapter 3's start ($615A = 2).
@@ -145,23 +145,38 @@ ENTRY_ROW = {0: 1, 2: 0}
 COMPANION_TABLE = 0x0A
 COMPANION_NAMES = {0x05 * 4: "호이민"}
 COMPANION_SPARE = range(4)
+# Human companions' names (name table 00, person number - 3). Chapter 2 borrows the person records of ヘンリー (09) and
+# サンチョ (05) for クリフト and ブライ; ピピン, フローラ and パパス never join in this hack, so their slots give the bytes.
+PERSON_TABLE = 0x00
+PERSON_NAMES = {0x09 - 3: "크리프트", 0x05 - 3: "브라이"}
+PERSON_SPARE = (0x06 - 3, 0x07 - 3, 0x08 - 3)
 
 
-def companion_names(dq5):
+def korean_names(dq5, table, korean, spare):
+    """dq5names/1 table: the Korean names in name-entry display bytes, the extra bytes cut off the ends of `spare`
+    slots so the packed table keeps its length."""
     import dq4nameentry
     import dq5namewrite
-    original = dq5namewrite.read_tables(dq5)[COMPANION_TABLE]
+    original = dq5namewrite.read_tables(dq5)[table]
     names = {n: list(b"".join(dq4nameentry.code_bytes(dq4nameentry.GLYPHS.index(c)) for c in name))
-             for n, name in COMPANION_NAMES.items()}
+             for n, name in korean.items()}
     grow = sum(len(raw) - len(original[n]) for n, raw in names.items())
-    for n in COMPANION_SPARE:
-        cut = min(grow, len(original[n]))
-        if cut:
+    for n in spare:
+        cut = min(grow, len(original[n]) - 1)
+        if cut > 0:
             names[n] = original[n][:len(original[n]) - cut]
             grow -= cut
     if grow > 0:
-        raise ValueError(f"companion names: {grow} bytes more than slots {COMPANION_SPARE} hold")
-    return {"table": COMPANION_TABLE, "names": [{"id": n, "bytes": raw} for n, raw in sorted(names.items())]}
+        raise ValueError(f"name table {table:02X}: {grow} bytes more than slots {list(spare)} hold")
+    return {"table": table, "names": [{"id": n, "bytes": raw} for n, raw in sorted(names.items())]}
+
+
+def companion_names(dq5):
+    return korean_names(dq5, COMPANION_TABLE, COMPANION_NAMES, COMPANION_SPARE)
+
+
+def person_names(dq5):
+    return korean_names(dq5, PERSON_TABLE, PERSON_NAMES, PERSON_SPARE)
 
 
 def cell(x, y):
@@ -743,6 +758,8 @@ def _build(pool, dq5, dq4, out, with_people):
     # names other patches write between tables 0A and 0B.
     checks.append(step("dq5namewrite.py", "companion-names",
                        {"format": "dq5names/1", "tables": [companion_names(dq5.read_bytes())]}, dq5))
+    checks.append(step("dq5namewrite.py", "person-names",
+                       {"format": "dq5names/1", "tables": [person_names(dq5.read_bytes())]}, dq5))
     zones, grids, zone_report = dq4fieldencounter.docs(prg, dq5.read_bytes(), encounter_orig, fc_zones.values())
     _save(out / "zone-report.json", zone_report)
     step("dq5progresswrite.py", "zones", zones, dq5)

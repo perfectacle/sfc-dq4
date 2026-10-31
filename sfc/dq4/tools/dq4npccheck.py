@@ -215,6 +215,8 @@ def main():
         ported = json.loads((args.build / "text.json").read_text(encoding="utf-8"))["messages"]
         first = dq4npcport.FIRST_MESSAGE + sum(1 for e in ported if e["id"] >= dq4npcport.FIRST_MESSAGE)
         events = dq4ch1event.start_messages(first)
+        import dq4ch2event
+        events.update(dq4ch2event.start_messages(first + len(dq4ch1event.MESSAGES)))
 
     jobs, later = [], []
     for m, persons in people.items():

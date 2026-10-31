@@ -20,9 +20,10 @@ class FlagTest(unittest.TestCase):
         earlier = {v for k, v in vars(dq4ch1event).items() if k.isupper() and isinstance(v, tuple) and len(v) == 2
                    and all(isinstance(x, int) for x in v) and v[0] < 0x80 and v[1] in (1, 2, 4, 8, 16, 32, 64, 128)}
         earlier |= {_flag(f) for f in (dq4prologue.box.PROLOGUE.flag, dq4prologue.box.CHAPTER1.flag)}
-        for flag in (ev.CHAPTER2, ev.OPENING):
+        mine = (ev.CHAPTER2, ev.OPENING, ev.KICKED, ev.JOINED, ev.TALKED_GATE, ev.TALKED_BREY, ev.TALKED_KIRYL, ev.READY)
+        for flag in mine:
             self.assertNotIn(flag, earlier)
-        self.assertNotEqual(ev.CHAPTER2, ev.OPENING)
+        self.assertEqual(len(set(mine)), len(mine))
 
 
 class RecordTest(unittest.TestCase):
@@ -46,22 +47,35 @@ class RecordTest(unittest.TestCase):
 
 class NativeTest(unittest.TestCase):
     def test_addresses_do_not_depend_on_the_rom(self):
-        code, at = ev.native(bytes(range(42)))
+        data = bytes(k & 0xFF for k in range(0x400000))
+        code, at = ev.native(data)
         self.assertEqual(at, ev.native()[1])
-        self.assertEqual(code[:42], ev.alena_record(bytes(range(42))))
-        self.assertLess((ev.CODE_AT & 0xFFFF) + len(code), 0x10000)
+        self.assertEqual(code[:42], ev.alena_record(ev.person_record(data, 0)))
+        more, tail = ev.tail_native(0xE00, data)
+        self.assertEqual(tail, ev.tail_native(0xE00)[1])
+        self.assertLess((ev.CODE_AT & 0xFFFF) + len(code) + len(more), 0x10000)
+
+    def test_recruits_start_at_level_one(self):
+        data = bytes(0x400000)
+        kiryl, brey = ev.recruit_records(data)
+        self.assertEqual((kiryl[0x12], kiryl[2], kiryl[4], kiryl[0x16:0x18], kiryl[0x14]), (1, 18, 7, b'\x02\x43', 0x03))
+        self.assertEqual((brey[0x12], brey[2], brey[4], brey[0x16:0x18]), (1, 16, 10, b'\x00\x42'))
 
     def test_hero_picture_hook(self):
         data = bytearray(0x400000)
         o = ev.ch1.lorom(ev.HERO_PICTURE_AT)
         data[o:o + len(ev.HERO_PICTURE_ORIG)] = ev.HERO_PICTURE_ORIG
+        s = ev.ch1.lorom(ev.STEP_HOOK_AT)
+        data[s:s + 4] = ev.STEP_HOOK_ORIG
         original = bytearray(0x400000)
-        out = ev.apply(bytes(data), bytes(original))
+        out = ev.apply(bytes(data), bytes(original), 0xE00)
         _, at = ev.native()
         a = at['hero_picture']
         self.assertEqual(out[o:o + 5], bytes((0x22, a & 0xFF, a >> 8 & 0xFF, a >> 16, 0x60)))
+        step = ev.tail_native(0xE00)[1]['step']
+        self.assertEqual(out[s:s + 4], bytes((0x22, step & 0xFF, step >> 8 & 0xFF, step >> 16)))
         with self.assertRaises(SystemExit):
-            ev.apply(bytes(0x400000), bytes(original))
+            ev.apply(bytes(0x400000), bytes(original), 0xE00)
 
     def test_event_moves_to_the_throne_room(self):
         _, at = ev.native()
@@ -76,12 +90,32 @@ class ListTest(unittest.TestCase):
         king = {"from": {"list": "05:8857", "index": 6}, "time": "day",
                 "fields": {"x": ev.KING_CELL[0], "y": ev.KING_CELL[1], "interval": 1}}
         other = {"from": {"list": "05:8857", "index": 6}, "time": "day", "fields": {"x": 2, "y": 3, "interval": 4}}
-        new, over = ev.npc_lists([{"map": ev.THRONE, "entries": [king, other]}])
-        opening, = new
-        self.assertEqual(opening["entries"][0]["from"], ev.KING_SRC)
-        self.assertEqual(opening["entries"][1], other)
-        self.assertEqual(over, [{"map": ev.THRONE, "flag": ev.OPENING[0], "when": "on", "mask": ev.OPENING[1],
-                                 "list": "new:ch2_opening"}])
+        def person(cell, time="day"):
+            return {"from": {"list": "05:8857", "index": 6}, "time": time,
+                    "fields": {"x": cell[0], "y": cell[1], "interval": 4, "talk": 0x100}}
+        ported = [{"map": ev.THRONE, "entries": [king, other, person(ev.BREY_AT[1])]},
+                  {"map": ev.CASTLE, "entries": [person(ev.GATE[0]), person(ev.GATE[1]), person(ev.KIRYL_AT[1])]},
+                  {"map": ev.BEDROOM, "entries": [person(ev.CARPENTER), person((2, 3))]}]
+        king["fields"]["talk"] = 0x100
+        _, new, over = ev.npc_lists(ported, 0xA00)
+        t = ev.talk_numbers(0xA00)
+        lists = {n["name"]: n["entries"] for n in new}
+        self.assertEqual(lists["ch2_opening"][0]["from"], ev.KING_SRC)
+        self.assertEqual(lists["ch2_opening"][1], other)
+        self.assertEqual(over[0], {"map": ev.THRONE, "flag": ev.OPENING[0], "when": "on", "mask": ev.OPENING[1],
+                                   "list": "new:ch2_opening"})
+        # 수리공은 셋과 이야기한 뒤·걷어찬 뒤 목록에서 빠지고, 묻는 인물은 기본 목록에 밤에만
+        cells = lambda name: [(e["fields"]["x"], e["fields"]["y"]) for e in lists[name]]  # noqa: E731
+        self.assertNotIn(ev.CARPENTER, cells("ch2_ready"))
+        self.assertNotIn(ev.CARPENTER, cells("ch2_kicked"))
+        room = ported[2]["entries"]
+        self.assertEqual([e["time"] for e in room if e["from"] == ev.ASKER_SRC], ["night"])
+        # 합류 뒤 브라이·크리프트는 성에서 빠지고 문지기는 비켜선다
+        self.assertNotIn(ev.BREY_AT[1], cells("ch2_throne_joined"))
+        self.assertNotIn(ev.KIRYL_AT[1], cells("ch2_castle_joined"))
+        gate = [e for e in lists["ch2_castle_joined"] if e["fields"]["talk"] == t["gate_back"]]
+        self.assertEqual([e["fields"]["x"] for e in gate], [ev.GATE[0][0] - 2, ev.GATE[1][0] + 2])
+        self.assertEqual(ported[1]["entries"][0]["fields"]["interval"], 0)
 
     def test_opening_script_calls_box_then_reveal(self):
         script = ev.scripts(0xE00, {'box2': 0x5F8000, 'reveal': 0x5F9000})[0]
@@ -89,6 +123,17 @@ class ListTest(unittest.TestCase):
         self.assertEqual(ops, ['3F', '37', '21', '37', '21', '21', '11', '40', '16'])
         self.assertEqual(script["commands"][1]["args"], [0x00, 0x80, 0x5F])
         self.assertEqual(script["commands"][6]["args"], [ev.OPENING[0], ~ev.OPENING[1] & 0xFF])
+
+    def test_ready_needs_all_three_talks(self):
+        body = ev.talk_scripts(0xE00)[ev.TALKS.index('gate')]
+        flag, ready = body[1], body[2]
+        self.assertEqual(flag, {"op": "flag-on", "index": ev.TALKED_GATE[0], "mask": ev.TALKED_GATE[1]})
+        seen = []
+        while ready["op"] == "if":
+            seen.append((ready["cond"]["index"], ready["cond"]["mask"]))
+            ready = ready["then"][0] if isinstance(ready["then"], list) else ready["then"]
+        self.assertEqual(sorted(seen), sorted([ev.TALKED_GATE, ev.TALKED_BREY, ev.TALKED_KIRYL]))
+        self.assertEqual(ready, {"op": "flag-on", "index": ev.READY[0], "mask": ev.READY[1]})
 
 
 if __name__ == '__main__':
