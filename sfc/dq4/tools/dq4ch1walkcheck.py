@@ -7,9 +7,11 @@
   - 돌아다니는 이무르 밤의 아이를 제자리에 묶는다.
   - 조우 계수 표(23:EA44, 파일 11EA44)를 0 으로 덮어 걸음 전투를 없앤다.
   - 탑 위 보스 두 마리(몬스터 E2·52)를 HP 1·수비 0 으로 덮고, 보스 구간만 주인공 HP 를 999 로 묶는다.
-구간마다 끝 맵·깃발·물건을 보고, 마지막은 1장 끝 서술 뒤 2장 왕좌의 방에 들어가 제목 상자를 기다리는지 본다.
+구간마다 끝 맵·깃발·물건을 보고, 마지막은 1장 끝이다. 1장에서 끝내는 롬(기본 빌드)은 성 앞에서 끝맺음 서술과
+끝 상자를 지나 버튼으로 리셋되고, 드라이버를 다시 올리지 않고 다시 시작해 리셋 루틴이 소리 켜기 뒤로 이어지는지
+본다. --chapter2 롬(dq4build.py --chapter2)은 1장 끝 서술 뒤 2장 왕좌의 방에 들어가 제목 상자를 기다리는지 본다.
 
-  MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4ch1walkcheck.py --rom work/ch1/dq4-ch1.sfc --out work/ch1walk
+  MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4ch1walkcheck.py --rom work/ch1/dq4-ch1.sfc --out work/ch1walk [--chapter2]
   (--from 구간 --states 앞 출력 폴더 로 그 구간부터 다시 걷는다)
 형식은 sfc/dq4/docs/dq4-chapter1-format.md 「검증」.
 """
@@ -129,10 +131,23 @@ SEGMENTS = [
     ('imuru', 'warp', '37/00,28,49', {'poke': DAY, 'map': '37/00'}),
     ('homecoming', 'walk', '28,45;' + taps(6) + ';' + pc.CLOSE, {'poke': DAY, 'off': ['KIDS_FOLLOW']}),
     ('castle', 'warp', '36/01,30,66', {'map': '36/01'}),
-    # 병사가 갈라서고 왕 앞까지 저절로 걸어가 칭찬·선물·레벨업 줄·작별 뒤, 성 앞에서 1장 끝 서술 → 2장 왕좌의 방
+    # 병사가 갈라서고 왕 앞까지 저절로 걸어가 칭찬·선물·레벨업 줄·작별 뒤 성 앞에 들어선다
+    ('king', 'walk', '30,51;' + taps(120, 60), {'changes': 1, 'after': 60, 'map': '36/00',
+                                                 'want': ['REPORTED'], 'off': ['CHAPTER2', 'OPENING']}),
+    # 끝맺음 서술 둘을 넘기고 끝 상자에서 누르면 리셋된다
+    ('ending', 'ending', None, {}),
+]
+# --chapter2 롬: 성 앞에서 1장 끝 서술 → 2장 왕좌의 방
+CHAPTER2_END = [
     ('king', 'walk', '30,51;' + taps(120, 60), {'changes': 2, 'after': 150, 'map': '3D/01',
                                                  'want': ['REPORTED', 'CHAPTER2', 'OPENING']}),
 ]
+MSG = DQ5_TOOLS / 'lua' / 'dq5msg.lua'
+ENDING_PRE = ','.join(['wait:52', 'a:8'] * 14) + ',wait:900'
+RESET = 0x008639
+DRIVER_UPLOAD = box.DRIVER_UPLOAD
+DRIVER_HELLO = 0x24FDF9          # 24:FD6E 가 드라이버를 올린 뒤 부르는 인사(Chun → SOFT)
+AFTER_SOUND = 0x008680           # 리셋 루틴에서 24:FD6E(소리 켜기)를 부른 JSL(00:867C) 다음
 
 
 def frames(waypoints):
@@ -165,8 +180,41 @@ def watch_flags():
     return ';'.join(f'{k}=7E{a & 0xFFFF:04X}:1' for k, (a, _) in FLAGS.items()) + f';ITEMS0={ITEMS:X}:6;ITEMS1={ITEMS + 6:X}:6;BE=7E00BE:1'
 
 
+def ending(mesence, rom, state, dest):
+    """끝 상자에서 버튼을 눌러 리셋한 뒤의 호출 차례를 본다."""
+    import dq4chapter1
+    scenes = dq4chapter1.scenes(True)
+    end_box = box.entry_points(scenes)['end']
+    acked = box.boot_points(scenes)['acked']
+    calls = [end_box, RESET, acked, DRIVER_UPLOAD, DRIVER_HELLO, AFTER_SOUND]
+    run(mesence, rom, MSG, dest, {'STATE': str(state), 'PRE': ENDING_PRE, 'MAXF': '2400',
+                                  'CALLS': ','.join(f'{a:06X}' for a in calls)}, 200)
+    text = (dest / 'msg.txt').read_text(encoding='utf-8') if (dest / 'msg.txt').exists() else ''
+    seen = [(int(f), int(pc, 16)) for f, pc in re.findall(r'^(\d+) (\w{6}) ', text, re.M)]
+    def first(addr, after=0):
+        return next((f for f, pc in seen if pc == addr and f >= after), None)
+    problems = []
+    shown = first(end_box)
+    reset = first(RESET, shown or 0) if shown is not None else None
+    if shown is None:
+        problems.append('끝 상자가 불리지 않음')
+    elif reset is None:
+        problems.append('끝 상자 뒤 리셋되지 않음')
+    else:
+        if first(acked, reset) is None:
+            problems.append('드라이버가 다시 시작 명령을 받지 않음')
+        if first(DRIVER_UPLOAD, reset) is not None:
+            problems.append('리셋 뒤 드라이버를 IPL 로 다시 올리려 함')
+        if first(DRIVER_HELLO, reset) is None or first(AFTER_SOUND, reset) is None:
+            problems.append('리셋 루틴이 소리 켜기에서 이어지지 않음')
+    return {'name': 'ending', 'status': 'failed' if problems else 'passed', 'problems': problems,
+            'frames': {'box': shown, 'reset': reset, 'after_sound': first(AFTER_SOUND, reset or 0) if reset else None}}
+
+
 def segment(mesence, rom, state, dest, seg, patch):
     name, how, arg, opt = seg
+    if how == 'ending':
+        return ending(mesence, rom, state, dest)
     poke = opt.get('poke', '')
     if how == 'warp':
         run(mesence, rom, WARP, dest, {'STATE': str(state), 'TO': arg, 'SAVE': 'end.mss', 'SETTLE': '120',
@@ -228,7 +276,9 @@ def main():
     ap.add_argument('--from', dest='start', help='이 구간부터(앞 구간의 end.mss 는 --states 에서)')
     ap.add_argument('--until', help='이 구간까지만')
     ap.add_argument('--states', type=Path, help='앞서 걸은 출력 폴더')
+    ap.add_argument('--chapter2', action='store_true', help='1장 끝에서 2장으로 넘어가는 롬(dq4build.py --chapter2)')
     args = ap.parse_args()
+    segments = SEGMENTS[:-2] + CHAPTER2_END if args.chapter2 else SEGMENTS
     mesence = Path(os.environ['MESENCE'])
     out = args.out.resolve()
     if out.exists() and any(out.iterdir()):
@@ -238,7 +288,7 @@ def main():
     shutil.copyfile(args.rom.resolve(), rom)
     data = rom.read_bytes()
     patch = NO_ENCOUNTERS
-    names = [s[0] for s in SEGMENTS]
+    names = [s[0] for s in segments]
     first = names.index(args.start) if args.start else 0
     if first:
         state = (args.states or out).resolve() / names[first - 1] / 'end.mss'
@@ -251,8 +301,8 @@ def main():
         if not state.exists():
             raise SystemExit('세이브스테이트를 만들지 못함')
     results = []
-    last = names.index(args.until) if args.until else len(SEGMENTS) - 1
-    for seg in SEGMENTS[first:last + 1]:
+    last = names.index(args.until) if args.until else len(segments) - 1
+    for seg in segments[first:last + 1]:
         boss = seg[3].get('boss')
         r = segment(mesence, rom, state, out / seg[0], seg,
                     patch + (';' + boss_patch(data) if boss else ''))

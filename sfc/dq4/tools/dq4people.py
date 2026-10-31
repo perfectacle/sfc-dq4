@@ -554,18 +554,35 @@ def prepare(rom, assets, work, base=None):
     return rows, board
 
 
-def split_patches(rom, doc, base):
-    """원래 자리에 들어가지 않는 세트를 TILE_AREAS 에 나눠 담는 dq5spritewrite 패치들. 한 번 돌려 어느 세트가
+def tile_areas(base):
+    """TILE_AREAS 를 base 롬(곡 롬)에 맞춘다. 앞 단계가 그 뱅크 끝의 0 줄 안까지 자료를 늘렸으면 쓰인 끝 다음 16바이트
+    경계부터 쓴다(1장 빌드의 인물 자료가 3F 끝을 향해 자란다)."""
+    out = []
+    for at, size in TILE_AREAS:
+        start, end = cpu(at), cpu(at) + size
+        o = lorom(start)
+        used = [i for i in range(o, lorom(end - 1) + 1) if base[i]]
+        if used:
+            moved = (start + used[-1] - o + 0x10) & ~0xF
+            if any(base[lorom(moved):lorom(end - 1) + 1]):
+                raise SystemExit(f'{at}: 타일 자리 안에 0 이 아닌 자료가 흩어져 있음')
+            start = moved
+        out.append((f'{start >> 16:02X}:{start & 0xFFFF:04X}', end - start))
+    return tuple(out)
+
+
+def split_patches(rom, doc, base, areas=TILE_AREAS):
+    """원래 자리에 들어가지 않는 세트를 areas 에 나눠 담는 dq5spritewrite 패치들. 한 번 돌려 어느 세트가
     얼마나 넘치는지 본 뒤, 큰 것부터 남은 자리가 가장 큰 곳에 넣고 자리마다 다시 만든다."""
-    first = cpu(TILE_AREAS[0][0])
+    first = cpu(areas[0][0])
     trial = dq5spritewrite.patch(rom, doc, base, first)
     size = Counter()
     for w in trial['writes']:
         at = cpu(w['at'])
         if at >= first and '타일' in w['note']:
             size[w['note'].split()[1]] += len(w['hex'].split())
-    room = [n for _, n in TILE_AREAS]
-    bins = [[] for _ in TILE_AREAS]
+    room = [n for _, n in areas]
+    bins = [[] for _ in areas]
     for s, n in sorted(size.items(), key=lambda t: -t[1]):
         k = max(range(len(room)), key=lambda i: room[i])
         if room[k] < n:
@@ -573,7 +590,7 @@ def split_patches(rom, doc, base):
         room[k] -= n
         bins[k].append(s)
     out = []
-    for k, (at, _) in enumerate(TILE_AREAS):
+    for k, (at, _) in enumerate(areas):
         if k == 0:
             # 첫 패치가 새 세트 레코드·그림 연결과 원래 자리에 들어가는 세트를 모두 맡는다
             part = {**doc, 'sets': [r for r in doc['sets'] if not any(r['set'] in b for b in bins[1:])]}
@@ -602,7 +619,7 @@ def build(base, dq5, assets, out, work):
     # 장 주인공 두 세트는 그림 2B·2E 에 하나씩 잇는다(훅이 앞서므로 표 값은 쓰이지 않는다)
     doc['gfx'] += [{'gfx': f'{g:02X}', 'set': f'{s:02X}'} for g, s in zip(LEADER_PICTURES, leader_sets)]
     (work / 'sprite.json').write_text(json.dumps(doc, indent=1) + '\n')
-    sprites = split_patches(Rom(original), doc, work)
+    sprites = split_patches(Rom(original), doc, work, tile_areas(base.read_bytes()))
     for k, sprite in enumerate(sprites):
         (work / f'sprite{k}.dq5patch.json').write_text(json.dumps(sprite, ensure_ascii=False, indent=1) + '\n')
     subprocess.run([sys.executable, DQ5_TOOLS / 'dq5build.py', dq5, 'build',
