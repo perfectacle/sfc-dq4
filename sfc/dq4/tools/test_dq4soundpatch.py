@@ -135,15 +135,19 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(patch.read_sets(out)[0x1D], bytes([2, 2, 0x1F, 0x05]))
         self.assertEqual(report['songs'][0]['spc_budget']['streamed_while_playing'], [])
 
-    def test_resident_wave_replaces_only_a_resident_effect_wave_no_larger_than_before(self):
+    def test_resident_wave_replaces_only_a_resident_sample_no_larger_than_before(self):
         small = brr.resource(bytes(18), 1, pitch=0x0831)
         out, _ = patch.install(self.base, {2: self.item}, resident_waves={0x20: small})
         self.assertEqual(patch.sample_size(out, 0x20), len(small) - 2)
+        # 효과음 파형이 아닌 늘 두는 샘플(DQ5 여관 곡의 05)도 바꿀 수 있다
+        out, _ = patch.install(self.base, {2: self.item}, resident_waves={0x05: small})
+        self.assertEqual(patch.sample_size(out, 0x05), len(small) - 2)
         with self.assertRaises(ValueError):
             big = brr.resource(bytes(patch.sample_size(self.base, 0x20)), 1)
             patch.install(self.base, {2: self.item}, resident_waves={0x20: big})
+        other = next(x for x in range(0x01, 0x26) if x not in patch.resident_samples(self.base))
         with self.assertRaises(ValueError):
-            patch.install(self.base, {2: self.item}, resident_waves={0x05: small})
+            patch.install(self.base, {2: self.item}, resident_waves={other: small})
 
     def test_fast_receive_adds_ff00_block_and_driver_jump(self):
         out, report = patch.install(self.base, {0x02: patch.Replacement(melody(), (0x03,))}, fast_receive=True)
