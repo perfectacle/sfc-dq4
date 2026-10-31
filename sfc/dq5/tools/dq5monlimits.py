@@ -39,6 +39,14 @@ ROW_LIMIT = 0x40 - 1 - 16
 # 그 위로 싸우는 도중의 풀기가 쌓인다. 원래 게임의 가장 큰 합(부르기로 올 그림 포함)이 97 이고, 도중의 풀기가 쓰는 양은
 # 재지 않아 원래 게임이 남긴 30칸을 그대로 남긴다.
 PIECE_LIST_LIMIT = 0x80 - 1 - 30
+# 16x16 자리 사슬 7E:8400 도 128칸이다. 그림의 마지막 자리 뒤 빈 칸 찾기(22:AD2C)는 Y 가 8비트라 128칸을 모두 쓰면
+# 조각 목록 사슬 7E:8480 쪽으로 넘어가 거기의 빈 칸을 다음 자리($0D1D)로 삼는다. 앞 칸을 채워 둔 실측에서 127칸은 다음 자리가
+# 127, 128칸은 170(7E:84AA)이었다(dq5slotcheck.py). 그래서 한 번에 풀려 있는 자리 합은 127 까지다.
+# 연출의 OBJ 그림(22:BB3D)도 같은 할당(22:AC79)으로 자리를 받는다. 도구 장면의 연출 82가지에서 한꺼번에 쓴 자리는 6 까지였다
+# (dq5slotcheck.py, 장면 밖 연출은 재지 않음). 싸우는 도중의 풀기(パルプンテ·モシャス·がったい)는 그림 MID_PICTURES 개를
+# 더 푼다고 보고 가장 큰 그림들 몫을 남긴다. モシャス 는 몬스터마다 걸려 여럿이 풀 수 있어 하나보다 많이 남기지만, 이 수도
+# 증명하지 않은 가정이다.
+SLOT_LIMIT, EFFECT_SLOTS, MID_PICTURES = 0x80 - 1, 6, 2
 FIRST_SUMMON, SUMMONED = 0xAE, (0x1E, 0x27, 0x1B, 0x61, 0x67, 0x8C, 0xB2, 0xCF)   # 행동 AE~B5 가 부르는 몬스터(20:D9D6)
 SKIP_FIRST = (0xE7, 0xEA)
 # 22:89E5·22:8A57·22:8A85 가 무리를 더하거나 합치는 ミルドラース 와 그 둘째 무리. 이 셈으로는 배치를 셀 수 없다.
@@ -190,6 +198,23 @@ class Pictures:
         부르기를 거듭해 닿는 그림을 모두 더한다."""
         return sum(self.stats(g)[0]['h'] for g in self.reachable(groups))
 
+    def reach_slots(self, groups):
+        """전투를 시작할 때 푼 그림과 부르기로 올 그림의 16x16 자리 합."""
+        return sum(self.slots(g) for g in self.reachable(groups))
+
+    def seen(self, found):
+        """센 조합에서 풀거나 부르기로 올 그림 번호."""
+        key = ('seen', id(found))
+        if key not in self.cache:
+            self.cache[key] = (found, {g for groups in found for g in self.reachable(groups)})
+        return self.cache[key][1]
+
+    def reserve(self, found, grow=None, by=0):
+        """연출 몫 EFFECT_SLOTS 와, 센 조합에 나오는 그림 가운데 자리가 큰 MID_PICTURES 개의 합. grow 의 그림 번호는
+        by 만큼 늘린 것으로 센다. 그림 표 7E:0D3D 는 같은 번호를 두 번 풀지 않으므로 번호마다 한 번씩만 든다."""
+        sizes = sorted((self.slots(g) + (by if grow and g in grow else 0) for g in self.seen(found)), reverse=True)
+        return EFFECT_SLOTS + sum(sizes[:MID_PICTURES])
+
     def reachable(self, groups):
         """전투를 시작할 때 푼 그림과, 그 몬스터들이 부르기를 거듭해 풀 수 있는 그림."""
         loaded = {g for g, _, _ in self.loads(groups)}
@@ -205,14 +230,15 @@ class Pictures:
 def losses(rom, pictures=None, monsters=None, found=None, areas=None):
     """바꾼 그림·그림 번호로 다시 세어 걸리는 조합 [(조합, 원래 수, 바뀐 수, 나온 곳, 까닭)].
     까닭은 원래보다 덜 놓이는 무리가 있음, 그림 조각 합(7E:5800 목록, 부르기를 거듭해 올 그림 포함)이 PIECE_LIST_LIMIT
-    를 넘음, 16x16 자리 합이 원래 롬의 모든 조합 중 가장 큰 값을 넘음, 그림 세로 칸 합(줄 목록 7E:5B20, 부르기를 거듭해
+    를 넘음, 16x16 자리 합(부르기로 올 그림 포함)에 연출 몫과 가장 큰 그림들 몫(Pictures.reserve)을 더한 값이 SLOT_LIMIT 를
+    넘음, 그림 세로 칸 합(줄 목록 7E:5B20, 부르기를 거듭해
     올 그림 포함)이 ROW_LIMIT 를 넘음, 바꾼 그림의 상자 위가 y $38 보다 위임이다.
-    자리는 연출의 OBJ 그림(22:BB3D)도 같은 128개에서 받으므로, 원래 게임이 이미 쓰는 합까지만 받는다. 줄마다 타일 합은
+    줄마다 타일 합은
     7E:2F00 + (y >> 3) - 7 에 세는데(22:A177) X 가 8비트라, y 가 $38 보다 작으면 X 가 $F9~$FF 로 돌아
     7E:2FF9~ 를 고친다(코드 읽기)."""
     found = found if found is not None else compositions(rom, areas)[0]
     before, after = Pictures(rom), Pictures(rom, pictures, monsters)
-    most_slots = max((sum(s for _, _, s in before.loads(groups)) for groups in found), default=0)
+    reserve = after.reserve(found)
     changed = set(monsters or ()) | {m for m in range(M.COUNT) if before.picture(m) in (pictures or {})}
     out = []
     # 바꾼 뒤 기준으로, 늘린 그림을 쓰는 몬스터가 센 조합에 하나도 없거나 ミルドラース(E7~EB)면 셀 수 없다.
@@ -223,8 +249,14 @@ def losses(rom, pictures=None, monsters=None, found=None, areas=None):
             out.append(((), [], [], f'그림 {g:02X}', '무리를 더하는 몬스터(E7~EB)가 써서 한도를 정할 수 없음'))
         elif not users & appear:
             out.append(((), [], [], f'그림 {g:02X}', '세는 조합에 나오지 않아 한도를 정할 수 없음'))
+    # 늘린 그림이 가장 큰 그림들에 들면 남겨 두는 몫이 늘어, 바꾼 몬스터가 없는 조합도 자리 한도에 걸릴 수 있다.
+    spill = reserve > before.reserve(found)
     for groups, where in found.items():
         if not changed & {m for m, _, _ in groups}:
+            if spill and before.reach_slots(groups) + reserve > SLOT_LIMIT:
+                old = [k[1] for k in before.place(groups)[0]]
+                out.append((groups, old, old, where, f'16x16 자리 {before.reach_slots(groups)}개 + 연출·도중 풀기 {reserve}개 > '
+                                                     f'{SLOT_LIMIT}개'))
             continue
         old = [k[1] for k in before.place(groups)[0]]
         kept = after.place(groups)[0]
@@ -236,8 +268,9 @@ def losses(rom, pictures=None, monsters=None, found=None, areas=None):
             out.append((groups, old, new, where, '덜 놓임'))
         elif after.listed(groups) > PIECE_LIST_LIMIT:
             out.append((groups, old, new, where, f'조각 목록 {after.listed(groups)}개 > {PIECE_LIST_LIMIT}개'))
-        elif sum(s for _, _, s in after.loads(groups)) > most_slots:
-            out.append((groups, old, new, where, f'16x16 자리 {sum(s for _, _, s in after.loads(groups))}개 > {most_slots}개'))
+        elif after.reach_slots(groups) + reserve > SLOT_LIMIT:
+            out.append((groups, old, new, where, f'16x16 자리 {after.reach_slots(groups)}개 + 연출·도중 풀기 {reserve}개 > '
+                                                 f'{SLOT_LIMIT}개'))
         elif after.band_rows(groups) > ROW_LIMIT:
             out.append((groups, old, new, where, f'그림 세로 칸 {after.band_rows(groups)}개 > {ROW_LIMIT}개'))
     return out
@@ -247,16 +280,20 @@ def budgets(rom, found=None):
     """그림마다 {pieces: 더 늘릴 수 있는 조각 수, bands: 8픽셀 줄마다 더 늘릴 수 있는 타일 수, slots: 더 늘릴 수 있는
     16x16 자리 수, compositions: 나온 조합 수}.
     한 그림만 바꿀 때 이 안이면 losses() 에 걸리는 조합이 없다(마지막 합 + 늘린 양이 한도 밑이면 도중의 합도 밑이고,
-    조각 목록 합은 PIECE_LIST_LIMIT, 자리 합은 원래 가장 큰 값 안). 같은 머리를 쓰는 그림 번호(00·11·29 등)는 함께 바뀌므로 머리마다 합쳐 세고,
-    그 번호들에 같은 값을 준다."""
+    조각 목록 합은 PIECE_LIST_LIMIT, 자리 합은 연출·가장 큰 그림들 몫을 더해 SLOT_LIMIT 안). 같은 머리를 쓰는 그림 번호(00·11·29 등)는 함께 바뀌므로 머리마다 합쳐 세고,
+    그 번호들에 같은 값을 준다. 자리는 늘린 그림이 가장 큰 그림들에 들면 남겨 두는 몫이 늘어 그 그림이 없는 조합에도
+    걸리므로, 모든 조합을 늘린 뒤의 몫으로 다시 견준다."""
     found = found if found is not None else compositions(rom)[0]
     pics = Pictures(rom)
-    most_slots = max((sum(s for _, _, s in pics.loads(groups)) for groups in found), default=0)
     table, members = {}, {}
+    # 머리마다 {그 머리 번호가 n 개 드는 조합: 그런 조합의 가장 큰 자리 합}. n = 0 은 모든 조합.
+    slot_reach = {}
+    top_reach = 0
     for groups in found:
         kept, pieces, bands = pics.place(groups)
         spare = PIECE_LIST_LIMIT - pics.listed(groups)
-        spare_slots = most_slots - sum(s for _, _, s in pics.loads(groups, kept))
+        reach = pics.reach_slots(groups)
+        top_reach = max(top_reach, reach)
         by_head = {}
         for m, j, hd, row, y, k in kept:
             g = pics.picture(m)
@@ -272,7 +309,6 @@ def budgets(rom, found=None):
             row = table.setdefault(key, {'pieces': None, 'bands': [None] * pics.stats(g)[0]['h'], 'slots': None,
                                          'compositions': 0})
             row['compositions'] += 1
-            row['slots'] = least(row['slots'], spare_slots // len(numbers))
             if counted:
                 row['pieces'] = least(row['pieces'], (PIECE_LIMIT - 1 - pieces) // counted)
             for b in starts:
@@ -288,6 +324,17 @@ def budgets(rom, found=None):
             row = table.setdefault(key, {'pieces': None, 'bands': [None] * pics.stats(g)[0]['h'], 'slots': None,
                                          'compositions': 0})
             row['pieces'] = least(row['pieces'], spare // len(numbers))
+            worst = slot_reach.setdefault(key, {})
+            worst[len(numbers)] = max(worst.get(len(numbers), 0), reach)
+    seen = pics.seen(found)
+    for key, worst in slot_reach.items():
+        grow = members[key] & seen
+        fits = lambda x: all(r + n * x + pics.reserve(found, grow, x) <= SLOT_LIMIT
+                             for n, r in [(0, top_reach), *worst.items()])
+        x = 0
+        while x < 0x80 and fits(x + 1):
+            x += 1
+        table[key]['slots'] = x if fits(0) else 0
     return {g: table[key] for key, gs in members.items() for g in gs}
 
 

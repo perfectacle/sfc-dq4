@@ -78,14 +78,16 @@ def build(original, grid, out):
     return rom
 
 
-def run(rom, out, state, mesence, libdir, battle, pieces):
+def run(rom, out, state, mesence, libdir, battle, pieces, slots=None):
     env = {k: v for k, v in os.environ.items()
            if k not in ('ADULT', 'ANYWHERE', 'GROUP', 'LATESET', 'PARTY', 'POKE', 'ROMPATCH', 'SAVE', 'SET',
-                        'WAGON', 'EVERY', 'TO', 'PIECES')}
+                        'WAGON', 'EVERY', 'TO', 'PIECES', 'SLOTS')}
     env.update(LIBDIR=str(libdir), STATE=str(state), SHOT_DIR=str(out), MAXF='1700', SETTLE='300', FIELD='341,56',
                BATTLE=battle, TEST='wait:900', DUMPF=str(DUMP))
     if pieces is not None:
         env['PIECES'] = str(pieces)
+    if slots is not None:
+        env['SLOTS'] = str(slots)
     with (out / 'mesen.log').open('w', encoding='utf-8') as log:
         subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5nmidma.lua'),
                         '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT, timeout=300)
