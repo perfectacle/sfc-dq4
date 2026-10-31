@@ -666,7 +666,10 @@ def _fade_out():
 # 손님 바이트 5 = C5 에서 참). 행동 칸 ホイミ ×3·공격·방어·공격, 고르는 법 2(칸 가중치 209 29 10 4 2 1, 같은 행동은
 # 첫 칸에 합침), AI 2(ホイミ 칸은 같은 편 누군가 HP 가 최대의 절반 미만이고 MP 가 될 때만 남김, 10:B9E9·13:B915).
 # 곧 ホイミ 248·공격 5·방어 2, 남기지 않으면 공격 5·방어 2 에서 난수로.
-# ホイミ 의 대상은 절반 미만인 사람 가운데 HP 가 가장 낮은 사람으로 한다(FC 의 대상 고르기 10:B272~ 는 재지 않음).
+# ホイミ 의 대상: 절반 미만인 사람이 하나면 그 사람. 자기와 남이 함께 그러면 SELF_HEAL 의 확률로 자기, 아니면 남.
+# FC 마지막 고르기 코드는 풀지 못해 실측으로 정했다: 1장 필드에서 손님 C5 와 라이안의 HP 를 묶고 싸워 ホイミ 뒤 첫 HP
+# 쓰기를 세니 676번 중 자기 112번(16.6%)이었고, HP 비율·잃은 양·일행 차례를 바꿔도 같았다. 남이 둘 이상인 경우는 1장에
+# 없어(걷는 일행이 라이안과 호이민뿐) 재지 않았고, 그때는 차례가 앞인 사람을 고친다
 # 21:AED8 은 행동을 고른 뒤 21:AF6E 의 LDA #$01 을 대상 번호로 21:B199 에 넘겨, 그대로 두면 늘 자기를 고쳤다(실측)
 GUEST_AI_AT, GUEST_AI_ORIG = 0x21AF1B, bytes.fromhex('2e 0e 11 2e')   # ROL $110E / ROL $110F 의 앞 4바이트
 GUEST_AI_BACK, GUEST_AI_DONE = 0x21AF21, 0x21AF3B                     # 원래 고르기 / 고른 행동을 $10F7 에
@@ -676,13 +679,14 @@ HEAL, ATTACK, DEFEND = 0x27, 0x73, 0x71
 HEAL_MP = 3
 GUEST_WEIGHTS = ((HEAL, 248), (ATTACK, 5), (DEFEND, 2))
 WALKERS = 3                     # 전투에 나오는 걷는 일행(7E:201E) 최대 수
+SELF_HEAL = 6                   # 자기와 남이 함께 다쳤을 때 1/SELF_HEAL 로 자기
 
 
 def _guest_ai(origin):
     """21:AED8(かしこさ 10 미만의 무작위 고르기)이 고르기 직전에 부르는 루틴. 행동자 $7B 의 일행 기록 +0 이 손님
     몬스터 동료(C0 이 다 켜짐)면 FC 규칙으로 행동을 골라 21:AF3B 로, 아니면 원래 고르기로 돌아간다."""
     import dq4environmentrom
-    hurt, mp, target, low = SCRATCH + 0x0A, SCRATCH + 0x0B, SCRATCH + 0x0C, SCRATCH + 0x0D
+    hurt, mp, target, self_k = SCRATCH + 0x0A, SCRATCH + 0x0B, SCRATCH + 0x0C, SCRATCH + 0x0D
     a = dq4environmentrom._Asm(origin)
     # 대상 훅: 손님이 ホイミ 를 골랐으면 그 번호(target 은 번호 + 1, 0 은 없음. 켤 때 WRAM 0 이라)를, 아니면 원래의 1 을
     a.label('pick').b(0x08, 0xE2, 0x20, 0xA9, 0x01, 0x0C, 0x15, 0x11).long(0xAF, 'target')
@@ -692,17 +696,17 @@ def _guest_ai(origin):
     a.b(0x08, 0xE2, 0x30, 0xA5, 0x7B, 0x00, 0x8B, 0x80, 0x2A, 0xA5, 0x46, 0x29, GUEST, 0xC9, GUEST)  # BRK 8B 80 2A
     a.rel(0xF0, 'guest')
     a.b(0x28, 0x2E, 0x0E, 0x11, 0x2E, 0x0F, 0x11).long(0x5C, 'back')
-    a.label('guest').b(0xA9, 0x00).long(0x8F, 'hurt').long(0x8F, 'target').long(0x8F, 'mp')
-    a.b(0xA9, 0xFF).long(0x8F, 'low').long(0x8F, 'low', 1).b(0xC2, 0x10)
+    # hurt: 절반 미만인 사람의 걷는 차례 비트, self_k: 손님 자신의 차례
+    a.label('guest').b(0xA9, 0x00).long(0x8F, 'hurt').long(0x8F, 'target').long(0x8F, 'mp').long(0x8F, 'self')
+    a.b(0xC2, 0x10)
     for k in range(WALKERS):
         a.b(0xAF, 0x1E, 0x20, 0x7E, 0xC9, k + 1).rel(0x90, f'skip{k}')              # 걷는 수 < k+1
         a.b(0xAF, 0x20 + k, 0x20, 0x7E, 0xC2, 0x20, 0x29, 0x07, 0x00, 0x0A, 0xAA).long(0xBF, 'offsets').b(0xAA)
         a.b(0xE2, 0x20, 0xBF, 0x40, 0x20, 0x7E, 0x29, GUEST, 0xC9, GUEST).rel(0xD0, f'hp{k}')
-        a.b(0xBF, 0x44, 0x20, 0x7E).long(0x8F, 'mp')                                  # 손님의 MP
+        a.b(0xBF, 0x44, 0x20, 0x7E).long(0x8F, 'mp').b(0xA9, k).long(0x8F, 'self')       # 손님의 MP 와 차례
         a.label(f'hp{k}').b(0xC2, 0x20, 0xBF, 0x42, 0x20, 0x7E).rel(0xF0, f'skip{k}')  # 쓰러짐
         a.b(0x0A, 0xDF, 0x4E, 0x20, 0x7E).rel(0xB0, f'skip{k}')                       # 2 × HP >= 최대 HP
-        a.b(0xBF, 0x42, 0x20, 0x7E).long(0xCF, 'low').rel(0xB0, f'skip{k}')             # 앞서 본 사람보다 낮을 때만
-        a.long(0x8F, 'low').b(0xE2, 0x20, 0xA9, k + 1).long(0x8F, 'pending').b(0xA9, 0x01).long(0x8F, 'hurt')
+        a.b(0xE2, 0x20).long(0xAF, 'hurt').b(0x09, 1 << k).long(0x8F, 'hurt')
         a.label(f'skip{k}').b(0xE2, 0x20)
     a.b(0xE2, 0x30).long(0xAF, 'hurt').rel(0xF0, 'calm').long(0xAF, 'mp').b(0xC9, HEAL_MP).rel(0x90, 'calm')
     a.b(0xA9, sum(w for _, w in GUEST_WEIGHTS)).long(0x22, 'random')
@@ -721,12 +725,23 @@ def _guest_ai(origin):
     for act, _ in GUEST_WEIGHTS:
         a.label(f'act{act:02X}')
         if act == HEAL:
-            a.long(0xAF, 'pending').long(0x8F, 'target')
+            a.long(0x22, 'aim')
         a.b(0xA9, act).rel(0x80, 'done')
     a.label('done').b(0x28).long(0x5C, 'finish')
+    # ホイミ 대상(M·X 8): 남(hurt 에서 자기 비트를 뺀 것)이 없으면 자기. 자기도 다쳤으면 1/SELF_HEAL 로 자기.
+    # 아니면 남 가운데 차례가 앞인 사람
+    a.label('aim').long(0xAF, 'self').b(0xAA).long(0xBF, 'bits').b(0x49, 0xFF).long(0x2F, 'hurt')
+    a.rel(0xF0, 'aim_self').b(0x48).long(0xBF, 'bits').long(0x2F, 'hurt').rel(0xF0, 'aim_other')
+    # 00:953A 는 돌아올 때 Z 를 A 로 맞추지 않는다
+    a.b(0xA9, SELF_HEAL).long(0x22, 'random').b(0xC9, 0x00).rel(0xD0, 'aim_other').b(0x68).rel(0x80, 'aim_self')
+    a.label('aim_other').b(0x68, 0xA2, 0x01)
+    a.label('aim_bit').b(0x4A).rel(0xB0, 'aim_set').b(0xE8).rel(0x80, 'aim_bit')
+    a.label('aim_self').long(0xAF, 'self').b(0x1A, 0xAA)
+    a.label('aim_set').b(0x8A).long(0x8F, 'target').b(0x6B)
+    a.label('bits').b(*(1 << k for k in range(WALKERS)))
     a.label('offsets').b(*b''.join((42 * n).to_bytes(2, 'little') for n in range(8)))
     code, labels = a.assemble({'back': GUEST_AI_BACK, 'finish': GUEST_AI_DONE, 'random': RANDOM, 'hurt': hurt,
-                               'mp': mp, 'target': target, 'low': low, 'pending': SCRATCH + 0x0F})
+                               'mp': mp, 'target': target, 'self': self_k})
     return code, labels['entry'], labels['pick']
 
 
