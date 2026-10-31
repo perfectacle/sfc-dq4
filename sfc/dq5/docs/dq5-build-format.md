@@ -2148,7 +2148,7 @@ uv run --locked python sfc/dq5/tools/dq5talkwrite.py rom/dq5.sfc check work/papa
 | `flag-on` | `18 i m` | `index`, `mask`: `7E:2190 + i \|= m` |
 | `flag-set` | `19 i v` | `index`, `value`: `7E:2190 + i = v` |
 | `call` | `00 lo hi`, `args` 가 있으면 `01 lo hi a b` | `target`: 뱅크 06 네이티브 루틴 주소(`B3A0` 꼴). `args`(0~255 둘)는 부르기 전에 `7E:0F30`·`0F31` 에 둠(`06:B143`) |
-| `service` | `12 i` | `index`: `06:DBD2` 의 처리기 번호 `00`~`10`(대화 번호 `000`~`010` 과 같은 가게·여관·교회 등, [가게 종류](dq5-data-format.md#가게-종류-06dbd2)) |
+| `service` | `12 i` | `index`: `06:DBD2` 의 처리기 번호 `00`~`10`(대화 번호 `000`~`010` 과 같은 가게·여관·교회 등, 코드 읽기. [가게 종류](dq5-data-format.md#가게-종류-06dbd2). 게임에서 본 것은 `01` 뿐) |
 
 `cond` 는 `code` 와 그 조건의 인자, 결과를 뒤집는 `not`(조건 바이트 bit7)입니다. 받는 조건은 형식 문서에서 실측한 것만입니다.
 
