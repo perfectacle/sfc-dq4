@@ -183,6 +183,7 @@ class CounterTests(unittest.TestCase):
         self.assertEqual(rom.block_head("0E-00", source, counter), (0, 0, rom.COUNTER_ATTR))
 
 
+@unittest.skipUnless((ROOT / "rom" / "dq4.nes").is_file(), "local source ROM not present")
 class FrontTests(unittest.TestCase):
     def test_cells_below_pots_draw_the_party_in_front(self):
         # 산골 마을 지하 (FC 14/01): pots fill (1..2,9..C) and (3,A..B); (3,C) and (4,*) are floor.
