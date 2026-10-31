@@ -228,6 +228,18 @@ def _rel(code, target):
     return d & 0xFF
 
 
+def _effect(se, branch):
+    """BRK 16 se branch 와 같은 일: 효과음을 대기열에 넣고(24:FEAC, A = 효과음, X = 갈래) 보내질 때까지 기다린다(24:FE44).
+    BRK 를 쓰지 않는다. BRK 핸들러는 DB 를 부른 코드의 뱅크(5E)로 두는데, 24:FE44 는 대기열 $1D91·$1D93 을 DB 기준으로
+    읽는다. 5E:0000~7FFF 는 WRAM 거울이 아니다. MesenCE 는 열린 버스라 기다림이 그냥 넘어갔고, snes9x 는 롬 거울이라
+    끝나지 않았다. 레지스터·폭·DB·D 를 BRK 처럼 지킨다."""
+    return bytes((0x08, 0x8B, 0x0B, 0xC2, 0x30, 0x48, 0xDA, 0x5A,        # PHP / PHB / PHD / REP #$30 / PHA / PHX / PHY
+                  0xF4, 0x00, 0x00, 0xAB, 0xAB, 0xF4, 0x00, 0x00, 0x2B,  # PEA $0000 / PLB / PLB / PEA $0000 / PLD
+                  0xE2, 0x20, 0xA9, se, 0xA2, branch, 0x00,              # SEP #$20 / LDA #효과음 / LDX #갈래
+                  0x22, 0xAC, 0xFE, 0x24, 0x22, 0x44, 0xFE, 0x24,        # JSL 24:FEAC / JSL 24:FE44
+                  0xC2, 0x30, 0x7A, 0xFA, 0x68, 0x2B, 0xAB, 0x28))       # REP #$30 / PLY / PLX / PLA / PLD / PLB / PLP
+
+
 def _fx_frames(addr):
     """서브루틴(JSR, M 8·X 16, DB 00). X = 프레임 목록(뱅크 fx.BANK), Y = 올릴 프레임 수. 프레임마다 화면을 잠깐 끄고
     그 레코드의 타일 행과 팔레트(BG3 팔레트 1 = CGRAM 4~7, 색 버퍼에도)를 올린 뒤 한 프레임 기다린다."""
@@ -263,14 +275,14 @@ def _fx_map(entry, step):
 
 
 def _spar(at):
-    """장 제목 상자 뒤 검은 화면(주화면 BG3 만)에서 칼 여섯 합. 합마다 효과음(BRK 16 n X)을 내고, 칼 효과 자료
+    """장 제목 상자 뒤 검은 화면(주화면 BG3 만)에서 칼 여섯 합. 합마다 효과음(_effect)을 내고, 칼 효과 자료
     (dq4sparfx, 뱅크 fx.BANK)가 있으면 그 효과 프레임을 BG3 의 메시지 창 캔버스 타일에 올린다. 자료가 없으면 효과음과
     기다리기만. 끝에 타일맵·캔버스·팔레트 1 을 되돌린다."""
     me = at.get('spar', CODE_AT)
     blank2 = at.get('blank2', 0)
     plain = bytearray()
     for (se, branch), _, gap in SPAR:
-        plain += bytes((0x00, 0x16, se, branch)) + box.wait(gap)
+        plain += _effect(se, branch) + box.wait(gap)
     head = box.ENTER + bytes((0xAF, *fx.BANK.to_bytes(3, 'little'), 0xC9, fx.MAGIC[0]))       # LDA 표시 / CMP
     save = bytes((0xC2, 0x20)) + b''.join(bytes((0xAF, *(box.CGRAM_BUFFER + 8 + 2 * i).to_bytes(3, 'little'), 0x48))
                                           for i in range(4)) + bytes((0xE2, 0x20))
@@ -290,7 +302,7 @@ def _spar(at):
         out = bytearray()
         for (se, branch), effect, gap in SPAR:
             shown = min(fx.FRAMES, gap)
-            out += bytes((0x00, 0x16, se, branch, 0xC2, 0x20,
+            out += _effect(se, branch) + bytes((0xC2, 0x20,
                           0xAF, *(fx.BANK + 4 + 2 * effect).to_bytes(3, 'little'), 0xAA, 0xE2, 0x20,   # X = 목록
                           0xA0, shown, 0x00, 0x20, *(sub & 0xFFFF).to_bytes(2, 'little')))             # LDY / JSR
             if gap > shown:
