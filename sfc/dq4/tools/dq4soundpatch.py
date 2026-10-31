@@ -573,6 +573,32 @@ BARE_HANDS = 0x80                   # $0DA7 bit7
 QUEUE_SLOTS = 16
 
 
+EFFECT_REMAP = CODE + 0xC00
+EFFECT_REMAP_SITE = 0x24FEAC  # 0C(효과음) 대기열 입구 하나뿐. A = 시퀀스, X = 갈래(스크립트)
+EFFECT_REMAP_ORIGINAL = bytes.fromhex('08 E2 20 48 A9 0C 4C 83 FF')
+
+
+def effect_remap_code(remaps, base=EFFECT_REMAP):
+    """24:FEAC 대신. remaps = {(효과음, 갈래): (새 효과음, 새 갈래)}. 맞으면 A·X 를 바꿔 원래 입구(24:FF83)로 간다.
+    늘 두는 효과음 시퀀스의 갈래를 바꾸면 시퀀스가 커져 곡 예산(곧 곡 샘플)이 바뀌므로, NDS 소리를 빈 효과음에 두고
+    부르는 쪽을 가리지 않고 여기서 돌린다. 부르는 쪽의 레지스터 너비를 모르므로 X·Y 는 16비트로 저장하고, 스택의 X 낮은
+    바이트($04,S)를 고친다."""
+    h = bytes.fromhex
+    items = [h('08 C2 10 DA 5A E2 30 48')]                     # PHP / REP #10 / PHX / PHY / SEP #30 / PHA
+    for i, ((src, branch), (dst, new)) in enumerate(sorted(remaps.items())):
+        if not (0 <= branch < 0x21 and 0 <= new < 0x21):
+            raise ValueError('effect branches select scripts 00..20')
+        nxt = f'next{i}'
+        items += [h(f'A3 01 C9 {src:02X}'), ('b', 0xD0, nxt),   # LDA $01,S / CMP #src / BNE
+                  h(f'8A C9 {branch:02X}'), ('b', 0xD0, nxt),   # TXA / CMP #branch / BNE
+                  h(f'A9 {dst:02X} 83 01 A9 {new:02X} 83 04'),  # LDA #dst / STA $01,S / LDA #new / STA $04,S
+                  ('jmp', 'done'), ('label', nxt)]
+    items += [('label', 'done'),
+              h('68 C2 10 7A FA 28'),                          # PLA / REP #10 / PLY / PLX / PLP
+              h('08 E2 20 48 A9 0C 5C 83 FF 24')]              # 원래 입구: PHP / SEP #20 / PHA / LDA #0C / JML 24:FF83
+    return _asm_far(items, base)
+
+
 def weapon_sound_code(bare, songs, base=WEAPON_SOUND):
     """28:805C 대신(8비트 A·X). 지금 곡($1D8B)이 songs 가운데 하나이고 대기열에 보내는 중인 칸(bit7·bit6, FF 아님)이 없으면
     무기 번호($0DA7)로 WEAPON_SEQ_TABLE·WEAPON_BRANCH_TABLE 을 보고 그 (효과음, 갈래)를 28:804A 로 낸다. bare 는 맨손의
@@ -928,7 +954,7 @@ def write_resident_samples(data, ids):
 def install(base, replacements, *, sample_resources=None, map_fades=False, preview=None, pinned=(),
             resident=None, set_records=None, fast_receive=False, chains=None, chain_late=(), hold=False, early_song=False, load_pump=False,
             vehicle_song=False, keep_samples=False, release_failed=False, unpin=(), resident_waves=None, weapon_sounds=None,
-            effect_calls=None, release_pending=False, tick_scan=False):
+            effect_calls=None, release_pending=False, tick_scan=False, effect_remaps=None):
     """pinned 는 늘 두는 시퀀스 목록에 남길 바꾸는 곡(나머지 바꾸는 곡은 목록에서 뺌). resident 는 새 늘 두는 샘플 목록
     전체(주지 않으면 그대로). set_records 는 바꾸지 않는 곡의 곡 묶음 레코드 {곡: (k, 샘플…)}.
     fast_receive 는 SPC 자료 받기를 묶음 여러 개 이어 받게 바꾼다(fast_receive_code). chains 는 {곡: 본체 시퀀스} 로,
@@ -945,6 +971,7 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
     weapon_sounds 는 ({무기 물건 번호(맨손 80): (효과음, 갈래)}, 곡들) 로, 그 곡들이 울리는 동안 たたかう 소리를 무기마다
     그 갈래로 낸다(weapon_sound_code). 그 효과음 샘플을 곡들의 레코드에 붙이는 것은 replacements 몫이다.
     effect_calls 는 {롬 주소: (원래 효과음, 새 효과음)} 로, 그 자리의 효과음 부르기 BRK 16·19 n X 의 n 을 바꾼다.
+    effect_remaps 는 {(효과음, 갈래): (새 효과음, 새 갈래)} 로, 효과음 대기열 입구에서 늘 바꿔 부른다(effect_remap_code).
     release_pending 은 곡 뒤 샘플이 오기 전에 끝난 곡의 샘플을 SPC 기다림 목록에서 지운다(pending_release_code).
     tick_scan 은 곡 자리 틱마다 트랙을 차례 수만큼 다시 훑던 고리를 한 번 훑기로 바꾼다(tick_scan_code).
     """
@@ -1190,6 +1217,13 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
         if data[pos] != 0x00 or data[pos + 1] not in (0x16, 0x19) or data[pos + 2] != old:
             raise ValueError(f'{addr:06X}: not BRK 16/19 {old:02X}')
         data[pos + 2] = new
+    if effect_remaps:
+        code = effect_remap_code(effect_remaps)
+        if EFFECT_REMAP + len(code) > CODE + 0x1000:
+            raise ValueError('effect remap code overflows its area')
+        write(EFFECT_REMAP, code, empty=True)
+        write(EFFECT_REMAP_SITE, bytes([0x5C]) + EFFECT_REMAP.to_bytes(3, 'little') + bytes([0xEA] * 5),
+              EFFECT_REMAP_ORIGINAL)
     if weapon_sounds:
         sounds, songs = weapon_sounds
         code = weapon_sound_code(sounds.get(BARE_HANDS), songs)
@@ -1225,6 +1259,7 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
                     'weapon_sounds': {'songs': [f'{x:02X}' for x in sorted(weapon_sounds[1])],
                                       'items': {f'{k:02X}': f'{a:02X}-{b:02X}' for k, (a, b) in sorted(weapon_sounds[0].items())}}
                     if weapon_sounds else None,
+                    'effect_remaps': {f'{a:02X}-{b:02X}': f'{c:02X}-{d:02X}' for (a, b), (c, d) in sorted((effect_remaps or {}).items())},
                     'effect_calls': {f'{a:06X}': f'{o:02X} -> {n:02X}' for a, (o, n) in sorted((effect_calls or {}).items())},
                     'pinned_sequences': [f'{x:02X}' for x in pinned_sequences(result)],
                     'resident_samples': [f'{x:02X}' for x in resident_samples(result)],

@@ -758,3 +758,15 @@
 03BB4D=35:45
 --sfx-call
 0FFBE2=35:45
+--sfx-pcm
+45-03=192
+--sfx-pcm
+45-04=1F6
+--sfx-remap
+37-14=45-03
+--sfx-remap
+46-04=45-04
+--sfx-gain-db
+45-03=-2.3
+--sfx-gain-db
+45-04=-5.3
