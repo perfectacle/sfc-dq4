@@ -207,6 +207,7 @@ def main():
             # 대화 029 뒤 입력을 이어 넣으면 메시지 20C~20F·214~217 이 이어지고 1A/04 로 옮겨 가, 같은 방문에서 다시 걸 수 없다.
             'inn-leave': {f'{m:03X}' for m in (*range(0x20C, 0x210), *range(0x214, 0x218))}
             <= set(seen['inn-leave']['messages'])
+            and not {f'{m:03X}' for m in range(0x210, 0x214)} & set(seen['inn-leave']['messages'])
             and seen['inn-leave']['map'] == '1A/04',
             'refuse': refused.returncode != 0 and '한도' in refused.stderr,
             'ev3': made('ev3', '02B3B4') == [(0x0E, 0x0D)] and seen['ev3']['free'] == 0x0E,
