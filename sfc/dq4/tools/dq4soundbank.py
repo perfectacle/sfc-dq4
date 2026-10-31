@@ -194,6 +194,9 @@ def approximate_adsr(region):
     return 0x80 | decay << 4 | attack, sustain << 5
 
 
+RELEASE_ONLY = 'release'
+
+
 def nds_adsr(region):
     """NDS 영역의 attack·decay·sustain 을 ADSR1·ADSR2 로. decay 는 dB/초가 같은 DR, sustain 은 가장 가까운 SL 이며,
     SL 의 바닥(-18dB)보다 낮은 sustain 은 SR 로 decay 와 같은 빠르기로 계속 줄여 붙들린 음으로 남지 않게 한다."""
@@ -338,10 +341,12 @@ def build_bank(score, asset_root, *, start_id=0x26, max_rate=8000, cache_dir=Non
     budget(바이트)·max_samples(곡 묶음 칸)를 넘으면 손실이 가장 작은 줄이기를 하나씩 고른다.
     쓰이는 음이 적은 영역을 같은 프로그램의 이웃 영역 샘플로 합치기, 표본율 낮추기, 반복 없는 샘플 자르기.
     무엇을 줄였는지는 report['reductions']에 남긴다. envelope 이면 샘플 머리를 nds_adsr 로 하고, 프로그램 표에 영역의
-    엔벨로프 값과 머리 ADSR('header')을 담아 변환기가 음마다 adsr·release 를 쓰게 한다. 영역 음들의 고정 벤드 중앙값
+    엔벨로프 값과 머리 ADSR('header')을 담아 변환기가 음마다 adsr·release 를 쓰게 한다. envelope 가 RELEASE_ONLY 면
+    샘플 머리는 그대로(다른 곡과 같은 샘플을 나눠 쓴다) 두고 음마다 release 만 쓰게 한다. 영역 음들의 고정 벤드 중앙값
     (region_tunes)은 샘플 음높이에 굽고 프로그램 표의 'tune' 에 남긴다.
     """
-    adsr_of = nds_adsr if envelope else approximate_adsr
+    full = envelope is True
+    adsr_of = nds_adsr if full else approximate_adsr
     if not 0x26 <= start_id < 0xC8:
         raise ValueError('custom sample IDs must start in 26..C7')
     root = Path(asset_root)
@@ -458,7 +463,7 @@ def build_bank(score, asset_root, *, start_id=0x26, max_rate=8000, cache_dir=Non
         if identifier >= 0xC8:
             raise ValueError('sample ID table exhausted')
         region, path, _ = regions[key]
-        resource, detail = convert_sample(path, region, max_rate=rates[rate.get(ident, 0)], envelope=envelope,
+        resource, detail = convert_sample(path, region, max_rate=rates[rate.get(ident, 0)], envelope=full,
                                           treble_db=treble_db,
                                           cache_dir=cache_dir, seconds=ONE_SHOT_SECONDS[cut.get(ident, 0)])
         resources[identifier], details[f'{identifier:02X}'] = resource, detail
@@ -471,7 +476,9 @@ def build_bank(score, asset_root, *, start_id=0x26, max_rate=8000, cache_dir=Non
             entry['tune'] = regions[target[(program, k)]][0]['tune']
         if envelope:
             entry |= {x: region[x] for x in ('attack', 'decay', 'sustain', 'release') if x in region}
-            entry['header'] = list(nds_adsr(regions[target[(program, k)]][0]))
+            entry['header'] = list(adsr_of(regions[target[(program, k)]][0]))
+            if not full:
+                entry['release_only'] = True
         mapping.setdefault(program, []).append(entry)
     return resources, mapping, {
         'samples': details, 'sample_count': len(resources),

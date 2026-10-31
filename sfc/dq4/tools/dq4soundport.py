@@ -172,7 +172,7 @@ def allocate(score, voices, end, tail_ticks=0, lanes_for=None):
         peak = max(peak, concurrent)
 
     def priority(n):
-        role = 2 if n['ch'] == melody or n['ch'] == bass else 1
+        role = 0 if n.get('yield') else 2 if n['ch'] == melody or n['ch'] == bass else 1
         outer = -n['note'] if n['ch'] == bass else n['note']
         return role, n.get('priority', 64), n['velocity'], outer, -n['uid']
 
@@ -263,7 +263,8 @@ def note_envelope(region, note):
     """음마다 덮어쓴 NDS ADSR 을 반영한 (ADSR1, ADSR2, release 명령 값)과 샘플 머리의 (ADSR1, ADSR2)."""
     override = dict(zip(('attack', 'decay', 'sustain', 'release'), note.get('adsr') or ()))
     merged = region | {k: v for k, v in override.items() if v is not None}
-    return bank.nds_adsr(merged), bank.nds_release_rate(merged.get('release', 127)), tuple(region['header'])
+    adsr = tuple(region['header']) if region.get('release_only') else bank.nds_adsr(merged)
+    return adsr, bank.nds_release_rate(merged.get('release', 127)), tuple(region['header'])
 
 
 def _envelope_key(adsr):

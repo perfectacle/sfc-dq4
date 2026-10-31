@@ -82,6 +82,15 @@ class LevelTests(unittest.TestCase):
         self.assertIn('release 16', text)
         self.assertEqual(text.count('adsr '), 2)  # 덮어쓴 음, 그리고 머리 값으로 되돌리기
 
+    def test_release_only_keeps_the_sample_header(self):
+        notes = score([(0, 24, 60, 100), (24, 24, 60, 100)])
+        notes['timeline'][1]['adsr'] = [None, 20, 0, None]
+        region = {'lo': 0, 'hi': 127, 'sample': 0x26, 'attack': 127, 'decay': 110, 'sustain': 0, 'release': 110}
+        mapping = {0: [region | {'header': [0xEF, 0x00], 'release_only': True}]}
+        text = port.convert(notes, voices=1, program_map=mapping).text
+        self.assertIn('release 16', text)
+        self.assertNotIn('adsr ', text)
+
     def test_large_bend_becomes_fine_tune_and_small_is_dropped(self):
         notes = score([(0, 24, 60, 100), (24, 24, 60, 100), (48, 24, 60, 100)])
         for e, bend in zip(notes['timeline'], (-16, 3, -16)):
@@ -270,3 +279,16 @@ class LaneTests(unittest.TestCase):
         lanes, report = port.allocate(song, 3, 10, lanes_for={'track1': [1]})
         self.assertEqual([n['note'] for n in lanes[1]], [60])
         self.assertEqual(report['dropped_notes'], 1)
+
+    def test_yielding_track_gives_up_its_voice(self):
+        # 메아리 트랙(track2)이 더 세고 NDS 우선순위가 높아도, 양보하면 화음 음(track1)이 남는다
+        timeline = [{'op': 'note', 'tick': 0, 'gate': 10, 'note': n, 'velocity': v, 'ch': ch, 'program': 0, 'priority': p}
+                    for n, v, ch, p in ((72, 100, 'track0', 64), (40, 100, 'track3', 64),
+                                        (60, 60, 'track1', 64), (67, 120, 'track2', 100))]
+        song = {'ticks_per_quarter': 48, 'tempo': 120, 'timeline': timeline, 'end_tick': 10,
+                'channels': [{'name': 'track0'}]}
+        _, report = port.allocate(song, 3, 10)
+        self.assertEqual([timeline[i]['ch'] for i in report['dropped_source_indices']], ['track1'])
+        timeline[3]['yield'] = True
+        _, report = port.allocate(song, 3, 10)
+        self.assertEqual([timeline[i]['ch'] for i in report['dropped_source_indices']], ['track2'])
