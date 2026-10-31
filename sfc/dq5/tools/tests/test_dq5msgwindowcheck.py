@@ -98,6 +98,15 @@ class ScreenTests(unittest.TestCase):
         self.assertEqual(border_gaps(image, 2, 21, 7), 0)
         image.putpixel((17, 180), (0, 0, 0))
         self.assertEqual(border_gaps(image, 2, 21, 7), 1)
+        # 세로줄 전체가 2점 옮겨지면(흔들림) 0, 줄마다 다르게 밀리면(물결) 센다.
+        moved = Image.new('RGB', (256, 224))
+        for row in range(21 * 8 - 7, 27 * 8 - 7 + 2):
+            moved.putpixel((19, row), WINDOW_WHITE)
+        self.assertEqual(border_gaps(moved, 2, 21, 7), 0)
+        for row in range(170, 180):
+            moved.putpixel((19, row), (0, 0, 0))
+            moved.putpixel((15 + row % 2 * 2, row), WINDOW_WHITE)
+        self.assertEqual(border_gaps(moved, 2, 21, 7), 10)
 
 
 class NumberMatchTests(unittest.TestCase):

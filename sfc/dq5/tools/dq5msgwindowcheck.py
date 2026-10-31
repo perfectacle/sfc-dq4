@@ -19,9 +19,10 @@ wide 는 (0,21) 31 × 7(글자 29칸), h9 는 (2,19) 28 × 9, tall 은 (2,17) 28
 - field: 전투가 끝나고 필드 메시지(파파스)의 40번째 글자(24:9E94)에서 맵·필드 좌표와 7E:1E71~1EFF(필드 변수)가
   원래 롬과 같다.
 - event·party·papasNN: 이벤트 전투(무리 1E ジャミ), 동료 ホイミン·マーリン 과 ラリホー 슬라임, 손님 파파스(무리 01 둘째 판)가
-  주문 NN(PAPAS_SPELLS)만 거는 전투. 모양을 바꾼 롬은 위 (1)~(3)에 더해 00:FDA1 전송 크기(효과 층 1CE0 만 (Y - 7) × 64),
-  스크린샷의 창 테두리·창 안 다른 색 점, 원래 롬의 효과 층 줄·OBJ 상자 아래 끝을 적는다. 높인 창이 주문 연출에 깨지는 것은
-  알려진 문제라 결과에 세기만 한다. --hlog 는 원래 롬 실행에서 연출마다 줄마다 쓰는 PPU 레지스터를 모은다.
+  주문 NN(PAPAS_SPELLS)만 거는 전투. papasNN 은 난수를 고정한다(FIXED_RNG). 모양을 바꾼 롬은 위 (1)~(3)에 더해 00:FDA1
+  전송 크기(효과 층 1CE0 만 (Y - 7) × 64), 스크린샷의 창 테두리·창 안 다른 색 점(모든 롬에서 0 이어야 함), 원래 롬의 효과 층
+  줄·OBJ 상자 아래 끝, 연출 시작을 맞춘 창 위 화면(effect_above, 세기만 함)을 적는다. --hlog 는 원래 롬 실행에서 연출마다
+  줄마다 쓰는 PPU 레지스터와 원래 창 맨 위 줄에 닿는 168줄부터의 줄:값을 모은다. --shot-every 로 스크린샷 간격을 줄인다.
 원래 롬과 선실 상태는 읽기만 하며 롬·기록은 --out 의 새 폴더에 쓴다.
   MESENCE=… python sfc/dq5/tools/dq5msgwindowcheck.py rom/dq5.sfc --state work/state/ship.mss
 """
@@ -49,6 +50,9 @@ CASES = {'left': {'x': 0}, 'right': {'x': 4}, 'wide': {'x': 0, 'w': 31}, 'h9': {
          'both': {'x': 1, 'w': 31, 'h': 13}}
 # 손님 파파스의 행동 여섯 칸(파일 오프셋 11958D)에 넣는 주문. 연출(22:D73C)이 BG3·HDMA·색 더하기를 쓰는 것과 쓰지 않는
 # 보조·회복 주문을 고루 둔다. ミナデイン·スカラ 는 이 장면에서 파파스가 걸지 않아 뺐다.
+# 8비트 난수(00:9878)를 늘 80 으로(파일 1878). 연출 그림(マヒャド 얼음 기둥 자리 등)은 난수와 CPU 시간에 따라 갈려,
+# 고친 롬과 원래 롬의 연출을 프레임째 견주려면 난수를 고정해야 한다.
+FIXED_RNG = '1878=08E220A98028;187E=60'
 PAPAS_SPELLS = ('01', '03', '04', '06', '09', '0B', '0C', '0D', '0F', '10', '11', '1F', '22', '2A')
 TAPS = ','.join(['wait:400'] + ['a:8,wait:24'] * 110)
 SCENES = {
@@ -58,7 +62,8 @@ SCENES = {
     'event': {'GROUP': '1E', 'SET': '2035=07', 'MAXF': '3400'},
     'party': {'BATTLE': '00:3', 'PARTY': '05,04', 'SET': '2035=07;2073=63;209D=63;208E=FF;20B8=FF;2034=00;2042=02',
               'ROMPATCH': '118003=C8;118004=63;118011=4B4B4B4B4B4B', 'MAXF': '3400'},
-    **{f'papas{a}': {'GROUP': '01', 'SET': '2035=07;101A=01', 'ROMPATCH': f'118003=C8;11958D={a * 6}', 'MAXF': '3400'}
+    **{f'papas{a}': {'GROUP': '01', 'SET': '2035=07;101A=01', 'ROMPATCH': f'118003=C8;11958D={a * 6};{FIXED_RNG}',
+                     'MAXF': '3400'}
        for a in PAPAS_SPELLS},
 }
 # 견주는 구간에서 지나야 하는 곳: 메시지·FD ▼·줄 올리기·셋째 줄 끝 ▼·효과 층 전송, 무리 넷이면 넷째 줄 끝 ▼.
@@ -250,13 +255,85 @@ def border_rows(y, h):
 
 
 def border_gaps(image, x, y, h):
-    """화면 창 왼쪽 테두리 세로줄(점 x × 8 + 1)에서 흰 점이 아닌 줄 수."""
-    return sum(image.getpixel((x * 8 + 1, row)) != WINDOW_WHITE for row in border_rows(y, h))
+    """화면 창 왼쪽 테두리 세로줄(점 x × 8 + 1)에서 흰 점이 아닌 줄 수. 피해 흔들림은 화면 전체를 1~2점 좌우로
+    옮기므로(원래 롬도 같음) 세로줄 전체를 같은 d(-2~2)만큼 옮겨 본 것 가운데 가장 적은 수를 낸다. 줄마다 다르게 밀리는
+    물결(BG3 가로 스크롤)은 어느 d 로도 다 맞지 않아 그대로 센다."""
+    return min(sum(image.getpixel((x * 8 + 1 + d, row)) != WINDOW_WHITE for row in border_rows(y, h))
+               for d in range(-2, 3) if 0 <= x * 8 + 1 + d < 256)
 
 
 def safe(screen):
     """screen_window 결과에서 창이 화면에서 깨진 스크린샷(어두워지는 화면·피해 흔들림 말고)과 창 안 다른 색 점이 없는지."""
     return screen['border_broken'] == 0 and screen['foreign_shots'] == 0
+
+
+def synced_until(calls, other):
+    """메시지 번호·연출 시작·행동 결정 기록이 처음 갈리는 프레임. 모양을 바꾼 롬은 전송 크기(FX) 줄이 늘 달라 뺀다."""
+    keep = ('248C39', 'FXID', 'ACT')
+    return same_until([line for line in calls if len(line.split()) > 1 and line.split()[1] in keep],
+                      [line for line in other if len(line.split()) > 1 and line.split()[1] in keep])
+
+
+def above_window(scene, name, shape, seen, out):
+    """창을 21줄 위로 올린 롬과 원래 롬의 같은 프레임 스크린샷에서 창 위가 같은지. 창 타일은 흰 테두리(스크린샷
+    y × 8 - SHOT_SHIFT) 한 줄 위의 어두운 줄부터다. 두 롬의 메시지·연출·행동 기록이 갈리기 전 프레임만 본다.
+    → (견준 장, 다른 장, 처음 다른 프레임)."""
+    limit = synced_until(seen[('original', scene)][2], seen[(name, scene)][2])
+    top = shape['y'] * 8 - SHOT_SHIFT - 3
+    frames = differ = 0
+    first = None
+    for shot in sorted((out / scene / name).glob('f*.png')):
+        frame = int(shot.stem[1:])
+        other = out / scene / 'original' / shot.name
+        if frame >= limit or not other.is_file():
+            continue
+        frames += 1
+        a = Image.open(shot).convert('RGB').crop((0, 0, 256, top))
+        b = Image.open(other).convert('RGB').crop((0, 0, 256, top))
+        if a.tobytes() != b.tobytes():
+            differ += 1
+            first = first or frame
+    return {'until': limit, 'shots': frames, 'differ': differ, 'first': first}
+
+
+def effect_spans(calls):
+    """실행 기록 → [(연출 번호, 시작 프레임, 끝 프레임)]. 연출 시작(FXID)부터 그 뒤 둘째 메시지까지."""
+    starts, messages = [], []
+    for line in calls:
+        parts = line.split()
+        if len(parts) == 3 and parts[1] == 'FXID':
+            starts.append((parts[2], int(parts[0])))
+        elif len(parts) == 3 and parts[1] == '248C39':
+            messages.append(int(parts[0]))
+    out = []
+    for number, frame in starts:
+        later = [m for m in messages if m > frame]
+        out.append((number, frame, later[1] if len(later) > 1 else frame + 200))
+    return out
+
+
+def effect_above(scene, name, shape, seen, out):
+    """연출마다 시작 프레임을 맞춰, 창을 21줄 위로 올린 롬과 원래 롬의 창 위 화면이 같은지 본다. 창 크기에 따라 메시지
+    때가 달라져 두 롬의 같은 프레임 번호는 다른 장면일 수 있다. k 번째 연출을 원래 롬의 그 연출 구간 동안 견준다.
+    피해 흔들림은 화면 전체(창 포함)를 2점까지 위로 올리므로(원래 롬도 같음) 창 위 두 줄은 빼고 본다.
+    → (견준 장, 다른 장, 처음 다른 (연출, 시작에서 프레임))."""
+    top = shape['y'] * 8 - SHOT_SHIFT - 3
+    frames = differ = 0
+    first = None
+    for (number, start, end), (other, moved, _) in zip(effect_spans(seen[('original', scene)][2]),
+                                                        effect_spans(seen[(name, scene)][2])):
+        if number != other:
+            break
+        for d in range(end - start):
+            a, b = out / scene / 'original' / f'f{start + d:05d}.png', out / scene / name / f'f{moved + d:05d}.png'
+            if not (a.is_file() and b.is_file()):
+                continue
+            frames += 1
+            if Image.open(a).convert('RGB').crop((0, 0, 256, top)).tobytes() != \
+                    Image.open(b).convert('RGB').crop((0, 0, 256, top)).tobytes():
+                differ += 1
+                first = first or (number, d)
+    return {'shots': frames, 'differ': differ, 'first': first}
 
 
 def screen_window(scene, name, shape, seen, out):
@@ -271,7 +348,7 @@ def screen_window(scene, name, shape, seen, out):
     for k in range(2, len(dumps)):
         frame = FROM + k * STEP
         shot = out / scene / name / f'f{frame:05d}.png'
-        if (frame - FROM) % SHOTEVERY or not shot.is_file():
+        if not shot.is_file():
             continue
         if not all(complete(dumps[j], x, y, w, h) for j in (k - 2, k - 1, k)):
             continue
@@ -456,9 +533,11 @@ def main():
     ap.add_argument('--mesence', default=os.environ.get('MESENCE'))
     ap.add_argument('--out', type=Path, default='work/msgwindowcheck')
     ap.add_argument('--message-at', default='16:FE10', help='모양을 바꾸는 경우의 새 코드 자리')
+    ap.add_argument('--effects-at', default='3F:F000', help='창을 21줄 위로 올리는 경우의 연출 막기 코드 자리')
     ap.add_argument('--cases', default=','.join(CASES))
     ap.add_argument('--scenes', default=','.join(SCENES))
     ap.add_argument('--jobs', type=int, default=4)
+    ap.add_argument('--shot-every', type=int, default=SHOTEVERY, help='스크린샷 간격(프레임)')
     ap.add_argument('--hlog', action='store_true', help='원래 롬 실행에서 보이는 줄의 PPU 레지스터 쓰기를 모은다(느림)')
     args = ap.parse_args()
     if not args.mesence:
@@ -482,6 +561,8 @@ def main():
             if (shape['w'], shape['h']) != (WIDTH, HEIGHT):
                 shapes[name] = shape
                 write += ['--message-at', args.message_at]
+            if shape['y'] < TOP:
+                write += ['--effects-at', args.effects_at]
             for tool, extra in (('dq5windowwrite.py', write),
                                 ('dq5build.py', ['build', out / f'{name}.patch.json', '-o', out / f'{name}.sfc',
                                                  '--ips', out / f'{name}.ips'])):
@@ -504,7 +585,7 @@ def main():
             for key in ('PARTY', 'SET', 'POKE', 'ROMPATCH', 'TO', 'LATESET', 'SWAP', 'GROUP', 'BATTLE', 'FIELDSNAP'):
                 env.pop(key, None)
             env.update(LIBDIR=libdir, STATE=str(state), SHOT_DIR=str(dest), DRIVER=str(HERE / 'lua/dq5warp.lua'),
-                       FIELD='341,56', TEST=TAPS, FROM=str(FROM), STEP=str(STEP), SHOTEVERY=str(SHOTEVERY), ACC=ACC,
+                       FIELD='341,56', TEST=TAPS, FROM=str(FROM), STEP=str(STEP), SHOTEVERY=str(args.shot_every), ACC=ACC,
                        HLOG='1' if args.hlog and rom == 'original' else '0', HLOGTAIL=str(HLOG_TAIL), **SCENES[scene])
             def launch():
                 with (dest / 'mesen.log').open('w') as log:
@@ -545,11 +626,12 @@ def main():
                 elif name in shapes:
                     result = {**compare_shaped(scene, name, shapes[name], seen),
                               **transfer_sizes(scene, name, shapes[name]['y'], seen[(name, scene)][2]),
-                              'screen': screen_window(scene, name, shapes[name], seen, out)}
-                    # 21줄 창(넓히기만)은 원래 창처럼 안전해야 한다. 21줄 위로 높인 창이 주문 연출에 깨지는 것은
-                    # 알려진 문제라 세기만 한다(dq5-build-format.md).
-                    if shapes[name]['y'] == TOP:
-                        require(safe(result['screen']), f'{scene}/{name}: 21줄 창이 화면에서 깨짐 {result["screen"]}')
+                              'screen': screen_window(scene, name, shapes[name], seen, out),
+                              'above': above_window(scene, name, shapes[name], seen, out),
+                              'effect_above': effect_above(scene, name, shapes[name], seen, out)}
+                    # 창은 화면에서 깨지지 않아야 한다. 연출 동안 창 위 화면(effect_above)은 세기만 한다: 창을 높이기만
+                    # 해도(효과 층을 창 위 줄까지만 올림) 원래 롬과 다른 프레임이 있다.
+                    require(safe(result['screen']), f'{scene}/{name}: 화면 창이 깨짐 {result["screen"]}')
                 else:
                     result = {**compare_moved(scene, name, row['x'], seen, out),
                               **transfer_sizes(scene, name, TOP, seen[(name, scene)][2])}

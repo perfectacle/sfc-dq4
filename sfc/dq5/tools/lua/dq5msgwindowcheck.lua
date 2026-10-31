@@ -4,7 +4,7 @@
 -- SWAP="05E:006,118;069:006" 은 24:8C39 에 들어온 메시지 번호(A)를 차례로 바꾼다.
 -- exec.txt 에는 24:A519·24:A523(▼ 기다림)·24:880A(FD ▼)·24:A569(줄 올리기)·24:8C39(메시지 번호)에 들어온 프레임,
 -- 24:A4A4(글자 하나) 의 글자·줄($0F0E)·칸($0F0D), 00:FDA1 에서 $0F5E 가 1CE0(BG3 효과 층)인 전송(EFF)을 적는다.
--- 00:FDA1 의 모든 전송은 FX 줄(VRAM 자리 $0F5E, 크기 $4375, 1CE0 이면 7E:8A1D 에서 0 이 아닌 워드가 있는 첫·끝 BG3 줄)로,
+-- 00:FDA1 의 모든 전송은 FX 줄(VRAM 자리 $0F5E, 크기 $4375(창을 올린 롬은 $4305), 1CE0 이면 7E:8A1D 에서 0 이 아닌 워드가 있는 첫·끝 BG3 줄)로,
 -- 연출 시작 22:D73C 의 A 는 FXID 줄로, 행동 결정 20:8846 의 행동자 $1200·행동 $1201 은 ACT 줄로 적는다.
 -- OAM(544바이트)과 OBJ 크기 모드(OBSEL 위 3비트) 1바이트는 덤프 프레임마다 oam.bin 에 이어 붙인다.
 -- FIELDSNAP=N 이면 첫 전투 메시지 뒤 필드 메시지 글자(24:9E94)가 N 번째일 때 그 프레임·맵·필드 좌표와 7E:1E71~1EFF 를
@@ -56,7 +56,9 @@ emu.addMemoryCallback(function()
 end, emu.callbackType.exec, 0x24A4A4, 0x24A4A4)
 emu.addMemoryCallback(function()
   local dest = emu.read(0x7E0F5E, m) | emu.read(0x7E0F5F, m) << 8
-  local size = emu.read(0x4375, m) | emu.read(0x4376, m) << 8
+  -- 창을 21줄 위로 올린 롬은 이 전송을 채널 0 으로 옮긴다(dq5windowwrite.py DMA_REGS). 원본 7E:8A1D 를 가리키는 채널을 읽는다.
+  local ch = (emu.read(0x4302, m) == 0x1D and emu.read(0x4303, m) == 0x8A) and 0x4300 or 0x4370
+  local size = emu.read(ch + 5, m) | emu.read(ch + 6, m) << 8
   local rows = '-'
   if dest == 0x1CE0 then
     log[#log + 1] = string.format('%d EFF', n)
@@ -80,8 +82,8 @@ emu.addMemoryCallback(function()
   log[#log + 1] = string.format('%d ACT %02X %02X', n, emu.read(0x7E1200, m), emu.read(0x7E1201, m))
 end, emu.callbackType.exec, 0x208846, 0x208846)
 -- HLOG=1 이면 보이는 줄(ppu.scanline 1~224)에서 PPU 레지스터 $2105~$2112·$2121·$2123~$2133 에 쓴 것(HDMA 쓰기도 걸림)을
--- 프레임·레지스터마다 첫·끝 줄과 횟수, HLOGTAIL(기본 150) 줄부터 쓴 값(겹치지 않게, 16진, 없으면 -)으로 모아 hdma.txt 에
--- "프레임 레지스터 첫줄 끝줄 횟수 값,…" 으로 적는다. 레지스터는 거울 뱅크
+-- 프레임·레지스터마다 첫·끝 줄과 횟수, HLOGTAIL(기본 150) 줄부터 쓴 줄:값(겹치지 않게, 줄 10진 세 자리:값 16진, 없으면 -)
+-- 으로 모아 hdma.txt 에 "프레임 레지스터 첫줄 끝줄 횟수 줄:값,…" 으로 적는다. 레지스터는 거울 뱅크
 -- 00~3F·80~BF 어디로도 쓸 수 있다. 쓰기마다 상태를 읽어 실행이 열 배 넘게 느려지므로 따로 켠다. VRAM·CGRAM 데이터
 -- 포트($2118·$2119·$2122)는 DMA 로 바이트마다 걸려 뺀다.
 local hlogon = os.getenv('HLOG') == '1'
@@ -98,13 +100,12 @@ local function pcb(addr, value)
     e = {sl, sl, 1, {}}
     lines[r] = e
   end
-  if sl >= hlogtail then e[4][value] = true end
+  if sl >= hlogtail then e[4][string.format('%03d:%02X', sl, value)] = true end
 end
 local function tail(set)
   local t = {}
   for v in pairs(set) do t[#t + 1] = v end
   table.sort(t)
-  for i, v in ipairs(t) do t[i] = string.format('%02X', v) end
   return #t > 0 and table.concat(t, ',') or '-'
 end
 for bank = 0, 0xBF do
