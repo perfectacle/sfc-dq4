@@ -1,11 +1,14 @@
 """곡 삽입의 경계, 기존 재배치 보존과 IPL 길이를 검사한다."""
+from functools import cache
 import os
 from pathlib import Path
 import unittest
+from unittest import mock
 
 import dq4soundpatch as patch
 from dq5song import assemble
 from dq5map import lorom
+from dq5spc import RESIDENT_SAMPLES, SAMPLE_COUNT, SAMPLES, SEQUENCE_COUNT, SEQUENCES
 
 ROOT = Path(__file__).resolve().parents[3]
 ROM = ROOT / 'rom/dq5.sfc'
@@ -14,6 +17,53 @@ ROM = ROOT / 'rom/dq5.sfc'
 def melody(instrument=0):
     return assemble(['tempo 78', 'track L0', 'L0:', f'  instrument {instrument:02X}',
                      '  volume 30', '  volume2 FF', '  release 14', '  note 30 len 30', '  jump L0'])
+
+
+def chained(data, start, sizes, fill):
+    pos = lorom(start)
+    for size in sizes:
+        data[pos:pos + 2 + size] = size.to_bytes(2, 'little') + bytes([fill]) * size
+        pos += 2 + size
+
+
+@cache
+def synthetic_base():
+    """롬 없이 install 을 돌릴 2MB 합성 롬. 표 모양만 DQ5 와 같고 샘플·시퀀스 내용은 채움 바이트다.
+
+    곡 묶음 표는 365바이트로, 곡 하나에 샘플을 열 개 넘게 붙이면 원래 자리(TABLE_CAPACITY)를 넘게 했다.
+    패치 자리의 원래 바이트는 install 이 put 에 넘기는 기대값을 그대로 심는다(도구 상수뿐, 롬 자료가 아님).
+    """
+    data = bytearray(0x200000)
+    chained(data, SAMPLES, [0x200] * SAMPLE_COUNT, 0x11)
+    chained(data, SEQUENCES, [0x40] * SEQUENCE_COUNT, 0x22)
+    records = [bytes([4 if song < 10 else 3, 1, 0x01, 0x02, 0x03, 0x04][:6 if song < 10 else 5])
+               for song in range(SEQUENCE_COUNT)]
+    table = b''.join(records)
+    data[lorom(patch.SONG_SETS):lorom(patch.SONG_SETS) + len(table) + 4] = table + patch.IPL_END
+    data[lorom(patch.IPL_BLOCK):lorom(patch.IPL_BLOCK) + 2] = (
+        lorom(patch.SONG_SETS) + len(table) - lorom(patch.IPL_BLOCK) - 4).to_bytes(2, 'little')
+    data[lorom(patch.HEAP_START):lorom(patch.HEAP_START) + 2] = (0x2A5D).to_bytes(2, 'little')
+    data[lorom(RESIDENT_SAMPLES):lorom(RESIDENT_SAMPLES) + 7] = bytes([0x00, 0x05, 0x1F, 0x22, 0x20, 0x21, 0xFF])
+    data[lorom(patch.RESIDENT_SEQUENCES):lorom(patch.RESIDENT_SEQUENCES) + 4] = bytes([0x17, 0x32, 0x33, 0xFF])
+    data[lorom(patch.RESIDENT_SAMPLE_LOAD):lorom(patch.RESIDENT_SAMPLE_LOAD) + 4] = (
+        bytes([0xBF]) + RESIDENT_SAMPLES.to_bytes(3, 'little'))
+    data[lorom(0x2BC3AB):lorom(0x2BC3AB) + 5] = bytes.fromhex('48 DA 29 FF 00')
+
+    expected = {}
+
+    def record(data, addr, payload, expected_bytes=None, empty=False):
+        if expected_bytes is not None:
+            assert expected.setdefault(addr, bytes(expected_bytes)) == expected_bytes, f'{addr:06X}'
+        data[lorom(addr):lorom(addr) + len(payload)] = payload
+
+    with mock.patch.object(patch, 'put', record):
+        for options in ({'fast_receive': True, 'hold': True, 'early_song': True, 'load_pump': True,
+                         'keep_samples': True, 'release_failed': True, 'vehicle_song': True},
+                        {'map_fades': True}):
+            patch.install(bytes(data), {0x48: patch.Replacement(melody(), (0x03,))}, **options)
+    for addr, raw in expected.items():
+        data[lorom(addr):lorom(addr) + len(raw)] = raw
+    return bytes(data)
 
 
 class SequenceValidationTests(unittest.TestCase):
@@ -43,11 +93,12 @@ class SequenceValidationTests(unittest.TestCase):
             patch.validate_replacement(patch.Replacement(bytes([120, 8, 0, 0]), (0x18,)))
 
 
-@unittest.skipUnless(ROM.exists(), 'user-supplied DQ5 ROM required')
 class InstallTests(unittest.TestCase):
+    load = staticmethod(synthetic_base)
+
     @classmethod
     def setUpClass(cls):
-        cls.base = ROM.read_bytes()
+        cls.base = cls.load()
         cls.item = patch.Replacement(melody(), (0x18,))
 
     def test_relocated_sequence_and_table_are_readable(self):
@@ -155,6 +206,13 @@ class InstallTests(unittest.TestCase):
             self.assertEqual(out[pos:pos + 4], self.base[pos:pos + 4])
         self.assertEqual(out[lorom(patch.MAP_START):lorom(patch.MAP_START) + 4], bytes.fromhex('22 80 80 71'))
 
+
+@unittest.skipUnless(ROM.exists(), 'user-supplied DQ5 ROM required')
+class RealRomInstallTests(InstallTests):
+    load = staticmethod(ROM.read_bytes)
+
+
+class TransitionCodeTests(unittest.TestCase):
     def test_map_hooks_never_wait_for_frames(self):
         # 맵을 불러올 때는 NMI 가 꺼져 있어 프레임 기다림(24:FE44, 00:9506)을 부르면 멈춘다.
         for code in patch.transition_code():
@@ -272,11 +330,12 @@ class EngineCodeTests(unittest.TestCase):
         self.assertEqual(code[-4:], bytes.fromhex('5C 49 CE 00'))
 
 
-@unittest.skipUnless(ROM.exists(), 'user-supplied DQ5 ROM required')
 class MapStartInstallTests(unittest.TestCase):
+    load = staticmethod(synthetic_base)
+
     @classmethod
     def setUpClass(cls):
-        cls.base = ROM.read_bytes()
+        cls.base = cls.load()
         cls.item = {0x02: patch.Replacement(melody(), (0x03,))}
 
     def test_hold_needs_fast_receive_and_pump_needs_early_song(self):
@@ -296,6 +355,11 @@ class MapStartInstallTests(unittest.TestCase):
         for at, (payload, _) in patch.load_pump_code().items():
             self.assertEqual(out[lorom(at):lorom(at) + len(payload)], payload)
 
+
+@unittest.skipUnless(ROM.exists(), 'user-supplied DQ5 ROM required')
+class RealRomMapStartInstallTests(MapStartInstallTests):
+    load = staticmethod(ROM.read_bytes)
+
 class SongNumberCodeTests(unittest.TestCase):
     def spc_effect(self, a):
         # SPC 도우미를 흉내: CMP #47 / BCS 곡 / CMP #32 / RET(C) ; 곡: CLRC
@@ -314,10 +378,11 @@ class SongNumberCodeTests(unittest.TestCase):
         self.assertLessEqual(patch.SONG_TEST_HELPER + len(patch.song_test_helper()), 0x2BB805)
 
 
-@unittest.skipUnless(ROM.exists(), 'user-supplied DQ5 ROM required')
 class SongNumberInstallTests(unittest.TestCase):
+    load = staticmethod(synthetic_base)
+
     def test_new_song_number_pads_records_and_patches_effect_tests(self):
-        base = ROM.read_bytes()
+        base = self.load()
         out, report = patch.install(base, {0x48: patch.Replacement(melody(), (0x03,))})
         records = patch.read_sets(out)
         self.assertEqual(len(records), 0x49)
@@ -332,6 +397,11 @@ class SongNumberInstallTests(unittest.TestCase):
         self.assertEqual(out[lorom(patch.NMI_RANGE_STUB)], 0xC9)
         with self.assertRaisesRegex(ValueError, '47..4B'):
             patch.install(base, {0x4C: patch.Replacement(melody(), (0x03,))})
+
+
+@unittest.skipUnless(ROM.exists(), 'user-supplied DQ5 ROM required')
+class RealRomSongNumberInstallTests(SongNumberInstallTests):
+    load = staticmethod(ROM.read_bytes)
 
 
 if __name__ == '__main__':

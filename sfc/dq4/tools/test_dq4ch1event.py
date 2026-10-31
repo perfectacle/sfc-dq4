@@ -219,6 +219,51 @@ class LearnTest(unittest.TestCase):
         self.assertEqual(before[1:], after[1:])
 
 
+class LearnLayoutTest(unittest.TestCase):
+    def test_hero_learns_nothing_and_others_keep_theirs(self):
+        # 지어낸 습득 표·목록. 사람 표는 원래 자리(23:B819~B978)를 꼭 채워야 줄어든 표를 그 자리에 다시 쓴다.
+        sys.path.insert(0, str(ROOT / "sfc" / "dq5" / "tools"))
+        import dq5learnwrite as lw
+        from dq5map import Rom, lorom
+        data = bytearray(0x180000)
+
+        def put(address, raw):
+            data[lorom(address):lorom(address) + len(raw)] = raw
+
+        put(lw.LDY_AT, lw.LDY)
+        for kind, (_, base, _, _) in lw.GROUPS.items():
+            put(lw.BASE_AT[kind], (base & 0xFFFF).to_bytes(2, "little"))
+        for at in lw.BANK_AT.values():
+            put(at, b"\x23")
+        rows = [[(2, 0x000101), (5, 0x000202)], [(3, 0x000101)]] + [[]] * 8 + [[(n, 1) for n in range(2, 84)]]
+        address = lw.GROUPS["person"][1]
+        for row in rows:
+            put(address, bytes([len(row)]) + b"".join(bytes([level]) + mask.to_bytes(3, "little") for level, mask in row))
+            address += 1 + 4 * len(row)
+        self.assertEqual(address, lw.GROUPS["person"][2])
+        # 목록 표의 칸(사람 0~10, 몬스터 11~52)은 모두 빈 목록을 가리키고, 주인공과 사람 1 만 제 목록을 둔다.
+        empty = at = lw.LIST_REGION[0]
+        at += 1
+        for table in lw.TABLES.values():
+            for index in range(53):
+                put(table + index * 2, (empty & 0xFFFF).to_bytes(2, "little"))
+        for index, pair in {0: (b"\x02\x27\x29", b"\x02\x05\x09"), 1: (b"\x01\x2C", b"\x01\x11")}.items():
+            for name, raw in zip(lw.TABLES, pair):
+                put(at, raw)
+                put(lw.TABLES[name] + index * 2, (at & 0xFFFF).to_bytes(2, "little"))
+                at += len(raw)
+        before = lw.dump(Rom(bytes(data)))["characters"]
+        for w in lw.patch(Rom(bytes(data)), ev.learn_doc())["writes"]:
+            bank, addr = (int(v, 16) for v in w["at"].split(":"))
+            put(bank << 16 | addr, bytes.fromhex(w["hex"]))
+        after = lw.dump(Rom(bytes(data)))["characters"]
+        self.assertEqual([r["level"] for r in before[0]["learn"]], [2, 5])
+        self.assertEqual(after[0]["learn"], [])
+        self.assertEqual((after[0]["field"], after[0]["battle"]), ([0x27, 0x29], [0x05, 0x09]))
+        self.assertEqual(after[1]["learn"], [{"level": 3, "field_slots": [0], "battle_slots": [0]}])
+        self.assertEqual(before[1:], after[1:])
+
+
 @unittest.skipUnless(DQ4.is_file() and DQ5.is_file(), "local source ROMs not present")
 class ListTest(unittest.TestCase):
     @classmethod

@@ -18,6 +18,22 @@ class FoldTest(unittest.TestCase):
         self.assertEqual(shopport._fold("いばらのむち"), shopport._fold("いばらのムチ"))
 
 
+class SellerConditionTest(unittest.TestCase):
+    def test_story_flag_sellers_at_chapter_start(self):
+        # Made-up sellers of one cell: a church that needs a story flag off stays, an inn that needs it on is not
+        # there yet, a weapon seller on a story-flag list is not the base list; the day-only item shop stays by day.
+        from unittest import mock
+        flag = shopport.STORY_FLAG + "06 10"
+        rows = [(0x03, 0x04, 0x20, 0, [f"아님({flag})"], ""), (0x03, 0x04, 0x21, 6, [flag], ""),
+                (0x03, 0x04, 0x22, 2, [shopport.FLAG_LIST + " 1"], ""), (0x05, 0x06, 0x23, 1, ["낮"], "")]
+        with mock.patch.object(shopport.dq4shop, "merchants", return_value=rows):
+            found = shopport.merchants(b"", 0x0E, 0)
+            self.assertEqual(found, {(0x03, 0x04, False): 5, (0x03, 0x04, True): 5, (0x05, 0x06, False): 1})
+            rows.append((0x07, 0x08, 0x24, 1, ["unknown"], ""))
+            with self.assertRaises(ValueError):
+                shopport.merchants(b"", 0x0E, 0)
+
+
 @unittest.skipUnless(DQ4.is_file() and DQ5.is_file(), "local source ROMs not present")
 class PortTest(unittest.TestCase):
     @classmethod

@@ -48,6 +48,25 @@ class AllocationTest(unittest.TestCase):
             port.talk_doc([{"id": 0xC7F, "codes": [port.END]}])
 
 
+class PlantedPeopleTest(unittest.TestCase):
+    def test_night_facing_from_picture_byte(self):
+        # Made-up list 02/00 in bank 05: two day-and-night records (head 8 or 7 bytes, then two empty blocks).
+        # F 1E has bit0 off, so at night the facing is byte 7 (03 = left), not byte 3 (02 = down); F 1F has bit0
+        # on and keeps byte 3 (01 = right). Talk 01 is a service, so no script is read.
+        sys.path.insert(0, str(ROOT / "fc" / "dq4" / "tools"))
+        import dq4map
+        prg = bytearray(0x80000)
+        bank = dq4map.NPC_BANK * 0x4000
+        prg[bank + 4:bank + 6] = (0x8100).to_bytes(2, "little")
+        records = bytes.fromhex("1E 00 35 02 01 12 34 03 00 00" "1F 00 47 01 01 13 35 00 00" "00")
+        prg[bank + 0x100:bank + 0x100 + len(records)] = records
+        people = port.fc_people(bytes(prg), 0x02, 0, True)
+        self.assertEqual([(p["x"], p["y"], p["facing"], p["interval"]) for p in people],
+                         [(0x12, 0x34, "left", 5), (0x13, 0x35, "right", 7)])
+        day = port.fc_people(bytes(prg), 0x02, 0, False)
+        self.assertEqual([(p["facing"], p["interval"]) for p in day], [("down", 3), ("right", 4)])
+
+
 @unittest.skipUnless(DQ4.is_file(), "local source ROM not present")
 class CodesTest(unittest.TestCase):
     @classmethod

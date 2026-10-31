@@ -2,8 +2,10 @@
 groups."""
 
 import sys
+import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -29,6 +31,30 @@ class DungeonAttrsTest(unittest.TestCase):
         self.assertEqual(row, [0x2C, 0x2C, 0x2C, 0x07, 0x01, 0x09])
         self.assertEqual(build.map_attrs(dq5, link)["bytes"][:3], [0xFF] * 3)
         self.assertEqual(build.map_attrs(dq5, {"attrs": "03/00"}), {"copy": "03/00"})
+
+
+class SyntheticTablesTest(unittest.TestCase):
+    """map_attrs and dungeon_zones on made-up tables in place of the ROM readers."""
+
+    def test_map_attrs_replaces_song_and_dungeon_zones(self):
+        attrs = {0x21: {0x02: bytes([1, 2, 3, 4, 5, 6])}}
+        with mock.patch("dq5newmap.entries", return_value=(attrs, None)), \
+                mock.patch.object(Path, "read_bytes", return_value=b""):
+            link = {"attrs": "21/02", "music": 0x09, "dungeon": True}
+            self.assertEqual(build.map_attrs(Path("dq5.sfc"), link, 0x2C)["bytes"], [0x2C, 0x2C, 0x2C, 4, 5, 0x09])
+            self.assertEqual(build.map_attrs(Path("dq5.sfc"), link)["bytes"][:3], [0xFF] * 3)
+            self.assertEqual(build.map_attrs(Path("dq5.sfc"), {"attrs": "21/02", "music": 0x0A})["bytes"],
+                             [1, 2, 3, 4, 5, 0x0A])
+
+    def test_dungeon_zones_skip_maps_without_a_zone(self):
+        dungeons = {part["fc"] for parts in build.LINKS.values() for part in parts if part.get("dungeon")}
+        first = min(dungeons)
+        lists = [(fc, [0x40, 0xFF]) for fc in dungeons if fc != first]
+        encounter = types.SimpleNamespace(dungeon_lists=lambda prg: [(None, None, lists)])
+        with mock.patch.dict(sys.modules, {"dq4encounter": encounter}), \
+                mock.patch.object(build, "fc_numbers", return_value=[0, 1, 2]):
+            zones = build.dungeon_zones(b"")
+        self.assertEqual(zones, {(fc, 0): 0x40 for fc in dungeons if fc != first})
 
 
 class BundleTest(unittest.TestCase):
