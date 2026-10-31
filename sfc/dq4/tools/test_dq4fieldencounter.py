@@ -43,11 +43,12 @@ class RomTest(unittest.TestCase):
             subprocess.run([sys.executable, str(enc.DQ5_TOOLS / "dq5encounterwrite.py"), str(DQ5), "dump", "-o",
                             str(path)], check=True, capture_output=True)
             cls.orig = json.loads(path.read_text(encoding="utf-8"))
-        cls.progress, cls.grids, cls.report = enc.docs(cls.prg, cls.dq5, cls.orig)
+        cls.dungeon = (0x40, 0x41, 0x42, 0x43)
+        cls.progress, cls.grids, cls.report = enc.docs(cls.prg, cls.dq5, cls.orig, cls.dungeon)
 
     def test_every_monster_has_a_placeholder(self):
         import dq4encounter
-        for z in enc.fc_zones(self.prg):
+        for z in (*enc.fc_zones(self.prg), *self.dungeon):
             slots = dq4encounter.zone(self.prg, z)["slots"]
             for i in (*enc.GROUP_SLOTS, *enc.SOLO_SLOTS, *enc.ONE_SLOTS):
                 if slots[i] != 0xFF:
@@ -59,6 +60,19 @@ class RomTest(unittest.TestCase):
         self.assertEqual(len(areas), len(set(areas)))
         self.assertFalse(set(areas) & used)
         self.assertEqual(areas[-4:], list(enc.SEA_AREAS))
+
+    def test_dungeon_zones_are_out_of_the_grids(self):
+        dungeon = {self.report[f"{z:02X}"]["zone"] for z in self.dungeon}
+        self.assertEqual(len(dungeon), len(self.dungeon))
+        in_grids = {a for g in self.grids["field_grids"] for row in g["rows"] for a in row}
+        self.assertFalse(dungeon & in_grids)
+
+    def test_dungeon_rate(self):
+        # FC base 10 and 14 in a dungeon are 15/256 and 18.75/256 a step; DQ5's highest coefficient 80 x 7 >> 6
+        # is 14/256, the nearest.
+        for z in self.dungeon:
+            self.assertEqual(self.report[f"{z:02X}"]["rate_index"], 7)
+        self.assertEqual(enc.rate_index(self.dq5, 0x10), 3)
 
     def test_castle_zone(self):
         # FC zone 04 around バトランド: level 1, base rate 16 -> coefficient 40, スライム·バブルスライム kept.

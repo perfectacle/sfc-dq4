@@ -18,6 +18,19 @@ class CellTest(unittest.TestCase):
         self.assertEqual(build.cell(0, 0), (0, 1))
 
 
+class DungeonAttrsTest(unittest.TestCase):
+    def test_dungeon_zones_and_song(self):
+        dq5 = ROM.parent / "dq5.sfc"
+        if not dq5.exists():
+            self.skipTest("rom/dq5.sfc")
+        link = {"attrs": "21/02", "music": 0x09, "dungeon": True}
+        row = build.map_attrs(dq5, link, 0x2C)["bytes"]
+        # 21/02: zones 01 14 14, background 07, ceiling 01, song 09.
+        self.assertEqual(row, [0x2C, 0x2C, 0x2C, 0x07, 0x01, 0x09])
+        self.assertEqual(build.map_attrs(dq5, link)["bytes"][:3], [0xFF] * 3)
+        self.assertEqual(build.map_attrs(dq5, {"attrs": "03/00"}), {"copy": "03/00"})
+
+
 class BundleTest(unittest.TestCase):
     """Two FC groups in one DQ5 group, and one FC group alone."""
     LINKS = {0x40: [{"fc": 0x10, "arrival": (1, 2), "map": 1, "field": (100, 50)},
@@ -121,6 +134,17 @@ class RecordAreasTest(unittest.TestCase):
         self.assertEqual(rest, [{"at": "31:8000", "hex": "AA"}])
         with self.assertRaises(ValueError):
             build.splice(first, [{"at": "0F:8EDB", "hex": "01 02 03 04 05"}])
+
+
+@unittest.skipUnless(ROM.is_file(), "local source ROM not present")
+class DungeonZonesTest(unittest.TestCase):
+    def test_fc_dungeon_list(self):
+        from kr_patch.fc import ines
+        zones = build.dungeon_zones(ines.prg(ROM.read_bytes()))
+        # The tower's two top floors and 古井戸の底 (1C) have no zone.
+        want = {(0x30, 0): 0x42, (0x30, 1): 0x42, (0x30, 2): 0x43, (0x30, 3): 0x43, (0x41, 0): 0x40,
+                **{(0x3A, k): 0x41 for k in range(7)}}
+        self.assertEqual(zones, want)
 
 
 @unittest.skipUnless(ROM.is_file(), "local source ROM not present")

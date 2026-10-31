@@ -56,24 +56,31 @@ from kr_patch.fc import ines  # noqa: E402
 # field 0 block for block, dq4fieldport.py), and the inputs that take the party from the arrival to the field.
 # "music" replaces the song byte of the copied attributes (attribute +5): FC plays one song for the whole group
 # (19:$803B, map branch $07BA), and 02 バトランド plays FC song 03, 王宮のメヌエット, which the sound port puts
-# in DQ5 song slot 01. The DQ5 group's own arrival (the dq5newmap entrance) is its first FC group's.
+# in DQ5 song slot 01. A "dungeon" part's maps take the zones of the FC dungeon list in place of the borrowed
+# ones (map_attrs, dungeon_zones) and its DQ5 group counts steps for encounters (INDOOR_ENCOUNTERS). The DQ5
+# group's own arrival (the dq5newmap entrance) is its first FC group's.
 LINKS = {
     0x36: [{"fc": 0x02, "arrival": (0x00, 0x1D), "attrs": "03/00", "music": 0x01, "field": [(0xA4, 0x2E)],
             "out": "left:64"}],
     # 마을 곡: 19/02 의 곡 바이트 07 은 사운드 포팅에서 楽しいカジノ 자리라, FC 마을 곡 0C 街でのひととき 가 든 06 으로
     0x37: [{"fc": 0x12, "arrival": (0x0D, 0x19), "attrs": "19/02", "music": 0x06, "field": [(0x9A, 0x16)], "out": "down:64"}],
-    # 古井戸の底, the tower of chapter 1's end, and the house of 41/00. Their attributes are a placeholder
-    # (the castle's: no encounters) until the DQ4 encounters and music are ported.
-    0x38: [{"fc": 0x1C, "arrival": (0x0D, 0x10), "attrs": "03/00", "field": [(0xA2, 0x1A)], "out": "down:64"}],
-    0x39: [{"fc": 0x30, "arrival": (0x10, 0x21), "map": 3, "attrs": "03/00", "field": [(0x88, 0x17)],
-            "out": "down:64"}],
+    # 古井戸の底, the tower of chapter 1's end, and the house of 41/00. The dungeons borrow a DQ5 cave (21/02:
+    # battle background 07, ルーラ hits the ceiling) or tower (33/00: background 0A) and take the FC dungeon
+    # zones ("dungeon"). FC plays 恐怖の洞窟 (FC song 06, DQ5 slot 09) in 1C and map branch 5 (3A, 41) and
+    # 呪われし塔 (07, slot 0A) in branch 4 (30).
+    0x38: [{"fc": 0x1C, "arrival": (0x0D, 0x10), "attrs": "21/02", "music": 0x09, "dungeon": True,
+            "field": [(0xA2, 0x1A)], "out": "down:64"}],
+    0x39: [{"fc": 0x30, "arrival": (0x10, 0x21), "map": 3, "attrs": "33/00", "music": 0x0A, "dungeon": True,
+            "field": [(0x88, 0x17)], "out": "down:64"}],
     # 41/00's arrival is its stair to the field: step off and back on. FC enters it from two caves, each onto
     # its own stair, and each stair leaves by its cave (08:$B2EC). Bataland's land reaches only (8D,1F) and
     # イムル's only (8D,1B), so one arrival and one way out made the cave one-way.
-    0x3A: [{"fc": 0x41, "arrival": (0x03, 0x03), "attrs": "03/00", "field": [(0x8D, 0x1B), (0x8D, 0x1F)],
+    0x3A: [{"fc": 0x41, "arrival": (0x03, 0x03), "attrs": "21/02", "music": 0x09, "dungeon": True,
+            "field": [(0x8D, 0x1B), (0x8D, 0x1F)],
             "stairs": {(0x8D, 0x1B): (0x03, 0x03), (0x8D, 0x1F): (0x0E, 0x30)}, "out": "down:32,wait:60,up:32"}],
     # Below 古井戸の底: no field entrance; its group arrival is the cell the well's stair leads to (3A/02).
-    0x3B: [{"fc": 0x3A, "arrival": (0x03, 0x02), "map": 2, "attrs": "03/00", "field": None, "out": None}],
+    0x3B: [{"fc": 0x3A, "arrival": (0x03, 0x02), "map": 2, "attrs": "21/02", "music": 0x09, "dungeon": True,
+            "field": None, "out": None}],
     # The prologue's village (FC 14/00). The field leads to the ruined 14/02, so this arrival is the same cell
     # of 14/00. The prologue places its own people: the FC people of 14/00 belong to chapter 5's start.
     0x3C: [{"fc": 0x14, "arrival": (0x0C, 0x18), "attrs": "19/02", "music": 0x06, "field": [(0x91, 0x31)], "out": "down:64",
@@ -123,6 +130,9 @@ CHEST_AT = ("--chests-at", "3C:8400", "--chest-maps-at", "3C:8800", "--search-at
 FIELD_AT = "3A:8000"
 LAYER = 1
 WORLD_CODE = 1
+# Group arrival +4 bit2-6 -> $194A bit0-4 (2A:FD7E): 4 counts steps for encounters indoors (00:8340), as in the
+# DQ5 caves 07-09; 0 never does.
+INDOOR_ENCOUNTERS = 0x04
 AREA_FLAGS = 0x80
 # FC direction (0 up, 2 down) -> the DQ5 row of an FC cell the party first steps onto.
 ENTRY_ROW = {0: 1, 2: 0}
@@ -505,17 +515,38 @@ def _save(path, doc):
     return path
 
 
-def map_attrs(dq5, link):
-    """dq5newmap attrs: a copy of the borrowed map's attributes, with the song byte replaced when "music" is set."""
-    if "music" not in link:
+def map_attrs(dq5, link, zone=None):
+    """dq5newmap attrs: a copy of the borrowed map's attributes, with the song byte replaced when "music" is set
+    and, for a "dungeon" part, the zones of all three $1948 values set to the DQ5 zone `zone` (None: FF, none)."""
+    if "music" not in link and not link.get("dungeon"):
         return {"copy": link["attrs"]}
     import dq5newmap
     from dq5map import Rom
     attrs, _ = dq5newmap.entries(Rom(dq5.read_bytes()), "attr")
     group, number = (int(v, 16) for v in link["attrs"].split("/"))
     row = list(attrs[group][number])
-    row[5] = link["music"]
+    if "music" in link:
+        row[5] = link["music"]
+    if link.get("dungeon"):
+        row[0:3] = [0xFF if zone is None else zone] * 3
     return {"bytes": row}
+
+
+def dungeon_zones(prg):
+    """{(FC group, FC map): FC zone} of the ported maps of the LINKS "dungeon" parts, from the chapters 1-4 dungeon
+    list (18:$A069, indexed by the FC map number); maps without a zone are left out."""
+    import dq4encounter
+    _, _, recs = dq4encounter.dungeon_lists(prg)[0]
+    lists = dict(recs)
+    out = {}
+    for parts in LINKS.values():
+        for part in parts:
+            if part.get("dungeon"):
+                zones = lists.get(part["fc"], [])
+                for k in fc_numbers(prg, part["fc"]):
+                    if k < len(zones) and zones[k] != 0xFF:
+                        out[part["fc"], k] = zones[k]
+    return out
 
 
 def records_pass(dq5, out, manifests, k, sources):
@@ -594,13 +625,20 @@ def _build(pool, dq5, dq4, out, with_people):
     for group, (first, *_) in LINKS.items():
         x, y = cell(*first["arrival"])
         number = place[first["fc"], first.get("map", 0)][1]
+        indoor = INDOOR_ENCOUNTERS << 2 if any(part.get("dungeon") for part in LINKS[group]) else 0
         newmap["groups"].append({"group": f"{group:02X}",
-                                 "entrance": {"bytes": [WORLD_CODE << 5 | number, x, y, LAYER, 0]}})
+                                 "entrance": {"bytes": [WORLD_CODE << 5 | number, x, y, LAYER, indoor]}})
     part_of = {part["fc"]: part for parts in LINKS.values() for part in parts}
+    import dq4fieldencounter
+    dumps["encounter-orig"].result()
+    encounter_orig = json.loads((out / "encounter-orig.json").read_text(encoding="utf-8"))
+    fc_zones = dungeon_zones(prg)
+    dq5_zone = dq4fieldencounter.dungeon_zones(prg, encounter_orig, fc_zones.values())
     for m in new_maps:
-        fc_group, _ = fc_map(prg, int(m[:2], 16), int(m[3:], 16))
+        fc_group, fc_number = fc_map(prg, int(m[:2], 16), int(m[3:], 16))
         record = {"source": f"env/{names[m]}.dq5map.json"} if area[m] == 0 else {"copy": RECORD_PLACEHOLDER}
-        newmap["maps"].append({"map": m, "record": record, "attrs": map_attrs(dq5, part_of[fc_group])})
+        zone = dq5_zone.get(fc_zones.get((fc_group, fc_number)))
+        newmap["maps"].append({"map": m, "record": record, "attrs": map_attrs(dq5, part_of[fc_group], zone)})
     manifests = [env / "dq4-environment.dq5patch.json"]
 
     def step(tool, name, doc, base, *args):
@@ -675,10 +713,7 @@ def _build(pool, dq5, dq4, out, with_people):
     manifests.append(_save(out / "travel.dq5patch.json", {
         "format": "dq5patch/1", "name": "dq4-travel", "writes": dq4fieldtravel.writes(dq5.read_bytes(), destinations)}))
     checks.append(step("dq5namewrite.py", "names", dq4fieldtravel.names_doc(dq5.read_bytes(), destinations), dq5))
-    import dq4fieldencounter
-    dumps["encounter-orig"].result()
-    zones, grids, zone_report = dq4fieldencounter.docs(
-        prg, dq5.read_bytes(), json.loads((out / "encounter-orig.json").read_text(encoding="utf-8")))
+    zones, grids, zone_report = dq4fieldencounter.docs(prg, dq5.read_bytes(), encounter_orig, fc_zones.values())
     _save(out / "zone-report.json", zone_report)
     step("dq5progresswrite.py", "zones", zones, dq5)
     step("dq5encounterwrite.py", "grids", grids, dq5)
