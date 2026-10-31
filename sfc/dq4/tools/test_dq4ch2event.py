@@ -20,7 +20,8 @@ class FlagTest(unittest.TestCase):
         earlier = {v for k, v in vars(dq4ch1event).items() if k.isupper() and isinstance(v, tuple) and len(v) == 2
                    and all(isinstance(x, int) for x in v) and v[0] < 0x80 and v[1] in (1, 2, 4, 8, 16, 32, 64, 128)}
         earlier |= {_flag(f) for f in (dq4prologue.box.PROLOGUE.flag, dq4prologue.box.CHAPTER1.flag)}
-        mine = (ev.CHAPTER2, ev.OPENING, ev.KICKED, ev.JOINED, ev.TALKED_GATE, ev.TALKED_BREY, ev.TALKED_KIRYL, ev.READY)
+        mine = (ev.CHAPTER2, ev.OPENING, ev.KICKED, ev.JOINED, ev.TALKED_GATE, ev.TALKED_BREY, ev.TALKED_KIRYL, ev.READY,
+                ev.ANSWERED, ev.TEMPE_HEARD, ev.TEMPE_GONE, ev.TEMPE_ALTAR)
         for flag in mine:
             self.assertNotIn(flag, earlier)
         self.assertEqual(len(set(mine)), len(mine))
@@ -95,7 +96,8 @@ class ListTest(unittest.TestCase):
                     "fields": {"x": cell[0], "y": cell[1], "interval": 4, "talk": 0x100}}
         ported = [{"map": ev.THRONE, "entries": [king, other, person(ev.BREY_AT[1])]},
                   {"map": ev.CASTLE, "entries": [person(ev.GATE[0]), person(ev.GATE[1]), person(ev.KIRYL_AT[1])]},
-                  {"map": ev.BEDROOM, "entries": [person(ev.CARPENTER), person((2, 3))]}]
+                  {"map": ev.BEDROOM, "entries": [person(ev.CARPENTER), person((2, 3))]},
+                  {"map": ev.TEMPE, "entries": [person(ev.CHIEF), person(ev.PRIEST), person((2, 3))]}]
         king["fields"]["talk"] = 0x100
         _, new, over = ev.npc_lists(ported, 0xA00)
         t = ev.talk_numbers(0xA00)
@@ -116,6 +118,14 @@ class ListTest(unittest.TestCase):
         gate = [e for e in lists["ch2_castle_joined"] if e["fields"]["talk"] == t["gate_back"]]
         self.assertEqual([e["fields"]["x"] for e in gate], [ev.GATE[0][0] - 2, ev.GATE[1][0] + 2])
         self.assertEqual(ported[1]["entries"][0]["fields"]["interval"], 0)
+        # 텐페: 촌장·신부는 2장 대화. 신부는 바구니 이벤트 스크립트를 빌리고, 제단 목록에서는 원래 인물 그대로
+        tempe, altar = ported[3]["entries"], lists["ch2_tempe_altar"]
+        self.assertEqual(tempe[0]["fields"]["talk"], t["chief"])
+        self.assertEqual((tempe[1]["from"], tempe[1]["fields"]["talk"]), (ev.PRIEST_SRC, t["priest"]))
+        self.assertEqual((altar[1]["from"], altar[1]["fields"]["talk"]), (person(ev.PRIEST)["from"], t["priest"]))
+        self.assertEqual(altar[2], tempe[2])
+        names = [o["list"] for o in over if o["map"] == ev.TEMPE]
+        self.assertEqual(names, ["new:ch2_tempe_altar"])
 
     def test_opening_script_calls_box_then_reveal(self):
         script = ev.scripts(0xE00, {'box2': 0x5F8000, 'reveal': 0x5F9000})[0]
@@ -123,6 +133,24 @@ class ListTest(unittest.TestCase):
         self.assertEqual(ops, ['3F', '37', '21', '37', '21', '21', '11', '40', '16'])
         self.assertEqual(script["commands"][1]["args"], [0x00, 0x80, 0x5F])
         self.assertEqual(script["commands"][6]["args"], [ev.OPENING[0], ~ev.OPENING[1] & 0xFF])
+
+    def test_priest_script_waits_for_the_answer(self):
+        script = next(s for s in ev.scripts(0xE00, {'box2': 0, 'reveal': 0}) if s["address"] == ev.PRIEST_SCRIPT)
+        ops = [(c["op"], c["args"]) for c in script["commands"]]
+        go = ev.tail_native(0xE00)[1]['altar_go']
+        self.assertEqual(ops, [('09', [0x80 | ev.TEMPE_GONE[0], ev.TEMPE_GONE[1]]), ('10', list(ev.TEMPE_ALTAR)),
+                               ('37', list(ev._al(go))), ('16', [])])
+
+    def test_altar_event_moves_to_tempe(self):
+        more, tail = ev.tail_native(0xE00)
+        base = tail['join_event']
+        e = more[tail['altar_event'] - base:tail['altar_go'] - base]
+        g, n = (int(v, 16) for v in ev.TEMPE.split('/'))
+        self.assertEqual(e[0], 0x60)
+        self.assertEqual(e[3:], bytes((0x90, g, n, *ev.ALTAR_CELL, 0x01, 0x80, 0xFF)))
+        # 합류 이벤트·걸음 훅 자리는 바구니 이벤트를 붙여도 그대로
+        self.assertEqual(tail['step'], base + len(ev._event_bytes(ev.join_event(0xE00, ev.native()[1]))))
+        self.assertIn(ev._night(), more[tail['altar_go'] - base:])
 
     def test_ready_needs_all_three_talks(self):
         body = ev.talk_scripts(0xE00)[ev.TALKS.index('gate')]
