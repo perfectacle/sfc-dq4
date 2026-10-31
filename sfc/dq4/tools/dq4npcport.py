@@ -142,6 +142,8 @@ SCRIPT_TALK = 0x900
 LINE, PAGE, END = 0x1000, 0x1002, 0x1001
 # FC F4 는 30프레임 쉼(16:$80E9), DQ5 100D 는 31프레임 멈춤(24:84E9).
 PAUSE = 0x100D
+# FC 이름 0(勇者)은 새 게임에서 지은 이름이고, DQ5 는 그 이름을 7E:2001 에 두고 1012 로 찍는다.
+HERO = 0x1012
 NIGHT = 0x78
 MAX_CELL = 0x7F
 
@@ -242,6 +244,8 @@ def dq5_codes(rom, messages):
                 codes.append(LINE)
             elif p == "PAUSE":
                 codes.append(PAUSE)
+            elif p == "NAME:0":
+                codes.append(HERO)
             elif p == "WAIT":
                 page()
                 k = _skip_speaker(pieces, k)

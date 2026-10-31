@@ -123,6 +123,17 @@ LINKS = {
             "field": [(0x24, 0x57)], "out": "down:64", "chapter": 2},
            {"fc": 0x39, "arrival": (0x23, 0x08), "map": 1, "attrs": "21/02", "music": 0x09, "dungeon": True,
             "field": [(0x58, 0x3C)], "out": "down:32,wait:60,up:32", "chapter": 2}],
+    # 5장 시작 지역: ブランカ 와 きこりのいえ(20). 인물과 판매자는 5장 시작 상태($615A = 4)의 것. 여우가 홀리는
+    # 마을(18)은 자고 나면 사라지는 이벤트와 장소별 값(はがねのつるぎ 10G)이 있어 뺀다.
+    0x46: [{"fc": 0x06, "arrival": (0x10, 0x1D), "attrs": "03/00", "field": [(0x99, 0x45)], "out": "down:64",
+            "chapter": 5},
+           {"fc": 0x20, "arrival": (0x06, 0x0C), "attrs": "03/00", "field": [(0x92, 0x3A)], "out": "down:64",
+            "chapter": 5}],
+    # ブランカ 에서 エンドール 로 가는 터널. 3장에 뚫린 뒤(5장)의 42/01 만 옮긴다. FC 는 입구마다 그 쪽 계단으로
+    # 들여보낸다(08:$AF99).
+    0x47: [{"fc": 0x42, "arrival": (0x1F, 0x02), "map": 1, "attrs": "03/00", "field": [(0x84, 0x5A), (0x79, 0x5D)],
+            "stairs": {(0x84, 0x5A): (0x1F, 0x02), (0x79, 0x5D): (0x05, 0x0F)}, "out": "down:32,wait:60,up:32",
+            "chapter": 5}],
 }
 # The attribute table grows by 6 bytes a map and outgrows its own bank (108 spare bytes), so it moves whole; the
 # map pointer table (3 bytes a map) outgrew bank 0F with chapter 3's maps and moves the same way. The entrance and
@@ -132,8 +143,9 @@ NEWMAP_AT = ("--entrance-table-at", "3C:9000", "--door-bank", "3B", "--attr-tabl
 # New-map records, [start, end) areas in banks 30-3F: the map loader reads a record with DB set to its bank and
 # reads low WRAM meanwhile. One dq5newmap call puts all its records in one bank, so the records that do not fit the
 # first area go to the next areas in later calls (record_areas, records_pass).
-# 3F 는 환경 맵 레코드가 3E 에서 끝나 비어 있다(1장 빌드는 이 표를 dq4chapter1.RECORDS_AT 로 바꾼다).
-RECORDS_AT = ((0x348000, 0x350000), (0x318000, 0x320000), (0x3F8000, 0x400000))
+# 3F 는 환경 맵 레코드가 3E 에서 끝나 비어 있고, 30 은 이 빌드에서 아무도 쓰지 않는다(1장 빌드는 이 표를
+# dq4chapter1.RECORDS_AT 로 바꾼다).
+RECORDS_AT = ((0x348000, 0x350000), (0x318000, 0x320000), (0x3F8000, 0x400000), (0x308000, 0x310000))
 # The record a new map points at until a later call gives it its own: any original map.
 RECORD_PLACEHOLDER = "03/00"
 EXIT_AT = ("--exits-at", "2A:D812", "--records-at", "3C:A000")
@@ -152,7 +164,9 @@ SHOP_KEY_AT = 0x3CFE00
 WELL_SWITCH_AT = 0x3CFF00
 DUNGEON_RATE_AT = 0x578000   # a bank of its own: no other tool writes 57
 # The three tables chests and drawers grow; dq5chestplace reads chest_maps and search with DB, so bank 00-3F.
-CHEST_AT = ("--chests-at", "3C:8400", "--chest-maps-at", "3C:8800", "--search-at", "3C:8C00")
+# 필드 입구 표(3C:8000)가 5장에서 3C:8400 을 넘어, 어느 뱅크든 long 으로 읽는 상자 표(chests)를 입구 훅과 같은
+# 5B 의 뒤쪽으로 옮기고 입구 표가 3C:8800 까지 쓴다.
+CHEST_AT = ("--chests-at", "5B:C000", "--chest-maps-at", "3C:8800", "--search-at", "3C:8C00")
 # The field loader reads both RLE chunks with DB set to their bank, so 30-3F; bank 3A is free in this build.
 FIELD_AT = "3A:8000"
 # dq5npcrelocate 의 기본 목록·대체 목록 자리(비우면 그 도구의 기본값 32:8000·33:8000).

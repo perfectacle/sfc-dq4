@@ -135,6 +135,12 @@ class DoorBankTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, f"{rom.DOOR_BANK:02X}:FDB7 differs from 01:FDB7"):
             dq4groupbuild.check_door_copy(bytes(built), 0x3B)
 
+    def test_find_counts_with_16_bit_x(self):
+        # 바꾼 맵이 128개를 넘으면 8비트 X 가 돌아 맵을 불러오다 멈췄다: PHP; SEP #$20; REP #$10; LDX #$0000.
+        self.assertGreater(len(__import__("dq4environmentrom").MAPS), 128)
+        lib, _, _ = self.code(self.entries(1))
+        self.assertIn(bytes((0x08, 0xE2, 0x20, 0xC2, 0x10, 0xA2, 0x00, 0x00)), lib)
+
     def test_obj_sets_the_data_bank_after_the_hit(self):
         import dq4environmentrom as rom
         lib, _, _ = self.code(self.entries(1))
