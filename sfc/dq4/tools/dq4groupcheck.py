@@ -53,14 +53,19 @@ LAST_KEY_DOOR = 0x97
 # 벽에 둘러싸여 이벤트로만 오는 계단: キングレオ 00/00 (1F,12) 는 감옥 00/04 로 가는 칸이고, FC 는 キングレオ 에게
 # 진 일행을 이벤트로 그곳에 보낸다(fc/dq4/docs/dq4-story-format.md 의 4장 4).
 EVENT_STAIRS = {(0x00, 0x00, 0x1F, 0x12)}
+# --set: WRAM writes before every warp (dq5warp.lua SET). A chapter-1 ROM started from the ship state has the
+# throne-room flag off, so warping into 36/01 runs the opening and the stairs there never get the input.
+PRESET = ""
 
 
 def scene(mesence, rom, state, out, name, **extra):
     dest = out / name
     dest.mkdir(parents=True)
     env = environment(os.environ["LIBDIR"], state, dest)
+    extra = {k: str(v) for k, v in extra.items()}
+    sets = ";".join(s for s in (PRESET, extra.pop("SET", "")) if s)
     env.update({"MAXF": "2400", "WARPEXIT": f"{warp_exit(rom):X}", "DP86OK": dp86_allowed(rom),
-                **{k: str(v) for k, v in extra.items()}})
+                **({"SET": sets} if sets else {}), **extra})
     subprocess.run([str(mesence), "--testrunner", str(rom), str(WARP), "--Snes.DisableFrameSkipping=true"],
                    env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300, check=False)
     text = (dest / "warp.txt").read_text(encoding="utf-8") if (dest / "warp.txt").exists() else ""
@@ -159,7 +164,11 @@ def main():
     ap.add_argument("--jobs", type=int, default=4)
     ap.add_argument("--groups", type=lambda v: {int(g, 16) for g in v.split(",")}, default=set(LINKS),
                     help="DQ5 groups to walk (hex, comma-separated); all by default")
+    ap.add_argument("--set", default="", help="WRAM writes before every warp (dq5warp.lua SET), e.g. 2199|01 "
+                    "for a chapter-1 ROM (the throne-room opening done)")
     args = ap.parse_args()
+    global PRESET
+    PRESET = args.set
     mesence = Path(os.environ["MESENCE"])
     out = args.out.resolve()
     if out.exists() and any(out.iterdir()):

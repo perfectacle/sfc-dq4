@@ -82,6 +82,19 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual(calls, [[v & 0xFF, v >> 8 & 0xFF, v >> 16] for v in (want['box'], want['reveal'])])
         self.assertLess(ops.index(('37', calls[0])), ops.index(('21', [ch.MSG_NARRATION & 0xFF, ch.MSG_NARRATION >> 8])))
 
+    def test_king_leaves_the_stair_after_the_speech(self):
+        # (10,0D) 는 2층 36/02 로 오르는 계단 칸이라, 연출 뒤 목록의 왕이 거기 서면 계단이 막힌다
+        doc = ch.npc_doc({'overrides': []})
+        after = next(n['entries'] for n in doc['new_lists'] if n['name'] == 'after')
+        spots = {(e['fields']['x'], e['fields']['y']) for e in after}
+        self.assertNotIn((ch.KING_AT[0] * 2, ch.KING_AT[1] * 2), spots)
+        self.assertIn((ch.KING_DOWN[0] * 2, ch.KING_DOWN[1] * 2), spots)
+
+    def test_rom_title_fills_the_header_field(self):
+        self.assertEqual(len(ch.TITLE), 21)
+        self.assertEqual(len(ch.TITLE_ORIG), 21)
+        self.assertTrue(ch.TITLE.startswith(b'DRAGONQUEST4 '))
+
     def test_override_comes_first(self):
         doc = ch.npc_doc({'overrides': [{'map': '01/00', 'flag': 0, 'when': 'on', 'mask': 128, 'list': '10:8674'}]})
         self.assertEqual(doc['overrides'][0]['map'], ch.THRONE)
