@@ -14,7 +14,8 @@ element 를 주면 몬스터가 일행에게 쓸 때 갑옷 원소 표(27:80FC)�
 JSON: {"format": "dq5spellgrow/1", "spells": [{"id": "C6", "copy": "27", "class": "spell", "MP": 4, "menu_mp": 4,
                                              "element": "01"}]}
 새 번호는 C6 부터 빈틈 없이 D4 까지 이어진다. copy 는 원래 행동(00~AA) 가운데 하나이고, 그 행동의 표 값을 모두 베낀다.
-MP·범위·적쪽(26:8765, dq5tables.py 와 같은 뜻)과 menu_mp(21:9BB4)만 덮을 수 있다. class 는 spell 또는 skill(기본)이고
+MP·범위·적쪽(26:8765, dq5tables.py 와 같은 뜻)과 menu_mp(21:9BB4)만 덮을 수 있다. MP 만 주면 menu_mp 는
+dq5tables.menu_mp 규칙(1F→0, 1E→36, 1D→FF, 그 밖 그대로)으로 정하고, 둘 다 없으면 copy 의 칸을 베낀다. class 는 spell 또는 skill(기본)이고
 spell 을 앞에 몰아 둔다. copy 가 필드 주문(27~38)이면 필드 처리기도 베껴 필드에서 외울 수 있다.
 element 는 원소 비트 하나(01 メラ·02 ギラ·04 ヒャド·08 バギ·10·20 숨·40 イオ·80 デイン)이고, 주지 않으면 원래처럼
 갑옷으로 줄지 않는다.
@@ -26,7 +27,7 @@ import sys
 from pathlib import Path
 
 from dq5map import Rom, lorom
-from dq5tables import SPELL_FIELDS, put
+from dq5tables import SPELL_FIELDS, menu_mp, put
 
 FORMAT = 'dq5spellgrow/1'
 COUNT = 0xAB
@@ -143,7 +144,8 @@ def new_rows(rom, doc):
                 width = sum(w for _, _, w in SPELL_FIELDS[field][1])
                 require(type(v) is int and 0 <= v < 1 << width, f'spells[{i}] {field}: 0~{(1 << width) - 1} 정수')
                 put(flags, SPELL_FIELDS[field][1], v)
-        menu = read(rom, MENU_MP + src, 1)[0]
+        # MP 를 바꾸면 창의 MP 칸도 dq5tables.py 와 같은 규칙으로 정한다(작전 AI 의 MP 거름도 이 칸을 본다).
+        menu = menu_mp(row['MP']) if 'MP' in row else read(rom, MENU_MP + src, 1)[0]
         if 'menu_mp' in row:
             require(type(row['menu_mp']) is int and 0 <= row['menu_mp'] <= 0xFF, f'spells[{i}] menu_mp: 0~255 정수')
             menu = row['menu_mp']
