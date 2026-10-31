@@ -27,6 +27,8 @@ def branch(cond):
 
 
 # 900: 조건 뒤집기와 플래그. 901: BRK 를 쓰는 조건(일행·물건·레코드)·はい/いいえ·네이티브 호출·플래그. 921: 둘째 묶음.
+# 902: 선실에서 거짓인 BRK 조회 조건(サンチョ 05 가 일행에 없음, 일행 레코드 1 이 없음, ドラゴンオーブ D1 을 갖지 않음)과
+# 901 에 없던 조건 02·14·1A·1E·1F.
 BODIES = {
     0x900: [{'op': 'if', 'cond': {'code': '1B', 'index': 1, 'mask': 1, 'not': True},
              'then': [{'op': 'msg', 'id': '74F'}, {'op': 'flag-on', 'index': 2, 'mask': 128}],
@@ -38,9 +40,12 @@ BODIES = {
              'then': [{'op': 'msg', 'id': '618'}, {'op': 'flag-on', 'index': 0x61, 'mask': 1}],
              'else': {'op': 'msg', 'id': '619'}},
             {'op': 'call', 'target': 'B3A0'}, {'op': 'msg', 'id': '74F'}],
+    0x902: [branch({'code': '03', 'member': 5}), branch({'code': '13', 'record': 1}),
+            branch({'code': '11', 'item': 0xD1}), branch({'code': '02'}), branch({'code': '14'}),
+            branch({'code': '1A', 'index': 1, 'value': 1}), branch({'code': '1E'}), branch({'code': '1F'})],
     0x921: [{'op': 'flag-off', 'index': 0x62, 'mask': 0x0F}, {'op': 'msg', 'id': '129'}, {'op': 'msg', 'id': '742'}],
 }
-PAIRS = {0x900: 0x012, 0x901: 0x013, 0x921: 0x014}
+PAIRS = {0x900: 0x012, 0x901: 0x013, 0x902: 0x015, 0x921: 0x014}
 TALK = 'b:4,wait:40,up:3,wait:20,a:4,wait:30,a:4,wait:150' + ',a:4,wait:100' * 9
 # 02/06 기본 목록(05:8CD4) 넷째(밤) 인물을 낮의 (24,12) 에 세우고 대화 번호를 921 로(dq5npcrecordcheck.py 와 같은 자리).
 NPC = {'format': 'dq5npcrecord/1', 'entries': [{'list': '05:8CD4', 'index': 3, 'time': 'day',
