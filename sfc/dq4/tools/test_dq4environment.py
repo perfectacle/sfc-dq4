@@ -239,3 +239,31 @@ class UpperLayerHeadTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WaterRoutineTests(unittest.TestCase):
+    """The map routine choice and the fountain's DMA entry, without a ROM."""
+
+    def code(self):
+        import dq4environmentrom as rom
+        n = len(rom.MAPS)
+        waters = [2, 1] + [0] * (n - 2)
+        lib, _, _ = rom.engine_code(10, (0, 1, 2, 3), [rom.PALETTE_AT] * n, [[]] * n, waters, [False] * n)
+        return rom, lib
+
+    def test_flag_compare_is_a_16_bit_immediate(self):
+        # _ENTER leaves A 16-bit; a two-byte CMP #$02 ate the next opcode and the prologue village hung.
+        rom, lib = self.code()
+        at = lib.index(bytes((0x22, 0xD0, 0xF7, 0x15)))
+        load = lib.index(bytes((0xBF,)), at)
+        self.assertEqual(lib[load + 4], 0xF0)
+        self.assertEqual(lib[load + 6:load + 9], bytes((0xC9, 0x02, 0x00)))
+
+    def test_fountain_routine_queues_the_fountain_after_the_water(self):
+        rom, lib = self.code()
+        vram = 0x2000 + rom.FOUNTAIN_SLOT * 16
+        entry = bytes((0xA9, vram & 0xFF, vram >> 8, 0x8F, 0x1E, 0x1C, 0x00, 0xA9, 0x80, 0x00, 0x8F, 0x28, 0x1C, 0x00))
+        self.assertEqual(lib.count(entry), 1)
+        source = bytes((0x69, rom.FOUNTAIN_AT & 0xFF, rom.FOUNTAIN_AT >> 8 & 0xFF, 0x8F, 0x10, 0x1C, 0x00))
+        self.assertEqual(lib.count(source), 1)
+        self.assertEqual(rom.FOUNTAIN_SLOT, rom.WATER_SLOT + 4)

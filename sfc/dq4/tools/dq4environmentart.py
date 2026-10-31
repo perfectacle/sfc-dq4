@@ -1485,18 +1485,21 @@ def _wood_grain():
     return _finish(c, "나이테 나무벽", "town")
 
 
-def _fountain():
-    # The town fountain stands in the middle of a pond (water all round it in FC), so it is drawn in the water
-    # line over the water's main colour: a pale jet whose drops fall to both sides into a ripple ring.
-    c = _Canvas(7, fill=3)
-    for x, y, length in ((1, 2, 3), (12, 1, 3), (0, 14, 4), (11, 13, 4)):
-        c.line((x, y, x + length, y), 6)
-    c.draw.ellipse((2, 7, 13, 14), outline=c.c(5))
+def _fountain(frame=0):
+    # The town fountain stands in the middle of a pond, so it is drawn over the water frame of the same number: the
+    # water routine swaps both together and the pond keeps flowing with the water around it. Each frame moves the
+    # drops one step down their arcs and widens the ripple ring.
+    c = _Canvas(7)
+    c.image = _water(frame)
+    c.draw = ImageDraw.Draw(c.image)
+    c.draw.ellipse(((2, 7, 13, 14), (1, 7, 14, 15), (1, 6, 14, 15))[frame], outline=c.c(5))
     c.draw.ellipse((5, 9, 10, 12), fill=c.c(4))
     c.rect((7, 2, 8, 10), 7)
-    for x, y in ((6, 3), (9, 3), (5, 5), (10, 5), (4, 7), (11, 7)):
+    arc = ((6, 2), (5, 4), (4, 6), (3, 8), (3, 10), (2, 12))
+    for x, y in arc[frame::3]:
         c.point((x, y), 7)
-    return _finish(c, "분수")
+        c.point((15 - x, y), 7)
+    return _finish(c, f"분수 {frame}")
 
 
 def _cloud():
@@ -1821,6 +1824,8 @@ def create_assets():
         assets[name] = _on_wall_bank(assets[name])
     for frame in range(3):
         assets[f"water{frame}"] = _water(frame)
+    for frame in (1, 2):
+        assets[f"fountain{frame}"] = _fountain(frame)
     for direction in "nsew":
         assets[f"shore_{direction}"] = _shore(direction)
     assets.update(_castle_town_assets())
