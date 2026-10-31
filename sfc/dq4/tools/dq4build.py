@@ -55,6 +55,9 @@ def build(out, dq5, dq4, prologue=True, assets=None, chapter2=False):
     subprocess.run([sys.executable, HERE / 'dq4soundset.py', '--base', out / 'dq4-ch1.sfc', '--assets', assets,
                     f'@{HERE / "dq4sound-game.args"}', '--out', out / 'dq4-ch1-sound.sfc'],
                    check=True, stdout=subprocess.DEVNULL)
+    # 서장 수련의 칼 효과(NDS 화면에서 잡은 프레임)는 에셋 저장소에 있어 곡 롬에 얹는다. 없으면 효과음만 난다
+    subprocess.run([sys.executable, HERE / 'dq4sparfx.py', 'apply', '--base', out / 'dq4-ch1-sound.sfc',
+                    '--assets', assets, '--out', out / 'dq4-ch1-sound.sfc'], check=True, stdout=subprocess.DEVNULL)
     import dq4people
     if not (Path(assets) / dq4people.FIELD).is_dir():
         print(f'{Path(assets) / dq4people.FIELD} 이 없어 인물 그림 없이 곡 롬에서 끝낸다', file=sys.stderr)

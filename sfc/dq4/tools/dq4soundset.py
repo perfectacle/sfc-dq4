@@ -185,7 +185,7 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
           nds_envelope=(), nds_release=(), treble_db=None, sample_rates=None,
           fast_receive=False, chains=(), holds=(), early_song=False, load_pump=False, vehicle_song=False,
           keep_samples=False, prefetch=None, release_failed=False, unpin=(), effects=None, effect_waves=None,
-          effect_gain_db=None, routed_effects=None, effect_routes=None, routed_rate=8000):
+          effect_gain_db=None, routed_effects=None, effect_routes=None, routed_rate=8000, silent_songs=(), routed_only=None):
     """stream 은 {곡 자리: 곡 앞 샘플 바이트 상한}. 그 곡은 샘플 일부를 곡이 울리는 동안 보낸다(transfer_plan).
 
     stream_ticks 는 {곡 자리: 틱}. 곡 앞 바이트 상한을 곡이 처음 그 틱 안에 쓰는 샘플의 합으로 정하고, 도착 어림보다
@@ -284,8 +284,8 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
     for src, (dst, carriers) in sorted(effect_routes.items()):
         if dst in pinned_sizes or dst in effect_sequences or not 0x32 <= dst < patch.SEQUENCE_COUNT:
             raise ValueError(f'{dst:02X}: route target must be an unpinned, unreplaced effect sequence')
-        if any(x not in {slot for slot, _ in songs} for x in carriers):
-            raise ValueError('songs carrying routed effect samples must be replaced songs')
+        if any(x not in {slot for slot, _ in songs} | set(silent_songs) for x in carriers):
+            raise ValueError('songs carrying routed effect samples must be replaced or silent songs')
         spec = {k: v for k, v in routed_effects.items() if k[0] == src}
         routed[src] = sfx_port.build_routed(data, assets, spec, patch.sequence_bytes,
                                             {k: voice_volume(db) for k, db in (effect_gain_db or {}).items()},
@@ -554,6 +554,12 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
         size, first, *ids = records[seq]
         replacements[seq] = patch.Replacement(new, tuple(ids) + tuple(effect_extras.get(seq, ())), first)
     pinned = list(pinned) + list(effect_sequences)
+    # 무음 곡: DQ5 곡 00(무음 5바이트, 오프닝의 01 00)의 사본을 새 곡 번호에 둔다. 효과음 샘플을 붙여 곡 없는 장면에서
+    # 틀어 두면, 곡을 울리지 않고도 옮긴 효과음이 그 샘플로 난다. 곡 00 자체에 붙이면 오프닝이 샘플을 받느라 늦는다
+    for slot in silent_songs:
+        if slot in replacements or slot < patch.NEW_SONG_FIRST:
+            raise ValueError(f'{slot:02X}: silent song needs an unused new song number')
+        replacements[slot] = patch.Replacement(patch.sequence_bytes(data, 0x00), (), 0)
     by_bytes = {payload: ident for ident, payload in resources.items()}
     route_report, pin_new = {}, []
     for src, (new, temp, order, report) in sorted(routed.items()):
@@ -570,9 +576,13 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
         replacements[dst] = patch.Replacement(new, tuple(ids), len(ids))
         pin_new.append(dst)
         for song in carriers:
+            # --sfx-pcm 의 @곡 으로 묶은 갈래의 샘플은 그 곡에만 붙인다(다른 곡의 자리·샘플 칸을 쓰지 않게)
+            used = {int(t, 16) for key, v in report.items()
+                    if song in (routed_only or {}).get(tuple(int(x, 16) for x in key.split('-')), {song})
+                    for t in v['samples']}
+            add = tuple(x for t, x in zip(order, ids) if t in used and x not in replacements[song].samples)
             item = replacements[song]
-            replacements[song] = patch.Replacement(item.sequence, item.samples + tuple(x for x in ids if x not in item.samples),
-                                                   item.send_first)
+            replacements[song] = patch.Replacement(item.sequence, item.samples + add, item.send_first)
         route_report[f'{src:02X}'] = {'to': f'{dst:02X}', 'songs': [f'{x:02X}' for x in carriers], 'sequence_bytes': len(new),
                                       'samples': {real[k]: v for b in report.values() for k, v in b['samples'].items()
                                                   if k in real},
@@ -694,11 +704,14 @@ def main():
                     help='change the voice volume (ED) of that converted sound effect branch by DB')
     ap.add_argument('--sfx', action='append', default=[], metavar='SEQ-BRANCH=NDS',
                     help='replace a DQ5 sound effect branch (0C SEQ BRANCH) with an NDS noise sound effect (dq4soundsfx)')
-    ap.add_argument('--sfx-pcm', action='append', default=[], metavar='SEQ-BRANCH=NDS',
-                    help='play that DQ5 sound effect branch as an NDS sample sound effect while a --sfx-route song plays')
+    ap.add_argument('--sfx-pcm', action='append', default=[], metavar='SEQ-BRANCH=NDS[@SONG,...]',
+                    help='play that DQ5 sound effect branch as an NDS sample sound effect while a --sfx-route song plays; '
+                         'with @SONG its samples ride only on those route songs')
     ap.add_argument('--sfx-route', action='append', default=[], metavar='SEQ=SPARE@SONG[,SONG...]',
                     help='collect the --sfx-pcm branches of SEQ into unused effect sequence SPARE and append their samples '
                          'to the records of SONGs; the game calls SPARE only while one of those songs plays')
+    ap.add_argument('--silent-song', action='append', default=[], metavar='SLOT',
+                    help='new song number (47..4B) holding a copy of the silent DQ5 song 00; may carry --sfx-route samples')
     ap.add_argument('--sfx-pcm-rate', type=int, default=8000, help='upper sample rate of --sfx-pcm samples')
     ap.add_argument('--unpin', action='append', default=[], metavar='SONG',
                     help='drop an unreplaced sequence from the pinned list so it loads when played (frees an SPC sequence slot)')
@@ -772,11 +785,14 @@ def main():
                         effect_waves={int(k, 16): [n if n.endswith('.wav') else n + '.wav' for n in v.split(',')]
                                       for k, v in (x.split('=') for x in args.sfx_wave)},
                         prefetch={int(v, 16): int(m, 16) for v, m in (x.split('=') for x in args.prefetch)},
-                        routed_effects={(int(k.split('-')[0], 16), int(k.split('-')[1], 16)): v
+                        routed_effects={(int(k.split('-')[0], 16), int(k.split('-')[1], 16)): v.split('@')[0]
                                         for k, v in (x.split('=') for x in args.sfx_pcm)},
+                        routed_only={(int(k.split('-')[0], 16), int(k.split('-')[1], 16)):
+                                     {int(y, 16) for y in v.split('@')[1].split(',')}
+                                     for k, v in (x.split('=') for x in args.sfx_pcm) if '@' in v},
                         effect_routes={int(k, 16): (int(v.split('@')[0], 16), [int(y, 16) for y in v.split('@')[1].split(',')])
                                        for k, v in (x.split('=') for x in args.sfx_route)},
-                        routed_rate=args.sfx_pcm_rate)
+                        routed_rate=args.sfx_pcm_rate, silent_songs=[int(x, 16) for x in args.silent_song])
     from dq5build import make_ips
     from kr_patch import ips
     patch_bytes = make_ips(base, rom)
