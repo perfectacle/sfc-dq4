@@ -43,6 +43,11 @@ NPC_LIST, NPC_INDEXES = 0x058CD4, (3, 2)
 # 이름: (방향, 누움). 둘 다 이동 간격 0 으로 세운다.
 POSES = {'face-up': ('up', False), 'face-left': ('left', False), 'face-right': ('right', False),
          'lying-up': ('up', True), 'lying-down': ('down', True), 'lying-right': ('right', True), 'lying-left': ('left', True)}
+# 제자리 걸음 롬(step-*): 위 자세처럼 세우되 7E:2191 을 0 으로 붙잡아 05:8D0B 인물이 메시지 1D1 창을 열지 않게 한다.
+# 창이 열려 있으면 인물이 모두 멈춰 걸음 프레임 1 이 나오지 않는다. 덤프는 걸음이 바뀌는 사이(약 16프레임)보다 촘촘히.
+STEPS = {'step-down': 'down', 'step-up': 'up', 'step-left': 'left', 'step-right': 'right'}
+STEP_HOLD = '7E2191=00'
+STEP_DUMPS = '620,628,636,644,652,660,668,676'
 GROWN, GROWN_GFX, GROWN_PALETTE = 0xFF, 0x29, 2
 REGROWN, REGROWN_PALETTE = 0x71, 1
 
@@ -82,14 +87,16 @@ def tool(name, *args):
                    timeout=300)
 
 
-def run(rom, name, out, state, mesence, libdir):
+def run(rom, name, out, state, mesence, libdir, dumps='620,700,780,860', poke=None):
     dest = out / name
     dest.mkdir()
     env = {k: v for k, v in os.environ.items()
            if k not in ('ADULT', 'ANYWHERE', 'BATTLE', 'FIELD', 'GROUP', 'LATESET', 'PARTY', 'POKE',
                         'ROMPATCH', 'SAVE', 'SET', 'WAGON', 'EVERY')}
     env.update(LIBDIR=str(libdir), STATE=str(state), SHOT_DIR=str(dest), MAXF='1500', SETTLE='120',
-               TO='02/06,24,14,1', TEST='wait:400', DUMPF='620,700,780,860')
+               TO='02/06,24,14,1', TEST='wait:400', DUMPF=dumps)
+    if poke:
+        env['POKE'] = poke
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
         subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5gfxdump.lua'),
                         '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
@@ -100,6 +107,14 @@ def run(rom, name, out, state, mesence, libdir):
 def pose_records(facing):
     return {'format': 'dq5npcrecord/1', 'entries': [
         {**e, 'fields': {**e['fields'], 'facing': facing, 'interval': 0}} for e in RECORDS['entries']]}
+
+
+def step_records(facing):
+    """pose_records 와 같되 엔트리 2 의 추가 값(걷기·서기 애니메이션 간격, 원래 0/0 이라 제자리 걸음을 하지 않음)을
+    추가 값이 없는 엔트리 3 과 같은 F/F 로 둔다."""
+    doc = pose_records(facing)
+    doc['entries'][1]['fields'].update(walk_anim=15, stand_anim=15)
+    return doc
 
 
 def lay_down(data):
@@ -207,9 +222,18 @@ def main():
                      '-o', roms[name])
                 if lying:
                     roms[name].write_bytes(lay_down(roms[name].read_bytes()))
+        for step, facing in STEPS.items():
+            (out / f'{step}.json').write_text(json.dumps(step_records(facing), indent=1) + '\n', encoding='utf-8')
+            tool('dq5npcrecord.py', original, 'patch', out / f'{step}.json', '-o', out / f'{step}.dq5patch.json')
+            for kind, extra in (('original', []), ('edited', [out / 'sprite.dq5patch.json'])):
+                name = f'{step}-{kind}'
+                roms[name] = out / f'{name}.sfc'
+                tool('dq5build.py', original, 'build', out / f'{step}.dq5patch.json', *extra, '--size', '2',
+                     '-o', roms[name])
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-            jobs = {name: pool.submit(lambda n, r: compare(Rom(r.read_bytes()), run(r, n, out, state, mesence, libdir)),
-                                      name, rom) for name, rom in roms.items()}
+            jobs = {name: pool.submit(lambda n, r: compare(Rom(r.read_bytes()), run(
+                r, n, out, state, mesence, libdir, *((STEP_DUMPS, STEP_HOLD) if n.startswith('step-') else ()))),
+                name, rom) for name, rom in roms.items()}
             results = {name: job.result() for name, job in jobs.items()}
         edited = Rom(roms['edited'].read_bytes())
         changed = {}
@@ -233,8 +257,15 @@ def main():
             poses[pose] = all(want <= seen[name] for name in seen) and all(
                 results[f'{pose}-{name}']['groups'] == results[f'{pose}-{name}']['hits'] > 0 for name in seen) and same(
                 results[f'{pose}-edited'], (SIMPLE, OVERLAP))
+        steps = {}
+        for step, facing in STEPS.items():
+            want = {f'{s:02X} {facing}{f}' for s in (SIMPLE, OVERLAP) for f in (0, 1)}
+            steps[step] = all(want <= set(results[f'{step}-{name}']['frames'])
+                              and results[f'{step}-{name}']['groups'] == results[f'{step}-{name}']['hits'] > 0
+                              for name in ('original', 'edited')) and same(results[f'{step}-edited'], (SIMPLE, OVERLAP))
         checks = {
             'poses': all(poses.values()),
+            'steps': all(steps.values()),
             'vram': same(mine, (SIMPLE, OVERLAP, NEW)),
             'oam': mine['groups'] == mine['hits'] > 0 and results['original']['groups'] == results['original']['hits'],
             'shown': shown(mine, (SIMPLE, OVERLAP, NEW)),
@@ -248,7 +279,7 @@ def main():
                        and S.set_record(regrown, REGROWN)['palette'] == REGROWN_PALETTE,
         }
         report = {'donors': {'simple': f'{simple:02X}', 'overlap': f'{overlap:02X}'}, 'results': results,
-                  'changed': changed, 'poses': poses, 'checks': checks}
+                  'changed': changed, 'poses': poses, 'steps': steps, 'checks': checks}
         (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
         for name, r in results.items():
             print(f'{name}: 덤프 {r["dumps"]}개, 세트 ' + ' '.join(f'{s} {v[0]}/{v[1]}' for s, v in sorted(r['sets'].items()))

@@ -40,6 +40,8 @@ map 은 "04/06", 그룹 전체 "04/**", 필드 "field0"(세계). cond 는 null·
 실내는 128 을 따로 보지 않아 그 셀에 그대로 놓인다(실내 맵은 폭 128·높이 124 이하라 맵 바로 밖이다. 16/00 의 X 128·
 129, 50/50 의 Y 128·129 물체가 그 칸에 그려졌다).
 bit7(+6 bit7)은 쓰임을 모르는 원래 값으로, 없으면 0.
+물체 칸은 맵을 불러올 때 슬롯 칸 목록(7E:8060~)에 일행 세 목록·인물 세트 목록(60 바이트씩) 뒤로 이어 쓰인다.
+목록 끝이 7E:9000(누운 인물의 돌린 타일 자리)을 넘어 원래보다 커지면 거부한다(check_cells).
 8타일 세트(80~)의 cells 는 "up-head" 같은 머리 4칸과 "up0"·"up1" 몸 4칸이다.
 """
 import argparse
@@ -53,7 +55,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dq5sprite as S  # noqa: E402
 from dq5build import PatchError  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
-from dq5npc import OVERRIDE_LISTS, all_lists, entry_size, list_entries  # noqa: E402
+from dq5npc import OVERRIDE_LISTS, all_lists, entry_size, list_entries, parse  # noqa: E402
 from dq5npclists import SCENE_SLOTS, SLOT_END, SLOT_FIRST, placed, read  # noqa: E402
 
 FORMAT = 'dq5objlayout/1'
@@ -95,6 +97,9 @@ TURN = 3
 # 탈것에 탄 채 함께 그려지는 주인공 OBJ 수의 최댓값(양탄자에 탄 어린 주인공 8, 어른 6, 天空城·マスタードラゴン 0).
 RIDER = 8
 OAM_LIMIT = 128
+# 슬롯 칸 목록: 7E:8060 부터 일행 세 목록, 인물 세트마다 48칸(60 바이트), 물체마다 칸 수 × 2. 7E:9000~ 은 누운 인물의 줄기를
+# 풀고 돌리는 자리(1F:D3A0~D441)라, 거기 걸린 목록은 나중에 놓이는 누운 인물이 지운다(dq5celllistcheck.py).
+CELL_START, CELL_LIMIT, LIST_BYTES, PARTY_LISTS = 0x8060, 0x9000, 0x60, 3
 TOKEN = re.compile(r'(h?)(v?)([0-9A-Fa-f]{2})')
 
 
@@ -231,6 +236,67 @@ def map_people(rom):
     return most
 
 
+def map_sets(rom):
+    """실내 맵·낮밤마다 그 맵의 인물 목록 가운데 칸 목록을 가장 많이 만드는 것의 (세트, 누웠는지) 수.
+    같은 세트라도 누운 인물은 돌린 칸으로 목록을 따로 만든다(1F:D066)."""
+    lists = {}
+    for at, name in all_lists(rom):
+        if re.fullmatch(r'[0-9A-F]{2}/[0-9A-F]{2}', name):
+            lists.setdefault(tuple(int(v, 16) for v in name.split('/')), []).append(at)
+    t = OVERRIDE_LISTS
+    while rom.u8(t) != 0xFF:
+        lists.setdefault((rom.u8(t), rom.u8(t + 1)), []).append(0x100000 | rom.u16(t + 4))
+        t += 6
+    most = {}
+    for (bc, bd), ats in lists.items():
+        for at in ats:
+            for night in (False, True):
+                sets = {(S.gfx_set(rom, f['gfx']), bool(f['misc'] & 0x80)) for e, _ in list_entries(rom, at)
+                        if (f := parse(rom, e, night)) and f['gfx'] < S.GFX_COUNT}
+                count = sum(s is not None for s, _ in sets)
+                most[bc, bd, night] = max(most.get((bc, bd, night), 0), count)
+    return most
+
+
+def object_cells(heads, bc, bd, night):
+    """objects_on 과 같은 물체들의 칸 수 합(+4 아래 6비트 × +5)."""
+    if bc == 0xFE:
+        match = [h for h in heads if h[0] == 0xFE and h[1] == bd]
+    else:
+        match = [h for h in heads if h[0] == bc and h[1] & 0x7F in (0x7F, bd)]
+    return sum((h[4] & 0x3F) * h[5] for h in match if not h[4] & 0x80 or bool(h[4] & 0x40) == night)
+
+
+def cell_end(sets, cells):
+    """맵을 다 놓은 뒤 슬롯 칸 목록의 끝(다음 빈 자리). 원본 실내 346곳 훑기에서 맵에 머문 343곳이 이 셈과 같았다."""
+    return CELL_START + LIST_BYTES * (PARTY_LISTS + sets) + 2 * cells
+
+
+def check_cells(rom, old_heads, new_heads):
+    """물체 칸이 늘어 슬롯 칸 목록 끝이 7E:9000 을 넘고 원래보다 커지는 맵·낮밤이 있으면 거부한다."""
+    keys = {(h[0], h[1] & 0x7F) for h in new_heads}
+    if not any(object_cells(new_heads, bc, bd, n) > object_cells(old_heads, bc, bd, n)
+               for bc, bd in keys for n in (False, True)):
+        return
+    sets = map_sets(rom)
+    for bc, bd in sorted(keys):
+        if bc == 0xFE:
+            targets = [(bc, bd)]
+        elif bd == 0x7F:
+            targets = sorted({(c, d) for c, d, _ in sets if c == bc})
+        else:
+            targets = [(bc, bd)]
+        for c, d in targets:
+            for night in (False, True):
+                people = sets.get((c, d, night), 0) if c != 0xFE else 0
+                new = cell_end(people, object_cells(new_heads, c, d, night))
+                old = cell_end(people, object_cells(old_heads, c, d, night))
+                if new > CELL_LIMIT and new > old:
+                    name = f'field{d}' if c == 0xFE else f'{c:02X}/{d:02X}'
+                    raise ValueError(f'{name} {"밤" if night else "낮"}: 슬롯 칸 목록 끝 7E:{new:04X} 가 7E:{CELL_LIMIT:04X} 를 '
+                                     '넘음(누운 인물이 그 자리를 써 앞 목록이 지워짐). 물체 칸을 줄여야 함')
+
+
 def objects_on(heads, bc, bd, night):
     """16:F60D 가 실내 맵 bc/bd(bc = FE 면 필드 세계 bd)에 놓는 물체 수(+4 bit7 이면 낮밤으로 고르고 bit6 이 밤).
     필드 항목은 +1 을 $1949 와 그대로 견준다(16:F685)."""
@@ -281,6 +347,7 @@ def plan_objects(rom, rows, at):
     old = read_objects(rom)
     entries = [object_entry(r, f'objects[{i}]') for i, r in enumerate(rows)]
     check_slots(rom, [o['raw'] for o in old], [h for h, _ in entries])
+    check_cells(rom, [o['raw'] for o in old], [h for h, _ in entries])
     table_end = TABLE + len(entries) * ENTRY + 1
     if table_end > REGION_END:
         raise ValueError(f'objects {len(entries)}개: 표가 {cpu(REGION_END)} 를 넘음(최대 {(REGION_END - TABLE - 1) // ENTRY}개)')

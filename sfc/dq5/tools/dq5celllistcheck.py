@@ -9,12 +9,16 @@ lua/dq5cellshift.lua 로 옮기고 dq5gfxdump.lua 로 덤프해 dq5sprite.py 의
 들면(ptr-52) 그대로이고 7E:8060 을 넘으면(ptr-54) 첫 목록(주인공)의 첫 칸을 덮어 주인공이 깨진다. 깨진 두 경우는
 디코더와 맞는 OAM 묶음 수도 shift-00 보다 줄어야 한다.
 원본 롬·선실 상태는 읽기만 하고 출력은 --out 의 새 하위 폴더에 둔다.
-  MESENCE=… python sfc/dq5/tools/dq5celllistcheck.py rom/dq5.sfc --state work/state/ship.mss
+--sweep 에 dq5freesweep.py --ranges 7E8000-7E805F,7E8060-7E8FFF,7E9000-7E9FFF --access write 의 출력 폴더를 주면, 맵마다
+끝 WRAM 의 플래그로 고른 인물 목록과 맵 OBJ 물체로 센 칸 목록 끝(dq5objlayout.cell_end)이 잰 가장 높은 쓰기와 같은지도
+센다. 걷다 다른 맵으로 나간 실행은 두 맵 가운데 큰 쪽과 견준다.
+  MESENCE=… python sfc/dq5/tools/dq5celllistcheck.py rom/dq5.sfc --state work/state/ship.mss [--sweep work/cellsweep]
 """
 import argparse
 import concurrent.futures
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -22,7 +26,9 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import dq5npc as N  # noqa: E402
 import dq5sprite as S  # noqa: E402
+from dq5objlayout import cell_end, object_cells, read_objects  # noqa: E402
 from dq5map import Rom  # noqa: E402
 from dq5spritewritecheck import lay_down, pose_records  # noqa: E402
 
@@ -67,12 +73,53 @@ def run(name, rom_path, rom, out, state, mesence, libdir):
             'hits': stats.get('hits', 0), 'shown': sorted({f'{s:02X}' for s, _, _ in stats.get('frames', set())})}
 
 
+def predicted(rom, heads, bc, bd, flags, night):
+    """그때 플래그로 고른 인물 목록(12:8009)의 (세트, 누웠는지) 수와 그 맵의 물체 칸으로 센 칸 목록 끝."""
+    at = N.list_address(rom, bc, bd, flags)
+    people = {(f['gfx'], bool(f['misc'] & 0x80)) for e, _ in (N.list_entries(rom, at) if at is not None else [])
+              if (f := N.parse(rom, e, night))}
+    # 그림 9A 는 7E:21B3 bit3 에 따라 97·2F 의 세트를 쓴다(1F:CF32).
+    wife = 0x2F if flags.get(0x7E21B3, 0) & 0x08 else 0x97
+    sets = {(S.gfx_set(rom, wife if g == 0x9A else g), lying) for g, lying in people if g < S.GFX_COUNT}
+    return cell_end(sum(s is not None for s, _ in sets), object_cells(heads, bc, bd, night))
+
+
+def sweep_model(rom, folder):
+    """(같은 맵 수, 걷다 나간 맵이 설명하는 수, 다른 맵 목록)."""
+    heads = [o['raw'] for o in read_objects(rom)]
+    same, moved, other = 0, 0, []
+    for d in sorted(Path(folder, 'maps').iterdir()):
+        txt, wram = d / 'free.txt', d / 'final.wram'
+        found = re.search(r'7E8060-7E8FFF .* hi=7E(\w{4})', txt.read_text()) if txt.exists() else None
+        if not (found and wram.exists()):
+            continue
+        hi = int(found[1], 16) + 1
+        w = wram.read_bytes()
+        bc, bd = (int(v, 16) for v in d.name.split('_'))
+        flags = {0x7E0000 | a: w[a] for a in range(0x2190, 0x2200)}
+        night = w[0x075E] >= 0xF0
+        want = predicted(rom, heads, bc, bd, flags, night)
+        if want == hi:
+            same += 1
+            continue
+        try:
+            left = predicted(rom, heads, w[0xBC], w[0xBD], flags, night) if (w[0xBC], w[0xBD]) != (bc, bd) else None
+        except IndexError:
+            left = None
+        if left is not None and max(want, left) == hi:
+            moved += 1
+        else:
+            other.append(f'{bc:02X}/{bd:02X} 잼 {hi:04X} 셈 {want:04X} 끝 맵 {w[0xBC]:02X}/{w[0xBD]:02X}')
+    return same, moved, other
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('rom', type=Path)
     ap.add_argument('--state', required=True, type=Path)
     ap.add_argument('--mesence', default=os.environ.get('MESENCE'))
     ap.add_argument('--out', type=Path, default='work/celllistcheck')
+    ap.add_argument('--sweep', type=Path, help='dq5freesweep.py 로 칸 목록 쓰기를 훑은 출력 폴더')
     args = ap.parse_args()
     if not args.mesence:
         ap.error('--mesence 또는 MESENCE가 필요함')
@@ -112,6 +159,12 @@ def main():
             if not ok:
                 failed.append(name)
         (out / 'results.json').write_text(json.dumps(results, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+        if args.sweep:
+            same, moved, other = sweep_model(Rom(original.read_bytes()), args.sweep)
+            print(f'훑기 맵 {same + moved + len(other)}곳 가운데 셈과 같은 곳 {same}, 걷다 나간 맵으로 설명되는 곳 {moved}, '
+                  f'다른 곳 {len(other)}' + (': ' + ', '.join(other) if other else ''))
+            if same + moved < 0.99 * (same + moved + len(other)):
+                failed.append('sweep')
         if failed:
             raise ValueError('불일치: ' + ', '.join(failed))
         print(f'{len(CASES)}개 검사 통과')
