@@ -8,8 +8,9 @@ from PIL import Image  # noqa: E402
 
 import tempfile  # noqa: E402
 
-from dq5msgwindowcheck import (WINDOW_WHITE, border_gaps, border_rows, complete, effect_log, hdma_ranges,  # noqa: E402
-                               number_matches, obj_boxes, safe, same_until, transfer_sizes, with_retries)
+from dq5msgwindowcheck import (EFFECT_SWAPS, FIXED_RNG, MONSTER_SPELLS, SCENES, WINDOW_WHITE, border_gaps,  # noqa: E402
+                               border_rows, complete, effect_log, hdma_ranges, number_matches, obj_boxes, safe, same_until,
+                               transfer_sizes, with_retries)
 
 
 class SameUntilTests(unittest.TestCase):
@@ -153,6 +154,23 @@ class SafeTests(unittest.TestCase):
         self.assertFalse(safe({'border_broken': 1, 'foreign_shots': 0}))
         self.assertFalse(safe({'border_broken': 0, 'foreign_shots': 2}))
         self.assertEqual(len(border_rows(21, 7)), 48)
+
+
+class SceneTests(unittest.TestCase):
+    def test_monster_and_swap_scenes(self):
+        """몬스터용 주문 39~65 에서 party 장면의 ラリホー(4B)만 빼고, 슬라임 행동 여섯 칸을 그 주문으로 채운다.
+        ミナデイン·スカラ 는 파파스의 メラ 연출 번호(파일 130BE1)를 바꾼다."""
+        self.assertEqual(len(MONSTER_SPELLS), 0x65 - 0x39 + 1 - 1)
+        self.assertNotIn('4B', MONSTER_SPELLS)
+        patch = dict(kv.split('=') for kv in SCENES['mon3B']['ROMPATCH'].split(';'))
+        self.assertEqual((patch['118011'], patch['118004'], patch['118008'], patch['11958D']),
+                         ('3B' * 6, 'FF', '00', '2A' * 6))
+        self.assertEqual(EFFECT_SWAPS, ('12', '21'))
+        patch = dict(kv.split('=') for kv in SCENES['fx12']['ROMPATCH'].split(';'))
+        self.assertEqual((patch['130BE1'], patch['11958D']), ('12', '01' * 6))
+        for name in ('mon3B', 'fx21'):
+            self.assertTrue(SCENES[name]['ROMPATCH'].endswith(FIXED_RNG))
+            self.assertEqual(SCENES[name]['SET'], '2035=07;101A=01')
 
 
 if __name__ == '__main__':
