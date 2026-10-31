@@ -36,7 +36,6 @@ SPC_CAPACITY = SPC_END - 0x2A5D
 RESIDENT_SAMPLE_LOAD = 0x2BBFDF
 RESIDENT_SAMPLE_LIST = CODE + 0x200
 SAMPLE_SLOTS = 0x14
-RESIDENT_WAVES = (0x20, 0x21, 0x22)
 SPC_MARGIN = 512                   # 곡이 쓰는 SPC 자리 밖에 남겨 두는 바이트(슬롯 관리·정렬과 잔향 버퍼 사이)
 # 드라이버 코드 IPL 블록(SPC 0750~28E6). 1046 은 자료 받기 상태(80)의 처리, 곡 묶음 표 블록 뒤에 붙이는 빠른 받기 코드는
 # 메아리 버퍼(D700~FEFF) 뒤 FF00 에 올린다. 샘플 자리가 아니라 자리 정리(0A)에 덮이지 않는다.
@@ -940,7 +939,7 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
     vehicle_song 은 マスタードラゴン 에서 내릴 때 울리던 맵 곡을 다시 보내지 않고 잇는다(vehicle_song_code).
     keep_samples 는 1A 의 정리에서 앞 곡과 다음 곡이 함께 쓰는 샘플을 버리지 않는다(keep_samples_code, load_pump 필요).
     release_failed 는 자리를 얻지 못해 그만둔 곡·효과음의 시퀀스를 SPC 에서 치운다(release_failed_code, load_pump 필요).
-    resident_waves 는 {늘 두는 효과음 파형 번호(20~22): 자원} 으로 그 샘플을 바꾼다. 곡 예산은 원래 크기로 셌으므로
+    resident_waves 는 {늘 두는 샘플 번호: 자원} 으로 그 샘플을 바꾼다(효과음 파형 20~22, 문 소리를 넣은 05 등). 곡 예산은 원래 크기로 셌으므로
     원래보다 크면 거부한다.
     unpin 은 바꾸지 않았어도 늘 두는 시퀀스 목록에서 뺄 곡(부를 때마다 올림).
     weapon_sounds 는 ({무기 물건 번호(맨손 80): (효과음, 갈래)}, 곡들) 로, 그 곡들이 울리는 동안 たたかう 소리를 무기마다
@@ -1031,8 +1030,8 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
         write(address, payload, empty=True)
         write(RELOC_SMP_TABLE + sample * 3, address.to_bytes(3, 'little'))
     for sample, payload in sorted((resident_waves or {}).items()):
-        if sample not in RESIDENT_WAVES or sample not in resident_samples(data):
-            raise ValueError(f'resident wave {sample:02X} must be one of the resident sound effect waves 20..22')
+        if sample not in resident_samples(data):
+            raise ValueError(f'resident wave {sample:02X} must be a resident sample')
         if len(payload) > sample_size(data, sample) + 2:
             raise ValueError(f'resident wave {sample:02X} is larger than the original')
         address = place(payload, f'wave {sample:02X}')

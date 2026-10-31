@@ -197,12 +197,14 @@ def build_effects(data, assets, spec, sequence_bytes, records=None, waves=None, 
     return sequences, {seq: more for seq, more in extras.items() if more}, report
 
 
-def bend_slides(score, dump):
+def bend_slides(score, dump, curve=False):
     """NDS 효과음 시퀀스 글(ndssound 의 sfx/*.txt)에서 음마다 울리는 동안 바뀌는 벤드를 읽어 'slide'(반음, 틱)를 붙인 악보.
 
     악보에는 음이 시작할 때의 벤드만 남는데, 무기 소리는 틱마다 벤드를 바꿔 음을 몇 옥타브씩 쓸어 올리거나 내린다(양날 검은
     -2 → 80, 범위 60 이면 약 38반음). 음이 울리는 동안(다음 음 또는 길이 끝까지) 마지막 벤드와 처음 벤드의 차를 반음으로
-    반올림해 한 번의 고른 미끄럼으로 옮긴다. note-wait 0 인 트랙만 읽는다(효과음은 모두 그렇다)."""
+    반올림해 한 번의 고른 미끄럼으로 옮긴다. curve 면 오르내림이 바뀌는 데마다 미끄럼을 나눠 'slides' 로 곡선을 따른다
+    (개구리 뛰기처럼 올랐다 내려오는 소리. 한 번으로 옮기면 끝 벤드만 남아 밋밋하다). note-wait 0 인 트랙만 읽는다(효과음은
+    모두 그렇다)."""
     events, tick, track, wait, scale = {}, 0, None, True, 2
     for line in dump.splitlines():
         head = re.match(r'\[(track\d+)\]', line)
@@ -232,13 +234,39 @@ def bend_slides(score, dump):
             after = [n['tick'] for n in notes if n['ch'] == e['ch'] and n['tick'] > e['tick']]
             stop = min([e['tick'] + max(e.get('gate', 0), 1)] + after)
             inside = [(t, b, r) for t, b, r in events[e['ch']] if e['tick'] < t < stop]
-            if inside:
+            turns = _turns([(t - e['tick'], (b - (e.get('bend') or 0)) * r / 128) for t, b, r in inside]) if curve else []
+            if len(turns) > 1:
+                e = e | {'slides': turns}
+            elif inside:
                 t, b, r = inside[-1]
                 semis = round((b - (e.get('bend') or 0)) * r / 128)
                 if semis:
                     e = e | {'slide': (max(-128, min(127, semis)), t - e['tick'])}
         timeline.append(e)
     return score | {'timeline': timeline}
+
+
+def _turns(points):
+    """음 안 벤드 (틱, 반음)를 오르내림이 바뀌는 데서 끊어 [(시작 틱, 반음, 틱)] 미끄럼 구간으로. 반음은 그 구간에서
+    옮길 만큼(FB 는 울리는 음높이에서 옮긴다). 한 방향으로만 가면 구간 하나라, 부르는 쪽은 예전처럼 끝 벤드 한 번으로 둔다."""
+    if len(points) < 2:
+        return []
+    cuts, way = [points[0]], 0
+    for (_, a), (t, b) in zip(points, points[1:]):
+        step = (b > a) - (b < a)
+        if step and way and step != way:
+            cuts.append(prev)
+        if step:
+            way = step
+        prev = (t, b)
+    cuts.append(points[-1])
+    out, done = [], 0
+    for (t0, _), (t1, b) in zip(cuts, cuts[1:]):
+        semis = round(b) - done
+        if semis and t1 > t0:
+            out.append((max(t0, 1), max(-128, min(127, semis)), t1 - max(t0, 1) or 1))
+            done += semis
+    return out
 
 
 BASE_KEY = 60
@@ -275,10 +303,17 @@ def one_base(score):
             while note - BASE_KEY > MAX_SHIFT and instruments[str(program)].get('type') != NOISE_TYPE:
                 note -= 12
             e = e | {'program': program, 'note': note, 'bend': round((units - semis * 128) / scale) if scale else 0}
+            # 미끄럼 끝도 음높이 한계 안에(넘치면 음높이가 돌아 엉뚱한 소리). 낮은 쪽은 0 까지 내려도 깨지지 않는다
+            top = BASE_KEY + MAX_SHIFT - note
             if e.get('slide'):
-                # 미끄럼 끝도 음높이 한계 안에(넘치면 음높이가 돌아 엉뚱한 소리). 낮은 쪽은 0 까지 내려도 깨지지 않는다
-                top = BASE_KEY + MAX_SHIFT - note
                 e = e | {'slide': (min(e['slide'][0], top), e['slide'][1])}
+            if e.get('slides'):
+                slides, at = [], 0
+                for start, semis, ticks in e['slides']:
+                    semis = min(semis, top - at)
+                    slides.append((start, semis, ticks))
+                    at += semis
+                e = e | {'slides': slides}
         timeline.append(e)
     return score | {'instruments': instruments, 'timeline': timeline}
 
@@ -302,8 +337,8 @@ def build_spare(data, assets, specs, sequence_bytes, tempo_from=0x37, volumes=No
     regions = {}
     for spec in specs.values():
         for ident in spec.values():
-            if ident and not ident.endswith('!'):
-                for ins in json.loads(sfx_path(assets, ident).read_text())['instruments'].values():
+            if ident and '!' not in ident:
+                for ins in json.loads(sfx_path(assets, ident.rstrip('~')).read_text())['instruments'].values():
                     for r in (ins or {}).get('regions') or []:
                         regions.setdefault(r.get('sample'), r)
     for seq, spec in sorted(specs.items()):
@@ -335,12 +370,32 @@ def prerendered(assets, ident, cache_dir=None):
     return out
 
 
+def resident_pcm(assets, spec, max_rate=8000, cache_dir=None):
+    """spec = {늘 두는 샘플 번호: 'NDS!초'}. NDS 가 낸 그 효과음 소리를 그 길이까지 샘플 하나로 만들어 늘 두는 샘플 자리에
+    넣을 자원으로. 빈 효과음 갈래를 같은 'NDS!' 로 주면 그 번호로 울린다. ({번호: 자원}, waves, 보고서)."""
+    resources, waves, report = {}, {}, {}
+    for sample, text in sorted(spec.items()):
+        ident, bang, seconds = text.partition('!')
+        if not bang:
+            raise ValueError(f'resident pcm {sample:02X}: give NDS!SECONDS')
+        score = _prerendered_score(json.loads(sfx_path(assets, ident).read_text()), ident)
+        region = score['instruments']['0']['regions'][0]
+        resource, detail = bank.convert_sample(prerendered(assets, ident, cache_dir), region, max_rate=max_rate,
+                                               cache_dir=cache_dir, seconds=float(seconds) if seconds else None)
+        resources[sample] = resource
+        waves[f'{ident.upper()}!'] = sample
+        report[f'{sample:02X}'] = {'nds': ident.upper(), 'hz': round(detail['effective_rate']),
+                                   'brr_bytes': detail['brr_bytes']}
+    return resources, waves, report
+
+
 def _prerendered_score(score, ident):
     """원래 악보의 첫 음을 본으로, 0 틱에 기준음 하나를 끝까지 울리는 악보(프로그램 0 = 렌더한 소리)."""
     first = next(e for e in score['timeline'] if e.get('op') == 'note')
     note = first | {'tick': 0, 'note': BASE_KEY, 'velocity': 127, 'gate': score.get('end_tick', 48), 'len': 0,
                     'program': 0, 'bend': 0, 'volume': 127, 'expression': 127, 'pan': 64, 'uid': 0}
     note.pop('slide', None)
+    note.pop('slides', None)
     region = {'lo': 0, 'hi': 127, 'base': BASE_KEY, 'attack': 127, 'decay': 127, 'sustain': 127, 'release': 125,
               'type': 'PCM', 'sample': f'{ident.upper()}!'}
     return score | {'timeline': [note], 'instruments': {'0': {'type': 'PCM', 'regions': [region]}}}
@@ -356,15 +411,17 @@ def _spare_sequence(assets, seq, spec, tempo, resources, by_bytes, baked, volume
             branches[branch] = ([], [])
             report[f'{branch:02X}'] = {'nds': None}
             continue
-        whole = ident.endswith('!')
-        ident = ident.rstrip('!')
+        # NDS! 는 NDS 가 낸 소리를 통째로, NDS!초 는 그 길이까지만 샘플 하나로, NDS~ 는 음 안 벤드 곡선을 따라
+        curve = ident.endswith('~')
+        ident, whole, seconds = ident.rstrip('~').partition('!')
+        seconds = float(seconds) if seconds else None
         path = sfx_path(assets, ident)
         dump = path.with_suffix('.txt')
         score = json.loads(path.read_text())
         if whole:
             score = _prerendered_score(score, ident)
         elif dump.exists():
-            score = bend_slides(score, dump.read_text())
+            score = bend_slides(score, dump.read_text(), curve)
         swap = substitutes.get((seq, branch), {})
         if swap:
             score = score | {'instruments': {p: ins and ins | {'regions': [
@@ -385,14 +442,16 @@ def _spare_sequence(assets, seq, spec, tempo, resources, by_bytes, baked, volume
         pcm = score | {'timeline': [e for e in score['timeline']
                                     if e.get('op') != 'note' or (e['program'] not in noise and e['program'] not in waved)]}
         remap, program_map, samples = {}, {}, {}
-        if whole:
+        # 늘 두는 샘플 자리에 넣은 소리(resident_pcm)는 그 번호로 울려 레코드에 샘플을 더하지 않는다
+        baked_whole = whole and f'{ident.upper()}!' not in waves
+        if baked_whole:
             program, region = next((int(p), ins['regions'][0]) for p, ins in instruments.items())
             resource, sample_detail = bank.convert_sample(prerendered(assets, ident, cache_dir), region, max_rate=max_rate,
-                                                          cache_dir=cache_dir)
+                                                          cache_dir=cache_dir, seconds=seconds)
             found, program_map = {0x26: resource}, {program: [{'lo': 0, 'hi': 127, 'sample': 0x26}]}
             detail = {'samples': {'26': sample_detail}}
-        if whole or any(e.get('op') == 'note' for e in pcm['timeline']):
-            if not whole:
+        if baked_whole or any(e.get('op') == 'note' for e in pcm['timeline']):
+            if not baked_whole:
                 found, program_map, detail = bank.build_bank(pcm, assets, start_id=0x26, max_rate=max_rate,
                                                              cache_dir=cache_dir)
             for temp, payload in sorted(found.items()):

@@ -621,9 +621,13 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
             remaining = stop - tick
             # 효과음의 음 안 벤드 쓸기(dq4soundsfx.bend_slides): 첫 틱을 울린 뒤 음높이 미끄럼(FB)을 건다. FB 는 울리는 음에
             # 그 틱부터 걸리므로 음 앞에 두면 앞 음에 걸린다
-            slide = note.get('slide') if note and fresh and not noisy else None
+            slides = []
+            if note and fresh and not noisy:
+                slides = note.get('slides') or ([(1, *note['slide'])] if note.get('slide') else [])
+            began = tick
             while remaining:
-                length = 1 if slide and remaining > 1 else min(remaining, 240)
+                ahead = [start for start, _, _ in slides if start > tick - began]
+                length = min(remaining, 240, (ahead[0] - (tick - began)) if ahead else 240)
                 final = note is None or tick + length in (note['end'], loop_start)
                 if note:
                     setting('gate_preset', 0xFE if final else 0)
@@ -636,10 +640,9 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
                 tick += length
                 if note:
                     word = 'tie'
-                if slide:
-                    if remaining:
-                        lines.append(f'  pitch_slide {slide[0] & 0xFF:02X} {min(slide[1], 0xFF):02X}')
-                    slide = None
+                for start, semis, ticks in slides:
+                    if start == tick - began and remaining:
+                        lines.append(f'  pitch_slide {semis & 0xFF:02X} {min(ticks, 0xFF):02X}')
             last_note = note
         if loop_start is None:
             lines += ['  rest len 30', '  end']
