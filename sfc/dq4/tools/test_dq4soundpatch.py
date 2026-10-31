@@ -135,6 +135,22 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(patch.read_sets(out)[0x1D], bytes([2, 2, 0x1F, 0x05]))
         self.assertEqual(report['songs'][0]['spc_budget']['streamed_while_playing'], [])
 
+    def test_effect_remap_jumps_from_the_effect_queue_entry_and_rewrites_sequence_and_branch(self):
+        base = bytearray(self.base)
+        site = lorom(patch.EFFECT_REMAP_SITE)
+        base[site:site + len(patch.EFFECT_REMAP_ORIGINAL)] = patch.EFFECT_REMAP_ORIGINAL
+        out, report = patch.install(bytes(base), {2: self.item}, effect_remaps={(0x37, 0x14): (0x45, 0x03)})
+        self.assertEqual(out[site:site + 4], bytes([0x5C]) + patch.EFFECT_REMAP.to_bytes(3, 'little'))
+        code = patch.effect_remap_code({(0x37, 0x14): (0x45, 0x03)})
+        at = lorom(patch.EFFECT_REMAP)
+        self.assertEqual(out[at:at + len(code)], code)
+        # 시퀀스·갈래를 맞춰 보고 스택의 A·X 낮은 바이트를 고친 뒤, 원래 입구 코드로 24:FF83 에 간다
+        self.assertIn(bytes.fromhex('A3 01 C9 37'), code)
+        self.assertIn(bytes.fromhex('8A C9 14'), code)
+        self.assertIn(bytes.fromhex('A9 45 83 01 A9 03 83 04'), code)
+        self.assertTrue(code.endswith(bytes.fromhex('08 E2 20 48 A9 0C 5C 83 FF 24')))
+        self.assertEqual(report['effect_remaps'], {'37-14': '45-03'})
+
     def test_resident_wave_replaces_only_a_resident_sample_no_larger_than_before(self):
         small = brr.resource(bytes(18), 1, pitch=0x0831)
         out, _ = patch.install(self.base, {2: self.item}, resident_waves={0x20: small})
