@@ -279,7 +279,7 @@ def talk_scripts(first_message):
           "else": _msg(m['king_room'])}],
         # FC 는 호이민이 일행에 있는지 보지만, 1장에서 호이민은 합류한 뒤 떠나지 않아 합류 깃발과 같다
         [_if(HOIMIN, _msg(m['tower_soldier_hoimin']), _msg(m['tower_soldier']))],
-        # FC 는 예면 깃발을 켜고 노인을 일행 쪽으로 걷게 한다(15:9D36, 슬롯 0E 의 간격 33). 여기서는 깃발만
+        # FC 는 예면 깃발을 켜고 노인을 일행 쪽으로 걷게 한다(15:9D36, 슬롯 0E 의 간격 33). 걷기는 OLD_MAN_SCRIPT
         [_if(OLD_MAN_TRIED, _msg(m['old_man_tired']),
              [_msg(m['old_man_ask']), {"op": "if", "cond": {"code": "05"},
                                       "then": [_flag_on(OLD_MAN_TRIED), _msg(m['old_man_yes'])],
@@ -316,6 +316,8 @@ KING_CALL_SRC, KING_CALL_SCRIPT = _SPARE[6]
 CRY_SRC, CRY_SCRIPT = _SPARE[7]
 RESCUED2_SRC, RESCUED2_SCRIPT = _SPARE[8]
 HOME_KID_SRCS = (_SPARE[9], ({"list": "05:9768", "index": 0}, "05:976F"))
+# 성 앞 노인: 이 해킹에서 가지 않는 DQ5 03/0D 의 한 벌 스크립트 인물
+OLD_MAN_SRC, OLD_MAN_SCRIPT = {"list": "05:9837", "index": 0}, "05:983E"
 END_MAP = '36/00'               # 1장 끝은 보고한 뒤 성 앞에 들어설 때(FC 는 같은 방문 안, $6285 는 필드로 나가면 지워짐)
 # 탑 위 30/04 의 FC 인물 슬롯(06 부터 차례): 06 보스, 07·08 잡힌 아이, 09 마물은 이기면 숨고, 0C~0E 의 구한 아이는
 # 이기기 전에 숨는다(1C:$A266). 0C 가 고맙다고 말한다
@@ -594,8 +596,11 @@ def _status_count():
 # 능력치만 끝없이 올랐음), 기록 +12 를 직접 올린다. 25:8B07 의 BRK 89 80 29 를 따라 부르면 남은 $43~$45 가 경험치를
 # 덮었다. 25:8B2F~8BAD 는
 # 오른 양마다 BRK 8D 80 필드로 기록에 더하고(둘은 16비트라 $44 를 0 으로), 배운 주문 비트를 BRK 89 80 D2 로 쓴다.
-# 21:805A 가 다음 레벨 경험치를 다시 셈하고, 25:8B07 은 팡파르 21 을 울린다(24:FF0F, 20:8218)
+# 21:805A 가 다음 레벨 경험치를 다시 셈한다.
+# 팡파르는 전투처럼(25:8B1C 의 BRK 11 21) 틀기만 하고 기다리지 않아 「레벨이 올랐다」 줄이 곡과 함께 뜬다. 다음 레벨에
+# 들어설 때와 끝날 때 24:FF0F 로 곡이 끝나기를 기다리고, 끝나면 맵 곡($194B)을 24:FE9A 로 다시 튼다(_fanfare 와 같은 까닭)
 LEVEL_UP = 0x23EB50
+LEVEL_SONG = 0x21                           # DQ5 레벨 업 곡 자리(dq4-sound-port-format)
 GROWTH = ((0, 0x06, True), (1, 0x0E, True), (2, 0x1D, False), (3, 0x18, False), (6, 0x1F, False), (4, 0x21, False),
           (5, 0x23, False))
 
@@ -605,7 +610,9 @@ def _level_up():
     「레벨이 올랐다」를 되풀이할지 고른다)."""
     from dq4chapterbox import ENTER, LEAVE
     flag = 0x7E2190 + REPORTED[0]
-    done = bytes((0xAF,)) + _al(flag) + bytes((0x09, REPORTED[1], 0x8F)) + _al(flag)
+    wait = bytes((0xA9, LEVEL_SONG, 0x22, 0x0F, 0xFF, 0x24))                             # LDA #곡 / JSL 24:FF0F
+    done = (bytes((0xAF,)) + _al(flag) + bytes((0x09, REPORTED[1], 0x8F)) + _al(flag) + wait +
+            bytes((0xAD, 0x4B, 0x19, 0x29, 0x7F, 0x22, 0x9A, 0xFE, 0x24)))                # LDA $194B / AND #$7F / JSL 24:FE9A
     up = bytearray(bytes((0xAF,)) + _al(flag) + bytes((0x29, ~REPORTED[1] & 0xFF, 0x8F)) + _al(flag))
     up += bytes((0xA2, 0x09, 0xB5, 0x00, 0x9F)) + _al(SCRATCH) + bytes((0xCA, 0x10, 0xF7))   # $00~$09 를 SCRATCH 로
     up += bytes((0xAF,)) + _al(HERO_LEVEL) + bytes((0x1A, 0x8F)) + _al(HERO_LEVEL)          # 레벨 +1
@@ -616,10 +623,35 @@ def _level_up():
         up += bytes((0xAF,)) + _al(SCRATCH + 7 + k) + bytes((0x85, 0x43 + k))
     up += bytes((0x64, 0x42, 0x00, 0x89, 0x80, 0xD2,                                         # STZ $42 / BRK 89 80 D2
                  0xA9, 0x00, 0x22, 0x5A, 0x80, 0x21,                                         # LDA #0 / JSL 21:805A
-                 0xA9, 0x21, 0x22, 0x0F, 0xFF, 0x24, 0x22, 0x18, 0x82, 0x20))                # 팡파르
-    body = (bytes((0xE2, 0x20, 0xC2, 0x10, 0xA9, 0x00, 0x22)) + _al(LEVEL_UP) +            # SEP / REP / LDA #0 / JSL
+                 0xA9, LEVEL_SONG, 0x22, 0x9A, 0xFE, 0x24))                                  # LDA #곡 / JSL 24:FE9A
+    body = (wait + bytes((0xE2, 0x20, 0xC2, 0x10, 0xA9, 0x00, 0x22)) + _al(LEVEL_UP) +     # SEP / REP / LDA #0 / JSL
             bytes((0xE2, 0x10, 0xB0, len(done) + 3)) + done + bytes((0x82, *len(up).to_bytes(2, 'little'))) + bytes(up))
     return ENTER + body + LEAVE
+
+
+# FC 노인은 블록 명령으로 일행을 목표 삼아 걷고(24 80 00), 간격 33 이라 약 48프레임에 한 칸 걷는다(차례 16프레임 × 3,
+# fc dq4-script-format 「그림과 움직임」). 여기서는 한 걸음마다 명령 37 로 목표를 주인공 쪽 한 칸(2셀)으로 두고 명령 14 로
+# 걷는다. 인물 스크립트는 이동 간격(명령 1D, 7E:3300 위 니블 × 8프레임)마다 한 차례 돌고, 명령 37 과 걷기 시작하는
+# 명령 14 가 차례를 하나씩 쓴다. 간격 3(24프레임)이면 49프레임마다 한 걸음이었다(실측). 1D 02 는 위 니블이 0 이라 멈춘다
+OLD_MAN_INTERVAL = 0x30
+
+
+def _old_man_step():
+    """명령 37 이 부른다. 인물 슬롯($90)의 걸어갈 곳(7E:3560·3580·35A0·35C0, 명령 13 의 자리)을 지금 자리로 두고, 주인공과
+    X 가 2셀보다 멀면 X 로, 아니면 Y 가 2셀보다 멀 때 Y 로 2셀 옮긴다. 붙어 있으면 그 자리(명령 14 가 곧바로 지나감).
+    직접 페이지는 스크립트 고리가 쓰므로 건드리지 않는다."""
+    a = bytearray((0x08, 0xE2, 0x30, 0xA6, 0x90))                                     # PHP / SEP #$30 / LDX $90
+    for here, there in ((0x3020, 0x3560), (0x3040, 0x3580), (0x3080, 0x35A0), (0x30A0, 0x35C0)):
+        a += bytes((0xBF, *_long(0x7E0000 + here), 0x9F, *_long(0x7E0000 + there)))  # LDA 지금,X / STA 목표,X
+    out = bytes((0x28, 0x6B))                                                        # PLP / RTL
+
+    def axis(here, there, tail):
+        add = bytes((0x18, 0x7F, *_long(0x7E0000 + there), 0x9F, *_long(0x7E0000 + there))) + out  # CLC / ADC / STA
+        neg = bytes((0xC9, 0xFE, 0xB0, 2 + len(add), 0xA9, 0xFE)) + add                  # -2·-1 이면 다음 축으로
+        pos = bytes((0xC9, 0x03, 0x90, 2 + len(add) + len(neg), 0xA9, 0x02)) + add       # 0~2 면 다음 축으로
+        return (bytes((0xAF, *_long(0x7E0000 + here), 0x38, 0xFF, *_long(0x7E0000 + here), 0x30, len(pos))) +
+                pos + neg + tail)                                    # LDA 주인공 / SEC / SBC 노인,X / BMI 음수
+    return bytes(a) + axis(0x3020, 0x3560, axis(0x3080, 0x35A0, out))
 
 
 # 01:C800 의 인물 스크립트 고리가 직접 페이지 앞자리를 쓰므로, 그 자리를 덮는 루틴(25:FA15, 23:EB50 등)을 부르는
@@ -827,6 +859,7 @@ def native(data=None):
                        ('king_away', _at(None, ch1_cell(0, KING_ROW)[1], away=True)),
                        ('cry_at', _at(*ch1_cell(CRY_FROM, CRY_ROW), x_from=True)),
                        ('level_up', _level_up()), ('open_cage', _open_cage()),
+                       ('old_man_step', _old_man_step()),
                        ('status_count', _status_count())):
         at[name] = CODE_AT + len(out)
         out += code
@@ -984,6 +1017,14 @@ def scripts(first_message, chapter2_at=None):
         {"address": SOLDIER_SCRIPT, "commands": [_cmd('09', 0x80 | SOLDIER_LEFT[0], SOLDIER_LEFT[1]), _cmd('3F')] +
          [c for x, y in SOLDIER_PATH for c in (_cmd('13', *ch1_cell(x, y)), _cmd('14'))] +
          [_cmd('28'), _cmd('52'), _cmd('40'), _cmd('16')]},
+        # 성 앞 노인: 이 방문에서 「예」 라고 하면 일행 쪽으로 느리게 걷는다. 다시 들어오면 서 있다(FC 는 맵을 읽을 때
+        # 간격이 맵 자료의 0 으로 돌아감)
+        {"address": OLD_MAN_SCRIPT, "commands": [
+            {**_cmd('06', *OLD_MAN_TRIED), "target": "stay"}, _cmd('09', 0x80 | OLD_MAN_TRIED[0], OLD_MAN_TRIED[1]),
+            _cmd('1E', WALK_SPEED), _cmd('1D', OLD_MAN_INTERVAL),
+            {**_cmd('37', *_long(at['old_man_step'])), "label": "follow"}, _cmd('14'),
+            {"op": "03", "args": [], "target": "follow"},
+            {**_cmd('16'), "label": "stay"}]},
         # 보이지 않는 인물: 아이들이 따라오는 동안 이 줄에 오면 엄마 곁으로 보내고 따라옴 깃발을 끈다(11 은 AND)
         {"address": KIDS_HOME_SCRIPT, "commands": [
             _cmd('28'), _cmd('52'), _cmd('09', 0x80 | KIDS_FOLLOW[0], KIDS_FOLLOW[1]),
@@ -1164,7 +1205,7 @@ def npc_lists(ported, report, first_talk):
         if not hits:
             raise SystemExit(f'{m}: FC 대화 {fc_talk:03X} 인물이 없음')
         for i in hits:
-            lst[i] = _same(lst[i], lst[i]["from"], t[name])
+            lst[i] = _same(lst[i], OLD_MAN_SRC if name == 'old_man' else lst[i]["from"], t[name])
     room = lists[HOIMIN_ROOM]
     hoimins = [i for i, p in enumerate(report[HOIMIN_ROOM]) if p["talk"] == FC_HOIMIN]
     gone = [e for i, e in enumerate(room) if i not in hoimins]
