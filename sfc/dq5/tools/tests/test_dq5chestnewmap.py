@@ -1,4 +1,5 @@
-"""상자 도구 셋(표 옮기기·고정 표 쓰기·상자 놓기)이 dq5newmap.py 로 더하는 새 맵을 --new-map·--with-patch 로 받는지."""
+"""상자 도구 셋(표 옮기기·고정 표 쓰기·상자 놓기)이 dq5newmap.py 로 더하는 새 맵을 --new-map·--with-patch 로 받는지.
+합성 롬(test_dq5chestplace.mapped())에서 돌리고, 롬이 있으면 원본 롬에서도 돌린다."""
 import contextlib
 import io
 import json
@@ -17,6 +18,7 @@ import dq5newmap
 from dq5build import build, load
 from dq5chestwrite import NewMaps
 from dq5map import Rom
+from test_dq5chestplace import mapped
 from test_dq5chestwrite import ROM, fixture
 
 # 36/00 은 31/03(상자 칸 (8,17)·(10,17), ツボ 칸 (8,21)·(10,21))과 같은 레코드·속성
@@ -61,17 +63,22 @@ class NewMapArgumentTests(unittest.TestCase):
                     self.assertEqual(run(module, rom, *args)[0], 2)
 
 
-@unittest.skipUnless(ROM.is_file(), '롬 없음')
 class NewMapRomTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.rom = Rom(ROM.read_bytes())
         cls.tmp = tempfile.TemporaryDirectory()
+        cls.rom, cls.path = cls.source()
         cls.newmap = Path(cls.tmp.name) / 'newmap.dq5patch.json'
         manifest = dq5newmap.patch(cls.rom, NEWMAP, at={'entrance': 0x3EC000}, allow_doors=True)
         cls.newmap.write_text(json.dumps(manifest), encoding='utf-8')
         cls.new = NewMaps(cls.rom, [NEW], [cls.newmap])
         cls.extended = Rom(build(cls.rom.d, [load(str(cls.newmap))], manifest.get('rom_size', 0))[0])
+
+    @classmethod
+    def source(cls):
+        path = Path(cls.tmp.name) / 'rom.sfc'
+        path.write_bytes(mapped().d)
+        return mapped(), path
 
     @classmethod
     def tearDownClass(cls):
@@ -308,11 +315,18 @@ class NewMapRomTests(unittest.TestCase):
         source.write_text(json.dumps(self.tables()), encoding='utf-8')
         places = [arg for name, at in self.AT.items() for arg in (f'--{name.replace("_", "-")}-at', reloc.cpu(at))]
         args = ('--new-map', '36/00', '--with-patch', self.newmap, *places)
-        code, text = run(reloc, ROM, 'patch', source, '-o', tmp / 'out.dq5patch.json', *args)
+        code, text = run(reloc, self.path, 'patch', source, '-o', tmp / 'out.dq5patch.json', *args)
         self.assertEqual(code, 0, text)
-        code, text = run(reloc, ROM, 'check', source, *args)
+        code, text = run(reloc, self.path, 'check', source, *args)
         self.assertEqual(code, 0, text)
-        self.assertEqual(run(reloc, ROM, 'check', source, *places)[0], 1)
+        self.assertEqual(run(reloc, self.path, 'check', source, *places)[0], 1)
+
+
+@unittest.skipUnless(ROM.is_file(), '롬 없음')
+class RealRomNewMapTests(NewMapRomTests):
+    @classmethod
+    def source(cls):
+        return Rom(ROM.read_bytes()), ROM
 
 
 if __name__ == '__main__':

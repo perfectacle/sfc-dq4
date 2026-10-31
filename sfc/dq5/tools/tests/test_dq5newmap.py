@@ -18,14 +18,15 @@ def write(data, addr, raw):
     data[lorom(addr):lorom(addr) + len(raw)] = raw
 
 
-def original_rom():
-    """그룹 목록 바로 뒤에 그룹 표가 있는 원래 꼴 두 표와 표를 읽는 명령 꼴을 넣은 1.5MB 합성 롬."""
-    data = bytearray(0x180000)
+def original_rom(counts=COUNTS, data=None):
+    """그룹 목록 바로 뒤에 그룹 표가 있는 원래 꼴 두 표와 표를 읽는 명령 꼴을 넣은 1.5MB 합성 롬.
+    counts 는 그룹마다 맵 수, data 는 이 자리들 밖에 다른 자료를 미리 둔 1.5MB 바탕."""
+    data = bytearray(0x180000) if data is None else data
     for table, size, value in ((GROUP_TABLE, 3, lambda g, b: (0x188000 + g * 0x100 + b * 0x10).to_bytes(3, 'little')),
                                (ATTR_TABLE, 6, lambda g, b: bytes([g, b, 1, 2, 3, 4]))):
-        start = (table & 0xFFFF) - sum(COUNTS) * size
+        start = (table & 0xFFFF) - sum(counts) * size
         cursor, pointers = start, []
-        for g, n in enumerate(COUNTS):
+        for g, n in enumerate(counts):
             pointers.append(cursor)
             for b in range(n):
                 write(data, table & 0xFF0000 | cursor, value(g, b))
@@ -47,7 +48,7 @@ def original_rom():
     for entry in DOOR_ENTRIES:
         write(data, entry, bytes.fromhex('8b 4b ab 20 d1 f3 ab 6b') if entry == 0x01F3C9 else bytes.fromhex('08 8b 4b ab'))
     write(data, DOOR_TABLE, b''.join((b'\x01\x02\x03\x04\x05' if g == 3 else b'') + b'\x80' * (n - 1) + b'\xc0'
-                                     for g, n in enumerate(COUNTS)))
+                                     for g, n in enumerate(counts)))
     write(data, ATTR_SITES[0] - 1, bytes([0xBD, 0x6A, 0xFD]))
     write(data, ATTR_SITES[1] - 1, bytes([0xBD, 0x6B, 0xFD]))
     return Rom(data)
