@@ -6,7 +6,8 @@ lua/dq5cellshift.lua 로 옮기고 dq5gfxdump.lua 로 덤프해 dq5sprite.py 의
   ptr-XX     $1A2C = XX: 첫 목록 주소가 7E:8000 + XX 에 적힌다(주소 표는 7E:805F 까지 48칸)
 기대: 목록이 모두 7E:9000 밑이거나(shift-0D) 누운 인물의 돌린 타일 자리(이 맵에서 7E:9000~928F) 위면(shift-13·20)
 그대로이고, 누운 세트 둘의 목록이 7E:9040·90A0 에 걸리면(shift-0E) 그 둘이 깨진다. 주소 표 일곱째가 7E:805E 에
-들면(ptr-52) 그대로이고 7E:8060 을 넘으면(ptr-54) 첫 목록(주인공)의 첫 칸을 덮어 주인공이 깨진다.
+들면(ptr-52) 그대로이고 7E:8060 을 넘으면(ptr-54) 첫 목록(주인공)의 첫 칸을 덮어 주인공이 깨진다. 깨진 두 경우는
+디코더와 맞는 OAM 묶음 수도 shift-00 보다 줄어야 한다.
 원본 롬·선실 상태는 읽기만 하고 출력은 --out 의 새 하위 폴더에 둔다.
   MESENCE=… python sfc/dq5/tools/dq5celllistcheck.py rom/dq5.sfc --state work/state/ship.mss
 """
@@ -102,8 +103,9 @@ def main():
             r = results[name]
             good = [s for s in SETS if s in r['sets'] and r['sets'][s][0] == r['sets'][s][1] and s in r['shown']]
             r['intact'] = good
+            # 깨진 경우는 디코더와 맞는 OAM 묶음 수도 그대로인 shift-00 보다 줄어야 한다(지워진 목록의 인물이 빠지거나 틀림).
             ok = (good == list(SETS) and r['groups'] == r['hits'] > 0) if intact else \
-                (sorted(set(SETS) - set(good)) == sorted(broken))
+                (sorted(set(SETS) - set(good)) == sorted(broken) and r['hits'] < results['shift-00']['hits'])
             r['passed'] = ok
             print(f'{name}: 목록 {" ".join(r["lists"])}, 그대로인 세트 {" ".join(good)}, OAM 묶음 {r["hits"]}/{r["groups"]}'
                   f'{"" if ok else " 불일치"}')
