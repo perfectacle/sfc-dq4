@@ -4,6 +4,9 @@
           배움. 20:8846 에서 행동자·행동을 모아, 작전(7E:2034)·주인공 HP·가진 물건을 POKE 로 둔 같은 입력으로 견줌
   papas   파파스가 슬라임 셋에게 メラ. 내성 단계 0 배율 27:8055 FF → 80
   armor   슬라임이 まほうのよろい 를 입은 주인공에게 メラミ(3A). 갑옷 원소 표 まほうのよろい 항목 10 → 48
+  menu_mp 작전 3 의 MP 거름(21:DA58). 주문 목록 창의 MP 표 21:9BB4 의 メラ(01) 칸을 0 으로 둔 롬으로 전투를 시작해,
+          マーリン 의 メラ 가 거름 뒤 후보 넣기(21:DA77)에 닿는지 원본과 견줌. 거름은 BRK 88 85(21:9BAD 가 LDA $219BB4,X)가
+          $47 에 둔 값을 보므로 AI 레코드 +3 이나 전투 MP(26:8765)와 상관없다
 
 장면 준비용 ROMPATCH·SET·POKE(전투로 순간이동, 슬라임 HP·MP·행동, 동료 레코드, 작전, 주인공 HP·갑옷·물건·레벨)는
 확인하는 표를 덮지 않는다. 원본 롬·선실 상태는 읽기만 하고 출력은 --out 의 새 하위 폴더에 둔다.
@@ -21,7 +24,7 @@ from collections import Counter
 from pathlib import Path
 
 from dq5aiwrite import FORMAT, ODDS, dump
-from dq5map import Rom
+from dq5map import Rom, lorom
 from dq5progresscheck import command, environment, require, run, save_json
 from dq5spellfxcheck import casts
 from dq5tablecheck import PAPAS
@@ -42,6 +45,7 @@ def cases(rom):
         'branch': {'actions': [{'action': '27', 'branch': '00'}]},
         'mp': {'actions': [{'action': a, 'mp': 0} for a in ('01', '04')]},
         'range': {'actions': [{'action': '04', 'range': '00'}]},
+        'range_a0': {'actions': [{'action': '04', 'range': 'A0'}]},
         'resist': {'actions': [{'action': '06', 'resist': '56'}]},
         'ivalue': {'items': [{'item': 'A1', 'value': 0}]},
         'ibranch': {'items': [{'item': 'A1', 'branch': '07'}]},
@@ -50,6 +54,9 @@ def cases(rom):
         'flat': {'tactics': [{'tactic': 2, 'flat': 0xFF}]},
         'mp_ratio': {'tactics': [{'tactic': 2, 'mp_ratio': 0xFF}]},
         'mp_penalty': {'tactics': [{'tactic': 2, 'mp_penalty': 0}]},
+        'heal_value': {'tactics': [{'tactic': 0, 'heal_value': 0}]},
+        'heal_mp': {'tactics': [{'tactic': 0, 'heal_value': 8, 'heal_mp': 0}]},
+        'heal_mp_ref': {'tactics': [{'tactic': 0, 'heal_value': 8}]},
         **{f'odds_{name}': {'odds': {name: zero_group0(odds[name])}} for name in ODDS},
         'rates': {'resist_rates': [0x80, 205, 84, 0]},
         'armor': {'armor': [{'index': 2, 'reduce': 48}]},
@@ -59,6 +66,7 @@ def cases(rom):
 
 
 HERO_HP = ',7E2042={:02X},7E2043=00'
+MAX_HP = HERO_HP.format(2) + ',7E204E=FA,7E204F=00'
 ITEM = ',7E2080=A1'
 # (이름, 고친 롬, 작전, 덧붙일 POKE, 기대: 행동자 → 행동 개수 사전을 받아 참/거짓)
 AI_CASES = [
@@ -67,6 +75,12 @@ AI_CASES = [
     ('branch', 0, HERO_HP.format(2), lambda o, m: o[HOIMIN]['27'] > 0 and m[HOIMIN]['27'] == 0 and m[HOIMIN]['28'] > 0),
     ('mp', 2, '', lambda o, m: o[MARLIN]['04'] == 0 and m[MARLIN]['04'] > 0),
     ('range', 0, '', lambda o, m: o[MARLIN]['04'] > 0 and m[MARLIN]['04'] == 0),
+    ('range_a0', 0, '', lambda o, m: o[MARLIN]['04'] > 0 and m[MARLIN]['04'] == 0),
+    # 주인공 최대 HP 250·HP 2 면 ホイミン 은 ベホマ(29)를 고른다. 작전 +3(회복 값 무게)이 0 이면 ホイミ(27).
+    ('heal_value', 0, MAX_HP, lambda o, m: o[HOIMIN]['29'] > 0 and m[HOIMIN]['29'] == 0 and m[HOIMIN]['27'] > 0),
+    # +3 을 8 로 낮추면 ホイミ, 거기서 +4(MP 무게)를 0 으로 하면 다시 ベホマ. 견주는 쪽은 +3 만 8 로 둔 롬.
+    ('heal_mp', 0, MAX_HP, lambda o, m: o[HOIMIN]['27'] > 0 and o[HOIMIN]['29'] == 0 and m[HOIMIN]['29'] > 0,
+     'heal_mp_ref'),
     ('resist', 0, '', lambda o, m: o[MARLIN]['06'] > 0 and m[MARLIN]['06'] == 0),
     ('ivalue', 3, HERO_HP.format(2) + ITEM, lambda o, m: o[HOIMIN]['A1'] > 0 and m[HOIMIN]['A1'] == 0),
     ('ibranch', 4, HERO_HP.format(2) + ITEM, lambda o, m: o[HOIMIN]['A1'] > 0 and m[HOIMIN]['A1'] == 0),
@@ -94,8 +108,12 @@ def build(original, out):
         command('dq5build.py', original, 'build', manifest, '-o', out / f'{name}.sfc', '--ips', out / f'{name}.ips')
 
 
-def prepare(original, state, out, mesence, libdir):
-    dest = out / 'ai-state'
+MENU_MP = 0x219BB4
+MELA = 0x01
+
+
+def prepare(original, state, out, mesence, libdir, name='ai-state'):
+    dest = out / name
     env = environment(libdir, state, dest)
     env.update(FIELD='341,56', BATTLE='00:3', PARTY='05,04', SET='2073=63;209D=63;208E=FF;20B8=FF;2034=00',
                ROMPATCH='118003=C8', SETTLE='300', SAVE='battle.mss', MAXF='1800')
@@ -104,11 +122,11 @@ def prepare(original, state, out, mesence, libdir):
     return dest / 'battle.mss'
 
 
-def ai_run(name, rom, tactic, poke, state, out, mesence, libdir):
+def ai_run(name, rom, tactic, poke, state, out, mesence, libdir, probe='', reads=''):
     dest = out / name
     env = environment(libdir, state, dest)
     env.update(DRIVER=str(HERE / 'lua/dq5battle.lua'), MAXF='4000', LOOP='a:4,wait:20',
-               POKE=f'7E2034={tactic:02X}{poke}')
+               POKE=f'7E2034={tactic:02X}{poke}', AIPROBE=probe, AIREADS=reads)
     run(mesence, rom, HERE / 'lua/dq5aicheck.lua', dest, env)
     rows = re.findall(r'actor (\w\w) action (\w\w)', (dest / 'decisions.txt').read_text())
     require(rows, f'{name}: 작전 AI 결정이 없음')
@@ -146,24 +164,34 @@ def main():
                                 check=True, timeout=30).stdout.strip()
         build(original, out)
         battle = prepare(original, state, out, mesence, libdir)
+        data = bytearray(original.read_bytes())
+        data[lorom(MENU_MP + MELA)] = 0
+        (out / 'menu_mp.sfc').write_bytes(bytes(data))
+        menu_battle = prepare(out / 'menu_mp.sfc', state, out, mesence, libdir, 'menu-state')
         jobs, controls = {}, {}
-        for name, tactic, poke, _ in AI_CASES:
+        for name, tactic, poke, _, *base in AI_CASES:
             # 같은 작전·POKE 의 원본 실행은 한 번만 돌린다.
             key = controls.setdefault((tactic, poke), f'ai-original-{len(controls)}')
             jobs[key] = (original, tactic, poke)
             jobs[f'ai-{name}'] = (out / f'{name}.sfc', tactic, poke)
+            if base:
+                jobs[f'ai-{base[0]}'] = (out / f'{base[0]}.sfc', tactic, poke)
         for (tactic, poke), key in controls.items():
             jobs[f'{key}-control'] = (out / 'control.sfc', tactic, poke)
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
             futures = {k: pool.submit(ai_run, k, *v, battle, out, mesence, libdir) for k, v in jobs.items()}
+            filters = {k: pool.submit(ai_run, k, rom, 3, '', st, out, mesence, libdir, '21DA77') for k, rom, st in (
+                ('menu-original', original, battle), ('menu-patched', out / 'menu_mp.sfc', menu_battle))}
             texts = {k: pool.submit(scene_run, k, rom, opts, state, out, mesence, libdir) for k, rom, opts in (
                 ('papas-original', original, PAPAS_SCENE), ('papas-rates', out / 'rates.sfc', PAPAS_SCENE),
                 ('armor-original', original, ARMOR_SCENE), ('armor-armor', out / 'armor.sfc', ARMOR_SCENE))}
             seen = {k: f.result() for k, f in futures.items()}
             observed = {k: f.result() for k, f in texts.items()}
+            for f in filters.values():
+                f.result()
         results, failed = {}, []
-        for name, tactic, poke, ok in AI_CASES:
-            o = {a: Counter(c) for a, c in seen[controls[tactic, poke]].items()}
+        for name, tactic, poke, ok, *base in AI_CASES:
+            o = {a: Counter(c) for a, c in seen[f'ai-{base[0]}' if base else controls[tactic, poke]].items()}
             m = {a: Counter(c) for a, c in seen[f'ai-{name}'].items()}
             for d in (o, m):
                 for actor in (HOIMIN, MARLIN):
@@ -195,7 +223,11 @@ def main():
         armor_ok = (armor['original'] and armor['armor'] and all(d == 10 for _, d in armor['original'])
                     and all(d == 48 for _, d in armor['armor']))
         results['armor'] = {'original': armor['original'], 'patched': armor['armor'], 'passed': bool(armor_ok)}
-        failed += [k for k in ('rates', 'armor') if not results[k]['passed']]
+        passes = {k: len(re.findall(r'probe 21DA77 dp42=02 \w\w 00 00 01 ', (out / k / 'decisions.txt').read_text()))
+                  for k in ('menu-original', 'menu-patched')}
+        results['menu_mp'] = {'original': passes['menu-original'], 'patched': passes['menu-patched'],
+                              'passed': passes['menu-original'] == 0 and passes['menu-patched'] > 0}
+        failed += [k for k in ('rates', 'armor', 'menu_mp') if not results[k]['passed']]
         save_json(out / 'results.json', results)
         for name, r in results.items():
             print(f'{name}: {"통과" if r["passed"] else "불일치"} 원본 {r["original"]} 변경 {r["patched"]}')

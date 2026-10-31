@@ -25,15 +25,17 @@ ITEMS, ITEM_COUNT = 0x21C136, 0xD8
 NEW_ACTIONS = range(NEW_FIRST, NEW_LAST + 1)
 BATTLE_MP = 0x268765
 TACTICS, TACTIC_COUNT, TACTIC_SIZE = 0x21D8BD, 5, 32
-# 작전 레코드에서 받는 칸: (이름, 위치, 바이트 수). +3~+5·+A·+12 는 게임에서 확인하지 않아 내보내지 않는다.
-TACTIC_FIELDS = (('per_mp', 0, 1), ('flat', 1, 1), ('mp_ratio', 2, 1), ('danger', 6, 1),
-                 ('fubaha', 7, 1), ('baikiruto', 8, 1), ('sukuruto', 9, 1), ('mp_penalty', 0x10, 2))
+# 작전 레코드에서 받는 칸: (이름, 위치, 바이트 수). +5·+A·+12 는 게임에서 바뀐 것을 보지 못해 내보내지 않는다.
+TACTIC_FIELDS = (('per_mp', 0, 1), ('flat', 1, 1), ('mp_ratio', 2, 1), ('heal_value', 3, 1), ('heal_mp', 4, 1),
+                 ('danger', 6, 1), ('fubaha', 7, 1), ('baikiruto', 8, 1), ('sukuruto', 9, 1), ('mp_penalty', 0x10, 2))
 # 27:8228 이 고르는 학습 배율 표 셋. [갈래 0~2][라운드 수 0~3][내성 단계 0~3].
 ODDS = {'normal': 0x278254, 'easy': 0x278284, 'saving': 0x2782B4}
 RESIST = 0x278055
 ARMOR = 0x2780FC
 NO_RESIST = 0x1F
-KNOWN_RANGES = {0x00, 0x20, 0x40, 0x60, 0x80}
+# A0 은 공격 평가(21:DD47)·회복 평가(21:EF05) 어느 갈래에도 들지 않아 보통 평가에서 빠진다. C0·E0 도 같은
+# 갈래로 빠지지만 바꿔 보지 않아 원래 값 그대로만 받는다.
+KNOWN_RANGES = {0x00, 0x20, 0x40, 0x60, 0x80, 0xA0}
 
 
 def require(ok, message):
@@ -169,8 +171,7 @@ def edits(rom, doc, original=None):
             rng = rec[4] & 0xE0
             if 'range' in row:
                 value = hexbyte(row['range'], f'{name} range')
-                # 뜻을 확인한 다섯 값으로만 바꾼다. A0·C0·E0 은 원래 값 그대로 둘 때만 받는다.
-                require(value in KNOWN_RANGES or value == rng, f'{name} range: 00·20·40·60·80 중 하나(또는 원래 값)')
+                require(value in KNOWN_RANGES or value == rng, f'{name} range: 00·20·40·60·80·A0 중 하나(또는 원래 값)')
                 rng = value
             resist = rec[4] & 0x1F
             if 'resist' in row:

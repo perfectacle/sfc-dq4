@@ -87,7 +87,9 @@ class AiWriteTests(unittest.TestCase):
                {'odds': {'normal': [[0] * 4] * 3}}, {'odds': {'other': []}}, {'resist_rates': [1, 2, 3]},
                {'armor': [{'index': 2, 'reduce': 1}]}, {'armor': [{'index': 0, 'element': '01'}]},
                {'armor': [{'index': 0, 'reduce': 128}]}, {'armor': [{'index': 0, 'item': '56'}]},
-               {'actions': [{'action': '04', 'range': 'A0'}]}, {'actions': [{'action': '04', 'kind': '08'}]},
+               {'actions': [{'action': '04', 'range': 'C0'}]}, {'actions': [{'action': '04', 'range': 'E0'}]},
+               {'actions': [{'action': '04', 'kind': '08'}]}, {'tactics': [{'tactic': 0, 'heal_damage': 1}]},
+               {'tactics': [{'tactic': 0, 'damage_weight': 1}]}, {'tactics': [{'tactic': 0, 'dragoram': 1}]},
                {'items': [{'item': 'A1', 'branch': '01'}]}, {'other': 1}]
         for change in bad:
             with self.subTest(change=change), self.assertRaises(ValueError):
@@ -95,6 +97,10 @@ class AiWriteTests(unittest.TestCase):
         self.assertEqual(writes(ai.patch(r, doc(actions=[{'action': '04', 'resist': None}])))[0][1], '3f')
         self.assertEqual(ai.patch(r, doc(actions=[{'action': '04', 'kind': '01', 'range': '20'}]))['writes'], [])
         self.assertEqual(writes(ai.patch(r, doc(actions=[{'action': '04', 'range': '80'}])))[0][1], '81')
+        self.assertEqual(writes(ai.patch(r, doc(actions=[{'action': '04', 'range': 'A0'}])))[0][1], 'a1')
+        # 작전 +3(회복 값 무게)·+4(회복 MP 무게)
+        self.assertEqual(writes(ai.patch(r, doc(tactics=[{'tactic': 1, 'heal_value': 0, 'heal_mp': 9}]))),
+                         [('21:D8E0', '00', 'ff'), ('21:D8E1', '09', '64')])
 
     def test_new_actions(self):
         r = rom()
