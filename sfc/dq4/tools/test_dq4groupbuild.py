@@ -182,7 +182,8 @@ class RecordsTest(unittest.TestCase):
 
     # FC stairs that do not lead back. きたのどうくつ 3D/02 (3E/05) is the 3D/01 (3E/04) of after the fall: its stairs
     # lead to 3D/00, whose stairs lead to 3D/01 until $62AA bit7 turns them to 3D/02 (08:$B397).
-    # モンバーバラ 15/03(41/03)은 공연 중인 15/02 라, 계단은 15/00 으로 가지만 15/00 의 계단은 15/02 로 돌아온다.
+    # モンバーバラ 15/03(41/03)은 밤의 15/02 다. FC 는 15/00 의 계단을 밤이면 15/03 으로 돌리지만(08:$B397) 옮기지 않아
+    # 15/00 의 계단은 늘 15/02 로 간다.
     ONE_WAY = {"3E/05", "41/03"}
 
     def test_stairs_lead_back(self):
