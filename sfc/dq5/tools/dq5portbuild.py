@@ -250,9 +250,12 @@ def fixed_mask(original, rom, keep=None):
     base = bytearray(expand(original, mb))
     base[HEADER_RANGE[0]:HEADER_RANGE[1]] = rom[HEADER_RANGE[0]:HEADER_RANGE[1]]
     mask = bytearray(a != b for a, b in zip(base, rom))
-    # 모두 0 인 늘린 뱅크는 표지만 다르다. 쓰지 않은 뱅크라 차지하지 않는다.
+    # 모두 0 인 늘린 뱅크는 표지만 다르다. 쓰지 않은 뱅크라 차지하지 않는다. 다만 타이틀 거울 안에서는 0 도 거울을
+    # 지운 자료라(DQ4 1장 빌드가 다음 장 레코드 자리로 비운 37·39) 표지 자리를 0 으로 써 둔다.
     for b in range(ORIGINAL_SIZE // BANK, len(rom) // BANK):
         s, e = b * BANK, (b + 1) * BANK
+        if keep is not None and MIRROR[0] <= s < MIRROR[1]:
+            continue
         if not any(rom[s:e]):
             mask[s:e] = bytes(BANK)
     if keep is None:
@@ -441,16 +444,16 @@ class TextJob(Job):
         if 'over' in self.doc:
             fixed = self.ctx.fixed_by_name(self.doc['over'])
             self.base = fixed['rom_path']
-            messages, font, glyphs, extent = tw.base_package(fixed['rom'])
-            fixed['supersede'].append(extent)
+            messages, font, glyphs, extents, controls = tw.base_package(fixed['rom'])
+            fixed['supersede'] += extents
         else:
             for fixed in self.ctx.fixed:
                 if fixed['mask'][lorom(DECODER)]:
                     raise ValueError(f'작업 {self.name}: 고정 패치 {fixed["name"]} 가 보행 메시지를 이미 옮겼음. '
                                      f'over 로 그 묶음을 기준으로 삼아야 함(같은 색인·훅을 둘이 쓸 수 없음)')
-            messages, font, glyphs = tw.read_messages(self.ctx.original), None, tw.GLYPHS
-        self.messages = tw.overrides(messages, doc, glyphs)
-        _, nodes, _ = tw.tree(self.messages, glyphs)
+            messages, font, glyphs, controls = tw.read_messages(self.ctx.original), None, tw.GLYPHS, ()
+        self.messages = tw.overrides(messages, doc, glyphs, controls)
+        _, nodes, _ = tw.tree(self.messages, glyphs, controls)
         self.head = DECODER_END - DECODER + 8 + len(nodes) * 4 + tw.index_size(self.messages) + len(font or b'')
 
     def run(self, out, at, alt=None):
