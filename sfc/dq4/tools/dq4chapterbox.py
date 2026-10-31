@@ -37,9 +37,9 @@ class Scene:
         self.name, self.where, self.flag, self.title, self.since = name, where, flag, title, since
 
 
-# 1장 연출 깃발. DQ5 롬에서 켜고 끄고 보는 곳도, 그 바이트를 통째로 쓰는 곳도 없는 비트다(dq5flags.py)
+# 1장 연출·서장 수련 끝 깃발. DQ5 롬에서 켜고 끄고 보는 곳도, 그 바이트를 통째로 쓰는 곳도 없는 비트다(dq5flags.py)
 CHAPTER1 = Scene('box', (0x36, 0x01), (0x7E2199, 0x01), TITLE)
-PROLOGUE = Scene('box0', (0x3C, 0x01), (0x7E219E, 0x80), '서장')
+PROLOGUE = Scene('box0', (0x3C, 0x01), (0x7E219E, 0x08), '서장')
 # 1장 끝에서 산트하임 왕좌의 방(3D/01)으로 옮긴 뒤 첫머리를 마칠 때까지(첫머리 대기 깃발 7E:2208 bit6)
 CHAPTER2 = Scene('box2', (0x3D, 0x01), None, '제2장  말괄량이 공주의 모험', since=(0x7E2208, 0x40))
 # 게임에 넣는 장면 차례. 상자·밝히기 네이티브 주소가 이 목록으로 정해지므로, 주소를 부르는 스크립트(서장·1장)와

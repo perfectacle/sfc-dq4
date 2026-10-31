@@ -26,9 +26,13 @@ class PrologueTests(unittest.TestCase):
         self.assertEqual(pro.TALK_BASE, ch.TALK_BASE + len(ch._talks))
         for t in range(pro.TALK_BASE, pro.TALK_BASE + len(pro._talks)):
             self.assertIn(t + 0x3C6, pro.TEXTS)
-        # 문지기는 묻기 대화(24F~26C): T + 3C6 뒤 예·아니요, +1·+2 가 대답
-        for k in range(3):
-            self.assertIn(pro.T_GATE + 0x3C6 + k, pro.TEXTS)
+        self.assertLessEqual(pro.TALK_END, 0x900)
+
+    def test_gate_asks_in_an_appended_talk(self):
+        scripts = {s['talk']: s['body'] for s in pro.talk_doc()['scripts']}
+        self.assertEqual(scripts[f'{pro.T_GATE:03X}'], pro._yes_no(pro.M_GATE_ASK, pro.M_GATE_YES, pro.M_GATE_NO))
+        talks = [int(t, 16) for t in scripts]
+        self.assertEqual(talks, list(range(0x900, 0x900 + len(talks))))
 
     def test_ask_talk_asks_and_sets_the_done_flag(self):
         body = pro.talk_doc()['scripts'][0]['body']

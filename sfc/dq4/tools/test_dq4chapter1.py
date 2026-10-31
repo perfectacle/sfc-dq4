@@ -28,12 +28,13 @@ class MessageTests(unittest.TestCase):
 
     def test_messages_do_not_touch_menu_messages(self):
         self.assertFalse(set(ch.TEXTS) & set(mm.TEXTS))
-        self.assertTrue(all(0 <= m < mm.MESSAGES for m in ch.TEXTS))
+        # DQ5 메시지(000~C7F)를 덮지 않고 그 뒤에 이어 쓴다
+        self.assertEqual(min(ch.TEXTS), mm.MESSAGES)
 
     def test_talk_numbers_show_their_message(self):
-        # 대화 번호 26D 이상은 메시지 T + 3C6
+        # 대화 번호 26D~8FF 는 스크립트 없이 메시지 T + 3C6(900~ 는 덧붙인 대화 스크립트)
         for t in range(ch.TALK_BASE, ch.TALK_BASE + len(ch._talks)):
-            self.assertGreaterEqual(t, 0x26D)
+            self.assertLess(t, 0x900)
             self.assertIn(t + 0x3C6, ch.TEXTS)
 
     def test_name_is_spliced_as_a_code(self):

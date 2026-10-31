@@ -5,7 +5,7 @@ Each FC person record of the day and the night list becomes one DQ5 entry of tha
 template entry: a standing one, or one that wanders (script 19 03 03) with the FC step interval. The
 picture is a placeholder DQ5 townsperson of the same role (PICTURES) until DQ4 sprites exist. The talk is
 the FC talk of chapter 1 at the start (dq4talk.predict with chapter 0, no flags, no party): the messages it
-shows are joined into one new DQ5 message (C80-, gap-free), shown by an appended talk script (talk_doc).
+shows are joined into one new DQ5 message (FIRST_MESSAGE-, gap-free), shown by an appended talk script (talk_doc).
 People who open a shop, an inn, a church or the deposit in FC take the DQ5 talk number of the same service
 instead (dq4shopport).
 
@@ -32,6 +32,7 @@ from dq5hangul import MESSAGES  # noqa: E402
 from dq4environmentrom import GROUPS  # noqa: E402
 from dq4groupbuild import cell, chapter, fc_map, has_people  # noqa: E402
 import dq4shopport  # noqa: E402
+import dq4prologue  # noqa: E402
 from dq4shopport import merchants  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
 
@@ -128,8 +129,10 @@ PICTURES = {
 FACING = ("up", "right", "down", "left")
 # Placeholder line for a person whose FC talk shows nothing at the start of chapter 1.
 NOTHING = "＜なにもない＞"
-# Ported lines are new messages after DQ5's own (dq5textwrite appends them gap-free from the end).
-FIRST_MESSAGE = MESSAGES
+# Ported lines are new messages after DQ5's own, right after chapter 1's and the prologue's Korean messages
+# (dq4chapter1.TALK_BASE), gap-free.
+FIRST_MESSAGE = dq4prologue.TALK_END + 0x3C6
+assert FIRST_MESSAGE > MESSAGES
 # Talk numbers 900- run talk scripts appended by dq5talkwrite --extra-at, gap-free from 900: the prologue's
 # first (dq4prologue.talk_doc), then chapter 1's event talks (dq4ch1event), then one `msg` script per ported
 # message. A talk number T >= 26D shows message
@@ -290,7 +293,7 @@ def talk_doc(messages):
     first = first_talk()
     ids = [m["id"] for m in messages]
     if ids != list(range(FIRST_MESSAGE, FIRST_MESSAGE + len(ids))):
-        raise ValueError("ported messages must run gap-free from C80")
+        raise ValueError(f"ported messages must run gap-free from {FIRST_MESSAGE:X}")
     events = dq4ch1event.talk_numbers(SCRIPT_TALK + len(doc["scripts"]))
     doc["scripts"] += [{"talk": f"{events[name]:03X}", "body": body}
                        for name, body in zip(dq4ch1event.TALKS, dq4ch1event.talk_scripts(FIRST_MESSAGE + len(ids)))]

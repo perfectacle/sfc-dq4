@@ -21,22 +21,24 @@ import dq4chapter1 as ch1  # noqa: E402
 
 say, speak = ch1.say, ch1.speak
 
-NIGHT_TOLD = (0x07, 0x02)       # 7E:2197 bit1  이무르 밤에 알렉스 이름을 들음(FC $6281&80)
-FLARE_FOLLOWS = (0x08, 0x04)    # 7E:2198 bit2  프레아가 따라옴(FC $627E&20)
-REUNITED = (0x22, 0x04)         # 7E:21B2 bit2  감옥에서 재회함(FC $627E&40)
-HOIMIN = (0x28, 0x01)           # 7E:21B8 bit0  호이민이 동료가 됨(FC $6281&40)
-KIDNAPPED = (0x28, 0x20)        # 7E:21B8 bit5  탑 입구에서 마물이 아이를 끌고 감(FC $627E&01)
-BOSS_WON = (0x29, 0x40)         # 7E:21B9 bit6  탑 위 보스를 이김(FC $6283&80)
-KIDS_FOLLOW = (0x29, 0x80)      # 7E:21B9 bit7  구한 아이들이 따라옴(FC $6283&20). 이무르에 데려다주면 끈다
+# 1장 진행 깃발. DQ5 롬에서 켜고 끄고 보는 곳이 없고, 이 바이트와 앞 바이트를 바이트로 쓰는 곳도 없는 비트다
+# (sfc/dq5/docs/dq5-flags.md). 21EF 부터는 색인 쓰기(02:E053·05:DF2A·23:E20E 등)가 220F 까지 덮는다
+NIGHT_TOLD = (0x57, 0x01)       # 7E:21E7 bit0  이무르 밤에 알렉스 이름을 들음(FC $6281&80)
+FLARE_FOLLOWS = (0x57, 0x02)    # 7E:21E7 bit1  프레아가 따라옴(FC $627E&20)
+REUNITED = (0x57, 0x04)         # 7E:21E7 bit2  감옥에서 재회함(FC $627E&40)
+HOIMIN = (0x57, 0x10)           # 7E:21E7 bit4  호이민이 동료가 됨(FC $6281&40)
+KIDNAPPED = (0x57, 0x20)        # 7E:21E7 bit5  탑 입구에서 마물이 아이를 끌고 감(FC $627E&01)
+BOSS_WON = (0x57, 0x40)         # 7E:21E7 bit6  탑 위 보스를 이김(FC $6283&80)
+KIDS_FOLLOW = (0x57, 0x80)      # 7E:21E7 bit7  구한 아이들이 따라옴(FC $6283&20). 이무르에 데려다주면 끈다
 # 아래는 DQ5 레ヌール城 04/05 의 인물 스크립트만 읽는 비트(이 해킹은 04/05 에 가지 않음, dq5flags.py)
 SOLDIER_LEFT = (0x06, 0x01)     # 7E:2196 bit0  탑의 병사가 먼저 돌아감(FC $6280&80)
 REPORTED = (0x07, 0x80)         # 7E:2197 bit7  왕에게 보고하고 여행을 허락받음(FC $6285&04)
 # 41 동굴 병사의 대사 차례(FC $6281 아래 두 비트, 15:9D3E). FC 는 말을 걸면 bit2 를 켜고, 맵에서 필드로 나갈 때
 # (15:9CF9, 1E:9311 이 부름) bit2 가 켜져 있으면 차례를 하나 올린다. 여기서는 동굴 맵에 들어설 때 올린다(동굴의 두
-# 출구가 모두 필드라 같은 일). 셋 다 시험하는 곳이 없는 비트
-CAVE_TALKED = (0x2E, 0x08)      # 7E:21BE bit3  (FC $6281&04)
-CAVE_STEP1 = (0x54, 0x08)       # 7E:21E4 bit3  차례 1(FC $6281&03 = 1)
-CAVE_STEP2 = (0x54, 0x10)       # 7E:21E4 bit4  차례 2
+# 출구가 모두 필드라 같은 일)
+CAVE_TALKED = (0x58, 0x01)      # 7E:21E8 bit0  (FC $6281&04)
+CAVE_STEP1 = (0x58, 0x02)       # 7E:21E8 bit1  차례 1(FC $6281&03 = 1)
+CAVE_STEP2 = (0x58, 0x04)       # 7E:21E8 bit2  차례 2
 OLD_MAN_TRIED = (0x06, 0x80)    # 7E:2196 bit7  성 앞 노인이 따라나섰다가 지침(FC $6289&10). DQ5 롬에 참조가 없는 비트
 
 # 보스를 이긴 뒤 FC 가 바꾸는 인물 목록(1C:$841E 등, $6283&80 으로 고름). dq4npcport.port 가 이 상태로 뽑아
