@@ -79,7 +79,7 @@ def build(assets, dq5, dq4, commit):
     if commit:
         # 다른 세션이 먼저 넣었으면 그 위에 쌓아야 push 가 받아들여진다
         remote(assets, 'pull', '-q', '--ff-only')
-    rom = dq4build.build(ROOT / 'work' / 'publish', dq5, dq4)
+    rom = dq4build.build(ROOT / 'work' / 'publish', dq5, dq4, assets=assets)
     base, out = dq5.read_bytes(), rom.read_bytes()
     patch = ips.make(base, out, rle=True)
     if ips.apply(base, patch) != out:
