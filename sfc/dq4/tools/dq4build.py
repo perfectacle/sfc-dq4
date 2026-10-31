@@ -7,6 +7,9 @@
 에서 읽으므로 그것이 없으면 곡 없이 끝난다. 이 단계는 dq4buildcache 를 거치지 않는다: 키가 자원 저장소 전체를
 해시하게 되고, dq4soundset 이 자원 저장소 안에 자기 캐시를 따로 둔다.
 
+곡 롬 위에 장 주인공 필드 그림(dq4leader.py, 같은 자원 저장소의 NDS 인물 시트)을 얹어 dq4-ch1-full.sfc 로 끝낸다.
+인물 시트가 없으면 곡 롬에서 끝난다.
+
   python sfc/dq4/tools/dq4build.py --out work/ch1 [--no-prologue] [--assets 폴더 | --no-sound]
 """
 import argparse
@@ -48,7 +51,14 @@ def build(out, dq5, dq4, prologue=True, assets=None):
     subprocess.run([sys.executable, HERE / 'dq4soundset.py', '--base', out / 'dq4-ch1.sfc', '--assets', assets,
                     f'@{HERE / "dq4sound-game.args"}', '--out', out / 'dq4-ch1-sound.sfc'],
                    check=True, stdout=subprocess.DEVNULL)
-    return out / 'dq4-ch1-sound.sfc'
+    import dq4leader
+    if not (Path(assets) / dq4leader.FIELD).is_dir():
+        print(f'{Path(assets) / dq4leader.FIELD} 이 없어 장 주인공 그림 없이 곡 롬에서 끝낸다', file=sys.stderr)
+        return out / 'dq4-ch1-sound.sfc'
+    subprocess.run([sys.executable, HERE / 'dq4leader.py', '--base', out / 'dq4-ch1-sound.sfc', '--dq5', dq5,
+                    '--assets', assets, '--out', out / 'dq4-ch1-full.sfc', '--work', out / 'leader'],
+                   check=True, stdout=subprocess.DEVNULL)
+    return out / 'dq4-ch1-full.sfc'
 
 
 def main():
