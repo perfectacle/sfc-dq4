@@ -376,16 +376,16 @@ def scripts():
     call = lambda name: _cmd('37', *_long(at[name]))  # noqa: E731
     inside = lambda name: _cmd('05', *_long(at[name]))  # noqa: E731
     fx, fy = FROG_AT
-    jump = [c for (x, y), lift in FROG_JUMP for c in (_cmd('39', lift), _cmd('13', x * 2, y * 2), _cmd('14'))]
+    jump = [c for (x, y), lift in FROG_JUMP for c in (_cmd('39', lift), _cmd('13', x * 2, y * 2 + 1), _cmd('14'))]
     hops = [c for k, (x, y) in enumerate(FROG_OUT)
-            for c in (_cmd('39', 4 if k % 2 == 0 else 0), _cmd('13', x * 2, y * 2), _cmd('14'))]
+            for c in (_cmd('39', 4 if k % 2 == 0 else 0), _cmd('13', x * 2, y * 2 + 1), _cmd('14'))]
     # 연못에 숨어 있다가 오두막을 나설 때·다리 동쪽 끝에서 목소리, 다리 위에서 도와 달라는 말 뒤 떠올라 다리로 뛰어오른다.
     # 물 위와 주인공 곁을 지나므로 1C. 착지 뒤 주인공 쪽(서쪽)을 보고 주인공을 동쪽으로 돌려세운 뒤 말을 건다
     frog = ([_cmd('27'),
              inside('voice_hut'), _cmd('3F'), _msg(M_CALL), _cmd('40'),
              inside('voice_bridge'), _cmd('3F'), _msg(M_CALL), _cmd('40'),
              inside('frog_call'), _cmd('3F'), _msg(M_HELP),
-             _cmd('20', *SPLASH), _cmd('50', fx * 2, fy * 2), _cmd('53'), _cmd('4F'), call('wait'),
+             _cmd('20', *SPLASH), _cmd('50', fx * 2, fy * 2 + 1), _cmd('53'), _cmd('4F'), call('wait'),
              _cmd('1C'), _cmd('1E', 0x02), _cmd('2F', 0x80)] + jump +
             [_cmd('38'), _cmd('2F', 0x20), call('wait'), call('hero_right'), call('wait6'),
              call('talk_here'), _wait_on(FROG_MET), _cmd('3F'),
@@ -400,7 +400,7 @@ def scripts():
                 _msg(M_SUPPER)] +
                # 주인공이 문틈 (4,0D) 쪽에서 다가오면 나가는 길에 선 채 말이 걸리므로, 주인공을 지나 걷는다(1C)
                [_cmd('1C')] + _walk(SHINSIA_OUT) + [_cmd('28'), _cmd('10', *SHINSIA_MET), _cmd('40'), _cmd('16')])
-    form = ([_cmd('27'), _wait_on(MORPH), _cmd('50', sx * 2, sy * 2), _cmd('53'), _cmd('4F'),
+    form = ([_cmd('27'), _wait_on(MORPH), _cmd('50', sx * 2, sy * 2), _cmd('37', *_long(at['face_hero'])), _cmd('53'), _cmd('4F'),
              _msg(M_MORPH), _msg(M_MIMIC), _msg(M_SORRY)] + _spin(at) +
             # 51 은 안 보이게만 해 말을 걸 수 있는 채로 남는다. 52 로 자리를 치운다
             [_cmd('51'), _cmd('52'), _cmd('10', *MORPH_BACK), _cmd('16')])

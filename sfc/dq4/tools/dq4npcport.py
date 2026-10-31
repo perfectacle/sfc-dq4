@@ -38,7 +38,8 @@ from kr_patch.fc import ines  # noqa: E402
 
 # Template entries (dq5npcrelocate `from`): one-time entries with no extra byte. STAND has no script and
 # interval 0; WALK has the most common wander script 19 03 03 (walk within 3x3 of the start).
-STAND = {"list": "05:86C5", "index": 1}
+# 기타 bit4-5 가 00 이라 말을 걸면 주인공 쪽으로 돈다(05:86C5 1번은 30 이라 정면만 봄)
+STAND = {"list": "05:870A", "index": 2}
 WALK = {"list": "05:8857", "index": 6}
 # FC picture (dq4talk.sprite without the 80 bit) -> DQ5 picture of a townsperson of the same role, chosen by
 # eye from the two sprite sheets (dq4fcsprite.py field, dq5sprite.py).
