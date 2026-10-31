@@ -38,6 +38,7 @@ sys.path[:0] = [str(HERE), str(DQ5_TOOLS)]
 import dq4chapterbox  # noqa: E402
 from dq4chapter1 import apply_writes, lorom  # noqa: E402
 from dq4romassets import set_checksum  # noqa: E402
+import dq5npcrecord  # noqa: E402
 import dq5objpalette  # noqa: E402
 import dq5sprite as S  # noqa: E402
 import dq5spritewrite  # noqa: E402
@@ -124,10 +125,12 @@ SHARED_LINES = (0, 1, 2, 4)
 HOOK_SITES = ('1F:CF45', '03:D202')
 LOAD_SET = bytes.fromhex('bf d0 86 25')                  # LDA $2586D0,X
 MAP_GROUP = 0x7E00BC
+DQ4_GROUPS = frozenset(range(0x36, 0x46))            # dq4groupbuild 가 만드는 DQ4 맵 그룹
 # 원래 자리에 들어가지 않는 타일 자료를 나눠 담는 곳(뱅크 3F 이하여야 레코드가 가리킴). 곡 롬의 0 끝 줄 안. 3F 는 앞쪽을
 # 인물 목록(dq4chapter1.NPC_BANK, 인라인 스크립트 포함)이 쓰므로 그 끝과 겹치지 않게 띄운다
 TILE_AREAS = (('3E:D700', 0xFC00 - 0xD700), ('3F:EB80', 0x10000 - 0xEB80))
 PALETTES_AT, HOOK_AT = '3D:EA00', '3E:FC00'
+MAP_PALETTES_AT = '3D:EB60'                       # 맵 팔레트 줄 루틴·표를 옮길 곳(세트 팔레트 표 뒤 빈 자리)
 
 
 def cpu(text):
@@ -363,16 +366,55 @@ def lines(people, hists):
     return assign, {n: reduce(g) for n, g in groups.items() if g}
 
 
+ROUNDS = 6
+
+
+def place(people, hists, where):
+    """맵 그룹마다 줄 색을 따로 싣는다. 줄은 공용 배정(lines)을 따르고, 인물 색 → 칸 번호는 모든 그룹에서 같아야
+    하므로 인물마다 하나로 둔다. 「그룹마다 칸 색 = 그 그룹에서 그 칸에 모인 색의 가중 평균」과 「인물 색마다 그
+    인물이 나오는 그룹들의 칸 색과의 거리 합이 가장 작은 칸」을 번갈아 고친다(공용 줄 색에서 시작).
+    끝에는 칸 색을 그 칸에 모인 NDS 원래 색 가운데 평균에 가장 가까운 것으로 둔다.
+    반환: ({인물: (줄, {색: 칸})}, {(그룹, 줄): 15색})."""
+    assign, shared = lines(people, hists)
+    who = [p for p in people if p.palette is None]
+    keys = {(g, assign[p]) for p in who for g in where[p]}
+    centers = {key: [lab(c) for c in shared[key[1]]] for key in keys}
+    mapping = {}
+    for _ in range(ROUNDS):
+        for p in who:
+            rows = [centers[(g, assign[p])] for g in where[p]]
+            mapping[p] = {c: min(range(len(rows[0])), key=lambda k: sum(math.dist(lab(c), r[k]) for r in rows))
+                          for c in hists[p]}
+        acc = {}
+        for p in who:
+            for c, w in hists[p].items():
+                for g in where[p]:
+                    acc.setdefault((g, assign[p], mapping[p][c]), Counter())[c] += w * (4 if p.main else 1)
+        for (g, line, k), cs in acc.items():
+            total = sum(cs.values())
+            centers[(g, line)][k] = tuple(sum(lab(c)[i] * w for c, w in cs.items()) / total for i in range(3))
+    board = {}
+    for g, line in keys:
+        row = []
+        for k, center in enumerate(centers[(g, line)]):
+            cs = acc.get((g, line, k))
+            row.append(min(cs, key=lambda c: math.dist(lab(c), center)) if cs else shared[line][k])
+        board[(g, line)] = row
+    return {p: (assign[p], mapping[p]) for p in who}, board
+
+
 def index_image(cells, pal, layout):
-    """색 번호 시트. simple 32x96(열 걸음 0·1), overlap 48x64(열 머리·몸 0·몸 1, 몸은 프레임의 8~23행)."""
-    lp = [lab(c) for c in pal]
-    near = {}
+    """색 번호 시트. simple 32x96(열 걸음 0·1), overlap 48x64(열 머리·몸 0·몸 1, 몸은 프레임의 8~23행).
+    pal 이 {색: 칸} 이면 그대로 쓰고, 색 목록이면 가장 가까운 색의 칸으로."""
+    mapping, pal = (pal, None) if isinstance(pal, dict) else (None, pal)
+    lp = {k: lab(c) for k, c in enumerate(pal) if c is not None} if pal else {}
+    near = {c: k + 1 for c, k in mapping.items()} if mapping else {}
 
     def idx(p):
         if not p[3]:
             return 0
         if p[:3] not in near:
-            near[p[:3]] = min(range(len(pal)), key=lambda k: math.dist(lab(p[:3]), lp[k])) + 1
+            near[p[:3]] = min(lp, key=lambda k: math.dist(lab(p[:3]), lp[k])) + 1
         return near[p[:3]]
     if layout == 'simple':
         out = Image.new('P', (32, 96), 0)
@@ -392,7 +434,11 @@ def index_image(cells, pal, layout):
                 for y in range(16):
                     for x in range(16):
                         out.putpixel((16 + col * 16 + x, r * 16 + y), idx(c.getpixel((x, y + 8))))
-    out.putpalette([0, 0, 0] + [v for c in pal for v in c])
+    if mapping:
+        pal = [None] * 15
+        for c, k in mapping.items():
+            pal[k] = pal[k] or c
+    out.putpalette([0, 0, 0] + [v for c in pal for v in (c or (0, 0, 0))])
     return out
 
 
@@ -450,18 +496,50 @@ def tiles(path, layout):
     return len(dq5spritewrite.deduplicate(cells)[0])
 
 
-def prepare(rom, assets, work):
+def usage(base):
+    """{그림: 나오는 DQ4 맵 그룹들}. 곡 롬의 인물 목록에서 읽고, 대체 목록은 overrides 로 맵에 잇는다."""
+    doc = dq5npcrecord.dump(base)
+    maps = {}
+    for o in doc['overrides']:
+        maps.setdefault(o['list'], set()).add(o['map'])
+    out = {}
+    for e in doc['entries']:
+        names = ({e['name']} if '/' in e['name'] else set()) | maps.get(e['list'], set())
+        groups = {int(m.split('/')[0], 16) for m in names} & DQ4_GROUPS
+        for part in (e.get('fields'), e.get('day'), e.get('night')):
+            if part and groups:
+                out.setdefault(part['gfx'], set()).update(groups)
+    return out
+
+
+def where(people, used):
+    """{인물: 나오는 맵 그룹들}. 그룹을 정한 인물은 그 그룹만, 그 그룹에서 같은 그림을 빌려 간 인물이 있으면 뺀다.
+    목록에서 찾지 못한 그림(이벤트로만 바꾸는 그림 등)은 모든 그룹으로 본다."""
+    out = {}
+    for p in people:
+        if p.group is not None:
+            out[p] = {p.group}
+            continue
+        groups = set()
+        for pic in p.pictures:
+            groups |= used.get(pic, DQ4_GROUPS)
+        groups -= {q.group for q in people if q.group is not None and set(q.pictures) & set(p.pictures)}
+        out[p] = groups or set(DQ4_GROUPS)
+    return out
+
+
+def prepare(rom, assets, work, base=None):
     """인물마다 시트를 만들어 타일 한도에 맞춘다. [(인물, 세트, 배치, 한도, 타일, 낮춘 단계, 줄, 줄 색)]."""
     cells = {p: rgb_frames(p, assets) for p in PEOPLE}
     hists = {p: histogram(cells[p]) for p in PEOPLE}
-    assign, shared = lines(PEOPLE, hists)
+    used = usage(base) if base is not None else {}
+    placed, board = place(PEOPLE, hists, where(PEOPLE, used))
     sets = [target(p, rom)[0] for p in PEOPLE]
     if len(set(sets)) != len(sets):
         raise SystemExit(f'두 인물이 같은 세트를 바꿈: {sorted(f"{s:02X}" for s in sets if sets.count(s) > 1)}')
     rows = []
     for p in PEOPLE:
-        line = p.palette if p.palette is not None else assign[p]
-        pal = reduce(hists[p]) if p.palette is not None else shared[line]
+        line, pal = (p.palette, reduce(hists[p])) if p.palette is not None else placed[p]
         s, layout, limit = target(p, rom)
         path = work / f'{s:02X}.png'
         index_image(cells[p], pal, layout).save(path)
@@ -473,7 +551,7 @@ def prepare(rom, assets, work):
             index_image(cells[p], pal, layout).save(path)
             steps.append(name)
         rows.append((p, s, layout, limit, tiles(path, layout), steps, line, pal))
-    return rows
+    return rows, board
 
 
 def split_patches(rom, doc, base):
@@ -509,7 +587,7 @@ def split_patches(rom, doc, base):
 
 def build(base, dq5, assets, out, work):
     original = dq5.read_bytes()
-    rows = prepare(Rom(original), assets, work)
+    rows, board = prepare(Rom(original), assets, work, Rom(base.read_bytes()))
     over = [f'{p.role} {n}>{limit}' for p, _, _, limit, n, _, _, _ in rows if n > limit]
     if over:
         raise SystemExit('타일 한도를 넘음: ' + ', '.join(over))
@@ -530,15 +608,25 @@ def build(base, dq5, assets, out, work):
     subprocess.run([sys.executable, DQ5_TOOLS / 'dq5build.py', dq5, 'build',
                     *(work / f'sprite{k}.dq5patch.json' for k in range(len(sprites))),
                     '--size', '2', '-o', work / 'mid.sfc'], check=True, stdout=subprocess.DEVNULL)
-    colors = {line: pal for _, _, _, _, _, _, line, pal in rows}
+    bgr = lambda pal: [0 if c is None else (c[2] >> 3) << 10 | (c[1] >> 3) << 5 | c[0] >> 3 for c in pal] + \
+        [0] * (15 - len(pal))  # noqa: E731
+    fixed = {line: pal for p, _, _, _, _, _, line, pal in rows if p.palette is not None}
+    # DQ4 그룹이 아닌 맵(필드 등)은 칸이 가장 많이 찬 그룹의 줄 색을 기본으로 둔다
+    home = max({g for g, _ in board}, key=lambda g: sum(c is not None for (h, _), row in board.items() if h == g for c in row))
+    base_lines = {line: board[(home, line)] for g, line in board if g == home}
     pal_doc = {'format': 'dq5objpalette/1',
-               'palettes': [{'palette': n, 'colors': [(b >> 3) << 10 | (g >> 3) << 5 | r >> 3 for r, g, b in pal]
-                             + [0] * (15 - len(pal))} for n, pal in sorted(colors.items())],
+               'palettes': [{'palette': n, 'colors': bgr(pal)} for n, pal in sorted({**base_lines, **fixed}.items())],
                'sets': [{'set': f'{s:02X}', 'palette': line} for _, s, _, _, _, _, line, _ in rows]}
+    # 그룹 36~ 은 DQ4 롬에만 있으므로 맵 팔레트 줄은 곡 롬을 기준으로 따로 만든다
+    map_doc = {'format': 'dq5objpalette/1',
+               'new_map_palettes': [{'map': f'{g:02X}/FF', 'line': f'{0x08 + line:02X}', 'flag': 'FF', 'mask': '00',
+                                     'colors': bgr(row)} for (g, line), row in sorted(board.items())]}
+    maps = dq5objpalette.patch(Rom(base.read_bytes()), map_doc, MAP_PALETTES_AT)
+    (work / 'maps.dq5patch.json').write_text(json.dumps(maps, ensure_ascii=False, indent=1) + '\n')
     palettes = dq5objpalette.patch(Rom((work / 'mid.sfc').read_bytes()), pal_doc, PALETTES_AT)
     (work / 'palette.dq5patch.json').write_text(json.dumps(palettes, ensure_ascii=False, indent=1) + '\n')
     (work / 'hook.dq5patch.json').write_text(json.dumps(hook_patch(original), indent=1) + '\n')
-    names = [f'sprite{k}' for k in range(len(sprites))] + ['palette', 'hook']
+    names = [f'sprite{k}' for k in range(len(sprites))] + ['palette', 'maps', 'hook']
     rom = apply_writes(base.read_bytes(), original, [work / f'{n}.dq5patch.json' for n in names])
     out.write_bytes(set_checksum(rom))
     return rows
@@ -567,7 +655,8 @@ def main():
         work = args.work or Path(tmp)
         work.mkdir(parents=True, exist_ok=True)
         if args.plan:
-            report(prepare(Rom(args.dq5.read_bytes()), args.assets, work))
+            report(prepare(Rom(args.dq5.read_bytes()), args.assets, work,
+                           Rom(args.base.read_bytes()) if args.base else None)[0])
             return
         report(build(args.base, args.dq5, args.assets, args.out, work))
     print(args.out)
