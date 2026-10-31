@@ -40,6 +40,9 @@ HEAD = 0x5A8000
 # 64:8000~C0C5 는 메뉴 빌드가 쓰고, 그 뒤부터 69 끝까지 비어 있다. 70 은 서곡 재배치 표, 6A~6F·72~7D 는 소리 이식이 쓴다.
 BASE = 0x64C400
 LIMIT = 0x6A0000
+# 덩어리가 차면 다음 16개 묶음부터 이어 쓰는 자리. 61 은 메뉴 빌드가 61:A72E 까지 쓰고 그 뒤가 비어 있다(늘 몫으로 띄움).
+# 색인이 60 기준 21비트라 60~7F 안이어야 한다.
+SEGMENTS = ((BASE, LIMIT), (0x61B000, 0x620000))
 INDEX_BANK = 0x60
 # 3200 이상을 덧붙일 때의 색인(16개마다 3바이트). 메시지 덩어리(BASE~LIMIT)가 3장 대사까지 차서 덩어리 밖에 둔다.
 # 24:8BC3 이 DB 를 이 뱅크로 두고 abs 로 읽으므로(64·65 와 같이 WRAM 거울 없는 뱅크) 59 도 같다.
@@ -166,6 +169,34 @@ def index_entry(stream, bit):
     return cpu_to_bytes((cpu - (INDEX_BANK << 16)) << 3 | bit & 7)
 
 
+def place(d, blob, starts, total, segments=SEGMENTS):
+    """메시지 흐름 blob 을 segments 에 16개 묶음 단위로 나눠 d 에 쓰고, 묶음마다 흐름 0 바이트가 놓인 셈인 파일 오프셋을
+    돌려준다(index_entry 의 stream). 색인이 묶음 첫 메시지의 비트만 가리키므로, 묶음은 한 자리 안에 통째로 둔다."""
+    groups = range(0, total, 16)
+    ends = [starts[g + 16] if g + 16 < total else len(blob) * 8 for g in groups]
+    origin, k = [], 0
+    for lo, hi in segments:
+        if k == len(groups):
+            break
+        first, room = starts[groups[k]] >> 3, lorom(hi - 1) + 1 - lorom(lo)
+        j = k
+        while j < len(groups) and (ends[j] + 7) // 8 - first <= room:
+            j += 1
+        if j == k:
+            continue
+        chunk = blob[first:(ends[j - 1] + 7) // 8]
+        o = lorom(lo)
+        if any(d[o:o + len(chunk)]):
+            raise ValueError(f'{lo:06X}~ 가 비어 있지 않음')
+        d[o:o + len(chunk)] = chunk
+        origin += [o - first] * (j - k)
+        k = j
+    if k < len(groups):
+        left = len(blob) - (starts[groups[k]] >> 3)
+        raise ValueError(f'메시지가 자리를 넘음(묶음 {k} 부터 {left}바이트 남음)')
+    return origin
+
+
 def message_count(ids):
     """메시지 수: 3200 이상 번호는 3200 부터 빈 번호 없이 이어야 하고, 색인이 16개마다 하나라 16의 배수로 올린다."""
     more = sorted(m for m in ids if m >= MESSAGES)
@@ -232,15 +263,8 @@ def apply(data, font, extra=None):
     if any(d[lorom(HEAD):lorom(HEAD) + len(head)]):
         raise ValueError(f'{HEAD:06X}~ 가 비어 있지 않음')
     d[lorom(HEAD):lorom(HEAD) + len(head)] = head
-    stream = bytes(blob)
-    o = lorom(BASE)
-    if lorom(BASE) + len(stream) > lorom(LIMIT - 1) + 1:
-        raise ValueError(f'메시지가 {LIMIT:06X} 을 넘음({lorom(BASE) + len(stream) - lorom(LIMIT - 1) - 1}바이트)')
-    if any(d[o:o + len(stream)]):
-        raise ValueError(f'{BASE:06X}~ 가 비어 있지 않음')
-    d[o:o + len(stream)] = stream
-
-    index = b''.join(index_entry(o, starts[m]) for m in range(0, total, 16))
+    origin = place(d, bytes(blob), starts, total)
+    index = b''.join(index_entry(origin[m // 16], starts[m]) for m in range(0, total, 16))
     index_table = index_at if grown else INDEX
     if grown and ((INDEX_AT & 0xFFFF) + len(index) > 0x10000 or any(d[lorom(INDEX_AT):lorom(INDEX_AT) + len(index)])):
         raise ValueError(f'{INDEX_AT:06X}~ 색인 {len(index)}바이트 자리가 비어 있지 않거나 뱅크를 넘음')
@@ -275,7 +299,7 @@ def apply(data, font, extra=None):
         if again[m] != msgs[m]:
             raise ValueError(f'메시지 {m:03X}: 다시 풀기가 다름')
     info = [(f'잎 {len(tree)}, 노드 {len(nodes)}, 최장 부호 {max(map(len, tree.values()))}비트, '
-             f'메시지 {len(blob)}바이트 {BASE:06X}~(머리 {len(head)}바이트 {HEAD:06X}~)'),
+             f'메시지 {len(blob)}바이트 {BASE:06X}~ 부터 {len(set(origin))}곳(머리 {len(head)}바이트 {HEAD:06X}~)'),
             '글자 묶음 ' + ', '.join(f'{n}자 {w}×{h} {at:06X}' for n, w, h, at in groups)]
     return out, info
 
