@@ -45,8 +45,9 @@ from dq5map import Rom  # noqa: E402
 
 FIELD = Path('nds') / 'dq4' / 'chr' / 'field'
 ROWS8 = (('down', 4), ('left', 6), ('right', 2), ('up', 0))
-ROWS4 = (('down', 2), ('left', 1), ('right', 3), ('up', 0))
+ROWS4 = (('down', 2), ('left', 3), ('right', 1), ('up', 0))   # 4줄 시트는 1줄이 오른쪽(얼굴 살색이 오른쪽에 몰림)
 SCALE, BOTTOM, WIDTH = 22 / 28, 22, 16
+DARK_L, DARK_SHARE = 15, 0.34                    # Lab 밝기 15 아래를 눈·외곽선으로 봄(더 느슨하면 얼굴 그늘까지 검어짐)
 PROLOGUE = dq4chapterbox.PROLOGUE.where[0]       # 서장 마을(FC 14/00, 5장 첫머리도 같은 마을)
 LEADER_PICTURES = (0x2B, 0x2E)                     # 일행 0번: 실내 02:CA5A, 바깥 05:D98F
 
@@ -72,9 +73,10 @@ DEGRADE = (
 
 class Person:
     def __init__(self, pictures, group, sheet, role, anim='legs', main=False, palette=None, new_set=None, spare=None,
-                 allow=None):
+                 allow=None, outline=False):
         self.pictures, self.group, self.sheet, self.role = pictures, group, sheet, role
         self.anim, self.main, self.palette, self.new_set, self.spare = anim, main, palette, new_set, spare
+        self.outline = outline
         # 타일이 모자랄 때 낮춰도 되는 단계(이름). 주요 인물은 기본으로 낮추지 않고 큰 세트로 옮긴다
         self.allow = allow if allow is not None else (() if main else tuple(n for n, _ in DEGRADE))
 
@@ -93,7 +95,7 @@ PEOPLE = (
     Person((0x9B,), None, 'h153', '피사로의 부하', anim='frames', main=True, spare=0x6F,
            allow=('왼쪽=오른쪽 반전',)),
     Person((0x0E,), None, 'h143', '신시아', main=True),
-    Person((0x50,), None, 'h174', '개구리', anim='frames', main=True),
+    Person((0x50,), None, 'h174', '개구리', anim='frames', main=True, outline=True),  # 풀·나뭇잎과 같은 초록이라
     Person((0x08,), PROLOGUE, 'h019', '검사', main=True, spare=0x90),
     Person((0x17,), PROLOGUE, 'h003', '어머니', spare=0x39),
     Person((0x09,), PROLOGUE, 'h002', '아버지', spare=0x8D),
@@ -165,7 +167,9 @@ def frames(sheet, anim):
 
 
 def shrink(f):
-    """BOX 축소한 RGBA. 칸마다 NDS 원래 색 가운데 가장 가까운 색으로 되돌린다."""
+    """BOX 축소한 RGBA. 칸마다 NDS 원래 색 가운데 가장 가까운 색으로 되돌리되, 칸에 어두운 점(눈·외곽선)이
+    DARK_SHARE 이상이면 그 어두운 색을 남긴다. 평균만 내면 1~2픽셀 눈과 외곽선이 피부·배경색에 섞여 사라진다."""
+    src = f.load()
     pal = sorted({p[:3] for p in f.get_flattened_data() if p[3]})
     w, h = max(1, round(f.width * SCALE)), max(1, round(f.height * SCALE))
     small = f.resize((w, h), Image.BOX)
@@ -173,7 +177,15 @@ def shrink(f):
     for y in range(h):
         for x in range(w):
             p = small.getpixel((x, y))
-            if p[3] >= 128:
+            if p[3] < 128:
+                continue
+            box = [src[sx, sy] for sy in range(int(y / SCALE), min(f.height, math.ceil((y + 1) / SCALE)))
+                   for sx in range(int(x / SCALE), min(f.width, math.ceil((x + 1) / SCALE)))]
+            solid = [q[:3] for q in box if q[3]]
+            dark = [q for q in solid if lab(q)[0] < DARK_L]
+            if solid and len(dark) / len(solid) >= DARK_SHARE:
+                out.putpixel((x, y), Counter(dark).most_common(1)[0][0] + (255,))
+            else:
                 out.putpixel((x, y), min(pal, key=lambda c: sum((a - b) ** 2 for a, b in zip(c, p[:3]))) + (255,))
     return out
 
@@ -191,8 +203,22 @@ def rgb_frames(person, assets):
             cells.append(c)
         if person.anim == 'legs':
             step(cells, name, s.height)
+        if person.outline:
+            for c in cells:
+                outline(c)
         out[name] = cells
     return out
+
+
+def outline(c):
+    """실루엣 가장자리 픽셀을 그림에서 가장 어두운 색으로. 크기는 그대로 두고 배경과 같은 계열 색인 인물을 떼어 낸다."""
+    px = c.load()
+    solid = {(x, y) for y in range(c.height) for x in range(c.width) if px[x, y][3]}
+    darkest = min((px[q] for q in solid), key=lambda q: lab(q[:3])[0])
+    edge = [(x, y) for x, y in solid if any((x + dx, y + dy) not in solid
+                                              for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)))]
+    for q in edge:
+        px[q] = darkest
 
 
 def step(cells, name, height):

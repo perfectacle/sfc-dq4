@@ -1,5 +1,7 @@
+import tempfile
 import unittest
 from collections import Counter
+from pathlib import Path
 
 from PIL import Image
 
@@ -75,6 +77,35 @@ class SheetTests(unittest.TestCase):
         # 몸 열은 프레임의 8~23행이라 몸 0 과 몸 1 의 아랫줄(발) 색이 다르다
         self.assertEqual(im.getpixel((16 + 5, 16 - 3)), 2)
         self.assertEqual(im.getpixel((32 + 5, 16 - 3)), 3)
+
+    def test_four_row_sheet_faces_right_on_row_one(self):
+        sheet = Image.new('RGBA', (128, 128))
+        for row in range(4):
+            for y in range(row * 32 + 4, row * 32 + 28):
+                for x in range(4, 12):
+                    sheet.putpixel((x, y), (row * 60, 0, 0, 255))
+        with tempfile.TemporaryDirectory() as d:
+            sheet.save(Path(d) / 's.png')
+            out = P.frames(Path(d) / 's.png', 'legs')
+        self.assertEqual(out['right'][0].getpixel((4, 12))[0], 60)
+        self.assertEqual(out['left'][0].getpixel((4, 12))[0], 180)
+
+    def test_shrink_keeps_a_dark_eye(self):
+        f = Image.new('RGBA', (28, 28), (230, 180, 140, 255))
+        for y in (10, 11):
+            f.putpixel((9, y), (0, 0, 0, 255))
+        s = P.shrink(f)
+        self.assertIn((0, 0, 0, 255), list(s.get_flattened_data()))
+
+    def test_outline_darkens_only_the_edge(self):
+        c = Image.new('RGBA', (16, 24))
+        for y in range(10, 20):
+            for x in range(4, 12):
+                c.putpixel((x, y), (10, 10, 10, 255) if (x, y) == (7, 15) else (60, 180, 40, 255))
+        P.outline(c)
+        self.assertEqual(c.getpixel((4, 12)), (10, 10, 10, 255))
+        self.assertEqual(c.getpixel((6, 14)), (60, 180, 40, 255))
+        self.assertEqual(c.getpixel((3, 12))[3], 0)
 
     def test_reduce_keeps_the_most_used_colors(self):
         hist = Counter({(k * 10, 0, 0): 100 - k for k in range(20)})
