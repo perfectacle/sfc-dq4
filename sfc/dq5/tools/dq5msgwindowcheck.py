@@ -21,7 +21,7 @@ wide 는 (0,21) 31 × 7(글자 29칸), h9 는 (2,19) 28 × 9, tall 은 (2,17) 28
 - event·party·papasNN·monNN·fxNN: 이벤트 전투(무리 1E ジャミ), 동료 ホイミン·マーリン 과 ラリホー 슬라임, 손님 파파스(무리 01
   둘째 판)가 주문 NN(PAPAS_SPELLS)만 거는 전투, 같은 전투에서 슬라임이 몬스터용 주문 NN(MONSTER_SPELLS)만 거는 전투, 파파스의
   メラ 를 연출 NN(EFFECT_SWAPS)으로 바꾼 전투. papasNN·monNN·fxNN 은 난수를 고정하고(FIXED_RNG), 모든 롬에서
-  그 연출 NN 이 돌았는지 본다(NO_EFFECT 는 주문을 건 것만). 모양을 바꾼 롬은 위 (1)~(3)에 더해 00:FDA1
+  그 연출 NN 이 돌았는지 본다(NO_EFFECT 는 파파스가 그 주문을 건 것). 모양을 바꾼 롬은 위 (1)~(3)에 더해 00:FDA1
   전송 크기(효과 층 1CE0 만 (Y - 7) × 64), 스크린샷의 창 테두리·창 안 다른 색 점(모든 롬에서 0 이어야 함), 원래 롬의 효과 층
   줄·OBJ 상자 아래 끝, 연출 시작을 맞춘 창 위 화면(effect_above, 세기만 함)을 적는다. --hlog 는 원래 롬 실행에서 연출마다
   줄마다 쓰는 PPU 레지스터와 원래 창 맨 위 줄에 닿는 168줄부터의 줄:값을 모은다. --shot-every 로 스크린샷 간격을 줄인다.
@@ -59,9 +59,12 @@ PAPAS_SPELLS = ('01', '03', '04', '06', '09', '0B', '0C', '0D', '0F', '10', '11'
 # 몬스터용 주문(39~65) 가운데 party 장면이 거는 ラリホー(4B)를 뺀 것. 같은 장면의 슬라임이 그 주문만 걸게 MP(118004)를
 # 255 로 두고 행동 평가 조건(118008 bit0-1)을 끄며, 파파스는 회복(2A)만 걸어 일행이 버티게 한다.
 MONSTER_SPELLS = tuple(f'{n:02X}' for n in range(0x39, 0x66) if n != 0x4B)
-# 연출(22:D73C)을 띄우지 않는 파파스 주문. 원래 롬에서 「となえた」(070)는 나오나 FXID 줄이 없어, 주문을 건 것만 본다.
+# 연출(22:D73C)을 띄우지 않는 파파스 주문. 원래 롬에서 「となえた」(070)는 나오나 FXID 줄이 없어, 파파스가 그 주문을
+# 건 것만 본다. 070 의 인자 대기열은 $F5 = 행동자(bit7 이면 몬스터 무리, 아니면 일행 칸), $F6 = 주문 번호다. 일행 칸은
+# 전투마다 바뀌어(주인공이 쓰러지면 파파스가 00) 이름을 찍은 글자(24:A4A4, 「パパス」)로 행동자를 가린다.
 NO_EFFECT = ('22', '2A')
 CAST = '070'
+PAPAS_GLYPHS = ('83', '5B', '83', '5B', '4E')
 # 파파스가 걸지 않는 ミナデイン(12)·スカラ(21)은 파파스의 メラ(01) 연출 번호(우리 편 표 26:8BE0, 파일 130BE1)를 바꿔 띄운다.
 EFFECT_SWAPS = ('12', '21')
 TAPS = ','.join(['wait:400'] + ['a:8,wait:24'] * 110)
@@ -229,17 +232,37 @@ def hdma_ranges(calls, text):
             for number, regs in sorted(per.items())}
 
 
+def cast_log(calls):
+    """실행 기록 → 「となえた」(CAST) 메시지마다 (행동자 $F5, 주문 번호 $F6, 찍힌 글자 목록)."""
+    out, current = [], None
+    for line in calls:
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        if parts[1] == '248C39':
+            current = None
+            if parts[2] == CAST:
+                current = [None, None, []]
+                out.append(current)
+        elif parts[1] == 'ARG' and current and current[0] is None:
+            current[0], current[1] = int(parts[2], 16), parts[3]
+        elif len(parts) == 5 and parts[1] == '24A4A4' and current:
+            current[2].append(parts[2])
+    return [tuple(c) for c in out if c[0] is not None]
+
+
 def spell_ran(scene, name, calls):
     """papasNN·monNN·fxNN 장면에서 그 주문의 연출(FXID NN)이 실제로 돌았는지 본다. 몬스터 행동 조건·MP 나 연출 번호
     표(130BE1)를 잘못 읽어 연출이 돌지 않으면 창이 깨진 장 0 이 거저 나오므로 막는다. 연출을 띄우지 않는 파파스
-    주문(NO_EFFECT)은 「となえた」(CAST)가 나왔는지만 본다. 다른 장면은 None."""
+    주문(NO_EFFECT)은 파파스가 그 주문으로 「となえた」(CAST)를 냈는지 본다. 다른 장면은 None."""
     prefix = next((p for p in ('papas', 'mon', 'fx') if scene.startswith(p)), None)
     if prefix is None:
         return None
     number = scene[len(prefix):]
     if prefix == 'papas' and number in NO_EFFECT:
-        casts = sum(line.split()[1:] == ['248C39', CAST] for line in calls if line)
-        require(casts, f'{scene}/{name}: 주문 {number} 를 걸지 않음({CAST} 없음)')
+        casts = sum(spell == number and slot < 0x80 and glyphs[:len(PAPAS_GLYPHS)] == list(PAPAS_GLYPHS)
+                    for slot, spell, glyphs in cast_log(calls))
+        require(casts, f'{scene}/{name}: 파파스가 주문 {number} 를 걸지 않음')
         return {'casts': casts}
     runs = sum(line.split()[1:] == ['FXID', number] for line in calls if line)
     require(runs, f'{scene}/{name}: 연출 {number} 가 돌지 않음')

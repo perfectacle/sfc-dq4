@@ -8,9 +8,9 @@ from PIL import Image  # noqa: E402
 
 import tempfile  # noqa: E402
 
-from dq5msgwindowcheck import (EFFECT_SWAPS, FIXED_RNG, MONSTER_SPELLS, NO_EFFECT, SCENES, WINDOW_WHITE, border_gaps,  # noqa: E402
+from dq5msgwindowcheck import (EFFECT_SWAPS, FIXED_RNG, MONSTER_SPELLS, SCENES, WINDOW_WHITE, border_gaps,  # noqa: E402
                                border_rows, complete, effect_log, hdma_ranges, number_matches, obj_boxes, safe, same_until,
-                               spell_ran, transfer_sizes, with_retries)
+                               cast_log, spell_ran, transfer_sizes, with_retries)
 
 
 class SameUntilTests(unittest.TestCase):
@@ -191,11 +191,28 @@ class SpellRanTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             spell_ran('mon41', 'both', self.CALLS)
 
-    def test_no_effect_spell_needs_cast(self):
-        self.assertEqual(NO_EFFECT, ('22', '2A'))
-        self.assertEqual(spell_ran('papas2A', 'original', ['1500 248C39 070', '1520 248C39 094']), {'casts': 1})
+    # 원래 롬 papas2A 실행 기록에서 뽑은 꼴: 주인공(10…)의 공격, 파파스(83 5B 83 5B 4E)가 2A 를 외침, 회복
+    PAPAS = ['83', '5B', '83', '5B', '4E']
+    CASTS = ['1111 248C39 05E', '1111 ARG 00 81 00 00', *(f'1112 24A4A4 {c} 0 {i}' for i, c in enumerate(['10'] * 4)),
+             '2139 248C39 070', '2139 ARG 00 2A 00 00', *(f'2140 24A4A4 {c} 0 {i}' for i, c in enumerate(PAPAS)),
+             '2153 248C39 094', '2153 ARG 00 6E 00 00', '']
+
+    def test_cast_log(self):
+        self.assertEqual(cast_log(self.CASTS), [(0x00, '2A', self.PAPAS)])
+
+    def test_papas_cast(self):
+        self.assertEqual(spell_ran('papas2A', 'original', self.CASTS), {'casts': 1})
         with self.assertRaises(ValueError):
-            spell_ran('papas22', 'original', ['1110 248C39 05E', '1130 FXID 73'])
+            spell_ran('papas22', 'original', self.CASTS)
+
+    def test_cast_by_someone_else(self):
+        # 몬스터 무리(bit7)나 주인공이 외친 「となえた」, 메시지 번호만 있고 인자가 없는 기록은 세지 않는다
+        monster = [line.replace('ARG 00 2A', 'ARG 80 2A') for line in self.CASTS]
+        hero = [line.replace('24A4A4 83 0 0', '24A4A4 10 0 0') for line in self.CASTS]
+        bare = ['1500 248C39 070', '1520 248C39 094']
+        for calls in (monster, hero, bare):
+            with self.assertRaises(ValueError):
+                spell_ran('papas2A', 'original', calls)
 
     def test_other_scenes(self):
         for scene in ('one', 'four', 'event', 'party'):
