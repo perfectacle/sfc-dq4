@@ -114,6 +114,11 @@ def port(dq5_path, dq4_path):
     return doc, report
 
 
+# 일반 상자 열림 비트는 상자 표 차례로 2210 부터 매기므로, 5장에서 상자 193번째가 아래층 상자 비트(2228·2229)에 닿았다.
+# 아래층 상자를 어느 표도 쓰지 않는 2243·2244 로 옮겨 일반 상자를 222B 까지(224개) 받는다.
+LOWER_SHIFT = 0x1B
+
+
 def base_tables(tables):
     """The original chest tables (dq5chestreloc dump) without the DQ5 maps whose records dq4environmentrom
     replaces (TARGETS). Their blocks carry no attributes, so the chest and drawer cells are gone, and
@@ -127,7 +132,8 @@ def base_tables(tables):
             maps.append(row)
             chests += tables["chests"][start:start + row["count"]]
         start += row["count"]
-    return {**tables, "chests": chests, "chest_maps": maps,
+    lower = [{**e, "flag_index": e["flag_index"] + LOWER_SHIFT} for e in tables["lower"]]
+    return {**tables, "chests": chests, "chest_maps": maps, "lower": lower,
             "search": [e for e in tables["search"] if (e["group"], e["map"]) not in slots]}
 
 

@@ -74,6 +74,8 @@ GROUPS = {
     # Chapter 2's サラン, desert bazaar, 西の塔 and the cave south of フレノール.
     **{f"13-{k:02X}": (0x45, k) for k in range(4)}, "saran-04": (0x45, 4), "0C-00": (0x45, 5),
     **{f"2E-{k:02X}": (0x45, 6 + k) for k in range(6)}, **{f"39-{k:02X}": (0x45, 12 + k) for k in range(2)},
+    **{f"06-{k:02X}": (0x46, k) for k in range(4)}, "20-00": (0x46, 0x04),
+    "42-01": (0x47, 0x00),
 }
 MAPS = {**TARGETS, **GROUPS}
 # Further banks for map records once the first one reaches the library.
@@ -501,7 +503,8 @@ def engine_code(block_count, water_ids, palettes, entries, waters, lids):
         lib.word(None, f"objects{i}" if data else "no_objects", -(OBJECT_TABLE & 0xFFFF))
 
     # find: carry set and X = target index * 2 if $BC/$BD is a replaced map.
-    lib.label("find").b(0x08, 0xE2, 0x30, 0xA2, 0x00)
+    # X 는 16비트로 센다. 8비트면 바꾼 맵이 128개를 넘을 때 X 가 돌아 끝 표시 FF 에 닿지 못하고 맵을 불러오다 멈춘다.
+    lib.label("find").b(0x08, 0xE2, 0x20, 0xC2, 0x10, 0xA2, 0x00, 0x00)
     lib.label("find_loop").long(0xBF, "targets").b(0xC9, 0xFF).rel(0xF0, "find_none")
     lib.b(0xC5, 0xBC).rel(0xD0, "find_next").long(0xBF, "targets", 1).b(0xC5, 0xBD).rel(0xF0, "find_hit")
     lib.label("find_next").b(0xE8, 0xE8).rel(0x80, "find_loop")
@@ -529,7 +532,7 @@ def engine_code(block_count, water_ids, palettes, entries, waters, lids):
     lib.label("pal_done").b(*_LEAVE, 0x6B)
 
     # obj (01:F42D): Y = the target's object entries and DB = their bank, then the replaced LDX #$0009.
-    # find's SEP #$30 clears the high byte of Y, so Y is saved and the hit overwrites the saved copy (STA $01,S).
+    # Y 는 스택에 지켜 두고, 찾으면 그 사본을 덮어(STA $01,S) _LEAVE 의 PLY 가 그 맵의 물체 항목을 돌려준다.
     lib.label("obj").b(*_ENTER).long(0x22, "find").rel(0x90, "obj_keep")
     lib.long(0xBF, "objects").b(0x83, 0x01, 0xE2, 0x20, 0xA9, DOOR_BANK, 0x48, 0xAB)
     lib.label("obj_keep").b(*_LEAVE, 0xA2, 0x09, 0x00, 0x6B)
