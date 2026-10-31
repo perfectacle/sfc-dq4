@@ -50,9 +50,12 @@ def numbered_names():
 TACTIC_LINES = (('한방에', '끝내자구'), ('모두', '힘내자'), ('주문', '아끼자'),
                 ('주문을', '쓰지마'), ('생명을', '소중히'), ('명령을', '내려줘'))
 # 한글이 없는 이름도 필드에서는 가나 칸을 슬롯으로 돌려 써 원래 가나 타일로 찍으면 깨진다. 필드 창에 나오는 물건 표는
-# 원래 가나를 Galmuri9 가나 그림으로 넣는다(창 열 수를 넘는 이름은 뺌). 뱅크가 모자라 주문(3)은 넣지 않는다(한글 없는
-# 주문은 DQ5 전용 주문과 몬스터 행동). 몬스터(4)는 전투에서만 나와 가나 칸이 살아 있다
+# 원래 가나를 Galmuri9 가나 그림으로 넣고, 창 열 수를 넘는 이름은 더 좁은 Galmuri7 로 그린다. 물건 번호 KANA_LIMIT
+# 이상은 DQ5 물건이 아니라(작전 이름·지명 등) 넣지 않는다. 뱅크가 모자라 주문(3)은 넣지 않는다(한글 없는 주문은 DQ5 전용
+# 주문과 몬스터 행동). 몬스터(4)는 전투에서만 나와 가나 칸이 살아 있다
 KANA_KINDS = (5,)
+KANA_LIMIT = 0xD8               # dq4itemport.ITEM_COUNT
+NARROW_FONT = 'galmuri7'
 SHIFT = 6                       # render 의 띠(한글 윗줄 = 1줄)를 위 줄 7줄로 내림
 
 # 창 레코드의 가나 항목을 접두 9E k(고정 문구 k)로 바꾼다. 이름 표가 쓰지 않는 종류 7 에 그림을 둔다.
@@ -488,6 +491,7 @@ def build(data, font):
         body += bytes((len(cols),)) + b''.join(cols)
     report[FIXED_KIND] = (len(phrases()), len(phrases()))
     placed = {}
+    narrow = None
     for kind, (table, limit, strict) in KINDS.items():
         korean = adopted(table)
         korean.update({kana_key(jp): ko for jp, ko in EXTRA_NAMES.get(kind, {}).items()})
@@ -496,11 +500,16 @@ def build(data, font):
         done = 0
         for n, name in enumerate(names):
             ko = by_number.get(n) or korean.get(kana_key(name))
-            if not ko and kind in KANA_KINDS and name and all(0x3041 <= ord(c) <= 0x30FC for c in name):
+            kana = name and all(0x3041 <= ord(c) <= 0x30FC for c in name)
+            if not ko and kind in KANA_KINDS and n < KANA_LIMIT and kana:
                 ko = name
             if not ko:
                 continue
             cols = columns(font, ko)
+            if len(cols) > limit and ko == name:
+                import dq4menupatch
+                narrow = narrow or dq4menupatch.Font(NARROW_FONT)
+                cols = columns(narrow, ko)
             if len(cols) > limit:
                 if strict and ko != name:
                     raise ValueError(f'{ko!r}: {len(cols)}열, 창은 {limit}열')

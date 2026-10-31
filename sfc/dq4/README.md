@@ -263,3 +263,4 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [2026-10-31-44: 성 앞 상자, 맡기는 곳 대사, 서술문 15칸](journal/2026-10-31-44-ch1-chest-bank-narration.md)
 - [2026-10-31-45: 막힌 셀을 피해 걷는 성 앞 노인](journal/2026-10-31-45-ch1-oldman-reroute.md)
 - [2026-10-31-46: 던전 조우를 FC 처럼 두 셀에 한 번, 방이 바뀐 걸음은 85/256](journal/2026-10-31-46-dungeon-step-chance.md)
+- [2026-10-31-47: 넘친 목록 이름을 목록 창 밑에 숨기기](journal/2026-10-31-47-list-overflow-hidden.md)
