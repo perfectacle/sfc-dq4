@@ -176,10 +176,12 @@ def check(folder, rom, slots):
                 live.update({t: i for t in tiles})
         tilemap = (d[0x0725][0] & 0xFC) << 8
         bad = []
-        for i, (tile, size, field_only) in enumerate(table):
+        # 캔버스 밖 1D0~1FF 슬롯은 필드 표에서 위 줄이 글자 줄 바로 뒤라 열 수 × 2 칸이 이어진다
+        lent = [] if battle else [(i, lo, 2 * n) for i, (lo, up, n) in enumerate(field_slots) if lo >= 0x1D0]
+        for i, tile, size in lent:
             key = int.from_bytes(keys[2 * i:2 * i + 2], 'little')
             age = int.from_bytes(ages[2 * i:2 * i + 2], 'little')
-            if tile < 0x1D0 or battle or not key or not age:
+            if not key or not age:
                 continue
             c = (key - BUFFER) // 2
             if not 0 <= c < 32 * 28:
