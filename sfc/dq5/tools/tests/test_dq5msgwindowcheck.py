@@ -210,8 +210,9 @@ class SpellRanTests(unittest.TestCase):
         monster = [line.replace('ARG 00 2A', 'ARG 80 2A') for line in self.CASTS]
         hero = [line.replace('24A4A4 83 0 0', '24A4A4 10 0 0') for line in self.CASTS]
         bare = ['1500 248C39 070', '1520 248C39 094']
-        for calls in (monster, hero, bare):
-            with self.assertRaises(ValueError):
+        for calls, shown in ((monster, '070 1번: 80/2A/83 5B 83 5B 4E'), (hero, '070 1번: 00/2A/10 5B 83 5B 4E'),
+                             (bare, '070 0번: -')):
+            with self.assertRaisesRegex(ValueError, shown):
                 spell_ran('papas2A', 'original', calls)
 
     def test_other_scenes(self):
