@@ -318,6 +318,13 @@ def map_document(name, source, local, target):
             front |= {(cx, cy) for cy in (y * 2 - 2, y * 2 - 1) for cx in range(x * 2 - 1, x * 2 + 3)
                       if 0 <= cx < width and not _prop(source, cx // 2, cy // 2) & 0x80}
             front |= {(cx, cy) for cy in (y * 2, y * 2 + 1) for cx in (x * 2, x * 2 + 1)}
+    # The party walks in half blocks, so it can stand half a block below a pot or chest, and those upper-layer
+    # blocks then cover all but its feet (14/01 pots). The two rows below them draw a person in front.
+    for x, y in ((x, y) for y in range(source.h - 1) for x in range(source.w)
+                 if name in GROUPS and (_prop(source, x, y) & 0x7F == CHEST_KIND or
+                                        FURNITURE.get(_prop(source, x, y), (0, 0))[1] == UPPER)):
+        front |= {(cx, cy) for cy in (y * 2 + 2, y * 2 + 3) for cx in range(x * 2 - 1, x * 2 + 2)
+                  if 0 <= cx < width and not _prop(source, cx // 2, cy // 2) & 0x80}
 
     def pass2(cx, cy):
         value = (COUNTER_PASS if _prop(source, cx // 2, cy // 2) == COUNTER_PROP else 0) | \
