@@ -1,11 +1,14 @@
 """DQ5 그룹마다 걸음마다 부르는 루틴 표(00:C689) 쓰기·늘리기. 형식은 sfc/dq5/docs/dq5-build-format.md 「걸음 루틴 표」.
 
 표는 [$BC][루틴 16비트]… [FF] 이다. 00:C652 가 $BE bit7(실내)일 때 처음부터 $BC 를 찾아 루틴 주소를 $1AAD 에 두고,
-없거나 필드면 기본 00:C687(CLC / RTS)을 둔다. 00:C357 이 `JMP ($1AAD)` 로 부르므로 루틴은 뱅크 00 에 있어야 한다.
+없거나 필드면 기본 00:C687(CLC / RTS)을 둔다. 00:C357 이 `JMP ($1AAD)` 로 부르므로 표의 루틴 주소는 뱅크 00 이다.
 원본은 15그룹(46바이트)이고 표 바로 뒤가 코드라 제자리로는 늘리지 못한다. 그보다 많으면 --table-at 자리에
 [찾기 루틴][표] 를 두고 00:C652 를 JML 로 바꾼다. 루틴은 원래와 같은 차례로 표를 긴 주소로 읽고 $1AAD 를 긴 주소로 쓴 뒤
 RTL 한다(원래 루틴도 RTL 로 끝남). 색인 X 가 8비트라 끝 FF 를 X ≤ 255 에서 읽어야 하므로
 표는 85그룹까지다(85그룹이면 끝 FF 가 X = 255).
+루틴을 뱅크 00 밖(BB:AAAA, BB ≠ 00)에 적으면 찾기를 옮겨 비는 00:C656~C686 에 받침 `JSL 루틴 / RTS`(5바이트)를 두고
+표에는 받침 주소를 적는다. 받침은 9개까지라 뱅크 00 밖 루틴도 9개까지이고, --table-at 이 있어야 한다.
+루틴 몸통은 이 도구가 쓰지 않는다. 몸통은 RTL 로 끝나고 돌려줄 값은 원래 루틴처럼 캐리다.
 
   python sfc/dq5/tools/dq5stepwrite.py rom/dq5.sfc dump -o work/step.json
   python sfc/dq5/tools/dq5stepwrite.py rom/dq5.sfc patch work/step.json -o work/step.dq5patch.json \\
@@ -36,6 +39,10 @@ DEFAULT = 0x00C687
 ORIGINAL_SIZE = 46
 MAX_GROUPS = 85
 ROUTINE_SLOT = 0x1AAD
+# 찾기를 옮기면 00:C656~C686 은 아무 데서도 오지 않는다(정적 검색·실내 맵 훑기, 형식 문서 「걸음 루틴 표」)
+TRAMPOLINES = 0x00C656
+TRAMPOLINE_SIZE = 5
+MAX_FAR = (LOOKUP_END - TRAMPOLINES) // TRAMPOLINE_SIZE
 
 
 def cpu(addr):
@@ -80,6 +87,19 @@ def assemble(at):
     return bytes(body)
 
 
+def trampoline(target):
+    return b'\x22' + target.to_bytes(3, 'little') + b'\x60'           # JSL 루틴 / RTS
+
+
+def far_target(rom, routine):
+    """표의 16비트 루틴이 옮긴 찾기 롬의 받침이면 받침이 부르는 24비트 주소, 아니면 00:루틴."""
+    if rom.u8(LOOKUP) == 0x5C and TRAMPOLINES <= routine < LOOKUP_END \
+            and (routine - TRAMPOLINES) % TRAMPOLINE_SIZE == 0 \
+            and rom.u8(routine) == 0x22 and rom.u8(routine + 4) == 0x60:
+        return rom.u24(routine + 1)
+    return routine
+
+
 def step_table(rom):
     """롬이 읽는 표 자리. 00:C652 가 JML 이면 옮긴 루틴의 첫 LDA 피연산자."""
     if rom.u8(LOOKUP) == 0x5C:
@@ -96,11 +116,11 @@ def routine_value(value, name):
     if not isinstance(value, str) or not re.fullmatch(r'[0-9A-F]{2}:[0-9A-F]{4}', value):
         raise ValueError(f'{name}: 대문자 16진 BB:AAAA 문자열이어야 함')
     bank, addr = int(value[:2], 16), int(value[3:], 16)
-    if bank != 0 or addr < 0x8000:
-        raise ValueError(f'{name}: 00:C357 의 JMP ($1AAD) 가 뱅크 00 으로 부르므로 00:8000~FFFF 여야 함')
-    if LOOKUP <= addr < LOOKUP_END:
+    if addr < 0x8000 or bank > 0x7D:
+        raise ValueError(f'{name}: 뱅크 00~7D, AAAA 8000~FFFF 여야 함')
+    if bank == 0 and LOOKUP <= addr < LOOKUP_END:
         raise ValueError(f'{name}: {value} 은 찾기 루틴 자리(00:C652~C686)')
-    return addr
+    return bank << 16 | addr
 
 
 def group_rows(doc, groups):
@@ -136,6 +156,17 @@ def encode(rows):
     return b''.join(bytes([bc]) + r.to_bytes(2, 'little') for bc, r in rows) + b'\xff'
 
 
+def far_layout(rows):
+    """뱅크 00 밖 루틴을 받침으로 바꾼 (표 줄, 받침 바이트). 같은 루틴은 받침 하나를 같이 쓴다."""
+    slots = {}
+    for _, r in rows:
+        if r >> 16 and r not in slots:
+            slots[r] = TRAMPOLINES + len(slots) * TRAMPOLINE_SIZE
+    if len(slots) > MAX_FAR:
+        raise ValueError(f'뱅크 00 밖 루틴 {len(slots)}개가 받침 자리 00:C656~C686 의 {MAX_FAR}개를 넘음')
+    return [(bc, slots.get(r, r)) for bc, r in rows], b''.join(trampoline(r) for r in slots)
+
+
 def writes_for(rom, doc, table_at=None, new_maps=()):
     """(주소, 새 값, 원본|None, 설명)."""
     if step_table(rom) != TABLE:
@@ -146,7 +177,10 @@ def writes_for(rom, doc, table_at=None, new_maps=()):
     rows = merged(rom, doc, new_maps)
     if len(rows) > MAX_GROUPS:
         raise ValueError(f'걸음 루틴 표 {len(rows)}그룹이 8비트 색인 한도 {MAX_GROUPS}그룹을 넘음')
+    rows, stubs = far_layout(rows)
     blob = encode(rows)
+    if stubs and table_at is None:
+        raise ValueError('뱅크 00 밖 루틴은 찾기를 옮긴 자리에 받침을 두므로 --table-at 이 필요함')
     if table_at is None:
         if len(blob) > ORIGINAL_SIZE:
             raise ValueError(f'걸음 루틴 표 {len(blob)}바이트가 원래 자리 {ORIGINAL_SIZE}바이트를 넘음(--table-at 이 필요함)')
@@ -158,8 +192,12 @@ def writes_for(rom, doc, table_at=None, new_maps=()):
         raise ValueError(f'찾기 루틴·표 {len(code) + len(blob)}바이트가 {table_at} 의 뱅크 끝을 넘음')
     hook = bytes([0x5C, *at.to_bytes(3, 'little')])
     # 새 자리는 orig 를 붙이지 않는다. 빌더가 빈 자리 지도 밖이면 거부하게 하기 위해서다.
-    return [(at, code + blob, None, f'걸음 루틴 찾기 루틴·표({len(rows)}그룹)'),
-            (LOOKUP, hook, LOOKUP_ORIG[:4], '걸음 루틴 찾기를 옮긴 루틴으로(JML)')]
+    writes = [(at, code + blob, None, f'걸음 루틴 찾기 루틴·표({len(rows)}그룹)'),
+              (LOOKUP, hook, LOOKUP_ORIG[:4], '걸음 루틴 찾기를 옮긴 루틴으로(JML)')]
+    if stubs:
+        old = rom.d[lorom(TRAMPOLINES):lorom(TRAMPOLINES) + len(stubs)]
+        writes.append((TRAMPOLINES, stubs, bytes(old), f'뱅크 00 밖 걸음 루틴 받침 {len(stubs) // TRAMPOLINE_SIZE}개'))
+    return writes
 
 
 def patch(rom, doc, table_at=None, new_maps=()):
@@ -181,7 +219,7 @@ def patch(rom, doc, table_at=None, new_maps=()):
 
 
 def dump(rom):
-    return {'format': FORMAT, 'groups': [{'group': f'{bc:02X}', 'routine': cpu(r)}
+    return {'format': FORMAT, 'groups': [{'group': f'{bc:02X}', 'routine': cpu(far_target(rom, r))}
                                          for bc, r in parse_table(rom, step_table(rom))]}
 
 
@@ -194,7 +232,7 @@ def check(rom, doc=None, table_at=None, new_maps=()):
                bytes.fromhex(w['orig']) if 'orig' in w else None, w['note']) for w in manifest['writes']]
     built = Rom(build(rom.d, [('step-routines', mb, writes)], mb)[0])
     want = dict(merged(rom, doc, new_maps))
-    got = dict(parse_table(built, step_table(built)))
+    got = {bc: far_target(built, r) for bc, r in parse_table(built, step_table(built))}
     for bc in sorted(known_maps(rom, new_maps)):
         if got.get(bc, DEFAULT) != want.get(bc, DEFAULT):
             raise ValueError(f'그룹 {bc:02X}: 만든 롬의 루틴 {cpu(got.get(bc, DEFAULT))} 가 입력 '
