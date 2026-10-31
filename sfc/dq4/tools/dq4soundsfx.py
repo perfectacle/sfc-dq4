@@ -72,12 +72,12 @@ def wave_resources(assets, spec):
     return resources, waves, report
 
 
-def convert_branch(score, program_map, record=()):
+def convert_branch(score, program_map, record=(), voice_volume=0x30):
     """(트랙 입구 이름표 목록, 본문 글 줄, 빠진 음 수, 레코드에 더할 샘플). 목소리 하나로 빠지는 음이 있으면 둘로 바꾼다.
     record 는 그 효과음 시퀀스의 곡 묶음 레코드 샘플 순서로, 악기 번호를 그 순서로 바꾸고 없는 샘플은 끝에 더한다."""
     best = None
     for voices in range(1, MAX_VOICES + 1):
-        result = port.convert(score, voices=voices, program_map=program_map)
+        result = port.convert(score, voices=voices, program_map=program_map, voice_volume=voice_volume)
         dropped = result.report['dropped_notes']
         if best is None or dropped < best[1]:
             best = (result, dropped)
@@ -165,8 +165,9 @@ def splice(sequence, branches):
     return assemble(pruned)
 
 
-def build_effects(data, assets, spec, sequence_bytes, records=None, waves=None):
-    """spec = {(효과음, 갈래): NDS 번호}. records 는 {효과음: 곡 묶음 레코드 샘플}, waves 는 noise_program_map 의 것.
+def build_effects(data, assets, spec, sequence_bytes, records=None, waves=None, volumes=None):
+    """spec = {(효과음, 갈래): NDS 번호}. records 는 {효과음: 곡 묶음 레코드 샘플}, waves 는 noise_program_map 의 것,
+    volumes 는 {(효과음, 갈래): 목소리 음량 ED}(DQ5 효과음과 세기를 맞춤).
     ({효과음: 새 시퀀스 바이트}, {효과음: 레코드에 더할 샘플}, 보고서)."""
     by_seq, extras, report = {}, {}, {}
     for (seq, branch), ident in sorted(spec.items()):
@@ -176,7 +177,7 @@ def build_effects(data, assets, spec, sequence_bytes, records=None, waves=None):
             raise ValueError(f'{seq:02X}-{branch:02X} <- {ident}: uses samples (SPC sample slots are full); '
                              'only noise and wave effects are supported')
         record = list((records or {}).get(seq, ())) + extras.get(seq, [])
-        entries, text, dropped, more = convert_branch(score, program_map, record)
+        entries, text, dropped, more = convert_branch(score, program_map, record, (volumes or {}).get((seq, branch), 0x30))
         extras.setdefault(seq, []).extend(more)
         by_seq.setdefault(seq, {})[branch] = (entries, text)
         report[f'{seq:02X}-{branch:02X}'] = {'nds': ident.upper(), 'title': score.get('title'), 'tracks': len(entries),

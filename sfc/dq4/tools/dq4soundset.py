@@ -184,7 +184,8 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
           level_db=None, programs=None, set_records=None, keep_regions=None, track_db=None, yield_tracks=None, gain_db=None, gain_all=0.0,
           nds_envelope=(), nds_release=(), treble_db=None, sample_rates=None,
           fast_receive=False, chains=(), holds=(), early_song=False, load_pump=False, vehicle_song=False,
-          keep_samples=False, prefetch=None, release_failed=False, unpin=(), effects=None, effect_waves=None):
+          keep_samples=False, prefetch=None, release_failed=False, unpin=(), effects=None, effect_waves=None,
+          effect_gain_db=None):
     """stream 은 {곡 자리: 곡 앞 샘플 바이트 상한}. 그 곡은 샘플 일부를 곡이 울리는 동안 보낸다(transfer_plan).
 
     stream_ticks 는 {곡 자리: 틱}. 곡 앞 바이트 상한을 곡이 처음 그 틱 안에 쓰는 샘플의 합으로 정하고, 도착 어림보다
@@ -266,7 +267,8 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
     resident_sizes |= {x: len(p) - 2 for x, p in wave_payloads.items() if x in resident_sizes}
     effect_sequences, effect_extras, effect_report = (
         sfx_port.build_effects(data, assets, effects, patch.sequence_bytes,
-                               {seq: records[seq][2:] for seq, _ in effects}, waves) if effects else ({}, {}, {}))
+                               {seq: records[seq][2:] for seq, _ in effects}, waves,
+                               {k: voice_volume(db) for k, db in (effect_gain_db or {}).items()}) if effects else ({}, {}, {}))
     if any(x not in resident for more in effect_extras.values() for x in more):
         raise ValueError('sound effects may only add resident samples to their records')
     growth += sum(map(len, effect_extras.values()))
@@ -642,6 +644,8 @@ def main():
     ap.add_argument('--sfx-wave', action='append', default=[], metavar='ID=SAMPLE[,SAMPLE...]',
                     help='put a one-cycle wave of the first NDS sample into resident sound effect sample ID (20..22); '
                          'sound effects using any listed sample play it')
+    ap.add_argument('--sfx-gain-db', action='append', default=[], metavar='SEQ-BRANCH=DB',
+                    help='change the voice volume (ED) of that converted sound effect branch by DB')
     ap.add_argument('--sfx', action='append', default=[], metavar='SEQ-BRANCH=NDS',
                     help='replace a DQ5 sound effect branch (0C SEQ BRANCH) with an NDS noise sound effect (dq4soundsfx)')
     ap.add_argument('--unpin', action='append', default=[], metavar='SONG',
@@ -711,6 +715,8 @@ def main():
                         release_failed=args.release_failed, unpin=[int(x, 16) for x in args.unpin],
                         effects={(int(k.split('-')[0], 16), int(k.split('-')[1], 16)): v
                                  for k, v in (x.split('=') for x in args.sfx)},
+                        effect_gain_db={(int(k.split('-')[0], 16), int(k.split('-')[1], 16)): float(v)
+                                        for k, v in (x.split('=') for x in args.sfx_gain_db)},
                         effect_waves={int(k, 16): [n if n.endswith('.wav') else n + '.wav' for n in v.split(',')]
                                       for k, v in (x.split('=') for x in args.sfx_wave)},
                         prefetch={int(v, 16): int(m, 16) for v, m in (x.split('=') for x in args.prefetch)})
