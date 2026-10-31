@@ -60,6 +60,26 @@ class PrologueTests(unittest.TestCase):
         self.assertEqual(overrides[0]['map'], pro.CELLAR)
         self.assertEqual(lists[0]['entries'][0]['fields']['talk'], pro.T_ASK)
 
+    def test_reveal_and_hold_are_one_call(self):
+        # 인물 스크립트는 37 마다 다음 차례를 기다리므로 밝히기와 기다리기를 한 루틴에 둔다
+        code = pro._reveal_hold()
+        self.assertTrue(code.endswith(b''.join(box.wait(f) for f in pro.REVEAL_HOLD) + box.LEAVE))
+        self.assertLess(len(box.reveal_code(pro.REVEAL_STEP, song_wait=False)), len(box.reveal_code(pro.REVEAL_STEP)))
+
+    def test_morph_spin_turns_fast_then_walks_at_old_speed(self):
+        for script in pro.scripts()[1:3]:
+            ops = [(c['op'], c['args']) for c in script['commands']]
+            first = ops.index(('1E', [pro.SPIN_SPEED]))
+            self.assertEqual([op for op, _ in ops[first + 1:first + 17]], ['2F', '37'] * 8)
+            self.assertEqual(ops[first + 17], ('1E', [pro.WALK_SPEED]))
+            self.assertNotIn(('1E', [pro.SPIN_SPEED]), ops[first + 1:])
+
+    def test_supper_father_runs_every_turn(self):
+        _, new_lists, _, _ = pro.npc_lists()
+        supper = next(lst for lst in new_lists if lst['name'] == 'village_supper')
+        father = next(e for e in supper['entries'] if e['fields']['talk'] == pro.T_FATHER_SUPPER)
+        self.assertEqual(father['fields']['interval'], 1)
+
     def test_villagers_stand_apart(self):
         cells = [(x, y) for x, y, *_ in pro.VILLAGERS] + [pro.SLEEPER_AT]
         self.assertEqual(len(cells), len(set(cells)))
