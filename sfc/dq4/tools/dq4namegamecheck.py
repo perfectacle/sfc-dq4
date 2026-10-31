@@ -8,13 +8,13 @@
 import argparse
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
+import dq4mesen as mesen  # noqa: E402
 import dq4namegame as ng  # noqa: E402
 import dq4nameentry as ne  # noqa: E402
 from dq5map import Rom  # noqa: E402
@@ -71,13 +71,11 @@ def main():
     for i, (name, raw) in enumerate(CASES):
         folder = out / f'case{i}'
         folder.mkdir(parents=True)
-        probe = folder / f'namegame-{out.name}-{i}.sfc'
-        shutil.copyfile(a.rom, probe)
         data = name_bytes(name, raw)
         env = dict(os.environ, LIBDIR=libdir, SHOT_DIR=str(folder), STATE=str(a.state.resolve()), NAME=data.hex(),
                    PRE=PRE, SHOT='200', MAXF='220')
-        subprocess.run([mesence, '--testrunner', str(probe), str(HERE / 'lua' / 'dq4namegamecheck.lua')],
-                       env=env, check=False, timeout=120, capture_output=True)
+        mesen.run(mesence, a.rom, HERE / 'lua' / 'dq4namegamecheck.lua', folder=folder, tag='namegame', extra=(),
+                  env=env, check=False, timeout=120, capture_output=True)
         got = (folder / 'codes.txt').read_text().split() if (folder / 'codes.txt').exists() else []
         want = [f'{c:04X}' for c in expected(rom, name, raw)]
         ok = got == want

@@ -8,7 +8,6 @@
 """
 import argparse
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -16,6 +15,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path[:0] = [str(HERE), str(ROOT / 'sfc' / 'dq5' / 'tools')]
+
+import dq4mesen as mesen  # noqa: E402
 
 TEST = 'wait:90,a:4,wait:90'
 
@@ -39,13 +40,11 @@ def arrived(folder):
 
 def run(mesence, libdir, rom, state, target, folder):
     folder.mkdir(parents=True, exist_ok=True)
-    probe = folder / f'bg3-{folder.parent.name}.sfc'
-    shutil.copyfile(rom, probe)
     env = dict(os.environ, LIBDIR=libdir, SHOT_DIR=str(folder), STATE=str(state), TO=f'{target},10,10',
                SETTLE='60', TEST=TEST, MAXF='2400', WARPLUA=str(ROOT / 'sfc/dq5/tools/lua/dq5warp.lua'))
-    return subprocess.Popen([mesence, '--testrunner', str(probe), str(HERE / 'lua/dq4bg3slotwarp.lua'),
-                             '--Snes.RamPowerOnState=AllZeros'],
-                            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return mesen.Runner(mesence, rom, HERE / 'lua/dq4bg3slotwarp.lua', folder, tag='bg3',
+                        extra=('--Snes.RamPowerOnState=AllZeros',), env=env, stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL)
 
 
 def main():

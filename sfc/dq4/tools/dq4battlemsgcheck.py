@@ -23,6 +23,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
+import dq4mesen as mesen  # noqa: E402
 import dq4battlemsg  # noqa: E402
 import dq4battletexts  # noqa: E402
 import dq4npccheck as nc  # noqa: E402
@@ -55,8 +56,8 @@ def run(mesence, libdir, rom, state, out, ids, field=False):
         env.update(FIELD)
     with (out / 'mesen.log').open('w') as log:
         try:
-            subprocess.run([str(mesence), '--testrunner', str(rom), str(SWAP_LUA), '--Snes.DisableFrameSkipping=true'],
-                           env=env, stdout=log, stderr=subprocess.STDOUT, timeout=600, check=False)
+            mesen.run(mesence, rom, SWAP_LUA, folder=out, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=600,
+                      check=False)
         except subprocess.TimeoutExpired:
             pass
     path = out / 'swap.txt'

@@ -13,7 +13,6 @@ import argparse
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -22,6 +21,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
+import dq4mesen as mesen  # noqa: E402
 import dq4prologue as pro  # noqa: E402
 
 MKSTATE = ROOT / 'tools' / 'lua' / 'mkstate.lua'
@@ -66,11 +66,10 @@ FLAGS = {'DONE': pro.DONE, 'FROG_MET': pro.FROG_MET, 'SHINSIA_MET': pro.SHINSIA_
 
 def run(mesence, rom, script, dest, env, timeout):
     dest.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(rom, dest / 'c.sfc')
     full = {**os.environ, **env, 'SHOT_DIR': str(dest)}
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(dest / 'c.sfc'), str(script), '--Snes.DisableFrameSkipping=true'],
-                       cwd=dest, env=full, stdout=log, stderr=subprocess.STDOUT, timeout=timeout, check=False)
+        mesen.run(mesence, rom, script, cwd=dest, env=full, stdout=log, stderr=subprocess.STDOUT, timeout=timeout,
+                  check=False)
 
 
 def main():

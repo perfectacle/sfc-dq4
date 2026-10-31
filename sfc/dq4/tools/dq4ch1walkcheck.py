@@ -27,6 +27,7 @@ ROOT = HERE.parents[2]
 DQ5_TOOLS = HERE.parents[1] / 'dq5' / 'tools'
 sys.path[:0] = [str(HERE), str(DQ5_TOOLS)]
 
+import dq4mesen as mesen  # noqa: E402
 import dq4ch1event as ev  # noqa: E402
 import dq4ch2event as ch2  # noqa: E402
 import dq4chapterbox as box  # noqa: E402
@@ -151,8 +152,8 @@ def run(mesence, rom, script, dest, env, timeout):
     full.update(env, SHOT_DIR=str(dest))
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
         try:
-            subprocess.run([str(mesence), '--testrunner', str(rom), str(script), '--Snes.DisableFrameSkipping=true'],
-                           cwd=dest, env=full, stdout=log, stderr=subprocess.STDOUT, timeout=timeout, check=False)
+            mesen.run(mesence, rom, script, cwd=dest, env=full, stdout=log, stderr=subprocess.STDOUT,
+                      timeout=timeout, check=False)
         except subprocess.TimeoutExpired:
             pass
 

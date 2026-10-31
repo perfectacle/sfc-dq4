@@ -10,8 +10,9 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
-import shutil
 import subprocess
+
+import dq4mesen as mesen
 
 HERE = Path(__file__).resolve().parent
 BOOT = 6600
@@ -56,15 +57,13 @@ def main():
         name, events, positions, frames = case
         folder = output / name
         folder.mkdir()
-        rom = folder / (output.name + '-' + name + '.sfc')
-        shutil.copyfile(args.rom, rom)
         cfg = folder / 'case.lua'
         events = SETUP + [(START + f, n, b) for f, n, b in events]
         cfg.write_text(f'return {{boot={BOOT},shot={START - 10},stop={START + 100},events={{'
                        + ','.join('{%d,%d,"%s"}' % e for e in events) + '}}')
         env = dict(os.environ, LIBDIR=lib, SHOT_DIR=str(folder), MENU_CURSOR_CASE=str(cfg))
-        subprocess.run([mesence, '--testrunner', str(rom), str(HERE / 'lua/dq4menucursorcheck.lua')],
-                       env=env, check=True, timeout=300)
+        mesen.run(mesence, args.rom, HERE / 'lua/dq4menucursorcheck.lua', folder=folder, tag=name, extra=(), env=env,
+                  check=True, timeout=300)
         moves = [row.split()[1:] for row in (folder / 'cursor.txt').read_text().splitlines()
                  if row.startswith('MOVE ')]
         moves = [(int(f), int(a), int(b), int(w, 16)) for f, a, b, w in moves]
