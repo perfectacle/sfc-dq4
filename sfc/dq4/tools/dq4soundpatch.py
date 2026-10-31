@@ -77,6 +77,12 @@ HOLD_SPARE = 0x1049
 HOLD_TICK_SITE = 0x146C
 HOLD_INSTRUMENT_SITE = 0x1861
 HOLD_END_SITE = 0x103A
+# 곡 틀기(25F8)는 곡 묶음 레코드에서 k 개 뒤 「곡 뒤」 샘플을 기다림 목록 052B~(10칸)에 적고, 그 샘플이 도착하면
+# (0ABB → 27A5) 참조 수(20) 대신 연주 셈 01 로 올린다. 곡이 끝날 때 연주 셈을 내리는 268A 는 없는 샘플을 건너뛰므로,
+# 곡 뒤 샘플이 오기 전에 곡이 끝나면(샘플만 싣는 무음 곡, 받는 동안 끝난 곡) 도착한 샘플에 01 이 남는다. 16 은 참조 수만
+# 지우므로 0A 에서도 버려지지 않고 샘플 칸을 잡은 채 남았다. 268A 에서 없는 샘플을 만나면 기다림 목록에서도 지운다.
+# 코드는 곡 묶음 표 뒤(판정 도우미처럼)에 붙인다.
+PENDING_RELEASE_SITE = 0x26A0      # 268A 고리의 MOV A,$03FF+X / CMP A,#FF(앞 MOV X,A 와 뒤 BEQ 26C3 은 그대로)
 
 
 @dataclass(frozen=True)
@@ -677,6 +683,12 @@ def keep_loop_code():
     return bytes.fromhex('AD') + KEEP_BUSY.to_bytes(2, 'little') + bytes.fromhex('D0 03 4C D5 BE 60')
 
 
+def pending_release_code():
+    """268A 고리(X = 샘플 번호)에서 불린다. 원래 두 명령을 하고, 샘플이 없으면(Z=1 로 26C3 에 감)
+    27A5(기다림 목록에서 찾아 FF 로)를 부른 뒤 Z=1 로 돌아간다. 있으면 A = 칸, Z=0 그대로."""
+    return bytes.fromhex('F5 FF 03 68 FF D0 05 3F A5 27 E8 00 6F')
+
+
 def nmi_range_code():
     """NMI 선점(00:88E2)이 2B:B741~B804(우리 코루틴 코드: 응답 판정·곡 틀기 문·나눈 곡 발판·곡 번호 도우미)도
     코루틴으로 보게 하는 00:8004 발판. 빠뜨리면 그 안에서 NMI 가 와도 코루틴이 멈추지 않아 게임이 한 프레임 밀린다."""
@@ -889,7 +901,7 @@ def write_resident_samples(data, ids):
 def install(base, replacements, *, sample_resources=None, map_fades=False, preview=None, pinned=(),
             resident=None, set_records=None, fast_receive=False, chains=None, chain_late=(), hold=False, early_song=False, load_pump=False,
             vehicle_song=False, keep_samples=False, release_failed=False, unpin=(), resident_waves=None, weapon_sounds=None,
-            effect_calls=None):
+            effect_calls=None, release_pending=False):
     """pinned 는 늘 두는 시퀀스 목록에 남길 바꾸는 곡(나머지 바꾸는 곡은 목록에서 뺌). resident 는 새 늘 두는 샘플 목록
     전체(주지 않으면 그대로). set_records 는 바꾸지 않는 곡의 곡 묶음 레코드 {곡: (k, 샘플…)}.
     fast_receive 는 SPC 자료 받기를 묶음 여러 개 이어 받게 바꾼다(fast_receive_code). chains 는 {곡: 본체 시퀀스} 로,
@@ -906,6 +918,7 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
     weapon_sounds 는 ({무기 물건 번호(맨손 80): (효과음, 갈래)}, 곡들) 로, 그 곡들이 울리는 동안 たたかう 소리를 무기마다
     그 갈래로 낸다(weapon_sound_code). 그 효과음 샘플을 곡들의 레코드에 붙이는 것은 replacements 몫이다.
     effect_calls 는 {롬 주소: (원래 효과음, 새 효과음)} 로, 그 자리의 효과음 부르기 BRK 16·19 n X 의 n 을 바꾼다.
+    release_pending 은 곡 뒤 샘플이 오기 전에 끝난 곡의 샘플을 SPC 기다림 목록에서 지운다(pending_release_code).
     """
     if len(base) not in (0x180000, 0x200000, 0x400000):
         raise ValueError('base must be a headerless 1.5MB, 2MB or 4MB DQ5 build')
@@ -1044,6 +1057,11 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
         if not load_pump:
             for at, (payload, original) in nmi_range_code().items():
                 write(at, payload, original, empty=original is None)
+    if release_pending:
+        pending_at = 0x28EC + len(table)
+        table += pending_release_code()
+        write(DRIVER_BLOCK + 4 + PENDING_RELEASE_SITE - 0x0750, bytes([0x3F]) + pending_at.to_bytes(2, 'little') + bytes(2),
+              bytes.fromhex('F5 FF 03 68 FF'))
     if 0x28EC + len(table) > 0x3000:
         raise ValueError(f'song sample table too large: {len(table)} bytes')
     if not 0x2A5D <= heap_start(data) < 0x3000:
@@ -1085,7 +1103,16 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
         blocks.append((HOLD_VARS, bytes([0xFF, 0xFF, 0, 0, 0xFF])))
         blocks.append((HOLD_CHECK, hold_check_code()))
     if blocks:
-        out = b''.join(len(c).to_bytes(2, 'little') + dest.to_bytes(2, 'little') + c for dest, c in blocks) + IPL_END
+        # 블록 머리(4바이트)마다 IPL 꼬리가 길어져 뒤 코드(RELEASE_CODE)에 닿으므로, 붙어 있거나 3바이트 안쪽으로
+        # 떨어진 블록은 0 으로 메워 하나로 보낸다(메운 자리는 아무도 쓰지 않는 RAM)
+        merged = []
+        for dest, c in sorted(blocks):
+            if merged and 0 <= dest - (merged[-1][0] + len(merged[-1][1])) <= 3:
+                last, code = merged[-1]
+                merged[-1] = (last, code + bytes(dest - last - len(code)) + c)
+            else:
+                merged.append((dest, c))
+        out = b''.join(len(c).to_bytes(2, 'little') + dest.to_bytes(2, 'little') + c for dest, c in merged) + IPL_END
         at = lorom(SONG_SETS) + len(table)
         if any(data[max(at + 4, end):at + len(out)]):
             raise ValueError('SPC code blocks would overwrite nonzero ROM data')

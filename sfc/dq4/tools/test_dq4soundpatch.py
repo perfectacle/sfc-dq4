@@ -59,7 +59,8 @@ def synthetic_base():
 
     with mock.patch.object(patch, 'put', record):
         for options in ({'fast_receive': True, 'hold': True, 'early_song': True, 'load_pump': True,
-                         'keep_samples': True, 'release_failed': True, 'vehicle_song': True},
+                         'keep_samples': True, 'release_failed': True, 'vehicle_song': True,
+                         'release_pending': True},
                         {'map_fades': True}):
             patch.install(bytes(data), {0x48: patch.Replacement(melody(), (0x03,))}, **options)
     for addr, raw in expected.items():
