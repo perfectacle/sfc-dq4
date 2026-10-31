@@ -17,8 +17,9 @@ def put(data, addr, raw):
     data[lorom(addr):lorom(addr) + len(raw)] = raw
 
 
-def hook(data, maps, bank, table, count, probe=0x800B):
-    """01:936E 훅을 환경 패치와 같은 꼴로 써 넣는다: JMP 스텁 → JSL 로더(찾기·BCS·$1823·MVN)."""
+def hook(data, maps, bank, table, count, probe=0x800B, wide=False):
+    """01:936E 훅을 환경 패치와 같은 꼴로 써 넣는다: JMP 스텁 → JSL 로더(찾기·BCS·$1823·MVN).
+    wide 면 찾기 루틴이 A 8비트·X 16비트(LDX #$0000) 꼴이다."""
     put(data, LOAD_TAIL, bytes((0x4C, STUB & 0xFF, STUB >> 8 & 0xFF)))
     put(data, STUB, bytes((0x22, *LOADER.to_bytes(3, 'little'), 0x28, 0xAB, 0x60)))
     rel = HIT - (LOADER + 12)
@@ -27,7 +28,8 @@ def hook(data, maps, bank, table, count, probe=0x800B):
     put(data, LOADER + 12, bytes((0xC2, 0x20, 0xAF, 0x02, 0xB0, 0x7E, 0xC9, probe & 0xFF, probe >> 8, 0xD0, 0x04,
                                   0x22, *REBUILD.to_bytes(3, 'little'))))
     put(data, REBUILD, bytes((0x20, 0xD8, 0x8C, 0x6B)))
-    put(data, FIND, bytes((0x08, 0xE2, 0x30, 0xA2, 0x00, 0xBF, *TARGETS.to_bytes(3, 'little'), 0xC9, 0xFF, 0xF0, 0x10,
+    head = (0x08, 0xE2, 0x20, 0xC2, 0x10, 0xA2, 0x00, 0x00) if wide else (0x08, 0xE2, 0x30, 0xA2, 0x00)
+    put(data, FIND, bytes((*head, 0xBF, *TARGETS.to_bytes(3, 'little'), 0xC9, 0xFF, 0xF0, 0x10,
                            0xC5, 0xBC, 0xD0, 0x08, 0xBF, *(TARGETS + 1).to_bytes(3, 'little'), 0xC5, 0xBD, 0xF0, 0x07,
                            0xE8, 0xE8, 0x80, 0xE8, 0x28, 0x18, 0x6B, 0x28, 0x38, 0x6B)))
     size = count * 2 - 1
@@ -68,6 +70,25 @@ class BlockHookTests(unittest.TestCase):
         hook(data, [(0x51, 0x51)], 0x3D, 0x8C00, 150)
         with self.assertRaisesRegex(ValueError, '그룹 50 이상'):
             Decoder(Rom(data), 0xBE, True, (0x51, 0x51))
+
+    def test_reads_wide_find_routine(self):
+        # 맵이 127개를 넘으면 dq4 가 찾기 루틴을 X 16비트 꼴로 쓴다
+        data = blank()
+        put(data, 0x3D8C00, bytes((0x00, 0x80, 0x0B, 0x80)))
+        maps = [(0x10 + i // 8, i % 8) for i in range(129)]
+        hook(data, maps, 0x3D, 0x8C00, 150, wide=True)
+        self.assertEqual(block_hook(Rom(data)), (maps, 0x3D, 0x3D8C00, 150))
+        self.assertEqual(block_table(Rom(data), key=maps[128])[:2], [0x3D8000, 0x3D800B])
+        # X 8비트 꼴로 128맵 이상이면 게임이 목록 끝을 못 만나므로 멈춘다
+        hook(data, maps, 0x3D, 0x8C00, 150)
+        with self.assertRaisesRegex(ValueError, '127'):
+            block_hook(Rom(data))
+        hook(data, maps[:127], 0x3D, 0x8C00, 150)
+        self.assertEqual(len(block_hook(Rom(data))[0]), 127)
+        hook(data, maps, 0x3D, 0x8C00, 150, wide=True)
+        put(data, FIND + 8, bytes((0xAF,)))
+        with self.assertRaisesRegex(ValueError, '찾기'):
+            block_hook(Rom(data))
 
     def test_rebuild_stub_at_bank_end(self):
         # 스텁 4바이트가 01:FFFC~FFFF 에 꼭 들어가면 받는다
