@@ -46,11 +46,33 @@ PAGE_LINES, LINE_COLS, NARR_COLS, NAME_COLS = 4, 14, 15, 4
 NAME = '@'      # 대사 문자열 안의 주인공 이름 자리({1012}). 이름 입력은 네 글자까지
 
 
+def _josa():
+    """{'{은}': (코드, 칸)}. 이름 뒤 조사도 찍힌 이름의 받침으로 고른다(dq4josa). 키는 dq4sysmsg 와 같다."""
+    import dq4josa
+    return {f'{{{"로" if none == "로" else has}}}': (code, len(has))
+            for code, (has, none, _) in dq4josa.JOSA.items()}
+
+
+def _parts(text):
+    """조사 토큰({은} 등)과 나머지 글자로 나눈다."""
+    import re
+    return [p for p in re.split(r'(\{[^}]+\})', text) if p]
+
+
 def _width(word):
-    return sum(NAME_COLS if c == NAME else 1 for c in word)
+    josa = _josa()
+    return sum(josa[p][1] if p in josa else sum(NAME_COLS if c == NAME else 1 for c in p) for p in _parts(word))
 
 
 def _codes(line):
+    josa = _josa()
+    out = []
+    for p in _parts(line):
+        out += [josa[p][0]] if p in josa else _plain_codes(p)
+    return out
+
+
+def _plain_codes(line):
     out = []
     for n, part in enumerate(line.split(NAME)):
         if n:
@@ -248,9 +270,10 @@ def throne_script(native):
         {"op": "16", "args": []}]}
 
 
-def npc_doc(records, ported=(), prologue=False, report=None, ported_messages=()):
+def npc_doc(records, ported=(), prologue=False, report=None, ported_messages=(), chapter2=False):
     """ported·report·ported_messages: dq4npcport.port 의 인물 목록·보고·메시지. 왕좌의 방은 이 연출 배치로 바꾸고,
-    report 가 있으면 1장 진행 사건(dq4ch1event)의 인물을 고친다. prologue 면 서장 맵의 인물을 더한다."""
+    report 가 있으면 1장 진행 사건(dq4ch1event)의 인물을 고친다. prologue 면 서장 맵의 인물을 더한다. chapter2 면
+    1장 끝 서술 뒤 2장으로 옮기고, 아니면 끝맺음 서술과 끝 상자 뒤 타이틀로 돌아간다(1장까지의 배포판)."""
     native = {k: [v & 0xFF, v >> 8 & 0xFF, v >> 16] for k, v in dq4chapterbox.entry_points(scenes(prologue)).items()}
     flag, mask = EVENT_FLAG
     staff = [entry(STATIC, x, y, g, f, t) for x, y, g, f, t in STAFF]
@@ -295,7 +318,10 @@ def npc_doc(records, ported=(), prologue=False, report=None, ported_messages=())
                                       over(dq4ch1event.BOSS_WON, 'throne_return')] + overrides
         import dq4ch2event
         first = dq4npcport.FIRST_MESSAGE + len(ported_messages)
-        scripts += dq4ch1event.scripts(first, dq4ch2event.native()[1]['transfer'])
+        if chapter2:
+            scripts += dq4ch1event.scripts(first, dq4ch2event.native()[1]['transfer'])
+        else:
+            scripts += dq4ch1event.scripts(first, ending_at=dq4chapterbox.entry_points(scenes(prologue))['end'])
         ported, ch2_new, ch2_overrides = dq4ch2event.npc_lists(ported, chapter2_talk())
         new_lists += ch2_new
         overrides = ch2_overrides + overrides
@@ -373,8 +399,11 @@ def message_flow(first_message):
     points = dq4chapterbox.entry_points(scenes(True))
     native = {k: [v & 0xFF, v >> 8 & 0xFF, v >> 16] for k, v in points.items()}
     import dq4ch2event
+    # 1장 끝 스크립트는 빌드 옵션(chapter2)으로 갈리지만 메시지 단계에는 옵션이 없어 두 판을 모두 본다
+    ending = [s for s in dq4ch1event.scripts(first_message, ending_at=points['end'])
+              if s['address'] == dq4ch1event.ENDER_SCRIPT]
     scripts = ([throne_script(native)] + dq4prologue.npc_lists()[3] +
-               dq4ch1event.scripts(first_message, dq4ch2event.native()[1]['transfer']) +
+               dq4ch1event.scripts(first_message, dq4ch2event.native()[1]['transfer']) + ending +
                dq4ch2event.scripts(chapter2_message(first_message), points))
     talks = ([s["body"] for s in dq4prologue.talk_doc()["scripts"]] + dq4ch1event.talk_scripts(first_message) +
              dq4ch2event.talk_scripts(chapter2_message(first_message)))
@@ -592,7 +621,7 @@ def return_places(out, original, dq4):
     return out
 
 
-def build(rom, dq5, dq4, work, prologue=True):
+def build(rom, dq5, dq4, work, prologue=True, chapter2=False):
     """메뉴 빌드 롬(dq4menupatch.py build --messages) → 1장 첫머리 롬. prologue 면 새 게임이 서장으로 시작해
     서장 끝에서 1장 첫머리로 넘어간다."""
     original = dq5.read_bytes()
@@ -618,7 +647,7 @@ def build(rom, dq5, dq4, work, prologue=True):
     ported, ported_messages, report = port(dq5, dq4)
     new_maps = [a for g, n in sorted(GROUPS.values()) for a in ('--new-map', f'{g:02X}/{n:02X}')]
     records = json.loads((work / 'npc-records.json').read_text())
-    (work / 'npc.json').write_text(json.dumps(npc_doc(records, ported, prologue, report, ported_messages), ensure_ascii=False, indent=1))
+    (work / 'npc.json').write_text(json.dumps(npc_doc(records, ported, prologue, report, ported_messages, chapter2), ensure_ascii=False, indent=1))
     base = npc_base(work / 'groups' / GROUP_PATCHES[0])
     run_tool(DQ5_TOOLS / 'dq5npcrelocate.py', dq5, 'patch', work / 'npc.json', '--base', base, '--alt', NPC_ALT,
              '--allow-growth', *new_maps, '-o', work / 'npc.dq5patch.json')
@@ -673,6 +702,8 @@ def main():
     b.add_argument('--out', required=True, type=Path)
     b.add_argument('--keep', type=Path, help='중간 패치 목록을 남길 폴더')
     b.add_argument('--no-prologue', action='store_true', help='NDS 서장(dq4prologue.py) 없이 새 게임을 1장으로 시작')
+    b.add_argument('--chapter2', action='store_true',
+                   help='1장 끝에서 2장으로 넘어감(기본은 끝맺음 서술·끝 상자 뒤 타이틀로, 1장까지의 배포판)')
     args = ap.parse_args()
     if args.cmd == 'messages':
         args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -683,10 +714,10 @@ def main():
     rom = args.rom.read_bytes()
     if args.keep:
         args.keep.mkdir(parents=True, exist_ok=True)
-        out = build(rom, args.dq5, args.dq4, args.keep, not args.no_prologue)
+        out = build(rom, args.dq5, args.dq4, args.keep, not args.no_prologue, args.chapter2)
     else:
         with tempfile.TemporaryDirectory() as t:
-            out = build(rom, args.dq5, args.dq4, Path(t), not args.no_prologue)
+            out = build(rom, args.dq5, args.dq4, Path(t), not args.no_prologue, args.chapter2)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_bytes(out)
     args.out.with_suffix('.ips').write_bytes(ips_patch(rom, out))

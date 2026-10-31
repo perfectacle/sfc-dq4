@@ -19,10 +19,15 @@ class Ch1WalkCheckTests(unittest.TestCase):
             self.assertEqual(rom[base + 8] | 0x40, 0xFF)
 
     def test_segments(self):
-        names = [s[0] for s in wc.SEGMENTS]
+        for segments in (wc.SEGMENTS, wc.SEGMENTS[:-2] + wc.CHAPTER2_END):
+            self.check_segments(segments)
+        self.assertEqual([s[0] for s in wc.SEGMENTS[-3:]], ['castle', 'king', 'ending'])
+
+    def check_segments(self, segments):
+        names = [s[0] for s in segments]
         self.assertEqual(len(names), len(set(names)))
-        for name, how, arg, opt in wc.SEGMENTS:
-            self.assertIn(how, ('warp', 'walk'), name)
+        for name, how, arg, opt in segments:
+            self.assertIn(how, ('warp', 'walk', 'ending'), name)
             for k in (*opt.get('want', ()), *opt.get('off', ())):
                 self.assertIn(k, wc.FLAGS, name)
             if how == 'walk':

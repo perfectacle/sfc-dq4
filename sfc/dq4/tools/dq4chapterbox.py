@@ -31,10 +31,12 @@ TITLE = '제1장   왕궁의 전사들'
 class Scene:
     """장 제목 상자로 시작하는 장면: 그 맵(그룹, 번호)에서 깃발(7E 주소, 비트)이 꺼져 있는 동안 맵을 검게
     불러오고, 그 맵 인물 스크립트가 상자(box_at)와 맵 밝히기(reveal)를 부른다. since 가 있으면 그 깃발도 켜져
-    있어야 한다(flag 는 없어도 됨)."""
+    있어야 한다(flag 는 없어도 됨). subtitle 이 있으면 끝 상자다: 상자 아래 한 줄을 더 띄우고, 버튼을 기다린 뒤
+    타이틀로 돌아간다(돌아오지 않음). 끝 상자는 맵이 없어 인물 스크립트가 직접 부른다."""
 
-    def __init__(self, name, where, flag, title, since=None):
+    def __init__(self, name, where, flag, title, since=None, subtitle=None):
         self.name, self.where, self.flag, self.title, self.since = name, where, flag, title, since
+        self.subtitle = subtitle
 
 
 # 1장 연출·서장 수련 끝 깃발. DQ5 롬에서 켜고 끄고 보는 곳도, 그 바이트를 통째로 쓰는 곳도 없는 비트다(dq5flags.py)
@@ -42,9 +44,12 @@ CHAPTER1 = Scene('box', (0x36, 0x01), (0x7E2199, 0x01), TITLE)
 PROLOGUE = Scene('box0', (0x3C, 0x01), (0x7E219E, 0x08), '서장')
 # 1장 끝에서 산트하임 왕좌의 방(3D/01)으로 옮긴 뒤 첫머리를 마칠 때까지(첫머리 대기 깃발 7E:2208 bit6)
 CHAPTER2 = Scene('box2', (0x3D, 0x01), None, '제2장  말괄량이 공주의 모험', since=(0x7E2208, 0x40))
+# 1장에서 끝내는 배포판: 1장 끝 서술 뒤 2장 제목과 「다음에 계속」 을 띄우고 타이틀로 돌아간다
+ENDING = Scene('end', None, None, CHAPTER2.title, subtitle='― 다음에 계속 ―')
 # 게임에 넣는 장면 차례. 상자·밝히기 네이티브 주소가 이 목록으로 정해지므로, 주소를 부르는 스크립트(서장·1장)와
 # 빌드가 같은 목록을 써야 한다
-GAME_SCENES = (PROLOGUE, CHAPTER1, CHAPTER2)
+GAME_SCENES = (PROLOGUE, CHAPTER1, CHAPTER2, ENDING)
+SUB_GAP = 1                                 # 상자와 부제 띠 사이 행
 
 # FC 팔레트(MesenCE 색): 0 검정, 1 금색(테두리)·흰색(글자), 2 파랑, 3 흰색
 GOLD, BLUE, WHITE = (234, 158, 34), (20, 18, 167), (255, 254, 255)
@@ -99,11 +104,16 @@ def title_mask(font, text, width):
     return out
 
 
-def box_pixels(nes, font, text=TITLE):
-    """상자 26x6 타일의 색 번호 그림과 타일마다의 팔레트(테두리 / 안)."""
-    W, H = BOX_W * 8, BOX_H * 8
+def rows(subtitle):
+    """상자 타일맵의 행 수. 부제가 있으면 상자 아래 SUB_GAP 행을 띄우고 16점 띠(2행)를 더한다."""
+    return BOX_H + (SUB_GAP + 2 if subtitle else 0)
+
+
+def box_pixels(nes, font, text=TITLE, subtitle=None):
+    """상자 26x6 타일(부제가 있으면 그 아래 행까지)의 색 번호 그림과 타일마다의 팔레트(테두리 / 안)."""
+    W, H = BOX_W * 8, rows(subtitle) * 8
     img = [[0] * W for _ in range(H)]
-    pal = [[PAL_TEXT] * BOX_W for _ in range(BOX_H)]
+    pal = [[PAL_TEXT] * BOX_W for _ in range(rows(subtitle))]
     for ty in range(BOX_H):
         for tx in range(BOX_W):
             v = 't' if ty == 0 else 'b' if ty == BOX_H - 1 else ''
@@ -122,6 +132,10 @@ def box_pixels(nes, font, text=TITLE):
         for x, g in enumerate(row):
             up = mask[y - 1][x] if y else 0
             img[TEXT_ROW * 8 + y][8 + x] = g | (0 if up else 2)
+    if subtitle:
+        # 검은 바탕 위라 그림자·파랑 없이 흰 점(색 1)만
+        for y, row in enumerate(title_mask(font, subtitle, W)):
+            img[(BOX_H + SUB_GAP) * 8 + y] = row[:]
     return img, pal
 
 
@@ -134,12 +148,14 @@ def snes_tile(rows):
 
 
 def box_data(nes, font, texts=(TITLE,)):
-    """(타일 바이트, 제목마다 타일맵 26x6 워드 바이트). 상자들은 캔버스를 함께 쓰고 같은 타일은 한 번만 둔다."""
+    """(타일 바이트, 제목마다 타일맵 26x행 수 워드 바이트). texts 의 항목은 제목, 또는 (제목, 부제). 상자들은 캔버스를
+    함께 쓰고 같은 타일은 한 번만 둔다."""
     tiles, index, maps = bytearray(), {}, []
     for text in texts:
-        img, pal = box_pixels(nes, font, text)
+        text, subtitle = text if isinstance(text, tuple) else (text, None)
+        img, pal = box_pixels(nes, font, text, subtitle)
         words = bytearray()
-        for ty in range(BOX_H):
+        for ty in range(rows(subtitle)):
             for tx in range(BOX_W):
                 t = snes_tile([img[ty * 8 + y][tx * 8:tx * 8 + 8] for y in range(8)])
                 if t not in index:
@@ -247,10 +263,10 @@ LEAVE = bytes((0xC2, 0x30, 0x7A, 0xFA, 0x68, 0x2B, 0xAB, 0x28, 0x6B))  # REP #$3
 DB0 = bytes((0xF4, 0x00, 0x00, 0xAB, 0xAB))                        # PEA $0000 / PLB / PLB
 
 
-def map_rows(src_of_row):
-    """상자 6행의 타일맵 버퍼 쓰기. src_of_row(r) 는 그 행 52바이트의 롬 주소(None 이면 BLANK 로 채움)."""
+def map_rows(src_of_row, n=BOX_H):
+    """상자 n 행의 타일맵 버퍼 쓰기. src_of_row(r) 는 그 행 52바이트의 롬 주소(None 이면 BLANK 로 채움)."""
     out = bytearray((0xC2, 0x30))                                   # REP #$30
-    for r in range(BOX_H):
+    for r in range(n):
         dst = MAP_BUFFER + ((BOX_ROW + r) * 32 + BOX_COL) * 2
         src = src_of_row(r)
         if src is None:
@@ -299,6 +315,67 @@ def if_pending(scenes, then, other=b''):
     return bytes(out) + then + other
 
 
+def _loop(body):
+    """body 끝의 BNE/BEQ 자리(마지막 바이트)가 body 처음으로 돌아가게 채운다."""
+    return body[:-1] + bytes((-len(body) & 0xFF,))
+
+
+def wait_button():
+    """M 8. 앞 서술에서 누른 채인 버튼을 놓기를 기다린 뒤, A·B·X·Y·START 가운데 하나를 누르기를 기다린다
+    (자동 조이패드 읽기 결과 $4218·$4219)."""
+    release = _loop(wait(1) + bytes((0xAD, 0x18, 0x42, 0x29, 0xC0, 0xD0, 0x00)))   # LDA $4218 / AND #$C0 / BNE
+    release2 = _loop(wait(1) + bytes((0xAD, 0x19, 0x42, 0x29, 0xF0, 0xD0, 0x00)))  # LDA $4219 / AND #$F0 / BNE
+    tail = bytes((0xAD, 0x19, 0x42, 0x29, 0xD0, 0xF0, 0x00))      # LDA $4219 / AND #$D0 / BEQ 처음
+    head = wait(1) + bytes((0xAD, 0x18, 0x42, 0x29, 0xC0, 0xD0, len(tail)))         # LDA $4218 / AND #$C0 / BNE 끝
+    return release + release2 + _loop(head + tail)
+
+
+RESET = 0x008639        # 리셋 벡터(00:FFFC)가 가리키는 곳
+DRIVER_UPLOAD = 0x24FD85    # 24:FD6E(소리 켜기)가 처음 부르는 루틴: 드라이버를 IPL 로 올림(00:FE66)
+DRIVER_UPLOAD_CALL = 0x24FD74
+DRIVER_UPLOAD_ORIG = bytes.fromhex('22 85 fd 24')
+DRIVER_RESTART = 0x08   # SPC 명령: CALL $1076 / JMP $09DB, 올린 직후의 진입점($0200)과 같은 초기화
+
+
+def soft_reset():
+    """화면·NMI·HDMA 를 끄고 리셋 벡터의 루틴으로 간다. 리셋 루틴은 직접 페이지 0 을 가정한다($00,X 로 지움)."""
+    return bytes((0x78, 0xA9, 0x00, 0x8D, 0x00, 0x42, 0x8D, 0x0C, 0x42,  # SEI / LDA #0 / STA $4200 / STA $420C
+                  0xA9, 0x80, 0x8D, 0x00, 0x21,                          # LDA #$80 / STA $2100
+                  0xC2, 0x30, 0xA9, 0x00, 0x00, 0x5B,                    # REP #$30 / LDA #0 / TCD
+                  0x5C, *le(RESET, 3)))                                  # JML
+
+
+def soft_boot():
+    """24:FD6E 가 드라이버를 올리러 부르는 자리(JSL). M·X 16 으로 온다.
+
+    전원을 켜면 SPC 는 IPL 에서 $2140·$2141 = AA BB 로 기다린다. 소프트 리셋이면 드라이버가 돌고 있어 IPL 로 올릴 수
+    없다(00:FE79 가 AA BB 를 끝없이 기다림). 그때는 드라이버에 다시 시작 명령을 보낸다. 드라이버는 $F4 bit0 이 자기
+    차례 비트와 달라지면 $F5 를 명령으로 읽고 $F4 = 차례 & E0 로 답하는데, CPU 쪽 차례($08DA)는 리셋이 지웠으므로
+    bit0 을 0, 1 차례로 써 보고 $2140 이 바뀌면 받은 것으로 본다. 다시 시작한 드라이버는 24:FDF9 의 인사를 기다린다.
+    둘 다 답이 없으면 원래 길로 간다."""
+    upload = bytes((0x28, 0x5C, *le(DRIVER_UPLOAD, 3)))                 # PLP / JML
+    acked = bytes((0x68, 0x28, 0x6B))                                   # PLA / PLP / RTL
+    stable = _loop(bytes((0xAD, 0x40, 0x21, 0xCD, 0x40, 0x21, 0xD0, 0x00)))
+    head = bytes((0x08, 0xE2, 0x20, 0xAD, 0x40, 0x21, 0xC9, 0xAA, 0xD0, 0x07,     # PHP / SEP / LDA / CMP #$AA / BNE
+                  0xAD, 0x41, 0x21, 0xC9, 0xBB, 0xF0, 0x00))                      # LDA $2141 / CMP #$BB / BEQ 올림
+    body = bytearray(bytes((0xA9, DRIVER_RESTART, 0x8D, 0x41, 0x21)) + stable + b'\x48')   # LDA / STA $2141 / … / PHA
+    branches = []
+    for bit in (0, 1):
+        body += bytes((0xA9, bit, 0x8D, 0x40, 0x21, 0xA2, 0xFF, 0xFF))       # LDA #bit / STA $2140 / LDX #$FFFF
+        at = len(body)
+        # LDA $2140 / CMP 1,S / BNE 답 / DEX / BNE 고리
+        body += bytes((0xAD, 0x40, 0x21, 0xC3, 0x01, 0xD0, 0x00, 0xCA, 0xD0, -10 & 0xFF))
+        branches.append(at + 6)
+    body += b'\x68' + upload                                            # PLA / PLP / JML 올림
+    acked_at = len(body)
+    body += acked
+    for b in branches:
+        body[b] = (acked_at - (b + 1)) & 0xFF
+    out = bytearray(head) + body + upload
+    out[len(head) - 1] = (len(out) - len(upload) - len(head)) & 0xFF   # BEQ 올림(맨 끝 upload)
+    return bytes(out)
+
+
 class Layout:
     """뱅크 하나에 코드·자료를 늘어놓는다."""
 
@@ -310,7 +387,7 @@ class Layout:
         # 코드 길이는 자료 주소에 따라 바뀌지 않으므로(즉값 폭 고정) 두 번 짜서 자리를 맞춘다
         addr = {'tiles': 0, 'maps': [0] * len(self.maps), 'pal': 0, 'blank': 0}
         for _ in range(2):
-            start, hook, boxes, reveal = self.code(addr)
+            start, hook, boxes, reveal, boot = self.code(addr)
             self.start_at = self.base
             self.hook_at = self.start_at + len(start)
             at = self.hook_at + len(hook)
@@ -319,12 +396,13 @@ class Layout:
                 self.box_at[scene.name] = at
                 at += len(box)
             self.reveal_at = at
-            data_at = self.reveal_at + len(reveal)
+            self.boot_at = self.reveal_at + len(reveal)
+            data_at = self.boot_at + len(boot)
             maps_at = data_at + 2 + len(self.pal)
             addr = {'blank': data_at, 'pal': data_at + 2,
                     'maps': [maps_at + sum(map(len, self.maps[:k])) for k in range(len(self.maps))],
                     'tiles': maps_at + sum(map(len, self.maps))}
-        self.blob = (start + hook + b''.join(boxes) + reveal + b'\x00\xff' + self.pal + b''.join(self.maps) +
+        self.blob = (start + hook + b''.join(boxes) + reveal + boot + b'\x00\xff' + self.pal + b''.join(self.maps) +
                      self.tiles)
         if (self.base & 0xFFFF) + len(self.blob) > 0x10000:
             raise ValueError('뱅크를 넘음')
@@ -366,7 +444,19 @@ class Layout:
                    fill_vram(BG3_CHR + CANVAS * 8, a['blank'], len(self.tiles) // 2) +
                    restore + dma_cgram(PAL_BORDER * 4, CGRAM_BUFFER + pal_off, n) +
                    bytes((0xA9, 0x0F, 0x8D, 0x1D, 0x00)) + screen_on() + LEAVE)      # 메시지 창은 밝은 채로
-        boxes = [box(map_at) for map_at in a['maps']]
+        def ending(map_at, n):
+            # 메시지 창이 남지 않게 BG3 타일맵 버퍼를 모두 비운 뒤 상자·부제를 놓고, 버튼을 누르면 어둡게 해 리셋한다
+            clear_all = (bytes((0xC2, 0x30, 0xA9, *le(BLANK, 2), 0x8F, *le(MAP_BUFFER, 3))) +
+                         mvn(MAP_BUFFER, MAP_BUFFER + 2, 0x800 - 2) + DB0 + bytes((0xE2, 0x20)))
+            return (ENTER + bytes((0x9C, 0x1D, 0x00)) + screen_off() + bytes((0xC2, 0x10)) +
+                    dma_vram(BG3_CHR + CANVAS * 8, a['tiles'], len(self.tiles)) +
+                    dma_cgram(PAL_BORDER * 4, a['pal'], len(self.pal)) +
+                    bytes((0xC2, 0x30)) + mvn(a['pal'], CGRAM_BUFFER + pal_off, len(self.pal)) + DB0 +
+                    bytes((0xE2, 0x20)) + clear_all + map_rows(lambda r: map_at + r * BOX_W * 2, n) +
+                    dma_vram(BG3_MAP, MAP_BUFFER, 0x800) + screen_on() +
+                    fade(1, 15, FADE_STEP) + wait_button() + fade(14, 0, FADE_STEP) + soft_reset())
+        boxes = [ending(map_at, rows(scene.subtitle)) if scene.subtitle else box(map_at)
+                 for scene, map_at in zip(self.scenes, a['maps'])]
         # FC 는 서술 창이 닫히면 곡을 멈추고, 왕좌의 방이 밝아질 때 성 곡을 튼다
         # 곡 자료를 SPC 로 보내는 동안(소리 롬에서 약 160프레임) 화면을 검게 두고, 곡이 시작되면 밝힌다
         song_wait = bytes((0xDA,)) + wait(1) + bytes((0xFA,                 # PHX / BRK 09 01 / PLX
@@ -381,7 +471,7 @@ class Layout:
                   # NMI 는 $0733 을 늘 $212C 로 쓰지 않으므로(실측) 맵을 불러올 때처럼 직접 쓴다
                   bytes((0xA9, 0x17, 0x8D, 0x33, 0x07, 0x8D, 0x2C, 0x21, 0x8D, 0x2D, 0x21)) +
                   fade(1, 15, REVEAL_STEP) + LEAVE)
-        return start, hook, boxes, reveal
+        return start, hook, boxes, reveal, soft_boot()
 
 
 START_AT = 0x25834A
@@ -397,13 +487,20 @@ def entry_points(scenes=(CHAPTER1,)):
     return {**lay.box_at, 'reveal': lay.reveal_at}
 
 
+def boot_points(scenes=(CHAPTER1,)):
+    """리셋 훅 주소 {'boot': 입구, 'acked': 드라이버가 다시 시작 명령을 받아 올리기를 건너뛰는 RTL 자리}."""
+    lay = Layout(CODE_AT, scenes, b'', [bytes(BOX_W * BOX_H * 2)] * len(scenes), palettes())
+    return {'boot': lay.boot_at, 'acked': lay.boot_at + soft_boot().index(bytes((0x68, 0x28, 0x6B)))}
+
+
 def writes(nes, font, scenes=(CHAPTER1,)):
     """(롬 주소, 바이트, 원래 바이트 또는 None) 목록."""
-    lay = Layout(CODE_AT, scenes, *box_data(nes, font, [s.title for s in scenes]), palettes())
+    lay = Layout(CODE_AT, scenes, *box_data(nes, font, [(s.title, s.subtitle) for s in scenes]), palettes())
     if {**lay.box_at, 'reveal': lay.reveal_at} != entry_points(scenes):
         raise AssertionError('네이티브 주소가 자료 크기에 따라 바뀜')
     return [(START_AT, bytes((0x22, *le(lay.start_at, 3))), START_ORIG),
             (HOOK_AT, bytes((0x22, *le(lay.hook_at, 3), 0xEA)), HOOK_ORIG),
+            (DRIVER_UPLOAD_CALL, bytes((0x22, *le(lay.boot_at, 3))), DRIVER_UPLOAD_ORIG),
             (CODE_AT, lay.blob, None)]
 
 

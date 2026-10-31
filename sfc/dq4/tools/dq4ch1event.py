@@ -193,6 +193,9 @@ MESSAGES = {
     'brag_joke': say('와하하, 농담이야!/자넨 정말/사람이 좋구먼!'),
     # 글 없이 ▼ 만 기다린다(DQ5 메시지 013 과 같은 꼴). 끝 코드 1010 은 메시지를 끝내므로 글 앞에 둘 수 없어 따로 띄운다
     'line_pause': [ch1.NARR, WAIT_END],
+    # 1장에서 끝내는 배포판의 끝맺음(원작에 없음): 검은 화면에서 1장을 닫고, 다음 장의 주인공을 이름 없이 비춘다
+    'ending_leave': ch1.narrate('@{은}/홀로 성을 나섰다./세상을 구할 용사를/찾아서.'),
+    'ending_far': ch1.narrate('같은 무렵,/멀리 산트하임 성.', '성벽 너머 세상을 꿈꾸는/한 공주가 있었다.'),
 }
 
 
@@ -327,6 +330,7 @@ HOME_KID_SRCS = (_SPARE[9], ({"list": "05:9768", "index": 0}, "05:976F"))
 # 성 앞 노인: 이 해킹에서 가지 않는 DQ5 03/0D 의 한 벌 스크립트 인물
 OLD_MAN_SRC, OLD_MAN_SCRIPT = {"list": "05:9837", "index": 0}, "05:983E"
 END_MAP = '36/00'               # 1장 끝은 보고한 뒤 성 앞에 들어설 때(FC 는 같은 방문 안, $6285 는 필드로 나가면 지워짐)
+ENDING_PAUSE = 60               # 1장에서 끝낼 때 두 서술 사이의 검은 화면(프레임)
 # 탑 위 30/04 의 FC 인물 슬롯(06 부터 차례): 06 보스, 07·08 잡힌 아이, 09 마물은 이기면 숨고, 0C~0E 의 구한 아이는
 # 이기기 전에 숨는다(1C:$A266). 0C 가 고맙다고 말한다
 TOP_HIDE_ON_WIN, TOP_RESCUED, CRY_SLOT = (0x06, 0x07, 0x08, 0x09), (0x0C, 0x0D, 0x0E), 0x08
@@ -928,6 +932,9 @@ def native(data=None):
     out += ENTER + REFRESH + LEAVE
     at['followers'] = CODE_AT + len(out)
     out += _followers(at['followers'])
+    from dq4chapterbox import wait
+    at['ending_pause'] = CODE_AT + len(out)
+    out += ENTER + wait(ENDING_PAUSE) + LEAVE
     return bytes(out), at
 
 
@@ -1003,8 +1010,9 @@ def _cmd(op, *args):
     return {"op": op, "args": list(args)}
 
 
-def scripts(first_message, chapter2_at=None):
-    """chapter2_at: 1장 끝 서술 뒤 2장으로 옮기는 네이티브(dq4ch2event 의 transfer)."""
+def scripts(first_message, chapter2_at=None, ending_at=None):
+    """chapter2_at: 1장 끝 서술 뒤 2장으로 옮기는 네이티브(dq4ch2event 의 transfer).
+    ending_at: 1장에서 끝내는 배포판의 끝 상자(dq4chapterbox.ENDING). 주면 2장으로 옮기지 않는다."""
     m = message_ids(first_message)
     _, at = native()
     lo, hi = lambda v: v & 0xFF, lambda v: v >> 8
@@ -1095,6 +1103,13 @@ def scripts(first_message, chapter2_at=None):
         # 다시 말한다. 아니면 칭찬 → 선물(경험치·레벨업) → 작별, 보고 깃발
         {"address": KING_CALL_SCRIPT, "commands": _king_call(m, at)},
     ] + ([
+        # 1장에서 끝냄: 검은 화면 → 끝맺음 서술 → 쉼 → 다음 장 예고 서술 → 2장 제목과 「다음에 계속」, 버튼을 누르면
+        # 타이틀로(돌아오지 않음). 보고 깃발은 켜졌지만 기록은 하지 않았으므로 마지막 기록은 보고 전 그대로다
+        {"address": ENDER_SCRIPT, "commands": [
+            _cmd('28'), _cmd('52'), _cmd('3F'), _cmd('37', *_long(at['darken'])),
+            _cmd('21', lo(m['ending_leave']), hi(m['ending_leave'])), _cmd('37', *_long(at['ending_pause'])),
+            _cmd('21', lo(m['ending_far']), hi(m['ending_far'])), _cmd('37', *_long(ending_at)), _cmd('16')]},
+    ] if ending_at is not None else [
         # 1장 끝: 서술 → 검은 화면 → 2장으로 옮김(일행을 바꾸고 산트하임 왕좌의 방을 검게 불러옴)
         {"address": ENDER_SCRIPT, "commands": [
             _cmd('28'), _cmd('52'), _cmd('3F'), _cmd('21', lo(m['chapter_end']), hi(m['chapter_end'])),
