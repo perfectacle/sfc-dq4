@@ -3,7 +3,7 @@
 -- 7E:5000~57FF 를 buf.bin 에 이어 붙이고, SHOTEVERY 프레임마다 화면을 fNNNNN.png 로 남긴다.
 -- SWAP="05E:006,118;069:006" 은 24:8C39 에 들어온 메시지 번호(A)를 차례로 바꾼다.
 -- exec.txt 에는 24:A519·24:A523(▼ 기다림)·24:880A(FD ▼)·24:A569(줄 올리기)·24:8C39(메시지 번호)에 들어온 프레임,
--- 24:A4A4(글자 하나) 의 글자·줄($0F0E)·칸($0F0D), 00:FDA1 에서 $0F5E 가 1CE0(BG3 효과 층)인 전송(EFF)을 적는다.
+-- 그 메시지의 이름·숫자 인자 대기열 $F5~$F8 을 ARG 줄로, 24:A4A4(글자 하나) 의 글자·줄($0F0E)·칸($0F0D), 00:FDA1 에서 $0F5E 가 1CE0(BG3 효과 층)인 전송(EFF)을 적는다.
 -- 00:FDA1 의 모든 전송은 FX 줄(VRAM 자리 $0F5E, 크기 $4375(창을 올린 롬은 $4305), 1CE0 이면 7E:8A1D 에서 0 이 아닌 워드가 있는 첫·끝 BG3 줄)로,
 -- 연출 시작 22:D73C 의 A 는 FXID 줄로, 행동 결정 20:8846 의 행동자 $1200·행동 $1201 은 ACT 줄로 적는다.
 -- OAM(544바이트)과 OBJ 크기 모드(OBSEL 위 3비트) 1바이트는 덤프 프레임마다 oam.bin 에 이어 붙인다.
@@ -34,6 +34,9 @@ emu.addMemoryCallback(function()
     emu.setState(s)
   end
   log[#log + 1] = string.format('%d 248C39 %03X', n, emu.getState()['cpu.a'] & 0xFFFF)
+  local d = emu.getState()['cpu.d']
+  log[#log + 1] = string.format('%d ARG %02X %02X %02X %02X', n, emu.read(0x7E0000 + d + 0xF5, m),
+    emu.read(0x7E0000 + d + 0xF6, m), emu.read(0x7E0000 + d + 0xF7, m), emu.read(0x7E0000 + d + 0xF8, m))
   battled = true
 end, emu.callbackType.exec, 0x248C39, 0x248C39)
 emu.addMemoryCallback(function()
