@@ -32,7 +32,7 @@ SHIP_SLOTS = 13          # 1E:E4B2 CPX #$0D
 # FC ルーラ destinations (fc/dq4/tools/dq4field.py places) by FC group, in FC destination order. Each must be the
 # first FC group of its DQ5 group: the landing takes the DQ5 group's first entrance row. テンペ (0E) and フレノール
 # (0F) share DQ5 group 3D with サントハイム, so they have no slot of their own.
-FC_GROUPS = (0x00, 0x01, 0x02, 0x04, 0x05, 0x11, 0x12, 0x14, 0x15, 0x16, 0x17)
+FC_GROUPS = (0x00, 0x01, 0x02, 0x04, 0x05, 0x06, 0x11, 0x12, 0x14, 0x15, 0x16, 0x17)
 SEA = 0x83
 
 

@@ -125,10 +125,11 @@ SHARED_LINES = (0, 1, 2, 4)
 HOOK_SITES = ('1F:CF45', '03:D202')
 LOAD_SET = bytes.fromhex('bf d0 86 25')                  # LDA $2586D0,X
 MAP_GROUP = 0x7E00BC
-DQ4_GROUPS = frozenset(range(0x36, 0x46))            # dq4groupbuild 가 만드는 DQ4 맵 그룹
-# 원래 자리에 들어가지 않는 타일 자료를 나눠 담는 곳(뱅크 3F 이하여야 레코드가 가리킴). 곡 롬의 0 끝 줄 안. 3F 는 앞쪽을
-# 인물 목록(dq4chapter1.NPC_BANK, 인라인 스크립트 포함)이 쓰므로 그 끝과 겹치지 않게 띄운다
-TILE_AREAS = (('3E:D700', 0xFC00 - 0xD700), ('3F:EB80', 0x10000 - 0xEB80))
+DQ4_GROUPS = frozenset(range(0x36, 0x48))            # dq4groupbuild 가 만드는 DQ4 맵 그룹
+# 원래 자리에 들어가지 않는 타일 자료를 나눠 담는 곳(뱅크 3F 이하여야 레코드가 가리킴). 곡 롬의 0 끝 줄 안.
+# 3F 끝은 5장 인물로 인물 기본 목록이 길어져 쓰지 않고, 1장 빌드가 레코드 자리로 0 으로 비운 39 의 끝을 쓴다
+# (레코드는 36·37 다음에 39 로 가므로, 그 끝까지 차면 apply_writes 가 겹침으로 멈춘다).
+TILE_AREAS = (('3E:D700', 0xFC00 - 0xD700), ('39:E000', 0x10000 - 0xE000))
 PALETTES_AT, HOOK_AT = '3D:EA00', '3E:FC00'
 MAP_PALETTES_AT = '3D:EB60'                       # 맵 팔레트 줄 루틴·표를 옮길 곳(세트 팔레트 표 뒤 빈 자리)
 

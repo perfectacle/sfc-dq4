@@ -48,7 +48,7 @@ DRAWER_MESSAGE = {0xAB: 0x12F, 0xAA: 0x135}
 # Rewards 0100-CFFF are gold (value - 100); D000- are special (FFFF the empty chest) and add none.
 GOLD, SPECIAL = 0x100, 0xD000
 OPEN_BITS = range(0x2210, 0x2250)
-CHEST_BITS = range(0x2210, 0x2228)
+CHEST_BITS = range(0x2210, 0x222C)
 DRAWER_BITS = 0x222C
 
 
