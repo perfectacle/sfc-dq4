@@ -20,13 +20,15 @@ PLACEMENTS = {'background.chr': 0x188000, 'background.map': 0x18D000,
               'cloud-oam.bin': 0x1A8000,
               'foreground.chr': 0x190000, 'dragon-dma.bin': 0x198000,
               'dragon-initial.chr': 0x1A0000, 'layer-payload.bin': 0x1B0000}
+# dq4titlelayers.asm 의 MenuInit: 구름 팔레트와 OAM 포인터 사이 빈 곳
+MENU_INIT = (0x18E9A0, 0x18EB00)
 
 
 def verify_layout(original, rom, blobs):
     if len(rom) != 0x200000 or rom[0x7FD7] != 0x0B or rom[HOOK:HOOK + 5] != NEW_HOOK or rom[MUSIC_HOOK:MUSIC_HOOK + 3] != NEW_MUSIC_HOOK:
         raise ValueError('unexpected ROM layout, header or hooks')
     ranges = [(0x7FDC, 0x7FE0), (HOOK, HOOK + 5),
-              (MUSIC_HOOK, MUSIC_HOOK + 3), (0x180000, 0x181000)]
+              (MUSIC_HOOK, MUSIC_HOOK + 3), (0x180000, 0x181000), MENU_INIT]
     ranges += [(offset, offset + len(blobs[name])) for name, offset in PLACEMENTS.items()]
     merged = []
     for lo, hi in sorted(ranges):

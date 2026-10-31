@@ -173,7 +173,7 @@ FadeOut:
   stx $4305
   lda.b #$01
   sta $420B
-  jsl $02F9E3
+  jsl MenuInit
   stz $2121
   stz $4300
   lda.b #$22
@@ -339,6 +339,150 @@ org $31E900
 incbin "dragon.pal"
 org $31E920
 incbin "cloud.pal"
+
+org $31E9A0
+MenuFadeTail = 17
+; Same work as the native menu setup 02:F9E3, minus its frame waits. That routine fills
+; 7E:A007 from the run-length table at 1E:D7E3 and waits a frame after every fill run
+; (27 waits), then clears VRAM 4000-5FFF in eight 2-frame steps. The screen is already
+; force-blanked here, so the waits only kept the menu black for about 44 frames.
+; Channel 7 and the direct-page scratch ($00, $09, $CE) match the native routine.
+MenuInit:
+  phb
+  stz $2115
+  lda.b #$1E
+  sta $4374
+  pha
+  plb
+  lda.b #$07
+  sta $2181
+  lda.b #$A0
+  sta $2182
+  stz $2183
+  lda.b #$80
+  sta $4371
+  ldx.w #$D7E3
+  stx $09
+  ldx.w #$0000
+  stx $00
+.run:
+  lda ($09)
+  stz $4376
+  bmi .fill
+  inc a
+  sta $4375
+  rep #$20
+  and.w #$00FF
+  pha
+  clc
+  adc $00
+  sta $00
+  pla
+  ldx $09
+  inx
+  stx $4372
+  sec
+  adc $09
+  sta $09
+  sep #$20
+  stz $4370
+  lda.b #$80
+  sta $420B
+  bra .run
+.fill:
+  cmp.b #$80
+  beq .filled
+  and.b #$7F
+  inc a
+  sta $4375
+  rep #$20
+  and.w #$00FF
+  clc
+  adc $00
+  sta $00
+  sep #$20
+  ldx $09
+  inx
+  stx $4372
+  inx
+  stx $09
+  lda.b #$08
+  sta $4370
+  lda.b #$80
+  sta $420B
+  bra .run
+.filled:
+  phk
+  plb
+  ldx.w #$FFFF
+  stx $1F0E
+  ldx.w #$000F
+  lda.b #$00
+.state:
+  sta $1F10,x
+  dex
+  bpl .state
+  ldx.w #$1C00
+  stx $1F18
+  ldx.w #$0001
+  stx $1F1A
+  ldx.w #$4008
+  stx $1F1E
+  ldx.w #$0005
+  stx $1F20
+  ldx.w #$0000
+  stx $1C93
+  stz $00
+  stz $01
+  stz $CE
+  lda.b #$60
+  sta $CF
+  lda.b #$80
+  sta $2115
+  ldx.w #$4000
+  stx $2116
+  lda.b #$09
+  sta $4370
+  lda.b #$18
+  sta $4371
+  stz $4372
+  stz $4373
+  stz $4374
+  stz $4377
+  ldx.w #$4000
+  stx $4375
+  lda.b #$80
+  sta $420B
+  lda.b #$24
+  sta $210C
+  ldx.w #$003F
+.windows:
+  stz $1C33,x
+  dex
+  bpl .windows
+  lda.b #$7E
+  pha
+  plb
+  ldx.w #$0002
+.palette:
+  lda.l $02FAD0,x
+  sta $3914,x
+  inx
+  cpx.w #$0008
+  bcc .palette
+  jsl $04FAB3
+  ; The overture fade from FadeOut's start runs about 56 frames, and the menu song load
+  ; silences the SPC at once. Wait out the fade's tail so it still ends on its own.
+  lda.b #MenuFadeTail
+.tail:
+  pha
+  jsl $009506
+  pla
+  dec a
+  bne .tail
+  plb
+  rtl
+assert pc() <= $31EB00
 org $31EB00
 incbin "oam-pointers.bin"
 org $328000
