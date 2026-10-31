@@ -53,11 +53,15 @@ BmRun:
     STA.w !bm_p
     JSR BmClear
     JSR BmCarrySave
+    SEP #$20
+    STZ.w !bm_sp
+    REP #$20
 .token
     LDA.w !bm_p
     CMP.w !bm_n
     BEQ +
-    BCS .done
+    BCC +
+    JMP .done
 +
     SEP #$20
     STZ.w !bm_tail
@@ -82,6 +86,21 @@ BmRun:
     CMP #$0080
     BCC +
     ORA #$FF00              ; 부호 있는 점 수(좁은 문장 부호는 뒤로 당김)
++
+    CMP.w #!bm_space
+    BNE +
+    ; 첫 띄움의 자리와 그 앞 점 자리(BmCarryWrap 이 줄을 나눌 곳)
+    PHA
+    SEP #$20
+    LDA.w !bm_sp
+    BNE ++
+    LDA.w !bm_p
+    STA.w !bm_sp
+    LDA.w !bm_x
+    STA.w !bm_sx
+++
+    REP #$20
+    PLA
 +
     PHA
     CLC
@@ -668,6 +687,7 @@ BmCarryWrap:
     CLC
     RTS
 +
+    STA.w !bm_o             ; 이어 받은 점 자리(나눌 때 되돌림)
     STZ.w !bm_cx
     LDA.w !bm_x
     CLC
@@ -685,6 +705,89 @@ BmCarryWrap:
     CLC
     RTS
 +
+    ; 구간의 첫 띄움 앞까지(이름 뒤 조사와 그 낱말)가 지금 줄에 들면 거기서 나눈다. 띄움 토큰 두 바이트 자리에
+    ; 줄 바꿈(FF)과 남은 구간 머리(E3 길이)를 넣고, 앞부분만 이어 받은 열에 다시 그린다. 구간 앞의 E3 는 이미 꺼냈으므로
+    ; 버퍼를 한 바이트 밀어도 메시지 바이트는 버려지지 않는다
+    LDA.w !bm_sp
+    AND #$00FF
+    BNE +
+    JMP .whole
++
+    STA.w !bm_v
+    LDA.w !bm_sx
+    AND #$00FF
+    CLC
+    ADC #$0007
+    LSR
+    LSR
+    LSR
+    STA.w !bm_s
+    LDA.w $0F0D
+    AND #$00FF
+    CLC
+    ADC.w !bm_s
+    CMP #$001B
+    BCC +
+    JMP .whole
++
+    LDA.w !bm_v
+    CLC
+    ADC #$0002
+    STA.w !bm_r
+    LDX #$007F
+-
+    CPX.w !bm_r
+    BEQ +
+    BCC +
+    SEP #$20
+    LDA.w !bm_buf-1,X
+    STA.w !bm_buf,X
+    REP #$20
+    DEX
+    BRA -
++
+    SEP #$20
+    LDX.w !bm_v
+    LDA #$FF
+    STA.w !bm_buf,X
+    LDA #$E3
+    STA.w !bm_buf+1,X
+    LDA.w !bm_n
+    SEC
+    SBC.w !bm_v
+    DEC
+    STA.w !bm_buf+2,X
+    STZ.w !bm_sp
+    REP #$20
+    LDA.w !bm_v
+    DEC
+    STA.w !bm_n
+    JSR BmClear
+    SEP #$20
+    LDX #$0000
+    LDY #$0000
+-
+    LDA.w !bm_col0,Y
+    STA.w !bm_band,X
+    REP #$20
+    TXA
+    CLC
+    ADC.w #!bm_w
+    TAX
+    SEP #$20
+    INY
+    CPY #$0009
+    BCC -
+    REP #$20
+    LDA.w !bm_o
+    STA.w !bm_x
+    LDA.w !bm_cl
+    STA.w !bm_last
+    LDA #$0001
+    STA.w !bm_p
+    SEC
+    RTS
+.whole
     ; 띠 첫 열을 이어 받은 그대로 되돌려 칸으로 올려 찍는다. 짝 위 칸은 WnBattleChar 가 큐 머리에서 꺼낸다
     SEP #$20
     LDX #$0000

@@ -20,7 +20,7 @@
 | `dq4menupatch.py build\|sheet` | 서곡 롬 위에 모험의 서 메뉴·조합형 이름 입력·메뉴 메시지를 한글로(4MB 롬·IPS). `DQ4_GALMURI` 의 Galmuri BDF 와 `ASAR` 실행 파일 필요. `--messages` 로 다른 보행 메시지도 바꿈(`dq4messages/1`). `sheet` 는 문구 열 그림. [메뉴 한글화](../docs/dq4-menu-format.md), [이름 입력](../docs/dq4-name-entry-format.md) |
 | `dq4msgnames.py` | 메시지의 물건·주문 이름(`{100A}`·`{100B}`)을 adopt 표의 한글로. `dq4chapter1.py` 가 얹음. [조사 코드의 이름](../docs/dq4-josa-format.md#이름) |
 | `dq4battlemsg.py`·`dq4battletexts.py`·`dq4battlemsg.asm` | 전투 메시지 432개의 한글(구간 인코더·글자 표·이름 표·칸 풀 엔진). `dq4windowname.py` 가 메뉴 빌드에서 얹음. [전투 메시지 한글](../docs/dq4-battle-text-format.md) |
-| `dq4battlemsgcheck.py --rom 롬 --state 1장상태 --out 폴더` | 탑 위 보스 전투에서 전투 메시지 번호를 차례로 바꿔 끼워 끝까지 찍히는지·풀 사용량·화면 모음. [전투 메시지 검사](../docs/dq4-battle-text-format.md#전투-메시지-검사) |
+| `dq4battlemsgcheck.py --rom 롬 --state 1장상태 --out 폴더 [--field --ids 번호]` | 탑 위 보스 전투에서 전투 메시지 번호를 차례로 바꿔 끼워 끝까지 찍히는지·풀 사용량·화면 모음. `--field` 는 성 앞에서 「はなす」로 뜨는 보행 메시지를 바꿔 끼움. [전투 메시지 검사](../docs/dq4-battle-text-format.md#전투-메시지-검사) |
 | `dq4josa.py`·`dq4sysmsg.py` | 받침을 보고 조사를 고르는 메시지 코드(`101E`~`1024`)와 DQ5 필드 시스템 메시지 116개와 가게·여관·교회 대사 172개의 한글. `dq4chapter1.py` 가 얹음. [조사 코드](../docs/dq4-josa-format.md) |
 | `dq4chapterbox.py preview --out PNG` | 1장 시작의 검은 화면 금테 장 제목 상자 미리보기. 상자 타일은 `rom/dq4.nes` 에서, 제목은 `DQ4_GALMURI` 의 Galmuri11 로. 맵 훅·네이티브 루틴은 `dq4chapter1.py build` 가 얹음. [1장 첫머리](../docs/dq4-chapter1-format.md#검은-화면과-장-제목-상자) |
 | `dq4ch1event.py` | 1장 진행 사건(이무르 밤의 아이 → 프레아 → 감옥 재회, 우물 아래 목소리, 호이민 합류, そらとぶくつ 로 탑에, 아이 납치, 탑 위 보스, 보스 뒤 목록·병사·아이 귀가, 왕에게 보고·1장 끝)의 깃발·덧붙인 대화·인물 스크립트·메시지·네이티브(`5E:D000`·전투 `06:FF00`). `dq4chapter1.py`·`dq4npcport.py` 가 씀. [진행 사건](../docs/dq4-chapter1-format.md#진행-사건) |

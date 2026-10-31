@@ -5,6 +5,8 @@
   - 한 번 실행에 BATCH 개씩 넣는다. 바꿔 넣은 번호 뒤로 다음 메시지가 오지 않고 실행이 끝나면 그 번호를 멈춤으로 보고,
     남은 번호는 다음 묶음으로 넘긴다.
   - 결과: OUT/report.json(보인 번호·멈춘 번호·못 닿은 번호), OUT/sheet-NN.png(메시지 창 모음).
+  - --field 면 보행 메시지(24:8BAF)를 같은 식으로 본다. 성 앞(36/00)에서 빈 곳에 「はなす」를 골라 뜨는 메시지를 번호마다
+    한 번씩 바꿔 끼우고 100프레임 뒤 화면을 남긴다(--ids 로 번호를 준다).
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4battlemsgcheck.py --rom work/x/ch1.sfc --state work/state/ch1.mss --out work/battlemsgcheck
 형식은 sfc/dq4/docs/dq4-battle-text-format.md 「검증」.
@@ -28,16 +30,20 @@ import dq4npccheck as nc  # noqa: E402
 SWAP_LUA = HERE / 'lua' / 'dq4battlemsgswap.lua'
 WARP_LUA = HERE.parents[1] / 'dq5' / 'tools' / 'lua' / 'dq5warp.lua'
 BOSS_CELL = '39/04,46,22'
-# 주인공 이름 「라이언」(이름 입력 표시 바이트), HP 999
-HERO = '2001=8B;2002=2F;2003=93;2004=3C;2005=92;2006=13;2042=E7;2043=03;204E=E7;204F=03'
+# 주인공 이름 「라이언」(이름 입력 표시 바이트, 01 로 끝남), HP 999
+HERO = '2001=8B;2002=2F;2003=93;2004=3C;2005=92;2006=13;2007=01;2042=E7;2043=03;204E=E7;204F=03'
 TAPS = 'up:20,idle:10,a:4,wait:40,' + ','.join(['a:4,wait:30'] * 220)
 BATCH = 40
-# 이 장면에서 원래 코드가 끝내지 못하는 번호. 원문 가나로 두어도 같다(검사의 바꿔 끼우기 탓)
-SKIP = {0x004: '{EC}(합류하는 동료 이름)가 동료가 끼어드는 장면 밖에서는 멈춤'}
+# 이 장면에서 원래 코드가 끝내지 못하는 번호(검사의 바꿔 끼우기 탓). 지금은 없다
+SKIP = {}
 MAXF = 9000
+BATTLE_BOX = (16, 150, 240, 212)
+FIELD_BOX = (16, 128, 240, 216)
+FIELD = {'TO': '36/00,38,25', 'TEST': 'idle:20,a:4,wait:20,a:4,wait:400', 'MAXF': '1200', 'ENTRY': '248BAF',
+         'SHOTDELAY': '100'}
 
 
-def run(mesence, libdir, rom, state, out, ids):
+def run(mesence, libdir, rom, state, out, ids, field=False):
     out.mkdir(parents=True)
     env = {k: v for k, v in os.environ.items() if k not in ('POKE', 'ROMPATCH', 'BATTLE', 'FIELD')}
     env.update(LIBDIR=str(libdir), STATE=str(state), SHOT_DIR=str(out), DRIVER=str(WARP_LUA),
@@ -45,6 +51,8 @@ def run(mesence, libdir, rom, state, out, ids):
                SETTLE='120', TEST=TAPS, MAXF=str(MAXF), SWAP=','.join(f'{n:03X}' for n in ids),
                POOLCODES=','.join(f'{c:02X}' for c in dq4battlemsg.CODES),
                LATECODES=','.join(f'{c:02X}' for c in dq4battlemsg.CODES[dq4battlemsg.POOL.index(dq4battlemsg.POOL_C[0]):]))
+    if field:
+        env.update(FIELD)
     with (out / 'mesen.log').open('w') as log:
         try:
             subprocess.run([str(mesence), '--testrunner', str(rom), str(SWAP_LUA), '--Snes.DisableFrameSkipping=true'],
@@ -56,15 +64,15 @@ def run(mesence, libdir, rom, state, out, ids):
     return [(int(f), int(n, 16)) for f, n in rows]
 
 
-def sheet(folder, ids, path):
+def sheet(shots, path, box):
+    """화면들에서 메시지 창(box)만 잘라 두 줄씩 모은다."""
     from PIL import Image
-    shots = [(n, folder / f'm{n:03X}.png') for n in ids if (folder / f'm{n:03X}.png').exists()]
     if not shots:
         return
-    w, h = 224, 62
+    w, h = box[2] - box[0], box[3] - box[1]
     img = Image.new('RGB', (w * 2, h * ((len(shots) + 1) // 2)))
-    for k, (_, p) in enumerate(shots):
-        img.paste(Image.open(p).crop((16, 150, 16 + w, 150 + h)), ((k % 2) * w, (k // 2) * h))
+    for k, p in enumerate(shots):
+        img.paste(Image.open(p).crop(box), ((k % 2) * w, (k // 2) * h))
     img.save(path)
 
 
@@ -74,21 +82,26 @@ def main():
     ap.add_argument('--state', required=True, type=Path, help='1장 맵에 선 세이브스테이트')
     ap.add_argument('--out', required=True, type=Path)
     ap.add_argument('--ids', help='검사할 번호(16진, 쉼표). 없으면 dq4battletexts 의 모든 번호')
+    ap.add_argument('--field', action='store_true', help='보행 메시지(24:8BAF)를 본다. --ids 가 필요')
     ap.add_argument('--jobs', type=int, default=4)
     ap.add_argument('--mesence', default=os.environ.get('MESENCE'))
     args = ap.parse_args()
     if not args.mesence or not os.environ.get('LIBDIR'):
         raise SystemExit('MESENCE 와 LIBDIR 을 주세요')
+    if args.field and not args.ids:
+        raise SystemExit('--field 는 --ids 로 번호를 주세요')
     rom, state, out = args.rom.resolve(), args.state.resolve(), args.out.resolve()
+    batch = 1 if args.field else BATCH
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True)
     todo = [int(x, 16) for x in args.ids.split(',')] if args.ids else sorted(set(dq4battletexts.SOURCE) - set(SKIP))
     shown, stalled, rounds = [], [], 0
     while todo and rounds < 20:
-        batches = [todo[i:i + BATCH] for i in range(0, len(todo), BATCH)]
+        batches = [todo[i:i + batch] for i in range(0, len(todo), batch)]
         with ThreadPoolExecutor(args.jobs) as ex:
             results = list(ex.map(lambda kb: run(Path(args.mesence), Path(os.environ['LIBDIR']), rom, state,
-                                                 out / f'r{rounds:02d}-{kb[0]:02d}', kb[1]), enumerate(batches)))
+                                                 out / f'r{rounds:02d}-{kb[0]:02d}', kb[1], args.field),
+                                  enumerate(batches)))
         todo = []
         for batch, swaps in zip(batches, results):
             done = [n for _, n in swaps]
@@ -101,10 +114,14 @@ def main():
             elif done:
                 shown.append(done[-1])
         rounds += 1
-    for d in sorted(out.glob('r*')):
-        ids = [n for line in (d / 'swap.txt').read_text().splitlines() if line.strip()
-               for n in [int(line.split()[1], 16)]] if (d / 'swap.txt').exists() else []
-        sheet(d, ids, out / f'sheet-{d.name}.png')
+    if args.field:
+        sheet(sorted(out.glob('r*/m*.png')), out / 'sheet-field.png', FIELD_BOX)
+    else:
+        for d in sorted(out.glob('r*')):
+            ids = [n for line in (d / 'swap.txt').read_text().splitlines() if line.strip()
+                   for n in [int(line.split()[1], 16)]] if (d / 'swap.txt').exists() else []
+            sheet([d / f'm{n:03X}.png' for n in ids if (d / f'm{n:03X}.png').exists()], out / f'sheet-{d.name}.png',
+                  BATTLE_BOX)
     used = [int(line.split()[1]) for d in out.glob('r*') if (d / 'used.txt').exists()
             for line in (d / 'used.txt').read_text().splitlines() if line.strip()]
     effects = [int(line.split()[1]) for d in out.glob('r*') if (d / 'effects.txt').exists()
