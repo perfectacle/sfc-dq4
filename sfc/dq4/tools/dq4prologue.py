@@ -31,6 +31,8 @@ CODE_AT = 0x5EC000
 # 마지막 합(우리 편이 맞음 403)은 37-0D
 # 합이 끝나면 NDS 는 지하를 90프레임에 걸쳐 밝히고(0x0E 90), 60·60프레임 기다린 뒤 검사가 묻는다
 REVEAL_STEP = 6     # 밝기 1 → 15 한 단계에 6프레임
+REVEAL_HOLD = (60, 60)
+SPIN_SPEED, WALK_SPEED = 4, 1
 # NDS 는 지하에 들어오면 곡을 멈춘다(0x147 0). 무음 곡 4A(dq4sound-game.args 의 --silent-song)를 틀어 두면 그 곡에
 # 붙인 칼 효과음 샘플이 미리 올라가(--sfx-carry 40=4A), 칼 소리를 부를 때 샘플을 받느라 늦지 않는다
 SILENT_SONG = 0x4A
@@ -339,6 +341,14 @@ def _inside(x0, y0, x1, y1):
     return bytes((0x08, 0xE2, 0x30)) + body + near + far
 
 
+def _reveal_hold():
+    """지하 밝히기와 그 뒤 기다리기를 한 루틴으로. 인물 스크립트는 명령마다 다음 차례(이동 간격 1 이면 8프레임)를
+    기다리므로 37 을 나누면 기다리기마다 그만큼 늘어난다. 맵 곡은 SPC 로 보내는 동안 기다리지 않고 밝히기 시작한다
+    (NDS 는 지하에 곡이 없어 밝히기가 곡을 기다리지 않는다)."""
+    code = box.reveal_code(REVEAL_STEP, song_wait=False)
+    return code[:-len(box.LEAVE)] + b''.join(box.wait(f) for f in REVEAL_HOLD) + box.LEAVE
+
+
 def _hero_face(facing):
     """주인공(슬롯 0)을 facing(31E0 꼴: 88 위, 11 오른쪽, 44 아래, 22 왼쪽)으로 돌린다. 고정하지 않은 인물의 그림은
     31E0 위 니블을 따르므로 자세(3240·3260)만 바꾸면 그대로였다."""
@@ -376,14 +386,13 @@ def native():
             out.extend(code)
         put('wait', box.ENTER + box.wait(20) + box.LEAVE)
         put('wait6', box.ENTER + box.wait(6) + box.LEAVE)
-        put('wait2', box.ENTER + box.wait(2) + box.LEAVE)
         put('blank2', bytes((0x00, 0xFF)))      # 빈 캔버스 줄(plane 0 = 00, plane 1 = FF, dq4chapterbox 와 같음)
         put('quiet', box.ENTER + bytes((0xA9, SILENT_SONG, 0x22, 0x91, 0xFE, 0x24,      # 1A(앞 곡 정리)
                                         0xA9, SILENT_SONG, 0x22, 0x9A, 0xFE, 0x24)) +   # 01(곡 틀기)
             box.LEAVE)
         put('spar', _spar(at))
-        put('reveal_slow', box.reveal_code(REVEAL_STEP))
-        put('wait60', box.ENTER + box.wait(60) + box.LEAVE)
+        put('reveal_slow', _reveal_hold())
+        put('wait1', box.ENTER + box.wait(1) + box.LEAVE)
         put('face_hero', _face_hero())
         put('darken', _darken())
         put('talk_slot', _talk_slot())
@@ -436,6 +445,16 @@ def talk_doc():
     return {"format": "dq5talk/1", "scripts": [{"talk": f"{t:03X}", "body": body} for t, body in scripts]}
 
 
+def _spin(at):
+    """모샤스: 두 바퀴 돌기(NDS 는 방향을 바꾸고 6프레임 기다리기를 여덟 번). 인물 스크립트는 명령마다 다음 차례를
+    기다리고, 속도 1 이면 차례가 8프레임이라 한 칸에 19프레임이 걸렸다. 도는 동안만 속도(1E)를 올려 차례를 당긴다.
+    한 37 안에서 방향을 모두 바꾸면 그 사이 인물 그림을 다시 그리지 않아 돌지 않았다."""
+    out = [_cmd('1E', SPIN_SPEED)]
+    for d in (0x40, 0x20, 0x80, 0x10) * 2:
+        out += [_cmd('2F', d), _cmd('37', *_long(at['wait1']))]
+    return out + [_cmd('1E', WALK_SPEED)]
+
+
 def _cmd(op, *args):
     return {"op": op, "args": list(args)}
 
@@ -456,20 +475,11 @@ def _walk(path):
     return [c for x, y in path for c in (_cmd('13', x * 2, y * 2), _cmd('14'))]
 
 
-def _spin(at):
-    """모샤스: 두 바퀴 돌기. 6프레임마다 바꾸면 명령을 읽는 틈까지 더해져 느려 보여 2프레임으로 줄였다."""
-    out = []
-    for d in (0x40, 0x20, 0x80, 0x10) * 2:
-        out += [_cmd('2F', d), _cmd('37', *_long(at['wait2']))]
-    return out
-
-
 def master_script(boxes):
     """수련: 상자 → 검은 화면에서 칼 여섯 합 → 밝히기 → 조작을 풀고 주인공이 말을 걸어 대화가 끝날(깃발) 때까지 → 맺음말 → 나가기."""
     _, at = native()
     head = [_cmd('3F'), _cmd('37', *_long(at['quiet'])), _cmd('37', *_long(boxes[SCENE.name])), _cmd('37', *_long(at['spar'])),
-            _cmd('37', *_long(at['reveal_slow'])), _cmd('37', *_long(at['wait60'])), _cmd('37', *_long(at['wait60'])),
-            _cmd('37', *_long(at['talk_here'])), _wait_on(DONE)]
+            _cmd('37', *_long(at['reveal_slow'])), _cmd('37', *_long(at['talk_here'])), _wait_on(DONE)]
     tail = [_msg(M_AFTER)] + _walk(MASTER_OUT) + [_cmd('28'), _cmd('40'), _cmd('16')]
     return {"address": MASTER_SCRIPT, "commands": head + tail}
 
@@ -524,7 +534,10 @@ def npc_lists():
     people = [ch1.entry(ch1.STATIC, x, y, g, f, t) for x, y, g, f, t in VILLAGERS] + [sleeper]
     father = next(i for i, v in enumerate(VILLAGERS) if v[4] == T_FATHER)
     x, y, g, f, _ = VILLAGERS[father]
-    supper = people[:father] + [ch1.entry(FATHER_SRC, x, y, g, f, T_FATHER_SUPPER)] + people[father + 1:]
+    supper_father = ch1.entry(FATHER_SRC, x, y, g, f, T_FATHER_SUPPER)
+    # 빌린 칸의 이동 간격 4 면 스크립트 명령마다 약 32프레임을 기다려, 대답 뒤 저녁 대사까지 늘어졌다
+    supper_father["fields"]["interval"] = 1
+    supper = people[:father] + [supper_father] + people[father + 1:]
     mother = next(i for i, v in enumerate(VILLAGERS) if v[4] == T_MOTHER)
     x, y, g, f, t = VILLAGERS[mother]
     supper[mother] = ch1.entry(MOTHER_SRC, x, y, g, f, t)
