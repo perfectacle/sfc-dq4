@@ -220,5 +220,16 @@ class FrontTests(unittest.TestCase):
         self.assertFalse(front & walls)
 
 
+class UpperLayerHeadTest(unittest.TestCase):
+    def test_upper_layer_blocks_draw_people_in_front(self):
+        # 2B:B815 gives the head row of a person standing right below an upper-layer block OAM priority 2 (under
+        # the block) unless the block has +0 bit6, as DQ5's chest and two pot blocks do.
+        import dq4environmentrom as rom
+        heads = [rom.CHEST_HEAD] + [h for h in rom.FURNITURE.values() if h[1] & rom.UPPER]
+        self.assertEqual(len(heads), 2)
+        for head in heads:
+            self.assertTrue(head[0] & rom.FRONT, head)
+
+
 if __name__ == "__main__":
     unittest.main()
