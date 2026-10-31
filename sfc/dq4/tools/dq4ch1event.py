@@ -368,6 +368,22 @@ COMPANION = 0x23AED1            # 동료 표: 종류마다 9바이트(처음 레
 HOIMIN_KIND = 0x05              # ホイミスライム. 이름 0 이 「ホイミン」
 GUEST = 0xC0                    # 일행 기록 +0: bit7 몬스터 동료, bit6 손님
 SCRATCH = 0x7E1BC6              # 7E:1BBE~ 의 DQ5 가 쓰지 않는 자리(서장이 1BC4 까지 씀)
+PARTY_OBJECTS = 0x05D89D        # 걷는 일행 그림을 일행 기록대로 다시 세움(DQ5 동료 합류 이벤트들이 부름)
+REFRESH = bytes((0xE2, 0x30, 0x22)) + PARTY_OBJECTS.to_bytes(3, 'little')
+# 따라 걷는 그림. 맵을 불러올 때(02:CA29)와 일행이 바뀔 때(05:D89D → 02:C7E4) 모두 02:C634 가 걷는 그림 수 7E:1967 을
+# 정한다. 그 끝(STA $1967 / PLP / RTS)을 02 뱅크 빈 자리로 돌려, 따라옴 깃발이 켜진 동안 일행 뒤에 그림을 더한다
+COUNT_AT, COUNT_ORIG = 0x02C64F, bytes.fromhex('8d 67 19 28 60')
+COUNT_TAIL = 0x02FF60           # sfc/dq5/docs/dq5-build-format.md 「빈 자리 지도」의 02:FF60~
+# 맵을 불러올 때만 부르는, 실내면 주인공 그림을 2B 로 두는 루틴. 일행이 바뀔 때도 불러 주인공 그림이 맵을 다시
+# 불러온 것과 같게 한다(부르지 않으면 05:D98F 의 2E 로 바뀜, 실측)
+HERO_INDOOR = 0x02CA5A
+# 2191 bit5 가 꺼져 있으면(DQ5 이야기 첫머리, 장 롬은 늘 꺼짐) 맵을 불러올 때 02:B16E 가 걷는 그림을 주인공 하나로
+# 줄인다. 그 STA $1967 만 지운다
+SOLO_AT, SOLO_ORIG = 0x02B178, bytes.fromhex('8d 67 19')
+# 몬스터 동료 그림은 기록 +0 & 7F 로 05:D9E1 표를 읽어 손님 bit6 이 켜진 C5 는 표 밖(0F)을 읽었다. & 3F 로
+GUEST_PICTURE_AT, GUEST_PICTURE_ORIG = 0x05D9CE, bytes.fromhex('29 7f')
+FC_FLARE_PICTURE, FC_CHILD_PICTURE = 0x13, 0x15
+KIDS_WALKING = 2                # FC 는 구한 아이 둘을 일행 자리에 그린다(KIDS_FC_WALKERS)
 # 동료가 된 スライム 의 일행 기록(sfc/dq5/tools/lua/dq5warp.lua 의 PARTY_TEMPLATE, 그 밖의 바이트는 동료 표에서)
 PARTY_TEMPLATE = bytes((
     0x82, 0x80, 0x08, 0x00, 0x00, 0x00, 0x03, 0x08, 0x05, 0x01, 0x03, 0x00, 0x00, 0x00, 0x08, 0x00,
@@ -413,7 +429,8 @@ def _join(record_at):
                    0x68, 0xE2, 0x20, 0xAA, 0x9F)) + _al(0x7E2020) + bytes((0x9F,)) + _al(0x7E2028) +  # PLA / SEP / TAX
             bytes((0x1A, 0x8F)) + _al(0x7E201D) + bytes((0x8F,)) + _al(0x7E201F) +       # INC / 수 둘
             bytes((0xC9, 0x04, 0x90, 0x02, 0xA9, 0x03, 0x8F)) + _al(0x7E201E) +           # 걷는 수
-            bytes((0xAF,)) + _al(0x7E29EA + HOIMIN_KIND) + bytes((0x09, 0x01, 0x8F)) + _al(0x7E29EA + HOIMIN_KIND))
+            bytes((0xAF,)) + _al(0x7E29EA + HOIMIN_KIND) + bytes((0x09, 0x01, 0x8F)) + _al(0x7E29EA + HOIMIN_KIND) +
+            REFRESH)
     return ENTER + body + LEAVE
 
 
@@ -792,7 +809,43 @@ def native(data=None):
         out += code
     code, at['guest_ai'], at['guest_target'] = _guest_ai(CODE_AT + len(out))
     out += code
+    from dq4chapterbox import ENTER, LEAVE
+    at['refresh'] = CODE_AT + len(out)
+    out += ENTER + REFRESH + LEAVE
+    at['followers'] = CODE_AT + len(out)
+    out += _followers(at['followers'])
     return bytes(out), at
+
+
+def _followers(origin):
+    """02:C634 끝에서 M·X 8 로 부른다. 프레아(따라옴, 재회 전, 감옥 안이 아님)와 구한 아이들(따라옴)의 그림을 걷는 그림
+    7E:196F~ 끝에 더하고 7E:1967 을 늘린다. 1978 은 0(보이는 그림, 02:C6F2 가 bit7 을 관 그림 35 로 보냄)."""
+    import dq4environmentrom
+    from dq4npcport import PICTURES
+    jail_bc, jail_bd = (int(v, 16) for v in JAIL.split('/'))
+    flag = lambda f: 0x7E2190 + f[0]  # noqa: E731
+    a = dq4environmentrom._Asm(origin)
+    a.b(0x08, 0xE2, 0x30).long(0xAF, 'flare').b(0x29, FLARE_FOLLOWS[1]).rel(0xF0, 'kids')
+    a.long(0xAF, 'reunited').b(0x29, REUNITED[1]).rel(0xD0, 'kids')
+    # 필드에서도 $BC·$BD 는 나온 맵 번호로 남는다(실측, 감옥에서 필드로 나와 37/02). 실내일 때만 감옥으로 본다
+    a.b(0xAF, 0xBE, 0x00, 0x7E).rel(0x10, 'add_flare')
+    a.b(0xAF, 0xBC, 0x00, 0x7E, 0xC9, jail_bc).rel(0xD0, 'add_flare')
+    a.b(0xAF, 0xBD, 0x00, 0x7E, 0xC9, jail_bd).rel(0xF0, 'kids')
+    a.label('add_flare').b(0xA9, PICTURES[FC_FLARE_PICTURE]).word(0x20, 'add')
+    a.label('kids').long(0xAF, 'kids_flag').b(0x29, KIDS_FOLLOW[1]).rel(0xF0, 'done')
+    for _ in range(KIDS_WALKING):
+        a.b(0xA9, PICTURES[FC_CHILD_PICTURE]).word(0x20, 'add')
+    a.label('done').b(0x28, 0x6B)
+    a.label('add').b(0x48, 0xAF, 0x67, 0x19, 0x7E, 0xAA, 0x68, 0x9F, 0x6F, 0x19, 0x7E, 0xA9, 0x00, 0x9F, 0x78, 0x19, 0x7E,
+                     0xE8, 0x8A, 0x8F, 0x67, 0x19, 0x7E, 0x60)
+    code, _ = a.assemble({'flare': flag(FLARE_FOLLOWS), 'reunited': flag(REUNITED), 'kids_flag': flag(KIDS_FOLLOW)})
+    return code
+
+
+def _count_tail(followers):
+    """02:FF60: 02:C634 의 끝을 대신한다. 원래의 STA $1967 뒤에 따라 걷는 그림과 실내 주인공 그림을 더한다."""
+    return (bytes((0x8D, 0x67, 0x19, 0x22)) + followers.to_bytes(3, 'little') +
+            bytes((0x20, *(HERO_INDOOR & 0xFFFF).to_bytes(2, 'little'), 0x28, 0x60)))
 
 
 def _put(d, addr, code):
@@ -813,12 +866,16 @@ def apply(data):
     _put(d, CODE_AT, code)
     _put(d, BATTLE_AT, _battle())
     _, at = native()
+    _put(d, COUNT_TAIL, _count_tail(at['followers']))
     fx, fy = TOWER_FIELD[0] * 2, TOWER_FIELD[1] * 2      # FC 필드 칸 → DQ5 필드 좌표(그룹 연결의 필드 입구와 같은 셈)
     for addr, orig, new in ((FLY_AT, FLY_ORIG, bytes((0x22, *_long(at['fly']), 0xEA))),
                             (GUEST_AI_AT, GUEST_AI_ORIG, bytes((0x5C, *_long(at['guest_ai'])))),
                             (GUEST_TARGET_AT, GUEST_TARGET_ORIG, bytes((0x22, *_long(at['guest_target']), 0xEA))),
                             (FLY_X_AT, FLY_XY_ORIG[0], fx.to_bytes(2, 'little')),
-                            (FLY_Y_AT, FLY_XY_ORIG[1], fy.to_bytes(2, 'little'))):
+                            (FLY_Y_AT, FLY_XY_ORIG[1], fy.to_bytes(2, 'little')),
+                            (COUNT_AT, COUNT_ORIG, bytes((0x4C, *(COUNT_TAIL & 0xFFFF).to_bytes(2, 'little'), 0xEA, 0xEA))),
+                            (SOLO_AT, SOLO_ORIG, bytes((0xEA, 0xEA, 0xEA))),
+                            (GUEST_PICTURE_AT, GUEST_PICTURE_ORIG, bytes((0x29, 0x3F)))):
         o = lorom(addr)
         if bytes(d[o:o + len(orig)]) != orig:
             raise SystemExit(f'{addr:06X}: 원래 바이트가 아님 {d[o:o + len(orig)].hex()}')
@@ -839,7 +896,7 @@ def scripts(first_message, chapter2_at=None):
     return [
         # 따라오기로 하면 사라진다. 다시 들어와도 곧바로 숨는다
         {"address": FLARE_SCRIPT, "commands": [_cmd('09', 0x80 | FLARE_FOLLOWS[0], FLARE_FOLLOWS[1]),
-                                               _cmd('28'), _cmd('52'), _cmd('16')]},
+                                               _cmd('37', *_long(at['refresh'])), _cmd('28'), _cmd('52'), _cmd('16')]},
         # 감옥에 들어서면 계단 쪽에서 알렉스 옆까지 걸어와 재회한다
         {"address": WALKER_SCRIPT, "commands": [
             _cmd('3F'), _cmd('13', REUNION_AT[0] * 2, REUNION_AT[1] * 2 + 1), _cmd('14'),
@@ -886,7 +943,8 @@ def scripts(first_message, chapter2_at=None):
         {"address": RESCUED_SCRIPT, "commands": _rescued([], 0x0D)},
         {"address": RESCUED2_SCRIPT, "commands": _rescued([], 0x0C)},
         {"address": THANKS_SCRIPT, "commands": _rescued([_cmd('3F'), _cmd('21', lo(m['kids_thanks']), hi(m['kids_thanks'])),
-                                                         _cmd('10', *KIDS_FOLLOW), _cmd('40')], 0x0E)},
+                                                         _cmd('10', *KIDS_FOLLOW), _cmd('37', *_long(at['refresh'])),
+                                                         _cmd('40')], 0x0E)},
         {"address": SOLDIER_SCRIPT, "commands": [_cmd('09', 0x80 | SOLDIER_LEFT[0], SOLDIER_LEFT[1]), _cmd('3F')] +
          [c for x, y in SOLDIER_PATH for c in (_cmd('13', *ch1_cell(x, y)), _cmd('14'))] +
          [_cmd('28'), _cmd('52'), _cmd('40'), _cmd('16')]},
@@ -894,7 +952,8 @@ def scripts(first_message, chapter2_at=None):
         {"address": KIDS_HOME_SCRIPT, "commands": [
             _cmd('28'), _cmd('52'), _cmd('09', 0x80 | KIDS_FOLLOW[0], KIDS_FOLLOW[1]),
             _cmd('05', *_long(at['kids_home_row'])), _cmd('3F'), _cmd('21', lo(m['kids_home']), hi(m['kids_home'])),
-            _cmd('11', KIDS_FOLLOW[0], ~KIDS_FOLLOW[1] & 0xFF), _cmd('40'), _cmd('16')]},
+            _cmd('11', KIDS_FOLLOW[0], ~KIDS_FOLLOW[1] & 0xFF), _cmd('37', *_long(at['refresh'])), _cmd('40'),
+            _cmd('16')]},
     ] + [
         # 엄마 곁의 아이: 따라오는 중에 들어오면 숨었다가, 따라옴 깃발이 꺼지면 통로 아래에서 나타나 집으로 걷는다
         {"address": script, "commands": [

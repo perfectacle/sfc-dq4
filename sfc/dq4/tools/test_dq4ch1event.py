@@ -13,6 +13,17 @@ DQ4 = ROOT / "rom" / "dq4.nes"
 DQ5 = ROOT / "rom" / "dq5.sfc"
 
 
+def _hooked():
+    """apply 가 덮는 자리마다 원래 바이트를 둔 빈 롬."""
+    data = bytearray(0x400000)
+    for addr, orig in ((ev.FLY_AT, ev.FLY_ORIG), (ev.FLY_X_AT, ev.FLY_XY_ORIG[0]), (ev.FLY_Y_AT, ev.FLY_XY_ORIG[1]),
+                       (ev.GUEST_AI_AT, ev.GUEST_AI_ORIG), (ev.GUEST_TARGET_AT, ev.GUEST_TARGET_ORIG),
+                       (ev.COUNT_AT, ev.COUNT_ORIG), (ev.SOLO_AT, ev.SOLO_ORIG),
+                       (ev.GUEST_PICTURE_AT, ev.GUEST_PICTURE_ORIG)):
+        data[ev.lorom(addr):ev.lorom(addr) + len(orig)] = orig
+    return bytes(data)
+
+
 class NumberTest(unittest.TestCase):
     def test_messages_follow_the_ported_ones(self):
         ids = ev.message_ids(0xD00)
@@ -53,11 +64,7 @@ class NumberTest(unittest.TestCase):
 
 class FlyTest(unittest.TestCase):
     def test_shoes_start_the_tower_event_and_fly_to_the_island(self):
-        data = bytearray(0x400000)
-        for addr, orig in ((ev.FLY_AT, ev.FLY_ORIG), (ev.FLY_X_AT, ev.FLY_XY_ORIG[0]), (ev.FLY_Y_AT, ev.FLY_XY_ORIG[1]),
-                           (ev.GUEST_AI_AT, ev.GUEST_AI_ORIG), (ev.GUEST_TARGET_AT, ev.GUEST_TARGET_ORIG)):
-            data[ev.lorom(addr):ev.lorom(addr) + len(orig)] = orig
-        out = ev.apply(bytes(data))
+        out = ev.apply(_hooked())
         _, at = ev.native()
         o = ev.lorom(ev.FLY_AT)
         self.assertEqual(out[o:o + 5], bytes((0x22, *ev._long(at['fly']), 0xEA)))
@@ -67,11 +74,7 @@ class FlyTest(unittest.TestCase):
         self.assertEqual(out[e:e + 8], bytes((0x90, ev.TOWER, 0x00, 18, 25, 0x01, 0x80, 0xFF)))   # FC 30/00 (09,0C)
 
     def test_guest_ai_hooks_jump_to_the_native(self):
-        data = bytearray(0x400000)
-        for addr, orig in ((ev.FLY_AT, ev.FLY_ORIG), (ev.FLY_X_AT, ev.FLY_XY_ORIG[0]), (ev.FLY_Y_AT, ev.FLY_XY_ORIG[1]),
-                           (ev.GUEST_AI_AT, ev.GUEST_AI_ORIG), (ev.GUEST_TARGET_AT, ev.GUEST_TARGET_ORIG)):
-            data[ev.lorom(addr):ev.lorom(addr) + len(orig)] = orig
-        out = ev.apply(bytes(data))
+        out = ev.apply(_hooked())
         _, at = ev.native()
         self.assertEqual(out[ev.lorom(ev.GUEST_AI_AT):][:4], bytes((0x5C, *ev._long(at['guest_ai']))))
         self.assertEqual(out[ev.lorom(ev.GUEST_TARGET_AT):][:5], bytes((0x22, *ev._long(at['guest_target']), 0xEA)))
@@ -80,6 +83,29 @@ class FlyTest(unittest.TestCase):
         self.assertIn(bytes((0x28, 0x2E, 0x0E, 0x11, 0x2E, 0x0F, 0x11, 0x5C, *ev._long(ev.GUEST_AI_BACK))), code)
         # 가중치 합은 FC 고르는 법 2 의 칸 가중치 합(255)
         self.assertEqual(sum(w for _, w in ev.GUEST_WEIGHTS), 255)
+
+    def test_followers_hook_the_walker_count(self):
+        out = ev.apply(_hooked())
+        _, at = ev.native()
+        self.assertEqual(out[ev.lorom(ev.COUNT_AT):][:5], bytes((0x4C, 0x60, 0xFF, 0xEA, 0xEA)))
+        tail = out[ev.lorom(ev.COUNT_TAIL):][:12]
+        self.assertEqual(tail, bytes((0x8D, 0x67, 0x19, 0x22, *ev._long(at['followers']), 0x20, 0x5A, 0xCA, 0x28, 0x60)))
+        self.assertEqual(out[ev.lorom(ev.SOLO_AT):][:3], bytes((0xEA, 0xEA, 0xEA)))
+        self.assertEqual(out[ev.lorom(ev.GUEST_PICTURE_AT):][:2], bytes((0x29, 0x3F)))
+        code = ev._followers(ev.CODE_AT)
+        # 프레아 하나, 아이 둘을 더하는 부름
+        self.assertEqual(code.count(bytes((0xA9, 0x09, 0x20))), 1)
+        self.assertEqual(code.count(bytes((0xA9, 0x0B, 0x20))), ev.KIDS_WALKING)
+        self.assertEqual(code[-1], 0x60)
+
+    def test_party_changes_redraw_the_walkers(self):
+        _, at = ev.native()
+        refresh = {'op': '37', 'args': ev._long(at['refresh'])}
+        by_address = {s['address']: s['commands'] for s in ev.scripts(0xD00)}
+        for script in (ev.FLARE_SCRIPT, ev.THANKS_SCRIPT, ev.KIDS_HOME_SCRIPT):
+            self.assertIn(refresh, by_address[script])
+        code, _ = ev.native()
+        self.assertIn(ev.REFRESH, code[at['join'] - ev.CODE_AT:at['voice0'] - ev.CODE_AT])
 
     def test_boss_battle_sets_the_flag_only_on_a_win(self):
         code = ev._battle()
