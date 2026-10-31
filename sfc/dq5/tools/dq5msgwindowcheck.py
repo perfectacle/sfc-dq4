@@ -260,9 +260,12 @@ def spell_ran(scene, name, calls):
         return None
     number = scene[len(prefix):]
     if prefix == 'papas' and number in NO_EFFECT:
+        log = cast_log(calls)
         casts = sum(spell == number and slot < 0x80 and glyphs[:len(PAPAS_GLYPHS)] == list(PAPAS_GLYPHS)
-                    for slot, spell, glyphs in cast_log(calls))
-        require(casts, f'{scene}/{name}: 파파스가 주문 {number} 를 걸지 않음')
+                    for slot, spell, glyphs in log)
+        # 이름 글자가 바뀌어 못 맞춘 것인지 가릴 수 있게, 외친 070 마다 행동자·주문·첫 글자를 함께 찍는다.
+        seen = [f'{slot:02X}/{spell}/{" ".join(glyphs[:len(PAPAS_GLYPHS)])}' for slot, spell, glyphs in log[:3]]
+        require(casts, f'{scene}/{name}: 파파스가 주문 {number} 를 걸지 않음({CAST} {len(log)}번: {", ".join(seen) or "-"})')
         return {'casts': casts}
     runs = sum(line.split()[1:] == ['FXID', number] for line in calls if line)
     require(runs, f'{scene}/{name}: 연출 {number} 가 돌지 않음')
