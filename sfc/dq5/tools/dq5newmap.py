@@ -21,8 +21,8 @@
   attrs:  {"copy": "GG/MM"} 또는 {"bytes": [6개]}. entrance: {"copy": "GG"} 또는 {"bytes": [5개]}
   새 맵은 record·attrs 가 둘 다 있어야 한다(그룹 50 이상은 record 만). 기존 맵도 바꿀 것만 적을 수 있다. 새 그룹은 groups 에 들어가는 곳이 있어야 하고,
   groups 에 기존 그룹을 적으면 그 그룹의 들어가는 곳을 바꾼다.
-  그룹 50 이상은 50·52·53 에만 더한다(51·54 는 01:94B4 가 $BD 마다 영역 이동 목록을 고르고, 맞는 것이 없으면
-  앞 맵의 개수 $183D 가 남음).
+  그룹 51·54 의 새 맵은 01:94B4 가 $BD 마다 영역 이동 목록을 고르므로, dq5exitreloc.py --new-map … --high-hook-at 을
+  함께 넣어야 한다(넣지 않으면 앞 맵의 개수 $183D 가 남음).
   문 표(01:D2FC)는 --door-bank BB(30~3F)로 늘린다: 뱅크 01 을 그 뱅크에 복사하고 복사본의 문 표에 빈 맵·빈 그룹을
   끼운 뒤, 문 자료로 들어가는 여섯 입구를 JML 로 --door-stub-at(기본 22:FF30)의 스텁에 보내 DB 를 그 뱅크로 둔다.
   주지 않으면 새 맵이 건너뛰기로 읽게 되는 문 목록이 비어 있지 않거나 표 밖일 때 거부하고,
@@ -41,7 +41,6 @@ from dq5mapwrite import encode, entries_for
 
 FORMAT = 'dq5newmap/1'
 HIGH_FIRST = 0x50
-HIGH_OK = (0x50, 0x52, 0x53)
 # 같은 뱅크에서 그룹 표를 둘 기본 자리(그 뱅크 끝 빈 자리).
 DEFAULT_TABLE = {'pointer': 0x0FFF50, 'attr': 0x23FF20, 'high': 0x1FFE30}
 # 2A:F393 등 LDA $0FEA97,X 꼴(긴 주소) 여덟 곳의 피연산자와 표 시작에서 더하는 값. 그룹마다 5바이트.
@@ -188,8 +187,6 @@ class Plan:
         if slot == len(ptrs):
             if set(row) != ({'map', 'record'} if high else {'map', 'record', 'attrs'}):
                 raise ValueError(f'{name}: 새 맵 {row["map"]} 에는 record' + ('' if high else ' 와 attrs 가 둘 다') + ' 필요함')
-            if high and bc not in HIGH_OK:
-                raise ValueError(f'{name}: 그룹 {bc:02X} 에는 새 맵을 더하지 않음(50·52·53 만)')
             ptrs.append(None)
             if not high:
                 self.attrs[bc].append(None)

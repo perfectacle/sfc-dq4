@@ -121,7 +121,7 @@ class NewMapTests(unittest.TestCase):
         cases = [
             (doc({'map': '01/03', 'record': {'copy': '01/00'}, 'attrs': {'copy': '01/00'}}), '끝 번호'),
             (doc({'map': '01/02', 'record': {'copy': '01/00'}}), '둘 다'),
-            (doc({'map': '51/51', 'record': {'copy': '51/50'}}), '50·52·53'),
+            (doc({'map': '55/50', 'record': {'copy': '50/50'}}), '새 그룹은 받지 않음'),
             (doc({'map': '50/51', 'record': {'copy': '01/00'}}), '서로 복사'),
             (doc({'map': '50/51', 'record': {'copy': '50/50'}, 'attrs': {'copy': '01/00'}}), 'dq5encounterwrite'),
             (doc({'map': '01/02', 'record': {'copy': '01/00'}, 'attrs': {'copy': '01/00'}},
