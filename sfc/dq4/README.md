@@ -18,7 +18,7 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [docs/dq4-name-entry-format.md](docs/dq4-name-entry-format.md): 두벌식 자모 조합과 네 글자 이름 저장, 메뉴 이름 표시
 - [docs/dq4-window-text-format.md](docs/dq4-window-text-format.md): 게임 안 창 한글 조사(이름이 지나는 루틴, 장면마다 빈 BG3 타일, 가나 칸 재사용, 글꼴 크기와 타일 수)와 BG3 타일맵 옮기기
 - [docs/dq4-title-format.md](docs/dq4-title-format.md): 정지 한글 타이틀, NDS 오프닝 관찰과 초기 SFC 연결 기록
-- [docs/dq4-josa-format.md](docs/dq4-josa-format.md): 받침을 보고 고르는 조사 코드와 필드 시스템 메시지 81개
+- [docs/dq4-josa-format.md](docs/dq4-josa-format.md): 받침을 보고 고르는 조사 코드와 필드·가게·여관·교회 시스템 메시지
 - [docs/dq4-battle-text-format.md](docs/dq4-battle-text-format.md): 전투 메시지 432개 한글(전투 중 빈 BG3 칸 풀, 한글 구간·글자 표, 이름·조사, 창 테두리·줄 올림)
 - [docs/dq4-chapter1-format.md](docs/dq4-chapter1-format.md): 1장 첫머리(새 게임 첫 맵, 왕좌의 방 연출, 한글 대사, 인물 배치, 바트랜드 성 곡)
 - [docs/dq4-chapter2-format.md](docs/dq4-chapter2-format.md): 2장 첫머리(1장 끝에서 넘어가기, 아리나 일행, 산트하임 왕좌의 방 연출)
@@ -246,3 +246,4 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [2026-10-31-27: 1장 진행 대사, 예·아니요 갈래, 합류 팡파르, 창살 너머 말 걸기](journal/2026-10-31-27-ch1-talk-progress.md)
 - [2026-10-31-28: 1장을 한 번에 걷는 검사](journal/2026-10-31-28-ch1-walk.md)
 - [2026-10-31-29: 산트하임 성을 빠져나가 두 사람과 떠나기까지](journal/2026-10-31-29-ch2-castle.md)
+- [2026-10-31-30: 상자·열쇠 문·여관·교회·가게 갈래 메시지를 게임에서 띄웠다](journal/2026-10-31-30-sysmsg-scenes.md)
