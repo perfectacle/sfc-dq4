@@ -278,8 +278,14 @@ class PatchTests(unittest.TestCase):
         put(data, JOIN + 11 * JOIN_SIZE, bytes([0x80]))
         rom = Rom(data)
         self.assertEqual(dump(rom)['join'][11]['owner'], 'monster 00')
-        with self.assertRaisesRegex(ValueError, '동료 몬스터 칸'):
-            patch(rom, {'format': FORMAT, 'characters': [], 'join': [{'entry': 11, 'field_slots': [], 'battle_slots': [0]}]})
+        # 몬스터 칸도 그 몬스터 목록 길이 안에서 쓴다(21:8042 가 A = 80 으로 그대로 베낌)
+        size = len(next(c for c in dump(rom)['characters'] if (c['kind'], c['index']) == ('monster', 0))['battle'])
+        self.assertGreater(size, 0)
+        after = apply(rom, patch(rom, {'format': FORMAT, 'characters': [],
+                                       'join': [{'entry': 11, 'field_slots': [], 'battle_slots': [0]}]}))
+        self.assertEqual(dump(after)['join'][11]['battle_slots'], [0])
+        with self.assertRaisesRegex(ValueError, 'join 칸 11'):
+            patch(rom, {'format': FORMAT, 'characters': [], 'join': [{'entry': 11, 'field_slots': [], 'battle_slots': [size]}]})
         twelve = {'format': FORMAT, 'characters': [{'kind': 'person', 'index': 3, 'battle': list(range(1, 10))}],
                   'join': [{'entry': 3, 'field_slots': [], 'battle_slots': [8]}]}
         writes = patch(rom, twelve)['writes']
