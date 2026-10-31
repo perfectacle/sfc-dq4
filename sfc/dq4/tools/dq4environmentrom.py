@@ -140,12 +140,14 @@ STAIR_ATTR = 0x05
 # upper rows), else in +4. The chest search 12:E63B and the ツボ attribute A7 read +7 only; タンス 93 is a +4
 # attribute in DQ5 too. Chests stay walkable as in FC, so the party can open one in a row of chests from the next;
 # block +0 bit6 (cell +1 bit4, as DQ5 chest block 384) draws the party in front of the upper layer, without which
-# a hero standing on a chest disappears under it.
+# a hero standing on a chest disappears under it. つぼ needs it too, as DQ5's two A7 blocks have it: 2B:B815 reads
+# the pot cell for a person's head row when the person stands right below the pot, and without the bit gives that
+# row OAM priority 2, under the upper-layer pot.
 CHEST_KIND = 0x04
 UPPER = 0x20
 FRONT = 0x40
 CHEST_HEAD = FRONT, UPPER, 0x04
-FURNITURE = {0xAB: (0, 0x00, 0x13), 0xAA: (0, UPPER, 0x27)}
+FURNITURE = {0xAB: (0, 0x00, 0x13), 0xAA: (FRONT, UPPER, 0x27)}
 OPENINGS = DOORS | {GATE}
 DOOR_KIND = 0x3B
 GATE_KIND = 0x48
