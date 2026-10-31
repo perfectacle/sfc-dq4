@@ -29,6 +29,9 @@ TOWER = ('04/00,32,12,2', 'wait:60', None)
 # 01/04 (32,5) 도 같은 범위의 바닥이다. 원래 표에는 01/04 항목이 없다.
 HALL = ('01/04,32,5', 'wait:60', None)
 ADULT = '2190|40'
+# 01/04 (32,5) 에서 네 방향으로 따로 걸어 셀 읽기 루틴이 통행을 바꾸는지 본다
+WALKS = {d: ('01/04,32,5', f'{d}:160', None) for d in ('left', 'down', 'right', 'up')}
+WALK_END = {'left': ('01/06', (75, 67)), 'down': ('01/04', (32, 7)), 'right': ('01/04', (36, 5)), 'up': ('01/04', (32, 4))}
 
 
 def entry(entries, selector):
@@ -85,12 +88,15 @@ CASES = [
     ('hall-grown', 'grown', HALL, None, (None, '02:A7BD'), None, '04/0A', (8, 17)),
     ('tower-grown', 'grown', TOWER, None, (None, '02:A7BD'), None, '04/0A', (8, 17)),
     ('stairs-grown', 'grown', STAIRS, None, ('02:94E0', None), True, '01/04', (13, 47)),
-    ('hall-select', 'select', HALL, None, (None, '02:A7BD'), None, '04/0A', (8, 17)),
+    ('hall-select', 'select', HALL, None, ('02:94C1', '02:A7BD'), None, '04/0A', (8, 17)),
     ('tower-select', 'select', TOWER, None, ('15:F906', '15:F906'), None, '04/00', None),
     ('tower-raw', 'raw', TOWER, None, ('02:94E0', '02:A7BD'), None, '04/0A', (8, 17)),
     ('hall-freebank', 'freebank', HALL, None, (None, '02:A7BD'), None, '04/0A', (8, 17)),
     ('stairs-freebank', 'freebank', STAIRS, None, ('02:94E0', None), True, '01/04', (13, 47)),
     ('tower-freebank', 'freebank', TOWER, None, ('15:F906', '15:F906'), None, '04/00', None),
+    # 01/04 를 00:BCC3 으로 읽는 롬도 원본과 같은 칸에 서거나 같은 출구로 나간다
+    *[(f'walk-{d}-{rom}', rom, WALKS[d], None, (None, None), None, *WALK_END[d])
+      for d in WALKS for rom in ('original', 'cells')],
 ]
 # (이름, 롬, SET, 01/04 를 풀었을 때의 $1AAA, JMP ($1AAA) 로 00:BCC3 에 갔는가)
 CELL_CASES = [

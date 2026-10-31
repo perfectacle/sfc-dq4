@@ -76,6 +76,25 @@ class EncodeTests(unittest.TestCase):
                 'else': {'op': 'msg', 'id': '129'}}]
         self.assertEqual(encode_script(one, 'x'), bytes.fromhex('07 1c 01 00 06 61 6b 3e 0b 61 29 3f'))
 
+    def test_call_args_and_service(self):
+        # 01 + 대상 + 인자 둘, 12 + 가게 처리기 번호. 06:AFA9 는 01·12 를 1바이트로 세므로 스크립트 끝이 맞는 값만 받는다.
+        msg = {'op': 'msg', 'id': '129'}
+        body = [{'op': 'call', 'target': 'B3A0', 'args': [0x5A, 0xA5]}, msg]
+        self.assertEqual(encode_script(body, 'x'), bytes.fromhex('01 a0 b3 5a a5 61 29 3f'))
+        self.assertEqual(encode_script([{'op': 'service', 'index': 1}], 'x'), bytes.fromhex('12 01 3f'))
+        # 인자 00 은 06:AFA9 가 3바이트로 세어 뒤 메시지에 닿아 끝이 맞지만, 끝에 두면 3F 를 삼킨다.
+        self.assertEqual(encode_script([{'op': 'service', 'index': 0}, msg], 'x'), bytes.fromhex('12 00 61 29 3f'))
+        for bad in ([{'op': 'service', 'index': 0}],
+                    [{'op': 'call', 'target': 'B3A0', 'args': [0x3F, 0]}, msg],
+                    [{'op': 'service', 'index': 0x11}],
+                    [{'op': 'call', 'target': 'B3A0', 'args': [1]}],
+                    [{'op': 'call', 'target': 'B3A0', 'args': [1, 256]}]):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                encode_script(bad, 'x')
+        # 갈리지 않은 분기 안에서도 06:B23F 는 01 을 5바이트, 12 를 2바이트로 건너뛴다
+        nested = [{'op': 'if', 'cond': {'code': '05'}, 'then': body + [{'op': 'service', 'index': 1}], 'else': msg}]
+        self.assertEqual(encode_script(nested, 'x'), bytes.fromhex('07 05 06 01 a0 b3 5a a5 61 29 12 01 3e 0b 61 29 3f'))
+
     def test_invalid(self):
         msg = {'op': 'msg', 'id': '129'}
         cases = [
