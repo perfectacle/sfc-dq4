@@ -586,15 +586,16 @@ def keep_samples_code():
     적은 곡이 다 실려 있지 않아도(다른 길로 16·0A 가 지나감) C21E 는 없는 샘플을 보내므로 결과는 원래와 같다."""
     h = bytes.fromhex
     song = KEEP_SONG.to_bytes(2, 'little')
-    done = _asm([
+    # dq5song._asm 은 짧은 분기가 닿지 않아도 조용히 감싸므로, 범위를 보는 _asm_far 로 짠다
+    done = _asm_far([
         h('08 C2 30 BD 95 1D 29 FF 00 C9 FF 00'), ('b', 0xF0, 'skip'),   # 칸이 지워졌으면(1A 가 끊음) 적지 않음
         h('BD A5 1D 29 FF 00 C9 32 00'), ('b', 0x90, 'store'),           # 효과음(32~46)은 맵 곡 기록을 덮지 않게 건너뜀
         h('C9 47 00'), ('b', 0x90, 'skip'),
         ('label', 'store'), h('8D') + song,
         ('label', 'skip'), h('28 4C 84 C1'),                              # PLP / JMP $C184
-    ])
+    ], KEEP_CODE)
     busy = KEEP_BUSY.to_bytes(2, 'little')
-    mark = _asm([
+    mark = _asm_far([
         h('08 C2 30 AD') + song + h('29 FF 00'), ('b', 0xF0, 'done'),
         h('A9 01 00 8D') + busy,                                          # C21E 가 대기열 루프를 부르지 않게
         h('A3 04'),                                                       # 1A 의 칸
@@ -615,7 +616,7 @@ def keep_samples_code():
         ('label', 'next'), h('FA 7A E8 88'), ('b', 0xD0, 'new'),
         ('label', 'done'), h('9C') + busy + h('9C') + song,             # 0A 뒤에는 다 실려 있지 않다
         h('28 20 2F C3 A9 0A 00 4C 12 C1'),                               # PLP / JSR C32F / LDA #0A / JMP C112
-    ])
+    ], KEEP_CODE)
     return done, mark
 
 
