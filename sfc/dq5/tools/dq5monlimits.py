@@ -131,6 +131,8 @@ def compositions(rom, areas=None):
 def fingerprint(rom, areas=None):
     """조합 검사가 본 무리 조합과 부르기(몬스터 행동)의 요약. dq5monwrite.py 가 패치 목록에 남기고, dq5build.py 가 빌드한
     롬에서 다시 세어 다르면 검사하지 않은 조합이 있는 것으로 보고 거부한다."""
+    # 그림 자료와 몬스터 → 그림 번호는 요약에 넣지 않는다. 그림 패치 자신이 바꾸는 것이라 빌드한 롬에서는 늘 다르다.
+    # 그래서 다른 패치가 몬스터의 그림 번호를 바꿔도 이 요약으로는 잡지 못한다.
     found = compositions(rom, areas)[0]
     summons = [(m, summoned(rom, m)) for m in range(M.COUNT)]
     return hashlib.sha1(repr((sorted(found), summons)).encode()).hexdigest()

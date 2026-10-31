@@ -158,7 +158,8 @@ def build(original, lists, mb, fill=None):
 
 def check_compositions(paths, rom):
     """dq5monwrite.py 가 무리 조합을 세어 받은 몬스터 그림 패치는, 빌드한 롬의 무리·구역·부르기로 센 조합이 같아야 한다.
-    조우 패치(dq5encounterwrite.py·dq5progresswrite.py)를 넣지 않은 롬으로 만든 그림 패치를 함께 넣으면 다르다."""
+    조우 패치(dq5encounterwrite.py·dq5progresswrite.py)를 넣지 않은 롬으로 만든 그림 패치를 함께 넣으면 다르다.
+    build 명령에서만 돈다. check 명령과 이 모듈의 build() 를 바로 부르는 도구는 이 검사를 거치지 않는다."""
     for path in paths:
         with open(path, encoding='utf-8') as f:
             doc = json.load(f)

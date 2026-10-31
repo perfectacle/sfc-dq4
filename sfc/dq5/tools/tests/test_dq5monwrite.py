@@ -170,6 +170,31 @@ class PlanTests(unittest.TestCase):
             pictures, _ = self.run_plan(pictures=[{'picture': '00', 'image': 'less.png'}])
         self.assertEqual(pictures[0][3], 90)          # 아래 두 칸 줄을 비우면 타일 90개라 받는다
 
+    def test_tile_limit_midbattle(self):
+        # 12x8 칸 16x16 조각 24개 = 타일 96개. 전투 첫머리 그림이면 받고, 싸우는 도중에 풀릴 수 있는 그림이면 OAM DMA 몫을
+        # 더 남겨 89개까지라 거부한다.
+        rng = random.Random(13)
+        self.save('mid.png', [[rng.randrange(1, 3) for _ in range(96)] for _ in range(64)])
+        doc = {'pictures': [{'picture': '00', 'image': 'mid.png'}]}
+        with mock('dq5monlimits.losses', return_value=[]):
+            pictures, _ = self.run_plan(**doc)
+            self.assertEqual(pictures[0][3], 96)
+            with mock('dq5monwrite.midbattle_pictures', return_value={0}), \
+                    self.assertRaisesRegex(ValueError, '타일 96개.*89개만 닿음.*OAM DMA'):
+                self.run_plan(**doc)
+            # 같은 머리를 쓰는 그림 01 이 싸우는 도중에 풀려도 같다.
+            with mock('dq5monwrite.midbattle_pictures', return_value={1}), self.assertRaisesRegex(ValueError, 'OAM DMA'):
+                self.run_plan(**doc)
+
+    def test_midbattle_pictures(self):
+        # 부르기 대상·がったい·パルプンテ·동료 종류가 있는 몬스터의 그림. 바꾼 그림 번호를 따른다.
+        with mock('dq5monwrite.M.COUNT', 0xEC), \
+                mock('dq5monwrite.M.monster', side_effect=lambda rom, m: (m & 0x3F, [])), \
+                mock('dq5monster.record', side_effect=lambda rom, m: [0] * 0x18 + [2 if m == 5 else 0] + [0] * 0x30):
+            got = W.midbattle_pictures(None, {0x1E: (0x20, [])})
+        self.assertEqual(got, {0x20, 0x27 & 0x3F, 0x1B, 0x61 & 0x3F, 0x67 & 0x3F, 0x8C & 0x3F, 0xB2 & 0x3F,
+                               0xCF & 0x3F, W.GATTAI & 0x3F, W.PARUPUNTE, 5})
+
     def test_nmi_tiles(self):
         # 16x16 조각 26개(타일 104개). 자리 7 부터면 목록이 [14, 2]·[30, 100]·[144, 2] 셋이고, 셋째의 둘째 타일이
         # 0줄을 넘는다(그림 43 을 이렇게 늘린 전투에서 103개가 닿음). 자리 0 부터면 항목이 둘이라 모두 닿는다.
