@@ -158,39 +158,76 @@ class PlanTests(unittest.TestCase):
             self.run_plan(**doc)
 
     def test_tile_limit(self):
-        # 가로 12·세로 8 칸을 모두 다른 무늬로 칠하면 16x16 조각 24개 = 타일 96개로 NMI 한 번의 91개를 넘는다.
+        # 가로 15·세로 8 칸을 모두 다른 무늬로 칠하면 타일 120개로, 다음 NMI 한 번에 모두 보내지 못한다.
         raw = bytes([0, 0, 0, 1, 1, 0xB7, 0x80] + [0] * 11 + [0x00]) + b'\x00'
         self.rom.d[lorom(0x258C99):lorom(0x258C99) + len(raw)] = raw
         rng = random.Random(9)
-        self.save('big.png', [[rng.randrange(1, 3) for _ in range(96)] for _ in range(64)])
-        with mock('dq5monlimits.losses', return_value=[]), self.assertRaisesRegex(ValueError, '타일 96개'):
+        self.save('big.png', [[rng.randrange(1, 3) for _ in range(120)] for _ in range(64)])
+        with mock('dq5monlimits.losses', return_value=[]), self.assertRaisesRegex(ValueError, '타일 120개'):
             self.run_plan(pictures=[{'picture': '00', 'image': 'big.png'}])
-        self.save('less.png', [[rng.randrange(1, 3) if y < 56 else 0 for _ in range(96)] for y in range(64)])
+        self.save('less.png', [[rng.randrange(1, 3) if y < 48 else 0 for _ in range(120)] for y in range(64)])
         with mock('dq5monlimits.losses', return_value=[]):
             pictures, _ = self.run_plan(pictures=[{'picture': '00', 'image': 'less.png'}])
-        self.assertEqual(pictures[0][3], 84)          # 맨 아래 칸 줄을 비우면 타일 84개라 받는다
+        self.assertEqual(pictures[0][3], 90)          # 아래 두 칸 줄을 비우면 타일 90개라 받는다
+
+    def test_nmi_tiles(self):
+        # 16x16 조각 26개(타일 104개). 자리 7 부터면 목록이 [14, 2]·[30, 100]·[144, 2] 셋이고, 셋째의 둘째 타일이
+        # 0줄을 넘는다(그림 43 을 이렇게 늘린 전투에서 103개가 닿음). 자리 0 부터면 항목이 둘이라 모두 닿는다.
+        d = {'pieces': [(0, 0, True, [b''] * 4, False)] * 26}
+        self.assertEqual(M.transfer_runs(d, 7), [[14, 2], [30, 100], [144, 2]])
+        self.assertEqual(M.nmi_tiles(d, 7), 103)
+        self.assertEqual(M.transfer_runs(d, 0), [[0, 100], [112, 4]])
+        self.assertEqual(M.nmi_tiles(d, 0), 104)
+        # 8x8 조각은 자리를 잡자마자 다음 16x16 조각이 그 뒤 자리를 쓴다.
+        mixed = {'pieces': [(0, 0, False, [b''], False), (0, 0, True, [b''] * 4, False), (0, 0, False, [b''], False)]}
+        self.assertEqual(M.obj_tiles(mixed, 0), [0, 2, 3, 18, 19, 1])
+        self.assertEqual(M.transfer_runs(mixed, 0), [[0, 4], [18, 2]])
 
     def test_tile_limit_keeps_original_layout(self):
-        # 12x8 칸에 16x16 조각 24개. 마지막은 첫 조각의 반전 복사라 타일 92개(그림 6C 처럼 91 을 넘는 원본).
+        # 14x8 칸에 16x16 조각 28개. 마지막은 첫 조각의 반전 복사라 타일 108개(그림 6C 처럼 NMI 한도를 넘는 원본).
         rng = random.Random(10)
-        cells = [(x, y) for y in range(0, 8, 2) for x in range(0, 12, 2)]
-        bitmap = bytearray(12)
+        cells = [(x, y) for y in range(0, 8, 2) for x in range(0, 14, 2)]
+        bitmap = bytearray(14)
         for x, y in cells:
-            bitmap[(y * 12 + x) // 8] |= 0x80 >> ((y * 12 + x) % 8)
+            bitmap[(y * 14 + x) // 8] |= 0x80 >> ((y * 14 + x) % 8)
         tiles = b''.join(encode_tile(tile_bytes([[rng.randrange(1, 3) for _ in range(8)] for _ in range(8)]))
-                         for _ in range(92))
-        raw = bytes([0, 0, 0, 1, 1, 0xB7]) + bytes(bitmap) + bytes([0x22] * 11 + [0x26]) + tiles + bytes([0])
+                         for _ in range(108))
+        raw = bytes([0, 0, 0, 1, 1, 0xD7]) + bytes(bitmap) + bytes([0x22] * 13 + [0x26]) + tiles + bytes([0])
         self.rom.d[lorom(0x258C99):lorom(0x258C99) + len(raw)] = raw
         grid = [row[1:] for row in M.index_image(M.decode(self.rom, 0))]
         self.save('swap.png', [[{1: 2, 2: 1}.get(v, v) for v in row] for row in grid])
         broken = [list(row) for row in grid]
-        broken[48][80] = 2 if broken[48][80] == 1 else 1       # 반전 복사 쪽만 바꾸면 새 배치(타일 96개)
+        broken[48][100] = 2 if broken[48][100] == 1 else 1     # 반전 복사 쪽만 바꾸면 새 배치(타일 112개)
         self.save('broken.png', broken)
         with mock('dq5monlimits.losses', return_value=[]):
             pictures, _ = self.run_plan(pictures=[{'picture': '00', 'image': 'swap.png'}])
-            self.assertEqual(pictures[0][3], 92)
-            with self.assertRaisesRegex(ValueError, '타일 96개'):
+            self.assertEqual(pictures[0][3], 108)
+            with self.assertRaisesRegex(ValueError, '타일 112개'):
                 self.run_plan(pictures=[{'picture': '00', 'image': 'broken.png'}])
+
+    def test_compositions_recorded_and_built(self):
+        # 조합을 센 그림 패치는 그 조합의 요약을 남기고, 빌더는 빌드한 롬에서 다시 센 요약이 다르면 거부한다.
+        rng = random.Random(12)
+        self.save('tall.png', [[rng.randrange(1, 3) for _ in range(16)] for _ in range(24)])
+        doc = {'format': FORMAT, 'pictures': [{'picture': '00', 'image': 'tall.png'}]}
+        with mock('dq5monlimits.losses', return_value=[]), mock('dq5monlimits.fingerprint', return_value='aa'):
+            manifest = W.patch(self.rom, doc, self.dir, at=0x3C8000)
+        self.assertEqual(manifest['compositions'], {'areas': None, 'sha1': 'aa'})
+        self.save('same.png', self.grid)
+        same = W.patch(self.rom, {'format': FORMAT, 'pictures': [{'picture': '00', 'image': 'same.png'}]}, self.dir)
+        self.assertNotIn('compositions', same)          # 조합을 세지 않은 패치(크기·조각 그대로)
+        path = self.dir / 'monster.dq5patch.json'
+        path.write_text(json.dumps(manifest), encoding='utf-8')
+        import dq5build
+        with mock('dq5monlimits.fingerprint', return_value='aa'):
+            dq5build.check_compositions([path], bytes(self.rom.d))
+        with mock('dq5monlimits.fingerprint', return_value='bb'), \
+                self.assertRaisesRegex(dq5build.PatchError, '조우 패치를 먼저 넣은 롬'):
+            dq5build.check_compositions([path], bytes(self.rom.d))
+        # 구역 표를 옮긴 롬을 구역 수 없이 세면 compositions 가 거부하는데, 그것도 다른 것으로 본다.
+        with mock('dq5monlimits.fingerprint', side_effect=ValueError('구역 표를 옮긴 롬')), \
+                self.assertRaisesRegex(dq5build.PatchError, '무리·구역·부르기가 다름'):
+            dq5build.check_compositions([path], bytes(self.rom.d))
 
     def test_resize_and_header(self):
         # 2x2 칸 그림을 3x4 칸으로 키우고 머리 +0~+4 를 바꾼다. 크기가 바뀌면 조합을 다시 센다(머리를 함께 넘김).

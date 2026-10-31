@@ -4,6 +4,7 @@
 결과 롬·IPS 는 work/ 아래에만 쓴다(커밋하지 않는다).
 
   build    패치 목록 여럿 → 롬(-o)과 IPS(--ips). --size 로 롬 크기(MB), 목록의 rom_size 중 큰 값이 우선.
+           무리 조합을 센 몬스터 그림 패치(dq5monwrite.py, compositions)는 빌드한 롬에서 조합을 다시 세어 견준다
            --fill-free XX 는 아무 목록도 쓰지 않은 빈 자리를 XX 로 채운다(빈 자리 지도를 시험할 때)
   check    패치 목록만 검사(겹침, orig, 범위)
   free     원래 롬의 빈 자리 지도와 늘린 뒤 새로 생기는 뱅크
@@ -155,6 +156,26 @@ def build(original, lists, mb, fill=None):
     return bytes(checksum(d)), allw
 
 
+def check_compositions(paths, rom):
+    """dq5monwrite.py 가 무리 조합을 세어 받은 몬스터 그림 패치는, 빌드한 롬의 무리·구역·부르기로 센 조합이 같아야 한다.
+    조우 패치(dq5encounterwrite.py·dq5progresswrite.py)를 넣지 않은 롬으로 만든 그림 패치를 함께 넣으면 다르다."""
+    for path in paths:
+        with open(path, encoding='utf-8') as f:
+            doc = json.load(f)
+        seen = doc.get('compositions')
+        if seen is None:
+            continue
+        from dq5map import Rom
+        from dq5monlimits import fingerprint
+        try:
+            now = fingerprint(Rom(rom), seen.get('areas'))
+        except ValueError as e:
+            now = str(e)
+        if now != seen.get('sha1'):
+            raise PatchError(f'{doc.get("name") or path}: 무리 조합 검사를 한 롬과 빌드한 롬의 무리·구역·부르기가 다름 — '
+                             '조우 패치를 먼저 넣은 롬으로 dq5monwrite.py 를 다시 돌림')
+
+
 RLE_MIN = 16
 
 
@@ -276,6 +297,7 @@ def main():
             print(f'목록 {len(lists)}개, 쓰기 {len(allw)}개 {sum(e - o for o, e, _, _ in allw)}바이트, 겹침 없음')
             return 0
         out, allw = build(original, lists, mb, a.fill_free)
+        check_compositions(a.inputs, out)
     except PatchError as e:
         print(f'오류: {e}', file=sys.stderr)
         return 1

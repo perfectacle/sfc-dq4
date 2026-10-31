@@ -66,15 +66,15 @@ class PlaceTests(unittest.TestCase):
 
 class LimitTests(unittest.TestCase):
     def test_budgets(self):
-        with Fakes():
+        with Fakes(), mock('dq5monlimits.PIECE_LIST_LIMIT', 7):
             got = L.budgets(None, FOUND)
-        # 조각: 조각 목록 합이 가장 큰 b(7) 에 걸려 0. 줄: a 는 (27 - 16) // 8 = 1, b 는 (27 - 12) // 4 = 3.
+        # 조각: 조각 목록 한도를 7 로 두면 b(1 + 6 = 7) 에 걸려 0. 줄: a 는 (27 - 16) // 8 = 1, b 는 (27 - 12) // 4 = 3.
         # 자리: 합이 가장 큰 b(1 + 6 = 7) 에 걸려 0.
         self.assertEqual(got[0], {'pieces': 0, 'bands': [1, 1], 'slots': 0, 'compositions': 2})
         self.assertEqual(got[1], {'pieces': 0, 'bands': [23, 23, 15, 15], 'slots': 0, 'compositions': 1})
 
     def test_losses(self):
-        with Fakes():
+        with Fakes(), mock('dq5monlimits.PIECE_LIST_LIMIT', 7):
             self.assertEqual(L.losses(None, {0: (1, [2, 2])}, found=FOUND), [])
             self.assertEqual(L.losses(None, {0: (1, [3, 3])}, found=FOUND), [])
             band = L.losses(None, {0: (1, [4, 4])}, found=FOUND)
@@ -132,6 +132,21 @@ class LimitTests(unittest.TestCase):
                 loaded = L.Pictures(None).band_rows(((0, 1, 0), (1, 1, 0)))
         self.assertEqual((chain, full, loaded), (6, 13, 6))
 
+    def test_listed_summons(self):
+        # 조각 목록에는 전투를 시작할 때 푼 그림과 부르기로 올 그림이 든다. 놓이지 않아 풀지 않은 무리의 그림은 없다.
+        with Fakes(), mock.dict(SHAPES, {4: (2, 2, 5, [1, 1])}), mock.dict(SLOTS, {4: 1}), mock.dict(HEADS, {4: 4}):
+            pics = L.Pictures(None)
+            alone = pics.listed(((0, 1, 0),))
+            with mock.dict(SUMMONS, {0: (4,)}):
+                called = pics.listed(((0, 1, 0),))
+            # 조각 40 인 그림 1 둘째 무리는 조각 합 100 에 걸려 놓이지 않는다(1 × 60 + 40 = 100).
+            with mock.dict(SHAPES, {0: (2, 2, 60, [2, 2]), 1: (4, 4, 40, [4, 4, 4, 4])}):
+                cut = L.Pictures(None).listed(((0, 1, 0), (1, 1, 0)))
+            with mock('dq5monlimits.PIECE_LIST_LIMIT', 5), mock.dict(SUMMONS, {0: (4,)}), mock('dq5monlimits.M.COUNT', 5):
+                over = L.losses(None, {0: (1, [2, 2])}, found={((0, 1, 0),): 'e'})
+        self.assertEqual((alone, called, cut), (1, 6, 60))
+        self.assertEqual([(x[3], x[4]) for x in over], [('e', '조각 목록 6개 > 5개')])
+
     def test_summoned(self):
         # 몬스터 1 의 행동 여섯(23:8000 + 25 + 11~16)에 AE·B5 와 부르기가 아닌 AD·B6 이 섞여 있다.
         data = bytearray(lorom(0x238000) + 25 * 2)
@@ -159,9 +174,10 @@ class LimitTests(unittest.TestCase):
     def test_budgets_merge_same_head(self):
         # 몬스터 1 이 그림 3(그림 0 과 같은 머리)을 쓰면, 두 번호의 여유는 함께 센 하나다.
         found = {((0, 4, 0), (1, 4, 0)): 'c', ((0, 2, 0),): 'd'}
-        with Fakes(), mock.dict(HEADS, {3: 0}), mock('dq5monlimits.M.monster', side_effect=lambda rom, m: ([0, 3][m], [])):
+        with Fakes(), mock.dict(HEADS, {3: 0}), mock('dq5monlimits.M.monster', side_effect=lambda rom, m: ([0, 3][m], [])), \
+                mock('dq5monlimits.PIECE_LIST_LIMIT', 2):
             got = L.budgets(None, found)
-        # 조각: 조각 목록 합이 가장 큰 c(번호 둘, 2)에서 남는 0. 줄: c 는 같은 줄에 8마리라 (27 - 16) // 8 = 1.
+        # 조각: 조각 목록 한도를 2 로 두면 c(번호 둘, 1 + 1)에서 남는 0. 줄: c 는 같은 줄에 8마리라 (27 - 16) // 8 = 1.
         self.assertEqual(got[0], got[3])
         self.assertEqual(got[0], {'pieces': 0, 'bands': [1, 1], 'slots': 0, 'compositions': 2})
 

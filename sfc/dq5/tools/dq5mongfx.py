@@ -253,6 +253,60 @@ def slot_count(d):
     return big + (small + 3) // 4
 
 
+# 그림 하나의 타일은 다음 NMI 한 번(00:FD4A)에 22:B235 의 목록 7E:0F5E 로 보낸다. 전투는 overscan 이라 NMI 가 240줄에
+# 들고, VRAM 쓰기는 다음 프레임 0줄에서 끊긴다. 마스터 주기로 잰 값: 첫 DMA 는 241줄 346~378, DMA 는 바이트마다 8,
+# 줄마다 메모리 새로 고침 40, 다음 항목의 DMA 까지 486.
+LINE, REFRESH = 1364, 40
+NMI_FIRST_DMA = 241 * LINE + 378
+NMI_DEADLINE = 262 * LINE
+NMI_ENTRY_GAP = 486
+
+
+def obj_tiles(d, start):
+    """그림을 자리 start 부터 이어진 사슬에 풀 때 조각 타일의 OBJ 타일 번호(22:ACFE·22:9D8F·22:9E1C). 16x16 조각은 자리
+    하나씩, 8x8 조각은 넷째마다 새 자리의 0·1·16·17 칸에 놓고, 그 자리를 잡자마자 다음 16x16 조각은 그 뒤 자리를 쓴다."""
+    def first(s):
+        return (s % 8) * 2 + (s // 8) * 32
+    slot, small, k, out = start, 0, 0, []
+    for _, _, big, _, mirrored in d['pieces']:
+        if mirrored:
+            continue
+        if big:
+            out += [first(slot) + o for o in (0, 1, 16, 17)]
+            slot += 1
+            continue
+        if k == 0:
+            small, slot = slot, slot + 1
+        out.append(first(small) + (0, 1, 16, 17)[k])
+        k = (k + 1) % 4
+    return out
+
+
+def transfer_runs(d, start):
+    """NMI 목록 7E:0F5E 의 항목: 이어진 OBJ 타일 번호마다 [첫 타일, 타일 수]. 22:B235 가 번호 차례로 적는다."""
+    out = []
+    for t in sorted(set(obj_tiles(d, start))):
+        if out and out[-1][0] + out[-1][1] == t:
+            out[-1][1] += 1
+        else:
+            out.append([t, 1])
+    return out
+
+
+def nmi_tiles(d, start, margin=0):
+    """그 NMI 에 VRAM 에 닿는 타일 수(앞 번호부터). margin 마스터 주기만큼 일찍 끊긴다고 본다."""
+    per_tile = 32 * 8 * LINE / (LINE - REFRESH)
+    t, arrived = NMI_FIRST_DMA, 0
+    for i, (_, count) in enumerate(transfer_runs(d, start)):
+        t += NMI_ENTRY_GAP if i else 0
+        for _ in range(count):
+            t += per_tile
+            if t > NMI_DEADLINE - margin:
+                return arrived
+            arrived += 1
+    return arrived
+
+
 def band_counts(d):
     """그림의 8픽셀 줄마다 OBJ 타일 수(22:9822 가 7E:5B60 에 적는 값). 16x16 조각은 두 줄에 2씩 센다."""
     counts = [0] * d['h']

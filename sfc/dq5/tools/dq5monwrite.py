@@ -25,6 +25,7 @@
 
 크기·띄움·들어올림을 바꾸었거나 조각·줄마다 타일·16x16 자리(22:91F7)가 원래보다 많은 그림은 입력 롬의 무리·구역으로 센 조합 검사(dq5monlimits.py)를 거친다. 같은 빌드에서
 무리·구역을 바꾸면 그 패치를 먼저 넣은 롬을 입력으로 주고, 구역 수를 늘렸으면 --progress 또는 --areas 를 준다.
+조합을 센 패치 목록에는 그 조합의 요약(compositions)을 남겨, dq5build.py build 가 빌드한 롬의 무리·구역·부르기와 다르면 거부한다.
 
 새 그림이 원래 자리보다 길면 --at 에 놓는다. 머리 포인터 표는 그림 번호 구간마다 뱅크 25·26·27 의 16비트라,
 이때는 22:9014 를 24비트 포인터 표(--at 첫머리)로 읽는 코드로 바꾼다.
@@ -58,9 +59,10 @@ E4_BANK, E4_READ = 0x02F48D, 0x02F498                  # LDA #$27 (STA $02) / LD
 E4, E4_COLORS = 0xE4, 10
 READ_ORIGINAL, BANK_ORIGINAL = bytes.fromhex('bf dc e5 27'), bytes.fromhex('a9 27')
 MAX_COLORS = 15                 # OBJ 팔레트 1~15. 22:A5A4 는 색 수 0 이면 65536번 돈다
-# 그림 하나의 타일은 풀고 난 다음 NMI 한 번(00:FD4A)에 VRAM 으로 보내, 많으면 화면 기간에 걸린 뒤쪽이 VRAM 에 닿지 않는다.
-# 원래 그림 가운데 한 번에 보내는 가장 많은 수가 그림 70(EA)의 91개다. 110개인 그림 6C 는 E4 일 때 22:90FA 가 나눠 보낸다.
-TILE_LIMIT = 91
+# 그림 하나의 타일은 풀고 난 다음 NMI 한 번(00:FD4A)에 VRAM 으로 보내, 많으면 0줄을 넘긴 뒤쪽이 VRAM 에 닿지 않는다
+# (dq5mongfx.nmi_tiles). 첫 자리가 자리 줄 어디에 오든 모두 닿아야 받고, 잰 가장 늦은 첫 DMA 에 타일 하나 몫을 남긴다.
+# 원래 그림 6C(110개)는 셈으로 뒤 5개가 닿지 않고, E4 일 때 22:90FA 가 한 프레임 뒤에 6개를 다시 보낸다.
+NMI_MARGIN = 264
 WIDTHS = (*range(1, 16), 0x13)  # 머리 +5 상위 니블 0~E → 1~15, F → 19
 HEIGHTS = range(1, 17)
 SHADOWS = 0x22B4FE              # 그림자 모양 표(22:B44A). 번호 × 2 의 칸이 FFFF 면 그림자 자료가 없음
@@ -332,6 +334,17 @@ def heads(rom):
     return {h: (gs, decode(rom, gs[0])['end']) for h, gs in out.items()}
 
 
+def nmi_short(d):
+    """첫 자리를 자리 줄의 0~7 번째에 두어 NMI 한 번에 닿지 않는 타일이 있으면 (첫 자리, 닿는 수), 없으면 None.
+    새 전투는 자리를 이어서 주므로 줄 안 위치만 목록 항목을 바꾼다."""
+    tiles = len(M.obj_tiles(d, 0))
+    for start in range(8):
+        arrived = M.nmi_tiles(d, start, NMI_MARGIN)
+        if arrived < tiles:
+            return start, arrived
+    return None
+
+
 def picture_limits(rom, g):
     """(조각, 타일, 가로 칸, 세로 칸, 줄마다 타일 최대). 몬스터의 그림을 바꿀 때 원래 그림 이하로 둔다."""
     d = decode(rom, g)
@@ -340,6 +353,11 @@ def picture_limits(rom, g):
 
 
 def plan(rom, doc, base, areas=None):
+    return plan_all(rom, doc, base, areas)[:2]
+
+
+def plan_all(rom, doc, base, areas=None):
+    """(그림, 몬스터, 무리 조합을 다시 셌는지)."""
     if not isinstance(doc, dict) or doc.keys() - {'format', 'pictures', 'monsters'} or doc.get('format') != FORMAT:
         raise ValueError(f'문서는 format={FORMAT}, pictures·monsters 만 담은 객체여야 함')
     if records_moved(rom):
@@ -366,10 +384,11 @@ def plan(rom, doc, base, areas=None):
         limit = stats(d)
         slots = M.slot_count(decode_bytes(raw))
         hd, old = M.parse_header(raw[:6]), M.parse_header([rom.u8(head_of(rom, g) + k) for k in range(6)])
-        # 그림 6C(110개)는 22:90FA 가 정해진 6타일을 다시 보내 버티므로, 원래 배치 그대로일 때만 91개를 넘겨 받는다.
-        if tiles > TILE_LIMIT and keep_layout(rom, g, grid) is None:
-            raise ValueError(f'{label}: 타일 {tiles}개 — 한 그림의 타일은 NMI 한 번에 VRAM 으로 보내므로 {TILE_LIMIT}개까지'
-                             f'(원래 배치를 그대로 쓰면 원래 {limit[1]}개까지)')
+        # 그림 6C 는 22:90FA 가 정해진 6타일을 다시 보내 버티므로, 원래 배치 그대로일 때만 NMI 한도를 넘겨 받는다.
+        short = nmi_short(decode_bytes(raw))
+        if short and keep_layout(rom, g, grid) is None:
+            raise ValueError(f'{label}: 타일 {tiles}개 — 한 그림의 타일은 다음 NMI 한 번에 VRAM 으로 보내, 첫 자리가 '
+                             f'{short[0]} 이면 {short[1]}개만 닿음(원래 배치를 그대로 쓰면 원래 {limit[1]}개까지)')
         # 크기·띄움·들어올림은 줄·y·가로 자리를 바꾸므로(22:A001·22:9284) 조합을 다시 센다.
         if pieces > limit[0] or slots > M.slot_count(d) or len(bands) > len(limit[2]) or \
                 any(a > b for a, b in zip(bands, limit[2])) or \
@@ -439,7 +458,7 @@ def plan(rom, doc, base, areas=None):
             shown = ' '.join(f'{m:02X}x{n}' for m, n, _ in groups)
             raise ValueError(f'그림 {", ".join(f"{g:02X}" for g in sorted(grown))}: 크기·띄움·들어올림을 바꾸었거나 조각·줄마다 타일·자리가 원래보다 많아 '
                              f'무리 조합 {len(bad)}개에 걸림. 첫째: {where} [{shown}] 놓이는 수 {old} → {new}, {why}')
-    return pictures, monsters
+    return pictures, monsters, bool(grown)
 
 
 def find_code(table):
@@ -452,7 +471,7 @@ def find_code(table):
 
 
 def patch(rom, doc, base=Path('.'), at=None, areas=None, records_at=None):
-    pictures, monsters = plan(rom, doc, base, areas)
+    pictures, monsters, counted = plan_all(rom, doc, base, areas)
     writes = []
 
     def write(addr, data, note, orig=True):
@@ -527,7 +546,12 @@ def patch(rom, doc, base=Path('.'), at=None, areas=None, records_at=None):
     for a, b in spans:
         if lorom(a) < ORIGINAL_SIZE and not inside(lorom(a), b - a, free):
             raise ValueError(f'옮긴 자료 {cpu(a)}~ 가 원래 롬의 코드·자료 자리와 겹침(빈 자리 지도 밖)')
-    return {'format': 'dq5patch/1', 'name': 'monster-pictures', 'writes': writes}
+    manifest = {'format': 'dq5patch/1', 'name': 'monster-pictures', 'writes': writes}
+    if counted:
+        # 입력 롬의 무리·구역으로만 셌으므로, 다른 패치가 무리·구역·부르기를 바꾸면 dq5build.py 가 거부한다.
+        from dq5monlimits import fingerprint
+        manifest['compositions'] = {'areas': areas, 'sha1': fingerprint(rom, areas)}
+    return manifest
 
 
 def parse(text):
