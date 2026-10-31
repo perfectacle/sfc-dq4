@@ -32,6 +32,7 @@
 | `dq4build.py --out 폴더 [--no-prologue] [--assets 폴더 \| --no-sound]` | 1장 통합 롬을 처음부터: 타이틀 레이어·1장 메시지(함께) → 타이틀 롬 → 서곡 → 메뉴 → `dq4chapter1.py build` → 곡 묶음(`dq4soundset.py @dq4sound-game.args`, 결과 `dq4-ch1-sound.sfc`). 곡 묶음은 자원 저장소(`--assets`, 기본 `DQ4_ASSETS`)의 NDS 곡을 읽고, 없으면 곡 없이 `dq4-ch1.sfc` 로 끝냄. 곡 앞 단계는 `dq4buildcache.py` 를 거쳐 바뀌지 않은 단계를 캐시에서 꺼내고, 곡 묶음은 자기 캐시(자원 저장소 `sfc/dq4/cache/sound`)를 씀. `ASAR`·`DQ4_GALMURI` 필요. 중간 롬도 그 폴더에 남김 |
 | `dq4publish.py build [--commit] \| stamp \| check` | 1장 롬을 `dq4build.py` 로 만들어 원본 DQ5 와의 IPS 를 비공개 에셋 저장소(`DQ4_ASSETS`)의 `sfc/dq4/ips/` 에 쓰고, `--commit` 이면 그 저장소에 커밋·push. origin/main 에 들어간 커밋에서 추적 파일을 고치지 않은 상태로만 만듦. `SOURCE.txt` 에 커밋과 입력 해시(`dq4build.py` 에서 닿는 도구 파일과 `uv.lock`)를 적고, `check` 는 그 해시를 지금 소스로 다시 세어 IPS 가 뒤처졌는지 알림(롬 없이 돎) |
 | `dq4prologuecheck.py --rom 롬 --out 폴더` | 새 게임부터 서장 끝(1장 왕좌의 방)까지 한 번에 걷는 MesenCE 헤드리스 검사. `MESENCE`·`LIBDIR` 필요. [서장 검증](../docs/dq4-prologue-format.md#검증) |
+| `dq4ch1walkcheck.py --rom 롬 --out 폴더 [--from 구간 --states 폴더] [--until 구간]` | 새 게임부터 1장 끝(2장 제목 상자)까지 구간 26개를 세이브스테이트로 이어 걷는 MesenCE 헤드리스 검사. 맵 사이는 순간이동, 깃발은 사건이 켠 것만. `lua/dq4walkstate.lua`(walk.lua + 메시지 번호 + 끝 세이브스테이트)를 씀. `MESENCE`·`LIBDIR` 필요. [1장 검증](../docs/dq4-chapter1-format.md#이어-걷기) |
 | `dq4menumsg.py [그림]` | `dq4menupatch.py build` 가 부르는 메뉴 메시지 모듈. 보행 메시지를 새 허프만 트리로 뱅크 `65`~ 에 옮기고 한글 글자를 넣음. 직접 실행하면 세 메시지 미리보기. [메뉴 메시지](../docs/dq4-menu-format.md#메뉴-메시지) |
 | `dq4nameentrycheck.py --rom 롬 --symbols 심볼 --out 새폴더` | MesenCE에서 조합·삭제·Y 완료·새 게임 이름을 검사하고 입력 칸 VRAM을 비교. `MESENCE` 실행 파일 필요. [재현](../docs/dq4-name-entry-format.md#재현) |
 | `dq4namecursorcheck.py --rom 롬 --symbols 심볼 --out 새폴더` | MesenCE 실제 입력으로 빠른 방향 전환·겹침·반복·빈칸 경계와 Start 이동을 검사. `MESENCE` 실행 파일 필요. [재현](../docs/dq4-name-entry-format.md#재현) |
@@ -46,6 +47,7 @@
 | `dq4windowcheck.py --rom 롬 --symbols wn.sym --ship work/state/ship.mss --party 09/00세이브 --out 새폴더 [--only 이름]` | 선실 대화 64장면과 무작위 입력 여덟 벌에서 창 글자가 가나 칸 슬롯과 겹쳐 깨지거나 메시지 창에 비치는 칸을 찾고 빨간 네모 시트를 남김. `MESENCE` 필요. [창 글자 깨짐 검사](../docs/dq4-window-text-format.md#창-글자-깨짐-검사) |
 | `dq4bg3slotcheck.py --old 원래롬 --new 새롬 --state work/state/ship.mss --out 새폴더 [--maps 맵,...]` | 실내 맵마다 순간이동해 명령 창을 열고, BG3 타일맵을 옮긴 롬이 버퍼와 같은 타일맵을 보이는지·옛 자리를 건드리지 않는지 원래 롬과 견줌. `MESENCE` 필요. [BG3 타일맵 옮기기](../docs/dq4-window-text-format.md#bg3-타일맵-옮기기) |
 | `lua/dq4bg3slotwarp.lua` | `dq4bg3slotcheck.py` 가 부름. `dq5warp.lua` 를 돌리며 30프레임마다 맵, `$0725`, 타일맵과 버퍼 `7E:5000` 차이, 옛 자리 `1C00`~`1FFF` 변화를 `bg3.txt` 에 적음. `SHOTS` 프레임 화면도 남김 |
+| `lua/dq4walkstate.lua` | `dq4ch1walkcheck.py` 가 부름. `WALK`(tools/lua/walk.lua)를 그대로 돌리며 메시지 루틴 `24:8BAF` 가 받은 번호와 프레임을 `walk.txt` 끝에 덧붙이고, 끝 프레임에 세이브스테이트 `SAVE` 를 남김 |
 | `dq4soundcatalog.py --assets 폴더 [--dq5-rom 롬] --out JSON` | NDS 곡·효과음 목록, FC 장면 대응, DQ5 재사용 후보와 숙박곡 비교. [사운드 포팅](../docs/dq4-sound-port-format.md) |
 | `dq4soundport.py export --assets 폴더 --out 폴더` | NDS 악보 JSON 을 DQ5 시퀀스로(템포·세기 합치기, 꼬리를 남기는 성부 배분, 되풀이·깊이 3 부르기로 묶기와 KOF 미리 보기 검산, 손실 보고서) |
 | `dq4soundbank.py --score JSON --assets 폴더 --out 폴더 [--max-rate 8000]` | 곡에 쓰이는 NDS PCM 을 S-DSP 계산으로 BRR 로(무음 첫 블록, 실기 SNR) |
