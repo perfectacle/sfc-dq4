@@ -61,6 +61,12 @@ class SpellGrowTests(unittest.TestCase):
             self.assertEqual(grow.value(after, base, size, 0xC7), grow.value(self.rom, base, size, 0x01))
             self.assertEqual(grow.value(after, base, size, 0xD5), grow.value(self.rom, base, size, 0xD5))
         self.assertEqual(after.u8(grow.MENU_MP + 0xC7), 7)
+        self.assertEqual(after.u8(grow.MENU_MP + 0xC6), 9)              # MP 를 바꾸면 창 칸도 그 MP
+        for mp, menu in ((0x1F, 0), (0x1E, 36), (0x1D, 0xFF)):
+            got = apply(self.data, grow.patch(self.rom, doc({'id': 'C6', 'copy': '27', 'MP': mp}), 0x6E8000))
+            self.assertEqual(got.u8(grow.MENU_MP + 0xC6), menu)
+        both = apply(self.data, grow.patch(self.rom, doc({'id': 'C6', 'copy': '27', 'MP': 9, 'menu_mp': 4}), 0x6E8000))
+        self.assertEqual(both.u8(grow.MENU_MP + 0xC6), 4)               # menu_mp 를 적으면 그 값
         where = int.from_bytes(after.d[lorom(0x268B6F):lorom(0x268B6F) + 3], 'little')
         self.assertEqual(where, 0x6E8000)
         self.assertEqual(after.u8(where + 0xC7), self.rom.u8(0x268BE0 + 0x01))

@@ -268,7 +268,8 @@ def writes_for(docs, data):
 
 def field_mp_warnings(writes, data):
     """전투 MP 를 바꾼 주문 가운데 필드에서도 외우는 것의 필드 MP(dq5spellfx.py 의 field_handlers, 뱅크 11 의 즉값)가
-    새 전투 MP 와 다르면 그 경고 문장들. 필드에서 외울 때는 그 즉값만큼 빼고, 창의 MP 숫자는 21:9BB4 를 보인다."""
+    새 전투 MP 와 다르면 그 경고 문장들. 필드에서 외울 때는 그 즉값만큼 빼고, 창의 MP 숫자는 21:9BB4 를 보인다.
+    즉값은 입력 롬에서 읽으므로, 같은 빌드에 dq5spellfx.py 패치로 맞춘 경우에도 경고가 나온다(그때는 무시해도 됨)."""
     from dq5spellfx import FIELD_COUNT, FIELD_FIRST, FIELD_MP, FIELD_TABLE
     out = []
     for off, new, old, label in writes:
@@ -278,7 +279,8 @@ def field_mp_warnings(writes, data):
         handler = int.from_bytes(data[lorom(FIELD_TABLE + (n - FIELD_FIRST) * 2):][:2], 'little')
         if handler in FIELD_MP and data[lorom(FIELD_MP[handler][0])] != new & 0x1F:
             out.append(f'경고: spells {n:02X} 의 필드 MP(처리기 11:{handler:04X})는 {data[lorom(FIELD_MP[handler][0])]} 그대로라 '
-                       f'필드에서 외우면 그만큼 뺌(창에는 {new & 0x1F}). dq5spellfx.py 의 field_handlers 에서 맞출 것')
+                       f'필드에서 외우면 그만큼 뺌(창에는 {new & 0x1F}). dq5spellfx.py 의 field_handlers 에서 맞출 것'
+                       f'(같은 빌드에 그 패치를 이미 넣었으면 무시)')
     return out
 
 
@@ -318,6 +320,7 @@ def check(docs, data):
                         want = v if kind == 'int' else fmt(kind, t.fields[k][1], parse(kind, v))
                         if got[k] != want:
                             bad.append(f'{key} {entry["id"]} {k}: 적은 값 {v!r}, 읽은 값 {got[k]!r}')
+    # 회귀 막이: 지금은 writes_for 가 MP 를 바꿀 때 늘 창 칸도 맞추므로 걸리지 않는다. 그 맞춤이 빠지면 여기서 잡힌다.
     for n in range(SPELL_COUNT):
         battle = d[lorom(0x268765 + n)] & 0x1F
         if d[lorom(MENU_MP + n)] != menu_mp(battle) and data[lorom(MENU_MP + n)] == menu_mp(data[lorom(0x268765 + n)] & 0x1F):
