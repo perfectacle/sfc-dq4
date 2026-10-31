@@ -12,7 +12,7 @@ DB를 바꾼 뒤 01:A668의 LDX $00A5와 01:A67D의 STA $420B도 같은 뱅크�
 평면도 함께 읽는 훅으로 바꾼다. 평면은 롬이라 게임이 칸을 바꾸는 00:CF50(밤에 빛나는 풀 등, 부르는 곳 넷이 칸과 번호를
 즉값으로 줌)은 10·11번째 비트를 바꾸지 못한다. 그래서 그 칸들(즉값을 롬에서 읽으므로 dq5chestwrite.py 의 field 로 옮긴 빛 칸도 따름)에 512 이상을 두면
 거부한다. 지도 패치는 상자 패치를 넣은 롬에서 만든다(반대 순서는 dq5chestwrite.py 가 512 이상 칸을 거부).
-10·11번째 비트 평면을 쓰는 세계는 한 번의 patch 에 함께 준다(훅이 하나다). 블록 표를 늘린 롬이면 00:BBF7·00:BDC5 의 몸통을
+10·11번째 비트 평면을 쓰는 세계는 한 번의 patch 에 함께 준다(훅이 하나다). 블록 표를 늘린 롬이면 00:BBF7 의 몸통을
 빠른 훅(fast_hook)으로 바꾸고 세계마다 32KB 의 반 바이트 평면(nibble_plane)을 더 둔다(필드 불러오기 프레임을 원본과 맞춤).
 세계 지도 화면의 점 하나(03:CB07)와 지형 루틴(03:CB1B, 조우·융단·天空城 착륙)도 같은 셈으로 지형까지 한 번에 내는 훅으로
 바꾼다(점을 다 만드는 프레임을 원본과 맞춤, 03:CB1B 가 원래처럼 A 윗바이트 0 으로 돌아가게).
@@ -199,9 +199,10 @@ def bit10_hook(planes):
     return b'\x80\x09' + b''.join((p or 0).to_bytes(3, 'little') for p in planes) + head + arms + tail
 
 
-# 00:BBF7(블록 번호와 블록 표)·00:BDC5(번호만, 지형·세계 지도 화면) 의 앞머리 명령 뒤. 둘 다 M·X 16비트에 같은 바이트이고,
-# 빠른 훅(fast_hook)이 JML 로 들어가는 자리다.
-FAST_SITES, FAST_ORIG = (0x00BBF8, 0x00BDC9), bytes.fromhex('a590c900')
+# 00:BBF7(블록 번호와 블록 표)의 앞머리 명령 뒤(M·X 16비트). 빠른 훅(fast_hook)이 JML 로 들어가는 자리다.
+# 번호만 내는 00:BDC5 는 03:CB1B 만 부르고(JSL $00BDC1), 03:CB07·03:CB1C 를 훅으로 바꾸면 부르는 곳이 없다.
+# 그래도 그 9번째 비트 읽기(00:BE06)는 10·11번째 비트 훅으로 바뀌어 있어 불리더라도 번호는 맞다.
+FAST_SITE, FAST_ORIG = 0x00BBF8, bytes.fromhex('a590c900')
 # 03:CB07: たびびとのちず 화면의 점 하나(03:CAC2 가 JSR, M 8비트·X 16비트). $CE·$D0 을 $90·$92 에 두고 03:CB1B(지형) 를 JSL 한다.
 MAP_SITE, MAP_ORIG = 0x03CB07, bytes.fromhex('daa6ce86')
 # 03:CB1B(PHP 뒤 REP #$30 / PHX / PHY): $90·$92 칸의 지형을 A 에 낸다. 01:81D6(융단의 다음 칸)·01:84E0(걸음마다 $1AA0)·
@@ -224,24 +225,22 @@ def nibble_plane(grid):
 
 
 def fast_hook(at, nibbles, lower, upper, land):
-    """00:BBF8·00:BDC9·03:CB07·03:CB1C 대신(JML 로 들어옴). (훅, 둘째·셋째·넷째 입구의 훅 안 자리)를 돌려준다. 훅은
-    [00:BBF8 몸통][00:BDC9 몸통][03:CB07 몸통][03:CB1C 몸통][XMASK][TILE_BITS] 이다. nibbles 는 세계 0·1·2 의 반 바이트 평면(nibble_plane)
+    """00:BBF8·03:CB07·03:CB1C 대신(JML 로 들어옴). (훅, 둘째·셋째 입구의 훅 안 자리)를 돌려준다. 훅은
+    [00:BBF8 몸통][03:CB07 몸통][03:CB1C 몸통][XMASK][TILE_BITS] 이다. nibbles 는 세계 0·1·2 의 반 바이트 평면(nibble_plane)
     주소, lower·upper 는 옮긴 블록 표(번호 511 부터), land 는 지형 표(03:CB2A 가 읽는 자리).
-    00:BBF7 은 필드를 불러올 때 화면 칸마다(세계 0 (341,56) 에서 1,090번), 00:BDC5 는 세계 지도 화면에서 점마다(15,360번) 불린다.
+    00:BBF7 은 필드를 불러올 때 화면 칸마다(세계 0 (341,56) 에서 1,090번), 03:CB07 은 세계 지도 화면에서 점마다(15,360번) 불린다.
     00:BBF7 이 원래보다 칸마다 70마스터 클록쯤 길면 불러오기가 한 프레임 늦어진다. 그래서 9번째 비트 훅처럼 비트마다
     마스크하지 않고 10·11번째 비트를 반 바이트 평면 한 번으로 읽고, 원래 루틴의 JSR·DB 바꾸기·칸 계산을 덜어 원래 루틴과
     거의 같은 사이클로 맞춘다.
     - 좌표가 0200 이상이면 원래처럼 A = 0 으로 00:BC43(JSR $BC4E)·00:BE14(PLB / PLP / RTS) 에 돌아간다.
     - 00:BBF8: 번호 511 미만은 INDEX5 뒤 PEA $BC45 로 00:BC6D 에 들어가 원래 표를 읽고 00:BC9B 의 RTS 로 00:BC46 에 온다.
       511 이상은 옮긴 표에서 $94~$97 을 채우고 00:BC46(PLP / RTS) 로 JML 한다.
-    - 00:BDC9: 번호(A 윗바이트 = 상위 비트)를 들고 00:BE14 로 JML 한다. DB 를 바꾸지 않으므로 세계는 긴 주소로 읽는다.
     - 03:CB07(M 8비트·X 16비트): 세계 지도 화면에서 03:CB07 → 03:CB1B → 00:BDC1 → 00:BDC5 로 네 번 들고 나는 것을 한 번에
-      한다. X·Y 를 지키고 $CE·$D0 을 $90·$92 에 둔 뒤 00:BDC9 와 같이 번호를 모아, 03:CB1B 처럼 지형 니블을 A 에 두고 03:CB15
+      한다. X·Y 를 지키고 $CE·$D0 을 $90·$92 에 둔 뒤 번호를 모아(DB 를 바꾸지 않으므로 세계는 긴 주소로), 03:CB1B 처럼 지형 니블을 A 에 두고 03:CB15
       (CLC / ADC #$20 / STA $CD / RTS)로 JML 한다.
     - 03:CB1C(03:CB1B 의 PHP 뒤): REP #$30 / PHX / PHY 하고 $90·$92 로 번호를 모아 지형 니블을 A 에 두고 PLY / PLX / PLP / RTL 한다.
       원래 루틴은 번호 >> 1 이 FF 이하라 A 윗바이트가 0 으로 돌아오고, 01:81D6 은 16비트 TAX 로 01:81FD 를 읽는다. 번호가
       512 이상이면 00:BDC5 를 거쳐서는 윗바이트가 남아 융단이 움직이지 못하므로, 니블을 읽기 전에 A 를 0 으로 둔다.
-      이 몸통이 붙으면 00:BDC5 는 부르는 곳이 없지만(롬에서 03:CB20 의 JSL 하나) 00:BDC9 몸통은 그대로 둔다.
     세계 0 만 분기 없이 이어지고, 나머지는 1·2·3 이상(평면 없음)을 가른 뒤 JMP 로 합친다."""
     def arm(n):
         return b'\xbf' + n.to_bytes(3, 'little') + b'\x90\x04\x4a\x4a\x4a\x4a\x29\x06' if n else b'\xa9\x00'
@@ -287,19 +286,18 @@ def fast_hook(at, nibbles, lower, upper, land):
         fast = INDEX5 + b'\xf4\x45\xbc\x5c\x6d\xbc\x00'
         blocks = number(at, xmask, 0x00BC43, b'\xad\x49\x19',
                         lambda k: b'\xc2\x30\xc9\xff\x01\xb0' + bytes([len(fast) + k]) + fast, slow)
-        terrain = number(at + len(blocks), xmask, 0x00BE14, b'\xaf\x49\x19\x7e', lambda k: b'\x5c\x14\xbe\x00')
         # 좌표 0200 이상이면 A = 0 으로 land_tail 에 가지만, 세계 지도 화면이 넘기는 $CE·$D0 은 첫 값을 03:C8D2 의 즉값이나
         # 03:C932·C93E 의 AND #$01FF 로, 점마다 03:CB40 의 CB68·CB73 의 AND #$01FF 로 두어 01FF 를 넘지 않는다. 세계 0·1 에서
         # CB68·CB73 이 점마다 돌고 03:CB07 에 온 $CE·$D0 이 가장 커도 01FF 였다(MesenCE 실행 기록).
         head = b'\xda\x5a\xa6\xce\x86\x90\xa6\xd0\x86\x92\xc2\x20'
-        world_map = head + number(at + len(blocks) + len(terrain) + len(head), xmask, None, b'\xaf\x49\x19\x7e', land_tail)
+        world_map = head + number(at + len(blocks) + len(head), xmask, None, b'\xaf\x49\x19\x7e', land_tail)
         head = b'\xc2\x30\xda\x5a'
-        base = at + len(blocks) + len(terrain) + len(world_map)
+        base = at + len(blocks) + len(world_map)
         landing = head + number(base + len(head), xmask, None, b'\xaf\x49\x19\x7e', land_return)
-        return blocks, terrain, world_map, landing
+        return blocks, world_map, landing
     n = sum(map(len, code(0, 0)))
     bodies = code(at + n, at + n + len(XMASK))
-    entries = [sum(map(len, bodies[:i])) for i in range(1, 4)]
+    entries = [sum(map(len, bodies[:i])) for i in range(1, 3)]
     return b''.join(bodies) + XMASK + TILE_BITS, *entries
 
 
@@ -357,11 +355,11 @@ def plane_writes(rom, data, grids, at):
     # 11비트 훅은 평면이 없는 세계의 읽기를 짧게 내므로, 길이는 실제로 둘 평면과 같은 자리에 아무 주소를 넣어 센다.
     used = {bit: [w in wide and any(v >> bit & 1 for v in wide[w]) for w in range(3)] for bit in (9, 10)}
     size = len(bit9_hook(*([0x8000 if u else None for u in used[bit]] for bit in (9, 10))))
-    # 블록 표를 늘린 롬이면 00:BBF8·00:BDC9·03:CB07·03:CB1C 에 빠른 훅을 더한다. 그러면 9번째 비트 훅은 실행되지 않지만, 디코더가 00:BC33 의
+    # 블록 표를 늘린 롬이면 00:BBF8·03:CB07·03:CB1C 에 빠른 훅을 더한다. 그러면 9번째 비트 훅은 실행되지 않지만, 디코더가 00:BC33 의
     # 훅 머리에서 평면을 찾으므로 그대로 둔다.
     grown = grown_blocks(rom)
     if grown:
-        for site, want in (*((s, FAST_ORIG) for s in FAST_SITES), (MAP_SITE, MAP_ORIG), (LAND_SITE, LAND_ORIG)):
+        for site, want in ((FAST_SITE, FAST_ORIG), (MAP_SITE, MAP_ORIG), (LAND_SITE, LAND_ORIG)):
             if data[lorom(site):lorom(site) + len(want)] != want:
                 raise ValueError(f'{site >> 16:02X}:{site & 0xFFFF:04X}: 원래 롬의 블록 번호 루틴·세계 지도 점·지형 루틴이 아님')
         size += len(fast_hook(0, [0x8000 if w in wide else None for w in range(3)], 0, 0, 0)[0])
@@ -397,7 +395,7 @@ def plane_writes(rom, data, grids, at):
     entries = bit11_entries(hook) if any(planes[10]) else (0, 0)
     fast = at + len(hook)
     if grown:
-        body, terrain, world_map, landing = fast_hook(fast, nibbles, grown[0], grown[1], terrain_table(rom))
+        body, world_map, landing = fast_hook(fast, nibbles, grown[0], grown[1], terrain_table(rom))
         hook += body
     out.insert(0, {'at': f'{at >> 16:02X}:{at & 0xFFFF:04X}', 'hex': hook.hex(' '), 'note': '블록 번호 10·11번째 비트 훅'})
     for site, want, entry in zip(BIT9_SITES, BIT9_ORIG, entries):
@@ -409,8 +407,7 @@ def plane_writes(rom, data, grids, at):
             raw = b'\x22' + at.to_bytes(3, 'little') + b'\x80' + bytes([skip]) + b'\xea' * skip
         out.append({'at': f'{site >> 16:02X}:{site & 0xFFFF:04X}', 'hex': raw.hex(' '), 'orig': want.hex(' '),
                     'note': '9번째 비트 읽기를 10·11번째 비트 훅으로'})
-    jumps = ((FAST_SITES[0], FAST_ORIG, fast, '블록 번호 루틴(00:BBF7)'),
-             (FAST_SITES[1], FAST_ORIG, fast + terrain, '블록 번호 루틴(00:BDC5)'),
+    jumps = ((FAST_SITE, FAST_ORIG, fast, '블록 번호 루틴(00:BBF7)'),
              (MAP_SITE, MAP_ORIG, fast + world_map, '세계 지도 화면의 점(03:CB07)'),
              (LAND_SITE, LAND_ORIG, fast + landing, '지형 루틴(03:CB1B)')) if grown else ()
     for site, want, entry, what in jumps:
