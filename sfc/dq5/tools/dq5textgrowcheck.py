@@ -3,7 +3,10 @@
 덧붙인 롬은 3200~1FFF(4,992개)를 붙여 38:8000 에 둔다. C80·CC5·13C5·1FFF 만 글자가 있고 나머지는 {1001} 이다.
   대화 번호: 선실 파파스의 대화 번호를 POKE 로 8BA·8FF·FFF 로 바꿔(메시지 T + 3C6) 말을 건다
   대화 스크립트: dq5talkwrite 로 012(파파스)를 msg C80, msg 1FFF 로 바꿔 말을 건다
-  이벤트 명령 60·인물 인라인 21: dq5scriptcheck.py 와 같은 17/00 인물(05:A84F)이 이벤트 번호 7 을 부르거나 21 을 실행
+  이벤트 명령 60·인물 인라인 21·30·31·32: dq5scriptcheck.py 와 같은 17/00 인물(05:A84F)이 이벤트 번호 7 을 부르거나
+    인라인 명령을 실행
+  덧붙인 스크립트와 함께: dq5talkwrite --extra-at 으로 대화 900~921 을 덧붙인 롬에서 900·921(스크립트가 C80·1FFF)과
+    끝 뒤 922·FFF(메시지 CE8·13C5), 900 앞 8FF(CC5)를 같은 파파스 길로 건다
 원래 메시지 633·742·C7F 는 원본 롬과 덧붙인 롬에서 같은 64코드인지 본다.
 원본 롬·선실 상태는 읽기만 하고 출력은 --out 의 새 하위 폴더에 둔다.
   MESENCE=… python sfc/dq5/tools/dq5textgrowcheck.py rom/dq5.sfc --state work/state/ship.mss
@@ -24,11 +27,16 @@ from dq5text import CHARS  # noqa: E402
 from dq5textwrite import FORMAT, overrides, read_messages  # noqa: E402
 
 LAST = 0x1FFF
-TEXTS = {0xC80: 'あいうえお', 0xCC5: 'かきくけこ', 0x13C5: 'さしすせそ', 0x1FFF: 'たちつてと'}
+TEXTS = {0xC80: 'あいうえお', 0xCC5: 'かきくけこ', 0xCE8: 'なにぬねの', 0x13C5: 'さしすせそ', 0x1FFF: 'たちつてと'}
 TALK = 'b:4,wait:40,up:3,wait:20,a:4,wait:30,a:4,wait:150' + ',a:4,wait:100' * 3
 DIRECT = {0x8BA: 0xC80, 0x8FF: 0xCC5, 0xFFF: 0x13C5, 0x26D: 0x633, 0x37C: 0x742, 0x8B9: 0xC7F}
 ORIGINAL = (0x26D, 0x37C, 0x8B9)
 RETURN = {'original': '249E46', 'grown': '388044'}
+# 대화 900~921(묶음 둘, 끝 922). 900·921 만 덧붙인 메시지를 띄우고 나머지는 원래 메시지 129.
+EXTRA_SCRIPTS = {0x900: 'C80', 0x921: '1FFF'}
+EXTRA = ['--extra-at', '3F:8000', '--hook-at', '06:FE10']
+EXTRA_TALK = {0x900: 0xC80, 0x921: 0x1FFF, 0x922: 0xCE8, 0xFFF: 0x13C5, 0x8FF: 0xCC5}
+INLINE = {'30': 0xC80, '31': 0xCC5, '32': 0x1FFF}
 
 
 def tool(name, *args):
@@ -135,10 +143,19 @@ def main():
         talk = write_json(out / 'talk.json', {'format': 'dq5talk/1', 'scripts': [
             {'talk': '012', 'body': [{'op': 'msg', 'id': 'C80'}, {'op': 'msg', 'id': '1FFF'}]}]})
         tool('dq5talkwrite.py', original, 'patch', talk, '-o', out / 'talk.dq5patch.json')
+        extra = write_json(out / 'extra.json', {'format': 'dq5talk/1', 'scripts': [
+            {'talk': f'{t:03X}', 'body': [{'op': 'msg', 'id': EXTRA_SCRIPTS.get(t, '129')}]}
+            for t in range(0x900, 0x922)]})
+        tool('dq5talkwrite.py', original, 'check', extra, *EXTRA)
+        tool('dq5talkwrite.py', original, 'patch', extra, '-o', out / 'extra.dq5patch.json', *EXTRA)
         builds = {'grown': [], 'talk': [out / 'talk.dq5patch.json'],
                   'event-C80': event_patches(original, out, 'event-C80', 0xC80),
                   'event-1FFF': event_patches(original, out, 'event-1FFF', 0x1FFF),
-                  'inline-1FFF': [npc_patch(original, out, 'inline-1FFF', [{'op': '21', 'args': [0xFF, 0x1F]}])]}
+                  'inline-1FFF': [npc_patch(original, out, 'inline-1FFF', [{'op': '21', 'args': [0xFF, 0x1F]}])],
+                  'extra': [out / 'extra.dq5patch.json']}
+        for op, n in INLINE.items():
+            builds[f'inline{op}-{n:03X}'] = [npc_patch(original, out, f'inline{op}-{n:03X}',
+                                                       [{'op': op, 'args': [n & 0xFF, n >> 8]}])]
         roms = {}
         for name, extra in builds.items():
             roms[name] = out / f'{name}.sfc'
@@ -156,7 +173,11 @@ def main():
                 jobs[f'original-{t:03X}'] = pool.submit(papas, f'original-{t:03X}', original, t, *common,
                                                         RETURN['original'])
             jobs['talk-012'] = pool.submit(papas, 'talk-012', roms['talk'], 0x012, *common, RETURN['grown'])
-            for name in ('event-C80', 'event-1FFF', 'inline-1FFF'):
+            for t in EXTRA_TALK:
+                jobs[f'extra-{t:03X}'] = pool.submit(papas, f'extra-{t:03X}', roms['extra'], t, *common,
+                                                     RETURN['grown'])
+            inline = [f'inline{op}-{n:03X}' for op, n in INLINE.items()]
+            for name in ('event-C80', 'event-1FFF', 'inline-1FFF', *inline):
                 jobs[name] = pool.submit(walk, name, roms[name], *common, RETURN['grown'])
             got = {name: job.result() for name, job in jobs.items()}
         results = [judge(f'대화 번호 {t:03X}', got[f'grown-{t:03X}'], n, messages) for t, n in DIRECT.items()]
@@ -165,6 +186,10 @@ def main():
         results += [judge('이벤트 명령 60 C80', got['event-C80'], 0xC80, messages),
                     judge('이벤트 명령 60 1FFF', got['event-1FFF'], 0x1FFF, messages),
                     judge('인물 인라인 21 1FFF', got['inline-1FFF'], 0x1FFF, messages)]
+        results += [judge(f'인물 인라인 {op} {n:03X}', got[f'inline{op}-{n:03X}'], n, messages)
+                    for op, n in INLINE.items()]
+        results += [judge(f'덧붙인 스크립트 롬 대화 번호 {t:03X}', got[f'extra-{t:03X}'], n, messages)
+                    for t, n in EXTRA_TALK.items()]
         for t in ORIGINAL:
             # C7F 뒤는 원본 롬에서는 메시지가 아니므로 원래 메시지 3,200개 안의 코드만 견준다.
             n = DIRECT[t]
