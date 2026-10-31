@@ -40,8 +40,9 @@ START = (THRONE, 32, 42)       # FC (10,15): 줄 선 전사들 사이의 빈 자
 
 
 # DQ5 메시지 창은 한 쪽에 4줄, 한 줄은 ＊「·들여쓰기 2칸 뒤 한글 14자까지(실측: 15자째에서 넘쳐 깨짐).
+# 서술({1006})은 ＊「 가 없어 한글 15자까지 들어간다(실측: 16자째는 줄 첫머리로 돌아가 다음 줄과 겹침).
 # 한 쪽이 4줄을 넘으면 쪽 넘김 없이 밀려 올라가다 빈 창이 남았다(실측).
-PAGE_LINES, LINE_COLS, NAME_COLS = 4, 14, 4
+PAGE_LINES, LINE_COLS, NARR_COLS, NAME_COLS = 4, 14, 15, 4
 NAME = '@'      # 대사 문자열 안의 주인공 이름 자리({1012}). 이름 입력은 네 글자까지
 
 
@@ -62,12 +63,12 @@ def _codes(line):
     return out
 
 
-def _message(pages, prefix=()):
+def _message(pages, prefix=(), cols=LINE_COLS):
     """pages: 쪽마다 문장. 줄이 4줄을 넘으면 쪽을 더 나눈다."""
     out = []
     first = max(0, len(prefix[1]) + 1 - 2) if prefix else 0
     for text in pages:
-        lines = dq4wrap.wrap(text, _width, LINE_COLS, first, PAGE_LINES)
+        lines = dq4wrap.wrap(text, _width, cols, first, PAGE_LINES)
         for k in range(0, len(lines), PAGE_LINES):
             if out:
                 out.append(PAGE)
@@ -89,9 +90,9 @@ def say(*pages):
 
 
 def narrate(*pages):
-    """서술문({1006}): ＊「 도 들여쓰기도 없다. 줄 너비는 대사와 같은 14칸으로 둔다. 서술은 해라체(「~다.」)로 쓴다."""
+    """서술문({1006}): ＊「 도 들여쓰기도 없어 한 줄이 15칸이다. 서술은 해라체(「~다.」)로 쓴다."""
     out = [NARR]
-    for part in _message(pages):
+    for part in _message(pages, cols=NARR_COLS):
         out.append(part)
         if part == PAGE:        # 쪽이 바뀌면 첫 코드를 다시 본다(실측: 빼면 ＊「 가 붙음)
             out.append(NARR)

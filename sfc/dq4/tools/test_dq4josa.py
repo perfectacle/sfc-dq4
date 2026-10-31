@@ -86,8 +86,12 @@ class MessageTests(unittest.TestCase):
         self.assertEqual(sysmsg.parts('{P}{이여}'), ([0x1008, 0x1024], 6))
 
     def test_too_long_word_is_refused(self):
+        # 서술은 15칸, 대사는 ＊「 뒤 14칸
+        sysmsg.message('{P}{은}{I}{을}')
         with self.assertRaises(ValueError):
-            sysmsg.message('{P}{은}{I}{을}')
+            sysmsg.message('{P}{은}{I}{을}가')
+        with self.assertRaises(ValueError):
+            sysmsg.message('{P}{은}{I}{을}', narrate=False)
 
 
 if __name__ == '__main__':
