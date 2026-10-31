@@ -277,7 +277,7 @@ def npc_doc(records, ported=(), prologue=False, report=None, ported_messages=(),
     native = {k: [v & 0xFF, v >> 8 & 0xFF, v >> 16] for k, v in dq4chapterbox.entry_points(scenes(prologue)).items()}
     flag, mask = EVENT_FLAG
     staff = [entry(STATIC, x, y, g, f, t) for x, y, g, f, t in STAFF]
-    king = entry(STATIC, *KING_AT, KING, 'down', T_KING)
+    king = entry(STATIC, *KING_DOWN, KING, 'down', T_KING)
     easy = entry(STATIC, *EASY_AT, WARRIOR, 'up', T_EASY)
     # 연출은 왕이 돌린다. FC 에서도 연설 뒤 왕은 계단(10,0D)이 아니라 대신 옆 (10,13)에 서 있다
     lineup = [entry(HIDER if x <= 0x0F else HIDER2, x, y, WARRIOR, 'up', T_EASY) for x, y in LINEUP]
@@ -351,6 +351,11 @@ SLOT_TABLE, SLOT_COUNT = 0x2585D5, 0x16       # 25:857C 가 찾는 칸 수
 FC_PLACES, FC_PLACE_COUNT = (0x1E, 0xA76D), 22
 TIME_FREEZE = 0x00A738
 TIME_FREEZE_ORIG = bytes.fromhex('00 0c 02 00')
+# 롬 헤더 내부 제목(LoROM 7FC0, 21바이트, 남는 칸은 원본처럼 공백). 뒤 단계(곡·인물 그림)는 이 롬을 이어받아
+# 체크섬만 다시 맞추므로 여기서 한 번 쓰면 된다
+TITLE_OFFSET = 0x7FC0
+TITLE_ORIG = b'DRAGONQUEST5'.ljust(21, b' ')
+TITLE = b'DRAGONQUEST4'.ljust(21, b' ')
 
 
 def lorom(addr):
@@ -680,6 +685,9 @@ def build(rom, dq5, dq4, work, prologue=True, chapter2=False):
     group, number = (int(v, 16) for v in start[0].split('/'))
     out[o:o + 4] = bytes((group, number, start[1], start[2]))
     out = bytearray(return_places(out, original, dq4.read_bytes()))
+    if out[TITLE_OFFSET:TITLE_OFFSET + 21] != TITLE_ORIG:
+        raise SystemExit(f'{TITLE_OFFSET:06X}: 내부 제목이 원래 값이 아님 {bytes(out[TITLE_OFFSET:TITLE_OFFSET + 21])!r}')
+    out[TITLE_OFFSET:TITLE_OFFSET + 21] = TITLE
     out = set_checksum(out)
     group_patches = [work / 'groups' / p for p in (*GROUP_PATCHES, *summary['record_patches'])]
     verify_groups(bytes(out), (work / 'groups' / 'groups.sfc').read_bytes(), group_patches, work / 'groups' / 'env')
