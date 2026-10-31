@@ -70,6 +70,21 @@ class MessageTests(unittest.TestCase):
         # {P}{은} 5칸 + 띄어쓰기 + {I}{을} 10칸은 14칸을 넘어 둘째 줄로 간다
         self.assertEqual(sysmsg.message('{P}{은} {I}{을}').count(sysmsg.LINE), 1)
 
+    def test_speech_has_no_narration_and_pages_restart_narration(self):
+        # 대사는 엔진이 ＊「 를 붙이게 {1006} 없이, 서술은 쪽마다 {1006} 으로 연다
+        self.assertNotIn(sysmsg.NARR, sysmsg.TEXTS[0x002])
+        self.assertEqual(sysmsg.TEXTS[0x07E].count(sysmsg.PAGE), 1)
+        narr = sysmsg.message('가|나')
+        self.assertEqual(narr[:2], [sysmsg.NARR, '가'])
+        self.assertEqual(narr[2:5], [sysmsg.PAGE, sysmsg.NARR, '나'])
+
+    def test_page_over_four_lines_is_refused(self):
+        with self.assertRaises(ValueError):
+            sysmsg.message('가나다라마바사 ' * 9)
+
+    def test_vocative_josa_is_two_columns(self):
+        self.assertEqual(sysmsg.parts('{P}{이여}'), ([0x1008, 0x1024], 6))
+
     def test_too_long_word_is_refused(self):
         with self.assertRaises(ValueError):
             sysmsg.message('{P}{은}{I}{을}')
