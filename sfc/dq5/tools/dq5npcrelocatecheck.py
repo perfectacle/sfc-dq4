@@ -53,7 +53,8 @@ def capture(rom, case, dest, state, mesence, libdir):
     return (dest / 'npc.bin').read_bytes()
 
 
-def compare_case(case, out, original_path, relocated_path, original, layout, state, mesence, libdir):
+def compare_case(case, out, original_path, relocated_path, original, layout, state, mesence, libdir, model=None):
+    """model 은 재배치 롬의 인물 표를 예측할 롬(인물 레코드를 고쳤으면 원래 롬에 그 패치만 넣은 것). 없으면 원래 롬."""
     bc, bd, night, flags_override = case
     tag = f'{bc:02X}-{bd:02X}-' + ('night' if night else 'day') + ('-override' if flags_override else '')
     a = capture(original_path, case, out / (tag + '-original'), state, mesence, libdir)
@@ -63,23 +64,31 @@ def compare_case(case, out, original_path, relocated_path, original, layout, sta
     flags = {FLAGS + i: a[0x2190 + i] for i in range(0x170)}
     if a[0x2190:0x2300] != b[0x2190:0x2300] or a[0x075E] != b[0x075E]:
         raise ValueError(f'{tag}: 플래그·시간대가 다름')
-    source = list_address(original, bc, bd, flags)
-    placed = [] if source is None else [(at, value) for at, _ in list_entries(original, source)
-                                        if (value := parse(original, at, night))]
+    model = model or original
+
+    def predict(rom):
+        source = list_address(rom, bc, bd, flags)
+        placed = [] if source is None else [(at, value) for at, _ in list_entries(rom, source)
+                                            if (value := parse(rom, at, night))]
+        return source, placed, table_values(rom, placed, flags)
+
+    source, placed, expected = predict(original)
     bad, pointers = [], 0
-    for slot, ((_, value), expected) in enumerate(zip(placed, table_values(original, placed, flags)), 8):
-        for addr, want in expected.items():
-            if a[addr + slot] != want:
-                bad.append(f'원본 {slot:02X}/{addr:04X}')
-            if addr not in (0x3480, 0x34A0) and b[addr + slot] != want:
-                bad.append(f'재배치 {slot:02X}/{addr:04X}')
+    for slot, ((_, value), want_values) in enumerate(zip(placed, expected), 8):
+        bad += [f'원본 {slot:02X}/{addr:04X}' for addr, want in want_values.items() if a[addr + slot] != want]
         if value['script'] is not None:
-            old = value['script'] + 1
+            actual = a[0x3480 + slot] | a[0x34A0 + slot] << 8 | a[0x34C0 + slot] << 16
+            if actual != value['script'] + 1:
+                bad.append(f'원본 포인터 {slot:02X}: {actual:06X}!={value["script"] + 1:06X}')
+    source, placed, expected = predict(model)
+    for slot, ((_, value), want_values) in enumerate(zip(placed, expected), 8):
+        bad += [f'재배치 {slot:02X}/{addr:04X}' for addr, want in want_values.items()
+                if addr not in (0x3480, 0x34A0) and b[addr + slot] != want]
+        if value['script'] is not None:
             new = int(layout['scripts'][cpu(value['script'])].replace(':', ''), 16) + 1
-            for wram, want, name in ((a, old, '원본'), (b, new, '재배치')):
-                actual = wram[0x3480 + slot] | wram[0x34A0 + slot] << 8 | wram[0x34C0 + slot] << 16
-                if actual != want:
-                    bad.append(f'{name} 포인터 {slot:02X}: {actual:06X}!={want:06X}')
+            actual = b[0x3480 + slot] | b[0x34A0 + slot] << 8 | b[0x34C0 + slot] << 16
+            if actual != new:
+                bad.append(f'재배치 포인터 {slot:02X}: {actual:06X}!={new:06X}')
             pointers += 1
         elif b[0x3480 + slot] or b[0x34A0 + slot]:
             bad.append(f'없는 스크립트 포인터 {slot:02X}')

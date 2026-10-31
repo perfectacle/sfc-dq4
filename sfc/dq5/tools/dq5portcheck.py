@@ -8,6 +8,9 @@
   npc    인물 표 23칸·스크립트 포인터(dq5npcrelocatecheck 의 장면), 입력이 긴 스크립트 시험과 같으면 실행 5건
   map    고친 맵에 들어가 속성 패스 끝 01:BA4C 의 셀 버퍼를 롬 디코더와(dq5map --compare 와 같은 비교)
   event  번호 표·이벤트 표 조회로 새 스크립트를 실행(dq5scriptcheck 의 장면, 호출 틀은 실행 때만 ROMPATCH)
+  patch  쓰기가 통합 롬에 그대로 있는지. dq5tablecheck 의 고친 값(칸·피해량)이 들어 있으면 그 장면을 통합 롬에서
+npc 작업에 records 가 있으면 원래 롬에 레코드 패치만 넣은 롬으로 인물 표를 예측한다. 그 문서가 dq5npcrecordcheck 의
+문서면 옮긴 인물이 낮에 새 대화 번호로 서고 말을 걸면 그 메시지가 뜨는지도 통합 롬에서 돌린다.
 
   MESENCE=… python sfc/dq5/tools/dq5portcheck.py rom/dq5.sfc work/port/build/report.json \\
       --state work/state/ship.mss --symbols work/menu/name-entry.sym --out work/port/check
@@ -33,6 +36,7 @@ from dq5fieldwrite import read_grid, split  # noqa: E402
 from dq5hangul import DECODER, DECODER_END  # noqa: E402
 from dq5map import Decoder, Rom, map_pointer  # noqa: E402
 from dq5mapmusic import entry_cells  # noqa: E402
+import dq5npcrecordcheck as recordcheck  # noqa: E402
 import dq5npcrelocatecheck as npccheck  # noqa: E402
 import dq5scriptcheck as scriptcheck  # noqa: E402
 from dq5textcheck import decoder_codes  # noqa: E402
@@ -153,19 +157,98 @@ def check_field(report, port, out, state, mesence, libdir):
         return list(pool.map(run, jobs))
 
 
-def check_npc(report, original_path, port, out, state, mesence, libdir):
+def check_npc(report, original_path, port, out, state, mesence, libdir, bootdir):
     original = Rom(original_path.read_bytes())
     results = []
     for job in [j for j in report['jobs_input'] if j['kind'] == 'npc']:
         layout = json.loads(Path(job['layout']).read_text(encoding='utf-8'))
+        model = records_model(job, original_path, out) if 'records' in job else None
         cases = [(bc, bd, night, '') for bc, bd in ((0x17, 0), (2, 6), (1, 5)) for night in (False, True)]
         cases += [(2, 6, night, ';7E21AD=10') for night in (False, True)]
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
             results += list(pool.map(lambda c: npccheck.compare_case(c, out, original_path, port, original, layout,
-                                                                     state, mesence, libdir), cases))
+                                                                     state, mesence, libdir, model), cases))
         source = json.loads(Path(job['input']).read_text(encoding='utf-8'))
         if source == npccheck.MUTATION_SOURCE:
             results += npccheck.run_mutations(out, port, layout, state, mesence, libdir, 4)
+        if model is not None and json.loads(Path(job['records']).read_text(encoding='utf-8')) == RECORD_SOURCE:
+            results.append(check_records(port, model, out, state, mesence, bootdir))
+    return results
+
+
+# dq5npcrecordcheck 의 레코드 문서. 이 문서면 그 도구의 장면을 통합 롬에서 돌린다.
+RECORD_SOURCE = {'format': 'dq5npcrecord/1', 'entries': recordcheck.ENTRIES}
+
+
+def records_model(job, original_path, out):
+    """원래 롬에 인물 레코드 패치만 넣은 롬. 재배치 롬의 인물 표는 이 롬의 목록·필드와 같아야 한다."""
+    dest = out / f'{job["name"]}-records'
+    dest.mkdir()
+    recordcheck.command('dq5npcrecord.py', original_path, 'patch', job['records'], '-o', dest / 'records.dq5patch.json')
+    recordcheck.command('dq5build.py', original_path, 'build', dest / 'records.dq5patch.json', '-o',
+                        dest / 'records.sfc', '--ips', dest / 'records.ips')
+    return Rom((dest / 'records.sfc').read_bytes())
+
+
+def check_records(port, model, out, state, mesence, bootdir):
+    """옮긴 밤 인물이 낮에 (24,12)에 그림 18·대화 300 으로 서고, 말을 걸면 메시지 300 + 3C6 이 뜨는지."""
+    rows = {}
+    for name, night, test in (('records-day', False, recordcheck.TALK_TEST), ('records-night', True, '')):
+        wram, messages = recordcheck.run((name, 'port', night, test), {'port': port}, state, out, mesence, bootdir)
+        source, placed, expected = recordcheck.slots(model, wram, 2, 6, night)
+        bad = recordcheck.compare(wram, expected, (0x3480, 0x34A0))
+        require(not bad, f'{name}: 인물 표 {bad[:6]}')
+        rows[name] = (wram, messages, [at for at, _ in placed])
+    wram, messages, placed = rows['records-day']
+    require(recordcheck.MOVED in placed, '옮긴 인물이 낮 목록에 없음')
+    at = 8 + placed.index(recordcheck.MOVED)
+    cell = tuple(wram[c + at] for c in (0x3020, 0x3080, 0x3220, 0x36E0, 0x3700))
+    want = (24, 12, 0x18, recordcheck.TALK & 0xFF, recordcheck.TALK >> 8)
+    require(cell == want, f'옮긴 인물 칸·그림·대화 {cell} != {want}')
+    require(recordcheck.MESSAGE in messages, f'말을 건 메시지에 {recordcheck.MESSAGE:03X} 없음: {messages}')
+    require(rows['records-night'][2] == [recordcheck.NIGHT], f'밤 목록 {rows["records-night"][2]}')
+    return {'case': 'records', 'moved': f'{recordcheck.MOVED:06X}', 'cell': list(cell),
+            'messages': [f'{m:03X}' for m in messages], 'night': [f'{a:06X}' for a in rows['records-night'][2]]}
+
+
+# dq5tablecheck 의 고친 값 가운데 통합 롬 하나에 함께 넣어도 서로의 장면을 바꾸지 않는 것.
+TABLE_EDITS = ('slot', 'amount')
+
+
+def check_patch(report, original_path, port, out, state, mesence, libdir):
+    """patch 작업의 쓰기가 통합 롬에 그대로 있는지. dq5tablecheck 의 고친 값을 담고 있으면 그 장면을 통합 롬에서 돌린다."""
+    from dq5build import load
+    import dq5tablecheck as tablecheck
+    data = port.read_bytes()
+    results = []
+    for job in [j for j in report['jobs_input'] if j['kind'] == 'patch']:
+        _, _, writes = load(job['input'])
+        bad = [where for off, payload, _, where in writes if data[off:off + len(payload)] != payload]
+        require(not bad, f'{job["name"]}: 통합 롬에 없는 쓰기 {bad[:6]}')
+        have = {(off, payload) for off, payload, _, _ in writes}
+        found = []
+        for name in TABLE_EDITS:
+            source, manifest = out / f'table-{name}.json', out / f'table-{name}.dq5patch.json'
+            source.write_text(json.dumps({'format': 'dq5tables/1', **tablecheck.EDITS[name]}, ensure_ascii=False),
+                              encoding='utf-8')
+            recordcheck.command('dq5tables.py', original_path, 'patch', source, '-o', manifest)
+            if {(off, payload) for off, payload, _, _ in load(str(manifest))[2]} <= have:
+                found.append(name)
+        row = {'case': job['name'], 'writes': len(writes), 'in_rom': True, 'table_edits': found}
+        if 'slot' in found:
+            tablecheck.run_case('shop', 'port', port, state, out, mesence, libdir, {})
+            text = tablecheck.observed(out, 'shop-port')
+            require('read 23B237=01 pc=21A43D' in text and '23B237=00' not in text, '칸: 23:B237 을 01 로 읽지 않음')
+            shown = tablecheck.wram(out, 'shop-port')[0x46]
+            require(shown == 16, f'칸: 비교 창 새 능력치가 16 이 아님: {shown}')
+            row['slot'] = {'read': '23B237=01', 'shown': shown}
+        if 'amount' in found:
+            tablecheck.run_case('papas', 'port', port, state, out, mesence, libdir, {})
+            hits = tablecheck.casts(out, 'papas-port')
+            require(len(hits) >= 2 and all(len(h) == 1 and h[0][1] == 40 for h in hits), f'피해량: {hits}')
+            require('read 278073=28' in tablecheck.observed(out, 'papas-port'), '피해량: 27:8073 을 28 로 읽지 않음')
+            row['amount'] = hits
+        results.append(row)
     return results
 
 
@@ -261,7 +344,7 @@ def main():
     ap.add_argument('--symbols', type=Path, help='DQ4 이름 입력 빌드의 심볼 파일(dq4 검사)')
     ap.add_argument('--mesence', default=os.environ.get('MESENCE'))
     ap.add_argument('--out', type=Path, default=Path('work/port/check'))
-    ap.add_argument('--only', help='쉼표로 고른 묶음(title,dq4,text,field,npc,map,event)')
+    ap.add_argument('--only', help='쉼표로 고른 묶음(title,dq4,text,field,npc,map,event,patch)')
     args = ap.parse_args()
     if not args.mesence:
         ap.error('--mesence 또는 MESENCE 가 필요함')
@@ -281,7 +364,7 @@ def main():
         shutil.copyfile(HERE / 'lua/dq5warp.lua', libdir / 'boot.lua')
         shutil.copytree(krlua, out / 'maplib')
         shutil.copyfile(HERE / 'lua/dq5warp.lua', out / 'maplib' / 'boot.lua')
-        groups = (args.only or 'title,dq4,text,field,npc,map,event').split(',')
+        groups = (args.only or 'title,dq4,text,field,npc,map,event,patch').split(',')
         results = {}
         if 'title' in groups:
             results['title'] = check_title(report, port, out, mesence)
@@ -293,11 +376,13 @@ def main():
         if 'field' in groups:
             results['field'] = check_field(report, port, out, state, mesence, libdir)
         if 'npc' in groups:
-            results['npc'] = check_npc(report, original, port, out, state, mesence, str(krlua))
+            results['npc'] = check_npc(report, original, port, out, state, mesence, str(krlua), libdir)
         if 'map' in groups:
             results['map'] = check_map(report, original, port, out, state, mesence, libdir)
         if 'event' in groups:
             results['event'] = check_event(report, port, out, state, mesence, str(krlua))
+        if 'patch' in groups:
+            results['patch'] = check_patch(report, original, port, out, state, mesence, str(krlua))
         (out / 'results.json').write_text(json.dumps(results, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
         for group, rows in results.items():
             print(f'{group}: {len(rows)}건 통과')
