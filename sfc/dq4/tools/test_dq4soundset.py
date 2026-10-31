@@ -82,12 +82,30 @@ class SongScoreTests(unittest.TestCase):
         out = soundset.song_score(self.SCORE, drop_tracks={'track10'}, drop_programs={127})
         self.assertEqual(out['timeline'], [self.SCORE['timeline'][0], self.SCORE['timeline'][2]])
 
+    def test_drops_one_program_of_a_track(self):
+        out = soundset.song_score(self.SCORE, drop_tracks={'track10@64', 'track0@40'})
+        self.assertEqual(out['timeline'], [self.SCORE['timeline'][i] for i in (0, 2, 3)])
+
+    def test_yield_marks_only_that_track(self):
+        out = soundset.song_score(self.SCORE, yield_tracks={'track10'})
+        self.assertEqual([e.get('yield', False) for e in out['timeline']], [False, True, False, False])
+
     def test_track_db_scales_velocity_of_a_track_or_one_program_in_it(self):
         score = {'timeline': [{'op': 'note', 'ch': 'track6', 'program': 45, 'velocity': 100},
                               {'op': 'note', 'ch': 'track8', 'program': 40, 'velocity': 100},
                               {'op': 'note', 'ch': 'track8', 'program': 45, 'velocity': 100}]}
         out = soundset.song_score(score, track_db={'track6': -6, 'track8@45': -20})
         self.assertEqual([e['velocity'] for e in out['timeline']], [50, 100, 10])
+
+
+class VoiceVolumeTests(unittest.TestCase):
+    def test_zero_db_keeps_the_default(self):
+        self.assertEqual(soundset.voice_volume(0), 0x30)
+
+    def test_db_scales_the_volume_and_clamps(self):
+        self.assertEqual(soundset.voice_volume(6), round(0x30 * 10 ** 0.3))
+        self.assertEqual(soundset.voice_volume(40), 0xFF)
+        self.assertEqual(soundset.voice_volume(-80), 1)
 
 
 class HoldUnitsTests(unittest.TestCase):

@@ -21,6 +21,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path[:0] = [str(ROOT / 'sfc/dq5/tools'), str(ROOT / 'nds/dq4/tools')]
 
+import dq4soundbank as bank  # noqa: E402
 from dq4soundcompact import MAX_CALL_DEPTH, compact  # noqa: E402
 from dq5song import assemble, header, listing, step, walk  # noqa: E402
 
@@ -171,7 +172,7 @@ def allocate(score, voices, end, tail_ticks=0, lanes_for=None):
         peak = max(peak, concurrent)
 
     def priority(n):
-        role = 2 if n['ch'] == melody or n['ch'] == bass else 1
+        role = 0 if n.get('yield') else 2 if n['ch'] == melody or n['ch'] == bass else 1
         outer = -n['note'] if n['ch'] == bass else n['note']
         return role, n.get('priority', 64), n['velocity'], outer, -n['uid']
 
@@ -248,6 +249,29 @@ def resolve_sample(mapping, program, note):
     if len(matches) != 1:
         raise ValueError(f'program {program} key {note}: expected one sample region, got {len(matches)}')
     return matches[0]
+
+
+def resolve_region(mapping, program, note):
+    """그 음을 울리는 NDS 영역(엔벨로프 값이 든 dict). 잡음·번호만 준 프로그램, 엔벨로프 값이 없는 표는 None."""
+    value = mapping[program]
+    if not isinstance(value, list) or not any('header' in r for r in value):
+        return None
+    return next(r for r in value if r['lo'] <= note <= r['hi'])
+
+
+def note_envelope(region, note):
+    """음마다 덮어쓴 NDS ADSR 을 반영한 (ADSR1, ADSR2, release 명령 값)과 샘플 머리의 (ADSR1, ADSR2)."""
+    override = dict(zip(('attack', 'decay', 'sustain', 'release'), note.get('adsr') or ()))
+    merged = region | {k: v for k, v in override.items() if v is not None}
+    adsr = tuple(region['header']) if region.get('release_only') else bank.nds_adsr(merged)
+    return adsr, bank.nds_release_rate(merged.get('release', 127)), tuple(region['header'])
+
+
+def _envelope_key(adsr):
+    """귀로 구별되는 ADSR 만 남긴 값. attack 11 이상은 거의 바로 차오르고, SR 한 칸은 빠르기 1.3배 안팎이다."""
+    a1, a2 = adsr
+    attack = a1 & 0x0F
+    return min(attack, 11), a1 >> 4 & 7, a2 >> 5, (a2 & 0x1F) // 2
 
 
 def _pan(value):
@@ -371,7 +395,7 @@ def seconds_to_tick(tempos, seconds):
 
 def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_tolerance_db=1.0,
             tail_ticks=12, release_rate=0x1C, sample_order=None, arrivals=None, lanes_for=None,
-            split_tick=None, chain_song=None, hold=None, cache_dir=None):
+            split_tick=None, chain_song=None, hold=None, cache_dir=None, voice_volume=0x30):
     """악보 → 글·바이너리·곡 묶음의 DQ5 샘플 번호·손실 보고서.
 
     시퀀스만 만들며 ROM/SPC 공간 검사는 삽입기가 맡는다. 8번째 목소리를 BGM에서 쓰지 않지만
@@ -392,6 +416,7 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
     를 둔다. 그 샘플을 받는 동안 곡을 틀고 문턱만큼 오면 곡이 나아간다. 붙들기는 그 틱의 나머지 트랙을 막지 못하므로 모든
     트랙을 1틱 쉼으로 시작한다(그 틱에 instrument 가 오면 아직 없는 샘플로 보아 트랙이 조용해진다).
     cache_dir 는 시퀀스 묶기 결과를 둘 곳(dq4soundcompact.compact 참고).
+    voice_volume 은 목소리마다 처음에 두는 음량(ED)이다. 곡 전체 세기를 올리고 내릴 때 바꾼다.
     """
     if not 1 <= voices <= 7:
         raise ValueError('BGM voices must be between 1 and 7')
@@ -462,13 +487,25 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
     folded = []
     cc_emitted = 0
     level_skips, level_error = 0, 0.0
+    drums = bank.drum_programs(score)
+    gliding = bank.gliding_bends(score['timeline'])
+
+    def bend_units(note):
+        """샘플 음높이에 구운 영역 벤드(프로그램 표 'tune')를 뺀 나머지 E9 값. E9 의 1 은 1/128 반음."""
+        value = mapping[note['program']]
+        baked = next((r.get('tune', 0) for r in value if r['lo'] <= note['note'] <= r['hi']), 0) if isinstance(value, list) else 0
+        if note['uid'] in gliding:
+            return 0
+        rest = bank.bend_units(note, drums) - baked
+        return rest if abs(rest) >= bank.BEND_MIN_UNITS else 0
+
     for lane_id, lane in enumerate(lanes):
         lines.append(f'Lvoice{lane_id}:')
         if hold is not None:
             if lane_id == 0:
                 lines += [f'  db F7 FE {hold[0]:02X}', f'  db F7 FF {hold[1]:02X}']
             lines.append('  rest len 01')
-        lines += ['  volume 30', f'  release {release_rate:02X}', '  echo_on']
+        lines += [f'  volume {voice_volume:02X}', f'  release {release_rate:02X}', '  echo_on']
         cuts = {0, end}
         if loop_start is not None:
             cuts.add(loop_start)
@@ -490,7 +527,9 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
                     previous = changed
         boundaries = sorted(cuts)
         current = 0
-        cache = {}
+        # 벤드를 쓰는 목소리는 앞 곡·루프 끝의 미세 조정이 남지 않게 처음과 루프 머리에서 다시 쓴다
+        tuned = any(bend_units(n) for n in lane)
+        cache = {'fine_tune': None} if tuned else {}
         last_note = None
         note_cc = {}
         for i, tick in enumerate(boundaries[:-1]):
@@ -501,6 +540,8 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
             if tick == loop_start:
                 lines.append(f'Lloop{lane_id}:')
                 cache.clear()
+                if tuned:
+                    cache['fine_tune'] = None
                 last_note = None
             if tick == split_tick:
                 lines.append(f'Lsplit{lane_id}:')
@@ -536,10 +577,25 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
                     if cache.get('instrument') == index:
                         reissued += 1
                     cache.pop('instrument', None)
+                region = None if noisy else resolve_region(mapping, note['program'], note['note'])
+                envelope = note_envelope(region, note) if region else None
                 if index is not None and cache.get('instrument') != index:
                     setting('instrument', index)
                     cache['instrument_at'] = tick
-                setting('release', release_rate)
+                    # instrument 가 샘플 머리의 ADSR 을 다시 쓴다
+                    cache['adsr'] = envelope[2] if envelope else None
+                # 들리지 않는 엔벨로프 차이까지 옮기면 음마다 명령이 붙어 곡 앞 바이트(곡 시작 지연)가 는다
+                if envelope and (cache.get('adsr') is None or _envelope_key(cache['adsr']) != _envelope_key(envelope[0])):
+                    lines.append(f'  adsr {envelope[0][0]:02X} {envelope[0][1]:02X}')
+                    cache['adsr'] = envelope[0]
+                tune = bend_units(note)
+                held = cache.get('fine_tune', 0)
+                if held is None or abs(held - tune) >= bank.BEND_MIN_UNITS or (tune == 0) != (held == 0):
+                    lines.append(f'  fine_tune {tune & 0xFF:02X}')
+                    cache['fine_tune'] = tune
+                release = envelope[1] if envelope else release_rate
+                if cache.get('release') is None or abs(cache['release'] - release) > 1:
+                    setting('release', release)
                 level = _level(note, note_cc[7], note_cc[11], score.get('volume', 127))
                 held = cache.get('volume2')
                 # 사람이 거의 못 듣는 세기 차이까지 옮기면 음마다 명령이 붙어 SPC 메모리를 넘는다.

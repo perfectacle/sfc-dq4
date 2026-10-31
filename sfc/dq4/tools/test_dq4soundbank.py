@@ -52,6 +52,28 @@ class BankTests(unittest.TestCase):
         self.assertGreater(bank.hw_snr(pcm, encoded), 20)
 
 
+class EnvelopeTests(unittest.TestCase):
+    def test_release_follows_nds_speed(self):
+        # 빠른 NDS 릴리스일수록 큰 속도 번호, 127 은 바로 끝남
+        rates = [bank.nds_release_rate(x) for x in (100, 110, 120, 127)]
+        self.assertEqual(rates, sorted(rates))
+        self.assertEqual(rates[-1], 0x1F)
+
+    def test_full_sustain_holds(self):
+        self.assertEqual(bank.nds_adsr({'attack': 127, 'decay': 127, 'sustain': 127}), (0xFF, 0xE0))
+
+    def test_low_sustain_keeps_falling(self):
+        a1, a2 = bank.nds_adsr({'attack': 127, 'decay': 80, 'sustain': 20})
+        self.assertEqual(a2 >> 5, 0)
+        self.assertGreater(a2 & 0x1F, 0)
+
+    def test_treble_keeps_dc_and_lifts_nyquist(self):
+        flat = np.full(64, 1000.0)
+        np.testing.assert_allclose(bank.treble(flat, 6), flat)
+        alt = np.array([1000.0, -1000.0] * 32)
+        self.assertAlmostEqual(np.abs(bank.treble(alt, 6, loop_start=16)).max() / 1000, 10 ** (6 / 20), places=3)
+
+
 def write_wave(path, seconds, rate=16000):
     t = np.arange(int(seconds * rate))
     pcm = np.rint(np.sin(t * 2 * np.pi / 37) * 9000).astype('<i2')
@@ -86,6 +108,14 @@ class FitTests(unittest.TestCase):
 
     def tearDown(self):
         self.directory.cleanup()
+
+    def test_sample_rate_raises_only_that_sample(self):
+        _, _, plain = bank.build_bank(self.score, self.root)
+        _, _, raised = bank.build_bank(self.score, self.root, sample_rates={'c.wav': 16000})
+        rate = {d['source']: round(d['effective_rate']) for d in raised['samples'].values()}
+        self.assertGreater(rate['c.wav'], 8000)
+        self.assertEqual({k: v for k, v in rate.items() if k != 'c.wav'},
+                         {d['source']: round(d['effective_rate']) for d in plain['samples'].values() if d['source'] != 'c.wav'})
 
     def test_slot_limit_merges_least_used_region(self):
         _, mapping, report = bank.build_bank(self.score, self.root, max_samples=3)

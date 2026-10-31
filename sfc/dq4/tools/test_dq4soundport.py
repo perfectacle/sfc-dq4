@@ -67,6 +67,43 @@ class LevelTests(unittest.TestCase):
         self.assertGreater(result.report['level_changes_merged'], 0)
         self.assertLessEqual(result.report['level_max_error_db'], 1.0)
 
+    def test_voice_volume_sets_every_voice(self):
+        notes = [(0, 24, 60, 100)]
+        self.assertIn('volume 30', port.convert(score(notes), voices=1).text)
+        self.assertIn('volume 60', port.convert(score(notes), voices=1, voice_volume=0x60).text)
+
+    def test_nds_envelope_writes_release_and_audible_overrides(self):
+        notes = score([(0, 24, 60, 100), (24, 24, 60, 100), (48, 24, 60, 100)])
+        notes['timeline'][1]['adsr'] = [None, 20, 0, None]   # decay·sustain 덮어쓰기: 들리는 차이
+        notes['timeline'][2]['adsr'] = [120, None, None, None]  # attack 120: 거의 같은 빠르기
+        region = {'lo': 0, 'hi': 127, 'sample': 0x26, 'attack': 127, 'decay': 127, 'sustain': 127, 'release': 110}
+        mapping = {0: [region | {'header': [0xFF, 0xE0]}]}
+        text = port.convert(notes, voices=1, program_map=mapping).text
+        self.assertIn('release 16', text)
+        self.assertEqual(text.count('adsr '), 2)  # 덮어쓴 음, 그리고 머리 값으로 되돌리기
+
+    def test_release_only_keeps_the_sample_header(self):
+        notes = score([(0, 24, 60, 100), (24, 24, 60, 100)])
+        notes['timeline'][1]['adsr'] = [None, 20, 0, None]
+        region = {'lo': 0, 'hi': 127, 'sample': 0x26, 'attack': 127, 'decay': 110, 'sustain': 0, 'release': 110}
+        mapping = {0: [region | {'header': [0xEF, 0x00], 'release_only': True}]}
+        text = port.convert(notes, voices=1, program_map=mapping).text
+        self.assertIn('release 16', text)
+        self.assertNotIn('adsr ', text)
+
+    def test_large_bend_becomes_fine_tune_and_small_is_dropped(self):
+        notes = score([(i * 24, 24, 60 + i % 2, 100) for i in range(6)])
+        for e, bend in zip(notes['timeline'], (-16, -16, 3, 3, -16, -16)):
+            e['bend'], e['bend_range'] = bend, 2
+        text = port.convert(notes, voices=1).text
+        self.assertEqual([x.strip() for x in text.split('\n') if 'fine_tune' in x], ['fine_tune E0', 'fine_tune 00', 'fine_tune E0'])
+
+    def test_bend_only_at_a_note_start_is_a_glide_and_is_not_held(self):
+        # NDS 는 음 안에서 벤드를 0 으로 되돌린다(끌어올리기). 시작 값을 음 내내 붙들면 반음 가까이 낮게 들린다
+        notes = score([(0, 24, 60, 100), (24, 24, 62, 100), (48, 24, 64, 100)])
+        notes['timeline'][1]['bend'], notes['timeline'][1]['bend_range'] = -44, 2
+        self.assertNotIn('fine_tune', port.convert(notes, voices=1).text)
+
     def test_audible_velocity_change_is_written(self):
         notes = [(0, 24, 60, 100), (24, 24, 60, 50)]
         result = port.convert(score(notes), voices=1)
@@ -248,3 +285,16 @@ class LaneTests(unittest.TestCase):
         lanes, report = port.allocate(song, 3, 10, lanes_for={'track1': [1]})
         self.assertEqual([n['note'] for n in lanes[1]], [60])
         self.assertEqual(report['dropped_notes'], 1)
+
+    def test_yielding_track_gives_up_its_voice(self):
+        # 메아리 트랙(track2)이 더 세고 NDS 우선순위가 높아도, 양보하면 화음 음(track1)이 남는다
+        timeline = [{'op': 'note', 'tick': 0, 'gate': 10, 'note': n, 'velocity': v, 'ch': ch, 'program': 0, 'priority': p}
+                    for n, v, ch, p in ((72, 100, 'track0', 64), (40, 100, 'track3', 64),
+                                        (60, 60, 'track1', 64), (67, 120, 'track2', 100))]
+        song = {'ticks_per_quarter': 48, 'tempo': 120, 'timeline': timeline, 'end_tick': 10,
+                'channels': [{'name': 'track0'}]}
+        _, report = port.allocate(song, 3, 10)
+        self.assertEqual([timeline[i]['ch'] for i in report['dropped_source_indices']], ['track1'])
+        timeline[3]['yield'] = True
+        _, report = port.allocate(song, 3, 10)
+        self.assertEqual([timeline[i]['ch'] for i in report['dropped_source_indices']], ['track2'])
