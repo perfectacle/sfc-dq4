@@ -39,7 +39,7 @@ from pathlib import Path
 
 from dq5build import BANK, FREE_MARGIN, ORIGINAL_SIZE, free_ranges, parse_at
 from dq5chest import AHEAD_TABLE, CHEST_ITEMS, CHEST_MAPS, FOOT_TABLE, LOWER_TABLE, SEARCH_TABLE, chests
-from dq5chestwrite import NO_NEW_MAPS, NewMaps, decode, encode, integer, map_dimensions
+from dq5chestwrite import NO_NEW_MAPS, NewMaps, decode, encode, field_reward, integer, light_clash, map_dimensions
 from dq5gfx import map_ids
 from dq5map import Rom, lorom
 from dq5palsetwrite import new_map
@@ -301,6 +301,9 @@ def serialize(rom, doc, new_maps=NO_NEW_MAPS, wide=False):
         raise ValueError(f'chests: 상자 수는 chest_maps 의 count 합({total})과 같고 {most} 이하여야 함'
                          + ('' if wide else '(257개부터는 --wide-at)'))
     flag_bits(doc, wide)
+    reward = field_reward(rom)
+    if reward is not None:
+        light_clash(doc['foot'], reward)
     return blobs
 
 

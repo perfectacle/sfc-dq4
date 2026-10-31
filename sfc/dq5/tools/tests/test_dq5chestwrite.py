@@ -25,7 +25,8 @@ def fixture():
                 row[1], row[2], row[3] = i, 4, 5
                 if size == 9:
                     row[4] = 0x38 if name == 'search' else 1
-                row[-4:-2] = b'\xa1\x00'
+                # 발밑은 필드 조사(A1)와 다른 보상: 같으면 12:EFB9 가 실내에서 빛 칸을 덮으므로 거부한다
+                row[-4:-2] = b'\xa2\x00' if name == 'foot' else b'\xa1\x00'
                 # 표마다 겹치지 않는 열림 비트(dq5chestreloc.flag_bits): 서랍 222C~, 발밑 2240~, 아래층 2228~, 두 칸 앞 2243~
                 first = {'search': 0, 'foot': 0, 'lower': 0x18, 'ahead': 0x33}[name]
                 row[-2:] = bytes([first + i // 8, 0x80 >> i % 8])
@@ -169,16 +170,16 @@ class ChestWriteTests(unittest.TestCase):
                                                'reward': 0xA1, 'flag_index': 0x30, 'mask': 0x08}])
         calls = []
         same = encode_field(raw, {'reward': 0x46C, 'x': 10}, lambda x, y: calls.append((x, y)) or 0x55)
-        self.assertEqual([FIELD_TEMPLATE[i] for i in range(len(raw)) if raw[i] != same[i]], ['r0', 'r1'])
+        self.assertEqual([FIELD_TEMPLATE[i] for i in range(len(raw)) if raw[i] != same[i]], ['r0', 'r1'] * 2)
         self.assertEqual(calls, [(10, 0x120)])
         redrawn = encode_field(raw, {}, lambda x, y: 0x123)
-        self.assertEqual([FIELD_TEMPLATE[i] for i in range(len(raw)) if raw[i] != redrawn[i]], ['b0', 'b1'])
+        self.assertEqual([FIELD_TEMPLATE[i] for i in range(len(raw)) if raw[i] != redrawn[i]], ['b0', 'b1'] * 2)
         moved = encode_field(raw, {'x': 24, 'y': 168, 'flag_index': 0x22, 'mask': 4}, lambda x, y: 0x178)
         got = {t: v for t, v in zip(FIELD_TEMPLATE, moved) if named(t)}
         self.assertEqual((got['x0'], got['X0'], got['y0'], got['Y0'], got['y1']), (24, 26, 168, 170, 0))
         self.assertEqual((got['i0'], got['m0'], got['a0'], got['a1'], got['b0'], got['b1']),
                          (0x22, 4, 0xB2, 0x21, 0x78, 1))
-        self.assertEqual(sum(1 for t in FIELD_TEMPLATE if t == 'x0'), 2)
+        self.assertEqual(sum(1 for t in FIELD_TEMPLATE if t == 'x0'), 3)
         for change in ({'x': 11}, {'y': 511}, {'x': 512}, {'width': 3}, {'height': 1}, {'flag_index': 0x80},
                        {'mask': 0}, {'flag_index': 0x15, 'mask': 0x0C}, {'flag_index': 0x1A, 'mask': 1},
                        {'reward': 0xD000}, {'reward': True}, {'layer': 1}):
@@ -194,10 +195,11 @@ class ChestWriteTests(unittest.TestCase):
     def test_field_manifest_and_schema(self, _, __):
         rom = fixture()
         writes = patch(rom, {'format': FORMAT, 'field': [{'index': 0, 'reward': 0x46C}]})['writes']
-        self.assertEqual(writes, [{'at': '12:E61F', 'hex': '6c 04', 'orig': 'a1 00', 'note': 'field 0'}])
+        # 줍고 나서 빛 칸을 되돌리는 12:EFB9 의 비교값도 함께 바뀐다
+        self.assertEqual(writes, [{'at': at, 'hex': '6c 04', 'orig': 'a1 00', 'note': 'field 0'} for at in ('12:E61F', '12:EFBD')])
         moved = patch(rom, {'format': FORMAT, 'field': [{'index': 0, 'x': 24, 'flag_index': 0x31}]})['writes']
         self.assertEqual([w['at'] for w in moved], ['12:E5FD', '12:E602', '12:E615', '12:E627', '01:9FFC', '01:A01C',
-                                                    '01:A05E'])
+                                                    '01:A05E', '12:EFC2'])
         for rows in ({}, [{'index': 1}], [{'index': 0}, {'index': 0}], [{'reward': 1}]):
             with self.subTest(rows=rows), self.assertRaises(ValueError):
                 edits(rom, {'format': FORMAT, 'field': rows})
@@ -209,7 +211,7 @@ class ChestWriteTests(unittest.TestCase):
         rom = fixture()
         doc = {'format': FORMAT, 'search': [{'index': 1, 'reward': 0x432}], 'field': [{'index': 0, 'reward': 0x1A1}]}
         writes = patch(rom, doc)['writes']
-        self.assertEqual([w['at'] for w in writes], ['1F:F5D4', '12:E620'])
+        self.assertEqual([w['at'] for w in writes], ['1F:F5D4', '12:E620', '12:EFBE'])
         self.assertEqual(writes[1]['hex'], '01')
         data = bytearray(rom.d)
         for addr, new, _, _ in edits(rom, doc):
@@ -217,6 +219,21 @@ class ChestWriteTests(unittest.TestCase):
         self.assertEqual(dump(Rom(data))['field'][0]['reward'], 0x1A1)
         with self.assertRaises(ValueError):
             edits(rom, {'format': FORMAT, 'field': ['x']})
+
+    @mock('dq5chestwrite.map_ids', return_value=[(0, i) for i in range(86)])
+    @mock('dq5chestwrite.map_dimensions', return_value=(64, 64))
+    @mock('dq5chestwrite.world_block', return_value=0x55)
+    def test_foot_reward_must_differ_from_field(self, _, __, ___):
+        rom = fixture()
+        for doc in ({'foot': [{'index': 3, 'reward': 0xA1}]}, {'field': [{'index': 0, 'reward': 0xA2}]},
+                    {'foot': [{'index': 0, 'reward': 0x33}], 'field': [{'index': 0, 'reward': 0x33}]}):
+            with self.subTest(doc=doc), self.assertRaisesRegex(ValueError, '12:EFB9'):
+                edits(rom, {'format': FORMAT, **doc})
+        # 필드 보상을 옮기면 그 값을 쓰던 발밑은 받는다
+        self.assertTrue(edits(rom, {'format': FORMAT, 'foot': [{'index': 3, 'reward': 0xA1}],
+                                    'field': [{'index': 0, 'reward': 0x46C}]}))
+        # 필드 코드를 다른 패치가 바꾼 롬은 비교할 보상을 모르므로 보지 않는다
+        self.assertTrue(edits(poke(rom, FIELD_CODE, 0xE2), {'format': FORMAT, 'foot': [{'index': 3, 'reward': 0xA1}]}))
 
     @mock('dq5chestwrite.map_ids', return_value=[(0, i) for i in range(86)])
     def test_tables_ignore_changed_field_code(self, _):

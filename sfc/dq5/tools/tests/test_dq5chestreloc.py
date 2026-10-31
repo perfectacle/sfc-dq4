@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dq5chestreloc import (ABS, DB_SITES, FORMAT, LONG, MAX_CHESTS, ORIGINAL, ORIGINAL_BYTES, address, flag_bits,
                            locate, original_spans, parse, placement, read, rom_size, row_encode, serialize, writes_for)
-from dq5chestwrite import TABLES
+from dq5chestwrite import FIELD_CODE, TABLES
 from dq5map import Rom, lorom
 from test_dq5chestwrite import ROM, fixture, poke
 
@@ -20,7 +20,8 @@ COUNTS = [TABLES['chests'][1] - 82] + [1] * 82
 
 def row(name, **values):
     base = {'group': 0, 'map': 1, 'x': 2, 'y': 3, 'reward': 0xA1, 'flag_index': 3, 'mask': 0x80}
-    extra = {'search': {'unused': 1}, 'foot': {'layer': 1}}.get(name, {})
+    # 발밑 보상은 fixture 의 필드 조사(A1)와 달라야 함(12:EFB9)
+    extra = {'search': {'unused': 1}, 'foot': {'layer': 1, 'reward': 0xA2}}.get(name, {})
     return base | extra | values
 
 
@@ -154,6 +155,16 @@ class ChestRelocTests(unittest.TestCase):
                 serialize(rom, dict(doc, **{name: rows(name, limit)}))
                 with self.assertRaisesRegex(ValueError, '8비트 색인'):
                     serialize(rom, dict(doc, **{name: rows(name, limit + 1)}))
+
+    @mock('dq5chestreloc.map_ids', return_value=[(0, 1)])
+    @mock('dq5chestreloc.map_dimensions', return_value=(64, 64))
+    def test_foot_reward_must_differ_from_field(self, _, __):
+        rom = fixture()
+        doc = {'format': FORMAT, 'chests': [], 'chest_maps': [], 'search': [], 'foot': [row('foot', reward=0xA1)],
+               'ahead': [], 'lower': []}
+        with self.assertRaisesRegex(ValueError, '12:EFB9'):
+            serialize(rom, doc)
+        serialize(poke(rom, FIELD_CODE, 0xE2), doc)
 
     def test_placement_bank_rules(self):
         rom = fixture()

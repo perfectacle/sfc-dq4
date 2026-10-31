@@ -95,11 +95,12 @@ def split(grid):
 
 
 # 00:CF50 을 부르는 넷이 $90·$92(8픽셀 칸)를 즉값으로 두는 곳. 원본에서는 블록 (0B,53)·(0B,53)·(11,7C)·(E2,75)~(E2,77).
-# 01:A01B 는 밤에 빛나는 풀이라 dq5chestwrite.py 의 field 가 칸을 옮기므로 롬에서 읽는다.
-# 꼴: 16진은 그대로 있어야 하는 명령 바이트, x0 x1·y0 y1 은 칸, n0 n1 은 05:EF0F 의 되풀이 횟수 − 1(Y 는 2 씩 줄어듦).
+# 01:A01B·12:EFC1 은 밤에 빛나는 풀이라 dq5chestwrite.py 의 field 가 칸(과 12:EFC1 의 되돌릴 블록)을 옮기므로 롬에서 읽는다.
+# 꼴: 16진은 그대로 있어야 하는 명령 바이트, x0 x1·y0 y1 은 칸, n0 n1 은 05:EF0F 의 되풀이 횟수 − 1(Y 는 2 씩 줄어듦),
+# b0 b1 은 놓을 블록(칸을 정하지 않으므로 보지 않음).
 CHANGED_SITES = (
     (0x01A01B, 'A2 x0 x1 86 90 A2 y0 y1 86 92 22 50 CF 00'),
-    (0x12EFC1, 'A9 x0 x1 85 90 A9 y0 y1 85 92 A9 CA 00 22 50 CF 00'),
+    (0x12EFC1, 'A9 x0 x1 85 90 A9 y0 y1 85 92 A9 b0 b1 22 50 CF 00'),
     (0x03BB3C, 'A2 x0 x1 86 90 A2 y0 y1 86 92 7B A9 71 22 50 CF 00'),
     (0x05EF0F, 'A9 y0 y1 85 CA A9 x0 x1 85 CC A2 n0 n1 DA A5 CA 85 92 3A 3A 85 CA A5 CC 85 90'),
 )
@@ -112,7 +113,7 @@ def changed_cells(rom):
         raw = rom.d[lorom(at):lorom(at) + len(text.split())]
         v = {}
         for token, b in zip(text.split(), raw):
-            if token[0] in 'xyn':
+            if token[0] in 'xynb':
                 v[token[0]] = v.get(token[0], 0) | b << 8 * int(token[1])
             elif int(token, 16) != b:
                 raise ValueError(f'{at >> 16:02X}:{at & 0xFFFF:04X}: 00:CF50 을 부르는 즉값 꼴이 아님')
