@@ -15,7 +15,6 @@ import concurrent.futures
 import json
 import os
 import random
-import re
 import shutil
 import subprocess
 import sys
