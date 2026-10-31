@@ -77,6 +77,28 @@ class CodeTests(unittest.TestCase):
         self.assertEqual(t[:2], bytes((0b11000000, 0b10100000)))
 
 
+class FcTileTests(unittest.TestCase):
+    def nes(self, n, plane):
+        bank, addr = box.FC_TILES
+        o = 0x10 + bank * 0x4000 + (addr - 0x8000) + (n - 1) * 8
+        data = bytearray(o + 8)
+        data[o:o + 8] = plane
+        return bytes(data)
+
+    def test_no_shadow_tiles_keep_plane_0_only(self):
+        plane = bytes([0xFF, 0x81, 0x55, 0, 0xAA, 0x0F, 0xF0, 0x3C])
+        for n in box.FC_BORDER.values():
+            rows = box.fc_tile(self.nes(n, plane), n)
+            self.assertEqual([[v >> 1 for v in row] for row in rows], [[0] * 8] * 8, f'{n:02X}')
+            self.assertEqual(rows[1], [1, 0, 0, 0, 0, 0, 0, 1])
+
+    def test_shadow_is_plane_0_inverted_one_row_down(self):
+        rows = box.fc_tile(self.nes(box.FC_FILL, bytes([0x80] + [0] * 7)), box.FC_FILL)
+        self.assertEqual(rows[0], [3] + [2] * 7)
+        self.assertEqual(rows[1], [0] + [2] * 7)
+        self.assertEqual({v for row in rows[2:] for v in row}, {2})
+
+
 @unittest.skipUnless(NES.exists() and os.environ.get('DQ4_GALMURI'), 'rom/dq4.nes 와 DQ4_GALMURI 가 있어야 함')
 class BoxTests(unittest.TestCase):
     def setUp(self):

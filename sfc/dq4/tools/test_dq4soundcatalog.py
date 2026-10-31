@@ -1,7 +1,9 @@
 import json
 from pathlib import Path
+import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import dq4soundcatalog as catalog
 
@@ -74,6 +76,41 @@ class CatalogTests(unittest.TestCase):
         score['timeline'][-1]['note'] += 1
         with self.assertRaisesRegex(ValueError, '음높이 불일치'):
             catalog.verify_inn(score, ROM)
+
+    def test_inn_reuse_merges_two_dq5_tracks_per_part(self):
+        # 지어낸 4트랙 시퀀스를 1D 자리에 둔다. 트랙 0·1 이 NDS track0, 2·3 이 track1 이고 둘째 트랙은 쉼 뒤에 이어 분다.
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'dq5/tools'))
+        import dq5song
+        seq = dq5song.assemble([
+            'tempo 20', 'track A', 'track B', 'track C', 'track D',
+            'A:', '  note 30 len 18', '  note 32', '  note 34', '  end',
+            'B:', '  rest len 48', '  note 35 len 18', '  note 37', '  end',
+            'C:', '  note 28 len 18', '  note 29', '  note 2B', '  end',
+            'D:', '  rest len 48', '  note 2D len 18', '  note 2F', '  end',
+        ])
+        parts = ([0x30, 0x32, 0x34, 0x35, 0x37], [0x28, 0x29, 0x2B, 0x2D, 0x2F])
+        score = {'timeline': [
+            {'tick': i * 24, 'note': note + 23, 'ch': f'track{ch}', 'op': 'note'}
+            for ch, part in enumerate(parts) for i, note in enumerate(part)
+        ]}
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch('dq5spc.sequences', return_value={0x1D: (0, 0, len(seq))}), \
+                mock.patch('dq5spc.body', return_value=seq):
+            rom = Path(directory) / 'dq5.sfc'
+            rom.write_bytes(b'')
+            result = catalog.verify_inn(score, rom)
+            self.assertEqual([e['matched_notes'] for e in result['evidence']], [5, 5])
+            self.assertEqual([e['max_tick_difference'] for e in result['evidence']], [0, 0])
+            score['timeline'][3]['tick'] += 2
+            with self.assertRaisesRegex(ValueError, '1틱 초과'):
+                catalog.verify_inn(score, rom)
+            score['timeline'][3]['tick'] -= 2
+            score['timeline'][-1]['note'] += 1
+            with self.assertRaisesRegex(ValueError, '음높이 불일치'):
+                catalog.verify_inn(score, rom)
+            del score['timeline'][0]
+            with self.assertRaisesRegex(ValueError, '음 수 불일치'):
+                catalog.verify_inn(score, rom)
 
 
 if __name__ == '__main__':

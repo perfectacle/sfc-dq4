@@ -30,6 +30,34 @@ class GridTest(unittest.TestCase):
             self.assertTrue(source is None or len(source) == count)
 
 
+class TerrainRateTest(unittest.TestCase):
+    def test_terrain_rates_are_fc_factors(self):
+        # Made-up FC factors, kind k day 10 + k / night 20 + k, and a made-up DQ5 terrain of each borrowed block:
+        # the blocks of FC kinds 0-7 get terrains 0-7 in reverse, every other block terrain D.
+        from unittest import mock
+        import dq4encounter
+        import dq4fieldport
+        prg = bytearray(0x80000)
+        for k in range(enc.FC_TERRAINS):
+            prg[dq4encounter.BANK * 0x4000 + (dq4encounter.TERRAIN_DAY & 0x3FFF) + k] = 0x10 + k
+            prg[dq4encounter.BANK * 0x4000 + (dq4encounter.TERRAIN_NIGHT & 0x3FFF) + k] = 0x20 + k
+        dq5 = bytearray(0x120000)
+        o = enc._lorom(enc.TERRAIN_RATES)
+        dq5[o:o + 2 * enc.TERRAINS] = b"\xEE" * (2 * enc.TERRAINS)
+        terrains = {dq4fieldport.BLOCKS[k]: 7 - k for k in range(enc.FC_TERRAINS)}
+        with mock.patch("dq5field.terrain", lambda rom, block: terrains.get(block, 0x0D)):
+            w = enc.terrain_rates(bytes(prg), bytes(dq5))
+            self.assertEqual(w["at"], "23:F1E0")
+            new = bytes.fromhex(w["hex"])
+            for k in range(enc.FC_TERRAINS):
+                self.assertEqual((new[7 - k], new[enc.TERRAINS + 7 - k]), (0x10 + k, 0x20 + k))
+            self.assertEqual((new[0x0D], new[enc.TERRAINS + 0x0D]), (0, 0))   # only kinds 8 and up
+            self.assertEqual(new[0x0A], 0xEE)                                  # no kind borrows it
+            terrains[dq4fieldport.BLOCKS[1]] = terrains[dq4fieldport.BLOCKS[2]]
+            with self.assertRaises(ValueError):
+                enc.terrain_rates(bytes(prg), bytes(dq5))
+
+
 @unittest.skipUnless(DQ4.exists() and DQ5.exists(), "rom/dq4.nes and rom/dq5.sfc")
 class RomTest(unittest.TestCase):
     @classmethod

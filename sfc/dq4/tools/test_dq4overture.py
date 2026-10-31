@@ -25,6 +25,31 @@ class WriterTests(unittest.TestCase):
         self.assertEqual(ov.tempo_at(ov.FC_MARCH[0] + 100), 121)
 
 
+class SetTableTests(unittest.TestCase):
+    def rom(self, title):
+        from dq5map import Rom, lorom
+        from dq5spc import SEQUENCE_COUNT
+        records = [bytes([len(title), 1, *title]) if song == ov.SONG else bytes([1, 1, 0x00])
+                   for song in range(SEQUENCE_COUNT)]
+        data = bytearray(0x200000)
+        table = b''.join(records)
+        data[lorom(ov.SONG_SETS):lorom(ov.SONG_SETS) + len(table)] = table
+        return Rom(data), records
+
+    def test_only_the_title_record_grows(self):
+        rom, records = self.rom(ov.ORIGINAL_SAMPLES)
+        table, old = ov.set_table(rom)
+        self.assertEqual(old, sum(map(len, records)))
+        self.assertEqual(len(table) - old, len(ov.SAMPLES) - len(ov.ORIGINAL_SAMPLES))
+        at = sum(map(len, records[:ov.SONG]))
+        self.assertEqual(table[at:at + 2 + len(ov.SAMPLES)], bytes([len(ov.SAMPLES), ov.SEND_FIRST, *ov.SAMPLES]))
+        self.assertEqual(table[:at], b''.join(records[:ov.SONG]))
+
+    def test_rejects_a_changed_title_record(self):
+        with self.assertRaisesRegex(ValueError, 'original title samples'):
+            ov.set_table(self.rom(ov.SAMPLES)[0])
+
+
 @unittest.skipUnless(NES.exists() and SFC.exists(), 'rom/dq4.nes and rom/dq5.sfc are user supplied')
 class ArrangementTests(unittest.TestCase):
     @classmethod

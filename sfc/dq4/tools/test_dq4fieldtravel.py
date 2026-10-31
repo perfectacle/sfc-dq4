@@ -57,6 +57,29 @@ class OrderTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             travel.ship_cell(props, (0x09, 0x10), (0, 0))
 
+    def test_names_encode_as_dq5(self):
+        # Made-up tables: single bytes 10 ハ, 11 ト, 12 り; mark entry 5 バ (84 + key 10), entry 28 パ (83 + key 10).
+        # Every other entry is code 0, the blank, which no name uses. Mark entries 0-3 are also single bytes 7F-82
+        # (the tables touch), so バ takes entry 5.
+        import dq5text
+        from dq5map import lorom
+        chars = "".join(dq5text.CHARS)
+        dq5 = bytearray(0x200000)
+
+        def code(at, c):
+            dq5[lorom(at):lorom(at) + 2] = chars.index(c).to_bytes(2, "little")
+
+        for b, c in ((0x10, "ハ"), (0x11, "ト"), (0x12, "り")):
+            code(dq5text.STRING_CODES + b * 2, c)
+        for k, c in ((5, "バ"), (0x28, "パ")):
+            code(dq5text.MARK_CODES + k * 2, c)
+            dq5[lorom(dq5text.MARK_KEYS + k)] = 0x10
+        dq5 = bytes(dq5)
+        self.assertEqual(travel.name_bytes(dq5, "ハトバ"), bytes([0x10, 0x11, 0x84, 0x10]))
+        self.assertEqual(travel.name_bytes(dq5, "パはリ"), bytes([0x83, 0x10, 0x10, 0x12]))
+        with self.assertRaises(ValueError):
+            travel.name_bytes(dq5, "ラ")
+
 
 @unittest.skipUnless(DQ4.exists() and DQ5.exists(), "rom/dq4.nes and rom/dq5.sfc")
 class RomTest(unittest.TestCase):
