@@ -47,6 +47,18 @@ class RomTest(unittest.TestCase):
         # BEQ from 01:851E back onto 01:854B (LDY #0 / PLP / RTL), as the original BEQ.
         self.assertEqual(site["hex"], "22 00 FF 3C F0 2D EA")
 
+    def test_clear_hooks(self):
+        writes = well.writes(0x3CFF00, self.prg, self.place)
+        data = bytes.fromhex(writes[0]["hex"])
+        load, wipe = writes[2:]
+        self.assertEqual((load["at"], load["orig"]), ("25:8278", "E2 30 A9 50 8D 5E 07"))
+        self.assertEqual((wipe["at"], wipe["orig"]), ("01:88EF", "22 9A FE 24"))
+        clear = "AF E1 21 7E 29 FD 8F E1 21 7E"
+        at = int.from_bytes(bytes.fromhex(load["hex"])[1:4], "little") - 0x3CFF00
+        self.assertEqual(data[at:at + 18].hex(" ").upper(), f"E2 30 {clear} A9 50 8D 5E 07 6B")
+        at = int.from_bytes(bytes.fromhex(wipe["hex"])[1:4], "little") - 0x3CFF00
+        self.assertEqual(data[at:at + 20].hex(" ").upper(), f"08 E2 20 48 {clear} 68 28 5C 9A FE 24")
+
 
 if __name__ == "__main__":
     unittest.main()

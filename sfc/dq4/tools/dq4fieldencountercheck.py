@@ -5,8 +5,11 @@ dq5warp.lua FIELD with dq5warptrace.lua).
          DQ5 rate coefficient at FF (23:EA44, so nearly every step fights): every step 23:E7C2 gets the DQ5 zone
          of that FC zone, and every group 23:E7C2 picks is made of the monsters that zone's record weighs. The
          walk stops at the first fight, so each zone is walked after three different waits (DELAYS)
-  rate   the same walk at the ROM's own rates: per step, the DQ5 chance (23:EA44[coefficient] x 00:82AF's Y >> 6)
-         is FC's (base rate x 16 x the day or night terrain factor of the FC block >> 8)
+  rate   the same walk at the ROM's own rates: every step 23:E7C2's Y is the day or night FC terrain factor of
+         the FC block, the zone's coefficient is the one dq4fieldencounter.field_rate_index picks, and the chance
+         23:E8B7 gets is dq4fieldencounter.dq5_chance of the coefficient, Y and the steps since the last fight
+         ($1A9A). The report gives each walked kind's mean cells to a fight in DQ5 (dq5_steps) and twice FC's mean
+         steps (fc_steps)
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4fieldencountercheck.py --rom work/dq4-groups/groups.sfc \\
       --out work/dq4-encountercheck
@@ -33,18 +36,20 @@ import dq4groupcheck  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
 
 # Scene -> (FC field, FC zone-map cell (column, row) to stand in). The first two have DQ5 namesakes (スライム,
-# バブルスライム), 0E is a zone-map row past grid 0's seven, the last two are fields 1 and 3.
+# バブルスライム), 0E is a zone-map row past grid 0's seven, 09 and 08 have base rates 20 and 28 (the others 16),
+# the last two are fields 1 and 3.
 ZONES = {"castle-04": (0, (0x0A, 0x02)), "imuru-05": (0, (0x09, 0x01)), "south-0E": (0, (0x03, 0x0C)),
+         "west-09": (0, (0x05, 0x02)), "west-08": (0, (0x03, 0x03)),
          "w1-34": (1, (0x01, 0x02)), "w2-36": (3, (0x02, 0x02))}
-RATE_SCENES = ("castle-04", "imuru-05")
+RATE_SCENES = ("castle-04", "imuru-05", "west-09", "west-08")
 # Frames waited before the walk: each starts the random numbers elsewhere, for another fight.
 DELAYS = (0, 7, 13)
 RATES = "11EA44=FFFFFFFFFFFFFFFF"
 # Five cells each way keeps the party on its two blocks' neighbours, inside the zone-map cell.
 WALK = "idle:16," + ",".join(["right:40,left:40"] * 8)
 TRACE = "23E7C2,23E9B0,23EA40,23E98F"
-LOG = "7E1001,7E1003,7E1005,7E1007,7E00B6,7E00B8"
-RATE_TRACE = "0082AF"
+LOG = "7E1001,7E1003,7E1005,7E1007,7E00B6,7E00B8,7E0000,7E1A9A"
+RATE_TRACE = "23E7C2,23E8B7"
 EXITS = {"23E9B0": "single", "23EA40": "mixed", "23E98F": "fixed"}
 TERRAIN_DAY, TERRAIN_NIGHT = dq4encounter.TERRAIN_DAY, dq4encounter.TERRAIN_NIGHT
 GRASS = 0x02
@@ -142,24 +147,34 @@ def main():
                        and all(kind != "fixed" and {m for m, _ in g} <= allowed for kind, g in fights)}
 
     def rate_report(data, prg, grid, fc, zone, rows):
-        """Per walked FC block kind: DQ5's chance of a fight per step (/256, the zone's coefficient x 00:82AF's Y
-        >> 6) and FC's (base x 16 x the kind's day or night factor >> 8)."""
+        """Per walked FC block kind: 23:E7C2's Y and FC's day and night factors, the steps, and the mean cells to a
+        fight in DQ5 and FC; ok when every step's Y is a factor of its kind and its chance at 23:E8B7 is
+        dq5_chance."""
         import dq5encounter
         from dq5map import Rom
         coef = dq5encounter.area(Rom(data), zone)["coef"]
         base = dq4encounter.zone(prg, fc)["rate"]
-        seen = {}
+        want = dq4fieldencounter._coefs(args.dq5.read_bytes())[report[f"{fc:02X}"]["rate_index"]]
+        seen, wrong, step = {}, [], None
         for _, pc, kv in rows:
-            if pc != RATE_TRACE or int(kv["A"], 16) & 0xFF != zone:
+            if pc == "23E7C2":
+                step = kv if int(kv["A"], 16) & 0xFF == zone else None
                 continue
-            kind = grid[int(kv["7E00B8"], 16) >> 1][int(kv["7E00B6"], 16) >> 1]
-            y = int(kv["Y"], 16) & 0xFF
-            fc_day, fc_night = (base * 16 * dq4encounter.rd(prg, t + kind) >> 8 for t in (TERRAIN_DAY, TERRAIN_NIGHT))
-            row = seen.setdefault(f"{kind:02X}", {"y": y, "dq5": coef * y >> 6, "fc_day": fc_day,
-                                                  "fc_night": fc_night, "steps": 0})
+            if pc != "23E8B7" or step is None:
+                continue
+            kind = grid[int(step["7E00B8"], 16) >> 1][int(step["7E00B6"], 16) >> 1]
+            y, s = int(step["Y"], 16) & 0xFF, int(step["7E1A9A"], 16) & 0xFF
+            factors = [dq4encounter.rd(prg, t + kind) for t in (TERRAIN_DAY, TERRAIN_NIGHT)]
+            row = seen.setdefault(f"{kind:02X}", {"y": y, "fc_day": factors[0], "fc_night": factors[1], "steps": 0,
+                                                  "dq5_cells": round(dq4fieldencounter.dq5_steps(coef, y), 1),
+                                                  "fc_cells": round(2 * dq4fieldencounter.fc_steps(prg, base, y), 1)})
             row["steps"] += 1
-        return {"coefficient": coef, "fc_base": base, "chances": seen,
-                "ok": bool(seen) and all(v["dq5"] in (v["fc_day"], v["fc_night"]) for v in seen.values())}
+            chance = int(kv["7E0000"], 16) & 0xFF
+            if y not in factors or y != row["y"] or chance != dq4fieldencounter.dq5_chance(coef, y, s):
+                wrong.append({"kind": kind, "y": y, "1A9A": s, "chance": chance})
+            step = None
+        return {"coefficient": coef, "fc_base": base, "chances": seen, "wrong": wrong[:10],
+                "ok": bool(seen) and coef == want and not wrong}
 
     jobs = [(name, False, d) for name in ZONES for d in DELAYS] + [(name, True) for name in RATE_SCENES]
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
