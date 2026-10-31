@@ -238,7 +238,6 @@ def edits(rom, doc, original=None):
     seen = set()
     for row in value:
         keys(row, ('index', 'element', 'item', 'reduce'), 'armor')
-        old = entries[integer(row.get('index'), 0, len(entries) - 1, 'armor index')][1]
         i = integer(row.get('index'), 0, len(entries) - 1, 'armor index')
         require(i not in seen, f'armor: {i} 를 두 번 지정함')
         seen.add(i)
