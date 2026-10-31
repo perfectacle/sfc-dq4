@@ -21,6 +21,7 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [docs/dq4-josa-format.md](docs/dq4-josa-format.md): 받침을 보고 고르는 조사 코드와 필드 시스템 메시지 81개
 - [docs/dq4-battle-text-format.md](docs/dq4-battle-text-format.md): 전투 메시지 432개 한글(전투 중 빈 BG3 칸 풀, 한글 구간·글자 표, 이름·조사, 창 테두리·줄 올림)
 - [docs/dq4-chapter1-format.md](docs/dq4-chapter1-format.md): 1장 첫머리(새 게임 첫 맵, 왕좌의 방 연출, 한글 대사, 인물 배치, 바트랜드 성 곡)
+- [docs/dq4-chapter2-format.md](docs/dq4-chapter2-format.md): 2장 첫머리(1장 끝에서 넘어가기, 아리나 일행, 산트하임 왕좌의 방 연출)
 - [docs/dq4-prologue-format.md](docs/dq4-prologue-format.md): NDS 서장(지하 검술 수련, 개구리, 신시아의 모샤스, 저녁, 1장으로 넘기기)
 - [todo.md](todo.md): 남은 일
 - [references.md](references.md): 참고 자료
@@ -235,3 +236,4 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [2026-10-31-17: 진행에 따라 바뀌는 1장 대사와 손님 호이민](journal/2026-10-31-17-ch1-talks.md)
 - [2026-10-31-18: 동료 이름 「호이민」](journal/2026-10-31-18-companion-name.md)
 - [2026-10-31-19: 호이민이 FC 가중치로 행동을 고른다](journal/2026-10-31-19-hoimin-ai.md)
+- [2026-10-31-20: 1장 끝에서 2장 첫머리로](journal/2026-10-31-20-ch2-start.md)

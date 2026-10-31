@@ -127,6 +127,19 @@ if __name__ == '__main__':
 class EndBoxTest(unittest.TestCase):
     def test_a_box_without_a_map_never_darkens_a_map(self):
         import dq4chapterbox as b
-        self.assertEqual(b.if_pending((b.CHAPTER1, b.CHAPTER2), b'T', b'O'), b.if_pending((b.CHAPTER1,), b'T', b'O'))
+        mapless = b.Scene('end', None, None, 't')
+        self.assertEqual(b.if_pending((b.CHAPTER1, mapless), b'T', b'O'), b.if_pending((b.CHAPTER1,), b'T', b'O'))
         self.assertIn('box2', b.entry_points((b.CHAPTER1, b.CHAPTER2)))
+
+    def test_chapter2_waits_for_its_chapter_flag(self):
+        # 첫머리 대기 깃발이 꺼져 있으면(1장에 걸어 들어온 때, 첫머리 뒤) 맵을 검게 불러오지 않는다: BEQ 로 다음 장면에
+        import dq4chapterbox as b
+        import dq4ch2event as e
+        addr, mask = 0x7E2190 + e.OPENING[0], e.OPENING[1]
+        code = b.if_pending((b.CHAPTER2,), b'T', b'O')
+        check = bytes((0xAF, addr & 0xFF, addr >> 8 & 0xFF, addr >> 16, 0x29, mask, 0xF0))
+        self.assertIn(check, code)
+        self.assertEqual(b.CHAPTER2.since, (addr, mask))
+        self.assertIsNone(b.CHAPTER2.flag)
+        self.assertEqual(b.CHAPTER2.where, tuple(int(v, 16) for v in e.THRONE.split('/')))
 

@@ -816,8 +816,8 @@ def _cmd(op, *args):
     return {"op": op, "args": list(args)}
 
 
-def scripts(first_message, box_at=None):
-    """box_at: 2장 제목 상자 네이티브(dq4chapterbox.entry_points 의 box2)."""
+def scripts(first_message, chapter2_at=None):
+    """chapter2_at: 1장 끝 서술 뒤 2장으로 옮기는 네이티브(dq4ch2event 의 transfer)."""
     m = message_ids(first_message)
     _, at = native()
     lo, hi = lambda v: v & 0xFF, lambda v: v >> 8
@@ -898,12 +898,11 @@ def scripts(first_message, box_at=None):
         # 다시 말한다. 아니면 칭찬 → 선물(경험치·레벨업) → 작별, 보고 깃발
         {"address": KING_CALL_SCRIPT, "commands": _king_call(m, at)},
     ] + ([
-        # 1장 끝: 서술 → 검은 화면 → 2장 제목 상자 → 어둡게. 조작은 풀지 않는다(2장은 아직 이어지지 않음)
+        # 1장 끝: 서술 → 검은 화면 → 2장으로 옮김(일행을 바꾸고 산트하임 왕좌의 방을 검게 불러옴)
         {"address": ENDER_SCRIPT, "commands": [
             _cmd('28'), _cmd('52'), _cmd('3F'), _cmd('21', lo(m['chapter_end']), hi(m['chapter_end'])),
-            _cmd('37', *_long(at['darken'])), _cmd('37', *_long(box_at)), _cmd('37', *_long(at['fade_out'])),
-            _cmd('16')]},
-    ] if box_at is not None else [])
+            _cmd('37', *_long(at['darken'])), _cmd('37', *_long(chapter2_at)), _cmd('16')]},
+    ] if chapter2_at is not None else [])
 
 
 def _king_call(m, at):

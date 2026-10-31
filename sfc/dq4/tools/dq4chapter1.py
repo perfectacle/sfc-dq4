@@ -293,8 +293,13 @@ def npc_doc(records, ported=(), prologue=False, report=None, ported_messages=())
         over = lambda flag, name: {"map": THRONE, "flag": flag[0], "when": "on", "mask": flag[1], "list": f"new:{name}"}  # noqa: E731
         overrides = more_overrides + [over(dq4ch1event.REPORTED, 'throne_report'),
                                       over(dq4ch1event.BOSS_WON, 'throne_return')] + overrides
-        scripts += dq4ch1event.scripts(dq4npcport.FIRST_MESSAGE + len(ported_messages),
-                                       dq4chapterbox.entry_points(scenes(prologue))['box2'])
+        import dq4ch2event
+        first = dq4npcport.FIRST_MESSAGE + len(ported_messages)
+        scripts += dq4ch1event.scripts(first, dq4ch2event.native()[1]['transfer'])
+        ch2_new, ch2_overrides = dq4ch2event.npc_lists(ported)
+        new_lists += ch2_new
+        overrides = ch2_overrides + overrides
+        scripts += dq4ch2event.scripts(chapter2_message(first), dq4chapterbox.entry_points(scenes(prologue)))
     mine = {lst["map"] for lst in lists}
     return {"format": "dq5npcrelocate/1", "scripts": scripts,
             "lists": lists + [lst for lst in ported if "map" in lst and lst["map"] not in mine],
@@ -348,8 +353,9 @@ def messages(ported_messages, report):
     import dq4npcport
     first = dq4npcport.FIRST_MESSAGE + len(ported_messages)
     events = dq4ch1event.texts(first)
+    import dq4ch2event
     for name, texts in (('1장', TEXTS), ('서장', dq4prologue.TEXTS), ('시스템', dq4sysmsg.TEXTS),
-                        ('1장 사건', events)):
+                        ('1장 사건', events), ('2장', dq4ch2event.texts(chapter2_message(first)))):
         clash = set(out) & set(texts)
         if clash:
             raise ValueError(f'{name} 메시지와 겹치는 번호: {sorted(f"{m:03X}" for m in clash)}')
@@ -367,11 +373,19 @@ def message_flow(first_message):
     import dq4prologue
     points = dq4chapterbox.entry_points(scenes(True))
     native = {k: [v & 0xFF, v >> 8 & 0xFF, v >> 16] for k, v in points.items()}
+    import dq4ch2event
     scripts = ([throne_script(native)] + dq4prologue.npc_lists()[3] +
-               dq4ch1event.scripts(first_message, points['box2']))
+               dq4ch1event.scripts(first_message, dq4ch2event.native()[1]['transfer']) +
+               dq4ch2event.scripts(chapter2_message(first_message), points))
     talks = ([s["body"] for s in dq4prologue.talk_doc()["scripts"]] + dq4ch1event.talk_scripts(first_message))
     _, at = dq4prologue.native()
     return {"talks": talks, "scripts": [s["commands"] for s in scripts], "events": [dq4prologue.end_event(at)]}
+
+
+def chapter2_message(first_message):
+    """2장 메시지의 첫 번호: 1장 사건 메시지 바로 뒤."""
+    import dq4ch1event
+    return first_message + len(dq4ch1event.MESSAGES)
 
 
 def event_talk():
@@ -597,6 +611,8 @@ def build(rom, dq5, dq4, work, prologue=True):
     import dq4menupatch
     out = bytearray(dq4chapterbox.apply(out, dq4.read_bytes(), dq4menupatch.Font('galmuri11'), scenes(prologue)))
     out = bytearray(dq4ch1event.apply(out))
+    import dq4ch2event
+    out = bytearray(dq4ch2event.apply(out, original))
     import dq4josa
     out = bytearray(dq4josa.apply(out))
     import dq4msgnames

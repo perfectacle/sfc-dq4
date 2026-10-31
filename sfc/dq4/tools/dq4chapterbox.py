@@ -30,16 +30,17 @@ TITLE = '제1장   왕궁의 전사들'
 
 class Scene:
     """장 제목 상자로 시작하는 장면: 그 맵(그룹, 번호)에서 깃발(7E 주소, 비트)이 꺼져 있는 동안 맵을 검게
-    불러오고, 그 맵 인물 스크립트가 상자(box_at)와 맵 밝히기(reveal)를 부른다."""
+    불러오고, 그 맵 인물 스크립트가 상자(box_at)와 맵 밝히기(reveal)를 부른다. since 가 있으면 그 깃발도 켜져
+    있어야 한다(flag 는 없어도 됨)."""
 
-    def __init__(self, name, where, flag, title):
-        self.name, self.where, self.flag, self.title = name, where, flag, title
+    def __init__(self, name, where, flag, title, since=None):
+        self.name, self.where, self.flag, self.title, self.since = name, where, flag, title, since
 
 
 CHAPTER1 = Scene('box', (0x36, 0x01), (0x7E219E, 0x04), TITLE)
 PROLOGUE = Scene('box0', (0x3C, 0x01), (0x7E219E, 0x80), '서장')
-# 1장 끝: 인물 스크립트가 서술 뒤에 상자만 띄운다. 맵을 검게 불러오지 않으므로 맵·깃발이 없다
-CHAPTER2 = Scene('box2', None, None, '제2장  말괄량이 공주의 모험')
+# 1장 끝에서 산트하임 왕좌의 방(3D/01)으로 옮긴 뒤 첫머리를 마칠 때까지(첫머리 대기 깃발 7E:2208 bit6)
+CHAPTER2 = Scene('box2', (0x3D, 0x01), None, '제2장  말괄량이 공주의 모험', since=(0x7E2208, 0x40))
 # 게임에 넣는 장면 차례. 상자·밝히기 네이티브 주소가 이 목록으로 정해지므로, 주소를 부르는 스크립트(서장·1장)와
 # 빌드가 같은 목록을 써야 한다
 GAME_SCENES = (PROLOGUE, CHAPTER1, CHAPTER2)
@@ -265,10 +266,16 @@ def if_pending(scenes, then, other=b''):
     보지 않는다."""
     scenes = [scene for scene in scenes if scene.where]
     def checks(scene):
-        (g, n), (addr, mask) = scene.where, scene.flag
-        return [bytes((0xAD, 0xBC, 0x00, 0xC9, g, 0xD0)),                 # LDA $00BC / CMP #g / BNE 다음
-                bytes((0xAD, 0xBD, 0x00, 0xC9, n, 0xD0)),                 # LDA $00BD / CMP #n / BNE 다음
-                bytes((0xAF, *le(addr, 3), 0x29, mask, 0xD0))]            # LDA flag / AND #m / BNE 다음
+        g, n = scene.where
+        out = [bytes((0xAD, 0xBC, 0x00, 0xC9, g, 0xD0)),                  # LDA $00BC / CMP #g / BNE 다음
+               bytes((0xAD, 0xBD, 0x00, 0xC9, n, 0xD0))]                  # LDA $00BD / CMP #n / BNE 다음
+        if scene.flag:
+            addr, mask = scene.flag
+            out.append(bytes((0xAF, *le(addr, 3), 0x29, mask, 0xD0)))      # LDA flag / AND #m / BNE 다음
+        if scene.since:
+            addr, mask = scene.since
+            out.append(bytes((0xAF, *le(addr, 3), 0x29, mask, 0xF0)))      # LDA flag / AND #m / BEQ 다음
+        return out
     then = then + (bytes((0x80, len(other))) if other else b'')           # BRA 끝
     # 장면마다 [검사 셋][BRA then]. 마지막 장면의 BRA 는 없고 then 이 바로 뒤
     parts = []
