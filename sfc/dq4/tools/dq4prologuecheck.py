@@ -61,7 +61,7 @@ ROUTE = [
 ]
 MAPS = ['3C/00', '3C/01', '3C/00', '36/01']
 FLAGS = {'DONE': pro.DONE, 'FROG_MET': pro.FROG_MET, 'SHINSIA_MET': pro.SHINSIA_MET, 'DINNER': pro.DINNER,
-         'CHAPTER1': (0x0E, 0x04)}
+         'CHAPTER1': pro.ch1.EVENT_FLAG}
 
 
 def run(mesence, rom, script, dest, env, timeout):

@@ -25,13 +25,15 @@ sys.path[:0] = [str(HERE), str(DQ5_TOOLS)]
 import dq4wrap  # noqa: E402
 from dq4environmentrom import GROUPS  # noqa: E402
 from dq4romassets import ips_patch, set_checksum  # noqa: E402
+import dq4chapterbox  # noqa: E402
 from dq5build import load  # noqa: E402
 
 LINE, END, PAGE, SPEAK, NARR, HERO = 0x1000, 0x1001, 0x1002, 0x1003, 0x1006, 0x1012
 Q = 0x363      # 「 (DQ5 글자)
 DOTS = 0x366   # …
 
-EVENT_FLAG = (0x0E, 0x04)       # 7E:219E & 04. 원래 태어나는 장면이 켜는 비트라 새 게임 첫 맵에서는 꺼져 있다
+# 왕의 연설이 끝나면 켜는 연출 깃발(번호, 비트). 자리는 dq4chapterbox.CHAPTER1 한 곳에서 정한다
+EVENT_FLAG = (dq4chapterbox.CHAPTER1.flag[0] - 0x7E2190, dq4chapterbox.CHAPTER1.flag[1])
 # バトランド 성 FC 02/01(왕좌)·02/00(성 앞)이 놓인 DQ5 맵
 THRONE, FRONT = (f'{g:02X}/{n:02X}' for g, n in (GROUPS['02-01'], GROUPS['burland']))
 START = (THRONE, 32, 42)       # FC (10,15): 줄 선 전사들 사이의 빈 자리
@@ -250,7 +252,6 @@ def throne_script(native):
 def npc_doc(records, ported=(), prologue=False, report=None, ported_messages=()):
     """ported·report·ported_messages: dq4npcport.port 의 인물 목록·보고·메시지. 왕좌의 방은 이 연출 배치로 바꾸고,
     report 가 있으면 1장 진행 사건(dq4ch1event)의 인물을 고친다. prologue 면 서장 맵의 인물을 더한다."""
-    import dq4chapterbox
     native = {k: [v & 0xFF, v >> 8 & 0xFF, v >> 16] for k, v in dq4chapterbox.entry_points(scenes(prologue)).items()}
     flag, mask = EVENT_FLAG
     staff = [entry(STATIC, x, y, g, f, t) for x, y, g, f, t in STAFF]
@@ -308,7 +309,6 @@ def npc_doc(records, ported=(), prologue=False, report=None, ported_messages=())
 
 def scenes(prologue):
     """장 제목 상자로 시작하는 장면. 서장이 있으면 서장 지하가 먼저다."""
-    import dq4chapterbox
     scenes = dq4chapterbox.GAME_SCENES
     return scenes if prologue else tuple(s for s in scenes if s is not dq4chapterbox.PROLOGUE)
 
@@ -369,7 +369,6 @@ def message_flow(first_message):
     """메시지를 띄우는 대화·인물 스크립트·이벤트 스크립트(dq4msgwait.plan 의 인자). 서장은 늘 넣는다(메시지
     단계에는 서장 옵션이 없음). first_message 는 1장 사건 메시지의 첫 번호."""
     import dq4ch1event
-    import dq4chapterbox
     import dq4prologue
     points = dq4chapterbox.entry_points(scenes(True))
     native = {k: [v & 0xFF, v >> 8 & 0xFF, v >> 16] for k, v in points.items()}
@@ -607,7 +606,6 @@ def build(rom, dq5, dq4, work, prologue=True):
         work / 'npc.dq5patch.json', work / 'boss.dq5patch.json', work / 'boss-monsters.dq5patch.json',
         work / 'learn.dq5patch.json']
     out = bytearray(apply_writes(clear_mirror(rom, original, group_ranges()), original, patches))
-    import dq4chapterbox
     import dq4menupatch
     out = bytearray(dq4chapterbox.apply(out, dq4.read_bytes(), dq4menupatch.Font('galmuri11'), scenes(prologue)))
     out = bytearray(dq4ch1event.apply(out))
