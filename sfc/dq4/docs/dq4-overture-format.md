@@ -148,6 +148,8 @@ OUT="$PWD/work/sound/song10" MAXF=9000 INPUT="a@400:4,a@700:4,a@1000:4,a@1300:4,
   "$MESENCE" --testrunner work/name-entry/dq4-name-entry.sfc "$PWD/sfc/dq4/tools/lua/dq4soundcmdlog.lua"
 ```
 
+1장 롬에서는 새 게임이 첫 맵을 바꿔 이 장면에 가지 않습니다. 저장한 칸을 이어 할 때도 가지 않습니다. 1장 진행의 다섯 지점에서 교회에 기록하고 리셋해 이으니 `25:824F` 만 돌고 `0F:D93A` 는 한 번도 불리지 않았습니다([1장 저장과 이어 하기](dq4-chapter1-format.md#저장과-이어-하기)).
+
 ## 남은 것
 
 - 실제 SFC 기기와 이름 입력 뒤 게임 시작까지의 확인.
