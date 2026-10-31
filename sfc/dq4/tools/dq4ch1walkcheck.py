@@ -29,6 +29,7 @@ sys.path[:0] = [str(HERE), str(DQ5_TOOLS)]
 
 import dq4ch1event as ev  # noqa: E402
 import dq4ch2event as ch2  # noqa: E402
+import dq4chapterbox as box  # noqa: E402
 import dq4prologuecheck as pc  # noqa: E402
 from dq5exitcheck import warp_exit  # noqa: E402
 
@@ -50,16 +51,16 @@ def flag(pair):
 
 
 FLAGS = {
-    'CHAPTER1': (0x7E219E, 0x04),
-    'NIGHT_TOLD': (0x7E2197, 0x02),
-    'FLARE': (0x7E2198, 0x04),
-    'REUNITED': (0x7E21B2, 0x04),
-    'HOIMIN': (0x7E21B8, 0x01),
-    'KIDNAPPED': (0x7E21B8, 0x20),
+    'CHAPTER1': box.CHAPTER1.flag,
+    'NIGHT_TOLD': flag(ev.NIGHT_TOLD),
+    'FLARE': flag(ev.FLARE_FOLLOWS),
+    'REUNITED': flag(ev.REUNITED),
+    'HOIMIN': flag(ev.HOIMIN),
+    'KIDNAPPED': flag(ev.KIDNAPPED),
     'BOSS_WON': flag(ev.BOSS_WON),
-    'KIDS_FOLLOW': (0x7E21B9, 0x80),
-    'SOLDIER': (0x7E2196, 0x01),
-    'REPORTED': (0x7E2197, 0x80),
+    'KIDS_FOLLOW': flag(ev.KIDS_FOLLOW),
+    'SOLDIER': flag(ev.SOLDIER_LEFT),
+    'REPORTED': flag(ev.REPORTED),
     'CHAPTER2': flag(ch2.CHAPTER2),
     'OPENING': flag(ch2.OPENING),
 }
@@ -96,8 +97,9 @@ def talk(face, n=8):
 # 선택: poke(매 프레임 묶음), boss(보스 패치), maxf, changes(맵이 바뀔 횟수, 그 뒤 after 프레임에 끝), after,
 # want·off(끝에 켜져·꺼져 있을 깃발), map(끝 맵), field(끝에 필드인지), items(가진 물건)
 SEGMENTS = [
-    ('prologue', 'walk', ';'.join(w for _, w in pc.ROUTE) + ';' + taps(30), {'maxf': 16000, 'want': ['CHAPTER1'],
-                                                                            'map': '36/01'}),
+    # 저녁 대사를 넘기는 A 가 왕좌의 방 연출(장 제목·서술·왕의 연설)까지 넘긴다
+    ('prologue', 'walk', ';'.join(w for _, w in pc.ROUTE),
+     {'maxf': 20000, 'changes': len(pc.MAPS), 'after': 2500, 'want': ['CHAPTER1'], 'map': '36/01'}),
     ('throne_out', 'walk', '32,70;down:60', {'changes': 1, 'map': '36/00'}),
     ('imuru_night', 'warp', '37/00,4,30', {'poke': NIGHT + ';' + HOLD_CHILD, 'map': '37/00'}),
     ('night_child', 'walk', talk('up') + ';6,31', {'poke': NIGHT + ';' + HOLD_CHILD, 'want': ['NIGHT_TOLD']}),
@@ -178,7 +180,9 @@ def segment(mesence, rom, state, dest, seg, patch):
         messages = []
     else:
         maxf = opt.get('maxf', frames(arg))
+        # PRE: 앞 구간이 끝날 때 남은 A 가 연 명령 창을 닫는다. 창이 없을 때의 B 는 아무것도 열지 않는다
         run(mesence, rom, WALK_STATE, dest, {'STATE': str(state), 'WALK': str(WALK), 'WAYPOINTS': arg,
+                                             'PRE': pc.CLOSE.replace(';', ','),
                                              'SAVE': 'end.mss', 'MAXF': str(maxf),
                                              'CHANGES': str(opt.get('changes', 99)), 'AFTER': str(opt.get('after', 120)),
                                              'WATCH': watch_flags(), 'ROMPATCH': patch,
