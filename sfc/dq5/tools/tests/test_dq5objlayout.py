@@ -152,6 +152,19 @@ class PatchTests(unittest.TestCase):
                 self.assertRaises(ValueError):
             self.writes(dict(self.doc, objects=self.doc['objects'] + [group]), at=0x16FE10)
 
+    def test_cell_limit(self):
+        # 04/06 낮 인물 세트 30개면 일행 셋과 함께 목록 끝이 8060 + 60 × 33 = 8CC0. 남은 340 바이트(416칸)까지 받는다.
+        base = self.doc['objects'][0]
+        fits = dict(base, cells=[' '.join(['00'] * 63)] * 6)          # 378칸 → 8CC0 + 2 × 378 = 8FB4
+        wide = dict(base, cells=[' '.join(['00'] * 63)] * 7)          # 441칸 → 9032
+        with mock.patch('dq5objlayout.map_people', return_value={}), \
+                mock.patch('dq5objlayout.map_sets', return_value={(0x04, 0x06, False): 30}):
+            self.writes(dict(self.doc, objects=[fits] + self.doc['objects'][1:]), at=0x16FE10)
+            with self.assertRaisesRegex(ValueError, '슬롯 칸 목록 끝'):
+                self.writes(dict(self.doc, objects=[wide] + self.doc['objects'][1:]), at=0x16FE10)
+            # 밤 전용이면 낮 목록에 들지 않는다(밤 인물 세트는 0 이라 넘지 않음).
+            self.writes(dict(self.doc, objects=[dict(wide, cond='night')] + self.doc['objects'][1:]), at=0x16FE10)
+
     def test_table_limit(self):
         most = (REGION_END - TABLE - 1) // 9
         self.assertEqual(most, 159)
