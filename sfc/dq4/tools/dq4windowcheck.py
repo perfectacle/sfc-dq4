@@ -45,9 +45,16 @@ def fuzz(seed):
     return ','.join(o)
 
 
-def scenes(ship, party):
+# 1장 이무르 방어구점 카운터 앞(일행 둘)에서 대화 → 사기 → 첫 물건 → 「누가」 창. 누가 창과 소지품 창이 물건 목록·메시지와 함께 뜬다
+SHOP_WHO = ('wait:30,up:6,wait:30,a:4,wait:30,a:4,wait:90,a:4,wait:60,a:4,wait:60,' + 'a:4,wait:80,' * 3
+            + 'a:4,wait:200,a:4,wait:300,' + 'a:4,wait:120,' * 4 + 'b:4,wait:120')
+
+
+def scenes(ship, party, shop=None):
     """(이름, 세이브스테이트, POKE, ROMPATCH, PRE, 프레임)."""
     out = []
+    if shop:
+        out.append(('shopwho', shop, '', '', SHOP_WHO, range(100, 1900, 30)))
     for n in range(0x40):
         # 선실 파파스의 대화 번호를 바꿔 가게·교회·여관 등을 연다(35C37 = A901 은 대화를 그 번호로 고정)
         out.append((f'talk{n:02X}', ship, f'7E36EB={n:02X};7E370B=00', '35C37=A901', TALK, range(60, 1500, 30)))
@@ -182,6 +189,7 @@ def main():
     ap.add_argument('--symbols', type=Path, required=True, help='DQ4_WINDOWNAME_SYMBOLS 로 남긴 심볼 파일')
     ap.add_argument('--ship', type=Path, required=True, help='선실 세이브스테이트')
     ap.add_argument('--party', type=Path, required=True, help='일행 셋 세이브스테이트(09/00)')
+    ap.add_argument('--shop', type=Path, help='1장 롬으로 이무르 37/00 의 셀 34,9(방어구점 카운터 앞)에 일행 둘로 선 세이브스테이트')
     ap.add_argument('--out', type=Path, required=True)
     ap.add_argument('--only', help='이 글자가 이름에 든 장면만')
     ap.add_argument('--jobs', type=int, default=8)
@@ -196,7 +204,7 @@ def main():
     slots = slot_table(rom, symbols(a.symbols))
     libdir = os.environ.get('LIBDIR') or subprocess.check_output(
         ['uv', 'run', '--locked', 'krpatch', 'sfc', 'lua'], text=True).strip()
-    todo = [s for s in scenes(a.ship.resolve(), a.party.resolve()) if not a.only or a.only in s[0]]
+    todo = [s for s in scenes(a.ship.resolve(), a.party.resolve(), a.shop and a.shop.resolve()) if not a.only or a.only in s[0]]
     with ThreadPoolExecutor(a.jobs) as pool:
         list(pool.map(lambda s: run(mesence, libdir, a.rom, rom, out / s[0], s), todo))
     flagged = 0

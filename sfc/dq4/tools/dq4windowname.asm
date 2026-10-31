@@ -139,6 +139,7 @@ org $24A5E9
 !wt_occ   = $3DF0           ; 13바이트: 가나 칸 010~077 의 쓰는 칸 비트(WtOcc 가 그때그때 만듦)
 !wt_tmp   = $3DFE           ; WtAlloc 안에서만: 찾는 칸 수, 찾은 첫 칸
 !wt_slot2 = $3D56           ; 이번에 쓴 슬롯 × 2, FFFF = 명령 창 전용 칸
+!wt_fixkey = $3D5E          ; 명령 창·가게 창 전용 칸 문구를 마지막으로 그린 버퍼 자리, 0 = 그 창이 안 보임(WtVis)
 !wt_k     = $3D58           ; 그리는 고정 문구 번호
 !wt_dirty = $3DD4           ; 2 워드: 슬롯마다 1비트, 메시지 캔버스 안에 그림을 올린 슬롯
 !wt_age   = $3D50           ; 쓸 때마다 하나씩
@@ -1117,7 +1118,8 @@ WnText:
     JML $04B7A3
 
 ; 칸 슬롯: 큰 20칸(10열 × 글자 줄·위 줄), 중간 14칸, 작은 8칸(WtSlot). 캔버스 096~17F 안의 슬롯은 메시지 창이 뜨면
-; WqClean 이 지우고, 필드 전용 가나 칸 슬롯은 캔버스 밖이다(명령 창·가게 창 문구만 캔버스 밖 1D0~1FF 의 전용 칸).
+; WqClean 이 지우고, 필드 전용 가나 칸 슬롯은 캔버스 밖이다(명령 창·가게 창 문구는 캔버스 밖 1D0~1FF 의 전용 칸이고,
+; 그 창이 안 보이는 동안은 같은 칸을 필드 전용 슬롯 셋으로 빌려 가나 칸이 찬 목록이 메시지 창에 비치지 않게 한다).
 ; 같은 버퍼 자리(!wt_buf + Y)에 들어갈 크기의 슬롯이 있으면 그 슬롯을, 아니면 들어갈 크기 가운데 빈 슬롯이나 가장 오래 쓰지
 ; 않은 슬롯을 쓴다. 타일맵 버퍼를 훑어 빈 칸을 찾던 방식은, 다른 창을 여는 동안 게임이 버퍼를 비워 화면에 보이는 칸을
 ; 다시 빌렸다.
@@ -1267,6 +1269,13 @@ WtFits:
     BCC +
     LDA.w !wt_field
     BEQ ++
+    ; 캔버스 밖 1D0~1FF 의 빈 슬롯은 명령 창·가게 창 문구가 안 보일 때만. 그 창이 다시 그려지면 문구가 같은 칸을 덮는다
+    LDA.l WtClass,X
+    AND #$0020
+    BEQ .size
+    LDA.w !wt_fixkey
+    BNE ++
+.size
     LDA.l WtClass,X
     AND #$000F
 +
@@ -1461,12 +1470,12 @@ WtOccBit:
 ; 칸일수록 메시지 글자에 덮이기 쉽다. 전투 공격 연출은 B0~122 를 덮는다.
 WtSlot:
     dw 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-    dw $0174, $016C, $0164, $015C, $0154, $014C, $00A6, $009E, $0096
+    dw $0174, $016C, $0164, $015C, $0154, $014C, $01F8, $01E4, $01D0
     dw $013E, $0130, $0122, $0114
     dw $0100, $00EC, $00D8, $00C4, $00B0
 WtClass:
     dw $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-    dw 0, 0, 0, 0, 0, 0, $10, $10, $10
+    dw 0, 0, 0, 0, 0, 0, $30, $32, $32
     dw 1, 1, 1, 1
     dw 2, 2, 2, 2, 2
 ; 슬롯 × 2 → !wt_dirty 의 비트(낮은 워드, 높은 워드). 슬롯 i 는 비트 i 이고, 캔버스 밖 가나 항목은 0
@@ -1477,7 +1486,7 @@ WtBitLo:
     dw 0, 0, 0, 0, 0
 WtBitHi:
     dw 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-    dw 0, 0, 0, 0, $0001, $0002, $0004, $0008, $0010
+    dw 0, 0, 0, 0, $0001, $0002, 0, 0, 0
     dw $0020, $0040, $0080, $0100
     dw $0200, $0400, $0800, $1000, $2000
 
@@ -1723,6 +1732,10 @@ WtNameDraw:
     LDA.l (!wt_bank<<16)|!wt_safe,X
     BEQ +
     STA.w !wt_base
+    LDA.w !wt_buf
+    CLC
+    ADC.w !wn_y
+    STA.w !wt_fixkey
     LDA #$FFFF
     STA.w !wt_slot2
     BRA ++
@@ -2076,6 +2089,38 @@ WtVis:
     INX
     CPX.w #!wt_nslot*2
     BCC .slot
+    ; 전용 칸 문구 자리도 같은 줄 거르기로 재, 그 자리가 더는 1D0~1FF 를 가리키지 않으면 창이 닫힌 것으로 본다
+    LDA.w !wt_fixkey
+    BEQ .fixdone
+    SEC
+    SBC #$5000
+    CMP #$0800
+    BCS .fixgone
+    TAY
+    LDA.w !wq_head
+    AND #$0080
+    BNE .fixcheck
+    TYA
+    LSR
+    LSR
+    LSR
+    LSR
+    LSR
+    LSR
+    CMP #$0007
+    BCC .fixcheck
+    CMP #$0015
+    BCC .fixdone
+    CMP #$001E
+    BCS .fixdone
+.fixcheck
+    LDA.w $5000,Y
+    AND #$03FF
+    CMP #$01D0
+    BCS .fixdone
+.fixgone
+    STZ.w !wt_fixkey
+.fixdone
     SEP #$20
     STZ.w !wt_xfer
     PLB
