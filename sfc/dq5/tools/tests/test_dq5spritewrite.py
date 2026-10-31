@@ -12,7 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import dq5sprite as S  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
 from dq5spritewrite import (  # noqa: E402
-    FORMAT, apply, cell_tiles, commands, decoded, deduplicate, grow_table, packed, patch, place, plan, tile_bytes,
+    FORMAT, OBJ_TILES, PARTY_TILES, apply, cell_tiles, commands, decoded, deduplicate, grow_table, packed, patch, place, plan,
+    tile_bytes, vram_use,
 )
 
 
@@ -112,6 +113,10 @@ class GrowTableTests(unittest.TestCase):
         pieces += [(site, S.SET_POINTERS.to_bytes(3, 'little')) for site in S.SET_TABLE_SITES]
         pieces += [(site, b'\x1f') for site in S.SET_BANK_SITES]
         self.rom = rom_with(pieces)
+        # 가짜 롬에는 인물 목록이 없다.
+        lists = mock('dq5spritewrite.vram_lists', return_value=[])
+        lists.start()
+        self.addCleanup(lists.stop)
 
     def apply(self, writes):
         data = bytearray(self.rom.d)
@@ -227,7 +232,9 @@ class PlanTests(unittest.TestCase):
         self.mocks = [mock('dq5spritewrite.S.set_record', side_effect=lambda rom, s: recs.get(s)),
                       mock('dq5spritewrite.S.gfx_set', side_effect=lambda rom, g: 0x80 if g == 1 else 0),
                       mock('dq5spritewrite.S.set_numbers', side_effect=lambda rom: list(range(0xA3))),
-                      mock('dq5spritewrite.S.GFX_COUNT', 2)]
+                      mock('dq5spritewrite.S.GFX_COUNT', 2),
+                      mock('dq5spritewrite.vram_lists', side_effect=lambda rom: self.lists)]
+        self.lists = []
         for m in self.mocks:
             m.start()
         save(self.dir / 'flat.png', [[1] * 32 for _ in range(96)])
@@ -264,7 +271,6 @@ class PlanTests(unittest.TestCase):
     def test_rejects(self):
         bad = [{'sets': [{'set': '00', 'image': 'parts.png'}]},
                {'sets': [{'set': '00', 'image': 'rgb.png'}]},
-               {'sets': [{'set': '00', 'image': 'busy.png'}]},
                {'sets': [{'set': '70', 'image': 'flat.png'}]},
                {'sets': [{'set': '00', 'image': 'flat.png', 'palette': 4}]},
                {'sets': [{'set': '00', 'image': 'flat.png', 'palette': True}]},
@@ -282,6 +288,38 @@ class PlanTests(unittest.TestCase):
         for doc in bad:
             with self.subTest(doc=doc), self.assertRaises(ValueError):
                 self.run_plan(**doc)
+
+    def test_growth_checks_obj_vram(self):
+        # busy.png 는 세트 00(타일 3개)보다 타일이 많다. 그림 00 을 놓는 목록의 OBJ VRAM 이 512 를 넘을 때만 거부한다.
+        grown = len(self.run_plan(sets=[{'set': '00', 'image': 'busy.png'}])[0][0][1])
+        self.assertGreater(grown, 3)
+        full = OBJ_TILES - PARTY_TILES - 3
+        self.lists = [('01/00 목록 05:8000', full - 4, False, {1})]
+        self.run_plan(sets=[{'set': '00', 'image': 'busy.png'}])
+        self.lists = [('01/00 목록 05:8000', full - grown + 3, False, {0})]
+        self.run_plan(sets=[{'set': '00', 'image': 'busy.png'}])
+        self.lists = [('01/00 목록 05:8000', full - grown + 4, True, {0, 1})]
+        with self.assertRaises(ValueError):
+            self.run_plan(sets=[{'set': '00', 'image': 'busy.png'}])
+        # 그림 번호를 옮겨 그 목록에서 세트가 바뀌어도 같은 셈이다.
+        self.lists = [('01/00 목록 05:8000', full - grown + 4, False, {1})]
+        with self.assertRaises(ValueError):
+            self.run_plan(new_sets=[{'set': '70', 'image': 'busy.png', 'palette': 0}], gfx=[{'gfx': '01', 'set': '70'}])
+
+    def test_original_overflow_is_not_blamed(self):
+        # 원래부터 512 를 넘는 목록은 늘리지 않는 한 거부하지 않는다.
+        self.lists = [('01/00 목록 05:8000', OBJ_TILES, False, {0})]
+        self.run_plan(sets=[{'set': '00', 'image': 'flat.png'}])
+        with self.assertRaises(ValueError):
+            self.run_plan(sets=[{'set': '00', 'image': 'busy.png'}])
+
+
+class VramUseTests(unittest.TestCase):
+    def test_counts_each_set_once_and_wife_branch(self):
+        sets = {0x00: 0x10, 0x01: 0x10, 0x02: 0x20, 0x97: 0x30, 0x2F: 0x31}
+        tiles = {0x10: 30, 0x20: 7, 0x30: 26, 0x31: 35}
+        lists = [('a', 0, False, {0x00, 0x01, 0x02}), ('b', 5, True, {0x00, 0x9A}), ('c', 0, False, set())]
+        self.assertEqual(vram_use(lists, sets.get, tiles.get), [PARTY_TILES + 37, PARTY_TILES + 5 + 30 + 35, PARTY_TILES])
 
 
 if __name__ == '__main__':

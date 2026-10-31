@@ -10,14 +10,17 @@
   python sfc/dq5/tools/dq5spritewrite.py rom/dq5.sfc dump 84 -o work/sprite/84.png
   python sfc/dq5/tools/dq5spritewrite.py rom/dq5.sfc patch work/sprite.json -o work/sprite.dq5patch.json [--at 3A:8000]
   python sfc/dq5/tools/dq5spritewrite.py rom/dq5.sfc check [work/sprite.json]
+  python sfc/dq5/tools/dq5spritewrite.py rom/dq5.sfc vram [work/sprite.json] [--top 10]
 
 문서(dq5sprite/1):
   {"format": "dq5sprite/1",
    "sets": [{"set": "84", "image": "84.png", "palette": 0}],          # 기존 세트 그림 바꾸기(palette 는 생략 가능)
    "new_sets": [{"set": "70", "image": "70.png", "palette": 1}],      # 빈 세트 번호 70~7F(6타일), --sets-at 이면 A5~FF(8타일)에도
    "gfx": [{"gfx": "2B", "set": "70"}]}                               # 그림 번호 → 세트(25:86D0)
-image 는 문서 파일 기준 상대 경로. 세트의 타일 수는 그 세트를 쓰는 그림 번호들이 원래 가리키던 세트의 타일 수를
-넘을 수 없다(인물마다 VRAM 을 타일 수만큼 잡는다, 1F:CF1E). 압축 자료가 원래 자리보다 크면 --at 부터 차례로 놓는다.
+image 는 문서 파일 기준 상대 경로. 세트의 타일 수는 칸 수인 48 까지다. 주인공·일행 슬롯 1·2(1F:CF14)는 세트와 상관없이
+48타일을 잡고, 인물(1F:CF1E)은 맵마다 세트 하나에 그 타일 수만큼 잡는다. 그래서 타일 수를 늘리면 인물 목록마다
+「일행 90 + 맵 OBJ 타일 + 놓이는 인물 세트의 타일 수 합」이 OBJ 이름 표 512타일을 넘지 않는지 보고(vram_use), 원래보다
+늘어 넘는 목록이 있으면 거부한다. 압축 자료가 원래 자리보다 크면 --at 부터 차례로 놓는다.
 --sets-at BB:AAAA 를 주면 세트 포인터 표를 256칸으로 늘려 그 자리에 두고, 모든 세트 레코드를 표 뒤로 옮긴다
 (레코드 포인터가 16비트라 표와 레코드는 한 뱅크). 표를 읽는 세 곳의 주소와 레코드 뱅크 세 곳을 고친다(dq5sprite.SET_TABLE_SITES).
 이미 표를 옮긴 롬은 기존 세트를 옮긴 레코드 자리에서 고치고, 새 세트를 더할 때는 --sets-at 으로 표를 새 자리에 다시 놓는다.
@@ -31,6 +34,7 @@ from pathlib import Path
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import dq5npc as N  # noqa: E402
 import dq5sprite as S  # noqa: E402
 from dq5build import PatchError  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
@@ -41,6 +45,12 @@ FREE_SETS = range(0x70, 0x80)          # 1F:D63D 포인터가 FFFF 인 번호. 6
 TABLE_SIZE = 0x200
 RECORD_AREA = (0x1FFE30, 0x200000)     # 뱅크 1F 끝 빈 자리(dq5build.py free). 레코드 포인터는 뱅크 1F 의 16비트
 SIMPLE_SIZE, OVERLAP_SIZE = (32, 96), (48, 64)
+# 맵에 들어갈 때 00:E977 이 7E:1995 를 0 으로 두고, 주인공·일행 슬롯 1·2 를 1F:CF14 가 세트와 상관없이 48타일씩 잡는다
+# (00:E232·E3D4, 일행이 모자라면 00:E45E 가 그림 00 으로 자리만). 인물은 1F:CF1E 가 같은 세트를 한 번만 올린다(7E:AC00).
+PARTY_TILES = 3 * 48
+# OBJ 이름 표($6000) 512타일. 넘으면 그 뒤 타일은 VRAM 에 남지 않고, 칸 값의 9비트 타일 번호가 넘쳐 0번(주인공) 타일을 가리킨다.
+OBJ_TILES = 0x200
+NAMED_LIST = re.compile(r'[0-9A-F]{2}/[0-9A-F]{2}')
 
 
 def cpu(addr):
@@ -219,14 +229,71 @@ def dump_image(rom, s, path):
     return rec
 
 
-def original_tiles_by_gfx(rom):
-    """그림 번호마다 원래 세트의 타일 수."""
-    return {g: S.set_record(rom, S.gfx_set(rom, g))['tiles'] for g in range(S.GFX_COUNT)
-            if S.set_record(rom, S.gfx_set(rom, g)) is not None}
+def vram_lists(rom):
+    """[(맵 이름들, 맵 OBJ 타일 수, 밤인지, 놓이는 인물의 그림 번호들)]. 기본·대체 목록마다 낮·밤 한 줄씩.
+    맵 OBJ 타일(1F:D59A)은 그 목록을 쓰는 맵 가운데 가장 큰 것. 어느 맵도 가리키지 않는 숨은 목록은 뺀다."""
+    maps = {}
+    for a, name in N.all_lists(rom):
+        if NAMED_LIST.fullmatch(name):
+            maps.setdefault(a, set()).add(tuple(int(v, 16) for v in name.split('/')))
+    t = N.OVERRIDE_LISTS
+    while rom.u8(t) != 0xFF:
+        maps.setdefault(0x100000 | rom.u16(t + 4), set()).add((rom.u8(t), rom.u8(t + 1)))
+        t += 6
+    objects = S.map_objects(rom)
+    out = []
+    for a, where in sorted(maps.items()):
+        reserve = max(sum(o['reserve'] for o in objects if o['bc'] == bc and o['bd'] & 0x7F in (bd, 0x7F))
+                      for bc, bd in where)
+        entries = N.list_entries(rom, a)
+        for night in (False, True):
+            gfx = {f['gfx'] for e, _ in entries if (f := N.parse(rom, e, night))}
+            if gfx:
+                out.append((' '.join(f'{bc:02X}/{bd:02X}' for bc, bd in sorted(where)) + f' 목록 {cpu(a)}', reserve, night, gfx))
+    return out
 
 
-def plan(rom, doc, base, grown=False):
-    """{세트: (칸, 타일, 팔레트, 새 세트인지)}, {그림: 세트}. grown 이면 A5~FF 도 새 세트로 받는다."""
+def vram_use(lists, set_of, tiles_of):
+    """목록마다 맵을 다 놓은 뒤의 7E:1995(다음 OBJ 타일). set_of(그림) → 세트, tiles_of(세트) → 타일 수.
+    그림 9A 는 7E:21B3 bit3 에 따라 그림 97 이나 2F 의 세트를 쓰므로(1F:CF32) 둘 가운데 큰 쪽을 센다."""
+    out = []
+    for maps, reserve, night, gfx in lists:
+        total = []
+        for wife in ((0x97, 0x2F) if 0x9A in gfx else (None,)):
+            sets = {set_of(wife if g == 0x9A else g) for g in gfx}
+            total.append(sum(tiles_of(s) for s in sets if s is not None))
+        out.append(PARTY_TILES + reserve + max(total))
+    return out
+
+
+def vram_rows(rom, sets, final):
+    """[(목록 줄, 원래 7E:1995, sets·final(그림 → 세트)로 바꾼 뒤)]."""
+    lists = vram_lists(rom)
+
+    def tiles_of(s, mine):
+        if mine and s in sets:
+            return len(sets[s][1])
+        rec = S.set_record(rom, s)
+        return rec['tiles'] if rec is not None else 0
+    before = vram_use(lists, lambda g: S.gfx_set(rom, g) if g < S.GFX_COUNT else None, lambda s: tiles_of(s, False))
+    after = vram_use(lists, lambda g: final.get(g), lambda s: tiles_of(s, True))
+    return list(zip(lists, before, after))
+
+
+def vram_check(rom, sets, final):
+    """바꾼 뒤 512타일을 넘는 목록이 원래보다 늘었으면 거부한다. 원래부터 넘는 목록은 이 문서 탓이 아니므로 둔다."""
+    rows = vram_rows(rom, sets, final)
+    over = [(row, b, n) for row, b, n in rows if n > OBJ_TILES and n > b]
+    if over:
+        shown = ', '.join(f'{row[0]} {"밤" if row[2] else "낮"} {n:03X}(원래 {b:03X})' for row, b, n in over[:6])
+        raise ValueError(f'인물 OBJ VRAM 이 {OBJ_TILES:03X}타일을 넘는 목록 {len(over)}개: {shown}'
+                         f'{" …" if len(over) > 6 else ""}. 그 맵에서 그 그림을 빼거나 타일을 줄여야 함')
+    return rows
+
+
+def plan(rom, doc, base, grown=False, vram=True):
+    """{세트: (칸, 타일, 팔레트, 새 세트인지)}, {그림: 세트}. grown 이면 A5~FF 도 새 세트로 받는다.
+    vram 이면 인물 목록마다 OBJ VRAM 이 넘치지 않는지 본다(vram_check)."""
     if not isinstance(doc, dict) or doc.keys() - {'format', 'sets', 'new_sets', 'gfx'} or doc.get('format') != FORMAT:
         raise ValueError(f'문서는 format={FORMAT}, sets·new_sets·gfx 만 담은 객체여야 함')
     sets = {}
@@ -271,20 +338,17 @@ def plan(rom, doc, base, grown=False):
         if s not in sets and (s not in S.set_numbers(rom) or S.set_record(rom, s) is None):
             raise ValueError(f'gfx[{i}]: 세트 {s:02X}가 없음')
         mapping[g] = s
-    limit = original_tiles_by_gfx(rom)
     final = {g: mapping.get(g, S.gfx_set(rom, g)) for g in range(S.GFX_COUNT)}
-    for g, s in final.items():
-        count = len(sets[s][1]) if s in sets else S.set_record(rom, s)['tiles']
-        if g in limit and count > limit[g]:
-            raise ValueError(f'그림 {g:02X} → 세트 {s:02X} 타일 {count}개가 원래 세트의 {limit[g]}개를 넘음')
+    if vram:
+        vram_check(rom, sets, final)
     for s, (_, tiles, _, new) in sets.items():
         if new and not any(v == s for v in final.values()):
             raise ValueError(f'새 세트 {s:02X}를 가리키는 그림 번호가 없음')
     return sets, mapping
 
 
-def patch(rom, doc, base=Path('.'), at=None, records_at=RECORD_AREA[0], sets_at=None):
-    sets, mapping = plan(rom, doc, base, grown=sets_at is not None)
+def patch(rom, doc, base=Path('.'), at=None, records_at=RECORD_AREA[0], sets_at=None, vram=True):
+    sets, mapping = plan(rom, doc, base, grown=sets_at is not None, vram=vram)
     # 표를 옮긴 롬의 1F:D63D 와 1F:FE30 은 엔진이 더 읽지 않는다. 새 레코드는 표와 함께 다시 놓아야 한다.
     if sets_at is None and S.set_table(rom)[0] != S.SET_POINTERS and any(new for *_, new in sets.values()):
         raise ValueError('세트 포인터 표를 옮긴 롬에 새 세트를 더하려면 --sets-at 으로 표와 레코드를 다시 놓아야 함')
@@ -445,6 +509,21 @@ def check(rom, doc=None, base=Path('.'), at=None, workdir=None, records_at=RECOR
     print(f'문서: 쓰기 {len(manifest["writes"])}개, 바꾼 세트 {len(sets)}개·그림 연결 {len(mapping)}개를 빌드한 롬에서 확인')
 
 
+def vram_report(rom, doc=None, base=Path('.'), top=10, grown=False):
+    """목록마다 맵을 다 놓은 뒤의 7E:1995 를 큰 것부터. 문서를 주면 바꾼 뒤 값과 함께."""
+    sets, mapping = plan(rom, doc, base, grown, vram=False) if doc is not None else ({}, {})
+    final = {g: mapping.get(g, S.gfx_set(rom, g)) for g in range(S.GFX_COUNT)}
+    rows = sorted(vram_rows(rom, sets, final), key=lambda r: (-r[2], -r[1], r[0][0]))
+    for (maps, reserve, night, gfx), before, after in rows[:top]:
+        change = f' → {after:03X}' if after != before else ''
+        print(f'{maps} {"밤" if night else "낮"}: {before:03X}{change}, 남는 타일 {OBJ_TILES - after}'
+              f'(맵 OBJ {reserve}, 그림 {" ".join(f"{g:02X}" for g in sorted(gfx))})')
+    over = [r for r in rows if r[2] > OBJ_TILES]
+    print(f'목록 {len(rows)}줄, 가장 큰 7E:1995 {rows[0][2]:03X}({rows[0][0][0]}), {OBJ_TILES:03X} 을 넘는 줄 {len(over)}개'
+          + (f'(그 가운데 원래보다 는 줄 {sum(r[2] > r[1] for r in over)}개)' if over else ''))
+    return rows
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('rom', type=Path)
@@ -458,6 +537,10 @@ def main():
     write.add_argument('--at', help='원래 자리에 들어가지 않는 압축 자료를 놓을 곳(BB:AAAA, 뱅크 00~3F)')
     write.add_argument('--records-at', default='1F:FE30', help='새 세트 레코드를 놓을 곳(뱅크 1F 빈 자리)')
     write.add_argument('--sets-at', help='세트 포인터 표(256칸)와 모든 레코드를 옮길 곳(BB:AAAA). 새 세트 A5~FF 에 필요')
+    budget = sub.add_parser('vram')
+    budget.add_argument('source', type=Path, nargs='?')
+    budget.add_argument('--top', type=int, default=10)
+    budget.add_argument('--grown', action='store_true', help='문서가 새 세트 A5~FF 를 쓰면(--sets-at 과 함께 쓸 문서)')
     verify = sub.add_parser('check')
     verify.add_argument('source', type=Path, nargs='?')
     verify.add_argument('--at')
@@ -472,6 +555,9 @@ def main():
             return 0
         doc = json.loads(args.source.read_text(encoding='utf-8')) if getattr(args, 'source', None) else None
         base = args.source.parent if getattr(args, 'source', None) else Path('.')
+        if args.command == 'vram':
+            vram_report(rom, doc, base, args.top, args.grown)
+            return 0
         at = address(args.at) if args.at else None
         records_at = int(args.records_at.replace(':', ''), 16) if re.fullmatch(r'1[Ff]:[0-9A-Fa-f]{4}', args.records_at) else None
         if records_at is None or not RECORD_AREA[0] <= records_at < RECORD_AREA[1]:
