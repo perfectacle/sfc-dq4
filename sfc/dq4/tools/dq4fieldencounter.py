@@ -26,7 +26,8 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
 
 # FC monster -> DQ5 monster, a placeholder until the DQ4 monsters are ported: the DQ5 monster of the same name, or
 # else (marked ~) the first DQ5 monster, by number, of a DQ5 zone whose level is nearest the lowest level of the
-# FC zones the monster appears in (FC zones of fields 0, 1 and 3; DQ5 zones as in the original ROM).
+# FC zones the monster appears in (FC zones of fields 0, 1 and 3, then the dungeon zones; DQ5 zones as in the
+# original ROM).
 MONSTERS = {
     0x00: 0x00,  # スライム
     0x01: 0x03,  # ~ キリキリバッタ -> ドラキー
@@ -54,8 +55,11 @@ MONSTERS = {
     0x1A: 0x12,  # ~ ひとくいそう -> まほうつかい
     0x1B: 0x1B,  # ~ つかいま -> がいこつへい
     0x1C: 0x12,  # ~ あばれうしどり -> まほうつかい
+    0x1D: 0x12,  # ~ べビーマジシャン -> まほうつかい
     0x1E: 0x12,  # ~ リリパット -> まほうつかい
     0x20: 0x1F,  # ~ とさかへび -> わらいぐさ
+    0x21: 0x12,  # ~ おおにわとり -> まほうつかい
+    0x22: 0x12,  # ~ ピクシー -> まほうつかい
     0x23: 0x1B,  # ~ ヘルビートル -> がいこつへい
     0x24: 0x1F,  # ~ テベロ -> わらいぐさ
     0x25: 0x25,  # ~ おにこぞう -> ダークアイ
@@ -117,6 +121,8 @@ SEA_AREAS = (81, 82, 83, 84)   # 01:85D8: the ship's two rectangles take these f
 # A DQ5 grid row is 16 blocks, so field 1's first row takes 35.
 FIELD1_TOP, FIELD1, FIELD3 = 0x35, 0x34, 0x36
 RATE_COEF = 0x23EA44
+# FC dungeons take terrain factor 0F on every tile (18:$9F9B) and DQ5 indoor maps rate 7 (01:8522).
+FC_DUNGEON_TERRAIN, DQ5_INDOOR_RATE = 0x0F, 7
 # DQ5 rate per terrain nibble (01:84CF's Y), day then night, 14 each. FC's chance per step is base x 16 x the
 # terrain factor >> 8 and DQ5's coefficient x Y >> 6, so with Y = the FC factor and coefficient = 4 x base
 # (rate_index) a DQ5 step has the FC chance. FC fights only on tiles below 8 ($9CB5).
@@ -148,6 +154,18 @@ def zones(prg, enc):
     return dict(zip(fc, field))
 
 
+def dungeon_zones(prg, enc, fc):
+    """{FC dungeon zone: DQ5 zone}: the FC zones `fc` on the field-only DQ5 zones that zones() leaves, in order.
+    The field grids written by grids() hold only zones()'s zones and the sea, so these are no longer read there."""
+    used = {a for m in enc["maps"] for a in m["areas"]}
+    field = sorted({a for g in enc["field_grids"] for row in g["rows"] for a in row} - used - set(SEA_AREAS))
+    left = [a for a in field if a not in zones(prg, enc).values()]
+    fc = sorted(set(fc))
+    if len(fc) > len(left):
+        raise ValueError(f"{len(fc)} FC dungeon zones, {len(left)} DQ5 zones left")
+    return dict(zip(fc, left))
+
+
 def grids(prg, assign):
     """dq5encounter/1 field_grids: every cell of the five grids from the FC zone maps."""
     _, fc_rows = _fc(prg).zone_map(prg, 0)
@@ -169,10 +187,12 @@ def grids(prg, assign):
     return out
 
 
-def rate_index(dq5, base):
-    """Index of the DQ5 rate coefficient (23:EA44) nearest 4 x FC's base rate (TERRAIN_RATES)."""
+def rate_index(dq5, base, dungeon=False):
+    """Index of the DQ5 rate coefficient (23:EA44) nearest FC's chance a step. On the field that is 4 x FC's base
+    rate (TERRAIN_RATES); in a dungeon FC's base x 16 x 0F >> 8 against DQ5's coefficient x 7 >> 6."""
     coefs = dq5[_lorom(RATE_COEF):_lorom(RATE_COEF) + 8]
-    return min(range(8), key=lambda i: (abs(coefs[i] - 4 * base), i))
+    want = base * 16 * FC_DUNGEON_TERRAIN / 4 / DQ5_INDOOR_RATE if dungeon else 4 * base
+    return min(range(8), key=lambda i: (abs(coefs[i] - want), i))
 
 
 def terrain_rates(prg, dq5):
@@ -204,7 +224,7 @@ def _lorom(addr):
     return (addr >> 16 & 0x7F) * 0x8000 + (addr & 0x7FFF)
 
 
-def record(prg, dq5, z):
+def record(prg, dq5, z, dungeon=False):
     """dq5progress/1 encounter fields of FC zone z (without its index) and the FC slots left out."""
     enc = _fc(prg)
     rec = enc.zone(prg, z)
@@ -233,19 +253,22 @@ def record(prg, dq5, z):
             continue
         slots[free[0]].update(weight=weight(i), count_code=0, monster=MONSTERS[s[i]])
     return {"level": rec["b1"], "slots": list(slots.values()), "fixed": {"weight": 0, "group": 0},
-            "species_weights": [3, 1 if w[14] else 0, 1 if w[15] else 0], "rate_index": rate_index(dq5, rec["rate"]),
+            "species_weights": [3, 1 if w[14] else 0, 1 if w[15] else 0], "rate_index": rate_index(dq5, rec["rate"], dungeon),
             "flag_1000": 0, "flag_1010": False, "fixed_night_only": False}, dropped
 
 
-def docs(prg, dq5, enc):
-    """(dq5progress/1, dq5encounter/1, report) for the FC zones. The terrain rates are terrain_rates."""
+def docs(prg, dq5, enc, dungeon=()):
+    """(dq5progress/1, dq5encounter/1, report) for the FC field zones and the FC dungeon zones `dungeon`
+    (dungeon_zones). The terrain rates are terrain_rates."""
     assign = zones(prg, enc)
     records, report = [], {}
-    for fc, area in assign.items():
-        fields, dropped = record(prg, dq5, fc)
-        records.append({"index": area, **fields})
-        report[f"{fc:02X}"] = {"zone": area, "level": fields["level"], "dropped_slots": dropped,
-                               "monsters": sorted({sl["monster"] for sl in fields["slots"] if sl["weight"]})}
+    for kind, found in (("field", assign), ("dungeon", dungeon_zones(prg, enc, dungeon))):
+        for fc, area in found.items():
+            fields, dropped = record(prg, dq5, fc, kind == "dungeon")
+            records.append({"index": area, **fields})
+            report[f"{fc:02X}"] = {"zone": area, "kind": kind, "level": fields["level"], "dropped_slots": dropped,
+                                   "rate_index": fields["rate_index"],
+                                   "monsters": sorted({sl["monster"] for sl in fields["slots"] if sl["weight"]})}
     sea, _ = record(prg, dq5, SEA_ZONE)
     records += [{"index": area, **sea} for area in SEA_AREAS]
     return ({"format": "dq5progress/1", "encounters": records},
