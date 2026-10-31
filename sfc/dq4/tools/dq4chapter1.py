@@ -505,6 +505,7 @@ GROUP_PATCHES = ('env/dq4-environment.dq5patch.json', 'newmap.dq5patch.json', 'e
                  'entrances.dq5patch.json', 'shops.dq5patch.json', 'inn.dq5patch.json',
                  'entrance-hook.dq5patch.json', 'field-gfx.dq5patch.json', 'field-blocks.dq5patch.json',
                  'field.dq5patch.json', 'talk.dq5patch.json', 'travel.dq5patch.json', 'names.dq5patch.json',
+                 'companion-names.dq5patch.json',
                  'zones.dq5patch.json', 'grids.dq5patch.json', 'rates.dq5patch.json', 'chests.dq5patch.json')
 # 원래 롬에서는 새 맵 레코드를 34 에 두지만 통합 롬의 34 는 타이틀 자료라 3A 로 돌린다. 3A 가 차면 다음 레코드는
 # 타이틀 뱅크 30·31 에서 타이틀 자료 사이의 빈 곳(메뉴 롬에서 0 이거나 원본 20·21 의 거울 그대로인 곳)으로 간다.

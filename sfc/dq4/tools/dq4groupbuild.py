@@ -136,6 +136,31 @@ INDOOR_ENCOUNTERS = 0x04
 AREA_FLAGS = 0x80
 # FC direction (0 up, 2 down) -> the DQ5 row of an FC cell the party first steps onto.
 ENTRY_ROW = {0: 1, 2: 0}
+# Companion monster names (name table 0A, kind * 4 + name number) in the name-entry display bytes, so the status and
+# battle windows, battle messages and field messages print them through the same Korean path as the hero's name.
+# The tables are packed in place with no spare byte, and other patches write item names inside the later tables, so
+# the bytes the longer names take come off the end of slots 0-3 (kind 00 is no companion kind; kinds start at 01) and
+# the rewrite stays inside table 0A.
+COMPANION_TABLE = 0x0A
+COMPANION_NAMES = {0x05 * 4: "호이민"}
+COMPANION_SPARE = range(4)
+
+
+def companion_names(dq5):
+    import dq4nameentry
+    import dq5namewrite
+    original = dq5namewrite.read_tables(dq5)[COMPANION_TABLE]
+    names = {n: list(b"".join(dq4nameentry.code_bytes(dq4nameentry.GLYPHS.index(c)) for c in name))
+             for n, name in COMPANION_NAMES.items()}
+    grow = sum(len(raw) - len(original[n]) for n, raw in names.items())
+    for n in COMPANION_SPARE:
+        cut = min(grow, len(original[n]))
+        if cut:
+            names[n] = original[n][:len(original[n]) - cut]
+            grow -= cut
+    if grow > 0:
+        raise ValueError(f"companion names: {grow} bytes more than slots {COMPANION_SPARE} hold")
+    return {"table": COMPANION_TABLE, "names": [{"id": n, "bytes": raw} for n, raw in sorted(names.items())]}
 
 
 def cell(x, y):
@@ -713,6 +738,10 @@ def _build(pool, dq5, dq4, out, with_people):
     manifests.append(_save(out / "travel.dq5patch.json", {
         "format": "dq5patch/1", "name": "dq4-travel", "writes": dq4fieldtravel.writes(dq5.read_bytes(), destinations)}))
     checks.append(step("dq5namewrite.py", "names", dq4fieldtravel.names_doc(dq5.read_bytes(), destinations), dq5))
+    # A doc of its own: one doc writes one span from its first to its last changed byte, which would cover the item
+    # names other patches write between tables 0A and 0B.
+    checks.append(step("dq5namewrite.py", "companion-names",
+                       {"format": "dq5names/1", "tables": [companion_names(dq5.read_bytes())]}, dq5))
     zones, grids, zone_report = dq4fieldencounter.docs(prg, dq5.read_bytes(), encounter_orig, fc_zones.values())
     _save(out / "zone-report.json", zone_report)
     step("dq5progresswrite.py", "zones", zones, dq5)
