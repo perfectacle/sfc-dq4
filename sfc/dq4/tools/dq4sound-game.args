@@ -264,6 +264,7 @@
 --vehicle-song
 --keep-samples
 --release-failed
+--release-pending
 --unpin
 00
 --prefetch
