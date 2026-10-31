@@ -66,6 +66,9 @@ RAW = {
     'c1c-set': ('07 1C 01 00 61 6B 0B 61 29 3F', 0x02),
     'c1c-mask': ('07 1C 01 01 61 6B 0B 61 29 3F', 0x00),
     'c1c-skip': ('07 1B 01 01 06 07 1C 01 00 61 6B 3E 0B 61 29 3F', 0x00),
+    # bit7 로 뒤집은 1C(9C). 06:B27E 가 & 3F 로 길이를 찾으므로 갈리지 않은 블록 안에서도 3바이트
+    'c9c-run': ('07 9C 01 00 61 6B 0B 61 29 3F', 0x00),
+    'c9c-skip': ('07 1B 01 01 06 07 9C 01 00 61 6B 3E 0B 61 29 3F', 0x00),
     # 01: 네이티브 06:B3A0(메시지 1CC) + 인자 둘(7E:0F30·0F31 에 둠)
     'op01': ('01 A0 B3 5A A5 61 29 3F', 0x00),
     # 12: 06:DBD2 의 가게 처리기(01 = 무기점)
@@ -75,7 +78,7 @@ TALK = 'b:4,wait:40,up:3,wait:20,a:4,wait:30,a:4'
 ANSWER = {'yes': 'wait:150,a:4', 'no': 'wait:120,down:3,wait:27,a:4'}
 REST = ',wait:100,a:4' * 5
 # (이름, 롬, 대화 번호, はい/いいえ, 기대 메시지(None 이면 원본 롬의 같은 대화와 같음),
-#  기대 묶음 시작(None 이면 그 롬의 06:AEF8 표 값), 기대 플래그 {7E 주소: 값})
+#  기대 묶음 시작(None 이면 그 롬의 06:AEF8 표 값), 기대 플래그 {7E 주소: 값}[, 모르는 명령 갈래 06:B10F 를 지나는가(기본 아님)])
 CASES = [
     ('original', 'original', 0x012, 'yes', ['742'], '8129', {0x2192: 0x00}),
     ('cond', 'cond', 0x012, 'yes', ['74F'], '8129', {0x2192: 0x80}),
@@ -95,11 +98,13 @@ CASES = [
     ('c16-on', 'c16-on', 0x012, 'yes', ['16B'], '8129', {}),
     ('c16-off', 'c16-off', 0x012, 'yes', ['129'], '8129', {}),
     # 06:B23F 가 조건 16 을 2바이트로 건너뛰어 어긋나고, 모르는 명령 갈래(06:B10F, 「エラーデス!!」 창)로 감
-    ('c16-skip', 'c16-skip', 0x012, 'yes', [], '8129', {}),
+    ('c16-skip', 'c16-skip', 0x012, 'yes', [], '8129', {}, True),
     ('c1c-zero', 'c1c-zero', 0x012, 'yes', ['129'], '8129', {}),
     ('c1c-set', 'c1c-set', 0x012, 'yes', ['16B'], '8129', {}),
     ('c1c-mask', 'c1c-mask', 0x012, 'yes', ['16B'], '8129', {}),
     ('c1c-skip', 'c1c-skip', 0x012, 'yes', ['129'], '8129', {}),
+    ('c9c-run', 'c9c-run', 0x012, 'yes', ['16B'], '8129', {}),
+    ('c9c-skip', 'c9c-skip', 0x012, 'yes', ['129'], '8129', {}),
     ('op01', 'op01', 0x012, 'yes', ['1CC', '129'], '8129', {0x0F30: 0x5A, 0x0F31: 0xA5}),
     # 무기점 첫 메시지 002 뒤, 같은 누름으로 가게 메뉴의 006·013 까지
     ('op12', 'op12', 0x012, 'yes', ['002', '006', '013'], '8129', {}),
@@ -192,13 +197,14 @@ def main():
             seen = list(pool.map(lambda case: run(case, roms, state, out, mesence, libdir), CASES))
         by_name = {case[0]: got for case, got in zip(CASES, seen)}
         results = []
-        for (name, rom, talk, answer, want, start, want_flags), (got, flags) in zip(CASES, seen):
+        for (name, rom, talk, answer, want, start, want_flags, *more), (got, flags) in zip(CASES, seen):
+            unknown = bool(more and more[0])
             if want is None:
                 want = by_name[f'{talk:03X}-original'][0]['messages']
             if start is None:
                 at = lorom(TABLE + ((talk - 0x11) >> 5) * 2)
                 start = f'{int.from_bytes(roms[rom].read_bytes()[at:at + 2], "little"):04X}'
-            ok = (got['messages'] == want and got['start'] == start and (got['unknown'] > 0) == (name == 'c16-skip')
+            ok = (got['messages'] == want and got['start'] == start and (got['unknown'] > 0) == unknown
                   and all(flags.get(a) == v for a, v in want_flags.items()))
             results.append({'case': name, 'rom': rom, 'talk': f'{talk:03X}', 'answer': answer,
                             'messages': got['messages'], 'expected_messages': want,

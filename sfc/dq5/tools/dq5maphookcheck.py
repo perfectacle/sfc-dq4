@@ -88,7 +88,7 @@ CASES = [
     ('hall-grown', 'grown', HALL, None, (None, '02:A7BD'), None, '04/0A', (8, 17)),
     ('tower-grown', 'grown', TOWER, None, (None, '02:A7BD'), None, '04/0A', (8, 17)),
     ('stairs-grown', 'grown', STAIRS, None, ('02:94E0', None), True, '01/04', (13, 47)),
-    ('hall-select', 'select', HALL, None, (None, '02:A7BD'), None, '04/0A', (8, 17)),
+    ('hall-select', 'select', HALL, None, ('02:94C1', '02:A7BD'), None, '04/0A', (8, 17)),
     ('tower-select', 'select', TOWER, None, ('15:F906', '15:F906'), None, '04/00', None),
     ('tower-raw', 'raw', TOWER, None, ('02:94E0', '02:A7BD'), None, '04/0A', (8, 17)),
     ('hall-freebank', 'freebank', HALL, None, (None, '02:A7BD'), None, '04/0A', (8, 17)),
