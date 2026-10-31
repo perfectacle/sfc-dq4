@@ -48,6 +48,8 @@ FIELD_PIECES = (
                'A9 A7 00 A2 x0 x1 86 90 A2 y0 y1 86 92 22 50 CF 00 28 60 08 C2 30 00 0D FB 15 A9 b0 b1 80'),
     # 01:A05D 8프레임마다(02:AD3D) 낮밤이 바뀌면 빛을 켜고 끔
     (0x01A05D, 'AF a0 a1 7E 29 m0 D0 25 AF AA 21 7E 29 01 F0 1D'),
+    # 12:EFB9 조사 종류 1(12:EF92)이 보상을 준 뒤 그 값이 r 이면 빛 칸을 블록 b 로 되돌림. 칸이 아니라 보상 값만 봄
+    (0x12EFB9, 'AD 73 1E C9 r0 r1 D0 11 A9 x0 x1 85 90 A9 y0 y1 85 92 A9 b0 b1 22 50 CF 00'),
 )
 FIELD_TEMPLATE = [token for _, text in FIELD_PIECES for token in text.split()]
 FIELD_ADDRS = [addr + i for addr, text in FIELD_PIECES for i in range(len(text.split()))]
@@ -55,6 +57,21 @@ FIELD_CODE = FIELD_PIECES[0][0]
 FIELD_LAST = 510
 # 12:E5F2 의 조건과 빛 표시. 열림 플래그로 쓰면 보상이 스스로를 막음
 FIELD_RESERVED = ((0x15, 0x04), (0x1A, 0x01))
+
+def light_clash(foot, reward):
+    """발밑 항목도 조사 종류 1 로 12:EFB9 를 지나므로, 보상이 필드 조사와 같으면 실내에서도 지금 맵 버퍼의 빛 칸을 덮는다."""
+    clash = [row.get('index', i) for i, row in enumerate(foot) if row['reward'] == reward]
+    if clash:
+        raise ValueError(f'foot {clash[0]}: 보상 {reward:04X} 가 필드 조사와 같아 줍는 곳에서 12:EFB9 가 빛 칸을 되돌림')
+
+
+def field_reward(rom):
+    """필드 조사 코드가 이 도구의 꼴이면 그 보상, 다른 패치로 바뀌었으면 None."""
+    try:
+        return decode_field(read_field(rom))['reward']
+    except ValueError:
+        return None
+
 
 def integer(value, maximum, field):
     if type(value) is not int or not 0 <= value <= maximum:
@@ -327,6 +344,10 @@ def edits(rom, doc, new_maps=NO_NEW_MAPS):
             out.append((addr, new, old, f'{name} {i}'))
     out += field_edits(rom, doc.get('field', []))
     validate_tables(rom, current, map_changed, new_maps)
+    rows = doc.get('field') or [{}]
+    reward = rows[0].get('reward', current['field'][0]['reward']) if 'field' in doc else field_reward(rom)
+    if reward is not None:
+        light_clash(current['foot'], reward)
     dimensions = {}
     for row in positions:
         key = row['group'], row['map']

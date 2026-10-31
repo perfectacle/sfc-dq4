@@ -25,6 +25,8 @@ for button, frames in (os.getenv('INPUT') or ''):gmatch('([%w+]+):(%d+)') do
   steps[#steps + 1] = {button, tonumber(frames)}
 end
 local flag = os.getenv('FLAG') and tonumber(os.getenv('FLAG'), 16)
+-- RESETAT 프레임에 emu.reset()(교회 기록을 SRAM 에서 불러오는 장면용. INPUT 이 타이틀에서 불러오기를 누른다)
+local resetat = tonumber(os.getenv('RESETAT') or '-1')
 local function b(a) return emu.read(a, m) end
 local function w(a) return emu.read16(a, m) end
 emu.addMemoryCallback(function()
@@ -35,6 +37,13 @@ emu.addMemoryCallback(function()
   local s = emu.getState()
   log[#log + 1] = string.format('message f=%d value=%04X', n, s['cpu.a'])
 end, emu.callbackType.exec, 0x248BAF, 0x248BAF)
+-- 조사 종류(12:E4C9 가 돌려준 A)로 12:E4A7 표를 뛰는 자리. 종류 1(12:EF92)은 보상이 CA 면 빛 블록을 되돌린다(12:EFB9)
+emu.addMemoryCallback(function()
+  log[#log + 1] = string.format('kind f=%d value=%02X', n, emu.getState()['cpu.a'] & 0xFF)
+end, emu.callbackType.exec, 0x12E4A3, 0x12E4A3)
+emu.addMemoryCallback(function()
+  log[#log + 1] = string.format('light f=%d reward=%04X', n, w(0x7E1E73))
+end, emu.callbackType.exec, 0x12EFB9, 0x12EFB9)
 -- 상자 열기 12:E66F(상자 번호 16비트 훅이면 그 JML). pend 는 들어올 때의 넘길 마스크 칸 7E:291B
 emu.addMemoryCallback(function()
   log[#log + 1] = string.format('open f=%d pend=%02X pos=%d,%d', n, b(0x7E291B), b(0x7E3020), b(0x7E3080))
@@ -65,6 +74,7 @@ emu.addEventCallback(function()
     if old then emu.write(tonumber(old, 16), 0, m) end
     L.dump('before.wram', emu.memType.snesWorkRam, 0x20000)
   end
+  if n == resetat then emu.reset() end
   L.release()
   if i <= #steps then
     local step = steps[i]
@@ -79,6 +89,12 @@ emu.addEventCallback(function()
   elseif not ended then
     ended = n
     L.dump('after.wram', emu.memType.snesWorkRam, 0x20000)
+    -- SRAM=1 이면 70:0000~1FFF(기록 칸 1 은 70:0012~)도 남긴다
+    if os.getenv('SRAM') == '1' then
+      local t = {}
+      for a = 0x700000, 0x701FFF do t[#t + 1] = string.char(b(a)) end
+      L.write('after.sram', table.concat(t))
+    end
     L.shot('end.png')
     -- saveState 는 다음 프레임에 쓰이므로 몇 프레임 뒤에 멈춘다
     if os.getenv('SAVE') then L.saveState(os.getenv('SAVE')) end

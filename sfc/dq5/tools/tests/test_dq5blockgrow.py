@@ -138,14 +138,14 @@ class BlockGrowTests(unittest.TestCase):
 
 
 # 원본의 00:CF50 즉값: x0 x1·y0 y1 은 8픽셀 칸, n 은 되풀이 횟수 − 1.
-CELL_VALUES = {0x01A01B: {'x': 0x16, 'y': 0xA6}, 0x12EFC1: {'x': 0x16, 'y': 0xA6}, 0x03BB3C: {'x': 0x22, 'y': 0xF8},
+CELL_VALUES = {0x01A01B: {'x': 0x16, 'y': 0xA6}, 0x12EFC1: {'x': 0x16, 'y': 0xA6, 'b': 0xCA}, 0x03BB3C: {'x': 0x22, 'y': 0xF8},
                0x05EF0F: {'x': 0x1C4, 'y': 0xEE, 'n': 2}}
 
 
 def put_cells(d, values=CELL_VALUES):
     for at, text in fw.CHANGED_SITES:
         v = values[at]
-        put(d, at, bytes(v[t[0]] >> 8 * int(t[1]) & 0xFF if t[0] in 'xyn' else int(t, 16) for t in text.split()))
+        put(d, at, bytes(v[t[0]] >> 8 * int(t[1]) & 0xFF if t[0] in 'xynb' else int(t, 16) for t in text.split()))
 
 
 def bit9_rom(planes, planes10=(None, None, None)):
@@ -206,6 +206,15 @@ class Bit9HookTests(unittest.TestCase):
         # 11번째 비트 평면이 없으면 10번째 비트만 읽던 훅 그대로
         self.assertEqual(fw.bit9_hook(planes)[:2], b'\x80\x09')
         self.assertEqual(len(fw.bit9_hook(planes)), 78)
+
+    def test_changed_cells_follow_moved_field(self):
+        # dq5chestwrite.py 의 field 가 빛 칸을 (24,168) 로 옮기고 12:EFCC 의 되돌릴 블록을 178 로 쓴 롬
+        d = bytearray(0x200000)
+        moved = {0x01A01B: {'x': 0x18, 'y': 0xA8}, 0x12EFC1: {'x': 0x18, 'y': 0xA8, 'b': 0x178}}
+        put_cells(d, CELL_VALUES | moved)
+        cells = fw.changed_cells(Rom(bytes(d)))
+        self.assertEqual(cells[:2], [(0x0C, 0x54), (0x0C, 0x54)])
+        self.assertNotIn((0x0B, 0x53), cells)
 
     def test_plane_writes_eleventh_bit(self):
         d = bit9_rom([None] * 3)
