@@ -550,43 +550,54 @@ def vehicle_song_code():
 
 
 
-EFFECT_ROUTE = CODE + 0x880
-EFFECT_ROUTE_SITE = 0x24FEAC  # 0C(효과음) 대기열 입구. A = 시퀀스, X = 갈래(스크립트)
-EFFECT_ROUTE_ORIGINAL = bytes.fromhex('08 E2 20 48 A9 0C 4C 83 FF')
+WEAPON_SOUND = CODE + 0x880
+WEAPON_SEQ_TABLE = CODE + 0xA00     # [물건 번호] → 빈 효과음(FF 면 DQ5 소리)
+WEAPON_BRANCH_TABLE = CODE + 0xB00  # [물건 번호] → 갈래
+WEAPON_SOUND_SITE = 0x28805C        # たたかう 소리(28:8055): 무기 종류로 28:816E 를 보기 전 LDX #00 / LDA $0DA7
+WEAPON_SOUND_ORIGINAL = bytes.fromhex('A2 00 AD A7 0D')
+WEAPON_PLAY = 0x28804A              # LDA $71 / LDX $72 / JSL 24:FEAC / BRK 01 / RTS
+WEAPON_RESUME = 0x288061            # BMI(맨손) 부터 원래대로
+BARE_HANDS = 0x80                   # $0DA7 bit7
 QUEUE_SLOTS = 16
 
 
-def effect_route_code(routes, base=EFFECT_ROUTE):
-    """24:FEAC 대신. routes = [(원래 효과음, 옮긴 효과음, 갈래들, 곡들)]. 효과음·갈래가 맞고 지금 곡($1D8B)이 곡들 가운데
-    하나이며 대기열에 보내는 중인 칸(bit7·bit6, FF 아님)이 없으면 A 를 옮긴 효과음으로 바꿔 원래 입구(24:FF83)로 간다.
-    옮긴 효과음의 샘플은 그 곡들의 곡 묶음 레코드 끝에 붙어 곡 뒤 단계에서 오므로, 그 단계가 끝나기 전에는 원래 소리를 낸다.
-    호출한 쪽의 레지스터 너비를 모르므로 X·Y 는 16비트로 저장하고, 8비트 A 로 TXA 해 갈래(X 낮은 바이트)를 읽는다.
-    DB 도 모르므로 WRAM 은 긴 주소로 읽는다."""
+def weapon_sound_code(bare, songs, base=WEAPON_SOUND):
+    """28:805C 대신(8비트 A·X). 지금 곡($1D8B)이 songs 가운데 하나이고 대기열에 보내는 중인 칸(bit7·bit6, FF 아님)이 없으면
+    무기 번호($0DA7)로 WEAPON_SEQ_TABLE·WEAPON_BRANCH_TABLE 을 보고 그 (효과음, 갈래)를 28:804A 로 낸다. bare 는 맨손의
+    (효과음, 갈래) 또는 None. 표 칸이 FF 이거나 조건이 맞지 않으면 원래처럼 무기 종류로 28:816E 를 본다.
+    빈 효과음의 샘플은 songs 의 곡 묶음 레코드 끝에 붙어 곡 뒤 단계에서 오므로, 그 단계가 끝나기 전에는 원래 소리를 낸다.
+    DB 를 모르므로 WRAM 은 긴 주소로 읽는다."""
+    if not songs:
+        raise ValueError('weapon sounds need songs')
     h = bytes.fromhex
-    items = [h('08 C2 10 DA 5A E2 30 48')]                     # PHP / REP #10 / PHX / PHY / SEP #30 / PHA
-    for i, (src, dst, branches, songs) in enumerate(routes):
-        if not branches or not songs:
-            raise ValueError('an effect route needs branches and songs')
-        nxt, hit, song = f'next{i}', f'branch{i}', f'song{i}'
-        items += [h(f'A3 01 C9 {src:02X}'), ('b', 0xD0, nxt), h('8A')]  # LDA $01,S / CMP #src / BNE / TXA
-        for b in sorted(branches):
-            if not 0 <= b < 0x21:
-                raise ValueError('effect branches select scripts 00..20')
-            items += [h(f'C9 {b:02X}'), ('b', 0xF0, hit)]
-        items += [('b', 0x80, nxt), ('label', hit), h('AF 8B 1D 7E')]  # LDA $7E1D8B
-        for x in sorted(songs):
-            items += [h(f'C9 {x:02X}'), ('b', 0xF0, song)]
-        items += [('b', 0x80, nxt), ('label', song), h(f'A0 {dst:02X}'), ('jmp', 'queue'), ('label', nxt)]
-    items += [('jmp', 'done'), ('label', 'queue')]
+    items = [h('AF 8B 1D 7E')]                                  # LDA $7E1D8B
+    for x in sorted(songs):
+        items += [h(f'C9 {x:02X}'), ('b', 0xF0, 'song')]
+    items += [('jmp', 'dq5'), ('label', 'song')]
     for i in range(QUEUE_SLOTS):
         at = 0x1D95 + i
-        items += [h(f'AF {at & 0xFF:02X} {at >> 8:02X} 7E C9 FF'), ('b', 0xF0, f'q{i}'),  # LDA $7E1D95+i / CMP #FF / BEQ
-                  h('29 C0'), ('b', 0xF0, f'q{i}'), ('jmp', 'done'), ('label', f'q{i}')]   # AND #C0 / BEQ / JMP done
-    items += [h('98 83 01'),                                   # TYA / STA $01,S
-              ('label', 'done'),
-              h('68 C2 10 7A FA 28'),                          # PLA / REP #10 / PLY / PLX / PLP
-              h('08 E2 20 48 A9 0C 5C 83 FF 24')]              # 원래 입구: PHP / SEP #20 / PHA / LDA #0C / JML 24:FF83
+        items += [h(f'AF {at & 0xFF:02X} {at >> 8:02X} 7E C9 FF'), ('b', 0xF0, f'q{i}'),   # LDA $7E1D95+i / CMP #FF / BEQ
+                  h('29 C0'), ('b', 0xF0, f'q{i}'), ('jmp', 'dq5'), ('label', f'q{i}')]    # AND #C0 / BEQ / JMP dq5
+    seq, branch = WEAPON_SEQ_TABLE.to_bytes(3, 'little'), WEAPON_BRANCH_TABLE.to_bytes(3, 'little')
+    items += [h('AF A7 0D 7E'), ('b', 0x30, 'bare'),             # LDA $7E0DA7 / BMI 맨손
+              h('AA BF') + seq + h('C9 FF'), ('b', 0xF0, 'dq5'),  # TAX / LDA seq,X / CMP #FF / BEQ
+              h('85 71 BF') + branch + h('85 72'),                # STA $71 / LDA branch,X / STA $72
+              h('5C') + WEAPON_PLAY.to_bytes(3, 'little'),        # JML 28:804A
+              ('label', 'bare')]
+    if bare is not None:
+        items += [h(f'A9 {bare[0]:02X} 85 71 A9 {bare[1]:02X} 85 72'), h('5C') + WEAPON_PLAY.to_bytes(3, 'little')]
+    items += [('label', 'dq5'), WEAPON_SOUND_ORIGINAL, h('5C') + WEAPON_RESUME.to_bytes(3, 'little')]
     return _asm_far(items, base)
+
+
+def weapon_tables(sounds):
+    """{물건 번호: (효과음, 갈래)} → (효과음 표 256바이트, 갈래 표 256바이트). 없는 칸은 FF."""
+    seq, branch = bytearray(b'\xff' * 256), bytearray(b'\xff' * 256)
+    for item, (s, b) in sounds.items():
+        if not 0 <= item < BARE_HANDS or not 0x32 <= s < 0x47 or not 0 <= b < 0x21:
+            raise ValueError(f'weapon {item:02X}: item below 80, effect 32..46, branch 00..20')
+        seq[item], branch[item] = s, b
+    return bytes(seq), bytes(branch)
 
 
 # 1A 는 앞 곡을 줄인 뒤 16(참조 수 지움)·0A(참조 없는 샘플·시퀀스 버림)를 보내, 다음 곡과 함께 쓰는 샘플도 버렸다가
@@ -814,18 +825,15 @@ def pinned_sequences(data):
     return list(data[pos:end])
 
 
-def unpin_sequences(data, songs, add=()):
-    """늘 두는 시퀀스 목록(2B:C429, 켤 때 명령 93 으로 고정)에서 songs 를 빼고 FF 로 채운다. add 는 뺀 자리에 더할 것으로,
-    목록이 원래 길이를 넘으면 거부한다.
+def unpin_sequences(data, songs):
+    """늘 두는 시퀀스 목록(2B:C429, 켤 때 명령 93 으로 고정)에서 songs 를 빼고 FF 로 채운다.
 
     늘 두는 곡은 2B 로더가 곡 앞 전송(2B:C1AE)을 건너뛰어 곡 묶음의 「곡 앞」 샘플을 보내지 않고,
     시퀀스가 SPC 에 늘 남아 다른 모든 곡의 예산을 줄인다. 빼면 보통 곡처럼 틀 때마다 올라간다.
     """
     pos = lorom(RESIDENT_SEQUENCES)
     old = pinned_sequences(data)
-    kept = [x for x in old if x not in songs] + [x for x in add if x not in old]
-    if len(kept) > len(old):
-        raise ValueError('the resident sequence list has no free entry for the added sequences')
+    kept = [x for x in old if x not in songs]
     data[pos:pos + len(old) + 1] = bytes(kept) + b'\xff' * (len(old) - len(kept) + 1)
     return [x for x in old if x in songs]
 
@@ -880,8 +888,8 @@ def write_resident_samples(data, ids):
 
 def install(base, replacements, *, sample_resources=None, map_fades=False, preview=None, pinned=(),
             resident=None, set_records=None, fast_receive=False, chains=None, chain_late=(), hold=False, early_song=False, load_pump=False,
-            vehicle_song=False, keep_samples=False, release_failed=False, unpin=(), resident_waves=None, effect_routes=(),
-            pin_new=()):
+            vehicle_song=False, keep_samples=False, release_failed=False, unpin=(), resident_waves=None, weapon_sounds=None,
+            effect_calls=None):
     """pinned 는 늘 두는 시퀀스 목록에 남길 바꾸는 곡(나머지 바꾸는 곡은 목록에서 뺌). resident 는 새 늘 두는 샘플 목록
     전체(주지 않으면 그대로). set_records 는 바꾸지 않는 곡의 곡 묶음 레코드 {곡: (k, 샘플…)}.
     fast_receive 는 SPC 자료 받기를 묶음 여러 개 이어 받게 바꾼다(fast_receive_code). chains 는 {곡: 본체 시퀀스} 로,
@@ -895,9 +903,9 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
     resident_waves 는 {늘 두는 효과음 파형 번호(20~22): 자원} 으로 그 샘플을 바꾼다. 곡 예산은 원래 크기로 셌으므로
     원래보다 크면 거부한다.
     unpin 은 바꾸지 않았어도 늘 두는 시퀀스 목록에서 뺄 곡(부를 때마다 올림).
-    effect_routes 는 [(원래 효과음, 옮긴 효과음, 갈래들, 곡들)] 로, 그 곡들이 울리는 동안 그 갈래를 옮긴 효과음으로 보낸다
-    (effect_route_code). 옮긴 효과음의 샘플을 곡들의 레코드에 붙이는 것은 replacements 몫이다.
-    pin_new 는 원래 목록에 없던 바꾸는 곡을 늘 두는 목록의 빈 자리(unpin 으로 빈 칸)에 더한다.
+    weapon_sounds 는 ({무기 물건 번호(맨손 80): (효과음, 갈래)}, 곡들) 로, 그 곡들이 울리는 동안 たたかう 소리를 무기마다
+    그 갈래로 낸다(weapon_sound_code). 그 효과음 샘플을 곡들의 레코드에 붙이는 것은 replacements 몫이다.
+    effect_calls 는 {롬 주소: (원래 효과음, 새 효과음)} 로, 그 자리의 효과음 부르기 BRK 16·19 n X 의 n 을 바꾼다.
     """
     if len(base) not in (0x180000, 0x200000, 0x400000):
         raise ValueError('base must be a headerless 1.5MB, 2MB or 4MB DQ5 build')
@@ -929,9 +937,7 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
     old_size = sum(map(len, records))
     if not set(pinned) <= set(replacements) or not set(pinned) <= set(pinned_sequences(data)):
         raise ValueError('pinned songs must be replaced songs already in the resident sequence list')
-    if not set(pin_new) <= set(replacements) or set(pin_new) & set(pinned_sequences(data)):
-        raise ValueError('newly pinned songs must be replaced songs not yet in the resident sequence list')
-    unpinned = unpin_sequences(data, (set(replacements) - set(pinned) - set(pin_new)) | set(unpin), pin_new)
+    unpinned = unpin_sequences(data, (set(replacements) - set(pinned)) | set(unpin))
     if resident is not None:
         write_resident_samples(data, list(resident))
     for song, (first, *ids) in (set_records or {}).items():
@@ -1122,10 +1128,21 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
         write(KEEP_DONE_SITE, bytes([0x4C]) + (KEEP_CODE & 0xFFFF).to_bytes(2, 'little'), bytes.fromhex('4C 84 C1'))
         write(KEEP_MARK_SITE, bytes([0x20]) + (mark_at & 0xFFFF).to_bytes(2, 'little') + bytes([0xEA] * 6),
               bytes.fromhex('20 2F C3 A9 0A 00 20 12 C1'))
-    if effect_routes:
-        write(EFFECT_ROUTE, effect_route_code(effect_routes), empty=True)
-        write(EFFECT_ROUTE_SITE, bytes([0x5C]) + EFFECT_ROUTE.to_bytes(3, 'little') + bytes([0xEA] * 5),
-              EFFECT_ROUTE_ORIGINAL)
+    for addr, (old, new) in sorted((effect_calls or {}).items()):
+        pos = lorom(addr)
+        if data[pos] != 0x00 or data[pos + 1] not in (0x16, 0x19) or data[pos + 2] != old:
+            raise ValueError(f'{addr:06X}: not BRK 16/19 {old:02X}')
+        data[pos + 2] = new
+    if weapon_sounds:
+        sounds, songs = weapon_sounds
+        code = weapon_sound_code(sounds.get(BARE_HANDS), songs)
+        if WEAPON_SOUND + len(code) > WEAPON_SEQ_TABLE:
+            raise ValueError('weapon sound code overflows its tables')
+        seq_table, branch_table = weapon_tables({k: v for k, v in sounds.items() if k != BARE_HANDS})
+        write(WEAPON_SOUND, code, empty=True)
+        write(WEAPON_SEQ_TABLE, seq_table, empty=True)
+        write(WEAPON_BRANCH_TABLE, branch_table, empty=True)
+        write(WEAPON_SOUND_SITE, bytes([0x5C]) + WEAPON_SOUND.to_bytes(3, 'little') + bytes([0xEA]), WEAPON_SOUND_ORIGINAL)
     if vehicle_song:
         write(VEHICLE_SONG, vehicle_song_code(), empty=True)
         write(VEHICLE_SONG_SITE, bytes([0x22]) + VEHICLE_SONG.to_bytes(3, 'little') + bytes([0xEA] * 7),
@@ -1148,8 +1165,10 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
                     'heap_start': f'{heap_start(result):04X}',
                     'sound_bank_bytes_left': {f'{bank:02X}': 0x10000 - at for bank, at in free.items() if at > 0x8000},
                     'unpinned_sequences': [f'{x:02X}' for x in unpinned],
-                    'effect_routes': [{'from': f'{a:02X}', 'to': f'{b:02X}', 'branches': [f'{x:02X}' for x in sorted(c)],
-                                       'songs': [f'{x:02X}' for x in sorted(d)]} for a, b, c, d in effect_routes],
+                    'weapon_sounds': {'songs': [f'{x:02X}' for x in sorted(weapon_sounds[1])],
+                                      'items': {f'{k:02X}': f'{a:02X}-{b:02X}' for k, (a, b) in sorted(weapon_sounds[0].items())}}
+                    if weapon_sounds else None,
+                    'effect_calls': {f'{a:06X}': f'{o:02X} -> {n:02X}' for a, (o, n) in sorted((effect_calls or {}).items())},
                     'pinned_sequences': [f'{x:02X}' for x in pinned_sequences(result)],
                     'resident_samples': [f'{x:02X}' for x in resident_samples(result)],
                     'map_fades': map_fades, 'preview': preview, 'fast_receive': fast_receive, 'hold': hold, 'early_song': early_song, 'load_pump': load_pump,
