@@ -10,8 +10,6 @@ from dq5map import Rom, lorom  # noqa: E402
 from dq5objlayout import (FORMAT, REGION_END, SCENES, TABLE, VEHICLE_FRAMES, VEHICLE_PARTS, address,  # noqa: E402
                           dump, normalized, object_entry, parse_token, patch, scene_layout, token, vehicle_part)
 
-ROM = Path(__file__).resolve().parents[4] / 'rom' / 'dq5.sfc'
-
 
 def put(data, addr, raw):
     data[lorom(addr):lorom(addr) + len(raw)] = raw
@@ -332,15 +330,13 @@ class VehicleLayoutTests(unittest.TestCase):
         self.assertEqual(patch(after, dump(after))['writes'], [])
         self.assertEqual(patch(after, doc, vehicle_at=0x0BFBB0)['writes'], [])
 
-    @unittest.skipUnless(ROM.is_file(), '롬 없음')
-    def test_scene_layout_real_rom(self):
-        # 4x4 マスタードラゴン: 프레임 수마다 착륙 X·天空城 간격 S. 6프레임이면 S 가 한 바이트를 넘는다.
-        rom = Rom(ROM.read_bytes())
+    def test_scene_layout(self):
+        # 4x4 マスタードラゴン(天空城 4블록): 프레임 수마다 착륙 X·天空城 간격 S. 6프레임이면 S 가 한 바이트를 넘는다.
         for frames, want in ((1, (2, 0x40)), (2, (8, 0x60)), (4, (5, 0xC0)), (5, (0xB, 0xE0))):
             with self.subTest(frames=frames):
-                self.assertEqual(scene_layout(rom, '82-1', frames, 16)[:2], want)
+                self.assertEqual(scene_layout(self.rom, '82-1', frames, 16)[:2], want)
         with self.assertRaises(ValueError):
-            scene_layout(rom, '82-1', 6, 16)
+            scene_layout(self.rom, '82-1', 6, 16)
 
     def test_dragon_size(self):
         # 5x5 · 3프레임: 天空城 37C7 = C8(블록 12~15), 착륙 X = 8(블록 17·16).
