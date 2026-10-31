@@ -91,10 +91,14 @@ class ChestWriteTests(unittest.TestCase):
             with self.subTest(row=row), self.assertRaises(ValueError):
                 patch(rom, {'format': FORMAT, 'search': [row]})
 
-    @unittest.skipUnless(ROM.is_file(), '롬 없음')
-    def test_fixed_code_bit_owner_keeps_its_bit(self):
-        rom = Rom(ROM.read_bytes())
-        # 두 칸 앞 11(03/04)의 7E:223D & 08 은 12:AE9C 가 직접 본다
+    @mock('dq5chestwrite.map_ids', return_value=[(0, i) for i in range(86)] + [(0x03, 0x04)])
+    @mock('dq5chestwrite.map_dimensions', return_value=(64, 64))
+    def test_fixed_code_bit_owner_keeps_its_bit(self, _, __):
+        # 두 칸 앞 11 을 03/04 (10, 7) 에 두면 그 열림 비트 7E:223D & 08 은 12:AE9C 가 직접 본다
+        start = lorom(TABLES['ahead'][0] + 11 * 8)
+        data = bytearray(fixture().d)
+        data[start:start + 4], data[start + 6:start + 8] = bytes((0x03, 0x04, 10, 7)), bytes((0x2D, 0x08))
+        rom = Rom(data)
         patch(rom, {'format': FORMAT, 'ahead': [{'index': 11, 'reward': 0x38E}]})
         with self.assertRaises(ValueError):
             patch(rom, {'format': FORMAT, 'ahead': [{'index': 11, 'flag_index': 0x2E, 'mask': 0x02}]})

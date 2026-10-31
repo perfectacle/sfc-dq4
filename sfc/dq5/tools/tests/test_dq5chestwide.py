@@ -1,4 +1,4 @@
-"""상자 번호 16비트 훅(dq5chestreloc --wide-at): 원본 롬에 훅을 붙여 65816 해석기로 열기·들어갈 때·켜기를 돌려 보고,
+"""상자 번호 16비트 훅(dq5chestreloc --wide-at): 합성 롬(롬이 있으면 원본 롬도)에 훅을 붙여 65816 해석기로 열기·들어갈 때·켜기를 돌려 보고,
 훅 롬의 표 자리 찾기와 입력 검사를 본다."""
 import io
 import json
@@ -14,6 +14,7 @@ import dq5chestreloc as reloc  # noqa: E402
 import dq5chestwrite as chestwrite  # noqa: E402
 from dq5build import build  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
+from test_dq5chestreloc import counted, fake_maps  # noqa: E402
 from test_dq5chestwrite import ROM  # noqa: E402
 from w65816 import Cpu  # noqa: E402
 
@@ -28,8 +29,17 @@ class Reached(Exception):
     pass
 
 
-def hooked(index=0):
-    data = bytearray(Path(ROM).read_bytes()) + bytes(0x200000 - Path(ROM).stat().st_size)
+def synthetic():
+    """counted() 에 훅이 덮을 자리의 원래 바이트와, 훅이 상자 번호 & 7 → 마스크로 읽는 25:FAE9 의 8바이트를 둔 롬."""
+    data = bytearray(counted().d)
+    for addr, old in reloc.WIDE_SITES.values():
+        data[lorom(addr):lorom(addr) + len(old)] = old
+    data[lorom(0x25FAE9):lorom(0x25FAE9) + 8] = bytes(0x80 >> i for i in range(8))
+    return Rom(bytes(data))
+
+
+def hooked(base, index=0):
+    data = bytearray(base.d) + bytes(0x200000 - len(base.d))
     for addr, new, old, _ in reloc.wide_code(CODE, TABLE):
         if old is not None:
             assert data[lorom(addr):lorom(addr) + len(old)] == old
@@ -86,10 +96,13 @@ def open_chest(rom, group, number, **wram):
     return seen
 
 
-@unittest.skipUnless(ROM.is_file(), '롬 없음')
 class ChestWideTests(unittest.TestCase):
+    def setUp(self):
+        self.base = synthetic()
+        fake_maps(self)
+
     def test_open_branches(self):
-        rom = hooked(index=4)
+        rom = hooked(self.base, index=4)
         # 19/00 의 맵 안 순서 4 = 상자 304: 바이트 28F3 + 48/8 = 28F9, 마스크 80
         got = open_chest(rom, 0x19, 0x00, w291B=0, w1E71=0x0C, w1E72=0x2D)
         self.assertEqual(got['name'], 'reward')
@@ -107,14 +120,14 @@ class ChestWideTests(unittest.TestCase):
         # 01/02 의 순서 4 는 256 미만이라 원래 루틴(A = 4)으로
         got = open_chest(rom, 0x01, 0x02)
         self.assertEqual((got['name'], got['a'] & 0xFF, got['p'] & 0x30), ('below', 4, 0x30))
-        self.assertEqual(open_chest(hooked(index=55), 0x03, 0x00)['a'] & 0xFF, 0xFF)   # 200 + 55 = 255
-        self.assertEqual(open_chest(hooked(index=56), 0x03, 0x00)['wram'][0x1E80], 0)   # 256
+        self.assertEqual(open_chest(hooked(self.base, index=55), 0x03, 0x00)['a'] & 0xFF, 0xFF)   # 200 + 55 = 255
+        self.assertEqual(open_chest(hooked(self.base, index=56), 0x03, 0x00)['wram'][0x1E80], 0)   # 256
         # 표에 없는 맵(12:E669 로)도 앞 상자가 남긴 마스크를 지운다
         got = open_chest(rom, 0x05, 0x00, w291B=0x04)
         self.assertEqual((got['name'], got['wram'][0x291B], got['s']), ('none', 0, 0x1FF))
 
     def test_entry(self):
-        rom = hooked()
+        rom = hooked(self.base)
         cases = [(0x19, 0x00, 4, {}, False), (0x19, 0x00, 4, {'w28F9': 0x80}, True),
                  (0x19, 0x00, 4, {'w28F9': 0x7F}, False), (0x01, 0x02, 9, {'w2211': 0x40}, True),
                  (0x03, 0x00, 55, {'w222F': 0x01}, True), (0x03, 0x00, 56, {'w222F': 0xFF}, False),
@@ -128,7 +141,7 @@ class ChestWideTests(unittest.TestCase):
             self.assertEqual((cpu.a & 0xFF, cpu.x, cpu.p & 0x30), (index, 0x33, 0x30))
 
     def test_set(self):
-        rom = hooked()
+        rom = hooked(self.base)
         cpu = cpu_for(rom, 0, 0, w1E80=6, w1E81=0, w291B=0x08, w28F9=0x01)
         cpu.jsl(label('set'), max_steps=1_000)
         self.assertEqual((cpu.wram[0x28F9], cpu.wram[0x291B], cpu.p & 1), (0x09, 0, 0))
@@ -152,7 +165,7 @@ class ChestWideTests(unittest.TestCase):
             self.assertEqual((cpu.wram[0x2190 + index], cpu.wram[0x291B], cpu.p & 1), (0, 0x08, 0))
 
     def test_locate_and_limits(self):
-        rom = hooked()
+        rom = hooked(self.base)
         self.assertEqual(reloc.locate(rom)['chest_maps'], TABLE)
         data = bytearray(rom.d)
         data[lorom(CODE) + 40] ^= 1
@@ -180,7 +193,7 @@ class ChestWideTests(unittest.TestCase):
             reloc.flag_bits(dict(doc, chests=[], lower=[dict(lower, flag_index=0, mask=0)]), wide=True)
 
     def test_patch_writes_hooks(self):
-        rom = Rom(Path(ROM).read_bytes())
+        rom = self.base
         doc = reloc.parse(rom)
         writes, mb = reloc.writes_for(rom, doc, {'chest_maps': 0x3FC000, 'wide': 0x3FD000})
         sites = {addr for addr, *_ in writes}
@@ -192,7 +205,7 @@ class ChestWideTests(unittest.TestCase):
 
     def test_check_rejects_other_wide_place(self):
         # 만든 롬의 12:E66F 가 --wide-at 이 아닌 곳(그곳에도 훅이 온전히 있음)을 가리키면 check 가 거부한다
-        rom = Rom(Path(ROM).read_bytes())
+        rom = self.base
         at = dict.fromkeys(reloc.ORIGINAL) | {'wide': 0x3FD000}
         real = reloc.patch
 
@@ -207,13 +220,20 @@ class ChestWideTests(unittest.TestCase):
 
     def test_chestwrite_on_hooked_rom(self):
         # 표를 옮기지 않고 훅만 넣은 롬에서도 고정 표 쓰기가 같은 표를 읽고 쓴다
-        rom = Rom(Path(ROM).read_bytes())
+        rom = self.base
         writes, mb = reloc.writes_for(rom, reloc.parse(rom), {'wide': 0x3FD000})
         self.assertLessEqual({0x3FD000, *(site for site, _ in reloc.WIDE_SITES.values())}, {addr for addr, *_ in writes})
         built = Rom(build(rom.d, [('wide', mb, [(lorom(a), n, o, note) for a, n, o, note in writes])], mb)[0])
         self.assertEqual(reloc.locate(built), reloc.ORIGINAL)
         manifest = chestwrite.patch(built, {'format': chestwrite.FORMAT, 'chests': [{'index': 2, 'reward': 0x241}]})
         self.assertEqual([w['at'] for w in manifest['writes']], ['1E:EE52'])
+
+
+
+@unittest.skipUnless(ROM.is_file(), '롬 없음')
+class RealRomChestWideTests(ChestWideTests):
+    def setUp(self):
+        self.base = Rom(ROM.read_bytes())
 
 
 if __name__ == '__main__':

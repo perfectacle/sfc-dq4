@@ -10,14 +10,37 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dq5chestreloc import (ABS, DB_SITES, FORMAT, LONG, MAX_CHESTS, ORIGINAL, ORIGINAL_BYTES, address, flag_bits,
                            locate, original_spans, parse, placement, read, rom_size, row_encode, serialize, writes_for)
+from dq5chestwrite import TABLES
 from dq5map import Rom, lorom
 from test_dq5chestwrite import ROM, fixture, poke
+
+# 맵 (00, i) 마다 상자 수. 합은 상자 내용물 표의 행 수(161)
+COUNTS = [TABLES['chests'][1] - 82] + [1] * 82
 
 
 def row(name, **values):
     base = {'group': 0, 'map': 1, 'x': 2, 'y': 3, 'reward': 0xA1, 'flag_index': 3, 'mask': 0x80}
     extra = {'search': {'unused': 1}, 'foot': {'layer': 1}}.get(name, {})
     return base | extra | values
+
+
+def counted():
+    """fixture() 의 상자 맵 연결에 COUNTS 를 적은 롬. 표 여섯을 parse 해 그대로 다시 쓸 수 있다."""
+    data = bytearray(fixture().d)
+    for i, count in enumerate(COUNTS):
+        data[lorom(ORIGINAL['chest_maps'] + i * 3 + 2)] = count
+    return Rom(data)
+
+
+def fake_maps(case, *extra):
+    """counted() 의 표가 가리키는 맵(00/00~00/55 와 extra)과 맵 크기·상자 칸을 흉내 낸다."""
+    ids = [(0, i) for i in range(86)] + list(extra)
+    cells = {(0, i): count for i, count in enumerate(COUNTS)}
+    for module in ('dq5chestreloc', 'dq5chestwrite'):
+        case.enterContext(mock(f'{module}.map_ids', return_value=ids))
+        case.enterContext(mock(f'{module}.map_dimensions', return_value=(64, 64)))
+    case.enterContext(mock('dq5chestreloc.chests', side_effect=lambda rom, group, number, start: [None] * cells.get(
+        (group, number), 0)))
 
 
 class ChestRelocTests(unittest.TestCase):
@@ -148,9 +171,21 @@ class ChestRelocTests(unittest.TestCase):
         self.assertEqual((rom_size([0x1E8000]), rom_size([0x3F8000]), rom_size([0x5F8000]), rom_size([0x7D8000])),
                          (0, 2, 3, 4))
 
-    @unittest.skipUnless(ROM.is_file(), '롬 없음')
-    def test_rom_grow_moves_operands_and_owns_old_spans(self):
-        rom = Rom(ROM.read_bytes())
+    def test_address_accepts_cpu_only(self):
+        self.assertEqual(address('BF:9000'), 0x3F9000)
+        for text in ('0x1000', '3F9000', '3F:12'):
+            with self.subTest(text=text), self.assertRaises(argparse.ArgumentTypeError):
+                address(text)
+
+
+class ChestTableRomTests(unittest.TestCase):
+    """표 여섯을 parse 해 고쳐 쓰기. 합성 롬에서 맵 목록·크기·상자 칸은 흉내 낸다."""
+    def setUp(self):
+        self.rom = counted()
+        fake_maps(self, (0x17, 0))
+
+    def test_grow_moves_operands_and_owns_old_spans(self):
+        rom = self.rom
         doc = parse(rom)
         self.assertEqual(writes_for(rom, doc)[0], [])
         doc['ahead'].append(row('ahead', group=0x17, map=0, x=9, y=9, flag_index=0x2E, mask=4))
@@ -169,9 +204,8 @@ class ChestRelocTests(unittest.TestCase):
             covered = [(max(a, lo), min(b, hi)) for a, b in owned if a < hi and b > lo]
             self.assertEqual(sum(b - a for a, b in covered), hi - lo)
 
-    @unittest.skipUnless(ROM.is_file(), '롬 없음')
-    def test_rom_rules_cells_flags_and_merged_spans(self):
-        rom = Rom(ROM.read_bytes())
+    def test_rules_cells_flags_and_merged_spans(self):
+        rom = self.rom
         doc = parse(rom)
         self.assertEqual(doc['search'][0]['unused'], read(rom, ORIGINAL['search'] + 4, 1)[0])
         cells = json.loads(json.dumps(doc))
@@ -189,11 +223,11 @@ class ChestRelocTests(unittest.TestCase):
         writes, _ = writes_for(rom, doc, {'lower': 0x1EFFA0})
         self.assertTrue(any(a == 0x1EFFA0 for a, _, _, _ in writes))
 
-    def test_address_accepts_cpu_only(self):
-        self.assertEqual(address('BF:9000'), 0x3F9000)
-        for text in ('0x1000', '3F9000', '3F:12'):
-            with self.subTest(text=text), self.assertRaises(argparse.ArgumentTypeError):
-                address(text)
+
+@unittest.skipUnless(ROM.is_file(), '롬 없음')
+class RealRomChestTableTests(ChestTableRomTests):
+    def setUp(self):
+        self.rom = Rom(ROM.read_bytes())
 
 
 if __name__ == '__main__':
