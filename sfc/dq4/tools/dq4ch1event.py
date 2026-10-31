@@ -368,7 +368,7 @@ COMPANION = 0x23AED1            # 동료 표: 종류마다 9바이트(처음 레
 HOIMIN_KIND = 0x05              # ホイミスライム. 이름 0 이 「ホイミン」
 GUEST = 0xC0                    # 일행 기록 +0: bit7 몬스터 동료, bit6 손님
 SCRATCH = 0x7E1BC6              # 7E:1BBE~ 의 DQ5 가 쓰지 않는 자리(서장이 1BC4 까지 씀)
-PARTY_OBJECTS = 0x05D89D        # 걷는 일행 그림을 일행 기록대로 다시 세움(DQ5 동료 합류 이벤트들이 부름)
+PARTY_OBJECTS = 0x05D89D        # 걷는 일행 그림을 일행 기록대로 다시 세움(02:C7E4 를 거침)
 REFRESH = bytes((0xE2, 0x30, 0x22)) + PARTY_OBJECTS.to_bytes(3, 'little')
 # 따라 걷는 그림. 맵을 불러올 때(02:CA29)와 일행이 바뀔 때(05:D89D → 02:C7E4) 모두 02:C634 가 걷는 그림 수 7E:1967 을
 # 정한다. 그 끝(STA $1967 / PLP / RTS)을 02 뱅크 빈 자리로 돌려, 따라옴 깃발이 켜진 동안 일행 뒤에 그림을 더한다
@@ -377,7 +377,7 @@ COUNT_TAIL = 0x02FF60           # sfc/dq5/docs/dq5-build-format.md 「빈 자리
 # 맵을 불러올 때만 부르는, 실내면 주인공 그림을 2B 로 두는 루틴. 일행이 바뀔 때도 불러 주인공 그림이 맵을 다시
 # 불러온 것과 같게 한다(부르지 않으면 05:D98F 의 2E 로 바뀜, 실측)
 HERO_INDOOR = 0x02CA5A
-# 2191 bit5 가 꺼져 있으면(DQ5 이야기 첫머리, 장 롬은 늘 꺼짐) 맵을 불러올 때 02:B16E 가 걷는 그림을 주인공 하나로
+# 2191 bit5 가 꺼져 있으면(1장 롬에서는 꺼져 있음) 맵을 불러올 때 02:B16E 가 걷는 그림을 주인공 하나로
 # 줄인다. 그 STA $1967 만 지운다
 SOLO_AT, SOLO_ORIG = 0x02B178, bytes.fromhex('8d 67 19')
 # 몬스터 동료 그림은 기록 +0 & 7F 로 05:D9E1 표를 읽어 손님 bit6 이 켜진 C5 는 표 밖(0F)을 읽었다. & 3F 로
@@ -827,7 +827,7 @@ def _followers(origin):
     a = dq4environmentrom._Asm(origin)
     a.b(0x08, 0xE2, 0x30).long(0xAF, 'flare').b(0x29, FLARE_FOLLOWS[1]).rel(0xF0, 'kids')
     a.long(0xAF, 'reunited').b(0x29, REUNITED[1]).rel(0xD0, 'kids')
-    # 필드에서도 $BC·$BD 는 나온 맵 번호로 남는다(실측, 감옥에서 필드로 나와 37/02). 실내일 때만 감옥으로 본다
+    # 필드에서도 $BC·$BD 가 들어갔던 맵 번호로 남아 있었다(실측). 실내일 때만 감옥으로 본다
     a.b(0xAF, 0xBE, 0x00, 0x7E).rel(0x10, 'add_flare')
     a.b(0xAF, 0xBC, 0x00, 0x7E, 0xC9, jail_bc).rel(0xD0, 'add_flare')
     a.b(0xAF, 0xBD, 0x00, 0x7E, 0xC9, jail_bd).rel(0xF0, 'kids')
