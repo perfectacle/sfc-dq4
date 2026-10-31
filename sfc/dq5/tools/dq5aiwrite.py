@@ -33,7 +33,7 @@ ODDS = {'normal': 0x278254, 'easy': 0x278284, 'saving': 0x2782B4}
 RESIST = 0x278055
 ARMOR = 0x2780FC
 NO_RESIST = 0x1F
-# A0 은 공격 평가(21:DD47)·회복 평가(21:EF05) 어느 갈래에도 들지 않아 그 행동을 고르지 않게 한다. C0·E0 도 같은
+# A0 은 공격 평가(21:DD47)·회복 평가(21:EF05) 어느 갈래에도 들지 않아 보통 평가에서 빠진다. C0·E0 도 같은
 # 갈래로 빠지지만 바꿔 보지 않아 원래 값 그대로만 받는다.
 KNOWN_RANGES = {0x00, 0x20, 0x40, 0x60, 0x80, 0xA0}
 
@@ -171,7 +171,6 @@ def edits(rom, doc, original=None):
             rng = rec[4] & 0xE0
             if 'range' in row:
                 value = hexbyte(row['range'], f'{name} range')
-                # 뜻을 확인한 다섯 값으로만 바꾼다. A0·C0·E0 은 원래 값 그대로 둘 때만 받는다.
                 require(value in KNOWN_RANGES or value == rng, f'{name} range: 00·20·40·60·80·A0 중 하나(또는 원래 값)')
                 rng = value
             resist = rec[4] & 0x1F
