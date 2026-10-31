@@ -119,9 +119,19 @@ def _run_step(code, ram, slot, blocked=()):
         elif op == 0x82:
             pc += 3 + int.from_bytes(code[pc + 1:pc + 3], 'little', signed=True)
         elif op == 0xC9:
-            carry, pc = int(a >= code[pc + 1]), pc + 2
-        elif op in (0x30, 0x90, 0xB0, 0x10, 0xD0, 0x80):
-            take = {0x30: neg, 0x90: not carry, 0xB0: carry, 0x10: not neg, 0xD0: not z, 0x80: True}[op]
+            carry, (z, neg), pc = int(a >= code[pc + 1]), nz((a - code[pc + 1]) & 0xFF), pc + 2
+        elif op == 0xAD:
+            a = ram.get(0x7E0000 + (code[pc + 1] | code[pc + 2] << 8), 0)
+            (z, neg), pc = nz(a), pc + 3
+        elif op == 0x29:
+            a = a & code[pc + 1]
+            (z, neg), pc = nz(a), pc + 2
+        elif op == 0xE9:
+            v = a - code[pc + 1] - (1 - carry)
+            a, carry, pc = v & 0xFF, int(v >= 0), pc + 2
+            z, neg = nz(a)
+        elif op in (0x30, 0x90, 0xB0, 0x10, 0xD0, 0xF0, 0x80):
+            take = {0x30: neg, 0x90: not carry, 0xB0: carry, 0x10: not neg, 0xD0: not z, 0xF0: z, 0x80: True}[op]
             d = code[pc + 1] - (0x100 if code[pc + 1] & 0x80 else 0)
             pc += 2 + (d if take else 0)
         else:
@@ -210,6 +220,27 @@ class NumberTest(unittest.TestCase):
         self.assertEqual(run((38, 25), (35, 25), {(36, 25)}), (37, 25))      # 둘째 셀만 막히면 한 셀(왼쪽)
         self.assertEqual(run((44, 25), (49, 25), {(47, 25)}), (45, 25))      # 오른쪽
         self.assertEqual(run((44, 25), (44, 30), {(44, 27)}), (44, 26))      # 아래
+
+    def test_old_man_steps_aside_when_the_hero_walks_into_him(self):
+        def run(man, hero, pad, blocked=()):
+            ram = {0x7E3020: hero[0], 0x7E3080: hero[1], 0x7E3020 + 0x10: man[0], 0x7E3080 + 0x10: man[1],
+                   0x7E0749: pad, **{k: 0x40 + k for k in range(0x10)}}
+            target = _run_step(ev._old_man_step(), ram, 0x10, blocked)
+            self.assertEqual([target[k] for k in range(0x10)], [ram[k] for k in range(0x10)])
+            self.assertEqual((target[0x7E3020 + 0x10], target[0x7E3080 + 0x10]), man)
+            return target[0x7E3560 + 0x10], target[0x7E35A0 + 0x10]
+        # 성 앞 오른쪽 막다른 열 (70,17)~(70,23) 어귀에 한 셀 어긋나 선 노인(실측)
+        self.assertEqual(run((68, 22), (70, 23), 0x02), (66, 22))                       # 주인공이 걷는 쪽으로
+        self.assertEqual(run((68, 22), (70, 23), 0x02, {(67, 22)}), (68, 24))           # 막히면 아래
+        self.assertEqual(run((68, 22), (70, 23), 0x02, {(67, 22), (68, 23)}), (68, 20))  # 그것도 막히면 위
+        self.assertEqual(run((68, 22), (70, 23), 0x02, {(67, 22), (68, 23), (68, 21)}), (68, 22))
+        self.assertEqual(run((60, 23), (60, 21), 0x04), (60, 25))
+        self.assertEqual(run((60, 23), (60, 25), 0x08), (60, 21))
+        self.assertEqual(run((62, 25), (60, 25), 0x01), (64, 25))
+        self.assertEqual(run((60, 23), (70, 23), 0x02), (62, 23))       # 붙어 있지 않으면 따라옴
+        self.assertEqual(run((68, 23), (70, 23), 0x01), (68, 23))       # 노인 반대쪽을 누르면 그대로
+        self.assertEqual(run((68, 23), (70, 23), 0x06), (68, 23))       # 두 방향을 같이 누르면 그대로
+        self.assertEqual(run((68, 23), (70, 23), 0x80 | 0x02), (66, 23))   # 패드 아래 니블만 본다
 
 
     def test_braggart_jokes_either_way(self):
@@ -557,6 +588,10 @@ class ListTest(unittest.TestCase):
         t = ev.talk_numbers(0x904)
         olds = [e for e in self.entries(ev.FRONT) if e["fields"]["talk"] == t['old_man']]
         self.assertEqual([e["from"] for e in olds], [ev.OLD_MAN_SRC])
+        self.assertEqual([e["fields"]["gfx"] for e in olds], [ev.OLD_MAN_PICTURE])
+        import dq4people
+        (sheet,) = [p.sheet for p in dq4people.PEOPLE if ev.OLD_MAN_PICTURE in p.pictures and p.group is None]
+        self.assertEqual(sheet, 'h005')     # NDS 가 이 노인에 쓰는 모습 5
         everywhere = [e["from"] for lst in self.lists for e in lst["entries"]] + \
             [e["from"] for lst in self.new for e in lst["entries"]]
         self.assertEqual(everywhere.count(ev.OLD_MAN_SRC), 1)
