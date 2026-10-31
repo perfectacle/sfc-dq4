@@ -31,6 +31,12 @@ KIDS_FOLLOW = (0x29, 0x80)      # 7E:21B9 bit7  구한 아이들이 따라옴(FC
 # 아래는 DQ5 레ヌール城 04/05 의 인물 스크립트만 읽는 비트(이 해킹은 04/05 에 가지 않음, dq5flags.py)
 SOLDIER_LEFT = (0x06, 0x01)     # 7E:2196 bit0  탑의 병사가 먼저 돌아감(FC $6280&80)
 REPORTED = (0x07, 0x80)         # 7E:2197 bit7  왕에게 보고하고 여행을 허락받음(FC $6285&04)
+# 41 동굴 병사의 대사 차례(FC $6281 아래 두 비트, 15:9D3E). FC 는 말을 걸면 bit2 를 켜고, 맵에서 필드로 나갈 때
+# (15:9CF9, 1E:9311 이 부름) bit2 가 켜져 있으면 차례를 하나 올린다. 여기서는 동굴 맵에 들어설 때 올린다(동굴의 두
+# 출구가 모두 필드라 같은 일). 셋 다 시험하는 곳이 없는 비트
+CAVE_TALKED = (0x2E, 0x08)      # 7E:21BE bit3  (FC $6281&04)
+CAVE_STEP1 = (0x54, 0x08)       # 7E:21E4 bit3  차례 1(FC $6281&03 = 1)
+CAVE_STEP2 = (0x54, 0x10)       # 7E:21E4 bit4  차례 2
 
 # 보스를 이긴 뒤 FC 가 바꾸는 인물 목록(1C:$841E 등, $6283&80 으로 고름). dq4npcport.port 가 이 상태로 뽑아
 # 「상태-맵」 이름의 새 목록으로 돌려주고, 보스 깃발에 그 목록을 쓴다. 왕좌의 방은 왕의 보고와 함께
@@ -119,9 +125,10 @@ MESSAGES = {
                       ('알렉스', '거기 전사님./정말 고맙습니다.'),
                       ('알렉스', '아, 그렇지./이건 아이들한테/들은 이야기인데요……')),
     'hint': dq4ch1talk.TEXTS[(0x342,)],
-    # 우물 아래의 아이 목소리(FC 1D 이벤트 05·0B, 02EC·02EE)
+    # 우물 아래의 아이 목소리(FC 1D 이벤트 05·09 02EC, 08 02ED, 07·0B 02EE)
     'voice_here': say('이쪽으로 와……'),
     'voice_not': say('그쪽이 아니야.'),
+    'voice_back': say('그쪽으로 가면/돌아가 버려……'),
     # FC 0793 → 예 0794(합류 서술) / 아니요 0795
     'hoimin_ask': say('나는 호이민./지금은 호이미/슬라임이지만/사람이 되는 게 꿈이야.',
                       '있잖아, 사람의/동료가 되면/사람이 될 수/있을까……?', '나를 동료로/삼아 줘!'),
@@ -158,6 +165,19 @@ MESSAGES = {
     **{f'stat_{k}': [ch1.NARR, f'{name} ', NUMBER, '포인트 올랐다!', WAIT_END] for k, name in STATS},
     # FC 02F5
     'cry': say('으앙, 으앙……/살려 줘!'),
+    # 41 동굴 병사(FC 대화 014): 차례 0·1·2 에 0790·0791·0792, 보스 뒤 079F
+    'cave_0': say('오오, @!/나도 이제부터/이무르 마을에/가려던 참이다.'),
+    'cave_1': say('곤란하군……/아무래도 길을/잃은 모양이다……'),
+    'cave_2': say('뭐? 출구까지/데려다주겠다고?', '쓸데없는 참견이다,/@./나는 내 힘으로/나가 보이겠다!'),
+    'cave_after': say('뭐? 벌써 아이들을/구했다고?/으헉!'),
+    # 왕의 방 왕(FC 대화 00B): そらとぶくつ 를 가졌으면 0786, 아니면 0785. 둘 다 060A 가 잇는다
+    'king_room': dq4ch1talk.TEXTS[(0x785, 0x60A)],
+    'king_shoes': say('@여, 잘/돌아왔도다!', '그 자신 있어 보이는/얼굴을 보니 무언가/알아낸 모양이로구나.',
+                      '흠흠……/뭐라, 하늘을 나는/구두라고?/그랬던 것이로구나……', '아무튼 한시라도/빨리 아이들을/데려오도록 하라.',
+                      '그대의 활약을/기대하고 있노라./@여.'),
+    # 탑의 병사(FC 대화 148): 0797 뒤 호이민이 일행에 있으면 0798
+    'tower_soldier': dq4ch1talk.TEXTS[(0x797,)],
+    'tower_soldier_hoimin': dq4ch1talk.TEXTS[(0x797,)][:-1] + [ch1.PAGE] + say('자네가 부럽군.'),
 }
 
 
@@ -170,7 +190,9 @@ def texts(first):
     return {first + k: parts for k, parts in enumerate(MESSAGES.values())}
 
 
-TALKS = ('child', 'alex_night', 'flare_day', 'flare_night', 'hoimin', 'boss', 'soldier', 'king', 'guard')
+TALKS = ('child', 'alex_night', 'flare_day', 'flare_night', 'hoimin', 'boss', 'soldier', 'king', 'guard',
+         'cave_soldier', 'king_room', 'tower_soldier')
+SKY_SHOES = 0xCD                # DQ5 ソラトブクツ(FC そらとぶくつ 6C 자리)
 
 
 def talk_numbers(first_talk):
@@ -188,7 +210,9 @@ def start_messages(first_message):
     m = message_ids(first_message)
     return {(IMURU, FC_CHILD, True): m['child'], (JAIL, FC_ALEX_NIGHT, True): m['alex_night'],
             (FRONT, FC_FLARE_DAY, False): m['flare_day'], (FRONT_NIGHT, FC_FLARE_NIGHT, True): m['flare_night'],
-            (JAIL, FC_JAIL_FLARE, None): NOBODY, (HOIMIN_ROOM, FC_HOIMIN, None): m['hoimin_ask']}
+            (JAIL, FC_JAIL_FLARE, None): NOBODY, (HOIMIN_ROOM, FC_HOIMIN, None): m['hoimin_ask'],
+            (CAVE, FC_CAVE_SOLDIER, None): m['cave_0'], (KING_ROOM, FC_KING_ROOM, None): m['king_room'],
+            (SOLDIER_MAP, FC_SOLDIER, None): m['tower_soldier']}
 
 
 def _msg(m):
@@ -197,6 +221,14 @@ def _msg(m):
 
 def _flag_on(flag):
     return {"op": "flag-on", "index": flag[0], "mask": flag[1]}
+
+
+def _if(flag, then, otherwise=None):
+    out = {"op": "if", "cond": {"code": "1B", "index": flag[0], "mask": flag[1]}, "then": then}
+    # 갈래 안의 조건문은 블록(목록)이어야 한다(dq5talkwrite)
+    if isinstance(otherwise, dict) and otherwise["op"] == "if":
+        otherwise = [otherwise]
+    return {**out, "else": otherwise} if otherwise is not None else out
 
 
 def _flare(m, otherwise):
@@ -225,6 +257,13 @@ def talk_scripts(first_message):
                     "then": _msg(m['king_back']),
                     "else": [_msg(m['king_praise']), _msg(m['king_farewell']), _flag_on(REPORTED)]}]}],
         [_msg(m['guard_wait'])],
+        [_if(BOSS_WON, _msg(m['cave_after']),
+             _if(CAVE_STEP2, _msg(m['cave_2']),
+                 _if(CAVE_STEP1, [_msg(m['cave_1']), _flag_on(CAVE_TALKED)], [_msg(m['cave_0']), _flag_on(CAVE_TALKED)])))],
+        [{"op": "if", "cond": {"code": "11", "item": SKY_SHOES}, "then": _msg(m['king_shoes']),
+          "else": _msg(m['king_room'])}],
+        # FC 는 호이민이 일행에 있는지 보지만, 1장에서 호이민은 합류한 뒤 떠나지 않아 합류 깃발과 같다
+        [_if(HOIMIN, _msg(m['tower_soldier_hoimin']), _msg(m['tower_soldier']))],
     ]
 
 
@@ -232,7 +271,10 @@ def talk_scripts(first_message):
 # 두 벌 인물은 한 시간대에만 둘 수 없다(dq5npcrelocate 가 거부)
 FLARE_SRC, FLARE_SCRIPT = {"list": "05:9180", "index": 0}, "05:9187"
 WALKER_SRC, WALKER_SCRIPT = {"list": "05:9180", "index": 1}, "05:919F"
-VOICE_SRCS = ({"list": "05:9180", "index": 2}, "05:91B7"), ({"list": "05:9180", "index": 3}, "05:91CF")
+VOICE_SRCS = (({"list": "05:9180", "index": 2}, "05:91B7"), ({"list": "05:9180", "index": 3}, "05:91CF"),
+              ({"list": "05:9768", "index": 1}, "05:9788"), ({"list": "05:9768", "index": 2}, "05:979E"),
+              ({"list": "05:9768", "index": 3}, "05:97B8"))
+CAVE_STEP_SRC, CAVE_STEP_SCRIPT = {"list": "05:9768", "index": 4}, "05:97D2"
 HOIMIN_SRC, HOIMIN_SCRIPT = {"list": "05:9180", "index": 4}, "05:91EB"
 KIDNAPPER_SRC, KIDNAPPER_SCRIPT = {"list": "05:9180", "index": 5}, "05:9207"
 KID_SRC, KID_SCRIPT = {"list": "05:9239", "index": 1}, "05:9248"
@@ -306,13 +348,25 @@ def _battle():
 
 # 탑 입구 30/00: 주인공이 이 줄(FC Y)에 오면 마물이 아이를 데리고 계단(09,03) 쪽으로 간다(FC 1D 이벤트 02)
 KIDNAP_ROW, KIDNAP_TO = 0x09, 0x03
-# 목소리가 나는 칸(FC 칸)과 메시지. FC 는 그 칸에서 왼쪽(05)·오른쪽(0B)을 보고 있을 때이고, そらとぶくつ 를
-# 가졌으면 나지 않는다
-VOICES = ((UNDER_WELL, (0x14, 0x0C), 'voice_here'), (HOIMIN_ROOM, (0x14, 0x10), 'voice_not'))
+# 목소리: (맵, 메시지, そらとぶくつ 를 가졌으면 나지 않는지, 칸). 칸은 (FC X, FC Y, 바라보는 방향 0 위·1 오른쪽·2 아래·
+# 3 왼쪽)이고 어느 칸에 그 방향으로 서면 뜬다. FC 는 뜬 뒤 그 무리의 칸을 모두 벗어날 때까지 다시 띄우지 않는다
+# ($627C 비트, 1D:99F1·9A5F 의 표 1D:9A41~·9A7D~). 02ED 의 무리만 구두를 보지 않는다(1D:9A31 CMP #$40)
+VOICES = ((UNDER_WELL, 'voice_here', True, ((0x14, 0x0C, 3), (0x14, 0x0D, 3), (0x0A, 0x19, 2), (0x0B, 0x19, 2),
+                                            (0x0D, 0x26, 1), (0x0D, 0x27, 1))),
+          (UNDER_WELL, 'voice_back', False, ((0x11, 0x0C, 3), (0x11, 0x0D, 3))),
+          (UNDER_WELL, 'voice_not', True, ((0x02, 0x19, 0), (0x03, 0x19, 0), (0x0C, 0x1A, 1), (0x0C, 0x1B, 1),
+                                           (0x10, 0x26, 1), (0x10, 0x27, 1))),
+          (HOIMIN_ROOM, 'voice_here', True, ((0x12, 0x12, 0), (0x13, 0x12, 0), (0x11, 0x2A, 1), (0x11, 0x2B, 1))),
+          (HOIMIN_ROOM, 'voice_not', True, ((0x14, 0x10, 1), (0x14, 0x11, 1), (0x11, 0x1C, 3), (0x11, 0x1D, 3),
+                                            (0x14, 0x1C, 1), (0x14, 0x1D, 1), (0x14, 0x2A, 1), (0x14, 0x2B, 1))))
+FACING = (0x80, 0x10, 0x40, 0x20)   # FC 방향 → DQ5 7E:31E0 위 니블
+CAVE, FC_CAVE_SOLDIER, FC_KING_ROOM, FC_TOWER_SOLDIER = '3A/00', 0x014, 0x00B, 0x148
+KING_ROOM = '36/02'
 
 CODE_AT = 0x5ED000              # 서장 코드(5E:C000) 뒤의 빈 자리
 COMPANION = 0x23AED1            # 동료 표: 종류마다 9바이트(처음 레벨, 최대 레벨, 능력치 넷, HP, MP, 장비 갈래)
 HOIMIN_KIND = 0x05              # ホイミスライム. 이름 0 이 「ホイミン」
+GUEST = 0xC0                    # 일행 기록 +0: bit7 몬스터 동료, bit6 손님
 SCRATCH = 0x7E1BC6              # 7E:1BBE~ 의 DQ5 가 쓰지 않는 자리(서장이 1BC4 까지 씀)
 # 동료가 된 スライム 의 일행 기록(sfc/dq5/tools/lua/dq5warp.lua 의 PARTY_TEMPLATE, 그 밖의 바이트는 동료 표에서)
 PARTY_TEMPLATE = bytes((
@@ -329,7 +383,8 @@ def companion_record(data, kind):
     """동료 표의 처음 값으로 채운 일행 기록 42바이트."""
     c = data[lorom(COMPANION + kind * 9):][:9]
     r = bytearray(PARTY_TEMPLATE)
-    r[0] = 0x80 | kind
+    # bit6(손님)을 켜면 작전이 めいれいさせろ 여도 명령 창을 띄우지 않는다(20:9243). FC 의 호이민도 늘 스스로 싸운다
+    r[0] = GUEST | kind
     r[0x12], r[0x13] = c[0], c[1]
     r[7:11] = c[2:6]
     r[2] = r[0xE] = c[6]
@@ -360,6 +415,37 @@ def _join(record_at):
             bytes((0xC9, 0x04, 0x90, 0x02, 0xA9, 0x03, 0x8F)) + _al(0x7E201E) +           # 걷는 수
             bytes((0xAF,)) + _al(0x7E29EA + HOIMIN_KIND) + bytes((0x09, 0x01, 0x8F)) + _al(0x7E29EA + HOIMIN_KIND))
     return ENTER + body + LEAVE
+
+
+def _voice(cells, shoes, away=False):
+    """인물 명령 05 가 부르는 루틴: 주인공이 cells(FC 칸 X, Y, 31E0 위 니블) 가운데 하나에 그 방향으로 서 있으면
+    A = 0, 아니면 1. 주인공은 반 칸(셀 하나)씩도 서므로, 셀 (2x 또는 2x+1, 2y+1 또는 2y+2)를 FC 칸 (x, y)로 본다. shoes 면 そらとぶくつ 를 가졌을 때 늘 1(대화 조건 11 의 06:B2B7 처럼 $43 에 물건을 두고
+    BRK 88 90. 없으면 $46 bit7 이 켜진다(실측)). away 면 방향과 구두는 보지 않고, 그 칸들을 모두 벗어나야 0."""
+    yes = bytes((0xC2, 0x30, 0xA9, 0x00, 0x00, 0x28, 0x6B))
+    no = bytes((0xC2, 0x30, 0xA9, 0x01, 0x00, 0x28, 0x6B))
+    hit, miss = (no, yes) if away else (yes, no)
+    out = bytearray((0x08, 0xE2, 0x30))                                      # PHP / SEP #$30
+    if shoes and not away:
+        out += DP_SAVE + bytes((0xA9, SKY_SHOES, 0x85, 0x43, 0x64, 0x44, 0x64, 0x45, 0xC2, 0x10,
+                                0x00, 0x88, 0x90, 0xE2, 0x10, 0xA5, 0x46, 0xA8)) + DP_RESTORE
+        out += bytes((0x98, 0x30, len(no))) + no                               # TYA / BMI(없음) 칸 검사
+    for x, y, f in cells:
+        tests = [bytes((0xAF, 0x20, 0x30, 0x7E, 0x29, 0xFE, 0xC9, 2 * x)),                 # X & FE = 2x
+                 bytes((0xAF, 0x80, 0x30, 0x7E, 0x3A, 0x29, 0xFE, 0xC9, 2 * y))]           # (Y-1) & FE = 2y
+        if not away:
+            tests.append(bytes((0xAF, 0xE0, 0x31, 0x7E, 0x29, 0xF0, 0xC9, f)))
+        block = hit
+        for t in reversed(tests):
+            block = t + bytes((0xD0, 0)) + block
+        # BNE 는 모두 이 칸 블록의 끝(다음 칸)으로
+        block = bytearray(block)
+        k = 0
+        for t in tests:
+            k += len(t)
+            block[k + 1] = len(block) - (k + 2)
+            k += 2
+        out += block
+    return bytes(out + miss)
 
 
 def _at(x, y, x_from=False, away=False):
@@ -582,9 +668,11 @@ def native(data=None):
     out, at = bytearray(record), {'record': CODE_AT}
     at['join'] = CODE_AT + len(out)
     out += _join(CODE_AT)
-    for m, (x, y), _ in VOICES:
-        at[m] = CODE_AT + len(out)
-        out += _at(*ch1_cell(x, y))
+    for i, (_, _, shoes, cells) in enumerate(VOICES):
+        dq5 = [(x, y, FACING[f]) for x, y, f in cells]
+        for name, away in ((f'voice{i}', False), (f'voice{i}_away', True)):
+            at[name] = CODE_AT + len(out)
+            out += _voice(dq5, shoes, away)
     at['kidnap_row'] = CODE_AT + len(out)
     out += _at(None, ch1_cell(0, KIDNAP_ROW)[1])
     at['kids_home_row'] = CODE_AT + len(out)
@@ -671,10 +759,22 @@ def scripts(first_message, box_at=None):
             _cmd('21', lo(m['reunion']), hi(m['reunion'])), _cmd('21', lo(m['hint']), hi(m['hint'])),
             _cmd('10', *REUNITED), _cmd('40'), _cmd('16')]},
     ] + [
-        # 보이지 않는 인물이 칸을 기다렸다가 목소리를 띄운다. 52 로 자리를 치워 길을 막지 않는다
-        {"address": script, "commands": [_cmd('28'), _cmd('52'), _cmd('05', *_long(at[where])), _cmd('3F'),
-                                         _cmd('21', lo(m[msg]), hi(m[msg])), _cmd('40'), _cmd('16')]}
-        for (_, script), (where, _, msg) in zip(VOICE_SRCS, VOICES)
+        # 보이지 않는 인물이 칸을 기다렸다가 목소리를 띄우고, 그 칸들을 벗어나면 다시 기다린다. 52 로 자리를 치워
+        # 길을 막지 않는다
+        {"address": script, "commands": [
+            _cmd('28'), _cmd('52'), {**_cmd('05', *_long(at[f'voice{i}'])), "label": "wait"}, _cmd('3F'),
+            _cmd('21', lo(m[msg]), hi(m[msg])), _cmd('40'), _cmd('05', *_long(at[f'voice{i}_away'])),
+            {"op": "03", "args": [], "target": "wait"}]}
+        for i, ((_, script), (_, msg, _, _)) in enumerate(zip(VOICE_SRCS, VOICES))
+    ] + [
+        # 41 동굴에 들어설 때: 병사와 이야기했으면 대사 차례를 하나 올린다(0 → 1 → 2)
+        {"address": CAVE_STEP_SCRIPT, "commands": [
+            _cmd('28'), _cmd('52'), {**_cmd('06', 0x80 | CAVE_TALKED[0], CAVE_TALKED[1]), "target": "done"},
+            _cmd('11', CAVE_TALKED[0], ~CAVE_TALKED[1] & 0xFF),
+            {**_cmd('06', *CAVE_STEP1), "target": "two"}, _cmd('10', *CAVE_STEP1),
+            {"op": "03", "args": [], "target": "done"},
+            {**_cmd('11', CAVE_STEP1[0], ~CAVE_STEP1[1] & 0xFF), "label": "two"}, _cmd('10', *CAVE_STEP2),
+            {**_cmd('16'), "label": "done"}]},
     ] + [
         # 예라고 대답하면(합류 깃발) 일행 기록을 쓰고 사라진다
         {"address": HOIMIN_SCRIPT, "commands": [_cmd('09', 0x80 | HOIMIN[0], HOIMIN[1]), _cmd('37', *_long(at['join'])),
@@ -865,11 +965,17 @@ def npc_lists(ported, report, first_talk):
     new_lists = [{"name": "jail_reunion", "entries": alex + both(walker)},
                  {"name": "jail_after", "entries": after_alex + both(stand)}]
     # 우물 아래: 목소리 인물을 더하고, 호이민은 합류하면 빠진 목록으로
-    for (src, _), (where, (x, y), _) in zip(VOICE_SRCS, VOICES):
-        cx, cy = ch1_cell(x, y)
-        voice = {"from": src, "fields": {"x": cx, "y": cy, "facing": "down", "talk": t['hoimin'], "gfx": 0x01,
-                                         "layer": 0}}
-        lists[where] += [{**voice, "time": "day"}, {**voice, "time": "night"}]
+    for (src, _), (where, _, _, _) in zip(VOICE_SRCS, VOICES):
+        lists[where] += _invisible(src, t['hoimin'])
+    # 41 동굴 병사·왕의 방 왕·탑의 병사는 진행에 따라 대사를 고르는 대화로
+    for mp, fc_talk, name in ((CAVE, FC_CAVE_SOLDIER, 'cave_soldier'), (KING_ROOM, FC_KING_ROOM, 'king_room'),
+                              (SOLDIER_MAP, FC_SOLDIER, 'tower_soldier')):
+        hits = [i for i, p in enumerate(report[mp]) if p["talk"] == fc_talk]
+        if not hits:
+            raise SystemExit(f'{mp}: FC 대화 {fc_talk:03X} 인물이 없음')
+        for i in hits:
+            lists[mp][i] = _same(lists[mp][i], lists[mp][i]["from"], t[name])
+    lists[CAVE] += _invisible(CAVE_STEP_SRC, t['cave_soldier'])
     room = lists[HOIMIN_ROOM]
     hoimins = [i for i, p in enumerate(report[HOIMIN_ROOM]) if p["talk"] == FC_HOIMIN]
     gone = [e for i, e in enumerate(room) if i not in hoimins]
