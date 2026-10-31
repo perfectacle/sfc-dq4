@@ -24,6 +24,51 @@ def _hooked():
     return bytes(data)
 
 
+
+def _run_step(code, ram, slot):
+    """_old_man_step 이 쓰는 명령만 도는 65816 흉내(M·X 8). 직접 페이지 $90 = slot. 돌린 뒤의 ram."""
+    ram, pc, a, x, carry, n = dict(ram), 0, 0, 0, 0, 0
+    long_ = lambda: code[pc + 1] | code[pc + 2] << 8 | code[pc + 3] << 16  # noqa: E731
+    while True:
+        op = code[pc]
+        if op in (0x08, 0x28):
+            pc += 1
+        elif op == 0x6B:
+            return ram
+        elif op == 0xE2:
+            pc += 2
+        elif op == 0xA6:
+            x, pc = slot, pc + 2
+        elif op == 0xBF:
+            a, pc = ram.get(long_() + x, 0), pc + 4
+        elif op == 0x9F:
+            ram[long_() + x], pc = a, pc + 4
+        elif op == 0xAF:
+            a, pc = ram.get(long_(), 0), pc + 4
+        elif op == 0x38:
+            carry, pc = 1, pc + 1
+        elif op == 0x18:
+            carry, pc = 0, pc + 1
+        elif op == 0xFF:
+            v = a - ram.get(long_() + x, 0) - (1 - carry)
+            a, carry, pc = v & 0xFF, int(v >= 0), pc + 4
+        elif op == 0x7F:
+            v = a + ram.get(long_() + x, 0) + carry
+            a, carry, pc = v & 0xFF, int(v > 0xFF), pc + 4
+        elif op == 0xA9:
+            a, pc = code[pc + 1], pc + 2
+        elif op == 0xC9:
+            carry, pc = int(a >= code[pc + 1]), pc + 2
+        elif op in (0x30, 0x90, 0xB0):
+            take = {0x30: a & 0x80, 0x90: not carry, 0xB0: carry}[op]
+            pc += 2 + (code[pc + 1] if take else 0)
+        else:
+            raise AssertionError(f'{op:02X}')
+        n += 1
+        if n > 200:
+            raise AssertionError('끝나지 않음')
+
+
 class NumberTest(unittest.TestCase):
     def test_messages_follow_the_ported_ones(self):
         ids = ev.message_ids(0xD00)
@@ -61,6 +106,30 @@ class NumberTest(unittest.TestCase):
         self.assertEqual(yes_no["cond"], {"code": "05"})
         self.assertEqual(yes_no["then"], [ev._flag_on(ev.OLD_MAN_TRIED), ev._msg(m['old_man_yes'])])
         self.assertEqual(yes_no["else"], ev._msg(m['old_man_no']))
+
+    def test_old_man_walks_only_in_the_visit_he_said_yes(self):
+        (script,) = [s for s in ev.scripts(0xD00) if s["address"] == ev.OLD_MAN_SCRIPT]
+        c = script["commands"]
+        self.assertEqual((c[0]["op"], c[0]["args"], c[0]["target"]), ('06', list(ev.OLD_MAN_TRIED), "stay"))
+        self.assertEqual(c[1], ev._cmd('09', 0x80 | ev.OLD_MAN_TRIED[0], ev.OLD_MAN_TRIED[1]))
+        self.assertIn(ev._cmd('1D', ev.OLD_MAN_INTERVAL), c)
+        _, at = ev.native()
+        step = next(i for i, x in enumerate(c) if x.get("label") == "follow")
+        self.assertEqual(c[step]["args"], ev._long(at['old_man_step']))
+        self.assertEqual((c[step + 1]["op"], c[step + 2]["target"]), ('14', "follow"))
+        self.assertEqual(c[-1]["label"], "stay")
+
+    def test_old_man_steps_one_tile_toward_the_hero(self):
+        def run(man, hero):
+            ram = {0x7E3020: hero[0], 0x7E3080: hero[1], 0x7E3020 + 0x10: man[0], 0x7E3080 + 0x10: man[1]}
+            target = _run_step(ev._old_man_step(), ram, 0x10)
+            return target[0x7E3560 + 0x10], target[0x7E35A0 + 0x10]
+        self.assertEqual(run((44, 25), (54, 25)), (46, 25))     # 오른쪽으로 2셀
+        self.assertEqual(run((44, 25), (30, 31)), (42, 25))     # X 가 멀면 X 부터
+        self.assertEqual(run((44, 25), (45, 35)), (44, 27))     # X 가 붙으면 Y
+        self.assertEqual(run((44, 25), (44, 21)), (44, 23))
+        self.assertEqual(run((44, 25), (46, 27)), (44, 25))     # 붙어 있으면 그 자리
+        self.assertEqual(run((44, 25), (42, 23)), (44, 25))
 
     def test_braggart_jokes_either_way(self):
         m = ev.message_ids(0xD00)
@@ -186,6 +255,18 @@ class FlyTest(unittest.TestCase):
         self.assertEqual(brl + 3 + int.from_bytes(body[brl + 1:brl + 3], 'little'), len(body))  # 끝(LEAVE)으로
         self.assertIn(bytes((0x22, *ev._long(ev.LEVEL_UP))), body)
         self.assertIn(bytes((0xAF, *ev._long(ev.HERO_LEVEL), 0x1A)), body)      # 레벨은 직접 +1
+
+    def test_level_up_plays_the_song_without_waiting_and_restores_the_map_song(self):
+        from dq4chapterbox import ENTER, LEAVE
+        body = ev._level_up()[len(ENTER):-len(LEAVE)]
+        wait = bytes((0xA9, ev.LEVEL_SONG, 0x22, 0x0F, 0xFF, 0x24))
+        play = bytes((0xA9, ev.LEVEL_SONG, 0x22, 0x9A, 0xFE, 0x24))
+        restore = bytes((0xAD, 0x4B, 0x19, 0x29, 0x7F, 0x22, 0x9A, 0xFE, 0x24))
+        self.assertTrue(body.startswith(wait))                       # 앞 레벨의 곡이 끝나기를 기다림
+        self.assertTrue(body.endswith(play))                         # 오른 갈래 끝에서 틀기만
+        done = body.index(restore)
+        self.assertEqual(body[done - len(wait):done], wait)          # 끝 갈래는 기다린 뒤 맵 곡
+        self.assertNotIn(bytes((0x22, 0x18, 0x82, 0x20)), body)      # 20:8218 은 곡이 끝난 뒤 돌아오지 않았다
 
     def test_cage_copies_each_cell_from_the_floor_beside_it(self):
         code = ev._open_cage()
@@ -391,6 +472,11 @@ class ListTest(unittest.TestCase):
 
     def test_yes_no_people_take_the_event_talks(self):
         t = ev.talk_numbers(0x904)
+        olds = [e for e in self.entries(ev.FRONT) if e["fields"]["talk"] == t['old_man']]
+        self.assertEqual([e["from"] for e in olds], [ev.OLD_MAN_SRC])
+        everywhere = [e["from"] for lst in self.lists for e in lst["entries"]] + \
+            [e["from"] for lst in self.new for e in lst["entries"]]
+        self.assertEqual(everywhere.count(ev.OLD_MAN_SRC), 1)
         old = [p for p in self.report[ev.FRONT] if p["talk"] == ev.FC_OLD_MAN]
         self.assertEqual([p["dq5"]["talk"] != t['old_man'] for p in old], [True])
         self.assertIn(t['old_man'], {e["fields"]["talk"] for e in self.entries(ev.FRONT)})
