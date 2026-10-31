@@ -262,7 +262,6 @@ class Bit9HookTests(unittest.TestCase):
         for site, want in zip(dq5field.BIT9_SITES, fw.BIT9_ORIG):
             put(d, site, want)
         put(d, 0x00BBF7, b'\x08' + fw.FAST_ORIG)
-        put(d, 0x00BDC5, b'\x08\x8b\xc2\x30' + fw.FAST_ORIG)
         put(d, fw.MAP_SITE, fw.MAP_ORIG)
         put(d, fw.LAND_SITE - 1, b'\x08' + fw.LAND_ORIG)
         d = apply(d, ft.edits(Rom(bytes(d)), document(blocks=new_blocks(1600)), blocks_at=0x3C8000))
@@ -271,13 +270,12 @@ class Bit9HookTests(unittest.TestCase):
         grids = {0: [5 if i in cells else (i * 37 + i // 256) % 1600 for i in range(fw.SIZE)],
                  1: [5 if i in cells else (i * 11) % 1024 for i in range(fw.SIZE)]}
         out, _ = fw.plane_writes(rom, bytes(d), grids, 0x318000)
-        self.assertEqual([w['at'] for w in out[-4:]], ['00:BBF8', '00:BDC9', '03:CB07', '03:CB1C'])
+        self.assertEqual([w['at'] for w in out[-3:]], ['00:BBF8', '03:CB07', '03:CB1C'])
+        self.assertNotIn('00:BDC9', [w['at'] for w in out])
         self.assertEqual([w['at'] for w in out if '반 바이트' in w['note']], ['32:8000', '33:8000'])
         for w in out:
             put(d, int(w['at'][:2], 16) << 16 | int(w['at'][3:], 16), bytes.fromhex(w['hex']))
         put(d, 0x009000, b'\xc2\x30\x20\xf7\xbb\x6b')
-        put(d, 0x009010, b'\xc2\x30\x20\xc5\xbd\x6b')
-        put(d, 0x00BE14, b'\xab\x28\x60')
         put(d, 0x00BC46, b'\x28\x60')
         put(d, 0x00BC6D, b'\x60')
         put(d, 0x00BC43, b'\x20\x6d\xbc')
@@ -306,11 +304,6 @@ class Bit9HookTests(unittest.TestCase):
             n = grid[(y >> 1) * 256 + (x >> 1)] & (0x1FF if world == 3 else 0xFFFF)
             q = (x & 1) | (y & 1) << 1
             self.assertEqual(cpu.s, s, f'세계 {world} ({x},{y})')
-            # 00:BDC5(번호만): 00:BE14 의 PLB / PLP / RTS 로 돌아와 A = 번호, DB 는 그대로
-            terrain = Cpu(bytes(d), bytes(wram))
-            terrain.dbr = 0x01
-            terrain.jsl(0x009010)
-            self.assertEqual((terrain.a & 0xFFFF, terrain.dbr, terrain.s), (n, 0x01, s), f'세계 {world} ({x},{y}) 지형')
             # 03:CB07: $CE·$D0 을 $90·$92 에 두고 지형 + 20 을 $CD 에, X 는 그대로
             if x < 0x200 and y < 0x200:
                 dot = Cpu(bytes(d), bytes(wram))

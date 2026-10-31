@@ -57,6 +57,7 @@ class FieldPatchTests(unittest.TestCase):
         put(d, fgw.REDRAW_SITE, fgw.REDRAW_ORIG)
         put(d, fgw.REDRAW_RTL, b'\x6b')
         put(d, fgw.WATER_SITE, fgw.WATER_ORIG)
+        put(d, fgw.ANIM_LOAD, fgw.ANIM_LOAD_ORIG)
         for at, want in (fgw.SEARCH_SITE, fgw.PTR_SITE, fgw.NIGHT_SITE, fgw.PAL_BANK_SITE, fgw.WAVE_SITE,
                          *fgw.ATTR_SITES.items(), fgw.REFRESH_SITE, *(x for pair in fgw.W12_LOAD.values() for x in pair)):
             put(d, at, want)
@@ -321,6 +322,56 @@ class FieldPatchTests(unittest.TestCase):
         body = next(w for w in m['writes'] if w['at'] == '35:8000')['hex']
         self.assertEqual(len(bytes.fromhex(body)), fgw.WATER_HOOK_LEN + 12 + 2 * fgw.WATER_BYTES)
         self.assertEqual(fgw.current(self.apply(m))['water'], {'world0': sea, 'world1': sea2, 'world2': sea})
+
+    def test_anim_per_world(self):
+        from w65816 import Cpu
+        folder = Path(self.tmp.name)
+        anim0 = (folder / 'anim.bin').read_bytes()
+        other = bytes(range(256)) * (fgw.ANIM_BYTES // 256)
+        (folder / 'other.bin').write_bytes(other)
+        self.doc['anim_files'] = {'world1': 'other.bin'}
+        with self.assertRaisesRegex(ValueError, '--anim-worlds-at'):
+            fgw.patch(self.rom, self.doc, self.tmp.name)
+        m = fgw.patch(self.rom, self.doc, self.tmp.name, anim_worlds_at=0x368000)
+        sites = {w['at']: w for w in m['writes']}
+        self.assertEqual((sites['2B:8016']['hex'], sites['2B:8016']['orig']), ('5c 00 80 36', 'a2 ff d0 20'))
+        self.assertNotIn('2B:8017', sites)
+        rom = self.apply(m)
+        got = fgw.current(rom)['anim_worlds']
+        sets = [other[k * fgw.ANIM_SET:(k + 1) * fgw.ANIM_SET] for k in range(8)]
+        self.assertEqual((got['world0'], got['world1'], got['world2']),
+                         ([anim0[:fgw.ANIM_SET]] * 8, sets, [anim0[:fgw.ANIM_SET]] * 8))
+        # 훅만 돌린다: 2B:8039 는 RTS(쌓은 801B 로 돌아와 801C), 2B:801C 는 RTL
+        data = bytearray(rom.d)
+        put(data, 0x2B8039, b'\x60')
+        put(data, 0x2B801C, b'\x6b')
+        table = 0x368000 + fgw.ANIM_HOOK_LEN
+        for world, want in ((0, fgw.ANIM), (1, table + 12), (2, fgw.ANIM), (3, fgw.ANIM)):
+            cpu = Cpu(bytes(data), bytes(0x20000))
+            cpu.wram[0x1949], cpu.p, cpu.dbr = world, 0x20, 0x1E
+            cpu.jsl(0x368000, max_steps=200)
+            self.assertEqual((cpu.dbr << 16 | cpu.x, cpu.p & 0x30), (want, 0x20), f'세계 {world}')
+            self.assertIn((0x4374, want >> 16), cpu.io_writes)
+        # 벌을 16개로 늘려 옮긴 롬도 세계 0 은 --anim-at 자리, 2B:8017 은 그대로
+        (folder / 'big.bin').write_bytes(bytes(fgw.ANIM_SET * 16))
+        (folder / 'big2.bin').write_bytes(bytes([7]) * (fgw.ANIM_SET * 16))
+        self.doc['anim_file'], self.doc['anim_files'] = 'big.bin', {'world1': 'big2.bin', 'world2': 'big2.bin'}
+        m = fgw.patch(self.rom, self.doc, self.tmp.name, anim_at=0x358000, anim_worlds_at=0x368000)
+        self.assertNotIn('2B:8017', {w['at'] for w in m['writes']})
+        got = fgw.current(self.apply(m))['anim_worlds']
+        self.assertEqual([len(got[k]) for k in fgw.WORLDS], [16] * 3)
+        self.assertEqual((got['world0'][0], got['world2'][15]), (bytes(fgw.ANIM_SET), bytes([7]) * fgw.ANIM_SET))
+        body = next(w for w in m['writes'] if w['at'] == '36:8000')['hex']
+        self.assertEqual(len(bytes.fromhex(body)), fgw.ANIM_HOOK_LEN + 12 + len(fgw.encode_rle(bytes([7]) * (fgw.ANIM_SET * 16))))
+        self.doc['anim_files'] = {'world1': 'other.bin'}
+        with self.assertRaisesRegex(ValueError, '같은 벌 수'):
+            fgw.patch(self.rom, self.doc, self.tmp.name, anim_at=0x358000, anim_worlds_at=0x368000)
+        self.doc['anim_file'], self.doc['anim_files'] = 'anim.bin', {'world1': 'anim.bin'}
+        with self.assertRaisesRegex(ValueError, '다를 때만'):
+            fgw.patch(self.rom, self.doc, self.tmp.name, anim_worlds_at=0x368000)
+        self.doc['anim_files'] = {'world0': 'other.bin'}
+        with self.assertRaisesRegex(ValueError, 'anim_files'):
+            fgw.patch(self.rom, self.doc, self.tmp.name)
 
 
 class WaterFramesTests(unittest.TestCase):
