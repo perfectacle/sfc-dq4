@@ -1525,8 +1525,9 @@ WtClass:
     dw 0, 0, 0, 0, 0, 0, $30, $32, $32
     dw 1, 1, 1, 1
     dw 2, 2, 2, 2, 2
-; 필드에서 쓰는 슬롯(WtBaseOf·WtUpperOf·WtFits·WqClean 이 $1944 로 고름). 18~20 은 전투 표와 같은 캔버스 밖 1D0~1FF
-; 슬롯이고($20, 위 줄은 글자 줄 바로 뒤라 WtUpperF = 0), 나머지는 캔버스 안에서 글자 줄과 위 줄을 따로 둔다. 가게 팔기·
+; 필드에서 쓰는 슬롯(WtBaseOf·WtUpperOf·WtFits·WqClean 이 $1944 로 고름). 앞 셋은 전투 표의 캔버스 밖 1D0~1FF 슬롯이고
+; ($20, 위 줄은 글자 줄 바로 뒤라 WtUpperF = 0), 메시지 창에 비치지 않으니 먼저 고르게 맨 앞에 둔다. 캔버스 밖이라 WqClean 이
+; 비우지 않는다. 나머지는 캔버스 안에서 글자 줄과 위 줄을 따로 둔다. 가게 팔기·
 ; 맡기기 목록 창은 메시지 창의 화면 9~21열을 덮으므로, 앞쪽 캔버스 슬롯(작은 셋, 중간 셋, 큰 하나)은 두 줄 모두 캔버스 앞
 ; 여덟 줄의 7~19번째 칸에 두어 가나 칸을 넘친 목록 이름이 메시지 창에 비치지 않게 한다. 캔버스 마지막 줄(화면 26줄)은 가게
 ; 사기의 장비 비교 창이 덮지 않아 뺀다. 한 줄에 일곱 칸 넘는 줄은 하나만 들어가 더 가리지는 못하고, DQ4 물건 이름은 6~7열이
@@ -1534,20 +1535,21 @@ WtClass:
 ; 않는다(test_dq4windowname.py).
 WtSlotF:
     dw 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-    dw $010D, $011E, $00A4, $0147, $00A8, $0166, $01F8, $01E4, $01D0
+    dw $01F8, $01E4, $01D0, $010D, $011E, $00A4, $0147, $00A8, $0166
     dw $0122, $00BA, $009D, $00D0
     dw $0096, $00AC, $015C, $0176, $00DA
 WtUpperF:
     dw 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-    dw $00EC, $00B6, $013F, $00C1, $0101, $0143, 0, 0, 0
+    dw 0, 0, 0, $00EC, $00B6, $013F, $00C1, $0101, $0143
     dw $00F0, $0106, $0138, $0152
     dw $016F, $0111, $00F7, $00C6, $0129
 WtClassF:
     dw $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-    dw 0, 0, 0, 0, 0, 0, $20, $22, $22
+    dw $20, $22, $22, 0, 0, 0, 0, 0, 0
     dw 1, 1, 1, 2
     dw 1, 2, 2, 2, 2
-; 슬롯 × 2 → !wt_dirty 의 비트(낮은 워드, 높은 워드). 슬롯 i 는 비트 i 이고, 캔버스 밖 가나 항목은 0
+; 슬롯 × 2 → !wt_dirty 의 비트(낮은 워드, 높은 워드). 슬롯 i 는 비트 i 이고, 캔버스 밖 가나 항목은 0. 1D0~1FF 슬롯(등급 $20)은
+; 전투 표와 필드 표에서 번호가 달라 비트를 두고 WqClean 이 등급을 보고 건너뛴다
 WtBitLo:
     dw 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
     dw $1000, $2000, $4000, $8000, 0, 0, 0, 0, 0
@@ -1555,7 +1557,7 @@ WtBitLo:
     dw 0, 0, 0, 0, 0
 WtBitHi:
     dw 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-    dw 0, 0, 0, 0, $0001, $0002, 0, 0, 0
+    dw 0, 0, 0, 0, $0001, $0002, $0004, $0008, $0010
     dw $0020, $0040, $0080, $0100
     dw $0200, $0400, $0800, $1000, $2000
 
@@ -2512,21 +2514,41 @@ WqClean:
     BCS +
     JMP .next
 +
-    STZ.w !wt_keys,X
-    STZ.w !wt_ages,X
     LDA.w $1944
     CMP #$8952
     BEQ .battle
+    ; 필드의 캔버스 밖 슬롯은 메시지가 덮지 않아 그대로 둔다
+    LDA.l WtClassF,X
+    AND #$0020
+    BEQ +
+    JMP .next
++
+    STZ.w !wt_keys,X
+    STZ.w !wt_ages,X
     ; 필드 캔버스 슬롯은 글자 줄과 위 줄이 떨어져 있다(WtSlotF·WtUpperF)
     LDA.l WtClassF,X
+    AND #$000F
     JSR WqRunBytes
     STA.w !wq_left
+    LDA.l WtUpperF,X
+    BEQ .joined
+    JSR WqCleanRun
     LDA.l WtSlotF,X
     JSR WqCleanRun
-    LDA.l WtUpperF,X
+    BRA .next
+.joined
+    ASL.w !wq_left
+    LDA.l WtSlotF,X
     JSR WqCleanRun
     BRA .next
 .battle
+    LDA.l WtClass,X
+    AND #$0020
+    BEQ +
+    JMP .next
++
+    STZ.w !wt_keys,X
+    STZ.w !wt_ages,X
     LDA.l WtClass,X
     AND #$000F
     JSR WqRunBytes
