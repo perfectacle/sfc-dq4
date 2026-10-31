@@ -255,10 +255,11 @@ def border_rows(y, h):
 
 
 def border_gaps(image, x, y, h):
-    """화면 창 왼쪽 테두리 세로줄(점 x × 8 + 1)에서 흰 점이 없는 줄 수. 피해 흔들림은 화면을 1~2점 위아래·좌우로
-    옮기므로(원래 롬도 같음) 좌우 2점 안에 흰 점이 있으면 테두리가 있는 것으로 본다."""
-    return sum(all(image.getpixel((x * 8 + 1 + d, row)) != WINDOW_WHITE for d in range(-2, 3) if 0 <= x * 8 + 1 + d < 256)
-               for row in border_rows(y, h))
+    """화면 창 왼쪽 테두리 세로줄(점 x × 8 + 1)에서 흰 점이 아닌 줄 수. 피해 흔들림은 화면 전체를 1~2점 좌우로
+    옮기므로(원래 롬도 같음) 세로줄 전체를 같은 d(-2~2)만큼 옮겨 본 것 가운데 가장 적은 수를 낸다. 줄마다 다르게 밀리는
+    물결(BG3 가로 스크롤)은 어느 d 로도 다 맞지 않아 그대로 센다."""
+    return min(sum(image.getpixel((x * 8 + 1 + d, row)) != WINDOW_WHITE for row in border_rows(y, h))
+               for d in range(-2, 3) if 0 <= x * 8 + 1 + d < 256)
 
 
 def safe(screen):

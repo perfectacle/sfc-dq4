@@ -77,6 +77,10 @@ COLOR_LOADS = {0x2B82A3: bytes.fromhex('a9 00 8d 31 21'), 0x2B82F7: bytes.fromhe
 DMA_REGS = (0x00FCFB, 0x00FD00, 0x00FD05, 0x00FD0F, 0x00FD15, 0x00FD3D, 0x00FD42, 0x00FD47, 0x00FD51, 0x00FD57,
             0x00FD83, 0x00FD88, 0x00FD8D, 0x00FD9B, 0x00FDBE, 0x00FDC3, 0x00FDC8, 0x00FDD0, 0x00FDD6)
 DMA_STARTS = (0x00FD25, 0x00FD68, 0x00FDA6, 0x00FDDE)
+# 필드로 돌아갈 때 채널 7 을 끄는 훅 자리(00:87E6 의 SEP #$20 / REP #$10).
+LEAVE_SITE, LEAVE_ORIG = 0x0087EA, bytes.fromhex('e2 20 c2 10')
+# 줄의 수평 귀선이 시작하는 점(H). 그 뒤에 쓴 값은 다음 줄부터 보인다.
+HBLANK_H = 274
 # 채널 7 HDMA 표(7바이트까지, effect_items). GRID 뒤 장면 770개에서 접근이 없던 자리.
 EFFECT_RAM = 0x7EA900
 WAVE_FIRST_LINE, WAVE_END = 55, 239
@@ -156,7 +160,7 @@ def message_sites(x, y, w=MESSAGE_W, h=MESSAGE_H):
 
 
 def assemble(items, at):
-    """[바이트 | ('label', 이름) | ('br', 옵코드, 이름) | ('jsr', 이름) | ('jml', 이름)] → (코드, 이름별 CPU 주소).
+    """[바이트 | ('label', 이름) | ('br', 옵코드, 이름) | ('jsr'·'jmp'·'jml', 이름)] → (코드, 이름별 CPU 주소).
     at 은 첫 바이트의 CPU 주소."""
     labels, pos = {}, 0
     for item in items:
@@ -177,8 +181,8 @@ def assemble(items, at):
             if not -128 <= delta < 128:
                 raise ValueError(f'분기 {item[2]} 가 멂')
             code += bytes([item[1], delta & 0xFF])
-        elif item[0] == 'jsr':
-            code += b'\x20' + (labels[item[1]] & 0xFFFF).to_bytes(2, 'little')
+        elif item[0] in ('jsr', 'jmp'):
+            code += bytes([0x20 if item[0] == 'jsr' else 0x4C]) + (labels[item[1]] & 0xFFFF).to_bytes(2, 'little')
         elif item[0] == 'jml':
             code += b'\x5c' + labels[item[1]].to_bytes(3, 'little')
     if (at & 0xFFFF) + len(code) > 0x10000:
@@ -287,6 +291,8 @@ def effect_items(y):
     #   고르기 22:8FBF 는 1~6 만 씀)에 채널 7 비트를 더한다. vblank 안($4212 bit7)이면 $420C 에도 바로 쓴다. 화면을 그리는
     #   중이고 지금 줄($213D)이 창 맨 위 줄보다 아래면(ベギラゴン 은 130~173줄에서 씀) BG3 비트를 뺀 값을 쓰고, 아니면
     #   원래 값을 쓴다(창 줄은 채널 7 이 BG3 비트를 뺀다).
+    #   전투 NMI 일 때만 켠다. 화면 중간 쓰기는 지금 줄이 창 맨 위 줄 아래이거나, 그 줄의 수평 귀선(H ≥ HBLANK_H) 안일 때
+    #   BG3 비트를 뺀다.
     #   BG3 비트가 없어도 채널 7 은 켜 둔다(표의 두 값이 같아 그대로). 연출이 BG3 비트를 껐다 켰다 하면(メラゾーマ) 다시
     #   켜는 프레임에 채널 7 이 없어 창 위 줄까지 BG3 비트를 빼야 했다. $0D83 은 전투 연출을 처음 둘 때(22:8424·84CB)
     #   0 이 되고, 전투가 끝나면 게임이 $420C 를 다시 써 채널 7 이 꺼진다.
@@ -297,19 +303,32 @@ def effect_items(y):
             fill += b('a9') + bytes([v]) + b('8f') + long(EFFECT_RAM + i)
     store = b''.join(b('8f') + long(EFFECT_RAM + at) for kind, at in slots if kind == 'full')
     items = [('label', 'color'), b('08 c2 20 48 e2 20') + fill + b('a3 01') + store + b('29 fb 8f') + long(masked)
-             + b('a3 01 29 04'), ('br', 0xF0, 'plain'),
+             + b('a3 01 29 04'), ('br', 0xF0, 'far'),
+             # 전투 NMI($1944 = 00:8952)일 때만. 00:8AD3 은 필드·메뉴에서도 도는 PPU 거울 갱신(00:8A45) 안이다.
+             b('af 44 19 7e c9 52'), ('br', 0xD0, 'far'), b('af 45 19 7e c9 89'), ('br', 0xF0, 'go'),
+             ('label', 'far'), ('jmp', 'plain'), ('label', 'go'),
+             # 채널 7 레지스터는 처음 켤 때만 둔다. 전투 중에는 채널 7 을 쓰는 다른 DMA 가 없고, 화면 중간에 이 레지스터를
+             # 다시 쓰자(값은 같아도) 그 프레임 창 줄의 BG3 비트가 빠지지 않은 프레임이 나왔다.
+             b('af 83 0d 7e'), ('br', 0x30, 'set'),
              b('a9 00 8f 70 43 00 a9 31 8f 71 43 00 a9') + bytes([EFFECT_RAM & 0xFF]) + b('8f 72 43 00 a9')
              + bytes([EFFECT_RAM >> 8 & 0xFF]) + b('8f 73 43 00 a9 7e 8f 74 43 00'),
-             b('af 12 42 00'), ('br', 0x10, 'mid'),
+             ('label', 'set'), b('af 12 42 00'), ('br', 0x10, 'mid'),
              b('af 83 0d 7e 09 80 8f 83 0d 7e 8f 0c 42 00'), ('br', 0x80, 'plain'),
              ('label', 'mid'), b('af 83 0d 7e 30 08 09 80 8f 83 0d 7e'), ('br', 0x80, 'mask'),
-             b('af 37 21 00 af 3f 21 00 af 3d 21 00 eb af 3d 21 00 29 01 eb c2 20 c9') + w16(first + 1),
-             b('e2 20'), ('br', 0x90, 'plain'),
+             # 지금 줄 V($213D)·점 H($213C). 줄 S 에 쓴 값은 그 줄 남은 점(창 위 줄)과 다음 줄(창 맨 위 점 줄)부터 보인다.
+             b('af 37 21 00 af 3f 21 00 af 3d 21 00 eb af 3d 21 00 29 01 eb c2 20 c9') + w16(first),
+             b('e2 20'), ('br', 0x90, 'plain'), ('br', 0xD0, 'mask'),
+             b('af 3c 21 00 eb af 3c 21 00 29 01 eb c2 20 c9') + w16(HBLANK_H), b('e2 20'), ('br', 0x90, 'plain'),
              ('label', 'mask'),
              # BG3 비트를 뺀 값을 $2131 에, 부른 쪽이 16비트(스택의 P bit5 가 0)면 높은 바이트를 $2132 에.
              b('af') + long(masked) + b('8f 31 21 00 a3 03 29 20'), ('br', 0xD0, 'm8'),
              b('a3 02 8f 32 21 00'), ('label', 'm8'), b('c2 20 68 28 6b'),
              ('label', 'plain'), b('c2 20 68 28 8f 31 21 00 6b')]
+    # 00:87EA(00:87E6 이 $70 bit7 로 NMI 를 전투·필드로 고르는 곳, M·X 를 두는 SEP/REP 자리): 필드로 돌아갈 때 켜 둔
+    # 채널 7 을 끈다. 전투가 끝난 뒤 필드 쪽 GP DMA(1F:D2AD 등)가 채널 7 을 쓰는데, $420C 에 채널 7 이 남으면 다음
+    # 프레임 HDMA 가 그 레지스터로 낡은 표를 읽는다. 전투 중 $420C 쓰기는 모두 $0D83 과 같았다.
+    items += [('label', 'leave'), b('e2 20 c2 10 a5 70'), ('br', 0x30, 'l9'), b('af 83 0d 7e'), ('br', 0x10, 'l9'),
+              b('29 7f 8f 83 0d 7e 8f 0c 42 00'), ('label', 'l9'), b('6b')]
     for addr, orig in COLOR_LOADS.items():
         items += [('label', f'load{addr:06X}'), orig[:-3], ('jml', 'color')]
     return items
@@ -365,6 +384,7 @@ def effect_hooks(labels):
         out.append((addr, COLOR_ORIG, jsl('color', 4) if labels else COLOR_ORIG))
     for addr, orig in COLOR_LOADS.items():
         out.append((addr, orig, jsl(f'load{addr:06X}', len(orig)) if labels else orig))
+    out.append((LEAVE_SITE, LEAVE_ORIG, jsl('leave', len(LEAVE_ORIG)) if labels else LEAVE_ORIG))
     return out
 
 
@@ -380,15 +400,21 @@ def effects_at(rom):
 
 
 def effect_edits(rom, y, at):
-    """창 맨 위 줄 y 에 맞춘 연출 막기 코드와 훅. y 가 21 이면 훅 자리를 원래 바이트로 둔다."""
+    """창 맨 위 줄 y 에 맞춘 연출 막기 코드와 훅. y 가 21 이면 훅 자리를 원래 바이트로 둔다. 이미 걸린 훅은 지금 롬의
+    연출 막기 코드(창 줄마다 짠 꼴 가운데 하나)의 입구로 가는 JSL 이어야 한다."""
     out, labels = [], None
     if y < MESSAGE_Y:
         code, labels = assemble(effect_items(y), at)
         out.append((at, code, None, 'message window: 높인 창을 주문 연출에서 지킴'))
+    current = effects_at(rom)
+    ours = set()
+    if current is not None:
+        for line in range(MESSAGE_BOTTOM + 1 - MESSAGE_MAX_H, MESSAGE_Y):
+            ours |= {hook for _, _, hook in effect_hooks(assemble(effect_items(line), current)[1])}
     for addr, orig, new in effect_hooks(labels):
         old = read(rom, addr, len(orig))
-        if old != orig and not (old[0] == 0x22 and set(old[4:]) <= {0xEA}):
-            raise ValueError(f'{addr >> 16:02X}:{addr & 0xFFFF:04X}: 연출 막기 훅 자리가 원래 꼴이 아님')
+        if old != orig and old not in ours:
+            raise ValueError(f'{addr >> 16:02X}:{addr & 0xFFFF:04X}: 연출 막기 훅 자리가 원래 꼴도, 이 도구의 훅도 아님')
         out.append((addr, new, old, 'message window: 연출 막기 훅'))
     for addr in DMA_REGS:
         old = read(rom, addr, 3)
