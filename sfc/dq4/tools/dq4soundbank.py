@@ -224,6 +224,33 @@ def treble(pcm, db, loop_start=None):
     return np.concatenate((boost(pcm[:loop_start], False) if loop_start else pcm[:0], boost(pcm[loop_start:], True)))
 
 
+WAVE_SAMPLES = 32
+
+
+def wave_resource(path, region, length=WAVE_SAMPLES):
+    """반복 구간이 기준음(base) 주기를 되풀이하는 짧은 음정 샘플을 한 주기 length 표본의 반복 샘플로. (자원, 보고서).
+    NDS UI·전투 효과음의 작은 파형(수 KB)이 수십 바이트가 된다. 잡음을 줄이려고 반복 구간의 주기들을 평균한다."""
+    pcm, rate, loop = read_wave(path)
+    if loop is None:
+        raise ValueError(f'{path.name}: wave samples must loop')
+    period = rate / (440 * 2 ** ((region['base'] - 69) / 12))
+    segment = pcm[loop[0]:loop[1]]
+    cycles = int(len(segment) // period)
+    if cycles < 1:
+        # 반복 구간이 기준음 한 주기보다 짧으면 그 구간 자체가 (더 높은 음의) 한 주기다
+        period, cycles = len(segment), 1
+    cycle = resample_segment(segment[:round(cycles * period)], cycles * length).reshape(cycles, length).mean(axis=0)
+    converted = np.concatenate((np.zeros(16), np.clip(np.rint(cycle), -16384, 16383))).astype('<i2')
+    encoded = encode_hw(converted.tolist(), 16)
+    effective_rate = rate * length / period
+    adsr1, adsr2 = approximate_adsr(region)
+    pitch = pitch_word(effective_rate, region['base'])
+    report = {'source': path.name, 'base_midi': region['base'], 'cycles_averaged': cycles, 'samples': len(converted),
+              'brr_bytes': len(encoded), 'pitch': pitch, 'snr_db': round(hw_snr(converted, encoded), 3),
+              'envelope': {'adsr1': adsr1, 'adsr2': adsr2}}
+    return brr.resource(encoded, 1, adsr1=adsr1, adsr2=adsr2, pitch=pitch), report
+
+
 def convert_sample(path, region, *, max_rate=12000, cache_dir=None, seconds=None, envelope=False, treble_db=0.0):
     pcm, rate, loop = read_wave(path)
     if seconds is not None and loop is None:

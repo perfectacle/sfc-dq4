@@ -184,7 +184,7 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
           level_db=None, programs=None, set_records=None, keep_regions=None, track_db=None, yield_tracks=None, gain_db=None, gain_all=0.0,
           nds_envelope=(), nds_release=(), treble_db=None, sample_rates=None,
           fast_receive=False, chains=(), holds=(), early_song=False, load_pump=False, vehicle_song=False,
-          keep_samples=False, prefetch=None, release_failed=False, unpin=(), effects=None):
+          keep_samples=False, prefetch=None, release_failed=False, unpin=(), effects=None, effect_waves=None):
     """stream 은 {곡 자리: 곡 앞 샘플 바이트 상한}. 그 곡은 샘플 일부를 곡이 울리는 동안 보낸다(transfer_plan).
 
     stream_ticks 는 {곡 자리: 틱}. 곡 앞 바이트 상한을 곡이 처음 그 틱 안에 쓰는 샘플의 합으로 정하고, 도착 어림보다
@@ -262,7 +262,14 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
                     if x not in replaced and x not in unpin}
     pinned_sizes |= {slot: size + MARGIN for slot, _, _, _, size, _ in plans if slot in pinned}
     # 바꾼 효과음 시퀀스는 늘 두는 채로 커지므로, 곡 예산을 셈하기 전에 그 크기를 넣는다
-    effect_sequences, effect_report = sfx_port.build_effects(data, assets, effects, patch.sequence_bytes) if effects else ({}, {})
+    wave_payloads, waves, wave_report = sfx_port.wave_resources(assets, effect_waves) if effect_waves else ({}, {}, {})
+    resident_sizes |= {x: len(p) - 2 for x, p in wave_payloads.items() if x in resident_sizes}
+    effect_sequences, effect_extras, effect_report = (
+        sfx_port.build_effects(data, assets, effects, patch.sequence_bytes,
+                               {seq: records[seq][2:] for seq, _ in effects}, waves) if effects else ({}, {}, {}))
+    if any(x not in resident for more in effect_extras.values() for x in more):
+        raise ValueError('sound effects may only add resident samples to their records')
+    growth += sum(map(len, effect_extras.values()))
     pinned_sizes |= {seq: len(new) for seq, new in effect_sequences.items()}
 
     def make_bank(score, budget, limit, loose, overrides, keep=(), envelope=False, treble=0.0, rates_of=None):
@@ -525,7 +532,7 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
         raise ValueError('every chained song must be a replaced song (install numbers the bodies in slot order)')
     for seq, new in effect_sequences.items():
         size, first, *ids = records[seq]
-        replacements[seq] = patch.Replacement(new, tuple(ids), first)
+        replacements[seq] = patch.Replacement(new, tuple(ids) + tuple(effect_extras.get(seq, ())), first)
     pinned = list(pinned) + list(effect_sequences)
 
     def install():
@@ -535,7 +542,7 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
                              fast_receive=fast_receive, chains=mains, chain_late=chain_late,
                              hold=bool(holds), early_song=early_song, load_pump=load_pump,
                              vehicle_song=vehicle_song, keep_samples=keep_samples,
-                             release_failed=release_failed, unpin=tuple(unpin))
+                             release_failed=release_failed, unpin=tuple(unpin), resident_waves=wave_payloads)
 
     rom, install_report = install()
     # 넣은 롬의 실제 자리로 덧붙일 샘플을 다시 고른다. 앞부분은 처음 고른 바이트(상한)를 받는 길이로 나눴으므로 그 안에서만
@@ -565,7 +572,7 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
         except ValueError as exc:
             unreplaced[f'{song:02X}'] = {'error': str(exc)}
     install_report['unreplaced_songs'] = unreplaced
-    return rom, {'install': install_report, 'songs': reports, 'effects': effect_report}
+    return rom, {'install': install_report, 'songs': reports, 'effects': effect_report, 'effect_waves': wave_report}
 
 
 def main():
@@ -632,6 +639,9 @@ def main():
     ap.add_argument('--prefetch', action='append', default=[], metavar='VEHICLE=MAP',
                     help='append front samples of MAP song to VEHICLE song record so they load while riding and survive dismount '
                          '(needs --keep-samples)')
+    ap.add_argument('--sfx-wave', action='append', default=[], metavar='ID=SAMPLE[,SAMPLE...]',
+                    help='put a one-cycle wave of the first NDS sample into resident sound effect sample ID (20..22); '
+                         'sound effects using any listed sample play it')
     ap.add_argument('--sfx', action='append', default=[], metavar='SEQ-BRANCH=NDS',
                     help='replace a DQ5 sound effect branch (0C SEQ BRANCH) with an NDS noise sound effect (dq4soundsfx)')
     ap.add_argument('--unpin', action='append', default=[], metavar='SONG',
@@ -701,6 +711,8 @@ def main():
                         release_failed=args.release_failed, unpin=[int(x, 16) for x in args.unpin],
                         effects={(int(k.split('-')[0], 16), int(k.split('-')[1], 16)): v
                                  for k, v in (x.split('=') for x in args.sfx)},
+                        effect_waves={int(k, 16): [n if n.endswith('.wav') else n + '.wav' for n in v.split(',')]
+                                      for k, v in (x.split('=') for x in args.sfx_wave)},
                         prefetch={int(v, 16): int(m, 16) for v, m in (x.split('=') for x in args.prefetch)})
     from dq5build import make_ips
     from kr_patch import ips

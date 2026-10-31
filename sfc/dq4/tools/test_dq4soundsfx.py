@@ -34,6 +34,16 @@ class SpliceTests(unittest.TestCase):
         self.assertEqual(notes(seq, 1), [[(0, 0x05, False)], []])
         self.assertEqual(notes(seq, 0), [[(0, 0x20, False)], [(0, 0x22, False)]])
 
+    def test_same_body_is_kept_once_and_replaced_original_is_dropped(self):
+        body = ['L0006:', '  note 05 len 02', '  end']
+        one = sfx.splice(ORIGINAL, {1: (['L0006'], body)})
+        both = sfx.splice(ORIGINAL, {0: (['L0006'], body), 1: (['L0006'], body)})
+        self.assertEqual(notes(both, 0), notes(both, 1))
+        self.assertEqual(notes(both, 1), notes(one, 1))
+        # 갈래를 모두 바꾸면 원래 본문(음 20·21)이 남지 않는다
+        self.assertNotIn(0x21, both)
+        self.assertLess(len(both), len(one) + 3)
+
 
 class NoiseTests(unittest.TestCase):
     def test_noise_frequency_rises_with_the_note(self):
@@ -46,13 +56,34 @@ class NoiseTests(unittest.TestCase):
                      'uid': i} for i, t in enumerate((0, 4, 8))]
         score = {'tempo': 120, 'ticks_per_quarter': 48, 'end_tick': 16, 'timeline': timeline, 'volume': 127,
                  'instruments': {'20': {'type': sfx.NOISE_TYPE, 'regions': []}}}
-        entries, body, dropped = sfx.convert_branch(score, sfx.noise_program_map(score))
-        self.assertEqual(dropped, 0)
+        entries, body, dropped, more = sfx.convert_branch(score, sfx.noise_program_map(score))
+        self.assertEqual((dropped, more), (0, []))
         self.assertIn('  noise_on', body)
         self.assertNotIn(['rest', 'len', '30'], [ln.split() for ln in body])
         seq = sfx.splice(ORIGINAL, {1: (entries, body)})
         self.assertEqual([n for _, n, noise in notes(seq, 1)[0]],
                          [port.noise_frequency(60 + t) for t in (0, 4, 8)])
+
+
+class WaveTests(unittest.TestCase):
+    SCORE = {'tempo': 120, 'ticks_per_quarter': 48, 'end_tick': 16, 'volume': 127,
+             'timeline': [{'op': 'note', 'tick': 0, 'ch': 'track0', 'note': 60, 'velocity': 100, 'gate': 2, 'program': 5,
+                           'uid': 0}],
+             'instruments': {'5': {'type': 'PCM', 'regions': [{'lo': 0, 'hi': 127, 'sample': 'w.wav', 'base': 60}]}}}
+
+    def test_wave_programs_map_to_resident_waves_and_others_refuse(self):
+        self.assertEqual(sfx.noise_program_map(self.SCORE, {'w.wav': 0x22}),
+                         {5: [{'lo': 0, 'hi': 127, 'sample': 0x22}]})
+        self.assertIsNone(sfx.noise_program_map(self.SCORE, {'other.wav': 0x22}))
+
+    def test_instrument_follows_the_record_order_and_adds_missing_waves(self):
+        program_map = sfx.noise_program_map(self.SCORE, {'w.wav': 0x22})
+        _, body, _, more = sfx.convert_branch(self.SCORE, program_map, [0x1F, 0x20, 0x22])
+        self.assertIn('  instrument 02', body)
+        self.assertEqual(more, [])
+        _, body, _, more = sfx.convert_branch(self.SCORE, program_map, [0x1F])
+        self.assertIn('  instrument 01', body)
+        self.assertEqual(more, [0x22])
 
 
 if __name__ == '__main__':

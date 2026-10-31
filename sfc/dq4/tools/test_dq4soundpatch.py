@@ -6,6 +6,7 @@ import unittest
 from unittest import mock
 
 import dq4soundpatch as patch
+import dq5brrenc as brr
 from dq5song import assemble
 from dq5map import lorom
 from dq5spc import RESIDENT_SAMPLES, SAMPLE_COUNT, SAMPLES, SEQUENCE_COUNT, SEQUENCES
@@ -132,6 +133,16 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(patch.resident_samples(self.base), [0x00, 0x05, 0x1F, 0x22, 0x20, 0x21])
         self.assertEqual(patch.read_sets(out)[0x1D], bytes([2, 2, 0x1F, 0x05]))
         self.assertEqual(report['songs'][0]['spc_budget']['streamed_while_playing'], [])
+
+    def test_resident_wave_replaces_only_a_resident_effect_wave_no_larger_than_before(self):
+        small = brr.resource(bytes(18), 1, pitch=0x0831)
+        out, _ = patch.install(self.base, {2: self.item}, resident_waves={0x20: small})
+        self.assertEqual(patch.sample_size(out, 0x20), len(small) - 2)
+        with self.assertRaises(ValueError):
+            big = brr.resource(bytes(patch.sample_size(self.base, 0x20)), 1)
+            patch.install(self.base, {2: self.item}, resident_waves={0x20: big})
+        with self.assertRaises(ValueError):
+            patch.install(self.base, {2: self.item}, resident_waves={0x05: small})
 
     def test_fast_receive_adds_ff00_block_and_driver_jump(self):
         out, report = patch.install(self.base, {0x02: patch.Replacement(melody(), (0x03,))}, fast_receive=True)

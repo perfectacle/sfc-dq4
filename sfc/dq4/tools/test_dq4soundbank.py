@@ -1,5 +1,6 @@
 import math
 from pathlib import Path
+import struct
 import tempfile
 import unittest
 import wave
@@ -138,3 +139,30 @@ class FitTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+def write_looped_wave(path, pcm, rate, loop):
+    """smpl 청크로 정방향 반복을 단 16-bit 모노 WAV."""
+    body = np.asarray(pcm, dtype='<i2').tobytes()
+    smpl = struct.pack('<9I', 0, 0, 0, 60, 0, 0, 0, 1, 0) + struct.pack('<6I', 0, 0, loop[0], loop[1] - 1, 0, 0)
+    fmt = struct.pack('<HHIIHH', 1, 1, rate, rate * 2, 2, 16)
+    chunks = b'fmt ' + struct.pack('<I', len(fmt)) + fmt + b'data' + struct.pack('<I', len(body)) + body
+    chunks += b'smpl' + struct.pack('<I', len(smpl)) + smpl
+    path.write_bytes(b'RIFF' + struct.pack('<I', 4 + len(chunks)) + b'WAVE' + chunks)
+
+
+class WaveResourceTests(unittest.TestCase):
+    def test_one_cycle_keeps_the_base_note_pitch(self):
+        rate, base = 44100, 48
+        period = rate / (440 * 2 ** ((base - 69) / 12))
+        t = np.arange(4000)
+        pcm = np.rint(np.sin(2 * np.pi * t / period) * 9000)
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / 'w.wav'
+            write_looped_wave(path, pcm, rate, (400, 4000))
+            resource, report = bank.wave_resource(path, {'base': base, 'lo': 0, 'hi': 127})
+        self.assertEqual(report['samples'], 16 + bank.WAVE_SAMPLES)
+        self.assertLess(len(resource), 40)
+        # 한 주기 32표본을 기준음 주파수로 울리는 음높이(같은 식으로 만든 긴 샘플의 음높이와 같음)
+        self.assertEqual(report['pitch'], bank.pitch_word(bank.WAVE_SAMPLES * rate / period, base))
+        self.assertGreater(report['snr_db'], 20)
