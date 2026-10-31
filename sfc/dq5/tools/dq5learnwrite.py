@@ -418,9 +418,8 @@ def patch(rom, doc, learn_at=None, stub_at=None, lists_at=None, spell_rom=None):
                 integer(slot, 0, len(new[owner][name]) - 2, f'join 칸 {entry} {name} slot')
                 mask |= 1 << (shift + slot)
         at = JOIN + entry * JOIN_SIZE + 0x23
-        # 몬스터 칸(80·81)은 쓰이는 때를 확인하지 못했고, 몬스터 합류(21:81E5)는 +23~+25 를 습득 표 결과로 덮는다(코드 읽기).
-        require(owner[0] == 'person' or mask == int.from_bytes(read(rom, at, 3), 'little') & 0xFFFFF,
-                f'join 칸 {entry}: 동료 몬스터 칸은 바꾸지 않음(쓰임 미확인)')
+        # 몬스터 칸 11·12 는 21:8042 가 A = 80·81 로 넣을 때(06:CA89·06:B4CC) 그대로 베낀다(실측). 습득 표로 동료가 되는
+        # 몬스터 합류(21:81E5)는 이 칸을 쓰지 않는다
         high = read(rom, at + 2, 1)[0] & 0xF0
         put(at, mask.to_bytes(3, 'little')[:2] + bytes([mask >> 16 | high]), '일행에 들 때 습득 비트')
     writes = changed_writes(expected, rom, '주문 습득·목록')
