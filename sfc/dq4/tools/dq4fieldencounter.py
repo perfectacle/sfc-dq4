@@ -277,8 +277,10 @@ def field_rate_index(prg, dq5, base, kinds=LAND_KINDS):
 
 def terrain_rates(prg, dq5):
     """dq5patch/1 write of the DQ5 day and night terrain rates: each terrain nibble of the DQ5 blocks the FC kinds
-    0-7 borrow (dq4fieldport.BLOCKS) takes the FC day and night factor of that kind; the nibbles only other kinds
+    0-7 borrow (dq4fieldport.BLOCKS) takes the FC day and night factor of that kind times dq4balance.ENCOUNTER
+    (field_rate_index still matches FC's own factor, so the port fights less than FC); the nibbles only other kinds
     borrow are 0. A nibble shared by kinds below and above 8 keeps the factor of the kind below 8."""
+    import dq4balance
     import dq4fieldport
     from dq5field import terrain
     from dq5map import Rom
@@ -295,9 +297,9 @@ def terrain_rates(prg, dq5):
         if len(fc) > 1:
             raise ValueError(f"terrain {t:X}: FC kinds {fc} share it")
         for half, table in enumerate((enc.TERRAIN_DAY, enc.TERRAIN_NIGHT)):
-            new[half * TERRAINS + t] = enc.rd(prg, table + fc[0]) if fc else 0
+            new[half * TERRAINS + t] = dq4balance.chance(enc.rd(prg, table + fc[0])) if fc else 0
     return {"at": f"{TERRAIN_RATES >> 16:02X}:{TERRAIN_RATES & 0xFFFF:04X}", "hex": new.hex(" ").upper(),
-            "orig": old.hex(" ").upper(), "note": "지형별 조우율(낮·밤)을 FC 지형 배수로"}
+            "orig": old.hex(" ").upper(), "note": "지형별 조우율(낮·밤)을 FC 지형 배수의 3/4 로"}
 
 
 def _lorom(addr):

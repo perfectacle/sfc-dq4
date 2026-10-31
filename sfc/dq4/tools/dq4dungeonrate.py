@@ -3,12 +3,13 @@
 DQ5 judges a fight on every 8-pixel cell with a chance that grows with the cells since the last fight (23:E7C2,
 dq4fieldencounter.dq5_chance); FC judges one on every 16-pixel block with base x the step factor (2, 4, 8 on the
 first three steps after a fight or a map entry, then 16) x 0F >> 8 (18:$9CCC, $9F9B), and on a step whose cell
-region ($7140 bit7-5, the room a block belongs to) differs from the step before with 55 out of 256 ($9FA0). The hook
+region ($7140 bit7-5, the room a block belongs to) differs from the step before with 55 out of 256 ($9FA0). The port
+takes each of these chances times dq4balance.ENCOUNTER (a deliberate change, fewer fights). The hook
 takes 23:E8B7, where 23:E7C2 holds its chance in $00/$01 and the zone's record index (zone x 16) in X:
 
   in a zone of the FC dungeons, only every second cell walked is an FC step (two 8-pixel cells make a block, and a
   hero stepping to and fro across a block edge walks no farther than FC's one step); the other cells have chance
-  0. On a step the count goes up (at most 4) and the chance is the zone's for that count, or REGION_CHANCE when
+  0. On a step the count goes up (at most 4) and the chance is the zone's for that count, or PORT_REGION_CHANCE when
   the region of the hero's FC block (7E:3020 AND FE, 7E:3080 - 1 AND FE, as dq4wellswitch) differs from the last
   step's. A drop of $1A9A (the cells since the last fight, which a fight and a map entry reset) or another map
   starts over on an odd cell: count 0, this block's region. Other zones go on as before.
@@ -26,12 +27,14 @@ for path in (TOOLS, FC_TOOLS):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+import dq4balance  # noqa: E402
 from dq4environmentrom import _Asm  # noqa: E402
 
 SITE, ORIG = 0x23E8B7, bytes((0xA5, 0x01, 0xD0, 0x0B))   # LDA $01 / BNE $E8C6, M 8-bit, X 16-bit, DB 23
 ON, CERTAIN = 0x23E8BB, 0x23E8C6
 ZONE_RECORD = 0x16          # 23:E862: X = zone x 16
 REGION_CHANCE = 0x55        # 18:$9FA0
+PORT_REGION_CHANCE = dq4balance.chance(REGION_CHANCE)
 FC_TERRAIN = 0x0F           # 18:$9F9B: every dungeon tile
 STEPS = 4
 HERO_X, HERO_Y = 0x7E3020, 0x7E3080
@@ -43,10 +46,11 @@ CELLS = 0x7E1A9A
 
 
 def chances(prg, base):
-    """FC's chance on steps 1..STEPS after a fight in a dungeon zone of base rate `base`."""
+    """The port's chance on steps 1..STEPS after a fight in a dungeon zone of base rate `base`: FC's times
+    dq4balance.ENCOUNTER."""
     import dq4encounter
     factor = [dq4encounter.rd(prg, dq4encounter.AFTER_BATTLE + n) for n in range(3)] + [0x10]
-    return [base * f * FC_TERRAIN >> 8 for f in factor]
+    return [dq4balance.chance(base * f * FC_TERRAIN >> 8) for f in factor]
 
 
 def zone_rows(prg, dq5_zones):
@@ -95,7 +99,7 @@ def code(at, zones, maps):
     def cmp(name):
         return (0xCF, *ram[name])
 
-    asm.label("region_chance").b(REGION_CHANCE)
+    asm.label("region_chance").b(PORT_REGION_CHANCE)
     asm.label("zones")
     for area, steps in zones:
         asm.b(*(area * ZONE_RECORD).to_bytes(2, "little"), *steps)
@@ -168,14 +172,14 @@ def writes(at, prg, place, dq5_zones, fc_maps):
         raise ValueError("dungeon step chance crosses a bank")
     return [
         {"at": _cpu(at), "hex": data.hex(" ").upper(),
-         "note": "던전 조우를 FC 처럼 블록 걸음마다, 구역이 바뀐 걸음은 55"},
+         "note": "던전 조우를 FC 처럼 블록 걸음마다(확률은 FC 의 3/4), 구역이 바뀐 걸음은 40"},
         {"at": _cpu(SITE), "hex": bytes((0x5C, *labels["hook"].to_bytes(3, "little"))).hex(" ").upper(),
          "orig": ORIG.hex(" ").upper(), "note": "조우 확률 비교 앞을 FC 던전 걸음 훅으로"},
     ]
 
 
 def chance_offsets(at, zones):
-    """File offsets (LoROM) of REGION_CHANCE and of each zone row's chances, for a check's ROMPATCH."""
+    """File offsets (LoROM) of PORT_REGION_CHANCE and of each zone row's chances, for a check's ROMPATCH."""
     base = (at >> 16 & 0x7F) * 0x8000 + (at & 0x7FFF)
     return base, [base + 1 + i * (2 + STEPS) + 2 for i in range(len(zones))]
 
@@ -199,7 +203,7 @@ def _cpu(addr):
 class Walk:
     """The hook's state machine in Python, for a check: step() is the chance the hook leaves in $00 at 23:E8BB."""
 
-    def __init__(self, zones, maps, region_chance=REGION_CHANCE):
+    def __init__(self, zones, maps, region_chance=PORT_REGION_CHANCE):
         self.zones = {area * ZONE_RECORD: steps for area, steps in zones}
         self.maps = {(group, number): (width, runs) for group, number, width, runs in maps}
         self.region_chance, self.state = region_chance, None
