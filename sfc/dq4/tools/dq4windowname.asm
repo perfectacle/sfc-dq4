@@ -147,7 +147,8 @@ org $24A5E9
 !wt_lastx = $3D54           ; 원래 루틴이 마지막으로 찍는 바이트의 DP 자리
 !wt_sp    = $3D60           ; 원래 스택 포인터(7E)
 !wt_cols  = $1D84           ; 그릴 열 수
-!wt_base  = $1D86           ; 빌린 첫 칸. 글자 줄 열 칸 다음에 위 줄 열 칸
+!wt_base  = $1D86           ; 빌린 첫 칸(글자 줄)
+!wt_ubase = $3DCE           ; 위 줄 첫 칸. 가나 항목·전투 슬롯·전용 칸은 글자 줄 열 칸 다음, 필드 캔버스 슬롯은 WtUpperF
 !wt_ptr   = $1D88           ; 그림 자리(뱅크 !wt_bank 안)
 !wt_len   = $1D8A           ; 원래 문자열 길이($00)
 !wq_count = $3D62           ; 우리 전송 대기열 항목 수(7E, NMI 가 보내고 0 으로)
@@ -1224,10 +1225,12 @@ WtAlloc:
     PLX
     JSR WtBaseOf
     STA.w !wt_base
+    JSR WtUpperOf
+    STA.w !wt_ubase
     CLC
     RTS
 
-; 슬롯 X 의 첫 칸(A). 가나 항목은 RAM, 캔버스 슬롯은 WtSlot
+; 슬롯 X 의 첫 칸(A). 가나 항목은 RAM, 캔버스 슬롯은 필드면 WtSlotF, 전투면 WtSlot
 WtBaseOf:
     CPX.w #!wt_nkana*2
     BCS +
@@ -1240,7 +1243,40 @@ WtBaseOf:
     AND #$00FF
     RTS
 +
+    LDA.w $1944
+    CMP #$8952
+    BEQ +
+    LDA.l WtSlotF,X
+    RTS
++
     LDA.l WtSlot,X
+    RTS
+
+; 슬롯 X 의 등급(A). 필드면 WtClassF, 전투면 WtClass
+WtClassOf:
+    LDA.w $1944
+    CMP #$8952
+    BEQ +
+    LDA.l WtClassF,X
+    RTS
++
+    LDA.l WtClass,X
+    RTS
+
+; 슬롯 X 의 위 줄 첫 칸(A). WtBaseOf 바로 뒤에 부르고 !wt_base·!wt_cols 가 정해져 있어야 한다
+WtUpperOf:
+    CPX.w #!wt_nkana*2
+    BCC +
+    LDA.w $1944
+    CMP #$8952
+    BEQ +
+    LDA.l WtUpperF,X
+    BEQ +
+    RTS
++
+    LDA.w !wt_base
+    CLC
+    ADC.w !wt_cols
     RTS
 
 ; 슬롯 X 가 이번 크기에 맞고 이 장면에서 쓸 수 있으면 C = 1. 가나 항목은 필드에서 칸 수가 열 수 × 2 이상이면
@@ -1264,15 +1300,12 @@ WtFits:
     SEC
     RTS
 .fixed
-    LDA.l WtClass,X
-    CMP #$0010
-    BCC +
     LDA.w !wt_field
-    BEQ ++
+    BEQ .battle
     ; 캔버스 밖 1D0~1FF 의 슬롯은 전용 칸 문구가 하나도 안 보일 때만(일부만 가려진 명령 창의 문구를 덮지 않게)
-    LDA.l WtClass,X
+    LDA.l WtClassF,X
     AND #$0020
-    BEQ .size
+    BEQ +
     PHX
     LDX #$000E
 -
@@ -1282,14 +1315,19 @@ WtFits:
     DEX
     BPL -
     PLX
-    BRA .size
+    BRA +
 .busy
     PLX
     BRA ++
-.size
-    LDA.l WtClass,X
-    AND #$000F
 +
+    LDA.l WtClassF,X
+    AND #$000F
+    BRA .cmp
+.battle
+    LDA.l WtClass,X
+    CMP #$0010
+    BCS ++
+.cmp
     CMP.w !wt_need
     BCC ++
     SEC
@@ -1472,13 +1510,11 @@ WtOcc:
 WtOccBit:
     db $01, $02, $04, $08, $10, $20, $40, $80
 
-; 슬롯 첫 칸과 등급. 0 = 작은 슬롯 8칸(네 열), 1 = 중간 슬롯 14칸(일곱 열), 2 = 큰 슬롯 20칸(열 열), $10 을 더하면 필드에서만
-; 쓰는 슬롯. 맞는 크기가 모자라면 더 큰 슬롯을 빌리고, 빈 슬롯은 표 순서로 고른다. 가나 칸(010~073) 슬롯을 크기와 상관없이
-; 모두 앞에 둔다. 가나 칸은 메시지 캔버스 밖이라 메시지와 함께 뜨는 창(교회·가게 팔기 목록 등)의 글자가 메시지 창에 비치지
-; 않는다. 가나 칸은 DQ4 물건 이름(6~7열이 가장 많음)에 맞춰 중간을 많이 두고, 「누구의」 창 뒤 강함 보기(문구 25개 남짓)가 들어가게 캔버스 안은 작은 슬롯을 늘려 모두 26개. 전투 메시지와 몬스터 목록이 가나 1바이트
-; 타일을 써서 가나 칸은 전투에서 못 쓰고, 전투에 들어가면 WqKana 가 원래 그림으로 되돌린다. 096~0AD 는 전투에서 전투
-; 글자 칸이라 필드 전용. 캔버스 안에서는 작은 것부터, 같은 크기면 높은 칸부터: 메시지는 캔버스를 096 부터 채워, 낮은
-; 칸일수록 메시지 글자에 덮이기 쉽다. 전투 공격 연출은 B0~122 를 덮는다.
+; 전투에서 쓰는 슬롯의 첫 칸과 등급(필드는 WtSlotF). 0 = 작은 슬롯 8칸(네 열), 1 = 중간 슬롯 14칸(일곱 열),
+; 2 = 큰 슬롯 20칸(열 열), 글자 줄 다음에 위 줄이 이어진다. $10 을 더하면 필드에서만 쓰는 슬롯이라 전투에서는 고르지 않고,
+; $20 은 캔버스 밖 1D0~1FF 의 슬롯이다. 앞 12개는 가나 항목 자리라 0. 맞는 크기가 모자라면 더 큰 슬롯을 빌리고, 빈 슬롯은
+; 표 순서로 고른다. 작은 것부터, 같은 크기면 높은 칸부터: 메시지는 캔버스를 096 부터 채워 낮은 칸일수록 메시지 글자에 덮이기
+; 쉽고, 전투 공격 연출은 B0~122 를 덮는다.
 WtSlot:
     dw 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
     dw $0174, $016C, $0164, $015C, $0154, $014C, $01F8, $01E4, $01D0
@@ -1489,6 +1525,28 @@ WtClass:
     dw 0, 0, 0, 0, 0, 0, $30, $32, $32
     dw 1, 1, 1, 1
     dw 2, 2, 2, 2, 2
+; 필드에서 쓰는 슬롯(WtBaseOf·WtUpperOf·WtFits·WqClean 이 $1944 로 고름). 18~20 은 전투 표와 같은 캔버스 밖 1D0~1FF
+; 슬롯이고($20, 위 줄은 글자 줄 바로 뒤라 WtUpperF = 0), 나머지는 캔버스 안에서 글자 줄과 위 줄을 따로 둔다. 가게 팔기·
+; 맡기기 목록 창은 메시지 창의 화면 9~21열을 덮으므로, 앞쪽 캔버스 슬롯(작은 셋, 중간 셋, 큰 하나)은 두 줄 모두 캔버스 앞
+; 여덟 줄의 7~19번째 칸에 두어 가나 칸을 넘친 목록 이름이 메시지 창에 비치지 않게 한다. 캔버스 마지막 줄(화면 26줄)은 가게
+; 사기의 장비 비교 창이 덮지 않아 뺀다. 한 줄에 일곱 칸 넘는 줄은 하나만 들어가 더 가리지는 못하고, DQ4 물건 이름은 6~7열이
+; 가장 많아 중간을 많이 가렸다. 빈 슬롯은 표 순서로 고르므로 가린 큰 슬롯을 보이는 중간 슬롯보다 앞에 둔다. 칸은 서로 겹치지
+; 않는다(test_dq4windowname.py).
+WtSlotF:
+    dw 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    dw $010D, $011E, $00A4, $0147, $00A8, $0166, $01F8, $01E4, $01D0
+    dw $0122, $00BA, $009D, $00D0
+    dw $0096, $00AC, $015C, $0176, $00DA
+WtUpperF:
+    dw 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    dw $00EC, $00B6, $013F, $00C1, $0101, $0143, 0, 0, 0
+    dw $00F0, $0106, $0138, $0152
+    dw $016F, $0111, $00F7, $00C6, $0129
+WtClassF:
+    dw $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+    dw 0, 0, 0, 0, 0, 0, $20, $22, $22
+    dw 1, 1, 1, 2
+    dw 1, 2, 2, 2, 2
 ; 슬롯 × 2 → !wt_dirty 의 비트(낮은 워드, 높은 워드). 슬롯 i 는 비트 i 이고, 캔버스 밖 가나 항목은 0
 WtBitLo:
     dw 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
@@ -1696,6 +1754,7 @@ WnTactic:
 ; 전용 칸 문구(!wt_base 부터 열 × 2 칸)를 그리기 전에 같은 칸을 빌린 슬롯을 본다. 그 슬롯이 보이면 C = 1(문구는 일반
 ; 슬롯으로 그려, 보이는 빌린 글자를 덮지 않는다). 안 보이면 슬롯을 비우고, 문구 자리를 !wt_fixkeys 에 넣고 C = 0.
 ; 빌려 주는 쪽(WtFits)은 !wt_fixkeys 가 하나라도 있으면 빌려 주지 않아, 일부만 가려진 창의 문구도 덮지 않는다
+; 빌린 슬롯의 번호·자리는 필드와 전투 표가 달라 WtClassOf·WtBaseOf 로 본다
 WtFixLend:
     LDA.w !wt_cols
     ASL
@@ -1704,23 +1763,24 @@ WtFixLend:
     STA.w !wt_tmp
     LDX.w #!wt_nkana*2
 .slot
-    LDA.l WtClass,X
+    JSR WtClassOf
     AND #$0020
     BEQ .next
     LDA.w !wt_ages,X
     BEQ .next
-    LDA.l WtSlot,X
+    JSR WtBaseOf
     CMP.w !wt_tmp
     BCS .next
-    PHX
-    LDA.l WtClass,X
+    STA.w !wn_c
+    JSR WtClassOf
     AND #$000F
     ASL
+    PHX
     TAX
     LDA.l WtLen,X
     PLX
     CLC
-    ADC.l WtSlot,X
+    ADC.w !wn_c
     CMP.w !wt_base
     BEQ .next
     BCC .next
@@ -1825,6 +1885,10 @@ WtNameDraw:
     STA.w !wt_base
     JSR WtFixLend
     BCS +
+    LDA.w !wt_base
+    CLC
+    ADC.w !wt_cols
+    STA.w !wt_ubase
     LDA #$FFFF
     STA.w !wt_slot2
     BRA ++
@@ -1940,9 +2004,7 @@ WtQueue:
     CMP.w !wt_cols
     BCC .lower
     ; 위 줄 항목 머리
-    LDA.w !wt_base
-    CLC
-    ADC.w !wt_cols
+    LDA.w !wt_ubase
     ASL
     ASL
     ASL
@@ -2452,21 +2514,60 @@ WqClean:
 +
     STZ.w !wt_keys,X
     STZ.w !wt_ages,X
+    LDA.w $1944
+    CMP #$8952
+    BEQ .battle
+    ; 필드 캔버스 슬롯은 글자 줄과 위 줄이 떨어져 있다(WtSlotF·WtUpperF)
+    LDA.l WtClassF,X
+    JSR WqRunBytes
+    STA.w !wq_left
+    LDA.l WtSlotF,X
+    JSR WqCleanRun
+    LDA.l WtUpperF,X
+    JSR WqCleanRun
+    BRA .next
+.battle
     LDA.l WtClass,X
+    AND #$000F
+    JSR WqRunBytes
+    ASL
+    STA.w !wq_left
+    LDA.l WtSlot,X
+    JSR WqCleanRun
+.next
+    INX
+    INX
+    CPX.w #!wt_nslot*2
+    BCS .out
+    JMP .slot
+.out
+    SEP #$20
+    PLB
+    ; 원래 명령: PHB / PHK / PLB(DB = 00) / LDA #$7E
+    PHB
+    LDA #$00
+    PHA
+    PLB
+    LDA #$7E
+    JML $008EA3
+
+; 등급(A: 0·1·2) → 한 줄(글자 줄 또는 위 줄)의 평면 1 바이트 수(열 4·7·10 × 8)
+WqRunBytes:
     CMP #$0001
     BNE +
-    LDA #$0070              ; 14칸 × 8
-    BRA ++
+    LDA #$0038
+    RTS
 +
     CMP #$0002
     BNE +
-    LDA #$00A0              ; 20칸 × 8
-    BRA ++
+    LDA #$0050
+    RTS
 +
-    LDA #$0040              ; 8칸 × 8
-++
-    STA.w !wq_left
-    LDA.l WtSlot,X
+    LDA #$0020
+    RTS
+
+; 칸 A 부터 !wq_left 바이트만큼 평면 1 을 FF 로(DMA 0, 고정 원본). X 는 그대로
+WqCleanRun:
     ASL
     ASL
     ASL
@@ -2489,24 +2590,9 @@ WqClean:
     LDA #$01
     STA.l $00420B
     REP #$20
-.next
-    INX
-    INX
-    CPX.w #!wt_nslot*2
-    BCS .out
-    JMP .slot
-.out
-    SEP #$20
-    PLB
-    ; 원래 명령: PHB / PHK / PLB(DB = 00) / LDA #$7E
-    PHB
-    LDA #$00
-    PHA
-    PLB
-    LDA #$7E
-    JML $008EA3
+    RTS
 
-; 타일맵: 글자 줄은 빌린 칸, 위 줄은 빌린 칸 + 열 수. 높은 바이트는 우선·팔레트만 살리고, 색($ED)이 있으면 글자 줄에 쓴다.
+; 타일맵: 글자 줄은 빌린 칸, 위 줄은 !wt_ubase. 높은 바이트는 우선·팔레트만 살리고, 색($ED)이 있으면 글자 줄에 쓴다.
 WtTilemap:
     STZ.w !wn_k
 -
@@ -2532,11 +2618,9 @@ WtTilemap:
     TAX
     LDA.w $0000,X
     AND #$3C00
-    ORA.w !wt_base
+    ORA.w !wt_ubase
     CLC
     ADC.w !wn_k
-    CLC
-    ADC.w !wt_cols
     STA.w $0000,X
     INC.w !wn_k
     LDA.w !wn_k

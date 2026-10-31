@@ -33,6 +33,10 @@ KEYS, AGES = 0x3D70, 0x3D14         # dq4windowname.asm 의 !wt_keys·!wt_ages(�
 KANA_ENTRIES, KBASE = 12, 0x3DD8    # !wt_nkana, !wt_kbase(첫 칸 12바이트, 이어서 칸 수 12바이트)
 SHARED_JP = 0x60B400                # 맵을 불러올 때 7E:1AC0 으로 복사되는 원래 공용 창 레코드(dq4menupatch.SHARED_JP)
 TALK = 'b:4,wait:40,up:3,wait:20,a:4,wait:30,' + ','.join(['a:6,wait:40,down:4,wait:10,a:6,wait:40'] * 10)
+# 도구점(선실 대화 02)에서 팔기를 골라 메시지와 목록을 함께 띄운다. 가진 물건 12칸(7E:2056~)을 1장에서 얻는 긴 이름으로
+# 채우면 이름이 가나 칸을 넘쳐 캔버스 슬롯으로 간다
+SELL = 'b:4,wait:40,up:3,wait:20,a:4,wait:30,a:6,wait:60,down:4,wait:20,a:6,wait:80,a:6,wait:80,down:4,wait:30,a:6,wait:80'
+FULL_BAG = (0xA4, 0xCD, 0xB1, 0xB2, 0x00, 0x4E, 0xA9, 0xAF, 0x1C, 0x48, 0x75, 0x86)
 # 주인공 이름 7E:2001 에 넣는 「크리프트」 한글 표시 바이트. 세이브스테이트의 가나 이름은 가나 칸 슬롯과 겹쳐 깨진다.
 # 09/00 의 몬스터 동료 이름(이름 표 0A, DQ5 데이터)은 가나라 필드 상태 창에서 「가나」 로 걸린다
 NAME = '97338C3799299827'
@@ -67,6 +71,8 @@ def scenes(ship, party, shop=None):
     for n in range(0x40):
         # 선실 파파스의 대화 번호를 바꿔 가게·교회·여관 등을 연다(35C37 = A901 은 대화를 그 번호로 고정)
         out.append((f'talk{n:02X}', ship, f'7E36EB={n:02X};7E370B=00', '35C37=A901', TALK, range(60, 1500, 30)))
+    bag = ';'.join(f'7E{0x2056 + i:04X}={b:02X}' for i, b in enumerate(FULL_BAG))
+    out.append(('talk02-full', ship, f'7E36EB=02;7E370B=00;{bag}', '35C37=A901', SELL, range(60, 700, 10)))
     for seed in (1, 2, 3, 4):
         out.append((f'ship{seed}', ship, '', '', fuzz(seed), range(100, 8000, 50)))
     out.append(('partyitems', party, PARTY_ITEMS, '', PARTY_ITEMS_PRE, range(60, 900, 30)))
@@ -92,15 +98,17 @@ def symbols(path):
 
 
 def slot_table(rom, sym):
-    """[(첫 칸, 칸 수, 필드 전용)]. 슬롯 수는 WtClass 가 WtSlot 바로 뒤라는 데서 센다."""
-    base, cls = lorom(sym['WtSlot']), lorom(sym['WtClass'])
-    n = (cls - base) // 2
-    out = []
-    for i in range(n):
-        tile = int.from_bytes(rom[base + 2 * i:base + 2 * i + 2], 'little')
-        c = int.from_bytes(rom[cls + 2 * i:cls + 2 * i + 2], 'little')
-        out.append((tile, (8, 14, 20, 0)[min(c & 0x0F, 3)], c >= 0x10))
-    return out
+    """(전투, 필드). 전투는 [(첫 칸, 칸 수, 필드 전용)], 필드는 [(글자 줄 첫 칸, 위 줄 첫 칸, 열 수)]. 슬롯 수는 WtClass 가
+    WtSlot 바로 뒤라는 데서 센다."""
+    def words(name, n):
+        o = lorom(sym[name])
+        return [int.from_bytes(rom[o + 2 * i:o + 2 * i + 2], 'little') for i in range(n)]
+    n = (lorom(sym['WtClass']) - lorom(sym['WtSlot'])) // 2
+    battle = [(t, (8, 14, 20, 0)[min(c & 0x0F, 3)], c >= 0x10) for t, c in zip(words('WtSlot', n), words('WtClass', n))]
+    # 캔버스 밖 슬롯(등급 $20)은 위 줄이 글자 줄 바로 뒤라 WtUpperF 가 0
+    field = [(lo, up or lo + cols, cols) for lo, up, c in zip(words('WtSlotF', n), words('WtUpperF', n), words('WtClassF', n))
+             for cols in [(4, 7, 10, 0)[min(c & 0x0F, 3)]]]
+    return battle, field
 
 
 def run(mesence, libdir, rom_path, rom, folder, scene):
@@ -109,7 +117,10 @@ def run(mesence, libdir, rom_path, rom, folder, scene):
     probe = folder / f'windowcheck-{name}.sfc'
     shutil.copyfile(rom_path, probe)
     o = lorom(SHARED_JP)
-    sets = ['7E0725=3C'] + [f'{0x7E1AC0 + i:X}={b:02X}' for i, b in enumerate(rom[o:o + 48])]
+    # 선실 세이브스테이트는 BG3 타일맵을 옮기기 전 것이라 실내 자리(3C)로 맞춘다. 일행 세이브스테이트는 필드에 서 있어
+    # 그대로 둔다(3C 로 두면 타일맵이 필드 그림 자리에 놓여 화면 위쪽이 깨진다)
+    sets = ['7E0725=3C'] if name.startswith(('talk', 'ship')) else []
+    sets += [f'{0x7E1AC0 + i:X}={b:02X}' for i, b in enumerate(rom[o:o + 48])]
     sets += [f'{0x7E2001 + i:X}={NAME[2 * i:2 * i + 2]}' for i in range(8)]
     fs = ','.join(map(str, frames))
     dump = ','.join(f'{f}:7E{KEYS:04X}:60,{f}:7E{AGES:04X}:60,{f}:7E{KBASE:04X}:24,{f}:7E0725:1,{f}:7E1944:2'
@@ -147,16 +158,21 @@ def check(folder, rom, slots):
         battle = int.from_bytes(d[0x1944], 'little') == 0x8952
         mine, live = set(), {}
         kb = d[KBASE]
-        table = [(kb[i], kb[KANA_ENTRIES + i], True) for i in range(KANA_ENTRIES)] + slots[KANA_ENTRIES:]
-        for i, (tile, size, field_only) in enumerate(table):
+        battle_slots, field_slots = slots
+        if battle:
+            canvas = [range(t, t + size) for t, size, field_only in battle_slots]
+        else:
+            canvas = [list(range(lo, lo + n)) + list(range(up, up + n)) for lo, up, n in field_slots]
+        cells = [range(kb[i], kb[i] + kb[KANA_ENTRIES + i]) for i in range(KANA_ENTRIES)] + canvas[KANA_ENTRIES:]
+        for i, tiles in enumerate(cells):
             key = int.from_bytes(keys[2 * i:2 * i + 2], 'little')
             age = int.from_bytes(ages[2 * i:2 * i + 2], 'little')
             if not key or not age:
                 continue
             c = (key - BUFFER) // 2
             mine |= {c + j for j in range(10)} | {c - 32 + j for j in range(10)}
-            if not (battle and field_only):
-                live.update({t: i for t in range(tile, tile + size)})
+            if not (battle and (i < KANA_ENTRIES or battle_slots[i][2])):
+                live.update({t: i for t in tiles})
         tilemap = (d[0x0725][0] & 0xFC) << 8
         bad = []
         for i, (tile, size, field_only) in enumerate(table):
