@@ -5,6 +5,9 @@
 골라 그 번호를 넣는다(코드 읽기). 이름과 달리 켜진 쪽이 그룹을 그대로 대상으로 둔다(그룹을 치는 いかずちのつえ 등). やくそう(A1)를 적쪽(k2 bit5)으로 바꾸고 이 비트만 1·0 으로 둔 롬 둘로,
 첫 필드 이벤트 전투를 スライム 3 으로 붙인 세이브스테이트에서 명령 앞 기다림을 바꿔 가며(난수가 달라짐) 쓰고
 메시지마다 $1037 을 적는다(dq5battle.lua 의 PEEK).
+같은 장면에서 물건 k4 하위 6비트(dq5tables.py 의 「k4하위」)도 본다. 전투에서 물건을 쓰면 20:B9F9 가 BRK #94 0F 로 이 값을
+읽어, 06 이 아니면 27:81D0 + 값 × 2 의 두 바이트(전투 메시지 번호, 0 이면 없음)를 띄운다(코드 읽기). やくそう(A1)는 07
+(「…を つかった！」 0D3)이고, 01 로 바꾼 롬은 0CC 「…を どうぐとして つかってみた！」 여야 한다.
   MESENCE=… python sfc/dq5/tools/dq5grouptargetcheck.py rom/dq5.sfc --state work/state/ship.mss
 """
 import argparse
@@ -33,12 +36,12 @@ def prepare(original, state, out, mesence, libdir):
     return dest / 'battle.mss'
 
 
-def build(original, out, bit):
-    source = out / f'bit{bit}.json'
-    save_json(source, {'format': 'dq5tables/1', 'items': [{'id': 'A1', '적쪽': 1, '그룹무작위': bit}]})
-    command('dq5tables.py', original, 'patch', source, '-o', out / f'bit{bit}.patch.json')
-    command('dq5build.py', original, 'build', out / f'bit{bit}.patch.json', '-o', out / f'bit{bit}.sfc')
-    return out / f'bit{bit}.sfc'
+def build(original, out, name, fields):
+    source = out / f'{name}.json'
+    save_json(source, {'format': 'dq5tables/1', 'items': [{'id': 'A1', **fields}]})
+    command('dq5tables.py', original, 'patch', source, '-o', out / f'{name}.patch.json')
+    command('dq5build.py', original, 'build', out / f'{name}.patch.json', '-o', out / f'{name}.sfc')
+    return out / f'{name}.sfc'
 
 
 def use(rom, name, wait, state, out, mesence, libdir):
@@ -49,7 +52,7 @@ def use(rom, name, wait, state, out, mesence, libdir):
     run(mesence, rom, HERE / 'lua/dq5battle.lua', dest, env)
     rows = re.findall(r'msg ([0-9A-F]{3}) 7E1037=([0-9A-F]{2})', (dest / 'battle.txt').read_text(encoding='utf-8'))
     require(rows, f'{name}: 전투 메시지가 없음')
-    return int(rows[0][1], 16)
+    return int(rows[0][1], 16), [m for m, _ in rows]
 
 
 def main():
@@ -71,17 +74,25 @@ def main():
         libdir = subprocess.run(['krpatch', 'sfc', 'lua'], capture_output=True, text=True,
                                 check=True, timeout=30).stdout.strip()
         battle = prepare(original, state, out, mesence, libdir)
-        roms = {bit: build(original, out, bit) for bit in (0, 1)}
+        roms = {bit: build(original, out, f'bit{bit}', {'적쪽': 1, '그룹무작위': bit}) for bit in (0, 1)}
+        roms['k4'] = build(original, out, 'k4', {'k4하위': 1})
+        roms['original'] = original
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
             futures = {(bit, w): pool.submit(use, roms[bit], f'bit{bit}-wait{w}', w, battle, out, mesence, libdir)
                        for bit in (0, 1) for w in WAITS}
-            seen = {k: f.result() for k, f in futures.items()}
+            words = {k: pool.submit(use, roms[k], k, 0, battle, out, mesence, libdir) for k in ('original', 'k4')}
+            seen = {k: f.result()[0] for k, f in futures.items()}
+            said = {k: f.result()[1] for k, f in words.items()}
         # $1037 bit3-6 = 대상 몬스터 번호(무리 안 0~2), bit7·bit0 = 적 한 마리.
         targets = {bit: [seen[(bit, w)] >> 3 & 0x0F for w in WAITS] for bit in (0, 1)}
         checks = {'bit1-fixed': set(targets[1]) == {0},
-                  'bit0-random': len(set(targets[0])) > 1 and set(targets[0]) <= {0, 1, 2}}
+                  'bit0-random': len(set(targets[0])) > 1 and set(targets[0]) <= {0, 1, 2},
+                  'k4-message': '0D3' in said['original'] and '0CC' not in said['original']
+                  and '0CC' in said['k4'] and '0D3' not in said['k4']}
         save_json(out / 'results.json', {'1037': {f'{b}-{w}': f'{v:02X}' for (b, w), v in seen.items()},
-                                         'targets': targets, 'checks': checks})
+                                         'targets': targets, 'messages': said, 'checks': checks})
+        for k, rows in said.items():
+            print(f'k4하위 {"원래(07)" if k == "original" else "01"}: 전투 메시지 {" ".join(rows)}')
         for bit in (1, 0):
             print(f'k2 bit4 = {bit}: 기다림 {list(WAITS)} → $1037 '
                   + ' '.join(f'{seen[(bit, w)]:02X}' for w in WAITS) + f' (대상 {targets[bit]})')
