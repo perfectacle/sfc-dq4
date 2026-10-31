@@ -25,6 +25,9 @@ for button, frames in (os.getenv('INPUT') or ''):gmatch('([%w+]+):(%d+)') do
   steps[#steps + 1] = {button, tonumber(frames)}
 end
 local flag = os.getenv('FLAG') and tonumber(os.getenv('FLAG'), 16)
+-- SETONCE="7E075E=00;7E36EB=06" 첫 프레임에 한 번 쓴다(CPU 주소=값)
+local setonce = {}
+for a, v in string.gmatch(os.getenv('SETONCE') or '', '(%x+)=(%x+)') do setonce[#setonce + 1] = {tonumber(a, 16), tonumber(v, 16)} end
 -- RESETAT 프레임에 emu.reset()(교회 기록을 SRAM 에서 불러오는 장면용. INPUT 이 타이틀에서 불러오기를 누른다)
 local resetat = tonumber(os.getenv('RESETAT') or '-1')
 local function b(a) return emu.read(a, m) end
@@ -70,6 +73,7 @@ emu.addEventCallback(function()
   if n == 1 then
     emu.write(0x7E2019, 100, m); emu.write(0x7E201A, 0, m); emu.write(0x7E201B, 0, m)
     if flag then emu.write(flag, 0, m) end
+    for _, p in ipairs(setonce) do emu.write(p[1], p[2], m) end
     local old = os.getenv('OLD_FLAG')
     if old then emu.write(tonumber(old, 16), 0, m) end
     L.dump('before.wram', emu.memType.snesWorkRam, 0x20000)

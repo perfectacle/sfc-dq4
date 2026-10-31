@@ -6,6 +6,8 @@
 조우 판정 23:E7C2 를 CLC / RTL 로). 외우기 전·첫 번째 뒤·두 번째 뒤에 덤프하고, 그때 $075E 로 고른 시간대(01:A132 의
 표, 색인 0C 이상이면 밤)의 인물 팔레트가 CGRAM 11·12번 줄 색 1~15 에 있는지 본다. 원본 롬도 같은 장면을 돌려 $075E 가
 같게 바뀌었는지 견준다.
+여관: 선실에서 밤($075E = 0100)에 파파스의 대화 번호를 06(여관 처리기)으로 두고 묵은 뒤(lua/dq5chestcheck.lua), 그 세이브스테이트로
+세계 0 (310,60) 에 나가 덤프한다. 묵지 않고 같은 밤으로 나간 실행과 견준다.
 
   MESENCE=… python sfc/dq5/tools/dq5personpalcheck.py rom/dq5.sfc --state work/state/ship.mss --out work/personpalcheck
 """
@@ -34,6 +36,10 @@ SCENE = {'FIELD': '310,60', 'SET': '2063=FF;2044=63;2050=63;075E=20;075F=00;2190
          'SETTLE': '60', 'MAXF': '3100', 'DUMPF': ','.join(map(str, FRAMES)),
          'TEST': 'wait:300,' + LANA + 'wait:200,' + LANA + 'wait:300'}
 COLORS = {'day': 0x001F, 'night': 0x7C00}
+NIGHT = 0x0100
+INN = {'SETONCE': f'7E36EB=06;7E370B=00;7E075E={NIGHT & 0xFF:02X};7E075F={NIGHT >> 8:02X}', 'SAVE': 'inn.mss',
+       'INPUT': 'b:4,wait:40,up:3,wait:20,' + ','.join(['a:4,wait:60'] * 40)}
+OUTSIDE = {'FIELD': '310,60', 'SETTLE': '60', 'MAXF': '900', 'DUMPF': '600', 'TEST': 'wait:300'}
 
 
 def night(rom, t):
@@ -87,6 +93,23 @@ def main():
             require(person == [COLORS[kind]] * 30, f'{n}프레임 $075E {t:04X}: 11·12번 줄이 {kind} 인물 팔레트가 아님')
             results.append({'frame': n, '075E': f'{t:04X}', 'person': kind})
         require(len({r['person'] for r in results}) == 2, f'ラナルータ 로 낮밤이 바뀌지 않음 {results}')
+        # 여관에 묵고 나가기와, 묵지 않고 같은 밤에 나가기
+        inn = gwc.run(mesence, pp, HERE / 'lua/dq5chestcheck.lua', INN, out / 'inn', libdir, state)
+        stays = (inn / 'after.wram').read_bytes()
+        require([m for m in (inn / 'trace.txt').read_text().split() if m.startswith('value=')][:1] == ['value=0071'],
+                 '여관 메시지 071 로 시작하지 않음')
+        for name, start, extra in (('inn-field', inn / 'inn.mss', {}),
+                                   ('night-field', state, {'SET': f'075E={NIGHT & 0xFF:02X};075F={NIGHT >> 8:02X}'})):
+            dest = gwc.run(mesence, pp, gfx, OUTSIDE | extra, out / name, libdir, start)
+            w, cg = frame(dest, 600, 'wram'), frame(dest, 600, 'cgram')
+            t = w[0x75E] | w[0x75F] << 8
+            require(w[0x1949] == 0 and not w[0xBE] & 0x80, f'{name}: 세계 0 필드가 아님')
+            kind = 'night' if night(rom, t) else 'day'
+            person = [fgc.cg_color(cg, row, c) for row in (11, 12) for c in range(1, 16)]
+            require(person == [COLORS[kind]] * 30, f'{name} $075E {t:04X}: 11·12번 줄이 {kind} 인물 팔레트가 아님')
+            results.append({'scene': name, '075E': f'{t:04X}', 'person': kind})
+        require([r['person'] for r in results[-2:]] == ['day', 'night'], f'여관 뒤 낮·묵지 않은 밤이 아님 {results[-2:]}')
+        results[-2]['inn_075E'] = f'{stays[0x75E] | stays[0x75F] << 8:04X}'
         (out / 'results.json').write_text(json.dumps(results, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
         print(json.dumps(results, ensure_ascii=False))
         print(f'{len(results)}/{len(results)} 통과')

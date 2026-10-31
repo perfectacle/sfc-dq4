@@ -403,7 +403,7 @@ def environment(libdir, state, dest):
                 'SET', 'TEST', 'TO', 'WAGON', 'PRE', 'LOOP', 'WAYPOINTS', 'PEEK', 'SHOTMSG', 'CALLS', 'WW',
                 'WWRANGE', 'WRAMWATCH', 'COVER', 'ACCESS', 'VMADD', 'SHOTS', 'DUMP', 'VRAMDUMP', 'BG3FONT',
                 'TRACE', 'LOG', 'RWATCH', 'WWATCH', 'LATE', 'PREPARE', 'WATCH', 'INPUT', 'FLAG', 'OLD_FLAG', 'NEXT',
-                'RESETAT', 'CDLEVERY', 'ACCRANGE', 'SETTLE', 'MAXF', 'SRAM'):
+                'RESETAT', 'CDLEVERY', 'ACCRANGE', 'SETTLE', 'MAXF', 'SRAM', 'SETONCE'):
         env.pop(key, None)
     env.update(LIBDIR=libdir, STATE=str(state), SHOT_DIR=str(dest))
     return env
