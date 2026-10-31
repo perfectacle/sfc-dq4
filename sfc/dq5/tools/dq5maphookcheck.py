@@ -56,6 +56,12 @@ def edits(rom):
         'grown': ('rewrite', '3F:8000', strip + [hall], '15:FFF0'),
         'cells': ('cells-rewrite', '15:FF80', cells + [room | {'flag': None}]),
         'cellflag': ('cells-rewrite', '15:FF80', cells + [room]),
+        # 04/00 항목의 맵 고르기를 01/04 로(제자리, 루틴은 그대로)
+        'select': ('patch', None, [{'index': tower['index'], 'group': '01', 'map': '04'}]),
+        # 04/00 항목의 맵을 푼 뒤 루틴을 원래 표의 그 칸에 없던 02:94E0(01/05 의 것)으로
+        'raw': ('patch', None, [{'index': tower['index'], 'post_load': stairs['post_load']}], None, ['--raw-routines']),
+        # 'moved' 의 3항목 표를 원래 롬의 빈 자리 0B:FBB0 에 두고 로더 DB 를 스텁으로
+        'freebank': ('rewrite', '0B:FBB0', [hall] + [strip[e['index']] for e in (stairs, ship)], '15:FFF0'),
     }
 
 
@@ -79,6 +85,12 @@ CASES = [
     ('hall-grown', 'grown', HALL, None, (None, '02:A7BD'), None, '04/0A', (8, 17)),
     ('tower-grown', 'grown', TOWER, None, (None, '02:A7BD'), None, '04/0A', (8, 17)),
     ('stairs-grown', 'grown', STAIRS, None, ('02:94E0', None), True, '01/04', (13, 47)),
+    ('hall-select', 'select', HALL, None, (None, '02:A7BD'), None, '04/0A', (8, 17)),
+    ('tower-select', 'select', TOWER, None, ('15:F906', '15:F906'), None, '04/00', None),
+    ('tower-raw', 'raw', TOWER, None, ('02:94E0', '02:A7BD'), None, '04/0A', (8, 17)),
+    ('hall-freebank', 'freebank', HALL, None, (None, '02:A7BD'), None, '04/0A', (8, 17)),
+    ('stairs-freebank', 'freebank', STAIRS, None, ('02:94E0', None), True, '01/04', (13, 47)),
+    ('tower-freebank', 'freebank', TOWER, None, ('15:F906', '15:F906'), None, '04/00', None),
 ]
 # (이름, 롬, SET, 01/04 를 풀었을 때의 $1AAA, JMP ($1AAA) 로 00:BCC3 에 갔는가)
 CELL_CASES = [
@@ -143,12 +155,13 @@ def main():
         print(f'실행 출력: {out}', flush=True)
         roms = {'original': original}
         tool = HERE / 'dq5maphook.py'
-        for key, (mode, at, entries, *stub) in edits(Rom(original.read_bytes())).items():
+        for key, (mode, at, entries, *more) in edits(Rom(original.read_bytes())).items():
+            stub, options = (more[0] if more else None), (more[1] if len(more) > 1 else [])
             source, manifest = out / f'{key}.json', out / f'{key}.patch.json'
             kind = CELL_FORMAT if mode == 'cells-rewrite' else FORMAT
             source.write_text(json.dumps({'format': kind, 'entries': entries}, ensure_ascii=False, indent=2) + '\n',
                               encoding='utf-8')
-            where = (['--at', at] if at else []) + (['--stub-at', stub[0]] if stub else [])
+            where = (['--at', at] if at else []) + (['--stub-at', stub] if stub else []) + options
             command(tool, original, mode, source, *where, '-o', manifest)
             command(tool, original, 'cells-check' if mode == 'cells-rewrite' else 'check', source, *where)
             roms[key] = out / f'{key}.sfc'

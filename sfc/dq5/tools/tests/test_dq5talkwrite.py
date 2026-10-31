@@ -71,6 +71,10 @@ class EncodeTests(unittest.TestCase):
                 {'op': 'call', 'target': 'B3A0'},
                 {'op': 'if', 'cond': {'code': '05', 'not': True}, 'then': {'op': 'call', 'target': 'B3A0'}}]
         self.assertEqual(encode_script(body, 'x'), bytes.fromhex('19 60 5a 17 01 02 00 a0 b3 07 85 00 a0 b3 3f'))
+        # 1C 는 1B 와 같은 인자 둘(길이 표·건너뛰기 모두 3바이트)
+        one = [{'op': 'if', 'cond': {'code': '1C', 'index': 1, 'mask': 0}, 'then': [{'op': 'msg', 'id': '16B'}],
+                'else': {'op': 'msg', 'id': '129'}}]
+        self.assertEqual(encode_script(one, 'x'), bytes.fromhex('07 1c 01 00 06 61 6b 3e 0b 61 29 3f'))
 
     def test_invalid(self):
         msg = {'op': 'msg', 'id': '129'}
@@ -80,7 +84,6 @@ class EncodeTests(unittest.TestCase):
             [{'op': 'jump'}], [{'op': 'flag-on', 'index': 256, 'mask': 1}], [{'op': 'flag-on', 'index': True, 'mask': 1}],
             [{'op': 'call', 'target': '7FFF'}],
             [{'op': 'if', 'cond': {'code': '16', 'index': 1}, 'then': msg}],
-            [{'op': 'if', 'cond': {'code': '1C', 'index': 1, 'mask': 1}, 'then': msg}],
             [{'op': 'if', 'cond': {'code': '1B', 'index': 1}, 'then': msg}],
             [{'op': 'if', 'cond': {'code': '05', 'not': 1}, 'then': msg}],
             [{'op': 'if', 'cond': {'code': '05'}, 'then': []}],

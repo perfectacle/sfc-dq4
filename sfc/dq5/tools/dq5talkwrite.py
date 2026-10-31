@@ -37,9 +37,9 @@ MAX_SCRIPT = 256
 # dq5textwrite 가 3200 이상을 덧붙일 수 있어, 메시지 명령 bit5 갈래(v & 1FFF)가 닿는 끝까지 받는다.
 MESSAGES = 0x2000
 # 조건 코드 → 인자 이름. 형식 문서에서 실측한 것만 받는다. 16 은 실행(06:B31F)이 3바이트, 건너뛰기(06:B27E)가 2바이트로
-# 길이가 어긋나고, 1C 는 코드 읽기뿐이라 받지 않는다.
+# 길이가 어긋나 갈리지 않은 블록 안에서 모르는 명령 갈래(06:B10F)로 가므로 받지 않는다. 1C 는 mask | 7E:2190+index 가 0 이 아니면 참.
 CONDS = {0x02: (), 0x03: ('member',), 0x05: (), 0x11: ('item',), 0x13: ('record',), 0x14: (),
-         0x1A: ('index', 'value'), 0x1B: ('index', 'mask'), 0x1E: (), 0x1F: (), 0x20: ()}
+         0x1A: ('index', 'value'), 0x1B: ('index', 'mask'), 0x1C: ('index', 'mask'), 0x1E: (), 0x1F: (), 0x20: ()}
 FLAG_OPS = {0x17: ('flag-off', 'mask'), 0x18: ('flag-on', 'mask'), 0x19: ('flag-set', 'value')}
 FLAG_CODES = {name: (code, arg) for code, (name, arg) in FLAG_OPS.items()}
 
