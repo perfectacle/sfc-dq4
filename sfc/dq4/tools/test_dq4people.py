@@ -107,6 +107,16 @@ class SheetTests(unittest.TestCase):
         self.assertEqual(c.getpixel((6, 14)), (60, 180, 40, 255))
         self.assertEqual(c.getpixel((3, 12))[3], 0)
 
+    def test_place_keeps_one_slot_per_color_and_tunes_each_group(self):
+        a = P.Person((0x10,), None, 'x', 'a')
+        b = P.Person((0x11,), None, 'x', 'b')
+        hists = {a: Counter({(200, 30, 30): 50, (20, 20, 20): 10}), b: Counter({(220, 40, 40): 50, (20, 20, 20): 10})}
+        placed, board = P.place([a, b], hists, {a: {0x36}, b: {0x37}})
+        for p, g in ((a, 0x36), (b, 0x37)):
+            line, mapping = placed[p]
+            for c, k in mapping.items():
+                self.assertEqual(board[(g, line)][k], c)
+
     def test_reduce_keeps_the_most_used_colors(self):
         hist = Counter({(k * 10, 0, 0): 100 - k for k in range(20)})
         pal = P.reduce(hist)
