@@ -1101,7 +1101,34 @@ uv run --locked python sfc/dq4/tools/dq4soundset.py --base <이름 입력 빌드
 
 **시험용 롬 바꾸기**: 장면마다 걸음 전투를 없애거나(`dq4ch1walkcheck.NO_ENCOUNTERS`) 정한 무리로 강제하고(`dq4battlecheck.force_patch`), 슬라임(`00`)의 HP 를 1 이나 2047 로, 공격력을 0 으로(빗나감), 행동 여섯을 スカラ(`55`)와 MP 255 로 덮습니다. 무기는 `$0DA7` 을 프레임마다 묶어 고르고, 여관은 성 마을 인물의 대화 번호(`7E:36E0`·`3700` + 슬롯)를 `006` 으로 바꿉니다. 회심은 시드 1~80 을 두 코어로 돌려 A 15번 안에 회심이 나는 시드를 골랐습니다(snes9x 29, bsnes 19). 두 코어는 전투에 드는 프레임이 하나 달라 같은 시드가 같은 결과를 내지 않습니다.
 
-SFX_TABLE
+| 장면 | 동작 | 기대(대기열 · 바탕) | snes9x 프레임 · 바탕 | bsnes 프레임 · 바탕 |
+| --- | --- | --- | --- | --- |
+| `menu-open` | 필드에서 명령 창 열기(DQ5 33-00) | `0C 33 00` nds | 604 nds 통과 | 605 nds 통과 |
+| `menu-cursor` | 명령 창 커서 움직이기(창 선택 고리 BRK 19 33 00) | `0C 33 00` nds, `0C 33 00` nds | 604 nds / 668 nds 통과 | 605 nds / 670 nds 통과 |
+| `menu-open-release` | 배포 롬: 필드에서 명령 창 열기 | `.. 33 00` nds | 604 nds 통과 | 605 nds 통과 |
+| `stairs-release` | 배포 롬: 왕좌의 방 아래 출구 | `.. 34 02` noise | 904 noise 통과 | 906 noise 통과 |
+| `talk` | 사람에게 말 걸기: 대화 글자(DQ5 32-00) | `0C 32 00` dq5 | 994 dq5 1F 통과 | 996 dq5 1F 통과 |
+| `stairs` | 왕좌의 방 아래 출구로 나가기(DQ5 34-02) | `0C 34 02` noise | 904 noise 통과 | 906 noise 통과 |
+| `door` | 이무르 문 열기(DQ5 35-01, 01:E01B 등 문 15곳) | `0C 45 01` nds | 2135 nds 통과 | 2137 nds 통과 |
+| `locked-door` | 잠긴 문에 부딪힘(DQ5 34-03) | `0C 34 03` dq5 | 897 dq5 1F 통과 | 899 dq5 1F 통과 |
+| `chest` | 우물 아래 상자 열기(DQ5 35-00, 05:E6A9 등 상자 7곳) | `0C 3F 00` nds | 1108 nds 통과 | 1109 nds 통과 |
+| `pot` | 항아리에서 물건 찾기(--sfx-item) | `0C 3F 01` nds | 1329 nds 통과 | 1331 nds 통과 |
+| `inn` | 여관에 묵기: 예·아니요 창(DQ5 33-01)과 징글(곡 1D) | `0C 33 01` nds, `01 1D ..` | 1104 nds / 1233 통과 | 1105 nds / 1235 통과 |
+| `church` | 교회에서 기록하기: 예·아니요(DQ5 33-01)와 기록 징글(곡 20) | `0C 33 01` nds, `01 20 ..` | 1301 nds / 2096 통과 | 1303 nds / 2097 통과 |
+| `battle-win` | 걸음 전투: 공격 시작(37-01)·무기(00)·적이 맞음(37-04)·승리(곡 1F)·레벨 업(곡 21) | `0C 37 01` nds, `0C 43 01` not-dq5, `0C 37 04` noise, `01 1F ..`, `01 21 ..` | 1190 nds / 1244 nds / 1295 noise / 1377 / 1555 통과 | 1191 nds / 1245 nds / 1296 noise / 1378 / 1556 통과 |
+| `battle-trade` | 주고받기: 적의 공격 시작(37-02)·우리 편이 맞음(37-03) | `0C 37 01` nds, `0C 37 04` noise, `0C 37 02` nds, `0C 37 03` noise | 1190 nds / 1295 noise / 1331 nds / 1382 noise 통과 | 1191 nds / 1297 noise / 1333 nds / 1384 noise 통과 |
+| `battle-miss` | 공격력 0 인 적이 때림: 빗나감(37-0D) | `0C 37 02` nds, `0C 37 0D` nds | 1331 nds / 1409 nds 통과 | 1333 nds / 1411 nds 통과 |
+| `battle-scara` | 적의 スカラ: 돌려 부르기 46-04 → 45-04 | `0C 45 04` nds | 1430 nds 통과 | 1433 nds 통과 |
+| `battle-boss` | 탑 위 보스 전투(사건 전투, 전투 곡이 무기 표 곡이 아님): 발톱 무기의 종류 소리(28:816E 종류 4 → DQ5 37-08)와 보스가 맞음(돌려 부르기 37-14 → 45-03) | `0C 37 08` noise, `0C 45 03` noise | 2430 noise / 2469 noise 통과 | 2299 noise / 2339 noise 통과 |
+| `battle-critical` | 회심의 일격(DQ5 37-0B) | `0C 37 01` nds, `0C 37 0B` dq5 | 1190 nds / 1673 nds 통과 | 1191 nds / 1242 noise 통과 |
+| `battle-flee` | 도망(DQ5 37-00) | `0C 37 00` dq5 | 1123 nds 통과 | 1124 noise 통과 |
+| `training` | 전원부터 새 게임: 이름 칸이 찬 뒤 A(33-02), 서장 칼 여섯 합(40-01·40-02·37-03) | `0C 33 02` nds, `0C 40 01` nds, `0C 40 02` nds, `0C 40 01` nds, `0C 40 02` nds, `0C 40 02` nds, `0C 37 03` noise | 643 nds / 1134 nds / 1166 nds / 1227 nds / 1258 nds / 1279 nds / 1340 noise 통과 | 644 nds / 1134 nds / 1166 nds / 1227 nds / 1258 nds / 1279 nds / 1340 noise 통과 |
+| `frog` | 서장 개구리가 연못에서 뛰어오름(45-00 두 번) | `0C 45 00` nds, `0C 45 00` nds | 3967 nds / 4044 nds 통과 | 3986 nds / 4063 nds 통과 |
+| `battle-heal` | 호이민이 ホイミ: 주문 외움(37-0E)·ホイミ 효과(DQ5 36-00) | `0C 37 0E` nds, `0C 36 00` dq5 | 1339 nds / 1414 dq5 1F 통과 | 1341 nds / 1416 dq5 1F 통과 |
+
+무기 27가지(`weapon-XX`, 공격 시작 `0C 37 01` 뒤, 바탕 snes9x/bsnes, 기대 not-dq5): `00`→`43 01` nds/nds, `01`→`43 02` nds/nds, `02`→`43 03` nds/nds, `06`→`43 04` nds/nds, `07`→`43 05` nds/nds, `0B`→`43 06` nds/nds, `0C`→`43 07` nds/nds, `0D`→`43 08` nds/nds, `0E`→`43 09` nds/nds, `10`→`43 0A` nds/nds, `12`→`43 0B` nds/nds, `13`→`43 0C` nds/nds, `1B`→`43 0D` nds/nds, `24`→`43 0E` nds/nds, `26`→`43 0F` nds/nds, `27`→`43 10` nds/nds, `28`→`43 11` nds/nds, `29`→`43 12` nds/nds, `2A`→`43 13` nds/nds, `2B`→`43 14` nds/nds, `2F`→`42 00` noise/nds, `30`→`42 01` nds/nds, `31`→`42 02` nds/nds, `38`→`42 03` nds/nds, `3A`→`42 04` nds/nds, `3E`→`42 06` nds/nds, `80`→`43 00` nds/nds
+
+롬 SHA-1 `2690c55ffecc`, 장면 49개 × 두 코어 = 98번 중 98번 통과(`--jobs 4` 로 141초). bsnes 대조 실행: chest 값 같음 True·시각 차 1, battle-trade 값 같음 True·시각 차 1.
 
 **찾은 것**(고치지 않음):
 - 롬의 늘 두는 파형 `20`·`21`·`22` 가 원본 DQ5 와 BRR 이 다릅니다(`1F` 만 같음, 결과의 `findings.resident_waves_changed`). `--sfx-wave` 가 그 자리에 NDS 한 주기 파형을 넣기 때문입니다. 그래서 DQ5 로 고른 효과음 가운데 이 파형을 쓰는 것도 소리가 바뀝니다. 회심 `37-0B`·도망 `37-00` 은 목소리 7 의 첫 음이 잡음이고, 그 뒤 음(snes9x 실측: 도망 목소리 7 SRCN 의 BRR 이 롬의 파형 `20`)이 바뀐 파형입니다. 장면 판정은 첫 울림의 바탕만 보므로 이 둘은 통과합니다.
