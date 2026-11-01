@@ -108,51 +108,95 @@ def unset_env(needs, environ=os.environ):
 PLACEHOLDER = re.compile(r'<[^<>]+>')
 
 
+def made_paths(run):
+    """마지막 단계 앞의 단계들이 --out 으로 만드는 경로(파일 또는 폴더)."""
+    return [m for st in run.split('&&')[:-1] for m in re.findall(r'--out\s+(\S+)', st)]
+
+
+def under(path, base):
+    p, b = PurePosixPath(path).parts, PurePosixPath(base).parts
+    return p[:len(b)] == b
+
+
 def rom_of(run):
-    """명령의 마지막 단계(검사)가 읽는 --rom 경로. 앞 단계가 만드는 롬이면 None(돌리기 전엔 알 수 없음)."""
-    stages = run.split('&&')
-    m = re.search(r'--rom\s+(\S+)', stages[-1])
+    """마지막 단계(검사)가 읽는 --rom 경로. 앞 단계가 만드는 롬이면 None(돌리기 전엔 알 수 없음)."""
+    m = re.search(r'--rom\s+(\S+)', run.split('&&')[-1])
     if not m:
         return None
-    rom = m[1]
-    built = any(re.search(rf'--out\s+{re.escape(str(PurePosixPath(rom).parent))}(?:\s|$)', st) for st in stages[:-1])
-    return None if built else rom
+    return None if any(under(m[1], d) for d in made_paths(run)) else m[1]
 
 
 def builds(run):
     """마지막 단계 앞에 --out 으로 무언가를 만드는 단계가 있는지(롬 빌드)."""
-    return any(re.search(r'--out\s', st) for st in run.split('&&')[:-1])
+    return bool(made_paths(run))
 
 
 def out_dirs(run):
-    """마지막 단계의 --out 가운데 work/ 아래 폴더(검사 출력. 돌리기 전에 비운다)."""
+    """마지막 단계의 --out 가운데 work/<이름>… 폴더(검사 출력. 돌리기 전에 비운다). work 자체와 공유 캐시는 뺀다."""
     stage = run.split('&&')[-1]
-    return [d for d in re.findall(r'--out\s+(\S+)', stage) if PurePosixPath(d).parts[:1] == ('work',)
-            and '..' not in PurePosixPath(d).parts]
+    keep = []
+    for d in re.findall(r'--out\s+(\S+)', stage):
+        parts = PurePosixPath(d).parts
+        if len(parts) >= 2 and parts[0] == 'work' and parts[1] != 'cache' and '..' not in parts:
+            keep.append(d)
+    return keep
+
+
+def hash_path(h, path):
+    """파일은 내용, 폴더는 그 안 파일들의 상대 경로와 내용. 없으면 표시만."""
+    path = Path(path)
+    if path.is_file():
+        h.update(hashlib.sha1(path.read_bytes()).digest())
+    elif path.is_dir():
+        for f in sorted(p for p in path.rglob('*') if p.is_file()):
+            h.update(str(f.relative_to(path)).encode() + hashlib.sha1(f.read_bytes()).digest())
+    else:
+        h.update(b'-')
+
+
+def env_names(needs):
+    """needs 글에 나오는 환경 변수 이름(설명문 안의 LIBRETRO_BSNES 같은 것도)."""
+    return sorted({n for item in needs for n in re.findall(r'\b[A-Z][A-Z0-9_]{2,}\b', item)})
 
 
 def input_key(check, root=ROOT, environ=os.environ):
-    """같은 입력이면 같은 키. .md 는 롬·검사에 영향이 없어 뺀다."""
+    """같은 입력이면 같은 키. .md 는 롬·검사에 영향이 없어 뺀다.
+    추적 파일, 명령, needs 환경 변수가 가리키는 파일·폴더 내용, rom/ 원본, 명령이 읽는 파일(앞 단계가 만드는 것 빼고)."""
     h = hashlib.sha256()
-    h.update(check['run'].encode())
+    run = check['run']
+    h.update(run.encode())
     for line in git('ls-files', '-s', '--', '.', ':!*.md').splitlines():
         h.update(line.encode())
     for f in sorted(x for x in git('diff', '--name-only', 'HEAD').splitlines() if x and not x.endswith('.md')):
-        path = root / f
-        h.update(f.encode() + (path.read_bytes() if path.is_file() else b'-'))
-    for n in check.get('needs', []):
-        if ENV.match(n):
-            h.update(f'{n}={environ.get(n, "")}'.encode())
-    rom = rom_of(check['run'])
-    if rom:
-        path = root / rom
-        h.update(hashlib.sha1(path.read_bytes()).hexdigest().encode() if path.is_file() else b'no-rom')
+        h.update(f.encode())
+        hash_path(h, root / f)
+    for n in env_names(check.get('needs', [])):
+        v = environ.get(n, '')
+        h.update(f'{n}={v}'.encode())
+        if v:
+            hash_path(h, v)
+    hash_path(h, root / 'rom')
+    made = made_paths(run) + out_dirs(run)
+    for tok in sorted(set(re.findall(r'(?<![\w/])(work/\S+|rom/\S+)', run))):
+        if not any(under(tok, d) for d in made):
+            h.update(tok.encode())
+            hash_path(h, root / tok)
     return h.hexdigest()
 
 
 def cache_dir():
     common = Path(git('rev-parse', '--path-format=absolute', '--git-common-dir').strip())
     return common.parent / 'work' / 'cache' / 'guards'
+
+
+RUNNING = set()
+
+
+def kill_group(proc):
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
 
 
 def run_check(check, timeout, logs):
@@ -176,12 +220,16 @@ def run_check(check, timeout, logs):
     with log.open('w', encoding='utf-8') as out:
         proc = subprocess.Popen(['bash', '-c', run], cwd=ROOT, stdout=out, stderr=subprocess.STDOUT,
                                 start_new_session=True)
+        RUNNING.add(proc)
         try:
             code = proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            os.killpg(proc.pid, signal.SIGKILL)
-            proc.wait()
             return 'failed', f'{timeout}초 안에 끝나지 않음, 로그 {shown}'
+        finally:
+            # 명령이 남긴 백그라운드 자식까지 그룹째 정리
+            kill_group(proc)
+            proc.wait()
+            RUNNING.discard(proc)
     secs = round(time.time() - t0)
     if code:
         return 'failed', f'종료 코드 {code}, 로그 {shown}'
@@ -189,9 +237,11 @@ def run_check(check, timeout, logs):
     rom = m[1] if m else None
     detail = f'{secs}초' + (f', 롬 SHA-1 {hashlib.sha1((ROOT / rom).read_bytes()).hexdigest()[:8]}'
                            if rom and (ROOT / rom).is_file() else '')
-    hit.parent.mkdir(parents=True, exist_ok=True)
-    hit.write_text(json.dumps({'when': time.strftime('%Y-%m-%d %H:%M'), 'detail': detail}, ensure_ascii=False),
-                   encoding='utf-8')
+    # 도는 동안 입력이 바뀌었으면 그 결과는 어느 입력의 것인지 모르므로 캐시하지 않는다
+    if input_key(check) == key:
+        hit.parent.mkdir(parents=True, exist_ok=True)
+        hit.write_text(json.dumps({'when': time.strftime('%Y-%m-%d %H:%M'), 'detail': detail}, ensure_ascii=False),
+                       encoding='utf-8')
     return 'passed', detail
 
 
@@ -207,9 +257,18 @@ def run_all(hit, parallel, timeout):
         return c, status, detail
     # 롬을 스스로 빌드하는 검사는 다른 검사가 읽는 롬을 다시 쓸 수 있어 먼저 홀로 돌린다
     builders = [c for c in hit if builds(c['run'])]
-    done = [one(c) for c in builders]
-    with concurrent.futures.ThreadPoolExecutor(max(1, parallel)) as pool:
-        done += list(pool.map(one, [c for c in hit if c not in builders]))
+    pool = concurrent.futures.ThreadPoolExecutor(max(1, parallel))
+    try:
+        done = [one(c) for c in builders]
+        futures = [pool.submit(one, c) for c in hit if c not in builders]
+        done += [f.result() for f in futures]
+    except BaseException:
+        # Ctrl-C 등: 도는 검사 그룹을 모두 끄고 남은 일을 버린다
+        for proc in list(RUNNING):
+            kill_group(proc)
+        pool.shutdown(wait=False, cancel_futures=True)
+        raise
+    pool.shutdown()
     print('\nPR 본문 결과 줄:')
     for c, status, detail in done:
         mark, word = ('x', '통과') if status == 'passed' else (' ', '실패' if status == 'failed' else '돌리지 않음')

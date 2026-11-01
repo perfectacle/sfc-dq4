@@ -97,6 +97,33 @@ class RunTest(unittest.TestCase):
         self.assertFalse(guards.builds(walk))
         self.assertEqual(guards.out_dirs('c.py --out /elsewhere --out work/../x'), [])
 
+    def test_review_cases(self):
+        window = ('X=$PWD/work/wc/wn.sym uv run m.py build --rom work/ch1/o.sfc --out work/wc/menu.sfc'
+                  ' && uv run w.py --rom work/wc/menu.sfc --out work/wc/out')
+        self.assertIsNone(guards.rom_of(window))
+        self.assertEqual(guards.out_dirs('c.py --out work --out work/cache/guards --out work/ok'), ['work/ok'])
+        self.assertEqual(guards.env_names(['rom', '코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X)', 'MESENCE']),
+                         ['LIBRETRO_BSNES', 'LIBRETRO_SNES9X', 'MESENCE'])
+
+    def test_key_follows_input_files(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'work').mkdir()
+            (root / 'work' / 'a.sfc').write_bytes(b'1')
+            (root / 'tool').write_bytes(b'v1')
+            check = {'run': 'x.py --rom work/a.sfc --out work/o', 'needs': ['TOOL_BIN']}
+            env = {'TOOL_BIN': str(root / 'tool')}
+            k1 = guards.input_key(check, root, env)
+            (root / 'work' / 'o').mkdir()
+            (root / 'work' / 'o' / 'junk').write_bytes(b'z')
+            self.assertEqual(guards.input_key(check, root, env), k1)
+            (root / 'tool').write_bytes(b'v2')
+            k2 = guards.input_key(check, root, env)
+            self.assertNotEqual(k2, k1)
+            (root / 'work' / 'a.sfc').write_bytes(b'2')
+            self.assertNotEqual(guards.input_key(check, root, env), k2)
+
     def test_run_check_caches_passes_only(self):
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
