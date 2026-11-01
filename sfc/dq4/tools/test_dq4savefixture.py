@@ -1,7 +1,9 @@
 """롬 없이: 체크섬, 칸 배치, 머리, 금화·flag·자리 쓰기 위치(합성 바이트). 1장 롬(work/ch1/dq4-ch1-full.sfc,
 DQ4_CH1_ROM 으로 바꿈)이 있으면 이어 할 자리 표 읽기도."""
 import os
+import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import dq4ch1walkcheck as wc
@@ -124,6 +126,48 @@ class SlotTest(unittest.TestCase):
         self.assertEqual(blk[SUM_AT] | blk[SUM_AT + 1] << 8, checksum(blk))
         # 7E:2019 는 워드 2018 의 윗바이트
         self.assertEqual(checksum(blk), 0x100)
+
+
+class CacheKeyTest(unittest.TestCase):
+    def test_key_follows_rom_core_and_inputs(self):
+        with tempfile.TemporaryDirectory() as d:
+            rom, core = Path(d) / 'r.sfc', Path(d) / 'c.dylib'
+            rom.write_bytes(b'rom')
+            core.write_bytes(b'core')
+            base = fx.new_game_key(rom, core)
+            self.assertEqual(base, fx.new_game_key(rom, core))
+            core.write_bytes(b'core2')
+            self.assertNotEqual(base, fx.new_game_key(rom, core))
+            core.write_bytes(b'core')
+            rom.write_bytes(b'rom2')
+            self.assertNotEqual(base, fx.new_game_key(rom, core))
+            rom.write_bytes(b'rom')
+            for name, value in (('NEW_GAME_FRAMES', 1), ('NEW_GAME_TAP', (40, 5)), ('NEW_GAME_YS', ())):
+                with mock.patch.object(fx, name, value):
+                    self.assertNotEqual(base, fx.new_game_key(rom, core), name)
+            with mock.patch.object(fx.pc, 'TAP_UNTIL', 1):
+                self.assertNotEqual(base, fx.new_game_key(rom, core))
+
+
+class LoadSramTest(unittest.TestCase):
+    class Fake:
+        """bsnes 처럼 SRAM 포인터가 없고 직렬화 상태에서만 읽히는 코어."""
+        name = 'fake'
+
+        def __init__(self, state):
+            self.state = state
+            self.lib = mock.Mock()
+            self.lib.retro_get_memory_size.return_value = 0
+
+        def save(self):
+            return self.state, 0
+
+    def test_mismatch_is_refused(self):
+        sram = fx.frame_sram({0: bytes(SLOT_SIZE)})
+        state = bytes(fx.BSNES_SRAM_OFFSET) + sram
+        fx.load_sram(self.Fake(state), sram)
+        with self.assertRaises(RuntimeError):
+            fx.load_sram(self.Fake(bytes(len(state))), sram)
 
 
 @unittest.skipUnless(CH1.exists(), 'work/ch1/dq4-ch1-full.sfc(dq4build.py) 또는 DQ4_CH1_ROM')

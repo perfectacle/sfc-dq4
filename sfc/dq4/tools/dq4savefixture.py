@@ -4,7 +4,8 @@ sfc/dq4/docs/dq4-savefixture-format.md.
 
 - SRAM 형식은 DQ5 그대로(sfc/dq5/tools/dq5sram.py): 칸 하나 = WRAM 7E:2000~2A9F, 끝 워드가 체크섬(25:8450).
   켤 때 25:81CF 가 체크섬이 틀린 칸을 지운다.
-- 밑판은 새 게임이 첫 기록을 쓴 SRAM(snes9x 로 롬마다 한 번 돌려 원래 체크아웃 work/cache/states/ 에 둔다).
+- 밑판은 새 게임이 첫 기록을 쓴 SRAM(snes9x 로 롬·코어·새 게임 입력마다 한 번 돌려 원래 체크아웃
+  work/cache/states/ 에 둔다).
 - 이어 할 자리: 7E:2033 bit0-6 = ルーラ 칸, 25:85D5[칸] = 그룹, 25:8621 의 6바이트 항목([BC][BD][X][Y][층][198E])
   중 그 그룹의 첫 것(없으면 항목 0). bit7 이 서 있으면 밤(25:8278 이 시각 075E 를 0190, 아니면 0050 으로).
 - 저장되지 않는 것(난수 075B~D, 시각, 주인공 칸·방향, 인물 위치)은 boot 뒤 core.poke 나
@@ -22,6 +23,7 @@ sfc/dq4/docs/dq4-savefixture-format.md.
   close(core)                            # 다음 Core 를 열기 전에(헤드리스 자리도 놓음)
 """
 import argparse
+import contextlib
 import ctypes as C
 import hashlib
 import json
@@ -54,6 +56,10 @@ SLOT_TABLE, SLOT_TABLE_ALT, SLOT_COUNT = 0x2585D5, 0x2585EB, 22
 PLACE_TABLE, PLACE_ROW = 0x258621, 6
 # 새 게임 첫 기록은 약 964프레임에 쓰인다(snes9x). 넉넉히 기다린다
 NEW_GAME_FRAMES = 1500
+# dq4compatcheck.Walker.boot 와 같은 부팅 입력(서장 검사의 새 게임): Y 를 이 프레임들에 2프레임씩, 그 밖에는
+# pc.TAP_UNTIL 앞까지 40프레임마다 A 를 4프레임
+NEW_GAME_YS = tuple((f, 2) for f in range(900, 1600, 150))
+NEW_GAME_TAP = (40, 4)
 # bsnes 115 는 SRAM 을 retro_get_memory_data 로 내주지 않고(nullptr), 저장 폴더의 <롬>.srm 을 켤 때 읽는다.
 # 직렬화 상태 안 SRAM 자리(.srm 에 넣은 8KB 가 그대로 나오는 곳을 찾아 잼)
 BSNES_SRAM_OFFSET = 558
@@ -312,13 +318,30 @@ def open_core(core_path, rom, sysdir, sram=None):
         srm.unlink()
     core = Core(str(core_path), str(rom), str(sysdir))
     if sram is not None:
-        view = sram_ptr(core)
-        if view is not None:
-            C.memmove(view, sram, SIZE)
-        if read_sram(core) != sram:
+        try:
+            load_sram(core, sram)
+        except BaseException:
             close(core)
-            raise RuntimeError(f'{core.name}: 넣은 SRAM 이 코어에 보이지 않음')
+            raise
     return core
+
+
+def load_sram(core, sram):
+    """열린 코어에 SRAM 을 넣고(snes9x 는 포인터에 씀, bsnes 는 열 때 읽은 .srm) 그대로 보이는지 맞춰 본다."""
+    view = sram_ptr(core)
+    if view is not None:
+        C.memmove(view, sram, SIZE)
+    if read_sram(core) != sram:
+        raise RuntimeError(f'{core.name}: 넣은 SRAM 이 코어에 보이지 않음')
+
+
+@contextlib.contextmanager
+def closing(core):
+    """with 블록이 예외로 끝나도 close 한다."""
+    try:
+        yield core
+    finally:
+        close(core)
 
 
 def close(core):
@@ -349,32 +372,39 @@ def boot(core, goal, settle=90, step=None):
     return arrived
 
 
+def new_game_key(rom_path, core_path):
+    """밑판 캐시 키: 롬 SHA-1, 코어 SHA-256, 새 게임 입력. 어느 하나가 바뀌면 칸 내용이 달라질 수 있다."""
+    h = hashlib.sha1()
+    h.update(hashlib.sha1(Path(rom_path).read_bytes()).digest())
+    h.update(dq4cores.sha256(core_path).encode())
+    h.update(repr((NEW_GAME_YS, pc.TAP_UNTIL, NEW_GAME_TAP, NEW_GAME_FRAMES, ARRIVE_FROM)).encode())
+    return h.hexdigest()
+
+
 def new_game_sram(rom_path, core_path=None):
-    """새 게임이 첫 기록을 쓴 SRAM. 롬 SHA-1 마다 한 번 snes9x 로 돌려 cache_dir() 에 둔다."""
+    """새 게임이 첫 기록을 쓴 SRAM. 롬·코어·입력(new_game_key)마다 한 번 snes9x 로 돌려 cache_dir() 에 둔다."""
     rom_path = Path(rom_path)
-    sha = hashlib.sha1(rom_path.read_bytes()).hexdigest()
-    path = cache_dir() / f'savefixture-newgame-{sha}.srm'
+    core_path = core_path or dq4cores.core_path('snes9x')
+    key = new_game_key(rom_path, core_path)
+    path = cache_dir() / f'savefixture-newgame-{key}.srm'
     if path.exists():
         return path.read_bytes()
-    core_path = core_path or dq4cores.core_path('snes9x')
-    work = cache_dir() / f'savefixture-newgame-{sha}-{os.getpid()}'
-    core = open_core(core_path, rom_path, work)
-    # dq4compatcheck.Walker.boot 와 같은 부팅 입력(서장 검사의 새 게임)
-    ys = [(f, 2) for f in range(900, 1600, 150)]
+    work = cache_dir() / f'savefixture-newgame-{key}-{os.getpid()}'
+    period, held_for = NEW_GAME_TAP
     held = set()
     written = None
-    for n in range(1, NEW_GAME_FRAMES + 1):
-        core.run(held)
-        held = ({'y'} if any(f <= n < f + ln for f, ln in ys) else
-                {'a'} if n < pc.TAP_UNTIL and n % 40 < 4 else set())
-        s = read_sram(core)
-        if written is None and n >= ARRIVE_FROM and saved_slots(s):
-            written = n
-        if written is not None and n >= written + 30:
-            break
+    with closing(open_core(core_path, rom_path, work)) as core:
+        for n in range(1, NEW_GAME_FRAMES + 1):
+            core.run(held)
+            held = ({'y'} if any(f <= n < f + ln for f, ln in NEW_GAME_YS) else
+                    {'a'} if n < pc.TAP_UNTIL and n % period < held_for else set())
+            s = read_sram(core)
+            if written is None and n >= ARRIVE_FROM and saved_slots(s):
+                written = n
+            if written is not None and n >= written + 30:
+                break
     if written is None:
         raise RuntimeError(f'{NEW_GAME_FRAMES} 프레임 안에 새 게임이 기록을 쓰지 않음')
-    close(core)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(f'.{os.getpid()}.tmp')
     tmp.write_bytes(s)
@@ -415,12 +445,11 @@ def check_core(name, rom, out):
 
     runs = []
     for tag in ('a', 'b'):
-        core = open_core(path, rom, out / tag, sram)
-        res['core'] = core.name
-        at = boot(core, goal)
-        runs.append((at, bytes(core.wram()[:0x20000]), wram_summary(core)))
-        core.shot(out / f'{tag}.png')
-        close(core)
+        with closing(open_core(path, rom, out / tag, sram)) as core:
+            res['core'] = core.name
+            at = boot(core, goal)
+            runs.append((at, bytes(core.wram()[:0x20000]), wram_summary(core)))
+            core.shot(out / f'{tag}.png')
     at, w, loaded = runs[0]
     res['arrived'] = at
     if at is None:
@@ -441,50 +470,46 @@ def check_core(name, rom, out):
 
     night = SaveSlot(slot.block, slot.rom)
     night.night = True
-    core = open_core(path, rom, out / 'night', night.to_sram())
-    at = boot(core, goal, settle=0)
-    res['night'] = {'arrived': at, 'time': f'{core.rd(0x7E075E, 2):04X}'}
-    if at is None or core.rd(0x7E075E, 2) != NIGHT_TIME:
+    with closing(open_core(path, rom, out / 'night', night.to_sram())) as core:
+        at = boot(core, goal, settle=0)
+        res['night'] = {'arrived': at, 'time': f'{core.rd(0x7E075E, 2):04X}'}
+    if at is None or res['night']['time'] != f'{NIGHT_TIME:04X}':
         problems.append(f'(a) 밤 칸이 밤 시각으로 서지 않음: {res["night"]}')
-    close(core)
 
     bad_sum = bytearray(sram)
     bad_sum[SLOTS[0] + SUM_AT] ^= 0x01
-    core = open_core(path, rom, out / 'nosum', bytes(bad_sum))
-    # 칸은 켤 때가 아니라 타이틀을 넘겨 기록 목록을 고를 때(snes9x 397프레임) 지워진다
+    # 칸은 켤 때가 아니라 타이틀을 넘겨 기록 목록을 고를 때(398프레임) 지워진다
     script = [b for b, f in CONTINUE for _ in range(f)]
     erased = None
-    while core.n < NOSUM_FRAMES:
-        b = script[core.n]
-        core.run(set() if b == 'wait' else {b})
-        after = read_sram(core)
-        if erased is None and not after[USED] & 1 and not any(after[SLOTS[0]:SLOTS[0] + SLOT_SIZE]):
-            erased = core.n
+    with closing(open_core(path, rom, out / 'nosum', bytes(bad_sum))) as core:
+        while core.n < NOSUM_FRAMES:
+            b = script[core.n]
+            core.run(set() if b == 'wait' else {b})
+            after = read_sram(core)
+            if erased is None and not after[USED] & 1 and not any(after[SLOTS[0]:SLOTS[0] + SLOT_SIZE]):
+                erased = core.n
     res['nosum_erased'] = erased
     if erased is None:
         problems.append(f'(b) 체크섬이 틀린 칸이 {NOSUM_FRAMES} 프레임 안에 지워지지 않음(쓰는 칸 {after[USED]:02X})')
-    close(core)
 
     wout = out / 'warp'
     wout.mkdir(exist_ok=True)
     # Walker 는 out/c.sfc 를 out 을 저장 폴더로 연다: bsnes 가 읽을 c.srm 을 먼저 둔다
     (wout / 'c.srm').write_bytes(sram)
     walker = cc.Walker(str(path), rom, wout)
-    view = sram_ptr(walker.c)
-    if view is not None:
-        C.memmove(view, sram, SIZE)
-    at = boot(walker.c, goal, step=walker.step)
-    if at is None:
-        problems.append('(d) 순간이동 앞 이어 하기에서 서지 않음')
-    else:
-        maps = walker.warp(CHECK_WARP, wc.pins({}), cc.sets(wc.pins({})))
-        res['warp'] = {**wram_summary(walker.c), 'frame': walker.c.n}
-        if maps[-1] != CHECK_WARP[:5]:
-            problems.append(f'(d) 순간이동이 {maps[-1]} 에 섬(기대 {CHECK_WARP[:5]})')
-        if 'HOIMIN' not in res['warp']['flags'] or res['warp']['gold'] != 12345 or res['warp']['party'] != 2:
-            problems.append(f'(d) 순간이동 뒤 일행·flag·금화가 바뀜: {res["warp"]}')
-        walker.c.shot(wout / 'end.png')
-    close(walker.c)
+    with closing(walker.c):
+        load_sram(walker.c, sram)
+        at = boot(walker.c, goal, step=walker.step)
+        if at is None:
+            problems.append('(d) 순간이동 앞 이어 하기에서 서지 않음')
+        else:
+            maps = walker.warp(CHECK_WARP, wc.pins({}), cc.sets(wc.pins({})))
+            res['warp'] = {**wram_summary(walker.c), 'frame': walker.c.n}
+            if maps[-1] != CHECK_WARP[:5]:
+                problems.append(f'(d) 순간이동이 {maps[-1]} 에 섬(기대 {CHECK_WARP[:5]})')
+            if 'HOIMIN' not in res['warp']['flags'] or res['warp']['gold'] != 12345 or res['warp']['party'] != 2:
+                problems.append(f'(d) 순간이동 뒤 일행·flag·금화가 바뀜: {res["warp"]}')
+            walker.c.shot(wout / 'end.png')
     res.update(status='failed' if problems else 'passed', problems=problems, seconds=round(time.time() - t0, 1),
                core_sha256=dq4cores.sha256(path))
     return res

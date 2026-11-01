@@ -12,7 +12,7 @@
 | `0012`, `0AB2`, `1552` | 칸 1~3, 칸마다 `AA0` 바이트 = WRAM `7E:2000`~`2A9F` 그대로 |
 | 칸 `+A9E` | 체크섬: 앞 `54F` 워드의 16비트 합(`25:8450`) |
 
-맨바닥 SRAM 에 머리 두 곳, `000E` = `01`, 상태 `C0`, 칸 1 하나만 두어도 이어 하기가 정상으로 돕니다(snes9x·bsnes). 칸의 내용은 새 게임이 첫 기록을 쓴 칸을 밑판으로 씁니다. 새 게임은 약 964프레임에 칸 2 를 씁니다(서장 검사와 같은 부팅 입력). 밑판은 저장소에 넣지 않고, 롬 SHA-1 마다 한 번 snes9x 로 만들어 원래 체크아웃의 `work/cache/states/savefixture-newgame-<SHA-1>.srm` 에 둡니다(`DQ4_STATES_CACHE` 로 바꿈).
+맨바닥 SRAM 에 머리 두 곳, `000E` = `01`, 상태 `C0`, 칸 1 하나만 두어도 이어 하기가 정상으로 돕니다(snes9x·bsnes). 칸의 내용은 새 게임이 첫 기록을 쓴 칸을 밑판으로 씁니다. 새 게임은 약 964프레임에 칸 2 를 씁니다(서장 검사와 같은 부팅 입력). 밑판은 저장소에 넣지 않고 snes9x 로 한 번 만들어 원래 체크아웃의 `work/cache/states/savefixture-newgame-<키>.srm` 에 둡니다(`DQ4_STATES_CACHE` 로 바꿈). 키는 롬 SHA-1, snes9x 코어 파일 SHA-256, 새 게임 입력(Y 를 누르는 프레임, A 연타 주기와 끝 프레임, 기다리는 프레임 수)을 묶은 해시입니다. 셋 중 하나만 바뀌어도 칸 내용이 달라질 수 있어 다시 만듭니다(`new_game_key`).
 
 체크섬이 틀린 칸은 켤 때가 아니라 타이틀을 넘겨 기록 목록을 고를 때 지워집니다. 두 코어 모두 398프레임에 `000E` 의 칸 비트가 꺼지고 칸 `AA0` 바이트가 0 이 됐고, 그 뒤 새 게임이 시작했습니다.
 
@@ -96,7 +96,7 @@ arrived = fx.boot(core, slot.goal)        # 맵에 선 프레임, 그 뒤 90프�
 core.poke(dq4compatcheck.sets(dq4ch1walkcheck.pins({})))   # 난수·시각을 걷기 검사와 같이
 ```
 
-`dq4compatcheck.Walker` 와 함께 쓸 때는 `Walker` 가 `out/c.sfc` 를 `out` 을 저장 폴더로 여므로, 만들기 전에 `out/c.srm` 을 두고 `boot(walker.c, goal, step=walker.step)` 으로 부릅니다.
+`dq4compatcheck.Walker` 와 함께 쓸 때는 `Walker` 가 `out/c.sfc` 를 `out` 을 저장 폴더로 여므로, 만들기 전에 `out/c.srm` 을 두고 `load_sram(walker.c, sram)`(넣은 SRAM 이 보이는지 확인) 뒤 `boot(walker.c, goal, step=walker.step)` 으로 부릅니다. `with closing(core):` 를 쓰면 예외로 끝나도 코어를 닫습니다.
 
 이어 하기 입력은 start 2프레임, 10프레임 쉼, 그 뒤 A 2프레임·14프레임 쉼을 되풀이합니다. 맵에 서는 것은 432~445프레임, 화면이 밝아지는 것은 약 502~525프레임입니다. 도착은 맵·칸(`7E:00BC`·`00BD`·`3020`·`3080`)이 표의 자리와 같아진 첫 프레임으로 봅니다. `7E:2000` 블록을 기록 칸과 견주면 켤 때 `25:81CF` 가 칸을 WRAM 에 미리 불러 516프레임 무렵 거짓으로 같아지므로 쓰지 않습니다. 300프레임 전에는 보지 않습니다.
 
