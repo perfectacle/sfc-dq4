@@ -118,12 +118,11 @@ class CancelBackTest(unittest.TestCase):
         no = ASM[ASM.index('ShopBuyConfirm:'):ASM.index('ShopBuyEquip:')]
         self.assertIn('JMP $DC37', no)
         self.assertNotIn('JMP $DC2F', no)
-        self.assertNotIn('$97, $13', no[no.index('.no'):])
+        self.assertIn('$97, $13', no[no.index('.no'):])
         # 팔기 「아니요」 는 사기/팔기 창(06:DF50) 대신 같은 사람의 팔기 목록(06:DEC6)으로
         self.assertRegex(ASM, r'org \$06DF48\n    JMP ShopSellNo')
         body = ASM[ASM.index('ShopSellNo:'):ASM.index('assert pc() <= !shop_qty_end')]
-        self.assertNotIn('$97, $13', body)
-        for need in ('STZ.w $0F2C', 'db $00, $95, $00', 'LDA #$18', 'JSR $DFC4', 'JMP $DEC9'):
+        for need in ('STZ.w $0F2C', 'db $00, $95, $00', 'LDA #$18', 'JSR $DFC4', 'JMP $DEC6'):
             self.assertIn(need, body)
 
 
