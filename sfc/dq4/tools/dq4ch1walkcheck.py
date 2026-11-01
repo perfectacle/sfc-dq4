@@ -179,10 +179,20 @@ def prologue_inputs():
     return repr((sorted(PROLOGUE_START.items()), SEGMENTS[0], pins(SEGMENTS[0][3], 0), NO_ENCOUNTERS))
 
 
+def prologue_files():
+    """서장 끝 상태·주인공 막힘 출발 상태를 만드는 데 닿는 파일: 이 검사와 부르는 Python, 띄우는 Lua 전부(저장소의
+    tools/lua·sfc/dq4/tools/lua·sfc/dq5/tools/lua 와 툴킷 LIBDIR), uv.lock."""
+    import dq5exitcheck
+    py = [Path(m.__file__) for m in (sys.modules[__name__], pc, mesen, ev, ch2, box, dq5exitcheck)]
+    lua = [ROOT / 'tools' / 'lua', HERE / 'lua', DQ5_TOOLS / 'lua']
+    if os.environ.get('LIBDIR'):
+        lua.append(Path(os.environ['LIBDIR']))
+    return py + sorted(f for d in lua if d.is_dir() for f in d.rglob('*.lua')) + [ROOT / 'uv.lock']
+
+
 def code_key(mesence, *extra):
-    """서장을 걷는 데 닿는 코드·도구·입력 상수·에뮬레이터의 지문. 하나라도 바뀌면 캐시를 새로 만든다."""
-    return fingerprint(Path(__file__), Path(pc.__file__), Path(mesen.__file__), WALK, WALK_STATE, pc.MKSTATE,
-                       ROOT / 'uv.lock', mesence_stamp(mesence), prologue_inputs(), *extra)
+    """서장을 걷는 데 닿는 코드·Lua·입력 상수·에뮬레이터의 지문. 하나라도 바뀌면 캐시를 새로 만든다."""
+    return fingerprint(*prologue_files(), mesence_stamp(mesence), prologue_inputs(), *extra)
 
 
 def states_root():
@@ -200,12 +210,19 @@ class StateCache:
     def path(self, kind, key, ext):
         return self.folder / f'{kind}-{key}{ext}'
 
-    def get(self, kind, key, ext):
-        """(상태 파일, 만들 때의 결과) 또는 None. 결과 .json 을 상태보다 나중에 쓰므로 .json 이 있으면 상태도 온전하다."""
+    def get(self, kind, key, ext, dest=None):
+        """(상태 파일, 만들 때의 결과) 또는 None. 결과 .json 을 상태보다 나중에 쓰므로 .json 이 있으면 상태도 온전하다.
+        dest 를 주면 걸었을 때와 같은 자리(앞 출력/prologue/end.mss 등)에 복사해 그 경로를 돌려준다. --base·--states 로
+        앞 출력을 다시 쓰는 흐름이 캐시 적중 때도 그대로 되게 하려는 것이다."""
         state, meta = self.path(kind, key, ext), self.path(kind, key, '.json')
         if not (state.exists() and meta.exists()):
             return None
-        return state, json.loads(meta.read_text(encoding='utf-8'))
+        result = json.loads(meta.read_text(encoding='utf-8'))
+        if dest:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(state, dest)
+            state = dest
+        return state, result
 
     def put(self, kind, key, ext, src, result):
         """다른 워크트리가 동시에 읽어도 반쯤 쓴 파일을 보지 않게 임시 파일에 쓰고 os.replace 로 바꿔 넣는다."""
@@ -354,11 +371,18 @@ def frames(waypoints):
     return total
 
 
+# 검사가 띄우는 Lua(mkstate·walk·dq4walkstate·dq5warp·dq5msg 와 툴킷 LIBDIR 의 boot·lib·seq 등)가 읽는 환경 변수.
+# 셸에 남은 값이 섞이면 같은 롬·같은 코드라도 다르게 돌아 서장 캐시가 틀린 상태를 나눠 주므로, 넘기는 값만 쓴다
+LUA_ENV = frozenset('''
+    ACCESS ADULT AFTER ANYWHERE BATTLE BG3FONT CALLS CHANGES COVER DUMP EVERY FIELD GROUP HOLD LATESET LOG MAXF
+    OAMDUMP OUT PARTY PERIOD POKE PRE ROMPATCH SAVE SAVEAT SCRIPT SEQ SET SETTLE SHOTS SHOT_DIR SRM STATE TAIL TAP
+    TAPUNTIL TEST TO VMADD VRAMDUMP WAGON WALK WARPEXIT WATCH WATCH_FMT WATCH_WRAM WAYPOINTS WRAMWATCH WRAMWATCHBY
+    WRAMWATCHREAD WW WWFROM WWRANGE'''.split())
+
+
 def run(mesence, rom, script, dest, env, timeout):
     dest.mkdir(parents=True, exist_ok=True)
-    full = {k: v for k, v in os.environ.items()
-            if k not in ('ADULT', 'ANYWHERE', 'BATTLE', 'FIELD', 'GROUP', 'LATESET', 'PARTY', 'POKE', 'ROMPATCH',
-                         'SAVE', 'SET', 'WAGON', 'TEST', 'TO', 'PRE', 'WAYPOINTS', 'WATCH', 'CHANGES', 'AFTER')}
+    full = {k: v for k, v in os.environ.items() if k not in LUA_ENV}
     full.update(env, SHOT_DIR=str(dest))
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
         try:
@@ -473,7 +497,7 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0):
 
 def prologue_start(mesence, rom, out):
     """전원부터 새 게임 첫 장면까지 걸어 서장 시작 세이브스테이트를 만든다."""
-    pc.run(mesence, rom, pc.MKSTATE, out / 'start', PROLOGUE_START, 200)
+    run(mesence, rom, pc.MKSTATE, out / 'start', PROLOGUE_START, 200)
     state = out / 'start' / 'start.mss'
     if not state.exists():
         raise SystemExit('세이브스테이트를 만들지 못함')
@@ -508,11 +532,11 @@ def prologue(mesence, rom, data, out, segments, cache=None):
     """서장 끝 세이브스테이트와 서장 구간 결과. 서장은 늘 시드 0 이라 시드와 상관없이 하나를 나눠 쓴다.
     cache(StateCache)에 같은 롬·같은 코드로 만든 것이 있으면 걷지 않고 그것을 쓴다."""
     key = code_key(mesence) if cache else None
-    hit = cache.get('prologue', key, '.mss') if cache else None
-    if hit:
-        return hit[0], {**hit[1], 'cached': hit[0].name}
-    r = walk_unit(mesence, rom, data, out, segments, [0], prologue_start(mesence, rom, out))[-1]
     state = out / segments[0][0] / 'end.mss'
+    hit = cache.get('prologue', key, '.mss', state) if cache else None
+    if hit:
+        return hit[0], {**hit[1], 'cached': cache.path('prologue', key, '.mss').name}
+    r = walk_unit(mesence, rom, data, out, segments, [0], prologue_start(mesence, rom, out))[-1]
     if cache and r['status'] == 'passed':
         cache.put('prologue', key, '.mss', state, r)
     return state, r

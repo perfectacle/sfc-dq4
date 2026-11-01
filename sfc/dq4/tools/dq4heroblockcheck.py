@@ -241,9 +241,9 @@ def make_base(mesence, rom, out, cache=None):
     """서장 첫 장면 → 명령 창 닫기 → 성 마을 36/00. 사례마다 여기서 사건 맵으로 옮긴다. 시드와 상관없이 시드 0 으로
     만들고, cache(dq4ch1walkcheck.StateCache)에 같은 롬·같은 코드로 만든 것이 있으면 그것을 쓴다."""
     key = wc.code_key(mesence, Path(__file__), HUB) if cache else None
-    hit = cache.get('heroblock-hub', key, '.mss') if cache else None
-    if hit:
-        return hit[0], True
+    base = out / 'hub' / 'end.mss'
+    if cache and cache.get('heroblock-hub', key, '.mss', base):
+        return base, True
     start = wc.prologue_start(mesence, rom, out)
     wc.run(mesence, rom, wc.WALK_STATE, out / 'close', {'STATE': str(start), 'WALK': str(wc.WALK),
                                                        'WAYPOINTS': f'{pc.CLOSE};wait:30', 'SAVE': 'end.mss',
@@ -253,11 +253,13 @@ def make_base(mesence, rom, out, cache=None):
         'STATE': str(out / 'close' / 'end.mss'), 'TO': HUB, 'SAVE': 'end.mss', 'SETTLE': '60', 'MAXF': '1500',
         'WARPEXIT': f'{warp_exit(rom):X}', 'ANYWHERE': '1', 'ROMPATCH': wc.NO_ENCOUNTERS, 'SET': pins,
         'LATESET': pins}, 300)
-    base = out / 'hub' / 'end.mss'
     if not base.exists():
         raise SystemExit('출발 상태를 만들지 못함')
-    if cache:
-        cache.put('heroblock-hub', key, '.mss', base, {'name': 'hub'})
+    log = out / 'hub' / 'warp.txt'
+    # 세이브스테이트는 도착하지 못해도 남는다. 도착한 것만 캐시에 두어 다음 실행이 틀린 출발점을 받지 않게 한다
+    arrived = re.search(r'arrived map (\w\w/\w\w)', log.read_text(encoding='utf-8')) if log.exists() else None
+    if cache and arrived and arrived[1] == HUB[:5]:
+        cache.put('heroblock-hub', key, '.mss', base, {'name': 'hub', 'arrived': arrived[1]})
     return base, False
 
 

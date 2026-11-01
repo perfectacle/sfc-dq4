@@ -437,11 +437,12 @@ class Walker:
         groups = wc.units(wc.SEGMENTS)
         # 키: 롬 SHA-1(캐시 폴더) + 코어 SHA-256 + 서장 입력 상수(부팅 입력 START_AT·TAP_UNTIL 포함) + 검사 코드
         key = wc.fingerprint(Path(__file__), Path(dq4libretro.__file__), Path(wc.__file__), Path(pc.__file__),
+                             Path(sys.modules[warp_exit.__module__].__file__),
                              ROOT / 'uv.lock', dq4cores.sha256(core_path), wc.prologue_inputs(),
                              repr((pc.START_AT, pc.TAP_UNTIL))) if cache else None
-        hit = cache.get(kind, key, '.state') if cache else None
+        hit = cache.get(kind, key, '.state', self.out / 'prologue.state') if cache else None
         if hit:
-            base, pro = hit[0], {**hit[1], 'cached': hit[0].name}
+            base, pro = hit[0], {**hit[1], 'cached': cache.path(kind, key, '.state').name}
             print(json.dumps(pro, ensure_ascii=False), flush=True)
         else:
             self.seed = 0

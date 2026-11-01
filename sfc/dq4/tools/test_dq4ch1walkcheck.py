@@ -1,8 +1,11 @@
 import argparse
 import hashlib
+import os
+import re
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import dq4ch1walkcheck as wc
 
@@ -123,6 +126,38 @@ class Ch1WalkCheckTests(unittest.TestCase):
             src.write_bytes(b'other')
             self.assertNotEqual(wc.fingerprint('a', src), wc.fingerprint('a', b'state'.decode()))
             self.assertNotEqual(wc.fingerprint('a', src), wc.fingerprint('b', src))
+
+    def test_state_cache_hit_copies_to_walk_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cache = wc.StateCache(b'rom', root / 'states')
+            src = root / 'src.mss'
+            src.write_bytes(b'state')
+            cache.put('prologue', 'k', '.mss', src, {'status': 'passed'})
+            dest = root / 'out' / 'prologue' / 'end.mss'
+            state, _ = cache.get('prologue', 'k', '.mss', dest)
+            self.assertEqual((state, dest.read_bytes()), (dest, b'state'))
+
+    def test_prologue_files_cover_warp_and_lua(self):
+        files = set(wc.prologue_files())
+        import dq5exitcheck
+        for f in (wc.WARP, wc.WALK, wc.WALK_STATE, wc.pc.MKSTATE, Path(dq5exitcheck.__file__), wc.ROOT / 'uv.lock'):
+            self.assertIn(f, files)
+
+    def test_lua_env_covers_what_launched_lua_reads(self):
+        # 검사가 띄우는 저장소 Lua 가 새 환경 변수를 읽기 시작하면 LUA_ENV 에도 더해야 셸 값이 새지 않는다
+        for f in (wc.WALK, wc.WALK_STATE, wc.WARP, wc.MSG, wc.pc.MKSTATE):
+            names = set(re.findall(r'getenv\([\'"]([A-Z_0-9]+)', f.read_text(encoding='utf-8'))) - {'LIBDIR'}
+            self.assertLessEqual(names, wc.LUA_ENV, f.name)
+
+    def test_run_drops_shell_lua_env(self):
+        seen = {}
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {'SEQ': 'y@1:2', 'HOLD': '9', 'KEEP': '1'}), \
+                mock.patch.object(wc.mesen, 'run', lambda *a, **kw: seen.update(kw['env'])):
+            wc.run(Path('mesen'), Path('rom'), Path('x.lua'), Path(tmp), {'STATE': 's'}, 1)
+        self.assertNotIn('SEQ', seen)
+        self.assertNotIn('HOLD', seen)
+        self.assertEqual((seen['KEEP'], seen['STATE']), ('1', 's'))
 
     def test_prologue_key_covers_inputs(self):
         before = wc.prologue_inputs()
