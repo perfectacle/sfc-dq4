@@ -106,7 +106,9 @@ COUNTER_ATTR = 0x15
 # An opened 2x3 door keeps its top row on the upper layer and 01:FC1E fills one more row above it with upper
 # words; in DQ5 those rows are the wall over the door. FC doors with floor above (14/01 (3,6)) left the party
 # under the floor there, from the floor row above down to the door cell. Attribute pass 2 bit0 (cell +0 bit3) draws a
-# person standing on those cells in front.
+# person standing on those cells in front. The door cells get it whatever is above: opening sets the door cells'
+# +1 bit4-5 to 3, and 2B:B815 then gives every row of a person standing there OAM priority 2, so in a side door
+# (FC wall above and below, walked through sideways) the wall rows above covered the head and body.
 FRONT_PASS = 1
 WATER_FRAMES = ("water0", "water1", "water2")
 WATER_AT = 0x41F000
@@ -353,7 +355,7 @@ def map_document(name, source, local, target):
         if not _prop(source, x, y - 1) & 0x80:
             front |= {(cx, cy) for cy in (y * 2 - 2, y * 2 - 1) for cx in range(x * 2 - 1, x * 2 + 3)
                       if 0 <= cx < width and not _prop(source, cx // 2, cy // 2) & 0x80}
-            front |= {(cx, cy) for cy in (y * 2, y * 2 + 1) for cx in (x * 2, x * 2 + 1)}
+        front |= {(cx, cy) for cy in (y * 2, y * 2 + 1) for cx in (x * 2, x * 2 + 1)}
     # The party walks in half blocks, so it can stand half a block below a pot or chest, and those upper-layer
     # blocks then cover all but its feet (14/01 pots). The two rows below them draw a person in front.
     for x, y in ((x, y) for y in range(source.h - 1) for x in range(source.w)

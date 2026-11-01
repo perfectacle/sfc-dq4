@@ -97,8 +97,8 @@ class MapDocumentTests(unittest.TestCase):
         for cx in (4, 5):
             for cy in (2, 3):
                 self.assertTrue(second[cx, cy] & env.COUNTER_PASS)
-        # 위가 벽인 문, 맨 아래 줄 상자는 인물을 앞에 그리지 않는다
-        self.assertFalse(any(v & env.FRONT_PASS for v in second.values()))
+        # 위가 벽인 문은 문 칸만 인물을 앞에 그린다(옆문에 선 주인공이 위 벽에 가려지지 않게). 맨 아래 줄 상자는 그리지 않는다
+        self.assertEqual({c for c, v in second.items() if v & env.FRONT_PASS}, {(x, y) for y in (2, 3) for x in (2, 3)})
         self.assertFalse(doc['passes'][2]['entries'])
 
     def test_front_cells_around_open_doors_and_below_chests(self):
