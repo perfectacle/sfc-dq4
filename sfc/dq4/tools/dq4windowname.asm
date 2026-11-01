@@ -138,6 +138,7 @@ org $24A5E9
 !wt_klen  = $3DE4           ; 가나 항목마다 1바이트: 칸 수(열 수 × 2)
 !wt_occ   = $3DF0           ; 13바이트: 가나 칸 010~077 의 쓰는 칸 비트(WtOcc 가 그때그때 만듦)
 !wt_tmp   = $3DFE           ; WtAlloc 안에서만: 찾는 칸 수, 찾은 첫 칸
+!wt_hash  = $1D0C           ; WtAlloc 안에서만: 그린 문구 표식. 이름 그리기(WnKorean)의 !wn_s 와 자리를 함께 씀(겹쳐 돌지 않음)
 !wt_slot2 = $3D56           ; 이번에 쓴 슬롯 × 2, FFFF = 명령 창 전용 칸
 !wt_fixkeys = $3EA0         ; 8 워드: 전용 칸에 그린 명령 창·가게 창 문구의 버퍼 자리, 0 = 빈 칸. WtVis 가 안 보이는 것을 지움
 !wt_k     = $3D58           ; 그리는 고정 문구 번호
@@ -153,7 +154,7 @@ org $24A5E9
 !wt_len   = $3D5E           ; 원래 문자열 길이($00). $1D8A 에 두면 16비트 쓰기가 지금 곡 번호 $1D8B 를 00 으로 덮음
 !wq_count = $3D62           ; 우리 전송 대기열 항목 수(7E, NMI 가 보내고 0 으로)
 !wq_off   = $3D64           ; 대기열에 다음으로 쓸 자리
-!wt_vis   = $3DAC           ; 슬롯마다 1바이트: 마지막 창 타일맵 전송 때 보였거나 그 뒤에 그렸으면 1
+!wt_vis   = $3DAC           ; 슬롯마다 1바이트: bit0 = 마지막 창 타일맵 전송 때 보였거나 그 뒤에 그렸음, bit1~7 = 그린 문구 표식
 !wt_xfer  = $3DCA           ; 1바이트: 이번 NMI 에 게임이 보낼 창 타일맵 줄($0BEC 의 bit7·6), NMI 끝에서 WtVis 가 씀
 !wt_ecsave = $3DCC          ; 1바이트: 창 제목을 그리는 동안 맡겨 둔 $EC
 !wq_rd    = $3D5C           ; NMI 가 다음으로 보낼 항목 자리. VBlank 가 끝나 가면 남은 항목을 다음 NMI 로 넘긴다
@@ -1147,13 +1148,44 @@ WtAlloc:
     ADC.w !wn_y
     STA.w !wn_key
     INC.w !wt_age
+    ; 그린 문구의 표식(!wt_vis bit1~7): 그림 자리의 7비트 해시, bit0 = 보임
+    LDA.w !wt_ptr
+    LSR
+    LSR
+    LSR
+    LSR
+    LSR
+    LSR
+    LSR
+    EOR.w !wt_ptr
+    ASL
+    ORA #$0001
+    AND #$00FF
+    STA.w !wt_hash
     LDX #$0000
 -
     LDA.w !wt_keys,X
     CMP.w !wn_key
     BNE +
     JSR WtFits
-    BCS .found
+    BCC .resize
+    ; 보이는 슬롯에 다른 문구를 덮으면 게임이 새 창 타일맵을 보내기 전 몇 프레임 동안 옛 타일맵이 새 그림을 가리켜
+    ; 글자가 깨진다(가게 동료 창의 「소지 중 ↔ 없음」). 그때는 새 슬롯에 그리고, 옛 슬롯은 같은 키로 남겨 타일맵이
+    ; 바뀌면 WtVis 가 안 보인다고 표시하게 둔다
+    PHX
+    TXA
+    LSR
+    TAX
+    LDA.w !wt_vis,X
+    PLX
+    AND #$00FF
+    BIT #$0001
+    BEQ .found
+    EOR.w !wt_hash
+    AND #$00FE
+    BEQ .found
+    BRA +
+.resize
     ; 같은 자리를 다른 크기로 다시 그림: 옛 슬롯은 비운다
     STZ.w !wt_keys,X
     STZ.w !wt_ages,X
@@ -1188,7 +1220,7 @@ WtAlloc:
     TAX
     LDA.w !wt_vis,X
     PLX
-    AND #$00FF
+    AND #$0001
     BNE +
     TXY
     BRA .pick
@@ -1219,7 +1251,7 @@ WtAlloc:
     LSR
     TAX
     SEP #$20
-    LDA #$01
+    LDA.w !wt_hash
     STA.w !wt_vis,X
     REP #$20
     PLX
@@ -1434,7 +1466,7 @@ WtKEvict:
     TAX
     LDA.w !wt_vis,X
     PLX
-    AND #$00FF
+    AND #$0001
     BNE .next
     LDA.w !wt_age
     SEC
@@ -1792,7 +1824,7 @@ WtFixLend:
     TAX
     LDA.w !wt_vis,X
     PLX
-    AND #$00FF
+    AND #$0001
     BEQ +
     SEC
     RTS
@@ -2230,10 +2262,12 @@ WtVis:
     PLP
     SEP #$20
     BEQ +
-    LDA #$00
+    LDA.w !wt_vis,Y
+    AND #$FE
     BRA ++
 +
-    LDA #$01
+    LDA.w !wt_vis,Y
+    ORA #$01
 ++
     STA.w !wt_vis,Y
     REP #$20
