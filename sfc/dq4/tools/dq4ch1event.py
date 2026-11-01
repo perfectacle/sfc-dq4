@@ -329,6 +329,9 @@ RESCUED2_SRC, RESCUED2_SCRIPT = _SPARE[8]
 HOME_KID_SRCS = (_SPARE[9], ({"list": "05:9768", "index": 0}, "05:976F"))
 # 성 앞 노인: 이 해킹에서 가지 않는 DQ5 03/0D 의 한 벌 스크립트 인물
 OLD_MAN_SRC, OLD_MAN_SCRIPT = {"list": "05:9837", "index": 0}, "05:983E"
+# 노인 그림. FC 그림 16(대머리 노인)이 옮겨지는 38 은 dq4people 에서 젊은 남자 시트(h002)라, NDS 가 이 노인(haout 그룹 5
+# 오브젝트 5, 대사 101510~)에 쓰는 모습 5(h005)를 dq4people 가 싣는 그림 09 로 바꾼다
+OLD_MAN_PICTURE = 0x09
 END_MAP = '36/00'               # 1장 끝은 보고한 뒤 성 앞에 들어설 때(FC 는 같은 방문 안, $6285 는 필드로 나가면 지워짐)
 ENDING_PAUSE = 60               # 1장에서 끝낼 때 두 서술 사이의 검은 화면(프레임)
 # 탑 위 30/04 의 FC 인물 슬롯(06 부터 차례): 06 보스, 07·08 잡힌 아이, 09 마물은 이기면 숨고, 0C~0E 의 구한 아이는
@@ -670,7 +673,7 @@ def _old_man_step():
     차례로 STEP_CHECK 로 본다. 첫 셀이 막혔으면 그 축을 건너뛰고, 둘째 셀만 막혔으면(홀수 셀에 선 주인공 등) 한 셀만 간다.
     둘 다 못 가면 그 자리라 명령 14 가 곧바로 지나가고, 다음 차례에 다시 고른다(FC 의 1F:DC3E 도 차례마다 주인공 쪽
     방향을 새로 고름). 둘째 셀을 보는 동안만 자리를 한 셀 옮겨 두었다 되돌린다. 직접 페이지는 스크립트 고리가 쓰므로
-    되돌려 둔다."""
+    되돌려 둔다. 그보다 먼저, 주인공이 노인 쪽으로 걸으려 하면 PUSH 대로 비킨다."""
     a = bytearray((0x08, 0xE2, 0x30, 0x8B, 0xA9, 0x7E, 0x48, 0xAB)) + DP_SAVE     # PHP / SEP / PHB / DB = 7E
     a += bytes((0xA5, 0x80, 0x48, 0xA5, 0x81, 0x48, 0xA5, 0x82, 0x48, 0xA6, 0x90))  # $80~$82 를 스택에 / LDX $90
     for here, there in ((0x3020, 0x3560), (0x3040, 0x3580), (0x3080, 0x35A0), (0x30A0, 0x35C0)):
@@ -701,7 +704,31 @@ def _old_man_step():
         pos = bytes((0xC9, 0x03)) + _branch(0x90, len(right) + len(neg)) + right
         return (bytes((0xAF, *_long(0x7E0000 + here), 0x38, 0xFF, *_long(0x7E0000 + here))) + _branch(0x30, len(pos)) +
                 pos + neg + tail)                                    # LDA 주인공 / SEC / SBC 노인,X / BMI 음수
-    return bytes(a) + axis(0x3020, 0x3560, 0x10, 0x20, axis(0x3080, 0x35A0, 0x40, 0x80, out))
+
+    def gap(here, dp):
+        return bytes((0xAF, *_long(0x7E0000 + here), 0x38, 0xFF, *_long(0x7E0000 + here), 0x85, dp))  # $dp = 주인공 - 노인
+
+    steps = {0x10: (0x3020, 0x3560, 1), 0x20: (0x3020, 0x3560, -1), 0x40: (0x3080, 0x35A0, 1), 0x80: (0x3080, 0x35A0, -1)}
+    push = b''
+    for pad, (dx, dy), sides in reversed(PUSH):
+        body = b''.join(walk(d, *steps[d]) for d in (pad << 4, *sides)) + out
+        checks = (bytes((0xA5, 0x02, 0xC9, pad)), *(bytes((0xA5, dp, 0x38, 0xE9, lo & 0xFF, 0xC9, n))
+                                                    for dp, (lo, n) in ((0x00, dx), (0x01, dy))))
+        for check, op in reversed(tuple(zip(checks, (0xD0, 0xB0, 0xB0)))):   # 다른 방향·범위 밖이면 다음 방향으로
+            body = check + _branch(op, len(body)) + body
+        push = body + push
+    push = (gap(0x3020, 0x00) + gap(0x3080, 0x01) +
+            bytes((0xAD, 0x49, 0x07, 0x29, 0x0F, 0x85, 0x02)) + push)   # LDA $0749(1P 패드 위 바이트) / AND #$0F
+    return bytes(a) + push + axis(0x3020, 0x3560, 0x10, 0x20, axis(0x3080, 0x35A0, 0x40, 0x80, out))
+
+
+# FC 노인은 인물 표 $70E0 bit3(비켜 서는 인물, 블록 명령 0E)이 켜져 있다. 일행이 그 칸으로 걸어 들어가면 1F:D06E 가 막은
+# 인물을 찾고 1F:D0E2 가 주인공이 걷는 방향으로 한 칸 옮기며, 막히면 옆 두 방향을 차례로(첫째는 난수 $12 로) 본다.
+# 여기서는 노인 차례마다(_old_man_step) 1P 패드가 한 방향을 누르고 있고 노인이 그쪽으로 주인공에 붙어 있으면 그렇게
+# 비킨다. 항목: 패드 비트(1 오른쪽·2 왼쪽·4 아래·8 위), 주인공 - 노인의 X·Y 범위(시작, 개수), 막혔을 때 볼 옆 방향.
+# 걷기 검사가 오른쪽은 X+2, 왼쪽은 X-1 셀을 보므로 가로는 1~3셀. 한 셀 어긋난 노인도 주인공을 막아서(실측) 옆 축은 ±1
+PUSH = ((0x01, ((-3, 3), (-1, 3)), (0x40, 0x80)), (0x02, ((1, 3), (-1, 3)), (0x40, 0x80)),
+        (0x04, ((-1, 3), (-2, 2)), (0x10, 0x20)), (0x08, ((-1, 3), (1, 2)), (0x10, 0x20)))
 
 
 # 01:C800 의 인물 스크립트 고리가 직접 페이지 앞자리를 쓰므로, 그 자리를 덮는 루틴(25:FA15, 23:EB50 등)을 부르는
@@ -1272,6 +1299,8 @@ def npc_lists(ported, report, first_talk):
             raise SystemExit(f'{m}: FC 대화 {fc_talk:03X} 인물이 없음')
         for i in hits:
             lst[i] = _same(lst[i], OLD_MAN_SRC if name == 'old_man' else lst[i]["from"], t[name])
+            if name == 'old_man':
+                lst[i]["fields"]["gfx"] = OLD_MAN_PICTURE
     room = lists[HOIMIN_ROOM]
     hoimins = [i for i, p in enumerate(report[HOIMIN_ROOM]) if p["talk"] == FC_HOIMIN]
     gone = [e for i, e in enumerate(room) if i not in hoimins]
