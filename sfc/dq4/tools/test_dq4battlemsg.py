@@ -88,6 +88,16 @@ class TokenTests(unittest.TestCase):
         self.assertEqual(toks[0], 0xC000 | bm.JOSA_KEYS['이'])
         self.assertEqual(toks[1], 0x8000 | bm.SPACE_PX)
 
+    def test_suffix_tokens_two_per_suffix(self):
+        p = punct()
+        toks = bm.suffix_tokens(p)
+        self.assertEqual(len(toks), bm.SUFFIX_TOKENS * len(bm.SUFFIXES))
+        self.assertEqual(toks[0], p['A'][0])
+        self.assertEqual(toks[bm.SUFFIX_TOKENS * (len(bm.SUFFIX_LETTERS) - 1)], p['H'][0])
+        plural = bm.SUFFIX_TOKENS * bm.SUFFIXES.index('들')
+        self.assertEqual(toks[plural:plural + 2], [ne.GLYPHS.index('들'), 0x8000])
+        self.assertEqual(bm.PLURAL, bytes((0x1F, 0x20)))
+
     def test_name_blob_ends_entries_before_appear(self):
         blob, at = bm.name_blob([(b'\x10\x11', [1, 2])], [3])
         self.assertEqual(blob[:3], bytes((2, 0x10, 0x11)))
@@ -139,6 +149,11 @@ class ApplyTests(unittest.TestCase):
         self.assertEqual(bytes(d[o:o + len(names)]), names)
         self.assertEqual(int(defs['!bm_appear'][1:], 16), bm.NAMES_AT + appear_at)
         self.assertEqual(int(defs['!bm_appear_count']), len(appear))
+        suffix = b''.join(t.to_bytes(2, 'little') for t in bm.suffix_tokens(p))
+        at = bm.lorom(int(defs['!bm_suffix'][1:], 16))
+        self.assertEqual(bytes(d[at:at + len(suffix)]), suffix)
+        self.assertEqual(int(defs['!bm_suffix_plural']), bm.SUFFIXES.index('들'))
+        self.assertEqual(int(defs['!bm_plural'][1:], 16), 0x201F)
         self.assertEqual(int(defs['!bm_digit0']), FIRST + bm.PUNCT.index('0'))
         self.assertEqual(int(defs['!bm_count']), len(bm.POOL))
         self.assertEqual((int(defs['!bm_b0']), int(defs['!bm_b1'])), bm.restored())
