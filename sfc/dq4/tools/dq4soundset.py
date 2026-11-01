@@ -187,7 +187,7 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
           keep_samples=False, prefetch=None, release_failed=False, release_pending=False, tick_scan=False, unpin=(), effects=None, effect_waves=None,
           effect_gain_db=None, spare_effects=None, spare_carriers=None, spare_keep=None,
           spare_rate=8000, weapon_sounds=None, weapon_songs=(), effect_calls=None, spare_substitutes=None, silent_songs=(),
-          resident_pcm=None, reserve=(), effect_remaps=None):
+          resident_pcm=None, reserve=(), effect_remaps=None, item_sound=None, inn_jingle=False):
     """stream 은 {곡 자리: 곡 앞 샘플 바이트 상한}. 그 곡은 샘플 일부를 곡이 울리는 동안 보낸다(transfer_plan).
 
     stream_ticks 는 {곡 자리: 틱}. 곡 앞 바이트 상한을 곡이 처음 그 틱 안에 쓰는 샘플의 합으로 정하고, 도착 어림보다
@@ -295,6 +295,8 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
     for (seq, branch), (dst, new) in (effect_remaps or {}).items():
         if new not in (spare_effects or {}).get(dst, {}):
             raise ValueError(f'{seq:02X}-{branch:02X} -> {dst:02X}-{new:02X}: remap to a --sfx-pcm branch')
+    if item_sound and item_sound[1] not in spare_effects.get(item_sound[0], {}):
+        raise ValueError(f'{item_sound[0]:02X}-{item_sound[1]:02X}: the item sound must be a --sfx-pcm branch')
     for seq in spare_effects:
         if seq in pinned_sizes or seq in effect_sequences or not 0x32 <= seq < patch.SEQUENCE_COUNT:
             raise ValueError(f'{seq:02X}: a spare effect must be an unpinned, unreplaced effect sequence')
@@ -616,7 +618,8 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
                              release_failed=release_failed, unpin=tuple(unpin), resident_waves=wave_payloads,
                              weapon_sounds=(weapon_sounds, tuple(weapon_songs)) if weapon_sounds else None,
                              effect_calls=effect_calls, release_pending=release_pending,
-                             tick_scan=tick_scan, effect_remaps=effect_remaps)
+                             tick_scan=tick_scan, effect_remaps=effect_remaps,
+                             item_sound=item_sound, inn_jingle=inn_jingle)
 
     rom, install_report = install()
     # 넣은 롬의 실제 자리로 덧붙일 샘플을 다시 고른다. 앞부분은 처음 고른 바이트(상한)를 받는 길이로 나눴으므로 그 안에서만
@@ -743,6 +746,10 @@ def main():
     ap.add_argument('--sfx-remap', action='append', default=[], metavar='SEQ-BRANCH=SPARE-BRANCH',
                     help='always play that effect branch as a --sfx-pcm branch instead (rewritten at the effect queue entry, '
                          'so pinned effect sequences and song budgets stay)')
+    ap.add_argument('--sfx-item', metavar='SPARE-BRANCH',
+                    help='play that --sfx-pcm branch when searching finds an item (before message 12E)')
+    ap.add_argument('--inn-jingle', action='store_true',
+                    help='start the inn jingle as the screen darkens instead of after the morning map reload')
     ap.add_argument('--sfx-pcm-rate', type=int, default=8000, help='upper sample rate of --sfx-pcm samples')
     ap.add_argument('--reserve', action='append', default=[], metavar='SONG',
                     help='keep the DQ5 pinned size of that replaced, unpinned sequence in song budgets so other songs stay')
@@ -821,6 +828,8 @@ def main():
                         release_failed=args.release_failed, release_pending=args.release_pending, tick_scan=args.tick_scan,
                         unpin=[int(x, 16) for x in args.unpin],
                         reserve=[int(x, 16) for x in args.reserve],
+                        item_sound=tuple(int(x, 16) for x in args.sfx_item.split('-')) if args.sfx_item else None,
+                        inn_jingle=args.inn_jingle,
                         effect_remaps={(int(k.split('-')[0], 16), int(k.split('-')[1], 16)):
                                        (int(v.split('-')[0], 16), int(v.split('-')[1], 16))
                                        for k, v in (x.split('=') for x in args.sfx_remap)},
