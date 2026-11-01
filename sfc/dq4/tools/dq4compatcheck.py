@@ -372,6 +372,8 @@ class Walker:
         base = self.out / 'prologue.state'
         raw, n = self.c.save()
         base.write_bytes(n.to_bytes(8, 'little') + raw)
+        # 묶음 프로세스마다 코어가 자리를 잡는다. 이 코어는 그동안 쉬므로 자리를 내놓아야 자리가 적을 때 막히지 않는다
+        self.c.close()
 
         def one(u):
             dest = self.out / f'unit-{u[0]:02d}'
