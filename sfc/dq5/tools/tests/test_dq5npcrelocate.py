@@ -8,7 +8,8 @@ from dq5map import Rom, lorom  # noqa: E402
 from dq5npc import entry_size, parse, script_address  # noqa: E402
 from dq5npc import NO_NPC, OVERRIDE_LISTS  # noqa: E402
 from dq5npcrelocate import (  # noqa: E402
-    FORMAT, condition_writes, destination, pack_region, repack_entry, replacements,
+    FORMAT, banks_of, bank_stub, condition_writes, destination, pack_alt, pack_base, pack_region, repack_entry,
+    replacements,
 )
 
 OLD, NEW = 0x058000, 0x328000
@@ -120,6 +121,62 @@ class NpcRelocateTests(unittest.TestCase):
         for v in ('05:8000','60:8000','32:0000','32:10000','32: 800','032:8000'):
             with self.assertRaises(ValueError):
                 destination(v)
+
+
+DAY = bytes.fromhex('84 12 cb 85 0a 2c 44 f0')
+
+
+class SplitBankTests(unittest.TestCase):
+    """목록을 여러 뱅크에 나눌 때의 배치. 인물 하나(9바이트 목록)짜리 목록으로 센다."""
+    def setUp(self):
+        self.rom = fixture(DAY)
+        self.lists = [(f'{g:02X}/00', [(OLD, DAY)]) for g in range(3)]
+
+    def test_single_bank_keeps_one_region(self):
+        regions, home, lm, _, _, stub = pack_base(self.rom, self.lists, [0x328000], {}, {}, 3, {})
+        self.assertIsNone(stub)
+        self.assertEqual([(b, len(r)) for b, r in regions], [(0x328000, 6 + 27)])
+        self.assertEqual(set(home.values()), {0x328000})
+
+    def test_pinned_group_and_bank_stub(self):
+        regions, home, lm, _, _, stub = pack_base(self.rom, self.lists, [0x328000, 0x348000], {1: 0x34}, {}, 3, {})
+        self.assertEqual(home, {0: 0x328000, 1: 0x348000, 2: 0x328000})
+        self.assertEqual(lm, {'00/00': 0x328006, '02/00': 0x32800F, '01/00': 0x348006})
+        first = regions[0][1]
+        table = 0x328000 + 6 + 18 + 1
+        self.assertEqual(stub, table + 3)
+        self.assertEqual(bytes(first[24:]), bytes([3, 0x32, 0x34, 0x32]) + bank_stub(table))
+        self.assertEqual(bank_stub(table), bytes.fromhex('da a6 bc bf 19 80 32 85 a7 fa 6b'))
+
+    def test_groups_fill_banks_in_order(self):
+        # 32:FFE0 은 표 6 + 뱅크 표·루틴 15 를 빼면 11바이트라 그룹 00 만 들어간다.
+        _, home, _, _, _, _ = pack_base(self.rom, self.lists, [0x32FFE0, 0x34FFE0], {}, {}, 3, {})
+        self.assertEqual(home, {0: 0x32FFE0, 1: 0x34FFE0, 2: 0x34FFE0})
+        with self.assertRaises(ValueError):
+            pack_base(self.rom, self.lists, [0x32FFE0, 0x34FFF0], {}, {}, 3, {})
+        with self.assertRaises(ValueError):
+            pack_base(self.rom, self.lists, [0x32FFE0], {0: 0x35}, {}, 3, {})
+
+    def test_alt_lists_and_tail_spill(self):
+        lists = [(f'new:a{i}', [(OLD, DAY)]) for i in range(3)]
+        # 33:FFF0 은 16바이트라 목록 하나, 35:FFE0 은 32바이트라 둘. 꼬리 14바이트까지는 35 의 목록 뒤.
+        regions, lm, _, _, table = pack_alt(self.rom, lists, [0x33FFF0, 0x35FFE0], {}, 14)
+        self.assertEqual(lm, {'new:a0': 0x33FFF0, 'new:a1': 0x35FFE0, 'new:a2': 0x35FFE9})
+        self.assertEqual(table, 0x35FFE0 + 18)
+        regions, lm, _, _, table = pack_alt(self.rom, lists, [0x33FFF0, 0x35FFE0, 0x36FFE0], {}, 20)
+        self.assertEqual(table, 0x36FFE0)
+        self.assertEqual(regions[-1], (0x36FFE0, bytearray()))
+        with self.assertRaises(ValueError):
+            pack_alt(self.rom, lists, [0x33FFF0, 0x35FFE0], {}, 20)
+        with self.assertRaises(ValueError):
+            pack_alt(self.rom, lists, [0x33FFF0, 0x35FFF0], {}, 0)
+
+    def test_bank_lists_validated(self):
+        self.assertEqual(banks_of(0x328000, '기본'), [0x328000])
+        self.assertEqual(banks_of([0x328000, 0x348000], '기본'), [0x328000, 0x348000])
+        for bad in ([], [0x328000, 0x32C000], [0x408000], ['32:8000']):
+            with self.assertRaises(ValueError):
+                banks_of(bad, '기본')
 
 
 if __name__ == '__main__':

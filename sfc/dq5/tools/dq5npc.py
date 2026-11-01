@@ -326,11 +326,20 @@ def format_op(off, raw, name):
 
 
 def group_pointers(rom):
-    """(목록 뱅크, 그룹 포인터 표 자리, 그룹마다 첫 목록 주소). 원본은 05:D4B2 의 54그룹이고 표가 목록 바로 뒤에 있다.
+    """(목록 뱅크, 그룹 포인터 표 자리, 그룹마다 첫 목록 주소). 여러 뱅크에 나눈 꼴이면 뱅크·표 자리는 그룹 00 의 것. 원본은 05:D4B2 의 54그룹이고 표가 목록 바로 뒤에 있다.
     옮긴 표는 [그룹마다 포인터][목록…] 꼴이라 가장 앞 목록 앞까지가 표다. 코드 자리가 모두 0 인 합성 롬은 원본 자리로 본다."""
     code = bytes(rom.d[lorom(BANK_SITE):lorom(BANK_SITE) + 2]), bytes(rom.d[lorom(GROUP_SITE):lorom(GROUP_SITE) + 3])
     if code == (bytes(2), bytes(3)) or (code[0] == bytes([0xA9, NPC_BANK]) and code[1] == bytes([0xB9, 0xB2, 0xD4])):
         bank, table, count = NPC_BANK, NPC_GROUPS, GROUP_COUNT
+    elif code[0][0] == 0x22 and code[1][0] == 0xB9:
+        # dq5npcrelocate.py 가 기본 목록을 여러 뱅크에 나눈 꼴: JSL 루틴이 [그룹 수][그룹마다 뱅크] 표로 $A7 을 고른다.
+        stub = rom.u24(BANK_SITE + 1)
+        if bytes(rom.d[lorom(stub):lorom(stub) + 4]) != bytes([0xDA, 0xA6, 0xBC, 0xBF]):
+            raise ValueError(f'12:8020 이 부르는 {stub:06X} 이 인물 목록 뱅크 루틴이 아님')
+        banks = rom.u24(stub + 4)
+        count, low = rom.u8(banks - 1), int.from_bytes(code[1][1:], 'little')
+        starts = [rom.u8(banks + g) << 16 | rom.u16(rom.u8(banks + g) << 16 | low + g * 2) for g in range(count)]
+        return rom.u8(banks), rom.u8(banks) << 16 | low, starts
     elif code[0][0] == 0xA9 and code[1][0] == 0xB9:
         bank = code[0][1]
         table, count, first = bank << 16 | int.from_bytes(code[1][1:], 'little'), 0, 0x10000
@@ -350,8 +359,10 @@ def all_lists(rom):
     그룹의 첫 목록(원본 마지막 그룹은 그룹 표)까지 세고, 옮긴 표의 맨 뒤 그룹은 맵 포인터 그룹의 맵 수만큼 센다."""
     out = []
     _, table, starts = group_pointers(rom)
+    # 여러 뱅크에 나눈 꼴이면 뱅크마다 같은 자리에 그룹 포인터 표가 있다. 다음 목록은 같은 뱅크에서만 찾는다.
+    tables = {p & 0xFF0000 | table & 0xFFFF for p in starts} | {table}
     for bc, a in enumerate(starts):
-        later = [p for p in starts + [table] if p > a]
+        later = [p for p in starts + sorted(tables) if p > a and p >> 16 == a >> 16]
         if later:
             end, count = min(later), None
         else:

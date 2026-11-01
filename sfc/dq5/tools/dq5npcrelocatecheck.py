@@ -1,6 +1,8 @@
 """인물 목록 재배치의 원본·패치 롬을 MesenCE에서 비교한다.
 
 기본은 선실·02/06·01/05 낮밤과 02/06 대체 목록. --all은 기본 맵 346개 낮밤을 비교한다.
+--base·--alt·--group-bank 는 dq5npcrelocate.py 와 같아 목록을 여러 뱅크에 나눈 롬을 볼 수 있고,
+--case 로 대체 목록을 고르는 플래그와 맵을 더 준다.
 인물 배치 직후 12:803C에서 23칸을 비교하고, 스크립트가 있으면 뱅크까지 포함한
 3바이트 포인터를 재배치 주소표에 대조한다. 시험 롬·덤프·화면은 --out의 새 폴더에만 쓴다.
 
@@ -19,10 +21,17 @@ import tempfile
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dq5map import Rom  # noqa: E402
 from dq5npc import FLAGS, all_lists, list_address, list_entries, parse, table_values  # noqa: E402
-from dq5npcrelocate import FORMAT, cpu, patch  # noqa: E402
+from dq5npcrelocate import FORMAT, cpu, group_bank, patch, places  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
+
+
+def extra_case(text):
+    match = re.fullmatch(r'([0-9A-F]{2})/([0-9A-F]{2})((?::7E[0-9A-F]{4}=[0-9A-F]{2})(?:;7E[0-9A-F]{4}=[0-9A-F]{2})*)?', text)
+    if not match:
+        raise argparse.ArgumentTypeError('--case 는 GG/MM 또는 GG/MM:7EXXXX=VV;… (대문자 16진)')
+    return int(match[1], 16), int(match[2], 16), (';' + match[3][1:]) if match[3] else ''
 
 
 def command(tool, *args):
@@ -158,6 +167,11 @@ def main():
     parser.add_argument('--all', action='store_true')
     parser.add_argument('--mutations', action='store_true', help='긴 선실·기본 공유·대체 공유 스크립트 실행 5건 추가')
     parser.add_argument('--jobs', type=int, default=4)
+    parser.add_argument('--base', default='32:8000', help='dq5npcrelocate.py patch 의 --base(쉼표로 여러 뱅크)')
+    parser.add_argument('--alt', default='33:8000', help='dq5npcrelocate.py patch 의 --alt(쉼표로 여러 뱅크)')
+    parser.add_argument('--group-bank', action='append', default=[], type=group_bank, help='dq5npcrelocate.py 의 --group-bank')
+    parser.add_argument('--case', action='append', default=[], type=extra_case,
+                        help='낮밤으로 더 볼 맵 GG/MM[:7EXXXX=VV;…] (대체 목록을 고르는 플래그를 함께 줌)')
     args = parser.parse_args()
     if not args.mesence or args.jobs < 1:
         parser.error('MESENCE 또는 --mesence와 양수 --jobs가 필요함')
@@ -167,7 +181,8 @@ def main():
             if not path.is_file():
                 raise ValueError(f'파일 없음: {path}')
         original = Rom(original_path.read_bytes())
-        manifest, layout = patch(original, {'format': FORMAT})
+        manifest, layout = patch(original, {'format': FORMAT}, places(args.base), places(args.alt),
+                                 group_banks=dict(args.group_bank))
         args.out.mkdir(parents=True, exist_ok=True)
         out = Path(tempfile.mkdtemp(prefix='run-', dir=args.out.resolve()))
         (out / 'relocate.dq5patch.json').write_text(json.dumps(manifest), encoding='utf-8')
@@ -179,6 +194,7 @@ def main():
         maps = [tuple(int(v, 16) for v in name.split('/')) for _, name in all_lists(original)[:346]] if args.all else [(0x17, 0), (2, 6), (1, 5)]
         cases = [(bc, bd, night, '') for bc, bd in maps for night in (False, True)]
         cases.extend((2, 6, night, ';7E21AD=10') for night in (False, True))
+        cases.extend((bc, bd, night, pokes) for bc, bd, pokes in args.case for night in (False, True))
         print(f'출력 {out}; 검사 {len(cases)}건', flush=True)
         results = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
