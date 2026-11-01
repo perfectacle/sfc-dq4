@@ -11,6 +11,8 @@
   - 전투가 끝나(00:82BE) 돌아온 맵·$BE·칸(필드면 필드 좌표)·곡($1D8B)이 전투가 걸린 때와 같음
   - 돌아온 화면이 전투가 걸린 때의 맵 화면과 픽셀 90% 이상 같음, 그 뒤 걸으면 자리가 바뀜(전투가 끝나면 조우
     루틴을 CLC/RTL 로 되돌려 다시 걸리지 않게 함)
+  - 필드 전투면 전투 화면(시작 120프레임 뒤)의 위·아래 띠에 남은 필드 칸(BG1·BG2 타일맵에서 전투가 덮지 않은 칸)이
+    가리키는 타일이 전투가 걸린 때와 바이트째 같음(band_problems. 필드 타일이 512 이상이면 전투 배경 그림이 덮는다)
   - 전투 동안 30프레임마다 본 BG3 타일맵에서 창 왼쪽 위 모서리마다 같은 줄 오른쪽에 짝 모서리가 있음
     (dq4windowcheck.corners. 이름 다섯째 칸이 전투 상태 창 오른쪽 테두리 열을 덮으면 깨진다)
   - --repeat 2 면 같은 장면을 두 번 돌려 battle.txt 가 바이트째 같음
@@ -177,6 +179,35 @@ def same_pixels(a, b, shift=8):
     return best
 
 
+def band_problems(dest, layers):
+    """필드 전투의 위·아래 띠: 전투가 걸린 때(start.vram)와 전투 화면(fight.vram)의 BG1·BG2 타일맵(64x32칸)에서 전투가
+    덮지 않은 칸이 가리키는 타일이 전투 전과 바이트째 같은지. 게임이 늘 다시 쓰는 움직이는 바다·타일은 뺀다.
+    전투는 배경 그림을 VRAM 워드 4000~5DFF(필드 타일 512 이상 자리)에 올린다."""
+    import dq4fieldgfx
+    from dq5gfx import FIELD_ANIM_COUNT, FIELD_ANIM_TILE
+    if not (dest / 'start.vram').exists() or not (dest / 'fight.vram').exists() or layers is None:
+        return ['필드 띠: VRAM 덤프·layers 줄이 없음']
+    a, b = ((dest / f).read_bytes() for f in ('start.vram', 'fight.vram'))
+    wa, wb = memoryview(a).cast('H'), memoryview(b).cast('H')
+    moving = {*dq4fieldgfx.SEA_TILES, *range(FIELD_ANIM_TILE, FIELD_ANIM_TILE + FIELD_ANIM_COUNT)}
+    kept, bad = 0, {}
+    for layer in ('bg1', 'bg2'):
+        tilemap, chr_base = (int(v, 16) for v in layers[layer].split(','))
+        for i in range(tilemap, tilemap + 0x800):
+            if wa[i] != wb[i] or (t := wa[i] & 0x3FF) in moving:
+                continue
+            kept += 1
+            at = (chr_base + t * 16) & 0x7FFF
+            if wa[at:at + 16] != wb[at:at + 16]:
+                bad[t] = bad.get(t, 0) + 1
+    if not kept:
+        return ['필드 띠: 전투가 덮지 않은 필드 칸이 없음']
+    if bad:
+        return [f'필드 띠: 전투가 덮지 않은 칸 {kept} 가운데 {sum(bad.values())} 칸의 타일이 전투 전과 다름(타일 '
+                + ' '.join(f'{t:03X}' for t in sorted(bad)[:12]) + ')']
+    return []
+
+
 def judge(rom, scene, stages, dest, kind='win'):
     """kind 가 win 이면 금화가 무리 금화만큼, flee 면 그대로여야 한다."""
     problems = []
@@ -193,6 +224,8 @@ def judge(rom, scene, stages, dest, kind='win'):
     broken = sorted({(r, c) for m in maps for r, c, _, _ in dq4windowcheck.corners(m, 0)})
     if broken:
         problems.append('창 테두리: 왼쪽 위 모서리의 오른쪽 짝이 없음(줄, 열) ' + ' '.join(f'{r},{c}' for r, c in broken))
+    if not int(start['BE'], 16) & 0x80:
+        problems += band_problems(dest, stages.get('layers'))
     if after is None:
         return problems + ['전투에서 돌아오지 않음']
     earned = int.from_bytes(bytes.fromhex(after['gold']), 'little') - int.from_bytes(bytes.fromhex(start['gold']), 'little')

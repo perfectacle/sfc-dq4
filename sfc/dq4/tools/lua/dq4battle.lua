@@ -12,7 +12,8 @@
 --                 이름 표에서 한글을 못 찾은 이름만 가나 표로 그린다(dq4battlemsg.asm BmKana). 24:A854 에서 이름 하나가 끝남
 -- 결과: SHOT_DIR/battle.txt(단계마다 프레임·맵·칸·곡·무리·금화·전투 슬롯), start.png(전투가 걸린 프레임의 맵 화면),
 -- fight.png(전투 시작 120프레임 뒤), after.png(돌아와 SETTLE 뒤),
--- bg3.txt(전투 동안 30프레임마다 「프레임 BG3 타일맵 2KB 16진」 한 줄)
+-- bg3.txt(전투 동안 30프레임마다 「프레임 BG3 타일맵 2KB 16진」 한 줄), start.vram·fight.vram(start.png·fight.png 때의
+-- VRAM 64KB)과 battle.txt 의 layers 줄(전투가 걸린 때 BG1·BG2 의 타일맵·타일 VRAM 워드 주소)
 package.path = os.getenv("LIBDIR") .. "/?.lua;" .. package.path
 local L = require("lib")
 L.loadState(os.getenv("STATE"))
@@ -94,7 +95,14 @@ if kanaLo then
 end
 
 emu.addMemoryCallback(function()
-  if not started then started = n; phase = "battle"; record("start"); L.shot("start.png") end
+  if not started then
+    started = n; phase = "battle"; record("start"); L.shot("start.png")
+    L.dump("start.vram", emu.memType.snesVideoRam, 0x10000)
+    local st = emu.getState()
+    log[#log + 1] = string.format("layers f=%d bg1=%04X,%04X bg2=%04X,%04X", n,
+      st["ppu.layers[0].tilemapAddress"], st["ppu.layers[0].chrAddress"],
+      st["ppu.layers[1].tilemapAddress"], st["ppu.layers[1].chrAddress"])
+  end
 end, emu.callbackType.exec, 0x01860D, 0x01860D)
 emu.addMemoryCallback(function()
   if started and not ended then ended = n; phase = "settle"; mark = n; patchRom(afterpatches) end
@@ -111,6 +119,7 @@ emu.addEventCallback(function()
   elseif phase == "battle" then
     if n == started + 120 then
       L.shot("fight.png")
+      L.dump("fight.vram", emu.memType.snesVideoRam, 0x10000)
       log[#log + 1] = string.format("slots f=%d %s", n, hex(0x7E07C0, 64))
     end
     if (n - started) % 30 == 0 then

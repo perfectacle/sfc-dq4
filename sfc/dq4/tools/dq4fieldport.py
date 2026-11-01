@@ -64,11 +64,10 @@ BLOCKS = {
 # Per FC field, kinds whose terrain differs from BLOCKS. Field 3 makes its hills impassable (08:$8A34 gives block 01
 # property 80), so they take the mountain's terrain and keep the hill art.
 FIELD_BLOCKS = {3: {0x01: MOUNTAIN}}
-# Places of the field graphics (dq4fieldgfx.py), free in both the dq4groupbuild ROM and the chapter-1 ROM
-# (dq4chapter1.py): the tile hooks and tables in one bank of 30-3F (01:A4A7 reads with DB set to it), the rest in
-# 30-7D. The planes take the bank of "planes" (hooks and the 1-bit planes) and one bank per world after it; the
-# chapter-1 menu ROM already uses bank 58.
-GFX_AT = {"worlds": "30:E000", "extra": "54:8000", "blocks": "54:C000", "planes": "50:8000"}
+# Places of the field blocks and planes, free in both the dq4groupbuild ROM and the chapter-1 ROM (dq4chapter1.py).
+# The planes take the bank of "planes" (hooks and the 1-bit planes) and one bank per world after it; the chapter-1
+# menu ROM already uses bank 58. The tiles need no place: they stay 512 and go back in place (dq4fieldgfx.free_slots).
+GFX_AT = {"blocks": "54:C000", "planes": "50:8000"}
 # First DQ5 block dq5fieldtables --blocks-at adds: 511 shares its slot with upper-layer block 0 in the original table.
 FIRST_BLOCK = 511
 
@@ -256,7 +255,7 @@ def _run(tool, *args):
 
 def patch(dq5, prg, path, at, gfx_at=GFX_AT):
     """Patch lists of the field, in build order: the DQ4 tiles (dq5fieldgfxwrite.py), their blocks (dq5fieldtables.py
-    --blocks-at, made from a ROM with the tiles: block tiles from 512 need the tile hooks) and the three worlds
+    --blocks-at, made from a ROM with the tiles) and the three worlds
     (dq5fieldwrite.py, made from a ROM with both: blocks from 511 need the moved block table; one call, as the
     plane hook is shared). path names the map's
     list; the others sit next to it. The original ROM's cells that 00:CF50 changes are all sea (block 0) on the FC
@@ -265,8 +264,7 @@ def patch(dq5, prg, path, at, gfx_at=GFX_AT):
     folder = path.parent / "fieldgfx"
     gfx, table = dq4fieldgfx.gfx_doc(dq5, folder)
     lists = [path.with_name("field-gfx.dq5patch.json"), path.with_name("field-blocks.dq5patch.json"), path]
-    _run("dq5fieldgfxwrite.py", dq5, "patch", gfx, "-o", lists[0], "--worlds-at", gfx_at["worlds"],
-         "--extra-at", gfx_at["extra"], "--name", "dq4-field-gfx")
+    _run("dq5fieldgfxwrite.py", dq5, "patch", gfx, "-o", lists[0], "--name", "dq4-field-gfx")
     with_gfx = folder / "gfx.sfc"
     _run("dq5build.py", dq5, "build", lists[0], "--size", 4, "-o", with_gfx)
     _run("dq5fieldtables.py", with_gfx, "patch", table, "-o", lists[1], "--blocks-at", gfx_at["blocks"],

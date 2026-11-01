@@ -188,6 +188,16 @@ why = "새 게임·다시 시작 자리 표(25:8621, 6바이트 항목)(dq4chapt
 
 [[original]]
 stage = "chapter1"
+at = "12:B1A8~12:E44C"
+why = "필드 타일 RLE(12:B1A8, 원래 12,965바이트) 제자리. 새 필드 타일 70개를 쓰지 않는 DQ5 타일 자리에 넣고 다시 싸며, 원래보다 길면 dq5fieldgfxwrite 가 거부함(dq4fieldgfx.free_slots, dq4-field-format.md 「타일 자리」)"
+
+[[original]]
+stage = "chapter1"
+at = "2A:D512~2A:D811"
+why = "필드 타일 속성 512바이트(2A:D512)와 팔레트 니블 256바이트(2A:D712). 새 필드 타일이 든 자리의 속성·니블(dq4fieldgfx.free_slots)"
+
+[[original]]
+stage = "chapter1"
 at = "2A:D812~2A:F223"
 why = "영역 이동 레코드를 3C:A000 으로 옮겨 비운 원래 표 자리(dq5exitreloc.POOLS)에 늘린 출구 표를 씀(dq4groupbuild.EXIT_AT)"
 
