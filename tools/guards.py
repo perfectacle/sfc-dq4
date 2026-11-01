@@ -7,7 +7,7 @@
     why = "무엇이 다시 깨지지 않게 하나"
     paths = ["sfc/dq4/tools/dq4prologue.py"]   # 이 파일을 바꾼 PR 은 이 검사를 돌린다(glob, ** 가능)
     run = "uv run --locked python ..."  # 돌리는 명령
-    needs = ["rom"]                     # 돌리는 데 필요한 것(설명용)
+    needs = ["rom", "MESENCE"]          # 돌리는 데 필요한 것. 대문자 이름은 환경 변수로 보고 --base 때 설정됐는지 알린다
 
 사용:
   python tools/guards.py                         목록 형식만 검사
@@ -18,6 +18,7 @@
 결과 줄: `- [x] <이름>: 통과 (…)` 또는 `- [x] <이름>: 해당 없음 — <이유>`. 그 밖의 글(「통과하지 못함」 등)은 실패로 친다.
 """
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -26,6 +27,7 @@ from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parent.parent
 NAME = re.compile(r'^[a-z0-9]+(?:-[a-z0-9]+)*$')
+ENV = re.compile(r'^[A-Z][A-Z0-9_]*$')
 FIELDS = {'name': str, 'why': str, 'paths': list, 'run': str, 'needs': list}
 
 
@@ -87,6 +89,11 @@ def load(files, read=lambda f: (ROOT / f).read_text(encoding='utf-8')):
     return checks, problems
 
 
+def unset_env(needs, environ=os.environ):
+    """needs 가운데 환경 변수 이름인데 지금 비어 있는 것."""
+    return [n for n in needs if ENV.match(n) and not environ.get(n)]
+
+
 def triggered(checks, changed):
     return [c for c in checks if any(matches(f, p) for f in changed for p in c.get('paths', []))]
 
@@ -124,6 +131,11 @@ def main():
             print('이 변경이 건드리는 실행 검사(돌리고 PR 본문에 결과 줄):')
             for c in hit:
                 print(f'- {c["name"]} ({c["file"]}): {c["why"]}\n    {c["run"]}')
+                if c.get('needs'):
+                    print(f'    필요: {", ".join(c["needs"])}')
+                    unset = unset_env(c['needs'])
+                    if unset:
+                        print(f'    ⚠ 지금 설정 안 된 환경 변수: {", ".join(unset)} (export 한 뒤 돌릴 것)')
                 print(f'    본문 줄: - [x] {c["name"]}: 통과 …')
         else:
             print('걸리는 실행 검사 없음')

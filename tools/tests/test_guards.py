@@ -45,6 +45,12 @@ class GuardsTest(unittest.TestCase):
         self.assertEqual(len(guards.triggered(checks, ['sfc/dq4/tools/dq4ch2event.py'])), 1)
         self.assertEqual(guards.triggered(checks, ['README.md']), [])
 
+    def test_unset_env_only_checks_env_names(self):
+        needs = ['rom', 'MESENCE', 'LIBDIR', 'dq4cores.py 로 빌드한 코어']
+        self.assertEqual(guards.unset_env(needs, {'MESENCE': '/x'}), ['LIBDIR'])
+        self.assertEqual(guards.unset_env(needs, {'MESENCE': '/x', 'LIBDIR': ''}), ['LIBDIR'])
+        self.assertEqual(guards.unset_env(needs, {'MESENCE': '/x', 'LIBDIR': '/y'}), [])
+
     def test_pr_body_lines(self):
         checks, _ = load(GOOD)
         self.assertEqual(guards.body_problems(checks, '- [x] dq4-walk: 통과 (bsnes 27/27)'), [])
