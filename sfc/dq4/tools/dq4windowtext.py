@@ -102,6 +102,8 @@ FIXED = {
     # 가게 동료 창의 상태(INLINE_STRINGS). 이름 뒤 빈칸을 문구에 둔다
     '\u3000そうびしている': ' 장비 중', '\u3000\u3000もっている': ' 소지 중', '\u3000そうびできない': ' 장비 불가',
     '\u3000もっていない': ' 없음',
+    # 소지 중을 가진 개수로(HELD_COUNT). 롬에 없는 문구라 키는 지어 붙인 일본어
+    **{f'もっている{n}': f' {n}개 소지' for n in range(1, 13)},
     'たからばこ': '보물상자', 'アイテム': '아이템', 'あずけにきた': '맡기기', 'むかえにきた': '데려가기',
     'ようすをみる': '상태 보기', 'わかれにきた': '헤어지기', 'なかまをくわえる': '동료 넣기', 'なかまをはずす': '동료 빼기',
     'ぼうけんのしょに': '모험의 서에', 'キロクする': '기록', 'おはなしのつづきをプレイする': '중단된 모험을 시작',
@@ -147,6 +149,7 @@ EXP_TILE, EXP_VALUE = 0x86, 0xBC               # 「Ex」 타일, 경험치 값 
 LINE_WINDOWS = {0x2D: 1, 0x82: 0, 0x83: 0}
 EMPTY_SLOT = 'しようしていません'
 CANNOT_SELL = 'うれません'
+HELD_COUNT = [f'もっている{n}' for n in range(1, 13)]
 TITLE_COUNT = 0x2B              # 제목 2B 부터는 목록 뒤의 코드
 # 열 머리 제목(11 「レベル　　こうげき　　しゅび」). 가나 끝이 아래 숫자 열의 오른쪽 끝과 맞으므로, 짧은 한글은 가나 자리
 # 안에서 오른쪽에 붙인다(남는 칸을 앞에)
@@ -487,14 +490,18 @@ def build(data, font):
     body = bytearray()
     report = {}
     bases = safe_bases(font)
+    # 같은 그림(같은 이름·문구)은 한 번만 두고 색인이 함께 가리킨다. 뱅크 하나에 다 넣어야 해서다.
+    # 전용 칸 창의 문구는 같은 낱말이 일반 번호로 또 나오므로 고정 문구끼리도 많이 겹친다
+    placed = {}
     for k, (jp, ko, _) in enumerate(phrases()):
         index[SAFE - INDEX + k * 2:SAFE - INDEX + k * 2 + 2] = bases.get(k, 0).to_bytes(2, 'little')
         cols = columns(font, ko)
-        at = DATA + len(body)
-        index[FIXED_KIND * 0x200 + k * 2:FIXED_KIND * 0x200 + k * 2 + 2] = at.to_bytes(2, 'little')
-        body += bytes((len(cols),)) + b''.join(cols)
+        blob = bytes((len(cols),)) + b''.join(cols)
+        if blob not in placed:
+            placed[blob] = DATA + len(body)
+            body += blob
+        index[FIXED_KIND * 0x200 + k * 2:FIXED_KIND * 0x200 + k * 2 + 2] = placed[blob].to_bytes(2, 'little')
     report[FIXED_KIND] = (len(phrases()), len(phrases()))
-    placed = {}
     narrow = None
     for kind, (table, limit, strict) in KINDS.items():
         korean = adopted(table)
@@ -519,7 +526,6 @@ def build(data, font):
                     raise ValueError(f'{ko!r}: {len(cols)}열, 창은 {limit}열')
                 continue
             blob = bytes((len(cols),)) + b''.join(cols)
-            # 같은 그림(같은 이름)은 한 번만 두고 색인이 함께 가리킨다. 뱅크 하나에 다 넣어야 해서다
             if blob not in placed:
                 placed[blob] = DATA + len(body)
                 body += blob
