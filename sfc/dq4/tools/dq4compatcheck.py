@@ -45,6 +45,8 @@ ENTRANCE, ARRIVALS = 0x27E83, 0x7EA97
 TITLE_BRIGHT = 60                # 끝 상자·메뉴는 어둡고 타이틀(하늘 그림)은 밝다
 DARK = 20                        # 끝맺음 서술·끝 상자의 검은 화면
 WALK_HOLD, STUCK = 90, 90        # walk.lua 와 같음
+# 멈춘 롬이 검사를 붙잡지 않게. bsnes 가 가장 느리고, 1장 전체가 이 머신에서 3분 안팎
+UNIT_TIMEOUT, CORE_TIMEOUT = 900, 2400
 
 
 def cpu(off):
@@ -206,8 +208,9 @@ class Walker:
             if (last_change is not None and changes >= want and n >= last_change + after) or n >= maxf:
                 return maps or ['%02X/%02X' % here]
 
-    def warp(self, arg, late=(), extra='', party=''):
-        """dq5warp.lua 의 「어디서나」(ANYWHERE=1, SETTLE 120): 발밑에 트리거를 깔고 밟는다."""
+    def warp(self, arg, start='', late=(), party=''):
+        """dq5warp.lua 의 「어디서나」(ANYWHERE=1, SETTLE 120): 발밑에 트리거를 깔고 밟는다.
+        start 는 dq5warp.lua SET, late 는 LATESET 의 poke 목록."""
         m = re.fullmatch(r'(\w+)/(\w+),(\d+),(\d+),?(\d*)', arg)
         bc, bd, tx, ty = int(m[1], 16), int(m[2], 16), int(m[3]), int(m[4])
         d = int(m[5]) if m[5] else 1
@@ -227,11 +230,12 @@ class Walker:
                 self.c.poke([(TRIGGER_LIST, 0x12), (TRIGGER_LIST + 1, 0xD8), (TRIGGER_LIST + 2, 0x2A), (TRIGGER_LIST + 3, 0x01)])
             self.apply()
 
+        # dq5warp.lua 는 상태를 불러온 뒤 둘째 프레임이 끝날 때 동료(PARTY)를 만들고 SET 을 둔다
         self.step()
-        # dq5warp.lua 처럼 둘째 프레임에 동료(PARTY)를 만들고 SET 을 둔다(묶음 첫 구간)
+        self.step()
         if party:
             self.c.poke(party_pokes(party, self.rom.read_bytes()))
-        apply_sets(self.c, extra)
+        apply_sets(self.c, start)
         start, gmap = self.c.n, self.rd(0x7E00BC) << 8 | self.rd(0x7E00BD)
         laid = tried = arrived = None
         phase, buttons = 'any', set()
@@ -316,10 +320,15 @@ class Walker:
             if how == 'ending':
                 r = self.ending()
             else:
-                # 걷기 검사와 같이 구간을 시작할 때 난수·시각을 한 번 정한 값으로 둔다
-                self.c.poke(sets(wc.pins(opt)))
-                first = (extra, party) if k == 0 else ('', '')
-                maps = (self.warp(arg, sets(wc.pins(opt)), *first) if how == 'warp' else self.walk(arg, opt))
+                # 걷기 검사와 같이 구간을 시작할 때 난수·시각(묶음 첫 구간이면 앞 구간들의 깃발·물건도)을 둔다
+                first, mates = (extra, party) if k == 0 else ('', '')
+                start = ';'.join(v for v in (wc.pins(opt), first) if v)
+                if how == 'warp':
+                    maps = self.warp(arg, start, sets(wc.pins(opt)), mates)
+                else:
+                    # dq4walkstate.lua 는 상태를 불러온 바로 뒤에 SET 을 둔다
+                    apply_sets(self.c, start)
+                    maps = self.walk(arg, opt)
                 r = self.check(name, opt, maps)
             self.c.shot(self.out / f'{i:02d}-{name}.png')
             results.append({**r, 'index': i})
@@ -336,8 +345,8 @@ class Walker:
             # 같은 맵 안의 순간이동은 도착을 알아보지 못하므로 이웃 맵을 거친다
             hop = wc.HOPS[arg.split(',')[0]]
             self.pokes = []
-            self.c.poke(sets(wc.RNG))
-            maps = self.warp(hop, sets(wc.RNG), extra, party)
+            pin = wc.pins({'map': hop[:5]})
+            maps = self.warp(hop, ';'.join(v for v in (pin, extra) if v), sets(pin), party)
             if maps[-1] != hop[:5]:
                 return [{'name': f'{name}-hop', 'status': 'failed', 'problems': [f'끝 맵 {maps[-1]}'], 'index': indices[0]}]
             extra, party = '', ''
@@ -369,10 +378,15 @@ class Walker:
             dest.mkdir(exist_ok=True)
             cmd = [sys.executable, __file__, '_unit', '--rom', str(rom), '--out', str(dest), '--core-path', str(core_path),
                    '--base', str(base), '--unit', ','.join(map(str, u))]
-            subprocess.run(cmd, stdout=(dest / 'log.txt').open('w'), stderr=subprocess.STDOUT)
+            why = '묶음 프로세스가 결과를 남기지 않음'
+            with (dest / 'log.txt').open('w') as log:
+                try:
+                    subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, timeout=UNIT_TIMEOUT)
+                except subprocess.TimeoutExpired:
+                    why = f'묶음 프로세스가 {UNIT_TIMEOUT}초 안에 끝나지 않음'
             f = dest / 'unit.json'
             return json.loads(f.read_text()) if f.exists() else [{'name': wc.SEGMENTS[u[0]][0], 'status': 'failed',
-                                                                    'problems': ['묶음 프로세스가 결과를 남기지 않음'], 'index': u[0]}]
+                                                                    'problems': [why], 'index': u[0]}]
         with concurrent.futures.ThreadPoolExecutor(jobs) as pool:
             for part in pool.map(one, groups[1:]):
                 results += part
@@ -471,16 +485,25 @@ def main():
                 raise SystemExit(f'{dq4cores.core_path(name)} 가 없음: sfc/dq4/tools/dq4cores.py 로 빌드하거나 {CORES[name]} 로 코어 파일을 줌')
             (out / name).mkdir()
         # 코어마다 프로세스 하나(그 안에서 묶음 jobs 개)로 함께 돌린다
-        procs = {name: subprocess.Popen([sys.executable, __file__, '_core', '--core', name, '--rom', str(rom),
-                                         '--out', str(out / name), '--jobs', str(args.jobs)],
-                                        stdout=(out / name / 'log.txt').open('w'), stderr=subprocess.STDOUT)
-                 for name in names}
+        procs = {}
+        for name in names:
+            with (out / name / 'log.txt').open('w') as log:
+                procs[name] = subprocess.Popen([sys.executable, __file__, '_core', '--core', name, '--rom', str(rom),
+                                                '--out', str(out / name), '--jobs', str(args.jobs)],
+                                               stdout=log, stderr=subprocess.STDOUT)
         report = {'rom_sha1': rom_sha, 'cores': {}}
+        deadline = time.time() + CORE_TIMEOUT
         for name, proc in procs.items():
-            proc.wait()
+            why = '코어 프로세스가 결과를 남기지 않음'
+            try:
+                proc.wait(timeout=max(1, deadline - time.time()))
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+                why = f'코어 프로세스가 {CORE_TIMEOUT}초 안에 끝나지 않음'
             f = out / name / 'core.json'
             report['cores'][name] = (json.loads(f.read_text()) if f.exists() else
-                                     {'status': 'failed', 'segments': [], 'problems': ['코어 프로세스가 결과를 남기지 않음']})
+                                     {'status': 'failed', 'segments': [], 'problems': [why]})
         report['status'] = 'passed' if all(r['status'] == 'passed' for r in report['cores'].values()) else 'failed'
     report['seconds'] = round(time.time() - t0, 1)
     (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')
