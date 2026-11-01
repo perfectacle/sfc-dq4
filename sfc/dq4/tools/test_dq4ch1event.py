@@ -428,12 +428,14 @@ class FlyTest(unittest.TestCase):
         self.assertIn({"op": "10", "args": list(ev.REPORTED)}, cmds)
 
     def test_walk_in_lands_in_the_aisle(self):
-        # 줄의 어느 칸에서든 병사를 기다린 뒤 줄 → 통로 → 왕 앞 줄(그 자리에서 만드는 길은 test_dq4heroblock)
+        # 줄의 어느 칸에서든 병사를 기다린 뒤 줄 바로 위 → 통로 → 왕 앞 줄(그 자리에서 만드는 길은 test_dq4heroblock)
         for x in range(ev.LINEUP_X[0], ev.LINEUP_X[1] + 1):
             for y in range(ev.LINEUP_Y[0], ev.LINEUP_Y[1] + 1):
                 code = pro.route((x, y), ev._walk_legs(), bytes((0xC2,)) * ev.LINEUP_WAIT)
                 self.assertEqual(code[:ev.LINEUP_WAIT], bytes((0xC2,)) * ev.LINEUP_WAIT)
-                self.assertEqual(code[-2:], bytes((ev.UP, ev.KING_STEPS)))
+                self.assertEqual(code[-2:], bytes((ev.UP, ev.WALK_ROW - ev.ch1_cell(0, ev.KING_ROW)[1])))
+        # 물러나기(ev_back)는 왕 앞 줄에서 줄(셀 51)까지
+        self.assertEqual(ev.ch1_cell(0, ev.KING_ROW)[1] + ev.KING_STEPS, ev.ch1_cell(0, ev.LINEUP_ROW)[1])
 
     def test_king_waits_for_the_line_again_after_kids(self):
         # 아이들을 돌려보내라 한 뒤에는 줄 판정부터 다시: 왕 앞 줄의 다른 X 에서 물러나기·나가기 걸음이 벽에 막히지 않게

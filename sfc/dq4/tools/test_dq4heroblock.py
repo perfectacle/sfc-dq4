@@ -106,9 +106,14 @@ def run_goto(code, hero):
             c, a = int(r >= 0), r & 0xFF
             z = a == 0
             pc += 2
-        elif op in (0xF0, 0x90, 0x80):
-            take = {0xF0: z, 0x90: not c, 0x80: True}[op]
+        elif op in (0xF0, 0x90, 0xB0, 0x80):
+            take = {0xF0: z, 0x90: not c, 0xB0: c, 0x80: True}[op]
             pc += 2 + (rel(pc + 1) if take else 0)
+        elif op == 0x82:                                    # BRL
+            pc += 3 + int.from_bytes(code[pc + 1:pc + 3], 'little', signed=True)
+        elif op == 0xC9:
+            c, z = int(a >= code[pc + 1]), a == code[pc + 1]
+            pc += 2
         elif op == 0x48:
             stack.append(a)
             pc += 1
@@ -125,6 +130,78 @@ def run_goto(code, hero):
             pc += 3 if op != 0x09 else 2
         else:
             raise AssertionError(f'모르는 명령 {op:02X}')
+
+
+def cell_box(cell):
+    """인물 표 셀에 선 인물의 16×16 점 사각형."""
+    return pro.walker_box([cell])
+
+
+def boxes_meet(a, b):
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def hero_frames(start, prefix, legs):
+    """이벤트 걸음을 따라 프레임마다 주인공 점 자리(셀 하나 8점, 한 프레임 1점, C2 하나 8프레임)."""
+    x, y = start[0] * 8, start[1] * 8
+    out = [(x, y)] * (1 + 8 * len(prefix))
+    for name, goal in legs:
+        while (x if name == 'x' else y) != goal * 8:
+            d = 1 if goal * 8 > (x if name == 'x' else y) else -1
+            x, y = (x + d, y) if name == 'x' else (x, y + d)
+            out.append((x, y))
+    return out
+
+
+class SpritesDoNotMeet(unittest.TestCase):
+    """1C 는 멈춤을 막을 뿐 겹침은 막지 않는다. 걷는 인물과 주인공의 길·차례가 엇갈리지 않는지(점 단위로 셈)."""
+    def test_supper_parents_and_hero_never_meet(self):
+        father_way = pro.walker_box([pro.FATHER_CELL, pro.FATHER_SEAT_CELL])
+        mx, my = next((x * 2, y * 2) for x, y, _, _, t in pro.VILLAGERS if t == pro.T_MOTHER)
+        mother_cells = [(mx, my)] + [(x * 2, y * 2) for x, y in pro.MOTHER_PATH]
+        mother_ways = [pro.walker_box(mother_cells[k:k + 2]) for k in range(len(mother_cells) - 1)]
+        starts = ([(12, y) for y in (35, 36, 37)] + [(8, 36), (8, 37)] + [(10, 34), (11, 34)])
+        for start in starts:
+            prefix, legs, _ = pro.pick_route(pro.SUPPER_ROUTES, start)
+            hero = hero_frames(start, prefix, legs)
+            self.assertEqual(hero[-1], (pro.HERO_AT[0] * 8, pro.HERO_AT[1] * 8), start)
+            for frame, (x, y) in enumerate(hero):
+                for way in mother_ways:
+                    self.assertFalse(boxes_meet((x, y, x + 16, y + 16), way), (start, frame))
+            # 아버지는 주인공이 자기 길에서 벗어난 뒤(father_way) 인물 차례만큼 늦게 걷기 시작한다. 그 늦음이 한 걸음(8프레임)
+            # 안이면 어느 값이어도 겹치지 않아야 한다
+            clear = next(f for f, (x, y) in enumerate(hero + [hero[-1]] * 64)
+                         if not boxes_meet((x, y, x + 16, y + 16), father_way))
+            for lag in range(9):
+                fx, fy = pro.FATHER_CELL[0] * 8, pro.FATHER_CELL[1] * 8
+                for frame in range(len(hero) + 64):
+                    hx, hy = hero[min(frame, len(hero) - 1)]
+                    walked = max(0, frame - clear - lag)
+                    y = max(pro.FATHER_SEAT_CELL[1] * 8, fy - walked)
+                    self.assertFalse(boxes_meet((hx, hy, hx + 16, hy + 16), (fx, y, fx + 16, y + 16)),
+                                     (start, lag, frame))
+
+    def test_soldier_picks_the_way_off_the_hero(self):
+        first = pro.walker_box([ev._npc(*ev.SOLDIER_FROM), ev.ch1_cell(*ev.SOLDIER_PATH[0])])
+        rect = pro.hero_cells_in(first)
+        sx, sy = ev._npc(*ev.SOLDIER_FROM)
+        # 말을 거는 칸: 왼쪽(반 칸 포함)·오른쪽·아래·위
+        for hero in [(sx - 2, sy - 1), (sx - 2, sy), (sx - 2, sy + 1), (sx + 2, sy), (sx, sy + 2), (sx, sy - 2)]:
+            inside = rect[0] <= hero[0] <= rect[2] and rect[1] <= hero[1] <= rect[3]
+            path = ev.SOLDIER_PATH_UP if inside else ev.SOLDIER_PATH
+            cells = [(sx, sy)] + [ev.ch1_cell(x, y) for x, y in path]
+            for k in range(len(cells) - 1):
+                self.assertFalse(boxes_meet(cell_box(hero), pro.walker_box(cells[k:k + 2])), (hero, k))
+
+    def test_king_walk_row_clears_guards_and_soldiers(self):
+        row = ev._walk_legs()[0][1]
+        self.assertEqual(row, ev.WALK_ROW)
+        lineup_x = range(ev.LINEUP_X[0], ev.LINEUP_X[1] + 1)
+        walk = pro.walker_box([(lineup_x[0], row), (lineup_x[-1], row)])
+        standing = [(x * 2, y * 2) for (x, y), _ in ev.THRONE_GUARDS]
+        standing += [(x * 2, y * 2) for (x, y), path, _ in ev.THRONE_SOLDIERS if not path]
+        for cell in standing:
+            self.assertFalse(boxes_meet(cell_box(cell), walk), cell)
 
 
 class WalkersPassHero(unittest.TestCase):
@@ -183,15 +260,19 @@ class HeroMovesArePinned(unittest.TestCase):
 
 class HeroGoto(unittest.TestCase):
     def check(self, code, legs, then, prefix, starts):
-        goal = {name: v for name, v in legs}
+        self.check_routes(code, [(None, prefix, legs)], then, starts)
+
+    def check_routes(self, code, routes, then, starts):
+        tail = bytes((0xFF,)) if then is None else bytes((0xC3, *then.to_bytes(3, 'little')))
         for start in starts:
+            prefix, legs, suffix = pro.pick_route(routes, start)
+            goal = {name: v for name, v in legs}
             wrote = run_goto(code, start)
-            self.assertEqual(wrote[:-4], pro.route(start, legs, prefix), start)
-            self.assertEqual(wrote[-4:], bytes((0xC3, *then.to_bytes(3, 'little'))))
+            self.assertEqual(wrote, pro.route(start, legs, prefix) + suffix + tail, start)
             self.assertLessEqual(len(wrote), pro.ROUTE_MAX)
             # 걸음을 따라가면 목표 칸에 선다
             x, y = start
-            steps = wrote[len(prefix):-4]
+            steps = wrote[len(prefix):len(wrote) - len(suffix) - len(tail)]
             for d, n in zip(steps[::2], steps[1::2]):
                 self.assertGreater(n, 0)
                 x += {0x01: n, 0x02: -n}.get(d, 0)
@@ -204,10 +285,22 @@ class HeroGoto(unittest.TestCase):
 
     def test_supper_walk_reaches_the_table_from_any_side(self):
         code, at = pro.native()
-        end = self.body(code, pro.CODE_AT, at['end'])
+        walk = self.body(code, pro.CODE_AT, at['hero_walk'])
         starts = [(x, y) for x in range(4, 16) for y in range(30, 40)]
-        self.check(end, pro.HERO_LEGS, at['end_event'], b'', starts)
+        self.check_routes(walk, pro.SUPPER_ROUTES, None, starts)
         self.assertEqual(dict(pro.HERO_LEGS), {'x': pro.HERO_AT[0], 'y': pro.HERO_AT[1]})
+
+    def test_shinsia_aside_leaves_her_way(self):
+        code, at = pro.native()
+        aside = self.body(code, pro.CODE_AT, at['shinsia_aside'])
+        way = pro.walker_box(pro.SHINSIA_WAY_CELLS)
+        routes = pro.step_aside(way, (('y', way[3] // 8),), bytes((0xA0, *at['hero_up'].to_bytes(3, 'little'))))
+        starts = [(x, y) for x in range(2, 12) for y in range(24, 34)]
+        self.check_routes(aside, routes, None, starts)
+        for start in starts:
+            _, legs, _ = pro.pick_route(routes, start)
+            end = (dict(legs).get('x', start[0]), dict(legs).get('y', start[1]))
+            self.assertFalse(boxes_meet(cell_box(end), way), start)
 
     def test_king_walk_goes_along_the_line_first(self):
         code, at = ev.native()
@@ -215,8 +308,8 @@ class HeroGoto(unittest.TestCase):
         starts = [(x, y) for x in range(ev.LINEUP_X[0], ev.LINEUP_X[1] + 1)
                   for y in range(ev.LINEUP_Y[0], ev.LINEUP_Y[1] + 1)]
         self.check(walk, ev._walk_legs(), at['ev_stop'], bytes((0xC2,)) * ev.LINEUP_WAIT, starts)
-        # 줄(셀 51)로 세로 → 통로로 가로 → 왕 앞 줄로 세로. 옆으로 가는 줄에는 벽·문지기가 없다
-        self.assertEqual(ev._walk_legs(), (('y', ev.ch1_cell(0, ev.LINEUP_ROW)[1]), ('x', ev.AISLE_X),
+        # 줄 바로 위(셀 50)로 세로 → 통로로 가로 → 왕 앞 줄로 세로. 옆으로 가는 줄에는 벽이 없고 문지기·병사와 16점 떨어진다
+        self.assertEqual(ev._walk_legs(), (('y', ev.ch1_cell(0, ev.LINEUP_ROW)[1] - 1), ('x', ev.AISLE_X),
                                           ('y', ev.ch1_cell(0, ev.KING_ROW)[1])))
 
     def test_lineup_is_only_the_open_part(self):

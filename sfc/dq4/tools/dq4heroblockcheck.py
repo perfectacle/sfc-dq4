@@ -57,6 +57,10 @@ def slot(n):
     return f'X{n:02X}=7E{0x3020 + n:04X}:1;Y{n:02X}=7E{0x3080 + n:04X}:1;F{n:02X}=7E{0x31E0 + n:04X}:1'
 
 
+# 겹침을 셀 슬롯: 일행(0~7)과 인물 목록의 슬롯(8~, dq5-map-format 「인물 슬롯」). 일행끼리는 DQ5 에서도 서로 지나가며
+# 겹쳐 그리므로 세지 않고, 일행과 인물·인물끼리만 센다
+TRACK = list(range(0x20))
+PARTY_SLOTS = 8
 HERO = 'HX=7E3020:1;HY=7E3080:1;HF=7E31E0:1;HP=7E3240:1;HQ=7E3260:1'
 
 # 서장 저녁: 아버지(슬롯 0F)에게 오른쪽·왼쪽·위(의자 칸)에서. 주인공 셀은 반 칸(Y 짝수)에도 선다.
@@ -129,6 +133,27 @@ def cases():
     return out
 
 
+def overlaps(text):
+    """track.txt(lua/dq4heroblock.lua 의 TRACK)에서 두 인물이 겹쳐 보인 프레임 수와 처음 몇 프레임.
+    인물은 16×16 점(2×2 셀)을 차지하므로 X·Y 점 차가 둘 다 16 보다 작으면 겹친다. 그리지 않는 슬롯과 일행끼리는 뺀다."""
+    frames, first = 0, []
+    for line in text.splitlines():
+        f, *slots = line.split()
+        seen = []
+        for v in slots:
+            n, rest = v.split(':')
+            x, y, gone = map(int, rest.split(','))
+            if not gone:
+                seen.append((n, x, y))
+        hits = [f'{a[0]}/{b[0]}' for i, a in enumerate(seen) for b in seen[i + 1:]
+                if max(int(a[0], 16), int(b[0], 16)) >= PARTY_SLOTS and abs(a[1] - b[1]) < 16 and abs(a[2] - b[2]) < 16]
+        if hits:
+            frames += 1
+            if len(first) < 3:
+                first.append(f"{f}:{'+'.join(hits)}")
+    return frames, first
+
+
 def run_case(mesence, rom, base, out, name, case, exit_at):
     dest = out / name
     pins = f'{wc.RNG};{wc.DAY_SET}'
@@ -152,6 +177,7 @@ def run_case(mesence, rom, base, out, name, case, exit_at):
            'WATCH': watch, 'ROMPATCH': wc.NO_ENCOUNTERS, 'SET': wc.RNG}
     if 'snap' in case:
         env.update(SNAPMSG=f"{case['snap'][0]:X}", SNAPWATCH=case['watch'])
+    env['TRACK'] = ','.join(f'{n:02X}' for n in TRACK)
     wc.run(mesence, rom, DRIVER, dest, env, int(env['MAXF']) // 40 + 120)
     text = (dest / 'walk.txt').read_text(encoding='utf-8') if (dest / 'walk.txt').exists() else ''
     seen = {k: int(v, 16) for k, v in re.findall(r'^(\w+)=([0-9A-F]+)$', text, re.M)}
@@ -188,7 +214,14 @@ def run_case(mesence, rom, base, out, name, case, exit_at):
         for k, v in case['snap'][1].items():
             if snap and snap.get(k) != v:
                 problems.append(f'{k}={snap.get(k)}, 기대 {v}')
-    return {'name': name, 'status': 'failed' if problems else 'passed', 'problems': problems,
+    overlap, track = None, dest / 'track.txt'
+    if not track.exists():
+        problems.append('track.txt 없음')
+    else:
+        overlap, first = overlaps(track.read_text())
+        if overlap:
+            problems.append(f'인물이 겹쳐 보인 프레임 {overlap}개(처음 {first})')
+    return {'name': name, 'status': 'failed' if problems else 'passed', 'problems': problems, 'overlap': overlap,
             'end': end[0] if end else None, 'hero': (seen.get('HX'), seen.get('HY')), 'snap': snap,
             'stuck': re.findall(r'stuck at \S+ heading \S+', text)}
 
