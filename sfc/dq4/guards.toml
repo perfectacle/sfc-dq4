@@ -69,3 +69,23 @@ paths = [
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4heroblockcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/heroblock --jobs 6"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI"]
+
+[[check]]
+name = "dq4-savefixture"
+why = "저장 기록으로 시작하는 장면 검사의 출발점: 고친 칸(금화·주인공·동료·flag·자리·밤)이 이어 하기로 그대로 불러와지고, 체크섬이 틀린 칸은 지워지고, 같은 입력이 같은 WRAM 을 내고, 이어 한 뒤 순간이동이 되는지(bsnes·snes9x). 재개 자리 표·칸 표·이어 하기 훅을 바꾸면 깨진다"
+paths = [
+  "sfc/dq4/tools/dq4savefixture.py",
+  "sfc/dq4/tools/dq4chapter1.py",
+  "sfc/dq4/tools/dq4chapterbox.py",
+  "sfc/dq4/tools/dq4wellswitch.py",
+  "sfc/dq4/tools/dq4fieldtravel.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
+  "sfc/dq4/tools/dq4compatcheck.py",
+  "sfc/dq4/tools/dq4libretro.py",
+  "sfc/dq4/tools/dq4cores.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/dq4prologuecheck.py",
+  "sfc/dq5/tools/dq5sram.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4savefixture.py check --rom work/ch1/dq4-ch1-full.sfc --out work/savefixture"
+needs = ["rom", "ASAR", "DQ4_GALMURI", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
