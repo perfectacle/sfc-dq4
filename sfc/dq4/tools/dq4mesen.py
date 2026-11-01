@@ -8,7 +8,9 @@ MesenCE 는 배터리 기록을 세이브 폴더에 「롬 파일 이름.srm」 
 
   run(mesence, rom, script, cwd=dest, env=env, stdout=log, timeout=600)
 
-롬을 복사하지 않고 받은 인자 그대로 띄우려면 testrunner 를 쓴다. MesenCE --testrunner 를 subprocess 로
+롬을 복사하지 않고 받은 인자 그대로 띄우려면 testrunner 를 쓴다. 셸 스크립트는
+`uv run --locked python sfc/dq4/tools/dq4mesen.py 인자…` 로 부른다(MESENCE 환경 변수의 실행 파일에 --testrunner 와 인자를
+붙여 띄우고, 그 종료 코드로 끝난다). MesenCE --testrunner 를 subprocess 로
 부르는 코드는 이 파일과 sfc/dq5/tools/dq5mesen.py 에만 둔다(tools/tests/test_testrunner_callers.py 가 본다).
 """
 import os
@@ -130,3 +132,9 @@ def testrunner(mesence, *args, tag=None, **kwargs):
     """[mesence, '--testrunner', *args] 를 자리를 쥔 채 subprocess.run 으로 띄운다. 롬은 복사하지 않는다."""
     name = f'MesenCE {tag or Path(sys.argv[0]).stem}'
     return headless_slots.run([mesence, '--testrunner', *args], name, **kwargs)
+
+
+if __name__ == '__main__':
+    if not os.environ.get('MESENCE'):
+        sys.exit('MESENCE 에 MesenCE 실행 파일을 주세요')
+    sys.exit(testrunner(os.environ['MESENCE'], *sys.argv[1:]).returncode)

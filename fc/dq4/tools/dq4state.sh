@@ -24,7 +24,7 @@ mkdir -p "$tmp" "$out"
 step() {
   mkdir -p "$tmp/$1"
   SHOT_DIR=$tmp/$1 STATE=$2 SEQ=$3 TAIL=$4 EVERY=0 WATCH="x=0044;y=0045;map=0028" \
-    "$MESENCE" --testrunner --nes.ramPowerOnState=AllZeros "$rom" "$LIBDIR/seq.lua" >/dev/null 2>&1
+    uv run --locked python "$root/sfc/dq4/tools/dq4mesen.py" --nes.ramPowerOnState=AllZeros "$rom" "$LIBDIR/seq.lua" >/dev/null 2>&1
   echo "$1: $(tail -1 "$tmp/$1/watch.txt")"
 }
 
@@ -32,7 +32,7 @@ step() {
 mkdir -p "$tmp/name"
 SHOT_DIR=$tmp/name MAXF=760 EVERY=0 SAVEAT=750 STATE_OUT=name.mss SRAM_DRIVER=$LIBDIR/mkstate.lua \
   SEQ="a@300:4,a@320:4,a@340:4,a@360:4,start@400:4,a@440:4,a@560:4,a@700:4" \
-  "$MESENCE" --testrunner --nes.ramPowerOnState=AllZeros "$rom" "$root/fc/dq4/tools/lua/debugsram.lua" >/dev/null 2>&1
+  uv run --locked python "$root/sfc/dq4/tools/dq4mesen.py" --nes.ramPowerOnState=AllZeros "$rom" "$root/fc/dq4/tools/lua/debugsram.lua" >/dev/null 2>&1
 
 # 커서를 「おわり」로: 아래 5칸, 오른쪽 9칸
 d="down:10,wait:10,"; r="right:10,wait:10,"

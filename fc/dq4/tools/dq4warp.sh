@@ -51,6 +51,6 @@ EOF
     export X=$1 Y=$2 DIR=${DIR:-$3}
   fi
 fi
-SHOT_DIR=$out "$MESENCE" --testrunner --nes.ramPowerOnState=AllZeros "$root/rom/dq4.nes" \
+SHOT_DIR=$out uv run --locked python "$root/sfc/dq4/tools/dq4mesen.py" --nes.ramPowerOnState=AllZeros "$root/rom/dq4.nes" \
   "$root/fc/dq4/tools/lua/warp.lua" >/dev/null 2>&1 || true
 cat "$out/warp.txt"
