@@ -84,6 +84,14 @@ LOW_SPOT, LOW_SPOT_END = 0x05FF00, 0x060000
 # 가게 팔기 개수: 값 셈(06:DF06)과 물건 빼기 앞(06:DF35), 코드는 원래 롬도 빈 12 끝
 SELL_QTY_SITE, SELL_QTY_ORIG = 0x06DF06, bytes.fromhex('ad220f8542225bdf06')
 SELL_GIVE_SITE, SELL_GIVE_ORIG = 0x06DF35, bytes.fromhex('ad210f8542ad230f854300898032')
+# 가게 개수 창의 금액 미리보기. 메시지 「몇 개 사시겠어요? / 쓰는 돈 / 남는 돈」 의 둘째·셋째 줄(창 버퍼 행)에서
+# 숫자 다섯 칸이 시작하는 열. 수 창 깜박임(04:D16D, LDA $0AD9 / CLC)에서 매 프레임 쓴다
+QP_ROWS, QP_COL = (21, 23), 12
+# 가게 개수 창(ShopQtyRec, x 16 y 5 너비 8 높이 5): 안쪽은 x 17~1C, y 6~8(실측). 원래 다섯 자리는 y 6 의 x 18~1C.
+# 숫자는 가운데 줄 x 1A, ▲·▼ 는 그 위·아래. 쓰지 않는 자리는 화면에 나오지 않는 캔버스 맨 아래 줄(y 1F)로 보낸다
+QP_LINE_X, QP_NUM_X, QP_NUM_Y, QP_OFF_Y = 0x17, 0x1A, 7, 0x1F
+QP_OPEN_SITES, QP_OPEN_ORIG = (0x049C46, 0x04A437, 0x04A48A, 0x04A7F4), bytes.fromhex('bd48eb85da')
+QP_FRAME_SITE, QP_FRAME_ORIG = 0x04D16D, bytes.fromhex('add90a18')
 # 수 창 위·아래의 다음 숫자 셈(LDA $0AFE,X / INC·DEC / CMP / BCC·BCS / LDA). 가게 개수 창에서만 1~최대로 돌린다
 QTY_UP_SITE, QTY_UP_ORIG = 0x04C970, bytes.fromhex('bdfe0a1ac90c9002a902')
 QTY_DOWN_SITE, QTY_DOWN_ORIG = 0x04C995, bytes.fromhex('bdfe0a3ac902b002a90b')
@@ -95,6 +103,11 @@ SELL_SPOT, SELL_SPOT_END = 0x12FEB0, 0x130000
 # 개수를 묻는 수 창(다섯 자리 입력, 맡기는 곳 등과 함께 씀)
 QTY_WINDOW = 0x5C
 QTY_RECORD = bytes.fromhex('16050823000101fdfdfdfdfdff52')
+
+
+def qp_cell(x, y):
+    return 0x5000 + (y * 32 + x) * 2
+
 
 
 def lorom(a):
@@ -214,7 +227,8 @@ def apply(data, font=None, asar=None):
         raise ValueError(f'{BUY_SPOT:06X}~ 가 비어 있지 않음')
     for a, orig in ((SELL_QTY_SITE, SELL_QTY_ORIG), (SELL_GIVE_SITE, SELL_GIVE_ORIG), (SELL_NO_SITE, SELL_NO_ORIG),
                     (SELL_ASK_SITE, SELL_ASK_ORIG),
-                    (QTY_UP_SITE, QTY_UP_ORIG), (QTY_DOWN_SITE, QTY_DOWN_ORIG)):
+                    (QTY_UP_SITE, QTY_UP_ORIG), (QTY_DOWN_SITE, QTY_DOWN_ORIG),
+                    (QP_FRAME_SITE, QP_FRAME_ORIG), *((a, QP_OPEN_ORIG) for a in QP_OPEN_SITES)):
         if d[lorom(a):lorom(a) + len(orig)] != orig:
             raise ValueError(f'{a:06X}: 가게 팔기 자리가 아님 {d[lorom(a):lorom(a) + len(orig)].hex()}')
     if any(d[lorom(SELL_SPOT):lorom(SELL_SPOT_END - 1) + 1]):
@@ -275,6 +289,9 @@ def apply(data, font=None, asar=None):
             f'!shop_sell_code = ${SHOP_SELL_CODE:02X}\n!shop_sell_slot = ${CODE_TABLE + (SHOP_SELL_CODE - 0xB0) * 2:06X}\n'
             f'!shop_spot = ${SHOP_SPOT:06X}\n!shop_sell_w = {shop_w}\n!wt_held_first = {held[0]}\n'
             f'!shop_buy_ask = ${BUY_ASK:02X}\n!shop_buy_spot = ${BUY_SPOT:06X}\n'
+            f'!qp_line = $7E{qp_cell(QP_LINE_X, QP_NUM_Y - 1):04X}\n!qp_up = $7E{qp_cell(QP_NUM_X, QP_NUM_Y - 1):04X}\n!qp_num = $7E{qp_cell(QP_NUM_X, QP_NUM_Y):04X}\n!qp_down = $7E{qp_cell(QP_NUM_X, QP_NUM_Y + 1):04X}\n'
+            f'!qp_num_xy = ${QP_NUM_Y << 8 | QP_NUM_X:04X}\n!qp_off_xy = ${QP_OFF_Y << 8:04X}\n'
+            f'!qp_row1 = ${0x5000 + (QP_ROWS[0] * 32 + QP_COL) * 2:04X}\n!qp_row2 = ${0x5000 + (QP_ROWS[1] * 32 + QP_COL) * 2:04X}\n'
             f'!shop_qty_spot = ${QTY_SPOT:06X}\n!shop_qty_end = ${QTY_SPOT_END:06X}\n'
             f'!shop_low_spot = ${LOW_SPOT:06X}\n!shop_low_end = ${LOW_SPOT_END:06X}\n'
             f'!shop_sell_spot = ${SELL_SPOT:06X}\n!shop_sell_end = ${SELL_SPOT_END:06X}\n')
