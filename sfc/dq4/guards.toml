@@ -102,3 +102,14 @@ paths = [
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4romledgercheck.py --ledger work/ch1/ledger.json --report work/ledgercheck/report.json"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
+
+[[check]]
+name = "dq4-field-obj-math"
+why = "필드에서 장 주인공(OBJ 팔레트 5~7)이 BG 와 반씩 섞여 반투명하게 보이는 일: DQ5 필드 맵 불러오기(2B:82E5)의 OBJ 반 더하기($2131 = 50)를 dq4people.hook_patch 가 끈다"
+paths = [
+  "sfc/dq4/tools/dq4people.py",
+  "sfc/dq4/tools/dq4fieldmathcheck.py",
+  "sfc/dq4/tools/lua/dq4fieldmath.lua",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4fieldmathcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/fieldmath"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]

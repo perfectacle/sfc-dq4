@@ -513,10 +513,17 @@ def hook_patch(rom):
     if mask != b'\x29\x0f':
         raise SystemExit(f'03:D2C7: AND #$0F 가 아님 ({mask.hex(" ")})')
     writes.append({'at': '03:D2C7', 'hex': '29 3f', 'orig': '29 0f', 'note': '일행 그림 다시 싣기의 타일 자료 뱅크 6비트'})
+    # 필드 맵을 불러올 때 DQ5 는 OBJ 반 더하기($2131 = 50)를 켠다(탈것 그림자용). 색 연산은 OBJ 팔레트 4~7 에만
+    # 걸리므로 그 줄을 쓰는 장 주인공·동료가 필드에서 BG 와 반씩 섞인다. 필드 OBJ 색 연산을 끈다
+    math = rom[lorom(FIELD_MATH_SITE):lorom(FIELD_MATH_SITE) + 2]
+    if math != b'\xa9\x50':
+        raise SystemExit(f'2B:82F7: LDA #$50 이 아님 ({math.hex(" ")})')
+    writes.append({'at': '2B:82F7', 'hex': 'a9 00', 'orig': 'a9 50', 'note': '필드 $2131 OBJ 반 더하기 끔'})
     return {'format': 'dq5patch/1', 'name': 'people-hook', 'writes': writes, 'rom_size': 2}
 
 
 BANK_MASK_SITE = 0x03D2C7
+FIELD_MATH_SITE = 0x2B82F7                        # 필드 맵 불러오기의 LDA #$50 / STA $2131
 SWAP_SITE = 0x03D24D
 SWAP_HEAD = 29                                    # swap_routine 의 머리(PHX … PLB). 뒤는 A = 세트로 표를 찾는다
 
