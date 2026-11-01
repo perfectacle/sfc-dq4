@@ -381,6 +381,13 @@ def new_game_key(rom_path, core_path):
     return h.hexdigest()
 
 
+def new_game_buttons(n):
+    """새 게임 입력: 프레임 n 을 돌린 뒤 다음 프레임에 누를 버튼."""
+    period, held_for = NEW_GAME_TAP
+    return ({'y'} if any(f <= n < f + ln for f, ln in NEW_GAME_YS) else
+            {'a'} if n < pc.TAP_UNTIL and n % period < held_for else set())
+
+
 def new_game_sram(rom_path, core_path=None):
     """새 게임이 첫 기록을 쓴 SRAM. 롬·코어·입력(new_game_key)마다 한 번 snes9x 로 돌려 cache_dir() 에 둔다."""
     rom_path = Path(rom_path)
@@ -390,14 +397,12 @@ def new_game_sram(rom_path, core_path=None):
     if path.exists():
         return path.read_bytes()
     work = cache_dir() / f'savefixture-newgame-{key}-{os.getpid()}'
-    period, held_for = NEW_GAME_TAP
     held = set()
     written = None
     with closing(open_core(core_path, rom_path, work)) as core:
         for n in range(1, NEW_GAME_FRAMES + 1):
             core.run(held)
-            held = ({'y'} if any(f <= n < f + ln for f, ln in NEW_GAME_YS) else
-                    {'a'} if n < pc.TAP_UNTIL and n % period < held_for else set())
+            held = new_game_buttons(n)
             s = read_sram(core)
             if written is None and n >= ARRIVE_FROM and saved_slots(s):
                 written = n

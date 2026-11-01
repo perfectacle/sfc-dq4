@@ -51,6 +51,8 @@ PROBE_HOLD, PROBE_WAIT, PROBE_EVERY = 6, 14, 5
 # 글 넘기기 A 의 주기와 누르는 길이. 고르기 창이 뜨면 다음 A 전에 프로브가 먼저 알아본다. 필드 명령 창은 7E:007F & 7 = 0
 # 인 프레임에만 입력을 읽으므로(dq4npccheck.TALKS) 8프레임을 눌러야 빠지지 않는다
 ADVANCE_EVERY, ADVANCE_HOLD = 40, 8
+LOOKAHEAD = ADVANCE_HOLD + 8
+SOUND_QUEUE_HEAD, SOUND_QUEUE_TAIL = 0x7E1D91, 0x7E1D93
 # 이무르 37/00: 이어 하면 교회 신부(50,7) 아래 (50,9) 에 선다. 여관 주인(34,37)은 카운터 너머라 (34,41) 에 내려 위로 한
 # 걸음 걸어 (34,40) 에서 말한다
 IMURU = 'imuru'
@@ -68,9 +70,10 @@ TITLE_COPY, TITLE_ERASE = 3, 4
 class Probe:
     """한 코어의 입력·고르기 창 알아보기. step 은 한 프레임 돌리는 함수(Walker.step 이면 bsnes cheat 도 이어 감)."""
 
-    def __init__(self, core, step=None):
+    def __init__(self, core, step=None, retry=True):
         self.c = core
         self.step = step or core.run
+        self.retry = retry
 
     def press(self, key, hold, wait=0):
         for _ in range(hold):
@@ -81,8 +84,16 @@ class Probe:
     def idle(self, frames):
         self.press('wait', 0, frames)
 
+    def sound_busy(self):
+        """소리 대기열에 보낼 것이 남았는지(24:FE44 와 같은 판정). bsnes 는 소리 전송 중에 상태를 저장·되돌리면 손잡기가
+        풀리지 않아 멈췄으므로(여관 잠들기·기도 기록 징글) 그동안은 프로브하지 않는다."""
+        return self.c.rd(SOUND_QUEUE_TAIL) != self.c.rd(SOUND_QUEUE_HEAD)
+
     def choosing(self):
-        """고르기 창이 입력을 기다리는지. 상태를 저장해 아래·위를 눌러 보고 커서가 움직였는지 본 뒤 되돌린다."""
+        """고르기 창이 입력을 기다리는지. 상태를 저장해 아래·위를 눌러 보고 커서가 움직였는지 본 뒤 되돌린다.
+        소리 대기열이 차 있으면 보지 않고 False."""
+        if self.sound_busy():
+            return False
         st, before = self.c.save(), self.c.rd(CURSOR)
         for key in ('down', 'up'):
             for _ in range(PROBE_HOLD):
@@ -95,6 +106,18 @@ class Probe:
                 return True
         return False
 
+    def coming(self, frames=LOOKAHEAD):
+        """frames 프레임 쉬면 고르기 창이 뜨는지(상태를 저장해 보고 되돌림). 글 넘기기 A 가 막 뜨는 예/아니요를 기본값으로
+        답해 버리지 않게, A 를 누르기 전에 본다."""
+        if self.sound_busy():
+            return True
+        st = self.c.save()
+        for _ in range(frames):
+            self.c.run(set())
+        soon = self.choosing()
+        self.c.load(st)
+        return soon
+
     def pick(self, target):
         """커서를 target 에 두고 A. 다다르지 못하면 False. 글 넘기기 A 를 누른 채로 창이 뜨면 이어 누른 A 는 새 입력이
         아니라 먹히지 않으므로 먼저 뗀다."""
@@ -102,19 +125,26 @@ class Probe:
         for _ in range(16):
             at = self.c.rd(CURSOR)
             if at == target:
-                self.press('a', ADVANCE_HOLD, 30)
+                # 창이 막 뜬 프레임의 A 는 먹히지 않을 때가 있어(bsnes 해독의 예, snes9x 저주 풀기의 예), 창이 그대로면
+                # 다시 누른다. 대화의 창은 글 한 쪽 뒤에 뜨지만, 타이틀은 메뉴 뒤 기록 목록이 바로 떠 다시 누른 A 가
+                # 목록을 고르므로 retry=False 로 쓴다
+                for _ in range(3 if self.retry else 1):
+                    self.press('a', ADVANCE_HOLD, 30)
+                    if not self.retry or not self.choosing():
+                        break
                 return True
             self.press('down' if at < target else 'up', ADVANCE_HOLD, 12)
         return False
 
     def converse(self, answers, default=None, limit=2500, watch=None, talk=True, until=None):
         """대화를 끝까지: 고르기 창마다 answers 를 차례로 고르고, 다 쓰면 default(칸 번호, 'b' 면 B 로 닫음).
-        default 가 None 이면 답을 다 쓴 뒤로는 프로브하지 않는다. bsnes 는 여관의 잠드는 연출(소리 손잡기를 기다림)
-        도중에 상태를 저장·되돌리면 그 손잡기가 풀리지 않아 멈췄다(같은 입력을 프로브 없이 넣으면 끝까지 감).
+        default 가 None 이면 답을 다 쓴 뒤로는 프로브하지 않고 B 로 글을 넘긴다(B 는 고르기 창이 다시 떠도 닫기만 함).
+        bsnes 는 여관의 잠드는 연출(소리 손잡기를 기다림) 도중에 상태를 저장·되돌리면 그 손잡기가 풀리지 않아
+        멈췄고(같은 입력을 프로브 없이 넣으면 끝까지 감), 멈춤을 판정하는 장면이 프로브 탓을 섞지 않게 한다.
         talk 면 여관·교회 처리기(7E:0F20)가 돌다 멈춘 프레임에서, until() 이 참이 된 프레임에서 끝낸다.
         watch(frame) 는 프레임마다 부른다.
         돌려주는 것: {'choices': [(프레임, 고른 칸, 창이 뜰 때의 커서)], 'ended': 프레임 또는 None}."""
-        choices, began, t0 = [], None, self.c.n
+        choices, began, t0, press = [], None, self.c.n, True
         while self.c.n - t0 < limit:
             if until and until():
                 return {'choices': choices, 'ended': self.c.n}
@@ -123,8 +153,8 @@ class Probe:
                     began = began or self.c.n
                 elif began is not None:
                     return {'choices': choices, 'ended': self.c.n}
-            probing = default is not None or len(choices) < len(answers)
-            if probing and (self.c.n - t0) % PROBE_EVERY == 0 and self.choosing():
+            tail = default is None and len(choices) >= len(answers)
+            if not tail and (self.c.n - t0) % PROBE_EVERY == 0 and self.choosing():
                 k = len(choices)
                 target = answers[k] if k < len(answers) else default
                 choices.append((self.c.n, target, self.c.rd(CURSOR)))
@@ -134,7 +164,11 @@ class Probe:
                     choices[-1] = (self.c.n, f'{target} 에 닿지 못함', choices[-1][2])
                     return {'choices': choices, 'ended': None}
                 continue
-            self.step({'a'} if (self.c.n - t0) % ADVANCE_EVERY < ADVANCE_HOLD else set())
+            phase = (self.c.n - t0) % ADVANCE_EVERY
+            if phase == 0 and not tail:
+                press = not self.coming()
+            press = press if phase < ADVANCE_HOLD and not tail else phase < ADVANCE_HOLD
+            self.step({'b' if tail else 'a'} if press else set())
             if watch:
                 watch(self.c.n)
         return {'choices': choices, 'ended': None}
@@ -221,6 +255,12 @@ def judge_saved(sram_before, sram_after, wram_at_write, slot, others_kept=True):
     return problems
 
 
+def judge_choices(choices, want):
+    """고르기 창이 want(고른 칸 차례)만큼 떴고 창마다 그 칸에 커서를 두고 골랐는지."""
+    got = [c[1] for c in choices]
+    return [] if got == list(want) else [f'고르기 창 {got}(기대 {list(want)})']
+
+
 def judge_loaded(block, wram):
     """이어 한 WRAM 이 기록 칸과 같은지(맵에 들어설 때 고치는 네 바이트 빼고)."""
     diff = block_diff(block, wram, REWRITTEN)
@@ -272,10 +312,23 @@ class Town:
     def __exit__(self, *exc):
         fx.close(self.c)
 
-    def talk(self, answers, default='b', watch=None):
+    def talk(self, answers, default=None, watch=None):
         """위를 보고(서 있는 자리에서 상대가 위) 말을 건다."""
         self.p.press('up', 6, 30)
-        return self.p.converse([0] + list(answers), default, watch=watch)
+        res = self.p.converse([0] + list(answers), default, watch=watch)
+        res['talking'] = self.c.rd(TALKING)
+        return res
+
+
+FROZEN_FRAMES = 300
+
+
+def frozen(t):
+    """대화가 끝나지 않았을 때: A·B 를 번갈아 눌러도 FROZEN_FRAMES 동안 화면·7E:0F20 이 그대로인지."""
+    before, talking = t.c.frame.tobytes(), t.c.rd(TALKING)
+    for n in range(FROZEN_FRAMES):
+        t.w.step({'a' if n // 40 % 2 else 'b'} if n % 40 < ADVANCE_HOLD else set())
+    return t.c.frame.tobytes() == before and t.c.rd(TALKING) == talking
 
 
 def base_slot(rom):
@@ -311,11 +364,13 @@ def scene_inn(core, rom, out, seed, kind, dq4):
         before = snapshot(t.c)
         # 위로 한 걸음 걸어 카운터 앞에 서고, 그 자리에서 다시 위를 보고 말한다
         t.p.press('up', 6, 30)
-        talk = t.talk([1 if kind == 'refuse' else 0], default=None)
+        answers = [1 if kind == 'refuse' else 0]
+        talk = t.talk(answers)
         after = snapshot(t.c)
         t.c.shot(out / 'end.png')
         total = t.c.rd(INN_TOTAL, 2)
     problems = [] if talk['ended'] else ['대화가 끝나지 않음']
+    problems += judge_choices(talk['choices'], [0] + answers)
     problems += judge_inn(before, after, total, price, kind in ('stay', 'night'), kind == 'night')
     return {'problems': problems, 'price': price, 'total': total, 'before': before, 'after': after, **talk}
 
@@ -326,49 +381,67 @@ def scene_church(core, rom, out, seed, kind):
     if kind == 'revive':
         slot.set_party(HOIMIN)
         put_member(slot, 1, state=0x00, hp=0)
-        who, item, pick_who = 1, REVIVE, 1
+        who, answers = 1, [REVIVE, 1, 0]
+    # 일행이 주인공 하나면 「누구를」 창이 뜨지 않고 바로 값을 묻는다
     elif kind == 'cure':
         put_member(slot, 0, state=ALIVE | POISON)
-        who, item, pick_who = 0, CURE, 0
+        who, answers = 0, [CURE, 0]
     else:
         put_member(slot, 0, state=ALIVE | CURSE)
-        who, item, pick_who = 0, UNCURSE, 0
+        who, answers = 0, [UNCURSE, 0]
     with Town(core, rom, out, slot, seed=seed) as t:
         before = snapshot(t.c)
-        talk = t.talk([item, pick_who, 0])
+        talk = t.talk(answers)
         after = snapshot(t.c)
         t.c.shot(out / 'end.png')
+        talk['frozen'] = None if talk['ended'] else frozen(t)
     level = before['party'][who]['level']
     cost = 5 if kind == 'cure' else level * 10
     problems = [] if talk['ended'] else ['대화가 끝나지 않음']
+    problems += judge_choices(talk['choices'], [0] + answers)
     problems += judge_church(before, after, who, cost, ALIVE)
-    return {'problems': problems, 'cost': cost, 'before': before, 'after': after, **talk}
+    return {'problems': problems, 'cost': cost, 'want_choices': [0] + answers, 'before': before, 'after': after, **talk}
+
+
+ORACLE_VALUES = (0x00ABCD - 0x000100, 12345)
+ORACLE_AT = 0x7E00F6           # 계시가 셈한 남은 경험치(3바이트, 직접 페이지)
+ORACLE_BOX = (16, 128, 240, 216)  # 메시지 창(x0, y0, x1, y1)
+ORACLE_SHOT = 40               # 값이 선 뒤 숫자가 찍힐 때까지
 
 
 def scene_oracle(core, rom, out, seed):
-    """계시: 다음 레벨까지 남은 경험치. 메시지가 그 수를 받는 WRAM 칸을 찾아 기록 값과 견준다."""
-    slot = base_slot(rom)
-    put_member(slot, 0, exp=0x000100, next_exp=0x00ABCD)
-    want = 0x00ABCD - 0x000100
-    seen = {}
-    def hits(w):
-        return {a for a in range(0x2000 - 2) if w[a] | w[a + 1] << 8 | w[a + 2] << 16 == want}
-
-    with Town(core, rom, out, slot, seed=seed) as t:
-        # 말하기 전부터 그 값이 있던 자리는 우연이므로 뺀다
-        already = hits(bytes(t.c.wram()[:0x2000]))
-
-        def watch(n):
-            if not seen:
-                found = sorted(hits(bytes(t.c.wram()[:0x2000])) - already)
-                if found:
-                    seen.update(frame=n, at=[f'{a:04X}' for a in found])
-        talk = t.talk([ORACLE], watch=watch)
-        t.c.shot(out / 'end.png')
-    problems = [] if talk['ended'] else ['대화가 끝나지 않음']
-    if not seen:
-        problems.append(f'남은 경험치 {want} 가 7E:0000~1FFF 에 나타나지 않음')
-    return {'problems': problems, 'want': want, 'seen': seen, **talk}
+    """계시: 남은 경험치를 둘로 바꿔 두 번 듣는다. 두 번 모두 7E:00F6 이 그 값이 되고, 그 뒤 같은 프레임의 메시지 창
+    그림이 두 값에서 달라야 한다(글자는 WRAM 에 그림으로 그려져 숫자 칸을 바로 읽지 못하므로 화면으로 본다)."""
+    from PIL import Image
+    runs, problems = [], []
+    for k, want in enumerate(ORACLE_VALUES):
+        slot = base_slot(rom)
+        put_member(slot, 0, exp=0, next_exp=want)
+        seen = {}
+        with Town(core, rom, out / f'v{k}', slot, seed=seed) as t:
+            def watch(n):
+                if 'frame' not in seen and t.c.rd(ORACLE_AT, 3) == want:
+                    seen['frame'] = n
+                if seen.get('frame') is not None and n == seen['frame'] + ORACLE_SHOT:
+                    t.c.shot(out / f'v{k}.png')
+            talk = t.talk([ORACLE], watch=watch)
+        runs.append({'want': want, 'frame': seen.get('frame'), 'ended': talk['ended'],
+                     'choices': [list(c) for c in talk['choices']]})
+        if not talk['ended']:
+            problems.append(f'{want}: 대화가 끝나지 않음')
+        problems += judge_choices(talk['choices'], [0, ORACLE])
+        if seen.get('frame') is None:
+            problems.append(f'{want}: 7E:00F6 이 남은 경험치가 되지 않음')
+    shots = [out / f'v{k}.png' for k in range(len(ORACLE_VALUES))]
+    if all(p.exists() for p in shots):
+        boxes = [Image.open(p).convert('RGB').crop(ORACLE_BOX).tobytes() for p in shots]
+        differ = sum(a != b for a, b in zip(*boxes))
+        if not differ:
+            problems.append('두 값의 메시지 창 그림이 같음(숫자가 찍히지 않음)')
+    else:
+        differ = None
+        problems.append('메시지 창 그림이 없음')
+    return {'problems': problems, 'runs': runs, 'box_differ': differ}
 
 
 def scene_save(core, rom, out, seed, n):
@@ -386,10 +459,12 @@ def scene_save(core, rom, out, seed, n):
                 if slot_block(s, n) != slot_block(sram_before, n):
                     write.update(frame=frame, wram=bytes(t.c.wram()[:0x20000]))
 
-        talk = t.talk([PRAY, 0, n], default=0, watch=watch)
+        answers = [PRAY, 0, n, 0]
+        talk = t.talk(answers, watch=watch)
         sram_after = fx.read_sram(t.c)
         t.c.shot(out / 'save.png')
     problems = [] if talk['ended'] else ['대화가 끝나지 않음']
+    problems += judge_choices(talk['choices'], [0] + answers)
     problems += judge_saved(sram_before, sram_after, write.get('wram'), n)
     res = {'gold': gold, 'written': write.get('frame'), 'used': f'{sram_after[USED]:02X}',
            'slot_status': [f'{sram_after[STATUS + k]:02X}' for k in range(3)], **talk}
@@ -420,7 +495,7 @@ def continue_from(c, n, goal, limit=1500):
     used = fx.saved_slots(fx.read_sram(c))
     if n not in used:
         raise ValueError(f'칸 {n + 1} 이 쓰인 칸 {[u + 1 for u in used]} 에 없음')
-    p = Probe(c)
+    p = Probe(c, retry=False)
     p.press('start', 2, 10)
     at = lambda: (c.rd(0x7E00BC), c.rd(0x7E00BD), c.rd(0x7E3020), c.rd(0x7E3080)) == tuple(goal)  # noqa: E731
     talk = p.converse([0, used.index(n)], default='b', limit=limit, talk=False, until=lambda: c.n >= fx.ARRIVE_FROM and at())
@@ -437,14 +512,14 @@ def scene_copy(core, rom, out, seed):
     slot = base_slot(rom)
     sram = slot.to_sram(0)
     with fx.closing(title_core(core, rom, out, sram)) as c:
-        p = Probe(c)
+        p = Probe(c, retry=False)
         p.press('start', 2, 10)
-        talk = p.converse([TITLE_COPY, 0, 0, 0], default='b', limit=1500, talk=False,
+        talk = p.converse([TITLE_COPY, 0], default='b', limit=1500, talk=False,
                           until=lambda: fx.read_sram(c)[USED] & 2)
         p.idle(120)
         after = fx.read_sram(c)
         c.shot(out / 'end.png')
-    problems = []
+    problems = judge_choices(talk['choices'], [TITLE_COPY, 0])
     if not slot_ok(after, 1) or slot_block(after, 1)[:SUM_AT] != slot_block(sram, 0)[:SUM_AT]:
         problems.append(f'칸 2 가 칸 1 의 복사가 아님(쓰는 칸 {after[USED]:02X})')
     if slot_block(after, 0) != slot_block(sram, 0):
@@ -459,14 +534,14 @@ def scene_erase(core, rom, out, seed):
     other.gold = 2222
     sram = fx.frame_sram({0: slot.to_block(), 1: other.to_block()}, last=0)
     with fx.closing(title_core(core, rom, out, sram)) as c:
-        p = Probe(c)
+        p = Probe(c, retry=False)
         p.press('start', 2, 10)
         talk = p.converse([TITLE_ERASE, 1, 0], default='b', limit=1500, talk=False,
                           until=lambda: not fx.read_sram(c)[USED] & 2)
         p.idle(120)
         after = fx.read_sram(c)
         c.shot(out / 'end.png')
-    problems = []
+    problems = judge_choices(talk['choices'], [TITLE_ERASE, 1, 0])
     if after[USED] & 2:
         problems.append(f'칸 2 의 쓰는 칸 비트가 남음({after[USED]:02X})')
     if not slot_ok(after, 0) or slot_block(after, 0) != slot_block(sram, 0):
@@ -475,27 +550,27 @@ def scene_erase(core, rom, out, seed):
 
 
 def scene_blank(core, rom, out, seed):
-    """빈 SRAM(모두 0): 새 게임 입력(dq4savefixture.new_game_sram 과 같음)으로 머리를 쓰고 칸 하나만 기록한다."""
-    import dq4prologuecheck as pc
+    """빈 SRAM(모두 0): 새 게임 입력(dq4savefixture.new_game_buttons)으로 머리를 쓰고 칸 하나를 기록한다. 그 칸은
+    저장 기록 밑판(dq4savefixture.new_game_sram, snes9x)의 칸과 번호·바이트가 같아야 한다."""
+    want = fx.new_game_sram(rom)
     sram = bytes(fx.SIZE)
     with fx.closing(title_core(core, rom, out, sram)) as c:
-        period, held_for = fx.NEW_GAME_TAP
         held, written = set(), None
         while c.n < fx.NEW_GAME_FRAMES:
             c.run(held)
-            n = c.n
-            held = ({'y'} if any(f <= n < f + ln for f, ln in fx.NEW_GAME_YS) else
-                    {'a'} if n < pc.TAP_UNTIL and n % period < held_for else set())
+            held = fx.new_game_buttons(c.n)
             if written is None and fx.saved_slots(fx.read_sram(c)):
-                written = n
+                written = c.n
         after = fx.read_sram(c)
         c.shot(out / 'end.png')
     problems = []
-    used = fx.saved_slots(after)
+    used, base = fx.saved_slots(after), fx.saved_slots(want)
     if after[:len(MAGIC)] != MAGIC:
         problems.append('머리가 쓰이지 않음')
-    if len(used) != 1:
-        problems.append(f'쓴 칸 {[u + 1 for u in used]}(기대 하나)')
+    if used != base:
+        problems.append(f'쓴 칸 {[u + 1 for u in used]}(밑판 {[u + 1 for u in base]})')
+    elif any(slot_block(after, u) != slot_block(want, u) for u in used):
+        problems.append('쓴 칸이 밑판 칸과 바이트가 다름')
     return {'problems': problems, 'written': written, 'slots': [u + 1 for u in used]}
 
 
@@ -522,30 +597,47 @@ def scene_badsum(core, rom, out, seed):
     return {'problems': problems, 'arrived': at, 'gold': gold, 'used': f'{after[USED]:02X}'}
 
 
-# 알려진 실패: 장면 → (까닭, 그때 나는 문제인지 보는 함수). 그 문제로만 실패하면 known 으로 치고, 다르게 실패하거나
-# 통과하면 failed — 고쳐지면 여기서 빼라는 뜻이다
-def _stuck(problems):
-    return problems == ['대화가 끝나지 않음']
+# 알려진 실패: 장면 → (이슈와 지울 때, 그 증상인지 보는 함수(결과 dict)). 정확히 그 증상일 때만 known 으로 쳐 전체가
+# 통과하고, 고쳐져 통과하거나 다른 증상이면 failed — 고친 PR 이 그 항목을 지운다
+def _church_stuck(res):
+    """기도 문구에서 멈춤: 문제는 대화가 끝나지 않은 것 하나(고르기 창은 정한 대로, 상태·금화도 맞음), 7E:0F20 = 0C,
+    A·B 를 눌러도 화면이 그대로(frozen)."""
+    return (res['problems'] == ['대화가 끝나지 않음']
+            and res.get('talking') == CHURCH_TALKING and res.get('frozen') is True)
 
 
-def _no_field_color(problems):
-    return bool(problems) and all('걸어도' in p for p in problems)
+def _field_stays_day(res):
+    """필드 시각 색이 낮 그대로: 판정에 걸린 시각마다 버퍼 전체(2·3번 줄, 인물 두 줄, 7E:1AA1)가 낮 벌과 같고,
+    맞은 시각은 낮 벌인 시각뿐."""
+    rows = res.get('steps', [])
+    bad = [r for r in rows if r['frames'] is None]
+    return (bool(bad) and len(res['problems']) == len(bad) and all(r.get('stays_day') for r in bad)
+            and all(r['set'] == DAY_SET for r in rows if r['frames'] is not None))
 
 
-def _no_dusk(problems):
-    return len(problems) == 1 and problems[0].startswith('dusk: 밤 인물 표지')
+def _cross_stays_day(res):
+    """붙들지 않고 넘겨도 낮 그대로: 해 질 녘 다리에서 본 벌이 낮 하나·밤 인물 표지 0 이고, 새벽 다리는 낮으로 끝남."""
+    legs = res.get('legs', {})
+    dusk, dawn = legs.get('dusk', {}), legs.get('dawn', {})
+    return (len(res['problems']) == 1 and res['problems'][0].startswith('dusk: 밤 인물 표지')
+            and [tuple(x[1:]) for x in dusk.get('seen', [])] == [('낮', 0)] and dawn.get('frames') is not None)
 
 
-SOUND_STUCK = '소리 패치 롬(dq4-ch1-sound.sfc 이후)은 {} 뒤 기도 문구에서 멈춤(7E:0F20 그대로). 소리 패치 전 dq4-ch1.sfc 는 끝까지 감'
-FIELD_COLOR = ('libretro 두 코어에서 1장 필드의 시각 색(01:A055)이 걸어도, 필드를 다시 불러와도 낮 벌 그대로. '
-               '원인 미확인(dq4-town-scene-format.md 「남은 것」)')
+CHURCH_TALKING = 0x0C
+SOUND_STUCK = ('이슈: 소리 패치 롬(dq4-ch1-sound.sfc 이후)에서 {} 뒤 「…주소서!」 에서 멈춤(프로브 없이도, 두 코어). '
+               '교회가 부르는 곡 1E 자리에 NDS 반복 곡(コロシアム楽屋)이 든 것으로 보임. 소리 전 dq4-ch1.sfc 는 끝까지 감. '
+               '고치면 이 항목을 지울 것')
+FIELD_COLOR = ('이슈: libretro 두 코어에서 1장 필드의 시각 색(02:AD2A → 01:A055)이 시각을 붙든 채 걸어도 낮 벌 그대로. '
+               '1장 롬 문제인지 검사 진입 방식 차이인지 미확인(dq4-town-scene-format.md 「남은 것」). 고치면 이 항목을 지울 것')
+CROSS_COLOR = ('이슈: 필드에서 시각 00EA → 0002 를 붙들지 않고 걸어 넘겨도 버퍼가 낮 벌 하나, 7E:1AA1(밤 인물 표지)이 '
+               '켜지지 않음(FIELD_COLOR 와 같은 원인으로 보임). 고치면 이 항목을 지울 것')
 KNOWN = {
-    'church_revive': (SOUND_STUCK.format('되살린'), _stuck),
-    'church_cure': (SOUND_STUCK.format('해독한'), _stuck),
-    'church_uncurse': (SOUND_STUCK.format('저주를 푼'), _stuck),
-    'dusk': (FIELD_COLOR, _no_field_color),
-    'dawn': (FIELD_COLOR, _no_field_color),
-    'cross': (FIELD_COLOR, _no_dusk),
+    'church_revive': (SOUND_STUCK.format('되살린'), _church_stuck),
+    'church_cure': (SOUND_STUCK.format('해독한'), _church_stuck),
+    'church_uncurse': (SOUND_STUCK.format('저주를 푼'), _church_stuck),
+    'dusk': (FIELD_COLOR, _field_stays_day),
+    'dawn': (FIELD_COLOR, _field_stays_day),
+    'cross': (CROSS_COLOR, _cross_stays_day),
 }
 
 SCENES = {
@@ -567,10 +659,11 @@ SCENES = {
 }
 
 
-def verdict(name, problems, known=True):
-    """passed·known(알려진 실패가 그대로)·failed."""
+def verdict(name, res, known=True):
+    """passed·known(알려진 실패가 그 증상 그대로)·failed. res 는 장면 결과(problems 와 판정 자료)."""
+    problems = res['problems']
     if known and name in KNOWN:
-        if KNOWN[name][1](problems):
+        if KNOWN[name][1](res):
             return 'known'
         if not problems:
             problems.append(f'알려진 실패가 풀림: KNOWN 에서 {name} 을 뺄 것')
@@ -695,20 +788,26 @@ def palette_follows(w, rom, limit):
     return walk_until(w, lambda: not judge_palette(expected_palette(rom, w.c.rd(TIME, 2)), wram_palette(w.c)), limit)
 
 
-def night_pinned(core, rom, out, seed, name):
+DAY_SET = 'A24D'
+DAY_TIME = 0x0050
+
+
+def night_pinned(core, rom, out, seed, name, dq5):
     """필드에서 시각을 경계값 하나씩에 붙든 채 걸어, 팔레트 버퍼(2·3번 줄 색 1~13, 인물 11·12번 줄, 7E:1AA1)가 그 값의
     표(01:A16B) 벌로 바뀌는지."""
     w, at = field_walker(core, rom, out, seed)
-    rom_bytes = Path(rom).read_bytes()
+    table = Path(dq5).read_bytes()
+    day = expected_palette(table, DAY_TIME)
     rows, problems = [], []
     with fx.closing(w.c):
         if w.c.rd(TIME_STOP[0]) & TIME_STOP[1]:
             problems.append(f'시간 멈춤 7E:2190 bit1 이 켜져 있음({w.c.rd(TIME_STOP[0]):02X})')
         for t in BOUNDARIES[name]:
             w.pokes = [(TIME, t & 0xFF), (TIME + 1, t >> 8)]
-            took = palette_follows(w, rom_bytes, FOLLOW_LIMIT)
-            want = expected_palette(rom_bytes, t)
-            rows.append({'time': f'{t:04X}', 'set': want['set'], 'night_obj': want['night_obj'], 'frames': took})
+            took = palette_follows(w, table, FOLLOW_LIMIT)
+            want = expected_palette(table, t)
+            rows.append({'time': f'{t:04X}', 'set': want['set'], 'night_obj': want['night_obj'], 'frames': took,
+                         'stays_day': not judge_palette(day, wram_palette(w.c))})
             if took is None:
                 bad = judge_palette(want, wram_palette(w.c))
                 problems.append(f'시각 {t:04X}: {FOLLOW_LIMIT} 프레임 걸어도 {" ".join(bad)} 가 표(벌 {want["set"]})와 다름')
@@ -717,10 +816,10 @@ def night_pinned(core, rom, out, seed, name):
     return {'problems': problems, 'field_at': at, 'steps': rows}
 
 
-def night_cross(core, rom, out, seed):
+def night_cross(core, rom, out, seed, dq5):
     """붙들지 않고 걸어 해 질 녘과 새벽을 넘기: 시각이 오르는 동안 팔레트 버퍼가 고른 벌을 차례로 적고, 끝에서 표와 같은지."""
     w, at = field_walker(core, rom, out, seed)
-    rom_bytes = Path(rom).read_bytes()
+    rom_bytes = Path(dq5).read_bytes()
     problems, legs = [], {}
     with fx.closing(w.c):
         for leg, (start, end) in CROSSINGS.items():
@@ -784,9 +883,9 @@ def night_town(core, rom, out, seed):
 
 
 NIGHT_SCENES = {
-    'dusk': lambda c, r, o, s, a: night_pinned(c, r, o, s, 'dusk'),
-    'dawn': lambda c, r, o, s, a: night_pinned(c, r, o, s, 'dawn'),
-    'cross': lambda c, r, o, s, a: night_cross(c, r, o, s),
+    'dusk': lambda c, r, o, s, a: night_pinned(c, r, o, s, 'dusk', a.dq5),
+    'dawn': lambda c, r, o, s, a: night_pinned(c, r, o, s, 'dawn', a.dq5),
+    'cross': lambda c, r, o, s, a: night_cross(c, r, o, s, a.dq5),
     'town_edge': lambda c, r, o, s, a: night_town(c, r, o, s),
 }
 
@@ -872,7 +971,7 @@ def run_one(args):
     except Exception as e:  # noqa: BLE001 — 장면 하나가 깨져도 결과 파일에 남긴다
         res = {'problems': [f'{type(e).__name__}: {e}']}
     res['choices'] = [list(x) for x in res.get('choices', [])]
-    res.update(status=verdict(args.scene, res['problems'], args.known), seconds=round(time.time() - t0, 1))
+    res.update(status=verdict(args.scene, res, args.known), seconds=round(time.time() - t0, 1))
     if args.scene in KNOWN and args.known:
         res['known'] = KNOWN[args.scene][0]
     (out / 'result.json').write_text(json.dumps(res, ensure_ascii=False, indent=1) + '\n')
@@ -899,7 +998,7 @@ def fan_out(mode, args, units):
             dest.mkdir(parents=True)
             log = (dest / 'log.txt').open('w')
             cmd = [sys.executable, __file__, mode, '--scene', name, '--core', core, '--seed', str(seed),
-                   '--rom', str(rom), '--out', str(dest), '--dq4', str(args.dq4.resolve())]
+                   '--rom', str(rom), '--out', str(dest), '--dq4', str(args.dq4.resolve()), '--dq5', str(args.dq5.resolve())]
             if not args.known:
                 cmd.append('--no-known')
             running[(name, core, seed)] = (subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT), log, dest,
@@ -939,6 +1038,8 @@ def main(argv=None):
     ap.add_argument('--rom', required=True, type=Path)
     ap.add_argument('--out', required=True, type=Path)
     ap.add_argument('--dq4', type=Path, default=ROOT / 'rom' / 'dq4.nes', help='FC 롬(여관 값의 기준)')
+    ap.add_argument('--dq5', type=Path, default=ROOT / 'rom' / 'dq5.sfc',
+                    help='원본 DQ5 롬(시각 색 표 01:A16B·A189·A422 의 기준. 검사할 롬에서 읽으면 포팅이 쓴 표를 그대로 믿게 됨)')
     ap.add_argument('--core', choices=('all', *cc.CORES), default='all')
     ap.add_argument('--only', nargs='+', help='이 장면만')
     ap.add_argument('--scene')
