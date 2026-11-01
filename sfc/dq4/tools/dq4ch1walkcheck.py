@@ -13,13 +13,19 @@
 본다. --chapter2 롬(dq4build.py --chapter2)은 1장 끝 서술 뒤 2장 왕좌의 방에 들어가 제목 상자를 기다리는지 본다.
 
 구간마다 시작할 때 난수 상태(7E:075B~075D)와 시각(7E:075E·075F)을 한 번 정한 값으로 둔다. 앞 구간이 남긴 난수·시각이
-롬의 상관없는 바이트 때문에 달라져도 구간 결과가 운에 기대지 않게 하려는 것이다.
+롬의 상관없는 바이트 때문에 달라져도 구간 결과가 운에 기대지 않게 하려는 것이다. 난수 값은 시드로 고른다(--seed N,
+--seeds 0,5,9). 시드 0 은 세 바이트 모두 00, 그 밖은 random.Random(시드) 로 뽑는다(rng_for). 서장은 늘 시드 0 이고,
+여러 시드면 서장 끝에서 시드마다 따로 걸어 모두 통과해야 통과다.
+
+서장 끝 세이브스테이트는 롬 SHA-1 마다 원래 체크아웃의 work/cache/states/<롬sha1>/ 에 두고, 같은 롬·같은 검사 코드면
+서장을 다시 걷지 않는다(--no-state-cache 로 끔).
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4ch1walkcheck.py --rom work/ch1/dq4-ch1.sfc --out work/ch1walk [--chapter2]
   (--from 구간 --states 앞 출력 폴더 로 그 구간부터 다시 걷는다)
   --units --jobs 6: 서장만 이어 걷고, 나머지는 순간이동으로 나눈 묶음(units)마다 서장 끝 세이브스테이트에서 따로
   시작한다. 묶음 앞 구간들이 켰을 깃발·호이민·물건을 SET·PARTY 로 직접 두므로 묶음끼리 기다리지 않고 함께 돈다.
   --base 는 서장 끝 세이브스테이트를 주어 서장을 건너뛴다(같은 롬으로 만든 것만), --only 는 그 묶음만 돈다.
+  여러 시드면 시드마다 --out 아래 seed-N/ 에 구간 폴더를 둔다.
 형식은 sfc/dq4/docs/dq4-chapter1-format.md 「검증」.
 """
 import argparse
@@ -27,6 +33,7 @@ import concurrent.futures
 import hashlib
 import json
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -98,9 +105,100 @@ EFFECTS = {
 HOPS = {'36/01': '36/00,16,72'}
 
 
-def pins(opt):
+def rng_for(seed):
+    """시드의 난수 SET. 시드 0 은 RNG 그대로(지금까지 검사가 쓴 값), 그 밖은 random.Random(seed) 로 세 바이트."""
+    if seed == 0:
+        return RNG
+    pick = random.Random(seed)
+    return ';'.join(f'{a:04X}={pick.randrange(256):02X}' for a in (0x075B, 0x075C, 0x075D))
+
+
+def pins(opt, seed=0):
     """구간 시작에 두는 난수·시각. 밤을 묶는 구간은 밤, 나머지는 낮."""
-    return f"{RNG};{NIGHT_SET if NIGHT in opt.get('poke', '') else DAY_SET}"
+    return f"{rng_for(seed)};{NIGHT_SET if NIGHT in opt.get('poke', '') else DAY_SET}"
+
+
+def add_seed_args(ap):
+    """검사들이 함께 쓰는 --seed·--seeds·--no-state-cache."""
+    group = ap.add_mutually_exclusive_group()
+    group.add_argument('--seed', type=int, help='서장 뒤 구간의 난수 시드(기본 0 = 075B~075D 모두 00)')
+    group.add_argument('--seeds', help='시드 여럿(쉼표, 예 0,5,9). 시드마다 따로 돌고 모두 통과해야 통과')
+    ap.add_argument('--no-state-cache', action='store_true', help='서장 끝 상태 캐시(work/cache/states)를 쓰지 않음')
+
+
+def seeds_of(args):
+    """--seed·--seeds 의 시드 목록(차례 유지, 겹침 없음)."""
+    if args.seeds:
+        seeds = [int(v) for v in args.seeds.split(',') if v.strip()]
+    else:
+        seeds = [args.seed or 0]
+    if not seeds or any(v < 0 for v in seeds):
+        raise SystemExit('시드는 0 이상의 정수')
+    return list(dict.fromkeys(seeds))
+
+
+def seed_dir(out, seed, seeds):
+    """시드 하나면 out 그대로, 여럿이면 out/seed-N."""
+    return out if len(seeds) == 1 else out / f'seed-{seed}'
+
+
+def main_checkout():
+    """원래 체크아웃. 워크트리끼리 캐시를 나눠 쓰려고 git 공통 폴더의 부모를 쓴다."""
+    try:
+        common = subprocess.run(['git', 'rev-parse', '--path-format=absolute', '--git-common-dir'], cwd=ROOT,
+                                capture_output=True, text=True, check=True).stdout.strip()
+        return Path(common).parent
+    except (OSError, subprocess.CalledProcessError):
+        return ROOT
+
+
+def fingerprint(*parts):
+    """캐시 이름에 붙일 검사 코드 지문. Path 는 파일 내용, 나머지는 문자열로 섞는다."""
+    h = hashlib.sha1()
+    for part in parts:
+        h.update(b'\0')
+        h.update(Path(part).read_bytes() if isinstance(part, Path) else str(part).encode())
+    return h.hexdigest()[:12]
+
+
+def mesence_stamp(mesence):
+    # 실행 파일이 90MB 쯤이라 내용 대신 크기·고친 때로 판을 가른다
+    st = Path(mesence).stat()
+    return f'mesence {st.st_size} {st.st_mtime_ns}'
+
+
+def code_key(mesence, *extra):
+    """서장을 걷는 데 닿는 코드·도구의 지문. 하나라도 바뀌면 캐시를 새로 만든다."""
+    return fingerprint(Path(__file__), Path(pc.__file__), Path(mesen.__file__), WALK, WALK_STATE, pc.MKSTATE,
+                       ROOT / 'uv.lock', mesence_stamp(mesence), *extra)
+
+
+class StateCache:
+    """롬 SHA-1 별 시작 상태 캐시: <root>/work/cache/states/<롬sha1>/<종류>-<지문>.<확장자> 와 결과 .json."""
+
+    def __init__(self, rom_bytes, root=None):
+        self.folder = (root or main_checkout()) / 'work' / 'cache' / 'states' / hashlib.sha1(rom_bytes).hexdigest()
+
+    def path(self, kind, key, ext):
+        return self.folder / f'{kind}-{key}{ext}'
+
+    def get(self, kind, key, ext):
+        """(상태 파일, 만들 때의 결과) 또는 None. 결과 .json 을 상태보다 나중에 쓰므로 .json 이 있으면 상태도 온전하다."""
+        state, meta = self.path(kind, key, ext), self.path(kind, key, '.json')
+        if not (state.exists() and meta.exists()):
+            return None
+        return state, json.loads(meta.read_text(encoding='utf-8'))
+
+    def put(self, kind, key, ext, src, result):
+        """다른 워크트리가 동시에 읽어도 반쯤 쓴 파일을 보지 않게 임시 파일에 쓰고 os.replace 로 바꿔 넣는다."""
+        self.folder.mkdir(parents=True, exist_ok=True)
+        state, meta = self.path(kind, key, ext), self.path(kind, key, '.json')
+        for dst, data in ((state, Path(src).read_bytes()),
+                          (meta, json.dumps(result, ensure_ascii=False).encode())):
+            tmp = dst.with_name(f'.{dst.name}.{os.getpid()}')
+            tmp.write_bytes(data)
+            os.replace(tmp, dst)
+        return state
 
 
 def units(segments):
@@ -259,14 +357,14 @@ def watch_flags():
     return ';'.join(f'{k}=7E{a & 0xFFFF:04X}:1' for k, (a, _) in FLAGS.items()) + f';ITEMS0={ITEMS:X}:6;ITEMS1={ITEMS + 6:X}:6;BE=7E00BE:1'
 
 
-def ending(mesence, rom, state, dest):
+def ending(mesence, rom, state, dest, seed=0):
     """끝 상자에서 버튼을 눌러 리셋한 뒤의 호출 차례를 본다."""
     import dq4chapter1
     scenes = dq4chapter1.scenes(True)
     end_box = box.entry_points(scenes)['end']
     acked = box.boot_points(scenes)['acked']
     calls = [end_box, RESET, acked, DRIVER_UPLOAD, DRIVER_HELLO, AFTER_SOUND]
-    run(mesence, rom, MSG, dest, {'STATE': str(state), 'PRE': ENDING_PRE, 'MAXF': '2400', 'SET': RNG,
+    run(mesence, rom, MSG, dest, {'STATE': str(state), 'PRE': ENDING_PRE, 'MAXF': '2400', 'SET': rng_for(seed),
                                   'CALLS': ','.join(f'{a:06X}' for a in calls)}, 200)
     text = (dest / 'msg.txt').read_text(encoding='utf-8') if (dest / 'msg.txt').exists() else ''
     # 견주는 것은 지난 PC 와 그 프레임뿐이다. 리셋 뒤 X 는 소리 CPU 가 포트에 둔 값이라 앞서 걸은 길에 따라 다르다
@@ -291,18 +389,18 @@ def ending(mesence, rom, state, dest):
             'trace': hashlib.sha1(repr(seen).encode()).hexdigest()[:12], 'frames': {'box': shown, 'reset': reset, 'after_sound': first(AFTER_SOUND, reset or 0) if reset else None}}
 
 
-def segment(mesence, rom, state, dest, seg, patch, extra='', party=''):
+def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0):
     """한 구간을 걷는다. extra 는 시작에 더 둘 SET(묶음 첫 구간의 깃발·물건), party 는 dq5warp.lua PARTY."""
     name, how, arg, opt = seg
     if how == 'ending':
-        return ending(mesence, rom, state, dest)
+        return ending(mesence, rom, state, dest, seed)
     poke = opt.get('poke', '')
-    start = ';'.join(v for v in (pins(opt), extra) if v)
+    start = ';'.join(v for v in (pins(opt, seed), extra) if v)
     if how == 'warp':
         # 도착해 조작이 풀린 첫 프레임에 난수를 다시 둔다. 어디서 떠났느냐에 따라 도착 프레임까지 굴린 수가 다르다
         run(mesence, rom, WARP, dest, {'STATE': str(state), 'TO': arg, 'SAVE': 'end.mss', 'SETTLE': '120',
                                        'MAXF': '1500', 'WARPEXIT': f'{warp_exit(rom):X}', 'ANYWHERE': '1',
-                                       'ROMPATCH': patch, 'SET': start, 'LATESET': pins(opt),
+                                       'ROMPATCH': patch, 'SET': start, 'LATESET': pins(opt, seed),
                                        **({'POKE': poke} if poke else {}), **({'PARTY': party} if party else {})}, 300)
         log = dest / 'warp.txt'
         text = log.read_text(encoding='utf-8') if log.exists() else ''
@@ -367,7 +465,7 @@ def prologue_start(mesence, rom, out):
     return state
 
 
-def walk_unit(mesence, rom, data, out, segments, unit, base):
+def walk_unit(mesence, rom, data, out, segments, unit, base, seed=0):
     """한 묶음을 base 에서 시작해 차례로 걷는다. 첫 구간에 앞 구간들의 깃발·물건·동료를 둔다."""
     extra, party = setup(segments, unit[0])
     state, results = base, []
@@ -376,19 +474,33 @@ def walk_unit(mesence, rom, data, out, segments, unit, base):
         # dq5warp.lua 는 같은 맵 안의 순간이동이면 목적지 칸에 꼭 맞게 서야 도착으로 본다. 이웃 맵을 거친다
         hop = HOPS[arg.split(',')[0]]
         r = segment(mesence, rom, state, out / f'{name}-hop', (f'{name}-hop', 'warp', hop, {'map': hop[:5]}),
-                    NO_ENCOUNTERS, extra, party)
+                    NO_ENCOUNTERS, extra, party, seed)
         if r['status'] != 'passed':
             return [r]
         state, extra, party = out / f'{name}-hop' / 'end.mss', '', ''
     for k, i in enumerate(unit):
         seg = segments[i]
         patch = NO_ENCOUNTERS + (';' + boss_patch(data) if seg[3].get('boss') else '')
-        r = segment(mesence, rom, state, out / seg[0], seg, patch, *((extra, party) if k == 0 else ()))
+        r = segment(mesence, rom, state, out / seg[0], seg, patch, *((extra, party) if k == 0 else ('', '')), seed)
         results.append(r)
         if r['status'] != 'passed':
             break
         state = out / seg[0] / 'end.mss'
     return results
+
+
+def prologue(mesence, rom, data, out, segments, cache=None):
+    """서장 끝 세이브스테이트와 서장 구간 결과. 서장은 늘 시드 0 이라 시드와 상관없이 하나를 나눠 쓴다.
+    cache(StateCache)에 같은 롬·같은 코드로 만든 것이 있으면 걷지 않고 그것을 쓴다."""
+    key = code_key(mesence, repr(segments[0]), NO_ENCOUNTERS) if cache else None
+    hit = cache.get('prologue', key, '.mss') if cache else None
+    if hit:
+        return hit[0], {**hit[1], 'cached': hit[0].name}
+    r = walk_unit(mesence, rom, data, out, segments, [0], prologue_start(mesence, rom, out))[-1]
+    state = out / segments[0][0] / 'end.mss'
+    if cache and r['status'] == 'passed':
+        cache.put('prologue', key, '.mss', state, r)
+    return state, r
 
 
 def main():
@@ -403,7 +515,9 @@ def main():
     ap.add_argument('--jobs', type=int, default=6, help='--units 에서 함께 띄울 MesenCE 수')
     ap.add_argument('--base', type=Path, help='--units: 서장 끝 세이브스테이트(같은 롬으로 만든 것). 주면 서장을 건너뜀')
     ap.add_argument('--only', help='--units: 이 구간으로 시작하는 묶음만(쉼표로 여럿)')
+    add_seed_args(ap)
     args = ap.parse_args()
+    seeds = seeds_of(args)
     segments = SEGMENTS[:-2] + CHAPTER2_END if args.chapter2 else SEGMENTS
     mesence = Path(os.environ['MESENCE'])
     out = args.out.resolve()
@@ -413,54 +527,67 @@ def main():
     rom = out / 'c.sfc'
     shutil.copyfile(args.rom.resolve(), rom)
     data = rom.read_bytes()
+    cache = None if args.no_state_cache else StateCache(data)
     began = time.monotonic()
     names = [s[0] for s in segments]
+    pro = None
+    runs = {s: [] for s in seeds}
     if args.units:
-        groups = units(segments)
+        groups = [u for u in units(segments) if u[0] != 0]
         if args.only:
             wanted = args.only.split(',')
             groups = [u for u in groups if names[u[0]] in wanted]
-        results = []
         if args.base:
             base = args.base.resolve()
-            groups = [u for u in groups if u[0] != 0]
         else:
-            base = out / names[0] / 'end.mss'
-            if groups and groups[0][0] == 0:
-                results += walk_unit(mesence, rom, data, out, segments, groups.pop(0), prologue_start(mesence, rom, out))
-                print(json.dumps(results[-1], ensure_ascii=False), flush=True)
-        if all(r['status'] == 'passed' for r in results):
+            base, pro = prologue(mesence, rom, data, out, segments, cache)
+            print(json.dumps(pro, ensure_ascii=False), flush=True)
+        if pro is None or pro['status'] == 'passed':
             with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
-                jobs = [pool.submit(walk_unit, mesence, rom, data, out, segments, u, base) for u in groups]
-                for job in concurrent.futures.as_completed(jobs):
+                jobs = [(s, pool.submit(walk_unit, mesence, rom, data, seed_dir(out, s, seeds), segments, u, base, s))
+                        for s in seeds for u in groups]
+                for job in concurrent.futures.as_completed([j for _, j in jobs]):
                     for r in job.result():
                         print(json.dumps(r, ensure_ascii=False), flush=True)
-            for job in jobs:
-                results += job.result()
-        expected = sum(len(u) for u in groups) + (0 if args.base or args.only else 1)
-        ok = len(results) == expected and all(r['status'] == 'passed' for r in results)
+            for s, job in jobs:
+                runs[s] += job.result()
+        expected = sum(len(u) for u in groups)
     else:
         first = names.index(args.start) if args.start else 0
-        if first:
-            state = (args.states or out).resolve() / names[first - 1] / 'end.mss'
-        else:
-            state = prologue_start(mesence, rom, out)
-        results = []
         last = names.index(args.until) if args.until else len(segments) - 1
-        for seg in segments[first:last + 1]:
-            boss = seg[3].get('boss')
-            r = segment(mesence, rom, state, out / seg[0], seg,
-                        NO_ENCOUNTERS + (';' + boss_patch(data) if boss else ''))
-            results.append(r)
-            print(json.dumps(r, ensure_ascii=False), flush=True)
-            if r['status'] != 'passed':
-                break
-            state = out / seg[0] / 'end.mss'
-        ok = len(results) == last + 1 - first and all(r['status'] == 'passed' for r in results)
+        if first:
+            start = (args.states or out).resolve() / names[first - 1] / 'end.mss'
+        else:
+            start, pro = prologue(mesence, rom, data, out, segments, cache)
+            print(json.dumps(pro, ensure_ascii=False), flush=True)
+            first = 1
+        if pro is None or pro['status'] == 'passed':
+            for s in seeds:
+                state, dest = start, seed_dir(out, s, seeds)
+                for seg in segments[first:last + 1]:
+                    boss = seg[3].get('boss')
+                    r = segment(mesence, rom, state, dest / seg[0], seg,
+                                NO_ENCOUNTERS + (';' + boss_patch(data) if boss else ''), seed=s)
+                    runs[s].append(r)
+                    print(json.dumps({'seed': s, **r}, ensure_ascii=False), flush=True)
+                    if r['status'] != 'passed':
+                        break
+                    state = dest / seg[0] / 'end.mss'
+        expected = max(0, last + 1 - first)
+    pro_ok = pro is None or pro['status'] == 'passed'
+    per_seed = [{'seed': s, 'rng': rng_for(s),
+                 'status': 'passed' if pro_ok and len(rs) == expected and all(r['status'] == 'passed' for r in rs)
+                 else 'failed', 'segments': rs} for s, rs in runs.items()]
+    ok = all(r['status'] == 'passed' for r in per_seed)
     report = {'status': 'passed' if ok else 'failed', 'mode': 'units' if args.units else 'chain',
-              'seconds': round(time.monotonic() - began), 'segments': results}
+              'seconds': round(time.monotonic() - began),
+              'state_cache': 'off' if cache is None or pro is None else 'hit' if pro.get('cached') else 'miss',
+              'prologue': pro, 'seeds': per_seed}
+    if len(seeds) == 1:
+        report.update(seed=seeds[0], rng=rng_for(seeds[0]), segments=([pro] if pro else []) + per_seed[0]['segments'])
     (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')
-    print(json.dumps({'status': report['status'], 'seconds': report['seconds']}, ensure_ascii=False))
+    print(json.dumps({'status': report['status'], 'seconds': report['seconds'], 'state_cache': report['state_cache'],
+                      'seeds': {r['seed']: r['status'] for r in per_seed}}, ensure_ascii=False))
     return 0 if ok else 1
 
 

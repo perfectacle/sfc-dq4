@@ -12,6 +12,9 @@ MesenCE 판(dq4ch1walkcheck)과 다른 점: 세이브스테이트 대신 한 실
 보지 않고, 끝(리셋)은 실행 추적 대신 어두운 끝 화면 뒤 타이틀이 다시 뜨는지(밝기)와 소리로 본다.
 
   python sfc/dq4/tools/dq4cores.py && python sfc/dq4/tools/dq4compatcheck.py walk --rom work/ch1/dq4-ch1-full.sfc --out work/compat
+  (--seed N·--seeds 0,5,9 는 서장 뒤 구간의 난수(dq4ch1walkcheck.rng_for). 서장은 늘 시드 0 이고, --jobs 2 이상이면 서장 끝
+  상태(prologue.state)를 롬 SHA-1·코어별로 work/cache/states 에 두어 다시 걷지 않는다. --no-state-cache 로 끔.
+  여러 시드는 --jobs 2 이상에서만, 코어 폴더 아래 seed-N/ 에 묶음 폴더)
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4compatcheck.py probe --rom work/ch1/dq4-ch1-full.sfc --out work/compat-probe
 형식은 sfc/dq4/docs/dq4-compat-format.md.
 """
@@ -30,11 +33,13 @@ from pathlib import Path
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
+ROOT = HERE.parents[2]
 sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
 import dq4brkscan  # noqa: E402
 import dq4cores  # noqa: E402
 import dq4ch1walkcheck as wc  # noqa: E402
+import dq4libretro  # noqa: E402
 import dq4prologuecheck as pc  # noqa: E402
 from dq4libretro import Core, write_wav  # noqa: E402
 from dq5exitcheck import warp_exit  # noqa: E402
@@ -85,7 +90,7 @@ def die_with_parent(group):
 def unit_waits(out):
     """묶음 프로세스들이 자리를 기다린 초의 합. 코어 프로세스의 시간 제한에 더한다(함께 기다리면 겹쳐 세어 넉넉해진다)."""
     total = 0.0
-    for f in out.glob(f'unit-*/{STARTED}'):
+    for f in out.glob(f'**/unit-*/{STARTED}'):
         try:
             total += float(f.read_text() or 0)
         except (OSError, ValueError):
@@ -158,8 +163,8 @@ def tokens(s):
 class Walker:
     """한 코어에서 구간을 차례로 걷는다."""
 
-    def __init__(self, core_path, rom_in, out):
-        self.out = out
+    def __init__(self, core_path, rom_in, out, seed=0):
+        self.out, self.seed = out, seed
         data = bytearray(Path(rom_in).read_bytes())
         # 조우를 끄고 보스를 약하게(MesenCE 판은 보스 패치를 보스 구간에만 둠. 다른 구간에서 그 몬스터를 만나지 않음)
         for tok in (wc.NO_ENCOUNTERS + ';' + wc.boss_patch(bytes(data))).split(';'):
@@ -334,7 +339,7 @@ class Walker:
 
     def ending(self):
         """끝 서술 둘을 넘기고 끝 상자에서 누른 뒤(ENDING_PRE) 리셋되어 타이틀이 다시 뜨고 소리가 나는지."""
-        self.c.poke(sets(wc.RNG))
+        self.c.poke(sets(wc.rng_for(self.seed)))
         bright = []
         k = 0
         start = len(self.rms)
@@ -368,9 +373,11 @@ class Walker:
             else:
                 # 걷기 검사와 같이 구간을 시작할 때 난수·시각(묶음 첫 구간이면 앞 구간들의 깃발·물건도)을 둔다
                 first, mates = (extra, party) if k == 0 else ('', '')
-                start = ';'.join(v for v in (wc.pins(opt), first) if v)
+                # 서장은 시드와 상관없이 시드 0(서장 끝 상태를 시드끼리 나눠 쓴다)
+                seed = 0 if i == 0 else self.seed
+                start = ';'.join(v for v in (wc.pins(opt, seed), first) if v)
                 if how == 'warp':
-                    maps = self.warp(arg, start, sets(wc.pins(opt)), mates)
+                    maps = self.warp(arg, start, sets(wc.pins(opt, seed)), mates)
                 else:
                     # dq4walkstate.lua 는 상태를 불러온 바로 뒤에 SET 을 둔다
                     apply_sets(self.c, start)
@@ -391,41 +398,69 @@ class Walker:
             # 같은 맵 안의 순간이동은 도착을 알아보지 못하므로 이웃 맵을 거친다
             hop = wc.HOPS[arg.split(',')[0]]
             self.pokes = []
-            pin = wc.pins({'map': hop[:5]})
+            pin = wc.pins({'map': hop[:5]}, self.seed)
             maps = self.warp(hop, ';'.join(v for v in (pin, extra) if v), sets(pin), party)
             if maps[-1] != hop[:5]:
                 return [{'name': f'{name}-hop', 'status': 'failed', 'problems': [f'끝 맵 {maps[-1]}'], 'index': indices[0]}]
             extra, party = '', ''
         return self.segments(indices, extra, party)
 
-    def finish(self, results, count, t0):
+    def finish(self, runs, pro, t0, cache_state='off'):
+        """runs 는 시드 → 서장 뒤 구간 결과. pro 는 서장 결과(None 이면 runs 에 서장도 들었다)."""
         if self.audio:
             write_wav(self.out / 'audio.wav', np.concatenate(self.audio), self.c.rate)
-        ok = len(results) == count and all(r['status'] == 'passed' for r in results)
-        return {'core': self.c.name, 'status': 'passed' if ok else 'failed', 'segments': results,
-                'frames': self.c.n, 'seconds': round(time.time() - t0, 1)}
+        per_seed = []
+        for seed, results in runs.items():
+            results = sorted(([pro] if pro else []) + results, key=lambda r: r['index'])
+            ok = len(results) == len(wc.SEGMENTS) and all(r['status'] == 'passed' for r in results)
+            per_seed.append({'seed': seed, 'rng': wc.rng_for(seed), 'status': 'passed' if ok else 'failed',
+                             'segments': results})
+        report = {'core': self.c.name, 'status': 'passed' if all(r['status'] == 'passed' for r in per_seed) else 'failed',
+                  'frames': self.c.n, 'seconds': round(time.time() - t0, 1), 'state_cache': cache_state,
+                  'seeds': per_seed}
+        if len(per_seed) == 1:
+            report.update(seed=per_seed[0]['seed'], rng=per_seed[0]['rng'], segments=per_seed[0]['segments'])
+        return report
 
-    def run(self, jobs=1, core_path=None, rom=None):
-        """1장 전체. jobs > 1 이면 서장만 이어 걷고, 나머지 묶음은 서장 끝 상태에서 jobs 개씩 함께(프로세스마다 코어 하나)."""
+    def run(self, jobs=1, core_path=None, rom=None, seeds=(0,), cache=None, kind='compat'):
+        """1장 전체. jobs > 1 이면 서장만 이어 걷고, 나머지 묶음은 서장 끝 상태에서 jobs 개씩 함께(프로세스마다 코어 하나).
+        cache(dq4ch1walkcheck.StateCache)에 같은 롬·코어·코드의 서장 끝 상태가 있으면 서장을 걷지 않는다."""
         t0 = time.time()
-        self.boot()
+        seeds = list(seeds)
         if jobs <= 1:
-            return self.finish(self.segments(range(len(wc.SEGMENTS))), len(wc.SEGMENTS), t0)
+            # 서장부터 끝까지 세이브스테이트 없이 한 줄로 걷는 것이 이 방식의 뜻이라 캐시도 여러 시드도 쓰지 않는다
+            if len(seeds) > 1:
+                raise SystemExit('--jobs 1 은 시드 하나만')
+            self.seed = seeds[0]
+            self.boot()
+            return self.finish({self.seed: self.segments(range(len(wc.SEGMENTS)))}, None, t0)
         groups = wc.units(wc.SEGMENTS)
-        results = self.segments(groups[0])
-        if any(r['status'] != 'passed' for r in results):
-            return self.finish(results, len(wc.SEGMENTS), t0)
-        base = self.out / 'prologue.state'
-        raw, n = self.c.save()
-        base.write_bytes(n.to_bytes(8, 'little') + raw)
+        key = wc.fingerprint(Path(__file__), Path(dq4libretro.__file__), Path(wc.__file__), Path(pc.__file__),
+                             ROOT / 'uv.lock', dq4cores.sha256(core_path)) if cache else None
+        hit = cache.get(kind, key, '.state') if cache else None
+        if hit:
+            base, pro = hit[0], {**hit[1], 'cached': hit[0].name}
+            print(json.dumps(pro, ensure_ascii=False), flush=True)
+        else:
+            self.seed = 0
+            self.boot()
+            pro = self.segments(groups[0])[0]
+            base = self.out / 'prologue.state'
+            if pro['status'] != 'passed':
+                return self.finish({s: [] for s in seeds}, pro, t0, 'off' if cache is None else 'miss')
+            raw, n = self.c.save()
+            base.write_bytes(n.to_bytes(8, 'little') + raw)
+            if cache:
+                cache.put(kind, key, '.state', base, pro)
         # 묶음 프로세스마다 코어가 자리를 잡는다. 이 코어는 그동안 쉬므로 자리를 내놓아야 자리가 적을 때 막히지 않는다
         self.c.close()
 
-        def one(u):
-            dest = self.out / f'unit-{u[0]:02d}'
-            dest.mkdir(exist_ok=True)
+        def one(work):
+            seed, u = work
+            dest = wc.seed_dir(self.out, seed, seeds) / f'unit-{u[0]:02d}'
+            dest.mkdir(parents=True, exist_ok=True)
             cmd = [sys.executable, __file__, '_unit', '--rom', str(rom), '--out', str(dest), '--core-path', str(core_path),
-                   '--base', str(base), '--unit', ','.join(map(str, u))]
+                   '--base', str(base), '--unit', ','.join(map(str, u)), '--seed', str(seed)]
             why = '묶음 프로세스가 결과를 남기지 않음'
             (dest / STARTED).unlink(missing_ok=True)
             with (dest / 'log.txt').open('w') as log:
@@ -434,13 +469,13 @@ class Walker:
                 if not wait_child(proc, dest, UNIT_TIMEOUT):
                     why = f'묶음 프로세스가 자리를 잡은 뒤 {UNIT_TIMEOUT}초 안에 끝나지 않음'
             f = dest / 'unit.json'
-            return json.loads(f.read_text()) if f.exists() else [{'name': wc.SEGMENTS[u[0]][0], 'status': 'failed',
-                                                                    'problems': [why], 'index': u[0]}]
+            return seed, (json.loads(f.read_text()) if f.exists() else
+                          [{'name': wc.SEGMENTS[u[0]][0], 'status': 'failed', 'problems': [why], 'index': u[0]}])
+        runs = {s: [] for s in seeds}
         with concurrent.futures.ThreadPoolExecutor(jobs) as pool:
-            for part in pool.map(one, groups[1:]):
-                results += part
-        results.sort(key=lambda r: r['index'])
-        return self.finish(results, len(wc.SEGMENTS), t0)
+            for seed, part in pool.map(one, [(s, u) for s in seeds for u in groups[1:]]):
+                runs[seed] += part
+        return self.finish(runs, pro, t0, 'off' if cache is None else 'hit' if hit else 'miss')
 
 
 def probe_problems(lines):
@@ -459,7 +494,7 @@ def probe_problems(lines):
     return problems
 
 
-def probe(rom, out, jobs=6):
+def probe(rom, out, jobs=6, seeds='0'):
     import dq4mesen
     lua = HERE / 'lua' / 'dq4openbus.lua'
     log = out / 'openbus.txt'
@@ -473,7 +508,9 @@ def probe(rom, out, jobs=6):
 
     dq4mesen.run = wrapped
     old_argv = sys.argv
-    sys.argv = ['dq4ch1walkcheck', '--rom', str(rom), '--out', str(out / 'walk'), '--units', '--jobs', str(jobs)]
+    # 서장의 열린 버스 접근도 기록해야 하므로 캐시한 서장 끝 상태를 쓰지 않는다
+    sys.argv = ['dq4ch1walkcheck', '--rom', str(rom), '--out', str(out / 'walk'), '--units', '--jobs', str(jobs),
+                '--seeds', seeds, '--no-state-cache']
     try:
         walked = wc.main() == 0
     finally:
@@ -485,11 +522,12 @@ def probe(rom, out, jobs=6):
             'records': len(lines)}
 
 
-def core_report(name, rom, out, jobs):
+def core_report(name, rom, out, jobs, seeds=(0,), state_cache=True):
     path = dq4cores.core_path(name)
     if not path.exists():
         raise SystemExit(f'{path} 가 없음: sfc/dq4/tools/dq4cores.py 로 빌드하거나 {CORES[name]} 로 코어 파일을 줌')
-    report = Walker(path, rom, out).run(jobs, path, rom)
+    cache = wc.StateCache(Path(rom).read_bytes()) if state_cache else None
+    report = Walker(path, rom, out).run(jobs, path, rom, seeds, cache, f'compat-{name}')
     built = path == dq4cores.core_path(name, dq4cores.cores_dir()) and not os.environ.get(dq4cores.ENV[name])
     # 환경 변수로 다른 파일을 주면 빌드 기록은 그 파일의 것이 아니다
     return {**report, 'core_sha256': dq4cores.sha256(path), 'core_build': dq4cores.stamp(name) if built else None}
@@ -505,13 +543,15 @@ def main():
     ap.add_argument('--core-path', type=Path, help=argparse.SUPPRESS)
     ap.add_argument('--base', type=Path, help=argparse.SUPPRESS)
     ap.add_argument('--unit', help=argparse.SUPPRESS)
+    wc.add_seed_args(ap)
     args = ap.parse_args()
+    seeds = wc.seeds_of(args)
     out, rom = args.out.resolve(), args.rom.resolve()
     if args.mode in ('_core', '_unit'):
         die_with_parent(group=args.mode == '_core')
     if args.mode == '_unit':
         # 묶음 하나: 서장 끝 상태를 불러 걷고 unit.json 에 결과
-        w = Walker(args.core_path, rom, out)
+        w = Walker(args.core_path, rom, out, seeds[0])
         data = args.base.read_bytes()
         w.c.run(set())
         w.c.load((data[8:], int.from_bytes(data[:8], 'little')))
@@ -519,7 +559,7 @@ def main():
         (out / 'unit.json').write_text(json.dumps(results, ensure_ascii=False))
         return 0
     if args.mode == '_core':
-        report = core_report(args.core, rom, out, args.jobs)
+        report = core_report(args.core, rom, out, args.jobs, seeds, not args.no_state_cache)
         (out / 'core.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')
         return 0 if report['status'] == 'passed' else 1
     if out.exists() and any(out.iterdir()):
@@ -528,7 +568,7 @@ def main():
     rom_sha = __import__('hashlib').sha1(rom.read_bytes()).hexdigest()
     t0 = time.time()
     if args.mode == 'probe':
-        report = {'rom_sha1': rom_sha, **probe(rom, out, args.jobs)}
+        report = {'rom_sha1': rom_sha, **probe(rom, out, args.jobs, ','.join(map(str, seeds)))}
     else:
         names = list(CORES) if args.core == 'all' else [args.core]
         for name in names:
@@ -541,7 +581,9 @@ def main():
             with (out / name / 'log.txt').open('w') as log:
                 # 새 세션으로 띄워, 시간을 넘기면 묶음 프로세스까지 그룹째 끈다(코어 프로세스만 끄면 묶음이 자리를 쥔 채 남는다)
                 procs[name] = subprocess.Popen([sys.executable, __file__, '_core', '--core', name, '--rom', str(rom),
-                                                '--out', str(out / name), '--jobs', str(args.jobs)],
+                                                '--out', str(out / name), '--jobs', str(args.jobs),
+                                                '--seeds', ','.join(map(str, seeds)),
+                                                *(['--no-state-cache'] if args.no_state_cache else [])],
                                                stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         report = {'rom_sha1': rom_sha, 'cores': {}}
         for name, proc in procs.items():
@@ -555,8 +597,9 @@ def main():
         report['status'] = 'passed' if all(r['status'] == 'passed' for r in report['cores'].values()) else 'failed'
     report['seconds'] = round(time.time() - t0, 1)
     (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')
-    summary = ({k: f'{v["status"]} {sum(s["status"] == "passed" for s in v["segments"])}/{len(wc.SEGMENTS)}'
-                for k, v in report.get('cores', {}).items()} or {'problems': report.get('problems')})
+    summary = ({k: {r['seed']: f'{r["status"]} {sum(s["status"] == "passed" for s in r["segments"])}/{len(wc.SEGMENTS)}'
+                    for r in v.get('seeds', [])} or v['status'] for k, v in report.get('cores', {}).items()}
+               or {'problems': report.get('problems')})
     print(json.dumps({'status': report['status'], 'rom_sha1': rom_sha, 'seconds': report['seconds'], **summary},
                      ensure_ascii=False))
     return 0 if report['status'] == 'passed' else 1
