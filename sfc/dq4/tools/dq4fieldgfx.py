@@ -41,6 +41,11 @@ DAY_SET = 2
 LINES = (0, 1)  # nibble n is palette line n + 2
 COLOURS = range(1, 14)
 SEA_TILES = (4, 5, 20, 21)
+# DQ5 blocks whose tiles stay: the sea, and the blocks 00:CF50 puts on cells by DQ5's own events (02, 71, A7, CA;
+# sfc/dq5/docs/dq5-field-format.md). Every other DQ5 tile is free for the new tiles, which must stay below 512:
+# a battle loads its background into VRAM words 4000-5DFF, where tiles from 512 would sit, while the field still
+# shows above and below it.
+KEPT_BLOCKS = (0, 0x02, 0x71, 0xA7, 0xCA)
 WATER_FILE = "sea-dq4.bin"
 REEF = 0x0A
 # Art colours (drawn for town maps) moved onto DQ5 field colours before the nearest colour is taken; key None is for
@@ -155,9 +160,33 @@ def water(palettes):
     return b"".join(encode(quantize(q, sea)[1]) for q in quarters(_pixels(assets()["water0"], "water0")))
 
 
+def free_slots(r, tiles):
+    """DQ5 field tile slots the new tiles may take, in the order they are taken: every one of the 512 but tile 0
+    (the empty upper layer), the moving sea and the moving tiles (the game rewrites them in VRAM), and the tiles of
+    the DQ5 blocks still on the worlds: the sea block and the blocks the game itself puts on cells (KEPT_BLOCKS).
+    The worlds hold no other DQ5 block (dq4fieldport.world). tiles: DQ5's 512 tiles.
+
+    The tiles go back in place at 12:B1A8 only if their RLE is no longer than DQ5's, and the new tiles are busier
+    than the blank and flat ones they would replace. So the busiest DQ5 tiles go first: the bytes of a tile row that
+    differ from the byte before them in its plane (tiles_to_planar), which the RLE has to spell out."""
+    from dq5field import BLOCK_LOWER, BLOCK_UPPER, block_tiles
+    from dq5fieldgfxwrite import tiles_to_planar
+    from dq5gfx import FIELD_ANIM_COUNT, FIELD_ANIM_TILE
+    kept = {0, *SEA_TILES, *range(FIELD_ANIM_TILE, FIELD_ANIM_TILE + FIELD_ANIM_COUNT)}
+    for m in KEPT_BLOCKS:
+        kept.update(t for table in (BLOCK_LOWER, BLOCK_UPPER) for t in block_tiles(r, table, m))
+    planar = tiles_to_planar(tiles)
+    plane = len(planar) // 4
+
+    def busy(t):
+        return sum(planar[p * plane + i] != planar[p * plane + i - 1] for p in range(4) for i in range(t * 8, t * 8 + 8)
+                   if i)
+    return sorted((t for t in range(TILES) if t not in kept), key=lambda t: (-busy(t), t))
+
+
 def generate(rom):
-    """(tiles, tile palette nibbles, tile attributes, dq5fieldtables blocks) for a DQ5 ROM: its 512 field tiles,
-    then the new tiles; and the DQ5 blocks of dq4fieldport.OWN_BLOCKS."""
+    """(tiles, tile palette nibbles, tile attributes, dq5fieldtables blocks) for a DQ5 ROM: its 512 field tiles with
+    the new tiles in free_slots; and the DQ5 blocks of dq4fieldport.OWN_BLOCKS."""
     from dq5field import BLOCK_LOWER, BLOCK_UPPER, block_tiles, terrain
     from dq5fieldgfxwrite import original
     from dq5map import Rom
@@ -167,13 +196,15 @@ def generate(rom):
     lines = line_colours(o["palettes"])
     tiles = bytearray(o["tiles"])
     nibbles, attrs = list(o["tile_palettes"]), list(o["tile_attributes"])
-    found = {}
+    found, slots = {}, free_slots(r, o["tiles"])
 
     def tile(pixels, attr):
         nibble, indices = quantize(pixels, lines)
         key = (encode(indices), nibble, attr)
         if key not in found:
-            found[key] = TILES + len(found)
+            if len(found) == len(slots):
+                raise ValueError(f"more new field tiles than the {len(slots)} free DQ5 slots")
+            found[key] = slots[len(found)]
         return found[key]
 
     blocks = []
@@ -187,10 +218,10 @@ def generate(rom):
             new_lower = [tile(p, a) for p, a in zip(quarters(art(FIELD_ART[kind][0])), quarter_attrs)]
             new_upper = [0, 0, 0, 0]
         blocks.append({"index": number, "lower": new_lower, "upper": new_upper, "terrain": terrain(r, borrowed)})
-    for (raw, nibble, attr), _ in sorted(found.items(), key=lambda kv: kv[1]):
-        tiles += raw
-        nibbles.append(nibble)
-        attrs.append(attr)
+    for (raw, nibble, attr), t in found.items():
+        tiles[t * 32:t * 32 + 32] = raw
+        nibbles[t] = nibble
+        attrs[t] = attr
     return bytes(tiles), nibbles, attrs, blocks
 
 
@@ -209,8 +240,7 @@ def gfx_doc(dq5, folder):
     tiles, nibbles, attrs, blocks = generate(Path(dq5).read_bytes())
     doc = json.loads((folder / "fieldgfx.json").read_text(encoding="utf-8"))
     (folder / "tiles.bin").write_bytes(tiles)
-    # dq5fieldgfxwrite takes 1,024 attributes once tiles grow; past the tiles, those of tile − 512, as it fills them.
-    doc.update(tile_palettes=nibbles, tile_attributes=attrs + attrs[len(attrs) - TILES:TILES])
+    doc.update(tile_palettes=nibbles, tile_attributes=attrs)
     doc["palettes"]["world1"] = [world1_set(doc["palettes"])]
     # One source for the three worlds: dq5fieldgfxwrite writes it in place at 01:A719, with no world hook.
     (folder / WATER_FILE).write_bytes(water(doc["palettes"]))

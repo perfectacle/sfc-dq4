@@ -581,7 +581,7 @@ GROUP_PATCHES = ('env/dq4-environment.dq5patch.json', 'doors.dq5patch.json', 'ou
                  'zones.dq5patch.json', 'grids.dq5patch.json', 'rates.dq5patch.json', 'chests.dq5patch.json')
 # 원래 롬에서는 새 맵 레코드를 34 에 두지만 통합 롬의 34 는 필드 지도(34:C000~)가 쓰므로 3A 로 돌린다. 3A 가 차면 30 의
 # 타이틀 코드·서곡 사이 빈 곳(메뉴 롬에서 0 이거나 원본 20 의 거울 그대로인 곳), 그다음 통째로 빈 31~33·34 앞쪽·36·37·39
-# 로 간다. 그룹 빌드 안에서는 30:E000 의 필드 그림 패치 앞이다. 30:8000~8FFF 는 타이틀 코드(메뉴 준비
+# 로 간다. 30:8000~8FFF 는 타이틀 코드(메뉴 준비
 # 포함) 몫이라 뺐다. 필드 지도(덩어리 둘 약 12KB, 필드 로더의 DB 때문에 30~3F)가 34:C000 에 있고, 35 는 인물 기본
 # 목록(NPC_BANK), 38 은 대체 목록(NPC_ALT)이 쓴다. 비어 있지 않으면 apply_writes 가 멈춘다.
 RECORDS_AT = ((0x3A8000, 0x3B0000), (0x309000, 0x30A000), (0x30A900, 0x30E000), (0x318000, 0x320000),
