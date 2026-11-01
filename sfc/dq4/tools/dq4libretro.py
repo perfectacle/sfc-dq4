@@ -64,6 +64,7 @@ STATE = C.CFUNCTYPE(C.c_int16, C.c_uint, C.c_uint, C.c_uint, C.c_uint)
 
 class Core:
     def __init__(self, dylib, rom, sysdir, options=None):
+        self.path = str(dylib)
         self.lib = C.CDLL(dylib)
         self.options = {k.encode(): v.encode() for k, v in (options or {}).items()}
         self._keep = []
@@ -176,12 +177,57 @@ class Core:
         self.lib.retro_run()
         self.n += 1
 
+    def _locate_wram(self):
+        """bsnes 처럼 WRAM 을 API 로 주지 않는 코어: 직렬화 상태의 WRAM 을 코어 이미지의 데이터 세그먼트에서 찾아 그
+        주소를 쥔다. 매 프레임 직렬화는 코어 스레드 동기 지점을 건드려 타이밍을 바꾸므로(빌드마다 다르게) 피한다.
+        WRAM 이 아직 고르면(부팅 직후) 찾지 않고 다음에 다시 본다."""
+        if self.n < 60 or getattr(self, '_wram_searched', None) == self.n // 60:
+            return None
+        self._wram_searched = self.n // 60
+        wram = self.save()[0][WRAM_OFFSET:WRAM_OFFSET + 0x20000]
+        if len(set(wram)) < 32:
+            return None
+        candidates = set()
+        for start, size in data_segments(self.path):
+            blob = C.string_at(start, size)
+            for probe in range(0x100, 0x20000 - 64, 0x1F01):
+                chunk = wram[probe:probe + 64]
+                if len(set(chunk)) < 12:
+                    continue
+                at = blob.find(chunk)
+                while at >= 0:
+                    base = at - probe
+                    if 0 <= base and blob[base:base + 0x20000] == wram:
+                        candidates.add(start + base)
+                    at = blob.find(chunk, at + 1)
+        # 사본(직렬화 버퍼 등)이 같은 내용일 수 있다. 몇 프레임 돌린 뒤에도 상태의 WRAM 과 같은 곳이 살아 있는 WRAM
+        for _ in range(8):
+            if len(candidates) <= 1:
+                break
+            self.lib.retro_run()
+            self.n += 1
+            now = self.save()[0][WRAM_OFFSET:WRAM_OFFSET + 0x20000]
+            candidates = {a for a in candidates if C.string_at(a, 0x20000) == now}
+        if len(candidates) == 1:
+            found = candidates.pop()
+            self.lib.retro_run()
+            self.n += 1
+            # bsnes 는 직렬화하며 코어를 동기 지점까지 더 돌리므로, 상태를 먼저 만들고 메모리를 읽는다
+            now = self.save()[0][WRAM_OFFSET:WRAM_OFFSET + 0x20000]
+            if C.string_at(found, 0x20000) == now:
+                return found
+        return None
+
     def wram(self):
         p = self.lib.retro_get_memory_data(2)
         size = self.lib.retro_get_memory_size(2)
         if not size and self.wram_ptr:
             p, size = self.wram_ptr
         if not size:
+            found = self._locate_wram()
+            if found:
+                self.wram_ptr = (found, 0x20000)
+                return (C.c_ubyte * 0x20000).from_address(found)
             if not getattr(self, '_wc', None) or self._wc[0] != self.n:
                 st = self.save()[0]
                 self._wc = (self.n, (C.c_ubyte * 0x20000).from_buffer_copy(st[WRAM_OFFSET:WRAM_OFFSET + 0x20000]))
@@ -198,7 +244,7 @@ class Core:
 
     def poke(self, pairs):
         """[(WRAM 주소, 바이트)] 를 한 번 쓴다."""
-        if self.lib.retro_get_memory_size(2) or self.wram_ptr:
+        if self.lib.retro_get_memory_size(2) or self.wram_ptr or self._locate_wram_now():
             m = self.wram()
             for a, v in pairs:
                 m[a & 0x1FFFF] = v
@@ -210,11 +256,23 @@ class Core:
         self.load((bytes(buf), n))
         self._wc = None
 
+    def _locate_wram_now(self):
+        if self.wram_ptr:
+            return True
+        self.wram()
+        return bool(self.wram_ptr)
+
+    @property
+    def direct(self):
+        """WRAM 을 직접 읽고 쓸 수 있으면(API 또는 찾은 주소) True."""
+        return bool(self.lib.retro_get_memory_size(2) or self._locate_wram_now())
+
     def set_cheats(self, codes):
         """켜 둘 PAR 코드 전부. 앞서 켠 것은 모두 끈다."""
         self.lib.retro_cheat_reset()
         for i, code in enumerate(codes):
-            self.lib.retro_cheat_set(i, True, code.encode())
+            # bsnes(target-libretro/program.cpp decodeSNES)는 16진 소문자만 받는다
+            self.lib.retro_cheat_set(i, True, code.lower().encode())
 
     def shot(self, path):
         Image.fromarray(self.frame).save(path)
@@ -235,6 +293,37 @@ class Core:
         buf = C.create_string_buffer(raw, len(raw))
         assert self.lib.retro_unserialize(buf, len(raw))
         self.n = n
+
+
+def data_segments(path):
+    """불러온 이미지 path 의 쓰기 가능한 데이터 세그먼트 [(주소, 크기)]. macOS(Mach-O)만, 그 밖은 빈 목록."""
+    import os
+    import sys
+    if sys.platform != 'darwin':
+        return []
+    dyld = C.CDLL(None)
+    dyld._dyld_image_count.restype = C.c_uint32
+    dyld._dyld_get_image_name.restype = C.c_char_p
+    dyld._dyld_get_image_header.restype = C.c_void_p
+    dyld._dyld_get_image_vmaddr_slide.restype = C.c_long
+    want = os.path.realpath(path)
+    for i in range(dyld._dyld_image_count()):
+        name = dyld._dyld_get_image_name(i)
+        if not name or os.path.realpath(name.decode()) != want:
+            continue
+        header, slide = dyld._dyld_get_image_header(i), dyld._dyld_get_image_vmaddr_slide(i)
+        ncmds = C.c_uint32.from_address(header + 16).value
+        at, out = header + 32, []                       # mach_header_64 는 32바이트
+        for _ in range(ncmds):
+            cmd, size = C.c_uint32.from_address(at).value, C.c_uint32.from_address(at + 4).value
+            if cmd == 0x19:                             # LC_SEGMENT_64
+                name = C.string_at(at + 8, 16).rstrip(b'\0')
+                vmaddr, vmsize = C.c_uint64.from_address(at + 24).value, C.c_uint64.from_address(at + 32).value
+                if name.startswith(b'__DATA'):
+                    out.append((vmaddr + slide, vmsize))
+            at += size
+        return out
+    return []
 
 
 def write_wav(path, samples, rate):

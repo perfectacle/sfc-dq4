@@ -48,11 +48,12 @@ paths = [
   "sfc/dq4/tools/*.asm",
   "sfc/dq4/tools/dq4compatcheck.py",
   "sfc/dq4/tools/dq4libretro.py",
+  "sfc/dq4/tools/dq4cores.py",
   "sfc/dq4/tools/dq4ch1walkcheck.py",
   "sfc/dq4/tools/dq4prologuecheck.py",
 ]
-run = "uv run --locked python sfc/dq4/tools/dq4compatcheck.py walk --rom work/ch1/dq4-ch1-full.sfc --out work/compat-walk"
-needs = ["rom", "LIBRETRO_BSNES", "LIBRETRO_SNES9X"]
+run = "uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4compatcheck.py walk --rom work/ch1/dq4-ch1-full.sfc --out work/compat-walk"
+needs = ["rom", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X)"]
 
 [[check]]
 name = "dq4-heroblock"

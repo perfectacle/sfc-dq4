@@ -41,4 +41,5 @@ description: Python 의존성·Python·uv·kr-patch-toolkit·GitHub Actions 버�
 kr-patch-toolkit 은 `git+https://…@vX.Y.Z` 릴리스 태그로만 고정한다. 브랜치나 로컬 경로로 바꾸지 않는다.
 
 - 이유: 분석 결과와 나중의 패치 빌드가 툴킷 버전에 따라 달라지면 안 된다. 태그는 옮기지 않으므로 같은 태그면 같은 도구다.
+- 소스에서 빌드하는 외부 도구(dq4 호환성 검사의 libretro 코어, `sfc/dq4/tools/dq4cores.py`)도 같은 까닭으로 전체 커밋 SHA 로 고정하고, 나온 지 7일 넘은 커밋만 고른다. 바이너리는 커밋하지 않는다.
 - 툴킷에 기능이 필요하면 툴킷 저장소에 PR 을 내고 릴리스된 뒤에 올린다. 이 저장소에만 필요한 게임별 코드는 `tools/` 에 둔다(툴킷은 게임 무관이다).

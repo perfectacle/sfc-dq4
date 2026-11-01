@@ -1,7 +1,8 @@
 """호환성 검사(COMPAT-01·02): MesenCE 밖의 에뮬레이터에서도 1장을 끝까지 걸을 수 있는지 본다.
 
   walk  : dq4ch1walkcheck.SEGMENTS(서장 → 1장 끝 리셋)를 libretro 코어(bsnes·snes9x) 하나에서 끊지 않고 이어 걷는다.
-          코어 파일은 LIBRETRO_BSNES·LIBRETRO_SNES9X 로 준다(저장소에 두지 않음).
+          코어는 dq4cores.py 가 고정 커밋에서 빌드한 것(원래 체크아웃 work/cores/)을 쓰고, LIBRETRO_BSNES·LIBRETRO_SNES9X
+          가 있으면 그 파일을 쓴다(코어 바이너리는 저장소에 두지 않음).
   probe : MesenCE 1장 걷기 검사에 lua/dq4openbus.lua 를 붙여, 뱅크 40~7D 아래 절반(열린 버스·롬 거울) 접근과
           뱅크 40 이상 코드가 부른 BRK 를 기록한다. SRAM(뱅크 70~7D)을 낮은 뱅크 코드가 쓰는 것 말고 접근이 있거나,
           dq4brkscan.ALLOWED 밖의 BRK 가 불리면 실패. MESENCE·LIBDIR 필요.
@@ -10,7 +11,7 @@ MesenCE 판(dq4ch1walkcheck)과 다른 점: 세이브스테이트 대신 한 실
 처음부터 롬에 쓰고, 워프의 롬 쓰기는 cheat, 한 번 쓰는 WRAM 은 poke(bsnes 는 상태를 고쳐 다시 불러옴), 메시지 번호는
 보지 않고, 끝(리셋)은 실행 추적 대신 어두운 끝 화면 뒤 타이틀이 다시 뜨는지(밝기)와 소리로 본다.
 
-  LIBRETRO_BSNES=… LIBRETRO_SNES9X=… python sfc/dq4/tools/dq4compatcheck.py walk --rom work/ch1/dq4-ch1-full.sfc --out work/compat
+  python sfc/dq4/tools/dq4cores.py && python sfc/dq4/tools/dq4compatcheck.py walk --rom work/ch1/dq4-ch1-full.sfc --out work/compat
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4compatcheck.py probe --rom work/ch1/dq4-ch1-full.sfc --out work/compat-probe
 형식은 sfc/dq4/docs/dq4-compat-format.md.
 """
@@ -28,6 +29,7 @@ HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
 import dq4brkscan  # noqa: E402
+import dq4cores  # noqa: E402
 import dq4ch1walkcheck as wc  # noqa: E402
 import dq4prologuecheck as pc  # noqa: E402
 from dq4libretro import Core, write_wav  # noqa: E402
@@ -93,7 +95,7 @@ class Walker:
 
     def apply(self):
         """구간 POKE 는 매 프레임(snes9x 는 직접, bsnes 는 cheat), 롬 쓰기는 cheat."""
-        direct = self.c.lib.retro_get_memory_size(2) > 0
+        direct = self.c.direct
         if direct and self.pokes:
             self.c.poke(self.pokes)
         codes = [x for cs in self.rom_cheats.values() for x in cs]
@@ -349,11 +351,12 @@ def main():
     else:
         report = {'rom_sha1': rom_sha, 'cores': {}}
         for name in (CORES if args.core == 'all' else [args.core]):
-            path = os.environ.get(CORES[name])
-            if not path:
-                raise SystemExit(f'{CORES[name]} 가 없음(libretro {name} 코어 파일)')
+            path = dq4cores.core_path(name)
+            if not path.exists():
+                raise SystemExit(f'{path} 가 없음: sfc/dq4/tools/dq4cores.py 로 빌드하거나 {CORES[name]} 로 코어 파일을 줌')
             (out / name).mkdir()
-            report['cores'][name] = Walker(Path(path), args.rom.resolve(), out / name).run()
+            report['cores'][name] = {**Walker(path, args.rom.resolve(), out / name).run(),
+                                     'core_sha256': dq4cores.sha256(path), 'core_build': dq4cores.stamp(name)}
         report['status'] = 'passed' if all(r['status'] == 'passed' for r in report['cores'].values()) else 'failed'
     (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')
     summary = ({k: f'{v["status"]} {sum(s["status"] == "passed" for s in v["segments"])}/{len(wc.SEGMENTS)}'
