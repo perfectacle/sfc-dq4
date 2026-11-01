@@ -42,7 +42,7 @@ class BuyConfirmTest(unittest.TestCase):
         body = body[:body.index('assert pc()')]
         # 창(BRK 95)은 뱅크 06 에서 불러야 돈다. 뱅크 06 코드는 JSR 로 들어와 JSR 로 원래 루틴을 부른다
         self.assertNotIn('JSL', body)
-        for need in ('JSR $F602', 'JSR $DFC4', 'JMP $DC2F', 'db $00, $95, $32'):
+        for need in ('JSR $F602', 'JSR $DFC4', 'JMP $DC37', 'db $00, $95, $32'):
             self.assertIn(need, body)
 
 
@@ -110,6 +110,21 @@ class SellEquippedTest(unittest.TestCase):
         for need in ('LDX.w $0F23', 'JSR ShopSellSlot', 'LDA.b $47', 'db $00, $95, $00', 'LDA #$003D', 'JSL $248157', 'LDA.w $0F28'):
             self.assertIn(need, done)
 
+
+
+class CancelBackTest(unittest.TestCase):
+    def test_cancel_returns_to_own_list_without_intro(self):
+        # 사기 「아니요」 는 「사시려고요?」(06:DC2F) 를 건너 목록 창(06:DC37)으로
+        no = ASM[ASM.index('ShopBuyConfirm:'):ASM.index('ShopBuyEquip:')]
+        self.assertIn('JMP $DC37', no)
+        self.assertNotIn('JMP $DC2F', no)
+        self.assertNotIn('$97, $13', no[no.index('.no'):])
+        # 팔기 「아니요」 는 사기/팔기 창(06:DF50) 대신 같은 사람의 팔기 목록(06:DEC6)으로
+        self.assertRegex(ASM, r'org \$06DF48\n    JMP ShopSellNo')
+        body = ASM[ASM.index('ShopSellNo:'):ASM.index('assert pc() <= !shop_qty_end')]
+        self.assertNotIn('$97, $13', body)
+        for need in ('STZ.w $0F2C', 'db $00, $95, $00', 'LDA #$18', 'JSR $DFC4', 'JMP $DEC9'):
+            self.assertIn(need, body)
 
 class SellPriceTest(unittest.TestCase):
     def test_cannot_sell_phrase(self):
