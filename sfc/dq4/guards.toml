@@ -182,6 +182,41 @@ run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
 
 [[check]]
+name = "dq4-town-scene"
+why = "여관(묵기 값 = FC 1인 값 × 일행 수, HP·MP 가득, 밤 → 아침, 금화 모자람·거절은 그대로)·교회(되살리기·해독·저주 풀기 값과 상태, 계시의 남은 경험치, 기도 저장이 칸 1·2·3 에 그 순간 WRAM 그대로·체크섬)·타이틀(복사·지우기·빈 SRAM·체크섬 틀린 칸)과 낮밤 경계(필드 색, 마을 낮·밤 인물)가 bsnes·snes9x 에서 다시 깨지지 않게. 알려진 실패(소리 롬 교회 멈춤, 필드 시각 색)는 정확히 그 증상일 때만 통과하고 고치면 KNOWN 에서 지운다"
+paths = [
+  "sfc/dq4/tools/dq4townscene.py",
+  "sfc/dq4/tools/dq4savefixture.py",
+  "sfc/dq4/tools/dq4shopport.py",
+  "sfc/dq4/tools/dq4shopkey.py",
+  "sfc/dq4/tools/dq4npcport.py",
+  "sfc/dq4/tools/dq4sysmsg.py",
+  "sfc/dq4/tools/dq4menupatch.py",
+  "sfc/dq4/tools/dq4wellswitch.py",
+  "sfc/dq4/tools/dq4chapter1.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
+  "sfc/dq4/tools/dq4fieldgfx.py",
+  "sfc/dq4/tools/dq4fieldport.py",
+  "sfc/dq4/tools/dq4soundpatch.py",
+  "sfc/dq4/tools/dq4soundset.py",
+  "sfc/dq4/tools/*.asm",
+  "sfc/dq4/tools/dq4compatcheck.py",
+  "sfc/dq4/tools/dq4libretro.py",
+  "sfc/dq4/tools/dq4cores.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/dq4prologuecheck.py",
+  "sfc/dq4/tools/dq4mesen.py",
+  "sfc/dq4/tools/dq4ch1event.py",
+  "sfc/dq4/tools/dq4ch2event.py",
+  "sfc/dq4/tools/dq4chapterbox.py",
+  "sfc/dq5/tools/dq5exitcheck.py",
+  "sfc/dq5/tools/dq5sram.py",
+  "fc/dq4/tools/dq4shop.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4townscene.py check --rom work/ch1/dq4-ch1-full.sfc --out work/townscene --jobs 4 && uv run --locked python sfc/dq4/tools/dq4townscene.py daynight --rom work/ch1/dq4-ch1-full.sfc --out work/townnight --jobs 4"
+needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states), 원본 rom/dq5.sfc(시각 색 기준)"]
+
+[[check]]
 name = "dq4-battle-check"
 why = "걸음 전투가 걸리고 이겨 맵으로 돌아오는지와, 전투 상태 창 오른쪽 위 모서리·테두리가 이름 다섯째 칸에 덮이지 않는지(창 17·26·27 너비 6 그대로라 맨 오른쪽 사람의 이름 다섯째 칸이 테두리 열을 덮던 것), 필드 전투 글의 몬스터 이름이 꼬리(Ａ~Ｈ·たち)나 빌려 쓴 DQ5 몬스터 때문에 가나로 찍히지 않는지(names_one·names_two·name-table)"
 paths = [
