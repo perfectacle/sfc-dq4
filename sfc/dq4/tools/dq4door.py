@@ -134,7 +134,10 @@ def auto_code(at=AUTO_AT):
     # Locked: the door command's message for the result (01:D8FC: 1 -> 187, 2 -> 188, 3 -> 315), once per push. $1958
     # holds the directions already bumped (00:83B4 sounds the bump only for a new one; walking on clears it).
     asm.label("locked").b(0xAD, 0x58, 0x19, 0x25, 0xC4).rel(0xD0, "shut")      # LDA $1958 / AND $C4 / BNE shut
-    asm.b(0xA5, 0xC4, 0x0C, 0x58, 0x19, 0x8A, 0x20, 0xFC, 0xD8, 0xE2, 0x30, 0x38, 0x60)   # TSB $1958 / TXA / JSR $D8FC
+    asm.b(0xA5, 0xC4, 0x0C, 0x58, 0x19)                                          # LDA $C4 / TSB $1958
+    # 걸어서 부딪힌 것이므로 벽에 부딪힐 때의 효과음 34-03 을 낸다(원작 DQ5·NDS 의 잠긴 문은 소리 없음, 청취로 정함)
+    asm.b(0xDA, 0xA9, 0x34, 0xA2, 0x03, 0x22, 0xAC, 0xFE, 0x24, 0xE2, 0x30, 0xFA)    # PHX / LDA #34 / LDX #03 / JSL 24:FEAC / SEP #30 / PLX
+    asm.b(0x8A, 0x20, 0xFC, 0xD8, 0xE2, 0x30, 0x38, 0x60)                          # TXA / JSR $D8FC
     asm.label("shut").b(0xE2, 0x30, 0x18, 0x60)
     return asm.assemble()
 

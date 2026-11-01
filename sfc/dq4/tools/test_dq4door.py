@@ -55,7 +55,9 @@ class FindTest(unittest.TestCase):
         self.assertEqual(dq4environmentrom.HOOK_END, door.AUTO_AT)
         # A locked door shows the door command's message once per push: $1958 (bumped directions) gates it.
         self.assertIn(bytes((0xAD, 0x58, 0x19, 0x25, 0xC4)), auto)
-        self.assertIn(bytes((0x0C, 0x58, 0x19, 0x8A, 0x20, 0xFC, 0xD8)), auto)
+        # 메시지 앞에 벽에 부딪힐 때의 효과음 34-03 을 효과음 입구 24:FEAC 로 낸다
+        self.assertIn(bytes((0x0C, 0x58, 0x19, 0xDA, 0xA9, 0x34, 0xA2, 0x03, 0x22, 0xAC, 0xFE, 0x24, 0xE2, 0x30, 0xFA,
+                             0x8A, 0x20, 0xFC, 0xD8)), auto)
 
     def test_writes(self):
         w = {x["at"]: x for x in door.writes()}
