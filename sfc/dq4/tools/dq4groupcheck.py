@@ -39,6 +39,7 @@ from dq4groupbuild import LINKS, cell, doors, entrance_doors, exit_order, fc_num
 from dq5exitcheck import dp86_allowed, warp_exit  # noqa: E402
 from dq5progresscheck import environment  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
+import dq4mesen  # noqa: E402
 
 WARP = DQ5_TOOLS / "lua" / "dq5warp.lua"
 DIRS = {(0, -1): "up", (1, 0): "right", (0, 1): "down", (-1, 0): "left"}
@@ -66,8 +67,8 @@ def scene(mesence, rom, state, out, name, **extra):
     sets = ";".join(s for s in (PRESET, extra.pop("SET", "")) if s)
     env.update({"MAXF": "2400", "WARPEXIT": f"{warp_exit(rom):X}", "DP86OK": dp86_allowed(rom),
                 **({"SET": sets} if sets else {}), **extra})
-    subprocess.run([str(mesence), "--testrunner", str(rom), str(WARP), "--Snes.DisableFrameSkipping=true"],
-                   env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300, check=False)
+    dq4mesen.testrunner(str(mesence), str(rom), str(WARP), "--Snes.DisableFrameSkipping=true",
+                        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300, check=False)
     text = (dest / "warp.txt").read_text(encoding="utf-8") if (dest / "warp.txt").exists() else ""
     found = END.findall(text)
     if not found:

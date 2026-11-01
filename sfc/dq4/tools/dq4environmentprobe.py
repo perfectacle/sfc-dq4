@@ -15,6 +15,7 @@ from PIL import Image
 from kr_patch.sfc import header
 from kr_patch.sfc.mapper import LoROM
 
+import dq4mesen
 import dq4titlepreview
 
 HERE = Path(__file__).resolve().parent
@@ -45,11 +46,10 @@ def verify(source, stem, output, asar, mesence):
     output.mkdir(parents=True)
     rompath = output / 'environment-preview.sfc'
     rompath.write_bytes(rom)
-    command = [mesence, '--testrunner', str(rompath), str(HERE / 'lua/dq4environment.lua'),
-               '--Snes.Region=Ntsc', '--Snes.EnableRandomPowerOnState=false',
-               '--Snes.DisableFrameSkipping=true', '--Emulation.RunAheadFrames=0']
-    process = subprocess.run(command, env=dict(os.environ, ENVIRONMENT_OUT=str(output)),
-                             capture_output=True, timeout=90)
+    process = dq4mesen.testrunner(mesence, str(rompath), str(HERE / 'lua/dq4environment.lua'),
+                                  '--Snes.Region=Ntsc', '--Snes.EnableRandomPowerOnState=false',
+                                  '--Snes.DisableFrameSkipping=true', '--Emulation.RunAheadFrames=0',
+                                  env=dict(os.environ, ENVIRONMENT_OUT=str(output)), capture_output=True, timeout=90)
     (output / 'emulator.log').write_bytes(process.stdout + process.stderr)
     process.check_returncode()
     with Image.open(output / 'screen.png') as screenshot:

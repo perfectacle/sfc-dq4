@@ -111,5 +111,60 @@ class SlotTests(unittest.TestCase):
             hs.limit('-1')
 
 
+@unittest.skipIf(hs.fcntl is None, 'flock 없음')
+class LaunchTests(unittest.TestCase):
+    """run·popen 이 띄운 프로세스가 도는 동안만 자리를 쥐고, 시간을 넘기면 끄는지."""
+
+    # 자식이 같은 자리를 잡아 보고 결과를 찍는다. 부모가 쥐고 있으면 busy
+    PROBE = ('import sys; sys.path.insert(0, sys.argv[1]); import headless_slots as hs\n'
+             'try:\n    hs.acquire("child", n=1, folder=sys.argv[2], timeout=0, log=None).release(); print("free")\n'
+             'except TimeoutError:\n    print("busy")')
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp())
+        patches = [mock.patch.dict(os.environ, {hs.ENV: '1'}), mock.patch.object(hs, 'slots_dir', lambda: self.dir)]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def free(self):
+        hs.acquire('test', n=1, folder=self.dir, timeout=2, poll=0.02, log=None).release()
+
+    def probe(self):
+        return [sys.executable, '-c', self.PROBE, str(Path(hs.__file__).parent), str(self.dir)]
+
+    def test_run_holds_slot_while_child_runs(self):
+        done = hs.run(self.probe(), 'test', capture_output=True, text=True, check=True)
+        self.assertEqual(done.stdout.strip(), 'busy')
+        self.free()
+
+    def test_run_timeout_kills_and_releases(self):
+        t0 = time.monotonic()
+        with self.assertRaises(subprocess.TimeoutExpired):
+            hs.run([sys.executable, '-c', 'import time; time.sleep(30)'], 'test', timeout=0.3)
+        self.assertLess(time.monotonic() - t0, 10)
+        self.free()
+
+    def test_popen_holds_slot_until_exit(self):
+        p = hs.popen(self.probe(), 'test', stdout=subprocess.PIPE, text=True)
+        out, _ = p.communicate(timeout=10)
+        self.assertEqual(out.strip(), 'busy')
+        self.free()
+
+    def test_popen_second_waits_for_first_to_exit(self):
+        first = hs.popen([sys.executable, '-c', 'import time; time.sleep(0.4)'], 'first')
+        second = hs.popen([sys.executable, '-c', 'pass'], 'second')
+        self.assertIsNotNone(first.poll())
+        self.assertGreater(second.slot.waited, 0.2)
+        self.assertEqual(second.wait(timeout=10), 0)
+        first.wait()
+
+    def test_popen_timeout_kills_and_releases(self):
+        p = hs.popen([sys.executable, '-c', 'import time; time.sleep(30)'], 'test', timeout=0.3)
+        self.assertNotEqual(p.wait(timeout=10), 0)
+        self.free()
+        self.assertTrue(p.timed_out)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from dq5gfx import EFFECT_COUNT, Out, effect_lists  # noqa: E402
 from dq5map import Rom  # noqa: E402
 from dq5spell import name  # noqa: E402
+import dq5mesen  # noqa: E402
 
 TOOLS = os.path.dirname(os.path.abspath(__file__))
 PRE = 'b:4,wait:40,b:4,wait:40'
@@ -55,9 +56,9 @@ def run(mesen, rom_path, script, env, shot_dir):
     os.makedirs(shot_dir, exist_ok=True)
     # 설정의 Snes.RamPowerOnState 가 Random 이면 같은 입력도 결과가 달라져, 이 실행만 RAM 을 0 으로 켠다(인자는 롬·스크립트 뒤에 두어야 먹음).
     # 프레임 건너뛰기를 끄지 않으면 빠르게 돌 때 PPU 가 몇 프레임을 그리지 않아, 화면 버퍼가 시간에 따라 1~3프레임 앞의 그림으로 남는다.
-    subprocess.run([mesen, '--testrunner', rom_path, script, '--Snes.RamPowerOnState=AllZeros',
-                    '--Snes.DisableFrameSkipping=true'], env=dict(os.environ, SHOT_DIR=shot_dir, **env),
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=900)
+    dq5mesen.testrunner(mesen, rom_path, script, '--Snes.RamPowerOnState=AllZeros',
+                        '--Snes.DisableFrameSkipping=true', env=dict(os.environ, SHOT_DIR=shot_dir, **env),
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=900)
 
 
 def window(log, papas):

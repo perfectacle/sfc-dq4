@@ -30,6 +30,7 @@ import dq5monwrite as W  # noqa: E402
 import dq5scenes as S  # noqa: E402
 from dq5map import Rom  # noqa: E402
 from dq5progresscheck import require, save_json  # noqa: E402
+import dq5mesen  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 TILES = 100
@@ -75,16 +76,16 @@ def run(rom, scene, battle, out, state, mesence, krlua):
     env = dict(clean, LIBDIR=str(lib), STATE=str(state), SHOT_DIR=str(out), SAVE='battle.mss', MAXF='1800', **st_env)
     if patch:
         env['ROMPATCH'] = patch
-    subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5warp.lua'),
-                    '--Snes.DisableFrameSkipping=true'], env=env, capture_output=True, timeout=300)
+    dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua/dq5warp.lua'),
+                        '--Snes.DisableFrameSkipping=true', env=env, capture_output=True, timeout=300)
     require((out / 'battle.mss').is_file(), f'{scene}: 전투 상태가 저장되지 않음')
     shutil.copyfile(HERE / 'lua/dq5battle.lua', lib / 'boot.lua')
     env = dict(clean, LIBDIR=str(lib), STATE=str(out / 'battle.mss'), SHOT_DIR=str(out), MAXF=str(maxf))
     env.update({k: v for k, v in senv.items() if k != 'ROMPATCH'})
     if patch:
         env['ROMPATCH'] = patch
-    subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5nmidma.lua'),
-                    '--Snes.DisableFrameSkipping=true'], env=env, capture_output=True, timeout=600)
+    dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua/dq5nmidma.lua'),
+                        '--Snes.DisableFrameSkipping=true', env=env, capture_output=True, timeout=600)
 
 
 def frames(out):

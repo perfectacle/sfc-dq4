@@ -43,6 +43,7 @@ from PIL import Image
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from dq5windowwrite import GRID, GRID_SIZE  # noqa: E402
+import dq5mesen  # noqa: E402
 
 LEFT, TOP = 2, 21
 WIDTH, HEIGHT = 28, 7
@@ -648,10 +649,10 @@ def main():
                        HLOG='1' if args.hlog and rom == 'original' else '0', HLOGTAIL=str(HLOG_TAIL), **SCENES[scene])
             def launch():
                 with (dest / 'mesen.log').open('w') as log:
-                    return subprocess.run([str(mesence), '--testrunner', str(roms[rom]),
-                                           str(HERE / 'lua/dq5msgwindowcheck.lua'), '--Snes.DisableFrameSkipping=true',
-                                           '--timeout=900'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                                          timeout=1000).returncode
+                    return dq5mesen.testrunner(str(mesence), str(roms[rom]),
+                                               str(HERE / 'lua/dq5msgwindowcheck.lua'), '--Snes.DisableFrameSkipping=true',
+                                               '--timeout=900', env=env, stdout=log, stderr=subprocess.STDOUT,
+                                               timeout=1000).returncode
 
             retried.extend(f'{scene}/{rom}' for _ in range(with_retries(launch, dest, f'{scene}/{rom}')))
             acc = {}

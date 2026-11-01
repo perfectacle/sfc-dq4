@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dq5map import Rom  # noqa: E402
 from dq5npc import FLAGS, all_lists, list_address, list_entries, parse, table_values  # noqa: E402
 from dq5npcrelocate import FORMAT, cpu, group_bank, patch, places  # noqa: E402
+import dq5mesen  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
@@ -57,8 +58,8 @@ def capture(rom, case, dest, state, mesence, libdir):
     dest.mkdir()
     env = environment(case, dest, state, libdir)
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5npcrelocatecheck.lua')],
-                       env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=90)
+        dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua/dq5npcrelocatecheck.lua'),
+                            env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=90)
     return (dest / 'npc.bin').read_bytes()
 
 
@@ -143,8 +144,8 @@ def run_mutations(out, rom_path, layout, state, mesence, libdir, jobs):
                    'lo': 0x3480 + slot, 'hi': 0x34A0 + slot, 'bank': 0x34C0 + slot, 'time': 0x075E}
         env.update(MAXF='6000', WATCH=';'.join(f'{key}=7E{addr:04X}' for key, addr in watches.items()))
         with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-            subprocess.run([str(mesence), '--testrunner', str(rom_path), str(HERE / 'lua/dq5scriptcheck.lua')],
-                           env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=90)
+            dq5mesen.testrunner(str(mesence), str(rom_path), str(HERE / 'lua/dq5scriptcheck.lua'),
+                                env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=90)
         text = (dest / 'walk.txt').read_text(encoding='utf-8')
         got = {key: int(value, 16) for key, value in re.findall(r'^(\w+)=([0-9A-F]+)$', text, re.M)}
         expected = int(layout['scripts'][address].replace(':', ''), 16) + 39

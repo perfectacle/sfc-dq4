@@ -92,13 +92,20 @@ FC 원작 분석 도구는 [fc/dq4/tools/README.md](../fc/dq4/tools/README.md), 
 - 자리 수는 `HEADLESS_SLOTS` 로 정합니다. 기본은 CPU 수의 절반(최소 1)이고, `0` 이나 `off` 면 제한하지 않습니다.
 - 프로세스마다 `HEADLESS_SLOTS` 가 다르면, 지금 자리를 쥐었거나 기다리는 프로세스들의 값 중 가장 작은 값을 모두가 따릅니다. 그 값을 쓰는 프로세스가 다 끝나면 다시 자기 값을 씁니다.
 - 빈 자리가 없으면 `[headless_slots] <이름>: 자리 N개 모두 사용 중, 기다림` 을 찍고 기다리다가, 잡으면 `자리 i 잡음, X초 기다림` 을 찍습니다. 기다린 시간은 `subprocess` 의 시간 제한과 `guards.py --timeout` 에 듭니다(`dq4compatcheck.py` 의 묶음·코어 프로세스 시간 제한은 자리를 잡은 뒤부터 잽니다).
-- 자리를 잡는 곳은 `sfc/dq4/tools/dq4mesen.py`(`run`·`Runner`, MesenCE 하나당 하나. `Runner` 는 자리를 잡은 뒤 `timeout`(기본 900초)을 넘기면 MesenCE 를 끕니다)와 `sfc/dq4/tools/dq4libretro.py` 의 `Core`(코어 하나당 하나)입니다. MesenCE 를 `subprocess` 로 직접 띄우는 도구는 아직 자리를 잡지 않습니다.
-- 새 도구에서 쓰려면 띄우는 자리를 감쌉니다.
+- 자리를 잡는 곳은 MesenCE 를 띄우는 공통 러너와 `sfc/dq4/tools/dq4libretro.py` 의 `Core`(코어 하나당 하나)입니다. 공통 러너는 MesenCE 하나당 자리 하나를 잡습니다.
+  - dq4: `sfc/dq4/tools/dq4mesen.py` 의 `run`·`Runner`(롬을 실행마다 다른 이름으로 복사하고 배터리 기록을 지움. `Runner` 는 자리를 잡은 뒤 `timeout`(기본 900초)을 넘기면 끕니다)와 `testrunner`(받은 인자 그대로 `subprocess.run`). `fc/dq4/tools/dq4story.py` 도 `testrunner` 를 씁니다.
+  - dq5: `sfc/dq5/tools/dq5mesen.py` 의 `testrunner`(`subprocess.run` 꼴)·`testrunner_popen`(`subprocess.Popen` 꼴, 프로세스가 끝나는 즉시 자리를 놓고 `timeout` 을 주면 넘길 때 끕니다).
+  - `testrunner` 들은 `headless_slots.run`·`headless_slots.popen` 을 부릅니다. `timeout` 은 자리를 잡은 뒤부터 잽니다.
+- MesenCE 를 `subprocess` 로 직접 띄우는 코드는 위 두 러너 파일에만 둡니다. `tools/tests/test_testrunner_callers.py` 가 다른 파일에서 `'--testrunner'` 문자열이나, 실행 파일이 `mesence`·`MESENCE` 인 `subprocess` 호출을 찾으면 실패합니다.
+- 자리를 쥔 프로세스가 자리를 잡는 자식을 기다리면 자리가 하나일 때 서로 막힙니다. 자리는 에뮬레이터 프로세스를 띄우는 동안만 쥐고, 자식 Python 도구를 띄우기 전에는 쥔 자리(코어 등)를 놓습니다.
+- 새 도구는 위 러너를 부릅니다. 에뮬레이터가 MesenCE 가 아니면 띄우는 자리를 감쌉니다.
 
 ```python
 import headless_slots   # tools/ 를 sys.path 에
 
-with headless_slots.slot('내 검사') as s:
-    subprocess.run([mesence, '--testrunner', rom, lua])
+headless_slots.run([emulator, rom], '내 검사', timeout=600)      # subprocess.run 꼴
+p = headless_slots.popen([emulator, rom], '내 검사', timeout=600)  # subprocess.Popen 꼴
+with headless_slots.slot('내 검사') as s:                          # 직접 감쌀 때
+    ...
 print(s.waited)         # 기다린 초
 ```

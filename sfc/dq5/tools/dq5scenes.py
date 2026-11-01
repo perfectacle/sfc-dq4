@@ -25,6 +25,7 @@ import shutil
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
+import dq5mesen
 
 TOOLS = os.path.dirname(os.path.abspath(__file__))
 LUA = os.path.join(TOOLS, 'lua')
@@ -64,9 +65,9 @@ def driver_lib(root, driver):
 
 def mesen(rom, script, env, out, timeout=900):
     os.makedirs(out, exist_ok=True)
-    subprocess.run([os.environ['MESENCE'], '--testrunner', os.path.abspath(rom), script],
-                   env=dict(os.environ, SHOT_DIR=os.path.abspath(out), **env),
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout, check=False)
+    dq5mesen.testrunner(os.environ['MESENCE'], os.path.abspath(rom), script,
+                        env=dict(os.environ, SHOT_DIR=os.path.abspath(out), **env),
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout, check=False)
 
 
 def warp_state(rom, ship, out, name, env):

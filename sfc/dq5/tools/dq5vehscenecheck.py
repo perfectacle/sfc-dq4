@@ -41,6 +41,7 @@ from dq5map import Rom  # noqa: E402
 from dq5objlayout import VEHICLE_PARTS, vehicle_part  # noqa: E402
 from dq5objlayoutcheck import find_grid, w16  # noqa: E402
 from dq5vehiclecheck import build, dragon_doc, dragon_runs, mirror, scene_expect, tool  # noqa: E402
+import dq5mesen  # noqa: E402
 
 USE = 'a:8,wait:60,right:8,wait:40,down:8,wait:40,a:8,wait:80,a:8,wait:80,a:8'
 CARPET_TEST = USE + ',wait:300,left:32,up:32,right:32,wait:100,a:8,wait:300'
@@ -95,9 +96,9 @@ def run(rom, name, extra, out, state, mesence, libdir):
         shutil.rmtree(dest, ignore_errors=True)
         dest.mkdir()
         with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-            done = subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5vehscene.lua'),
-                                   '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                                  timeout=600)
+            done = dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua/dq5vehscene.lua'),
+                                       '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                                       timeout=600)
         if (dest / 'warp.txt').exists():
             return dest
         if done.returncode != 255:

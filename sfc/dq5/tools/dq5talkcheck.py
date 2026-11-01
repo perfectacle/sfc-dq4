@@ -19,6 +19,7 @@ from pathlib import Path
 
 from dq5map import lorom
 from dq5talkwrite import TABLE
+import dq5mesen
 
 HERE = Path(__file__).resolve().parent
 AT = '06:FE10'
@@ -139,9 +140,9 @@ def run(case, roms, state, out, mesence, libdir):
                SET='21F2=FF' + (f';2191={RAW[rom][1]:02X}' if rom in RAW else ''), POKE=f'7E36EB={talk & 0xFF:02X};7E370B={talk >> 8:02X}',
                PRE=f'{TALK},{ANSWER[answer]}{REST}')
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(roms[rom]), str(HERE / 'lua/dq5msg.lua'),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                       check=True, timeout=120)
+        dq5mesen.testrunner(str(mesence), str(roms[rom]), str(HERE / 'lua/dq5msg.lua'),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                            check=True, timeout=120)
     talks, flags = [], {}
     for line in (dest / 'msg.txt').read_text(encoding='utf-8').splitlines():
         parts = line.split()

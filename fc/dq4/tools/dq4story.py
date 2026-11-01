@@ -34,6 +34,9 @@ import dq4npcblock
 import dq4talk
 import dq4text
 
+sys.path.append(str(Path(__file__).resolve().parents[3] / 'sfc' / 'dq4' / 'tools'))
+import dq4mesen  # noqa: E402
+
 HIDE = 0xA035                      # 슬롯 X+6 을 (80,80) 으로(1C:$A037)
 PUT = 0xA04A                       # 슬롯 X+6 을 (A, Y) 로
 FLAGS = dq4event.FLAGS
@@ -481,8 +484,8 @@ def cmd_run(jobsfile, runs, par):
         for x in kv:
             a, v = x.split('=', 1)
             env[a] = str(Path(v).resolve()) if a == 'STATE' else v
-        subprocess.run([os.environ['MESENCE'], '--testrunner', '--nes.ramPowerOnState=AllZeros', str(rom),
-                        str(here / 'lua/flagsweep.lua')], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        dq4mesen.testrunner(os.environ['MESENCE'], '--nes.ramPowerOnState=AllZeros', str(rom),
+                            str(here / 'lua/flagsweep.lua'), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     with ThreadPoolExecutor(par) as ex:
         list(ex.map(go, lines))
     return 0

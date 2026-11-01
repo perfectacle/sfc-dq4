@@ -4,6 +4,8 @@
 
 MesenCE 프로브(`lua/`)는 [트랙 공통 도구](../../../tools/README.md) 의 `LIBDIR`·`MESENCE` 설정과 `seqlib.sh` 드라이버를 그대로 씁니다. 스크립트 경로만 `"$PWD/sfc/dq5/tools/lua/<스크립트>"` 로 줍니다.
 
+Python 도구는 MesenCE 를 `subprocess` 로 직접 띄우지 않고 `dq5mesen.py` 의 `testrunner`(`subprocess.run` 꼴)·`testrunner_popen`(`subprocess.Popen` 꼴)으로 띄웁니다. 머신 전체의 헤드리스 에뮬레이터 자리를 잡고 놓습니다([HEADLESS_SLOTS](../../../tools/README.md#headless_slots-헤드리스-에뮬레이터-자리)).
+
 ## Python
 
 | 스크립트 | 하는 일 |

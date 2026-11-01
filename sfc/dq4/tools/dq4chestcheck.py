@@ -32,6 +32,7 @@ from dq4groupbuild import placement  # noqa: E402
 from dq4groupcheck import same_place, scene  # noqa: E402
 from dq5chestcheck import environment, gold  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
+import dq4mesen  # noqa: E402
 
 CHECK = DQ5_TOOLS / "lua" / "dq5chestcheck.lua"
 # The command window, then しらべる (dq5chestcheck.INPUT without its first step up).
@@ -83,8 +84,8 @@ def run_entry(mesence, rom, state, out, preset, name, to, facing, reward, messag
     env = environment(os.environ["LIBDIR"], saved, dest)
     env.update(INPUT=SEARCH_MEDAL if reward == MEDAL else SEARCH)
     try:
-        subprocess.run([str(mesence), "--testrunner", str(rom), str(CHECK), "--Snes.DisableFrameSkipping=true"],
-                       env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300, check=False)
+        dq4mesen.testrunner(str(mesence), str(rom), str(CHECK), "--Snes.DisableFrameSkipping=true",
+                            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300, check=False)
     except subprocess.TimeoutExpired:
         return {"passed": False, "error": "search: MesenCE timed out"}
     if not all((dest / f).is_file() for f in ("trace.txt", "before.wram", "after.wram")):

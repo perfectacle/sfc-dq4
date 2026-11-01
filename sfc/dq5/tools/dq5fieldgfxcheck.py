@@ -35,6 +35,7 @@ import dq5map  # noqa: E402
 from dq5map import Rom, lorom, map_pointer  # noqa: E402
 import dq5mapgfxwrite as mgw  # noqa: E402
 import dq5sram  # noqa: E402
+import dq5mesen  # noqa: E402
 
 STRIPE, DOTS = gwc.STRIPE, gwc.DOTS
 FIELD_TILE_POS = (170, 26)          # (341,56) 부근 세계 0 블록. 이 블록 아래층 첫 타일을 고친다
@@ -403,8 +404,8 @@ def main():
         for key in ('STATE', 'TO', 'FIELD', 'SEQ'):
             env.pop(key, None)
         with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-            subprocess.run([str(mesence), '--testrunner', str(copy), str(gfx), '--Snes.DisableFrameSkipping=true'],
-                           env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=180)
+            dq5mesen.testrunner(str(mesence), str(copy), str(gfx), '--Snes.DisableFrameSkipping=true',
+                                env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=180)
         srm.unlink(missing_ok=True)
         results = [check_field('field-orig', original, (dirs['field-orig'], frames), None, info)]
         results += [check_field(n, out / f'{n}.sfc', (dirs[n], frames), dirs['field-orig'], info)

@@ -23,6 +23,7 @@ from kr_patch.sfc.mapper import LoROM
 from dq5exit import arrival, exit_attrs
 from dq5exitreloc import EXIT_INDEXED, EXIT_SHORT, STUB_SIZE, cpu, engine_exits, locate
 from dq5map import Rom, lorom
+import dq5mesen
 
 HERE = Path(__file__).resolve().parent
 EDITS = {
@@ -182,9 +183,9 @@ def run(case, roms, state, out, mesence, libdir, audit=False, stale=STALE):
         if os.environ.get('AUDITOPEN'):
             env['AUDITOPEN'] = os.environ['AUDITOPEN']
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(roms[rom][0]), str(HERE / 'lua/dq5exitcheck.lua'),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                       check=True, timeout=1800 if audit else 120)
+        dq5mesen.testrunner(str(mesence), str(roms[rom][0]), str(HERE / 'lua/dq5exitcheck.lua'),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                            check=True, timeout=1800 if audit else 120)
     text = (dest / 'warp.txt').read_text(encoding='utf-8')
     match = re.search(r'final map (\w\w/\w\w) cell (\d+),(\d+) layer (\w\w) BE=(\w\w) sound (\d+)', text)
     require(match is not None and 'timeout' not in text, f'{name}: 보행 결과가 없음')

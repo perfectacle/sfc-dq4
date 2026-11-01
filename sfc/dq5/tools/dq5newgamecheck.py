@@ -17,6 +17,7 @@ import tempfile
 
 from dq5map import Rom
 from dq5newgame import HEADER_SIZE, new_game
+import dq5mesen
 
 HERE = Path(__file__).resolve().parent
 SKIP = set(range(0x01, 0x09)) | {0x33}
@@ -38,9 +39,9 @@ def run(mesence, libdir, rom, dest):
     env = os.environ.copy()
     env.update(LIBDIR=libdir, SHOT_DIR=str(dest))
     with (dest / 'mesen.log').open('w') as log:
-        subprocess.run([str(mesence), '--testrunner', str(copy), str(HERE / 'lua/dq5newgamecheck.lua'),
-                        '--Snes.DisableFrameSkipping=true', '--Snes.RamPowerOnState=AllZeros'],
-                       env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=300)
+        dq5mesen.testrunner(str(mesence), str(copy), str(HERE / 'lua/dq5newgamecheck.lua'),
+                            '--Snes.DisableFrameSkipping=true', '--Snes.RamPowerOnState=AllZeros',
+                            env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=300)
     copy.unlink()
     return (dest / 'newgame.txt').read_text().strip(), (dest / 'final.wram').read_bytes()
 

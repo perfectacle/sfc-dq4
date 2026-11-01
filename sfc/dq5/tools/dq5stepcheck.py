@@ -31,6 +31,7 @@ from pathlib import Path
 
 from dq5exitcheck import command, dp86_allowed, require, warp_exit
 from dq5progresscheck import environment
+import dq5mesen
 
 HERE = Path(__file__).resolve().parent
 BODY_AT = '3C:B000'
@@ -65,9 +66,9 @@ def run(rom, name, to, test, state, out, mesence, libdir):
     env.update(TO=to, TEST=f'{test},wait:120', SETTLE='120', MAXF='1500', WARPEXIT=f'{warp_exit(rom):X}',
                DP86OK=dp86_allowed(rom), STEPBODY=BODY_AT.replace(':', ''))
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5stepprobe.lua'),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                       check=True, timeout=180)
+        dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua/dq5stepprobe.lua'),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                            check=True, timeout=180)
     require('timeout' not in (dest / 'warp.txt').read_text(encoding='utf-8'), f'{name}: 장면 이동 시간 초과')
     ram = (dest / 'final.wram').read_bytes()
     text = (dest / 'step.txt').read_text(encoding='utf-8')

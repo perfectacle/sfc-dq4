@@ -42,6 +42,7 @@ import dq5npcrelocatecheck as npccheck  # noqa: E402
 import dq5scriptcheck as scriptcheck  # noqa: E402
 from dq5textcheck import decoder_codes  # noqa: E402
 from dq5textwrite import decoded_messages, relocated  # noqa: E402
+import dq5mesen  # noqa: E402
 
 DQ4 = HERE.parents[1] / 'dq4' / 'tools'
 TITLE_RUNS = {'idle': {'MAXF': '1280', 'FROM': '300', 'EVERY': '64', 'SEQ': ''},
@@ -58,9 +59,9 @@ def require(condition, message):
 
 def mesence_run(mesence, rom, lua, env, dest, timeout=180):
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(lua), '--Snes.RamPowerOnState=AllZeros',
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                       check=True, timeout=timeout)
+        dq5mesen.testrunner(str(mesence), str(rom), str(lua), '--Snes.RamPowerOnState=AllZeros',
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                            check=True, timeout=timeout)
 
 
 def check_title(report, port, out, mesence):

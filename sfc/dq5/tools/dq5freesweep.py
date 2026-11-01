@@ -22,6 +22,7 @@ from dq5build import cpu, free_ranges  # noqa: E402
 from dq5map import Rom  # noqa: E402
 from dq5mapmusic import entry_cells  # noqa: E402
 from dq5sound import map_songs  # noqa: E402
+import dq5mesen  # noqa: E402
 
 PROBE = os.path.join(HERE, 'lua', 'dq5freewatch.lua')
 WALK = 'left:30,right:30,up:30,down:30,wait:30'
@@ -72,8 +73,8 @@ def main():
         d = os.path.abspath(os.path.join(a.out, kind, name))
         os.makedirs(d, exist_ok=True)
         e = dict(os.environ, LIBDIR=lib, STATE=os.path.abspath(a.state), SHOT_DIR=d, FREE=free, ACCESS=a.access, **env)
-        subprocess.run([mesen, '--testrunner', os.path.abspath(a.rom), PROBE], env=e,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
+        dq5mesen.testrunner(mesen, os.path.abspath(a.rom), PROBE, env=e,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
         path = os.path.join(d, 'free.txt')
         lines = open(path).read().split('\n') if os.path.exists(path) else []
         frames = next((ln for ln in lines if ln.startswith('frames=')), 'frames=?')

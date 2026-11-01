@@ -14,6 +14,8 @@
   with headless_slots.slot('dq4ch1walkcheck') as s:
       subprocess.run([...])
   s.waited  # 자리를 기다린 초
+
+에뮬레이터를 subprocess 로 띄우는 곳은 run·popen 으로 감싼다. timeout 은 자리를 잡은 뒤부터 잰다.
 """
 import contextlib
 import functools
@@ -166,3 +168,36 @@ def slot(name='', **kwargs):
         yield s
     finally:
         s.release()
+
+
+def run(cmd, name='', **kwargs):
+    """subprocess.run 을 자리 하나를 쥔 채 부른다. timeout 을 넘기면 subprocess.run 이 끄고 TimeoutExpired 를 올린다."""
+    with slot(name):
+        return subprocess.run(cmd, **kwargs)
+
+
+def popen(cmd, name='', timeout=None, **kwargs):
+    """subprocess.Popen 으로 띄우고 프로세스가 끝나는 즉시 자리를 놓는다. timeout 초를 넘기면 끈다.
+
+    여러 개를 띄운 뒤 앞엣것부터 wait() 하는 호출이 많아, wait() 까지 자리를 쥐면 자리보다 많이 띄울 때
+    서로 막힌다. 그래서 프로세스마다 지켜보는 스레드가 놓는다. 끈 프로세스는 timed_out 이 True 다.
+    """
+    s = acquire(name)
+    try:
+        proc = subprocess.Popen(cmd, **kwargs)
+    except BaseException:
+        s.release()
+        raise
+    proc.slot, proc.timed_out = s, False
+
+    def watch():
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.timed_out = True
+            proc.kill()
+            proc.wait()
+        finally:
+            s.release()
+    threading.Thread(target=watch, daemon=True).start()
+    return proc

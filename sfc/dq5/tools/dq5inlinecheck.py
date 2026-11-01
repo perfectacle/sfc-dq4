@@ -25,6 +25,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path.insert(0, str(HERE))
 from dq5textgrowcheck import npc_patch, tool  # noqa: E402
+import dq5mesen  # noqa: E402
 
 CASES = {'21': [{'op': '21', 'args': [0x29, 0x01]}],
          '32': [{'op': '32', 'args': [0x29, 0x01]}],
@@ -45,9 +46,9 @@ def run(name, rom, wait, out, mesence, libdir, state):
                ROMPATCH='156FF5=E0090B0117', CHANGES='99', MAXF=str(MAXF), HOLD='90', MARKS=MARKS,
                SHOTS=','.join(str(f) for f in range(300, MAXF, 10)))
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5inlinecheck.lua'),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                       check=True, timeout=200)
+        dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua/dq5inlinecheck.lua'),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                            check=True, timeout=200)
     events = {}
     for f, what in re.findall(r'^f(\d+) (.+)$', (dest / 'inline.txt').read_text(encoding='utf-8'), re.M):
         events.setdefault(what, []).append(int(f))

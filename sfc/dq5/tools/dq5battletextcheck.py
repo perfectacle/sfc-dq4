@@ -14,6 +14,7 @@ import sys
 import tempfile
 
 from dq5battletextwrite import read_messages
+import dq5mesen
 
 HERE = Path(__file__).resolve().parent
 TAPS = ','.join(['a:8,wait:40'] * 15)
@@ -92,9 +93,9 @@ def main():
             env.update(LIBDIR=libdir, STATE=str(state), SHOT_DIR=str(dest), DRIVER=str(HERE / 'lua/dq5warp.lua'),
                        FIELD='341,56', BATTLE='00:1', TEST=TAPS, MAXF='2000')
             with (dest / 'mesen.log').open('w') as log:
-                subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5battletextcheck.lua'),
-                                '--Snes.DisableFrameSkipping=true'], env=env, stdout=log,
-                               stderr=subprocess.STDOUT, check=True, timeout=180)
+                dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua/dq5battletextcheck.lua'),
+                                    '--Snes.DisableFrameSkipping=true', env=env, stdout=log,
+                                    stderr=subprocess.STDOUT, check=True, timeout=180)
             lines = [line.split() for line in (dest / 'battletext.txt').read_text().splitlines()]
             buffers = [(int(w[2], 16), bytes.fromhex(w[3])) for w in lines if w[1] == 'buffer']
             streams = {int(w[2], 16): int(w[4].split('.')[0], 16) for w in lines if w[1] == 'msg'}

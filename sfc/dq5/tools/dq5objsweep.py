@@ -21,6 +21,7 @@ import dq5sprite as S  # noqa: E402
 from dq5map import Rom  # noqa: E402
 from dq5mapmusic import entry_cells  # noqa: E402
 from dq5sound import map_songs  # noqa: E402
+import dq5mesen  # noqa: E402
 
 PROBE = os.path.join(HERE, 'lua', 'dq5objsweep.lua')
 WALK = 'left:30,right:30,up:30,down:30,wait:30'
@@ -86,8 +87,8 @@ def main():
         os.makedirs(d, exist_ok=True)
         env = dict(os.environ, LIBDIR=lib, STATE=os.path.abspath(a.state), SHOT_DIR=d, SETTLE='60', TEST=WALK, MAXF='1000',
                    TO=f'{m},{",".join(str(v) for v in cells[m])}')
-        subprocess.run([mesen, '--testrunner', os.path.abspath(a.rom), PROBE, '--Snes.DisableFrameSkipping=true'], env=env,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
+        dq5mesen.testrunner(mesen, os.path.abspath(a.rom), PROBE, '--Snes.DisableFrameSkipping=true', env=env,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
         return m, look(rom, m.replace('/', '_'), d)
 
     todo = [m for m in maps if m in cells]

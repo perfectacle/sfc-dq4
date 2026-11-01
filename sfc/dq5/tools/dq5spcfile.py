@@ -33,6 +33,7 @@ from dq5map import Rom  # noqa: E402
 from dq5song import header, walk  # noqa: E402
 from dq5sound import map_songs  # noqa: E402
 from dq5spc import RESIDENT_SEQUENCES, SEQUENCE_COUNT, body, ff_list, sequences, song_sets  # noqa: E402
+import dq5mesen  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LUA = os.path.join(HERE, 'lua', 'dq5spcdump.lua')
@@ -291,8 +292,8 @@ def run_one(mesence, libdir, rom, state, n, x, stem, work, free='', preload=Fals
     cmd = f'10:1A:00:00;14:94:{n:02X}:00;200:{play}' if preload else f'10:1A:00:00;14:{play}'
     env = dict(os.environ, LIBDIR=libdir, SHOT_DIR=out, STATE=os.path.abspath(state), CMDS=cmd,
                WAITSONG=f'{n:02X}', FULLSET=f'{n:02X}', MAXF='900', FREEWATCH=free)
-    subprocess.run([mesence, '--testrunner', os.path.abspath(rom), LUA], env=env,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
+    dq5mesen.testrunner(mesence, os.path.abspath(rom), LUA, env=env,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
     return out
 
 

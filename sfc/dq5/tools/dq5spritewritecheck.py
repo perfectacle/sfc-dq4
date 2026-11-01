@@ -33,6 +33,7 @@ from dq5map import Rom, lorom  # noqa: E402
 from dq5npc import list_entries  # noqa: E402
 from dq5npcrecord import offsets  # noqa: E402
 from dq5spritewrite import FORMAT, apply, dump_image, patch  # noqa: E402
+import dq5mesen  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 RECORDS = {'format': 'dq5npcrecord/1', 'entries': [
@@ -98,9 +99,9 @@ def run(rom, name, out, state, mesence, libdir, dumps='620,700,780,860', poke=No
     if poke:
         env['POKE'] = poke
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5gfxdump.lua'),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                       check=True, timeout=180)
+        dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua/dq5gfxdump.lua'),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                            check=True, timeout=180)
     return dest
 
 

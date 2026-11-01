@@ -28,6 +28,7 @@ import dq5sprite as S  # noqa: E402
 import dq5spritewrite as W  # noqa: E402
 from dq5map import Rom  # noqa: E402
 from dq5mapmusic import entry_cells  # noqa: E402
+import dq5mesen  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 NEW = 0x70
@@ -71,9 +72,9 @@ def run(rom_path, tag, to, out, state, mesence, lib):
     env.update(LIBDIR=str(lib), STATE=str(state), SHOT_DIR=str(dest), MAXF='1500', SETTLE='120', TO=to, TEST='wait:400',
                DUMPF='620,700')
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom_path), str(HERE / 'lua/dq5gfxdump.lua'),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT, check=True,
-                       timeout=300)
+        dq5mesen.testrunner(str(mesence), str(rom_path), str(HERE / 'lua/dq5gfxdump.lua'),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT, check=True,
+                            timeout=300)
     dumps = sorted(dest.glob('f0*.wram'))
     if not dumps:
         raise ValueError(f'{tag}: 덤프가 없음')

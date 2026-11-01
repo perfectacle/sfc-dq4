@@ -21,6 +21,7 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dq5map import Rom  # noqa: E402
 from dq5objtiles import FORMAT, PER_ROW, blocks, read_tiles, sheet_size  # noqa: E402
+import dq5mesen  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 MAP_BLOCK, VEHICLE_BLOCK = 'obj-15', 'veh-80-0'
@@ -57,9 +58,9 @@ def run(rom, name, extra, out, state, mesence, libdir):
     env.update(LIBDIR=str(libdir), STATE=str(state), SHOT_DIR=str(dest), MAXF='1500', SETTLE='120',
                TEST='wait:400', DUMPF=DUMPF, **extra)
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5gfxdump.lua'),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                       check=True, timeout=180)
+        dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua/dq5gfxdump.lua'),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                            check=True, timeout=180)
     return dest
 
 

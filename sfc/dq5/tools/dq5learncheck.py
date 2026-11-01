@@ -14,6 +14,7 @@ from pathlib import Path
 
 from dq5learnwrite import FORMAT, dump
 from dq5map import Rom
+import dq5mesen
 
 HERE = Path(__file__).resolve().parent
 # (몬스터 번호, 동료 종류, 동료 확률 등급) — 처음 레벨 1 인 スライムナイト 와 3 인 キメラ.
@@ -48,8 +49,8 @@ def run(name, state, driver, rom, out, mesence, libdir, **options):
     env.update(LIBDIR=libdir, STATE=str(state), SHOT_DIR=str(dest), DRIVER=str(HERE / 'lua' / driver), **options)
     lua = HERE / ('lua/dq5warp.lua' if driver == 'dq5warp.lua' else 'lua/dq5learncheck.lua')
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(lua), '--Snes.DisableFrameSkipping=true'],
-                       env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=90)
+        dq5mesen.testrunner(str(mesence), str(rom), str(lua), '--Snes.DisableFrameSkipping=true',
+                            env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=90)
     return dest
 
 

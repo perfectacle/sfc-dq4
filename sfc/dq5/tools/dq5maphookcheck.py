@@ -19,6 +19,7 @@ from pathlib import Path
 
 from dq5maphook import CELL_FORMAT, FORMAT, NONE, cells_dump, dump, text
 from dq5map import Rom
+import dq5mesen
 
 HERE = Path(__file__).resolve().parent
 # 01/05 의 루틴 02:94E0 은 (51,20) +4 를 85 로 두어 출구 셀을 하나 더한다. 그 셀이 없으면 (13,47) 계단이
@@ -130,9 +131,9 @@ def run(case, roms, state, out, mesence, libdir):
     if setting:
         env['SET'] = setting
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(roms[rom]), str(HERE / 'lua/dq5maphookcheck.lua'),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                       check=True, timeout=120)
+        dq5mesen.testrunner(str(mesence), str(roms[rom]), str(HERE / 'lua/dq5maphookcheck.lua'),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                            check=True, timeout=120)
     log = (dest / 'warp.txt').read_text(encoding='utf-8')
     final = re.search(r'final map (\w\w/\w\w) cell (\d+),(\d+)', log)
     target = to.split(',')[0]

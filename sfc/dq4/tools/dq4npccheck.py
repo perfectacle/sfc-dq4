@@ -43,6 +43,7 @@ from dq5map import Rom  # noqa: E402
 from dq5npc import list_entries, parse, table_values  # noqa: E402
 from dq5npcrecordcheck import compare  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
+import dq4mesen  # noqa: E402
 
 PROBE = DQ5_TOOLS / "lua" / "dq5npcrecordcheck.lua"
 SHOP_PROBE = DQ5_TOOLS / "lua" / "dq5progresscheck.lua"
@@ -114,9 +115,9 @@ def run(mesence, rom, state, out, name, libdir, to, test, night, shop=False, ret
     probe = SHOP_PROBE if shop else PROBE if ret is None else DECODE_PROBE
     with (dest / "mesen.log").open("w", encoding="utf-8") as log:
         try:
-            subprocess.run([str(mesence), "--testrunner", str(rom), str(probe),
-                            "--Snes.DisableFrameSkipping=true"],
-                           env=env, stdout=log, stderr=subprocess.STDOUT, timeout=300, check=False)
+            dq4mesen.testrunner(str(mesence), str(rom), str(probe),
+                                "--Snes.DisableFrameSkipping=true",
+                                env=env, stdout=log, stderr=subprocess.STDOUT, timeout=300, check=False)
         except subprocess.TimeoutExpired:
             return None, None
     if shop:

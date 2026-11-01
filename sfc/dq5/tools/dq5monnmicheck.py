@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dq5mongfx as M  # noqa: E402
 import dq5monwrite as W  # noqa: E402
 from dq5map import Rom  # noqa: E402
+import dq5mesen  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 WIDE = 0x43
@@ -89,8 +90,8 @@ def run(rom, out, state, mesence, libdir, battle, pieces, slots=None):
     if slots is not None:
         env['SLOTS'] = str(slots)
     with (out / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5nmidma.lua'),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT, timeout=300)
+        dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua/dq5nmidma.lua'),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT, timeout=300)
 
 
 def arrived(rom, out):

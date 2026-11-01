@@ -20,6 +20,7 @@ from dq5growth import PEOPLE, RECORD_FIELD, exp_at, stats_at
 from dq5map import Rom
 from dq5progresswrite import dump
 from dq5shop import price
+import dq5mesen
 
 HERE = Path(__file__).resolve().parent
 
@@ -84,8 +85,8 @@ def environment(libdir, state, dest):
 def run(mesence, rom, lua, dest, env):
     dest.mkdir()
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(lua), '--Snes.DisableFrameSkipping=true'],
-                       env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=90)
+        dq5mesen.testrunner(str(mesence), str(rom), str(lua), '--Snes.DisableFrameSkipping=true',
+                            env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=90)
 
 
 def prepare_battle(original, state, out, mesence, libdir):

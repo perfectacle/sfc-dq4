@@ -39,6 +39,7 @@ import dq5mongfx as M  # noqa: E402
 from dq5map import Rom, lorom  # noqa: E402
 from dq5monlimits import Pictures  # noqa: E402
 from dq5monwrite import FORMAT, following_table, picture_grid  # noqa: E402
+import dq5mesen  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 BIG, SMALL, PLAIN = (0x4F, 0xE2), (0x1C, 0xE6), 0x00     # (그림, 몬스터), 고치지 않는 몬스터(スライム)
@@ -98,9 +99,9 @@ def run(rom, name, groups, out, state, mesence, libdir, lua='dq5gfxdump.lua', **
                FIELD='341,56', BATTLE=','.join(f'{m:02X}:{n}' for m, n, _ in groups), TEST='wait:900', DUMPF=DUMPF)
     env.update(extra)
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua' / lua),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                       check=True, timeout=240)
+        dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua' / lua),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                            check=True, timeout=240)
     return dest
 
 
