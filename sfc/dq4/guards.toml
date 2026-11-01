@@ -419,3 +419,24 @@ paths = [
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/doorstand && uv run --locked python sfc/dq4/tools/dq4doorstandcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/doorstand"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI"]
+
+[[check]]
+name = "dq4-people-match"
+why = "원작 FC 인물 그림과 다른 갈래의 그림이 실리는 일(1장 바트랜드의 프레아·이무르의 엄마들이 노인 그림, FC 그림 13 → DQ5 09)을 에뮬레이터 없이 잡는다. 원작 그림 종류·DQ5 세트 종류는 sfc/dq4/people-kinds.toml"
+paths = [
+  "sfc/dq4/tools/dq4npcport.py",
+  "sfc/dq4/tools/dq4people.py",
+  "sfc/dq4/tools/dq4ch1event.py",
+  "sfc/dq4/tools/dq4ch2event.py",
+  "sfc/dq4/tools/dq4chapter1.py",
+  "sfc/dq4/tools/dq4prologue.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
+  "sfc/dq4/tools/dq4environmentrom.py",
+  "sfc/dq4/tools/dq4peoplematchcheck.py",
+  "sfc/dq4/people-kinds.toml",
+  "sfc/dq5/tools/dq5npc.py",
+  "sfc/dq5/tools/dq5npcrelocate.py",
+  "fc/dq4/tools/dq4talk.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4peoplematchcheck.py --rom work/ch1/dq4-ch1-full.sfc --json work/peoplematch/match.json"
+needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
