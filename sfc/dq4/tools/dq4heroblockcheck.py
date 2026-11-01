@@ -12,6 +12,8 @@
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4heroblockcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/heroblock
   (--only 사례이름,… 은 그 사례만, --base 는 1단계 출발 상태를 다시 쓴다)
+  --seed N·--seeds 0,5,9 는 2·3단계 난수(dq4ch1walkcheck.rng_for)를 고른다. 1단계 출발 상태는 늘 시드 0 이고 롬
+  SHA-1 별로 work/cache/states/prologue 에 두어 다시 만들지 않는다(--no-state-cache 로 끔). 여러 시드면 seed-N/ 아래에 사례 폴더.
 """
 import argparse
 import concurrent.futures
@@ -162,9 +164,10 @@ def overlaps(text):
     return frames, first
 
 
-def run_case(mesence, rom, base, out, name, case, exit_at):
+def run_case(mesence, rom, base, out, name, case, exit_at, seed=0):
     dest = out / name
-    pins = f'{wc.RNG};{wc.DAY_SET}'
+    rng = wc.rng_for(seed)
+    pins = f'{rng};{wc.DAY_SET}'
     wc.run(mesence, rom, wc.WARP, dest / 'warp', {
         'STATE': str(base), 'TO': case['warp'], 'SAVE': 'end.mss', 'SETTLE': '60', 'MAXF': '1500',
         'WARPEXIT': f'{exit_at:X}', 'ANYWHERE': '1', 'ROMPATCH': wc.NO_ENCOUNTERS,
@@ -173,7 +176,7 @@ def run_case(mesence, rom, base, out, name, case, exit_at):
     state = dest / 'warp' / 'end.mss'
     problems = []
     if not state.exists():
-        return {'name': name, 'status': 'failed', 'problems': ['순간이동 실패']}
+        return {'name': name, 'seed': seed, 'status': 'failed', 'problems': ['순간이동 실패']}
     walk = case['walk'] + (f";{case['free']}" if case.get('free') else '')
     watch = ';'.join(v for v in (HERO, case.get('watch', ''),
                                  ';'.join(slot(n) for n in case.get('gone', [])),
@@ -182,7 +185,7 @@ def run_case(mesence, rom, base, out, name, case, exit_at):
                                           case.get('want', []) + case.get('not', []))) if v)
     env = {'STATE': str(state), 'WALK': str(wc.WALK), 'WALK_STATE': str(wc.WALK_STATE), 'WAYPOINTS': walk,
            'MAXF': str(case.get('maxf', wc.frames(walk))), 'CHANGES': str(case.get('changes', 99)), 'AFTER': '30',
-           'WATCH': watch, 'ROMPATCH': wc.NO_ENCOUNTERS, 'SET': wc.RNG}
+           'WATCH': watch, 'ROMPATCH': wc.NO_ENCOUNTERS, 'SET': rng}
     if 'snap' in case:
         env.update(SNAPMSG=f"{case['snap'][0]:X}", SNAPWATCH=case['watch'])
     env['TRACK'] = ','.join(f'{n:02X}' for n in TRACK)
@@ -229,13 +232,18 @@ def run_case(mesence, rom, base, out, name, case, exit_at):
         overlap, first = overlaps(track.read_text())
         if overlap:
             problems.append(f'인물이 겹쳐 보인 프레임 {overlap}개(처음 {first})')
-    return {'name': name, 'status': 'failed' if problems else 'passed', 'problems': problems, 'overlap': overlap,
+    return {'name': name, 'seed': seed, 'status': 'failed' if problems else 'passed', 'problems': problems, 'overlap': overlap,
             'end': end[0] if end else None, 'hero': (seen.get('HX'), seen.get('HY')), 'snap': snap,
             'stuck': re.findall(r'stuck at \S+ heading \S+', text)}
 
 
-def make_base(mesence, rom, out):
-    """서장 첫 장면 → 명령 창 닫기 → 성 마을 36/00. 사례마다 여기서 사건 맵으로 옮긴다."""
+def make_base(mesence, rom, out, cache=None):
+    """서장 첫 장면 → 명령 창 닫기 → 성 마을 36/00. 사례마다 여기서 사건 맵으로 옮긴다. 시드와 상관없이 시드 0 으로
+    만들고, cache(dq4ch1walkcheck.StateCache)에 같은 롬·같은 코드로 만든 것이 있으면 그것을 쓴다."""
+    key = wc.code_key(mesence, Path(__file__), HUB) if cache else None
+    base = out / 'hub' / 'end.mss'
+    if cache and cache.get('heroblock-hub', key, '.mss', base):
+        return base, True
     start = wc.prologue_start(mesence, rom, out)
     wc.run(mesence, rom, wc.WALK_STATE, out / 'close', {'STATE': str(start), 'WALK': str(wc.WALK),
                                                        'WAYPOINTS': f'{pc.CLOSE};wait:30', 'SAVE': 'end.mss',
@@ -245,10 +253,14 @@ def make_base(mesence, rom, out):
         'STATE': str(out / 'close' / 'end.mss'), 'TO': HUB, 'SAVE': 'end.mss', 'SETTLE': '60', 'MAXF': '1500',
         'WARPEXIT': f'{warp_exit(rom):X}', 'ANYWHERE': '1', 'ROMPATCH': wc.NO_ENCOUNTERS, 'SET': pins,
         'LATESET': pins}, 300)
-    base = out / 'hub' / 'end.mss'
     if not base.exists():
         raise SystemExit('출발 상태를 만들지 못함')
-    return base
+    log = out / 'hub' / 'warp.txt'
+    # 세이브스테이트는 도착하지 못해도 남는다. 도착한 것만 캐시에 두어 다음 실행이 틀린 출발점을 받지 않게 한다
+    arrived = re.search(r'arrived map (\w\w/\w\w)', log.read_text(encoding='utf-8')) if log.exists() else None
+    if cache and arrived and arrived[1] == HUB[:5]:
+        cache.put('heroblock-hub', key, '.mss', base, {'name': 'hub', 'arrived': arrived[1]})
+    return base, False
 
 
 def main():
@@ -258,7 +270,9 @@ def main():
     ap.add_argument('--jobs', type=int, default=6)
     ap.add_argument('--only', help='이 사례만(쉼표로 여럿, 앞부분이 같으면 모두: supper)')
     ap.add_argument('--base', type=Path, help='같은 롬으로 만든 출발 상태(hub/end.mss)')
+    wc.add_seed_args(ap)
     args = ap.parse_args()
+    seeds = wc.seeds_of(args)
     mesence = Path(os.environ['MESENCE'])
     out = args.out.resolve()
     if out.exists() and any(out.iterdir()):
@@ -267,25 +281,39 @@ def main():
     rom = out / 'c.sfc'
     shutil.copyfile(args.rom.resolve(), rom)
     began = time.monotonic()
-    base = args.base.resolve() if args.base else make_base(mesence, rom, out)
+    cache = None if args.no_state_cache else wc.StateCache(rom.read_bytes())
+    if args.base:
+        base, cached = args.base.resolve(), None
+    else:
+        base, cached = make_base(mesence, rom, out, cache)
     todo = cases()
     if args.only:
         keys = args.only.split(',')
         todo = {k: v for k, v in todo.items() if any(k == p or k.startswith(p + '-') for p in keys)}
     exit_at = warp_exit(rom)
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
-        jobs = {pool.submit(run_case, mesence, rom, base, out, k, v, exit_at): k for k, v in todo.items()}
+        jobs = [pool.submit(run_case, mesence, rom, base, wc.seed_dir(out, s, seeds), k, v, exit_at, s)
+                for s in seeds for k, v in todo.items()]
         results = []
         for job in concurrent.futures.as_completed(jobs):
             r = job.result()
             results.append(r)
             print(json.dumps(r, ensure_ascii=False), flush=True)
-    results.sort(key=lambda r: list(todo).index(r['name']))
-    ok = len(results) == len(todo) and all(r['status'] == 'passed' for r in results)
-    report = {'status': 'passed' if ok else 'failed', 'seconds': round(time.monotonic() - began), 'cases': results}
+    results.sort(key=lambda r: (seeds.index(r['seed']), list(todo).index(r['name'])))
+    per_seed = []
+    for s in seeds:
+        rs = [r for r in results if r['seed'] == s]
+        passed = len(rs) == len(todo) and all(r['status'] == 'passed' for r in rs)
+        per_seed.append({'seed': s, 'rng': wc.rng_for(s), 'status': 'passed' if passed else 'failed', 'cases': rs})
+    ok = all(r['status'] == 'passed' for r in per_seed)
+    report = {'status': 'passed' if ok else 'failed', 'seconds': round(time.monotonic() - began),
+              'state_cache': 'off' if cached is None or cache is None else 'hit' if cached else 'miss', 'seeds': per_seed}
+    if len(seeds) == 1:
+        report.update(seed=seeds[0], rng=per_seed[0]['rng'], cases=per_seed[0]['cases'])
     (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')
-    print(json.dumps({'status': report['status'], 'seconds': report['seconds'],
-                      'failed': [r['name'] for r in results if r['status'] != 'passed']}, ensure_ascii=False))
+    print(json.dumps({'status': report['status'], 'seconds': report['seconds'], 'state_cache': report['state_cache'],
+                      'failed': [f"{r['seed']}:{r['name']}" for r in results if r['status'] != 'passed']},
+                     ensure_ascii=False))
     return 0 if ok else 1
 
 

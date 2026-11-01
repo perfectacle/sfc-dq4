@@ -14,7 +14,9 @@
   - --repeat 2 면 같은 장면을 두 번 돌려 battle.txt 가 바이트째 같음
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4battlecheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/battlecheck \\
-      [--base work/ch1walk/prologue/end.mss] [--repeat 2]
+      [--base work/ch1walk/prologue/end.mss] [--repeat 2] [--seed N | --seeds 0,5,9] [--no-state-cache]
+  --base 가 없으면 서장 끝 상태를 dq4ch1walkcheck.prologue 로 얻는다(롬 SHA-1 별 캐시 work/cache/states/prologue, 서장은 시드 0).
+  시드는 자리 잡기와 전투 시작의 난수(dq4ch1walkcheck.rng_for)만 바꾼다. 여러 시드면 seed-N/ 아래에 장면 폴더.
 형식은 sfc/dq4/docs/dq4-chapter1-format.md 「검증」.
 """
 import argparse
@@ -144,16 +146,17 @@ def judge(rom, scene, stages, dest, kind='win'):
     return problems
 
 
-def run_scene(mesence, rom, data, base, out, name, scene, rounds):
+def run_scene(mesence, rom, data, base, out, name, scene, rounds, seed=0):
     """자리를 잡고(조우 없음) 그 세이브스테이트에서 전투마다 rounds 번 돌린다."""
     dest = out / name
     state = base
     names = [s[0] for s in wc.SEGMENTS]
     extra, party = wc.setup(wc.SEGMENTS, names.index(scene['after']) + 1)
     for k, seg in enumerate(scene['prep']):
-        r = wc.segment(mesence, rom, state, dest / seg[0], seg, wc.NO_ENCOUNTERS, *((extra, party) if k == 0 else ()))
+        r = wc.segment(mesence, rom, state, dest / seg[0], seg, wc.NO_ENCOUNTERS,
+                       *((extra, party) if k == 0 else ('', '')), seed)
         if r['status'] != 'passed':
-            return [{'name': name, 'status': 'failed', 'problems': [f'자리 잡기 {seg[0]}: {r["problems"]}']}]
+            return [{'name': name, 'seed': seed, 'status': 'failed', 'problems': [f'자리 잡기 {seg[0]}: {r["problems"]}']}]
         state = dest / seg[0] / 'end.mss'
     patch = ';'.join((force_patch(scene['group']), weak_patch(data, [m for m, _ in scene['group']])))
     results = []
@@ -162,7 +165,7 @@ def run_scene(mesence, rom, data, base, out, name, scene, rounds):
         for i in range(rounds):
             run_dir = dest / f'{kind}{i + 1}'
             wc.run(mesence, rom, BATTLE, run_dir, {'STATE': str(state), 'ROMPATCH': patch, 'AFTERPATCH': wc.NO_ENCOUNTERS,
-                                                    'SET': f'{wc.RNG};{wc.DAY_SET}', 'POKE': wc.HERO_HP,
+                                                    'SET': f'{wc.rng_for(seed)};{wc.DAY_SET}', 'POKE': wc.HERO_HP,
                                                     'STEP': scene['step'], 'KEYS': keys, 'MOVE': scene['move'],
                                                     'MAXF': '6000'}, 300)
             log = run_dir / 'battle.txt'
@@ -175,7 +178,7 @@ def run_scene(mesence, rom, data, base, out, name, scene, rounds):
             problems.append('같은 입력의 실행끼리 다름: ' + ', '.join(r['trace'] for r in runs))
         first = runs[0]['stages']
         frames = int(first['after']['f']) - int(first['start']['f']) if 'after' in first and 'start' in first else None
-        results.append({'name': f'{name}-{kind}', 'status': 'failed' if problems else 'passed', 'problems': problems,
+        results.append({'name': f'{name}-{kind}', 'seed': seed, 'status': 'failed' if problems else 'passed', 'problems': problems,
                         'traces': [r['trace'] for r in runs], 'start': first.get('start'), 'after': first.get('after'),
                         'battle_frames': frames})
     return results
@@ -189,7 +192,9 @@ def main():
     ap.add_argument('--repeat', type=int, default=2, help='장면마다 전투를 같은 세이브스테이트에서 몇 번 돌릴지')
     ap.add_argument('--scenes', help='쉼표로 고른 장면만')
     ap.add_argument('--jobs', type=int, default=4)
+    wc.add_seed_args(ap)
     args = ap.parse_args()
+    seeds = wc.seeds_of(args)
     mesence = Path(os.environ['MESENCE'])
     out = args.out.resolve()
     if out.exists() and any(out.iterdir()):
@@ -198,24 +203,32 @@ def main():
     rom = out / 'c.sfc'
     shutil.copyfile(args.rom.resolve(), rom)
     data = rom.read_bytes()
+    pro = None
     if args.base:
         base = args.base.resolve()
     else:
-        r = wc.segment(mesence, rom, wc.prologue_start(mesence, rom, out), out / 'prologue', wc.SEGMENTS[0],
-                       wc.NO_ENCOUNTERS)
-        if r['status'] != 'passed':
-            raise SystemExit(f'서장 실패: {r["problems"]}')
-        base = out / 'prologue' / 'end.mss'
+        cache = None if args.no_state_cache else wc.StateCache(data)
+        base, pro = wc.prologue(mesence, rom, data, out, wc.SEGMENTS, cache)
+        if pro['status'] != 'passed':
+            raise SystemExit(f'서장 실패: {pro["problems"]}')
     names = args.scenes.split(',') if args.scenes else list(SCENES)
+    work = [(s, n) for s in seeds for n in names]
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
-        results = [r for rs in pool.map(lambda n: run_scene(mesence, rom, data, base, out, n, SCENES[n], args.repeat),
-                                        names) for r in rs]
+        results = [r for rs in pool.map(lambda w: run_scene(mesence, rom, data, base, wc.seed_dir(out, w[0], seeds), w[1],
+                                                            SCENES[w[1]], args.repeat, w[0]), work) for r in rs]
     for r in results:
         print(json.dumps(r, ensure_ascii=False))
-    ok = all(r['status'] == 'passed' for r in results)
-    (out / 'results.json').write_text(json.dumps({'status': 'passed' if ok else 'failed', 'scenes': results},
-                                                 ensure_ascii=False, indent=1) + '\n')
-    print(json.dumps({'status': 'passed' if ok else 'failed'}))
+    per_seed = [{'seed': s, 'rng': wc.rng_for(s),
+                 'status': 'passed' if all(r['status'] == 'passed' for r in results if r['seed'] == s) else 'failed',
+                 'scenes': [r for r in results if r['seed'] == s]} for s in seeds]
+    ok = all(r['status'] == 'passed' for r in per_seed)
+    report = {'status': 'passed' if ok else 'failed',
+              'state_cache': 'off' if pro is None or args.no_state_cache else 'hit' if pro.get('cached') else 'miss',
+              'seeds': per_seed}
+    if len(seeds) == 1:
+        report.update(seed=seeds[0], rng=per_seed[0]['rng'], scenes=per_seed[0]['scenes'])
+    (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')
+    print(json.dumps({'status': report['status'], 'seeds': {r['seed']: r['status'] for r in per_seed}}))
     return 0 if ok else 1
 
 

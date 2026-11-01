@@ -1,4 +1,11 @@
+import argparse
+import hashlib
+import os
+import re
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 import dq4ch1walkcheck as wc
 
@@ -67,6 +74,101 @@ class Ch1WalkCheckTests(unittest.TestCase):
         self.assertEqual(wc.pins({}), wc.RNG + ';' + wc.DAY_SET)
         self.assertEqual(wc.pins({'poke': wc.NIGHT + ';' + wc.HOLD_CHILD}), wc.RNG + ';' + wc.NIGHT_SET)
         self.assertEqual({a for a, _ in (p.split('=') for p in wc.RNG.split(';'))}, {'075B', '075C', '075D'})
+
+    def test_seed_zero_is_the_fixed_rng(self):
+        self.assertEqual(wc.rng_for(0), '075B=00;075C=00;075D=00')
+        self.assertEqual(wc.pins({}, 0), wc.pins({}))
+
+    def test_seed_values_are_deterministic(self):
+        for seed in (1, 2, 16, 123456):
+            text = wc.rng_for(seed)
+            self.assertEqual(text, wc.rng_for(seed))
+            self.assertRegex(text, r'^075B=[0-9A-F]{2};075C=[0-9A-F]{2};075D=[0-9A-F]{2}$')
+            self.assertTrue(wc.pins({}, seed).startswith(text + ';'))
+        # 바뀌면 이미 기록한 시드 결과와 견줄 수 없으므로 값을 묶어 둔다
+        self.assertEqual(wc.rng_for(1), '075B=44;075C=20;075D=82')
+        self.assertEqual(wc.rng_for(2), '075B=1C;075C=2E;075D=2B')
+        self.assertGreater(len({wc.rng_for(s) for s in range(32)}), 30)
+
+    def test_seed_args(self):
+        ap = argparse.ArgumentParser()
+        wc.add_seed_args(ap)
+        self.assertEqual(wc.seeds_of(ap.parse_args([])), [0])
+        self.assertEqual(wc.seeds_of(ap.parse_args(['--seed', '7'])), [7])
+        self.assertEqual(wc.seeds_of(ap.parse_args(['--seeds', '0,5,9,5'])), [0, 5, 9])
+        self.assertFalse(ap.parse_args([]).no_state_cache)
+        with self.assertRaises(SystemExit):
+            wc.seeds_of(ap.parse_args(['--seeds', '-1']))
+        out = Path('o')
+        self.assertEqual(wc.seed_dir(out, 3, [3]), out)
+        self.assertEqual(wc.seed_dir(out, 3, [0, 3]), out / 'seed-3')
+
+    def test_state_cache_key_is_rom_sha1(self):
+        rom = bytes(range(256)) * 4
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cache = wc.StateCache(rom, root)
+            self.assertEqual(cache.folder, root / 'prologue' / hashlib.sha1(rom).hexdigest())
+            self.assertIsNone(cache.get('prologue', 'k1', '.mss'))
+            src = root / 'end.mss'
+            src.write_bytes(b'state')
+            stored = cache.put('prologue', 'k1', '.mss', src, {'name': 'prologue', 'status': 'passed'})
+            self.assertEqual(stored, cache.folder / 'prologue-k1.mss')
+            state, result = wc.StateCache(rom, root).get('prologue', 'k1', '.mss')
+            self.assertEqual((state.read_bytes(), result['status']), (b'state', 'passed'))
+            self.assertIsNone(cache.get('prologue', 'k2', '.mss'))
+            self.assertIsNone(wc.StateCache(rom + b'\0', root).get('prologue', 'k1', '.mss'))
+            self.assertEqual(sorted(f.name for f in cache.folder.iterdir()), ['prologue-k1.json', 'prologue-k1.mss'])
+            # 결과 .json 이 없으면 상태를 반쯤 쓴 것으로 본다
+            (cache.folder / 'prologue-k1.json').unlink()
+            self.assertIsNone(cache.get('prologue', 'k1', '.mss'))
+            self.assertEqual(wc.fingerprint('a', src), wc.fingerprint('a', src))
+            src.write_bytes(b'other')
+            self.assertNotEqual(wc.fingerprint('a', src), wc.fingerprint('a', b'state'.decode()))
+            self.assertNotEqual(wc.fingerprint('a', src), wc.fingerprint('b', src))
+
+    def test_state_cache_hit_copies_to_walk_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cache = wc.StateCache(b'rom', root / 'states')
+            src = root / 'src.mss'
+            src.write_bytes(b'state')
+            cache.put('prologue', 'k', '.mss', src, {'status': 'passed'})
+            dest = root / 'out' / 'prologue' / 'end.mss'
+            state, _ = cache.get('prologue', 'k', '.mss', dest)
+            self.assertEqual((state, dest.read_bytes()), (dest, b'state'))
+
+    def test_prologue_files_cover_warp_and_lua(self):
+        files = set(wc.prologue_files())
+        import dq5exitcheck
+        for f in (wc.WARP, wc.WALK, wc.WALK_STATE, wc.pc.MKSTATE, Path(dq5exitcheck.__file__), wc.ROOT / 'uv.lock'):
+            self.assertIn(f, files)
+
+    def test_lua_env_covers_what_launched_lua_reads(self):
+        # 검사가 띄우는 저장소 Lua 가 새 환경 변수를 읽기 시작하면 LUA_ENV 에도 더해야 셸 값이 새지 않는다
+        for f in (wc.WALK, wc.WALK_STATE, wc.WARP, wc.MSG, wc.pc.MKSTATE):
+            names = set(re.findall(r'getenv\([\'"]([A-Z_0-9]+)', f.read_text(encoding='utf-8'))) - {'LIBDIR'}
+            self.assertLessEqual(names, wc.LUA_ENV, f.name)
+
+    def test_run_drops_shell_lua_env(self):
+        seen = {}
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {'SEQ': 'y@1:2', 'HOLD': '9', 'KEEP': '1'}), \
+                mock.patch.object(wc.mesen, 'run', lambda *a, **kw: seen.update(kw['env'])):
+            wc.run(Path('mesen'), Path('rom'), Path('x.lua'), Path(tmp), {'STATE': 's'}, 1)
+        self.assertNotIn('SEQ', seen)
+        self.assertNotIn('HOLD', seen)
+        self.assertEqual((seen['KEEP'], seen['STATE']), ('1', 's'))
+
+    def test_prologue_key_covers_inputs(self):
+        before = wc.prologue_inputs()
+        self.assertIn(wc.PROLOGUE_START['SEQ'], before)
+        self.assertIn(wc.RNG, before)
+        old = wc.PROLOGUE_START['TAPUNTIL']
+        try:
+            wc.PROLOGUE_START['TAPUNTIL'] = old + '0'
+            self.assertNotEqual(wc.prologue_inputs(), before)
+        finally:
+            wc.PROLOGUE_START['TAPUNTIL'] = old
 
     def test_trace_ignores_repeated_warp_end(self):
         once = 'f00002 anywhere\nf00259 end map 37/00\nflags 7E2190: 00\n'

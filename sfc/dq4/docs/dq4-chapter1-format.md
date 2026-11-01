@@ -748,6 +748,23 @@ MesenCE 헤드리스로 전원부터 타이틀 A, 메뉴 A, 이름 입력 Y 를 
 
 PR 전에는 이어 걷기를, 고치는 동안에는 `--units`(또는 `--units --base 앞 출력/prologue/end.mss --only 구간`)를 씁니다. `--base` 는 같은 롬으로 만든 서장 끝이어야 합니다. 세이브스테이트에는 그때 롬의 표 주소가 WRAM 에 남아 있어, 다른 롬과 섞으면 엉뚱하게 깨질 수 있습니다.
 
+#### 시드와 서장 캐시
+
+난수를 한 값(`00 00 00`)에만 묶으면 그 값에서만 우연히 통과하는 것을 놓칩니다. `--seed N` 이나 `--seeds 0,5,9` 로 구간 시작에 둘 난수를 고릅니다. 시드 0 은 지금까지의 `00 00 00` 이고, 그 밖의 시드는 `random.Random(N)` 으로 세 바이트를 뽑습니다(`dq4ch1walkcheck.rng_for`, 시드 1 은 `44 20 82`). `dq4ch1walkcheck.py`·`dq4heroblockcheck.py`·`dq4battlecheck.py`·`dq4compatcheck.py` 가 같은 인자를 받습니다.
+
+- 서장은 늘 시드 0 으로 걷고, 그 끝 상태에서 시드마다 따로 걷습니다. 여러 시드면 출력 폴더 아래 `seed-N/` 에 구간 폴더를 두고, 모든 시드가 통과해야 통과입니다. `results.json` 의 `seeds` 에 시드마다 뽑은 값(`rng`)과 결과가 들어갑니다.
+- 배포 직전에는 16~32개(`--seeds $(seq -s, 0 15)`), PR 에는 시드 0 과 커밋 SHA 에서 딴 둘(`SHA=$(git rev-parse HEAD); echo 0,$((16#${SHA:0:6})),$((16#${SHA:6:6}))`)을 돌립니다.
+- 서장 끝 세이브스테이트는 원래 체크아웃의 `work/cache/states/prologue/<롬 SHA-1>/` 에 `prologue-<지문>.mss` 로 둡니다(`DQ4_STATES_CACHE` 로 뿌리를 바꿈. [저장 기록 검사](dq4-savefixture-format.md)의 밑판은 뿌리에 바로 두므로 섞이지 않음). 지문은 서장 입력 상수(전원부터 누르는 입력 `PROLOGUE_START`, 서장 구간, 그 구간의 난수·시각·롬 패치), 서장·출발 상태를 만드는 데 닿는 Python(`dq4ch1walkcheck`·`dq4prologuecheck`·`dq4mesen`·`dq5exitcheck` 등)과 Lua 전부(`tools/lua`·`sfc/dq4/tools/lua`·`sfc/dq5/tools/lua`·툴킷 `LIBDIR`), `uv.lock`, MesenCE 실행 파일(크기와 고친 때)에서 땁니다. 이 Lua 들이 읽는 환경 변수는 셸에서 물려받지 않고 검사가 넘긴 값만 씁니다(`LUA_ENV`). 같은 롬·같은 지문이면 서장을 다시 걷지 않고, 캐시 파일을 걸었을 때와 같은 자리(`앞 출력/prologue/end.mss`, 주인공 막힘은 `hub/end.mss`)에 복사해 `--base`·`--states` 로 다시 쓸 수 있습니다. 주인공 막힘 출발 상태는 `36/00` 에 도착한 것만 캐시에 둡니다. 파일은 임시 이름으로 쓴 뒤 바꿔 넣어, 워크트리끼리 함께 읽어도 반쯤 쓴 파일을 보지 않습니다. `--no-state-cache` 로 끕니다. `dq4battlecheck.py` 도 같은 서장 끝을 쓰고, `dq4heroblockcheck.py` 는 출발 상태(성 마을 `36/00`)를 `heroblock-hub-<지문>.mss` 로 둡니다.
+
+잰 것(2026-11-01, 1장 롬 SHA-1 `8260d047…`, `--units --jobs 4`, 14코어 Mac, 다른 세션과 함께):
+
+| 실행 | 결과 |
+| --- | --- |
+| 바꾸기 전 코드, 시드 없음 | 27구간 통과, 120초 |
+| 시드 0, 캐시 없음 | 27구간 통과, 134초. 구간 27개의 `trace`·메시지·flag·물건이 바꾸기 전과 모두 같음 |
+| 시드 0, 캐시 있음 | 26구간(서장 빼고) 통과, 85초 |
+| 시드 0·5578746·8152795, 캐시 있음 | 셋 모두 26구간 통과, 205초. 시드 0 의 `trace` 는 캐시 없을 때와 같고, 다른 두 시드는 `shoes`·`boss`·`homecoming` 셋만 `trace` 가 다름 |
+
 #### 걸음 전투 검사
 
 조우를 끈 검사들은 전투 코드를 지나지 않습니다. `dq4battlecheck.py` 가 정한 곳·정한 무리로 걸음 전투를 붙입니다.
