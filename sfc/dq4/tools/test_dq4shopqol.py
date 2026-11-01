@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 import dq4sysmsg
+import dq4windowname
 import dq4windowtext
 
 ASM = (Path(__file__).resolve().parent / 'dq4windowname.asm').read_text()
@@ -83,6 +84,7 @@ class SellQtyTest(unittest.TestCase):
         self.assertRegex(ASM, r'org \$06DF35\n    JSL ShopSellExtra')
 
     def test_sell_code_below_bank_40_and_uses_own_count(self):
+        self.assertLess(dq4windowname.SELL_SPOT_END - 1, 0x400000)
         start = ASM.index('org !shop_sell_spot')
         end = ASM.index('assert pc() <= !shop_sell_end')
         body = ASM[start:end]
@@ -93,6 +95,7 @@ class SellQtyTest(unittest.TestCase):
         self.assertNotIn('STA.w $0F21', body)
         self.assertIn('STA.w $0F2C', body)
         self.assertIn('DEC.w $0F23', body)
+        self.assertEqual(body.count('STZ.w $0F2C'), 2)
 
 
 class SellPriceTest(unittest.TestCase):

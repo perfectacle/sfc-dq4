@@ -297,7 +297,8 @@ ShopQtyMsg:
 assert pc() <= !shop_low_end
 
 ; 가게 팔기: 값을 셈(06:DF06, LDA $0F22 / STA $42 / JSL $06DF5B)과 물건 빼기 앞(06:DF35, LDA $0F21 / STA $42 / LDA $0F23 /
-; STA $43, 뒤는 BRK 89 80 32). 팔기에서 $0F21 은 사람, $0F23 은 고른 칸이라 개수는 $0F2C(여관·06:E03E 가 지우기만 하는 자리)에
+; STA $43, 뒤는 BRK 89 80 32). 팔기에서 $0F21 은 사람, $0F23 은 고른 칸이라 개수는 $0F2C 에 둔다. $0F2C 는 06:E36B 가
+; 16비트 $0F2B 의 높은 바이트로 읽는데 그 처리기들이 들어올 때 지우므로, 다 쓰면 0 으로 되돌린다
 org $06DF06
     JSL ShopSellQty
     NOP #5
@@ -377,6 +378,7 @@ ShopSellQty:
 .done
     RTL
 .cancel
+    STZ.w $0F2C
     PLA
     PLA
     PLA
@@ -386,6 +388,11 @@ ShopSellQty:
 ; → $46 물건, $47 장비 중
 ShopSellCount:
     LDY #$01
+    ; 고른 칸이 장비 중이면 묻지 않는다(한꺼번에 팔다 입은 장비까지 벗겨 팔지 않게)
+    LDX.w $0F23
+    JSR ShopSellSlot
+    LDA.b $47
+    BNE ++
     LDX #$00
 -
     CPX.w $0F23
@@ -397,6 +404,7 @@ ShopSellCount:
     INX
     CPX #$0C
     BCC -
+++
     TYA
     CMP #$0A
     BCC +
@@ -449,6 +457,7 @@ ShopSellExtra:
     STA.b $42
     LDA.w $0F23
     STA.b $43
+    STZ.w $0F2C
     RTL
 
 ; 「몇 개 파시겠어요?」 메시지 번호(가게 종류 $0F20 마다). 원작에서 비어 있고 부르는 곳이 없는 메시지
