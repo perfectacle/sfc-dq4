@@ -30,6 +30,7 @@ from dq4environmentmap import prepare_maps, render_maps  # noqa: E402
 from dq4environmentmap import block_prop  # noqa: E402
 from dq4environmentrom import (COUNTER_PROPS, DOOR_KIND, FLOOR, GATE_KIND, OPENINGS, door_floor, GROUPS, MAPS, STAIRS, WALL, WATER_SLOT, water_block,  # noqa: E402
                                WATER_FRAMES, WATER_PERIOD, build_graphics, objects, water_frames)
+import dq4mesen  # noqa: E402
 
 OBJECT_SIZE = {DOOR_KIND: (2, 3), GATE_KIND: (4, 4)}  # noqa: E402
 # Cell +4/+7 values 2A:F6B8 counts as exits (2A:FF37).
@@ -47,8 +48,8 @@ UNTOUCHED = ((0x1A, 0x00), (0x19, 0x00), (0x03, 0x00), (0x19, 0x02), (0x06, 0x06
 
 def _run(mesence, rom, script, env):
     full = dict(os.environ, **{k: str(v) for k, v in env.items()})
-    subprocess.run([str(mesence), "--testrunner", str(rom), str(script)], env=full,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600, check=False)
+    dq4mesen.testrunner(str(mesence), str(rom), str(script), env=full,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600, check=False)
 
 
 def warp(mesence, rom, state, to, out, name, test=False, **extra):

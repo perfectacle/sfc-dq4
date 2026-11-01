@@ -37,6 +37,7 @@ import dq5objlayout as L  # noqa: E402
 import dq5sprite as S  # noqa: E402
 from dq5map import Rom  # noqa: E402
 from dq5objlayoutcheck import screen_match, w16  # noqa: E402
+import dq5mesen  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 DUMP = 600
@@ -89,9 +90,9 @@ def run(rom, dest, extra, state, mesence, libdir):
                 'TEST': 'wait:500', 'DUMPF': f'{DUMP},{DUMP + 1}', 'WATCHR': '7E0500-7E05FF',
                 'NEXT': str(HERE / 'lua' / 'dq5gfxdump.lua')} | extra)
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua' / 'dq5rangewatch.lua'),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                       check=True, timeout=300)
+        dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua' / 'dq5rangewatch.lua'),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                            check=True, timeout=300)
     d = {k: (dest / f'f{DUMP:05d}.{k}').read_bytes() for k in ('wram', 'vram', 'oam', 'cgram')}
     d['png'] = Image.open(dest / f'f{DUMP + 1:05d}.png').convert('RGB')
     d['ppu'] = dict(line.split('=', 1) for line in (dest / f'f{DUMP:05d}.ppu.txt').read_text().split())

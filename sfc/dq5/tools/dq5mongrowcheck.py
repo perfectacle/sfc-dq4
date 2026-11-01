@@ -28,6 +28,7 @@ import dq5mongfx as M  # noqa: E402
 from dq5map import Rom  # noqa: E402
 from dq5monlimits import Pictures  # noqa: E402
 from dq5monwrite import FORMAT, decode_bytes, encode, following_table, nmi_short, picture_grid, stats  # noqa: E402
+import dq5mesen  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 GROUPS = ((0x0F, 1, 0), (0x7E, 1, 0), (0x00, 1, 0))
@@ -57,9 +58,9 @@ def run(rom, name, out, state, mesence, libdir):
     env.update(LIBDIR=str(libdir), STATE=str(state), SHOT_DIR=str(dest), MAXF='1800', SETTLE='300',
                FIELD='341,56', BATTLE=','.join(f'{m:02X}:{n}' for m, n, _ in GROUPS), TEST='wait:900', DUMPF=DUMPF)
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5gfxdump.lua'),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                       check=True, timeout=240)
+        dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua/dq5gfxdump.lua'),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                            check=True, timeout=240)
     return dest
 
 

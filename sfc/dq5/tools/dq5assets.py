@@ -33,6 +33,7 @@ import time
 TOOLS = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, TOOLS)
 import dq5gfx  # noqa: E402
+import dq5mesen  # noqa: E402
 
 # 결과를 바꾸는 MesenCE 설정. 사용자 설정 파일과 상관없이 같게 한다.
 #   SpcClockSpeedAdjustment 는 SPC700 빠르기라 .spc 의 SPC 레지스터·RAM 이 달라진다(0 과 40 이 다름을 실측).
@@ -89,9 +90,9 @@ def ship_state(rom, work, env):
         os.remove(srm)
     lib = subprocess.run(['uv', 'run', '--locked', 'krpatch', 'sfc', 'lua'], capture_output=True, text=True,
                          check=True).stdout.strip()
-    subprocess.run([env['MESENCE'], '--testrunner', rom_path, os.path.join(TOOLS, 'lua', 'dq5shipstate.lua')],
-                   env=dict(env, LIBDIR=lib, SHOT_DIR=out, SAVEAT=str(SHIP_AT), SAVE='ship.mss'),
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600, check=False)
+    dq5mesen.testrunner(env['MESENCE'], rom_path, os.path.join(TOOLS, 'lua', 'dq5shipstate.lua'),
+                        env=dict(env, LIBDIR=lib, SHOT_DIR=out, SAVEAT=str(SHIP_AT), SAVE='ship.mss'),
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600, check=False)
     if os.path.exists(srm):
         os.remove(srm)
     log = open(os.path.join(out, 'ship.txt')).read() if os.path.exists(os.path.join(out, 'ship.txt')) else ''

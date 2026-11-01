@@ -12,7 +12,7 @@ import dq5newmapcheck
 
 
 def fake_mesence(seen):
-    def run(cmd, env, **_):
+    def run(mesence, *args, env, **_):
         seen.append(env)
         Path(env['SHOT_DIR'], 'warp.txt').write_text(
             'final map 0D/07 cell 8,10 layer 01 BE=80 sound 0\ndp86 -\nstale reads 0 -\n', encoding='utf-8')
@@ -30,7 +30,7 @@ class StaleTests(unittest.TestCase):
         case = ('doors-new', 'doors', '0D/07,8,10,1', 'wait:10', None)
         roms = {'doors': (Path('doors.sfc'), 0x2AEFF5, '')}
         seen = []
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(dq5exitcheck.subprocess, 'run', fake_mesence(seen)):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(dq5exitcheck.dq5mesen, 'testrunner', fake_mesence(seen)):
             out = Path(tmp)
             (out / 'a').mkdir()
             dq5exitcheck.run(case, roms, Path('s.mss'), out / 'a', Path('mesence'), Path('lib'),

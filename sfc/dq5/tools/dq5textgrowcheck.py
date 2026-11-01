@@ -25,6 +25,7 @@ ROOT = HERE.parents[2]
 sys.path.insert(0, str(HERE))
 from dq5text import CHARS  # noqa: E402
 from dq5textwrite import FORMAT, overrides, read_messages  # noqa: E402
+import dq5mesen  # noqa: E402
 
 LAST = 0x1FFF
 TEXTS = {0xC80: 'あいうえお', 0xCC5: 'かきくけこ', 0xCE8: 'なにぬねの', 0x13C5: 'さしすせそ', 0x1FFF: 'たちつてと'}
@@ -82,9 +83,9 @@ def run(name, rom, out, mesence, libdir, state, inner, ret, **extra):
     env = {k: v for k, v in os.environ.items() if k not in ('ROMPATCH', 'SET', 'POKE', 'CALLS', 'DUMP', 'SHOTS', 'LOG')}
     env.update(LIBDIR=libdir, STATE=str(state), SHOT_DIR=str(dest), INNER=str(inner), RETURN_PC=ret, **extra)
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5textgrowcheck.lua'),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                       check=True, timeout=150)
+        dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua/dq5textgrowcheck.lua'),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                            check=True, timeout=150)
     rows = []
     for line in (dest / 'decoded.txt').read_text(encoding='utf-8').split('\n'):
         if line:

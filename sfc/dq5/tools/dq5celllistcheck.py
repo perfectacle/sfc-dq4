@@ -31,6 +31,7 @@ import dq5sprite as S  # noqa: E402
 from dq5objlayout import cell_end, object_cells, read_objects  # noqa: E402
 from dq5map import Rom  # noqa: E402
 from dq5spritewritecheck import lay_down, pose_records  # noqa: E402
+import dq5mesen  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 # 이름: (SHIFT, PTR, 그대로여야 하는지, 깨져야 할 세트)
@@ -54,9 +55,9 @@ def run(name, rom_path, rom, out, state, mesence, libdir):
                TO='02/06,24,14,1', TEST='wait:400', DUMPF='620,700,780,860', SHIFT=shift, PTR=ptr,
                INNER=str(HERE / 'lua/dq5gfxdump.lua'))
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom_path), str(HERE / 'lua/dq5cellshift.lua'),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                       check=True, timeout=200)
+        dq5mesen.testrunner(str(mesence), str(rom_path), str(HERE / 'lua/dq5cellshift.lua'),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                            check=True, timeout=200)
     stats = {}
     tags = sorted(p.stem for p in dest.glob('f[0-9]*.wram'))
     if not tags:

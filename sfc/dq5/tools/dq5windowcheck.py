@@ -14,6 +14,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import dq5mesen
 
 HERE = Path(__file__).resolve().parent
 CORNER = 0x8C
@@ -67,9 +68,9 @@ def main():
             env.update(LIBDIR=libdir, STATE=str(state), SHOT_DIR=str(dest), DRIVER=str(HERE / 'lua/dq5warp.lua'),
                        FIELD='341,56', BATTLE='00:1', TEST='wait:400,a:8,wait:200', FRAMES='700,1000', MAXF='1100')
             with (dest / 'mesen.log').open('w') as log:
-                subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5windowcheck.lua'),
-                                '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                               check=True, timeout=180)
+                dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua/dq5windowcheck.lua'),
+                                    '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                                    check=True, timeout=180)
             return {f: (dest / f'bg3-f{f:05d}.bin').read_bytes() for f in (700, 1000)}
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:

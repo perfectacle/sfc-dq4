@@ -22,6 +22,7 @@ from pathlib import Path
 
 from dq5learnwrite import JOIN, JOIN_SIZE, dump, layout
 from dq5map import Rom, lorom
+import dq5mesen
 
 HERE = Path(__file__).resolve().parent
 BIANCA = 3
@@ -98,9 +99,9 @@ def run(name, rom, out, mesence, libdir, state, lua, **extra):
     env = {k: v for k, v in os.environ.items() if k not in CLEAR}
     env.update(LIBDIR=libdir, STATE=str(state), SHOT_DIR=str(dest), **extra)
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua' / lua),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                       check=True, timeout=180)
+        dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua' / lua),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                            check=True, timeout=180)
     return dest
 
 

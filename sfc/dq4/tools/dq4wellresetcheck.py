@@ -33,6 +33,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
 import dq4dungeonencountercheck  # noqa: E402
 import dq4groupcheck  # noqa: E402
 import dq4wellswitch  # noqa: E402
+import dq4mesen  # noqa: E402
 
 FLAG, BIT = dq4wellswitch.FLAG[0] & 0xFFFF, dq4wellswitch.FLAG[1]
 WIPE_TEST = ",".join(["left:24,right:24"] * 4 + ["a:4,wait:40"] * 90)
@@ -80,9 +81,9 @@ def load(mesence, rom, state, out, name, patch=""):
                PRE=f"{TALK},wait:400,{CONTINUE}", RESETAT=str(RESET), MAXF=str(LOADED + 100),
                CALLS="25824F,258278", ROMPATCH=patch,
                DUMP=f"{SAVED - 50}:7E2000:{SAVE_SIZE};{SAVED}:{SLOT:06X}:{SAVE_SIZE};{LOADED}:7E2000:{SAVE_SIZE}")
-    subprocess.run([str(mesence), "--testrunner", str(copy), str(DQ5_TOOLS / "lua" / "dq5cdldump.lua"),
-                    "--Snes.DisableFrameSkipping=true"], env=env, stdout=subprocess.DEVNULL,
-                   stderr=subprocess.DEVNULL, timeout=600, check=False)
+    dq4mesen.testrunner(str(mesence), str(copy), str(DQ5_TOOLS / "lua" / "dq5cdldump.lua"),
+                        "--Snes.DisableFrameSkipping=true", env=env, stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL, timeout=600, check=False)
     copy.unlink()
     text = (dest / "msg.txt").read_text(encoding="utf-8")
     dumps = {(int(m[1]), int(m[2], 16)): bytes.fromhex(m[3])

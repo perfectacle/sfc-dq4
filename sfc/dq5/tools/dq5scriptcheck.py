@@ -15,6 +15,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import dq5mesen
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
@@ -91,9 +92,9 @@ def run_case(case, out, state, mesence, libdir, rom=None, at=0x608000, rompatch=
                      'p8lo=7E3488;p8hi=7E34A8;p8bank=7E34C8;move8=7E3308',
                POKE=f'7E219F={flag:02X}' if flag is not None else '')
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom or out / f'{name}.sfc'),
-                        str(HERE / 'lua/dq5scriptcheck.lua'), '--Snes.DisableFrameSkipping=true'],
-                       env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=90)
+        dq5mesen.testrunner(str(mesence), str(rom or out / f'{name}.sfc'),
+                            str(HERE / 'lua/dq5scriptcheck.lua'), '--Snes.DisableFrameSkipping=true',
+                            env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=90)
     walk = (dest / 'walk.txt').read_text(encoding='utf-8')
     trace = (dest / 'trace.txt').read_text(encoding='utf-8')
     fields = dict(line.split('=', 1) for line in walk.splitlines()

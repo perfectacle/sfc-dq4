@@ -33,6 +33,7 @@ import tempfile
 from dq5growth import RECORD, RECORD_FIELD, exp_at, gains, stats_at
 from dq5map import Rom
 from dq5progresswrite import dump, table_bases
+import dq5mesen
 
 HERE = Path(__file__).resolve().parent
 NEW_AREA, NEW_PERSON, NEW_MONSTER = 0x55, 0x0B, 0x2A
@@ -96,8 +97,8 @@ def environment(libdir, state, dest, **extra):
 def run(mesence, rom, lua, dest, env):
     dest.mkdir(parents=True, exist_ok=True)
     with (dest / 'mesen.log').open('w') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(lua), '--Snes.DisableFrameSkipping=true'],
-                       env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=180)
+        dq5mesen.testrunner(str(mesence), str(rom), str(lua), '--Snes.DisableFrameSkipping=true',
+                            env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=180)
 
 
 def scene(name, rom, battle_state, ship_state, out, mesence, libdir):

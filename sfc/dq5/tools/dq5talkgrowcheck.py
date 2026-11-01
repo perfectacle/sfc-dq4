@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+import dq5mesen
 
 HERE = Path(__file__).resolve().parent
 EXTRA = ['--extra-at', '3F:8000', '--hook-at', '06:FE10']
@@ -79,9 +80,9 @@ def papas(name, rom, talk, out, mesence, libdir, state):
                DUMP='1400:7E2190:16,1400:7E21F0:4', SET='21F2=FF',
                POKE=f'7E36EB={talk & 0xFF:02X};7E370B={talk >> 8:02X}', PRE=TALK)
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5msg.lua'),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                       check=True, timeout=120)
+        dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua/dq5msg.lua'),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                            check=True, timeout=120)
     talks, flags = [], ''
     for line in (dest / 'msg.txt').read_text(encoding='utf-8').splitlines():
         parts = line.split()
@@ -104,9 +105,9 @@ def walk(name, rom, out, mesence, libdir, state):
                TO='02/06,24,14,1', TEST='up:40,wait:40,a:4,wait:60,a:4,wait:200,wait:30',
                CHECK_GROUP='02', CHECK_MAP='06')
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5npcrecordcheck.lua'),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                       check=True, timeout=120)
+        dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua/dq5npcrecordcheck.lua'),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                            check=True, timeout=120)
     text = (dest / 'warp.txt').read_text(encoding='utf-8')
     found = re.search(r'^messages (.*)$', text, re.M)
     require(found is not None, f'{name}: 메시지 기록이 없음')

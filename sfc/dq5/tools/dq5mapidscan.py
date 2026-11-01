@@ -18,6 +18,7 @@ from pathlib import Path
 
 from kr_patch.sfc.dis65816 import decode
 from kr_patch.sfc.mapper import LoROM
+import dq5mesen
 
 HERE = Path(__file__).resolve().parent
 WARP, MSG, BATTLE = (str(HERE / f'lua/{n}') for n in ('dq5warp.lua', 'dq5msg.lua', 'dq5battle.lua'))
@@ -61,9 +62,9 @@ def run(scene, rom, state, battle, out, mesence, libdir):
     env.update(LIBDIR=str(libdir), STATE=str(battle if start == 'battle' else state), SHOT_DIR=str(dest),
                DRIVER=driver, **{'MAXF': '1500', 'SETTLE': '60', **extra})
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5mapidscan.lua'),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                       check=True, timeout=600)
+        dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua/dq5mapidscan.lua'),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                            check=True, timeout=600)
     path = dest / 'mapid.txt'
     require(path.is_file(), f'{name}: mapid.txt 가 없음')
     return {int(pc, 16): int(n) for pc, n in (line.split() for line in path.read_text().split('\n') if line)}

@@ -36,6 +36,7 @@ import dq5map  # noqa: E402
 from dq5map import Rom, lorom, map_pointer  # noqa: E402
 import dq5battlebgwrite as bgw  # noqa: E402
 import dq5mapgfxwrite as mgw  # noqa: E402
+import dq5mesen  # noqa: E402
 
 STRIPE = bytes(v for r in range(8) for v in ((0xAA if r % 2 == 0 else 0x55), 0xFF)) + bytes([0x0F, 0]) * 8
 DOTS = bytes(v for r in range(8) for v in (0x81 << (r % 4) & 0xFF, 0)) + bytes([0xFF, 0xFF]) * 8
@@ -180,8 +181,8 @@ def run(mesence, rom, lua, env_extra, dest, libdir, state):
         env.pop(key, None)
     env.update(LIBDIR=str(libdir), STATE=str(state), SHOT_DIR=str(dest), **env_extra)
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(copy), str(lua), '--Snes.DisableFrameSkipping=true'],
-                       env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=180)
+        dq5mesen.testrunner(str(mesence), str(copy), str(lua), '--Snes.DisableFrameSkipping=true',
+                            env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=180)
     return dest
 
 

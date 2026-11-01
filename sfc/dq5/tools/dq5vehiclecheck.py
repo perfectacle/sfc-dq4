@@ -37,6 +37,7 @@ import dq5sprite as S  # noqa: E402
 from dq5map import Rom  # noqa: E402
 from dq5objlayout import FORMAT, SCENES as SCENE_SITES, VEHICLE_PARTS, dump, vehicle_part  # noqa: E402
 from dq5objlayoutcheck import find_grid, screen_match, w16  # noqa: E402
+import dq5mesen  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 WALK = 'wait:100,left:120,up:120,right:120,down:120,left:60,down:60,right:60,up:60'
@@ -131,9 +132,9 @@ def run(rom, name, lua, extra, out, state, mesence, libdir):
     env.update({'LIBDIR': str(libdir), 'STATE': str(state), 'SHOT_DIR': str(dest), 'MAXF': '2000', 'SETTLE': '120',
                 'TEST': WALK} | extra)
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua' / lua),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                       check=True, timeout=300)
+        dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua' / lua),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                            check=True, timeout=300)
     return dest
 
 

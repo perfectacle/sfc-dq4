@@ -17,6 +17,7 @@ import sys
 import tempfile
 
 from dq5map import lorom
+import dq5mesen
 
 HERE = Path(__file__).resolve().parent
 TABLE, SIZE = 0x2AD512, 512
@@ -41,9 +42,9 @@ def run(rom, dest, env, mesence, libdir, state):
     full = {k: v for k, v in os.environ.items() if k not in ('FIELD', 'TEST', 'LATESET', 'SET', 'POKE', 'TO')}
     full.update(LIBDIR=libdir, STATE=str(state), SHOT_DIR=str(dest), **env)
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5warp.lua'),
-                        '--Snes.DisableFrameSkipping=true'], env=full, stdout=log, stderr=subprocess.STDOUT,
-                       check=True, timeout=300)
+        dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua/dq5warp.lua'),
+                            '--Snes.DisableFrameSkipping=true', env=full, stdout=log, stderr=subprocess.STDOUT,
+                            check=True, timeout=300)
     line = next(x for x in (dest / 'warp.txt').read_text(encoding='utf-8').splitlines() if ' test ' in x)
     end = re.search(r'-> field (\d+),(\d+)', line)
     require(end is not None, f'{dest.name}: 필드에서 끝나지 않음 {line}')

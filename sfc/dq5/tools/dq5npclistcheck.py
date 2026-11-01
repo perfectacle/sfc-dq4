@@ -25,6 +25,7 @@ from dq5mapwrite import all_maps  # noqa: E402
 from dq5npc import FLAGS, list_address, list_entries, parse, table_values  # noqa: E402
 from dq5npclists import NO_NPC_COUNT, OVERRIDE_COUNT, SLOT_FIRST, map_objects  # noqa: E402
 from dq5npcrecordcheck import command, compare, require  # noqa: E402
+import dq5mesen  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 TALK = 0x300
@@ -101,9 +102,9 @@ def run(case, roms, state, out, mesence, libdir):
     if night:
         env['POKE'] = '7E075E=F0;7E075F=00'
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(roms[rom]), str(HERE / 'lua/dq5npcrecordcheck.lua'),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                       check=True, timeout=120)
+        dq5mesen.testrunner(str(mesence), str(roms[rom]), str(HERE / 'lua/dq5npcrecordcheck.lua'),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                            check=True, timeout=120)
     text = (dest / 'warp.txt').read_text(encoding='utf-8')
     require((dest / 'npc.bin').is_file(), f'{name}: 맵에 들어가지 못함')
     slots = re.search(r'slots ([0-9A-F]{2}) ([0-9A-F]{2})', text)

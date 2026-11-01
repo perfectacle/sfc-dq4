@@ -19,6 +19,7 @@ import tempfile
 from dq5field import BLOCK_LOWER, BLOCK_UPPER, block_tiles, tile_word
 from dq5fieldwrite import read_grid, split
 from dq5map import Rom
+import dq5mesen
 
 HERE = Path(__file__).resolve().parent
 BLOCK = 8
@@ -82,9 +83,9 @@ def run_scene(name, original, state, out, mesence, libdir):
     env.update(SCENES[name])
     rom = original if name == 'baseline' else out / ('repack.sfc' if name.startswith('world') else f'{name}.sfc')
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5gfxdump.lua'),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                       check=True, timeout=90)
+        dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua/dq5gfxdump.lua'),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                            check=True, timeout=90)
     require('timeout' not in (dest / 'warp.txt').read_text(encoding='utf-8'), f'{name}: 보행 시간 초과')
     return name
 

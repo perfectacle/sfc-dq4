@@ -20,6 +20,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from dq5map import Rom  # noqa: E402
 from dq5sound import map_songs  # noqa: E402
+import dq5mesen  # noqa: E402
 
 ARRIVAL = re.compile(r"([0-9A-F]{2})/([0-9A-F]{2}) 의 출구 \d+ → 도착 \((\d+), (\d+)\)")
 
@@ -80,8 +81,8 @@ def main():
                    SETTLE="60", TEST="wait:200", MAXF="640", SHOT_DIR=d)
         if a.set:
             env["SET"] = a.set
-        subprocess.run([mesen, "--testrunner", os.path.abspath(a.rom), probe], env=env,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
+        dq5mesen.testrunner(mesen, os.path.abspath(a.rom), probe, env=env,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
         try:
             snd = open(os.path.join(d, "snd.txt")).read()
             # 시작 세이브스테이트(배 선실 17/01)와 같은 그룹은 사다리 단계로 가서 「arrived」 없이 「end map」 만 찍힘

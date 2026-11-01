@@ -16,6 +16,7 @@ import os
 import shutil
 import subprocess
 import sys
+import dq5mesen
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LUA = os.path.join(HERE, 'lua', 'dq5boot.lua')
@@ -31,9 +32,9 @@ def start(mesence, libdir, rom, out):
     env = dict(os.environ, LIBDIR=libdir, SHOT_DIR=os.path.abspath(out))
     # 설정의 Snes.RamPowerOnState 가 Random 이면 같은 롬도 결과가 달라진다. 이 실행만 0 으로 켠다.
     # 프레임 건너뛰기를 끄지 않으면 화면 PNG 가 시간에 따라 1~3프레임 앞의 그림으로 찍힌다.
-    return subprocess.Popen([mesence, '--testrunner', os.path.abspath(rom), LUA, '--Snes.RamPowerOnState=AllZeros',
-                             '--Snes.DisableFrameSkipping=true'],
-                            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return dq5mesen.testrunner_popen(mesence, os.path.abspath(rom), LUA, '--Snes.RamPowerOnState=AllZeros',
+                                     '--Snes.DisableFrameSkipping=true',
+                                     env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def result(out):
@@ -78,8 +79,8 @@ def scenes(mesence, krlua, state, roms, work):
             out = os.path.join(work, f'scene-{name}', tag)
             os.makedirs(out, exist_ok=True)
             e = dict(os.environ, LIBDIR=lib, SHOT_DIR=out, STATE=os.path.abspath(state), SHOTS=shots, **env)
-            procs.append(subprocess.Popen([mesence, '--testrunner', rom, SCENE_LUA], env=e,
-                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+            procs.append(dq5mesen.testrunner_popen(mesence, rom, SCENE_LUA, env=e,
+                                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
     for p in procs:
         p.wait()
     res = []

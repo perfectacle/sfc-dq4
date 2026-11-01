@@ -42,6 +42,7 @@ import dq5npc
 from dq5exitcheck import command, dp86_allowed, require, warp_exit
 from dq5map import Rom, lorom, map_cgram
 from dq5progresscheck import environment
+import dq5mesen
 
 HERE = Path(__file__).resolve().parent
 # 맵 안에서 좌우로 몇 걸음. 걸음마다 00:C652 가 $1AAD 에 그룹의 걸음 루틴을 둔다
@@ -115,9 +116,9 @@ def warp(rom, name, state, out, mesence, libdir, to, test):
     env.update(TO=to, TEST=f'{test},wait:300', SETTLE='120', MAXF='1800', WARPEXIT=f'{warp_exit(rom):X}',
                DP86OK=dp86_allowed(rom))
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5warp.lua'),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                       check=True, timeout=180)
+        dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua/dq5warp.lua'),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                            check=True, timeout=180)
     require('timeout' not in (dest / 'warp.txt').read_text(encoding='utf-8'), f'{name}: 장면 이동 시간 초과')
 
 
@@ -127,9 +128,9 @@ def walk(rom, name, state, out, mesence, libdir):
     env = environment(libdir, state, dest)
     env.update(DRIVER=str(HERE / 'lua/dq5msg.lua'), MAXF='500', PRE='right:40,wait:400')
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5tablecheck.lua'),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                       check=True, timeout=180)
+        dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua/dq5tablecheck.lua'),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                            check=True, timeout=180)
 
 
 def place(out, name):

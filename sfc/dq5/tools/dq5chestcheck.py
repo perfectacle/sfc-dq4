@@ -43,6 +43,7 @@ from dq5chest import chests
 from dq5map import Rom, block_hook, block_table
 from dq5mapcompile import compile_places, extract
 from dq5mapwrite import all_maps, dumps
+import dq5mesen
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
@@ -411,8 +412,8 @@ def environment(libdir, state, dest):
 
 def run(mesence, rom, script, dest, env, timeout=90):
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(script), '--Snes.DisableFrameSkipping=true'],
-                       env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=timeout)
+        dq5mesen.testrunner(str(mesence), str(rom), str(script), '--Snes.DisableFrameSkipping=true',
+                            env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=timeout)
 
 
 def require(condition, message):

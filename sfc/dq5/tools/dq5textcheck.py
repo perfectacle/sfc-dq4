@@ -13,6 +13,7 @@ import tempfile
 
 from dq5text import CHARS
 from dq5textwrite import read_messages
+import dq5mesen
 
 HERE = Path(__file__).resolve().parent
 
@@ -28,9 +29,9 @@ def decoder_codes(rom, msg, ret, dest, state, mesence, libdir):
                DRIVER=str(HERE / 'lua/dq5msg.lua'), MAXF='500', ROMPATCH=f'30139={0x6000 | msg:04X}',
                PRE='b:4,wait:40,up:3,wait:20,a:4,wait:30,a:4,wait:150')
     with (dest / 'mesen.log').open('w') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5textcheck.lua'),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log,
-                       stderr=subprocess.STDOUT, check=True, timeout=90)
+        dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua/dq5textcheck.lua'),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log,
+                            stderr=subprocess.STDOUT, check=True, timeout=90)
     lines = (dest / 'decoded.txt').read_text().splitlines()
     return int(lines[0].split('=')[1], 16), [int(code, 16) for code in lines[1:]]
 

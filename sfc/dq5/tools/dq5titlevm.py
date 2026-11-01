@@ -31,6 +31,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(__file__))
 import dq5ppu  # noqa: E402
 from w65816 import Cpu as _Cpu, Stop  # noqa: E402
+import dq5mesen  # noqa: E402
 
 FRAME_WAIT = 0x00969A
 HDMA_TABLE = os.environ.get('DQ5_HDMA_TABLE', '1') == '1'
@@ -310,9 +311,9 @@ def boot_snapshot(rom_path, mesen, folder):
     seq = T.MENU + T.TAPS
     env = dict(os.environ, LIBDIR=lib, PERIOD='40', TAP='a', TAPUNTIL='205', SEQ=','.join(seq), EVERY='0', BOOT='1',
                FROM=str(SNAP_FROM), MAXN='3', MAXF='9000', SHOT_DIR=folder)
-    subprocess.run([mesen, '--testrunner', test, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lua',
-                    'dq5titlesnap.lua'), '--Snes.RamPowerOnState=AllZeros', '--Snes.DisableFrameSkipping=true'],
-                   env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1800, check=False)
+    dq5mesen.testrunner(mesen, test, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lua',
+                        'dq5titlesnap.lua'), '--Snes.RamPowerOnState=AllZeros', '--Snes.DisableFrameSkipping=true',
+                        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1800, check=False)
     if os.path.exists(srm):
         os.remove(srm)
     return seq

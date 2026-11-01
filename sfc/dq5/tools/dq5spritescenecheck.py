@@ -25,6 +25,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import dq5mesen
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
@@ -66,9 +67,9 @@ def run(name, rom, out, mesence, libdir, state, extra):
     env.update({'LIBDIR': libdir, 'STATE': str(state), 'SHOT_DIR': str(dest), 'SETTLE': '60', 'MAXF': '700',
                 'DRIVER': str(HERE / 'lua/dq5warp.lua')} | extra)
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5spritescene.lua'),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                       check=True, timeout=300)
+        dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua/dq5spritescene.lua'),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                            check=True, timeout=300)
     text = dest / 'scene.txt'
     return dest, text.read_text(encoding='utf-8').splitlines() if text.is_file() else []
 

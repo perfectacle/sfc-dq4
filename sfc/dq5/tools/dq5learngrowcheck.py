@@ -20,6 +20,7 @@ import dq5learnwrite
 from dq5build import build, parse_at
 from dq5learnwrite import FORMAT, dump, layout, patch
 from dq5map import Rom
+import dq5mesen
 
 HERE = Path(__file__).resolve().parent
 KIND = 14
@@ -73,8 +74,8 @@ def run(name, rom, out, mesence, libdir, state, driver, **env_extra):
     env.update(LIBDIR=libdir, STATE=str(state), SHOT_DIR=str(dest), DRIVER=str(HERE / 'lua' / driver), **env_extra)
     lua = HERE / ('lua/dq5warp.lua' if env_extra.get('SAVE') else 'lua/dq5learncheck.lua')
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(lua), '--Snes.DisableFrameSkipping=true'],
-                       env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=180)
+        dq5mesen.testrunner(str(mesence), str(rom), str(lua), '--Snes.DisableFrameSkipping=true',
+                            env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=180)
     return dest
 
 

@@ -23,6 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dq5map import Rom  # noqa: E402
 from dq5npc import FLAGS, list_address, list_entries, parse, table_values  # noqa: E402
+import dq5mesen  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 TALK = 0x300            # 26D 이상은 메시지 T + 3C6 을 바로 띄운다(06:AFFB)
@@ -91,9 +92,9 @@ def run(case, roms, state, out, mesence, libdir):
     if night:
         env['POKE'] = '7E075E=F0;7E075F=00'
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(roms[rom]), str(HERE / 'lua/dq5npcrecordcheck.lua'),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                       check=True, timeout=120)
+        dq5mesen.testrunner(str(mesence), str(roms[rom]), str(HERE / 'lua/dq5npcrecordcheck.lua'),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                            check=True, timeout=120)
     text = (dest / 'warp.txt').read_text(encoding='utf-8')
     require('timeout' not in text and (dest / 'npc.bin').is_file(), f'{name}: 맵에 들어가지 못함')
     messages = re.search(r'^messages (.*)$', text, re.M)[1]

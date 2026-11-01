@@ -23,6 +23,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from dq5freesweep import jobs  # noqa: E402
 from dq5map import Rom  # noqa: E402
+import dq5mesen  # noqa: E402
 
 PROBE = os.path.join(HERE, 'lua', 'dq5cdldump.lua')
 
@@ -121,8 +122,8 @@ def main():
         e.update(env)
         if 'STATE_OVERRIDE' in e:
             e['STATE'] = e.pop('STATE_OVERRIDE')
-        subprocess.run([mesen, '--testrunner', os.path.abspath(a.rom), PROBE, '--Snes.DisableFrameSkipping=true'], env=e,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
+        dq5mesen.testrunner(mesen, os.path.abspath(a.rom), PROBE, '--Snes.DisableFrameSkipping=true', env=e,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
         return os.path.join(d, 'cdl.bin')
     with ThreadPoolExecutor(a.jobs) as ex:
         paths = list(ex.map(run, todo))

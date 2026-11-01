@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dq5objlayout as L  # noqa: E402
 import dq5sprite as S  # noqa: E402
 from dq5map import Rom  # noqa: E402
+import dq5mesen  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 MAP, AT = '19/02', '42,26'
@@ -49,9 +50,9 @@ def run(rom, dest, state, mesence, libdir):
     env.update(LIBDIR=str(libdir), STATE=str(state), SHOT_DIR=str(dest), MAXF='1200', SETTLE='120', TO=f'{MAP},{AT}',
                DUMPF=f'{DUMP},{DUMP + 1}', TEST='wait:300')
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
-        subprocess.run([str(mesence), '--testrunner', str(rom), str(HERE / 'lua/dq5gfxdump.lua'),
-                        '--Snes.DisableFrameSkipping=true'], env=env, stdout=log, stderr=subprocess.STDOUT,
-                       check=True, timeout=180)
+        dq5mesen.testrunner(str(mesence), str(rom), str(HERE / 'lua/dq5gfxdump.lua'),
+                            '--Snes.DisableFrameSkipping=true', env=env, stdout=log, stderr=subprocess.STDOUT,
+                            check=True, timeout=180)
     w = (dest / f'f{DUMP:05d}.wram').read_bytes()
     oam = (dest / f'f{DUMP:05d}.oam').read_bytes()
     return w, sum(1 for i in S.oam_groups(oam) if i)
