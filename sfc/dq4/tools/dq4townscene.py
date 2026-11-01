@@ -109,6 +109,8 @@ class Probe:
 
     def converse(self, answers, default=None, limit=2500, watch=None, talk=True, until=None):
         """대화를 끝까지: 고르기 창마다 answers 를 차례로 고르고, 다 쓰면 default(칸 번호, 'b' 면 B 로 닫음).
+        default 가 None 이면 답을 다 쓴 뒤로는 프로브하지 않는다. bsnes 는 여관의 잠드는 연출(소리 손잡기를 기다림)
+        도중에 상태를 저장·되돌리면 그 손잡기가 풀리지 않아 멈췄다(같은 입력을 프로브 없이 넣으면 끝까지 감).
         talk 면 여관·교회 처리기(7E:0F20)가 돌다 멈춘 프레임에서, until() 이 참이 된 프레임에서 끝낸다.
         watch(frame) 는 프레임마다 부른다.
         돌려주는 것: {'choices': [(프레임, 고른 칸, 창이 뜰 때의 커서)], 'ended': 프레임 또는 None}."""
@@ -121,7 +123,8 @@ class Probe:
                     began = began or self.c.n
                 elif began is not None:
                     return {'choices': choices, 'ended': self.c.n}
-            if (self.c.n - t0) % PROBE_EVERY == 0 and self.choosing():
+            probing = default is not None or len(choices) < len(answers)
+            if probing and (self.c.n - t0) % PROBE_EVERY == 0 and self.choosing():
                 k = len(choices)
                 target = answers[k] if k < len(answers) else default
                 choices.append((self.c.n, target, self.c.rd(CURSOR)))
@@ -308,7 +311,7 @@ def scene_inn(core, rom, out, seed, kind, dq4):
         before = snapshot(t.c)
         # 위로 한 걸음 걸어 카운터 앞에 서고, 그 자리에서 다시 위를 보고 말한다
         t.p.press('up', 6, 30)
-        talk = t.talk([1 if kind == 'refuse' else 0])
+        talk = t.talk([1 if kind == 'refuse' else 0], default=None)
         after = snapshot(t.c)
         t.c.shot(out / 'end.png')
         total = t.c.rd(INN_TOTAL, 2)
