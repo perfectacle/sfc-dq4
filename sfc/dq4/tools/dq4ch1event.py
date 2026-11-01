@@ -55,12 +55,19 @@ def alt_name(state, m):
 
 FC_SOLDIER = 0x148
 SOLDIER_PATH = ((0x0E, 0x18), (0x0E, 0x16), (0x0B, 0x16), (0x0B, 0x14))
+# 탑 병사가 선 FC 칸. 말을 걸면 왼쪽 (0E,18) 로 걸어 나가는데, 그 첫 구간에 주인공이 말을 거는 왼쪽 칸이 있어 1C 로 지나가는
+# 병사와 겹쳐 보였다. 주인공이 그 구간에 서 있으면 먼저 위로 올라가 (0E,16) 줄로 돈다. 주인공을 비키게 하면 뒤따르던
+# 동료가 주인공이 섰던 칸(병사의 길)으로 들어와 병사와 겹쳤다
+SOLDIER_FROM = (0x12, 0x18)
+SOLDIER_PATH_UP = ((0x12, 0x16), (0x0B, 0x16), (0x0B, 0x14))
+SOLDIER_UP = (0x13, 0x04)       # 7E:21A3 bit2(맵을 옮기면 지워짐). 주인공이 병사의 첫 구간에 섰음
 KIDS_HOME_ROW = 0x17            # FC 1D 이벤트 33: 12/00 에서 일행이 이 줄에 오면 아이들이 엄마에게 간다
-# 엄마 곁의 두 아이(FC 12/00 슬롯 19·13)는 따라옴 깃발이 꺼질 때 일행 뒤에서 나타나 집으로 걷는다(FC 레코드 09·17 의
-# 길). FC 는 일행 그림 자리에 세우지만 여기서는 통로 아래 칸에서 나타나고, 주인공을 지나가도록 1C 를 켠다.
+# 엄마 곁의 두 아이(FC 12/00 슬롯 19·13)는 따라옴 깃발이 꺼질 때 나타나 집으로 걷는다(FC 레코드 09·17 의 길). FC 는
+# 일행 그림 자리에 세우지만 여기서는 판정 줄(Y 17)의 두 칸 앞(Y 15)에서 나타난다. 일행은 남쪽 입구에서 올라와 줄 아래에
+# 있으므로 길에 서지 않는다. 줄 아래(Y 19)에서 나타나던 때는 아이가 동료와 주인공을 지나 올라가며 겹쳐 보였다. 1C 는 남긴다.
 # (FC 집 칸, 나타나는 칸, 길, 마지막 방향)
-KIDS_WALK_HOME = (((0x0E, 0x12), (0x0E, 0x19), ((0x0E, 0x12),), 0x22),
-                  ((0x0C, 0x11), (0x0D, 0x19), ((0x0D, 0x13), (0x0C, 0x13), (0x0C, 0x11)), 0x22))
+KIDS_WALK_HOME = (((0x0E, 0x12), (0x0E, 0x15), ((0x0E, 0x12),), 0x22),
+                  ((0x0C, 0x11), (0x0D, 0x15), ((0x0D, 0x13), (0x0C, 0x13), (0x0C, 0x11)), 0x22))
 KIDS_FC_WALKERS = ((0x17, 0x1A), (0x16, 0x1A))  # FC 가 일행 자리로 옮겨 걷게 하는 슬롯 0F·17. 여기서는 집의 아이가 걷는다
 
 # 보스 뒤 왕좌의 방(FC 1C:$8184). 병사 8명이 카펫에 두 줄로 섰다가 주인공이 Y=19 줄에 오면(1D 이벤트 36) 통로 양옆으로
@@ -90,10 +97,11 @@ HERO_LEVEL = 0x7E2052           # 일행 첫 기록 +12
 CRY_FROM, CRY_ROW, CRY_TO = 0x16, 0x12, (0x17, 0x11)
 CAGE, CAGE_FLOOR_DX = (0x10, 0x0C), 2   # 철창 왼쪽 위 FC 칸, 같은 줄에서 바닥 블록 06 이 있는 칸까지(FC 칸)
 # 구한 아이(슬롯 0C·0D·0E)가 걸어 나가 서는 길. FC 는 0D 가 (13,0D)→(17,0E), 0E 가 (17,0C) 이지만 두 길이 엇갈려,
-# 한 줄씩 곧장 나오게 바꿨다
+# 한 줄씩 곧장 나오게 바꿨다. 보스 아래 칸 (17,0B) 에서 이긴 일행은 X 17 열로 뒤따라 서 있어, 철창의 둘은 그 열
+# 두 칸 앞(15 열)에서 멈춘다. 17 열까지 걸으면 동료 위에 겹쳐 섰다
 # (처음 칸, 길)
-RESCUED_PATHS = {0x0C: ((0x17, 0x13), ((0x17, 0x0F),)), 0x0D: ((0x0F, 0x0C), ((0x17, 0x0C),)),
-                 0x0E: ((0x0F, 0x0D), ((0x17, 0x0D), (0x17, 0x0E)))}
+RESCUED_PATHS = {0x0C: ((0x17, 0x13), ((0x17, 0x0F),)), 0x0D: ((0x0F, 0x0C), ((0x15, 0x0C),)),
+                 0x0E: ((0x0F, 0x0D), ((0x15, 0x0D),))}
 
 FRONT, FRONT_NIGHT, IMURU, JAIL = '36/00', '36/03', '37/00', '37/02'
 UNDER_WELL, HOIMIN_ROOM = '3B/00', '3B/03'
@@ -789,9 +797,14 @@ OUT_STEPS = 2 * (EXIT_ROW - LINEUP_ROW) + 2   # 출구 줄(셀 71)에서 한 칸
 LINEUP_X, LINEUP_Y = (0x0C * 2, 0x13 * 2), (0x19 * 2, 0x1A * 2 + 1)
 
 
+# 줄에서 통로로 옆으로 걷는 셀 줄. 줄(셀 51)로 걸으면 출구 쪽 문지기 둘(셀 52, 반 칸 아래)과 겹쳐 보이며 지나갔다.
+# 한 칸 위(셀 50)면 문지기·병사 줄(셀 48)과 둘 다 16점 떨어진다
+WALK_ROW = 2 * LINEUP_ROW        # ch1_cell 의 줄 셀(2y + 1) 바로 위
+
+
 def _walk_legs():
-    """줄 → 통로 → 왕 앞 줄. 세로로 줄(셀 51)에 맞춘 뒤 옆으로 통로, 위로 왕 앞."""
-    return (('y', ch1_cell(0, LINEUP_ROW)[1]), ('x', AISLE_X), ('y', ch1_cell(0, KING_ROW)[1]))
+    """줄 → 통로 → 왕 앞 줄. 세로로 WALK_ROW 에 맞춘 뒤 옆으로 통로, 위로 왕 앞."""
+    return (('y', WALK_ROW), ('x', AISLE_X), ('y', ch1_cell(0, KING_ROW)[1]))
 
 
 def _walk_in(stop):
@@ -977,6 +990,9 @@ def native(data=None):
                        ('ev_stop', b'\xff')):
         at[name] = CODE_AT + len(out)
         out += code
+    at['soldier_side'] = CODE_AT + len(out)
+    way = dq4prologue.walker_box([_npc(*SOLDIER_FROM), ch1_cell(*SOLDIER_PATH[0])])
+    out += dq4prologue._hero_flag(dq4prologue.hero_cells_in(way), SOLDIER_UP)
     for name, code in (('walk_in', _walk_in(at['ev_stop'])), ('walk_back', dq4prologue._event_start(at['ev_back'])),
                        ('walk_out', dq4prologue._event_start(at['ev_out'])),
                        *((f'stat_{k}', _stat(k)) for k, _ in STATS)):
@@ -1128,9 +1144,11 @@ def scripts(first_message, chapter2_at=None, ending_at=None):
         {"address": THANKS_SCRIPT, "commands": _rescued([_cmd('3F'), _cmd('21', lo(m['kids_thanks']), hi(m['kids_thanks'])),
                                                          _cmd('10', *KIDS_FOLLOW), _cmd('37', *_long(at['refresh'])),
                                                          _cmd('40')], 0x0E)},
-        {"address": SOLDIER_SCRIPT, "commands": [_cmd('09', 0x80 | SOLDIER_LEFT[0], SOLDIER_LEFT[1]), _cmd('3F'), _cmd('1C')] +
-         [c for x, y in SOLDIER_PATH for c in (_cmd('13', *ch1_cell(x, y)), _cmd('14'))] +
-         [_cmd('28'), _cmd('52'), _cmd('40'), _cmd('16')]},
+        {"address": SOLDIER_SCRIPT, "commands": [_cmd('09', 0x80 | SOLDIER_LEFT[0], SOLDIER_LEFT[1]), _cmd('3F'),
+                                                 _cmd('37', *_long(at['soldier_side'])), _cmd('1C'),
+                                                 {**_cmd('06', 0x80 | SOLDIER_UP[0], SOLDIER_UP[1]), "target": "row"}] +
+         _soldier_walk(SOLDIER_PATH_UP) + [{"op": "03", "args": [], "target": "gone"}] +
+         _soldier_walk(SOLDIER_PATH, "row") + [{**_cmd('28'), "label": "gone"}, _cmd('52'), _cmd('40'), _cmd('16')]},
         # 성 앞 노인: 이 방문에서 「예」 라고 하면 일행 쪽으로 느리게 걷는다. 다시 들어오면 서 있다(FC 는 맵을 읽을 때
         # 간격이 맵 자료의 0 으로 돌아감)
         {"address": OLD_MAN_SCRIPT, "commands": [
@@ -1220,6 +1238,13 @@ def _king_call(m, at):
         # 닫히고 스크립트가 서서 왕좌의 방을 떠나지 않음)
         {**_cmd('34'), "label": "grown"}, call('walk_back'), _cmd('05', *_long(at['lineup_row'])),
         msg('king_farewell'), _cmd('10', *REPORTED), call('walk_out'), _cmd('40'), _cmd('16')]
+
+
+def _soldier_walk(path, label=None):
+    walk = [c for x, y in path for c in (_cmd('13', *ch1_cell(x, y)), _cmd('14'))]
+    if label:
+        walk[0] = {**walk[0], "label": label}
+    return walk
 
 
 def _rescued(speak, slot):

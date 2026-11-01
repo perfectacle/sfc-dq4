@@ -187,6 +187,9 @@ SPLASH = JUMP = (0x45, 0x00)    # NDS EVE_JUMP 를 옮긴 빈 효과음(dq4sound
 STAIRS = (0x34, 0x02)           # 계단(NDS 階段 으로 바뀐 갈래)
 SHINSIA_AT = (3, 0x0E)          # 수련하던 자리
 SHINSIA_OUT = [(4, 0x0E), (4, 0x07), (3, 0x07)]
+# 신시아가 나가는 길 가운데 주인공이 말을 거는 칸에 닿는 앞 두 구간(인물 표 셀). 오른쪽 칸 (8,29) 에서 말을 걸면 주인공이
+# 문틈 아래 그 길 위에 있어, 1C 로 지나가는 신시아와 겹쳐 보였다. 주인공이 한 칸 내려 비킨 뒤 위(신시아 쪽)를 본다
+SHINSIA_WAY_CELLS = [(SHINSIA_AT[0] * 2, SHINSIA_AT[1] * 2)] + [(x * 2, y * 2) for x, y in SHINSIA_OUT[:2]]
 FROG_SRC, FROG_SCRIPT = {"list": "05:B2EE", "index": 4}, "05:B352"
 SHINSIA_SRC, SHINSIA_SCRIPT = {"list": "05:B2EE", "index": 7}, "05:B386"
 FORM_SRC, FORM_SCRIPT = {"list": "05:B2EE", "index": 8}, "05:B3B3"
@@ -195,10 +198,24 @@ MOTHER_SRC, MOTHER_SCRIPT = {"list": "05:B48B", "index": 3}, "05:B4A7"
 # 집의 식탁 (4,11) 과 의자 (3,11)·(5,11). 아버지는 오른쪽, 어머니는 왼쪽 의자, 주인공은 식탁 아래쪽 (4,12) 에서 위를 봄.
 # 주인공이 식탁 위쪽에 서면 카메라가 주인공을 가운데에 두어 식탁·부모가 아래 메시지 창에 가렸다
 FATHER_SEAT, MOTHER_PATH = (5, 0x11), [(3, 0x10), (3, 0x11)]
-# 주인공은 아버지의 오른쪽·왼쪽·위(의자 칸) 어디서든 말을 걸 수 있다. 끝 이벤트는 그 자리에서 세로 먼저 식탁 아래쪽
-# (4,12) 셀 (8,37) 까지 걷는다(hero_goto). 위에서 말을 걸면 아버지가 의자로 가며 주인공과 겹치므로 아버지·어머니는 1C
+# 주인공은 아버지의 오른쪽·왼쪽·위(의자 칸) 어디서든 말을 걸 수 있다. 대답하면 주인공이 그 자리에서 식탁 아래쪽
+# (4,12) 셀 (8,37) 까지 걷고(hero_routes), 아버지·어머니도 같이 의자로 간다. 인물은 2×2 셀을 차지하므로 길이 엇갈리면
+# 1C(주인공 통과)로 지나가며 겹쳐 보인다. 그래서 선 자리마다 길과 기다림을 나눈다.
+#   위(의자 칸): 아버지가 올라올 칸이라 먼저 오른쪽 줄(X 12)로 비킨 뒤 내려가고, 아버지는 주인공이 비킨 뒤에 걷는다.
+#   오른쪽: 아래 줄(Y 37)로 왼쪽에 가면 아버지가 서 있던 칸 바로 아래를 지나므로, 아버지가 한 칸(8프레임) 오른 뒤
+#   한 걸음(8프레임)의 여유를 두고 왼쪽으로 꺾게, Y 37 에 닿기까지가 두 걸음이 안 되면 그만큼 C2 로 기다린다.
+#   왼쪽: X 8 그대로 내려간다(아버지·어머니와 2셀 떨어짐).
 HERO_AT = (8, 37)
 HERO_LEGS = (('y', HERO_AT[1]), ('x', HERO_AT[0]))
+FATHER_CELL = next((x * 2, y * 2) for x, y, _, _, t in VILLAGERS if t == T_FATHER)   # 인물 표 셀은 FC 칸 × 2
+FATHER_SEAT_CELL = (FATHER_SEAT[0] * 2, FATHER_SEAT[1] * 2)
+SIDE_X = FATHER_CELL[0] + 2      # 아버지 오른쪽 줄
+TURN_LEAD = 2                    # 오른쪽 줄에서 왼쪽으로 꺾기 전까지 둘 걸음(8프레임) 수
+SUPPER_ROUTES = ([((FATHER_CELL[0] - 1, 0, SIDE_X - 1, FATHER_CELL[1] - 1), b'', (('x', SIDE_X),) + HERO_LEGS)] +
+                 [((SIDE_X, y, 0x7F, 0x7F if y == HERO_AT[1] else y), bytes((0xC2,)) * (TURN_LEAD - (HERO_AT[1] - y)),
+                   HERO_LEGS) for y in range(HERO_AT[1], HERO_AT[1] - TURN_LEAD, -1)] +
+                 [(None, b'', HERO_LEGS)])
+NPC_SLOT0 = 8                    # 인물 목록의 첫 인물 슬롯(00:E1A9 가 $81 을 8 로 둠, dq5-map-format 「인물 슬롯」)
 HERO_AT_TABLE = 0x80             # 명령 C1 의 방향: 위
 # hero_goto 가 걸음 이벤트를 만드는 자리. 7E:1BBE~ 의 DQ5 가 쓰지 않는 칸 가운데 1BC0~1BCF(조사·서장·1장)와
 # 1BE0~1BE7(이름 입력) 뒤, 1BFF~(DQ5 바위 자리) 앞의 빈 곳. 앞붙임 8 + 걸음 세 구간 6 + 점프 4 바이트
@@ -220,11 +237,24 @@ def _event_start(script):
 def hero_goto(legs, then, prefix=b''):
     """인물 스크립트(명령 37)에서: 주인공(슬롯 0)을 지금 선 셀에서 legs 차례대로 걷게 하는 이벤트를 ROUTE_BUF 에 만들어
     건다. legs 는 ('x' 또는 'y', 목표 셀)이고, 이벤트는 prefix → 구간마다 그 축으로 목표까지 → C3 then(롬의 이어질
-    이벤트)이다. 축마다 첫 구간만 주인공 자리(7E:3020·3080)에서 걸음 수를 세고, 같은 축의 다음 구간은 앞 구간의 목표에서
-    센다. 이벤트 리더(00:BED2)는 LDA [$80] 로 읽어 WRAM 의 스크립트도 돈다. 이벤트 걸음은 벽을 지나가므로(실측) 길이
-    벽·인물을 넘지 않게 구간을 고른다. 걸음 수 0 은 255 걸음이 되어 넣지 않는다."""
-    if len(prefix) + 2 * len(legs) + 4 > ROUTE_MAX:
-        raise ValueError('hero_goto: 길이 ROUTE_BUF 보다 길다')
+    이벤트)이다. then 이 None 이면 C3 대신 FF 로 끝난다. 축마다 첫 구간만 주인공 자리(7E:3020·3080)에서 걸음 수를
+    세고, 같은 축의 다음 구간은 앞 구간의 목표에서 센다. 이벤트 리더(00:BED2)는 LDA [$80] 로 읽어 WRAM 의 스크립트도
+    돈다. 이벤트 걸음은 벽을 지나가므로(실측) 길이 벽·인물을 넘지 않게 구간을 고른다. 걸음 수 0 은 255 걸음이 되어
+    넣지 않는다."""
+    return hero_routes([(None, prefix, legs)], then)
+
+
+def hero_routes(routes, then):
+    """hero_goto 의 갈래판. routes 는 (사각형, prefix, legs[, suffix]) 목록이고, 주인공 셀이 사각형 (x0, y0, x1, y1)(양 끝
+    포함) 안에 드는 첫 갈래의 길을 쓴다. suffix 는 그 갈래의 걸음 뒤에 둘 이벤트 바이트다. 마지막 갈래의 사각형은
+    None(나머지 모두)이어야 한다. 한 갈래뿐이면 고르는 코드 없이 hero_goto 와 같은 바이트다."""
+    if not routes or routes[-1][0] is not None or any(r[0] is None for r in routes[:-1]):
+        raise ValueError('hero_routes: 마지막 갈래만 사각형이 None 이어야 한다')
+    tail_ops = (0xFF,) if then is None else (0xC3, *then.to_bytes(3, 'little'))
+    routes = [(r[0], r[1], r[2], r[3] if len(r) > 3 else b'') for r in routes]
+    for _, prefix, legs, suffix in routes:
+        if len(prefix) + 2 * len(legs) + len(suffix) + len(tail_ops) > ROUTE_MAX:
+            raise ValueError('hero_goto: 길이 ROUTE_BUF 보다 길다')
     buf = ROUTE_BUF.to_bytes(3, 'little')
     put_a = bytes((0x9F, *buf, 0xE8))                   # STA buf,X / INX
 
@@ -238,20 +268,120 @@ def hero_goto(legs, then, prefix=b''):
         pos += bytes((0x80, len(neg)))
         return (bytes((0xAF, table & 0xFF, table >> 8, 0x7E, 0x29, 0x7F, 0x38, 0xE9, goal,   # 주인공 - 목표
                        0xF0, 2 + len(pos) + len(neg), 0x90, len(pos))) + pos + neg)
-    body, known = bytearray(), {}
-    for name, goal in legs:
-        table, steps = {'x': (0x3020, STEP_X), 'y': (0x3080, STEP_Y)}[name]
-        if name in known:
-            if goal != known[name]:
-                body += put(steps[0] if goal > known[name] else steps[1]) + put(abs(goal - known[name]))
-        else:
-            body += axis(table, goal, steps)
-        known[name] = goal
-    body = (bytes((0xE2, 0x30, 0xA2, 0x00)) + b''.join(put(b) for b in prefix) + bytes(body) +
-            b''.join(put(b) for b in (0xC3, *then.to_bytes(3, 'little'))))
+
+    def walk(prefix, legs, suffix):
+        body, known = bytearray(), {}
+        for name, goal in legs:
+            table, steps = {'x': (0x3020, STEP_X), 'y': (0x3080, STEP_Y)}[name]
+            if name in known:
+                if goal != known[name]:
+                    body += put(steps[0] if goal > known[name] else steps[1]) + put(abs(goal - known[name]))
+            else:
+                body += axis(table, goal, steps)
+            known[name] = goal
+        return b''.join(put(b) for b in prefix) + bytes(body) + b''.join(put(b) for b in suffix)
+
+    def within(rect, miss):
+        """주인공 셀이 rect 밖이면 miss 바이트 뒤로 건너뛴다(BRL). CMP 뒤 BCS/BCC 로 BRL 을 넘는다."""
+        x0, y0, x1, y1 = rect
+        out = bytearray()
+        for table, lo, hi in ((0x3020, x0, x1), (0x3080, y0, y1)):
+            out += bytes((0xAF, table & 0xFF, table >> 8, 0x7E, 0x29, 0x7F,
+                          0xC9, lo, 0xB0, 0x03, 0x82, 0, 0,                  # CMP lo / BCS +3 / BRL 다음 갈래
+                          0xC9, hi + 1, 0x90, 0x03, 0x82, 0, 0))             # CMP hi+1 / BCC +3 / BRL 다음 갈래
+        # BRL 의 거리는 그 명령 뒤에서 센다. 자리를 채운 뒤 거리를 넣는다
+        brls = [k for k in range(len(out)) if out[k] == 0x82 and out[k - 2] in (0xB0, 0x90) and out[k - 1] == 0x03]
+        for k in brls:
+            dist = len(out) - (k + 3) + miss
+            out[k + 1:k + 3] = dist.to_bytes(2, 'little')
+        return bytes(out)
+
+    if len(routes) == 1:
+        body = walk(*routes[0][1:])
+    else:
+        # 뒤 갈래부터 붙인다: 앞 갈래는 「사각형 판정 · 길 · BRL 끝」, 판정에 지면 다음 갈래로
+        body = walk(*routes[-1][1:])
+        for rect, *way in reversed(routes[:-1]):
+            path = walk(*way)
+            path += bytes((0x82, *len(body).to_bytes(2, 'little')))         # BRL 끝(뒤 갈래들을 넘음)
+            body = within(rect, len(path)) + path + body
+    body = bytes((0xE2, 0x30, 0xA2, 0x00)) + body + b''.join(put(b) for b in tail_ops)
     start = bytes((0xA9, buf[0], 0x8D, 0xB3, 0x19, 0xA9, buf[1], 0x8D, 0xB4, 0x19, 0xA9, buf[2], 0x8D, 0xB5, 0x19,
                    0xAD, 0xAE, 0x19, 0x09, 0x80, 0x8D, 0xAE, 0x19))
     return box.ENTER + body + start + box.LEAVE
+
+
+def pick_route(routes, start):
+    """hero_routes 가 주인공이 start 셀에 있을 때 고를 (prefix, legs, suffix)."""
+    for rect, prefix, legs, *suffix in routes:
+        if rect is None or (rect[0] <= start[0] <= rect[2] and rect[1] <= start[1] <= rect[3]):
+            return prefix, legs, (suffix or [b''])[0]
+    raise ValueError(start)
+
+
+def walker_box(cells):
+    """인물이 cells(인물 표 셀) 사이를 곧게 걸을 때 차지하는 점 사각형 [x0, x1) × [y0, y1). 인물은 16×16 점(2×2 셀)."""
+    xs, ys = [x for x, _ in cells], [y for _, y in cells]
+    return min(xs) * 8, min(ys) * 8, max(xs) * 8 + 16, max(ys) * 8 + 16
+
+
+def hero_cells_in(box):
+    """주인공이 서면 그 16×16 점이 box 와 겹치는 셀 사각형 (x0, y0, x1, y1)(양 끝 포함)."""
+    x0, y0, x1, y1 = box
+    return (x0 - 16) // 8 + 1, (y0 - 16) // 8 + 1, (x1 - 1) // 8, (y1 - 1) // 8
+
+
+def step_aside(box, legs, suffix=b''):
+    """걷는 인물의 길(점 사각형 box)에 주인공이 서 있으면 legs 로 비키게 하는 hero_routes 갈래. 길 밖이면 걷지 않는다."""
+    return [(hero_cells_in(box), b'', legs, suffix), (None, b'', ())]
+
+
+def _hero_flag(rect, flag):
+    """인물 명령 37 이 부르는 루틴: 주인공 셀이 rect (x0, y0, x1, y1)(양 끝 포함) 안이면 깃발 flag((7E:2190 + i, 마스크))를
+    켜고, 아니면 끈다. 인물 스크립트가 명령 06 으로 주인공이 선 자리에 따라 길을 고를 때 쓴다."""
+    addr = (0x7E2190 + flag[0]).to_bytes(3, 'little')
+    on = bytes((0xAF, *addr, 0x09, flag[1], 0x8F, *addr))
+    body = b''
+    for table, lo, hi in ((0x3080, rect[1], rect[3]), (0x3020, rect[0], rect[2])):
+        tail = len(body) + len(on)
+        body = bytes((0xAF, table & 0xFF, table >> 8, 0x7E, 0x29, 0x7F,
+                      0xC9, lo, 0x90, 4 + tail, 0xC9, hi + 1, 0xB0, tail)) + body   # 작으면·크면 끝으로
+    off = bytes((0xAF, *addr, 0x29, ~flag[1] & 0xFF, 0x8F, *addr))
+    return box.ENTER + off + body + on + box.LEAVE
+
+
+def _hero_clear(x0, y0, x1, y1):
+    """인물 명령 05 가 부르는 루틴: 주인공(슬롯 0)이 차지한 16×16 점(셀 자리 × 8 + 걸음 도중의 점 7E:3000·3060 위 3비트)이
+    점 사각형 [x0, x1) × [y0, y1) 과 겹치지 않으면 A = 0, 겹치면 1(다음 차례에 다시)."""
+    def pixel(sub, cell):           # 스택에 셀 × 8 + 점을 남긴다(16비트)
+        return bytes((0xAF, sub & 0xFF, sub >> 8, 0x7E, 0x29, 0xE0, 0x00, 0x4A, 0x4A, 0x4A, 0x4A, 0x4A, 0x48,
+                      0xAF, cell & 0xFF, cell >> 8, 0x7E, 0x29, 0x7F, 0x00, 0x0A, 0x0A, 0x0A, 0x18, 0x63, 0x01, 0x83, 0x01))
+    blocked = bytes((0x68, 0x68, 0xA9, 0x01, 0x00, 0x28, 0x6B))         # PLA ×2 / LDA #1 / PLP / RTL
+    clear = bytes((0x68, 0x68, 0xA9, 0x00, 0x00, 0x28, 0x6B))
+    # 스택: 1,S = Y 점, 3,S = X 점. 축마다 점 ≥ 끝이거나 점 + 16 ≤ 시작이면 겹치지 않는다
+    tests = b''
+    for at, lo, hi in ((1, y0, y1), (3, x0, x1)):          # 뒤 시험부터 붙여 clear 까지의 거리를 센다
+        rest = len(tests) + len(blocked)
+        tail = bytes((0x18, 0x69, 0x10, 0x00, 0xC9, *(lo + 1).to_bytes(2, 'little'), 0x90, rest))   # +16 / CMP / BCC
+        tests = bytes((0xA3, at, 0xC9, *hi.to_bytes(2, 'little'), 0xB0, len(tail) + rest)) + tail + tests  # LDA n,S / CMP / BCS
+    return bytes((0x08, 0xC2, 0x30)) + pixel(0x3000, 0x3020) + pixel(0x3060, 0x3080) + tests + blocked + clear
+
+
+def _all_at(checks):
+    """인물 명령 05 가 부르는 루틴: checks 의 (슬롯, X 셀, Y 셀, 방향 31E0 또는 None)이 모두 그 자리에 멈춰 섰고(걸음 도중의
+    점 3000·3060 이 0) 이벤트가 돌지 않으면($19AE bit7 이 꺼짐) A = 0, 아니면 1."""
+    fail = bytes((0xC2, 0x30, 0xA9, 0x01, 0x00, 0x28, 0x6B))
+    ok = bytes((0xC2, 0x30, 0xA9, 0x00, 0x00, 0x28, 0x6B))
+    parts = []
+    for slot, x, y, face in checks:
+        for table, mask, want in ((0x3020, 0x7F, x), (0x3080, 0x7F, y), (0x3000, 0xFF, 0), (0x3060, 0xFF, 0),
+                                  *(((0x31E0, 0xFF, face),) if face is not None else ())):
+            parts.append(bytes((0xAF, (table + slot) & 0xFF, (table + slot) >> 8, 0x7E, 0x29, mask, 0xC9, want)))
+    parts.append(bytes((0xAF, 0xAE, 0x19, 0x7E, 0x29, 0x80, 0xC9, 0x00)))
+    body = b''
+    for part in reversed(parts):
+        body = part + bytes((0xD0, len(body) + len(ok))) + body           # BNE 실패
+    return bytes((0x08, 0xE2, 0x30)) + body + ok + fail
 
 
 def route(start, legs, prefix=b''):
@@ -446,6 +576,10 @@ def _face_hero():
     return box.ENTER + body + box.LEAVE
 
 
+def _mother_slot():
+    return NPC_SLOT0 + next(i for i, v in enumerate(VILLAGERS) if v[4] == T_MOTHER)
+
+
 def native():
     """(바이트, {이름: 주소}). 인물 스크립트 명령 37 이 JSL 로 부르는 루틴과 이벤트 스크립트."""
     def layout(at):
@@ -473,11 +607,19 @@ def native():
         put('hero_right', _hero_face(0x11))
         put('hero_up', _hero_face(0x88))
         put('skip_song', _skip_song())
-        # 저녁: 주인공이 말을 건 칸에서 식탁 아래까지 걸어(hero_goto) 위를 봄(C1 80) → 저녁 대사 → 끝: 검은 화면 → 서술 → 곡 건너뛰기 →
-        # 1장 왕좌의 방으로(이벤트 명령 90, $198E = 80)
+        # 저녁: 주인공이 말을 건 칸에서 식탁 아래까지 걷는 동안(hero_walk) 아버지·어머니도 의자로 가고, 모두 앉으면(table_ready)
+        # 끝 이벤트: 위를 봄(C1 80) → 저녁 대사 → 검은 화면 → 서술 → 곡 건너뛰기 → 1장 왕좌의 방으로(이벤트 명령 90, $198E = 80)
         put('end_event', b''.join(bytes((0x60, t[1] & 0xFF, t[1] >> 8)) if isinstance(t, tuple) else t
                                   for t in end_event(at)))
-        put('end', hero_goto(HERO_LEGS, at.get('end_event', 0)))
+        way = walker_box(SHINSIA_WAY_CELLS)
+        put('shinsia_aside', hero_routes(step_aside(way, (('y', way[3] // 8),), bytes((0xA0, *_long(at.get('hero_up', 0))))),
+                                         None))
+        put('shinsia_way', _hero_clear(*way))
+        put('hero_walk', hero_routes(SUPPER_ROUTES, None))
+        fx, fy = FATHER_CELL
+        put('father_way', _hero_clear(fx * 8, FATHER_SEAT_CELL[1] * 8, fx * 8 + 16, fy * 8 + 16))
+        put('table_ready', _all_at([(0, *HERO_AT, None), (_mother_slot(), MOTHER_PATH[-1][0] * 2, MOTHER_PATH[-1][1] * 2, 0x10)]))
+        put('end', _event_start(at.get('end_event', 0)))
         return bytes(out), a
     _, at = layout({})
     return layout(at)
@@ -585,16 +727,17 @@ def scripts():
                 # 돌기는 오른쪽 보기로 끝나므로, 주인공 쪽을 보고 다시 나타나 말한다
                 _cmd('50', sx * 2, sy * 2), _cmd('37', *_long(at['face_hero'])), _cmd('53'), _cmd('4F'), _msg(M_MORPH), _msg(M_BYE),
                 _msg(M_SUPPER)] +
-               # 주인공이 문틈 (4,0D) 쪽에서 다가오면 나가는 길에 선 채 말이 걸리므로, 주인공을 지나 걷는다(1C)
-               [_cmd('1C')] + _walk(SHINSIA_OUT) + [_cmd('28'), _cmd('10', *SHINSIA_MET), _cmd('40'), _cmd('16')])
+               # 주인공이 문틈 (4,0D) 쪽에서 다가오면 나가는 길에 선 채 말이 걸리므로, 주인공을 비키게 하고(shinsia_aside)
+               # 길에서 벗어나기를 기다린다. 1C 는 남겨 둔다(조작을 막은 채 걷다 막히면 멈춤)
+               [call('shinsia_aside'), inside('shinsia_way'), _cmd('1C')] + _walk(SHINSIA_OUT) + [_cmd('28'), _cmd('10', *SHINSIA_MET), _cmd('40'), _cmd('16')])
     form = ([_cmd('27'), _wait_on(MORPH), _cmd('50', sx * 2, sy * 2), _cmd('37', *_long(at['face_hero'])), _cmd('53'), _cmd('4F'),
              _msg(M_MORPH), _msg(M_MIMIC), _msg(M_SORRY)] + _spin(at) +
             # 51 은 안 보이게만 해 말을 걸 수 있는 채로 남는다. 52 로 자리를 치운다
             [_cmd('51'), _cmd('52'), _cmd('10', *MORPH_BACK), _cmd('16')])
-    # 대답하면 부모가 의자로 가고, 아버지가 저녁 이벤트를 건다(이벤트는 메인 문맥에서 주인공을 걷게 하고 대사를 띄움).
-    # 조작을 막은 채 걸으므로 1C: 의자 칸에서 말을 건 주인공에 막히면 저녁이 멈췄다
-    father = ([_wait_on(SUPPER), _cmd('3F'), _cmd('1C')] + _walk([FATHER_SEAT]) + [_cmd('2F', 0x20), _cmd('37', *_long(at['wait'])),
-              _cmd('37', *_long(at['end'])), _cmd('16')])
+    # 대답하면 주인공(이벤트)·아버지·어머니가 함께 식탁으로 가고, 모두 앉으면 아버지가 저녁 이벤트를 건다. 아버지는 주인공이
+    # 의자 칸에서 비킨 뒤 걷는다(father_way). 조작을 막은 채 걸으므로 1C: 의자 칸에서 말을 건 주인공에 막히면 저녁이 멈췄다
+    father = ([_wait_on(SUPPER), _cmd('3F'), _cmd('1C'), call('hero_walk'), inside('father_way')] + _walk([FATHER_SEAT]) +
+              [_cmd('2F', 0x20), inside('table_ready'), call('end'), _cmd('16')])
     mother = [_wait_on(SUPPER), _cmd('1C')] + _walk(MOTHER_PATH) + [_cmd('2F', 0x10), _cmd('16')]
     return [{"address": FROG_SCRIPT, "commands": frog}, {"address": SHINSIA_SCRIPT, "commands": shinsia},
             {"address": FORM_SCRIPT, "commands": form}, {"address": FATHER_SCRIPT, "commands": father},

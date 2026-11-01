@@ -57,6 +57,10 @@ def slot(n):
     return f'X{n:02X}=7E{0x3020 + n:04X}:1;Y{n:02X}=7E{0x3080 + n:04X}:1;F{n:02X}=7E{0x31E0 + n:04X}:1'
 
 
+# 겹침을 셀 슬롯: 일행(0~7)과 인물 목록의 슬롯(8~, dq5-map-format 「인물 슬롯」). 일행과 인물 사이만 센다. 일행끼리는
+# DQ5 에서도 서로 지나가며 겹쳐 그리고, 인물끼리는 돌아다니는 마을 사람이 어긋나 스치는 일이 있다(1C 와 무관)
+TRACK = list(range(0x20))
+PARTY_SLOTS = 8
 HERO = 'HX=7E3020:1;HY=7E3080:1;HF=7E31E0:1;HP=7E3240:1;HQ=7E3260:1'
 
 # 서장 저녁: 아버지(슬롯 0F)에게 오른쪽·왼쪽·위(의자 칸)에서. 주인공 셀은 반 칸(Y 짝수)에도 선다.
@@ -81,6 +85,9 @@ SOLDIER = [('soldier-below', '36,51', 'up'), ('soldier-left', '34,51;34,49', 'ri
 CRY = [(f'cry-{x}', f'{x},41;{x},37') for x in (44, 46, 48)]
 # 탑 입구(39/00): Y 19 줄에 오면 마물(슬롯 08)과 아이(09)가 (18,15)·(16,15)에서 위로 걸어 나간다
 KIDNAP = [(f'kidnap-{x}', f'{x},25;{x},19') for x in (16, 18, 20)]
+# 이무르(37/00): 아이들이 따라오는 채 Y 47 줄에 오면 엄마 곁으로 보내고, 아이 둘이 줄 앞 (28,43)·(26,43)에서
+# 나타나 (28,37)·(24,35)로 걷는다. 남쪽 입구에서 올라오는 통로의 X 마다(X 24·30 은 줄 아래가 막힘)
+KIDS_HOME = [(f'kids-home-{x}', x) for x in (26, 28)]
 # 보스 뒤 왕좌의 방: Y 51 줄의 X 24~38 에 오면 병사가 갈라서고 주인공이 통로로 걸어 왕 앞 줄까지. 출구 쪽 줄(Y 53)은
 # 문지기 둘이 막아, 통로(X 30~32) 밖의 줄 칸은 위쪽 방에서 내려와야 닿는다. -pass 는 줄에서 서지 않고 지나간다.
 # (이름, 순간이동 TO, 걸음)
@@ -116,6 +123,10 @@ def cases():
     for name, at in KIDNAP:
         out[name] = {'warp': '39/00,18,24', 'set': extra, 'walk': f'{at};{wc.taps(6)};{pc.CLOSE};wait:200',
                      'free': '18,25', 'want': [('KIDNAPPED', ev.KIDNAPPED)], 'gone': [0x08, 0x09]}
+    extra, party = chapter1('homecoming')
+    for name, x in KIDS_HOME:
+        out[name] = {'warp': f'37/00,{x},49', 'set': extra, 'party': party,
+                     'walk': f'{x},45;{wc.taps(6)};{pc.CLOSE};wait:300', 'not': [('KIDS_FOLLOW', ev.KIDS_FOLLOW)]}
     extra, party = chapter1('castle')
     for name, to, at in LINEUP:
         out[name] = {'warp': f'36/01,{to}', 'set': extra, 'party': party, 'walk': f'{at};{wc.taps(200, 60)}',
@@ -129,13 +140,35 @@ def cases():
     return out
 
 
+def overlaps(text):
+    """track.txt(lua/dq4heroblock.lua 의 TRACK)에서 두 인물이 겹쳐 보인 프레임 수와 처음 몇 프레임.
+    인물은 16×16 점(2×2 셀)을 차지하므로 X·Y 점 차가 둘 다 16 보다 작으면 겹친다. 그리지 않는 슬롯은 빼고 일행과 인물
+    사이만 센다."""
+    frames, first = 0, []
+    for line in text.splitlines():
+        f, *slots = line.split()
+        seen = []
+        for v in slots:
+            n, rest = v.split(':')
+            x, y, gone = map(int, rest.split(','))
+            if not gone:
+                seen.append((n, x, y))
+        hits = [f'{a[0]}/{b[0]}' for i, a in enumerate(seen) for b in seen[i + 1:]
+                if (int(a[0], 16) < PARTY_SLOTS) != (int(b[0], 16) < PARTY_SLOTS) and abs(a[1] - b[1]) < 16 and abs(a[2] - b[2]) < 16]
+        if hits:
+            frames += 1
+            if len(first) < 3:
+                first.append(f"{f}:{'+'.join(hits)}")
+    return frames, first
+
+
 def run_case(mesence, rom, base, out, name, case, exit_at):
     dest = out / name
     pins = f'{wc.RNG};{wc.DAY_SET}'
     wc.run(mesence, rom, wc.WARP, dest / 'warp', {
         'STATE': str(base), 'TO': case['warp'], 'SAVE': 'end.mss', 'SETTLE': '60', 'MAXF': '1500',
         'WARPEXIT': f'{exit_at:X}', 'ANYWHERE': '1', 'ROMPATCH': wc.NO_ENCOUNTERS,
-        'SET': ';'.join(v for v in (pins, case['set']) if v), 'LATESET': pins,
+        'SET': ';'.join(v for v in (pins, case['set']) if v), 'LATESET': ';'.join(v for v in (pins, case.get('late')) if v),
         **({'PARTY': case['party']} if case.get('party') else {})}, 300)
     state = dest / 'warp' / 'end.mss'
     problems = []
@@ -152,6 +185,7 @@ def run_case(mesence, rom, base, out, name, case, exit_at):
            'WATCH': watch, 'ROMPATCH': wc.NO_ENCOUNTERS, 'SET': wc.RNG}
     if 'snap' in case:
         env.update(SNAPMSG=f"{case['snap'][0]:X}", SNAPWATCH=case['watch'])
+    env['TRACK'] = ','.join(f'{n:02X}' for n in TRACK)
     wc.run(mesence, rom, DRIVER, dest, env, int(env['MAXF']) // 40 + 120)
     text = (dest / 'walk.txt').read_text(encoding='utf-8') if (dest / 'walk.txt').exists() else ''
     seen = {k: int(v, 16) for k, v in re.findall(r'^(\w+)=([0-9A-F]+)$', text, re.M)}
@@ -188,7 +222,14 @@ def run_case(mesence, rom, base, out, name, case, exit_at):
         for k, v in case['snap'][1].items():
             if snap and snap.get(k) != v:
                 problems.append(f'{k}={snap.get(k)}, 기대 {v}')
-    return {'name': name, 'status': 'failed' if problems else 'passed', 'problems': problems,
+    overlap, track = None, dest / 'track.txt'
+    if not track.exists():
+        problems.append('track.txt 없음')
+    else:
+        overlap, first = overlaps(track.read_text())
+        if overlap:
+            problems.append(f'인물이 겹쳐 보인 프레임 {overlap}개(처음 {first})')
+    return {'name': name, 'status': 'failed' if problems else 'passed', 'problems': problems, 'overlap': overlap,
             'end': end[0] if end else None, 'hero': (seen.get('HX'), seen.get('HY')), 'snap': snap,
             'stuck': re.findall(r'stuck at \S+ heading \S+', text)}
 
