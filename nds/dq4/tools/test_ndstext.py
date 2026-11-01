@@ -5,6 +5,7 @@ import os
 import struct
 import tempfile
 import unittest
+from unittest import mock
 
 import ndstext as nt
 
@@ -67,14 +68,19 @@ class TableTests(unittest.TestCase):
         self.assertEqual(nt.decode_kr("ЁX", t), "이X")
 
     def test_adopt_table(self):
-        a = nt.adopt_table()
-        self.assertEqual(a["아이템", 1][1], "곤봉")
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "adopt.tsv")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("표\t번호\t일본어\t채택\t근거\n아이템\t1\tかたいぼう\t단단한 막대\t\n몬스터\t7\tあおいもの\t파란 것\t뜻\n")
+            with mock.patch.object(nt, "ADOPT", path):
+                a = nt.adopt_table()
+        self.assertEqual(a, {("아이템", 1): ("かたいぼう", "단단한 막대", ""), ("몬스터", 7): ("あおいもの", "파란 것", "뜻")})
 
     def test_label_and_kana_key(self):
-        self.assertEqual(nt.label("@1ソ;ロ@"), "ソロ")
+        self.assertEqual(nt.label("@1ナ;ナシ@"), "ナナシ")
         self.assertEqual(nt.label("@0m@2the@3a@4Hero@5x@"), "Hero")
         self.assertEqual(nt.label("@plain@"), "plain")
-        self.assertEqual(nt.kana_key("ひの き;のぼう"), "ヒノキノボウ")
+        self.assertEqual(nt.kana_key("かた い;ぼう"), "カタイボウ")
         self.assertEqual(nt.kana_key("ゖ"), "ヶ")
         self.assertEqual(nt.kana_key("ゝ"), "ゝ")   # 가나 범위 밖은 그대로
 
@@ -150,13 +156,17 @@ class CommandTests(unittest.TestCase):
     def test_names_glossary_stats_forms_talk_dump(self):
         with tempfile.TemporaryDirectory() as jp, tempfile.TemporaryDirectory() as kr:
             for f in nt.NAME_FILES:
-                name_root(jp, "ja", {f: [(0, "@1ひのきのぼう@"), (1, "@1こんぼう@"), (2, "@1こんぼう@")]})
-                name_root(jp, "en", {f: [(0, "@4Cypress stick@"), (1, "@4Club|x@")]})
+                name_root(jp, "ja", {f: [(0, "@1かたいぼう@"), (1, "@1ながいぼう@"), (2, "@1ながいぼう@")]})
+                name_root(jp, "en", {f: [(0, "@4Hard stick@"), (1, "@4Long|x@")]})
                 name_root(kr, "ja", {f: [(0, "@1Ё@")]})
-            put(jp, "data/data/MESS/ja/b0100000.mpt", mpt(100000, [(0, "%a01002 と %a01012 @c1@")]))
+            put(jp, "data/data/MESS/ja/b0100000.mpt", mpt(100000, [(0, "%a01003 x %a01013 @c1@")]))
             put(jp, "data/data/PARAM/param_player_talk1.dat",
                 b"HEAD" + struct.pack("<16xI24x", 100000))
-            with contextlib.redirect_stdout(io.StringIO()) as buf:
+            adopt = os.path.join(jp, "adopt.tsv")
+            with open(adopt, "w", encoding="utf-8") as fh:
+                # 1번은 일본어가 달라(번호가 밀린 롬) 채택 이름을 붙이지 않아야 한다
+                fh.write("표\t번호\t일본어\t채택\t근거\n아이템\t0\tかたいぼう\t단단한 막대\t\n아이템\t1\tべつのもの\t딴것\t\n")
+            with contextlib.redirect_stdout(io.StringIO()) as buf, mock.patch.object(nt, "ADOPT", adopt):
                 nt.cmd_names(jp, kr)
                 nt.cmd_glossary(jp, kr, os.path.join(jp, "none.nes"))
                 nt.cmd_stats(jp)
@@ -165,16 +175,17 @@ class CommandTests(unittest.TestCase):
                 nt.main(["talk", jp, "1", "--kr", kr])
                 nt.main(["dump", os.path.join(jp, "data/data/MESS/ja/b1000000.mpt"), "--kr"])
             out = buf.getvalue()
-        self.assertIn("아이템\tb1000000:0\tひのきのぼう\tCypress stick\t이", out)
+        self.assertIn("아이템\tb1000000:0\tかたいぼう\tHard stick\t이", out)
         self.assertIn("<!-- FC 이름을 읽지 못함", out)
-        self.assertIn("| 0 | ひのきのぼう |  | Cypress stick | 이 | 노송나무 막대 |", out)
-        self.assertEqual(out.count("| 2 | こんぼう"), 0)      # 같은 (일본어, 한글) 은 한 번만
-        self.assertIn("Club/x", out)                         # 표 칸을 깨는 | 는 바꾼다
+        self.assertIn("| 0 | かたいぼう |  | Hard stick | 이 | 단단한 막대 |", out)
+        self.assertIn("| 1 | ながいぼう |  | Long/x |  |  | adopt.tsv 의 일본어(べつのもの)와 다름 |", out)
+        self.assertEqual(out.count("| 2 | ながいぼう"), 0)      # 같은 (일본어, 한글) 은 한 번만
+        self.assertIn("Long/x", out)                         # 표 칸을 깨는 | 는 바꾼다
         self.assertIn("ja\t파일 9\t문자열 25", out)
         self.assertIn("ja\t01\t2\t0:1 1:1", out)
         self.assertIn("ja\t01\t1\t1:1", out)
         self.assertIn("1\t100000\t", out)
-        self.assertIn("\n0\t@1" + nt.decode_kr("ひのきのぼう", nt.kr_table()) + "@\n", out)
+        self.assertIn("\n0\t@1" + nt.decode_kr("かたいぼう", nt.kr_table()) + "@\n", out)
 
     def test_main_usage(self):
         with self.assertRaises(SystemExit):

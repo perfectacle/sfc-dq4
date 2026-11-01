@@ -285,7 +285,7 @@ def write_fs(root):
     with open(os.path.join(d, "MAP", "_list.txt"), "w", encoding="shift_jis") as f:
         f.write("0,a,caf1\n1,b,hac1\n2,c,bad1\nend\n")
     with open(os.path.join(d, "DEBUG", "flagshop.dat"), "w", encoding="shift_jis") as f:
-        f.write("1,0,序章\n331,6,ピサロ\nbroken\n")
+        f.write("1,0,まえがき\n331,6,ナナシ\nbroken\n")
     for k in range(1, 5):
         recs = b""
         for n, m in ((331 if k == 1 else 0xFFFF, "hac1"), (1 if k == 1 else 331, "zzz1")):
@@ -311,7 +311,7 @@ class WarpTests(unittest.TestCase):
 
     def test_tables(self):
         self.assertEqual(W.map_names(self.fs), ["caf1", "hac1", "bad1"])
-        self.assertEqual(W.preset_names(self.fs), {1: (0, "序章"), 331: (6, "ピサロ")})
+        self.assertEqual(W.preset_names(self.fs), {1: (0, "まえがき"), 331: (6, "ナナシ")})
         recs = W.preset_records(self.fs)
         self.assertEqual(sorted(recs), [1, 331])                  # 마지막 레코드까지, FFFF 는 뺀다
         self.assertEqual(W.preset_map(recs, 331), "hac1")         # 같은 번호는 앞 파일이 이긴다
@@ -471,9 +471,9 @@ class WarpCliTests(unittest.TestCase):
             with contextlib.redirect_stdout(out):
                 with mock.patch.object(sys, "argv", ["ndswarp", "list", "ha", "--fs", d]):
                     W.main()
-                with mock.patch.object(sys, "argv", ["ndswarp", "presets", "ピサ", "--fs", d]):
+                with mock.patch.object(sys, "argv", ["ndswarp", "presets", "ナナ", "--fs", d]):
                     W.main()
-        self.assertEqual(out.getvalue().splitlines(), ["  1 hac1", "331  6 hac1     ピサロ"])
+        self.assertEqual(out.getvalue().splitlines(), ["  1 hac1", "331  6 hac1     ナナシ"])
 
 
 if __name__ == "__main__":

@@ -182,10 +182,10 @@ def synthetic_original():
     at = ov.rom_off(ov.SONG_SETS)
     data[at:at + len(table) + 4] = table + ov.IPL_END
     data[ov.rom_off(ov.IPL_BLOCK):ov.rom_off(ov.IPL_BLOCK) + 2] = (0x1234).to_bytes(2, 'little')
-    data[ov.TITLE_CALL:ov.TITLE_CALL + 6] = bytes.fromhex('A9 10 22 9A FE 24')
-    data[ov.MENU_CALL:ov.MENU_CALL + 6] = bytes.fromhex('8D 00 21 EA EA EA')
+    data[ov.TITLE_CALL:ov.TITLE_CALL + 6] = ov.TITLE_CALL_ORIG
+    data[ov.MENU_CALL:ov.MENU_CALL + 6] = ov.MENU_CALL_ORIG
     data[ov.MENU_FADE] = 0x10
-    data[ov.rom_off(ov.FADE_CALL):ov.rom_off(ov.FADE_CALL) + 3] = bytes.fromhex('A2 0F 00')
+    data[ov.rom_off(ov.FADE_CALL):ov.rom_off(ov.FADE_CALL) + 3] = ov.FADE_CALL_ORIG
     return bytes(data), len(table)
 
 

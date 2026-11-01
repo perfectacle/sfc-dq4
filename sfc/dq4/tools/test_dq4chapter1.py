@@ -216,13 +216,14 @@ class BuildFlowTests(unittest.TestCase):
                                      scenes=lambda p: ['scene']), \
                     mock.patch.object(ch.dq4chapterbox, 'apply', step('chapterbox')), \
                     mock.patch.object(dq4menupatch, 'Font', lambda name: name), \
-                    mock.patch.multiple(dq4ch1event, apply=step('ch1event'), encounter_doc=lambda: {},
-                                        learn_doc=lambda: {}, monster_doc=lambda prg: {}), \
+                    mock.patch.multiple(dq4ch1event, apply=step('ch1event'),
+                                        monster_doc=lambda prg: {'format': 'test-monsters', 'prg': len(prg)}), \
                     mock.patch.object(dq4ch2event, 'apply', step('ch2event')), \
                     mock.patch.object(dq4josa, 'apply', step('josa')), \
                     mock.patch.object(dq4msgnames, 'apply', step('msgnames')), \
                     mock.patch.object(dq4prologue, 'apply', step('prologue')):
                 out = ch.build(rom, dq5, dq4, work, prologue=prologue)
+            self.files = {p.name: json.loads(p.read_text()) for p in work.glob('*.json')}
         return out, calls, order
 
     @staticmethod
@@ -238,10 +239,41 @@ class BuildFlowTests(unittest.TestCase):
     def test_patches_go_on_in_the_group_build_order(self):
         self.run_build()
         names = [p.name for p in self.applied]
-        groups = [p.split('/')[-1] for p in ch.GROUP_PATCHES]
-        # 그룹 빌드가 겹침을 본 차례대로, 그 뒤에 인물·보스·학습 패치
-        self.assertEqual(names, groups + ['newmap-1.dq5patch.json', 'npc.dq5patch.json', 'boss.dq5patch.json',
-                                          'boss-monsters.dq5patch.json', 'learn.dq5patch.json'])
+        # 그룹 빌드가 겹침을 본 차례대로(환경 맵이 맨 앞, 상자가 맨 끝), 그 뒤에 그룹 빌드가 낸 레코드 패치, 인물·보스·학습 패치
+        self.assertEqual(names, [
+            'dq4-environment.dq5patch.json', 'doors.dq5patch.json', 'outside.dq5patch.json', 'newmap.dq5patch.json',
+            'exits.dq5patch.json', 'entrances.dq5patch.json', 'shops.dq5patch.json', 'inn.dq5patch.json',
+            'entrance-hook.dq5patch.json', 'field-gfx.dq5patch.json', 'field-blocks.dq5patch.json',
+            'field.dq5patch.json', 'talk.dq5patch.json', 'travel.dq5patch.json', 'names.dq5patch.json',
+            'companion-names.dq5patch.json', 'person-names.dq5patch.json', 'zones.dq5patch.json',
+            'grids.dq5patch.json', 'rates.dq5patch.json', 'chests.dq5patch.json',
+            'newmap-1.dq5patch.json', 'npc.dq5patch.json', 'boss.dq5patch.json', 'boss-monsters.dq5patch.json',
+            'learn.dq5patch.json'])
+        self.assertEqual(self.applied[0].parent.name, 'env')
+        # 그룹 빌드 롬과 견줄 때는 그룹 빌드가 낸 패치만 넘긴다(인물·보스 패치는 그룹 빌드 롬에 없다)
+        self.assertEqual([p.name for p in self.verify.call_args.args[2]], names[:22])
+
+    def test_side_documents_feed_the_tools_that_write_the_applied_patches(self):
+        _, calls, _ = self.run_build(prologue=False)
+        boss, learn, monsters, npc = (self.files[n] for n in ('boss.json', 'learn.json', 'boss-monsters.json', 'npc.json'))
+        self.assertEqual(boss['format'], 'dq5encounter/1')
+        self.assertTrue(boss['event_groups'])
+        for g in boss['event_groups']:
+            self.assertTrue(0 <= g['index'] <= 0xFF and g['members'])
+            self.assertTrue(all(m['count'] >= 1 for m in g['members']))
+        self.assertEqual(learn['format'], 'dq5learn/1')
+        # 몬스터 문서는 iNES 머리를 뗀 PRG(16KB 한 뱅크) 를 읽는다
+        self.assertEqual(monsters, {'format': 'test-monsters', 'prg': 0x4000})
+        self.assertEqual(npc, {'format': 'dq5npcrelocate/1'})
+        self.assertEqual(self.npc_doc.call_args.args, ({'records': 1}, ['ported'], False, {'report': 1}, ['m1', 'm2'],
+                                                      False))
+        # 각 문서를 읽는 도구의 출력이 곧 덮어 쓰는 패치다
+        outs = {c[0]: (Path(c[c.index('patch') + 1]).name, Path(c[c.index('-o') + 1]).name)
+                for c in calls if 'patch' in c}
+        self.assertEqual(outs, {'dq5encounterwrite.py': ('boss.json', 'boss.dq5patch.json'),
+                                'dq5tables.py': ('boss-monsters.json', 'boss-monsters.dq5patch.json'),
+                                'dq5learnwrite.py': ('learn.json', 'learn.dq5patch.json'),
+                                'dq5npcrelocate.py': ('npc.json', 'npc.dq5patch.json')})
 
     def test_npc_patch_uses_the_free_base_and_the_new_maps(self):
         _, calls, _ = self.run_build()

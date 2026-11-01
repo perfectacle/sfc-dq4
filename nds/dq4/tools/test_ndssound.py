@@ -826,11 +826,11 @@ def write_fs(root, sdat):
     (d / "MAP").mkdir()
     (d / "SCRIPT").mkdir()
     (Path(root) / ns.SDAT_PATH).write_bytes(sdat)
-    (Path(root) / ns.SOUNDLIST).write_text("BGM,1,序曲\n#BGM,2,終曲\nSE,0,カーソル\nbad line\n", "shift_jis")
+    (Path(root) / ns.SOUNDLIST).write_text("BGM,1,はじまり\n#BGM,2,おわり\nSE,0,カーソル\nbad line\n", "shift_jis")
     (Path(root) / ns.SADL_PATH).write_text("#define SND_BGM_A 1\n#define X\n// c\n#define SND_SE_B 300\n",
                                            "ascii")
     (d / "DEBUG" / "fieldsymbol.dat").write_text(
-        "1,HA(CA)バトランド城下町＆城\n2,zz\n3,KUクルーナ\nnone\n4,AB(XY)村ABあいう\n", "shift_jis")
+        "1,HA(CA)ミナト町＆城\n2,zz\n3,KUモリノ\nnone\n4,AB(XY)村ABあいう\n", "shift_jis")
     names = ["caf1", "dab1"]
     (d / "MAP" / "_list.txt").write_text("".join(f"{i},x,{n}\n" for i, n in enumerate(names)) + "end\n",
                                          "shift_jis")
@@ -855,11 +855,11 @@ class Dq4TableTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_text_tables(self):
-        self.assertEqual(ns.soundlist(self.fs), {("BGM", 1): "序曲", ("BGM", 2): "終曲", ("SE", 0): "カーソル"})
+        self.assertEqual(ns.soundlist(self.fs), {("BGM", 1): "はじまり", ("BGM", 2): "おわり", ("SE", 0): "カーソル"})
         self.assertEqual(ns.sadl(self.fs), {"SND_BGM_A": 1, "SND_SE_B": 300})
         names = ns.place_names(self.fs)
-        self.assertEqual((names["ha"], names["ca"], names["ku"]), ("バトランド城下町＆城", "バトランド城下町＆城",
-                                                                   "クルーナ"))
+        self.assertEqual((names["ha"], names["ca"], names["ku"]), ("ミナト町＆城", "ミナト町＆城",
+                                                                   "モリノ"))
         self.assertEqual((names["ab"], names["xy"]), ("村ABあいう", "村ABあいう"))
         self.assertNotIn("zz", names)
 
@@ -895,8 +895,8 @@ class Dq4TableTests(unittest.TestCase):
             ns.export(out, self.fs, only=["songs", "sfx"], jobs=1)
         songs = json.loads((out / "songs" / "index.json").read_text(encoding="utf-8"))
         self.assertEqual(sorted(songs), ["01"])      # STRM 은 BGM 1 칸에 든다(실제 롬은 SEQ 1 이 비어 겹치지 않음)
-        self.assertEqual((songs["01"]["kind"], songs["01"]["channels"], songs["01"]["title"]), ("STRM", 2, "序曲"))
-        with wave.open(str(out / "songs" / "01-序曲.wav")) as w:
+        self.assertEqual((songs["01"]["kind"], songs["01"]["channels"], songs["01"]["title"]), ("STRM", 2, "はじまり"))
+        with wave.open(str(out / "songs" / "01-はじまり.wav")) as w:
             self.assertEqual((w.getnchannels(), w.getframerate(), w.getnframes()), (2, 22050, 4))
         sfx = json.loads((out / "sfx" / "index.json").read_text(encoding="utf-8"))
         self.assertEqual(sorted(sfx), ["000", "002"])
@@ -951,13 +951,13 @@ class Dq4TableTests(unittest.TestCase):
         self.assertEqual(ns.script_sounds(self.fs), [("kua1", 0x86, 30), ("kua1", 0x86, 0), ("kua1", 0x62, 302),
                                                      ("kua1", 0x13A, 31)])   # 인자 없는 명령은 뺀다
         r = ns.summarize([f], self.fs)
-        self.assertEqual(r["bgm"]["30"], ["이벤트(곡) クルーナ"])
-        self.assertEqual(r["bgm"]["31"], ["이벤트(ME) クルーナ"])
-        self.assertEqual(r["se"]["302"], ["이벤트 クルーナ"])
+        self.assertEqual(r["bgm"]["30"], ["이벤트(곡) モリノ"])
+        self.assertEqual(r["bgm"]["31"], ["이벤트(ME) モリノ"])
+        self.assertEqual(r["se"]["302"], ["이벤트 モリノ"])
         self.assertNotIn("0", r["bgm"])             # 곡 0(멈춤)은 장면으로 치지 않는다
         self.assertEqual(r["maps"], {"agree": 2, "disagree": 1})
-        self.assertEqual(r["bgm"]["5"], ["맵: バトランド城下町＆城 (1맵)", "맵 밤: クルーナ (1맵)"])
-        self.assertEqual(r["bgm"]["12"], ["필드 6장 선두 ライアン"])
+        self.assertEqual(r["bgm"]["5"], ["맵: ミナト町＆城 (1맵)", "맵 밤: モリノ (1맵)"])
+        self.assertEqual(r["bgm"]["12"], [f"필드 6장 선두 {ns.CHARACTERS[3]}"])
         self.assertEqual(r["bgm"]["14"], ["필드 배"])
         self.assertEqual(r["bgm"]["21"], ["고정 전투(조우 레코드 3·10)"])
         self.assertEqual(r["bgm"]["22"], ["보통 전투(던전 조우)"])
@@ -1215,7 +1215,7 @@ class RomTests(unittest.TestCase):
             rows = ns.mini2sf(Path(d) / "out", d, rom=Path(d, "dq4ds.nds"), songs=[1])
             raw = (Path(d) / "out" / rows[0]["file"]).read_bytes()
             idx = json.loads((Path(d) / "out" / "index.json").read_text(encoding="utf-8"))
-        self.assertEqual(rows[0]["title"], "序曲")
+        self.assertEqual(rows[0]["title"], "はじまり")
         self.assertTrue(rows[0]["loop"])
         size = struct.unpack_from("<I", raw, 8)[0]
         prog = zlib.decompress(raw[16:16 + size])

@@ -24,20 +24,25 @@ NMI_STUB = 0x00FFA1               # NMI 00:887C 가 들르는 받침(JML WqNmiEn
 NAME_LISTS = (0x0C, 0x0E, 0x11, 0x13, 0x2C, 0x36, 0x38, 0x3D, 0x4A, 0x4F, 0x6F, 0x7A, 0x7F)
 # 주문 목록 창(본문 00 81 FE D6 FF). 다섯 글자 칸을 한글 일곱 칸으로 오른쪽으로 넓힌다.
 SPELL_WINDOW = 0x28
+SPELL_BODY = bytes((0x00, 0x81, 0xFE, 0xD6, 0xFF))
 # 전투 작전 창(머리 17 82 06 05). 두 줄 한글(줄마다 다섯 칸까지)이 들어가게 한 칸 왼쪽으로 옮겨 넓힌다
 TACTIC_WINDOW = 0x16
+TACTIC_HEAD = bytes((0x17, 0x82, 0x06, 0x05))
 # 가게 동료 창(머리 02 0F 1C, 줄마다 이름 EF + 상태 CC). 이름 다섯째 칸 뒤로 상태를 미는 만큼 한 칸 왼쪽으로 옮겨 넓힌다
 SHOP_MEMBERS = 0x3A
+SHOP_MEMBERS_HEAD, SHOP_MEMBERS_ROW = bytes((0x02, 0x0F, 0x1C)), bytes((0xEF, 0xCC))
 # 대열 바꾸기 창(46 왼쪽 DF 줄, 45 오른쪽 F1 줄). 줄마다 「번호 이름 Lv:」 라 이름 다섯째 칸 뒤로 미는 만큼 한 칸씩 넓힌다.
 # 46 은 왼쪽으로 옮기고 45 는 오른쪽으로만 넓혀 둘이 겹치지 않게 한다
 FORMATION = ((0x46, bytes((0x42, 0x04, 0x0E)), True), (0x45, bytes((0x10, 0x84, 0x0E)), False))
 # 「HP와 MP」 창(03 은 앞 세 사람, 04 는 넷째부터). 너비가 한 사람 몫(6)이라 이름 다섯째 칸이 열 사이 빈칸에 걸치고,
 # 맨 오른쪽 사람은 오른쪽 테두리를 덮었다. 상태 창처럼 한 사람 몫을 7 로
 HP_WINDOWS = (0x03, 0x04)
+HP_BODY = {0x03: bytes((0x00, 0x8B)), 0x04: bytes((0x00, 0x89))}
 # 가나 이름(몬스터 동료 등)의 바이트 → 글리프 번호 표(평 · 탁점 84 · 반탁점 83, 바이트마다 16비트, FFFF = 없음).
 # 필드에서는 가나 칸을 슬롯으로 돌려 써 원래 가나 타일로 찍은 이름이 깨지므로, 한글 이름처럼 Galmuri9 가나로 그린다
 KANA_TABLE = 0x60E800
 EMPTY_SLOT_HOOK = 0x04B9EB        # 모험의 서 기록 목록의 빈 칸 「 しようしていません」 을 한 글자씩 찍는 고리
+EMPTY_SLOT_ORIG = bytes.fromhex('a20900bdfbb92035b2ca10f7')
 PREFIX_HOOK = 0x04B11E            # 창 바이트 갈래(메뉴 패치가 JSL 로 바꿔 둔 자리). 고정 문구 접두를 먼저 가른다
 # 가게 사기 목록(창 39). 줄마다 이름(EE) + 빈칸 셋 + 값 다섯 자리(CB). 빈칸 하나를 값 뒤 「G」(타일 0F, 골드 창 05 와 같은 글자)로
 SHOP_BUY = 0x39
@@ -46,24 +51,34 @@ SHOP_BUY_ROW = (bytes.fromhex('feee010101cbff'), bytes.fromhex('feee0101cb0fff')
 # 세 자리(창 열기·그리기·크기 셈의 LDA $EB48,X)에서 가게일 때만 값 열이 붙은 레코드로 바꾼다(dq4windowname.asm ShopListRes)
 SHOP_SELL_ALIAS = 0x37
 SHOP_SELL_ITEMS = 0x0F
+SHOP_SELL_ALIAS_RECORD = bytes((0x89, 0x02, SHOP_SELL_ITEMS))
+SHOP_SELL_ITEMS_SHAPE = bytes.fromhex('4f03b90081fed3ff83')
 SHOP_RESOLVE = (0x049C5C, 0x049FBB, 0x04A8C2)
+SHOP_RESOLVE_ORIG = bytes.fromhex('bd48eb')
 SHOP_SPOT, SHOP_SPOT_END = 0x04FF40, 0x050000
 # 줄 물건의 파는 값 + G 를 찍는 자리 표시. 원래 DQ5 디버그 창 6C 만 쓰던 코드인데 메뉴 패치가 6C 를 다시 써 쓰는 창이 없어,
 # 그 갈래(04:B3A2 표)를 빌린다. 값 다섯 자리 + G 여섯 칸에 「판매불가」 도 들어가야 한다
 SHOP_PRICE_COLS = 6
 SHOP_SELL_CODE = 0xD9
 CODE_TABLE = 0x04B3A2
+SHOP_SELL_CODE_ORIG = bytes.fromhex('46b9')
 # 가게 동료 창(3A)의 「소지 중」 을 고르는 두 자리(장비류 04:C3B1, 도구 04:C508). LDY #$000A / BRL $C440 을 그 사람
 # 소지품에서 고른 물건($0F22)의 개수를 센 「 N개 소지」 로(dq4windowname.asm ShopHeldCount)
 HELD_SITES = (0x04C3B1, 0x04C508)
+HELD_ORIG, HELD_PICKER = bytes.fromhex('a00a0082'), 0x04C440
 # 가게 사기에서 값을 $0F28~ 에 두는 두 자리(도구·장비 갈래, STA $0F28 / LDA $47 / STA $0F29 / LDA $48 / STA $0F2A). 이어지는 06:F5E9 가
 # 돈을 빼기 전에 확인을 묻는다. 확인 메시지는 원작에서 빈 묶음 064~067(dq4sysmsg)
 BUY_SITES, BUY_ORIG = (0x06DCDF, 0x06DDFC), bytes.fromhex('8d280fa5478d290fa5488d2a0f')
+BUY_CALL = bytes.fromhex('20e9f5')
+# ShopBuyConfirm 이 부르는 원래 코드: 06:F602 돈 견주기, 06:DC2F 물건 목록(LDA #$01 / JSR $DFC4)
+BUY_CONFIRM_ORIG = ((0x06F602, bytes.fromhex('008849')), (0x06DC2F, bytes.fromhex('a90120c4df')),
+                    (0x06DFC4, bytes.fromhex('c904')))
 BUY_ASK = 0x19                    # 메시지 묶음(06:DFC4 의 A, 메시지 = A × 4 + 가게 종류)
 BUY_SPOT, BUY_SPOT_END = 0x06FFB0, 0x070000
 # 도구 갈래의 개수 묻기와 나머지 개수 주기(06:FE10~ 대화 훅 뒤의 빈자리)
 QTY_SPOT, QTY_SPOT_END = 0x06FE64, 0x06FF00
 GIVE_SITE, GIVE_ORIG = 0x06DD39, bytes.fromhex('ad230f8542ad220f8543')
+GIVE_TAIL = bytes.fromhex('00898030')
 # 가게 BRK 를 부르는 도우미(가진 개수·최대 개수·합계). 뱅크 40 아래여야 BRK 가 WRAM 을 읽는다. 원래 롬도 빈 05 끝
 LOW_SPOT, LOW_SPOT_END = 0x05FF00, 0x060000
 # 가게 팔기 개수: 값 셈(06:DF06)과 물건 빼기 앞(06:DF35), 코드는 원래 롬도 빈 12 끝
@@ -79,6 +94,7 @@ SELL_NO_SITE, SELL_NO_ORIG = 0x06DF48, bytes.fromhex('009500a91820c4df')
 SELL_SPOT, SELL_SPOT_END = 0x12FEB0, 0x130000
 # 개수를 묻는 수 창(다섯 자리 입력, 맡기는 곳 등과 함께 씀)
 QTY_WINDOW = 0x5C
+QTY_RECORD = bytes.fromhex('16050823000101fdfdfdfdfdff52')
 
 
 def lorom(a):
@@ -141,7 +157,7 @@ def apply(data, font=None, asar=None):
     d[o + 2] = (d[o + 2] & 0xE0) | 7
     for w in HP_WINDOWS:
         o = lorom(dq4menupatch.window_addr(d, w))
-        if d[o + 2] & 0x1F != 6 or d[o + 4:o + 6] != bytes((0x00, 0x89 if w == 4 else 0x8B)):
+        if d[o + 2] & 0x1F != 6 or d[o + 4:o + 6] != HP_BODY[w]:
             raise ValueError(f'창 {w:02X} 머리 {d[o:o + 8].hex()}: HP와 MP 창 모양이 아님')
         d[o + 2] += 1
     for w in NAME_LISTS:
@@ -151,11 +167,11 @@ def apply(data, font=None, asar=None):
         d[o] -= 1
         d[o + 2] += 1
     o = lorom(dq4menupatch.window_addr(d, SPELL_WINDOW))
-    if d[o + 2] & 0x1F != 8 or d[o + 4:o + 9] != bytes((0x00, 0x81, 0xFE, 0xD6, 0xFF)):
+    if d[o + 2] & 0x1F != 8 or d[o + 4:o + 9] != SPELL_BODY:
         raise ValueError(f'창 {SPELL_WINDOW:02X} 머리 {d[o:o + 9].hex()}: 주문 목록 창 모양이 아님')
     d[o + 2] += 2
     o = lorom(dq4menupatch.window_addr(d, SHOP_MEMBERS))
-    if d[o:o + 3] != bytes((0x02, 0x0F, 0x1C)) or bytes((0xEF, 0xCC)) not in d[o:o + 12]:
+    if d[o:o + 3] != SHOP_MEMBERS_HEAD or SHOP_MEMBERS_ROW not in d[o:o + 12]:
         raise ValueError(f'창 {SHOP_MEMBERS:02X} 머리 {d[o:o + 12].hex()}: 가게 동료 창 모양이 아님')
     d[o] -= 1
     d[o + 2] += 1
@@ -166,7 +182,7 @@ def apply(data, font=None, asar=None):
         d[o] -= left
         d[o + 2] += 1
     o = lorom(dq4menupatch.window_addr(d, TACTIC_WINDOW))
-    if d[o:o + 4] != bytes((0x17, 0x82, 0x06, 0x05)):
+    if d[o:o + 4] != TACTIC_HEAD:
         raise ValueError(f'창 {TACTIC_WINDOW:02X} 머리 {d[o:o + 8].hex()}: 전투 작전 창 모양이 아님')
     d[o] -= 1
     d[o + 2] += 1
@@ -176,24 +192,23 @@ def apply(data, font=None, asar=None):
         raise ValueError(f'창 {SHOP_BUY:02X} 레코드 {d[o:o + 14].hex()}: 가게 사기 목록 모양이 아님')
     d[o + 6:o + 13] = SHOP_BUY_ROW[1]
     sell = dq4menupatch.window_addr(d, SHOP_SELL_ALIAS)
-    if d[lorom(sell):lorom(sell) + 3] != bytes((0x89, 0x02, SHOP_SELL_ITEMS)):
+    if d[lorom(sell):lorom(sell) + 3] != SHOP_SELL_ALIAS_RECORD:
         raise ValueError(f'창 {SHOP_SELL_ALIAS:02X} 레코드 {d[lorom(sell):lorom(sell) + 3].hex()}: 창 0F 별칭이 아님')
     o = lorom(dq4menupatch.window_addr(d, SHOP_SELL_ITEMS))
     # 너비(셋째 바이트)는 다른 단계가 이름 칸에 맞춰 넓힌다
-    if d[o:o + 2] + d[o + 3:o + 10] != bytes.fromhex('4f03b90081fed3ff83'):
+    if d[o:o + 2] + d[o + 3:o + 10] != SHOP_SELL_ITEMS_SHAPE:
         raise ValueError(f'창 {SHOP_SELL_ITEMS:02X} 레코드 {d[o:o + 10].hex()}: 물건 목록 모양이 아님')
     for a in SHOP_RESOLVE:
-        if d[lorom(a):lorom(a) + 3] != bytes.fromhex('bd48eb'):
+        if d[lorom(a):lorom(a) + 3] != SHOP_RESOLVE_ORIG:
             raise ValueError(f'{a:06X}: LDA $EB48,X 가 아님')
     o = lorom(CODE_TABLE) + (SHOP_SELL_CODE - 0xB0) * 2
-    if d[o:o + 2] != bytes.fromhex('46b9'):
+    if d[o:o + 2] != SHOP_SELL_CODE_ORIG:
         raise ValueError(f'코드 {SHOP_SELL_CODE:02X} 갈래 {d[o:o + 2].hex()}: 04:B946 이 아님')
     for a in BUY_SITES:
-        if d[lorom(a):lorom(a) + len(BUY_ORIG) + 3] != BUY_ORIG + bytes.fromhex('20e9f5'):
+        if d[lorom(a):lorom(a) + len(BUY_ORIG) + 3] != BUY_ORIG + BUY_CALL:
             raise ValueError(f'{a:06X}: 가게 사기 값 저장 + JSR $F5E9 가 아님')
-    # ShopBuyConfirm 이 부르는 원래 코드: 06:F602 돈 견주기, 06:DC2F 물건 목록(LDA #$01 / JSR $DFC4)
-    for a, want in ((0x06F602, '008849'), (0x06DC2F, 'a90120c4df'), (0x06DFC4, 'c904')):
-        if d[lorom(a):lorom(a) + len(want) // 2] != bytes.fromhex(want):
+    for a, want in BUY_CONFIRM_ORIG:
+        if d[lorom(a):lorom(a) + len(want)] != want:
             raise ValueError(f'{a:06X}: 가게 사기 확인이 부르는 코드가 아님')
     if any(d[lorom(BUY_SPOT):lorom(BUY_SPOT_END - 1) + 1]):
         raise ValueError(f'{BUY_SPOT:06X}~ 가 비어 있지 않음')
@@ -208,14 +223,14 @@ def apply(data, font=None, asar=None):
         raise ValueError(f'{LOW_SPOT:06X}~ 가 비어 있지 않음')
     if any(d[lorom(QTY_SPOT):lorom(QTY_SPOT_END - 1) + 1]):
         raise ValueError(f'{QTY_SPOT:06X}~ 가 비어 있지 않음')
-    if d[lorom(GIVE_SITE):lorom(GIVE_SITE) + 14] != GIVE_ORIG + bytes.fromhex('00898030'):
+    if d[lorom(GIVE_SITE):lorom(GIVE_SITE) + 14] != GIVE_ORIG + GIVE_TAIL:
         raise ValueError(f'{GIVE_SITE:06X}: 도구 주기가 아님')
     o = lorom(dq4menupatch.window_addr(d, QTY_WINDOW))
-    if d[o:o + 14] != bytes.fromhex('16050823000101fdfdfdfdfdff52'):
+    if d[o:o + 14] != QTY_RECORD:
         raise ValueError(f'창 {QTY_WINDOW:02X} {d[o:o + 14].hex()}: 다섯 자리 입력 창이 아님')
     for a in HELD_SITES:
         o = lorom(a)
-        if d[o:o + 4] != bytes.fromhex('a00a0082') or o + 6 + int.from_bytes(d[o + 4:o + 6], 'little', signed=True) != lorom(0x04C440):
+        if d[o:o + 4] != HELD_ORIG or o + 6 + int.from_bytes(d[o + 4:o + 6], 'little', signed=True) != lorom(HELD_PICKER):
             raise ValueError(f'{a:06X} {d[o:o + 6].hex()}: 「소지 중」 고르기가 아님')
     if any(d[lorom(SHOP_SPOT):lorom(SHOP_SPOT_END - 1) + 1]):
         raise ValueError(f'{SHOP_SPOT:06X}~ 가 비어 있지 않음')
@@ -232,7 +247,7 @@ def apply(data, font=None, asar=None):
     if held != list(range(held[0], held[0] + len(held))):
         raise ValueError(f'「N개 소지」 문구 번호가 이어지지 않음: {held}')
     eo = lorom(EMPTY_SLOT_HOOK)
-    if d[eo:eo + 12] != bytes.fromhex('a20900bdfbb92035b2ca10f7'):
+    if d[eo:eo + 12] != EMPTY_SLOT_ORIG:
         raise ValueError(f'{EMPTY_SLOT_HOOK:06X}: 빈 기록 칸 고리가 아님')
     po = lorom(PREFIX_HOOK)
     if d[po] != 0x22:

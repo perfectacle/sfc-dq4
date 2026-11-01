@@ -1,5 +1,6 @@
 """통합 타이틀의 색 소유 범위와 ROM 기록 경계를 검사한다."""
 
+from contextlib import ExitStack
 import hashlib
 import json
 import os
@@ -7,6 +8,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -59,17 +61,18 @@ def run_build(module, rom, root, asar, **patches):
     """롬 SHA-1 을 합성 롬 것으로 두고, asar 실행만 asar 로 바꿔 build 를 돌린다."""
     source = root / 'source.sfc'
     source.write_bytes(rom)
-    with patch.object(module, 'SOURCE_SHA1', hashlib.sha1(rom).hexdigest()), \
-            patch.object(module.shutil, 'which', return_value='/fake/asar'), \
-            patch.object(module.subprocess, 'check_output', return_value='Asar 1.91\n'), \
-            patch.object(module.subprocess, 'run', side_effect=asar):
+    # module.subprocess.run 을 고치면 stdlib 모듈 자체가 바뀌어 다른 테스트로 번지므로, 모듈이 쥔 참조만 바꾼다
+    fake_subprocess = SimpleNamespace(**vars(subprocess))
+    fake_subprocess.run, fake_subprocess.check_output = asar, lambda *a, **k: 'Asar 1.91\n'
+    fake_shutil = SimpleNamespace(**vars(shutil))
+    fake_shutil.which = lambda name: '/fake/asar'
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(module, 'SOURCE_SHA1', hashlib.sha1(rom).hexdigest()))
+        stack.enter_context(patch.object(module, 'subprocess', fake_subprocess))
+        stack.enter_context(patch.object(module, 'shutil', fake_shutil))
         for name, value in patches.items():
-            stack = patch.object(module, name, value)
-            stack.start()
-        try:
-            return module.build(source, root / 'assets', root / 'out' / 'title.sfc', 'asar')
-        finally:
-            patch.stopall()
+            stack.enter_context(patch.object(module, name, value))
+        return module.build(source, root / 'assets', root / 'out' / 'title.sfc', 'asar')
 
 
 class IntegratedTitleTests(unittest.TestCase):
@@ -181,6 +184,15 @@ class BuildAroundAsarTests(unittest.TestCase):
     def build(self, asar):
         with self.assets:
             return run_build(patcher, self.rom, self.root, asar)
+
+    def test_run_build_leaves_caller_patches_and_stdlib_alone(self):
+        real_run, real_which = subprocess.run, shutil.which
+        with self.assets as outer:
+            run_build(patcher, self.rom, self.root, FakeAsar(STATIC))
+            self.assertIs(patcher.read_assets, outer)
+        self.assertIs(subprocess.run, real_run)
+        self.assertIs(shutil.which, real_which)
+        self.assertIs(patcher.subprocess, subprocess)
 
     def test_static_title_inputs_and_outputs(self):
         asar = FakeAsar(STATIC)

@@ -80,23 +80,23 @@ def lorom(a):
 WINDOWS = 0x04EB48
 LIST_PREV = 0x6123AB
 PREFIX_PREV = 0x608000
-NAME_LIST = bytes.fromhex('0502080500d0fe01ff80')
+# 창 레코드는 apply 가 보는 바이트만 맞추고 나머지는 5A 로 채운 합성 값
+F = 0x5A
+NAME_LIST = bytes((0x05, F, 0x08, F, F, 0xD0, F, 0x80))
 
 
 def base_windows():
     out = {
-        wn.STATUS_WINDOW: bytes.fromhex('0000060500010180'),
-        0x03: bytes.fromhex('0000060500' '8b0180'),
-        0x04: bytes.fromhex('0000060500' '890180'),
-        wn.SPELL_WINDOW: bytes.fromhex('020208050081fed6ff80'),
-        wn.SHOP_MEMBERS: bytes.fromhex('020f1c050001feefccff80'),
-        0x46: bytes.fromhex('42040e050001fe01ff80'),
-        0x45: bytes.fromhex('10840e050001fe01ff80'),
-        wn.TACTIC_WINDOW: bytes.fromhex('17820605000101ff80'),
-        wn.SHOP_BUY: bytes.fromhex('020214090001') + wn.SHOP_BUY_ROW[0] + b'\x80',
-        wn.SHOP_SELL_ALIAS: bytes((0x89, 0x02, wn.SHOP_SELL_ITEMS)),
-        wn.SHOP_SELL_ITEMS: bytes.fromhex('4f0308b90081fed3ff8380'),
-        wn.QTY_WINDOW: bytes.fromhex('16050823000101fdfdfdfdfdff5280'),
+        wn.STATUS_WINDOW: bytes((F, F, 0x06, F, F, 0x80)),
+        **{w: bytes((F, F, 0x06, F)) + wn.HP_BODY[w] + b'\x80' for w in wn.HP_WINDOWS},
+        wn.SPELL_WINDOW: bytes((F, F, 0x08, F)) + wn.SPELL_BODY + b'\x80',
+        wn.SHOP_MEMBERS: wn.SHOP_MEMBERS_HEAD + bytes((F, F)) + wn.SHOP_MEMBERS_ROW + b'\x80',
+        **{w: head + bytes((F, F, 0x80)) for w, head, _ in wn.FORMATION},
+        wn.TACTIC_WINDOW: wn.TACTIC_HEAD + bytes((F, 0x80)),
+        wn.SHOP_BUY: bytes((F, F, 0x14, F, F, F)) + wn.SHOP_BUY_ROW[0] + b'\x80',
+        wn.SHOP_SELL_ALIAS: wn.SHOP_SELL_ALIAS_RECORD,
+        wn.SHOP_SELL_ITEMS: wn.SHOP_SELL_ITEMS_SHAPE[:2] + b'\x08' + wn.SHOP_SELL_ITEMS_SHAPE[2:] + b'\x80',
+        wn.QTY_WINDOW: wn.QTY_RECORD + b'\x80',
     }
     out.update({w: NAME_LIST for w in wn.NAME_LISTS})
     return out
@@ -115,21 +115,21 @@ def base_rom(windows=None):
         put(WINDOWS + 2 * n, at.to_bytes(2, 'little'))
         at += len(rec)
     for a in wn.SHOP_RESOLVE:
-        put(a, bytes.fromhex('bd48eb'))
-    put(wn.CODE_TABLE + (wn.SHOP_SELL_CODE - 0xB0) * 2, bytes.fromhex('46b9'))
+        put(a, wn.SHOP_RESOLVE_ORIG)
+    put(wn.CODE_TABLE + (wn.SHOP_SELL_CODE - 0xB0) * 2, wn.SHOP_SELL_CODE_ORIG)
     for a in wn.BUY_SITES:
-        put(a, wn.BUY_ORIG + bytes.fromhex('20e9f5'))
-    for a, want in ((0x06F602, '008849'), (0x06DC2F, 'a90120c4df'), (0x06DFC4, 'c904')):
-        put(a, bytes.fromhex(want))
+        put(a, wn.BUY_ORIG + wn.BUY_CALL)
+    for a, want in wn.BUY_CONFIRM_ORIG:
+        put(a, want)
     for a, orig in ((wn.SELL_QTY_SITE, wn.SELL_QTY_ORIG), (wn.SELL_GIVE_SITE, wn.SELL_GIVE_ORIG),
                     (wn.SELL_NO_SITE, wn.SELL_NO_ORIG), (wn.SELL_ASK_SITE, wn.SELL_ASK_ORIG),
                     (wn.QTY_UP_SITE, wn.QTY_UP_ORIG), (wn.QTY_DOWN_SITE, wn.QTY_DOWN_ORIG)):
         put(a, orig)
-    put(wn.GIVE_SITE, wn.GIVE_ORIG + bytes.fromhex('00898030'))
+    put(wn.GIVE_SITE, wn.GIVE_ORIG + wn.GIVE_TAIL)
     for a in wn.HELD_SITES:
-        rel = lorom(0x04C440) - (lorom(a) + 6)
-        put(a, bytes.fromhex('a00a0082') + rel.to_bytes(2, 'little', signed=True))
-    put(wn.EMPTY_SLOT_HOOK, bytes.fromhex('a20900bdfbb92035b2ca10f7'))
+        rel = lorom(wn.HELD_PICKER) - (lorom(a) + 6)
+        put(a, wn.HELD_ORIG + rel.to_bytes(2, 'little', signed=True))
+    put(wn.EMPTY_SLOT_HOOK, wn.EMPTY_SLOT_ORIG)
     put(wn.PREFIX_HOOK, b'\x22' + PREFIX_PREV.to_bytes(3, 'little'))
     put(wn.LIST_HOOK, b'\x5c' + LIST_PREV.to_bytes(3, 'little'))
     return d
@@ -254,13 +254,13 @@ class ApplyRejectTests(unittest.TestCase):
             run(rom)
 
     def test_window_shape_checks(self):
-        for n, bad in ((wn.STATUS_WINDOW, bytes.fromhex('0000070500010180')),
-                       (wn.SPELL_WINDOW, bytes.fromhex('020208050081fed5ff80')),
-                       (0x45, bytes.fromhex('10840f050001fe01ff80')),
-                       (wn.SHOP_SELL_ALIAS, bytes((0x89, 0x02, 0x10)))):
+        for n, at, value in ((wn.STATUS_WINDOW, 2, 0x07), (wn.SPELL_WINDOW, 7, 0xD5), (0x45, 2, 0x0F),
+                             (wn.SHOP_SELL_ALIAS, 2, 0x10)):
             with self.subTest(n=hex(n)):
+                bad = bytearray(base_windows()[n])
+                bad[at] = value
                 with self.assertRaisesRegex(ValueError, f'^창 {n:02X} '):
-                    run(base_rom({**base_windows(), n: bad}))
+                    run(base_rom({**base_windows(), n: bytes(bad)}))
 
     def test_held_site_must_branch_to_the_label_picker(self):
         rom = base_rom()

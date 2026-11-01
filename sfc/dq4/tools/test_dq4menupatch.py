@@ -27,18 +27,18 @@ class FakeAtlas:
 class RecordTests(unittest.TestCase):
     def test_item_record_sizes_window_to_longest_row(self):
         atlas = FakeAtlas({'가나': 3, '다': 2})
-        head = bytes.fromhex('02040ea30001')
+        head = bytes((0x5A, 0x5A, 0x4E, 0xA3, 0x5A, 0x5A))
         rec = mp.item_record(atlas, head, [['가나'], ['다', b'\x01\x03']])
         # 커서 FE 1 + 열 2 + 공백·숫자 2 = 5, 테두리 2 → 7. 높이는 3 → 4
-        self.assertEqual(rec[:6], bytes.fromhex('020407a40001'))
+        self.assertEqual(rec[:6], bytes((0x5A, 0x5A, 0x47, 0xA4, 0x5A, 0x5A)))   # 너비 위 두 비트는 그대로
         self.assertEqual(rec[6:], bytes.fromhex('fe9f0302ff fe9f020301 03ff 80'.replace(' ', '')))
 
     def test_speed_record_keeps_digit_items(self):
-        old = bytes.fromhex('070f122800061419282f28012a411284ffff'
-                            'ff293311' + '01' * 10 + '141e11ffff' + 'fe03fe04fe05fe06fe07fe08fe09fe0aff80')
+        digits = b''.join(bytes((0xFE, k)) for k in range(3, 11)) + b'\xff\x80'
+        old = bytes((0x5A, 0x5A, 0x28, 0x5A, 0x5A, 0x5A)) + b'\x5a' * 12 + b'\xff\xff' + b'\x01' * 10 + b'\xff\xff' + digits
         atlas = FakeAtlas({mp.SPEED_TEXT[0]: 15, mp.SPEED_TEXT[1]: 3, mp.SPEED_TEXT[2]: 3})
         rec = mp.speed_record(atlas, old)
-        self.assertTrue(rec.endswith(bytes.fromhex('fe03fe04fe05fe06fe07fe08fe09fe0aff80')))
+        self.assertTrue(rec.endswith(digits))
         self.assertIn(b'\x01' * 10, rec)
 
     def test_hook_loop_branch_lands_on_loop_start(self):
@@ -56,7 +56,7 @@ class RecordTests(unittest.TestCase):
             self.assertEqual(at + 4 + code[at + 3], ignore)
         last = 8 + (len(mp.TOP_MENUS) - 1) * 4
         self.assertEqual(last + 4 + code[last + 3], ignore + 3)
-        self.assertEqual(code[ignore + 3:], bytes.fromhex('ade80a60'))
+        self.assertEqual(code[ignore + 3:], mp.B_CANCEL_ORIG + b'\x60')    # keep: 원래 LDA 를 하고 RTS
 
     def test_tiles_leave_bg12_tile_zero_empty(self):
         atlas = mp.Atlas.__new__(mp.Atlas)
@@ -156,12 +156,12 @@ def menu_rom(small=0x5E, spare=0x40):
     for n in range(COUNT):
         a = addr.get(n, addr[small] if n == ALIAS else dummy)
         mp.put(d, TABLE + 2 * n, (a & 0xFFFF).to_bytes(2, 'little'))
-    mp.put(d, mp.B_CANCEL, bytes.fromhex('ade80a'))
+    mp.put(d, mp.B_CANCEL, mp.B_CANCEL_ORIG)
     for site, target in mp.CURSOR_MOVES.items():
         mp.put(d, site, bytes((0x20, target & 0xFF, target >> 8)))
-    mp.put(d, mp.MAP_LOAD, bytes.fromhex('a91c8d2507'))
-    mp.put(d, mp.WIN_DISPATCH, bytes.fromhex('c901f0052035b280c6c8c8'))
-    mp.put(d, mp.FADEOUT_EXIT, bytes.fromhex('5c5cfe03'))
+    mp.put(d, mp.MAP_LOAD, mp.MAP_LOAD_ORIG)
+    mp.put(d, mp.WIN_DISPATCH, mp.WIN_DISPATCH_ORIG)
+    mp.put(d, mp.FADEOUT_EXIT, mp.FADEOUT_EXIT_ORIG)
     return d, recs, addr
 
 
@@ -289,7 +289,7 @@ class BaseProblemTests(unittest.TestCase):
     def rom(self):
         d = bytearray(0x400000)
         mp.put(d, mp.OVERTURE_STUB, b'\x6b')
-        mp.put(d, 0x108000, bytes.fromhex('2200ff70'))
+        mp.put(d, 0x108000, mp.OVERTURE_CALL)
         return d
 
     def test_overture_build_is_accepted(self):
