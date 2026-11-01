@@ -123,7 +123,8 @@ def base_rom(windows=None):
         put(a, want)
     for a, orig in ((wn.SELL_QTY_SITE, wn.SELL_QTY_ORIG), (wn.SELL_GIVE_SITE, wn.SELL_GIVE_ORIG),
                     (wn.SELL_NO_SITE, wn.SELL_NO_ORIG), (wn.SELL_ASK_SITE, wn.SELL_ASK_ORIG),
-                    (wn.QTY_UP_SITE, wn.QTY_UP_ORIG), (wn.QTY_DOWN_SITE, wn.QTY_DOWN_ORIG)):
+                    (wn.QTY_UP_SITE, wn.QTY_UP_ORIG), (wn.QTY_DOWN_SITE, wn.QTY_DOWN_ORIG),
+                    (wn.QP_FRAME_SITE, wn.QP_FRAME_ORIG), *((a, wn.QP_OPEN_ORIG) for a in wn.QP_OPEN_SITES)):
         put(a, orig)
     put(wn.GIVE_SITE, wn.GIVE_ORIG + wn.GIVE_TAIL)
     for a in wn.HELD_SITES:
