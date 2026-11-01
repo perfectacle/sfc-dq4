@@ -116,6 +116,8 @@ def _run_step(code, ram, slot, blocked=()):
         elif op == 0x69:
             v = a + code[pc + 1] + carry
             a, carry, pc = v & 0xFF, int(v > 0xFF), pc + 2
+        elif op == 0x4C:
+            pc = code[pc + 1] | code[pc + 2] << 8
         elif op == 0x82:
             pc += 3 + int.from_bytes(code[pc + 1:pc + 3], 'little', signed=True)
         elif op == 0xC9:
@@ -195,7 +197,7 @@ class NumberTest(unittest.TestCase):
         def run(man, hero, blocked=()):
             ram = {0x7E3020: hero[0], 0x7E3080: hero[1], 0x7E3020 + 0x10: man[0], 0x7E3080 + 0x10: man[1],
                    **{k: 0x40 + k for k in range(0x10)}, 0x80: 1, 0x81: 2, 0x82: 3}
-            target = _run_step(ev._old_man_step(), ram, 0x10, blocked)
+            target = _run_step(ev._old_man_step(0), ram, 0x10, blocked)
             self.assertEqual([target[k] for k in (*range(0x10), 0x80, 0x81, 0x82)],
                              [ram[k] for k in (*range(0x10), 0x80, 0x81, 0x82)])
             return target[0x7E3560 + 0x10], target[0x7E35A0 + 0x10]
@@ -209,7 +211,7 @@ class NumberTest(unittest.TestCase):
     def test_old_man_goes_around_a_blocked_cell(self):
         def run(man, hero, blocked):
             ram = {0x7E3020: hero[0], 0x7E3080: hero[1], 0x7E3020 + 0x10: man[0], 0x7E3080 + 0x10: man[1]}
-            target = _run_step(ev._old_man_step(), ram, 0x10, blocked)
+            target = _run_step(ev._old_man_step(0), ram, 0x10, blocked)
             self.assertEqual((target[0x7E3020 + 0x10], target[0x7E3080 + 0x10]), man)   # 자리는 되돌려 둠
             return target[0x7E3560 + 0x10], target[0x7E35A0 + 0x10]
         self.assertEqual(run((44, 25), (54, 31), {(46, 25)}), (44, 27))      # 오른쪽이 막히면 아래로
@@ -221,11 +223,30 @@ class NumberTest(unittest.TestCase):
         self.assertEqual(run((44, 25), (49, 25), {(47, 25)}), (45, 25))      # 오른쪽
         self.assertEqual(run((44, 25), (44, 30), {(44, 27)}), (44, 26))      # 아래
 
+    def test_old_man_lines_up_when_the_far_axis_is_blocked(self):
+        def run(man, hero, blocked):
+            ram = {0x7E3020: hero[0], 0x7E3080: hero[1], 0x7E3020 + 0x10: man[0], 0x7E3080 + 0x10: man[1]}
+            target = _run_step(ev._old_man_step(0), ram, 0x10, blocked)
+            self.assertEqual((target[0x7E3020 + 0x10], target[0x7E3080 + 0x10]), man)
+            return target[0x7E3560 + 0x10], target[0x7E35A0 + 0x10]
+        # 성 앞 탑 밑 (56,23) 오른쪽에 선 노인, 주인공은 아래 줄 왼쪽
+        self.assertEqual(run((58, 23), (46, 25), {(57, 23)}), (58, 25))      # Y 차 2 → 2셀
+        self.assertEqual(run((58, 23), (46, 24), {(57, 23)}), (58, 24))      # Y 차 1 → 1셀
+        self.assertEqual(run((58, 23), (46, 22), {(57, 23)}), (58, 22))      # 위로 1셀
+        self.assertEqual(run((58, 23), (46, 21), {(57, 23)}), (58, 21))
+        self.assertEqual(run((58, 23), (46, 25), {(57, 23), (58, 25)}), (58, 24))   # 둘째 셀이 막히면 1셀
+        self.assertEqual(run((58, 23), (46, 25), {(57, 23), (58, 24)}), (58, 23))   # 둘 다 막히면 그 자리
+        self.assertEqual(run((58, 23), (46, 23), {(57, 23)}), (58, 23))      # 같은 줄이면 그 자리
+        self.assertEqual(run((44, 25), (45, 35), {(44, 26)}), (45, 25))      # Y 가 막히면 X 를 맞춤
+        self.assertEqual(run((44, 25), (43, 35), {(44, 26)}), (43, 25))
+        self.assertEqual(run((44, 25), (42, 15), {(44, 24)}), (42, 25))      # 차 2 → 2셀
+        self.assertEqual(run((44, 25), (44, 35), {(44, 26)}), (44, 25))      # 같은 열이면 그 자리
+
     def test_old_man_steps_aside_when_the_hero_walks_into_him(self):
         def run(man, hero, pad, blocked=()):
             ram = {0x7E3020: hero[0], 0x7E3080: hero[1], 0x7E3020 + 0x10: man[0], 0x7E3080 + 0x10: man[1],
                    0x7E0749: pad, **{k: 0x40 + k for k in range(0x10)}}
-            target = _run_step(ev._old_man_step(), ram, 0x10, blocked)
+            target = _run_step(ev._old_man_step(0), ram, 0x10, blocked)
             self.assertEqual([target[k] for k in range(0x10)], [ram[k] for k in range(0x10)])
             self.assertEqual((target[0x7E3020 + 0x10], target[0x7E3080 + 0x10]), man)
             return target[0x7E3560 + 0x10], target[0x7E35A0 + 0x10]

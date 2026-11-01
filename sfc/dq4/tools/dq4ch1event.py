@@ -667,19 +667,23 @@ def _branch(op, n):
     return bytes((op ^ 0x20, 3, 0x82, *n.to_bytes(2, 'little')))
 
 
-def _old_man_step():
+def _old_man_step(origin):
     """명령 37 이 부른다. 인물 슬롯($90)의 걸어갈 곳(7E:3560·3580·35A0·35C0, 명령 13 의 자리)을 지금 자리로 두고, 주인공과
-    X 가 2셀보다 멀면 X 로, 아니면·막혔으면 Y 가 2셀보다 멀 때 Y 로 옮긴다. 걷기는 한 셀마다 앞 셀 하나만 보므로 두 셀을
-    차례로 STEP_CHECK 로 본다. 첫 셀이 막혔으면 그 축을 건너뛰고, 둘째 셀만 막혔으면(홀수 셀에 선 주인공 등) 한 셀만 간다.
-    둘 다 못 가면 그 자리라 명령 14 가 곧바로 지나가고, 다음 차례에 다시 고른다(FC 의 1F:DC3E 도 차례마다 주인공 쪽
-    방향을 새로 고름). 둘째 셀을 보는 동안만 자리를 한 셀 옮겨 두었다 되돌린다. 직접 페이지는 스크립트 고리가 쓰므로
-    되돌려 둔다. 그보다 먼저, 주인공이 노인 쪽으로 걸으려 하면 PUSH 대로 비킨다."""
+    X 가 2셀보다 멀면 X 로, 아니면 Y 가 2셀보다 멀 때 Y 로 옮긴다. 먼 축이 막혔으면 다른 축의 차가 0 이 아닐 때 그만큼(2셀까지)
+    옮겨 줄을 맞춘다. 걷기는 한 셀마다 앞 셀 하나만 보므로 두 셀을 차례로 STEP_CHECK 로 보고, 둘째 셀만 막혔으면(홀수 셀에
+    선 주인공 등) 한 셀만 간다. 다 못 가면 그 자리라 명령 14 가 곧바로 지나가고, 다음 차례에 다시 고른다(FC 의 1F:DC3E 도
+    차례마다 주인공 쪽 방향을 새로 고름). 둘째 셀을 보는 동안만 자리를 한 셀 옮겨 두었다 되돌린다. 직접 페이지는 스크립트
+    고리가 쓰므로 되돌려 둔다. 그보다 먼저, 주인공이 노인 쪽으로 걸으려 하면 PUSH 대로 비킨다. origin 은 이 코드가 놓일
+    주소로, 갈래마다 같은 끝맺음으로 JMP 한다(PB 가 이 뱅크)."""
     a = bytearray((0x08, 0xE2, 0x30, 0x8B, 0xA9, 0x7E, 0x48, 0xAB)) + DP_SAVE     # PHP / SEP / PHB / DB = 7E
     a += bytes((0xA5, 0x80, 0x48, 0xA5, 0x81, 0x48, 0xA5, 0x82, 0x48, 0xA6, 0x90))  # $80~$82 를 스택에 / LDX $90
     for here, there in ((0x3020, 0x3560), (0x3040, 0x3580), (0x3080, 0x35A0), (0x30A0, 0x35C0)):
         a += bytes((0xBF, *_long(0x7E0000 + here), 0x9F, *_long(0x7E0000 + there)))  # LDA 지금,X / STA 목표,X
-    out = (bytes((0x68, 0x85, 0x82, 0x68, 0x85, 0x81, 0x68, 0x85, 0x80)) + DP_RESTORE +
-           bytes((0xAB, 0x28, 0x6B)))                                                  # PLB / PLP / RTL
+    leave = (bytes((0x68, 0x85, 0x82, 0x68, 0x85, 0x81, 0x68, 0x85, 0x80)) + DP_RESTORE +
+             bytes((0xAB, 0x28, 0x6B)))                                                # PLB / PLP / RTL
+    a += _branch(0x80, len(leave))
+    out = bytes((0x4C, *((origin + len(a)) & 0xFFFF).to_bytes(2, 'little')))         # JMP 끝맺음
+    a += leave
 
     def call(direction):
         return bytes((0xA9, direction, 0x9D, 0xE0, 0x31, 0x9B, 0x4B, 0x62, 0x06, 0x00,  # LDA #방향 / STA,X / TXY / PHK / PER
@@ -696,14 +700,32 @@ def _old_man_step():
         rest = add(here, d) + call(direction) + bytes((0x08,)) + add(here, -d) + tail   # 한 셀 옮겨 보고 PHP / 되돌림
         return call(direction) + _branch(0x90, len(rest)) + rest                      # 첫 셀이 막혔으면 다음 축으로
 
-    def axis(here, there, plus, minus, tail):
-        left = walk(minus, here, there, -1)
-        neg = bytes((0xC9, 0xFE)) + _branch(0xB0, len(left)) + left                  # -2·-1 이면 다음 축으로
-        right = walk(plus, here, there, 1)
-        right += _branch(0x80, len(neg))
-        pos = bytes((0xC9, 0x03)) + _branch(0x90, len(right) + len(neg)) + right
-        return (bytes((0xAF, *_long(0x7E0000 + here), 0x38, 0xFF, *_long(0x7E0000 + here))) + _branch(0x30, len(pos)) +
-                pos + neg + tail)                                    # LDA 주인공 / SEC / SBC 노인,X / BMI 음수
+    def walk1(direction, there, d):
+        rest = bytes((0xBF, *_long(0x7E0000 + there), 0x18, 0x69, d & 0xFF, 0x9F, *_long(0x7E0000 + there))) + out
+        return call(direction) + _branch(0x90, len(rest)) + rest
+
+    def diff(here):
+        return bytes((0xAF, *_long(0x7E0000 + here), 0x38, 0xFF, *_long(0x7E0000 + here)))  # 주인공 - 노인,X
+
+    def primary(here, there, plus, minus, blocked):
+        """차가 3셀 이상이면 그쪽으로 걷는다. 차가 작으면 이 덩어리 끝으로, 막혔으면 그 뒤 blocked 바이트 앞으로 간다."""
+        neg_walk = walk(minus, here, there, -1) + _branch(0x80, blocked)
+        neg = bytes((0xC9, 0xFE)) + _branch(0xB0, len(neg_walk)) + neg_walk
+        pos_walk = walk(plus, here, there, 1) + _branch(0x80, len(neg) + blocked)
+        pos = bytes((0xC9, 0x03)) + _branch(0x90, len(pos_walk) + len(neg)) + pos_walk
+        return diff(here) + _branch(0x30, len(pos)) + pos + neg
+
+    def near(here, there, plus, minus):
+        """다른 축이 막혔을 때. 차가 0 이 아니면 그만큼(2셀까지) 맞춘다. 못 가면 이 덩어리 끝으로."""
+        n2 = walk(minus, here, there, -1)
+        w1n = walk1(minus, there, -1)
+        bra = _branch(0x80, len(n2))
+        neg = bytes((0xC9, 0xFF)) + _branch(0xD0, len(w1n) + len(bra)) + w1n + bra + n2
+        p2 = walk(plus, here, there, 1) + _branch(0x80, len(neg))
+        p1 = walk1(plus, there, 1) + _branch(0x80, len(p2) + len(neg))
+        pos = bytes((0xC9, 0x01)) + _branch(0xD0, len(p1)) + p1 + p2
+        zero = _branch(0xF0, len(pos) + len(neg))
+        return diff(here) + _branch(0x30, len(zero) + len(pos)) + zero + pos + neg
 
     def gap(here, dp):
         return bytes((0xAF, *_long(0x7E0000 + here), 0x38, 0xFF, *_long(0x7E0000 + here), 0x85, dp))  # $dp = 주인공 - 노인
@@ -719,7 +741,15 @@ def _old_man_step():
         push = body + push
     push = (gap(0x3020, 0x00) + gap(0x3080, 0x01) +
             bytes((0xAD, 0x49, 0x07, 0x29, 0x0F, 0x85, 0x02)) + push)   # LDA $0749(1P 패드 위 바이트) / AND #$0F
-    return bytes(a) + push + axis(0x3020, 0x3560, 0x10, 0x20, axis(0x3080, 0x35A0, 0x40, 0x80, out))
+    # X 가 멀면 X, 아니면 Y 가 멀 때 Y. 먼 축이 막히면 FC 처럼 다른 축으로 줄을 맞춘다(1F:DC3E 는 목표 쪽 방향
+    # 후보에 차가 1칸인 축도 넣는다). 맞춘 뒤에도 막혀 있으면 그 자리에서 다음 차례를 기다린다
+    near_x = near(0x3020, 0x3560, 0x10, 0x20)
+    near_y = near(0x3080, 0x35A0, 0x40, 0x80)
+    near_y += _branch(0x80, len(near_x))
+    y_skip = _branch(0x80, len(near_y) + len(near_x))
+    y_first = primary(0x3080, 0x35A0, 0x40, 0x80, len(y_skip) + len(near_y))
+    x_first = primary(0x3020, 0x3560, 0x10, 0x20, len(y_first) + len(y_skip))
+    return bytes(a) + push + x_first + y_first + y_skip + near_y + near_x + out
 
 
 # FC 노인은 인물 표 $70E0 bit3(비켜 서는 인물, 블록 명령 0E)이 켜져 있다. 일행이 그 칸으로 걸어 들어가면 1F:D06E 가 막은
@@ -936,10 +966,11 @@ def native(data=None):
                        ('king_away', _at(None, ch1_cell(0, KING_ROW)[1], away=True)),
                        ('cry_at', _at(*ch1_cell(CRY_FROM, CRY_ROW), x_from=True)),
                        ('level_up', _level_up()), ('open_cage', _open_cage()),
-                       ('old_man_step', _old_man_step()),
                        ('status_count', _status_count())):
         at[name] = CODE_AT + len(out)
         out += code
+    at['old_man_step'] = CODE_AT + len(out)
+    out += _old_man_step(at['old_man_step'])
     events = {}
     for x in (AISLE_X - 2, AISLE_X - 1, AISLE_X, AISLE_X + 1):
         events[x] = CODE_AT + len(out)
