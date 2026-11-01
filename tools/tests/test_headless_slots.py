@@ -62,6 +62,37 @@ class SlotTests(unittest.TestCase):
             child.stdout.close()
         hs.acquire('test', n=1, folder=self.dir, timeout=2, poll=0.02, log=None).release()
 
+    def test_smaller_limit_elsewhere_wins_while_it_runs(self):
+        small = hs.acquire('small', n=1, folder=self.dir, log=None)
+        self.assertEqual(hs.effective_limit(self.dir, 3), 1)
+        with self.assertRaises(TimeoutError):
+            hs.acquire('big', n=3, folder=self.dir, timeout=0.2, poll=0.02, log=self.log)
+        self.assertIn('1개로 줄임', self.log.getvalue())
+        small.release()
+        self.assertEqual(hs.effective_limit(self.dir, 3), 3)
+        held = [hs.acquire('big', n=3, folder=self.dir, timeout=0, log=None) for _ in range(3)]
+        self.assertEqual(sorted(s.index for s in held), [0, 1, 2])
+        for s in held:
+            s.release()
+
+    def test_waiting_process_also_lowers_limit(self):
+        # 기다리는 동안에도 작은 값을 알리므로, 큰 값 쪽이 빈 자리를 먼저 다 채우지 않는다
+        a = hs.acquire('a', n=2, folder=self.dir, log=None)
+        b = hs.acquire('b', n=2, folder=self.dir, log=None)
+        got = []
+        t = threading.Thread(target=lambda: got.append(
+            hs.acquire('small', n=1, folder=self.dir, timeout=5, poll=0.02, log=None)))
+        t.start()
+        time.sleep(0.2)
+        self.assertEqual(hs.effective_limit(self.dir, 2), 1)
+        b.release()
+        with self.assertRaises(TimeoutError):
+            hs.acquire('c', n=2, folder=self.dir, timeout=0.2, poll=0.02, log=None)
+        a.release()
+        t.join(5)
+        self.assertEqual(got[0].index, 0)
+        got[0].release()
+
     def test_off(self):
         for value in ('0', 'off', 'OFF'):
             with mock.patch.dict(os.environ, {hs.ENV: value}):

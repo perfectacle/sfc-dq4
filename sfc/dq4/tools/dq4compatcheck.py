@@ -20,8 +20,10 @@ import concurrent.futures
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -46,7 +48,49 @@ TITLE_BRIGHT = 60                # 끝 상자·메뉴는 어둡고 타이틀(하
 DARK = 20                        # 끝맺음 서술·끝 상자의 검은 화면
 WALK_HOLD, STUCK = 90, 90        # walk.lua 와 같음
 # 멈춘 롬이 검사를 붙잡지 않게. bsnes 가 가장 느리고, 1장 전체가 이 머신에서 3분 안팎
+# 자식이 헤드리스 자리를 잡은 뒤부터 잰다(자리 대기는 넣지 않음)
 UNIT_TIMEOUT, CORE_TIMEOUT = 900, 2400
+STARTED = 'started'
+
+
+def wait_child(proc, out, timeout, extra=lambda: 0.0, kill=None):
+    """자식이 자리를 잡고 out/started 를 쓴 때부터 timeout(+extra())초 안에 끝나기를 기다린다.
+    넘기면 kill(없으면 proc.kill)로 끄고 False. 자리를 기다리는 동안은 재지 않는다."""
+    started = out / STARTED
+    while True:
+        try:
+            proc.wait(timeout=0.5)
+            return True
+        except subprocess.TimeoutExpired:
+            pass
+        if started.exists() and time.time() - started.stat().st_mtime > timeout + extra():
+            (kill or proc.kill)()
+            proc.wait()
+            return False
+
+
+def die_with_parent(group):
+    """부모가 죽으면 스스로 끈다. 코어 프로세스는 새 세션이라 부모를 그룹째 끄는 쪽(guards.py --run)에 함께 걸리지 않는다."""
+    parent = os.getppid()
+
+    def watch():
+        while os.getppid() == parent:
+            time.sleep(1)
+        if group:
+            os.killpg(os.getpgrp(), signal.SIGKILL)
+        os.kill(os.getpid(), signal.SIGKILL)
+    threading.Thread(target=watch, daemon=True).start()
+
+
+def unit_waits(out):
+    """묶음 프로세스들이 자리를 기다린 초의 합. 코어 프로세스의 시간 제한에 더한다(함께 기다리면 겹쳐 세어 넉넉해진다)."""
+    total = 0.0
+    for f in out.glob(f'unit-*/{STARTED}'):
+        try:
+            total += float(f.read_text() or 0)
+        except (OSError, ValueError):
+            pass
+    return total
 
 
 def cpu(off):
@@ -125,6 +169,8 @@ class Walker:
         self.rom.write_bytes(bytes(data))
         self.warp_exit = warp_exit(self.rom)
         self.c = Core(str(core_path), str(self.rom), str(out))
+        # 부모는 이 표지가 생긴 때부터 시간 제한을 잰다
+        (out / STARTED).write_text(f'{self.c.slot.waited:.3f}')
         self.audio, self.rms = [], []
         self.pokes, self.rom_cheats, self.cheat_key = [], {}, None
 
@@ -381,11 +427,12 @@ class Walker:
             cmd = [sys.executable, __file__, '_unit', '--rom', str(rom), '--out', str(dest), '--core-path', str(core_path),
                    '--base', str(base), '--unit', ','.join(map(str, u))]
             why = '묶음 프로세스가 결과를 남기지 않음'
+            (dest / STARTED).unlink(missing_ok=True)
             with (dest / 'log.txt').open('w') as log:
-                try:
-                    subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, timeout=UNIT_TIMEOUT)
-                except subprocess.TimeoutExpired:
-                    why = f'묶음 프로세스가 {UNIT_TIMEOUT}초 안에 끝나지 않음'
+                # 코어 프로세스와 같은 프로세스 그룹에 두어, 코어 프로세스를 그룹째 끄면 함께 꺼지게 한다
+                proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)
+                if not wait_child(proc, dest, UNIT_TIMEOUT):
+                    why = f'묶음 프로세스가 자리를 잡은 뒤 {UNIT_TIMEOUT}초 안에 끝나지 않음'
             f = dest / 'unit.json'
             return json.loads(f.read_text()) if f.exists() else [{'name': wc.SEGMENTS[u[0]][0], 'status': 'failed',
                                                                     'problems': [why], 'index': u[0]}]
@@ -460,6 +507,8 @@ def main():
     ap.add_argument('--unit', help=argparse.SUPPRESS)
     args = ap.parse_args()
     out, rom = args.out.resolve(), args.rom.resolve()
+    if args.mode in ('_core', '_unit'):
+        die_with_parent(group=args.mode == '_core')
     if args.mode == '_unit':
         # 묶음 하나: 서장 끝 상태를 불러 걷고 unit.json 에 결과
         w = Walker(args.core_path, rom, out)
@@ -490,19 +539,16 @@ def main():
         procs = {}
         for name in names:
             with (out / name / 'log.txt').open('w') as log:
+                # 새 세션으로 띄워, 시간을 넘기면 묶음 프로세스까지 그룹째 끈다(코어 프로세스만 끄면 묶음이 자리를 쥔 채 남는다)
                 procs[name] = subprocess.Popen([sys.executable, __file__, '_core', '--core', name, '--rom', str(rom),
                                                 '--out', str(out / name), '--jobs', str(args.jobs)],
-                                               stdout=log, stderr=subprocess.STDOUT)
+                                               stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         report = {'rom_sha1': rom_sha, 'cores': {}}
-        deadline = time.time() + CORE_TIMEOUT
         for name, proc in procs.items():
             why = '코어 프로세스가 결과를 남기지 않음'
-            try:
-                proc.wait(timeout=max(1, deadline - time.time()))
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
-                why = f'코어 프로세스가 {CORE_TIMEOUT}초 안에 끝나지 않음'
+            if not wait_child(proc, out / name, CORE_TIMEOUT, extra=lambda d=out / name: unit_waits(d),
+                              kill=lambda p=proc: os.killpg(p.pid, signal.SIGKILL)):
+                why = f'코어 프로세스가 자리를 잡은 뒤 {CORE_TIMEOUT}초 안에 끝나지 않음'
             f = out / name / 'core.json'
             report['cores'][name] = (json.loads(f.read_text()) if f.exists() else
                                      {'status': 'failed', 'segments': [], 'problems': [why]})

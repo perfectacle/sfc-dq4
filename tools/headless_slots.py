@@ -7,6 +7,10 @@
 
   HEADLESS_SLOTS   자리 수. 기본 max(1, CPU 수 // 2). 0 이나 off 면 제한하지 않는다.
 
+프로세스마다 HEADLESS_SLOTS 가 다르면 지금 자리를 쥐었거나 기다리는 프로세스들의 값 중 가장 작은 것을 모두가
+따른다. 각자 n-<값>.lock 을 공유 잠금으로 쥐고 있어, 그 값을 쓰는 프로세스가 다 끝나면 제한도 풀린다.
+값이 줄기 전에 큰 번호 자리를 잡은 프로세스는 끝날 때까지 그 자리를 쓰므로 잠깐은 작은 값보다 많이 돈다.
+
   with headless_slots.slot('dq4ch1walkcheck') as s:
       subprocess.run([...])
   s.waited  # 자리를 기다린 초
@@ -61,17 +65,20 @@ def slots_dir():
 class Slot:
     """잡은 자리. release() 하거나 프로세스가 끝나면 풀린다. index 가 None 이면 제한 없이 지나온 것."""
 
-    def __init__(self, fd, index, waited):
+    def __init__(self, fd, index, waited, limit_fd=None):
         self.fd, self.index, self.waited = fd, index, waited
+        self._limit_fd = limit_fd
         self._lock = threading.Lock()
 
     def release(self):
         # 여러 스레드가 함께 불러도 한 번만 닫는다. 두 번 닫으면 그새 다른 파일이 받은 번호를 닫는다
         with self._lock:
-            if self.fd is not None:
-                # 잠금은 이 파일 설명자에 붙어 있어 닫으면 풀린다
-                os.close(self.fd)
-                self.fd = None
+            # 잠금은 파일 설명자에 붙어 있어 닫으면 풀린다
+            for attr in ('fd', '_limit_fd'):
+                fd = getattr(self, attr)
+                if fd is not None:
+                    os.close(fd)
+                    setattr(self, attr, None)
 
     def __enter__(self):
         return self
@@ -93,6 +100,33 @@ def _try(folder, i, name):
     return fd
 
 
+def _register(folder, n):
+    """이 프로세스가 n 을 쓴다고 알린다. 쥔 동안 다른 프로세스가 effective_limit 에서 본다."""
+    fd = os.open(folder / f'n-{n}.lock', os.O_RDWR | os.O_CREAT, 0o644)
+    # 다른 프로세스가 살아 있는지 보려고 배타 잠금을 잠깐 걸 때만 막히므로 곧 풀린다
+    fcntl.flock(fd, fcntl.LOCK_SH)
+    return fd
+
+
+def effective_limit(folder, n):
+    """n 과, 지금 다른 프로세스가 쓰는 값 중 가장 작은 것."""
+    for path in folder.glob('n-*.lock'):
+        try:
+            v = int(path.stem[2:])
+        except ValueError:
+            continue
+        if v >= n:
+            continue
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            n = v  # 누군가 공유 잠금으로 쥐고 있다
+        finally:
+            os.close(fd)
+    return n
+
+
 def acquire(name='', n=None, folder=None, timeout=None, poll=POLL, log=sys.stderr):
     """빈 자리를 잡을 때까지 기다린다. timeout 초를 넘기면 TimeoutError. 기다렸으면 log 에 한 줄씩 남긴다."""
     n = limit() if n is None else n
@@ -100,22 +134,29 @@ def acquire(name='', n=None, folder=None, timeout=None, poll=POLL, log=sys.stder
         return Slot(None, None, 0.0)
     folder = Path(folder) if folder else slots_dir()
     folder.mkdir(parents=True, exist_ok=True)
+    limit_fd = _register(folder, n)
     t0 = time.monotonic()
     told = False
-    while True:
-        for i in range(n):
-            fd = _try(folder, i, name)
-            if fd is not None:
-                waited = time.monotonic() - t0
-                if told and log:
-                    print(f'[headless_slots] {name}: 자리 {i} 잡음, {waited:.1f}초 기다림', file=log, flush=True)
-                return Slot(fd, i, waited)
-        if not told and log:
-            print(f'[headless_slots] {name}: 자리 {n}개 모두 사용 중, 기다림 ({folder})', file=log, flush=True)
-        told = True
-        if timeout is not None and time.monotonic() - t0 >= timeout:
-            raise TimeoutError(f'{name}: {timeout}초 안에 빈 자리가 나지 않음')
-        time.sleep(poll)
+    try:
+        while True:
+            m = effective_limit(folder, n)
+            for i in range(m):
+                fd = _try(folder, i, name)
+                if fd is not None:
+                    waited = time.monotonic() - t0
+                    if told and log:
+                        print(f'[headless_slots] {name}: 자리 {i} 잡음, {waited:.1f}초 기다림', file=log, flush=True)
+                    return Slot(fd, i, waited, limit_fd)
+            if not told and log:
+                fewer = f' (다른 프로세스가 {m}개로 줄임)' if m < n else ''
+                print(f'[headless_slots] {name}: 자리 {m}개 모두 사용 중{fewer}, 기다림 ({folder})', file=log, flush=True)
+            told = True
+            if timeout is not None and time.monotonic() - t0 >= timeout:
+                raise TimeoutError(f'{name}: {timeout}초 안에 빈 자리가 나지 않음')
+            time.sleep(poll)
+    except BaseException:
+        os.close(limit_fd)
+        raise
 
 
 @contextlib.contextmanager

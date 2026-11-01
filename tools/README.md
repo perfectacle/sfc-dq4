@@ -90,8 +90,9 @@ FC 원작 분석 도구는 [fc/dq4/tools/README.md](../fc/dq4/tools/README.md), 
 
 - 자리는 원래 체크아웃의 `work/cache/slots/` 에 있는 잠금 파일입니다. 워크트리에서 돌려도 같은 곳을 씁니다. 자리를 쥔 프로세스가 죽으면 잠금이 저절로 풀리므로 파일을 지울 필요가 없습니다.
 - 자리 수는 `HEADLESS_SLOTS` 로 정합니다. 기본은 CPU 수의 절반(최소 1)이고, `0` 이나 `off` 면 제한하지 않습니다.
-- 빈 자리가 없으면 `[headless_slots] <이름>: 자리 N개 모두 사용 중, 기다림` 을 찍고 기다리다가, 잡으면 `자리 i 잡음, X초 기다림` 을 찍습니다. 기다린 시간도 검사의 시간 제한에 듭니다.
-- 자리를 잡는 곳은 `sfc/dq4/tools/dq4mesen.py`(`run`·`Runner`, MesenCE 하나당 하나)와 `sfc/dq4/tools/dq4libretro.py` 의 `Core`(코어 하나당 하나)입니다. MesenCE 를 `subprocess` 로 직접 띄우는 도구는 아직 자리를 잡지 않습니다.
+- 프로세스마다 `HEADLESS_SLOTS` 가 다르면, 지금 자리를 쥐었거나 기다리는 프로세스들의 값 중 가장 작은 값을 모두가 따릅니다. 그 값을 쓰는 프로세스가 다 끝나면 다시 자기 값을 씁니다.
+- 빈 자리가 없으면 `[headless_slots] <이름>: 자리 N개 모두 사용 중, 기다림` 을 찍고 기다리다가, 잡으면 `자리 i 잡음, X초 기다림` 을 찍습니다. 기다린 시간은 `subprocess` 의 시간 제한과 `guards.py --timeout` 에 듭니다(`dq4compatcheck.py` 의 묶음·코어 프로세스 시간 제한은 자리를 잡은 뒤부터 잽니다).
+- 자리를 잡는 곳은 `sfc/dq4/tools/dq4mesen.py`(`run`·`Runner`, MesenCE 하나당 하나. `Runner` 는 자리를 잡은 뒤 `timeout`(기본 900초)을 넘기면 MesenCE 를 끕니다)와 `sfc/dq4/tools/dq4libretro.py` 의 `Core`(코어 하나당 하나)입니다. MesenCE 를 `subprocess` 로 직접 띄우는 도구는 아직 자리를 잡지 않습니다.
 - 새 도구에서 쓰려면 띄우는 자리를 감쌉니다.
 
 ```python

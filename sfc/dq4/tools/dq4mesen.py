@@ -20,6 +20,8 @@ sys.path.append(str(Path(__file__).resolve().parents[3] / 'tools'))
 import headless_slots  # noqa: E402
 
 ARGS = ('--Snes.DisableFrameSkipping=true',)
+# Runner 의 기본 시간 상한(초)
+RUNNER_TIMEOUT = 900
 
 
 def save_dirs(mesence=None):
@@ -60,10 +62,15 @@ def unique_copy(rom, folder, tag='probe'):
 
 
 class Runner:
-    """Popen 으로 띄운다. wait() 가 끝나기를 기다리고 복사본과 기록을 치운다."""
+    """Popen 으로 띄운다. wait() 가 끝나기를 기다리고 복사본과 기록을 치운다.
 
-    def __init__(self, mesence, rom, script, folder, tag='probe', extra=ARGS, **kwargs):
+    timeout 초(자리를 잡은 뒤부터)를 넘기면 MesenCE 를 끈다. 멈춘 MesenCE 가 자리를 계속 쥐지 않게 한다.
+    """
+
+    def __init__(self, mesence, rom, script, folder, tag='probe', extra=ARGS, timeout=RUNNER_TIMEOUT, **kwargs):
         self.mesence = mesence
+        self.timeout = timeout
+        self.timed_out = False
         self.rom = unique_copy(rom, folder, tag)
         clear_saves(self.rom, mesence)
         self.slot = headless_slots.acquire(f'MesenCE {tag}')
@@ -77,8 +84,17 @@ class Runner:
         threading.Thread(target=self._release_on_exit, daemon=True).start()
 
     def _release_on_exit(self):
-        self.proc.wait()
+        try:
+            self.proc.wait(timeout=self.timeout)
+        except subprocess.TimeoutExpired:
+            self.timed_out = True
+            self._kill()
         self.slot.release()
+
+    def _kill(self):
+        if self.proc.poll() is None:
+            self.proc.kill()
+            self.proc.wait()
 
     def wait(self):
         try:
@@ -87,6 +103,8 @@ class Runner:
             self.close()
 
     def close(self):
+        # KeyboardInterrupt 등으로 MesenCE 가 살아 있을 때 불려도, 끄기 전에는 자리와 롬 복사본을 놓지 않는다
+        self._kill()
         self.slot.release()
         clear_saves(self.rom, self.mesence)
         self.rom.unlink(missing_ok=True)

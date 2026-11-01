@@ -88,6 +88,27 @@ class MesenTests(unittest.TestCase):
         mesen.run(self.fake, self.rom, 'probe.lua', folder=self.dir / 'work', env=dict(os.environ), check=True)
         mesen.headless_slots.acquire('test', timeout=0, log=None).release()
 
+    def hanging(self):
+        fake = self.dir / 'Hang'
+        fake.write_text(f'#!{sys.executable}\nimport time\ntime.sleep(60)\n')
+        fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+        return fake
+
+    def test_runner_timeout_kills_and_frees_slot(self):
+        runner = mesen.Runner(self.hanging(), self.rom, 'probe.lua', self.dir / 'work', timeout=0.5,
+                              env=dict(os.environ))
+        mesen.headless_slots.acquire('test', timeout=5, log=None).release()
+        self.assertTrue(runner.timed_out)
+        self.assertNotEqual(runner.wait(), 0)
+
+    def test_runner_close_kills_live_mesence_first(self):
+        work = self.dir / 'work'
+        runner = mesen.Runner(self.hanging(), self.rom, 'probe.lua', work, env=dict(os.environ))
+        runner.close()
+        self.assertIsNotNone(runner.proc.poll())
+        self.assertEqual(list(work.iterdir()), [])
+        mesen.headless_slots.acquire('test', timeout=0, log=None).release()
+
     def test_clear_saves_only_touches_that_name(self):
         (self.saves / 'a.srm').write_bytes(b'')
         (self.saves / 'b.srm').write_bytes(b'')
