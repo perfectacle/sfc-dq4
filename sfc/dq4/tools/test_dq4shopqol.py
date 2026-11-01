@@ -35,14 +35,44 @@ class BuyConfirmTest(unittest.TestCase):
         self.assertNotIn('감사합니다', dq4sysmsg.SPEECH[0x009])
 
     def test_hooks_both_buy_paths_in_bank_06(self):
-        for site in ('$06DCDF', '$06DDFC'):
-            self.assertRegex(ASM, rf'org {re.escape(site)}\n    JSR ShopBuyConfirm')
+        self.assertRegex(ASM, r'org \$06DCDF\n    JSR ShopBuyTool')
+        self.assertRegex(ASM, r'org \$06DDFC\n    JSR ShopBuyEquip')
         body = ASM[ASM.index('ShopBuyConfirm:'):]
-        body = body[:body.index('warnpc')]
+        body = body[:body.index('assert pc()')]
         # 창(BRK 95)은 뱅크 06 에서 불러야 돈다. 뱅크 06 코드는 JSR 로 들어와 JSR 로 원래 루틴을 부른다
         self.assertNotIn('JSL', body)
         for need in ('JSR $F602', 'JSR $DFC4', 'JMP $DC2F', 'db $00, $95, $32'):
             self.assertIn(need, body)
+
+
+class MultiBuyTest(unittest.TestCase):
+    def test_messages(self):
+        for n in (0x09C, 0x09D, 0x0AB, 0x0C3):
+            self.assertIn('몇 개', dq4sysmsg.SPEECH[n])
+        self.assertIn('dw $009C, $009D, $00AB, $00C3', ASM)
+
+    def test_tool_path_asks_quantity_in_bank_06(self):
+        body = ASM[ASM.index('ShopBuyTool:'):]
+        body = body[:body.index('assert pc()')]
+        # 창(BRK 95)은 뱅크 06 코드에서. 수 창 5C 의 끝 자리 $0B02 를 개수로, 나머지 개수는 물건을 줄 때 더 준다
+        for need in ('db $00, $95, $5C', 'JSL ShopQtyMax', '$0B02', 'JMP ShopBuyConfirm', 'ShopGiveExtra:'):
+            self.assertIn(need, body)
+        self.assertRegex(ASM, r'org \$06DD39\n    JSR ShopGiveExtra')
+        # 장비 갈래도 06:DE77 → 06:DCFF 로 06:DD39 를 지난다. 남은 $0F21(팔기 등의 사람 번호)만큼 더 주지 않게 1 을 둔다
+        equip = ASM[ASM.index('ShopBuyEquip:'):]
+        self.assertTrue(equip.startswith('ShopBuyEquip:\n    LDA #$01\n    STA.w $0F21\n'))
+        tool = ASM[ASM.index('ShopBuyTool:'):]
+        self.assertIn('STA.w $0F21', tool[:tool.index('JSL ShopQtyMax')])
+
+
+class LowBankTest(unittest.TestCase):
+    def test_brk_helpers_below_bank_40(self):
+        # BRK 처리기는 DB 를 부른 뱅크로 둔다. 뱅크 40 이상(창 코드의 60)에서 부르면 WRAM 대신 열린 버스를 읽는다
+        start = ASM.index('org !shop_low_spot')
+        end = ASM.index('assert pc() <= !shop_low_end')
+        for name in ('ShopHeldCount:', 'ShopQtyMax:', 'ShopQtyTotal:'):
+            self.assertTrue(start < ASM.index(name) < end, name)
+        self.assertNotIn('org', ASM[start + 4:end])
 
 
 class SellPriceTest(unittest.TestCase):
