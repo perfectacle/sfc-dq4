@@ -86,6 +86,14 @@ why = "그림 번호 + 맵 그룹 → 세트 훅 표(dq4people.HOOK_AT)"
 earlier = "chapter1"
 later = "people"
 reuse = true
+at = "39:F000~39:FFFF"
+max = 4096
+why = "세트 타일(dq4people.TILE_AREAS 의 39:F000~, 맵 레코드 자리 39 의 끝 4KB. 레코드는 39:8000 부터 참)"
+
+[[overlap]]
+earlier = "chapter1"
+later = "people"
+reuse = true
 at = "3F:EB80~3F:FFFF"
 why = "세트 타일(dq4people.TILE_AREAS 의 3F:EB80~, 인물 목록 끝과 띄움)"
 
@@ -275,8 +283,8 @@ why = "세트 89 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 
 
 [[original]]
 stage = "people"
-at = "0E:C3F8~0E:C8F3"
-why = "세트 8B 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+at = "0E:C121~0E:C8F3"
+why = "이어 붙은 세트 8A·8B 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people). 8A 는 다른 세트가 넘침 자리로 옮겨 갈 때 제자리에 들어가기도 함"
 
 [[original]]
 stage = "people"

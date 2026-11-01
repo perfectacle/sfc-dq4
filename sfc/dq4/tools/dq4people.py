@@ -101,7 +101,8 @@ PEOPLE = (
     Person((0x9B,), None, 'h153', '피사로의 부하', anim='frames', main=True, spare=0x6F,
            allow=('왼쪽=오른쪽 반전',)),
     Person((0x0E,), PROLOGUE, 'h143', '신시아', main=True, spare=0x2D),
-    Person((0x50,), None, 'h174', '개구리', anim='frames', main=True, outline=True),  # 풀·나뭇잎과 같은 초록이라
+    # 개구리는 서장에만 나오고 그림 50 은 다른 그룹에서 슬라임이라, 개구리는 쓰지 않는 그림 93 의 세트를 빌린다
+    Person((0x50,), PROLOGUE, 'h174', '개구리', anim='frames', main=True, outline=True, spare=0x93),  # 풀·나뭇잎과 같은 초록이라
     Person((0x08,), PROLOGUE, 'h019', '검사', main=True, spare=0x90),
     Person((0x17,), PROLOGUE, 'h003', '어머니', spare=0x39),
     Person((0x09,), PROLOGUE, 'h002', '아버지', spare=0x8D),
@@ -118,13 +119,19 @@ PEOPLE = (
     Person((0x15,), None, 'h021', '신부'),
     Person((0x05,), None, 'h022', '수녀'),
     Person((0x1F,), None, 'h033', '학자'),
-    Person((0x42,), None, 'h010', '여행 상인', spare=0x89),
+    # FC 그림 40(뿔 달린 지팡이 마물: 1장 탑 꼭대기의 마물, 4장 バルザック). NDS 는 이들을 필드 오브젝트로 두지 않아
+    # 생김새가 가장 가까운 붉은 뿔 마물 h171 을 쓴다
+    Person((0x42,), None, 'h171', '마물', anim='frames', spare=0x89),
     Person((0x20,), None, 'h044', '개', anim='frames', spare=0x75),
     Person((0x19,), None, 'h003', '아주머니'),
     Person((0x07,), None, 'h011', '거친 남자'),
     Person((0x82,), None, 'h029', '하녀', spare=0x5D),
     Person((0x0C,), None, 'h031', '시인', spare=0x92),
     Person((0x40,), None, 'h009', '상인'),
+    Person((0x50,), None, 'h180', '슬라임', anim='frames'),
+    # FC 그림 25 의 고양이(「にゃーん」). NDS 이무르 may1f2 의 ネコ 가 모습 2F(h047). DQ5 에 고양이 그림이 없어 쓰지 않는
+    # 그림 24 의 세트에 싣는다
+    Person((0x24,), None, 'h047', '고양이', anim='frames'),
     # 2장 일행. 크리프트·브라이는 사람 동료 그림 표(COMPANION_PICTURES)의 인물 09·05 칸이 그림을 고른다
     Person((ALENA_PICTURE,), None, 'h109', '아리나', main=True, palette=7, flag=CHAPTER2, leader=True),
     Person((KIRYL_PICTURE,), None, 'h112', '크리프트', main=True, palette=6, flag=CHAPTER2),
@@ -143,10 +150,12 @@ MAP_GROUP = 0x7E00BC
 DQ4_GROUPS = frozenset(range(0x36, 0x46))            # dq4groupbuild 가 만드는 DQ4 맵 그룹
 # 원래 자리에 들어가지 않는 타일 자료를 나눠 담는 곳(뱅크 3F 이하여야 레코드가 가리킴). 곡 롬의 0 끝 줄 안. 3F 는 앞쪽을
 # 인물 목록(dq4chapter1.NPC_BANK, 인라인 스크립트 포함)이 쓰므로 그 끝과 겹치지 않게 띄운다
-# 3C:F040~ 는 그룹 빌드(3A~3F)가 채운 뒤 남는 끝자리. 37·39·36:9E00~ 는 맵 레코드 자리(dq4chapter1.RECORDS_AT)라 쓰지 않는다
+# 3C:F040~ 는 그룹 빌드(3A~3F)가 채운 뒤 남는 끝자리. 37·36:9E00~ 는 맵 레코드 자리(dq4chapter1.RECORDS_AT)라 쓰지 않는다.
+# 39 도 레코드 자리의 마지막이지만 레코드는 앞(8000)부터 차므로 끝 4KB 만 쓴다. 레코드가 거기까지 자라면 tile_areas 가
+# 쓰인 끝 뒤로 미루고, 자리가 모자라면 멈춘다
 # 3D:FA80~FD90 은 맵 팔레트 표(MAP_PALETTES_AT) 뒤의 남는 자리. 표가 자라 겹치면 apply_writes 가 멈춘다
 TILE_AREAS = (('3E:D700', 0xFC00 - 0xD700), ('3F:EB80', 0x10000 - 0xEB80), ('3C:F040', 0xFE00 - 0xF040),
-              ('3D:FA80', 0xFD90 - 0xFA80))
+              ('3D:FA80', 0xFD90 - 0xFA80), ('39:F000', 0x10000 - 0xF000))
 PALETTES_AT, HOOK_AT = '3D:EA00', '3E:FC00'
 MAP_PALETTES_AT = '3D:EB60'                       # 맵 팔레트 줄 루틴·표를 옮길 곳(세트 팔레트 표 뒤 빈 자리)
 

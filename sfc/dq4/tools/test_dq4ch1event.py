@@ -331,7 +331,7 @@ class FlyTest(unittest.TestCase):
         self.assertEqual(out[ev.lorom(ev.GUEST_PICTURE_AT):][:2], bytes((0x29, 0x3F)))
         code = ev._followers(ev.CODE_AT)
         # 프레아 하나, 아이 둘을 더하는 부름
-        self.assertEqual(code.count(bytes((0xA9, 0x09, 0x20))), 1)
+        self.assertEqual(code.count(bytes((0xA9, 0x17, 0x20))), 1)
         self.assertEqual(code.count(bytes((0xA9, 0x0B, 0x20))), ev.KIDS_WALKING)
         self.assertEqual(code[-1], 0x60)
 
