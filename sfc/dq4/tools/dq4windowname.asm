@@ -91,6 +91,52 @@ org $04C508
     JML ShopHeldCount
     NOP #2
 
+; 가게 사기의 도구·장비 갈래가 값을 $0F28~ 에 두는 STA $0F28 / LDA $47 / STA $0F29 / LDA $48 / STA $0F2A.
+; 다음 JSR $F5E9 가 돈을 뺀다
+org $06DCDF
+    JSR ShopBuyConfirm
+    NOP #10
+org $06DDFC
+    JSR ShopBuyConfirm
+    NOP #10
+
+; 값을 $0F28~ 에 둔 뒤, 돈이 되면(06:F602, C = 모자람) 창을 닫고 「{N}골드인데 사시겠어요?」(메시지 묶음 19 = 064~067)와
+; 예/아니요를 묻는다. 예거나 돈이 모자라면 돌아가 06:F5E9 가 원래대로 돈을 빼거나 「돈이 모자란」 메시지를 낸다.
+; 아니요·B 면 돌아갈 자리를 버리고 「그래요? 아쉽네요」(묶음 18) 뒤 물건 목록(06:DC2F)으로 간다. 그 사이 스크립트는
+; 스택을 쌓지 않는다. 창(BRK 95)·메시지는 스크립트 뱅크 06 안에서 불러야 해 뱅크 06 끝에 둔다(뱅크 60 에서 부르면 멈춤)
+org !shop_buy_spot
+ShopBuyConfirm:
+    LDA.b $46
+    STA.w $0F28
+    LDA.b $47
+    STA.w $0F29
+    LDA.b $48
+    STA.w $0F2A
+    JSR $F602
+    BCS .done
+    LDA.w $0F28
+    STA.b $F5
+    LDA.w $0F29
+    STA.b $F6
+    LDA.w $0F2A
+    STA.b $F7
+    db $00, $95, $00        ; BRK 95 00: 「누가」·소지품 창을 닫는다. 열린 채면 메시지가 찍히지 않는다
+    LDA #!shop_buy_ask
+    JSR $DFC4
+    db $00, $95, $32        ; BRK 95 32: 예/아니요
+    LDA.b $E8
+    BNE .no
+.done
+    RTS
+.no
+    PLA
+    PLA
+    db $00, $95, $00
+    LDA #$18
+    JSR $DFC4
+    db $00, $97, $13
+    JMP $DC2F
+
 ; 창 바이트 갈래(메뉴 패치의 JSL). 고정 문구 접두를 먼저 가르고, 나머지는 원래 대상으로.
 org $04B11E
     JSL WnPrefix
