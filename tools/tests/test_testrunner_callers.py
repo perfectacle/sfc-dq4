@@ -13,6 +13,8 @@ RUNNERS = {'sfc/dq4/tools/dq4mesen.py', 'sfc/dq5/tools/dq5mesen.py'}
 LAUNCH = {('subprocess', name) for name in ('run', 'Popen', 'call', 'check_call', 'check_output')} | {
     ('os', name) for name in ('system', 'popen', 'execv', 'execve', 'execvp', 'execvpe', 'spawnv', 'spawnve')}
 EMULATOR = {'mesence', 'mesen'}
+# 이 파일도 저장소 검사에 들므로 낱말을 쪼개 둔다
+FLAG = '--' + 'testrunner'
 
 
 def _docstrings(tree):
@@ -43,8 +45,8 @@ def problems(source, name='<src>'):
     found = []
     for node in ast.walk(tree):
         if (isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docs
-                and '--testrunner' in node.value.split()):
-            found.append(f'{name}:{node.lineno}: --testrunner')
+                and FLAG in node.value.split()):
+            found.append(f'{name}:{node.lineno}: {FLAG}')
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                 and isinstance(node.func.value, ast.Name) and (node.func.value.id, node.func.attr) in LAUNCH):
             continue
@@ -75,8 +77,7 @@ dq5mesen.testrunner(mesence, rom, lua, timeout=9)
 subprocess.run([sys.executable, 'dq5x.py', '--mesence', mesence])
 subprocess.run(['krpatch', 'sfc', 'lua'])
 '''
-        # 이 파일도 저장소 검사에 걸리므로 docstring 속 낱말은 띄울 때 만든다
-        self.assertEqual(problems(src.replace('@TR', '--' + 'testrunner')), [])
+        self.assertEqual(problems(src.replace('@TR', FLAG)), [])
 
 
 class RepoTests(unittest.TestCase):

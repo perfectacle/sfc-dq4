@@ -12,6 +12,8 @@ import sys
 sys.path.append(str(Path(__file__).resolve().parents[3] / 'tools'))
 import headless_slots  # noqa: E402
 
+TESTRUNNER = '--testrunner'
+
 
 def _name(tag):
     return f'MesenCE {tag or Path(sys.argv[0]).stem}'
@@ -19,9 +21,9 @@ def _name(tag):
 
 def testrunner(mesence, *args, tag=None, **kwargs):
     """subprocess.run 과 같다. TimeoutExpired 는 그대로 올린다(MesenCE 는 꺼진 뒤다)."""
-    return headless_slots.run([mesence, '--testrunner', *args], _name(tag), **kwargs)
+    return headless_slots.run([mesence, TESTRUNNER, *args], _name(tag), **kwargs)
 
 
 def testrunner_popen(mesence, *args, tag=None, timeout=None, **kwargs):
     """subprocess.Popen 과 같다. timeout 초를 넘기면 끈다."""
-    return headless_slots.popen([mesence, '--testrunner', *args], _name(tag), timeout=timeout, **kwargs)
+    return headless_slots.popen([mesence, TESTRUNNER, *args], _name(tag), timeout=timeout, **kwargs)

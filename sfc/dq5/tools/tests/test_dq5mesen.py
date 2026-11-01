@@ -43,12 +43,12 @@ class Dq5MesenTests(unittest.TestCase):
     def test_testrunner(self):
         done = dq5mesen.testrunner(self.fake, 'r.sfc', 'p.lua', '--Snes.DisableFrameSkipping=true',
                                    capture_output=True, text=True, timeout=30)
-        self.assertEqual(done.stdout.split(), ['busy', '--testrunner', 'r.sfc', 'p.lua', '--Snes.DisableFrameSkipping=true'])
+        self.assertEqual(done.stdout.split(), ['busy', dq5mesen.TESTRUNNER, 'r.sfc', 'p.lua', '--Snes.DisableFrameSkipping=true'])
 
     def test_testrunner_popen(self):
         p = dq5mesen.testrunner_popen(str(self.fake), 'r.sfc', 'p.lua', stdout=subprocess.PIPE, text=True)
         out, _ = p.communicate(timeout=30)
-        self.assertEqual(out.split(), ['busy', '--testrunner', 'r.sfc', 'p.lua'])
+        self.assertEqual(out.split(), ['busy', dq5mesen.TESTRUNNER, 'r.sfc', 'p.lua'])
 
 
 if __name__ == '__main__':
