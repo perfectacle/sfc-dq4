@@ -151,6 +151,48 @@ class InstallTests(unittest.TestCase):
         self.assertTrue(code.endswith(bytes.fromhex('08 E2 20 48 A9 0C 5C 83 FF 24')))
         self.assertEqual(report['effect_remaps'], {'37-14': '45-03'})
 
+    def test_item_sound_hooks_the_item_message_and_plays_only_for_search_callers(self):
+        base = bytearray(self.base)
+        site = lorom(patch.ITEM_SOUND_SITE)
+        base[site:site + 7] = patch.ITEM_SOUND_ORIGINAL + patch.ITEM_SOUND_NEXT
+        for caller in patch.ITEM_SOUND_CALLERS:
+            base[lorom(caller):lorom(caller) + 3] = bytes.fromhex('20 3B F4')
+        out, report = patch.install(bytes(base), {2: self.item}, item_sound=(0x3F, 0x01))
+        self.assertEqual(out[site:site + 7], bytes([0x22]) + patch.ITEM_SOUND.to_bytes(3, 'little') + patch.ITEM_SOUND_NEXT)
+        code = patch.item_sound_code((0x3F, 0x01))
+        self.assertEqual(out[lorom(patch.ITEM_SOUND):lorom(patch.ITEM_SOUND) + len(code)], code)
+        # 항아리·통·옷장의 JSR 복귀 값과 견주고, 효과음을 낸 뒤 원래 두 명령(SEP #20 / STA $F5)을 하고 돌아간다
+        for caller in patch.ITEM_SOUND_CALLERS:
+            self.assertIn(bytes([0xC9]) + ((caller + 2) & 0xFFFF).to_bytes(2, 'little'), code)
+        self.assertIn(bytes.fromhex('A9 3F A2 01 22 AC FE 24'), code)
+        self.assertTrue(code.endswith(bytes.fromhex('68 28 E2 20 85 F5 6B')))
+        # 메시지 BRK 는 원래 뱅크에 남긴다(뱅크 71 에서 BRK 를 부르면 처리기가 WRAM 을 읽지 못함)
+        self.assertNotIn(bytes.fromhex('00 98'), code)
+        self.assertEqual(report['item_sound'], '3F-01')
+        # 메시지 자리가 다르면(다른 빌드) 거부한다
+        base[site + 4] = 0xEA
+        with self.assertRaises(ValueError):
+            patch.install(bytes(base), {2: self.item}, item_sound=(0x3F, 0x01))
+
+    def test_inn_jingle_starts_before_the_morning_map_reload(self):
+        base = bytearray(self.base)
+        fade_site, wait_site = lorom(patch.INN_FADE_SITE), lorom(patch.INN_WAIT_SITE)
+        base[fade_site:fade_site + 4] = patch.INN_FADE_ORIGINAL
+        base[wait_site:wait_site + 4] = patch.INN_WAIT_ORIGINAL
+        out, report = patch.install(bytes(base), {2: self.item}, inn_jingle=True)
+        fade, wait = patch.inn_jingle_code()
+        self.assertEqual(out[fade_site:fade_site + 4], bytes([0x22]) + patch.INN_JINGLE.to_bytes(3, 'little'))
+        self.assertEqual(out[wait_site:wait_site + 4], bytes([0x22]) + (patch.INN_JINGLE + len(fade)).to_bytes(3, 'little'))
+        at = lorom(patch.INN_JINGLE)
+        self.assertEqual(out[at:at + len(fade) + len(wait)], fade + wait)
+        # 21DF 에 징글을 남기고 01 로 튼 뒤 화면을 어둡게 하고 대기열이 빌 때까지 기다린다(1A 는 보내지 않음)
+        self.assertIn(bytes.fromhex('A9 9D 8F DF 21 7E A9 1D 22 9A FE 24 28 22 4E 95 00 22 44 FE 24 6B'), fade)
+        self.assertNotIn(bytes.fromhex('22 91 FE 24'), fade)
+        # 징글 몫이면 21DF 를 지우고 끝을 기다려 맵 곡으로, 아니면 원래 25:FD00
+        self.assertIn(bytes.fromhex('A9 00 8F DF 21 7E 22 44 FE 24 68 22 0F FF 24 22 61 CE 00'), wait)
+        self.assertTrue(wait.endswith(bytes.fromhex('68 28 5C 00 FD 25')))
+        self.assertTrue(report['inn_jingle'])
+
     def test_resident_wave_replaces_only_a_resident_sample_no_larger_than_before(self):
         small = brr.resource(bytes(18), 1, pitch=0x0831)
         out, _ = patch.install(self.base, {2: self.item}, resident_waves={0x20: small})

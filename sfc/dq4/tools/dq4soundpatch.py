@@ -599,6 +599,72 @@ def effect_remap_code(remaps, base=EFFECT_REMAP):
     return _asm_far(items, base)
 
 
+ITEM_SOUND = CODE + 0xD00
+# 물건을 주는 12:F43B(REP #20 / PHX / LDA $1E73 / CMP #0100 / BCS) 가 「なんと！ Xを みつけた！」(메시지 12E)를 띄우는 곳:
+# SEP #20 / STA $F5(물건) / BRK 98 2E. 상자·발밑·항아리·통·옷장이 모두 JSR 로 이 루틴을 부른다
+ITEM_SOUND_SITE = 0x12F446
+ITEM_SOUND_ORIGINAL = bytes.fromhex('E2 20 85 F5')
+ITEM_SOUND_NEXT = bytes.fromhex('00 98 2E')
+# 소리를 내는 부르는 곳(JSR F43B 의 첫 바이트): 항아리(메시지 135 뒤)·통(149 뒤)·옷장(12F 뒤). JSR 이 넣는 복귀 값은 +2
+ITEM_SOUND_CALLERS = (0x12EFF4, 0x12F021, 0x12F055)
+
+
+def item_sound_code(effect, callers=ITEM_SOUND_CALLERS):
+    """조사로 항아리·통·옷장에서 물건을 찾은 메시지(12E) 바로 앞에서 효과음 (시퀀스, 갈래)를 낸다. 상자 등 다른 곳에서 부른
+    때는 내지 않는다. 12:F446 의 SEP #20 / STA $F5 대신 불려 그 둘을 여기서 하고 돌아가므로, 메시지 BRK 는 원래 뱅크에서
+    돈다(BRK 처리기는 DB 를 부른 뱅크로 두어 뱅크 40 이상에서는 WRAM 을 읽지 못함). 부른 곳은 스택에서 F43B 의 PHX(X
+    너비에 따라 1·2바이트) 아래 JSR 복귀 값으로 가린다."""
+    seq, branch = effect
+    if not (0x32 <= seq < 0x47 and 0 <= branch < 0x21):
+        raise ValueError('item sound: effect 32..46, branch 00..20')
+    h = bytes.fromhex
+    # 스택: [A 2][P][이 JSL 복귀 3][F43B 의 X 1·2][JSR 복귀 2]
+    items = [h('08 C2 30 48 A3 03 29 10 00'), ('b', 0xD0, 'x8'),       # PHP / REP #30 / PHA / LDA $03,S / AND #0010 / BNE
+             h('A3 09'), ('b', 0x80, 'got'), ('label', 'x8'), h('A3 08'), ('label', 'got')]
+    for at in callers:
+        if at >> 16 != ITEM_SOUND_SITE >> 16:
+            raise ValueError(f'{at:06X}: callers JSR within bank {ITEM_SOUND_SITE >> 16:02X}')
+        items += [h('C9') + ((at + 2) & 0xFFFF).to_bytes(2, 'little'), ('b', 0xF0, 'play')]
+    items += [('b', 0x80, 'done'), ('label', 'play'),
+              h(f'DA 5A E2 30 A9 {seq:02X} A2 {branch:02X} 22 AC FE 24 C2 30 7A FA'),   # PHX / PHY / … JSL 24:FEAC / PLY / PLX
+              ('label', 'done'), h('68 28 E2 20 85 F5 6B')]                           # PLA / PLP / SEP #20 / STA $F5 / RTL
+    return _asm_far(items, ITEM_SOUND)
+
+
+INN_JINGLE = CODE + 0xD80
+INN_SONG = 0x1D
+# 여관(06:E384)의 「ごゆっくり」 뒤: BRK 0E(A 기다림) / JSL 00:954E(화면 어둡게) / BRK 95 FF / JSR E43A(아침으로, 맵을
+# 다시 불러옴) / BIT $0F1B / BVC E422 → E422: LDA #1D / JSL 25:FD00(1A·01 1D·대기열 비우기·곡 끝 기다림·맵 곡)
+INN_FADE_SITE = 0x06E3FF
+INN_FADE_ORIGINAL = bytes.fromhex('22 4E 95 00')
+INN_WAIT_SITE = 0x06E424
+INN_WAIT_ORIGINAL = bytes.fromhex('22 00 FD 25')
+LASTING_SONG = 0x7E21DF  # 곡 | 80 이면 맵을 다시 불러와도 그 곡이 남음(이벤트 명령 C8)
+
+
+def inn_jingle_code(base=INN_JINGLE):
+    """(화면을 어둡게 하는 자리 코드, 징글 끝을 기다리는 자리 코드). 원래는 아침 맵을 다시 불러온 뒤에 징글을 보내고,
+    맵을 불러오는 동안(NMI 꺼짐)에는 곡 틀기가 미뤄져 화면이 다 어두워진 뒤 약 130프레임에야 울렸다.
+    화면을 어둡게 하기 전에 21DF 로 징글을 남겨 둔 채 틀고(01. 앞 곡 정리 1A 는 보내지 않음: 01 이 앞 곡을 줄여 끝냄),
+    대기열이 다 넘어간 뒤 맵을 다시 불러온다. 징글이 끝나면 21DF 를 지우고 원래처럼 맵 곡으로 돌아간다.
+    $0F1B bit6(징글 없는 갈래)이거나 이미 남겨 둔 곡이 있으면 원래 흐름 그대로다."""
+    h = bytes.fromhex
+    lasting = LASTING_SONG.to_bytes(3, 'little')
+    mark = INN_SONG | 0x80
+    fade = _asm_far([h('08 E2 20 2C 1B 0F'), ('b', 0x70, 'dq5'),                # PHP / SEP #20 / BIT $0F1B / BVS
+                     h('AF') + lasting, ('b', 0xD0, 'dq5'),                     # LDA 21DF / BNE
+                     h(f'A9 {mark:02X} 8F') + lasting,                          # LDA #9D / STA 21DF
+                     h(f'A9 {INN_SONG:02X} 22 9A FE 24'),                       # LDA #1D / JSL 24:FE9A(01)
+                     h('28 22 4E 95 00 22 44 FE 24 6B'),                        # PLP / JSL 00:954E / JSL 24:FE44 / RTL
+                     ('label', 'dq5'), h('28 5C 4E 95 00')], base)              # PLP / JML 00:954E
+    wait = _asm_far([h('08 E2 20 48') + h('AF') + lasting + h(f'C9 {mark:02X}'), ('b', 0xD0, 'dq5'),
+                     h('A9 00 8F') + lasting,                                   # 21DF = 0
+                     h('22 44 FE 24 68 22 0F FF 24 22 61 CE 00 28 6B'),         # JSL FE44 / PLA / JSL FF0F / JSL CE61
+                     ('label', 'dq5'), h('68 28 5C 00 FD 25')],                 # PLA / PLP / JML 25:FD00
+                    base + len(fade))
+    return fade, wait
+
+
 def weapon_sound_code(bare, songs, base=WEAPON_SOUND):
     """28:805C 대신(8비트 A·X). 지금 곡($1D8B)이 songs 가운데 하나이고 대기열에 보내는 중인 칸(bit7·bit6, FF 아님)이 없으면
     무기 번호($0DA7)로 WEAPON_SEQ_TABLE·WEAPON_BRANCH_TABLE 을 보고 그 (효과음, 갈래)를 28:804A 로 낸다. bare 는 맨손의
@@ -954,7 +1020,8 @@ def write_resident_samples(data, ids):
 def install(base, replacements, *, sample_resources=None, map_fades=False, preview=None, pinned=(),
             resident=None, set_records=None, fast_receive=False, chains=None, chain_late=(), hold=False, early_song=False, load_pump=False,
             vehicle_song=False, keep_samples=False, release_failed=False, unpin=(), resident_waves=None, weapon_sounds=None,
-            effect_calls=None, release_pending=False, tick_scan=False, effect_remaps=None):
+            effect_calls=None, release_pending=False, tick_scan=False, effect_remaps=None,
+            item_sound=None, inn_jingle=False):
     """pinned 는 늘 두는 시퀀스 목록에 남길 바꾸는 곡(나머지 바꾸는 곡은 목록에서 뺌). resident 는 새 늘 두는 샘플 목록
     전체(주지 않으면 그대로). set_records 는 바꾸지 않는 곡의 곡 묶음 레코드 {곡: (k, 샘플…)}.
     fast_receive 는 SPC 자료 받기를 묶음 여러 개 이어 받게 바꾼다(fast_receive_code). chains 는 {곡: 본체 시퀀스} 로,
@@ -972,6 +1039,8 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
     그 갈래로 낸다(weapon_sound_code). 그 효과음 샘플을 곡들의 레코드에 붙이는 것은 replacements 몫이다.
     effect_calls 는 {롬 주소: (원래 효과음, 새 효과음)} 로, 그 자리의 효과음 부르기 BRK 16·19 n X 의 n 을 바꾼다.
     effect_remaps 는 {(효과음, 갈래): (새 효과음, 새 갈래)} 로, 효과음 대기열 입구에서 늘 바꿔 부른다(effect_remap_code).
+    item_sound 는 (효과음, 갈래) 로, 항아리·통·옷장에서 물건을 찾은 메시지 앞에서 낸다(item_sound_code).
+    inn_jingle 은 여관 징글을 화면이 어두워질 때 틀고 아침 맵은 그 뒤에 불러온다(inn_jingle_code).
     release_pending 은 곡 뒤 샘플이 오기 전에 끝난 곡의 샘플을 SPC 기다림 목록에서 지운다(pending_release_code).
     tick_scan 은 곡 자리 틱마다 트랙을 차례 수만큼 다시 훑던 고리를 한 번 훑기로 바꾼다(tick_scan_code).
     """
@@ -1219,11 +1288,27 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
         data[pos + 2] = new
     if effect_remaps:
         code = effect_remap_code(effect_remaps)
-        if EFFECT_REMAP + len(code) > CODE + 0x1000:
+        if EFFECT_REMAP + len(code) > ITEM_SOUND:
             raise ValueError('effect remap code overflows its area')
         write(EFFECT_REMAP, code, empty=True)
         write(EFFECT_REMAP_SITE, bytes([0x5C]) + EFFECT_REMAP.to_bytes(3, 'little') + bytes([0xEA] * 5),
               EFFECT_REMAP_ORIGINAL)
+    if item_sound:
+        write(ITEM_SOUND, item_sound_code(item_sound), empty=True)
+        at = lorom(ITEM_SOUND_SITE) + len(ITEM_SOUND_ORIGINAL)
+        if data[at:at + len(ITEM_SOUND_NEXT)] != ITEM_SOUND_NEXT:
+            raise ValueError(f'{ITEM_SOUND_SITE:06X}: not the item message')
+        for caller in ITEM_SOUND_CALLERS:
+            if data[lorom(caller):lorom(caller) + 3] != bytes.fromhex('20 3B F4'):
+                raise ValueError(f'{caller:06X}: not JSR F43B')
+        write(ITEM_SOUND_SITE, bytes([0x22]) + ITEM_SOUND.to_bytes(3, 'little'), ITEM_SOUND_ORIGINAL)
+    if inn_jingle:
+        fade, wait = inn_jingle_code()
+        if INN_JINGLE + len(fade) + len(wait) > CODE + 0x1000:
+            raise ValueError('inn jingle code overflows its area')
+        write(INN_JINGLE, fade + wait, empty=True)
+        write(INN_FADE_SITE, bytes([0x22]) + INN_JINGLE.to_bytes(3, 'little'), INN_FADE_ORIGINAL)
+        write(INN_WAIT_SITE, bytes([0x22]) + (INN_JINGLE + len(fade)).to_bytes(3, 'little'), INN_WAIT_ORIGINAL)
     if weapon_sounds:
         sounds, songs = weapon_sounds
         code = weapon_sound_code(sounds.get(BARE_HANDS), songs)
@@ -1259,6 +1344,8 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
                     'weapon_sounds': {'songs': [f'{x:02X}' for x in sorted(weapon_sounds[1])],
                                       'items': {f'{k:02X}': f'{a:02X}-{b:02X}' for k, (a, b) in sorted(weapon_sounds[0].items())}}
                     if weapon_sounds else None,
+                    'item_sound': f'{item_sound[0]:02X}-{item_sound[1]:02X}' if item_sound else None,
+                    'inn_jingle': bool(inn_jingle),
                     'effect_remaps': {f'{a:02X}-{b:02X}': f'{c:02X}-{d:02X}' for (a, b), (c, d) in sorted((effect_remaps or {}).items())},
                     'effect_calls': {f'{a:06X}': f'{o:02X} -> {n:02X}' for a, (o, n) in sorted((effect_calls or {}).items())},
                     'pinned_sequences': [f'{x:02X}' for x in pinned_sequences(result)],

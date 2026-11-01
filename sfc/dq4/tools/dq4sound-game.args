@@ -614,6 +614,12 @@
 40=00-3C,00-3D
 --sfx-pcm
 3F-00=13A
+--sfx-pcm
+3F-01=146
+--sfx-sub
+3F-01=00-48:00-4E
+--sfx-item
+3F-01
 --sfx-keep
 3F=
 --sfx-call
@@ -636,6 +642,8 @@
 44=0:
 --sfx-gain-db
 3F-00=4.3
+--sfx-gain-db
+3F-01=-3.2
 --sfx-gain-db
 40-01=2.2
 --sfx-gain-db
@@ -770,3 +778,4 @@
 45-03=-2.3
 --sfx-gain-db
 45-04=-5.3
+--inn-jingle
