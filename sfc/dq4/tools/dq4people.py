@@ -119,9 +119,6 @@ PEOPLE = (
     Person((0x15,), None, 'h021', '신부'),
     Person((0x05,), None, 'h022', '수녀'),
     Person((0x1F,), None, 'h033', '학자'),
-    # FC 그림 40(뿔 달린 지팡이 마물: 1장 탑 꼭대기의 마물, 4장 バルザック). NDS 는 이들을 필드 오브젝트로 두지 않아
-    # 생김새가 가장 가까운 붉은 뿔 마물 h171 을 쓴다
-    Person((0x42,), None, 'h171', '마물', anim='frames', spare=0x89),
     Person((0x20,), None, 'h044', '개', anim='frames', spare=0x75),
     Person((0x19,), None, 'h003', '아주머니'),
     Person((0x07,), None, 'h011', '거친 남자'),

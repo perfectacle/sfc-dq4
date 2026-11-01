@@ -76,7 +76,7 @@ PICTURES = {
     0x28: 0x19,  # woman
     0x36: 0x05,  # nun
     0x27: 0x4E,  # fire (48 is on the list of pictures nobody talks to, 05:862F)
-    0x40: 0x42,  # horned monster with a staff (NDS h171, dq4people)
+    0x40: 0x9B,  # horned monster in a robe with a staff: Pisaro's minion, as 0x41 (NDS ピサロの手先 h153)
     0x41: 0x9B,  # purple monster
     0x45: 0x1F,  # wizard
     0x3D: 0x5B,  # heal slime
