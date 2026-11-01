@@ -355,3 +355,54 @@ paths = [
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4battlescene.py --rom work/ch1/dq4-ch1-full.sfc --out work/battlescene --seeds 0,1,2 --jobs 4"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
+
+[[check]]
+name = "dq4-sfx-scene"
+why = "효과음 대응표(dq4sound-game.args)의 항목마다 게임 동작(문·계단·상자·항아리·메뉴·대화·여관·교회·전투 공격·무기 27가지·주문·맞음·빗나감·회심·보스·スカラ·도망·레벨 업·서장 수련·개구리)을 해서 소리 대기열에 기대한 (명령, 효과음, 갈래)가 들어가고 SPC 목소리가 실제로 울리는지(bsnes·snes9x). 부르는 자리(--sfx-call)와 무기 표는 롬 바이트로도 본다"
+paths = [
+  "sfc/dq4/tools/dq4sound-game.args",
+  "sfc/dq4/tools/dq4sound*.py",
+  "sfc/dq4/tools/dq4sparfx.py",
+  "sfc/dq4/tools/dq4prologue.py",
+  "sfc/dq4/tools/dq4menupatch.py",
+  "sfc/dq4/tools/dq4door.py",
+  "sfc/dq4/tools/dq4ch1event.py",
+  "sfc/dq4/tools/dq4sfxscene.py",
+  "sfc/dq4/tools/dq4savefixture.py",
+  "sfc/dq4/tools/dq4compatcheck.py",
+  "sfc/dq4/tools/dq4libretro.py",
+  "sfc/dq4/tools/dq4cores.py",
+  "sfc/dq4/tools/dq4battlecheck.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/dq4prologuecheck.py",
+  "sfc/dq4/tools/dq4build.py",
+  "sfc/dq5/tools/dq5exitcheck.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4sfxscene.py --rom work/ch1/dq4-ch1-full.sfc --out work/sfxscene --jobs 4"
+needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
+
+[[check]]
+name = "dq4-title-scene"
+why = "배포 롬을 전원부터: 서곡이 지금 곡이 되어 울리고 타이틀이 밝아지는지, 기록 없을 때 메뉴에서 이름 입력으로 가는지, 이름 조합·B·「지우기」·다섯째 글자 거절(거절음)이 커서·조합 상태까지 모델과 같은지, Y 뒤 서장 맵·무음 곡·이름 바이트, 새 기록이 밑판과 이름·체크섬만 다른지, 그 기록으로 이어 하기(bsnes·snes9x)"
+paths = [
+  "sfc/dq4/tools/dq4nameentry.py",
+  "sfc/dq4/tools/dq4nameentry.asm",
+  "sfc/dq4/tools/dq4namegame.py",
+  "sfc/dq4/tools/dq4menupatch.py",
+  "sfc/dq4/tools/dq4menumsg.py",
+  "sfc/dq4/tools/dq4title*.py",
+  "sfc/dq4/tools/dq4title*.asm",
+  "sfc/dq4/tools/dq4overture.py",
+  "sfc/dq4/tools/dq4chapter1.py",
+  "sfc/dq4/tools/dq4chapterbox.py",
+  "sfc/dq4/tools/dq4prologue.py",
+  "sfc/dq4/tools/dq4titlescene.py",
+  "sfc/dq4/tools/dq4sfxscene.py",
+  "sfc/dq4/tools/dq4compatcheck.py",
+  "sfc/dq4/tools/dq4savefixture.py",
+  "sfc/dq4/tools/dq4libretro.py",
+  "sfc/dq4/tools/dq4cores.py",
+  "sfc/dq5/tools/dq5sram.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4titlescene.py --rom work/ch1/dq4-ch1-full.sfc --out work/titlescene"
+needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
