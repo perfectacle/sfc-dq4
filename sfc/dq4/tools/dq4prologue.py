@@ -195,9 +195,16 @@ MOTHER_SRC, MOTHER_SCRIPT = {"list": "05:B48B", "index": 3}, "05:B4A7"
 # 집의 식탁 (4,11) 과 의자 (3,11)·(5,11). 아버지는 오른쪽, 어머니는 왼쪽 의자, 주인공은 식탁 아래쪽 (4,12) 에서 위를 봄.
 # 주인공이 식탁 위쪽에 서면 카메라가 주인공을 가운데에 두어 식탁·부모가 아래 메시지 창에 가렸다
 FATHER_SEAT, MOTHER_PATH = (5, 0x11), [(3, 0x10), (3, 0x11)]
-# 주인공은 아버지 오른쪽 칸 (6,12) 에서 말을 건다. 아버지가 의자로 간 뒤 왼쪽으로 2칸(DQ5 셀 4)
-HERO_TO_SEAT = ((0x02, 4),)
+# 주인공은 아버지의 오른쪽·왼쪽·위(의자 칸) 어디서든 말을 걸 수 있다. 끝 이벤트는 그 자리에서 세로 먼저 식탁 아래쪽
+# (4,12) 셀 (8,37) 까지 걷는다(hero_goto). 위에서 말을 걸면 아버지가 의자로 가며 주인공과 겹치므로 아버지·어머니는 1C
+HERO_AT = (8, 37)
+HERO_LEGS = (('y', HERO_AT[1]), ('x', HERO_AT[0]))
 HERO_AT_TABLE = 0x80             # 명령 C1 의 방향: 위
+# hero_goto 가 걸음 이벤트를 만드는 자리. 7E:1BBE~ 의 DQ5 가 쓰지 않는 칸 가운데 1BC0~1BCF(조사·서장·1장)와
+# 1BE0~1BE7(이름 입력) 뒤, 1BFF~(DQ5 바위 자리) 앞의 빈 곳. 앞붙임 8 + 걸음 세 구간 6 + 점프 4 바이트
+ROUTE_BUF, ROUTE_MAX = 0x7E1BE8, 20
+# 이벤트 걸음 방향(dq5-event-format 의 00~0F d n): (X 를 늘림, 줄임), (Y 를 늘림, 줄임)
+STEP_X, STEP_Y = (0x01, 0x02), (0x04, 0x08)
 # 1장 왕좌의 방 첫 자리(dq4chapter1.START)와 같은 칸
 CHAPTER1_AT = (0x36, 0x01, 32, 42)
 
@@ -208,6 +215,54 @@ def _event_start(script):
     return (box.ENTER + bytes((0xA9, script & 0xFF, 0x8D, 0xB3, 0x19, 0xA9, script >> 8 & 0xFF, 0x8D, 0xB4, 0x19,
                                0xA9, script >> 16, 0x8D, 0xB5, 0x19,
                                0xAD, 0xAE, 0x19, 0x09, 0x80, 0x8D, 0xAE, 0x19)) + box.LEAVE)
+
+
+def hero_goto(legs, then, prefix=b''):
+    """인물 스크립트(명령 37)에서: 주인공(슬롯 0)을 지금 선 셀에서 legs 차례대로 걷게 하는 이벤트를 ROUTE_BUF 에 만들어
+    건다. legs 는 ('x' 또는 'y', 목표 셀)이고, 이벤트는 prefix → 구간마다 그 축으로 목표까지 → C3 then(롬의 이어질
+    이벤트)이다. 축마다 첫 구간만 주인공 자리(7E:3020·3080)에서 걸음 수를 세고, 같은 축의 다음 구간은 앞 구간의 목표에서
+    센다. 이벤트 리더(00:BED2)는 LDA [$80] 로 읽어 WRAM 의 스크립트도 돈다. 이벤트 걸음은 벽을 지나가므로(실측) 길이
+    벽·인물을 넘지 않게 구간을 고른다. 걸음 수 0 은 255 걸음이 되어 넣지 않는다."""
+    if len(prefix) + 2 * len(legs) + 4 > ROUTE_MAX:
+        raise ValueError('hero_goto: 길이 ROUTE_BUF 보다 길다')
+    buf = ROUTE_BUF.to_bytes(3, 'little')
+    put_a = bytes((0x9F, *buf, 0xE8))                   # STA buf,X / INX
+
+    def put(value):
+        return bytes((0xA9, value)) + put_a
+
+    def axis(table, goal, steps):
+        plus, minus = steps
+        neg = bytes((0x49, 0xFF, 0x1A, 0x48, 0xA9, plus)) + put_a + bytes((0x68,)) + put_a      # 목표가 큼: -차
+        pos = bytes((0x48, 0xA9, minus)) + put_a + bytes((0x68,)) + put_a
+        pos += bytes((0x80, len(neg)))
+        return (bytes((0xAF, table & 0xFF, table >> 8, 0x7E, 0x29, 0x7F, 0x38, 0xE9, goal,   # 주인공 - 목표
+                       0xF0, 2 + len(pos) + len(neg), 0x90, len(pos))) + pos + neg)
+    body, known = bytearray(), {}
+    for name, goal in legs:
+        table, steps = {'x': (0x3020, STEP_X), 'y': (0x3080, STEP_Y)}[name]
+        if name in known:
+            if goal != known[name]:
+                body += put(steps[0] if goal > known[name] else steps[1]) + put(abs(goal - known[name]))
+        else:
+            body += axis(table, goal, steps)
+        known[name] = goal
+    body = (bytes((0xE2, 0x30, 0xA2, 0x00)) + b''.join(put(b) for b in prefix) + bytes(body) +
+            b''.join(put(b) for b in (0xC3, *then.to_bytes(3, 'little'))))
+    start = bytes((0xA9, buf[0], 0x8D, 0xB3, 0x19, 0xA9, buf[1], 0x8D, 0xB4, 0x19, 0xA9, buf[2], 0x8D, 0xB5, 0x19,
+                   0xAD, 0xAE, 0x19, 0x09, 0x80, 0x8D, 0xAE, 0x19))
+    return box.ENTER + body + start + box.LEAVE
+
+
+def route(start, legs, prefix=b''):
+    """hero_goto 가 주인공이 start 셀 (x, y) 에 있을 때 만들 이벤트(C3 앞까지)."""
+    out, here = bytearray(prefix), {'x': start[0], 'y': start[1]}
+    for name, goal in legs:
+        plus, minus = STEP_X if name == 'x' else STEP_Y
+        if here[name] != goal:
+            out += bytes((plus if here[name] < goal else minus, abs(here[name] - goal)))
+        here[name] = goal
+    return bytes(out)
 
 
 FADE_SPEED = 0x40   # 곡 줄이기(소리 명령 04)의 X. dq4overture 가 서곡을 줄일 때와 같은 값
@@ -418,11 +473,11 @@ def native():
         put('hero_right', _hero_face(0x11))
         put('hero_up', _hero_face(0x88))
         put('skip_song', _skip_song())
-        # 저녁: 주인공이 식탁 아래에서 위를 봄(C1 80) → 저녁 대사 → 끝: 검은 화면 → 서술 → 곡 건너뛰기 →
+        # 저녁: 주인공이 말을 건 칸에서 식탁 아래까지 걸어(hero_goto) 위를 봄(C1 80) → 저녁 대사 → 끝: 검은 화면 → 서술 → 곡 건너뛰기 →
         # 1장 왕좌의 방으로(이벤트 명령 90, $198E = 80)
         put('end_event', b''.join(bytes((0x60, t[1] & 0xFF, t[1] >> 8)) if isinstance(t, tuple) else t
                                   for t in end_event(at)))
-        put('end', _event_start(at.get('end_event', 0)))
+        put('end', hero_goto(HERO_LEGS, at.get('end_event', 0)))
         return bytes(out), a
     _, at = layout({})
     return layout(at)
@@ -432,7 +487,7 @@ def end_event(at):
     """저녁 끝 이벤트의 토큰 목록: 바이트, 또는 메시지(이벤트 명령 60)는 ('msg', 번호). dq4msgwait 가 메시지 끝 코드를
     고를 때도 이 목록을 본다."""
     g, n, x, y = CHAPTER1_AT
-    return ([bytes(b for d, k in HERO_TO_SEAT for b in (d, k)) + bytes((0xC1, HERO_AT_TABLE))] +
+    return ([bytes((0xC1, HERO_AT_TABLE))] +
             # C1 은 31E0 만 바꿔 그림(자세 3240·3260)이 앞모습으로 남았다
             [bytes((0xA0, *_long(at.get('hero_up', 0))))] +
             [('msg', m) for m in M_SUPPER_LINES] +
@@ -498,7 +553,7 @@ def master_script(boxes):
     _, at = native()
     head = [_cmd('3F'), _cmd('37', *_long(at['quiet'])), _cmd('37', *_long(boxes[SCENE.name])), _cmd('37', *_long(at['spar'])),
             _cmd('37', *_long(at['reveal_slow'])), _cmd('37', *_long(at['talk_here'])), _wait_on(DONE)]
-    tail = [_msg(M_AFTER)] + _walk(MASTER_OUT) + [_cmd('28'), _cmd('40'), _cmd('16')]
+    tail = [_msg(M_AFTER), _cmd('1C')] + _walk(MASTER_OUT) + [_cmd('28'), _cmd('40'), _cmd('16')]
     return {"address": MASTER_SCRIPT, "commands": head + tail}
 
 
@@ -536,10 +591,11 @@ def scripts():
              _msg(M_MORPH), _msg(M_MIMIC), _msg(M_SORRY)] + _spin(at) +
             # 51 은 안 보이게만 해 말을 걸 수 있는 채로 남는다. 52 로 자리를 치운다
             [_cmd('51'), _cmd('52'), _cmd('10', *MORPH_BACK), _cmd('16')])
-    # 대답하면 부모가 의자로 가고, 아버지가 저녁 이벤트를 건다(이벤트는 메인 문맥에서 주인공을 걷게 하고 대사를 띄움)
-    father = ([_wait_on(SUPPER), _cmd('3F')] + _walk([FATHER_SEAT]) + [_cmd('2F', 0x20), _cmd('37', *_long(at['wait'])),
+    # 대답하면 부모가 의자로 가고, 아버지가 저녁 이벤트를 건다(이벤트는 메인 문맥에서 주인공을 걷게 하고 대사를 띄움).
+    # 조작을 막은 채 걸으므로 1C: 의자 칸에서 말을 건 주인공에 막히면 저녁이 멈췄다
+    father = ([_wait_on(SUPPER), _cmd('3F'), _cmd('1C')] + _walk([FATHER_SEAT]) + [_cmd('2F', 0x20), _cmd('37', *_long(at['wait'])),
               _cmd('37', *_long(at['end'])), _cmd('16')])
-    mother = [_wait_on(SUPPER)] + _walk(MOTHER_PATH) + [_cmd('2F', 0x10), _cmd('16')]
+    mother = [_wait_on(SUPPER), _cmd('1C')] + _walk(MOTHER_PATH) + [_cmd('2F', 0x10), _cmd('16')]
     return [{"address": FROG_SCRIPT, "commands": frog}, {"address": SHINSIA_SCRIPT, "commands": shinsia},
             {"address": FORM_SCRIPT, "commands": form}, {"address": FATHER_SCRIPT, "commands": father},
             {"address": MOTHER_SCRIPT, "commands": mother}]

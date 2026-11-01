@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import dq4ch1event as ev  # noqa: E402
+import dq4prologue as pro  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[3]
 DQ4 = ROOT / "rom" / "dq4.nes"
@@ -421,20 +422,26 @@ class FlyTest(unittest.TestCase):
         branch = next(c for c in cmds if c["op"] == '06' and c["args"] == [0x80 | ev.KIDS_FOLLOW[0], ev.KIDS_FOLLOW[1]])
         self.assertEqual(branch["target"], "praise")
         calls = [c["args"] for c in cmds if c["op"] == '37']
-        want = ['walk_in', 'status_count', 'level_up'] + [f'stat_{k}' for k, _ in ev.STATS] + ['level_up', 'walk_back',
+        want = ['settle', 'walk_in', 'status_count', 'level_up'] + [f'stat_{k}' for k, _ in ev.STATS] + ['level_up', 'walk_back',
                                                                                          'walk_out']
         self.assertEqual(calls, [ev._long(at[n]) for n in want])
         self.assertIn({"op": "10", "args": list(ev.REPORTED)}, cmds)
 
     def test_walk_in_lands_in_the_aisle(self):
-        for x in (ev.AISLE_X - 2, ev.AISLE_X - 1, ev.AISLE_X, ev.AISLE_X + 1):
-            code = ev._walk_in_event(x)
-            self.assertEqual(code[:ev.LINEUP_WAIT], bytes((0xC2,)) * ev.LINEUP_WAIT)
-            dx = 0
-            for d, n in zip(code[ev.LINEUP_WAIT:-1:2], code[ev.LINEUP_WAIT + 1:-1:2]):
-                dx += {ev.RIGHT: n, ev.LEFT: -n}.get(d, 0)
-            self.assertEqual(x + dx, ev.AISLE_X)
-            self.assertEqual(code[-3:], bytes((ev.UP, ev.KING_STEPS, 0xFF)))
+        # 줄의 어느 칸에서든 병사를 기다린 뒤 줄 → 통로 → 왕 앞 줄(그 자리에서 만드는 길은 test_dq4heroblock)
+        for x in range(ev.LINEUP_X[0], ev.LINEUP_X[1] + 1):
+            for y in range(ev.LINEUP_Y[0], ev.LINEUP_Y[1] + 1):
+                code = pro.route((x, y), ev._walk_legs(), bytes((0xC2,)) * ev.LINEUP_WAIT)
+                self.assertEqual(code[:ev.LINEUP_WAIT], bytes((0xC2,)) * ev.LINEUP_WAIT)
+                self.assertEqual(code[-2:], bytes((ev.UP, ev.KING_STEPS)))
+
+    def test_king_waits_for_the_line_again_after_kids(self):
+        # 아이들을 돌려보내라 한 뒤에는 줄 판정부터 다시: 왕 앞 줄의 다른 X 에서 물러나기·나가기 걸음이 벽에 막히지 않게
+        cmds = ev._king_call(ev.message_ids(0xF00), ev.native()[1])
+        back = next(i for i, c in enumerate(cmds) if c["op"] == '03')
+        target = next(c for c in cmds if c.get("label") == cmds[back]["target"])
+        self.assertEqual(target["op"], '05')
+        self.assertEqual(target["args"], ev._long(ev.native()[1]['lineup_row']))
 
     def test_status_window_opens_without_brk(self):
         code = ev._status_count()

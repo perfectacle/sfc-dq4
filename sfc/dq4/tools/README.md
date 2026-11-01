@@ -42,6 +42,7 @@
 | `dq4compatcheck.py walk\|probe --rom 롬 --out 폴더 [--core all\|bsnes\|snes9x]` | 호환성 검사. `walk` 는 libretro bsnes·snes9x 에서 1장 걷기 구간을 처음부터 끝 리셋까지 이어 걷기(`LIBRETRO_BSNES`·`LIBRETRO_SNES9X`), `probe` 는 MesenCE 1장 걷기에 `lua/dq4openbus.lua` 를 붙여 뱅크 `40`~`7D` 아래 절반 접근과 높은 뱅크 BRK 를 보고 실패 판정(`MESENCE`·`LIBDIR`). `guards.toml` 의 실행 검사. [호환성 검사](../docs/dq4-compat-format.md) |
 | `dq4brkscan.py` | 서장·사건·장 상자 코드를 흐름을 따라 역어셈블해 높은 뱅크 BRK 가 허용 목록(`ALLOWED`) 안인지(롬 없음, CI `test_dq4brkscan.py`) |
 | `dq4libretro.py` | 헤드리스 libretro 프런트엔드(입력·WRAM·화면·소리·상태·cheat). `dq4compatcheck.py` 가 씀 |
+| `dq4heroblockcheck.py --rom 롬 --out 폴더 [--jobs N] [--only 사례…] [--base hub/end.mss]` | 주인공이 선 칸 때문에 사건이 멈추거나 주인공 걸음이 엇나가지 않는지 보는 MesenCE 헤드리스 검사. 사건(서장 저녁·신시아, 1장 탑 병사·우는 아이·납치·왕의 귀환)마다 그 사건을 걸 수 있는 칸을 모두 사례로 두고 6개씩 함께 돌린다(31사례, 약 2분). 난수·시각·걸음 전투를 묶는다. `MESENCE`·`LIBDIR` 필요. [주인공이 막는 사건](../docs/dq4-prologue-format.md#주인공이-막는-사건) |
 | `dq4ch1savecheck.py --rom 롬 --states 걷기출력 --out 폴더 [--only 장면…]` | 1장 걷기 검사의 구간 끝 세이브스테이트 다섯에서 바트랜드 교회로 가 기록 → 리셋 → 이어 하기, 그리고 우물 아래 전멸 → 교회를 보는 MesenCE 헤드리스 검사. 이어 하기 루틴이 돌고 로고 장면이 불리지 않는지, 불러온 `7E:2000`~`2A9F` 가 기록 칸과 같은지, 깃발·인물 대화 번호가 기록할 때와 같은지 봄. `MESENCE`·`LIBDIR` 필요. [1장 검증](../docs/dq4-chapter1-format.md#저장과-이어-하기) |
 | `dq4menumsg.py [그림]` | `dq4menupatch.py build` 가 부르는 메뉴 메시지 모듈. 보행 메시지를 새 허프만 트리로 뱅크 `65`~ 에 옮기고 한글 글자를 넣음. 직접 실행하면 세 메시지 미리보기. [메뉴 메시지](../docs/dq4-menu-format.md#메뉴-메시지) |
 | `dq4nameentrycheck.py --rom 롬 --symbols 심볼 --out 새폴더` | MesenCE에서 조합·삭제·Y 완료·새 게임 이름을 검사하고 입력 칸 VRAM을 비교. `MESENCE` 실행 파일 필요. [재현](../docs/dq4-name-entry-format.md#재현) |
@@ -59,6 +60,7 @@
 | `lua/dq4bg3slotwarp.lua` | `dq4bg3slotcheck.py` 가 부름. `dq5warp.lua` 를 돌리며 30프레임마다 맵, `$0725`, 타일맵과 버퍼 `7E:5000` 차이, 옛 자리 `1C00`~`1FFF` 변화를 `bg3.txt` 에 적음. `SHOTS` 프레임 화면도 남김 |
 | `lua/dq4walkstate.lua` | `dq4ch1walkcheck.py` 가 부름. `WALK`(tools/lua/walk.lua)를 그대로 돌리며 메시지 루틴 `24:8BAF` 가 받은 번호와 프레임을 `walk.txt` 끝에 덧붙이고, 끝 프레임에 세이브스테이트 `SAVE` 를 남김. `SET` 은 불러온 바로 뒤 한 번 WRAM 을 고침 |
 | `lua/dq4openbus.lua` | 뱅크 `40`~`7D` 아래 절반 읽기·쓰기와 높은 뱅크가 부른 BRK 를 PC 별로 `OPENBUS_LOG` 에 적고 `PROBE_TARGET` 스크립트를 이어 돎(`dq4compatcheck.py probe`) |
+| `lua/dq4heroblock.lua` | `dq4heroblockcheck.py` 가 부름. `WALK_STATE`(dq4walkstate.lua)를 그대로 돌리며, 메시지 루틴 `24:8BAF` 가 `SNAPMSG` 번호를 처음 받은 뒤 `SNAPDELAY` 프레임(기본 40)에 `SNAPWATCH` 값을 `snap.txt`, 화면을 `snap.png` 로 남김 |
 | `dq4battlecheck.py --rom 롬 --out 폴더 [--base 서장끝.mss] [--repeat 2] [--scenes 장면…]` | 조우 루틴 `23:E7C2` 를 정한 무리로 덮어 필드·탑 `39/01` 에서 걸음 전투를 붙이고, 이기기·도망 뒤 무리·금화·돌아온 맵·칸·곡·화면·걷기를 보고, 같은 세이브스테이트에서 두 번 돌려 기록이 같은지 보는 MesenCE 헤드리스 검사. `lua/dq4battle.lua` 를 씀. [걸음 전투 검사](../docs/dq4-chapter1-format.md#걸음-전투-검사) |
 | `lua/dq4battle.lua` | `dq4battlecheck.py` 가 부름. 한 걸음 내디뎌 전투(`01:860D`)가 걸리면 `KEYS` 를 차례로 누르고, 끝나(`00:82BE`) 돌아온 맵·칸·곡·금화를 `battle.txt` 에, 화면을 `start.png`·`fight.png`·`after.png` 로 |
 | `dq4soundcatalog.py --assets 폴더 [--dq5-rom 롬] --out JSON` | NDS 곡·효과음 목록, FC 장면 대응, DQ5 재사용 후보와 숙박곡 비교. [사운드 포팅](../docs/dq4-sound-port-format.md) |

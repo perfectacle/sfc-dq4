@@ -314,3 +314,4 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [2026-11-01-26: 여관 징글 앞당기기와 물건을 찾을 때의 소리](journal/2026-11-01-26-inn-jingle-item-sound.md)
 - [2026-11-01-27: 가게에서 사기 전에 확인](journal/2026-11-01-27-shop-buy-confirm.md)
 - [2026-11-01-28: snes9x·bsnes 로 1장 끝까지 걷기와 회귀 가드](journal/2026-11-01-28-compat-walk.md)
+- [2026-11-01-29: 주인공이 선 자리 때문에 멈추는 사건](journal/2026-11-01-29-hero-block-events.md)
