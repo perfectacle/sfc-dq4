@@ -192,10 +192,12 @@ SHINSIA_SRC, SHINSIA_SCRIPT = {"list": "05:B2EE", "index": 7}, "05:B386"
 FORM_SRC, FORM_SCRIPT = {"list": "05:B2EE", "index": 8}, "05:B3B3"
 FATHER_SRC, FATHER_SCRIPT = {"list": "05:B466", "index": 0}, "05:B46D"
 MOTHER_SRC, MOTHER_SCRIPT = {"list": "05:B48B", "index": 3}, "05:B4A7"
-# 집의 식탁 (4,11) 과 의자 (3,11)·(5,11). 아버지는 오른쪽, 어머니는 왼쪽 의자, 주인공은 식탁 위쪽 (4,10) 에서 아래를 봄
+# 집의 식탁 (4,11) 과 의자 (3,11)·(5,11). 아버지는 오른쪽, 어머니는 왼쪽 의자, 주인공은 식탁 아래쪽 (4,12) 에서 위를 봄.
+# 주인공이 식탁 위쪽에 서면 카메라가 주인공을 가운데에 두어 식탁·부모가 아래 메시지 창에 가렸다
 FATHER_SEAT, MOTHER_PATH = (5, 0x11), [(3, 0x10), (3, 0x11)]
-# 주인공은 아버지 오른쪽 칸 (6,12) 에서 말을 건다. 거기서 위로 2칸, 왼쪽으로 2칸(DQ5 셀 4·4)
-HERO_TO_SEAT = ((0x08, 4), (0x02, 4))
+# 주인공은 아버지 오른쪽 칸 (6,12) 에서 말을 건다. 아버지가 의자로 간 뒤 왼쪽으로 2칸(DQ5 셀 4)
+HERO_TO_SEAT = ((0x02, 4),)
+HERO_AT_TABLE = 0x80             # 명령 C1 의 방향: 위
 # 1장 왕좌의 방 첫 자리(dq4chapter1.START)와 같은 칸
 CHAPTER1_AT = (0x36, 0x01, 32, 42)
 
@@ -415,7 +417,7 @@ def native():
             put(name, _inside(*rect))
         put('hero_right', _hero_face(0x11))
         put('skip_song', _skip_song())
-        # 저녁: 주인공이 식탁에 앉아 아래를 봄(C1 40) → 저녁 대사 → 끝: 검은 화면 → 서술 → 곡 건너뛰기 →
+        # 저녁: 주인공이 식탁 아래에서 위를 봄(C1 80) → 저녁 대사 → 끝: 검은 화면 → 서술 → 곡 건너뛰기 →
         # 1장 왕좌의 방으로(이벤트 명령 90, $198E = 80)
         put('end_event', b''.join(bytes((0x60, t[1] & 0xFF, t[1] >> 8)) if isinstance(t, tuple) else t
                                   for t in end_event(at)))
@@ -429,7 +431,7 @@ def end_event(at):
     """저녁 끝 이벤트의 토큰 목록: 바이트, 또는 메시지(이벤트 명령 60)는 ('msg', 번호). dq4msgwait 가 메시지 끝 코드를
     고를 때도 이 목록을 본다."""
     g, n, x, y = CHAPTER1_AT
-    return ([bytes(b for d, k in HERO_TO_SEAT for b in (d, k)) + bytes((0xC1, 0x40))] +
+    return ([bytes(b for d, k in HERO_TO_SEAT for b in (d, k)) + bytes((0xC1, HERO_AT_TABLE))] +
             [('msg', m) for m in M_SUPPER_LINES] +
             [bytes((0x10, *DINNER, 0xA0, *_long(at.get('darken', 0)))), ('msg', M_STORY_BEGINS),
              bytes((0xA0, *_long(at.get('skip_song', 0)), 0x90, g, n, x, y, 0x01, 0x80, 0xFF))])
