@@ -150,6 +150,7 @@ LINE_WINDOWS = {0x2D: 1, 0x82: 0, 0x83: 0}
 EMPTY_SLOT = 'しようしていません'
 CANNOT_SELL = 'うれません'
 HELD_COUNT = [f'もっている{n}' for n in range(1, 13)]
+FIXED_PREFIX_LIMIT = 0xFE          # 9E k 의 k 는 한 바이트, FE·FF 는 창 바이트의 제어 코드와 겹친다
 TITLE_COUNT = 0x2B              # 제목 2B 부터는 목록 뒤의 코드
 # 열 머리 제목(11 「レベル　　こうげき　　しゅび」). 가나 끝이 아래 숫자 열의 오른쪽 끝과 맞으므로, 짧은 한글은 가나 자리
 # 안에서 오른쪽에 붙인다(남는 칸을 앞에)
@@ -501,6 +502,8 @@ def build(data, font):
             placed[blob] = DATA + len(body)
             body += blob
         index[FIXED_KIND * 0x200 + k * 2:FIXED_KIND * 0x200 + k * 2 + 2] = placed[blob].to_bytes(2, 'little')
+    if len(phrases()) > FIXED_PREFIX_LIMIT:
+        raise ValueError(f'고정 문구 {len(phrases())}개: 번호 k 가 한 바이트(FE 미만)를 넘음')
     report[FIXED_KIND] = (len(phrases()), len(phrases()))
     narrow = None
     for kind, (table, limit, strict) in KINDS.items():
