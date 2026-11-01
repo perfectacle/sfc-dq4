@@ -82,9 +82,26 @@ class PrologueTests(unittest.TestCase):
         for script in pro.scripts()[1:3]:
             ops = [(c['op'], c['args']) for c in script['commands']]
             first = ops.index(('1E', [pro.SPIN_SPEED]))
-            self.assertEqual([op for op, _ in ops[first + 1:first + 17]], ['2F', '37'] * 8)
+            self.assertEqual([op for op, _ in ops[first + 1:first + 17]], ['37'] * 16)
             self.assertEqual(ops[first + 17], ('1E', [pro.WALK_SPEED]))
             self.assertNotIn(('1E', [pro.SPIN_SPEED]), ops[first + 1:])
+
+    def test_morph_spin_ends_facing_the_hero_before_vanishing(self):
+        # 정해 둔 방향(2F)으로 돌면 늘 오른쪽 보기로 끝나 그대로 사라졌다. 돌기는 지금 방향의 다음으로 일곱 번,
+        # 여덟째에 주인공 쪽을 보고, 그 그림이 그려질 차례(wait1)를 지난 뒤 사라진다(51)
+        _, at = pro.native()
+        call = lambda name: ('37', [at[name] & 0xFF, at[name] >> 8 & 0xFF, at[name] >> 16])  # noqa: E731
+        for script in pro.scripts()[1:3]:
+            ops = [(c['op'], c['args']) for c in script['commands']]
+            first = ops.index(('1E', [pro.SPIN_SPEED]))
+            turns = ops[first + 1:first + 17:2]
+            self.assertEqual(turns, [call('turn_next')] * 7 + [call('face_hero')])
+            self.assertEqual(ops[first + 2:first + 17:2], [call('wait1')] * 8)
+            self.assertNotIn('2F', [op for op, _ in ops[first:first + 18]])
+            self.assertEqual(ops[first + 18][0], '51')
+        # 대화 끝이 자세를 되돌려 신시아는 아래를 보고 있으므로, 돌기 앞에서 주인공 쪽부터 본다
+        shinsia = [(c['op'], c['args']) for c in pro.scripts()[1]['commands']]
+        self.assertEqual(shinsia[1], call('face_hero'))
 
     def test_supper_father_runs_every_turn(self):
         _, new_lists, _, _ = pro.npc_lists()
@@ -217,3 +234,27 @@ class FaceHeroTests(unittest.TestCase):
         self.assertEqual(self.facing((8, 10), (10, 10)), (0x22, 0x02, 0x02, 0))
         self.assertEqual(self.facing((10, 14), (10, 11)), (0x44, 0x04, 0x04, 0))
         self.assertEqual(self.facing((11, 6), (10, 11)), (0x88, 0x08, 0x08, 0))
+
+
+class TurnNextTests(unittest.TestCase):
+    def turn(self, facing):
+        at = 0x3E8000
+        rom = bytearray(0x400000)
+        code = pro._turn_next()
+        rom[lorom(at):lorom(at) + len(code)] = code
+        cpu = Cpu(bytes(rom), bytearray(0x20000))
+        cpu.wram[0x90] = 3
+        cpu.wram[0x31E3] = facing
+        cpu.jsl(at)
+        return cpu.wram[0x31E3], cpu.wram[0x3243], cpu.wram[0x3263], cpu.wram[0x31E0]
+
+    def test_turns_down_left_up_right(self):
+        # 아래 → 왼쪽 → 위 → 오른쪽 차례. 네 번이면 한 바퀴라 여덟 번 돌면 처음 방향으로 돌아온다
+        self.assertEqual(self.turn(0x44), (0x22, 0x02, 0x02, 0))
+        self.assertEqual(self.turn(0x22), (0x88, 0x08, 0x08, 0))
+        self.assertEqual(self.turn(0x88), (0x11, 0x01, 0x01, 0))
+        self.assertEqual(self.turn(0x11), (0x44, 0x04, 0x04, 0))
+        facing = 0x22
+        for _ in range(8):
+            facing = self.turn(facing)[0]
+        self.assertEqual(facing, 0x22)

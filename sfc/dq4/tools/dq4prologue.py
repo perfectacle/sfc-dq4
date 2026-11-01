@@ -576,6 +576,20 @@ def _face_hero():
     return box.ENTER + body + box.LEAVE
 
 
+SPIN_NEXT = {0x40: 0x22, 0x20: 0x88, 0x80: 0x11, 0x10: 0x44}   # 31E0 위 니블 -> 다음(아래·왼쪽·위·오른쪽 차례)
+
+
+def _turn_next():
+    """인물 스크립트(명령 37)에서: 이 인물($90 슬롯)을 돌기 차례의 다음 방향으로 한 번 돌린다(그림은 다음 명령 차례에)."""
+    body = bytearray((0xE2, 0x30, 0xA6, 0x90, 0xBF, 0xE0, 0x31, 0x7E, 0x29, 0xF0))   # LDX $90 / LDA 31E0,X / AND #$F0
+    *tests, (_, last) = SPIN_NEXT.items()
+    for k, (now, nxt) in enumerate(tests):                                         # CMP / BNE 다음 / LDA # / BRA 저장
+        body += bytes((0xC9, now, 0xD0, 4, 0xA9, nxt, 0x80, 8 * (len(tests) - 1 - k) + 2))
+    body += bytes((0xA9, last))                                                     # 남은 하나(오른쪽)
+    store = bytes((0x9F, 0xE0, 0x31, 0x7E, 0x29, 0x0F, 0x9F, 0x40, 0x32, 0x7E, 0x9F, 0x60, 0x32, 0x7E))
+    return box.ENTER + bytes(body) + store + box.LEAVE
+
+
 def _mother_slot():
     return NPC_SLOT0 + next(i for i, v in enumerate(VILLAGERS) if v[4] == T_MOTHER)
 
@@ -598,6 +612,7 @@ def native():
         put('reveal_slow', _reveal_hold())
         put('wait1', box.ENTER + box.wait(1) + box.LEAVE)
         put('face_hero', _face_hero())
+        put('turn_next', _turn_next())
         put('darken', _darken())
         put('talk_slot', _talk_slot())
         put('talk_event', bytes((0xA0, *_long(at.get('talk_slot', 0)), 0xFF)))
@@ -663,10 +678,12 @@ def talk_doc():
 def _spin(at):
     """모샤스: 두 바퀴 돌기(NDS 는 방향을 바꾸고 6프레임 기다리기를 여덟 번). 인물 스크립트는 명령마다 다음 차례를
     기다리고, 속도 1 이면 차례가 8프레임이라 한 칸에 19프레임이 걸렸다. 도는 동안만 속도(1E)를 올려 차례를 당긴다.
-    한 37 안에서 방향을 모두 바꾸면 그 사이 인물 그림을 다시 그리지 않아 돌지 않았다."""
+    한 37 안에서 방향을 모두 바꾸면 그 사이 인물 그림을 다시 그리지 않아 돌지 않았다.
+    지금 방향(주인공 쪽)에서 다음 방향으로 일곱 번 돌고 여덟째에 주인공 쪽을 보아, 두 바퀴를 돌고 주인공을 본 채 끝난다.
+    시작이 주인공 쪽이 아니어도 주인공 쪽으로 끝난다. 마지막 wait1 차례에 그 그림이 그려진 뒤 다음 명령(51)이 돈다."""
     out = [_cmd('1E', SPIN_SPEED)]
-    for d in (0x40, 0x20, 0x80, 0x10) * 2:
-        out += [_cmd('2F', d), _cmd('37', *_long(at['wait1']))]
+    for k in range(8):
+        out += [_cmd('37', *_long(at['turn_next' if k < 7 else 'face_hero'])), _cmd('37', *_long(at['wait1']))]
     return out + [_cmd('1E', WALK_SPEED)]
 
 
@@ -722,9 +739,10 @@ def scripts():
             [_cmd('38'), _cmd('20', *STAIRS), _cmd('51'), _cmd('52'), _cmd('40'), _cmd('16')])
     sx, sy = SHINSIA_AT
     # NDS mlb1a 처럼 말을 걸어야 시작한다(대화 902 가 신시아 시작 깃발을 켬)
-    shinsia = ([_wait_on(SHINSIA_START), _cmd('3F'), _cmd('20', 0x37, 0)] + _spin(at) +
+    # 대화 끝(06:AF20)이 자세를 되돌려 신시아가 아래를 보므로, 돌기 앞에 주인공 쪽을 본다(_spin 은 지금 방향부터 돈다)
+    shinsia = ([_wait_on(SHINSIA_START), call('face_hero'), _cmd('3F'), _cmd('20', 0x37, 0)] + _spin(at) +
                [_cmd('51'), _cmd('10', *MORPH), _wait_on(MORPH_BACK),
-                # 돌기는 오른쪽 보기로 끝나므로, 주인공 쪽을 보고 다시 나타나 말한다
+                # 개구리 꼴인 동안 주인공이 움직였을 수 있으므로, 주인공 쪽을 보고 다시 나타나 말한다
                 _cmd('50', sx * 2, sy * 2), _cmd('37', *_long(at['face_hero'])), _cmd('53'), _cmd('4F'), _msg(M_MORPH), _msg(M_BYE),
                 _msg(M_SUPPER)] +
                # 주인공이 문틈 (4,0D) 쪽에서 다가오면 나가는 길에 선 채 말이 걸리므로, 주인공을 비키게 하고(shinsia_aside)
