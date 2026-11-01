@@ -130,7 +130,8 @@ class TileGrowTests(unittest.TestCase):
         lay = fgw.grow_layout(0x348000)
         self.assertEqual(sites['01:A4A7']['hex'], f'22 {fgw.long_addr(lay["load"]).hex(" ")} 80 04 ea ea ea ea')
         self.assertEqual(sites['00:BC6D']['hex'], fgw.block_read(lay['tile_bits']).hex(' '))
-        self.assertEqual(sites['00:BBAC']['hex'], fgw.palette_fast(lay['palettes'], lay['palettes'] + 1024).hex(' '))
+        self.assertEqual(sites['00:BBAC']['hex'], fgw.ending_gate(fgw.palette_fast(lay['palettes'], lay['palettes'] + 1024),
+                                                                lay['ending'] + len(fgw.dma_gate(0))).hex(' '))
         self.assertNotIn('00:BBB4', sites)
         self.assertEqual(sites['01:B4D5']['hex'], f'5c {fgw.long_addr(lay["redraw"]).hex(" ")}')
         self.assertEqual(fgw.redraw_hook(0)[-7:], bytes.fromhex('f4 b9 8a 5c 0a b5 01'))
@@ -197,7 +198,7 @@ class TileGrowTests(unittest.TestCase):
         self.assertEqual(cur['worlds']['world2'], cur['worlds']['world0'])
         # 세계 1 의 니블이 다르면 니블 훅 대신 00:BBAC 를 $1949 로 세계마다 워드 표를 고르는 코드로 바꾼다.
         # 표 14KB 는 늘린 타일 뒤(36:C000)에 두고, 아래층 표는 위층 세계 셋 뒤(36:D800)에서 시작한다.
-        self.assertEqual(rom.d[lorom(fgw.PALETTE_READ):lorom(fgw.PALETTE_READ) + 38],
+        self.assertEqual(rom.d[lorom(fgw.PALETTE_READ) + 6:lorom(fgw.PALETTE_READ) + 6 + 38],
                          fgw.palette_worlds(0x36C000, 0x36D800))
         self.assertEqual([w['at'] for w in m['writes'] if w['note'].startswith('세계마다 타일맵 워드 표')], ['36:C000'])
         for upper in (True, False):
@@ -207,6 +208,72 @@ class TileGrowTests(unittest.TestCase):
             fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x358000, extra_at=0x358100)
         with self.assertRaisesRegex(ValueError, '30~7D'):
             fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x348000, extra_at=0x7E8000)
+
+    def run_palette(self, rom_data, ending, tiles):
+        """00:BBAC 를 M·X 16비트로 JSR 한다. tiles 는 (위층, 아래층) 타일 번호. ($96 워드, $94 워드, 나갈 때 A)."""
+        cpu = Cpu(rom_data, bytes(0x20000))
+        cpu.wram[0x21EA] = 0x80 if ending else 0x7F
+        cpu.wram[0xC6] = 0x20
+        for dp, t in zip((0x96, 0x94), tiles):
+            cpu.wram[dp], cpu.wram[dp + 1] = t & 0xFF, t >> 8
+        cpu.p = 0
+        cpu.jsr(fgw.PALETTE_READ)
+        return (cpu.wram[0x96] | cpu.wram[0x97] << 8, cpu.wram[0x94] | cpu.wram[0x95] << 8, cpu.a)
+
+    def test_ending_substitutes_grown_tiles(self):
+        """엔딩(7E:21EA bit7)이면 00:BBAC 가 타일 512 이상을 ending_tiles 의 대체 타일 워드로 바꾸고, 아니면 그대로 둔다.
+        ending_tiles 가 짧으면 나머지는 타일 - 512."""
+        self.doc['ending_tiles'] = [7, 511]
+        for kind in ('shared', 'worlds'):
+            with self.subTest(kind):
+                if kind == 'worlds':
+                    self.world_doc('world1', self.extra, self.doc['tile_palettes'][:fgw.TILES] + [1] * 300)
+                m = fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x348000, extra_at=0x358000)
+                data = apply(self.data, m)
+                rom = Rom(data)
+                self.assertEqual(dq5field.palette_kind(rom), kind)
+                for upper, lower in ((512, 513), (811, 3), (0, 600)):
+                    plain = self.run_palette(data, False, (upper, lower))
+                    self.assertEqual(plain, (dq5field.tile_word(rom, upper, True) | 0x20,
+                                             dq5field.tile_word(rom, lower, False), dq5field.tile_word(rom, lower, False)))
+                    sub = {512: 7, 513: 511, 811: 811 - 512, 600: 600 - 512}
+                    want = [t if t < fgw.TILES else sub[t] for t in (upper, lower)]
+                    got = self.run_palette(data, True, (upper, lower))
+                    self.assertEqual(got, (dq5field.tile_word(rom, want[0], True) | 0x20,
+                                           dq5field.tile_word(rom, want[1], False),
+                                           dq5field.tile_word(rom, want[1], False)))
+                    self.assertEqual(dq5field.ending_word(rom, upper, True) | 0x20, got[0])
+                    self.assertEqual(dq5field.ending_word(rom, lower, False), got[1])
+
+    def test_ending_skips_grown_tile_dma(self):
+        """엔딩이면 불러오기 훅(01:A4A7)·다시 그리기 훅이 늘린 타일 DMA($420B)를 하지 않는다."""
+        data = apply(self.data, fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x348000, extra_at=0x358000))
+        lay = fgw.grow_layout(0x348000)
+        for ending in (False, True):
+            cpu = Cpu(data, bytes(0x20000))
+            cpu.wram[0x21EA] = 0x80 if ending else 0
+            cpu.p = 0x20
+            cpu.jsl(lay['load'])
+            self.assertEqual((0x420B, 0x80) in cpu.io_writes, not ending)
+            cpu = Cpu(data, bytes(0x20000))
+            cpu.wram[0x21EA] = 0x80 if ending else 0
+            cpu.hooks[fgw.REDRAW_BODY] = lambda c: (c.__setattr__('pc', c.pull16() + 1), True)[1]
+            cpu.jsl(lay['redraw'])
+            self.assertEqual((0x420B, 0x80) in cpu.io_writes, not ending)
+
+    def test_ending_tiles_must_stay_below_512(self):
+        for bad, msg in (([512], '0~511'), ([-1], '0~511'), ([0] * 513, '512개까지'), ('x', '목록'), ([1.0], '목록')):
+            self.doc['ending_tiles'] = bad
+            with self.assertRaisesRegex(ValueError, msg):
+                fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=0x348000, extra_at=0x358000)
+
+    def test_no_grow_unchanged_and_rejects_ending_tiles(self):
+        """타일을 늘리지 않으면 엔딩 갈래를 넣지 않고(쓰기 0개), ending_tiles 를 주면 거부한다."""
+        doc = fgw.dump(self.rom, self.tmp.name)
+        self.assertEqual(fgw.patch(self.rom, doc, self.tmp.name)['writes'], [])
+        doc['ending_tiles'] = [0]
+        with self.assertRaisesRegex(ValueError, 'ending_tiles 는 타일이 512개를 넘을 때만'):
+            fgw.patch(self.rom, doc, self.tmp.name)
 
     def world_doc(self, key, extra, nib):
         (self.folder / f'{key}.bin').write_bytes((self.folder / 'tiles.bin').read_bytes()[:fgw.TILES * 32] + extra)
