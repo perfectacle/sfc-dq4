@@ -24,6 +24,7 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [docs/dq4-chapter2-format.md](docs/dq4-chapter2-format.md): 2장 첫머리(1장 끝에서 넘어가기, 아리나 일행, 산트하임 왕좌의 방 연출)
 - [docs/dq4-compat-format.md](docs/dq4-compat-format.md): 호환성 검사(높은 뱅크 BRK 목록의 정적 검사, MesenCE 열린 버스 프로브, libretro bsnes·snes9x 1장 걷기)
 - [docs/dq4-savefixture-format.md](docs/dq4-savefixture-format.md): 저장 기록으로 시작하는 검사(SRAM 칸 만들기, 이어 할 자리 `7E:2033`, 저장되지 않는 것, bsnes·snes9x 에 넣기)
+- [docs/dq4-battle-scene-format.md](docs/dq4-battle-scene-format.md): 전투 장면 검사(저장 기록으로 전투 직전에서 시작, 주문·약초·도망·전멸·레벨업·보스, 창 번호 `7E:0A00` 으로 맞춘 입력, 시드별 선제·기습·회심·도망 실패 분포)
 - [docs/dq4-shopscene-format.md](docs/dq4-shopscene-format.md): 가게 장면 검사(이무르 가게 14장면, 창 번호 `$0A00` 으로 따라가는 입력 열, 금화·물건·장비 비트 판정)
 - [docs/dq4-prologue-format.md](docs/dq4-prologue-format.md): NDS 서장(지하 검술 수련, 개구리, 신시아의 모샤스, 저녁, 1장으로 넘기기)
 - [docs/dq4-rom-ledger-format.md](docs/dq4-rom-ledger-format.md): 롬 쓰기 장부(빌드 단계마다 바뀐 바이트)와 에뮬레이터 없는 바이트 검사(단계끼리 겹침, 원래 롬 덮기, 뱅크 넘기, 표 불변식, 허용 목록)
@@ -333,3 +334,4 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [2026-11-01-42: 가게 장면 검사](journal/2026-11-01-42-shop-scene.md)
 - [2026-11-01-43: 전투 상태 창 오른쪽 위 모서리](journal/2026-11-01-43-battle-status-corner.md)
 - [2026-11-01-44: 필드 전투 메시지의 몬스터 이름 한글화](journal/2026-11-01-44-battle-monster-names.md)
+- [2026-11-01-45: 전투 장면 검사](journal/2026-11-01-45-battle-scene.md)

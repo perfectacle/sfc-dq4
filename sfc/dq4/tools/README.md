@@ -69,6 +69,7 @@
 | `lua/dq4heroblock.lua` | `dq4heroblockcheck.py` 가 부름. `WALK_STATE`(dq4walkstate.lua)를 그대로 돌리며, 메시지 루틴 `24:8BAF` 가 `SNAPMSG` 번호를 처음 받은 뒤 `SNAPDELAY` 프레임(기본 40)에 `SNAPWATCH` 값을 `snap.txt`, 화면을 `snap.png` 로 남김 |
 | `lua/dq4fieldmath.lua` | `dq4fieldmathcheck.py` 가 부름. `dq5warp.lua` 를 그대로 돌리고, 끝 프레임의 PPU 색 연산 층 비트·`$BE` 와 화면 안 OAM 의 자리·팔레트를 `math.txt` 로 남김 |
 | `dq4battlecheck.py --rom 롬 --out 폴더 [--base 서장끝.mss] [--repeat 2] [--scenes 장면…]` | 조우 루틴 `23:E7C2` 를 정한 무리로 덮어 필드·탑 `39/01` 에서 걸음 전투를 붙이고, 이기기·도망 뒤 무리·금화·돌아온 맵·칸·곡·화면·걷기를 보고, 같은 세이브스테이트에서 두 번 돌려 기록이 같은지 보는 MesenCE 헤드리스 검사. `lua/dq4battle.lua` 를 씀. [걸음 전투 검사](../docs/dq4-chapter1-format.md#걸음-전투-검사) |
+| `dq4battlescene.py --rom 롬 --out 폴더 [--seeds 0,1,2] [--scenes 장면…] [--core all\|bsnes\|snes9x] [--repeat 2] [--jobs 4]` | 전투 장면 검사(libretro bsnes·snes9x): 저장 기록으로 이어 해 탑 `39/01` 에서 정한 무리와 싸움(보통 공격·회심, 도망, 도망칠 수 없는 무리, 약초, 호이민의 ホイミ, 레벨업 한 번·두 번, 전멸, 탑 위 보스). 금화·경험치·레벨·능력치·HP·MP·물건·flag·다시 시작 자리·곡 `$1D8B`·조작이 돌아오는지를 WRAM 으로 판정하고, 선제·기습·회심·도망 실패를 시드마다 셈. [전투 장면 검사](../docs/dq4-battle-scene-format.md) |
 | `lua/dq4battle.lua` | `dq4battlecheck.py` 가 부름. 한 걸음 내디뎌 전투(`01:860D`)가 걸리면 `KEYS` 를 차례로 누르고, 끝나(`00:82BE`) 돌아온 맵·칸·곡·금화를 `battle.txt` 에, 화면을 `start.png`·`fight.png`·`after.png` 로 |
 | `dq4soundcatalog.py --assets 폴더 [--dq5-rom 롬] --out JSON` | NDS 곡·효과음 목록, FC 장면 대응, DQ5 재사용 후보와 숙박곡 비교. [사운드 포팅](../docs/dq4-sound-port-format.md) |
 | `dq4soundport.py export --assets 폴더 --out 폴더` | NDS 악보 JSON 을 DQ5 시퀀스로(템포·세기 합치기, 꼬리를 남기는 성부 배분, 되풀이·깊이 3 부르기로 묶기와 KOF 미리 보기 검산, 손실 보고서) |
