@@ -356,7 +356,10 @@ def main():
                 raise SystemExit(f'{path} 가 없음: sfc/dq4/tools/dq4cores.py 로 빌드하거나 {CORES[name]} 로 코어 파일을 줌')
             (out / name).mkdir()
             report['cores'][name] = {**Walker(path, args.rom.resolve(), out / name).run(),
-                                     'core_sha256': dq4cores.sha256(path), 'core_build': dq4cores.stamp(name)}
+                                     'core_sha256': dq4cores.sha256(path),
+                                     # 환경 변수로 다른 파일을 주면 빌드 기록은 그 파일의 것이 아니다
+                                     'core_build': (dq4cores.stamp(name) if path == dq4cores.core_path(name, dq4cores.cores_dir())
+                                                    and not os.environ.get(dq4cores.ENV[name]) else None)}
         report['status'] = 'passed' if all(r['status'] == 'passed' for r in report['cores'].values()) else 'failed'
     (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')
     summary = ({k: f'{v["status"]} {sum(s["status"] == "passed" for s in v["segments"])}/{len(wc.SEGMENTS)}'

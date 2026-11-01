@@ -7,13 +7,14 @@ DEP-01 처럼 나온 지 7일이 넘은 것만 고른다.
 출력은 원래 체크아웃의 work/cores/(워크트리끼리 함께 씀, DQ4_CORES 로 바꿈)에 <코어>_libretro.<확장자> 와
 <코어>.json(커밋·출력 SHA-256)을 둔다. 이미 같은 커밋으로 만든 것이 있으면 다시 빌드하지 않는다.
 
-  python sfc/dq4/tools/dq4cores.py            # 둘 다 받아 빌드(처음 약 2분)
+  python sfc/dq4/tools/dq4cores.py            # 둘 다 받아 빌드(처음 약 1분)
   python sfc/dq4/tools/dq4cores.py --check    # 빌드 없이 상태만
 """
 import argparse
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -44,7 +45,7 @@ ENV = {'bsnes': 'LIBRETRO_BSNES', 'snes9x': 'LIBRETRO_SNES9X'}
 
 
 def suffix():
-    return {'darwin': 'dylib', 'win32': 'dll'}.get(sys.platform, 'so')
+    return {'darwin': 'dylib', 'win32': 'dll', 'msys': 'dll', 'cygwin': 'dll'}.get(sys.platform, 'so')
 
 
 def cores_dir():
@@ -76,42 +77,62 @@ def sha256(path):
 
 
 def is_clang():
-    cxx = os.environ.get('CXX', 'c++')
-    out = subprocess.run([cxx, '--version'], capture_output=True, text=True).stdout
+    try:
+        cxx = shlex.split(os.environ.get('CXX', 'c++'))
+        out = subprocess.run([*cxx, '--version'], capture_output=True, text=True).stdout
+    except (OSError, ValueError):
+        return False
     return 'clang' in out
 
 
+def write_atomic(dst, data):
+    """다른 워크트리가 동시에 읽어도 반쯤 쓴 파일을 보지 않게, 옆에 쓰고 바꿔 넣는다."""
+    tmp = dst.with_name(f'.{dst.name}.{os.getpid()}')
+    tmp.write_bytes(data)
+    os.replace(tmp, dst)
+
+
 def build(name, folder, jobs):
+    """고정 커밋을 받아 빌드한다. 같은 폴더를 쓰는 워크트리끼리 겹치지 않게 잠근다."""
+    import fcntl
+    with (folder / '.lock').open('w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return _build(name, folder, jobs)
+
+
+def _build(name, folder, jobs):
     spec = CORES[name]
     out = folder / f'{name}_libretro.{suffix()}'
     have = stamp(name, folder)
     if have and have.get('commit') == spec['commit'] and out.exists() and have.get('sha256') == sha256(out):
         print(f'{name}: {spec["commit"][:12]} 이미 있음 {out}')
         return out
-    src = folder / 'src' / f'{name}-{spec["commit"][:12]}'
-    if src.exists():
-        shutil.rmtree(src)
+    src = folder / 'src' / f'{name}-{spec["commit"][:12]}-{os.getpid()}'
+    shutil.rmtree(src, ignore_errors=True)
     src.mkdir(parents=True)
-    git = ['git', '-C', str(src)]
-    subprocess.run(git + ['init', '-q'], check=True)
-    subprocess.run(git + ['remote', 'add', 'origin', spec['repo']], check=True)
-    subprocess.run(git + ['fetch', '-q', '--depth', '1', 'origin', spec['commit']], check=True)
-    subprocess.run(git + ['-c', 'advice.detachedHead=false', 'checkout', '-q', 'FETCH_HEAD'], check=True)
-    head = subprocess.run(git + ['rev-parse', 'HEAD'], capture_output=True, text=True, check=True).stdout.strip()
-    if head != spec['commit']:
-        raise SystemExit(f'{name}: 받은 커밋 {head} 가 고정한 {spec["commit"]} 와 다름')
-    cmd = ['make', f'-j{jobs}', *spec['make']]
-    if spec['clang_cxx'] and is_clang():
-        # 명령줄 CXXFLAGS 는 Makefile 의 플래그를 통째로 덮으므로 컴파일러에 붙인다
-        cmd.append(f'CXX={os.environ.get("CXX", "c++")} {spec["clang_cxx"]}')
-    print(f'{name}: {spec["commit"][:12]} 빌드: {" ".join(cmd)}', flush=True)
-    with (folder / f'{name}-build.log').open('w', encoding='utf-8') as log:
-        subprocess.run(cmd, cwd=src, stdout=log, stderr=subprocess.STDOUT, check=True)
-    built = src / f'{spec["output"]}.{suffix()}'
-    shutil.copyfile(built, out)
-    info = {'commit': spec['commit'], 'repo': spec['repo'], 'sha256': sha256(out), 'platform': sys.platform}
-    (folder / f'{name}.json').write_text(json.dumps(info, indent=1) + '\n', encoding='utf-8')
-    shutil.rmtree(src)
+    try:
+        git = ['git', '-C', str(src)]
+        subprocess.run(git + ['init', '-q'], check=True)
+        subprocess.run(git + ['remote', 'add', 'origin', spec['repo']], check=True)
+        subprocess.run(git + ['fetch', '-q', '--depth', '1', 'origin', spec['commit']], check=True)
+        subprocess.run(git + ['-c', 'advice.detachedHead=false', 'checkout', '-q', 'FETCH_HEAD'], check=True)
+        head = subprocess.run(git + ['rev-parse', 'HEAD'], capture_output=True, text=True, check=True).stdout.strip()
+        if head != spec['commit']:
+            raise SystemExit(f'{name}: 받은 커밋 {head} 가 고정한 {spec["commit"]} 와 다름')
+        cmd = ['make', f'-j{jobs}', *spec['make']]
+        if spec['clang_cxx'] and is_clang():
+            # 명령줄 CXXFLAGS 는 Makefile 의 플래그를 통째로 덮으므로 컴파일러에 붙인다
+            cmd.append(f'CXX={os.environ.get("CXX", "c++")} {spec["clang_cxx"]}')
+        print(f'{name}: {spec["commit"][:12]} 빌드: {" ".join(cmd)}', flush=True)
+        with (folder / f'{name}-build.log').open('w', encoding='utf-8') as log:
+            subprocess.run(cmd, cwd=src, stdout=log, stderr=subprocess.STDOUT, check=True)
+        data = (src / f'{spec["output"]}.{suffix()}').read_bytes()
+    finally:
+        shutil.rmtree(src, ignore_errors=True)
+    write_atomic(out, data)
+    info = {'commit': spec['commit'], 'repo': spec['repo'], 'sha256': hashlib.sha256(data).hexdigest(),
+            'platform': sys.platform}
+    write_atomic(folder / f'{name}.json', (json.dumps(info, indent=1) + '\n').encode())
     print(f'{name}: {out} sha256 {info["sha256"][:16]}…')
     return out
 
