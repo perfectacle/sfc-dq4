@@ -146,6 +146,15 @@ class QtyCapTest(unittest.TestCase):
         buy = ASM[ASM.index('ShopBuyTool:'):ASM.index('ShopGiveExtra:')]
         self.assertIn('STZ.w $0F2C', buy[buy.index('db $00, $95, $5C'):])
 
+
+class SellLinesTest(unittest.TestCase):
+    def test_no_appraisal_line(self):
+        # 값이 목록에 보이므로 050 을 건너 058 이 바로 묻는다
+        self.assertRegex(ASM, r'org \$06DEFE\n    BRA \$06DF06')
+        for n in (0x058, 0x059, 0x05A, 0x05B):
+            self.assertIn('{N}골드에', dq4sysmsg.SPEECH[n])
+            self.assertNotIn('음, ', dq4sysmsg.SPEECH[n])
+
 class SellPriceTest(unittest.TestCase):
     def test_cannot_sell_phrase(self):
         self.assertEqual(dq4windowtext.FIXED[dq4windowtext.CANNOT_SELL], '판매불가')
