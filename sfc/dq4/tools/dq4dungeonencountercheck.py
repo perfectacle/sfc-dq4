@@ -41,15 +41,20 @@ import dq4fieldport  # noqa: E402
 import dq4groupcheck  # noqa: E402
 import dq4groupbuild  # noqa: E402
 import dq4wellswitch  # noqa: E402
+from dq4ch1walkcheck import NO_ENCOUNTERS, RNG  # noqa: E402
 from dq4groupbuild import LINKS, dungeon_zones, placement  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
 
 # Scene set-up, not what is checked: every coefficient FF and the indoor rate 01:8522 LDY #7 at 40, so
 # 255 x 40 >> 6 fights on every step past the engine's first three; in the FC dungeon zones (dq4dungeonrate) every
-# chance FF, so every new block fights. CALM makes every chance 0. STEP gives each step count its own small chance
-# (1 to 4) and keeps the region chance, so the walk seldom stops and $00 tells which branch the hook took.
+# chance FF, so every new block fights. CALM returns from the encounter routine 23:E7C2 with carry clear, so no step
+# fights at all (zeroing the coefficients alone leaves the dungeon hook's own chances). STEP gives each step count its
+# own small chance (1 to 4) and keeps the region chance over zeroed coefficients, so the walk seldom stops and $00
+# tells which branch the hook took. Every warped scene starts with the RNG state pinned (SET and again on arrival), so
+# whether a STEP walk meets a fight does not hang on the state the ship savestate or the warp left.
 RATES = "11EA44=FFFFFFFFFFFFFFFF;8523=40"
-CALM = "11EA44=0000000000000000"
+CALM = NO_ENCOUNTERS
+ZERO_COEFFICIENTS = "11EA44=0000000000000000"
 STEP_CHANCES = [1, 2, 3, 4]
 SIDEWAYS = ",".join(["left:24,right:24"] * 16)
 UPDOWN = ",".join(["up:24,down:24"] * 16)
@@ -61,7 +66,7 @@ EXITS = {"23E9B0": "single", "23EA40": "mixed", "23E98F": "fixed"}
 # Scene -> (how it comes in, walk): ("field", DQ5 group) walks in from the group's first field entrance, ("to", warp
 # TO) warps there, ("stair", warp TO, input) warps beside an FC stair (dq4groupcheck stair_scenes) and takes it.
 # The walk keeps off the stair beside the warp. Further items: "on" sets the well's switch before the warp, "calm"
-# warps with every chance 0 (CALM) to walk the switch cells without a fight stopping the walk, "step" warps with
+# warps with no step fights (CALM) to walk the switch cells without a fight stopping the walk, "step" warps with
 # STEP_CHANCES.
 SCENES = {
     "38-00-field": (("field", 0x38), SIDEWAYS), "38-01": (("to", "38/01,12,9"), SIDEWAYS),
@@ -148,8 +153,7 @@ def main():
     def chances(steps, region=None):
         return dq4dungeonrate.rom_patch(data, dq4groupbuild.DUNGEON_RATE_AT, steps, region)
 
-    patches = {None: rates(data), "calm": f"{CALM};{chances([0] * dq4dungeonrate.STEPS, 0)}",
-               "step": f"{CALM};{chances(STEP_CHANCES)}"}
+    patches = {None: rates(data), "calm": CALM, "step": f"{ZERO_COEFFICIENTS};{chances(STEP_CHANCES)}"}
     walks = {None: [0xFF] * dq4dungeonrate.STEPS, "calm": [0] * dq4dungeonrate.STEPS, "step": STEP_CHANCES}
     region_chances = {None: dq4dungeonrate.PORT_REGION_CHANCE, "field": dq4dungeonrate.PORT_REGION_CHANCE, "calm": 0,
                       "step": dq4dungeonrate.PORT_REGION_CHANCE}
@@ -162,10 +166,9 @@ def main():
 
     def run(name):
         how, walk, *option = SCENES[name]
-        extra = {"MAXF": "3600", "TRACE": TRACE, "LOG": LOG}
+        extra = {"MAXF": "3600", "TRACE": TRACE, "LOG": LOG, "LATESET": RNG}
         switch = "on" in option
-        if switch:
-            extra["SET"] = SWITCH_ON
+        extra["SET"] = f"{RNG};{SWITCH_ON}" if switch else RNG
         calm = "calm" in option
         mode = "field" if how[0] == "field" else next((o for o in option if o in ("calm", "step")), None)
         walk_sim = dq4dungeonrate.Walk(zones if mode == "field" else [(area, walks[mode]) for area, _ in zones],
