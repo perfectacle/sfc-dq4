@@ -1052,10 +1052,12 @@ def _bookshelf():
 
 def _sky(deep=False):
     # FC sky is 21 (mid blue) except the castle in the clouds, whose sky below the clouds is 12 (deep blue);
-    # both stay darker than the pale cloud.
+    # both stay darker than the pale cloud. The plain sky stays one flat colour: it also fills everything
+    # outside the map, and any pale streak repeated every 16 pixels reads as waves on the sea.
     c = _Canvas(7, fill=4 if deep else 6)
-    for x, y, length in ((1, 3, 5), (9, 7, 4), (4, 12, 6), (13, 13, 3)):
-        c.line((x, y, x + length, y), 5 if deep else 7)
+    if deep:
+        for x, y, length in ((1, 3, 5), (9, 7, 4), (4, 12, 6), (13, 13, 3)):
+            c.line((x, y, x + length, y), 5)
     return _finish(c, "짙은 하늘(구름 아래)" if deep else "하늘(떨어지는 칸)")
 
 

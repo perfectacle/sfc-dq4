@@ -267,3 +267,15 @@ class WaterRoutineTests(unittest.TestCase):
         source = bytes((0x69, rom.FOUNTAIN_AT & 0xFF, rom.FOUNTAIN_AT >> 8 & 0xFF, 0x8F, 0x10, 0x1C, 0x00))
         self.assertEqual(lib.count(source), 1)
         self.assertEqual(rom.FOUNTAIN_SLOT, rom.WATER_SLOT + 4)
+
+
+class SkyArtTests(unittest.TestCase):
+    def test_plain_sky_is_one_flat_colour(self):
+        # Pale streaks on the sky block, repeated over the off-map fill, looked like the sea around 02/03.
+        from dq4environmentart import create_assets
+        assets = create_assets()
+        sky = set(assets["sky"].tobytes())
+        self.assertEqual(sky, {7 * 16 + 6})
+        self.assertGreater(len(set(assets["water0"].tobytes())), 1)
+        self.assertNotEqual(set(assets["cloud"].tobytes()), sky)
+        self.assertEqual(set(assets["sky_deep"].tobytes()), {7 * 16 + 4, 7 * 16 + 5})
