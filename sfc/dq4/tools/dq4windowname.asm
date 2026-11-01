@@ -94,11 +94,86 @@ org $04C508
 ; 가게 사기의 도구·장비 갈래가 값을 $0F28~ 에 두는 STA $0F28 / LDA $47 / STA $0F29 / LDA $48 / STA $0F2A.
 ; 다음 JSR $F5E9 가 돈을 뺀다
 org $06DCDF
-    JSR ShopBuyConfirm
+    JSR ShopBuyTool
     NOP #10
 org $06DDFC
     JSR ShopBuyConfirm
     NOP #10
+; 도구 갈래가 물건을 주는 자리 앞(LDA $0F23 / STA $42 / LDA $0F22 / STA $43, 뒤는 BRK 89 80 30)
+org $06DD39
+    JSR ShopGiveExtra
+    NOP #7
+
+; 도구 갈래(M = 8, X = 8, 값 $46~$48). 최대 개수(ShopQtyMax)가 2 이상이면 「몇 개 사시겠어요?」 와 한 자리 수량 창을 묻고,
+; 개수 × 값으로 ShopBuyConfirm 의 확인으로 간다. 개수는 물건을 줄 때까지 $0F21(사기 흐름에서는 쓰지 않음)에 둔다.
+; 수 창(5C, 맡기는 곳 등과 같은 창)은 고르면 $E8 = 0 이고 자리마다 숫자(0~9)를 $0AFE~$0B02 에 둔다(06:EF06 이 값으로
+; 바꾸는 자리). 끝 자리를 개수로 쓰고, 앞 자리가 0 이 아니거나 최대보다 크면 최대로, 0 이거나 B 면 확인의 「아니요」 길로
+org !shop_qty_spot
+ShopBuyTool:
+    LDA.b $46
+    STA.w $0F28
+    LDA.b $47
+    STA.w $0F29
+    LDA.b $48
+    STA.w $0F2A
+    LDA #$01
+    STA.w $0F21
+    JSL ShopQtyMax
+    CMP #$02
+    BCC .one
+    PHA
+    db $00, $95, $00
+    LDA.w $0F20
+    AND #$03
+    ASL
+    TAX
+    REP #$20
+    LDA.l ShopQtyMsg,X
+    JSL $248157
+    SEP #$20
+    db $00, $95, $5C        ; BRK 95 5C: 다섯 자리 수 창. 커서는 맨 끝 자리에서 시작한다
+    PLA
+    LDX.b $E8
+    BNE .cancel
+    LDX #$03
+-
+    LDY.w $0AFE,X
+    BNE +
+    DEX
+    BPL -
+    LDX.w $0B02
+    BEQ .cancel
+    CMP.w $0B02
+    BCC +
+    LDA.w $0B02
++
+    STA.w $0F21
+    JSL ShopQtyTotal
+    JMP ShopBuyConfirm
+.one
+    LDA #$01
+    JSL ShopQtyTotal
+    JMP ShopBuyConfirm
+.cancel
+    JMP ShopBuyConfirm_no
+
+; 고른 개수에서 하나 모자라게 더 준다(BRK 89 80 30). 마지막 하나는 원래 코드가 준다
+ShopGiveExtra:
+-
+    LDA.w $0F23
+    STA.b $42
+    LDA.w $0F22
+    STA.b $43
+    LDA.w $0F21
+    CMP #$02
+    BCC +
+    DEC
+    STA.w $0F21
+    db $00, $89, $80, $30
+    BRA -
++
+    RTS
+assert pc() <= !shop_qty_end
 
 ; 값을 $0F28~ 에 둔 뒤, 돈이 되면(06:F602, C = 모자람) 창을 닫고 「{N}골드인데 사시겠어요?」(메시지 묶음 19 = 064~067)와
 ; 예/아니요를 묻는다. 예거나 돈이 모자라면 돌아가 06:F5E9 가 원래대로 돈을 빼거나 「돈이 모자란」 메시지를 낸다.
@@ -136,7 +211,7 @@ ShopBuyConfirm:
     JSR $DFC4
     db $00, $97, $13
     JMP $DC2F
-warnpc $070000
+assert pc() <= $070000
 
 ; 창 바이트 갈래(메뉴 패치의 JSL). 고정 문구 접두를 먼저 가르고, 나머지는 원래 대상으로.
 org $04B11E
@@ -1817,6 +1892,77 @@ ShopSellCannot:
     PLY
     SEP #$20
     RTL
+
+; 가게 도구 사기의 최대 개수(M = 8, X = 8, 값 $0F28~, 사람 $0F23). 그 사람 빈칸(12 − 가진 수, BRK 89 80 2F)과 9 가운데
+; 작은 수까지, 가진 돈(BRK 88 49)에서 값을 몇 번 뺄 수 있는지 센다. A = 최대(0~9)
+ShopQtyMax:
+    LDA.w $0F23
+    STA.b $42
+    db $00, $89, $80, $2F   ; BRK 89 80 2F: $46 = 가진 물건 수
+    LDA #$0C
+    SEC
+    SBC.b $46
+    CMP #$0A
+    BCC +
+    LDA #$09
++
+    PHA
+    db $00, $88, $49        ; BRK 88 49: $46~$48 = 가진 돈
+    LDX #$00
+-
+    TXA
+    CMP $01,S
+    BCS +
+    LDA.b $46
+    SEC
+    SBC.w $0F28
+    STA.b $46
+    LDA.b $47
+    SBC.w $0F29
+    STA.b $47
+    LDA.b $48
+    SBC.w $0F2A
+    STA.b $48
+    BCC +
+    INX
+    BRA -
++
+    PLA
+    TXA
+    RTL
+
+; 개수 A(1~9) × 값(BRK 94 02, 물건 $0F22)을 $46~$48 에(M = 8, X = 8)
+ShopQtyTotal:
+    TAX
+    LDA.w $0F22
+    STA.b $42
+    db $00, $94, $02
+    LDA.b $46
+    STA.w $0F28
+    LDA.b $47
+    STA.w $0F29
+    LDA.b $48
+    STA.w $0F2A
+-
+    DEX
+    BEQ +
+    LDA.b $46
+    CLC
+    ADC.w $0F28
+    STA.b $46
+    LDA.b $47
+    ADC.w $0F29
+    STA.b $47
+    LDA.b $48
+    ADC.w $0F2A
+    STA.b $48
+    BRA -
++
+    RTL
+
+; 「몇 개 사시겠어요?」 메시지 번호(가게 종류 $0F20 마다). 원작에서 비어 있고 부르는 곳이 없는 메시지
+ShopQtyMsg:
+    dw $009C, $009D, $00AB, $00C3
 
 ; 04:C3B1·04:C508(M = 8, X = 16, DB = 04, 줄 $E4, 고른 물건 $0F22). 원래는 04:C511 표의 「 소지 중」 을 문자열 버퍼
 ; $01~(빈칸 01 로 채운 16바이트)에 베끼고 04:C45A(PLY / RTS)로 끝난다. 그 사람 소지품 12칸에서 같은 물건을 세어

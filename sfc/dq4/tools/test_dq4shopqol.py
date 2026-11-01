@@ -35,14 +35,29 @@ class BuyConfirmTest(unittest.TestCase):
         self.assertNotIn('감사합니다', dq4sysmsg.SPEECH[0x009])
 
     def test_hooks_both_buy_paths_in_bank_06(self):
-        for site in ('$06DCDF', '$06DDFC'):
-            self.assertRegex(ASM, rf'org {re.escape(site)}\n    JSR ShopBuyConfirm')
+        self.assertRegex(ASM, r'org \$06DCDF\n    JSR ShopBuyTool')
+        self.assertRegex(ASM, r'org \$06DDFC\n    JSR ShopBuyConfirm')
         body = ASM[ASM.index('ShopBuyConfirm:'):]
-        body = body[:body.index('warnpc')]
+        body = body[:body.index('assert pc()')]
         # 창(BRK 95)은 뱅크 06 에서 불러야 돈다. 뱅크 06 코드는 JSR 로 들어와 JSR 로 원래 루틴을 부른다
         self.assertNotIn('JSL', body)
         for need in ('JSR $F602', 'JSR $DFC4', 'JMP $DC2F', 'db $00, $95, $32'):
             self.assertIn(need, body)
+
+
+class MultiBuyTest(unittest.TestCase):
+    def test_messages(self):
+        for n in (0x09C, 0x09D, 0x0AB, 0x0C3):
+            self.assertIn('몇 개', dq4sysmsg.SPEECH[n])
+        self.assertIn('dw $009C, $009D, $00AB, $00C3', ASM)
+
+    def test_tool_path_asks_quantity_in_bank_06(self):
+        body = ASM[ASM.index('ShopBuyTool:'):]
+        body = body[:body.index('assert pc()')]
+        # 창(BRK 95)은 뱅크 06 코드에서. 수 창 5C 의 끝 자리 $0B02 를 개수로, 나머지 개수는 물건을 줄 때 더 준다
+        for need in ('db $00, $95, $5C', 'JSL ShopQtyMax', '$0B02', 'JMP ShopBuyConfirm', 'ShopGiveExtra:'):
+            self.assertIn(need, body)
+        self.assertRegex(ASM, r'org \$06DD39\n    JSR ShopGiveExtra')
 
 
 class SellPriceTest(unittest.TestCase):

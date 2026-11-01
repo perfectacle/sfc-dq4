@@ -61,6 +61,11 @@ HELD_SITES = (0x04C3B1, 0x04C508)
 BUY_SITES, BUY_ORIG = (0x06DCDF, 0x06DDFC), bytes.fromhex('8d280fa5478d290fa5488d2a0f')
 BUY_ASK = 0x19                    # 메시지 묶음(06:DFC4 의 A, 메시지 = A × 4 + 가게 종류)
 BUY_SPOT, BUY_SPOT_END = 0x06FFB0, 0x070000
+# 도구 갈래의 개수 묻기와 나머지 개수 주기(06:FE10~ 대화 훅 뒤의 빈자리)
+QTY_SPOT, QTY_SPOT_END = 0x06FE64, 0x06FF00
+GIVE_SITE, GIVE_ORIG = 0x06DD39, bytes.fromhex('ad230f8542ad220f8543')
+# 개수를 묻는 수 창(다섯 자리 입력, 맡기는 곳 등과 함께 씀)
+QTY_WINDOW = 0x5C
 
 
 def lorom(a):
@@ -179,6 +184,13 @@ def apply(data, font=None, asar=None):
             raise ValueError(f'{a:06X}: 가게 사기 확인이 부르는 코드가 아님')
     if any(d[lorom(BUY_SPOT):lorom(BUY_SPOT_END - 1) + 1]):
         raise ValueError(f'{BUY_SPOT:06X}~ 가 비어 있지 않음')
+    if any(d[lorom(QTY_SPOT):lorom(QTY_SPOT_END - 1) + 1]):
+        raise ValueError(f'{QTY_SPOT:06X}~ 가 비어 있지 않음')
+    if d[lorom(GIVE_SITE):lorom(GIVE_SITE) + 14] != GIVE_ORIG + bytes.fromhex('00898030'):
+        raise ValueError(f'{GIVE_SITE:06X}: 도구 주기가 아님')
+    o = lorom(dq4menupatch.window_addr(d, QTY_WINDOW))
+    if d[o:o + 14] != bytes.fromhex('16050823000101fdfdfdfdfdff52'):
+        raise ValueError(f'창 {QTY_WINDOW:02X} {d[o:o + 14].hex()}: 다섯 자리 입력 창이 아님')
     for a in HELD_SITES:
         o = lorom(a)
         if d[o:o + 4] != bytes.fromhex('a00a0082') or o + 6 + int.from_bytes(d[o + 4:o + 6], 'little', signed=True) != lorom(0x04C440):
@@ -225,7 +237,8 @@ def apply(data, font=None, asar=None):
             f'!wt_cannot_sell = {numbers[dq4windowtext.CANNOT_SELL]}\n!shop_sell_alias = ${sell & 0xFFFF:04X}\n'
             f'!shop_sell_code = ${SHOP_SELL_CODE:02X}\n!shop_sell_slot = ${CODE_TABLE + (SHOP_SELL_CODE - 0xB0) * 2:06X}\n'
             f'!shop_spot = ${SHOP_SPOT:06X}\n!shop_sell_w = {shop_w}\n!wt_held_first = {held[0]}\n'
-            f'!shop_buy_ask = ${BUY_ASK:02X}\n!shop_buy_spot = ${BUY_SPOT:06X}\n')
+            f'!shop_buy_ask = ${BUY_ASK:02X}\n!shop_buy_spot = ${BUY_SPOT:06X}\n'
+            f'!shop_qty_spot = ${QTY_SPOT:06X}\n!shop_qty_end = ${QTY_SPOT_END:06X}\n')
     defs += dq4battlemsg.apply(d, font or dq4menupatch.Font('galmuri9'), dq4menupatch.render,
                                len(ne.GLYPHS) + len(kana))
     with tempfile.TemporaryDirectory() as tmp:
@@ -244,9 +257,12 @@ def apply(data, font=None, asar=None):
         raise ValueError('창 이름 코드가 정해 둔 자리를 벗어남')
     if not any(out[lorom(SHOP_SPOT):lorom(SHOP_SPOT_END - 1) + 1]):
         raise ValueError('가게 팔기 목록 코드가 들어가지 않음')
-    for a in BUY_SITES:
-        if out[lorom(a)] != 0x20 or int.from_bytes(out[lorom(a) + 1:lorom(a) + 3], 'little') != BUY_SPOT & 0xFFFF:
-            raise ValueError(f'{a:06X}: JSR ShopBuyConfirm 이 아님')
+    # 도구 갈래는 개수 묻기(QTY_SPOT 첫머리 ShopBuyTool), 장비 갈래는 바로 확인(BUY_SPOT 첫머리 ShopBuyConfirm)
+    for a, spot in ((BUY_SITES[0], QTY_SPOT), (BUY_SITES[1], BUY_SPOT), (GIVE_SITE, None)):
+        t = int.from_bytes(out[lorom(a) + 1:lorom(a) + 3], 'little')
+        if out[lorom(a)] != 0x20 or (t != spot & 0xFFFF if spot else not QTY_SPOT & 0xFFFF <= t < QTY_SPOT_END & 0xFFFF):
+            raise ValueError(f'{a:06X}: 가게 사기 훅 JSR 이 아님 {out[lorom(a):lorom(a) + 3].hex()}')
+
     for a in SHOP_RESOLVE:
         t = int.from_bytes(out[lorom(a) + 1:lorom(a) + 3], 'little')
         if out[lorom(a)] != 0x20 or not SHOP_SPOT & 0xFFFF <= t < 0x10000:
