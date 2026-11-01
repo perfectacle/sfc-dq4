@@ -57,7 +57,7 @@ needs = ["rom", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETR
 
 [[check]]
 name = "dq4-heroblock"
-why = "주인공이 선 칸 때문에 사건이 멈추거나(서장 저녁 의자 칸·탑 병사 왼쪽) 주인공 걸음이 엇나가는(저녁 왼쪽, 왕의 귀환 위쪽 방) 일이 다시 생기지 않게"
+why = "주인공이 선 칸 때문에 사건이 멈추거나(서장 저녁 의자 칸·탑 병사 왼쪽) 주인공 걸음이 엇나가는(저녁 왼쪽, 왕의 귀환 위쪽 방) 일, 1C·이벤트 걸음으로 인물이 주인공·동료와 겹쳐 보이는 일(저녁 의자 칸·신시아 오른쪽·탑 병사 왼쪽·왕의 귀환 옆 칸)이 다시 생기지 않게"
 paths = [
     "sfc/dq4/tools/dq4prologue.py",
     "sfc/dq4/tools/dq4ch1event.py",
