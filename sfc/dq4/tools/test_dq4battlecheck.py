@@ -75,3 +75,27 @@ class BattleCheckTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+def tilemap(cells):
+    """{(줄, 열): 낱말} 만 채운 BG3 타일맵 2KB(나머지는 빈칸 2C00)."""
+    words = [0x2C00] * (32 * 32)
+    for (r, c), w in cells.items():
+        words[r * 32 + c] = w
+    return b''.join(w.to_bytes(2, 'little') for w in words)
+
+
+class CornerTests(unittest.TestCase):
+    def test_status_window_with_right_corner_passes(self):
+        # 일행 한 명 전투 상태 창: 왼쪽 모서리 2열, 이름 5칸 3~7열, 오른쪽 모서리(좌우 뒤집음) 8열
+        m = tilemap({(2, 2): 0x208C, **{(2, c): 0x218F + c for c in range(3, 8)}, (2, 8): 0x608C})
+        self.assertEqual(bc.dq4windowcheck.corners(m, 0), [])
+
+    def test_name_cell_over_right_border_fails(self):
+        # 창 너비 6 이면 이름 다섯째 칸(7열)이 오른쪽 모서리 자리를 덮는다
+        m = tilemap({(2, 2): 0x208C, **{(2, c): 0x218F + c for c in range(3, 8)}})
+        self.assertEqual(bc.dq4windowcheck.corners(m, 0), [(2, 2, '테두리', 0x08C)])
+
+    def test_each_left_corner_needs_its_own_right_corner(self):
+        m = tilemap({(20, 1): 0x208C, (20, 10): 0x208C, (20, 20): 0x608C})
+        self.assertEqual(bc.dq4windowcheck.corners(m, 0), [(20, 1, '테두리', 0x08C)])

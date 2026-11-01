@@ -11,6 +11,8 @@
   - 전투가 끝나(00:82BE) 돌아온 맵·$BE·칸(필드면 필드 좌표)·곡($1D8B)이 전투가 걸린 때와 같음
   - 돌아온 화면이 전투가 걸린 때의 맵 화면과 픽셀 90% 이상 같음, 그 뒤 걸으면 자리가 바뀜(전투가 끝나면 조우
     루틴을 CLC/RTL 로 되돌려 다시 걸리지 않게 함)
+  - 전투 동안 30프레임마다 본 BG3 타일맵에서 창 왼쪽 위 모서리마다 같은 줄 오른쪽에 짝 모서리가 있음
+    (dq4windowcheck.corners. 이름 다섯째 칸이 전투 상태 창 오른쪽 테두리 열을 덮으면 깨진다)
   - --repeat 2 면 같은 장면을 두 번 돌려 battle.txt 가 바이트째 같음
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4battlecheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/battlecheck \\
@@ -34,6 +36,7 @@ sys.path.insert(0, str(HERE))
 
 import dq4balance  # noqa: E402
 import dq4ch1walkcheck as wc  # noqa: E402
+import dq4windowcheck  # noqa: E402
 
 BATTLE = HERE / 'lua' / 'dq4battle.lua'
 ENCOUNTER = 0x11E7C2        # 23:E7C2 파일 오프셋
@@ -128,6 +131,13 @@ def judge(rom, scene, stages, dest, kind='win'):
     want_group, want_count = group_bytes(scene['group'])
     if (start['group'], start['count']) != (want_group, want_count):
         problems.append(f"무리 {start['group']}/{start['count']}, 기대 {want_group}/{want_count}")
+    maps = [bytes.fromhex(line.split(' ')[1]) for line in (dest / 'bg3.txt').read_text().split('\n') if ' ' in line] \
+        if (dest / 'bg3.txt').exists() else []
+    if not any(w & 0xC3FF == dq4windowcheck.CORNER for m in maps for w in memoryview(m).cast('H')):
+        problems.append('전투 동안 창 모서리를 하나도 못 봄')
+    broken = sorted({(r, c) for m in maps for r, c, _, _ in dq4windowcheck.corners(m, 0)})
+    if broken:
+        problems.append('창 테두리: 왼쪽 위 모서리의 오른쪽 짝이 없음(줄, 열) ' + ' '.join(f'{r},{c}' for r, c in broken))
     if after is None:
         return problems + ['전투에서 돌아오지 않음']
     earned = int.from_bytes(bytes.fromhex(after['gold']), 'little') - int.from_bytes(bytes.fromhex(start['gold']), 'little')

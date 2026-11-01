@@ -17,6 +17,10 @@ HERE = Path(__file__).resolve().parent
 CODE = 0x60C000
 CODE_END = 0x60E000
 STATUS_WINDOW = 0x02
+# 전투 상태 창 세 벌(머리 x 2, 본문 D1 12 12 12 12). 창 02 와 같은 열 간격 상수로 그려 이름 다섯째 칸이 맨 오른쪽 사람에서
+# 오른쪽 테두리 열에 오므로, 창 02 처럼 머리 너비를 6 → 7 로 늘려 테두리를 한 칸 밖으로 민다
+BATTLE_STATUS = (0x17, 0x26, 0x27)
+BATTLE_STATUS_BODY = bytes((0xD1, 0x12, 0x12, 0x12, 0x12))
 LIST_HOOK = 0x04B79B
 NMI_STUB = 0x00FFA1               # NMI 00:887C 가 들르는 받침(JML WqNmiEntry, 이어서 JMP ($1944))
 # 이름 하나를 04:B79B 로 찍는 「누구」 고르기 창(본문에 D0 자리 표시). 이름 칸 5칸을 담게 한 칸 왼쪽으로 옮겨 넓힌다.
@@ -168,6 +172,11 @@ def apply(data, font=None, asar=None):
     if d[o + 2] & 0x1F != 6:
         raise ValueError(f'창 {STATUS_WINDOW:02X} 머리 {d[o:o + 4].hex()}: 너비가 6 이 아님')
     d[o + 2] = (d[o + 2] & 0xE0) | 7
+    for w in BATTLE_STATUS:
+        o = lorom(dq4menupatch.window_addr(d, w))
+        if d[o + 2] & 0x1F != 6 or d[o + 4:o + 9] != BATTLE_STATUS_BODY:
+            raise ValueError(f'창 {w:02X} 머리 {d[o:o + 9].hex()}: 전투 상태 창 모양이 아님')
+        d[o + 2] += 1
     for w in HP_WINDOWS:
         o = lorom(dq4menupatch.window_addr(d, w))
         if d[o + 2] & 0x1F != 6 or d[o + 4:o + 6] != HP_BODY[w]:
