@@ -74,6 +74,7 @@ STATE=$PWD/work/state/ship.mss PRE="b:4,wait:40" WAYPOINTS="3,11;3,24;7,24;7,22"
 | `listing.py rom cover.txt [시작 끝]` | `cover.lua` 결과로, 실제 실행된 명령만 실행 당시 M·X 폭으로 디스어셈블 |
 | `guards.py [--base REF [--pr-body FILE]]` | 트랙별 `guards.toml`(롬이 있어야 도는 회귀 가드) 형식 검사, 바뀐 파일로 걸리는 검사와 명령 찍기, PR 본문 결과 줄 확인(CI `required-checks` 잡과 같음). [guards 스킬](../.agents/skills/guards/SKILL.md) |
 | `check_docs.py` | 일지 이름·제목·순번 중복, README 일지 목록, 상대 링크, 개인 경로, 충돌 표시 검사(CI `docs` 잡과 같음) |
+| `headless_slots.py` | 머신 전체의 헤드리스 에뮬레이터 프로세스 수 제한. 아래 [HEADLESS_SLOTS](#headless_slots-헤드리스-에뮬레이터-자리) |
 
 ### dq5
 
@@ -82,3 +83,22 @@ STATE=$PWD/work/state/ship.mss PRE="b:4,wait:40" WAYPOINTS="3,11;3,24;7,24;7,22"
 ### dq4
 
 FC 원작 분석 도구는 [fc/dq4/tools/README.md](../fc/dq4/tools/README.md), SFC 포팅용 그래픽 도구는 [sfc/dq4/tools/README.md](../sfc/dq4/tools/README.md) 에 있습니다.
+
+## HEADLESS_SLOTS: 헤드리스 에뮬레이터 자리
+
+여러 세션이 한 머신에서 검사를 병렬로 돌리면 에뮬레이터 프로세스가 코어 수보다 많아져 모두 느려집니다. 그래서 헤드리스 에뮬레이터 프로세스 하나가 뜨기 전에 머신 전체에서 함께 쓰는 자리(slot)를 하나 잡고, 끝나면 놓습니다.
+
+- 자리는 원래 체크아웃의 `work/cache/slots/` 에 있는 잠금 파일입니다. 워크트리에서 돌려도 같은 곳을 씁니다. 자리를 쥔 프로세스가 죽으면 잠금이 저절로 풀리므로 파일을 지울 필요가 없습니다.
+- 자리 수는 `HEADLESS_SLOTS` 로 정합니다. 기본은 CPU 수의 절반(최소 1)이고, `0` 이나 `off` 면 제한하지 않습니다.
+- 프로세스마다 `HEADLESS_SLOTS` 가 다르면, 지금 자리를 쥐었거나 기다리는 프로세스들의 값 중 가장 작은 값을 모두가 따릅니다. 그 값을 쓰는 프로세스가 다 끝나면 다시 자기 값을 씁니다.
+- 빈 자리가 없으면 `[headless_slots] <이름>: 자리 N개 모두 사용 중, 기다림` 을 찍고 기다리다가, 잡으면 `자리 i 잡음, X초 기다림` 을 찍습니다. 기다린 시간은 `subprocess` 의 시간 제한과 `guards.py --timeout` 에 듭니다(`dq4compatcheck.py` 의 묶음·코어 프로세스 시간 제한은 자리를 잡은 뒤부터 잽니다).
+- 자리를 잡는 곳은 `sfc/dq4/tools/dq4mesen.py`(`run`·`Runner`, MesenCE 하나당 하나. `Runner` 는 자리를 잡은 뒤 `timeout`(기본 900초)을 넘기면 MesenCE 를 끕니다)와 `sfc/dq4/tools/dq4libretro.py` 의 `Core`(코어 하나당 하나)입니다. MesenCE 를 `subprocess` 로 직접 띄우는 도구는 아직 자리를 잡지 않습니다.
+- 새 도구에서 쓰려면 띄우는 자리를 감쌉니다.
+
+```python
+import headless_slots   # tools/ 를 sys.path 에
+
+with headless_slots.slot('내 검사') as s:
+    subprocess.run([mesence, '--testrunner', rom, lua])
+print(s.waited)         # 기다린 초
+```

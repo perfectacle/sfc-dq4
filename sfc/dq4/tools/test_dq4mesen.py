@@ -3,6 +3,7 @@ from pathlib import Path
 import stat
 import sys
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -32,10 +33,14 @@ class MesenTests(unittest.TestCase):
         self.log = self.dir / 'log.txt'
         self.rom = self.dir / 'c.sfc'
         self.rom.write_bytes(b'rom')
-        self.env = mock.patch.dict(os.environ, MESENCE_SAVES=str(self.saves), FAKE_LOG=str(self.log))
+        self.env = mock.patch.dict(os.environ, MESENCE_SAVES=str(self.saves), FAKE_LOG=str(self.log),
+                                   HEADLESS_SLOTS='1')
         self.env.start()
+        self.slots = mock.patch.object(mesen.headless_slots, 'slots_dir', lambda: self.dir / 'slots')
+        self.slots.start()
 
     def tearDown(self):
+        self.slots.stop()
         self.env.stop()
 
     def runs(self):
@@ -60,6 +65,49 @@ class MesenTests(unittest.TestCase):
         self.assertTrue(self.runs()[0][0].startswith('bg3-'))
         self.assertEqual(list(self.saves.iterdir()), [])
         self.assertEqual(list(work.iterdir()), [])
+
+    def test_runners_beyond_slots_do_not_block_each_other(self):
+        # 자리 하나에서 Runner 둘을 띄운 뒤에야 wait() 해도, 앞 MesenCE 가 끝나면 자리가 풀려 둘째가 뜬다
+        work = self.dir / 'work'
+        runners = []
+
+        def start_two():
+            for _ in range(2):
+                runners.append(mesen.Runner(self.fake, self.rom, 'probe.lua', work, env=dict(os.environ)))
+        t = threading.Thread(target=start_two, daemon=True)
+        t.start()
+        t.join(10)
+        self.assertFalse(t.is_alive())
+        self.assertEqual([r.wait() for r in runners], [0, 0])
+        mesen.headless_slots.acquire('test', timeout=2, log=None).release()
+
+    def test_run_waits_for_slot_and_releases_it(self):
+        with mesen.headless_slots.slot('test', log=None):
+            with self.assertRaises(TimeoutError):
+                mesen.headless_slots.acquire('test', timeout=0.1, log=None)
+        mesen.run(self.fake, self.rom, 'probe.lua', folder=self.dir / 'work', env=dict(os.environ), check=True)
+        mesen.headless_slots.acquire('test', timeout=0, log=None).release()
+
+    def hanging(self):
+        fake = self.dir / 'Hang'
+        fake.write_text(f'#!{sys.executable}\nimport time\ntime.sleep(60)\n')
+        fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+        return fake
+
+    def test_runner_timeout_kills_and_frees_slot(self):
+        runner = mesen.Runner(self.hanging(), self.rom, 'probe.lua', self.dir / 'work', timeout=0.5,
+                              env=dict(os.environ))
+        mesen.headless_slots.acquire('test', timeout=5, log=None).release()
+        self.assertTrue(runner.timed_out)
+        self.assertNotEqual(runner.wait(), 0)
+
+    def test_runner_close_kills_live_mesence_first(self):
+        work = self.dir / 'work'
+        runner = mesen.Runner(self.hanging(), self.rom, 'probe.lua', work, env=dict(os.environ))
+        runner.close()
+        self.assertIsNotNone(runner.proc.poll())
+        self.assertEqual(list(work.iterdir()), [])
+        mesen.headless_slots.acquire('test', timeout=0, log=None).release()
 
     def test_clear_saves_only_touches_that_name(self):
         (self.saves / 'a.srm').write_bytes(b'')

@@ -1,4 +1,9 @@
+import subprocess
+import sys
+import tempfile
+import time
 import unittest
+from pathlib import Path
 
 import dq4compatcheck as cc
 
@@ -51,6 +56,34 @@ class ProbeLogTest(unittest.TestCase):
     def test_rom_offsets_map_to_lorom(self):
         self.assertEqual(cc.cpu(cc.TRIGGER_RECORD), 0x2AD812)
         self.assertEqual(cc.rom_codes(0x155812, b'\x01\x02'), ['2AD81201', '2AD81302'])
+
+
+class WaitChildTest(unittest.TestCase):
+    """자리를 기다린 시간은 시간 제한에 넣지 않고, 표지(started)를 쓴 뒤부터 잰다."""
+
+    def child(self, before, after):
+        out = Path(tempfile.mkdtemp())
+        code = (f'import time, pathlib; time.sleep({before}); '
+                f'pathlib.Path({str(out / cc.STARTED)!r}).write_text("0"); time.sleep({after})')
+        return subprocess.Popen([sys.executable, '-c', code]), out
+
+    def test_wait_before_marker_is_not_counted(self):
+        proc, out = self.child(1.5, 0.2)
+        self.assertTrue(cc.wait_child(proc, out, 1.0))
+
+    def test_timeout_after_marker_kills(self):
+        proc, out = self.child(0, 30)
+        t = time.time()
+        self.assertFalse(cc.wait_child(proc, out, 0.5))
+        self.assertLess(time.time() - t, 10)
+        self.assertIsNotNone(proc.poll())
+
+    def test_unit_waits_sums_markers(self):
+        out = Path(tempfile.mkdtemp())
+        for i, w in enumerate(('1.5', '2.0')):
+            (out / f'unit-{i:02d}').mkdir()
+            (out / f'unit-{i:02d}' / cc.STARTED).write_text(w)
+        self.assertAlmostEqual(cc.unit_waits(out), 3.5)
 
 
 if __name__ == '__main__':

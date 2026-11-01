@@ -6,12 +6,18 @@ dq4compatcheck.py 가 쓴다. 코어 파일은 저장소에 두지 않는다(LIB
   쓰기는 상태를 고쳐 다시 불러온다. 직렬화가 코어 스레드를 맞추므로 타이밍이 조금 바뀔 수 있다.
 - cheat(PAR 코드 AAAAAADD)는 롬·WRAM 쓰기에 쓴다. bsnes 는 cheat 를 풀 때 켜기 전 값을 되돌려 그 사이 게임이 쓴
   값을 덮으므로, 한 번만 쓰는 WRAM 값에는 cheat 대신 poke 를 쓴다.
+- 코어 하나가 tools/headless_slots.py 의 자리 하나를 잡는다. close() 하거나 프로세스가 끝나면 놓는다.
 """
 import ctypes as C
 import os
+from pathlib import Path
+import sys
 import wave
 import numpy as np
 from PIL import Image
+
+sys.path.append(str(Path(__file__).resolve().parents[3] / 'tools'))
+import headless_slots  # noqa: E402
 
 # bsnes 115 직렬화 상태에서 WRAM 128KB 가 시작하는 자리(snes9x WRAM 과 견줘 찾음)
 WRAM_OFFSET = 8836
@@ -67,6 +73,18 @@ STATE = C.CFUNCTYPE(C.c_int16, C.c_uint, C.c_uint, C.c_uint, C.c_uint)
 
 class Core:
     def __init__(self, dylib, rom, sysdir, options=None):
+        self.slot = headless_slots.acquire(f'libretro {os.path.basename(str(dylib))}')
+        try:
+            self._open(dylib, rom, sysdir, options)
+        except BaseException:
+            self.slot.release()
+            raise
+
+    def close(self):
+        """자리를 놓는다. 코어는 내리지 않으므로 이 뒤에는 run 을 부르지 않는다."""
+        self.slot.release()
+
+    def _open(self, dylib, rom, sysdir, options):
         self.path = os.path.realpath(str(dylib))
         self.lib = C.CDLL(dylib)
         self.options = {k.encode(): v.encode() for k, v in (options or {}).items()}
