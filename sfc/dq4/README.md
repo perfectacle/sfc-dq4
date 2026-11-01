@@ -25,6 +25,7 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [docs/dq4-compat-format.md](docs/dq4-compat-format.md): 호환성 검사(높은 뱅크 BRK 목록의 정적 검사, MesenCE 열린 버스 프로브, libretro bsnes·snes9x 1장 걷기)
 - [docs/dq4-savefixture-format.md](docs/dq4-savefixture-format.md): 저장 기록으로 시작하는 검사(SRAM 칸 만들기, 이어 할 자리 `7E:2033`, 저장되지 않는 것, bsnes·snes9x 에 넣기)
 - [docs/dq4-prologue-format.md](docs/dq4-prologue-format.md): NDS 서장(지하 검술 수련, 개구리, 신시아의 모샤스, 저녁, 1장으로 넘기기)
+- [docs/dq4-rom-ledger-format.md](docs/dq4-rom-ledger-format.md): 롬 쓰기 장부(빌드 단계마다 바뀐 바이트)와 에뮬레이터 없는 바이트 검사(단계끼리 겹침, 원래 롬 덮기, 뱅크 넘기, 표 불변식, 허용 목록)
 - [todo.md](todo.md): 남은 일
 - [references.md](references.md): 참고 자료
 - [tools/README.md](tools/README.md): 도구 사용법
@@ -325,3 +326,4 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [2026-11-01-36: 가게 개수 창을 최대까지만](journal/2026-11-01-36-shop-qty-cap.md)
 - [2026-11-01-37: 저장 기록으로 검사 시작하기](journal/2026-11-01-37-save-fixture.md)
 - [2026-11-01-38: 팔기에서 값 매기는 말 빼기](journal/2026-11-01-38-shop-sell-lines.md)
+- [2026-11-01-39: 롬 쓰기 장부와 바이트 검사](journal/2026-11-01-39-rom-ledger.md)

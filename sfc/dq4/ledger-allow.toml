@@ -1,0 +1,302 @@
+# 롬 바이트 검사(sfc/dq4/tools/dq4romledgercheck.py)가 받아 주는 쓰기. 규칙은 sfc/dq4/docs/dq4-rom-ledger-format.md.
+# 항목마다 at(끝 포함 "BB:AAAA~BB:AAAA" 또는 한 바이트 "BB:AAAA")과 why(왜 괜찮은지, 근거 문서·도구)를 쓴다.
+# 단계 이름은 dq4build.py 가 장부에 적는 것: title overture menu chapter1 sound sparfx people. "*" 는 아무 단계.
+# max(바이트)를 주면 그 항목이 받은 쓰기의 합이 그보다 크면 실패한다. 넓은 자리를 적을 때는 꼭 준다.
+# [[overlap]] 의 reuse = true 는 앞 단계가 거울을 지워 비운 자리(장부 cleared)를 뒤 단계가 쓰는 것만 받는다.
+# 의도한 것만 넣는다. 덮어쓰기가 왜 생겼는지 모르면 넣지 말고 원인을 찾는다.
+
+# --- 단계끼리 겹침: 뒤 단계(later)가 앞 단계(earlier)가 쓴 바이트를 다시 씀
+
+[[overlap]]
+earlier = "*"
+later = "*"
+at = "00:FFDC~00:FFDF"
+why = "머리 체크섬. 롬을 고친 단계마다 다시 맞춘다"
+
+[[overlap]]
+earlier = "title"
+later = "overture"
+at = "00:A70C"
+why = "타이틀이 메뉴 곡 BRK 0F 10(00:A70C~A70E)을 NOP 으로 막고, 서곡이 그 앞 STA $2100 자리(00:A709~A70C)를 JSL $70FF20 으로 바꾼다. 남은 NOP 둘은 그대로(dq4-overture-format.md, dq4overture.MENU_CALL)"
+
+[[overlap]]
+earlier = "title"
+later = "overture"
+at = "30:801C~30:8021"
+why = "타이틀 코드의 LDA #$10 / JSL $24FE9A 를 서곡이 JSL $70FF00 으로 바꿈(dq4-overture-format.md, dq4overture.TITLE_CALL)"
+
+[[overlap]]
+earlier = "title"
+later = "overture"
+at = "30:81AA~30:81AC"
+why = "타이틀 FadeOut 첫 명령 LDX #$000F 를 서곡이 JMP $FF00(곡 줄이기 스텁)으로 바꿈(dq4-overture-format.md, dq4overture.FADE_STUB)"
+
+[[overlap]]
+earlier = "title"
+later = "menu"
+at = "30:829B~30:829D"
+why = "타이틀 코드의 JML $03FE5C 대상을 메뉴가 60:8100 으로 바꿈(dq4menupatch.FADEOUT_EXIT)"
+
+[[overlap]]
+earlier = "overture"
+later = "sound"
+at = "2B:E676~2B:E7ED"
+why = "서곡이 곡 10 레코드를 늘린 곡 묶음 표·IPL 블록 길이(2B:E676, 표 2B:E67F~)를 곡 묶음 단계가 바꾼 곡 전부로 다시 씀(dq4-sound-port-format.md 의 곡 묶음 표)"
+
+
+# 1장 빌드가 거울을 0 으로 비운 자리에 인물 단계가 넣는 것(dq4people.TILE_AREAS·PALETTES_AT·MAP_PALETTES_AT·HOOK_AT)
+
+[[overlap]]
+earlier = "chapter1"
+later = "people"
+reuse = true
+at = "3C:F040~3C:FDFF"
+why = "원래 자리에 들어가지 않는 세트 타일(dq4people.TILE_AREAS 의 3C:F040~, 그룹 빌드가 채운 뒤 남는 끝자리)"
+
+[[overlap]]
+earlier = "chapter1"
+later = "people"
+reuse = true
+at = "3D:EA00~3D:FA7F"
+why = "세트 팔레트 표(dq4people.PALETTES_AT)와 맵 팔레트 줄 루틴·표(MAP_PALETTES_AT 3D:EB60)"
+
+[[overlap]]
+earlier = "chapter1"
+later = "people"
+reuse = true
+at = "3D:FA80~3D:FD8F"
+why = "세트 타일(dq4people.TILE_AREAS 의 3D:FA80~FD90, 맵 팔레트 표 뒤)"
+
+[[overlap]]
+earlier = "chapter1"
+later = "people"
+reuse = true
+at = "3E:D700~3E:FBFF"
+why = "세트 타일(dq4people.TILE_AREAS 의 3E:D700~FC00)"
+
+[[overlap]]
+earlier = "chapter1"
+later = "people"
+reuse = true
+at = "3E:FC00~3E:FDFF"
+max = 512
+why = "그림 번호 + 맵 그룹 → 세트 훅 표(dq4people.HOOK_AT)"
+
+[[overlap]]
+earlier = "chapter1"
+later = "people"
+reuse = true
+at = "3F:EB80~3F:FFFF"
+why = "세트 타일(dq4people.TILE_AREAS 의 3F:EB80~, 인물 목록 끝과 띄움)"
+
+# --- 원래 롬의 0 아닌 바이트를 64바이트 이상 한 덩어리로 덮음
+
+[[original]]
+stage = "overture"
+at = "2B:E676~2B:E7ED"
+why = "곡 묶음 표(2B:E67F~)를 곡 10 레코드를 늘려 다시 씀(dq4-overture-format.md)"
+
+[[original]]
+stage = "sound"
+at = "2B:E676~2B:EAF7"
+why = "곡 묶음 표와 IPL 블록을 바꾼 곡으로 다시 씀(dq4-sound-port-format.md)"
+
+[[original]]
+stage = "menu"
+at = "04:AD78~04:AE7A"
+why = "창 제목 목록(04:AD78)을 한글로(dq4windowtext, dq4-window-text-format.md)"
+
+[[original]]
+stage = "menu"
+at = "04:EB48~04:FAFF"
+why = "창 표(04:EB48)와 창 레코드(04:ED04~)를 한글 레코드로 다시 쓰고 줄어든 자리에 다리 코드를 둠(dq4menupatch.place, dq4windowname, dq4-menu-format.md)"
+
+[[original]]
+stage = "menu"
+at = "07:D77C~07:FFFF"
+max = 10372
+why = "원래 보행 메시지 자리(07:D77C~0C:8020)의 앞. 메시지를 64:C400~ 로 옮기고 글자 그림 묶음 51(3DB~64E, 12×11 1bpp)을 둠(dq4menumsg.GLYPH_START, dq4-menu-format.md 의 글자)"
+
+[[original]]
+stage = "menu"
+at = "08:8000~08:F414"
+max = 29717
+why = "같은 옛 메시지 자리. 글자 그림 묶음 52(64F~D3D)와 부호·숫자·로마자 묶음(08:F268~)(dq4menumsg, dq4-menu-format.md 의 글자)"
+
+[[original]]
+stage = "menu"
+at = "24:9E02~24:9E55"
+why = "보행 디코더 호출(dq4menumsg), 이름 짓기(dq4namegame), 창 이름(dq4windowname)이 이 루틴 자리를 이어 씀(dq4-menu-format.md)"
+
+[[original]]
+stage = "menu"
+at = "24:AECD~24:AF1D"
+why = "전투 메시지 색인(24:AECD)을 dq4windowname 이 다시 씀(dq4-battle-text-format.md)"
+
+[[original]]
+stage = "chapter1"
+at = "01:A5CC~01:A64A"
+why = "필드 지도 덩어리 불러오기 루틴(01:A5C2~)의 뱅크·주소 즉값을 옮긴 지도로(dq5fieldwrite field, dq4-field-format.md)"
+
+[[original]]
+stage = "chapter1"
+at = "01:A719~01:A798"
+why = "움직이는 바다 원본 128바이트를 DQ4 물결로 제자리에(dq5fieldgfxwrite, dq4-field-format.md)"
+
+[[original]]
+stage = "chapter1"
+at = "1E:F4DF~1E:F54C"
+why = "보물상자 아래 표(1E:F4DF, 11항목) 칸을 DQ4 상자로(dq5chest lower, dq4chestport)"
+
+[[original]]
+stage = "chapter1"
+at = "23:96F3~23:9E40"
+why = "조우 구역 표(23:96F3) 안 레코드를 FC 구역으로(dq5progresswrite zones, dq4fieldencounter)"
+
+[[original]]
+stage = "chapter1"
+at = "23:B081~23:B1BD"
+why = "물건 값 바탕(23:B081)·배수(23:B159) 표에서 옮긴 가게가 파는 물건을 FC 값으로(dq4itemport)"
+
+[[original]]
+stage = "chapter1"
+at = "23:B819~23:BD1E"
+why = "주문 습득 목록(23:B819·B979)을 DQ4 로(dq5learnwrite learn)"
+
+[[original]]
+stage = "chapter1"
+at = "23:C242~23:D6A0"
+why = "이름 표 자리(23:C242~D6A0) 안 이름을 FC 이름으로(dq5namewrite names, dq4-chapter1-format.md·dq4-field-format.md)"
+
+[[original]]
+stage = "chapter1"
+at = "23:F1E0~23:F54D"
+why = "필드 지형 조우율(23:F1E0)과 구역 격자(23:F1FC~)를 FC 로(dq5encounterwrite grids, dq4fieldencounter)"
+
+[[original]]
+stage = "chapter1"
+at = "25:8621~25:8684"
+why = "새 게임·다시 시작 자리 표(25:8621, 6바이트 항목)(dq4chapter1, dq4-chapter1-format.md)"
+
+[[original]]
+stage = "chapter1"
+at = "2A:D812~2A:F223"
+why = "영역 이동 레코드를 3C:A000 으로 옮겨 비운 원래 표 자리(dq5exitreloc.POOLS)에 늘린 출구 표를 씀(dq4groupbuild.EXIT_AT)"
+
+[[original]]
+stage = "people"
+at = "04:96D8~04:97D5"
+why = "OBJ 팔레트 0~7 색 1~15 를 인물 색으로(dq4people, palette.dq5patch.json)"
+
+[[original]]
+stage = "people"
+at = "0C:886D~0C:8CB1"
+why = "세트 03 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0C:8CB2~0C:91AC"
+why = "세트 04 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0C:91AD~0C:9489"
+why = "세트 05 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0C:CD6D~0C:D1EB"
+why = "세트 20 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0C:D541~0C:D953"
+why = "세트 22 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0C:DEFB~0C:E2E2"
+why = "세트 25 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0C:F5CA~0C:FA2B"
+why = "세트 2D 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0D:9455~0D:98CD"
+why = "세트 39 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0D:98CE~0D:9CCC"
+why = "세트 3A 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0D:9F5B~0D:A403"
+why = "세트 3C 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0D:A802~0D:AB92"
+why = "세트 40 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0D:F5A5~0D:F988"
+why = "세트 63 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0E:9A0F~0E:9F93"
+why = "세트 6F 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0E:9F94~0E:A483"
+why = "세트 80 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0E:B3B8~0E:B6C5"
+why = "세트 86 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0E:B971~0E:BCA6"
+why = "세트 88 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0E:BCA7~0E:C120"
+why = "세트 89 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0E:C3F8~0E:C8F3"
+why = "세트 8B 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0F:8085~0F:84D4"
+why = "세트 9F 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "1F:D71D~1F:FE97"
+why = "세트 레코드(52바이트)·세트 포인터를 바꾼 세트로(dq4people)"
+
+# --- 뱅크 경계를 넘는 쓰기 덩어리(자료만. 코드는 PC 가 뱅크를 넘지 않으므로 넣지 않는다)
+
+[[cross]]
+stage = "menu"
+at = "64:C400~69:FFFF"
+why = "보행 메시지 비트열. 디코더가 뱅크 끝에서 다음 뱅크 8000 으로 넘어가며 읽음(dq5map.next_addr, dq4-menu-format.md)"
+
+[[cross]]
+stage = "chapter1"
+at = "3C:FFEA~3D:8000"
+max = 32
+why = "뱅크 3C 끝을 0 으로 비운 22바이트(지운 자리로 보기에 짧음)와 3D:8000 첫 자료가 이어진 것. 코드도 한 덩어리 자료도 아님"

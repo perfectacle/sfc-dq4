@@ -10,6 +10,8 @@
 곡 롬 위에 서장·1장 인물 필드 그림(dq4people.py, 같은 자원 저장소의 NDS 인물 시트)을 얹어 dq4-ch1-full.sfc 로 끝낸다.
 인물 시트가 없으면 곡 롬에서 끝난다.
 
+끝나면 단계마다 바뀐 바이트 범위를 --out 의 ledger.json 에 적는다(dq4romledger.py, 검사는 dq4romledgercheck.py).
+
 1장 끝은 기본으로 끝맺음 서술과 「다음에 계속」 상자 뒤 타이틀로 돌아간다(1장까지의 배포판). --chapter2 를 주면
 2장으로 넘어간다.
 
@@ -27,6 +29,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import dq4buildcache  # noqa: E402
+import dq4romledger  # noqa: E402
 
 
 def step(tool, *args):
@@ -36,25 +39,39 @@ def step(tool, *args):
 
 def build(out, dq5, dq4, prologue=True, assets=None, chapter2=False):
     out.mkdir(parents=True, exist_ok=True)
+    stages = []
+
+    def done(rom):
+        dq4romledger.write(out / 'ledger.json', dq4romledger.build(Path(dq5).read_bytes(), stages))
+        return rom
+
+    def stage(name, rom):
+        stages.append((name, Path(rom).read_bytes(), Path(rom).name))
     with ThreadPoolExecutor() as pool:
         layers = pool.submit(step, 'dq4titlelayers.py', '--out', out / 'title')
         messages = pool.submit(step, 'dq4chapter1.py', 'messages', '--dq5', dq5, '--dq4', dq4,
                                '-o', out / 'messages.json')
         layers.result()
         step('dq4titlelayerpatch.py', '--rom', dq5, '--input', out / 'title', '--out', out / 'title.sfc')
+        stage('title', out / 'title.sfc')
         step('dq4overture.py', 'build', '--nes', dq4, '--rom', dq5, '--title', out / 'title.sfc',
              '--out', out / 'overture.sfc')
+        stage('overture', out / 'overture.sfc')
         messages.result()
     step('dq4menupatch.py', 'build', '--rom', out / 'overture.sfc', '--messages', out / 'messages.json',
          '--out', out / 'menu.sfc')
+    stage('menu', out / 'menu.sfc')
     step('dq4chapter1.py', 'build', '--rom', out / 'menu.sfc', '--dq5', dq5, '--dq4', dq4,
          '--out', out / 'dq4-ch1.sfc', *([] if prologue else ['--no-prologue']),
          *(['--chapter2'] if chapter2 else []))
+    stage('chapter1', out / 'dq4-ch1.sfc')
     if assets is None:
-        return out / 'dq4-ch1.sfc'
+        return done(out / 'dq4-ch1.sfc')
     subprocess.run([sys.executable, HERE / 'dq4soundset.py', '--base', out / 'dq4-ch1.sfc', '--assets', assets,
                     f'@{HERE / "dq4sound-game.args"}', '--out', out / 'dq4-ch1-sound.sfc'],
                    check=True, stdout=subprocess.DEVNULL)
+    # 칼 효과가 같은 파일을 고쳐 쓰므로 곡 묶음만 얹은 롬은 여기서 따로 잡아 둔다
+    stage('sound', out / 'dq4-ch1-sound.sfc')
     # 서장 수련의 칼 효과(NDS 화면에서 잡은 프레임)는 에셋 저장소에 있어 곡 롬에 얹는다. 없으면 효과음만 난다
     subprocess.run([sys.executable, HERE / 'dq4sparfx.py', 'apply', '--base', out / 'dq4-ch1-sound.sfc',
                     '--assets', assets, '--out', out / 'dq4-ch1-sound.sfc'], check=True, stdout=subprocess.DEVNULL)
@@ -62,14 +79,16 @@ def build(out, dq5, dq4, prologue=True, assets=None, chapter2=False):
     from dq4romassets import set_checksum
     sound = out / 'dq4-ch1-sound.sfc'
     sound.write_bytes(set_checksum(sound.read_bytes()))
+    stage('sparfx', sound)
     import dq4people
     if not (Path(assets) / dq4people.FIELD).is_dir():
         print(f'{Path(assets) / dq4people.FIELD} 이 없어 인물 그림 없이 곡 롬에서 끝낸다', file=sys.stderr)
-        return out / 'dq4-ch1-sound.sfc'
+        return done(out / 'dq4-ch1-sound.sfc')
     subprocess.run([sys.executable, HERE / 'dq4people.py', '--base', out / 'dq4-ch1-sound.sfc', '--dq5', dq5,
                     '--assets', assets, '--out', out / 'dq4-ch1-full.sfc', '--work', out / 'leader'],
                    check=True, stdout=subprocess.DEVNULL)
-    return out / 'dq4-ch1-full.sfc'
+    stage('people', out / 'dq4-ch1-full.sfc')
+    return done(out / 'dq4-ch1-full.sfc')
 
 
 def main():

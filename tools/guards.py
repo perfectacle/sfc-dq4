@@ -142,14 +142,28 @@ def out_dirs(run):
     return keep
 
 
+# 이보다 큰 파일은 내용 대신 (크기, mtime_ns) 로 본다
+BIG_FILE = 64 << 20
+
+
+def stat_key(path):
+    st = path.stat()
+    return f'{st.st_size}:{st.st_mtime_ns}'.encode()
+
+
 def hash_path(h, path):
-    """파일은 내용, 폴더는 그 안 파일들의 상대 경로와 내용. 없으면 표시만."""
+    """파일은 내용(BIG_FILE 보다 크면 크기·mtime_ns), 폴더는 그 안 파일들의 (상대 경로, 크기, mtime_ns).
+    폴더를 내용째 읽지 않는 것은 needs 의 자원 저장소(수 GB)처럼 큰 폴더도 키를 곧 만들게 하려는 것이다.
+    파일을 내용은 그대로 두고 mtime 만 되돌리면 옛 결과로 건너뛸 수 있다. 없으면 표시만."""
     path = Path(path)
     if path.is_file():
-        h.update(hashlib.sha1(path.read_bytes()).digest())
+        if path.stat().st_size > BIG_FILE:
+            h.update(b'big:' + stat_key(path))
+        else:
+            h.update(hashlib.sha1(path.read_bytes()).digest())
     elif path.is_dir():
         for f in sorted(p for p in path.rglob('*') if p.is_file()):
-            h.update(str(f.relative_to(path)).encode() + hashlib.sha1(f.read_bytes()).digest())
+            h.update(str(f.relative_to(path)).encode() + b'\0' + stat_key(f))
     else:
         h.update(b'-')
 
@@ -161,7 +175,7 @@ def env_names(needs):
 
 def input_key(check, root=ROOT, environ=os.environ):
     """같은 입력이면 같은 키. .md 는 롬·검사에 영향이 없어 뺀다.
-    추적 파일, 명령, needs 환경 변수가 가리키는 파일·폴더 내용, rom/ 원본, 명령이 읽는 파일(앞 단계가 만드는 것 빼고)."""
+    추적 파일, 명령, needs 환경 변수가 가리키는 파일·폴더(hash_path), rom/ 원본, 명령이 읽는 파일(앞 단계가 만드는 것 빼고)."""
     h = hashlib.sha256()
     run = check['run']
     h.update(run.encode())
