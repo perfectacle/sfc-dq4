@@ -53,6 +53,9 @@ SHOP_SPOT, SHOP_SPOT_END = 0x04FF40, 0x050000
 SHOP_PRICE_COLS = 6
 SHOP_SELL_CODE = 0xD9
 CODE_TABLE = 0x04B3A2
+# 가게 동료 창(3A)의 「소지 중」 을 고르는 두 자리(장비류 04:C3B1, 도구 04:C508). LDY #$000A / BRL $C440 을 그 사람
+# 소지품에서 고른 물건($0F22)의 개수를 센 「 N개 소지」 로(dq4windowname.asm ShopHeldCount)
+HELD_SITES = (0x04C3B1, 0x04C508)
 
 
 def lorom(a):
@@ -162,6 +165,10 @@ def apply(data, font=None, asar=None):
     o = lorom(CODE_TABLE) + (SHOP_SELL_CODE - 0xB0) * 2
     if d[o:o + 2] != bytes.fromhex('46b9'):
         raise ValueError(f'코드 {SHOP_SELL_CODE:02X} 갈래 {d[o:o + 2].hex()}: 04:B946 이 아님')
+    for a in HELD_SITES:
+        o = lorom(a)
+        if d[o:o + 4] != bytes.fromhex('a00a0082') or o + 6 + int.from_bytes(d[o + 4:o + 6], 'little', signed=True) != lorom(0x04C440):
+            raise ValueError(f'{a:06X} {d[o:o + 6].hex()}: 「소지 중」 고르기가 아님')
     if any(d[lorom(SHOP_SPOT):lorom(SHOP_SPOT_END - 1) + 1]):
         raise ValueError(f'{SHOP_SPOT:06X}~ 가 비어 있지 않음')
     hi_count = -(-len(ne.GLYPHS) // ne.CODE_RADIX)
@@ -173,6 +180,9 @@ def apply(data, font=None, asar=None):
     records, numbers = dq4windowtext.fixed_records(d, font)
     for o, rec in records:
         d[o:o + len(rec)] = rec
+    held = [numbers[k] for k in dq4windowtext.HELD_COUNT]
+    if held != list(range(held[0], held[0] + len(held))):
+        raise ValueError(f'「N개 소지」 문구 번호가 이어지지 않음: {held}')
     eo = lorom(EMPTY_SLOT_HOOK)
     if d[eo:eo + 12] != bytes.fromhex('a20900bdfbb92035b2ca10f7'):
         raise ValueError(f'{EMPTY_SLOT_HOOK:06X}: 빈 기록 칸 고리가 아님')
@@ -200,7 +210,7 @@ def apply(data, font=None, asar=None):
             f'!wn_kana_table = ${KANA_TABLE:06X}\n!wt_empty_slot = {numbers[dq4windowtext.EMPTY_SLOT]}\n'
             f'!wt_cannot_sell = {numbers[dq4windowtext.CANNOT_SELL]}\n!shop_sell_alias = ${sell & 0xFFFF:04X}\n'
             f'!shop_sell_code = ${SHOP_SELL_CODE:02X}\n!shop_sell_slot = ${CODE_TABLE + (SHOP_SELL_CODE - 0xB0) * 2:06X}\n'
-            f'!shop_spot = ${SHOP_SPOT:06X}\n!shop_sell_w = {shop_w}\n')
+            f'!shop_spot = ${SHOP_SPOT:06X}\n!shop_sell_w = {shop_w}\n!wt_held_first = {held[0]}\n')
     defs += dq4battlemsg.apply(d, font or dq4menupatch.Font('galmuri9'), dq4menupatch.render,
                                len(ne.GLYPHS) + len(kana))
     with tempfile.TemporaryDirectory() as tmp:

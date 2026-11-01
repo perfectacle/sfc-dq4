@@ -83,6 +83,14 @@ org $04BB70
 org $04B9EB
     JML WnEmptySlot
 
+; 가게 동료 창(3A)의 「소지 중」 을 고르는 두 자리(장비류·도구). LDY #$000A / BRL $C440
+org $04C3B1
+    JML ShopHeldCount
+    NOP #2
+org $04C508
+    JML ShopHeldCount
+    NOP #2
+
 ; 창 바이트 갈래(메뉴 패치의 JSL). 고정 문구 접두를 먼저 가르고, 나머지는 원래 대상으로.
 org $04B11E
     JSL WnPrefix
@@ -129,12 +137,12 @@ ShopSellPrice:
     LDY.w #$0018
     LDA.b $E4
     STA.b $42
-    db $00, $88, $46        ; BRK 88 46: 줄 → 소지품 칸
+    db $00, $88, $46        ; BRK 88 46: 「누가」 창 줄 → 사람
     LDA.b $46
     STA.b $42
     LDA.w $0B9E
     STA.b $43
-    db $00, $88, $2E        ; BRK 88 2E: $46 = 물건
+    db $00, $88, $2E        ; BRK 88 2E: $46 = 사람 $42 의 칸 $43($0B9E, 지금 줄) 의 물건
     LDA.b $46
     CMP #$FF
     BCS .done
@@ -1762,6 +1770,51 @@ ShopSellCannot:
     PLY
     SEP #$20
     RTL
+
+; 04:C3B1·04:C508(M = 8, X = 16, DB = 04, 줄 $E4, 고른 물건 $0F22). 원래는 04:C511 표의 「 소지 중」 을 문자열 버퍼
+; $01~(빈칸 01 로 채운 16바이트)에 베끼고 04:C45A(PLY / RTS)로 끝난다. 그 사람 소지품 12칸에서 같은 물건을 세어
+; 고정 문구 「 N개 소지」 를 9E k 로 넣는다. BRK 88 은 A·X·Y 를 지키고, 어느 뱅크에서 불러도 피연산자를 읽는다
+ShopHeldCount:
+    LDA.b $E4
+    STA.b $42
+    db $00, $88, $46        ; BRK 88 46: 줄 → 사람
+    LDA.b $46
+    PHA
+    LDY.w #$0000
+    LDX.w #$0000
+-
+    TXA
+    STA.b $43
+    LDA $01,S
+    STA.b $42
+    db $00, $88, $2E        ; BRK 88 2E: $46 = 사람 $42 의 칸 $43 의 물건
+    LDA.b $46
+    CMP.w $0F22
+    BNE +
+    INY
++
+    INX
+    CPX.w #$000C
+    BCC -
+    PLA
+    CPY.w #$0001
+    BCS +
+    LDY.w #$000A
+    JML $04C440
++
+    LDX.w #$000F
+    LDA #$01
+-
+    STA.b $00,X
+    DEX
+    BPL -
+    LDA #!wt_fixed
+    STA.b $01
+    TYA
+    CLC
+    ADC #!wt_held_first-1
+    STA.b $02
+    JML $04C45A
 
 ; 04:AC25(04:AA10 제목 고리에서 B0 미만 바이트, A = 바이트 8비트, X = 그 바이트 자리, DB = 04, Y = $DC 기준 자리).
 ; 원래는 STA $00 / PHB / LDA #$7E / PHA / PLB 뒤 ($DC),Y 에 쓴다. 9E k 면 고정 문구를 그리고 고리로 돌아간다.
