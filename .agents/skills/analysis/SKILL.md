@@ -5,7 +5,7 @@ description: 롬을 분석할 때. MesenCE 프로브·자동 보행 실험, 커�
 
 # 롬 분석
 
-이 스킬이 ROM-01, ORIG-01, VERIFY-01, EMU-01 의 정본이다. 도구 하나하나의 사용법은 [tools/README.md](../../../tools/README.md) 가 정본이고, 여기에는 절차와 판단 기준만 둔다.
+이 스킬이 ROM-01, ORIG-01, VERIFY-01, EMU-01, COMPAT-01 의 정본이다. 도구 하나하나의 사용법은 [tools/README.md](../../../tools/README.md) 가 정본이고, 여기에는 절차와 판단 기준만 둔다.
 
 ## 준비
 
@@ -59,7 +59,15 @@ description: 롬을 분석할 때. MesenCE 프로브·자동 보행 실험, 커�
 분석·실험은 [MesenCE](https://github.com/nesdev-org/MesenCE) 로 한다(`--testrunner` + Lua). 문서에도 MesenCE 로 적는다. Mesen 2 는 호환 비교가 필요할 때만 쓴다.
 
 - 이유: 툴킷의 Lua 라이브러리와 기존 프로브가 MesenCE 기준이다. 에뮬레이터가 다르면 같은 세이브스테이트가 다른 결과를 낸다.
+- 호환성 확인(MesenCE 에서만 우연히 도는 코드 찾기)에는 libretro bsnes·snes9x 도 쓴다. dq4 는 `sfc/dq4/tools/dq4compatcheck.py`([호환성 검사](../../../sfc/dq4/docs/dq4-compat-format.md)).
 - NDS(`nds` 트랙)는 MesenCE 가 돌리지 못한다. kr-patches 의 고스트 트릭 패치와 같이 desmume libretro 코어로 실측하고, 문서에 코어 커밋을 적는다.
+
+### COMPAT-01 — 높은 뱅크 코드는 확인한 BRK 만
+
+뱅크 `40` 이상에 두는 네이티브 코드는 열린 버스 프로브로 확인한 BRK 스크립트 명령만 부른다. 확인한 명령과 금지한 명령은 트랙의 BRK 목록(dq4 는 `sfc/dq4/tools/dq4brkscan.py` 의 `ALLOWED`·`FORBIDDEN`)에 있다. 목록에 없는 명령이 필요하면 프로브로 확인하고 목록에 더한다. 금지 명령의 일은 DB 를 0 으로 둔 채 그 루틴을 직접 부른다.
+
+- 이유: BRK 핸들러는 DB 를 부른 코드의 뱅크로 둔다. 핸들러가 부르는 루틴이 WRAM 을 DB 기준 절대 주소로 읽으면, 뱅크 `40` 이상에서는 WRAM 대신 열린 버스·롬 거울에 닿는다. 에뮬레이터·카트마다 값이 달라 MesenCE 에서만 우연히 돈다(snes9x 에서 서장이 멈춘 원인).
+- 같은 까닭으로 높은 뱅크 코드 안의 DB 기준 절대 주소(`LDA $1234` 등)도 DB 를 0 으로 둔 뒤에 쓴다.
 
 ## 참고 — 자주 밟는 함정
 

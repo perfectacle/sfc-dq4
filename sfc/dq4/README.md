@@ -22,6 +22,7 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [docs/dq4-battle-text-format.md](docs/dq4-battle-text-format.md): 전투 메시지 432개 한글(전투 중 빈 BG3 칸 풀, 한글 구간·글자 표, 이름·조사, 창 테두리·줄 올림)
 - [docs/dq4-chapter1-format.md](docs/dq4-chapter1-format.md): 1장 첫머리(새 게임 첫 맵, 왕좌의 방 연출, 한글 대사, 인물 배치, 바트랜드 성 곡)
 - [docs/dq4-chapter2-format.md](docs/dq4-chapter2-format.md): 2장 첫머리(1장 끝에서 넘어가기, 아리나 일행, 산트하임 왕좌의 방 연출)
+- [docs/dq4-compat-format.md](docs/dq4-compat-format.md): 호환성 검사(높은 뱅크 BRK 목록의 정적 검사, MesenCE 열린 버스 프로브, libretro bsnes·snes9x 1장 걷기)
 - [docs/dq4-prologue-format.md](docs/dq4-prologue-format.md): NDS 서장(지하 검술 수련, 개구리, 신시아의 모샤스, 저녁, 1장으로 넘기기)
 - [todo.md](todo.md): 남은 일
 - [references.md](references.md): 참고 자료
@@ -312,4 +313,5 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [2026-11-01-25: 가게 동료 창에 가진 개수](journal/2026-11-01-25-shop-held-count.md)
 - [2026-11-01-26: 여관 징글 앞당기기와 물건을 찾을 때의 소리](journal/2026-11-01-26-inn-jingle-item-sound.md)
 - [2026-11-01-27: 가게에서 사기 전에 확인](journal/2026-11-01-27-shop-buy-confirm.md)
-- [2026-11-01-28: 주인공이 선 자리 때문에 멈추는 사건](journal/2026-11-01-28-hero-block-events.md)
+- [2026-11-01-28: snes9x·bsnes 로 1장 끝까지 걷기와 회귀 가드](journal/2026-11-01-28-compat-walk.md)
+- [2026-11-01-29: 주인공이 선 자리 때문에 멈추는 사건](journal/2026-11-01-29-hero-block-events.md)
