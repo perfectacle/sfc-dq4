@@ -181,8 +181,9 @@ def slot_diff(a, b):
 class Runner:
     """한 코어를 프레임마다 돌리며 소리·밝기·대기열 인자를 적는다."""
 
-    def __init__(self, core):
+    def __init__(self, core, rom=None):
         self.c = core
+        self.rom = rom
         self.rms, self.bright, self.events, self.notes = [], [], [], []
         self.voices = []
         self.last_q = None
@@ -225,6 +226,31 @@ class Runner:
         self.wait(GAP)
 
 
+def envx(r):
+    from dq4sfxscene import spc_state
+    got = spc_state(r.c)
+    return tuple(got[0][v * 16 + 8] for v in range(8)) if got else (0,) * 8
+
+
+NAME_VRAM = ((0x4F80, 0x5000), (0x5F80, 0x6000))   # 이름 칸 위·아래 타일(dq4nameentrycheck 와 같은 자리)
+
+
+def name_tiles(r, rom, text):
+    """화면 이름 칸 타일이 롬 글꼴로 그린 text 와 같은지. snes9x 는 VRAM 을 API 로 읽고, bsnes(VRAM API 없음)는
+    직렬화 상태 안에서 위·아래 타일 줄을 찾는다. 돌려줌: (같은지, 다른 바이트 수 또는 None)."""
+    import ctypes as C
+    import dq4nameentrycheck as nec
+    want = nec.field_tiles(rom, text)
+    size = r.c.lib.retro_get_memory_size(3)
+    if size:
+        vram = bytes((C.c_ubyte * size).from_address(r.c.lib.retro_get_memory_data(3)))
+        got = b''.join(vram[a:b] for a, b in NAME_VRAM)
+        diff = sum(x != y for x, y in zip(got, want))
+        return diff == 0, diff
+    st = r.c.save()[0]
+    return want[:128] in st and want[128:] in st, None
+
+
 def name_state(r):
     n = r.rd(NE_N)
     return n, [r.rd(NE_CH + 2 * k, 2) for k in range(min(n, ne.MAX_CHARS))], r.rd(NE_SP)
@@ -232,22 +258,24 @@ def name_state(r):
 
 def new_game(r, problems, info):
     """1~4. 이름 입력을 마치고 서장 첫머리에 서기까지."""
-    from dq4sfxscene import dsp_regs
+    from dq4sfxscene import spc_state
     at = r.until(lambda: r.rd(SONG_NOW) == OVERTURE, 600)
     info['overture_frame'] = at
     if at is None:
         problems.append(f'서곡(곡 {OVERTURE:02X})이 600프레임 안에 지금 곡이 되지 않음')
         return None
-    voiced = None
+    # 곡이 바뀐 프레임의 ENVX 를 바탕으로, 그 뒤 목소리 0~5 가운데 하나가 앞 프레임보다 오르면 서곡이 울린 것
+    voiced, prev = None, envx(r)
     for _ in range(120):
         r.step()
-        regs = dsp_regs(r.c)
-        if regs and any(regs[v * 16 + 8] for v in range(6)):
+        now = envx(r)
+        if any(now[v] > prev[v] for v in range(6)):
             voiced = r.c.n
             break
+        prev = now
     info['overture_voiced'] = voiced
     if voiced is None:
-        problems.append('서곡이 지금 곡이 된 뒤 120프레임 안에 목소리 0~5 가 울리지 않음')
+        problems.append('서곡이 지금 곡이 된 뒤 120프레임 안에 목소리 0~5 가 새로 울리지 않음')
     lit = r.until(lambda: r.bright and r.bright[-1][1] >= TITLE_BRIGHT, 600)
     info['title_lit'] = lit
     if lit is None:
@@ -311,6 +339,11 @@ def new_game(r, problems, info):
     info['typed'] = steps
     text = model.text()
     info['name'] = text
+    r.wait(10)
+    shown, diff = name_tiles(r, Path(r.rom).read_bytes(), text)
+    info['name_tiles'] = {'same': shown, 'diff_bytes': diff}
+    if not shown:
+        problems.append(f'이름 칸 화면 타일이 롬 글꼴로 그린 「{text}」 와 다름({diff} 바이트)')
     r.tap('y')
     r.wait(30)
     if r.rd(NE_ACTIVE) != 0:
@@ -379,7 +412,7 @@ def check_core(name, rom, out):
     t0 = time.time()
     with fx.closing(fx.open_core(path, rom, out / 'new')) as core:
         res['core'] = core.name
-        r = Runner(core)
+        r = Runner(core, rom)
         text = new_game(r, problems, info)
         r.wait(60)
         core.shot(out / 'prologue.png')

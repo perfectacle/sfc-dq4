@@ -51,6 +51,9 @@ WINDOW = 45
 SFX_VOICES = (7, 6)
 DSP_DIR = 0x07                        # 드라이버가 두는 DIR(dq5spc.SPC_DIR >> 8)
 BSNES_DSP = 289781                    # bsnes 115 직렬화 상태의 DSP 레지스터 128바이트(DIR·EDL 로 찾아 잼)
+# SPC RAM 64KB 의 자리. DIR(7)의 칸이 가리키는 BRR 이 원본 DQ5 늘 두는 파형 1F 와 바이트까지 같아지는 자리로 맞춤
+BSNES_SPC_RAM = 207853
+SNES9X_SPC_RAM = 1                    # snes9x 상태 SND: 블록 안
 SNES9X_DSP = 65701                    # snes9x 상태 SND: 블록 안의 DSP 레지스터
 
 
@@ -260,6 +263,8 @@ class Scene:
     patches: list = field(default_factory=list)
     npc_talk: tuple = None
     seed: int = 0
+    critical: bool = False
+    release: bool = False
     maxf: int = None
 
 
@@ -284,6 +289,8 @@ def scene_rom(rom, scene):
     """검사 롬 사본: 대기열 훅, 걸음 전투(scene.battle 이면 그 무리로 강제, 아니면 없앰), 장면 패치."""
     import dq4battlecheck as bc
     import dq4ch1walkcheck as wc
+    if scene.release:
+        return bytes(rom)
     data = bytearray(rom)
     patches = hook_patches(rom) + list(scene.patches)
     text = bc.force_patch(scene.battle) if scene.battle else wc.NO_ENCOUNTERS
@@ -297,19 +304,41 @@ def scene_rom(rom, scene):
     return bytes(data)
 
 
-def dsp_regs(core):
-    """직렬화 상태의 DSP 레지스터 128바이트(코어마다 자리가 다름, DIR 로 맞는지 본다). 드라이버가 DIR 을 두기 전(켠
-    직후)이면 None."""
+def spc_state(core):
+    """직렬화 상태의 (DSP 레지스터 128바이트, SPC RAM 64KB). 코어마다 자리가 다르고, DIR 이 드라이버가 두는 값인지로
+    맞는지 본다. 드라이버가 DIR 을 두기 전(켠 직후)이면 None."""
     st = core.save()[0]
     if core.name.lower().startswith('snes9x'):
-        i = st.find(b'SND:')
-        at = i + 10 + SNES9X_DSP
+        base = st.find(b'SND:') + 10
+        ram, regs = base + SNES9X_SPC_RAM, base + SNES9X_DSP
     else:
-        at = BSNES_DSP
-    regs = st[at:at + 128]
-    if len(regs) != 128:
+        ram, regs = BSNES_SPC_RAM, BSNES_DSP
+    r = st[regs:regs + 128]
+    if len(r) != 128:
         raise RuntimeError(f'{core.name}: 직렬화 상태가 짧음')
-    return regs if regs[0x5D] == DSP_DIR else None
+    if r[0x5D] != DSP_DIR:
+        return None
+    return r, st[ram:ram + 0x10000]
+
+
+def dq5_samples(path=None):
+    """원본 DQ5 롬(rom/dq5.sfc)의 샘플 번호 → BRR. 빌드 입력과 상관없는 기준이다."""
+    import dq4soundcheck as sc
+    from dq5map import Rom
+    from dq5spc import samples
+    data = Path(path or HERE.parents[2] / 'rom' / 'dq5.sfc').read_bytes()
+    return {n: sc.sample_body(data, n)[7:] for n, *_ in samples(Rom(data))}
+
+
+def source(regs, ram, voice, dq5):
+    """목소리의 소리 바탕: 잡음(NON 비트)이면 'noise'. 아니면 SRCN 의 DIR 시작에서 원본 DQ5 샘플과 BRR 이 같으면
+    'dq5 XX'(같은 파형이 여럿이면 '/' 로), 어느 것과도 다르면 'nds'(DQ5 에 없는 샘플: NDS 에서 옮긴 소리)."""
+    if regs[0x3D] >> voice & 1:
+        return 'noise'
+    srcn = regs[voice * 16 + 4]
+    start = ram[DSP_DIR * 0x100 + srcn * 4] | ram[DSP_DIR * 0x100 + srcn * 4 + 1] << 8
+    same = [n for n, brr in dq5.items() if ram[start:start + len(brr)] == brr]
+    return 'dq5 ' + '/'.join(f'{n:02X}' for n in same) if same else 'nds'
 
 
 def make_walker():
@@ -320,7 +349,7 @@ def make_walker():
     class SceneWalker(cc.Walker):
         """dq4compatcheck.Walker 와 같게 걷되, 롬은 scene_rom 사본이고 프레임마다 대기열과 DSP 를 적는다."""
 
-        def __init__(self, core_path, rom_bytes, out):
+        def __init__(self, core_path, rom_bytes, out, release=False):
             self.out, self.seed = out, 0
             self.rom = out / 'c.sfc'
             self.rom.write_bytes(rom_bytes)
@@ -332,11 +361,39 @@ def make_walker():
             self.events, self.envx, self.songs = [], [], []
             self.last = None
             self.watch = False
+            self.release = release
             self.dsp_seen = False
+            self.sources = {}
+            self.dq5 = dq5_samples()
 
         def step(self, buttons=()):
             super().step(buttons)
             m = self.c.wram()
+            if self.release:
+                # 배포 롬(훅 없음): 쓰기 칸이 옮겨 간 칸의 인자·X 만 읽는다(명령은 이미 지워졌을 수 있음)
+                now = m[Q_WRITE]
+                if self.last is not None and now != self.last:
+                    i = self.last
+                    while i != now:
+                        self.events.append((self.c.n, None, m[Q_ARG + i], m[Q_X + i]))
+                        i = (i + 1) % Q_LEN
+                self.last = now
+            else:
+                self.shadow_step(m)
+            if self.watch:
+                # 직렬화는 이어 하기·순간이동을 마친 뒤에만(bsnes 는 직렬화가 코어 동기 지점을 바꾼다)
+                got = spc_state(self.c)
+                env = tuple(got[0][v * 16 + 8] for v in range(8)) if got else (0,) * 8
+                prev = self.envx[-1][1] if self.envx else (0,) * 8
+                for v in SFX_VOICES:
+                    if got and env[v] > prev[v]:
+                        # 울리기 시작한 프레임의 바탕(다음 프레임이면 SRCN 이 다음 음으로 바뀔 수 있다)
+                        self.sources[(len(self.envx), v)] = source(got[0], got[1], v, self.dq5)
+                self.envx.append((self.c.n, env))
+                self.dsp_seen |= got is not None
+                self.songs.append(m[SONG_NOW])
+
+        def shadow_step(self, m):
             clear = [(0x7E0000 + a + i, 0xFF) for a in (SHADOW, SHADOW_NOT) for i in range(Q_LEN)]
             if self.last is None:
                 # 켤 때 그림자 칸은 아무 값이나 들어 있다
@@ -348,12 +405,6 @@ def make_walker():
                 if any(v != 0xFF for v in m[SHADOW:SHADOW + Q_LEN]) or any(v != 0xFF for v in m[SHADOW_NOT:SHADOW_NOT + Q_LEN]):
                     self.c.poke(clear)
             self.last = self.c.rd(0x7E0000 + Q_WRITE)
-            if self.watch:
-                # 직렬화는 이어 하기·순간이동을 마친 뒤에만(bsnes 는 직렬화가 코어 동기 지점을 바꾼다)
-                regs = dsp_regs(self.c)
-                self.envx.append((self.c.n, tuple(regs[v * 16 + 8] for v in range(8)) if regs else (0,) * 8))
-                self.dsp_seen |= regs is not None
-                self.songs.append(m[SONG_NOW])
 
     return SceneWalker
 
@@ -378,7 +429,7 @@ def slot_for(rom_path, scene):
     return slot
 
 
-def run_scene(core_name, rom_path, scene, out):
+def run_scene(core_name, rom_path, scene, out, dsp=True):
     """한 코어에서 장면 하나: 저장 기록으로 이어 하고(필요하면 순간이동), 입력을 넣고, 대기열·DSP 를 적는다."""
     import dq4compatcheck as cc
     import dq4cores
@@ -387,11 +438,11 @@ def run_scene(core_name, rom_path, scene, out):
     out.mkdir(parents=True, exist_ok=True)
     rom = Path(rom_path).read_bytes()
     if scene.place == POWER:
-        walker = make_walker()(dq4cores.core_path(core_name), scene_rom(rom, scene), out)
+        walker = make_walker()(dq4cores.core_path(core_name), scene_rom(rom, scene), out, scene.release)
         res = {'scene': scene.name, 'core': walker.c.name, 'problems': []}
         with fx.closing(walker.c):
             # 서장 검사와 같은 새 게임 입력(A 연타, 이름 입력에서 Y)으로 수련이 끝날 때까지
-            walker.events, walker.watch = [], True
+            walker.events, walker.watch = [], dsp
             walker.boot()
             cc.apply_sets(walker.c, wc.pins(wc.SEGMENTS[0][3]))
             walker.pokes = list(scene.pokes)
@@ -400,7 +451,7 @@ def run_scene(core_name, rom_path, scene, out):
     slot = slot_for(rom_path, scene)
     sram = slot.to_sram()
     (out / 'c.srm').write_bytes(sram)
-    walker = make_walker()(dq4cores.core_path(core_name), scene_rom(rom, scene), out)
+    walker = make_walker()(dq4cores.core_path(core_name), scene_rom(rom, scene), out, scene.release)
     res = {'scene': scene.name, 'core': walker.c.name, 'problems': []}
     with fx.closing(walker.c):
         fx.load_sram(walker.c, sram)
@@ -424,41 +475,127 @@ def run_scene(core_name, rom_path, scene, out):
                 return finish(walker, scene, res, out)
             n = scene.npc_talk[2]
             walker.c.poke([(0x7E0000 + NPC_TALK_LO + slot_no, n & 0xFF), (0x7E0000 + NPC_TALK_HI + slot_no, n >> 8)])
-        walker.events, walker.watch = [], True
+        walker.events, walker.watch = [], dsp
         walker.pokes = list(scene.pokes)
         walker.walk(scene.inputs, {'maxf': scene.maxf or wc.frames(scene.inputs)})
     return finish(walker, scene, res, out)
+
+
+def song_on(songs, envx, f, song, limit=600, window=120):
+    """곡이 지금 곡으로 바뀐 프레임 자리(f 뒤 첫 전환)와, 그 뒤 window 안에 목소리 0~5 가운데 하나가 앞 프레임보다
+    올라 울린 자리. 전환 앞부터 울리던 곡의 꼬리는 줄어들기만 하므로 치지 않는다."""
+    j = next((k for k in range(max(f, 1), min(len(songs), f + limit)) if songs[k] == song and songs[k - 1] != song), None)
+    if j is None:
+        return None, None
+    hits = [k for v in range(6) for k in [key_on([e[v] for _, e in envx], j, window)] if k is not None]
+    return j, min(hits) if hits else None
+
+
+def source_ok(got, want):
+    """want: 'noise', 'nds'(원본 DQ5 에 없는 샘플), 'dq5'(원본 DQ5 샘플과 BRR 이 같거나 잡음: DQ5 효과음도 잡음을 씀),
+    'not-dq5'(원본 DQ5 에 없는 샘플이거나 잡음: NDS 무기 소리는 샘플·잡음 둘 다로 옮겨짐)."""
+    if got is None:
+        return False
+    if want == 'dq5':
+        return got.startswith('dq5 ') or got == 'noise'
+    if want == 'not-dq5':
+        return got in ('nds', 'noise')
+    return got == want
+
+
+def assign_key_ons(events, wants, frames, envx, sources):
+    """대기열 효과음 항목마다 울림 하나를 짝짓는다. 항목의 창은 다음 효과음 항목이 들어오기 전까지(최대 WINDOW).
+    목소리 7·6 의 ENVX 가 오른 자리 가운데 아직 짝짓지 않은 가장 이른 자리를 고른다. 목소리 6 은 곡과 나눠 쓰고,
+    대화 글자처럼 효과음이 6 에서만 울리기도 해서(7 은 앞 효과음 꼬리) 둘 다 본다. 바탕은 짝지은 울림과, 창 안의 다른
+    목소리 첫 울림 것을 함께 돌려준다(6 의 울림이 곡 음일 수 있음).
+    돌려줌: want 차례대로 (프레임, 목소리, [(목소리, 바탕)…]) 또는 None."""
+    sfx_frames = sorted({n for n, c, *_ in events if c in (SFX, None)})
+    used, out = set(), []
+    for f in wants:
+        if f is None:
+            out.append(None)
+            continue
+        nxt = next((n for n in sfx_frames if n > f), None)
+        end = min(f + WINDOW, nxt) if nxt is not None else f + WINDOW
+        i = frames.index(f) if f in frames else None
+        firsts = []
+        for v in SFX_VOICES:
+            series = [e[v] for _, e in envx]
+            k = i
+            while k is not None:
+                k = key_on(series, k, end - frames[k] if k < len(frames) else 0)
+                if k is None or frames[k] > end:
+                    k = None
+                    break
+                if (k, v) not in used:
+                    break
+                k += 1
+            if k is not None:
+                firsts.append((k, v))
+        if not firsts:
+            out.append(None)
+            continue
+        best = min(firsts)
+        used.add(best)
+        k, v = best
+        out.append((frames[k], v, [(v, sources.get(best))] + [(x[1], sources.get(x)) for x in firsts if x != best]))
+    return out
 
 
 def finish(walker, scene, res, out):
     """대기열·울림을 판정하고 결과를 쓴다."""
     events = walker.events
     frames = [n for n, _ in walker.envx]
-    res['queue'] = [f'{n} {c:02X} {a:02X} {x:02X}' for n, c, a, x in events]
+    res['queue'] = [f"{n} {'..' if c is None else f'{c:02X}'} {a:02X} {x:02X}" for n, c, a, x in events]
     res['want'] = []
-    for want, f in zip(scene.want, match_seq(events, scene.want)):
-        row = {'want': fmt(want), 'frame': f, 'sounded': None}
+    if not walker.watch:
+        # DSP 를 읽지 않은 대조 실행: 대기열 기록만 남긴다
+        res['status'] = 'control'
+        (out / 'scene.json').write_text(json.dumps(res, ensure_ascii=False, indent=1) + '\n')
+        return res
+    hits = match_seq(events, [w[:3] for w in scene.want])
+    sfx_rows = [(k, f) for k, (w, f) in enumerate(zip(scene.want, hits)) if w[0] in (SFX, None)]
+    ons = dict(zip([k for k, _ in sfx_rows], assign_key_ons(events, [f for _, f in sfx_rows], frames, walker.envx,
+                                                           walker.sources)))
+    for k, (want, f) in enumerate(zip(scene.want, hits)):
+        row = {'want': fmt(want[:3]), 'frame': f, 'sounded': None}
+        if len(want) > 3:
+            row['source_want'] = want[3]
         if f is None:
             res['problems'].append(f'대기열에 {row["want"]} 없음')
-        else:
-            i = frames.index(f) if f in frames else None
-            if want[0] == SONG:
-                k = next((j for j in range(i, min(len(frames), i + 600)) if walker.songs[j] == want[1]), None)
-                row['sounded'] = frames[k] if k is not None and any(
-                    any(walker.envx[j][1][v] for v in range(6)) for j in range(k, min(len(frames), k + 120))) else None
-            else:
-                for v in SFX_VOICES:
-                    k = key_on([e[v] for _, e in walker.envx], i)
-                    if k is not None:
-                        row['sounded'], row['voice'] = frames[k], v
-                        break
+            res['want'].append(row)
+            continue
+        if want[0] == SONG:
+            switch, on = song_on(walker.songs, walker.envx, frames.index(f) if f in frames else 0, want[1])
+            row['switch'] = frames[switch] if switch is not None else None
+            row['sounded'] = frames[on] if on is not None else None
             if row['sounded'] is None:
-                res['problems'].append(f'{row["want"]} 이 대기열에 들어갔지만(프레임 {f}) 울리지 않음')
+                res['problems'].append(f'{row["want"]} 이 대기열에 들어갔지만 곡이 바뀐 뒤 목소리 0~5 가 새로 울리지 않음')
+        else:
+            got = ons.get(k)
+            if got is None:
+                res['problems'].append(f'{row["want"]}(프레임 {f}): 다음 효과음 항목 전까지 목소리 7·6 에 새 울림이 없음')
+            else:
+                row['sounded'], row['voice'], row['source'] = got[0], got[1], got[2][0][1]
+                row['sources'] = [f'{v}:{x}' for v, x in got[2]]
+                kind = want[3] if len(want) > 3 else None
+                bad = None
+                if kind and not any(source_ok(x, kind) for _, x in got[2]):
+                    bad = f'{row["want"]}: 울린 바탕 {row["sources"]}, 결정 표의 바탕 {kind}'
+                elif kind == 'dq5' and any(v == 7 and x == 'nds' for v, x in got[2]):
+                    # 목소리 7 은 효과음만 쓴다: DQ5 로 고른 소리가 원본 DQ5 에 없는 샘플로 울림
+                    bad = f'{row["want"]}: DQ5 로 고른 소리가 목소리 7 에서 원본 DQ5 에 없는 샘플로 울림({row["sources"]})'
+                if bad and (scene.name, want[:3]) in KNOWN_FINDINGS:
+                    res.setdefault('findings', []).append(bad + ' — ' + KNOWN_FINDINGS[(scene.name, want[:3])])
+                elif bad:
+                    res['problems'].append(bad)
         res['want'].append(row)
     for bad in scene.forbid:
         f = match(events, bad)
         if f is not None:
             res['problems'].append(f'대기열에 {fmt(bad)}(원래 번호)가 들어감(프레임 {f})')
+    if scene.critical and not any(w.get('sounded') for w in res['want'] if w['want'] == fmt((SFX, 0x37, 0x0B))):
+        res['problems'].insert(0, '회심 미발생(시드 다시 고르기: dq4sfxscene.py --pick-critical-seed)')
     if walker.envx and not walker.dsp_seen:
         res['problems'].append(f'DSP 레지스터를 찾지 못함(DIR {DSP_DIR:02X} 이 직렬화 상태의 그 자리에 없음)')
     res['status'] = 'failed' if res['problems'] else 'passed'
@@ -505,14 +642,109 @@ def uncovered(table, every):
     return [e for e in table.entries() if e not in covered]
 
 
-# 1장 장면으로 부르지 못하는 대응표 항목과 까닭
+# 1장 장면으로 부르지 못하는 대응표 항목과 까닭. unreached_problems 가 롬에서 그 까닭을 다시 본다
 UNREACHED = {
-    'sfx 3B-01': '카지노 슬롯 돌리기(11:B673). 1장에 카지노가 없음',
-    'sfx 3C-00': '카지노 슬롯(11:B3B7). 1장에 카지노가 없음',
-    'pcm 40-03': '훈련장 칼 소리 미리 받기(소리 없음). 서장 장면 기록에 나오지 않음',
-    'pcm 45-02': '문 소리 갈래 02(35-02 를 부르는 01:E19A 등 일곱 자리). 걸어서 여는 문·열쇠 문은 모두 갈래 01 이었음. '
-                 '자리 바이트는 call_site_problems 가 롬에서 봄',
+    'sfx 3C-00': '부르는 자리가 카지노 슬롯 루틴 11:B3B7 하나뿐이고 1장에 카지노가 없음',
+    'pcm 40-03': '롬에 이 갈래를 넣는 코드(BRK 16|19 40 03, LDA #40 / LDX #03)가 없음',
 }
+# 장면은 없지만 1장에서 부를 수 있는 항목(런타임으로 확인하지 못한 것). 단위 테스트가 이 목록을 고정해, 새로 빠지는
+# 항목이 생기면 드러나게 한다. --sfx-call 자리는 롬 바이트만 보고(call_site_problems), 게임 안에서 어느 자리를
+# 지났는지는 가르지 못한다(문·상자 장면은 갈래 01·00 의 어느 한 자리를 지남)
+RUNTIME_GAPS = {
+    'pcm 45-02',    # 35-02 를 부르는 일곱 자리. 걸어서 여는 문·열쇠 문·문 명령은 모두 갈래 01 이었음
+    'sfx 3B-01',    # 11:B673(카지노)과 20:D2E1(전투 쪽 코드, 어느 연출인지 모름)이 부름
+}
+
+
+def call_sites(rom, sfx, branch):
+    """롬에서 `BRK 16|19 sfx branch` 와 `LDA #sfx / LDX #branch`(·거꾸로) 자리(CPU 주소)."""
+    import re
+    pats = [bytes((0, 0x16, sfx, branch)), bytes((0, 0x19, sfx, branch)), bytes((0xA9, sfx, 0xA2, branch)),
+            bytes((0xA2, branch, 0xA9, sfx))]
+    return sorted({(m.start() // 0x8000) << 16 | 0x8000 | m.start() % 0x8000
+                   for p in pats for m in re.finditer(re.escape(p), rom)})
+
+
+UNREACHED_SITES = {'sfx 3C-00': [0x11B3B7], 'pcm 40-03': []}
+
+
+def unreached_problems(rom):
+    """UNREACHED 의 까닭을 롬에서: 부르는 자리가 적어 둔 그대로인지."""
+    out = []
+    for k, want in UNREACHED_SITES.items():
+        got = call_sites(rom, *key(k.split()[1]))
+        if got != want:
+            out.append(f'{k}: 부르는 자리 {[f"{a:06X}" for a in got]}, 기대 {[f"{a:06X}" for a in want]}')
+    return out
+
+
+def leftover_sites(rom, table):
+    """대응표가 번호를 바꾼 원래 효과음(35-00·01·02)을 아직 부르는 자리 — 바뀌지 않은 사본 코드(결과에 적기만 함)."""
+    olds = {old for old, _ in table.calls.values()}
+    return [f'{a:06X} {o:02X}-{b:02X}' for o in sorted(olds) for b in range(4) for a in call_sites(rom, o, b)]
+
+
+# ---- 효과음 결정 표(손으로 적음) --------------------------------------------------------------------------------------
+# 빌드 입력(dq4sound-game.args)과 따로 둔 기준이다. 사용자가 청취로 고른 결정(DQ5 기본, 확실히 나은 것만 NDS:
+# dq4-sound-port-format.md 「효과음 이식」 1~8 절)을 동작마다 적는다.
+#   이름: (DQ5 원래 (효과음, 갈래), 부르는 자리 또는 None, 결정, 대기열에 들어갈 (효과음, 갈래), 울린 바탕)
+# 바탕: 'dq5' = 원본 DQ5 롬(rom/dq5.sfc)의 어느 샘플과 BRR 이 같음, 'nds' = 원본 DQ5 에 없는 샘플, 'noise' = DSP 잡음.
+# 결정이 NDS 인데 바탕이 dq5 이거나, DQ5 인데 nds 면 그 소리가 결정과 다르다.
+DECISIONS = {
+    'menu':        ((0x33, 0x00), None, 'NDS 12C 決定音', (0x33, 0x00), 'nds'),
+    'yes-no':      ((0x33, 0x01), None, 'NDS 12C 決定音', (0x33, 0x01), 'nds'),
+    'reject':      ((0x33, 0x02), None, 'NDS 12C 決定音', (0x33, 0x02), 'nds'),
+    'talk':        ((0x32, 0x00), None, 'DQ5', (0x32, 0x00), 'dq5'),
+    'stairs':      ((0x34, 0x02), None, 'NDS 131 階段', (0x34, 0x02), 'noise'),
+    'bump':        ((0x34, 0x03), None, 'DQ5', (0x34, 0x03), 'dq5'),
+    'door':        ((0x35, 0x01), 0x01E01B, 'NDS 134 扉（小）', (0x45, 0x01), 'nds'),
+    'chest':       ((0x35, 0x00), 0x05E6A9, 'NDS 13A 宝箱', (0x3F, 0x00), 'nds'),
+    'item':        (None, None, 'NDS 146 アイテム出現', (0x3F, 0x01), 'nds'),
+    'attack':      ((0x37, 0x01), None, 'NDS 190 PC攻撃開始', (0x37, 0x01), 'nds'),
+    'enemy-attack': ((0x37, 0x02), None, 'NDS 191 敵攻撃開始', (0x37, 0x02), 'nds'),
+    'pc-hit':      ((0x37, 0x03), None, 'NDS 193 PCにダメージ', (0x37, 0x03), 'noise'),
+    'enemy-hit':   ((0x37, 0x04), None, 'NDS 192 敵にダメージ', (0x37, 0x04), 'noise'),
+    'miss':        ((0x37, 0x0D), None, 'NDS 194 敵のミス', (0x37, 0x0D), 'nds'),
+    'spell':       ((0x37, 0x0E), None, 'NDS 132 呪文使用時', (0x37, 0x0E), 'nds'),
+    'claw-kind':   ((0x37, 0x08), None, 'NDS 19D WEP_TETUTUME', (0x37, 0x08), 'noise'),
+    'hoimi':       ((0x36, 0x00), None, 'DQ5', (0x36, 0x00), 'dq5'),
+    'critical':    ((0x37, 0x0B), None, 'DQ5', (0x37, 0x0B), 'dq5'),
+    'flee':        ((0x37, 0x00), None, 'DQ5', (0x37, 0x00), 'dq5'),
+    'boss-hit':    ((0x37, 0x14), None, 'NDS 192 敵にダメージ', (0x45, 0x03), 'noise'),
+    'scara':       ((0x46, 0x04), None, 'NDS 1F6 GAB_03', (0x45, 0x04), 'nds'),
+    'spar-hero':   (None, None, 'NDS 19C 銅の剣', (0x40, 0x01), 'nds'),
+    'spar-master': (None, None, 'NDS 1A0 鋼の剣', (0x40, 0x02), 'nds'),
+    'frog-jump':   (None, None, 'NDS 47B EVE_JUMP', (0x45, 0x00), 'nds'),
+}
+# 결정과 실제 소리가 다른 것(검사가 찾은 것, 고치지 않음). 장면은 이 줄을 실패 대신 findings 로 찍고, 단위 테스트가
+# 목록을 고정해 고쳐지면 지우게 한다
+KNOWN_FINDINGS = {
+    ('battle-critical', (SFX, 0x37, 0x0B)): '늘 두는 파형 20·22 를 --sfx-wave 가 NDS 파형으로 덮어, 그 파형을 쓰는 DQ5 효과음도 바뀜',
+    ('battle-flee', (SFX, 0x37, 0x00)): '늘 두는 파형 20 을 --sfx-wave 가 NDS 파형으로 덮어, 그 파형을 쓰는 DQ5 효과음도 바뀜',
+}
+
+
+def d(key):
+    """결정 표의 대기열 기대값과 바탕: (명령, 효과음, 갈래, 바탕)."""
+    _, _, _, queue, kind = DECISIONS[key]
+    return (SFX, *queue, kind)
+
+
+def decision_problems(table):
+    """빌드 입력이 결정 표와 어긋나는 곳: NDS 로 고른 DQ5 소리가 대응표를 거쳐 결정 표의 대기열 값으로 가는지, DQ5 로
+    고른 소리는 대응표가 바꾸지 않는지(--sfx·--sfx-remap 에 없음)."""
+    out = []
+    for key, (orig, site, choice, queue, _) in DECISIONS.items():
+        if orig is None:
+            continue
+        got = routed(table, *orig, site)
+        if got != queue:
+            out.append(f'{key}: 대응표로 {name(got)}, 결정 표 {name(queue)}')
+        if choice == 'DQ5' and (orig in table.sfx or orig in table.remap):
+            out.append(f'{key}: DQ5 로 고른 {name(orig)} 를 대응표가 바꿈')
+        if choice.startswith('NDS ') and orig in table.sfx and table.sfx[orig] != choice.split()[1]:
+            out.append(f'{key}: --sfx {name(orig)}={table.sfx[orig]}, 결정 표 {choice.split()[1]}')
+    return out
 
 
 TOWER = '39/01,20,16'                 # 탑 39/01: FC 던전 조우 구역(dq4battlecheck 의 tower 장면과 같은 자리)
@@ -572,78 +804,85 @@ def weak(n):
             (base + 10, lambda v: bytes((v[0] & ~0x07 & 0xFF,)))]
 
 
+# 무기 소리는 모두 NDS 로 골랐다(효과음 이식 5). 효과음 번호는 빌드가 빈 효과음에 차례로 놓아 결정 표에 적지 않고,
+# 바탕이 원본 DQ5 소리가 아닌지만 본다(not-dq5)
+SPAR_KEYS = {(0x40, 0x01): 'spar-hero', (0x40, 0x02): 'spar-master', (0x37, 0x03): 'pc-hit'}
+
+
 def scenes(table):
     """대응표에서 기대값을 계산한 장면 목록. 효과음마다 DQ5 원래 (효과음, 갈래)와 부르는 자리를 적고 routed 로 옮긴다."""
     import dq4prologue as pro
     import dq4prologuecheck as pc
-    door_calls = [f'call {a:06X}' for a, (_, new) in table.calls.items() if new == 0x45]
-    chest_calls = [f'call {a:06X}' for a, (_, new) in table.calls.items() if new == 0x3F]
     battle_song = table.weapon_songs[0]
-    attack = sfx(routed(table, 0x37, 0x01))
-    enemy_hit = sfx(routed(table, 0x37, 0x04))
+    attack, enemy_hit = d('attack'), d('enemy-hit')
     out = [
-        Scene('menu-open', '필드에서 명령 창 열기(DQ5 33-00)', [sfx(routed(table, 0x33, 0x00))],
+        Scene('menu-open', '필드에서 명령 창 열기(DQ5 33-00)', [d('menu')],
               covers=['sfx 33-00'], inputs='a:8;wait:60'),
         Scene('menu-cursor', '명령 창 커서 움직이기(창 선택 고리 BRK 19 33 00)',
-              [sfx(routed(table, 0x33, 0x00))] * 2, inputs='a:8;wait:60;down:6;wait:40'),
-        Scene('talk', '사람에게 말 걸기: 대화 글자(DQ5 32-00)', [sfx((0x32, 0x00))],
+              [d('menu')] * 2, inputs='a:8;wait:60;down:6;wait:40'),
+        # 배포 롬 그대로(대기열 훅·조우 패치 없음): 명령 칸은 이미 지워졌을 수 있어 인자·X 만 맞추고, 울림과 바탕은 같게 본다
+        Scene('menu-open-release', '배포 롬: 필드에서 명령 창 열기', [(None, *d('menu')[1:])], release=True,
+              inputs='a:8;wait:60'),
+        Scene('stairs-release', '배포 롬: 왕좌의 방 아래 출구', [(None, *d('stairs')[1:])], release=True,
+              warp='36/01,32,68', inputs='down:90;wait:120'),
+        Scene('talk', '사람에게 말 걸기: 대화 글자(DQ5 32-00)', [d('talk')],
               warp='36/00,16,72', inputs=talk('up', 2)),
-        Scene('stairs', '왕좌의 방 아래 출구로 나가기(DQ5 34-02)', [sfx(routed(table, 0x34, 0x02))],
+        Scene('stairs', '왕좌의 방 아래 출구로 나가기(DQ5 34-02)', [d('stairs')],
               covers=['sfx 34-02'], warp='36/01,32,68', inputs='down:90;wait:120'),
-        Scene('door', '이무르 문 열기(DQ5 35-01, 01:E01B 등 문 15곳)', [sfx(routed(table, 0x35, 0x01, 0x01E01B))],
-              covers=door_calls + ['pcm 45-01'], forbid=[sfx((0x35, 0x01))], warp='37/00,38,45',
+        Scene('door', '이무르 문 열기(DQ5 35-01, 01:E01B 등 문 15곳)', [d('door')],
+              covers=['pcm 45-01'], forbid=[sfx((0x35, 0x01))], warp='37/00,38,45',
               inputs='up:100;wait:60'),
-        Scene('locked-door', '잠긴 문에 부딪힘(DQ5 34-03)', [sfx((0x34, 0x03))],
+        Scene('locked-door', '잠긴 문에 부딪힘(DQ5 34-03)', [d('bump')],
               warp='36/01,6,27', inputs='up:60;wait:120'),
-        Scene('chest', '우물 아래 상자 열기(DQ5 35-00, 05:E6A9 등 상자 7곳)', [sfx(routed(table, 0x35, 0x00, 0x05E6A9))],
-              covers=chest_calls + ['pcm 3F-00'], forbid=[sfx((0x35, 0x00))], warp='3B/03,14,14',
+        Scene('chest', '우물 아래 상자 열기(DQ5 35-00, 05:E6A9 등 상자 7곳)', [d('chest')],
+              covers=['pcm 3F-00'], forbid=[sfx((0x35, 0x00))], warp='3B/03,14,14',
               inputs='up:8;wait:30;' + SEARCH + ';a:8;wait:60'),
-        Scene('pot', '항아리에서 물건 찾기(--sfx-item)', [sfx(table.items[0])],
+        Scene('pot', '항아리에서 물건 찾기(--sfx-item)', [d('item')],
               covers=[f'item {name(table.items[0])}', f'pcm {name(table.items[0])}'],
               warp='38/01,4,5', inputs='up:8;wait:30;' + SEARCH + ';a:8;wait:60'),
-        Scene('inn', '여관에 묵기: 예·아니요 창(DQ5 33-01)과 징글(곡 1D)', [sfx(routed(table, 0x33, 0x01)), (SONG, 0x1D, None)],
+        Scene('inn', '여관에 묵기: 예·아니요 창(DQ5 33-01)과 징글(곡 1D)', [d('yes-no'), (SONG, 0x1D, None)],
               covers=['sfx 33-01', 'inn-jingle'], sets=['flag=CHAPTER1', 'gold=1000'], warp='36/00,16,72',
               npc_talk=(16, 71, 0x006), inputs=talk('up', 1) + ';a:8;wait:60;a:8;wait:60;a:8;wait:600'),
         Scene('church', '교회에서 기록하기: 예·아니요(DQ5 33-01)와 기록 징글(곡 20)',
-              [sfx(routed(table, 0x33, 0x01)), (SONG, 0x20, None)], warp='36/00,10,43',
+              [d('yes-no'), (SONG, 0x20, None)], warp='36/00,10,43',
               inputs=talk('up', 1) + ';' + taps(4, 60) + ';a:8;wait:300;a:8;wait:400;' + taps(2, 200)),
         Scene('battle-win', '걸음 전투: 공격 시작(37-01)·무기(00)·적이 맞음(37-04)·승리(곡 1F)·레벨 업(곡 21)',
-              [attack, sfx(weapon_sound(table, 0x00, battle_song)), enemy_hit, (SONG, 0x1F, None), (SONG, 0x21, None)],
+              [attack, (*sfx(weapon_sound(table, 0x00, battle_song)), 'not-dq5'), enemy_hit, (SONG, 0x1F, None), (SONG, 0x21, None)],
               covers=['sfx 37-01', 'sfx 37-04'], sets=['flag=CHAPTER1', NEXT_EXP], warp=TOWER, battle=[(SLIME, 1)],
               pokes=HERO_HP + [(WEAPON, 0x00)], patches=weak(SLIME), inputs=FIGHT + taps(30)),
         Scene('battle-trade', '주고받기: 적의 공격 시작(37-02)·우리 편이 맞음(37-03)',
-              [attack, enemy_hit, sfx(routed(table, 0x37, 0x02)), sfx(routed(table, 0x37, 0x03))],
+              [attack, enemy_hit, d('enemy-attack'), d('pc-hit')],
               covers=['sfx 37-02', 'sfx 37-03'], warp=TOWER, battle=[(SLIME, 1)], pokes=HERO_HP,
               patches=strong(SLIME), inputs=FIGHT + taps(20)),
-        Scene('battle-miss', '공격력 0 인 적이 때림: 빗나감(37-0D)', [sfx(routed(table, 0x37, 0x02)), sfx(routed(table, 0x37, 0x0D))],
+        Scene('battle-miss', '공격력 0 인 적이 때림: 빗나감(37-0D)', [d('enemy-attack'), d('miss')],
               covers=['sfx 37-0D'], warp=TOWER, battle=[(SLIME, 1)], pokes=HERO_HP,
               patches=strong(SLIME) + harmless(SLIME), inputs=FIGHT + taps(20)),
-        Scene('battle-scara', '적의 スカラ: 돌려 부르기 46-04 → 45-04', [sfx(routed(table, 0x46, 0x04))],
+        Scene('battle-scara', '적의 スカラ: 돌려 부르기 46-04 → 45-04', [d('scara')],
               covers=['remap 46-04', 'pcm 45-04'], forbid=[sfx((0x46, 0x04))], warp=TOWER, battle=[(SLIME, 1)],
               pokes=HERO_HP, patches=strong(SLIME) + actions(SLIME, SCARA), inputs=FIGHT + taps(20)),
         Scene('battle-boss', '탑 위 보스 전투(사건 전투, 전투 곡이 무기 표 곡이 아님): 발톱 무기의 종류 소리(28:816E 종류 4 → '
               'DQ5 37-08)와 보스가 맞음(돌려 부르기 37-14 → 45-03)',
-              [sfx(routed(table, *CLAW_KIND_SOUND)), sfx(routed(table, 0x37, 0x14))],
+              [d('claw-kind'), d('boss-hit')],
               covers=['sfx 37-08', 'remap 37-14', 'pcm 45-03'], forbid=[sfx((0x37, 0x14))],
               sets=['flag=CHAPTER1'] + boss_setup(), warp='39/04,46,40', pokes=HERO_HP + [(WEAPON, CLAW)],
               patches=boss_patches(), inputs=boss_inputs()),
-        Scene('battle-critical', '회심의 일격(DQ5 37-0B)', [attack, sfx((0x37, 0x0B))], warp=TOWER, battle=[(SLIME, 1)],
-              pokes=HERO_HP, seed=CRITICAL_SEED, patches=strong(SLIME), inputs=FIGHT + taps(15)),
-        Scene('battle-flee', '도망(DQ5 37-00)', [sfx((0x37, 0x00))], warp=TOWER, battle=[(SLIME, 1)],
+        Scene('battle-critical', '회심의 일격(DQ5 37-0B)', [attack, d('critical')], warp=TOWER, battle=[(SLIME, 1)],
+              pokes=HERO_HP, seed=CRITICAL_SEED, critical=True, patches=strong(SLIME), inputs=FIGHT + taps(15)),
+        Scene('battle-flee', '도망(DQ5 37-00)', [d('flee')], warp=TOWER, battle=[(SLIME, 1)],
               pokes=HERO_HP, patches=strong(SLIME), inputs=FIGHT + 'down:8;wait:30;' + taps(8)),
         Scene('training', '전원부터 새 게임: 이름 칸이 찬 뒤 A(33-02), 서장 칼 여섯 합(40-01·40-02·37-03)',
-              [sfx(routed(table, 0x33, 0x02))] + [sfx(routed(table, *se)) for se, _, _ in pro.SPAR],
+              [d('reject')] + [d(SPAR_KEYS[se]) for se, _, _ in pro.SPAR],
               covers=['sfx 33-02', 'pcm 40-01', 'pcm 40-02'], place='power'),
-        Scene('frog', '서장 개구리가 연못에서 뛰어오름(45-00 두 번)', [sfx(routed(table, *pro.JUMP))] * 2,
+        Scene('frog', '서장 개구리가 연못에서 뛰어오름(45-00 두 번)', [d('frog-jump')] * 2,
               covers=['pcm 45-00'], place='power', inputs=';'.join(w for k, w in pc.ROUTE if k in ('train', 'frog'))),
         Scene('battle-heal', '호이민이 ホイミ: 주문 외움(37-0E)·ホイミ 효과(DQ5 36-00)',
-              [sfx(routed(table, 0x37, 0x0E)), sfx((0x36, 0x00))], covers=['sfx 37-0E'],
+              [d('spell'), d('hoimi')], covers=['sfx 37-0E'],
               sets=['flag=CHAPTER1', 'effect=hoimin', 'flag=HOIMIN'], warp=TOWER, battle=[(SLIME, 1)],
               pokes=[(0x7E2042, 0x02), (0x7E2043, 0x00)], patches=strong(SLIME) + harmless(SLIME), inputs=FIGHT + taps(30)),
     ]
     for w, se in sorted(table.weapons.items()):
         out.append(Scene(f'weapon-{w:02X}', f'たたかう: 무기 {w:02X} 소리(전투 곡 {battle_song:02X})',
-                         [attack, sfx(weapon_sound(table, w, battle_song))], covers=[f'weapon {w:02X}', f'pcm {name(se)}'],
+                         [attack, (*sfx(weapon_sound(table, w, battle_song)), 'not-dq5')], covers=[f'weapon {w:02X}', f'pcm {name(se)}'],
                          warp=TOWER, battle=[(SLIME, 1)], pokes=HERO_HP + [(WEAPON, w)], patches=weak(SLIME),
                          inputs=FIGHT + taps(4)))
     return out
@@ -651,11 +890,67 @@ def scenes(table):
 
 # ---- 명령 ------------------------------------------------------------------------------------------------------------
 
+def unreached_problems(rom):
+    return []
+
+
+CRIT_PREFIX = 'crit-'
+# bsnes 에서 직렬화(DSP 읽기)가 타이밍을 바꾸지 않는지: 이 장면들을 DSP 를 읽지 않고 한 번 더 돌려 대기열 기록이
+# 프레임까지 같은지 본다
+CONTROL = ('chest', 'battle-trade')
+# 실측: DSP 를 읽으면 bsnes 대기열 시각이 많아야 1프레임 늦고(코어 동기 지점), 값·차례는 같았다
+CONTROL_SHIFT = 2
+
+
+def crit_scene(seed):
+    """회심 시드 고르기용 장면(battle-critical 과 같은 입력, 시드만 다름)."""
+    return Scene(f'{CRIT_PREFIX}{seed}', '회심 시드 찾기', [], warp=TOWER, battle=[(SLIME, 1)], pokes=HERO_HP, seed=seed,
+                 patches=strong(SLIME), inputs=FIGHT + taps(15))
+
+
+def find_scene(table, name):
+    if name.startswith(CRIT_PREFIX):
+        return crit_scene(int(name[len(CRIT_PREFIX):]))
+    return next(s for s in scenes(table) if s.name == name)
+
+
 def run_one(args):
     table = load_table(ARGS.read_text())
-    scene = next(s for s in scenes(table) if s.name == args.only)
-    res = run_scene(args.core, args.rom.resolve(), scene, args.out.resolve())
+    scene = find_scene(table, args.only)
+    res = run_scene(args.core, args.rom.resolve(), scene, args.out.resolve(), dsp=not args.no_dsp)
     return 0 if res['status'] == 'passed' else 1
+
+
+def run_jobs(jobs, rom_path, out, n):
+    """[(코어, 장면, DSP 읽기)] 를 장면마다 프로세스 하나로(같은 dylib 를 한 프로세스에서 둘 열지 않게)."""
+    import dq4compatcheck as cc
+
+    def one(job):
+        core, scene, dsp = job
+        dest = out / core / (scene.name if dsp else scene.name + '-nodsp')
+        dest.mkdir(parents=True)
+        with (dest / 'log.txt').open('w') as log:
+            proc = subprocess.run([sys.executable, __file__, '--_one', '--core', core, '--only', scene.name,
+                                   '--rom', str(rom_path), '--out', str(dest)] + ([] if dsp else ['--no-dsp']),
+                                  stdout=log, stderr=subprocess.STDOUT, timeout=cc.UNIT_TIMEOUT, check=False)
+        f = dest / 'scene.json'
+        if f.exists():
+            return json.loads(f.read_text())
+        return {'scene': scene.name, 'core': core, 'status': 'failed',
+                'problems': [f'장면 프로세스가 결과를 남기지 않음(종료 {proc.returncode}, {dest / "log.txt"})']}
+    with concurrent.futures.ThreadPoolExecutor(max(1, n)) as pool:
+        return list(pool.map(one, jobs))
+
+
+def pick_seeds(rom_path, out, cores, last, n):
+    """회심 시드 고르기: 시드 1~last 를 코어마다 돌려 회심(0C 37 0B)이 난 시드를 찍는다."""
+    jobs = [(c, crit_scene(k), True) for k in range(1, last + 1) for c in cores]
+    found = {c: [] for c in cores}
+    for (c, sc, _), r in zip(jobs, run_jobs(jobs, rom_path, out, n)):
+        if any(q.endswith(' 0C 37 0B') for q in r.get('queue', [])):
+            found[c].append(int(sc.name[len(CRIT_PREFIX):]))
+    print(json.dumps(found))
+    return 0
 
 
 def main():
@@ -668,6 +963,8 @@ def main():
     ap.add_argument('--only', help='장면 이름(쉼표)')
     ap.add_argument('--core', choices=('all', *cc.CORES), default='all')
     ap.add_argument('--jobs', type=int, default=4)
+    ap.add_argument('--pick-critical-seed', type=int, metavar='N', help='회심 장면 시드를 1~N 에서 코어마다 고름')
+    ap.add_argument('--no-dsp', action='store_true', help=argparse.SUPPRESS)
     ap.add_argument('--_one', action='store_true', help=argparse.SUPPRESS)
     args = ap.parse_args()
     if args._one:
@@ -680,48 +977,58 @@ def main():
     rom = rom_path.read_bytes()
     table = load_table(ARGS.read_text())
     every = scenes(table)
+    cores = list(cc.CORES) if args.core == 'all' else [args.core]
+    for c in cores:
+        if not dq4cores.core_path(c).exists():
+            raise SystemExit(f'{dq4cores.core_path(c)} 가 없음: sfc/dq4/tools/dq4cores.py 로 빌드')
+    fx.SaveSlot.new_game(rom_path)            # 밑판을 먼저 한 번(장면 프로세스끼리 함께 만들지 않게)
+    if args.pick_critical_seed:
+        return pick_seeds(rom_path, out, cores, args.pick_critical_seed, args.jobs)
     if args.only:
         names = args.only.split(',')
         unknown = set(names) - {s.name for s in every}
         if unknown:
             raise SystemExit(f'모르는 장면: {sorted(unknown)}')
         every = [s for s in every if s.name in names]
-    cores = list(cc.CORES) if args.core == 'all' else [args.core]
-    for c in cores:
-        if not dq4cores.core_path(c).exists():
-            raise SystemExit(f'{dq4cores.core_path(c)} 가 없음: sfc/dq4/tools/dq4cores.py 로 빌드')
     t0 = time.time()
-    fx.SaveSlot.new_game(rom_path)            # 밑판을 먼저 한 번(장면 프로세스끼리 함께 만들지 않게)
+    all_scenes = scenes(table)
     static = {'call_sites': call_site_problems(rom, table), 'weapon_table': weapon_table_problems(rom, table),
-              'uncovered': uncovered(table, every if not args.only else scenes(table))}
-
-    def one(job):
-        core, scene = job
-        dest = out / core / scene.name
-        dest.mkdir(parents=True)
-        with (dest / 'log.txt').open('w') as log:
-            proc = subprocess.run([sys.executable, __file__, '--_one', '--core', core, '--only', scene.name,
-                                   '--rom', str(rom_path), '--out', str(dest)], stdout=log, stderr=subprocess.STDOUT,
-                                  timeout=cc.UNIT_TIMEOUT, check=False)
-        f = dest / 'scene.json'
-        if f.exists():
-            return json.loads(f.read_text())
-        return {'scene': scene.name, 'core': core, 'status': 'failed',
-                'problems': [f'장면 프로세스가 결과를 남기지 않음(종료 {proc.returncode}, {dest / "log.txt"})']}
-
-    jobs = [(c, s) for s in every for c in cores]
-    with concurrent.futures.ThreadPoolExecutor(max(1, args.jobs)) as pool:
-        results = list(pool.map(one, jobs))
+              'decisions': decision_problems(table), 'unreached': unreached_problems(rom),
+              'uncovered': [e for e in uncovered(table, all_scenes)
+                            if e not in RUNTIME_GAPS and not e.startswith('call ')]}
+    jobs = [(c, s, True) for s in every for c in cores]
+    jobs += [('bsnes', s, False) for s in every if s.name in CONTROL and 'bsnes' in cores]
+    done = run_jobs(jobs, rom_path, out, args.jobs)
+    results = [r for (_, _, dsp), r in zip(jobs, done) if dsp]
+    control = {}
+    for (c, sc, dsp), r in zip(jobs, done):
+        if not dsp:
+            twin = next(x for (c2, s2, d2), x in zip(jobs, done) if d2 and c2 == c and s2.name == sc.name)
+            a, b = r.get('queue', []), twin.get('queue', [])
+            same = bool(a) and [x.split(None, 1)[1] for x in a] == [y.split(None, 1)[1] for y in b]
+            shift = max((abs(int(x.split()[0]) - int(y.split()[0])) for x, y in zip(a, b)), default=None)
+            control[sc.name] = {'same_values': same, 'max_frame_shift': shift, 'queue_len': len(a)}
+            if not same or shift is None or shift > CONTROL_SHIFT:
+                static.setdefault('control', []).append(
+                    f'{sc.name}: DSP 를 읽지 않은 bsnes 실행과 대기열 기록이 다름(값 같음 {same}, 프레임 차 {shift})')
     problems = [f'{k}: {p}' for k, v in static.items() for p in v]
     ok = not problems and all(r['status'] == 'passed' for r in results)
     report = {'status': 'passed' if ok else 'failed', 'rom_sha1': hashlib.sha1(rom).hexdigest(),
-              'seconds': round(time.time() - t0, 1), 'static': static, 'scenes': results}
+              'seconds': round(time.time() - t0, 1), 'static': static, 'control': control,
+              'runtime_uncovered': sorted(RUNTIME_GAPS | {f'call {a:06X}' for a in table.calls}),
+              'findings': {'leftover_sites': leftover_sites(rom, table),
+                           'scenes': sorted({f for r in results for f in r.get('findings', [])})},
+              'scenes': results}
     (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')
     for r in results:
-        got = ', '.join(f"{w['want']}@{w['frame']}{'♪' if w.get('sounded') else '✕'}" for w in r.get('want', []))
-        print(f"{r['status']:6} {r.get('core', '?')[:6]:6} {r['scene']:18} {got} {'; '.join(r['problems'])}")
+        got = ', '.join(f"{w['want']}@{w['frame']}{'♪' + str(w.get('source') or '') if w.get('sounded') else '✕'}"
+                        for w in r.get('want', []))
+        print(f"{r['status']:6} {r.get('core', '?')[:6]:6} {r['scene']:18} {got} {'; '.join(r['problems'])}"
+              + ''.join(f' [찾은 것] {x}' for x in r.get('findings', [])))
     print(json.dumps({'status': report['status'], 'rom_sha1': report['rom_sha1'], 'seconds': report['seconds'],
-                      'static_problems': problems}, ensure_ascii=False))
+                      'control': control, 'runtime_uncovered': report['runtime_uncovered'],
+                      'findings': report['findings'], 'static_problems': problems},
+                     ensure_ascii=False))
     return 0 if ok else 1
 
 
