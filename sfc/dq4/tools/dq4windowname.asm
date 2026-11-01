@@ -132,7 +132,10 @@ ShopBuyTool:
     LDA.l ShopQtyMsg,X
     JSL $248157
     SEP #$20
+    LDA $01,S               ; 최대를 수 창 동안 $0F2C 에(WnQtyUp·WnQtyDown 이 끝 자리를 1~최대로 돌림)
+    STA.w $0F2C
     db $00, $95, $5C        ; BRK 95 5C: 다섯 자리 수 창. 커서는 맨 끝 자리에서 시작한다
+    STZ.w $0F2C
     PLA
     LDX.b $E8
     BNE .cancel
@@ -345,6 +348,8 @@ ShopSellQty:
     LDA.l ShopSellMsg,X
     JSL $248157
     SEP #$20
+    LDA $01,S               ; 수 창 동안 $0F2C = 최대(WnQtyUp·WnQtyDown). 뒤에서 개수를 쓰거나 0 으로 둔다
+    STA.w $0F2C
     db $00, $95, $5C
     PLA
     LDX.b $E8
@@ -743,6 +748,15 @@ org $24A5E9
 
 !wn_stage = $3E00           ; 올릴 160바이트를 먼저 만드는 자리(7E:3D14~3FFF 는 실행한 장면에서 접근 없음)
 
+
+; 수 창(5C 등 자리마다 0~9 를 고르는 창)의 위·아래(04:C967·04:C98C). 자리 숫자는 타일 코드 02~0B 로 $0AFE + 자리에 둔다.
+; 원래는 0~9 를 돈다. 가게 개수 창은 $0F2C 에 최대를 둔 동안만 끝 자리를 1~최대로 돌리고 앞 자리는 0 으로 둔다
+org $04C970
+    JSL WnQtyUp
+    NOP #6
+org $04C995
+    JSL WnQtyDown
+    NOP #6
 
 org !wn_code
 WnName:
@@ -2209,6 +2223,62 @@ WnEmptySlot:
     PLY
     SEP #$20
     JML $04B9F7
+
+; 04:C970·04:C995(M = 8, X = 8, X = 자리). 돌려준 A 를 원래 코드가 $0AFE,X 에 쓴다. $0F2C 가 0 이면 원래대로
+WnQtyUp:
+    LDA.l $7E0F2C
+    BNE .cap
+    LDA.w $0AFE,X
+    INC
+    CMP #$0C
+    BCC +
+    LDA #$02
++
+    RTL
+.cap
+    TXA                     ; X 는 8·16비트 어느 쪽이어도 낮은 바이트가 자리
+    CMP #$04
+    BNE WnQtyZero
+    LDA.w $0AFE,X
+    SEC
+    SBC #$01                ; 다음 숫자(코드 − 2 + 1)
+    CMP.l $7E0F2C
+    BEQ +
+    BCC +
+    LDA #$01
++
+    CLC
+    ADC #$02
+    RTL
+WnQtyZero:
+    LDA #$02
+    RTL
+
+WnQtyDown:
+    LDA.l $7E0F2C
+    BNE .cap
+    LDA.w $0AFE,X
+    DEC
+    CMP #$02
+    BCS +
+    LDA #$0B
++
+    RTL
+.cap
+    TXA                     ; X 는 8·16비트 어느 쪽이어도 낮은 바이트가 자리
+    CMP #$04
+    BNE WnQtyZero
+    LDA.w $0AFE,X
+    SEC
+    SBC #$03                ; 앞 숫자(코드 − 2 − 1)
+    BEQ +
+    BPL ++
++
+    LDA.l $7E0F2C
+++
+    CLC
+    ADC #$02
+    RTL
 
 ; 가게 팔기 목록의 「판매불가」(ShopSellPrice, Y = 빈칸 여섯을 찍은 뒤 자리). 그 여섯 칸에 그리고 Y 는 그대로 둔다
 ShopSellCannot:

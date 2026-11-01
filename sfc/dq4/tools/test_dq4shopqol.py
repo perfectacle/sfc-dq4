@@ -126,6 +126,27 @@ class CancelBackTest(unittest.TestCase):
         for need in ('STZ.w $0F2C', 'db $00, $95, $00', 'LDA #$18', 'JSR $DFC4', 'JMP $DEC9'):
             self.assertIn(need, body)
 
+
+class QtyCapTest(unittest.TestCase):
+    def test_number_window_hooks(self):
+        self.assertRegex(ASM, r'org \$04C970\n    JSL WnQtyUp')
+        self.assertRegex(ASM, r'org \$04C995\n    JSL WnQtyDown')
+        for name in ('WnQtyUp:', 'WnQtyDown:'):
+            body = ASM[ASM.index(name):]
+            body = body[:body.index('RTL\n\n') if name == 'WnQtyDown:' else body.index('WnQtyZero:')]
+            # $0F2C 가 0 이면 원래처럼 0~9, 아니면 끝 자리(4)만 1~최대
+            self.assertIn('LDA.l $7E0F2C', body)
+            self.assertIn('CMP #$04', body)
+
+    def test_both_quantity_windows_set_max(self):
+        for name, end in (('ShopBuyTool:', 'ShopGiveExtra:'), ('ShopSellQty:', 'ShopSellCount:')):
+            body = ASM[ASM.index(name):ASM.index(end)]
+            at = body.index('db $00, $95, $5C')
+            self.assertIn('LDA $01,S', body[:at])
+            self.assertIn('STA.w $0F2C', body[:at])
+        buy = ASM[ASM.index('ShopBuyTool:'):ASM.index('ShopGiveExtra:')]
+        self.assertIn('STZ.w $0F2C', buy[buy.index('db $00, $95, $5C'):])
+
 class SellPriceTest(unittest.TestCase):
     def test_cannot_sell_phrase(self):
         self.assertEqual(dq4windowtext.FIXED[dq4windowtext.CANNOT_SELL], '판매불가')
