@@ -9,8 +9,10 @@ local hook
 hook = emu.addMemoryCallback(function()
   emu.removeMemoryCallback(hook, emu.callbackType.exec, 0, 0xFFFFFF)
   emu.loadSavestate(state)
-  -- 조우 계수표를 0 으로 두어 걷는 동안 전투가 나지 않게 한다(런타임 롬만, 파일은 그대로)
-  for i = 0, 7 do emu.write(0x11EA44 + i, 0, emu.memType.snesPrgRom) end
+  -- 조우 판정 23:E7C2 를 CLC/RTL 로 덮어 걷는 동안 전투가 나지 않게 한다(런타임 롬만, 파일은 그대로).
+  -- 계수표 23:EA44 만 0 으로 두면 FC 던전 구역은 dq4dungeonrate 훅이 자기 확률을 써서 전투가 남는다
+  emu.write(0x11E7C2, 0x18, emu.memType.snesPrgRom)
+  emu.write(0x11E7C3, 0x6B, emu.memType.snesPrgRom)
 end, emu.callbackType.exec, 0, 0xFFFFFF)
 local frame = 0
 local plan = { { "down", 20, 60 }, { "left", 80, 120 }, { "up", 140, 180 }, { "right", 200, 240 } }

@@ -11,7 +11,9 @@ local hook
 hook = emu.addMemoryCallback(function()
   emu.removeMemoryCallback(hook, emu.callbackType.exec, 0, 0xFFFFFF)
   emu.loadSavestate(state)
-  for i = 0, 7 do emu.write(0x11EA44 + i, 0, emu.memType.snesPrgRom) end
+  -- 조우 판정 23:E7C2 를 CLC/RTL 로 덮어 걷는 동안 전투를 없앤다(계수표 23:EA44 만 0 이면 dq4 롬의 던전 구역은 남는다)
+  emu.write(0x11E7C2, 0x18, emu.memType.snesPrgRom)
+  emu.write(0x11E7C3, 0x6B, emu.memType.snesPrgRom)
 end, emu.callbackType.exec, 0, 0xFFFFFF)
 local frame = 0
 local auto = os.getenv("TEST") == "1"
