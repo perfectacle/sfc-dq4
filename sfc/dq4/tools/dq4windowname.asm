@@ -87,6 +87,114 @@ org $04B9EB
 org $04B11E
     JSL WnPrefix
 
+; 창 표를 읽어 별칭(레코드 첫 바이트 bit7, 셋째 바이트 = 대상 창)을 푸는 세 자리: 창 열기·그리기·크기 셈.
+; 셋 모두 $DA 에 별칭 레코드 주소가 있고, 돌아온 A(16비트)를 대상 레코드로 쓴다
+org $049C5C
+    JSR ShopListRes
+org $049FBB
+    JSR ShopListRes
+org $04A8C2
+    JSR ShopListRes
+org !shop_sell_slot
+    dw ShopSellPrice
+
+; 가게 팔기 목록. 창 37 은 창 0F(물건 목록, 필드 도구 창 등과 함께 씀)의 별칭인데 맡기는 곳(06:E5E5)도 연다.
+; 가게($0F20: 0 도구·1 방어구·2 무기·3 06:E02E 가게(같은 사기·팔기 흐름), 맡기는 곳은 6)에서 37 을 풀 때만 값 열을 붙인 레코드를 돌려주고, 사기 목록과
+; 같은 자리(x 2, 너비 20)에 둔다. 오른쪽에 골드 창과 「누가」 창이 있어 오른쪽으로는 넓히지 못한다
+org !shop_spot
+ShopSellRec:
+    db $4F, $03, $80|!shop_sell_w, $B9, $00, $81, $FE, $D3, $01, !shop_sell_code, $FF, $83
+ShopListRes:
+    LDA.b $DA
+    CMP.w #!shop_sell_alias
+    BNE .plain
+    LDA.w $0F20
+    AND #$00FF
+    CMP #$0004
+    BCS .plain
+    SEP #$20
+    LDA #$02
+    STA.w $0A43
+    REP #$20
+    LDA.w #ShopSellRec
+    RTS
+.plain
+    LDA.w $EB48,X
+    RTS
+
+; 자리 표시 코드(M = 8, X = 16, DB = 04, 스택에 갈래가 넣은 레코드 자리 X). 같은 줄 D3 이 찍은 물건의 파는 값
+; (산 값의 3/4, 06:DF75 와 같은 셈)을 다섯 자리 + 「G」 로, 팔 수 없는 물건(BRK 94 06 의 C)이면 「판매불가」 를 같은 여섯 칸에
+; D3 은 이름 뒤 Y 를 원래 가나 길이만큼만 나아가므로, 값은 줄 첫 칸($E0) 기준 안쪽 12열(커서·장비 표시·이름 9열·빈칸 뒤)에 둔다
+ShopSellPrice:
+    LDY.w #$0018
+    LDA.b $E4
+    STA.b $42
+    db $00, $88, $46        ; BRK 88 46: 줄 → 소지품 칸
+    LDA.b $46
+    STA.b $42
+    LDA.w $0B9E
+    STA.b $43
+    db $00, $88, $2E        ; BRK 88 2E: $46 = 물건
+    LDA.b $46
+    CMP #$FF
+    BCS .done
+    STA.b $42
+    PHA
+    db $00, $94, $06
+    PLA
+    BCS .cannot
+    db $00, $94, $02        ; $46~$48 = 값
+    ; 값을 $03~$05 에 맡기고 3/4 를 $46~$48 에 낸다. $03~ 은 다음 04:C0AB 가 자릿수로 덮는 자리이고, 가게가 실제로
+    ; 치를 값인 $0F28~ 은 예/아니요 사이에 목록을 다시 그려도 건드리지 않는다
+    LDA.b $46
+    STA.b $03
+    LDA.b $47
+    STA.b $04
+    LDA.b $48
+    STA.b $05
+    ASL.b $46
+    ROL.b $47
+    ROL.b $48
+    LDA.b $46
+    CLC
+    ADC.b $03
+    STA.b $46
+    LDA.b $47
+    ADC.b $04
+    STA.b $47
+    LDA.b $48
+    ADC.b $05
+    LSR
+    STA.b $48
+    ROR.b $47
+    ROR.b $46
+    LSR.b $48
+    ROR.b $47
+    ROR.b $46
+    JSR $C0AB
+    LDX.w #$0003
+-
+    LDA.b $00,X
+    JSR $B235
+    INX
+    CPX.w #$0008
+    BCC -
+    LDA #$0F
+    JSR $B235
+.done
+    PLX
+    JMP $BFF2
+.cannot
+    ; 빈칸 여섯을 먼저 찍어 칸 셈과 Y 를 값과 같게 두고, 그 자리에 고정 문구를 덮는다
+    LDX.w #$0006
+-
+    LDA #$01
+    JSR $B235
+    DEX
+    BNE -
+    JSL ShopSellCannot
+    BRA .done
+
 ; 걷는 메시지 캔버스(7E:5800 의 평면 0 → 칸 096~)를 보내는 NMI 작업. PHB / PHK / PLB / LDA #$7E 의 첫 네 바이트
 org $008E9E
     JML WqClean
@@ -1638,6 +1746,22 @@ WnEmptySlot:
     PLY
     SEP #$20
     JML $04B9F7
+
+; 가게 팔기 목록의 「판매불가」(ShopSellPrice, Y = 빈칸 여섯을 찍은 뒤 자리). 그 여섯 칸에 그리고 Y 는 그대로 둔다
+ShopSellCannot:
+    REP #$30
+    PHY
+    TYA
+    SEC
+    SBC #$000C
+    TAY
+    LDA.b $E0
+    STA.l $7E0000|!wt_buf
+    LDA.w #!wt_cannot_sell
+    JSR WtFixedDraw
+    PLY
+    SEP #$20
+    RTL
 
 ; 04:AC25(04:AA10 제목 고리에서 B0 미만 바이트, A = 바이트 8비트, X = 그 바이트 자리, DB = 04, Y = $DC 기준 자리).
 ; 원래는 STA $00 / PHB / LDA #$7E / PHA / PLB 뒤 ($DC),Y 에 쓴다. 9E k 면 고정 문구를 그리고 고리로 돌아간다.

@@ -39,6 +39,20 @@ HP_WINDOWS = (0x03, 0x04)
 KANA_TABLE = 0x60E800
 EMPTY_SLOT_HOOK = 0x04B9EB        # 모험의 서 기록 목록의 빈 칸 「 しようしていません」 을 한 글자씩 찍는 고리
 PREFIX_HOOK = 0x04B11E            # 창 바이트 갈래(메뉴 패치가 JSL 로 바꿔 둔 자리). 고정 문구 접두를 먼저 가른다
+# 가게 사기 목록(창 39). 줄마다 이름(EE) + 빈칸 셋 + 값 다섯 자리(CB). 빈칸 하나를 값 뒤 「G」(타일 0F, 골드 창 05 와 같은 글자)로
+SHOP_BUY = 0x39
+SHOP_BUY_ROW = (bytes.fromhex('feee010101cbff'), bytes.fromhex('feee0101cb0fff'))
+# 가게 팔기 목록은 창 37(창 0F 의 별칭, 89 02 0F). 창 0F 는 필드 도구 창 등과 함께 쓰고 37 은 맡기는 곳도 열므로, 별칭을 푸는
+# 세 자리(창 열기·그리기·크기 셈의 LDA $EB48,X)에서 가게일 때만 값 열이 붙은 레코드로 바꾼다(dq4windowname.asm ShopListRes)
+SHOP_SELL_ALIAS = 0x37
+SHOP_SELL_ITEMS = 0x0F
+SHOP_RESOLVE = (0x049C5C, 0x049FBB, 0x04A8C2)
+SHOP_SPOT, SHOP_SPOT_END = 0x04FF40, 0x050000
+# 줄 물건의 파는 값 + G 를 찍는 자리 표시. 원래 DQ5 디버그 창 6C 만 쓰던 코드인데 메뉴 패치가 6C 를 다시 써 쓰는 창이 없어,
+# 그 갈래(04:B3A2 표)를 빌린다. 값 다섯 자리 + G 여섯 칸에 「판매불가」 도 들어가야 한다
+SHOP_PRICE_COLS = 6
+SHOP_SELL_CODE = 0xD9
+CODE_TABLE = 0x04B3A2
 
 
 def lorom(a):
@@ -130,8 +144,31 @@ def apply(data, font=None, asar=None):
         raise ValueError(f'창 {TACTIC_WINDOW:02X} 머리 {d[o:o + 8].hex()}: 전투 작전 창 모양이 아님')
     d[o] -= 1
     d[o + 2] += 1
+    o = lorom(dq4menupatch.window_addr(d, SHOP_BUY))
+    shop_w = d[o + 2] & 0x1F
+    if d[o + 6:o + 13] != SHOP_BUY_ROW[0]:
+        raise ValueError(f'창 {SHOP_BUY:02X} 레코드 {d[o:o + 14].hex()}: 가게 사기 목록 모양이 아님')
+    d[o + 6:o + 13] = SHOP_BUY_ROW[1]
+    sell = dq4menupatch.window_addr(d, SHOP_SELL_ALIAS)
+    if d[lorom(sell):lorom(sell) + 3] != bytes((0x89, 0x02, SHOP_SELL_ITEMS)):
+        raise ValueError(f'창 {SHOP_SELL_ALIAS:02X} 레코드 {d[lorom(sell):lorom(sell) + 3].hex()}: 창 0F 별칭이 아님')
+    o = lorom(dq4menupatch.window_addr(d, SHOP_SELL_ITEMS))
+    # 너비(셋째 바이트)는 다른 단계가 이름 칸에 맞춰 넓힌다
+    if d[o:o + 2] + d[o + 3:o + 10] != bytes.fromhex('4f03b90081fed3ff83'):
+        raise ValueError(f'창 {SHOP_SELL_ITEMS:02X} 레코드 {d[o:o + 10].hex()}: 물건 목록 모양이 아님')
+    for a in SHOP_RESOLVE:
+        if d[lorom(a):lorom(a) + 3] != bytes.fromhex('bd48eb'):
+            raise ValueError(f'{a:06X}: LDA $EB48,X 가 아님')
+    o = lorom(CODE_TABLE) + (SHOP_SELL_CODE - 0xB0) * 2
+    if d[o:o + 2] != bytes.fromhex('46b9'):
+        raise ValueError(f'코드 {SHOP_SELL_CODE:02X} 갈래 {d[o:o + 2].hex()}: 04:B946 이 아님')
+    if any(d[lorom(SHOP_SPOT):lorom(SHOP_SPOT_END - 1) + 1]):
+        raise ValueError(f'{SHOP_SPOT:06X}~ 가 비어 있지 않음')
     hi_count = -(-len(ne.GLYPHS) // ne.CODE_RADIX)
     font = font or dq4menupatch.Font('galmuri9')
+    cannot = dq4windowtext.FIXED[dq4windowtext.CANNOT_SELL]
+    if len(dq4windowtext.columns(font, cannot)) > SHOP_PRICE_COLS:
+        raise ValueError(f'「{cannot}」 이 값 칸 {SHOP_PRICE_COLS}열을 넘음')
     text, _ = dq4windowtext.build(d, font)
     records, numbers = dq4windowtext.fixed_records(d, font)
     for o, rec in records:
@@ -160,7 +197,10 @@ def apply(data, font=None, asar=None):
             f'!wt_prefix_prev = ${int.from_bytes(d[po + 1:po + 4], "little"):06X}\n'
             f'!wt_fixed = ${dq4windowtext.FIXED_PREFIX:02X}\n!wt_fixed_kind = {dq4windowtext.FIXED_KIND}\n!wt_safe = ${dq4windowtext.SAFE:04X}\n'
             f'!wt_tactic = {dq4windowtext.tactic_first()}\n!wt_tactic_count = {len(dq4windowtext.TACTIC_LINES)}\n'
-            f'!wn_kana_table = ${KANA_TABLE:06X}\n!wt_empty_slot = {numbers[dq4windowtext.EMPTY_SLOT]}\n')
+            f'!wn_kana_table = ${KANA_TABLE:06X}\n!wt_empty_slot = {numbers[dq4windowtext.EMPTY_SLOT]}\n'
+            f'!wt_cannot_sell = {numbers[dq4windowtext.CANNOT_SELL]}\n!shop_sell_alias = ${sell & 0xFFFF:04X}\n'
+            f'!shop_sell_code = ${SHOP_SELL_CODE:02X}\n!shop_sell_slot = ${CODE_TABLE + (SHOP_SELL_CODE - 0xB0) * 2:06X}\n'
+            f'!shop_spot = ${SHOP_SPOT:06X}\n!shop_sell_w = {shop_w}\n')
     defs += dq4battlemsg.apply(d, font or dq4menupatch.Font('galmuri9'), dq4menupatch.render,
                                len(ne.GLYPHS) + len(kana))
     with tempfile.TemporaryDirectory() as tmp:
@@ -177,4 +217,13 @@ def apply(data, font=None, asar=None):
         out = (tmp / 'rom.sfc').read_bytes()
     if not any(out[lorom(CODE):lorom(CODE_END)]) or any(out[lorom(CODE_END):lorom(CODE_END) + 0x100]):
         raise ValueError('창 이름 코드가 정해 둔 자리를 벗어남')
+    if not any(out[lorom(SHOP_SPOT):lorom(SHOP_SPOT_END - 1) + 1]):
+        raise ValueError('가게 팔기 목록 코드가 들어가지 않음')
+    for a in SHOP_RESOLVE:
+        t = int.from_bytes(out[lorom(a) + 1:lorom(a) + 3], 'little')
+        if out[lorom(a)] != 0x20 or not SHOP_SPOT & 0xFFFF <= t < 0x10000:
+            raise ValueError(f'{a:06X}: JSR ShopListRes 가 아님 {out[lorom(a):lorom(a) + 3].hex()}')
+    o = lorom(CODE_TABLE) + (SHOP_SELL_CODE - 0xB0) * 2
+    if not SHOP_SPOT & 0xFFFF <= int.from_bytes(out[o:o + 2], 'little') < 0x10000:
+        raise ValueError(f'코드 {SHOP_SELL_CODE:02X} 갈래가 ShopSellPrice 가 아님')
     return out
