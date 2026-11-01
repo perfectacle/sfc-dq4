@@ -69,6 +69,9 @@ LOW_SPOT, LOW_SPOT_END = 0x05FF00, 0x060000
 # 가게 팔기 개수: 값 셈(06:DF06)과 물건 빼기 앞(06:DF35), 코드는 원래 롬도 빈 12 끝
 SELL_QTY_SITE, SELL_QTY_ORIG = 0x06DF06, bytes.fromhex('ad220f8542225bdf06')
 SELL_GIVE_SITE, SELL_GIVE_ORIG = 0x06DF35, bytes.fromhex('ad210f8542ad230f854300898032')
+# 수 창 위·아래의 다음 숫자 셈(LDA $0AFE,X / INC·DEC / CMP / BCC·BCS / LDA). 가게 개수 창에서만 1~최대로 돌린다
+QTY_UP_SITE, QTY_UP_ORIG = 0x04C970, bytes.fromhex('bdfe0a1ac90c9002a902')
+QTY_DOWN_SITE, QTY_DOWN_ORIG = 0x04C995, bytes.fromhex('bdfe0a3ac902b002a90b')
 # 팔기 「아니요」(BRK 95 00 / LDA #$18 / JSR $DFC4, 뒤는 06:DF50 사기/팔기 창)
 SELL_NO_SITE, SELL_NO_ORIG = 0x06DF48, bytes.fromhex('009500a91820c4df')
 SELL_SPOT, SELL_SPOT_END = 0x12FEB0, 0x130000
@@ -192,7 +195,8 @@ def apply(data, font=None, asar=None):
             raise ValueError(f'{a:06X}: 가게 사기 확인이 부르는 코드가 아님')
     if any(d[lorom(BUY_SPOT):lorom(BUY_SPOT_END - 1) + 1]):
         raise ValueError(f'{BUY_SPOT:06X}~ 가 비어 있지 않음')
-    for a, orig in ((SELL_QTY_SITE, SELL_QTY_ORIG), (SELL_GIVE_SITE, SELL_GIVE_ORIG), (SELL_NO_SITE, SELL_NO_ORIG)):
+    for a, orig in ((SELL_QTY_SITE, SELL_QTY_ORIG), (SELL_GIVE_SITE, SELL_GIVE_ORIG), (SELL_NO_SITE, SELL_NO_ORIG),
+                    (QTY_UP_SITE, QTY_UP_ORIG), (QTY_DOWN_SITE, QTY_DOWN_ORIG)):
         if d[lorom(a):lorom(a) + len(orig)] != orig:
             raise ValueError(f'{a:06X}: 가게 팔기 자리가 아님 {d[lorom(a):lorom(a) + len(orig)].hex()}')
     if any(d[lorom(SELL_SPOT):lorom(SELL_SPOT_END - 1) + 1]):
