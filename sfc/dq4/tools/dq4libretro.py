@@ -8,12 +8,15 @@ dq4compatcheck.py 가 쓴다. 코어 파일은 저장소에 두지 않는다(LIB
   값을 덮으므로, 한 번만 쓰는 WRAM 값에는 cheat 대신 poke 를 쓴다.
 """
 import ctypes as C
+import os
 import wave
 import numpy as np
 from PIL import Image
 
 # bsnes 115 직렬화 상태에서 WRAM 128KB 가 시작하는 자리(snes9x WRAM 과 견줘 찾음)
 WRAM_OFFSET = 8836
+# WRAM 찾기의 표지를 잠깐 써 보는 자리(맨 끝 바이트, 바로 되돌림)
+SENTINEL_AT = 0x1FFFF
 BSNES_VERSION = '115'
 BTN = {'b': 0, 'y': 1, 'select': 2, 'start': 3, 'up': 4, 'down': 5, 'left': 6, 'right': 7,
        'a': 8, 'x': 9, 'l': 10, 'r': 11}
@@ -64,6 +67,7 @@ STATE = C.CFUNCTYPE(C.c_int16, C.c_uint, C.c_uint, C.c_uint, C.c_uint)
 
 class Core:
     def __init__(self, dylib, rom, sysdir, options=None):
+        self.path = os.path.realpath(str(dylib))
         self.lib = C.CDLL(dylib)
         self.options = {k.encode(): v.encode() for k, v in (options or {}).items()}
         self._keep = []
@@ -176,17 +180,72 @@ class Core:
         self.lib.retro_run()
         self.n += 1
 
+    def _locate_wram(self):
+        """bsnes 처럼 WRAM 을 API 로 주지 않는 코어: 직렬화 상태의 WRAM 을 코어 이미지의 데이터 세그먼트에서 찾아 그
+        주소를 쥔다. 매 프레임 직렬화는 코어를 동기 지점까지 더 돌려 타이밍을 바꾸므로(빌드마다 다르게) 피한다.
+        같은 내용의 사본이 있을 수 있어, 후보마다 표지 바이트를 써 보고 직렬화 상태에 그 값이 나타나는 곳만 고른다.
+        프레임을 돌리지 않는다. WRAM 이 아직 고르면(부팅 직후) 다음 60프레임 묶음에 다시 본다."""
+        segments = data_segments(self.path)
+        if not segments:
+            self._wram_search = 'none'
+            return None
+        if self.n < 60 or getattr(self, '_wram_search', None) == self.n // 60:
+            return None
+        self._wram_search = self.n // 60
+        wram = self.save()[0][WRAM_OFFSET:WRAM_OFFSET + 0x20000]
+        if len(set(wram)) < 32:
+            return None
+        candidates = set()
+        for start, size in segments:
+            blob = C.string_at(start, size)
+            for probe in range(0x100, 0x20000 - 64, 0x1F01):
+                chunk = wram[probe:probe + 64]
+                if len(set(chunk)) < 12:
+                    continue
+                at = blob.find(chunk)
+                while at >= 0:
+                    base = at - probe
+                    if 0 <= base and blob[base:base + 0x20000] == wram:
+                        candidates.add(start + base)
+                    at = blob.find(chunk, at + 1)
+        live = []
+        for addr in candidates:
+            cell = C.c_ubyte.from_address(addr + SENTINEL_AT)
+            old = cell.value
+            cell.value = old ^ 0xA5
+            seen = self.save()[0][WRAM_OFFSET + SENTINEL_AT]
+            cell.value = old
+            if seen == old ^ 0xA5:
+                live.append(addr)
+        return live[0] if len(live) == 1 else None
+
+    def _has_wram(self):
+        """WRAM 을 직접 읽고 쓸 수 있는지. 찾지 못했으면 직렬화로 돌아가지 않고 False(호출이 싸다)."""
+        if self.lib.retro_get_memory_size(2) or self.wram_ptr:
+            return True
+        if getattr(self, '_wram_search', None) == 'none':
+            return False
+        found = self._locate_wram()
+        if found:
+            self.wram_ptr = (found, 0x20000)
+        return bool(self.wram_ptr)
+
+    @property
+    def direct(self):
+        """WRAM 을 직접 읽고 쓸 수 있으면(API 또는 찾은 주소) True. 프레임을 돌리지 않는다."""
+        return self._has_wram()
+
     def wram(self):
-        p = self.lib.retro_get_memory_data(2)
         size = self.lib.retro_get_memory_size(2)
-        if not size and self.wram_ptr:
-            p, size = self.wram_ptr
-        if not size:
-            if not getattr(self, '_wc', None) or self._wc[0] != self.n:
-                st = self.save()[0]
-                self._wc = (self.n, (C.c_ubyte * 0x20000).from_buffer_copy(st[WRAM_OFFSET:WRAM_OFFSET + 0x20000]))
-            return self._wc[1]
-        return (C.c_ubyte * size).from_address(p)
+        if size:
+            return (C.c_ubyte * size).from_address(self.lib.retro_get_memory_data(2))
+        if self._has_wram():
+            return (C.c_ubyte * 0x20000).from_address(self.wram_ptr[0])
+        # 찾지 못한 코어(macOS 밖의 bsnes 등): 직렬화 상태에서 읽는다. 타이밍이 흔들릴 수 있다
+        if not getattr(self, '_wc', None) or self._wc[0] != self.n:
+            st = self.save()[0]
+            self._wc = (self.n, (C.c_ubyte * 0x20000).from_buffer_copy(st[WRAM_OFFSET:WRAM_OFFSET + 0x20000]))
+        return self._wc[1]
 
     def rd(self, addr, n=1):
         m = self.wram()
@@ -198,7 +257,7 @@ class Core:
 
     def poke(self, pairs):
         """[(WRAM 주소, 바이트)] 를 한 번 쓴다."""
-        if self.lib.retro_get_memory_size(2) or self.wram_ptr:
+        if self._has_wram():
             m = self.wram()
             for a, v in pairs:
                 m[a & 0x1FFFF] = v
@@ -214,7 +273,9 @@ class Core:
         """켜 둘 PAR 코드 전부. 앞서 켠 것은 모두 끈다."""
         self.lib.retro_cheat_reset()
         for i, code in enumerate(codes):
-            self.lib.retro_cheat_set(i, True, code.encode())
+            # bsnes 63ee22f7(target-libretro/program.cpp decodeSNES)는 16진 소문자만 받는다. snes9x fae2fea 도 소문자를
+            # 받는 것을 실측함(7e1f005a → 7E:1F00 = 5A)
+            self.lib.retro_cheat_set(i, True, code.lower().encode())
 
     def shot(self, path):
         Image.fromarray(self.frame).save(path)
@@ -235,6 +296,37 @@ class Core:
         buf = C.create_string_buffer(raw, len(raw))
         assert self.lib.retro_unserialize(buf, len(raw))
         self.n = n
+
+
+def data_segments(path):
+    """불러온 이미지 path 의 쓰기 가능한 데이터 세그먼트 [(주소, 크기)]. macOS(Mach-O)만, 그 밖은 빈 목록."""
+    import os
+    import sys
+    if sys.platform != 'darwin':
+        return []
+    dyld = C.CDLL(None)
+    dyld._dyld_image_count.restype = C.c_uint32
+    dyld._dyld_get_image_name.restype = C.c_char_p
+    dyld._dyld_get_image_header.restype = C.c_void_p
+    dyld._dyld_get_image_vmaddr_slide.restype = C.c_long
+    want = os.path.realpath(path)
+    for i in range(dyld._dyld_image_count()):
+        name = dyld._dyld_get_image_name(i)
+        if not name or os.path.realpath(name.decode()) != want:
+            continue
+        header, slide = dyld._dyld_get_image_header(i), dyld._dyld_get_image_vmaddr_slide(i)
+        ncmds = C.c_uint32.from_address(header + 16).value
+        at, out = header + 32, []                       # mach_header_64 는 32바이트
+        for _ in range(ncmds):
+            cmd, size = C.c_uint32.from_address(at).value, C.c_uint32.from_address(at + 4).value
+            if cmd == 0x19:                             # LC_SEGMENT_64
+                name = C.string_at(at + 8, 16).rstrip(b'\0')
+                vmaddr, vmsize = C.c_uint64.from_address(at + 24).value, C.c_uint64.from_address(at + 32).value
+                if name.startswith(b'__DATA'):
+                    out.append((vmaddr + slide, vmsize))
+            at += size
+        return out
+    return []
 
 
 def write_wav(path, samples, rate):
