@@ -175,6 +175,126 @@ ShopGiveExtra:
     RTS
 assert pc() <= !shop_qty_end
 
+; 가게 BRK 를 부르는 도우미. BRK 처리기는 DB 를 부른 코드의 뱅크로 두므로, 뱅크 40 이상(창 코드의 60)에서 부르면
+; WRAM 대신 열린 버스를 읽는다(dq4brkscan). 원래 롬에서도 비어 있는 뱅크 05 끝에 둔다
+org !shop_low_spot
+; 04:C3B1·04:C508(M = 8, X = 16, DB = 04, 줄 $E4, 고른 물건 $0F22). 원래는 04:C511 표의 「 소지 중」 을 문자열 버퍼
+; $01~(빈칸 01 로 채운 16바이트)에 베끼고 04:C45A(PLY / RTS)로 끝난다. 그 사람 소지품 12칸에서 같은 물건을 세어
+; 고정 문구 「 N개 소지」 를 9E k 로 넣는다. BRK 88 은 A·X·Y 를 지키고 부른 뱅크에서 피연산자를 읽는다
+ShopHeldCount:
+    LDA.b $E4
+    STA.b $42
+    db $00, $88, $46        ; BRK 88 46: 줄 → 사람
+    LDA.b $46
+    PHA
+    LDY.w #$0000
+    LDX.w #$0000
+-
+    TXA
+    STA.b $43
+    LDA $01,S
+    STA.b $42
+    db $00, $88, $2E        ; BRK 88 2E: $46 = 사람 $42 의 칸 $43 의 물건
+    LDA.b $46
+    CMP.w $0F22
+    BNE +
+    INY
++
+    INX
+    CPX.w #$000C
+    BCC -
+    PLA
+    CPY.w #$0001
+    BCS +
+    LDY.w #$000A
+    JML $04C440
++
+    LDX.w #$000F
+    LDA #$01
+-
+    STA.b $00,X
+    DEX
+    BPL -
+    LDA #!wt_fixed
+    STA.b $01
+    TYA
+    CLC
+    ADC #!wt_held_first-1
+    STA.b $02
+    JML $04C45A
+
+; 가게 도구 사기의 최대 개수(M = 8, X = 8, 값 $0F28~, 사람 $0F23). 그 사람 빈칸(12 − 가진 수, BRK 89 80 2F)과 9 가운데
+; 작은 수까지, 가진 돈(BRK 88 49)에서 값을 몇 번 뺄 수 있는지 센다. A = 최대(0~9)
+ShopQtyMax:
+    LDA.w $0F23
+    STA.b $42
+    db $00, $89, $80, $2F   ; BRK 89 80 2F: $46 = 가진 물건 수
+    LDA #$0C
+    SEC
+    SBC.b $46
+    CMP #$0A
+    BCC +
+    LDA #$09
++
+    PHA
+    db $00, $88, $49        ; BRK 88 49: $46~$48 = 가진 돈
+    LDX #$00
+-
+    TXA
+    CMP $01,S
+    BCS +
+    LDA.b $46
+    SEC
+    SBC.w $0F28
+    STA.b $46
+    LDA.b $47
+    SBC.w $0F29
+    STA.b $47
+    LDA.b $48
+    SBC.w $0F2A
+    STA.b $48
+    BCC +
+    INX
+    BRA -
++
+    PLA
+    TXA
+    RTL
+
+; 개수 A(1~9) × 값(BRK 94 02, 물건 $0F22)을 $46~$48 에(M = 8, X = 8)
+ShopQtyTotal:
+    TAX
+    LDA.w $0F22
+    STA.b $42
+    db $00, $94, $02
+    LDA.b $46
+    STA.w $0F28
+    LDA.b $47
+    STA.w $0F29
+    LDA.b $48
+    STA.w $0F2A
+-
+    DEX
+    BEQ +
+    LDA.b $46
+    CLC
+    ADC.w $0F28
+    STA.b $46
+    LDA.b $47
+    ADC.w $0F29
+    STA.b $47
+    LDA.b $48
+    ADC.w $0F2A
+    STA.b $48
+    BRA -
++
+    RTL
+
+; 「몇 개 사시겠어요?」 메시지 번호(가게 종류 $0F20 마다). 원작에서 비어 있고 부르는 곳이 없는 메시지
+ShopQtyMsg:
+    dw $009C, $009D, $00AB, $00C3
+assert pc() <= !shop_low_end
+
 ; 값을 $0F28~ 에 둔 뒤, 돈이 되면(06:F602, C = 모자람) 창을 닫고 「{N}골드인데 사시겠어요?」(메시지 묶음 19 = 064~067)와
 ; 예/아니요를 묻는다. 예거나 돈이 모자라면 돌아가 06:F5E9 가 원래대로 돈을 빼거나 「돈이 모자란」 메시지를 낸다.
 ; 아니요·B 면 돌아갈 자리(JSR 2바이트)만 버리고 「그래요? 아쉽네요」(묶음 18) 뒤 물건 목록(06:DC2F)으로 간다.
@@ -1893,121 +2013,7 @@ ShopSellCannot:
     SEP #$20
     RTL
 
-; 가게 도구 사기의 최대 개수(M = 8, X = 8, 값 $0F28~, 사람 $0F23). 그 사람 빈칸(12 − 가진 수, BRK 89 80 2F)과 9 가운데
-; 작은 수까지, 가진 돈(BRK 88 49)에서 값을 몇 번 뺄 수 있는지 센다. A = 최대(0~9)
-ShopQtyMax:
-    LDA.w $0F23
-    STA.b $42
-    db $00, $89, $80, $2F   ; BRK 89 80 2F: $46 = 가진 물건 수
-    LDA #$0C
-    SEC
-    SBC.b $46
-    CMP #$0A
-    BCC +
-    LDA #$09
-+
-    PHA
-    db $00, $88, $49        ; BRK 88 49: $46~$48 = 가진 돈
-    LDX #$00
--
-    TXA
-    CMP $01,S
-    BCS +
-    LDA.b $46
-    SEC
-    SBC.w $0F28
-    STA.b $46
-    LDA.b $47
-    SBC.w $0F29
-    STA.b $47
-    LDA.b $48
-    SBC.w $0F2A
-    STA.b $48
-    BCC +
-    INX
-    BRA -
-+
-    PLA
-    TXA
-    RTL
 
-; 개수 A(1~9) × 값(BRK 94 02, 물건 $0F22)을 $46~$48 에(M = 8, X = 8)
-ShopQtyTotal:
-    TAX
-    LDA.w $0F22
-    STA.b $42
-    db $00, $94, $02
-    LDA.b $46
-    STA.w $0F28
-    LDA.b $47
-    STA.w $0F29
-    LDA.b $48
-    STA.w $0F2A
--
-    DEX
-    BEQ +
-    LDA.b $46
-    CLC
-    ADC.w $0F28
-    STA.b $46
-    LDA.b $47
-    ADC.w $0F29
-    STA.b $47
-    LDA.b $48
-    ADC.w $0F2A
-    STA.b $48
-    BRA -
-+
-    RTL
-
-; 「몇 개 사시겠어요?」 메시지 번호(가게 종류 $0F20 마다). 원작에서 비어 있고 부르는 곳이 없는 메시지
-ShopQtyMsg:
-    dw $009C, $009D, $00AB, $00C3
-
-; 04:C3B1·04:C508(M = 8, X = 16, DB = 04, 줄 $E4, 고른 물건 $0F22). 원래는 04:C511 표의 「 소지 중」 을 문자열 버퍼
-; $01~(빈칸 01 로 채운 16바이트)에 베끼고 04:C45A(PLY / RTS)로 끝난다. 그 사람 소지품 12칸에서 같은 물건을 세어
-; 고정 문구 「 N개 소지」 를 9E k 로 넣는다. BRK 88 은 A·X·Y 를 지키고, 어느 뱅크에서 불러도 피연산자를 읽는다
-ShopHeldCount:
-    LDA.b $E4
-    STA.b $42
-    db $00, $88, $46        ; BRK 88 46: 줄 → 사람
-    LDA.b $46
-    PHA
-    LDY.w #$0000
-    LDX.w #$0000
--
-    TXA
-    STA.b $43
-    LDA $01,S
-    STA.b $42
-    db $00, $88, $2E        ; BRK 88 2E: $46 = 사람 $42 의 칸 $43 의 물건
-    LDA.b $46
-    CMP.w $0F22
-    BNE +
-    INY
-+
-    INX
-    CPX.w #$000C
-    BCC -
-    PLA
-    CPY.w #$0001
-    BCS +
-    LDY.w #$000A
-    JML $04C440
-+
-    LDX.w #$000F
-    LDA #$01
--
-    STA.b $00,X
-    DEX
-    BPL -
-    LDA #!wt_fixed
-    STA.b $01
-    TYA
-    CLC
-    ADC #!wt_held_first-1
-    STA.b $02
-    JML $04C45A
 
 ; 04:AC25(04:AA10 제목 고리에서 B0 미만 바이트, A = 바이트 8비트, X = 그 바이트 자리, DB = 04, Y = $DC 기준 자리).
 ; 원래는 STA $00 / PHB / LDA #$7E / PHA / PLB 뒤 ($DC),Y 에 쓴다. 9E k 면 고정 문구를 그리고 고리로 돌아간다.

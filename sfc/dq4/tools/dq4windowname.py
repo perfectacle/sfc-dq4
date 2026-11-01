@@ -64,6 +64,8 @@ BUY_SPOT, BUY_SPOT_END = 0x06FFB0, 0x070000
 # 도구 갈래의 개수 묻기와 나머지 개수 주기(06:FE10~ 대화 훅 뒤의 빈자리)
 QTY_SPOT, QTY_SPOT_END = 0x06FE64, 0x06FF00
 GIVE_SITE, GIVE_ORIG = 0x06DD39, bytes.fromhex('ad230f8542ad220f8543')
+# 가게 BRK 를 부르는 도우미(가진 개수·최대 개수·합계). 뱅크 40 아래여야 BRK 가 WRAM 을 읽는다. 원래 롬도 빈 05 끝
+LOW_SPOT, LOW_SPOT_END = 0x05FF00, 0x060000
 # 개수를 묻는 수 창(다섯 자리 입력, 맡기는 곳 등과 함께 씀)
 QTY_WINDOW = 0x5C
 
@@ -184,6 +186,8 @@ def apply(data, font=None, asar=None):
             raise ValueError(f'{a:06X}: 가게 사기 확인이 부르는 코드가 아님')
     if any(d[lorom(BUY_SPOT):lorom(BUY_SPOT_END - 1) + 1]):
         raise ValueError(f'{BUY_SPOT:06X}~ 가 비어 있지 않음')
+    if any(d[lorom(LOW_SPOT):lorom(LOW_SPOT_END - 1) + 1]):
+        raise ValueError(f'{LOW_SPOT:06X}~ 가 비어 있지 않음')
     if any(d[lorom(QTY_SPOT):lorom(QTY_SPOT_END - 1) + 1]):
         raise ValueError(f'{QTY_SPOT:06X}~ 가 비어 있지 않음')
     if d[lorom(GIVE_SITE):lorom(GIVE_SITE) + 14] != GIVE_ORIG + bytes.fromhex('00898030'):
@@ -238,7 +242,8 @@ def apply(data, font=None, asar=None):
             f'!shop_sell_code = ${SHOP_SELL_CODE:02X}\n!shop_sell_slot = ${CODE_TABLE + (SHOP_SELL_CODE - 0xB0) * 2:06X}\n'
             f'!shop_spot = ${SHOP_SPOT:06X}\n!shop_sell_w = {shop_w}\n!wt_held_first = {held[0]}\n'
             f'!shop_buy_ask = ${BUY_ASK:02X}\n!shop_buy_spot = ${BUY_SPOT:06X}\n'
-            f'!shop_qty_spot = ${QTY_SPOT:06X}\n!shop_qty_end = ${QTY_SPOT_END:06X}\n')
+            f'!shop_qty_spot = ${QTY_SPOT:06X}\n!shop_qty_end = ${QTY_SPOT_END:06X}\n'
+            f'!shop_low_spot = ${LOW_SPOT:06X}\n!shop_low_end = ${LOW_SPOT_END:06X}\n')
     defs += dq4battlemsg.apply(d, font or dq4menupatch.Font('galmuri9'), dq4menupatch.render,
                                len(ne.GLYPHS) + len(kana))
     with tempfile.TemporaryDirectory() as tmp:

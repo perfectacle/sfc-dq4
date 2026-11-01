@@ -60,6 +60,16 @@ class MultiBuyTest(unittest.TestCase):
         self.assertRegex(ASM, r'org \$06DD39\n    JSR ShopGiveExtra')
 
 
+class LowBankTest(unittest.TestCase):
+    def test_brk_helpers_below_bank_40(self):
+        # BRK 처리기는 DB 를 부른 뱅크로 둔다. 뱅크 40 이상(창 코드의 60)에서 부르면 WRAM 대신 열린 버스를 읽는다
+        start = ASM.index('org !shop_low_spot')
+        end = ASM.index('assert pc() <= !shop_low_end')
+        for name in ('ShopHeldCount:', 'ShopQtyMax:', 'ShopQtyTotal:'):
+            self.assertTrue(start < ASM.index(name) < end, name)
+        self.assertNotIn('org', ASM[start + 4:end])
+
+
 class SellPriceTest(unittest.TestCase):
     def test_cannot_sell_phrase(self):
         self.assertEqual(dq4windowtext.FIXED[dq4windowtext.CANNOT_SELL], '판매불가')
