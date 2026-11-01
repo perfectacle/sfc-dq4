@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+    # edited: fixing a guard result line in the PR body reruns required-checks
+    types: [opened, synchronize, reopened, edited]
   workflow_dispatch:
 
 permissions:
@@ -71,6 +73,8 @@ jobs:
             dir: sfc/dq4/tools
           - track: dq5
             dir: sfc/dq5/tools/tests
+          - track: common
+            dir: tools/tests
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -112,10 +116,40 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+  # Run-time guards need the ROM, so CI only checks that a PR touching a guard's
+  # paths reports its result in the body (tools/guards.py, GUARD-02).
+  required-checks:
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: 0.13.1
+          enable-cache: true
+
+      - run: uv sync --locked
+
+      - name: Check guard lists and the PR's guard results
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -n "$BASE" ]; then
+            printf '%s' "$PR_BODY" > "$RUNNER_TEMP/pr-body.md"
+            uv run --frozen python tools/guards.py --base "$BASE" --pr-body "$RUNNER_TEMP/pr-body.md"
+          else
+            uv run --frozen python tools/guards.py
+          fi
+
   # The one required status check on main: passes only when every job above passed.
   ci-ok:
     if: always()
-    needs: [docs, syntax, test, actionlint, zizmor]
+    needs: [docs, syntax, test, actionlint, zizmor, required-checks]
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 2
     steps:

@@ -25,7 +25,7 @@ description: 분석·코드·문서를 바꾸기 전에(워크트리·브랜치)
    완료: `git log -1 --format='%an <%ae> %G?'` 가 주인 정보와 `G` 다.
 3. **로컬 검증을 끝낸다** — [ci](../ci/SKILL.md) 의 검사를 로컬에서 돌린다: `uv run --locked python tools/check_docs.py`, `git ls-files -z '*.py' | xargs -0 uv run --locked python -m compileall -q`. 일지가 있으면 [journal 절차 5](../journal/SKILL.md#절차--한-항목을-끝냈을-때)로 순번을 매긴 뒤에 돌린다.
    완료: 전부 통과.
-4. **PR 을 올린다** — push 와 `gh` 는 저장소 주인 계정으로 한다. 여러 계정이 로그인돼 있으면 `gh auth switch` 로 전역 계정을 바꾸지 말고 명령마다 토큰을 넘긴다(`GH_TOKEN=$(gh auth token -u perfectacle) gh …`). `gh pr create --base main` 후 `gh pr merge --auto --merge`. 본문에는 무엇을 확인했는지, 어떻게 검증했는지(실측 숫자), 다른 트랙이 알아야 할 것(공유 파일 변경)을 쓴다.
+4. **PR 을 올린다** — push 와 `gh` 는 저장소 주인 계정으로 한다. 여러 계정이 로그인돼 있으면 `gh auth switch` 로 전역 계정을 바꾸지 말고 명령마다 토큰을 넘긴다(`GH_TOKEN=$(gh auth token -u perfectacle) gh …`). `gh pr create --base main` 후 `gh pr merge --auto --merge`. 본문에는 무엇을 확인했는지, 어떻게 검증했는지(실측 숫자), 다른 트랙이 알아야 할 것(공유 파일 변경)을 쓴다. `uv run --locked python tools/guards.py --base origin/main` 이 찍는 실행 검사를 돌리고 검사마다 결과 줄을 쓴다([GUARD-02](../guards/SKILL.md#guard-02--걸린-실행-검사는-돌리고-결과를-적는다)).
    자동 머지가 저장소 설정으로 막혀 있으면 `ci-ok` 가 초록이 된 뒤 `gh pr merge --merge` 한다. 에이전트 권한 설정이 머지를 막으면 우회하지 말고 사용자가 실행할 명령을 넘긴다.
    완료: PR 이 열리고 auto-merge 가 켜졌거나, `ci-ok` 를 기다리는 중이다.
 5. **머지까지 지켜본다** — 실패하면 [ci](../ci/SKILL.md) 절차로 고친다. main 과 충돌하면 rebase 해서 풀되, 다른 트랙의 줄은 main 쪽을 그대로 둔다([TRACK-02](../tracks/SKILL.md#track-02--공유-파일)).

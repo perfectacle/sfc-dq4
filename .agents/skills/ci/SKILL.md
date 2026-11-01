@@ -36,4 +36,5 @@ PR 은 `ci-ok` 가 초록일 때만 머지한다. `ci-ok` 는 모든 잡을 모�
 - **`docs` 잡**(`tools/check_docs.py`): 일지 이름 형식, 제목과 파일 이름의 날짜·순번 일치, 같은 트랙 안의 순번 중복, 일지 목록(트랙 폴더 `<플랫폼>/<게임>/README.md`, 옮기기 전 트랙은 저장소 README) 누락·순서, 문서 안 상대 링크 대상, 개인 경로, 추적 텍스트 파일의 rebase·merge 충돌 표시를 검사한다.
 - **`syntax` 잡**: Lua 문법(`luac`)과 Python 컴파일을 추적 파일 전체(`git ls-files`)로 본다.
 - **`test` 잡**: 트랙마다 한 잡(`test (dq4)`, `test (dq5)`)으로 unittest 를 돌린다. 롬을 읽는 테스트는 `skipUnless(<롬>.is_file(), ...)` 로 감싸야 한다. 가드가 빠지면 로컬에서는 통과해도 CI 에서 `FileNotFoundError` 로 실패한다. 테스트 파일을 새 폴더에 두면 matrix 에도 넣는다.
+- **`required-checks` 잡**(`tools/guards.py`): 모든 `guards.toml` 의 형식을 보고, PR 이면 바뀐 파일로 걸리는 실행 검사마다 본문에 결과 줄이 있는지 본다([GUARD-02](../guards/SKILL.md#guard-02--걸린-실행-검사는-돌리고-결과를-적는다)). 본문을 고치면 다시 돈다. 공유 도구 테스트는 `test (common)`(`tools/tests`).
 - **보안 점검**: `zizmor` 가 워크플로를, `actionlint` 가 문법을 본다. checkout 에는 `persist-credentials: false`(이 워크플로는 push 하지 않는다). 액션은 커밋 SHA 로 고정한다([DEP-01](../dependencies/SKILL.md#dep-01--7일-쿨다운)).
