@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 import dq4sysmsg
+import dq4windowname
 import dq4windowtext
 
 ASM = (Path(__file__).resolve().parent / 'dq4windowname.asm').read_text()
@@ -73,6 +74,28 @@ class LowBankTest(unittest.TestCase):
         for name in ('ShopHeldCount:', 'ShopQtyMax:', 'ShopQtyTotal:'):
             self.assertTrue(start < ASM.index(name) < end, name)
         self.assertNotIn('org', ASM[start + 4:end])
+
+
+class SellQtyTest(unittest.TestCase):
+    def test_messages_and_hooks(self):
+        for n in (0x0C4, 0x0D6, 0x0D7, 0x0D8):
+            self.assertIn('몇 개', dq4sysmsg.SPEECH[n])
+        self.assertRegex(ASM, r'org \$06DF06\n    JSL ShopSellQty')
+        self.assertRegex(ASM, r'org \$06DF35\n    JSL ShopSellExtra')
+
+    def test_sell_code_below_bank_40_and_uses_own_count(self):
+        self.assertLess(dq4windowname.SELL_SPOT_END - 1, 0x400000)
+        start = ASM.index('org !shop_sell_spot')
+        end = ASM.index('assert pc() <= !shop_sell_end')
+        body = ASM[start:end]
+        self.assertNotIn('org', body[4:])
+        for name in ('ShopSellQty:', 'ShopSellCount:', 'ShopSellExtra:'):
+            self.assertIn(name, body)
+        # 팔기에서 $0F21 은 사람 번호. 개수는 $0F2C 에, 고른 칸보다 앞을 빼면 고른 칸 번호를 줄인다
+        self.assertNotIn('STA.w $0F21', body)
+        self.assertIn('STA.w $0F2C', body)
+        self.assertIn('DEC.w $0F23', body)
+        self.assertEqual(body.count('STZ.w $0F2C'), 2)
 
 
 class SellPriceTest(unittest.TestCase):
