@@ -69,7 +69,7 @@
 | snes9x | `retro_get_memory_data(0)` 에 씀(게임을 연 뒤) | 같은 포인터 |
 | bsnes 115 | `retro_get_memory_data`·`retro_get_memory_size` 가 nullptr·0 을 줌. 저장 폴더(`RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY`)의 `<롬 이름>.srm` 을 게임을 열 때 읽으므로 열기 전에 파일로 둠 | 직렬화 상태의 오프셋 558 부터 8KB |
 
-한 프로세스에서 같은 코어 파일로 `Core` 를 여럿 열면 dylib 의 전역 상태를 나눠 씁니다. bsnes 는 앞 게임을 내리지 않고 다음 게임을 열면 `.srm` 대신 앞 게임의 SRAM 이 남았습니다. 다음 `Core` 를 열기 전에 `retro_unload_game` 을 부릅니다(`dq4savefixture.close`).
+한 프로세스에서 같은 코어 파일로 `Core` 를 여럿 열면 dylib 의 전역 상태를 나눠 씁니다. bsnes 는 앞 게임을 내리지 않고 다음 게임을 열면 `.srm` 대신 앞 게임의 SRAM 이 남았습니다. 다음 `Core` 를 열기 전에 `dq4savefixture.close` 로 `retro_unload_game` 을 부르고 `Core.close` 로 헤드리스 자리(`tools/headless_slots.py`)를 놓습니다.
 
 ## 사용법
 

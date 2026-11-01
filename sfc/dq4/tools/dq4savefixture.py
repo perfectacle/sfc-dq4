@@ -19,6 +19,7 @@ sfc/dq4/docs/dq4-savefixture-format.md.
   slot.place = 'imuru'; slot.gold = 1000; slot.flags.add('HOIMIN')
   core = open_core(core_path, rom, sysdir, slot.to_sram())
   arrived = boot(core, slot.goal)        # 맵에 선 프레임
+  close(core)                            # 다음 Core 를 열기 전에(헤드리스 자리도 놓음)
 """
 import argparse
 import ctypes as C
@@ -315,14 +316,18 @@ def open_core(core_path, rom, sysdir, sram=None):
         if view is not None:
             C.memmove(view, sram, SIZE)
         if read_sram(core) != sram:
+            close(core)
             raise RuntimeError(f'{core.name}: 넣은 SRAM 이 코어에 보이지 않음')
     return core
 
 
 def close(core):
-    """게임을 내린다. 한 프로세스의 Core 는 같은 dylib 의 전역 상태를 나눠 쓰므로, 다음 Core 를 열기 전에 부른다
-    (bsnes 는 내리지 않고 다음 게임을 열면 저장 폴더의 .srm 대신 앞 게임의 SRAM 이 남는다)."""
-    core.lib.retro_unload_game()
+    """게임을 내리고 헤드리스 자리를 놓는다. 한 프로세스의 Core 는 같은 dylib 의 전역 상태를 나눠 쓰므로, 다음 Core 를
+    열기 전에 부른다(bsnes 는 내리지 않고 다음 게임을 열면 저장 폴더의 .srm 대신 앞 게임의 SRAM 이 남는다)."""
+    try:
+        core.lib.retro_unload_game()
+    finally:
+        core.close()
 
 
 def boot(core, goal, settle=90, step=None):
