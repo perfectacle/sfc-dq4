@@ -172,9 +172,22 @@ class SlotTests(unittest.TestCase):
 
 
 class RoutineTests(unittest.TestCase):
+    def test_banked_rows_read_bank_byte(self):
+        # 대체 목록을 여러 뱅크에 나누면 항목 끝 1바이트가 목록 뱅크이고 다음 항목은 7바이트 뒤.
+        code = assemble_find(0x35E000, None)
+        self.assertIn(bytes.fromhex('bf 06 e0 35 85 a7 28 ab 38 6b'), code)
+        self.assertIn(bytes.fromhex('69 07 00'), code)
+        self.assertNotIn(bytes.fromhex('69 06 00'), code)
+        self.assertEqual(len(code), len(assemble_find(0x35E000, 0x35)) + 2)
+
     def test_branches_land_on_instructions(self):
+        for bank in (0x33, None):
+            with self.subTest(bank=bank):
+                self.check_branches(bank)
+
+    def check_branches(self, bank):
         table = 0x33E000
-        code = assemble_find(table, 0x33)
+        code = assemble_find(table, bank)
         data = bytearray(0x1A0000)
         start = 0x33F000
         data[lorom(start):lorom(start) + len(code)] = code
@@ -194,7 +207,8 @@ class RoutineTests(unittest.TestCase):
         self.assertTrue(set(targets) <= starts)
         self.assertEqual(code[:13], bytes.fromhex('8b 08 e2 20 c2 10 a9 7e 48 ab a2 00 00'))
         self.assertEqual(code[13:17], bytes([0xBF, 0x00, 0xE0, 0x33]))
-        self.assertIn(bytes.fromhex('a9 33 85 a7 28 ab 38 6b'), code)
+        if bank is not None:
+            self.assertIn(bytes.fromhex('a9 33 85 a7 28 ab 38 6b'), code)
         self.assertEqual(code[-4:], bytes.fromhex('28 ab 18 6b'))
 
 
