@@ -8,6 +8,9 @@
   비침: 필드에서 칸이 살아 있는 캔버스 안 슬롯(096~17F)의 그림을 가리키는데 우리 자리가 아니다. 메시지 창이 우리 그림을 보인다.
   덮임: 캔버스 밖 1D0~ 을 빌린 슬롯이 화면에 보이는데(키 자리가 그 슬롯 첫 칸), 같은 키·나이로 앞서 본 그림과 VRAM 이 다르다.
         다시 그리지 않은 빌린 글자를 명령 창·가게 창 전용 칸 문구가 덮었다.
+  바뀜: 바로 앞 프레임과 이 프레임 모두 슬롯이 화면에 보이고 키 자리의 타일맵 두 줄이 그대로인데 슬롯 그림이 바뀌었다.
+        보이는 슬롯에 다른 문구를 덮어, 게임이 새 창 타일맵을 보내기 전까지 옛 타일맵이 새 그림을 가리켰다.
+        매 프레임 덤프하는 장면에서만 본다.
 
 걸린 프레임은 화면에 빨간 네모를 그려 sheet-*.png 로 모은다.
 
@@ -58,6 +61,12 @@ SHOP_WHO = ('wait:30,up:6,wait:30,a:4,wait:30,a:4,wait:90,a:4,wait:60,a:4,wait:6
             + 'a:4,wait:200,a:4,wait:300,' + 'a:4,wait:120,' * 4 + 'b:4,wait:120')
 
 
+# 같은 가게 상태로 도구점(대화 번호 표 06:DBDB 의 방어구점 칸을 도구점 처리기 E01F 로)을 열어 사기 목록을 띄우고, 주인공에게
+# 약초만 쥐여 약초 ↔ 해독초로 커서를 오르내린다. 동료 창의 주인공 줄이 「소지 중 ↔ 없음」 으로 바뀐다
+SHOP_FLIP = ('wait:30,up:6,wait:30,a:4,wait:200,a:4,wait:200,a:4,wait:200,a:4,wait:150,'
+             + ','.join(['down:4,wait:30,up:4,wait:30'] * 4))
+
+
 # 09/00 크리프트 소지품 12칸을 긴 이름으로 채우고 도구 → 크리프트 → 셋째 물건. 목록이 가나 칸을 넘쳐 「어떻게 할까」 제목이
 # 1D0~ 을 빌리고, 「어떻게 할까」 를 열 때 게임이 뒤의 명령 창을 다시 그린다
 PARTY_ITEMS = ';'.join(f'7E{0x2056 + i:04X}={0x0C + i * 3:02X}' for i in range(12))
@@ -70,6 +79,7 @@ def scenes(ship, party, shop=None):
     out = []
     if shop:
         out.append(('shopwho', shop, '', '', SHOP_WHO, range(100, 1900, 30)))
+        out.append(('shopflip', shop, '7E2058=A1', '35BE1=1FE0', SHOP_FLIP, range(880, 1110)))
     for n in range(0x40):
         # 선실 파파스의 대화 번호를 바꿔 가게·교회·여관 등을 연다(35C37 = A901 은 대화를 그 번호로 고정)
         out.append((f'talk{n:02X}', ship, f'7E36EB={n:02X};7E370B=00', '35C37=A901', TALK, range(60, 1500, 30)))
@@ -148,7 +158,7 @@ def dumps(folder):
 def check(folder, rom, slots):
     """[(프레임, [(줄, 열, 규칙, 타일)])] 걸린 프레임만."""
     kana = {t: bytes(x for b in rom[KANA_ROM + (t - 1) * 8:KANA_ROM + t * 8] for x in (b, 0xFF)) for t in KANA}
-    out, seen = [], {}
+    out, seen, before = [], {}, {}
     for frame, d in sorted(dumps(folder).items()):
         vram_path = folder / f'v{frame:05d}.bin'
         if not vram_path.exists() or len(d) < 5:
@@ -190,6 +200,23 @@ def check(folder, rom, slots):
             art = vram[(0x1000 + tile * 8) * 2:(0x1000 + (tile + size) * 8) * 2]
             if seen.setdefault((i, key, age), art) != art:
                 bad += [(c // 32, c % 32 + j, '덮임', tile + j) for j in range(size // 2)]
+        now = {}
+        for i, tiles in enumerate(cells):
+            key = int.from_bytes(keys[2 * i:2 * i + 2], 'little')
+            age = int.from_bytes(ages[2 * i:2 * i + 2], 'little')
+            c = (key - BUFFER) // 2
+            if not key or not age or not 32 <= c < 32 * 28 or not tiles:
+                continue
+            tiles = list(tiles)
+            if int.from_bytes(vram[(tilemap + c) * 2:(tilemap + c) * 2 + 2], 'little') & 0x3FF != tiles[0]:
+                continue
+            row = vram[(tilemap + c - 32) * 2:(tilemap + c - 22) * 2] + vram[(tilemap + c) * 2:(tilemap + c + 10) * 2]
+            art = b''.join(vram[(0x1000 + t * 8) * 2:(0x1000 + t * 8) * 2 + 16] for t in tiles)
+            now[i, key] = row, art
+            prev = before.get((frame - 1, i, key))
+            if prev and prev[0] == row and prev[1] != art:
+                bad += [(c // 32, c % 32 + j, '바뀜', tiles[0] + j) for j in range(len(tiles) // 2)]
+        before = {(frame, i, key): v for (i, key), v in now.items()}
         for cell in range(32 * 28):         # 화면은 28줄(224점)
             if cell in mine:
                 continue
