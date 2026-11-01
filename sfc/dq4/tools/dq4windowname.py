@@ -171,8 +171,12 @@ def apply(data, font=None, asar=None):
     if d[o:o + 2] != bytes.fromhex('46b9'):
         raise ValueError(f'코드 {SHOP_SELL_CODE:02X} 갈래 {d[o:o + 2].hex()}: 04:B946 이 아님')
     for a in BUY_SITES:
-        if d[lorom(a):lorom(a) + len(BUY_ORIG)] != BUY_ORIG:
-            raise ValueError(f'{a:06X}: 가게 사기 값 저장이 아님')
+        if d[lorom(a):lorom(a) + len(BUY_ORIG) + 3] != BUY_ORIG + bytes.fromhex('20e9f5'):
+            raise ValueError(f'{a:06X}: 가게 사기 값 저장 + JSR $F5E9 가 아님')
+    # ShopBuyConfirm 이 부르는 원래 코드: 06:F602 돈 견주기, 06:DC2F 물건 목록(LDA #$01 / JSR $DFC4)
+    for a, want in ((0x06F602, '008849'), (0x06DC2F, 'a90120c4df'), (0x06DFC4, 'c904')):
+        if d[lorom(a):lorom(a) + len(want) // 2] != bytes.fromhex(want):
+            raise ValueError(f'{a:06X}: 가게 사기 확인이 부르는 코드가 아님')
     if any(d[lorom(BUY_SPOT):lorom(BUY_SPOT_END - 1) + 1]):
         raise ValueError(f'{BUY_SPOT:06X}~ 가 비어 있지 않음')
     for a in HELD_SITES:
@@ -240,6 +244,9 @@ def apply(data, font=None, asar=None):
         raise ValueError('창 이름 코드가 정해 둔 자리를 벗어남')
     if not any(out[lorom(SHOP_SPOT):lorom(SHOP_SPOT_END - 1) + 1]):
         raise ValueError('가게 팔기 목록 코드가 들어가지 않음')
+    for a in BUY_SITES:
+        if out[lorom(a)] != 0x20 or int.from_bytes(out[lorom(a) + 1:lorom(a) + 3], 'little') != BUY_SPOT & 0xFFFF:
+            raise ValueError(f'{a:06X}: JSR ShopBuyConfirm 이 아님')
     for a in SHOP_RESOLVE:
         t = int.from_bytes(out[lorom(a) + 1:lorom(a) + 3], 'little')
         if out[lorom(a)] != 0x20 or not SHOP_SPOT & 0xFFFF <= t < 0x10000:
