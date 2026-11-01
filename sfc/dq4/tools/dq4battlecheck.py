@@ -15,7 +15,7 @@
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4battlecheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/battlecheck \\
       [--base work/ch1walk/prologue/end.mss] [--repeat 2] [--seed N | --seeds 0,5,9] [--no-state-cache]
-  --base 가 없으면 서장 끝 상태를 dq4ch1walkcheck.prologue 로 얻는다(롬 SHA-1 별 캐시 work/cache/states, 서장은 시드 0).
+  --base 가 없으면 서장 끝 상태를 dq4ch1walkcheck.prologue 로 얻는다(롬 SHA-1 별 캐시 work/cache/states/prologue, 서장은 시드 0).
   시드는 자리 잡기와 전투 시작의 난수(dq4ch1walkcheck.rng_for)만 바꾼다. 여러 시드면 seed-N/ 아래에 장면 폴더.
 형식은 sfc/dq4/docs/dq4-chapter1-format.md 「검증」.
 """

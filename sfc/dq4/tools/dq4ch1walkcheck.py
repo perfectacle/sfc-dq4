@@ -17,7 +17,8 @@
 --seeds 0,5,9). 시드 0 은 세 바이트 모두 00, 그 밖은 random.Random(시드) 로 뽑는다(rng_for). 서장은 늘 시드 0 이고,
 여러 시드면 서장 끝에서 시드마다 따로 걸어 모두 통과해야 통과다.
 
-서장 끝 세이브스테이트는 롬 SHA-1 마다 원래 체크아웃의 work/cache/states/<롬sha1>/ 에 두고, 같은 롬·같은 검사 코드면
+서장 끝 세이브스테이트는 롬 SHA-1 마다 원래 체크아웃의 work/cache/states/prologue/<롬sha1>/ 에 두고, 같은 롬·같은 검사 코드·
+같은 입력 상수·같은 MesenCE 면
 서장을 다시 걷지 않는다(--no-state-cache 로 끔).
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4ch1walkcheck.py --rom work/ch1/dq4-ch1.sfc --out work/ch1walk [--chapter2]
@@ -167,17 +168,34 @@ def mesence_stamp(mesence):
     return f'mesence {st.st_size} {st.st_mtime_ns}'
 
 
+# 전원부터 서장 첫 장면까지 누르는 입력(mkstate.lua). 서장 캐시 키에도 들어간다
+PROLOGUE_START = {'SAVEAT': str(pc.START_AT), 'STATE': 'start.mss', 'MAXF': str(pc.START_AT + 10), 'EVERY': '0',
+                  'PERIOD': '40', 'TAP': 'a', 'TAPUNTIL': str(pc.TAP_UNTIL),
+                  'SEQ': ','.join(f'y@{f}:2' for f in range(900, 1600, 150))}
+
+
+def prologue_inputs():
+    """서장 끝 상태를 정하는 입력 상수: 전원부터의 입력, 서장 구간(길·맵·끝 조건), 그 구간에 두는 난수·시각과 롬 패치."""
+    return repr((sorted(PROLOGUE_START.items()), SEGMENTS[0], pins(SEGMENTS[0][3], 0), NO_ENCOUNTERS))
+
+
 def code_key(mesence, *extra):
-    """서장을 걷는 데 닿는 코드·도구의 지문. 하나라도 바뀌면 캐시를 새로 만든다."""
+    """서장을 걷는 데 닿는 코드·도구·입력 상수·에뮬레이터의 지문. 하나라도 바뀌면 캐시를 새로 만든다."""
     return fingerprint(Path(__file__), Path(pc.__file__), Path(mesen.__file__), WALK, WALK_STATE, pc.MKSTATE,
-                       ROOT / 'uv.lock', mesence_stamp(mesence), *extra)
+                       ROOT / 'uv.lock', mesence_stamp(mesence), prologue_inputs(), *extra)
+
+
+def states_root():
+    """시작 상태 캐시의 뿌리. dq4savefixture 와 같은 폴더(DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)를 쓴다."""
+    return Path(os.environ.get('DQ4_STATES_CACHE') or main_checkout() / 'work' / 'cache' / 'states')
 
 
 class StateCache:
-    """롬 SHA-1 별 시작 상태 캐시: <root>/work/cache/states/<롬sha1>/<종류>-<지문>.<확장자> 와 결과 .json."""
+    """롬 SHA-1 별 시작 상태 캐시: <states_root>/prologue/<롬sha1>/<종류>-<지문>.<확장자> 와 결과 .json.
+    dq4savefixture 가 뿌리에 바로 두는 파일과 섞이지 않게 prologue/ 아래에 둔다."""
 
     def __init__(self, rom_bytes, root=None):
-        self.folder = (root or main_checkout()) / 'work' / 'cache' / 'states' / hashlib.sha1(rom_bytes).hexdigest()
+        self.folder = (root or states_root()) / 'prologue' / hashlib.sha1(rom_bytes).hexdigest()
 
     def path(self, kind, key, ext):
         return self.folder / f'{kind}-{key}{ext}'
@@ -455,10 +473,7 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0):
 
 def prologue_start(mesence, rom, out):
     """전원부터 새 게임 첫 장면까지 걸어 서장 시작 세이브스테이트를 만든다."""
-    seq = ','.join(f'y@{f}:2' for f in range(900, 1600, 150))
-    pc.run(mesence, rom, pc.MKSTATE, out / 'start',
-           {'SAVEAT': str(pc.START_AT), 'STATE': 'start.mss', 'MAXF': str(pc.START_AT + 10), 'EVERY': '0',
-            'PERIOD': '40', 'TAP': 'a', 'TAPUNTIL': str(pc.TAP_UNTIL), 'SEQ': seq}, 200)
+    pc.run(mesence, rom, pc.MKSTATE, out / 'start', PROLOGUE_START, 200)
     state = out / 'start' / 'start.mss'
     if not state.exists():
         raise SystemExit('세이브스테이트를 만들지 못함')
@@ -492,7 +507,7 @@ def walk_unit(mesence, rom, data, out, segments, unit, base, seed=0):
 def prologue(mesence, rom, data, out, segments, cache=None):
     """서장 끝 세이브스테이트와 서장 구간 결과. 서장은 늘 시드 0 이라 시드와 상관없이 하나를 나눠 쓴다.
     cache(StateCache)에 같은 롬·같은 코드로 만든 것이 있으면 걷지 않고 그것을 쓴다."""
-    key = code_key(mesence, repr(segments[0]), NO_ENCOUNTERS) if cache else None
+    key = code_key(mesence) if cache else None
     hit = cache.get('prologue', key, '.mss') if cache else None
     if hit:
         return hit[0], {**hit[1], 'cached': hit[0].name}

@@ -105,7 +105,7 @@ class Ch1WalkCheckTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             cache = wc.StateCache(rom, root)
-            self.assertEqual(cache.folder, root / 'work' / 'cache' / 'states' / hashlib.sha1(rom).hexdigest())
+            self.assertEqual(cache.folder, root / 'prologue' / hashlib.sha1(rom).hexdigest())
             self.assertIsNone(cache.get('prologue', 'k1', '.mss'))
             src = root / 'end.mss'
             src.write_bytes(b'state')
@@ -123,6 +123,17 @@ class Ch1WalkCheckTests(unittest.TestCase):
             src.write_bytes(b'other')
             self.assertNotEqual(wc.fingerprint('a', src), wc.fingerprint('a', b'state'.decode()))
             self.assertNotEqual(wc.fingerprint('a', src), wc.fingerprint('b', src))
+
+    def test_prologue_key_covers_inputs(self):
+        before = wc.prologue_inputs()
+        self.assertIn(wc.PROLOGUE_START['SEQ'], before)
+        self.assertIn(wc.RNG, before)
+        old = wc.PROLOGUE_START['TAPUNTIL']
+        try:
+            wc.PROLOGUE_START['TAPUNTIL'] = old + '0'
+            self.assertNotEqual(wc.prologue_inputs(), before)
+        finally:
+            wc.PROLOGUE_START['TAPUNTIL'] = old
 
     def test_trace_ignores_repeated_warp_end(self):
         once = 'f00002 anywhere\nf00259 end map 37/00\nflags 7E2190: 00\n'

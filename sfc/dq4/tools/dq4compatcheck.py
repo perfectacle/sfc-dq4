@@ -13,7 +13,7 @@ MesenCE 판(dq4ch1walkcheck)과 다른 점: 세이브스테이트 대신 한 실
 
   python sfc/dq4/tools/dq4cores.py && python sfc/dq4/tools/dq4compatcheck.py walk --rom work/ch1/dq4-ch1-full.sfc --out work/compat
   (--seed N·--seeds 0,5,9 는 서장 뒤 구간의 난수(dq4ch1walkcheck.rng_for). 서장은 늘 시드 0 이고, --jobs 2 이상이면 서장 끝
-  상태(prologue.state)를 롬 SHA-1·코어별로 work/cache/states 에 두어 다시 걷지 않는다. --no-state-cache 로 끔.
+  상태(prologue.state)를 롬 SHA-1·코어별로 work/cache/states/prologue 에 두어 다시 걷지 않는다. --no-state-cache 로 끔.
   여러 시드는 --jobs 2 이상에서만, 코어 폴더 아래 seed-N/ 에 묶음 폴더)
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4compatcheck.py probe --rom work/ch1/dq4-ch1-full.sfc --out work/compat-probe
 형식은 sfc/dq4/docs/dq4-compat-format.md.
@@ -435,8 +435,10 @@ class Walker:
             self.boot()
             return self.finish({self.seed: self.segments(range(len(wc.SEGMENTS)))}, None, t0)
         groups = wc.units(wc.SEGMENTS)
+        # 키: 롬 SHA-1(캐시 폴더) + 코어 SHA-256 + 서장 입력 상수(부팅 입력 START_AT·TAP_UNTIL 포함) + 검사 코드
         key = wc.fingerprint(Path(__file__), Path(dq4libretro.__file__), Path(wc.__file__), Path(pc.__file__),
-                             ROOT / 'uv.lock', dq4cores.sha256(core_path)) if cache else None
+                             ROOT / 'uv.lock', dq4cores.sha256(core_path), wc.prologue_inputs(),
+                             repr((pc.START_AT, pc.TAP_UNTIL))) if cache else None
         hit = cache.get(kind, key, '.state') if cache else None
         if hit:
             base, pro = hit[0], {**hit[1], 'cached': hit[0].name}

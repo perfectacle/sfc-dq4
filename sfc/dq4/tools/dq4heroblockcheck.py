@@ -13,7 +13,7 @@
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4heroblockcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/heroblock
   (--only 사례이름,… 은 그 사례만, --base 는 1단계 출발 상태를 다시 쓴다)
   --seed N·--seeds 0,5,9 는 2·3단계 난수(dq4ch1walkcheck.rng_for)를 고른다. 1단계 출발 상태는 늘 시드 0 이고 롬
-  SHA-1 별로 work/cache/states 에 두어 다시 만들지 않는다(--no-state-cache 로 끔). 여러 시드면 seed-N/ 아래에 사례 폴더.
+  SHA-1 별로 work/cache/states/prologue 에 두어 다시 만들지 않는다(--no-state-cache 로 끔). 여러 시드면 seed-N/ 아래에 사례 폴더.
 """
 import argparse
 import concurrent.futures
