@@ -19,6 +19,11 @@ class ProbeLogTest(unittest.TestCase):
         # 높은 뱅크 코드가 SRAM 을 직접 쓰면 DB 실수일 수 있어 잡는다
         self.assertTrue(cc.probe_problems(['W pc=5E:D000 bank=70']))
 
+    def test_reset_needs_dark_then_bright(self):
+        self.assertTrue(cc.reset_seen([90, 90, 5, 3, 130, 12]))       # 성 앞 → 서술(어둠) → 타이틀 → 메뉴
+        self.assertFalse(cc.reset_seen([90, 90, 90]))                  # 밝은 성 앞만: 리셋이 아님
+        self.assertFalse(cc.reset_seen([90, 5, 3, 12, 12]))            # 어두워진 뒤 타이틀이 안 뜸
+
     def test_rom_offsets_map_to_lorom(self):
         self.assertEqual(cc.cpu(cc.TRIGGER_RECORD), 0x2AD812)
         self.assertEqual(cc.rom_codes(0x155812, b'\x01\x02'), ['2AD81201', '2AD81302'])

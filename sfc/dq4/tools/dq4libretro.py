@@ -14,6 +14,7 @@ from PIL import Image
 
 # bsnes 115 직렬화 상태에서 WRAM 128KB 가 시작하는 자리(snes9x WRAM 과 견줘 찾음)
 WRAM_OFFSET = 8836
+BSNES_VERSION = '115'
 BTN = {'b': 0, 'y': 1, 'select': 2, 'start': 3, 'up': 4, 'down': 5, 'left': 6, 'right': 7,
        'a': 8, 'x': 9, 'l': 10, 'r': 11}
 
@@ -71,7 +72,8 @@ class Core:
         self.wram_ptr = None
         self.buttons = set()
         self.audio = []
-        self.sysdir = C.c_char_p(sysdir.encode())
+        # 코어가 콜백 뒤에도 읽는 문자열은 self 가 쥔 버퍼의 주소로 넘긴다
+        self.sysdir = C.create_string_buffer(sysdir.encode())
         self._cbs = (ENV(self._env), VIDEO(self._video), AUDIO1(self._a1), AUDIOB(self._ab), POLL(lambda: None),
                      STATE(self._state))
         L = self.lib
@@ -85,6 +87,9 @@ class Core:
         si = SysInfo()
         L.retro_get_system_info(C.byref(si))
         self.name = f'{si.library_name.decode()} {si.library_version.decode()}'
+        if si.library_name.decode() == 'bsnes' and si.library_version.decode() != BSNES_VERSION:
+            # WRAM_OFFSET 은 이 판의 직렬화 형식에서 잰 값이다
+            raise RuntimeError(f'bsnes {si.library_version.decode()}: WRAM_OFFSET 은 bsnes {BSNES_VERSION} 에서만 확인함')
         data = open(rom, 'rb').read()
         self._rom = C.create_string_buffer(data, len(data))
         gi = GameInfo(rom.encode(), C.cast(self._rom, C.c_void_p), len(data), None)
@@ -108,17 +113,18 @@ class Core:
             self.pixfmt = C.cast(data, C.POINTER(C.c_int)).contents.value
             return True
         if cmd in (9, 31):
-            C.cast(data, C.POINTER(C.c_char_p))[0] = self.sysdir.value
+            C.cast(data, C.POINTER(C.c_void_p))[0] = C.addressof(self.sysdir)
             return True
         if cmd == 3:
             C.cast(data, C.POINTER(C.c_bool))[0] = True
             return True
         if cmd == 15:
-            v = C.cast(data, C.POINTER(Variable)).contents
-            if v.key in self.options:
-                buf = C.c_char_p(self.options[v.key])
+            v = C.cast(data, C.POINTER(Variable))
+            key = v.contents.key
+            if key in self.options:
+                buf = C.create_string_buffer(self.options[key])
                 self._keep.append(buf)
-                v.value = buf.value
+                C.cast(data, C.POINTER(C.c_void_p * 2)).contents[1] = C.addressof(buf)
                 return True
             return False
         if cmd == 36:

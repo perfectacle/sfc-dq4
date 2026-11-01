@@ -35,11 +35,31 @@ FORBIDDEN = {
 RETURNS = {0x60, 0x6B, 0x40}                    # RTS RTL RTI
 JUMPS = {0x4C, 0x5C, 0x80, 0x82}                # JMP abs, JML long, BRA, BRL
 CALLS = {0x20, 0x22}                            # JSR abs, JSL long
-STOPS = {0x6C, 0x7C, 0xDC, 0xFC, 0xDB, 0xCB}    # 간접 점프·STP·WAI: 따라가지 않음
+STOPS = {0x6C, 0x7C, 0xDC, 0xDB, 0xCB}          # 간접 점프·STP·WAI: 따라가지 않음
+INDIRECT_CALL = 0xFC                            # JSR (abs,X): 대상은 모르고 다음 명령으로 이어 감
+# native() 의 이름 가운데 자료(이벤트 스크립트·기록·빈 줄)인 것과, PHP 로 시작하지 않는 코드. 둘 다 아닌 이름이
+# PHP 로 시작하지 않으면 문제로 친다(자료로 잘못 알고 건너뛰지 않게)
+DATA_ENTRIES = {'blank2', 'end_event', 'talk_event', 'ev_back', 'ev_out', 'fly_event', 'record', 'event',
+                'kick_walk', 'name', 'recruits'}
+CODE_ENTRIES = {'hero_picture'}
+
+
+def entries_of(name, base, blob, at):
+    """(진입점 목록, 문제). PHP 로 시작하거나 CODE_ENTRIES 면 코드, DATA_ENTRIES 면 자료."""
+    entries, problems = [], []
+    for label, a in at.items():
+        inside = 0 <= a - base < len(blob)
+        if label in DATA_ENTRIES:
+            continue
+        if inside and (blob[a - base] == 0x08 or label in CODE_ENTRIES):
+            entries.append(a)
+        elif inside:
+            problems.append(f'{name}.{label} {a:06X}: PHP 로 시작하지 않음(코드면 CODE_ENTRIES, 자료면 DATA_ENTRIES 에)')
+    return entries, problems
 
 
 def blobs():
-    """[(이름, 시작 주소, 바이트, 진입점 목록)]. 롬 없이 만든다."""
+    """[(이름, 시작 주소, 바이트, 진입점 목록)]. 롬 없이 만든다. 진입점을 못 가른 이름이 있으면 ValueError."""
     import dq4ch1event
     import dq4ch2event
     import dq4chapterbox as box
@@ -47,7 +67,9 @@ def blobs():
     out = []
     for name, mod in (('prologue', dq4prologue), ('ch1event', dq4ch1event), ('ch2event', dq4ch2event)):
         blob, at = mod.native()
-        entries = [a for a in at.values() if 0 <= a - mod.CODE_AT < len(blob) and blob[a - mod.CODE_AT] == 0x08]
+        entries, problems = entries_of(name, mod.CODE_AT, blob, at)
+        if problems:
+            raise ValueError('; '.join(problems))
         out.append((name, mod.CODE_AT, blob, entries))
     scenes = box.GAME_SCENES
     lay = box.Layout(box.CODE_AT, scenes, b'', [bytes(box.BOX_W * box.BOX_H * 2)] * len(scenes), box.palettes())
@@ -56,13 +78,19 @@ def blobs():
     return out
 
 
-def scan(base, blob, entries):
-    """({BRK 명령: [주소]}, [문제])."""
-    found, problems, seen = {}, [], set()
+def scan(base, blob, entries, others=()):
+    """({BRK 명령: [주소]}, [문제], {덩어리 밖 대상}). others 는 따로 훑는 다른 덩어리의 (시작, 끝).
+    뱅크 40 이상인데 어느 덩어리에도 없는 곳으로 나가면 훑지 못한 높은 뱅크 코드라 문제로 친다."""
+    found, problems, seen, exits = {}, [], set(), set()
     work = [(e, True, True, ()) for e in entries]
 
     def inside(a):
         return base <= a < base + len(blob)
+
+    def leave(a, how):
+        exits.add(a)
+        if a >> 16 >= 0x40 and not any(lo <= a < hi for lo, hi in others):
+            problems.append(f'{how} {a:06X}: 훑지 않은 높은 뱅크 코드로 나감')
 
     while work:
         pc, m8, x8, pstack = work.pop()
@@ -70,7 +98,10 @@ def scan(base, blob, entries):
             seen.add((pc, m8, x8))
             op = blob[pc - base]
             if op == 0x00:
-                cmd = blob[pc - base + 1] if inside(pc + 1) else None
+                if not inside(pc + 1):
+                    problems.append(f'{pc:06X}: 덩어리 끝의 BRK')
+                    break
+                cmd = blob[pc - base + 1]
                 found.setdefault(cmd, []).append(pc)
                 if cmd in FORBIDDEN:
                     problems.append(f'{pc:06X}: BRK {cmd:02X} 금지 — {FORBIDDEN[cmd]}')
@@ -94,36 +125,62 @@ def scan(base, blob, entries):
                 (m8, x8), pstack = pstack[-1], pstack[:-1]
             if op in RETURNS or op in STOPS:
                 break
+            if op == INDIRECT_CALL:
+                exits.add(f'JSR ({arg:04X},X) at {pc:06X}')
+                pc = nxt
+                continue
             if md == 'rel':
                 target = (nxt + (arg - 256 if arg & 0x80 else arg)) & 0xFFFF | (pc & 0xFF0000)
-                if op == 0x80:
+                if not inside(target):
+                    leave(target, 'branch')
+                elif op == 0x80:
                     pc = target
                     continue
-                work.append((target, m8, x8, pstack))
+                else:
+                    work.append((target, m8, x8, pstack))
+                if op == 0x80:
+                    break
             elif op == 0x82:
                 pc = (nxt + (arg - 65536 if arg & 0x8000 else arg)) & 0xFFFF | (pc & 0xFF0000)
+                if not inside(pc):
+                    leave(pc, 'BRL')
+                    break
                 continue
             elif op in (0x4C, 0x20):
                 target = arg | (pc & 0xFF0000)
-                if op == 0x4C:
+                if not inside(target):
+                    leave(target, 'JMP' if op == 0x4C else 'JSR')
+                    if op == 0x4C:
+                        break
+                elif op == 0x4C:
                     pc = target
                     continue
-                work.append((target, m8, x8, ()))
+                else:
+                    work.append((target, m8, x8, ()))
             elif op in (0x5C, 0x22):
-                if op == 0x5C:
+                if not inside(arg):
+                    leave(arg, 'JML' if op == 0x5C else 'JSL')
+                    if op == 0x5C:
+                        break
+                elif op == 0x5C:
                     pc = arg
                     continue
-                work.append((arg, m8, x8, ()))
+                else:
+                    work.append((arg, m8, x8, ()))
             pc = nxt
-    return found, problems
+    return found, problems, exits
 
 
 def main():
     bad = 0
-    for name, base, blob, entries in blobs():
-        found, problems = scan(base, blob, entries)
+    all_blobs = blobs()
+    spans = [(b, b + len(blob)) for _, b, blob, _ in all_blobs]
+    for name, base, blob, entries in all_blobs:
+        found, problems, exits = scan(base, blob, entries, spans)
         cmds = ' '.join(f'{c:02X}×{len(v)}' for c, v in sorted(found.items(), key=lambda kv: kv[0] or 0))
         print(f'{name} {base:06X}+{len(blob)} 진입점 {len(entries)}: {cmds or "BRK 없음"}')
+        outside = sorted(f'{e:06X}' if isinstance(e, int) else e for e in exits)
+        print(f'  덩어리 밖: {" ".join(outside) or "없음"}')
         for p in problems:
             print(f'  문제: {p}')
         bad += len(problems)

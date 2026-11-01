@@ -28,6 +28,10 @@ paths = [
   "sfc/dq4/tools/dq4environmentrom.py",
   "sfc/dq4/tools/*.asm",
   "sfc/dq4/tools/dq4brkscan.py",
+  "sfc/dq4/tools/dq4compatcheck.py",
+  "sfc/dq4/tools/lua/dq4openbus.lua",
+  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/dq4prologuecheck.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4compatcheck.py probe --rom work/ch1/dq4-ch1-full.sfc --out work/compat-probe"
 needs = ["rom", "MESENCE", "LIBDIR"]
@@ -44,6 +48,8 @@ paths = [
   "sfc/dq4/tools/*.asm",
   "sfc/dq4/tools/dq4compatcheck.py",
   "sfc/dq4/tools/dq4libretro.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/dq4prologuecheck.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4compatcheck.py walk --rom work/ch1/dq4-ch1-full.sfc --out work/compat-walk"
 needs = ["rom", "LIBRETRO_BSNES", "LIBRETRO_SNES9X"]

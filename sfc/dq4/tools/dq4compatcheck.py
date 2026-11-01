@@ -6,9 +6,9 @@
           뱅크 40 이상 코드가 부른 BRK 를 기록한다. SRAM(뱅크 70~7D)을 낮은 뱅크 코드가 쓰는 것 말고 접근이 있거나,
           dq4brkscan.ALLOWED 밖의 BRK 가 불리면 실패. MESENCE·LIBDIR 필요.
 
-MesenCE 판(dq4ch1walkcheck)과 다른 점: 세이브스테이트 대신 한 실행에서 이어 걷고, 워프의 롬 쓰기는 cheat, 한 번 쓰는
-WRAM 은 poke(bsnes 는 상태를 고쳐 다시 불러옴), 메시지 번호는 보지 않고, 끝(리셋)은 실행 추적 대신 타이틀 화면이 다시
-뜨는지(밝기)와 소리로 본다.
+MesenCE 판(dq4ch1walkcheck)과 다른 점: 세이브스테이트 대신 한 실행에서 이어 걷고, 보스 패치를 보스 구간만이 아니라
+처음부터 롬에 쓰고, 워프의 롬 쓰기는 cheat, 한 번 쓰는 WRAM 은 poke(bsnes 는 상태를 고쳐 다시 불러옴), 메시지 번호는
+보지 않고, 끝(리셋)은 실행 추적 대신 어두운 끝 화면 뒤 타이틀이 다시 뜨는지(밝기)와 소리로 본다.
 
   LIBRETRO_BSNES=… LIBRETRO_SNES9X=… python sfc/dq4/tools/dq4compatcheck.py walk --rom work/ch1/dq4-ch1-full.sfc --out work/compat
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4compatcheck.py probe --rom work/ch1/dq4-ch1-full.sfc --out work/compat-probe
@@ -39,6 +39,7 @@ TRIGGER_LIST = 0x7E183A          # 지금 맵의 트리거 목록 포인터·개
 BIG_BD = 0x157769                # 맵 번호가 1F 를 넘을 때 덮는 자리
 ENTRANCE, ARRIVALS = 0x27E83, 0x7EA97
 TITLE_BRIGHT = 60                # 끝 상자·메뉴는 어둡고 타이틀(하늘 그림)은 밝다
+DARK = 20                        # 끝맺음 서술·끝 상자의 검은 화면
 WALK_HOLD, STUCK = 90, 90        # walk.lua 와 같음
 
 
@@ -53,6 +54,13 @@ def rom_codes(off, data):
 def sets(s):
     """dq5warp.lua SET 꼴(`075B=00;…`, 7E 뱅크 하위 16비트) → [(주소, 값)]."""
     return [(0x7E0000 | int(a, 16), int(v, 16)) for a, v in re.findall(r'(\w+)=(\w+)', s or '')]
+
+
+def reset_seen(bright):
+    """끝 구간 화면 밝기(30프레임마다)에서, 어두운 화면(서술·끝 상자) 뒤에 밝은 타이틀이 다시 떴는지.
+    성 앞은 밝으므로 밝은 화면만으로는 리셋을 알 수 없다."""
+    dark = next((i for i, b in enumerate(bright) if b < DARK), None)
+    return dark is not None and any(b >= TITLE_BRIGHT for b in bright[dark:])
 
 
 def tokens(s):
@@ -94,6 +102,9 @@ class Walker:
         if tuple(codes) != self.cheat_key:
             self.c.set_cheats(codes)
             self.cheat_key = tuple(codes)
+            if not direct and self.pokes:
+                # bsnes 는 cheat 를 다시 걸 때 앞 값을 되돌리므로 묶는 값을 바로 다시 쓴다
+                self.c.poke(self.pokes)
 
     def step(self, buttons=()):
         self.c.run(buttons)
@@ -234,6 +245,7 @@ class Walker:
         self.c.poke(sets(wc.RNG))
         bright = []
         k = 0
+        start = len(self.rms)
         for b, f in (tok.split(':') for tok in wc.ENDING_PRE.split(',')):
             for _ in range(int(f)):
                 self.step(set() if b == 'wait' else {b})
@@ -246,12 +258,12 @@ class Walker:
                 bright.append(int(self.c.frame.mean()))
         self.c.shot(self.out / 'ending.png')
         problems = []
-        if max(bright) < TITLE_BRIGHT:
-            problems.append('리셋 뒤 타이틀이 뜨지 않음')
-        if max(self.rms[-10:]) < 100:
+        if not reset_seen(bright):
+            problems.append('어두운 끝 화면 뒤 타이틀이 다시 뜨지 않음')
+        if max(self.rms[start:][-10:] or [0]) < 100:
             problems.append('리셋 뒤 소리가 없음')
         return {'name': 'ending', 'status': 'failed' if problems else 'passed', 'problems': problems,
-                'max_bright': max(bright), 'frame': self.c.n}
+                'bright': bright, 'frame': self.c.n}
 
     def run(self):
         t0 = time.time()
