@@ -194,6 +194,14 @@ class PrologueTests(unittest.TestCase):
         village = next(x for x in lists if x["map"] == pro.VILLAGE)["entries"]
         self.assertEqual(village[-1]["fields"]["interval"], 1)
 
+    def test_frog_sounds_when_surfacing_and_when_jumping(self):
+        # 다리로 뛰어오를 때 소리가 빠져 떠오를 때만 울리던 것: 첫 뜀(39) 바로 앞에도 점프 소리를 낸다
+        frog = next(s for s in pro.scripts() if s["address"] == pro.FROG_SCRIPT)["commands"]
+        appear = frog.index({"op": '50', "args": [pro.FROG_AT[0] * 2, pro.FROG_AT[1] * 2 + 1]})
+        first_jump = next(i for i, c in enumerate(frog) if c["op"] == '39')
+        self.assertEqual(frog[appear - 1], {"op": '20', "args": list(pro.SPLASH)})
+        self.assertEqual(frog[first_jump - 1], {"op": '20', "args": list(pro.JUMP)})
+
 
 if __name__ == '__main__':
     unittest.main()
