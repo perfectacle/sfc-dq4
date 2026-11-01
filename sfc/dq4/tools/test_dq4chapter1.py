@@ -178,6 +178,7 @@ class BuildFlowTests(unittest.TestCase):
         import dq4menupatch
         import dq4msgnames
         import dq4prologue
+        import dq4signs
         calls, order = [], []
 
         def run_tool(tool, *args):
@@ -221,6 +222,7 @@ class BuildFlowTests(unittest.TestCase):
                     mock.patch.object(dq4ch2event, 'apply', step('ch2event')), \
                     mock.patch.object(dq4josa, 'apply', step('josa')), \
                     mock.patch.object(dq4msgnames, 'apply', step('msgnames')), \
+                    mock.patch.object(dq4signs, 'apply', step('signs')), \
                     mock.patch.object(dq4prologue, 'apply', step('prologue')):
                 out = ch.build(rom, dq5, dq4, work, prologue=prologue)
             self.files = {p.name: json.loads(p.read_text()) for p in work.glob('*.json')}
@@ -305,7 +307,7 @@ class BuildFlowTests(unittest.TestCase):
         checksum = int.from_bytes(out[0x7FDE:0x7FE0], 'little')
         self.assertEqual(checksum ^ int.from_bytes(out[0x7FDC:0x7FDE], 'little'), 0xFFFF)
         self.assertEqual(checksum, sum(out) & 0xFFFF)
-        self.assertEqual(order[:5], ['chapterbox', 'ch1event', 'ch2event', 'josa', 'msgnames'])
+        self.assertEqual(order[:6], ['chapterbox', 'ch1event', 'ch2event', 'josa', 'msgnames', 'signs'])
         # 그룹 빌드 롬과 견주는 것은 체크섬까지 끝낸 롬이다
         self.assertEqual(self.verify.call_args.args[:2], (bytes(out), b'groups'))
 

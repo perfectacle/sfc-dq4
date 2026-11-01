@@ -419,3 +419,11 @@ paths = [
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/doorstand && uv run --locked python sfc/dq4/tools/dq4doorstandcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/doorstand"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI"]
+
+[[check]]
+name = "dq4-field-signs"
+why = "필드 팻말에 はなす·しらべる 하면 FC 처럼 팻말 글(아래를 보면 뒷면)이 떠야 한다. DQ5 팻말 표 1E:F4BF 가 DQ5 좌표 그대로라 「그 방향에는 아무도 없다」 가 떴다"
+paths = ["sfc/dq4/tools/dq4signs.py", "sfc/dq4/tools/dq4signcheck.py", "sfc/dq4/tools/dq4sysmsg.py",
+         "sfc/dq4/tools/dq4fieldport.py", "sfc/dq4/tools/dq4fieldgfx.py", "sfc/dq4/tools/dq4chapter1.py"]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/signcheck && uv run --locked python sfc/dq4/tools/dq4signcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/signcheck"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI"]
