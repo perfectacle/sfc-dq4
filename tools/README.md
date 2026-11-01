@@ -72,6 +72,7 @@ STATE=$PWD/work/state/ship.mss PRE="b:4,wait:40" WAYPOINTS="3,11;3,24;7,24;7,22"
 | 스크립트 | 하는 일 |
 | --- | --- |
 | `listing.py rom cover.txt [시작 끝]` | `cover.lua` 결과로, 실제 실행된 명령만 실행 당시 M·X 폭으로 디스어셈블 |
+| `guards.py [--base REF [--pr-body FILE]]` | 트랙별 `guards.toml`(롬이 있어야 도는 회귀 가드) 형식 검사, 바뀐 파일로 걸리는 검사와 명령 찍기, PR 본문 결과 줄 확인(CI `required-checks` 잡과 같음). [guards 스킬](../.agents/skills/guards/SKILL.md) |
 | `check_docs.py` | 일지 이름·제목·순번 중복, README 일지 목록, 상대 링크, 개인 경로, 충돌 표시 검사(CI `docs` 잡과 같음) |
 
 ### dq5

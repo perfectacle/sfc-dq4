@@ -27,6 +27,7 @@
 - **일지 순번은 트랙마다 PR 직전 `origin/main` 기준으로 매긴다** — 같은 트랙의 세션끼리 번호가 겹치지 않게. 다른 트랙과는 겹쳐도 된다. [JOURNAL-01](.agents/skills/journal/SKILL.md#journal-01--일지-이름과-순번)
 - **작업마다 최신 `origin/main` 에서 워크트리를 파고, 머지가 끝나면 지운다** — [GIT-02](.agents/skills/git-workflow/SKILL.md#git-02--작업마다-워크트리)
 - **모든 변경은 브랜치 → PR, `ci-ok` 를 통과시킨다** — [GIT-01](.agents/skills/git-workflow/SKILL.md#git-01--브랜치와-pr), [CI-01](.agents/skills/ci/SKILL.md#ci-01--ci-ok)
+- **고친 것에는 가드를 남기고, 걸린 실행 검사는 돌려 PR 본문에 적는다** — 다른 세션이 모르고 되돌리지 않게. [GUARD-01](.agents/skills/guards/SKILL.md#guard-01--고친-것에는-가드를-남긴다), [GUARD-02](.agents/skills/guards/SKILL.md#guard-02--걸린-실행-검사는-돌리고-결과를-적는다)
 - **검사가 실패하면 기준을 낮추지 말고 원인을 고친다** — [CI-02](.agents/skills/ci/SKILL.md#ci-02--실패는-원인을-고친다)
 
 전체 목록: [불변식 카탈로그](.agents/invariants/INVARIANTS.md)
@@ -41,6 +42,7 @@
 | 포팅용 스프라이트를 그리거나 고친다(DQ5 실측 규격, 원작과 견주기)  | [sprites](.agents/skills/sprites/SKILL.md)           |
 | 워크트리·브랜치·커밋·PR 을 만들거나 정리한다                      | [git-workflow](.agents/skills/git-workflow/SKILL.md) |
 | 워크플로를 바꾸거나 CI 실패를 고친다                              | [ci](.agents/skills/ci/SKILL.md)                     |
+| 버그를 고쳤거나 개선했다(가드 넣기, PR 본문 결과 줄)              | [guards](.agents/skills/guards/SKILL.md)             |
 | 의존성·Python·uv·툴킷 버전을 바꾼다                               | [dependencies](.agents/skills/dependencies/SKILL.md) |
 | 한국어 문서(README, 일지, 형식 문서)를 쓴다                       | [korean-copy](.agents/skills/korean-copy/SKILL.md)   |
 
