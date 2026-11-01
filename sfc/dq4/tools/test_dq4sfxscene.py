@@ -200,11 +200,6 @@ class SceneListTest(unittest.TestCase):
         for k in ('boss-hit', 'stairs', 'chest', 'critical'):
             self.assertIn(k, got)
 
-    def test_known_findings_are_dq5_decisions(self):
-        for (scene, want), why in s.KNOWN_FINDINGS.items():
-            self.assertTrue(why)
-            self.assertIn(scene, {x.name for x in s.scenes(s.load_table(s.ARGS.read_text()))})
-
     def test_decision_kinds(self):
         for k, (_, _, choice, _, kind) in s.DECISIONS.items():
             self.assertEqual(kind == 'dq5', choice == 'DQ5', k)

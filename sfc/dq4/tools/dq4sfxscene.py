@@ -49,6 +49,7 @@ HOOK_CODE = (bytes.fromhex('9F951D7E') + bytes((0x9F, SHADOW & 0xFF, SHADOW >> 8
 SFX, SONG = 0x0C, 0x01
 WINDOW = 45
 SFX_VOICES = (7, 6)
+TOGETHER = 4                          # 한 효과음의 두 목소리가 함께 시작한다고 보는 프레임 차
 DSP_DIR = 0x07                        # 드라이버가 두는 DIR(dq5spc.SPC_DIR >> 8)
 BSNES_DSP = 289781                    # bsnes 115 직렬화 상태의 DSP 레지스터 128바이트(DIR·EDL 로 찾아 잼)
 # SPC RAM 64KB 의 자리. DIR(7)의 칸이 가리키는 BRR 이 원본 DQ5 늘 두는 파형 1F 와 바이트까지 같아지는 자리로 맞춤
@@ -507,7 +508,7 @@ def assign_key_ons(events, wants, frames, envx, sources):
     """대기열 효과음 항목마다 울림 하나를 짝짓는다. 항목의 창은 다음 효과음 항목이 들어오기 전까지(최대 WINDOW).
     목소리 7·6 의 ENVX 가 오른 자리 가운데 아직 짝짓지 않은 가장 이른 자리를 고른다. 목소리 6 은 곡과 나눠 쓰고,
     대화 글자처럼 효과음이 6 에서만 울리기도 해서(7 은 앞 효과음 꼬리) 둘 다 본다. 바탕은 짝지은 울림과, 창 안의 다른
-    목소리 첫 울림 것을 함께 돌려준다(6 의 울림이 곡 음일 수 있음).
+    목소리 첫 울림 가운데 TOGETHER 프레임 안에 시작한 것을 함께 돌려준다(6 의 울림이 곡 음일 수 있음).
     돌려줌: want 차례대로 (프레임, 목소리, [(목소리, 바탕)…]) 또는 None."""
     sfx_frames = sorted({n for n, c, *_ in events if c in (SFX, None)})
     used, out = set(), []
@@ -538,7 +539,9 @@ def assign_key_ons(events, wants, frames, envx, sources):
         best = min(firsts)
         used.add(best)
         k, v = best
-        out.append((frames[k], v, [(v, sources.get(best))] + [(x[1], sources.get(x)) for x in firsts if x != best]))
+        # 다른 목소리의 울림은 짝지은 울림과 거의 같이 시작할 때만(늦게 오른 것은 다음 소리일 수 있음)
+        out.append((frames[k], v, [(v, sources.get(best))] +
+                    [(x[1], sources.get(x)) for x in firsts if x != best and x[0] - k <= TOGETHER]))
     return out
 
 
@@ -585,9 +588,7 @@ def finish(walker, scene, res, out):
                 elif kind == 'dq5' and any(v == 7 and x == 'nds' for v, x in got[2]):
                     # 목소리 7 은 효과음만 쓴다: DQ5 로 고른 소리가 원본 DQ5 에 없는 샘플로 울림
                     bad = f'{row["want"]}: DQ5 로 고른 소리가 목소리 7 에서 원본 DQ5 에 없는 샘플로 울림({row["sources"]})'
-                if bad and (scene.name, want[:3]) in KNOWN_FINDINGS:
-                    res.setdefault('findings', []).append(bad + ' — ' + KNOWN_FINDINGS[(scene.name, want[:3])])
-                elif bad:
+                if bad:
                     res['problems'].append(bad)
         res['want'].append(row)
     for bad in scene.forbid:
@@ -716,12 +717,16 @@ DECISIONS = {
     'spar-master': (None, None, 'NDS 1A0 鋼の剣', (0x40, 0x02), 'nds'),
     'frog-jump':   (None, None, 'NDS 47B EVE_JUMP', (0x45, 0x00), 'nds'),
 }
-# 결정과 실제 소리가 다른 것(검사가 찾은 것, 고치지 않음). 장면은 이 줄을 실패 대신 findings 로 찍고, 단위 테스트가
-# 목록을 고정해 고쳐지면 지우게 한다
-KNOWN_FINDINGS = {
-    ('battle-critical', (SFX, 0x37, 0x0B)): '늘 두는 파형 20·22 를 --sfx-wave 가 NDS 파형으로 덮어, 그 파형을 쓰는 DQ5 효과음도 바뀜',
-    ('battle-flee', (SFX, 0x37, 0x00)): '늘 두는 파형 20 을 --sfx-wave 가 NDS 파형으로 덮어, 그 파형을 쓰는 DQ5 효과음도 바뀜',
-}
+# DQ5 효과음이 쓰는 늘 두는 파형(원본 DQ5 샘플 1F~22). --sfx-wave 가 이 자리에 NDS 파형을 넣으면 그 파형을 쓰는 DQ5
+# 효과음(DQ5 로 고른 것 포함)의 소리도 바뀐다. 결과의 findings 에 적기만 한다
+RESIDENT_WAVES = (0x1F, 0x20, 0x21, 0x22)
+
+
+def resident_wave_diffs(rom, dq5=None):
+    """롬의 늘 두는 파형 가운데 원본 DQ5 와 BRR 이 다른 번호."""
+    import dq4soundcheck as sc
+    dq5 = dq5 or dq5_samples()
+    return [f'{n:02X}' for n in RESIDENT_WAVES if sc.sample_body(rom, n)[7:] != dq5[n]]
 
 
 def d(key):
@@ -1016,7 +1021,7 @@ def main():
     report = {'status': 'passed' if ok else 'failed', 'rom_sha1': hashlib.sha1(rom).hexdigest(),
               'seconds': round(time.time() - t0, 1), 'static': static, 'control': control,
               'runtime_uncovered': sorted(RUNTIME_GAPS | {f'call {a:06X}' for a in table.calls}),
-              'findings': {'leftover_sites': leftover_sites(rom, table),
+              'findings': {'leftover_sites': leftover_sites(rom, table), 'resident_waves_changed': resident_wave_diffs(rom),
                            'scenes': sorted({f for r in results for f in r.get('findings', [])})},
               'scenes': results}
     (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')
