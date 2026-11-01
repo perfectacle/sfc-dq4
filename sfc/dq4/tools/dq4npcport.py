@@ -386,9 +386,11 @@ def port(dq5_path, dq4_path, with_people=True):
                           "gfx": gfx, "layer": 0, "interval": p["interval"]}
                 template = WALK if p["interval"] else STAND
                 if (p["x"], p["y"]) in beds and service is None:
-                    # Lying on the bed's row, half a block right so the head (right when facing down) rests on
-                    # the pillow and the foot of the bed shows.
-                    fields.update(x=x + 1, y=y - 1, facing="down", interval=0)
+                    # Lying on the bed's row, half a block right so the head rests on the pillow and the foot of
+                    # the bed shows. The lying picture is the standing one turned clockwise: facing down turns the
+                    # front view so the eyes stand one above the other and the face reads as turned to the wall;
+                    # facing right (as most DQ5 sleepers) turns the side view to a face up from the pillow.
+                    fields.update(x=x + 1, y=y - 1, facing="right", interval=0)
                     template = LIE
                 entries.append({"from": template, "time": "night" if night else "day", "fields": fields})
                 people.append({**p, "night": night, "service": service,

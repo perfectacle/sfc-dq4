@@ -146,7 +146,7 @@ class PrologueTests(unittest.TestCase):
         code, at = pro.native()
         ev = code[at['end_event'] - pro.CODE_AT:]
         # 식탁 아래쪽까지 왼쪽으로 걷고 위(식탁)를 본다. 식탁 위쪽에 서면 메시지 창이 식탁·부모를 가린다
-        walk = bytes((0x02, 4, 0xC1, 0x80))
+        walk = bytes((0x02, 4, 0xC1, 0x80, 0xA0)) + at['hero_up'].to_bytes(3, 'little')
         self.assertEqual(ev[:len(walk)], walk)
         self.assertEqual(ev[len(walk)], 0x60)
         father = next(sc for sc in pro.scripts() if sc['address'] == pro.FATHER_SCRIPT)['commands']
