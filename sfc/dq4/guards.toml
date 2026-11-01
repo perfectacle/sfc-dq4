@@ -7,3 +7,43 @@ paths = ["sfc/dq4/tools/dq4windowname.asm", "sfc/dq4/tools/dq4windowname.py", "s
          "sfc/dq4/tools/dq4windowcheck.py", "sfc/dq4/tools/dq4bg3slot.py"]
 run = "DQ4_WINDOWNAME_SYMBOLS=$PWD/work/wc/wn.sym uv run --locked python sfc/dq4/tools/dq4menupatch.py build --rom work/ch1/overture.sfc --messages work/ch1/messages.json --out work/wc/menu.sfc && uv run --locked python sfc/dq4/tools/dq4windowcheck.py --rom work/wc/menu.sfc --symbols work/wc/wn.sym --ship work/state/ship.mss --party <일행셋.mss> --shop <이무르 방어구점 앞.mss> --out work/wc/out"
 needs = ["rom", "MESENCE", "ASAR", "DQ4_GALMURI"]
+
+[[check]]
+name = "dq4-openbus-probe"
+why = "뱅크 40 이상 코드가 BRK 로 DB 를 바꿔 WRAM 대신 열린 버스·롬 거울을 읽으면 에뮬레이터·카트마다 다르게 돈다(snes9x 서장 멈춤, #904). MesenCE 1장 걷기 전체 통과도 본다"
+paths = [
+  "sfc/dq4/tools/dq4*event.py",
+  "sfc/dq4/tools/dq4prologue.py",
+  "sfc/dq4/tools/dq4chapter*.py",
+  "sfc/dq4/tools/dq4josa.py",
+  "sfc/dq4/tools/dq4msgnames.py",
+  "sfc/dq4/tools/dq4battlemsg.py",
+  "sfc/dq4/tools/dq4bg3slot.py",
+  "sfc/dq4/tools/dq4windowname.py",
+  "sfc/dq4/tools/dq4soundpatch.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
+  "sfc/dq4/tools/dq4door.py",
+  "sfc/dq4/tools/dq4balance.py",
+  "sfc/dq4/tools/dq4menumsg.py",
+  "sfc/dq4/tools/dq4environmentrom.py",
+  "sfc/dq4/tools/*.asm",
+  "sfc/dq4/tools/dq4brkscan.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4compatcheck.py probe --rom work/ch1/dq4-ch1-full.sfc --out work/compat-probe"
+needs = ["rom", "MESENCE", "LIBDIR"]
+
+[[check]]
+name = "dq4-compat-walk"
+why = "MesenCE 에서만 우연히 도는 코드를 잡는다: libretro bsnes·snes9x 에서 서장부터 1장 끝 리셋까지 이어 걷기(#904 의 snes9x 멈춤)"
+paths = [
+  "sfc/dq4/tools/dq4*event.py",
+  "sfc/dq4/tools/dq4prologue.py",
+  "sfc/dq4/tools/dq4chapter*.py",
+  "sfc/dq4/tools/dq4soundpatch.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
+  "sfc/dq4/tools/*.asm",
+  "sfc/dq4/tools/dq4compatcheck.py",
+  "sfc/dq4/tools/dq4libretro.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4compatcheck.py walk --rom work/ch1/dq4-ch1-full.sfc --out work/compat-walk"
+needs = ["rom", "LIBRETRO_BSNES", "LIBRETRO_SNES9X"]
