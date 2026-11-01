@@ -210,11 +210,12 @@ def condition_row(row, known, targets, label):
     raise ValueError(f'{label}.list: 원본 대체 목록 시작점(10:xxxx) 또는 new:이름 이어야 함')
 
 
-def condition_plan(rom, doc, records, alt_keys, new_maps=()):
-    """(대체 표 [(조건 4바이트, 목록 열쇠)], 빈 맵 표 [4바이트], 대체 표를 옮기는지)."""
+def condition_plan(rom, doc, records, alt_keys, new_maps=(), split=False):
+    """(대체 표 [(조건 4바이트, 목록 열쇠)], 빈 맵 표 [4바이트], 대체 표를 옮기는지). split 이면 대체 목록이 여러 뱅크라
+    원래 표(목록 뱅크가 즉값 하나)를 쓸 수 없어 늘 옮긴다."""
     known = set(all_maps(rom)) | set(new_maps)
     record_rows = {at for at in records if NO_NPC <= at < OVERRIDE_LISTS + OVERRIDE_COUNT * 6}
-    moved = 'overrides' in doc or 'no_npc' in doc and isinstance(doc['no_npc'], list) and len(doc['no_npc']) > NO_NPC_COUNT
+    moved = split or 'overrides' in doc or 'no_npc' in doc and isinstance(doc['no_npc'], list) and len(doc['no_npc']) > NO_NPC_COUNT
     if ('overrides' in doc or 'no_npc' in doc) and record_rows:
         raise ValueError('조건 표를 통째로 쓸 때는 --records 의 overrides·no_npc 를 함께 쓸 수 없음')
     if 'overrides' in doc:
@@ -284,7 +285,9 @@ def slot_guard(rom, original, base, alt, overrides, allow_growth, new_maps=()):
 
 
 def assemble_find(table, alt_bank):
-    """12:82FB 를 대신하는 루틴. 표는 [BC][BD][플래그][마스크][포인터 16비트] 6바이트, FF 로 끝."""
+    """12:82FB 를 대신하는 루틴. 표는 [BC][BD][플래그][마스크][포인터 16비트] 6바이트, FF 로 끝.
+    alt_bank 가 None 이면 항목 끝에 목록 뱅크 1바이트를 더한 7바이트 항목으로 읽는다(대체 목록을 여러 뱅크에 나눌 때)."""
+    size = 6 if alt_bank is not None else 7
     def long(op, plus):
         a = table + plus
         return [op, a & 0xFF, a >> 8 & 0xFF, a >> 16]
@@ -318,10 +321,11 @@ def assemble_find(table, alt_bank):
     emit([0xA5, 0x00])
     branch(0x10, 'next')
     labels['hit'] = len(code)
-    emit(long(0xBF, 4), [0x85, 0xA5], long(0xBF, 5), [0x85, 0xA6], [0xA9, alt_bank], [0x85, 0xA7],
+    bank = [0xA9, alt_bank] if alt_bank is not None else long(0xBF, 6)
+    emit(long(0xBF, 4), [0x85, 0xA5], long(0xBF, 5), [0x85, 0xA6], bank, [0x85, 0xA7],
          0x28, 0xAB, 0x38, 0x6B)
     labels['next'] = len(code)
-    emit([0xC2, 0x20], 0x8A, 0x18, [0x69, 0x06, 0x00], 0xAA, [0xE2, 0x20])
+    emit([0xC2, 0x20], 0x8A, 0x18, [0x69, size, 0x00], 0xAA, [0xE2, 0x20])
     branch(0x80, 'loop')
     labels['none'] = len(code)
     emit(0x28, 0xAB, 0x18, 0x6B)

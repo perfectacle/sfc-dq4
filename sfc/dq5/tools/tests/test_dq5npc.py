@@ -84,6 +84,42 @@ class GroupPointerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             all_lists(Rom(data))
 
+    def test_split_banks_follow_bank_stub(self):
+        # 기본 목록을 32·34 두 뱅크에 나눈 꼴: 12:8020 이 JSL 로 [그룹 수][그룹마다 뱅크] 표를 읽는 루틴을 부른다.
+        # 뱅크마다 8000 에 같은 자리의 그룹 포인터 표가 있고 그룹 01·03 만 34 에 있다.
+        data = base([1] * GROUPS)
+        homes = [0x34 if g in (1, 3) else 0x32 for g in range(GROUP_COUNT)]
+        cursors = {0x32: 0x328000 + GROUP_COUNT * 2, 0x34: 0x348000 + GROUP_COUNT * 2}
+        starts = []
+        for g, bank in enumerate(homes):
+            body = (DAY + b'\0') if g == 3 else b'\0'
+            at = cursors[bank]
+            starts.append(at)
+            put(data, at, body)
+            put(data, bank << 16 | 0x8000 + g * 2, (at & 0xFFFF).to_bytes(2, 'little'))
+            cursors[bank] += len(body)
+        tail = 0x32F000
+        stub = tail + 1 + GROUP_COUNT
+        put(data, tail, bytes([GROUP_COUNT, *homes]))
+        put(data, stub, bytes.fromhex('da a6 bc bf') + (tail + 1).to_bytes(3, 'little') + bytes.fromhex('85 a7 fa 6b'))
+        put(data, BANK_SITE, bytes([0x22]) + stub.to_bytes(3, 'little'))
+        put(data, GROUP_SITE, bytes([0xB9, 0x00, 0x80]))
+        rom = Rom(data)
+        bank, at, found = group_pointers(rom)
+        self.assertEqual((bank, at, found), (0x32, 0x328000, starts))
+        names = {name: addr for addr, name in all_lists(rom)}
+        self.assertEqual(names['03/00'], starts[3])
+        self.assertEqual(names['02/00'], starts[2])
+        self.assertNotIn('03/01', names)
+        self.assertEqual(map_entries(rom, 3, 0), [(starts[3], len(DAY))])
+
+    def test_bank_stub_must_match(self):
+        data = base([1] * GROUPS)
+        put(data, BANK_SITE, bytes([0x22, 0x00, 0xF0, 0x32]))
+        put(data, GROUP_SITE, bytes([0xB9, 0x00, 0x80]))
+        with self.assertRaises(ValueError):
+            group_pointers(Rom(data))
+
     def test_changed_loader_is_refused(self):
         data = base([1] * GROUPS)
         put(data, BANK_SITE, bytes([0xEA, 0x05]))

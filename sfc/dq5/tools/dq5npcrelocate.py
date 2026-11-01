@@ -11,8 +11,9 @@
 JSON: {"format":"dq5npcrelocate/1","scripts":[{"address":"05:A84F","commands":[...]}]}.
 address는 원본 길이 바이트 주소, commands는 dq5npcwrite.py와 같은 형식이다.
 생략한 스크립트는 원본을 보존한다. 새 스크립트는 1~255바이트. 04 절대 점프는 재배치할 수 없어 거부한다.
-각 목록 영역은 한 뱅크에 들어가야 한다. 기본 32:8000에는 그룹 포인터 108바이트와 기본 목록,
-대체 33:8000에는 대체 목록을 둔다. --base·--alt는 서로 다른 30~3F 뱅크를 받는다.
+기본 32:8000에는 그룹 포인터 108바이트와 기본 목록, 대체 33:8000에는 대체 목록을 둔다.
+--base·--alt는 서로 다른 30~3F 뱅크를 받고, 쉼표로 여럿을 주면 목록을 나눈다(sfc/dq5/docs/dq5-build-format.md).
+기본 목록은 그룹마다 한 뱅크(차례로 채우거나 --group-bank GG=BB 로 고정), 대체 목록은 목록마다 한 뱅크다.
 --records는 dq5npcrecord.py 문서(인물 필드·조건 표)를 옮기는 사본과 조건 표에 함께 넣는다.
 이때 dq5npcrecord.py의 패치 목록은 따로 빌드에 넣지 않는다.
 """
@@ -168,12 +169,129 @@ def pack_region(rom, lists, start, changes, prefix=0):
     return out, mapping, scripts, entries
 
 
-def patch(rom, doc, base=0x328000, alt=0x338000, records=None, allow_growth=False, new_maps=()):
-    if type(base) is not int or type(alt) is not int:
-        raise ValueError('목적지 주소는 정수여야 함')
-    base, alt = destination(cpu(base)), destination(cpu(alt))
-    if base >> 16 == alt >> 16:
+def banks_of(value, label):
+    """--base·--alt 값(정수 하나 또는 여럿)을 확장 뱅크 주소 목록으로."""
+    values = [value] if type(value) is int else list(value) if isinstance(value, (list, tuple)) else None
+    if not values or any(type(v) is not int for v in values):
+        raise ValueError('목적지 주소는 정수 또는 정수 목록이어야 함')
+    out = [destination(cpu(v)) for v in values]
+    if len({v >> 16 for v in out}) != len(out):
+        raise ValueError(f'{label} 목록 뱅크가 겹침')
+    return out
+
+
+def bank_stub(banks_at):
+    """12:8020 의 「LDA #$05; STA $A7」 자리에서 JSL 로 부르는 루틴. X 는 8비트(12:800B SEP #$30)이고 $BC 는 50 미만이다."""
+    return bytes([0xDA, 0xA6, 0xBC, 0xBF, banks_at & 0xFF, banks_at >> 8 & 0xFF, banks_at >> 16, 0x85, 0xA7, 0xFA, 0x6B])
+
+
+def region_size(rom, rows, start, changes):
+    return len(pack_region(rom, rows, start, changes)[0])
+
+
+def pack_base(rom, base_items, banks, pins, changes, groups, names):
+    """기본 목록을 뱅크에 나눈다. [(뱅크 시작, 영역 바이트)], 그룹→뱅크 시작, 목록·스크립트·엔트리 대응표, 스텁 주소(한 뱅크면 None).
+    그룹 하나의 목록은 한 뱅크에 둔다(12:803F 가 그룹 첫 목록부터 00 끝 목록을 $BD 개 건너뜀). 뱅크마다 앞에 같은 자리의
+    그룹 포인터 표를 두고 그 뱅크에 든 그룹의 칸만 채운다(12:8050 은 $A7 뱅크의 표를 읽는다)."""
+    prefix = groups * 2
+    if len(banks) == 1 and not pins:
+        region, lm, sm, em = pack_region(rom, base_items, banks[0], changes, prefix)
+        return [(banks[0], region)], {g: banks[0] for g in range(groups)}, lm, sm, em, None
+    if len({b & 0xFFFF for b in banks}) != 1:
+        raise ValueError('기본 목록을 여러 뱅크에 나눌 때는 시작 주소(하위 16비트)가 같아야 함(그룹 포인터 표 자리가 12:8051 하나)')
+    by_group = {}
+    for key, items in base_items:
+        by_group.setdefault(int((key if isinstance(key, str) else names[key])[:2], 16), []).append((key, items))
+    if sorted(by_group) != list(range(groups)):
+        raise ValueError('기본 목록의 그룹이 00 부터 빈틈없이 이어지지 않음')
+    free = {b: 0x10000 - (b & 0xFFFF) - prefix for b in banks}
+    free[banks[0]] -= 1 + groups + len(bank_stub(0))
+    home = {}
+    for g, b in sorted(pins.items()):
+        if g not in by_group:
+            raise ValueError(f'--group-bank {g:02X}: 기본 목록이 있는 그룹이 아님')
+        bank = next((x for x in banks if x >> 16 == b), None)
+        if bank is None:
+            raise ValueError(f'--group-bank {g:02X}={b:02X}: --base 에 없는 뱅크')
+        home[g] = bank
+        free[bank] -= region_size(rom, by_group[g], bank, changes)
+    i = 0
+    for g in range(groups):
+        if g in home:
+            continue
+        size = region_size(rom, by_group[g], banks[0], changes)
+        while i < len(banks) and free[banks[i]] < size:
+            i += 1
+        if i == len(banks):
+            raise ValueError(f'그룹 {g:02X}({size}바이트)을 넣을 기본 목록 뱅크가 없음')
+        home[g] = banks[i]
+        free[banks[i]] -= size
+    full = [b for b in banks if free[b] < 0]
+    if full:
+        raise ValueError(f'{cpu(full[0])}: 고정한 그룹이 한 뱅크를 넘음')
+    regions, lm, sm, em = [], {}, {}, {}
+    for bank in banks:
+        rows = [row for g in range(groups) if home[g] == bank for row in by_group[g]]
+        if not rows and bank != banks[0]:
+            continue
+        region, a, b, c = pack_region(rom, rows, bank, changes, prefix)
+        lm |= a
+        for mapping, part in ((sm, b), (em, c)):
+            for k, v in part.items():
+                mapping.setdefault(k, v)
+        regions.append((bank, region))
+    region = regions[0][1]
+    table = banks[0] + len(region) + 1
+    region.extend(bytes([groups]) + bytes(home[g] >> 16 for g in range(groups)) + bank_stub(table))
+    if (banks[0] & 0xFFFF) + len(region) > 0x10000:
+        raise ValueError(f'{cpu(banks[0])}: 기본 목록·뱅크 표·루틴 {len(region)}바이트가 한 뱅크를 넘음')
+    return regions, home, lm, sm, em, table + groups
+
+
+def pack_alt(rom, alt_items, banks, changes, tail):
+    """대체 목록을 차례대로 뱅크에 채운다. [(뱅크 시작, 영역 바이트)], 대응표, 꼬리(대체 표·루틴)를 둘 주소.
+    한 뱅크면 꼬리는 목록 바로 뒤, 여러 뱅크면 마지막 영역 뒤에 들어가지 않을 때 다음 뱅크 앞."""
+    if len(banks) == 1:
+        region, lm, sm, em = pack_region(rom, alt_items, banks[0], changes)
+        return [(banks[0], region)], lm, sm, em, banks[0] + len(region)
+    groups, i, used = [[] for _ in banks], 0, 0
+    for key, items in alt_items:
+        # 크기는 주소와 무관하다. 첫 뱅크 시작에서 재면 끝 가까이 둔 첫 뱅크가 넘침으로 막혀 다음 뱅크로 못 간다.
+        size = region_size(rom, [(key, items)], (banks[0] & 0xFF0000) | 0x8000, changes)
+        while i < len(banks) and (banks[i] & 0xFFFF) + used + size > 0x10000:
+            i, used = i + 1, 0
+        if i == len(banks):
+            raise ValueError(f'대체 목록 {key if isinstance(key, str) else cpu(key)}을 넣을 뱅크가 없음')
+        groups[i].append((key, items))
+        used += size
+    regions, lm, sm, em = [], {}, {}, {}
+    for bank, rows in zip(banks, groups):
+        if not rows:
+            continue
+        region, a, b, c = pack_region(rom, rows, bank, changes)
+        lm |= a
+        for mapping, part in ((sm, b), (em, c)):
+            for k, v in part.items():
+                mapping.setdefault(k, v)
+        regions.append((bank, region))
+    last, region = regions[-1]
+    if (last & 0xFFFF) + len(region) + tail <= 0x10000:
+        return regions, lm, sm, em, last + len(region)
+    spare = [b for b in banks if b not in {r for r, _ in regions}]
+    if not spare or (spare[0] & 0xFFFF) + tail > 0x10000:
+        raise ValueError(f'대체 표·루틴 {tail}바이트를 둘 대체 목록 뱅크가 없음')
+    regions.append((spare[0], bytearray()))
+    return regions, lm, sm, em, spare[0]
+
+
+def patch(rom, doc, base=0x328000, alt=0x338000, records=None, allow_growth=False, new_maps=(), group_banks=None):
+    """base·alt 는 확장 뱅크 주소 하나 또는 목록. 여럿이면 기본 목록은 그룹마다(group_banks {그룹: 뱅크} 로 고정하거나
+    차례로 채움), 대체 목록은 목록마다 다른 뱅크에 둔다. 하나씩이면 출력은 나누기 전과 같다."""
+    bases, alts = banks_of(base, '기본'), banks_of(alt, '대체')
+    pins = dict(group_banks or {})
+    if {b >> 16 for b in bases} & {b >> 16 for b in alts}:
         raise ValueError('기본·대체 목록은 서로 다른 뱅크여야 함')
+    split_alt = len(alts) > 1
     lists = original_layout(rom)
     base_lists = [(at, name) for at, name in lists if BASE_START <= at < BASE_END]
     alt_lists = [(at, name) for at, name in lists if ALT_START <= at < ALT_END]
@@ -186,40 +304,56 @@ def patch(rom, doc, base=0x328000, alt=0x338000, records=None, allow_growth=Fals
     entry_edits = {at: v for at, v in edited.items() if not NO_NPC <= at < OVERRIDE_LISTS + OVERRIDE_COUNT * 6}
     new_maps = new_map_keys(base_lists, list(new_maps))
     new_groups = sorted({bc for bc, _ in new_maps if bc >= GROUP_COUNT})
+    groups = GROUP_COUNT + len(new_groups)
     base_items, alt_items = list_plan(rom, doc, base_lists + alt_lists, entry_edits, new_maps)
-    first, lm1, sm1, em1 = pack_region(rom, base_items, base, changes, (GROUP_COUNT + len(new_groups)) * 2)
-    second, lm2, sm2, em2 = pack_region(rom, alt_items, alt, changes)
-    overrides, no_npc, moved = condition_plan(rom, doc, edited, [key for key, _ in alt_items], new_maps)
+    regions, home, lm1, sm1, em1, stub = pack_base(rom, base_items, bases, pins, changes, groups, dict(base_lists))
+    overrides, no_npc, moved = condition_plan(rom, doc, edited, [key for key, _ in alt_items], new_maps, split_alt)
+    row = 7 if split_alt else 6
+    tail = len(overrides) * row + 1 + len(assemble_find(alts[0], None if split_alt else alts[0] >> 16)) if moved else 0
+    alt_regions, lm2, sm2, em2, table = pack_alt(rom, alt_items, alts, changes, tail)
     growth = slot_guard(rom, lists, base_items, alt_items, overrides, allow_growth, new_maps)
     if moved:
-        table = alt + len(second)
-        rows = b''.join(head + (lm2[key] & 0xFFFF).to_bytes(2, 'little') for head, key in overrides) + b'\xff'
-        routine = assemble_find(table, alt >> 16)
-        second.extend(rows + routine)
-        if (alt & 0xFFFF) + len(second) > 0x10000:
-            raise ValueError(f'{cpu(alt)}: 대체 목록·대체 표·루틴 {len(second)}바이트가 한 뱅크를 넘음')
+        region = next(r for b, r in alt_regions if b + len(r) == table or b == table)
+        rows = b''.join(head + (lm2[key] & 0xFFFF).to_bytes(2, 'little') + (bytes([lm2[key] >> 16]) if split_alt else b'')
+                        for head, key in overrides) + b'\xff'
+        routine = assemble_find(table, None if split_alt else alts[0] >> 16)
+        region.extend(rows + routine)
+        if (table & 0xFFFF) + len(rows) + len(routine) > 0x10000:
+            raise ValueError(f'{cpu(alts[0])}: 대체 목록·대체 표·루틴 {len(region)}바이트가 한 뱅크를 넘음')
         find = table + len(rows)
+    first = dict(regions)
     for i in range(GROUP_COUNT):
         old = 0x050000 | rom.u16(NPC_GROUPS + i * 2)
         if old not in lm1:
             raise ValueError(f'그룹 {i}: 목록 시작점이 아닌 포인터')
-        first[i * 2:i * 2 + 2] = (lm1[old] & 0xFFFF).to_bytes(2, 'little')
+        first[home[i]][i * 2:i * 2 + 2] = (lm1[old] & 0xFFFF).to_bytes(2, 'little')
     # 새 그룹(36~)의 포인터는 옮긴 그룹 표 끝에 이어 둔다. 12:8050 이 $BC*2 로 읽는 표다.
     for bc in new_groups:
-        first[bc * 2:bc * 2 + 2] = (lm1[f'{bc:02X}/00'] & 0xFFFF).to_bytes(2, 'little')
-    writes = [{'at': cpu(base), 'hex': first.hex(' '), 'note': '기본 인물 그룹 포인터와 목록'},
-              {'at': cpu(alt), 'hex': second.hex(' '), 'note': '대체 인물 목록'}]
+        first[home[bc]][bc * 2:bc * 2 + 2] = (lm1[f'{bc:02X}/00'] & 0xFFFF).to_bytes(2, 'little')
+    if stub is None:
+        writes = [{'at': cpu(bases[0]), 'hex': regions[0][1].hex(' '), 'note': '기본 인물 그룹 포인터와 목록'}]
+    else:
+        writes = [{'at': cpu(b), 'hex': r.hex(' '), 'note': f'기본 인물 그룹 포인터와 목록(그룹 '
+                   + ' '.join(f'{g:02X}' for g in range(groups) if home[g] == b) + ')'} for b, r in regions]
+    writes += [{'at': cpu(b), 'hex': r.hex(' '), 'note': '대체 인물 목록'} for b, r in alt_regions if r]
 
     def original_write(addr, value, note):
         writes.append({'at': cpu(addr), 'hex': value.hex(' '), 'orig': read(rom, addr, len(value)).hex(' '), 'note': note})
 
-    original_write(0x128021, bytes([base >> 16]), '기본 인물 목록 뱅크')
-    original_write(0x128051, (base & 0xFFFF).to_bytes(2, 'little'), '기본 그룹 포인터 표')
+    if stub is None:
+        original_write(0x128021, bytes([bases[0] >> 16]), '기본 인물 목록 뱅크')
+    else:
+        original_write(0x128020, bytes([0x22, stub & 0xFF, stub >> 8 & 0xFF, stub >> 16]),
+                       f'기본 인물 목록 뱅크를 그룹마다 {cpu(stub)} 로')
+    original_write(0x128051, (bases[0] & 0xFFFF).to_bytes(2, 'little'), '기본 그룹 포인터 표')
     if moved:
         original_write(FIND_OVERRIDE, bytes([0x22, find & 0xFF, find >> 8 & 0xFF, find >> 16, 0x60]),
                        f'대체 표 찾기를 {cpu(find)} 로(표 {cpu(table)} {len(overrides)}항목)')
+        if no_npc is None:
+            for addr in sorted(at for at in edited if NO_NPC <= at < OVERRIDE_LISTS):
+                original_write(addr, edited[addr], '빈 맵 표 조건')
     else:
-        original_write(0x12833C, bytes([alt >> 16]), '대체 인물 목록 뱅크')
+        original_write(0x12833C, bytes([alts[0] >> 16]), '대체 인물 목록 뱅크')
         for addr, value, note in condition_writes(rom, edited, lm2):
             original_write(addr, value, note)
     if no_npc is not None:
@@ -227,7 +361,13 @@ def patch(rom, doc, base=0x328000, alt=0x338000, records=None, allow_growth=Fals
     layout = {'lists': {(k if isinstance(k, str) else cpu(k)): cpu(v) for k, v in (lm1 | lm2).items()},
               'scripts': {cpu(k): cpu(v) for k, v in (sm1 | sm2).items()},
               'entries': {cpu(k): cpu(v) for k, v in (em1 | em2).items()},
-              'base_bytes': len(first), 'alt_bytes': len(second), 'slot_growth': growth}
+              'base_bytes': len(regions[0][1]), 'alt_bytes': len(alt_regions[0][1]), 'slot_growth': growth}
+    if stub is not None or split_alt:
+        layout['base_regions'] = {cpu(b): len(r) for b, r in regions}
+        layout['alt_regions'] = {cpu(b): len(r) for b, r in alt_regions}
+        layout['group_banks'] = {f'{g:02X}': f'{home[g] >> 16:02X}' for g in range(groups)}
+    if stub is not None:
+        layout['bank_stub'] = cpu(stub)
     if moved:
         layout['override_table'], layout['override_find'] = cpu(table), cpu(find)
     return {'format': 'dq5patch/1', 'name': 'npc-relocate', 'rom_size': 2, 'writes': writes}, layout
@@ -301,6 +441,16 @@ def check(rom):
           f'05·37의 원본 목록 영역 호출 {native_refs}개')
 
 
+def places(text):
+    return [destination(part.strip()) for part in text.split(',')]
+
+
+def group_bank(text):
+    if not re.fullmatch(r'[0-9A-Fa-f]{2}=[0-9A-Fa-f]{2}', text):
+        raise argparse.ArgumentTypeError('--group-bank 은 GG=BB(16진)')
+    return tuple(int(v, 16) for v in text.split('='))
+
+
 def new_map(text):
     if not re.fullmatch(r'[0-9A-F]{2}/[0-9A-F]{2}', text):
         raise argparse.ArgumentTypeError('--new-map 은 대문자 16진 GG/MM')
@@ -348,8 +498,10 @@ def main():
     write = sub.add_parser('patch')
     write.add_argument('source')
     write.add_argument('-o', '--out', required=True)
-    write.add_argument('--base', default='32:8000')
-    write.add_argument('--alt', default='33:8000')
+    write.add_argument('--base', default='32:8000', help='기본 목록 자리 BB:AAAA, 쉼표로 여럿(하위 주소가 같아야 함)')
+    write.add_argument('--alt', default='33:8000', help='대체 목록 자리 BB:AAAA, 쉼표로 여럿')
+    write.add_argument('--group-bank', action='append', default=[], type=group_bank,
+                       help='그룹 GG 의 기본 목록을 --base 의 뱅크 BB 에 둠(여럿이면 되풀이)')
     write.add_argument('--report')
     write.add_argument('--records', help='dq5npcrecord/1 문서. 레코드·조건 표 수정을 옮기는 사본에 넣는다')
     write.add_argument('--new-map', action='append', default=[], type=new_map,
@@ -375,8 +527,8 @@ def main():
             if args.records:
                 with open(args.records, encoding='utf-8') as f:
                     records = json.load(f)
-            manifest, layout = patch(rom, doc, destination(args.base), destination(args.alt), records, args.allow_growth,
-                                     new_maps_from(rom, args.new_map, args.newmap_doc))
+            manifest, layout = patch(rom, doc, places(args.base), places(args.alt), records, args.allow_growth,
+                                     new_maps_from(rom, args.new_map, args.newmap_doc), dict(args.group_bank))
             for line in layout['slot_growth']:
                 print(f'원본보다 많은 슬롯: {line}')
             save(args.out, manifest)
