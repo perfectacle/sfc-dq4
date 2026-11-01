@@ -145,8 +145,8 @@ why = "움직이는 바다 원본 128바이트를 DQ4 물결로 제자리에(dq5
 
 [[original]]
 stage = "chapter1"
-at = "1E:F4DF~1E:F54C"
-why = "보물상자 아래 표(1E:F4DF, 11항목) 칸을 DQ4 상자로(dq5chest lower, dq4chestport)"
+at = "1E:F4BF~1E:F54C"
+why = "필드 팻말 표(1E:F4BF, 5항목과 FFFF 끝)를 FC 필드 팻말로(dq4signs, dq4-field-format.md 「팻말」)와, 바로 뒤 보물상자 아래 표(1E:F4DF, 11항목) 칸을 DQ4 상자로(dq5chest lower, dq4chestport). 두 표가 붙어 있어 장부에서 한 덩어리로 잡힘"
 
 [[original]]
 stage = "chapter1"
