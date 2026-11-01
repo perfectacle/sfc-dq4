@@ -580,12 +580,14 @@ def usage(base):
 
 
 def where(people, used):
-    """{인물: 나오는 맵 그룹들}. 그룹을 정한 인물은 그 그룹만, 그 그룹에서 같은 그림을 빌려 간 인물이 있으면 뺀다.
+    """{인물: 나오는 맵 그룹들}. 그룹을 정한 인물은 그 그룹과, 빌린 그림 번호(spare)를 그대로 쓰는 인물이 나오는 그룹.
+    그룹을 정하지 않은 인물은 그 그림이 나오는 그룹에서, 그 그룹에서 같은 그림을 빌려 간 인물이 있으면 뺀다.
     목록에서 찾지 못한 그림(이벤트로만 바꾸는 그림 등)은 모든 그룹으로 본다."""
     out = {}
     for p in people:
         if p.group is not None:
-            out[p] = {p.group}
+            # 빌린 그림 번호는 훅을 거치지 않고 바꿔 쓴 세트를 그대로 싣는다(다른 그룹에서 그 시트를 쓰려는 인물)
+            out[p] = {p.group} | (used.get(p.spare, set()) if p.spare is not None else set())
             continue
         groups = set()
         for pic in p.pictures:
