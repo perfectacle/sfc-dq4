@@ -416,6 +416,7 @@ def native():
         for name, rect in (('voice_hut', VOICE_HUT), ('voice_bridge', VOICE_BRIDGE), ('frog_call', FROG_CALL)):
             put(name, _inside(*rect))
         put('hero_right', _hero_face(0x11))
+        put('hero_up', _hero_face(0x88))
         put('skip_song', _skip_song())
         # 저녁: 주인공이 식탁 아래에서 위를 봄(C1 80) → 저녁 대사 → 끝: 검은 화면 → 서술 → 곡 건너뛰기 →
         # 1장 왕좌의 방으로(이벤트 명령 90, $198E = 80)
@@ -432,6 +433,8 @@ def end_event(at):
     고를 때도 이 목록을 본다."""
     g, n, x, y = CHAPTER1_AT
     return ([bytes(b for d, k in HERO_TO_SEAT for b in (d, k)) + bytes((0xC1, HERO_AT_TABLE))] +
+            # C1 은 31E0 만 바꿔 그림(자세 3240·3260)이 앞모습으로 남았다
+            [bytes((0xA0, *_long(at.get('hero_up', 0))))] +
             [('msg', m) for m in M_SUPPER_LINES] +
             [bytes((0x10, *DINNER, 0xA0, *_long(at.get('darken', 0)))), ('msg', M_STORY_BEGINS),
              bytes((0xA0, *_long(at.get('skip_song', 0)), 0x90, g, n, x, y, 0x01, 0x80, 0xFF))])
@@ -545,7 +548,7 @@ def scripts():
 def npc_lists():
     """(lists, new_lists, overrides, scripts) 에 더할 것. 대체 목록은 앞에 둔 것부터 맞춰 본다."""
     master = ch1.entry(MASTER_SRC, *MASTER_AT, SWORDSMAN, 'down', T_ASK)
-    sleeper = ch1.entry(SLEEPER_SRC, *SLEEPER_AT, MAN, 'down', T_SLEEPER)
+    sleeper = ch1.entry(SLEEPER_SRC, *SLEEPER_AT, MAN, 'right', T_SLEEPER)
     sleeper['fields']['x'] += 1
     people = [ch1.entry(ch1.STATIC, x, y, g, f, t) for x, y, g, f, t in VILLAGERS] + [sleeper]
     father = next(i for i, v in enumerate(VILLAGERS) if v[4] == T_FATHER)
