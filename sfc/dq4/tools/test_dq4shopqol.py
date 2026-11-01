@@ -36,7 +36,7 @@ class BuyConfirmTest(unittest.TestCase):
 
     def test_hooks_both_buy_paths_in_bank_06(self):
         self.assertRegex(ASM, r'org \$06DCDF\n    JSR ShopBuyTool')
-        self.assertRegex(ASM, r'org \$06DDFC\n    JSR ShopBuyConfirm')
+        self.assertRegex(ASM, r'org \$06DDFC\n    JSR ShopBuyEquip')
         body = ASM[ASM.index('ShopBuyConfirm:'):]
         body = body[:body.index('assert pc()')]
         # 창(BRK 95)은 뱅크 06 에서 불러야 돈다. 뱅크 06 코드는 JSR 로 들어와 JSR 로 원래 루틴을 부른다
@@ -58,6 +58,11 @@ class MultiBuyTest(unittest.TestCase):
         for need in ('db $00, $95, $5C', 'JSL ShopQtyMax', '$0B02', 'JMP ShopBuyConfirm', 'ShopGiveExtra:'):
             self.assertIn(need, body)
         self.assertRegex(ASM, r'org \$06DD39\n    JSR ShopGiveExtra')
+        # 장비 갈래도 06:DE77 → 06:DCFF 로 06:DD39 를 지난다. 남은 $0F21(팔기 등의 사람 번호)만큼 더 주지 않게 1 을 둔다
+        equip = ASM[ASM.index('ShopBuyEquip:'):]
+        self.assertTrue(equip.startswith('ShopBuyEquip:\n    LDA #$01\n    STA.w $0F21\n'))
+        tool = ASM[ASM.index('ShopBuyTool:'):]
+        self.assertIn('STA.w $0F21', tool[:tool.index('JSL ShopQtyMax')])
 
 
 class LowBankTest(unittest.TestCase):

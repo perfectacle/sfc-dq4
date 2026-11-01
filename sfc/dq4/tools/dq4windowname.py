@@ -262,10 +262,12 @@ def apply(data, font=None, asar=None):
         raise ValueError('창 이름 코드가 정해 둔 자리를 벗어남')
     if not any(out[lorom(SHOP_SPOT):lorom(SHOP_SPOT_END - 1) + 1]):
         raise ValueError('가게 팔기 목록 코드가 들어가지 않음')
-    # 도구 갈래는 개수 묻기(QTY_SPOT 첫머리 ShopBuyTool), 장비 갈래는 바로 확인(BUY_SPOT 첫머리 ShopBuyConfirm)
-    for a, spot in ((BUY_SITES[0], QTY_SPOT), (BUY_SITES[1], BUY_SPOT), (GIVE_SITE, None)):
+    # 도구 갈래는 개수 묻기(QTY_SPOT 첫머리 ShopBuyTool)
+    # 장비 갈래는 개수 1 을 두는 ShopBuyEquip(BUY_SPOT 안)을 거쳐 확인으로
+    for a, lo_, hi_ in ((BUY_SITES[0], QTY_SPOT, QTY_SPOT + 1), (BUY_SITES[1], BUY_SPOT + 1, BUY_SPOT_END),
+                        (GIVE_SITE, QTY_SPOT, QTY_SPOT_END)):
         t = int.from_bytes(out[lorom(a) + 1:lorom(a) + 3], 'little')
-        if out[lorom(a)] != 0x20 or (t != spot & 0xFFFF if spot else not QTY_SPOT & 0xFFFF <= t < QTY_SPOT_END & 0xFFFF):
+        if out[lorom(a)] != 0x20 or not lo_ & 0xFFFF <= t < (hi_ - 1 & 0xFFFF) + 1:
             raise ValueError(f'{a:06X}: 가게 사기 훅 JSR 이 아님 {out[lorom(a):lorom(a) + 3].hex()}')
 
     for a in SHOP_RESOLVE:

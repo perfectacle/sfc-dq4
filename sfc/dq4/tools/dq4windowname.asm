@@ -97,15 +97,16 @@ org $06DCDF
     JSR ShopBuyTool
     NOP #10
 org $06DDFC
-    JSR ShopBuyConfirm
+    JSR ShopBuyEquip
     NOP #10
 ; 도구 갈래가 물건을 주는 자리 앞(LDA $0F23 / STA $42 / LDA $0F22 / STA $43, 뒤는 BRK 89 80 30)
 org $06DD39
     JSR ShopGiveExtra
     NOP #7
 
-; 도구 갈래(M = 8, X = 8, 값 $46~$48). 최대 개수(ShopQtyMax)가 2 이상이면 「몇 개 사시겠어요?」 와 한 자리 수량 창을 묻고,
-; 개수 × 값으로 ShopBuyConfirm 의 확인으로 간다. 개수는 물건을 줄 때까지 $0F21(사기 흐름에서는 쓰지 않음)에 둔다.
+; 도구 갈래(M = 8, X = 8, 값 $46~$48). 최대 개수(ShopQtyMax)가 2 이상이면 「몇 개 사시겠어요?」 와 다섯 자리 수 창(끝 자리만 씀)을 묻고,
+; 개수 × 값으로 ShopBuyConfirm 의 확인으로 간다. 개수는 물건을 줄 때까지 $0F21 에 둔다. $0F21 은 팔기·필드 도구
+; 메뉴 등이 사람 번호로도 쓰므로, 06:DD39 로 오는 두 사기 갈래(ShopBuyTool·ShopBuyEquip)가 모두 먼저 둔다.
 ; 수 창(5C, 맡기는 곳 등과 같은 창)은 고르면 $E8 = 0 이고 자리마다 숫자(0~9)를 $0AFE~$0B02 에 둔다(06:EF06 이 값으로
 ; 바꾸는 자리). 끝 자리를 개수로 쓰고, 앞 자리가 0 이 아니거나 최대보다 크면 최대로, 0 이거나 B 면 확인의 「아니요」 길로
 org !shop_qty_spot
@@ -331,6 +332,12 @@ ShopBuyConfirm:
     JSR $DFC4
     db $00, $97, $13
     JMP $DC2F
+; 장비 갈래. 「바로 장비하시겠어요?」 에 아니요거나 장비할 수 없으면 06:DE77 → 06:DCFF 로 도구 갈래와 합쳐
+; 06:DD39(ShopGiveExtra)를 지나므로, 개수를 1 로 두고 확인으로 간다. $0F21 은 팔기·필드 도구 메뉴 등이 사람 번호로 쓴다
+ShopBuyEquip:
+    LDA #$01
+    STA.w $0F21
+    JMP ShopBuyConfirm
 assert pc() <= $070000
 
 ; 창 바이트 갈래(메뉴 패치의 JSL). 고정 문구 접두를 먼저 가르고, 나머지는 원래 대상으로.
