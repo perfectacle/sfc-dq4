@@ -1,19 +1,31 @@
 """출구 종류·끝 표시, 음수 가장자리 사각형, 고층 공유 목록과 목적지 검사."""
+import contextlib
+import io
 import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch as mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from dq5exit import DEST_TABLE
+from dq5exitreloc import (
+    EXIT_INDEXED, EXIT_INIT, EXIT_SHORT, HIGH_ORIGINAL, HIGH_SITES, INDEX_BANK, INDEX_OPERANDS, RECORD_BANK, RECORD_LOW,
+)
 from dq5exitwrite import (
+    EXIT_END,
     FORMAT,
+    HIGH_LISTS,
+    check,
     decode_trigger,
+    dump,
     encode_exit,
     encode_trigger,
     group_scan,
+    layout as read_layout,
     patch,
 )
-from dq5map import Rom
+from dq5map import GROUP_TABLE, Rom, lorom
+from dq5trigger import INDEX, RECORD_SIZE, RECORDS
 
 EDGE = bytes([0xFF, 6, 0, 12, 1, 0x80, 1, 4, 17, 4, 0xFA, 1])
 FIELD = bytes([30, 60, 35, 61, 1, 0xC0, 0x80, 0, 0, 0, 1, 1])
@@ -103,6 +115,113 @@ class TriggerTests(unittest.TestCase):
                        {'triggers': [{'map': '01/06', 'index': True}]}, {'exits': [{'map': '1/0', 'index': 0}]}):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 run(**kwargs)
+
+
+HIGH_COUNTS = {0x50: 2, 0x51: 8, 0x52: 1, 0x53: 3, 0x54: 4}
+LOW = [(0, bd) for bd in range(145)] + [(g, 0) for g in range(1, 54)]    # 영역 이동 색인 198칸과 같은 수
+
+
+def fixed_rom():
+    """원래 자리·크기의 출구 표(2A:ED61~F224)와 영역 이동 레코드·색인·고층 목록을 꽉 채운 합성 롬.
+    출구는 00/00 이 위치 출구 182개·다른 그룹 출구 하나·특수 출구로 남는 자리를 채우고, 나머지 맵은 특수 출구 하나."""
+    data = bytearray(0x180000)
+
+    def put(addr, raw):
+        data[lorom(addr):lorom(addr) + len(raw)] = raw
+
+    put(EXIT_INIT, bytes.fromhex('a9 61 85 84 a9 ed 85 85'))
+    for at in EXIT_SHORT:
+        put(at, b'\xb2\x84')
+    for at in EXIT_INDEXED:
+        put(at, b'\xb1\x84')
+    put(INDEX_BANK, b'\x2a')
+    for at, plus in INDEX_OPERANDS:
+        put(at, (0xEB0E + plus).to_bytes(2, 'little'))
+    put(RECORD_LOW, b'\x12\xd8')
+    put(RECORD_BANK, b'\x2a')
+    for site, at in zip(HIGH_SITES, HIGH_ORIGINAL):
+        put(site, bytes([0xAF, *at.to_bytes(3, 'little'), 0x8D, 0x3D, 0x18, 0xA2,
+                         *(at + 1 & 0xFFFF).to_bytes(2, 'little'), 0x8E, 0x3A, 0x18, 0xA9, 0x01]))
+    low = GROUP_TABLE & 0xFFFF
+    counts = [145] + [1] * 53
+    starts = [low - 3 * 198 + 3 * sum(counts[:g]) for g in range(54)]
+    put(GROUP_TABLE, b''.join(v.to_bytes(2, 'little') for v in starts))
+    starts = [0xCEB6 - 3 * 18 + 3 * sum(list(HIGH_COUNTS.values())[:i]) for i in range(5)]
+    put(0x1FCEB6, b''.join(v.to_bytes(2, 'little') for v in starts))
+    table = bytearray()
+    for bc in range(54):
+        table.append(bc)
+        for bd in sorted(bd for g, bd in LOW if g == bc):
+            if (bc, bd) == (0, 0):
+                table += bytes([0x60 | 2, 9, 8, 1, 3]) * 182 + bytes([0x20 | 1, 0, 5])
+            table.append(0x80)
+        table.append(0xFF)
+    assert DEST_TABLE + len(table) == EXIT_END
+    put(DEST_TABLE, table)
+    counts = [405 - 197] + [1] * 197
+    put(INDEX, b''.join(bytes([bc, bd, n]) for (bc, bd), n in zip(LOW, counts)) + b'\xff')
+    put(RECORDS, b''.join(bytes([2, 2, 3, 3, 1, 0xC0, 1, 0, 4, 5, 1, k % 4]) for k in range(405)))
+    for at, count in HIGH_LISTS:
+        put(at, bytes([count]) + EDGE * count)
+    return data
+
+
+class FixedLayoutTests(unittest.TestCase):
+    """layout: 고정 슬롯 표를 원래 크기로 끝까지 읽고, 넘치거나 어긋나면 거부한다."""
+
+    def setUp(self):
+        self.data = fixed_rom()
+
+    def put(self, addr, raw):
+        self.data[lorom(addr):lorom(addr) + len(raw)] = raw
+
+    def test_rows_are_contiguous_and_end_with_the_last_bit(self):
+        known, exits, triggers, references = read_layout(Rom(self.data))
+        self.assertEqual(len([k for k in known if k[0] < 0x50]), 198)
+        self.assertEqual(len(exits), 198)
+        self.assertEqual(exits[0, 0][0][0], DEST_TABLE + 1)
+        self.assertEqual(len(exits[0, 0]), 184)
+        for rows in exits.values():
+            self.assertTrue(rows[-1][1][0] & 0x80)
+            self.assertFalse(any(raw[0] & 0x80 for _, raw in rows[:-1]))
+            for (a, raw), (b, _) in zip(rows, rows[1:]):
+                self.assertEqual(a + len(raw), b)
+        # 영역 이동은 색인 차례대로 레코드를 이어 받는다
+        order = [at for key in LOW for at, _ in triggers[key]]
+        self.assertEqual(order, [RECORDS + k * RECORD_SIZE for k in range(405)])
+        # 51 그룹 첫 고층 맵의 목록은 다른 맵과 겹치지 않고, 50 그룹 두 맵은 한 목록을 함께 쓴다
+        self.assertEqual(triggers[0x50, 0x50], triggers[0x50, 0x51])
+        self.assertEqual(references[0x019636], ['50/50', '50/51'])
+        self.assertEqual(len(triggers[0x51, 0x50]), 1)
+
+    def test_dump_round_trip_and_check(self):
+        rom = Rom(self.data)
+        self.assertEqual(patch(rom, dump(rom))['writes'], [])
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            check(rom)
+        self.assertIn('바뀐 레코드 0개', out.getvalue())
+
+    def test_broken_tables_are_rejected(self):
+        cases = {
+            '그룹 순서': (DEST_TABLE, b'\x01'),
+            '그룹 종료자를 만남': (EXIT_END - 2, b'\x00'),
+            '중복': (INDEX + 3, bytes([0, 0])),
+            '고층 목록': (HIGH_LISTS[1][0], b'\x02'),
+            '겹침': (INDEX + 2, b'\xff'),
+            '크기나 종료자': (INDEX + 198 * 3, b'\x00'),
+        }
+        for message, (addr, raw) in cases.items():
+            with self.subTest(message=message):
+                self.data = fixed_rom()
+                self.put(addr, raw)
+                with self.assertRaisesRegex(ValueError, message):
+                    read_layout(Rom(self.data))
+
+    def test_table_that_runs_past_the_fixed_area_is_rejected(self):
+        # 마지막 그룹 종료자를 지우면 출구 표가 F224 를 넘어 읽힌다
+        self.put(EXIT_END - 1, b'\x00')
+        with self.assertRaisesRegex(ValueError, '고정 영역|종료자'):
+            read_layout(Rom(self.data))
 
 
 if __name__ == '__main__':

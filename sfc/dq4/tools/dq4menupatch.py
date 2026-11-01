@@ -35,7 +35,9 @@ HOOK = 0x608000             # 창 접두 처리
 UPLOAD = 0x608100           # 타이틀 FadeOut 끝에서 열 그림을 VRAM 2000 에 올림
 TILES = 0x609000            # 열 그림 8KB: 글자 줄 256 타일, 이어서 아래 줄 256 타일
 WIN_DISPATCH = 0x04B11E     # CMP #$01 갈래(wintest 와 같은 자리)
+WIN_DISPATCH_ORIG = bytes.fromhex('c901f0052035b280c6c8c8')
 FADEOUT_EXIT = 0x30829A     # dq4titlelayers.asm FadeOut 의 JML $03FE5C
+FADEOUT_EXIT_ORIG = bytes.fromhex('5c5cfe03')
 MENU_ENTRY = 0x03FE5C
 BAND = 16                   # 글자 줄 8점 + 아래 줄 8점
 
@@ -75,6 +77,7 @@ MENU_FLAG = 0x1BB0          # 메뉴에서 A5, 맵을 불러오면 00. 이름 �
 SHARED_KR = 0x60B000        # 한글 레코드들과 표시 A5(창마다 원래와 한글 중 긴 쪽만큼 칸을 잡음)
 SHARED_JP = 0x60B400        # 원래 레코드들과 표시 00
 MAP_LOAD = 0x2B82BD         # LDA #$1C / STA $0725 (맵을 불러올 때마다)
+MAP_LOAD_ORIG = bytes.fromhex('a91c8d2507')
 # 창 63(표시 속도)은 FE 항목 창이 아니라 줄 글 + 숫자 항목이라 따로 엮는다(speed_record).
 SPEED_WINDOW = 0x63
 SPEED_TEXT = ('원하는 표시 속도는?', '빠름', '느림')
@@ -334,6 +337,7 @@ CURSOR_SE = 0x33
 CURSOR_MOVES = {0x04CB66: 0xD584, 0x04CC1A: 0xD68C, 0x04CC47: 0xD794, 0x04CC73: 0xD82E}
 # B(취소, $24 bit6)는 04:CCA1 BVS → 04:CD0A 로 창을 닫는다. 창 스택 맨 위($09FF + $0AD6)가 첫 메뉴면 아무것도 하지 않는다.
 B_CANCEL = 0x04CD0A
+B_CANCEL_ORIG = bytes.fromhex('ade80a')
 TOP_MENUS = (0x5E, 0x5F, 0x60)
 
 
@@ -384,6 +388,7 @@ def put(data, addr, b, expect=None):
 # 바탕 롬은 dq4overture.py build 결과다. 서곡 롬의 해시는 타이틀을 고칠 때마다 달라지므로, 서곡이 부르는 스텁
 # (dq4overture.TITLE_STUB, JSL 70:FF00)과 아직 비어 있는 메뉴 메시지 자리(dq4menumsg.BASE)로 본다.
 OVERTURE_STUB = 0x70FF00
+OVERTURE_CALL = bytes((0x22,)) + OVERTURE_STUB.to_bytes(3, 'little')
 
 
 def base_problem(rom):
@@ -391,7 +396,7 @@ def base_problem(rom):
     import dq4menumsg
     if len(rom) != 0x400000:
         return f'4MB 가 아님({len(rom):#x})'
-    if not any(rom[lorom(OVERTURE_STUB):lorom(OVERTURE_STUB) + 0x20]) or bytes.fromhex('2200ff70') not in rom:
+    if not any(rom[lorom(OVERTURE_STUB):lorom(OVERTURE_STUB) + 0x20]) or OVERTURE_CALL not in rom:
         return f'{OVERTURE_STUB:06X} 에 서곡 스텁이 없음(dq4overture.py build 결과가 아님)'
     if any(rom[lorom(dq4menumsg.BASE):lorom(dq4menumsg.BASE) + 0x100]):
         return f'{dq4menumsg.BASE:06X} 가 비어 있지 않음(이미 메뉴를 얹은 롬)'
@@ -434,7 +439,7 @@ def build(rom, font, jamo_font, message_font=None, messages=None):
         spot[0] += len(new)
     slack.sort(key=lambda s: s[0] - s[1])
     check = place(data, slack, b_check())
-    put(data, B_CANCEL, bytes((0x20, check & 0xFF, check >> 8 & 0xFF)), bytes.fromhex('ade80a'))
+    put(data, B_CANCEL, bytes((0x20, check & 0xFF, check >> 8 & 0xFF)), B_CANCEL_ORIG)
     common = place(data, slack, cursor_common())
     for site, target in CURSOR_MOVES.items():
         t = place(data, slack, cursor_tramp(target, common))
@@ -467,7 +472,7 @@ def build(rom, font, jamo_font, message_font=None, messages=None):
                        (MAP_HOOK, map_hook_code())):
         put(data, addr, code, bytes(len(code)))
     put(data, MAP_LOAD, bytes((0x22, MAP_HOOK & 0xFF, MAP_HOOK >> 8 & 0xFF, MAP_HOOK >> 16, 0xEA)),
-        bytes.fromhex('a91c8d2507'))
+        MAP_LOAD_ORIG)
     hook = hook_code()
     put(data, HOOK, hook, bytes(len(hook)))
     up = upload_code()
@@ -475,8 +480,8 @@ def build(rom, font, jamo_font, message_font=None, messages=None):
     tiles = atlas.tiles()
     put(data, TILES, tiles, bytes(len(tiles)))
     put(data, WIN_DISPATCH, bytes((0x22, HOOK & 0xFF, HOOK >> 8 & 0xFF, HOOK >> 16, 0xB0, 0x05,
-                                   0x20, 0x35, 0xB2, 0x80, 0xC4)), bytes.fromhex('c901f0052035b280c6c8c8'))
-    put(data, FADEOUT_EXIT, bytes((0x5C, UPLOAD & 0xFF, UPLOAD >> 8 & 0xFF, UPLOAD >> 16)), bytes.fromhex('5c5cfe03'))
+                                   0x20, 0x35, 0xB2, 0x80, 0xC4)), WIN_DISPATCH_ORIG)
+    put(data, FADEOUT_EXIT, bytes((0x5C, UPLOAD & 0xFF, UPLOAD >> 8 & 0xFF, UPLOAD >> 16)), FADEOUT_EXIT_ORIG)
     bridges = {}
     for name, target in {'wait': 0x9D35, 'erase': 0xD1B9, 'draw': 0xD183, 'row': 0xD319, 'blink': 0xD162}.items():
         bridges[name] = place(data, slack, bytes((0x20, target & 0xFF, target >> 8, 0x6B)))

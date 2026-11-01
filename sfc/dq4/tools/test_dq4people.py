@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 import unittest.mock
@@ -202,6 +203,100 @@ class SheetTests(unittest.TestCase):
         pal = P.reduce(hist)
         self.assertEqual(len(pal), 15)
         self.assertIn((0, 0, 0), pal)
+
+
+class BuildFlowTests(unittest.TestCase):
+    """롬 없이 build 가 시트 준비 결과로 스프라이트·팔레트 문서를 짜고 패치를 얹는 차례를 본다. 시트 준비·패치 만들기는
+    가짜로 바꾼다."""
+    RED, GREEN, BLUE = (255, 0, 0), (0, 255, 0), (8, 16, 248)
+
+    def person(self, role, new_set=None, palette=None, flag=None):
+        from types import SimpleNamespace
+        return SimpleNamespace(role=role, new_set=new_set, palette=palette, flag=flag)
+
+    def rows(self, over=False):
+        p = self.person
+        return [(p('a'), 0x90, 'overlap', 48, 49 if over else 30, [], 1, [self.RED]),
+                (p('hero1', new_set=0), 0xA5, 'overlap', 48, 40, [], 2, [self.GREEN]),
+                (p('fixed', palette='x'), 0x91, 'simple', 24, 20, [], 3, [self.BLUE]),
+                (p('hero2', new_set=1), 0xA6, 'overlap', 48, 40, [], 2, [self.GREEN]),
+                (p('flagged', palette='y', flag=(0x12, 0x40)), 0x92, 'simple', 24, 20, [], 4, [self.RED, None])]
+
+    BOARD = {(0x36, 1): [(0, 0, 0), None], (0x36, 2): [None, None], (0x37, 1): [(0, 0, 0), (8, 8, 8)],
+             (0x37, 2): [(16, 16, 16), None]}
+
+    def run_build(self, rows):
+        calls = {'applied': [], 'palette_docs': []}
+
+        def run(cmd, **kw):
+            calls['dq5build'] = [str(c) for c in cmd]
+            Path(cmd[cmd.index('-o') + 1]).write_bytes(b'mid')
+
+        def objpalette(rom, doc, at):
+            calls['palette_docs'].append((doc, at))
+            return {'format': 'dq5patch/1', 'writes': [], 'at': at}
+
+        def apply_writes(data, original, paths):
+            calls['applied'].append([Path(p).name for p in paths])
+            return bytearray(data)
+
+        with tempfile.TemporaryDirectory() as t:
+            work = Path(t)
+            base, dq5, out = work / 'base.sfc', work / 'dq5.sfc', work / 'out.sfc'
+            base.write_bytes(bytes(0x400000))
+            dq5.write_bytes(b'dq5')
+            with unittest.mock.patch.multiple(P, prepare=lambda *a: (rows, self.BOARD),
+                                              split_patches=lambda rom, doc, w, areas: [{'n': 0}, {'n': 1}],
+                                              tile_areas=lambda data: (('3F:8000', 16),),
+                                              hook_patch=lambda rom: {'hook': 1}, swap_patch=lambda rom: {'swap': 1},
+                                              apply_writes=apply_writes), \
+                    unittest.mock.patch.object(P.subprocess, 'run', run), \
+                    unittest.mock.patch.object(P.dq5objpalette, 'patch', objpalette):
+                P.build(base, dq5, work / 'assets', out, work)
+                calls['sprite'] = json.loads((work / 'sprite.json').read_text())
+                calls['out'] = out.read_bytes()
+        return calls
+
+    def test_tile_limit_stops_the_build(self):
+        with self.assertRaisesRegex(SystemExit, 'a 49>48'):
+            self.run_build(self.rows(over=True))
+
+    def test_sprite_doc_links_the_new_leader_sets_to_the_leader_pictures(self):
+        doc = self.run_build(self.rows())['sprite']
+        self.assertEqual([r['set'] for r in doc['sets']], ['90', '91', '92'])
+        self.assertEqual([(r['set'], r['palette']) for r in doc['new_sets']], [('A5', 0), ('A6', 0)])
+        self.assertEqual(doc['gfx'], [{'gfx': f'{g:02X}', 'set': s} for g, s in zip(P.LEADER_PICTURES, ('A5', 'A6'))])
+
+    def test_patches_go_on_sprites_then_palettes_then_the_swap(self):
+        calls = self.run_build(self.rows())
+        self.assertEqual(calls['applied'], [['sprite0.dq5patch.json', 'sprite1.dq5patch.json', 'palette.dq5patch.json',
+                                             'maps.dq5patch.json', 'hook.dq5patch.json'], ['swap.dq5patch.json']])
+        build = calls['dq5build']
+        self.assertEqual([Path(a).name for a in build if a.endswith('.json')],
+                         ['sprite0.dq5patch.json', 'sprite1.dq5patch.json'])
+        out = calls['out']
+        checksum = int.from_bytes(out[0x7FDE:0x7FE0], 'little')
+        self.assertEqual(checksum ^ int.from_bytes(out[0x7FDC:0x7FDE], 'little'), 0xFFFF)
+
+    def test_palette_lines_take_the_fullest_group_then_the_fixed_lines(self):
+        docs = dict((at, doc) for doc, at in self.run_build(self.rows())['palette_docs'])
+        pal = docs[P.PALETTES_AT]
+        lines = {p['palette']: p['colors'] for p in pal['palettes']}
+        # 37 이 칸이 더 찬 그룹이라 기본 줄 1·2 는 37 의 것, 깃발 없는 고정 줄 3 은 그 인물의 색
+        self.assertEqual(sorted(lines), [1, 2, 3])
+        self.assertEqual(lines[1][:2], [0, 1 << 10 | 1 << 5 | 1])
+        self.assertEqual(lines[3][0], 31 << 10 | 2 << 5 | 1)
+        self.assertTrue(all(len(c) == 15 for c in lines.values()))
+        self.assertEqual(pal['sets'][0], {'set': '90', 'palette': 1})
+        maps = docs[P.MAP_PALETTES_AT]['new_map_palettes']
+        plain = [m for m in maps if m['flag'] == 'FF']
+        self.assertEqual([(m['map'], m['line']) for m in plain], [('36/FF', '09'), ('36/FF', '0A'), ('37/FF', '09'),
+                                                                   ('37/FF', '0A')])
+        flagged = [m for m in maps if m['flag'] != 'FF']
+        every = [f'{g:02X}/FF' for g in P.chapter_groups(2)] + ['FE/00', 'FE/01', 'FE/02']
+        self.assertEqual([m['map'] for m in flagged], every)
+        self.assertTrue(all((m['line'], m['flag'], m['mask']) == ('0C', '12', '40') for m in flagged))
+        self.assertEqual(flagged[0]['colors'][:2], [31, 0])
 
 
 if __name__ == '__main__':

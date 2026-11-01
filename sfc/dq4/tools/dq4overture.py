@@ -51,11 +51,14 @@ SPC_SET_TABLE, SPC_SAMPLE_AREA = 0x28EC, 0x2A5D     # 곡 묶음 표가 올라�
 IPL_BLOCK = 0x2BE676
 IPL_END = bytes.fromhex('00 00 00 02')
 TITLE_CALL = 0x18001C       # 30:801C, 타이틀 코드의 LDA #$10 / JSL $24FE9A
+TITLE_CALL_ORIG = bytes.fromhex('A9 10 22 9A FE 24')
 MENU_CALL = 0x002709        # 00:A709, 원래 STA $2100 / BRK 0F 10(메뉴 곡). 타이틀 패치가 BRK 를 NOP 으로 막아 둔 자리
+MENU_CALL_ORIG = bytes.fromhex('8D 00 21 EA EA EA')
 TITLE_STUB, MENU_STUB = 0x70FF00, 0x70FF20
 # 타이틀 FadeOut 첫 명령 LDX #$000F(30:81AA). 바로 뒤 30:81AD 는 밝기 반복의 분기 대상이라 3바이트만 바꿀 수 있어
 # 같은 뱅크 JMP 로 30:FF00 에 간다. 30:9000~ 은 빌드가 원본 뱅크 20~2F 를 거울로 채운 자리로 읽는 코드가 없다
 FADE_CALL, FADE_STUB = 0x30_81AA, 0x30_FF00
+FADE_CALL_ORIG = bytes.fromhex('A2 0F 00')
 FADE_SPEED = 0x40           # 명령 04 의 X. 20 은 메뉴(약 80프레임 뒤)까지 30% 가 남았다
 # 모험의 서 곡. NDS 는 이 화면에서 インテルメッツォ(NDS 04, FC 1F)를 틀고, 사운드 세트(dq4soundset.py)가 그 곡을
 # DQ5 곡 자리 23 에 넣는다. 사운드를 얹지 않은 롬에서는 DQ5 의 23 번 곡이 나온다
@@ -487,19 +490,19 @@ def build(nes, rom_path, title_path, out):
     stub = stub[:5] + bytes([OVERTURE_FLAG]) + stub[6:]
     put(rom_off(TITLE_STUB), stub, bytes(len(stub)))
     put(TITLE_CALL, bytes([0x22, TITLE_STUB & 0xFF, TITLE_STUB >> 8 & 0xFF, TITLE_STUB >> 16, 0xEA, 0xEA]),
-        bytes.fromhex('A9 10 22 9A FE 24'))
+        TITLE_CALL_ORIG)
     # 타이틀을 나갈 때 화면과 함께 서곡을 줄인다(04 10, X = FADE_SPEED)
     fade = bytes.fromhex('08 5A E2 20 A9 10 A2') + bytes([FADE_SPEED, 0]) + bytes.fromhex('22 C7 FE 24 7A 28 A2 0F 00 4C')
     fade += (FADE_CALL + 3 & 0xFFFF).to_bytes(2, 'little')
     put(rom_off(FADE_STUB), fade, data[rom_off(FADE_STUB):rom_off(FADE_STUB) + len(fade)])
-    put(rom_off(FADE_CALL), bytes([0x4C]) + (FADE_STUB & 0xFFFF).to_bytes(2, 'little'), bytes.fromhex('A2 0F 00'))
+    put(rom_off(FADE_CALL), bytes([0x4C]) + (FADE_STUB & 0xFFFF).to_bytes(2, 'little'), FADE_CALL_ORIG)
     # 메뉴: 원래의 BRK 0F 10 자리. 02 10(서곡 멈춤) 뒤 1A·01 로 MENU_SONG 을 튼다(맵을 불러올 때 곡이 바뀌는 것과
     # 같은 차례, 00:CEB1·00:CEA2). BRK 0F 처럼 대기열이 빌 때까지 기다린다
     menu = bytes.fromhex('8D 00 21 08 E2 20 A9 10 22 BE FE 24 A9') + bytes([MENU_SONG]) + \
         bytes.fromhex('22 91 FE 24 A9') + bytes([MENU_SONG]) + bytes.fromhex('22 9A FE 24 22 44 FE 24 28 6B')
     put(rom_off(MENU_STUB), menu, bytes(len(menu)))
     put(MENU_CALL, bytes([0x22, MENU_STUB & 0xFF, MENU_STUB >> 8 & 0xFF, MENU_STUB >> 16, 0xEA, 0xEA]),
-        bytes.fromhex('8D 00 21 EA EA EA'))
+        MENU_CALL_ORIG)
     put(MENU_FADE, bytes([MENU_SONG]), bytes([0x10]))
     rom_out = set_checksum(bytes(data))
     # 늘린 2MB 의 대부분이 0 이라 RLE 레코드를 쓰는 dq5build 의 IPS 로 만든다

@@ -226,5 +226,274 @@ class RecordsTest(unittest.TestCase):
         self.assertEqual(areas["36/01"][0]["rect"], [30, 72, 33, 73])
 
 
+class FakeTools:
+    """_run 자리의 가짜 도구. dump·patch 는 -o 파일을 쓰고, 부른 차례와 그때 있던 파일을 남긴다."""
+    POINTERS = "3C:9200"
+
+    def __init__(self, out, fail=None):
+        self.out, self.fail, self.calls, self.lock = out, fail, [], __import__("threading").Lock()
+
+    def __call__(self, tool, *args):
+        import json
+        name, args = Path(tool).name, [str(a) for a in args]
+        with self.lock:
+            self.calls.append((name, args))
+        if self.fail and self.fail(name, args):
+            raise RuntimeError(f"{name} failed")
+        if name == "dq4environmentrom.py":
+            env = Path(args[args.index("--out") + 1])
+            env.mkdir(parents=True, exist_ok=True)
+            (env / "dq4-environment.dq5patch.json").write_text('{"format": "dq5patch/1", "writes": []}')
+            return json.dumps({"group_maps": {}, "records_end": "3E:FFFF", "bank01_bytes": 1})
+        o = Path(args[args.index("-o") + 1]) if "-o" in args else None
+        if name == "dq5build.py":
+            # 얹는 패치가 모두 만들어진 뒤여야 한다
+            missing = [a for a in args[2:] if a.endswith(".json") and not Path(a).is_file()]
+            if missing:
+                raise AssertionError(f"dq5build before {missing}")
+            o.write_bytes(b"rom")
+        elif "dump" in args:
+            doc = {"exits-orig.json": {"exits": [{"map": "36/00", "records": ["old"]}, {"map": "03/00", "records": ["dq5"]}],
+                                       "triggers": [{"map": "36/01", "records": ["old"]}]},
+                   "fieldtables-orig.json": {"arrivals": [{"group": 0}], "entrances": [{"table": "main", "n": 1},
+                                                                                   {"table": "aux", "n": 2}]}}
+            o.write_text(json.dumps(doc.get(o.name, {})))
+        elif "patch" in args:
+            # dq5newmap 의 뒤 호출은 첫 호출의 포인터 목록 안을 다시 쓴다(splice 가 첫 목록에 얹어야 한다)
+            writes = []
+            if name == "dq5newmap.py":
+                first = o.name == "newmap.dq5patch.json"
+                writes = [{"at": self.POINTERS, "hex": "00 " * 15 + "00"} if first else
+                          {"at": "3C:9204", "hex": "AA BB"}, {"at": "34:8000" if first else "31:8000", "hex": "01"}]
+            o.write_text(json.dumps({"format": "dq5patch/1", "writes": writes}))
+        return ""
+
+
+def fc_maps_of(links, per_group=5):
+    """{FC group: FC map numbers}: per_group maps per DQ5 group, one for each part after the first (its "map")
+    and the rest on the first part, which always holds its own arrival map."""
+    maps = {}
+    for parts in links.values():
+        first, *rest = parts
+        own = list(range(per_group - len(rest)))
+        if first.get("map", 0) not in own:
+            own[-1] = first["map"]
+        maps[first["fc"]] = own
+        for part in rest:
+            maps[part["fc"]] = [part.get("map", 0)]
+    return maps
+
+
+class CountingPool(build._Pool):
+    """_Pool that sets `finished` once `expect` submitted calls have ended (a done callback runs after the future
+    is marked done, so build's except clause then sees them as done)."""
+    expect = 4
+
+    def __init__(self, workers):
+        super().__init__(workers)
+        self.finished, self.ended, self.count_lock = __import__("threading").Event(), 0, __import__("threading").Lock()
+        type(self).last = self
+
+    def submit(self, *args, **kwargs):
+        f = super().submit(*args, **kwargs)
+        f.add_done_callback(self._ended)
+        return f
+
+    def _ended(self, _):
+        with self.count_lock:
+            self.ended += 1
+            if self.ended >= self.expect:
+                self.finished.set()
+
+
+class SyntheticBuildTest(unittest.TestCase):
+    """롬 없이 _build 의 도구 차례: 패치 목록, --with-patch, 레코드 나누기, 검사 롬. FC 맵 목록(all_maps)만 합성으로
+    바꾸고 placement·fc_map·layout 은 실제 함수가 돈다."""
+
+    def run_build(self, fail=None):
+        import json
+        import tempfile
+        fc_maps = fc_maps_of(build.LINKS)
+        # GROUPS 는 dq4environmentrom 이 맵을 짓는 자리: 같은 LINKS 차례로 번호를 매겨 둔다
+        groups, maps = {}, []
+        for g, parts in build.LINKS.items():
+            number = 0
+            for part in parts:
+                for k in sorted(fc_maps[part["fc"]]):
+                    name = f"fc{part['fc']:02X}-{k:02X}"
+                    groups[name] = (g, number)
+                    maps.append((part["fc"], k, None, name))
+                    number += 1
+        self.groups = groups
+        build._fc_names.cache_clear()
+        self.addCleanup(build._fc_names.cache_clear)
+        doors = {part["fc"]: ([(1, 2)], "leave") for parts in build.LINKS.values() for part in parts}
+        # 맵마다 다른 레코드라, 다른 맵의 레코드를 넘기면 check_records 인자 검사에서 드러난다
+        self.records = {(g, n): bytes([g, n]) * 0x180 for g, n in groups.values()}
+        empty = lambda *a, **k: []  # noqa: E731
+        self.tmp = tempfile.TemporaryDirectory()
+        out, dq5, dq4 = Path(self.tmp.name) / "out", Path(self.tmp.name) / "dq5.sfc", Path(self.tmp.name) / "dq4.nes"
+        dq5.write_bytes(b"dq5")
+        dq4.write_bytes(b"dq4")
+        self.tools = FakeTools(out, fail)
+        self.check_records, self.check_door_copy = mock.Mock(), mock.Mock()
+        import dq4balance
+        import dq4chestport
+        import dq4door
+        import dq4dungeonrate
+        import dq4fieldencounter
+        import dq4fieldtravel
+        import dq4npcport
+        import dq4outside
+        import dq4shopport
+        import dq4wellswitch
+        patches = [
+            mock.patch.multiple(build, GROUPS=groups, _run=self.tools, all_maps=lambda prg: maps, _Pool=CountingPool,
+                                dungeon_zones=lambda prg: {},
+                                map_attrs=lambda dq5, part, zone: {"copy": part["attrs"], "fc": part["fc"]},
+                                new_map_records=lambda env: dict(self.records),
+                                exit_records=lambda prg, g: {f"{g:02X}/00": ["new"]},
+                                area_records=lambda prg, g: {f"{g:02X}/01": ["area"], f"{g:02X}/02": ["area2"]},
+                                fall_records=lambda prg, g: {}, doors=lambda prg: doors, entrance_doors=lambda prg: {},
+                                hook_rows=lambda *a: ([], []), companion_names=lambda d: {}, person_names=lambda d: {},
+                                check_door_copy=self.check_door_copy, check_records=self.check_records),
+            mock.patch.object(build.ines, "prg", lambda data: b"prg"),
+            mock.patch.object(build.dq4fieldport, "park", lambda rows, worlds: [dict(r, parked=1) for r in rows]),
+            mock.patch.object(build.dq4fieldport, "patch",
+                              lambda dq5, prg, path, at: [build._save(path, {"format": "dq5patch/1", "writes": []})]),
+            mock.patch.object(build.dq4entrancehook, "writes", empty),
+            mock.patch.object(dq4door, "writes", empty),
+            mock.patch.multiple(dq4outside, writes=empty, rows=empty),
+            mock.patch.multiple(dq4fieldencounter, dungeon_zones=lambda *a: {}, docs=lambda *a: ({}, {}, {}),
+                                terrain_rates=lambda *a: {"at": "00:0000", "hex": "00"}),
+            mock.patch.multiple(dq4npcport, port=lambda *a: ([{"map": "36/00", "entries": []}, {"name": "alt", "entries": []}],
+                                                            [{"id": dq4npcport.FIRST_MESSAGE, "codes": [1]}], {}),
+                                nothing_codes=lambda: [0], talk_doc=lambda m: {"format": "dq5talk/1"}),
+            mock.patch.object(dq4shopport, "port", lambda *a: ({}, [{"kind": 0}], [], {})),
+            mock.patch.multiple(dq4fieldtravel, destinations=lambda *a: {}, landing_rows=lambda *a: [{"landing": 1}],
+                                writes=empty, names_doc=lambda *a: {"format": "dq5names/1"}),
+            mock.patch.object(dq4wellswitch, "writes", empty),
+            mock.patch.object(dq4dungeonrate, "writes", empty),
+            mock.patch.object(dq4balance, "writes", empty),
+            mock.patch.multiple(dq4chestport, port=lambda *a: ({"format": "dq5chest/1"}, {}), base_tables=lambda d: {}),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        self.addCleanup(self.tmp.cleanup)
+        self.out = out
+        summary = build.build(dq5, dq4, out)
+        self.newmap = json.loads((out / "newmap.json").read_text())
+        return summary
+
+    def calls(self, name, verb=None):
+        return [a for n, a in self.tools.calls if n == name and (verb is None or verb in a)]
+
+    def test_records_spill_into_later_areas_and_pointers_splice_into_the_first_list(self):
+        import json
+        summary = self.run_build()
+        n = len(build.GROUPS)
+        per_area = (build.RECORDS_AT[0][1] - build.RECORDS_AT[0][0]) // 0x300
+        self.assertEqual(summary["record_patches"], [f"newmap-{k}.dq5patch.json" for k in (1, 2)])
+        sources = [m["record"] for m in self.newmap["maps"]]
+        self.assertEqual(sum("source" in r for r in sources), per_area)
+        self.assertTrue(all(r == {"copy": build.RECORD_PLACEHOLDER} for r in sources[per_area:]))
+        self.assertEqual(len(sources), n)
+        first = json.loads((self.out / "newmap.dq5patch.json").read_text())["writes"]
+        self.assertEqual(first[0]["hex"].split()[4:6], ["AA", "BB"])
+        for k in (1, 2):
+            later = json.loads((self.out / f"newmap-{k}.dq5patch.json").read_text())["writes"]
+            self.assertEqual([w["at"] for w in later], ["31:8000"])
+        # 뒤 호출은 앞 호출까지 얹은 롬에서 자기 자리(RECORDS_AT[k])에 레코드를 쓴다
+        later = [a for a in self.calls("dq5newmap.py", "patch") if "newmap-" in a[2]]
+        self.assertEqual([a[a.index("--records-at") + 1] for a in later], ["31:8000", "3F:8000"])
+
+    def test_group_entrances_and_dungeon_step_counting(self):
+        self.run_build()
+        self.assertEqual([row["group"] for row in self.newmap["groups"]], [f"{g:02X}" for g in build.LINKS])
+        for row in self.newmap["groups"]:
+            group = int(row["group"], 16)
+            part = build.LINKS[group][0]
+            x, y = build.cell(*part["arrival"])
+            indoor = build.INDOOR_ENCOUNTERS << 2 if any(p.get("dungeon") for p in build.LINKS[group]) else 0
+            # 입구 맵 번호는 첫 FC 그룹의 도착 맵이 놓인 DQ5 맵(GROUPS 에서 그 이름을 찾아 둔다)
+            number = self.groups[f"fc{part['fc']:02X}-{part.get('map', 0):02X}"][1]
+            self.assertEqual(row["entrance"]["bytes"], [build.WORLD_CODE << 5 | number, x, y, build.LAYER, indoor])
+        # 첫 FC 그룹 도착 맵이 0 이 아닌 그룹이 있어야 위 번호가 실제로 검사된다
+        self.assertTrue(any(row["entrance"]["bytes"][0] & 0x1F for row in self.newmap["groups"]))
+
+    def test_each_new_map_takes_the_attrs_of_the_fc_group_placed_there(self):
+        self.run_build()
+        fc_of = {f"{g:02X}/{n:02X}": int(name[2:4], 16) for name, (g, n) in self.groups.items()}
+        self.assertEqual([m["map"] for m in self.newmap["maps"]], sorted(fc_of))
+        for m in self.newmap["maps"]:
+            self.assertEqual(m["attrs"]["fc"], fc_of[m["map"]], m["map"])
+            part = next(p for parts in build.LINKS.values() for p in parts if p["fc"] == fc_of[m["map"]])
+            self.assertEqual(m["attrs"]["copy"], part["attrs"])
+
+    def test_built_rom_is_checked_against_each_maps_own_record(self):
+        self.run_build()
+        (rom, records), _ = self.check_records.call_args
+        self.assertEqual(rom, (self.out / "groups.sfc").read_bytes())
+        self.assertEqual(records, self.records)
+        (rom, door_bank), _ = self.check_door_copy.call_args
+        self.assertEqual(rom, (self.out / "groups.sfc").read_bytes())
+        self.assertEqual(door_bank, int(build.NEWMAP_AT[build.NEWMAP_AT.index("--door-bank") + 1], 16))
+        self.assertNotEqual(door_bank, build.DOOR_BANK)
+
+    def test_final_rom_takes_every_patch_and_chests_see_all_before_them(self):
+        summary = self.run_build()
+        (final,) = [a for a in self.calls("dq5build.py") if a[a.index("-o") + 1].endswith("groups.sfc")]
+        manifests = [Path(a).name for a in final[2:final.index("--size")]]
+        self.assertEqual(manifests[:5], ["dq4-environment.dq5patch.json", "doors.dq5patch.json", "outside.dq5patch.json",
+                                         "newmap.dq5patch.json", "newmap-1.dq5patch.json"])
+        self.assertEqual(manifests[-1], "field.dq5patch.json")
+        self.assertEqual(len(manifests), len(set(manifests)))
+        (chests,) = self.calls("dq5chestplace.py", "patch")
+        with_patch = [Path(chests[i + 1]).name for i, a in enumerate(chests) if a == "--with-patch"]
+        self.assertEqual(with_patch, manifests[:manifests.index("chests.dq5patch.json")])
+        self.assertEqual(summary["rom"], str(self.out / "groups.sfc"))
+
+    def test_checks_run_on_the_built_rom_only_for_dq5newmap(self):
+        self.run_build()
+        checks = self.calls("dq5newmap.py", "check") + [a for n, a in self.tools.calls if "check" in a and n != "dq5newmap.py"]
+        self.assertTrue(checks)
+        for name, args in self.tools.calls:
+            if "check" in args:
+                self.assertEqual(Path(args[0]).name, "groups.sfc" if name == "dq5newmap.py" else "dq5.sfc", name)
+        self.assertEqual({n for n, a in self.tools.calls if "check" in a},
+                         {"dq5newmap.py", "dq5textwrite.py", "dq5talkwrite.py", "dq5exitreloc.py", "dq5namewrite.py",
+                          "dq5chestplace.py"})
+
+    def test_exit_records_replace_ours_and_add_new_trigger_maps(self):
+        import json
+        self.run_build()
+        exits = json.loads((self.out / "exits.json").read_text())
+        rows = {r["map"]: r["records"] for r in exits["exits"]}
+        self.assertEqual((rows["36/00"], rows["03/00"]), (["new"], ["dq5"]))
+        triggers = {r["map"]: r["records"] for r in exits["triggers"]}
+        self.assertEqual(triggers["36/01"], ["area"])
+        self.assertEqual([r["map"] for r in exits["triggers"]].count("36/01"), 1)
+        self.assertEqual(triggers["37/02"], ["area2"])
+        entrances = json.loads((self.out / "entrances.json").read_text())["entrance_tables"]
+        self.assertEqual(entrances["main"], [{"table": "main", "n": 1, "parked": 1}])
+        self.assertEqual(entrances["aux"][-1], {"landing": 1})
+
+    def test_failure_cancels_the_rest_and_names_other_failures(self):
+        def fail(name, args):
+            if name == "dq4environmentrom.py":
+                # 원래 롬 덤프 넷(이때 pool 에 낸 것은 이 넷뿐)이 먼저 실패해 끝난 뒤에 앞 단계가 실패한다
+                if not CountingPool.last.finished.wait(timeout=5):
+                    raise AssertionError("the four dumps did not end")
+                return True
+            return "dump" in args
+
+        with self.assertRaisesRegex(RuntimeError, "dq4environmentrom.py failed") as caught:
+            self.run_build(fail=fail)
+        notes = sorted(caught.exception.__notes__)
+        self.assertEqual(notes, sorted(f"also failed: {t} failed" for t in
+                                       ("dq5exitreloc.py", "dq5fieldtables.py", "dq5encounterwrite.py", "dq5chestreloc.py")))
+        self.assertFalse(self.calls("dq5newmap.py"))
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,17 @@
+import os
 import re
+import sys
 import unittest
 from pathlib import Path
+from unittest import mock
+
+import dq4battlemsg
+import dq4nameentry as ne
+import dq4windowname as wn
+import dq4windowtext
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'dq5' / 'tools'))
+import dq5text  # noqa: E402
 
 ASM = Path(__file__).resolve().parent / 'dq4windowname.asm'
 CANVAS = range(0x096, 0x180)     # 메시지 캔버스: 9줄 × 26칸
@@ -60,6 +71,288 @@ class FieldSlotTest(unittest.TestCase):
         order = [(n, hidden(lo, n) and hidden(up, n)) for lo, up, n in self.slots if lo in CANVAS]
         medium_visible = order.index((7, False))
         self.assertLess(max(i for i, s in enumerate(order) if s == (10, True)), medium_visible)
+
+
+def lorom(a):
+    return ((a >> 16) & 0x7F) * 0x8000 + (a & 0x7FFF)
+
+
+WINDOWS = 0x04EB48
+LIST_PREV = 0x6123AB
+PREFIX_PREV = 0x608000
+# 창 레코드는 apply 가 보는 바이트만 맞추고 나머지는 5A 로 채운 합성 값
+F = 0x5A
+NAME_LIST = bytes((0x05, F, 0x08, F, F, 0xD0, F, 0x80))
+
+
+def base_windows():
+    out = {
+        wn.STATUS_WINDOW: bytes((F, F, 0x06, F, F, 0x80)),
+        **{w: bytes((F, F, 0x06, F)) + wn.HP_BODY[w] + b'\x80' for w in wn.HP_WINDOWS},
+        wn.SPELL_WINDOW: bytes((F, F, 0x08, F)) + wn.SPELL_BODY + b'\x80',
+        wn.SHOP_MEMBERS: wn.SHOP_MEMBERS_HEAD + bytes((F, F)) + wn.SHOP_MEMBERS_ROW + b'\x80',
+        **{w: head + bytes((F, F, 0x80)) for w, head, _ in wn.FORMATION},
+        wn.TACTIC_WINDOW: wn.TACTIC_HEAD + bytes((F, 0x80)),
+        wn.SHOP_BUY: bytes((F, F, 0x14, F, F, F)) + wn.SHOP_BUY_ROW[0] + b'\x80',
+        wn.SHOP_SELL_ALIAS: wn.SHOP_SELL_ALIAS_RECORD,
+        wn.SHOP_SELL_ITEMS: wn.SHOP_SELL_ITEMS_SHAPE[:2] + b'\x08' + wn.SHOP_SELL_ITEMS_SHAPE[2:] + b'\x80',
+        wn.QTY_WINDOW: wn.QTY_RECORD + b'\x80',
+    }
+    out.update({w: NAME_LIST for w in wn.NAME_LISTS})
+    return out
+
+
+def base_rom(windows=None):
+    """dq4windowname.apply 가 원래 롬에서 확인하는 바이트만 채운 4MB 롬."""
+    d = bytearray(0x400000)
+
+    def put(addr, raw):
+        d[lorom(addr):lorom(addr) + len(raw)] = raw
+
+    at = 0x8000
+    for n, rec in (windows or base_windows()).items():
+        put(0x040000 | at, rec)
+        put(WINDOWS + 2 * n, at.to_bytes(2, 'little'))
+        at += len(rec)
+    for a in wn.SHOP_RESOLVE:
+        put(a, wn.SHOP_RESOLVE_ORIG)
+    put(wn.CODE_TABLE + (wn.SHOP_SELL_CODE - 0xB0) * 2, wn.SHOP_SELL_CODE_ORIG)
+    for a in wn.BUY_SITES:
+        put(a, wn.BUY_ORIG + wn.BUY_CALL)
+    for a, want in wn.BUY_CONFIRM_ORIG:
+        put(a, want)
+    for a, orig in ((wn.SELL_QTY_SITE, wn.SELL_QTY_ORIG), (wn.SELL_GIVE_SITE, wn.SELL_GIVE_ORIG),
+                    (wn.SELL_NO_SITE, wn.SELL_NO_ORIG), (wn.SELL_ASK_SITE, wn.SELL_ASK_ORIG),
+                    (wn.QTY_UP_SITE, wn.QTY_UP_ORIG), (wn.QTY_DOWN_SITE, wn.QTY_DOWN_ORIG)):
+        put(a, orig)
+    put(wn.GIVE_SITE, wn.GIVE_ORIG + wn.GIVE_TAIL)
+    for a in wn.HELD_SITES:
+        rel = lorom(wn.HELD_PICKER) - (lorom(a) + 6)
+        put(a, wn.HELD_ORIG + rel.to_bytes(2, 'little', signed=True))
+    put(wn.EMPTY_SLOT_HOOK, wn.EMPTY_SLOT_ORIG)
+    put(wn.PREFIX_HOOK, b'\x22' + PREFIX_PREV.to_bytes(3, 'little'))
+    put(wn.LIST_HOOK, b'\x5c' + LIST_PREV.to_bytes(3, 'little'))
+    return d
+
+
+def jump(op, target, size):
+    return bytes((op,)) + (target & (0xFFFFFF if size == 3 else 0xFFFF)).to_bytes(size, 'little')
+
+
+def good_asar(rom):
+    """asar 가 asm 을 넣은 뒤 apply 가 확인하는 자리만 흉내 낸다."""
+    def put(addr, raw):
+        rom[lorom(addr):lorom(addr) + len(raw)] = raw
+    put(wn.CODE, b'\xea')
+    put(wn.SHOP_SPOT, b'\xea')
+    for a in (wn.SELL_QTY_SITE, wn.SELL_GIVE_SITE):
+        put(a, jump(0x22, wn.SELL_SPOT, 3))
+    put(wn.SELL_NO_SITE, jump(0x4C, wn.QTY_SPOT + 4, 2))
+    put(wn.BUY_SITES[0], jump(0x20, wn.QTY_SPOT, 2))
+    put(wn.BUY_SITES[1], jump(0x20, wn.BUY_SPOT + 1, 2))
+    put(wn.GIVE_SITE, jump(0x20, wn.QTY_SPOT + 8, 2))
+    for a in wn.SHOP_RESOLVE:
+        put(a, jump(0x20, wn.SHOP_SPOT, 2))
+    put(wn.CODE_TABLE + (wn.SHOP_SELL_CODE - 0xB0) * 2, (wn.SHOP_SPOT + 0x10 & 0xFFFF).to_bytes(2, 'little'))
+
+
+class FakeAsar:
+    def __init__(self, edit=good_asar, code=0):
+        self.edit, self.code, self.asm, self.rom = edit, code, None, None
+
+    def __call__(self, cmd, **kw):
+        asm, path = Path(cmd[-2]), Path(cmd[-1])
+        self.asm, self.rom = asm.read_text(), path.read_bytes()
+        rom = bytearray(self.rom)
+        self.edit(rom)
+        path.write_bytes(bytes(rom))
+        return mock.Mock(returncode=self.code, stdout='', stderr='boom' if self.code else '')
+
+
+TEXT = b'\x5a' * 0x40
+RECORD_AT = lorom(0x04F000)
+NUMBERS = {**{k: 0x40 + i for i, k in enumerate(dq4windowtext.HELD_COUNT)},
+           dq4windowtext.EMPTY_SLOT: 0x21, dq4windowtext.CANNOT_SELL: 0x22}
+
+
+def run(rom, asar=None, numbers=NUMBERS, columns=2):
+    asar = asar or FakeAsar()
+    with mock.patch.object(dq4windowtext, 'build', return_value=(TEXT, {})), \
+            mock.patch.object(dq4windowtext, 'fixed_records', return_value=([(RECORD_AT, b'\x9e\x21')], numbers)), \
+            mock.patch.object(dq4windowtext, 'columns', return_value=[b''] * columns), \
+            mock.patch.object(wn, 'kana_glyphs', return_value={'か': 1}), \
+            mock.patch.object(dq4battlemsg, 'apply', return_value='!bm_test = 1\n'), \
+            mock.patch.object(wn.subprocess, 'run', asar):
+        return wn.apply(bytes(rom), object(), 'asar'), asar
+
+
+def window(d, n):
+    return lorom(0x040000 | int.from_bytes(d[lorom(WINDOWS + 2 * n):lorom(WINDOWS + 2 * n) + 2], 'little'))
+
+
+class ApplyTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.rom = base_rom()
+        cls.out, cls.asar = run(cls.rom)
+        cls.defs = dict(re.findall(r'^(!\w+)\s*=\s*(.+)$', cls.asar.asm, re.M))
+
+    def head(self, n, rom=None):
+        d = self.asar.rom if rom is None else rom
+        o = window(d, n)
+        return d[o:o + 4]
+
+    def test_windows_widen_for_five_name_cells(self):
+        before, after = self.rom, self.asar.rom
+        self.assertEqual(self.head(wn.STATUS_WINDOW)[2], 7)
+        for w in wn.HP_WINDOWS:
+            self.assertEqual(self.head(w)[2], 7)
+        for w in wn.NAME_LISTS + (wn.SHOP_MEMBERS, wn.TACTIC_WINDOW):
+            b, a = self.head(w, before), self.head(w, after)
+            self.assertEqual((a[0], a[2]), (b[0] - 1, b[2] + 1), f'{w:02X}')
+        self.assertEqual(self.head(wn.SPELL_WINDOW)[2], 8 + 2)
+        for w, h, left in wn.FORMATION:
+            self.assertEqual(self.head(w)[:3], bytes((h[0] - left, h[1], h[2] + 1)))
+
+    def test_shop_buy_row_gets_gold_mark(self):
+        o = window(self.asar.rom, wn.SHOP_BUY)
+        self.assertEqual(self.asar.rom[o + 6:o + 13], wn.SHOP_BUY_ROW[1])
+
+    def test_text_bank_and_records_reach_asar(self):
+        t = lorom(dq4windowtext.TEXT_BANK << 16 | dq4windowtext.INDEX)
+        self.assertEqual(self.asar.rom[t:t + len(TEXT)], TEXT)
+        self.assertEqual(self.asar.rom[RECORD_AT:RECORD_AT + 2], b'\x9e\x21')
+
+    def test_defs_carry_previous_hooks_and_numbers(self):
+        self.assertEqual(int(self.defs['!wn_list_prev'][1:], 16), LIST_PREV)
+        self.assertEqual(int(self.defs['!wt_prefix_prev'][1:], 16), PREFIX_PREV)
+        self.assertEqual(int(self.defs['!wt_held_first']), NUMBERS[dq4windowtext.HELD_COUNT[0]])
+        self.assertEqual(int(self.defs['!wt_empty_slot']), NUMBERS[dq4windowtext.EMPTY_SLOT])
+        self.assertEqual(int(self.defs['!wt_cannot_sell']), NUMBERS[dq4windowtext.CANNOT_SELL])
+        self.assertEqual(int(self.defs['!shop_sell_w']), 0x14)
+        sell = window(self.rom, wn.SHOP_SELL_ALIAS)
+        self.assertEqual(lorom(0x040000 | int(self.defs['!shop_sell_alias'][1:], 16)), sell)
+        self.assertEqual(int(self.defs['!wn_hi_count']), -(-len(ne.GLYPHS) // ne.CODE_RADIX))
+        self.assertEqual(self.defs['!bm_test'], '1')
+        # 창 이름 asm 과 전투 글 asm 을 이 정의 뒤에 붙인다
+        self.assertTrue(self.asar.asm.index('!bm_test') < self.asar.asm.index(
+            (Path(wn.__file__).parent / 'dq4windowname.asm').read_text()[:200]))
+
+    def test_output_is_what_asar_wrote(self):
+        self.assertEqual(self.out[lorom(wn.CODE)], 0xEA)
+
+
+class ApplyRejectTests(unittest.TestCase):
+    def test_needs_asar(self):
+        with mock.patch.dict(os.environ, {}, clear=True), self.assertRaises(SystemExit):
+            wn.apply(bytes(base_rom()), object())
+
+    def test_code_area_must_be_empty(self):
+        rom = base_rom()
+        rom[lorom(wn.CODE_END - 1)] = 1
+        with self.assertRaisesRegex(ValueError, '비어 있지 않음'):
+            run(rom)
+
+    def test_window_shape_checks(self):
+        for n, at, value in ((wn.STATUS_WINDOW, 2, 0x07), (wn.SPELL_WINDOW, 7, 0xD5), (0x45, 2, 0x0F),
+                             (wn.SHOP_SELL_ALIAS, 2, 0x10)):
+            with self.subTest(n=hex(n)):
+                bad = bytearray(base_windows()[n])
+                bad[at] = value
+                with self.assertRaisesRegex(ValueError, f'^창 {n:02X} '):
+                    run(base_rom({**base_windows(), n: bytes(bad)}))
+
+    def test_held_site_must_branch_to_the_label_picker(self):
+        rom = base_rom()
+        rom[lorom(wn.HELD_SITES[1]) + 4] ^= 1
+        with self.assertRaisesRegex(ValueError, '소지 중'):
+            run(rom)
+
+    def test_cannot_sell_must_fit_the_price_cells(self):
+        with self.assertRaisesRegex(ValueError, '값 칸'):
+            run(base_rom(), columns=wn.SHOP_PRICE_COLS + 1)
+
+    def test_held_numbers_must_be_consecutive(self):
+        numbers = {**NUMBERS, dq4windowtext.HELD_COUNT[3]: 0x7F}
+        with self.assertRaisesRegex(ValueError, '이어지지 않음'):
+            run(base_rom(), numbers=numbers)
+
+    def test_asar_failure(self):
+        with self.assertRaises(SystemExit):
+            run(base_rom(), FakeAsar(code=1))
+
+    def test_code_past_its_area(self):
+        def spill(rom):
+            good_asar(rom)
+            rom[lorom(wn.CODE_END)] = 1
+        with self.assertRaisesRegex(ValueError, '벗어남'):
+            run(base_rom(), FakeAsar(spill))
+
+    def test_hooks_must_land_in_their_spots(self):
+        def outside(site, raw):
+            def edit(rom):
+                good_asar(rom)
+                rom[lorom(site):lorom(site) + len(raw)] = raw
+            return edit
+        for site, raw in ((wn.SELL_QTY_SITE, jump(0x22, wn.SELL_SPOT_END, 3)),
+                          (wn.SELL_NO_SITE, jump(0x4C, wn.QTY_SPOT_END, 2)),
+                          (wn.BUY_SITES[0], jump(0x20, wn.QTY_SPOT + 1, 2)),
+                          (wn.BUY_SITES[1], jump(0x20, wn.BUY_SPOT, 2)),
+                          (wn.SHOP_RESOLVE[2], jump(0x20, wn.SHOP_SPOT - 1, 2))):
+            with self.subTest(site=hex(site)):
+                with self.assertRaises(ValueError):
+                    run(base_rom(), FakeAsar(outside(site, raw)))
+
+
+KANA = 'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん'
+
+
+class KanaGlyphTests(unittest.TestCase):
+    def rom(self):
+        d = bytearray(0x400000)
+
+        def put(addr, raw):
+            d[lorom(addr):lorom(addr) + len(raw)] = raw
+        for i, ch in enumerate(KANA):
+            put(dq5text.STRING_CODES + (0x10 + i) * 2, dq5text.CHARS.index(ch).to_bytes(2, 'little'))
+        # 탁점 열쇠: 84 는 0 부터, 83 은 28 부터 찾으므로 두 자리 모두 10~7F 를 차례로 둔다
+        put(dq5text.MARK_KEYS, bytes(range(0x10, 0x80)))
+        put(dq5text.MARK_KEYS + 0x28, bytes(range(0x10, 0x80)))
+        put(dq5text.MARK_CODES + (KANA.index('か')) * 2, dq5text.CHARS.index('が').to_bytes(2, 'little'))
+        put(dq5text.MARK_CODES + (0x28 + KANA.index('は')) * 2, dq5text.CHARS.index('ぱ').to_bytes(2, 'little'))
+        return d
+
+    def render(self, font, ch, tight):
+        return [[[1] * 8 for _ in range(16)]]
+
+    def test_table_maps_bytes_to_new_glyphs_after_name_glyphs(self):
+        d = self.rom()
+        numbers = wn.kana_glyphs(d, object(), self.render)
+        self.assertEqual(set(numbers), set(KANA) | {'が', 'ぱ'})
+        self.assertEqual(sorted(numbers.values()), list(range(len(ne.GLYPHS), len(ne.GLYPHS) + len(numbers))))
+        t = lorom(wn.KANA_TABLE)
+
+        def entry(page, b):
+            return int.from_bytes(d[t + page * 0x100 + b * 2:t + page * 0x100 + b * 2 + 2], 'little')
+        self.assertEqual(entry(0, 0x10 + KANA.index('か')), numbers['か'])
+        self.assertEqual(entry(1, 0x10 + KANA.index('か')), numbers['が'])
+        self.assertEqual(entry(2, 0x10 + KANA.index('は')), numbers['ぱ'])
+        self.assertEqual(entry(1, 0x10 + KANA.index('は')), 0xFFFF)
+        self.assertEqual(entry(0, 0x0F), 0xFFFF)
+        for ch, n in numbers.items():
+            o = lorom((ne.GLYPH_BANK + n // 1024) << 16 | 0x8000 + n % 1024 * 32)
+            self.assertEqual(d[o:o + 32], b'\xff' * 16 + bytes(16), ch)
+
+    def test_glyph_spot_must_be_empty(self):
+        d = self.rom()
+        n = len(ne.GLYPHS)
+        d[lorom((ne.GLYPH_BANK + n // 1024) << 16 | 0x8000 + n % 1024 * 32) + 31] = 1
+        with self.assertRaisesRegex(ValueError, '비어 있지 않음'):
+            wn.kana_glyphs(d, object(), self.render)
+
+    def test_kana_wider_than_two_columns(self):
+        with self.assertRaisesRegex(ValueError, '두 열'):
+            wn.kana_glyphs(self.rom(), object(), lambda f, ch, t: [[[0] * 8] * 16] * 3)
 
 
 if __name__ == '__main__':
