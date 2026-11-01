@@ -15,7 +15,7 @@
   python tools/guards.py --base SHA --pr-body FILE
                                                  걸린 검사마다 본문에 결과 줄이 있는지 봄(CI)
 
-결과 줄: `- [x] <이름>: 통과 …` 또는 `- [x] <이름>: 해당 없음 — <이유>`. `실패` 가 든 줄은 실패로 친다.
+결과 줄: `- [x] <이름>: 통과 (…)` 또는 `- [x] <이름>: 해당 없음 — <이유>`. 그 밖의 글(「통과하지 못함」 등)은 실패로 친다.
 """
 import argparse
 import re
@@ -53,8 +53,15 @@ def load(files, read=lambda f: (ROOT / f).read_text(encoding='utf-8')):
         for key in data:
             if key != 'check':
                 problems.append(f'{toml}: 모르는 키 {key}')
-        for i, item in enumerate(data.get('check', [])):
+        items = data.get('check', [])
+        if not isinstance(items, list):
+            problems.append(f'{toml}: check 는 [[check]] 배열이어야 함')
+            continue
+        for i, item in enumerate(items):
             where = f'{toml} check[{i}]'
+            if not isinstance(item, dict):
+                problems.append(f'{where}: 표가 아님')
+                continue
             for key, kind in FIELDS.items():
                 if not isinstance(item.get(key), kind):
                     problems.append(f'{where}: {key} 가 없거나 {kind.__name__} 가 아님')
@@ -69,7 +76,8 @@ def load(files, read=lambda f: (ROOT / f).read_text(encoding='utf-8')):
                 for pattern in item['paths']:
                     if not isinstance(pattern, str) or not any(matches(f, pattern) for f in files):
                         problems.append(f'{where}: paths {pattern!r} 에 맞는 추적 파일이 없음')
-            checks.append({'file': toml, **item})
+            if all(isinstance(item.get(k), kind) for k, kind in FIELDS.items()):
+                checks.append({'file': toml, **item})
     seen = {}
     for c in checks:
         name = c.get('name')
@@ -83,30 +91,34 @@ def triggered(checks, changed):
     return [c for c in checks if any(matches(f, p) for f in changed for p in c.get('paths', []))]
 
 
+# 「통과」 다음은 줄 끝·괄호·대시만(「통과하지 못함」「통과 못 함」을 통과로 읽지 않게)
+PASSED = re.compile(r'^통과(?:[ \t]*$|[ \t]*[(（]|[ \t]+[—-])')
+NOT_APPLICABLE = re.compile(r'^해당 없음[ \t]*[—-][ \t]*\S')
+
+
 def body_problems(checks, body):
-    """걸린 검사마다 `- [x] 이름: 통과` 또는 `해당 없음 — 이유` 줄이 있어야 한다."""
+    """걸린 검사마다 `- [x] 이름: 통과 …` 또는 `- [x] 이름: 해당 없음 — 이유` 줄이 있어야 한다."""
     problems = []
     for c in checks:
-        line = re.compile(rf'^\s*[-*]\s*\[[xX]\]\s*`?{re.escape(c["name"])}`?\s*:\s*(.+)$', re.M)
+        line = re.compile(rf'^[ \t]*[-*][ \t]*\[[xX]\][ \t]*`?{re.escape(c["name"])}`?[ \t]*:[ \t]*(\S.*)$', re.M)
         found = [m[1].strip() for m in line.finditer(body)]
         if not found:
             problems.append(f'{c["name"]}: PR 본문에 결과 줄이 없음 (`- [x] {c["name"]}: 통과 …`)')
-        elif any('실패' in r for r in found):
-            problems.append(f'{c["name"]}: 결과 줄이 실패')
-        elif not any(r.startswith('통과') or re.match(r'^해당 없음\s*[—-]\s*\S', r) for r in found):
-            problems.append(f'{c["name"]}: 결과는 「통과 …」 또는 「해당 없음 — 이유」')
+        elif not all(PASSED.match(r) or NOT_APPLICABLE.match(r) for r in found):
+            problems.append(f'{c["name"]}: 결과는 「통과 (…)」 또는 「해당 없음 — 이유」만: {found}')
     return problems
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--base', help='이 커밋과 HEAD 사이에 바뀐 파일로 걸리는 검사를 고른다')
+    ap.add_argument('--head', default='HEAD', help='바뀐 파일을 볼 끝 커밋(CI 는 PR 의 head SHA: 머지 커밋이면 그 뒤 main 변경까지 걸림)')
     ap.add_argument('--pr-body', type=Path, help='PR 본문 파일. 걸린 검사의 결과 줄을 확인한다')
     args = ap.parse_args()
     files = tracked()
     checks, problems = load(files)
     if args.base:
-        changed = [f for f in git('diff', '--name-only', f'{args.base}...HEAD').splitlines() if f]
+        changed = [f for f in git('diff', '--name-only', f'{args.base}...{args.head}').splitlines() if f]
         hit = triggered(checks, changed)
         if hit:
             print('이 변경이 건드리는 실행 검사(돌리고 PR 본문에 결과 줄):')

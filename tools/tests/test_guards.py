@@ -54,6 +54,25 @@ class GuardsTest(unittest.TestCase):
         self.assertTrue(guards.body_problems(checks, '- [x] dq4-walk: 실패 (snes9x 멈춤)'))
         self.assertTrue(guards.body_problems(checks, '- [x] dq4-walk: 해당 없음'))
         self.assertTrue(guards.body_problems(checks, '- [x] dq4-walk: 아직'))
+        self.assertEqual(guards.body_problems(checks, '- [x] dq4-walk: 통과 (실패 0건)'), [])
+        self.assertEqual(guards.body_problems(checks, '- [x] dq4-walk: 통과'), [])
+        self.assertTrue(guards.body_problems(checks, '- [x] dq4-walk: 통과하지 못함'))
+        self.assertTrue(guards.body_problems(checks, '- [x] dq4-walk: 통과 못 함'))
+        self.assertTrue(guards.body_problems(checks, '- [x] dq4-walk:\n통과'))
+        # 통과 줄과 실패 줄이 함께 있으면 실패
+        self.assertTrue(guards.body_problems(checks, '- [x] dq4-walk: 통과\n- [x] dq4-walk: 실패'))
+
+    def test_malformed_lists_are_reported_not_raised(self):
+        for text in ('[check]\nname = "x"', 'check = [1, 2]', '[[check]]\nwhy = "no name"'):
+            checks, problems = load(text)
+            self.assertEqual(checks, [])
+            self.assertTrue(problems, text)
+
+    def test_double_star_glob(self):
+        self.assertTrue(guards.matches('a/b/x.py', '**/x.py'))
+        self.assertTrue(guards.matches('x.py', '**/x.py'))
+        self.assertTrue(guards.matches('sfc/dq4/tools/dq4ch1event.py', 'sfc/dq4/**/*.py'))
+        self.assertFalse(guards.matches('sfc/dq5/tools/a.py', 'sfc/dq4/**'))
 
 
 if __name__ == '__main__':
