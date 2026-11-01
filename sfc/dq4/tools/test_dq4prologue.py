@@ -145,7 +145,8 @@ class PrologueTests(unittest.TestCase):
         self.assertEqual(body[-1], {'op': 'flag-on', 'index': pro.SUPPER[0], 'mask': pro.SUPPER[1]})
         code, at = pro.native()
         ev = code[at['end_event'] - pro.CODE_AT:]
-        walk = bytes(b for d, k in pro.HERO_TO_SEAT for b in (d, k)) + bytes((0xC1, 0x40))
+        # 식탁 아래쪽까지 왼쪽으로 걷고 위(식탁)를 본다. 식탁 위쪽에 서면 메시지 창이 식탁·부모를 가린다
+        walk = bytes((0x02, 4, 0xC1, 0x80))
         self.assertEqual(ev[:len(walk)], walk)
         self.assertEqual(ev[len(walk)], 0x60)
         father = next(sc for sc in pro.scripts() if sc['address'] == pro.FATHER_SCRIPT)['commands']
