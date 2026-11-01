@@ -114,10 +114,22 @@ class SwapTests(unittest.TestCase):
         for site in P.HOOK_SITES:
             rom[lorom(P.cpu(site)):lorom(P.cpu(site)) + 4] = P.LOAD_SET
         rom[lorom(P.BANK_MASK_SITE):lorom(P.BANK_MASK_SITE) + 2] = b'\x29\x0f'
+        rom[lorom(P.FIELD_MATH_SITE):lorom(P.FIELD_MATH_SITE) + 2] = b'\xa9\x50'
         with unittest.mock.patch.object(P, 'hook_entries', return_value=[]):
             writes = P.hook_patch(bytes(rom))['writes']
         self.assertIn({'at': '03:D2C7', 'hex': '29 3f', 'orig': '29 0f',
                        'note': '일행 그림 다시 싣기의 타일 자료 뱅크 6비트'}, writes)
+
+    def test_hook_patch_turns_off_field_obj_color_math(self):
+        # 장 주인공·동료는 OBJ 팔레트 5~7 이라, 필드의 OBJ 반 더하기가 남으면 BG 와 반씩 섞여 보인다
+        rom = bytearray(0x400000)
+        for site in P.HOOK_SITES:
+            rom[lorom(P.cpu(site)):lorom(P.cpu(site)) + 4] = P.LOAD_SET
+        rom[lorom(P.BANK_MASK_SITE):lorom(P.BANK_MASK_SITE) + 2] = b'\x29\x0f'
+        rom[lorom(P.FIELD_MATH_SITE):lorom(P.FIELD_MATH_SITE) + 2] = b'\xa9\x50'
+        with unittest.mock.patch.object(P, 'hook_entries', return_value=[]):
+            writes = P.hook_patch(bytes(rom))['writes']
+        self.assertEqual([(w['hex'], w['orig']) for w in writes if w['at'] == '2B:82F7'], [('a9 00', 'a9 50')])
 
 
 def body(color=(200, 30, 30, 255)):
