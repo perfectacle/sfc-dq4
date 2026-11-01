@@ -138,13 +138,87 @@ class QtyCapTest(unittest.TestCase):
             self.assertIn('CMP #$04', body)
 
     def test_both_quantity_windows_set_max(self):
-        for name, end in (('ShopBuyTool:', 'ShopGiveExtra:'), ('ShopSellQty:', 'ShopSellCount:')):
-            body = ASM[ASM.index(name):ASM.index(end)]
-            at = body.index('db $00, $95, $5C')
-            self.assertIn('LDA $01,S', body[:at])
-            self.assertIn('STA.w $0F2C', body[:at])
+        # 수 창을 열기 전에 $0F2C = 최대 | 40(열림), 팔기는 | 80. 사기는 닫자마자 0
         buy = ASM[ASM.index('ShopBuyTool:'):ASM.index('ShopGiveExtra:')]
+        at = buy.index('JSL ShopQtyAsk')
+        self.assertIn('ORA #$40', buy[:at])
+        self.assertIn('STA.w $0F2C', buy[:at])
         self.assertIn('STZ.w $0F2C', buy[buy.index('db $00, $95, $5C'):])
+        sell = ASM[ASM.index('ShopSellQty:'):ASM.index('ShopSellCount:')]
+        at = sell.index('JSL ShopSellAsk')
+        self.assertIn('ORA #$C0', sell[:at])
+        self.assertIn('STA.w $0F2C', sell[:at])
+        for name in ('ShopQtyAsk:', 'ShopSellAsk:'):
+            body = ASM[ASM.index(name):]
+            self.assertIn('JSL $248157', body[:body.index('RTL')])
+
+
+class QtyPreviewTest(unittest.TestCase):
+    def test_labels_in_messages(self):
+        # 개수 메시지 둘째·셋째 줄이 라벨, 숫자는 QpFrame 이 그 줄 뒤에 쓴다
+        for n in (0x09C, 0x09D, 0x0AB, 0x0C3):
+            self.assertTrue(dq4sysmsg.SPEECH[n].endswith('/쓰는 돈/남는 돈'), hex(n))
+        for n in (0x0C4, 0x0D6, 0x0D7, 0x0D8):
+            self.assertTrue(dq4sysmsg.SPEECH[n].endswith('/받는 돈/판 뒤'), hex(n))
+
+    def test_frame_hook_draws_only_while_open(self):
+        self.assertRegex(ASM, r'org \$04D16D\n    JSL QpFrame')
+        body = ASM[ASM.index('QpFrame:'):ASM.index('\nQpWindow:')]
+        plain, shop = body.split('\n.shop\n')
+        self.assertIn('AND #$40', plain)         # 수 창이 떠 있을 때만(뒤의 예/아니요 깜박임에서는 쓰지 않음)
+        self.assertIn('LDA.w $0AD9\n    CLC\n    RTL', plain)   # 아니면 덮은 LDA $0AD9 / CLC 그대로
+        self.assertIn('LDA.l $7E0B02', shop)     # 끝 자리 = 개수
+        self.assertIn('JSR QpDraw', shop)
+        draw = ASM[ASM.index('QpDraw:'):ASM.index('QpNumber:')]
+        for need in ('$7E0F28', '$7E2019', 'BMI .sell', '!qp_row1', '!qp_row2'):
+            self.assertIn(need, draw)
+
+    def test_rows_follow_message_lines(self):
+        self.assertEqual(dq4windowname.QP_ROWS, (21, 23))
+
+
+class QtyArrowTest(unittest.TestCase):
+    # 개수 창은 ▲ / 숫자 / ▼ 세 줄: 1 부터, 앞자리 0 없음, 깜박이지 않음, 더 갈 수 있는 쪽 화살표만, 끝에서 멈춤
+    def test_no_blink(self):
+        shop = ASM[ASM.index('QpFrame:'):ASM.index('\nQpWindow:')].split('\n.shop\n')[1]
+        self.assertIn('JSR QpWindow', shop)
+        self.assertIn('LDA #$00', shop)          # 깜박임 박자를 늘 양수로(숫자 쪽)
+        self.assertNotIn('$0AD9', shop)
+
+    def test_window_cells(self):
+        body = ASM[ASM.index('\nQpWindow:'):]
+        body = body[:body.index('RTS')]
+        self.assertIn('INC                     ; 처음 열린 0 을 1 로', body)
+        self.assertIn('LDX.w #$A07B', body)      # ▲ = ▼(7B) 상하 반전
+        self.assertIn('LDX.w #$207B', body)
+        self.assertIn('STA.l $7E0AD7', body)     # 왼쪽·오른쪽으로 옮긴 커서를 끝 자리로
+        for col in ('$7E0A56', '$7E0A5C', '$7E0A5E'):
+            self.assertIn(col, body)             # 커서 자리 칸 좌표표를 숫자 칸·화면 밖으로
+        for need in ('!qp_line', '!qp_up', '!qp_num', '!qp_down'):
+            self.assertIn(need, body)
+        self.assertEqual((dq4windowname.QP_NUM_X, dq4windowname.QP_NUM_Y), (0x1A, 7))
+
+    def test_tall_record_only_for_shop(self):
+        # 가게 개수 창만 높이 5 레코드(▲ / 숫자 / ▼). 5C 는 맡기는 곳과 같이 쓰므로 원래 레코드는 그대로
+        rec = ASM[ASM.index('ShopQtyRec:'):ASM.index('ShopSellRec:')]
+        self.assertIn('db $16, $05, $08, $25, $00, $01, $01, $FF, $52', rec)   # 52 = 수 창 입력 갈래
+        self.assertEqual(dq4windowname.QTY_RECORD[:6], bytes.fromhex('160508230001'))
+        for site in dq4windowname.QP_OPEN_SITES:
+            self.assertRegex(ASM, rf'org \${site:06X}\n    JSL ShopOpenRes\n    NOP')
+        res = ASM[ASM.index('ShopOpenRes:'):]
+        res = res[:res.index('RTL')]
+        for need in ('CPX.w #$005C*2', 'AND.w #$0040', 'LDA.w #ShopQtyRec', 'STA.b $DA'):
+            self.assertIn(need, res)
+
+    def test_stops_at_ends(self):
+        up = ASM[ASM.index('WnQtyUp:'):ASM.index('WnQtyZero:')]
+        self.assertIn('LDA $01,S               ; 최대에서 멈춘다', up)
+        down = ASM[ASM.index('WnQtyDown:'):ASM.index('WnQtyDone:')]
+        self.assertIn('LDA #$01                ; 1 에서 멈춘다', down)
+        done = ASM[ASM.index('WnQtyDone:'):]
+        done = done[:done.index('RTL')]
+        self.assertIn('JSR QpWindow', done)      # 누른 그 프레임에 화살표·금액도 새 개수로
+        self.assertIn('JSR QpDraw', done)
 
 
 class SellLinesTest(unittest.TestCase):

@@ -123,17 +123,9 @@ ShopBuyTool:
     CMP #$02
     BCC .one
     PHA
-    db $00, $95, $00
-    LDA.w $0F20
-    AND #$03
-    ASL
-    TAX
-    REP #$20
-    LDA.l ShopQtyMsg,X
-    JSL $248157
-    SEP #$20
-    LDA $01,S               ; 최대를 수 창 동안 $0F2C 에(WnQtyUp·WnQtyDown 이 끝 자리를 1~최대로 돌림)
+    ORA #$40                ; 수 창 동안 $0F2C = 최대 | 40(열림). WnQtyUp·WnQtyDown 이 끝 자리를 1~최대로 돌리고 QpFrame 이 금액을 쓴다
     STA.w $0F2C
+    JSL ShopQtyAsk
     db $00, $95, $5C        ; BRK 95 5C: 다섯 자리 수 창. 커서는 맨 끝 자리에서 시작한다
     STZ.w $0F2C
     PLA
@@ -306,6 +298,34 @@ ShopQtyTotal:
 +
     RTL
 
+; 사기 개수 묻기: 창을 닫고 「몇 개 사시겠어요? / 쓰는 돈 / 남는 돈」(가게 종류마다)을 띄운다. 숫자는 수 창이 떠 있는 동안
+; QpFrame 이 매 프레임 그 줄 뒤에 쓴다. 뱅크 06 자리가 모자라 여기(뱅크 05, BRK 가능)에 둔다
+; 팔기 개수 묻기: 창을 닫고 「몇 개 파시겠어요? / 받는 돈 / 판 뒤」(가게 종류마다) 뒤 수 창 5C 를 연다. 뱅크 12 는 자리가 없어 여기
+ShopSellAsk:
+    db $00, $95, $00
+    LDA.w $0F20
+    AND #$03
+    ASL
+    TAX
+    REP #$20
+    LDA.l ShopSellMsg,X
+    JSL $248157
+    SEP #$20
+    db $00, $95, $5C
+    RTL
+
+ShopQtyAsk:
+    db $00, $95, $00
+    LDA.w $0F20
+    AND #$03
+    ASL
+    TAX
+    REP #$20
+    LDA.l ShopQtyMsg,X
+    JSL $248157
+    SEP #$20
+    RTL
+
 ; 「몇 개 사시겠어요?」 메시지 번호(가게 종류 $0F20 마다). 원작에서 비어 있고 부르는 곳이 없는 메시지
 ShopQtyMsg:
     dw $009C, $009D, $00AB, $00C3
@@ -342,20 +362,13 @@ ShopSellQty:
     STA.w $0F2C
     JSR ShopSellCount
     CMP #$02
-    BCC .done
+    BCS +
+    JMP .done
++
     PHA
-    db $00, $95, $00
-    LDA.w $0F20
-    AND #$03
-    ASL
-    TAX
-    REP #$20
-    LDA.l ShopSellMsg,X
-    JSL $248157
-    SEP #$20
-    LDA $01,S               ; 수 창 동안 $0F2C = 최대(WnQtyUp·WnQtyDown). 뒤에서 개수를 쓰거나 0 으로 둔다
+    ORA #$C0                ; 수 창 동안 $0F2C = 최대 | 40(열림) | 80(팔기). 뒤에서 개수를 쓰거나 0 으로 둔다
     STA.w $0F2C
-    db $00, $95, $5C
+    JSL ShopSellAsk
     PLA
     LDX.b $E8
     BNE .cancel
@@ -455,11 +468,11 @@ ShopSellSlot:
 ; 고른 칸이 장비 중이면 058 「{N}골드에 사들일게요」 앞에 「지금 장착하고 있는 물건이다.」(원작에서 빈 메시지 3D, ▼ 를 기다린
 ; 뒤 058 이 이어 찍힘). 이름이 가나로 남은 물건 뒤 조사({은})는 찍다 멈추므로 이름을 넣지 않는다. 가게 말투 넷을 쓸 빈 메시지가 남지 않아 서술 한 줄로 두고, 058 이 가게 말투로 다시 묻는다
 ShopSellWarn:
+    db $00, $95, $00        ; 개수를 물었으면 미리보기 창이 058 뒤에 남지 않게(골드 창은 남음). 장착 알림 앞에도 닫아야 한다
     LDX.w $0F23
     JSR ShopSellSlot
     LDA.b $47
     BEQ +
-    db $00, $95, $00
     REP #$20
     LDA #$003D
     JSL $248157
@@ -508,9 +521,6 @@ ShopSellExtra:
     STZ.w $0F2C
     RTL
 
-; 「몇 개 파시겠어요?」 메시지 번호(가게 종류 $0F20 마다). 원작에서 비어 있고 부르는 곳이 없는 메시지
-ShopSellMsg:
-    dw $00C4, $00D6, $00D7, $00D8
 assert pc() <= !shop_sell_end
 
 ; 값을 $0F28~ 에 둔 뒤, 돈이 되면(06:F602, C = 모자람) 창을 닫고 「{N}골드인데 사시겠어요?」(메시지 묶음 19 = 064~067)와
@@ -575,6 +585,11 @@ org !shop_sell_slot
 ; 가게($0F20: 0 도구·1 방어구·2 무기·3 06:E02E 가게(같은 사기·팔기 흐름), 맡기는 곳은 6)에서 37 을 풀 때만 값 열을 붙인 레코드를 돌려주고, 사기 목록과
 ; 같은 자리(x 2, 너비 20)에 둔다. 오른쪽에 골드 창과 「누가」 창이 있어 오른쪽으로는 넓히지 못한다
 org !shop_spot
+; 가게 개수 창: 창 5C(16 05 08 23 00 01 | 01 FD×5 FF | 52) 에서 높이(+3 아래 5비트)를 3 → 5 로, 자리 표시 FD 다섯을 뺐다.
+; FD 는 창을 열 때 「0」 으로 찍혀 QpWindow 가 지우기 전 한 프레임 비쳤고, 자리 칸 좌표는 QpWindow 가 매 프레임 쓴다.
+; 줄 끝 FF 뒤 바이트 & 1F 가 입력 갈래($0AD8, 04:C681, 12 = 수 창)라 빼면 커서 메뉴가 된다
+ShopQtyRec:
+    db $16, $05, $08, $25, $00, $01, $01, $FF, $52
 ShopSellRec:
     db $4F, $03, $80|!shop_sell_w, $B9, $00, $81, $FE, $D3, $01, !shop_sell_code, $FF, $83
 ShopListRes:
@@ -755,7 +770,23 @@ org $24A5E9
 
 
 ; 수 창(5C 등 자리마다 0~9 를 고르는 창)의 위·아래(04:C967·04:C98C). 자리 숫자는 타일 코드 02~0B 로 $0AFE + 자리에 둔다.
-; 원래는 0~9 를 돈다. 가게 개수 창은 $0F2C 에 최대를 둔 동안만 끝 자리를 1~최대로 돌리고 앞 자리는 0 으로 둔다
+; 원래는 0~9 를 돈다. 가게 개수 창은 $0F2C 에 최대를 둔 동안만 끝 자리를 1~최대 사이로 움직이고(끝에서 멈춤) 앞 자리는 0 으로 둔다
+org $04D16D
+    JSL QpFrame
+; 창 표를 창 번호로 읽어 $DA 에 두는 네 자리(LDA $EB48,X / STA $DA): 창 열기 04:9C46 와 크기·그리기 쪽
+; 04:A437·04:A48A·04:A7F4. 가게 개수 창은 열 때 9C46 뒤 A48A 에서 레코드를 다시 읽으므로 넷 모두 같은 훅으로 바꾼다
+org $049C46
+    JSL ShopOpenRes
+    NOP
+org $04A437
+    JSL ShopOpenRes
+    NOP
+org $04A48A
+    JSL ShopOpenRes
+    NOP
+org $04A7F4
+    JSL ShopOpenRes
+    NOP
 org $04C970
     JSL WnQtyUp
     NOP #6
@@ -2229,7 +2260,8 @@ WnEmptySlot:
     SEP #$20
     JML $04B9F7
 
-; 04:C970·04:C995(M = 8, X = 8, X = 자리). 돌려준 A 를 원래 코드가 $0AFE,X 에 쓴다. $0F2C 가 0 이면 원래대로
+; 04:C970·04:C995(M = 8, X = 자리). 돌려준 A 를 원래 코드가 $0AFE,X 에 쓴다. $0F2C 가 0 이면 원래대로.
+; $0F2C 아래 6비트 = 최대, bit6 = 수 창이 떠 있음(QpFrame), bit7 = 팔기(QpDraw 의 셈)
 WnQtyUp:
     LDA.l $7E0F2C
     BNE .cap
@@ -2244,17 +2276,21 @@ WnQtyUp:
     TXA                     ; X 는 8·16비트 어느 쪽이어도 낮은 바이트가 자리
     CMP #$04
     BNE WnQtyZero
+    LDA.l $7E0F2C
+    AND #$3F
+    PHA                     ; 최대(DP 를 쓰지 않으려고 스택에)
     LDA.w $0AFE,X
     SEC
     SBC #$01                ; 다음 숫자(코드 − 2 + 1)
-    CMP.l $7E0F2C
+    CMP $01,S
     BEQ +
     BCC +
-    LDA #$01
+    LDA $01,S               ; 최대에서 멈춘다(오른쪽 ▲ 가 사라져 더 못 감을 보인다)
 +
-    CLC
-    ADC #$02
-    RTL
+    XBA
+    PLA
+    XBA
+    JMP WnQtyDone
 WnQtyZero:
     LDA #$02
     RTL
@@ -2270,20 +2306,315 @@ WnQtyDown:
 +
     RTL
 .cap
-    TXA                     ; X 는 8·16비트 어느 쪽이어도 낮은 바이트가 자리
+    TXA
     CMP #$04
     BNE WnQtyZero
     LDA.w $0AFE,X
     SEC
     SBC #$03                ; 앞 숫자(코드 − 2 − 1)
     BEQ +
-    BPL ++
+    BPL WnQtyDone
 +
-    LDA.l $7E0F2C
-++
+    LDA #$01                ; 1 에서 멈춘다
+WnQtyDone:
     CLC
     ADC #$02
+    STA.w $0AFE,X           ; 원래 코드도 쓰지만, 뒤의 키 반복 대기 동안 화살표·금액이 옛 개수로 남지 않게 먼저 쓰고 바로 그린다
+    PHA
+    PHP
+    REP #$10                ; QpWindow·QpDraw 는 X = 16 을 바란다(이 자리는 X = 8)
+    JSR QpWindow
+    LDA.l $7E0B02
+    SEC
+    SBC #$02
+    JSR QpDraw
+    PLP
+    PLA
     RTL
+
+; 「몇 개 파시겠어요? / 받는 돈 / 판 뒤」 메시지 번호(가게 종류 $0F20 마다). 원작에서 비어 있고 부르는 곳이 없는 메시지.
+; ShopSellQty 가 LDA.l 로 읽으므로 자리가 모자란 뱅크 12 대신 여기에 둔다
+ShopSellMsg:
+    dw $00C4, $00D6, $00D7, $00D8
+
+; 04:D16D(수 창 깜박임 04:D162 안, M = 8, X = 16, 레지스터는 04:D162 가 맡김). 수 창이 떠 있는 동안 매 프레임 부른다.
+; 가게 개수 창($0F2C ≠ 0)이면 끝 자리($0B02, 타일 코드)로 금액 두 줄을 메시지 창에 쓰고, 덮은 LDA $0AD9 / CLC 를 한다
+QpFrame:
+    LDA.l $7E0F2C
+    AND #$40
+    BNE .shop
+    LDA.w $0AD9
+    CLC
+    RTL
+.shop
+    JSR QpWindow
+    LDA.l $7E0B02
+    SEC
+    SBC #$02
+    JSR QpDraw
+    LDA #$00                ; 깜박임 박자(뒤에서 8 을 더함)를 늘 양수로 두어 끝 자리 숫자를 깜박이지 않게 한다
+    CLC
+    RTL
+
+; 개수 창 칸을 ▲ / 숫자 / ▼ 세 줄로 고쳐 쓴다(M = 8, X = 16). 원래 창은 다섯 자리를 하나씩 고르는 은행용이라
+; 「0000N」 에 커서 자리가 ✱ 와 번갈아 깜박인다. 가게는 끝 자리만 쓰므로 높이 5 의 ShopQtyRec 으로 열고(ShopOpenRes)
+; 숫자 위·아래에 더 갈 수 있는 쪽 화살표만 둔다(▲ 는 ▼ 타일을 위아래로 뒤집어 쓴다).
+; 커서 자리 칸 좌표표($0A56, 자리마다 x·y)를 끝 자리 → 숫자 칸, 나머지 → 화면 밖 칸으로 바꿔, 엔진이 그리는 숫자도
+; 같은 칸에 가고 왼쪽·오른쪽으로 커서를 옮겨도 ✱ 가 보이지 않게 한다. 옮긴 커서 자리는 다음 프레임에 끝 자리로 되돌린다
+QpWindow:
+    PHX
+    LDA #$04
+    STA.l $7E0AD7
+    LDA.l $7E0B02
+    CMP #$02
+    BNE +
+    INC                     ; 처음 열린 0 을 1 로
+    STA.l $7E0B02
++
+    REP #$20
+    LDA.w #!qp_off_xy
+    STA.l $7E0A56
+    STA.l $7E0A58
+    STA.l $7E0A5A
+    STA.l $7E0A5C
+    LDA.w #!qp_num_xy
+    STA.l $7E0A5E
+    LDA.w #$2001            ; 엔진이 첫 줄에 그린 「0000」 과 커서를 지운다
+    LDX.w #$000A
+-
+    STA.l !qp_line,X
+    DEX
+    DEX
+    BPL -
+    SEP #$20
+    LDA.l $7E0B02
+    STA.l !qp_num
+    LDA #$20
+    STA.l !qp_num+1
+    LDA.l $7E0F2C
+    AND #$3F
+    CLC
+    ADC #$02                ; 최대의 타일 코드
+    LDX.w #$A07B            ; ▲
+    CMP.l $7E0B02
+    BNE +
+    LDX.w #$2001
++
+    REP #$20
+    TXA
+    STA.l !qp_up
+    SEP #$20
+    LDX.w #$207B            ; ▼
+    LDA.l $7E0B02
+    CMP #$03
+    BNE +
+    LDX.w #$2001
++
+    REP #$20
+    TXA
+    STA.l !qp_down
+    SEP #$20
+    PLX
+    RTS
+
+; 04:9C46 등(M = 16, X = 16 = 창 번호 × 2, DB = 04). 덮은 LDA $EB48,X / STA $DA 를 하되(A 도 레코드로 남김), 가게 개수 창
+; ($0F2C bit6)이 창 5C 를 열 때만 ShopQtyRec 을 준다. 5C 는 맡기는 곳 등과 같이 쓰므로 레코드는 그대로 둔다
+ShopOpenRes:
+    LDA.w $EB48,X
+    CPX.w #$005C*2
+    BNE +
+    PHA
+    LDA.l $7E0F2C
+    AND.w #$0040
+    BEQ .keep
+    PLA
+    LDA.w #ShopQtyRec
+    BRA +
+.keep
+    PLA
++
+    STA.b $DA
+    RTL
+
+; 개수 창 메시지(「몇 개 사시겠어요? / 쓰는 돈 / 남는 돈」, 팔기는 「받는 돈 / 판 뒤」)의 둘째·셋째 줄 숫자 다섯 칸과 G 를 다섯 칸을 창 버퍼(7E:5000, 수 창이 떠 있는 동안 매 프레임 VRAM 으로 감)에 쓴다.
+; A = 개수. 첫 줄 = 개수 × 한 개 값($0F28~), 둘째 줄 = 가진 돈(7E:2019~) − 첫 줄(사기) 또는 + 첫 줄(팔기, 99999 에서 멈춤).
+; 숫자 타일은 값 + 2, 앞의 0 은 빈칸 01. 낮은 바이트만 쓴다(높은 바이트는 창이 그린 색). DP $00~$08 을 쓴다
+QpDraw:
+    PHP
+    PHB
+    PHK                     ; 자리값 표 QpPlace 를 .w 로 읽으려고 DB = 이 뱅크(부르는 곳은 DB = 04)
+    PLB
+    REP #$30
+    PHX
+    PHY
+    TAX
+    LDA.b $00               ; 수 창 깜박임(04:D162) 안에서 불리므로 둘레 코드의 DP $00~$09 를 맡겼다가 되돌린다
+    PHA
+    LDA.b $02
+    PHA
+    LDA.b $04
+    PHA
+    LDA.b $06
+    PHA
+    LDA.b $08
+    PHA
+    TXA
+    AND.w #$000F
+    TAX
+    SEP #$20
+    STZ.b $00
+    STZ.b $01
+    STZ.b $02
+-
+    DEX
+    BMI +
+    REP #$21
+    LDA.b $00
+    ADC.l $7E0F28
+    STA.b $00
+    SEP #$20
+    LDA.b $02
+    ADC.l $7E0F2A
+    STA.b $02
+    BRA -
++
+    REP #$20
+    LDA.b $00
+    STA.b $04
+    SEP #$20
+    LDA.b $02
+    STA.b $06
+    LDA.l $7E0F2C
+    BMI .sell
+    REP #$21
+    LDA.l $7E2019
+    SEC
+    SBC.b $04
+    STA.b $04
+    SEP #$20
+    LDA.l $7E201B
+    SBC.b $06
+    STA.b $06
+    BRA .draw
+.sell
+    REP #$21
+    LDA.l $7E2019
+    ADC.b $04
+    STA.b $04
+    SEP #$20
+    LDA.l $7E201B
+    ADC.b $06
+    STA.b $06
+.draw
+    LDX.w #!qp_row1
+    JSR QpNumber
+    REP #$20
+    LDA.b $04
+    STA.b $00
+    SEP #$20
+    LDA.b $06
+    STA.b $02
+    LDX.w #!qp_row2
+    JSR QpNumber
+    REP #$30
+    PLA
+    STA.b $08
+    PLA
+    STA.b $06
+    PLA
+    STA.b $04
+    PLA
+    STA.b $02
+    PLA
+    STA.b $00
+    PLY
+    PLX
+    PLB
+    PLP
+    RTS
+
+; $00~$02(24비트)를 99999 에서 멈춰 X(7E 뱅크 버퍼 주소)부터 다섯 칸에 쓴다. M = 8, X = 16
+QpNumber:
+    LDA.b $02
+    BNE .max
+    REP #$20
+    LDA.b $00
+    CMP.w #$86A0            ; 100000 = $0186A0. 높은 바이트가 1 이면 아래 16비트로 견준다
+    SEP #$20
+    BRA .ok
+.max
+    CMP #$01
+    BNE .big
+    REP #$20
+    LDA.b $00
+    CMP.w #$86A0
+    SEP #$20
+    BCC .ok
+.big
+    LDA #$9F                ; 99999 = $01869F
+    STA.b $00
+    LDA #$86
+    STA.b $01
+    LDA #$01
+    STA.b $02
+.ok
+    LDY.w #$0000
+    STZ.b $08               ; 앞자리 0 을 빈칸으로(0 이 아닌 숫자를 만나면 1)
+-
+    STZ.b $07
+--
+    ; $00~$02 >= 자리값(QpPlace,Y)이면 빼고 숫자를 하나 올린다
+    REP #$20
+    LDA.b $00
+    SEC
+    SBC.w QpPlace,Y
+    STA.b $09
+    SEP #$20
+    LDA.b $02
+    SBC.w QpPlace+2,Y
+    BCC +
+    STA.b $02
+    REP #$20
+    LDA.b $09
+    STA.b $00
+    SEP #$20
+    INC.b $07
+    BRA --
++
+    LDA.b $07
+    BNE ++
+    LDA.b $08
+    BNE ++
+    CPY.w #$000C            ; 마지막(일의 자리)은 0 도 찍는다
+    BEQ ++
+    LDA #$01
+    BRA +++
+++
+    INC.b $08
+    LDA.b $07
+    CLC
+    ADC #$02
++++
+    XBA                     ; 메시지 창 칸은 캔버스 타일(096~, 높은 바이트에 타일 bit8)이라 글자 색 20 과 함께 워드로 쓴다
+    LDA #$20
+    XBA
+    REP #$20
+    STA.l $7E0000,X
+    SEP #$20
+    INX
+    INX
+    INY
+    INY
+    INY
+    CPY.w #$000F
+    BCC -
+    REP #$20
+    LDA.w #$200F            ; G
+    STA.l $7E0000,X
+    SEP #$20
+    RTS
+QpPlace:
+    dl 10000, 1000, 100, 10, 1
 
 ; 가게 팔기 목록의 「판매불가」(ShopSellPrice, Y = 빈칸 여섯을 찍은 뒤 자리). 그 여섯 칸에 그리고 Y 는 그대로 둔다
 ShopSellCannot:
