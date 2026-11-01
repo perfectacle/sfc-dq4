@@ -256,7 +256,8 @@ def pack_alt(rom, alt_items, banks, changes, tail):
         return [(banks[0], region)], lm, sm, em, banks[0] + len(region)
     groups, i, used = [[] for _ in banks], 0, 0
     for key, items in alt_items:
-        size = region_size(rom, [(key, items)], banks[0], changes)
+        # 크기는 주소와 무관하다. 첫 뱅크 시작에서 재면 끝 가까이 둔 첫 뱅크가 넘침으로 막혀 다음 뱅크로 못 간다.
+        size = region_size(rom, [(key, items)], (banks[0] & 0xFF0000) | 0x8000, changes)
         while i < len(banks) and (banks[i] & 0xFFFF) + used + size > 0x10000:
             i, used = i + 1, 0
         if i == len(banks):

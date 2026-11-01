@@ -171,6 +171,13 @@ class SplitBankTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             pack_alt(self.rom, lists, [0x33FFF0, 0x35FFF0], {}, 0)
 
+    def test_alt_first_bank_too_small_moves_on(self):
+        # 33:FFFC 는 4바이트라 9바이트 목록이 하나도 안 들어가, 모두 다음 뱅크로 간다.
+        lists = [(f'new:a{i}', [(OLD, DAY)]) for i in range(2)]
+        regions, lm, _, _, _ = pack_alt(self.rom, lists, [0x33FFFC, 0x358000], {}, 0)
+        self.assertEqual(lm, {'new:a0': 0x358000, 'new:a1': 0x358009})
+        self.assertEqual([b for b, _ in regions], [0x358000])
+
     def test_bank_lists_validated(self):
         self.assertEqual(banks_of(0x328000, '기본'), [0x328000])
         self.assertEqual(banks_of([0x328000, 0x348000], '기본'), [0x328000, 0x348000])
