@@ -376,6 +376,7 @@ ShopSellQty:
     LDA.w $0F2A
     STA.b $F7
 .done
+    JSR ShopSellWarn
     RTL
 .cancel
     STZ.w $0F2C
@@ -423,6 +424,28 @@ ShopSellSlot:
     CMP.w $0F22
     BNE +
     LDA.b $47
++
+    RTS
+
+; 고른 칸이 장비 중이면 058 「{N}골드에 사들일게요」 앞에 「지금 장착하고 있는 물건이다.」(원작에서 빈 메시지 3D, ▼ 를 기다린
+; 뒤 058 이 이어 찍힘). 이름이 가나로 남은 물건 뒤 조사({은})는 찍다 멈추므로 이름을 넣지 않는다. 가게 말투 넷을 쓸 빈 메시지가 남지 않아 서술 한 줄로 두고, 058 이 가게 말투로 다시 묻는다
+ShopSellWarn:
+    LDX.w $0F23
+    JSR ShopSellSlot
+    LDA.b $47
+    BEQ +
+    db $00, $95, $00
+    REP #$20
+    LDA #$003D
+    JSL $248157
+    SEP #$20
+    ; 메시지를 찍으면 $F5~ 가 바뀌어 058 의 {N} 이 0 이 된다. 치를 값($0F28~)으로 되돌린다
+    LDA.w $0F28
+    STA.b $F5
+    LDA.w $0F29
+    STA.b $F6
+    LDA.w $0F2A
+    STA.b $F7
 +
     RTS
 

@@ -98,6 +98,19 @@ class SellQtyTest(unittest.TestCase):
         self.assertEqual(body.count('STZ.w $0F2C'), 2)
 
 
+class SellEquippedTest(unittest.TestCase):
+    def test_equipped_line_before_price(self):
+        # 이름이 가나로 남은 물건 뒤 조사에서 찍기가 멈추므로 이름·조사를 넣지 않는다(dq4-window-check talk03)
+        self.assertEqual(dq4sysmsg.SOURCE[0x03D], '지금 장착하고 있는 물건이다.')
+        self.assertEqual(dq4sysmsg.TEXTS[0x03D][-1], dq4sysmsg.END_WAIT)
+        body = ASM[ASM.index('ShopSellQty:'):ASM.index('ShopSellCount:')]
+        self.assertIn('.done\n    JSR ShopSellWarn\n    RTL', body)
+        done = ASM[ASM.index('ShopSellWarn:'):ASM.index('ShopSellExtra:')]
+        # 고른 칸의 장비 중 비트($47)를 보고, 창을 닫은 뒤 3D 를 찍는다. 058 은 돌아간 원래 코드가 찍는다
+        for need in ('LDX.w $0F23', 'JSR ShopSellSlot', 'LDA.b $47', 'db $00, $95, $00', 'LDA #$003D', 'JSL $248157', 'LDA.w $0F28'):
+            self.assertIn(need, done)
+
+
 class SellPriceTest(unittest.TestCase):
     def test_cannot_sell_phrase(self):
         self.assertEqual(dq4windowtext.FIXED[dq4windowtext.CANNOT_SELL], '판매불가')
