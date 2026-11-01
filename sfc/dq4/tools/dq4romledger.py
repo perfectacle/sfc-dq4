@@ -116,15 +116,14 @@ def intersect(a, b):
 def cleared_ranges(ranges, mirror, before, after):
     """ranges 가운데 뱅크 30~3F 에서 거울을 0 으로 지운 곳의 [시작, 끝) 목록.
     지운 자리는 거울 그대로이던(before == mirror) 바이트가 뒤에 0 인 칸이 CLEAR_MIN 바이트 넘게 이어지는 곳이다.
-    거울이 원래 0 인 칸도 잇는다. 새 자료 속의 0 은 짧게 끊기므로 빈 자리로 보지 않는다. 뱅크 끝에 닿는 0 줄은 짧아도
-    지운 자리다(자료 뒤를 뱅크 끝까지 비운 것)."""
+    거울이 원래 0 인 칸도 잇는다. 새 자료 속의 0 은 짧게 끊기므로 빈 자리로 보지 않는다."""
     lo, hi = ORIGINAL_SIZE, min(MIRROR_END, len(after))
     if hi <= lo:
         return []
     b = np.frombuffer(bytes(before[lo:hi]), np.uint8)
     a = np.frombuffer(bytes(after[lo:hi]), np.uint8)
     m = np.frombuffer(bytes(mirror[lo:hi]), np.uint8)
-    spans = [(lo + s, lo + e) for s, e in runs((a == 0) & (b == m)) if e - s >= CLEAR_MIN or (lo + e) % BANK == 0]
+    spans = [(lo + s, lo + e) for s, e in runs((a == 0) & (b == m)) if e - s >= CLEAR_MIN]
     return intersect(ranges, spans)
 
 

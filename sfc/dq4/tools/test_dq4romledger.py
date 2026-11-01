@@ -81,16 +81,16 @@ class DiffTest(unittest.TestCase):
         self.assertEqual(L.merge(got, gap=1), [(s, s + 39), (s + 62, s + 99)])
         self.assertEqual(L.intersect([(0, 10), (20, 30)], [(5, 25)]), [(5, 10), (20, 25)])
 
-    def test_short_zero_run_at_bank_end_is_cleared(self):
+    def test_short_zero_run_at_bank_end_is_not_cleared(self):
         s = L.ORIGINAL_SIZE + L.BANK
         mirror = bytearray(L.MIRROR_END)
-        mirror[s - 8:s + 8] = b'\x11' * 16
+        mirror[s - 64:s + 8] = b'\x11' * 72
         after = bytearray(mirror)
         after[s - 8:s] = bytes(8)
         after[s] = 0x09
         ranges = L.diff_ranges(mirror, after)
         self.assertEqual(ranges, [(s - 8, s + 1)])
-        self.assertEqual(L.cleared_ranges(ranges, mirror, mirror, after), [(s - 8, s)])
+        self.assertEqual(L.cleared_ranges(ranges, mirror, mirror, after), [])
 
     def test_build_ledger(self):
         dq5 = bytes(L.ORIGINAL_SIZE)
@@ -162,16 +162,35 @@ class OverlapTest(unittest.TestCase):
 
     def test_later_stage_rewriting_earlier_bytes(self):
         stages = [stage('a', [(0x10, 0x20)]), stage('b', [(0x30, 0x40)]), stage('c', [(0x18, 0x34)])]
-        self.assertEqual(C.overlaps(stages, 0x100), [('a', 'c', 0x18, 0x20), ('b', 'c', 0x30, 0x34)])
+        self.assertEqual(C.overlaps(stages, 0x100),
+                         [('a', 'c', 0x18, 0x20, False), ('b', 'c', 0x30, 0x34, False)])
 
-    def test_cleared_bytes_are_free_for_later_stages(self):
+    def test_writing_cleared_bytes_is_reuse(self):
         stages = [stage('a', [(0x10, 0x20)], cleared=[(0x10, 0x18)]), stage('b', [(0x10, 0x1C)])]
-        self.assertEqual(C.overlaps(stages, 0x100), [('a', 'b', 0x18, 0x1C)])
+        self.assertEqual(C.overlaps(stages, 0x100), [('a', 'b', 0x10, 0x18, True), ('a', 'b', 0x18, 0x1C, False)])
 
-    def test_clearing_later_releases_owner(self):
+    def test_clearing_stage_owns_the_cleared_bytes(self):
         stages = [stage('a', [(0x10, 0x20)]), stage('b', [(0x10, 0x20)], cleared=[(0x10, 0x20)]),
                   stage('c', [(0x10, 0x20)])]
-        self.assertEqual(C.overlaps(stages, 0x100), [])
+        self.assertEqual(C.overlaps(stages, 0x100), [('b', 'c', 0x10, 0x20, True)])
+
+    def test_reuse_needs_reuse_entry(self):
+        text = '[[overlap]]\nearlier = "a"\nlater = "b"\nat = "00:8010~00:801F"\nwhy = "x"'
+        stages = [stage('a', [(0x10, 0x20)], cleared=[(0x10, 0x20)]), stage('b', [(0x10, 0x14)])]
+        self.assertEqual(len(C.check_overlaps(stages, C.load_allow(text, ['a', 'b']), 0x100)[1]), 1)
+        allow = C.load_allow(text + '\nreuse = true', ['a', 'b'])
+        self.assertEqual(C.check_overlaps(stages, allow, 0x100)[1], [])
+
+    def test_max(self):
+        allow = C.load_allow('[[original]]\nstage = "a"\nat = "00:8000~00:80FF"\nmax = 8\nwhy = "x"', ['a'])
+        C.find_allow(allow, 'original', 0, 6, stage='a')
+        self.assertEqual(C.over_max(allow), [])
+        C.find_allow(allow, 'original', 0x10, 0x14, stage='a')
+        self.assertEqual(len(C.over_max(allow)), 1)
+        with self.assertRaises(C.AllowError):
+            C.load_allow('[[original]]\nstage = "a"\nat = "00:8000"\nmax = 0\nwhy = "x"', ['a'])
+        with self.assertRaises(C.AllowError):
+            C.load_allow('[[original]]\nstage = "a"\nat = "00:8000"\nreuse = true\nwhy = "x"', ['a'])
 
     def test_check_overlaps_reports_unallowed(self):
         allow = C.load_allow('[[overlap]]\nearlier = "a"\nlater = "b"\nat = "00:8010~00:8013"\nwhy = "x"', ['a', 'b'])
@@ -187,6 +206,8 @@ class OriginalTest(unittest.TestCase):
         dq5 = rom(0x9000, o100=b'\1' * 40, o140=b'\1' * 40, o7FDC=b'\1\1\1\1')
         blocks = C.original_blocks(stage('a', [(0xF0, 0x200), (0x7FDC, 0x7FE0), (0x8F00, 0x9100)]), dq5)
         self.assertEqual(blocks, [(0x100, 0x128), (0x140, 0x168)])     # 틈 24바이트는 GAP 보다 커서 둘
+        dq5 = rom(0x9000, o7FF0=b'\1' * 0x20)
+        self.assertEqual(C.original_blocks(stage('a', [(0x7FF0, 0x8010)]), dq5), [(0x7FF0, 0x8000), (0x8000, 0x8010)])
         dq5 = rom(0x9000, o100=b'\1' * 40, o138=b'\1' * 40)
         self.assertEqual(C.original_blocks(stage('a', [(0xF0, 0x200)]), dq5), [(0x100, 0x160)])
 
@@ -196,6 +217,19 @@ class OriginalTest(unittest.TestCase):
         self.assertEqual(small['a'], {'blocks': 1, 'bytes': 10})
         self.assertEqual(len(rows), 1)
         self.assertEqual(len(bad), 1)
+
+
+class StagesTest(unittest.TestCase):
+    def test_missing_stages_fail_unless_allowed(self):
+        dq5 = bytes(L.ORIGINAL_SIZE)
+        data = L.expanded_original(dq5)
+        ledger = L.build(dq5, [('title', data)])
+        _, fails = C.run(ledger, data, dq5, '')
+        self.assertTrue(any('overture' in f and 'people' in f for f in fails))
+        report, fails = C.run(ledger, data, dq5, '', allow_missing=True)
+        self.assertFalse(any('단계' in f and '없음' in f for f in fails))
+        self.assertTrue(any('people' in w for w in report['warnings']))
+        self.assertTrue(report['limits'])
 
 
 class CrossTest(unittest.TestCase):

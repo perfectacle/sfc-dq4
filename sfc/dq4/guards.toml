@@ -92,7 +92,7 @@ needs = ["rom", "ASAR", "DQ4_GALMURI", "dq4cores.py 로 빌드한 코어(또는 
 
 [[check]]
 name = "dq4-rom-ledger"
-why = "빌드 단계끼리 앞 단계가 쓴 바이트를 몰래 다시 쓰거나, 원래 DQ5 코드·자료를 허용 목록에 없이 크게 덮거나, 뱅크 경계를 넘는 쓰기·코드, 가게·여관·출구·메시지·인물 표·벡터·체크섬·훅 대상이 깨지는 일을 에뮬레이터 없이 롬 바이트로 잡는다. 자원 저장소(DQ4_ASSETS)가 있으면 곡·인물 단계까지 본다"
+why = "빌드 단계끼리 앞 단계가 쓴 바이트를 몰래 다시 쓰거나, 원래 DQ5 코드·자료를 허용 목록에 없이 크게 덮거나, 뱅크 경계를 넘는 쓰기·코드, 가게·여관·출구·메시지·인물 표·벡터·체크섬·훅 대상이 깨지는 일을 에뮬레이터 없이 롬 바이트로 잡는다. 곡·인물 단계가 빠진 장부(자원 저장소 없는 빌드)는 실패"
 paths = [
   "sfc/dq4/tools/**",
   "sfc/dq4/ledger-allow.toml",
@@ -101,4 +101,4 @@ paths = [
   "uv.lock",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4romledgercheck.py --ledger work/ch1/ledger.json --report work/ledgercheck/report.json"
-needs = ["rom", "ASAR", "DQ4_GALMURI"]
+needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]

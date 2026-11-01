@@ -124,6 +124,47 @@ class RunTest(unittest.TestCase):
             (root / 'work' / 'a.sfc').write_bytes(b'2')
             self.assertNotEqual(guards.input_key(check, root, env), k2)
 
+    def test_hash_path_dirs_by_stat_and_big_files_by_stat(self):
+        import hashlib
+        import os
+        import tempfile
+
+        def key(p):
+            h = hashlib.sha256()
+            guards.hash_path(h, p)
+            return h.hexdigest()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / 'assets'
+            (d / 'sub').mkdir(parents=True)
+            f = d / 'sub' / 'a.bin'
+            f.write_bytes(b'abc')
+            os.utime(f, ns=(1, 1_000_000_000))
+            k1 = key(d)
+            f.write_bytes(b'xyz')                       # 같은 크기, 다른 내용
+            os.utime(f, ns=(1, 1_000_000_000))
+            self.assertEqual(key(d), k1)                # 폴더는 내용을 읽지 않음
+            os.utime(f, ns=(1, 2_000_000_000))
+            self.assertNotEqual(key(d), k1)
+            k2 = key(d)
+            (d / 'b.bin').write_bytes(b'')
+            self.assertNotEqual(key(d), k2)
+            small = key(f)
+            f.write_bytes(b'abc')
+            os.utime(f, ns=(1, 2_000_000_000))
+            self.assertNotEqual(key(f), small)          # 작은 파일은 내용
+            old = guards.BIG_FILE
+            guards.BIG_FILE = 2
+            try:
+                big = key(f)
+                f.write_bytes(b'xyz')
+                os.utime(f, ns=(1, 2_000_000_000))
+                self.assertEqual(key(f), big)           # 큰 파일은 크기·mtime
+                os.utime(f, ns=(1, 3_000_000_000))
+                self.assertNotEqual(key(f), big)
+            finally:
+                guards.BIG_FILE = old
+
     def test_run_check_caches_passes_only(self):
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:

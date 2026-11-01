@@ -9,8 +9,8 @@
 
   python sfc/dq4/tools/dq4romledgercheck.py --ledger work/ch1/ledger.json [--rom 롬] [--report work/ledgercheck/report.json]
 
---rom 을 빼면 장부 마지막 단계의 파일(장부와 같은 폴더)을 본다. 자원 저장소 없이 빌드해 곡·인물 단계가 없으면 그 단계의
-허용 항목은 쓰이지 않아 경고만 남는다.
+--rom 을 빼면 장부 마지막 단계의 파일(장부와 같은 폴더)을 본다. 장부에 dq4romledger.STAGES 가 다 없으면(자원 저장소
+없이 빌드) 실패다. --allow-missing-stages 를 줄 때만 경고로 낮춘다.
 """
 import argparse
 import hashlib
@@ -57,8 +57,13 @@ def load_allow(text, stages):
         for n, item in enumerate(items, 1):
             where = f'[[{kind}]] {n}번째'
             keys = set(KINDS[kind]) | {'at', 'why'}
-            if set(item) != keys:
-                raise AllowError(f'{where}: 키는 {sorted(keys)} 여야 함(받은 것 {sorted(item)})')
+            extra = {'max', 'reuse'} if kind == 'overlap' else {'max'}
+            if not keys <= set(item) <= keys | extra:
+                raise AllowError(f'{where}: 키는 {sorted(keys)}(와 {"·".join(sorted(extra))}) 여야 함(받은 것 {sorted(item)})')
+            if 'reuse' in item and not isinstance(item['reuse'], bool):
+                raise AllowError(f'{where}: reuse 는 true·false')
+            if 'max' in item and (not isinstance(item['max'], int) or item['max'] <= 0):
+                raise AllowError(f'{where}: max 는 양의 정수(바이트)')
             if not isinstance(item['why'], str) or not item['why'].strip():
                 raise AllowError(f'{where}: why 가 비었음')
             for field in KINDS[kind]:
@@ -68,18 +73,25 @@ def load_allow(text, stages):
                 span = parse_at(item['at'])
             except ValueError as e:
                 raise AllowError(f'{where}: {e}') from None
-            out[kind].append({**item, 'span': span, 'used': False})
+            out[kind].append({**item, 'span': span, 'used': 0})
     return out
 
 
 def find_allow(allow, kind, s, e, **names):
-    """[s, e) 를 통째로 덮고 단계 이름이 맞는(또는 '*') 첫 항목. 없으면 None."""
+    """[s, e) 를 통째로 덮고 단계 이름이 맞는(또는 '*') 첫 항목. 없으면 None. 받은 바이트를 항목의 used 에 더한다."""
     for item in allow[kind]:
         lo, hi = item['span']
-        if lo <= s and e <= hi and all(item[k] in ('*', v) for k, v in names.items()):
-            item['used'] = True
+        if lo <= s and e <= hi and all(item.get(k, False) == v if k == 'reuse' else item[k] in ('*', v)
+                                       for k, v in names.items()):
+            item['used'] += e - s
             return item
     return None
+
+
+def over_max(allow):
+    """max 를 넘게 받은 항목의 실패 글."""
+    return [f'[[{kind}]] {item["at"]}: 받은 쓰기 {item["used"]}바이트가 max {item["max"]} 를 넘음'
+            for kind, items in allow.items() for item in items if 'max' in item and item['used'] > item['max']]
 
 
 def subtract(ranges, holes):
@@ -106,8 +118,11 @@ def written(stage):
 
 
 def overlaps(stages, size):
-    """[(앞 단계, 뒤 단계, 시작, 끝)]. 바이트마다 마지막으로 쓴 단계를 들고 간다. 거울을 지운 바이트는 주인을 비운다."""
+    """[(앞 단계, 뒤 단계, 시작, 끝, 빈 자리 재사용)]. 바이트마다 마지막으로 쓴 단계를 들고 간다. 거울을 지운 바이트도
+    지운 단계가 주인이다. 뒤 단계가 그 자리를 쓰면 재사용(True)으로 따로 적는다: 지운 0 이 자료일 수도 있어 허용 목록에
+    빈 자리로 쓴다고 밝혀야 받는다."""
     owner = bytearray(size)
+    freed = bytearray(size)
     out = []
     for i, st in enumerate(stages, 1):
         for s, e in written(st):
@@ -116,20 +131,23 @@ def overlaps(stages, size):
                 j = s
                 while j < e:
                     k = j + 1
-                    while k < e and owner[k] == owner[j]:
+                    while k < e and owner[k] == owner[j] and freed[k] == freed[j]:
                         k += 1
                     if owner[j]:
-                        out.append((stages[owner[j] - 1]['name'], st['name'], j, k))
+                        out.append((stages[owner[j] - 1]['name'], st['name'], j, k, bool(freed[j])))
                     j = k
             owner[s:e] = bytes([i]) * (e - s)
+            freed[s:e] = bytes(e - s)
         for r in st.get('cleared', ()):
             s, e = L.range_of(r)
-            owner[s:e] = bytes(e - s)
+            owner[s:e] = bytes([i]) * (e - s)
+            freed[s:e] = b'\1' * (e - s)
     return out
 
 
 def original_blocks(stage, dq5):
-    """단계가 원래 롬(1.5MB)의 0 아닌 바이트를 덮은 곳을 GAP 이하 틈은 이어 [시작, 끝) 목록으로. 머리는 뺀다."""
+    """단계가 원래 롬(1.5MB)의 0 아닌 바이트를 덮은 곳을 GAP 이하 틈은 이어 [시작, 끝) 목록으로. 머리는 빼고,
+    허용 목록을 뱅크마다 적도록 뱅크 경계에서 자른다."""
     hits = []
     for s, e in written(stage):
         start = None
@@ -142,7 +160,14 @@ def original_blocks(stage, dq5):
                 start = None
         if start is not None:
             hits.append((start, min(e, len(dq5))))
-    return L.merge(hits, GAP)
+    out = []
+    for s, e in L.merge(hits, GAP):
+        while s // L.BANK != (e - 1) // L.BANK:
+            cut = (s // L.BANK + 1) * L.BANK
+            out.append((s, cut))
+            s = cut
+        out.append((s, e))
+    return out
 
 
 def fmt(s, e):
@@ -152,14 +177,16 @@ def fmt(s, e):
 def check_overlaps(stages, allow, size):
     rows, bad = [], []
     merged = defaultdict(list)
-    for a, b, s, e in overlaps(stages, size):
-        merged[a, b].append((s, e))
-    for (a, b), spans in merged.items():
+    for a, b, s, e, reuse in overlaps(stages, size):
+        merged[a, b, reuse].append((s, e))
+    for (a, b, reuse), spans in merged.items():
         for s, e in L.merge(spans):
-            item = find_allow(allow, 'overlap', s, e, earlier=a, later=b)
-            rows.append({'earlier': a, 'later': b, 'at': fmt(s, e), 'bytes': e - s, 'why': item and item['why']})
+            item = find_allow(allow, 'overlap', s, e, earlier=a, later=b, reuse=reuse)
+            rows.append({'earlier': a, 'later': b, 'at': fmt(s, e), 'bytes': e - s, 'reuse': reuse,
+                         'why': item and item['why']})
             if not item:
-                bad.append(f'겹침 {a} → {b} {fmt(s, e)}({e - s}바이트)가 허용 목록에 없음')
+                what = '앞 단계가 비운 자리를 다시 씀' if reuse else '겹침'
+                bad.append(f'{what} {a} → {b} {fmt(s, e)}({e - s}바이트)가 허용 목록에 없음')
     return rows, bad
 
 
@@ -393,10 +420,19 @@ INVARIANTS = {
 }
 
 
-def run(ledger, rom, dq5, allow_text):
-    """(보고 dict, [실패]). 경고는 보고의 warnings."""
+# 단계 사이 차이로 보는 검사라 볼 수 없는 것. 보고와 출력에 늘 남긴다
+LIMITS = ('앞 단계와 같은 값을 다시 쓴 바이트는 장부에 없어 겹침으로 보이지 않음',
+          '한 단계 안 모듈끼리의 덮어쓰기는 보이지 않음')
+
+
+def run(ledger, rom, dq5, allow_text, allow_missing=False):
+    """(보고 dict, [실패]). 경고는 보고의 warnings. allow_missing 이면 장부에 없는 단계를 실패로 치지 않는다."""
     stages = ledger['stages']
     fails, warnings = [], []
+    missing = [n for n in L.STAGES if n not in {s['name'] for s in stages}]
+    if missing:
+        msg = f'장부에 단계 {", ".join(missing)} 가 없음(자원 저장소 DQ4_ASSETS 없이 빌드함)'
+        (warnings if allow_missing else fails).append(msg)
     if hashlib.sha1(dq5).hexdigest() != ledger['base']['sha1']:
         fails.append('원래 롬 SHA-1 이 장부의 base 와 다름')
     if not stages or hashlib.sha1(rom).hexdigest() != stages[-1]['sha1']:
@@ -420,11 +456,13 @@ def run(ledger, rom, dq5, allow_text):
     summary, bad = inv_hooks(rom, dq5, stages)
     report['invariants']['hooks'] = {'summary': summary, 'problems': bad}
     fails += [f'hooks: {p}' for p in bad]
+    fails += over_max(allow)
     for kind, items in allow.items():
         for item in items:
             if not item['used']:
                 warnings.append(f'[[{kind}]] {item["at"]} 에 맞는 쓰기가 없음(지워도 되는지 확인)')
     report['warnings'] = warnings
+    report['limits'] = list(LIMITS)
     return report, fails
 
 
@@ -435,10 +473,13 @@ def main():
     ap.add_argument('--dq5', type=Path, default=Path('rom/dq5.sfc'))
     ap.add_argument('--allow', type=Path, default=ALLOW)
     ap.add_argument('--report', type=Path, help='보고를 JSON 으로 쓸 곳')
+    ap.add_argument('--allow-missing-stages', action='store_true',
+                    help='곡·인물 단계 없이 만든 장부도 받음(자원 저장소 없는 빌드를 일부러 볼 때만)')
     args = ap.parse_args()
     ledger = L.load(args.ledger)
     rom = args.rom or args.ledger.parent / ledger['stages'][-1]['file']
-    report, fails = run(ledger, rom.read_bytes(), args.dq5.read_bytes(), args.allow.read_text(encoding='utf-8'))
+    report, fails = run(ledger, rom.read_bytes(), args.dq5.read_bytes(), args.allow.read_text(encoding='utf-8'),
+                        args.allow_missing_stages)
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
@@ -450,6 +491,11 @@ def main():
             print(f"  {name}: 원래 롬 작은 덮기 {small['blocks']}곳 {small['bytes']}바이트(보고만)")
     for name, inv in report['invariants'].items():
         print(f"불변식 {name}: {'통과' if not inv['problems'] else '실패'} — {inv['summary']}")
+    reuse = [r for r in report['overlap'] if r['reuse']]
+    if reuse:
+        print(f"  그 가운데 앞 단계가 비운 자리 다시 쓰기 {len(reuse)}곳 {sum(r['bytes'] for r in reuse)}바이트")
+    for limit in report['limits']:
+        print(f'보지 못함: {limit}')
     for w in report['warnings']:
         print(f'경고: {w}')
     for f in fails:
