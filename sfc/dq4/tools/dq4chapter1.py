@@ -389,7 +389,9 @@ def messages(ported_messages, report):
     first = dq4npcport.FIRST_MESSAGE + len(ported_messages)
     events = dq4ch1event.texts(first)
     import dq4ch2event
+    import dq4signs
     for name, texts in (('1장', TEXTS), ('서장', dq4prologue.TEXTS), ('시스템', dq4sysmsg.TEXTS),
+                        ('팻말', dq4signs.texts()),
                         ('1장 사건', events), ('2장', dq4ch2event.texts(chapter2_message(first)))):
         clash = set(out) & set(texts)
         if clash:
@@ -682,6 +684,8 @@ def build(rom, dq5, dq4, work, prologue=True, chapter2=False):
     out = bytearray(dq4josa.apply(out))
     import dq4msgnames
     out = bytearray(dq4msgnames.apply(out))
+    import dq4signs
+    out = bytearray(dq4signs.apply(out, ines.prg(dq4.read_bytes())))
     o = lorom(START_TABLE)
     if out[o:o + 6] != START_ORIG:
         raise SystemExit(f'{START_TABLE:06X}: 새 게임 첫 맵 표가 원래 값이 아님 {out[o:o + 6].hex()}')
