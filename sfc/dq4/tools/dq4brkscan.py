@@ -39,7 +39,7 @@ STOPS = {0x6C, 0x7C, 0xDC, 0xDB, 0xCB}          # 간접 점프·STP·WAI: 따�
 INDIRECT_CALL = 0xFC                            # JSR (abs,X): 대상은 모르고 다음 명령으로 이어 감
 # native() 의 이름 가운데 자료(이벤트 스크립트·기록·빈 줄)인 것과, PHP 로 시작하지 않는 코드. 둘 다 아닌 이름이
 # PHP 로 시작하지 않으면 문제로 친다(자료로 잘못 알고 건너뛰지 않게)
-DATA_ENTRIES = {'blank2', 'end_event', 'talk_event', 'ev_back', 'ev_out', 'fly_event', 'record', 'event',
+DATA_ENTRIES = {'blank2', 'end_event', 'talk_event', 'ev_back', 'ev_out', 'ev_stop', 'fly_event', 'record', 'event',
                 'kick_walk', 'name', 'recruits'}
 CODE_ENTRIES = {'hero_picture'}
 
