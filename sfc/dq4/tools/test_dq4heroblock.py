@@ -153,8 +153,79 @@ def hero_frames(start, prefix, legs):
     return out
 
 
+# 1C 로 걷는 인물마다 겹침을 어떻게 피하나. 장치(DEVICES 의 루틴을 걷기 전에 부름)가 없으면 까닭이 있어야 한다.
+# 까닭은 아래 시험이나 dq4heroblockcheck 사례·이어 걷기의 겹침 0 실측으로 지킨다
+PASS_NO_DEVICE = {
+    pro.MASTER_SCRIPT: '서장 수련 검사: 주인공은 칼 합 동안 제자리에 묶여 길 밖(서장 이어 걷기 겹침 0)',
+    pro.FROG_SCRIPT: '개구리: 연못·다리 동쪽 X 38 이상으로만 움직이고 주인공 판정 칸은 X 35 까지(test_frog_stays_off_the_bridge_cell)',
+    pro.MOTHER_SCRIPT: '어머니: 주인공 길과 떨어짐(test_supper_parents_and_hero_never_meet)',
+    '05:A84F': '1장 첫머리 왕: 주인공은 (32,42) 에 묶여 길 밖(서장 이어 걷기 겹침 0)',
+    ev.WALKER_SCRIPT: '감옥 재회 프레아: 주인공이 계단 도착 칸에 서 있을 때만(1장 이어 걷기 겹침 0)',
+    ev.KIDNAPPER_SCRIPT: '납치범: 판정 줄(Y 19) 위로만 걸음(kidnap 사례 겹침 0)',
+    ev.KID_SCRIPT: '납치된 아이: 납치범과 같음',
+    ev.CRY_SCRIPT: '우는 아이: 판정 줄(Y 37) 위에서 멈춤(cry 사례 겹침 0)',
+    ev.RESCUED_SCRIPT: '구한 아이: 보스 아래 칸 뒤 일행 열 밖에서 멈춤(test_rescued_kids_stop_off_the_party)',
+    ev.RESCUED2_SCRIPT: '구한 아이: 위와 같음',
+    ev.THANKS_SCRIPT: '구한 아이: 위와 같음',
+    **{script: '엄마 곁의 아이: 판정 줄 앞에서 나타나 위로 걸음(test_home_kids_walk_ahead_of_the_party, kids-home 사례)'
+       for (_, script) in ev.HOME_KID_SRCS},
+    **{script: '왕의 귀환 병사: 주인공이 줄(셀 50~53)에서 기다리는 동안 셀 48 위로만 걸음(king 사례 겹침 0)'
+       for (_, script), (_, path, _) in ev._distinct(zip(ev.SOLDIER_SRCS, ev.THRONE_SOLDIERS)) if path},
+}
+
+
+def devices():
+    """걷는 인물이 걷기 전에 부르는 겹침 피하기 루틴의 롱 주소."""
+    _, pa = pro.native()
+    _, ea = ev.native()
+    names = [pa[k] for k in ('hero_walk', 'father_way', 'shinsia_aside', 'shinsia_way')] + [ea['soldier_side']]
+    return {(a & 0xFF, a >> 8 & 0xFF, a >> 16) for a in names}
+
+
 class SpritesDoNotMeet(unittest.TestCase):
     """1C 는 멈춤을 막을 뿐 겹침은 막지 않는다. 걷는 인물과 주인공의 길·차례가 엇갈리지 않는지(점 단위로 셈)."""
+    def test_every_pass_through_walker_avoids_the_hero(self):
+        found = set()
+        used = devices()
+        for script in ch.npc_scripts(FIRST):
+            ops = [c['op'] for c in script['commands']]
+            if '1C' not in ops or '13' not in ops:
+                continue
+            found.add(script['address'])
+            before = script['commands'][:ops.index('13')]
+            called = {tuple(c['args'][:3]) for c in before if c['op'] in ('37', '05')}
+            if called & used:
+                self.assertNotIn(script['address'], PASS_NO_DEVICE, '장치를 쓰는데 예외 목록에도 있음')
+            else:
+                self.assertIn(script['address'], PASS_NO_DEVICE, f"{script['address']}: 1C 로 걷는데 겹침 피하기 장치도 까닭도 없음")
+        self.assertEqual(set(PASS_NO_DEVICE) - found, set(), '예외 목록에 빌드에 없는 스크립트가 있음')
+
+    def test_frog_stays_off_the_bridge_cell(self):
+        fx, fy = pro.FROG_AT
+        cells = [(fx * 2, fy * 2 + 1)] + [(x * 2, y * 2 + 1) for (x, y), _ in pro.FROG_JUMP] + \
+            [(x * 2, y * 2 + 1) for x, y in pro.FROG_OUT]
+        x0, y0, x1, y1 = pro.FROG_CALL
+        for hero in [(x, y) for x in range(x0, x1 + 1) for y in range(y0, y1 + 1)]:
+            for k in range(len(cells) - 1):
+                self.assertFalse(boxes_meet(cell_box(hero), pro.walker_box(cells[k:k + 2])), (hero, k))
+
+    def test_rescued_kids_stop_off_the_party(self):
+        # 보스 (17,0A) 아래 칸에서 이기면 동료 셋이 그 아래 17 열에 뒤따라 선다(1장 이어 걷기 실측)
+        hx, hy = ev.ch1_cell(0x17, 0x0B)
+        party = [(hx, hy)] + [(hx, hy + 2 * k) for k in (1, 2, 3)]
+        for slot, (start, path) in ev.RESCUED_PATHS.items():
+            cells = [ev._npc(*start)] + [ev._npc(*p) for p in path]
+            for k in range(len(cells) - 1):
+                for cell in party:
+                    self.assertFalse(boxes_meet(cell_box(cell), pro.walker_box(cells[k:k + 2])), (slot, cell))
+
+    def test_home_kids_walk_ahead_of_the_party(self):
+        # 일행은 남쪽 입구에서 올라와 판정 줄과 그 아래에 있다. 아이는 그 위에서만 나타나 걷는다
+        row = ev.ch1_cell(0, ev.KIDS_HOME_ROW)[1]
+        for _, start, path, _ in ev.KIDS_WALK_HOME:
+            cells = [ev._npc(*start)] + [ev._npc(*p) for p in path]
+            self.assertLessEqual(pro.walker_box(cells)[3], row * 8, start)
+
     def test_supper_parents_and_hero_never_meet(self):
         father_way = pro.walker_box([pro.FATHER_CELL, pro.FATHER_SEAT_CELL])
         mx, my = next((x * 2, y * 2) for x, y, _, _, t in pro.VILLAGERS if t == pro.T_MOTHER)
