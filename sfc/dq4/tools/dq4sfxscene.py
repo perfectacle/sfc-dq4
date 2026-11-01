@@ -771,6 +771,9 @@ NEXT_EXP = 'poke=2066=01;2067=00;2068=00'  # 주인공 다음 레벨 경험치(+
 # --pick-critical-seed 80 으로 고른 시드(A 15번 안에 회심). 두 코어는 전투에 드는 프레임이 하나 달라 난수가 갈린다.
 # 전투 메시지 길이 같은 상관없는 변경에도 바뀌므로(snes9x 29 가 빠졌음), 두 롬에서 함께 난 시드를 골랐다
 CRITICAL_SEED = {'snes9x': 48, 'bsnes': 19}
+# 공격력 0 인 적의 피해는 0·1 이 난수로 갈려, 빗나감이 나는지가 전투에 드는 프레임 수에 따라 바뀐다(시드 0 은 인물 그림을
+# 바꾼 롬의 bsnes 에서 빗나감 없이 1 만 났음). 시드 1~5 를 그 롬과 바꾸기 전 롬, 두 코어로 돌려 넷 모두 빗나감이 난 것
+MISS_SEED = 1
 SCARA = 0x55                          # 몬스터 행동 スカラ(돌려 부르기 46-04 를 듣는 시험 롬)
 
 
@@ -871,7 +874,7 @@ def scenes(table):
               covers=['sfx 37-02', 'sfx 37-03'], warp=TOWER, battle=[(SLIME, 1)], pokes=HERO_HP,
               patches=strong(SLIME), inputs=FIGHT + taps(20)),
         Scene('battle-miss', '공격력 0 인 적이 때림: 빗나감(37-0D)', [d('enemy-attack'), d('miss')],
-              covers=['sfx 37-0D'], warp=TOWER, battle=[(SLIME, 1)], pokes=HERO_HP,
+              covers=['sfx 37-0D'], warp=TOWER, battle=[(SLIME, 1)], pokes=HERO_HP, seed=MISS_SEED,
               patches=strong(SLIME) + harmless(SLIME), inputs=FIGHT + taps(20)),
         Scene('battle-scara', '적의 スカラ: 돌려 부르기 46-04 → 45-04', [d('scara')],
               covers=['remap 46-04', 'pcm 45-04'], forbid=[sfx((0x46, 0x04))], warp=TOWER, battle=[(SLIME, 1)],
