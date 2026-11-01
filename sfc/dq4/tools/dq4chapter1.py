@@ -223,6 +223,8 @@ KING_AT = (0x10, 0x0D)
 # 한 줄로 몰면 통로에서 서로 막혀 멈췄다(실측).
 EXIT_LEFT = [(0x0F, 0x1A), (0x0F, 0x23)]
 EXIT_RIGHT = [(0x11, 0x1A), (0x10, 0x1A), (0x10, 0x23)]
+# 두 줄의 스크립트(HIDER·HIDER2 의 원래 자리)
+WALK_OUT_LEFT, WALK_OUT_RIGHT = "05:A899", "05:A87B"
 KING_DOWN = (0x10, 0x13)       # 연설하러 내려와 서는 곳(FC 연출 뒤 화면)
 MINISTER_AT = (0x0F, 0x13)
 EASY_AT = (0x0E, 0x15)          # 연출 뒤에도 남는 전사
@@ -262,6 +264,8 @@ def throne_script(native):
         {"op": "21", "args": [lo(MSG_NARRATION), hi(MSG_NARRATION)]},
         {"op": "37", "args": native['reveal']},
         {"op": "21", "args": [lo(MSG_MINISTER), hi(MSG_MINISTER)]},
+        # 조작을 막은 채 걷는 인물은 주인공을 통과한다(sfc/dq4/docs/dq4-prologue-format.md 「주인공이 막는 사건」)
+        {"op": "1C", "args": []},
         {"op": "13", "args": [KING_DOWN[0] * 2, KING_DOWN[1] * 2]},
         {"op": "14", "args": []},
         {"op": "21", "args": [lo(MSG_KING), hi(MSG_KING)]},
@@ -289,8 +293,8 @@ def npc_doc(records, ported=(), prologue=False, report=None, ported_messages=(),
         throne_script(native),
         # 주인공 통과(1C)를 켜면 주인공 옆 전사가 반 칸 어긋나 멈춰서(실측), 오른쪽 무리는 먼저 곧장 내려가
         # 가운데 선 주인공을 지나지 않게 한다.
-        walk_out("05:A899", EXIT_LEFT),
-        walk_out("05:A87B", EXIT_RIGHT),
+        walk_out(WALK_OUT_LEFT, EXIT_LEFT),
+        walk_out(WALK_OUT_RIGHT, EXIT_RIGHT),
     ]
     overrides = [{"map": THRONE, "flag": flag, "when": "on", "mask": mask, "list": "new:after"}] + \
         [{k: o[k] for k in ("map", "flag", "when", "mask", "list")} for o in records["overrides"]]
@@ -396,20 +400,28 @@ def messages(ported_messages, report):
     return dq4msgwait.apply(out, wait, keep)
 
 
+def npc_scripts(first_message):
+    """빌드가 넣을 수 있는 인물 스크립트 전부({"address", "commands"}): 왕좌의 방 연출, 서장, 1장 사건, 2장. 1장 끝
+    스크립트는 빌드 옵션(chapter2)으로 갈리므로 두 판을 모두 넣는다."""
+    import dq4ch1event
+    import dq4ch2event
+    import dq4prologue
+    points = dq4chapterbox.entry_points(scenes(True))
+    native = {k: [v & 0xFF, v >> 8 & 0xFF, v >> 16] for k, v in points.items()}
+    ending = [s for s in dq4ch1event.scripts(first_message, ending_at=points['end'])
+              if s['address'] == dq4ch1event.ENDER_SCRIPT]
+    return ([throne_script(native), walk_out(WALK_OUT_LEFT, EXIT_LEFT), walk_out(WALK_OUT_RIGHT, EXIT_RIGHT)] +
+            dq4prologue.npc_lists()[3] + dq4ch1event.scripts(first_message, dq4ch2event.native()[1]['transfer']) +
+            ending + dq4ch2event.scripts(chapter2_message(first_message), points))
+
+
 def message_flow(first_message):
     """메시지를 띄우는 대화·인물 스크립트·이벤트 스크립트(dq4msgwait.plan 의 인자). 서장은 늘 넣는다(메시지
     단계에는 서장 옵션이 없음). first_message 는 1장 사건 메시지의 첫 번호."""
     import dq4ch1event
-    import dq4prologue
-    points = dq4chapterbox.entry_points(scenes(True))
-    native = {k: [v & 0xFF, v >> 8 & 0xFF, v >> 16] for k, v in points.items()}
     import dq4ch2event
-    # 1장 끝 스크립트는 빌드 옵션(chapter2)으로 갈리지만 메시지 단계에는 옵션이 없어 두 판을 모두 본다
-    ending = [s for s in dq4ch1event.scripts(first_message, ending_at=points['end'])
-              if s['address'] == dq4ch1event.ENDER_SCRIPT]
-    scripts = ([throne_script(native)] + dq4prologue.npc_lists()[3] +
-               dq4ch1event.scripts(first_message, dq4ch2event.native()[1]['transfer']) + ending +
-               dq4ch2event.scripts(chapter2_message(first_message), points))
+    import dq4prologue
+    scripts = npc_scripts(first_message)
     talks = ([s["body"] for s in dq4prologue.talk_doc()["scripts"]] + dq4ch1event.talk_scripts(first_message) +
              dq4ch2event.talk_scripts(chapter2_message(first_message)))
     _, at = dq4prologue.native()

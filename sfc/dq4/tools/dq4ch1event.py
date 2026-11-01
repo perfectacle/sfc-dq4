@@ -69,6 +69,9 @@ KIDS_FC_WALKERS = ((0x17, 0x1A), (0x16, 0x1A))  # FC 가 일행 자리로 옮겨
 THRONE_KING, THRONE_MINISTER = (0x10, 0x13), (0x0F, 0x13)
 THRONE_GUARDS = (((0x0E, 0x1A), 'right'), ((0x11, 0x1A), 'left'))   # FC 대화 26A(0609)
 LINEUP_ROW, KING_ROW = 0x19, 0x15
+# 왕이 줄 판정을 하면 켜고 병사는 이것을 기다린다(맵을 옮기면 지워지는 칸 7E:21A3, bit0 은 2장 ANSWERED). 병사가
+# 저마다 줄을 보면 주인공이 줄을 지나쳐 갈 때 왕만 알아채, 비키지 않은 병사에게 주인공의 이벤트 걸음이 막혔다
+LINED_UP = (0x13, 0x02)
 # (처음 칸, 길, 마지막 방향 31E0). 옆으로만 가면 이웃 병사에 막히므로 한 칸 올라선 뒤 옆으로 간다
 THRONE_SOLDIERS = (
     ((0x0F, 0x18), ((0x0F, 0x17), (0x0E, 0x17)), 0x11), ((0x10, 0x18), ((0x10, 0x17), (0x11, 0x17)), 0x22),
@@ -772,31 +775,30 @@ DP_RESTORE = bytes((0xA2, 0x00, 0x68, 0x95, 0x00, 0xE8, 0xE0, 0x10, 0xD0, 0xF8))
 # 걸어 (10,19)에서 0345 를 띄우고 그대로 출구로 나간다
 AISLE_X = 0x10 * 2                # FC X=10 에 선 주인공의 셀(ch1_cell)
 LINEUP_WAIT = 8                 # 가운데 병사가 통로를 비울 때까지 쉬는 걸음 수(C2 하나 8프레임)
+SETTLE = 16                     # 조작을 막은 뒤 주인공의 걸음이 끝나기를 기다리는 프레임(한 셀 8프레임의 두 배)
 UP, DOWN, RIGHT, LEFT = 0x08, 0x04, 0x01, 0x02
 KING_STEPS = 2 * (LINEUP_ROW - KING_ROW)
 EXIT_ROW = 0x23
 OUT_STEPS = 2 * (EXIT_ROW - LINEUP_ROW) + 2   # 출구 줄(셀 71)에서 한 칸 더 내려서야 성 앞으로 나간다(실측)
 
 
-def _walk_in_event(x):
-    dx = AISLE_X - x
-    side = bytes((RIGHT, dx)) if dx > 0 else bytes((LEFT, -dx)) if dx < 0 else b''
-    return bytes((0xC2,)) * LINEUP_WAIT + side + bytes((UP, KING_STEPS, 0xFF))
+# 줄 판정(lineup_row)을 거는 주인공 셀. 이 줄(FC Y=19, 셀 51)의 가로 (0C~13,19) 은 막힘이 없어 어느 X 에서든 옆으로
+# 걸어 통로에 닿는다. 그 밖(왼쪽 0A 열·오른쪽 15·17~18 열)은 벽 너머라, 줄 전체로 판정하던 때는 이벤트 걸음이 벽에
+# 막혔다. 세로는 50~53: 통로에서 위로 걸으면 병사 바로 아래 반 칸(50)에 서고, 줄을 걸어 지나가면 51 에 머무는 동안
+# 판정이 돌지 않을 수 있어 아래 칸 52·53(출구 쪽 줄, 문지기 둘이 막는 곳 앞)까지 본다
+LINEUP_X, LINEUP_Y = (0x0C * 2, 0x13 * 2), (0x19 * 2, 0x1A * 2 + 1)
 
 
-def _walk_in(events):
-    """주인공 X(7E:3020)에 맞는 이벤트를 건다. events: {X: 이벤트 주소}, 첫 것이 그 밖의 X."""
-    from dq4chapterbox import ENTER, LEAVE
+def _walk_legs():
+    """줄 → 통로 → 왕 앞 줄. 세로로 줄(셀 51)에 맞춘 뒤 옆으로 통로, 위로 왕 앞."""
+    return (('y', ch1_cell(0, LINEUP_ROW)[1]), ('x', AISLE_X), ('y', ch1_cell(0, KING_ROW)[1]))
 
-    def load(a):
-        return bytes((0xA9, a & 0xFF, 0x8D, 0xB3, 0x19, 0xA9, a >> 8 & 0xFF, 0x8D, 0xB4, 0x19, 0xA9, a >> 16, 0x8D, 0xB5, 0x19))
-    tail = bytes((0xAD, 0xAE, 0x19, 0x09, 0x80, 0x8D, 0xAE, 0x19))
-    xs = list(events)
-    body = load(events[xs[0]])
-    for x in reversed(xs[1:]):
-        branch = load(events[x]) + bytes((0x80, len(body)))
-        body = bytes((0xC9, x, 0xD0, len(branch))) + branch + body
-    return ENTER + bytes((0xAF, 0x20, 0x30, 0x7E)) + body + tail + LEAVE
+
+def _walk_in(stop):
+    """줄에 온 주인공을 병사가 비키기를 기다린 뒤 줄 → 통로 → 왕 앞 줄로 걷게 한다(dq4prologue.hero_goto).
+    stop: 이어 둘 끝 이벤트(FF)."""
+    import dq4prologue
+    return dq4prologue.hero_goto(_walk_legs(), stop, prefix=bytes((0xC2,)) * LINEUP_WAIT)
 
 
 def _stat(k):
@@ -961,7 +963,7 @@ def native(data=None):
     out += bytes((0x90, TOWER, number, *ch1_cell(x, y), 0x01, 0x80, 0xFF))
     at['fly'] = CODE_AT + len(out)
     out += _fly(at['fly_event'])
-    for name, code in (('lineup_row', _at(None, ch1_cell(0, LINEUP_ROW)[1])),
+    for name, code in (('lineup_row', dq4prologue._inside(LINEUP_X[0], LINEUP_Y[0], LINEUP_X[1], LINEUP_Y[1])),
                        ('king_row', _at(None, ch1_cell(0, KING_ROW)[1])),
                        ('king_away', _at(None, ch1_cell(0, KING_ROW)[1], away=True)),
                        ('cry_at', _at(*ch1_cell(CRY_FROM, CRY_ROW), x_from=True)),
@@ -971,14 +973,11 @@ def native(data=None):
         out += code
     at['old_man_step'] = CODE_AT + len(out)
     out += _old_man_step(at['old_man_step'])
-    events = {}
-    for x in (AISLE_X - 2, AISLE_X - 1, AISLE_X, AISLE_X + 1):
-        events[x] = CODE_AT + len(out)
-        out += _walk_in_event(x)
-    for name, code in (('ev_back', bytes((DOWN, KING_STEPS, 0xFF))), ('ev_out', bytes((DOWN, OUT_STEPS, 0xFF)))):
+    for name, code in (('ev_back', bytes((DOWN, KING_STEPS, 0xFF))), ('ev_out', bytes((DOWN, OUT_STEPS, 0xFF))),
+                       ('ev_stop', b'\xff')):
         at[name] = CODE_AT + len(out)
         out += code
-    for name, code in (('walk_in', _walk_in(events)), ('walk_back', dq4prologue._event_start(at['ev_back'])),
+    for name, code in (('walk_in', _walk_in(at['ev_stop'])), ('walk_back', dq4prologue._event_start(at['ev_back'])),
                        ('walk_out', dq4prologue._event_start(at['ev_out'])),
                        *((f'stat_{k}', _stat(k)) for k, _ in STATS)):
         at[name] = CODE_AT + len(out)
@@ -993,6 +992,8 @@ def native(data=None):
     from dq4chapterbox import wait
     at['ending_pause'] = CODE_AT + len(out)
     out += ENTER + wait(ENDING_PAUSE) + LEAVE
+    at['settle'] = CODE_AT + len(out)
+    out += ENTER + wait(SETTLE) + LEAVE
     return bytes(out), at
 
 
@@ -1080,7 +1081,7 @@ def scripts(first_message, chapter2_at=None, ending_at=None):
                                                _cmd('37', *_long(at['refresh'])), _cmd('28'), _cmd('52'), _cmd('16')]},
         # 감옥에 들어서면 계단 쪽에서 알렉스 옆까지 걸어와 재회한다
         {"address": WALKER_SCRIPT, "commands": [
-            _cmd('3F'), _cmd('13', REUNION_AT[0] * 2, REUNION_AT[1] * 2 + 1), _cmd('14'),
+            _cmd('3F'), _cmd('1C'), _cmd('13', REUNION_AT[0] * 2, REUNION_AT[1] * 2 + 1), _cmd('14'),
             _cmd('21', lo(m['reunion']), hi(m['reunion'])), _cmd('21', lo(m['hint']), hi(m['hint'])),
             _cmd('10', *REUNITED), _cmd('40'), _cmd('16')]},
     ] + [
@@ -1108,15 +1109,16 @@ def scripts(first_message, chapter2_at=None, ending_at=None):
         # 마물이 말하고 납치 깃발을 켜면 아이도 함께 계단 쪽으로 걸어가 사라진다
         {"address": KIDNAPPER_SCRIPT, "commands": [
             _cmd('05', *_long(at['kidnap_row'])), _cmd('3F'), _cmd('21', lo(m['kidnap']), hi(m['kidnap'])),
-            _cmd('10', *KIDNAPPED)] + _walk_off(9) + [_cmd('40'), _cmd('16')]},
-        {"address": KID_SCRIPT, "commands": [_cmd('09', 0x80 | KIDNAPPED[0], KIDNAPPED[1])] + _walk_off(8) + [_cmd('16')]},
+            _cmd('10', *KIDNAPPED), _cmd('1C')] + _walk_off(9) + [_cmd('40'), _cmd('16')]},
+        {"address": KID_SCRIPT, "commands": [_cmd('09', 0x80 | KIDNAPPED[0], KIDNAPPED[1]), _cmd('1C')] + _walk_off(8) +
+         [_cmd('16')]},
         # 이기면 철창을 열고 숨는다. 이긴 뒤 다시 들어오면 이 인물 하나가 철창만 연다
         {"address": HIDE_ON_WIN_SCRIPT, "commands": [_cmd('09', 0x80 | BOSS_WON[0], BOSS_WON[1]),
                                                      _cmd('37', *_long(at['open_cage'])), _cmd('28'), _cmd('52'),
                                                      _cmd('16')]},
         # 잡힌 아이: 주인공이 다가오면 그 앞까지 와서 울고, 이기면 숨는다
         {"address": CRY_SCRIPT, "commands": [
-            _cmd('05', *_long(at['cry_at'])), _cmd('3F')] + _walk(CRY_TO) + [
+            _cmd('05', *_long(at['cry_at'])), _cmd('3F'), _cmd('1C')] + _walk(CRY_TO) + [
             _cmd('21', lo(m['cry']), hi(m['cry'])), _cmd('40'), _cmd('09', 0x80 | BOSS_WON[0], BOSS_WON[1]),
             _cmd('28'), _cmd('52'), _cmd('16')]},
         # 구한 아이: 이기기 전에는 숨어 있다가 나타나 열린 철창 밖으로 걸어 나오고, 따라오기로 하면 숨는다
@@ -1126,7 +1128,7 @@ def scripts(first_message, chapter2_at=None, ending_at=None):
         {"address": THANKS_SCRIPT, "commands": _rescued([_cmd('3F'), _cmd('21', lo(m['kids_thanks']), hi(m['kids_thanks'])),
                                                          _cmd('10', *KIDS_FOLLOW), _cmd('37', *_long(at['refresh'])),
                                                          _cmd('40')], 0x0E)},
-        {"address": SOLDIER_SCRIPT, "commands": [_cmd('09', 0x80 | SOLDIER_LEFT[0], SOLDIER_LEFT[1]), _cmd('3F')] +
+        {"address": SOLDIER_SCRIPT, "commands": [_cmd('09', 0x80 | SOLDIER_LEFT[0], SOLDIER_LEFT[1]), _cmd('3F'), _cmd('1C')] +
          [c for x, y in SOLDIER_PATH for c in (_cmd('13', *ch1_cell(x, y)), _cmd('14'))] +
          [_cmd('28'), _cmd('52'), _cmd('40'), _cmd('16')]},
         # 성 앞 노인: 이 방문에서 「예」 라고 하면 일행 쪽으로 느리게 걷는다. 다시 들어오면 서 있다(FC 는 맵을 읽을 때
@@ -1153,7 +1155,8 @@ def scripts(first_message, chapter2_at=None, ending_at=None):
         for (_, script), (_, start, path, facing) in zip(HOME_KID_SRCS, KIDS_WALK_HOME)
     ] + [
         # 보스 뒤 왕좌의 방: 병사는 주인공이 줄에 오면 통로 양옆으로 갈라선다. 말을 걸 수 없다(FC 02F0)
-        {"address": script, "commands": [_cmd('44'), _cmd('05', *_long(at['lineup_row']))] + _walk(*path, half=0) +
+        {"address": script, "commands": [_cmd('44'), _cmd('09', 0x80 | LINED_UP[0], LINED_UP[1]), _cmd('1C')] +
+         _walk(*path, half=0) +
          [_cmd('2F', facing), _cmd('16')]}
         for (_, script), (_, path, facing) in _distinct(zip(SOLDIER_SRCS, THRONE_SOLDIERS))
     ] + [
@@ -1192,11 +1195,16 @@ def _king_call(m, at):
         stats += [{**call(f'stat_{k}'), "label": f"stat{i}"}, {**_cmd('06', *REPORTED), "target": skip},
                   msg('line_pause', '30'), msg(f'stat_{k}', '30')]
     return [
-        _cmd('28'), _cmd('52'), _cmd('05', *_long(at['lineup_row'])), call('walk_in'),
-        {**_cmd('05', *_long(at['king_row'])), "label": "wait"}, _cmd('3F'),
+        # 줄 판정은 주인공이 걷는 도중에도 걸린다. 조작을 막고 걸음이 끝나기를 기다린 뒤 선 자리에서 길을 센다.
+        # 걷는 중에 이벤트를 걸면 한 칸 어긋난 자리에서 세거나(왕 앞 줄에 못 닿음) 이벤트가 걸리지 않았다
+        _cmd('28'), _cmd('52'), {**_cmd('05', *_long(at['lineup_row'])), "label": "lineup"}, _cmd('10', *LINED_UP),
+        _cmd('3F'), call('settle'), call('walk_in'),
+        _cmd('05', *_long(at['king_row'])), _cmd('3F'),
         # 갈래는 상대 점프(-128~127)라, 아이들 갈래를 앞에 두고 깃발이 꺼져 있으면 칭찬으로 건너뛴다
         {**_cmd('06', 0x80 | KIDS_FOLLOW[0], KIDS_FOLLOW[1]), "target": "praise"},
-        msg('king_back'), _cmd('40'), _cmd('05', *_long(at['king_away'])), {"op": "03", "args": [], "target": "wait"},
+        # 돌려보내라 한 뒤에는 줄로 돌아와야 다시 걷게 한다. 왕 앞 줄 어디로든 돌아오게 두면 그 X 에서 아래로 걷는
+        # 물러나기·나가기 이벤트가 벽에 막혀 멈출 수 있었다
+        msg('king_back'), _cmd('40'), _cmd('05', *_long(at['king_away'])), {"op": "03", "args": [], "target": "lineup"},
         # 상태 창은 레벨업 줄 동안 열어 두고(FC 와 같음) 마지막에 명령 34 로 함께 닫는다. 칭찬도 30 으로 창을 남겨
         # 레벨업 줄을 그 창에 잇는다. 대화(보고 깃발 전)에서도 칭찬 뒤 작별이 이어져 끝 코드가 ▼ 대기(1010)라, 닫기
         # 대기를 하는 21 로 띄우면 마지막 쪽에서 A 를 두 번 받는다
@@ -1250,9 +1258,11 @@ def _walk_off(x):
     return [_cmd('13', x * 2, KIDNAP_TO * 2 + 1), _cmd('14'), _cmd('28'), _cmd('52')]
 
 
-def _invisible(src, talk):
-    """스크립트만 돌리는 보이지 않는 인물(낮·밤 하나씩). 스크립트가 숨긴다."""
-    e = {"from": src, "fields": {"x": 0, "y": 1, "facing": "down", "talk": talk, "gfx": 0x01, "layer": 0}}
+def _invisible(src, talk, interval=None):
+    """스크립트만 돌리는 보이지 않는 인물(낮·밤 하나씩). 스크립트가 숨긴다. interval 을 주면 이동 간격(스크립트가 도는
+    차례)을 그것으로."""
+    e = {"from": src, "fields": {"x": 0, "y": 1, "facing": "down", "talk": talk, "gfx": 0x01, "layer": 0,
+                                 **({"interval": interval} if interval is not None else {})}}
     return [{**e, "time": "day"}, {**e, "time": "night"}]
 
 
@@ -1265,8 +1275,12 @@ def throne_return(first_talk):
         [ch1.entry(ch1.STATIC, x, y, ch1.GUARD, facing, t['guard']) for (x, y), facing in THRONE_GUARDS]
     soldiers = [ch1.entry(src, x, y, ch1.WARRIOR, 'down', t['guard'])
                 for src, ((x, y), _, _) in zip((s for s, _ in SOLDIER_SRCS), THRONE_SOLDIERS)]
+    # 빌린 칸의 이동 간격이면 줄 판정(명령 05)이 드물게 돌아 줄을 걸어 지나가는 주인공을 놓쳤다. 병사도 왕의 표시에
+    # 곧바로 비키게 1
+    for e in soldiers:
+        e["fields"]["interval"] = 1
     day = static + soldiers
-    return day + [{**e, "time": "night"} for e in day] + _invisible(KING_CALL_SRC, t['king'])
+    return day + [{**e, "time": "night"} for e in day] + _invisible(KING_CALL_SRC, t['king'], interval=1)
 
 
 def _same(entry, src, talk):
