@@ -23,7 +23,9 @@
          VRAM 워드 2000~3FFF·4000~5FFF 의 타일과 BG1·2 타일맵의 채운 칸을 디코더(dq5field)와 견준다
         세계를 오가는 장면은 ルーラ 1 → 2, キメラのつばさ(세계 2 → 0 → 2), 天空城 이륙(06/08, 02:9779), 52/50 석상
         이벤트(30/00 에서 걸어 나가 세계 2), 27/00 에서 $1949 = FF 를 쓴 뒤 ルーラ·FF 를 가진 채 1C/00 에서 걸어 나가기도 있다.
-  ending: 엔딩 필드 비행(02:B9D8)에서 원본·tiles 롬의 $1949·BG3 글자 기준·VRAM 워드 4000~5FFF(스태프 롤이 지움)
+  ending: 엔딩 필드 비행(02:B9D8)에서 원본·tiles·endmap 롬의 $1949·BG3 글자 기준·VRAM 워드 4000~5FFF(스태프 롤이 지움)와
+          BG1·2 타일맵. tiles 롬(ending_tiles 없음, 늘린 타일 t 는 t - 512)은 타일맵이 원본 게임과 같고, endmap 롬
+          (ending_tiles 로 늘린 타일 512 + t 를 511 - t 로)은 채운 칸마다 그 대체 타일의 엔딩 워드여야 한다
   clock: 원본·nibs 롬. 세계 0 밤에 ルーラ 로 세계 1·2 에 내려 걷고 ラナルータ, 세계 0 으로 돌아와 걷고 ラナルータ.
          $075E 쓰기(lua/dq5worldlog.lua 의 WATCHW)와 덤프마다 2·3번 줄
   fieldpal: (341,56) 에서 $075E 를 여섯 값으로 두고 2·3번 줄 색 1~13 과 11·12번 줄(낮·밤 인물 팔레트)
@@ -48,6 +50,7 @@ import dq5fieldgfxcheck as fgc  # noqa: E402
 import dq5fieldgfxwrite as fgw  # noqa: E402
 import dq5gfxwritecheck as gwc  # noqa: E402
 import dq5map  # noqa: E402
+import dq5field  # noqa: E402
 from dq5field import tile_word  # noqa: E402
 from dq5map import Rom, lorom, map_pointer  # noqa: E402
 
@@ -128,12 +131,20 @@ WORLD_SCENES = {
                      [(1400, 2)], {'2AFEEF'}),
 }
 # 엔딩 준비 02:F974 를 02/06 인물 스크립트 첫머리(10:9B89)에 걸어 7E:21EA bit7 을 켜면, 맵을 나갈 때 00:CBFA 가
-# 02:B9C3 으로 필드 (399,387)·$1949 = 0 에 둔다(02:B9D8 의 STZ). 01:A4A7 이 필드를 불러 늘린 타일도 보내지만, 그 뒤
-# 스태프 롤 준비 02:FA86 이 BG3 글자 자리 VRAM 워드 4000~5FFF 를 DMA 로 지우고 BG3 글자 기준을 4000 에 둔다. 원본 롬과
-# tiles 롬으로 돌려 그 충돌을 잰다.
+# 02:B9C3 으로 필드 (399,387)·$1949 = 0 에 둔다(02:B9D8 의 STZ). 01:A4A7 이 필드를 불러오고, 스태프 롤 준비 02:FA86 이
+# BG3 글자 자리 VRAM 워드 4000~5FFF 를 DMA 로 지우고 BG3 글자 기준을 4000 에 둔다. 그래서 타일을 늘린 롬은 엔딩
+# (7E:21EA bit7) 동안 늘린 타일을 보내지 않고 타일맵에 타일 512 이상을 쓰지 않는다(ending_tiles 로 바꿈).
 ENDING = {'TO': '02/06,39,9,1', 'SET': '2190|80', 'ROMPATCH': '081B89=3774F902', 'MAXF': '1100', 'TEST': 'wait:900',
           'READPC': '00BBAC,01A4A7', 'DUMPF': '1000'}
 ENDING_FRAME, ENDING_WRITE = 1000, '02B9DB'
+ENDING_ROMS = ('orig', 'tiles', 'endmap')
+
+
+def endmap_tile(t):
+    """endmap 롬의 ending_tiles: 늘린 타일 512 + t 대신 쓰는 타일."""
+    return fgw.TILES - 1 - t
+
+
 # $1949 에 3 이상을 써도 되는 장면과 그 PC. 00:BBAC 가 읽는 값은 이 장면에서도 0~2 여야 한다.
 WORLD_FF = {'ship27-ff': '03C687'}
 WORLD_ROMS = ('orig', 'tiles', 'nibs')
@@ -197,6 +208,10 @@ def make_roms(original, out):
     (src / 'fieldgfx.json').write_text(json.dumps(doc), encoding='utf-8')
     command('dq5fieldgfxwrite.py', original, 'patch', src / 'fieldgfx.json', '-o', out / 'tiles-gfx.json',
             '--worlds-at', '34:8000', '--extra-at', '60:8000')
+    (src / 'endmap.json').write_text(json.dumps(dict(doc, ending_tiles=[endmap_tile(t) for t in range(fgw.TILES)])),
+                                     encoding='utf-8')
+    command('dq5fieldgfxwrite.py', original, 'patch', src / 'endmap.json', '-o', out / 'endmap-gfx.json',
+            '--worlds-at', '34:8000', '--extra-at', '60:8000')
     nib = doc['tile_palettes']
     doc['worlds'] = {k: {'tiles_file': 'tiles.bin', 'tile_palettes': nib[:fgw.TILES] + [n ^ x for n in nib[fgw.TILES:]]}
                      for k, x in NIB_FLIPS.items()}
@@ -249,6 +264,7 @@ def make_roms(original, out):
     command('dq5palsetwrite.py', out / 'indoor-step.sfc', 'patch', out / 'palset.json', '-o', out / 'indoor-map.json')
     for name, lists in (('tiles', ['tiles-gfx.json', 'tiles-blocks.json']),
                         ('nibs', ['nibs-gfx.json', 'tiles-blocks.json']),
+                        ('endmap', ['endmap-gfx.json', 'tiles-blocks.json']),
                         *((f'wall-{v:02x}', [f'wall-{v:02x}-gfx.json', 'tiles-blocks.json']) for v in WALLS),
                         ('fieldpal', ['fieldpal.json']),
                         ('indoor', ['indoor-sets.json', 'indoor-map.json'])):
@@ -449,11 +465,13 @@ def check_palset(name, rom_path, dump, bcbd, s, alt, orig_dump=None, same=None):
 
 
 def check_ending(name, roms, dirs):
-    """엔딩의 필드 비행: 원본·tiles 롬 모두 02:B9D8 이 $1949 = 0 을 쓰고 01:A4A7 로 필드를 불러오며, BG3 글자 기준이 VRAM
-    워드 4000 이고 4000~5FFF 가 비어 있는지. tiles 롬은 블록이 늘린 타일을 쓰므로 그 칸이 빈 타일로 보인다(충돌).
-    알려진 문제를 그대로 확인하는 검사다. 엔딩 비행에서 늘린 타일을 지키게 고치면 이 검사를 바꿀 것."""
-    out = {'case': name, 'known_issue': '엔딩 스태프 롤 준비(02:FA86)가 VRAM 4000~5FFF 를 지워 늘린 타일 칸이 빈 타일로 보임'}
-    for r in ('orig', 'tiles'):
+    """엔딩의 필드 비행: 세 롬 모두 02:B9D8 이 $1949 = 0 을 쓰고 01:A4A7 로 필드를 불러오며, BG3 글자 기준이 VRAM 워드 4000 이고
+    4000~5FFF 가 비어 있는지(스태프 롤이 지운 자리). 타일맵에 타일 512 이상을 쓰는 칸이 없고, 채운 칸 수가 원본 게임과 같은지.
+    tiles 롬은 블록이 모두 늘린 타일(원래 타일 + 512, 위층 0 은 그대로)을 쓰고 ending_tiles 가 없어 대체 타일이 원래 타일이므로
+    BG1·2 타일맵이 원본 게임과 바이트마다 같아야 한다. endmap 롬은 원본 게임 칸의 타일 t 가 endmap_tile(t)(위층 0 은 0)의
+    엔딩 워드(dq5field.ending_word)여야 한다."""
+    out = {'case': name}
+    for r in ENDING_ROMS:
         d = dirs[r]
         writes, reads = world_log(d)
         require({(pc, v) for pc, v, _, _ in writes} == {('2AFEEF', 0), (ENDING_WRITE, 0)} or
@@ -463,13 +481,31 @@ def check_ending(name, roms, dirs):
         require(w[0x21EA] & 0x80 and not w[0xBE] & 0x80 and w[0x1949] == 0, f'{name} {r}: 엔딩 필드가 아님')
         require(ppu['ppu.layers[2].chrAddress'] == str(0x4000), f'{name} {r}: BG3 글자 기준 {ppu["ppu.layers[2].chrAddress"]}')
         require(not any(vram[0x8000:0xC000]), f'{name} {r}: VRAM 워드 4000~5FFF 가 비어 있지 않음')
-        cells = sum((vram[i] | vram[i + 1] << 8) & 0x3FF >= fgw.TILES for i in range(0, 0x2000, 2))
+        cells = field_cells(Rom(roms[r].read_bytes()), vram, 0)
+        high = sum((v & 0x3FF) >= fgw.TILES for v, _ in cells.values())
         out[r] = {'1949_writes': [x[:2] for x in writes], 'bbac': reads, 'bg3_chr': '4000',
-                  'cells_using_512_up': cells}
-    loads = [x for x in (dirs['tiles'] / 'world.txt').read_text().split('\n') if x.startswith('read 01A4A7')]
-    require(loads, f'{name}: tiles 롬에서 01:A4A7 이 돌지 않음')
-    require(out['orig']['cells_using_512_up'] == 0 and out['tiles']['cells_using_512_up'],
-            f'{name}: 늘린 타일 칸 원본 {out["orig"]["cells_using_512_up"]}·tiles {out["tiles"]["cells_using_512_up"]}')
+                  'tilemap_cells': len(cells), 'cells_using_512_up': high}
+        require(not high, f'{name} {r}: 타일 512 이상을 쓰는 칸 {high}개(스태프 롤 글자 자리라 빈 타일로 보임)')
+        loads = [x for x in (d / 'world.txt').read_text().split('\n') if x.startswith('read 01A4A7')]
+        require(loads, f'{name} {r}: 01:A4A7 이 돌지 않음')
+    ov = frame(dirs['orig'], ENDING_FRAME, 'vram')
+    require(out['orig']['tilemap_cells'] and
+            all(out[r]['tilemap_cells'] == out['orig']['tilemap_cells'] for r in ENDING_ROMS),
+            f'{name}: 채운 칸 수가 원본 게임과 다름 {[out[r]["tilemap_cells"] for r in ENDING_ROMS]}')
+    require(frame(dirs['tiles'], ENDING_FRAME, 'vram')[:0x2000] == ov[:0x2000],
+            f'{name}: tiles 롬의 BG1·2 타일맵이 원본 게임과 다름')
+    out['tiles']['tilemap_same_as_original_game'] = True
+    rom, vram = Rom(roms['endmap'].read_bytes()), frame(dirs['endmap'], ENDING_FRAME, 'vram')
+    wrong = []
+    for a, (v, _) in field_cells(rom, vram, 0).items():
+        upper, t = a >= 0x1000, (ov[a] | ov[a + 1] << 8) & 0x3FF
+        # 시험 롬의 블록은 위층 타일 0 을 그대로 두므로(00:BCA8 의 「위층 없음」) 그 칸은 대체하지 않는다
+        kept = upper and not t
+        want = dq5field.ending_word(rom, t if kept else t + fgw.TILES, upper)
+        if v & 0x3FF != (t if kept else endmap_tile(t)) or v & 0x1FFF != want & 0x1FFF:
+            wrong.append(a)
+    require(not wrong, f'{name}: endmap 롬의 칸 {len(wrong)}개가 대체 타일의 엔딩 워드와 다름 {wrong[:8]}')
+    out['endmap']['cells_with_ending_word'] = out['endmap']['tilemap_cells']
     return out
 
 
@@ -646,9 +682,10 @@ def main():
                 luas[f'{k}-{r}'] = worldlog
                 cases.append((f'{k}-{r}', world_roms[r], dict(env, SETTLE='60', NEXT=str(gfx),
                                                                  DUMPF=','.join(str(n) for n, _ in frames))))
-        for r in ('orig', 'tiles'):
+        ending_roms = dict(world_roms, endmap=out / 'endmap.sfc')
+        for r in ENDING_ROMS:
             luas[f'ending-{r}'] = worldlog
-            cases.append((f'ending-{r}', world_roms[r], dict(ENDING, SETTLE='60', NEXT=str(gfx))))
+            cases.append((f'ending-{r}', ending_roms[r], dict(ENDING, SETTLE='60', NEXT=str(gfx))))
         for k, (env, _) in CLOCK_SCENES.items():
             for r in CLOCK_ROMS:
                 luas[f'{k}-{r}'] = worldlog
@@ -716,7 +753,7 @@ def main():
         results.append(check_palset('flag-new', indoor, dirs['flag-new'], FLAG_MAP, NEW_SET, False, dirs['flag-orig'],
                                     False))
         results.append(check_palset('flag-new-night', indoor, dirs['flag-new-night'], FLAG_MAP, NEW_SET, True))
-        results.append(check_ending('ending', world_roms, {r: dirs[f'ending-{r}'] for r in ('orig', 'tiles')}))
+        results.append(check_ending('ending', ending_roms, {r: dirs[f'ending-{r}'] for r in ENDING_ROMS}))
         for k, (_, w) in CLOCK_SCENES.items():
             results.append(check_clock(k, original, {r: dirs[f'{k}-{r}'] for r in CLOCK_ROMS}, w))
         (out / 'results.json').write_text(json.dumps(results, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')

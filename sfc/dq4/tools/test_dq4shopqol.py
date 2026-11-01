@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 import dq4sysmsg
+import dq4windowname
 import dq4windowtext
 
 ASM = (Path(__file__).resolve().parent / 'dq4windowname.asm').read_text()
@@ -73,6 +74,41 @@ class LowBankTest(unittest.TestCase):
         for name in ('ShopHeldCount:', 'ShopQtyMax:', 'ShopQtyTotal:'):
             self.assertTrue(start < ASM.index(name) < end, name)
         self.assertNotIn('org', ASM[start + 4:end])
+
+
+class SellQtyTest(unittest.TestCase):
+    def test_messages_and_hooks(self):
+        for n in (0x0C4, 0x0D6, 0x0D7, 0x0D8):
+            self.assertIn('몇 개', dq4sysmsg.SPEECH[n])
+        self.assertRegex(ASM, r'org \$06DF06\n    JSL ShopSellQty')
+        self.assertRegex(ASM, r'org \$06DF35\n    JSL ShopSellExtra')
+
+    def test_sell_code_below_bank_40_and_uses_own_count(self):
+        self.assertLess(dq4windowname.SELL_SPOT_END - 1, 0x400000)
+        start = ASM.index('org !shop_sell_spot')
+        end = ASM.index('assert pc() <= !shop_sell_end')
+        body = ASM[start:end]
+        self.assertNotIn('org', body[4:])
+        for name in ('ShopSellQty:', 'ShopSellCount:', 'ShopSellExtra:'):
+            self.assertIn(name, body)
+        # 팔기에서 $0F21 은 사람 번호. 개수는 $0F2C 에, 고른 칸보다 앞을 빼면 고른 칸 번호를 줄인다
+        self.assertNotIn('STA.w $0F21', body)
+        self.assertIn('STA.w $0F2C', body)
+        self.assertIn('DEC.w $0F23', body)
+        self.assertEqual(body.count('STZ.w $0F2C'), 2)
+
+
+class SellEquippedTest(unittest.TestCase):
+    def test_equipped_line_before_price(self):
+        # 이름이 가나로 남은 물건 뒤 조사에서 찍기가 멈추므로 이름·조사를 넣지 않는다(dq4-window-check talk03)
+        self.assertEqual(dq4sysmsg.SOURCE[0x03D], '지금 장착하고 있는 물건이다.')
+        self.assertEqual(dq4sysmsg.TEXTS[0x03D][-1], dq4sysmsg.END_WAIT)
+        body = ASM[ASM.index('ShopSellQty:'):ASM.index('ShopSellCount:')]
+        self.assertIn('.done\n    JSR ShopSellWarn\n    RTL', body)
+        done = ASM[ASM.index('ShopSellWarn:'):ASM.index('ShopSellExtra:')]
+        # 고른 칸의 장비 중 비트($47)를 보고, 창을 닫은 뒤 3D 를 찍는다. 058 은 돌아간 원래 코드가 찍는다
+        for need in ('LDX.w $0F23', 'JSR ShopSellSlot', 'LDA.b $47', 'db $00, $95, $00', 'LDA #$003D', 'JSL $248157', 'LDA.w $0F28'):
+            self.assertIn(need, done)
 
 
 class SellPriceTest(unittest.TestCase):

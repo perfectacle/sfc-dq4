@@ -296,6 +296,198 @@ ShopQtyMsg:
     dw $009C, $009D, $00AB, $00C3
 assert pc() <= !shop_low_end
 
+; 가게 팔기: 값을 셈(06:DF06, LDA $0F22 / STA $42 / JSL $06DF5B)과 물건 빼기 앞(06:DF35, LDA $0F21 / STA $42 / LDA $0F23 /
+; STA $43, 뒤는 BRK 89 80 32). 팔기에서 $0F21 은 사람, $0F23 은 고른 칸이라 개수는 $0F2C 에 둔다. $0F2C 는 06:E36B 가
+; 16비트 $0F2B 의 높은 바이트로 읽는데 그 처리기들이 들어올 때 지우므로, 다 쓰면 0 으로 되돌린다
+org $06DF06
+    JSL ShopSellQty
+    NOP #5
+org $06DF35
+    JSL ShopSellExtra
+    NOP #6
+
+; 원래 롬도 빈 뱅크 12 끝. BRK 를 부르므로 뱅크 40 아래에 둔다
+org !shop_sell_spot
+; 06:DF06(M = 8, X = 8). 한 개 값(06:DF5B, 산 값의 3/4)을 낸 뒤, 같은 사람에게 장비하지 않은 같은 물건이 더 있으면(고른 칸 포함
+; 최대 9) 「몇 개 파시겠어요?」 와 수 창 5C 를 묻고, 개수 × 값을 $0F28~ 과 메시지의 {N}($F5~)에 둔다. 0·B 면 돌아갈 자리를
+; 버리고 팔기의 「아니요」(06:DF48)로 간다
+ShopSellQty:
+    LDA.w $0F22
+    STA.b $42
+    JSL $06DF5B
+    LDA #$01
+    STA.w $0F2C
+    JSR ShopSellCount
+    CMP #$02
+    BCC .done
+    PHA
+    db $00, $95, $00
+    LDA.w $0F20
+    AND #$03
+    ASL
+    TAX
+    REP #$20
+    LDA.l ShopSellMsg,X
+    JSL $248157
+    SEP #$20
+    db $00, $95, $5C
+    PLA
+    LDX.b $E8
+    BNE .cancel
+    LDX #$03
+-
+    LDY.w $0AFE,X
+    BNE +
+    DEX
+    BPL -
+    LDX.w $0B02
+    BEQ .cancel
+    CMP.w $0B02
+    BCC +
+    LDA.w $0B02
++
+    STA.w $0F2C
+    TAX
+    LDA.w $0F28
+    STA.b $46
+    LDA.w $0F29
+    STA.b $47
+    LDA.w $0F2A
+    STA.b $48
+-
+    DEX
+    BEQ +
+    LDA.w $0F28
+    CLC
+    ADC.b $46
+    STA.w $0F28
+    LDA.w $0F29
+    ADC.b $47
+    STA.w $0F29
+    LDA.w $0F2A
+    ADC.b $48
+    STA.w $0F2A
+    BRA -
++
+    LDA.w $0F28
+    STA.b $F5
+    LDA.w $0F29
+    STA.b $F6
+    LDA.w $0F2A
+    STA.b $F7
+.done
+    JSR ShopSellWarn
+    RTL
+.cancel
+    STZ.w $0F2C
+    PLA
+    PLA
+    PLA
+    JML $06DF48
+
+; 사람 $0F21 의 소지품에서 고른 칸($0F23) 말고 장비하지 않은 같은 물건($0F22) 수 + 1, 9 까지(A). BRK 88 2E: $42 사람, $43 칸
+; → $46 물건, $47 장비 중
+ShopSellCount:
+    LDY #$01
+    ; 고른 칸이 장비 중이면 묻지 않는다(한꺼번에 팔다 입은 장비까지 벗겨 팔지 않게)
+    LDX.w $0F23
+    JSR ShopSellSlot
+    LDA.b $47
+    BNE ++
+    LDX #$00
+-
+    CPX.w $0F23
+    BEQ +
+    JSR ShopSellSlot
+    BNE +
+    INY
++
+    INX
+    CPX #$0C
+    BCC -
+++
+    TYA
+    CMP #$0A
+    BCC +
+    LDA #$09
++
+    RTS
+
+; 칸 X 가 장비하지 않은 고른 물건이면 Z = 1
+ShopSellSlot:
+    TXA
+    STA.b $43
+    LDA.w $0F21
+    STA.b $42
+    db $00, $88, $2E
+    LDA.b $46
+    CMP.w $0F22
+    BNE +
+    LDA.b $47
++
+    RTS
+
+; 고른 칸이 장비 중이면 058 「{N}골드에 사들일게요」 앞에 「지금 장착하고 있는 물건이다.」(원작에서 빈 메시지 3D, ▼ 를 기다린
+; 뒤 058 이 이어 찍힘). 이름이 가나로 남은 물건 뒤 조사({은})는 찍다 멈추므로 이름을 넣지 않는다. 가게 말투 넷을 쓸 빈 메시지가 남지 않아 서술 한 줄로 두고, 058 이 가게 말투로 다시 묻는다
+ShopSellWarn:
+    LDX.w $0F23
+    JSR ShopSellSlot
+    LDA.b $47
+    BEQ +
+    db $00, $95, $00
+    REP #$20
+    LDA #$003D
+    JSL $248157
+    SEP #$20
+    ; 메시지를 찍으면 $F5~ 가 바뀌어 058 의 {N} 이 0 이 된다. 치를 값($0F28~)으로 되돌린다
+    LDA.w $0F28
+    STA.b $F5
+    LDA.w $0F29
+    STA.b $F6
+    LDA.w $0F2A
+    STA.b $F7
++
+    RTS
+
+; 06:DF35. 개수 − 1 개를 뒤 칸부터 찾아 BRK 89 80 32 로 빼고(빼면 뒤 칸이 앞으로 당겨지므로, 고른 칸보다 앞을 빼면 고른 칸
+; 번호를 하나 줄인다), 마지막 하나는 원래 코드가 고른 칸에서 뺀다
+ShopSellExtra:
+-
+    LDA.w $0F2C
+    CMP #$02
+    BCC ++
+    LDX #$0B
+--
+    CPX.w $0F23
+    BEQ +
+    JSR ShopSellSlot
+    BNE +
+    TXA
+    STA.b $43
+    LDA.w $0F21
+    STA.b $42
+    db $00, $89, $80, $32
+    DEC.w $0F2C
+    CPX.w $0F23
+    BCS -
+    DEC.w $0F23
+    BRA -
++
+    DEX
+    BPL --
+++
+    LDA.w $0F21
+    STA.b $42
+    LDA.w $0F23
+    STA.b $43
+    STZ.w $0F2C
+    RTL
+
+; 「몇 개 파시겠어요?」 메시지 번호(가게 종류 $0F20 마다). 원작에서 비어 있고 부르는 곳이 없는 메시지
+ShopSellMsg:
+    dw $00C4, $00D6, $00D7, $00D8
+assert pc() <= !shop_sell_end
+
 ; 값을 $0F28~ 에 둔 뒤, 돈이 되면(06:F602, C = 모자람) 창을 닫고 「{N}골드인데 사시겠어요?」(메시지 묶음 19 = 064~067)와
 ; 예/아니요를 묻는다. 예거나 돈이 모자라면 돌아가 06:F5E9 가 원래대로 돈을 빼거나 「돈이 모자란」 메시지를 낸다.
 ; 아니요·B 면 돌아갈 자리(JSR 2바이트)만 버리고 「그래요? 아쉽네요」(묶음 18) 뒤 물건 목록(06:DC2F)으로 간다.

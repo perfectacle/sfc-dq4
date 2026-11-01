@@ -22,7 +22,8 @@ WAIT = {0x12B, 0x12E, 0x12F, 0x131, 0x135, 0x136, 0x137, 0x13C, 0x142, 0x143, 0x
         *range(0x09E, 0x0AA), *range(0x0AC, 0x0B0), *range(0x0B2, 0x0B7), 0x0B8,
         0x1B3, 0x1B6, 0x1BD, 0x1C0, 0x1C1, 0x1CA,
         0x0BB, *range(0x0BD, 0x0C2), *range(0x0C5, 0x0C9), 0x0CA, 0x0CC, *range(0x0CE, 0x0D6),
-        *range(0x0D9, 0x0DC), *range(0x0DF, 0x0E4), 0x0E6, 0x0E7}
+        *range(0x0D9, 0x0DC), *range(0x0DF, 0x0E4), 0x0E6, 0x0E7,
+        0x03D}
 PAGE = 0x1002
 PAGE_LINES = 4
 LINE_COLS = 14
@@ -34,6 +35,8 @@ JOSA['과'] = next(code for code, (has, _, _) in dq4josa.JOSA.items() if has == 
 JOSA_COLS = {'로': 2, '이여': 2}       # 「으로」·「이여」 는 두 칸
 
 SOURCE = {
+    # 원작에서 비어 있고 부르는 곳이 없는 메시지. 장착 중인 장비를 팔 때 058 앞에 찍는다(dq4windowname.asm ShopSellQty)
+    0x03D: '지금 장착하고 있는 물건이다.',
     0x11F: '{I}{을} 내던졌다.',
     0x120: '{L}{은} {I}{을} {P}의 주머니에서 꺼내 내던졌다.',
     0x121: '{P}{은} {I}{을} {P}에게 건넸다.',
@@ -267,6 +270,11 @@ SPEECH = {
     0x09D: '몇 개 사시겠습니까?',
     0x0AB: '몇 개 사겠나?',
     0x0C3: '몇 개 살래?',
+    # 같은 물건을 여러 개 팔 때 개수 묻기(도구점·방어구점·무기점·잡화점). 원작에서 비어 있고 부르는 곳이 없는 메시지
+    0x0C4: '몇 개 파시겠어요?',
+    0x0D6: '몇 개 파시겠습니까?',
+    0x0D7: '몇 개 팔 텐가?',
+    0x0D8: '몇 개 팔래?',
     0x068: '그 밖에 또 볼일이 있으세요?',
     0x069: '그 밖에 또 용무가 있으십니까?',
     0x06A: '그 밖에 또 볼일이 있나?',

@@ -197,15 +197,32 @@ PALETTE_SITE, PALETTE_UPPER, PALETTE_LOWER = 0x00BBAC, 0x00BBB1, 0x00BBC6
 # 세 세계의 니블이 다르면 00:BBAC 를 LDA $7E1949 로 시작하는 코드로 바꿔, 세계마다 2KB 인 타일맵 워드 표(색인
 # 세계 << 11 | 타일 << 1)를 위층은 00:BBBA, 아래층은 00:BBCB 의 LDA long,X 로 읽는다.
 PALETTE_WORLD_UPPER, PALETTE_WORLD_LOWER = 0x00BBBA, 0x00BBCB
+# 엔딩 갈래가 있는 롬은 00:BBAC 를 LDA $7E21E9 / BMI 로 시작해(7E:21EA bit7 이면 엔딩 워드 표로 JML) 위 두 꼴이 6바이트 뒤에
+# 온다. 엔딩 코드는 위층 표를 +5, 아래층 표를 +17 의 LDA long,X 로 읽는다.
+ENDING_GATE, ENDING_UPPER, ENDING_LOWER = bytes.fromhex('afe9217e30'), 5, 17
+
+
+def palette_shift(rom):
+    """00:BBAC 앞의 엔딩 갈래 길이(없으면 0)."""
+    return 6 if rom.d[lorom(PALETTE_SITE):lorom(PALETTE_SITE) + 5] == ENDING_GATE else 0
 
 
 def palette_kind(rom):
     """00:BBAC 가 원래 니블 루틴이면 None, 타일마다 1바이트 표면 'shared', 세계마다 워드 표면 'worlds'."""
-    if rom.u8(PALETTE_SITE + 2) == 0xAA:
+    k = palette_shift(rom)
+    if rom.u8(PALETTE_SITE + k + 2) == 0xAA:
         return 'shared'
-    if rom.u8(PALETTE_SITE) == 0xAF:
+    if rom.u8(PALETTE_SITE + k) == 0xAF:
         return 'worlds'
     return None
+
+
+def ending_word(rom, tile, upper):
+    """엔딩 비행(7E:21EA bit7) 동안 00:BBAC 가 내는 타일맵 워드(위층은 $C6 을 ORA 하기 전). 엔딩 갈래가 없으면 None."""
+    if not palette_shift(rom):
+        return None
+    code = rom.u24(PALETTE_SITE + 6 + rom.u8(PALETTE_SITE + 5) + 1)
+    return rom.u16(rom.u24(code + (ENDING_UPPER if upper else ENDING_LOWER)) + tile * 2)
 
 
 def nibble_table(rom, world=0):
@@ -221,11 +238,11 @@ def nibble_table(rom, world=0):
 
 def tile_word(rom, tile, upper, world=0):
     """00:BBAC: 타일 번호에 팔레트 비트를 붙인 타일맵 워드."""
-    kind = palette_kind(rom)
+    kind, k = palette_kind(rom), palette_shift(rom)
     if kind == 'shared':
-        return tile | rom.u8(rom.u24((PALETTE_UPPER if upper else PALETTE_LOWER) + 1) + tile) << 8
+        return tile | rom.u8(rom.u24((PALETTE_UPPER if upper else PALETTE_LOWER) + k + 1) + tile) << 8
     if kind == 'worlds':
-        table = rom.u24((PALETTE_WORLD_UPPER if upper else PALETTE_WORLD_LOWER) + 1)
+        table = rom.u24((PALETTE_WORLD_UPPER if upper else PALETTE_WORLD_LOWER) + k + 1)
         return rom.u16(table + ((world & 3) << 11 | tile << 1))
     nib = rom.u8(nibble_table(rom, world) + (tile >> 1))
     if upper:
