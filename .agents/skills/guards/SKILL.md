@@ -27,8 +27,9 @@ description: 버그를 고치거나 동작을 개선했을 때, PR 을 올리기
    run = "uv run --locked python sfc/dq4/tools/<검사>.py --rom <롬> --out work/<폴더>"
    needs = ["rom", "MESENCE"]
    ```
+   `needs` 의 대문자 이름(`MESENCE`, `LIBDIR` 등)은 환경 변수로 본다. 검사가 읽는 환경 변수는 빠짐없이 적는다 — 다음 단계에서 설정 안 된 것을 짚어 준다.
    완료: `uv run --locked python tools/guards.py` 가 문제 0개.
-3. **PR 전에 걸리는 검사를 돌린다** — `uv run --locked python tools/guards.py --base origin/main` 이 이 변경이 건드리는 실행 검사와 명령을 찍는다. 모두 돌리고 PR 본문에 검사마다 한 줄을 쓴다.
+3. **PR 전에 걸리는 검사를 돌린다** — `uv run --locked python tools/guards.py --base origin/main` 이 이 변경이 건드리는 실행 검사와 명령, 필요한 것(`needs`)을 찍고, 지금 셸에 설정 안 된 환경 변수가 있으면 `⚠` 로 알린다. 모두 돌리고 PR 본문에 검사마다 한 줄을 쓴다.
    ```text
    - [x] dq4-compat-walk: 통과 (bsnes 27/27, snes9x 27/27, 롬 SHA-1 …)
    - [x] dq4-ch1-walk: 해당 없음 — 주석만 고침
