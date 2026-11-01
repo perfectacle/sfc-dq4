@@ -11,6 +11,8 @@
   바뀜: 바로 앞 프레임과 이 프레임 모두 슬롯이 화면에 보이고 키 자리의 타일맵 두 줄이 그대로인데 슬롯 그림이 바뀌었다.
         보이는 슬롯에 다른 문구를 덮어, 게임이 새 창 타일맵을 보내기 전까지 옛 타일맵이 새 그림을 가리켰다.
         매 프레임 덤프하는 장면에서만 본다.
+  테두리: 전투에서 창 왼쪽 위 모서리(타일 08C) 오른쪽 같은 줄에 오른쪽 위 모서리(좌우 뒤집은 08C)가 없다. 이름 다섯째 칸이
+        맨 오른쪽 사람에서 전투 상태 창의 오른쪽 테두리 열을 덮었다. 전투 창은 서로 겹치지 않아 전투에서만 본다.
 
 걸린 프레임은 화면에 빨간 네모를 그려 sheet-*.png 로 모은다.
 
@@ -31,6 +33,7 @@ HERE = Path(__file__).resolve().parent
 PROBE = HERE.parents[1] / 'dq5' / 'tools' / 'lua' / 'dq5msg.lua'
 KANA_ROM = 0x26528                  # 04:E528, 칸 01 부터 1bpp 8바이트
 KANA = range(0x010, 0x079)
+CORNER = 0x08C                      # 창 위 모서리 타일. 오른쪽 모서리는 같은 타일을 좌우로 뒤집는다(타일맵 낱말 bit14)
 CANVAS = range(0x096, 0x180)
 BUFFER = 0x5000                     # 창 타일맵 버퍼 7E:5000(32 × 32 칸)
 KEYS, AGES = 0x3D70, 0x3D14         # dq4windowname.asm 의 !wt_keys·!wt_ages(슬롯마다 워드)
@@ -225,9 +228,25 @@ def check(folder, rom, slots):
                 bad.append((cell // 32, cell % 32, '가나', t))
             elif not battle and t in CANVAS and t in live:
                 bad.append((cell // 32, cell % 32, '비침', t))
+        if battle:
+            bad += corners(vram, tilemap)
         if bad:
             out.append((frame, bad))
     return out
+
+
+def corners(vram, tilemap):
+    """[(줄, 열, '테두리', 타일)] 오른쪽 위 모서리 짝이 없는 왼쪽 위 모서리."""
+    bad = []
+    for r in range(28):
+        row = [int.from_bytes(vram[(tilemap + r * 32 + c) * 2:(tilemap + r * 32 + c) * 2 + 2], 'little') for c in range(32)]
+        lefts = [c for c, w in enumerate(row) if w & 0xC3FF == CORNER]
+        rights = [c for c, w in enumerate(row) if w & 0xC3FF == 0x4000 | CORNER]
+        for i, c in enumerate(lefts):
+            end = lefts[i + 1] if i + 1 < len(lefts) else 32
+            if not any(c < x < end for x in rights):
+                bad.append((r, c, '테두리', CORNER))
+    return bad
 
 
 def sheet(folder, hits, path):

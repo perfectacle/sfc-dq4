@@ -180,3 +180,16 @@ paths = [
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4shopscene.py --rom work/ch1/dq4-ch1-full.sfc --out work/shopscene --jobs 4"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
+
+[[check]]
+name = "dq4-battle-check"
+why = "걸음 전투가 걸리고 이겨 맵으로 돌아오는지와, 전투 상태 창 오른쪽 위 모서리·테두리가 이름 다섯째 칸에 덮이지 않는지(창 17·26·27 너비 6 그대로라 맨 오른쪽 사람의 이름 다섯째 칸이 테두리 열을 덮던 것)"
+paths = [
+    "sfc/dq4/tools/dq4windowname.py",
+    "sfc/dq4/tools/dq4windowname.asm",
+    "sfc/dq4/tools/dq4battlecheck.py",
+    "sfc/dq4/tools/dq4windowcheck.py",
+    "sfc/dq4/tools/lua/dq4battle.lua",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/battlecheck && uv run --locked python sfc/dq4/tools/dq4battlecheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/battlecheck --repeat 1 --jobs 3"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI"]

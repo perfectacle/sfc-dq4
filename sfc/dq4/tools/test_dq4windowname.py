@@ -88,6 +88,7 @@ NAME_LIST = bytes((0x05, F, 0x08, F, F, 0xD0, F, 0x80))
 def base_windows():
     out = {
         wn.STATUS_WINDOW: bytes((F, F, 0x06, F, F, 0x80)),
+        **{w: bytes((0x02, F, 0xE6, F)) + wn.BATTLE_STATUS_BODY + b'\x80' for w in wn.BATTLE_STATUS},
         **{w: bytes((F, F, 0x06, F)) + wn.HP_BODY[w] + b'\x80' for w in wn.HP_WINDOWS},
         wn.SPELL_WINDOW: bytes((F, F, 0x08, F)) + wn.SPELL_BODY + b'\x80',
         wn.SHOP_MEMBERS: wn.SHOP_MEMBERS_HEAD + bytes((F, F)) + wn.SHOP_MEMBERS_ROW + b'\x80',
@@ -208,6 +209,9 @@ class ApplyTests(unittest.TestCase):
         self.assertEqual(self.head(wn.STATUS_WINDOW)[2], 7)
         for w in wn.HP_WINDOWS:
             self.assertEqual(self.head(w)[2], 7)
+        # 전투 상태 창은 맨 오른쪽 사람의 이름 다섯째 칸이 테두리 열을 덮지 않게 한 칸 넓힌다(위치·위쪽 비트는 그대로)
+        for w in wn.BATTLE_STATUS:
+            self.assertEqual(self.head(w)[:3], bytes((0x02, F, 0xE7)), f'{w:02X}')
         for w in wn.NAME_LISTS + (wn.SHOP_MEMBERS, wn.TACTIC_WINDOW):
             b, a = self.head(w, before), self.head(w, after)
             self.assertEqual((a[0], a[2]), (b[0] - 1, b[2] + 1), f'{w:02X}')
@@ -255,7 +259,8 @@ class ApplyRejectTests(unittest.TestCase):
             run(rom)
 
     def test_window_shape_checks(self):
-        for n, at, value in ((wn.STATUS_WINDOW, 2, 0x07), (wn.SPELL_WINDOW, 7, 0xD5), (0x45, 2, 0x0F),
+        for n, at, value in ((wn.STATUS_WINDOW, 2, 0x07), (0x17, 2, 0xE7), (0x26, 5, 0x13),
+                             (wn.SPELL_WINDOW, 7, 0xD5), (0x45, 2, 0x0F),
                              (wn.SHOP_SELL_ALIAS, 2, 0x10)):
             with self.subTest(n=hex(n)):
                 bad = bytearray(base_windows()[n])

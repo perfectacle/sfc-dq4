@@ -9,7 +9,8 @@
 --   SETTLE=120    전투가 끝나고 쉴 프레임. 그 뒤 기록하고 MOVE 쪽으로 MOVEF 프레임 걸어 조작되는지 본다
 --   MAXF=6000     이 프레임에 이르면 그대로 끝낸다
 -- 결과: SHOT_DIR/battle.txt(단계마다 프레임·맵·칸·곡·무리·금화·전투 슬롯), start.png(전투가 걸린 프레임의 맵 화면),
--- fight.png(전투 시작 120프레임 뒤), after.png(돌아와 SETTLE 뒤)
+-- fight.png(전투 시작 120프레임 뒤), after.png(돌아와 SETTLE 뒤),
+-- bg3.txt(전투 동안 30프레임마다 「프레임 BG3 타일맵 2KB 16진」 한 줄)
 package.path = os.getenv("LIBDIR") .. "/?.lua;" .. package.path
 local L = require("lib")
 L.loadState(os.getenv("STATE"))
@@ -48,7 +49,7 @@ end)
 
 local n, phase, mark = 0, "walk", 0
 local started, ended = nil, nil
-local log = {}
+local log, bg3 = {}, {}
 local function rd(a) return emu.read(a, m) end
 local function hex(a, len)
   local t = {}
@@ -67,6 +68,7 @@ local function finish()
   if done then return end
   done = true
   L.write("battle.txt", table.concat(log, "\n") .. "\n")
+  L.write("bg3.txt", table.concat(bg3, "\n") .. "\n")
   emu.stop(0)
 end
 
@@ -89,6 +91,11 @@ emu.addEventCallback(function()
     if n == started + 120 then
       L.shot("fight.png")
       log[#log + 1] = string.format("slots f=%d %s", n, hex(0x7E07C0, 64))
+    end
+    if (n - started) % 30 == 0 then
+      local base, t = (rd(0x7E0725) & 0xFC) << 9, {}
+      for i = 0, 0x7FF do t[#t + 1] = string.format("%02X", emu.read(base + i, emu.memType.snesVideoRam)) end
+      bg3[#bg3 + 1] = string.format("%d %s", n, table.concat(t))
     end
     local k = (n - started) // tap
     if (n - started) % tap < 8 then L.press({[keys[k % #keys + 1]] = true}) end
