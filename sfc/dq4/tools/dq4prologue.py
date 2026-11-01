@@ -183,7 +183,7 @@ FROG_OUT = [(0x14, 0x04), (0x15, 0x04), (0x15, 0x03), (0x15, 0x02)]      # 다�
 VOICE_HUT = (40, 7, 44, 8)      # 오두막을 나섬: 「용사님 용사님……」
 VOICE_BRIDGE = (37, 8, 38, 10)  # 다리 동쪽 끝: 같은 말
 FROG_CALL = (34, 8, 35, 10)     # 다리 위: 「용사님 제발 도와주세요……」 → 개구리가 나타남
-SPLASH = JUMP = (0x45, 0x00)    # NDS EVE_JUMP 를 옮긴 빈 효과음(dq4sound-game.args). 첨벙 EVE_3_08 도 이 소리로
+SPLASH = JUMP = (0x45, 0x00)    # NDS EVE_JUMP 를 옮긴 빈 효과음(dq4sound-game.args). 첨벙 EVE_3_08 은 샘플 자리가 없어 이 소리로
 STAIRS = (0x34, 0x02)           # 계단(NDS 階段 으로 바뀐 갈래)
 SHINSIA_AT = (3, 0x0E)          # 수련하던 자리
 SHINSIA_OUT = [(4, 0x0E), (4, 0x07), (3, 0x07)]
@@ -732,7 +732,7 @@ def scripts():
              inside('voice_bridge'), _cmd('3F'), _msg(M_CALL), _cmd('40'),
              inside('frog_call'), _cmd('3F'), _msg(M_HELP),
              _cmd('20', *SPLASH), _cmd('50', fx * 2, fy * 2 + 1), _cmd('53'), _cmd('4F'), call('wait'),
-             _cmd('1C'), _cmd('1E', 0x02), _cmd('2F', 0x80)] + jump +
+             _cmd('1C'), _cmd('1E', 0x02), _cmd('2F', 0x80), _cmd('20', *JUMP)] + jump +
             [_cmd('38'), _cmd('2F', 0x20), call('wait'), call('hero_right'), call('wait6'),
              call('talk_here'), _wait_on(FROG_MET), _cmd('3F'),
              _cmd('20', *JUMP), _cmd('2F', 0x10)] + hops +
