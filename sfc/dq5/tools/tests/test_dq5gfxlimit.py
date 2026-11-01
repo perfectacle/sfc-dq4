@@ -261,6 +261,25 @@ class TileGrowTests(unittest.TestCase):
             cpu.jsl(lay['redraw'])
             self.assertEqual((0x420B, 0x80) in cpu.io_writes, not ending)
 
+    def test_ending_words_go_after_extras(self):
+        """엔딩 워드 표 4KB 는 --worlds-at 이 아니라 늘린 타일 뒤에 둔다. --worlds-at 을 뱅크 끝에 딱 맞게 두어도 들어가고,
+        다른 뱅크의 표를 LDA long,X 로 읽어 엔딩 대체가 맞는다."""
+        lay = fgw.grow_layout(0x348000)
+        size = lay['rles'] - 0x348000
+        at = 0x350000 - size
+        self.doc['ending_tiles'] = [5]
+        m = fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=at, extra_at=0x608000)
+        notes = {w['note'].split('(')[0]: w['at'] for w in m['writes']}
+        self.assertEqual(notes['엔딩 워드 표'], f'60:{0x8000 + len(self.extra):04X}')
+        data = apply(self.data, m)
+        rom = Rom(data)
+        got = self.run_palette(data, True, (512, 600))
+        self.assertEqual(got[:2], (dq5field.tile_word(rom, 5, True) | 0x20, dq5field.tile_word(rom, 600 - 512, False)))
+        self.assertEqual(self.run_palette(data, False, (512, 600))[:2],
+                         (dq5field.tile_word(rom, 512, True) | 0x20, dq5field.tile_word(rom, 600, False)))
+        with self.assertRaisesRegex(ValueError, '한 뱅크 안'):
+            fgw.patch(self.rom, self.doc, self.tmp.name, worlds_at=at + 1, extra_at=0x608000)
+
     def test_ending_tiles_must_stay_below_512(self):
         for bad, msg in (([512], '0~511'), ([-1], '0~511'), ([0] * 513, '512개까지'), ('x', '목록'), ([1.0], '목록')):
             self.doc['ending_tiles'] = bad

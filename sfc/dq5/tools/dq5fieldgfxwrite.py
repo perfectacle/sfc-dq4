@@ -412,11 +412,11 @@ def grow_layout(at, block_hooks=False):
     """타일 늘리기 --worlds-at 자리. 이름 → 주소: 불러오기 훅·니블 훅·다시 그리기 훅·DMA·고르기 표(세계 넷 × 8바이트:
     [RLE 주소 16][RLE 뱅크][늘린 타일 뱅크][주소 16][크기 16])·니블 표(4 × 512바이트)·타일 속성(1,024바이트)·
     블록 칸 9·10번째 비트 표(TILE_BITS)·palette_fast 의 위층·아래층 표(1,024바이트씩)·엔딩 코드(dma_gate·ending_palette)·
-    엔딩 위층·아래층 워드 표(2KB 씩)·그 뒤 세계 1·2 RLE. 엔딩 둘이 없던 판으로 만든 롬은 rles 만 다르고 나머지 자리는 같다.
+    그 뒤 세계 1·2 RLE. 엔딩 코드가 없던 판으로 만든 롬은 rles 만 다르고 나머지 자리는 같다. 엔딩 워드 표는 --extra-at 쪽에 둔다.
     block_hooks 면 예전 판: 니블 훅 뒤에 블록 훅 둘(block_lower·block_upper)이 있고 칸 비트 표·팔레트 표가 없다."""
     hooks = (('block_lower', OLD_BLOCK_HOOK_LEN), ('block_upper', OLD_BLOCK_HOOK_LEN)) if block_hooks else ()
     tail = () if block_hooks else (('tile_bits', len(TILE_BITS)), ('palettes', MAX_TILES * 2),
-                                   ('ending', ENDING_LEN), ('ending_words', MAX_TILES * 4))
+                                   ('ending', ENDING_LEN))
     out, a = {}, at
     for name, n in (('load', GROW_LOAD_LEN), ('nib', len(nib_hook(0, wide=True))), *hooks,
                     ('redraw', REDRAW_LEN), ('dma', DMA_LEN), ('table', GROW_ENTRY * 4), ('tables', 0x800),
@@ -1054,7 +1054,13 @@ def write_grow(rom, at, extra_at, world0_at, full0, nib0, world_data, placed, wr
     words = b'' if shared else palette_world_words([n for _, n in worlds[:3]])
     extras, after = place_extras(extra_at, [t[TILES * 32:] for t, _ in worlds], placed)
     # 워드 표는 늘린 타일과 바이트가 같아도 따로 둔다(같은 덩어리로 합치면 타일 주소를 덮어씀)
-    words_at = place_extras(after, [words], placed)[0][words] if words else None
+    words_at = None
+    if words:
+        got, after = place_extras(after, [words], placed)
+        words_at = got[words]
+    # 엔딩 워드 표(4KB)는 LDA long,X 로만 읽으므로 --worlds-at 뱅크 밖, 늘린 타일·워드 표 뒤에 둔다
+    end_words = b''.join(ending_words(nib0, ending))
+    end_at = place_extras(after, [end_words], placed)[0][end_words]
     blob, srcs = bytearray(), []
     for tiles, _ in worlds:
         base = tiles[:TILES * 32]
@@ -1074,13 +1080,12 @@ def write_grow(rom, at, extra_at, world0_at, full0, nib0, world_data, placed, wr
     palette = (palette_fast(lay['palettes'], lay['palettes'] + MAX_TILES) if shared
                else palette_worlds(words_at, words_at + WORD_LOWER))
     back = PALETTE_READ + 6 + len(palette) - 1
-    words_upper = lay['ending_words']
-    ending_code = dma_gate(lay['dma']) + ending_palette(words_upper, words_upper + MAX_TILES * 2, back)
-    body = (code + table + nibs + attrs + TILE_BITS + b''.join(palette_bytes(nib0)) + ending_code
-            + b''.join(ending_words(nib0, ending)) + bytes(blob))
+    ending_code = dma_gate(lay['dma']) + ending_palette(end_at, end_at + MAX_TILES * 2, back)
+    body = code + table + nibs + attrs + TILE_BITS + b''.join(palette_bytes(nib0)) + ending_code + bytes(blob)
     place_in(at, len(body), '--worlds-at', placed)
-    write(at, body, '타일 늘리기: 훅 셋·DMA·고르기 표·니블 표 넷·블록 칸 비트 표·팔레트 표 둘·엔딩 코드·엔딩 워드 표 둘·'
-          '세계 1·2 RLE', orig=False)
+    write(at, body, '타일 늘리기: 훅 셋·DMA·고르기 표·니블 표 넷·블록 칸 비트 표·팔레트 표 둘·엔딩 코드·세계 1·2 RLE',
+          orig=False)
+    write(end_at, end_words, '엔딩 워드 표(위층·아래층 2KB 씩, 타일 512 이상은 ending_tiles)', orig=False)
     for chunk, a in extras.items():
         write(a, chunk, f'늘린 타일 {len(chunk) // 32}개(VRAM 워드 {EXTRA_VRAM:04X}~)', orig=False)
     write(LOAD_SITE, b'\x22' + long_addr(lay['load']) + b'\x80\x04' + b'\xea' * 4, '타일 불러오기를 늘리기 훅으로')
