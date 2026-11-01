@@ -47,6 +47,8 @@ HOOK = 0x7DFF00
 HOOK_CODE = (bytes.fromhex('9F951D7E') + bytes((0x9F, SHADOW & 0xFF, SHADOW >> 8, 0x7E)) + bytes.fromhex('49FF')
              + bytes((0x9F, SHADOW_NOT & 0xFF, SHADOW_NOT >> 8, 0x7E)) + bytes.fromhex('A9056B'))
 SFX, SONG = 0x0C, 0x01
+# 효과음 목소리를 울리는 대기열 명령: 효과음 0C, 글자 소리 05(대화·전투 메시지 글자마다 32-01), 배포 롬 장면의 모르는 명령
+SOUND_CMDS = (SFX, 0x05, None)
 WINDOW = 45
 SFX_VOICES = (7, 6)
 TOGETHER = 4                          # 한 효과음의 두 목소리가 함께 시작한다고 보는 프레임 차
@@ -226,6 +228,11 @@ def fmt(want):
 
 def match_seq(events, wants):
     """wants 를 차례로(같은 것이 두 번이면 두 번) 찾는다. 프레임 목록, 못 찾은 것부터는 None."""
+    return [None if i is None else events[i][0] for i in match_index(events, wants)]
+
+
+def match_index(events, wants):
+    """match_seq 와 같되 events 의 자리(색인)."""
     out, i = [], 0
     for want in wants:
         while i < len(events) and not same(events[i][1:], want):
@@ -233,7 +240,7 @@ def match_seq(events, wants):
         if i >= len(events):
             out += [None] * (len(wants) - len(out))
             break
-        out.append(events[i][0])
+        out.append(i)
         i += 1
     return out
 
@@ -510,7 +517,7 @@ def assign_key_ons(events, wants, frames, envx, sources):
     대화 글자처럼 효과음이 6 에서만 울리기도 해서(7 은 앞 효과음 꼬리) 둘 다 본다. 바탕은 짝지은 울림과, 창 안의 다른
     목소리 첫 울림 가운데 TOGETHER 프레임 안에 시작한 것을 함께 돌려준다(6 의 울림이 곡 음일 수 있음).
     돌려줌: want 차례대로 (프레임, 목소리, [(목소리, 바탕)…]) 또는 None."""
-    sfx_frames = sorted({n for n, c, *_ in events if c in (SFX, None)})
+    sfx_frames = sorted({n for n, c, *_ in events if c in SOUND_CMDS})
     used, out = set(), []
     for f in wants:
         if f is None:
@@ -556,10 +563,14 @@ def finish(walker, scene, res, out):
         res['status'] = 'control'
         (out / 'scene.json').write_text(json.dumps(res, ensure_ascii=False, indent=1) + '\n')
         return res
-    hits = match_seq(events, [w[:3] for w in scene.want])
-    sfx_rows = [(k, f) for k, (w, f) in enumerate(zip(scene.want, hits)) if w[0] in (SFX, None)]
-    ons = dict(zip([k for k, _ in sfx_rows], assign_key_ons(events, [f for _, f in sfx_rows], frames, walker.envx,
-                                                           walker.sources)))
+    idx = match_index(events, [w[:3] for w in scene.want])
+    hits = [None if i is None else events[i][0] for i in idx]
+    # 울림은 글자 소리까지 모든 효과음 항목에 차례로 짝지어, 원하는 항목이 앞 항목의 울림을 가져가지 않게 한다
+    sound = [i for i, e in enumerate(events) if e[1] in SOUND_CMDS]
+    paired = dict(zip(sound, assign_key_ons(events, [events[i][0] for i in sound], frames, walker.envx,
+                                            walker.sources)))
+    ons = {k: paired.get(i) for k, (w, i) in enumerate(zip(scene.want, idx))
+           if w[0] in (SFX, None) and i is not None}
     for k, (want, f) in enumerate(zip(scene.want, hits)):
         row = {'want': fmt(want[:3]), 'frame': f, 'sounded': None}
         if len(want) > 3:
@@ -757,9 +768,9 @@ FIGHT = 'down:8;wait:200;'            # 한 걸음 내디뎌 강제 조우
 SLIME, BOSS = 0x00, 0xE2              # 슬라임, 탑 위 보스(dq4ch1event.BOSS_MONSTERS 첫째)
 WEAPON = 0x7E0DA7                     # 공격하는 사람의 무기(28:8055 가 읽음). 프레임마다 묶어 무기를 고른다
 NEXT_EXP = 'poke=2066=01;2067=00;2068=00'  # 주인공 다음 레벨 경험치(+26~+28)를 1 로: 한 번 이기면 레벨 업
-# 시드 1~80 을 두 코어로 돌려 A 15번 안에 회심이 나는 시드를 골랐다(snes9x 29·48·58·59, bsnes 19·27·38·…).
-# 두 코어는 전투에 드는 프레임이 하나 달라 난수가 갈린다. 전투 코드가 바뀌어 회심이 사라지면 다시 고른다
-CRITICAL_SEED = {'snes9x': 29, 'bsnes': 19}
+# --pick-critical-seed 80 으로 고른 시드(A 15번 안에 회심). 두 코어는 전투에 드는 프레임이 하나 달라 난수가 갈린다.
+# 전투 메시지 길이 같은 상관없는 변경에도 바뀌므로(snes9x 29 가 빠졌음), 두 롬에서 함께 난 시드를 골랐다
+CRITICAL_SEED = {'snes9x': 48, 'bsnes': 19}
 SCARA = 0x55                          # 몬스터 행동 スカラ(돌려 부르기 46-04 를 듣는 시험 롬)
 
 
