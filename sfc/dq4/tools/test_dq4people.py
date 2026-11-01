@@ -186,6 +186,13 @@ class SheetTests(unittest.TestCase):
             for c, k in mapping.items():
                 self.assertEqual(board[(g, line)][k], c)
 
+    def test_where_adds_groups_that_use_the_spare_picture(self):
+        elder = P.Person((0x1F,), 0x3C, 'x', 'elder', spare=0x9C)
+        scholar = P.Person((0x1F,), None, 'x', 'scholar')
+        out = P.where([elder, scholar], {0x9C: {0x36}, 0x1F: {0x3C, 0x45}})
+        self.assertEqual(out[elder], {0x3C, 0x36})
+        self.assertEqual(out[scholar], {0x45})
+
     def test_pack_backtracks_when_largest_first_fragments(self):
         bins = P.pack([('a', 6), ('b', 5), ('c', 5)], [10, 6])
         self.assertEqual(sorted(sorted(b) for b in bins), [['a'], ['b', 'c']])

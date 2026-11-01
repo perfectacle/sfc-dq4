@@ -43,6 +43,16 @@ from kr_patch.fc import ines  # noqa: E402
 # 기타 bit4-5 가 00 이라 말을 걸면 주인공 쪽으로 돈다(05:86C5 1번은 30 이라 정면만 봄)
 STAND = {"list": "05:870A", "index": 2}
 WALK = {"list": "05:8857", "index": 6}
+# 같은 FC 그림이라도 NDS 가 다른 시트로 그리는 인물: (맵, 처음 보이는 FC 대사) -> DQ5 그림(dq4people 의 시트).
+# NDS 맵 스크립트에서 같은 대사를 하는 오브젝트의 모습 번호로 골랐다(nds/dq4/tools/ndsscript.py dump)
+NDS_LOOKS = {
+    # 바트랜드 성 앞의 장로(NDS ham2f1 長老 h039, 대사 287·320). 9C 는 서장 장로 시트를 싣는 빌린 그림
+    ("36/00", 1932): 0x9C, ("36/00", 1312): 0x9C,
+    # 사막 바자의 아저씨(NDS mem1f1·mey1f1 砂漠のおじさん h058). 그 시트가 없어 おじさん h002 로 둔다
+    ("45/05", 1583): 0x38, ("45/05", 1362): 0x38,
+    # 사란의 역사 학자(FC 그림 29, NDS mbw1f1 学者 h033, 대사 95566)
+    ("45/04", 1807): 0x1F,
+}
 # A person FC puts on a bed lies in it: a one-time entry with 기타 bit7 (lying, drawn rotated 8 px lower) and bit4
 # (does not turn when spoken to, which would swap the head to the foot of the bed), no script.
 LIE = {"list": "10:A4E9", "index": 14}
@@ -57,7 +67,7 @@ PICTURES = {
     0x13: 0x09,  # old man
     0x14: 0x29,  # man
     0x15: 0x0B,  # child
-    0x16: 0x38,  # bald old man
+    0x16: 0x09,  # bald old man (NDS draws them 老人 h005, see NDS_LOOKS)
     0x17: 0x17,  # woman
     0x18: 0x03,  # man
     0x19: 0x07,  # man
@@ -344,6 +354,7 @@ def port(dq5_path, dq4_path, with_people=True):
         entries, people = [], []
         shops = merchants(prg, fc_group, fc_number, items)
         group = int(name[:2], 16) if "/" in name else GROUPS[name][0]
+        dq5_map = name if "/" in name else "%02X/%02X" % GROUPS[name]
         beds = bed_cells(prg, fc_group, fc_number) if group in LIE_GROUPS else set()
         for night in (False, True) if has_people(fc_group, with_people) else ():
             for p in fc_people(prg, fc_group, fc_number, night, flags):
@@ -369,9 +380,10 @@ def port(dq5_path, dq4_path, with_people=True):
                     talk = first + message - FIRST_MESSAGE
                 if p["picture"] not in PICTURES:
                     raise ValueError(f"{name}: FC picture {p['picture']:02X} has no DQ5 picture")
+                gfx = NDS_LOOKS.get((dq5_map, p["shows"][0] if p["shows"] else None), PICTURES[p["picture"]])
                 x, y = cell(p["x"], p["y"])
                 fields = {"x": x, "y": y, "facing": p["facing"], "talk": talk,
-                          "gfx": PICTURES[p["picture"]], "layer": 0, "interval": p["interval"]}
+                          "gfx": gfx, "layer": 0, "interval": p["interval"]}
                 template = WALK if p["interval"] else STAND
                 if (p["x"], p["y"]) in beds and service is None:
                     # Lying on the bed's row, half a block right so the head (right when facing down) rests on
