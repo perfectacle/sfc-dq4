@@ -1,9 +1,11 @@
 """통합 타이틀의 색 소유 범위와 ROM 기록 경계를 검사한다."""
 
 import hashlib
+import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -12,6 +14,62 @@ from PIL import Image
 
 import dq4titleassets
 import dq4titlepatch as patcher
+from dq4romassets import CHECKSUM_OFFSET, apply_ips
+
+
+def source_rom():
+    """원본 머리·훅 바이트만 넣은 1.5MB 합성 롬."""
+    rom = bytearray(0x180000)
+    rom[0x7FD7] = 0x0B
+    rom[patcher.HOOK:patcher.HOOK + 5] = patcher.ORIGINAL_HOOK
+    rom[patcher.MUSIC_HOOK:patcher.MUSIC_HOOK + 3] = patcher.ORIGINAL_MUSIC_HOOK
+    for i in range(0x100000, 0x180000, 0x1000):
+        rom[i] = i >> 12 & 0xFF
+    return bytes(rom)
+
+
+class FakeAsar:
+    """asar 자리에서 받은 입력(정의, 늘린 롬, 자료 파일)을 기록하고, 훅과 자료를 placements 대로 써 넣는다."""
+
+    def __init__(self, placements, extra=(), returncode=0):
+        self.placements, self.extra, self.returncode = placements, dict(extra), returncode
+        self.defines, self.target = {}, None
+
+    def __call__(self, command, **_):
+        asm, target = Path(command[2]), Path(command[3])
+        for line in asm.read_text().splitlines():
+            if line.startswith('!'):
+                name, value = line[1:].split(' = ')
+                self.defines.setdefault(name, int(value))
+        data = bytearray(target.read_bytes())
+        self.target = bytes(data)
+        data[patcher.HOOK:patcher.HOOK + 5] = patcher.NEW_HOOK
+        data[patcher.MUSIC_HOOK:patcher.MUSIC_HOOK + 3] = patcher.NEW_MUSIC_HOOK
+        data[0x180000:0x180004] = b'\x5c\x00\x80\x30'
+        for name, offset in self.placements:
+            blob = (asm.parent / name).read_bytes()
+            data[offset:offset + len(blob)] = blob
+        for offset, value in self.extra.items():
+            data[offset] = value
+        target.write_bytes(data)
+        return subprocess.CompletedProcess(command, self.returncode, '', 'error' if self.returncode else '')
+
+
+def run_build(module, rom, root, asar, **patches):
+    """롬 SHA-1 을 합성 롬 것으로 두고, asar 실행만 asar 로 바꿔 build 를 돌린다."""
+    source = root / 'source.sfc'
+    source.write_bytes(rom)
+    with patch.object(module, 'SOURCE_SHA1', hashlib.sha1(rom).hexdigest()), \
+            patch.object(module.shutil, 'which', return_value='/fake/asar'), \
+            patch.object(module.subprocess, 'check_output', return_value='Asar 1.91\n'), \
+            patch.object(module.subprocess, 'run', side_effect=asar):
+        for name, value in patches.items():
+            stack = patch.object(module, name, value)
+            stack.start()
+        try:
+            return module.build(source, root / 'assets', root / 'out' / 'title.sfc', 'asar')
+        finally:
+            patch.stopall()
 
 
 class IntegratedTitleTests(unittest.TestCase):
@@ -104,6 +162,81 @@ class IntegratedTitleTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'SHA-1'):
                 patcher.build(original, root / 'missing-assets', root / 'output.sfc', 'missing-asar')
             self.assertFalse((root / 'output.sfc').exists())
+
+
+BLOBS = {'title.chr': bytes(range(1, 33)) * 4, 'title.map': bytes([2]) * 2048, 'title.pal': bytes([3]) * 256}
+STATIC = [('title.chr', 0x188000), ('title.map', 0x190000), ('title.pal', 0x190800), ('gleam.pal', 0x192000)]
+
+
+class BuildAroundAsarTests(unittest.TestCase):
+    """asar 앞(정의·늘린 롬·자료 파일)과 뒤(기록 범위·자료 자리·체크섬·IPS·보고)를 롬·asar 없이 본다."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root)
+        self.rom = source_rom()
+        self.blobs = dict(BLOBS, **{'gleam.pal': BLOBS['title.pal'] * 32})
+        self.assets = patch.object(patcher, 'read_assets', return_value=(dict(self.blobs), [5], [0] * 32))
+
+    def build(self, asar):
+        with self.assets:
+            return run_build(patcher, self.rom, self.root, asar)
+
+    def test_static_title_inputs_and_outputs(self):
+        asar = FakeAsar(STATIC)
+        report = self.build(asar)
+        self.assertLessEqual({'chr_size': len(BLOBS['title.chr']), 'animation_enabled': 0, 'animation_frames': 8}.items(),
+                             asar.defines.items())
+        # asar 가 받는 롬은 원본 뒤에 원본 마지막 512KB 를 거울로 붙인 2MB
+        self.assertEqual(asar.target, self.rom + self.rom[0x100000:])
+        out = self.root / 'out' / 'title.sfc'
+        rom = out.read_bytes()
+        self.assertEqual(len(rom), 0x200000)
+        for name, offset in STATIC:
+            self.assertEqual(rom[offset:offset + len(self.blobs[name])], self.blobs[name])
+        low, high = (int.from_bytes(rom[CHECKSUM_OFFSET + i:CHECKSUM_OFFSET + i + 2], 'little') for i in (0, 2))
+        self.assertEqual(low ^ high, 0xFFFF)
+        self.assertEqual(apply_ips(self.rom, out.with_suffix('.ips').read_bytes()), rom)
+        saved = json.loads(out.with_suffix('.json').read_text())
+        self.assertEqual(saved, json.loads(json.dumps(report)))
+        self.assertEqual(report['rom_sha1'], hashlib.sha1(rom).hexdigest())
+        self.assertEqual(report['gleam']['indices'], [5])
+        self.assertEqual((self.root / 'source.sfc').read_bytes(), self.rom)
+
+    def test_write_outside_declared_regions_leaves_no_output(self):
+        for offset in (0x100, 0x181000, 0x188000 + len(BLOBS['title.chr'])):
+            with self.subTest(offset=f'{offset:06X}'), self.assertRaisesRegex(ValueError, 'outside declared'):
+                self.build(FakeAsar(STATIC, {offset: 0xA5}))
+            self.assertFalse((self.root / 'out').exists())
+
+    def test_missing_or_misplaced_asset_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'gleam.pal was not embedded'):
+            self.build(FakeAsar(STATIC[:-1]))
+        with self.assertRaisesRegex(ValueError, 'Asar failed'):
+            self.build(FakeAsar(STATIC, returncode=1))
+        self.assertFalse((self.root / 'out').exists())
+
+    def test_animated_title_doubles_rom_and_places_frames_per_bank(self):
+        frames = {f'frame{i:02d}.chr': bytes([0x10 + i]) * 0x7000 for i in range(3)}
+        assets = self.root / 'assets'
+        assets.mkdir()
+        (assets / 'animation.json').write_text(json.dumps({'frame_count': 3}))
+        asar = FakeAsar(STATIC + [(name, 0x198000 + i * 0x8000) for i, name in enumerate(frames)], {0x7FD7: 0x0C})
+        import dq4titleanimation
+        with patch.object(dq4titleanimation, 'read_pack', return_value={**BLOBS, **frames}):
+            report = run_build(patcher, self.rom, self.root, asar)
+        self.assertEqual(asar.defines['animation_enabled'], 1)
+        self.assertEqual(asar.defines['animation_frames'], 3)
+        mirrored = self.rom + self.rom[0x100000:]
+        self.assertEqual(len(asar.target), 0x400000)
+        self.assertEqual(asar.target[0x7FD7], 0x0C)
+        self.assertEqual(asar.target[:0x7FD7] + asar.target[0x7FD8:], (mirrored * 2)[:0x7FD7] + (mirrored * 2)[0x7FD8:])
+        rom = (self.root / 'out' / 'title.sfc').read_bytes()
+        self.assertEqual(report['rom_bytes'], 0x400000)
+        for i, (name, data) in enumerate(frames.items()):
+            self.assertEqual(rom[0x198000 + i * 0x8000:0x198000 + i * 0x8000 + len(data)], data)
+        # 정지 그림 팔레트를 32번 되풀이한 반짝임 표(색이 바뀌지 않음)
+        self.assertEqual(rom[0x192000:0x194000], BLOBS['title.pal'] * 32)
 
 
 ROM = Path(__file__).resolve().parents[3] / 'rom/dq5.sfc'

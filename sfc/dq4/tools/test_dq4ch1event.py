@@ -640,5 +640,174 @@ class ListTest(unittest.TestCase):
         self.assertLessEqual(set(t.values()), talks)
 
 
+def _ported(maps, alts):
+    """dq4npcport.port 꼴의 (ported, report). maps·alts: {이름: [(FC 대화, 밤, x, y, 그림)]}. 옮긴 인물은 제 자리
+    (F0:<이름> 목록)를 빌리고 간격·속도·걸음을 가진다."""
+    ported, report = [], {}
+    for kind, source in (("map", maps), ("name", alts)):
+        for name, rows in source.items():
+            entries, people = [], []
+            for i, (talk, night, x, y, picture) in enumerate(rows):
+                dq5 = {"x": 2 * x, "y": 2 * y + 1, "talk": 0x300 + i}
+                entries.append({"from": {"list": f"F0:{name}", "index": i}, "time": "night" if night else "day",
+                                "fields": {**dq5, "facing": "down", "gfx": picture, "layer": 0,
+                                           "interval": 0, "speed": 2, "step": 3}})
+                people.append({"talk": talk, "night": night, "x": x, "y": y, "picture": picture, "dq5": dq5})
+            ported.append({kind: name, "entries": entries})
+            report[name] = people
+    return ported, report
+
+
+def _fixture():
+    """npc_lists 가 찾는 FC 인물만 둔 맵들. 탑 위는 낮 10명(슬롯 06~0F)과 밤 3명."""
+    other = (0x7F, False, 1, 1, 0x20)
+    after = lambda m: ev.alt_name(ev.AFTER_BOSS, m)  # noqa: E731
+    (home0, *_), (home1, *_) = ev.KIDS_WALK_HOME
+    maps = {
+        ev.IMURU: [(ev.FC_CHILD, True, 3, 4, 0x15), other],
+        ev.FRONT: [(ev.FC_FLARE_DAY, False, 5, 6, 0x30), (ev.FC_OLD_MAN, False, 7, 8, 0x31), other],
+        ev.FRONT_NIGHT: [(ev.FC_FLARE_NIGHT, True, 5, 6, 0x30)],
+        ev.JAIL: [(0x7E, False, 2, 2, 0x40), (ev.FC_ALEX_NIGHT, True, 2, 2, 0x40),
+                  (ev.FC_JAIL_FLARE, False, *ev.REUNION_AT, 0x30), (ev.FC_JAIL_FLARE, False, 9, 10, 0x30)],
+        ev.CAVE: [(ev.FC_CAVE_SOLDIER, False, 4, 4, 0x22)],
+        ev.KING_ROOM: [(ev.FC_KING_ROOM, False, 4, 4, 0x23)],
+        ev.SOLDIER_MAP: [(ev.FC_SOLDIER, False, 4, 4, 0x22)],
+        ev.HOIMIN_ROOM: [(ev.FC_HOIMIN, False, 4, 4, 0x50), other],
+        ev.TOWER_HALL: [(0x70, False, 4, 4, ev.FC_KIDNAPPER), (0x71, False, 5, 4, 0x15),
+                        (0x70, True, 4, 4, ev.FC_KIDNAPPER), (0x71, True, 5, 4, 0x15)],
+        ev.TOWER_TOP: [(0x60 + i, False, i, 2, 0x15) for i in range(10)] + [(0x6A + i, True, i, 2, 0x15) for i in range(3)],
+        ev.UNDER_WELL: [other],
+    }
+    alts = {
+        after(ev.FRONT): [(ev.FC_BRAGGART, False, 4, 4, 0x24), other],
+        after(ev.FRONT_NIGHT): [other],
+        after(ev.KIDS_HOME_MAP): [(0x72, False, *ev.KIDS_FC_WALKERS[0], 0x15), (0x72, False, *ev.KIDS_FC_WALKERS[1], 0x15),
+                                  (0x73, False, *home0, 0x15), (0x73, False, *home1, 0x15), other],
+        after('37/01'): [other],
+        after(ev.SOLDIER_MAP): [(ev.FC_SOLDIER, False, 4, 4, 0x22), other],
+        after('39/03'): [other],
+    }
+    return _ported(maps, alts)
+
+
+class SyntheticListTest(unittest.TestCase):
+    """롬 없이 npc_lists 의 목록 바꾸기를 본다(ListTest 는 실제 인물 목록으로 같은 성질을 본다)."""
+    FIRST = 0x904
+
+    @classmethod
+    def setUpClass(cls):
+        import copy
+        cls.ported, cls.report = _fixture()
+        cls.before = copy.deepcopy(cls.ported)
+        cls.lists, cls.new, cls.over = ev.npc_lists(cls.ported, cls.report, cls.FIRST)
+        cls.t = ev.talk_numbers(cls.FIRST)
+
+    def entries(self, m):
+        return next(lst["entries"] for lst in self.lists if lst["map"] == m)
+
+    def named(self, name):
+        (found,) = [lst["entries"] for lst in self.new if lst["name"] == name]
+        return found
+
+    def voices(self, m):
+        return 2 * sum(where == m for where, *_ in ev.VOICES)
+
+    def test_input_lists_are_not_changed(self):
+        # 같은 port 결과를 1장·2장 빌드가 함께 쓰므로 고친 목록은 사본이어야 한다
+        self.assertEqual(self.ported, self.before)
+
+    def test_moved_people_drop_the_borrowed_motion_and_staying_ones_keep_theirs(self):
+        (flare,) = [e for e in self.entries(ev.FRONT) if e["from"] == ev.FLARE_SRC]
+        self.assertEqual(flare["fields"]["talk"], self.t['flare_day'])
+        self.assertFalse({"interval", "speed", "step"} & set(flare["fields"]))
+        child = self.entries(ev.IMURU)[0]
+        self.assertEqual((child["fields"]["talk"], child["fields"]["interval"]), (self.t['child'], 0))
+        self.assertEqual(child["time"], "night")
+
+    def test_jail_keeps_alex_and_the_walker_stands_where_the_fc_walker_starts(self):
+        jail = self.entries(ev.JAIL)
+        self.assertEqual(len(jail), 2)
+        self.assertEqual(jail[1]["fields"]["talk"], self.t['alex_night'])
+        walkers = [e for e in self.named("jail_reunion") if e["from"] == ev.WALKER_SRC]
+        self.assertEqual([e["time"] for e in walkers], ["day", "night"])
+        # 걸어가는 프레아는 재회 칸이 아닌 FC 슬롯의 DQ5 자리에서, 힌트 대사(먼저 나온 프레아의 옮긴 대화)로
+        hint = self.report[ev.JAIL][2]["dq5"]["talk"]
+        self.assertTrue(all((e["fields"]["x"], e["fields"]["y"]) == (2 * 9, 2 * 10 + 1) for e in walkers))
+        self.assertTrue(all(e["fields"]["talk"] == hint for e in walkers))
+        self.assertEqual({e["fields"]["talk"] for e in self.named("jail_after")}, {hint})
+        self.assertEqual([o["list"] for o in self.over if o["map"] == ev.JAIL], ["new:jail_after", "new:jail_reunion"])
+
+    def test_voices_and_cave_step_add_invisible_day_and_night_people(self):
+        well = self.entries(ev.UNDER_WELL)
+        self.assertEqual(len(well), 1 + self.voices(ev.UNDER_WELL))
+        self.assertTrue(all(e["fields"]["gfx"] == 0x01 and e["fields"]["talk"] == self.t['hoimin'] for e in well[1:]))
+        cave = self.entries(ev.CAVE)
+        self.assertEqual([e["from"] for e in cave[1:]], [ev.CAVE_STEP_SRC] * 2)
+        self.assertEqual(cave[0]["fields"]["talk"], self.t['cave_soldier'])
+
+    def test_missing_event_person_stops_the_build(self):
+        ported, report = _fixture()
+        report[ev.KING_ROOM] = [{**p, "talk": 0x7F} for p in report[ev.KING_ROOM]]
+        with self.assertRaises(SystemExit):
+            ev.npc_lists(ported, report, self.FIRST)
+
+    def test_old_man_takes_his_picture_and_braggart_his_talk(self):
+        (old,) = [e for e in self.entries(ev.FRONT) if e["fields"]["talk"] == self.t['old_man']]
+        self.assertEqual((old["from"], old["fields"]["gfx"]), (ev.OLD_MAN_SRC, ev.OLD_MAN_PICTURE))
+        after = self.named(ev.alt_name(ev.AFTER_BOSS, ev.FRONT))
+        self.assertEqual(after[0]["fields"]["talk"], self.t['braggart'])
+        self.assertEqual(after[0]["from"], {"list": f"F0:{ev.alt_name(ev.AFTER_BOSS, ev.FRONT)}", "index": 0})
+
+    def test_hoimin_leaves_his_room_and_the_hall_empties(self):
+        room = self.entries(ev.HOIMIN_ROOM)
+        self.assertEqual(room[0]["from"], ev.HOIMIN_SRC)
+        gone = self.named("hoimin_gone")
+        self.assertNotIn(ev.HOIMIN_SRC, [e["from"] for e in gone])
+        # 그 방의 목소리 인물은 합류한 뒤에도 남는다
+        self.assertEqual(len(gone), 1 + self.voices(ev.HOIMIN_ROOM))
+        self.assertEqual([e["from"] for e in self.entries(ev.TOWER_HALL)],
+                         [ev.KIDNAPPER_SRC, ev.KID_SRC, ev.KIDNAPPER_SRC, ev.KID_SRC])
+        self.assertEqual(self.named("hall_empty"), [])
+
+    def test_tower_top_slots_count_within_day_and_night(self):
+        srcs = [e["from"] for e in self.entries(ev.TOWER_TOP)]
+        # 낮 슬롯 06~0F, 밤 슬롯 06~08: 06 은 보스 대화, 08 은 우는 아이, 07·09 는 이기면 숨음, 0C~0E 는 구한 사람
+        day = [ev.HIDE_ON_WIN_SRC, ev.HIDE_ON_WIN_SRC, ev.CRY_SRC, ev.HIDE_ON_WIN_SRC, None, None,
+               ev.RESCUED2_SRC, ev.RESCUED_SRC, ev.THANKS_SRC, None]
+        night = [ev.HIDE_ON_WIN_SRC, ev.HIDE_ON_WIN_SRC, ev.CRY_SRC]
+        for i, (got, want) in enumerate(zip(srcs, day + night)):
+            if want is not None:
+                self.assertEqual(got, want, i)
+        top = self.entries(ev.TOWER_TOP)
+        self.assertEqual((top[0]["fields"]["talk"], top[10]["fields"]["talk"]), (self.t['boss'], self.t['boss']))
+        kept = [e["from"]["index"] for e in self.named("top_after") if e["from"]["list"] == f"F0:{ev.TOWER_TOP}"]
+        self.assertEqual(kept, [4, 5, 9])
+
+    def test_after_boss_soldier_and_kids(self):
+        soldier = self.named(ev.alt_name(ev.AFTER_BOSS, ev.SOLDIER_MAP))
+        self.assertEqual((soldier[0]["from"], soldier[0]["fields"]["talk"]), (ev.SOLDIER_SRC, self.t['soldier']))
+        self.assertEqual([e["from"]["index"] for e in self.named("soldier_gone")], [1])
+        kids = self.named(ev.alt_name(ev.AFTER_BOSS, ev.KIDS_HOME_MAP))
+        srcs = [e["from"] for e in kids]
+        # FC 가 일행 자리로 옮기는 두 아이 대신 집의 아이가 걷는다
+        self.assertEqual(srcs[:2], [src for src, _ in ev.HOME_KID_SRCS])
+        self.assertEqual(srcs[3:], [ev.KIDS_HOME_SRC] * 2)
+        self.assertEqual(len(kids), 5 - len(ev.KIDS_FC_WALKERS) + 2)
+
+    def test_chapter_end_and_override_order(self):
+        end = self.named("chapter_end")
+        self.assertEqual([e["from"] for e in end[-2:]], [ev.ENDER_SRC] * 2)
+        self.assertEqual(end[-1]["fields"]["talk"], self.t['king'])
+        # 앞에 둔 override 부터 맞춰 보므로 진행 깃발 목록이 보스 뒤 목록보다 먼저다
+        self.assertEqual([o["list"] for o in self.over][:7],
+                         ["new:jail_after", "new:jail_reunion", "new:hoimin_gone", "new:hall_empty",
+                          "new:top_after", "new:soldier_gone", "new:chapter_end"])
+        alt = self.over[7:]
+        self.assertEqual([o["map"] for o in alt], list(ev.ALT_STATES[0][2]))
+        self.assertTrue(all((o["flag"], o["mask"]) == ev.BOSS_WON for o in alt))
+        names = {lst["name"] for lst in self.new}
+        self.assertTrue(all(o["list"].removeprefix("new:") in names for o in self.over))
+
+
 if __name__ == "__main__":
     unittest.main()

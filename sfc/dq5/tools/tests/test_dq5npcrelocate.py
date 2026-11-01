@@ -1,15 +1,18 @@
 """인물 레코드 안 스크립트 길이 변경과 낮·밤 공유 경계 검사."""
+import contextlib
+import io
 import sys
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from dq5map import Rom, lorom  # noqa: E402
+from dq5map import GROUP_TABLE, Rom, lorom  # noqa: E402
 from dq5npc import entry_size, parse, script_address  # noqa: E402
-from dq5npc import NO_NPC, OVERRIDE_LISTS  # noqa: E402
+from dq5npc import ALT_END, ALT_START, NO_NPC, NPC_GROUPS, OVERRIDE_LISTS, all_lists, script_bytes  # noqa: E402
+from dq5npclists import MAP_OBJECTS  # noqa: E402
 from dq5npcrelocate import (  # noqa: E402
-    FORMAT, banks_of, bank_stub, condition_writes, destination, pack_alt, pack_base, pack_region, repack_entry,
-    replacements,
+    BASE_START, FORMAT, GROUP_COUNT, HOOKS, OVERRIDE_COUNT, apply_manifest, banks_of, bank_stub, check,
+    condition_writes, cpu, destination, pack_alt, pack_base, pack_region, patch, repack_entry, replacements,
 )
 
 OLD, NEW = 0x058000, 0x328000
@@ -184,6 +187,110 @@ class SplitBankTests(unittest.TestCase):
         for bad in ([], [0x328000, 0x32C000], [0x408000], ['32:8000']):
             with self.assertRaises(ValueError):
                 banks_of(bad, '기본')
+
+
+FILLER = bytes.fromhex('b0 12 03 04 05 06 07 01 16')    # 스크립트 한 바이트(16)를 단 9바이트 인물
+
+
+def filled_list(size):
+    """끝 0 까지 size 바이트인 목록 하나. 마지막 인물의 스크립트 길이로 크기를 맞춘다."""
+    body = bytearray()
+    while size - 1 - len(body) > 260:
+        body += FILLER
+    script = size - 1 - len(body) - 8
+    return bytes(body + FILLER[:7] + bytes([script]) + b'\x1a' * (script - 1) + b'\x16' + b'\x00')
+
+
+def full_rom():
+    """원본 인물 목록 자리를 그대로 채운 합성 롬: 기본 54그룹 346목록(05:8651~D4B2), 대체 293목록(10:8000~DDB1),
+    대체 표 296행, 맵 포인터 그룹 표와 빈 맵 물체 표. 마지막 목록이 남은 자리를 채운다."""
+    data = bytearray(0x200000)
+
+    def put(addr, raw):
+        data[lorom(addr):lorom(addr) + len(raw)] = raw
+
+    for addr, raw in HOOKS.items():
+        put(addr, raw)
+    starts = [BASE_START + g for g in range(GROUP_COUNT)]
+    last = starts[-1] + 346 - GROUP_COUNT
+    put(last, filled_list(NPC_GROUPS - last))
+    put(NPC_GROUPS, b''.join((a & 0xFFFF).to_bytes(2, 'little') for a in starts))
+    put(ALT_START + 292, filled_list(ALT_END - (ALT_START + 292)))
+    rows = b''.join(bytes([i % GROUP_COUNT, 0, 0x1D, 0x10]) + ((ALT_START + i % 292) & 0xFFFF).to_bytes(2, 'little')
+                    for i in range(OVERRIDE_COUNT))
+    put(OVERRIDE_LISTS, rows + b'\xff')
+    # 맵 수는 그룹마다 인물 목록 수와 같다(옮긴 롬은 마지막 그룹의 목록 수를 이 표로 센다)
+    low = GROUP_TABLE & 0xFFFF
+    first = low - 3 * 346
+    put(GROUP_TABLE, b''.join((first + 3 * g).to_bytes(2, 'little') for g in range(GROUP_COUNT)))
+    put(0x1FCEB6, (0xCEB6).to_bytes(2, 'little') * 5)
+    put(MAP_OBJECTS, b'\xff')
+    return Rom(data), last
+
+
+class FullPatchTests(unittest.TestCase):
+    """patch 전체: 원본 꼴 롬의 모든 목록을 옮긴 뒤 목록·인물·스크립트가 그대로인지, 길이를 바꾼 뒤가 밀리는지."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.rom, cls.last = full_rom()
+        cls.lists = all_lists(cls.rom)
+
+    def test_fixture_has_the_original_list_count(self):
+        self.assertEqual(len(self.lists), 346 + 293)
+
+    def test_untouched_relocation_passes_the_checker(self):
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            check(self.rom)
+        self.assertIn('목록 639개', out.getvalue())
+
+    def test_writes_restore_on_the_original_and_repoint_the_loader(self):
+        manifest, layout = patch(self.rom, {'format': FORMAT, 'scripts': []})
+        moved = apply_manifest(self.rom, manifest)
+        at = {w['at']: bytes.fromhex(w['hex']) for w in manifest['writes']}
+        self.assertEqual(at['12:8021'], b'\x32')
+        self.assertEqual(at['12:8051'], b'\x00\x80')
+        self.assertEqual(at['12:833C'], b'\x33')
+        # 32:8000 의 그룹 포인터는 옮긴 그룹 첫 목록을 가리키고, 목록 이름·수는 원본과 같다
+        table = [moved.u16(0x328000 + g * 2) for g in range(GROUP_COUNT)]
+        self.assertEqual(table, [int(layout['lists'][cpu(BASE_START + g)].replace(':', ''), 16) & 0xFFFF
+                                 for g in range(GROUP_COUNT)])
+        self.assertEqual(table[0], 0x8000 + GROUP_COUNT * 2)
+        self.assertEqual(layout['base_bytes'], GROUP_COUNT * 2 + NPC_GROUPS - BASE_START)
+        self.assertEqual(layout['alt_bytes'], ALT_END - ALT_START)
+        for addr, _ in self.lists:
+            target = int(layout['lists'][cpu(addr)].replace(':', ''), 16)
+            self.assertIn(target >> 16, (0x32, 0x33))
+        bad = dict(manifest)
+        bad['writes'] = [dict(w, orig='00') if w['at'] == '12:8021' else w for w in manifest['writes']]
+        with self.assertRaises(ValueError):
+            apply_manifest(self.rom, bad)
+
+    def test_longer_script_shifts_only_what_follows(self):
+        slot = self.last + 7
+        code = [{'op': '1a'}] * 20 + [{'op': '16'}]
+        manifest, layout = patch(self.rom, {'format': FORMAT, 'scripts': [{'address': cpu(slot), 'commands': code}]})
+        moved = apply_manifest(self.rom, manifest)
+        new_slot = int(layout['scripts'][cpu(slot)].replace(':', ''), 16)
+        self.assertEqual(script_bytes(moved, new_slot), b'\x1a' * 20 + b'\x16')
+        start = int(layout['lists'][cpu(self.last)].replace(':', ''), 16)
+        self.assertEqual(new_slot, start + 7)
+        # 같은 목록의 다음 인물은 20바이트 밀리고, 기본 영역 전체도 20바이트 는다
+        self.assertEqual(int(layout['entries'][cpu(self.last + len(FILLER))].replace(':', ''), 16),
+                         start + len(FILLER) + 20)
+        self.assertEqual(layout['base_bytes'], GROUP_COUNT * 2 + NPC_GROUPS - BASE_START + 20)
+        self.assertEqual(int(layout['lists'][cpu(BASE_START + 1)].replace(':', ''), 16), 0x328000 + GROUP_COUNT * 2 + 1)
+        after = all_lists(moved)
+        self.assertEqual(len(after), len(self.lists))
+        self.assertEqual([n for _, n in after[:346]], [n for _, n in self.lists[:346]])
+
+    def test_bank_choices_are_checked(self):
+        doc = {'format': FORMAT, 'scripts': []}
+        with self.assertRaisesRegex(ValueError, '다른 뱅크'):
+            patch(self.rom, doc, base=0x328000, alt=0x32C000)
+        # 기본 목록 20KB 는 32:F000 뒤 4KB 에 들지 않는다
+        with self.assertRaises(ValueError):
+            patch(self.rom, doc, base=0x32F000)
 
 
 if __name__ == '__main__':

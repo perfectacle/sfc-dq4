@@ -167,5 +167,124 @@ class PrologueEntryTest(unittest.TestCase):
         self.assertIn([want['box0'] & 0xFF, want['box0'] >> 8 & 0xFF, want['box0'] >> 16], calls)
 
 
+class BuildFlowTests(unittest.TestCase):
+    """롬 없이 build 의 순서와 마지막 롬 고치기를 본다. 도구 실행·그룹 빌드·바이트 덮기 단계는 기록하는 가짜로 바꾼다."""
+
+    def run_build(self, prologue=True, rom=None):
+        from unittest import mock
+        import dq4ch1event
+        import dq4ch2event
+        import dq4josa
+        import dq4menupatch
+        import dq4msgnames
+        import dq4prologue
+        calls, order = [], []
+
+        def run_tool(tool, *args):
+            calls.append((Path(tool).name, *map(str, args)))
+            if Path(tool).name == 'dq5npcrecord.py':
+                Path(args[list(args).index('-o') + 1]).write_text('{"records": 1}')
+
+        def group_build(dq5, dq4, out):
+            out.mkdir(parents=True)
+            (out / 'groups.sfc').write_bytes(b'groups')
+            return {'record_patches': ['newmap-1.dq5patch.json']}
+
+        def step(name):
+            def apply(out, *args):
+                order.append(name)
+                return bytes(out)
+            return apply
+
+        def apply_writes(data, original, paths):
+            self.applied = [Path(p) for p in paths]
+            return data
+
+        if rom is None:
+            rom = self.menu_rom()
+        with tempfile.TemporaryDirectory() as t:
+            work, dq5, dq4 = Path(t) / 'work', Path(t) / 'dq5.sfc', Path(t) / 'dq4.nes'
+            dq5.write_bytes(b'dq5')
+            dq4.write_bytes(b'NES\x1a\x01\x00' + bytes(10) + bytes(0x4000))
+            self.verify = mock.Mock()
+            self.npc_doc = mock.Mock(return_value={'format': 'dq5npcrelocate/1'})
+            with mock.patch.multiple(ch, run_tool=run_tool, group_build=group_build,
+                                     port=lambda a, b: (['ported'], ['m1', 'm2'], {'report': 1}),
+                                     npc_doc=self.npc_doc, npc_base=lambda p: '35:8100',
+                                     clear_mirror=lambda data, original, ranges: data, apply_writes=apply_writes,
+                                     return_places=step('return_places'), verify_groups=self.verify,
+                                     scenes=lambda p: ['scene']), \
+                    mock.patch.object(ch.dq4chapterbox, 'apply', step('chapterbox')), \
+                    mock.patch.object(dq4menupatch, 'Font', lambda name: name), \
+                    mock.patch.multiple(dq4ch1event, apply=step('ch1event'), encounter_doc=lambda: {},
+                                        learn_doc=lambda: {}, monster_doc=lambda prg: {}), \
+                    mock.patch.object(dq4ch2event, 'apply', step('ch2event')), \
+                    mock.patch.object(dq4josa, 'apply', step('josa')), \
+                    mock.patch.object(dq4msgnames, 'apply', step('msgnames')), \
+                    mock.patch.object(dq4prologue, 'apply', step('prologue')):
+                out = ch.build(rom, dq5, dq4, work, prologue=prologue)
+        return out, calls, order
+
+    @staticmethod
+    def menu_rom():
+        data = bytearray(0x400000)
+        o = ch.lorom(ch.START_TABLE)
+        data[o:o + 6] = ch.START_ORIG
+        o = ch.lorom(ch.TIME_FREEZE)
+        data[o:o + 4] = ch.TIME_FREEZE_ORIG
+        data[ch.TITLE_OFFSET:ch.TITLE_OFFSET + 21] = ch.TITLE_ORIG
+        return bytes(data)
+
+    def test_patches_go_on_in_the_group_build_order(self):
+        self.run_build()
+        names = [p.name for p in self.applied]
+        groups = [p.split('/')[-1] for p in ch.GROUP_PATCHES]
+        # 그룹 빌드가 겹침을 본 차례대로, 그 뒤에 인물·보스·학습 패치
+        self.assertEqual(names, groups + ['newmap-1.dq5patch.json', 'npc.dq5patch.json', 'boss.dq5patch.json',
+                                          'boss-monsters.dq5patch.json', 'learn.dq5patch.json'])
+
+    def test_npc_patch_uses_the_free_base_and_the_new_maps(self):
+        _, calls, _ = self.run_build()
+        (npc,) = [c for c in calls if c[0] == 'dq5npcrelocate.py']
+        self.assertEqual(npc[npc.index('--base') + 1], '35:8100')
+        self.assertEqual(npc[npc.index('--alt') + 1], ch.NPC_ALT)
+        self.assertIn('--allow-growth', npc)
+        new_maps = [npc[i + 1] for i, a in enumerate(npc) if a == '--new-map']
+        self.assertEqual(new_maps, [f'{g:02X}/{n:02X}' for g, n in sorted(ch.GROUPS.values())])
+        # 인물 문서는 그룹 빌드와 함께 돈 기록 덤프를 읽는다
+        self.assertEqual(self.npc_doc.call_args.args[0], {'records': 1})
+
+    def test_new_game_starts_on_the_chapter_or_the_prologue(self):
+        import dq4prologue
+        for prologue, start in ((False, ch.START), (True, dq4prologue.START)):
+            with self.subTest(prologue=prologue):
+                out, _, order = self.run_build(prologue)
+                o = ch.lorom(ch.START_TABLE)
+                group, number = (int(v, 16) for v in start[0].split('/'))
+                self.assertEqual(out[o:o + 6], bytes((group, number, start[1], start[2])) + ch.START_ORIG[4:])
+                self.assertEqual('prologue' in order, prologue)
+                self.assertEqual(order[-1], 'return_places')
+
+    def test_time_freeze_title_and_checksum(self):
+        out, _, order = self.run_build()
+        o = ch.lorom(ch.TIME_FREEZE)
+        self.assertEqual(out[o:o + 4], b'\xea' * 4)
+        self.assertEqual(out[ch.TITLE_OFFSET:ch.TITLE_OFFSET + 21], ch.TITLE)
+        checksum = int.from_bytes(out[0x7FDE:0x7FE0], 'little')
+        self.assertEqual(checksum ^ int.from_bytes(out[0x7FDC:0x7FDE], 'little'), 0xFFFF)
+        self.assertEqual(checksum, sum(out) & 0xFFFF)
+        self.assertEqual(order[:5], ['chapterbox', 'ch1event', 'ch2event', 'josa', 'msgnames'])
+        # 그룹 빌드 롬과 견주는 것은 체크섬까지 끝낸 롬이다
+        self.assertEqual(self.verify.call_args.args[:2], (bytes(out), b'groups'))
+
+    def test_unexpected_bytes_stop_the_build(self):
+        for at, size in ((ch.lorom(ch.START_TABLE), 6), (ch.lorom(ch.TIME_FREEZE), 4), (ch.TITLE_OFFSET, 21)):
+            with self.subTest(at=hex(at)):
+                rom = bytearray(self.menu_rom())
+                rom[at + size - 1] ^= 0xFF
+                with self.assertRaises(SystemExit):
+                    self.run_build(rom=bytes(rom))
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -1,4 +1,10 @@
+import json
+from pathlib import Path
+import tempfile
 import unittest
+import wave
+
+import numpy as np
 
 import dq4soundport as port
 import dq4soundsfx as sfx
@@ -170,6 +176,105 @@ class SpareTests(unittest.TestCase):
         self.assertEqual(notes(seq, 7), [[(0, 0x30, False)]])
         self.assertEqual(notes(seq, 3), [[]])
         self.assertEqual(notes(seq, 0), [[]])
+
+
+def write_wave(path, period):
+    t = np.arange(4000)
+    pcm = np.rint(np.sin(t * 2 * np.pi / period) * 9000).astype('<i2')
+    with wave.open(str(path), 'wb') as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(16000)
+        w.writeframes(pcm.tobytes())
+
+
+def effect(root, ident, programs, hits):
+    """programs = {프로그램: (샘플 파일 또는 None(잡음), 기준음)}, hits = [(틱, 프로그램, 음)]."""
+    instruments = {}
+    for p, (sample, base) in programs.items():
+        region = {'type': 'PCM', 'lo': 0, 'hi': 127, 'base': base, 'attack': 127, 'decay': 127, 'sustain': 127,
+                  'release': 100}
+        instruments[str(p)] = ({'type': sfx.NOISE_TYPE, 'regions': [region]} if sample is None else
+                               {'type': 'PCM', 'regions': [region | {'sample': sample}]})
+    timeline = [{'op': 'note', 'tick': t, 'gate': 6, 'note': n, 'velocity': 100, 'ch': f'track{i}', 'program': p,
+                 'uid': i} for i, (t, p, n) in enumerate(hits)]
+    score = {'ticks_per_quarter': 48, 'tempo': 120, 'tempo_changes': [], 'end_tick': max(t for t, _, _ in hits) + 8,
+             'volume': 127, 'timeline': timeline, 'instruments': instruments}
+    (root / f'nds/dq4/sound/sfx/{ident}-test.json').write_text(json.dumps(score))
+
+
+class SpareSequenceTests(unittest.TestCase):
+    """빈 효과음 시퀀스에 NDS 효과음을 갈래로 모은다(build_spare → _spare_sequence)."""
+    TEMPO = assemble(['tempo 3C', 'track L0', 'L0:', '  end'])
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = root = Path(self.directory.name)
+        (root / 'nds/dq4/sound/sfx').mkdir(parents=True)
+        (root / 'nds/dq4/sound/samples').mkdir(parents=True)
+        for name, period in (('p.wav', 37), ('q.wav', 29), ('w.wav', 23)):
+            write_wave(root / 'nds/dq4/sound/samples' / name, period)
+        effect(root, '101', {0: ('p.wav', 60)}, [(0, 0, 60)])
+        effect(root, '102', {0: ('p.wav', 48)}, [(0, 0, 50)])           # 같은 p.wav 를 다른 기준음으로
+        effect(root, '103', {0: (None, 60)}, [(0, 0, 60)])
+        effect(root, '104', {0: ('p.wav', 60), 1: ('q.wav', 60)}, [(0, 0, 60), (4, 1, 62)])
+        effect(root, '105', {0: ('w.wav', 60)}, [(0, 0, 60)])
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def spare(self, specs, **options):
+        return sfx.build_spare(b'', self.root, specs, lambda data, seq: self.TEMPO, **options)
+
+    def test_branches_share_one_resource_for_one_nds_sample(self):
+        out, resources = self.spare({0x40: {1: '101', 2: '102', 3: None}, 0x41: {1: '101'}})
+        # one_base 가 기준음을 맞추므로 p.wav 는 갈래·시퀀스를 가리지 않고 자원 하나다(샘플 칸을 아낌)
+        self.assertEqual(list(resources), [0x26])
+        seq, order, report = out[0x40]
+        self.assertEqual(order, [0x26])
+        self.assertEqual(out[0x41][1], [0x26])
+        self.assertEqual(notes(seq, 1), [[(0, 60 - 23, False)]])
+        # 기준음 48 에서 두 반음 위인 음은 기준음 60 자원에서도 두 반음 위로 울린다
+        self.assertEqual(notes(seq, 2), [[(0, 62 - 23, False)]])
+        self.assertEqual(notes(seq, 3), [[]])
+        self.assertEqual(notes(seq, 0), [[]])
+        self.assertEqual(report['03'], {'nds': None})
+        self.assertEqual(list(report['01']['samples']), ['26'])
+
+    def test_keep_drops_notes_of_other_samples_and_reports_them(self):
+        out, resources = self.spare({0x40: {1: '104'}}, keep={0x40: {'p.wav'}})
+        seq, order, report = out[0x40]
+        self.assertEqual(report['01']['left_out_samples'], ['q.wav'])
+        self.assertEqual(len(resources), 1)
+        self.assertEqual([n for track in notes(seq, 1) for _, n, _ in track], [60 - 23])
+
+    def test_noise_and_resident_waves_add_no_resource(self):
+        out, resources = self.spare({0x40: {1: '103', 2: '105'}}, waves={'w.wav': 0x22})
+        seq, order, _ = out[0x40]
+        self.assertEqual(resources, {})
+        self.assertEqual(order, [0x22])
+        self.assertEqual([noise for track in notes(seq, 1) for _, _, noise in track], [True])
+        self.assertTrue(notes(seq, 2)[0])
+
+    def test_whole_effect_becomes_one_sample_unless_it_is_resident(self):
+        t = np.arange(6000)
+        pcm = np.rint(np.sin(t * 2 * np.pi / 31) * 8000).astype('<i2')
+        with wave.open(str(self.root / 'nds/dq4/sound/sfx/104-test.wav'), 'wb') as w:
+            w.setnchannels(2)
+            w.setsampwidth(2)
+            w.setframerate(16000)
+            w.writeframes(np.repeat(pcm, 2).tobytes())
+        out, resources = self.spare({0x40: {1: '104!0.2'}}, cache_dir=self.root / 'cache')
+        _, order, report = out[0x40]
+        # 음 둘·샘플 둘인 효과음을 녹음 한 덩어리로 울려 샘플 칸 하나만 쓴다
+        self.assertEqual((order, list(resources)), ([0x26], [0x26]))
+        self.assertEqual(report['01']['tracks'], 1)
+        out, resources = self.spare({0x40: {1: '104!'}}, waves={'104!': 0x21})
+        self.assertEqual((out[0x40][1], resources), ([0x21], {}))
+
+    def test_branch_must_select_a_script(self):
+        with self.assertRaisesRegex(ValueError, 'branch 21'):
+            self.spare({0x40: {0x21: '101'}})
 
 
 if __name__ == '__main__':
