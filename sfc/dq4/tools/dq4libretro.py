@@ -72,7 +72,6 @@ class Core:
         self.options = {k.encode(): v.encode() for k, v in (options or {}).items()}
         self._keep = []
         self.pixfmt = 0
-        self.frame = None
         self.wram_ptr = None
         self.buttons = set()
         self.audio = []
@@ -144,24 +143,32 @@ class Core:
         return False
 
     def _video(self, data, w, h, pitch):
-        if not data:
-            return
-        if self.pixfmt == 1:
-            a = np.frombuffer(C.string_at(data, pitch * h), np.uint32).reshape(h, pitch // 4)[:, :w]
-            rgb = np.stack([(a >> 16) & 255, (a >> 8) & 255, a & 255], -1).astype(np.uint8)
-        else:
-            a = np.frombuffer(C.string_at(data, pitch * h), np.uint16).reshape(h, pitch // 2)[:, :w]
-            if self.pixfmt == 2:
-                r, g, b = (a >> 11) & 31, (a >> 5) & 63, a & 31
-                rgb = np.stack([r << 3 | r >> 2, g << 2 | g >> 4, b << 3 | b >> 2], -1).astype(np.uint8)
+        # 프레임마다 numpy 로 바꾸면 snes9x 에서 걷기 시간이 약 30% 늘었다. 바이트만 쥐고 frame 을 읽을 때 바꾼다
+        if data:
+            self._raw = (C.string_at(data, pitch * h), w, h, pitch)
+            self._frame = None
+
+    @property
+    def frame(self):
+        if getattr(self, '_frame', None) is None and getattr(self, '_raw', None):
+            raw, w, h, pitch = self._raw
+            if self.pixfmt == 1:
+                a = np.frombuffer(raw, np.uint32).reshape(h, pitch // 4)[:, :w]
+                rgb = np.stack([(a >> 16) & 255, (a >> 8) & 255, a & 255], -1).astype(np.uint8)
             else:
-                r, g, b = (a >> 10) & 31, (a >> 5) & 31, a & 31
-                rgb = np.stack([r << 3 | r >> 2, g << 3 | g >> 2, b << 3 | b >> 2], -1).astype(np.uint8)
-        if w >= 512:
-            rgb = rgb[:, ::2]
-        if h >= 448:
-            rgb = rgb[::2]
-        self.frame = rgb
+                a = np.frombuffer(raw, np.uint16).reshape(h, pitch // 2)[:, :w]
+                if self.pixfmt == 2:
+                    r, g, b = (a >> 11) & 31, (a >> 5) & 63, a & 31
+                    rgb = np.stack([r << 3 | r >> 2, g << 2 | g >> 4, b << 3 | b >> 2], -1).astype(np.uint8)
+                else:
+                    r, g, b = (a >> 10) & 31, (a >> 5) & 31, a & 31
+                    rgb = np.stack([r << 3 | r >> 2, g << 3 | g >> 2, b << 3 | b >> 2], -1).astype(np.uint8)
+            if w >= 512:
+                rgb = rgb[:, ::2]
+            if h >= 448:
+                rgb = rgb[::2]
+            self._frame = rgb
+        return getattr(self, '_frame', None)
 
     def _a1(self, l, r):
         self.audio.append(np.array([l, r], np.int16))
