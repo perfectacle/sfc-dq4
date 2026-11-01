@@ -79,10 +79,12 @@ def head(*b):
 FIXED_WINDOWS = {0x10: 3, 0x11: 0}
 SHARED = {0x32: 1}
 LINE_WINDOWS = {0x2D: 1}
+COUNT_WINDOWS = {0x12: (0xC8, 1)}
 
 
-def records(exp_w=0x0C, w11=0x0A, label_w=9):
+def records(exp_w=0x0C, w11=0x0A, label_w=9, unit='ひき'):
     return {
+        0x12: head(2, 3, 0x12, 3, 0, 1) + bytes.fromhex('fee60188c8') + enc(unit) + b'\xff\x80',
         0x10: head(2, 3, 8, 3, 0, 2) + b'\xfe' + enc('はい') + b'\x01' * 3 + b'\xff\xfe' + enc('いいえ') + b'\x01\xff\x80',
         0x11: head(2, 3, w11, 2, 0, 1) + b'\xfe' + enc('はい') + b'\x01' + enc('みる') + b'\x01\x01\xff\x80',
         0x2D: head(1, 1, 0x0B, 1, 0, 1) + enc('しようしていません') + b'\xff\x80',
@@ -108,6 +110,7 @@ def scene(**kw):
 
 def patched():
     return mock.patch.multiple(wt, FIXED_WINDOWS={**FIXED_WINDOWS, **SHARED}, LINE_WINDOWS=LINE_WINDOWS,
+                               COUNT_WINDOWS=COUNT_WINDOWS,
                                LABEL_WINDOWS=(0x07, 0x06), INLINE_STRINGS=((INLINE, INLINE + len(INLINE_TEXT)),),
                                columns=fake_columns)
 
@@ -126,6 +129,17 @@ class FixedRecordsTests(unittest.TestCase):
 
     def written(self, n):
         return self.at[lorom(self.rom.addr[n])]
+
+    def test_count_unit_becomes_a_phrase_and_window_widens(self):
+        rec = self.written(0x12)
+        k = self.numbers['ひき']
+        self.assertEqual(rec[6:13], bytes.fromhex('fee60188c8') + bytes((wt.FIXED_PREFIX, k)))
+        self.assertEqual(rec[2], 0x12 + 1)
+        self.assertEqual(len(rec), len(records()[0x12]))
+
+    def test_unknown_count_unit(self):
+        with self.assertRaises(ValueError):
+            run(scene(unit='ぬぬ'))
 
     def test_writes_do_not_overlap(self):
         spans = sorted((o, o + len(rec)) for o, rec in self.writes)
@@ -320,6 +334,19 @@ class BuildTests(unittest.TestCase):
         names[3] = 'かさ'
         out, _ = self.build({4: names}, adopted={'かさ': '삿갓'}, numbered={4: {3: '부하'}})
         self.assertEqual(self.blob(out, self.ptr(out, 4, 3)), fake_columns(FakeFont(), '부하'))
+
+    def test_wide_monster_name_drops_its_spaces(self):
+        names = ['かさ'] + [''] * 255
+        wide = {'かさ': '슬라임 베호마즌'}                # 11열, 띄어쓰기를 빼면 9열
+        out, report = self.build({4: names}, adopted=wide)
+        self.assertEqual(self.blob(out, self.ptr(out, 4, 0)), fake_columns(FakeFont(), '슬라임베호마즌'))
+        out, report = self.build({3: names}, adopted=wide)
+        self.assertEqual(self.ptr(out, 3, 0), 0)
+
+    def test_placeholder_dq5_monsters_have_korean(self):
+        names = ['ドラキー'] + [''] * 255
+        out, _ = self.build({4: names})
+        self.assertEqual(self.blob(out, self.ptr(out, 4, 0)), fake_columns(FakeFont(), '드라키'))
 
     def test_too_long_name_is_an_error_only_in_strict_kinds(self):
         names = ['かさ'] + [''] * 255

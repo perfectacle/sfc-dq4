@@ -45,6 +45,39 @@ class BattleCheckTests(unittest.TestCase):
         self.assertEqual(sorted(bc.weak_patch(rom, [0xE2, 0x52, 0x52]).split(';')),
                          sorted(wc.boss_patch(rom).split(';')))
 
+    def test_battle_names_and_problems(self):
+        text = ('start f=1 map=00/00\nname f=10 bytes=84556848A0 kana=0\n'
+                'name f=20 bytes=845568481F20 kana=0\nname f=30 bytes=05 kana=0\n')
+        names = bc.battle_names(text)
+        self.assertEqual(names, [(bytes.fromhex('84556848A0'), 0), (bytes.fromhex('845568481F20'), 0),
+                                 (b'\x05', 0)])
+        self.assertEqual(bc.name_problems(names, ('letter', 'plural')), [])
+        problems = bc.name_problems([(b'\x10\x11', 3)], ('letter', 'plural'))
+        self.assertEqual(len(problems), 3)
+        self.assertIn('가나로 그린 이름 10 11', problems)
+
+    def test_name_table_problems(self):
+        import dq4battlemsg as bm
+        import dq4ch1event
+        import dq4fieldencounter
+        import dq4windowtext as wt
+        import dq5namewrite
+        want = sorted(set(dq4fieldencounter.MONSTERS.values()) | set(dq4ch1event.BOSS_MONSTERS))
+        names = [bytes((0x10 + n % 0x60, n)) for n in range(256)]
+        data = bytearray(0x400000)
+        o = bm.lorom(bm.NAMES_AT)
+        for m in want[1:]:
+            data[o:o + 6] = bytes((2, *names[m], 1, 0, 0))
+            o += 6
+        index = bm.lorom(wt.TEXT_BANK << 16 | wt.INDEX + 4 * 0x200)
+        for m in want[:-1]:
+            data[index + 2 * m:index + 2 * m + 2] = b'\x00\x92'
+        from unittest import mock
+        with mock.patch.object(dq5namewrite, 'read_tables', return_value={4: names}):
+            problems = bc.name_table_problems(bytes(data), b'')
+        self.assertEqual(problems, [f'몬스터 {want[0]:02X} 가 전투 글 이름 표에 없음',
+                                    f'몬스터 {want[-1]:02X} 가 창 이름 표에 없음'])
+
     def test_parse_stages(self):
         stages = bc.parse('start f=24 map=36/00 gold=140000\nslots f=144 00\n')
         self.assertEqual(stages['start'], {'f': '24', 'map': '36/00', 'gold': '140000'})

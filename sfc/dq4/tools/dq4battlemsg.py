@@ -38,7 +38,13 @@ LINE_CELLS = 26
 NAME_CELLS = 7
 NUMBER_CELLS = 3
 BUFFER = 128
-PUNCT = '!?.,…「」~0123456789'     # 숫자는 이름 안 숫자(가나 이름의 02~0B)를 그릴 때
+PUNCT = '!?.,…「」~0123456789ABCDEFGH'     # 숫자는 이름 안 숫자(가나 이름의 02~0B)를 그릴 때, 글자는 이름 뒤 Ａ~Ｈ
+# 24:88E3 이 몬스터 이름 뒤에 붙이는 무리 안 번째(A0 + $46, Ａ~Ｈ)와 FA(24:8A80)가 붙이는 「たち」(1F 20). 이름 표는 맨
+# 이름만 가지므로 dq4battlemsg.asm 의 BmFind 가 이 꼬리를 떼고 다시 찾아, 이름 뒤에 SUFFIXES 의 같은 차례를 그린다
+SUFFIX_LETTER0, SUFFIX_LETTERS = 0xA0, 'ABCDEFGH'
+PLURAL = b'\x1f\x20'
+SUFFIXES = (*SUFFIX_LETTERS, '들')
+SUFFIX_TOKENS = 2                 # 꼬리마다 토큰 수(모자라면 0점 띄움으로 채움). BmSuffix 가 4바이트 간격으로 읽음
 # 전투 메시지가 이름을 찍는 표: 주문·특기 3, 몬스터 4, 물건 5(dq5battletext.CONTROLS 의 F4·F6·F5, F7 의 몬스터 무리)
 NAME_TABLES = (3, 4, 5)
 NAMES_AT = 0x4DA000
@@ -106,6 +112,7 @@ WRAM = '''!bm_last   = $A5F2          ; 마지막에 그린 글리프(조사용)
 !bm_pt     = $A91E          ; 1바이트: 찾는 위 줄 무늬
 !bm_sp     = $A921          ; 1바이트: 구간 안 첫 띄움 토큰 자리(0 = 없음). 7E:A921~ABFF 도 같은 770개 장면에서 접근이 없었다
 !bm_sx     = $A922          ; 1바이트: 그 띄움 앞의 점 자리
+!bm_sfx    = $A923          ; BmFind 가 뗀 이름 꼬리(SUFFIXES 차례), FFFF = 없음
 !bm_w      = 29             ; 26칸 + 밀린 글리프 몫
 !bm_buf    = $0E4B          ; 전투 메시지 푼 버퍼(128바이트)
 !bm_queue  = $0ECB          ; 글 큐(64바이트)
@@ -368,6 +375,17 @@ def name_blob(entries, appear):
     return bytes(out), at
 
 
+def suffix_tokens(punct):
+    """SUFFIXES 차례로 꼬리마다 SUFFIX_TOKENS 개 토큰."""
+    out = []
+    for ch in SUFFIXES:
+        toks = tokens(ch, punct)
+        if len(toks) > SUFFIX_TOKENS:
+            raise ValueError(f'{ch}: 꼬리 토큰이 {len(toks)}개')
+        out += toks + [0x8000] * (SUFFIX_TOKENS - len(toks))
+    return out
+
+
 def restored():
     """연출 끝에 다시 올리는 풀 번호 범위(B·C, 이어져 있어야 함)."""
     idx = sorted(POOL.index(t) for t in POOL_B + POOL_C)
@@ -408,6 +426,8 @@ def apply(d, font, render, first_glyph):
     d[o:o + len(blob)] = blob
     appear = tokens(APPEAR, punct)
     names, appear_at = name_blob(entries, appear)
+    suffix_at = len(names)
+    names += b''.join(t.to_bytes(2, 'little') for t in suffix_tokens(punct))
     o = lorom(NAMES_AT)
     if any(d[o:o + len(names)]) or (NAMES_AT & 0xFFFF) + len(names) > 0x10000:
         raise ValueError(f'{NAMES_AT:06X}: 이름 표 자리가 비어 있지 않거나 뱅크를 넘음')
@@ -423,7 +443,10 @@ def apply(d, font, render, first_glyph):
             f'!bm_b0 = {b0}\n!bm_b1 = {b1}\n'
             f'!bm_run_stub = ${RUN_STUB:06X}\n!bm_run_table = ${RUN_TABLE:06X}\n!bm_space = {SPACE_PX}\n'
             f'!bm_digit0 = {punct["0"][0]}\n!bm_digit_adv = "{",".join(f"${(punct[str(d)][1] - GLYPH_PX) & 0xFF:02X}" for d in range(10))}"\n!bm_glyph_px = {GLYPH_PX}\n!bm_glyphs = {len(ne.GLYPHS)}\n!bm_names = ${NAMES_AT:06X}\n'
-            f'!bm_appear = ${NAMES_AT + appear_at:06X}\n!bm_appear_count = {len(appear)}\n')
+            f'!bm_appear = ${NAMES_AT + appear_at:06X}\n!bm_appear_count = {len(appear)}\n'
+            f'!bm_suffix = ${NAMES_AT + suffix_at:06X}\n!bm_suffix_letter0 = ${SUFFIX_LETTER0:02X}\n'
+            f'!bm_suffix_letters = {len(SUFFIX_LETTERS)}\n!bm_plural = ${PLURAL[1] << 8 | PLURAL[0]:04X}\n'
+            f'!bm_suffix_plural = {SUFFIXES.index("들")}\n!bm_suffix_tokens = {SUFFIX_TOKENS}\n')
 
 
 if __name__ == '__main__':

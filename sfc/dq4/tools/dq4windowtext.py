@@ -32,7 +32,12 @@ KINDS = {5: ('아이템', 10, True), 3: ('주문·특기', 7, False), 4: ('몬�
 # adopt.tsv 에 없는 DQ5 고유 이름(빌드가 키를 kana_key 꼴로 바꿈). 작전은 고정 문구 FIXED 와 같은 한글
 # 표 2 는 성별 둘(adopt.tsv 능력치·직업 4·5) 뒤에 몬스터 종족이 이어짐. DQ4 동료는 사람뿐이라 성별만 한글로
 # 표 1 은 강함 보기의 직함(D2, 사람이면 $43 = 1). DQ5 주인공 직함은 adopt.tsv 에 없어 새로 옮김
+# 표 4 는 DQ4 몬스터를 옮기기 전까지 필드 조우가 빌려 쓰는 DQ5 몬스터(dq4fieldencounter.MONSTERS) 가운데 DQ4 에 없는 것.
+# 정발 이름이 없어(まほうつかい 는 DQ III HD-2D 의 직업 이름) 소리대로 옮긴 임시 이름
 EXTRA_NAMES = {6: {'みんながんばれ': '모두 힘내자', 'じゅもんせつやく': '주문 아끼자'}, 2: {'おとこ': '남자', 'おんな': '여자'},
+               4: {'ドラキー': '드라키', 'スカルサーペント': '스컬 서펜트', 'スピニー': '스피니', 'まほうつかい': '마법사',
+                   'がいこつへい': '해골병', 'わらいぐさ': '웃음풀', 'ダークアイ': '다크 아이', 'エビルアップル': '이블 애플',
+                   'インスペクター': '인스펙터', 'メタルライダー': '메탈 라이더', 'シャドーサタン': '섀도 사탄'},
                1: {'パパスのむすこ': '파파스의 아들', 'やどやのむすめ': '여관집 딸', 'ラインハットおうじ': '라인하트 왕자',
                    'しんでんのドレイ': '신전의 노예', 'にげたドレイ': '도망친 노예', 'さすらいのたびびと': '떠돌이 나그네',
                    'モンスターつかい': '몬스터 조련사', 'グランバニアおう': '그란바니아 왕', 'ようせいびと': '요정',
@@ -54,6 +59,8 @@ TACTIC_LINES = (('한방에', '끝내자구'), ('모두', '힘내자'), ('주문
 # 이상은 DQ5 물건이 아니라(작전 이름·지명 등) 넣지 않는다. 뱅크가 모자라 주문(3)은 넣지 않는다(한글 없는 주문은 DQ5 전용
 # 주문과 몬스터 행동). 몬스터(4)는 전투에서만 나와 가나 칸이 살아 있다
 KANA_KINDS = (5,)
+# 창 열 수를 넘는 한글 이름을 띄어쓰기를 빼고 다시 재는 종류. 몬스터 목록(창 1B)의 「슬라임 베호마즌」(10열 → 9열)
+SQUEEZE_KINDS = (4,)
 KANA_LIMIT = 0xD8               # dq4itemport.ITEM_COUNT
 NARROW_FONT = 'galmuri7'
 SHIFT = 6                       # render 의 띠(한글 윗줄 = 1줄)를 위 줄 7줄로 내림
@@ -115,6 +122,8 @@ FIXED = {
     'どうぐを\u3000もっていない': '가진 도구가 없다',
     # 가게 팔기 목록의 값 칸에 넣는 팔 수 없는 물건 표시(CANNOT_SELL). 롬에 없는 문구라 키는 지어 붙인 일본어
     'うれません': '판매불가',
+    # 전투 몬스터 목록(창 1B)의 마릿수 뒤(COUNT_WINDOWS)
+    'ひき': '마리',
 }
 # 창 제목(04:AD78 목록). 표에 없는 제목(이름 뒤 「の１」, 이름 입력 등)은 가나로 둔다.
 TITLES = {
@@ -147,6 +156,9 @@ EXP_TILE, EXP_VALUE = 0x86, 0xBC               # 「Ex」 타일, 경험치 값 
 # 항목 머리 FE 없이 한 줄을 찍는 창 → 오른쪽으로 넓힐 칸 수. 2D じゅもんはつかえない(「주문을 쓸 수 없다」 가 들어가게 한 칸),
 # 82 じゅもんを まだ おぼえていない, 83 どうぐを もっていない
 LINE_WINDOWS = {0x2D: 1, 0x82: 0, 0x83: 0}
+# 값 코드 바로 뒤에 가나 단위가 붙는 창 → (값 코드, 오른쪽으로 넓힐 칸 수). 1B 전투 몬스터 목록 「— 1ひき」 의 C8(마릿수)
+# 뒤 「ひき」 를 「마리」(세 열)로 바꾸고 한 칸 넓힌다. 항목 머리 FE 바로 뒤가 아니라 FIXED_WINDOWS 가 건드리지 않는다
+COUNT_WINDOWS = {0x1B: (0xC8, 1)}
 EMPTY_SLOT = 'しようしていません'
 CANNOT_SELL = 'うれません'
 HELD_COUNT = [f'もっている{n}' for n in range(1, 13)]
@@ -390,6 +402,23 @@ def fixed_records(data, font):
             raise ValueError(f'창 {w:02X}: 레코드 자리가 어긋남')
         out.append((o, bytes(new) + b'\xff' * (len(rec) - len(new))))
 
+    for w, (code, widen) in COUNT_WINDOWS.items():
+        addr, rec = window(w)
+        i = next(i for i in range(7, len(rec)) if rec[i - 1] == code and 0x10 <= rec[i] <= 0x7A)
+        j, n, jp = _runs(rom, rec, i, False)
+        if jp not in numbers:
+            raise ValueError(f'창 {w:02X}: 「{jp}」 의 한글 문구가 없음')
+        if width[jp] > n + widen:
+            raise ValueError(f'창 {w:02X}: 「{korean[jp]}」 {width[jp]}열, 자리 {n + widen}열')
+        new = bytearray(rec[:i] + bytes((FIXED_PREFIX, numbers[jp])) + b'\x01' * max(0, n - width[jp]) + rec[j:])
+        if len(new) > len(rec):
+            raise ValueError(f'창 {w:02X}: 고친 레코드가 원래보다 김')
+        new[2] += widen
+        o = lorom(addr)
+        if bytes(data[o:o + len(rec)]) != rec:
+            raise ValueError(f'창 {w:02X}: 레코드 자리가 어긋남')
+        out.append((o, bytes(new) + b'\xff' * (len(rec) - len(new))))
+
     out += exp_record(rom, data, width, numbers, korean, lorom)
     for w in LABEL_WINDOWS:
         if w == EXP_WINDOW:
@@ -520,6 +549,8 @@ def build(data, font):
             if not ko:
                 continue
             cols = columns(font, ko)
+            if len(cols) > limit and kind in SQUEEZE_KINDS and ' ' in ko:
+                cols = columns(font, ko.replace(' ', ''))
             if len(cols) > limit and ko == name:
                 import dq4menupatch
                 narrow = narrow or dq4menupatch.Font(NARROW_FONT)

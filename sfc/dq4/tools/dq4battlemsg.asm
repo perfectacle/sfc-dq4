@@ -228,6 +228,7 @@ BmNameLookup:
     BCS .none
     JSR BmClear
     JSR BmTokens
+    JSR BmSuffix
     JSR BmEmit
     PLB
     PLP
@@ -324,7 +325,11 @@ BmDigitAdv:
 
 ; 직접 페이지 $00 = 길이, $01~ = 이름 바이트를 이름 표(!bm_names)에서 찾는다(DB = 7E, M = X = 16).
 ; 있으면 C = 0, !bm_p = 첫 토큰 자리, !bm_n = 토큰 수. 없으면 C = 1.
+; 그대로 없으면 끝의 Ａ~Ｈ(24:88E3)나 「たち」(FA)를 떼고 다시 찾아, 뗀 꼬리를 !bm_sfx 에 둔다(BmSuffix 가 그림).
+; 표에는 맨 이름만 있어, 무리에 여럿이거나 「たち」 가 붙으면 가나로 찍혔다.
 BmFind:
+    LDA.w #$FFFF
+    STA.w !bm_sfx
     LDA.b $00
     AND #$00FF
     STA.w !bm_s
@@ -336,6 +341,44 @@ BmFind:
     DEX
     BPL -
     REP #$20
+    JSR BmScan
+    BCS +
+    RTS
++
+    LDX.w !bm_s
+    CPX #$0002
+    BCC .none
+    LDA.w !bm_band,X
+    AND #$00FF
+    SEC
+    SBC.w #!bm_suffix_letter0
+    CMP.w #!bm_suffix_letters
+    BCS .plural
+    STA.w !bm_sfx
+    DEC.w !bm_s
+    BRA .again
+.plural
+    CPX #$0003
+    BCC .none
+    LDA.w !bm_band-1,X
+    CMP.w #!bm_plural
+    BNE .none
+    LDA.w #!bm_suffix_plural
+    STA.w !bm_sfx
+    DEC.w !bm_s
+    DEC.w !bm_s
+.again
+    JSR BmScan
+    BCC +
+    LDA.w #$FFFF
+    STA.w !bm_sfx
+.none
+    SEC
++
+    RTS
+
+; !bm_band+1~ 의 !bm_s 바이트와 같은 항목을 찾는다. BmFind 와 같은 결과.
+BmScan:
     LDX #$0000
 .entry
     LDA.l !bm_names,X
@@ -388,6 +431,21 @@ BmFind:
     ADC.w !bm_v
     TAX
     JMP .entry
+
+; BmFind 가 뗀 꼬리(!bm_sfx)가 있으면 이름 뒤에 그린다. 꼬리마다 토큰 둘(4바이트, ASL 두 번).
+BmSuffix:
+    LDA.w !bm_sfx
+    BMI +
+    ASL
+    ASL
+    CLC
+    ADC.w #!bm_suffix-!bm_names
+    STA.w !bm_p
+    LDA.w #!bm_suffix_tokens
+    STA.w !bm_n
+    JSR BmTokens
++
+    RTS
 
 ; !bm_names + !bm_p 의 토큰 !bm_n 개를 띠에 그린다. 토큰: 글리프, 8000 + 띄울 점(낮은 바이트, 부호 있음),
 ; C000 + 조사 종류.
@@ -448,6 +506,7 @@ BmEncounter:
     REP #$20
     JSR BmClear
     JSR BmTokens
+    JSR BmSuffix
     LDA.w #!bm_appear-!bm_names
     STA.w !bm_p
     LDA.w #!bm_appear_count

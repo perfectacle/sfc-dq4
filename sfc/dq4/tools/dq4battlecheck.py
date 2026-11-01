@@ -14,6 +14,9 @@
   - 전투 동안 30프레임마다 본 BG3 타일맵에서 창 왼쪽 위 모서리마다 같은 줄 오른쪽에 짝 모서리가 있음
     (dq4windowcheck.corners. 이름 다섯째 칸이 전투 상태 창 오른쪽 테두리 열을 덮으면 깨진다)
   - --repeat 2 면 같은 장면을 두 번 돌려 battle.txt 가 바이트째 같음
+  - names 장면(names_*)은 전투 글 이름마다 가나 글리프 표를 읽지 않았는지(이름 표에서 한글을 찾음), 이름 뒤 Ａ~Ｈ 와
+    「たち」 가 붙은 이름이 나왔는지 본다. 장면과 따로, 필드 조우가 빌려 쓰는 DQ5 몬스터와 1장 보스(dq4fieldencounter.MONSTERS,
+    dq4ch1event.BOSS_MONSTERS)가 모두 전투 글 이름 표(dq4battlemsg.NAMES_AT)와 창 이름 표(dq4windowtext 표 4)에 있는지 본다
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4battlecheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/battlecheck \\
       [--base work/ch1walk/prologue/end.mss] [--repeat 2] [--seed N | --seeds 0,5,9] [--no-state-cache]
@@ -45,13 +48,65 @@ GROUP = 0x7E1001
 # 전투(이름: 전투 동안 차례로 누를 버튼). win 은 A 만 눌러 이기고, flee 는 명령 창에서 아래 → A(にげる).
 # 필드는 성 마을 아래 끝으로 걸어 나간 곳(조우 구역은 지형으로), 탑 39/01 은 FC 던전 구역(dq4dungeonrate 훅 자리).
 # 자리 잡기 앞에는 1장 걷기 검사가 그 구간에 이르렀을 때의 깃발·동료·물건을 둔다(dq4ch1walkcheck.setup, 'after')
+FIELD_PREP = [('castle_town', 'warp', '36/00,16,72', {'map': '36/00'}),
+              ('field', 'walk', '16,71;28,71;28,81;down:120', {'field': True})]
 SCENES = {
     'field': {'after': 'shoes', 'prep': [('castle_town', 'warp', '36/00,16,72', {'map': '36/00'}),
                                          ('field', 'walk', '16,71;28,71;28,81;down:120', {'field': True})],
               'step': 'down', 'group': [(0x00, 2)], 'move': 'up', 'battles': {'win': 'a', 'flee': 'down,a'}},
     'tower': {'after': 'kidnap', 'prep': [('tower', 'warp', '39/01,20,16', {'map': '39/01'})],
               'step': 'down', 'group': [(0x12, 1), (0x1E, 1)], 'move': 'up', 'battles': {'win': 'a'}},
+    # 한 종 두 마리면 「ドラキーＡ·Ｂ」 와 이긴 뒤 「ドラキーたち」, 두 종이면 Ａ·Ｂ 와 묶음 이름(마물 무리)
+    'names_one': {'after': 'shoes', 'prep': FIELD_PREP, 'step': 'down', 'group': [(0x03, 2)], 'move': 'up',
+                  'battles': {'win': 'a'}, 'names': ('letter', 'plural')},
+    'names_two': {'after': 'shoes', 'prep': FIELD_PREP, 'step': 'down', 'group': [(0x0B, 2), (0x10, 1)], 'move': 'up',
+                  'battles': {'win': 'a'}, 'names': ('letter',)},
 }
+
+
+def kana_range():
+    import dq4windowname
+    return f'{dq4windowname.KANA_TABLE:06X}-{dq4windowname.KANA_TABLE + 0x2FF:06X}'
+
+
+def battle_names(text):
+    """battle.txt 의 name 줄: [(이름 바이트, 가나 표를 읽은 횟수)]."""
+    return [(bytes.fromhex(kv['bytes']), int(kv['kana'])) for line in text.splitlines() if line.startswith('name ')
+            for kv in [dict(x.split('=', 1) for x in line.split(' ')[1:])]]
+
+
+def name_problems(names, want):
+    """이름 줄이 모두 한글로 그려졌는지, want 의 꼬리('letter' Ａ~Ｈ, 'plural' たち)가 붙은 이름이 나왔는지."""
+    import dq4battlemsg as bm
+    letters = range(bm.SUFFIX_LETTER0, bm.SUFFIX_LETTER0 + len(bm.SUFFIX_LETTERS))
+    out = [f'가나로 그린 이름 {b.hex(" ")}' for b, k in dict(names).items() if k]
+    seen = {'letter': any(len(b) > 1 and b[-1] in letters for b, _ in names),
+            'plural': any(len(b) > 2 and b.endswith(bm.PLURAL) for b, _ in names)}
+    out += [f'{w} 꼬리가 붙은 이름이 나오지 않음' for w in want if not seen[w]]
+    return out
+
+
+def name_table_problems(data, dq5):
+    """필드 조우의 DQ5 몬스터·1장 보스가 전투 글 이름 표와 창 이름 표(표 4)에 모두 있는지. dq5 는 원래 DQ5 롬(이름 바이트)."""
+    import dq4battlemsg as bm
+    import dq4ch1event
+    import dq4fieldencounter
+    import dq4windowtext as wt
+    import dq5namewrite
+    names = dq5namewrite.read_tables(dq5)[4]
+    o, entries = bm.lorom(bm.NAMES_AT), set()
+    while data[o]:
+        n = data[o]
+        entries.add(bytes(data[o + 1:o + 1 + n]))
+        o += 1 + n + 1 + 2 * data[o + 1 + n]
+    index = bm.lorom(wt.TEXT_BANK << 16 | wt.INDEX + 4 * 0x200)
+    out = []
+    for m in sorted(set(dq4fieldencounter.MONSTERS.values()) | set(dq4ch1event.BOSS_MONSTERS)):
+        if bytes(names[m]) not in entries:
+            out.append(f'몬스터 {m:02X} 가 전투 글 이름 표에 없음')
+        if not int.from_bytes(data[index + 2 * m:index + 2 * m + 2], 'little'):
+            out.append(f'몬스터 {m:02X} 가 창 이름 표에 없음')
+    return out
 
 
 def force_patch(group):
@@ -177,12 +232,15 @@ def run_scene(mesence, rom, data, base, out, name, scene, rounds, seed=0):
             wc.run(mesence, rom, BATTLE, run_dir, {'STATE': str(state), 'ROMPATCH': patch, 'AFTERPATCH': wc.NO_ENCOUNTERS,
                                                     'SET': f'{wc.rng_for(seed)};{wc.DAY_SET}', 'POKE': wc.HERO_HP,
                                                     'STEP': scene['step'], 'KEYS': keys, 'MOVE': scene['move'],
-                                                    'MAXF': '6000'}, 300)
+                                                    'MAXF': '6000', 'KANATABLE': kana_range()}, 300)
             log = run_dir / 'battle.txt'
             text = log.read_text(encoding='utf-8') if log.exists() else ''
             stages = parse(text)
+            problems = judge(data, scene, stages, run_dir, kind)
+            if 'names' in scene:
+                problems += name_problems(battle_names(text), scene['names'])
             runs.append({'trace': hashlib.sha1(text.encode()).hexdigest()[:12], 'stages': stages,
-                         'problems': judge(data, scene, stages, run_dir, kind)})
+                         'problems': problems})
         problems = [p for r in runs for p in r['problems']]
         if len({r['trace'] for r in runs}) > 1:
             problems.append('같은 입력의 실행끼리 다름: ' + ', '.join(r['trace'] for r in runs))
@@ -226,6 +284,9 @@ def main():
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
         results = [r for rs in pool.map(lambda w: run_scene(mesence, rom, data, base, wc.seed_dir(out, w[0], seeds), w[1],
                                                             SCENES[w[1]], args.repeat, w[0]), work) for r in rs]
+    table = name_table_problems(data, (wc.ROOT / 'rom' / 'dq5.sfc').read_bytes())
+    results += [{'name': 'name-table', 'seed': s, 'status': 'failed' if table else 'passed', 'problems': table}
+                for s in seeds]
     for r in results:
         print(json.dumps(r, ensure_ascii=False))
     per_seed = [{'seed': s, 'rng': wc.rng_for(s),

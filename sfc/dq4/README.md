@@ -332,3 +332,4 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [2026-11-01-41: 필드에서 반투명하던 주인공](journal/2026-11-01-41-field-hero-translucent.md)
 - [2026-11-01-42: 가게 장면 검사](journal/2026-11-01-42-shop-scene.md)
 - [2026-11-01-43: 전투 상태 창 오른쪽 위 모서리](journal/2026-11-01-43-battle-status-corner.md)
+- [2026-11-01-44: 필드 전투 메시지의 몬스터 이름 한글화](journal/2026-11-01-44-battle-monster-names.md)

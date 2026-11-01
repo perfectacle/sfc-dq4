@@ -8,6 +8,8 @@
 --   AFTERPATCH    전투가 끝나면 롬(파일 오프셋=바이트)을 이것으로 덮는다. 돌아온 뒤 걸어 볼 때 다시 전투가 걸리지 않게
 --   SETTLE=120    전투가 끝나고 쉴 프레임. 그 뒤 기록하고 MOVE 쪽으로 MOVEF 프레임 걸어 조작되는지 본다
 --   MAXF=6000     이 프레임에 이르면 그대로 끝낸다
+--   KANATABLE="60E800-60EAFF"  전투 글 이름(24:A83C 에 온 길이·바이트)마다 이 범위(가나 글리프 표)를 읽었는지 name 줄로 남긴다.
+--                 이름 표에서 한글을 못 찾은 이름만 가나 표로 그린다(dq4battlemsg.asm BmKana). 24:A854 에서 이름 하나가 끝남
 -- 결과: SHOT_DIR/battle.txt(단계마다 프레임·맵·칸·곡·무리·금화·전투 슬롯), start.png(전투가 걸린 프레임의 맵 화면),
 -- fight.png(전투 시작 120프레임 뒤), after.png(돌아와 SETTLE 뒤),
 -- bg3.txt(전투 동안 30프레임마다 「프레임 BG3 타일맵 2KB 16진」 한 줄)
@@ -70,6 +72,25 @@ local function finish()
   L.write("battle.txt", table.concat(log, "\n") .. "\n")
   L.write("bg3.txt", table.concat(bg3, "\n") .. "\n")
   emu.stop(0)
+end
+
+local kanaLo, kanaHi = string.match(os.getenv("KANATABLE") or "", "(%x+)-(%x+)")
+if kanaLo then
+  local naming, kana, bytes = false, 0, ""
+  emu.addMemoryCallback(function()
+    naming, kana = true, 0
+    local len = rd(0x7E0000)
+    bytes = hex(0x7E0001, len)
+  end, emu.callbackType.exec, 0x24A83C, 0x24A83C)
+  emu.addMemoryCallback(function()
+    if naming then kana = kana + 1 end
+  end, emu.callbackType.read, tonumber(kanaLo, 16), tonumber(kanaHi, 16))
+  emu.addMemoryCallback(function()
+    if naming then
+      naming = false
+      log[#log + 1] = string.format("name f=%d bytes=%s kana=%d", n, bytes, kana)
+    end
+  end, emu.callbackType.exec, 0x24A854, 0x24A854)
 end
 
 emu.addMemoryCallback(function()
