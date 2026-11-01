@@ -1,0 +1,9 @@
+# 롬·에뮬레이터가 있어야 도는 dq4 회귀 가드. 형식은 tools/guards.py, 규칙은 guards 스킬(GUARD-01~03)
+
+[[check]]
+name = "dq4-window-check"
+why = "창 글자 깨짐·비침(#911 가게 동료 창 2프레임 깨짐 shopflip, #916·#918·#922 가게 목록·동료 창·사기 확인 shopwho)이 다시 생기지 않게"
+paths = ["sfc/dq4/tools/dq4windowname.asm", "sfc/dq4/tools/dq4windowname.py", "sfc/dq4/tools/dq4windowtext.py",
+         "sfc/dq4/tools/dq4windowcheck.py", "sfc/dq4/tools/dq4bg3slot.py"]
+run = "DQ4_WINDOWNAME_SYMBOLS=$PWD/work/wc/wn.sym uv run --locked python sfc/dq4/tools/dq4menupatch.py build --rom work/ch1/overture.sfc --messages work/ch1/messages.json --out work/wc/menu.sfc && uv run --locked python sfc/dq4/tools/dq4windowcheck.py --rom work/wc/menu.sfc --symbols work/wc/wn.sym --ship work/state/ship.mss --party <일행셋.mss> --shop <이무르 방어구점 앞.mss> --out work/wc/out"
+needs = ["rom", "MESENCE", "ASAR", "DQ4_GALMURI"]
