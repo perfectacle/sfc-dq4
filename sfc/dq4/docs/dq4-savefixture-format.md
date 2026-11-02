@@ -133,7 +133,7 @@ core.poke(dq4compatcheck.sets(dq4ch1walkcheck.pins({})))   # 난수·시각을 �
 | 검사 | 장면 | 쓰는 롬과 근거 |
 | --- | --- | --- |
 | `dq4namegamecheck` | 선실의 파파스에게 말 걸기 | DQ5 새 게임이 남은 `menu.sfc`(이름 메시지 훅이 든 `dq4menupatch` 결과) |
-| `dq4bg3slotcheck` | 원래 롬과 새 롬의 실내 맵 명령 창 | `overture.sfc`·`menu.sfc`. 1장 롬의 새 그룹은 원래 롬에 없음 |
+| `dq4bg3slotcheck` | 실내 맵 명령 창의 BG3 자리 | `menu.sfc`(자리 표 `dq4bg3slot.MAP_SLOTS` 가 DQ5 맵 번호). 출발 맵 `17/00` 은 `01/01` 을 거쳐 감([판정](dq4-window-text-format.md#패치-단계가-다른-롬과-화면을-견주지-않는-판정2026-11-03)) |
 | `dq4wellresetcheck` 의 `load` | 교회 대화(대화 번호 05)로 기록, 리셋, 이어 하기 | `--load-rom`(`groups.sfc`). `25:8278` 훅 바이트와 그 훅이 부르는 루틴 앞 48바이트가 1장 롬과 같아야 시작함. 1장 롬 서장 끝에서 같은 대화를 하면 기록이 남지 않았고, `36/00` 신부 앞(10,44)으로 순간이동해 말을 걸어도 명령 창 제목만 남은 채 기록 칸이 비어 있었음 |
 
 재발 방지 테스트는 `sfc/dq4/tools/test_dq4freshstate.py` 입니다. 옮긴 검사 열다섯이 `dq4freshstate.resolve`·`make` 로 만든 값을 장면에 넘기는지, `--state` 를 받는 dq4 도구가 같은 빌드인지 보는지, 어느 도구도 `work/state` 를 가리키지 않는지(합친 경로 포함) 봅니다. `dq4sparfx` 의 `--state` 는 NDS DeSmuME 상태라 대상이 아닙니다.
