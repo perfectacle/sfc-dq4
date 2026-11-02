@@ -5,8 +5,11 @@ Each such door is a 4x4 gate object (kind 48) at (2gx, 2gy) over the FC door's 2
 with a walkable FC block next to the door the hero warps (dq5warp.lua, from the ROM's dq4freshstate start) onto the
 cell it stands on there and holds the direction into the door (lua/dq4doorwalk.lua, dq4door's walk-in opening):
 
-  below  (2gx, 2gy+5) up      above  (2gx, 2gy-1) down
-  left   (2gx-2, 2gy+1 or 2gy+3) right                 right  (2gx+4, 2gy+1 or 2gy+3) left
+  below  (2gx or 2gx+2, 2gy+5) up        above  (2gx or 2gx+2, 2gy-1) down
+  left   (2gx-2, 2gy+1 or 2gy+3) right     right  (2gx+4, 2gy+1 or 2gy+3) left
+
+Each of the door's two columns (below, above) and two rows (left, right) is walked on its own, from the FC block
+next to it when that block is walkable.
 
 A door of lock 0 must open (a bit of 7E:21C2-21C5 set) and let the hero walk on past its far edge (or onto another
 map). A locked door must stay shut and keep the hero on its side without a key, and with one key level too few;
@@ -54,7 +57,10 @@ def cases(prg):
             prop = block_prop(source, source.cell(gx, gy) & 31)
             if kind != GATE_KIND or prop == GATE:
                 continue
-            sides = [("below", (gx, gy + 2), (ex, ey + 5), "up"), ("above", (gx, gy - 1), (ex, ey - 1), "down")]
+            sides = []
+            for col in (0, 1):
+                sides.append((f"below{col}", (gx + col, gy + 2), (ex + 2 * col, ey + 5), "up"))
+                sides.append((f"above{col}", (gx + col, gy - 1), (ex + 2 * col, ey - 1), "down"))
             for row in (0, 1):
                 sides.append((f"left{row}", (gx - 1, gy + row), (ex - 2, ey + 1 + 2 * row), "right"))
                 sides.append((f"right{row}", (gx + 2, gy + row), (ex + 4, ey + 1 + 2 * row), "left"))

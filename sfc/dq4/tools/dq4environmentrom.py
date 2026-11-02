@@ -141,8 +141,9 @@ DOORS = {0x94, 0x95, 0x96}
 LOCKS = {0x94: 0, 0x95: 1, 0x96: 2}
 # FC 2x2 doors and their DQ5 lock kinds, all drawn as the 4x4 gate object GATE_KIND: A0 and A2 (key gate) are
 # the FC gate shape; 9C and 9D the FC shape that opens the 2x2 onto the block beyond it (08:$8855). Kind 48 is the
-# 4x4 object that blocks every row while closed (01:F4FD ORs 90 into +1 of all four rows, the other 4x4 kinds only
-# the last), and 01:DB96 finds it from any side, which the FC doors opened from the side (30-02) need.
+# 4x4 object that blocks every row while closed: the 4x4 drawer 01:F4E6 ORs 90 into +1 of the last row for every
+# kind, and of the three rows above 90 for 48 (01:F4FD), 10 for 41 and 42, 30 for 49 (no bit7). 01:DB96 finds 48 from
+# any side, which the FC doors opened from the side (30-02) need.
 GATE = 0xA0
 GATES = {GATE: 0, 0xA2: 2, 0x9C: 0, 0x9D: 1}
 # FC stairs (08:$B22E destinations) of GROUPS maps become DQ5 exit blocks: block attribute 05 puts $85 in

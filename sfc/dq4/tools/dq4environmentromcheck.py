@@ -198,8 +198,11 @@ def water_cycle(wram_vram, water_ids, frames):
 
 
 def shown_assets(assets, frame):
-    """Assets as the game draws them at water frame `frame`: the water routine sends the fountain's frame of the
-    same number with the water's, so both change together."""
+    """Assets as the game draws them at water frame `frame`, with the fountain at the frame of the same number.
+
+    The expected picture is the offline art of create_assets again (the ROM was built from it), so it cannot show
+    that the fountain follows the water. That comes from the dumps: main() reads which frame each dump holds in the
+    fountain's VRAM slots and requires the same numbers as the water's (fountain_with_water)."""
     return dict(assets, **{WATER_FRAMES[0]: assets[WATER_FRAMES[frame]],
                            FOUNTAIN_FRAMES[0]: assets[FOUNTAIN_FRAMES[frame]]})
 
@@ -281,7 +284,9 @@ def main():
                 "fountain_frames": water_cycle([(wram, vram)] + [(w, v) for w, v, _ in later], FOUNTAIN_IDS, fountains),
                 "fountain_slots": all((wram[0x6000 + i * 2] | wram[0x6001 + i * 2] << 8) & 0x3FF == FOUNTAIN_SLOT + k
                                       for k, i in enumerate(FOUNTAIN_IDS))}
-            result_fountain["fountain_with_water"] = result_fountain["fountain_frames"] == cycle
+            # Without water there is no water frame to follow (cycle is the [0] placeholder); the build puts a
+            # fountain only on a map with water, so a fountain map without water fails.
+            result_fountain["fountain_with_water"] = has_water and result_fountain["fountain_frames"] == cycle
         else:
             result_fountain = {}
         result, image = check_map(name, wram, vram, cgram, expected(name, cycle[0] or 0), sources[name], known)

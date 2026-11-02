@@ -368,6 +368,8 @@ class RomCheckExpectationTests(unittest.TestCase):
     def test_expected_render_moves_the_fountain_with_the_water(self):
         # The water routine sends the fountain's frame n together with water frame n, so the offline render the
         # ROM check compares with must swap both, or a dump taken at frame 1 or 2 differs on the fountain block.
+        # This only tests the helper; the game itself is checked by the run check dq4-environment-rom
+        # (dq4environmentromcheck.py), which reads the frames from the dumps.
         import dq4environmentromcheck as check
         from dq4environmentrom import FOUNTAIN_FRAMES, WATER_FRAMES
         assets = {name: object() for name in WATER_FRAMES + FOUNTAIN_FRAMES}

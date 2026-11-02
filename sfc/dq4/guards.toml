@@ -538,6 +538,7 @@ name = "dq4-gate-doors"
 why = "FC 2×2 문 9C·9D(너머 칸으로 여는 문)와 A2(열쇠 성문)는 성문 물체 48 로 바뀌어, 잠금 0 은 어느 쪽에서든 걸어 들어가면 열리고 지나가며, 잠금 1·2 는 그 단계 열쇠가 있을 때만 열려야 한다. 변환이 벽으로 두던 문이다"
 paths = ["sfc/dq4/tools/dq4gatecheck.py", "sfc/dq4/tools/dq4environmentrom.py", "sfc/dq4/tools/dq4door.py",
          "sfc/dq4/tools/dq4doorcheck.py", "sfc/dq4/tools/lua/dq4doorwalk.lua", "sfc/dq4/tools/dq4groupbuild.py",
-         "sfc/dq4/tools/dq4freshstate.py", "sfc/dq5/tools/lua/dq5warp.lua"]
+         "sfc/dq4/tools/dq4freshstate.py", "sfc/dq5/tools/lua/dq5warp.lua", "sfc/dq4/tools/dq4environmentmap.py",
+         "fc/dq4/tools/dq4block.py", "sfc/dq4/tools/dq4groupcheck.py"]
 run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/fresh-gates && uv run --locked python sfc/dq4/tools/dq4gatecheck.py --rom work/dq4-groups/groups.sfc --out work/fresh-gates"
 needs = ["rom", "MESENCE", "LIBDIR", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
