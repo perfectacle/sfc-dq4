@@ -375,6 +375,9 @@ def scene_inn(core, rom, out, seed, kind, dq4):
     return {'problems': problems, 'price': price, 'total': total, 'before': before, 'after': after, **talk}
 
 
+SONG_REPLY, SONG_NOW = 0x7E08D2, 0x7E1D8B
+
+
 def scene_church(core, rom, out, seed, kind):
     """교회 되살리기·해독·저주 풀기."""
     slot = base_slot(rom)
@@ -395,6 +398,8 @@ def scene_church(core, rom, out, seed, kind):
         after = snapshot(t.c)
         t.c.shot(out / 'end.png')
         talk['frozen'] = None if talk['ended'] else frozen(t)
+        # 치료 갈래는 25:FD00 → 24:FF0F 로 곡 1E 가 끝나기(명령 09 의 대답 7E:08D2 = 7F)를 기다린다
+        talk['song_reply'], talk['song'] = t.c.rd(SONG_REPLY), t.c.rd(SONG_NOW)
     level = before['party'][who]['level']
     cost = 5 if kind == 'cure' else level * 10
     problems = [] if talk['ended'] else ['대화가 끝나지 않음']
@@ -599,13 +604,6 @@ def scene_badsum(core, rom, out, seed):
 
 # 알려진 실패: 장면 → (이슈와 지울 때, 그 증상인지 보는 함수(결과 dict)). 정확히 그 증상일 때만 known 으로 쳐 전체가
 # 통과하고, 고쳐져 통과하거나 다른 증상이면 failed — 고친 PR 이 그 항목을 지운다
-def _church_stuck(res):
-    """기도 문구에서 멈춤: 문제는 대화가 끝나지 않은 것 하나(고르기 창은 정한 대로, 상태·금화도 맞음), 7E:0F20 = 0C,
-    A·B 를 눌러도 화면이 그대로(frozen)."""
-    return (res['problems'] == ['대화가 끝나지 않음']
-            and res.get('talking') == CHURCH_TALKING and res.get('frozen') is True)
-
-
 def _field_stays_day(res):
     """필드 시각 색이 낮 그대로: 판정에 걸린 시각마다 버퍼 전체(2·3번 줄, 인물 두 줄, 7E:1AA1)가 낮 벌과 같고,
     맞은 시각은 낮 벌인 시각뿐."""
@@ -623,18 +621,11 @@ def _cross_stays_day(res):
             and [tuple(x[1:]) for x in dusk.get('seen', [])] == [('낮', 0)] and dawn.get('frames') is not None)
 
 
-CHURCH_TALKING = 0x0C
-SOUND_STUCK = ('이슈: 소리 패치 롬(dq4-ch1-sound.sfc 이후)에서 {} 뒤 「…주소서!」 에서 멈춤(프로브 없이도, 두 코어). '
-               '교회가 부르는 곡 1E 자리에 NDS 반복 곡(コロシアム楽屋)이 든 것으로 보임. 소리 전 dq4-ch1.sfc 는 끝까지 감. '
-               '고치면 이 항목을 지울 것')
 FIELD_COLOR = ('이슈: libretro 두 코어에서 1장 필드의 시각 색(02:AD2A → 01:A055)이 시각을 붙든 채 걸어도 낮 벌 그대로. '
                '1장 롬 문제인지 검사 진입 방식 차이인지 미확인(dq4-town-scene-format.md 「남은 것」). 고치면 이 항목을 지울 것')
 CROSS_COLOR = ('이슈: 필드에서 시각 00EA → 0002 를 붙들지 않고 걸어 넘겨도 버퍼가 낮 벌 하나, 7E:1AA1(밤 인물 표지)이 '
                '켜지지 않음(FIELD_COLOR 와 같은 원인으로 보임). 고치면 이 항목을 지울 것')
 KNOWN = {
-    'church_revive': (SOUND_STUCK.format('되살린'), _church_stuck),
-    'church_cure': (SOUND_STUCK.format('해독한'), _church_stuck),
-    'church_uncurse': (SOUND_STUCK.format('저주를 푼'), _church_stuck),
     'dusk': (FIELD_COLOR, _field_stays_day),
     'dawn': (FIELD_COLOR, _field_stays_day),
     'cross': (CROSS_COLOR, _cross_stays_day),

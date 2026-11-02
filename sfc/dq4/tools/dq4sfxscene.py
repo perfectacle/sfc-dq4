@@ -702,6 +702,7 @@ def leftover_sites(rom, table):
 #   이름: (DQ5 원래 (효과음, 갈래), 부르는 자리 또는 None, 결정, 대기열에 들어갈 (효과음, 갈래), 울린 바탕)
 # 바탕: 'dq5' = 원본 DQ5 롬(rom/dq5.sfc)의 어느 샘플과 BRR 이 같음, 'nds' = 원본 DQ5 에 없는 샘플, 'noise' = DSP 잡음.
 # 결정이 NDS 인데 바탕이 dq5 이거나, DQ5 인데 nds 면 그 소리가 결정과 다르다.
+WAVE_CHOICE = 'DQ5 효과음, 파형 20/21 NDS 음색 채택(사용자 청음 결정)'
 DECISIONS = {
     'menu':        ((0x33, 0x00), None, 'NDS 12C 決定音', (0x33, 0x00), 'nds'),
     'yes-no':      ((0x33, 0x01), None, 'NDS 12C 決定音', (0x33, 0x01), 'nds'),
@@ -727,17 +728,23 @@ DECISIONS = {
     'spar-hero':   (None, None, 'NDS 19C 銅の剣', (0x40, 0x01), 'nds'),
     'spar-master': (None, None, 'NDS 1A0 鋼の剣', (0x40, 0x02), 'nds'),
     'frog-jump':   (None, None, 'NDS 47B EVE_JUMP', (0x45, 0x00), 'nds'),
+    # 효과음 번호는 DQ5 그대로지만 늘 두는 파형 20·21 이 NDS 파형이라(ADOPTED_WAVES) 소리 바탕은 NDS
+    'chimera':     ((0x36, 0x02), None, WAVE_CHOICE, (0x36, 0x02), 'nds'),
+    'boss-attack': ((0x37, 0x05), None, WAVE_CHOICE, (0x37, 0x05), 'nds'),
 }
 # DQ5 효과음이 쓰는 늘 두는 파형(원본 DQ5 샘플 1F~22). --sfx-wave 가 이 자리에 NDS 파형을 넣으면 그 파형을 쓰는 DQ5
-# 효과음(DQ5 로 고른 것 포함)의 소리도 바뀐다. 결과의 findings 에 적기만 한다
+# 효과음(DQ5 로 고른 것 포함)의 소리도 바뀐다. ADOPTED_WAVES 밖의 것만 결과의 findings 에 적는다
 RESIDENT_WAVES = (0x1F, 0x20, 0x21, 0x22)
+# 사용자가 들어 보고 NDS 파형을 그대로 두기로 한 것(DQ5 로 고른 キメラのつばさ 36-02, 무기 표 곡이 아닌 전투의
+# たたかう 37-05, 파형 21 을 쓰는 무기 종류 소리도 이 파형으로 울림). dq4-sound-port-format.md 「효과음 장면 검사」
+ADOPTED_WAVES = (0x20, 0x21, 0x22)
 
 
-def resident_wave_diffs(rom, dq5=None):
-    """롬의 늘 두는 파형 가운데 원본 DQ5 와 BRR 이 다른 번호."""
+def resident_wave_diffs(rom, dq5=None, adopted=ADOPTED_WAVES):
+    """롬의 늘 두는 파형 가운데 원본 DQ5 와 BRR 이 다르고 adopted 에 없는 번호."""
     import dq4soundcheck as sc
     dq5 = dq5 or dq5_samples()
-    return [f'{n:02X}' for n in RESIDENT_WAVES if sc.sample_body(rom, n)[7:] != dq5[n]]
+    return [f'{n:02X}' for n in RESIDENT_WAVES if n not in adopted and sc.sample_body(rom, n)[7:] != dq5[n]]
 
 
 def d(key):
@@ -756,7 +763,7 @@ def decision_problems(table):
         got = routed(table, *orig, site)
         if got != queue:
             out.append(f'{key}: 대응표로 {name(got)}, 결정 표 {name(queue)}')
-        if choice == 'DQ5' and (orig in table.sfx or orig in table.remap):
+        if choice.startswith('DQ5') and (orig in table.sfx or orig in table.remap):
             out.append(f'{key}: DQ5 로 고른 {name(orig)} 를 대응표가 바꿈')
         if choice.startswith('NDS ') and orig in table.sfx and table.sfx[orig] != choice.split()[1]:
             out.append(f'{key}: --sfx {name(orig)}={table.sfx[orig]}, 결정 표 {choice.split()[1]}')
@@ -1037,6 +1044,7 @@ def main():
               'seconds': round(time.time() - t0, 1), 'static': static, 'control': control,
               'runtime_uncovered': sorted(RUNTIME_GAPS | {f'call {a:06X}' for a in table.calls}),
               'findings': {'leftover_sites': leftover_sites(rom, table), 'resident_waves_changed': resident_wave_diffs(rom),
+                           'resident_waves_adopted': [f'{n:02X}' for n in ADOPTED_WAVES],
                            'scenes': sorted({f for r in results for f in r.get('findings', [])})},
               'scenes': results}
     (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')

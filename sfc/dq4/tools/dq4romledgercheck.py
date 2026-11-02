@@ -408,6 +408,17 @@ def inv_brkscan(rom, dq5):
     return f'덩어리 {len(all_blobs)}개', bad
 
 
+def inv_song_wait(rom, dq5, sound):
+    """곡이 끝나기를 기다리는 자리(24:FF0F·25:FD00 과 그 입구)의 곡이 되풀이하지 않음(dq4songwait). sound 는 소리 단계
+    빌드 보고(dq4soundset 의 .json)."""
+    import dq4songwait
+    if sound is None:
+        return '', ['소리 단계 보고(dq4-ch1-sound.json)가 없어 기다리는 곡을 볼 수 없음']
+    rows, bad = dq4songwait.check(rom, dq5, sound)
+    later = sum(r[3] == '되풀이(미확인 자리)' for r in rows)
+    return f'자리 {len(rows)}개(끝나는 곡 {sum(r[3] == "끝남" for r in rows)}, 닿는지 미확인 반복 {later})', bad
+
+
 INVARIANTS = {
     'checksum': inv_checksum,
     'vectors': inv_vectors,
@@ -425,7 +436,7 @@ LIMITS = ('앞 단계와 같은 값을 다시 쓴 바이트는 장부에 없어 
           '한 단계 안 모듈끼리의 덮어쓰기는 보이지 않음')
 
 
-def run(ledger, rom, dq5, allow_text, allow_missing=False):
+def run(ledger, rom, dq5, allow_text, allow_missing=False, sound=None):
     """(보고 dict, [실패]). 경고는 보고의 warnings. allow_missing 이면 장부에 없는 단계를 실패로 치지 않는다."""
     stages = ledger['stages']
     fails, warnings = [], []
@@ -453,6 +464,10 @@ def run(ledger, rom, dq5, allow_text, allow_missing=False):
         summary, bad = f(rom, dq5)
         report['invariants'][name] = {'summary': summary, 'problems': bad}
         fails += [f'{name}: {p}' for p in bad]
+    if any(s['name'] == 'sound' for s in stages):
+        summary, bad = inv_song_wait(rom, dq5, sound)
+        report['invariants']['song_wait'] = {'summary': summary, 'problems': bad}
+        fails += [f'song_wait: {p}' for p in bad]
     summary, bad = inv_hooks(rom, dq5, stages)
     report['invariants']['hooks'] = {'summary': summary, 'problems': bad}
     fails += [f'hooks: {p}' for p in bad]
@@ -478,8 +493,11 @@ def main():
     args = ap.parse_args()
     ledger = L.load(args.ledger)
     rom = args.rom or args.ledger.parent / ledger['stages'][-1]['file']
+    sound = next((args.ledger.parent / Path(s['file']).with_suffix('.json') for s in ledger['stages']
+                  if s['name'] == 'sound'), None)
+    sound = json.loads(sound.read_text(encoding='utf-8')) if sound and sound.exists() else None
     report, fails = run(ledger, rom.read_bytes(), args.dq5.read_bytes(), args.allow.read_text(encoding='utf-8'),
-                        args.allow_missing_stages)
+                        args.allow_missing_stages, sound)
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')

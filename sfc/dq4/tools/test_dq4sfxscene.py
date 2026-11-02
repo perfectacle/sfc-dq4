@@ -200,6 +200,15 @@ class SceneListTest(unittest.TestCase):
         for k in ('boss-hit', 'stairs', 'chest', 'critical'):
             self.assertIn(k, got)
 
+    def test_adopted_nds_waves_stay_dq5_numbers(self):
+        self.assertEqual(s.ADOPTED_WAVES, (0x20, 0x21, 0x22))
+        t = s.load_table(s.ARGS.read_text())
+        t.sfx[(0x36, 0x02)] = '13B'
+        t.remap[(0x37, 0x05)] = (0x45, 0x03)
+        got = ' '.join(s.decision_problems(t))
+        for k in ('chimera', 'boss-attack'):
+            self.assertIn(k, got)
+
     def test_decision_kinds(self):
         for k, (_, _, choice, _, kind) in s.DECISIONS.items():
             self.assertEqual(kind == 'dq5', choice == 'DQ5', k)
