@@ -735,9 +735,16 @@ DECISIONS = {
 # DQ5 효과음이 쓰는 늘 두는 파형(원본 DQ5 샘플 1F~22). --sfx-wave 가 이 자리에 NDS 파형을 넣으면 그 파형을 쓰는 DQ5
 # 효과음(DQ5 로 고른 것 포함)의 소리도 바뀐다. ADOPTED_WAVES 밖의 것만 결과의 findings 에 적는다
 RESIDENT_WAVES = (0x1F, 0x20, 0x21, 0x22)
-# 사용자가 들어 보고 NDS 파형을 그대로 두기로 한 것(DQ5 로 고른 キメラのつばさ 36-02, 무기 표 곡이 아닌 전투의
-# たたかう 37-05, 파형 21 을 쓰는 무기 종류 소리도 이 파형으로 울림). dq4-sound-port-format.md 「효과음 장면 검사」
-ADOPTED_WAVES = (0x20, 0x21, 0x22)
+# 사용자가 들어 보고 NDS 파형을 그대로 두기로 한 것: 번호 → 채택한 BRR(sample_body[7:])의 SHA-1 앞 16자리.
+# 20·21: DQ5 로 고른 キメラのつばさ 36-02, 무기 표 곡이 아닌 전투의 たたかう 37-05, 파형 21 을 쓰는 무기 종류 소리.
+# 22: 청음 페이지에서 공격 시작·빗나감·상자·물건 찾기(모두 파형 22 로 울림)를 사용자가 좋다고 함.
+# 다른 BRR 이 들어가면 다시 들어야 하므로 실패한다. dq4-sound-port-format.md 「효과음 장면 검사」
+ADOPTED_WAVES = {0x20: 'b5ca241590ab00f6', 0x21: 'd464a9c233b1058b', 0x22: '5c47fd771d28247a'}
+
+
+def wave_hash(rom, n):
+    import dq4soundcheck as sc
+    return hashlib.sha1(sc.sample_body(rom, n)[7:]).hexdigest()[:16]
 
 
 def resident_wave_diffs(rom, dq5=None, adopted=ADOPTED_WAVES):
@@ -745,6 +752,12 @@ def resident_wave_diffs(rom, dq5=None, adopted=ADOPTED_WAVES):
     import dq4soundcheck as sc
     dq5 = dq5 or dq5_samples()
     return [f'{n:02X}' for n in RESIDENT_WAVES if n not in adopted and sc.sample_body(rom, n)[7:] != dq5[n]]
+
+
+def adopted_wave_problems(rom, adopted=ADOPTED_WAVES):
+    """채택한 파형 자리의 BRR 이 들어 본 것과 다르면 문제."""
+    return [f'파형 {n:02X}: BRR {wave_hash(rom, n)}, 청음으로 채택한 것 {want}'
+            for n, want in sorted(adopted.items()) if wave_hash(rom, n) != want]
 
 
 def d(key):
@@ -1030,6 +1043,7 @@ def main():
     all_scenes = scenes(table)
     static = {'call_sites': call_site_problems(rom, table), 'weapon_table': weapon_table_problems(rom, table),
               'decisions': decision_problems(table), 'unreached': unreached_problems(rom),
+              'adopted_waves': adopted_wave_problems(rom),
               'uncovered': [e for e in uncovered(table, all_scenes)
                             if e not in RUNTIME_GAPS and not e.startswith('call ')]}
     jobs = [(c, s, True) for s in every for c in cores]
@@ -1053,7 +1067,7 @@ def main():
               'seconds': round(time.time() - t0, 1), 'static': static, 'control': control,
               'runtime_uncovered': sorted(RUNTIME_GAPS | {f'call {a:06X}' for a in table.calls}),
               'findings': {'leftover_sites': leftover_sites(rom, table), 'resident_waves_changed': resident_wave_diffs(rom),
-                           'resident_waves_adopted': [f'{n:02X}' for n in ADOPTED_WAVES],
+                           'resident_waves_adopted': {f'{n:02X}': h for n, h in sorted(ADOPTED_WAVES.items())},
                            'scenes': sorted({f for r in results for f in r.get('findings', [])})},
               'scenes': results}
     (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')
