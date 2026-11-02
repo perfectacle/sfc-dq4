@@ -1,0 +1,240 @@
+"""dq4readset: 읽은 롬 바이트 캐시의 키·찾기·저장과, 머리말 Lua·러너가 지켜야 할 규칙(롬 없이)."""
+import ast
+import os
+from pathlib import Path
+import struct
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest import mock
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import dq4mesen  # noqa: E402
+import dq4readset as rs  # noqa: E402
+
+HERE = Path(__file__).resolve().parent
+
+
+def mss(name, payload=b'payload'):
+    """MesenCE 세이브스테이트 머리 꼴: 앞 칸, 이름 길이(u32), 이름, 압축된 본문."""
+    return b'MSS\x01' + b'\x00' * 40 + b'\xfb\xc9\x9c' + struct.pack('<I', len(name)) + name + b'x\x01' + payload
+
+
+class PureTests(unittest.TestCase):
+    def test_ranges_round_trip_and_merge(self):
+        r = rs.parse_ranges('10 4\n12 4\n0 1\n20 0\n')
+        self.assertEqual(r, [(0, 1), (0x10, 6)])
+        self.assertEqual(rs.unpack(rs.pack(r)), r)
+
+    def test_digest_sees_only_read_bytes(self):
+        rom = bytearray(range(256)) * 4
+        ranges = [(0x10, 4), (0x100, 2)]
+        d = rs.digest(rom, ranges)
+        outside = bytearray(rom)
+        outside[0x20] ^= 0xFF
+        outside[0x3FF] ^= 0xFF
+        self.assertEqual(rs.digest(outside, ranges), d)
+        inside = bytearray(rom)
+        inside[0x101] ^= 0x01
+        self.assertNotEqual(rs.digest(inside, ranges), d)
+        self.assertNotEqual(rs.digest(rom[:0x101], ranges), d)
+
+    def test_find_returns_matching_entry(self):
+        rom = bytes(1024)
+        other = bytearray(rom)
+        other[5] = 1
+        a = {'ranges': rs.pack([(0, 8)]), 'digest': rs.digest(other, [(0, 8)])}
+        b = {'ranges': rs.pack([(0, 8)]), 'digest': rs.digest(rom, [(0, 8)])}
+        self.assertIs(rs.find([a, b], rom), b)
+        self.assertIsNone(rs.find([a], rom))
+
+    def test_rom_shape_ignores_checksum(self):
+        rom = bytearray(0x8000)
+        rom[0x7FD5] = 0x20
+        before = rs.rom_shape(rom)
+        rom[0x7FDC:0x7FE0] = b'\x12\x34\x56\x78'
+        self.assertEqual(rs.rom_shape(rom), before)
+        rom[0x7FD7] = 0x0C
+        self.assertNotEqual(rs.rom_shape(rom), before)
+
+    def test_state_hash_ignores_rom_file_name_only(self):
+        a = mss(b'probe-855474adcaf4.sfc')
+        b = mss(b'windowcheck-e302b892a00a.sfc')
+        self.assertEqual(rs.state_hash(a), rs.state_hash(b))
+        self.assertNotEqual(rs.state_hash(a), rs.state_hash(mss(b'probe-855474adcaf4.sfc', b'payloae')))
+
+    def test_lua_env_names(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / 'a.lua'
+            f.write_text('local x = os.getenv("STATE") or os.getenv( \'PRE\' )\n-- getenv(NOPE)\n')
+            self.assertEqual(rs.lua_env_names([f]), ['PRE', 'STATE'])
+
+    def test_canon_env_uses_contents_not_paths(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            dest, code = d / 'dest', d / 'lua'
+            dest.mkdir()
+            code.mkdir()
+            s1, s2 = d / 's1.mss', d / 's2.mss'
+            s1.write_bytes(mss(b'probe-000000000001.sfc'))
+            s2.write_bytes(mss(b'probe-000000000002.sfc'))
+            names = ['SHOT_DIR', 'STATE', 'SAVE', 'LIBDIR', 'OUT', 'MISSING']
+            env1 = {'SHOT_DIR': str(dest), 'STATE': str(s1), 'SAVE': 'end.mss', 'LIBDIR': str(code),
+                    'OUT': str(dest / 'x.txt')}
+            env2 = dict(env1, STATE=str(s2), SHOT_DIR='/elsewhere')
+            (dest / 'x.txt').write_text('1')
+            c1 = rs.canon_env(env1, names, dest, [code])
+            self.assertEqual(c1, rs.canon_env(env2, names, dest, [code]))
+            self.assertNotIn('SHOT_DIR', c1)
+            self.assertEqual(c1['LIBDIR'], 'code')
+            self.assertEqual(c1['OUT'], 'dest:x.txt')
+            self.assertEqual(c1['SAVE'], 'end.mss')
+            s2.write_bytes(mss(b'probe-000000000002.sfc', b'other'))
+            self.assertNotEqual(c1, rs.canon_env(env2, names, dest, [code]))
+
+
+class StoreTests(unittest.TestCase):
+    def test_keeps_recent_entries_and_prunes_unreferenced_blobs(self):
+        with tempfile.TemporaryDirectory() as d:
+            st = rs.Store(d)
+            for i in range(rs.KEEP_ENTRIES + 3):
+                sha = st.put_blob(f'out{i}'.encode())
+                st.add('k' * 64, {'ranges': rs.pack([(0, 1)]), 'digest': str(i), 'files': {'o': sha}})
+            es = st.entries('k' * 64)
+            self.assertEqual(len(es), rs.KEEP_ENTRIES)
+            self.assertEqual(es[0]['digest'], str(rs.KEEP_ENTRIES + 2))
+            st.touch('k' * 64, es[-1])
+            self.assertEqual(st.entries('k' * 64)[0]['digest'], es[-1]['digest'])
+            st.drop('k' * 64, es[-1])
+            self.assertNotIn(es[-1]['digest'], [e['digest'] for e in st.entries('k' * 64)])
+            st.prune(0)
+            live = {s for e in st.entries('k' * 64) for s in e['files'].values()}
+            blobs = {p.name for p in (Path(d) / 'blob').rglob('*') if p.is_file()}
+            self.assertLessEqual(blobs, live)
+
+
+class FakeMesen:
+    """mesen.run 대신: ROM 의 READ 구간을 읽고 그 바이트로 출력을 만든다(읽은 집합 밖은 결과와 무관한 장면)."""
+
+    READ = (0x40, 0x10)
+
+    def __init__(self):
+        self.calls = 0
+
+    def __call__(self, mesence, rom, script, folder=None, tag='probe', extra=(), env=None, stdout=None, **kw):
+        self.calls += 1
+        data = Path(rom).read_bytes()
+        s, n = self.READ
+        Path(folder, 'out.bin').write_bytes(data[s:s + n])
+        Path(folder, 'end.mss').write_bytes(mss(f'probe-{self.calls:012x}.sfc'.encode(), data[s:s + 2]))
+        Path(env['READSET_OUT']).write_text(f'{s:X} {n:X}\n')
+        return subprocess.CompletedProcess([], 0)
+
+
+class RunTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        d = Path(self.tmp.name)
+        self.mesence = d / 'Mesen'
+        self.mesence.write_bytes(b'emu')
+        (d / 'Saves').mkdir()
+        self.rom = d / 'rom.sfc'
+        self.rom.write_bytes(bytes(0x8000))
+        self.script = d / 'scene.lua'
+        self.script.write_text('local s = os.getenv("STATE")\n')
+        self.store = rs.Store(d / 'cache')
+        self.fake = FakeMesen()
+        self.env = mock.patch.dict(os.environ, {'MESENCE_SAVES': str(d / 'Saves'), 'DQ4_READSET': '',
+                                                'DQ4_READSET_VERIFY': '0'})
+        self.env.start()
+        self.patch = mock.patch.object(rs.mesen, 'run', self.fake)
+        self.patch.start()
+        self.n = 0
+
+    def tearDown(self):
+        self.patch.stop()
+        self.env.stop()
+        self.tmp.cleanup()
+
+    def go(self):
+        self.n += 1
+        dest = Path(self.tmp.name) / f'run{self.n}'
+        return rs.run(self.mesence, self.rom, self.script, dest, {'STATE': 'x'}, store=self.store), dest
+
+    def flip(self, at):
+        data = bytearray(self.rom.read_bytes())
+        data[at] ^= 0xFF
+        self.rom.write_bytes(data)
+
+    def test_hit_outside_miss_inside(self):
+        info, d1 = self.go()
+        self.assertFalse(info['cached'])
+        self.assertEqual(info['readset'], 0x10)
+        info, d2 = self.go()
+        self.assertTrue(info['cached'])
+        self.assertEqual((d2 / 'out.bin').read_bytes(), (d1 / 'out.bin').read_bytes())
+        self.assertFalse((d2 / rs.ENTRY).exists() or (d2 / rs.OUT).exists())
+        self.flip(0x10)        # 읽은 집합 밖
+        self.assertTrue(self.go()[0]['cached'])
+        self.flip(0x45)        # 안
+        self.assertFalse(self.go()[0]['cached'])
+        self.assertEqual(self.fake.calls, 2)
+
+    def test_off_runs_everything(self):
+        self.go()
+        with mock.patch.dict(os.environ, {'DQ4_READSET': 'off'}):
+            self.assertFalse(self.go()[0]['cached'])
+
+    def test_verify_reruns_and_catches_wrong_cache(self):
+        self.go()
+        with mock.patch.dict(os.environ, {'DQ4_READSET_VERIFY': '1'}):
+            info, _ = self.go()
+            self.assertTrue(info['verified'])
+            self.assertEqual(self.fake.calls, 2)
+            # 키에 없는 입력이 결과를 바꾼 것처럼: 다음 실행은 다른 바이트를 낸다
+            self.fake.READ = (0x80, 0x10)
+            self.flip(0x80)
+            with self.assertRaises(SystemExit):
+                self.go()
+
+    def test_accept_false_is_not_cached(self):
+        dest = Path(self.tmp.name) / 'rej'
+        rs.run(self.mesence, self.rom, self.script, dest, {}, store=self.store, accept=lambda d: False)
+        self.assertFalse(self.go()[0]['cached'])
+
+
+class RuleTests(unittest.TestCase):
+    def test_prelude_wraps_what_counters_miss(self):
+        lua = rs.PRELUDE.read_text(encoding='utf-8')
+        # emu.read* 는 카운터에 잡히지 않는다: 머리말이 넷 모두 감싸야 한다
+        self.assertIn('pairs({read = 1, readWord = 2, read16 = 2, read32 = 4})', lua)
+        for fn in ('emu.loadSavestate = function', 'emu.createSavestate = function',
+                   'emu.resetAccessCounters = function', 'emu.stop = function', 'emu.eventType.scriptEnded',
+                   'emu.counterType.readCount', 'emu.counterType.execCount'):
+            self.assertIn(fn, lua)
+
+    def test_runner_copies_rom_so_no_battery_save_leaks(self):
+        """testrunner() 는 롬을 복사하지 않아 앞 실행의 .srm 을 읽는다. 캐시 실행은 run/Runner 만 쓴다."""
+        tree = ast.parse((HERE / 'dq4readset.py').read_text(encoding='utf-8'))
+        attrs = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name)
+                 and n.value.id == 'mesen'}
+        self.assertIn('run', attrs)
+        self.assertNotIn('testrunner', attrs)
+
+    def test_clear_saves_removes_cdl(self):
+        with tempfile.TemporaryDirectory() as d:
+            saves, dbg = Path(d) / 'Saves', Path(d) / 'Debugger'
+            saves.mkdir()
+            dbg.mkdir()
+            (saves / 'probe-0123456789ab.srm').write_bytes(b'')
+            (dbg / 'probe-0123456789ab.cdl').write_bytes(b'')
+            (dbg / 'keep.cdl').write_bytes(b'')
+            with mock.patch.dict(os.environ, {'MESENCE_SAVES': str(saves)}):
+                dq4mesen.clear_saves('x/probe-0123456789ab.sfc')
+            self.assertEqual(sorted(p.name for p in dbg.iterdir()), ['keep.cdl'])
+            self.assertEqual(list(saves.iterdir()), [])
+
+
+if __name__ == '__main__':
+    unittest.main()
