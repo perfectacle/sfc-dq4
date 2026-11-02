@@ -60,9 +60,44 @@ class Rom:
 
 class Loops(unittest.TestCase):
     def test_walk(self):
-        self.assertFalse(W.seq_loops(ENDS))
-        self.assertTrue(W.seq_loops(LOOPS))
-        self.assertFalse(W.seq_loops(b''))
+        self.assertEqual(W.classify(ENDS), '끝남')
+        self.assertEqual(W.classify(LOOPS), '되풀이')
+        self.assertEqual(W.classify(b''), '끝남')
+
+    def test_counted_loop_ends(self):
+        # 음 / F5 3바퀴 맨 앞으로 / 끝: 카운터를 세면 끝남
+        seq = bytes((0x20, 1, 4, 0, 0x51, 0x10, 0xF5, 0x03, 0xFA, 0xFF, 0xFF))
+        self.assertEqual(W.classify(seq), '끝남')
+        self.assertTrue(W.has_branches(seq))
+        self.assertFalse(W.has_branches(ENDS))
+
+    def test_flag_branch_both_ways(self):
+        # E0 이 v 면 끝으로, 아니면 맨 앞으로 점프: 갈래에 따라 갈림
+        mixed = bytes((0x20, 1, 4, 0, 0x51, 0x10, 0xE0, 0x03, 0x00, 0x01, 0xEA, 0xF7, 0xFF, 0xFF))
+        self.assertEqual(W.classify(mixed), '판정 불가')
+        # 두 갈래 모두 끝
+        both = bytes((0x20, 1, 4, 0, 0xE0, 0x02, 0x00, 0x01, 0x51, 0x10, 0xFF))
+        self.assertEqual(W.classify(both), '끝남')
+
+    def test_table_covers_every_index(self):
+        r = Rom()
+        t = W.loop_table(bytes(r.rom))
+        self.assertEqual(len(t), 0x100)
+        self.assertEqual(t[0x64:], bytes(0x9C))
+
+    def test_mixed_song_at_wait_fails_and_stays_out_of_table(self):
+        r = Rom()
+        # 첫머리 E0: 변수가 1 이면 끝으로, 아니면 음 하나 뒤 첫머리로(음 뒤 변수는 0 이라 되풀이)
+        r.seq(0x1E, bytes((0x20, 1, 4, 0, 0xE0, 0x05, 0x00, 0x01, 0x51, 0x10, 0xEA, 0xF7, 0xFF, 0xFF)))
+        put(r.rom, 0x069000, bytes((0xA9, 0x1E)) + call(0x22, W.WAIT))                 # 곡 변수를 모르는 자리
+        put(r.rom, 0x069100, bytes((0x00, 0x16, 0x1E, 0x01, 0xA9, 0x1E)) + call(0x22, W.WAIT))   # 0C 1E 01
+        put(r.rom, 0x069200, bytes((0xA9, 0x1E)) + call(0x22, W.JINGLE))               # 01 1E: 변수 0
+        rows, bad = r.check()
+        self.assertEqual(Rom.row(rows, 0x069002)[0][2], '판정 불가')
+        self.assertTrue(any('06:9002' in p and 'E0' in p for p in bad))
+        self.assertEqual(Rom.row(rows, 0x069106)[0][2], '끝남')
+        self.assertEqual(Rom.row(rows, 0x069202)[0][2], '되풀이')
+        self.assertEqual(W.loop_table(bytes(r.rom))[0x1E], 0)
 
     def test_chained_front_loops(self):
         r = Rom()
@@ -124,6 +159,13 @@ class Sites(unittest.TestCase):
         put(r.rom, 0x069000, bytes((0xA5, 0x03)) + call(0x22, W.WAIT))
         _, bad = r.check()
         self.assertTrue(any(p.startswith('06:9002:') and 'INDIRECT' in p for p in bad))
+
+    def test_guard_table_tail_is_checked(self):
+        r = Rom()
+        r.table()
+        put(r.rom, P.LOOP_TABLE + 0xC8, b'\x01')
+        _, bad = W.check(bytes(r.rom), bytes(SIZE))
+        self.assertTrue(any('가드 표가 롬 시퀀스와 다른 곡 C8' in p for p in bad))
 
     def test_stale_guard_table_fails(self):
         r = Rom()

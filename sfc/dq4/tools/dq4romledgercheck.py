@@ -466,10 +466,7 @@ def run(ledger, rom, dq5, allow_text, allow_missing=False):
         fails += [f'{name}: {p}' for p in bad]
     summary, bad = inv_song_wait(rom, dq5, stages)
     report['invariants']['song_wait'] = {'summary': summary, 'problems': bad}
-    if allow_missing and 'sound' in missing:
-        warnings += [f'song_wait: {p}' for p in bad]
-    else:
-        fails += [f'song_wait: {p}' for p in bad]
+    fails += [f'song_wait: {p}' for p in bad]
     summary, bad = inv_hooks(rom, dq5, stages)
     report['invariants']['hooks'] = {'summary': summary, 'problems': bad}
     fails += [f'hooks: {p}' for p in bad]

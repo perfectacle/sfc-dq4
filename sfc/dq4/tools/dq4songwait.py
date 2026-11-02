@@ -7,8 +7,8 @@ sfc/dq4/docs/dq4-sound-port-format.md 「곡 끝을 기다리는 자리」.
 
   uv run --locked python sfc/dq4/tools/dq4songwait.py --rom work/ch1/dq4-ch1-full.sfc
 
-곡이 되풀이하는지는 롬의 시퀀스(뱅크 70 재배치 표, 없으면 원래 시퀀스 묶음)를 트랙마다 따라가 본다. 판정:
-  - 즉값(또는 표)으로 곡을 주는 자리는 그 곡이 끝나야 한다(효과음도)
+곡이 되풀이하는지는 롬의 시퀀스(뱅크 70 재배치 표, 없으면 원래 시퀀스 묶음)를 트랙마다 상태로 펼쳐 본다(classify). 판정:
+  - 즉값(또는 표)으로 곡을 주는 자리는 그 곡이 끝나야 한다(효과음도). 갈래에 따라 갈리는 곡(판정 불가)도 실패
   - 곡 번호가 즉값이 아닌 자리(INDIRECT)는 24:FF0F 의 반복 곡 가드(dq4soundpatch.wait_guard_code)가 있고 가드의
     표가 롬 시퀀스와 맞아야 한다. 가드는 되풀이하는 곡이면 기다리지 않고 돌아오므로 어떤 곡이 와도 멈추지 않는다
   - 입구를 부르는 바이트(JSR·JMP·JSL·JML)는 모두 어느 자리로 분류되어야 한다
@@ -33,6 +33,7 @@ INDIRECT = {
     0x12F354: 'LDA $1E73 / CMP #$054C 가 같은 갈래라 A 낮은 바이트는 4C 로 보임(BRK 0B·19·9C 가 A 를 지키는지 미확인)',
 }
 SONG_LIMIT = 0x64
+TABLE_SIZE = 0x100
 # 원본 DQ5 의 기다림 자리(부르는 바이트 자리 → (곡, 곡을 주는 LDA 자리), 곡 None 은 INDIRECT). 원본 롬 훑기와 같은지 불변식이 본다.
 # 포팅이 기다리는 곡은 여기에 dq4sound-game.args 의 --song-call 을 더한 것과 PORT_SONGS(단위 테스트가 대응표와 견줌)
 DQ5_SITES = {
@@ -200,41 +201,115 @@ def sequence(rom, n):
     return body(r, a, ln)
 
 
-def seq_loops(seq, f7_args=0):
-    """트랙 가운데 끝(FF)에 닿지 않고 무조건 점프(EA)로 되도는 것이 있으면 True. 조건 갈래(if_flag E0, 횟수 F5)는
-    지나간다고 본다. f7_args 는 F7 의 인자 수(나눈 곡 처리기가 있으면 2, DQ5 는 0)."""
+BRANCHES = (0xDB, 0xDC, 0xE0, 0xF4, 0xF5)       # 카운터 되풀이(DB·DC·F4·F5)와 곡 변수 갈래(E0)
+
+
+def classify(seq, f7_args=0, flag=None):
+    """'끝남'·'되풀이'·'판정 불가'. 트랙마다 (pc, 부르기 스택, 카운터 1·2) 상태를 모두 펼쳐 본다. 카운터 되풀이는
+    드라이버처럼 세고(dq5song.play 와 같은 셈), if_flag(E0)는 곡 변수를 모르므로 두 갈래를 모두 따라간다.
+    flag 를 주면(명령 0C n X 의 X, 스크립트 00~14 는 곡 변수를 X 로 둠) 첫 음 전까지 곡 변수가 flag, 그 뒤 0 이라 보고
+    E0 을 그 값으로 가른다(드라이버는 if_flag 를 읽은 틱이 끝나면 변수를 0 으로 돌림).
+    끝(FF)에만 닿으면 끝남, 끝에 닿는 길이 없으면 되풀이, 둘 다 있으면 판정 불가. 한 트랙이라도 되풀이하면 곡은
+    되풀이, 판정 불가인 트랙이 있으면(되풀이하는 트랙 없이) 판정 불가. f7_args 는 F7 의 인자 수(나눈 곡 처리기가
+    있으면 2, DQ5 는 0)."""
+    from dq5song import header, step
+    if len(seq) < 2:
+        return '끝남'
+    verdicts = []
+    for start in header(seq)[1]:
+        def succ(state):
+            pc, stack, c1, c2, var = state
+            if not 0 <= pc < len(seq) or seq[pc] == 0xFF:
+                return None
+            b = seq[pc]
+            if b == 0xF7:
+                return [(pc + 1 + f7_args, stack, c1, c2, var)]
+            nxt, _, target, flow = step(seq, pc)
+            if b < 0xA0:
+                return [(nxt, stack, c1, c2, None if var is None else 0)]
+            if b == 0xF8:
+                return [(target, stack + (nxt,), c1, c2, var)]
+            if flow == 'ret':
+                return [(stack[-1], stack[:-1], c1, c2, var) if stack else (nxt, stack, c1, c2, var)]
+            if b == 0xEA:
+                return [(target, stack, c1, c2, var)]
+            if b == 0xDC:
+                c1 = (c1 or 2) - 1
+                return [(target if c1 else nxt, stack, c1, c2, var)]
+            if b == 0xDB:
+                return [(target if c1 else nxt, stack, c1, c2, var)]
+            if b in (0xF4, 0xF5):
+                c2 = (c2 or (2 if b == 0xF4 else seq[pc + 1])) - 1
+                return [(target if c2 else nxt, stack, c1, c2, var)]
+            if b == 0xE0:
+                if var is None:
+                    return [(target, stack, c1, c2, var), (nxt, stack, c1, c2, var)]
+                return [(target if seq[pc + 3] == var else nxt, stack, c1, c2, var)]
+            return [(nxt, stack, c1, c2, var)]
+
+        ends, cycle = False, False
+        color, todo = {}, [((start, (), 0, 0, flag), False)]
+        while todo:
+            state, done = todo.pop()
+            if done:
+                color[state] = 2
+                continue
+            if color.get(state) == 2:
+                continue
+            color[state] = 1
+            nxt = succ(state)
+            if nxt is None:
+                ends = True
+                color[state] = 2
+                continue
+            todo.append((state, True))
+            for n in nxt:
+                c = color.get(n)
+                if c == 1:
+                    cycle = True
+                elif c is None:
+                    todo.append((n, False))
+        verdicts.append('판정 불가' if ends and cycle else '되풀이' if cycle else '끝남')
+    if '되풀이' in verdicts:
+        return '되풀이'
+    return '판정 불가' if '판정 불가' in verdicts else '끝남'
+
+
+def has_branches(seq, f7_args=0):
+    """시퀀스가 카운터 되풀이·곡 변수 갈래 명령을 쓰는지(닿는 바이트만)."""
     from dq5song import header, step
     if len(seq) < 2:
         return False
     for pc in header(seq)[1]:
-        stack, seen = (), set()
-        while (pc, stack) not in seen:
-            seen.add((pc, stack))
-            if not 0 <= pc < len(seq):
-                break
-            if seq[pc] == 0xF7:
-                pc += 1 + f7_args
+        seen = set()
+        todo = [pc]
+        while todo:
+            pc = todo.pop()
+            if pc in seen or not 0 <= pc < len(seq) or seq[pc] == 0xFF:
                 continue
+            seen.add(pc)
+            if seq[pc] == 0xF7:
+                todo.append(pc + 1 + f7_args)
+                continue
+            if seq[pc] in BRANCHES:
+                return True
             nxt, _, target, flow = step(seq, pc)
-            if flow == 'end':
-                break
-            if seq[pc] == 0xF8:
-                stack, pc = stack + (nxt,), target
-            elif flow == 'ret':
-                pc, stack = (stack[-1], stack[:-1]) if stack else (nxt, stack)
-            elif flow == 'jump':
-                pc = target
-            else:
-                pc = nxt
-        else:
-            return True
+            if flow != 'ret':
+                todo.append(target if seq[pc] == 0xEA else nxt)
+            if target is not None and seq[pc] != 0xEA:
+                todo.append(target)
     return False
 
 
-def loop_table(rom):
-    """곡 번호 0~63 마다 되풀이하면 1. 나눈 곡의 앞부분(본체가 오기를 기다리며 되돎)도 1."""
+def verdicts(rom):
+    """곡 번호 0~63 의 판정. 나눈 곡의 앞부분(본체가 오기를 기다리며 되돎)은 되풀이."""
     pairs, f7 = _chain_pairs(rom), 2 if _has_chain_handler(rom) else 0
-    return bytes(int(bool(pairs[n]) or seq_loops(sequence(rom, n), f7)) for n in range(SONG_LIMIT))
+    return ['되풀이' if pairs[n] else classify(sequence(rom, n), f7) for n in range(SONG_LIMIT)]
+
+
+def loop_table(rom):
+    """가드 표 256칸(인덱스가 A 의 낮은 바이트 전체): 되풀이하는 곡만 1. 판정 불가와 64 이상은 0(원래처럼 기다림)."""
+    return bytes(int(v == '되풀이') for v in verdicts(rom)) + bytes(TABLE_SIZE - SONG_LIMIT)
 
 
 def guard_problems(rom):
@@ -247,9 +322,23 @@ def guard_problems(rom):
     if bytes(rom[g:g + len(code)]) != code:
         return ['반복 곡 가드 코드가 dq4soundpatch.wait_guard_code 와 다름']
     t = offset(patch.LOOP_TABLE)
-    got, want = bytes(rom[t:t + SONG_LIMIT]), loop_table(rom)
-    bad = [f'{n:02X}' for n in range(SONG_LIMIT) if got[n] != want[n]]
+    got, want = bytes(rom[t:t + TABLE_SIZE]), loop_table(rom)
+    bad = [f'{n:02X}' for n in range(TABLE_SIZE) if got[n] != want[n]]
     return [f'가드 표가 롬 시퀀스와 다른 곡 {", ".join(bad)}'] if bad else []
+
+
+def site_flag(rom, song, entry, lda):
+    """그 자리에서 곡 변수가 될 값: 바로 앞 `BRK 16|19 곡 X`(0C 곡 X, X < 15 면 스크립트가 변수를 X 로)면 X,
+    25:FD00 계열(01 곡, 스크립트 없음)이면 0, 모르면 None."""
+    if entry != WAIT:
+        return 0
+    if lda is None:
+        return None
+    o = offset(lda)
+    pre = rom[o - 4:o]
+    if pre[0] == 0x00 and pre[1] in (0x16, 0x19) and pre[2] == song and pre[3] < 0x15:
+        return pre[3]
+    return None
 
 
 def original_sites(dq5):
@@ -264,22 +353,26 @@ def check(rom, dq5):
     bad += loose
     guard = guard_problems(rom)
     bad += guard
-    loops = loop_table(rom)
+    judged = verdicts(rom)
     original = original_sites(dq5)
     if original != DQ5_SITES:
         diff = sorted(set(original.items()) ^ set(DQ5_SITES.items()), key=lambda r: r[0])
         bad.append(f'원본 DQ5 기다림 자리가 DQ5_SITES 와 다름: {[(fmt(a), s) for a, s in diff][:6]}')
-    for at, song, _, _ in found:
+    f7 = 2 if _has_chain_handler(rom) else 0
+    for at, song, entry, lda in found:
         if song is None:
             rows.append((at, None, '곡 모름' if guard else '가드'))
             continue
         if at not in original and at not in TABLES and song not in PORT_SONGS:
             bad.append(f'{fmt(at)}: 포팅 코드가 곡 {song:02X} 를 기다림(dq4songwait.PORT_SONGS 에 없음)')
-        if song < SONG_LIMIT and loops[song]:
-            rows.append((at, song, '되풀이'))
+        flag = site_flag(rom, song, entry, lda)
+        verdict = judged[song] if song >= SONG_LIMIT or judged[song] != '판정 불가' or flag is None \
+            else classify(sequence(rom, song), f7, flag)
+        rows.append((at, song, verdict))
+        if verdict == '되풀이':
             bad.append(f'{fmt(at)}: 곡 {song:02X} 이 끝나기를 기다리는데 그 곡은 되풀이함')
-        else:
-            rows.append((at, song, '끝남'))
+        elif verdict == '판정 불가':
+            bad.append(f'{fmt(at)}: 곡 {song:02X} 이 끝나기를 기다리는데 곡 변수 갈래(E0)에 따라 끝나기도 되풀이하기도 함')
     return rows, bad
 
 

@@ -668,6 +668,7 @@ def inn_jingle_code(base=INN_JINGLE):
 # 24:FF0F(곡 n 이 끝나기를 기다림)는 09 n 의 대답이 7F 가 될 때까지 돈다. 되풀이하는 곡이면 대답이 7F 가 되지 않아
 # 그 자리에서 멈추므로(교회 치료 뒤), 곡 번호마다 되풀이 여부 표(LOOP_TABLE, 롬 시퀀스에서 셈)를 보고 되풀이하는 곡은
 # 기다리지 않고 돌아온다. 곡 번호를 즉값으로 주지 않는 DQ5 자리(dq4songwait.INDIRECT)까지 막는다
+# 표는 A 의 낮은 바이트 전체를 인덱스로 쓰므로 256칸(64 이상은 0)
 WAIT_SITE = 0x24FF0F
 WAIT_ORIGINAL = bytes.fromhex('08 C2 30 22 5E FF 24')
 WAIT_GUARD = CODE + 0x1000

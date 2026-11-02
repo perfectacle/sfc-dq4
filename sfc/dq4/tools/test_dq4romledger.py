@@ -228,7 +228,8 @@ class StagesTest(unittest.TestCase):
         self.assertTrue(any('overture' in f and 'people' in f for f in fails))
         self.assertTrue(any(f.startswith('song_wait:') and '소리 단계가 없어' in f for f in fails))
         report, fails = C.run(ledger, data, dq5, '', allow_missing=True)
-        self.assertFalse(any('단계' in f and '없음' in f for f in fails))
+        self.assertFalse(any(f.startswith('장부에 단계') for f in fails))
+        self.assertTrue(any(f.startswith('song_wait:') and '소리 단계가 없어' in f for f in fails))
         self.assertTrue(any('people' in w for w in report['warnings']))
         self.assertTrue(report['limits'])
 
