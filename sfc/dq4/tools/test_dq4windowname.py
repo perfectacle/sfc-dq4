@@ -149,12 +149,21 @@ class WramTest(unittest.TestCase):
             size = 0xA0 if name == 'wn_stage' else 2
             self.assertFalse(set(range(a, a + size)) & set(self.ANIM14), name)
 
-    def test_moved_block_stays_after_the_battle_text_engine(self):
-        # 7E:A921~ABFF 는 DQ5 장면 770개에서 원래 코드의 접근이 없던 자리이고 앞은 전투 글 엔진(!bm_sfx, 2바이트)이 쓴다
+    # 7E:A9xx·AAxx 에 둔 변수마다 바이트 수(정의 주석의 크기). 없는 이름은 워드
+    SIZES = {'wn_stage': 0xA0, 'wt_ages': 60, 'wt_keys': 60, 'wt_vis': 30, 'wt_kbase': 12, 'wt_klen': 12, 'wt_occ': 13,
+             'wt_dirty': 4, 'wt_xfer': 1, 'wt_stale': 1, 'wt_stale2': 1, 'wt_ecsave': 1, 'wq_defer': 1}
+
+    def test_moved_block_stays_in_the_free_area_without_overlap(self):
+        # 앞은 전투 글 엔진(!bm_sfx 가 마지막, 2바이트), 끝은 7E:AC00
         bm_end = int(re.search(r'^!bm_sfx *= *\$([0-9A-F]{4})', dq4battlemsg.WRAM, re.M).group(1), 16) + 2
-        moved = [define(n) for n in ('wt_ages', 'wt_keys', 'wq_count', 'wq_defer', 'wt_tmp')]
-        self.assertGreaterEqual(min(moved), bm_end)
-        self.assertLessEqual(define('wn_stage') + 0xA0, 0xAC00)
+        parts = sorted((int(v, 16), self.SIZES.get(n, 2), n) for n, v in
+                       re.findall(r'^!(w[a-z_0-9]+) *= *\$(A[0-9A-F]{3})\b', ASM.read_text(), re.M))
+        self.assertGreater(len(parts), 30)
+        for a, size, name in parts:
+            self.assertGreaterEqual(a, bm_end, name)
+            self.assertLessEqual(a + size, 0xAC00, name)
+        for (a, size, name), (b, _, nxt) in zip(parts, parts[1:]):
+            self.assertLessEqual(a + size, b, f'{name} {nxt}')
 
 
 class NmiHookTest(unittest.TestCase):

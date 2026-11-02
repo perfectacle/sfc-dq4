@@ -22,7 +22,7 @@ STATUS_WINDOW = 0x02
 BATTLE_STATUS = (0x17, 0x26, 0x27)
 BATTLE_STATUS_BODY = bytes((0xD1, 0x12, 0x12, 0x12, 0x12))
 LIST_HOOK = 0x04B79B
-NMI_STUB = 0x00FF9E               # 필드 NMI 작업 받침(JSL WqNmiEntry, 이어서 JMP $8926). 00:FF9A 작업의 JML 자리를 넘겨받음
+NMI_STUB = 0x00FF9E               # 필드 NMI 작업 받침(JSL WqNmiEntry, 이어서 JMP $8926). 00:FF9A 작업이 WqNmiFF9A 로 가 비는 자리
 NMI_STUB_END = 0x00FFA5
 # NMI 작업마다 WqNmiEntry 를 거는 자리와 원래 바이트(dq4windowname.asm). 공통 입구 00:887C 는 고치지 않는다
 NMI_SITES = ((0x0087F2, bytes.fromhex('a22689')), (0x00887C, bytes.fromhex('6c4419')),
