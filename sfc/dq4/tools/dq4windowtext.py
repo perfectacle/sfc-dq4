@@ -57,11 +57,15 @@ TACTIC_LINES = (('한방에', '끝내자구'), ('모두', '힘내자'), ('주문
 # 한글이 없는 이름도 필드에서는 가나 칸을 슬롯으로 돌려 써 원래 가나 타일로 찍으면 깨진다. 필드 창에 나오는 물건 표는
 # 원래 가나를 Galmuri9 가나 그림으로 넣고, 창 열 수를 넘는 이름은 더 좁은 Galmuri7 로 그린다. 물건 번호 KANA_LIMIT
 # 이상은 DQ5 물건이 아니라(작전 이름·지명 등) 넣지 않는다. 뱅크가 모자라 주문(3)은 넣지 않는다(한글 없는 주문은 DQ5 전용
-# 주문과 몬스터 행동). 몬스터(4)는 전투에서만 나와 가나 칸이 살아 있다
-KANA_KINDS = (5,)
+# 주문과 몬스터 행동). 몬스터(4)는 필드의 격투장 거는 창(76, 코드 D4)에도 나와 모두 넣고, 그림은 뱅크 MONSTER_BANK 에 둔다
+KANA_KINDS = (5, 4)
+KANA_LIMITS = {5: 0xD8}         # 종류마다 가나 대체할 번호 상한(물건은 dq4itemport.ITEM_COUNT). 없으면 모두
+# 몬스터 이름 그림(한글·가나)을 두는 뱅크. 색인(TEXT_BANK 8000 + 종류 × 200)은 그대로 TEXT_BANK 에 두고 값만 이 뱅크 안
+# 주소다. 216개 가나 이름이 뱅크 TEXT_BANK 의 남은 자리에 들어가지 않아 나눴다(dq4windowname.asm WtFetchPic)
+MONSTER_KIND, MONSTER_BANK, MONSTER_DATA = 4, 0x5D, 0x8000
 # 창 열 수를 넘는 한글 이름을 띄어쓰기를 빼고 다시 재는 종류. 몬스터 목록(창 1B)의 「슬라임 베호마즌」(10열 → 9열)
 SQUEEZE_KINDS = (4,)
-KANA_LIMIT = 0xD8               # dq4itemport.ITEM_COUNT
+KANA_LIMIT = KANA_LIMITS[5]
 NARROW_FONT = 'galmuri7'
 SHIFT = 6                       # render 의 띠(한글 윗줄 = 1줄)를 위 줄 7줄로 내림
 
@@ -524,11 +528,22 @@ def fixed_records(data, font):
     return out, numbers
 
 
-def build(data, font):
-    """뱅크 TEXT_BANK 의 8000~ 에 넣을 바이트와, 종류마다 (이름 수, 한글로 바꾼 수)."""
+def build(data, font, banks=None):
+    """뱅크 TEXT_BANK 의 8000~ 에 넣을 바이트와, 종류마다 (이름 수, 한글로 바꾼 수). banks(dict)를 주면 몬스터 그림은
+    banks[MONSTER_BANK](MONSTER_DATA~ 의 바이트)에 두고 색인은 그 뱅크 안 주소를 가리킨다."""
     index = bytearray(DATA - INDEX)
     body = bytearray()
     report = {}
+    mbody = bytearray()
+    mplaced = {}
+
+    def mplace(blob):
+        if blob not in mplaced:
+            if MONSTER_DATA + len(mbody) + len(blob) > 0x10000:
+                raise ValueError('몬스터 이름 그림이 뱅크 하나를 넘음')
+            mplaced[blob] = MONSTER_DATA + len(mbody)
+            mbody.extend(blob)
+        return mplaced[blob]
     bases = safe_bases(font)
     # 같은 그림(같은 이름·문구)은 한 번만 두고 색인이 함께 가리킨다. 뱅크 하나에 다 넣어야 해서다.
     # 전용 칸 창의 문구는 같은 낱말이 일반 번호로 또 나오므로 고정 문구끼리도 많이 겹친다
@@ -561,7 +576,7 @@ def build(data, font):
         for n, name in enumerate(names):
             ko = by_number.get(n) or korean.get(kana_key(name))
             kana = name and all(0x3041 <= ord(c) <= 0x30FC for c in name)
-            if not ko and kind in KANA_KINDS and n < KANA_LIMIT and kana:
+            if not ko and kind in KANA_KINDS and n < KANA_LIMITS.get(kind, 0x100) and kana:
                 ko = name
             if not ko:
                 continue
@@ -577,7 +592,10 @@ def build(data, font):
                     raise ValueError(f'{ko!r}: {len(cols)}열, 창은 {limit}열')
                 continue
             blob = bytes((len(cols),)) + b''.join(cols)
-            index[kind * 0x200 + n * 2:kind * 0x200 + n * 2 + 2] = place(blob).to_bytes(2, 'little')
+            at = mplace(blob) if banks is not None and kind == MONSTER_KIND else place(blob)
+            index[kind * 0x200 + n * 2:kind * 0x200 + n * 2 + 2] = at.to_bytes(2, 'little')
             done += 1
         report[kind] = (len(names), done)
+    if banks is not None:
+        banks[MONSTER_BANK] = bytes(mbody)
     return bytes(index + body), report

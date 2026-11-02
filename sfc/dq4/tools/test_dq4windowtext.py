@@ -346,6 +346,24 @@ class BuildTests(unittest.TestCase):
         self.assertEqual(self.ptr(out, 5, wt.KANA_LIMIT), 0)
         self.assertEqual(report[5], (256, 1))
 
+    def test_monster_pictures_go_to_their_own_bank(self):
+        # 몬스터(4)는 한글이 없어도 가나 그림을 넣고, banks 를 주면 그림은 MONSTER_BANK 에, 색인은 그 뱅크 안 주소
+        names = [''] * 256
+        names[3] = 'ぬの'
+        names[0xF0] = 'あい'
+        banks = {}
+        with mock.patch.multiple(wt, columns=fake_columns, rom_names=names_for({4: names}),
+                                 adopted=lambda table: {}, numbered_names=lambda: {}), \
+                mock.patch.object(dq4menupatch, 'Font', FakeFont):
+            out, report = wt.build(bytes(16), FakeFont(), banks)
+        mon = banks[wt.MONSTER_BANK]
+        for n, name in ((3, 'ぬの'), (0xF0, 'あい')):
+            ptr = self.ptr(out, 4, n)
+            o = ptr - wt.MONSTER_DATA
+            self.assertGreaterEqual(ptr, wt.MONSTER_DATA)
+            self.assertEqual([mon[o + 1 + 9 * i:o + 10 + 9 * i] for i in range(mon[o])], fake_columns(FakeFont(), name))
+        self.assertEqual(report[4], (256, 2))
+
     def test_long_kana_item_uses_narrow_font(self):
         names = [''] * 256
         names[2] = 'あいうえおかきくけ'          # Galmuri9 로 12열, Galmuri7 로 7열

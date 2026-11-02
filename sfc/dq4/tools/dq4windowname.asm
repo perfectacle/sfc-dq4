@@ -75,6 +75,10 @@ org $04B8F3
 ; 전투 몬스터 목록(E6)이 이름을 아홉 글자 고정으로 찍는 자리
 org $04BC08
     JML WnMonster
+; 격투장 거는 창(76)의 D4(04:B859)가 몬스터 이름 뒤에 빈칸·구별 글자를 붙여 열 글자 고정으로 찍는 자리.
+; REP #$10 / PLY 다음의 LDX #$0000 / LDA #$0A / STA $00 / BRL $B7A3. 코드 갈래가 이미 PHX 를 했다
+org $04B880
+    JML WnArena
 ; 전투 작전 창(E5)이 작전 이름을 넉 자씩 두 줄로 찍는 자리. PHX / SEP #$10 / LDX #$00
 org $04BB70
     JML WnTactic
@@ -746,7 +750,7 @@ org $24A5E9
 !wt_cols  = $1D84           ; 그릴 열 수
 !wt_base  = $1D86           ; 빌린 첫 칸(글자 줄)
 !wt_ubase = $3DCE           ; 위 줄 첫 칸. 가나 항목·전투 슬롯·전용 칸은 글자 줄 열 칸 다음, 필드 캔버스 슬롯은 WtUpperF
-!wt_ptr   = $1D88           ; 그림 자리(뱅크 !wt_bank 안)
+!wt_ptr   = $1D88           ; 그림 자리(뱅크 !wt_bank 안, 몬스터는 !wt_mbank 안). 그리기는 WtFetchPic 이 !wn_stage 로 옮긴 사본을 읽는다
 !wt_len   = $3D5E           ; 원래 문자열 길이($00). $1D8A 에 두면 16비트 쓰기가 지금 곡 번호 $1D8B 를 00 으로 덮음
 !wq_count = $3D62           ; 우리 전송 대기열 항목 수(7E, NMI 가 보내고 0 으로)
 !wq_off   = $3D64           ; 대기열에 다음으로 쓸 자리
@@ -1585,6 +1589,11 @@ WnTilemap:
 WnSpell:
     LDA #$05
     BRA +
+; 04:B880(D4 격투장 몬스터 이름, 열 글자). 한글로 그리면 원래 이름 뒤에 붙이던 구별 글자(A·B, $1005 bit7 이 꺼진
+; 몬스터)는 빠진다
+WnArena:
+    LDA #$0A
+    BRA +
 ; 04:BC08(E6 전투 몬스터 이름, 04:B6A0 의 C9 도 BRL 로 옴). 원래는 REP #$10 / LDX #0 / LDA #9 / STA $00 / BRL $B7A3,
 ; 부른 쪽이 이미 PHX 를 했다.
 WnMonster:
@@ -1634,6 +1643,16 @@ WnText:
     JMP .original
 +
     STA.l $7E0000|!wt_ptr
+    PHA
+    LDX #$0000
+    LDA.b $43
+    AND #$00FF
+    CMP.w #!wt_mkind
+    BNE +
+    INX
++
+    PLA
+    JSR WtFetchPic
     PHB
     SEP #$20
     LDA #$7E
@@ -1653,8 +1672,7 @@ WnText:
     XBA
 +
     STA.w !wn_attr
-    LDX.w !wt_ptr
-    LDA.l !wt_bank<<16,X
+    LDA.l $7E0000|!wn_stage
     AND #$00FF
     STA.w !wt_cols
     ; 아홉 글자 고정(전투 몬스터·도구 창)은 자리가 아홉 칸이라 열 칸 이름(도구 9개)은 가나로 둔다
@@ -2901,6 +2919,47 @@ WtFixLend:
 WtLen:
     dw 8, 14, 20
 
+; 그림(A = 뱅크 안 주소, 0 이면 그대로 돌아감)을 7E:!wn_stage 로 옮긴다. X = 0 이면 뱅크 !wt_bank, 아니면 몬스터 그림
+; 뱅크 !wt_mbank. 몬스터 이름 그림이 !wt_bank 에 다 들어가지 않아 나눴고, 그리기 쪽은 뱅크와 상관없이 사본을 읽는다.
+; A·X·Y·DB 를 지킨다(M = X = 16)
+WtFetchPic:
+    PHB
+    PHY
+    PHX
+    PHA
+    CMP #$0000
+    BEQ .out
+    CPX #$0000
+    BNE .monster
+    TAX
+    LDA.l !wt_bank<<16,X
+    JSR .len
+    LDY.w #!wn_stage
+    db $54,$7E,!wt_bank     ; MVN !wt_bank → 7E
+    BRA .out
+.monster
+    TAX
+    LDA.l !wt_mbank<<16,X
+    JSR .len
+    LDY.w #!wn_stage
+    db $54,$7E,!wt_mbank    ; MVN !wt_mbank → 7E
+.out
+    PLA
+    PLX
+    PLY
+    PLB
+    RTS
+; A = 열 수 바이트 → MVN 횟수(1 + 열 × 9 − 1)
+.len
+    AND #$00FF
+    STA.l $7E0000|!wt_tmp
+    ASL
+    ASL
+    ASL
+    CLC
+    ADC.l $7E0000|!wt_tmp
+    RTS
+
 WtFixedDraw:
     PHB
     STA.l $7E0000|!wt_k
@@ -2916,9 +2975,22 @@ WtNameDraw:
     STA.l $7E0000|!wt_k
     PLA
 .go
+    PHA
+    XBA
+    LSR
+    AND #$0007
+    LDX #$0000
+    CMP.w #!wt_mkind
+    BNE +
+    INX
++
+    PLA
+    PHX
     TAX
     LDA.l (!wt_bank<<16)|$8000,X
     STA.l $7E0000|!wt_ptr
+    PLX
+    JSR WtFetchPic
     PEA $7E7E
     PLB
     PLB
@@ -2938,7 +3010,7 @@ WtNameDraw:
     XBA
 +
     STA.w !wn_attr
-    LDA.l !wt_bank<<16,X
+    LDA.w !wn_stage
     AND #$00FF
     STA.w !wt_cols
     STZ.w !wt_len
@@ -3052,14 +3124,14 @@ WtQueue:
     CLC
     ADC.w !wn_k
     CLC
-    ADC.w !wt_ptr
+    ADC.w #!wn_stage
     CLC
     ADC #$0002              ; 열 수 바이트 + 위 줄 7줄째
     TAX
     LDA #$0008
     STA.w !wn_r
 -
-    LDA.l !wt_bank<<16,X
+    LDA.l $7E0000,X
     SEP #$20
     STA.w !wq_buf,Y
     REP #$20
@@ -3121,11 +3193,11 @@ WtQueue:
     CLC
     ADC.w !wn_k
     CLC
-    ADC.w !wt_ptr
+    ADC.w #!wn_stage
     CLC
     ADC #$0001              ; 열 수 바이트 다음이 위 줄 7줄째
     TAX
-    LDA.l !wt_bank<<16,X
+    LDA.l $7E0000,X
     AND #$00FF
     STA.w !wn_t0
     XBA

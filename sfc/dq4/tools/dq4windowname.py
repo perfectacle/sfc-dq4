@@ -262,7 +262,13 @@ def apply(data, font=None, asar=None):
     cannot = dq4windowtext.FIXED[dq4windowtext.CANNOT_SELL]
     if len(dq4windowtext.columns(font, cannot)) > SHOP_PRICE_COLS:
         raise ValueError(f'「{cannot}」 이 값 칸 {SHOP_PRICE_COLS}열을 넘음')
-    text, _ = dq4windowtext.build(d, font)
+    banks = {}
+    text, _ = dq4windowtext.build(d, font, banks)
+    for bank, blob in banks.items():
+        o = lorom(bank << 16 | dq4windowtext.MONSTER_DATA)
+        if any(d[o:o + len(blob)]):
+            raise ValueError(f'{bank:02X}:{dq4windowtext.MONSTER_DATA:04X} 가 비어 있지 않음')
+        d[o:o + len(blob)] = blob
     records, numbers = dq4windowtext.fixed_records(d, font)
     for o, rec in records:
         d[o:o + len(rec)] = rec
@@ -289,7 +295,8 @@ def apply(data, font=None, asar=None):
     flag = re.search(r'^!flag\s*=\s*\$([0-9A-Fa-f]{6})', (HERE / 'dq4nameentry.asm').read_text(), re.M).group(1)
     defs = (f'!wn_code = ${CODE:06X}\n!wn_hi_base = ${ne.HI_BASE:02X}\n!wn_hi_count = {hi_count}\n'
             f'!wn_glyph_bank = ${ne.GLYPH_BANK:02X}\n!wn_list_prev = ${int.from_bytes(d[o + 1:o + 4], "little"):06X}\n'
-            f'!wn_menu_flag = ${flag}\n!wt_bank = ${dq4windowtext.TEXT_BANK:02X}\n'
+            f'!wn_menu_flag = ${flag}\n!wt_bank = ${dq4windowtext.TEXT_BANK:02X}\n!wt_mbank = ${dq4windowtext.MONSTER_BANK:02X}\n'
+            f'!wt_mkind = {dq4windowtext.MONSTER_KIND}\n'
             f'!wt_prefix_prev = ${int.from_bytes(d[po + 1:po + 4], "little"):06X}\n'
             f'!wt_fixed = ${dq4windowtext.FIXED_PREFIX:02X}\n!wt_fixed_kind = {dq4windowtext.FIXED_KIND}\n!wt_safe = ${dq4windowtext.SAFE:04X}\n'
             f'!wt_tactic = {dq4windowtext.tactic_first()}\n!wt_tactic_count = {len(dq4windowtext.TACTIC_LINES)}\n'
