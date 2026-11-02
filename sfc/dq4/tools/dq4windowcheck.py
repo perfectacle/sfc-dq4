@@ -1,7 +1,7 @@
 """MesenCE 로 창 글자가 깨지거나 메시지 창에 비치는 화면을 찾는다.
 
 형식은 sfc/dq4/docs/dq4-window-text-format.md 「창 글자 깨짐 검사」. 장면마다 정한 프레임에 VRAM 과 슬롯 키·나이
-(7E:3D70·3D14), BG3SC 그림자($0725), NMI 작업($1944)을 덤프해 BG3 타일맵의 칸을 두 규칙으로 본다.
+(dq4windowname.asm 의 !wt_keys·!wt_ages), BG3SC 그림자($0725), NMI 작업($1944)을 덤프해 BG3 타일맵의 칸을 두 규칙으로 본다.
 
   가나: 칸이 가나 타일(010~078)을 가리키는데 그 그림이 롬 가나(04:E528)와 다르고, 우리 슬롯이 그린 자리(키의 글자 줄과
         그 위 줄)가 아니다. 필드에서 가나 칸 슬롯과 겹친 원래 가나 글자다.
@@ -57,8 +57,16 @@ CORNER = 0x08C                      # 창 위 모서리 타일. 오른쪽 모서
 CANVAS = range(0x096, 0x180)
 BUFFER = 0x5000                     # 창 타일맵 버퍼 7E:5000(32 × 32 칸)
 MSG_CANVAS = 0x5800                 # 메시지 캔버스 버퍼 7E:5800(칸 096~ 의 평면 0, 칸마다 8바이트). 평면 1 은 FF
-KEYS, AGES = 0x3D70, 0x3D14         # dq4windowname.asm 의 !wt_keys·!wt_ages(슬롯마다 워드)
-KANA_ENTRIES, KBASE = 12, 0x3DD8    # !wt_nkana, !wt_kbase(첫 칸 12바이트, 이어서 칸 수 12바이트)
+
+
+def asm_define(name):
+    """dq4windowname.asm 의 !name 값(16비트 WRAM 자리)."""
+    text = (HERE / 'dq4windowname.asm').read_text(encoding='utf-8')
+    return int(re.search(rf'^!{name}\s*=\s*\$([0-9A-Fa-f]{{4}})\b', text, re.M).group(1), 16)
+
+
+KEYS, AGES = asm_define('wt_keys'), asm_define('wt_ages')   # 슬롯마다 워드
+KANA_ENTRIES, KBASE = 12, asm_define('wt_kbase')            # !wt_nkana, 첫 칸 12바이트, 이어서 칸 수 12바이트
 SHARED_JP = 0x60B400                # 맵을 불러올 때 7E:1AC0 으로 복사되는 원래 공용 창 레코드(dq4menupatch.SHARED_JP)
 # 위를 보고 명령 창을 연다. 필드는 몇 프레임에 한 번만 입력을 읽어 짧게 누르면 놓친다(놓치면 뒤 입력이 한 칸씩 밀림)
 OPEN = 'b:4,wait:40,up:10,wait:20,a:10,wait:30,'
