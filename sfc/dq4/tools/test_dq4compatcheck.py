@@ -41,6 +41,17 @@ class ProbeLogTest(unittest.TestCase):
         self.assertEqual((got[0x7E201D], got[0x7E201E], got[0x7E201F]), (2, 2, 2))
         self.assertEqual(cc.party_pokes('', bytes(rom)), [])
 
+    def test_party_uses_the_join_record(self):
+        import dq4ch1event as ev
+        rom = bytearray(0x400000)
+        rom[cc.COMPANIONS + 5 * 9:cc.COMPANIONS + 5 * 9 + 9] = bytes((4, 99, 3, 4, 5, 6, 7, 8, 0))
+        record = ev.companion_record(bytes(rom), 5)
+        o = ev.lorom(ev.CODE_AT)
+        rom[o:o + len(record)] = record
+        got = dict(cc.party_pokes('05', bytes(rom)))
+        self.assertEqual(bytes(got[0x7E206A + j] for j in range(42)), record)
+        self.assertEqual(got[0x7E206A + 0x13], 4)      # 최대 레벨 = 처음 레벨
+
     def test_sets_ops(self):
         class Fake:
             def __init__(self):

@@ -174,6 +174,7 @@ class BuildFlowTests(unittest.TestCase):
         from unittest import mock
         import dq4ch1event
         import dq4ch2event
+        import dq4growth
         import dq4josa
         import dq4menupatch
         import dq4msgnames
@@ -220,6 +221,7 @@ class BuildFlowTests(unittest.TestCase):
                     mock.patch.multiple(dq4ch1event, apply=step('ch1event'),
                                         monster_doc=lambda prg: {'format': 'test-monsters', 'prg': len(prg)}), \
                     mock.patch.object(dq4ch2event, 'apply', step('ch2event')), \
+                    mock.patch.object(dq4growth, 'writes', lambda dq5, dq4: []), \
                     mock.patch.object(dq4josa, 'apply', step('josa')), \
                     mock.patch.object(dq4msgnames, 'apply', step('msgnames')), \
                     mock.patch.object(dq4signs, 'apply', step('signs')), \
@@ -250,7 +252,7 @@ class BuildFlowTests(unittest.TestCase):
             'companion-names.dq5patch.json', 'person-names.dq5patch.json', 'zones.dq5patch.json',
             'grids.dq5patch.json', 'rates.dq5patch.json', 'chests.dq5patch.json',
             'newmap-1.dq5patch.json', 'npc.dq5patch.json', 'boss.dq5patch.json', 'boss-monsters.dq5patch.json',
-            'learn.dq5patch.json'])
+            'learn.dq5patch.json', 'growth.dq5patch.json'])
         self.assertEqual(self.applied[0].parent.name, 'env')
         # 그룹 빌드 롬과 견줄 때는 그룹 빌드가 낸 패치만 넘긴다(인물·보스 패치는 그룹 빌드 롬에 없다)
         self.assertEqual([p.name for p in self.verify.call_args.args[2]], names[:22])

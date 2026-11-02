@@ -2,7 +2,8 @@
 이어 하기로 시작하고, 전투 한 판을 WRAM 으로 판정한다. 형식은 sfc/dq4/docs/dq4-battle-scene-format.md.
 
 장면(SCENES): 보통 공격(회심 셈)·중간 수비, 도망·도망칠 수 없는 무리·몬스터 도망, 약초, 호이민의 ホイミ, 레벨업 한 번·두 번,
-전멸, 탑 위 보스(보스 패치 없이). 알려진 문제를 재는 nosong·growth 는 기본 묶음 밖(--scenes 로 고름).
+전멸, 탑 위 보스(보스 패치 없이), 라이안 성장 곡선(FC ライアン 과 견줌). 알려진 문제를 재는 nosong 은 기본 묶음
+밖(--scenes 로 고름).
 - 걸음 전투는 조우 루틴 23:E7C2 를 cheat 로 「무리를 7E:1001~ 에 쓰고 구역 레벨 $100F·무리 플래그 $1000 을 둔 뒤
   carry 를 켜 돌아옴」으로 덮어 탑 39/01 (20,16)에서 아래로 한 걸음 내디뎌 붙인다. 전투가 걸리면 cheat 를 풀어
   롬의 「조우 없음」(dq4ch1walkcheck.NO_ENCOUNTERS)으로 돌아간다.
@@ -61,11 +62,12 @@ HP, MP, AGI, STR, DEF, WIS, LUCK, EXP, MAX_HP, MAX_MP, LEVEL, ITEMS, NEXT = (
     0x02, 0x04, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0E, 0x10, 0x12, 0x16, 0x26)
 # dq5growth.STATS 차례(최대 HP, 최대 MP, ちから, すばやさ, かしこさ, うんのよさ, みのまもり)의 일행 기록 자리
 GROWTH_FIELDS = ((MAX_HP, 2), (MAX_MP, 2), (STR, 1), (AGI, 1), (WIS, 1), (LUCK, 1), (DEF, 1))
+SPELLS = 0x23                     # 일행 기록 +23~+25: 배운 주문 비트
 GOLD = 0x7E2019
 HERB = 0xA1                       # DQ5 やくそう
 HOIMI = 0x27                      # 행동 ホイミ(やくそう 도 이 처리 루틴, dq5-data-format 「물건」)
 FC_HOIMI = 0x29                   # FC 행동 ID ホイミ(fc/dq4/docs/dq4-data-format.md 「HP 회복」)
-FC_RYAN = 6                       # FC 인물 번호 ライアン(dq4data.PARTY)
+GROWTH_TO = 20                    # growth 장면이 오르는 끝 레벨
 NO_ITEM = 0xFF
 TOWER = '39/01,20,16'
 BOSS_CELL = '39/04,46,23'
@@ -350,6 +352,23 @@ def judge_levelup(s, expect):
     down = [k for k, (a, b) in enumerate(zip(was['stats'], hero['stats'])) if b < a]
     if down:
         problems.append(f"능력치가 줆: {was['stats']} → {hero['stats']}")
+    # 손님 호이민은 FC 처럼 레벨이 없다
+    if s['after'].get('party_levels', [])[1:] != s['before'].get('party_levels', [])[1:]:
+        problems.append(f"동료 레벨이 바뀜: {s['before'].get('party_levels')} → {s['after'].get('party_levels')}")
+    return problems
+
+
+def judge_growth(s, expect):
+    """레벨업 판정에 더해, 오른 뒤 능력치·다음 레벨 경험치가 FC ライアン 곡선 기준값과 같은지."""
+    problems = judge_levelup(s, expect)
+    if s.get('end') is None:
+        return problems
+    for name, got, fc in growth_table(s)[1]:
+        if got != fc:
+            problems.append(f'{name} {got}, FC 곡선 {fc}')
+    # FC ライアン 은 주문을 배우지 않는다(dq4ch1event.learn_doc)
+    if s['after']['hero'].get('spells'):
+        problems.append(f"배운 주문 비트 {s['after']['hero']['spells']:06X}")
     return problems
 
 
@@ -399,7 +418,7 @@ def judge_nosong(s, expect):
 JUDGES = {'attack': judge_attack, 'armor': judge_attack, 'flee': judge_flee, 'noflee': judge_noflee,
           'herb': judge_heal, 'spell': judge_heal, 'levelup': judge_levelup, 'levelup2': judge_levelup,
           'lose': judge_lose, 'boss': judge_boss, 'monflee': judge_monflee, 'nosong': judge_nosong,
-          'growth': judge_levelup}
+          'growth': judge_growth}
 
 
 def distribution(summaries):
@@ -472,7 +491,7 @@ def core_key(name):
 SCENES = {
     'attack': {'what': '보통 공격으로 이김(회심 셈, 평균 피해)', 'group': [(0x00, 1)],
                'monsters': {0x00: {'hp': 300, 'defense': 0, 'attack': 0}}, 'hero': {'level': 10}, 'turn': 'attack'},
-    # 공격력 40, 수비 50 → h = 7 이라 보통 피해가 6~8 셋뿐(정확 범위)
+    # 공격력 36(FC 곡선 ちから 34 + ひのきのぼう 2), 수비 50 → h = 5 라 보통 피해가 4~6 셋뿐(정확 범위)
     'armor': {'what': '중간 수비(50)의 몬스터를 공격', 'group': [(0x00, 1)],
               'monsters': {0x00: {'hp': 60, 'defense': 50, 'attack': 0}}, 'hero': {'level': 10}, 'turn': 'attack'},
     'flee': {'what': '도망(성공할 때까지 거듭)', 'group': [(0x00, 2)], 'monsters': {0x00: {'hp': 2000, 'attack': 0}},
@@ -502,21 +521,23 @@ SCENES = {
     # はがねのつるぎ·かわのよろい 를 밑판의 장비 두 칸(+14 = 03)에 둔다
     'boss': {'what': '탑 위 보스(진짜 능력치), 이긴 뒤 레벨업', 'boss': True, 'party': 'hoimin', 'growth': (12, 1),
              'items': [0x0C, 0x48], 'turn': 'attack', 'after_taps': ('a', 20), 'move': 'down'},
-    # 아래 둘은 알려진 문제를 재는 장면이라 기본 묶음(가드)에 넣지 않는다: --scenes 로 고른다
+    # 알려진 문제를 재는 장면이라 기본 묶음(가드)에 넣지 않는다: --scenes 로 고른다
     'nosong': {'what': '새 게임 첫 기록의 맵 곡 건너뛰기 비트를 그대로 두고 이어 함', 'keep_map_skip': True,
                'group': [(0x00, 1)], 'monsters': {0x00: {'hp': 1, 'defense': 0, 'attack': 0}}, 'turn': 'attack'},
-    'growth': {'what': '레벨 1 → 10 을 한 전투에(곡선을 FC ライアン 과 견줌)', 'group': [(0x00, 1)],
-               'monsters': {0x00: {'hp': 1, 'defense': 0, 'attack': 0}}, 'growth': (1, 9), 'turn': 'attack',
-               'limit': 20000, 'finish_limit': 9000},
+    # 1장에서 닿는 레벨(왕의 선물 3000 만으로 1 → 11)을 넘겨 20 까지. 값은 레벨마다 표라 끝 레벨이 같으면 그 사이
+    # 오른 양의 합도 같다
+    'growth': {'what': f'레벨 1 → {GROWTH_TO} 을 한 전투에(곡선을 FC ライアン 과 견줌)', 'group': [(0x00, 1)],
+               'monsters': {0x00: {'hp': 1, 'defense': 0, 'attack': 0}}, 'growth': (1, GROWTH_TO - 1), 'turn': 'attack',
+               'limit': 20000, 'finish_limit': 20000},
 }
-KNOWN_ISSUES = ('nosong', 'growth')
+KNOWN_ISSUES = ('nosong',)
 DEFAULT_SCENES = tuple(n for n in SCENES if n not in KNOWN_ISSUES)
 
 
 def scene_slot(rom_path, rom, scene):
-    """장면의 저장 기록. 레벨은 롬의 성장 곡선 값으로 두어(1.5배 규칙에 걸리지 않게) 판정의 기대값으로는 쓰지 않는다."""
-    import dq5growth
-    from dq5map import Rom
+    """장면의 저장 기록. 레벨은 롬의 성장 곡선 값으로 두어(오르는 양을 줄이는 문턱에 걸리지 않게) 판정의 기대값으로는
+    쓰지 않는다."""
+    import dq4growth
     slot = fx.SaveSlot.new_game(rom_path)
     slot.place = 'batland'
     slot.gold = 1000
@@ -529,21 +550,26 @@ def scene_slot(rom_path, rom, scene):
         extra, _ = wc.setup(wc.SEGMENTS, [s[0] for s in wc.SEGMENTS].index('boss'))
         slot.apply_sets(extra)
     hero = dict(scene.get('hero', {}))
-    rec = dq5growth.record_address(slot.block[0x40])
-    r = Rom(rom)
+    kind = slot.block[0x40]
     level = scene['growth'][0] if 'growth' in scene else hero.pop('level', None)
     if level:
-        stats = dq5growth.stats_at(r, rec, level)
+        stats = dq4growth.stats_at(rom, kind, level)
         for (field, n), v in zip(GROWTH_FIELDS, stats):
             slot._put(HERO + field, v, n)
         slot._put(HERO + HP, stats[0], 2)
         slot._put(HERO + MP, stats[1], 2)
         slot._put(HERO + LEVEL, level)
-        exp = dq5growth.exp_at(r, rec, level)
+        exp = dq4growth.exp_at(rom, kind, level)
         if 'growth' in scene:
-            exp = dq5growth.exp_at(r, rec, level + scene['growth'][1]) - 1
+            exp = dq4growth.exp_at(rom, kind, level + scene['growth'][1]) - 1
         slot._put(HERO + EXP, exp, 3)
-        slot._put(HERO + NEXT, dq5growth.exp_at(r, rec, level + 1), 3)
+        slot._put(HERO + NEXT, dq4growth.exp_at(rom, kind, level + 1), 3)
+    if 'growth' in scene and scene.get('party') == 'hoimin':
+        # 경험치를 동료의 다음 문턱 바로 아래로 두어, 레벨을 막지 않으면 이 전투에서 오르게 한다
+        mate = HERO + RECORD
+        kind, level = slot._get(mate), slot._get(mate + LEVEL)
+        slot._put(mate + EXP, dq4growth.exp_at(rom, kind, level + 1) - 1, 3)
+        slot._put(mate + NEXT, dq4growth.exp_at(rom, kind, level + 1), 3)
     if 'max_hp' in hero:
         slot._put(HERO + MAX_HP, hero['max_hp'], 2)
     if 'hp' in hero:
@@ -571,14 +597,10 @@ def original_hoimi(root=ROOT):
 
 
 def fc_growth(level, root=ROOT):
-    """FC ライアン(인물 6)의 성장 곡선 기준값을 dq5growth.STATS 차례로(최대 HP, 최대 MP, ちから, すばやさ, かしこさ,
-    うんのよさ, みのまもり ← たいりょく)와 그 레벨이 되는 경험치. FC ライアン 은 MP 가 없다(MP 는 0~4번만)."""
-    from kr_patch.fc import ines
-    sys.path.insert(0, str(root / 'fc' / 'dq4' / 'tools'))
-    import dq4data
-    prg = ines.prg((root / 'rom' / 'dq4.nes').read_bytes())
-    c = lambda stat: dq4data.curve(prg, FC_RYAN, stat, level)[0]  # noqa: E731
-    return [c(6), 0, c(1), c(2), c(4), c(5), c(3)], c(0)
+    """FC ライアン 의 곡선 기준값(dq4growth.fc_stats, dq5growth.STATS 차례)과 그 레벨이 되는 경험치."""
+    import dq4growth
+    stats, exp = dq4growth.tables(root / 'rom' / 'dq4.nes')
+    return stats[level], exp[level]
 
 
 def expectations(rom, scene_name, slot):
@@ -685,8 +707,9 @@ class Run:
         rd = self.c.rd
         hero = {'level': rd(HERO + LEVEL), 'hp': rd(HERO + HP, 2), 'max_hp': rd(HERO + MAX_HP, 2), 'mp': rd(HERO + MP, 2),
                 'exp': rd(HERO + EXP, 3), 'next': rd(HERO + NEXT, 3),
-                'stats': [rd(HERO + f, n) for f, n in GROWTH_FIELDS]}
-        return {'f': self.c.n, 'map': '%02X/%02X' % (rd(0x7E00BC), rd(0x7E00BD)), 'cell': [rd(0x7E3020), rd(0x7E3080)],
+                'stats': [rd(HERO + f, n) for f, n in GROWTH_FIELDS], 'spells': rd(HERO + SPELLS, 3)}
+        party = [rd(HERO + k * RECORD + LEVEL) for k in range(max(1, min(rd(0x7E201D), 4)))]
+        return {'party_levels': party, 'f': self.c.n, 'map': '%02X/%02X' % (rd(0x7E00BC), rd(0x7E00BD)), 'cell': [rd(0x7E3020), rd(0x7E3080)],
                 'song': rd(SONG), 'gold': rd(GOLD, 3), 'exp': hero['exp'], 'hero': hero,
                 'items': [rd(HERO + ITEMS + k) for k in range(12)],
                 'flags': sorted(k for k, (a, m) in wc.FLAGS.items() if rd(a) & m)}

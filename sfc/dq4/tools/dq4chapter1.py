@@ -648,6 +648,9 @@ def build(rom, dq5, dq4, work, prologue=True, chapter2=False):
     work.mkdir(parents=True, exist_ok=True)
     (work / 'boss.json').write_text(json.dumps(dq4ch1event.encounter_doc()))
     (work / 'learn.json').write_text(json.dumps(dq4ch1event.learn_doc()))
+    import dq4growth
+    (work / 'growth.dq5patch.json').write_text(json.dumps(
+        {"format": "dq5patch/1", "name": "dq4-growth", "writes": dq4growth.writes(original, dq4)}, ensure_ascii=False))
     (work / 'boss-monsters.json').write_text(json.dumps(dq4ch1event.monster_doc(ines.prg(dq4.read_bytes())),
                                                         ensure_ascii=False))
     # 원래 롬만 읽는 도구는 그룹 빌드와 함께 돌린다
@@ -671,7 +674,7 @@ def build(rom, dq5, dq4, work, prologue=True, chapter2=False):
              '--allow-growth', *new_maps, '-o', work / 'npc.dq5patch.json')
     patches = [work / 'groups' / p for p in (*GROUP_PATCHES, *summary['record_patches'])] + [
         work / 'npc.dq5patch.json', work / 'boss.dq5patch.json', work / 'boss-monsters.dq5patch.json',
-        work / 'learn.dq5patch.json']
+        work / 'learn.dq5patch.json', work / 'growth.dq5patch.json']
     out = bytearray(apply_writes(clear_mirror(rom, original, group_ranges()), original, patches))
     import dq4menupatch
     out = bytearray(dq4chapterbox.apply(out, dq4.read_bytes(), dq4menupatch.Font('galmuri11'), scenes(prologue)))

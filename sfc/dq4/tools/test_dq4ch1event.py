@@ -291,7 +291,7 @@ class NumberTest(unittest.TestCase):
         data[o:o + 9] = bytes((1, 99, 2, 3, 4, 5, 6, 7, 0))
         r = ev.companion_record(bytes(data), ev.HOIMIN_KIND)
         self.assertEqual((r[0], r[0x12], r[0x13], r[7:11], r[2], r[0xE], r[4], r[0x10]),
-                         (0xC5, 1, 99, bytes((2, 3, 4, 5)), 6, 6, 7, 7))
+                         (0xC5, 1, 1, bytes((2, 3, 4, 5)), 6, 6, 7, 7))   # 최대 레벨 = 처음 레벨: 오르지 않음
         code, at = ev.native(bytes(data))
         self.assertEqual(at, ev.native()[1])     # 주소는 롬 자료에 따라 바뀌지 않는다
         self.assertEqual(code[:42], r)

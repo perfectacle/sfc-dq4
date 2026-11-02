@@ -25,6 +25,7 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [docs/dq4-compat-format.md](docs/dq4-compat-format.md): 호환성 검사(높은 뱅크 BRK 목록의 정적 검사, MesenCE 열린 버스 프로브, libretro bsnes·snes9x 1장 걷기)
 - [docs/dq4-savefixture-format.md](docs/dq4-savefixture-format.md): 저장 기록으로 시작하는 검사(SRAM 칸 만들기, 이어 할 자리 `7E:2033`, 저장되지 않는 것, bsnes·snes9x 에 넣기)
 - [docs/dq4-battle-scene-format.md](docs/dq4-battle-scene-format.md): 전투 장면 검사(저장 기록으로 전투 직전에서 시작, 주문·약초·도망·전멸·레벨업·보스, 창 번호 `7E:0A00` 으로 맞춘 입력, 시드별 선제·기습·회심·도망 실패 분포)
+- [docs/dq4-growth-format.md](docs/dq4-growth-format.md): 라이안 성장(DQ5 성장 레코드와 FC 곡선의 능력치 대응, 레벨별 값 표와 훅 세 개, 1레벨 기록, 손님 호이민의 레벨)
 - [docs/dq4-shopscene-format.md](docs/dq4-shopscene-format.md): 가게 장면 검사(이무르 가게 14장면, 창 번호 `$0A00` 으로 따라가는 입력 열, 금화·물건·장비 비트 판정)
 - [docs/dq4-town-scene-format.md](docs/dq4-town-scene-format.md): 여관·교회·저장 칸·낮밤 경계 장면 검사(고르기 창 알아보기, 판정, 알려진 실패)
 - [docs/dq4-prologue-format.md](docs/dq4-prologue-format.md): NDS 서장(지하 검술 수련, 개구리, 신시아의 모샤스, 저녁, 1장으로 넘기기)
@@ -344,3 +345,4 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [2026-11-01-51: 필드 팻말 읽기](journal/2026-11-01-51-field-signs.md)
 - [2026-11-02-01: 바다처럼 보이던 하늘을 단색으로](journal/2026-11-02-01-sky-flat.md)
 - [2026-11-02-02: 교회 치료 뒤 멈춤과 곡 끝을 기다리는 자리](journal/2026-11-02-02-church-song.md)
+- [2026-11-02-03: 라이안을 FC 성장 곡선으로](journal/2026-11-02-03-ryan-growth.md)
