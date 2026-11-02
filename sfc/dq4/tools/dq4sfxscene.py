@@ -824,6 +824,14 @@ def harmless(n):
     return [(base + 1, b'\x00'), (base + 8, lambda v: bytes((v[0] & 0x7F,)))]
 
 
+def fierce(n, attack=60):
+    """몬스터 n 의 공격력을 attack 으로(바이트1, 바이트8 bit7). 주인공 수비력과 상관없이 맞히면 늘 피해가 나게 한다:
+    피해 h 가 0 이하면 0~1 난수라, 대기열 시각이 한 프레임만 밀려도 맞음(37-03)이 빗나감(37-0D)으로 바뀌었다(실측,
+    라이안 みのまもり 13)."""
+    base = MONSTERS + n * 25
+    return [(base + 1, bytes((attack,))), (base + 8, lambda v: bytes((v[0] & 0x7F,)))]
+
+
 def weak(n):
     """몬스터 n 을 HP 1·수비 0 으로(dq4ch1walkcheck.boss_patch 와 같은 바이트)."""
     base = MONSTERS + n * 25
@@ -877,10 +885,11 @@ def scenes(table):
               [attack, (*sfx(weapon_sound(table, 0x00, battle_song)), 'not-dq5'), enemy_hit, (SONG, 0x1F, None), (SONG, 0x21, None)],
               covers=['sfx 37-01', 'sfx 37-04'], sets=['flag=CHAPTER1', NEXT_EXP], warp=TOWER, battle=[(SLIME, 1)],
               pokes=HERO_HP + [(WEAPON, 0x00)], patches=weak(SLIME), inputs=FIGHT + taps(30)),
+        # 첫 주고받기만: 뒤 차례의 회피(37-0D)는 프레임마다 난수가 달라 DSP 를 읽는 실행과 한 프레임 차로 갈렸다
         Scene('battle-trade', '주고받기: 적의 공격 시작(37-02)·우리 편이 맞음(37-03)',
               [attack, enemy_hit, d('enemy-attack'), d('pc-hit')],
               covers=['sfx 37-02', 'sfx 37-03'], warp=TOWER, battle=[(SLIME, 1)], pokes=HERO_HP,
-              patches=strong(SLIME), inputs=FIGHT + taps(20)),
+              patches=strong(SLIME) + fierce(SLIME), inputs=FIGHT + taps(10)),
         Scene('battle-miss', '공격력 0 인 적이 때림: 빗나감(37-0D)', [d('enemy-attack'), d('miss')],
               covers=['sfx 37-0D'], warp=TOWER, battle=[(SLIME, 1)], pokes=HERO_HP, seed=MISS_SEED,
               patches=strong(SLIME) + harmless(SLIME), inputs=FIGHT + taps(MISS_TAPS)),
