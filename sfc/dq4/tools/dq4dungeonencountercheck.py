@@ -14,10 +14,10 @@ step fight (RATES); the field scenes keep the ROM's rates, or the field walk to 
          makes of the bit before and the step's FC cell (dq4encounter.toggle_after), and while it is off the
          zone is FF and no group is picked; a scene whose switch ends off need not fight
   song   00:CEA2 (the map's song request on arrival) gets the LINKS "music" slot, and in a field scene the song
-         playing ($1D8B) on the dungeon's steps is that slot once it has started: each visit (from the arrival's
-         song request) may begin with FF steps, the gap between the field song's stop (1A) and the new song's
-         start, which original DQ5 also walks through on entering its caves and towers, but once the slot plays
-         no step may read anything else, and some step must read it. The start state is built from this ROM
+         playing ($1D8B) on the dungeon's steps is that slot once it has started: every visit (from the arrival's
+         song request) must take at least one step that reads the slot, and only steps before the first of them,
+         within SONG_START_FRAMES of the request, may read FF, the gap between the field song's stop (1A) and the
+         new song's start that original DQ5 also walks through on entering its caves and towers. The start state is built from this ROM
          (dq4freshstate): a state of another build keeps that build's SPC song table (dq4soundstate.lua), and its
          first map's song may not start
 
@@ -69,6 +69,10 @@ LOG = f"7E1001,7E1003,7E1005,7E1007,7E00BC,7E00BD,7E00BE,7E194A,7E1D8B,{FLAG},7E
 SWITCH_ON = f"{dq4wellswitch.FLAG[0] & 0xFFFF:04X}|{dq4wellswitch.FLAG[1]:02X}"
 # $1D8B after the previous song's stop (1A) until the new one starts.
 SONG_STARTING = 0xFF
+# Frames after a map's song request (00:CEA2) in which a step may still read SONG_STARTING. Original DQ5 started the
+# tower song 0A 114 frames after the request walking in from the field (its last FF step 106 frames after it); the
+# port's slowest was 102. The bound keeps about a third over that.
+SONG_START_FRAMES = 150
 EXITS = {"23E9B0": "single", "23EA40": "mixed", "23E98F": "fixed"}
 # Scene -> (how it comes in, walk): ("field", DQ5 group) walks in from the group's first field entrance, ("to", warp
 # TO) warps there, ("stair", warp TO, input) warps beside an FC stair (dq4groupcheck stair_scenes) and takes it.
@@ -80,7 +84,8 @@ SCENES = {
     "39-03-field": (("field", 0x39), SIDEWAYS), "39-00-stair": (("stair", "39/01,30,31", "up:32"), SIDEWAYS),
     "39-01": (("to", "39/01,30,31"), SIDEWAYS), "39-02": (("to", "39/02,50,11"), SIDEWAYS),
     "39-04": (("to", "39/04,10,39"), SIDEWAYS), "39-05": (("to", "39/05,14,31"), UPDOWN),
-    "3A-00-field": (("field", 0x3A), UPDOWN), "3A-00": (("to", "3A/00,8,11"), UPDOWN),
+    # The walk ends on an entry from the field; the last steps inside let that visit hear its song too.
+    "3A-00-field": (("field", 0x3A), UPDOWN + ",wait:90,down:16"), "3A-00": (("to", "3A/00,8,11"), UPDOWN),
     "3B-02-stair": (("stair", "38/01,4,9", "up:32"), "down:48," + SIDEWAYS),
     "3B-02-stair-on": (("stair", "38/01,4,9", "up:32"), "down:48," + SIDEWAYS, "on"),
     "3B-00": (("to", "3B/00,6,43"), SIDEWAYS, "on"), "3B-03": (("to", "3B/03,10,83"), SIDEWAYS, "on"),
@@ -119,17 +124,22 @@ def lines(path):
 
 
 def song_held(visits, song):
-    """True when every visit's $1D8B per step is FF (song not started yet) then `song` to the end, and some step
-    reads `song`. `visits` is one list of step songs per arrival."""
-    heard = False
-    for steps in visits:
-        started = False
-        for got in steps:
-            if got == song:
-                started = heard = True
-            elif started or got != SONG_STARTING:
+    """True when every visit takes a step that reads `song`, the steps before the first such step read SONG_STARTING
+    within SONG_START_FRAMES of the visit's song request, and every step after it reads `song`. `visits` is a list of
+    {"request": frame of 00:CEA2 or None, "steps": [[frame, $1D8B], ...]}."""
+    if not visits:
+        return False
+    for visit in visits:
+        steps = visit["steps"]
+        first = next((i for i, (_, got) in enumerate(steps) if got == song), None)
+        if first is None:
+            return False
+        for frame, got in steps[:first]:
+            if got != SONG_STARTING or visit["request"] is None or frame - visit["request"] > SONG_START_FRAMES:
                 return False
-    return heard
+        if any(got != song for _, got in steps[first:]):
+            return False
+    return True
 
 
 def groups(kv):
@@ -214,7 +224,7 @@ def main():
                                       TEST=test, **extra)
         maps, here = {}, None
         well = {"steps": 0, "on_steps": 0, "flips": [], "bad": []}
-        for _, pc, kv in lines(out / name / "trace.txt"):
+        for frame, pc, kv in lines(out / name / "trace.txt"):
             if not byte(kv, "7E00BE") & 0x80:
                 here = None
                 continue
@@ -253,11 +263,11 @@ def main():
                 seen["zones"].add(byte(kv, "A"))
                 seen["y"].add(byte(kv, "Y"))
                 if not seen["playing"]:
-                    seen["playing"].append([])
-                seen["playing"][-1].append(byte(kv, "7E1D8B"))
+                    seen["playing"].append({"request": None, "steps": []})
+                seen["playing"][-1]["steps"].append([frame, byte(kv, "7E1D8B")])
             elif pc == "00CEA2":
                 seen["songs"].add(byte(kv, "A"))
-                seen["playing"].append([])
+                seen["playing"].append({"request": frame, "steps": []})
             elif group == well_group and not got_on:
                 seen["off_fights"] += 1
             else:
