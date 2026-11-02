@@ -10,10 +10,7 @@ HERE = Path(__file__).resolve().parent
 # 출발 세이브스테이트를 dq4freshstate 로 만들거나 같은 빌드인지 보고, 받은 상태를 장면에 쓰는 검사
 FRESH = ['dq4bg3slotcheck', 'dq4chestcheck', 'dq4dungeonencountercheck', 'dq4environmentromcheck', 'dq4fieldcheck',
          'dq4fieldencountercheck', 'dq4fieldtravelcheck', 'dq4groupcheck', 'dq4namegamecheck', 'dq4npccheck',
-         'dq4signcheck', 'dq4wellresetcheck', 'dq4battlemsgcheck']
-# 손으로 고른 SFC 세이브스테이트를 --state 로 받아 같은 빌드인지 보지 않는 도구. 고치면 expectedFailure 가 깨지므로
-# 그때 목록에서 뺀다(sfc/dq4/todo.md)
-UNCHECKED_STATE = {'dq4doorcheck', 'dq4doorstandcheck'}
+         'dq4signcheck', 'dq4wellresetcheck', 'dq4battlemsgcheck', 'dq4doorcheck', 'dq4doorstandcheck']
 # --state 가 SFC 세이브스테이트가 아닌 도구
 NOT_SFC_STATE = {'dq4sparfx': 'NDS 롬을 DeSmuME 로 돌리는 상태 파일이라 SFC 빌드와 상관없음'}
 FRESH_CALLS = ('resolve', 'make')
@@ -117,6 +114,18 @@ class SameBuildTests(unittest.TestCase):
             fs.resolve(self.state, 'mesence', rom, self.dir / 'out')
         self.assertFalse((self.dir / 'out').exists())
 
+    def test_built_state_is_stamped_with_the_rom(self):
+        rom = self.dir / 'x.sfc'
+        rom.write_bytes(b'new build')
+
+        def build(mesence, r, out):
+            (out / 'hub.mss').write_bytes(b'MSS hub')
+            return out / 'hub.mss'
+        state = fs.resolve(None, 'mesence', rom, self.dir / 'out', build)
+        self.assertEqual(fs.require_same_build(state, b'new build'), state)
+        with self.assertRaises(SystemExit):
+            fs.require_same_build(state, b'old build')
+
     def test_kind_by_header(self):
         rom = bytearray(0x10000)
         self.assertEqual(fs.kind_of(rom), 'ship')
@@ -151,7 +160,7 @@ class NoStaleStateTests(unittest.TestCase):
 
     def test_state_tools_check_the_build(self):
         for path in tools():
-            if path.stem in UNCHECKED_STATE or path.stem in NOT_SFC_STATE or path.stem == 'dq4freshstate':
+            if path.stem in NOT_SFC_STATE or path.stem == 'dq4freshstate':
                 continue
             tree = ast.parse(path.read_text(encoding='utf-8'))
             if state_args(tree):
@@ -166,25 +175,19 @@ class NoStaleStateTests(unittest.TestCase):
                 self.assertEqual(work_state_paths(ast.parse(path.read_text(encoding='utf-8'))), [],
                                  '손으로 고른 work/state 세이브스테이트를 가리킴')
 
+    def test_door_checks_pick_their_start(self):
+        # 문 칸에 서는 검사는 성 마을 출발 상태를 build 로 만들고, 문 열기 검사는 서장 끝(build 없음)에서 떠난다
+        for name, want in (('dq4doorstandcheck', True), ('dq4doorcheck', False)):
+            calls = [n for n in ast.walk(tree_of(name)) if is_fresh_call(n, ('resolve',))]
+            with self.subTest(name):
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(len(calls[0].args), 4)
+                self.assertEqual(any(k.arg == 'build' for k in calls[0].keywords), want)
+
     def test_exception_lists_are_current(self):
-        for name in {*UNCHECKED_STATE, *NOT_SFC_STATE}:
+        for name in NOT_SFC_STATE:
             with self.subTest(name):
                 self.assertTrue(state_args(tree_of(name)), '--state 를 받지 않으면 목록에서 뺀다')
-
-
-def _unchecked(name):
-    @unittest.expectedFailure
-    def test(self):
-        self.assertTrue(any(is_fresh_call(n) for n in ast.walk(tree_of(name))))
-    return test
-
-
-class UncheckedStateTests(unittest.TestCase):
-    """아직 손으로 고른 상태를 받는 도구. 옮기면 expectedFailure 가 깨져 UNCHECKED_STATE 에서 빼라고 알린다."""
-
-
-for _name in sorted(UNCHECKED_STATE):
-    setattr(UncheckedStateTests, f'test_{_name}_checks_the_build', _unchecked(_name))
 
 
 if __name__ == '__main__':
