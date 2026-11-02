@@ -3908,7 +3908,77 @@ WhStash:
     SBC #$02
     STA.w !wq_count
     REP #$20
+    RTS
+; 자리가 모자라 이 이름은 대기열로 바로 올라간다. 같은 칸의 옛 그림이 묶여 있으면 나중에 새 그림을 덮으므로 VRAM 워드를
+; $FFFF 로 바꿔 죽인다(WhNmi 가 건너뜀). NMI 가 꺼져 있어 NMI 안에서만 쓰는 !wq_left·!wq_head·!wq_len 을 빌린다
 .no
+    LDA.l !wh_count
+    BNE +
+    RTS
++
+    PHX
+    LDA.w !wq_off
+    SEC
+    SBC.w !wn_c
+    TAX
+    LDA.w !wq_buf,X
+    STA.w !wq_left          ; 글자 줄 항목의 VRAM 워드
+    LDA.w !wq_buf+2,X
+    JSR WhEntLen
+    STA.w !wq_len
+    TXA
+    CLC
+    ADC.w !wq_len
+    TAX
+    LDA.w !wq_buf,X
+    STA.w !wq_head          ; 위 줄 항목의 VRAM 워드
+    LDA.l !wh_count
+    STA.w !wq_len
+    LDA.l !wh_rd
+    TAX
+-
+    LDA.l !wh_buf,X
+    CMP.w !wq_left
+    BEQ +
+    CMP.w !wq_head
+    BNE ++
++
+    LDA #$FFFF
+    STA.l !wh_buf,X
+++
+    LDA.l !wh_buf+2,X
+    JSR WhEntLen
+    STA.l $7E0000|!wt_tmp
+    TXA
+    CLC
+    ADC.l $7E0000|!wt_tmp
+    TAX
+    DEC.w !wq_len
+    BNE -
+    PLX
+    RTS
+
+; A = 항목 머리 둘째 낱말(낮은 바이트 = 방식, 높은 바이트 = 칸 수) → 항목 바이트 수(4 + 방식 0 이면 칸 × 16, 아니면 칸 × 8). M = 16
+WhEntLen:
+    PHA
+    AND #$FF00
+    LSR
+    LSR
+    LSR
+    LSR
+    LSR
+    STA.l $7E0000|!wt_tmp
+    PLA
+    AND #$00FF
+    BNE +
+    LDA.l $7E0000|!wt_tmp
+    ASL
+    BRA ++
++
+    LDA.l $7E0000|!wt_tmp
+++
+    CLC
+    ADC #$0004
     RTS
 
 ; 게이트(M = 8). 게임이 이 NMI 에 창 타일맵을 보내면($0BEC) 그때까지 쌓인 항목을 다음 NMI 부터 보낸다(!wh_go). 그림을
@@ -3939,7 +4009,8 @@ WhRelease:
     LDA.l !wh_go
     BEQ .noxfer
     ; 창 타일맵과 같은 NMI 에 보내면 2KB 전송이 VBlank 를 넘긴다: 타일맵을 한 번 미루고 보낸다. 이미 한 번 미룬 타일맵이면
-    ; 이번에는 타일맵을 보내고 묶음은 다음 NMI 에(매 프레임 창을 다시 그리면 번갈아 감)
+    ; 이번에는 타일맵을 보내고 묶음은 다음 NMI 에. 다시 미루고 묶음을 먼저 보내면, 보낼 수(!wh_go)에 든 이름 가운데 아직
+    ; 화면에 뜨지 않은 창의 것이 옛 메시지 창에 비쳤다(팔기 목록 324프레임 11칸)
     LDA.l $000BEC
     AND #$00FF
     BEQ .send
@@ -3981,8 +4052,6 @@ WhNmi:
     BCC +
     JMP .stop
 +
-    LDA.l !wh_buf,X
-    STA.l $002116
     LDA.l !wh_buf+2,X       ; 낮은 바이트 = 방식, 높은 바이트 = 칸 수
     STA.w !wq_head
     AND #$FF00
@@ -3992,6 +4061,18 @@ WhNmi:
     LSR
     LSR                     ; 칸 × 8
     STA.w !wq_len
+    LDA.l !wh_buf,X
+    CMP #$FFFF
+    BNE +
+    ; 넘침으로 죽인 항목(WhStash .no): 보내지 않고 넘어간다
+    LDA.w !wq_head
+    AND #$00FF
+    BNE ++
+    ASL.w !wq_len
+++
+    JMP .next
++
+    STA.l $002116
     TXA
     CLC
     ADC.w #(!wh_buf&$FFFF)+4
