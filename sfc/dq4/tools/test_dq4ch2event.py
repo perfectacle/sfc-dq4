@@ -39,6 +39,7 @@ class RecordTest(unittest.TestCase):
         self.assertEqual(r[0x14], 0x01)
         self.assertEqual(r[0x16:0x22], bytes((ev.SILK_ROBE,)) + b'\xff' * 11)
         self.assertEqual(r[0x23:0x26], bytes(3))
+        self.assertEqual(r[0x26:0x29], (16).to_bytes(3, 'little'))   # FC ひめ 레벨 2 경험치
 
     def test_name_is_eight_bytes(self):
         b = ev.name_bytes(ev.ALENA_NAME)

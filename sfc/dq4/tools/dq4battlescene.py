@@ -364,10 +364,10 @@ def judge_growth(s, expect):
     problems = judge_levelup(s, expect)
     if s.get('end') is None:
         return problems
-    for name, got, fc in growth_table(s)[1]:
+    for name, got, fc in growth_table(s, expect)[1]:
         if got != fc:
-            problems.append(f'{name} {got}, FC 곡선 {fc}')
-    # FC ライアン 은 주문을 배우지 않는다(dq4ch1event.learn_doc)
+            problems.append(f'{name} {got}, FC {fc}')
+    # FC ライアン·アリーナ 는 주문을 배우지 않는다(dq4ch1event.learn_doc)
     if s['after']['hero'].get('spells'):
         problems.append(f"배운 주문 비트 {s['after']['hero']['spells']:06X}")
     return problems
@@ -421,7 +421,7 @@ def judge_nosong(s, expect):
 JUDGES = {'attack': judge_attack, 'armor': judge_attack, 'flee': judge_flee, 'noflee': judge_noflee,
           'herb': judge_heal, 'spell': judge_heal, 'levelup': judge_levelup, 'levelup2': judge_levelup,
           'lose': judge_lose, 'boss': judge_boss, 'monflee': judge_monflee, 'nosong': judge_nosong,
-          'growth': judge_growth}
+          'growth': judge_growth, 'growth2': judge_growth}
 
 
 def distribution(summaries):
@@ -529,9 +529,13 @@ SCENES = {
                'group': [(0x00, 1)], 'monsters': {0x00: {'hp': 1, 'defense': 0, 'attack': 0}}, 'turn': 'attack'},
     # 1장에서 닿는 레벨(왕의 선물 3000 만으로 1 → 11)을 넘겨 20 까지. 값은 레벨마다 표라 끝 레벨이 같으면 그 사이
     # 오른 양의 합도 같다
-    'growth': {'what': f'레벨 1 → {GROWTH_TO} 을 한 전투에(곡선을 FC ライアン 과 견줌)', 'group': [(0x00, 1)],
+    'growth': {'what': f'레벨 1 → {GROWTH_TO} 을 한 전투에(FC ライアン 실측 값과 견줌)', 'group': [(0x00, 1)],
                'monsters': {0x00: {'hp': 1, 'defense': 0, 'attack': 0}}, 'growth': (1, GROWTH_TO - 1), 'turn': 'attack',
                'limit': 20000, 'finish_limit': 20000},
+    # 2장 flag 를 켜 아리나 표를 고르게 한다(같은 사람 0 기록). 원작 실측 상수가 없어 FC 곡선 표와 견줌
+    'growth2': {'what': f'2장 flag 로 레벨 1 → {GROWTH_TO}(FC アリーナ 곡선과 견줌)', 'group': [(0x00, 1)],
+                'monsters': {0x00: {'hp': 1, 'defense': 0, 'attack': 0}}, 'growth': (1, GROWTH_TO - 1), 'turn': 'attack',
+                'limit': 20000, 'finish_limit': 20000, 'chapter': 1},
 }
 # 알려진 문제를 재는 장면이라 기본 묶음(가드)에 넣지 않는다: --scenes 로 고른다
 KNOWN_ISSUES = ()
@@ -552,21 +556,26 @@ def scene_slot(rom_path, rom, scene):
     if scene.get('boss'):
         extra, _ = wc.setup(wc.SEGMENTS, [s[0] for s in wc.SEGMENTS].index('boss'))
         slot.apply_sets(extra)
+    chapter = scene.get('chapter', 0)
+    if chapter:
+        slot.flag('CHAPTER2')
     hero = dict(scene.get('hero', {}))
     kind = slot.block[0x40]
     level = scene['growth'][0] if 'growth' in scene else hero.pop('level', None)
     if level:
-        stats = dq4growth.stats_at(rom, kind, level)
-        for (field, n), v in zip(GROWTH_FIELDS, stats):
-            slot._put(HERO + field, v, n)
-        slot._put(HERO + HP, stats[0], 2)
+        stats = dq4growth.stats_at(rom, kind, level, chapter)
+        # 1장 레벨 1 은 새 게임 기록(롬의 1레벨 기록, 최대 HP 는 곡선이 아닌 FC 장 시작 표) 그대로 둔다
+        if (level, chapter) != (1, 0):
+            for (field, n), v in zip(GROWTH_FIELDS, stats):
+                slot._put(HERO + field, v, n)
+            slot._put(HERO + HP, stats[0], 2)
         slot._put(HERO + MP, stats[1], 2)
         slot._put(HERO + LEVEL, level)
-        exp = dq4growth.exp_at(rom, kind, level)
+        exp = dq4growth.exp_at(rom, kind, level, chapter)
         if 'growth' in scene:
-            exp = dq4growth.exp_at(rom, kind, level + scene['growth'][1]) - 1
+            exp = dq4growth.exp_at(rom, kind, level + scene['growth'][1], chapter) - 1
         slot._put(HERO + EXP, exp, 3)
-        slot._put(HERO + NEXT, dq4growth.exp_at(rom, kind, level + 1), 3)
+        slot._put(HERO + NEXT, dq4growth.exp_at(rom, kind, level + 1, chapter), 3)
     if 'growth' in scene and scene.get('party') == 'hoimin':
         # 경험치를 동료의 다음 문턱 바로 아래로 두어, 레벨을 막지 않으면 이 전투에서 오르게 한다
         mate = HERO + RECORD
@@ -599,11 +608,14 @@ def original_hoimi(root=ROOT):
     return tuple(dq5), dq5spell.cost(r, HOIMI)[0]
 
 
-def fc_growth(level, root=ROOT):
-    """FC ライアン 의 곡선 기준값(dq4growth.fc_stats, dq5growth.STATS 차례)과 그 레벨이 되는 경험치."""
+def growth_expect(scene_name, level, root=ROOT):
+    """growth 장면이 오른 뒤의 기대값(dq5growth.STATS 차례 능력치, 다음 레벨 경험치). 1장은 FC 롬을 돌려 잰 상수
+    (dq4growth.RYAN_MEASURED), 2장은 실측 상수가 없어 FC アリーナ 곡선 표."""
     import dq4growth
-    stats, exp = dq4growth.tables(root / 'rom' / 'dq4.nes')
-    return stats[level], exp[level]
+    if SCENES[scene_name].get('chapter'):
+        stats, exp = dq4growth.tables(root / 'rom' / 'dq4.nes', dq4growth.FC_ALENA)
+        return stats[level], exp[level + 1]
+    return dq4growth.RYAN_MEASURED[level]
 
 
 def expectations(rom, scene_name, slot):
@@ -616,6 +628,8 @@ def expectations(rom, scene_name, slot):
     exp['exp'] = dq4balance.reward(sum(vals[n]['exp'] * c for n, c in group))
     if 'growth' in scene:
         exp['level'] = sum(scene['growth'])
+    if scene_name in ('growth', 'growth2'):
+        exp['curve'] = growth_expect(scene_name, exp['level'])
     if 'finish_limit' in scene:
         exp['finish_limit'] = scene['finish_limit']
     if scene_name in ('herb', 'spell'):
@@ -635,12 +649,11 @@ def expectations(rom, scene_name, slot):
     return exp
 
 
-def growth_table(summary):
-    """growth 장면 한 판: 이 롬의 라이안 능력치·다음 경험치와 FC ライアン 곡선 기준값을 견준 줄들."""
+def growth_table(summary, expect):
+    """growth 장면 한 판: 이 롬의 능력치·다음 경험치와 기대값(growth_expect)을 견준 줄들."""
     hero = summary['after']['hero']
     level = hero['level']
-    fc, _ = fc_growth(level)
-    _, fc_next = fc_growth(level + 1)
+    fc, fc_next = expect['curve']
     names = ('최대HP', '최대MP', 'ちから', 'すばやさ', 'かしこさ', 'うんのよさ', 'みのまもり(FC たいりょく)')
     rows = [(n, a, b) for n, a, b in zip(names, hero['stats'], fc)]
     rows.append(('다음 레벨 경험치', hero['next'], fc_next))
@@ -1010,13 +1023,13 @@ def main():
         if bad:
             rows.append({'scene': u['scene'], 'core': u['core'], 'seed': 'all', 'status': 'failed', 'problems': bad,
                          'battle_frames': None, 'turns': None, 'seconds': None, 'digests': None})
-        if u['scene'] == 'growth':
-            growth[core] = [growth_table(r) for r in u['results'] if r.get('after')]
+        if u['scene'] in ('growth', 'growth2'):
+            growth[f"{u['scene']} {core}"] = [growth_table(r, u['expect']) for r in u['results'] if r.get('after')]
     for line in dict.fromkeys(skipped):
         print(f'분포 검사 건너뜀: {line}', file=sys.stderr)
     for core, tables in growth.items():
         for level, table in tables[:1]:
-            print(f'growth {core}: 레벨 {level}, 이 롬 / FC ライアン 곡선')
+            print(f'{core}: 레벨 {level}, 이 롬 / FC')
             for name, got, fc in table:
                 print(f"  {name}: {got} / {fc}{'' if got == fc else '  다름'}")
     ok = all(r['status'] == 'passed' for r in rows)

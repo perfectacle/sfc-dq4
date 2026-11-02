@@ -94,7 +94,8 @@ MORNING = 0x0050
 ALENA_NAME = '아리나'
 # FC 1장 시작 기록 7(ひめ): HP 16, MP 0, ちから 12, すばやさ 7, たいりょく 8, かしこさ 4, うんのよさ 1, Eきぬのローブ.
 # DQ5 기록 +6 이 すばやさ, +7~+A 가 ちから·みのまもり·かしこさ·うんのよさ. たいりょく 는 1장처럼 みのまもり 자리에 둔다
-ALENA_STATS = {'hp': 16, 'mp': 0, 'agility': 7, 'stats': (12, 8, 4, 1)}
+# 다음 레벨 경험치 16 은 FC ひめ 경험치 곡선의 레벨 2(fc/dq4/docs/dq4-data-format.md 「성장 곡선」)
+ALENA_STATS = {'hp': 16, 'mp': 0, 'agility': 7, 'stats': (12, 8, 4, 1), 'next': 16}
 SILK_ROBE = 0x62               # DQ5 きぬのローブ
 GOLD = 100
 # 두 사람은 DQ5 사람 기록을 빌린다(인물 번호가 이름 표 0·그림 표를 고름, 이름은 dq4groupbuild.PERSON_NAMES).
@@ -118,6 +119,8 @@ def level_one(template, s, items):
     r[0x14:0x16] = ((1 << len(items)) - 1).to_bytes(2, 'little')
     r[0x16:0x22] = bytes(items) + b'\xff' * (12 - len(items))
     r[0x23:0x26] = bytes(3)
+    if 'next' in s:
+        r[0x26:0x29] = s['next'].to_bytes(3, 'little')
     return bytes(r)
 
 
