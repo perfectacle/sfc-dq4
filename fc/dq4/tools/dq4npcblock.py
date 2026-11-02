@@ -77,6 +77,38 @@ for _c in range(0x12, 0x21):
 STAY = {0x0D, 0x2A, 0x2B, 0x2D, 0x2F}         # 포인터를 넘기지 않고 같은 명령을 되풀이
 JUMPS = {0x80, 0x83, 0x84}                    # 다음 바이트로 이어지지 않음(81 은 횟수가 끝나면 이어짐)
 
+# 쉬지 않고 바로 다음 명령으로 이어 가는 명령(82 는 횟수만 두고 이어 감)
+GO_ON = {0x0F, 0x10, 0x11, *range(0x12, 0x21), 0x23, 0x24, 0x25, 0x27, 0x28, 0x29, 0x2C, 0x30, 0x82}
+HIDE = {0x07, 0x08, 0x09, 0x0A}
+
+
+def record_block(rec, night=False):
+    """인물 레코드 바이트(dq4map.records_at)에서 그 시간대의 블록 본문. 낮은 F bit4, 밤은 F bit3 의 블록."""
+    f, n = rec[0], 7
+    if f & 0x10 and f & 0x08:
+        n += (0 if f & 1 else 1) + (0 if f & 2 else 1) + (0 if f & 4 else 2)
+    for bit in (0x10, 0x08):
+        if f & bit:
+            ln = rec[n]
+            if bit == (0x08 if night else 0x10):
+                return rec[n + 1:n + 1 + ln]
+            n += 1 + ln
+    return b''
+
+
+def hidden_on_entry(rec, night=False):
+    """맵에 들어설 때 블록이 쉬기 전에 숨기는 인물: 이어 가는 명령만 지나 첫 쉬는 명령이 숨기기(07~0A)면 참.
+    그 인물은 이벤트가 0B·0C 로 드러낼 때까지 보이지 않고 막지도 않는다."""
+    block, p = record_block(rec, night), 0
+    while p < len(block):
+        c = block[p]
+        if c in HIDE:
+            return True
+        if c not in GO_ON:
+            return False
+        p += CMDS[c][0]
+    return False
+
 
 PATTERN_PTR = (0x1C, 0x8014)          # 1F:$DAB9: 워드 둘 = 패턴 본문 시작($804E), 패턴마다 길이 바이트 표($802C)
 PAD_DIRS = ((0x10, '위'), (0x20, '아래'), (0x40, '왼쪽'), (0x80, '오른쪽'))

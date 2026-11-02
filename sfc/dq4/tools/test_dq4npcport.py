@@ -149,5 +149,47 @@ class PortTest(unittest.TestCase):
         self.assertTrue(report and all(not people for people in report.values()))
 
 
+@unittest.skipUnless(DQ4.is_file() and DQ5.is_file(), "local source ROMs not present")
+class HiddenPeopleTest(unittest.TestCase):
+    def test_people_fc_hides_on_entry_are_not_ported(self):
+        # エンドール's colosseum stands (FC 04/07): six records hide at once and stay hidden. Ported as wanderers
+        # they would walk onto the stair (22,11), the only way down to 04/0E.
+        _, _, report = port.port(str(DQ5), str(DQ4))
+        stands = {(0x15, 0x09), (0x16, 0x09), (0x17, 0x0A), (0x17, 0x0B), (0x16, 0x0C), (0x15, 0x0C)}
+        self.assertFalse(stands & {(p["x"], p["y"]) for p in report["40/07"] if not p["night"]})
+        self.assertTrue(report["40/07"])
+
+
+@unittest.skipUnless(DQ4.is_file() and DQ5.is_file(), "local source ROMs not present")
+class SleeperTalkTest(unittest.TestCase):
+    """A sleeper lies half a block right and up of its FC cell, so DQ5 answers only from beside the bed's right
+    block. Every sleeper must still have a free walkable FC cell to talk from, and dq4npccheck must talk from it."""
+
+    def test_every_sleeper_can_be_talked_to(self):
+        import dq4block
+        import dq4npccheck
+        from dq4groupbuild import cell, fc_map
+        from kr_patch.fc import ines
+        prg = ines.prg(DQ4.read_bytes())
+        _, _, report = port.port(str(DQ5), str(DQ4))
+        sleepers = 0
+        for m, people in report.items():
+            if "/" not in m:
+                continue
+            group, number = (int(v, 16) for v in m.split("/"))
+            for p in people:
+                d = p["dq5"]
+                if (d["x"], d["y"]) == cell(p["x"], p["y"]):
+                    self.assertEqual(dq4npccheck.talk_cell(p), (p["x"], p["y"]))
+                    continue
+                sleepers += 1
+                self.assertEqual((d["x"], d["y"]), (2 * p["x"] + 1, 2 * p["y"]), (m, p))
+                self.assertEqual(dq4npccheck.talk_cell(p), (p["x"] + 1, p["y"]))
+                source = dq4block.Map(prg, *fc_map(prg, group, number))
+                now = {(q["x"], q["y"]) for q in people if q["night"] == p["night"]}
+                self.assertIsNotNone(dq4npccheck.talk_side(source, p["x"] + 1, p["y"], now), (m, p))
+        self.assertGreater(sleepers, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

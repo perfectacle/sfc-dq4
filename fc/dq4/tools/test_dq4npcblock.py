@@ -102,5 +102,37 @@ class PatternTests(unittest.TestCase):
         self.assertEqual(nb.pad_text(0x05), '멈춤×5')
 
 
+
+class HiddenOnEntryTests(unittest.TestCase):
+    @staticmethod
+    def record(f, day=None, night=None):
+        """머리 7바이트(낮·밤 둘 다면 덧붙은 바이트를 F bit0~2 에 맞춰 둠) + 블록."""
+        head = [f, 0, 0, 0, 0, 5, 6]
+        if f & 0x10 and f & 0x08:
+            head += [0] * ((0 if f & 1 else 1) + (0 if f & 2 else 1) + (0 if f & 4 else 2))
+        for block in (day, night):
+            if block is not None:
+                head += [len(block)] + block
+        return bytes(head)
+
+    def test_hide_before_the_first_rest(self):
+        self.assertTrue(nb.hidden_on_entry(self.record(0x97, day=[0x07, 0x2F])))
+        # 방향·목표·횟수처럼 이어 가는 명령 뒤의 숨기기도 들어설 때 숨김
+        self.assertTrue(nb.hidden_on_entry(self.record(0x97, day=[0x23, 0x82, 0x24, 1, 2, 0x82, 3, 0x08, 0x2F])))
+
+    def test_rest_or_step_first_is_seen(self):
+        self.assertFalse(nb.hidden_on_entry(self.record(0x97, day=[0x2F, 0x07])))
+        self.assertFalse(nb.hidden_on_entry(self.record(0x97, day=[0x03, 0x07])))
+        self.assertFalse(nb.hidden_on_entry(self.record(0x97, day=[])))
+
+    def test_day_and_night_blocks(self):
+        rec = self.record(0x1F, day=[0x2B], night=[0x07, 0x2F])
+        self.assertFalse(nb.hidden_on_entry(rec, night=False))
+        self.assertTrue(nb.hidden_on_entry(rec, night=True))
+        rec = self.record(0x18, day=[0x07], night=[0x2F])
+        self.assertTrue(nb.hidden_on_entry(rec, night=False))
+        self.assertFalse(nb.hidden_on_entry(rec, night=True))
+
+
 if __name__ == '__main__':
     unittest.main()

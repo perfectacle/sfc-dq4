@@ -165,6 +165,15 @@ def talk_side(source, x, y, occupied):
     return None
 
 
+def talk_cell(person):
+    """FC cell the hero faces to talk to a standing person. dq4npcport lays a sleeper half a block right and up
+    (DQ5 cell (2x+1, 2y) instead of cell(x, y) = (2x, 2y+1)). DQ5 answers when the cell two ahead of the hero is
+    the lower right of the sleeper's 2x2, the bed's right block; facing the bed's left block from below or beside
+    it finds nobody (message 129)."""
+    x, y = person["dq5"]["x"], person["dq5"]["y"]
+    return (x + 1) // 2, y // 2
+
+
 # FC people placed where nobody can reach them: (FC group, FC map, x, y). テンペ's three stand on wall blocks, cut off
 # from the town; フレノール's two night people stand below the map (its height is 1B). レイクナバ 16/00 (30x30) has
 # people right of and below the map; エンドール's colosseum stands 04/07 three on the top wall row and one on floor
@@ -249,8 +258,9 @@ def main():
             # People of the other time are not there. A walking person's start cell is the last resort: the hero
             # warps onto it before that person walks off.
             now = [q for q in persons if q["night"] == p["night"]]
-            side = talk_side(source, p["x"], p["y"], {(q["x"], q["y"]) for q in now}) or \
-                talk_side(source, p["x"], p["y"], {(q["x"], q["y"]) for q in now if not q["interval"]})
+            tx, ty = talk_cell(p)
+            side = talk_side(source, tx, ty, {(q["x"], q["y"]) for q in now}) or \
+                talk_side(source, tx, ty, {(q["x"], q["y"]) for q in now if not q["interval"]})
             if side is None and (*fc, p["x"], p["y"]) in STAGED:
                 jobs.append(("staged", f"talk-{m.replace('/', '')}-{i}", m, None, None, p["night"], None))
                 continue

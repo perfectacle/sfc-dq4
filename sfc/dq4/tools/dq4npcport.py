@@ -32,6 +32,7 @@ from dq5hangul import MESSAGES  # noqa: E402
 from dq4environmentrom import GROUPS  # noqa: E402
 from dq4environmentmap import edit_cells, sheet_art  # noqa: E402
 import dq4block  # noqa: E402
+import dq4npcblock  # noqa: E402
 from dq4groupbuild import cell, chapter, fc_map, has_people  # noqa: E402
 import dq4shopport  # noqa: E402
 import dq4prologue  # noqa: E402
@@ -191,6 +192,9 @@ def fc_people(prg, fc_group, number, night, flags=None):
     state = fc_state(night, flags, chapter(fc_group))
     out = []
     for rec in dq4talk.npc_list(prg, fc_group, number, night, ram=state.ram if flags else None):
+        if dq4npcblock.hidden_on_entry(rec, night):
+            # FC hides it before it is ever drawn. Ported, it would be seen, and a wanderer could stand on a stair.
+            continue
         x, y = dq4talk.pos(rec, night)
         step = rec[2] & 0x0F if night else rec[2] >> 4
         # Facing comes from the picture's byte: byte 3, or byte 7 at night when F bit0 is off (1C:$99B3).
