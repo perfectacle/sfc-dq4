@@ -250,6 +250,29 @@ class FixedRecordsRejectTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '제목 03'):
             run(scene(label_w=4))
 
+    def test_name_title_widens_inside_its_window(self):
+        # 「(이름)の どうぐ」 처럼 이름 E0 과 한 칸 코드 E2 사이의 가나도 한글로 바꾸고, 이름 다섯 칸을 넣어 창 너비를 잰다
+        title = b'\xe0' + enc('たて') + b'\xe2'
+        rom = WindowRom(records(label_w=1 + 5 + width('방패') + 1 + 1), shared_records(), {**TITLES, 3: title}, INLINE_TEXT)
+        writes, numbers = run(rom)
+        parts = dict(writes)[lorom(dq5text.WINDOW_TITLES)].split(b'\xff')
+        self.assertEqual(parts[3], b'\xe0' + bytes((wt.FIXED_PREFIX, numbers['たて'])) + b'\xe2')
+
+    def test_name_title_wider_than_its_window(self):
+        title = b'\xe0' + enc('たて') + b'\xe2'
+        rom = WindowRom(records(label_w=1 + 5 + width('방패') + 1), shared_records(), {**TITLES, 3: title}, INLINE_TEXT)
+        with self.assertRaisesRegex(ValueError, '제목 03'):
+            run(rom)
+
+    def test_label_record_longer_than_rom(self):
+        # 한 열짜리 한글 라벨은 빈칸 + 9E k 가 가나 바이트보다 많아 다음 레코드를 덮는다
+        def narrow(font, text):
+            cols = fake_columns(font, text)
+            return cols[:1] if text == '운' else cols
+        with patched(), mock.patch.object(wt, 'columns', narrow), mock.patch.dict(wt.TITLES, {'たてよろい': '창'}), \
+                self.assertRaisesRegex(ValueError, '창 06: 고친 레코드가 원래보다 김'):
+            wt.fixed_records(scene().data, FakeFont())
+
 
 def names_for(kinds):
     return lambda data, kind: kinds.get(kind, [''] * 256)
@@ -369,6 +392,13 @@ class BuildTests(unittest.TestCase):
             self.build({5: names[:count] + [''] * (256 - count)}, adopted=ko, kinds=kinds)
         out, _ = self.build({5: names[:count - 1] + [''] * (257 - count)}, adopted=ko, kinds=kinds)
         self.assertLessEqual(wt.INDEX + len(out), 0x10000)
+
+    def test_far_past_the_bank_is_a_value_error(self):
+        # 그림 자리가 16비트를 넘을 만큼 넘쳐도 색인을 쓰기 전에 멈춘다(OverflowError 가 아니라)
+        names = [chr(0xAC00 + n) for n in range(256)]
+        ko = {n: n * 70 for n in names}
+        with self.assertRaisesRegex(ValueError, '뱅크 하나를 넘음'):
+            self.build({5: names}, adopted=ko, kinds={5: ('아이템', 99, False)})
 
 class DotFont:
     """글자마다 10점 진행, 점 하나를 띠의 y 줄에."""

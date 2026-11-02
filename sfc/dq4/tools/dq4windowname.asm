@@ -752,6 +752,7 @@ org $24A5E9
 !wq_off   = $3D64           ; 대기열에 다음으로 쓸 자리
 !wt_vis   = $3DAC           ; 슬롯마다 1바이트: bit0 = 마지막 창 타일맵 전송 때 보였거나 그 뒤에 그렸음, bit1~7 = 그린 문구 표식
 !wt_xfer  = $3DCA           ; 1바이트: 이번 NMI 에 게임이 보낼 창 타일맵 줄($0BEC 의 bit7·6), NMI 끝에서 WtVis 가 씀
+!wt_stale = $3DCB           ; 1바이트: 다음 NMI 게이트에서 메시지 창에 비치는 슬롯을 찾음(보임이 바뀌었거나 다 못 되돌림)
 !wt_ecsave = $3DCC          ; 1바이트: 창 제목을 그리는 동안 맡겨 둔 $EC
 !wq_rd    = $3D5C           ; NMI 가 다음으로 보낼 항목 자리. VBlank 가 끝나 가면 남은 항목을 다음 NMI 로 넘긴다
 !wq_defer = $3D5A           ; 1바이트: bit7·6 = 다음 NMI 로 미룬 게임의 창 타일맵 전송 요청($0BEC),
@@ -2201,6 +2202,40 @@ WtClassF:
     dw $20, $22, $22, 0, 0, 0, 0, 0, 0
     dw 1, 1, 1, 2
     dw 1, 2, 2, 2, 2
+; 필드 슬롯마다 (버퍼 자리, 타일) 넷: 글자 줄 첫·끝 칸과 위 줄 첫·끝 칸을 메시지 창(화면 18~26줄·3~28열에 캔버스 096~17F 를
+; 한 줄 26칸씩)이 가리키는 7E:5000 버퍼 자리. 그 자리가 그 타일이면 메시지 창이 그 칸을 보인다. 캔버스 밖 슬롯은 0
+; (test_dq4windowname.py 가 WtSlotF·WtUpperF 와 맞는지 본다)
+WtMsgCellF:
+    dw 0, 0, 0, 0, 0, 0, 0, 0
+    dw 0, 0, 0, 0, 0, 0, 0, 0
+    dw 0, 0, 0, 0, 0, 0, 0, 0
+    dw 0, 0, 0, 0, 0, 0, 0, 0
+    dw 0, 0, 0, 0, 0, 0, 0, 0
+    dw 0, 0, 0, 0, 0, 0, 0, 0
+    dw 0, 0, 0, 0, 0, 0, 0, 0
+    dw 0, 0, 0, 0, 0, 0, 0, 0
+    dw 0, 0, 0, 0, 0, 0, 0, 0
+    dw 0, 0, 0, 0, 0, 0, 0, 0
+    dw 0, 0, 0, 0, 0, 0, 0, 0
+    dw 0, 0, 0, 0, 0, 0, 0, 0
+    dw 0, 0, 0, 0, 0, 0, 0, 0
+    dw 0, 0, 0, 0, 0, 0, 0, 0
+    dw 0, 0, 0, 0, 0, 0, 0, 0
+    dw $55A4, $010D, $55AA, $0110, $5556, $00EC, $555C, $00EF
+    dw $55D2, $011E, $55D8, $0121, $54D2, $00B6, $54D8, $00B9
+    dw $54A2, $00A4, $54A8, $00A7, $5620, $013F, $5626, $0142
+    dw $5630, $0147, $5636, $014A, $54E8, $00C1, $54EE, $00C4
+    dw $54AA, $00A8, $54B0, $00AB, $558C, $0101, $5592, $0104
+    dw $5686, $0166, $568C, $0169, $5628, $0143, $562E, $0146
+    dw $55DA, $0122, $55E6, $0128, $555E, $00F0, $556A, $00F6
+    dw $54DA, $00BA, $54E6, $00C0, $5596, $0106, $55A2, $010C
+    dw $5494, $009D, $54A0, $00A3, $5612, $0138, $561E, $013E
+    dw $5512, $00D0, $5524, $00D9, $5652, $0152, $5664, $015B
+    dw $5486, $0096, $5492, $009C, $5698, $016F, $56A4, $0175
+    dw $54B2, $00AC, $54D0, $00B5, $55AC, $0111, $55CA, $011A
+    dw $5666, $015C, $5678, $0165, $556C, $00F7, $558A, $0100
+    dw $56A6, $0176, $56B8, $017F, $54F2, $00C6, $5510, $00CF
+    dw $5526, $00DA, $5538, $00E3, $55E8, $0129, $5606, $0132
 ; 슬롯 × 2 → !wt_dirty 의 비트(낮은 워드, 높은 워드). 슬롯 i 는 비트 i 이고, 캔버스 밖 가나 항목은 0. 1D0~1FF 슬롯(등급 $20)은
 ; 전투 표와 필드 표에서 번호가 달라 비트를 두고 WqClean 이 등급을 보고 건너뛴다
 WtBitLo:
@@ -3113,6 +3148,11 @@ WtQueue:
     LDA.l WtBitHi,X
     ORA.w !wt_dirty+2
     STA.w !wt_dirty+2
+    ; WtAlloc 과 여기 사이에 NMI 의 WtStaleGate 가 이 슬롯을 비웠을 수 있어 NMI 를 끈 채 키·나이를 다시 쓴다
+    LDA.w !wn_key
+    STA.w !wt_keys,X
+    LDA.w !wt_age
+    STA.w !wt_ages,X
 +
     SEP #$20
     LDA.w !wq_count
@@ -3137,6 +3177,7 @@ WqNmiGate:
     AND #$03
     STA.l $7E0000|!wq_defer
 +
+    JSR WtStaleGate
     LDA.l $7E0000|!wq_defer
     BEQ +
     JSR WqKana
@@ -3183,6 +3224,8 @@ WtVisTail:
     JSR WtVis
     PLY
     PLX
+    LDA #$01
+    STA.l $7E0000|!wt_stale
 +
     PLP
     LDA.b $1E
@@ -3195,6 +3238,7 @@ WtVisTail:
 WqNmiEntry:
     LDA.l $7E0000|!wq_count
     ORA.l $7E0000|!wq_defer
+    ORA.l $7E0000|!wt_stale
     ORA.l $000BEC
     BEQ +
     PHX
@@ -3616,6 +3660,201 @@ WqRunBytes:
 +
     LDA #$0020
     RTS
+
+; 필드에서 그림을 올린 캔버스 슬롯(!wt_dirty)의 창이 닫히면, 게임이 캔버스를 다시 보내기 전까지 메시지 창이 그 칸에 옛
+; 이름을 보인다(가게 팔기 목록을 닫으며 「어느 물건을 팔아 주시겠어요?」 창을 다시 그릴 때). WtVis 가 안 보인다고 잰
+; 슬롯 가운데 메시지 창이 그 칸(WtMsgCellF)을 가리키는 슬롯을 NMI 첫머리(게이트)에서 메시지 캔버스(7E:5800 평면 0,
+; 평면 1 = FF)로 되돌리고 비운다. 한 NMI 에 !wt_restore_max 개까지 되돌리고 남으면 다음 NMI 에 잇는다. WtVis 가 돈
+; 다음 NMI 에만 찾는다(!wt_stale). 보이는 슬롯은 건드리지 않는다(닫히는 목록의 남은 줄이 깨지지 않게). M = 8 로 들어옴
+!wt_restore_max = 3
+WtStaleGate:
+    PHP
+    PHB
+    REP #$30
+    PEA $7E7E
+    PLB
+    PLB
+    LDA.w !wt_stale
+    AND #$00FF
+    BNE +
+    JMP .out
++
+    SEP #$20
+    STZ.w !wt_stale
+    REP #$20
+    LDA.w $1944
+    CMP #$8952
+    BNE +
+    JMP .out
++
+    ; 1D0~1FF 슬롯(비트 12~14)은 캔버스 밖
+    LDA.w !wt_dirty
+    AND #$8FFF
+    ORA.w !wt_dirty+2
+    BNE +
+    JMP .out
++
+    ; 메시지 창 왼쪽 테두리(2열, 타일 08E)가 18~26줄 어디에도 없으면 볼 것이 없다
+    LDX.w #(18*32+2)*2
+-
+    LDA.w $5000,X
+    AND #$03FF
+    CMP #$008E
+    BEQ .msg
+    TXA
+    CLC
+    ADC #$0040
+    TAX
+    CPX.w #(27*32+2)*2
+    BCC -
+    JMP .out
+.msg
+    PEA $0000               ; 이번 NMI 에 되돌린 수
+    LDX.w #!wt_nkana*2
+.slot
+    LDA.l WtBitLo,X
+    AND.w !wt_dirty
+    BNE +
+    LDA.l WtBitHi,X
+    AND.w !wt_dirty+2
+    BNE +
+    JMP .next
++
+    LDA.l WtClassF,X
+    AND #$0020
+    BEQ +
+    JMP .next
++
+    LDA.w !wt_ages,X
+    BNE +
+    JMP .next
++
+    TXA
+    LSR
+    TAY
+    LDA.w !wt_vis,Y
+    AND #$0001
+    BEQ +
+    JMP .next
++
+    PHX
+    TXA
+    ASL
+    ASL
+    ASL
+    TAX
+    LDA.l WtMsgCellF,X
+    TAY
+    LDA.w $0000,Y
+    AND #$03FF
+    CMP.l WtMsgCellF+2,X
+    BEQ .hit
+    LDA.l WtMsgCellF+4,X
+    TAY
+    LDA.w $0000,Y
+    AND #$03FF
+    CMP.l WtMsgCellF+6,X
+    BEQ .hit
+    LDA.l WtMsgCellF+8,X
+    TAY
+    LDA.w $0000,Y
+    AND #$03FF
+    CMP.l WtMsgCellF+10,X
+    BEQ .hit
+    LDA.l WtMsgCellF+12,X
+    TAY
+    LDA.w $0000,Y
+    AND #$03FF
+    CMP.l WtMsgCellF+14,X
+    BEQ .hit
+    PLX
+    BRA .next
+.hit
+    PLX
+    LDA $01,S
+    CMP.w #!wt_restore_max
+    BCC +
+    ; 다 못 되돌림: 다음 NMI 에 잇는다
+    SEP #$20
+    INC.w !wt_stale
+    REP #$20
+    BRA .done
++
+    INC
+    STA $01,S
+    JSR WtRestoreSlot
+.next
+    INX
+    INX
+    CPX.w #!wt_nslot*2
+    BCS .done
+    JMP .slot
+.done
+    PLA
+.out
+    PLB
+    PLP
+    RTS
+
+; 슬롯 X 의 그림을 메시지 캔버스로 되돌리고 비운다(M = 16, DB = 7E)
+WtRestoreSlot:
+    LDA.l WtBitLo,X
+    EOR #$FFFF
+    AND.w !wt_dirty
+    STA.w !wt_dirty
+    LDA.l WtBitHi,X
+    EOR #$FFFF
+    AND.w !wt_dirty+2
+    STA.w !wt_dirty+2
+    STZ.w !wt_keys,X
+    STZ.w !wt_ages,X
+    LDA.l WtClassF,X
+    AND #$000F
+    JSR WqRunBytes
+    STA.w !wq_left
+    LDA.l WtUpperF,X
+    BEQ .joined
+    JSR WqRestoreRun
+    LDA.l WtSlotF,X
+    JMP WqRestoreRun
+.joined
+    ASL.w !wq_left
+    LDA.l WtSlotF,X
+    JMP WqRestoreRun
+
+; 칸 A 부터 !wq_left 바이트: 평면 0 은 메시지 캔버스 버퍼(7E:5800, 칸 096 부터 8바이트씩)에서, 평면 1 은 FF. X 는 그대로
+WqRestoreRun:
+    PHA
+    ASL
+    ASL
+    ASL
+    CLC
+    ADC #$1000
+    STA.l $002116
+    LDA $01,S
+    SEC
+    SBC #$0096
+    ASL
+    ASL
+    ASL
+    CLC
+    ADC #$5800
+    STA.l $004302
+    LDA.w !wq_left
+    STA.l $004305
+    SEP #$20
+    LDA #$7E
+    STA.l $004304
+    LDA #$00
+    STA.l $002115
+    STA.l $004300
+    LDA #$18
+    STA.l $004301
+    LDA #$01
+    STA.l $00420B
+    REP #$20
+    PLA
+    JMP WqCleanRun
 
 ; 칸 A 부터 !wq_left 바이트만큼 평면 1 을 FF 로(DMA 0, 고정 원본). X 는 그대로
 WqCleanRun:

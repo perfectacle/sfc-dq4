@@ -164,6 +164,16 @@ class JudgeTests(unittest.TestCase):
         self.assertEqual(len(bs.judge_heal(s, expect)), 2)
         self.assertIn('HP 회복이 없음', bs.judge_heal(summary(heals=[]), expect))
 
+    def test_herb_item_window_title_must_not_be_kana(self):
+        expect = {**self.expect, 'amount': (30, 11), 'max_hp': 100, 'item_title': True}
+        heal = [{'from': 40, 'to': 75, 'caster_mp_drop': None}]
+        korean = [0x208C, 0x218D, 0x2180, 0x20B0]
+        self.assertEqual(bs.judge_heal(summary(heals=heal, item_title=korean), expect), [])
+        # 「の」(가나 칸 028)이 남은 제목
+        self.assertEqual(bs.judge_heal(summary(heals=heal, item_title=korean + [0x2028]), expect),
+                         ['물건 창 제목에 가나 칸 028'])
+        self.assertEqual(bs.judge_heal(summary(heals=heal), expect), ['물건 창이 뜨지 않음'])
+
     def test_monflee_needs_monster_alive(self):
         expect = {**self.expect, 'gold': 0, 'exp': 0}
         s = summary(mon_hp_at_finish=[])

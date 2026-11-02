@@ -73,6 +73,23 @@ class FieldSlotTest(unittest.TestCase):
         self.assertLess(max(i for i, s in enumerate(order) if s == (10, True)), medium_visible)
 
 
+class MessageCellTest(unittest.TestCase):
+    def test_message_cells_match_slot_tiles(self):
+        # 메시지 창은 화면 18~26줄·3~28열에 캔버스를 한 줄 26칸씩 차례로 가리킨다
+        def cell(t):
+            d = t - CANVAS.start
+            return 0x5000 + ((18 + d // ROW) * 32 + 3 + d % ROW) * 2
+        cells = table('WtMsgCellF')
+        for i, (lo, up, c) in enumerate(zip(table('WtSlotF'), table('WtUpperF'), table('WtClassF'))):
+            row = cells[8 * i:8 * i + 8]
+            if c == 0xFF or c & 0x20:
+                self.assertEqual(row, [0] * 8)
+                continue
+            n = COLS[c & 0x0F]
+            up = up or lo + n
+            self.assertEqual(row, [cell(lo), lo, cell(lo + n - 1), lo + n - 1, cell(up), up, cell(up + n - 1), up + n - 1])
+
+
 def lorom(a):
     return ((a >> 16) & 0x7F) * 0x8000 + (a & 0x7FFF)
 
