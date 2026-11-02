@@ -539,7 +539,7 @@ paths = ["sfc/dq4/tools/dq4npccheck.py", "sfc/dq4/tools/dq4npcport.py", "sfc/dq4
          "sfc/dq4/tools/dq4freshstate.py", "sfc/dq4/tools/lua/dq4shipstate.lua", "fc/dq4/tools/dq4npcblock.py",
          "sfc/dq5/tools/lua/dq5npcrecordcheck.lua", "sfc/dq5/tools/lua/dq5textgrowcheck.lua",
          "sfc/dq5/tools/lua/dq5progresscheck.lua", "sfc/dq5/tools/lua/dq5warp.lua"]
-run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/guard-npc-talk && uv run --locked python sfc/dq4/tools/dq4npccheck.py --build work/dq4-groups --out work/guard-npc-talk --jobs 2"
+run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/guard-npc-talk && uv run --locked python sfc/dq4/tools/dq4npccheck.py --build work/dq4-groups --out work/guard-npc-talk --jobs 3"
 needs = ["rom", "MESENCE", "LIBDIR", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 
 [[check]]
@@ -548,5 +548,5 @@ why = "그룹 롬의 FC 계단·출구·필드 입구가 연결된 맵·칸으�
 paths = ["sfc/dq4/tools/dq4groupcheck.py", "sfc/dq4/tools/dq4groupbuild.py", "sfc/dq4/tools/dq4npcport.py",
          "sfc/dq4/tools/dq4freshstate.py", "sfc/dq4/tools/lua/dq4shipstate.lua", "fc/dq4/tools/dq4npcblock.py",
          "sfc/dq5/tools/lua/dq5warp.lua"]
-run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/guard-group-links && uv run --locked python sfc/dq4/tools/dq4groupcheck.py --rom work/dq4-groups/groups.sfc --out work/guard-group-links --jobs 2"
+run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/guard-group-links && uv run --locked python sfc/dq4/tools/dq4groupcheck.py --rom work/dq4-groups/groups.sfc --out work/guard-group-links --jobs 3"
 needs = ["rom", "MESENCE", "LIBDIR", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
