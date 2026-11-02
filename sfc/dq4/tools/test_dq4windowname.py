@@ -111,6 +111,28 @@ class HoldAreaTest(unittest.TestCase):
         for name in ('wh_count', 'wh_off', 'wh_rd', 'wh_go'):
             self.assertIn(define(name), range(define('wh_magic') + 2, define('wt_stc')))
 
+    def test_send_tables_stay_after_the_buffer_in_the_free_area(self):
+        # WhReq 가 짜는 DMA 표·가림 표·임시 칸은 묶음 버퍼 뒤, 실측으로 비어 있던 7F:A33F 안. 표는 가장 많이 찼을 때
+        # (DMA !wh_ndma 칸 × 8바이트, 가림 !wh_nmask 칸 × 4바이트, 끝 표시 2바이트)도 다음 자리를 덮지 않아야 한다
+        text = ASM.read_text()
+
+        def count(name):
+            return int(re.search(rf'^!{name} *= *(\d+)', text, re.M).group(1))
+        end = define('wh_buf') + define('wh_size')
+        parts = sorted([(define('wh_dma'), count('wh_ndma') * 8 + 2), (define('wh_mask'), count('wh_nmask') * 4 + 2),
+                        (define('wh_skip'), 8 * 2)]
+                       + [(define(n), 2) for n in ('wh_snap', 'wh_snapn', 'wh_tmpn', 'wh_tmpl', 'wh_tmpb', 'wh_tmpv',
+                                                   'wh_tmpm', 'wh_tmpx', 'wh_tmpk', 'wh_tmpc', 'wh_tmpd', 'wh_tmpt',
+                                                   'wh_tmpi', 'wh_tmpe', 'wh_tmpr', 'wh_tmpq', 'wh_tmps')])
+        self.assertGreaterEqual(parts[0][0], end)
+        for (a, n), (b, _) in zip(parts, parts[1:]):
+            self.assertLessEqual(a + n, b, hex(a))
+        self.assertLessEqual(parts[-1][0] + parts[-1][1], 0x7FA340)
+
+    def test_head_flags_sit_before_the_stale_table(self):
+        for name in ('wh_msgwin', 'wh_pend', 'wh_maskthis'):
+            self.assertIn(define(name), range(define('wh_go') + 2, define('wt_stc')))
+
     def test_stale_slot_numbers_leave_bit7_free(self):
         # 후보 바이트는 슬롯 × 2 + 1 이고 bit7 은 「지금 버퍼에선 메시지 창이 안 가리킴」 표시
         self.assertLess((int(re.search(r'^!wt_nslot = (\d+)', ASM.read_text(), re.M).group(1)) - 1) * 2 + 1, 0x80)
@@ -174,6 +196,7 @@ def base_rom(windows=None):
         rel = lorom(wn.HELD_PICKER) - (lorom(a) + 6)
         put(a, wn.HELD_ORIG + rel.to_bytes(2, 'little', signed=True))
     put(wn.EMPTY_SLOT_HOOK, wn.EMPTY_SLOT_ORIG)
+    put(wn.WH_REQ_SITE, wn.WH_REQ_ORIG)
     put(wn.PREFIX_HOOK, b'\x22' + PREFIX_PREV.to_bytes(3, 'little'))
     put(wn.LIST_HOOK, b'\x5c' + LIST_PREV.to_bytes(3, 'little'))
     return d
@@ -335,6 +358,12 @@ class ApplyRejectTests(unittest.TestCase):
             rom[lorom(wn.CODE_END)] = 1
         with self.assertRaisesRegex(ValueError, '벗어남'):
             run(base_rom(), FakeAsar(spill))
+
+    def test_window_request_site_must_be_the_original(self):
+        rom = base_rom()
+        rom[lorom(wn.WH_REQ_SITE)] = 0xEA
+        with self.assertRaises(ValueError):
+            run(rom, FakeAsar(good_asar))
 
     def test_hooks_must_land_in_their_spots(self):
         def outside(site, raw):

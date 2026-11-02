@@ -13,8 +13,12 @@
         보이는 슬롯에 다른 문구를 덮어, 게임이 새 창 타일맵을 보내기 전까지 옛 타일맵이 새 그림을 가리켰다. 앞 그림이
         메시지 캔버스 그대로였으면(묶음 버퍼로 창이 먼저 뜨고 이름이 뒤에 채워짐) 걸지 않는다.
         매 프레임 덤프하는 장면에서만 본다.
+  빈칸: 필드에서 캔버스 안 슬롯이 화면에 보이는데(키 자리가 그 슬롯 첫 칸) 슬롯 칸 그림이 모두 메시지 캔버스 그대로다.
+        창 타일맵이 묶음 버퍼의 이름 그림보다 먼저 올라가, 목록 줄이 비었다가 채워진다.
   테두리: 전투에서 창 왼쪽 위 모서리(타일 08C) 오른쪽 같은 줄에 오른쪽 위 모서리(좌우 뒤집은 08C)가 없다. 이름 다섯째 칸이
         맨 오른쪽 사람에서 전투 상태 창의 오른쪽 테두리 열을 덮었다. 전투 창은 서로 겹치지 않아 전투에서만 본다.
+
+--every 로 고른 장면(EVERY)은 정한 구간을 원래 프레임에 더해 매 프레임 덤프한다. 30프레임마다 재면 한두 프레임짜리 빈칸·비침을 놓친다.
 
 걸린 프레임은 화면에 빨간 네모를 그려 sheet-*.png 로 모은다.
 
@@ -67,6 +71,12 @@ FULL_BAG = (0x01, 0x50, 0x78, 0x8A, 0xA1, 0xA1, 0xA4, 0xCD, 0xA3, 0xA2, 0xB1, 0x
 # 주인공 이름 7E:2001 에 넣는 「크리프트」 한글 표시 바이트. 세이브스테이트의 가나 이름은 가나 칸 슬롯과 겹쳐 깨진다.
 # 09/00 의 몬스터 동료 이름(이름 표 0A, DQ5 데이터)은 가나라 필드 상태 창에서 「가나」 로 걸린다
 NAME = '97338C3799299827'
+
+
+# --every 로 매 프레임 재는 장면과 구간(장면의 원래 프레임에 더함). 넘친 목록 이름을 묶음 버퍼로 보내는 장면들과, 메시지 창
+# 없이 상태 창에 이름이 넘치는 battle11·party21 의 구간
+EVERY = {'talk02-full': range(60, 700), 'shopwho': range(100, 1900), 'partyitems': range(60, 900),
+         'battle11': range(330, 430), 'party21': range(3380, 3420)}
 
 
 def fuzz(seed):
@@ -256,6 +266,9 @@ def check(folder, rom, slots):
                                  for k, t in enumerate(tiles))
             if prev and prev[0] == row and prev[1] != art and not blank:
                 bad += [(c // 32, c % 32 + j, '바뀜', tiles[0] + j) for j in range(len(tiles) // 2)]
+            if not battle and i >= KANA_ENTRIES and tiles[0] in CANVAS and all(
+                    canvas_tile(vram, d.get(MSG_CANVAS), t) for t in tiles):
+                bad += [(c // 32, c % 32 + j, '빈칸', tiles[0] + j) for j in range(len(tiles) // 2)]
         before = {(frame, i, key): v for (i, key), v in now.items()}
         for cell in range(32 * 28):         # 화면은 28줄(224점)
             if cell in mine:
@@ -329,6 +342,7 @@ def main():
     ap.add_argument('--out', type=Path, required=True)
     ap.add_argument('--only', help='이 글자가 이름에 든 장면만')
     ap.add_argument('--jobs', type=int, default=8)
+    ap.add_argument('--every', action='store_true', help='EVERY 장면을 매 프레임 잰다')
     a = ap.parse_args()
     mesence = os.environ.get('MESENCE')
     if not mesence:
@@ -345,6 +359,8 @@ def main():
         ['uv', 'run', '--locked', 'krpatch', 'sfc', 'lua'], text=True).strip()
     st = make_states(mesence, a.rom.resolve(), rom, out / 'states')
     todo = [s for s in scenes(st['shop'], st['shop'], st['shop'], st['battle']) if not a.only or a.only in s[0]]
+    if a.every:
+        todo = [s[:5] + (sorted(set(s[5]) | set(EVERY[s[0]])),) if s[0] in EVERY else s for s in todo]
     with ThreadPoolExecutor(a.jobs) as pool:
         list(pool.map(lambda s: run(mesence, libdir, a.rom, rom, out / s[0], s), todo))
     flagged = 0
