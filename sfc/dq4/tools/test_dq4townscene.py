@@ -1,6 +1,7 @@
 """dq4townscene 의 판정 함수·SRAM 조작(롬·에뮬레이터 없이)."""
 import sys
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -175,15 +176,6 @@ class TimeTest(unittest.TestCase):
         self.assertEqual(ts.judge_palette(want, got), ['obj12', 'night_obj'])
 
 
-def pinned_res(*rows):
-    problems = [f'시각 {r["time"]}: 걸어도 다름' for r in rows if r['frames'] is None]
-    return {'problems': problems, 'steps': list(rows)}
-
-
-def row(time, set_, frames, stays_day=True):
-    return {'time': time, 'set': set_, 'frames': frames, 'stays_day': stays_day}
-
-
 class VerdictTest(unittest.TestCase):
     def test_plain(self):
         self.assertEqual(ts.verdict('inn_stay', {'problems': []}), 'passed')
@@ -196,28 +188,15 @@ class VerdictTest(unittest.TestCase):
 
     def test_known_fixed_turns_red(self):
         res = {'problems': []}
-        self.assertEqual(ts.verdict('dusk', res), 'failed')
+        with patch.dict(ts.KNOWN, {'dusk': ('이슈', lambda r: False)}):
+            self.assertEqual(ts.verdict('dusk', res), 'failed')
         self.assertIn('KNOWN', res['problems'][0])
 
-    def test_field_known_only_when_everything_stays_day(self):
-        ok = pinned_res(row('00ED', 'A24D', 1), row('00EE', 'A289', None), row('00F1', 'A33D', None))
-        self.assertEqual(ts.verdict('dusk', ok), 'known')
-        # 인물 줄(obj11)만 밤으로 바뀌고 필드 줄이 남은 경우: 낮 그대로가 아니므로 known 이 아님
-        obj = pinned_res(row('00ED', 'A24D', 1), row('00F1', 'A33D', None, stays_day=False))
-        self.assertEqual(ts.verdict('dusk', obj), 'failed')
-        # 낮 벌이 아닌 시각이 맞으면 증상이 바뀐 것
-        part = pinned_res(row('00EE', 'A289', 3), row('00F1', 'A33D', None))
-        self.assertEqual(ts.verdict('dusk', part), 'failed')
-        stop = pinned_res(row('00EE', 'A289', None))
-        stop['problems'].append('시간 멈춤 7E:2190 bit1 이 켜져 있음(02)')
-        self.assertEqual(ts.verdict('dusk', stop), 'failed')
-
-    def test_cross_known(self):
-        res = {'problems': ["dusk: 밤 인물 표지 7E:1AA1 이 켜지지 않음([('00EA', '낮', 0)])"],
-               'legs': {'dusk': {'seen': [['00EA', '낮', 0]], 'frames': 2255}, 'dawn': {'frames': 80}}}
-        self.assertEqual(ts.verdict('cross', res), 'known')
-        res['legs']['dusk']['seen'].append(['00F2', '밤', 1])
-        self.assertEqual(ts.verdict('cross', res), 'failed')
+    def test_field_colour_is_not_known(self):
+        # 필드 시각 색은 고쳐졌다(환경 훅이 필드 루틴 02:AB33 을 물 루틴으로 덮던 것). 다시 known 으로 감추지 않는다
+        for name in ('dusk', 'dawn', 'cross'):
+            self.assertNotIn(name, ts.KNOWN)
+        self.assertEqual(ts.verdict('dusk', {'problems': ['시각 00EE: 다름']}), 'failed')
 
 
 class ChoicesTest(unittest.TestCase):

@@ -187,7 +187,7 @@ needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 
 
 [[check]]
 name = "dq4-town-scene"
-why = "여관(묵기 값 = FC 1인 값 × 일행 수, HP·MP 가득, 밤 → 아침, 금화 모자람·거절은 그대로)·교회(되살리기·해독·저주 풀기 값과 상태, 계시의 남은 경험치, 기도 저장이 칸 1·2·3 에 그 순간 WRAM 그대로·체크섬)·타이틀(복사·지우기·빈 SRAM·체크섬 틀린 칸)과 낮밤 경계(필드 색, 마을 낮·밤 인물)가 bsnes·snes9x 에서 다시 깨지지 않게. 교회 치료 뒤 대화는 끝까지 가야 한다(곡 1E 자리에 되풀이하는 NDS 곡이 들어 25:FD00 이 곡 끝을 기다리다 멈췄음). 알려진 실패(필드 시각 색)는 정확히 그 증상일 때만 통과하고 고치면 KNOWN 에서 지운다"
+why = "여관(묵기 값 = FC 1인 값 × 일행 수, HP·MP 가득, 밤 → 아침, 금화 모자람·거절은 그대로)·교회(되살리기·해독·저주 풀기 값과 상태, 계시의 남은 경험치, 기도 저장이 칸 1·2·3 에 그 순간 WRAM 그대로·체크섬)·타이틀(복사·지우기·빈 SRAM·체크섬 틀린 칸)과 낮밤 경계(필드 색, 마을 낮·밤 인물)가 bsnes·snes9x 에서 다시 깨지지 않게. 교회 치료 뒤 대화는 끝까지 가야 한다(곡 1E 자리에 되풀이하는 NDS 곡이 들어 25:FD00 이 곡 끝을 기다리다 멈췄음). 필드 시각 색은 환경 훅 wrap 이 필드에서 남은 $BC/$BD 로 필드 루틴 02:AB33 을 물 루틴으로 덮어 낮 그대로였음(고침, KNOWN 에서 지움)"
 paths = [
   "sfc/dq4/tools/dq4growth.py",
   "sfc/dq4/tools/dq4townscene.py",
@@ -202,6 +202,7 @@ paths = [
   "sfc/dq4/tools/dq4groupbuild.py",
   "sfc/dq4/tools/dq4fieldgfx.py",
   "sfc/dq4/tools/dq4fieldport.py",
+  "sfc/dq4/tools/dq4environmentrom.py",
   "sfc/dq4/tools/dq4soundpatch.py",
   "sfc/dq4/tools/dq4soundset.py",
   "sfc/dq4/tools/dq4sound-game.args",

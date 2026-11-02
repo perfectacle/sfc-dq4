@@ -291,6 +291,18 @@ class BuildTests(unittest.TestCase):
         self.assertEqual(bytes.fromhex(door['hex']),
                          dq5_rom()[env._off(0x010000 | env.DOOR_TABLES[0]):env._off(0x010000 | env.DOOR_TABLES[1])])
 
+    def test_wrap_keeps_the_field_routine(self):
+        # 필드에서는 $BC/$BD 가 막 나온 마을을 가리켜, 이 검사가 없으면 물 루틴이 필드 루틴 02:AB33(시각 색)을 덮는다
+        code = bytes.fromhex(next(w['hex'] for w in self.patch['writes'] if w['note'].startswith('바꾼 맵 표')))
+        head = bytes((0x22, 0xD0, 0xF7, 0x15, *env._ENTER, 0xE2, 0x20, 0xA5, 0xBE, 0xC2, 0x20, 0x10))
+        at = code.find(head)
+        self.assertGreaterEqual(at, 0)
+        self.assertEqual(code.find(head, at + 1), -1)
+        branch = at + len(head) + 1
+        target = branch + int.from_bytes(code[branch - 1:branch], 'little', signed=True)
+        self.assertEqual(code[target:target + len(env._LEAVE) + 1], bytes((*env._LEAVE, 0x6B)))
+        self.assertEqual(code[branch:branch + 1], b'\x22')
+
     def test_fountain_without_water_is_rejected(self):
         maps = dict(self.maps)
         name = list(env.MAPS)[5]
