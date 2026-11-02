@@ -293,6 +293,7 @@ class BuildTests(unittest.TestCase):
 
     def test_wrap_keeps_the_field_routine(self):
         # 필드에서는 $BC/$BD 가 막 나온 마을을 가리켜, 이 검사가 없으면 물 루틴이 필드 루틴 02:AB33(시각 색)을 덮는다
+        # 바이트만 본다. 맵에 들어설 때 bit7 이 켜진 채 돌아 물·뚜껑 루틴이 들어가는지는 실행 검사 dq4-wrap-routine 이 본다
         code = bytes.fromhex(next(w['hex'] for w in self.patch['writes'] if w['note'].startswith('바꾼 맵 표')))
         head = bytes((0x22, 0xD0, 0xF7, 0x15, *env._ENTER, 0xE2, 0x20, 0xA5, 0xBE, 0xC2, 0x20, 0x10))
         at = code.find(head)
