@@ -2,7 +2,7 @@
 
 For each replaced map: warp in from the ship cabin of the ROM under test (dq4freshstate), dump WRAM/VRAM/CGRAM, redraw the
 whole map from the game's own cell buffer and compare it pixel by pixel with the
-offline FC-layout render; compare the walkable-layer nibbles with the FC block
+offline FC-layout render (water and fountain at the frame the game shows); compare the walkable-layer nibbles with the FC block
 properties. Then leave to an untouched map and compare its cell buffer and block
 table with the same warp on the original ROM.
 """
@@ -30,12 +30,15 @@ from dq4environmentart import create_assets  # noqa: E402
 from dq4environmentmap import prepare_maps, render_maps  # noqa: E402
 from dq4environmentmap import block_prop  # noqa: E402
 from dq4environmentrom import (COUNTER_PROPS, DOOR_KIND, FLOOR, GATE_KIND, OPENINGS, door_floor, GROUPS, MAPS, STAIRS, WALL, WATER_SLOT, water_block,  # noqa: E402
-                               WATER_FRAMES, WATER_PERIOD, build_graphics, objects, water_frames)
+                               FOUNTAIN_FRAMES, FOUNTAIN_SLOT, WATER_FRAMES, WATER_PERIOD, build_graphics, fountain_block,
+                               fountain_frames, objects, water_frames)
 import dq4mesen  # noqa: E402
 
 OBJECT_SIZE = {DOOR_KIND: (2, 3), GATE_KIND: (4, 4)}  # noqa: E402
 # Cell +4/+7 values 2A:F6B8 counts as exits (2A:FF37).
 EXIT_MARKS = {0x85, 0xA1, 0xB3, 0xCC}
+# CHR ids of the fountain's first frame (dq4environmentrom.fountain_frames).
+FOUNTAIN_IDS = (4, 5, 6, 7)
 
 WARP = DQ5_TOOLS / "lua" / "dq5warp.lua"
 DUMP = TOOLS / "lua" / "dq4environmentdump.lua"
@@ -194,6 +197,16 @@ def water_cycle(wram_vram, water_ids, frames):
     return seen
 
 
+def shown_assets(assets, frame):
+    """Assets as the game draws them at water frame `frame`, with the fountain at the frame of the same number.
+
+    The expected picture is the offline art of create_assets again (the ROM was built from it), so it cannot show
+    that the fountain follows the water. That comes from the dumps: main() reads which frame each dump holds in the
+    fountain's VRAM slots and requires the same numbers as the water's (fountain_with_water)."""
+    return dict(assets, **{WATER_FRAMES[0]: assets[WATER_FRAMES[frame]],
+                           FOUNTAIN_FRAMES[0]: assets[FOUNTAIN_FRAMES[frame]]})
+
+
 def _arrival(source):
     """A walkable FC cell (and its right neighbour) closest to the centre, in DQ5 cells."""
     best = None
@@ -235,8 +248,7 @@ def main():
 
     def expected(name, frame):
         """Offline render with the water frame the game was showing."""
-        shown = dict(assets, **{WATER_FRAMES[0]: assets[WATER_FRAMES[frame]]})
-        image = render_maps(args.dq4, shown, [name])[name][0]
+        image = render_maps(args.dq4, shown_assets(assets, frame), [name])[name][0]
         return with_floor_doors(image, sources[name], prepared[name])
 
     sources, prepared = {}, {}
@@ -246,6 +258,7 @@ def main():
     known = set(chr_data)
     water_ids = block_words[next(w for w in (water_block(*b) for b in built.values()) if w is not None)]
     frames = water_frames(assets, chr_data, water_ids)
+    fountains = fountain_frames(assets, chr_data)
     results = {"maps": {}}
     # 대조용 원본 롬과 검사 롬은 빌드가 달라 한 세이브스테이트를 나눠 쓰지 못한다
     start = {"rom": dq4freshstate.resolve(args.state, mesence, args.rom, out / "start-rom"),
@@ -265,9 +278,21 @@ def main():
                  for n in (1, 2)]
         has_water = water_block(*built[name]) is not None
         cycle = water_cycle([(wram, vram)] + [(w, v) for w, v, _ in later], water_ids, frames) if has_water else [0]
+        has_fountain = fountain_block(*built[name]) is not None
+        if has_fountain:
+            result_fountain = {
+                "fountain_frames": water_cycle([(wram, vram)] + [(w, v) for w, v, _ in later], FOUNTAIN_IDS, fountains),
+                "fountain_slots": all((wram[0x6000 + i * 2] | wram[0x6001 + i * 2] << 8) & 0x3FF == FOUNTAIN_SLOT + k
+                                      for k, i in enumerate(FOUNTAIN_IDS))}
+            # Without water there is no water frame to follow (cycle is the [0] placeholder); the build puts a
+            # fountain only on a map with water, so a fountain map without water fails.
+            result_fountain["fountain_with_water"] = has_water and result_fountain["fountain_frames"] == cycle
+        else:
+            result_fountain = {}
         result, image = check_map(name, wram, vram, cgram, expected(name, cycle[0] or 0), sources[name], known)
         image.save(out / name / "redraw.png")
         result["water_frames"] = cycle
+        result.update(result_fountain)
         result["water_slots"] = not has_water or all(
             (wram[0x6000 + i * 2] | wram[0x6001 + i * 2] << 8) & 0x3FF == WATER_SLOT + k for k, i in enumerate(water_ids))
         # BG1 is filled with CHR slot 0 (VRAM word 2000); it must stay blank or it covers the map.
@@ -326,6 +351,7 @@ def main():
     ok = results["gate_open"]["passed_gate_row"] and all(m.get("pixel_differences") == 0 and m.get("walk_layer_mismatches") == 0 and m["moved"]
              and m["objects_drawn"].split("/")[0] == m["objects_drawn"].split("/")[1]
              and m["water_cycles"] and m["blank_tile_kept"] and m["water_slots"]
+             and m.get("fountain_with_water", True) and m.get("fountain_slots", True)
              and m["exit_cells"] == m["exit_cells_expected"]
              for m in results["maps"].values()) and all(
         v for k, v in results["control"].items() if k.endswith("_equal"))

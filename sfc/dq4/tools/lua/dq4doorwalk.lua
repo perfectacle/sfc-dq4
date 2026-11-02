@@ -2,7 +2,7 @@
 -- 주인공 셀($C1,$C2)을 처음과 끝에 적는다. SET="2199|02" 는 시작할 때 WRAM(7E 뱅크 하위 16비트 주소)을 고친다.
 -- 결과: SHOT_DIR/door.txt("start x,y flags", "end x,y flags", "seen flags": 걷는 동안 한 번이라도 켜진 비트), end.png.
 -- 열린 문을 지나 다른 그룹(필드 등)으로 나가면 flag 가 지워지므로 seen 으로 본다. "shown N" 은 잠긴 문 메시지 갈래
--- 01:D8FC 가 돈 횟수다.
+-- 01:D8FC 가 돈 횟수다. "map BC/BD" 는 끝났을 때의 맵이다.
 package.path = os.getenv("LIBDIR") .. "/?.lua;" .. package.path
 local L = require("lib")
 L.loadState(os.getenv("STATE"))
@@ -49,6 +49,7 @@ emu.addEventCallback(function()
     line("end")
     log[#log + 1] = string.format("seen %08X", seen)
     log[#log + 1] = string.format("shown %d", shown)
+    log[#log + 1] = string.format("map %02X/%02X", b(0x7E00BC), b(0x7E00BD))
     L.shot("end.png")
     L.write("door.txt", table.concat(log, "\n") .. "\n")
     emu.stop(0)
