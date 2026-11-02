@@ -117,9 +117,32 @@ core.poke(dq4compatcheck.sets(dq4ch1walkcheck.pins({})))   # 난수·시각을 �
 
 한 번 도는 데 약 6초입니다(밑판 캐시가 있을 때).
 
+## 검사 롬으로 만든 출발 상태
+
+저장 기록 대신 세이브스테이트로 시작하는 장면 검사는 출발 상태를 검사하는 롬에서 직접 만듭니다(`sfc/dq4/tools/dq4freshstate.py`). 세이브스테이트는 만든 롬의 WRAM·SPC·스택을 그대로 담아서, 다른 빌드로 만든 상태를 지금 롬에 불러오면 바뀐 코드 자리로 돌아가 폭주합니다. 옛 `work/state/ship.mss`(DQ5 선실)를 1장 롬에 불러오면 135프레임에 BRK `3D:401E` 를 만나고 스택이 직접 페이지를 덮었습니다.
+
+| 롬 | 출발 상태 | 만드는 법 |
+| --- | --- | --- |
+| 1장 롬(머리 `7FC0` 이 `DRAGONQUEST4`) | 서장 끝 | `dq4ch1walkcheck.prologue`(롬 SHA-1 별 캐시). 새 게임이 DQ4 서장으로 가서 DQ5 선실은 만들 수 없음 |
+| 그 밖(원본 DQ5, `dq4groupbuild` 의 `groups.sfc`, `dq4build` 의 `menu.sfc` 등) | 배 선실 `17/00` | `lua/dq4shipstate.lua` 로 전원부터 선실까지(약 7천 프레임, 20초). 같은 캐시 폴더의 `ship-<지문>.mss` |
+
+캐시는 `dq4savefixture` 와 같은 뿌리(`DQ4_STATES_CACHE`, 없으면 원래 체크아웃 `work/cache/states`)의 `prologue/<롬 SHA-1>/` 입니다. 만든 상태 옆 `<상태>.rom-sha1` 에 그 롬의 SHA-1 을 적고, 검사에 `--state` 를 주면 `require_same_build` 가 이 값을 검사 롬과 견주어 없거나 다르면 불러오기 전에 멈춥니다. 옛 `work/state/*.mss` 는 이 파일이 없어 쓸 수 없습니다. 원본 롬과 고친 롬을 견주는 검사(`dq4bg3slotcheck`, `dq4environmentromcheck`)는 롬마다 따로 만듭니다.
+
+1장 롬에 없는 장면은 다른 롬에서 봅니다.
+
+| 검사 | 장면 | 쓰는 롬과 근거 |
+| --- | --- | --- |
+| `dq4namegamecheck` | 선실의 파파스에게 말 걸기 | DQ5 새 게임이 남은 `menu.sfc`(이름 메시지 훅이 든 `dq4menupatch` 결과) |
+| `dq4bg3slotcheck` | 원래 롬과 새 롬의 실내 맵 명령 창 | `overture.sfc`·`menu.sfc`. 1장 롬의 새 그룹은 원래 롬에 없음 |
+| `dq4wellresetcheck` 의 `load` | 교회 대화(대화 번호 05)로 기록, 리셋, 이어 하기 | `--load-rom`(`groups.sfc`, 같은 이어 하기 훅 `25:8278`). 1장 롬 서장 끝에서 같은 대화를 하면 기록이 남지 않았고, `36/00` 신부 앞(10,44)으로 순간이동해 말을 걸어도 명령 창 제목만 남은 채 기록 칸이 비어 있었음 |
+
+재발 방지 테스트는 `sfc/dq4/tools/test_dq4freshstate.py` 입니다. 옮긴 검사 열셋이 `dq4freshstate` 를 거치는지, `--state` 를 받는 dq4 도구가 같은 빌드인지 보는지, 도구 안에 `work/state/` 경로가 남지 않았는지 봅니다. 아직 손으로 고른 상태를 받는 `dq4doorcheck`·`dq4doorstandcheck`·`dq4sparfx` 는 목록으로 따로 둡니다.
+
 ## 남은 것
 
 - MesenCE 에서 같은 SRAM 으로 이어 하기(`.srm` 을 MesenCE 저장 폴더에 두는 법과 테스트 러너에서의 이어 하기 입력).
 - 표에 없는 그룹의 칸으로 이어 했을 때 필드의 어느 칸에 서는지와 그 루틴.
 - `7E:21CB`·`21CC` 를 맵에 들어설 때 고쳐 쓰는 까닭.
 - 기존 장면 검사(`dq4ch1walkcheck` 의 묶음 걷기 등)를 서장 세이브스테이트 대신 이 기록으로 시작하게 옮기기.
+- `dq4doorcheck`·`dq4doorstandcheck`·`dq4sparfx` 의 `--state` 를 검사 롬으로 만든 상태로 옮기기.
+- 1장 롬 `36/00` 교회 신부에게 순간이동 뒤 말을 걸면 명령 창 제목만 남고 기록이 되지 않는 까닭(순간이동 상태 탓인지 게임 쪽인지 모름).

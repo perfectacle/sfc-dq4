@@ -1,6 +1,6 @@
 """Check the environment maps inside DQ5 with MesenCE.
 
-For each replaced map: warp in from the ship cabin, dump WRAM/VRAM/CGRAM, redraw the
+For each replaced map: warp in from the ship cabin of the ROM under test (dq4freshstate), dump WRAM/VRAM/CGRAM, redraw the
 whole map from the game's own cell buffer and compare it pixel by pixel with the
 offline FC-layout render; compare the walkable-layer nibbles with the FC block
 properties. Then leave to an untouched map and compare its cell buffer and block
@@ -25,6 +25,7 @@ for path in (TOOLS, DQ5_TOOLS):
 
 import dq5map  # noqa: E402
 from dq5exitcheck import dp86_allowed, warp_exit  # noqa: E402
+import dq4freshstate  # noqa: E402
 from dq4environmentart import create_assets  # noqa: E402
 from dq4environmentmap import prepare_maps, render_maps  # noqa: E402
 from dq4environmentmap import block_prop  # noqa: E402
@@ -222,7 +223,7 @@ def main():
     ap.add_argument("--rom", required=True, type=Path, help="DQ5 ROM built with dq4-environment.dq5patch.json")
     ap.add_argument("--orig", default="rom/dq5.sfc", type=Path)
     ap.add_argument("--dq4", default="rom/dq4.nes", type=Path)
-    ap.add_argument("--state", default="work/state/ship.mss", type=Path)
+    dq4freshstate.add_argument(ap)
     ap.add_argument("--out", required=True, type=Path)
     args = ap.parse_args()
     mesence = os.environ["MESENCE"]
@@ -246,15 +247,18 @@ def main():
     water_ids = block_words[next(w for w in (water_block(*b) for b in built.values()) if w is not None)]
     frames = water_frames(assets, chr_data, water_ids)
     results = {"maps": {}}
+    # 대조용 원본 롬과 검사 롬은 빌드가 달라 한 세이브스테이트를 나눠 쓰지 못한다
+    start = {"rom": dq4freshstate.resolve(args.state, mesence, args.rom, out / "start-rom"),
+             "orig": dq4freshstate.make(mesence, args.orig, out / "start-orig")}
     states = {}
     for name, (group, number) in MAPS.items():
         x, y = _arrival(sources[name])
         to = f"{group:02X}/{number:02X},{x},{y}"
-        states[name], moved = warp(mesence, args.rom.resolve(), args.state.resolve(), to, out / name, name, True)
+        states[name], moved = warp(mesence, args.rom.resolve(), start["rom"], to, out / name, name, True)
         # TEST 는 처음과 끝 칸만 견주므로 네 방향을 오가다 제자리로 돌아오면 moved=no 다. 직각 두 방향씩 다시 누르면 상쇄되지 않는다.
         for n, test in enumerate(("left:40,up:40", "right:40,down:40")):
             if not moved:
-                _, moved = warp(mesence, args.rom.resolve(), args.state.resolve(), to, out / name / f"test{n}", name,
+                _, moved = warp(mesence, args.rom.resolve(), start["rom"], to, out / name / f"test{n}", name,
                                 True, TEST=test)
         wram, vram, cgram = dump(mesence, args.rom.resolve(), states[name], out / name / "dump")
         later = [dump(mesence, args.rom.resolve(), states[name], out / name / f"dump{n}", 10 + n * WATER_PERIOD)
@@ -280,7 +284,7 @@ def main():
     cx, cy = _control_cell(args.orig.read_bytes())
     to = f"{CONTROL[0]:02X}/{CONTROL[1]:02X},{cx},{cy}"
     first = next(iter(MAPS))
-    base, _ = warp(mesence, args.orig.resolve(), args.state.resolve(), to, out / "control-orig", "control")
+    base, _ = warp(mesence, args.orig.resolve(), start["orig"], to, out / "control-orig", "control")
     after, _ = warp(mesence, args.rom.resolve(), states[first], to, out / "control-after", "control")
     w0, _, _ = dump(mesence, args.orig.resolve(), base, out / "control-orig" / "dump")
     w1, _, _ = dump(mesence, args.rom.resolve(), after, out / "control-after" / "dump")
@@ -297,7 +301,7 @@ def main():
         to = f"{group:02X}/{number:02X},{fx},{fy}"
         dumps = []
         for label, rom in (("orig", args.orig), ("rom", args.rom)):
-            saved, _ = warp(mesence, rom.resolve(), args.state.resolve(), to, out / f"{name}-{label}", name)
+            saved, _ = warp(mesence, rom.resolve(), start[label], to, out / f"{name}-{label}", name)
             dumps.append(dump(mesence, rom.resolve(), saved, out / f"{name}-{label}" / "dump")[0])
         width, height = dumps[0][0xBF], dumps[0][0xC0]
         results["control"][f"{name}_cell_buffer_equal"] = (

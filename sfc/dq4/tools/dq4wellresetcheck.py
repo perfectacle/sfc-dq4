@@ -1,16 +1,17 @@
 """Check that the well-bottom switch (dq4wellswitch FLAG) is off after a wipe-out and after loading a game, as FC
-clears $6E05 (MesenCE headless, ship cabin savestate).
+clears $6E05 (MesenCE headless, from a start state built from the ROM under test, dq4freshstate).
 
   wipe   warp into the well bottom with the switch on, the hero's HP at 1 and every step fighting (the dungeon
          check's rates), and let the fight end the party: the switch is on when the wipe-out starts (01:88EF) and
          off once the party stands again. "36" first sets the restart slot $195E to 36, whose way back goes by
-         01:899F to バトランド's church; the ship state's own slot 02 goes back without it. "-unhooked" puts
+         01:899F to バトランド's church; slot 02 goes back without it. "-unhooked" puts
          01:88EF back and keeps the switch on
-  load   switch on, save at a church (the cabin's talk number 05), reset and continue: the save slot holds the
-         switch on, the continue path (25:824F, 25:8278) runs the hook, and the loaded game has it off. Only FLAG
+  load   switch on, save at a church (the cabin's talk number 05; load_start), reset and continue: the save
+         slot holds the switch on, the continue path (25:824F, 25:8278) runs the hook, and the loaded game has it off. Only FLAG
          differs from the same scene with 25:8278 as before
 
-  MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4wellresetcheck.py --rom work/ch1/dq4-ch1.sfc --out work/dq4-wellreset
+  MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4wellresetcheck.py --rom work/ch1/dq4-ch1.sfc \\
+      --load-rom work/dq4-groups/groups.sfc --out work/dq4-wellreset
 """
 
 import argparse
@@ -30,6 +31,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+import dq4freshstate  # noqa: E402
 import dq4dungeonencountercheck  # noqa: E402
 import dq4groupcheck  # noqa: E402
 import dq4wellswitch  # noqa: E402
@@ -37,7 +39,7 @@ import dq4mesen  # noqa: E402
 
 FLAG, BIT = dq4wellswitch.FLAG[0] & 0xFFFF, dq4wellswitch.FLAG[1]
 WIPE_TEST = ",".join(["left:24,right:24"] * 4 + ["a:4,wait:40"] * 90)
-WIPES = {"wipe-36": ";195E=36", "wipe-02": "", "wipe-36-unhooked": ";195E=36"}
+WIPES = {"wipe-36": ";195E=36", "wipe-02": ";195E=02", "wipe-36-unhooked": ";195E=36"}
 # The church's yes/no window: the cabin state has not loaded a map, so the shared window records (60:B400, copied to
 # 7E:1AC0 on a map load) are not there yet (dq4-window-text-format.md).
 SHARED_JP, SHARED_WRAM, SHARED_SIZE = 0x60B400, 0x1AC0, 48
@@ -66,6 +68,21 @@ def wipe(mesence, rom, state, out, name):
     return name, {"got": got, "on_at_wipe": bool(start and start[0]), "lookup_899F": lookup,
                   "after": ram[FLAG] & BIT, "ok": bool(start and start[0]) and bool(ram[FLAG] & BIT) == unhooked
                   and lookup == name.startswith("wipe-36")}
+
+
+def load_start(mesence, rom, state, load_rom, out):
+    """(ROM, start state) of the load scene. It saves by talking to the person above the hero in the DQ5 new game's
+    cabin with the church's talk number 05. A chapter-1 ROM starts at the prologue's end, where the same talk at
+    バトランド's church left no save (the command window stayed and the slot stayed empty), so the scene runs on
+    LOAD_ROM: a ROM that keeps the DQ5 new game and has the same continue hook (dq4groupbuild's groups.sfc)."""
+    if dq4freshstate.kind_of(rom.read_bytes()) != "chapter1":
+        return rom, state
+    if not load_rom:
+        raise SystemExit("a chapter-1 ROM has no cabin: give --load-rom (dq4groupbuild.py's groups.sfc)")
+    at = slice(lorom(dq4wellswitch.LOAD), lorom(dq4wellswitch.LOAD) + len(dq4wellswitch.LOAD_ORIG))
+    if any(r.read_bytes()[at] == dq4wellswitch.LOAD_ORIG for r in (rom, load_rom)):
+        raise SystemExit(f"--rom and --load-rom must both have the continue hook at {dq4wellswitch.LOAD:06X}")
+    return load_rom, dq4freshstate.make(mesence, load_rom, out / "start-load")
 
 
 def load(mesence, rom, state, out, name, patch=""):
@@ -98,21 +115,24 @@ def load(mesence, rom, state, out, name, patch=""):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--rom", required=True, type=Path)
-    ap.add_argument("--state", default="work/state/ship.mss", type=Path)
+    dq4freshstate.add_argument(ap)
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--jobs", type=int, default=4)
+    ap.add_argument("--load-rom", type=Path, help="for a chapter-1 --rom: the ROM of the load scene (groups.sfc)")
     args = ap.parse_args()
     mesence = Path(os.environ["MESENCE"])
     out = args.out.resolve()
     if out.exists() and any(out.iterdir()):
         raise SystemExit(f"{out} is not empty")
     out.mkdir(parents=True, exist_ok=True)
-    rom, state = args.rom.resolve(), args.state.resolve()
+    rom = args.rom.resolve()
+    state = dq4freshstate.resolve(args.state, mesence, rom, out / "start")
     dq4groupcheck.WARP = DQ5_TOOLS / "lua" / "dq5warptrace.lua"
     orig = "{:X}={}".format(lorom(dq4wellswitch.LOAD), dq4wellswitch.LOAD_ORIG.hex().upper())
+    load_rom, saving = load_start(mesence, rom, state, args.load_rom and args.load_rom.resolve(), out)
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
         wipes = [pool.submit(wipe, mesence, rom, state, out, name) for name in WIPES]
-        loads = {k: pool.submit(load, mesence, rom, state, out, k, p) for k, p in (("load", ""), ("load-unhooked", orig))}
+        loads = {k: pool.submit(load, mesence, load_rom, saving, out, k, p) for k, p in (("load", ""), ("load-unhooked", orig))}
         results = dict(f.result() for f in wipes)
         hooked, plain = (loads[k].result() for k in ("load", "load-unhooked"))
     differ = [f"{0x2000 + i:04X}" for i, (a, b) in enumerate(zip(hooked.pop("loaded"), plain.pop("loaded"))) if a != b]

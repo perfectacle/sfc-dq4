@@ -34,6 +34,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+import dq4freshstate  # noqa: E402
 import dq4block  # noqa: E402
 from dq4environmentmap import block_prop  # noqa: E402
 from dq4environmentrom import COUNTER_PROPS  # noqa: E402
@@ -182,7 +183,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--build", required=True, type=Path, help="dq4groupbuild.py --out folder")
     ap.add_argument("--dq4", default="rom/dq4.nes", type=Path)
-    ap.add_argument("--state", default="work/state/ship.mss", type=Path)
+    dq4freshstate.add_argument(ap)
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--jobs", type=int, default=4)
     ap.add_argument("--rom", type=Path, help="ROM to check (default BUILD/groups.sfc)")
@@ -212,7 +213,7 @@ def main():
     shop_prices = {int(k.split()[0], 16): v for k, v in shop_report["prices"].items()}
     inns = shop_report["inns"]
     prg = ines.prg(args.dq4.read_bytes())
-    state = args.state.resolve()
+    state = dq4freshstate.resolve(args.state, mesence, rom_path, out / "start")
 
     events = {}
     if args.chapter1:
