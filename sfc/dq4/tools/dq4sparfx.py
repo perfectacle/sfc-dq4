@@ -4,7 +4,7 @@
            FRAMES 프레임 동안 화면의 효과 자리를 잘라 ASSETS/nds/dq4/effect/spar/<효과>/fNN.png 로 둔다(desmume 헤드리스).
   apply    그 프레임을 BG3 2bpp 타일·프레임마다 세 색 팔레트로 바꿔 BANK 에 넣는다. 프레임이 없으면 롬을 그대로 둔다.
 
-  DESMUME_CORE=… python sfc/dq4/tools/dq4sparfx.py capture --state work/state/dq4ds-ch0.state --assets "$DQ4_ASSETS"
+  DESMUME_CORE=… python sfc/dq4/tools/dq4sparfx.py capture --state <DeSmuME 상태 파일> --assets "$DQ4_ASSETS"
   python sfc/dq4/tools/dq4sparfx.py apply --base IN.sfc --assets "$DQ4_ASSETS" --out OUT.sfc
 
 dq4prologue 의 수련 루틴이 BANK 머리의 표시를 보고, 있으면 합마다 프레임 목록을 차례로 올린다.

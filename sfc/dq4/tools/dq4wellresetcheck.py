@@ -4,8 +4,8 @@ clears $6E05 (MesenCE headless, from a start state built from the ROM under test
   wipe   warp into the well bottom with the switch on, the hero's HP at 1 and every step fighting (the dungeon
          check's rates), and let the fight end the party: the switch is on when the wipe-out starts (01:88EF) and
          off once the party stands again. "36" first sets the restart slot $195E to 36, whose way back goes by
-         01:899F to バトランド's church; slot 02 goes back without it. "-unhooked" puts
-         01:88EF back and keeps the switch on
+         01:899F to バトランド's church; slot 02 goes back without it; "own" keeps the start state's slot (36 at
+         the end of the chapter-1 prologue). "-unhooked" puts 01:88EF back and keeps the switch on
   load   switch on, save at a church (the cabin's talk number 05; load_start), reset and continue: the save
          slot holds the switch on, the continue path (25:824F, 25:8278) runs the hook, and the loaded game has it off. Only FLAG
          differs from the same scene with 25:8278 as before
@@ -39,7 +39,11 @@ import dq4mesen  # noqa: E402
 
 FLAG, BIT = dq4wellswitch.FLAG[0] & 0xFFFF, dq4wellswitch.FLAG[1]
 WIPE_TEST = ",".join(["left:24,right:24"] * 4 + ["a:4,wait:40"] * 90)
-WIPES = {"wipe-36": ";195E=36", "wipe-02": ";195E=02", "wipe-36-unhooked": ";195E=36"}
+# The restart slot $195E each wipe scene sets, and whether its way back must go by 01:899F. "wipe-own" keeps the start
+# state's own slot: 36 at the end of the chapter-1 prologue (measured), 02 in a DQ5 new game's cabin. It is not judged
+# by the way back, only by the switch.
+WIPES = {"wipe-36": (";195E=36", True), "wipe-02": (";195E=02", False), "wipe-36-unhooked": (";195E=36", True),
+         "wipe-own": ("", None)}
 # The church's yes/no window: the cabin state has not loaded a map, so the shared window records (60:B400, copied to
 # 7E:1AC0 on a map load) are not there yet (dq4-window-text-format.md).
 SHARED_JP, SHARED_WRAM, SHARED_SIZE = 0x60B400, 0x1AC0, 48
@@ -58,7 +62,7 @@ def wipe(mesence, rom, state, out, name):
     unhooked = name.endswith("-unhooked")
     orig = ";{:X}={}".format(lorom(dq4wellswitch.WIPE), dq4wellswitch.WIPE_ORIG.hex().upper()) if unhooked else ""
     got = dq4groupcheck.scene(mesence, rom, state, out, name, TO="3B/00,6,43", MAXF="6000", TEST=WIPE_TEST,
-                              SET=f"{FLAG:04X}|{BIT:02X};2042=01;2043=00{WIPES[name]}",
+                              SET=f"{FLAG:04X}|{BIT:02X};2042=01;2043=00{WIPES[name][0]}",
                               ROMPATCH=dq4dungeonencountercheck.rates(rom.read_bytes()) + orig, TRACE="0188EF,01899F",
                               LOG=f"7E{FLAG:04X}")
     rows = list(dq4dungeonencountercheck.lines(out / name / "trace.txt"))
@@ -67,7 +71,17 @@ def wipe(mesence, rom, state, out, name):
     lookup = any(pc == "01899F" for _, pc, _ in rows)
     return name, {"got": got, "on_at_wipe": bool(start and start[0]), "lookup_899F": lookup,
                   "after": ram[FLAG] & BIT, "ok": bool(start and start[0]) and bool(ram[FLAG] & BIT) == unhooked
-                  and lookup == name.startswith("wipe-36")}
+                  and WIPES[name][1] in (None, lookup)}
+
+
+def hook_code(data, size=48):
+    """The bytes at 25:8278 and, when they are a JSL, the first `size` bytes of the routine it calls."""
+    at = lorom(dq4wellswitch.LOAD)
+    hook = data[at:at + len(dq4wellswitch.LOAD_ORIG)]
+    if hook[0] != 0x22:
+        return hook
+    target = lorom(int.from_bytes(hook[1:4], "little"))
+    return hook + data[target:target + size]
 
 
 def load_start(mesence, rom, state, load_rom, out):
@@ -79,9 +93,10 @@ def load_start(mesence, rom, state, load_rom, out):
         return rom, state
     if not load_rom:
         raise SystemExit("a chapter-1 ROM has no cabin: give --load-rom (dq4groupbuild.py's groups.sfc)")
-    at = slice(lorom(dq4wellswitch.LOAD), lorom(dq4wellswitch.LOAD) + len(dq4wellswitch.LOAD_ORIG))
-    if any(r.read_bytes()[at] == dq4wellswitch.LOAD_ORIG for r in (rom, load_rom)):
-        raise SystemExit(f"--rom and --load-rom must both have the continue hook at {dq4wellswitch.LOAD:06X}")
+    hooks = [hook_code(r.read_bytes()) for r in (rom, load_rom)]
+    if hooks[0] != hooks[1] or hooks[0][:len(dq4wellswitch.LOAD_ORIG)] == dq4wellswitch.LOAD_ORIG:
+        raise SystemExit(f"--load-rom's continue hook at {dq4wellswitch.LOAD:06X} (and the code it calls) is not "
+                         "the --rom's")
     return load_rom, dq4freshstate.make(mesence, load_rom, out / "start-load")
 
 

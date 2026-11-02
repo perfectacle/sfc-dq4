@@ -1,9 +1,9 @@
 """검사 롬으로 만든 출발 세이브스테이트(MesenCE 헤드리스).
 
-세이브스테이트는 만든 롬의 WRAM·SPC·스택을 그대로 담는다. 다른 빌드로 만든 상태를 지금 롬에 불러오면 바뀐 코드
-자리로 돌아가 폭주한다(옛 `work/state/ship.mss` 를 1장 롬에 불러 135프레임에 BRK `3D:401E`, 스택이 직접 페이지를
-덮음). 그래서 장면 검사는 출발 상태를 검사하는 롬에서 직접 만들고, 상태 옆에 그 롬의 SHA-1 을 적어 둔다. 다른 롬으로
-만든 상태나 SHA-1 이 적히지 않은 상태(옛 `work/state/*.mss`)는 `require_same_build` 가 거절한다.
+세이브스테이트는 만든 롬의 WRAM·SPC·스택을 그대로 담아서, 다른 빌드로 만든 상태를 불러오면 바뀐 코드 자리로 돌아가
+폭주할 수 있다. 그래서 장면 검사는 출발 상태를 검사하는 롬에서 직접 만들고, 상태 옆 곁 파일(`.rom-sha1`)에 그 롬과
+상태 파일의 SHA-1 을 적어 둔다. 롬이 다르거나, 곁 파일이 없거나(손으로 고른 `work/state/*.mss`), 상태 파일이 적힌 뒤
+바뀌었으면 `require_same_build` 가 불러오기 전에 멈춘다.
 
 | 롬 | 출발 상태 |
 | --- | --- |
@@ -46,29 +46,34 @@ def sidecar(state):
 
 
 def stamp(state, data):
-    sidecar(state).write_text(rom_sha1(data) + '\n', encoding='utf-8')
-    return Path(state)
+    """곁 파일에 「rom <롬 SHA-1>」·「state <상태 SHA-1>」 두 줄을 쓴다."""
+    state = Path(state)
+    sidecar(state).write_text(f'rom {rom_sha1(data)}\nstate {rom_sha1(state.read_bytes())}\n', encoding='utf-8')
+    return state
 
 
 def require_same_build(state, data):
-    """state 가 data 롬으로 만든 것이 아니면 SystemExit. 옛 세이브스테이트를 불러 폭주한 결과를 검사 결과로 믿지 않게
-    불러오기 전에 멈춘다."""
-    tag = sidecar(state)
-    if not Path(state).is_file():
+    """state 가 data 롬으로 만든 그대로가 아니면 SystemExit. 불러온 뒤 폭주한 결과를 검사 결과로 믿지 않게 불러오기
+    전에 멈춘다."""
+    state, tag = Path(state), sidecar(state)
+    if not state.is_file():
         raise SystemExit(f'세이브스테이트 없음: {state}')
     if not tag.is_file():
         raise SystemExit(f'{state}: 어느 롬으로 만들었는지 모름({tag.name} 없음). 검사 롬으로 만든 상태만 씀 — '
                          '--state 를 빼면 검사 롬으로 만든다')
-    made = tag.read_text(encoding='utf-8').strip()
-    if made != rom_sha1(data):
-        raise SystemExit(f'{state}: 롬 {made[:12]} 로 만든 상태인데 검사 롬은 {rom_sha1(data)[:12]}(다른 빌드)')
-    return Path(state)
+    made = dict(line.split(' ', 1) for line in tag.read_text(encoding='utf-8').splitlines() if ' ' in line)
+    if made.get('rom') != rom_sha1(data):
+        raise SystemExit(f'{state}: 롬 {made.get("rom", "?")[:12]} 로 만든 상태인데 검사 롬은 {rom_sha1(data)[:12]}'
+                         '(다른 빌드)')
+    if made.get('state') != rom_sha1(state.read_bytes()):
+        raise SystemExit(f'{state}: {tag.name} 를 적은 뒤 상태 파일이 바뀜')
+    return state
 
 
 def _ship(mesence, rom, out, cache):
     import dq4ch1walkcheck as walk
-    key = walk.fingerprint(SHIP_LUA, Path(__file__), walk.mesence_stamp(mesence),
-                           *(sorted(Path(os.environ['LIBDIR']).rglob('*.lua')) if os.environ.get('LIBDIR') else ()))
+    # 서장 캐시와 같은 파일 목록(walk.run·dq4mesen.run·lua 전부·uv.lock·MesenCE)에 이 모듈을 더한다
+    key = walk.code_key(mesence, Path(__file__), 'ship')
     state = out / 'ship.mss'
     hit = cache.get('ship', key, '.mss', state)
     if hit:

@@ -11,7 +11,7 @@ import dq4battlemsgcheck as bc
 
 class RoundsTests(unittest.TestCase):
     def test_second_round_after_a_stall(self):
-        """한 묶음이 멈추면 남은 번호를 다음 차례로 넘긴다. 차례 변수가 묶음 크기를 덮어 둘째 차례에서 죽은 적이 있다."""
+        """한 묶음이 멈추면 남은 번호를 다음 차례로 넘겨, 둘째 차례도 같은 묶음 크기로 나눈다."""
         calls = []
 
         def run(mesence, libdir, rom, state, out, ids, field=False):
