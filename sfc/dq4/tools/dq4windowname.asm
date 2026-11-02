@@ -752,6 +752,9 @@ org $24A5E9
 !wq_off   = $3D64           ; 대기열에 다음으로 쓸 자리
 !wt_vis   = $3DAC           ; 슬롯마다 1바이트: bit0 = 마지막 창 타일맵 전송 때 보였거나 그 뒤에 그렸음, bit1~7 = 그린 문구 표식
 !wt_xfer  = $3DCA           ; 1바이트: 이번 NMI 에 게임이 보낼 창 타일맵 줄($0BEC 의 bit7·6), NMI 끝에서 WtVis 가 씀
+!wt_tilemap_line = 249      ; 되돌린 뒤 이 주사선 앞이면 게임의 창 타일맵 2KB 를 미루지 않는다
+!wt_restore_line = 250      ; 게이트가 이 주사선 앞에서만 슬롯을 하나 더 되돌린다(하나에 다섯 줄까지)
+!wt_stale2 = $3DCD          ; 1바이트: 찾기가 본 둘째 슬롯 × 2 + 1(0 = 없음). 게이트가 주사선이 남으면 이어 되돌림
 !wt_stale = $3DCB           ; 1바이트: 메시지 창에 비치는 안 보이는 캔버스 슬롯 × 2 + 1(다음 NMI 게이트가 되돌림).
                             ; $80 = NMI 끝에서 찾음(창 타일맵을 보냈거나 하나를 되돌린 뒤, 전투 중이면 필드로 돌아올 때까지 둠), 0 = 없음
 !wt_ecsave = $3DCC          ; 1바이트: 창 제목을 그리는 동안 맡겨 둔 $EC
@@ -3234,6 +3237,14 @@ WtVisTail:
     ; bit7 이면 찾는다. 이 바이트는 게임이 켤 때 지우지 않아, $80 밖의 큰 값으로 남아 있어도 찾기가 멈추지 않게
     LDA.l $7E0000|!wt_stale
     BPL +
+    ; 전투에서는 부르지도 않는다(전투 NMI 길이를 바꾸지 않게)
+    LDA.l $001945
+    CMP #$89
+    BNE ++
+    LDA.l $001944
+    CMP #$52
+    BEQ +
+++
     PHX
     PHY
     JSR WtStaleFind
@@ -3694,6 +3705,7 @@ WtStaleFind:
 +
     SEP #$20
     STZ.w !wt_stale
+    STZ.w !wt_stale2
     REP #$20
     ; 1D0~1FF 슬롯(비트 12~14)은 캔버스 밖
     LDA.w !wt_dirty
@@ -3724,9 +3736,14 @@ WtStaleFind:
     TXA
     INC
     SEP #$20
-    STA.w !wt_stale
+    LDY.w !wt_stale
+    BEQ +
+    STA.w !wt_stale2
     REP #$20
     BRA .out
++
+    STA.w !wt_stale
+    REP #$20
 .next
     INX
     INX
@@ -3808,9 +3825,9 @@ WtStaleGate:
     PLB
     LDA.w !wt_stale
     AND #$00FF
-    BEQ .out
+    BEQ .bail
     BIT #$0080
-    BNE .out
+    BNE .bail
     DEC
     TAX
     SEP #$20
@@ -3819,31 +3836,68 @@ WtStaleGate:
     REP #$20
     ; 켤 때 남은 값이면 슬롯 번호가 아닐 수 있다: 캔버스 슬롯(짝수 × 2, 가나 항목 뒤)만
     CPX.w #!wt_nkana*2
-    BCC .out
+    BCC .bail
     CPX.w #!wt_nslot*2
-    BCS .out
+    BCS .bail
     TXA
     LSR
-    BCS .out
+    BCS .bail
     LDA.w $1944
     CMP #$8952
-    BEQ .out
+    BNE +
+.bail
+    JMP .out
++
+    ; 이 NMI 에 게임이 캔버스를 보내면 WqClean 이 그림을 올린 슬롯을 모두 비운다
+    LDA.w $0F59
+    AND #$00FF
+    BNE .bail
     TXA
     LSR
     TAY
     LDA.w !wt_vis,Y
     AND #$0001
-    BNE .out
+    BNE .bail
     LDA.w !wt_ages,X
-    BEQ .out
+    BEQ .bail
     LDA.l WtBitLo,X
     AND.w !wt_dirty
     BNE +
     LDA.l WtBitHi,X
     AND.w !wt_dirty+2
-    BEQ .out
+    BEQ .bail
 +
     JSR WtRestoreSlot
+    ; 주사선이 남으면 찾기가 본 둘째 슬롯도 되돌린다(목록이 닫히는 몇 프레임 동안 한 NMI 에 하나씩이면 메시지 창에 남음).
+    ; 슬롯 하나가 다섯 줄까지 들어, !wt_restore_line 앞에서만 시작한다
+    LDA.w !wt_stale2
+    AND #$00FF
+    BEQ .defer
+    DEC
+    TAX
+    SEP #$20
+    STZ.w !wt_stale2
+    REP #$20
+    CPX.w #!wt_nkana*2
+    BCC .defer
+    CPX.w #!wt_nslot*2
+    BCS .defer
+    TXA
+    LSR
+    BCS .defer
+    JSR WtLine
+    CMP #$00E1
+    BCC .defer
+    CMP.w #!wt_restore_line
+    BCS .defer
+    JSR WtStaleIs
+    BCC .defer
+    JSR WtRestoreSlot
+.defer
+    ; 창 타일맵 2KB 는 열두 줄쯤 든다. 그 안에 끝날 만큼 이르면 이 NMI 에 보내게 둔다
+    JSR WtLine
+    CMP.w #!wt_tilemap_line
+    BCC .out
     SEP #$20
     LDA.l $000BEC
     BEQ .out
@@ -3854,6 +3908,19 @@ WtStaleGate:
 .out
     PLB
     PLP
+    RTS
+
+; 지금 주사선(A, M = 16). WqNmi 와 같은 순서로 V 카운터를 읽는다($4201 bit7 은 게임이 부팅 때 켬)
+WtLine:
+    SEP #$20
+    LDA.l $00213F
+    LDA.l $002137
+    LDA.l $00213D
+    XBA
+    LDA.l $00213D
+    AND #$01
+    XBA
+    REP #$20
     RTS
 
 ; 슬롯 X 의 그림을 메시지 캔버스로 되돌리고 비운다(M = 16, DB = 7E)
