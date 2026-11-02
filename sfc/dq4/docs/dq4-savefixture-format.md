@@ -136,7 +136,9 @@ core.poke(dq4compatcheck.sets(dq4ch1walkcheck.pins({})))   # 난수·시각을 �
 | `dq4bg3slotcheck` | 실내 맵 명령 창의 BG3 자리 | `menu.sfc`(자리 표 `dq4bg3slot.MAP_SLOTS` 가 DQ5 맵 번호). 출발 맵 `17/00` 은 `01/01` 을 거쳐 감([판정](dq4-window-text-format.md#패치-단계가-다른-롬과-화면을-견주지-않는-판정2026-11-03)) |
 | `dq4wellresetcheck` 의 `load` | 교회 대화(대화 번호 05)로 기록, 리셋, 이어 하기 | `--load-rom`(`groups.sfc`). `25:8278` 훅 바이트와 그 훅이 부르는 루틴 앞 48바이트가 1장 롬과 같아야 시작함. 1장 롬 서장 끝에서 같은 대화를 하면 기록이 남지 않았고, `36/00` 신부 앞(10,44)으로 순간이동해 말을 걸어도 명령 창 제목만 남은 채 기록 칸이 비어 있었음 |
 
-재발 방지 테스트는 `sfc/dq4/tools/test_dq4freshstate.py` 입니다. 옮긴 검사 열셋이 `dq4freshstate.resolve`·`make` 로 만든 값을 장면에 넘기는지, `--state` 를 받는 dq4 도구가 같은 빌드인지 보는지, 어느 도구도 `work/state` 를 가리키지 않는지(합친 경로 포함) 봅니다. 아직 손으로 고른 상태를 받는 `dq4doorcheck`·`dq4doorstandcheck` 는 expectedFailure 이고, `dq4sparfx` 의 `--state` 는 NDS DeSmuME 상태라 대상이 아닙니다.
+재발 방지 테스트는 `sfc/dq4/tools/test_dq4freshstate.py` 입니다. 옮긴 검사 열다섯이 `dq4freshstate.resolve`·`make` 로 만든 값을 장면에 넘기는지, `--state` 를 받는 dq4 도구가 같은 빌드인지 보는지, 어느 도구도 `work/state` 를 가리키지 않는지(합친 경로 포함) 봅니다. `dq4sparfx` 의 `--state` 는 NDS DeSmuME 상태라 대상이 아닙니다.
+
+문 검사 둘도 이 길을 탑니다. `dq4doorcheck` 는 서장 끝에서, `dq4doorstandcheck` 는 `dq4heroblockcheck` 의 성 마을 `36/00` 출발 상태에서 시작합니다. 서장 끝·배 선실이 아닌 출발 상태는 `resolve` 의 `build` 로 만들고, 만든 뒤 같은 곁 파일을 적습니다. 그래서 두 검사 모두 `--state` 에는 같은 롬으로 SHA-1 을 적은 상태만 받습니다.
 
 우물 검사의 전멸 장면은 1장 롬에서 돕니다. 서장 끝 상태의 다시 시작 자리는 `$195E` = `36`(맵 `36/01`, 헤드리스로 잼)이라 선실의 `02` 와 다릅니다. `wipe-02` 는 `02` 를 직접 두고, `wipe-own` 은 서장 끝의 값을 그대로 둡니다.
 
@@ -146,5 +148,4 @@ core.poke(dq4compatcheck.sets(dq4ch1walkcheck.pins({})))   # 난수·시각을 �
 - 표에 없는 그룹의 칸으로 이어 했을 때 필드의 어느 칸에 서는지와 그 루틴.
 - `7E:21CB`·`21CC` 를 맵에 들어설 때 고쳐 쓰는 까닭.
 - 기존 장면 검사(`dq4ch1walkcheck` 의 묶음 걷기 등)를 서장 세이브스테이트 대신 이 기록으로 시작하게 옮기기.
-- `dq4doorcheck`·`dq4doorstandcheck` 의 `--state` 를 검사 롬으로 만든 상태로 옮기기.
 - 1장 롬 `36/00` 교회 신부에게 순간이동 뒤 말을 걸면 명령 창 제목만 남고 기록이 되지 않는 까닭(순간이동 상태 탓인지 게임 쪽인지 모름).

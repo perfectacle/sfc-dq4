@@ -5,6 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import dq4balance  # noqa: E402
+import dq4doorcheck  # noqa: E402
 import dq4door as door  # noqa: E402
 import dq4environmentrom  # noqa: E402
 
@@ -75,6 +76,17 @@ class FindTest(unittest.TestCase):
         finally:
             door.AUTO_OPEN = saved
 
+
+
+class VerdictTest(unittest.TestCase):
+    def test_no_cases_fails(self):
+        self.assertEqual(dq4doorcheck.verdict([]), "failed")
+
+    def test_all_ok_passes(self):
+        self.assertEqual(dq4doorcheck.verdict([{"ok": True}, {"ok": True}]), "passed")
+
+    def test_one_failure_fails(self):
+        self.assertEqual(dq4doorcheck.verdict([{"ok": True}, {"ok": False}]), "failed")
 
 if __name__ == "__main__":
     unittest.main()
