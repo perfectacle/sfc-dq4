@@ -699,7 +699,18 @@ class MidiWavTests(unittest.TestCase):
         self.assertEqual(tempos, [(0, round(60_000_000 / 240))])
         want = sorted((ti + 1, t, min(t + max(d, 1), stop), k, v)
                       for t, ti, kind, k, v, d in (e for e in seq.events if e[2] == "note") if t < stop)
-        self.assertEqual(sorted(n for n in notes if n[1] is not None and n[2] is not None), want)
+        # 켠 채로 남거나 짝 없이 끈 음(None 칸)이 섞여도 비교가 TypeError 없이 실패하게 키를 둔다
+        self.assertEqual(sorted(notes, key=lambda x: tuple(-1 if v is None else v for v in x)), want)
+
+    def test_midi_drops_note_at_stop_tick(self):
+        events = [(0, 0, "note", 60, 100, 4), (4, 0, "note", 62, 100, 4)]
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "z.mid"
+            ns.write_midi(path, events, 4, {"start_tick": 0, "end_tick": 4}, 1, "t")
+            data = path.read_bytes()
+        notes, _ = ns.midi_notes(data)
+        self.assertEqual([n[1:] for n in notes], [(0, 4, 60, 100)])
+        self.assertEqual(data.count(bytes([0x90, 62])), 0)
 
     def test_midi_other_events(self):
         events = [(0, 0, "prog", 130), (0, 0, "cc", 7, 200), (1, 0, "bend", -200), (1, 0, "range", 12),

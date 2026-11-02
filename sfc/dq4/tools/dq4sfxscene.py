@@ -30,6 +30,7 @@ HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
 ARGS = HERE / 'dq4sound-game.args'
+DQ5_ROM = HERE.parents[2] / 'rom' / 'dq5.sfc'
 
 # 대기열(7E 뱅크)
 Q_WRITE, Q_READ, Q_CMD, Q_ARG, Q_X = 0x1D91, 0x1D93, 0x1D95, 0x1DA5, 0x1DB5
@@ -334,7 +335,7 @@ def dq5_samples(path=None):
     import dq4soundcheck as sc
     from dq5map import Rom
     from dq5spc import samples
-    data = Path(path or HERE.parents[2] / 'rom' / 'dq5.sfc').read_bytes()
+    data = Path(path or DQ5_ROM).read_bytes()
     return {n: sc.sample_body(data, n)[7:] for n, *_ in samples(Rom(data))}
 
 
@@ -691,9 +692,76 @@ def unreached_problems(rom):
 
 
 def leftover_sites(rom, table):
-    """대응표가 번호를 바꾼 원래 효과음(35-00·01·02)을 아직 부르는 자리 — 바뀌지 않은 사본 코드(결과에 적기만 함)."""
+    """대응표가 번호를 바꾼 원래 효과음(35-00·01·02)을 아직 부르는 자리 (결과의 findings 에 그대로 적고, 검사는 leftover_problems)."""
     olds = {old for old, _ in table.calls.values()}
     return [f'{a:06X} {o:02X}-{b:02X}' for o in sorted(olds) for b in range(4) for a in call_sites(rom, o, b)]
+
+
+# 문 표를 늘린 롬(dq5newmap --door-bank, dq4groupbuild 는 3B)은 뱅크 01 전체를 그 뱅크에 복사하고, 문 자료로 들어가는
+# 여섯 입구를 `PEA $BBBB / PLB / PLB / JML 01:입구+4` 꼴 스텁으로 돌린다. 복사본은 DB 로 읽는 자료일 뿐 코드는 뱅크 01
+# 에서 돈다. 그래서 대응표가 뱅크 01 에서 바꾼 자리의 사본은 원래 번호로 남아도 울리지 않는다(MesenCE 실측은
+# dq4-sound-port-format.md 「문 뱅크 사본의 남은 효과음」).
+DOOR_ENTRIES = (0x01F3C9, 0x01D8C2, 0x01D92E, 0x01D915, 0x01F117, 0x01D97B)
+STUB_MAX = 16
+# 사본으로 보는 BRK 둘레: BRK 4바이트와 앞뒤 COPY_WINDOW 바이트가 패치 전 뱅크 01 의 같은 주소와 같아야 한다. 효과음
+# 번호 한 바이트만 같은 다른 코드를 사본으로 넘기지 않게, BRK 를 부르는 앞뒤 명령까지 본다. 창 안이 복사 뒤 바뀌었으면
+# 사본으로 치지 않으므로 틀려도 실패 쪽으로 틀린다
+COPY_WINDOW = 16
+LONG_JUMPS = (0x22, 0x5C)             # JSL·JML(JMP 롱)
+
+
+def door_copy_bank(rom):
+    """여섯 입구가 모두 같은 복사 뱅크 BB 로 DB 를 두고 뱅크 01 로 돌아가는 스텁으로 가면 BB, 아니면 None.
+    입구 스텁만 본다. 다른 코드가 BB 로 바로 뛰는지는 door_bank_jumps 가 훑는다."""
+    banks = set()
+    for entry in DOOR_ENTRIES:
+        o = lorom(entry)
+        if rom[o] != 0x5C:
+            return None
+        stub = lorom(int.from_bytes(rom[o + 1:o + 4], 'little'))
+        code = rom[stub:stub + STUB_MAX]
+        pea, jml = code.find(b'\xf4'), code.find(b'\x5c')
+        if pea < 0 or jml < pea or code[pea + 1] != code[pea + 2] or code[jml + 3] != entry >> 16:
+            return None
+        # F3C9 몫은 복귀 주소를 PEA 로 하나 더 쌓으므로 첫 PEA 만 DB 다
+        banks.add(code[pea + 1])
+    return banks.pop() if len(banks) == 1 and banks != {0x01} else None
+
+
+def door_bank_jumps(rom, bank, base):
+    """롬 전체에서 뱅크 bank(·거울 bank|80)의 8000~FFFF 로 가는 JSL·JML 롱 꼴 4바이트 자리 [(자리, 대상)].
+    패치 전 롬 base 의 같은 자리에 같은 4바이트가 있으면 뺀다(원본 DQ5 에는 그 뱅크의 코드가 없으므로 자료다).
+    바이트만 보므로 코드와 자료를 가르지 못한다: 샘플·그림·압축 자료·표 안의 같은 꼴도 잡힌다. 그래서 문제로 치지 않고
+    결과의 findings 에 적으며, 나온 자리가 코드인지는 사람이 본다(dq4-sound-port-format.md 「문 뱅크 사본의 남은 효과음」)."""
+    banks = re.escape(bytes((bank, bank | 0x80)))
+    pat = re.compile(b'(?=[' + re.escape(bytes(LONG_JUMPS)) + b'](?s:.)[\\x80-\\xff][' + banks + b'])')
+    return [(o // 0x8000 << 16 | 0x8000 | o % 0x8000, int.from_bytes(rom[o + 1:o + 4], 'little'))
+            for o in (m.start() for m in pat.finditer(rom)) if base[o:o + 4] != rom[o:o + 4]]
+
+
+def is_door_copy(rom, base, addr):
+    """addr(복사 뱅크의 BRK 자리) 둘레 바이트가 패치 전 뱅크 01(base) 의 같은 주소와 같으면 True."""
+    lo = max(addr & 0xFFFF, 0x8000 + COPY_WINDOW) - COPY_WINDOW
+    hi = min((addr & 0xFFFF) + 4 + COPY_WINDOW, 0x10000)
+    here, there = lorom(addr & 0xFF0000 | lo), lorom(0x010000 | lo)
+    return len(base) >= there + hi - lo and rom[here:here + hi - lo] == base[there:there + hi - lo]
+
+
+def leftover_problems(rom, table, base):
+    """원래 효과음을 아직 부르는 자리 가운데, 실행되지 않는 문 뱅크 복사본에 남은 --sfx-call 자리 사본이 아닌 것.
+    사본은 둘레 바이트가 패치 전 롬 base(원본 DQ5) 의 뱅크 01 과 같아야 한다. 그런 자리가 실제로 돌면 대응표와 달리
+    DQ5 소리가 난다."""
+    bank = door_copy_bank(rom)
+    out = []
+    for text in leftover_sites(rom, table):
+        at, call = text.split()
+        addr = int(at, 16)
+        twin = 0x010000 | addr & 0xFFFF
+        if bank is not None and addr >> 16 == bank and table.calls.get(twin, (None,))[0] == int(call[:2], 16) \
+                and is_door_copy(rom, base, addr):
+            continue
+        out.append(f'{text}: 대응표대로 바뀌지 않은 자리')
+    return out
 
 
 # ---- 효과음 결정 표(손으로 적음) --------------------------------------------------------------------------------------
@@ -1026,6 +1094,8 @@ def main():
     rom_path = args.rom.resolve()
     rom = rom_path.read_bytes()
     table = load_table(ARGS.read_text())
+    dq5 = DQ5_ROM.read_bytes()
+    bank = door_copy_bank(rom)
     every = scenes(table)
     cores = list(cc.CORES) if args.core == 'all' else [args.core]
     for c in cores:
@@ -1044,7 +1114,7 @@ def main():
     all_scenes = scenes(table)
     static = {'call_sites': call_site_problems(rom, table), 'weapon_table': weapon_table_problems(rom, table),
               'decisions': decision_problems(table), 'unreached': unreached_problems(rom),
-              'adopted_waves': adopted_wave_problems(rom),
+              'adopted_waves': adopted_wave_problems(rom), 'leftover_sites': leftover_problems(rom, table, dq5),
               'uncovered': [e for e in uncovered(table, all_scenes)
                             if e not in RUNTIME_GAPS and not e.startswith('call ')]}
     jobs = [(c, s, True) for s in every for c in cores]
@@ -1067,7 +1137,10 @@ def main():
     report = {'status': 'passed' if ok else 'failed', 'rom_sha1': hashlib.sha1(rom).hexdigest(),
               'seconds': round(time.time() - t0, 1), 'static': static, 'control': control,
               'runtime_uncovered': sorted(RUNTIME_GAPS | {f'call {a:06X}' for a in table.calls}),
-              'findings': {'leftover_sites': leftover_sites(rom, table), 'resident_waves_changed': resident_wave_diffs(rom),
+              'findings': {'leftover_sites': leftover_sites(rom, table),
+                           'door_bank_jumps': [f'{a:06X} -> {t:06X}' for a, t in door_bank_jumps(rom, bank, dq5)]
+                           if bank is not None else [],
+                           'resident_waves_changed': resident_wave_diffs(rom),
                            'resident_waves_adopted': {f'{n:02X}': h for n, h in sorted(ADOPTED_WAVES.items())},
                            'scenes': sorted({f for r in results for f in r.get('findings', [])})},
               'scenes': results}
