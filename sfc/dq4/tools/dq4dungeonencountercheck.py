@@ -14,7 +14,10 @@ step fight (RATES); the field scenes keep the ROM's rates, or the field walk to 
          makes of the bit before and the step's FC cell (dq4encounter.toggle_after), and while it is off the
          zone is FF and no group is picked; a scene whose switch ends off need not fight
   song   00:CEA2 (the map's song request on arrival) gets the LINKS "music" slot, and in a field scene the song
-         playing ($1D8B) on the dungeon's steps is that slot. The start state is built from this ROM
+         playing ($1D8B) on the dungeon's steps is that slot once it has started: each visit (from the arrival's
+         song request) may begin with FF steps, the gap between the field song's stop (1A) and the new song's
+         start, which original DQ5 also walks through on entering its caves and towers, but once the slot plays
+         no step may read anything else, and some step must read it. The start state is built from this ROM
          (dq4freshstate): a state of another build keeps that build's SPC song table (dq4soundstate.lua), and its
          first map's song may not start
 
@@ -64,6 +67,8 @@ TRACE = "0082AF,23E9B0,23EA40,23E98F,00CEA2,23E8BB"
 FLAG = f"7E{dq4wellswitch.FLAG[0] & 0xFFFF:04X}"
 LOG = f"7E1001,7E1003,7E1005,7E1007,7E00BC,7E00BD,7E00BE,7E194A,7E1D8B,{FLAG},7E3020,7E3080,7E0000,7E1A9A"
 SWITCH_ON = f"{dq4wellswitch.FLAG[0] & 0xFFFF:04X}|{dq4wellswitch.FLAG[1]:02X}"
+# $1D8B after the previous song's stop (1A) until the new one starts.
+SONG_STARTING = 0xFF
 EXITS = {"23E9B0": "single", "23EA40": "mixed", "23E98F": "fixed"}
 # Scene -> (how it comes in, walk): ("field", DQ5 group) walks in from the group's first field entrance, ("to", warp
 # TO) warps there, ("stair", warp TO, input) warps beside an FC stair (dq4groupcheck stair_scenes) and takes it.
@@ -113,6 +118,20 @@ def lines(path):
             yield int(f[0]), f[1], dict(x.split("=") for x in f[2:] if "=" in x)
 
 
+def song_held(visits, song):
+    """True when every visit's $1D8B per step is FF (song not started yet) then `song` to the end, and some step
+    reads `song`. `visits` is one list of step songs per arrival."""
+    heard = False
+    for steps in visits:
+        started = False
+        for got in steps:
+            if got == song:
+                started = heard = True
+            elif started or got != SONG_STARTING:
+                return False
+    return heard
+
+
 def groups(kv):
     b = b"".join(int(kv[k], 16).to_bytes(2, "little") for k in ("7E1001", "7E1003", "7E1005", "7E1007"))
     return [(m, c) for m, c in zip(b[:4], b[4:]) if m != 0xFF]
@@ -126,7 +145,12 @@ def main():
     dq4freshstate.add_argument(ap)
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--jobs", type=int, default=4)
+    ap.add_argument("--scenes", help="comma-separated SCENES names to run (default: all)")
     args = ap.parse_args()
+    names = args.scenes.split(",") if args.scenes else list(SCENES)
+    unknown = [n for n in names if n not in SCENES]
+    if unknown:
+        ap.error(f"unknown scenes: {unknown}")
     mesence = Path(os.environ["MESENCE"])
     out = args.out.resolve()
     if out.exists() and any(out.iterdir()):
@@ -207,7 +231,7 @@ def main():
                         chance["bad"].append([here, byte(kv, "7E3020"), byte(kv, "7E3080"), byte(kv, "7E0000"), want])
                 continue
             seen = maps.setdefault(here, {"steps": 0, "zones": set(), "y": set(), "fights": [], "songs": set(),
-                                          "194A": set(), "playing": set(), "off_zones": set(), "off_fights": 0})
+                                          "194A": set(), "playing": [], "off_zones": set(), "off_fights": 0})
             seen["194A"].add(byte(kv, "7E194A"))
             got_on = bool(byte(kv, FLAG) & dq4wellswitch.FLAG[1])
             if pc == "0082AF":
@@ -228,9 +252,12 @@ def main():
                 seen["steps"] += 1
                 seen["zones"].add(byte(kv, "A"))
                 seen["y"].add(byte(kv, "Y"))
-                seen["playing"].add(byte(kv, "7E1D8B"))
+                if not seen["playing"]:
+                    seen["playing"].append([])
+                seen["playing"][-1].append(byte(kv, "7E1D8B"))
             elif pc == "00CEA2":
                 seen["songs"].add(byte(kv, "A"))
+                seen["playing"].append([])
             elif group == well_group and not got_on:
                 seen["off_fights"] += 1
             else:
@@ -254,7 +281,7 @@ def main():
             good = good and seen["off_zones"] <= {0xFF} and not seen["off_fights"]
             good = good and seen["songs"] <= {want["song"]} and seen["194A"] == {dq4groupbuild.INDOOR_ENCOUNTERS}
             if how[0] == "field":
-                good = good and seen["playing"] == {want["song"]}
+                good = good and song_held(seen["playing"], want["song"])
             ok = ok and good
             report_maps[m] = {**{k: sorted(v) if isinstance(v, set) else v for k, v in seen.items()},
                               "want": want, "ok": good}
@@ -272,7 +299,7 @@ def main():
         return name, {"got": got, "maps": report_maps, "well": well, "chance": chance, "ok": ok}
 
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
-        results = dict(pool.map(run, SCENES))
+        results = dict(pool.map(run, names))
     ok = all(r["ok"] for r in results.values())
     result = {"status": "passed" if ok else "failed", "scenes": dict(sorted(results.items())),
               "zones": {k: v for k, v in report.items() if v["kind"] == "dungeon"}}
