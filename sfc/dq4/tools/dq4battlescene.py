@@ -50,6 +50,13 @@ TURN_WINDOW = 0x17                # 차례가 올 때 7E:0A00 이 FF 에서 이 
 # 입력을 기다리는 전투 창: 싸우기/도망 1B, 공격/방어/도구 17·1E, 물건 24. 이 창에서는 메시지 넘기기 A 를 누르지 않는다
 INPUT_WINDOWS = (0x17, 0x1B, 0x1E, 0x24)
 FIELD_WINDOW = 0x01               # 맵의 명령 창: 전투가 끝나 조작이 돌아왔다는 표지
+# 물건 창 24 의 제목 「(이름)の どうぐ」 가 가나로 남는지. 창 타일맵 버퍼(7E:5000, 32칸 줄)에서 창 자리(머리 x 5, y 20, 너비 25)의
+# 위 테두리 줄과 제목 줄을 창이 뜬 지 ITEM_TITLE_WAIT 프레임 뒤에 읽어, 가나 칸(010~077)을 가리키는 칸이 있으면 걸린다
+ITEM_WINDOW = 0x24
+ITEM_TITLE_AT = (5, 20, 25)
+ITEM_TITLE_WAIT = 20
+TILEMAP = 0x7E5000
+KANA_TILES = range(0x10, 0x78)
 SONG = 0x7E1D8B
 SONG_VICTORY, SONG_LOSE = 0x1F, 0x0B
 FLAGS_1000, ZONE_LEVEL = 0x7E1000, 0x7E100F
@@ -334,6 +341,13 @@ def judge_heal(s, expect):
         problems.append(f"호이민 MP 가 {h.get('caster_mp_drop')} 줆, 기대 {expect['mp_cost']}")
     if 'item_slot' in expect and (s.get('items_at_finish') or [None] * 12)[expect['item_slot']] != NO_ITEM:
         problems.append(f"몬스터를 쓰러뜨렸을 때 셋째 칸이 남음: {s.get('items_at_finish')}")
+    if expect.get('item_title'):
+        title = s.get('item_title')
+        kana = [w & 0x3FF for w in title or () if w & 0x3FF in KANA_TILES]
+        if title is None:
+            problems.append('물건 창이 뜨지 않음')
+        elif kana:
+            problems.append('물건 창 제목에 가나 칸 ' + ' '.join(f'{t:03X}' for t in kana))
     return problems
 
 
@@ -639,6 +653,7 @@ def expectations(rom, scene_name, slot):
             exp['mp_cost'] = cost
         else:
             exp['item_slot'] = 2
+            exp['item_title'] = True
     if scene_name == 'noflee':
         exp['flee_tries'] = scene['then'][1]
     if scene_name == 'monflee':
@@ -800,9 +815,17 @@ class Run:
         healed = False
         buttons = set()
         seen_window = False
+        item_open = None
         while c.n - s['start'] < scene.get('limit', BATTLE_LIMIT):
             w.step(buttons)
             buttons = set()
+            if c.rd(WINDOW) != ITEM_WINDOW:
+                item_open = None
+            elif item_open is None:
+                item_open = c.n
+            elif c.n - item_open == ITEM_TITLE_WAIT and 'item_title' not in s:
+                x, y, width = ITEM_TITLE_AT
+                s['item_title'] = [c.rd(TILEMAP + ((y + dy) * 32 + x + k) * 2, 2) for dy in (0, 1) for k in range(width)]
             cur = c.rd(SONG)
             if cur != song:
                 s['songs'].append([c.n - s['start'], cur])

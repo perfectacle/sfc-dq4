@@ -73,6 +73,48 @@ class FieldSlotTest(unittest.TestCase):
         self.assertLess(max(i for i, s in enumerate(order) if s == (10, True)), medium_visible)
 
 
+class MessageCellTest(unittest.TestCase):
+    def test_message_cells_match_slot_tiles(self):
+        # 메시지 창은 화면 18~26줄·3~28열에 캔버스를 한 줄 26칸씩 차례로 가리킨다
+        def cell(t):
+            d = t - CANVAS.start
+            return 0x5000 + ((18 + d // ROW) * 32 + 3 + d % ROW) * 2
+        cells = table('WtMsgCellF')
+        for i, (lo, up, c) in enumerate(zip(table('WtSlotF'), table('WtUpperF'), table('WtClassF'))):
+            row = cells[8 * i:8 * i + 8]
+            if c == 0xFF or c & 0x20:
+                self.assertEqual(row, [0] * 8)
+                continue
+            n = COLS[c & 0x0F]
+            up = up or lo + n
+            self.assertEqual(row, [cell(lo), lo, cell(lo + n - 1), lo + n - 1, cell(up), up, cell(up + n - 1), up + n - 1])
+
+
+def define(name):
+    return int(re.search(rf'^!{name} *= *\$([0-9A-Fa-f]+)', ASM.read_text(), re.M).group(1), 16)
+
+
+class HoldAreaTest(unittest.TestCase):
+    # 7F:8300~FFFF 는 1장 이어 걷기·창 검사 장면에서 읽는 곳이 없고, 월드 필드 밖에서는 맵을 불러올 때 지우기만 한다(접근
+    # 카운터·쓰기 추적 실측). 묶음 버퍼의 머리·후보 표·버퍼가 그 안에서 겹치지 않아야 한다
+    FREE = range(0x7F8300, 0x800000)
+
+    def test_hold_parts_do_not_overlap_and_stay_in_the_free_area(self):
+        parts = [(define('wh_magic'), 0x10), (define('wt_stc'), 16), (define('wh_buf'), define('wh_size'))]
+        for (a, n), (b, _) in zip(parts, parts[1:]):
+            self.assertLessEqual(a + n, b)
+        for a, n in parts:
+            self.assertIn(a, self.FREE)
+            self.assertIn(a + n - 1, self.FREE)
+
+    def test_counters_sit_in_the_head(self):
+        for name in ('wh_count', 'wh_off', 'wh_rd', 'wh_go'):
+            self.assertIn(define(name), range(define('wh_magic') + 2, define('wt_stc')))
+
+    def test_stale_slot_numbers_leave_bit7_free(self):
+        # 후보 바이트는 슬롯 × 2 + 1 이고 bit7 은 「지금 버퍼에선 메시지 창이 안 가리킴」 표시
+        self.assertLess((int(re.search(r'^!wt_nslot = (\d+)', ASM.read_text(), re.M).group(1)) - 1) * 2 + 1, 0x80)
+
 def lorom(a):
     return ((a >> 16) & 0x7F) * 0x8000 + (a & 0x7FFF)
 

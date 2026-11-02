@@ -143,6 +143,9 @@ def build(assets):
             if c not in chunk_at:
                 chunk_at[c] = data_at + len(blob)
                 blob += c
+    # 넘는 자리는 to_bytes(2) 가 먼저 OverflowError 를 내므로 주소를 쓰기 전에 잰다
+    if data_at + len(blob) > 0x8000:
+        raise ValueError(f'칼 효과 자료 {data_at + len(blob)}바이트가 뱅크를 넘음')
     for i, key in enumerate(pending):
         records[key] = rec_at + 8 * i
     out = bytearray(head)
@@ -154,8 +157,6 @@ def build(assets):
         vram = BG3_CHR + (CANVAS + r0 * COLS) * 8
         out += b''.join(v.to_bytes(2, 'little') for v in (vram, at(chunk_at[data]), len(data), at(chunk_at[pal])))
     out += blob
-    if len(out) > 0x8000:
-        raise ValueError(f'칼 효과 자료 {len(out)}바이트가 뱅크를 넘음')
     return bytes(out)
 
 

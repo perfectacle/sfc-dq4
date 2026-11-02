@@ -57,11 +57,15 @@ TACTIC_LINES = (('한방에', '끝내자구'), ('모두', '힘내자'), ('주문
 # 한글이 없는 이름도 필드에서는 가나 칸을 슬롯으로 돌려 써 원래 가나 타일로 찍으면 깨진다. 필드 창에 나오는 물건 표는
 # 원래 가나를 Galmuri9 가나 그림으로 넣고, 창 열 수를 넘는 이름은 더 좁은 Galmuri7 로 그린다. 물건 번호 KANA_LIMIT
 # 이상은 DQ5 물건이 아니라(작전 이름·지명 등) 넣지 않는다. 뱅크가 모자라 주문(3)은 넣지 않는다(한글 없는 주문은 DQ5 전용
-# 주문과 몬스터 행동). 몬스터(4)는 전투에서만 나와 가나 칸이 살아 있다
-KANA_KINDS = (5,)
+# 주문과 몬스터 행동). 몬스터(4)는 필드의 격투장 거는 창(76, 코드 D4)에도 나와 모두 넣고, 그림은 뱅크 MONSTER_BANK 에 둔다
+KANA_KINDS = (5, 4)
+KANA_LIMITS = {5: 0xD8}         # 종류마다 가나 대체할 번호 상한(물건은 dq4itemport.ITEM_COUNT). 없으면 모두
+# 몬스터 이름 그림(한글·가나)을 두는 뱅크. 색인(TEXT_BANK 8000 + 종류 × 200)은 그대로 TEXT_BANK 에 두고 값만 이 뱅크 안
+# 주소다. 216개 가나 이름이 뱅크 TEXT_BANK 의 남은 자리에 들어가지 않아 나눴다(dq4windowname.asm WtFetchPic)
+MONSTER_KIND, MONSTER_BANK, MONSTER_DATA = 4, 0x5D, 0x8000
 # 창 열 수를 넘는 한글 이름을 띄어쓰기를 빼고 다시 재는 종류. 몬스터 목록(창 1B)의 「슬라임 베호마즌」(10열 → 9열)
 SQUEEZE_KINDS = (4,)
-KANA_LIMIT = 0xD8               # dq4itemport.ITEM_COUNT
+KANA_LIMIT = KANA_LIMITS[5]
 NARROW_FONT = 'galmuri7'
 SHIFT = 6                       # render 의 띠(한글 윗줄 = 1줄)를 위 줄 7줄로 내림
 
@@ -124,6 +128,9 @@ FIXED = {
     'うれません': '판매불가',
     # 전투 몬스터 목록(창 1B)의 마릿수 뒤(COUNT_WINDOWS)
     'ひき': '마리',
+    # 디버그·오류 처리(24:81E4·24:86D3)가 여는 한 줄 창 89. 필드에서는 가나 칸을 슬롯으로 돌려 써 원래 가나 타일로 찍으면
+    # 깨지므로, 개발용 문구를 그대로 Galmuri9 가나로 그린다
+    '\u3000エラーデス！！': 'エラーデス!!',
 }
 # 창 제목(04:AD78 목록). 표에 없는 제목(이름 뒤 「の１」, 이름 입력 등)은 가나로 둔다.
 TITLES = {
@@ -154,8 +161,8 @@ LABEL_WINDOWS = (0x07, 0x06, 0x47)
 EXP_WINDOW, EXP_WIDEN, EXP_SPOT, EXP_SPOT_END = 0x07, 4, 0x04FECA, 0x04FF40
 EXP_TILE, EXP_VALUE = 0x86, 0xBC               # 「Ex」 타일, 경험치 값 코드(여덟 칸). 다른 값 코드는 세 칸
 # 항목 머리 FE 없이 한 줄을 찍는 창 → 오른쪽으로 넓힐 칸 수. 2D じゅもんはつかえない(「주문을 쓸 수 없다」 가 들어가게 한 칸),
-# 82 じゅもんを まだ おぼえていない, 83 どうぐを もっていない
-LINE_WINDOWS = {0x2D: 1, 0x82: 0, 0x83: 0}
+# 82 じゅもんを まだ おぼえていない, 83 どうぐを もっていない, 89 エラーデス！！(디버그·오류 창)
+LINE_WINDOWS = {0x2D: 1, 0x82: 0, 0x83: 0, 0x89: 0}
 # 값 코드 바로 뒤에 가나 단위가 붙는 창 → (값 코드, 오른쪽으로 넓힐 칸 수). 1B 전투 몬스터 목록 「— 1ひき」 의 C8(마릿수)
 # 뒤 「ひき」 를 「마리」(세 열)로 바꾸고 한 칸 넓힌다. 항목 머리 FE 바로 뒤가 아니라 FIXED_WINDOWS 가 건드리지 않는다
 COUNT_WINDOWS = {0x1B: (0xC8, 1)}
@@ -167,6 +174,10 @@ TITLE_COUNT = 0x2B              # 제목 2B 부터는 목록 뒤의 코드
 # 열 머리 제목(11 「レベル　　こうげき　　しゅび」). 가나 끝이 아래 숫자 열의 오른쪽 끝과 맞으므로, 짧은 한글은 가나 자리
 # 안에서 오른쪽에 붙인다(남는 칸을 앞에)
 RIGHT_TITLES = (0x11,)
+# 가나와 함께 제목에 들 수 있는 코드 → 차지하는 열(04:AA10 고리). E0·E1 은 사람 이름(한글 이름 칸 5칸이 가장 넓음),
+# E2·E5 는 칸 하나를 쓴다(04:AA89·04:AA4C). 이 코드만 든 제목은 가나 덩이를 한글로 바꿔 늘여도 쓰는 창마다 너비를 셀 수
+# 있다(전투 물건 창 「(이름)の どうぐ」, 맡기는 곳 꺼내기 목록 「ぼうぐ」 뒤의 E2)
+TITLE_CODE_COLS = {0xE0: 5, 0xE1: 5, 0xE2: 1, 0xE5: 1}
 
 
 def kana_key(text):
@@ -445,6 +456,8 @@ def fixed_records(data, font):
             i = row
         if not done:
             raise ValueError(f'창 {w:02X}: 바꾼 라벨이 없음')
+        if len(new) > len(rec):
+            raise ValueError(f'창 {w:02X}: 고친 레코드가 원래보다 김')
         o = lorom(addr)
         out.append((o, bytes(new) + b'\xff' * (len(rec) - len(new))))
 
@@ -465,11 +478,12 @@ def fixed_records(data, font):
         old += rec + b'\xff'
         i, cols = 0, 0
         body = bytearray()
-        single = len(rec) > 0 and all(0x02 <= b < 0xB0 for b in rec)
+        # 늘일 수 있는 제목: 가나와 TITLE_CODE_COLS 의 코드만 든 제목
+        single = len(rec) > 0 and all(0x02 <= b < 0xB0 or b in TITLE_CODE_COLS for b in rec)
         while i < len(rec):
             if not 0x02 <= rec[i] < 0xB0 or rec[i] == 0x01:
                 body.append(rec[i])
-                cols += 1
+                cols += TITLE_CODE_COLS.get(rec[i], 1)
                 i += 1
                 continue
             j, n, jp = _runs(rom, rec, i, False)
@@ -514,23 +528,41 @@ def fixed_records(data, font):
     return out, numbers
 
 
-def build(data, font):
-    """뱅크 TEXT_BANK 의 8000~ 에 넣을 바이트와, 종류마다 (이름 수, 한글로 바꾼 수)."""
+def build(data, font, banks=None):
+    """뱅크 TEXT_BANK 의 8000~ 에 넣을 바이트와, 종류마다 (이름 수, 한글로 바꾼 수). banks(dict)를 주면 몬스터 그림은
+    banks[MONSTER_BANK](MONSTER_DATA~ 의 바이트)에 두고 색인은 그 뱅크 안 주소를 가리킨다."""
     index = bytearray(DATA - INDEX)
     body = bytearray()
     report = {}
+    mbody = bytearray()
+    mplaced = {}
+
+    def mplace(blob):
+        if blob not in mplaced:
+            if MONSTER_DATA + len(mbody) + len(blob) > 0x10000:
+                raise ValueError('몬스터 이름 그림이 뱅크 하나를 넘음')
+            mplaced[blob] = MONSTER_DATA + len(mbody)
+            mbody.extend(blob)
+        return mplaced[blob]
     bases = safe_bases(font)
     # 같은 그림(같은 이름·문구)은 한 번만 두고 색인이 함께 가리킨다. 뱅크 하나에 다 넣어야 해서다.
     # 전용 칸 창의 문구는 같은 낱말이 일반 번호로 또 나오므로 고정 문구끼리도 많이 겹친다
     placed = {}
+
+    def place(blob):
+        # 넘는 자리는 to_bytes(2) 가 먼저 OverflowError 를 내므로 그림을 둘 때마다 잰다
+        if blob not in placed:
+            if DATA + len(body) + len(blob) > 0x10000:
+                raise ValueError('창 글자 그림이 뱅크 하나를 넘음')
+            placed[blob] = DATA + len(body)
+            body.extend(blob)
+        return placed[blob]
+
     for k, (jp, ko, _) in enumerate(phrases()):
         index[SAFE - INDEX + k * 2:SAFE - INDEX + k * 2 + 2] = bases.get(k, 0).to_bytes(2, 'little')
         cols = columns(font, ko)
         blob = bytes((len(cols),)) + b''.join(cols)
-        if blob not in placed:
-            placed[blob] = DATA + len(body)
-            body += blob
-        index[FIXED_KIND * 0x200 + k * 2:FIXED_KIND * 0x200 + k * 2 + 2] = placed[blob].to_bytes(2, 'little')
+        index[FIXED_KIND * 0x200 + k * 2:FIXED_KIND * 0x200 + k * 2 + 2] = place(blob).to_bytes(2, 'little')
     if len(phrases()) > FIXED_PREFIX_LIMIT:
         raise ValueError(f'고정 문구 {len(phrases())}개: 번호 k 가 한 바이트(FE 미만)를 넘음')
     report[FIXED_KIND] = (len(phrases()), len(phrases()))
@@ -544,7 +576,7 @@ def build(data, font):
         for n, name in enumerate(names):
             ko = by_number.get(n) or korean.get(kana_key(name))
             kana = name and all(0x3041 <= ord(c) <= 0x30FC for c in name)
-            if not ko and kind in KANA_KINDS and n < KANA_LIMIT and kana:
+            if not ko and kind in KANA_KINDS and n < KANA_LIMITS.get(kind, 0x100) and kana:
                 ko = name
             if not ko:
                 continue
@@ -560,12 +592,10 @@ def build(data, font):
                     raise ValueError(f'{ko!r}: {len(cols)}열, 창은 {limit}열')
                 continue
             blob = bytes((len(cols),)) + b''.join(cols)
-            if blob not in placed:
-                placed[blob] = DATA + len(body)
-                body += blob
-            index[kind * 0x200 + n * 2:kind * 0x200 + n * 2 + 2] = placed[blob].to_bytes(2, 'little')
+            at = mplace(blob) if banks is not None and kind == MONSTER_KIND else place(blob)
+            index[kind * 0x200 + n * 2:kind * 0x200 + n * 2 + 2] = at.to_bytes(2, 'little')
             done += 1
         report[kind] = (len(names), done)
-    if DATA + len(body) > 0x10000:
-        raise ValueError('창 글자 그림이 뱅크 하나를 넘음')
+    if banks is not None:
+        banks[MONSTER_BANK] = bytes(mbody)
     return bytes(index + body), report

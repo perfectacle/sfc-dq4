@@ -121,8 +121,8 @@ class SparBuildTests(unittest.TestCase):
                             img.putpixel((x, y), ((x * 7 + y * 13 + k * 31 + i) % 200 + 40,) * 3)
                     images.append(img)
                 write_frames(root, name, images)
-            # 넘친 자료의 주소가 16비트를 넘으면 크기 검사 전에 주소 인코딩에서 멈춘다. 어느 쪽이든 쓰지 않아야 한다
-            with self.assertRaises((ValueError, OverflowError)):
+            # 넘친 자료의 주소가 16비트를 넘어도 주소를 쓰기 전에 크기 검사에서 멈춘다
+            with self.assertRaisesRegex(ValueError, '뱅크를 넘음'):
                 fx.build(root)
 
 
