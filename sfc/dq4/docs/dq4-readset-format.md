@@ -14,7 +14,7 @@
 
 | 출처 | 얻는 법 |
 | --- | --- |
-| CPU 데이터 읽기, DMA 원본 읽기 | `emu.getAccessCounters(emu.memType.snesPrgRom, emu.counterType.readCount)`. 인자는 메모리 종류가 먼저다 |
+| CPU 데이터 읽기, DMA 원본 읽기, HDMA 표 읽기 | `emu.getAccessCounters(emu.memType.snesPrgRom, emu.counterType.readCount)`. 인자는 메모리 종류가 먼저다 |
 | 실행한 명령(오퍼랜드 바이트 포함) | 같은 함수의 `execCount`. 실행 바이트는 readCount 에 잡히지 않는다 |
 | Lua 의 `emu.read`·`readWord`·`read16`·`read32` | 카운터에 잡히지 않아 머리말이 감싸 따로 적는다. CPU 주소는 `emu.convertAddress` 로 롬 오프셋으로 바꾼다 |
 
@@ -67,7 +67,7 @@ work/cache/readset/index/<앞 2자>/<index_key>.json = [항목, …]   최근에
 - 결정성: 두 번 돌린 출력과 읽은 집합이 같다.
 - 밖: 읽은 집합과 머리(`$7FB0~$7FFF`) 밖 바이트를 모두 뒤집은 롬에서도 출력·읽은 집합이 같고, 캐시가 맞는다.
 - 안: 읽은 집합 안 바이트 하나를 바꾸면 캐시가 빗나간다.
-- HDMA: HDMA 표 첫 바이트가 롬이면 읽은 집합에 들어 있다.
+- HDMA: HDMA 표 첫 바이트가 롬이면 읽은 집합에 들어 있다. 창 글자 검사 76장면에는 롬을 표로 쓰는 HDMA 가 없어서, 롬 `FE:8000` 에 다섯 바이트 표를 써 두고 채널 7 로 켜는 장면(`lua/dq4readsethdma.lua`)을 따로 돌려 표 바이트가 모두 읽은 집합에 드는지 본다. HDMA 표 읽기는 readCount 에 잡힌다.
 
 ## 맞지 않는 경우
 

@@ -7,6 +7,9 @@
   안      읽은 집합 안 바이트 하나를 바꾸면 캐시가 빗나간다
   HDMA    HDMA 표 첫 바이트가 롬이면 읽은 집합에 들어 있다(카운터가 HDMA 읽기도 잡는지)
 
+그리고 롬 HDMA 표를 일부러 켜는 장면(lua/dq4readsethdma.lua)에서 표 다섯 바이트가 모두 읽은 집합에 드는지 본다.
+게임 장면에는 롬을 표로 쓰는 HDMA 가 드물어 위 HDMA 항목만으로는 확인이 안 될 수 있다.
+
 캐시는 --out 아래 따로 두어(DQ4_READSET_CACHE) 공유 캐시를 건드리지 않는다.
 
   MESENCE=… LIBDIR=… uv run --locked python sfc/dq4/tools/dq4readsetcheck.py --rom work/ch1/dq4-ch1.sfc --out work/readsetcheck
@@ -26,6 +29,8 @@ import dq4ch1walkcheck as walk  # noqa: E402
 import dq4readset as rs  # noqa: E402
 
 HEADER = range(0x7FB0, 0x8000)
+HDMA_LUA = HERE / 'lua' / 'dq4readsethdma.lua'
+HDMA_TABLE = range(0x3F0000, 0x3F0005)
 # 서장 첫 장면에서: 말 걸기·명령 창 열고 닫기·걷기
 FIELD_PRE = 'wait:60,a:6,wait:90,a:6,wait:90,b:6,wait:60,down:24,wait:20,left:24,wait:20,a:6,wait:60,b:6,wait:60,up:24'
 
@@ -91,6 +96,18 @@ def check_scene(mesence, rom_path, name, script, env, out, store):
             'hdma_tables': len(tables)}, out / f'{name}-a'
 
 
+def check_hdma(mesence, rom, libdir, out, store):
+    os.environ['DQ4_READSET'] = 'off'
+    info, entry, _, _ = run_once(mesence, rom, HDMA_LUA, {'LIBDIR': libdir}, out / 'hdma', store)
+    os.environ.pop('DQ4_READSET')
+    if entry is None:
+        return {'name': 'hdma', 'status': 'failed', 'problems': ['읽은 집합을 얻지 못함']}
+    read = {i for s, n in rs.unpack(entry['ranges']) for i in range(s, s + n)}
+    missing = [f'{i:06X}' for i in HDMA_TABLE if i not in read]
+    return {'name': 'hdma', 'status': 'failed' if missing else 'passed',
+            'problems': [f'HDMA 표 바이트가 읽은 집합에 없음 {missing}'] if missing else []}
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--rom', type=Path, required=True)
@@ -113,7 +130,10 @@ def main():
         print(json.dumps(r, ensure_ascii=False), flush=True)
         if name == 'boot' and not (out / 'boot-a' / 'start.mss').exists():
             break
-    ok = all(r.get('status') == 'passed' for r in results) and len(results) == 2
+    r = check_hdma(mesence, rom, libdir, out, store)
+    results.append(r)
+    print(json.dumps(r, ensure_ascii=False), flush=True)
+    ok = all(r.get('status') == 'passed' for r in results) and len(results) == 3
     print(json.dumps({'status': 'passed' if ok else 'failed'}, ensure_ascii=False))
     return 0 if ok else 1
 
