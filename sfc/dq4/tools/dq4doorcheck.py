@@ -14,8 +14,10 @@ below with the thieves' key level (2199.1, as 01:DCFC reads it). Without the key
 push: pushing on through closing it (A held with the direction) shows it no more, stepping back and pushing again
 shows it again.
 
-  MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4doorcheck.py --rom work/ch1/dq4-ch1.sfc \\
-      --state work/ch1walk/throne_out/end.mss --out work/doorcheck
+  MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4doorcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/doorcheck
+
+The start state is the ROM's own end of the prologue (dq4freshstate); --state takes only one dq4freshstate stamped
+with the same ROM.
 """
 
 import argparse
@@ -33,6 +35,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
         sys.path.insert(0, str(path))
 
 import dq4block  # noqa: E402
+import dq4freshstate  # noqa: E402
 import dq4mesen  # noqa: E402
 from dq4environmentrom import DOOR_KIND, objects  # noqa: E402
 from dq4groupbuild import placement  # noqa: E402
@@ -126,19 +129,20 @@ def one(mesence, rom, state, out, k, case, hop):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--rom", required=True, type=Path)
-    ap.add_argument("--state", required=True, type=Path, help="조작할 수 있는 1장 세이브스테이트")
+    dq4freshstate.add_argument(ap)
     ap.add_argument("--dq4", type=Path, default=Path("rom/dq4.nes"))
     ap.add_argument("--out", required=True, type=Path)
-    ap.add_argument("--jobs", type=int, default=6)
+    ap.add_argument("--jobs", type=int, default=2)
     args = ap.parse_args()
     prg = ines.prg(args.dq4.read_bytes())
     mesence = os.environ["MESENCE"]
     args.out = args.out.resolve()
     args.out.mkdir(parents=True, exist_ok=True)
+    state = dq4freshstate.resolve(args.state, mesence, args.rom, args.out / "fresh")
     todo = cases(prg)
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
         hops = {c["map"]: next((h for h in todo if h["map"] != c["map"]), None) for c in todo}
-        results = list(pool.map(lambda kc: one(mesence, args.rom.resolve(), args.state.resolve(), args.out, *kc,
+        results = list(pool.map(lambda kc: one(mesence, args.rom.resolve(), state, args.out, *kc,
                                                hops[kc[1]["map"]]), enumerate(todo)))
     report = {"status": "passed" if all(r["ok"] for r in results) else "failed", "cases": results}
     (args.out / "results.json").write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n")

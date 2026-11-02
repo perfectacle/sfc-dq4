@@ -116,11 +116,17 @@ def add_argument(ap):
                     '빼면 검사 롬으로 만든다(캐시)')
 
 
-def resolve(state, mesence, rom, out):
-    """--state 를 주면 같은 빌드인지 보고, 안 주면 rom 으로 만든다. 돌려준 경로는 rom 으로 만든 것이다."""
+def resolve(state, mesence, rom, out, build=None):
+    """--state 를 주면 같은 빌드인지 보고, 안 주면 rom 으로 만든다. 돌려준 경로는 rom 으로 만든 것이다.
+
+    build(mesence, rom, out) 를 주면 서장 끝·배 선실 대신 그것이 rom 으로 만든 상태를 쓰고 SHA-1 을 적는다."""
     if state:
         return require_same_build(Path(state).resolve(), Path(rom).read_bytes())
-    return make(mesence, rom, out)
+    if build is None:
+        return make(mesence, rom, out)
+    rom, out = Path(rom).resolve(), Path(out).resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    return stamp(build(mesence, rom, out), rom.read_bytes())
 
 
 def main():

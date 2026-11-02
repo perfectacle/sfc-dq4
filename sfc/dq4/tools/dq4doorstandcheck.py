@@ -13,7 +13,8 @@ door's cells (lua/dq4doorstand.lua). 50 frames later the OAM priority 2B:B815 pi
 is walked with the thieves' key level (2199.1). Format: sfc/dq4/docs/dq4-environment-format.md 「문과 성문」.
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4doorstandcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/doorstand
-  (--state 를 주지 않으면 dq4heroblockcheck 의 성 마을 출발 상태를 롬 SHA-1 캐시에서 쓰거나 만든다)
+  (--state 를 주지 않으면 dq4heroblockcheck 의 성 마을 출발 상태를 롬 SHA-1 캐시에서 쓰거나 만든다. --state 는
+  dq4freshstate 가 같은 롬의 SHA-1 을 적은 것만 받는다)
 """
 
 import argparse
@@ -32,6 +33,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
 
 import dq4block  # noqa: E402
 import dq4ch1walkcheck as wc  # noqa: E402
+import dq4freshstate  # noqa: E402
 import dq4heroblockcheck as hb  # noqa: E402
 from dq4doorcheck import GROUPS, KEY, WARP, run  # noqa: E402
 from dq4environmentrom import DOOR_KIND, objects  # noqa: E402
@@ -105,10 +107,14 @@ def one(mesence, rom, state, out, k, case, hop):
     return results
 
 
+def hub(mesence, rom, out):
+    return hb.make_base(mesence, rom, out, wc.StateCache(rom.read_bytes()))[0]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--rom", required=True, type=Path)
-    ap.add_argument("--state", type=Path, help="조작할 수 있는 1장 세이브스테이트(없으면 dq4heroblockcheck 의 성 마을 출발 상태)")
+    dq4freshstate.add_argument(ap)
     ap.add_argument("--dq4", type=Path, default=Path("rom/dq4.nes"))
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--jobs", type=int, default=2)
@@ -117,8 +123,7 @@ def main():
     mesence = os.environ["MESENCE"]
     args.out = args.out.resolve()
     args.out.mkdir(parents=True, exist_ok=True)
-    state = args.state.resolve() if args.state else \
-        hb.make_base(mesence, args.rom.resolve(), args.out, wc.StateCache(args.rom.read_bytes()))[0]
+    state = dq4freshstate.resolve(args.state, mesence, args.rom, args.out, hub)
     todo = cases(prg)
     # dq5warp does not see an arrival on the map it starts on, and stepping down from 36/01's start cell leaves by
     # the castle's exit, so hop by a map of another group.
