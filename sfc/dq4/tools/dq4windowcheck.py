@@ -18,7 +18,7 @@
   테두리: 전투에서 창 왼쪽 위 모서리(타일 08C) 오른쪽 같은 줄에 오른쪽 위 모서리(좌우 뒤집은 08C)가 없다. 이름 다섯째 칸이
         맨 오른쪽 사람에서 전투 상태 창의 오른쪽 테두리 열을 덮었다. 전투 창은 서로 겹치지 않아 전투에서만 본다.
 
---every 로 고른 장면(EVERY)은 정한 구간을 매 프레임 덤프한다. 30프레임마다 재면 한두 프레임짜리 빈칸·비침을 놓친다.
+--every 로 고른 장면(EVERY)은 정한 구간을 원래 프레임에 더해 매 프레임 덤프한다. 30프레임마다 재면 한두 프레임짜리 빈칸·비침을 놓친다.
 
 걸린 프레임은 화면에 빨간 네모를 그려 sheet-*.png 로 모은다.
 
@@ -73,8 +73,10 @@ FULL_BAG = (0x01, 0x50, 0x78, 0x8A, 0xA1, 0xA1, 0xA4, 0xCD, 0xA3, 0xA2, 0xB1, 0x
 NAME = '97338C3799299827'
 
 
-# --every 로 매 프레임 재는 장면과 구간. 넘친 목록 이름을 묶음 버퍼로 보내는 장면들이다
-EVERY = {'talk02-full': range(60, 700), 'shopwho': range(100, 1900), 'partyitems': range(60, 900)}
+# --every 로 매 프레임 재는 장면과 구간(장면의 원래 프레임에 더함). 넘친 목록 이름을 묶음 버퍼로 보내는 장면들과, 메시지 창
+# 없이 상태 창에 이름이 넘치는 battle11·party21 의 구간
+EVERY = {'talk02-full': range(60, 700), 'shopwho': range(100, 1900), 'partyitems': range(60, 900),
+         'battle11': range(330, 430), 'party21': range(3380, 3420)}
 
 
 def fuzz(seed):
@@ -358,7 +360,7 @@ def main():
     st = make_states(mesence, a.rom.resolve(), rom, out / 'states')
     todo = [s for s in scenes(st['shop'], st['shop'], st['shop'], st['battle']) if not a.only or a.only in s[0]]
     if a.every:
-        todo = [s[:5] + (EVERY[s[0]],) if s[0] in EVERY else s for s in todo]
+        todo = [s[:5] + (sorted(set(s[5]) | set(EVERY[s[0]])),) if s[0] in EVERY else s for s in todo]
     with ThreadPoolExecutor(a.jobs) as pool:
         list(pool.map(lambda s: run(mesence, libdir, a.rom, rom, out / s[0], s), todo))
     flagged = 0

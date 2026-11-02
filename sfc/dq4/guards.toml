@@ -2,7 +2,7 @@
 
 [[check]]
 name = "dq4-window-check"
-why = "창 글자 깨짐·비침(#911 가게 동료 창 2프레임 깨짐 shopflip, #916·#918·#922 가게 목록·동료 창·사기 확인 shopwho)과, 넘친 목록 이름이 창보다 늦게 올라와 목록 줄이 비는 프레임·「누가」 창이 닫히며 메시지 창에 이름이 비치는 프레임(--every 로 talk02-full·shopwho·partyitems 를 매 프레임 잼)이 다시 생기지 않게"
+why = "창 글자 깨짐·비침(#911 가게 동료 창 2프레임 깨짐 shopflip, #916·#918·#922 가게 목록·동료 창·사기 확인 shopwho)과, 넘친 목록 이름이 창보다 늦게 올라와 목록 줄이 비는 프레임·「누가」 창이 닫히며 메시지 창에 이름이 비치는 프레임(--every 로 talk02-full·shopwho·partyitems 와 battle11·party21 구간을 매 프레임 잼)이 다시 생기지 않게"
 paths = ["sfc/dq4/tools/dq4windowname.asm", "sfc/dq4/tools/dq4windowname.py", "sfc/dq4/tools/dq4windowtext.py",
          "sfc/dq4/tools/dq4windowcheck.py", "sfc/dq4/tools/dq4bg3slot.py",
          "sfc/dq4/tools/dq4ch1walkcheck.py", "sfc/dq5/tools/lua/dq5warp.lua"]
