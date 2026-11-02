@@ -460,3 +460,11 @@ paths = ["sfc/dq4/tools/dq4signs.py", "sfc/dq4/tools/dq4signcheck.py", "sfc/dq4/
          "sfc/dq4/tools/dq4fieldport.py", "sfc/dq4/tools/dq4fieldgfx.py", "sfc/dq4/tools/dq4chapter1.py"]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/signcheck && uv run --locked python sfc/dq4/tools/dq4signcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/signcheck"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI"]
+
+[[check]]
+name = "dq4-environment-collision"
+why = "바꾼 맵의 셀 막힘·카운터 칸이 FC 블록 속성(dq4block.terrain)이 막는 칸과 같아야 한다. 롬이 없으면 건너뛰는 단위 테스트라 CI 가 대신 돌리지 못한다(#970). 건너뛰면 OK 줄이 달라 실패로 친다"
+paths = ["sfc/dq4/tools/dq4environmentrom.py", "sfc/dq4/tools/dq4environmentmap.py", "sfc/dq4/tools/test_dq4environment.py",
+         "fc/dq4/tools/dq4block.py"]
+run = "uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4environment.py -k CounterTests 2>&1 | tee work/environment-collision.log | tail -1 | grep -qx OK"
+needs = ["rom"]
