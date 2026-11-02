@@ -5,13 +5,15 @@ DQ5 의 `24:FF0F` 는 명령 `09 n`(곡 n 이 아직 울리는지)을 보내고 
 이 자리에 두면 게임이 그 자리에서 멈춘다(교회 치료 뒤 「…주소서!」). 형식은
 sfc/dq4/docs/dq4-sound-port-format.md 「곡 끝을 기다리는 자리」.
 
-  uv run --locked python sfc/dq4/tools/dq4songwait.py --rom work/ch1/dq4-ch1-full.sfc --sound work/ch1/dq4-ch1-sound.json
+  uv run --locked python sfc/dq4/tools/dq4songwait.py --rom work/ch1/dq4-ch1-full.sfc
 
-곡이 되풀이하는지는 소리 빌드 보고(dq4soundset 의 conversion.loop_start)로, 보고에 없는 곡(DQ5 곡 그대로)은
-원래 롬의 시퀀스를 따라가 본다. 효과음(32~46)은 보지 않는다.
+곡이 되풀이하는지는 롬의 시퀀스(뱅크 70 재배치 표, 없으면 원래 시퀀스 묶음)를 트랙마다 상태로 펼쳐 본다(classify). 판정:
+  - 즉값(또는 표)으로 곡을 주는 자리는 그 곡이 끝나야 한다(효과음도). 갈래에 따라 갈리는 곡(판정 불가)도 실패
+  - 곡 번호가 즉값이 아닌 자리(INDIRECT)는 24:FF0F 의 반복 곡 가드(dq4soundpatch.wait_guard_code)가 있고 가드의
+    표가 롬 시퀀스와 맞아야 한다. 가드는 되풀이하는 곡이면 기다리지 않고 돌아오므로 어떤 곡이 와도 멈추지 않는다
+  - 입구를 부르는 바이트(JSR·JMP·JSL·JML)는 모두 어느 자리로 분류되어야 한다
 """
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -20,42 +22,45 @@ sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
 WAIT = 0x24FF0F
 JINGLE = 0x25FD00
-# SEP #20 / LDA #n / BRA FD00
-WRAPPERS = {0x25FCF0: 0x2E, 0x25FCF6: 0x22, 0x25FCFC: 0x24}
-# 같은 뱅크 안에서 LDA #n / JSR 로 부르는 기다림 루틴(JSL 24:FE9A / JSL 24:FF0F)
-LOCAL = {0x23E53A: 0x23}
-# 곡 번호를 표에서 읽는 기다림: 슬롯이 맞았을 때 받은 코인으로 고르는 곡(23:FEEC LDA $FF0A,X → 23:FEFC)
-TABLES = {0x23FEFC: (0x23FF0A, 4)}
-# 곡 번호가 즉값이 아닌 자리. 새로 생기면 여기 근거를 적는다(곡을 알 수 없어 반복 여부를 보지 못함)
+# 같은 뱅크 안에서 LDA #n / JSR 로 부르는 기다림 루틴과 그 첫 바이트(JSL 24:FE9A / JSL 24:FF0F)
+LOCAL = {0x23E53A: bytes.fromhex('22 9A FE 24 22 0F FF 24')}
+# 곡 번호를 표에서 읽는 기다림: 슬롯이 맞았을 때 받은 코인으로 고르는 곡(23:FEEC LDA $FF0A,X … 23:FEFC JSL FF0F)
+TABLES = {0x23FEFC: (0x23FEEC, bytes.fromhex('BD 0A FF'), 0x23FF0A, 4)}
+# 곡 번호가 즉값이 아닌 DQ5 자리(코드 읽기). 가드가 있어야 통과한다
 INDIRECT = {
-    0x02D286: '앞에서 A 를 정하지 않음(JSL 00:E9CE / BRK 08 뒤), 장면 미확인',
-    0x038EA8: 'LDA $03(직접 페이지 값), 장면 미확인',
-    0x12F354: 'STZ $224C 뒤, A 는 앞 갈래가 정함, 장면 미확인',
-    0x23E53E: 'LOCAL 23:E53A 의 몸통(부르는 곳마다 곡을 셈)',
-    0x23FEFC: 'TABLES 로 셈',
-    0x25FD0F: '25:FD00 의 몸통(부르는 곳마다 곡을 셈)',
+    0x02D286: 'JSL 00:E9CE(레지스터를 지킴) / BRK 08 뒤라 A 는 앞 고리의 02:D295 결과. 그 앞에서 BRK 19 24 를 냄',
+    0x038EA8: 'LDA #$0001 / JSL 03:A518(팔레트 페이드, A 를 바꿈) 뒤',
+    0x12F354: 'LDA $1E73 / CMP #$054C 가 같은 갈래라 A 낮은 바이트는 4C 로 보임(BRK 0B·19·9C 가 A 를 지키는지 미확인)',
 }
-# 되풀이하는 곡이 들었지만 이 롬에서 그 자리에 닿는지 확인하지 않은 자리. 닿게 되면 대응표를 고치고 여기서 지운다
-UNREACHED = {
-    0x02B7B0: '1C 동료가 됨(DQ5). 1장 합류는 dq4ch1event 의 곡 26',
-    0x05F015: '1C 「…が 仲間に くわわった！」(DQ5 메시지 5D9)',
-    0x06B491: '1C DQ5 대화 24D 의 네이티브',
-    0x06CFD4: '1C DQ5 대화 네이티브',
-    0x06B64E: '22 물건을 받음(DQ5 대화 네이티브)',
-    0x06B682: '22 물건을 받음(DQ5 대화 139 의 ゴールドオーブ)',
-    0x06B8D4: '22 물건을 받음(DQ5 대화 네이티브)',
-    0x06BC53: '22 물건을 받음(DQ5 대화 네이티브)',
-    0x06CA3C: '22 물건을 받음(DQ5 대화 네이티브)',
-    0x06F803: '22 물건을 받음(DQ5 대화 네이티브)',
-    0x12F527: '22 25:FCF6 를 부르는 DQ5 이벤트 루틴(25:FCF0 의 2E 를 부르는 12:F5B0 과 같은 묶음)',
-    0x12F6F2: '22 25:FCF6 를 부르는 DQ5 이벤트 루틴(같은 묶음)',
-    0x05DE06: '23 저주받은 장비를 장비함(05:DDFF, k2 bit3). 1장 가게·상자에 그런 물건이 있는지 미확인',
-    0x06C97A: '23 DQ5 대화 네이티브',
-    0x06FC4A: '23 DQ5 대화 네이티브',
-    0x06FC55: '23 DQ5 대화 네이티브',
-    0x06FC62: '23 DQ5 대화 네이티브',
+SONG_LIMIT = 0x64
+TABLE_SIZE = 0x100
+# 원본 DQ5 의 기다림 자리(부르는 바이트 자리 → (곡, 곡을 주는 LDA 자리), 곡 None 은 INDIRECT). 원본 롬 훑기와 같은지 불변식이 본다.
+# 포팅이 기다리는 곡은 여기에 dq4sound-game.args 의 --song-call 을 더한 것과 PORT_SONGS(단위 테스트가 대응표와 견줌)
+DQ5_SITES = {
+    0x02B7B0: (0x1C, 0x02B7AE), 0x02D286: (None, None), 0x038EA8: (None, None), 0x03BB57: (0x35, 0x03BB55),
+    0x03BDD5: (0x2E, 0x03BDD3), 0x03FC42: (0x1D, 0x03FC40), 0x03FD5E: (0x1E, 0x03FD5C), 0x03FD84: (0x1E, 0x03FD82),
+    0x03FDA9: (0x1E, 0x03FDA7), 0x05DE06: (0x23, 0x05DE04), 0x05F015: (0x1C, 0x05F013), 0x05F2D6: (0x1D, 0x05F2D4),
+    0x05F3B8: (0x34, 0x05F3B6), 0x05F3F7: (0x1D, 0x05F3F5), 0x05F640: (0x1D, 0x05F63E), 0x05F8E3: (0x1D, 0x05F8E1),
+    0x05F94D: (0x41, 0x05F94B), 0x05FA43: (0x1D, 0x05FA41), 0x05FAC3: (0x1E, 0x05FAC1), 0x05FBFA: (0x1D, 0x05FBF8),
+    0x05FD31: (0x1D, 0x05FD2F), 0x06B491: (0x1C, 0x06B48F), 0x06B64E: (0x22, 0x06B64C), 0x06B682: (0x22, 0x06B680),
+    0x06B8D4: (0x22, 0x06B8D2), 0x06BC53: (0x22, 0x06BC51), 0x06BE88: (0x1D, 0x06BE86), 0x06BFC7: (0x1D, 0x06BFC5),
+    0x06C0BE: (0x3F, 0x06C0BC), 0x06C208: (0x1D, 0x06C206), 0x06C2AE: (0x1D, 0x06C2AC), 0x06C49B: (0x1D, 0x06C499),
+    0x06C74E: (0x1D, 0x06C74C), 0x06C78C: (0x1D, 0x06C78A), 0x06C97A: (0x23, 0x06C978), 0x06CA3C: (0x22, 0x06CA3A),
+    0x06CB17: (0x1D, 0x06CB15), 0x06CEA8: (0x1D, 0x06CEA6), 0x06CFD4: (0x1C, 0x06CFD2), 0x06D2E5: (0x1D, 0x06D2E3),
+    0x06E110: (0x20, 0x06E10E), 0x06E17E: (0x1E, 0x06E17C), 0x06E29C: (0x1E, 0x06E29A), 0x06E30A: (0x1E, 0x06E308),
+    0x06E424: (0x1D, 0x06E422), 0x06F757: (0x1D, 0x06F755), 0x06F79F: (0x24, 0x06F79D), 0x06F803: (0x22, 0x06F801),
+    0x06F8ED: (0x1D, 0x06F8EB), 0x06F978: (0x1D, 0x06F976), 0x06FA9E: (0x1D, 0x06FA9C), 0x06FAFE: (0x1D, 0x06FAFC),
+    0x06FC4A: (0x23, 0x06FC48), 0x06FC55: (0x23, 0x06FC53), 0x06FC62: (0x23, 0x06FC60), 0x06FD1C: (0x37, 0x06FD1A),
+    0x06FD36: (0x38, 0x06FD34), 0x0FD936: (0x42, 0x0FD934), 0x0FFC42: (0x35, 0x0FFC40), 0x118BE0: (0x29, 0x118BDE),
+    0x118DD6: (0x2B, 0x118DD4), 0x11B4F1: (0x3B, 0x11B4EF), 0x12EA59: (0x24, 0x25FCFE), 0x12F354: (None, None),
+    0x12F3FF: (0x24, 0x12F3FD), 0x12F527: (0x22, 0x25FCF8), 0x12F5B0: (0x2E, 0x25FCF2), 0x12F646: (0x2E, 0x25FCF2),
+    0x12F6B6: (0x2E, 0x25FCF2), 0x12F6E9: (0x24, 0x25FCFE), 0x12F6F2: (0x22, 0x25FCF8), 0x1EE12C: (0x24, 0x1EE12A),
+    0x2080F2: (0x1F, 0x2080F0), 0x20BFBA: (0x29, 0x20BFB8), 0x20BFD3: (0x2B, 0x20BFD1), 0x23E4F2: (0x2D, 0x23E4F0),
+    0x23E52C: (0x25, 0x23E52A), 0x23E534: (0x27, 0x23E532), 0x24847C: (0x33, 0x24847A), 0x258B26: (0x21, 0x258B24),
+    0x25FF26: (0x1D, 0x25FF24), 0x25FF88: (0x1D, 0x25FF86), 0x2980F8: (0x1E, 0x2980F6),
 }
-EFFECTS = range(0x32, 0x47)
+# 포팅 코드가 기다리는 곡: 여관 징글(dq4soundpatch.INN_SONG), 레벨 업(dq4ch1event.LEVEL_SONG), 합류(JOIN_SONG)
+PORT_SONGS = {0x1D: '여관 징글', 0x21: '1장 필드 레벨 업', 0x26: '1장 합류 팡파르'}
 
 
 def offset(addr):
@@ -70,129 +75,316 @@ def fmt(addr):
     return f'{addr >> 16:02X}:{addr & 0xFFFF:04X}'
 
 
+def _far(addr):
+    return bytes((addr & 0xFF, addr >> 8 & 0xFF, addr >> 16))
+
+
 def inn_wait_entry():
-    """여관 징글 기다림 코드(dq4soundpatch.inn_jingle_code 의 둘째)의 첫 주소와 끝. 06:E422 LDA #1D 뒤 JSL 로 불린다."""
+    """여관 징글 기다림 코드(dq4soundpatch.inn_jingle_code 의 둘째)의 (첫 주소, 끝). 06:E422 LDA #1D 뒤 JSL 로 불린다."""
     import dq4soundpatch as patch
     fade, wait = patch.inn_jingle_code()
     start = patch.INN_JINGLE + len(fade)
     return start, start + len(wait)
 
 
-def _far(addr):
-    return bytes((addr & 0xFF, addr >> 8 & 0xFF, addr >> 16))
+def guard_span():
+    import dq4soundpatch as patch
+    return patch.WAIT_GUARD, patch.WAIT_GUARD + len(patch.wait_guard_code())
 
 
-def sites(rom, entries=None, bodies=()):
-    """[(자리, 곡 또는 None, 입구)]. entries 는 A 의 곡을 기다리는 입구(JSL·JML 대상), bodies 는 입구 몸통 범위
-    [(시작, 끝)] 으로 그 안의 부르기는 따로 세지 않는다."""
-    entries = set(entries or (WAIT, JINGLE))
-    out = []
-    for entry in sorted(entries):
-        for op in (0x22, 0x5C):
-            pat = bytes([op]) + _far(entry)
-            i = rom.find(pat)
-            while i >= 0:
-                at = cpu(i)
-                if not any(s <= at < e for s, e in bodies):
-                    song = rom[i - 1] if i >= 2 and rom[i - 2] == 0xA9 else None
-                    out.append((at, song, entry))
-                i = rom.find(pat, i + 1)
-    for entry, song in WRAPPERS.items():
-        pat = b'\x22' + _far(entry)
+def wrappers(rom):
+    """뱅크 25 의 `(SEP #20 /) LDA #n / BRA 25:FD00` 꼴과 25:FD00 바로 앞에서 흘러드는 `LDA #n`:
+    {입구: (곡, LDA 자리)}. 곡 번호는 롬 바이트에서 읽는다."""
+    out, lo = {}, offset(0x258000)
+    i = offset(JINGLE) - 2
+    if rom[i] == 0xA9:
+        entry = cpu(i - 2) if rom[i - 2:i] == b'\xE2\x20' else cpu(i)
+        out[entry] = (rom[i + 1], cpu(i))
+    for i in range(lo, lo + 0x8000 - 3):
+        if rom[i] == 0xA9 and rom[i + 2] == 0x80:
+            target = cpu(i + 4) + (rom[i + 3] - 0x100 if rom[i + 3] & 0x80 else rom[i + 3])
+            if target == JINGLE:
+                entry = cpu(i - 2) if rom[i - 2:i] == b'\xE2\x20' else cpu(i)
+                out[entry] = (rom[i + 1], cpu(i))
+    return out
+
+
+def call_hits(rom, entry):
+    """입구를 부르는 바이트 자리 [(자리, 명령)]: 어디서나 JSL·JML(22·5C + 긴 주소), 같은 뱅크 안의 JSR·JMP(20·4C)."""
+    hits = []
+    for op in (0x22, 0x5C):
+        pat = bytes([op]) + _far(entry)
         i = rom.find(pat)
         while i >= 0:
-            out.append((cpu(i), song, entry))
+            hits.append((cpu(i), op))
             i = rom.find(pat, i + 1)
-    for entry, bank in LOCAL.items():
-        lo = offset(bank << 16 | 0x8000)
-        pat = b'\x20' + bytes((entry & 0xFF, entry >> 8 & 0xFF))
+    lo = offset(entry & 0xFF0000 | 0x8000)
+    for op in (0x20, 0x4C):
+        pat = bytes((op, entry & 0xFF, entry >> 8 & 0xFF))
         i = rom.find(pat, lo, lo + 0x8000)
         while i >= 0:
-            out.append((cpu(i), rom[i - 1] if rom[i - 2] == 0xA9 else None, entry))
+            hits.append((cpu(i), op))
             i = rom.find(pat, i + 1, lo + 0x8000)
-    for at, (table, n) in TABLES.items():
-        o = offset(table)
-        for song in sorted(set(rom[o:o + n])):
-            out.append((at, song, table))
-    return sorted(out, key=lambda r: (r[0], -1 if r[1] is None else r[1]))
+    return sorted(hits)
 
 
-def dq5_loops(dq5, song):
-    """원래 DQ5 시퀀스 song 의 트랙 가운데 끝(FF)에 닿지 않고 되도는 것이 있으면 True."""
-    from dq5map import Rom
-    from dq5song import header, step
-    from dq5spc import body, sequences
-    rom = Rom(dq5)
-    _, a, n = sequences(rom)[song]
-    seq = body(rom, a, n)
-    for pc in header(seq)[1]:
-        stack, seen = (), set()
-        while (pc, stack) not in seen:
-            seen.add((pc, stack))
-            nxt, _, target, flow = step(seq, pc)
-            if flow == 'end':
-                break
-            if seq[pc] == 0xF8:
-                stack, pc = stack + (nxt,), target
-            elif flow == 'ret':
-                pc, stack = (stack[-1], stack[:-1]) if stack else (nxt, stack)
-            elif flow == 'jump':
-                pc = target
+def sites(rom, port=True):
+    """([(자리, 곡 또는 None, 입구, 곡을 주는 LDA 자리)], [분류하지 못한 부르기]). port 면 포팅이 넣은 입구(여관 기다림)와
+    가드 몸통도 본다."""
+    entries, bodies = [WAIT, JINGLE], [(JINGLE, JINGLE + 0x19)]
+    if port:
+        inn = inn_wait_entry()
+        entries.append(inn[0])
+        bodies += [inn, guard_span()]
+    wraps = wrappers(rom)
+    bodies += [(entry, lda + 4) for entry, (_, lda) in wraps.items()]
+    bodies += [(entry, entry + len(body)) for entry, body in LOCAL.items()]
+    out, loose, hits = [], [], 0
+    for entry in entries + list(wraps) + list(LOCAL):
+        for at, op in call_hits(rom, entry):
+            hits += 1
+            if any(s <= at < e for s, e in bodies):
+                out.append((at, None, 'body', None))
+                continue
+            o = offset(at)
+            if entry in wraps:
+                out.append((at, wraps[entry][0], entry, wraps[entry][1]))
+            elif rom[o - 2] == 0xA9:
+                out.append((at, rom[o - 1], entry, at - 2))
+            elif at in TABLES:
+                code, want, table, n = TABLES[at]
+                if bytes(rom[offset(code):offset(code) + len(want)]) != want:
+                    loose.append(f'{fmt(at)}: 표 읽기 {fmt(code)} 의 바이트가 다름')
+                songs = sorted(set(rom[offset(table):offset(table) + n]))
+                out += [(at, song, table, None) for song in songs[:1]]
+                out += [(at, song, 'table+', None) for song in songs[1:]]
             else:
-                pc = nxt
-        else:
-            return True
+                out.append((at, None, entry, None))
+                if at not in INDIRECT:
+                    loose.append(f'{fmt(at)}: {op:02X} {fmt(entry)} 앞에 곡 번호 즉값이 없음(dq4songwait.INDIRECT 에 근거를 적을 것)')
+    for entry, body in LOCAL.items():
+        if bytes(rom[offset(entry):offset(entry) + len(body)]) != body:
+            loose.append(f'{fmt(entry)}: 기다림 루틴 바이트가 다름')
+    calls = sum(1 for r in out if r[2] != 'table+')
+    if calls != hits:
+        loose.append(f'입구를 부르는 바이트 {hits}개 가운데 {calls}개만 분류됨')
+    out = [r for r in out if r[2] != 'body']
+    return sorted(out, key=lambda r: (r[0], -1 if r[1] is None else r[1])), loose
+
+
+def _chain_pairs(rom):
+    import dq4soundpatch as patch
+    o = offset(patch.CHAIN_PAIRS)
+    return bytes(rom[o:o + SONG_LIMIT]) if len(rom) >= o + SONG_LIMIT else bytes(SONG_LIMIT)
+
+
+def _has_chain_handler(rom):
+    import dq4soundpatch as patch
+    o = offset(patch.DRIVER_BLOCK) + 4 + patch.CHAIN_TABLE_ENTRY - 0x0750
+    return bytes(rom[o:o + 2]) == patch.CHAIN_HANDLER.to_bytes(2, 'little')
+
+
+def sequence(rom, n):
+    """시퀀스 n 의 바이트(재배치 표 70:8100 의 [길이 2][자료], 0 이면 원래 묶음 2E:E2E4). 없으면 b''."""
+    from dq5map import Rom
+    from dq5song import RELOC_SEQ_TABLE
+    from dq5spc import SEQUENCE_COUNT, body, sequences
+    t = offset(RELOC_SEQ_TABLE) + n * 3
+    ptr = int.from_bytes(rom[t:t + 3], 'little') if len(rom) >= t + 3 else 0
+    if ptr:
+        pos = offset(ptr)
+        return bytes(rom[pos + 2:pos + 2 + int.from_bytes(rom[pos:pos + 2], 'little')])
+    if n >= SEQUENCE_COUNT:
+        return b''
+    r = Rom(bytes(rom))
+    _, a, ln = sequences(r)[n]
+    return body(r, a, ln)
+
+
+BRANCHES = (0xDB, 0xDC, 0xE0, 0xF4, 0xF5)       # 카운터 되풀이(DB·DC·F4·F5)와 곡 변수 갈래(E0)
+
+
+def classify(seq, f7_args=0, flag=None):
+    """'끝남'·'되풀이'·'판정 불가'. 트랙마다 (pc, 부르기 스택, 카운터 1·2) 상태를 모두 펼쳐 본다. 카운터 되풀이는
+    드라이버처럼 세고(dq5song.play 와 같은 셈), if_flag(E0)는 곡 변수를 모르므로 두 갈래를 모두 따라간다.
+    flag 를 주면(명령 0C n X 의 X, 스크립트 00~14 는 곡 변수를 X 로 둠) 첫 음 전까지 곡 변수가 flag, 그 뒤 0 이라 보고
+    E0 을 그 값으로 가른다(드라이버는 if_flag 를 읽은 틱이 끝나면 변수를 0 으로 돌림).
+    끝(FF)에만 닿으면 끝남, 끝에 닿는 길이 없으면 되풀이, 둘 다 있으면 판정 불가. 한 트랙이라도 되풀이하면 곡은
+    되풀이, 판정 불가인 트랙이 있으면(되풀이하는 트랙 없이) 판정 불가. f7_args 는 F7 의 인자 수(나눈 곡 처리기가
+    있으면 2, DQ5 는 0)."""
+    from dq5song import header, step
+    if len(seq) < 2:
+        return '끝남'
+    verdicts = []
+    for start in header(seq)[1]:
+        def succ(state):
+            pc, stack, c1, c2, var = state
+            if not 0 <= pc < len(seq) or seq[pc] == 0xFF:
+                return None
+            b = seq[pc]
+            if b == 0xF7:
+                return [(pc + 1 + f7_args, stack, c1, c2, var)]
+            nxt, _, target, flow = step(seq, pc)
+            if b < 0xA0:
+                return [(nxt, stack, c1, c2, None if var is None else 0)]
+            if b == 0xF8:
+                return [(target, stack + (nxt,), c1, c2, var)]
+            if flow == 'ret':
+                return [(stack[-1], stack[:-1], c1, c2, var) if stack else (nxt, stack, c1, c2, var)]
+            if b == 0xEA:
+                return [(target, stack, c1, c2, var)]
+            if b == 0xDC:
+                c1 = (c1 or 2) - 1
+                return [(target if c1 else nxt, stack, c1, c2, var)]
+            if b == 0xDB:
+                return [(target if c1 else nxt, stack, c1, c2, var)]
+            if b in (0xF4, 0xF5):
+                c2 = (c2 or (2 if b == 0xF4 else seq[pc + 1])) - 1
+                return [(target if c2 else nxt, stack, c1, c2, var)]
+            if b == 0xE0:
+                if var is None:
+                    return [(target, stack, c1, c2, var), (nxt, stack, c1, c2, var)]
+                return [(target if seq[pc + 3] == var else nxt, stack, c1, c2, var)]
+            return [(nxt, stack, c1, c2, var)]
+
+        ends, cycle = False, False
+        color, todo = {}, [((start, (), 0, 0, flag), False)]
+        while todo:
+            state, done = todo.pop()
+            if done:
+                color[state] = 2
+                continue
+            if color.get(state) == 2:
+                continue
+            color[state] = 1
+            nxt = succ(state)
+            if nxt is None:
+                ends = True
+                color[state] = 2
+                continue
+            todo.append((state, True))
+            for n in nxt:
+                c = color.get(n)
+                if c == 1:
+                    cycle = True
+                elif c is None:
+                    todo.append((n, False))
+        verdicts.append('판정 불가' if ends and cycle else '되풀이' if cycle else '끝남')
+    if '되풀이' in verdicts:
+        return '되풀이'
+    return '판정 불가' if '판정 불가' in verdicts else '끝남'
+
+
+def has_branches(seq, f7_args=0):
+    """시퀀스가 카운터 되풀이·곡 변수 갈래 명령을 쓰는지(닿는 바이트만)."""
+    from dq5song import header, step
+    if len(seq) < 2:
+        return False
+    for pc in header(seq)[1]:
+        seen = set()
+        todo = [pc]
+        while todo:
+            pc = todo.pop()
+            if pc in seen or not 0 <= pc < len(seq) or seq[pc] == 0xFF:
+                continue
+            seen.add(pc)
+            if seq[pc] == 0xF7:
+                todo.append(pc + 1 + f7_args)
+                continue
+            if seq[pc] in BRANCHES:
+                return True
+            nxt, _, target, flow = step(seq, pc)
+            if flow != 'ret':
+                todo.append(target if seq[pc] == 0xEA else nxt)
+            if target is not None and seq[pc] != 0xEA:
+                todo.append(target)
     return False
 
 
-def song_loops(song, sound, dq5):
-    """(되풀이하는지, 출처 글)."""
-    item = sound.get('songs', {}).get(f'{song:02X}')
-    if item is not None:
-        return item['conversion'].get('loop_start') is not None, f"NDS {item['nds_song']}"
-    return dq5_loops(dq5, song), 'DQ5'
+def verdicts(rom):
+    """곡 번호 0~63 의 판정. 나눈 곡의 앞부분(본체가 오기를 기다리며 되돎)은 되풀이."""
+    pairs, f7 = _chain_pairs(rom), 2 if _has_chain_handler(rom) else 0
+    return ['되풀이' if pairs[n] else classify(sequence(rom, n), f7) for n in range(SONG_LIMIT)]
 
 
-def check(rom, dq5, sound):
-    """(행 [(자리, 곡, 출처, 판정)], [문제]). 판정은 '끝남'·'되풀이(미확인 자리)'·'효과음'·'곡 모름'."""
-    inn = inn_wait_entry()
+def loop_table(rom):
+    """가드 표 256칸(인덱스가 A 의 낮은 바이트 전체): 되풀이하는 곡만 1. 판정 불가와 64 이상은 0(원래처럼 기다림)."""
+    return bytes(int(v == '되풀이') for v in verdicts(rom)) + bytes(TABLE_SIZE - SONG_LIMIT)
+
+
+def guard_problems(rom):
+    """24:FF0F 의 반복 곡 가드가 있고 그 표가 롬 시퀀스와 같은지. 문제 목록."""
+    import dq4soundpatch as patch
+    o = offset(WAIT)
+    if bytes(rom[o:o + 4]) != bytes([0x5C]) + _far(patch.WAIT_GUARD):
+        return ['24:FF0F 에 반복 곡 가드가 없음(dq4soundset --wait-guard)']
+    g, code = offset(patch.WAIT_GUARD), patch.wait_guard_code()
+    if bytes(rom[g:g + len(code)]) != code:
+        return ['반복 곡 가드 코드가 dq4soundpatch.wait_guard_code 와 다름']
+    t = offset(patch.LOOP_TABLE)
+    got, want = bytes(rom[t:t + TABLE_SIZE]), loop_table(rom)
+    bad = [f'{n:02X}' for n in range(TABLE_SIZE) if got[n] != want[n]]
+    return [f'가드 표가 롬 시퀀스와 다른 곡 {", ".join(bad)}'] if bad else []
+
+
+def site_flag(rom, song, entry, lda):
+    """그 자리에서 곡 변수가 될 값: 바로 앞 `BRK 16|19 곡 X`(0C 곡 X, X < 15 면 스크립트가 변수를 X 로)면 X,
+    25:FD00 계열(01 곡, 스크립트 없음)이면 0, 모르면 None."""
+    if entry != WAIT:
+        return 0
+    if lda is None:
+        return None
+    o = offset(lda)
+    pre = rom[o - 4:o]
+    if pre[0] == 0x00 and pre[1] in (0x16, 0x19) and pre[2] == song and pre[3] < 0x15:
+        return pre[3]
+    return None
+
+
+def original_sites(dq5):
+    found, _ = sites(dq5, port=False)
+    return {at: (song, lda) for at, song, _, lda in found if at not in TABLES}
+
+
+def check(rom, dq5):
+    """(행 [(자리, 곡, 판정)], [문제]). 판정은 '끝남'·'되풀이'·'가드'·'곡 모름'."""
     rows, bad = [], []
-    for at, song, entry in sites(rom, (WAIT, JINGLE, inn[0]), bodies=[inn]):
-        where = fmt(at)
+    found, loose = sites(rom)
+    bad += loose
+    guard = guard_problems(rom)
+    bad += guard
+    judged = verdicts(rom)
+    original = original_sites(dq5)
+    if original != DQ5_SITES:
+        diff = sorted(set(original.items()) ^ set(DQ5_SITES.items()), key=lambda r: r[0])
+        bad.append(f'원본 DQ5 기다림 자리가 DQ5_SITES 와 다름: {[(fmt(a), s) for a, s in diff][:6]}')
+    f7 = 2 if _has_chain_handler(rom) else 0
+    for at, song, entry, lda in found:
         if song is None:
-            if at not in INDIRECT:
-                bad.append(f'{where}: 곡이 끝나기를 기다리는데 곡 번호가 즉값이 아님(dq4songwait.INDIRECT 에 근거를 적을 것)')
-            rows.append((at, None, '', '곡 모름'))
+            rows.append((at, None, '곡 모름' if guard else '가드'))
             continue
-        if song in EFFECTS:
-            rows.append((at, song, '', '효과음'))
-            continue
-        loops, source = song_loops(song, sound, dq5)
-        if not loops:
-            rows.append((at, song, source, '끝남'))
-        elif at in UNREACHED:
-            rows.append((at, song, source, '되풀이(미확인 자리)'))
-        else:
-            rows.append((at, song, source, '되풀이'))
-            bad.append(f'{where}: 곡 {song:02X}({source})이 끝나기를 기다리는데 그 곡은 되풀이함 — 그 자리에서 멈춤')
-    for at in sorted(set(INDIRECT) | set(UNREACHED)):
-        if all(r[0] != at for r in rows) and at not in TABLES:
-            bad.append(f'{fmt(at)}: 목록에 있는 자리에 기다림 부르기가 없음(목록을 고칠 것)')
+        if at not in original and at not in TABLES and song not in PORT_SONGS:
+            bad.append(f'{fmt(at)}: 포팅 코드가 곡 {song:02X} 를 기다림(dq4songwait.PORT_SONGS 에 없음)')
+        flag = site_flag(rom, song, entry, lda)
+        verdict = judged[song] if song >= SONG_LIMIT or judged[song] != '판정 불가' or flag is None \
+            else classify(sequence(rom, song), f7, flag)
+        rows.append((at, song, verdict))
+        if verdict == '되풀이':
+            bad.append(f'{fmt(at)}: 곡 {song:02X} 이 끝나기를 기다리는데 그 곡은 되풀이함')
+        elif verdict == '판정 불가':
+            bad.append(f'{fmt(at)}: 곡 {song:02X} 이 끝나기를 기다리는데 곡 변수 갈래(E0)에 따라 끝나기도 되풀이하기도 함')
     return rows, bad
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--rom', type=Path, required=True)
-    ap.add_argument('--sound', type=Path, required=True, help='dq4soundset 보고(dq4-ch1-sound.json)')
     ap.add_argument('--dq5', type=Path, default=Path('rom/dq5.sfc'))
     args = ap.parse_args()
-    rows, bad = check(args.rom.read_bytes(), args.dq5.read_bytes(),
-                      json.loads(args.sound.read_text(encoding='utf-8')))
-    for at, song, source, verdict in rows:
+    rows, bad = check(args.rom.read_bytes(), args.dq5.read_bytes())
+    for at, song, verdict in rows:
         name = '' if song is None else f'{song:02X}'
-        note = INDIRECT.get(at) or UNREACHED.get(at) or ''
-        print(f'{fmt(at)}  {name:2}  {source:7}  {verdict}  {note}'.rstrip())
+        print(f'{fmt(at)}  {name:2}  {verdict}  {INDIRECT.get(at, "")}'.rstrip())
     for p in bad:
         print(f'실패: {p}')
     print('통과' if not bad else f'실패 {len(bad)}개')
