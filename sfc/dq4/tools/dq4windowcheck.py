@@ -5,11 +5,13 @@
 
   가나: 칸이 가나 타일(010~078)을 가리키는데 그 그림이 롬 가나(04:E528)와 다르고, 우리 슬롯이 그린 자리(키의 글자 줄과
         그 위 줄)가 아니다. 필드에서 가나 칸 슬롯과 겹친 원래 가나 글자다.
-  비침: 필드에서 칸이 살아 있는 캔버스 안 슬롯(096~17F)의 그림을 가리키는데 우리 자리가 아니다. 메시지 창이 우리 그림을 보인다.
+  비침: 필드에서 칸이 살아 있는 캔버스 안 슬롯(096~17F)의 그림을 가리키는데 우리 자리가 아니고, 그 칸이 메시지 캔버스
+        (7E:5800 평면 0, 평면 1 = FF) 그대로가 아니다. 메시지 창이 우리 그림을 보인다.
   덮임: 캔버스 밖 1D0~ 을 빌린 슬롯이 화면에 보이는데(키 자리가 그 슬롯 첫 칸), 같은 키·나이로 앞서 본 그림과 VRAM 이 다르다.
         다시 그리지 않은 빌린 글자를 명령 창·가게 창 전용 칸 문구가 덮었다.
   바뀜: 바로 앞 프레임과 이 프레임 모두 슬롯이 화면에 보이고 키 자리의 타일맵 두 줄이 그대로인데 슬롯 그림이 바뀌었다.
-        보이는 슬롯에 다른 문구를 덮어, 게임이 새 창 타일맵을 보내기 전까지 옛 타일맵이 새 그림을 가리켰다.
+        보이는 슬롯에 다른 문구를 덮어, 게임이 새 창 타일맵을 보내기 전까지 옛 타일맵이 새 그림을 가리켰다. 앞 그림이
+        메시지 캔버스 그대로였으면(묶음 버퍼로 창이 먼저 뜨고 이름이 뒤에 채워짐) 걸지 않는다.
         매 프레임 덤프하는 장면에서만 본다.
   테두리: 전투에서 창 왼쪽 위 모서리(타일 08C) 오른쪽 같은 줄에 오른쪽 위 모서리(좌우 뒤집은 08C)가 없다. 이름 다섯째 칸이
         맨 오른쪽 사람에서 전투 상태 창의 오른쪽 테두리 열을 덮었다. 전투 창은 서로 겹치지 않아 전투에서만 본다.
@@ -50,6 +52,7 @@ KANA = range(0x010, 0x079)
 CORNER = 0x08C                      # 창 위 모서리 타일. 오른쪽 모서리는 같은 타일을 좌우로 뒤집는다(타일맵 낱말 bit14)
 CANVAS = range(0x096, 0x180)
 BUFFER = 0x5000                     # 창 타일맵 버퍼 7E:5000(32 × 32 칸)
+MSG_CANVAS = 0x5800                 # 메시지 캔버스 버퍼 7E:5800(칸 096~ 의 평면 0, 칸마다 8바이트). 평면 1 은 FF
 KEYS, AGES = 0x3D70, 0x3D14         # dq4windowname.asm 의 !wt_keys·!wt_ages(슬롯마다 워드)
 KANA_ENTRIES, KBASE = 12, 0x3DD8    # !wt_nkana, !wt_kbase(첫 칸 12바이트, 이어서 칸 수 12바이트)
 SHARED_JP = 0x60B400                # 맵을 불러올 때 7E:1AC0 으로 복사되는 원래 공용 창 레코드(dq4menupatch.SHARED_JP)
@@ -167,8 +170,8 @@ def run(mesence, libdir, rom_path, rom, folder, scene):
     sets = [f'{0x7E1AC0 + i:X}={b:02X}' for i, b in enumerate(rom[o:o + 48])]
     sets += [f'{0x7E2001 + i:X}={NAME[2 * i:2 * i + 2]}' for i in range(8)]
     fs = ','.join(map(str, frames))
-    dump = ','.join(f'{f}:7E{KEYS:04X}:60,{f}:7E{AGES:04X}:60,{f}:7E{KBASE:04X}:24,{f}:7E0725:1,{f}:7E1944:2'
-                    for f in frames)
+    dump = ','.join(f'{f}:7E{KEYS:04X}:60,{f}:7E{AGES:04X}:60,{f}:7E{KBASE:04X}:24,{f}:7E0725:1,{f}:7E1944:2,'
+                    f'{f}:7E{MSG_CANVAS:04X}:{len(CANVAS) * 8}' for f in frames)
     env = dict(os.environ, LIBDIR=libdir, SHOT_DIR=str(folder), STATE=str(state), PRE=pre, SHOTS=fs, VRAMDUMP=fs,
                DUMP=dump, SET=','.join(sets), MAXF=str(frames[-1] + 10))
     if poke:
@@ -248,7 +251,10 @@ def check(folder, rom, slots):
             art = b''.join(vram[(0x1000 + t * 8) * 2:(0x1000 + t * 8) * 2 + 16] for t in tiles)
             now[i, key] = row, art
             prev = before.get((frame - 1, i, key))
-            if prev and prev[0] == row and prev[1] != art:
+            # 앞 프레임에 아직 그림이 올라가지 않아 메시지 캔버스 그대로였으면(묶음 버퍼, 창이 먼저 뜸) 다른 문구가 아니다
+            blank = prev and all(canvas_tile_bytes(prev[1][k * 16:k * 16 + 16], d.get(MSG_CANVAS), t)
+                                 for k, t in enumerate(tiles))
+            if prev and prev[0] == row and prev[1] != art and not blank:
                 bad += [(c // 32, c % 32 + j, '바뀜', tiles[0] + j) for j in range(len(tiles) // 2)]
         before = {(frame, i, key): v for (i, key), v in now.items()}
         for cell in range(32 * 28):         # 화면은 28줄(224점)
@@ -257,13 +263,27 @@ def check(folder, rom, slots):
             t = int.from_bytes(vram[(tilemap + cell) * 2:(tilemap + cell) * 2 + 2], 'little') & 0x3FF
             if t in KANA and vram[(0x1000 + t * 8) * 2:(0x1000 + t * 8) * 2 + 16] != kana[t]:
                 bad.append((cell // 32, cell % 32, '가나', t))
-            elif not battle and t in CANVAS and t in live:
+            elif not battle and t in CANVAS and t in live and not canvas_tile(vram, d.get(MSG_CANVAS), t):
                 bad.append((cell // 32, cell % 32, '비침', t))
         if battle:
             bad += corners(vram, tilemap)
         if bad:
             out.append((frame, bad))
     return out
+
+
+def canvas_tile_bytes(art, canvas, t):
+    """16바이트 타일 그림 art 가 메시지 캔버스 칸 t 그대로(평면 0 = 캔버스 버퍼, 평면 1 = FF)인지."""
+    if not canvas or t not in CANVAS:
+        return False
+    o = (t - CANVAS.start) * 8
+    return art == bytes(x for r in range(8) for x in (canvas[o + r], 0xFF))
+
+
+def canvas_tile(vram, canvas, t):
+    """VRAM 의 캔버스 칸 t 가 메시지 캔버스 그대로(평면 0 = 캔버스 버퍼, 평면 1 = FF)인지. 슬롯을 잡았어도 그림을 아직
+    올리지 않았으면(묶음 버퍼) 메시지 창에는 메시지 글자만 보이므로 비침이 아니다."""
+    return canvas_tile_bytes(vram[(0x1000 + t * 8) * 2:(0x1000 + t * 8) * 2 + 16], canvas, t)
 
 
 def corners(vram, tilemap):

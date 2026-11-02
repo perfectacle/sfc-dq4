@@ -756,15 +756,27 @@ org $24A5E9
 !wq_off   = $3D64           ; 대기열에 다음으로 쓸 자리
 !wt_vis   = $3DAC           ; 슬롯마다 1바이트: bit0 = 마지막 창 타일맵 전송 때 보였거나 그 뒤에 그렸음, bit1~7 = 그린 문구 표식
 !wt_xfer  = $3DCA           ; 1바이트: 이번 NMI 에 게임이 보낼 창 타일맵 줄($0BEC 의 bit7·6), NMI 끝에서 WtVis 가 씀
-!wt_tilemap_line = 249      ; 되돌린 뒤 이 주사선 앞이면 게임의 창 타일맵 2KB 를 미루지 않는다
+!wt_late_line = 245         ; 게이트 일 뒤 이 주사선부터는 게임의 창 타일맵 2KB 를 미룬다(실측: 게임 NMI 진입이 한 줄쯤
+                            ; 뒤, 2KB DMA 시작이 그 세 줄 뒤. 2KB 는 열두 줄이라 249 줄까지 시작해야 261 줄 안에 끝남)
 !wt_restore_line = 250      ; 게이트가 이 주사선 앞에서만 슬롯을 하나 더 되돌린다(하나에 다섯 줄까지)
-!wt_stale2 = $3DCD          ; 1바이트: 찾기가 본 둘째 슬롯 × 2 + 1(0 = 없음). 게이트가 주사선이 남으면 이어 되돌림
-!wt_stale = $3DCB           ; 1바이트: 메시지 창에 비치는 안 보이는 캔버스 슬롯 × 2 + 1(다음 NMI 게이트가 되돌림).
-                            ; $80 = NMI 끝에서 찾음(창 타일맵을 보냈거나 하나를 되돌린 뒤, 전투 중이면 필드로 돌아올 때까지 둠), 0 = 없음
+; 묶음 버퍼(WhStash·WhRelease) 자리. 7F:8300~ 은 1장 이어 걷기·창 검사 장면에서 읽는 곳이 없고 맵을 불러올 때 지우기만 함
+!wh_magic = $7F8300
+!wh_count = $7F8302         ; 항목 수
+!wh_off   = $7F8304         ; 다음에 쓸 자리
+!wh_rd    = $7F8306         ; 다음에 보낼 자리
+!wh_go    = $7F8308         ; 보내도 되는 항목 수(창 타일맵을 보낸 NMI 에 그때까지 쌓인 수로 정함)
+!wt_stc   = $7F8310         ; 후보 둘 × [버퍼 칸 주소, 타일, 버퍼 칸 주소, 타일] 워드. 찾기가 적고 게이트가 비교만 함
+!wh_buf   = $7F8320
+!wh_size  = $1FF0
+!wh_magic_value = $4857
+!wt_stale = $3DCB           ; 1바이트씩: 그림을 올렸는데 WtVis 가 안 보인다고 잰 캔버스 슬롯 × 2 + 1 둘(0 = 없음).
+!wt_stale2 = $3DCD          ; NMI 끝(WtStaleFind)마다 새로 찾고, 게이트(WtStaleGate)가 메시지 창이 그 칸을 가리키면 되돌림
 !wt_ecsave = $3DCC          ; 1바이트: 창 제목을 그리는 동안 맡겨 둔 $EC
 !wq_rd    = $3D5C           ; NMI 가 다음으로 보낼 항목 자리. VBlank 가 끝나 가면 남은 항목을 다음 NMI 로 넘긴다
 !wq_defer = $3D5A           ; 1바이트: bit7·6 = 다음 NMI 로 미룬 게임의 창 타일맵 전송 요청($0BEC),
-                            ; bit1·0 = 전투에 들어가면 되돌릴 가나 칸 덩이 수(필드에서 가나 칸 슬롯을 쓰면 3)
+                            ; bit1·0 = 전투에 들어가면 되돌릴 가나 칸 덩이 수(필드에서 가나 칸 슬롯을 쓰면 3),
+                            ; bit3 = 이 NMI 의 창 타일맵은 이미 한 번 미룬 것,
+                            ; bit4 = 그 NMI 에 게임이 새 요청을 걸지 않아 버퍼가 미룰 때 잰 그대로
 !wq_buf   = $3EB0           ; 대기열 7E:3EB0~3FFF. 항목 [VRAM 워드 2][방식 1][칸 수 1][그림]
 !wq_size  = $0150
 !wq_left  = $3D66           ; NMI 안에서만: 남은 항목 수
@@ -3224,6 +3236,15 @@ WtQueue:
     LDA.l WtBitHi,X
     ORA.w !wt_dirty+2
     STA.w !wt_dirty+2
+    ; 필드의 캔버스 안 슬롯 그림은 창 타일맵을 보내는 NMI 까지 묶음 버퍼로(WhStash)
+    LDA.w $1944
+    CMP #$8952
+    BEQ +++
+    LDA.l WtClassF,X
+    AND #$0020
+    BNE +++
+    JSR WhStash
++++
     ; WtAlloc 과 여기 사이에 NMI 의 WtStaleGate 가 이 슬롯을 비웠을 수 있어 NMI 를 끈 채 키·나이를 다시 쓴다
     LDA.w !wn_key
     STA.w !wt_keys,X
@@ -3247,13 +3268,71 @@ WqNmiGate:
     LDA.l $7E0000|!wq_defer
     AND #$C0
     BEQ +
+    ; bit3: 이 NMI 의 창 타일맵은 한 번 미룬 것이라 묶음 버퍼·되돌리기가 다시 미루지 않는다(매 프레임 다시 그리는 창에서
+    ; 미루기가 이어지면 창이 뜨지 않음). bit4: 그사이 게임이 새 요청을 걸지 않았다
+    LDA.l $000BEC
+    BEQ +++
+    LDA #$08
+    BRA ++++
++++
+    LDA #$18
+++++
+    PHA
+    LDA.l $7E0000|!wq_defer
+    AND #$C0
     ORA.l $000BEC
     STA.l $000BEC
     LDA.l $7E0000|!wq_defer
     AND #$03
+    ORA $01,S
     STA.l $7E0000|!wq_defer
+    PLA
+    BRA ++
 +
+    LDA.l $7E0000|!wq_defer
+    AND #$E7
+    STA.l $7E0000|!wq_defer
+++
+    ; 게임의 창 타일맵 2KB 전송이 이 게이트 뒤에 오므로, 할 일이 없으면 들르지도 않는다(들러 재는 시간만으로 전송이 한두 줄
+    ; 밀렸다). 일을 했으면 WtLateDefer 가 늦어진 타일맵을 미룬다. 미룬 타일맵을 보내는 NMI 에 버퍼가 그대로면(bit4) 미룰 때
+    ; 이미 재고 되돌렸으므로 다시 재지 않는다(WtVis 는 타일맵을 보낸 NMI 에만 돌아 그사이 후보도 그대로)
+    LDA.l $7E0000|!wq_defer
+    AND #$10
+    BNE .nostale
+    LDA.l $000BEC
+    BNE .stale
+    LDA.l $7E0000|!wt_stale
+    BEQ +
+    BPL .stale
++
+    LDA.l $7E0000|!wt_stale2
+    BEQ .nostale
+    BMI .nostale
+.stale
+    JSR WtStaleFast
+    BCC .nostale
     JSR WtStaleGate
+    JSR WtLateDefer
+.nostale
+    LDA.l !wh_count
+    ORA.l !wh_count+1
+    BEQ +++
+    ; 미룬 타일맵을 보내는 NMI(bit3)에 WhRelease 가 할 일은 이번 타일맵까지 쌓인 수를 다음 NMI 몫으로 정하는 것뿐이다.
+    ; 그 NMI 는 후보 검사와 겹치기 쉬워 들르지 않고 바로 적는다
+    LDA.l $7E0000|!wq_defer
+    AND #$08
+    BEQ ++
+    LDA.l $000BEC
+    BEQ ++
+    REP #$20
+    LDA.l !wh_count
+    STA.l !wh_go
+    SEP #$20
+    BRA +++
+++
+    JSR WhRelease
+    JSR WtLateDefer
++++
     LDA.l $7E0000|!wq_defer
     BEQ +
     JSR WqKana
@@ -3283,6 +3362,91 @@ WqNmiGate:
     JSR WtXfer
     RTL
 
+; 게이트(M = 8). 후보마다 찾기가 적어 둔 버퍼 칸 둘(!wt_stc)을 곧 보낼 버퍼와 바로 비교한다. 하나라도 메시지 창이
+; 가리키면 C = 1(WtStaleGate 가 검증하고 되돌림), 아니면 후보에 bit7 을 켜고 C = 0. 창 타일맵을 보내는 NMI 마다 도는 자리라
+; DB·슬롯 검증 없이 짧게 둔다(WtStaleGate 로 재면 후보 둘에 두 줄이 들어 2KB 전송이 VBlank 를 넘겼다)
+WtStaleFast:
+    PHP
+    REP #$30
+    LDA.l $7E0000|!wt_stale
+    AND #$00FF
+    BEQ +
+    LDA.l !wt_stc
+    TAX
+    LDA.l $7E0000,X
+    AND #$03FF
+    CMP.l !wt_stc+2
+    BEQ .hit
+    LDA.l !wt_stc+4
+    TAX
+    LDA.l $7E0000,X
+    AND #$03FF
+    CMP.l !wt_stc+6
+    BEQ .hit
++
+    LDA.l $7E0000|!wt_stale2
+    AND #$00FF
+    BEQ +
+    LDA.l !wt_stc+8
+    TAX
+    LDA.l $7E0000,X
+    AND #$03FF
+    CMP.l !wt_stc+10
+    BEQ .hit
+    LDA.l !wt_stc+12
+    TAX
+    LDA.l $7E0000,X
+    AND #$03FF
+    CMP.l !wt_stc+14
+    BEQ .hit
++
+    SEP #$20
+    LDA.l $7E0000|!wt_stale
+    BEQ +
+    ORA #$80
+    STA.l $7E0000|!wt_stale
++
+    LDA.l $7E0000|!wt_stale2
+    BEQ +
+    ORA #$80
+    STA.l $7E0000|!wt_stale2
++
+    PLP
+    CLC
+    RTS
+.hit
+    PLP
+    SEC
+    RTS
+
+; 게이트(M = 8). 필드에서 게이트 일이 길어 주사선이 !wt_late_line 에 닿았으면 게임의 창 타일맵 2KB 전송을 다음 NMI 로
+; 미룬다(늦게 시작하면 아래쪽 줄이 VBlank 밖으로 밀려 화면에 가지 않는다). 한 번 미룬 것은 다시 미루지 않는다(bit3).
+; 전투는 미룬 요청을 다시 보내지 않으므로 두지 않는다
+WtLateDefer:
+    LDA.l $000BEC
+    BEQ +
+    LDA.l $7E0000|!wq_defer
+    AND #$08
+    BNE +
+    LDA.l $001945
+    CMP #$89
+    BNE ++
+    LDA.l $001944
+    CMP #$52
+    BEQ +
+++
+    JSR WtLine
+    CMP.w #!wt_late_line
+    SEP #$20
+    BCC +
+    LDA.l $000BEC
+    ORA.l $7E0000|!wq_defer
+    STA.l $7E0000|!wq_defer
+    LDA #$00
+    STA.l $000BEC
++
+    RTS
+
 WtXfer:
     LDA.l $000BEC
     ORA.l $7E0000|!wt_xfer
@@ -3300,16 +3464,9 @@ WtVisTail:
     JSR WtVis
     PLY
     PLX
-    LDA.l $7E0000|!wt_stale
-    BNE +
-    LDA #$80
-    STA.l $7E0000|!wt_stale
 +
-    ; 찾기는 VBlank 일이 끝난 뒤인 여기서 한다(게이트에서 슬롯을 훑으면 게임의 창 타일맵 2KB DMA 가 VBlank 를 넘김)
-    ; bit7 이면 찾는다. 이 바이트는 게임이 켤 때 지우지 않아, $80 밖의 큰 값으로 남아 있어도 찾기가 멈추지 않게
-    LDA.l $7E0000|!wt_stale
-    BPL +
-    ; 전투에서는 부르지도 않는다(전투 NMI 길이를 바꾸지 않게)
+    ; 찾기는 VBlank 일이 끝난 뒤인 여기서 NMI 마다 한다(게이트에서 슬롯을 훑으면 게임의 창 타일맵 2KB DMA 가 VBlank 를
+    ; 넘김). 전투에서는 부르지 않는다(전투 NMI 길이를 바꾸지 않게)
     LDA.l $001945
     CMP #$89
     BNE ++
@@ -3320,6 +3477,25 @@ WtVisTail:
     PHX
     PHY
     JSR WtStaleFind
+    ; 게임이 이 NMI 의 작업을 건너뛰어 아직 VBlank 안이면(주사선 225~!wt_restore_line) 여기서 바로 되돌린다. 가게 「누가」
+    ; 미리보기 목록을 지운 뒤 게임이 몇 NMI 를 건너뛰는 동안 게이트가 돌지 않아 메시지 창에 이름이 남았다
+    LDA.l $7E0000|!wt_stale
+    ORA.l $7E0000|!wt_stale2
+    BEQ +++
+    PHP
+    REP #$20
+    JSR WtLine
+    PLP
+    CMP #$E1
+    XBA
+    BNE +++                 ; 256~
+    XBA
+    CMP #$E1
+    BCC +++
+    CMP.b #!wt_restore_line
+    BCS +++
+    JSR WtStaleGate
++++
     PLY
     PLX
 +
@@ -3333,6 +3509,7 @@ WtVisTail:
 ; X·Y 를 바꾸자 메시지 창 아래쪽 줄이 화면으로 가지 않았다).
 WqNmiEntry:
     LDA.l $7E0000|!wt_stale
+    ORA.l $7E0000|!wt_stale2
     AND #$7F
     ORA.l $7E0000|!wq_count
     ORA.l $7E0000|!wq_defer
@@ -3657,6 +3834,244 @@ WqNmi:
 WqFF:
     db $FF
 
+; 묶음 버퍼(7F:!wh_*): 마을·던전에서 캔버스 안 슬롯에 그린 그림은 게임이 그 창의 타일맵을 보내는 NMI 까지 올리지
+; 않는다. 목록을 다 그린 뒤에야 타일맵을 보내는 창(가게 「누가」 미리보기 목록 열두 줄, 약 11프레임)을 그리는 동안 먼저
+; 올리면 아직 화면에 남은 메시지 창이 그 칸을 보여 이름이 비쳤다. 자리는 7F:8300~ 로, 1장 이어 걷기·창 검사 장면에서
+; CPU·DMA 가 읽지 않고 맵을 불러올 때 지우기(01:9937)만 썼다. 필드(세계 지도, $BE bit7 = 0)는 지도를 그 자리에 풀어
+; 묶지 않는다. 켤 때·맵을 불러올 때 지워지므로 머리 낱말(!wh_magic)이 맞을 때만 읽는다. 항목 꼴은 대기열(!wq_buf)과 같다
+
+; WtQueue 끝(NMI 꺼짐, DB = 7E, M = X = 16, X = 슬롯 × 2 보존). 방금 대기열 끝에 쓴 이 이름의 두 항목(8 + 열 × 24 바이트)을
+; 묶음 버퍼로 옮기고 대기열에서 거둔다. 필드이거나 자리가 모자라면 그대로 둔다(원래처럼 바로 올라감)
+WhStash:
+    LDA.w $00BE
+    AND #$0080
+    BNE +
+    RTS
++
+    LDA.l !wh_magic
+    CMP #!wh_magic_value
+    BEQ +
+    LDA #!wh_magic_value
+    STA.l !wh_magic
+    LDA #$0000
+    STA.l !wh_count
+    STA.l !wh_off
+    STA.l !wh_rd
+    STA.l !wh_go
++
+    LDA.w !wt_cols
+    ASL
+    ASL
+    ASL
+    STA.w !wn_c             ; 열 × 8
+    ASL
+    CLC
+    ADC.w !wn_c
+    CLC
+    ADC #$0008
+    STA.w !wn_c             ; 이 이름의 바이트
+    CLC
+    ADC.l !wh_off
+    CMP.w #!wh_size+1
+    BCS .no
+    PHX
+    PHY
+    PHB
+    LDA.w !wq_off
+    SEC
+    SBC.w !wn_c
+    STA.w !wq_off
+    CLC
+    ADC.w #!wq_buf
+    TAX
+    LDA.l !wh_off
+    CLC
+    ADC.w #!wh_buf&$FFFF
+    TAY
+    LDA.w !wn_c
+    DEC
+    db $54,$7F,$7E          ; MVN 7E → 7F
+    PLB
+    PLY
+    PLX
+    LDA.l !wh_off
+    CLC
+    ADC.w !wn_c
+    STA.l !wh_off
+    LDA.l !wh_count
+    CLC
+    ADC #$0002
+    STA.l !wh_count
+    SEP #$20
+    LDA.w !wq_count
+    SEC
+    SBC #$02
+    STA.w !wq_count
+    REP #$20
+.no
+    RTS
+
+; 게이트(M = 8). 게임이 이 NMI 에 창 타일맵을 보내면($0BEC) 그때까지 쌓인 항목을 다음 NMI 부터 보낸다(!wh_go). 그림을
+; 타일맵보다 먼저 올리면 그 한 프레임 동안 메시지 창에 비쳤다. 창이 먼저 뜨면 묶은 이름 줄이 한두 프레임 늦게 채워질 뿐
+; 메시지 창에는 비치지 않는다. 묶음과 창 타일맵을 한 NMI 에 함께 보내지 않는다. 전투에 들어가면 버린다
+WhRelease:
+    PHP
+    PHB
+    REP #$30
+    PEA $7E7E
+    PLB
+    PLB
+    LDA.l !wh_magic
+    CMP #!wh_magic_value
+    BNE .out
+    LDA.l !wh_count
+    BEQ .out
+    LDA.w $1944
+    CMP #$8952
+    BNE +
+    LDA #$0000
+    STA.l !wh_count
+    STA.l !wh_off
+    STA.l !wh_rd
+    STA.l !wh_go
+    BRA .out
++
+    LDA.l !wh_go
+    BEQ .noxfer
+    ; 창 타일맵과 같은 NMI 에 보내면 2KB 전송이 VBlank 를 넘긴다: 타일맵을 한 번 미루고 보낸다. 이미 한 번 미룬 타일맵이면
+    ; 이번에는 타일맵을 보내고 묶음은 다음 NMI 에(매 프레임 창을 다시 그리면 번갈아 감)
+    LDA.l $000BEC
+    AND #$00FF
+    BEQ .send
+    LDA.w !wq_defer
+    AND #$0008
+    BNE .noxfer
+    SEP #$20
+    LDA.l $000BEC
+    ORA.w !wq_defer
+    STA.w !wq_defer
+    LDA #$00
+    STA.l $000BEC
+    REP #$20
+.send
+    JSR WhNmi
+.noxfer
+    LDA.l $000BEC
+    AND #$00FF
+    BEQ .out
+    LDA.l !wh_count
+    STA.l !wh_go
+.out
+    PLB
+    PLP
+    RTS
+
+; 묶음 버퍼 항목을 !wh_go 개까지 차례로 보낸다(WqNmi 와 같은 방식, 원본 뱅크 7F). 주사선이 VBlank 밖이거나 끝 무렵이면 남긴다.
+; M = X = 16, DB = 7E
+WhNmi:
+    LDA.l !wh_rd
+    TAX
+.entry
+    JSR WtLine
+    CMP #$00E1
+    BCS +
+    JMP .stop
++
+    CMP #$0103
+    BCC +
+    JMP .stop
++
+    LDA.l !wh_buf,X
+    STA.l $002116
+    LDA.l !wh_buf+2,X       ; 낮은 바이트 = 방식, 높은 바이트 = 칸 수
+    STA.w !wq_head
+    AND #$FF00
+    LSR
+    LSR
+    LSR
+    LSR
+    LSR                     ; 칸 × 8
+    STA.w !wq_len
+    TXA
+    CLC
+    ADC.w #(!wh_buf&$FFFF)+4
+    STA.l $004302
+    SEP #$20
+    LDA #$7F
+    STA.l $004304
+    LDA #$18
+    STA.l $004301
+    LDA.w !wq_head
+    BNE .plane0
+    LDA #$80
+    STA.l $002115
+    LDA #$01
+    STA.l $004300
+    REP #$20
+    LDA.w !wq_len
+    ASL
+    STA.w !wq_len
+    STA.l $004305
+    SEP #$20
+    LDA #$01
+    STA.l $00420B
+    BRA .next
+.plane0
+    LDA #$00
+    STA.l $002115
+    STA.l $004300
+    REP #$20
+    LDA.w !wq_len
+    STA.l $004305
+    SEP #$20
+    LDA #$01
+    STA.l $00420B
+    REP #$20
+    LDA.l !wh_buf,X
+    STA.l $002116
+    LDA.w #WqFF
+    STA.l $004302
+    LDA.w !wq_len
+    STA.l $004305
+    SEP #$20
+    LDA #$80
+    STA.l $002115
+    LDA #$08                ; 고정 원본
+    STA.l $004300
+    LDA #$19
+    STA.l $004301
+    LDA.b #WqFF>>16
+    STA.l $004304
+    LDA #$01
+    STA.l $00420B
+.next
+    REP #$20
+    TXA
+    CLC
+    ADC #$0004
+    CLC
+    ADC.w !wq_len
+    TAX
+    LDA.l !wh_go
+    DEC
+    STA.l !wh_go
+    LDA.l !wh_count
+    DEC
+    STA.l !wh_count
+    BEQ +
+    LDA.l !wh_go
+    BEQ .stop
+    JMP .entry
++
+    STA.l !wh_off
+    STA.l !wh_rd
+    STA.l !wh_go
+    RTS
+.stop
+    TXA
+    STA.l !wh_rd
+    RTS
+
 ; 00:8E9E(NMI 작업 안, 게임이 메시지 캔버스를 보내기 직전, M = 8, X = 16). 캔버스 안에 그림을 올린 슬롯의 평면 1 을
 ; 원래 글자 칸처럼 FF 로 되돌리고 슬롯을 비운다. 게임은 캔버스의 평면 0 만 보내므로, 위 줄 합성(테두리 무늬가 든 평면 1)이
 ; 남아 메시지 창 빈 줄에 선으로 보였다. NMI 작업 안이라 큐용 NMI 변수(!wq_head·!wq_len·!wq_left)를 쓴다.
@@ -3760,22 +4175,22 @@ WqRunBytes:
 
 ; 필드에서 그림을 올린 캔버스 슬롯(!wt_dirty)의 창이 닫히면, 게임이 캔버스를 다시 보내기 전까지 메시지 창이 그 칸에 옛
 ; 이름을 보인다(가게 팔기 목록을 닫으며 「어느 물건을 팔아 주시겠어요?」 창을 다시 그릴 때). NMI 끝(WtVisTail, VBlank 일이
-; 끝난 뒤)에서 WtVis 가 안 보인다고 잰 슬롯 가운데 메시지 창이 그 칸(WtMsgCellF)을 가리키는 것 하나를 !wt_stale 에 두고,
-; 다음 NMI 첫머리(게이트, WtStaleGate)가 메시지 캔버스(7E:5800 평면 0, 평면 1 = FF)로 되돌리고 비운다. 보이는 슬롯은 건드리지
-; 않는다(닫히는 목록의 남은 줄이 깨지지 않게). M = 8 로 들어옴
+; 끝난 뒤)마다 WtVis 가 안 보인다고 잰 그런 슬롯을 둘까지
+; !wt_stale·!wt_stale2 에 두고, 다음 NMI 첫머리(게이트, WtStaleGate)가 곧 보낼 버퍼에서 메시지 창이 그 칸을 가리키면 메시지 캔버스(7E:5800 평면 0, 평면 1 = FF)로 되돌리고
+; 비운다. 게임이 그 NMI 작업을 건너뛰어 아직 VBlank 안이면 NMI 끝에서 바로 되돌린다. 보이는 슬롯은 건드리지 않는다.
+; 메시지 창이 없으면 찾지 않는다(게이트가 재는 시간만큼 게임의 창 타일맵 전송이 밀림). M = 8 로 들어옴
 WtStaleFind:
     PHB
     REP #$30
     PEA $7E7E
     PLB
     PLB
-    ; 전투에서는 $80 을 남겨 전투 뒤 필드로 돌아온 첫 NMI 끝에서 찾는다
-    LDA.w $1944
-    CMP #$8952
-    BNE +
-    JMP .out
-+
+    ; 같은 슬롯을 다시 찾으면 bit7(지금 버퍼에선 메시지 창이 안 가리킴)을 잇는다
     SEP #$20
+    LDA.w !wt_stale
+    PHA
+    LDA.w !wt_stale2
+    PHA
     STZ.w !wt_stale
     STZ.w !wt_stale2
     REP #$20
@@ -3786,10 +4201,15 @@ WtStaleFind:
     BNE +
     JMP .out
 +
-    ; 메시지 창 왼쪽 테두리(2열, 타일 08E)가 18~26줄 어디에도 없으면 볼 것이 없다
+    ; 메시지 창 왼쪽(2열)·오른쪽(29열) 테두리(타일 08E)가 18~26줄 어디에도 없으면 후보를 두지 않는다(게이트가 매 NMI
+    ; 슬롯을 재는 시간만큼 게임의 창 타일맵 2KB 전송이 밀림). 메시지 창이 없으면 창이 닫혀도 드러날 칸이 없다
     LDX.w #(18*32+2)*2
 -
     LDA.w $5000,X
+    AND #$03FF
+    CMP #$008E
+    BEQ .msg
+    LDA.w $5000+(27*2),X
     AND #$03FF
     CMP #$008E
     BEQ .msg
@@ -3803,30 +4223,79 @@ WtStaleFind:
 .msg
     LDX.w #!wt_nkana*2
 .slot
-    JSR WtStaleIs
+    JSR WtStalePre
     BCC .next
     TXA
     INC
     SEP #$20
-    LDY.w !wt_stale
+    PHA                     ; 1,S = 새 값, 2,S = 옛 stale2, 3,S = 옛 stale
+    LDA $03,S
+    AND #$7F
+    CMP $01,S
+    BNE +
+    LDA $03,S
+    STA $01,S
+    BRA ++
++
+    LDA $02,S
+    AND #$7F
+    CMP $01,S
+    BNE ++
+    LDA $02,S
+    STA $01,S
+++
+    LDA.w !wt_stale
     BEQ +
+    PLA
     STA.w !wt_stale2
     REP #$20
-    BRA .out
+    TXA
+    ASL
+    ASL
+    ASL
+    TAX
+    LDA.l WtMsgCellF,X
+    STA.l !wt_stc+8
+    LDA.l WtMsgCellF+2,X
+    STA.l !wt_stc+10
+    LDA.l WtMsgCellF+8,X
+    STA.l !wt_stc+12
+    LDA.l WtMsgCellF+10,X
+    STA.l !wt_stc+14
+    JMP .out
 +
+    PLA
     STA.w !wt_stale
     REP #$20
+    PHX
+    TXA
+    ASL
+    ASL
+    ASL
+    TAX
+    LDA.l WtMsgCellF,X
+    STA.l !wt_stc
+    LDA.l WtMsgCellF+2,X
+    STA.l !wt_stc+2
+    LDA.l WtMsgCellF+8,X
+    STA.l !wt_stc+4
+    LDA.l WtMsgCellF+10,X
+    STA.l !wt_stc+6
+    PLX
 .next
     INX
     INX
     CPX.w #!wt_nslot*2
-    BCC .slot
+    BCS .out
+    JMP .slot
 .out
+    PLA                     ; 옛 stale·stale2
     PLB
     RTS
 
-; 슬롯 X 가 그림을 올린 캔버스 안 슬롯이고, WtVis 가 안 보인다고 쟀고, 메시지 창이 그 칸을 가리키면 C = 1(M = 16, DB = 7E)
-WtStaleIs:
+
+; 슬롯 X 가 그림을 올린 캔버스 안 슬롯이고 WtVis 가 안 보인다고 쟀으면 C = 1(M = 16, DB = 7E). 찾기의 후보
+WtStalePre:
     LDA.l WtBitLo,X
     AND.w !wt_dirty
     BNE +
@@ -3845,49 +4314,16 @@ WtStaleIs:
     LDA.w !wt_vis,Y
     AND #$0001
     BNE .no
-    PHX
-    TXA
-    ASL
-    ASL
-    ASL
-    TAX
-    LDA.l WtMsgCellF,X
-    TAY
-    LDA.w $0000,Y
-    AND #$03FF
-    CMP.l WtMsgCellF+2,X
-    BEQ .yes
-    LDA.l WtMsgCellF+4,X
-    TAY
-    LDA.w $0000,Y
-    AND #$03FF
-    CMP.l WtMsgCellF+6,X
-    BEQ .yes
-    LDA.l WtMsgCellF+8,X
-    TAY
-    LDA.w $0000,Y
-    AND #$03FF
-    CMP.l WtMsgCellF+10,X
-    BEQ .yes
-    LDA.l WtMsgCellF+12,X
-    TAY
-    LDA.w $0000,Y
-    AND #$03FF
-    CMP.l WtMsgCellF+14,X
-    BEQ .yes
-    PLX
+    SEC
+    RTS
 .no
     CLC
     RTS
-.yes
-    PLX
-    SEC
-    RTS
 
-; 게이트(VBlank 첫머리, M = 8). !wt_stale 의 슬롯 하나를 되돌린다. 그사이 다시 그렸으면(보임 bit0) 두고, 게임이 캔버스를 보내
-; WqClean 이 이미 비웠으면(!wt_dirty 비트 꺼짐) 둔다. 되돌린 NMI 에는 게임의 창 타일맵 전송($0BEC)을 다음 NMI 로 미룬다:
-; 게이트 앞까지 게임 NMI 가 주사선 244 쯤을 쓰고, 되돌리기 뒤에 2KB 전송이 시작되면 VBlank(261)를 넘겨 창 아래쪽 줄이 빠진다.
-; 우리 대기열보다 먼저 보내므로 같은 슬롯에 새로 그린 그림이 뒤에 덮는다
+; 게이트(VBlank 첫머리, M = 8). !wt_stale·!wt_stale2 의 슬롯마다 메시지 창이 그 칸을 가리키면 되돌린다. 그사이 다시
+; 그렸으면(보임 bit0) 두고, 게임이 캔버스를 보내 WqClean 이 이미 비웠으면(!wt_dirty 비트 꺼짐) 둔다. 이 NMI 에 게임이
+; 캔버스를 보내면($0F59) 하지 않는다(WqClean 이 비움). 주사선 !wt_restore_line 앞에서만 되돌린다. 늦어진 창 타일맵은
+; 부르는 쪽(WtLateDefer)이 미룬다. 우리 대기열보다 먼저 보내므로 같은 슬롯에 새로 그린 그림이 뒤에 덮는다
 WtStaleGate:
     PHP
     PHB
@@ -3895,91 +4331,95 @@ WtStaleGate:
     PEA $7E7E
     PLB
     PLB
-    LDA.w !wt_stale
-    AND #$00FF
-    BEQ .bail
-    BIT #$0080
-    BNE .bail
-    DEC
-    TAX
-    SEP #$20
-    LDA #$80
-    STA.w !wt_stale
-    REP #$20
-    ; 켤 때 남은 값이면 슬롯 번호가 아닐 수 있다: 캔버스 슬롯(짝수 × 2, 가나 항목 뒤)만
-    CPX.w #!wt_nkana*2
-    BCC .bail
-    CPX.w #!wt_nslot*2
-    BCS .bail
-    TXA
-    LSR
-    BCS .bail
     LDA.w $1944
     CMP #$8952
     BNE +
-.bail
-    JMP .out
+    ; 전투에서는 찾기가 돌지 않아 들어오기 전 필드의 후보가 남는다. 지워 두어야 전투 NMI 마다 들르지 않는다
+    SEP #$20
+    STZ.w !wt_stale
+    STZ.w !wt_stale2
+    BRA .out
 +
-    ; 이 NMI 에 게임이 캔버스를 보내면 WqClean 이 그림을 올린 슬롯을 모두 비운다
     LDA.w $0F59
     AND #$00FF
-    BNE .bail
-    TXA
-    LSR
-    TAY
-    LDA.w !wt_vis,Y
-    AND #$0001
-    BNE .bail
-    LDA.w !wt_ages,X
-    BEQ .bail
-    LDA.l WtBitLo,X
-    AND.w !wt_dirty
-    BNE +
-    LDA.l WtBitHi,X
-    AND.w !wt_dirty+2
-    BEQ .bail
-+
-    JSR WtRestoreSlot
-    ; 주사선이 남으면 찾기가 본 둘째 슬롯도 되돌린다(목록이 닫히는 몇 프레임 동안 한 NMI 에 하나씩이면 메시지 창에 남음).
-    ; 슬롯 하나가 다섯 줄까지 들어, !wt_restore_line 앞에서만 시작한다
-    LDA.w !wt_stale2
-    AND #$00FF
-    BEQ .defer
-    DEC
-    TAX
-    SEP #$20
-    STZ.w !wt_stale2
-    REP #$20
-    CPX.w #!wt_nkana*2
-    BCC .defer
-    CPX.w #!wt_nslot*2
-    BCS .defer
-    TXA
-    LSR
-    BCS .defer
-    JSR WtLine
-    CMP #$00E1
-    BCC .defer
-    CMP.w #!wt_restore_line
-    BCS .defer
-    JSR WtStaleIs
-    BCC .defer
-    JSR WtRestoreSlot
-.defer
-    ; 창 타일맵 2KB 는 열두 줄쯤 든다. 그 안에 끝날 만큼 이르면 이 NMI 에 보내게 둔다
-    JSR WtLine
-    CMP.w #!wt_tilemap_line
-    BCC .out
-    SEP #$20
-    LDA.l $000BEC
-    BEQ .out
-    ORA.w !wq_defer
-    STA.w !wq_defer
-    LDA #$00
-    STA.l $000BEC
+    BNE .out
+    LDY.w #!wt_stale
+    LDX.w #0
+    JSR .one
+    LDY.w #!wt_stale2
+    LDX.w #8
+    JSR .one
 .out
     PLB
     PLP
+    RTS
+; Y = 후보 바이트 자리. 켤 때 남은 값이면 슬롯 번호가 아닐 수 있어 캔버스 슬롯(짝수 × 2, 가나 항목 뒤)만 본다.
+; bit7 = 지금 버퍼에선 메시지 창이 그 칸을 가리키지 않음. 게임이 버퍼를 다시 보내기($0BEC) 전까지 화면은 그대로라 다시 재지 않는다
+.one
+    LDA.w $0000,Y
+    AND #$00FF
+    BEQ .skip
+    BIT #$0080
+    BEQ +
+    LDA.l $000BEC
+    AND #$00FF
+    BEQ .skip
++
+    ; 창 타일맵을 보내는 NMI 에 도는 자리라 찾기가 적어 둔 칸 둘만 비교한다(슬롯 검증은 맞을 때만)
+    LDA.l !wt_stc,X
+    PHX
+    TAX
+    LDA.w $0000,X
+    PLX
+    AND #$03FF
+    CMP.l !wt_stc+2,X
+    BEQ .hit
+    LDA.l !wt_stc+4,X
+    PHX
+    TAX
+    LDA.w $0000,X
+    PLX
+    AND #$03FF
+    CMP.l !wt_stc+6,X
+    BEQ .hit
+    SEP #$20
+    LDA.w $0000,Y
+    ORA #$80
+    STA.w $0000,Y
+    REP #$20
+    RTS
+.hit
+    LDA.w $0000,Y
+    AND #$007F
+    DEC
+    TAX
+    CPX.w #!wt_nkana*2
+    BCC .drop
+    CPX.w #!wt_nslot*2
+    BCS .drop
+    TXA
+    LSR
+    BCS .drop
+    PHY
+    TAY
+    LDA.w !wt_vis,Y
+    PLY
+    AND #$0001
+    BNE .drop
+    JSR WtLine
+    CMP #$00E1
+    BCC .skip
+    CMP.w #!wt_restore_line
+    BCS .skip
+    PHY
+    JSR WtRestoreSlot
+    PLY
+.drop
+    SEP #$20
+    LDA #$00
+    STA.w $0000,Y
+    REP #$20
+.skip
     RTS
 
 ; 지금 주사선(A, M = 16). WqNmi 와 같은 순서로 V 카운터를 읽는다($4201 bit7 은 게임이 부팅 때 켬)
