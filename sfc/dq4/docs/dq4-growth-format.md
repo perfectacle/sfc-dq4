@@ -1,6 +1,6 @@
 # 라이안 성장
 
-1장 라이안이 레벨업에서 FC ライアン 의 성장 곡선대로 오르게 한 방법입니다. DQ5 성장 레코드의 구조와 FC 성장 곡선을 대응시키는 규칙, 1장 롬이 거는 훅 세 개, 1레벨 기록, 동료 호이민의 레벨을 다룹니다. 도구는 `sfc/dq4/tools/dq4growth.py`, 회귀 가드는 [`guards.toml`](../guards.toml) 의 `dq4-battle-scene`(`growth`·`levelup2` 장면)입니다. 과정은 [2026-11-02-03 일지](../journal/2026-11-02-03-ryan-growth.md)에 있습니다.
+1장 라이안이 레벨업에서 FC ライアン 의 성장 곡선대로 오르게 한 방법입니다. DQ5 성장 레코드의 구조와 FC 성장 곡선을 대응시키는 규칙, 1장 롬이 거는 훅 세 개, 1레벨 기록, 동료 호이민의 레벨을 다룹니다. 도구는 `sfc/dq4/tools/dq4growth.py`, 회귀 가드는 [`guards.toml`](../guards.toml) 의 `dq4-battle-scene`(`growth`·`levelup2` 장면)입니다. 과정은 [2026-11-02-04 일지](../journal/2026-11-02-04-ryan-growth.md)에 있습니다.
 
 ## 두 원작의 성장
 

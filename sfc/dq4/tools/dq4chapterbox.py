@@ -409,10 +409,14 @@ class Layout:
 
     def code(self, a):
         # 새 게임 시작(시작 지점 표를 읽은 뒤): 21A5.6 이 켜져 있으면 맵을 불러올 때 곡을 바꾸지 않는다(00:CE6B).
-        # 이 표는 「모험의 서를 만든다」에서 이름 입력 전에도 읽으므로 곡을 끄는 일은 여기서 하지 않는다
+        # 이 표는 「모험의 서를 만든다」에서 이름 입력 전에도 읽으므로 곡을 끄는 일은 여기서 하지 않는다.
+        # 새 게임의 첫 기록(약 964프레임)은 이 비트가 켜진 채 쓰인다. 이어 하기도 이 자리를 지나므로, 장면이 기다리지
+        # 않는 맵이면 끈다. 그러지 않으면 밝히기가 돌지 않아 맵을 옮겨도 곡이 울리지 않는다
         start = (bytes((0xA9, 0x80, 0x85, 0xBE)) +                    # 원래: LDA #$80 / STA $BE
                  if_pending(self.scenes, bytes((0xAF, *le(SKIP_SONG[0], 3), 0x09, SKIP_SONG[1],   # LDA / ORA #$40
-                                                0x8F, *le(SKIP_SONG[0], 3)))) +                 # STA $7E21A5
+                                                0x8F, *le(SKIP_SONG[0], 3))),                   # STA $7E21A5
+                            bytes((0xAF, *le(SKIP_SONG[0], 3), 0x29, ~SKIP_SONG[1] & 0xFF,      # LDA / AND #$BF
+                                   0x8F, *le(SKIP_SONG[0], 3)))) +                              # STA $7E21A5
                  bytes((0xAF, *le(FIELD_EVENT_DONE[0], 3), 0x09, FIELD_EVENT_DONE[1],          # LDA / ORA #$80
                         0x8F, *le(FIELD_EVENT_DONE[0], 3))) +                                # STA $7E2194
                  bytes((0xA9, 0x80, 0x6B)))                            # LDA #$80 / RTL
