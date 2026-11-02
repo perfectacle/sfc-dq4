@@ -23,7 +23,7 @@ GROUPS = range(0x36, 0x3D)
 OUTSIDE_WAY = 5
 WAY_TILES, WAY_ROUTINES = 0x0198A4, 0x0198BA
 WAY_ROUTINE_ORIG = bytes((0x4C, 0xBB))            # 00:BB4C, unused: no DQ5 map header has +3 = 5
-# 00:FFA8-FFAF: after the window text NMI stub (00:FFA1-FFA7), before the header dq5build keeps (00:FFB0-FFDF).
+# 00:FFA8-FFAF: after the window text NMI stub (00:FF9E-FFA4), before the header dq5build keeps (00:FFB0-FFDF).
 STUB_AT, STUB_END = 0x00FFA8, 0x00FFB0
 COMMON_TAIL = 0x00BAC3
 # After dq4door's finder (57:F400); dq4dungeonrate takes 57:8000 and dq4balance 57:F000.
