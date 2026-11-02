@@ -51,8 +51,6 @@
 --song
 1C=21
 --song
-1E=11
---song
 20=27
 --song
 21=2F
@@ -64,6 +62,8 @@
 24=26
 --song
 25=28
+--song
+1E=28
 --song
 26=2A
 --song
@@ -128,8 +128,6 @@
 0F=4
 --stream-ticks
 11=4
---stream-ticks
-1E=4
 --stream-ticks
 22=4
 --stream-ticks
@@ -200,8 +198,6 @@
 --chain
 11
 --chain
-1E
---chain
 22
 --chain
 30
@@ -237,8 +233,6 @@
 0F
 --hold
 11
---hold
-1E
 --hold
 22
 --hold
@@ -303,8 +297,6 @@
 --gain-db
 1C=-4.0
 --gain-db
-1E=-2.4
---gain-db
 20=-2.7
 --gain-db
 21=4.1
@@ -316,6 +308,8 @@
 24=3.8
 --gain-db
 25=-2.1
+--gain-db
+1E=-2.1
 --gain-db
 26=2.0
 --gain-db
@@ -346,6 +340,8 @@
 2C
 --nds-envelope
 25
+--nds-envelope
+1E
 --treble-db
 2F=8
 --gain-db
@@ -354,6 +350,10 @@
 25=track4
 --yield-track
 25=track5
+--yield-track
+1E=track4
+--yield-track
+1E=track5
 --yield-track
 08=track11
 --yield-track

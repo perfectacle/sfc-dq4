@@ -175,13 +175,6 @@ class TimeTest(unittest.TestCase):
         self.assertEqual(ts.judge_palette(want, got), ['obj12', 'night_obj'])
 
 
-def church_res(**kw):
-    res = {'problems': ['대화가 끝나지 않음'], 'choices': [[1, 0, 5], [2, 3, 0], [3, 0, 0], [4, 0, 0]],
-           'talking': ts.CHURCH_TALKING, 'frozen': True}
-    res.update(kw)
-    return res
-
-
 def pinned_res(*rows):
     problems = [f'시각 {r["time"]}: 걸어도 다름' for r in rows if r['frames'] is None]
     return {'problems': problems, 'steps': list(rows)}
@@ -196,17 +189,14 @@ class VerdictTest(unittest.TestCase):
         self.assertEqual(ts.verdict('inn_stay', {'problems': []}), 'passed')
         self.assertEqual(ts.verdict('inn_stay', {'problems': ['x']}), 'failed')
 
-    def test_church_known_only_for_exact_symptom(self):
-        self.assertEqual(ts.verdict('church_cure', church_res()), 'known')
-        self.assertEqual(ts.verdict('church_cure', church_res(problems=['대화가 끝나지 않음', '금화'])), 'failed')
-        self.assertEqual(ts.verdict('church_cure', church_res(talking=0)), 'failed')
-        self.assertEqual(ts.verdict('church_cure', church_res(frozen=False)), 'failed')
-        self.assertEqual(ts.verdict('church_cure', church_res(problems=['대화가 끝나지 않음', "고르기 창 [0, 3, 0, 0](기대 [0, 3, 0])"])), 'failed')
-        self.assertEqual(ts.verdict('church_cure', church_res(), known=False), 'failed')
+    def test_church_stuck_is_a_plain_failure(self):
+        res = {'problems': ['대화가 끝나지 않음'], 'talking': 0x0C, 'frozen': True}
+        self.assertNotIn('church_cure', ts.KNOWN)
+        self.assertEqual(ts.verdict('church_cure', res), 'failed')
 
     def test_known_fixed_turns_red(self):
         res = {'problems': []}
-        self.assertEqual(ts.verdict('church_cure', res), 'failed')
+        self.assertEqual(ts.verdict('dusk', res), 'failed')
         self.assertIn('KNOWN', res['problems'][0])
 
     def test_field_known_only_when_everything_stays_day(self):
