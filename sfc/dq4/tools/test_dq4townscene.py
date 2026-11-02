@@ -193,7 +193,7 @@ class VerdictTest(unittest.TestCase):
         self.assertIn('KNOWN', res['problems'][0])
 
     def test_field_colour_is_not_known(self):
-        # 필드 시각 색은 고쳐졌다(환경 훅이 필드 루틴 02:AB33 을 물 루틴으로 덮던 것). 다시 known 으로 감추지 않는다
+        # 필드 세 장면은 알려진 실패로 감추지 않는다: 필드 색이 시각 표대로 바뀌는 것이 이 장면들의 불변식이다
         for name in ('dusk', 'dawn', 'cross'):
             self.assertNotIn(name, ts.KNOWN)
         self.assertEqual(ts.verdict('dusk', {'problems': ['시각 00EE: 다름']}), 'failed')
