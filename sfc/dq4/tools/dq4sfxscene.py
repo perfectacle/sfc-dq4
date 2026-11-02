@@ -691,9 +691,49 @@ def unreached_problems(rom):
 
 
 def leftover_sites(rom, table):
-    """대응표가 번호를 바꾼 원래 효과음(35-00·01·02)을 아직 부르는 자리 — 바뀌지 않은 사본 코드(결과에 적기만 함)."""
+    """대응표가 번호를 바꾼 원래 효과음(35-00·01·02)을 아직 부르는 자리 (결과의 findings 에 그대로 적고, 검사는 leftover_problems)."""
     olds = {old for old, _ in table.calls.values()}
     return [f'{a:06X} {o:02X}-{b:02X}' for o in sorted(olds) for b in range(4) for a in call_sites(rom, o, b)]
+
+
+# 문 표를 늘린 롬(dq5newmap --door-bank, dq4groupbuild 는 3B)은 뱅크 01 전체를 그 뱅크에 복사하고, 문 자료로 들어가는
+# 여섯 입구를 `PEA $BBBB / PLB / PLB / JML 01:입구+4` 꼴 스텁으로 돌린다. 복사본은 DB 로 읽는 자료일 뿐 코드는 뱅크 01
+# 에서 돈다. 그래서 대응표가 뱅크 01 에서 바꾼 자리의 사본은 원래 번호로 남아도 울리지 않는다(MesenCE 실측: 문 22사례와
+# 맵 불러오기 3번에서 3B:8000~FFFF 실행 0, 사본 BRK 자리 읽기 0, 같은 동안 DB=3B 로 돈 문 루틴 18,423 명령).
+DOOR_ENTRIES = (0x01F3C9, 0x01D8C2, 0x01D92E, 0x01D915, 0x01F117, 0x01D97B)
+STUB_MAX = 16
+
+
+def door_copy_bank(rom):
+    """여섯 입구가 모두 같은 복사 뱅크 BB 로 DB 를 두고 뱅크 01 로 돌아가는 스텁으로 가면 BB, 아니면 None."""
+    banks = set()
+    for entry in DOOR_ENTRIES:
+        o = lorom(entry)
+        if rom[o] != 0x5C:
+            return None
+        stub = lorom(int.from_bytes(rom[o + 1:o + 4], 'little'))
+        code = rom[stub:stub + STUB_MAX]
+        pea, jml = code.find(b'\xf4'), code.find(b'\x5c')
+        if pea < 0 or jml < pea or code[pea + 1] != code[pea + 2] or code[jml + 3] != entry >> 16:
+            return None
+        # F3C9 몫은 복귀 주소를 PEA 로 하나 더 쌓으므로 첫 PEA 만 DB 다
+        banks.add(code[pea + 1])
+    return banks.pop() if len(banks) == 1 and banks != {0x01} else None
+
+
+def leftover_problems(rom, table):
+    """원래 효과음을 아직 부르는 자리 가운데, 실행되지 않는 문 뱅크 복사본에 남은 --sfx-call 자리 사본이 아닌 것.
+    그런 자리가 실제로 돌면 대응표와 달리 DQ5 소리가 난다."""
+    bank = door_copy_bank(rom)
+    out = []
+    for text in leftover_sites(rom, table):
+        at, call = text.split()
+        addr = int(at, 16)
+        twin = 0x010000 | addr & 0xFFFF
+        if bank is not None and addr >> 16 == bank and table.calls.get(twin, (None,))[0] == int(call[:2], 16):
+            continue
+        out.append(f'{text}: 대응표대로 바뀌지 않은 자리')
+    return out
 
 
 # ---- 효과음 결정 표(손으로 적음) --------------------------------------------------------------------------------------
@@ -1044,7 +1084,7 @@ def main():
     all_scenes = scenes(table)
     static = {'call_sites': call_site_problems(rom, table), 'weapon_table': weapon_table_problems(rom, table),
               'decisions': decision_problems(table), 'unreached': unreached_problems(rom),
-              'adopted_waves': adopted_wave_problems(rom),
+              'adopted_waves': adopted_wave_problems(rom), 'leftover_sites': leftover_problems(rom, table),
               'uncovered': [e for e in uncovered(table, all_scenes)
                             if e not in RUNTIME_GAPS and not e.startswith('call ')]}
     jobs = [(c, s, True) for s in every for c in cores]

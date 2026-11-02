@@ -82,6 +82,51 @@ class RomCheckTest(unittest.TestCase):
         rom[s.lorom(0x01E01B) + 2] = 0x35                                   # 원래 번호로 되돌아감
         self.assertEqual(len(s.call_site_problems(bytes(rom), t)), 1)
 
+    @staticmethod
+    def door_bank_rom(bank=0x3B, back=0x01):
+        """문 표를 3B 에 늘린 꼴: 여섯 입구 → 22:FF30 의 스텁(PHP PHB PEA $BBBB PLB PLB JML back:입구+4)."""
+        rom = bytearray(0x400000)
+        for k, entry in enumerate(s.DOOR_ENTRIES):
+            stub = 0x22FF30 + k * 11
+            o = s.lorom(entry)
+            rom[o:o + 4] = bytes((0x5C, *stub.to_bytes(3, 'little')))
+            o = s.lorom(stub)
+            rom[o:o + 11] = bytes((0x08, 0x8B, 0xF4, bank, bank, 0xAB, 0xAB, 0x5C,
+                                   *(entry + 4 & 0xFFFF).to_bytes(2, 'little'), back))
+        for addr, new in ((0x05E6A9, 0x3F), (0x01E01B, 0x45)):
+            o = s.lorom(addr)
+            rom[o:o + 3] = bytes((0x00, 0x19, new))
+        rom[s.lorom(0x3BE01B):s.lorom(0x3BE01B) + 4] = bytes((0x00, 0x19, 0x35, 0x01))   # 바꾸기 전에 복사한 사본
+        return rom
+
+    def test_leftover_in_door_copy_allowed(self):
+        t = s.load_table(ARGS)
+        rom = self.door_bank_rom()
+        self.assertEqual(s.door_copy_bank(bytes(rom)), 0x3B)
+        self.assertEqual(s.leftover_sites(bytes(rom), t), ['3BE01B 35-01'])
+        self.assertEqual(s.leftover_problems(bytes(rom), t), [])
+
+    def test_leftover_elsewhere_fails(self):
+        t = s.load_table(ARGS)
+        rom = self.door_bank_rom()
+        rom[s.lorom(0x05A000):s.lorom(0x05A000) + 4] = bytes((0x00, 0x19, 0x35, 0x01))   # 대응표가 모르는 자리
+        rom[s.lorom(0x3BE119):s.lorom(0x3BE119) + 4] = bytes((0x00, 0x19, 0x35, 0x01))   # 01:E119 는 --sfx-call 이 아님
+        self.assertEqual(s.leftover_problems(bytes(rom), t), ['05A000 35-01: 대응표대로 바뀌지 않은 자리',
+                                                              '3BE119 35-01: 대응표대로 바뀌지 않은 자리'])
+
+    def test_leftover_in_copy_fails_when_copy_runs(self):
+        t = s.load_table(ARGS)
+        # 스텁이 복사본 뱅크로 뛰면 사본 코드가 돌아 원래 번호가 울린다
+        self.assertIsNone(s.door_copy_bank(bytes(self.door_bank_rom(back=0x3B))))
+        self.assertEqual(s.leftover_problems(bytes(self.door_bank_rom(back=0x3B)), t),
+                         ['3BE01B 35-01: 대응표대로 바뀌지 않은 자리'])
+        # 문 표를 늘리지 않은 롬(입구가 원래 PHP PHB PHK PLB)에는 복사 뱅크가 없다
+        rom = self.door_bank_rom()
+        for entry in s.DOOR_ENTRIES:
+            rom[s.lorom(entry):s.lorom(entry) + 4] = bytes((0x08, 0x8B, 0x4B, 0xAB))
+        self.assertIsNone(s.door_copy_bank(bytes(rom)))
+        self.assertEqual(len(s.leftover_problems(bytes(rom), t)), 1)
+
     def test_weapon_table(self):
         t = s.load_table(ARGS)
         rom = bytearray(0x400000)
