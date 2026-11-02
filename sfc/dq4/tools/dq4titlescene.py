@@ -13,7 +13,8 @@ WRAM 으로 옮김)를 실제 패드 입력과 판정으로 잇는다. 형식은
      기록되고 그 칸은 dq4savefixture 밑판(같은 입력, 이름 ㅂㅂㅂㅂ)과 이름 8바이트·체크섬만 다르다.
 이어 하기(저장 기록 있음):
   5. 4 의 SRAM 을 넣고 전원 → Start → A·A 로 칸 목록을 거쳐 서장 저장 자리(25:8621 의 그룹 3C 항목)에 서고,
-     7E:2001~ 이 저장한 이름이다.
+     7E:2001~ 이 저장한 이름이다. 그 기록은 맵 곡 건너뛰기 비트(7E:21A5 bit6)가 켜진 채라, 서장 상자를 다시 띄운 뒤
+     BOX_SONG_BY 프레임 안에 그 비트가 꺼지고 맵 곡이 울려야 한다.
 
   python sfc/dq4/tools/dq4cores.py && python sfc/dq4/tools/dq4titlescene.py --rom work/ch1/dq4-ch1-full.sfc --out work/titlescene
 """
@@ -40,6 +41,8 @@ CURSOR = 0x7E0AD7
 NAME = 0x7E2001
 MAP = (0x7E00BC, 0x7E00BD)
 PROLOGUE_MAP = (0x3C, 0x01)
+# 첫 기록으로 이어 하면 서장 상자를 다시 띄우고 밝히기가 맵 곡을 튼다. 선 뒤 약 500프레임(snes9x 실측)
+BOX_SONG_BY = 900
 TITLE_BRIGHT = 60                     # dq4compatcheck.TITLE_BRIGHT: 타이틀 하늘 그림은 밝다
 Q_WRITE, Q_ARG, Q_X = 0x7E1D91, 0x7E1DA5, 0x7E1DB5
 REJECT = (0x33, 0x02)                 # 이름 칸이 찼을 때의 거절음(서장 수련 검사의 새 게임 입력에서 실측)
@@ -400,7 +403,19 @@ def continue_game(core):
         if core.n >= fx.ARRIVE_FROM and core.rd(MENU_FLAG) == 0 and (core.rd(MAP[0]), core.rd(MAP[1])) == PROLOGUE_MAP:
             arrived = core.n
             break
-    return {'arrived': arrived, 'name': bytes(core.rd(NAME + k) for k in range(8)).hex(), 'name_entry': entry}
+    song = None
+    if arrived is not None:
+        import dq4chapterbox as box
+        skip_addr, skip_bit = box.SKIP_SONG
+        for _ in range(BOX_SONG_BY):
+            if core.rd(SONG_NOW) not in (0x00, 0xFF, SILENT) and not core.rd(skip_addr) & skip_bit:
+                song = {'at': core.n - arrived, 'song': core.rd(SONG_NOW)}
+                break
+            core.run(set())
+        else:
+            song = {'at': None, 'song': core.rd(SONG_NOW), 'skip': core.rd(skip_addr)}
+    return {'arrived': arrived, 'name': bytes(core.rd(NAME + k) for k in range(8)).hex(), 'name_entry': entry,
+            'song': song}
 
 
 def check_core(name, rom, out):
@@ -428,6 +443,8 @@ def check_core(name, rom, out):
             problems.append(f'이어 하기로 서장 맵 {PROLOGUE_MAP[0]:02X}/{PROLOGUE_MAP[1]:02X} 에 서지 않음')
         elif cont['name'] != name_bytes(text).hex():
             problems.append(f'이어 한 뒤 이름 {cont["name"]}, 기대 {name_bytes(text).hex()}')
+        elif cont['song']['at'] is None:
+            problems.append(f'이어 해 선 뒤 {BOX_SONG_BY} 프레임 동안 맵 곡이 울리지 않음({cont["song"]})')
         if cont.get('name_entry'):
             problems.append('기록이 있는데 A·A 가 이름 입력으로 감(칸 목록이 아님)')
     res.update(status='failed' if problems else 'passed', problems=problems, info=info, continue_=cont,

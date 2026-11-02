@@ -37,6 +37,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
+import dq4chapterbox  # noqa: E402
 import dq4cores  # noqa: E402
 import dq4compatcheck as cc  # noqa: E402
 import dq4ch1walkcheck as wc  # noqa: E402
@@ -68,6 +69,12 @@ CONTINUE = [('start', 2), ('wait', 10)] + [('a', 2), ('wait', 14)] * 200
 # 켤 때 25:81CF 가 칸을 WRAM 에 미리 불러 2000 블록이 거짓으로 같아진다. 맵·칸으로만 도착을 보고, 그 전은 보지 않는다
 ARRIVE_FROM, ARRIVE_BY = 300, 3000
 NOSUM_FRAMES = 900
+SETTLE = 90                    # 선 뒤 더 돌리는 프레임(boot)
+SONG_NOW = 0x7E1D8B
+NO_SONG = (0x00, 0xFF)
+# 이어 해 선 뒤 맵 곡이 울리기까지의 상한. 이무르 교회 앞 62프레임, 바트랜드 67프레임(실측)
+CONTINUE_SONG_BY = 300
+SKIP_SONG = dq4chapterbox.SKIP_SONG
 NIGHT_TIME = 0x0190            # 25:8278 이 밤 칸에 두는 시각(낮은 0050)
 # ルーラ 칸의 이름(dq4fieldtravel.FC_GROUPS 차례로 포팅한 그룹). 이름 없는 칸은 번호로 준다
 PLACES = {'batland': 0x36, '바트랜드': 0x36, 'imuru': 0x37, '이무르': 0x37, 'prologue': 0x3C, '서장': 0x3C,
@@ -353,7 +360,7 @@ def close(core):
         core.close()
 
 
-def boot(core, goal, settle=90, step=None):
+def boot(core, goal, settle=SETTLE, step=None):
     """전원 직후의 코어에서 이어 하기 입력을 넣고, 맵·칸이 goal(BC, BD, X, Y)이 된 프레임을 돌려준다(못 서면 None).
     그 뒤 settle 프레임을 더 돌린다. step 은 한 프레임 돌리는 함수(dq4compatcheck.Walker.step 등)."""
     step = step or core.run
@@ -370,6 +377,20 @@ def boot(core, goal, settle=90, step=None):
     for _ in range(settle):
         step(set())
     return arrived
+
+
+def wait_song(core, limit, step=None, at_least=0):
+    """지금 곡 $1D8B 가 울리는(00·FF 가 아닌) 첫 프레임까지 limit 프레임을 돌린다. at_least 프레임은 곡이 일찍 울려도
+    채운다. {'at': 지금부터 센 프레임(못 울리면 None), 'song', 'skip': 그때 7E:21A5}."""
+    step = step or core.run
+    start, at = core.n, None
+    while True:
+        if at is None and core.rd(SONG_NOW) not in NO_SONG:
+            at = core.n - start
+        if (at is not None or core.n - start >= limit) and core.n - start >= at_least:
+            break
+        step(set())
+    return {'at': at, 'song': core.rd(SONG_NOW), 'skip': core.rd(SKIP_SONG[0])}
 
 
 def new_game_key(rom_path, core_path):
@@ -438,12 +459,14 @@ CHECK_WARP = '39/04,46,41'
 
 def check_core(name, rom, out):
     """한 코어에서 (a) 고친 값이 불러온 WRAM 과 같은지 (b) 체크섬이 틀린 칸이 지워지는지 (c) 같은 입력 두 번이
-    WRAM 128KB 가 같은지 (d) 이어 한 뒤 순간이동해 도착하는지."""
+    WRAM 128KB 가 같은지 (d) 이어 한 뒤 순간이동해 도착하는지 (e) 이어 해 선 뒤 맵 곡이 곧 울리는지."""
     path = dq4cores.core_path(name)
     out.mkdir(parents=True, exist_ok=True)
     slot = SaveSlot.new_game(rom)
     for k, v in CHECK_SETS:
         slot.set(k, v)
+    # 새 게임 첫 기록처럼 맵 곡 건너뛰기 비트를 켠다(밑판도 켜져 있음). 이어 할 때 시작 훅이 끄므로 (a) 에서 뺀다
+    slot.poke(SKIP_SONG[0], slot._get(SKIP_SONG[0]) | SKIP_SONG[1])
     sram, block, goal = slot.to_sram(), slot.to_block(), slot.goal
     res, problems = {'core': None, 'goal': list(goal)}, []
     t0 = time.time()
@@ -452,16 +475,23 @@ def check_core(name, rom, out):
     for tag in ('a', 'b'):
         with closing(open_core(path, rom, out / tag, sram)) as core:
             res['core'] = core.name
-            at = boot(core, goal)
+            at = boot(core, goal, settle=0)
+            song = wait_song(core, CONTINUE_SONG_BY, at_least=SETTLE) if at is not None else None
             runs.append((at, bytes(core.wram()[:0x20000]), wram_summary(core)))
+            res.setdefault('songs', []).append(song)
             core.shot(out / f'{tag}.png')
     at, w, loaded = runs[0]
     res['arrived'] = at
+    res['record_skip'] = f'{slot._get(SKIP_SONG[0]):02X}'
+    song = res['songs'][0]
+    if at is not None and song['at'] is None:
+        problems.append(f'(e) 이어 해 선 뒤 {CONTINUE_SONG_BY} 프레임 동안 맵 곡이 울리지 않음'
+                        f'($1D8B = {song["song"]:02X}, 7E:21A5 = {song["skip"]:02X}, 기록 {res["record_skip"]})')
     if at is None:
         problems.append(f'{ARRIVE_BY} 프레임 안에 이어 할 자리 {goal} 에 서지 않음')
     else:
         res['block_diff'] = [f'{WRAM_BASE + i:04X}' for i in range(SUM_AT) if w[WRAM_BASE + i] != block[i]]
-        changed = edited_addrs(SaveSlot.new_game(rom), slot)
+        changed = [a for a in edited_addrs(SaveSlot.new_game(rom), slot) if a != SKIP_SONG[0] & 0xFFFF]
         bad = [f'{a:04X}' for a in changed if w[a] != block[a - WRAM_BASE]]
         res['edited'] = len(changed)
         if bad:
