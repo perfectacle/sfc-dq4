@@ -1,5 +1,5 @@
 """Without a ROM, the 4bpp tile coding, the colour choice and the sea frame check; with rom/dq5.sfc, the generated
-tiles and blocks keep DQ5's tiles, terrain and attributes, and the sea takes DQ5's sea colours."""
+tiles change only free DQ5 slots and the blocks keep DQ5's terrain and attributes, and the sea takes DQ5's sea colours."""
 
 import sys
 import unittest
@@ -75,13 +75,19 @@ class GenerateTest(unittest.TestCase):
         cls.dq5 = lambda self, m: (block_tiles(cls.rom, BLOCK_LOWER, m), block_tiles(cls.rom, BLOCK_UPPER, m),
                                    terrain(cls.rom, m))
 
-    def test_dq5_tiles_stay(self):
-        self.assertEqual(self.tiles[:gfx.TILES * 32], self.original["tiles"])
-        self.assertEqual(self.nibbles[:gfx.TILES], self.original["tile_palettes"])
-        self.assertEqual(self.attrs[:gfx.TILES], self.original["tile_attributes"])
-        self.assertLessEqual(len(self.tiles) // 32, 1024)
-        self.assertEqual(len(self.tiles) // 32, len(self.nibbles))
-        self.assertTrue(set(self.nibbles[gfx.TILES:]) <= set(gfx.LINES))
+    def test_new_tiles_stay_in_dq5_free_slots(self):
+        # Tile 512 and up is VRAM 4000~, which the battle backdrop overwrites while the field shows above and below it.
+        self.assertEqual(len(self.tiles), gfx.TILES * 32)
+        self.assertEqual(len(self.nibbles), gfx.TILES)
+        self.assertEqual(len(self.attrs), gfx.TILES)
+        free = set(gfx.free_slots(self.rom, self.original["tiles"]))
+        o = self.original
+        for t in range(gfx.TILES):
+            old = (o["tiles"][t * 32:t * 32 + 32], o["tile_palettes"][t], o["tile_attributes"][t])
+            new = (self.tiles[t * 32:t * 32 + 32], self.nibbles[t], self.attrs[t])
+            if new != old:
+                self.assertIn(t, free, f"tile {t}")
+                self.assertIn(self.nibbles[t], gfx.LINES, f"tile {t}")
 
     def test_blocks_keep_the_borrowed_terrain_and_attributes(self):
         by_number = {b["index"]: b for b in self.blocks}
@@ -118,7 +124,7 @@ class GenerateTest(unittest.TestCase):
     def test_reef_is_rocks_over_the_sea(self):
         block = next(b for b in self.blocks if b["index"] == port.OWN_BLOCKS[gfx.REEF])
         self.assertEqual(block["lower"], list(gfx.SEA_TILES))
-        self.assertTrue(all(t >= gfx.TILES for t in block["upper"]))
+        self.assertTrue(set(block["upper"]) <= set(gfx.free_slots(self.rom, self.original["tiles"])))
         self.assertTrue(any(gfx.decode(self.tiles[t * 32:t * 32 + 32]).count(0) for t in block["upper"]))
 
 
