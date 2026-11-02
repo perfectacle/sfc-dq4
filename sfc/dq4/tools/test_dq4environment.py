@@ -207,6 +207,39 @@ class CounterTests(unittest.TestCase):
                            for i in (0, 1))
         self.assertTrue({(6, 6), (7, 6), (6, 7), (7, 7)} <= counters - walls)
 
+    def test_every_map_blocks_exactly_the_cells_fc_blocks(self):
+        # Each FC block is 2x2 DQ5 cells, so a cell walks only if its FC block does, and every counter cell keeps
+        # +1 bit7. The party may still stand on the cell just below a counter: its sprite reaches two cells up over
+        # the counter, as at DQ5's own inn counter (01/0C, party stops at (48,34) under counter rows 32-33).
+        import sys
+        sys.path.insert(0, str(ROOT / "fc" / "dq4" / "tools"))
+        import dq4block
+        import dq4environmentrom as rom
+        from dq4environmentmap import all_maps, block_prop, edit_cells
+        from kr_patch.fc import ines
+        prg = ines.prg((ROOT / "rom" / "dq4.nes").read_bytes())
+        where = {name: (g, k) for g, k, _, name in all_maps(prg)}
+        counters = 0
+        for name, target in rom.MAPS.items():
+            g, k = where[name]
+            source = dq4block.Map(prg, g, k)
+            edit_cells(source, g, k)
+            doc = rom.map_document(name, source, {b: b for b in range(32)}, target)
+            walls, marks = ({(x + i, y): value for x, y, n, value, _ in doc["passes"][p]["entries"] for i in range(n)}
+                            for p in (0, 1))
+            wrong = []
+            for y in range(source.h):
+                for x in range(source.w):
+                    prop = block_prop(source, source.cell(x, y) & 31)
+                    blocked = bool(prop & 0x80) and prop not in rom.OPENINGS
+                    for cell in ((x * 2 + dx, y * 2 + dy) for dy in (0, 1) for dx in (0, 1)):
+                        counter = bool(marks.get(cell, 0) & rom.COUNTER_PASS)
+                        counters += counter
+                        if blocked != (cell in walls or counter) or (prop in rom.COUNTER_PROPS) != counter:
+                            wrong.append((x, y, cell, f"{prop:02X}"))
+            self.assertEqual(wrong, [], name)
+        self.assertGreater(counters, 0)
+
 
 @unittest.skipUnless((ROOT / "rom" / "dq4.nes").is_file(), "local source ROM not present")
 class FrontTests(unittest.TestCase):
