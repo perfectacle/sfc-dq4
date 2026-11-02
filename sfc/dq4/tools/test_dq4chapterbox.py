@@ -66,6 +66,19 @@ class CodeTests(unittest.TestCase):
             self.assertEqual((a.box_at, a.reveal_at), (b.box_at, b.reveal_at))
             self.assertEqual(box.entry_points(scenes), {**a.box_at, 'reveal': a.reveal_at})
 
+    def test_start_clears_song_skip_when_no_scene_waits(self):
+        # 새 게임 첫 기록은 21A5 bit6 이 켜진 채 쓰여, 이어 하기에서 끄지 않으면 맵을 옮겨도 곡이 울리지 않았다
+        blank = bytes(box.BOX_W * box.BOX_H * 2)
+        scenes = box.GAME_SCENES
+        lay = box.Layout(box.CODE_AT, scenes, b'', [blank] * len(scenes), box.palettes())
+        start = lay.blob[:lay.hook_at - lay.start_at]
+        addr = box.SKIP_SONG[0].to_bytes(3, 'little')
+        on = bytes((0xAF, *addr, 0x09, 0x40, 0x8F, *addr))
+        off = bytes((0xAF, *addr, 0x29, 0xBF, 0x8F, *addr))
+        self.assertEqual(start, bytes((0xA9, 0x80, 0x85, 0xBE)) + box.if_pending(scenes, on, off) + start[-13:])
+        at = start.index(off)
+        self.assertEqual(start[at - 2:at], bytes((0x80, len(off))))   # 켜는 갈래는 끄기를 건너뜀
+
     def test_code_bank_is_not_a_sound_bank(self):
         # 사운드 세트는 이 롬 위에 얹으며 자기 뱅크가 비어 있어야 한다
         import dq4soundpatch

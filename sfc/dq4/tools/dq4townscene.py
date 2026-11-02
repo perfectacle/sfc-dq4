@@ -480,13 +480,21 @@ def scene_save(core, rom, out, seed, n):
     with fx.closing(fx.open_core(path, rom, out / 'load', sram_after)) as c:
         loaded = continue_from(c, n, slot.goal)
         at = loaded['ended']
-        p = Probe(c)
-        p.idle(90)
+        song = fx.wait_song(c, fx.CONTINUE_SONG_BY, at_least=fx.SETTLE)
         w = bytes(c.wram()[:0x20000])
         c.shot(out / 'load.png')
+    # 밑판(새 게임 첫 기록)의 맵 곡 건너뛰기 비트가 이어 하기 뒤에도 남으면 기도 기록에 그대로 실려 곡 없는 기록이 이어진다
+    skip_addr, skip_bit = fx.SKIP_SONG
+    res['saved_skip'] = f'{slot_block(sram_after, n)[(skip_addr & 0xFFFF) - fx.WRAM_BASE]:02X}'
+    res['load_song'] = song
+    if int(res['saved_skip'], 16) & skip_bit:
+        problems.append(f'기도 기록 칸 {n + 1} 에 맵 곡 건너뛰기 비트가 켜져 있음(7E:21A5 = {res["saved_skip"]})')
     if at is None:
         problems.append(f'이어 하기가 {slot.goal} 에 서지 않음')
     else:
+        if song['at'] is None:
+            problems.append(f'기도 기록으로 이어 해 선 뒤 {fx.CONTINUE_SONG_BY} 프레임 동안 맵 곡이 울리지 않음'
+                            f'($1D8B = {song["song"]:02X}, 7E:21A5 = {song["skip"]:02X})')
         problems += judge_loaded(slot_block(sram_after, n), w)
         got = int.from_bytes(w[fx.GOLD:fx.GOLD + 3], 'little')
         if got != gold:

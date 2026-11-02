@@ -2,7 +2,8 @@
 이어 하기로 시작하고, 전투 한 판을 WRAM 으로 판정한다. 형식은 sfc/dq4/docs/dq4-battle-scene-format.md.
 
 장면(SCENES): 보통 공격(회심 셈)·중간 수비, 도망·도망칠 수 없는 무리·몬스터 도망, 약초, 호이민의 ホイミ, 레벨업 한 번·두 번,
-전멸, 탑 위 보스(보스 패치 없이). 알려진 문제를 재는 nosong·growth 는 기본 묶음 밖(--scenes 로 고름).
+전멸, 탑 위 보스(보스 패치 없이), 맵 곡 건너뛰기 비트를 켠 기록으로 이어 하기(nosong). 알려진 문제를 재는 growth 는
+기본 묶음 밖(--scenes 로 고름).
 - 걸음 전투는 조우 루틴 23:E7C2 를 cheat 로 「무리를 7E:1001~ 에 쓰고 구역 레벨 $100F·무리 플래그 $1000 을 둔 뒤
   carry 를 켜 돌아옴」으로 덮어 탑 39/01 (20,16)에서 아래로 한 걸음 내디뎌 붙인다. 전투가 걸리면 cheat 를 풀어
   롬의 「조우 없음」(dq4ch1walkcheck.NO_ENCOUNTERS)으로 돌아간다.
@@ -70,10 +71,11 @@ NO_ITEM = 0xFF
 TOWER = '39/01,20,16'
 BOSS_CELL = '39/04,46,23'
 CHURCH = ('36/00', 10, 45)        # 바트랜드 교회 신부 앞(전멸 뒤 다시 시작 자리, dq4-chapter1-format)
-MAP_SKIP = '21A5&BF'              # 맵 곡 건너뛰기 비트를 끈다(새 게임 밑판은 켠 채 기록됨)
+MAP_SKIP = '21A5|40'              # 맵 곡 건너뛰기 비트(dq4chapterbox.SKIP_SONG). 새 게임 첫 기록은 켠 채 쓰인다
 STEP_LIMIT, START_LIMIT = 120, 2400
 BATTLE_LIMIT = 9000               # 전투가 걸린 뒤 끝나기까지. 넘으면 멈춤
 SONG_LIMIT = 900                  # 전투가 끝난 뒤 맵 곡이 돌아오기까지
+CONTINUE_SONG_LIMIT = 300         # 이어 해 선 뒤 맵 곡이 울리기까지(바트랜드 교회 앞 실측 67프레임)
 FINISH_LIMIT = 3000               # 몬스터·일행이 다 쓰러진 뒤 전투가 끝나기까지(레벨업 뒤 멈춤 7,313프레임을 잡음)
 MASH = 30
 
@@ -389,10 +391,12 @@ def judge_noflee(s, expect):
 
 
 def judge_nosong(s, expect):
-    """맵 곡 건너뛰기 비트를 그대로 둔 기록으로 이어 해도 맵 곡이 울려야 한다."""
+    """맵 곡 건너뛰기 비트가 켜진 기록으로 이어 해도, 선 자리에서 곧 맵 곡이 울려야 한다."""
     problems = judge_win(s, expect)
-    if s.get('map_song') in (0x00, 0xFF):
-        problems.insert(0, f"이어 한 뒤 {SONG_LIMIT} 프레임 동안 맵 곡이 울리지 않음($1D8B = {s.get('map_song'):02X})")
+    song = s.get('continue_song') or {}
+    if song.get('at') is None:
+        problems.insert(0, f"이어 해 선 뒤 {CONTINUE_SONG_LIMIT} 프레임 동안 맵 곡이 울리지 않음"
+                           f"($1D8B = {song.get('song', 0):02X}, 7E:21A5 = {song.get('skip', 0):02X})")
     return problems
 
 
@@ -502,14 +506,15 @@ SCENES = {
     # はがねのつるぎ·かわのよろい 를 밑판의 장비 두 칸(+14 = 03)에 둔다
     'boss': {'what': '탑 위 보스(진짜 능력치), 이긴 뒤 레벨업', 'boss': True, 'party': 'hoimin', 'growth': (12, 1),
              'items': [0x0C, 0x48], 'turn': 'attack', 'after_taps': ('a', 20), 'move': 'down'},
-    # 아래 둘은 알려진 문제를 재는 장면이라 기본 묶음(가드)에 넣지 않는다: --scenes 로 고른다
-    'nosong': {'what': '새 게임 첫 기록의 맵 곡 건너뛰기 비트를 그대로 두고 이어 함', 'keep_map_skip': True,
+    # 밑판이 바뀌어도 비트가 켜진 기록을 재도록 직접 켠다
+    'nosong': {'what': '맵 곡 건너뛰기 비트(새 게임 첫 기록에 켜진 채 남음)를 켠 기록으로 이어 함', 'sets': MAP_SKIP,
                'group': [(0x00, 1)], 'monsters': {0x00: {'hp': 1, 'defense': 0, 'attack': 0}}, 'turn': 'attack'},
     'growth': {'what': '레벨 1 → 10 을 한 전투에(곡선을 FC ライアン 과 견줌)', 'group': [(0x00, 1)],
                'monsters': {0x00: {'hp': 1, 'defense': 0, 'attack': 0}}, 'growth': (1, 9), 'turn': 'attack',
                'limit': 20000, 'finish_limit': 9000},
 }
-KNOWN_ISSUES = ('nosong', 'growth')
+# 알려진 문제를 재는 장면이라 기본 묶음(가드)에 넣지 않는다: --scenes 로 고른다
+KNOWN_ISSUES = ('growth',)
 DEFAULT_SCENES = tuple(n for n in SCENES if n not in KNOWN_ISSUES)
 
 
@@ -520,8 +525,7 @@ def scene_slot(rom_path, rom, scene):
     slot = fx.SaveSlot.new_game(rom_path)
     slot.place = 'batland'
     slot.gold = 1000
-    if not scene.get('keep_map_skip'):
-        slot.apply_sets(MAP_SKIP)
+    slot.apply_sets(scene.get('sets', ''))
     if scene.get('party') == 'hoimin':
         slot.effect('hoimin')
         slot.flag('HOIMIN')
@@ -668,9 +672,10 @@ class Run:
 
     def prepare(self):
         """이어 하기 → 순간이동. 전투 직전 상태를 돌려준다."""
-        at = fx.boot(self.c, self.slot.goal, step=self.w.step)
+        at = fx.boot(self.c, self.slot.goal, settle=0, step=self.w.step)
         if at is None:
             raise RuntimeError('이어 하기 자리에 서지 않음')
+        self.continue_song = fx.wait_song(self.c, CONTINUE_SONG_LIMIT, step=self.w.step, at_least=fx.SETTLE)
         pins = wc.pins({})
         self.w.warp(BOSS_CELL if self.scene.get('boss') else TOWER, pins, cc.sets(pins))
         # 순간이동 뒤 맵 곡이 울리기까지
@@ -726,7 +731,7 @@ class Run:
             w.rom_cheats = {'force': cc.rom_codes(ENCOUNTER, code)}
         w.apply()
         sentinel = bytes(ev.BOSS_MONSTERS) if boss else group_sentinel(scene['group'])
-        s = {'seed': seed, 'map_song': self.map_song, 'start': None, 'end': None, 'turns': 0, 'hits': [],
+        s = {'seed': seed, 'map_song': self.map_song, 'continue_song': self.continue_song, 'start': None, 'end': None, 'turns': 0, 'hits': [],
              'heals': [], 'songs': []}
         before = self.snapshot()
         t0 = c.n
@@ -906,7 +911,8 @@ def unit(core_name, rom_path, scene_name, seeds, out, repeat=1):
     finally:
         if run is not None:
             fx.close(run.c)
-    report = {'core': run.core, 'scene': scene_name, 'map_song': run.map_song, 'expect': run.expect,
+    report = {'core': run.core, 'scene': scene_name, 'map_song': run.map_song,
+              'continue_song': run.continue_song, 'expect': run.expect,
               'seconds': round(time.time() - t0, 1), 'results': results}
     (out / 'unit.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')
     return report
