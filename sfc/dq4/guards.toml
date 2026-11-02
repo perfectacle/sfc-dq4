@@ -187,7 +187,7 @@ needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 
 
 [[check]]
 name = "dq4-town-scene"
-why = "여관(묵기 값 = FC 1인 값 × 일행 수, HP·MP 가득, 밤 → 아침, 금화 모자람·거절은 그대로)·교회(되살리기·해독·저주 풀기 값과 상태, 계시의 남은 경험치, 기도 저장이 칸 1·2·3 에 그 순간 WRAM 그대로·체크섬)·타이틀(복사·지우기·빈 SRAM·체크섬 틀린 칸)과 낮밤 경계(필드 색, 마을 낮·밤 인물)가 bsnes·snes9x 에서 다시 깨지지 않게. 교회 치료 뒤 대화는 끝까지 가야 한다(곡 1E 자리에 되풀이하는 NDS 곡이 들어 25:FD00 이 곡 끝을 기다리다 멈췄음). 알려진 실패(필드 시각 색)는 정확히 그 증상일 때만 통과하고 고치면 KNOWN 에서 지운다"
+why = "여관(묵기 값 = FC 1인 값 × 일행 수, HP·MP 가득, 밤 → 아침, 금화 모자람·거절은 그대로)·교회(되살리기·해독·저주 풀기 값과 상태, 계시의 남은 경험치, 기도 저장이 칸 1·2·3 에 그 순간 WRAM 그대로·체크섬)·타이틀(복사·지우기·빈 SRAM·체크섬 틀린 칸)과 낮밤 경계(필드 색, 마을 낮·밤 인물)가 bsnes·snes9x 에서 다시 깨지지 않게. 교회 치료 뒤 대화는 끝까지 가야 한다(곡 1E 자리에 되풀이하는 NDS 곡이 들어 25:FD00 이 곡 끝을 기다리다 멈췄음). 필드에서는 환경 훅 wrap 이 필드 루틴 02:AB33 을 물 루틴으로 바꾸지 않아 필드 색이 시각 표대로 바뀌어야 하고, 필드 세 장면(dusk·dawn·cross)은 KNOWN 없이 통과해야 한다"
 paths = [
   "sfc/dq4/tools/dq4growth.py",
   "sfc/dq4/tools/dq4townscene.py",
@@ -202,6 +202,7 @@ paths = [
   "sfc/dq4/tools/dq4groupbuild.py",
   "sfc/dq4/tools/dq4fieldgfx.py",
   "sfc/dq4/tools/dq4fieldport.py",
+  "sfc/dq4/tools/dq4environmentrom.py",
   "sfc/dq4/tools/dq4soundpatch.py",
   "sfc/dq4/tools/dq4soundset.py",
   "sfc/dq4/tools/dq4sound-game.args",
@@ -418,6 +419,17 @@ run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
 
 [[check]]
+name = "dq4-wrap-routine"
+why = "환경 훅 wrap 이 $BE bit7(실내)로 바꾼 맵을 가려 매 프레임 루틴 7E:1AA6 을 두는 것이 다시 깨지지 않게. 필드로 나갈 때(01:9FD6)는 필드 루틴 02:AB33(시각 색)이 남고(남은 $BC/$BD 로 물 루틴이 덮어 필드가 늘 낮 색이었음), 필드에서 걸어 들어갈 때와 바꾼 맵마다 필드 입구로 들어갈 때(01:8F84)·맵을 그 자리에서 다시 풀 때(01:98FC)는 bit7 이 켜진 채 돌아 물·분수·뚜껑 루틴이 들어가야 한다. 문턱을 좁히거나 옮기면 깨진다(단위 테스트 test_wrap_keeps_the_field_routine 은 바이트만 본다)"
+paths = [
+  "sfc/dq4/tools/dq4environmentrom.py",
+  "sfc/dq4/tools/dq4wrapcheck.py",
+  "sfc/dq4/tools/lua/dq4wraplog.lua",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/wrapcheck && uv run --locked python sfc/dq4/tools/dq4wrapcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/wrapcheck --jobs 4"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI"]
+
+[[check]]
 name = "dq4-door-stand"
 why = "문을 열고 문 칸에 선 주인공이 위층 벽 밑(OAM 우선순위 2)에 그려져 다리만 보이던 일(옆문 넷: 바트랜드 성 마을 36/00 (70,41) 등)이 다시 생기지 않게. 문 칸의 속성 패스 2 bit0 을 빼면 깨진다"
 paths = [
@@ -502,3 +514,11 @@ paths = ["sfc/dq4/tools/dq4freshstate.py", "sfc/dq4/tools/lua/dq4shipstate.lua",
          "sfc/dq4/tools/dq4chapter1.py"]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/fresh-namegame && uv run --locked python sfc/dq4/tools/dq4namegamecheck.py --rom work/ch1/menu.sfc --out work/fresh-namegame"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+
+[[check]]
+name = "dq4-environment-collision"
+why = "바꾼 맵의 셀 막힘·카운터 칸이 FC 블록 속성(dq4block.terrain)이 막는 칸과 같아야 한다. 롬이 없으면 건너뛰는 단위 테스트라 CI 가 대신 돌리지 못한다(#970). 건너뛰면 OK 줄이 달라 실패로 친다"
+paths = ["sfc/dq4/tools/dq4environmentrom.py", "sfc/dq4/tools/dq4environmentmap.py", "sfc/dq4/tools/test_dq4environment.py",
+         "fc/dq4/tools/dq4block.py"]
+run = "uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4environment.py -k CounterTests 2>&1 | tee work/environment-collision.log | tail -1 | grep -qx OK"
+needs = ["rom"]

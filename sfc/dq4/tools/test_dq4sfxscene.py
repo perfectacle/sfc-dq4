@@ -82,6 +82,89 @@ class RomCheckTest(unittest.TestCase):
         rom[s.lorom(0x01E01B) + 2] = 0x35                                   # 원래 번호로 되돌아감
         self.assertEqual(len(s.call_site_problems(bytes(rom), t)), 1)
 
+    # 패치 전 뱅크 01 의 E000~E03F: 효과음 BRK(01:E01B) 앞뒤를 잇는 코드 바이트
+    CODE = bytes(range(0x80, 0xC0))
+    CODE = CODE[:0x1B] + bytes((0x00, 0x19, 0x35, 0x01)) + CODE[0x1F:]
+
+    @classmethod
+    def door_bank_base(cls):
+        """패치 전 롬(원본 DQ5 꼴): 01:E000 에 CODE."""
+        base = bytearray(0x180000)
+        base[s.lorom(0x01E000):s.lorom(0x01E000) + len(cls.CODE)] = cls.CODE
+        return bytes(base)
+
+    @classmethod
+    def door_bank_rom(cls, bank=0x3B, back=0x01):
+        """문 표를 3B 에 늘린 꼴: 여섯 입구 → 22:FF30 의 스텁(PHP PHB PEA $BBBB PLB PLB JML back:입구+4).
+        뱅크 3B 의 E000 은 --sfx-call 로 바꾸기 전에 복사한 CODE."""
+        rom = bytearray(0x400000)
+        rom[s.lorom(0x01E000):s.lorom(0x01E000) + len(cls.CODE)] = cls.CODE
+        rom[s.lorom(0x3BE000):s.lorom(0x3BE000) + len(cls.CODE)] = cls.CODE
+        for k, entry in enumerate(s.DOOR_ENTRIES):
+            stub = 0x22FF30 + k * 11
+            o = s.lorom(entry)
+            rom[o:o + 4] = bytes((0x5C, *stub.to_bytes(3, 'little')))
+            o = s.lorom(stub)
+            rom[o:o + 11] = bytes((0x08, 0x8B, 0xF4, bank, bank, 0xAB, 0xAB, 0x5C,
+                                   *(entry + 4 & 0xFFFF).to_bytes(2, 'little'), back))
+        for addr, new in ((0x05E6A9, 0x3F), (0x01E01B, 0x45)):
+            o = s.lorom(addr)
+            rom[o:o + 3] = bytes((0x00, 0x19, new))
+        return rom
+
+    def test_leftover_in_door_copy_allowed(self):
+        t = s.load_table(ARGS)
+        rom = self.door_bank_rom()
+        self.assertEqual(s.door_copy_bank(bytes(rom)), 0x3B)
+        self.assertEqual(s.leftover_sites(bytes(rom), t), ['3BE01B 35-01'])
+        self.assertEqual(s.leftover_problems(bytes(rom), t, self.door_bank_base()), [])
+
+    def test_leftover_copy_with_other_bytes_fails(self):
+        # 주소 쌍이 --sfx-call 자리와 맞아도, 둘레가 패치 전 뱅크 01 과 다르면 사본이 아닌 3B 코드다
+        t = s.load_table(ARGS)
+        for at in (0x3BE01B - 1, 0x3BE01B - s.COPY_WINDOW, 0x3BE01B + 4 + s.COPY_WINDOW - 1):
+            rom = self.door_bank_rom()
+            rom[s.lorom(at)] ^= 0xFF
+            self.assertEqual(s.leftover_problems(bytes(rom), t, self.door_bank_base()),
+                             ['3BE01B 35-01: 대응표대로 바뀌지 않은 자리'], f'{at:06X}')
+        # 창 밖의 바이트는 보지 않는다
+        rom = self.door_bank_rom()
+        rom[s.lorom(0x3BE01B - s.COPY_WINDOW - 1)] ^= 0xFF
+        self.assertEqual(s.leftover_problems(bytes(rom), t, self.door_bank_base()), [])
+
+    def test_leftover_elsewhere_fails(self):
+        t = s.load_table(ARGS)
+        rom = self.door_bank_rom()
+        rom[s.lorom(0x05A000):s.lorom(0x05A000) + 4] = bytes((0x00, 0x19, 0x35, 0x01))   # 대응표가 모르는 자리
+        rom[s.lorom(0x3BE119):s.lorom(0x3BE119) + 4] = bytes((0x00, 0x19, 0x35, 0x01))   # 01:E119 는 --sfx-call 이 아님
+        self.assertEqual(s.leftover_problems(bytes(rom), t, self.door_bank_base()),
+                         ['05A000 35-01: 대응표대로 바뀌지 않은 자리', '3BE119 35-01: 대응표대로 바뀌지 않은 자리'])
+
+    def test_leftover_in_copy_fails_when_copy_runs(self):
+        t = s.load_table(ARGS)
+        base = self.door_bank_base()
+        # 스텁이 복사본 뱅크로 뛰면 사본 코드가 돌아 원래 번호가 울린다
+        self.assertIsNone(s.door_copy_bank(bytes(self.door_bank_rom(back=0x3B))))
+        self.assertEqual(s.leftover_problems(bytes(self.door_bank_rom(back=0x3B)), t, base),
+                         ['3BE01B 35-01: 대응표대로 바뀌지 않은 자리'])
+        # 문 표를 늘리지 않은 롬(입구가 원래 PHP PHB PHK PLB)에는 복사 뱅크가 없다
+        rom = self.door_bank_rom()
+        for entry in s.DOOR_ENTRIES:
+            rom[s.lorom(entry):s.lorom(entry) + 4] = bytes((0x08, 0x8B, 0x4B, 0xAB))
+        self.assertIsNone(s.door_copy_bank(bytes(rom)))
+        self.assertEqual(len(s.leftover_problems(bytes(rom), t, base)), 1)
+
+    def test_door_bank_jumps(self):
+        rom = self.door_bank_rom()
+        base = bytearray(self.door_bank_base())
+        rom[s.lorom(0x0A8000):s.lorom(0x0A8000) + 4] = bytes((0x22, 0x1B, 0xE0, 0x3B))   # JSL 3B:E01B
+        rom[s.lorom(0x0A9000):s.lorom(0x0A9000) + 4] = bytes((0x5C, 0x00, 0x90, 0xBB))   # JML BB:9000(거울)
+        rom[s.lorom(0x0AA000):s.lorom(0x0AA000) + 4] = bytes((0x22, 0x00, 0x40, 0x3B))   # 3B:4000 은 롬이 아님
+        rom[s.lorom(0x0AB000):s.lorom(0x0AB000) + 4] = bytes((0x22, 0x00, 0x90, 0x3C))   # 다른 뱅크
+        base[s.lorom(0x0AC000):s.lorom(0x0AC000) + 4] = bytes((0x22, 0x00, 0x80, 0x3B))  # 원본 DQ5 에 있던 자료
+        rom[s.lorom(0x0AC000):s.lorom(0x0AC000) + 4] = bytes((0x22, 0x00, 0x80, 0x3B))
+        self.assertEqual(s.door_bank_jumps(bytes(rom), 0x3B, bytes(base)), [(0x0A8000, 0x3BE01B), (0x0A9000, 0xBB9000)])
+
     def test_weapon_table(self):
         t = s.load_table(ARGS)
         rom = bytearray(0x400000)

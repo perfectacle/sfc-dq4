@@ -207,6 +207,59 @@ class CounterTests(unittest.TestCase):
                            for i in (0, 1))
         self.assertTrue({(6, 6), (7, 6), (6, 7), (7, 7)} <= counters - walls)
 
+    def test_every_map_blocks_exactly_the_cells_fc_blocks(self):
+        # Each FC block is 2x2 DQ5 cells, so a cell walks only if its FC block does, and every counter cell keeps
+        # +1 bit7. The party may still stand on the cell just below a counter: its sprite reaches two cells up over
+        # the counter, as at DQ5's own inn counter.
+        # The expected values come from the FC decoder (dq4block.terrain over the FC ROM's own block properties and
+        # door-lock table), not from dq4environmentrom's tables, so a wrong OPENINGS or COUNTER_PROPS fails here.
+        import sys
+        sys.path.insert(0, str(ROOT / "fc" / "dq4" / "tools"))
+        import dq4block
+        import dq4environmentrom as rom
+        from dq4environmentmap import all_maps, edit_cells
+        from kr_patch.fc import ines
+        prg = ines.prg((ROOT / "rom" / "dq4.nes").read_bytes())
+        where = {name: (g, k) for g, k, _, name in all_maps(prg)}
+        # FC door locks 0-2 open with keys found before chapter 5; lock 3 (さいごのカギ) cannot, so it stays shut.
+        # A door shape that opens nothing (DOOR_OPENS None) is not a door the party can pass.
+        last_key = 3
+        # FC doors the conversion does not open yet, as (shape, lock): they stay walls. Remove one once it opens
+        # in DQ5, or this test fails on its maps.
+        unconverted = {("beyond_2x2", 0), ("beyond_2x2", 1), ("gate", 1), ("gate", 2)}
+
+        def expect(source, block):
+            prop = source.blocks["prop"].get(block)
+            if prop is None:
+                # A block the FC block table never defines draws nothing (black filler); the conversion walls it.
+                return True, False
+            t = dq4block.terrain(prg, prop)
+            door = t.get("door")
+            opens = door is not None and door["lock"] < last_key and door["opens"] is not None \
+                and (door["opens"], door["lock"]) not in unconverted
+            return not t["walk"] and not opens, bool(t.get("talk_over"))
+
+        counters = 0
+        for name, target in rom.MAPS.items():
+            g, k = where[name]
+            fc = dq4block.Map(prg, g, k)
+            source = dq4block.Map(prg, g, k)
+            edit_cells(source, g, k)
+            doc = rom.map_document(name, source, {b: b for b in range(32)}, target)
+            walls, marks = ({(x + i, y): value for x, y, n, value, _ in doc["passes"][p]["entries"] for i in range(n)}
+                            for p in (0, 1))
+            wrong = []
+            for y in range(fc.h):
+                for x in range(fc.w):
+                    blocked, talk_over = expect(fc, fc.cell(x, y) & 31)
+                    for cell in ((x * 2 + dx, y * 2 + dy) for dy in (0, 1) for dx in (0, 1)):
+                        counter = bool(marks.get(cell, 0) & rom.COUNTER_PASS)
+                        counters += counter
+                        if blocked != (cell in walls or counter) or talk_over != counter:
+                            wrong.append((x, y, cell, fc.cell(x, y) & 31))
+            self.assertEqual(wrong, [], name)
+        self.assertGreater(counters, 0)
+
 
 @unittest.skipUnless((ROOT / "rom" / "dq4.nes").is_file(), "local source ROM not present")
 class FrontTests(unittest.TestCase):
