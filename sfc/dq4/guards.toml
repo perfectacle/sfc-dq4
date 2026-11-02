@@ -437,10 +437,33 @@ paths = [
   "sfc/dq4/tools/dq4door.py",
   "sfc/dq4/tools/dq4doorcheck.py",
   "sfc/dq4/tools/dq4doorstandcheck.py",
+  "sfc/dq4/tools/dq4freshstate.py",
+  "sfc/dq4/tools/dq4heroblockcheck.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/dq4groupcheck.py",
   "sfc/dq4/tools/lua/dq4doorstand.lua",
+  "sfc/dq5/tools/lua/dq5warp.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/doorstand && uv run --locked python sfc/dq4/tools/dq4doorstandcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/doorstand"
-needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI"]
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+
+[[check]]
+name = "dq4-door-open"
+why = "서장·1장 맵(그룹 36~3C)의 문마다 옆 칸에서 밀면 잠금 0 은 열리고, 잠긴 문은 열쇠 없이 닫힌 채 밀 때마다 메시지가 한 번, 도둑의 열쇠로는 아래에서 열려야 한다(dq4door). 출발 상태는 그 롬의 서장 끝(dq4freshstate)"
+paths = [
+  "sfc/dq4/tools/dq4environmentrom.py",
+  "sfc/dq4/tools/dq4door.py",
+  "sfc/dq4/tools/dq4doorcheck.py",
+  "sfc/dq4/tools/dq4freshstate.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/dq4groupcheck.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
+  "fc/dq4/tools/dq4block.py",
+  "sfc/dq4/tools/lua/dq4doorwalk.lua",
+  "sfc/dq5/tools/lua/dq5warp.lua",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/doorcheck && uv run --locked python sfc/dq4/tools/dq4doorcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/doorcheck"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 
 [[check]]
 name = "dq4-people-match"
@@ -551,3 +574,44 @@ paths = ["sfc/dq4/tools/dq4groupcheck.py", "sfc/dq4/tools/dq4groupbuild.py", "sf
          "sfc/dq5/tools/lua/dq5warp.lua"]
 run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/guard-group-links && uv run --locked python sfc/dq4/tools/dq4groupcheck.py --rom work/dq4-groups/groups.sfc --out work/guard-group-links --jobs 3"
 needs = ["rom", "MESENCE", "LIBDIR", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+
+[[check]]
+name = "dq4-environment-rom"
+why = "바꾼 맵을 그룹 롬에서 다시 그린 그림이 오프라인 그림과 픽셀까지 같아야 한다(물체·통행·출구·물 슬롯, 성문을 연 채 지나가기, 원래 맵 셀 버퍼). 분수는 물과 같은 번호의 그림으로 함께 바뀌므로 기대 그림도 두 그림을 함께 바꾼다"
+paths = ["sfc/dq4/tools/dq4environmentromcheck.py", "sfc/dq4/tools/dq4environmentrom.py", "sfc/dq4/tools/dq4environmentmap.py",
+         "sfc/dq4/tools/dq4environmentart.py", "sfc/dq4/tools/dq4environment.py", "sfc/dq4/tools/dq4groupbuild.py",
+         "sfc/dq4/tools/dq4freshstate.py", "sfc/dq4/tools/lua/dq4shipstate.lua", "sfc/dq4/tools/lua/dq4environmentdump.lua",
+         "sfc/dq5/tools/lua/dq5warp.lua", "sfc/dq5/tools/dq5exitcheck.py", "fc/dq4/tools/dq4block.py"]
+run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/fresh-envrom && uv run --locked python sfc/dq4/tools/dq4environmentromcheck.py --rom work/dq4-groups/groups.sfc --out work/fresh-envrom"
+needs = ["rom", "MESENCE", "LIBDIR", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+
+[[check]]
+name = "dq4-gate-doors"
+why = "FC 2×2 문 9C·9D(너머 칸으로 여는 문)와 A2(열쇠 성문)는 성문 물체 48 로 바뀌어, 잠금 0 은 어느 쪽에서든 걸어 들어가면 열리고 지나가며, 잠금 1·2 는 그 단계 열쇠가 있을 때만 열려야 한다. 변환이 벽으로 두던 문이다"
+paths = ["sfc/dq4/tools/dq4gatecheck.py", "sfc/dq4/tools/dq4environmentrom.py", "sfc/dq4/tools/dq4door.py",
+         "sfc/dq4/tools/dq4doorcheck.py", "sfc/dq4/tools/lua/dq4doorwalk.lua", "sfc/dq4/tools/dq4groupbuild.py",
+         "sfc/dq4/tools/dq4freshstate.py", "sfc/dq5/tools/lua/dq5warp.lua", "sfc/dq4/tools/dq4environmentmap.py",
+         "fc/dq4/tools/dq4block.py", "sfc/dq4/tools/dq4groupcheck.py"]
+run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/fresh-gates && uv run --locked python sfc/dq4/tools/dq4gatecheck.py --rom work/dq4-groups/groups.sfc --out work/fresh-gates"
+needs = ["rom", "MESENCE", "LIBDIR", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+
+[[check]]
+name = "dq4-dungeon-encounter"
+why = "1장 롬 던전의 구역·무리·우물 스위치·걸음마다 조우 확률과 맵 곡이 FC 대로여야 한다. 필드에서 들어선 장면의 곡($1D8B)은 들어선 뒤 곡이 시작하기 전까지만 FF(원본 DQ5 탑 04/00·동굴 07/02 도 같음)이고, 시작한 뒤로는 그 곡 그대로여야 한다"
+paths = ["sfc/dq4/tools/dq4dungeonencountercheck.py", "sfc/dq4/tools/dq4dungeonrate.py", "sfc/dq4/tools/dq4groupbuild.py",
+         "sfc/dq4/tools/dq4groupcheck.py", "sfc/dq4/tools/dq4wellswitch.py", "sfc/dq4/tools/dq4fieldencounter.py",
+         "sfc/dq4/tools/dq4fieldport.py", "sfc/dq4/tools/dq4soundpatch.py", "sfc/dq4/tools/dq4freshstate.py",
+         "sfc/dq4/tools/dq4build.py", "sfc/dq4/tools/dq4chapter1.py", "sfc/dq5/tools/lua/dq5warptrace.lua",
+         "fc/dq4/tools/dq4encounter.py"]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/fresh-dungeon && uv run --locked python sfc/dq4/tools/dq4dungeonencountercheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/fresh-dungeon --jobs 2"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+
+[[check]]
+name = "dq4-bg3-slot"
+why = "BG3 타일맵을 옮긴 menu.sfc 에서 실내 맵마다 $0725 가 dq4bg3slot 의 자리(3C·78·7C·48·4C)이고, $2109 의 자리가 같고, 버퍼가 멈춘 프레임의 타일맵이 게임 버퍼 7E:5000 과 같고, BG3 글자 칸·자리 밖 VRAM 이 overture.sfc 와 같아야 한다. 출발 상태가 선 17/00 은 01/01 을 거쳐 간다. 알려진 실패(--known): 창 이름 전송 대기열이 BG3 타일맵을 덮는 1E/00·20/06·32/00, 전투 배경 BG1 타일이 0 으로 남는 00/0A·04/0B(도착 뒤 전투). 고치면 통과로 바뀌어 이 검사가 실패하니 --known 에서 뺀다"
+paths = ["sfc/dq4/tools/dq4bg3slot.py", "sfc/dq4/tools/dq4bg3slotcheck.py", "sfc/dq4/tools/lua/dq4bg3slotwarp.lua",
+         "sfc/dq4/tools/dq4menupatch.py", "sfc/dq4/tools/dq4windowname.py", "sfc/dq4/tools/dq4windowname.asm",
+         "sfc/dq4/tools/dq4windowtext.py", "sfc/dq4/tools/dq4freshstate.py", "sfc/dq4/tools/lua/dq4shipstate.lua",
+         "sfc/dq4/tools/dq4build.py", "sfc/dq5/tools/lua/dq5warp.lua"]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/fresh-bg3slot && uv run --locked python sfc/dq4/tools/dq4bg3slotcheck.py --rom work/ch1/menu.sfc --old work/ch1/overture.sfc --out work/fresh-bg3slot --maps 00/0A,01/00,01/01,02/00,03/00,05/00,0A/00,17/00,19/00,19/02,04/0B,33/01,1E/00,20/06,32/00 --known 00/0A,04/0B,1E/00,20/06,32/00"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
