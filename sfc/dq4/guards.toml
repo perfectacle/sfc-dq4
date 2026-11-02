@@ -522,3 +522,22 @@ paths = ["sfc/dq4/tools/dq4environmentrom.py", "sfc/dq4/tools/dq4environmentmap.
          "fc/dq4/tools/dq4block.py"]
 run = "uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4environment.py -k CounterTests 2>&1 | tee work/environment-collision.log | tail -1 | grep -qx OK"
 needs = ["rom"]
+
+[[check]]
+name = "dq4-environment-rom"
+why = "바꾼 맵을 그룹 롬에서 다시 그린 그림이 오프라인 그림과 픽셀까지 같아야 한다(물체·통행·출구·물 슬롯, 성문을 연 채 지나가기, 원래 맵 셀 버퍼). 분수는 물과 같은 번호의 그림으로 함께 바뀌므로 기대 그림도 두 그림을 함께 바꾼다"
+paths = ["sfc/dq4/tools/dq4environmentromcheck.py", "sfc/dq4/tools/dq4environmentrom.py", "sfc/dq4/tools/dq4environmentmap.py",
+         "sfc/dq4/tools/dq4environmentart.py", "sfc/dq4/tools/dq4environment.py", "sfc/dq4/tools/dq4groupbuild.py",
+         "sfc/dq4/tools/dq4freshstate.py", "sfc/dq4/tools/lua/dq4shipstate.lua", "sfc/dq4/tools/lua/dq4environmentdump.lua",
+         "sfc/dq5/tools/lua/dq5warp.lua", "sfc/dq5/tools/dq5exitcheck.py", "fc/dq4/tools/dq4block.py"]
+run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/fresh-envrom && uv run --locked python sfc/dq4/tools/dq4environmentromcheck.py --rom work/dq4-groups/groups.sfc --out work/fresh-envrom"
+needs = ["rom", "MESENCE", "LIBDIR", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+
+[[check]]
+name = "dq4-gate-doors"
+why = "FC 2×2 문 9C·9D(너머 칸으로 여는 문)와 A2(열쇠 성문)는 성문 물체 48 로 바뀌어, 잠금 0 은 어느 쪽에서든 걸어 들어가면 열리고 지나가며, 잠금 1·2 는 그 단계 열쇠가 있을 때만 열려야 한다. 변환이 벽으로 두던 문이다"
+paths = ["sfc/dq4/tools/dq4gatecheck.py", "sfc/dq4/tools/dq4environmentrom.py", "sfc/dq4/tools/dq4door.py",
+         "sfc/dq4/tools/dq4doorcheck.py", "sfc/dq4/tools/lua/dq4doorwalk.lua", "sfc/dq4/tools/dq4groupbuild.py",
+         "sfc/dq4/tools/dq4freshstate.py", "sfc/dq5/tools/lua/dq5warp.lua"]
+run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/fresh-gates && uv run --locked python sfc/dq4/tools/dq4gatecheck.py --rom work/dq4-groups/groups.sfc --out work/fresh-gates"
+needs = ["rom", "MESENCE", "LIBDIR", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]

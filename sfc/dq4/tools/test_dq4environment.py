@@ -224,9 +224,6 @@ class CounterTests(unittest.TestCase):
         # FC door locks 0-2 open with keys found before chapter 5; lock 3 (さいごのカギ) cannot, so it stays shut.
         # A door shape that opens nothing (DOOR_OPENS None) is not a door the party can pass.
         last_key = 3
-        # FC doors the conversion does not open yet, as (shape, lock): they stay walls. Remove one once it opens
-        # in DQ5, or this test fails on its maps.
-        unconverted = {("beyond_2x2", 0), ("beyond_2x2", 1), ("gate", 1), ("gate", 2)}
 
         def expect(source, block):
             prop = source.blocks["prop"].get(block)
@@ -235,8 +232,7 @@ class CounterTests(unittest.TestCase):
                 return True, False
             t = dq4block.terrain(prg, prop)
             door = t.get("door")
-            opens = door is not None and door["lock"] < last_key and door["opens"] is not None \
-                and (door["opens"], door["lock"]) not in unconverted
+            opens = door is not None and door["lock"] < last_key and door["opens"] is not None
             return not t["walk"] and not opens, bool(t.get("talk_over"))
 
         counters = 0
@@ -259,6 +255,40 @@ class CounterTests(unittest.TestCase):
                             wrong.append((x, y, cell, fc.cell(x, y) & 31))
             self.assertEqual(wrong, [], name)
         self.assertGreater(counters, 0)
+
+    def test_every_fc_door_that_opens_lies_under_an_object_of_its_lock(self):
+        # A walkable record cell under an FC door is only shut while a DQ5 object covers it. The lock comes from
+        # the FC door-lock table (dq4block.terrain), and a 2x2 FC door (gate or beyond_2x2 shape) needs the 4x4
+        # gate, the one 4x4 object that blocks all its rows while closed.
+        import sys
+        sys.path.insert(0, str(ROOT / "fc" / "dq4" / "tools"))
+        import dq4block
+        import dq4environmentrom as rom
+        from dq4environmentmap import all_maps
+        from kr_patch.fc import ines
+        prg = ines.prg((ROOT / "rom" / "dq4.nes").read_bytes())
+        where = {name: (g, k) for g, k, _, name in all_maps(prg)}
+        size = {rom.DOOR_KIND: (1, 1), rom.GATE_KIND: (2, 2)}
+        seen = set()
+        for name in rom.MAPS:
+            source = dq4block.Map(prg, *where[name])
+            cover = {}
+            for ex, ey, kind, lock in rom.objects(source):
+                fx, fy = ex // 2, (ey + 1) // 2
+                w, h = size[kind]
+                for dy in range(h):
+                    for dx in range(w):
+                        cover[fx + dx, fy + dy] = kind, lock
+            for y in range(source.h):
+                for x in range(source.w):
+                    prop = source.blocks["prop"].get(source.cell(x, y) & 31)
+                    door = prop is not None and dq4block.terrain(prg, prop).get("door")
+                    if not door or door["lock"] == 3 or door["opens"] is None:
+                        continue
+                    want = rom.DOOR_KIND if door["opens"] == "cell" else rom.GATE_KIND
+                    self.assertEqual(cover.get((x, y)), (want, door["lock"]), f"{name} ({x},{y}) {prop:02X}")
+                    seen.add(prop)
+        self.assertTrue({0x9C, 0x9D, 0xA2} <= seen)
 
 
 @unittest.skipUnless((ROOT / "rom" / "dq4.nes").is_file(), "local source ROM not present")
@@ -332,3 +362,16 @@ class SkyArtTests(unittest.TestCase):
         self.assertGreater(len(set(assets["water0"].tobytes())), 1)
         self.assertNotEqual(set(assets["cloud"].tobytes()), sky)
         self.assertEqual(set(assets["sky_deep"].tobytes()), {7 * 16 + 4, 7 * 16 + 5})
+
+
+class RomCheckExpectationTests(unittest.TestCase):
+    def test_expected_render_moves_the_fountain_with_the_water(self):
+        # The water routine sends the fountain's frame n together with water frame n, so the offline render the
+        # ROM check compares with must swap both, or a dump taken at frame 1 or 2 differs on the fountain block.
+        import dq4environmentromcheck as check
+        from dq4environmentrom import FOUNTAIN_FRAMES, WATER_FRAMES
+        assets = {name: object() for name in WATER_FRAMES + FOUNTAIN_FRAMES}
+        for frame in range(len(WATER_FRAMES)):
+            shown = check.shown_assets(assets, frame)
+            self.assertIs(shown[WATER_FRAMES[0]], assets[WATER_FRAMES[frame]])
+            self.assertIs(shown[FOUNTAIN_FRAMES[0]], assets[FOUNTAIN_FRAMES[frame]])

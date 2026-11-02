@@ -139,7 +139,12 @@ DOORS = {0x94, 0x95, 0x96}
 # FC key doors and the DQ5 lock kinds (end byte bit0-5) of the same key level: とうぞくのカギ, まほうのカギ.
 # 01:DCFC opens lock 1 with カギの技法 or a better key and lock 2 with まほうのカギ or さいごのカギ.
 LOCKS = {0x94: 0, 0x95: 1, 0x96: 2}
+# FC 2x2 doors and their DQ5 lock kinds, all drawn as the 4x4 gate object GATE_KIND: A0 and A2 (key gate) are
+# the FC gate shape; 9C and 9D the FC shape that opens the 2x2 onto the block beyond it (08:$8855). Kind 48 is the
+# 4x4 object that blocks every row while closed (01:F4FD ORs 90 into +1 of all four rows, the other 4x4 kinds only
+# the last), and 01:DB96 finds it from any side, which the FC doors opened from the side (30-02) need.
 GATE = 0xA0
+GATES = {GATE: 0, 0xA2: 2, 0x9C: 0, 0x9D: 1}
 # FC stairs (08:$B22E destinations) of GROUPS maps become DQ5 exit blocks: block attribute 05 puts $85 in
 # +4 of the block's bottom-right cell, and 2A:F6B8 numbers exits by those cells in cell-buffer order.
 # Borrowed TARGETS slots keep plain stairs: an exit cell there would fire the DQ5 map's own exit list.
@@ -159,7 +164,7 @@ UPPER = 0x20
 FRONT = 0x40
 CHEST_HEAD = FRONT, UPPER, 0x04
 FURNITURE = {0xAB: (0, 0x00, 0x13), 0xAA: (FRONT, UPPER, 0x27)}
-OPENINGS = DOORS | {GATE}
+OPENINGS = DOORS | set(GATES)
 DOOR_KIND = 0x3B
 GATE_KIND = 0x48
 OBJECT_TABLE = 0x01D2FC
@@ -281,10 +286,10 @@ def _prop(source, x, y):
 def objects(source):
     """DQ5 object entries [x, y, kind] for FC doors (2x3 door over the wall row above) and gates."""
     found = []
-    gate = {(x, y) for y in range(source.h) for x in range(source.w) if _prop(source, x, y) == GATE}
+    gate = {(x, y) for y in range(source.h) for x in range(source.w) if _prop(source, x, y) in GATES}
     for x, y in sorted(gate, key=lambda c: (c[1], c[0])):
         if (x, y) in gate:
-            found.append([x * 2, y * 2, GATE_KIND, 0])
+            found.append([x * 2, y * 2, GATE_KIND, GATES[_prop(source, x, y)]])
             gate -= {(x + dx, y + dy) for dx in (0, 1) for dy in (0, 1)}
     for y in range(source.h):
         for x in range(source.w):
