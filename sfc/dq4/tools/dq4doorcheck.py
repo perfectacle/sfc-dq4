@@ -126,6 +126,11 @@ def one(mesence, rom, state, out, k, case, hop):
     return result
 
 
+def verdict(results):
+    """사례가 하나도 없으면(문을 못 찾았거나 맵 배치가 바뀜) 통과로 치지 않는다."""
+    return "passed" if results and all(r["ok"] for r in results) else "failed"
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--rom", required=True, type=Path)
@@ -144,7 +149,7 @@ def main():
         hops = {c["map"]: next((h for h in todo if h["map"] != c["map"]), None) for c in todo}
         results = list(pool.map(lambda kc: one(mesence, args.rom.resolve(), state, args.out, *kc,
                                                hops[kc[1]["map"]]), enumerate(todo)))
-    report = {"status": "passed" if all(r["ok"] for r in results) else "failed", "cases": results}
+    report = {"status": verdict(results), "cases": results}
     (args.out / "results.json").write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n")
     for r in results:
         print(f"{'ok  ' if r['ok'] else 'FAIL'} {r['map']} {r['door']} 잠금{r['lock']} {r['from']}"

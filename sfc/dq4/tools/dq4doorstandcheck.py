@@ -123,7 +123,7 @@ def main():
     mesence = os.environ["MESENCE"]
     args.out = args.out.resolve()
     args.out.mkdir(parents=True, exist_ok=True)
-    state = dq4freshstate.resolve(args.state, mesence, args.rom, args.out, hub)
+    state = dq4freshstate.resolve(args.state, mesence, args.rom, args.out, build=hub)
     todo = cases(prg)
     # dq5warp does not see an arrival on the map it starts on, and stepping down from 36/01's start cell leaves by
     # the castle's exit, so hop by a map of another group.

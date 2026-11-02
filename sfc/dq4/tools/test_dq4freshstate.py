@@ -175,6 +175,15 @@ class NoStaleStateTests(unittest.TestCase):
                 self.assertEqual(work_state_paths(ast.parse(path.read_text(encoding='utf-8'))), [],
                                  '손으로 고른 work/state 세이브스테이트를 가리킴')
 
+    def test_door_checks_pick_their_start(self):
+        # 문 칸에 서는 검사는 성 마을 출발 상태를 build 로 만들고, 문 열기 검사는 서장 끝(build 없음)에서 떠난다
+        for name, want in (('dq4doorstandcheck', True), ('dq4doorcheck', False)):
+            calls = [n for n in ast.walk(tree_of(name)) if is_fresh_call(n, ('resolve',))]
+            with self.subTest(name):
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(len(calls[0].args), 4)
+                self.assertEqual(any(k.arg == 'build' for k in calls[0].keywords), want)
+
     def test_exception_lists_are_current(self):
         for name in NOT_SFC_STATE:
             with self.subTest(name):
