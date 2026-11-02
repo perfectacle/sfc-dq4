@@ -22,7 +22,12 @@ STATUS_WINDOW = 0x02
 BATTLE_STATUS = (0x17, 0x26, 0x27)
 BATTLE_STATUS_BODY = bytes((0xD1, 0x12, 0x12, 0x12, 0x12))
 LIST_HOOK = 0x04B79B
-NMI_STUB = 0x00FFA1               # NMI 00:887C 가 들르는 받침(JML WqNmiEntry, 이어서 JMP ($1944))
+NMI_STUB = 0x00FF9E               # 필드 NMI 작업 받침(JSL WqNmiEntry, 이어서 JMP $8926). 00:FF9A 작업의 JML 자리를 넘겨받음
+NMI_STUB_END = 0x00FFA5
+# NMI 작업마다 WqNmiEntry 를 거는 자리와 원래 바이트(dq4windowname.asm). 공통 입구 00:887C 는 고치지 않는다
+NMI_SITES = ((0x0087F2, bytes.fromhex('a22689')), (0x00887C, bytes.fromhex('6c4419')),
+             (0x00896F, bytes.fromhex('201e8c20e18e20e5fd20de894c7f88')),
+             (0x00FF9A, bytes.fromhex('22acc8115c8f8800')), (0x00FF08, bytes.fromhex('a200148e1621')))
 # 이름 하나를 04:B79B 로 찍는 「누구」 고르기 창(본문에 D0 자리 표시). 이름 칸 5칸을 담게 한 칸 왼쪽으로 옮겨 넓힌다.
 # 오른쪽에는 이어서 열리는 창(도구·주문 목록 등)이 붙어 있어 오른쪽으로는 넓히지 않는다.
 NAME_LISTS = (0x0C, 0x0E, 0x11, 0x13, 0x2C, 0x36, 0x38, 0x3D, 0x4A, 0x4F, 0x6F, 0x7A, 0x7F)
@@ -287,8 +292,11 @@ def apply(data, font=None, asar=None):
     if d[po] != 0x22:
         raise ValueError(f'{PREFIX_HOOK:06X} 가 JSL 이 아님: {d[po:po + 4].hex()}')
     t = lorom(dq4windowtext.TEXT_BANK << 16 | dq4windowtext.INDEX)
-    if any(d[lorom(NMI_STUB):lorom(NMI_STUB) + 13]):
-        raise ValueError(f'{NMI_STUB:06X} 가 비어 있지 않음')
+    if any(d[lorom(0x00FFA2):lorom(NMI_STUB_END)]):
+        raise ValueError(f'00FFA2~{NMI_STUB_END:06X} 가 비어 있지 않음')
+    for a, orig in NMI_SITES:
+        if d[lorom(a):lorom(a) + len(orig)] != orig:
+            raise ValueError(f'{a:06X}: NMI 작업 자리가 아님 {d[lorom(a):lorom(a) + len(orig)].hex()}')
     if any(d[t:t + len(text)]):
         raise ValueError(f'{dq4windowtext.TEXT_BANK:02X}:{dq4windowtext.INDEX:04X} 가 비어 있지 않음')
     d[t:t + len(text)] = text

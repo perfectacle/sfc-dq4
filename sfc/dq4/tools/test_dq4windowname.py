@@ -137,6 +137,35 @@ class HoldAreaTest(unittest.TestCase):
         # 후보 바이트는 슬롯 × 2 + 1 이고 bit7 은 「지금 버퍼에선 메시지 창이 안 가리킴」 표시
         self.assertLess((int(re.search(r'^!wt_nslot = (\d+)', ASM.read_text(), re.M).group(1)) - 1) * 2 + 1, 0x80)
 
+
+class WramTest(unittest.TestCase):
+    # DQ5 의 움직이는 타일 종류 14 사본(03:D9A0 의 원본 7E:3D14, 11칸 × 32바이트). 1E/00·20/06·32/00 등에 들어가면
+    # 03:D3E9 가 채운다. 창 글자 변수가 여기 있으면 대기열 항목 수가 덮여 NMI 가 BG3 타일맵에 쓰레기를 보냈다
+    ANIM14 = range(0x3D14, 0x3D14 + 11 * 32)
+
+    def test_no_window_variable_in_the_dq5_anim_copy(self):
+        for name, value in re.findall(r'^!(w[a-z_0-9]+) *= *\$([0-9A-Fa-f]{4})\b', ASM.read_text(), re.M):
+            a = int(value, 16)
+            size = 0xA0 if name == 'wn_stage' else 2
+            self.assertFalse(set(range(a, a + size)) & set(self.ANIM14), name)
+
+    def test_moved_block_stays_after_the_battle_text_engine(self):
+        # 7E:A921~ABFF 는 DQ5 장면 770개에서 원래 코드의 접근이 없던 자리이고 앞은 전투 글 엔진(!bm_sfx, 2바이트)이 쓴다
+        bm_end = int(re.search(r'^!bm_sfx *= *\$([0-9A-F]{4})', dq4battlemsg.WRAM, re.M).group(1), 16) + 2
+        moved = [define(n) for n in ('wt_ages', 'wt_keys', 'wq_count', 'wq_defer', 'wt_tmp')]
+        self.assertGreaterEqual(min(moved), bm_end)
+        self.assertLessEqual(define('wn_stage') + 0xA0, 0xAC00)
+
+
+class NmiHookTest(unittest.TestCase):
+    # 전투 작업의 큰 그림 길(00:895D~896E, 00:FD4A 의 0B00바이트 DMA)은 원래 롬에서도 VBlank 끝 직전에 끝난다. 그 앞에
+    # 명령을 더하면 DMA 꼬리가 버려져 전투 배경에 검은 칸이 생겼다. 공통 입구 00:887C 와 그 길은 고치지 않는다
+    def test_heavy_battle_path_and_common_entry_untouched(self):
+        orgs = [int(a, 16) for a in re.findall(r'^org \$([0-9A-F]{6})\b', ASM.read_text(), re.M)]
+        self.assertNotIn(0x00887C, orgs)
+        self.assertFalse([a for a in orgs if 0x008952 <= a < 0x00896F])
+        self.assertIn(0x00896F, orgs)
+
 def lorom(a):
     return ((a >> 16) & 0x7F) * 0x8000 + (a & 0x7FFF)
 
@@ -197,6 +226,8 @@ def base_rom(windows=None):
         put(a, wn.HELD_ORIG + rel.to_bytes(2, 'little', signed=True))
     put(wn.EMPTY_SLOT_HOOK, wn.EMPTY_SLOT_ORIG)
     put(wn.WH_REQ_SITE, wn.WH_REQ_ORIG)
+    for a, orig in wn.NMI_SITES:
+        put(a, orig)
     put(wn.PREFIX_HOOK, b'\x22' + PREFIX_PREV.to_bytes(3, 'little'))
     put(wn.LIST_HOOK, b'\x5c' + LIST_PREV.to_bytes(3, 'little'))
     return d
