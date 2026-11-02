@@ -14,8 +14,9 @@ step fight (RATES); the field scenes keep the ROM's rates, or the field walk to 
          makes of the bit before and the step's FC cell (dq4encounter.toggle_after), and while it is off the
          zone is FF and no group is picked; a scene whose switch ends off need not fight
   song   00:CEA2 (the map's song request on arrival) gets the LINKS "music" slot, and in a field scene the song
-         playing ($1D8B) on the dungeon's steps is that slot. A warped scene starts from the ship state's SPC,
-         whose song table is not this ROM's (dq4soundstate.lua), and its first map's song may not start
+         playing ($1D8B) on the dungeon's steps is that slot. The start state is built from this ROM
+         (dq4freshstate): a state of another build keeps that build's SPC song table (dq4soundstate.lua), and its
+         first map's song may not start
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4dungeonencountercheck.py --rom work/ch1/dq4-ch1.sfc \\
       --out work/dq4-dungeoncheck
@@ -35,6 +36,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+import dq4freshstate  # noqa: E402
 import dq4dungeonrate  # noqa: E402
 import dq4fieldencounter  # noqa: E402
 import dq4fieldport  # noqa: E402
@@ -51,7 +53,7 @@ from kr_patch.fc import ines  # noqa: E402
 # fights at all (zeroing the coefficients alone leaves the dungeon hook's own chances). STEP gives each step count its
 # own small chance (1 to 4) and keeps the region chance over zeroed coefficients, so the walk seldom stops and $00
 # tells which branch the hook took. Every warped scene starts with the RNG state pinned (SET and again on arrival), so
-# whether a STEP walk meets a fight does not hang on the state the ship savestate or the warp left.
+# whether a STEP walk meets a fight does not hang on the state the start savestate or the warp left.
 RATES = "11EA44=FFFFFFFFFFFFFFFF;8523=40"
 CALM = NO_ENCOUNTERS
 ZERO_COEFFICIENTS = "11EA44=0000000000000000"
@@ -121,7 +123,7 @@ def main():
     ap.add_argument("--rom", required=True, type=Path)
     ap.add_argument("--dq4", default="rom/dq4.nes", type=Path)
     ap.add_argument("--dq5", default="rom/dq5.sfc", type=Path)
-    ap.add_argument("--state", default="work/state/ship.mss", type=Path)
+    dq4freshstate.add_argument(ap)
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--jobs", type=int, default=4)
     args = ap.parse_args()
@@ -129,7 +131,8 @@ def main():
     out = args.out.resolve()
     if out.exists() and any(out.iterdir()):
         raise SystemExit(f"{out} is not empty")
-    rom, state = args.rom.resolve(), args.state.resolve()
+    rom = args.rom.resolve()
+    state = dq4freshstate.resolve(args.state, mesence, rom, out / "start")
     data = rom.read_bytes()
     prg = ines.prg(args.dq4.read_bytes())
     import subprocess

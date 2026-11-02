@@ -468,9 +468,52 @@ needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
 name = "dq4-field-signs"
 why = "필드 팻말에 はなす·しらべる 하면 FC 처럼 팻말 글(아래를 보면 뒷면)이 떠야 한다. DQ5 팻말 표 1E:F4BF 가 DQ5 좌표 그대로라 「그 방향에는 아무도 없다」 가 떴다"
 paths = ["sfc/dq4/tools/dq4signs.py", "sfc/dq4/tools/dq4signcheck.py", "sfc/dq4/tools/dq4sysmsg.py",
-         "sfc/dq4/tools/dq4fieldport.py", "sfc/dq4/tools/dq4fieldgfx.py", "sfc/dq4/tools/dq4chapter1.py"]
+         "sfc/dq4/tools/dq4fieldport.py", "sfc/dq4/tools/dq4fieldgfx.py", "sfc/dq4/tools/dq4chapter1.py",
+         "sfc/dq4/tools/dq4freshstate.py"]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/signcheck && uv run --locked python sfc/dq4/tools/dq4signcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/signcheck"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI"]
+
+[[check]]
+name = "dq4-groups-scenes"
+why = "그룹 롬(groups.sfc)의 상자·필드·필드 조우·ルーラ 장면이 그 롬으로 만든 배 선실 출발 상태(dq4freshstate)에서 통과해야 한다"
+paths = ["sfc/dq4/tools/dq4freshstate.py", "sfc/dq4/tools/lua/dq4shipstate.lua", "sfc/dq4/tools/dq4groupbuild.py",
+         "sfc/dq4/tools/dq4groupcheck.py", "sfc/dq4/tools/dq4chestcheck.py", "sfc/dq4/tools/dq4chestport.py",
+         "sfc/dq4/tools/dq4fieldcheck.py", "sfc/dq4/tools/dq4fieldport.py", "sfc/dq4/tools/dq4fieldencountercheck.py",
+         "sfc/dq4/tools/dq4fieldencounter.py", "sfc/dq4/tools/dq4fieldtravelcheck.py", "sfc/dq4/tools/dq4fieldtravel.py",
+         "sfc/dq5/tools/lua/dq5warp.lua", "sfc/dq5/tools/lua/dq5chestcheck.lua"]
+run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/fresh-groups && uv run --locked python sfc/dq4/tools/dq4chestcheck.py --build work/dq4-groups --out work/fresh-groups/chest && uv run --locked python sfc/dq4/tools/dq4fieldcheck.py --rom work/dq4-groups/groups.sfc --out work/fresh-groups/field && uv run --locked python sfc/dq4/tools/dq4fieldencountercheck.py --rom work/dq4-groups/groups.sfc --out work/fresh-groups/encounter && uv run --locked python sfc/dq4/tools/dq4fieldtravelcheck.py --rom work/dq4-groups/groups.sfc --out work/fresh-groups/travel"
+needs = ["rom", "MESENCE", "LIBDIR", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+
+[[check]]
+name = "dq4-battle-msgs"
+why = "1장 롬 탑 위 보스 전투에서 전투 메시지 번호마다 끝까지 찍혀야 한다(출발 상태는 그 롬의 서장 끝, dq4freshstate). 한 묶음이 멈춰도 남은 번호를 다음 차례로 넘겨 끝까지 돈다"
+paths = ["sfc/dq4/tools/dq4freshstate.py", "sfc/dq4/tools/dq4battlemsgcheck.py", "sfc/dq4/tools/dq4battlemsg.py",
+         "sfc/dq4/tools/dq4battletexts.py", "sfc/dq4/tools/lua/dq4battlemsgswap.lua",
+         "sfc/dq4/tools/dq4build.py", "sfc/dq4/tools/dq4chapter1.py", "sfc/dq4/tools/dq4windowname.py",
+         "sfc/dq4/tools/dq4menupatch.py"]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4battlemsgcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/fresh-battlemsg"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+
+[[check]]
+name = "dq4-well-reset"
+why = "우물 바닥 스위치가 전멸·이어 하기 뒤 꺼져야 한다(FC $6E05). 전멸 장면은 1장 롬(서장 끝의 다시 시작 자리 36 그대로인 wipe-own 포함)에서 돌지만, 기록·리셋·이어 하기 장면은 1장 롬에 선실이 없어 groups.sfc 에서 돈다(25:8278 훅과 부르는 코드가 1장 롬과 같은지 보고 시작)"
+paths = ["sfc/dq4/tools/dq4freshstate.py", "sfc/dq4/tools/dq4wellresetcheck.py",
+         "sfc/dq4/tools/dq4wellswitch.py", "sfc/dq4/tools/dq4dungeonrate.py", "sfc/dq4/tools/dq4build.py",
+         "sfc/dq4/tools/dq4chapter1.py", "sfc/dq4/tools/dq4groupbuild.py", "sfc/dq4/tools/dq4groupcheck.py",
+         "sfc/dq4/tools/dq4dungeonencountercheck.py", "sfc/dq5/tools/lua/dq5warptrace.lua",
+         "sfc/dq5/tools/lua/dq5cdldump.lua", "sfc/dq5/tools/lua/dq5msg.lua"]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/fresh-wellreset && uv run --locked python sfc/dq4/tools/dq4wellresetcheck.py --rom work/ch1/dq4-ch1-full.sfc --load-rom work/dq4-groups/groups.sfc --out work/fresh-wellreset"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+
+[[check]]
+name = "dq4-name-game"
+why = "보행 메시지의 주인공 이름(1012)이 한글·가나 이름 모두 맞는 글자 코드가 되어야 한다. 선실의 파파스에게 말을 거는 장면이라 선실이 없는 1장 롬 대신 dq4build 중간 단계 menu.sfc 로 돌며, 그래서 menu 패치(dq4menupatch)까지의 이름 코드만 다룬다"
+paths = ["sfc/dq4/tools/dq4freshstate.py", "sfc/dq4/tools/lua/dq4shipstate.lua",
+         "sfc/dq4/tools/dq4namegamecheck.py", "sfc/dq4/tools/dq4namegame.py",
+         "sfc/dq4/tools/lua/dq4namegamecheck.lua", "sfc/dq4/tools/dq4menupatch.py", "sfc/dq4/tools/dq4build.py",
+         "sfc/dq4/tools/dq4chapter1.py"]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/fresh-namegame && uv run --locked python sfc/dq4/tools/dq4namegamecheck.py --rom work/ch1/menu.sfc --out work/fresh-namegame"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 
 [[check]]
 name = "dq4-environment-collision"

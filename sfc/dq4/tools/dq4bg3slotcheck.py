@@ -1,8 +1,8 @@
-"""BG3 타일맵 옮기기(dq4bg3slot.py)를 MesenCE 로 검사한다. 배 선실 세이브스테이트에서 실내 맵마다 순간이동해
+"""BG3 타일맵 옮기기(dq4bg3slot.py)를 MesenCE 로 검사한다. 롬마다 그 롬으로 만든 출발 상태(dq4freshstate)에서 실내 맵마다 순간이동해
 명령 창을 연 화면을 원래 롬과 견주고, 새 롬의 BG3SC 그림자 $0725 와 그 자리 타일맵이 채워졌는지 본다.
 
   MESENCE=... uv run --locked python sfc/dq4/tools/dq4bg3slotcheck.py --old 원래롬 --new 새롬 \\
-      --state work/state/ship.mss --out 새폴더 [--maps 01/00,17/00] [--jobs 8]
+      --out 새폴더 [--maps 01/00,17/00] [--jobs 8]
 
 맵 목록은 DQ5 트랙 dq5hangul.py slots(실내 맵 364개), 도착 칸은 (10,10) 이다(DQ5 트랙 실측과 같은 방법).
 """
@@ -16,6 +16,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path[:0] = [str(HERE), str(ROOT / 'sfc' / 'dq5' / 'tools')]
 
+import dq4freshstate  # noqa: E402
 import dq4mesen as mesen  # noqa: E402
 
 TEST = 'wait:90,a:4,wait:90'
@@ -51,7 +52,6 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--old', type=Path, required=True)
     ap.add_argument('--new', type=Path, required=True)
-    ap.add_argument('--state', type=Path, required=True)
     ap.add_argument('--out', type=Path, required=True)
     ap.add_argument('--maps')
     ap.add_argument('--jobs', type=int, default=8)
@@ -65,13 +65,15 @@ def main():
     libdir = os.environ.get('LIBDIR') or subprocess.check_output(
         ['uv', 'run', '--locked', 'krpatch', 'sfc', 'lua'], text=True).strip()
     maps = a.maps.split(',') if a.maps else interior_maps()
+    # 두 롬은 빌드가 달라 한 세이브스테이트를 나눠 쓰지 못한다. 롬마다 그 롬으로 만든 상태에서 떠난다
+    states = {kind: dq4freshstate.make(mesence, rom, out / f'start-{kind}') for kind, rom in (('old', a.old), ('new', a.new))}
     jobs = []
     for mp in maps:
         for kind, rom in (('old', a.old), ('new', a.new)):
             jobs.append((mp, kind, rom))
     running = []
     for mp, kind, rom in jobs:
-        running.append(run(mesence, libdir, rom.resolve(), a.state.resolve(), mp, out / mp.replace('/', '-') / kind))
+        running.append(run(mesence, libdir, rom.resolve(), states[kind], mp, out / mp.replace('/', '-') / kind))
         if len(running) >= a.jobs:
             running.pop(0).wait()
     for p in running:

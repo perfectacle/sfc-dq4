@@ -31,6 +31,7 @@ for path in (TOOLS, DQ5_TOOLS):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+import dq4freshstate  # noqa: E402
 import dq4fieldgfx  # noqa: E402
 import dq4fieldport  # noqa: E402
 from dq4environmentromcheck import dump  # noqa: E402
@@ -145,7 +146,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--rom", required=True, type=Path)
     ap.add_argument("--dq4", default="rom/dq4.nes", type=Path)
-    ap.add_argument("--state", default="work/state/ship.mss", type=Path)
+    dq4freshstate.add_argument(ap)
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--dq5", default="rom/dq5.sfc", type=Path)
     ap.add_argument("--jobs", type=int, default=4)
@@ -154,7 +155,8 @@ def main():
     out = args.out.resolve()
     if out.exists() and any(out.iterdir()):
         raise SystemExit(f"{out} is not empty")
-    rom, state = args.rom.resolve(), args.state.resolve()
+    rom = args.rom.resolve()
+    state = dq4freshstate.resolve(args.state, mesence, rom, out / "start")
     prg = ines.prg(args.dq4.read_bytes())
     from dq4field import entrances
     taken = {(fx, fy) for _, fx, fy, *_ in entrances(prg)}

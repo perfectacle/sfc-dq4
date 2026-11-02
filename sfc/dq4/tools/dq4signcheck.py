@@ -1,9 +1,10 @@
 """Read every FC field signpost in the game (MesenCE headless).
 
-For each field sign of dq4signs: warp from the ship cabin (dq5warp.lua FIELD) onto a walkable FC block beside it,
-turn to it with the pad and choose はなす or しらべる (dq5chestcheck.lua logs every message 24:8BAF shows). From
-below, left or right the game must show 136 「(name) read the sign」 and then the sign's own message; from above
-(facing down) 137 and 138, the back of the sign, as FC 031B. Before the fix はなす showed 129 「nobody there」.
+For each field sign of dq4signs: warp from the start state built from the ROM under test (dq4freshstate; dq5warp.lua
+FIELD) onto a walkable FC block beside it, turn to it with the pad and choose はなす or しらべる (dq5chestcheck.lua logs
+every message 24:8BAF shows). From below, left or right the game must show 136 「(name) read the sign」 and then the
+sign's own message; from above (facing down) 137 and 138, the back of the sign, as FC 031B. Before the fix はなす
+showed 129 「nobody there」.
 
   MESENCE=... LIBDIR=$(uv run krpatch sfc lua) \\
     python sfc/dq4/tools/dq4signcheck.py --rom work/ch1/dq4-ch1.sfc --out work/signcheck
@@ -25,6 +26,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+import dq4freshstate  # noqa: E402
 import dq4fieldport  # noqa: E402
 import dq4mesen  # noqa: E402
 import dq4signs  # noqa: E402
@@ -86,7 +88,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--rom", required=True, type=Path)
     ap.add_argument("--dq4", default="rom/dq4.nes", type=Path)
-    ap.add_argument("--state", default="work/state/ship.mss", type=Path)
+    dq4freshstate.add_argument(ap)
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--jobs", type=int, default=2)
     args = ap.parse_args()
@@ -95,7 +97,8 @@ def main():
     if out.exists() and any(out.iterdir()):
         raise SystemExit(f"{out} is not empty")
     out.mkdir(parents=True, exist_ok=True)
-    rom, state = args.rom.resolve(), args.state.resolve()
+    rom = args.rom.resolve()
+    state = dq4freshstate.resolve(args.state, mesence, rom, out / "start")
     todo = jobs(ines.prg(args.dq4.read_bytes()))
     with ThreadPoolExecutor(args.jobs) as pool:
         results = dict(zip((j[0] for j in todo), pool.map(lambda j: run_job(mesence, rom, state, out, *j), todo)))

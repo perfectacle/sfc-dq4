@@ -29,6 +29,7 @@ for path in (TOOLS, FC_TOOLS):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+import dq4freshstate  # noqa: E402
 import dq4fieldport  # noqa: E402
 import dq4fieldtravel  # noqa: E402
 from dq4groupbuild import LINKS, doors  # noqa: E402
@@ -79,7 +80,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--rom", required=True, type=Path)
     ap.add_argument("--dq4", default="rom/dq4.nes", type=Path)
-    ap.add_argument("--state", default="work/state/ship.mss", type=Path)
+    dq4freshstate.add_argument(ap)
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--jobs", type=int, default=4)
     args = ap.parse_args()
@@ -87,7 +88,8 @@ def main():
     out = args.out.resolve()
     if out.exists() and any(out.iterdir()):
         raise SystemExit(f"{out} is not empty")
-    rom, state = args.rom.resolve(), args.state.resolve()
+    rom = args.rom.resolve()
+    state = dq4freshstate.resolve(args.state, mesence, rom, out / "start")
     prg = ines.prg(args.dq4.read_bytes())
     _, props = dq4fieldport.fc_field(prg)
     found = doors(prg)

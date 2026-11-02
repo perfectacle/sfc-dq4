@@ -1,10 +1,11 @@
 """Open every chest and drawer of the new groups in the game (MesenCE headless).
 
-For each entry of the dq5chestplace input that dq4groupbuild.py made (OUT/chests.json): warp from the ship cabin
-to a walkable FC cell beside it (dq5warp.lua), turn the hero to it, and choose しらべる with the controller
-(dq5chestcheck.lua). The entry passes when the game looked up the expected reward (12:F43B), showed the chest
-(131), タンス (12F) or ツボ (135) message, added the gold of a gold reward, and set one open bit: a chest bit in
-7E:2210-2222, or the drawer bit 7E:222C + flag_index & mask of the entry.
+For each entry of the dq5chestplace input that dq4groupbuild.py made (OUT/chests.json): warp from the start state
+built from the ROM under test (dq4freshstate: the ship cabin on a groups ROM) to a walkable FC cell beside it
+(dq5warp.lua), turn the hero to it, and choose しらべる with the controller (dq5chestcheck.lua). The entry passes when
+the game looked up the expected reward (12:F43B), showed the chest (131), タンス (12F) or ツボ (135) message, added the
+gold of a gold reward, and set one open bit: a chest bit in 7E:2210-2222, or the drawer bit 7E:222C + flag_index &
+mask of the entry.
 
   MESENCE=... LIBDIR=$(uv run krpatch sfc lua) \\
     python sfc/dq4/tools/dq4chestcheck.py --build work/dq4-groups --out work/dq4-chestcheck
@@ -26,6 +27,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+import dq4freshstate  # noqa: E402
 import dq4block  # noqa: E402
 from dq4environmentmap import block_prop  # noqa: E402
 from dq4groupbuild import placement  # noqa: E402
@@ -109,7 +111,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--build", required=True, type=Path, help="dq4groupbuild.py --out folder")
     ap.add_argument("--dq4", default="rom/dq4.nes", type=Path)
-    ap.add_argument("--state", default="work/state/ship.mss", type=Path)
+    dq4freshstate.add_argument(ap)
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--jobs", type=int, default=4)
     ap.add_argument("--set", default="", help="WRAM writes before the warp (dq5warp.lua SET), e.g. 2199|01")
@@ -120,7 +122,8 @@ def main():
     if out.exists() and any(out.iterdir()):
         raise SystemExit(f"{out} is not empty")
     out.mkdir(parents=True, exist_ok=True)
-    rom, state = (args.build / "groups.sfc").resolve(), args.state.resolve()
+    rom = (args.build / "groups.sfc").resolve()
+    state = dq4freshstate.resolve(args.state, mesence, rom, out / "start")
     sources = fc_maps(ines.prg(args.dq4.read_bytes()))
     place = json.loads((args.build / "chests.json").read_text(encoding="utf-8"))
     jobs = []

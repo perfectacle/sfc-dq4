@@ -1,9 +1,12 @@
 """MesenCE 로 보행 메시지의 주인공 이름(1012)이 한글 부호·가나 이름 모두 맞는 글자 코드가 되는지 검사한다.
 
-선실 세이브스테이트에서 파파스에게 말을 걸고, 메시지 첫 코드를 1012 로 바꿔(lua/dq4namegamecheck.lua) 24:A7B6 이
+검사 롬으로 만든 배 선실 상태(dq4freshstate)에서 파파스에게 말을 걸고, 메시지 첫 코드를 1012 로 바꿔(lua/dq4namegamecheck.lua) 24:A7B6 이
 쌓은 코드를 파이썬 기준과 견준다. 사례마다 롬 사본과 출력 폴더를 따로 둔다.
 
-  MESENCE=... uv run --locked python sfc/dq4/tools/dq4namegamecheck.py --rom 롬 --state work/state/ship.mss --out 새폴더
+  MESENCE=... uv run --locked python sfc/dq4/tools/dq4namegamecheck.py --rom 롬 --out 새폴더
+
+파파스가 선실에 있어야 하므로 DQ5 새 게임이 남은 롬(dq4build 의 menu.sfc 등)으로 돌린다. 1장 롬은 새 게임이
+DQ4 서장으로 가 선실 상태를 만들 수 없다
 """
 import argparse
 import os
@@ -14,6 +17,7 @@ import sys
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
+import dq4freshstate  # noqa: E402
 import dq4mesen as mesen  # noqa: E402
 import dq4namegame as ng  # noqa: E402
 import dq4nameentry as ne  # noqa: E402
@@ -55,7 +59,7 @@ def expected(rom, name, raw):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--rom', type=Path, required=True)
-    ap.add_argument('--state', type=Path, required=True)
+    dq4freshstate.add_argument(ap)
     ap.add_argument('--out', type=Path, required=True)
     a = ap.parse_args()
     mesence = os.environ.get('MESENCE')
@@ -67,12 +71,13 @@ def main():
     rom = Rom(a.rom.read_bytes())
     libdir = os.environ.get('LIBDIR') or subprocess.check_output(
         ['uv', 'run', '--locked', 'krpatch', 'sfc', 'lua'], text=True).strip()
+    state = dq4freshstate.resolve(a.state, mesence, a.rom, out / 'start')
     failed = 0
     for i, (name, raw) in enumerate(CASES):
         folder = out / f'case{i}'
         folder.mkdir(parents=True)
         data = name_bytes(name, raw)
-        env = dict(os.environ, LIBDIR=libdir, SHOT_DIR=str(folder), STATE=str(a.state.resolve()), NAME=data.hex(),
+        env = dict(os.environ, LIBDIR=libdir, SHOT_DIR=str(folder), STATE=str(state), NAME=data.hex(),
                    PRE=PRE, SHOT='200', MAXF='220')
         mesen.run(mesence, a.rom, HERE / 'lua' / 'dq4namegamecheck.lua', folder=folder, tag='namegame', extra=(),
                   env=env, check=False, timeout=120, capture_output=True)
