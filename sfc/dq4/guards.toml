@@ -59,6 +59,7 @@ needs = ["rom", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETR
 name = "dq4-heroblock"
 why = "주인공이 선 칸 때문에 사건이 멈추거나(서장 저녁 의자 칸·탑 병사 왼쪽) 주인공 걸음이 엇나가는(저녁 왼쪽, 왕의 귀환 위쪽 방) 일, 1C·이벤트 걸음으로 인물이 주인공·동료와 겹쳐 보이는 일(저녁 의자 칸·신시아 오른쪽·탑 병사 왼쪽·왕의 귀환 옆 칸)이 다시 생기지 않게"
 paths = [
+    "sfc/dq4/tools/dq4growth.py",
     "sfc/dq4/tools/dq4prologue.py",
     "sfc/dq4/tools/dq4ch1event.py",
     "sfc/dq4/tools/dq4ch2event.py",
@@ -74,6 +75,7 @@ needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI"]
 name = "dq4-savefixture"
 why = "저장 기록으로 시작하는 장면 검사의 출발점: 고친 칸(금화·주인공·동료·flag·자리·밤)이 이어 하기로 그대로 불러와지고, 체크섬이 틀린 칸은 지워지고, 같은 입력이 같은 WRAM 을 내고, 이어 한 뒤 순간이동이 되는지, 맵 곡 건너뛰기 비트(7E:21A5 bit6)가 켜진 기록으로 이어 해도 곧 맵 곡이 울리는지(bsnes·snes9x). 재개 자리 표·칸 표·이어 하기 훅을 바꾸면 깨진다"
 paths = [
+  "sfc/dq4/tools/dq4growth.py",
   "sfc/dq4/tools/dq4savefixture.py",
   "sfc/dq4/tools/dq4chapter1.py",
   "sfc/dq4/tools/dq4chapterbox.py",
@@ -118,6 +120,7 @@ needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
 name = "dq4-shop-scene"
 why = "이무르 가게의 사기 1개·여러 개·개수 창 최대·금화 모자람·가방 가득·사기 취소·팔기 1개·여러 개·장비한 물건(알림 ▼, 장비 비트)·팔기 취소($0F2C 되돌리기)·목록 B·사고 바로 장비·장비 못 하는 장비($0F21 남은 값) 장면에서 금화·물건·장비 비트·가게 임시값이 기대대로인지(bsnes·snes9x, 같은 입력 두 번). 가게 훅·메시지·창·가게 표를 바꾸면 깨진다"
 paths = [
+  "sfc/dq4/tools/dq4growth.py",
   "sfc/dq4/tools/dq4shopscene.py",
   "sfc/dq4/tools/dq4windowname.asm",
   "sfc/dq4/tools/dq4windowname.py",
@@ -185,6 +188,7 @@ needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 
 name = "dq4-town-scene"
 why = "여관(묵기 값 = FC 1인 값 × 일행 수, HP·MP 가득, 밤 → 아침, 금화 모자람·거절은 그대로)·교회(되살리기·해독·저주 풀기 값과 상태, 계시의 남은 경험치, 기도 저장이 칸 1·2·3 에 그 순간 WRAM 그대로·체크섬)·타이틀(복사·지우기·빈 SRAM·체크섬 틀린 칸)과 낮밤 경계(필드 색, 마을 낮·밤 인물)가 bsnes·snes9x 에서 다시 깨지지 않게. 교회 치료 뒤 대화는 끝까지 가야 한다(곡 1E 자리에 되풀이하는 NDS 곡이 들어 25:FD00 이 곡 끝을 기다리다 멈췄음). 알려진 실패(필드 시각 색)는 정확히 그 증상일 때만 통과하고 고치면 KNOWN 에서 지운다"
 paths = [
+  "sfc/dq4/tools/dq4growth.py",
   "sfc/dq4/tools/dq4townscene.py",
   "sfc/dq4/tools/dq4savefixture.py",
   "sfc/dq4/tools/dq4shopport.py",
@@ -238,7 +242,7 @@ needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI"]
 
 [[check]]
 name = "dq4-battle-scene"
-why = "전투 한 판의 결과(금화·경험치·레벨업·약초·ホイミ·도망·몬스터 도망·전멸 뒤 교회·보스)와 전투 뒤 맵 곡·조작 복귀를 bsnes·snes9x 에서 본다. 보스·레벨업 뒤 7,313프레임 멈춤(7a34c641)·레벨업 뒤 멈춤(2c9ec7f4)·새 게임 첫 기록으로 이어 하면 곡이 없던 일(nosong) 같은 일이 다시 생기지 않게. paths 는 검사 모듈의 import 닫힘과 빌드가 쓰는 asm·사운드"
+why = "전투 한 판의 결과(금화·경험치·레벨업·약초·ホイミ·도망·몬스터 도망·전멸 뒤 교회·보스)와 전투 뒤 맵 곡·조작 복귀를 bsnes·snes9x 에서 본다. 라이안이 1 → 20 레벨에서 FC ライアン 실측 값(능력치·다음 경험치, MP 0, 주문 없음)이 되고, 2장 flag 에서는 아리나가 FC アリーナ 곡선을 따르고 손님 호이민은 레벨이 오르지 않는지도(DQ5 주인공 곡선·호이민 성장으로 되돌아가지 않게). 보스·레벨업 뒤 7,313프레임 멈춤(7a34c641)·레벨업 뒤 멈춤(2c9ec7f4)·새 게임 첫 기록으로 이어 하면 곡이 없던 일(nosong) 같은 일이 다시 생기지 않게. paths 는 검사 모듈의 import 닫힘과 빌드가 쓰는 asm·사운드"
 paths = [
   "fc/dq4/tools/dq4bank.py",
   "fc/dq4/tools/dq4block.py",
@@ -283,6 +287,7 @@ paths = [
   "sfc/dq4/tools/dq4fieldport.py",
   "sfc/dq4/tools/dq4fieldtravel.py",
   "sfc/dq4/tools/dq4groupbuild.py",
+  "sfc/dq4/tools/dq4growth.py",
   "sfc/dq4/tools/dq4itemport.py",
   "sfc/dq4/tools/dq4josa.py",
   "sfc/dq4/tools/dq4libretro.py",
@@ -388,6 +393,7 @@ needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 
 name = "dq4-title-scene"
 why = "배포 롬을 전원부터: 서곡이 지금 곡이 되어 울리고 타이틀이 밝아지는지, 기록 없을 때 메뉴에서 이름 입력으로 가는지, 이름 조합·B·「지우기」·다섯째 글자 거절(거절음)이 커서·조합 상태까지 모델과 같은지, Y 뒤 서장 맵·무음 곡·이름 바이트, 새 기록이 밑판과 이름·체크섬만 다른지, 그 기록으로 이어 하기(bsnes·snes9x)"
 paths = [
+  "sfc/dq4/tools/dq4growth.py",
   "sfc/dq4/tools/dq4nameentry.py",
   "sfc/dq4/tools/dq4nameentry.asm",
   "sfc/dq4/tools/dq4namegame.py",
@@ -427,6 +433,7 @@ needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI"]
 name = "dq4-people-match"
 why = "원작 FC 인물 그림과 다른 갈래의 그림이 실리는 일(1장 바트랜드의 프레아·이무르의 엄마들이 노인 그림, FC 그림 13 → DQ5 09)을 에뮬레이터 없이 잡는다. 원작 그림 종류·DQ5 세트 종류는 sfc/dq4/people-kinds.toml"
 paths = [
+  "sfc/dq4/tools/dq4growth.py",
   "sfc/dq4/tools/dq4npcport.py",
   "sfc/dq4/tools/dq4people.py",
   "sfc/dq4/tools/dq4ch1event.py",

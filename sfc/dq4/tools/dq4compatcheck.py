@@ -133,8 +133,17 @@ PARTY_TEMPLATE = bytes((
 COMPANIONS = 0x11AED1            # 동료 표 23:AED1(파일 위치), 9바이트씩
 
 
+def join_record(rom, kind):
+    """1장 롬이 합류 때 쓰는 기록(dq4ch1event.native 의 맨 앞, 손님 bit6 까지 켜짐). 그 종류가 아니면 None."""
+    import dq4ch1event as ev
+    o = ev.lorom(ev.CODE_AT)
+    r = rom[o:o + len(PARTY_TEMPLATE)]
+    return bytes(r) if len(r) == len(PARTY_TEMPLATE) and r[0] == ev.GUEST | kind else None
+
+
 def party_pokes(kinds, rom):
-    """dq5warp.lua buildParty 와 같은 일행 기록(PARTY `05,…`) → [(주소, 값)]."""
+    """dq5warp.lua buildParty 와 같은 일행 기록(PARTY `05,…`) → [(주소, 값)]. 롬에 그 종류의 합류 기록이 있으면
+    그것을 쓴다(호이민의 최대 레벨 등 동료 표와 다른 값이 있다)."""
     kinds = [int(k, 16) for k in re.findall(r'\w+', kinds or '')]
     out = []
     for i, k in enumerate(kinds, 1):
@@ -144,6 +153,7 @@ def party_pokes(kinds, rom):
         r[7:11] = c[2:6]
         r[2] = r[0xE] = c[6]
         r[4] = r[0x10] = c[7]
+        r = bytearray(join_record(rom, k) or r)
         out += [(0x7E2040 + i * 42 + j, b) for j, b in enumerate(r)]
     if kinds:
         n = len(kinds)
