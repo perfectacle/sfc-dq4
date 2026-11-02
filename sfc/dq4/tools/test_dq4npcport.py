@@ -162,8 +162,9 @@ class HiddenPeopleTest(unittest.TestCase):
 
 @unittest.skipUnless(DQ4.is_file() and DQ5.is_file(), "local source ROMs not present")
 class SleeperTalkTest(unittest.TestCase):
-    """A sleeper lies half a block right and up of its FC cell, so DQ5 answers only from beside the bed's right
-    block. Every sleeper must still have a free walkable FC cell to talk from, and dq4npccheck must talk from it."""
+    """A sleeper lies half a block right and up of its FC cell. DQ5 answers beside the bed's right block (the head)
+    and, with dq4sleepertalk, beside the left block (the foot) where FC talks to it. Every sleeper must have a free
+    walkable FC cell beside each, and dq4npccheck must talk from both."""
 
     def test_every_sleeper_can_be_talked_to(self):
         import dq4block
@@ -188,6 +189,7 @@ class SleeperTalkTest(unittest.TestCase):
                 source = dq4block.Map(prg, *fc_map(prg, group, number))
                 now = {(q["x"], q["y"]) for q in people if q["night"] == p["night"]}
                 self.assertIsNotNone(dq4npccheck.talk_side(source, p["x"] + 1, p["y"], now), (m, p))
+                self.assertIsNotNone(dq4npccheck.talk_side(source, p["x"], p["y"], now), (m, p))
         self.assertGreater(sleepers, 0)
 
 
