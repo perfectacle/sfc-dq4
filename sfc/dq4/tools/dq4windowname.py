@@ -45,6 +45,7 @@ HP_BODY = {0x03: bytes((0x00, 0x8B)), 0x04: bytes((0x00, 0x89))}
 # 가나 이름(몬스터 동료 등)의 바이트 → 글리프 번호 표(평 · 탁점 84 · 반탁점 83, 바이트마다 16비트, FFFF = 없음).
 # 필드에서는 가나 칸을 슬롯으로 돌려 써 원래 가나 타일로 찍은 이름이 깨지므로, 한글 이름처럼 Galmuri9 가나로 그린다
 KANA_TABLE = 0x60E800
+WH_EXTRA = 0x60E100               # 묶음 버퍼 보조 코드·표(dq4windowname.asm 끝). 코드 넘침 검사 자리 뒤, 가나 표 앞
 EMPTY_SLOT_HOOK = 0x04B9EB        # 모험의 서 기록 목록의 빈 칸 「 しようしていません」 을 한 글자씩 찍는 고리
 EMPTY_SLOT_ORIG = bytes.fromhex('a20900bdfbb92035b2ca10f7')
 PREFIX_HOOK = 0x04B11E            # 창 바이트 갈래(메뉴 패치가 JSL 로 바꿔 둔 자리). 고정 문구 접두를 먼저 가른다
@@ -96,6 +97,8 @@ QP_ROWS, QP_COL = (21, 23), 12
 QP_LINE_X, QP_NUM_X, QP_NUM_Y, QP_OFF_Y = 0x17, 0x1A, 7, 0x1F
 QP_OPEN_SITES, QP_OPEN_ORIG = (0x049C46, 0x04A437, 0x04A48A, 0x04A7F4), bytes.fromhex('bd48eb85da')
 QP_FRAME_SITE, QP_FRAME_ORIG = 0x04D16D, bytes.fromhex('add90a18')
+# 게임이 창 타일맵 2KB 전송을 요청하는 LDA #$0080 / STA $0BEC(04:9D35 PHP / REP #$30 / PHX 다음). WhReq 가 받는다
+WH_REQ_SITE, WH_REQ_ORIG = 0x049D39, bytes.fromhex('a980008dec0b')
 # 수 창 위·아래의 다음 숫자 셈(LDA $0AFE,X / INC·DEC / CMP / BCC·BCS / LDA). 가게 개수 창에서만 1~최대로 돌린다
 QTY_UP_SITE, QTY_UP_ORIG = 0x04C970, bytes.fromhex('bdfe0a1ac90c9002a902')
 QTY_DOWN_SITE, QTY_DOWN_ORIG = 0x04C995, bytes.fromhex('bdfe0a3ac902b002a90b')
@@ -166,8 +169,8 @@ def apply(data, font=None, asar=None):
     if not asar:
         raise SystemExit('ASAR 에 asar 실행 파일을 주세요(sfc/dq4/docs/dq4-menu-format.md)')
     d = bytearray(data)
-    if any(d[lorom(CODE):lorom(CODE_END)]):
-        raise ValueError(f'{CODE:06X}~{CODE_END:06X} 가 비어 있지 않음')
+    if any(d[lorom(CODE):lorom(CODE_END)]) or any(d[lorom(WH_EXTRA):lorom(KANA_TABLE)]):
+        raise ValueError(f'{CODE:06X}~{CODE_END:06X} 나 {WH_EXTRA:06X}~{KANA_TABLE:06X} 가 비어 있지 않음')
     o = lorom(dq4menupatch.window_addr(d, STATUS_WINDOW))
     if d[o + 2] & 0x1F != 6:
         raise ValueError(f'창 {STATUS_WINDOW:02X} 머리 {d[o:o + 4].hex()}: 너비가 6 이 아님')
@@ -240,6 +243,8 @@ def apply(data, font=None, asar=None):
                     (QP_FRAME_SITE, QP_FRAME_ORIG), *((a, QP_OPEN_ORIG) for a in QP_OPEN_SITES)):
         if d[lorom(a):lorom(a) + len(orig)] != orig:
             raise ValueError(f'{a:06X}: 가게 팔기 자리가 아님 {d[lorom(a):lorom(a) + len(orig)].hex()}')
+    if d[lorom(WH_REQ_SITE):lorom(WH_REQ_SITE) + len(WH_REQ_ORIG)] != WH_REQ_ORIG:
+        raise ValueError(f'{WH_REQ_SITE:06X}: 창 타일맵 요청 자리가 아님')
     if any(d[lorom(SELL_SPOT):lorom(SELL_SPOT_END - 1) + 1]):
         raise ValueError(f'{SELL_SPOT:06X}~ 가 비어 있지 않음')
     if any(d[lorom(LOW_SPOT):lorom(LOW_SPOT_END - 1) + 1]):
@@ -300,7 +305,7 @@ def apply(data, font=None, asar=None):
             f'!wt_prefix_prev = ${int.from_bytes(d[po + 1:po + 4], "little"):06X}\n'
             f'!wt_fixed = ${dq4windowtext.FIXED_PREFIX:02X}\n!wt_fixed_kind = {dq4windowtext.FIXED_KIND}\n!wt_safe = ${dq4windowtext.SAFE:04X}\n'
             f'!wt_tactic = {dq4windowtext.tactic_first()}\n!wt_tactic_count = {len(dq4windowtext.TACTIC_LINES)}\n'
-            f'!wn_kana_table = ${KANA_TABLE:06X}\n!wt_empty_slot = {numbers[dq4windowtext.EMPTY_SLOT]}\n'
+            f'!wn_kana_table = ${KANA_TABLE:06X}\n!wh_extra = ${WH_EXTRA:06X}\n!wh_req_site = ${WH_REQ_SITE:06X}\n!wt_empty_slot = {numbers[dq4windowtext.EMPTY_SLOT]}\n'
             f'!wt_cannot_sell = {numbers[dq4windowtext.CANNOT_SELL]}\n!shop_sell_alias = ${sell & 0xFFFF:04X}\n'
             f'!shop_sell_code = ${SHOP_SELL_CODE:02X}\n!shop_sell_slot = ${CODE_TABLE + (SHOP_SELL_CODE - 0xB0) * 2:06X}\n'
             f'!shop_spot = ${SHOP_SPOT:06X}\n!shop_sell_w = {shop_w}\n!wt_held_first = {held[0]}\n'
