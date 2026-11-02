@@ -249,16 +249,19 @@ def make_base(mesence, rom, out, cache=None):
                                                        'WAYPOINTS': f'{pc.CLOSE};wait:30', 'SAVE': 'end.mss',
                                                        'MAXF': '200', 'CHANGES': '99'}, 120)
     pins = f'{wc.RNG};{wc.DAY_SET}'
+    log = out / 'hub' / 'warp.txt'
+    # 같은 out 에 남은 앞 실행의 상태·기록을 이번 도착으로 잘못 읽지 않게 지운다
+    for old in (base, log):
+        old.unlink(missing_ok=True)
     wc.run(mesence, rom, wc.WARP, out / 'hub', {
         'STATE': str(out / 'close' / 'end.mss'), 'TO': HUB, 'SAVE': 'end.mss', 'SETTLE': '60', 'MAXF': '1500',
         'WARPEXIT': f'{warp_exit(rom):X}', 'ANYWHERE': '1', 'ROMPATCH': wc.NO_ENCOUNTERS, 'SET': pins,
         'LATESET': pins}, 300)
-    if not base.exists():
-        raise SystemExit('출발 상태를 만들지 못함')
-    log = out / 'hub' / 'warp.txt'
-    # 세이브스테이트는 도착하지 못해도 남는다. 도착한 것만 캐시에 두어 다음 실행이 틀린 출발점을 받지 않게 한다
+    # 세이브스테이트는 도착하지 못해도 남는다. 도착한 것만 돌려주고 캐시에 두어 틀린 출발점을 쓰지 않게 한다
     arrived = re.search(r'arrived map (\w\w/\w\w)', log.read_text(encoding='utf-8')) if log.exists() else None
-    if cache and arrived and arrived[1] == HUB[:5]:
+    if not base.exists() or not arrived or arrived[1] != HUB[:5]:
+        raise SystemExit(f'출발 상태를 만들지 못함: {HUB[:5]} 에 닿지 않음({arrived[1] if arrived else "도착 기록 없음"})')
+    if cache:
         cache.put('heroblock-hub', key, '.mss', base, {'name': 'hub', 'arrived': arrived[1]})
     return base, False
 
