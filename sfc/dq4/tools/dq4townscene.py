@@ -612,32 +612,7 @@ def scene_badsum(core, rom, out, seed):
 
 # 알려진 실패: 장면 → (이슈와 지울 때, 그 증상인지 보는 함수(결과 dict)). 정확히 그 증상일 때만 known 으로 쳐 전체가
 # 통과하고, 고쳐져 통과하거나 다른 증상이면 failed — 고친 PR 이 그 항목을 지운다
-def _field_stays_day(res):
-    """필드 시각 색이 낮 그대로: 판정에 걸린 시각마다 버퍼 전체(2·3번 줄, 인물 두 줄, 7E:1AA1)가 낮 벌과 같고,
-    맞은 시각은 낮 벌인 시각뿐."""
-    rows = res.get('steps', [])
-    bad = [r for r in rows if r['frames'] is None]
-    return (bool(bad) and len(res['problems']) == len(bad) and all(r.get('stays_day') for r in bad)
-            and all(r['set'] == DAY_SET for r in rows if r['frames'] is not None))
-
-
-def _cross_stays_day(res):
-    """붙들지 않고 넘겨도 낮 그대로: 해 질 녘 다리에서 본 벌이 낮 하나·밤 인물 표지 0 이고, 새벽 다리는 낮으로 끝남."""
-    legs = res.get('legs', {})
-    dusk, dawn = legs.get('dusk', {}), legs.get('dawn', {})
-    return (len(res['problems']) == 1 and res['problems'][0].startswith('dusk: 밤 인물 표지')
-            and [tuple(x[1:]) for x in dusk.get('seen', [])] == [('낮', 0)] and dawn.get('frames') is not None)
-
-
-FIELD_COLOR = ('이슈: libretro 두 코어에서 1장 필드의 시각 색(02:AD2A → 01:A055)이 시각을 붙든 채 걸어도 낮 벌 그대로. '
-               '1장 롬 문제인지 검사 진입 방식 차이인지 미확인(dq4-town-scene-format.md 「남은 것」). 고치면 이 항목을 지울 것')
-CROSS_COLOR = ('이슈: 필드에서 시각 00EA → 0002 를 붙들지 않고 걸어 넘겨도 버퍼가 낮 벌 하나, 7E:1AA1(밤 인물 표지)이 '
-               '켜지지 않음(FIELD_COLOR 와 같은 원인으로 보임). 고치면 이 항목을 지울 것')
-KNOWN = {
-    'dusk': (FIELD_COLOR, _field_stays_day),
-    'dawn': (FIELD_COLOR, _field_stays_day),
-    'cross': (CROSS_COLOR, _cross_stays_day),
-}
+KNOWN = {}
 
 SCENES = {
     'inn_stay': lambda c, r, o, s, a: scene_inn(c, r, o, s, 'stay', a.dq4),
@@ -787,16 +762,11 @@ def palette_follows(w, rom, limit):
     return walk_until(w, lambda: not judge_palette(expected_palette(rom, w.c.rd(TIME, 2)), wram_palette(w.c)), limit)
 
 
-DAY_SET = 'A24D'
-DAY_TIME = 0x0050
-
-
 def night_pinned(core, rom, out, seed, name, dq5):
     """필드에서 시각을 경계값 하나씩에 붙든 채 걸어, 팔레트 버퍼(2·3번 줄 색 1~13, 인물 11·12번 줄, 7E:1AA1)가 그 값의
     표(01:A16B) 벌로 바뀌는지."""
     w, at = field_walker(core, rom, out, seed)
     table = Path(dq5).read_bytes()
-    day = expected_palette(table, DAY_TIME)
     rows, problems = [], []
     with fx.closing(w.c):
         if w.c.rd(TIME_STOP[0]) & TIME_STOP[1]:
@@ -805,8 +775,7 @@ def night_pinned(core, rom, out, seed, name, dq5):
             w.pokes = [(TIME, t & 0xFF), (TIME + 1, t >> 8)]
             took = palette_follows(w, table, FOLLOW_LIMIT)
             want = expected_palette(table, t)
-            rows.append({'time': f'{t:04X}', 'set': want['set'], 'night_obj': want['night_obj'], 'frames': took,
-                         'stays_day': not judge_palette(day, wram_palette(w.c))})
+            rows.append({'time': f'{t:04X}', 'set': want['set'], 'night_obj': want['night_obj'], 'frames': took})
             if took is None:
                 bad = judge_palette(want, wram_palette(w.c))
                 problems.append(f'시각 {t:04X}: {FOLLOW_LIMIT} 프레임 걸어도 {" ".join(bad)} 가 표(벌 {want["set"]})와 다름')

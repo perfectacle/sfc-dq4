@@ -1203,6 +1203,10 @@ def write_midi(path, events, stop_tick, loop, ntracks, title):
             per[ti] += [(tick, bytes([0xB0 | ch, 101, 0])), (tick, bytes([0xB0 | ch, 100, 0])),
                         (tick, bytes([0xB0 | ch, 6, min(127, ev[3])]))]
         elif kind == "note":
+            # 끊는 틱(루프가 다시 시작되는 틱)에 켜는 음은 길이가 0 이고, 끔이 같은 틱에서 앞에 정렬되어
+            # 켠 채로 남는다
+            if tick >= stop_tick:
+                continue
             key, vel, dur = ev[3], ev[4], ev[5]
             per[ti].append((tick, bytes([0x90 | ch, key, max(1, vel)])))
             per[ti].append((min(tick + max(dur, 1), stop_tick), bytes([0x80 | ch, key, 0])))
@@ -1257,7 +1261,6 @@ def midi_notes(data):
                     t0, v0 = on[key].pop(0)
                     notes.append((ti, t0, tick, key, v0))
                 else:
-                    # 끊는 틱에 켠 음은 끔(같은 틱에서 앞에 정렬됨)이 먼저 와 짝이 없다
                     notes.append((ti, None, tick, key, None))
             p += 1 if hi in (0xC0, 0xD0) else 2
         notes += [(ti, t0, None, key, v0) for key, lst in on.items() for t0, v0 in lst]

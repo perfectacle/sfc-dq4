@@ -566,7 +566,10 @@ def engine_code(block_count, water_ids, palettes, entries, waters, lids):
     # them over slot 0, the blank tile that fills BG1.
     # A dry new-group map runs the lid routine; the DQ5 routine of a borrowed slot is kept.
     # _ENTER leaves A 16-bit, so the flag compare takes a 16-bit immediate.
-    lib.label("wrap").b(0x22, 0xD0, 0xF7, 0x15, *_ENTER).long(0x22, "find")
+    # On the field ($BE bit7 clear) $BC/$BD still name the town just left, so find would match it and replace
+    # the field routine 02:AB33 (sea tiles and the time-of-day colours 01:A055) with the water routine.
+    lib.label("wrap").b(0x22, 0xD0, 0xF7, 0x15, *_ENTER, 0xE2, 0x20, 0xA5, 0xBE, 0xC2, 0x20).rel(0x10, "wrap_out")
+    lib.long(0x22, "find")
     lib.rel(0x90, "wrap_out").long(0xBF, "waters").rel(0xF0, "wrap_lid").b(0xC9, 0x02, 0x00)
     lib.rel(0xF0, "wrap_fountain").word(0xA9, "water").rel(0x80, "wrap_set")
     lib.label("wrap_fountain").word(0xA9, "fountain").rel(0x80, "wrap_set")
