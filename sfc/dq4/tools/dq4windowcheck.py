@@ -16,8 +16,14 @@
 
 걸린 프레임은 화면에 빨간 네모를 그려 sheet-*.png 로 모은다.
 
-  MESENCE=... uv run --locked python sfc/dq4/tools/dq4windowcheck.py --rom 롬 --symbols wn.sym \\
-      --ship work/state/ship.mss --party 일행셋.mss --out 새폴더
+장면의 출발 상태는 검사하는 롬에서 그때 만든다(make_states). 손으로 만든 세이브스테이트는 만든 뒤 롬이 바뀌면 코드 자리가
+어긋나, 불러오자마자 메인 흐름이 엉뚱한 곳을 실행해 멈추고 스택이 새어 직접 페이지(맵 번호 $BC·$BD 등)를 덮었다.
+1장 이어 걷기(dq4ch1walkcheck)의 서장 끝 상태(롬 SHA-1 별 캐시)에서 dq5warp.lua 로 순간이동해 이무르 방어구점 카운터 앞(37/00 셀 34,9, 호이민과 둘. 대화 번호를 바꿔 가게·교회·맡기는 곳을 여는 talk 장면과 무작위
+입력 장면)과 탑(39/01, 조우 장면)을 만든다.
+
+  MESENCE=... LIBDIR=... uv run --locked python sfc/dq4/tools/dq4windowcheck.py --rom work/ch1/dq4-ch1.sfc \\
+      --symbols wn.sym --symbols-rom 메뉴롬 --out 새폴더
+  (wn.sym·메뉴롬은 dq4menupatch.py build 를 DQ4_WINDOWNAME_SYMBOLS 와 함께 돌려 만든다. 창 코드 뱅크가 같은지 본다)
 """
 import argparse
 from concurrent.futures import ThreadPoolExecutor
@@ -29,6 +35,14 @@ import subprocess
 
 import dq4mesen as mesen
 
+# 출발 상태: (이름, dq5warp.lua TO, PARTY). 서장 끝 상태에서 순간이동한다(도착하며 한 칸 아래로 걸어 카운터 앞 셀 34,9 에
+# 선다). 1장 롬의 DQ5 선실(17/00)은 이야기 플래그가 DQ4 것이라 주인공이 침대에 누운 첫 장면이 되어 움직이지 못한다
+STATES = (('shop', '37/00,34,8', '05'), ('battle', '39/01,20,16', '05'))
+# 대화 번호를 바꿔 말을 거는 인물: 이무르 방어구점 주인(인물 표 7E:36E0·3700 의 칸, 원래 대화 번호 003). 카운터 앞에서 위를
+# 보고 대화를 고르면 이 사람과 말한다
+TALK_SLOT = 0x16
+CODE_BANK = 0x60            # 창 코드(dq4windowname.CODE)가 든 뱅크. 심볼 롬과 검사 롬이 같은 빌드인지 이 뱅크로 본다
+
 HERE = Path(__file__).resolve().parent
 PROBE = HERE.parents[1] / 'dq5' / 'tools' / 'lua' / 'dq5msg.lua'
 KANA_ROM = 0x26528                  # 04:E528, 칸 01 부터 1bpp 8바이트
@@ -39,11 +53,13 @@ BUFFER = 0x5000                     # 창 타일맵 버퍼 7E:5000(32 × 32 칸)
 KEYS, AGES = 0x3D70, 0x3D14         # dq4windowname.asm 의 !wt_keys·!wt_ages(슬롯마다 워드)
 KANA_ENTRIES, KBASE = 12, 0x3DD8    # !wt_nkana, !wt_kbase(첫 칸 12바이트, 이어서 칸 수 12바이트)
 SHARED_JP = 0x60B400                # 맵을 불러올 때 7E:1AC0 으로 복사되는 원래 공용 창 레코드(dq4menupatch.SHARED_JP)
-TALK = 'b:4,wait:40,up:3,wait:20,a:4,wait:30,' + ','.join(['a:6,wait:40,down:4,wait:10,a:6,wait:40'] * 10)
-# 도구점(선실 대화 02)에서 팔기를 골라 메시지와 목록을 함께 띄운다. 가진 물건 12칸(7E:2056~)을 1장에서 갖출 만한 것(철 장비
+# 위를 보고 명령 창을 연다. 필드는 몇 프레임에 한 번만 입력을 읽어 짧게 누르면 놓친다(놓치면 뒤 입력이 한 칸씩 밀림)
+OPEN = 'b:4,wait:40,up:10,wait:20,a:10,wait:30,'
+TALK = OPEN + ','.join(['a:6,wait:40,down:4,wait:10,a:6,wait:40'] * 10)
+# 도구점(대화 번호 02)에서 팔기를 골라 메시지와 목록을 함께 띄운다. 가진 물건 12칸(7E:2056~)을 1장에서 갖출 만한 것(철 장비
 # 넷, 약초 둘, 키메라의 날개, 하늘을 나는 구두, 성수, 해독초, 생명의 나무 열매, 힘의 씨앗)으로 채우면 이름이 가나 칸을
 # 넘쳐 캔버스 슬롯으로 간다
-SELL = 'b:4,wait:40,up:3,wait:20,a:4,wait:30,a:6,wait:60,down:4,wait:20,a:6,wait:80,a:6,wait:80,down:4,wait:30,a:6,wait:80'
+SELL = OPEN + 'a:6,wait:60,down:4,wait:20,a:6,wait:80,a:6,wait:80,down:4,wait:30,a:6,wait:80'
 FULL_BAG = (0x01, 0x50, 0x78, 0x8A, 0xA1, 0xA1, 0xA4, 0xCD, 0xA3, 0xA2, 0xB1, 0xAD)
 # 주인공 이름 7E:2001 에 넣는 「크리프트」 한글 표시 바이트. 세이브스테이트의 가나 이름은 가나 칸 슬롯과 겹쳐 깨진다.
 # 09/00 의 몬스터 동료 이름(이름 표 0A, DQ5 데이터)은 가나라 필드 상태 창에서 「가나」 로 걸린다
@@ -77,17 +93,35 @@ PARTY_ITEMS_PRE = ('wait:150,a:6,wait:60,right:4,wait:30,down:4,wait:30,a:6,wait
                    'b:6,wait:90,b:6,wait:90')
 
 
-def scenes(ship, party, shop=None):
-    """(이름, 세이브스테이트, POKE, ROMPATCH, PRE, 프레임)."""
+def make_states(mesence, rom_path, data, out):
+    """{이름: 세이브스테이트}. 검사 롬으로 서장 끝 상태(캐시)를 얻고 STATES 자리로 순간이동한다."""
+    import dq4ch1walkcheck as walk
+    base, r = walk.prologue(mesence, rom_path, data, out / 'prologue', walk.SEGMENTS, walk.StateCache(data))
+    if r['status'] != 'passed':
+        raise SystemExit(f'서장 끝 상태를 만들지 못함: {r["problems"]}')
+    states = {}
+    for name, to, party in STATES:
+        r = walk.segment(mesence, rom_path, base, out / name, (name, 'warp', to, {'map': to[:5]}), walk.NO_ENCOUNTERS,
+                         '', party)
+        if r['status'] != 'passed':
+            raise SystemExit(f'출발 상태 {name}({to})를 만들지 못함: {r["problems"]}')
+        states[name] = out / name / 'end.mss'
+    return states
+
+
+def scenes(ship, party, shop=None, battle=None):
+    """(이름, 세이브스테이트, POKE, ROMPATCH, PRE, 프레임). ship 은 talk·무작위 입력 장면의 출발 상태(이름은 선실에서 하던
+    때의 것)."""
     out = []
     if shop:
         out.append(('shopwho', shop, '', '', SHOP_WHO, range(100, 1900, 30)))
         out.append(('shopflip', shop, '7E2058=A1', '35BE1=1FE0', SHOP_FLIP, range(880, 1110)))
+    talk = f'7E{0x36E0 + TALK_SLOT:04X}={{:02X}};7E{0x3700 + TALK_SLOT:04X}=00'
     for n in range(0x40):
-        # 선실 파파스의 대화 번호를 바꿔 가게·교회·여관 등을 연다(35C37 = A901 은 대화를 그 번호로 고정)
-        out.append((f'talk{n:02X}', ship, f'7E36EB={n:02X};7E370B=00', '35C37=A901', TALK, range(60, 1500, 30)))
+        # 방어구점 주인의 대화 번호를 바꿔 가게·교회·여관 등을 연다
+        out.append((f'talk{n:02X}', ship, talk.format(n), '', TALK, range(60, 1500, 30)))
     bag = ';'.join(f'7E{0x2056 + i:04X}={b:02X}' for i, b in enumerate(FULL_BAG))
-    out.append(('talk02-full', ship, f'7E36EB=02;7E370B=00;{bag}', '35C37=A901', SELL, range(60, 700, 10)))
+    out.append(('talk02-full', ship, f'{talk.format(2)};{bag}', '', SELL, range(60, 700, 10)))
     for seed in (1, 2, 3, 4):
         out.append((f'ship{seed}', ship, '', '', fuzz(seed), range(100, 8000, 50)))
     out.append(('partyitems', party, PARTY_ITEMS, '', PARTY_ITEMS_PRE, range(60, 900, 30)))
@@ -95,7 +129,7 @@ def scenes(ship, party, shop=None):
         out.append((f'party{seed}', party, '', '', fuzz(seed), range(100, 8000, 50)))
     for seed in (11, 12):
         # 8523 = FF 는 걸을 때마다 조우
-        out.append((f'battle{seed}', party, '', '8523=FF', fuzz(seed), range(100, 8000, 50)))
+        out.append((f'battle{seed}', battle or party, '', '8523=FF', fuzz(seed), range(100, 8000, 50)))
     return out
 
 
@@ -130,10 +164,7 @@ def run(mesence, libdir, rom_path, rom, folder, scene):
     name, state, poke, patch, pre, frames = scene
     folder.mkdir(parents=True)
     o = lorom(SHARED_JP)
-    # 선실 세이브스테이트는 BG3 타일맵을 옮기기 전 것이라 실내 자리(3C)로 맞춘다. 일행 세이브스테이트는 필드에 서 있어
-    # 그대로 둔다(3C 로 두면 타일맵이 필드 그림 자리에 놓여 화면 위쪽이 깨진다)
-    sets = ['7E0725=3C'] if name.startswith(('talk', 'ship')) else []
-    sets += [f'{0x7E1AC0 + i:X}={b:02X}' for i, b in enumerate(rom[o:o + 48])]
+    sets = [f'{0x7E1AC0 + i:X}={b:02X}' for i, b in enumerate(rom[o:o + 48])]
     sets += [f'{0x7E2001 + i:X}={NAME[2 * i:2 * i + 2]}' for i in range(8)]
     fs = ','.join(map(str, frames))
     dump = ','.join(f'{f}:7E{KEYS:04X}:60,{f}:7E{AGES:04X}:60,{f}:7E{KBASE:04X}:24,{f}:7E0725:1,{f}:7E1944:2'
@@ -274,9 +305,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--rom', type=Path, required=True)
     ap.add_argument('--symbols', type=Path, required=True, help='DQ4_WINDOWNAME_SYMBOLS 로 남긴 심볼 파일')
-    ap.add_argument('--ship', type=Path, required=True, help='선실 세이브스테이트')
-    ap.add_argument('--party', type=Path, required=True, help='일행 셋 세이브스테이트(09/00)')
-    ap.add_argument('--shop', type=Path, help='1장 롬으로 이무르 37/00 의 셀 34,9(방어구점 카운터 앞)에 일행 둘로 선 세이브스테이트')
+    ap.add_argument('--symbols-rom', type=Path, required=True, help='그 심볼을 남긴 dq4menupatch.py build 의 롬')
     ap.add_argument('--out', type=Path, required=True)
     ap.add_argument('--only', help='이 글자가 이름에 든 장면만')
     ap.add_argument('--jobs', type=int, default=8)
@@ -288,10 +317,14 @@ def main():
     if out.exists():
         ap.error('--out 은 아직 없는 폴더를 주세요')
     rom = a.rom.read_bytes()
+    bank = slice(lorom(CODE_BANK << 16 | 0x8000), lorom(CODE_BANK << 16 | 0xFFFF) + 1)
+    if a.symbols_rom.read_bytes()[bank] != rom[bank]:
+        ap.error(f'--symbols-rom 과 --rom 의 창 코드 뱅크 {CODE_BANK:02X} 가 다름(같은 빌드가 아님)')
     slots = slot_table(rom, symbols(a.symbols))
     libdir = os.environ.get('LIBDIR') or subprocess.check_output(
         ['uv', 'run', '--locked', 'krpatch', 'sfc', 'lua'], text=True).strip()
-    todo = [s for s in scenes(a.ship.resolve(), a.party.resolve(), a.shop and a.shop.resolve()) if not a.only or a.only in s[0]]
+    st = make_states(mesence, a.rom.resolve(), rom, out / 'states')
+    todo = [s for s in scenes(st['shop'], st['shop'], st['shop'], st['battle']) if not a.only or a.only in s[0]]
     with ThreadPoolExecutor(a.jobs) as pool:
         list(pool.map(lambda s: run(mesence, libdir, a.rom, rom, out / s[0], s), todo))
     flagged = 0
