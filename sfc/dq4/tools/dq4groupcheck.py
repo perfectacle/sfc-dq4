@@ -11,7 +11,7 @@
           either DQ5 row or column of it, and step onto the block: the group arrival
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4groupcheck.py --rom work/dq4-groups/groups.sfc \\
-      --state work/state/ship.mss --out work/dq4-groups/check
+      --out work/dq4-groups/check
 """
 
 import argparse
@@ -30,6 +30,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+import dq4freshstate  # noqa: E402
 import dq4block  # noqa: E402
 import dq4fieldport  # noqa: E402
 import dq4talk  # noqa: E402
@@ -54,7 +55,7 @@ LAST_KEY_DOOR = 0x97
 # 벽에 둘러싸여 이벤트로만 오는 계단: キングレオ 00/00 (1F,12) 는 감옥 00/04 로 가는 칸이고, FC 는 キングレオ 에게
 # 진 일행을 이벤트로 그곳에 보낸다(fc/dq4/docs/dq4-story-format.md 의 4장 4).
 EVENT_STAIRS = {(0x00, 0x00, 0x1F, 0x12)}
-# --set: WRAM writes before every warp (dq5warp.lua SET). A chapter-1 ROM started from the ship state has the
+# --set: WRAM writes before every warp (dq5warp.lua SET). A chapter-1 ROM started from a state with the
 # throne-room flag off, so warping into 36/01 runs the opening and the stairs there never get the input.
 PRESET = ""
 
@@ -160,7 +161,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--rom", required=True, type=Path)
     ap.add_argument("--dq4", default="rom/dq4.nes", type=Path)
-    ap.add_argument("--state", default="work/state/ship.mss", type=Path)
+    dq4freshstate.add_argument(ap)
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--jobs", type=int, default=4)
     ap.add_argument("--groups", type=lambda v: {int(g, 16) for g in v.split(",")}, default=set(LINKS),
@@ -174,7 +175,8 @@ def main():
     out = args.out.resolve()
     if out.exists() and any(out.iterdir()):
         raise SystemExit(f"{out} is not empty")
-    rom, state = args.rom.resolve(), args.state.resolve()
+    rom = args.rom.resolve()
+    state = dq4freshstate.resolve(args.state, mesence, rom, out / "start")
     prg = ines.prg(args.dq4.read_bytes())
 
     stairs = list(stair_scenes(prg, args.groups))

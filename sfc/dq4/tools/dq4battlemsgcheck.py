@@ -1,4 +1,4 @@
-"""전투 메시지 한글 검사(MesenCE 헤드리스). 1장 상태에서 탑 위 보스(39/04)와 싸우며, 메시지를 띄울 때마다(24:8C39) 번호를
+"""전투 메시지 한글 검사(MesenCE 헤드리스). 1장 롬으로 만든 서장 끝 상태(dq4freshstate)에서 탑 위 보스(39/04)와 싸우며, 메시지를 띄울 때마다(24:8C39) 번호를
 검사할 번호로 바꿔 끼워 끝까지 찍히는지 보고 화면을 남긴다(lua/dq4battlemsgswap.lua).
 
   - 주인공 HP 999·이름 「라이언」을 SET 으로 두고 A 를 30프레임마다 눌러 싸운다. 이름·숫자 자리는 그때의 큐 값이 들어간다.
@@ -8,7 +8,7 @@
   - --field 면 보행 메시지(24:8BAF)를 같은 식으로 본다. 성 앞(36/00)에서 빈 곳에 「はなす」를 골라 뜨는 메시지를 번호마다
     한 번씩 바꿔 끼우고 100프레임 뒤 화면을 남긴다(--ids 로 번호를 준다).
 
-  MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4battlemsgcheck.py --rom work/x/ch1.sfc --state work/state/ch1.mss --out work/battlemsgcheck
+  MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4battlemsgcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/battlemsgcheck
 형식은 sfc/dq4/docs/dq4-battle-text-format.md 「검증」.
 """
 import argparse
@@ -23,6 +23,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
+import dq4freshstate  # noqa: E402
 import dq4mesen as mesen  # noqa: E402
 import dq4battlemsg  # noqa: E402
 import dq4battletexts  # noqa: E402
@@ -80,7 +81,7 @@ def sheet(shots, path, box):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--rom', required=True, type=Path)
-    ap.add_argument('--state', required=True, type=Path, help='1장 맵에 선 세이브스테이트')
+    dq4freshstate.add_argument(ap)
     ap.add_argument('--out', required=True, type=Path)
     ap.add_argument('--ids', help='검사할 번호(16진, 쉼표). 없으면 dq4battletexts 의 모든 번호')
     ap.add_argument('--field', action='store_true', help='보행 메시지(24:8BAF)를 본다. --ids 가 필요')
@@ -91,10 +92,11 @@ def main():
         raise SystemExit('MESENCE 와 LIBDIR 을 주세요')
     if args.field and not args.ids:
         raise SystemExit('--field 는 --ids 로 번호를 주세요')
-    rom, state, out = args.rom.resolve(), args.state.resolve(), args.out.resolve()
+    rom, out = args.rom.resolve(), args.out.resolve()
     batch = 1 if args.field else BATCH
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True)
+    state = dq4freshstate.resolve(args.state, args.mesence, rom, out / 'start')
     todo = [int(x, 16) for x in args.ids.split(',')] if args.ids else sorted(set(dq4battletexts.SOURCE) - set(SKIP))
     shown, stalled, rounds = [], [], 0
     while todo and rounds < 20:
@@ -104,14 +106,14 @@ def main():
                                                  out / f'r{rounds:02d}-{kb[0]:02d}', kb[1], args.field),
                                   enumerate(batches)))
         todo = []
-        for batch, swaps in zip(batches, results):
+        for ids, swaps in zip(batches, results):
             done = [n for _, n in swaps]
             shown += done[:-1]
-            if len(done) < len(batch):
+            if len(done) < len(ids):
                 # 마지막으로 바꿔 넣은 번호 뒤로 메시지가 더 오지 않았다
                 if done:
                     stalled.append(done[-1])
-                todo += batch[len(done):]
+                todo += ids[len(done):]
             elif done:
                 shown.append(done[-1])
         rounds += 1
