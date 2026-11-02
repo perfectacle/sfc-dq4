@@ -226,6 +226,7 @@ class StagesTest(unittest.TestCase):
         ledger = L.build(dq5, [('title', data)])
         _, fails = C.run(ledger, data, dq5, '')
         self.assertTrue(any('overture' in f and 'people' in f for f in fails))
+        self.assertTrue(any(f.startswith('song_wait:') and '소리 단계가 없어' in f for f in fails))
         report, fails = C.run(ledger, data, dq5, '', allow_missing=True)
         self.assertFalse(any('단계' in f and '없음' in f for f in fails))
         self.assertTrue(any('people' in w for w in report['warnings']))

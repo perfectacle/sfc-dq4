@@ -665,6 +665,29 @@ def inn_jingle_code(base=INN_JINGLE):
     return fade, wait
 
 
+# 24:FF0F(곡 n 이 끝나기를 기다림)는 09 n 의 대답이 7F 가 될 때까지 돈다. 되풀이하는 곡이면 대답이 7F 가 되지 않아
+# 그 자리에서 멈추므로(교회 치료 뒤), 곡 번호마다 되풀이 여부 표(LOOP_TABLE, 롬 시퀀스에서 셈)를 보고 되풀이하는 곡은
+# 기다리지 않고 돌아온다. 곡 번호를 즉값으로 주지 않는 DQ5 자리(dq4songwait.INDIRECT)까지 막는다
+WAIT_SITE = 0x24FF0F
+WAIT_ORIGINAL = bytes.fromhex('08 C2 30 22 5E FF 24')
+WAIT_GUARD = CODE + 0x1000
+LOOP_TABLE = CODE + 0x1080
+
+
+def wait_guard_code():
+    """24:FF0F 대신(JML). A 의 낮은 바이트가 곡 번호. 레지스터와 P 는 원래 루틴처럼 지키고, 기다리는 갈래는 원래
+    FF0F 와 같은 스택·P 로 24:FF16(대기열 돌리기 고리)에 들어간다."""
+    h = bytes.fromhex
+    return _asm([h('08 C2 30 48 DA 29 FF 00 AA E2 20 BF') + LOOP_TABLE.to_bytes(3, 'little'),
+                 ('b', 0xD0, 'loop'),
+                 h('C2 30 FA 68 28 08 C2 30 22 5E FF 24 5C 16 FF 24'),   # PLX / PLA / PLP / PHP / REP #30 / JSL FF5E / JML FF16
+                 ('label', 'loop'), h('C2 30 FA 68 28 6B')])            # PLX / PLA / PLP / RTL
+
+
+def wait_guard_table(data):
+    import dq4songwait
+    return dq4songwait.loop_table(bytes(data))
+
 def weapon_sound_code(bare, songs, base=WEAPON_SOUND):
     """28:805C 대신(8비트 A·X). 지금 곡($1D8B)이 songs 가운데 하나이고 대기열에 보내는 중인 칸(bit7·bit6, FF 아님)이 없으면
     무기 번호($0DA7)로 WEAPON_SEQ_TABLE·WEAPON_BRANCH_TABLE 을 보고 그 (효과음, 갈래)를 28:804A 로 낸다. bare 는 맨손의
@@ -1021,7 +1044,7 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
             resident=None, set_records=None, fast_receive=False, chains=None, chain_late=(), hold=False, early_song=False, load_pump=False,
             vehicle_song=False, keep_samples=False, release_failed=False, unpin=(), resident_waves=None, weapon_sounds=None,
             effect_calls=None, release_pending=False, tick_scan=False, effect_remaps=None,
-            item_sound=None, inn_jingle=False):
+            item_sound=None, inn_jingle=False, song_calls=None, wait_guard=False):
     """pinned 는 늘 두는 시퀀스 목록에 남길 바꾸는 곡(나머지 바꾸는 곡은 목록에서 뺌). resident 는 새 늘 두는 샘플 목록
     전체(주지 않으면 그대로). set_records 는 바꾸지 않는 곡의 곡 묶음 레코드 {곡: (k, 샘플…)}.
     fast_receive 는 SPC 자료 받기를 묶음 여러 개 이어 받게 바꾼다(fast_receive_code). chains 는 {곡: 본체 시퀀스} 로,
@@ -1041,6 +1064,8 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
     effect_remaps 는 {(효과음, 갈래): (새 효과음, 새 갈래)} 로, 효과음 대기열 입구에서 늘 바꿔 부른다(effect_remap_code).
     item_sound 는 (효과음, 갈래) 로, 항아리·통·옷장에서 물건을 찾은 메시지 앞에서 낸다(item_sound_code).
     inn_jingle 은 여관 징글을 화면이 어두워질 때 틀고 아침 맵은 그 뒤에 불러온다(inn_jingle_code).
+    song_calls 는 {LDA 자리: (원래 곡, 새 곡)} 으로, 곡이 끝나기를 기다리는 자리의 `LDA #곡` 즉값을 바꾼다.
+    wait_guard 는 24:FF0F 가 되풀이하는 곡을 기다리지 않게 한다(wait_guard_code, 표는 마지막 롬 시퀀스로 셈).
     release_pending 은 곡 뒤 샘플이 오기 전에 끝난 곡의 샘플을 SPC 기다림 목록에서 지운다(pending_release_code).
     tick_scan 은 곡 자리 틱마다 트랙을 차례 수만큼 다시 훑던 고리를 한 번 훑기로 바꾼다(tick_scan_code).
     """
@@ -1281,6 +1306,11 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
         write(KEEP_DONE_SITE, bytes([0x4C]) + (KEEP_CODE & 0xFFFF).to_bytes(2, 'little'), bytes.fromhex('4C 84 C1'))
         write(KEEP_MARK_SITE, bytes([0x20]) + (mark_at & 0xFFFF).to_bytes(2, 'little') + bytes([0xEA] * 6),
               bytes.fromhex('20 2F C3 A9 0A 00 20 12 C1'))
+    for addr, (old, new) in sorted((song_calls or {}).items()):
+        pos = lorom(addr)
+        if data[pos] != 0xA9 or data[pos + 1] != old:
+            raise ValueError(f'{addr:06X}: not LDA #{old:02X}')
+        data[pos + 1] = new
     for addr, (old, new) in sorted((effect_calls or {}).items()):
         pos = lorom(addr)
         if data[pos] != 0x00 or data[pos + 1] not in (0x16, 0x19) or data[pos + 2] != old:
@@ -1333,6 +1363,10 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
         if preview not in replacements:
             raise ValueError('preview song must be one of the replacements')
         write_preview(data, preview)
+    if wait_guard:
+        write(WAIT_GUARD, wait_guard_code(), empty=True)
+        write(WAIT_SITE, bytes([0x5C]) + WAIT_GUARD.to_bytes(3, 'little') + bytes([0xEA] * 3), WAIT_ORIGINAL)
+        write(LOOP_TABLE, wait_guard_table(data), empty=True)
     data[0x7FD7] = 0x0C
     result = set_checksum(bytes(data))
     return result, {'kind': 'dq4_sound_port', 'base_sha1': hashlib.sha1(base).hexdigest(),
@@ -1348,6 +1382,8 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
                     'inn_jingle': bool(inn_jingle),
                     'effect_remaps': {f'{a:02X}-{b:02X}': f'{c:02X}-{d:02X}' for (a, b), (c, d) in sorted((effect_remaps or {}).items())},
                     'effect_calls': {f'{a:06X}': f'{o:02X} -> {n:02X}' for a, (o, n) in sorted((effect_calls or {}).items())},
+                    'song_calls': {f'{a:06X}': f'{o:02X} -> {n:02X}' for a, (o, n) in sorted((song_calls or {}).items())},
+                    'wait_guard': bool(wait_guard),
                     'pinned_sequences': [f'{x:02X}' for x in pinned_sequences(result)],
                     'resident_samples': [f'{x:02X}' for x in resident_samples(result)],
                     'map_fades': map_fades, 'preview': preview, 'fast_receive': fast_receive, 'hold': hold, 'early_song': early_song, 'load_pump': load_pump,
