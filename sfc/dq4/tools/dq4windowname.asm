@@ -752,7 +752,8 @@ org $24A5E9
 !wq_off   = $3D64           ; 대기열에 다음으로 쓸 자리
 !wt_vis   = $3DAC           ; 슬롯마다 1바이트: bit0 = 마지막 창 타일맵 전송 때 보였거나 그 뒤에 그렸음, bit1~7 = 그린 문구 표식
 !wt_xfer  = $3DCA           ; 1바이트: 이번 NMI 에 게임이 보낼 창 타일맵 줄($0BEC 의 bit7·6), NMI 끝에서 WtVis 가 씀
-!wt_stale = $3DCB           ; 1바이트: 다음 NMI 게이트에서 메시지 창에 비치는 슬롯을 찾음(보임이 바뀌었거나 다 못 되돌림)
+!wt_stale = $3DCB           ; 1바이트: 메시지 창에 비치는 안 보이는 캔버스 슬롯 × 2 + 1(다음 NMI 게이트가 되돌림).
+                            ; $80 = NMI 끝에서 찾음(창 타일맵을 보냈거나 하나를 되돌린 뒤, 전투 중이면 필드로 돌아올 때까지 둠), 0 = 없음
 !wt_ecsave = $3DCC          ; 1바이트: 창 제목을 그리는 동안 맡겨 둔 $EC
 !wq_rd    = $3D5C           ; NMI 가 다음으로 보낼 항목 자리. VBlank 가 끝나 가면 남은 항목을 다음 NMI 로 넘긴다
 !wq_defer = $3D5A           ; 1바이트: bit7·6 = 다음 NMI 로 미룬 게임의 창 타일맵 전송 요청($0BEC),
@@ -3224,8 +3225,20 @@ WtVisTail:
     JSR WtVis
     PLY
     PLX
-    LDA #$01
+    LDA.l $7E0000|!wt_stale
+    BNE +
+    LDA #$80
     STA.l $7E0000|!wt_stale
++
+    ; 찾기는 VBlank 일이 끝난 뒤인 여기서 한다(게이트에서 슬롯을 훑으면 게임의 창 타일맵 2KB DMA 가 VBlank 를 넘김)
+    ; bit7 이면 찾는다. 이 바이트는 게임이 켤 때 지우지 않아, $80 밖의 큰 값으로 남아 있어도 찾기가 멈추지 않게
+    LDA.l $7E0000|!wt_stale
+    BPL +
+    PHX
+    PHY
+    JSR WtStaleFind
+    PLY
+    PLX
 +
     PLP
     LDA.b $1E
@@ -3236,9 +3249,10 @@ WtVisTail:
 ; X·Y 는 지킨다. 원래 받침은 A 만 바꿨고, 게임 NMI 는 들어올 때의 X·Y 를 이어 쓴다(창 타일맵을 보내는 NMI 마다 WtVis 가
 ; X·Y 를 바꾸자 메시지 창 아래쪽 줄이 화면으로 가지 않았다).
 WqNmiEntry:
-    LDA.l $7E0000|!wq_count
+    LDA.l $7E0000|!wt_stale
+    AND #$7F
+    ORA.l $7E0000|!wq_count
     ORA.l $7E0000|!wq_defer
-    ORA.l $7E0000|!wt_stale
     ORA.l $000BEC
     BEQ +
     PHX
@@ -3662,31 +3676,25 @@ WqRunBytes:
     RTS
 
 ; 필드에서 그림을 올린 캔버스 슬롯(!wt_dirty)의 창이 닫히면, 게임이 캔버스를 다시 보내기 전까지 메시지 창이 그 칸에 옛
-; 이름을 보인다(가게 팔기 목록을 닫으며 「어느 물건을 팔아 주시겠어요?」 창을 다시 그릴 때). WtVis 가 안 보인다고 잰
-; 슬롯 가운데 메시지 창이 그 칸(WtMsgCellF)을 가리키는 슬롯을 NMI 첫머리(게이트)에서 메시지 캔버스(7E:5800 평면 0,
-; 평면 1 = FF)로 되돌리고 비운다. 한 NMI 에 !wt_restore_max 개까지 되돌리고 남으면 다음 NMI 에 잇는다. WtVis 가 돈
-; 다음 NMI 에만 찾는다(!wt_stale). 보이는 슬롯은 건드리지 않는다(닫히는 목록의 남은 줄이 깨지지 않게). M = 8 로 들어옴
-!wt_restore_max = 3
-WtStaleGate:
-    PHP
+; 이름을 보인다(가게 팔기 목록을 닫으며 「어느 물건을 팔아 주시겠어요?」 창을 다시 그릴 때). NMI 끝(WtVisTail, VBlank 일이
+; 끝난 뒤)에서 WtVis 가 안 보인다고 잰 슬롯 가운데 메시지 창이 그 칸(WtMsgCellF)을 가리키는 것 하나를 !wt_stale 에 두고,
+; 다음 NMI 첫머리(게이트, WtStaleGate)가 메시지 캔버스(7E:5800 평면 0, 평면 1 = FF)로 되돌리고 비운다. 보이는 슬롯은 건드리지
+; 않는다(닫히는 목록의 남은 줄이 깨지지 않게). M = 8 로 들어옴
+WtStaleFind:
     PHB
     REP #$30
     PEA $7E7E
     PLB
     PLB
-    LDA.w !wt_stale
-    AND #$00FF
+    ; 전투에서는 $80 을 남겨 전투 뒤 필드로 돌아온 첫 NMI 끝에서 찾는다
+    LDA.w $1944
+    CMP #$8952
     BNE +
     JMP .out
 +
     SEP #$20
     STZ.w !wt_stale
     REP #$20
-    LDA.w $1944
-    CMP #$8952
-    BNE +
-    JMP .out
-+
     ; 1D0~1FF 슬롯(비트 12~14)은 캔버스 밖
     LDA.w !wt_dirty
     AND #$8FFF
@@ -3709,34 +3717,45 @@ WtStaleGate:
     BCC -
     JMP .out
 .msg
-    PEA $0000               ; 이번 NMI 에 되돌린 수
     LDX.w #!wt_nkana*2
 .slot
+    JSR WtStaleIs
+    BCC .next
+    TXA
+    INC
+    SEP #$20
+    STA.w !wt_stale
+    REP #$20
+    BRA .out
+.next
+    INX
+    INX
+    CPX.w #!wt_nslot*2
+    BCC .slot
+.out
+    PLB
+    RTS
+
+; 슬롯 X 가 그림을 올린 캔버스 안 슬롯이고, WtVis 가 안 보인다고 쟀고, 메시지 창이 그 칸을 가리키면 C = 1(M = 16, DB = 7E)
+WtStaleIs:
     LDA.l WtBitLo,X
     AND.w !wt_dirty
     BNE +
     LDA.l WtBitHi,X
     AND.w !wt_dirty+2
-    BNE +
-    JMP .next
+    BEQ .no
 +
     LDA.l WtClassF,X
     AND #$0020
-    BEQ +
-    JMP .next
-+
+    BNE .no
     LDA.w !wt_ages,X
-    BNE +
-    JMP .next
-+
+    BEQ .no
     TXA
     LSR
     TAY
     LDA.w !wt_vis,Y
     AND #$0001
-    BEQ +
-    JMP .next
-+
+    BNE .no
     PHX
     TXA
     ASL
@@ -3748,49 +3767,90 @@ WtStaleGate:
     LDA.w $0000,Y
     AND #$03FF
     CMP.l WtMsgCellF+2,X
-    BEQ .hit
+    BEQ .yes
     LDA.l WtMsgCellF+4,X
     TAY
     LDA.w $0000,Y
     AND #$03FF
     CMP.l WtMsgCellF+6,X
-    BEQ .hit
+    BEQ .yes
     LDA.l WtMsgCellF+8,X
     TAY
     LDA.w $0000,Y
     AND #$03FF
     CMP.l WtMsgCellF+10,X
-    BEQ .hit
+    BEQ .yes
     LDA.l WtMsgCellF+12,X
     TAY
     LDA.w $0000,Y
     AND #$03FF
     CMP.l WtMsgCellF+14,X
-    BEQ .hit
+    BEQ .yes
     PLX
-    BRA .next
-.hit
+.no
+    CLC
+    RTS
+.yes
     PLX
-    LDA $01,S
-    CMP.w #!wt_restore_max
-    BCC +
-    ; 다 못 되돌림: 다음 NMI 에 잇는다
+    SEC
+    RTS
+
+; 게이트(VBlank 첫머리, M = 8). !wt_stale 의 슬롯 하나를 되돌린다. 그사이 다시 그렸으면(보임 bit0) 두고, 게임이 캔버스를 보내
+; WqClean 이 이미 비웠으면(!wt_dirty 비트 꺼짐) 둔다. 되돌린 NMI 에는 게임의 창 타일맵 전송($0BEC)을 다음 NMI 로 미룬다:
+; 게이트 앞까지 게임 NMI 가 주사선 244 쯤을 쓰고, 되돌리기 뒤에 2KB 전송이 시작되면 VBlank(261)를 넘겨 창 아래쪽 줄이 빠진다.
+; 우리 대기열보다 먼저 보내므로 같은 슬롯에 새로 그린 그림이 뒤에 덮는다
+WtStaleGate:
+    PHP
+    PHB
+    REP #$30
+    PEA $7E7E
+    PLB
+    PLB
+    LDA.w !wt_stale
+    AND #$00FF
+    BEQ .out
+    BIT #$0080
+    BNE .out
+    DEC
+    TAX
     SEP #$20
-    INC.w !wt_stale
+    LDA #$80
+    STA.w !wt_stale
     REP #$20
-    BRA .done
-+
-    INC
-    STA $01,S
-    JSR WtRestoreSlot
-.next
-    INX
-    INX
+    ; 켤 때 남은 값이면 슬롯 번호가 아닐 수 있다: 캔버스 슬롯(짝수 × 2, 가나 항목 뒤)만
+    CPX.w #!wt_nkana*2
+    BCC .out
     CPX.w #!wt_nslot*2
-    BCS .done
-    JMP .slot
-.done
-    PLA
+    BCS .out
+    TXA
+    LSR
+    BCS .out
+    LDA.w $1944
+    CMP #$8952
+    BEQ .out
+    TXA
+    LSR
+    TAY
+    LDA.w !wt_vis,Y
+    AND #$0001
+    BNE .out
+    LDA.w !wt_ages,X
+    BEQ .out
+    LDA.l WtBitLo,X
+    AND.w !wt_dirty
+    BNE +
+    LDA.l WtBitHi,X
+    AND.w !wt_dirty+2
+    BEQ .out
++
+    JSR WtRestoreSlot
+    SEP #$20
+    LDA.l $000BEC
+    BEQ .out
+    ORA.w !wq_defer
+    STA.w !wq_defer
+    LDA #$00
+    STA.l $000BEC
 .out
     PLB
     PLP
