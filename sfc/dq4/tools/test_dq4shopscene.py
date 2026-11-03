@@ -1,5 +1,8 @@
-"""롬 없이: 가게 장면 검사의 입력 열(창 따라가기·커서 옮기기·누르지 않고 기다리기)과 판정, 장면 표."""
+"""롬 없이: 가게 장면 검사의 입력 열(창 따라가기·커서 옮기기·누르지 않고 기다리기)과 판정, 장면 표.
+롬이 있으면: 장면이 서는 카운터 앞 칸을 FC 맵에서 걸어 갈 수 있는지."""
+import sys
 import unittest
+from pathlib import Path
 
 import dq4shopscene as ss
 
@@ -191,6 +194,51 @@ class ScenesTest(unittest.TestCase):
         a = {'windows': [[1, '33']], 'end_frame': 10, 'wram_sha1': 'x'}
         self.assertTrue(ss.deterministic(a, dict(a)))
         self.assertFalse(ss.deterministic(a, {**a, 'end_frame': 11}))
+
+
+
+ROOT = Path(__file__).resolve().parents[3]
+
+
+@unittest.skipUnless((ROOT / 'rom' / 'dq4.nes').is_file() and (ROOT / 'rom' / 'dq5.sfc').is_file(),
+                     'local source ROMs not present')
+class ShopPlaceTest(unittest.TestCase):
+    def test_counter_fronts_are_where_fc_walks(self):
+        """카운터 앞 칸의 FC 블록은 맵 도착 자리에서 걸어서 닿고, 그 칸에서 카운터 쪽 한 블록은 카운터, 그 너머는
+        그 가게 주인이다(FC 처럼 카운터 너머로 말을 검)."""
+        sys.path[:0] = [str(ROOT / 'fc' / 'dq4' / 'tools')]
+        import dq4block
+        import dq4npcport
+        from dq4environmentmap import block_prop
+        from dq4environmentrom import COUNTER_PROPS
+        from dq4groupbuild import LINKS, fc_map
+        from kr_patch.fc import ines
+        prg = ines.prg((ROOT / 'rom' / 'dq4.nes').read_bytes())
+        _, _, report = dq4npcport.port(str(ROOT / 'rom' / 'dq5.sfc'), str(ROOT / 'rom' / 'dq4.nes'))
+        service = {0: 2, 1: 3, 2: 1}   # $0F20 → dq4npcport 시설 번호(1 무기·2 도구·3 방어구)
+        step = {'up': (0, -1), 'down': (0, 1), 'left': (-1, 0), 'right': (1, 0)}
+        for name, (warp, (x, y), kind, direction) in ss.SHOPS.items():
+            m = warp.split(',')[0]
+            group, number = (int(v, 16) for v in m.split('/'))
+            source = dq4block.Map(prg, *fc_map(prg, group, number))
+
+            def walkable(bx, by):
+                return 0 <= bx < source.w and 0 <= by < source.h and not block_prop(source, source.cell(bx, by) & 31) & 0x80
+            start = next(link['arrival'] for link in LINKS[group] if not link.get('map'))
+            seen, todo = {start}, [start]
+            while todo:
+                bx, by = todo.pop()
+                for dx, dy in step.values():
+                    if walkable(bx + dx, by + dy) and (bx + dx, by + dy) not in seen:
+                        seen.add((bx + dx, by + dy))
+                        todo.append((bx + dx, by + dy))
+            front = (x // 2, y // 2)
+            self.assertIn(front, seen, name)
+            dx, dy = step[direction]
+            counter = (front[0] + dx, front[1] + dy)
+            self.assertIn(block_prop(source, source.cell(*counter) & 31), COUNTER_PROPS, name)
+            keeper = (counter[0] + dx, counter[1] + dy)
+            self.assertIn(keeper, {(p['x'], p['y']) for p in report[m] if p['service'] == service[kind]}, name)
 
 
 if __name__ == '__main__':

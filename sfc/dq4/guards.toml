@@ -44,7 +44,7 @@ paths = [
   "sfc/dq4/tools/dq4ch1walkcheck.py",
   "sfc/dq4/tools/dq4prologuecheck.py",
 ]
-run = "uv run --locked python sfc/dq4/tools/dq4compatcheck.py probe --rom work/ch1/dq4-ch1-full.sfc --out work/compat-probe"
+run = "rm -rf work/compat-probe && uv run --locked python sfc/dq4/tools/dq4compatcheck.py probe --rom work/ch1/dq4-ch1-full.sfc --out work/compat-probe"
 needs = ["rom", "MESENCE", "LIBDIR"]
 
 [[check]]
@@ -63,7 +63,7 @@ paths = [
   "sfc/dq4/tools/dq4ch1walkcheck.py",
   "sfc/dq4/tools/dq4prologuecheck.py",
 ]
-run = "uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4compatcheck.py walk --rom work/ch1/dq4-ch1-full.sfc --out work/compat-walk"
+run = "uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/compat-walk && uv run --locked python sfc/dq4/tools/dq4compatcheck.py walk --rom work/ch1/dq4-ch1-full.sfc --out work/compat-walk"
 needs = ["rom", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X)"]
 
 [[check]]
@@ -79,7 +79,7 @@ paths = [
     "sfc/dq4/tools/lua/dq4heroblock.lua",
     "sfc/dq4/tools/lua/dq4walkstate.lua",
 ]
-run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4heroblockcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/heroblock --jobs 6"
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/heroblock && uv run --locked python sfc/dq4/tools/dq4heroblockcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/heroblock --jobs 6"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI"]
 
 [[check]]
@@ -100,7 +100,7 @@ paths = [
   "sfc/dq4/tools/dq4prologuecheck.py",
   "sfc/dq5/tools/dq5sram.py",
 ]
-run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4savefixture.py check --rom work/ch1/dq4-ch1-full.sfc --out work/savefixture"
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/savefixture && uv run --locked python sfc/dq4/tools/dq4savefixture.py check --rom work/ch1/dq4-ch1-full.sfc --out work/savefixture"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
 
 [[check]]
@@ -124,7 +124,7 @@ paths = [
   "sfc/dq4/tools/dq4fieldmathcheck.py",
   "sfc/dq4/tools/lua/dq4fieldmath.lua",
 ]
-run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4fieldmathcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/fieldmath"
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/fieldmath && uv run --locked python sfc/dq4/tools/dq4fieldmathcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/fieldmath"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
 
 [[check]]
@@ -192,7 +192,7 @@ paths = [
   "sfc/dq5/tools/w65816.py",
   "tools/headless_slots.py",
 ]
-run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4shopscene.py --rom work/ch1/dq4-ch1-full.sfc --out work/shopscene --jobs 4"
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/shopscene && uv run --locked python sfc/dq4/tools/dq4shopscene.py --rom work/ch1/dq4-ch1-full.sfc --out work/shopscene --jobs 4"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
 
 [[check]]
@@ -230,7 +230,7 @@ paths = [
   "sfc/dq5/tools/dq5sram.py",
   "fc/dq4/tools/dq4shop.py",
 ]
-run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4townscene.py check --rom work/ch1/dq4-ch1-full.sfc --out work/townscene --jobs 4 && uv run --locked python sfc/dq4/tools/dq4townscene.py daynight --rom work/ch1/dq4-ch1-full.sfc --out work/townnight --jobs 4"
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/townscene && uv run --locked python sfc/dq4/tools/dq4townscene.py check --rom work/ch1/dq4-ch1-full.sfc --out work/townscene --jobs 4 && rm -rf work/townnight && uv run --locked python sfc/dq4/tools/dq4townscene.py daynight --rom work/ch1/dq4-ch1-full.sfc --out work/townnight --jobs 4"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states), 원본 rom/dq5.sfc(시각 색 기준)"]
 
 [[check]]
@@ -398,7 +398,7 @@ paths = [
   "sfc/dq4/tools/dq4build.py",
   "sfc/dq5/tools/dq5exitcheck.py",
 ]
-run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4sfxscene.py --rom work/ch1/dq4-ch1-full.sfc --out work/sfxscene --jobs 4"
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/sfxscene && uv run --locked python sfc/dq4/tools/dq4sfxscene.py --rom work/ch1/dq4-ch1-full.sfc --out work/sfxscene --jobs 4"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
 
 [[check]]
@@ -425,7 +425,7 @@ paths = [
   "sfc/dq4/tools/dq4cores.py",
   "sfc/dq5/tools/dq5sram.py",
 ]
-run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4titlescene.py --rom work/ch1/dq4-ch1-full.sfc --out work/titlescene"
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/titlescene && uv run --locked python sfc/dq4/tools/dq4titlescene.py --rom work/ch1/dq4-ch1-full.sfc --out work/titlescene"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
 
 [[check]]
@@ -558,6 +558,37 @@ run = "uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4e
 needs = ["rom"]
 
 [[check]]
+name = "dq4-map-people-rom-tests"
+why = "롬이 있어야 도는 단위 테스트 11개: 들어설 때 숨는 FC 인물(엔도르 투기장 관중석 등)을 옮기지 않고 그 맵을 이벤트가 찾지 않으며, 누운 인물마다 발치·머리맡 옆에 말을 걸 빈 칸이 있고 발치 훅이 FC 발치 칸만 더하고 1장 빌드도 그 훅을 얹으며, 가게 장면의 카운터 앞 칸이 FC 에서 걸어서 닿고 카운터 너머가 그 가게 주인이어야 한다. 롬이 없어 건너뛰거나 테스트가 빠지면 ok 수가 모자라 실패한다"
+paths = ["sfc/dq4/tools/dq4npcport.py", "sfc/dq4/tools/dq4npccheck.py", "sfc/dq4/tools/test_dq4npcport.py",
+         "sfc/dq4/tools/dq4shopscene.py", "sfc/dq4/tools/test_dq4shopscene.py", "sfc/dq4/tools/dq4groupbuild.py",
+         "sfc/dq4/tools/dq4sleepertalk.py", "sfc/dq4/tools/test_dq4sleepertalk.py",
+         "sfc/dq4/tools/dq4ch1event.py", "sfc/dq4/tools/dq4ch2event.py", "sfc/dq4/tools/dq4chapter1.py",
+         "fc/dq4/tools/dq4npcblock.py", "fc/dq4/tools/dq4talk.py", "fc/dq4/tools/dq4map.py"]
+run = "test $( (uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4npcport.py -k HiddenPeopleTest -k SleeperTalkTest -v; uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4shopscene.py -k ShopPlaceTest -v; uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4sleepertalk.py -v) 2>&1 | tee work/map-people-rom-tests.log | grep -c ' \\.\\.\\. ok$') -eq 11"
+needs = ["rom"]
+
+[[check]]
+name = "dq4-npc-talk"
+why = "그룹 롬의 모든 인물 표·말 걸기·가게 장면이 빌드가 쓴 값과 같아야 한다. 누운 인물은 머리맡 블록 옆과 FC 처럼 발치 블록 옆(-foot 장면, dq4sleepertalk 훅) 양쪽에서 말이 걸려야 한다"
+paths = ["sfc/dq4/tools/dq4npccheck.py", "sfc/dq4/tools/dq4npcport.py", "sfc/dq4/tools/dq4groupbuild.py",
+         "sfc/dq4/tools/dq4sleepertalk.py",
+         "sfc/dq4/tools/dq4freshstate.py", "sfc/dq4/tools/lua/dq4shipstate.lua", "fc/dq4/tools/dq4npcblock.py",
+         "sfc/dq5/tools/lua/dq5npcrecordcheck.lua", "sfc/dq5/tools/lua/dq5textgrowcheck.lua",
+         "sfc/dq5/tools/lua/dq5progresscheck.lua", "sfc/dq5/tools/lua/dq5warp.lua"]
+run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/guard-npc-talk && uv run --locked python sfc/dq4/tools/dq4npccheck.py --build work/dq4-groups --out work/guard-npc-talk --jobs 3"
+needs = ["rom", "MESENCE", "LIBDIR", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+
+[[check]]
+name = "dq4-group-links"
+why = "그룹 롬의 FC 계단·출구·필드 입구가 연결된 맵·칸으로 가야 한다. 들어설 때 숨는 FC 인물을 옮기면 걸어 다니다 계단을 막는다(엔도르 투기장 40/07 계단)"
+paths = ["sfc/dq4/tools/dq4groupcheck.py", "sfc/dq4/tools/dq4groupbuild.py", "sfc/dq4/tools/dq4npcport.py",
+         "sfc/dq4/tools/dq4freshstate.py", "sfc/dq4/tools/lua/dq4shipstate.lua", "fc/dq4/tools/dq4npcblock.py",
+         "sfc/dq5/tools/lua/dq5warp.lua"]
+run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/guard-group-links && uv run --locked python sfc/dq4/tools/dq4groupcheck.py --rom work/dq4-groups/groups.sfc --out work/guard-group-links --jobs 3"
+needs = ["rom", "MESENCE", "LIBDIR", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+
+[[check]]
 name = "dq4-environment-rom"
 why = "바꾼 맵을 그룹 롬에서 다시 그린 그림이 오프라인 그림과 픽셀까지 같아야 한다(물체·통행·출구·물 슬롯, 성문을 연 채 지나가기, 원래 맵 셀 버퍼). 분수는 물과 같은 번호의 그림으로 함께 바뀌므로 기대 그림도 두 그림을 함께 바꾼다"
 paths = ["sfc/dq4/tools/dq4environmentromcheck.py", "sfc/dq4/tools/dq4environmentrom.py", "sfc/dq4/tools/dq4environmentmap.py",
@@ -596,4 +627,15 @@ paths = ["sfc/dq4/tools/dq4bg3slot.py", "sfc/dq4/tools/dq4bg3slotcheck.py", "sfc
          "sfc/dq4/tools/dq4windowtext.py", "sfc/dq4/tools/dq4freshstate.py", "sfc/dq4/tools/lua/dq4shipstate.lua",
          "sfc/dq4/tools/dq4build.py", "sfc/dq5/tools/lua/dq5warp.lua"]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/fresh-bg3slot && uv run --locked python sfc/dq4/tools/dq4bg3slotcheck.py --rom work/ch1/menu.sfc --old work/ch1/overture.sfc --out work/fresh-bg3slot --maps 00/0A,01/00,01/01,02/00,03/00,05/00,0A/00,17/00,19/00,19/02,04/0B,33/01,1E/00,20/06,32/00"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+
+[[check]]
+name = "dq4-sleeper-talk"
+why = "누운 인물에게 침대 발치(FC 칸)와 머리맡 양쪽에서 말이 걸려야 한다(사용자 결정, dq4sleepertalk 훅 05:84FE → 05:FEF0). 훅 패치는 그룹 빌드가 쓰고 1장 롬은 dq4chapter1.GROUP_PATCHES 로만 얹으므로 1장 배포 롬과 그룹 롬 둘 다 본다"
+paths = ["sfc/dq4/tools/dq4sleepercheck.py", "sfc/dq4/tools/dq4sleepertalk.py", "sfc/dq4/tools/dq4npccheck.py",
+         "sfc/dq4/tools/dq4npcport.py", "sfc/dq4/tools/dq4groupbuild.py", "sfc/dq4/tools/dq4chapter1.py",
+         "sfc/dq4/tools/dq4chapterbox.py", "sfc/dq4/tools/dq4build.py", "sfc/dq4/tools/dq4freshstate.py",
+         "sfc/dq5/tools/lua/dq5npcrecordcheck.lua",
+         "sfc/dq5/tools/lua/dq5textgrowcheck.lua", "sfc/dq5/tools/lua/dq5warp.lua"]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/sleepercheck-ch1 work/sleepercheck-groups && uv run --locked python sfc/dq4/tools/dq4sleepercheck.py --rom work/ch1/dq4-ch1-full.sfc --build work/dq4-groups --chapter1 --out work/sleepercheck-ch1 && uv run --locked python sfc/dq4/tools/dq4sleepercheck.py --rom work/dq4-groups/groups.sfc --build work/dq4-groups --out work/sleepercheck-groups"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]

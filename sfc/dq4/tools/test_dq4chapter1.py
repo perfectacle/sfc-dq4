@@ -250,12 +250,12 @@ class BuildFlowTests(unittest.TestCase):
             'entrance-hook.dq5patch.json', 'field-gfx.dq5patch.json', 'field-blocks.dq5patch.json',
             'field.dq5patch.json', 'talk.dq5patch.json', 'travel.dq5patch.json', 'names.dq5patch.json',
             'companion-names.dq5patch.json', 'person-names.dq5patch.json', 'zones.dq5patch.json',
-            'grids.dq5patch.json', 'rates.dq5patch.json', 'chests.dq5patch.json',
+            'grids.dq5patch.json', 'rates.dq5patch.json', 'sleeper-talk.dq5patch.json', 'chests.dq5patch.json',
             'newmap-1.dq5patch.json', 'npc.dq5patch.json', 'boss.dq5patch.json', 'boss-monsters.dq5patch.json',
             'learn.dq5patch.json', 'growth.dq5patch.json'])
         self.assertEqual(self.applied[0].parent.name, 'env')
         # 그룹 빌드 롬과 견줄 때는 그룹 빌드가 낸 패치만 넘긴다(인물·보스 패치는 그룹 빌드 롬에 없다)
-        self.assertEqual([p.name for p in self.verify.call_args.args[2]], names[:22])
+        self.assertEqual([p.name for p in self.verify.call_args.args[2]], names[:names.index('newmap-1.dq5patch.json') + 1])
 
     def test_side_documents_feed_the_tools_that_write_the_applied_patches(self):
         _, calls, _ = self.run_build(prologue=False)

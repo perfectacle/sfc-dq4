@@ -841,6 +841,10 @@ def _build(pool, dq5, dq4, out, with_people):
                    *dq4dungeonrate.writes(DUNGEON_RATE_AT, prg, placement(prg), dq5_zone, fc_zones),
                    *dq4balance.writes()]}))
 
+    import dq4sleepertalk
+    manifests.append(_save(out / "sleeper-talk.dq5patch.json", {
+        "format": "dq5patch/1", "name": "dq4-sleeper-talk", "writes": dq4sleepertalk.writes()}))
+
     import dq4chestport  # imports this module
     place, chest_report = dq4chestport.port(dq5, dq4)
     _save(out / "chest-report.json", chest_report)

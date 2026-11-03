@@ -32,6 +32,7 @@ from dq5hangul import MESSAGES  # noqa: E402
 from dq4environmentrom import GROUPS  # noqa: E402
 from dq4environmentmap import edit_cells, sheet_art  # noqa: E402
 import dq4block  # noqa: E402
+import dq4npcblock  # noqa: E402
 from dq4groupbuild import cell, chapter, fc_map, has_people  # noqa: E402
 import dq4shopport  # noqa: E402
 import dq4prologue  # noqa: E402
@@ -185,12 +186,30 @@ def bed_cells(prg, fc_group, number):
             if name(x, y) == "bed_left" and name(x + 1, y) == "bed_right"}
 
 
+def hidden_people(prg):
+    """(DQ5 map, night, FC talk, FC x, FC y) of every FC record a ported map leaves out because FC hides it on entry."""
+    out = []
+    for name, (group, number) in sorted(GROUPS.items(), key=lambda kv: kv[1]):
+        fc_group, fc_number = fc_map(prg, group, number)
+        if not has_people(fc_group):
+            continue
+        for night in (False, True):
+            for rec in dq4talk.npc_list(prg, fc_group, fc_number, night):
+                if dq4npcblock.hidden_on_entry(rec, night):
+                    out.append((f"{group:02X}/{number:02X}", night, dq4talk.talk_id(rec, night), *dq4talk.pos(rec, night)))
+    return out
+
+
 def fc_people(prg, fc_group, number, night, flags=None):
     """FC person records of a map at that time: FC cell, facing, step interval, picture, messages. With flags
     the list is the one FC picks for those event flags (dq4map.place_records)."""
     state = fc_state(night, flags, chapter(fc_group))
     out = []
     for rec in dq4talk.npc_list(prg, fc_group, number, night, ram=state.ram if flags else None):
+        if dq4npcblock.hidden_on_entry(rec, night):
+            # FC hides it before it is ever drawn. Ported, it would be seen, and a wanderer could stand on a stair.
+            # An event that shows it again has to bring it back with its own list (test_dq4npcport HiddenPeopleTest).
+            continue
         x, y = dq4talk.pos(rec, night)
         step = rec[2] & 0x0F if night else rec[2] >> 4
         # Facing comes from the picture's byte: byte 3, or byte 7 at night when F bit0 is off (1C:$99B3).

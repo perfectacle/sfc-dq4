@@ -56,13 +56,14 @@ PICK_LIMIT = 14        # 커서를 옮기는 최대 횟수
 SETTLE = 8             # 창에 닿은 뒤 다음 입력까지
 QUIET = 400            # 팔기에서 물건을 고른 뒤 누르지 않고 기다리는 프레임: ▼ 가 없으면 이 안에 예/아니요가 뜸
 
-# 가게마다 (순간이동 자리, 카운터 앞 칸, 가게 종류 $0F20). 같은 맵(37/00) 안의 순간이동은 그 칸이 아니라 근처에
-# 세운다(도구점 (18,49) 은 FC 로 걸어서는 못 가는 가게 방 안 주인 바로 아래, 방어구점 (34,12) 두 칸 아래). 위를 짧게
-# 한 번 누르면 도구점은 주인에 막혀 돌아서기만 하고 방어구점은 한 칸 올라선다. 더 누르면 방어구점은 카운터 바로 아래
-# (34,10)까지 올라서므로(그림이 두 셀 위까지 닿아 카운터에 겹치지만 FC·DQ5 와 같은 바닥 칸) 한 번만
-SHOPS = {'item': ('37/00,18,48', (18, 49), 0), 'armor': ('37/00,34,8', (34, 11), 1)}
+# 가게마다 (순간이동 자리, 카운터 앞 칸, 가게 종류 $0F20, 카운터 쪽 방향). 같은 맵(37/00) 안의 순간이동은 그 칸이
+# 아니라 근처에 세운다. 도구점은 FC 처럼 카운터 동쪽 바깥에서 왼쪽을 보고 카운터 너머 주인에게 말을 건다(주인이 선
+# 가게 방은 사방이 막혀 걸어 들어갈 수 없다). 카운터 쪽을 짧게 한 번 누르면 도구점은 카운터에 막혀 돌아서기만 하고
+# 방어구점은 한 칸 올라선다. 더 누르면 방어구점은 카운터 바로 아래 (34,10)까지 올라서므로(그림이 두 셀 위까지 닿아
+# 카운터에 겹치지만 FC·DQ5 와 같은 바닥 칸) 한 번만
+SHOPS = {'item': ('37/00,22,46', (22, 47), 0, 'left'), 'armor': ('37/00,34,8', (34, 11), 1, 'up')}
 X, Y = 0x7E3020, 0x7E3080
-FACE = (8, 24)         # 위를 누르는 프레임(돌아서려면 6프레임 넘게, 한 걸음보다 짧게), 걸음이 끝나기를 기다리는 프레임
+FACE = (8, 24)         # 카운터 쪽을 누르는 프레임(돌아서려면 6프레임 넘게, 한 걸음보다 짧게), 걸음이 끝나기를 기다리는 프레임
 BASE_ITEMS = (0x42, 0x00)   # 새 게임 밑판: 천 옷·노송나무 막대, 둘 다 장비(비트 0003)
 HERB, ANTIDOTE, CHAIN_MAIL, WOOD_HAT = 0xA1, 0xA2, 0x4D, 0x87
 
@@ -216,10 +217,10 @@ class Driver:
             if self.shot:
                 self.shot(len(self.path), v)
 
-    def face_up(self, x, y):
-        """위를 한 번 짧게 눌러(한 걸음보다 짧게) 카운터를 보게 하고 (x, y) 에 섰는지 본다."""
+    def face(self, direction, x, y):
+        """direction 을 한 번 짧게 눌러(한 걸음보다 짧게) 카운터를 보게 하고 (x, y) 에 섰는지 본다."""
         for _ in range(FACE[0]):
-            self.step({'up'})
+            self.step({direction})
         self.idle(FACE[1])
         if (self.rd(X), self.rd(Y)) != (x, y):
             raise Fail(f'카운터 앞 ({x},{y}) 이 아니라 ({self.rd(X)},{self.rd(Y)}) 에 섬')
@@ -370,7 +371,7 @@ def run_scene(core_name, rom, scene_name, out, seed=0):
         drv = Driver(walker.step, core.rd, lambda: core.n, shot)
         problems = []
         try:
-            drv.face_up(*SHOPS[scene.shop][1])
+            drv.face(SHOPS[scene.shop][3], *SHOPS[scene.shop][1])
             drv.run(scene.steps, lambda a, v: core.poke([(a, v)]))
             drv.idle(STABLE)
         except Fail as e:

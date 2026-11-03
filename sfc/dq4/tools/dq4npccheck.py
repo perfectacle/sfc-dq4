@@ -97,7 +97,7 @@ def codes_match(rows, message, want):
     return row is not None and row[:min(len(want), 64)] == want[:64]
 
 
-def run(mesence, rom, state, out, name, libdir, to, test, night, shop=False, ret=None):
+def run(mesence, rom, state, out, name, libdir, to, test, night, shop=False, ret=None, sets=None):
     dest = out / name
     dest.mkdir(parents=True)
     group, number = to.split(",")[0].split("/")
@@ -109,6 +109,8 @@ def run(mesence, rom, state, out, name, libdir, to, test, night, shop=False, ret
                WARPEXIT=f"{warp_exit(rom):X}", DP86OK=dp86_allowed(rom))
     if night:
         env["POKE"] = NIGHT_POKE
+    if sets:
+        env["SET"] = sets
     if shop:
         env.update(MODE="shop", DRIVER=str(DQ5_TOOLS / "lua" / "dq5warp.lua"))
     elif ret is not None:
@@ -163,6 +165,14 @@ def talk_side(source, x, y, occupied):
                 and walkable(source, nx + dx, ny + dy) and (nx + dx, ny + dy) not in occupied:
             return nx + dx, ny + dy, d
     return None
+
+
+def talk_cell(person):
+    """FC cell the hero faces to talk to a person. dq4npcport lays a sleeper half a block right and up (DQ5 cell
+    (2x+1, 2y) instead of cell(x, y) = (2x, 2y+1)), so beside the bed's right block (the head) DQ5 answers as it does
+    for its own sleepers; dq4sleepertalk makes it answer beside the left block (the foot, the FC cell) too."""
+    x, y = person["dq5"]["x"], person["dq5"]["y"]
+    return (x + 1) // 2, y // 2
 
 
 # FC people placed where nobody can reach them: (FC group, FC map, x, y). テンペ's three stand on wall blocks, cut off
@@ -249,8 +259,9 @@ def main():
             # People of the other time are not there. A walking person's start cell is the last resort: the hero
             # warps onto it before that person walks off.
             now = [q for q in persons if q["night"] == p["night"]]
-            side = talk_side(source, p["x"], p["y"], {(q["x"], q["y"]) for q in now}) or \
-                talk_side(source, p["x"], p["y"], {(q["x"], q["y"]) for q in now if not q["interval"]})
+            tx, ty = talk_cell(p)
+            side = talk_side(source, tx, ty, {(q["x"], q["y"]) for q in now}) or \
+                talk_side(source, tx, ty, {(q["x"], q["y"]) for q in now if not q["interval"]})
             if side is None and (*fc, p["x"], p["y"]) in STAGED:
                 jobs.append(("staged", f"talk-{m.replace('/', '')}-{i}", m, None, None, p["night"], None))
                 continue
@@ -273,8 +284,18 @@ def main():
                              p["night"], (first, inns.get(m) if service == INN else None)))
             else:
                 message = events.get((m, p["talk"], p["night"]), events.get((m, p["talk"], None)))
-                jobs.append(("talk", f"talk-{m.replace('/', '')}-{i}", m, to, d, p["night"],
-                             (int(p["message"], 16) if message is None else message, None)))
+                want = (int(p["message"], 16) if message is None else message, None)
+                jobs.append(("talk", f"talk-{m.replace('/', '')}-{i}", m, to, d, p["night"], want))
+                if (tx, ty) != (p["x"], p["y"]):
+                    # A sleeper: also from beside the foot of the bed, where FC talks to it.
+                    foot = talk_side(source, p["x"], p["y"], {(q["x"], q["y"]) for q in now})
+                    if foot is None:
+                        jobs.append(("unreachable", f"talk-{m.replace('/', '')}-{i}-foot", m, None, None,
+                                     p["night"], None))
+                    else:
+                        fx, fy, fd = foot
+                        jobs.append(("talk", f"talk-{m.replace('/', '')}-{i}-foot", m,
+                                     f"{m},{','.join(map(str, cell(fx, fy)))}", fd, p["night"], want))
 
     def scene(kind, name, to, test, night):
         if kind in ("unreachable", "closed", "staged"):

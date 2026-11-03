@@ -149,5 +149,108 @@ class PortTest(unittest.TestCase):
         self.assertTrue(report and all(not people for people in report.values()))
 
 
+@unittest.skipUnless(DQ4.is_file() and DQ5.is_file(), "local source ROMs not present")
+class HiddenPeopleTest(unittest.TestCase):
+    def test_people_fc_hides_on_entry_are_not_ported(self):
+        # エンドール's colosseum stands (FC 04/07): six records hide at once and stay hidden. Ported as wanderers
+        # they would walk onto the stair (22,11), the only way down to 04/0E.
+        _, _, report = port.port(str(DQ5), str(DQ4))
+        stands = {(0x15, 0x09), (0x16, 0x09), (0x17, 0x0A), (0x17, 0x0B), (0x16, 0x0C), (0x15, 0x0C)}
+        self.assertFalse(stands & {(p["x"], p["y"]) for p in report["40/07"] if not p["night"]})
+        self.assertTrue(report["40/07"])
+
+    def test_no_ported_event_looks_for_a_left_out_person(self):
+        # FC shows such a person only from event code (it clears $7020 bit7 of the slot); ported, it is not in the
+        # DQ5 list at all. An event port that touches its map must first bring it back as a list of its own.
+        import re
+        from kr_patch.fc import ines
+        left_out = port.hidden_people(ines.prg(DQ4.read_bytes()))
+        self.assertEqual({m for m, *_ in left_out}, {"3D/04", "40/07", "41/03"})
+        tools = Path(__file__).resolve().parent
+        touched = set()
+        for name in ("dq4ch1event.py", "dq4ch2event.py", "dq4chapter1.py"):
+            touched |= set(re.findall(r"['\"]([0-9A-F]{2}/[0-9A-F]{2})['\"]", (tools / name).read_text(encoding="utf-8")))
+        self.assertFalse(touched & {m for m, *_ in left_out}, sorted(touched & {m for m, *_ in left_out}))
+
+
+@unittest.skipUnless(DQ4.is_file() and DQ5.is_file(), "local source ROMs not present")
+class SleeperTalkTest(unittest.TestCase):
+    """A sleeper lies half a block right and up of its FC cell. DQ5 answers beside the bed's right block (the head)
+    and, with dq4sleepertalk, beside the left block (the foot) where FC talks to it. Every sleeper must have a free
+    walkable FC cell beside each, and dq4npccheck must talk from both."""
+
+    def test_every_sleeper_can_be_talked_to(self):
+        import dq4block
+        import dq4npccheck
+        from dq4groupbuild import cell, fc_map
+        from kr_patch.fc import ines
+        prg = ines.prg(DQ4.read_bytes())
+        _, _, report = port.port(str(DQ5), str(DQ4))
+        sleepers = 0
+        for m, people in report.items():
+            if "/" not in m:
+                continue
+            group, number = (int(v, 16) for v in m.split("/"))
+            for p in people:
+                d = p["dq5"]
+                if (d["x"], d["y"]) == cell(p["x"], p["y"]):
+                    self.assertEqual(dq4npccheck.talk_cell(p), (p["x"], p["y"]))
+                    continue
+                sleepers += 1
+                self.assertEqual((d["x"], d["y"]), (2 * p["x"] + 1, 2 * p["y"]), (m, p))
+                self.assertEqual(dq4npccheck.talk_cell(p), (p["x"] + 1, p["y"]))
+                source = dq4block.Map(prg, *fc_map(prg, group, number))
+                now = {(q["x"], q["y"]) for q in people if q["night"] == p["night"]}
+                self.assertIsNotNone(dq4npccheck.talk_side(source, p["x"] + 1, p["y"], now), (m, p))
+                self.assertIsNotNone(dq4npccheck.talk_side(source, p["x"], p["y"], now), (m, p))
+        self.assertGreater(sleepers, 0)
+
+
+    def test_the_hook_adds_exactly_the_fc_foot_sides(self):
+        # Over every ported map, every free walkable hero cell and facing: the cells where the hook makes 05:84FE
+        # find a sleeper (dq4sleepertalk.lying_target, a model of the code) are the FC cells beside the foot,
+        # facing it, and each finds the sleeper of that bed. dq4npccheck's -foot scenes check it in the ROM.
+        import dq4block
+        import dq4npccheck
+        import dq4sleepertalk
+        from dq4groupbuild import cell, fc_map
+        from kr_patch.fc import ines
+        prg = ines.prg(DQ4.read_bytes())
+        _, _, report = port.port(str(DQ5), str(DQ4))
+        step = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
+        sleepers = 0
+        for m, people in report.items():
+            if "/" not in m:
+                continue
+            group, number = (int(v, 16) for v in m.split("/"))
+            source = None
+            for night in (False, True):
+                now = [p for p in people if p["night"] == night]
+                lying = {(p["dq5"]["x"], p["dq5"]["y"]): p for p in now
+                         if (p["dq5"]["x"], p["dq5"]["y"]) != cell(p["x"], p["y"])}
+                if not lying:
+                    continue
+                sleepers += len(lying)
+                source = source or dq4block.Map(prg, *fc_map(prg, group, number))
+                taken = {(p["x"], p["y"]) for p in now}
+                gained, want = set(), set()
+                for fy in range(source.h):
+                    for fx in range(source.w):
+                        if not dq4npccheck.walkable(source, fx, fy) or (fx, fy) in taken:
+                            continue
+                        for d, (dx, dy) in step.items():
+                            before = dq4sleepertalk.lying_target(*cell(fx, fy), d, lying, hooked=False)
+                            after = dq4sleepertalk.lying_target(*cell(fx, fy), d, lying)
+                            foot = next((c for c, p in lying.items() if (p["x"], p["y"]) == (fx + dx, fy + dy)), None)
+                            if foot is not None:
+                                want.add((fx, fy, d, foot))
+                            if before is not None:
+                                self.assertEqual(after, before, (m, fx, fy, d))
+                            elif after is not None:
+                                gained.add((fx, fy, d, after))
+                self.assertEqual(gained, want, (m, night))
+        self.assertGreater(sleepers, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
