@@ -8,8 +8,9 @@
 -- 기계 전체를 덮어 결과에 남지 않는다. 다만 그 전에 상태를 만든 적이 있으면(만든 상태를 다시 불러오는 장면) 밑값을
 -- 두지 않는다. 장면이 카운터를 지우면 지우기 전 값을 쌓아 둔다.
 --
--- emu.stop 뒤에도 한두 프레임이 더 돌 수 있어(그 사이 스크립트가 기록을 더 쓴다) 멈춘 뒤 프레임마다 다시 쓴다.
--- 이 머리말의 endFrame 콜백이 장면 스크립트 것보다 먼저 걸리므로, 그 프레임에 스크립트가 쓰는 기록보다 뒤의 읽기는 없다.
+-- emu.stop 뒤에도 프레임이 더 도는데, 몇 프레임 더 도는지는 실행마다 다르다(머신이 바쁘면 더 돈다). 그 사이 장면
+-- 콜백이 기록을 더 쓰면 같은 장면의 출력이 실행마다 달라진다. 그래서 emu.stop 을 부른 뒤로는 장면 콜백을 부르지 않고,
+-- 읽은 집합은 emu.stop 때 한 번 쓴다. 출력은 모두 그 앞에 생긴 것이라 그 뒤의 읽기는 결과에 닿지 않는다.
 -- testrunner 에서는 scriptEnded 가 오지 않아 그것에 기대지 않는다.
 local out = READSET_OUT or os.getenv("READSET_OUT")
 if not out then return end
@@ -42,8 +43,13 @@ local function pass(ok, ...)
   return ...
 end
 
+local stopped = false     -- emu.stop 을 불렀는가. 그 뒤로는 장면 콜백을 부르지 않는다
+
 local function guarded(fn)
-  return function(...) return pass(pcall(fn, ...)) end
+  return function(...)
+    if stopped then return end
+    return pass(pcall(fn, ...))
+  end
 end
 
 -- MesenCE 는 지울 콜백을 add 가 돌려준 번호로 찾는다(함수를 넘기면 머리말이 없어도 지워지지 않는다). 그래서 감싼
@@ -165,11 +171,11 @@ if hdma then
   end, emu.callbackType.write, 0x420C, 0x420C)
 end
 
-local stopped = false
 local stopOrig = emu.stop
 emu.stop = function(...)
-  stopped = true
-  dump()
+  if not stopped then
+    stopped = true
+    dump()
+  end
   return stopOrig(...)
 end
-emu.addEventCallback(function() if stopped then dump() end end, emu.eventType.endFrame)

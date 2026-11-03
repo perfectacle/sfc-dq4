@@ -239,6 +239,7 @@ class FakeMesen:
         self.no_done = False
         self.timeout = False
         self.during = None
+        self.watchdog = 0
 
     def __call__(self, mesence, rom, script, folder=None, tag='probe', extra=(), env=None, stdout=None, **kw):
         self.calls += 1
@@ -253,6 +254,10 @@ class FakeMesen:
         Path(folder, 'mesen.log').write_text(f'loaded {Path(rom).name}\n')
         if self.lua_error:
             Path(env['READSET_OUT'] + '.err').write_text('scene.lua:3: boom\n')
+        if self.watchdog:
+            self.watchdog -= 1
+            Path(env['READSET_OUT'] + '.err').write_text('scene.lua:9: Maximum execution time (1 seconds) exceeded.\n')
+            Path(folder, 'half.bin').write_bytes(b'cut')
         if self.shot:
             Path(folder, 's00300.png').write_bytes(bytes([self.calls]))
         if self.timeout:
@@ -347,6 +352,19 @@ class RunTests(unittest.TestCase):
         self.assertNotIn('Lua 오류', err.getvalue())
         self.fake.timeout = False
         self.assertFalse(self.go()[0]['cached'])
+
+    def test_callback_watchdog_is_retried(self):
+        """머신이 바빠 콜백 시간 제한에 걸린 실행은 출력을 지우고 다시 돌린다. 끝내 걸리면 넣지 않는다."""
+        self.fake.watchdog = 1
+        with contextlib.redirect_stderr(io.StringIO()):
+            info, dest = self.go()
+        self.assertEqual((info['returncode'], self.fake.calls), (0, 2))
+        self.assertFalse((dest / 'half.bin').exists())
+        self.assertTrue(self.go()[0]['cached'])
+        self.fake.watchdog = rs.WATCHDOG_TRIES
+        with contextlib.redirect_stderr(io.StringIO()), mock.patch.dict(os.environ, {'DQ4_READSET': 'off'}):
+            info, _ = self.go()
+        self.assertEqual(info['returncode'], rs.LUA_WATCHDOG)
 
     def test_runs_the_rom_bytes_the_key_was_made_from(self):
         """키를 만든 뒤 실행 전에 롬 파일이 바뀌어도, 실행은 키를 만든 바이트의 사본으로 돈다."""
@@ -535,12 +553,15 @@ class RuleTests(unittest.TestCase):
         self.assertEqual(rs.mismatch(want, only_shots, {'returncode': 0, 'ranges': rs.pack([(0, 1)])}, 0, [(0, 1)]), '')
 
     def test_prelude_wraps_callbacks_before_its_own(self):
-        """소스 모양 확인: 감싸기를 머리말 자신의 콜백(HDMA·endFrame)보다 먼저 건다. 반환값은 개수까지 그대로 넘긴다."""
+        """소스 모양 확인: 감싸기를 머리말 자신의 콜백(HDMA)보다 먼저 건다. 반환값은 개수까지 그대로 넘긴다."""
         lua = (HERE / 'lua' / 'dq4readset.lua').read_text(encoding='utf-8')
         wrap = lua.index('emu[name] = function(fn, ...) return orig(guarded(fn), ...) end')
-        first_cb = min(lua.index('emu.addMemoryCallback(function'), lua.index('emu.addEventCallback(function'))
+        first_cb = min(lua.index(k) for k in ('emu.addMemoryCallback(function', 'emu.addEventCallback(function') if k in lua)
         self.assertLess(wrap, first_cb)
         self.assertIn('return pass(pcall(fn, ...))', lua)
+        # emu.stop 뒤 더 도는 프레임 수는 실행마다 달라, 그 뒤 장면 콜백을 부르면 출력이 흔들린다
+        self.assertIn('if stopped then return end', lua)
+        self.assertNotIn('if stopped then dump() end', lua)
         self.assertIn('os.remove(out)', lua)
 
     def test_prelude_records_lua_errors(self):

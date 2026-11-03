@@ -29,7 +29,11 @@
 - 카운터는 롬 파일 오프셋 단위라 LoROM 미러·뱅크를 따로 바꿀 필요가 없다.
 - 첫 세이브스테이트를 불러올 때의 카운터를 밑값으로 두고, 그 뒤 늘어난 바이트만 센다. 상태가 기계 전체를 덮으므로 그 전의 읽기는 결과에 남지 않는다. 그보다 먼저 상태를 만든 적이 있으면 밑값을 두지 않는다.
 - 장면이 `emu.resetAccessCounters` 를 부르면 지우기 전까지 읽은 것을 쌓아 둔다.
-- `emu.stop` 뒤에도 한두 프레임이 더 돌며 스크립트가 기록을 더 쓴다(`dq5warp.lua`). 그래서 멈춘 뒤 프레임마다 다시 쓴다. testrunner 에서는 `scriptEnded` 사건이 오지 않는다(실측).
+- `emu.stop` 뒤에도 프레임이 더 돈다. 몇 프레임인지는 실행마다 다르다. 그 사이 장면 콜백이 기록을 더 쓰면 출력이 실행마다 달라진다.
+  - 캐시 없이 그룹 롬 필드 검사를 두 번 돌렸다. 254개 출력 가운데 `terrain-0A-right`·`w1-terrain-04-right` 의 `warp.txt`·`final.wram` 만 달랐다.
+  - 한 번은 `dq5warp.lua` 가 멈춘 뒤 한 프레임 더 `finish()` 를 불러, 다른 걸음 결과(`moved=yes`)를 덧붙였다.
+  - 그래서 머리말은 `emu.stop` 을 부른 뒤로 장면 콜백을 부르지 않는다. 읽은 집합도 `emu.stop` 때 한 번만 쓴다.
+- testrunner 에서는 `scriptEnded` 사건이 오지 않는다.
 - `READSET_HDMA` 를 주면 HDMA 가 켜질 때 롬에 있는 표 첫 바이트가 읽은 집합에 들었는지 `.readset.txt.hdma` 에 적는다(건전성 검사용).
 
 ## 키
@@ -45,7 +49,7 @@ work/cache/readset/index/<앞 2자>/<index_key>.json = [항목, …]   최근에
 | 키 칸 | 내용 |
 | --- | --- |
 | Lua 코드 | `tools/lua`·`sfc/dq4/tools/lua`·`sfc/dq5/tools/lua`·`LIBDIR` 의 모든 `.lua`, 장면 스크립트, 머리말. 하나라도 바뀌면 모든 장면이 빗나간다 |
-| 에뮬레이터 | MesenCE 실행 파일의 크기·mtime, 명령줄 인자, 고정 인자(`--Snes.RamPowerOnState=AllZeros --Snes.EnableRandomPowerOnState=false`), 사용자 `settings.json` 원 바이트의 해시 |
+| 에뮬레이터 | MesenCE 실행 파일의 크기·mtime, 명령줄 인자, 고정 인자(`--Snes.RamPowerOnState=AllZeros --Snes.EnableRandomPowerOnState=false`), 사용자 `settings.json` 원 바이트의 해시. 고정 인자 없이 띄우면 이 머신 설정(`RamPowerOnState: Random`)으로는 전원을 켠 첫 프레임의 WRAM 이 무작위였다. 이 인자로 0, `AllOnes` 로 FF 가 되는 것을 실측했다 |
 | 환경 변수 | 위 Lua 가 `os.getenv` 로 읽는 이름의 값만. 경로는 내용으로 바꾼다: 출력 폴더 안이면 상대 경로(아직 없는 출력 경로도), 파일이면 해시(세이브스테이트는 롬 이름을 지운 해시), Lua 폴더면 `code`, 그 밖의 폴더면 안 파일들의 해시. 상대 경로는 Lua 가 도는 작업 폴더 기준으로 본다. 출력 폴더 밖의 없는 절대 경로는 `absent:` 를 붙인다(나중에 그 자리에 파일이 생기면 빗나간다). `SHOT_DIR`·`READSET_*` 는 뺀다 |
 | 출발 파일 | 돌리기 전에 출력 폴더에 있던 파일의 해시 |
 | 롬 모양 | 롬 크기와 머리 `$7FB0~$7FFF` 가운데 체크섬 `$7FDC~$7FDF` 를 뺀 것. 전원·리셋 때 리셋 벡터(`$7FFC`)를 읽는 것은 카운터에 잡히지 않는다(실측: 그 두 바이트만 뒤집어도 서장 시작 상태가 달라짐). 에뮬레이터가 매핑을 정할 때 읽는 칸도 잡히지 않는다. 체크섬은 빌드마다 바뀌는데, 뒤집어도 결과가 같았다(건전성 검사가 늘 뒤집어 본다) |
@@ -111,6 +115,11 @@ MesenCE `--testrunner` 는 장면 Lua 의 오류를 늘 0 이 아닌 종료로 �
 | `dq5warp.lua`(순간이동, `dq4battlemsgswap.lua` 의 DRIVER) | `MAXF` 에 닿으면 「timeout phase=」 를 적고 `emu.stop(0)` | `run(accept=warp_finished)` 가 넣지 않는다(`dq4groupcheck.scene`, `dq4ch1walkcheck.run` 의 순간이동, 전투 메시지 검사). dq5 트랙 파일이라 Lua 는 고치지 않았다 |
 | `dq4shipstate.lua` | 선실에 못 닿으면 `emu.stop(1)` | 종료 코드로 걸러진다 |
 | `dq5msg.lua`, `dq5chestcheck.lua`, `dq5cdldump.lua`(NEXT=dq5msg), `dq4namegamecheck.lua`, `walk.lua`·`dq4walkstate.lua`, `mkstate.lua`(툴킷 boot.lua) | 없음: 정한 프레임에 기록을 쓰고 멈춘다 | 성공·실패는 Python 판정이 매번 기록을 보고 정한다. 결정적인 실행이라 캐시에서 펼친 기록도 같은 판정을 받는다 |
+
+MesenCE 는 Lua 콜백 하나가 정한 시간(사용자 설정 `Debug.ScriptWindow.ScriptTimeout`, 이 머신은 1초)을 넘으면 「Maximum execution time (1 seconds) exceeded.」 오류로 끊는다.
+- 머신이 바쁠 때(부하 평균 14~33) 그룹 롬 필드 검사의 순간이동 장면에서 실측으로 나왔다. `dq5warp.lua` 의 `finish()` 가 WRAM 128KB 를 한 바이트씩 읽는 동안이었다.
+- 명령줄 `--Debug.ScriptWindow.ScriptTimeout=10` 으로는 늘어나지 않았다(2.5초 도는 콜백이 그대로 끊김).
+- 장면 탓이 아니므로, 이 오류로 끝난 실행은 출력을 지우고 세 번까지 처음부터 다시 돌린다(`WATCHDOG_TRIES`). 끝내 걸리면 종료 코드 71 로 알리고 넣지 않는다.
 
 시간이 초과된 실행은 끝줄 `OK` 를 썼어도 캐시에 넣지 않고, 「장면 Lua 오류」 가 아니라 시간 초과로 알린다. `dq4groupcheck.scene` 은 시간 초과와 0 이 아닌 종료를 `{"error": …}` 로 분명히 돌려준다.
 
