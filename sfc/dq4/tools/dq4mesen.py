@@ -47,13 +47,16 @@ def save_dirs(mesence=None):
 
 
 def clear_saves(rom, mesence=None):
-    """rom 이름으로 남은 배터리 기록을 지우고, 지운 경로를 돌려준다."""
+    """rom 이름으로 남은 배터리 기록과 코드·데이터 기록(Debugger/<이름>.cdl)을 지우고, 지운 경로를 돌려준다.
+
+    MesenCE 는 롬을 내릴 때 Debugger 폴더에 롬 크기만 한 .cdl 을 남긴다. 실행마다 이름이 다른 복사본은 그 파일이
+    다시 쓰이지 않고 쌓이기만 하므로 기록과 함께 지운다."""
     gone = []
     for folder in save_dirs(mesence):
-        path = folder / (Path(rom).stem + '.srm')
-        if path.exists():
-            path.unlink()
-            gone.append(path)
+        for path in (folder / (Path(rom).stem + '.srm'), folder.parent / 'Debugger' / (Path(rom).stem + '.cdl')):
+            if path.exists():
+                path.unlink()
+                gone.append(path)
     return gone
 
 

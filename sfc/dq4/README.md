@@ -24,6 +24,7 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [docs/dq4-chapter2-format.md](docs/dq4-chapter2-format.md): 2장 첫머리(1장 끝에서 넘어가기, 아리나 일행, 산트하임 왕좌의 방 연출)
 - [docs/dq4-compat-format.md](docs/dq4-compat-format.md): 호환성 검사(높은 뱅크 BRK 목록의 정적 검사, MesenCE 열린 버스 프로브, libretro bsnes·snes9x 1장 걷기)
 - [docs/dq4-savefixture-format.md](docs/dq4-savefixture-format.md): 저장 기록으로 시작하는 검사(SRAM 칸 만들기, 이어 할 자리 `7E:2033`, 저장되지 않는 것, bsnes·snes9x 에 넣기)
+- [docs/dq4-readset-format.md](docs/dq4-readset-format.md): 헤드리스 장면 실행을 그 실행이 읽은 롬 바이트 단위로 캐시하기(읽은 집합 얻기, 키, 건전성 검사)
 - [docs/dq4-battle-scene-format.md](docs/dq4-battle-scene-format.md): 전투 장면 검사(저장 기록으로 전투 직전에서 시작, 주문·약초·도망·전멸·레벨업·보스, 창 번호 `7E:0A00` 으로 맞춘 입력, 시드별 선제·기습·회심·도망 실패 분포)
 - [docs/dq4-growth-format.md](docs/dq4-growth-format.md): 라이안 성장(DQ5 성장 레코드와 FC 곡선의 능력치 대응, 레벨별 값 표와 훅 세 개, 1레벨 기록, 손님 호이민의 레벨)
 - [docs/dq4-shopscene-format.md](docs/dq4-shopscene-format.md): 가게 장면 검사(이무르 가게 14장면, 창 번호 `$0A00` 으로 따라가는 입력 열, 금화·물건·장비 비트 판정)
@@ -357,3 +358,4 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [2026-11-03-03: 2×2 문을 성문으로 열고, 분수 그림을 검사 기대에 맞추기](journal/2026-11-03-03-gate-doors.md)
 - [2026-11-03-04: 자는 인물에게 말 걸기, 투기장 관중석의 숨은 인물, 도구점 장면 자리](journal/2026-11-03-04-sleepers-stands-shop.md)
 - [2026-11-03-05: 창 글자 패치가 깨던 BG3 타일맵과 전투 배경 고치기](journal/2026-11-03-05-window-bg.md)
+- [2026-11-03-06: 효과음 장면의 회심을 시드 대신 판정 고정으로](journal/2026-11-03-06-sfx-critical.md)

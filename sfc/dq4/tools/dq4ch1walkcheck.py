@@ -380,10 +380,15 @@ LUA_ENV = frozenset('''
     WRAMWATCHREAD WW WWFROM WWRANGE'''.split())
 
 
-def run(mesence, rom, script, dest, env, timeout):
+def run(mesence, rom, script, dest, env, timeout, readset=False):
+    """readset 이면 dq4readset 으로 돌려, 같은 출발 상태·입력에 읽은 롬 바이트가 같으면 캐시의 출력을 펼친다."""
     dest.mkdir(parents=True, exist_ok=True)
     full = {k: v for k, v in os.environ.items() if k not in LUA_ENV}
     full.update(env, SHOT_DIR=str(dest))
+    if readset:
+        import dq4readset
+        dq4readset.run(mesence, rom, script, dest, full, timeout=timeout, log='mesen.log', cwd=dest)
+        return
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
         try:
             mesen.run(mesence, rom, script, cwd=dest, env=full, stdout=log, stderr=subprocess.STDOUT,
@@ -431,8 +436,9 @@ def ending(mesence, rom, state, dest, seed=0):
             'trace': hashlib.sha1(repr(seen).encode()).hexdigest()[:12], 'frames': {'box': shown, 'reset': reset, 'after_sound': first(AFTER_SOUND, reset or 0) if reset else None}}
 
 
-def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0):
-    """한 구간을 걷는다. extra 는 시작에 더 둘 SET(묶음 첫 구간의 깃발·물건), party 는 dq5warp.lua PARTY."""
+def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, readset=False):
+    """한 구간을 걷는다. extra 는 시작에 더 둘 SET(묶음 첫 구간의 깃발·물건), party 는 dq5warp.lua PARTY.
+    readset 은 run 과 같다."""
     name, how, arg, opt = seg
     if how == 'ending':
         return ending(mesence, rom, state, dest, seed)
@@ -443,7 +449,8 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0):
         run(mesence, rom, WARP, dest, {'STATE': str(state), 'TO': arg, 'SAVE': 'end.mss', 'SETTLE': '120',
                                        'MAXF': '1500', 'WARPEXIT': f'{warp_exit(rom):X}', 'ANYWHERE': '1',
                                        'ROMPATCH': patch, 'SET': start, 'LATESET': pins(opt, seed),
-                                       **({'POKE': poke} if poke else {}), **({'PARTY': party} if party else {})}, 300)
+                                       **({'POKE': poke} if poke else {}), **({'PARTY': party} if party else {})}, 300,
+            readset)
         log = dest / 'warp.txt'
         text = log.read_text(encoding='utf-8') if log.exists() else ''
         found = re.search(r'arrived map (\w\w/\w\w)', text)
@@ -460,7 +467,7 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0):
                                              'SAVE': 'end.mss', 'MAXF': str(maxf),
                                              'CHANGES': str(opt.get('changes', 99)), 'AFTER': str(opt.get('after', 120)),
                                              'WATCH': watch_flags(), 'ROMPATCH': patch, 'SET': start,
-                                             **({'POKE': poke} if poke else {})}, maxf // 40 + 120)
+                                             **({'POKE': poke} if poke else {})}, maxf // 40 + 120, readset)
         log = dest / 'walk.txt'
         text = log.read_text(encoding='utf-8') if log.exists() else ''
         maps = re.findall(r'map \w\w/\w\w -> (\w\w/\w\w)', text)
@@ -495,16 +502,16 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0):
             'items': ' '.join(f'{v:02X}' for v in items)}
 
 
-def prologue_start(mesence, rom, out):
+def prologue_start(mesence, rom, out, readset=False):
     """전원부터 새 게임 첫 장면까지 걸어 서장 시작 세이브스테이트를 만든다."""
-    run(mesence, rom, pc.MKSTATE, out / 'start', PROLOGUE_START, 200)
+    run(mesence, rom, pc.MKSTATE, out / 'start', PROLOGUE_START, 200, readset)
     state = out / 'start' / 'start.mss'
     if not state.exists():
         raise SystemExit('세이브스테이트를 만들지 못함')
     return state
 
 
-def walk_unit(mesence, rom, data, out, segments, unit, base, seed=0):
+def walk_unit(mesence, rom, data, out, segments, unit, base, seed=0, readset=False):
     """한 묶음을 base 에서 시작해 차례로 걷는다. 첫 구간에 앞 구간들의 깃발·물건·동료를 둔다."""
     extra, party = setup(segments, unit[0])
     state, results = base, []
@@ -513,14 +520,15 @@ def walk_unit(mesence, rom, data, out, segments, unit, base, seed=0):
         # dq5warp.lua 는 같은 맵 안의 순간이동이면 목적지 칸에 꼭 맞게 서야 도착으로 본다. 이웃 맵을 거친다
         hop = HOPS[arg.split(',')[0]]
         r = segment(mesence, rom, state, out / f'{name}-hop', (f'{name}-hop', 'warp', hop, {'map': hop[:5]}),
-                    NO_ENCOUNTERS, extra, party, seed)
+                    NO_ENCOUNTERS, extra, party, seed, readset)
         if r['status'] != 'passed':
             return [r]
         state, extra, party = out / f'{name}-hop' / 'end.mss', '', ''
     for k, i in enumerate(unit):
         seg = segments[i]
         patch = NO_ENCOUNTERS + (';' + boss_patch(data) if seg[3].get('boss') else '')
-        r = segment(mesence, rom, state, out / seg[0], seg, patch, *((extra, party) if k == 0 else ('', '')), seed)
+        r = segment(mesence, rom, state, out / seg[0], seg, patch, *((extra, party) if k == 0 else ('', '')), seed,
+                    readset)
         results.append(r)
         if r['status'] != 'passed':
             break
@@ -528,15 +536,17 @@ def walk_unit(mesence, rom, data, out, segments, unit, base, seed=0):
     return results
 
 
-def prologue(mesence, rom, data, out, segments, cache=None):
+def prologue(mesence, rom, data, out, segments, cache=None, readset=False):
     """서장 끝 세이브스테이트와 서장 구간 결과. 서장은 늘 시드 0 이라 시드와 상관없이 하나를 나눠 쓴다.
-    cache(StateCache)에 같은 롬·같은 코드로 만든 것이 있으면 걷지 않고 그것을 쓴다."""
+    cache(StateCache)에 같은 롬·같은 코드로 만든 것이 있으면 걷지 않고 그것을 쓴다. 없으면 readset 일 때 구간마다
+    읽은 롬 바이트 캐시(dq4readset)를 쓴다 — 롬이 바뀌어도 서장이 읽은 바이트가 같으면 다시 걷지 않는다."""
     key = code_key(mesence) if cache else None
     state = out / segments[0][0] / 'end.mss'
     hit = cache.get('prologue', key, '.mss', state) if cache else None
     if hit:
         return hit[0], {**hit[1], 'cached': cache.path('prologue', key, '.mss').name}
-    r = walk_unit(mesence, rom, data, out, segments, [0], prologue_start(mesence, rom, out))[-1]
+    r = walk_unit(mesence, rom, data, out, segments, [0], prologue_start(mesence, rom, out, readset),
+                  readset=readset)[-1]
     if cache and r['status'] == 'passed':
         cache.put('prologue', key, '.mss', state, r)
     return state, r

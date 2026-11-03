@@ -32,6 +32,7 @@
   (wn.sym·메뉴롬은 dq4menupatch.py build 를 DQ4_WINDOWNAME_SYMBOLS 와 함께 돌려 만든다. 창 코드 뱅크가 같은지 본다)
 """
 import argparse
+import json
 from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
@@ -39,7 +40,7 @@ import random
 import re
 import subprocess
 
-import dq4mesen as mesen
+import dq4readset
 
 # 출발 상태: (이름, dq5warp.lua TO, PARTY). 서장 끝 상태에서 순간이동한다(도착하며 한 칸 아래로 걸어 카운터 앞 셀 34,9 에
 # 선다). 1장 롬의 DQ5 선실(17/00)은 이야기 플래그가 DQ4 것이라 주인공이 침대에 누운 첫 장면이 되어 움직이지 못한다
@@ -117,13 +118,14 @@ PARTY_ITEMS_PRE = ('wait:150,a:6,wait:60,right:4,wait:30,down:4,wait:30,a:6,wait
 def make_states(mesence, rom_path, data, out):
     """{이름: 세이브스테이트}. 검사 롬으로 서장 끝 상태(캐시)를 얻고 STATES 자리로 순간이동한다."""
     import dq4ch1walkcheck as walk
-    base, r = walk.prologue(mesence, rom_path, data, out / 'prologue', walk.SEGMENTS, walk.StateCache(data))
+    base, r = walk.prologue(mesence, rom_path, data, out / 'prologue', walk.SEGMENTS, walk.StateCache(data),
+                             readset=True)
     if r['status'] != 'passed':
         raise SystemExit(f'서장 끝 상태를 만들지 못함: {r["problems"]}')
     states = {}
     for name, to, party in STATES:
         r = walk.segment(mesence, rom_path, base, out / name, (name, 'warp', to, {'map': to[:5]}), walk.NO_ENCOUNTERS,
-                         '', party)
+                         '', party, readset=True)
         if r['status'] != 'passed':
             raise SystemExit(f'출발 상태 {name}({to})를 만들지 못함: {r["problems"]}')
         states[name] = out / name / 'end.mss'
@@ -196,9 +198,8 @@ def run(mesence, libdir, rom_path, rom, folder, scene):
         env['POKE'] = poke
     if patch:
         env['ROMPATCH'] = patch
-    with (folder / 'log.txt').open('w') as log:
-        mesen.run(mesence, rom_path, PROBE, folder=folder, tag='windowcheck', extra=(), env=env, check=False,
-                  timeout=1800, stdout=log, stderr=subprocess.STDOUT)
+    return dq4readset.run(mesence, rom_path, PROBE, folder, env, timeout=1800, extra=(), log='log.txt',
+                          tag='windowcheck')
 
 
 def dumps(folder):
@@ -370,7 +371,9 @@ def main():
     if a.every:
         todo = [s[:5] + (sorted(set(s[5]) | set(EVERY[s[0]])),) if s[0] in EVERY else s for s in todo]
     with ThreadPoolExecutor(a.jobs) as pool:
-        list(pool.map(lambda s: run(mesence, libdir, a.rom, rom, out / s[0], s), todo))
+        infos = list(pool.map(lambda s: run(mesence, libdir, a.rom, rom, out / s[0], s), todo))
+    (out / 'readset.json').write_text(json.dumps({s[0]: i for s, i in zip(todo, infos)}, indent=1), encoding='utf-8')
+    print(f'읽은 바이트 캐시: 장면 {sum(i["cached"] for i in infos)}/{len(infos)} 맞음')
     flagged = 0
     for s in todo:
         folder = out / s[0]
