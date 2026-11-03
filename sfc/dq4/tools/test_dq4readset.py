@@ -139,6 +139,7 @@ class FakeMesen:
     def __init__(self):
         self.calls = 0
         self.rc = 0
+        self.shot = False
 
     def __call__(self, mesence, rom, script, folder=None, tag='probe', extra=(), env=None, stdout=None, **kw):
         self.calls += 1
@@ -148,6 +149,8 @@ class FakeMesen:
         Path(folder, 'end.mss').write_bytes(mss(f'probe-{self.calls:012x}.sfc'.encode(), data[s:s + 2]))
         Path(env['READSET_OUT']).write_text(f'{s:X} {n:X}\n')
         Path(folder, 'mesen.log').write_text(f'loaded {Path(rom).name}\n')
+        if self.shot:
+            Path(folder, 's00300.png').write_bytes(bytes([self.calls]))
         return subprocess.CompletedProcess([], self.rc)
 
 
@@ -246,6 +249,17 @@ class RunTests(unittest.TestCase):
             self.flip(0x80)
             with self.assertRaisesRegex(SystemExit, '출력'):
                 self.go()
+
+    def test_verify_does_not_trust_screenshots(self):
+        """화면 찍기는 같은 실행에서도 프레임이 어긋날 수 있어 재검증이 견주지 않는다. 다른 출력은 그대로 견준다."""
+        self.fake.shot = True
+        self.go()
+        with mock.patch.dict(os.environ, {'DQ4_READSET_VERIFY': '1'}):
+            info, dest = self.go()
+        self.assertTrue(info['verified'])
+        self.assertEqual(info['screens_differ'], ['s00300.png'])
+        self.assertEqual((dest / 's00300.png').read_bytes(), bytes([2]))
+        self.assertTrue(self.go()[0]['cached'])
 
     def test_accept_false_is_not_cached(self):
         dest = Path(self.tmp.name) / 'rej'
