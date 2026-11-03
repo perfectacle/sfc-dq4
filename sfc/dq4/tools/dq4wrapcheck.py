@@ -123,7 +123,7 @@ class Run:
         env = {'WARPLUA': str(wc.WARP), 'STATE': str(state), 'TO': to, 'SAVE': 'end.mss', 'SETTLE': '60',
                'MAXF': '2000', 'WARPEXIT': f'{warp_exit(self.rom):X}', 'ANYWHERE': '1',
                'ROMPATCH': wc.NO_ENCOUNTERS, 'SET': wc.RNG, 'WRAP': f'{self.wrap:06X}', **self.tables, **extra}
-        wc.run(self.mesence, self.rom, DRIVER, dest, env, 300)
+        wc.run(self.mesence, self.rom, DRIVER, dest, env, 300, readset=True)
         log = (dest / 'warp.txt').read_text() if (dest / 'warp.txt').exists() else ''
         arrived = re.search(r'arrived map (\w\w)/(\w\w)', log)
         return dest / 'end.mss', (int(arrived[1], 16), int(arrived[2], 16)) if arrived else None
@@ -131,7 +131,7 @@ class Run:
     def walk(self, dest, state, way, frames):
         env = {'STATE': str(state), 'DIR': way, 'WALKF': str(frames), 'SAVE': 'end.mss', 'ROMPATCH': wc.NO_ENCOUNTERS,
                'WRAP': f'{self.wrap:06X}'}
-        wc.run(self.mesence, self.rom, DRIVER, dest, env, 120)
+        wc.run(self.mesence, self.rom, DRIVER, dest, env, 120, readset=True)
         return dest / 'end.mss'
 
 

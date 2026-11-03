@@ -18,7 +18,7 @@ HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
 import dq4freshstate  # noqa: E402
-import dq4mesen as mesen  # noqa: E402
+import dq4readset  # noqa: E402
 import dq4namegame as ng  # noqa: E402
 import dq4nameentry as ne  # noqa: E402
 from dq5map import Rom  # noqa: E402
@@ -79,8 +79,8 @@ def main():
         data = name_bytes(name, raw)
         env = dict(os.environ, LIBDIR=libdir, SHOT_DIR=str(folder), STATE=str(state), NAME=data.hex(),
                    PRE=PRE, SHOT='200', MAXF='220')
-        mesen.run(mesence, a.rom, HERE / 'lua' / 'dq4namegamecheck.lua', folder=folder, tag='namegame', extra=(),
-                  env=env, check=False, timeout=120, capture_output=True)
+        dq4readset.run(mesence, a.rom, HERE / 'lua' / 'dq4namegamecheck.lua', folder, env, timeout=120, extra=(),
+                       tag='namegame')
         got = (folder / 'codes.txt').read_text().split() if (folder / 'codes.txt').exists() else []
         want = [f'{c:04X}' for c in expected(rom, name, raw)]
         ok = got == want

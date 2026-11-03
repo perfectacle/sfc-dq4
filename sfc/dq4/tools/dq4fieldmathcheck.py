@@ -70,7 +70,8 @@ def main():
     dest = out / 'field'
     wc.run(mesence, rom, PROBE, dest, {
         'STATE': str(base), 'FIELD': f'{x},{y}', 'SETTLE': '120', 'MAXF': '1500', 'WARPEXIT': f'{warp_exit(rom):X}',
-        'ROMPATCH': f'{dq4fieldport.warp_patch(data, x, y)};{wc.NO_ENCOUNTERS}', 'SET': f'{wc.RNG};{wc.DAY_SET}'}, 300)
+        'ROMPATCH': f'{dq4fieldport.warp_patch(data, x, y)};{wc.NO_ENCOUNTERS}', 'SET': f'{wc.RNG};{wc.DAY_SET}'}, 300,
+           readset=True)
     math = dest / 'math.txt'
     ok, why = judge(math.read_text(encoding='utf-8')) if math.exists() else (False, '끝 기록(math.txt)이 없음')
     report = {'status': 'passed' if ok else 'failed', 'field': [x, y], 'why': why}

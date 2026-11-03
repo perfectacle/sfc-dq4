@@ -9,6 +9,7 @@
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -16,6 +17,12 @@ HERE = Path(__file__).resolve().parent
 
 CODE = 0x60C000
 CODE_END = 0x60E000
+# 둘째 구역: 전투 메시지 코드(dq4battlemsg.CODE_AT~) 뒤 뱅크 끝까지. 첫 구역 뒤 E000~E0FF 는 넘침 검사 자리, E100~ 은
+# 묶음 버퍼 보조 코드, E800~ 은 가나 표라 첫 구역을 늘릴 수 없다. 같은 뱅크여야 JSR 로 오간다
+CODE2 = 0x60F900
+CODE2_END = 0x610000
+# 구역마다 남은 자리가 이보다 적으면 빌드가 알린다
+ROOM_WARN = 128
 STATUS_WINDOW = 0x02
 # 전투 상태 창 세 벌(머리 x 2, 본문 D1 12 12 12 12). 창 02 와 같은 열 간격 상수로 그려 이름 다섯째 칸이 맨 오른쪽 사람에서
 # 오른쪽 테두리 열에 오므로, 창 02 처럼 머리 너비를 6 → 7 로 늘려 테두리를 한 칸 밖으로 민다
@@ -165,6 +172,15 @@ def kana_glyphs(d, font, render):
     return numbers
 
 
+def room(out):
+    """구역마다 마지막으로 쓴 바이트 뒤 남은 바이트 수. 코드 끝이 0 바이트로 끝나면 그만큼 많게 센다(어림)."""
+    left = {}
+    for a, b in ((CODE, CODE_END), (WH_EXTRA, KANA_TABLE), (CODE2, CODE2_END)):
+        seg = bytes(out[lorom(a):lorom(b - 1) + 1])
+        left[(a, b)] = len(seg) - len(seg.rstrip(b'\0'))
+    return left
+
+
 def apply(data, font=None, asar=None):
     import dq4battlemsg
     import dq4menupatch
@@ -174,8 +190,9 @@ def apply(data, font=None, asar=None):
     if not asar:
         raise SystemExit('ASAR 에 asar 실행 파일을 주세요(sfc/dq4/docs/dq4-menu-format.md)')
     d = bytearray(data)
-    if any(d[lorom(CODE):lorom(CODE_END)]) or any(d[lorom(WH_EXTRA):lorom(KANA_TABLE)]):
-        raise ValueError(f'{CODE:06X}~{CODE_END:06X} 나 {WH_EXTRA:06X}~{KANA_TABLE:06X} 가 비어 있지 않음')
+    for a, b in ((CODE, CODE_END), (WH_EXTRA, KANA_TABLE), (CODE2, CODE2_END)):
+        if any(d[lorom(a):lorom(b - 1) + 1]):
+            raise ValueError(f'{a:06X}~{b:06X} 가 비어 있지 않음')
     o = lorom(dq4menupatch.window_addr(d, STATUS_WINDOW))
     if d[o + 2] & 0x1F != 6:
         raise ValueError(f'창 {STATUS_WINDOW:02X} 머리 {d[o:o + 4].hex()}: 너비가 6 이 아님')
@@ -306,7 +323,8 @@ def apply(data, font=None, asar=None):
         raise ValueError(f'{LIST_HOOK:06X} 가 JML 이 아님: {d[o:o + 4].hex()}')
     kana = kana_glyphs(d, font or dq4menupatch.Font('galmuri9'), dq4menupatch.render)
     flag = re.search(r'^!flag\s*=\s*\$([0-9A-Fa-f]{6})', (HERE / 'dq4nameentry.asm').read_text(), re.M).group(1)
-    defs = (f'!wn_code = ${CODE:06X}\n!wn_hi_base = ${ne.HI_BASE:02X}\n!wn_hi_count = {hi_count}\n'
+    defs = (f'!wn_code = ${CODE:06X}\n!wn_code_end = ${CODE_END:06X}\n!wn_code2 = ${CODE2:06X}\n!wn_code2_end = ${CODE2_END:06X}\n'
+            f'!wn_hi_base = ${ne.HI_BASE:02X}\n!wn_hi_count = {hi_count}\n'
             f'!wn_glyph_bank = ${ne.GLYPH_BANK:02X}\n!wn_list_prev = ${int.from_bytes(d[o + 1:o + 4], "little"):06X}\n'
             f'!wn_menu_flag = ${flag}\n!wt_bank = ${dq4windowtext.TEXT_BANK:02X}\n!wt_mbank = ${dq4windowtext.MONSTER_BANK:02X}\n'
             f'!wt_mkind = {dq4windowtext.MONSTER_KIND}\n'
@@ -340,6 +358,13 @@ def apply(data, font=None, asar=None):
         out = (tmp / 'rom.sfc').read_bytes()
     if not any(out[lorom(CODE):lorom(CODE_END)]) or any(out[lorom(CODE_END):lorom(CODE_END) + 0x100]):
         raise ValueError('창 이름 코드가 정해 둔 자리를 벗어남')
+    left = room(out)
+    print('창 이름 코드 남은 자리: ' + ', '.join(f'{a:06X}~{b:06X} {n}바이트' for (a, b), n in left.items()),
+          file=sys.stderr)
+    for (a, b), n in left.items():
+        if n < ROOM_WARN:
+            print(f'경고: 창 이름 코드 {a:06X}~{b:06X} 에 {n}바이트만 남음. 둘째 구역 쪽에 더하거나 자리를 새로 정할 것',
+                  file=sys.stderr)
     if not any(out[lorom(SHOP_SPOT):lorom(SHOP_SPOT_END - 1) + 1]):
         raise ValueError('가게 팔기 목록 코드가 들어가지 않음')
     # 도구 갈래는 개수 묻기(QTY_SPOT 첫머리 ShopBuyTool)

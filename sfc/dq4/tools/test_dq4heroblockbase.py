@@ -22,7 +22,9 @@ class MakeBaseTests(unittest.TestCase):
 
     def make(self, warp):
         """warp(dest, env): 순간이동 한 번이 dest 에 남기는 것을 흉내 낸다. 나머지 실행은 아무것도 남기지 않는다."""
-        def run(mesence, rom, script, dest, env, timeout):
+        def run(mesence, rom, script, dest, env, timeout, readset=False):
+            # 출발 상태를 만드는 실행은 읽은 바이트 캐시를 거친다
+            self.assertTrue(readset)
             if script == hb.wc.WARP:
                 warp(Path(dest), env)
         with mock.patch.object(hb.wc, 'prologue_start', return_value=self.out / 'start.mss'), \
