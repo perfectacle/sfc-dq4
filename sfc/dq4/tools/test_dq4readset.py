@@ -187,6 +187,25 @@ class StoreTests(unittest.TestCase):
             self.assertEqual(sorted(kind for kind, _ in seen), ['blob', 'blob', 'index'])
             self.assertTrue(all(under for _, under in seen))
 
+    def test_add_rewrites_corrupt_blob(self):
+        with tempfile.TemporaryDirectory() as d:
+            st = rs.Store(d)
+            e = st.add('k' * 64, {'ranges': rs.pack([(0, 1)]), 'digest': 'a'}, {'o': b'x'})
+            st.blob_path(e['files']['o']).write_bytes(b'not zlib')
+            st.add('k' * 64, {'ranges': rs.pack([(0, 1)]), 'digest': 'b'}, {'o': b'x'})
+            self.assertEqual(st.get_blob(e['files']['o']), b'x')
+
+    def test_prune_removes_leftover_temp_files(self):
+        with tempfile.TemporaryDirectory() as d:
+            st = rs.Store(d)
+            st.add('k' * 64, {'ranges': rs.pack([(0, 1)]), 'digest': 'a'}, {'o': b'x'})
+            tmp = Path(d) / 'blob' / 'ab' / '.abcd.123.deadbeef'
+            tmp.parent.mkdir(parents=True, exist_ok=True)
+            tmp.write_bytes(b'half')
+            st.prune(0)
+            self.assertFalse(tmp.exists())
+            self.assertTrue((Path(d) / '.lock').exists())
+
     def test_corrupt_blob_reads_as_missing(self):
         with tempfile.TemporaryDirectory() as d:
             st = rs.Store(d)
@@ -206,6 +225,7 @@ class FakeMesen:
         self.rc = 0
         self.shot = False
         self.lua_error = False
+        self.no_done = False
 
     def __call__(self, mesence, rom, script, folder=None, tag='probe', extra=(), env=None, stdout=None, **kw):
         self.calls += 1
@@ -213,7 +233,8 @@ class FakeMesen:
         s, n = self.READ
         Path(folder, 'out.bin').write_bytes(data[s:s + n])
         Path(folder, 'end.mss').write_bytes(mss(f'probe-{self.calls:012x}.sfc'.encode(), data[s:s + 2]))
-        Path(env['READSET_OUT']).write_text(f'{s:X} {n:X}\n')
+        Path(env['READSET_OUT']).write_text(f'{s:X} {n:X}\n' + ('' if self.no_done else f'{rs.DONE}\n'))
+        Path(folder, rs.OUT_TMP).write_text('half-written')
         Path(folder, 'mesen.log').write_text(f'loaded {Path(rom).name}\n')
         if self.lua_error:
             Path(env['READSET_OUT'] + '.err').write_text('scene.lua:3: boom\n')
@@ -306,6 +327,34 @@ class RunTests(unittest.TestCase):
         self.assertFalse(self.go()[0]['cached'])
         self.assertTrue(self.go()[0]['cached'])
 
+    def test_readset_without_done_line_is_not_cached(self):
+        """오류를 .err 에 적지 못했어도 머리말이 끝줄을 OK 로 쓰지 않았으면 넣지 않는다."""
+        self.fake.no_done = True
+        info, dest = self.go()
+        self.assertEqual(info['returncode'], rs.LUA_ERROR)
+        self.fake.no_done = False
+        self.assertFalse(self.go()[0]['cached'])
+
+    def test_half_written_readset_is_not_an_output(self):
+        info, dest = self.go()
+        self.assertFalse((dest / rs.OUT_TMP).exists())
+        self.assertNotIn(rs.OUT_TMP, self.store.entries(info['key'])[0]['files'])
+
+    def test_older_entry_used_when_newer_blob_missing(self):
+        """맞는 항목이 여럿이면, 앞 항목의 blob 이 없을 때 다음 항목을 본다."""
+        key = self.go()[0]['key']
+        self.fake.READ = (0x80, 0x10)
+        with mock.patch.dict(os.environ, {'DQ4_READSET': 'off'}):
+            self.go()                    # 같은 키에 읽은 구간이 다른 항목 하나 더(둘 다 지금 롬과 맞음)
+        es = self.store.entries(key)
+        self.assertEqual(len(es), 2)
+        for sha in set(es[0]['files'].values()) - set(es[1]['files'].values()):
+            self.store.blob_path(sha).unlink(missing_ok=True)
+        info, dest = self.go()
+        self.assertTrue(info['cached'])
+        self.assertEqual(self.fake.calls, 2)
+        self.assertEqual([e['digest'] for e in self.store.entries(key)], [es[1]['digest']])
+
     def test_missing_blob_is_a_miss(self):
         self.go()
         for f in (Path(self.tmp.name) / 'cache' / 'blob').rglob('*'):
@@ -383,6 +432,25 @@ class RuleTests(unittest.TestCase):
             self.assertIn(('dq4readset', 'run'), calls, name)
             self.assertFalse({c for c in calls if c[0] in ('dq4mesen', 'mesen')}, name)
 
+    def test_screen_rule(self):
+        """재검증·건전성 검사가 견주지 않는 출력은 화면 찍기(.png)뿐이다. 덤프·상태·글 기록은 그대로 견준다."""
+        want = {'s00300.png': 'a', 'v00300.bin': 'a', 'msg.txt': 'a', 'end.mss': 'a', 'sub/end.png': 'a'}
+        got = {'s00300.png': 'b', 'v00300.bin': 'b', 'msg.txt': 'b', 'end.mss': 'b', 'sub/end.png': 'b'}
+        self.assertEqual(rs.differing(want, got, screens=True), ['s00300.png', 'sub/end.png'])
+        self.assertEqual(rs.differing(want, got), ['end.mss', 'msg.txt', 'v00300.bin'])
+        self.assertIn('출력', rs.mismatch(want, got, {'returncode': 0, 'ranges': rs.pack([(0, 1)])}, 0, [(0, 1)]))
+        only_shots = dict(want, **{'s00300.png': 'b'})
+        self.assertEqual(rs.mismatch(want, only_shots, {'returncode': 0, 'ranges': rs.pack([(0, 1)])}, 0, [(0, 1)]), '')
+
+    def test_prelude_wraps_callbacks_before_its_own(self):
+        """감싸기를 머리말 자신의 콜백(HDMA·endFrame)보다 먼저 건다. 반환값은 개수까지 그대로 넘긴다."""
+        lua = (HERE / 'lua' / 'dq4readset.lua').read_text(encoding='utf-8')
+        wrap = lua.index('emu[name] = function(fn, ...) return orig(guarded(fn), ...) end')
+        first_cb = min(lua.index('emu.addMemoryCallback(function'), lua.index('emu.addEventCallback(function'))
+        self.assertLess(wrap, first_cb)
+        self.assertIn('return pass(pcall(fn, ...))', lua)
+        self.assertIn('os.remove(out)', lua)
+
     def test_prelude_records_lua_errors(self):
         """머리말이 콜백을 감싸 오류를 .err 에 적고, 진입 파일이 맨 위 오류를 잡아 멈춘다."""
         lua = (HERE / 'lua' / 'dq4readset.lua').read_text(encoding='utf-8')
@@ -403,9 +471,9 @@ class RuleTests(unittest.TestCase):
         self.assertIn('READSET_FAIL(e); emu.stop(1)', seen['entry'])
 
     def test_readset_users_do_not_judge_from_screenshots(self):
-        """emu.takeScreenshot 화면은 같은 실행에서도 달라 캐시 재검증이 견주지 않는다(SCREENS). 그래서 이 캐시를 쓰는
-        검사는 화면 파일을 판정에 읽지 않는다: PIL 로 여는 것은 모음 그림을 만드는 sheet* 함수 안에서만,
-        화면 파일 이름을 open()·read_bytes() 등으로 직접 읽지 않는다."""
+        """흔한 꼴만 막는 정적 휴리스틱이다(변수에 담은 이름, 다른 모듈을 거친 읽기는 못 본다): 이 캐시를 쓰는 검사에서
+        PIL 로 여는 것은 모음 그림을 만드는 sheet* 함수 안에서만, 화면 파일 이름 글자를 open()·read_bytes() 등으로
+        직접 읽지 않는다. 재검증이 화면을 견주지 않는다는 동작은 RunTests 와 test_screen_rule 이 직접 본다."""
         users = [p for p in sorted(HERE.glob('dq4*.py'))
                  if p.name not in ('dq4readset.py',) and re.search(r'^\s*import dq4readset\b|^\s*import dq4readset as',
                                                                    p.read_text(encoding='utf-8'), re.M)]
