@@ -32,9 +32,21 @@ import dq4buildcache  # noqa: E402
 import dq4romledger  # noqa: E402
 
 
+# 빌드가 하위 프로세스로 부르는 단계 스크립트. 회귀 가드 paths 와 그 시험이 이 목록을 본다. 여기 없는 스크립트는
+# script() 가 거부하므로 단계를 더하면 여기에도 적어야 한다
+STAGES = ('dq4titlelayers.py', 'dq4titlelayerpatch.py', 'dq4overture.py', 'dq4chapter1.py', 'dq4menupatch.py',
+          'dq4soundset.py', 'dq4sparfx.py', 'dq4people.py')
+
+
+def script(name):
+    if name not in STAGES:
+        raise ValueError(f'{name} 이 dq4build.STAGES 에 없음')
+    return HERE / name
+
+
 def step(tool, *args):
     # 표준 출력은 찍지 않는다: 캐시에서 나오면 처음 만든 워크트리의 경로가 들어 있다
-    dq4buildcache.run(HERE / tool, *args, echo_stderr=True)
+    dq4buildcache.run(script(tool), *args, echo_stderr=True)
 
 
 def build(out, dq5, dq4, prologue=True, assets=None, chapter2=False):
@@ -67,13 +79,13 @@ def build(out, dq5, dq4, prologue=True, assets=None, chapter2=False):
     stage('chapter1', out / 'dq4-ch1.sfc')
     if assets is None:
         return done(out / 'dq4-ch1.sfc')
-    subprocess.run([sys.executable, HERE / 'dq4soundset.py', '--base', out / 'dq4-ch1.sfc', '--assets', assets,
+    subprocess.run([sys.executable, script('dq4soundset.py'), '--base', out / 'dq4-ch1.sfc', '--assets', assets,
                     f'@{HERE / "dq4sound-game.args"}', '--out', out / 'dq4-ch1-sound.sfc'],
                    check=True, stdout=subprocess.DEVNULL)
     # 칼 효과가 같은 파일을 고쳐 쓰므로 곡 묶음만 얹은 롬은 여기서 따로 잡아 둔다
     stage('sound', out / 'dq4-ch1-sound.sfc')
     # 서장 수련의 칼 효과(NDS 화면에서 잡은 프레임)는 에셋 저장소에 있어 곡 롬에 얹는다. 없으면 효과음만 난다
-    subprocess.run([sys.executable, HERE / 'dq4sparfx.py', 'apply', '--base', out / 'dq4-ch1-sound.sfc',
+    subprocess.run([sys.executable, script('dq4sparfx.py'), 'apply', '--base', out / 'dq4-ch1-sound.sfc',
                     '--assets', assets, '--out', out / 'dq4-ch1-sound.sfc'], check=True, stdout=subprocess.DEVNULL)
     # 칼 효과는 체크섬을 다시 맞추지 않는다. 인물 그림 단계가 없으면 이 롬이 결과물이라 여기서 맞춘다
     from dq4romassets import set_checksum
@@ -84,7 +96,7 @@ def build(out, dq5, dq4, prologue=True, assets=None, chapter2=False):
     if not (Path(assets) / dq4people.FIELD).is_dir():
         print(f'{Path(assets) / dq4people.FIELD} 이 없어 인물 그림 없이 곡 롬에서 끝낸다', file=sys.stderr)
         return done(out / 'dq4-ch1-sound.sfc')
-    subprocess.run([sys.executable, HERE / 'dq4people.py', '--base', out / 'dq4-ch1-sound.sfc', '--dq5', dq5,
+    subprocess.run([sys.executable, script('dq4people.py'), '--base', out / 'dq4-ch1-sound.sfc', '--dq5', dq5,
                     '--assets', assets, '--out', out / 'dq4-ch1-full.sfc', '--work', out / 'leader'],
                    check=True, stdout=subprocess.DEVNULL)
     stage('people', out / 'dq4-ch1-full.sfc')

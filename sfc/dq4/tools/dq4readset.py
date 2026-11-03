@@ -41,6 +41,8 @@ ROOT = HERE.parents[2]
 sys.path.insert(0, str(HERE))
 
 import dq4mesen as mesen  # noqa: E402
+sys.path.insert(0, str(ROOT / 'tools'))
+from mesence_settings import settings_digest, settings_path  # noqa: E402
 
 PRELUDE = HERE / 'lua' / 'dq4readset.lua'
 # 장면 Lua 가 dofile·require 할 수 있는 곳. 하나라도 바뀌면 모든 장면이 빗나간다
@@ -362,26 +364,14 @@ class Store:
 
 # ---------------------------------------------------------------- 실행
 
-def settings_path(mesence):
-    """MesenCE 가 읽는 settings.json. 실행 파일 옆에 있으면 포터블 모드라 그것을, 아니면 사용자 설정 폴더의 것을 읽는다.
-    MESENCE_SAVES 는 dq4mesen 이 배터리 기록을 찾는 곳일 뿐 MesenCE 의 설정 위치를 바꾸지 않아 보지 않는다."""
-    portable = Path(mesence).resolve().parent / 'settings.json'
-    if portable.is_file():
-        return portable
-    home = Path.home()
-    if sys.platform == 'darwin':
-        return home / 'Library/Application Support/MesenCE/settings.json'
-    if sys.platform == 'win32':
-        return Path(os.environ.get('APPDATA', home)) / 'MesenCE/settings.json'
-    return Path(os.environ.get('XDG_CONFIG_HOME', home / '.config')) / 'MesenCE/settings.json'
-
-
 def mesence_settings(mesence):
-    """MesenCE 설정 파일 원 바이트의 해시. 명령줄로 고정하지 않은 설정도 결과에 닿을 수 있다. 못 찾으면 멈춘다."""
-    p = settings_path(mesence)
-    if not p.is_file():
-        raise SystemExit(f'MesenCE 설정 파일을 찾지 못함: {p}. 읽은 바이트 캐시 키에 넣어야 한다(한 번 띄우면 생긴다)')
-    return hashlib.sha256(p.read_bytes()).hexdigest()
+    """MesenCE 설정 파일 원 바이트의 해시(tools/mesence_settings.py). 명령줄로 고정하지 않은 설정도 결과에 닿을 수 있다.
+    못 찾으면 멈춘다."""
+    digest = settings_digest(mesence)
+    if digest is None:
+        raise SystemExit(f'MesenCE 설정 파일을 찾지 못함: {settings_path(mesence)}. 읽은 바이트 캐시 키에 넣어야 한다'
+                         '(한 번 띄우면 생긴다)')
+    return digest
 
 
 def mesence_stamp(mesence):
