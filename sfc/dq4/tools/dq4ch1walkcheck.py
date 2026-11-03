@@ -459,7 +459,8 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
         items = list(wram[ITEMS & 0xFFFF:(ITEMS & 0xFFFF) + 12])
         messages = []
         # 도착(arrived map) 뒤 settle·test 단계에서 MAXF 에 닿아도 「arrived map」 과 「timeout phase=」 가 함께 찍힌다
-        timed_out = ' timeout phase=' in text
+        import dq4readset
+        timed_out = dq4readset.warp_timed_out(text)
     else:
         maxf = opt.get('maxf', frames(arg))
         # PRE: 앞 구간이 끝날 때 남은 A 가 연 명령 창을 닫는다. 창이 없을 때의 B 는 아무것도 열지 않는다

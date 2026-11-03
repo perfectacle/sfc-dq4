@@ -364,7 +364,7 @@ class RunTests(unittest.TestCase):
 
     def test_verify_run_that_fails_keeps_entry(self):
         """재검증으로 다시 돌린 실행이 0 이 아닌 값(시간 제한 71, MesenCE 가 죽은 134, emu.stop(3))이나 시간 초과로
-        끝나면, 견주지 않고 그 실패로 알리며 항목은 둔다(「키에 빠진 입력」 이라 하지 않는다)."""
+        끝나면, 출력을 견주지 않고 그 실패로 알리며 항목은 둔다."""
         key = self.go()[0]['key']
         with mock.patch.dict(os.environ, {'DQ4_READSET_VERIFY': '1'}):
             self.fake.watchdog = 1
@@ -583,6 +583,73 @@ class WalkJudgeTests(unittest.TestCase):
         self.assertEqual(r['status'], 'passed', r['problems'])
 
 
+TIMED_OUT = ('f00431 arrived map 01/00 cell 10,10\nf01500 timeout phase=test\n'
+             'f01500 end map 01/00 cell 10,10 BE=80 1949=00\nmessages 12A\n')
+FINISHED = 'f00431 arrived map 01/00 cell 10,10\nf00700 end map 01/00 cell 10,10 BE=80 1949=00\nmessages 12A\n'
+
+
+class WarpLogTests(unittest.TestCase):
+    """warp.txt 를 읽는 판정마다 도착 뒤 MAXF 에 닿은 장면을 실패로 본다."""
+
+    def test_helper(self):
+        self.assertTrue(rs.warp_timed_out(TIMED_OUT))
+        self.assertFalse(rs.warp_timed_out(FINISHED))
+
+    def test_bg3slot_arrival(self):
+        import dq4bg3slotcheck as bg
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, 'warp.txt').write_text(TIMED_OUT)
+            self.assertIsNone(bg.arrival_of(Path(d)))
+            Path(d, 'warp.txt').write_text(FINISHED)
+            self.assertIsNotNone(bg.arrival_of(Path(d)))
+
+    def test_environment_rom_warp(self):
+        import dq4environmentromcheck as er
+        for log, ok in ((TIMED_OUT, False), (FINISHED, True)):
+            with tempfile.TemporaryDirectory() as d:
+                out = Path(d) / 'w'
+
+                def fake(mesence, rom, script, env):
+                    Path(env['SHOT_DIR'], 'warp.txt').write_text(log)
+                    Path(env['SHOT_DIR'], 'x.mss').write_bytes(b'MSS')
+                with mock.patch.object(er, '_run', fake), mock.patch.object(er, 'warp_exit', return_value=0), \
+                        mock.patch.object(er, 'dp86_allowed', return_value='0'):
+                    if ok:
+                        self.assertEqual(er.warp('m', 'r', 's', '01/00,1,1', out, 'x')[0], out / 'x.mss')
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, 'MAXF'):
+                            er.warp('m', 'r', 's', '01/00,1,1', out, 'x')
+
+    def test_save_church(self):
+        import dq4ch1savecheck as sc
+        for log, want in ((TIMED_OUT, (None, '순간이동이 MAXF 에 닿아 멈춤(timeout phase)')), (FINISHED, ('01/00', None)),
+                          (None, (None, 'warp.txt 없음'))):
+            with tempfile.TemporaryDirectory() as d:
+                def fake(mesence, rom, script, dest, env, timeout, readset=False):
+                    dest.mkdir(parents=True, exist_ok=True)
+                    if log is not None:
+                        (dest / 'warp.txt').write_text(log, encoding='utf-8')
+                with mock.patch.object(sc.walk, 'run', fake), mock.patch.object(sc, 'free', return_value='s'), \
+                        mock.patch.object(sc, 'warp_exit', return_value=0):
+                    self.assertEqual(sc.church('m', 'r', 's', Path(d) / 'c'), want)
+
+    def test_npc_run(self):
+        import dq4npccheck as npc
+        for log, ok in ((TIMED_OUT, False), (FINISHED, True)):
+            with tempfile.TemporaryDirectory() as d:
+                def fake(mesence, rom, probe, *args, env=None, **kw):
+                    Path(env['SHOT_DIR'], 'warp.txt').write_text(log, encoding='utf-8')
+                with mock.patch.object(npc.dq4mesen, 'testrunner', fake), \
+                        mock.patch.object(npc, 'warp_exit', return_value=0), \
+                        mock.patch.object(npc, 'dp86_allowed', return_value='0'):
+                    call = lambda: npc.run('m', 'r', 's', Path(d), 'x', d, '01/00,1,1', 'a:4', False)  # noqa: E731
+                    if ok:
+                        self.assertEqual(call()[1], [0x12A])
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, 'MAXF'):
+                            call()
+
+
 class RuleTests(unittest.TestCase):
     def test_runner_copies_rom_so_no_battery_save_leaks(self):
         """소스 모양 확인: testrunner() 는 롬을 복사하지 않아 앞 실행의 .srm 을 읽는다. 캐시 실행은 run/Runner 만 쓴다."""
@@ -647,10 +714,12 @@ class RuleTests(unittest.TestCase):
     def test_readset_users_do_not_judge_from_screenshots(self):
         """소스 모양 확인: 흔한 꼴만 막는 정적 휴리스틱이다(변수에 담은 이름, 다른 모듈을 거친 읽기는 못 본다): 이 캐시를 쓰는 검사에서
         PIL 로 여는 것은 모음 그림을 만드는 sheet* 함수 안에서만, 화면 파일 이름 글자를 open()·read_bytes() 등으로
-        직접 읽지 않는다. 재검증이 화면을 견주지 않는다는 동작은 RunTests 와 test_screen_rule 이 직접 본다."""
+        직접 읽지 않는다. 대상은 dq4readset.run 을 부르거나 readset=True 를 넘기거나 순간이동 장면(scene)을 쓰는 모듈이다
+        (warp_timed_out 처럼 도움 함수만 쓰는 모듈은 아니다). 재검증이 화면을 견주지 않는다는 동작은 RunTests 와
+        test_screen_rule 이 직접 본다."""
         users = [p for p in sorted(HERE.glob('dq4*.py'))
                  if p.name not in ('dq4readset.py',) and re.search(
-                     r'^\s*import dq4readset\b|^\s*import dq4groupcheck\b|^\s*from dq4groupcheck import .*\b(field_)?scene\b'
+                     r'dq4readset\.run\(|^\s*import dq4groupcheck\b|^\s*from dq4groupcheck import .*\b(field_)?scene\b'
                      r'|readset=True', p.read_text(encoding='utf-8'), re.M)]
         self.assertIn('dq4windowcheck.py', [p.name for p in users])
         self.assertIn('dq4fieldtravelcheck.py', [p.name for p in users])

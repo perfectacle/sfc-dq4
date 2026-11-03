@@ -611,7 +611,7 @@ paths = ["sfc/dq4/tools/dq4npccheck.py", "sfc/dq4/tools/dq4npcport.py", "sfc/dq4
          "sfc/dq4/tools/dq4sleepertalk.py",
          "sfc/dq4/tools/dq4freshstate.py", "sfc/dq4/tools/lua/dq4shipstate.lua", "fc/dq4/tools/dq4npcblock.py",
          "sfc/dq5/tools/lua/dq5npcrecordcheck.lua", "sfc/dq5/tools/lua/dq5textgrowcheck.lua",
-         "sfc/dq5/tools/lua/dq5progresscheck.lua", "sfc/dq5/tools/lua/dq5warp.lua"]
+         "sfc/dq5/tools/lua/dq5progresscheck.lua", "sfc/dq5/tools/lua/dq5warp.lua", "sfc/dq4/tools/dq4readset.py"]
 run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/guard-npc-talk && uv run --locked python sfc/dq4/tools/dq4npccheck.py --build work/dq4-groups --out work/guard-npc-talk --jobs 3"
 needs = ["rom", "MESENCE", "LIBDIR", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 
@@ -630,7 +630,7 @@ why = "바꾼 맵을 그룹 롬에서 다시 그린 그림이 오프라인 그�
 paths = ["sfc/dq4/tools/dq4environmentromcheck.py", "sfc/dq4/tools/dq4environmentrom.py", "sfc/dq4/tools/dq4environmentmap.py",
          "sfc/dq4/tools/dq4environmentart.py", "sfc/dq4/tools/dq4environment.py", "sfc/dq4/tools/dq4groupbuild.py",
          "sfc/dq4/tools/dq4freshstate.py", "sfc/dq4/tools/lua/dq4shipstate.lua", "sfc/dq4/tools/lua/dq4environmentdump.lua",
-         "sfc/dq5/tools/lua/dq5warp.lua", "sfc/dq5/tools/dq5exitcheck.py", "fc/dq4/tools/dq4block.py"]
+         "sfc/dq5/tools/lua/dq5warp.lua", "sfc/dq5/tools/dq5exitcheck.py", "fc/dq4/tools/dq4block.py", "sfc/dq4/tools/dq4readset.py"]
 run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/fresh-envrom && uv run --locked python sfc/dq4/tools/dq4environmentromcheck.py --rom work/dq4-groups/groups.sfc --out work/fresh-envrom"
 needs = ["rom", "MESENCE", "LIBDIR", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 
@@ -661,7 +661,7 @@ why = "BG3 타일맵을 옮긴 menu.sfc 에서 실내 맵마다 $0725 가 dq4bg3
 paths = ["sfc/dq4/tools/dq4bg3slot.py", "sfc/dq4/tools/dq4bg3slotcheck.py", "sfc/dq4/tools/lua/dq4bg3slotwarp.lua",
          "sfc/dq4/tools/dq4menupatch.py", "sfc/dq4/tools/dq4windowname.py", "sfc/dq4/tools/dq4windowname.asm",
          "sfc/dq4/tools/dq4windowtext.py", "sfc/dq4/tools/dq4freshstate.py", "sfc/dq4/tools/lua/dq4shipstate.lua",
-         "sfc/dq4/tools/dq4build.py", "sfc/dq5/tools/lua/dq5warp.lua"]
+         "sfc/dq4/tools/dq4build.py", "sfc/dq5/tools/lua/dq5warp.lua", "sfc/dq4/tools/dq4readset.py"]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/fresh-bg3slot && uv run --locked python sfc/dq4/tools/dq4bg3slotcheck.py --rom work/ch1/menu.sfc --old work/ch1/overture.sfc --out work/fresh-bg3slot --maps 00/0A,01/00,01/01,02/00,03/00,05/00,0A/00,17/00,19/00,19/02,04/0B,33/01,1E/00,20/06,32/00"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 

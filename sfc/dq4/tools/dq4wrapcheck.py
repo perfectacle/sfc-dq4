@@ -32,6 +32,7 @@ sys.path[:0] = [str(HERE), str(DQ5_TOOLS)]
 
 import dq4ch1walkcheck as wc  # noqa: E402
 import dq4heroblockcheck as hb  # noqa: E402
+import dq4readset  # noqa: E402
 from dq4environmentart import create_assets  # noqa: E402
 from dq4environmentmap import prepare_maps  # noqa: E402
 from dq4environmentrom import GROUPS, MAPS, ROUTINE_CALLS  # noqa: E402
@@ -126,7 +127,7 @@ class Run:
         wc.run(self.mesence, self.rom, DRIVER, dest, env, 300, readset=True)
         log = (dest / 'warp.txt').read_text() if (dest / 'warp.txt').exists() else ''
         arrived = re.search(r'arrived map (\w\w)/(\w\w)', log)
-        if ' timeout phase=' in log:
+        if dq4readset.warp_timed_out(log):
             # 도착한 뒤 MAXF 에 닿아도 「arrived map」 이 남는다. 도착하지 못한 것으로 친다
             arrived = None
         return dest / 'end.mss', (int(arrived[1], 16), int(arrived[2], 16)) if arrived else None
