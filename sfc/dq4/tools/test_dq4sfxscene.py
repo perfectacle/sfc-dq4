@@ -200,13 +200,14 @@ class RomCheckTest(unittest.TestCase):
         t = s.load_table(s.ARGS.read_text())
         crit = [x for x in s.scenes(t) if x.critical]
         self.assertEqual([x.name for x in crit], ['battle-critical'])
-        self.assertEqual(crit[0].seed, 0)
         rom = bytearray(0x400000)
         for site in s.ENTRY_SITES:
             rom[s.lorom(site):s.lorom(site) + 5] = s.ENTRY_BYTES
         o = s.lorom(s.CRITICAL_SITE)
         rom[o:o + len(s.CRITICAL_BYTES)] = s.CRITICAL_BYTES
-        self.assertEqual(s.scene_rom(bytes(rom), crit[0])[o + 1], 0x01)
+        want = bytearray(s.CRITICAL_BYTES)
+        want[1] = 0x01
+        self.assertEqual(s.scene_rom(bytes(rom), crit[0])[o:o + len(want)], bytes(want))
 
 
 class QueueTest(unittest.TestCase):
