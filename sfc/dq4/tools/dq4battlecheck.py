@@ -252,7 +252,7 @@ def run_scene(mesence, rom, data, base, out, name, scene, rounds, seed=0):
     extra, party = wc.setup(wc.SEGMENTS, names.index(scene['after']) + 1)
     for k, seg in enumerate(scene['prep']):
         r = wc.segment(mesence, rom, state, dest / seg[0], seg, wc.NO_ENCOUNTERS,
-                       *((extra, party) if k == 0 else ('', '')), seed)
+                       *((extra, party) if k == 0 else ('', '')), seed, readset=True)
         if r['status'] != 'passed':
             return [{'name': name, 'seed': seed, 'status': 'failed', 'problems': [f'자리 잡기 {seg[0]}: {r["problems"]}']}]
         state = dest / seg[0] / 'end.mss'
@@ -262,6 +262,8 @@ def run_scene(mesence, rom, data, base, out, name, scene, rounds, seed=0):
         runs = []
         for i in range(rounds):
             run_dir = dest / f'{kind}{i + 1}'
+            # 전투는 읽은 바이트 캐시를 거치지 않는다. 같은 상태에서 rounds 번 돌려 결과가 같은지 보는 검사라 캐시가 맞으면
+            # 두 번째가 첫 번째의 사본이 되고, 판정이 화면 찍기(start.png·after.png)를 견준다
             wc.run(mesence, rom, BATTLE, run_dir, {'STATE': str(state), 'ROMPATCH': patch, 'AFTERPATCH': wc.NO_ENCOUNTERS,
                                                     'SET': f'{wc.rng_for(seed)};{wc.DAY_SET}', 'POKE': wc.HERO_HP,
                                                     'STEP': scene['step'], 'KEYS': keys, 'MOVE': scene['move'],
@@ -309,7 +311,7 @@ def main():
         base = args.base.resolve()
     else:
         cache = None if args.no_state_cache else wc.StateCache(data)
-        base, pro = wc.prologue(mesence, rom, data, out, wc.SEGMENTS, cache)
+        base, pro = wc.prologue(mesence, rom, data, out, wc.SEGMENTS, cache, readset=True)
         if pro['status'] != 'passed':
             raise SystemExit(f'서장 실패: {pro["problems"]}')
     names = args.scenes.split(',') if args.scenes else list(SCENES)

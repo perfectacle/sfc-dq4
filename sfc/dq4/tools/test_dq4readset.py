@@ -477,17 +477,20 @@ class RuleTests(unittest.TestCase):
         직접 읽지 않는다. 재검증이 화면을 견주지 않는다는 동작은 RunTests 와 test_screen_rule 이 직접 본다."""
         users = [p for p in sorted(HERE.glob('dq4*.py'))
                  if p.name not in ('dq4readset.py',) and re.search(
-                     r'^\s*import dq4readset\b|^\s*import dq4groupcheck\b|^\s*from dq4groupcheck import .*\b(field_)?scene\b',
-                     p.read_text(encoding='utf-8'), re.M)]
+                     r'^\s*import dq4readset\b|^\s*import dq4groupcheck\b|^\s*from dq4groupcheck import .*\b(field_)?scene\b'
+                     r'|readset=True', p.read_text(encoding='utf-8'), re.M)]
         self.assertIn('dq4windowcheck.py', [p.name for p in users])
         self.assertIn('dq4fieldtravelcheck.py', [p.name for p in users])
+        self.assertIn('dq4heroblockcheck.py', [p.name for p in users])
+        # (파일, 함수): 화면을 견주지만 그 화면을 만드는 실행은 캐시를 거치지 않는다
+        allowed = {('dq4battlecheck.py', 'same_pixels')}
         bad = []
         for p in users:
             tree = ast.parse(p.read_text(encoding='utf-8'))
             for fn in ast.walk(tree):
                 if not isinstance(fn, (ast.FunctionDef, ast.Module)):
                     continue
-                if isinstance(fn, ast.FunctionDef) and fn.name.startswith('sheet'):
+                if isinstance(fn, ast.FunctionDef) and (fn.name.startswith('sheet') or (p.name, fn.name) in allowed):
                     continue
                 body = fn.body if isinstance(fn, ast.Module) else fn.body
                 for node in (n for stmt in body for n in ast.walk(stmt)
@@ -502,6 +505,17 @@ class RuleTests(unittest.TestCase):
                             for c in ast.walk(node)):
                         bad.append(f'{p.name}:{node.lineno} {f.attr}')
         self.assertEqual(bad, [])
+
+    def test_battle_rounds_bypass_cache(self):
+        """전투 검사는 같은 상태에서 전투를 여러 번 돌려 결과가 같은지 보고 화면을 견준다. 그 전투 실행은 캐시를 거치지 않는다
+        (거치면 둘째 실행이 첫 실행의 사본이 된다)."""
+        tree = ast.parse((HERE / 'dq4battlecheck.py').read_text(encoding='utf-8'))
+        fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == 'run_scene')
+        runs = [n for n in ast.walk(fn) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and n.func.attr == 'run' and isinstance(n.func.value, ast.Name) and n.func.value.id == 'wc']
+        self.assertTrue(runs)
+        for n in runs:
+            self.assertFalse([k for k in n.keywords if k.arg == 'readset' and getattr(k.value, 'value', False)])
 
     def test_clear_saves_removes_cdl(self):
         with tempfile.TemporaryDirectory() as d:

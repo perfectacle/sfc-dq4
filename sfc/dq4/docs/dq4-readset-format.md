@@ -9,6 +9,7 @@
 - 전투 메시지 검사(`dq4battlemsgcheck.py`)의 묶음 장면.
 - `dq4groupcheck.scene`(순간이동 장면)을 거치는 검사 모두. 기본이 캐시를 거친다(`readset=False` 면 거치지 않음): 그룹 롬 장면(상자·필드·필드 조우·ルーラ), 문 열기·문 칸, 성문, 던전 조우, 우물 스위치, 그룹 연결.
 - 상자 검사(`dq4chestcheck.py`)의 조사 장면, 우물 스위치 검사(`dq4wellresetcheck.py`)의 기록·리셋·이어 하기 장면, 보행 메시지 이름 검사(`dq4namegamecheck.py`).
+- 서장 끝에서 걷는 검사: 주인공이 선 칸(`dq4heroblockcheck.py`), 환경 훅 wrap(`dq4wrapcheck.py`), 필드 OBJ 반투명(`dq4fieldmathcheck.py`)의 장면 모두. 전투 검사(`dq4battlecheck.py`)는 서장과 자리 잡기 구간만 거친다. 전투 실행은 같은 상태에서 여러 번 돌려 결과가 같은지 보고 화면을 견주므로 캐시를 거치지 않는다.
 - 장면형 검사의 출발 상태(`dq4freshstate.make`): 서장 끝(서장 시작·서장 걷기)과 배 선실. 같은 롬 SHA-1 로 만든 상태 캐시가 없을 때 이 캐시로 걷기를 건너뛴다.
 
 ## 왜 건전한가
