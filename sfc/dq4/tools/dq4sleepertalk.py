@@ -47,3 +47,23 @@ def writes(at=HOOK_AT):
         {"at": _cpu(LYING_CHECK), "hex": bytes((0x4C, at & 0xFF, (at >> 8) & 0xFF)).hex(" ").upper(),
          "orig": LYING_CHECK_ORIG.hex(" ").upper(), "note": "누운 인물 찾기를 훅으로"},
     ]
+
+
+# The cells 05:84FE is called with, in order, for the hero at (x, y) facing each way (05:83B5·8403·844C·8498).
+LYING_CELLS = {
+    "up": ((0, -3), (-1, -3)),
+    "down": ((0, 1), (-1, 1)),
+    "right": ((2, -1), (2, -2)),
+    "left": ((-3, -1), (-3, -2)),
+}
+
+
+def lying_target(x, y, direction, lying, hooked=True):
+    """Which lying person (a cell of `lying`) 05:84FE finds for the hero at DQ5 cell (x, y), as the code reads,
+    with or without the hook. Counters and the standing check before it are left out. A model for the tests that
+    look over whole maps; the emulator scenes of dq4npccheck are what show the ROM does this."""
+    for dx, dy in LYING_CELLS[direction]:
+        for k in ((0, 1) if hooked else (0,)):
+            if (x + dx + k, y + dy) in lying:
+                return x + dx + k, y + dy
+    return None

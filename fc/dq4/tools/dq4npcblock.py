@@ -79,7 +79,8 @@ JUMPS = {0x80, 0x83, 0x84}                    # 다음 바이트로 이어지지
 
 # 쉬지 않고 바로 다음 명령으로 이어 가는 명령(82 는 횟수만 두고 이어 감)
 GO_ON = {0x0F, 0x10, 0x11, *range(0x12, 0x21), 0x23, 0x24, 0x25, 0x27, 0x28, 0x29, 0x2C, 0x30, 0x82}
-HIDE = {0x07, 0x08, 0x09, 0x0A}
+# 깜박이며 사라지는 09·0A 는 사라지기 전에 그려지므로 들어설 때 숨는 것으로 보지 않는다
+HIDE = {0x07, 0x08}
 
 
 def record_block(rec, night=False):
@@ -97,7 +98,7 @@ def record_block(rec, night=False):
 
 
 def hidden_on_entry(rec, night=False):
-    """맵에 들어설 때 블록이 쉬기 전에 숨기는 인물: 이어 가는 명령만 지나 첫 쉬는 명령이 숨기기(07~0A)면 참.
+    """맵에 들어설 때 블록이 쉬기 전에 숨기는 인물: 이어 가는 명령만 지나 첫 쉬는 명령이 숨기기(07·08)면 참.
     그 인물은 이벤트가 0B·0C 로 드러낼 때까지 보이지 않고 막지도 않는다."""
     block, p = record_block(rec, night), 0
     while p < len(block):

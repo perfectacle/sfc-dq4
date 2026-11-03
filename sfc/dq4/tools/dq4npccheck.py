@@ -97,7 +97,7 @@ def codes_match(rows, message, want):
     return row is not None and row[:min(len(want), 64)] == want[:64]
 
 
-def run(mesence, rom, state, out, name, libdir, to, test, night, shop=False, ret=None):
+def run(mesence, rom, state, out, name, libdir, to, test, night, shop=False, ret=None, sets=None):
     dest = out / name
     dest.mkdir(parents=True)
     group, number = to.split(",")[0].split("/")
@@ -109,6 +109,8 @@ def run(mesence, rom, state, out, name, libdir, to, test, night, shop=False, ret
                WARPEXIT=f"{warp_exit(rom):X}", DP86OK=dp86_allowed(rom))
     if night:
         env["POKE"] = NIGHT_POKE
+    if sets:
+        env["SET"] = sets
     if shop:
         env.update(MODE="shop", DRIVER=str(DQ5_TOOLS / "lua" / "dq5warp.lua"))
     elif ret is not None:

@@ -580,7 +580,8 @@ GROUP_PATCHES = ('env/dq4-environment.dq5patch.json', 'doors.dq5patch.json', 'ou
                  'entrance-hook.dq5patch.json', 'field-gfx.dq5patch.json', 'field-blocks.dq5patch.json',
                  'field.dq5patch.json', 'talk.dq5patch.json', 'travel.dq5patch.json', 'names.dq5patch.json',
                  'companion-names.dq5patch.json', 'person-names.dq5patch.json',
-                 'zones.dq5patch.json', 'grids.dq5patch.json', 'rates.dq5patch.json', 'chests.dq5patch.json')
+                 'zones.dq5patch.json', 'grids.dq5patch.json', 'rates.dq5patch.json', 'chests.dq5patch.json',
+                 'sleeper-talk.dq5patch.json')
 # 원래 롬에서는 새 맵 레코드를 34 에 두지만 통합 롬의 34 는 필드 지도(34:C000~)가 쓰므로 3A 로 돌린다. 3A 가 차면 30 의
 # 타이틀 코드·서곡 사이 빈 곳(메뉴 롬에서 0 이거나 원본 20 의 거울 그대로인 곳), 그다음 통째로 빈 31~33·34 앞쪽·36·37·39
 # 로 간다. 30:8000~8FFF 는 타이틀 코드(메뉴 준비
