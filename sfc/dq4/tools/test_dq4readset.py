@@ -516,30 +516,33 @@ class RunTests(unittest.TestCase):
 
 
 def uses_readset_run(path):
-    """그 모듈이 읽은 바이트 캐시로 장면을 돌리는가: dq4readset 의 run 을 부르거나(별칭 import·from import 포함),
-    readset=True 를 넘기거나, 순간이동 장면(dq4groupcheck.scene·field_scene)을 쓴다."""
+    """그 모듈이 읽은 바이트 캐시로 장면을 돌리는가: dq4readset 의 run 을 부르거나(별칭 import·from import·* 포함),
+    readset=True 를 넘기거나, 순간이동 장면(dq4groupcheck.scene·field_scene)을 부른다."""
     tree = ast.parse(Path(path).read_text(encoding='utf-8'))
-    modules, runs = set(), set()
+    aliases = {'dq4readset': set(), 'dq4groupcheck': set()}     # 모듈 이름 별칭
+    names = {'dq4readset': set(), 'dq4groupcheck': set()}       # from import 로 들인 함수 이름
+    wanted = {'dq4readset': {'run'}, 'dq4groupcheck': {'scene', 'field_scene'}}
     for n in ast.walk(tree):
         if isinstance(n, ast.Import):
             for a in n.names:
-                if a.name == 'dq4readset':
-                    modules.add(a.asname or a.name)
-                if a.name == 'dq4groupcheck':
+                if a.name in aliases:
+                    aliases[a.name].add(a.asname or a.name)
+        elif isinstance(n, ast.ImportFrom) and n.module in names:
+            for a in n.names:
+                if a.name == '*':
                     return True
-        elif isinstance(n, ast.ImportFrom) and n.module == 'dq4readset':
-            runs |= {a.asname or a.name for a in n.names if a.name == 'run'}
-        elif isinstance(n, ast.ImportFrom) and n.module == 'dq4groupcheck':
-            if {a.name for a in n.names} & {'scene', 'field_scene'}:
-                return True
+                if a.name in wanted[n.module]:
+                    names[n.module].add(a.asname or a.name)
     for n in ast.walk(tree):
         if not isinstance(n, ast.Call):
             continue
         f = n.func
-        if isinstance(f, ast.Attribute) and f.attr == 'run' and isinstance(f.value, ast.Name) and f.value.id in modules:
-            return True
-        if isinstance(f, ast.Name) and f.id in runs:
-            return True
+        for module in aliases:
+            if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) and f.value.id in aliases[module] \
+                    and f.attr in wanted[module]:
+                return True
+            if isinstance(f, ast.Name) and f.id in names[module]:
+                return True
         if any(k.arg == 'readset' and getattr(k.value, 'value', None) is True for k in n.keywords):
             return True
     return False
@@ -552,7 +555,12 @@ class UsesReadsetTests(unittest.TestCase):
                  'import dq4readset\ndq4readset.run(1)\n': True,
                  'import dq4readset\ndq4readset.warp_timed_out("")\n': False,
                  'import dq4ch1walkcheck as wc\nwc.run(1, readset=True)\n': True,
-                 'from dq4groupcheck import field_scene\n': True,
+                 'from dq4groupcheck import field_scene\nfield_scene(1)\n': True,
+                 'from dq4groupcheck import field_scene\n': False,
+                 'import dq4groupcheck\ndq4groupcheck.scene(1)\n': True,
+                 'import dq4groupcheck as g\ng.same_place(1)\n': False,
+                 'from dq4readset import *\n': True,
+                 'from dq4groupcheck import *\n': True,
                  'import os\n': False}
         with tempfile.TemporaryDirectory() as d:
             for i, (src, want) in enumerate(cases.items()):
@@ -691,20 +699,50 @@ class WarpLogTests(unittest.TestCase):
                     self.assertEqual(runner.warp(Path(d) / 'w', 's.mss', '01/00,1,1')[1], arrived)
 
     def test_npc_timeout_is_one_scene_failure(self):
-        """한 장면의 MAXF 는 그 장면의 실패로 바뀌고(나머지 장면은 계속 본다), 다른 예외는 그대로 던진다."""
-        import concurrent.futures
+        """main 을 실제로 돌린다(장면 실행만 가짜): 밤 인물 표 장면이 MAXF 에 닿으면 그 장면만 실패로 적히고, 낮 장면은
+        판정까지 가며, 끝에 1 로 끝난다."""
         import dq4npccheck as npc
-        bad, good, other = (concurrent.futures.Future() for _ in range(3))
-        bad.set_exception(npc.WarpTimeout('talk-x: dq5warp 가 MAXF 에 닿아 멈춤(timeout phase)'))
-        good.set_result((None, [0x12A], 0))
-        other.set_exception(ValueError('boom'))
-        self.assertEqual(npc.outcome(bad), (None, 'talk-x: dq5warp 가 MAXF 에 닿아 멈춤(timeout phase)'))
-        self.assertEqual(npc.outcome(good), ((None, [0x12A], 0), None))
-        with self.assertRaises(ValueError):
-            npc.outcome(other)
-        src = (HERE / 'dq4npccheck.py').read_text(encoding='utf-8')
-        self.assertIn('got, error = outcome(future)', src)          # 소스 모양 확인: 결과 모으는 곳이 outcome 을 거친다
-        self.assertNotIn('= future.result()', src)
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            build, out, lib = d / 'build', d / 'out', d / 'lib'
+            for p in (build, lib):
+                p.mkdir()
+            (build / 'groups.sfc').write_bytes(bytes(0x8000))
+            (build / 'npc-layout.json').write_text(json.dumps({'lists': {'01/00': '01:8000'}}))
+            (build / 'npc-report.json').write_text(json.dumps({'01/00': []}))
+            (build / 'shop-report.json').write_text(json.dumps({'shops': [], 'prices': {}, 'inns': []}))
+            (d / 'dq4.nes').write_bytes(b'')
+
+            class Map:
+                w = h = 4
+
+            def scene_run(mesence, rom, state, out_, name, libdir, to, test, night, *a, **k):
+                if night:
+                    raise npc.WarpTimeout(f'{name}: dq5warp 가 MAXF 에 닿아 멈춤(timeout phase)')
+                return bytes(0x20000), None
+            argv = ['dq4npccheck.py', '--build', str(build), '--out', str(out), '--dq4', str(d / 'dq4.nes'),
+                    '--jobs', '2']
+            patches = [mock.patch.object(npc, 'run', scene_run), mock.patch.object(npc, 'expected_codes', return_value={}),
+                       mock.patch.object(npc, 'decoder_return', return_value=None),
+                       mock.patch.object(npc.ines, 'prg', return_value=b''),
+                       mock.patch.object(npc, 'fc_map', return_value=(0, 0)),
+                       mock.patch.object(npc.dq4block, 'Map', return_value=Map()),
+                       mock.patch.object(npc, 'walkable', return_value=True),
+                       mock.patch.object(npc, 'list_entries', return_value=[]),
+                       mock.patch.object(npc, 'table_values', return_value={}),
+                       mock.patch.object(npc, 'compare', return_value=[]),
+                       mock.patch.object(npc.dq4freshstate, 'resolve', return_value=d / 's.mss'),
+                       mock.patch.object(sys, 'argv', argv),
+                       mock.patch.dict(os.environ, {'MESENCE': 'm', 'LIBDIR': str(lib)})]
+            with contextlib.ExitStack() as stack, contextlib.redirect_stdout(io.StringIO()):
+                for p in patches:
+                    stack.enter_context(p)
+                rc = npc.main()
+            scenes = json.loads((out / 'results.json').read_text())['scenes']
+        self.assertEqual(rc, 1)
+        self.assertEqual(scenes['table-0100-day'], {'ok': True, 'people': 0, 'mismatch': []})
+        self.assertEqual(scenes['table-0100-night'],
+                         {'ok': False, 'error': 'table-0100-night: dq5warp 가 MAXF 에 닿아 멈춤(timeout phase)'})
 
     def test_npc_run(self):
         import dq4npccheck as npc
@@ -791,6 +829,7 @@ class RuleTests(unittest.TestCase):
         (warp_timed_out 처럼 도움 함수만 쓰는 모듈은 아니다). 재검증이 화면을 견주지 않는다는 동작은 RunTests 와
         test_screen_rule 이 직접 본다."""
         users = [p for p in sorted(HERE.glob('dq4*.py')) if p.name != 'dq4readset.py' and uses_readset_run(p)]
+        self.assertNotIn('dq4npccheck.py', [p.name for p in users])        # 도움 함수만 쓴다
         self.assertIn('dq4windowcheck.py', [p.name for p in users])
         self.assertIn('dq4readsetcheck.py', [p.name for p in users])     # import dq4readset as rs → rs.run
         self.assertIn('dq4fieldtravelcheck.py', [p.name for p in users])
@@ -820,21 +859,22 @@ class RuleTests(unittest.TestCase):
         self.assertEqual(bad, [])
 
     def test_walk_guards_watch_their_imports(self):
-        """소스 모양 확인: 서장 끝 걷기 검사의 실행 검사 paths 에 그 검사가 바로 import 하는 dq4·dq5 모듈이 모두 있다.
-        모듈 파일을 찾지 못하면(옮겼거나 이름이 바뀜) 건너뛰지 않고 실패한다."""
+        """소스 모양 확인: 서장 끝 걷기·저장 검사의 실행 검사 paths 에, 명령이 부르는 진입 스크립트(빌드 스크립트 포함)와
+        그 각각이 바로 import 하는 dq4·dq5 모듈이 모두 있다. 모듈 파일을 찾지 못하면(옮겼거나 이름이 바뀜) 실패한다."""
         import tomllib
         checks = {c['name']: c for c in tomllib.loads((HERE.parent / 'guards.toml').read_text(encoding='utf-8'))['check']}
         root = HERE.parents[2]
-        for name, mod in (('dq4-heroblock', 'dq4heroblockcheck'), ('dq4-field-obj-math', 'dq4fieldmathcheck'),
-                          ('dq4-battle-check', 'dq4battlecheck'), ('dq4-wrap-routine', 'dq4wrapcheck'),
-                          ('dq4-ch1-save', 'dq4ch1savecheck')):
-            src = (HERE / f'{mod}.py').read_text(encoding='utf-8')
-            want = set()
-            for m in set(re.findall(r'^\s*(?:import|from)\s+(dq[45]\w+)', src, re.M)):
-                found = [base / f'{m}.py' for base in (HERE, root / 'sfc' / 'dq5' / 'tools', root / 'fc' / 'dq4' / 'tools')
-                         if (base / f'{m}.py').exists()]
-                self.assertTrue(found, f'{name}: import {m} 의 파일을 찾지 못함')
-                want.add(found[0].relative_to(root).as_posix())
+        bases = (HERE, root / 'sfc' / 'dq5' / 'tools', root / 'fc' / 'dq4' / 'tools')
+        for name in ('dq4-heroblock', 'dq4-field-obj-math', 'dq4-battle-check', 'dq4-wrap-routine', 'dq4-ch1-save'):
+            entries = re.findall(r'((?:sfc|fc)/\S+?\.py)', checks[name]['run'])
+            self.assertTrue(entries, name)
+            want = set(entries)
+            for entry in entries:
+                src = (root / entry).read_text(encoding='utf-8')
+                for m in set(re.findall(r'^\s*(?:import|from)\s+(dq[45]\w+)', src, re.M)):
+                    found = [b / f'{m}.py' for b in bases if (b / f'{m}.py').exists()]
+                    self.assertTrue(found, f'{name}: {entry} 의 import {m} 파일을 찾지 못함')
+                    want.add(found[0].relative_to(root).as_posix())
             self.assertFalse(want - set(checks[name]['paths']), name)
 
     def test_battle_rounds_bypass_cache(self):
