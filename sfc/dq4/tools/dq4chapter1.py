@@ -130,10 +130,13 @@ TEXTS = {}
 _talks = []
 
 
+MESSAGE_OF_TALK = 0x3C6          # 덧붙인 대화 t 의 메시지 번호는 t + 이 값
+
+
 def talk(parts):
     t = TALK_BASE + len(_talks)
     _talks.append(parts)
-    TEXTS[t + 0x3C6] = parts
+    TEXTS[t + MESSAGE_OF_TALK] = parts
     return t
 
 
@@ -215,8 +218,11 @@ NIGHT_STAFF = [
     (0x17, 0x09, GUARD, 'down', T_N_ROUND),
     (0x0F, 0x11, GUARD, 'down', T_N_ASLEEP),
     (0x10, 0x11, GUARD, 'down', T_N_INN),
-    (0x01, 0x1C, GUARD, 'down', T_N_SNORE),
-    (0x01, 0x1F, GUARD, 'down', T_N_BED),
+]
+# 침대 발치(bed_left)에 누운 병사. FC 도 누워 있고 발치 위·아래와 침대 오른쪽에서 대답한다(실측)
+NIGHT_ABED = [
+    (0x01, 0x1C, GUARD, T_N_SNORE),
+    (0x01, 0x1F, GUARD, T_N_BED),
 ]
 KING_AT = (0x10, 0x0D)
 # 연설이 끝나면 전사들이 두 줄로 아래 출구 (0F~10,23)까지 걸어가 빠진다(FC 인물 블록 레코드 12~19 와 같은 길).
@@ -243,6 +249,14 @@ def entry(src, x, y, gfx, facing, talk_no):
         # 원본은 횃불이라 애니 2/2(빠른 깜박임). DQ5 사람 인물은 F/F 다
         fields.update(walk_anim=15, stand_anim=15)
     return {"from": src, "time": "day", "fields": fields}
+
+
+def lying(x, y, gfx, talk_no):
+    """FC 칸 (x, y) 침대 발치에 눕힌 밤 인물. 놓는 자리·견본은 옮긴 FC 누운 인물(dq4npcport.LIE)과 같다."""
+    import dq4npcport
+    return {"from": dq4npcport.LIE, "time": "night",
+            "fields": {"x": x * 2 + 1, "y": y * 2, "gfx": gfx, "facing": "right", "talk": talk_no, "layer": 0,
+                       "interval": 0}}
 
 
 def walk_out(address, path):
@@ -288,7 +302,8 @@ def npc_doc(records, ported=(), prologue=False, report=None, ported_messages=(),
     before = [entry(SCRIPTED, *KING_AT, KING, 'down', T_KING),
               entry(STATIC, *MINISTER_AT, MINISTER, 'right', T_MINISTER), easy] + lineup + staff
     after = [king, entry(STATIC, *MINISTER_AT, MINISTER, 'right', T_MINISTER), easy] + staff + \
-        [{**entry(STATIC, x, y, g, f, t), "time": "night"} for x, y, g, f, t in NIGHT_STAFF]
+        [{**entry(STATIC, x, y, g, f, t), "time": "night"} for x, y, g, f, t in NIGHT_STAFF] + \
+        [lying(*abed) for abed in NIGHT_ABED]
     scripts = [
         throne_script(native),
         # 주인공 통과(1C)를 켜면 주인공 옆 전사가 반 칸 어긋나 멈춰서(실측), 오른쪽 무리는 먼저 곧장 내려가
