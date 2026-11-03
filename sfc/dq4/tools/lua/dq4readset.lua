@@ -17,8 +17,8 @@ local PRG = emu.memType.snesPrgRom
 local CPU = emu.memType.snesMemory
 local READ, EXEC = emu.counterType.readCount, emu.counterType.execCount
 
--- 장면 Lua 의 오류. testrunner 는 콜백 안 오류를 삼키고 다음 프레임을 계속 돌며, emu.stop 뒤에 난 오류에도 0 으로 끝난다
--- (실측). 오류가 나면 읽은 집합 파일을 지우고(그 파일이 없으면 dq4readset.py 가 캐시에 넣지 않는다), .err 와 표준 오류에
+-- 장면 Lua 의 오류. testrunner 는 콜백 안 오류를 삼키고 다음 프레임을 계속 돌며, emu.stop 뒤에 난 오류에도 0 으로 끝난다.
+-- 오류가 나면 읽은 집합 파일을 지우고(그 파일이 없으면 dq4readset.py 가 캐시에 넣지 않는다), .err 와 표준 오류에
 -- 적는다. 그 뒤 dump 는 끝줄을 LUAERROR 로 쓴다. 어느 쓰기가 실패해도 캐시에 들지 않는 쪽으로 기운다
 local errOut = out .. ".err"
 local failed = false
@@ -46,7 +46,7 @@ local function guarded(fn)
   return function(...) return pass(pcall(fn, ...)) end
 end
 
--- MesenCE 는 지울 콜백을 add 가 돌려준 번호로 찾는다(실측: 함수를 넘기면 머리말이 없어도 지워지지 않는다). 그래서 감싼
+-- MesenCE 는 지울 콜백을 add 가 돌려준 번호로 찾는다(함수를 넘기면 머리말이 없어도 지워지지 않는다). 그래서 감싼
 -- 함수를 넘겨도 장면이 받은 번호로 그대로 지워진다. 머리말 자신의 콜백보다 먼저 건다
 for _, name in ipairs({"addEventCallback", "addMemoryCallback"}) do
   local orig = emu[name]

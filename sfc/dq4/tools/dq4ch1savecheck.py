@@ -19,7 +19,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -27,7 +26,7 @@ HERE = Path(__file__).resolve().parent
 DQ5_TOOLS = HERE.parents[1] / 'dq5' / 'tools'
 sys.path[:0] = [str(HERE), str(DQ5_TOOLS)]
 
-import dq4mesen as mesen  # noqa: E402
+import dq4readset  # noqa: E402
 import dq4ch1walkcheck as walk  # noqa: E402
 import dq4dungeonencountercheck as enc  # noqa: E402
 import dq4groupcheck  # noqa: E402
@@ -84,7 +83,7 @@ def free(mesence, rom, state, dest):
     maxf = walk.frames(walk.pc.CLOSE) + 60
     walk.run(mesence, rom, walk.WALK_STATE, dest, {'STATE': str(state), 'WALK': str(walk.WALK),
                                                    'WAYPOINTS': walk.pc.CLOSE, 'SAVE': 'free.mss', 'MAXF': str(maxf),
-                                                   'ROMPATCH': walk.NO_ENCOUNTERS}, 120)
+                                                   'ROMPATCH': walk.NO_ENCOUNTERS}, 120, readset=True)
     return dest / 'free.mss'
 
 
@@ -92,7 +91,7 @@ def church(mesence, rom, state, dest):
     state = free(mesence, rom, state, dest / 'free')
     walk.run(mesence, rom, walk.WARP, dest, {'STATE': str(state), 'TO': CHURCH, 'SAVE': 'church.mss', 'SETTLE': '120',
                                              'MAXF': '1500', 'WARPEXIT': f'{warp_exit(rom):X}',
-                                             'ANYWHERE': '1', 'ROMPATCH': walk.NO_ENCOUNTERS}, 300)
+                                             'ANYWHERE': '1', 'ROMPATCH': walk.NO_ENCOUNTERS}, 300, readset=True)
     text = (dest / 'warp.txt').read_text(encoding='utf-8') if (dest / 'warp.txt').exists() else ''
     found = re.search(r'arrived map (\w\w/\w\w)', text)
     return found[1] if found else None
@@ -108,8 +107,7 @@ def save_continue(mesence, rom, state, dest):
                PRE=f'{TALK},wait:400,{well.CONTINUE}', RESETAT=str(RESET), MAXF=str(SHOT + 10),
                CALLS=f'{CONTINUE_PATH},{LOGO},{MESSAGE}', ROMPATCH=walk.NO_ENCOUNTERS, SHOTS=f'{SAVED - 50},{SHOT}',
                DUMP=';'.join(dumps))
-    mesen.run(mesence, rom, DQ5_TOOLS / 'lua' / 'dq5cdldump.lua', folder=dest, env=env, stdout=subprocess.DEVNULL,
-              stderr=subprocess.DEVNULL, timeout=900, check=False)
+    dq4readset.run(mesence, rom, DQ5_TOOLS / 'lua' / 'dq5cdldump.lua', dest, env, timeout=900)
     text = (dest / 'msg.txt').read_text(encoding='utf-8') if (dest / 'msg.txt').exists() else ''
     got = {(int(m[1]), int(m[2], 16)): bytes.fromhex(m[3])
            for m in re.finditer(r'(\d+) dump ([0-9A-F]{6}) ([0-9A-F ]+)', text)}

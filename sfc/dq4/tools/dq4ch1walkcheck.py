@@ -385,7 +385,8 @@ def run(mesence, rom, script, dest, env, timeout, readset=False):
     full.update(env, SHOT_DIR=str(dest))
     if readset:
         import dq4readset
-        dq4readset.run(mesence, rom, script, dest, full, timeout=timeout, log='mesen.log', cwd=dest)
+        accept = dq4readset.warp_finished if Path(script).resolve() == WARP.resolve() else None
+        dq4readset.run(mesence, rom, script, dest, full, timeout=timeout, log='mesen.log', cwd=dest, accept=accept)
         return
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
         try:
