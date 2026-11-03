@@ -184,19 +184,25 @@ NOT_INPUT = re.compile(r'(\.md$|(^|/)guards\.toml$|^\.agents/|^\.github/|^\.clau
 TEST_FILE = re.compile(r'((^|/)test_[^/]*\.py$|(^|/)tests/)')
 
 
+def runs_tests(run):
+    """명령이 단위 테스트를 부르는가: unittest·pytest 를 쓰거나 test_*.py·tests/ 의 파일을 바로 돌린다."""
+    return bool(re.search(r'\b(unittest|pytest)\b|(^|[\s/])test_\w*\.py\b|(^|[\s/])tests/', run))
+
+
 def is_input(path, run):
     """그 추적 파일이 이 검사 명령의 결과에 닿을 수 있는가. 단위 테스트를 부르는 명령은 테스트가 무엇을 읽을지 몰라
     .md 만 뺀다."""
     if path.endswith('.md'):
         return False
-    if re.search(r'\b(unittest|pytest)\b', run):
+    if runs_tests(run):
         return True
     return not (NOT_INPUT.search(path) or TEST_FILE.search(path))
 
 
 def input_key(check, root=ROOT, environ=os.environ):
     """같은 입력이면 같은 키. 추적 파일 가운데 결과에 닿는 것(is_input), 명령, needs 환경 변수가 가리키는 파일·폴더
-    (hash_path), MESENCE 가 있으면 MesenCE 사용자 설정 파일, rom/ 원본, 명령이 읽는 파일(앞 단계가 만드는 것 빼고)."""
+    (hash_path), MESENCE 가 있으면 MesenCE 사용자 설정 파일, rom/ 원본, 명령이 읽는 파일(앞 단계가 만드는 것 빼고).
+    MESENCE 가 있는데 설정 파일을 찾지 못하면 None: 결과에 닿는 입력을 모르므로 캐시를 읽지도 쓰지도 않는다."""
     h = hashlib.sha256()
     run = check['run']
     h.update(run.encode())
@@ -212,7 +218,10 @@ def input_key(check, root=ROOT, environ=os.environ):
         if v:
             hash_path(h, v)
         if n == 'MESENCE' and v:
-            h.update(b'mesence-settings:' + (settings_digest(v) or 'absent').encode())
+            digest = settings_digest(v)
+            if digest is None:
+                return None
+            h.update(b'mesence-settings:' + digest.encode())
     hash_path(h, root / 'rom')
     made = made_paths(run) + out_dirs(run)
     for tok in sorted(set(re.findall(r'(?<![\w/])(work/\S+|rom/\S+)', run))):
@@ -246,8 +255,8 @@ def run_check(check, timeout, logs, no_cache=False):
     if unset:
         return 'skipped', f'설정 안 된 환경 변수 {", ".join(unset)}'
     key = input_key(check)
-    hit = cache_dir() / f'{name}-{key[:24]}.json'
-    if hit.is_file() and not no_cache:
+    hit = cache_dir() / f'{name}-{key[:24]}.json' if key else None
+    if hit and hit.is_file() and not no_cache:
         old = json.loads(hit.read_text(encoding='utf-8'))
         return 'passed', f'캐시: 같은 입력으로 {old["when"]} 통과, {old["detail"]}'
     for d in out_dirs(run):
@@ -277,7 +286,7 @@ def run_check(check, timeout, logs, no_cache=False):
     detail = f'{secs}초' + (f', 롬 SHA-1 {hashlib.sha1((ROOT / rom).read_bytes()).hexdigest()[:8]}'
                            if rom and (ROOT / rom).is_file() else '')
     # 도는 동안 입력이 바뀌었으면 그 결과는 어느 입력의 것인지 모르므로 캐시하지 않는다
-    if input_key(check) == key:
+    if key is not None and input_key(check) == key:
         hit.parent.mkdir(parents=True, exist_ok=True)
         hit.write_text(json.dumps({'when': time.strftime('%Y-%m-%d %H:%M'), 'detail': detail}, ensure_ascii=False),
                        encoding='utf-8')

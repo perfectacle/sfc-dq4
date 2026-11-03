@@ -871,10 +871,9 @@ class RuleTests(unittest.TestCase):
             entries = re.findall(r'((?:sfc|fc)/\S+?\.py)', checks[name]['run'])
             self.assertTrue(entries, name)
             if 'sfc/dq4/tools/dq4build.py' in entries:
-                # dq4build 는 빌드 단계를 import 가 아니라 하위 프로세스(step·subprocess)로 부른다
-                stages = re.findall(r'''['"](dq4\w+\.py)['"]''', (HERE / 'dq4build.py').read_text(encoding='utf-8'))
-                self.assertIn('dq4menupatch.py', stages)
-                entries += [f'sfc/dq4/tools/{x}' for x in sorted(set(stages))]
+                # dq4build 는 빌드 단계를 import 가 아니라 하위 프로세스로 부른다(dq4build.STAGES, script() 가 지킨다)
+                import dq4build
+                entries += [f'sfc/dq4/tools/{x}' for x in dq4build.STAGES]
             want = set(entries)
             for entry in entries:
                 src = (root / entry).read_text(encoding='utf-8')
@@ -883,6 +882,20 @@ class RuleTests(unittest.TestCase):
                     self.assertTrue(found, f'{name}: {entry} 의 import {m} 파일을 찾지 못함')
                     want.add(found[0].relative_to(root).as_posix())
             self.assertFalse(want - set(checks[name]['paths']), name)
+
+    def test_build_stages_go_through_the_list(self):
+        """dq4build 가 단계 스크립트를 부르는 길은 script() 하나이고, STAGES 에 없는 이름은 거부한다."""
+        import dq4build
+        self.assertEqual(dq4build.script('dq4menupatch.py'), HERE / 'dq4menupatch.py')
+        with self.assertRaises(ValueError):
+            dq4build.script('dq4new.py')
+        for name in dq4build.STAGES:
+            self.assertTrue((HERE / name).is_file(), name)
+        tree = ast.parse((HERE / 'dq4build.py').read_text(encoding='utf-8'))
+        # 소스 모양 확인: HERE / '…py' 로 단계를 바로 부르는 곳이 없다
+        direct = [n for n in ast.walk(tree) if isinstance(n, ast.BinOp) and isinstance(n.right, ast.Constant)
+                  and isinstance(n.right.value, str) and n.right.value.endswith('.py')]
+        self.assertEqual(direct, [])
 
     def test_battle_rounds_bypass_cache(self):
         """소스 모양 확인: 전투 검사는 같은 상태에서 전투를 여러 번 돌려 결과가 같은지 보고 화면을 견준다. 그 전투 실행은 캐시를 거치지 않는다
