@@ -53,6 +53,7 @@ import dq4ch2event as ch2  # noqa: E402
 import dq4chapterbox as box  # noqa: E402
 import dq4prologuecheck as pc  # noqa: E402
 from dq5exitcheck import warp_exit  # noqa: E402
+from dq4pins import RNG  # noqa: E402
 
 WALK = ROOT / 'tools' / 'lua' / 'walk.lua'
 WALK_STATE = HERE / 'lua' / 'dq4walkstate.lua'
@@ -60,9 +61,6 @@ WARP = DQ5_TOOLS / 'lua' / 'dq5warp.lua'
 NIGHT = '7E075E=F0;7E075F=00'
 DAY = '7E075E=50;7E075F=00'
 NO_ENCOUNTERS = '11E7C2=186B'
-# 구간 시작에 한 번 두는 값(SET 꼴, 7E 뱅크 하위 16비트). 난수 00:9878 은 075B·075C 를 밀고 섞은 뒤 075D 를 하나 올려
-# 075B + 075D 를 낸다. NMI(00:8897)가 075B 를 프레임마다 하나 올리므로 세 바이트를 모두 둔다
-RNG = '075B=00;075C=00;075D=00'
 DAY_SET = '075E=50;075F=00'
 NIGHT_SET = '075E=F0;075F=00'
 MONSTERS = 0x118000                 # 몬스터 표 23:8000(파일 오프셋), 25바이트씩. dq5tables.MONSTER_FIELDS

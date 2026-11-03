@@ -5,7 +5,7 @@ name = "dq4-window-check"
 why = "창 글자 깨짐·비침(#911 가게 동료 창 2프레임 깨짐 shopflip, #916·#918·#922 가게 목록·동료 창·사기 확인 shopwho)과, 넘친 목록 이름이 창보다 늦게 올라와 목록 줄이 비는 프레임·「누가」 창이 닫히며 메시지 창에 이름이 비치는 프레임(--every 로 talk02-full·shopwho·partyitems 와 battle11·party21 구간을 매 프레임 잼)이 다시 생기지 않게"
 paths = ["sfc/dq4/tools/dq4windowname.asm", "sfc/dq4/tools/dq4windowname.py", "sfc/dq4/tools/dq4windowtext.py",
          "sfc/dq4/tools/dq4windowcheck.py", "sfc/dq4/tools/dq4bg3slot.py",
-         "sfc/dq4/tools/dq4ch1walkcheck.py", "sfc/dq5/tools/lua/dq5warp.lua",
+         "sfc/dq4/tools/dq4ch1walkcheck.py", "sfc/dq4/tools/dq4pins.py", "sfc/dq5/tools/lua/dq5warp.lua",
          "sfc/dq4/tools/dq4readset.py", "sfc/dq4/tools/lua/dq4readset.lua", "sfc/dq4/tools/dq4mesen.py"]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && mkdir -p work/wc && DQ4_WINDOWNAME_SYMBOLS=$PWD/work/wc/wn.sym uv run --locked python sfc/dq4/tools/dq4menupatch.py build --rom work/ch1/overture.sfc --messages work/ch1/messages.json --out work/wc/menu.sfc && rm -rf work/wc/out && uv run --locked python sfc/dq4/tools/dq4windowcheck.py --rom work/ch1/dq4-ch1.sfc --symbols work/wc/wn.sym --symbols-rom work/wc/menu.sfc --out work/wc/out --jobs 4 --every"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -41,7 +41,7 @@ paths = [
   "sfc/dq4/tools/dq4brkscan.py",
   "sfc/dq4/tools/dq4compatcheck.py",
   "sfc/dq4/tools/lua/dq4openbus.lua",
-  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py", "sfc/dq4/tools/dq4pins.py",
   "sfc/dq4/tools/dq4prologuecheck.py",
 ]
 run = "rm -rf work/compat-probe && uv run --locked python sfc/dq4/tools/dq4compatcheck.py probe --rom work/ch1/dq4-ch1-full.sfc --out work/compat-probe"
@@ -60,7 +60,7 @@ paths = [
   "sfc/dq4/tools/dq4compatcheck.py",
   "sfc/dq4/tools/dq4libretro.py",
   "sfc/dq4/tools/dq4cores.py",
-  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py", "sfc/dq4/tools/dq4pins.py",
   "sfc/dq4/tools/dq4prologuecheck.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/compat-walk && uv run --locked python sfc/dq4/tools/dq4compatcheck.py walk --rom work/ch1/dq4-ch1-full.sfc --out work/compat-walk"
@@ -98,7 +98,7 @@ paths = [
   "sfc/dq4/tools/dq4compatcheck.py",
   "sfc/dq4/tools/dq4libretro.py",
   "sfc/dq4/tools/dq4cores.py",
-  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py", "sfc/dq4/tools/dq4pins.py",
   "sfc/dq4/tools/dq4prologuecheck.py",
   "sfc/dq5/tools/dq5sram.py",
 ]
@@ -164,7 +164,7 @@ paths = [
   "sfc/dq4/tools/dq4brkscan.py",
   "sfc/dq4/tools/dq4ch1event.py",
   "sfc/dq4/tools/dq4ch1talk.py",
-  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py", "sfc/dq4/tools/dq4pins.py",
   "sfc/dq4/tools/dq4ch2event.py",
   "sfc/dq4/tools/dq4chapter1.py",
   "sfc/dq4/tools/dq4chapterbox.py",
@@ -224,7 +224,7 @@ paths = [
   "sfc/dq4/tools/dq4compatcheck.py",
   "sfc/dq4/tools/dq4libretro.py",
   "sfc/dq4/tools/dq4cores.py",
-  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py", "sfc/dq4/tools/dq4pins.py",
   "sfc/dq4/tools/dq4prologuecheck.py",
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/dq4ch1event.py",
@@ -286,7 +286,7 @@ paths = [
   "sfc/dq4/tools/dq4buildcache.py",
   "sfc/dq4/tools/dq4ch1event.py",
   "sfc/dq4/tools/dq4ch1talk.py",
-  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py", "sfc/dq4/tools/dq4pins.py",
   "sfc/dq4/tools/dq4ch2event.py",
   "sfc/dq4/tools/dq4ch2talk.py",
   "sfc/dq4/tools/dq4chapter1.py",
@@ -399,7 +399,7 @@ paths = [
   "sfc/dq4/tools/dq4libretro.py",
   "sfc/dq4/tools/dq4cores.py",
   "sfc/dq4/tools/dq4battlecheck.py",
-  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py", "sfc/dq4/tools/dq4pins.py",
   "sfc/dq4/tools/dq4prologuecheck.py",
   "sfc/dq4/tools/dq4build.py",
   "sfc/dq5/tools/dq5exitcheck.py",
@@ -457,7 +457,7 @@ paths = [
   "sfc/dq4/tools/dq4doorstandcheck.py",
   "sfc/dq4/tools/dq4freshstate.py",
   "sfc/dq4/tools/dq4heroblockcheck.py",
-  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py", "sfc/dq4/tools/dq4pins.py",
   "sfc/dq4/tools/dq4groupcheck.py",
   "sfc/dq4/tools/lua/dq4doorstand.lua",
   "sfc/dq5/tools/lua/dq5warp.lua",
@@ -475,7 +475,7 @@ paths = [
   "sfc/dq4/tools/dq4door.py",
   "sfc/dq4/tools/dq4doorcheck.py",
   "sfc/dq4/tools/dq4freshstate.py",
-  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py", "sfc/dq4/tools/dq4pins.py",
   "sfc/dq4/tools/dq4groupcheck.py",
   "sfc/dq4/tools/dq4groupbuild.py",
   "fc/dq4/tools/dq4block.py",
@@ -571,13 +571,13 @@ needs = ["rom"]
 
 [[check]]
 name = "dq4-map-people-rom-tests"
-why = "롬이 있어야 도는 단위 테스트 14개: 들어설 때 숨는 FC 인물(엔도르 투기장 관중석 등)을 옮기지 않고 그 맵을 이벤트가 찾지 않으며, 누운 인물마다 발치·머리맡 옆에 말을 걸 빈 칸이 있고 발치 훅이 FC 발치 칸만 더하고 1장 빌드도 그 훅을 얹으며, 가게 장면의 카운터 앞 칸이 FC 에서 걸어서 닿고 카운터 너머가 그 가게 주인이어야 한다. 발치 훅은 05:84FE 를 부르는 곳이 C 만 보고 05:8503 이 $00·$01·스택을 지킨다는 원래 롬 바이트에 기대며, 훅 자리는 원래 롬 빈 자리 안이고 05:FF00 가게 도우미 앞이어야 한다. 롬이 없어 건너뛰거나 테스트가 빠지면 ok 수가 모자라 실패한다"
+why = "롬이 있어야 도는 단위 테스트 20개: 들어설 때 숨는 FC 인물(엔도르 투기장 관중석 등)을 옮기지 않고 그 맵을 이벤트가 찾지 않으며, 누운 인물마다 발치·머리맡 옆에 말을 걸 빈 칸이 있고 발치 훅이 FC 발치 칸만 더하고 1장 빌드도 그 훅을 얹으며, 가게 장면의 카운터 앞 칸이 FC 에서 걸어서 닿고 카운터 너머가 그 가게 주인이어야 한다. 발치 훅은 05:84FE 를 부르는 곳이 C 만 보고 05:8503 이 $00·$01·스택을 지킨다는 원래 롬 바이트에 기대며, 훅 자리는 원래 롬 빈 자리 안이고 05:FF00 가게 도우미 앞이어야 한다. 롬이 없어 건너뛰거나 테스트가 빠지면 ok 수가 모자라 실패한다"
 paths = ["sfc/dq4/tools/dq4npcport.py", "sfc/dq4/tools/dq4npccheck.py", "sfc/dq4/tools/test_dq4npcport.py",
          "sfc/dq4/tools/dq4shopscene.py", "sfc/dq4/tools/test_dq4shopscene.py", "sfc/dq4/tools/dq4groupbuild.py",
          "sfc/dq4/tools/dq4sleepertalk.py", "sfc/dq4/tools/test_dq4sleepertalk.py",
          "sfc/dq4/tools/dq4ch1event.py", "sfc/dq4/tools/dq4ch2event.py", "sfc/dq4/tools/dq4chapter1.py",
          "fc/dq4/tools/dq4npcblock.py", "fc/dq4/tools/dq4talk.py", "fc/dq4/tools/dq4map.py"]
-run = "test $( (uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4npcport.py -k HiddenPeopleTest -k SleeperTalkTest -v; uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4shopscene.py -k ShopPlaceTest -v; uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4sleepertalk.py -v) 2>&1 | tee work/map-people-rom-tests.log | grep -c ' \\.\\.\\. ok$') -eq 14"
+run = "test $( (uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4npcport.py -k HiddenPeopleTest -k SleeperTalkTest -v; uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4shopscene.py -k ShopPlaceTest -v; uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4sleepertalk.py -v) 2>&1 | tee work/map-people-rom-tests.log | grep -c ' \\.\\.\\. ok$') -eq 20"
 needs = ["rom"]
 
 [[check]]
@@ -643,9 +643,9 @@ needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출�
 
 [[check]]
 name = "dq4-sleeper-talk"
-why = "누운 인물에게 침대 발치(FC 칸)와 머리맡 양쪽에서 말이 걸려야 한다(사용자 결정, dq4sleepertalk 훅 05:84FE → 05:FEF0). 훅 패치는 그룹 빌드가 쓰고 1장 롬은 dq4chapter1.GROUP_PATCHES 로만 얹으므로 1장 배포 롬과 그룹 롬 둘 다 본다. 1장 왕좌의 방 밤 침대 병사 둘(dq4chapter1.NIGHT_ABED)도 FC 처럼 누워 발치에서 대답해야 한다. 장면마다 난수를 같은 값으로 두고 도착하면 인물 슬롯 걸음을 멈춘다"
+why = "누운 인물에게 침대 발치(FC 칸)와 머리맡 양쪽에서 말이 걸려야 한다(사용자 결정, dq4sleepertalk 훅 05:84FE → 05:FEF0). 훅 패치는 그룹 빌드가 쓰고 1장 롬은 dq4chapter1.GROUP_PATCHES 로만 얹으므로 1장 배포 롬과 그룹 롬 둘 다 본다. 1장 왕좌의 방 밤 침대 병사 둘(dq4chapter1.NIGHT_ABED)도 FC 처럼 누워 발치에서 대답해야 한다. 장면마다 난수를 같은 값으로 두고 인물 슬롯 걸음 간격(7E:3300+슬롯 위 니블)을 맵을 불러온 프레임부터 매 프레임 0 으로 둔다(아래 니블은 그대로)"
 paths = ["sfc/dq4/tools/dq4sleepercheck.py", "sfc/dq4/tools/dq4sleepertalk.py", "sfc/dq4/tools/dq4npccheck.py",
-         "sfc/dq4/tools/dq4ch1walkcheck.py",
+         "sfc/dq4/tools/dq4pins.py", "sfc/dq4/tools/dq4ch1walkcheck.py", "sfc/dq4/tools/lua/dq4holdwalk.lua",
          "sfc/dq4/tools/dq4npcport.py", "sfc/dq4/tools/dq4groupbuild.py", "sfc/dq4/tools/dq4chapter1.py",
          "sfc/dq4/tools/dq4chapterbox.py", "sfc/dq4/tools/dq4build.py", "sfc/dq4/tools/dq4freshstate.py",
          "sfc/dq5/tools/lua/dq5npcrecordcheck.lua",

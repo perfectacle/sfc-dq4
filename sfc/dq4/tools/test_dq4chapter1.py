@@ -91,16 +91,15 @@ class LayoutTests(unittest.TestCase):
         self.assertIn((ch.KING_DOWN[0] * 2, ch.KING_DOWN[1] * 2), spots)
 
     def test_night_bed_guards_lie_like_the_ported_sleepers(self):
-        # FC 는 왕좌의 방 밤 침대의 두 병사를 눕혀 두고 발치·침대 오른쪽에서 대답한다(실측). 서 있는 꼴로 두면 침대 위에
-        # 서고 말이 걸리지 않았다. 옮긴 FC 누운 인물과 같은 견본·자리(2x+1, 2y)·오른쪽 방향이어야 한다
+        # FC 침대 (01,1C)·(01,1F) 의 병사는 누워 있다. 옮긴 FC 누운 인물과 같은 견본·반 블록 오른쪽 자리·오른쪽 방향
         import dq4npcport
         doc = ch.npc_doc({'overrides': []})
         after = next(n['entries'] for n in doc['new_lists'] if n['name'] == 'after')
         beds = [e for e in after if e['from'] == dq4npcport.LIE]
         self.assertEqual([(e['time'], e['fields']['x'], e['fields']['y'], e['fields']['facing']) for e in beds],
-                         [('night', x * 2 + 1, y * 2, 'right') for x, y, _, _ in ch.NIGHT_ABED])
+                         [('night', 3, 56, 'right'), ('night', 3, 62, 'right')])
         standing = {(e['fields']['x'], e['fields']['y']) for e in after if e['from'] != dq4npcport.LIE}
-        self.assertFalse(standing & {(x * 2, y * 2) for x, y, _, _ in ch.NIGHT_ABED})
+        self.assertFalse(standing & {(2, 56), (2, 62)})
 
     def test_rom_title_fills_the_header_field(self):
         self.assertEqual(len(ch.TITLE), 21)
