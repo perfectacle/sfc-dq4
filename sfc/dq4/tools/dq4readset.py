@@ -463,8 +463,14 @@ def _execute(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag
         print(f'[dq4readset] {dest}: 장면 Lua 오류(캐시에 넣지 않음): {why}', file=sys.stderr)
         if WATCHDOG in why:
             rc = LUA_WATCHDOG
+            print(f'[dq4readset] {dest}: MesenCE 가 Lua 콜백을 시간 제한으로 끊음(머신이 바쁠 때). 장면을 다시 돌릴 것',
+                  file=sys.stderr)
         elif rc == 0:
             rc = LUA_ERROR
+    elif text is None and rc == 0 and not timed_out:
+        # 0 으로 끝났는데 읽은 집합이 없다: 머리말이 쓰지 못했거나 emu.stop 을 거치지 않고 끝났다
+        print(f'[dq4readset] {dest}: 읽은 집합이 없음(캐시에 넣지 않음)', file=sys.stderr)
+        rc = LUA_ERROR
     for f in (entry, out, err, dest / OUT_TMP):
         f.unlink(missing_ok=True)
     return rc, timed_out, ranges
@@ -472,11 +478,10 @@ def _execute(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag
 
 # 장면 Lua 가 오류를 냈는데 MesenCE 가 0 으로 끝났을 때 돌려주는 종료 코드
 LUA_ERROR = 70
-# MesenCE 는 콜백 하나가 정한 시간(설정 Debug.ScriptWindow.ScriptTimeout)을 넘으면 끊는다. testrunner 명령줄로는 늘릴 수 없었다.
-# 머신이 바쁘면 큰 덤프를 쓰는 콜백이 걸린다. 장면 탓이 아니므로 처음부터 다시 돌린다
+# MesenCE 가 Lua 콜백 하나를 벽시계 시간 제한(사용자 설정 Debug.ScriptWindow.ScriptTimeout)으로 끊은 실행. 형식 문서
+# 「장면 Lua 의 오류」. 다시 돌리지 않고 이 종료 코드로 실패를 알린다
 WATCHDOG = 'Maximum execution time'
 LUA_WATCHDOG = 71
-WATCHDOG_TRIES = 3
 
 
 def run(mesence, rom_path, script, dest, env, timeout=1800, extra=mesen.ARGS, log='mesen.log', cwd=None,
@@ -524,9 +529,12 @@ def _run(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag, ac
         if random.random() >= verify_rate():
             return info
         _clear(dest, before)
-        rc, timed_out, ranges = _snapshot_run(snapshot, rom, mesence, script, dest, env, timeout, extra, log, cwd, tag, before)
+        rc, timed_out, ranges = _snapshot_run(snapshot, rom, mesence, script, dest, env, timeout, extra, log, cwd, tag)
+        # 다시 돌린 실행이 끝까지 가지 못했으면 출력을 견줄 수 없다. 항목은 두고 그 실패로 알린다
         if timed_out:
             raise SystemExit(f'읽은 바이트 캐시 재검증이 {timeout}초 안에 끝나지 않음: {dest}(항목은 그대로 둠)')
+        if rc in (LUA_WATCHDOG, LUA_ERROR) and hit.get('returncode') != rc:
+            raise SystemExit(f'읽은 바이트 캐시 재검증 실행이 실패함(종료 코드 {rc}): {dest}(항목은 그대로 둠)')
         want = {rel: content_hash(data, rel) for rel, data in blobs.items()}
         got = _outputs(dest, before)
         diff = mismatch(want, got, hit, rc, ranges)
@@ -539,7 +547,7 @@ def _run(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag, ac
             print(f'[dq4readset] {dest}: 다시 돌린 화면 {",".join(shots[:8])} 이 캐시와 다름(화면 찍기는 결정적이지 않아 '
                   '판정에 쓰지 않는 출력)', file=sys.stderr)
         return {**info, 'verified': True, 'screens_differ': shots}
-    rc, timed_out, ranges = _snapshot_run(snapshot, rom, mesence, script, dest, env, timeout, extra, log, cwd, tag, before)
+    rc, timed_out, ranges = _snapshot_run(snapshot, rom, mesence, script, dest, env, timeout, extra, log, cwd, tag)
     info = {'cached': False, 'returncode': rc, 'timed_out': timed_out,
             'readset': sum(n for _, n in ranges) if ranges is not None else None, 'ranges': len(ranges or ()),
             'key': key}
@@ -558,19 +566,11 @@ def _run(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag, ac
     return info
 
 
-def _snapshot_run(snapshot, rom, mesence, script, dest, env, timeout, extra, log, cwd, tag, before):
-    """키를 만든 롬 바이트(rom)를 dest 에 써 두고 그 사본으로 돌린다. MesenCE 의 콜백 시간 제한에 걸리면 출력을 지우고
-    WATCHDOG_TRIES 번까지 다시 돌린다."""
+def _snapshot_run(snapshot, rom, mesence, script, dest, env, timeout, extra, log, cwd, tag):
+    """키를 만든 롬 바이트(rom)를 dest 에 써 두고 그 사본으로 돌린다."""
     snapshot.write_bytes(rom)
     try:
-        for attempt in range(WATCHDOG_TRIES):
-            if attempt:
-                _clear(dest, before)
-                print(f'[dq4readset] {dest}: 콜백 시간 제한에 걸려 다시 돌림({attempt + 1}/{WATCHDOG_TRIES})', file=sys.stderr)
-            result = _execute(mesence, snapshot, script, dest, env, timeout, extra, log, cwd, tag)
-            if result[0] != LUA_WATCHDOG:
-                break
-        return result
+        return _execute(mesence, snapshot, script, dest, env, timeout, extra, log, cwd, tag)
     finally:
         snapshot.unlink(missing_ok=True)
 

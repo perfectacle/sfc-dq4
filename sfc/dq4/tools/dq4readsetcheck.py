@@ -11,7 +11,8 @@
 
 출력은 화면 찍기(.png)를 빼고 견준다(캐시 재검증과 같은 기준, 형식 문서 「화면 찍기는 결정적이지 않다」).
 콜백 장면(lua/dq4readsetcb.lua): 머리말이 감싼 콜백도 장면이 add 로 받은 번호로 지워진다.
-오류 장면(lua/dq4readseterr.lua): 장면 Lua 가 맨 위·콜백 안·emu.stop 뒤에서 오류를 내면 0 이 아닌 종료이고 캐시에 없다.
+오류 장면(lua/dq4readseterr.lua): 장면 Lua 가 맨 위·콜백 안·emu.stop 뒤에서 오류를 내거나 머리말이 읽은 집합을 쓰다
+실패하면, 시간 초과 없이 0 이 아닌 종료로 끝나고 캐시에 없다.
 
 field 장면에서는 캐시를 켠 채 롬 밖 입력을 바꿔 본다: 환경 변수 값 하나, 에뮬레이터 명령줄 하나, 출발 상태 내용을
 바꾸면 빗나가고, 출발 상태 파일을 다른 경로로 옮기기만 하면 맞는다.
@@ -168,7 +169,7 @@ def check_synth(go, rom, libdir, out):
 def check_errors(go, rom, out):
     """장면 Lua 가 오류를 내면(맨 위, 콜백 안, emu.stop 뒤) 0 이 아닌 종료로 보고 캐시에 넣지 않는다."""
     problems = []
-    for mode in ('top', 'callback', 'stop'):
+    for mode in ('top', 'callback', 'stop', 'dump'):
         info, entry, _, _ = go(rom, ERR_LUA, {'READSET_ERR': mode}, out / f'err-{mode}', timeout=120)
         if info['timed_out'] or info['returncode'] in (0, None) or entry is not None:
             problems.append(f'{mode}: 종료 코드 {info["returncode"]}, 시간 초과 {info["timed_out"]}, '

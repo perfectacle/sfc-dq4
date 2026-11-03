@@ -25,11 +25,13 @@ local errOut = out .. ".err"
 local failed = false
 function READSET_FAIL(e)
   failed = true
-  os.remove(out)
+  pcall(os.remove, out)
   local msg = tostring(e)
   pcall(function() io.stderr:write("[dq4readset] Lua 오류: ", msg, "\n") end)
-  local f = io.open(errOut, "a")
-  if f then f:write(msg, "\n"); f:close() end
+  pcall(function()
+    local f = io.open(errOut, "a")
+    if f then f:write(msg, "\n"); f:close() end
+  end)
 end
 
 -- 콜백의 반환값은 개수까지 그대로 넘긴다(메모리 콜백은 값을 돌려주어 읽은·쓴 값을 바꿀 수 있다). 매 명령마다 불리는 콜백도
@@ -172,10 +174,12 @@ if hdma then
 end
 
 local stopOrig = emu.stop
+-- dump 가 던져도 stopOrig 는 꼭 부른다. 부르지 않으면 장면 콜백이 막힌 채 시간 초과까지 돈다
 emu.stop = function(...)
   if not stopped then
     stopped = true
-    dump()
+    local ok, e = pcall(dump)
+    if not ok then READSET_FAIL(e) end
   end
   return stopOrig(...)
 end

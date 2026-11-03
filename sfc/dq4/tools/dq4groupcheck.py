@@ -60,7 +60,8 @@ PRESET = ""
 
 def scene(mesence, rom, state, out, name, **extra):
     """dq4readset 으로 돌려 같은 출발 상태·입력에 읽은 롬 바이트가 같으면 캐시의 출력을 펼친다. MesenCE 가 시간 안에
-    끝나지 않거나 0 이 아닌 값으로 끝나면 {"error": …} 를 돌려준다."""
+    끝나지 않거나, 0 이 아닌 값으로 끝나거나, dq5warp.lua 가 MAXF 에 닿아 멈췄으면(종료 코드는 0, 「end map」 도 찍힘)
+    {"error": …} 를 돌려준다."""
     import dq4readset
     dest = out / name
     dest.mkdir(parents=True)
@@ -74,6 +75,8 @@ def scene(mesence, rom, state, out, name, **extra):
         return {"error": "MesenCE 가 300초 안에 끝나지 않음"}
     if info["returncode"] != 0:
         return {"error": f"MesenCE 종료 코드 {info['returncode']}"}
+    if not dq4readset.warp_finished(dest):
+        return {"error": "dq5warp.lua 가 MAXF 에 닿아 멈춤(timeout phase)"}
     text = (dest / "warp.txt").read_text(encoding="utf-8") if (dest / "warp.txt").exists() else ""
     found = END.findall(text)
     if not found:

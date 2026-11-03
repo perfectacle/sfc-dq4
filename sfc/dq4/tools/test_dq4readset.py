@@ -353,18 +353,38 @@ class RunTests(unittest.TestCase):
         self.fake.timeout = False
         self.assertFalse(self.go()[0]['cached'])
 
-    def test_callback_watchdog_is_retried(self):
-        """머신이 바빠 콜백 시간 제한에 걸린 실행은 출력을 지우고 다시 돌린다. 끝내 걸리면 넣지 않는다."""
+    def test_callback_watchdog_is_a_clear_failure(self):
+        """MesenCE 가 콜백을 시간 제한으로 끊은 실행은 다시 돌리지 않고 종료 코드 71 로 알리며 넣지 않는다."""
         self.fake.watchdog = 1
-        with contextlib.redirect_stderr(io.StringIO()):
-            info, dest = self.go()
-        self.assertEqual((info['returncode'], self.fake.calls), (0, 2))
-        self.assertFalse((dest / 'half.bin').exists())
-        self.assertTrue(self.go()[0]['cached'])
-        self.fake.watchdog = rs.WATCHDOG_TRIES
-        with contextlib.redirect_stderr(io.StringIO()), mock.patch.dict(os.environ, {'DQ4_READSET': 'off'}):
+        with contextlib.redirect_stderr(io.StringIO()) as err:
             info, _ = self.go()
-        self.assertEqual(info['returncode'], rs.LUA_WATCHDOG)
+        self.assertEqual((info['returncode'], self.fake.calls), (rs.LUA_WATCHDOG, 1))
+        self.assertIn('시간 제한', err.getvalue())
+        self.assertFalse(self.go()[0]['cached'])
+
+    def test_verify_run_that_fails_keeps_entry(self):
+        """재검증으로 다시 돌린 실행이 시간 초과·시간 제한으로 끝나면, 견주지 않고 그 실패로 알리며 항목은 둔다."""
+        key = self.go()[0]['key']
+        with mock.patch.dict(os.environ, {'DQ4_READSET_VERIFY': '1'}):
+            self.fake.watchdog = 1
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaisesRegex(SystemExit, '실패함'):
+                self.go()
+            self.fake.timeout = True
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaisesRegex(SystemExit, '끝나지 않음'):
+                self.go()
+        self.assertEqual(len(self.store.entries(key)), 1)
+
+    def test_zero_exit_without_readset_is_a_failure(self):
+        """0 으로 끝났는데 읽은 집합 파일이 없으면(머리말이 쓰지 못함) 실패로 본다."""
+        real = self.fake.__call__
+
+        def drop(*a, **k):
+            r = real(*a, **k)
+            Path(k['env']['READSET_OUT']).unlink()
+            return r
+        with mock.patch.object(rs.mesen, 'run', drop), contextlib.redirect_stderr(io.StringIO()):
+            info, _ = self.go()
+        self.assertEqual(info['returncode'], rs.LUA_ERROR)
 
     def test_runs_the_rom_bytes_the_key_was_made_from(self):
         """키를 만든 뒤 실행 전에 롬 파일이 바뀌어도, 실행은 키를 만든 바이트의 사본으로 돈다."""
@@ -511,11 +531,14 @@ class SceneTests(unittest.TestCase):
     def test_nonzero_exit_is_reported(self):
         self.assertIn('종료 코드 3', self.scene({'timed_out': False, 'returncode': 3})['error'])
 
-    def test_warp_that_hit_maxf_is_not_cached(self):
+    def test_warp_that_hit_maxf_is_an_error(self):
+        """MAXF 에 닿아도 종료 코드는 0 이고 「end map」 이 찍힌다. 저장만 막지 않고 판정에도 실패로 돌려준다."""
         got = self.scene({'timed_out': False, 'returncode': 0},
                          'f02400 timeout phase=warp\nf02400 end map 36/00 cell 5,6 BE=80 1949=00\n')
-        self.assertEqual(got, {'map': '36/00', 'cell': [5, 6]})
+        self.assertIn('MAXF', got['error'])
         self.assertIs(self.accept, rs.warp_finished)
+        ok = self.scene({'timed_out': False, 'returncode': 0}, 'f00300 end map 36/00 cell 5,6 BE=80 1949=00\n')
+        self.assertEqual(ok, {'map': '36/00', 'cell': [5, 6]})
         with tempfile.TemporaryDirectory() as d:
             Path(d, 'warp.txt').write_text('f02400 timeout phase=warp\n')
             self.assertFalse(rs.warp_finished(d))
@@ -562,7 +585,8 @@ class RuleTests(unittest.TestCase):
         # emu.stop 뒤 더 도는 프레임 수는 실행마다 달라, 그 뒤 장면 콜백을 부르면 출력이 흔들린다
         self.assertIn('if stopped then return end', lua)
         self.assertNotIn('if stopped then dump() end', lua)
-        self.assertIn('os.remove(out)', lua)
+        self.assertIn('pcall(os.remove, out)', lua)
+        self.assertIn('local ok, e = pcall(dump)', lua)
 
     def test_prelude_records_lua_errors(self):
         """소스 모양 확인: 머리말이 콜백을 감싸 오류를 .err 에 적고, 진입 파일이 맨 위 오류를 잡아 멈춘다."""
@@ -617,6 +641,22 @@ class RuleTests(unittest.TestCase):
                             for c in ast.walk(node)):
                         bad.append(f'{p.name}:{node.lineno} {f.attr}')
         self.assertEqual(bad, [])
+
+    def test_walk_guards_watch_their_imports(self):
+        """소스 모양 확인: 서장 끝 걷기 검사의 실행 검사 paths 에 그 검사가 바로 import 하는 dq4·dq5 모듈이 모두 있다."""
+        import tomllib
+        checks = {c['name']: c for c in tomllib.loads((HERE.parent / 'guards.toml').read_text(encoding='utf-8'))['check']}
+        root = HERE.parents[2]
+        for name, mod in (('dq4-heroblock', 'dq4heroblockcheck'), ('dq4-field-obj-math', 'dq4fieldmathcheck'),
+                          ('dq4-battle-check', 'dq4battlecheck'), ('dq4-wrap-routine', 'dq4wrapcheck')):
+            src = (HERE / f'{mod}.py').read_text(encoding='utf-8')
+            want = set()
+            for m in set(re.findall(r'^\s*(?:import|from)\s+(dq[45]\w+)', src, re.M)):
+                for base in (HERE, root / 'sfc' / 'dq5' / 'tools'):
+                    if (base / f'{m}.py').exists():
+                        want.add((base / f'{m}.py').relative_to(root).as_posix())
+                        break
+            self.assertFalse(want - set(checks[name]['paths']), name)
 
     def test_battle_rounds_bypass_cache(self):
         """소스 모양 확인: 전투 검사는 같은 상태에서 전투를 여러 번 돌려 결과가 같은지 보고 화면을 견준다. 그 전투 실행은 캐시를 거치지 않는다

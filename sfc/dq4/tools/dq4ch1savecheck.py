@@ -107,7 +107,10 @@ def save_continue(mesence, rom, state, dest):
                PRE=f'{TALK},wait:400,{well.CONTINUE}', RESETAT=str(RESET), MAXF=str(SHOT + 10),
                CALLS=f'{CONTINUE_PATH},{LOGO},{MESSAGE}', ROMPATCH=walk.NO_ENCOUNTERS, SHOTS=f'{SAVED - 50},{SHOT}',
                DUMP=';'.join(dumps))
-    dq4readset.run(mesence, rom, DQ5_TOOLS / 'lua' / 'dq5cdldump.lua', dest, env, timeout=900)
+    info = dq4readset.run(mesence, rom, DQ5_TOOLS / 'lua' / 'dq5cdldump.lua', dest, env, timeout=900)
+    if info['timed_out'] or info['returncode'] != 0:
+        # 덤프가 모자라 save_scene 이 「저장·이어 하기가 끝나지 않음」 으로 실패시킨다
+        return {}, []
     text = (dest / 'msg.txt').read_text(encoding='utf-8') if (dest / 'msg.txt').exists() else ''
     got = {(int(m[1]), int(m[2], 16)): bytes.fromhex(m[3])
            for m in re.finditer(r'(\d+) dump ([0-9A-F]{6}) ([0-9A-F ]+)', text)}
