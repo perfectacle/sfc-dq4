@@ -88,11 +88,11 @@ def free(mesence, rom, state, dest):
 
 
 def church(mesence, rom, state, dest):
+    """(도착한 맵, 실패 까닭). 도착하지 못했으면 맵은 None."""
     state = free(mesence, rom, state, dest / 'free')
     walk.run(mesence, rom, walk.WARP, dest, {'STATE': str(state), 'TO': CHURCH, 'SAVE': 'church.mss', 'SETTLE': '120',
                                              'MAXF': '1500', 'WARPEXIT': f'{warp_exit(rom):X}',
                                              'ANYWHERE': '1', 'ROMPATCH': walk.NO_ENCOUNTERS}, 300, readset=True)
-    """(도착한 맵, 실패 까닭). 도착하지 못했으면 맵은 None."""
     log = dest / 'warp.txt'
     if not log.exists():
         return None, 'warp.txt 없음'

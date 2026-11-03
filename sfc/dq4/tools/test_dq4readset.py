@@ -515,6 +515,52 @@ class RunTests(unittest.TestCase):
                          [('scene.lua', False, 0x10), ('scene.lua', True, 0x10)])
 
 
+def uses_readset_run(path):
+    """그 모듈이 읽은 바이트 캐시로 장면을 돌리는가: dq4readset 의 run 을 부르거나(별칭 import·from import 포함),
+    readset=True 를 넘기거나, 순간이동 장면(dq4groupcheck.scene·field_scene)을 쓴다."""
+    tree = ast.parse(Path(path).read_text(encoding='utf-8'))
+    modules, runs = set(), set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Import):
+            for a in n.names:
+                if a.name == 'dq4readset':
+                    modules.add(a.asname or a.name)
+                if a.name == 'dq4groupcheck':
+                    return True
+        elif isinstance(n, ast.ImportFrom) and n.module == 'dq4readset':
+            runs |= {a.asname or a.name for a in n.names if a.name == 'run'}
+        elif isinstance(n, ast.ImportFrom) and n.module == 'dq4groupcheck':
+            if {a.name for a in n.names} & {'scene', 'field_scene'}:
+                return True
+    for n in ast.walk(tree):
+        if not isinstance(n, ast.Call):
+            continue
+        f = n.func
+        if isinstance(f, ast.Attribute) and f.attr == 'run' and isinstance(f.value, ast.Name) and f.value.id in modules:
+            return True
+        if isinstance(f, ast.Name) and f.id in runs:
+            return True
+        if any(k.arg == 'readset' and getattr(k.value, 'value', None) is True for k in n.keywords):
+            return True
+    return False
+
+
+class UsesReadsetTests(unittest.TestCase):
+    def test_aliases_and_from_imports(self):
+        cases = {'import dq4readset as rs\nrs.run(1)\n': True,
+                 'from dq4readset import run as go\ngo(1)\n': True,
+                 'import dq4readset\ndq4readset.run(1)\n': True,
+                 'import dq4readset\ndq4readset.warp_timed_out("")\n': False,
+                 'import dq4ch1walkcheck as wc\nwc.run(1, readset=True)\n': True,
+                 'from dq4groupcheck import field_scene\n': True,
+                 'import os\n': False}
+        with tempfile.TemporaryDirectory() as d:
+            for i, (src, want) in enumerate(cases.items()):
+                p = Path(d, f'm{i}.py')
+                p.write_text(src)
+                self.assertEqual(uses_readset_run(p), want, src)
+
+
 class SceneTests(unittest.TestCase):
     """dq4groupcheck.scene 이 run 의 결과를 보고 시간 초과·0 이 아닌 종료를 분명한 오류로 돌려준다."""
 
@@ -633,6 +679,33 @@ class WarpLogTests(unittest.TestCase):
                         mock.patch.object(sc, 'warp_exit', return_value=0):
                     self.assertEqual(sc.church('m', 'r', 's', Path(d) / 'c'), want)
 
+    def test_wrap_warp(self):
+        import dq4wrapcheck as wr
+        runner = wr.Run('m', Path('r.sfc'), 0x123456, {})
+        for log, arrived in ((TIMED_OUT, None), (FINISHED, (1, 0))):
+            with tempfile.TemporaryDirectory() as d:
+                def fake(mesence, rom, script, dest, env, timeout, readset=False):
+                    Path(dest).mkdir(parents=True, exist_ok=True)
+                    Path(dest, 'warp.txt').write_text(log, encoding='utf-8')
+                with mock.patch.object(wr.wc, 'run', fake), mock.patch.object(wr, 'warp_exit', return_value=0):
+                    self.assertEqual(runner.warp(Path(d) / 'w', 's.mss', '01/00,1,1')[1], arrived)
+
+    def test_npc_timeout_is_one_scene_failure(self):
+        """한 장면의 MAXF 는 그 장면의 실패로 바뀌고(나머지 장면은 계속 본다), 다른 예외는 그대로 던진다."""
+        import concurrent.futures
+        import dq4npccheck as npc
+        bad, good, other = (concurrent.futures.Future() for _ in range(3))
+        bad.set_exception(npc.WarpTimeout('talk-x: dq5warp 가 MAXF 에 닿아 멈춤(timeout phase)'))
+        good.set_result((None, [0x12A], 0))
+        other.set_exception(ValueError('boom'))
+        self.assertEqual(npc.outcome(bad), (None, 'talk-x: dq5warp 가 MAXF 에 닿아 멈춤(timeout phase)'))
+        self.assertEqual(npc.outcome(good), ((None, [0x12A], 0), None))
+        with self.assertRaises(ValueError):
+            npc.outcome(other)
+        src = (HERE / 'dq4npccheck.py').read_text(encoding='utf-8')
+        self.assertIn('got, error = outcome(future)', src)          # 소스 모양 확인: 결과 모으는 곳이 outcome 을 거친다
+        self.assertNotIn('= future.result()', src)
+
     def test_npc_run(self):
         import dq4npccheck as npc
         for log, ok in ((TIMED_OUT, False), (FINISHED, True)):
@@ -646,7 +719,7 @@ class WarpLogTests(unittest.TestCase):
                     if ok:
                         self.assertEqual(call()[1], [0x12A])
                     else:
-                        with self.assertRaisesRegex(RuntimeError, 'MAXF'):
+                        with self.assertRaisesRegex(npc.WarpTimeout, 'MAXF'):
                             call()
 
 
@@ -717,11 +790,9 @@ class RuleTests(unittest.TestCase):
         직접 읽지 않는다. 대상은 dq4readset.run 을 부르거나 readset=True 를 넘기거나 순간이동 장면(scene)을 쓰는 모듈이다
         (warp_timed_out 처럼 도움 함수만 쓰는 모듈은 아니다). 재검증이 화면을 견주지 않는다는 동작은 RunTests 와
         test_screen_rule 이 직접 본다."""
-        users = [p for p in sorted(HERE.glob('dq4*.py'))
-                 if p.name not in ('dq4readset.py',) and re.search(
-                     r'dq4readset\.run\(|^\s*import dq4groupcheck\b|^\s*from dq4groupcheck import .*\b(field_)?scene\b'
-                     r'|readset=True', p.read_text(encoding='utf-8'), re.M)]
+        users = [p for p in sorted(HERE.glob('dq4*.py')) if p.name != 'dq4readset.py' and uses_readset_run(p)]
         self.assertIn('dq4windowcheck.py', [p.name for p in users])
+        self.assertIn('dq4readsetcheck.py', [p.name for p in users])     # import dq4readset as rs → rs.run
         self.assertIn('dq4fieldtravelcheck.py', [p.name for p in users])
         self.assertIn('dq4heroblockcheck.py', [p.name for p in users])
         # (파일, 함수): 화면을 견주지만 그 화면을 만드는 실행은 캐시를 거치지 않는다
@@ -755,7 +826,8 @@ class RuleTests(unittest.TestCase):
         checks = {c['name']: c for c in tomllib.loads((HERE.parent / 'guards.toml').read_text(encoding='utf-8'))['check']}
         root = HERE.parents[2]
         for name, mod in (('dq4-heroblock', 'dq4heroblockcheck'), ('dq4-field-obj-math', 'dq4fieldmathcheck'),
-                          ('dq4-battle-check', 'dq4battlecheck'), ('dq4-wrap-routine', 'dq4wrapcheck')):
+                          ('dq4-battle-check', 'dq4battlecheck'), ('dq4-wrap-routine', 'dq4wrapcheck'),
+                          ('dq4-ch1-save', 'dq4ch1savecheck')):
             src = (HERE / f'{mod}.py').read_text(encoding='utf-8')
             want = set()
             for m in set(re.findall(r'^\s*(?:import|from)\s+(dq[45]\w+)', src, re.M)):

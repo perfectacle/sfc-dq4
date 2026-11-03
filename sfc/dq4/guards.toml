@@ -676,3 +676,15 @@ paths = ["sfc/dq4/tools/dq4sleepercheck.py", "sfc/dq4/tools/dq4sleepertalk.py", 
          "sfc/dq5/tools/lua/dq5textgrowcheck.lua", "sfc/dq5/tools/lua/dq5warp.lua"]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/sleepercheck-ch1 work/sleepercheck-groups && uv run --locked python sfc/dq4/tools/dq4sleepercheck.py --rom work/ch1/dq4-ch1-full.sfc --build work/dq4-groups --chapter1 --out work/sleepercheck-ch1 && uv run --locked python sfc/dq4/tools/dq4sleepercheck.py --rom work/dq4-groups/groups.sfc --build work/dq4-groups --out work/sleepercheck-groups"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+
+[[check]]
+name = "dq4-ch1-save"
+why = "1장 롬에서 교회 저장 → 리셋 → 이어 하기, 전멸 → 교회 귀환이 끝까지 가야 한다(서장 끝·이무르 밤·호이민·보스·보고 다섯 자리와 우물 아래 전멸). 교회 순간이동이 MAXF 에 닿아도 「arrived map」 만 보고 도착으로 읽던 판정을 고쳤다(#991). 출발 상태는 같은 명령 안의 1장 걷기(서장 끝~귀가)로 만든다"
+paths = ["sfc/dq4/tools/dq4ch1savecheck.py", "sfc/dq4/tools/dq4ch1walkcheck.py", "sfc/dq4/tools/dq4dungeonencountercheck.py",
+         "sfc/dq4/tools/dq4groupcheck.py", "sfc/dq4/tools/dq4readset.py", "sfc/dq4/tools/lua/dq4readset.lua",
+         "sfc/dq4/tools/dq4wellresetcheck.py", "sfc/dq4/tools/dq4wellswitch.py", "sfc/dq4/tools/dq4mesen.py",
+         "sfc/dq5/tools/dq5exitcheck.py", "sfc/dq5/tools/dq5sram.py", "sfc/dq5/tools/lua/dq5msg.lua",
+         "sfc/dq5/tools/lua/dq5cdldump.lua", "sfc/dq5/tools/lua/dq5warptrace.lua", "sfc/dq5/tools/lua/dq5warp.lua",
+         "sfc/dq4/tools/lua/dq4walkstate.lua", "tools/lua/walk.lua"]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/ch1save-walk work/ch1save && uv run --locked python sfc/dq4/tools/dq4ch1walkcheck.py --rom work/ch1/dq4-ch1.sfc --out work/ch1save-walk --units --until homecoming && uv run --locked python sfc/dq4/tools/dq4ch1savecheck.py --rom work/ch1/dq4-ch1.sfc --states work/ch1save-walk --out work/ch1save"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
