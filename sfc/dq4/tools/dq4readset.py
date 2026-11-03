@@ -51,9 +51,14 @@ OUT = '.readset.txt'
 HDMA = OUT + '.hdma'
 # 결과에 닿는 MesenCE 설정을 명령줄로 고정한다. 사용자 settings.json 의 값과 상관없이 같게 돈다
 FIXED_ARGS = ('--Snes.RamPowerOnState=AllZeros', '--Snes.EnableRandomPowerOnState=false')
-# 롬 머리 가운데 에뮬레이터가 매핑을 정하는 데 쓰는 칸(LoROM $7FD5~$7FD9). 체크섬은 빌드마다 바뀌고 결과와 무관해 뺀다
-HEADER_MAP = slice(0x7FD5, 0x7FDA)
+# 롬 머리(LoROM $7FB0~$7FFF)는 체크섬 네 바이트만 빼고 통째로 키에 넣는다. 전원·리셋 때의 리셋 벡터($7FFC) 읽기는 접근
+# 카운터에 잡히지 않고, 에뮬레이터가 매핑을 정할 때 읽는 칸도 잡히지 않는다. 체크섬은 빌드마다 바뀌는데 뒤집어도
+# 결과가 같았다(dq4readsetcheck 가 늘 뒤집어 본다)
+HEADER = (slice(0x7FB0, 0x7FDC), slice(0x7FE0, 0x8000))
+CHECKSUM = range(0x7FDC, 0x7FE0)
 KEEP_ENTRIES = 8
+# blob 은 잠금 밖에서 먼저 쓰고 index 는 그 뒤 잠금 안에서 쓴다. 그 사이의 blob 을 prune 이 지우지 않게 이만큼 젊은 것은 둔다
+BLOB_GRACE = 6 * 3600
 GETENV = re.compile(r'''os\.getenv\(\s*["']([A-Za-z_][A-Za-z0-9_]*)["']\s*\)''')
 # 출발 상태 머리의 롬 파일 이름(dq4mesen.unique_copy 가 실행마다 다르게 짓는다) 앞의 길이 칸
 _NAME = re.compile(rb'([\x01-\xff])\x00\x00\x00([ -~]{1,255}?\.(?:sfc|smc))', re.S)
@@ -104,8 +109,8 @@ def digest(rom, ranges):
 
 
 def rom_shape(rom):
-    """매핑을 정하는 머리 칸과 크기."""
-    return f'{len(rom)}:{bytes(rom[HEADER_MAP]).hex()}'
+    """롬 크기와 체크섬을 뺀 머리."""
+    return f'{len(rom)}:' + ':'.join(bytes(rom[h]).hex() for h in HEADER)
 
 
 def state_hash(data):
@@ -117,10 +122,22 @@ def state_hash(data):
     return hashlib.sha256(data).hexdigest()
 
 
+# dq4mesen.unique_copy 가 실행마다 짓는 롬 복사본 이름. 기록 글에 찍히면 같은 실행이라도 달라 보인다
+_COPY = re.compile(rb'[A-Za-z0-9_.-]+-[0-9a-f]{12}\.sfc')
+
+
+def content_hash(data, name):
+    """출력·입력 파일의 해시. 세이브스테이트는 머리의 롬 이름을, 글 기록은 복사본 이름을 지우고 본다."""
+    if str(name).endswith('.mss'):
+        return state_hash(data)
+    if str(name).endswith(('.log', '.txt')):
+        data = _COPY.sub(b'<rom>', bytes(data))
+    return hashlib.sha256(data).hexdigest()
+
+
 def file_hash(path):
     path = Path(path)
-    data = path.read_bytes()
-    return state_hash(data) if path.suffix == '.mss' else hashlib.sha256(data).hexdigest()
+    return content_hash(path.read_bytes(), path.name)
 
 
 def tree_hash(folder, skip=()):
@@ -250,9 +267,12 @@ class Store:
             return []
 
     def put_blob(self, data):
+        """이미 있으면 mtime 을 새로 해, 항목이 index 에 들어가기 전에 prune 이 지우지 않게 한다(BLOB_GRACE)."""
         sha = hashlib.sha256(data).hexdigest()
         p = self.blob_path(sha)
-        if not p.exists():
+        try:
+            os.utime(p)
+        except FileNotFoundError:
             _replace(p, zlib.compress(data, 1))
         return sha
 
@@ -294,24 +314,34 @@ class Store:
                         live |= set(e['files'].values())
                 except (OSError, ValueError):
                     pass
+            young = time.time() - BLOB_GRACE
             for f in (self.root / 'blob').rglob('*'):
-                if f.is_file() and f.name not in live:
+                if f.is_file() and f.name not in live and f.stat().st_mtime < young:
                     f.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------- 실행
 
+def settings_path(mesence):
+    """MesenCE 가 읽는 settings.json. 실행 파일 옆에 있으면 포터블 모드라 그것을, 아니면 사용자 설정 폴더의 것을 읽는다.
+    MESENCE_SAVES 는 dq4mesen 이 배터리 기록을 찾는 곳일 뿐 MesenCE 의 설정 위치를 바꾸지 않아 보지 않는다."""
+    portable = Path(mesence).resolve().parent / 'settings.json'
+    if portable.is_file():
+        return portable
+    home = Path.home()
+    if sys.platform == 'darwin':
+        return home / 'Library/Application Support/MesenCE/settings.json'
+    if sys.platform == 'win32':
+        return Path(os.environ.get('APPDATA', home)) / 'MesenCE/settings.json'
+    return Path(os.environ.get('XDG_CONFIG_HOME', home / '.config')) / 'MesenCE/settings.json'
+
+
 def mesence_settings(mesence):
-    """사용자 settings.json 가운데 SNES·에뮬레이션 절(명령줄로 고정하지 않은 설정도 결과에 닿을 수 있다)."""
-    for folder in mesen.save_dirs(mesence):
-        p = folder.parent / 'settings.json'
-        if p.is_file():
-            try:
-                data = json.loads(p.read_text(encoding='utf-8-sig'))
-            except ValueError:
-                return 'unreadable'
-            return {k: data.get(k) for k in ('Snes', 'Emulation')}
-    return None
+    """MesenCE 설정 파일 원 바이트의 해시. 명령줄로 고정하지 않은 설정도 결과에 닿을 수 있다. 못 찾으면 멈춘다."""
+    p = settings_path(mesence)
+    if not p.is_file():
+        raise SystemExit(f'MesenCE 설정 파일을 찾지 못함: {p}. 읽은 바이트 캐시 키에 넣어야 한다(한 번 띄우면 생긴다)')
+    return hashlib.sha256(p.read_bytes()).hexdigest()
 
 
 def mesence_stamp(mesence):
@@ -319,7 +349,7 @@ def mesence_stamp(mesence):
     return f'{st.st_size}:{st.st_mtime_ns}'
 
 
-def key_parts(mesence, rom, script, dest, env, extra):
+def key_parts(mesence, rom, script, dest, env, extra, cwd=None):
     libdir = env.get('LIBDIR')
     files = lua_files(libdir) + [Path(script).resolve(), PRELUDE.resolve()]
     files = sorted(set(files))
@@ -334,8 +364,17 @@ def key_parts(mesence, rom, script, dest, env, extra):
         'emulator': [mesence_stamp(mesence), list(extra), list(FIXED_ARGS), mesence_settings(mesence)],
         'env': canon_env(env, names, dest, [d for d in LUA_DIRS] + ([libdir] if libdir else [])),
         'inputs': tree_hash(dest, skip=(ENTRY, OUT, HDMA)),
+        'cwd': _cwd_key(cwd, dest),
         'rom': rom_shape(rom),
     }
+
+
+def _cwd_key(cwd, dest):
+    """환경 변수의 상대 경로(SAVE=end.mss 등)는 작업 폴더 기준이라 키에 넣는다."""
+    if cwd is None:
+        return 'inherit:' + str(Path.cwd().resolve())
+    c, d = Path(cwd).resolve(), Path(dest).resolve()
+    return 'dest' if c == d else ('dest:' + c.relative_to(d).as_posix() if d in c.parents else str(c))
 
 
 def _outputs(dest, before):
@@ -384,7 +423,7 @@ def run(mesence, rom_path, script, dest, env, timeout=1800, extra=mesen.ARGS, lo
     dest.mkdir(parents=True, exist_ok=True)
     rom = Path(rom_path).read_bytes()
     store = store or Store()
-    parts = key_parts(mesence, rom, script, dest, env, extra)
+    parts = key_parts(mesence, rom, script, dest, env, extra, cwd)
     key = index_key(parts)
     before = parts['inputs']
     hit = find(store.entries(key), rom) if enabled() else None
@@ -401,17 +440,21 @@ def run(mesence, rom_path, script, dest, env, timeout=1800, extra=mesen.ARGS, lo
             return info
         _clear(dest, before)
         rc, timed_out, ranges = _execute(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag)
-        got = _outputs(dest, before)
-        if timed_out or got != {rel: _hash_blob(store, sha, rel) for rel, sha in hit['files'].items()}:
+        if timed_out:
+            raise SystemExit(f'읽은 바이트 캐시 재검증이 {timeout}초 안에 끝나지 않음: {dest}(항목은 그대로 둠)')
+        want = {rel: content_hash(store.get_blob(sha), rel) for rel, sha in hit['files'].items()}
+        diff = mismatch(want, _outputs(dest, before), hit, rc, ranges)
+        if diff:
             store.drop(key, hit)
-            raise SystemExit(f'읽은 바이트 캐시가 틀렸다: {dest} 를 다시 돌린 출력이 캐시와 다름(항목을 지움). '
+            raise SystemExit(f'읽은 바이트 캐시가 틀렸다: {dest} 를 다시 돌린 결과가 캐시와 다름({diff}, 항목을 지움). '
                              'dq4readset 의 키에 빠진 입력이 있다')
         return {**info, 'verified': True}
     rc, timed_out, ranges = _execute(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag)
     info = {'cached': False, 'returncode': rc, 'timed_out': timed_out,
             'readset': sum(n for _, n in ranges) if ranges is not None else None, 'ranges': len(ranges or ()),
             'key': key}
-    if timed_out or ranges is None or (accept and not accept(dest)):
+    # 0 이 아닌 종료(스크립트 오류·끝까지 못 감)나 읽은 집합이 없는 실행은 넣지 않는다
+    if timed_out or rc != 0 or ranges is None or (accept and not accept(dest)):
         return info
     files = {}
     for rel in _outputs(dest, before):
@@ -427,6 +470,13 @@ def run(mesence, rom_path, script, dest, env, timeout=1800, extra=mesen.ARGS, lo
     return info
 
 
-def _hash_blob(store, sha, rel):
-    data = store.get_blob(sha)
-    return state_hash(data) if rel.endswith('.mss') else hashlib.sha256(data).hexdigest()
+def mismatch(want, got, entry, rc, ranges):
+    """재검증: 캐시 항목과 다시 돌린 결과가 어디서 다른지(같으면 빈 글)."""
+    out = []
+    if got != want:
+        out.append('출력 ' + ','.join(sorted(k for k in set(want) | set(got) if want.get(k) != got.get(k))[:8]))
+    if rc != entry.get('returncode'):
+        out.append(f'종료 코드 {entry.get("returncode")}→{rc}')
+    if ranges is None or pack(ranges) != entry['ranges']:
+        out.append('읽은 집합')
+    return '; '.join(out)

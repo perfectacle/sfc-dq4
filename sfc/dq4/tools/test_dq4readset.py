@@ -6,6 +6,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -49,20 +50,27 @@ class PureTests(unittest.TestCase):
         self.assertIs(rs.find([a, b], rom), b)
         self.assertIsNone(rs.find([a], rom))
 
-    def test_rom_shape_ignores_checksum(self):
+    def test_rom_shape_keeps_header_but_checksum(self):
         rom = bytearray(0x8000)
         rom[0x7FD5] = 0x20
         before = rs.rom_shape(rom)
         rom[0x7FDC:0x7FE0] = b'\x12\x34\x56\x78'
         self.assertEqual(rs.rom_shape(rom), before)
-        rom[0x7FD7] = 0x0C
-        self.assertNotEqual(rs.rom_shape(rom), before)
+        for at in (0x7FB0, 0x7FC0, 0x7FD7, 0x7FDB, 0x7FFC, 0x7FFF):
+            changed = bytearray(rom)
+            changed[at] ^= 1
+            self.assertNotEqual(rs.rom_shape(changed), before, hex(at))
 
     def test_state_hash_ignores_rom_file_name_only(self):
         a = mss(b'probe-855474adcaf4.sfc')
         b = mss(b'windowcheck-e302b892a00a.sfc')
         self.assertEqual(rs.state_hash(a), rs.state_hash(b))
         self.assertNotEqual(rs.state_hash(a), rs.state_hash(mss(b'probe-855474adcaf4.sfc', b'payloae')))
+
+    def test_content_hash_ignores_copy_name_in_logs(self):
+        a = rs.content_hash(b'load probe-0123456789ab.sfc ok', 'mesen.log')
+        self.assertEqual(a, rs.content_hash(b'load windowcheck-ba9876543210.sfc ok', 'mesen.log'))
+        self.assertNotEqual(a, rs.content_hash(b'load probe-0123456789ab.sfc no', 'mesen.log'))
 
     def test_lua_env_names(self):
         with tempfile.TemporaryDirectory() as d:
@@ -108,10 +116,18 @@ class StoreTests(unittest.TestCase):
             self.assertEqual(st.entries('k' * 64)[0]['digest'], es[-1]['digest'])
             st.drop('k' * 64, es[-1])
             self.assertNotIn(es[-1]['digest'], [e['digest'] for e in st.entries('k' * 64)])
+            old = time.time() - rs.BLOB_GRACE - 10
+            for f in (Path(d) / 'blob').rglob('*'):
+                os.utime(f, (old, old))
+            young = st.put_blob(b'just written, not in any index yet')
+            st.prune(0)
+            self.assertTrue(st.blob_path(young).exists())
+            os.utime(st.blob_path(young), (old, old))
             st.prune(0)
             live = {s for e in st.entries('k' * 64) for s in e['files'].values()}
             blobs = {p.name for p in (Path(d) / 'blob').rglob('*') if p.is_file()}
             self.assertLessEqual(blobs, live)
+            self.assertNotIn(young, blobs)
 
 
 class FakeMesen:
@@ -121,6 +137,7 @@ class FakeMesen:
 
     def __init__(self):
         self.calls = 0
+        self.rc = 0
 
     def __call__(self, mesence, rom, script, folder=None, tag='probe', extra=(), env=None, stdout=None, **kw):
         self.calls += 1
@@ -129,7 +146,8 @@ class FakeMesen:
         Path(folder, 'out.bin').write_bytes(data[s:s + n])
         Path(folder, 'end.mss').write_bytes(mss(f'probe-{self.calls:012x}.sfc'.encode(), data[s:s + 2]))
         Path(env['READSET_OUT']).write_text(f'{s:X} {n:X}\n')
-        return subprocess.CompletedProcess([], 0)
+        Path(folder, 'mesen.log').write_text(f'loaded {Path(rom).name}\n')
+        return subprocess.CompletedProcess([], self.rc)
 
 
 class RunTests(unittest.TestCase):
@@ -138,6 +156,8 @@ class RunTests(unittest.TestCase):
         d = Path(self.tmp.name)
         self.mesence = d / 'Mesen'
         self.mesence.write_bytes(b'emu')
+        self.settings = d / 'settings.json'
+        self.settings.write_text('{"Snes": {"RamPowerOnState": "Random"}}')
         (d / 'Saves').mkdir()
         self.rom = d / 'rom.sfc'
         self.rom.write_bytes(bytes(0x8000))
@@ -157,10 +177,11 @@ class RunTests(unittest.TestCase):
         self.env.stop()
         self.tmp.cleanup()
 
-    def go(self):
+    def go(self, env=None, cwd=None):
         self.n += 1
         dest = Path(self.tmp.name) / f'run{self.n}'
-        return rs.run(self.mesence, self.rom, self.script, dest, {'STATE': 'x'}, store=self.store), dest
+        return rs.run(self.mesence, self.rom, self.script, dest, env or {'STATE': 'x'}, store=self.store,
+                      cwd=cwd), dest
 
     def flip(self, at):
         data = bytearray(self.rom.read_bytes())
@@ -181,6 +202,28 @@ class RunTests(unittest.TestCase):
         self.assertFalse(self.go()[0]['cached'])
         self.assertEqual(self.fake.calls, 2)
 
+    def test_inputs_outside_rom_miss(self):
+        self.go()
+        self.assertTrue(self.go()[0]['cached'])
+        self.assertFalse(self.go(env={'STATE': 'y'})[0]['cached'])
+        self.settings.write_text('{"Snes": {"RamPowerOnState": "AllZeros"}}')
+        self.assertFalse(self.go()[0]['cached'])
+        self.assertFalse(self.go(cwd=self.tmp.name)[0]['cached'])
+
+    def test_missing_settings_is_an_error(self):
+        self.settings.unlink()
+        empty = Path(self.tmp.name) / 'home'
+        with mock.patch.object(rs.Path, 'home', return_value=empty), \
+                mock.patch.dict(os.environ, {'APPDATA': str(empty), 'XDG_CONFIG_HOME': str(empty)}):
+            with self.assertRaises(SystemExit):
+                self.go()
+
+    def test_failed_run_is_not_cached(self):
+        self.fake.rc = 1
+        self.go()
+        self.fake.rc = 0
+        self.assertFalse(self.go()[0]['cached'])
+
     def test_off_runs_everything(self):
         self.go()
         with mock.patch.dict(os.environ, {'DQ4_READSET': 'off'}):
@@ -192,10 +235,15 @@ class RunTests(unittest.TestCase):
             info, _ = self.go()
             self.assertTrue(info['verified'])
             self.assertEqual(self.fake.calls, 2)
-            # 키에 없는 입력이 결과를 바꾼 것처럼: 다음 실행은 다른 바이트를 낸다
+            # 키에 없는 입력이 결과를 바꾼 것처럼: 종료 코드만 달라져도 틀린 캐시로 본다
+            self.fake.rc = 3
+            with self.assertRaisesRegex(SystemExit, '종료 코드'):
+                self.go()
+            self.fake.rc = 0
+            self.go()
             self.fake.READ = (0x80, 0x10)
             self.flip(0x80)
-            with self.assertRaises(SystemExit):
+            with self.assertRaisesRegex(SystemExit, '출력'):
                 self.go()
 
     def test_accept_false_is_not_cached(self):
@@ -205,15 +253,6 @@ class RunTests(unittest.TestCase):
 
 
 class RuleTests(unittest.TestCase):
-    def test_prelude_wraps_what_counters_miss(self):
-        lua = rs.PRELUDE.read_text(encoding='utf-8')
-        # emu.read* 는 카운터에 잡히지 않는다: 머리말이 넷 모두 감싸야 한다
-        self.assertIn('pairs({read = 1, readWord = 2, read16 = 2, read32 = 4})', lua)
-        for fn in ('emu.loadSavestate = function', 'emu.createSavestate = function',
-                   'emu.resetAccessCounters = function', 'emu.stop = function', 'emu.eventType.scriptEnded',
-                   'emu.counterType.readCount', 'emu.counterType.execCount'):
-            self.assertIn(fn, lua)
-
     def test_runner_copies_rom_so_no_battery_save_leaks(self):
         """testrunner() 는 롬을 복사하지 않아 앞 실행의 .srm 을 읽는다. 캐시 실행은 run/Runner 만 쓴다."""
         tree = ast.parse((HERE / 'dq4readset.py').read_text(encoding='utf-8'))

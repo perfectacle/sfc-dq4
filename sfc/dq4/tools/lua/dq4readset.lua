@@ -9,6 +9,8 @@
 -- 두지 않는다. 장면이 카운터를 지우면 지우기 전 값을 쌓아 둔다.
 --
 -- emu.stop 뒤에도 한두 프레임이 더 돌 수 있어(그 사이 스크립트가 기록을 더 쓴다) 멈춘 뒤 프레임마다 다시 쓴다.
+-- 이 머리말의 endFrame 콜백이 장면 스크립트 것보다 먼저 걸리므로, 그 프레임에 스크립트가 쓰는 기록보다 뒤의 읽기는 없다.
+-- testrunner 에서는 scriptEnded 가 오지 않아 그것에 기대지 않는다.
 local out = READSET_OUT or os.getenv("READSET_OUT")
 if not out then return end
 local PRG = emu.memType.snesPrgRom
@@ -134,4 +136,3 @@ emu.stop = function(...)
   return stopOrig(...)
 end
 emu.addEventCallback(function() if stopped then dump() end end, emu.eventType.endFrame)
-emu.addEventCallback(dump, emu.eventType.scriptEnded)
