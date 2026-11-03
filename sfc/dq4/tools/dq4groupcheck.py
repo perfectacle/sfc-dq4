@@ -60,8 +60,9 @@ EVENT_STAIRS = {(0x00, 0x00, 0x1F, 0x12)}
 PRESET = ""
 
 
-def scene(mesence, rom, state, out, name, readset=False, **extra):
-    """readset 이면 dq4readset 으로 돌려 같은 출발 상태·입력에 읽은 롬 바이트가 같으면 캐시의 출력을 펼친다."""
+def scene(mesence, rom, state, out, name, readset=True, **extra):
+    """dq4readset 으로 돌려 같은 출발 상태·입력에 읽은 롬 바이트가 같으면 캐시의 출력을 펼친다. readset=False 는 캐시를
+    거치지 않고 롬을 복사하지 않는 testrunner 로 띄운다(배터리 기록이 남는 장면을 일부러 볼 때만)."""
     dest = out / name
     dest.mkdir(parents=True)
     env = environment(os.environ["LIBDIR"], state, dest)

@@ -19,8 +19,6 @@ import concurrent.futures
 import json
 import os
 import re
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -35,7 +33,7 @@ import dq4freshstate  # noqa: E402
 import dq4dungeonencountercheck  # noqa: E402
 import dq4groupcheck  # noqa: E402
 import dq4wellswitch  # noqa: E402
-import dq4mesen  # noqa: E402
+import dq4readset  # noqa: E402
 
 FLAG, BIT = dq4wellswitch.FLAG[0] & 0xFFFF, dq4wellswitch.FLAG[1]
 WIPE_TEST = ",".join(["left:24,right:24"] * 4 + ["a:4,wait:40"] * 90)
@@ -103,9 +101,6 @@ def load_start(mesence, rom, state, load_rom, out):
 def load(mesence, rom, state, out, name, patch=""):
     dest = out / name
     dest.mkdir()
-    # MesenCE keeps a ROM's battery save by its file name.
-    copy = dest / f"{name}-{os.getpid()}.sfc"
-    shutil.copyfile(rom, copy)
     shared = rom.read_bytes()[lorom(SHARED_JP):lorom(SHARED_JP) + SHARED_SIZE]
     env = dict(os.environ, STATE=str(state),
                SHOT_DIR=str(dest), NEXT=str(DQ5_TOOLS / "lua" / "dq5msg.lua"), POKE="7E36EB=05;7E370B=00",
@@ -113,10 +108,8 @@ def load(mesence, rom, state, out, name, patch=""):
                PRE=f"{TALK},wait:400,{CONTINUE}", RESETAT=str(RESET), MAXF=str(LOADED + 100),
                CALLS="25824F,258278", ROMPATCH=patch,
                DUMP=f"{SAVED - 50}:7E2000:{SAVE_SIZE};{SAVED}:{SLOT:06X}:{SAVE_SIZE};{LOADED}:7E2000:{SAVE_SIZE}")
-    dq4mesen.testrunner(str(mesence), str(copy), str(DQ5_TOOLS / "lua" / "dq5cdldump.lua"),
-                        "--Snes.DisableFrameSkipping=true", env=env, stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL, timeout=600, check=False)
-    copy.unlink()
+    # dq4readset.run 이 롬을 실행마다 다른 이름으로 복사해 띄우므로 앞 실행의 배터리 기록(.srm)을 읽지 않는다
+    dq4readset.run(mesence, rom, DQ5_TOOLS / "lua" / "dq5cdldump.lua", dest, env, timeout=600)
     text = (dest / "msg.txt").read_text(encoding="utf-8")
     dumps = {(int(m[1]), int(m[2], 16)): bytes.fromhex(m[3])
              for m in re.finditer(r"(\d+) dump ([0-9A-F]{6}) ([0-9A-F ]+)", text)}
