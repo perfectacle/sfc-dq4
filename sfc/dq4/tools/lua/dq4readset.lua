@@ -17,6 +17,42 @@ local PRG = emu.memType.snesPrgRom
 local CPU = emu.memType.snesMemory
 local READ, EXEC = emu.counterType.readCount, emu.counterType.execCount
 
+-- 장면 Lua 의 오류. testrunner 는 콜백 안 오류를 삼키고 다음 프레임을 계속 돌며, emu.stop 뒤에 난 오류에도 0 으로 끝난다
+-- (실측). 오류가 나면 읽은 집합 파일을 지우고(그 파일이 없으면 dq4readset.py 가 캐시에 넣지 않는다), .err 와 표준 오류에
+-- 적는다. 그 뒤 dump 는 끝줄을 LUAERROR 로 쓴다. 어느 쓰기가 실패해도 캐시에 들지 않는 쪽으로 기운다
+local errOut = out .. ".err"
+local failed = false
+function READSET_FAIL(e)
+  failed = true
+  os.remove(out)
+  local msg = tostring(e)
+  pcall(function() io.stderr:write("[dq4readset] Lua 오류: ", msg, "\n") end)
+  local f = io.open(errOut, "a")
+  if f then f:write(msg, "\n"); f:close() end
+end
+
+-- 콜백의 반환값은 개수까지 그대로 넘긴다(메모리 콜백은 값을 돌려주어 읽은·쓴 값을 바꿀 수 있다). 매 명령마다 불리는 콜백도
+-- 있어 표를 만들지 않는다
+local function pass(ok, ...)
+  if not ok then
+    local e = ...
+    READSET_FAIL(e)
+    error(e, 0)
+  end
+  return ...
+end
+
+local function guarded(fn)
+  return function(...) return pass(pcall(fn, ...)) end
+end
+
+-- MesenCE 는 지울 콜백을 add 가 돌려준 번호로 찾는다(실측: 함수를 넘기면 머리말이 없어도 지워지지 않는다). 그래서 감싼
+-- 함수를 넘겨도 장면이 받은 번호로 그대로 지워진다. 머리말 자신의 콜백보다 먼저 건다
+for _, name in ipairs({"addEventCallback", "addMemoryCallback"}) do
+  local orig = emu[name]
+  emu[name] = function(fn, ...) return orig(guarded(fn), ...) end
+end
+
 local base = nil          -- 밑값 {오프셋 = 읽기+실행}
 local created = false     -- 첫 불러오기 전에 상태를 만들었는가
 local kept = {}           -- 카운터를 지우기 전까지 읽은 오프셋
@@ -59,6 +95,7 @@ local function dump()
   if s then lines[#lines + 1] = string.format("%X %X", s, p - s + 1) end
   local tmp = out .. ".tmp"
   local f = assert(io.open(tmp, "w"))
+  lines[#lines + 1] = failed and "LUAERROR" or "OK"
   f:write(table.concat(lines, "\n"), "\n")
   f:close()
   os.rename(tmp, out)
@@ -126,31 +163,6 @@ if hdma then
       end
     end
   end, emu.callbackType.write, 0x420C, 0x420C)
-end
-
--- 장면 Lua 의 오류를 READSET_OUT.err 에 적는다. testrunner 는 콜백 안 오류를 삼키고 다음 프레임을 계속 돌며, emu.stop 뒤에
--- 난 오류에도 0 으로 끝난다(실측). 이 파일이 있으면 dq4readset.py 가 캐시에 넣지 않는다. 오류는 다시 던져 동작은 그대로다
-local errOut = out .. ".err"
-function READSET_FAIL(e)
-  local f = io.open(errOut, "a")
-  if f then f:write(tostring(e), "\n"); f:close() end
-end
-
--- 콜백은 값을 하나까지만 돌려준다(메모리 콜백이 읽은 값을 바꿀 때). 매 명령마다 불리는 콜백도 있어 표를 만들지 않는다
-local function guarded(fn)
-  return function(...)
-    local ok, r = pcall(fn, ...)
-    if not ok then
-      READSET_FAIL(r)
-      error(r, 0)
-    end
-    return r
-  end
-end
-
-for _, name in ipairs({"addEventCallback", "addMemoryCallback"}) do
-  local orig = emu[name]
-  emu[name] = function(fn, ...) return orig(guarded(fn), ...) end
 end
 
 local stopped = false

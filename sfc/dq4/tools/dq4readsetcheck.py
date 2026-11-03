@@ -10,6 +10,7 @@
   HDMA    게임 장면의 HDMA 표 첫 바이트가 롬이면 읽은 집합에 들어 있다
 
 출력은 화면 찍기(.png)를 빼고 견준다(캐시 재검증과 같은 기준, 형식 문서 「화면 찍기는 결정적이지 않다」).
+콜백 장면(lua/dq4readsetcb.lua): 머리말이 감싼 콜백도 장면이 add 로 받은 번호로 지워진다.
 오류 장면(lua/dq4readseterr.lua): 장면 Lua 가 맨 위·콜백 안·emu.stop 뒤에서 오류를 내면 0 이 아닌 종료이고 캐시에 없다.
 
 field 장면에서는 캐시를 켠 채 롬 밖 입력을 바꿔 본다: 환경 변수 값 하나, 에뮬레이터 명령줄 하나, 출발 상태 내용을
@@ -40,6 +41,7 @@ import dq4readset as rs  # noqa: E402
 KEYED_HEADER = [i for h in rs.HEADER for i in range(h.start, h.stop)]
 SYNTH_LUA = HERE / 'lua' / 'dq4readsetsynth.lua'
 ERR_LUA = HERE / 'lua' / 'dq4readseterr.lua'
+CB_LUA = HERE / 'lua' / 'dq4readsetcb.lua'
 SYNTH_READ = [*range(0x3F0000, 0x3F0005), *range(0x3F0010, 0x3F0014), *range(0x3F0020, 0x3F0024), 0x3F0030, 0x3F0031]
 # 서장 첫 장면에서: 말 걸기·명령 창 열고 닫기·걷기
 FIELD_PRE = 'wait:60,a:6,wait:90,a:6,wait:90,b:6,wait:60,down:24,wait:20,left:24,wait:20,a:6,wait:60,b:6,wait:60,up:24'
@@ -174,6 +176,19 @@ def check_errors(go, rom, out):
     return {'name': 'errors', 'status': 'failed' if problems else 'passed', 'problems': problems}
 
 
+def check_callbacks(go, rom, out):
+    """머리말이 감싼 콜백도 장면이 받은 번호로 지워진다(MesenCE 는 함수가 아니라 번호로 찾는다)."""
+    dest = out / 'callbacks'
+    info, entry, _, _ = go(rom, CB_LUA, {}, dest, timeout=120)
+    path = dest / 'callbacks.txt'
+    if info['returncode'] != 0 or not path.exists():
+        return {'name': 'callbacks', 'status': 'failed', 'problems': [f'종료 코드 {info["returncode"]}, 기록 없음']}
+    m10, m40, e10, e40 = map(int, path.read_text().split())
+    problems = [] if m10 > 0 and e10 > 0 and m40 == m10 and e40 == e10 else [f'지운 뒤에도 불림 {m10}→{m40}, {e10}→{e40}']
+    return {'name': 'callbacks', 'status': 'failed' if problems else 'passed', 'problems': problems,
+            'counts': [m10, m40, e10, e40]}
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--rom', type=Path, required=True)
@@ -202,7 +217,8 @@ def main():
             report(check_inputs(go, rom, script, env, out))
     report(check_synth(go, rom, libdir, out))
     report(check_errors(go, rom, out))
-    ok = all(r.get('status') == 'passed' for r in results) and len(results) == 5
+    report(check_callbacks(go, rom, out))
+    ok = all(r.get('status') == 'passed' for r in results) and len(results) == 6
     print(json.dumps({'status': 'passed' if ok else 'failed'}, ensure_ascii=False))
     return 0 if ok else 1
 

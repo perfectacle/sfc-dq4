@@ -52,7 +52,11 @@ OUT = '.readset.txt'
 HDMA = OUT + '.hdma'
 # 머리말이 장면 Lua 의 오류를 여기 적는다. MesenCE --testrunner 는 콜백 안 오류를 삼키고 0 으로 끝날 수 있다
 ERR = OUT + '.err'
-SKIP = (ENTRY, OUT, HDMA, ERR)
+# 머리말이 읽은 집합을 이 이름으로 쓴 뒤 OUT 으로 옮긴다. 도중에 끊기면 남는다
+OUT_TMP = OUT + '.tmp'
+SKIP = (ENTRY, OUT, HDMA, ERR, OUT_TMP)
+# 머리말이 읽은 집합 끝줄에 쓰는 표시. 장면 Lua 가 오류를 냈으면 LUAERROR
+DONE = 'OK'
 # 결과에 닿는 MesenCE 설정을 명령줄로 고정한다. 사용자 settings.json 의 값과 상관없이 같게 돈다
 FIXED_ARGS = ('--Snes.RamPowerOnState=AllZeros', '--Snes.EnableRandomPowerOnState=false')
 # 롬 머리(LoROM $7FB0~$7FFF)는 체크섬 네 바이트만 빼고 통째로 키에 넣는다. 전원·리셋 때의 리셋 벡터($7FFC) 읽기는 접근
@@ -208,12 +212,16 @@ def index_key(parts):
     return hashlib.sha256(json.dumps(parts, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
-def find(entries, rom):
-    """entries 가운데 지금 롬과 읽은 바이트가 같은 첫 것."""
+def matches(entries, rom):
+    """entries 가운데 지금 롬과 읽은 바이트가 같은 것들(최근 것부터)."""
     for e in entries:
         if digest(rom, unpack(e['ranges'])) == e['digest']:
-            return e
-    return None
+            yield e
+
+
+def find(entries, rom):
+    """entries 가운데 지금 롬과 읽은 바이트가 같은 첫 것."""
+    return next(matches(entries, rom), None)
 
 
 # ---------------------------------------------------------------- 저장소
@@ -292,13 +300,19 @@ class Store:
         packed = {rel: (hashlib.sha256(data).hexdigest(), zlib.compress(data, 1)) for rel, data in blobs.items()}
         with locked(self.root):
             for sha, z in packed.values():
-                p = self.blob_path(sha)
-                if not p.is_file():
-                    _replace(p, z)
+                if not self._blob_ok(sha):
+                    _replace(self.blob_path(sha), z)
             entry = {**entry, 'files': {rel: sha for rel, (sha, _) in packed.items()}}
             old = [e for e in self.entries(key) if e['digest'] != entry['digest']]
             _replace(self.index_path(key), json.dumps([entry] + old[:KEEP_ENTRIES - 1]).encode())
         return entry
+
+    def _blob_ok(self, sha):
+        """있고 풀리며 내용 해시가 이름과 같은가. 깨진 blob 을 그대로 두면 그 내용의 항목이 늘 빗나간다."""
+        try:
+            return hashlib.sha256(zlib.decompress(self.blob_path(sha).read_bytes())).hexdigest() == sha
+        except (OSError, zlib.error):
+            return False
 
     def touch(self, key, entry):
         """맞은 항목을 맨 앞으로(오래 안 쓴 것부터 지우게). 그 사이 prune·drop 이 지웠으면 되살리지 않는다."""
@@ -334,6 +348,10 @@ class Store:
                     pass
             for f in (self.root / 'blob').rglob('*'):
                 if f.is_file() and f.name not in live and not f.name.startswith('.'):
+                    f.unlink(missing_ok=True)
+            # _replace 가 쓰다 끊긴 임시 파일(.이름.pid.난수). 잠금 안이라 지금 쓰는 것은 없다
+            for f in self.root.rglob('.*.*'):
+                if f.is_file() and f.name != '.lock':
                     f.unlink(missing_ok=True)
 
 
@@ -430,13 +448,15 @@ def _execute(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag
             rc = p.returncode
     except subprocess.TimeoutExpired:
         timed_out = True
-    ranges = parse_ranges(out.read_text()) if out.exists() else None
-    if err.exists():
-        print(f'[dq4readset] {dest}: 장면 Lua 오류(캐시에 넣지 않음): {err.read_text(errors="replace").strip()[:500]}',
-              file=sys.stderr)
+    text = out.read_text() if out.exists() else None
+    ranges = parse_ranges(text) if text is not None else None
+    done = text is not None and text.split()[-1:] == [DONE]
+    if err.exists() or (text is not None and not done):
+        why = err.read_text(errors='replace').strip()[:500] if err.exists() else '읽은 집합 끝줄이 OK 가 아님'
+        print(f'[dq4readset] {dest}: 장면 Lua 오류(캐시에 넣지 않음): {why}', file=sys.stderr)
         if rc == 0:
             rc = LUA_ERROR
-    for f in (entry, out, err):
+    for f in (entry, out, err, dest / OUT_TMP):
         f.unlink(missing_ok=True)
     return rc, timed_out, ranges
 
@@ -468,14 +488,15 @@ def _run(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag, ac
     parts = key_parts(mesence, rom, script, dest, env, extra, cwd)
     key = index_key(parts)
     before = parts['inputs']
-    hit = find(store.entries(key), rom) if enabled() else None
-    blobs = {}
-    if hit:
+    hit, blobs = None, {}
+    for e in (matches(store.entries(key), rom) if enabled() else ()):
         try:
-            blobs = {rel: store.get_blob(sha) for rel, sha in hit['files'].items()}
+            blobs = {rel: store.get_blob(sha) for rel, sha in e['files'].items()}
         except FileNotFoundError:
-            store.drop(key, hit)
-            hit = None
+            store.drop(key, e)
+            continue
+        hit = e
+        break
     if hit:
         for rel, data in blobs.items():
             p = dest / rel
