@@ -44,10 +44,47 @@ class HookTest(unittest.TestCase):
     @unittest.skipUnless(DQ5.is_file(), "local source ROM not present")
     def test_original_bytes(self):
         rom = DQ5.read_bytes()
+        # lorom() reads a ROM without a copier header (README); a headed one would shift every offset by 512
+        self.assertEqual(len(rom), 0x180000, "rom/dq5.sfc must be the 1.5MB ROM without a copier header")
         self.assertEqual(rom[lorom(st.LYING_CHECK):lorom(st.LYING_CHECK) + 3], st.LYING_CHECK_ORIG)
         self.assertEqual(rom[lorom(0x058501):lorom(0x058501) + 4], bytes.fromhex("A9 01 85 A2"))
         self.assertEqual(set(rom[lorom(st.HOOK_AT):lorom(st.HOOK_AT) + len(st.code())]), {0})
 
+
+    @unittest.skipUnless(DQ5.is_file(), "local source ROM not present")
+    def test_callers_read_only_carry(self):
+        # The hook's second path ends with DEC $00, so N/Z differ from what 05:8503 left. Every JSR $84FE in bank 05
+        # (two per facing) is followed by BCS, and on a miss the caller loads A itself, so no caller reads N/Z.
+        rom = DQ5.read_bytes()
+        bank = rom[lorom(0x058000):lorom(0x058000) + 0x8000]
+        jsr = bytes((0x20, 0xFE, 0x84))
+        at = [0x8000 + i for i in range(len(bank) - 2) if bank[i:i + 3] == jsr]
+        self.assertEqual(at, [0x83DF, 0x83E6, 0x842B, 0x8432, 0x8476, 0x847D, 0x84DC, 0x84E3])
+        for a in at:
+            self.assertEqual(bank[a - 0x8000 + 3], 0xB0, f"05:{a:04X}")
+
+    @unittest.skipUnless(DQ5.is_file(), "local source ROM not present")
+    def test_the_check_body_keeps_00_01_and_the_stack(self):
+        # 05:8503 pushes $00 and $01 first and pulls them back just before its one RTS, so the hook can
+        # call it twice and the INC/DEC around the second call leave $00 as the caller set it. X and Y are not kept,
+        # as with one call in the original.
+        rom = DQ5.read_bytes()
+        head = rom[lorom(0x058503):lorom(0x058503) + 9]
+        self.assertEqual(head, bytes.fromhex("85 A2 A5 00 48 A5 01 48 A9"))
+        tail = rom[lorom(0x058597):lorom(0x058597) + 9]
+        self.assertEqual(tail, bytes.fromhex("AA 68 85 01 68 85 00 8A 60"))
+
+    @unittest.skipUnless(DQ5.is_file(), "local source ROM not present")
+    def test_hook_space_is_free_and_kept_apart(self):
+        # 05:FEF0~ lies in dq5build's free map (bank 05 end), before the shop helper at 05:FF00 (dq4windowname). The
+        # dq5 placers (dq5exitreloc, dq5chestreloc) only take addresses they are given, and dq5build refuses two
+        # writes on one byte, so this range stays the hook's as long as no fixed address here moves into it.
+        sys.path.insert(0, str(ROOT / "sfc" / "dq5" / "tools"))
+        import dq4windowname
+        from dq5build import free_ranges
+        start, end = lorom(st.HOOK_AT), lorom(st.HOOK_AT) + len(st.code())
+        self.assertTrue(any(s <= start and end <= s + n for s, n in free_ranges(DQ5.read_bytes())))
+        self.assertLessEqual(st.HOOK_AT + len(st.code()), dq4windowname.LOW_SPOT)
 
 
 class ReachTest(unittest.TestCase):

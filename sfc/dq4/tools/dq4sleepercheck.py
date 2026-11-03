@@ -9,8 +9,14 @@ The arrival is checked: after a warp the hero must stand on the cell asked for, 
 (7E:3020/3080). The chapter-1 ROM puts the party one cell lower than the cell a same-group warp asks for, so each
 scene asks for that cell and the one above it and keeps the warp that lands on the cell.
 
---chapter1 is for the chapter-1 ROM: every warp first sets the throne-room opening flag as done, and the throne room
-is left out, because its people there are dq4chapter1's own lists and not the ported ones npc-report.json describes.
+--chapter1 is for the chapter-1 ROM: every warp first sets the throne-room opening flag as done, and the throne room's
+sleepers are taken from dq4chapter1 (its own night list, NIGHT_ABED) instead of npc-report.json. Its start state
+stands in the throne room, and dq5warp.lua sees the arrival as the map number changing to the destination, so a warp
+to the throne room never arrives; those scenes start from the state saved on arriving at the first other map.
+
+Each scene starts from the same random state (dq4ch1walkcheck.RNG, at the start and again on arrival) and, on arrival,
+holds every person slot still (step interval 7E:3300+slot = 0), so a wanderer never steps between the hero and the
+sleeper and the result does not hang on the random walk.
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4sleepercheck.py --rom work/ch1/dq4-ch1-full.sfc \\
       --build work/dq4-groups --chapter1 --out work/sleepercheck
@@ -36,6 +42,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
 import dq4block  # noqa: E402
 import dq4chapter1  # noqa: E402
 import dq4chapterbox  # noqa: E402
+from dq4ch1walkcheck import RNG  # noqa: E402
 import dq4freshstate  # noqa: E402
 import dq4npccheck  # noqa: E402
 from dq4groupbuild import cell, fc_map  # noqa: E402
@@ -53,12 +60,27 @@ def sleepers(report):
                 yield m, i, p
 
 
-def scenes(prg, report, skip=()):
+# Person slots from here on are townspeople (7E:1994 on arrival, read back in every scene); below are the party's.
+FIRST_PERSON = 0x08
+SLOTS = 0x20
+HOLD = ";".join(f"{0x3300 + s:04X}=00" for s in range(FIRST_PERSON, SLOTS))
+
+
+def chapter1_throne():
+    """npc-report.json-shaped night people of the chapter-1 throne room after its opening (dq4chapter1.npc_doc)."""
+    def person(x, y, dq5=None, message=None):
+        return {"x": x, "y": y, "night": True, "message": message, "dq5": dq5 or dict(zip("xy", cell(x, y)))}
+    out = [person(x, y) for x, y, *_ in dq4chapter1.NIGHT_STAFF]
+    for x, y, gfx, talk in dq4chapter1.NIGHT_ABED:
+        e = dq4chapter1.lying(x, y, gfx, talk)["fields"]
+        out.append(person(x, y, {"x": e["x"], "y": e["y"]}, f"{talk + dq4chapter1.MESSAGE_OF_TALK:03X}"))
+    return out
+
+
+def scenes(prg, report):
     """(name, map, (x, y) hero cell, direction, night, message) for both sides of every sleeper."""
     out = []
     for m, i, p in sleepers(report):
-        if m in skip:
-            continue
         group, number = (int(v, 16) for v in m.split("/"))
         source = dq4block.Map(prg, *fc_map(prg, group, number))
         taken = {(q["x"], q["y"]) for q in report[m] if q["night"] == p["night"]}
@@ -92,19 +114,32 @@ def main():
     ret = dq4npccheck.decoder_return(Rom(rom.read_bytes()))
     report = json.loads((args.build / "npc-report.json").read_text(encoding="utf-8"))
     state = dq4freshstate.resolve(args.state, mesence, rom, out / "start")
-    sets, skip = None, ()
+    sets = RNG
     if args.chapter1:
         flag, mask = dq4chapterbox.CHAPTER1.flag
-        sets, skip = f"{flag & 0xFFFF:04X}|{mask:02X}", (dq4chapter1.THRONE,)
+        sets += f";{flag & 0xFFFF:04X}|{mask:02X}"
+        report = {**report, dq4chapter1.THRONE: chapter1_throne()}
+    late = f"{RNG};{HOLD}"
+    via = None
     results = {}
-    for name, m, (x, y), d, night, want in scenes(ines.prg(args.dq4.read_bytes()), report, skip):
+    for name, m, (x, y), d, night, want in scenes(ines.prg(args.dq4.read_bytes()), report):
         got, at = None, None
+        start, save = state, None
+        if args.chapter1 and m == dq4chapter1.THRONE:
+            if via is None or not via.exists():
+                raise SystemExit(f"{name}: no state saved in another map to warp into the throne room from")
+            start = via
+        elif args.chapter1 and via is None:
+            save = "via.mss"
         for k, ask in enumerate((y, y - 1)):
             for n, talk in enumerate(dq4npccheck.TALKS):
-                wram, messages = dq4npccheck.run(mesence, rom, state, out, f"{name}-{k}{n}", libdir, f"{m},{x},{ask}",
-                                                 talk.format(dir=d), night, False, ret,
-                                                 sets)
+                wram, messages = dq4npccheck.run(mesence, rom, start, out, f"{name}-{k}{n}", libdir, f"{m},{x},{ask}",
+                                                 talk.format(dir=d), night, False, ret, sets, late, save)
+                if save and (out / f"{name}-{k}{n}" / save).exists():
+                    via = out / f"{name}-{k}{n}" / save
                 final = wram[1] if isinstance(wram, tuple) else None
+                if final and final[0x1994] != FIRST_PERSON:
+                    raise SystemExit(f"{name}: first person slot 7E:1994 = {final[0x1994]:02X}, not {FIRST_PERSON:02X}")
                 at = (final[0x3020], final[0x3080]) if final else None
                 messages = (messages or (None, []))[0]
                 if at != (x, y):
@@ -117,7 +152,7 @@ def main():
         results[name] = {"ok": at == (x, y) and got == want, "at": at, "want": [x, y], "message": f"{want:03X}",
                          "got": None if got is None else f"{got:03X}"}
     ok = bool(results) and all(r["ok"] for r in results.values())
-    report_out = {"status": "passed" if ok else "failed", "rom": str(args.rom), "skipped": list(skip), "scenes": results}
+    report_out = {"status": "passed" if ok else "failed", "rom": str(args.rom), "scenes": results}
     (out / "results.json").write_text(json.dumps(report_out, ensure_ascii=False, indent=1) + "\n")
     print(json.dumps({"status": report_out["status"], "scenes": len(results),
                       "failed": {k: v for k, v in results.items() if not v["ok"]}}, ensure_ascii=False))
