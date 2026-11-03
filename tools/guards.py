@@ -37,6 +37,9 @@ import time
 import tomllib
 from pathlib import Path, PurePosixPath
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from mesence_settings import settings_digest  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
 NAME = re.compile(r'^[a-z0-9]+(?:-[a-z0-9]+)*$')
 ENV = re.compile(r'^[A-Z][A-Z0-9_]*$')
@@ -174,15 +177,33 @@ def env_names(needs):
     return sorted({n for item in needs for n in re.findall(r'\b[A-Z][A-Z0-9_]{2,}\b', item)})
 
 
+# 검사 명령이 읽거나 실행하지 않는 추적 파일. 키에서 빼도 결과가 같다(뺀 것이 결과에 닿는다고 의심되면 넣어 둔다)
+#   .md: 문서. guards.toml: 검사 목록(그 검사의 명령과 needs 는 따로 키에 든다). 에이전트·CI 설정, 해킹 일지
+NOT_INPUT = re.compile(r'(\.md$|(^|/)guards\.toml$|^\.agents/|^\.github/|^\.claude/|(^|/)journal/)')
+# 단위 테스트 파일
+TEST_FILE = re.compile(r'((^|/)test_[^/]*\.py$|(^|/)tests/)')
+
+
+def is_input(path, run):
+    """그 추적 파일이 이 검사 명령의 결과에 닿을 수 있는가. 단위 테스트를 부르는 명령은 테스트가 무엇을 읽을지 몰라
+    .md 만 뺀다."""
+    if path.endswith('.md'):
+        return False
+    if re.search(r'\b(unittest|pytest)\b', run):
+        return True
+    return not (NOT_INPUT.search(path) or TEST_FILE.search(path))
+
+
 def input_key(check, root=ROOT, environ=os.environ):
-    """같은 입력이면 같은 키. .md 는 롬·검사에 영향이 없어 뺀다.
-    추적 파일, 명령, needs 환경 변수가 가리키는 파일·폴더(hash_path), rom/ 원본, 명령이 읽는 파일(앞 단계가 만드는 것 빼고)."""
+    """같은 입력이면 같은 키. 추적 파일 가운데 결과에 닿는 것(is_input), 명령, needs 환경 변수가 가리키는 파일·폴더
+    (hash_path), MESENCE 가 있으면 MesenCE 사용자 설정 파일, rom/ 원본, 명령이 읽는 파일(앞 단계가 만드는 것 빼고)."""
     h = hashlib.sha256()
     run = check['run']
     h.update(run.encode())
-    for line in git('ls-files', '-s', '--', '.', ':!*.md').splitlines():
-        h.update(line.encode())
-    for f in sorted(x for x in git('diff', '--name-only', 'HEAD').splitlines() if x and not x.endswith('.md')):
+    for line in git('ls-files', '-s').splitlines():
+        if is_input(line.split('\t', 1)[-1], run):
+            h.update(line.encode())
+    for f in sorted(x for x in git('diff', '--name-only', 'HEAD').splitlines() if x and is_input(x, run)):
         h.update(f.encode())
         hash_path(h, root / f)
     for n in env_names(check.get('needs', [])):
@@ -190,6 +211,8 @@ def input_key(check, root=ROOT, environ=os.environ):
         h.update(f'{n}={v}'.encode())
         if v:
             hash_path(h, v)
+        if n == 'MESENCE' and v:
+            h.update(b'mesence-settings:' + (settings_digest(v) or 'absent').encode())
     hash_path(h, root / 'rom')
     made = made_paths(run) + out_dirs(run)
     for tok in sorted(set(re.findall(r'(?<![\w/])(work/\S+|rom/\S+)', run))):

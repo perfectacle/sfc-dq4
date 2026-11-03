@@ -516,8 +516,8 @@ class RunTests(unittest.TestCase):
 
 
 def uses_readset_run(path):
-    """그 모듈이 읽은 바이트 캐시로 장면을 돌리는가: dq4readset 의 run 을 부르거나(별칭 import·from import·* 포함),
-    readset=True 를 넘기거나, 순간이동 장면(dq4groupcheck.scene·field_scene)을 부른다."""
+    """그 모듈이 읽은 바이트 캐시로 장면을 돌리는가: dq4readset 의 run 이나 순간이동 장면(dq4groupcheck.scene·field_scene)을
+    참조하거나(부르기·값으로 넘기기, 별칭 import·from import·* 포함), readset=True 를 넘긴다."""
     tree = ast.parse(Path(path).read_text(encoding='utf-8'))
     aliases = {'dq4readset': set(), 'dq4groupcheck': set()}     # 모듈 이름 별칭
     names = {'dq4readset': set(), 'dq4groupcheck': set()}       # from import 로 들인 함수 이름
@@ -533,17 +533,16 @@ def uses_readset_run(path):
                     return True
                 if a.name in wanted[n.module]:
                     names[n.module].add(a.asname or a.name)
+    # 부르는 자리만이 아니라 값으로 넘기는 자리(pool.submit(scene, …), fn = g.field_scene)도 쓰는 것으로 본다
     for n in ast.walk(tree):
-        if not isinstance(n, ast.Call):
-            continue
-        f = n.func
         for module in aliases:
-            if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) and f.value.id in aliases[module] \
-                    and f.attr in wanted[module]:
+            if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id in aliases[module] \
+                    and n.attr in wanted[module]:
                 return True
-            if isinstance(f, ast.Name) and f.id in names[module]:
+            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load) and n.id in names[module]:
                 return True
-        if any(k.arg == 'readset' and getattr(k.value, 'value', None) is True for k in n.keywords):
+        if isinstance(n, ast.Call) and any(k.arg == 'readset' and getattr(k.value, 'value', None) is True
+                                           for k in n.keywords):
             return True
     return False
 
@@ -557,6 +556,9 @@ class UsesReadsetTests(unittest.TestCase):
                  'import dq4ch1walkcheck as wc\nwc.run(1, readset=True)\n': True,
                  'from dq4groupcheck import field_scene\nfield_scene(1)\n': True,
                  'from dq4groupcheck import field_scene\n': False,
+                 'from dq4groupcheck import scene\npool.submit(scene, 1)\n': True,
+                 'import dq4groupcheck as g\nfn = g.field_scene\n': True,
+                 'from dq4readset import run as go\njobs = [go]\n': True,
                  'import dq4groupcheck\ndq4groupcheck.scene(1)\n': True,
                  'import dq4groupcheck as g\ng.same_place(1)\n': False,
                  'from dq4readset import *\n': True,
@@ -859,8 +861,8 @@ class RuleTests(unittest.TestCase):
         self.assertEqual(bad, [])
 
     def test_walk_guards_watch_their_imports(self):
-        """소스 모양 확인: 서장 끝 걷기·저장 검사의 실행 검사 paths 에, 명령이 부르는 진입 스크립트(빌드 스크립트 포함)와
-        그 각각이 바로 import 하는 dq4·dq5 모듈이 모두 있다. 모듈 파일을 찾지 못하면(옮겼거나 이름이 바뀜) 실패한다."""
+        """소스 모양 확인: 서장 끝 걷기·저장 검사의 실행 검사 paths 에, 명령이 부르는 진입 스크립트(빌드 스크립트 포함),
+        빌드 스크립트가 하위 프로세스로 부르는 빌드 단계 스크립트, 그 각각이 바로 import 하는 dq4·dq5 모듈이 모두 있다. 모듈 파일을 찾지 못하면(옮겼거나 이름이 바뀜) 실패한다."""
         import tomllib
         checks = {c['name']: c for c in tomllib.loads((HERE.parent / 'guards.toml').read_text(encoding='utf-8'))['check']}
         root = HERE.parents[2]
@@ -868,6 +870,11 @@ class RuleTests(unittest.TestCase):
         for name in ('dq4-heroblock', 'dq4-field-obj-math', 'dq4-battle-check', 'dq4-wrap-routine', 'dq4-ch1-save'):
             entries = re.findall(r'((?:sfc|fc)/\S+?\.py)', checks[name]['run'])
             self.assertTrue(entries, name)
+            if 'sfc/dq4/tools/dq4build.py' in entries:
+                # dq4build 는 빌드 단계를 import 가 아니라 하위 프로세스(step·subprocess)로 부른다
+                stages = re.findall(r'''['"](dq4\w+\.py)['"]''', (HERE / 'dq4build.py').read_text(encoding='utf-8'))
+                self.assertIn('dq4menupatch.py', stages)
+                entries += [f'sfc/dq4/tools/{x}' for x in sorted(set(stages))]
             want = set(entries)
             for entry in entries:
                 src = (root / entry).read_text(encoding='utf-8')

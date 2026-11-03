@@ -124,6 +124,55 @@ class RunTest(unittest.TestCase):
             (root / 'work' / 'a.sfc').write_bytes(b'2')
             self.assertNotEqual(guards.input_key(check, root, env), k2)
 
+    def test_key_leaves_out_files_that_cannot_change_the_result(self):
+        """추적 파일 가운데 문서·검사 목록·에이전트·CI 설정·일지·단위 테스트는 검사 명령의 결과에 닿지 않아 키에서 뺀다.
+        도구 코드는 넣는다. 명령이 단위 테스트를 부르면 테스트가 무엇을 읽을지 몰라 .md 만 뺀다."""
+        from unittest import mock
+        base = {'sfc/dq4/tools/dq4x.py': 'a1', 'sfc/dq4/guards.toml': 'b1', 'sfc/dq4/journal/x.png': 'c1',
+                '.github/workflows/ci.yml': 'd1', '.agents/skills/x/y.txt': 'e1', 'sfc/dq4/tools/test_dq4x.py': 'f1',
+                'tools/tests/test_x.py': 'g1', 'README.md': 'h1', 'sfc/dq4/images/x.png': 'i1'}
+
+        def key(files, run='uv run python sfc/dq4/tools/dq4x.py --out work/o'):
+            listing = ''.join(f'100644 {sha} 0\t{f}\n' for f, sha in files.items())
+            with mock.patch.object(guards, 'git', lambda *a: listing if a[0] == 'ls-files' else ''):
+                return guards.input_key({'run': run, 'needs': []}, Path('/nonexistent'), {})
+        k = key(base)
+        for f in ('sfc/dq4/guards.toml', 'sfc/dq4/journal/x.png', '.github/workflows/ci.yml', '.agents/skills/x/y.txt',
+                  'sfc/dq4/tools/test_dq4x.py', 'tools/tests/test_x.py', 'README.md'):
+            self.assertEqual(key(dict(base, **{f: 'zz'})), k, f)
+        for f in ('sfc/dq4/tools/dq4x.py', 'sfc/dq4/images/x.png'):
+            self.assertNotEqual(key(dict(base, **{f: 'zz'})), k, f)
+        tests = 'uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4x.py'
+        kt = key(base, tests)
+        for f in ('sfc/dq4/tools/test_dq4x.py', 'sfc/dq4/guards.toml', 'sfc/dq4/journal/x.png'):
+            self.assertNotEqual(key(dict(base, **{f: 'zz'}), tests), kt, f)
+        self.assertEqual(key(dict(base, **{'README.md': 'zz'}), tests), kt)
+
+    def test_key_follows_mesence_settings(self):
+        """MESENCE 를 쓰는 검사는 MesenCE 사용자 설정 파일이 바뀌면(콜백 시간 제한 등) 옛 통과를 쓰지 않는다."""
+        import tempfile
+        from unittest import mock
+        import mesence_settings
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'Mesen').write_bytes(b'emu')
+            settings = root / 'settings.json'
+            settings.write_text('{"ScriptTimeout": 1}')
+            check = {'run': 'x.py --out work/o', 'needs': ['MESENCE']}
+            env = {'MESENCE': str(root / 'Mesen')}
+            with mock.patch.object(guards, 'git', lambda *a: ''), \
+                    mock.patch.object(mesence_settings, 'settings_path', lambda m: settings), \
+                    mock.patch.object(guards, 'settings_digest', mesence_settings.settings_digest):
+                k1 = guards.input_key(check, root, env)
+                self.assertEqual(guards.input_key(check, root, env), k1)
+                settings.write_text('{"ScriptTimeout": 10}')
+                k2 = guards.input_key(check, root, env)
+                self.assertNotEqual(k2, k1)
+                settings.unlink()
+                self.assertNotEqual(guards.input_key(check, root, env), k2)
+                self.assertEqual(guards.input_key({'run': 'x.py', 'needs': []}, root, env),
+                                 guards.input_key({'run': 'x.py', 'needs': []}, root, {}))
+
     def test_hash_path_dirs_by_stat_and_big_files_by_stat(self):
         import hashlib
         import os
