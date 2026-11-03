@@ -453,6 +453,8 @@ paths = [
   "sfc/dq4/tools/dq4groupcheck.py",
   "sfc/dq4/tools/lua/dq4doorstand.lua",
   "sfc/dq5/tools/lua/dq5warp.lua",
+  "sfc/dq4/tools/dq4readset.py",
+  "sfc/dq4/tools/lua/dq4readset.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/doorstand && uv run --locked python sfc/dq4/tools/dq4doorstandcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/doorstand"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -471,6 +473,8 @@ paths = [
   "fc/dq4/tools/dq4block.py",
   "sfc/dq4/tools/lua/dq4doorwalk.lua",
   "sfc/dq5/tools/lua/dq5warp.lua",
+  "sfc/dq4/tools/dq4readset.py",
+  "sfc/dq4/tools/lua/dq4readset.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/doorcheck && uv run --locked python sfc/dq4/tools/dq4doorcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/doorcheck"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -514,7 +518,7 @@ paths = ["sfc/dq4/tools/dq4freshstate.py", "sfc/dq4/tools/lua/dq4shipstate.lua",
          "sfc/dq4/tools/dq4groupcheck.py", "sfc/dq4/tools/dq4chestcheck.py", "sfc/dq4/tools/dq4chestport.py",
          "sfc/dq4/tools/dq4fieldcheck.py", "sfc/dq4/tools/dq4fieldport.py", "sfc/dq4/tools/dq4fieldencountercheck.py",
          "sfc/dq4/tools/dq4fieldencounter.py", "sfc/dq4/tools/dq4fieldtravelcheck.py", "sfc/dq4/tools/dq4fieldtravel.py",
-         "sfc/dq5/tools/lua/dq5warp.lua", "sfc/dq5/tools/lua/dq5chestcheck.lua"]
+         "sfc/dq5/tools/lua/dq5warp.lua", "sfc/dq5/tools/lua/dq5chestcheck.lua", "sfc/dq4/tools/dq4readset.py", "sfc/dq4/tools/lua/dq4readset.lua"]
 run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/fresh-groups && uv run --locked python sfc/dq4/tools/dq4chestcheck.py --build work/dq4-groups --out work/fresh-groups/chest && uv run --locked python sfc/dq4/tools/dq4fieldcheck.py --rom work/dq4-groups/groups.sfc --out work/fresh-groups/field && uv run --locked python sfc/dq4/tools/dq4fieldencountercheck.py --rom work/dq4-groups/groups.sfc --out work/fresh-groups/encounter && uv run --locked python sfc/dq4/tools/dq4fieldtravelcheck.py --rom work/dq4-groups/groups.sfc --out work/fresh-groups/travel"
 needs = ["rom", "MESENCE", "LIBDIR", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 
@@ -535,7 +539,7 @@ paths = ["sfc/dq4/tools/dq4freshstate.py", "sfc/dq4/tools/dq4wellresetcheck.py",
          "sfc/dq4/tools/dq4wellswitch.py", "sfc/dq4/tools/dq4dungeonrate.py", "sfc/dq4/tools/dq4build.py",
          "sfc/dq4/tools/dq4chapter1.py", "sfc/dq4/tools/dq4groupbuild.py", "sfc/dq4/tools/dq4groupcheck.py",
          "sfc/dq4/tools/dq4dungeonencountercheck.py", "sfc/dq5/tools/lua/dq5warptrace.lua",
-         "sfc/dq5/tools/lua/dq5cdldump.lua", "sfc/dq5/tools/lua/dq5msg.lua"]
+         "sfc/dq5/tools/lua/dq5cdldump.lua", "sfc/dq5/tools/lua/dq5msg.lua", "sfc/dq4/tools/dq4readset.py", "sfc/dq4/tools/lua/dq4readset.lua"]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/fresh-wellreset && uv run --locked python sfc/dq4/tools/dq4wellresetcheck.py --rom work/ch1/dq4-ch1-full.sfc --load-rom work/dq4-groups/groups.sfc --out work/fresh-wellreset"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 
@@ -545,7 +549,7 @@ why = "보행 메시지의 주인공 이름(1012)이 한글·가나 이름 모�
 paths = ["sfc/dq4/tools/dq4freshstate.py", "sfc/dq4/tools/lua/dq4shipstate.lua",
          "sfc/dq4/tools/dq4namegamecheck.py", "sfc/dq4/tools/dq4namegame.py",
          "sfc/dq4/tools/lua/dq4namegamecheck.lua", "sfc/dq4/tools/dq4menupatch.py", "sfc/dq4/tools/dq4build.py",
-         "sfc/dq4/tools/dq4chapter1.py"]
+         "sfc/dq4/tools/dq4chapter1.py", "sfc/dq4/tools/dq4readset.py", "sfc/dq4/tools/lua/dq4readset.lua"]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/fresh-namegame && uv run --locked python sfc/dq4/tools/dq4namegamecheck.py --rom work/ch1/menu.sfc --out work/fresh-namegame"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 
@@ -584,7 +588,7 @@ name = "dq4-group-links"
 why = "그룹 롬의 FC 계단·출구·필드 입구가 연결된 맵·칸으로 가야 한다. 들어설 때 숨는 FC 인물을 옮기면 걸어 다니다 계단을 막는다(엔도르 투기장 40/07 계단)"
 paths = ["sfc/dq4/tools/dq4groupcheck.py", "sfc/dq4/tools/dq4groupbuild.py", "sfc/dq4/tools/dq4npcport.py",
          "sfc/dq4/tools/dq4freshstate.py", "sfc/dq4/tools/lua/dq4shipstate.lua", "fc/dq4/tools/dq4npcblock.py",
-         "sfc/dq5/tools/lua/dq5warp.lua"]
+         "sfc/dq5/tools/lua/dq5warp.lua", "sfc/dq4/tools/dq4readset.py", "sfc/dq4/tools/lua/dq4readset.lua"]
 run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/guard-group-links && uv run --locked python sfc/dq4/tools/dq4groupcheck.py --rom work/dq4-groups/groups.sfc --out work/guard-group-links --jobs 3"
 needs = ["rom", "MESENCE", "LIBDIR", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 
@@ -604,7 +608,7 @@ why = "FC 2×2 문 9C·9D(너머 칸으로 여는 문)와 A2(열쇠 성문)는 �
 paths = ["sfc/dq4/tools/dq4gatecheck.py", "sfc/dq4/tools/dq4environmentrom.py", "sfc/dq4/tools/dq4door.py",
          "sfc/dq4/tools/dq4doorcheck.py", "sfc/dq4/tools/lua/dq4doorwalk.lua", "sfc/dq4/tools/dq4groupbuild.py",
          "sfc/dq4/tools/dq4freshstate.py", "sfc/dq5/tools/lua/dq5warp.lua", "sfc/dq4/tools/dq4environmentmap.py",
-         "fc/dq4/tools/dq4block.py", "sfc/dq4/tools/dq4groupcheck.py"]
+         "fc/dq4/tools/dq4block.py", "sfc/dq4/tools/dq4groupcheck.py", "sfc/dq4/tools/dq4readset.py", "sfc/dq4/tools/lua/dq4readset.lua"]
 run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/fresh-gates && uv run --locked python sfc/dq4/tools/dq4gatecheck.py --rom work/dq4-groups/groups.sfc --out work/fresh-gates"
 needs = ["rom", "MESENCE", "LIBDIR", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 
@@ -615,7 +619,7 @@ paths = ["sfc/dq4/tools/dq4dungeonencountercheck.py", "sfc/dq4/tools/dq4dungeonr
          "sfc/dq4/tools/dq4groupcheck.py", "sfc/dq4/tools/dq4wellswitch.py", "sfc/dq4/tools/dq4fieldencounter.py",
          "sfc/dq4/tools/dq4fieldport.py", "sfc/dq4/tools/dq4soundpatch.py", "sfc/dq4/tools/dq4freshstate.py",
          "sfc/dq4/tools/dq4build.py", "sfc/dq4/tools/dq4chapter1.py", "sfc/dq5/tools/lua/dq5warptrace.lua",
-         "fc/dq4/tools/dq4encounter.py"]
+         "fc/dq4/tools/dq4encounter.py", "sfc/dq4/tools/dq4readset.py", "sfc/dq4/tools/lua/dq4readset.lua"]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/fresh-dungeon && uv run --locked python sfc/dq4/tools/dq4dungeonencountercheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/fresh-dungeon --jobs 2"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 

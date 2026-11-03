@@ -5,8 +5,10 @@
 지금 이 캐시를 쓰는 곳:
 
 - 창 글자 검사(`dq4windowcheck.py`)의 장면과 출발 상태(서장 시작·서장 걷기·순간이동).
-- 필드 팻말 검사(`dq4signcheck.py`)의 순간이동 장면(`dq4groupcheck.scene(..., readset=True)`)과 팻말 장면.
+- 필드 팻말 검사(`dq4signcheck.py`)의 순간이동 장면과 팻말 장면.
 - 전투 메시지 검사(`dq4battlemsgcheck.py`)의 묶음 장면.
+- `dq4groupcheck.scene`(순간이동 장면)을 거치는 검사 모두. 기본이 캐시를 거친다(`readset=False` 면 거치지 않음): 그룹 롬 장면(상자·필드·필드 조우·ルーラ), 문 열기·문 칸, 성문, 던전 조우, 우물 스위치, 그룹 연결.
+- 상자 검사(`dq4chestcheck.py`)의 조사 장면, 우물 스위치 검사(`dq4wellresetcheck.py`)의 기록·리셋·이어 하기 장면, 보행 메시지 이름 검사(`dq4namegamecheck.py`).
 - 장면형 검사의 출발 상태(`dq4freshstate.make`): 서장 끝(서장 시작·서장 걷기)과 배 선실. 같은 롬 SHA-1 로 만든 상태 캐시가 없을 때 이 캐시로 걷기를 건너뛴다.
 
 ## 왜 건전한가

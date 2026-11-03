@@ -65,7 +65,7 @@ def jobs(prg):
 
 
 def run_job(mesence, rom, state, out, name, at, button, command, want):
-    where = scene(mesence, rom, state, out, name, readset=True, FIELD=f"{at[0]},{at[1]}",
+    where = scene(mesence, rom, state, out, name, FIELD=f"{at[0]},{at[1]}",
                   ROMPATCH=dq4fieldport.warp_patch(rom.read_bytes(), *at), SAVE="scene.mss", TEST="wait:10")
     saved = out / name / "scene.mss"
     if where.get("field") != list(at) or not saved.is_file():
