@@ -4,6 +4,8 @@
 장면 두 개(전원부터 정한 입력으로 1500프레임, 저장 기록으로 이무르에서 이어 하기 뒤 걷기)마다:
 
   결정성  같은 장면을 두 번 돌리면 화면·WRAM·읽은 집합이 같다
+  호환    비트맵을 켜지 않은 실행도 화면·WRAM 이 같다(패치가 에뮬레이션을 바꾸지 않음). --original 로 패치하지 않은
+          bsnes 를 주면 그 코어와도 견준다
   밖      읽은 집합과 롬 머리($7FB0~$7FFF, 체크섬 빼고) 밖 바이트를 모두 뒤집은 롬(체크섬도 뒤집음)으로 돌려도
           화면·WRAM·읽은 집합이 같다
   안      읽은 집합 안 바이트 하나를 바꾼 롬은 읽은 바이트 해시가 달라진다(캐시가 빗나감)
@@ -39,41 +41,43 @@ def boot_input(n):
     return ()
 
 
-def run_scene(scene, core_path, rom, out, sram, goal):
-    """한 프로세스 안에서 장면 하나. 결과(화면·WRAM 해시, 읽은 구간)를 out/result.json 에."""
+def run_scene(scene, core_path, rom, out, sram, goal, trace=True):
+    """한 프로세스 안에서 장면 하나. 결과(화면·WRAM 해시, 읽은 구간)를 out/result.json 에. trace 가 거짓이면 비트맵을
+    켜지 않는다(읽은 구간은 빈 목록)."""
     import dq4libretro
     import dq4savefixture as fx
     out.mkdir(parents=True, exist_ok=True)
     if scene == 'boot':
-        core = dq4libretro.Core(str(core_path), str(rom), str(out / 'sys'), trace=True)
+        core = dq4libretro.Core(str(core_path), str(rom), str(out / 'sys'), trace=trace)
         for n in range(BOOT_FRAMES):
             core.run(boot_input(n))
     else:
         # SRAM 을 맞춰 보는 직렬화도 코어를 돌리므로 비트맵은 열 때부터 켠다
-        core = fx.open_core(core_path, rom, out / 'sys', sram, trace=True)
+        core = fx.open_core(core_path, rom, out / 'sys', sram, trace=trace)
         if fx.boot(core, goal) is None:
             raise SystemExit('이어 하기로 자리에 서지 못함')
         for b in WALK:
             core.run((b,) if b else ())
     result = {'frame': hashlib.sha256(core.frame.tobytes()).hexdigest(),
-              'wram': hashlib.sha256(bytes(core.wram())).hexdigest(), 'ranges': core.trace_ranges()}
+              'wram': hashlib.sha256(bytes(core.wram())).hexdigest(), 'ranges': core.trace_ranges() if trace else []}
     (out / 'result.json').write_text(json.dumps(result), encoding='utf-8')
 
 
-def go(scene, core_path, rom, out, sram, goal):
+def go(scene, core_path, rom, out, sram, goal, trace=True):
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True)
     srm = out / 'start.srm'
     srm.write_bytes(sram)
     r = subprocess.run([sys.executable, __file__, '--scene', scene, '--core', str(core_path), '--rom', str(rom),
-                        '--out', str(out), '--sram', str(srm), '--goal', ','.join(map(str, goal))],
+                        '--out', str(out), '--sram', str(srm), '--goal', ','.join(map(str, goal)),
+                        *([] if trace else ['--no-trace'])],
                        capture_output=True, text=True, timeout=900)
     if r.returncode:
         raise SystemExit(f'{scene} {out.name}: 종료 코드 {r.returncode}\n{r.stdout[-800:]}{r.stderr[-800:]}')
     return json.loads((out / 'result.json').read_text(encoding='utf-8'))
 
 
-def check(scene, core_path, rom_path, out, sram, goal):
+def check(scene, core_path, rom_path, out, sram, goal, original=None):
     data = Path(rom_path).read_bytes()
     problems = []
     a = go(scene, core_path, rom_path, out / f'{scene}-a', sram, goal)
@@ -81,6 +85,14 @@ def check(scene, core_path, rom_path, out, sram, goal):
     same = ('frame', 'wram', 'ranges')
     if any(a[k] != b[k] for k in same):
         problems.append('결정성: 같은 장면 두 번이 다름 ' + ','.join(k for k in same if a[k] != b[k]))
+    # 비트맵을 켜지 않은 실행(패치한 코어, 그리고 주면 패치하지 않은 원본 코어)도 화면·WRAM 이 같아야 한다
+    for label, path in (('추적 꺼짐', core_path), ('원본 코어', original)):
+        if path is None:
+            continue
+        off = go(scene, path, rom_path, out / f'{scene}-{"off" if path == core_path else "original"}', sram, goal,
+                 trace=False)
+        if any(a[k] != off[k] for k in ('frame', 'wram')):
+            problems.append(f'{label}: 추적 켠 실행과 다름 ' + ','.join(k for k in ('frame', 'wram') if a[k] != off[k]))
     ranges = [tuple(r) for r in a['ranges']]
     if not ranges:
         return {'name': scene, 'status': 'failed', 'problems': ['읽은 집합이 비었음']}
@@ -114,10 +126,12 @@ def main():
     ap.add_argument('--core', type=Path, help=argparse.SUPPRESS)
     ap.add_argument('--sram', type=Path, help=argparse.SUPPRESS)
     ap.add_argument('--goal', help=argparse.SUPPRESS)
+    ap.add_argument('--no-trace', action='store_true', help=argparse.SUPPRESS)
+    ap.add_argument('--original', type=Path, help='패치하지 않은 bsnes 코어. 주면 추적을 끈 그 코어와도 화면·WRAM 을 견준다')
     a = ap.parse_args()
     if a.scene:
         run_scene(a.scene, a.core, a.rom.resolve(), a.out.resolve(), a.sram.read_bytes(),
-                  tuple(int(v) for v in a.goal.split(',')))
+                  tuple(int(v) for v in a.goal.split(',')), trace=not a.no_trace)
         return 0
     import dq4cores
     import dq4savefixture as fx
@@ -134,7 +148,7 @@ def main():
     sram, goal = slot.to_sram(), slot.goal
     results = []
     for scene in ('boot', 'continue'):
-        r = check(scene, core_path, rom, out, sram, goal)
+        r = check(scene, core_path, rom, out, sram, goal, a.original.resolve() if a.original else None)
         results.append(r)
         print(json.dumps(r, ensure_ascii=False), flush=True)
     ok = all(r['status'] == 'passed' for r in results)
