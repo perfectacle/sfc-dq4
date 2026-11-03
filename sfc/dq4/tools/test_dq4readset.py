@@ -619,7 +619,7 @@ class RuleTests(unittest.TestCase):
         self.assertEqual(bad, [])
 
     def test_battle_rounds_bypass_cache(self):
-        """전투 검사는 같은 상태에서 전투를 여러 번 돌려 결과가 같은지 보고 화면을 견준다. 그 전투 실행은 캐시를 거치지 않는다
+        """소스 모양 확인: 전투 검사는 같은 상태에서 전투를 여러 번 돌려 결과가 같은지 보고 화면을 견준다. 그 전투 실행은 캐시를 거치지 않는다
         (거치면 둘째 실행이 첫 실행의 사본이 된다)."""
         tree = ast.parse((HERE / 'dq4battlecheck.py').read_text(encoding='utf-8'))
         fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == 'run_scene')
@@ -627,7 +627,8 @@ class RuleTests(unittest.TestCase):
                 and n.func.attr == 'run' and isinstance(n.func.value, ast.Name) and n.func.value.id == 'wc']
         self.assertTrue(runs)
         for n in runs:
-            self.assertFalse([k for k in n.keywords if k.arg == 'readset' and getattr(k.value, 'value', False)])
+            # readset=flag 처럼 변수로 넘겨도 캐시를 거칠 수 있어, readset 키워드가 아예 없어야 한다
+            self.assertFalse([k for k in n.keywords if k.arg in ('readset', None)])
 
     def test_clear_saves_removes_cdl(self):
         with tempfile.TemporaryDirectory() as d:
