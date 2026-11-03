@@ -126,6 +126,9 @@ class Run:
         wc.run(self.mesence, self.rom, DRIVER, dest, env, 300, readset=True)
         log = (dest / 'warp.txt').read_text() if (dest / 'warp.txt').exists() else ''
         arrived = re.search(r'arrived map (\w\w)/(\w\w)', log)
+        if ' timeout phase=' in log:
+            # 도착한 뒤 MAXF 에 닿아도 「arrived map」 이 남는다. 도착하지 못한 것으로 친다
+            arrived = None
         return dest / 'end.mss', (int(arrived[1], 16), int(arrived[2], 16)) if arrived else None
 
     def walk(self, dest, state, way, frames):

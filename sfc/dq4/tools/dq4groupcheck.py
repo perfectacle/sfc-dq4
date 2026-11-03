@@ -75,6 +75,8 @@ def scene(mesence, rom, state, out, name, **extra):
         return {"error": "MesenCE 가 300초 안에 끝나지 않음"}
     if info["returncode"] != 0:
         return {"error": f"MesenCE 종료 코드 {info['returncode']}"}
+    if not (dest / "warp.txt").is_file():
+        return {"error": "warp.txt 없음(dq5warp.lua 가 끝 기록을 쓰지 못함)"}
     if not dq4readset.warp_finished(dest):
         return {"error": "dq5warp.lua 가 MAXF 에 닿아 멈춤(timeout phase)"}
     text = (dest / "warp.txt").read_text(encoding="utf-8") if (dest / "warp.txt").exists() else ""

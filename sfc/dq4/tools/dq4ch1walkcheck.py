@@ -458,6 +458,8 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
         seen = {k: wram[a & 0xFFFF] for k, (a, _) in FLAGS.items()}
         items = list(wram[ITEMS & 0xFFFF:(ITEMS & 0xFFFF) + 12])
         messages = []
+        # 도착(arrived map) 뒤 settle·test 단계에서 MAXF 에 닿아도 「arrived map」 과 「timeout phase=」 가 함께 찍힌다
+        timed_out = ' timeout phase=' in text
     else:
         maxf = opt.get('maxf', frames(arg))
         # PRE: 앞 구간이 끝날 때 남은 A 가 연 명령 창을 닫는다. 창이 없을 때의 B 는 아무것도 열지 않는다
@@ -478,11 +480,14 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
         end = re.search(r'end map (\w\w/\w\w)', text)
         if end:
             maps = maps or [end[1]]
+        timed_out = False
     flags = {k: bool(seen.get(k, 0) & m) for k, (_, m) in FLAGS.items()}
     end_map = maps[-1] if maps else None
     problems = []
     if not (dest / 'end.mss').exists():
         problems.append('세이브스테이트 없음')
+    if timed_out:
+        problems.append('순간이동이 MAXF 에 닿아 멈춤(timeout phase)')
     if 'map' in opt and end_map != opt['map']:
         problems.append(f'끝 맵 {end_map}, 기대 {opt["map"]}')
     for k in opt.get('want', []):

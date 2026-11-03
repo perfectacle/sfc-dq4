@@ -363,12 +363,19 @@ class RunTests(unittest.TestCase):
         self.assertFalse(self.go()[0]['cached'])
 
     def test_verify_run_that_fails_keeps_entry(self):
-        """재검증으로 다시 돌린 실행이 시간 초과·시간 제한으로 끝나면, 견주지 않고 그 실패로 알리며 항목은 둔다."""
+        """재검증으로 다시 돌린 실행이 0 이 아닌 값(시간 제한 71, MesenCE 가 죽은 134, emu.stop(3))이나 시간 초과로
+        끝나면, 견주지 않고 그 실패로 알리며 항목은 둔다(「키에 빠진 입력」 이라 하지 않는다)."""
         key = self.go()[0]['key']
         with mock.patch.dict(os.environ, {'DQ4_READSET_VERIFY': '1'}):
             self.fake.watchdog = 1
             with contextlib.redirect_stderr(io.StringIO()), self.assertRaisesRegex(SystemExit, '실패함'):
                 self.go()
+            for rc in (134, 3):
+                self.fake.rc = rc
+                with contextlib.redirect_stderr(io.StringIO()), \
+                        self.assertRaisesRegex(SystemExit, f'실패함\\(종료 코드 {rc}\\)'):
+                    self.go()
+            self.fake.rc = 0
             self.fake.timeout = True
             with contextlib.redirect_stderr(io.StringIO()), self.assertRaisesRegex(SystemExit, '끝나지 않음'):
                 self.go()
@@ -528,6 +535,9 @@ class SceneTests(unittest.TestCase):
         got = self.scene({'timed_out': True, 'returncode': None})
         self.assertIn('끝나지 않음', got['error'])
 
+    def test_missing_warp_log_is_reported(self):
+        self.assertIn('warp.txt 없음', self.scene({'timed_out': False, 'returncode': 0})['error'])
+
     def test_nonzero_exit_is_reported(self):
         self.assertIn('종료 코드 3', self.scene({'timed_out': False, 'returncode': 3})['error'])
 
@@ -544,6 +554,33 @@ class SceneTests(unittest.TestCase):
             self.assertFalse(rs.warp_finished(d))
             Path(d, 'warp.txt').write_text('f00300 end map 36/00 cell 5,6\n')
             self.assertTrue(rs.warp_finished(d))
+
+
+class WalkJudgeTests(unittest.TestCase):
+    """도착한 뒤 MAXF 에 닿은 순간이동은 「arrived map」 과 「timeout phase=」 가 함께 찍힌다. 판정이 실패로 본다."""
+
+    def run_segment(self, warp_text):
+        import dq4ch1walkcheck as wc
+        with tempfile.TemporaryDirectory() as d:
+            dest = Path(d) / 'seg'
+
+            def fake(mesence, rom, script, dest_, env, timeout, readset=False):
+                dest_.mkdir(parents=True, exist_ok=True)
+                (dest_ / 'warp.txt').write_text(warp_text, encoding='utf-8')
+                (dest_ / 'end.mss').write_bytes(b'MSS')
+            with mock.patch.object(wc, 'run', fake), mock.patch.object(wc, 'warp_exit', return_value=0):
+                return wc.segment('m', Path(d) / 'r.sfc', Path(d) / 's.mss', dest, ('x', 'warp', '36/00,10,10', {}),
+                                  wc.NO_ENCOUNTERS)
+
+    def test_timeout_after_arrival_fails(self):
+        r = self.run_segment('f00431 arrived map 36/00 cell 10,10\nf01500 timeout phase=test\n'
+                             'f01500 end map 36/00 cell 10,10 BE=80 1949=00\n')
+        self.assertEqual(r['status'], 'failed')
+        self.assertIn('순간이동이 MAXF 에 닿아 멈춤(timeout phase)', r['problems'])
+
+    def test_finished_warp_passes(self):
+        r = self.run_segment('f00431 arrived map 36/00 cell 10,10\nf00700 end map 36/00 cell 10,10 BE=80 1949=00\n')
+        self.assertEqual(r['status'], 'passed', r['problems'])
 
 
 class RuleTests(unittest.TestCase):
@@ -643,7 +680,8 @@ class RuleTests(unittest.TestCase):
         self.assertEqual(bad, [])
 
     def test_walk_guards_watch_their_imports(self):
-        """소스 모양 확인: 서장 끝 걷기 검사의 실행 검사 paths 에 그 검사가 바로 import 하는 dq4·dq5 모듈이 모두 있다."""
+        """소스 모양 확인: 서장 끝 걷기 검사의 실행 검사 paths 에 그 검사가 바로 import 하는 dq4·dq5 모듈이 모두 있다.
+        모듈 파일을 찾지 못하면(옮겼거나 이름이 바뀜) 건너뛰지 않고 실패한다."""
         import tomllib
         checks = {c['name']: c for c in tomllib.loads((HERE.parent / 'guards.toml').read_text(encoding='utf-8'))['check']}
         root = HERE.parents[2]
@@ -652,10 +690,10 @@ class RuleTests(unittest.TestCase):
             src = (HERE / f'{mod}.py').read_text(encoding='utf-8')
             want = set()
             for m in set(re.findall(r'^\s*(?:import|from)\s+(dq[45]\w+)', src, re.M)):
-                for base in (HERE, root / 'sfc' / 'dq5' / 'tools'):
-                    if (base / f'{m}.py').exists():
-                        want.add((base / f'{m}.py').relative_to(root).as_posix())
-                        break
+                found = [base / f'{m}.py' for base in (HERE, root / 'sfc' / 'dq5' / 'tools', root / 'fc' / 'dq4' / 'tools')
+                         if (base / f'{m}.py').exists()]
+                self.assertTrue(found, f'{name}: import {m} 의 파일을 찾지 못함')
+                want.add(found[0].relative_to(root).as_posix())
             self.assertFalse(want - set(checks[name]['paths']), name)
 
     def test_battle_rounds_bypass_cache(self):

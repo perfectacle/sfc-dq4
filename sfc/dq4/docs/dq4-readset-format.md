@@ -117,14 +117,14 @@ MesenCE `--testrunner` 는 장면 Lua 의 오류를 늘 0 이 아닌 종료로 �
 | `dq4shipstate.lua` | 선실에 못 닿으면 `emu.stop(1)` | 종료 코드로 걸러진다 |
 | `dq5msg.lua`, `dq5chestcheck.lua`, `dq5cdldump.lua`(NEXT=dq5msg), `dq4namegamecheck.lua`, `walk.lua`·`dq4walkstate.lua`, `mkstate.lua`(툴킷 boot.lua) | 없음: 정한 프레임에 기록을 쓰고 멈춘다 | 성공·실패는 Python 판정이 매번 기록을 보고 정한다. 결정적인 실행이라 캐시에서 펼친 기록도 같은 판정을 받는다 |
 
-MesenCE 는 Lua 콜백 하나를 벽시계 시간 제한(사용자 설정 `Debug.ScriptWindow.ScriptTimeout`, 이 머신은 1초)으로 끊는다. 오류는 「Maximum execution time (1 seconds) exceeded.」 다.
-- 실측: 머신이 바쁠 때(부하 평균 14~33) 그룹 롬 필드 검사의 순간이동 장면에서 나왔다. `dq5warp.lua` 의 `finish()` 안이었다.
-- 같은 일을 한가할 때 CPU 시간으로 쟀다. 화면 찍기 0.001초, WRAM 128KB 덤프 0.013초, 머리말의 읽은 집합 쓰기 0.048초였다. 일 자체는 1초에 한참 못 미친다. 그래서 바이트 단위 덤프를 빠르게 해도 바쁜 머신에서 벽시계가 1초를 넘는 것은 막지 못한다.
+MesenCE 는 Lua 콜백 하나를 벽시계 시간 제한(사용자 설정 `Debug.ScriptWindow.ScriptTimeout`)으로 끊는다. 오류는 「Maximum execution time (N seconds) exceeded.」 다.
+- 머신이 바쁠 때 그룹 롬 필드 검사의 순간이동 장면(`dq5warp.lua` 의 `finish()` 안)에서 나왔다.
+- 같은 일(화면 찍기, WRAM 128KB 덤프, 머리말의 읽은 집합 쓰기)을 한가할 때 CPU 시간으로 재면 제한의 몇십분의 일이다. 제한은 벽시계로 재므로, 덤프를 빠르게 해도 바쁜 머신에서 스레드가 밀리는 것은 막지 못한다.
 - MesenCE Lua API(실행 파일에 든 목록)에 메모리를 덩어리로 읽는 함수는 없다.
 - 명령줄 `--Debug.ScriptWindow.ScriptTimeout=10` 으로는 늘어나지 않았다. 2.5초 도는 콜백이 그대로 끊겼다. 같은 꼴의 `--Snes.RamPowerOnState` 는 먹었다.
 - 그래서 이 오류로 끝난 실행은 다시 돌리지 않는다. 종료 코드 71(`LUA_WATCHDOG`)과 「시간 제한으로 끊음」 알림으로 분명히 실패시키고, 캐시에 넣지 않는다.
 
-시간이 초과된 실행은 끝줄 `OK` 를 썼어도 캐시에 넣지 않고, 「장면 Lua 오류」 가 아니라 시간 초과로 알린다. `dq4groupcheck.scene` 은 시간 초과, 0 이 아닌 종료, `dq5warp.lua` 가 MAXF 에 닿아 멈춘 장면을 판정에서도 `{"error": …}` 로 돌려준다(MAXF 에 닿아도 종료 코드는 0 이고 「end map」 이 찍힌다). 전투 메시지 검사는 멈춘 묶음을 남은 번호로 다시 돌리는 것이 판정이라 저장만 막는다. 걷기 검사(`dq4ch1walkcheck.run` 의 순간이동)는 판정이 도착(「arrived map」)과 맵·칸을 본다.
+시간이 초과된 실행은 끝줄 `OK` 를 썼어도 캐시에 넣지 않고, 「장면 Lua 오류」 가 아니라 시간 초과로 알린다. `dq4groupcheck.scene` 은 시간 초과, 0 이 아닌 종료, `dq5warp.lua` 가 MAXF 에 닿아 멈춘 장면을 판정에서도 `{"error": …}` 로 돌려준다(MAXF 에 닿아도 종료 코드는 0 이고 「end map」 이 찍힌다). 전투 메시지 검사는 멈춘 묶음을 남은 번호로 다시 돌리는 것이 판정이라 저장만 막는다. `dq5warp.lua` 는 도착하면(settle 단계에 들 때) 「arrived map」 을 찍고, 그 뒤 settle·test 단계에서 MAXF 에 닿으면 「timeout phase=」 도 찍는다. 그래서 「arrived map」 만 보는 판정은 MAXF 에 닿은 장면을 통과시킨다. 걷기 검사의 순간이동 구간(`dq4ch1walkcheck.segment`), 주인공 칸 검사(`dq4heroblockcheck` 의 순간이동과 출발 상태), 환경 훅 검사(`dq4wrapcheck` 의 순간이동)는 「timeout phase=」 가 있으면 실패(도착 못 함)로 본다. 걷기 구간의 판정은 「arrived map」 의 맵만 보고 칸은 보지 않는다.
 
 감싸도 콜백을 지우는 데는 문제가 없다. MesenCE 의 `removeMemoryCallback`·`removeEventCallback` 은 add 가 돌려준 번호로 찾는다(실측: 머리말이 없을 때도 함수를 넘기면 지워지지 않고, 번호를 넘기면 머리말이 있어도 지워진다). 이 저장소의 Lua 는 모두 번호를 넘긴다. 반환값도 실측했다. 7E:0000~00FF 읽기 콜백이 아무것도 안 돌려줄 때, nil 일 때, 값 하나일 때, 값 둘일 때 모두 300프레임 뒤 WRAM 이 머리말 있음·없음 모두 같았다.
 

@@ -33,6 +33,7 @@ import dq4ch1event as ev  # noqa: E402
 import dq4ch1walkcheck as wc  # noqa: E402
 import dq4prologue as pro  # noqa: E402
 import dq4prologuecheck as pc  # noqa: E402
+import dq4readset  # noqa: E402
 from dq5exitcheck import warp_exit  # noqa: E402
 
 DRIVER = HERE / 'lua' / 'dq4heroblock.lua'
@@ -177,6 +178,8 @@ def run_case(mesence, rom, base, out, name, case, exit_at, seed=0):
     problems = []
     if not state.exists():
         return {'name': name, 'seed': seed, 'status': 'failed', 'problems': ['순간이동 실패']}
+    if not dq4readset.warp_finished(dest / 'warp'):
+        return {'name': name, 'seed': seed, 'status': 'failed', 'problems': ['순간이동이 MAXF 에 닿아 멈춤(timeout phase)']}
     walk = case['walk'] + (f";{case['free']}" if case.get('free') else '')
     watch = ';'.join(v for v in (HERO, case.get('watch', ''),
                                  ';'.join(slot(n) for n in case.get('gone', [])),
@@ -259,7 +262,7 @@ def make_base(mesence, rom, out, cache=None):
         'LATESET': pins}, 300, readset=True)
     # 세이브스테이트는 도착하지 못해도 남는다. 도착한 것만 돌려주고 캐시에 두어 틀린 출발점을 쓰지 않게 한다
     arrived = re.search(r'arrived map (\w\w/\w\w)', log.read_text(encoding='utf-8')) if log.exists() else None
-    if not base.exists() or not arrived or arrived[1] != HUB[:5]:
+    if not base.exists() or not arrived or arrived[1] != HUB[:5] or not dq4readset.warp_finished(out / 'hub'):
         raise SystemExit(f'출발 상태를 만들지 못함: {HUB[:5]} 에 닿지 않음({arrived[1] if arrived else "도착 기록 없음"})')
     if cache:
         cache.put('heroblock-hub', key, '.mss', base, {'name': 'hub', 'arrived': arrived[1]})

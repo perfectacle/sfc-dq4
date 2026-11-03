@@ -31,5 +31,16 @@ class Ch1SaveCheckTests(unittest.TestCase):
         self.assertEqual(sc.flags(ram), ['CHAPTER1'])
 
 
+class RunFailureTests(unittest.TestCase):
+    """저장·이어 하기 장면이 실패한 까닭을 「덤프가 모자람」 대신 종료 코드대로 알린다."""
+
+    def test_messages(self):
+        import dq4readset as rs
+        self.assertIsNone(sc.run_failure({'timed_out': False, 'returncode': 0}, 900))
+        self.assertIn('900초', sc.run_failure({'timed_out': True, 'returncode': None}, 900))
+        self.assertIn('시간 제한', sc.run_failure({'timed_out': False, 'returncode': rs.LUA_WATCHDOG}, 900))
+        self.assertIn('Lua 오류', sc.run_failure({'timed_out': False, 'returncode': rs.LUA_ERROR}, 900))
+        self.assertIn('134', sc.run_failure({'timed_out': False, 'returncode': 134}, 900))
+
 if __name__ == '__main__':
     unittest.main()

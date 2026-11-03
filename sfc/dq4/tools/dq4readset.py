@@ -459,8 +459,8 @@ def _execute(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag
     if timed_out:
         print(f'[dq4readset] {dest}: {timeout}초 안에 끝나지 않음(캐시에 넣지 않음)', file=sys.stderr)
     if err.exists() or (text is not None and not done and not timed_out):
-        why = err.read_text(errors='replace').strip()[:500] if err.exists() else '읽은 집합 끝줄이 OK 가 아님'
-        print(f'[dq4readset] {dest}: 장면 Lua 오류(캐시에 넣지 않음): {why}', file=sys.stderr)
+        why = err.read_text(errors='replace').strip() if err.exists() else '읽은 집합 끝줄이 OK 가 아님'
+        print(f'[dq4readset] {dest}: 장면 Lua 오류(캐시에 넣지 않음): {why[:500]}', file=sys.stderr)
         if WATCHDOG in why:
             rc = LUA_WATCHDOG
             print(f'[dq4readset] {dest}: MesenCE 가 Lua 콜백을 시간 제한으로 끊음(머신이 바쁠 때). 장면을 다시 돌릴 것',
@@ -533,7 +533,9 @@ def _run(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag, ac
         # 다시 돌린 실행이 끝까지 가지 못했으면 출력을 견줄 수 없다. 항목은 두고 그 실패로 알린다
         if timed_out:
             raise SystemExit(f'읽은 바이트 캐시 재검증이 {timeout}초 안에 끝나지 않음: {dest}(항목은 그대로 둠)')
-        if rc in (LUA_WATCHDOG, LUA_ERROR) and hit.get('returncode') != rc:
+        # 0 이 아닌 종료(시간 제한·Lua 오류·MesenCE 가 죽음·emu.stop(n))는 키와 상관없는 실패일 수 있다. 캐시에는 0 으로
+        # 끝난 실행만 들어가므로 견주지 않는다
+        if rc != 0:
             raise SystemExit(f'읽은 바이트 캐시 재검증 실행이 실패함(종료 코드 {rc}): {dest}(항목은 그대로 둠)')
         want = {rel: content_hash(data, rel) for rel, data in blobs.items()}
         got = _outputs(dest, before)

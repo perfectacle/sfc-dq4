@@ -97,7 +97,21 @@ def church(mesence, rom, state, dest):
     return found[1] if found else None
 
 
+def run_failure(info, timeout):
+    """dq4readset.run 결과가 실패면 그 까닭, 아니면 None."""
+    if info['timed_out']:
+        return f'MesenCE 가 {timeout}초 안에 끝나지 않음'
+    if info['returncode'] == dq4readset.LUA_WATCHDOG:
+        return 'MesenCE 가 Lua 콜백을 시간 제한으로 끊음(머신이 바쁠 때, 다시 돌릴 것)'
+    if info['returncode'] == dq4readset.LUA_ERROR:
+        return '장면 Lua 오류(로그 참고)'
+    if info['returncode'] != 0:
+        return f'MesenCE 종료 코드 {info["returncode"]}'
+    return None
+
+
 def save_continue(mesence, rom, state, dest):
+    """(덤프, 부름 기록, 실패 까닭). 실패면 앞 둘은 비어 있다."""
     # 길이는 10진
     dumps = [f'{SAVED - 50}:7E2000:{well.SAVE_SIZE}', f'{SAVED}:700000:{SRAM_SIZE}',
              f'{LOADED}:7E2000:{well.SAVE_SIZE}', f'{LOADED}:7E00BC:2', f'{LOADED}:7E3020:1', f'{LOADED}:7E3080:1']
@@ -108,14 +122,14 @@ def save_continue(mesence, rom, state, dest):
                CALLS=f'{CONTINUE_PATH},{LOGO},{MESSAGE}', ROMPATCH=walk.NO_ENCOUNTERS, SHOTS=f'{SAVED - 50},{SHOT}',
                DUMP=';'.join(dumps))
     info = dq4readset.run(mesence, rom, DQ5_TOOLS / 'lua' / 'dq5cdldump.lua', dest, env, timeout=900)
-    if info['timed_out'] or info['returncode'] != 0:
-        # 덤프가 모자라 save_scene 이 「저장·이어 하기가 끝나지 않음」 으로 실패시킨다
-        return {}, []
+    why = run_failure(info, 900)
+    if why:
+        return {}, [], why
     text = (dest / 'msg.txt').read_text(encoding='utf-8') if (dest / 'msg.txt').exists() else ''
     got = {(int(m[1]), int(m[2], 16)): bytes.fromhex(m[3])
            for m in re.finditer(r'(\d+) dump ([0-9A-F]{6}) ([0-9A-F ]+)', text)}
     calls = [(int(f), pc, a) for f, pc, a in re.findall(r'^(\d+) (\w{6}) A=(\w+)', text, re.M)]
-    return got, calls
+    return got, calls, None
 
 
 def save_scene(mesence, rom, states, out, name, segment):
@@ -124,7 +138,9 @@ def save_scene(mesence, rom, states, out, name, segment):
     arrived = church(mesence, rom, states / segment / 'end.mss', dest / 'warp')
     if arrived != '36/00' or not (dest / 'warp' / 'church.mss').exists():
         return name, {'status': 'failed', 'problems': [f'교회에 닿지 못함({arrived})']}
-    got, calls = save_continue(mesence, rom, dest / 'warp' / 'church.mss', dest)
+    got, calls, why = save_continue(mesence, rom, dest / 'warp' / 'church.mss', dest)
+    if why:
+        return name, {'status': 'failed', 'problems': [f'저장·이어 하기 장면: {why}']}
     before, sram, loaded = (got.get(k, b'') for k in ((SAVED - 50, 0x7E2000), (SAVED, 0x700000), (LOADED, 0x7E2000)))
     problems = []
     if not (before and sram and loaded):
