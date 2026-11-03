@@ -35,9 +35,10 @@ def walk(rom, start, m8=True, x8=True):
     """Every path from start to an RTS, in the bank of start. The stack is followed byte by byte: PHP pushes the M/X
     widths it saw and PLP brings them back (a PLP of anything else fails). Where two paths meet, the stack and the
     widths must be the same; an RTS must find the stack as it was on entry. Fails on REFUSED, an indirect jump or a
-    jump to another bank. Calls are assumed to come back level and are listed with the widths at the call. The CPU
-    is taken to be in native mode (E = 0) on entry: the reset routine 00:8639 (vector 00:FFFC) starts with CLC / XCE,
-    and XCE is refused here, so a walked routine cannot change it on the way."""
+    jump to another bank. Calls are assumed to come back level and are listed with the widths at the call.
+    Native mode (E = 0) on entry is a premise the caller has to make true. ResetTest checks only that the reset entry
+    00:8639 starts with CLC / XCE; XCE in the walked routine itself is refused, but routines it calls (JSR/JSL) are
+    not walked, so an XCE inside them is outside what this checks."""
     from kr_patch.sfc import dis65816
     state, todo = {}, [(start, (), m8, x8)]
     out = {"rts": set(), "seen": set(), "calls": {}, "long": set()}
@@ -145,18 +146,20 @@ class WalkTest(unittest.TestCase):
                 with self.assertRaises(AssertionError):
                     walk(bank05(bytes.fromhex(push + " 68 60")), 0x058000)
 
+    def test_refused_instructions(self):
+        for code in ("40", "5C 00 80 05", "00 00", "02 00", "DB", "CB", "82 00 00", "1B", "9A", "3B",
+                     "6C 00 80", "7C 00 80", "FC 00 80", "DC 00 80"):
+            with self.subTest(code), self.assertRaises(AssertionError):
+                walk(bank05(bytes.fromhex(code + " 60")), 0x058000)
+
+
+class ResetTest(unittest.TestCase):
     @unittest.skipUnless(DQ5.is_file(), "local source ROM not present")
     def test_the_game_leaves_emulation_mode_on_reset(self):
         rom = DQ5.read_bytes()
         reset = rom[0x7FFC] | rom[0x7FFD] << 8
         self.assertEqual(reset, 0x8639)
         self.assertEqual(rom[lorom(reset):lorom(reset) + 2], bytes.fromhex("18 FB"))    # CLC / XCE
-
-    def test_refused_instructions(self):
-        for code in ("40", "5C 00 80 05", "00 00", "02 00", "DB", "CB", "82 00 00", "1B", "9A", "3B",
-                     "6C 00 80", "7C 00 80", "FC 00 80", "DC 00 80"):
-            with self.subTest(code), self.assertRaises(AssertionError):
-                walk(bank05(bytes.fromhex(code + " 60")), 0x058000)
 
 
 class HookTest(unittest.TestCase):
