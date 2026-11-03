@@ -60,7 +60,8 @@ EVENT_STAIRS = {(0x00, 0x00, 0x1F, 0x12)}
 PRESET = ""
 
 
-def scene(mesence, rom, state, out, name, **extra):
+def scene(mesence, rom, state, out, name, readset=False, **extra):
+    """readset 이면 dq4readset 으로 돌려 같은 출발 상태·입력에 읽은 롬 바이트가 같으면 캐시의 출력을 펼친다."""
     dest = out / name
     dest.mkdir(parents=True)
     env = environment(os.environ["LIBDIR"], state, dest)
@@ -68,8 +69,12 @@ def scene(mesence, rom, state, out, name, **extra):
     sets = ";".join(s for s in (PRESET, extra.pop("SET", "")) if s)
     env.update({"MAXF": "2400", "WARPEXIT": f"{warp_exit(rom):X}", "DP86OK": dp86_allowed(rom),
                 **({"SET": sets} if sets else {}), **extra})
-    dq4mesen.testrunner(str(mesence), str(rom), str(WARP), "--Snes.DisableFrameSkipping=true",
-                        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300, check=False)
+    if readset:
+        import dq4readset
+        dq4readset.run(mesence, rom, WARP, dest, env, timeout=300)
+    else:
+        dq4mesen.testrunner(str(mesence), str(rom), str(WARP), "--Snes.DisableFrameSkipping=true",
+                            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300, check=False)
     text = (dest / "warp.txt").read_text(encoding="utf-8") if (dest / "warp.txt").exists() else ""
     found = END.findall(text)
     if not found:

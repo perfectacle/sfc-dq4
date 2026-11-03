@@ -502,7 +502,8 @@ name = "dq4-field-signs"
 why = "필드 팻말에 はなす·しらべる 하면 FC 처럼 팻말 글(아래를 보면 뒷면)이 떠야 한다. DQ5 팻말 표 1E:F4BF 가 DQ5 좌표 그대로라 「그 방향에는 아무도 없다」 가 떴다"
 paths = ["sfc/dq4/tools/dq4signs.py", "sfc/dq4/tools/dq4signcheck.py", "sfc/dq4/tools/dq4sysmsg.py",
          "sfc/dq4/tools/dq4fieldport.py", "sfc/dq4/tools/dq4fieldgfx.py", "sfc/dq4/tools/dq4chapter1.py",
-         "sfc/dq4/tools/dq4freshstate.py"]
+         "sfc/dq4/tools/dq4freshstate.py", "sfc/dq4/tools/dq4groupcheck.py", "sfc/dq5/tools/lua/dq5warp.lua",
+         "sfc/dq5/tools/lua/dq5chestcheck.lua", "sfc/dq4/tools/dq4readset.py", "sfc/dq4/tools/lua/dq4readset.lua"]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/signcheck && uv run --locked python sfc/dq4/tools/dq4signcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/signcheck"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI"]
 
@@ -523,7 +524,7 @@ why = "1장 롬 탑 위 보스 전투에서 전투 메시지 번호마다 끝까
 paths = ["sfc/dq4/tools/dq4freshstate.py", "sfc/dq4/tools/dq4battlemsgcheck.py", "sfc/dq4/tools/dq4battlemsg.py",
          "sfc/dq4/tools/dq4battletexts.py", "sfc/dq4/tools/lua/dq4battlemsgswap.lua",
          "sfc/dq4/tools/dq4build.py", "sfc/dq4/tools/dq4chapter1.py", "sfc/dq4/tools/dq4windowname.py",
-         "sfc/dq4/tools/dq4menupatch.py"]
+         "sfc/dq4/tools/dq4menupatch.py", "sfc/dq4/tools/dq4readset.py", "sfc/dq4/tools/lua/dq4readset.lua"]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4battlemsgcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/fresh-battlemsg"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 

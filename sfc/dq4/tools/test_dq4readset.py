@@ -1,5 +1,6 @@
 """dq4readset: 읽은 롬 바이트 캐시의 키·찾기·저장과, 머리말 Lua·러너가 지켜야 할 규칙(롬 없이)."""
 import ast
+import json
 import os
 from pathlib import Path
 import struct
@@ -138,6 +139,7 @@ class FakeMesen:
     def __init__(self):
         self.calls = 0
         self.rc = 0
+        self.shot = False
 
     def __call__(self, mesence, rom, script, folder=None, tag='probe', extra=(), env=None, stdout=None, **kw):
         self.calls += 1
@@ -147,6 +149,8 @@ class FakeMesen:
         Path(folder, 'end.mss').write_bytes(mss(f'probe-{self.calls:012x}.sfc'.encode(), data[s:s + 2]))
         Path(env['READSET_OUT']).write_text(f'{s:X} {n:X}\n')
         Path(folder, 'mesen.log').write_text(f'loaded {Path(rom).name}\n')
+        if self.shot:
+            Path(folder, 's00300.png').write_bytes(bytes([self.calls]))
         return subprocess.CompletedProcess([], self.rc)
 
 
@@ -246,10 +250,30 @@ class RunTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, '출력'):
                 self.go()
 
+    def test_verify_does_not_trust_screenshots(self):
+        """화면 찍기는 같은 실행에서도 프레임이 어긋날 수 있어 재검증이 견주지 않는다. 다른 출력은 그대로 견준다."""
+        self.fake.shot = True
+        self.go()
+        with mock.patch.dict(os.environ, {'DQ4_READSET_VERIFY': '1'}):
+            info, dest = self.go()
+        self.assertTrue(info['verified'])
+        self.assertEqual(info['screens_differ'], ['s00300.png'])
+        self.assertEqual((dest / 's00300.png').read_bytes(), bytes([2]))
+        self.assertTrue(self.go()[0]['cached'])
+
     def test_accept_false_is_not_cached(self):
         dest = Path(self.tmp.name) / 'rej'
         rs.run(self.mesence, self.rom, self.script, dest, {}, store=self.store, accept=lambda d: False)
         self.assertFalse(self.go()[0]['cached'])
+
+    def test_stats_records_each_run(self):
+        stats = Path(self.tmp.name) / 'stats.jsonl'
+        with mock.patch.dict(os.environ, {'DQ4_READSET_STATS': str(stats)}):
+            self.go()
+            self.go()
+        rows = [json.loads(line) for line in stats.read_text(encoding='utf-8').splitlines()]
+        self.assertEqual([(r['script'], r['cached'], r['readset']) for r in rows],
+                         [('scene.lua', False, 0x10), ('scene.lua', True, 0x10)])
 
 
 class RuleTests(unittest.TestCase):
@@ -260,6 +284,15 @@ class RuleTests(unittest.TestCase):
                  and n.value.id == 'mesen'}
         self.assertIn('run', attrs)
         self.assertNotIn('testrunner', attrs)
+
+    def test_scene_checks_run_through_cache(self):
+        """장면형 검사가 MesenCE 를 직접(testrunner·mesen.run) 띄우면 캐시도 .srm 막이도 비껴간다."""
+        for name in ('dq4signcheck.py', 'dq4battlemsgcheck.py'):
+            tree = ast.parse((HERE / name).read_text(encoding='utf-8'))
+            calls = {(n.func.value.id, n.func.attr) for n in ast.walk(tree) if isinstance(n, ast.Call)
+                     and isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name)}
+            self.assertIn(('dq4readset', 'run'), calls, name)
+            self.assertFalse({c for c in calls if c[0] in ('dq4mesen', 'mesen')}, name)
 
     def test_clear_saves_removes_cdl(self):
         with tempfile.TemporaryDirectory() as d:

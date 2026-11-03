@@ -15,6 +15,7 @@
   DQ4_READSET_VERIFY=0.05  캐시가 맞은 장면 가운데 이 비율을 다시 돌려 출력이 같은지 본다. 다르면 실패
   DQ4_READSET_CACHE=폴더    캐시 뿌리(기본 원래 체크아웃 work/cache/readset)
   DQ4_READSET_MAX_GB=20    이보다 커지면 오래 안 쓴 항목부터 지운다
+  DQ4_READSET_STATS=파일    실행마다 한 줄(JSON: 스크립트·출력 폴더·맞았는가·읽은 바이트 수)을 덧붙인다(적중률 재기)
 """
 import base64
 import contextlib
@@ -57,6 +58,9 @@ FIXED_ARGS = ('--Snes.RamPowerOnState=AllZeros', '--Snes.EnableRandomPowerOnStat
 HEADER = (slice(0x7FB0, 0x7FDC), slice(0x7FE0, 0x8000))
 CHECKSUM = range(0x7FDC, 0x7FE0)
 KEEP_ENTRIES = 8
+# emu.takeScreenshot 화면은 같은 실행을 되풀이해도 다를 수 있다(메모리·VRAM 덤프는 같은데 화면만 다름). 재검증은 이것을
+# 키에 빠진 입력의 증거로 보지 않는다. 그래서 장면 판정이 화면 찍기를 읽지 않는 검사만 이 캐시를 쓴다
+SCREENS = ('.png',)
 # blob 은 잠금 밖에서 먼저 쓰고 index 는 그 뒤 잠금 안에서 쓴다. 그 사이의 blob 을 prune 이 지우지 않게 이만큼 젊은 것은 둔다
 BLOB_GRACE = 6 * 3600
 GETENV = re.compile(r'''os\.getenv\(\s*["']([A-Za-z_][A-Za-z0-9_]*)["']\s*\)''')
@@ -419,6 +423,17 @@ def run(mesence, rom_path, script, dest, env, timeout=1800, extra=mesen.ARGS, lo
     """장면 하나. dest 에 출력이 생긴다(맞으면 캐시에서 펼침). accept(dest) 가 거짓이면 캐시에 넣지 않는다.
 
     돌려주는 dict: cached(맞음), returncode, timed_out, readset(읽은 바이트 수), key."""
+    info = _run(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag, accept, store)
+    stats = os.environ.get('DQ4_READSET_STATS')
+    if stats:
+        line = json.dumps({'script': Path(script).name, 'dest': str(dest), 'cached': info['cached'],
+                           'readset': info.get('readset'), 'returncode': info.get('returncode')})
+        with open(stats, 'a', encoding='utf-8') as f:
+            f.write(line + '\n')
+    return info
+
+
+def _run(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag, accept, store):
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
     rom = Path(rom_path).read_bytes()
@@ -443,12 +458,17 @@ def run(mesence, rom_path, script, dest, env, timeout=1800, extra=mesen.ARGS, lo
         if timed_out:
             raise SystemExit(f'읽은 바이트 캐시 재검증이 {timeout}초 안에 끝나지 않음: {dest}(항목은 그대로 둠)')
         want = {rel: content_hash(store.get_blob(sha), rel) for rel, sha in hit['files'].items()}
-        diff = mismatch(want, _outputs(dest, before), hit, rc, ranges)
+        got = _outputs(dest, before)
+        diff = mismatch(want, got, hit, rc, ranges)
         if diff:
             store.drop(key, hit)
             raise SystemExit(f'읽은 바이트 캐시가 틀렸다: {dest} 를 다시 돌린 결과가 캐시와 다름({diff}, 항목을 지움). '
                              'dq4readset 의 키에 빠진 입력이 있다')
-        return {**info, 'verified': True}
+        shots = differing(want, got, screens=True)
+        if shots:
+            print(f'[dq4readset] {dest}: 다시 돌린 화면 {",".join(shots[:8])} 이 캐시와 다름(화면 찍기는 결정적이지 않아 '
+                  '판정에 쓰지 않는 출력)', file=sys.stderr)
+        return {**info, 'verified': True, 'screens_differ': shots}
     rc, timed_out, ranges = _execute(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag)
     info = {'cached': False, 'returncode': rc, 'timed_out': timed_out,
             'readset': sum(n for _, n in ranges) if ranges is not None else None, 'ranges': len(ranges or ()),
@@ -470,11 +490,21 @@ def run(mesence, rom_path, script, dest, env, timeout=1800, extra=mesen.ARGS, lo
     return info
 
 
+def is_screen(rel):
+    return str(rel).endswith(SCREENS)
+
+
+def differing(want, got, screens=False):
+    """want·got(상대 경로 → 해시)에서 다른 경로. screens 면 화면 찍기만, 아니면 그 밖의 것만."""
+    return sorted(k for k in set(want) | set(got) if want.get(k) != got.get(k) and is_screen(k) == screens)
+
+
 def mismatch(want, got, entry, rc, ranges):
-    """재검증: 캐시 항목과 다시 돌린 결과가 어디서 다른지(같으면 빈 글)."""
+    """재검증: 캐시 항목과 다시 돌린 결과가 어디서 다른지(같으면 빈 글). 화면 찍기(SCREENS)는 견주지 않는다."""
     out = []
-    if got != want:
-        out.append('출력 ' + ','.join(sorted(k for k in set(want) | set(got) if want.get(k) != got.get(k))[:8]))
+    files = differing(want, got)
+    if files:
+        out.append('출력 ' + ','.join(files[:8]))
     if rc != entry.get('returncode'):
         out.append(f'종료 코드 {entry.get("returncode")}→{rc}')
     if ranges is None or pack(ranges) != entry['ranges']:
