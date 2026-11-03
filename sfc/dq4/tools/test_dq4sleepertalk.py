@@ -36,7 +36,8 @@ def walk(rom, start, m8=True, x8=True):
     widths it saw and PLP brings them back (a PLP of anything else fails). Where two paths meet, the stack and the
     widths must be the same; an RTS must find the stack as it was on entry. Fails on REFUSED, an indirect jump or a
     jump to another bank. Calls are assumed to come back level and are listed with the widths at the call. The CPU
-    is taken to be in native mode (E = 0) on entry, as the game runs; XCE is refused, so it cannot change on the way."""
+    is taken to be in native mode (E = 0) on entry: the reset routine 00:8639 (vector 00:FFFC) starts with CLC / XCE,
+    and XCE is refused here, so a walked routine cannot change it on the way."""
     from kr_patch.sfc import dis65816
     state, todo = {}, [(start, (), m8, x8)]
     out = {"rts": set(), "seen": set(), "calls": {}, "long": set()}
@@ -143,6 +144,13 @@ class WalkTest(unittest.TestCase):
                 walk(bank05(bytes.fromhex(push + " 68 68 60")), 0x058000)
                 with self.assertRaises(AssertionError):
                     walk(bank05(bytes.fromhex(push + " 68 60")), 0x058000)
+
+    @unittest.skipUnless(DQ5.is_file(), "local source ROM not present")
+    def test_the_game_leaves_emulation_mode_on_reset(self):
+        rom = DQ5.read_bytes()
+        reset = rom[0x7FFC] | rom[0x7FFD] << 8
+        self.assertEqual(reset, 0x8639)
+        self.assertEqual(rom[lorom(reset):lorom(reset) + 2], bytes.fromhex("18 FB"))    # CLC / XCE
 
     def test_refused_instructions(self):
         for code in ("40", "5C 00 80 05", "00 00", "02 00", "DB", "CB", "82 00 00", "1B", "9A", "3B",

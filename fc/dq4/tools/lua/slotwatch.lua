@@ -3,7 +3,9 @@
 --   WSLOTS=06,07       감시할 슬롯(16진). 쓰기마다 w7020.txt 에 「프레임 w 주소=값 pc= prg= map= xy=」
 --   WEXTRA=6F71,6F91   더 감시할 CPU 주소(16진). 인물 자리 $6F60/$6F80+슬롯 등
 --   SNAP=300,2000      그 프레임(10진)에 슬롯마다 「슬롯:$7020@X,Y」 줄과 화면 fNNNNN.png
---   FORCEHIDE=15       그 슬롯(16진)의 $7020 bit7 을 매 프레임 켠다. 같은 장면과 화면을 견주어 그 인물이 그려지는지 본다
+--   FORCEHIDE=15       그 슬롯(16진)의 $7020 bit7 을 매 프레임 켠다. 같은 장면과 화면을 견주어 그 인물이 그려지는지 본다.
+--                      $7020 이 FF 면 빈 슬롯이라(fc/dq4/docs/dq4-npcblock-format.md 「인물 표 열」) 건드리지 않는다.
+--                      이 emu.write 는 쓰기 감시 콜백을 부르지 않아 w7020.txt 에는 게임의 쓰기만 남는다(실측)
 --   NEXT               이어 돌릴 프로브의 절대 경로. MAXF 는 그 프로브와 같은 값을 쓴다(MAXF-2 에 w7020.txt 를 씀)
 -- 드라이버가 MAXF 보다 먼저 멈추면(seq.lua 는 SEQ·TAIL 뒤에 멈춤) w7020.txt 가 남지 않으므로 MAXF 를 그보다 작게 준다.
 package.path = os.getenv("LIBDIR") .. "/?.lua;" .. package.path
