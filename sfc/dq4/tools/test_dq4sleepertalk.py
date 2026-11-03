@@ -35,7 +35,10 @@ def walk(rom, start, m8=True, x8=True):
     """Every path from start to an RTS, in the bank of start. The stack is followed byte by byte: PHP pushes the M/X
     widths it saw and PLP brings them back (a PLP of anything else fails). Where two paths meet, the stack and the
     widths must be the same; an RTS must find the stack as it was on entry. Fails on REFUSED, an indirect jump or a
-    jump to another bank. Calls are assumed to come back level and are listed with the widths at the call."""
+    jump to another bank. Calls are assumed to come back level and are listed with the widths at the call.
+    Native mode (E = 0) on entry is a premise the caller has to make true. ResetTest checks only that the reset entry
+    00:8639 starts with CLC / XCE; XCE in the walked routine itself is refused, but routines it calls (JSR/JSL) are
+    not walked, so an XCE inside them is outside what this checks."""
     from kr_patch.sfc import dis65816
     state, todo = {}, [(start, (), m8, x8)]
     out = {"rts": set(), "seen": set(), "calls": {}, "long": set()}
@@ -124,8 +127,39 @@ class WalkTest(unittest.TestCase):
         walk(bank05(bytes.fromhex("C2 20 48 68 E2 20 60")), 0x058000)
 
     def test_plp_brings_back_the_widths_php_saw(self):
-        # PHP / REP #$30 / PLP / PHA / PLA / RTS: after PLP A is 8-bit again
-        walk(bank05(bytes.fromhex("08 C2 30 28 48 68 60")), 0x058000)
+        # PHP / REP #$30 / PLP / PHA / PEA $0000 / PLD / PLB / RTS is level only if A is 8-bit again after PLP:
+        # with A left 16-bit the PHA pushes 2 and one byte stays at the RTS
+        walk(bank05(bytes.fromhex("08 C2 30 28 48 F4 00 00 2B AB 60")), 0x058000)
+        with self.assertRaises(AssertionError):
+            walk(bank05(bytes.fromhex("08 C2 30 EA 48 F4 00 00 2B AB 60")), 0x058000)   # PLP → NOP
+
+    def test_index_pushes_follow_x(self):
+        walk(bank05(bytes.fromhex("C2 10 DA 7A E2 10 60")), 0x058000)       # REP #$10 / PHX / PLY / SEP #$10
+        for code in ("C2 10 DA E2 10 FA 60", "C2 10 5A E2 10 7A 60"):     # 16-bit push, 8-bit pull
+            with self.subTest(code), self.assertRaises(AssertionError):
+                walk(bank05(bytes.fromhex(code)), 0x058000)
+
+    def test_two_byte_pushes(self):
+        for push in ("0B", "F4 00 00", "D4 00", "62 00 00"):              # PHD, PEA, PEI, PER
+            with self.subTest(push):
+                walk(bank05(bytes.fromhex(push + " 68 68 60")), 0x058000)
+                with self.assertRaises(AssertionError):
+                    walk(bank05(bytes.fromhex(push + " 68 60")), 0x058000)
+
+    def test_refused_instructions(self):
+        for code in ("40", "5C 00 80 05", "00 00", "02 00", "DB", "CB", "82 00 00", "1B", "9A", "3B",
+                     "6C 00 80", "7C 00 80", "FC 00 80", "DC 00 80"):
+            with self.subTest(code), self.assertRaises(AssertionError):
+                walk(bank05(bytes.fromhex(code + " 60")), 0x058000)
+
+
+class ResetTest(unittest.TestCase):
+    @unittest.skipUnless(DQ5.is_file(), "local source ROM not present")
+    def test_the_game_leaves_emulation_mode_on_reset(self):
+        rom = DQ5.read_bytes()
+        reset = rom[0x7FFC] | rom[0x7FFD] << 8
+        self.assertEqual(reset, 0x8639)
+        self.assertEqual(rom[lorom(reset):lorom(reset) + 2], bytes.fromhex("18 FB"))    # CLC / XCE
 
 
 class HookTest(unittest.TestCase):
