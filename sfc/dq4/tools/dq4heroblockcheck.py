@@ -172,7 +172,7 @@ def run_case(mesence, rom, base, out, name, case, exit_at, seed=0):
         'STATE': str(base), 'TO': case['warp'], 'SAVE': 'end.mss', 'SETTLE': '60', 'MAXF': '1500',
         'WARPEXIT': f'{exit_at:X}', 'ANYWHERE': '1', 'ROMPATCH': wc.NO_ENCOUNTERS,
         'SET': ';'.join(v for v in (pins, case['set']) if v), 'LATESET': ';'.join(v for v in (pins, case.get('late')) if v),
-        **({'PARTY': case['party']} if case.get('party') else {})}, 300)
+        **({'PARTY': case['party']} if case.get('party') else {})}, 300, readset=True)
     state = dest / 'warp' / 'end.mss'
     problems = []
     if not state.exists():
@@ -189,7 +189,7 @@ def run_case(mesence, rom, base, out, name, case, exit_at, seed=0):
     if 'snap' in case:
         env.update(SNAPMSG=f"{case['snap'][0]:X}", SNAPWATCH=case['watch'])
     env['TRACK'] = ','.join(f'{n:02X}' for n in TRACK)
-    wc.run(mesence, rom, DRIVER, dest, env, int(env['MAXF']) // 40 + 120)
+    wc.run(mesence, rom, DRIVER, dest, env, int(env['MAXF']) // 40 + 120, readset=True)
     text = (dest / 'walk.txt').read_text(encoding='utf-8') if (dest / 'walk.txt').exists() else ''
     seen = {k: int(v, 16) for k, v in re.findall(r'^(\w+)=([0-9A-F]+)$', text, re.M)}
     end = re.search(r'end map (\w\w/\w\w) x=(\d+) y=(\d+)', text)
@@ -247,7 +247,7 @@ def make_base(mesence, rom, out, cache=None):
     start = wc.prologue_start(mesence, rom, out)
     wc.run(mesence, rom, wc.WALK_STATE, out / 'close', {'STATE': str(start), 'WALK': str(wc.WALK),
                                                        'WAYPOINTS': f'{pc.CLOSE};wait:30', 'SAVE': 'end.mss',
-                                                       'MAXF': '200', 'CHANGES': '99'}, 120)
+                                                       'MAXF': '200', 'CHANGES': '99'}, 120, readset=True)
     pins = f'{wc.RNG};{wc.DAY_SET}'
     log = out / 'hub' / 'warp.txt'
     # 같은 out 에 남은 앞 실행의 상태·기록을 이번 도착으로 잘못 읽지 않게 지운다
@@ -256,7 +256,7 @@ def make_base(mesence, rom, out, cache=None):
     wc.run(mesence, rom, wc.WARP, out / 'hub', {
         'STATE': str(out / 'close' / 'end.mss'), 'TO': HUB, 'SAVE': 'end.mss', 'SETTLE': '60', 'MAXF': '1500',
         'WARPEXIT': f'{warp_exit(rom):X}', 'ANYWHERE': '1', 'ROMPATCH': wc.NO_ENCOUNTERS, 'SET': pins,
-        'LATESET': pins}, 300)
+        'LATESET': pins}, 300, readset=True)
     # 세이브스테이트는 도착하지 못해도 남는다. 도착한 것만 돌려주고 캐시에 두어 틀린 출발점을 쓰지 않게 한다
     arrived = re.search(r'arrived map (\w\w/\w\w)', log.read_text(encoding='utf-8')) if log.exists() else None
     if not base.exists() or not arrived or arrived[1] != HUB[:5]:
