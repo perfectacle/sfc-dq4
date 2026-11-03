@@ -12,11 +12,14 @@ scene asks for that cell and the one above it and keeps the warp that lands on t
 --chapter1 is for the chapter-1 ROM: every warp first sets the throne-room opening flag as done, and the throne room's
 sleepers are taken from dq4chapter1 (its own night list, NIGHT_ABED) instead of npc-report.json. Its start state
 stands in the throne room, and dq5warp.lua sees the arrival as the map number changing to the destination, so a warp
-to the throne room never arrives; those scenes start from the state saved on arriving at the first other map.
+to the throne room never arrives; those scenes start from the state the first scene saved on arriving (the first
+try that saved one). That relies on the order of scenes(): maps sorted, so a 36/00 scene runs before the throne room
+(36/01); a throne-room scene with no saved state stops the check.
 
-Each scene starts from the same random state (dq4ch1walkcheck.RNG, at the start and again on arrival) and, on arrival,
-holds every person slot still (step interval 7E:3300+slot = 0), so a wanderer never steps between the hero and the
-sleeper and the result does not hang on the random walk.
+Each scene starts from the same random state (dq4pins.RNG, at the start and again on arrival) and holds every person
+slot still from the first frame (step interval 7E:3300+slot = 0, POKE writes it every frame, so also the frame the map
+is loaded), so a wanderer never steps between the hero and the sleeper and the result does not hang on the random
+walk.
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4sleepercheck.py --rom work/ch1/dq4-ch1-full.sfc \\
       --build work/dq4-groups --chapter1 --out work/sleepercheck
@@ -42,7 +45,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
 import dq4block  # noqa: E402
 import dq4chapter1  # noqa: E402
 import dq4chapterbox  # noqa: E402
-from dq4ch1walkcheck import RNG  # noqa: E402
+from dq4pins import RNG  # noqa: E402
 import dq4freshstate  # noqa: E402
 import dq4npccheck  # noqa: E402
 from dq4groupbuild import cell, fc_map  # noqa: E402
@@ -63,7 +66,7 @@ def sleepers(report):
 # Person slots from here on are townspeople (7E:1994 on arrival, read back in every scene); below are the party's.
 FIRST_PERSON = 0x08
 SLOTS = 0x20
-HOLD = ";".join(f"{0x3300 + s:04X}=00" for s in range(FIRST_PERSON, SLOTS))
+HOLD = ";".join(f"7E{0x3300 + s:04X}=00" for s in range(FIRST_PERSON, SLOTS))
 
 
 def chapter1_throne():
@@ -119,7 +122,7 @@ def main():
         flag, mask = dq4chapterbox.CHAPTER1.flag
         sets += f";{flag & 0xFFFF:04X}|{mask:02X}"
         report = {**report, dq4chapter1.THRONE: chapter1_throne()}
-    late = f"{RNG};{HOLD}"
+    late = RNG
     via = None
     results = {}
     for name, m, (x, y), d, night, want in scenes(ines.prg(args.dq4.read_bytes()), report):
@@ -134,9 +137,9 @@ def main():
         for k, ask in enumerate((y, y - 1)):
             for n, talk in enumerate(dq4npccheck.TALKS):
                 wram, messages = dq4npccheck.run(mesence, rom, start, out, f"{name}-{k}{n}", libdir, f"{m},{x},{ask}",
-                                                 talk.format(dir=d), night, False, ret, sets, late, save)
+                                                 talk.format(dir=d), night, False, ret, sets, late, save, HOLD)
                 if save and (out / f"{name}-{k}{n}" / save).exists():
-                    via = out / f"{name}-{k}{n}" / save
+                    via, save = out / f"{name}-{k}{n}" / save, None
                 final = wram[1] if isinstance(wram, tuple) else None
                 if final and final[0x1994] != FIRST_PERSON:
                     raise SystemExit(f"{name}: first person slot 7E:1994 = {final[0x1994]:02X}, not {FIRST_PERSON:02X}")

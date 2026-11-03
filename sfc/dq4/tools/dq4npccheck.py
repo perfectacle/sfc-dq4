@@ -98,7 +98,7 @@ def codes_match(rows, message, want):
 
 
 def run(mesence, rom, state, out, name, libdir, to, test, night, shop=False, ret=None, sets=None, late=None,
-        save=None):
+        save=None, pokes=None):
     dest = out / name
     dest.mkdir(parents=True)
     group, number = to.split(",")[0].split("/")
@@ -108,8 +108,9 @@ def run(mesence, rom, state, out, name, libdir, to, test, night, shop=False, ret
     env.update(LIBDIR=str(libdir), STATE=str(state), SHOT_DIR=str(dest), MAXF="1800", SETTLE="120", TO=to,
                TEST=f"{test},wait:30", CHECK_GROUP=group, CHECK_MAP=number,
                WARPEXIT=f"{warp_exit(rom):X}", DP86OK=dp86_allowed(rom))
-    if night:
-        env["POKE"] = NIGHT_POKE
+    poke = ";".join(p for p in (NIGHT_POKE if night else None, pokes) if p)
+    if poke:
+        env["POKE"] = poke
     if sets:
         env["SET"] = sets
     if late:

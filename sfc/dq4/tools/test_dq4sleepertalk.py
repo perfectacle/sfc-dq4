@@ -15,6 +15,55 @@ def lorom(addr):
     return (addr >> 16) * 0x8000 + (addr & 0x7FFF)
 
 
+PUSH = {"PHA", "PHX", "PHY", "PHP", "PHB", "PHD", "PHK", "PEA", "PEI", "PER"}
+PULL = {"PLA", "PLX", "PLY", "PLP", "PLB", "PLD"}
+BRANCH = {"BCC", "BCS", "BEQ", "BNE", "BMI", "BPL", "BVC", "BVS"}
+# Anything that leaves without RTS, reads or sets the stack pointer, or jumps where the walk cannot follow
+REFUSED = {"RTL", "RTI", "JML", "BRK", "COP", "TSC", "TSX", "TCS", "TXS", "STP", "WAI", "BRL"}
+
+
+def walk(rom, start):
+    """Every path from start in bank 05 to an RTS, with the push/pull depth. Fails on REFUSED, an indirect jump or a
+    jump to another bank, a depth that differs where paths meet, or an RTS reached with the stack not level."""
+    from kr_patch.sfc import dis65816
+    depth, todo, out = {}, [(start, 0, True, True)], {"rts": set(), "seen": set(), "calls": set(), "long": set()}
+    while todo:
+        a, d, m8, x8 = todo.pop()
+        if a in depth:
+            if depth[a] != d:
+                raise AssertionError(f"{a:06X}: stack depth {d} and {depth[a]} meet")
+            continue
+        depth[a] = d
+        out["seen"].add(a)
+        text, size, m8_next, x8_next = dis65816.decode(rom, a, m8, x8)
+        parts = text.split()
+        op = next(p for p in parts[1:] if p.isalpha() and p.isupper() and len(p) == 3)
+        arg = parts[-1] if parts[-1].startswith("$") else ""
+        if op in REFUSED or (op in ("JMP", "JSR") and not arg):
+            raise AssertionError(f"{a:06X}: {op}")
+        nxt = a + size
+        d2 = d + (op in PUSH) - (op in PULL)
+        if d2 < 0:
+            raise AssertionError(f"{a:06X}: pulls below the entry")
+        if op == "RTS":
+            if d:
+                raise AssertionError(f"{a:06X}: RTS with {d} bytes pushed")
+            out["rts"].add(a)
+        elif op == "JMP":
+            todo.append(((a & 0xFF0000) | int(arg[1:], 16), d2, m8_next, x8_next))
+        elif op == "BRA":
+            todo.append((int(arg[1:], 16), d2, m8_next, x8_next))
+        elif op in BRANCH:
+            todo += [(int(arg[1:], 16), d2, m8_next, x8_next), (nxt, d2, m8_next, x8_next)]
+        else:
+            if op == "JSR":
+                out["calls"].add((a & 0xFF0000) | int(arg[1:], 16))
+            elif op == "JSL":
+                out["long"].add(int(arg[1:], 16))
+            todo.append((nxt, d2, m8_next, x8_next))
+    return out
+
+
 class HookTest(unittest.TestCase):
     """The bytes checked here are the ones dq4sleepertalk writes, so this only guards against an edit that changes
     them by mistake. That the ROM answers from the foot is shown by the -foot scenes of dq4npccheck (dq4-npc-talk)."""
@@ -53,26 +102,47 @@ class HookTest(unittest.TestCase):
 
     @unittest.skipUnless(DQ5.is_file(), "local source ROM not present")
     def test_callers_read_only_carry(self):
-        # The hook's second path ends with DEC $00, so N/Z differ from what 05:8503 left. Every JSR $84FE in bank 05
-        # (two per facing) is followed by BCS, and on a miss the caller loads A itself, so no caller reads N/Z.
+        # The hook's second path ends with DEC $00, so N/Z differ from what 05:8503 left. Each facing calls 05:84FE
+        # twice: JSR / BCS found / DEC $00 or $01 / JSR / BCS found / LDA #$FF / RTS, and "found" is an RTS. Nothing
+        # between reads N/Z, and the RTS goes back through 05:8370 to 05:82DC, which pushes A and compares it again.
         rom = DQ5.read_bytes()
         bank = rom[lorom(0x058000):lorom(0x058000) + 0x8000]
+
+        def at(a, n=1):
+            return bank[a - 0x8000:a - 0x8000 + n]
+
         jsr = bytes((0x20, 0xFE, 0x84))
-        at = [0x8000 + i for i in range(len(bank) - 2) if bank[i:i + 3] == jsr]
-        self.assertEqual(at, [0x83DF, 0x83E6, 0x842B, 0x8432, 0x8476, 0x847D, 0x84DC, 0x84E3])
-        for a in at:
-            self.assertEqual(bank[a - 0x8000 + 3], 0xB0, f"05:{a:04X}")
+        sites = [0x8000 + i for i in range(len(bank) - 2) if bank[i:i + 3] == jsr]
+        self.assertEqual(sites, [0x83DF, 0x83E6, 0x842B, 0x8432, 0x8476, 0x847D, 0x84DC, 0x84E3])
+        for first, second in zip(sites[::2], sites[1::2]):
+            self.assertEqual(second - first, 7, f"05:{first:04X}")
+            self.assertEqual(at(first + 5), b"\xC6", f"05:{first:04X}")             # DEC dp
+            self.assertIn(at(first + 6), (b"\x00", b"\x01"), f"05:{first:04X}")
+            self.assertEqual(at(second + 5, 3), bytes.fromhex("A9 FF 60"), f"05:{second:04X}")   # LDA #$FF / RTS
+            for site in (first, second):
+                self.assertEqual(at(site + 3), b"\xB0", f"05:{site:04X}")        # BCS
+                found = site + 5 + int.from_bytes(at(site + 4), "little", signed=True)
+                self.assertEqual(at(found), b"\x60", f"05:{site:04X} -> 05:{found:04X}")
+        self.assertEqual(at(0x82DC, 6), bytes.fromhex("20 70 83 48 C9 FF"))    # JSR $8370 / PHA / CMP #$FF
 
     @unittest.skipUnless(DQ5.is_file(), "local source ROM not present")
     def test_the_check_body_keeps_00_01_and_the_stack(self):
-        # 05:8503 pushes $00 and $01 first and pulls them back just before its one RTS, so the hook can
-        # call it twice and the INC/DEC around the second call leave $00 as the caller set it. X and Y are not kept,
-        # as with one call in the original.
+        # 05:8503 pushes $00 and $01 first and pulls them back just before its one RTS, so the hook can call it twice
+        # and the INC/DEC around the second call leave $00 as the caller set it. X and Y are not kept, as with one
+        # call in the original. Walked instruction by instruction over every branch: one RTS, every jump stays
+        # inside, the stack is level at the RTS and the same wherever two paths meet. Bank-05 routines it calls are
+        # walked the same way (any number of RTS); the JSL to bank 00 is taken to return level.
         rom = DQ5.read_bytes()
-        head = rom[lorom(0x058503):lorom(0x058503) + 9]
-        self.assertEqual(head, bytes.fromhex("85 A2 A5 00 48 A5 01 48 A9"))
-        tail = rom[lorom(0x058597):lorom(0x058597) + 9]
-        self.assertEqual(tail, bytes.fromhex("AA 68 85 01 68 85 00 8A 60"))
+        body = walk(rom, 0x058503)
+        self.assertEqual(body["rts"], {0x05859F})
+        self.assertTrue(all(0x058503 <= a < 0x0585A0 for a in body["seen"]), "a jump leaves 05:8503~859F")
+        self.assertEqual(rom[lorom(0x058503):lorom(0x058503) + 8], bytes.fromhex("85 A2 A5 00 48 A5 01 48"))
+        self.assertEqual(rom[lorom(0x058597):lorom(0x058597) + 9], bytes.fromhex("AA 68 85 01 68 85 00 8A 60"))
+        self.assertEqual(body["calls"], {0x0585A0, 0x0585F8})
+        self.assertFalse(body["long"])
+        inner = [walk(rom, call) for call in sorted(body["calls"])]
+        self.assertTrue(all(w["rts"] and not w["calls"] for w in inner))
+        self.assertEqual(set().union(*(w["long"] for w in inner)), {0x00D0A2})
 
     @unittest.skipUnless(DQ5.is_file(), "local source ROM not present")
     def test_hook_space_is_free_and_kept_apart(self):
