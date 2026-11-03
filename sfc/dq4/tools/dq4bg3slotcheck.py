@@ -44,6 +44,7 @@ sys.path[:0] = [str(HERE), str(ROOT / 'sfc' / 'dq5' / 'tools')]
 import dq4bg3slot  # noqa: E402
 import dq4freshstate  # noqa: E402
 import dq4mesen as mesen  # noqa: E402
+import dq4readset  # noqa: E402
 
 TEST = 'wait:90,a:4,wait:90'
 START_MAP = {'ship': '17/00'}
@@ -178,8 +179,10 @@ def records_of(folder):
 
 
 def arrival_of(folder):
+    """dq5warp 가 적은 도착. MAXF 에 닿아 멈춘 장면(도착 뒤여도)은 None."""
     p = folder / 'warp.txt'
-    found = ARRIVED.findall(p.read_text()) if p.exists() else []
+    text = p.read_text() if p.exists() else ''
+    found = [] if dq4readset.warp_timed_out(text) else ARRIVED.findall(text)
     return found[-1] if found else None
 
 

@@ -45,6 +45,7 @@ from dq5npc import list_entries, parse, table_values  # noqa: E402
 from dq5npcrecordcheck import compare  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
 import dq4mesen  # noqa: E402
+import dq4readset  # noqa: E402
 
 PROBE = DQ5_TOOLS / "lua" / "dq5npcrecordcheck.lua"
 SHOP_PROBE = DQ5_TOOLS / "lua" / "dq5progresscheck.lua"
@@ -98,6 +99,18 @@ def codes_match(rows, message, want):
     return row is not None and row[:min(len(want), 64)] == want[:64]
 
 
+class WarpTimeout(RuntimeError):
+    """장면을 이끄는 dq5warp.lua 가 MAXF 에 닿아 멈췄다. 그 장면만 실패로 적고 다른 장면은 계속 본다."""
+
+
+def outcome(future):
+    """(장면 결과, 실패 까닭). WarpTimeout 은 실패 까닭으로 바꾸고, 다른 예외는 그대로 던진다."""
+    try:
+        return future.result(), None
+    except WarpTimeout as e:
+        return None, str(e)
+
+
 def run(mesence, rom, state, out, name, libdir, to, test, night, shop=False, ret=None, sets=None, late=None,
         save=None, hold=None):
     dest = out / name
@@ -132,12 +145,15 @@ def run(mesence, rom, state, out, name, libdir, to, test, night, shop=False, ret
                                 env=env, stdout=log, stderr=subprocess.STDOUT, timeout=300, check=False)
         except subprocess.TimeoutExpired:
             return None, None
+    # 상점·인물 장면 모두 dq5warp.lua 가 이끈다(상점은 DRIVER, 나머지는 LIBDIR 의 boot.lua 자리)
+    warp = (dest / "warp.txt").read_text(encoding="utf-8") if (dest / "warp.txt").exists() else ""
+    if dq4readset.warp_timed_out(warp):
+        raise WarpTimeout(f"{name}: dq5warp 가 MAXF 에 닿아 멈춤(timeout phase)")
     if shop:
         text = (dest / "observed.txt").read_text(encoding="utf-8") if (dest / "observed.txt").exists() else ""
         prices = [(int(i, 16), int(v)) for i, v in re.findall(r"price item=([0-9A-F]+) value=(\d+)", text)]
         return None, prices
-    text = (dest / "warp.txt").read_text(encoding="utf-8") if (dest / "warp.txt").exists() else ""
-    found = re.search(r"^messages (.*)$", text, re.M)
+    found = re.search(r"^messages (.*)$", warp, re.M)
     messages = [int(v, 16) for v in found[1].split(",") if v] if found else None
     final = dest / "final.wram"
     wram = (dest / "npc.bin").read_bytes() if (dest / "npc.bin").exists() else None
@@ -326,7 +342,11 @@ def main():
                    for kind, name, m, to, test, night, want in jobs}
         for future in concurrent.futures.as_completed(futures):
             kind, name, m, night, want = futures[future]
-            wram, messages, timing = future.result()
+            got, error = outcome(future)
+            if error:
+                results[name] = {"ok": False, "error": error}
+                continue
+            wram, messages, timing = got
             if kind == "unreachable":
                 results[name] = {"ok": False, "error": "no free walkable cell next to the person"}
             elif kind == "closed":

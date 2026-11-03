@@ -33,6 +33,7 @@ from dq4environmentrom import (COUNTER_PROPS, DOOR_KIND, FLOOR, GATE_KIND, OPENI
                                FOUNTAIN_FRAMES, FOUNTAIN_SLOT, WATER_FRAMES, WATER_PERIOD, build_graphics, fountain_block,
                                fountain_frames, objects, water_frames)
 import dq4mesen  # noqa: E402
+import dq4readset  # noqa: E402
 
 OBJECT_SIZE = {DOOR_KIND: (2, 3), GATE_KIND: (4, 4)}  # noqa: E402
 # Cell +4/+7 values 2A:F6B8 counts as exits (2A:FF37).
@@ -67,6 +68,8 @@ def warp(mesence, rom, state, to, out, name, test=False, **extra):
     _run(mesence, rom, WARP, env)
     log = (out / "warp.txt").read_text()
     saved = out / f"{name}.mss"
+    if dq4readset.warp_timed_out(log):
+        raise RuntimeError(f"warp to {to}: dq5warp reached MAXF (timeout phase): {log[-300:]}")
     if "arrived" not in log or not saved.exists():
         raise RuntimeError(f"warp to {to} failed: {log[-300:]}")
     return saved, "moved=yes" in log

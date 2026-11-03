@@ -577,11 +577,16 @@ def _snapshot_run(snapshot, rom, mesence, script, dest, env, timeout, extra, log
         snapshot.unlink(missing_ok=True)
 
 
+def warp_timed_out(text):
+    """dq5warp.lua 의 warp.txt 글이 MAXF 에 닿아 멈춘 장면인가. 그때도 종료 코드는 0 이고, 도착한 뒤였으면
+    「arrived map」 과 「end map」 이 함께 찍혀 있어 그 줄만 보는 판정은 성공으로 읽는다. warp.txt 를 읽는 판정은 이것을 먼저 본다."""
+    return ' timeout phase=' in text
+
+
 def warp_finished(dest):
-    """dq5warp.lua 장면이 끝까지 갔는가(run 의 accept 로 쓴다). MAXF 에 닿으면 「timeout phase=」 를 적고 0 으로 멈추므로,
-    종료 코드만으로는 캐시에 들어간다."""
+    """dq5warp.lua 장면이 끝까지 갔는가(warp.txt 가 있고 MAXF 에 닿지 않음). run 의 accept 로도 쓴다."""
     path = Path(dest) / 'warp.txt'
-    return path.is_file() and ' timeout phase=' not in path.read_text(encoding='utf-8', errors='replace')
+    return path.is_file() and not warp_timed_out(path.read_text(encoding='utf-8', errors='replace'))
 
 
 def is_screen(rel):

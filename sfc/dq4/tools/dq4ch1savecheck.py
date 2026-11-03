@@ -88,13 +88,19 @@ def free(mesence, rom, state, dest):
 
 
 def church(mesence, rom, state, dest):
+    """(도착한 맵, 실패 까닭). 도착하지 못했으면 맵은 None."""
     state = free(mesence, rom, state, dest / 'free')
     walk.run(mesence, rom, walk.WARP, dest, {'STATE': str(state), 'TO': CHURCH, 'SAVE': 'church.mss', 'SETTLE': '120',
                                              'MAXF': '1500', 'WARPEXIT': f'{warp_exit(rom):X}',
                                              'ANYWHERE': '1', 'ROMPATCH': walk.NO_ENCOUNTERS}, 300, readset=True)
-    text = (dest / 'warp.txt').read_text(encoding='utf-8') if (dest / 'warp.txt').exists() else ''
+    log = dest / 'warp.txt'
+    if not log.exists():
+        return None, 'warp.txt 없음'
+    text = log.read_text(encoding='utf-8')
+    if dq4readset.warp_timed_out(text):
+        return None, '순간이동이 MAXF 에 닿아 멈춤(timeout phase)'
     found = re.search(r'arrived map (\w\w/\w\w)', text)
-    return found[1] if found else None
+    return (found[1], None) if found else (None, '도착 기록 없음')
 
 
 def run_failure(info, timeout):
@@ -135,9 +141,9 @@ def save_continue(mesence, rom, state, dest):
 def save_scene(mesence, rom, states, out, name, segment):
     dest = out / name
     dest.mkdir(parents=True)
-    arrived = church(mesence, rom, states / segment / 'end.mss', dest / 'warp')
+    arrived, why = church(mesence, rom, states / segment / 'end.mss', dest / 'warp')
     if arrived != '36/00' or not (dest / 'warp' / 'church.mss').exists():
-        return name, {'status': 'failed', 'problems': [f'교회에 닿지 못함({arrived})']}
+        return name, {'status': 'failed', 'problems': [f'교회에 닿지 못함({why or arrived})']}
     got, calls, why = save_continue(mesence, rom, dest / 'warp' / 'church.mss', dest)
     if why:
         return name, {'status': 'failed', 'problems': [f'저장·이어 하기 장면: {why}']}
