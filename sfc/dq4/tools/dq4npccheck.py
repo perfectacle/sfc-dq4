@@ -49,6 +49,7 @@ import dq4mesen  # noqa: E402
 PROBE = DQ5_TOOLS / "lua" / "dq5npcrecordcheck.lua"
 SHOP_PROBE = DQ5_TOOLS / "lua" / "dq5progresscheck.lua"
 DECODE_PROBE = DQ5_TOOLS / "lua" / "dq5textgrowcheck.lua"
+HOLD_PROBE = TOOLS / "lua" / "dq4holdwalk.lua"
 # First message of each DQ5 service (06:DBD2, sfc/dq5/docs/dq5-data-format.md 「가게 종류」). At night the
 # inn opens with 071 and the church with 080 (measured on 36/00 and 37/00).
 SERVICE_MESSAGE = {1: 0x002, 2: 0x000, 3: 0x001, 4: 0x0B9, 5: 0x07E, 6: 0x070}
@@ -98,7 +99,7 @@ def codes_match(rows, message, want):
 
 
 def run(mesence, rom, state, out, name, libdir, to, test, night, shop=False, ret=None, sets=None, late=None,
-        save=None, pokes=None):
+        save=None, hold=None):
     dest = out / name
     dest.mkdir(parents=True)
     group, number = to.split(",")[0].split("/")
@@ -108,9 +109,8 @@ def run(mesence, rom, state, out, name, libdir, to, test, night, shop=False, ret
     env.update(LIBDIR=str(libdir), STATE=str(state), SHOT_DIR=str(dest), MAXF="1800", SETTLE="120", TO=to,
                TEST=f"{test},wait:30", CHECK_GROUP=group, CHECK_MAP=number,
                WARPEXIT=f"{warp_exit(rom):X}", DP86OK=dp86_allowed(rom))
-    poke = ";".join(p for p in (NIGHT_POKE if night else None, pokes) if p)
-    if poke:
-        env["POKE"] = poke
+    if night:
+        env["POKE"] = NIGHT_POKE
     if sets:
         env["SET"] = sets
     if late:
@@ -122,6 +122,9 @@ def run(mesence, rom, state, out, name, libdir, to, test, night, shop=False, ret
     elif ret is not None:
         env.update(INNER=str(PROBE), RETURN_PC=f"{ret:06X}")
     probe = SHOP_PROBE if shop else PROBE if ret is None else DECODE_PROBE
+    if hold:
+        env.update(HOLD=hold, HOLD_NEXT=str(probe))
+        probe = HOLD_PROBE
     with (dest / "mesen.log").open("w", encoding="utf-8") as log:
         try:
             dq4mesen.testrunner(str(mesence), str(rom), str(probe),

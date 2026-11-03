@@ -17,9 +17,9 @@ try that saved one). That relies on the order of scenes(): maps sorted, so a 36/
 (36/01); a throne-room scene with no saved state stops the check.
 
 Each scene starts from the same random state (dq4pins.RNG, at the start and again on arrival) and holds every person
-slot still from the first frame (step interval 7E:3300+slot = 0, POKE writes it every frame, so also the frame the map
-is loaded), so a wanderer never steps between the hero and the sleeper and the result does not hang on the random
-walk.
+slot still from the frame the map is loaded (lua/dq4holdwalk.lua clears the step interval, the high nibble of
+7E:3300+slot, every frame and keeps the low nibble), so a wanderer never steps between the hero and the sleeper and the
+result does not hang on the random walk. The arrival frame 90 frames after loading (LATESET) would be too late.
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4sleepercheck.py --rom work/ch1/dq4-ch1-full.sfc \\
       --build work/dq4-groups --chapter1 --out work/sleepercheck
@@ -66,7 +66,7 @@ def sleepers(report):
 # Person slots from here on are townspeople (7E:1994 on arrival, read back in every scene); below are the party's.
 FIRST_PERSON = 0x08
 SLOTS = 0x20
-HOLD = ";".join(f"7E{0x3300 + s:04X}=00" for s in range(FIRST_PERSON, SLOTS))
+HOLD = f"{FIRST_PERSON:02X}-{SLOTS - 1:02X}"
 
 
 def chapter1_throne():
