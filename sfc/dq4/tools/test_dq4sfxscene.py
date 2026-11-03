@@ -186,6 +186,28 @@ class RomCheckTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             s.hook_patches(bytes(rom))
 
+    def test_critical_patch_narrows_roll_only(self):
+        # 난수 범위 LDA #$20 의 값만 1 로: (난수8 × 1) >> 8 = 0 이 회심 분기(CMP #$00 / BEQ)를 탄다
+        rom = bytearray(0x400000)
+        o = s.lorom(s.CRITICAL_SITE)
+        rom[o:o + len(s.CRITICAL_BYTES)] = s.CRITICAL_BYTES
+        self.assertEqual(s.critical_patch(bytes(rom)), [(0x1046B3, b'\x01')])
+        rom[o + 2] = 0xEA
+        with self.assertRaises(ValueError):
+            s.critical_patch(bytes(rom))
+
+    def test_critical_scene_uses_patch_not_seed(self):
+        t = s.load_table(s.ARGS.read_text())
+        crit = [x for x in s.scenes(t) if x.critical]
+        self.assertEqual([x.name for x in crit], ['battle-critical'])
+        self.assertEqual(crit[0].seed, 0)
+        rom = bytearray(0x400000)
+        for site in s.ENTRY_SITES:
+            rom[s.lorom(site):s.lorom(site) + 5] = s.ENTRY_BYTES
+        o = s.lorom(s.CRITICAL_SITE)
+        rom[o:o + len(s.CRITICAL_BYTES)] = s.CRITICAL_BYTES
+        self.assertEqual(s.scene_rom(bytes(rom), crit[0])[o + 1], 0x01)
+
 
 class QueueTest(unittest.TestCase):
     def test_call_sites(self):

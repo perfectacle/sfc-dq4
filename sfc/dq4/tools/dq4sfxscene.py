@@ -59,6 +59,11 @@ BSNES_DSP = 289781                    # bsnes 115 직렬화 상태의 DSP 레지
 BSNES_SPC_RAM = 207853
 SNES9X_SPC_RAM = 1                    # snes9x 상태 SND: 블록 안
 SNES9X_DSP = 65701                    # snes9x 상태 SND: 블록 안의 DSP 레지스터
+# 회심 판정(20:C697, 원본 DQ5 와 같은 바이트): 일행이 때릴 때 `LDA #$20 / JSL 00:953A / CMP #$00 / BEQ` 로 난수 0~31 이
+# 0 이면 회심. 00:953A 는 (8비트 난수 × A) >> 8 이라, 검사 롬 사본에서만 A 를 1 로 바꿔 늘 0(실제로 나는 값)을 돌려받게
+# 한다. 그 뒤 분기·회심 피해·효과음은 원래 코드 그대로 지난다. 롬 난수·시드와 상관없이 첫 공격이 회심이 된다
+CRITICAL_SITE = 0x20C6B2
+CRITICAL_BYTES = bytes.fromhex('A920223A9500C900F002')
 
 
 def lorom(addr):
@@ -256,6 +261,7 @@ class Scene:
     [(몬스터, 마릿수)]. pokes: 프레임마다 묶는 WRAM(CPU 주소, 값). patches: 검사 롬 사본에만 쓰는 [(파일 위치, 바이트 또는 원래 한 바이트 → 바이트 함수)].
     npc_talk: (x, y, 대화 번호) — 그 칸에 선 인물의 대화 번호를 바꾼다(7E:36E0·3700 + 슬롯, 여관 006·교회 005 등).
     seed: 순간이동 뒤 두는 난수(dq4ch1walkcheck.rng_for). {코어: 시드} 면 코어마다.
+    critical: 검사 롬 사본의 회심 판정을 늘 회심으로(critical_patch), 회심 효과음이 울리지 않으면 실패.
     maxf: 입력에 쓸 프레임(없으면 입력 길이로)."""
     name: str
     action: str
@@ -294,14 +300,22 @@ def hook_patches(rom):
     return out
 
 
+def critical_patch(rom):
+    """회심 판정 난수의 범위를 1 로(검사 롬 사본만). 자리 바이트가 예상과 다르면 ValueError."""
+    o = lorom(CRITICAL_SITE)
+    if rom[o:o + len(CRITICAL_BYTES)] != CRITICAL_BYTES:
+        raise ValueError(f'{CRITICAL_SITE:06X}: {rom[o:o + len(CRITICAL_BYTES)].hex()} — 회심 판정이 바뀜')
+    return [(o + 1, b'\x01')]
+
+
 def scene_rom(rom, scene):
-    """검사 롬 사본: 대기열 훅, 걸음 전투(scene.battle 이면 그 무리로 강제, 아니면 없앰), 장면 패치."""
+    """검사 롬 사본: 대기열 훅, 걸음 전투(scene.battle 이면 그 무리로 강제, 아니면 없앰), 회심 고정, 장면 패치."""
     import dq4battlecheck as bc
     import dq4ch1walkcheck as wc
     if scene.release:
         return bytes(rom)
     data = bytearray(rom)
-    patches = hook_patches(rom) + list(scene.patches)
+    patches = hook_patches(rom) + (critical_patch(rom) if scene.critical else []) + list(scene.patches)
     text = bc.force_patch(scene.battle) if scene.battle else wc.NO_ENCOUNTERS
     for tok in text.split(';'):
         off, hexs = tok.split('=')
@@ -608,7 +622,7 @@ def finish(walker, scene, res, out):
         if f is not None:
             res['problems'].append(f'대기열에 {fmt(bad)}(원래 번호)가 들어감(프레임 {f})')
     if scene.critical and not any(w.get('sounded') for w in res['want'] if w['want'] == fmt((SFX, 0x37, 0x0B))):
-        res['problems'].insert(0, '회심 미발생(시드 다시 고르기: dq4sfxscene.py --pick-critical-seed)')
+        res['problems'].insert(0, '회심 미발생(회심 판정을 고정했는데도 회심 효과음이 울리지 않음)')
     if walker.envx and not walker.dsp_seen:
         res['problems'].append(f'DSP 레지스터를 찾지 못함(DIR {DSP_DIR:02X} 이 직렬화 상태의 그 자리에 없음)')
     res['status'] = 'failed' if res['problems'] else 'passed'
@@ -856,10 +870,6 @@ FIGHT = 'down:8;wait:200;'            # 한 걸음 내디뎌 강제 조우
 SLIME, BOSS = 0x00, 0xE2              # 슬라임, 탑 위 보스(dq4ch1event.BOSS_MONSTERS 첫째)
 WEAPON = 0x7E0DA7                     # 공격하는 사람의 무기(28:8055 가 읽음). 프레임마다 묶어 무기를 고른다
 NEXT_EXP = 'poke=2066=01;2067=00;2068=00'  # 주인공 다음 레벨 경험치(+26~+28)를 1 로: 한 번 이기면 레벨 업
-# --pick-critical-seed 로 고른 시드(A 15번 안에 회심). 두 코어는 전투에 드는 프레임이 하나 달라 난수가 갈린다.
-# 전투 메시지 길이·NMI 에 드는 시간 같은 상관없는 변경에도 바뀌므로(snes9x 29, 창 글자 묶음 버퍼에서 48 이 빠졌음),
-# 두 롬에서 함께 난 시드를 골랐다(snes9x 는 1~200 에서 84 하나)
-CRITICAL_SEED = {'snes9x': 84, 'bsnes': 55}
 # 공격력 0 인 적의 피해는 0·1 이 난수로 갈려, 빗나감이 나는지가 전투에 드는 프레임 수에 따라 바뀐다. 상관없는 롬 변경
 # (인물 그림, 옆문 가림)마다 빗나감 없는 코어가 생겨, 시드를 정하고 주고받는 차례를 늘려(A 20번 → 60번) 한 판에
 # 빗나감이 여러 번 나게 한다
@@ -985,7 +995,7 @@ def scenes(table):
               sets=['flag=CHAPTER1'] + boss_setup(), warp='39/04,46,40', pokes=HERO_HP + [(WEAPON, CLAW)],
               patches=boss_patches(), inputs=boss_inputs()),
         Scene('battle-critical', '회심의 일격(DQ5 37-0B)', [attack, d('critical')], warp=TOWER, battle=[(SLIME, 1)],
-              pokes=HERO_HP, seed=CRITICAL_SEED, critical=True, patches=strong(SLIME), inputs=FIGHT + taps(15)),
+              pokes=HERO_HP, critical=True, patches=strong(SLIME), inputs=FIGHT + taps(15)),
         Scene('battle-flee', '도망(DQ5 37-00)', [d('flee')], warp=TOWER, battle=[(SLIME, 1)],
               pokes=HERO_HP, patches=strong(SLIME), inputs=FIGHT + 'down:8;wait:30;' + taps(8)),
         Scene('training', '전원부터 새 게임: 이름 칸이 찬 뒤 A(33-02), 서장 칼 여섯 합(40-01·40-02·37-03)',
@@ -1012,7 +1022,6 @@ def unreached_problems(rom):
     return []
 
 
-CRIT_PREFIX = 'crit-'
 # bsnes 에서 직렬화(DSP 읽기)가 타이밍을 바꾸지 않는지: 이 장면들을 DSP 를 읽지 않고 한 번 더 돌려 대기열 기록이
 # 프레임까지 같은지 본다
 CONTROL = ('chest', 'battle-trade')
@@ -1020,15 +1029,7 @@ CONTROL = ('chest', 'battle-trade')
 CONTROL_SHIFT = 2
 
 
-def crit_scene(seed):
-    """회심 시드 고르기용 장면(battle-critical 과 같은 입력, 시드만 다름)."""
-    return Scene(f'{CRIT_PREFIX}{seed}', '회심 시드 찾기', [], warp=TOWER, battle=[(SLIME, 1)], pokes=HERO_HP, seed=seed,
-                 patches=strong(SLIME), inputs=FIGHT + taps(15))
-
-
 def find_scene(table, name):
-    if name.startswith(CRIT_PREFIX):
-        return crit_scene(int(name[len(CRIT_PREFIX):]))
     return next(s for s in scenes(table) if s.name == name)
 
 
@@ -1060,17 +1061,6 @@ def run_jobs(jobs, rom_path, out, n):
         return list(pool.map(one, jobs))
 
 
-def pick_seeds(rom_path, out, cores, last, n):
-    """회심 시드 고르기: 시드 1~last 를 코어마다 돌려 회심(0C 37 0B)이 난 시드를 찍는다."""
-    jobs = [(c, crit_scene(k), True) for k in range(1, last + 1) for c in cores]
-    found = {c: [] for c in cores}
-    for (c, sc, _), r in zip(jobs, run_jobs(jobs, rom_path, out, n)):
-        if any(q.endswith(' 0C 37 0B') for q in r.get('queue', [])):
-            found[c].append(int(sc.name[len(CRIT_PREFIX):]))
-    print(json.dumps(found))
-    return 0
-
-
 def main():
     import dq4compatcheck as cc
     import dq4cores
@@ -1081,7 +1071,6 @@ def main():
     ap.add_argument('--only', help='장면 이름(쉼표)')
     ap.add_argument('--core', choices=('all', *cc.CORES), default='all')
     ap.add_argument('--jobs', type=int, default=4)
-    ap.add_argument('--pick-critical-seed', type=int, metavar='N', help='회심 장면 시드를 1~N 에서 코어마다 고름')
     ap.add_argument('--no-dsp', action='store_true', help=argparse.SUPPRESS)
     ap.add_argument('--_one', action='store_true', help=argparse.SUPPRESS)
     args = ap.parse_args()
@@ -1102,8 +1091,6 @@ def main():
         if not dq4cores.core_path(c).exists():
             raise SystemExit(f'{dq4cores.core_path(c)} 가 없음: sfc/dq4/tools/dq4cores.py 로 빌드')
     fx.SaveSlot.new_game(rom_path)            # 밑판을 먼저 한 번(장면 프로세스끼리 함께 만들지 않게)
-    if args.pick_critical_seed:
-        return pick_seeds(rom_path, out, cores, args.pick_critical_seed, args.jobs)
     if args.only:
         names = args.only.split(',')
         unknown = set(names) - {s.name for s in every}
