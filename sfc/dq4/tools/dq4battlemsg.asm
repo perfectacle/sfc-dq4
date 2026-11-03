@@ -1735,3 +1735,5 @@ BmScroll:
     PLP
     PLB
     RTL
+; 뒤에 창 이름 코드 둘째 구역(!wn_code2)이 있다
+assert pc() <= !wn_code2
