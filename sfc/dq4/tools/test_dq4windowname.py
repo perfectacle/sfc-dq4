@@ -474,3 +474,31 @@ class KanaGlyphTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class CodeRoomTests(unittest.TestCase):
+    def test_room_counts_tail_per_region(self):
+        rom = bytearray(0x400000)
+        rom[lorom(wn.CODE):lorom(wn.CODE) + 0x100] = b'\x01' * 0x100
+        rom[lorom(wn.CODE2)] = 0x60
+        left = wn.room(rom)
+        self.assertEqual(left[(wn.CODE, wn.CODE_END)], wn.CODE_END - wn.CODE - 0x100)
+        self.assertEqual(left[(wn.CODE2, wn.CODE2_END)], wn.CODE2_END - wn.CODE2 - 1)
+        self.assertEqual(left[(wn.WH_EXTRA, wn.KANA_TABLE)], wn.KANA_TABLE - wn.WH_EXTRA)
+
+    def test_regions_do_not_overlap_and_stay_in_one_bank(self):
+
+        regions = sorted([(wn.CODE, wn.CODE_END), (wn.CODE_END, wn.CODE_END + 0x100), (wn.WH_EXTRA, wn.KANA_TABLE),
+                          (dq4battlemsg.CODE_AT, wn.CODE2), (wn.CODE2, wn.CODE2_END)])
+        for (a, b), (c, _) in zip(regions, regions[1:]):
+            self.assertLessEqual(b, c)
+        self.assertEqual({a >> 16 for a, _ in regions} | {(b - 1) >> 16 for _, b in regions}, {wn.CODE >> 16})
+
+    def test_each_region_ends_with_an_assert(self):
+        """넘치면 asar 가 멈춘다. 첫 구역은 빌드 뒤 E000~E0FF 검사도 있다."""
+        asm = ASM.read_text(encoding='utf-8')
+        self.assertIn('assert pc() <= !wn_code_end\norg !wn_code2', asm)
+        self.assertIn('assert pc() <= !wn_code2_end', asm)
+        self.assertIn('assert pc() <= !wn_kana_table', asm)
+        self.assertIn('assert pc() <= !wn_code2', (ASM.parent / 'dq4battlemsg.asm').read_text(encoding='utf-8'))
+
