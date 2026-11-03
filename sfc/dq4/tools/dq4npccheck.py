@@ -104,8 +104,8 @@ def run(mesence, rom, state, out, name, libdir, to, test, night, shop=False, ret
     dest.mkdir(parents=True)
     group, number = to.split(",")[0].split("/")
     env = {k: v for k, v in os.environ.items()
-           if k not in ("ADULT", "ANYWHERE", "BATTLE", "FIELD", "GROUP", "LATESET", "PARTY", "POKE", "ROMPATCH",
-                        "SAVE", "SET", "WAGON")}
+           if k not in ("ADULT", "ANYWHERE", "BATTLE", "FIELD", "GROUP", "HOLD_NEXT", "HOLD_SLOTS", "LATESET", "PARTY",
+                        "POKE", "ROMPATCH", "SAVE", "SET", "WAGON")}
     env.update(LIBDIR=str(libdir), STATE=str(state), SHOT_DIR=str(dest), MAXF="1800", SETTLE="120", TO=to,
                TEST=f"{test},wait:30", CHECK_GROUP=group, CHECK_MAP=number,
                WARPEXIT=f"{warp_exit(rom):X}", DP86OK=dp86_allowed(rom))
@@ -123,7 +123,7 @@ def run(mesence, rom, state, out, name, libdir, to, test, night, shop=False, ret
         env.update(INNER=str(PROBE), RETURN_PC=f"{ret:06X}")
     probe = SHOP_PROBE if shop else PROBE if ret is None else DECODE_PROBE
     if hold:
-        env.update(HOLD=hold, HOLD_NEXT=str(probe))
+        env.update(HOLD_SLOTS=hold, HOLD_NEXT=str(probe))
         probe = HOLD_PROBE
     with (dest / "mesen.log").open("w", encoding="utf-8") as log:
         try:

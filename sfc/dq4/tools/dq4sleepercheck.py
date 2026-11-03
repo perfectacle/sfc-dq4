@@ -19,7 +19,7 @@ try that saved one). That relies on the order of scenes(): maps sorted, so a 36/
 Each scene starts from the same random state (dq4pins.RNG, at the start and again on arrival) and holds every person
 slot still from the frame the map is loaded (lua/dq4holdwalk.lua clears the step interval, the high nibble of
 7E:3300+slot, every frame and keeps the low nibble), so a wanderer never steps between the hero and the sleeper and the
-result does not hang on the random walk. The arrival frame 90 frames after loading (LATESET) would be too late.
+result does not hang on the random walk.
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4sleepercheck.py --rom work/ch1/dq4-ch1-full.sfc \\
       --build work/dq4-groups --chapter1 --out work/sleepercheck
