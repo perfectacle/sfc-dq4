@@ -1,7 +1,9 @@
 """dq4readset: 읽은 롬 바이트 캐시의 키·찾기·저장과, 머리말 Lua·러너가 지켜야 할 규칙(롬 없이)."""
 import ast
+import contextlib
 import json
 import os
+import re
 from pathlib import Path
 import struct
 import subprocess
@@ -102,14 +104,38 @@ class PureTests(unittest.TestCase):
             s2.write_bytes(mss(b'probe-000000000002.sfc', b'other'))
             self.assertNotEqual(c1, rs.canon_env(env2, names, dest, [code]))
 
+    def test_canon_env_paths_that_do_not_exist_yet(self):
+        """없는 경로를 원 문자열로 두면, 나중에 그 자리에 생긴 파일 내용이 키에 들지 않는다."""
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            dest, work = d / 'dest', d / 'work'
+            dest.mkdir()
+            work.mkdir()
+            names = ['IN', 'REL', 'OUT']
+            env = {'IN': str(d / 'later.bin'), 'REL': 'input.bin', 'OUT': str(dest / 'not-yet.txt')}
+            c1 = rs.canon_env(env, names, dest, cwd=work)
+            self.assertEqual(c1['IN'], 'absent:' + str(d / 'later.bin'))
+            self.assertEqual(c1['OUT'], 'dest:not-yet.txt')
+            (d / 'later.bin').write_bytes(b'1')
+            (work / 'input.bin').write_bytes(b'2')
+            c2 = rs.canon_env(env, names, dest, cwd=work)
+            self.assertTrue(c2['IN'].startswith('file:'))
+            self.assertTrue(c2['REL'].startswith('file:'))
+            (work / 'input.bin').write_bytes(b'3')
+            self.assertNotEqual(c2['REL'], rs.canon_env(env, names, dest, cwd=work)['REL'])
+            other = d / 'other'
+            other.mkdir()
+            (other / 'input.bin').write_bytes(b'3')
+            self.assertEqual(rs.canon_env(env, names, dest, cwd=work)['REL'],
+                             rs.canon_env(env, names, dest, cwd=other)['REL'])
+
 
 class StoreTests(unittest.TestCase):
     def test_keeps_recent_entries_and_prunes_unreferenced_blobs(self):
         with tempfile.TemporaryDirectory() as d:
             st = rs.Store(d)
             for i in range(rs.KEEP_ENTRIES + 3):
-                sha = st.put_blob(f'out{i}'.encode())
-                st.add('k' * 64, {'ranges': rs.pack([(0, 1)]), 'digest': str(i), 'files': {'o': sha}})
+                st.add('k' * 64, {'ranges': rs.pack([(0, 1)]), 'digest': str(i)}, {'o': f'out{i}'.encode()})
             es = st.entries('k' * 64)
             self.assertEqual(len(es), rs.KEEP_ENTRIES)
             self.assertEqual(es[0]['digest'], str(rs.KEEP_ENTRIES + 2))
@@ -117,18 +143,57 @@ class StoreTests(unittest.TestCase):
             self.assertEqual(st.entries('k' * 64)[0]['digest'], es[-1]['digest'])
             st.drop('k' * 64, es[-1])
             self.assertNotIn(es[-1]['digest'], [e['digest'] for e in st.entries('k' * 64)])
-            old = time.time() - rs.BLOB_GRACE - 10
-            for f in (Path(d) / 'blob').rglob('*'):
-                os.utime(f, (old, old))
-            young = st.put_blob(b'just written, not in any index yet')
-            st.prune(0)
-            self.assertTrue(st.blob_path(young).exists())
-            os.utime(st.blob_path(young), (old, old))
             st.prune(0)
             live = {s for e in st.entries('k' * 64) for s in e['files'].values()}
             blobs = {p.name for p in (Path(d) / 'blob').rglob('*') if p.is_file()}
             self.assertLessEqual(blobs, live)
-            self.assertNotIn(young, blobs)
+
+    def test_touch_does_not_resurrect_pruned_entry(self):
+        """맞은 항목을 읽은 뒤 prune 이 index 를 지웠으면, touch 가 옛 항목으로 다시 쓰지 않는다(blob 은 이미 없다)."""
+        with tempfile.TemporaryDirectory() as d:
+            st = rs.Store(d)
+            hit = st.add('k' * 64, {'ranges': rs.pack([(0, 1)]), 'digest': 'a'}, {'o': b'x'})
+            for p in (Path(d) / 'index').rglob('*.json'):
+                p.unlink()
+            st.prune(0)
+            st.touch('k' * 64, hit)
+            self.assertEqual(st.entries('k' * 64), [])
+            with self.assertRaises(FileNotFoundError):
+                st.get_blob(hit['files']['o'])
+
+    def test_add_writes_blobs_under_the_lock(self):
+        """blob 쓰기와 index 쓰기 사이에 prune 이 끼면 index 가 없는 blob 을 가리킨다. 둘 다 잠금 안에서 한다."""
+        with tempfile.TemporaryDirectory() as d:
+            st = rs.Store(d)
+            seen = []
+            real = rs._replace
+
+            def spy(path, data):
+                seen.append((Path(path).parent.parent.name, (Path(d) / '.lock').exists() and held[0]))
+                real(path, data)
+            held = [False]
+            real_locked = rs.locked
+
+            @contextlib.contextmanager
+            def lock(root):
+                with real_locked(root):
+                    held[0] = True
+                    try:
+                        yield
+                    finally:
+                        held[0] = False
+            with mock.patch.object(rs, '_replace', spy), mock.patch.object(rs, 'locked', lock):
+                st.add('k' * 64, {'ranges': rs.pack([(0, 1)]), 'digest': 'a'}, {'o': b'x', 'p': b'y'})
+            self.assertEqual(sorted(kind for kind, _ in seen), ['blob', 'blob', 'index'])
+            self.assertTrue(all(under for _, under in seen))
+
+    def test_corrupt_blob_reads_as_missing(self):
+        with tempfile.TemporaryDirectory() as d:
+            st = rs.Store(d)
+            e = st.add('k' * 64, {'ranges': rs.pack([(0, 1)]), 'digest': 'a'}, {'o': b'x'})
+            st.blob_path(e['files']['o']).write_bytes(b'not zlib')
+            with self.assertRaises(FileNotFoundError):
+                st.get_blob(e['files']['o'])
 
 
 class FakeMesen:
@@ -140,6 +205,7 @@ class FakeMesen:
         self.calls = 0
         self.rc = 0
         self.shot = False
+        self.lua_error = False
 
     def __call__(self, mesence, rom, script, folder=None, tag='probe', extra=(), env=None, stdout=None, **kw):
         self.calls += 1
@@ -149,6 +215,8 @@ class FakeMesen:
         Path(folder, 'end.mss').write_bytes(mss(f'probe-{self.calls:012x}.sfc'.encode(), data[s:s + 2]))
         Path(env['READSET_OUT']).write_text(f'{s:X} {n:X}\n')
         Path(folder, 'mesen.log').write_text(f'loaded {Path(rom).name}\n')
+        if self.lua_error:
+            Path(env['READSET_OUT'] + '.err').write_text('scene.lua:3: boom\n')
         if self.shot:
             Path(folder, 's00300.png').write_bytes(bytes([self.calls]))
         return subprocess.CompletedProcess([], self.rc)
@@ -228,6 +296,27 @@ class RunTests(unittest.TestCase):
         self.fake.rc = 0
         self.assertFalse(self.go()[0]['cached'])
 
+    def test_lua_error_with_zero_exit_is_not_cached(self):
+        """testrunner 는 콜백 안 오류를 삼키고 0 으로 끝난다(실측). 머리말이 남긴 .err 가 있으면 넣지 않는다."""
+        self.fake.lua_error = True
+        info, dest = self.go()
+        self.assertEqual(info['returncode'], rs.LUA_ERROR)
+        self.assertFalse((dest / rs.ERR).exists())
+        self.fake.lua_error = False
+        self.assertFalse(self.go()[0]['cached'])
+        self.assertTrue(self.go()[0]['cached'])
+
+    def test_missing_blob_is_a_miss(self):
+        self.go()
+        for f in (Path(self.tmp.name) / 'cache' / 'blob').rglob('*'):
+            if f.is_file():
+                f.unlink()
+        info, dest = self.go()
+        self.assertFalse(info['cached'])
+        self.assertEqual(self.fake.calls, 2)
+        self.assertTrue((dest / 'out.bin').is_file())
+        self.assertTrue(self.go()[0]['cached'])
+
     def test_off_runs_everything(self):
         self.go()
         with mock.patch.dict(os.environ, {'DQ4_READSET': 'off'}):
@@ -293,6 +382,55 @@ class RuleTests(unittest.TestCase):
                      and isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name)}
             self.assertIn(('dq4readset', 'run'), calls, name)
             self.assertFalse({c for c in calls if c[0] in ('dq4mesen', 'mesen')}, name)
+
+    def test_prelude_records_lua_errors(self):
+        """머리말이 콜백을 감싸 오류를 .err 에 적고, 진입 파일이 맨 위 오류를 잡아 멈춘다."""
+        lua = (HERE / 'lua' / 'dq4readset.lua').read_text(encoding='utf-8')
+        self.assertIn('function READSET_FAIL', lua)
+        self.assertRegex(lua, r'"addEventCallback", "addMemoryCallback"')
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(rs.mesen, 'run', return_value=subprocess.CompletedProcess([], 0)):
+            seen = {}
+            real = Path.write_text
+
+            def spy(path, text, *a, **k):
+                if path.name == rs.ENTRY:
+                    seen['entry'] = text
+                return real(path, text, *a, **k)
+            with mock.patch.object(Path, 'write_text', spy):
+                rs._execute('m', 'r.sfc', Path(d) / 's.lua', Path(d), {}, 1, (), 'log.txt', None, 'probe')
+        self.assertIn('pcall(dofile', seen['entry'])
+        self.assertIn('READSET_FAIL(e); emu.stop(1)', seen['entry'])
+
+    def test_readset_users_do_not_judge_from_screenshots(self):
+        """emu.takeScreenshot 화면은 같은 실행에서도 달라 캐시 재검증이 견주지 않는다(SCREENS). 그래서 이 캐시를 쓰는
+        검사는 화면 파일을 판정에 읽지 않는다: PIL 로 여는 것은 모음 그림을 만드는 sheet* 함수 안에서만,
+        화면 파일 이름을 open()·read_bytes() 등으로 직접 읽지 않는다."""
+        users = [p for p in sorted(HERE.glob('dq4*.py'))
+                 if p.name not in ('dq4readset.py',) and re.search(r'^\s*import dq4readset\b|^\s*import dq4readset as',
+                                                                   p.read_text(encoding='utf-8'), re.M)]
+        self.assertIn('dq4windowcheck.py', [p.name for p in users])
+        bad = []
+        for p in users:
+            tree = ast.parse(p.read_text(encoding='utf-8'))
+            for fn in ast.walk(tree):
+                if not isinstance(fn, (ast.FunctionDef, ast.Module)):
+                    continue
+                if isinstance(fn, ast.FunctionDef) and fn.name.startswith('sheet'):
+                    continue
+                body = fn.body if isinstance(fn, ast.Module) else fn.body
+                for node in (n for stmt in body for n in ast.walk(stmt)
+                             if not isinstance(stmt, ast.FunctionDef)):
+                    if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                        continue
+                    f = node.func
+                    if isinstance(f.value, ast.Name) and f.value.id == 'Image' and f.attr == 'open':
+                        bad.append(f'{p.name}:{node.lineno} Image.open')
+                    if f.attr in ('read_bytes', 'read_text', 'open') and any(
+                            isinstance(c, ast.Constant) and isinstance(c.value, str) and c.value.endswith(rs.SCREENS)
+                            for c in ast.walk(node)):
+                        bad.append(f'{p.name}:{node.lineno} {f.attr}')
+        self.assertEqual(bad, [])
 
     def test_clear_saves_removes_cdl(self):
         with tempfile.TemporaryDirectory() as d:

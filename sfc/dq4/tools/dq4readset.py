@@ -50,6 +50,9 @@ VERSION = 'readset-1'
 ENTRY = '.readset-entry.lua'
 OUT = '.readset.txt'
 HDMA = OUT + '.hdma'
+# 머리말이 장면 Lua 의 오류를 여기 적는다. MesenCE --testrunner 는 콜백 안 오류를 삼키고 0 으로 끝날 수 있다
+ERR = OUT + '.err'
+SKIP = (ENTRY, OUT, HDMA, ERR)
 # 결과에 닿는 MesenCE 설정을 명령줄로 고정한다. 사용자 settings.json 의 값과 상관없이 같게 돈다
 FIXED_ARGS = ('--Snes.RamPowerOnState=AllZeros', '--Snes.EnableRandomPowerOnState=false')
 # 롬 머리(LoROM $7FB0~$7FFF)는 체크섬 네 바이트만 빼고 통째로 키에 넣는다. 전원·리셋 때의 리셋 벡터($7FFC) 읽기는 접근
@@ -61,8 +64,6 @@ KEEP_ENTRIES = 8
 # emu.takeScreenshot 화면은 같은 실행을 되풀이해도 다를 수 있다(메모리·VRAM 덤프는 같은데 화면만 다름). 재검증은 이것을
 # 키에 빠진 입력의 증거로 보지 않는다. 그래서 장면 판정이 화면 찍기를 읽지 않는 검사만 이 캐시를 쓴다
 SCREENS = ('.png',)
-# blob 은 잠금 밖에서 먼저 쓰고 index 는 그 뒤 잠금 안에서 쓴다. 그 사이의 blob 을 prune 이 지우지 않게 이만큼 젊은 것은 둔다
-BLOB_GRACE = 6 * 3600
 GETENV = re.compile(r'''os\.getenv\(\s*["']([A-Za-z_][A-Za-z0-9_]*)["']\s*\)''')
 # 출발 상태 머리의 롬 파일 이름(dq4mesen.unique_copy 가 실행마다 다르게 짓는다) 앞의 길이 칸
 _NAME = re.compile(rb'([\x01-\xff])\x00\x00\x00([ -~]{1,255}?\.(?:sfc|smc))', re.S)
@@ -168,10 +169,13 @@ def lua_env_names(files):
     return sorted(names)
 
 
-def canon_env(env, names, dest, code_dirs=()):
-    """키에 넣을 환경 변수 값. 경로는 내용으로 바꾼다: dest 안이면 상대 경로, 파일이면 해시(.mss 는 이름 지운 해시),
-    Lua 폴더(LIBDIR 등)면 'code'(Lua 는 따로 해시)."""
+def canon_env(env, names, dest, code_dirs=(), cwd=None):
+    """키에 넣을 환경 변수 값. 경로는 내용으로 바꾼다: dest 안이면 상대 경로(아직 없는 출력 경로도), 파일이면 해시
+    (.mss 는 이름 지운 해시), Lua 폴더(LIBDIR 등)면 'code'(Lua 는 따로 해시), 폴더면 안 파일들의 해시.
+    상대 경로는 Lua 가 도는 작업 폴더(cwd) 기준으로 본다. dest 밖의 없는 절대 경로는 'absent:' 를 붙여, 같은 경로에
+    나중에 파일이 생기면 빗나가게 한다(키가 원 문자열과 같으면 내용 없이 맞을 수 있다)."""
     dest = Path(dest).resolve()
+    base = Path(cwd).resolve() if cwd is not None else Path.cwd().resolve()
     code = {Path(d).resolve() for d in code_dirs}
     out = {}
     for n in names:
@@ -180,19 +184,24 @@ def canon_env(env, names, dest, code_dirs=()):
         v = env.get(n)
         if v is None:
             continue
-        p = Path(v)
-        if v and p.is_absolute() and p.exists():
-            r = p.resolve()
-            if r == dest or dest in r.parents:
-                v = 'dest:' + r.relative_to(dest).as_posix()
-            elif r.is_file():
-                v = 'file:' + file_hash(r)
-            elif r in code:
-                v = 'code'
-            else:
-                v = 'dir:' + json.dumps(tree_hash(r), sort_keys=True)
-        out[n] = v
+        out[n] = _canon_value(v, dest, base, code)
     return out
+
+
+def _canon_value(v, dest, base, code):
+    if not v:
+        return v
+    p = Path(v)
+    r = (p if p.is_absolute() else base / p).resolve()
+    if r == dest or dest in r.parents:
+        return 'dest:' + r.relative_to(dest).as_posix()
+    if r.is_file():
+        return 'file:' + file_hash(r)
+    if r in code:
+        return 'code'
+    if r.is_dir():
+        return 'dir:' + json.dumps(tree_hash(r), sort_keys=True)
+    return 'absent:' + v if p.is_absolute() else v
 
 
 def index_key(parts):
@@ -270,30 +279,35 @@ class Store:
         except (OSError, ValueError):
             return []
 
-    def put_blob(self, data):
-        """이미 있으면 mtime 을 새로 해, 항목이 index 에 들어가기 전에 prune 이 지우지 않게 한다(BLOB_GRACE)."""
-        sha = hashlib.sha256(data).hexdigest()
-        p = self.blob_path(sha)
-        try:
-            os.utime(p)
-        except FileNotFoundError:
-            _replace(p, zlib.compress(data, 1))
-        return sha
-
     def get_blob(self, sha):
-        return zlib.decompress(self.blob_path(sha).read_bytes())
+        """없거나 깨졌으면 FileNotFoundError(prune 이 지운 뒤 읽은 항목). 부르는 쪽은 빗나감으로 친다."""
+        try:
+            return zlib.decompress(self.blob_path(sha).read_bytes())
+        except zlib.error as e:
+            raise FileNotFoundError(f'blob {sha} 깨짐: {e}') from e
 
-    def add(self, key, entry):
+    def add(self, key, entry, blobs):
+        """blobs(상대 경로 → 바이트)를 넣고 entry['files'] 를 채워 index 맨 앞에 둔다. blob 과 index 를 한 잠금 안에서
+        써서, prune 이 index 에 들어가기 전의 blob 이나 index 가 가리키는 blob 을 지우지 못하게 한다."""
+        packed = {rel: (hashlib.sha256(data).hexdigest(), zlib.compress(data, 1)) for rel, data in blobs.items()}
         with locked(self.root):
+            for sha, z in packed.values():
+                p = self.blob_path(sha)
+                if not p.is_file():
+                    _replace(p, z)
+            entry = {**entry, 'files': {rel: sha for rel, (sha, _) in packed.items()}}
             old = [e for e in self.entries(key) if e['digest'] != entry['digest']]
             _replace(self.index_path(key), json.dumps([entry] + old[:KEEP_ENTRIES - 1]).encode())
+        return entry
 
     def touch(self, key, entry):
-        """맞은 항목을 맨 앞으로(오래 안 쓴 것부터 지우게)."""
+        """맞은 항목을 맨 앞으로(오래 안 쓴 것부터 지우게). 그 사이 prune·drop 이 지웠으면 되살리지 않는다."""
         with locked(self.root):
             es = self.entries(key)
-            es = [entry] + [e for e in es if e['digest'] != entry['digest']]
-            _replace(self.index_path(key), json.dumps(es).encode())
+            now = [e for e in es if e['digest'] == entry['digest']]
+            if not now:
+                return
+            _replace(self.index_path(key), json.dumps(now[:1] + [e for e in es if e['digest'] != entry['digest']]).encode())
 
     def drop(self, key, entry):
         with locked(self.root):
@@ -318,9 +332,8 @@ class Store:
                         live |= set(e['files'].values())
                 except (OSError, ValueError):
                     pass
-            young = time.time() - BLOB_GRACE
             for f in (self.root / 'blob').rglob('*'):
-                if f.is_file() and f.name not in live and f.stat().st_mtime < young:
+                if f.is_file() and f.name not in live and not f.name.startswith('.'):
                     f.unlink(missing_ok=True)
 
 
@@ -366,8 +379,9 @@ def key_parts(mesence, rom, script, dest, env, extra, cwd=None):
         'script': Path(script).name,
         'code': code.hexdigest(),
         'emulator': [mesence_stamp(mesence), list(extra), list(FIXED_ARGS), mesence_settings(mesence)],
-        'env': canon_env(env, names, dest, [d for d in LUA_DIRS] + ([libdir] if libdir else [])),
-        'inputs': tree_hash(dest, skip=(ENTRY, OUT, HDMA)),
+        'env': canon_env(env, names, dest, [d for d in LUA_DIRS] + ([libdir] if libdir else []),
+                         cwd=cwd),
+        'inputs': tree_hash(dest, skip=SKIP),
         'cwd': _cwd_key(cwd, dest),
         'rom': rom_shape(rom),
     }
@@ -384,14 +398,14 @@ def _cwd_key(cwd, dest):
 def _outputs(dest, before):
     """돌린 뒤 새로 생겼거나 바뀐 파일."""
     out = {}
-    for rel, h in tree_hash(dest, skip=(ENTRY, OUT, HDMA)).items():
+    for rel, h in tree_hash(dest, skip=SKIP).items():
         if before.get(rel) != h:
             out[rel] = h
     return out
 
 
 def _clear(dest, before):
-    for rel in tree_hash(dest, skip=(ENTRY, OUT, HDMA)):
+    for rel in tree_hash(dest, skip=SKIP):
         if rel not in before:
             (Path(dest) / rel).unlink(missing_ok=True)
 
@@ -399,10 +413,14 @@ def _clear(dest, before):
 def _execute(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag):
     entry = dest / ENTRY
     out = dest / OUT
+    err = dest / ERR
     out.unlink(missing_ok=True)
+    err.unlink(missing_ok=True)
+    # 맨 위 오류는 testrunner 를 멈추지 않아 시간 초과까지 돈다. 적고 바로 1 로 멈춘다
     entry.write_text(f'READSET_OUT = {json.dumps(str(out))}\n'
                      f'dofile({json.dumps(str(PRELUDE))})\n'
-                     f'dofile({json.dumps(str(Path(script).resolve()))})\n', encoding='utf-8')
+                     f'local ok, e = pcall(dofile, {json.dumps(str(Path(script).resolve()))})\n'
+                     'if not ok then READSET_FAIL(e); emu.stop(1) end\n', encoding='utf-8')
     full = dict(env, READSET_OUT=str(out))
     rc, timed_out = None, False
     try:
@@ -413,9 +431,18 @@ def _execute(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag
     except subprocess.TimeoutExpired:
         timed_out = True
     ranges = parse_ranges(out.read_text()) if out.exists() else None
-    entry.unlink(missing_ok=True)
-    out.unlink(missing_ok=True)
+    if err.exists():
+        print(f'[dq4readset] {dest}: 장면 Lua 오류(캐시에 넣지 않음): {err.read_text(errors="replace").strip()[:500]}',
+              file=sys.stderr)
+        if rc == 0:
+            rc = LUA_ERROR
+    for f in (entry, out, err):
+        f.unlink(missing_ok=True)
     return rc, timed_out, ranges
+
+
+# 장면 Lua 가 오류를 냈는데 MesenCE 가 0 으로 끝났을 때 돌려주는 종료 코드
+LUA_ERROR = 70
 
 
 def run(mesence, rom_path, script, dest, env, timeout=1800, extra=mesen.ARGS, log='mesen.log', cwd=None,
@@ -442,11 +469,18 @@ def _run(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag, ac
     key = index_key(parts)
     before = parts['inputs']
     hit = find(store.entries(key), rom) if enabled() else None
+    blobs = {}
     if hit:
-        for rel, sha in hit['files'].items():
+        try:
+            blobs = {rel: store.get_blob(sha) for rel, sha in hit['files'].items()}
+        except FileNotFoundError:
+            store.drop(key, hit)
+            hit = None
+    if hit:
+        for rel, data in blobs.items():
             p = dest / rel
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_bytes(store.get_blob(sha))
+            p.write_bytes(data)
         store.touch(key, hit)
         info = {'cached': True, 'returncode': hit.get('returncode'), 'timed_out': False,
                 'readset': sum(n for _, n in unpack(hit['ranges'])), 'ranges': len(unpack(hit['ranges'])),
@@ -457,7 +491,7 @@ def _run(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag, ac
         rc, timed_out, ranges = _execute(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag)
         if timed_out:
             raise SystemExit(f'읽은 바이트 캐시 재검증이 {timeout}초 안에 끝나지 않음: {dest}(항목은 그대로 둠)')
-        want = {rel: content_hash(store.get_blob(sha), rel) for rel, sha in hit['files'].items()}
+        want = {rel: content_hash(data, rel) for rel, data in blobs.items()}
         got = _outputs(dest, before)
         diff = mismatch(want, got, hit, rc, ranges)
         if diff:
@@ -476,11 +510,9 @@ def _run(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag, ac
     # 0 이 아닌 종료(스크립트 오류·끝까지 못 감)나 읽은 집합이 없는 실행은 넣지 않는다
     if timed_out or rc != 0 or ranges is None or (accept and not accept(dest)):
         return info
-    files = {}
-    for rel in _outputs(dest, before):
-        files[rel] = store.put_blob((dest / rel).read_bytes())
-    store.add(key, {'ranges': pack(ranges), 'digest': digest(rom, ranges), 'files': files, 'returncode': rc,
-                    'when': time.strftime('%Y-%m-%d %H:%M')})
+    store.add(key, {'ranges': pack(ranges), 'digest': digest(rom, ranges), 'returncode': rc,
+                    'when': time.strftime('%Y-%m-%d %H:%M')},
+              {rel: (dest / rel).read_bytes() for rel in _outputs(dest, before)})
     try:
         limit = float(os.environ.get('DQ4_READSET_MAX_GB', '20')) * (1 << 30)
     except ValueError:
