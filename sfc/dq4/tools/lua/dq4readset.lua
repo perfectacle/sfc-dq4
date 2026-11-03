@@ -128,6 +128,31 @@ if hdma then
   end, emu.callbackType.write, 0x420C, 0x420C)
 end
 
+-- 장면 Lua 의 오류를 READSET_OUT.err 에 적는다. testrunner 는 콜백 안 오류를 삼키고 다음 프레임을 계속 돌며, emu.stop 뒤에
+-- 난 오류에도 0 으로 끝난다(실측). 이 파일이 있으면 dq4readset.py 가 캐시에 넣지 않는다. 오류는 다시 던져 동작은 그대로다
+local errOut = out .. ".err"
+function READSET_FAIL(e)
+  local f = io.open(errOut, "a")
+  if f then f:write(tostring(e), "\n"); f:close() end
+end
+
+-- 콜백은 값을 하나까지만 돌려준다(메모리 콜백이 읽은 값을 바꿀 때). 매 명령마다 불리는 콜백도 있어 표를 만들지 않는다
+local function guarded(fn)
+  return function(...)
+    local ok, r = pcall(fn, ...)
+    if not ok then
+      READSET_FAIL(r)
+      error(r, 0)
+    end
+    return r
+  end
+end
+
+for _, name in ipairs({"addEventCallback", "addMemoryCallback"}) do
+  local orig = emu[name]
+  emu[name] = function(fn, ...) return orig(guarded(fn), ...) end
+end
+
 local stopped = false
 local stopOrig = emu.stop
 emu.stop = function(...)

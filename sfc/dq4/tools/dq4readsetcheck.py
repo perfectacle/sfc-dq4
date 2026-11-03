@@ -9,6 +9,9 @@
   안      읽은 집합 안 바이트 하나를 바꾸면 캐시가 빗나간다
   HDMA    게임 장면의 HDMA 표 첫 바이트가 롬이면 읽은 집합에 들어 있다
 
+출력은 화면 찍기(.png)를 빼고 견준다(캐시 재검증과 같은 기준, 형식 문서 「화면 찍기는 결정적이지 않다」).
+오류 장면(lua/dq4readseterr.lua): 장면 Lua 가 맨 위·콜백 안·emu.stop 뒤에서 오류를 내면 0 이 아닌 종료이고 캐시에 없다.
+
 field 장면에서는 캐시를 켠 채 롬 밖 입력을 바꿔 본다: 환경 변수 값 하나, 에뮬레이터 명령줄 하나, 출발 상태 내용을
 바꾸면 빗나가고, 출발 상태 파일을 다른 경로로 옮기기만 하면 맞는다.
 
@@ -36,6 +39,7 @@ import dq4readset as rs  # noqa: E402
 
 KEYED_HEADER = [i for h in rs.HEADER for i in range(h.start, h.stop)]
 SYNTH_LUA = HERE / 'lua' / 'dq4readsetsynth.lua'
+ERR_LUA = HERE / 'lua' / 'dq4readseterr.lua'
 SYNTH_READ = [*range(0x3F0000, 0x3F0005), *range(0x3F0010, 0x3F0014), *range(0x3F0020, 0x3F0024), 0x3F0030, 0x3F0031]
 # 서장 첫 장면에서: 말 걸기·명령 창 열고 닫기·걷기
 FIELD_PRE = 'wait:60,a:6,wait:90,a:6,wait:90,b:6,wait:60,down:24,wait:20,left:24,wait:20,a:6,wait:60,b:6,wait:60,up:24'
@@ -70,7 +74,8 @@ class Runner:
                 else:
                     os.environ[k] = v
         entry = rs.find(self.store.entries(info['key']), Path(rom).read_bytes())
-        outputs = rs.tree_hash(dest, skip=(rs.ENTRY, rs.OUT, rs.HDMA))
+        # 화면 찍기는 같은 실행에서도 달라 캐시 재검증과 같이 견주지 않는다(rs.SCREENS)
+        outputs = {k: v for k, v in rs.tree_hash(dest, skip=rs.SKIP).items() if not rs.is_screen(k)}
         hdma = (dest / rs.HDMA).read_text().split('\n') if (dest / rs.HDMA).exists() else []
         return info, entry, outputs, [line for line in hdma if line.strip()]
 
@@ -158,6 +163,17 @@ def check_synth(go, rom, libdir, out):
             'problems': [f'HDMA 표·Lua 가 읽은 롬 바이트가 읽은 집합에 없음 {missing}'] if missing else []}
 
 
+def check_errors(go, rom, out):
+    """장면 Lua 가 오류를 내면(맨 위, 콜백 안, emu.stop 뒤) 0 이 아닌 종료로 보고 캐시에 넣지 않는다."""
+    problems = []
+    for mode in ('top', 'callback', 'stop'):
+        info, entry, _, _ = go(rom, ERR_LUA, {'READSET_ERR': mode}, out / f'err-{mode}', timeout=120)
+        if info['timed_out'] or info['returncode'] in (0, None) or entry is not None:
+            problems.append(f'{mode}: 종료 코드 {info["returncode"]}, 시간 초과 {info["timed_out"]}, '
+                            f'캐시 {"있음" if entry is not None else "없음"}')
+    return {'name': 'errors', 'status': 'failed' if problems else 'passed', 'problems': problems}
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--rom', type=Path, required=True)
@@ -185,7 +201,8 @@ def main():
         if name == 'field':
             report(check_inputs(go, rom, script, env, out))
     report(check_synth(go, rom, libdir, out))
-    ok = all(r.get('status') == 'passed' for r in results) and len(results) == 4
+    report(check_errors(go, rom, out))
+    ok = all(r.get('status') == 'passed' for r in results) and len(results) == 5
     print(json.dumps({'status': 'passed' if ok else 'failed'}, ensure_ascii=False))
     return 0 if ok else 1
 
