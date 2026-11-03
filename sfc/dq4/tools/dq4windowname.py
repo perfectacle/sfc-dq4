@@ -173,9 +173,11 @@ def kana_glyphs(d, font, render):
 
 
 def room(out):
-    """구역마다 마지막으로 쓴 바이트 뒤 남은 바이트 수. 코드 끝이 0 바이트로 끝나면 그만큼 많게 센다(어림)."""
+    """구역마다 마지막으로 쓴 바이트 뒤 남은 바이트 수. 코드 끝이 0 바이트로 끝나면 그만큼 많게 센다(어림).
+    전투 메시지 코드(dq4battlemsg.CODE_AT~둘째 구역 앞)도 같은 뱅크를 나눠 쓰므로 함께 센다."""
+    import dq4battlemsg
     left = {}
-    for a, b in ((CODE, CODE_END), (WH_EXTRA, KANA_TABLE), (CODE2, CODE2_END)):
+    for a, b in ((CODE, CODE_END), (WH_EXTRA, KANA_TABLE), (dq4battlemsg.CODE_AT, CODE2), (CODE2, CODE2_END)):
         seg = bytes(out[lorom(a):lorom(b - 1) + 1])
         left[(a, b)] = len(seg) - len(seg.rstrip(b'\0'))
     return left
@@ -359,11 +361,11 @@ def apply(data, font=None, asar=None):
     if not any(out[lorom(CODE):lorom(CODE_END)]) or any(out[lorom(CODE_END):lorom(CODE_END) + 0x100]):
         raise ValueError('창 이름 코드가 정해 둔 자리를 벗어남')
     left = room(out)
-    print('창 이름 코드 남은 자리: ' + ', '.join(f'{a:06X}~{b:06X} {n}바이트' for (a, b), n in left.items()),
+    print('창 이름·전투 메시지 코드 남은 자리: ' + ', '.join(f'{a:06X}~{b:06X} {n}바이트' for (a, b), n in left.items()),
           file=sys.stderr)
     for (a, b), n in left.items():
         if n < ROOM_WARN:
-            print(f'경고: 창 이름 코드 {a:06X}~{b:06X} 에 {n}바이트만 남음. 둘째 구역 쪽에 더하거나 자리를 새로 정할 것',
+            print(f'경고: 뱅크 60 코드 구역 {a:06X}~{b:06X} 에 {n}바이트만 남음. 둘째 구역 쪽에 더하거나 자리를 새로 정할 것',
                   file=sys.stderr)
     if not any(out[lorom(SHOP_SPOT):lorom(SHOP_SPOT_END - 1) + 1]):
         raise ValueError('가게 팔기 목록 코드가 들어가지 않음')

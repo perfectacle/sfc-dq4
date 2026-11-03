@@ -472,9 +472,6 @@ class KanaGlyphTests(unittest.TestCase):
             wn.kana_glyphs(self.rom(), object(), lambda f, ch, t: [[[0] * 8] * 16] * 3)
 
 
-if __name__ == '__main__':
-    unittest.main()
-
 
 class CodeRoomTests(unittest.TestCase):
     def test_room_counts_tail_per_region(self):
@@ -485,9 +482,9 @@ class CodeRoomTests(unittest.TestCase):
         self.assertEqual(left[(wn.CODE, wn.CODE_END)], wn.CODE_END - wn.CODE - 0x100)
         self.assertEqual(left[(wn.CODE2, wn.CODE2_END)], wn.CODE2_END - wn.CODE2 - 1)
         self.assertEqual(left[(wn.WH_EXTRA, wn.KANA_TABLE)], wn.KANA_TABLE - wn.WH_EXTRA)
+        self.assertEqual(left[(dq4battlemsg.CODE_AT, wn.CODE2)], wn.CODE2 - dq4battlemsg.CODE_AT)
 
     def test_regions_do_not_overlap_and_stay_in_one_bank(self):
-
         regions = sorted([(wn.CODE, wn.CODE_END), (wn.CODE_END, wn.CODE_END + 0x100), (wn.WH_EXTRA, wn.KANA_TABLE),
                           (dq4battlemsg.CODE_AT, wn.CODE2), (wn.CODE2, wn.CODE2_END)])
         for (a, b), (c, _) in zip(regions, regions[1:]):
@@ -502,3 +499,5 @@ class CodeRoomTests(unittest.TestCase):
         self.assertIn('assert pc() <= !wn_kana_table', asm)
         self.assertIn('assert pc() <= !wn_code2', (ASM.parent / 'dq4battlemsg.asm').read_text(encoding='utf-8'))
 
+if __name__ == '__main__':
+    unittest.main()

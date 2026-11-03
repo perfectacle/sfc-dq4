@@ -25,7 +25,6 @@ import os
 from pathlib import Path
 import random
 import re
-import shutil
 import struct
 import subprocess
 import sys
@@ -54,7 +53,9 @@ HDMA = OUT + '.hdma'
 ERR = OUT + '.err'
 # 머리말이 읽은 집합을 이 이름으로 쓴 뒤 OUT 으로 옮긴다. 도중에 끊기면 남는다
 OUT_TMP = OUT + '.tmp'
-SKIP = (ENTRY, OUT, HDMA, ERR, OUT_TMP)
+# 키를 만든 롬 바이트 그대로의 사본. 그 사이 롬 파일이 바뀌어도 키와 실제로 돌린 롬이 같다
+ROM_COPY = '.readset-rom.sfc'
+SKIP = (ENTRY, OUT, HDMA, ERR, OUT_TMP, ROM_COPY)
 # 머리말이 읽은 집합 끝줄에 쓰는 표시. 장면 Lua 가 오류를 냈으면 LUAERROR
 DONE = 'OK'
 # 결과에 닿는 MesenCE 설정을 명령줄로 고정한다. 사용자 settings.json 의 값과 상관없이 같게 돈다
@@ -288,11 +289,15 @@ class Store:
             return []
 
     def get_blob(self, sha):
-        """없거나 깨졌으면 FileNotFoundError(prune 이 지운 뒤 읽은 항목). 부르는 쪽은 빗나감으로 친다."""
+        """없거나, 풀리지 않거나, 푼 내용의 SHA-256 이 이름과 다르면 FileNotFoundError(prune 이 지운 뒤 읽은 항목, 깨진
+        파일). 부르는 쪽은 빗나감으로 친다."""
         try:
-            return zlib.decompress(self.blob_path(sha).read_bytes())
+            data = zlib.decompress(self.blob_path(sha).read_bytes())
         except zlib.error as e:
             raise FileNotFoundError(f'blob {sha} 깨짐: {e}') from e
+        if hashlib.sha256(data).hexdigest() != sha:
+            raise FileNotFoundError(f'blob {sha} 내용이 이름과 다름')
+        return data
 
     def add(self, key, entry, blobs):
         """blobs(상대 경로 → 바이트)를 넣고 entry['files'] 를 채워 index 맨 앞에 둔다. blob 과 index 를 한 잠금 안에서
@@ -334,6 +339,10 @@ class Store:
     def prune(self, limit):
         """limit 바이트를 넘으면 오래 안 쓴 index 부터 지우고, 어느 index 도 가리키지 않는 blob 을 지운다."""
         with locked(self.root):
+            # _replace 가 쓰다 끊긴 임시 파일(.이름.pid.난수). 잠금 안이라 지금 쓰는 것은 없다
+            for f in self.root.rglob('.*.*'):
+                if f.is_file() and f.name != '.lock':
+                    f.unlink(missing_ok=True)
             if self.size() <= limit:
                 return
             idx = sorted((self.root / 'index').rglob('*.json'), key=lambda p: p.stat().st_mtime)
@@ -348,10 +357,6 @@ class Store:
                     pass
             for f in (self.root / 'blob').rglob('*'):
                 if f.is_file() and f.name not in live and not f.name.startswith('.'):
-                    f.unlink(missing_ok=True)
-            # _replace 가 쓰다 끊긴 임시 파일(.이름.pid.난수). 잠금 안이라 지금 쓰는 것은 없다
-            for f in self.root.rglob('.*.*'):
-                if f.is_file() and f.name != '.lock':
                     f.unlink(missing_ok=True)
 
 
@@ -451,11 +456,21 @@ def _execute(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag
     text = out.read_text() if out.exists() else None
     ranges = parse_ranges(text) if text is not None else None
     done = text is not None and text.split()[-1:] == [DONE]
-    if err.exists() or (text is not None and not done):
-        why = err.read_text(errors='replace').strip()[:500] if err.exists() else '읽은 집합 끝줄이 OK 가 아님'
-        print(f'[dq4readset] {dest}: 장면 Lua 오류(캐시에 넣지 않음): {why}', file=sys.stderr)
-        if rc == 0:
+    if timed_out:
+        print(f'[dq4readset] {dest}: {timeout}초 안에 끝나지 않음(캐시에 넣지 않음)', file=sys.stderr)
+    if err.exists() or (text is not None and not done and not timed_out):
+        why = err.read_text(errors='replace').strip() if err.exists() else '읽은 집합 끝줄이 OK 가 아님'
+        print(f'[dq4readset] {dest}: 장면 Lua 오류(캐시에 넣지 않음): {why[:500]}', file=sys.stderr)
+        if WATCHDOG in why:
+            rc = LUA_WATCHDOG
+            print(f'[dq4readset] {dest}: MesenCE 가 Lua 콜백을 시간 제한으로 끊음(머신이 바쁠 때). 장면을 다시 돌릴 것',
+                  file=sys.stderr)
+        elif rc == 0:
             rc = LUA_ERROR
+    elif text is None and rc == 0 and not timed_out:
+        # 0 으로 끝났는데 읽은 집합이 없다: 머리말이 쓰지 못했거나 emu.stop 을 거치지 않고 끝났다
+        print(f'[dq4readset] {dest}: 읽은 집합이 없음(캐시에 넣지 않음)', file=sys.stderr)
+        rc = LUA_ERROR
     for f in (entry, out, err, dest / OUT_TMP):
         f.unlink(missing_ok=True)
     return rc, timed_out, ranges
@@ -463,6 +478,10 @@ def _execute(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag
 
 # 장면 Lua 가 오류를 냈는데 MesenCE 가 0 으로 끝났을 때 돌려주는 종료 코드
 LUA_ERROR = 70
+# MesenCE 가 Lua 콜백 하나를 벽시계 시간 제한(사용자 설정 Debug.ScriptWindow.ScriptTimeout)으로 끊은 실행. 형식 문서
+# 「장면 Lua 의 오류」. 다시 돌리지 않고 이 종료 코드로 실패를 알린다
+WATCHDOG = 'Maximum execution time'
+LUA_WATCHDOG = 71
 
 
 def run(mesence, rom_path, script, dest, env, timeout=1800, extra=mesen.ARGS, log='mesen.log', cwd=None,
@@ -488,6 +507,7 @@ def _run(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag, ac
     parts = key_parts(mesence, rom, script, dest, env, extra, cwd)
     key = index_key(parts)
     before = parts['inputs']
+    snapshot = dest / ROM_COPY
     hit, blobs = None, {}
     for e in (matches(store.entries(key), rom) if enabled() else ()):
         try:
@@ -509,9 +529,14 @@ def _run(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag, ac
         if random.random() >= verify_rate():
             return info
         _clear(dest, before)
-        rc, timed_out, ranges = _execute(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag)
+        rc, timed_out, ranges = _snapshot_run(snapshot, rom, mesence, script, dest, env, timeout, extra, log, cwd, tag)
+        # 다시 돌린 실행이 끝까지 가지 못했으면 출력을 견줄 수 없다. 항목은 두고 그 실패로 알린다
         if timed_out:
             raise SystemExit(f'읽은 바이트 캐시 재검증이 {timeout}초 안에 끝나지 않음: {dest}(항목은 그대로 둠)')
+        # 0 이 아닌 종료(시간 제한·Lua 오류·MesenCE 가 죽음·emu.stop(n))는 키와 상관없는 실패일 수 있다. 캐시에는 0 으로
+        # 끝난 실행만 들어가므로 견주지 않는다
+        if rc != 0:
+            raise SystemExit(f'읽은 바이트 캐시 재검증 실행이 실패함(종료 코드 {rc}): {dest}(항목은 그대로 둠)')
         want = {rel: content_hash(data, rel) for rel, data in blobs.items()}
         got = _outputs(dest, before)
         diff = mismatch(want, got, hit, rc, ranges)
@@ -524,7 +549,7 @@ def _run(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag, ac
             print(f'[dq4readset] {dest}: 다시 돌린 화면 {",".join(shots[:8])} 이 캐시와 다름(화면 찍기는 결정적이지 않아 '
                   '판정에 쓰지 않는 출력)', file=sys.stderr)
         return {**info, 'verified': True, 'screens_differ': shots}
-    rc, timed_out, ranges = _execute(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag)
+    rc, timed_out, ranges = _snapshot_run(snapshot, rom, mesence, script, dest, env, timeout, extra, log, cwd, tag)
     info = {'cached': False, 'returncode': rc, 'timed_out': timed_out,
             'readset': sum(n for _, n in ranges) if ranges is not None else None, 'ranges': len(ranges or ()),
             'key': key}
@@ -541,6 +566,22 @@ def _run(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag, ac
     if random.random() < 0.02:
         store.prune(limit)
     return info
+
+
+def _snapshot_run(snapshot, rom, mesence, script, dest, env, timeout, extra, log, cwd, tag):
+    """키를 만든 롬 바이트(rom)를 dest 에 써 두고 그 사본으로 돌린다."""
+    snapshot.write_bytes(rom)
+    try:
+        return _execute(mesence, snapshot, script, dest, env, timeout, extra, log, cwd, tag)
+    finally:
+        snapshot.unlink(missing_ok=True)
+
+
+def warp_finished(dest):
+    """dq5warp.lua 장면이 끝까지 갔는가(run 의 accept 로 쓴다). MAXF 에 닿으면 「timeout phase=」 를 적고 0 으로 멈추므로,
+    종료 코드만으로는 캐시에 들어간다."""
+    path = Path(dest) / 'warp.txt'
+    return path.is_file() and ' timeout phase=' not in path.read_text(encoding='utf-8', errors='replace')
 
 
 def is_screen(rel):

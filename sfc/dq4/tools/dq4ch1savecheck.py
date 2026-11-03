@@ -19,7 +19,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -27,7 +26,7 @@ HERE = Path(__file__).resolve().parent
 DQ5_TOOLS = HERE.parents[1] / 'dq5' / 'tools'
 sys.path[:0] = [str(HERE), str(DQ5_TOOLS)]
 
-import dq4mesen as mesen  # noqa: E402
+import dq4readset  # noqa: E402
 import dq4ch1walkcheck as walk  # noqa: E402
 import dq4dungeonencountercheck as enc  # noqa: E402
 import dq4groupcheck  # noqa: E402
@@ -84,7 +83,7 @@ def free(mesence, rom, state, dest):
     maxf = walk.frames(walk.pc.CLOSE) + 60
     walk.run(mesence, rom, walk.WALK_STATE, dest, {'STATE': str(state), 'WALK': str(walk.WALK),
                                                    'WAYPOINTS': walk.pc.CLOSE, 'SAVE': 'free.mss', 'MAXF': str(maxf),
-                                                   'ROMPATCH': walk.NO_ENCOUNTERS}, 120)
+                                                   'ROMPATCH': walk.NO_ENCOUNTERS}, 120, readset=True)
     return dest / 'free.mss'
 
 
@@ -92,13 +91,27 @@ def church(mesence, rom, state, dest):
     state = free(mesence, rom, state, dest / 'free')
     walk.run(mesence, rom, walk.WARP, dest, {'STATE': str(state), 'TO': CHURCH, 'SAVE': 'church.mss', 'SETTLE': '120',
                                              'MAXF': '1500', 'WARPEXIT': f'{warp_exit(rom):X}',
-                                             'ANYWHERE': '1', 'ROMPATCH': walk.NO_ENCOUNTERS}, 300)
+                                             'ANYWHERE': '1', 'ROMPATCH': walk.NO_ENCOUNTERS}, 300, readset=True)
     text = (dest / 'warp.txt').read_text(encoding='utf-8') if (dest / 'warp.txt').exists() else ''
     found = re.search(r'arrived map (\w\w/\w\w)', text)
     return found[1] if found else None
 
 
+def run_failure(info, timeout):
+    """dq4readset.run 결과가 실패면 그 까닭, 아니면 None."""
+    if info['timed_out']:
+        return f'MesenCE 가 {timeout}초 안에 끝나지 않음'
+    if info['returncode'] == dq4readset.LUA_WATCHDOG:
+        return 'MesenCE 가 Lua 콜백을 시간 제한으로 끊음(머신이 바쁠 때, 다시 돌릴 것)'
+    if info['returncode'] == dq4readset.LUA_ERROR:
+        return '장면 Lua 오류(로그 참고)'
+    if info['returncode'] != 0:
+        return f'MesenCE 종료 코드 {info["returncode"]}'
+    return None
+
+
 def save_continue(mesence, rom, state, dest):
+    """(덤프, 부름 기록, 실패 까닭). 실패면 앞 둘은 비어 있다."""
     # 길이는 10진
     dumps = [f'{SAVED - 50}:7E2000:{well.SAVE_SIZE}', f'{SAVED}:700000:{SRAM_SIZE}',
              f'{LOADED}:7E2000:{well.SAVE_SIZE}', f'{LOADED}:7E00BC:2', f'{LOADED}:7E3020:1', f'{LOADED}:7E3080:1']
@@ -108,13 +121,15 @@ def save_continue(mesence, rom, state, dest):
                PRE=f'{TALK},wait:400,{well.CONTINUE}', RESETAT=str(RESET), MAXF=str(SHOT + 10),
                CALLS=f'{CONTINUE_PATH},{LOGO},{MESSAGE}', ROMPATCH=walk.NO_ENCOUNTERS, SHOTS=f'{SAVED - 50},{SHOT}',
                DUMP=';'.join(dumps))
-    mesen.run(mesence, rom, DQ5_TOOLS / 'lua' / 'dq5cdldump.lua', folder=dest, env=env, stdout=subprocess.DEVNULL,
-              stderr=subprocess.DEVNULL, timeout=900, check=False)
+    info = dq4readset.run(mesence, rom, DQ5_TOOLS / 'lua' / 'dq5cdldump.lua', dest, env, timeout=900)
+    why = run_failure(info, 900)
+    if why:
+        return {}, [], why
     text = (dest / 'msg.txt').read_text(encoding='utf-8') if (dest / 'msg.txt').exists() else ''
     got = {(int(m[1]), int(m[2], 16)): bytes.fromhex(m[3])
            for m in re.finditer(r'(\d+) dump ([0-9A-F]{6}) ([0-9A-F ]+)', text)}
     calls = [(int(f), pc, a) for f, pc, a in re.findall(r'^(\d+) (\w{6}) A=(\w+)', text, re.M)]
-    return got, calls
+    return got, calls, None
 
 
 def save_scene(mesence, rom, states, out, name, segment):
@@ -123,7 +138,9 @@ def save_scene(mesence, rom, states, out, name, segment):
     arrived = church(mesence, rom, states / segment / 'end.mss', dest / 'warp')
     if arrived != '36/00' or not (dest / 'warp' / 'church.mss').exists():
         return name, {'status': 'failed', 'problems': [f'교회에 닿지 못함({arrived})']}
-    got, calls = save_continue(mesence, rom, dest / 'warp' / 'church.mss', dest)
+    got, calls, why = save_continue(mesence, rom, dest / 'warp' / 'church.mss', dest)
+    if why:
+        return name, {'status': 'failed', 'problems': [f'저장·이어 하기 장면: {why}']}
     before, sram, loaded = (got.get(k, b'') for k in ((SAVED - 50, 0x7E2000), (SAVED, 0x700000), (LOADED, 0x7E2000)))
     problems = []
     if not (before and sram and loaded):

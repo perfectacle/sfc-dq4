@@ -54,7 +54,7 @@ def run(mesence, libdir, rom, state, out, ids, field=False):
                LATECODES=','.join(f'{c:02X}' for c in dq4battlemsg.CODES[dq4battlemsg.POOL.index(dq4battlemsg.POOL_C[0]):]))
     if field:
         env.update(FIELD)
-    dq4readset.run(mesence, rom, SWAP_LUA, out, env, timeout=600)
+    dq4readset.run(mesence, rom, SWAP_LUA, out, env, timeout=600, accept=dq4readset.warp_finished)
     path = out / 'swap.txt'
     rows = [line.split() for line in path.read_text().splitlines() if line.strip()] if path.exists() else []
     return [(int(f), int(n, 16)) for f, n in rows]

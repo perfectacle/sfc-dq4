@@ -19,7 +19,6 @@ import concurrent.futures
 import json
 import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -40,7 +39,6 @@ from dq4groupbuild import LINKS, cell, doors, entrance_doors, exit_order, fc_num
 from dq5exitcheck import dp86_allowed, warp_exit  # noqa: E402
 from dq5progresscheck import environment  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
-import dq4mesen  # noqa: E402
 
 WARP = DQ5_TOOLS / "lua" / "dq5warp.lua"
 DIRS = {(0, -1): "up", (1, 0): "right", (0, 1): "down", (-1, 0): "left"}
@@ -60,9 +58,11 @@ EVENT_STAIRS = {(0x00, 0x00, 0x1F, 0x12)}
 PRESET = ""
 
 
-def scene(mesence, rom, state, out, name, readset=True, **extra):
-    """dq4readset 으로 돌려 같은 출발 상태·입력에 읽은 롬 바이트가 같으면 캐시의 출력을 펼친다. readset=False 는 캐시를
-    거치지 않고 롬을 복사하지 않는 testrunner 로 띄운다(배터리 기록이 남는 장면을 일부러 볼 때만)."""
+def scene(mesence, rom, state, out, name, **extra):
+    """dq4readset 으로 돌려 같은 출발 상태·입력에 읽은 롬 바이트가 같으면 캐시의 출력을 펼친다. MesenCE 가 시간 안에
+    끝나지 않거나, 0 이 아닌 값으로 끝나거나, dq5warp.lua 가 MAXF 에 닿아 멈췄으면(종료 코드는 0, 「end map」 도 찍힘)
+    {"error": …} 를 돌려준다."""
+    import dq4readset
     dest = out / name
     dest.mkdir(parents=True)
     env = environment(os.environ["LIBDIR"], state, dest)
@@ -70,12 +70,15 @@ def scene(mesence, rom, state, out, name, readset=True, **extra):
     sets = ";".join(s for s in (PRESET, extra.pop("SET", "")) if s)
     env.update({"MAXF": "2400", "WARPEXIT": f"{warp_exit(rom):X}", "DP86OK": dp86_allowed(rom),
                 **({"SET": sets} if sets else {}), **extra})
-    if readset:
-        import dq4readset
-        dq4readset.run(mesence, rom, WARP, dest, env, timeout=300)
-    else:
-        dq4mesen.testrunner(str(mesence), str(rom), str(WARP), "--Snes.DisableFrameSkipping=true",
-                            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300, check=False)
+    info = dq4readset.run(mesence, rom, WARP, dest, env, timeout=300, accept=dq4readset.warp_finished)
+    if info["timed_out"]:
+        return {"error": "MesenCE 가 300초 안에 끝나지 않음"}
+    if info["returncode"] != 0:
+        return {"error": f"MesenCE 종료 코드 {info['returncode']}"}
+    if not (dest / "warp.txt").is_file():
+        return {"error": "warp.txt 없음(dq5warp.lua 가 끝 기록을 쓰지 못함)"}
+    if not dq4readset.warp_finished(dest):
+        return {"error": "dq5warp.lua 가 MAXF 에 닿아 멈춤(timeout phase)"}
     text = (dest / "warp.txt").read_text(encoding="utf-8") if (dest / "warp.txt").exists() else ""
     found = END.findall(text)
     if not found:

@@ -1,6 +1,7 @@
 """dq4readset: 읽은 롬 바이트 캐시의 키·찾기·저장과, 머리말 Lua·러너가 지켜야 할 규칙(롬 없이)."""
 import ast
 import contextlib
+import io
 import json
 import os
 import re
@@ -11,6 +12,7 @@ import sys
 import tempfile
 import time
 import unittest
+import zlib
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -202,9 +204,18 @@ class StoreTests(unittest.TestCase):
             tmp = Path(d) / 'blob' / 'ab' / '.abcd.123.deadbeef'
             tmp.parent.mkdir(parents=True, exist_ok=True)
             tmp.write_bytes(b'half')
-            st.prune(0)
+            st.prune(1 << 40)            # 상한 아래여도 쓴다
             self.assertFalse(tmp.exists())
             self.assertTrue((Path(d) / '.lock').exists())
+
+    def test_blob_with_other_content_reads_as_missing(self):
+        """zlib 으로는 풀리지만 내용이 이름(SHA-256)과 다른 blob 은 펼치지 않는다."""
+        with tempfile.TemporaryDirectory() as d:
+            st = rs.Store(d)
+            e = st.add('k' * 64, {'ranges': rs.pack([(0, 1)]), 'digest': 'a'}, {'o': b'x'})
+            st.blob_path(e['files']['o']).write_bytes(zlib.compress(b'y'))
+            with self.assertRaisesRegex(FileNotFoundError, '이름과 다름'):
+                st.get_blob(e['files']['o'])
 
     def test_corrupt_blob_reads_as_missing(self):
         with tempfile.TemporaryDirectory() as d:
@@ -226,9 +237,14 @@ class FakeMesen:
         self.shot = False
         self.lua_error = False
         self.no_done = False
+        self.timeout = False
+        self.during = None
+        self.watchdog = 0
 
     def __call__(self, mesence, rom, script, folder=None, tag='probe', extra=(), env=None, stdout=None, **kw):
         self.calls += 1
+        if self.during:
+            self.during()
         data = Path(rom).read_bytes()
         s, n = self.READ
         Path(folder, 'out.bin').write_bytes(data[s:s + n])
@@ -238,8 +254,14 @@ class FakeMesen:
         Path(folder, 'mesen.log').write_text(f'loaded {Path(rom).name}\n')
         if self.lua_error:
             Path(env['READSET_OUT'] + '.err').write_text('scene.lua:3: boom\n')
+        if self.watchdog:
+            self.watchdog -= 1
+            Path(env['READSET_OUT'] + '.err').write_text('scene.lua:9: Maximum execution time (1 seconds) exceeded.\n')
+            Path(folder, 'half.bin').write_bytes(b'cut')
         if self.shot:
             Path(folder, 's00300.png').write_bytes(bytes([self.calls]))
+        if self.timeout:
+            raise subprocess.TimeoutExpired('mesen', 1)
         return subprocess.CompletedProcess([], self.rc)
 
 
@@ -312,10 +334,89 @@ class RunTests(unittest.TestCase):
                 self.go()
 
     def test_failed_run_is_not_cached(self):
+        """읽은 집합과 끝줄 OK 가 있어도 종료 코드가 0 이 아니면 넣지 않는다."""
         self.fake.rc = 1
-        self.go()
+        info, _ = self.go()
+        self.assertEqual(info['readset'], 0x10)
         self.fake.rc = 0
         self.assertFalse(self.go()[0]['cached'])
+
+    def test_timed_out_run_is_not_cached_and_does_not_stop(self):
+        """끝줄 OK 까지 썼어도 시간이 초과되면 넣지 않고, 검사를 멈추지 않으며(SystemExit 없음), Lua 오류라 하지 않는다."""
+        self.fake.timeout = True
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            info, _ = self.go()
+        self.assertTrue(info['timed_out'])
+        self.assertIn('끝나지 않음', err.getvalue())
+        self.assertNotIn('Lua 오류', err.getvalue())
+        self.fake.timeout = False
+        self.assertFalse(self.go()[0]['cached'])
+
+    def test_callback_watchdog_is_a_clear_failure(self):
+        """MesenCE 가 콜백을 시간 제한으로 끊은 실행은 다시 돌리지 않고 종료 코드 71 로 알리며 넣지 않는다."""
+        self.fake.watchdog = 1
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            info, _ = self.go()
+        self.assertEqual((info['returncode'], self.fake.calls), (rs.LUA_WATCHDOG, 1))
+        self.assertIn('시간 제한', err.getvalue())
+        self.assertFalse(self.go()[0]['cached'])
+
+    def test_verify_run_that_fails_keeps_entry(self):
+        """재검증으로 다시 돌린 실행이 0 이 아닌 값(시간 제한 71, MesenCE 가 죽은 134, emu.stop(3))이나 시간 초과로
+        끝나면, 견주지 않고 그 실패로 알리며 항목은 둔다(「키에 빠진 입력」 이라 하지 않는다)."""
+        key = self.go()[0]['key']
+        with mock.patch.dict(os.environ, {'DQ4_READSET_VERIFY': '1'}):
+            self.fake.watchdog = 1
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaisesRegex(SystemExit, '실패함'):
+                self.go()
+            for rc in (134, 3):
+                self.fake.rc = rc
+                with contextlib.redirect_stderr(io.StringIO()), \
+                        self.assertRaisesRegex(SystemExit, f'실패함\\(종료 코드 {rc}\\)'):
+                    self.go()
+            self.fake.rc = 0
+            self.fake.timeout = True
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaisesRegex(SystemExit, '끝나지 않음'):
+                self.go()
+        self.assertEqual(len(self.store.entries(key)), 1)
+
+    def test_zero_exit_without_readset_is_a_failure(self):
+        """0 으로 끝났는데 읽은 집합 파일이 없으면(머리말이 쓰지 못함) 실패로 본다."""
+        real = self.fake.__call__
+
+        def drop(*a, **k):
+            r = real(*a, **k)
+            Path(k['env']['READSET_OUT']).unlink()
+            return r
+        with mock.patch.object(rs.mesen, 'run', drop), contextlib.redirect_stderr(io.StringIO()):
+            info, _ = self.go()
+        self.assertEqual(info['returncode'], rs.LUA_ERROR)
+
+    def test_runs_the_rom_bytes_the_key_was_made_from(self):
+        """키를 만든 뒤 실행 전에 롬 파일이 바뀌어도, 실행은 키를 만든 바이트의 사본으로 돈다."""
+        orig = self.rom.read_bytes()
+
+        def swap():
+            self.flip(0x45)              # 읽은 구간 안
+        self.fake.during = swap
+        info, dest = self.go()
+        self.fake.during = None
+        self.assertEqual((dest / 'out.bin').read_bytes(), orig[0x40:0x50])
+        self.assertFalse((dest / rs.ROM_COPY).exists())
+        self.rom.write_bytes(orig)
+        self.assertTrue(self.go()[0]['cached'])
+
+    def test_leftover_tmp_in_dest_does_not_change_key(self):
+        a, _ = self.go()
+        self.n += 1
+        dest = Path(self.tmp.name) / f'run{self.n}'
+        dest.mkdir()
+        (dest / rs.OUT_TMP).write_text('left by a killed run')
+        (dest / rs.ROM_COPY).write_bytes(b'left')
+        b = rs.run(self.mesence, self.rom, self.script, dest, {'STATE': 'x'}, store=self.store)
+        self.assertEqual(a['key'], b['key'])
+        self.assertTrue(b['cached'])
 
     def test_lua_error_with_zero_exit_is_not_cached(self):
         """testrunner 는 콜백 안 오류를 삼키고 0 으로 끝난다(실측). 머리말이 남긴 .err 가 있으면 넣지 않는다."""
@@ -414,9 +515,77 @@ class RunTests(unittest.TestCase):
                          [('scene.lua', False, 0x10), ('scene.lua', True, 0x10)])
 
 
+class SceneTests(unittest.TestCase):
+    """dq4groupcheck.scene 이 run 의 결과를 보고 시간 초과·0 이 아닌 종료를 분명한 오류로 돌려준다."""
+
+    def scene(self, info, warp=None):
+        import dq4groupcheck
+        with tempfile.TemporaryDirectory() as d:
+            def fake(mesence, rom, script, dest, env, **kw):
+                if warp is not None:
+                    Path(dest, 'warp.txt').write_text(warp, encoding='utf-8')
+                self.accept = kw.get('accept')
+                return info
+            with mock.patch.object(rs, 'run', fake), mock.patch.dict(os.environ, {'LIBDIR': d}), \
+                    mock.patch.object(dq4groupcheck, 'warp_exit', return_value=0), \
+                    mock.patch.object(dq4groupcheck, 'dp86_allowed', return_value='0'):
+                return dq4groupcheck.scene('m', Path(d) / 'r.sfc', Path(d) / 's.mss', Path(d), 'x')
+
+    def test_timeout_is_reported(self):
+        got = self.scene({'timed_out': True, 'returncode': None})
+        self.assertIn('끝나지 않음', got['error'])
+
+    def test_missing_warp_log_is_reported(self):
+        self.assertIn('warp.txt 없음', self.scene({'timed_out': False, 'returncode': 0})['error'])
+
+    def test_nonzero_exit_is_reported(self):
+        self.assertIn('종료 코드 3', self.scene({'timed_out': False, 'returncode': 3})['error'])
+
+    def test_warp_that_hit_maxf_is_an_error(self):
+        """MAXF 에 닿아도 종료 코드는 0 이고 「end map」 이 찍힌다. 저장만 막지 않고 판정에도 실패로 돌려준다."""
+        got = self.scene({'timed_out': False, 'returncode': 0},
+                         'f02400 timeout phase=warp\nf02400 end map 36/00 cell 5,6 BE=80 1949=00\n')
+        self.assertIn('MAXF', got['error'])
+        self.assertIs(self.accept, rs.warp_finished)
+        ok = self.scene({'timed_out': False, 'returncode': 0}, 'f00300 end map 36/00 cell 5,6 BE=80 1949=00\n')
+        self.assertEqual(ok, {'map': '36/00', 'cell': [5, 6]})
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, 'warp.txt').write_text('f02400 timeout phase=warp\n')
+            self.assertFalse(rs.warp_finished(d))
+            Path(d, 'warp.txt').write_text('f00300 end map 36/00 cell 5,6\n')
+            self.assertTrue(rs.warp_finished(d))
+
+
+class WalkJudgeTests(unittest.TestCase):
+    """도착한 뒤 MAXF 에 닿은 순간이동은 「arrived map」 과 「timeout phase=」 가 함께 찍힌다. 판정이 실패로 본다."""
+
+    def run_segment(self, warp_text):
+        import dq4ch1walkcheck as wc
+        with tempfile.TemporaryDirectory() as d:
+            dest = Path(d) / 'seg'
+
+            def fake(mesence, rom, script, dest_, env, timeout, readset=False):
+                dest_.mkdir(parents=True, exist_ok=True)
+                (dest_ / 'warp.txt').write_text(warp_text, encoding='utf-8')
+                (dest_ / 'end.mss').write_bytes(b'MSS')
+            with mock.patch.object(wc, 'run', fake), mock.patch.object(wc, 'warp_exit', return_value=0):
+                return wc.segment('m', Path(d) / 'r.sfc', Path(d) / 's.mss', dest, ('x', 'warp', '36/00,10,10', {}),
+                                  wc.NO_ENCOUNTERS)
+
+    def test_timeout_after_arrival_fails(self):
+        r = self.run_segment('f00431 arrived map 36/00 cell 10,10\nf01500 timeout phase=test\n'
+                             'f01500 end map 36/00 cell 10,10 BE=80 1949=00\n')
+        self.assertEqual(r['status'], 'failed')
+        self.assertIn('순간이동이 MAXF 에 닿아 멈춤(timeout phase)', r['problems'])
+
+    def test_finished_warp_passes(self):
+        r = self.run_segment('f00431 arrived map 36/00 cell 10,10\nf00700 end map 36/00 cell 10,10 BE=80 1949=00\n')
+        self.assertEqual(r['status'], 'passed', r['problems'])
+
+
 class RuleTests(unittest.TestCase):
     def test_runner_copies_rom_so_no_battery_save_leaks(self):
-        """testrunner() 는 롬을 복사하지 않아 앞 실행의 .srm 을 읽는다. 캐시 실행은 run/Runner 만 쓴다."""
+        """소스 모양 확인: testrunner() 는 롬을 복사하지 않아 앞 실행의 .srm 을 읽는다. 캐시 실행은 run/Runner 만 쓴다."""
         tree = ast.parse((HERE / 'dq4readset.py').read_text(encoding='utf-8'))
         attrs = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name)
                  and n.value.id == 'mesen'}
@@ -424,7 +593,7 @@ class RuleTests(unittest.TestCase):
         self.assertNotIn('testrunner', attrs)
 
     def test_scene_checks_run_through_cache(self):
-        """장면형 검사가 MesenCE 를 직접(testrunner·mesen.run) 띄우면 캐시도 .srm 막이도 비껴간다."""
+        """소스 모양 확인: 장면형 검사가 MesenCE 를 직접(testrunner·mesen.run) 띄우면 캐시도 .srm 막이도 비껴간다."""
         for name in ('dq4signcheck.py', 'dq4battlemsgcheck.py', 'dq4chestcheck.py', 'dq4namegamecheck.py',
                      'dq4wellresetcheck.py'):
             tree = ast.parse((HERE / name).read_text(encoding='utf-8'))
@@ -444,16 +613,20 @@ class RuleTests(unittest.TestCase):
         self.assertEqual(rs.mismatch(want, only_shots, {'returncode': 0, 'ranges': rs.pack([(0, 1)])}, 0, [(0, 1)]), '')
 
     def test_prelude_wraps_callbacks_before_its_own(self):
-        """감싸기를 머리말 자신의 콜백(HDMA·endFrame)보다 먼저 건다. 반환값은 개수까지 그대로 넘긴다."""
+        """소스 모양 확인: 감싸기를 머리말 자신의 콜백(HDMA)보다 먼저 건다. 반환값은 개수까지 그대로 넘긴다."""
         lua = (HERE / 'lua' / 'dq4readset.lua').read_text(encoding='utf-8')
         wrap = lua.index('emu[name] = function(fn, ...) return orig(guarded(fn), ...) end')
-        first_cb = min(lua.index('emu.addMemoryCallback(function'), lua.index('emu.addEventCallback(function'))
+        first_cb = min(lua.index(k) for k in ('emu.addMemoryCallback(function', 'emu.addEventCallback(function') if k in lua)
         self.assertLess(wrap, first_cb)
         self.assertIn('return pass(pcall(fn, ...))', lua)
-        self.assertIn('os.remove(out)', lua)
+        # emu.stop 뒤 더 도는 프레임 수는 실행마다 달라, 그 뒤 장면 콜백을 부르면 출력이 흔들린다
+        self.assertIn('if stopped then return end', lua)
+        self.assertNotIn('if stopped then dump() end', lua)
+        self.assertIn('pcall(os.remove, out)', lua)
+        self.assertIn('local ok, e = pcall(dump)', lua)
 
     def test_prelude_records_lua_errors(self):
-        """머리말이 콜백을 감싸 오류를 .err 에 적고, 진입 파일이 맨 위 오류를 잡아 멈춘다."""
+        """소스 모양 확인: 머리말이 콜백을 감싸 오류를 .err 에 적고, 진입 파일이 맨 위 오류를 잡아 멈춘다."""
         lua = (HERE / 'lua' / 'dq4readset.lua').read_text(encoding='utf-8')
         self.assertIn('function READSET_FAIL', lua)
         self.assertRegex(lua, r'"addEventCallback", "addMemoryCallback"')
@@ -472,7 +645,7 @@ class RuleTests(unittest.TestCase):
         self.assertIn('READSET_FAIL(e); emu.stop(1)', seen['entry'])
 
     def test_readset_users_do_not_judge_from_screenshots(self):
-        """흔한 꼴만 막는 정적 휴리스틱이다(변수에 담은 이름, 다른 모듈을 거친 읽기는 못 본다): 이 캐시를 쓰는 검사에서
+        """소스 모양 확인: 흔한 꼴만 막는 정적 휴리스틱이다(변수에 담은 이름, 다른 모듈을 거친 읽기는 못 본다): 이 캐시를 쓰는 검사에서
         PIL 로 여는 것은 모음 그림을 만드는 sheet* 함수 안에서만, 화면 파일 이름 글자를 open()·read_bytes() 등으로
         직접 읽지 않는다. 재검증이 화면을 견주지 않는다는 동작은 RunTests 와 test_screen_rule 이 직접 본다."""
         users = [p for p in sorted(HERE.glob('dq4*.py'))
@@ -506,8 +679,25 @@ class RuleTests(unittest.TestCase):
                         bad.append(f'{p.name}:{node.lineno} {f.attr}')
         self.assertEqual(bad, [])
 
+    def test_walk_guards_watch_their_imports(self):
+        """소스 모양 확인: 서장 끝 걷기 검사의 실행 검사 paths 에 그 검사가 바로 import 하는 dq4·dq5 모듈이 모두 있다.
+        모듈 파일을 찾지 못하면(옮겼거나 이름이 바뀜) 건너뛰지 않고 실패한다."""
+        import tomllib
+        checks = {c['name']: c for c in tomllib.loads((HERE.parent / 'guards.toml').read_text(encoding='utf-8'))['check']}
+        root = HERE.parents[2]
+        for name, mod in (('dq4-heroblock', 'dq4heroblockcheck'), ('dq4-field-obj-math', 'dq4fieldmathcheck'),
+                          ('dq4-battle-check', 'dq4battlecheck'), ('dq4-wrap-routine', 'dq4wrapcheck')):
+            src = (HERE / f'{mod}.py').read_text(encoding='utf-8')
+            want = set()
+            for m in set(re.findall(r'^\s*(?:import|from)\s+(dq[45]\w+)', src, re.M)):
+                found = [base / f'{m}.py' for base in (HERE, root / 'sfc' / 'dq5' / 'tools', root / 'fc' / 'dq4' / 'tools')
+                         if (base / f'{m}.py').exists()]
+                self.assertTrue(found, f'{name}: import {m} 의 파일을 찾지 못함')
+                want.add(found[0].relative_to(root).as_posix())
+            self.assertFalse(want - set(checks[name]['paths']), name)
+
     def test_battle_rounds_bypass_cache(self):
-        """전투 검사는 같은 상태에서 전투를 여러 번 돌려 결과가 같은지 보고 화면을 견준다. 그 전투 실행은 캐시를 거치지 않는다
+        """소스 모양 확인: 전투 검사는 같은 상태에서 전투를 여러 번 돌려 결과가 같은지 보고 화면을 견준다. 그 전투 실행은 캐시를 거치지 않는다
         (거치면 둘째 실행이 첫 실행의 사본이 된다)."""
         tree = ast.parse((HERE / 'dq4battlecheck.py').read_text(encoding='utf-8'))
         fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == 'run_scene')
@@ -515,7 +705,8 @@ class RuleTests(unittest.TestCase):
                 and n.func.attr == 'run' and isinstance(n.func.value, ast.Name) and n.func.value.id == 'wc']
         self.assertTrue(runs)
         for n in runs:
-            self.assertFalse([k for k in n.keywords if k.arg == 'readset' and getattr(k.value, 'value', False)])
+            # readset=flag 처럼 변수로 넘겨도 캐시를 거칠 수 있어, readset 키워드가 아예 없어야 한다
+            self.assertFalse([k for k in n.keywords if k.arg in ('readset', None)])
 
     def test_clear_saves_removes_cdl(self):
         with tempfile.TemporaryDirectory() as d:

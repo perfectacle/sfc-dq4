@@ -8,8 +8,9 @@
 -- 기계 전체를 덮어 결과에 남지 않는다. 다만 그 전에 상태를 만든 적이 있으면(만든 상태를 다시 불러오는 장면) 밑값을
 -- 두지 않는다. 장면이 카운터를 지우면 지우기 전 값을 쌓아 둔다.
 --
--- emu.stop 뒤에도 한두 프레임이 더 돌 수 있어(그 사이 스크립트가 기록을 더 쓴다) 멈춘 뒤 프레임마다 다시 쓴다.
--- 이 머리말의 endFrame 콜백이 장면 스크립트 것보다 먼저 걸리므로, 그 프레임에 스크립트가 쓰는 기록보다 뒤의 읽기는 없다.
+-- emu.stop 뒤에도 프레임이 더 도는데, 몇 프레임 더 도는지는 실행마다 다르다(머신이 바쁘면 더 돈다). 그 사이 장면
+-- 콜백이 기록을 더 쓰면 같은 장면의 출력이 실행마다 달라진다. 그래서 emu.stop 을 부른 뒤로는 장면 콜백을 부르지 않고,
+-- 읽은 집합은 emu.stop 때 한 번 쓴다. 출력은 모두 그 앞에 생긴 것이라 그 뒤의 읽기는 결과에 닿지 않는다.
 -- testrunner 에서는 scriptEnded 가 오지 않아 그것에 기대지 않는다.
 local out = READSET_OUT or os.getenv("READSET_OUT")
 if not out then return end
@@ -17,18 +18,20 @@ local PRG = emu.memType.snesPrgRom
 local CPU = emu.memType.snesMemory
 local READ, EXEC = emu.counterType.readCount, emu.counterType.execCount
 
--- 장면 Lua 의 오류. testrunner 는 콜백 안 오류를 삼키고 다음 프레임을 계속 돌며, emu.stop 뒤에 난 오류에도 0 으로 끝난다
--- (실측). 오류가 나면 읽은 집합 파일을 지우고(그 파일이 없으면 dq4readset.py 가 캐시에 넣지 않는다), .err 와 표준 오류에
+-- 장면 Lua 의 오류. testrunner 는 콜백 안 오류를 삼키고 다음 프레임을 계속 돌며, emu.stop 뒤에 난 오류에도 0 으로 끝난다.
+-- 오류가 나면 읽은 집합 파일을 지우고(그 파일이 없으면 dq4readset.py 가 캐시에 넣지 않는다), .err 와 표준 오류에
 -- 적는다. 그 뒤 dump 는 끝줄을 LUAERROR 로 쓴다. 어느 쓰기가 실패해도 캐시에 들지 않는 쪽으로 기운다
 local errOut = out .. ".err"
 local failed = false
 function READSET_FAIL(e)
   failed = true
-  os.remove(out)
+  pcall(os.remove, out)
   local msg = tostring(e)
   pcall(function() io.stderr:write("[dq4readset] Lua 오류: ", msg, "\n") end)
-  local f = io.open(errOut, "a")
-  if f then f:write(msg, "\n"); f:close() end
+  pcall(function()
+    local f = io.open(errOut, "a")
+    if f then f:write(msg, "\n"); f:close() end
+  end)
 end
 
 -- 콜백의 반환값은 개수까지 그대로 넘긴다(메모리 콜백은 값을 돌려주어 읽은·쓴 값을 바꿀 수 있다). 매 명령마다 불리는 콜백도
@@ -42,11 +45,16 @@ local function pass(ok, ...)
   return ...
 end
 
+local stopped = false     -- emu.stop 을 불렀는가. 그 뒤로는 장면 콜백을 부르지 않는다
+
 local function guarded(fn)
-  return function(...) return pass(pcall(fn, ...)) end
+  return function(...)
+    if stopped then return end
+    return pass(pcall(fn, ...))
+  end
 end
 
--- MesenCE 는 지울 콜백을 add 가 돌려준 번호로 찾는다(실측: 함수를 넘기면 머리말이 없어도 지워지지 않는다). 그래서 감싼
+-- MesenCE 는 지울 콜백을 add 가 돌려준 번호로 찾는다(함수를 넘기면 머리말이 없어도 지워지지 않는다). 그래서 감싼
 -- 함수를 넘겨도 장면이 받은 번호로 그대로 지워진다. 머리말 자신의 콜백보다 먼저 건다
 for _, name in ipairs({"addEventCallback", "addMemoryCallback"}) do
   local orig = emu[name]
@@ -165,11 +173,13 @@ if hdma then
   end, emu.callbackType.write, 0x420C, 0x420C)
 end
 
-local stopped = false
 local stopOrig = emu.stop
+-- dump 가 던져도 stopOrig 는 꼭 부른다. 부르지 않으면 장면 콜백이 막힌 채 시간 초과까지 돈다
 emu.stop = function(...)
-  stopped = true
-  dump()
+  if not stopped then
+    stopped = true
+    local ok, e = pcall(dump)
+    if not ok then READSET_FAIL(e) end
+  end
   return stopOrig(...)
 end
-emu.addEventCallback(function() if stopped then dump() end end, emu.eventType.endFrame)
