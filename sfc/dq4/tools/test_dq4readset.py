@@ -1,5 +1,6 @@
 """dq4readset: 읽은 롬 바이트 캐시의 키·찾기·저장과, 머리말 Lua·러너가 지켜야 할 규칙(롬 없이)."""
 import ast
+import json
 import os
 from pathlib import Path
 import struct
@@ -251,6 +252,15 @@ class RunTests(unittest.TestCase):
         rs.run(self.mesence, self.rom, self.script, dest, {}, store=self.store, accept=lambda d: False)
         self.assertFalse(self.go()[0]['cached'])
 
+    def test_stats_records_each_run(self):
+        stats = Path(self.tmp.name) / 'stats.jsonl'
+        with mock.patch.dict(os.environ, {'DQ4_READSET_STATS': str(stats)}):
+            self.go()
+            self.go()
+        rows = [json.loads(line) for line in stats.read_text(encoding='utf-8').splitlines()]
+        self.assertEqual([(r['script'], r['cached'], r['readset']) for r in rows],
+                         [('scene.lua', False, 0x10), ('scene.lua', True, 0x10)])
+
 
 class RuleTests(unittest.TestCase):
     def test_runner_copies_rom_so_no_battery_save_leaks(self):
@@ -260,6 +270,15 @@ class RuleTests(unittest.TestCase):
                  and n.value.id == 'mesen'}
         self.assertIn('run', attrs)
         self.assertNotIn('testrunner', attrs)
+
+    def test_scene_checks_run_through_cache(self):
+        """장면형 검사가 MesenCE 를 직접(testrunner·mesen.run) 띄우면 캐시도 .srm 막이도 비껴간다."""
+        for name in ('dq4signcheck.py', 'dq4battlemsgcheck.py'):
+            tree = ast.parse((HERE / name).read_text(encoding='utf-8'))
+            calls = {(n.func.value.id, n.func.attr) for n in ast.walk(tree) if isinstance(n, ast.Call)
+                     and isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name)}
+            self.assertIn(('dq4readset', 'run'), calls, name)
+            self.assertFalse({c for c in calls if c[0] in ('dq4mesen', 'mesen')}, name)
 
     def test_clear_saves_removes_cdl(self):
         with tempfile.TemporaryDirectory() as d:

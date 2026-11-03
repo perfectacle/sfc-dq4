@@ -14,7 +14,6 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -28,7 +27,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
 
 import dq4freshstate  # noqa: E402
 import dq4fieldport  # noqa: E402
-import dq4mesen  # noqa: E402
+import dq4readset  # noqa: E402
 import dq4signs  # noqa: E402
 from dq4groupcheck import scene  # noqa: E402
 from dq5progresscheck import environment  # noqa: E402
@@ -66,7 +65,7 @@ def jobs(prg):
 
 
 def run_job(mesence, rom, state, out, name, at, button, command, want):
-    where = scene(mesence, rom, state, out, name, FIELD=f"{at[0]},{at[1]}",
+    where = scene(mesence, rom, state, out, name, readset=True, FIELD=f"{at[0]},{at[1]}",
                   ROMPATCH=dq4fieldport.warp_patch(rom.read_bytes(), *at), SAVE="scene.mss", TEST="wait:10")
     saved = out / name / "scene.mss"
     if where.get("field") != list(at) or not saved.is_file():
@@ -75,8 +74,7 @@ def run_job(mesence, rom, state, out, name, at, button, command, want):
     dest.mkdir()
     env = environment(os.environ["LIBDIR"], saved, dest)
     env["INPUT"] = TURN.format(button) + COMMANDS[command]
-    dq4mesen.testrunner(str(mesence), str(rom), str(CHECK), "--Snes.DisableFrameSkipping=true", env=env,
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300, check=False)
+    dq4readset.run(mesence, rom, CHECK, dest, env, timeout=300)
     trace = dest / "trace.txt"
     shown = [int(v, 16) for v in MESSAGE.findall(trace.read_text())] if trace.is_file() else []
     if command == "search" and shown[:1] == [SEARCH_FIRST]:

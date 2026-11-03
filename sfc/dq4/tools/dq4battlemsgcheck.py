@@ -15,7 +15,6 @@ import argparse
 import json
 import os
 import shutil
-import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -24,7 +23,7 @@ HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
 import dq4freshstate  # noqa: E402
-import dq4mesen as mesen  # noqa: E402
+import dq4readset  # noqa: E402
 import dq4battlemsg  # noqa: E402
 import dq4battletexts  # noqa: E402
 import dq4npccheck as nc  # noqa: E402
@@ -55,12 +54,7 @@ def run(mesence, libdir, rom, state, out, ids, field=False):
                LATECODES=','.join(f'{c:02X}' for c in dq4battlemsg.CODES[dq4battlemsg.POOL.index(dq4battlemsg.POOL_C[0]):]))
     if field:
         env.update(FIELD)
-    with (out / 'mesen.log').open('w') as log:
-        try:
-            mesen.run(mesence, rom, SWAP_LUA, folder=out, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=600,
-                      check=False)
-        except subprocess.TimeoutExpired:
-            pass
+    dq4readset.run(mesence, rom, SWAP_LUA, out, env, timeout=600)
     path = out / 'swap.txt'
     rows = [line.split() for line in path.read_text().splitlines() if line.strip()] if path.exists() else []
     return [(int(f), int(n, 16)) for f, n in rows]

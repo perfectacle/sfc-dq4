@@ -80,7 +80,7 @@ def _ship(mesence, rom, out, cache):
     hit = cache.get('ship', key, '.mss', state)
     if hit:
         return hit[0]
-    walk.run(mesence, rom, SHIP_LUA, out, {'SAVE': 'ship.mss'}, 900)
+    walk.run(mesence, rom, SHIP_LUA, out, {'SAVE': 'ship.mss'}, 900, readset=True)
     log = out / 'ship.txt'
     text = log.read_text(encoding='utf-8') if log.exists() else ''
     if not state.exists() or 'map 17/00' not in text:
@@ -91,14 +91,16 @@ def _ship(mesence, rom, out, cache):
 
 def _chapter1(mesence, rom, data, out, cache):
     import dq4ch1walkcheck as walk
-    state, r = walk.prologue(mesence, rom, data, out, walk.SEGMENTS, cache)
+    state, r = walk.prologue(mesence, rom, data, out, walk.SEGMENTS, cache, readset=True)
     if r['status'] != 'passed':
         raise SystemExit(f'서장 끝 상태를 만들지 못함({rom}): {r["problems"]}')
     return state
 
 
 def make(mesence, rom, out):
-    """rom 으로 만든 출발 세이브스테이트(SHA-1 을 적은 것)의 경로. 같은 롬·같은 코드로 만든 캐시가 있으면 그것을 쓴다."""
+    """rom 으로 만든 출발 세이브스테이트(SHA-1 을 적은 것)의 경로. 같은 롬·같은 코드로 만든 캐시가 있으면 그것을 쓴다.
+    없으면 상태를 만드는 MesenCE 실행마다 읽은 롬 바이트 캐시(dq4readset)를 써, 롬이 바뀌어도 그 실행이 읽은 바이트가
+    같으면 다시 걷지 않는다."""
     import dq4ch1walkcheck as walk
     rom = Path(rom).resolve()
     data = rom.read_bytes()

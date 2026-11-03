@@ -2,7 +2,12 @@
 
 헤드리스 장면 검사의 MesenCE 실행 하나를 「그 실행이 실제로 읽은 롬 바이트」 단위로 캐시한다. 롬이 바뀌어도 장면이 읽은 바이트가 그대로면 다시 돌리지 않고 출력 파일을 펼친다. 도구는 `sfc/dq4/tools/dq4readset.py`(캐시), `sfc/dq4/tools/lua/dq4readset.lua`(머리말), `sfc/dq4/tools/dq4readsetcheck.py`(건전성 검사)다.
 
-지금 이 캐시를 쓰는 곳은 창 글자 검사(`dq4windowcheck.py`)의 장면과 출발 상태(서장 시작·서장 걷기·순간이동)다.
+지금 이 캐시를 쓰는 곳:
+
+- 창 글자 검사(`dq4windowcheck.py`)의 장면과 출발 상태(서장 시작·서장 걷기·순간이동).
+- 필드 팻말 검사(`dq4signcheck.py`)의 순간이동 장면(`dq4groupcheck.scene(..., readset=True)`)과 팻말 장면.
+- 전투 메시지 검사(`dq4battlemsgcheck.py`)의 묶음 장면.
+- 장면형 검사의 출발 상태(`dq4freshstate.make`): 서장 끝(서장 시작·서장 걷기)과 배 선실. 같은 롬 SHA-1 로 만든 상태 캐시가 없을 때 이 캐시로 걷기를 건너뛴다.
 
 ## 왜 건전한가
 
@@ -57,6 +62,7 @@ work/cache/readset/index/<앞 2자>/<index_key>.json = [항목, …]   최근에
 | `DQ4_READSET_VERIFY` | 캐시가 맞은 장면 가운데 이 비율(기본 0.05)을 다시 돌려 출력을 견준다. 다르면 그 항목을 지우고 검사를 멈춘다(키에 빠진 입력이 있다는 뜻) |
 | `DQ4_READSET_CACHE` | 캐시 뿌리. 기본은 원래 체크아웃 `work/cache/readset`(워크트리끼리 함께 씀) |
 | `DQ4_READSET_MAX_GB` | 캐시 상한(기본 20). 넘으면 오래 안 맞은 index 부터 지우고 가리키는 곳이 없는 blob 을 지운다 |
+| `DQ4_READSET_STATS` | 이 파일에 실행마다 JSON 한 줄(장면 스크립트, 출력 폴더, 맞았는가, 읽은 바이트 수, 종료 코드)을 덧붙인다. 적중률을 잴 때 쓴다 |
 
 캐시는 `work/` 아래라 커밋되지 않는다. 롬·상태 파생물이므로 커밋하지 않는다(ROM-01).
 

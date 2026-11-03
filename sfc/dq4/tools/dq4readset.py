@@ -15,6 +15,7 @@
   DQ4_READSET_VERIFY=0.05  캐시가 맞은 장면 가운데 이 비율을 다시 돌려 출력이 같은지 본다. 다르면 실패
   DQ4_READSET_CACHE=폴더    캐시 뿌리(기본 원래 체크아웃 work/cache/readset)
   DQ4_READSET_MAX_GB=20    이보다 커지면 오래 안 쓴 항목부터 지운다
+  DQ4_READSET_STATS=파일    실행마다 한 줄(JSON: 스크립트·출력 폴더·맞았는가·읽은 바이트 수)을 덧붙인다(적중률 재기)
 """
 import base64
 import contextlib
@@ -419,6 +420,17 @@ def run(mesence, rom_path, script, dest, env, timeout=1800, extra=mesen.ARGS, lo
     """장면 하나. dest 에 출력이 생긴다(맞으면 캐시에서 펼침). accept(dest) 가 거짓이면 캐시에 넣지 않는다.
 
     돌려주는 dict: cached(맞음), returncode, timed_out, readset(읽은 바이트 수), key."""
+    info = _run(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag, accept, store)
+    stats = os.environ.get('DQ4_READSET_STATS')
+    if stats:
+        line = json.dumps({'script': Path(script).name, 'dest': str(dest), 'cached': info['cached'],
+                           'readset': info.get('readset'), 'returncode': info.get('returncode')})
+        with open(stats, 'a', encoding='utf-8') as f:
+            f.write(line + '\n')
+    return info
+
+
+def _run(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag, accept, store):
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
     rom = Path(rom_path).read_bytes()
