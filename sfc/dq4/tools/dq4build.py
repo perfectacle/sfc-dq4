@@ -32,8 +32,8 @@ import dq4buildcache  # noqa: E402
 import dq4romledger  # noqa: E402
 
 
-# 빌드가 하위 프로세스로 부르는 단계 스크립트. 회귀 가드 paths 와 그 시험이 이 목록을 본다. 여기 없는 스크립트는
-# script() 가 거부하므로 단계를 더하면 여기에도 적어야 한다
+# 빌드가 하위 프로세스로 부르는 단계 스크립트. 여기 없는 스크립트는 script() 가 거부하므로 단계를 더하면 여기에도
+# 적어야 한다. 이 목록을 보는 곳은 test_dq4readset 의 걷기·저장 검사 paths 시험 하나다
 STAGES = ('dq4titlelayers.py', 'dq4titlelayerpatch.py', 'dq4overture.py', 'dq4chapter1.py', 'dq4menupatch.py',
           'dq4soundset.py', 'dq4sparfx.py', 'dq4people.py')
 

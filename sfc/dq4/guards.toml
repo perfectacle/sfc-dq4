@@ -961,3 +961,18 @@ paths = [
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/ch1save-walk work/ch1save && uv run --locked python sfc/dq4/tools/dq4ch1walkcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/ch1save-walk --units && uv run --locked python sfc/dq4/tools/dq4ch1savecheck.py --rom work/ch1/dq4-ch1-full.sfc --states work/ch1save-walk --out work/ch1save"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+
+[[check]]
+name = "dq4-libretro-readset-soundness"
+why = "libretro bsnes 의 읽은 롬 바이트 비트맵(dq4cores 가 얹는 romtrace 패치)이 결과에 닿는 롬 읽기를 빠뜨리지 않게: 전원 장면과 저장 기록 이어 하기 장면에서 같은 실행 두 번이 같고, 읽은 집합·머리 밖을 모두 뒤집은 롬(체크섬 포함)에서 화면·WRAM·읽은 집합이 같고, 안 바이트 하나로 읽은 바이트 해시가 달라진다. 비트맵은 코어를 연 바로 뒤에 켜야 한다(SRAM 확인 직렬화도 코어를 돌린다)"
+paths = [
+  "sfc/dq4/tools/dq4cores.py",
+  "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
+  "sfc/dq4/tools/dq4libretro.py",
+  "sfc/dq4/tools/dq4libretroreadsetcheck.py",
+  "sfc/dq4/tools/dq4savefixture.py",
+  "sfc/dq4/tools/dq4readset.py",
+  "tools/headless_slots.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/lrreadset && uv run --locked python sfc/dq4/tools/dq4libretroreadsetcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/lrreadset"
+needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "코어(dq4cores 가 빌드, 또는 LIBRETRO_BSNES·LIBRETRO_SNES9X)"]

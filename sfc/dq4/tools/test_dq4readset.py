@@ -884,18 +884,32 @@ class RuleTests(unittest.TestCase):
             self.assertFalse(want - set(checks[name]['paths']), name)
 
     def test_build_stages_go_through_the_list(self):
-        """dq4build 가 단계 스크립트를 부르는 길은 script() 하나이고, STAGES 에 없는 이름은 거부한다."""
+        """dq4build 가 단계 스크립트를 부르는 길은 script() 하나이고, STAGES 에 없는 이름은 거부한다.
+        소스 모양 확인(빌드 파일의 글자 상수만 본다): '…py' 글자는 STAGES 의 원소이거나 step()·script() 의 첫 인자일 때만
+        쓴다(pool.submit(step, '…py') 포함). 변수·f-string·문자열 이어 붙이기로 만든 이름은 이 시험이 못 본다. 그런 길은 script() 의 거부가 막는다."""
         import dq4build
+        self.assertTrue(dq4build.STAGES)
+        for name in ('dq4menupatch.py', 'dq4chapter1.py', 'dq4soundset.py', 'dq4people.py'):
+            self.assertIn(name, dq4build.STAGES)
         self.assertEqual(dq4build.script('dq4menupatch.py'), HERE / 'dq4menupatch.py')
         with self.assertRaises(ValueError):
             dq4build.script('dq4new.py')
         for name in dq4build.STAGES:
             self.assertTrue((HERE / name).is_file(), name)
         tree = ast.parse((HERE / 'dq4build.py').read_text(encoding='utf-8'))
-        # 소스 모양 확인: HERE / '…py' 로 단계를 바로 부르는 곳이 없다
-        direct = [n for n in ast.walk(tree) if isinstance(n, ast.BinOp) and isinstance(n.right, ast.Constant)
-                  and isinstance(n.right.value, str) and n.right.value.endswith('.py')]
-        self.assertEqual(direct, [])
+        allowed = set()
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'STAGES' for t in n.targets):
+                allowed |= {id(e) for e in ast.walk(n.value)}
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in ('step', 'script') and n.args:
+                allowed.add(id(n.args[0]))
+            # pool.submit(step, '…py', …)
+            if isinstance(n, ast.Call) and len(n.args) > 1 and isinstance(n.args[0], ast.Name) and n.args[0].id == 'step':
+                allowed.add(id(n.args[1]))
+        doc = tree.body[0].value if tree.body and isinstance(tree.body[0], ast.Expr) else None
+        loose = [(n.lineno, n.value) for n in ast.walk(tree) if isinstance(n, ast.Constant) and n is not doc
+                 and isinstance(n.value, str) and n.value.endswith('.py') and id(n) not in allowed]
+        self.assertEqual(loose, [])
 
     def test_battle_rounds_bypass_cache(self):
         """소스 모양 확인: 전투 검사는 같은 상태에서 전투를 여러 번 돌려 결과가 같은지 보고 화면을 견준다. 그 전투 실행은 캐시를 거치지 않는다
