@@ -186,5 +186,9 @@ class RunTest(unittest.TestCase):
                 self.assertEqual(guards.run_check(manual, 30, logs)[0], 'skipped')
                 env = {'name': 'e', 'run': 'true', 'needs': ['GUARDS_TEST_UNSET_VAR']}
                 self.assertEqual(guards.run_check(env, 30, logs)[0], 'skipped')
+                # --no-cache: 통과 캐시를 건너뛰고, 검사 안의 장면 캐시도 끄게 DQ4_READSET=off 를 넘긴다
+                self.assertNotIn('캐시', guards.run_check(ok, 30, logs, no_cache=True)[1])
+                gate = {'name': 'gate', 'run': 'test "$DQ4_READSET" = off', 'needs': []}
+                self.assertEqual(guards.run_check(gate, 30, logs, no_cache=True)[0], 'passed')
             finally:
                 guards.cache_dir = old

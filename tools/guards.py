@@ -18,7 +18,8 @@
                                                  걸린 검사마다 본문에 결과 줄이 있는지 봄(CI)
 
 --run 은 같은 입력(.md 를 뺀 추적 파일 내용, 명령, --rom 롬 SHA-1)으로 이미 통과한 검사를 건너뛴다.
-캐시는 원래 체크아웃의 work/cache/guards 에 있어 워크트리끼리 함께 쓴다.
+캐시는 원래 체크아웃의 work/cache/guards 에 있어 워크트리끼리 함께 쓴다. --no-cache 는 이 캐시와 검사 안의
+장면 캐시(DQ4_READSET=off, sfc/dq4/docs/dq4-readset-format.md)를 모두 끄고 전부 돌린다(배포 관문).
 
 결과 줄: `- [x] <이름>: 통과 (…)` 또는 `- [x] <이름>: 해당 없음 — <이유>`. 그 밖의 글(「통과하지 못함」 등)은 실패로 친다.
 """
@@ -213,7 +214,7 @@ def kill_group(proc):
         pass
 
 
-def run_check(check, timeout, logs):
+def run_check(check, timeout, logs, no_cache=False):
     """검사 하나를 돌린다. (결과 'passed'|'failed'|'skipped', 본문 괄호 안 글)."""
     name, run = check['name'], check['run']
     if PLACEHOLDER.search(run):
@@ -223,7 +224,7 @@ def run_check(check, timeout, logs):
         return 'skipped', f'설정 안 된 환경 변수 {", ".join(unset)}'
     key = input_key(check)
     hit = cache_dir() / f'{name}-{key[:24]}.json'
-    if hit.is_file():
+    if hit.is_file() and not no_cache:
         old = json.loads(hit.read_text(encoding='utf-8'))
         return 'passed', f'캐시: 같은 입력으로 {old["when"]} 통과, {old["detail"]}'
     for d in out_dirs(run):
@@ -232,8 +233,9 @@ def run_check(check, timeout, logs):
     shown = log.relative_to(ROOT) if log.is_relative_to(ROOT) else log
     t0 = time.time()
     with log.open('w', encoding='utf-8') as out:
+        env = dict(os.environ, DQ4_READSET='off') if no_cache else None
         proc = subprocess.Popen(['bash', '-c', run], cwd=ROOT, stdout=out, stderr=subprocess.STDOUT,
-                                start_new_session=True)
+                                start_new_session=True, env=env)
         RUNNING.add(proc)
         try:
             code = proc.wait(timeout=timeout)
@@ -259,14 +261,14 @@ def run_check(check, timeout, logs):
     return 'passed', detail
 
 
-def run_all(hit, parallel, timeout):
+def run_all(hit, parallel, timeout, no_cache=False):
     """걸린 검사를 parallel 개씩 함께 돌리고 본문 결과 줄을 찍는다. 모두 통과하면 0."""
     logs = ROOT / 'work' / 'guards'
     logs.mkdir(parents=True, exist_ok=True)
     print(f'검사 {len(hit)}개를 {parallel}개씩 돌림(로그 work/guards/)', flush=True)
 
     def one(c):
-        status, detail = run_check(c, timeout, logs)
+        status, detail = run_check(c, timeout, logs, no_cache)
         print(f'  {c["name"]}: {status} ({detail})', flush=True)
         return c, status, detail
     # 롬을 스스로 빌드하는 검사는 다른 검사가 읽는 롬을 다시 쓸 수 있어 먼저 홀로 돌린다
@@ -320,6 +322,7 @@ def main():
     ap.add_argument('--run', action='store_true', help='걸린 검사를 돌린다(--base 와 함께)')
     ap.add_argument('--parallel', type=int, default=2, help='--run 에서 함께 돌릴 검사 수(검사마다 안에서 다시 병렬)')
     ap.add_argument('--timeout', type=int, default=1800, help='--run 에서 검사 하나의 시간 제한(초)')
+    ap.add_argument('--no-cache', action='store_true', help='--run 에서 검사 캐시·장면 캐시를 모두 끄고 전부 돌린다(배포 관문)')
     args = ap.parse_args()
     files = tracked()
     checks, problems = load(files)
@@ -341,7 +344,7 @@ def main():
         if args.pr_body:
             problems += body_problems(hit, args.pr_body.read_text(encoding='utf-8'))
         if args.run and hit and not problems:
-            return run_all(hit, args.parallel, args.timeout)
+            return run_all(hit, args.parallel, args.timeout, args.no_cache)
     elif args.pr_body or args.run:
         ap.error('--pr-body·--run 은 --base 와 함께')
     for p in problems:
