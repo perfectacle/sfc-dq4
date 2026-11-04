@@ -851,7 +851,8 @@ needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출�
 name = "dq4-environment-collision"
 why = "바꾼 맵의 셀 막힘·카운터 칸이 FC 블록 속성(dq4block.terrain)이 막는 칸과 같아야 한다. 롬이 없으면 건너뛰는 단위 테스트라 CI 가 대신 돌리지 못한다(#970). 건너뛰면 OK 줄이 달라 실패로 친다"
 paths = ["sfc/dq4/tools/dq4environmentrom.py", "sfc/dq4/tools/dq4environmentmap.py", "sfc/dq4/tools/test_dq4environment.py",
-         "fc/dq4/tools/dq4block.py"]
+         "fc/dq4/tools/dq4block.py", "fc/dq4/tools/dq4chest.py", "fc/dq4/tools/dq4map.py", "fc/dq4/tools/dq4field.py",
+         "fc/dq4/tools/dq4data.py", "fc/dq4/tools/dq4talk.py", "fc/dq4/tools/dq4text.py", "fc/dq4/tools/dq4bank.py"]
 run = "uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4environment.py -k CounterTests 2>&1 | tee work/environment-collision.log | tail -1 | grep -qx OK"
 needs = ["rom"]
 
@@ -859,7 +860,8 @@ needs = ["rom"]
 name = "dq4-unported-gates"
 why = "MAPS 밖 FC 맵에서 9C 성문을 가진 맵이 31-04·33-01·3C-00 셋뿐이고, 각 맵에서 생성기(dq4environmentrom.objects)가 잠금 0 성문(48) 하나를 만들어야 한다. FC 롬이 있어야 도는 단위 테스트라 CI 가 대신 돌리지 못한다. 건너뛰면 OK 줄이 달라 실패로 친다. 셋 가운데 하나를 MAPS 에 넣으면 실패하므로 그때 dq4gatecheck 실측으로 옮긴다"
 paths = ["sfc/dq4/tools/dq4environmentrom.py", "sfc/dq4/tools/dq4environmentmap.py", "sfc/dq4/tools/test_dq4environment.py",
-         "fc/dq4/tools/dq4block.py"]
+         "fc/dq4/tools/dq4block.py", "fc/dq4/tools/dq4chest.py", "fc/dq4/tools/dq4map.py", "fc/dq4/tools/dq4field.py",
+         "fc/dq4/tools/dq4data.py", "fc/dq4/tools/dq4talk.py", "fc/dq4/tools/dq4text.py", "fc/dq4/tools/dq4bank.py"]
 run = "uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4environment.py -k UnportedGateTests 2>&1 | tee work/unported-gates.log | tail -1 | grep -qx OK"
 needs = ["rom"]
 
