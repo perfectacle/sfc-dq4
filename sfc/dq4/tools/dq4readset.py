@@ -71,6 +71,8 @@ HEADER_AT, HEADER_LEN = 0x7FB0, 0x50
 # 머리 안 보수(2)·체크섬(2). 점수는 두 값이 아니라 「합이 $FFFF」·「둘 다 0 아님」 만 보므로 키에는 그 둘만 넣는다.
 # 체크섬은 빌드마다 바뀐다
 SUM_AT, SUM_LEN = 0x2C, 4
+# MesenCE 는 매핑을 고르기 전에 롬 앞 27바이트가 SPC 파일 머리인지 견준다(같으면 SPC 로 불러온다)
+SPC_MAGIC = b'SNES-SPC700 Sound File Data'
 CHECKSUM = range(0x7FDC, 0x7FE0)
 KEEP_ENTRIES = 8
 # emu.takeScreenshot 화면은 같은 실행을 되풀이해도 다를 수 있다(메모리·VRAM 덤프는 같은데 화면만 다름). 재검증은 이것을
@@ -136,7 +138,8 @@ def _candidates(rom):
         op = None
         if end - start == HEADER_LEN:
             reset = rom[start + 0x4C] | rom[start + 0x4D] << 8
-            # 두 에뮬레이터 모두 리셋 벡터가 $8000 아래면 그 후보를 버리고, 아니면 base + (벡터 & $7FFF) 를 읽는다
+            # 리셋 벡터가 $8000 아래면 MesenCE 는 그 후보를 버리고 bsnes 는 0점을 준다. 둘 다 첫 명령은 읽지 않는다.
+            # 아니면 base + (벡터 & $7FFF) 를 읽는다
             if reset >= 0x8000 and base + (reset & 0x7FFF) < len(rom):
                 op = base + (reset & 0x7FFF)
         out.append((start, end, op))
@@ -145,7 +148,7 @@ def _candidates(rom):
 
 def loader_ranges(rom):
     """에뮬레이터가 매핑을 고를 때 읽는 롬 구간 (시작, 길이). 보수·체크섬 칸은 빼고, 첫 명령 바이트는 넣는다."""
-    ranges = []
+    ranges = [(0, min(len(SPC_MAGIC), len(rom)))]
     for start, end, op in _candidates(rom):
         ranges += [(i, 1) for i in range(start, end) if not 0 <= i - start - SUM_AT < SUM_LEN]
         if op is not None:
@@ -154,8 +157,8 @@ def loader_ranges(rom):
 
 
 def rom_shape(rom):
-    """롬 크기와, 머리 후보마다 보수·체크섬을 뺀 머리, 보수·체크섬의 두 조건, 첫 명령 바이트."""
-    parts = [str(len(rom))]
+    """롬 크기, 롬 앞이 SPC 파일 머리인지, 머리 후보마다 보수·체크섬을 뺀 머리, 보수·체크섬의 두 조건, 첫 명령 바이트."""
+    parts = [str(len(rom)), f'spc{int(bytes(rom[:len(SPC_MAGIC)]) == SPC_MAGIC)}']
     for start, end, op in _candidates(rom):
         head = bytearray(rom[start:end])
         cond = ''

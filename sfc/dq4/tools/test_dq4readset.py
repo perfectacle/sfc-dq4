@@ -103,10 +103,30 @@ class PureTests(unittest.TestCase):
             for i in range(0x7FDC, 0x7FE0):
                 flipped[i] ^= 0xFF
             self.assertEqual(rs.rom_shape(flipped), before)
-        # 리셋 벡터가 $8000 아래면 그 후보의 첫 명령은 읽지 않는다
+        # 리셋 벡터가 $8000 아래면 그 후보의 첫 명령($1000 & $7FFF = $1000)은 읽지 않는다
         rom = rom_with(0x400000)
         rom[0x7FFC:0x7FFE] = b'\x00\x10'
-        self.assertNotIn(0, {i for s, n in rs.loader_ranges(rom) for i in range(s, s + n)})
+        self.assertNotIn(0x1000, {i for s, n in rs.loader_ranges(rom) for i in range(s, s + n)})
+        changed = bytearray(rom)
+        changed[0x1000] ^= 0x78
+        self.assertEqual(rs.rom_shape(changed), rs.rom_shape(rom))
+        # 같은 벡터의 위쪽($9000)이면 같은 자리를 읽는다
+        rom[0x7FFC:0x7FFE] = b'\x00\x90'
+        self.assertIn(0x1000, {i for s, n in rs.loader_ranges(rom) for i in range(s, s + n)})
+        changed = bytearray(rom)
+        changed[0x1000] ^= 0x78
+        self.assertNotEqual(rs.rom_shape(changed), rs.rom_shape(rom))
+        # MesenCE 가 견주는 SPC 파일 머리(롬 앞 27바이트)
+        self.assertIn((0, 27), [(s, min(n, 27)) for s, n in rs.loader_ranges(rom) if s == 0])
+        spc = bytearray(rom)
+        spc[:27] = rs.SPC_MAGIC
+        self.assertNotEqual(rs.rom_shape(spc), rs.rom_shape(rom))
+
+    def test_repo_lua_does_not_read_rom_hash(self):
+        """소스 모양 확인: 롬 모양 키는 롬 전체 해시를 넣지 않는다. 그 해시를 장면이 읽으면(MesenCE
+        emu.getRomInfo().fileSha1Hash) 결과가 키 밖의 롬 바이트에 닿으므로, 저장소 Lua 는 그것을 읽지 않는다."""
+        bad = [str(f) for f in rs.lua_files() if 'fileSha1Hash' in f.read_text(encoding='utf-8', errors='replace')]
+        self.assertEqual(bad, [])
 
     def test_state_hash_ignores_rom_file_name_only(self):
         a = mss(b'probe-855474adcaf4.sfc')

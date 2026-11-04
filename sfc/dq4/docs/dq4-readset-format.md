@@ -53,7 +53,7 @@ work/cache/readset/index/<앞 2자>/<index_key>.json = [항목, …]   최근에
 | 에뮬레이터 | MesenCE 실행 파일의 크기·mtime, 명령줄 인자, 고정 인자(`--Snes.RamPowerOnState=AllZeros --Snes.EnableRandomPowerOnState=false`), 사용자 `settings.json` 원 바이트의 해시. 고정 인자 없이 띄우면 이 머신 설정(`RamPowerOnState: Random`)으로는 전원을 켠 첫 프레임의 WRAM 이 무작위였다. 이 인자로 0, `AllOnes` 로 FF 가 되는 것을 실측했다 |
 | 환경 변수 | 위 Lua 가 `os.getenv` 로 읽는 이름의 값만. 경로는 내용으로 바꾼다: 출력 폴더 안이면 상대 경로(아직 없는 출력 경로도), 파일이면 해시(세이브스테이트는 롬 이름을 지운 해시), Lua 폴더면 `code`, 그 밖의 폴더면 안 파일들의 해시. 상대 경로는 Lua 가 도는 작업 폴더 기준으로 본다. 출력 폴더 밖의 없는 절대 경로는 `absent:` 를 붙인다(나중에 그 자리에 파일이 생기면 빗나간다). `SHOT_DIR`·`READSET_*` 는 뺀다 |
 | 출발 파일 | 돌리기 전에 출력 폴더에 있던 파일의 해시 |
-| 롬 모양 | 롬 크기와, 롬을 불러올 때 에뮬레이터가 매핑을 고르며 읽는 바이트(`rom_shape`, 아래 「롬 모양」). 이 읽기와 전원·리셋 때 리셋 벡터(`$7FFC`)를 읽는 것은 카운터에 잡히지 않는다(실측: 그 두 바이트만 뒤집어도 서장 시작 상태가 달라짐) |
+| 롬 모양 | 롬 크기와, 롬을 불러올 때 에뮬레이터가 매핑을 고르며 읽는 바이트(`rom_shape`, 아래 「롬 모양」). 이 읽기와 전원·리셋 때 리셋 벡터(`$7FFC`) 읽기는 카운터에 잡히지 않으므로 `rom_shape` 키가 맡는다(실측: 리셋 벡터 두 바이트만 뒤집어도 서장 시작 상태가 달라짐) |
 
 키를 만든 롬 바이트는 실행 폴더에 사본(`.readset-rom.sfc`)으로 써서 그 사본으로 MesenCE 를 띄운다. 키를 만든 뒤 롬 파일이 바뀌어도 키와 실제로 돌린 롬이 같다. 사본은 실행 뒤 지우고 출력으로 치지 않는다.
 
@@ -66,7 +66,8 @@ work/cache/readset/index/<앞 2자>/<index_key>.json = [항목, …]   최근에
   - bsnes(`heuristics/super-famicom.cpp` 의 `SuperFamicom`·`scoreHeader`): 후보는 $7FB0·$FFB0·$407FB0·$40FFB0(MesenCE 후보 가운데 카피어 머리 없는 넷)이다. 롬이 후보 + $50 보다 작으면 0점이다. 맵 모드, 「보수 + 체크섬 = $FFFF」, 리셋 벡터, 같은 자리의 첫 명령 바이트를 본다. 카피어 머리는 롬 크기로만 가린다.
   - 그래서 키에는 롬에 걸치는 후보마다 보수·체크섬 네 바이트를 뺀 $50 바이트, 그 두 조건(합이 $FFFF, 둘 다 0 아님), 첫 명령 바이트를 넣는다. 보수·체크섬 값 자체는 빌드마다 바뀌므로 넣지 않는다. 네 바이트를 모두 뒤집어도 두 조건은 그대로다.
   - 이 롬(4MB LoROM)에서는 후보 넷($7FB0·$81B0·$FFB0·$101B0)이 걸친다. 4MB 를 넘으면 $407FB0 쪽 넷도 더해진다.
-  - 롬 전체 해시(MesenCE CRC·SHA-1, bsnes SHA-256)는 넷플레이·HD 팩·게임 정보에만 쓰고 SFC 에뮬레이션은 바꾸지 않는다. 키에 넣으면 캐시가 늘 빗나가므로 넣지 않는다. bsnes `hackPatchMemory` 는 BS-X 제목에서만 롬을 고친다.
+  - MesenCE 는 그보다 먼저 롬 앞 27바이트가 SPC 파일 머리(`SNES-SPC700 Sound File Data`)인지 견준다. 키에는 「같은가」 만 넣고, `loader_ranges` 는 그 27바이트를 넣는다.
+  - 롬 전체 해시(MesenCE CRC·SHA-1, bsnes SHA-256)는 키에 넣지 않는다(넣으면 캐시가 늘 빗나간다). MesenCE 에서 이 해시를 쓰는 곳은 넷플레이·무비·치트 창·Lua `emu.getRomInfo().fileSha1Hash` 다. 저장소 Lua 가 `fileSha1Hash` 를 읽지 않는 한 장면 결과를 바꾸지 않는다. 시험 `test_repo_lua_does_not_read_rom_hash` 가 이것을 지킨다. bsnes `hackPatchMemory` 는 BS-X 제목에서만 롬을 고친다.
   - 소스는 MesenCE 4b8a196e(nesdev-org/MesenCE)와 bsnes 63ee22f7 에서 확인했다. 쓰는 MesenCE 실행 파일의 정확한 커밋은 실행 파일에서 찾지 못했다. 매핑을 고르는 코드가 바뀌면 이 목록을 다시 본다.
 - MesenCE 세이브스테이트 머리에는 띄운 롬 파일 이름이 들어 있다. `dq4mesen.unique_copy` 가 실행마다 이름을 다르게 지으므로 같은 실행이라도 상태 파일이 12바이트 다르다. 상태 해시는 이 이름 칸을 지우고 낸다(`state_hash`). 이름은 압축한 화면 그림 뒤에 와서 그림 크기에 따라 자리가 바뀐다(8KB 뒤에 온 상태도 있었다). 그래서 파일 전체에서 찾는다. 상태 안에 롬 SHA-1·CRC 는 없다. MesenCE 는 상태를 불러올 때 이 이름을 보지 않는다. 그룹 롬 선실 상태의 이름 칸만 같은 길이의 다른 이름으로 바꿔 불러도, 120프레임 뒤 WRAM 128KB 가 원래 상태와 같았다(두 번씩). 다른 상태를 불러오면 달랐다. 그래서 캐시에서 펼친 상태(첫 실행의 롬 사본 이름이 든 것)로 다음 장면을 출발해도 된다.
 - MesenCE 는 롬 파일 이름으로 배터리 기록(`.srm`)을 읽는다. 롬을 같은 이름으로 띄우면 앞 실행의 SRAM 을 읽어 결과가 달라진다. 그래서 캐시 실행은 롬을 복사해 띄우는 `dq4mesen.run` 만 쓰고, 복사하지 않는 `dq4mesen.testrunner` 는 쓰지 않는다. `dq4mesen.clear_saves` 는 그 이름의 `.srm` 과 `Debugger/<이름>.cdl` 을 지운다. `.cdl` 은 롬 크기만 해서 실행마다 쌓이면 디스크를 채운다.
