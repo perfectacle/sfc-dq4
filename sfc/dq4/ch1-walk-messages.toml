@@ -1,0 +1,199 @@
+# 1장 걷기 검사(dq4ch1walkcheck.py)가 구간마다 견주는 메시지 번호(24:8BAF 가 받은 A)의 처음 나온 차례.
+# 고칠 때는 손으로 쓰지 않고 dq4ch1walkcheck.py --write-messages "까닭" 으로 다시 만든다. 차례가 바뀐 구간에만
+# 그 까닭이 reason 으로 남는다.
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "prologue"
+messages = ["CA8", "CA9", "CAA", "CAB", "CAD", "129", "186", "CAE", "CAF", "CB0", "CB1", "CB2", "CB3", "CB4", "CB5", "CB7", "CB8", "CB9", "CBA", "CBB", "CBC", "CBD", "C80", "C81", "C82"]
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "throne_out"
+messages = []
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "imuru_night"
+messages = []
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "night_child"
+messages = ["E61"]
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "castle_day"
+messages = []
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "flare"
+messages = ["E65", "129"]
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "jail_gate"
+messages = []
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "jail"
+messages = []
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "reunion"
+messages = ["E66", "E67", "129"]
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "well"
+messages = []
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "hoimin_side"
+messages = []
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "hoimin"
+messages = ["E6B", "E6C", "129"]
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "well_hole"
+messages = []
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "shoes_chest"
+messages = []
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "shoes"
+messages = ["131", "12E", "132"]
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "castle_town"
+messages = []
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "field"
+messages = []
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "fly"
+messages = ["1C6"]
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "kidnap"
+messages = ["129", "E6E"]
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "tower_top"
+messages = []
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "boss"
+messages = ["E81", "E6F", "E70", "129", "E71"]
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "tower_soldier"
+messages = []
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "soldier"
+messages = ["E72"]
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "imuru_gate"
+messages = []
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "imuru"
+messages = ["E73"]
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "homecoming"
+messages = ["129"]
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "castle"
+messages = []
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "king"
+messages = ["E75", "E79", "E90", "E7A", "E7B", "E7C", "E7E", "E7F", "E7D", "E76"]
+reason = "처음 만듦: 구간마다 걸으며 뜬 메시지의 처음 나온 차례"

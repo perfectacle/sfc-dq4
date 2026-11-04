@@ -52,6 +52,12 @@ class Ch1WalkCheckTests(unittest.TestCase):
         names = [[wc.SEGMENTS[i][0] for i in u] for u in wc.units(wc.SEGMENTS)]
         self.assertIn(['castle_town', 'field', 'fly', 'kidnap'], names)
         self.assertIn(['castle', 'king', 'ending'], names)
+        # 실제 계단으로 걸어 들어가는 구간: 순간이동은 계단 옆까지, 영역 이동은 걷는 구간이 한다
+        self.assertIn(['jail_gate', 'jail', 'reunion'], names)
+        self.assertIn(['imuru_gate', 'imuru', 'homecoming'], names)
+        seg = {x[0]: x for x in wc.SEGMENTS}
+        self.assertEqual((seg['jail'][1], seg['jail'][3]['map']), ('walk', '37/02'))
+        self.assertEqual((seg['imuru'][1], seg['imuru'][3]['map']), ('walk', '37/00'))
 
     def test_setup_carries_flags_and_effects(self):
         names = [s[0] for s in wc.SEGMENTS]
@@ -178,6 +184,48 @@ class Ch1WalkCheckTests(unittest.TestCase):
 
     def test_frames_cover_presses(self):
         self.assertEqual(wc.frames('a:8;wait:50;3,4'), 300 + 58 + 400)
+
+
+class MessageBaselineTests(unittest.TestCase):
+    def test_order_keeps_first_appearance(self):
+        self.assertEqual(wc.message_order(['E79', 'E90', 'E7A', 'E90', 'E79', '129']), ['E79', 'E90', 'E7A', '129'])
+
+    def test_problems(self):
+        base = {('chapter1', 0, 'flare'): {'messages': ['E65', '129'], 'reason': 'x'}}
+        ok = {'name': 'flare', 'messages': ['E65', '129', '129']}
+        self.assertEqual(wc.message_problems('chapter1', 0, ok, base), [])
+        lost = wc.message_problems('chapter1', 0, {'name': 'flare', 'messages': ['129']}, base)
+        self.assertIn('빠짐 E65', lost[0])
+        swap = wc.message_problems('chapter1', 0, {'name': 'flare', 'messages': ['129', 'E65']}, base)
+        self.assertIn('기준 E65 129, 실제 129 E65', swap[0])
+        self.assertIn('더함 E66', wc.message_problems('chapter1', 0, {'name': 'flare', 'messages': ['E65', 'E66', '129']},
+                                                       base)[0])
+        self.assertEqual(wc.message_problems('chapter1', 0, {'name': 'jail', 'messages': []}, base),
+                         ['메시지 기준 없음(chapter1, 시드 0)'])
+        # 기준이 없는 변형·시드와 메시지를 모으지 않는 구간(ending)은 보지 않는다
+        self.assertEqual(wc.message_problems('chapter2', 0, ok, base), [])
+        self.assertEqual(wc.message_problems('chapter1', 5, ok, base), [])
+        self.assertEqual(wc.message_problems('chapter1', 0, {'name': 'ending'}, base), [])
+
+    def test_write_keeps_reason_of_unchanged(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'm.toml'
+            wc.write_messages([('chapter1', 0, 'flare', ['E65', '129']), ('chapter1', 0, 'jail', [])], '처음', path)
+            wc.write_messages([('chapter1', 0, 'flare', ['E65', '129', '129']), ('chapter1', 0, 'jail', ['E66'])],
+                              '감옥 대사', path)
+            got = wc.load_messages(path)
+        self.assertEqual(got['chapter1', 0, 'flare'], {'messages': ['E65', '129'], 'reason': '처음'})
+        self.assertEqual(got['chapter1', 0, 'jail'], {'messages': ['E66'], 'reason': '감옥 대사'})
+
+    def test_baseline_file_covers_segments(self):
+        base = wc.load_messages()
+        names = {k[2] for k in base if k[:2] == ('chapter1', 0)}
+        want = {s[0] for s in wc.SEGMENTS if s[1] != 'ending'}
+        self.assertEqual(names, want)
+        for e in base.values():
+            self.assertTrue(e['reason'])
+            self.assertEqual(e['messages'], wc.message_order(e['messages']))
 
 
 if __name__ == '__main__':
