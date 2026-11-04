@@ -3,12 +3,15 @@
 -- 뱅크 40~7D 아래 절반(WRAM 거울이 아니라 열린 버스·롬 거울·SRAM)이다. 그때 기록 줄은 「R pc=24:FE52 bank=5E」 이고,
 -- 범위를 주면 주소까지 「R pc=24:FE52 bank=00 at=4380」 으로 적는다. 콜백 수가 늘면 느려져 장면이 시간 제한에 걸리므로
 -- 넓은 범위는 여러 실행으로 나눠 준다.
-local log = os.getenv("OPENBUS_LOG")
+-- 여러 MesenCE 가 같은 파일에 덧붙인다. 파일은 한 번만 열어 두고 줄마다 비운다(줄마다 열고 닫으면 같은 루틴이 수만
+-- 자리를 읽는 장면에서 콜백이 느려진다)
+local out = io.open(os.getenv("OPENBUS_LOG"), "a")
 local seen = {}
 local function put(line)
   if not seen[line] then
     seen[line] = true
-    local f = io.open(log, "a"); f:write(line .. "\n"); f:close()
+    out:write(line, "\n")
+    out:flush()
   end
 end
 local spec = os.getenv("OPENBUS_RANGES") or ""

@@ -193,6 +193,14 @@ def main():
         raise SystemExit(f'{ledger_path} 가 없음(dq4build.py 가 롬 옆에 둠)')
     patched = patched_ranges(json.loads(ledger_path.read_text()))
     pairs = [(s, r) for s in scenes for r in a.ranges.split(',')]
+    # 장면 검사는 서장 끝 상태를 캐시에서 받는다. 캐시가 비어 있으면 프로브를 붙인 채 서장을 걷게 되는데, 그때 MesenCE 가
+    # 출력 없이 끝난 일이 있었다(서장은 dq4-openbus-probe 가 본다). 그래서 롬마다 서장 끝 상태를 프로브 없이 먼저 만든다
+    roms = {a.rom} | ({a.window_rom} if 'window' in scenes else set())
+    for k, rom in enumerate(sorted(roms)):
+        with (out / f'warm-{k}.log').open('w') as f:
+            if subprocess.run([sys.executable, str(HERE / 'dq4ch1walkcheck.py'), '--rom', str(rom), '--out',
+                               str(out / f'warm-{k}'), '--until', 'prologue'], stdout=f, stderr=subprocess.STDOUT).returncode:
+                raise SystemExit(f'서장 끝 상태를 만들지 못함: {rom.name}(warm-{k}.log)')
     if 'save' in scenes:
         # 저장 장면의 출발 상태는 범위마다 같은 것을 쓰므로 먼저 한 번 만든다
         pre, _ = commands('save', 'high', a, out)
