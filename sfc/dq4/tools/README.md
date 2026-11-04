@@ -63,6 +63,7 @@
 | `dq4namecursorcheck.py --rom 롬 --symbols 심볼 --out 새폴더` | MesenCE 실제 입력으로 빠른 방향 전환·겹침·반복·빈칸 경계와 Start 이동을 검사. `MESENCE` 실행 파일 필요. [재현](../docs/dq4-name-entry-format.md#재현) |
 | `dq4menucursorcheck.py --rom 1장롬 --out 새폴더` | 1장 롬을 전원부터 켜 게임 안 명령 창에서 두 방향 겹침·한쪽 떼기·반복이 한 칸씩 움직이는지 실제 입력으로 검사. `MESENCE` 필요. [방향 처리](../docs/dq4-name-entry-format.md#방향-처리) |
 | `dq4namegamecheck.py --rom 선실이남은롬 --out 새폴더` | 선실에서 주인공 이름을 넣고 메시지 첫 코드를 `1012` 로 바꿔, 한글·가나 이름이 맞는 글자 코드가 되는지 MesenCE 로 검사. `MESENCE` 필요. [게임 안 이름](../docs/dq4-name-entry-format.md#게임-안-이름) |
+| `dq4ff9acheck.py --rom 선실이남은롬 --out 새폴더 [--original]` | 선실의 파파스를 슬라임 레이스 시설(대화 번호 `00D`)로 바꿔 레이스 화면을 띄우고, NMI 작업 `FF9A` 마다 `WqNmiEntry` 가 돌고 그 동안 넣은 창 글자 대기열 항목이 다음 NMI 에 나가는지 MesenCE 로 봄(`lua/dq4ff9acheck.lua`). `--original` 은 원본 DQ5 롬으로 `FF9A` 작업이 도는 것만. [NMI 작업마다 걸기](../docs/dq4-window-text-format.md#nmi-작업마다-걸기2026-11-03) |
 | `dq4namesave.py show\|convert` | SRAM 주인공 이름의 부호(한글·예전 한글·가나)를 보고, 고른 칸의 예전 한글 이름을 표시 있는 부호로 바꿔 새 파일에 씀. [예전 저장](../docs/dq4-name-entry-format.md#예전-저장) |
 | `dq4namegame.py` | `dq4menupatch.py build` 가 부르는 게임 안 메시지 이름 모듈(`24:A7D5` → `24:9E11`) |
 | `dq4bg3tiles.py 장면=VRAM덤프 ...` | VRAM 덤프에서 BG3 타일맵이 가리키는 칸과 빈 칸을 셈. [게임 안 창 한글 조사](../docs/dq4-window-text-format.md) |
@@ -77,6 +78,7 @@
 | `lua/dq4heroblock.lua` | `dq4heroblockcheck.py` 가 부름. `WALK_STATE`(dq4walkstate.lua)를 그대로 돌리며, 메시지 루틴 `24:8BAF` 가 `SNAPMSG` 번호를 처음 받은 뒤 `SNAPDELAY` 프레임(기본 40)에 `SNAPWATCH` 값을 `snap.txt`, 화면을 `snap.png` 로 남김 |
 | `lua/dq4fieldmath.lua` | `dq4fieldmathcheck.py` 가 부름. `dq5warp.lua` 를 그대로 돌리고, 끝 프레임의 PPU 색 연산 층 비트·`$BE` 와 화면 안 OAM 의 자리·팔레트를 `math.txt` 로 남김 |
 | `dq4battlecheck.py --rom 롬 --out 폴더 [--base 서장끝.mss] [--repeat 2] [--scenes 장면…]` | 조우 루틴 `23:E7C2` 를 정한 무리로 덮어 필드·탑 `39/01` 에서 걸음 전투를 붙이고, 이기기·도망 뒤 무리·금화·돌아온 맵·칸·곡·화면·걷기를 보고, 같은 세이브스테이트에서 두 번 돌려 기록이 같은지 보는 MesenCE 헤드리스 검사. `lua/dq4battle.lua` 를 씀. [걸음 전투 검사](../docs/dq4-chapter1-format.md#걸음-전투-검사) |
+| `dq4bigpiccheck.py --rom 1장롬 --out 새폴더 [--base 서장끝.mss] [--scenes tower,field,slimes]` | 몬스터 능력치를 고치지 않은 걸음 전투에서 전투 큰 그림 길(`$0DF3` ≠ 0)이 이어지는 길이, 그 길 NMI 의 창 글자 대기열 항목, 그 길에 넣은 항목이 나가기까지의 NMI 수를 MesenCE 로 잼(`lua/dq4bigpic.lua` → `lua/dq4battle.lua`). 통과: 이어진 길이·나가기까지의 NMI 수가 `LIMIT` 이하, 넣은 항목이 모두 나감(넣기 전 VRAM 다름 → 나간 뒤 같음), 모든 실행이 맵으로 돌아옴, 두 실행 기록 전체가 같음. 서장은 읽은 바이트 캐시 없이 걸음. [NMI 작업마다 걸기](../docs/dq4-window-text-format.md#nmi-작업마다-걸기2026-11-03)의 「전투 연출 동안 큰 그림 길」 |
 | `dq4battlescene.py --rom 롬 --out 폴더 [--seeds 0,1,2] [--scenes 장면…] [--core all\|bsnes\|snes9x] [--repeat 2] [--jobs 4]` | 전투 장면 검사(libretro bsnes·snes9x): 저장 기록으로 이어 해 탑 `39/01` 에서 정한 무리와 싸움(보통 공격·회심, 도망, 도망칠 수 없는 무리, 약초, 호이민의 ホイミ, 레벨업 한 번·두 번, 전멸, 탑 위 보스). 금화·경험치·레벨·능력치·HP·MP·물건·flag·다시 시작 자리·곡 `$1D8B`·조작이 돌아오는지를 WRAM 으로 판정하고, 선제·기습·회심·도망 실패를 시드마다 셈. [전투 장면 검사](../docs/dq4-battle-scene-format.md) |
 | `lua/dq4battle.lua` | `dq4battlecheck.py` 가 부름. 한 걸음 내디뎌 전투(`01:860D`)가 걸리면 `KEYS` 를 차례로 누르고, 끝나(`00:82BE`) 돌아온 맵·칸·곡·금화를 `battle.txt` 에, 화면을 `start.png`·`fight.png`·`after.png` 로 |
 | `dq4soundcatalog.py --assets 폴더 [--dq5-rom 롬] --out JSON` | NDS 곡·효과음 목록, FC 장면 대응, DQ5 재사용 후보와 숙박곡 비교. [사운드 포팅](../docs/dq4-sound-port-format.md) |
