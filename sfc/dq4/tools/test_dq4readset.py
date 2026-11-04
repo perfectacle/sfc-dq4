@@ -55,16 +55,58 @@ class PureTests(unittest.TestCase):
         self.assertIs(rs.find([a, b], rom), b)
         self.assertIsNone(rs.find([a], rom))
 
-    def test_rom_shape_keeps_header_but_checksum(self):
-        rom = bytearray(0x8000)
-        rom[0x7FD5] = 0x20
-        before = rs.rom_shape(rom)
-        rom[0x7FDC:0x7FE0] = b'\x12\x34\x56\x78'
-        self.assertEqual(rs.rom_shape(rom), before)
-        for at in (0x7FB0, 0x7FC0, 0x7FD7, 0x7FDB, 0x7FFC, 0x7FFF):
-            changed = bytearray(rom)
-            changed[at] ^= 1
-            self.assertNotEqual(rs.rom_shape(changed), before, hex(at))
+    def test_rom_shape_covers_every_mapping_candidate(self):
+        """롬 모양 키는 에뮬레이터가 매핑을 고를 때 읽는 바이트를 모두 덮는다: 머리 후보 $7FB0·$81B0·$FFB0·$101B0
+        (4MB 를 넘으면 $407FB0 쪽 넷도)마다 보수·체크섬을 뺀 $50 바이트, 두 조건, 리셋 벡터가 가리키는 첫 명령 바이트.
+        보수·체크섬 값만 바뀌고 두 조건이 같으면 키가 같다."""
+        def rom_with(size):
+            rom = bytearray(size)
+            for base in rs.HEADER_BASES:
+                at = base + rs.HEADER_AT
+                if at + rs.HEADER_LEN <= size:
+                    rom[at + 0x4C:at + 0x4E] = b'\x00\x80'   # 리셋 벡터 $8000 → 첫 명령 base + 0
+                    rom[at + rs.SUM_AT:at + rs.SUM_AT + 4] = b'\x34\x12\xcb\xed'   # 보수 + 체크섬 = $FFFF
+            return rom
+        for size in (0x400000, 0x600000):
+            rom = rom_with(size)
+            before = rs.rom_shape(rom)
+            starts = [b + rs.HEADER_AT for b in rs.HEADER_BASES if b + rs.HEADER_AT + rs.HEADER_LEN <= size]
+            self.assertEqual(len(starts), 4 if size == 0x400000 else 8)
+            ranges = rs.loader_ranges(rom)
+            covered = {i for s, n in ranges for i in range(s, s + n)}
+            for start in starts:
+                for off in range(rs.HEADER_LEN):
+                    at = start + off
+                    changed = bytearray(rom)
+                    changed[at] ^= 1
+                    if rs.SUM_AT <= off < rs.SUM_AT + rs.SUM_LEN:
+                        self.assertNotIn(at, covered)
+                        continue
+                    self.assertIn(at, covered, hex(at))
+                    self.assertNotEqual(rs.rom_shape(changed), before, hex(at))
+                op = start - rs.HEADER_AT
+                self.assertIn(op, covered)
+                changed = bytearray(rom)
+                changed[op] ^= 0x78
+                self.assertNotEqual(rs.rom_shape(changed), before, f'첫 명령 {op:x}')
+            # 보수·체크섬 값만 바꾸고 조건은 그대로: 같은 키
+            same = bytearray(rom)
+            same[0x7FDC:0x7FE0] = b'\xff\x00\x00\xff'
+            self.assertEqual(rs.rom_shape(same), before)
+            # 조건이 바뀜(합이 $FFFF 아님, 또는 한쪽이 0): 다른 키
+            for sums in (b'\x34\x12\xcb\xee', b'\xff\xff\x00\x00'):
+                changed = bytearray(rom)
+                changed[0xFFDC:0xFFE0] = sums
+                self.assertNotEqual(rs.rom_shape(changed), before, sums.hex())
+            # 뒤집기 시험처럼 네 바이트를 모두 뒤집어도 두 조건은 그대로다
+            flipped = bytearray(rom)
+            for i in range(0x7FDC, 0x7FE0):
+                flipped[i] ^= 0xFF
+            self.assertEqual(rs.rom_shape(flipped), before)
+        # 리셋 벡터가 $8000 아래면 그 후보의 첫 명령은 읽지 않는다
+        rom = rom_with(0x400000)
+        rom[0x7FFC:0x7FFE] = b'\x00\x10'
+        self.assertNotIn(0, {i for s, n in rs.loader_ranges(rom) for i in range(s, s + n)})
 
     def test_state_hash_ignores_rom_file_name_only(self):
         a = mss(b'probe-855474adcaf4.sfc')
@@ -320,6 +362,20 @@ class RunTests(unittest.TestCase):
         self.flip(0x45)        # 안
         self.assertFalse(self.go()[0]['cached'])
         self.assertEqual(self.fake.calls, 2)
+
+    def test_mapping_candidate_bytes_miss(self):
+        """읽은 집합 밖이라도 에뮬레이터가 매핑을 고를 때 읽는 후보 머리($FFB0 쪽)·첫 명령 바이트가 바뀌면 빗나간다."""
+        rom = bytearray(0x10000)
+        rom[0xFFFC:0xFFFE] = b'\x00\x90'     # $FFB0 후보의 리셋 벡터 → 첫 명령 $8000 + $1000
+        self.rom.write_bytes(rom)
+        self.go()
+        self.assertTrue(self.go()[0]['cached'])
+        self.flip(0x20)        # 읽은 집합 밖, 로더도 안 읽음
+        self.assertTrue(self.go()[0]['cached'])
+        for at in (0xFFD5, 0xFFDB, 0x9000):    # 후보 머리의 맵 모드, 그 밖 칸, 후보의 첫 명령
+            self.flip(at)
+            self.assertFalse(self.go()[0]['cached'], hex(at))
+            self.assertTrue(self.go()[0]['cached'], hex(at))
 
     def test_inputs_outside_rom_miss(self):
         self.go()

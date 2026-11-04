@@ -6,13 +6,14 @@
   결정성  같은 장면을 두 번 돌리면 화면·WRAM·읽은 집합이 같다
   호환    비트맵을 켜지 않은 실행도 화면·WRAM 이 같다(패치가 에뮬레이션을 바꾸지 않음). --original 로 패치하지 않은
           bsnes 를 주면 그 코어와도 견준다
-  밖      읽은 집합과 롬 머리($7FB0~$7FFF, 체크섬 빼고) 밖 바이트를 모두 뒤집은 롬(체크섬도 뒤집음)으로 돌려도
+  밖      읽은 집합과 롬을 불러올 때 매핑을 고르며 읽는 바이트(dq4readset.loader_ranges: 머리 후보마다 보수·체크섬
+          빼고, 첫 명령 바이트) 밖을 모두 뒤집은 롬(보수·체크섬도 뒤집음)으로 돌려도
           화면·WRAM·읽은 집합이 같다
   안      읽은 집합 안 바이트 하나를 바꾼 롬은 읽은 바이트 해시가 달라진다(캐시가 빗나감). 이 시험은 해시 쪽만 본다
   다시 열기  한 프로세스에서 작은 롬을 추적 켜고 연 뒤 원래 롬을 추적 끄고 열어 전원 장면을 돌린다. 앞 비트맵에 더
           써지지 않고(롬을 다시 잡으면 코어가 추적을 끈다), 화면·WRAM 이 따로 돌린 전원 장면과 같다
 
-롬 머리는 「밖」 에서 뒤집지 않는다. 머리는 dq4readset 의 롬 모양 키가 따로 맡는다.
+그 로더 바이트는 「밖」 에서 뒤집지 않는다. dq4readset 의 롬 모양 키(rom_shape)가 따로 맡는다.
 
 장면은 실행마다 따로 프로세스로 돌린다(한 프로세스의 Core 는 dylib 전역 상태를 나눠 쓴다). 저장 기록은 원래 롬으로 한 번
 만든 것을 모든 실행에 같이 넣는다.
@@ -134,8 +135,8 @@ def check(scene, core_path, rom_path, out, sram, goal, original=None):
     keep = bytearray(len(data))
     for s, n in ranges:
         keep[s:s + n] = b'\1' * n
-    for h in rs.HEADER:
-        keep[h] = b'\1' * len(keep[h])
+    for s, n in rs.loader_ranges(data):
+        keep[s:s + n] = b'\1' * n
     flipped = bytes(x ^ 0xFF if not k else x for x, k in zip(data, keep))
     outside_rom = out / f'{scene}-outside.sfc'
     outside_rom.write_bytes(flipped)
