@@ -364,3 +364,4 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [2026-11-03-09: 들어설 때 숨는 FC 인물 열 명을 FC 에서 재 보기](journal/2026-11-03-09-hidden-people.md)
 - [2026-11-04-01: NMI 작업 FF9A 는 슬라임 레이스 화면](journal/2026-11-04-01-ff9a-slime-race.md)
 - [2026-11-04-02: 전투 연출 동안 큰 그림 길이 대기열을 얼마나 늦추나](journal/2026-11-04-02-battle-bigpic.md)
+- [2026-11-04-03: 회심 판정 앞의 조건 셋](journal/2026-11-04-03-critical-conditions.md)
