@@ -45,6 +45,35 @@ class GuardsTest(unittest.TestCase):
         self.assertEqual(len(guards.triggered(checks, ['sfc/dq4/tools/dq4ch2event.py'])), 1)
         self.assertEqual(guards.triggered(checks, ['README.md']), [])
 
+    def test_groups_add_named_paths(self):
+        text = GOOD.replace('paths = ["sfc/dq4/tools/dq4ch*event.py"]', 'paths = []\ngroups = ["events"]') + \
+            '\n[groups]\nevents = ["sfc/dq4/tools/dq4ch1event.py"]\n'
+        checks, problems = load(text)
+        self.assertEqual(problems, [])
+        self.assertEqual(len(guards.triggered(checks, ['sfc/dq4/tools/dq4ch1event.py'])), 1)
+        self.assertEqual(guards.triggered(checks, ['sfc/dq4/tools/dq4ch2event.py']), [])
+        _, problems = load(text.replace('groups = ["events"]', 'groups = ["nope"]'))
+        self.assertTrue(any('nope' in p for p in problems), problems)
+        _, problems = load(text.replace('events = ["sfc/dq4/tools/dq4ch1event.py"]', 'events = ["gone.py"]'))
+        self.assertTrue(any('gone.py' in p for p in problems), problems)
+        _, problems = load(text.replace('groups = ["events"]', ''))
+        self.assertTrue(any('paths 가 비어 있음' in p for p in problems), problems)
+
+    def test_edited_run_or_needs_triggers_the_check(self):
+        """guards.toml 에서 그 검사의 run·needs 가 바뀌거나 새로 생기면 paths 와 상관없이 걸린다. why 만 바뀌면 걸리지 않는다."""
+        other = GOOD.replace('dq4-walk', 'dq4-other')
+        base = GOOD + other
+        self.assertEqual(guards.edited_checks(base, base), set())
+        self.assertEqual(guards.edited_checks(base, base.replace('x.py', 'x.py --maps 1', 1)), {'dq4-walk'})
+        self.assertEqual(guards.edited_checks(base, GOOD + other.replace('["rom"]', '["rom", "MESENCE"]')),
+                         {'dq4-other'})
+        self.assertEqual(guards.edited_checks(base, base.replace('1장 걷기', '설명만 바꿈')), set())
+        self.assertEqual(guards.edited_checks(GOOD, base), {'dq4-other'})
+        self.assertEqual(guards.edited_checks(base, GOOD), set())
+        self.assertEqual(guards.edited_checks('', GOOD), {'dq4-walk'})
+        checks, _ = load(base)
+        self.assertEqual([c['name'] for c in guards.triggered(checks, ['README.md'], {'dq4-other'})], ['dq4-other'])
+
     def test_unset_env_only_checks_env_names(self):
         needs = ['rom', 'MESENCE', 'LIBDIR', 'dq4cores.py 로 빌드한 코어']
         self.assertEqual(guards.unset_env(needs, {'MESENCE': '/x'}), ['LIBDIR'])

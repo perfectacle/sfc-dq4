@@ -28,6 +28,7 @@ description: 버그를 고치거나 동작을 개선했을 때, PR 을 올리기
    needs = ["rom", "MESENCE"]
    ```
    `needs` 의 대문자 이름(`MESENCE`, `LIBDIR` 등)은 환경 변수로 본다. 검사가 읽는 환경 변수는 빠짐없이 적는다 — 다음 단계에서 설정 안 된 것을 짚어 준다.
+   여러 검사가 함께 닿는 파일 묶음(롬 빌드, 걷기 드라이버 등)은 같은 파일의 `[groups]` 에 이름을 붙여 두고 검사에 `groups = ["ch1-build"]` 로 더한다. 검사는 바뀐 파일이 `paths`(와 묶음)에 맞을 때, 또는 `guards.toml` 에서 그 검사의 `run`·`needs` 가 바뀌었을 때(새 검사 포함) 걸린다. dq4 트랙은 `test_dq4guardpaths` 가 모든 실행 검사의 `paths`·묶음이, 명령의 스크립트(와 `unittest discover` 가 고르는 시험 파일)에서 전이 import·띄우는 Lua·asar 에 넣는 asm·`dq4build` 단계로 닿는 저장소 파일을 덮는지 본다. importlib, 변수로 만든 파일 이름, 자료 파일처럼 그 시험이 못 보는 길로 닿는 파일은 손으로 적는다(`dq4guardpaths.py` docstring). 빠진 것은 `uv run --locked python sfc/dq4/tools/dq4guardpaths.py` 가 찍는다.
    완료: `uv run --locked python tools/guards.py` 가 문제 0개.
 3. **PR 전에 걸리는 검사를 돌린다** — `uv run --locked python tools/guards.py --base origin/main` 이 이 변경이 건드리는 실행 검사와 명령, 필요한 것(`needs`)을 찍고, 지금 셸에 설정 안 된 환경 변수가 있으면 `⚠` 로 알린다. 모두 돌리고 PR 본문에 검사마다 한 줄을 쓴다.
    - **`origin/main` 을 합친 뒤(rebase·롬 다시 빌드 뒤) 한 번만 돌린다.** 합치기 전에 돌린 결과는 main 의 변경이 롬에 들어오면 다시 돌려야 하므로 시간만 든다.
