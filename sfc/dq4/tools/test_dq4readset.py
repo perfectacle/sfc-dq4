@@ -71,6 +71,10 @@ class PureTests(unittest.TestCase):
         b = mss(b'windowcheck-e302b892a00a.sfc')
         self.assertEqual(rs.state_hash(a), rs.state_hash(b))
         self.assertNotEqual(rs.state_hash(a), rs.state_hash(mss(b'probe-855474adcaf4.sfc', b'payloae')))
+        # 화면 그림이 커서 이름이 파일 8KB 뒤에 오는 상태
+        big = b'MSS\x01' + b'\x00' * 28 + bytes(range(256)) * 40
+        self.assertEqual(rs.state_hash(big + mss(b'probe-855474adcaf4.sfc')[4:]),
+                         rs.state_hash(big + mss(b'probe-c3848acf38d4.sfc')[4:]))
 
     def test_content_hash_ignores_copy_name_in_logs(self):
         a = rs.content_hash(b'load probe-0123456789ab.sfc ok', 'mesen.log')

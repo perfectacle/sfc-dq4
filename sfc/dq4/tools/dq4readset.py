@@ -126,9 +126,10 @@ def rom_shape(rom):
 
 
 def state_hash(data):
-    """세이브스테이트 해시. 머리에 든 롬 파일 이름(실행마다 다름)은 지우고 본다."""
+    """세이브스테이트 해시. 머리에 든 롬 파일 이름(실행마다 다름)은 지우고 본다. 이름은 압축한 화면 그림 뒤에 오므로
+    그림 크기에 따라 자리가 달라진다. 그래서 파일 앞 일부가 아니라 전체에서 찾는다."""
     data = bytes(data)
-    m = _NAME.search(data, 0, 8192)
+    m = _NAME.search(data)
     if m and m.group(1)[0] == len(m.group(2)):
         data = data[:m.start()] + b'<rom>' + data[m.end():]
     return hashlib.sha256(data).hexdigest()
