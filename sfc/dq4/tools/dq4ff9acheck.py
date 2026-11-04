@@ -131,6 +131,8 @@ def facts(data):
     if ff9a is not None:
         out['bytes']['WqNmiFF9A'] = data[lorom(ff9a):lorom(ff9a) + 12].hex(' ')
     if ff9a is not None and entry is not None and 0 < ff9a - entry < 0x100:
+        if data[lorom(ff9a) - 1] != 0x6B:
+            raise SystemExit(f'WqNmiEntry {entry:06X}~{ff9a - 1:06X} 이 RTL 로 끝나지 않음(asm 배치가 바뀜)')
         out['bytes']['WqNmiEntry'] = data[lorom(entry):lorom(ff9a)].hex(' ')
     return out
 
@@ -142,7 +144,7 @@ def break_entry(entry):
 
 def same_runs(folders):
     """실행마다 기록 두 파일이 바이트째 같은지."""
-    texts = [tuple((f / n).read_bytes() for n in ('nmi.txt', 'inject.txt')) for f in folders]
+    texts = [tuple((f / n).read_bytes() for n in ('nmi.txt', 'inject.txt', 'wq.txt') if (f / n).exists()) for f in folders]
     return all(t == texts[0] for t in texts)
 
 
@@ -193,6 +195,8 @@ def main():
         if not (folder / 'nmi.txt').exists():
             raise SystemExit(f'{folder.name}/nmi.txt 가 없음(MesenCE 가 MAXF 전에 멈춤)')
     nmi, inject = parse(folders[0])
+    wq = dict(line.split() for line in (folders[0] / 'wq.txt').read_text().split('\n') if line.strip()) \
+        if (folders[0] / 'wq.txt').exists() else {}
     ok, problems = judge(nmi, inject, a.original)
     if not same_runs(folders):
         ok, problems = False, problems + ['같은 입력의 실행끼리 기록이 다름']
@@ -200,6 +204,7 @@ def main():
         ok, problems = False, problems + [f'WqNmiFF9A 의 첫 명령이 WqNmiEntry 를 부르지 않음({report["first_call"]})']
     report.update(status='passed' if ok else 'failed', problems=problems,
                   nmi={f'{k:04X}': {'count': c, 'entry': e} for k, (c, e) in nmi.items()},
+                  ff9a_wq_count=wq,
                   inject=[{'task': f'{t:04X}', 'left': n, 'vram_same': s, 'vram_same_before': b}
                           for t, n, s, b in inject])
     (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')

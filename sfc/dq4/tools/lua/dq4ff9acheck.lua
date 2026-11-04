@@ -8,7 +8,8 @@
 --   SHOT=f1,f2     그 프레임의 화면
 --   SET="075B=00;…" 불러온 뒤 2~10프레임에 쓸 WRAM(7E 뱅크 하위 16비트 주소=값). 난수·시각을 고정한다
 --   ROMPATCH="11E7C2=186B;…"  첫 프레임에 PRG 롬(파일 오프셋=바이트들)을 메모리에서만 바꾼다. 조우 없애기, 변이 시험
--- 끝(MAXF)에 nmi.txt·inject.txt 를 쓰고 멈춘다.
+-- FF9A 작업 NMI 입구의 대기열 항목 수(!wq_count)를 wq.txt 에 「first 첫NMI값」「nonzero 0 아닌 NMI 수」「max 가장 큰 값」 으로.
+-- 끝(MAXF)에 nmi.txt·inject.txt·wq.txt 를 쓰고 멈춘다.
 package.path = os.getenv('LIBDIR') .. '/?.lua;' .. package.path
 local L = require('lib')
 L.loadState(os.getenv('STATE'))
@@ -42,6 +43,7 @@ local frame, si, left = 0, 1, nil
 local nmi, task = 0, nil
 local tasks, order, entries = {}, {}, {}
 local pending, injected, results, rest = nil, 0, {}, 0
+local wq_first, wq_nonzero, wq_max = nil, 0, 0
 
 -- 넣을 때마다 다른 그림(k 번째)이라야 앞 항목이 남긴 그림과 견주어 「나감」 을 가린다
 local function pattern(k, i) return (PATTERN[i] + 0x13 * k) & 0xFF end
@@ -60,6 +62,12 @@ emu.addMemoryCallback(function()
   task = rd16(0x7E1944)
   if not tasks[task] then tasks[task] = 0; order[#order + 1] = task end
   tasks[task] = tasks[task] + 1
+  if task == 0xFF9A then
+    local c = emu.read(WQ_COUNT, m)
+    if wq_first == nil then wq_first = c end
+    if c > 0 then wq_nonzero = wq_nonzero + 1 end
+    if c > wq_max then wq_max = c end
+  end
   if pending then
     if pending.nmi == nmi - 2 then
       local count = emu.read(WQ_COUNT, m)
@@ -124,6 +132,7 @@ emu.addEventCallback(function()
     end
     L.write('nmi.txt', table.concat(t, '\n') .. '\n')
     L.write('inject.txt', table.concat(results, '\n') .. (#results > 0 and '\n' or ''))
+    L.write('wq.txt', string.format('first %s\nnonzero %d\nmax %d\n', wq_first and tostring(wq_first) or '-', wq_nonzero, wq_max))
     emu.stop()
   end
 end, emu.eventType.endFrame)

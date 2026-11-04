@@ -46,8 +46,12 @@ class FactsTest(unittest.TestCase):
     def test_entry_bytes_run_up_to_ff9a(self):
         data = bytearray(rom_with(STUBS))
         data[fc.lorom(0x60D66C):fc.lorom(0x60D66C) + 4] = bytes.fromhex('20 6B 00 6B')    # a 6B operand inside
+        data[fc.lorom(0x60D690) - 1] = 0x6B                                                 # RTL just before WqNmiFF9A
         got = fc.facts(bytes(data))['bytes']['WqNmiEntry'].split()
         self.assertEqual(len(got), 0x60D690 - 0x60D66C)
+        data[fc.lorom(0x60D690) - 1] = 0x60
+        with self.assertRaises(SystemExit):
+            fc.facts(bytes(data))
 
 
 class JudgeTest(unittest.TestCase):

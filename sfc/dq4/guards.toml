@@ -967,6 +967,8 @@ name = "dq4-ff9a-nmi"
 why = "NMI 작업 FF9A(슬라임 레이스, 03:A211 이 고름)의 NMI 마다 WqNmiFF9A 가 WqNmiEntry 를 부르고, 그 작업 동안 넣은 창 글자 대기열 항목이 다음 NMI 에 나가야 하며(넣기 전 VRAM 은 달랐다가 넣은 뒤 같음), 난수·시각·조우를 고정해 두 번 돌린 기록이 같아야 한다(dq4windowname 의 NMI 작업마다 걸기). 00:FF9A 받침이 깨지면 레이스 화면에서 대기열이 멈추거나 엉뚱한 뱅크로 뛴다. 선실의 파파스를 레이스 시설로 바꿔 띄우므로 선실이 남은 menu.sfc 로 돈다"
 paths = [
   "fc/dq4/tools/dq4sound.py",
+  "sfc/dq4/tools/dq4battlemsg.asm",
+  "sfc/dq4/tools/dq4battlemsg.py",
   "sfc/dq4/tools/dq4bg3slot.py",
   "sfc/dq4/tools/dq4build.py",
   "sfc/dq4/tools/dq4buildcache.py",
@@ -1010,10 +1012,12 @@ paths = [
   "sfc/dq4/tools/dq4titleanimation.py",
   "sfc/dq4/tools/dq4titleassets.py",
   "sfc/dq4/tools/dq4titlelayerpatch.py",
+  "sfc/dq4/tools/dq4titlelayers.asm",
   "sfc/dq4/tools/dq4titlelayers.py",
   "sfc/dq4/tools/dq4titlepatch.py",
   "sfc/dq4/tools/dq4windowname.asm",
   "sfc/dq4/tools/dq4windowname.py",
+  "sfc/dq4/tools/dq4windowtext.py",
   "sfc/dq4/tools/dq4wrap.py",
   "sfc/dq4/tools/lua/dq4ff9acheck.lua",
   "sfc/dq4/tools/lua/dq4shipstate.lua",
