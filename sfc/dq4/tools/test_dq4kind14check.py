@@ -37,19 +37,31 @@ class Kind14Check(unittest.TestCase):
         self.assertEqual(got['rd'], 0x1234)
         self.assertEqual(set(got), set(k.NAMES))
 
-    def test_copy_range_from_tables(self):
+    # 원본 DQ5 의 표 값: 03:D9A0 의 14번째 워드, 03:D965 의 14번째 워드의 낮은 바이트(돌릴 타일 수)
+    DQ5_SLOT_WORD, DQ5_TILES = 0x3D14, 0x0B
+
+    def table_rom(self, word, tiles):
         rom = bytearray(0x200000)
         o = k.lorom(k.SLOT_TABLE) + k.KIND * 2
-        rom[o:o + 2] = b'\x14\x3D'
-        rom[k.lorom(k.COUNT_TABLE) + k.KIND * 2] = 11
-        self.assertEqual(k.copy_range(bytes(rom)), (0x3D14, 0x3E73))
+        rom[o:o + 2] = word.to_bytes(2, 'little')
+        rom[k.lorom(k.COUNT_TABLE) + k.KIND * 2] = tiles
+        return rom
+
+    def test_copy_range_from_tables(self):
+        rom = self.table_rom(self.DQ5_SLOT_WORD, self.DQ5_TILES)
+        self.assertEqual(k.copy_range(bytes(rom)), k.COPY)
+        self.assertEqual(k.COPY, (0x3D14, 0x3D14 + 0x0B * 32 - 1))
         rom[k.lorom(k.COUNT_TABLE) + k.KIND * 2] = 12
         self.assertNotEqual(k.copy_range(bytes(rom)), k.COPY)
 
     @unittest.skipUnless(DQ5.exists(), 'rom/dq5.sfc 없음')
     def test_copy_range_matches_dq5(self):
         # 사본 범위나 자리 표가 바뀌면 COPY·LAYOUT 의 판단을 다시 해야 한다
-        self.assertEqual(k.copy_range(DQ5.read_bytes()), k.COPY)
+        rom = DQ5.read_bytes()
+        o = k.lorom(k.SLOT_TABLE) + k.KIND * 2
+        self.assertEqual(rom[o] | rom[o + 1] << 8, self.DQ5_SLOT_WORD)
+        self.assertEqual(rom[k.lorom(k.COUNT_TABLE) + k.KIND * 2], self.DQ5_TILES)
+        self.assertEqual(k.copy_range(rom), k.COPY)
 
     def test_parse(self):
         text = '\n'.join([
@@ -73,23 +85,23 @@ class Kind14Check(unittest.TestCase):
     def test_judge(self):
         ok = {'copies': [(316, b'')], 'unseen': [],
               'frames': [{'frame': 316, 'w03': 352, 'wother': 0, 'wport': 0, 'vars': {}}]}
-        self.assertEqual(k.judge(ok), [])
-        self.assertEqual(k.judge({'copies': [], 'unseen': [], 'frames': []}), ['뱅크 03 이 종류 14 사본을 쓰지 않음'])
+        self.assertEqual(k.judge_copy(ok), [])
+        self.assertEqual(k.judge_copy({'copies': [], 'unseen': [], 'frames': []}), ['뱅크 03 이 종류 14 사본을 쓰지 않음'])
         # 사본 앞의 포트 쓰기(맵을 불러오며 지우는 DMA)는 덮이므로 괜찮다
         early = {'copies': [(316, b'')], 'unseen': [300],
                  'frames': [{'frame': 313, 'w03': 0, 'wother': 0, 'wport': 352, 'vars': {}}]}
-        self.assertEqual(k.judge(early), [])
+        self.assertEqual(k.judge_copy(early), [])
         # 사본 프레임 자체의 포트 쓰기·뱅크 03 이 일부만 쓴 사본은 실패
         same = {'copies': [(316, b'')], 'unseen': [],
                 'frames': [{'frame': 316, 'w03': 352, 'wother': 0, 'wport': 2, 'vars': {}}]}
-        self.assertIn('$2180', k.judge(same)[0])
+        self.assertIn('$2180', k.judge_copy(same)[0])
         part = {'copies': [(316, b'')], 'unseen': [],
                 'frames': [{'frame': 316, 'w03': 300, 'wother': 0, 'wport': 0, 'vars': {}}]}
-        self.assertEqual(k.judge(part), [])
-        self.assertIn('300바이트', k.judge(part, 352)[0])
+        self.assertEqual(k.judge_copy(part), [])
+        self.assertIn('300바이트', k.judge_copy(part, 352)[0])
         bad = {'copies': [(316, b'')], 'unseen': [500],
                'frames': [{'frame': 401, 'w03': 0, 'wother': 20, 'wport': 3, 'vars': {}}]}
-        got = k.judge(bad)
+        got = k.judge_copy(bad)
         self.assertEqual(len(got), 3)
         self.assertIn('$2180', got[1])
         self.assertIn('500', got[2])
@@ -107,6 +119,26 @@ class Kind14Check(unittest.TestCase):
     def test_end_frame(self):
         self.assertEqual(k.end_frame('f00010 arrived map 1E/00 cell\nf00647 end map 1E/00 cell 10,10 BE=80\n'), 647)
         self.assertIsNone(k.end_frame('f00010 arrived map 1E/00 cell\n'))
+        # MAXF 에 닿아 멈춘 장면도 「end map」 을 찍지만 끝 표지로 치지 않는다
+        timed = 'f00010 arrived map 1E/00 cell\nf02400 timeout phase=test\nf02400 end map 1E/00 cell 10,10 BE=80\n'
+        self.assertIsNone(k.end_frame(timed))
+        self.assertEqual(k.compare_runs(['1 x\n', '1 x\n'], [647, k.end_frame(timed)]), ['실행 1: 끝 표지 없음'])
+
+    def test_compare_runs_cannot_see_runs_cut_together(self):
+        # 두 실행이 같은 이른 프레임에서 함께 끊기면 비교는 통과한다. 이 경우는 실행마다의 도착·사본 판정이 잡는다
+        early = '1 x\n'
+        self.assertEqual(k.compare_runs([early, early], [10, 10]), [])
+        self.assertEqual(k.judge_copy({'copies': [], 'unseen': [], 'frames': []}), ['뱅크 03 이 종류 14 사본을 쓰지 않음'])
+        # 도착하지 못했거나 다른 맵에 선 실행은 dq4bg3slotcheck.judge 가 잡는다
+        self.assertEqual(k.bc.judge('1E/00', None, []), ['도착 못 함'])
+        self.assertEqual(k.bc.judge('1E/00', ('01/00', 'cell'), []), ['1E/00 대신 01/00 에 도착'])
+
+    def test_unseen_at_copy_frame_fails(self):
+        # 프로브는 사본 프레임에도 CPU 가 쓴 값과 다른 바이트를 unseen 으로 적는다(DMA 가 덮은 경우)
+        text = '\n'.join(['316 w03=352 wother=0 wport=0 pb= vars=', '316 unseen 2 3D20', '316 copy ' + '00' * 352])
+        rec = k.parse(text)
+        self.assertEqual(rec['unseen'], [316])
+        self.assertIn('316', k.judge_copy(rec, 352)[0])
 
 
 if __name__ == '__main__':

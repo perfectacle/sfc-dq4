@@ -11,7 +11,7 @@ lua/dq4bg3slotwarp.lua 를 감싸 프레임마다 적는다. 맵마다 같은 �
 --layout 은 대기열 변수 배치를 고른다: old 는 변수가 사본 안(7E:3D5A~)에 있는 배치, new 는 7E:A976~ 배치(지금
 dq4windowname.asm). 판정은 new 에만 더한다: 열 맵 모두에서 dq4bg3slotcheck 의 판정(요청한 맵에 도착·자리·보임·창이
 버퍼와 같음)이 맞고, 뱅크 03 이 사본을 쓰고, 그 밖의 코드는 CPU 로 사본을 쓰지 않고, 사본을 쓴 뒤로는 WRAM
-포트($2180)나 쓰기 콜백에 걸리지 않는 길(unseen)로도 사본이 바뀌지 않아야 한다(judge).
+포트($2180)나 쓰기 콜백에 걸리지 않는 길(unseen)로도 사본이 바뀌지 않아야 한다(judge_copy).
 
   MESENCE=... uv run --locked python sfc/dq4/tools/dq4kind14check.py --rom work/ch1/menu.sfc --out 새폴더 \\
       [--layout new|old] [--maps 1E/00,20/06] [--jobs 2] [--entry D843]
@@ -31,6 +31,7 @@ sys.path[:0] = [str(HERE), str(ROOT / 'sfc' / 'dq5' / 'tools')]
 import dq4bg3slotcheck as bc  # noqa: E402
 import dq4freshstate  # noqa: E402
 import dq4mesen as mesen  # noqa: E402
+import dq4readset  # noqa: E402
 
 PROBE = HERE / 'lua' / 'dq4kind14probe.lua'
 # 종류 마스크(03:D806) bit14 가 켜진 맵(원본 DQ5 와 menu.sfc 가 같음)
@@ -103,7 +104,7 @@ def at_copy(layout, copy, rng=COPY):
     return got
 
 
-def judge(rec, size=None):
+def judge_copy(rec, size=None):
     """new 배치에 더하는 판정: 뱅크 03 이 사본을 쓰고, 뱅크 03 밖 코드는 어느 때든 CPU 로 그 자리를 쓰지 않고,
     사본 프레임부터는 WRAM 포트($2180)로도 쓰기 콜백에 걸리지 않는 길로도 그 자리가 바뀌지 않음. size 를 주면 사본
     프레임에 뱅크 03 이 쓴 수가 사본 길이와 같아야 한다. 사본 프레임 앞의 포트 쓰기(맵을 불러오는 길)는 사본이 덮으므로
@@ -132,14 +133,18 @@ END = re.compile(r'^f(\d+) end map ', re.M)
 
 
 def end_frame(warp_text):
-    """dq5warp 가 장면을 끝낸 프레임(warp.txt 의 「fNNNNN end map」). 끝 표지가 없으면 None."""
+    """dq5warp 가 장면을 끝낸 프레임(warp.txt 의 「fNNNNN end map」). 끝 표지가 없거나, MAXF 에 닿아 멈춘
+    장면(dq4readset.warp_timed_out: 그때도 「end map」 을 찍음)이면 None."""
+    if dq4readset.warp_timed_out(warp_text):
+        return None
     got = END.findall(warp_text)
     return int(got[-1]) if got else None
 
 
 def compare_runs(texts, ends):
     """같은 명령 실행들의 문제 목록. 실행마다 기록이 있고 끝 표지가 있어야 하며, 끝 프레임 차이는 1 이하여야 한다.
-    dq5warp 가 끝낸 뒤 emu.stop 이 듣기까지 한 프레임쯤 걸려, 기록은 가장 이른 끝 프레임까지 견준다."""
+    dq5warp 가 장면을 끝내는 프레임이 실행마다 한 프레임 다를 수 있어, 기록은 가장 이른 끝 프레임까지 견준다. 두 실행이 같은 이른 프레임에서 함께 끊기면 이 비교로는 잡지 못한다. 그 경우는 실행마다 하는
+    도착·사본 판정(dq4bg3slotcheck.judge, judge_copy)이 잡는다(--layout old 는 도착·사본 판정을 하지 않으므로 이 전제가 없다)."""
     bad = [f'실행 {k}: 기록 없음' for k, t in enumerate(texts) if not t.strip()]
     bad += [f'실행 {k}: 끝 표지 없음' for k, e in enumerate(ends) if e is None]
     if bad:
@@ -220,7 +225,7 @@ def main():
         if a.layout == 'new':
             for k in range(ROUNDS):
                 f = folders[mp, k]
-                got = bc.judge(mp, bc.arrival_of(f), bc.records_of(f)) + judge(parse(texts[k]), rng[1] - rng[0] + 1)
+                got = bc.judge(mp, bc.arrival_of(f), bc.records_of(f)) + judge_copy(parse(texts[k]), rng[1] - rng[0] + 1)
                 bad += [f'실행 {k}: {x}' for x in got]
         row['problems'] = bad
         ok &= not bad

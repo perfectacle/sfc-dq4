@@ -225,6 +225,23 @@ class RomCheckTest(unittest.TestCase):
             W.crit_trace = []
             self.assertIsNone(s.critical_conditions(W, 15))
 
+    def test_judge_critical(self):
+        res = {'problems': []}
+        s.judge_critical(res, None, True)
+        self.assertFalse(res['critical_conditions_recorded'])
+        self.assertNotIn('critical_conditions', res)
+        self.assertIn('기록하지 못함', res['problems'][0])
+        res = {'problems': []}
+        s.judge_critical(res, [], True)
+        self.assertEqual(res, {'problems': [], 'critical_conditions': []})
+        res = {'problems': []}
+        s.judge_critical(res, ['$100E = 80: …'], False)
+        self.assertIn('회심 미발생', res['problems'][0])
+        self.assertIn('$100E', res['problems'][0])
+        res = {'problems': []}
+        s.judge_critical(res, ['칸 0 +7 = 40: …'], True)
+        self.assertIn('난수 판정이 아닌 길', res['problems'][0])
+
     def test_critical_scene_uses_patch_not_seed(self):
         t = s.load_table(s.ARGS.read_text())
         crit = [x for x in s.scenes(t) if x.critical]
