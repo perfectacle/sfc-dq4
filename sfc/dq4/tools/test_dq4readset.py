@@ -113,6 +113,13 @@ class PureTests(unittest.TestCase):
         b = mss(b'windowcheck-e302b892a00a.sfc')
         self.assertEqual(rs.state_hash(a), rs.state_hash(b))
         self.assertNotEqual(rs.state_hash(a), rs.state_hash(mss(b'probe-855474adcaf4.sfc', b'payloae')))
+        # 길이 칸이 맞지 않는 같은 꼴이 앞에 있어도 건너뛰고 진짜 이름을 지운다
+        decoy = b'MSS\x01' + b'\x00' * 8 + b'\x05\x00\x00\x00ab.sfc' + b'\x00' * 8
+        self.assertEqual(rs.state_hash(decoy + mss(b'probe-855474adcaf4.sfc')[4:]),
+                         rs.state_hash(decoy + mss(b'probe-c3848acf38d4.sfc')[4:]))
+        # 같은 꼴이라도 길이 칸이 틀리면 이름으로 보지 않는다: 그 바이트가 다르면 해시도 다르다
+        self.assertNotEqual(rs.state_hash(b'MSS\x01\x05\x00\x00\x00ab.sfc'),
+                            rs.state_hash(b'MSS\x01\x05\x00\x00\x00cd.sfc'))
         # 화면 그림이 커서 이름이 파일 8KB 뒤에 오는 상태
         big = b'MSS\x01' + b'\x00' * 28 + bytes(range(256)) * 40
         self.assertEqual(rs.state_hash(big + mss(b'probe-855474adcaf4.sfc')[4:]),

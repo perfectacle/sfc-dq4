@@ -151,7 +151,7 @@ libretro API 에는 메모리 읽기 훅이 없다. 그래서 `dq4cores.py` 가 
 - 이 bsnes(63ee22f7)에서 카트리지 롬 읽기는 모두 `Bus::read` → 카트리지 롬 `ReadableMemory::read` 를 지난다. 명령 가져오기·데이터 읽기·DMA·HDMA 가 다 그렇다. 패치는 이 함수에 비트맵 한 줄을 넣는다. 포인터가 비어 있으면(기본) 아무것도 하지 않는다.
 - 비트맵은 `retro_get_memory_data(0x5244)`·`retro_get_memory_size(0x5244)` 로 꺼낸다. 패치 전 이 코어는 모든 id 에 빈 값을 돌려줬다. `dq4libretro.Core(trace=True)`·`trace_ranges()` 가 이것을 쓴다.
   - 추적을 켜는 것은 `retro_get_memory_data` 뿐이다. 크기만 묻는 것은 켜지 않는다.
-  - 카트리지 롬을 다시 잡거나(`allocate`, 게임을 불러올 때) 놓으면(`reset`, 게임을 내릴 때) 추적이 꺼진다. 비트맵은 프로세스에 하나라, 이것이 없으면 같은 프로세스에서 다음에 연 게임이 앞 게임 크기의 비트맵에 쓴다. 더 큰 롬이면 비트맵 밖에 쓴다.
+  - 카트리지 롬을 다시 잡거나(`allocate`, 게임을 불러올 때) 놓으면(`reset`, 게임을 내릴 때) 추적이 꺼진다. 「내릴 때」 는 bsnes 소스(`Cartridge::unload` → `rom.reset()`)로만 확인했다. 하네스는 `retro_unload_game` 을 부르지 않으므로 아래 시험은 불러올 때(`allocate`) 길만 지난다. 비트맵은 프로세스에 하나라, 이것이 없으면 같은 프로세스에서 다음에 연 게임이 앞 게임 크기의 비트맵에 쓴다. 더 큰 롬이면 비트맵 밖에 쓴다.
   - 건전성 검사의 「다시 열기」 가 이것을 본다. 한 프로세스에서 작은 롬을 추적 켜고 연 뒤, 원래 롬을 추적 끄고 연다. 앞 비트맵이 그대로이고, 화면·WRAM 이 따로 돌린 전원 장면과 같아야 한다. 고치기 전 코어는 앞 비트맵에 계속 썼다.
 - 비트맵을 거치지 않는 롬 읽기(이 bsnes 소스에서 확인).
   - 카트리지 롬은 `loadMap` 이 `bus.map({&ReadableMemory::read, &rom}, …)` 으로 붙인다. CPU 읽기(`cpu/memory.cpp`)와 DMA(`cpu/dma.cpp`)는 `bus.read` 만 쓴다.

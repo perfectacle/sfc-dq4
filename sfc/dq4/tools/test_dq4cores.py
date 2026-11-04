@@ -51,7 +51,8 @@ class RomTraceTest(unittest.TestCase):
         """도장의 패치 해시가 지금 패치와 같을 때만 있는 코어를 쓰고, 다르면 다시 빌드한다. --check 도 패치를 본다."""
         self.assertEqual(dq4cores.patch_sha('bsnes'), dq4cores.sha256(dq4cores.HERE / 'dq4cores-bsnes-romtrace.patch'))
         self.assertIsNone(dq4cores.patch_sha('snes9x'))
-        with tempfile.TemporaryDirectory() as d:
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ):
+            os.environ.pop('LIBRETRO_BSNES', None)
             folder = Path(d)
             out = folder / f'bsnes_libretro.{dq4cores.suffix()}'
             out.write_bytes(b'core')

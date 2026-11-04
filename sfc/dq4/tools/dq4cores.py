@@ -5,7 +5,7 @@
 DEP-01 처럼 나온 지 7일이 넘은 것만 고른다.
 
 출력은 원래 체크아웃의 work/cores/(워크트리끼리 함께 씀, DQ4_CORES 로 바꿈)에 <코어>_libretro.<확장자> 와
-<코어>.json(커밋·출력 SHA-256)을 둔다. 이미 같은 커밋으로 만든 것이 있으면 다시 빌드하지 않는다.
+<코어>.json(커밋·패치 해시·출력 SHA-256)을 둔다. 이미 만든 것의 커밋과 패치 해시가 지금 것과 같으면 다시 빌드하지 않는다.
 
   python sfc/dq4/tools/dq4cores.py            # 둘 다 받아 빌드(처음 약 1분)
   python sfc/dq4/tools/dq4cores.py --check    # 빌드 없이 상태만

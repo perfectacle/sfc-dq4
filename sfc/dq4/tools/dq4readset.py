@@ -172,8 +172,11 @@ def state_hash(data):
     """세이브스테이트 해시. 머리에 든 롬 파일 이름(실행마다 다름)은 지우고 본다. 이름은 압축한 화면 그림 뒤에 오므로
     그림 크기에 따라 자리가 달라진다. 그래서 파일 앞 일부가 아니라 전체에서 찾는다."""
     data = bytes(data)
+    # 길이 칸이 이름 길이와 맞지 않는 매치(압축 본문에 우연히 든 꼴)는 건너뛰고 한 바이트 뒤부터 다시 찾는다
     m = _NAME.search(data)
-    if m and m.group(1)[0] == len(m.group(2)):
+    while m and m.group(1)[0] != len(m.group(2)):
+        m = _NAME.search(data, m.start() + 1)
+    if m:
         data = data[:m.start()] + b'<rom>' + data[m.end():]
     return hashlib.sha256(data).hexdigest()
 
