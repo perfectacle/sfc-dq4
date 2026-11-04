@@ -12,8 +12,10 @@ REPEAT 번 돌려 기록이 같아야 한다.
 
 큰 그림 길 NMI 에 대기열이 비어 있으면 항목 하나를 넣어(INJECT 번까지) 몇 NMI 뒤에 나가는지도 잰다.
 
-통과 조건: 큰 그림 길이 이어진 길이와 넣은 항목이 나가기까지의 NMI 수가 모두 LIMIT 이하이고, 넣은 항목이 모두 나감.
-게임이 큰 그림 길 NMI 에 대기열 항목을 두고 있었으면 그 덩어리를 보고에 적는다.
+통과 조건(장면마다): 큰 그림 길이 이어진 길이와 넣은 항목이 나가기까지의 NMI 수가 모두 LIMIT 이하, 넣은 항목이 INJECT 개
+모두 나감(넣기 전 VRAM 이 그 그림과 달랐다가 항목 수가 0 이 된 때 같음), 모든 실행이 전투를 끝내 맵으로 돌아옴(battle.txt 의
+after), REPEAT 번 돌린 기록(nmi.txt) 전체가 같음. 게임이 큰 그림 길 NMI 에 대기열 항목을 두고 있었으면 그 덩어리를 보고에
+적는다.
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4bigpiccheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/bigpic
 """
@@ -34,8 +36,8 @@ import dq4ch1walkcheck as wc  # noqa: E402
 
 PROBE = HERE / 'lua' / 'dq4bigpic.lua'
 BATTLE_TASK = 0x8952
-# 1장 전투 셋에서 잰 가장 긴 덩어리·가장 늦은 항목(8 NMI) 그대로라 여유가 없다. 이 검사가 보는 전투 경로가 바뀌면
-# (연출·무리·입력) 대기열과 상관없이도 넘을 수 있으니, 넘으면 기준을 올리기 전에 어느 연출이 길어졌는지 본다
+# 실측 최댓값이라 여유가 없다. 이 검사가 보는 전투 경로가 바뀌면(연출·무리·입력) 대기열과 상관없이도 넘을 수 있으니,
+# 넘으면 기준을 올리기 전에 어느 연출이 길어졌는지 본다
 LIMIT = 8
 REPEAT = 2
 INJECT = 40

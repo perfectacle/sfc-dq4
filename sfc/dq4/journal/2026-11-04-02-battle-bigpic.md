@@ -59,7 +59,7 @@
 
 ## 6. 재발 방지
 
-- 실행 검사 `dq4-battle-bigpic`: 세 장면에서 큰 그림 길이 이어진 길이와 넣은 항목이 나가기까지의 NMI 수가 `LIMIT`(8) 이하, 넣은 항목이 모두 나가고(넣기 전 VRAM 다름 → 나간 뒤 같음), 모든 실행이 맵으로 돌아오고, 두 실행의 기록 전체가 같아야 통과합니다. 8 은 잰 최댓값 그대로라 여유가 없어, 대기열과 무관한 전투 경로 변화로도 넘을 수 있습니다. 가드의 `paths` 는 검사의 import 닫힘·빌드 단계·쓰는 lua 를 담고, `test_dq4readset` 의 `test_walk_guards_watch_their_imports` 가 지킵니다.
+- 실행 검사 `dq4-battle-bigpic`: 세 장면에서 큰 그림 길이 이어진 길이와 넣은 항목이 나가기까지의 NMI 수가 `LIMIT`(8) 이하, 넣은 항목이 모두 나가고(넣기 전 VRAM 다름 → 나간 뒤 같음), 모든 실행이 맵으로 돌아오고, 두 실행의 기록 전체가 같아야 통과합니다. 8 은 잰 최댓값 그대로라 여유가 없어, 대기열과 무관한 전투 경로 변화로도 넘을 수 있습니다. 가드의 `paths` 는 명령의 진입 스크립트·빌드 단계와 그 직접 import 한 단계에, 손으로 보탠 전이 import·asm·lua 를 더한 것입니다. `test_dq4readset` 의 `test_walk_guards_watch_their_imports` 는 직접 import 한 단계를 지킵니다.
 - 단위 테스트 `test_dq4bigpiccheck`(롬 없음): 기록 읽기, 덩어리 나누기, 판정(VRAM 전후 포함).
 
 ## 남은 것
