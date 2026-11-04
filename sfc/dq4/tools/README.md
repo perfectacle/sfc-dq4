@@ -39,6 +39,7 @@
 | `dq4mesen.py` | MesenCE `--testrunner` 를 실행마다 다른 롬 이름으로 띄우고 그 이름의 배터리 기록(`.srm`)을 앞뒤로 지우는 공용 모듈. MesenCE 를 띄우는 dq4 검사가 씀. 같은 이름의 `Debugger/<이름>.cdl` 도 지움. 세이브 폴더는 `MESENCE_SAVES` 로 바꿀 수 있음 |
 | `dq4readset.py` | MesenCE 장면 실행 하나를 그 실행이 읽은 롬 바이트 단위로 캐시하는 공용 모듈(`lua/dq4readset.lua` 머리말). 창 글자 검사와 그 출발 상태가 씀. `DQ4_READSET=off`·`DQ4_READSET_VERIFY`·`DQ4_READSET_CACHE`. [읽은 롬 바이트 캐시](../docs/dq4-readset-format.md) |
 | `dq4readsetcheck.py --rom 롬 --out 폴더` | 읽은 롬 바이트 캐시의 건전성 검사(결정성, 읽은 집합 밖을 모두 뒤집어도 같은 출력, 안 한 바이트로 빗나감, HDMA 표 읽기). `guards.toml` 의 실행 검사. [읽은 롬 바이트 캐시](../docs/dq4-readset-format.md#건전성-검사) |
+| `dq4readsetprologuecheck.py --rom 롬 --out 폴더` | 읽은 롬 바이트 캐시를 켜고 서장 상태 캐시 없이 서장을 세 번(빈 캐시, 모두 적중, 적중 재검증) 만들어 시작 상태·서장 기록·끝 상태가 다 나오고 같은지 본다. `guards.toml` 의 실행 검사. [읽은 롬 바이트 캐시](../docs/dq4-readset-format.md) |
 | `dq4prologuecheck.py --rom 롬 --out 폴더` | 새 게임부터 서장 끝(1장 왕좌의 방)까지 한 번에 걷는 MesenCE 헤드리스 검사. `MESENCE`·`LIBDIR` 필요. [서장 검증](../docs/dq4-prologue-format.md#검증) |
 | `dq4msgcountcheck.py --rom 롬 --messages messages.json --states 1장걷기출력 --out 폴더` | 서장 걷기 길과 1장 왕 구간을 걸으며 메시지마다 받은 A(▼ 대기 + 닫기 대기)가 쪽 수를 넘지 않는지 봄(`lua/dq4msgcount.lua`). [메시지 끝](../docs/dq4-prologue-format.md#메시지-끝) |
 | `dq4talkdelay.py --rom 롬 --out 폴더` | 서장 걷기 길을 걸으며 메시지 진입·닫기 대기의 처음과 끝·서장 네이티브 루틴 진입을 프레임과 함께 적음(`lua/dq4talkdelay.lua`). 자동 대화가 뜨기까지의 시각을 잼. [자동 대화까지의 시각](../docs/dq4-prologue-format.md#자동-대화까지의-시각) |

@@ -961,10 +961,11 @@ class RuleTests(unittest.TestCase):
         checks = {c['name']: c for c in tomllib.loads((HERE.parent / 'guards.toml').read_text(encoding='utf-8'))['check']}
         root = HERE.parents[2]
         bases = (HERE, root / 'sfc' / 'dq5' / 'tools', root / 'fc' / 'dq4' / 'tools')
-        drivers = {'dq4-libretro-readset-soundness': ['sfc/dq4/tools/dq4libretro.py', 'sfc/dq4/tools/dq4savefixture.py']}
+        drivers = {'dq4-libretro-readset-soundness': ['sfc/dq4/tools/dq4libretro.py', 'sfc/dq4/tools/dq4savefixture.py'],
+                   'dq4-readset-prologue': ['sfc/dq4/tools/dq4ch1walkcheck.py']}
         for name in ('dq4-heroblock', 'dq4-field-obj-math', 'dq4-battle-check', 'dq4-wrap-routine', 'dq4-ch1-save',
                      'dq4-ff9a-nmi', 'dq4-battle-bigpic', 'dq4-crit-conditions', 'dq4-sfx-scene',
-                     'dq4-kind14-copy', 'dq4-bg3-slot', 'dq4-libretro-readset-soundness'):
+                     'dq4-kind14-copy', 'dq4-bg3-slot', 'dq4-libretro-readset-soundness', 'dq4-readset-prologue'):
             entries = re.findall(r'((?:sfc|fc)/\S+?\.py)', checks[name]['run'])
             self.assertTrue(entries, name)
             if 'sfc/dq4/tools/dq4build.py' in entries:

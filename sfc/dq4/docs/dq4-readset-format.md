@@ -99,6 +99,10 @@ work/cache/readset/index/<앞 2자>/<index_key>.json = [항목, …]   최근에
 - 오류 장면(`lua/dq4readseterr.lua`): 장면 Lua 가 맨 위·콜백 안·`emu.stop` 바로 뒤에서 오류를 내면 0 이 아닌 종료이고 캐시에 없다.
 - 출력은 화면 찍기(`.png`)를 빼고 견준다(아래, 재검증과 같은 기준).
 
+`dq4readsetprologuecheck.py`(`dq4-readset-prologue`)는 서장 상태 캐시 없이 `dq4ch1walkcheck.prologue(readset=True)` 를 같은 빈 캐시로 세 번 돌린다. 빈 캐시, 모두 적중, 적중 재검증(`DQ4_READSET_VERIFY=1`) 순서다. 세 번 모두 서장이 통과하고 시작 상태·서장 기록·서장 끝 상태가 나오며, 기록과 끝 상태가 같아야 한다.
+
+`dq4ch1walkcheck.run` 은 읽은 바이트 캐시로 돌린 실행이 끝까지 가지 못했으면 그 까닭을 돌려준다(시간 초과, 종료 코드 70·71 등). 구간이 출력이 없어 실패하면 그 까닭이 문제 목록에 「MesenCE 실행: …」 로 붙는다. 전에는 「세이브스테이트 없음」 만 남았다.
+
 ## 장면 Lua 의 오류
 
 MesenCE `--testrunner` 는 장면 Lua 의 오류를 늘 0 이 아닌 종료로 알리지 않는다. 실측:
