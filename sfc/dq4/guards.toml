@@ -1070,7 +1070,7 @@ needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출�
 
 [[check]]
 name = "dq4-ch1-save"
-why = "1장 출하 롬(dq4-ch1-full)에서 교회 저장 → 리셋 → 이어 하기, 우물 아래 전멸 → 교회 귀환이 끝까지 가야 한다(서장 끝·이무르 밤·호이민·보스·보고 다섯 자리). 교회 순간이동은 「arrived map」 이 36/00 이고 MAXF 에 닿지 않아야(timeout phase 없음) 도착으로 본다. 출발 상태는 같은 명령 안의 1장 걷기(--units, 전 구간)로 만든다. 그 걷기는 구간마다 뜬 메시지 번호의 처음 나온 차례가 기준 sfc/dq4/ch1-walk-messages.toml 과 같아야 하고(대사가 빠지거나 바뀌거나 늘면 실패, 기준은 --write-messages 「까닭」 으로만 고침), 이무르 감옥(37/00 → 37/02)과 이무르(37/01 → 37/00)는 순간이동 대신 실제 계단으로 걸어 들어가 끝 맵이 맞아야 한다"
+why = "1장 출하 롬(dq4-ch1-full)에서 교회 저장 → 리셋 → 이어 하기, 우물 아래 전멸 → 교회 귀환이 끝까지 가야 한다(서장 끝·이무르 밤·호이민·보스·보고 다섯 자리). 교회 순간이동은 「arrived map」 이 36/00 이고 MAXF 에 닿지 않아야(timeout phase 없음) 도착으로 본다. 출발 상태는 같은 명령 안의 1장 걷기(--units, 전 구간)로 만든다. 그 걷기는 구간마다(순간이동은 도착 뒤) 뜬 메시지 번호의 처음 나온 차례가 기준 sfc/dq4/ch1-walk-messages.toml 과 같아야 하고(기준이 없거나 손으로 고쳐 check 표지가 맞지 않거나 기록이 400개를 넘어 잘려도 실패)(대사가 빠지거나 바뀌거나 늘면 실패, 기준은 --write-messages 「까닭」 으로만 고침), 이무르 감옥(37/00 → 37/02)과 이무르(37/01 → 37/00)는 순간이동 대신 실제 계단으로 걸어 들어가 끝 맵이 맞아야 한다"
 paths = [
   "sfc/dq4/tools/dq4ch1savecheck.py",
   "sfc/dq4/tools/dq4ch1walkcheck.py",
@@ -1150,6 +1150,7 @@ paths = [
   "sfc/dq4/tools/dq4windowname.asm",
   "sfc/dq4/tools/test_dq4ch1walkcheck.py",
   "tools/lua/mkstate.lua",
+  "sfc/dq4/tools/lua/dq4warpmsg.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/ch1save-walk work/ch1save && uv run --locked python sfc/dq4/tools/dq4ch1walkcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/ch1save-walk --units && uv run --locked python sfc/dq4/tools/dq4ch1savecheck.py --rom work/ch1/dq4-ch1-full.sfc --states work/ch1save-walk --out work/ch1save"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]

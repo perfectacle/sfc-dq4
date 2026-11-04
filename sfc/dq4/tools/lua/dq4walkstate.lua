@@ -1,4 +1,5 @@
--- tools/lua/walk.lua 를 그대로 돌리며, 메시지 루틴 24:8BAF 가 받은 번호(A)를 프레임과 함께 walk.txt 끝에 덧붙이고,
+-- tools/lua/walk.lua 를 그대로 돌리며, 메시지 루틴 24:8BAF 가 받은 번호(A)를 프레임과 함께 walk.txt 끝에 덧붙이고(400개를
+-- 넘으면 끝에 truncated 하나),
 -- walk.txt 를 쓰는 끝 프레임에 세이브스테이트를 SAVE(SHOT_DIR 기준 파일 이름)로 남긴다. 구간을 이어 걸을 때 쓴다.
 -- WALK 에 walk.lua 경로를 준다. 나머지 환경 변수는 walk.lua 와 같다.
 -- SET="075B=12;21E7|01" 은 세이브스테이트를 불러온 바로 뒤 한 번 WRAM(7E 뱅크 하위 16비트 주소)을 고친다(dq5warp.lua 의 SET 과 같은 꼴).
@@ -7,7 +8,11 @@ local L = require('lib')
 local messages, frame = {}, 0
 emu.addEventCallback(function() frame = frame + 1 end, emu.eventType.endFrame)
 emu.addMemoryCallback(function()
-  if #messages < 400 then messages[#messages + 1] = string.format('%03X@%d', emu.getState()['cpu.a'] & 0xFFFF, frame) end
+  if #messages < 400 then
+    messages[#messages + 1] = string.format('%03X@%d', emu.getState()['cpu.a'] & 0xFFFF, frame)
+  elseif #messages == 400 then
+    messages[#messages + 1] = 'truncated'
+  end
 end, emu.callbackType.exec, 0x248BAF, 0x248BAF)
 local write, ended = L.write, {}
 L.write = function(name, data)

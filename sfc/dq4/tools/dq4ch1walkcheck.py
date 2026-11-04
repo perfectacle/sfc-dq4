@@ -61,6 +61,7 @@ from dq4pins import RNG  # noqa: E402
 WALK = ROOT / 'tools' / 'lua' / 'walk.lua'
 WALK_STATE = HERE / 'lua' / 'dq4walkstate.lua'
 WARP = DQ5_TOOLS / 'lua' / 'dq5warp.lua'
+WARP_MSG = HERE / 'lua' / 'dq4warpmsg.lua'
 NIGHT = '7E075E=F0;7E075F=00'
 DAY = '7E075E=50;7E075F=00'
 NO_ENCOUNTERS = '11E7C2=186B'
@@ -380,7 +381,7 @@ def frames(waypoints):
 # 검사가 띄우는 Lua(mkstate·walk·dq4walkstate·dq5warp·dq5msg 와 툴킷 LIBDIR 의 boot·lib·seq 등)가 읽는 환경 변수.
 # 셸에 남은 값이 섞이면 같은 롬·같은 코드라도 다르게 돌아 서장 캐시가 틀린 상태를 나눠 주므로, 넘기는 값만 쓴다
 LUA_ENV = frozenset('''
-    ACCESS ADULT AFTER ANYWHERE BATTLE BG3FONT CALLS CHANGES COVER DUMP EVERY FIELD GROUP HOLD LATESET LOG MAXF
+    ACCESS ADULT AFTER ANYWHERE BATTLE BG3FONT CALLS CHANGES COVER DUMP EVERY FIELD GROUP HOLD LATESET LIMIT LOG MAXF NEXT
     OAMDUMP OUT PARTY PERIOD POKE PRE ROMPATCH SAVE SAVEAT SCRIPT SEQ SET SETTLE SHOTS SHOT_DIR SRM STATE TAIL TAP
     TAPUNTIL TEST TO VMADD VRAMDUMP WAGON WALK WARPEXIT WATCH WATCH_FMT WATCH_WRAM WAYPOINTS WRAMWATCH WRAMWATCHBY
     WRAMWATCHREAD WW WWFROM WWRANGE'''.split())
@@ -393,7 +394,7 @@ def run(mesence, rom, script, dest, env, timeout, readset=False):
     full.update(env, SHOT_DIR=str(dest))
     if readset:
         import dq4readset
-        accept = dq4readset.warp_finished if Path(script).resolve() == WARP.resolve() else None
+        accept = dq4readset.warp_finished if Path(script).resolve() in (WARP.resolve(), WARP_MSG.resolve()) else None
         dq4readset.run(mesence, rom, script, dest, full, timeout=timeout, log='mesen.log', cwd=dest, accept=accept)
         return
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
@@ -443,6 +444,22 @@ def ending(mesence, rom, state, dest, seed=0):
             'trace': hashlib.sha1(repr(seen).encode()).hexdigest()[:12], 'frames': {'box': shown, 'reset': reset, 'after_sound': first(AFTER_SOUND, reset or 0) if reset else None}}
 
 
+def warp_messages(warp_text, msg_text):
+    """순간이동 구간에서 도착(warp.txt 의 arrived map) 뒤에 뜬 메시지 번호. 도착을 못 찾으면 모든 번호, 기록이 400 을 넘어
+    잘렸으면 끝에 'truncated'."""
+    found = re.search(r'^f(\d+) arrived map', warp_text, re.M)
+    at = int(found[1]) if found else 0
+    out = []
+    for line in msg_text.splitlines():
+        if line == 'truncated':
+            out.append(line)
+        elif '@' in line:
+            num, frame = line.split('@')
+            if int(frame) >= at:
+                out.append(num)
+    return out
+
+
 def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, readset=False):
     """한 구간을 걷는다. extra 는 시작에 더 둘 SET(묶음 첫 구간의 깃발·물건), party 는 dq5warp.lua PARTY.
     readset 은 run 과 같다."""
@@ -453,7 +470,7 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
     start = ';'.join(v for v in (pins(opt, seed), extra) if v)
     if how == 'warp':
         # 도착해 조작이 풀린 첫 프레임에 난수를 다시 둔다. 어디서 떠났느냐에 따라 도착 프레임까지 굴린 수가 다르다
-        run(mesence, rom, WARP, dest, {'STATE': str(state), 'TO': arg, 'SAVE': 'end.mss', 'SETTLE': '120',
+        run(mesence, rom, WARP_MSG, dest, {'NEXT': str(WARP), 'STATE': str(state), 'TO': arg, 'SAVE': 'end.mss', 'SETTLE': '120',
                                        'MAXF': '1500', 'WARPEXIT': f'{warp_exit(rom):X}', 'ANYWHERE': '1',
                                        'ROMPATCH': patch, 'SET': start, 'LATESET': pins(opt, seed),
                                        **({'POKE': poke} if poke else {}), **({'PARTY': party} if party else {})}, 300,
@@ -465,7 +482,8 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
         wram = (dest / 'final.wram').read_bytes() if (dest / 'final.wram').exists() else bytes(0x20000)
         seen = {k: wram[a & 0xFFFF] for k, (a, _) in FLAGS.items()}
         items = list(wram[ITEMS & 0xFFFF:(ITEMS & 0xFFFF) + 12])
-        messages = []
+        messages = warp_messages(text, (dest / 'warpmsg.txt').read_text(encoding='utf-8')
+                                 if (dest / 'warpmsg.txt').exists() else '')
         # 도착(arrived map) 뒤 settle·test 단계에서 MAXF 에 닿아도 「arrived map」 과 「timeout phase=」 가 함께 찍힌다
         import dq4readset
         timed_out = dq4readset.warp_timed_out(text)
@@ -580,19 +598,42 @@ def message_order(messages):
     return out
 
 
+def entry_check(variant, seed, name, messages, reason):
+    """기준 한 항목의 표지. write_messages 만 쓰므로, 메시지나 까닭을 손으로 고치면 맞지 않는다."""
+    text = '|'.join([variant, str(seed), name, ' '.join(messages), reason])
+    return hashlib.sha1(text.encode('utf-8')).hexdigest()[:12]
+
+
 def load_messages(path=MESSAGES):
-    """기준 파일 → {(변형, 시드, 구간): {'messages': [...], 'reason': 글}}. 파일이 없으면 빈 dict."""
+    """기준 파일 → {(변형, 시드, 구간): {'messages': [...], 'reason': 글}}. 파일이 없으면 빈 dict. 표지가 맞지 않거나 까닭이
+    비면 ValueError(손으로 고친 기준)."""
     import tomllib
     if not Path(path).exists():
         return {}
     doc = tomllib.loads(Path(path).read_text(encoding='utf-8'))
-    return {(e['variant'], e['seed'], e['name']): {'messages': list(e['messages']), 'reason': e['reason']}
-            for e in doc.get('segment', [])}
+    out = {}
+    for e in doc.get('segment', []):
+        key = (e['variant'], e['seed'], e['name'])
+        if not e.get('reason', '').strip():
+            raise ValueError(f'{Path(path).name} {key}: reason 이 비어 있음')
+        if e.get('check') != entry_check(*key, e['messages'], e['reason']):
+            raise ValueError(f'{Path(path).name} {key}: check 가 맞지 않음(손으로 고친 기준, --write-messages 로 다시 만들 것)')
+        out[key] = {'messages': list(e['messages']), 'reason': e['reason']}
+    return out
+
+
+# 기준이 반드시 있어야 하는 변형·시드(기본 걷기와 가드가 도는 것)
+REQUIRED = ('chapter1', 0)
 
 
 def message_problems(variant, seed, result, baseline):
-    """한 구간 결과의 메시지 차례가 기준과 다른 까닭(빈 목록이면 같음). 그 변형·시드의 기준이 하나도 없으면 보지 않는다."""
-    if 'messages' not in result or not any(k[:2] == (variant, seed) for k in baseline):
+    """한 구간 결과의 메시지 차례가 기준과 다른 까닭(빈 목록이면 같음). REQUIRED 밖의 변형·시드는 그 기준이 하나도
+    없으면 보지 않는다."""
+    if 'messages' not in result:
+        return []
+    if 'truncated' in result['messages']:
+        return ['메시지 기록이 400개를 넘어 잘림']
+    if (variant, seed) != REQUIRED and not any(k[:2] == (variant, seed) for k in baseline):
         return []
     want = baseline.get((variant, seed, result['name']))
     if want is None:
@@ -609,22 +650,27 @@ def message_problems(variant, seed, result, baseline):
 def write_messages(rows, reason, path=MESSAGES):
     """rows [(변형, 시드, 구간, 메시지 목록)] 로 기준 파일을 고친다. 차례가 바뀐 구간과 새 구간은 reason 을, 같은 구간은
     앞 reason 을 둔다. rows 에 없는 기준은 그대로 둔다."""
+    if not reason.strip():
+        raise ValueError('까닭이 비어 있음')
     old = load_messages(path)
     new = dict(old)
     for variant, seed, name, messages in rows:
+        if 'truncated' in messages:
+            raise ValueError(f'{name}: 메시지 기록이 잘려 기준으로 쓸 수 없음')
         order = message_order(messages)
         prev = old.get((variant, seed, name))
         new[variant, seed, name] = {'messages': order,
-                                    'reason': prev['reason'] if prev and prev['messages'] == order else reason}
+                                    'reason': prev['reason'] if prev and prev['messages'] == order else reason.strip()}
     lines = ['# 1장 걷기 검사(dq4ch1walkcheck.py)가 구간마다 견주는 메시지 번호(24:8BAF 가 받은 A)의 처음 나온 차례.',
-             '# 고칠 때는 손으로 쓰지 않고 dq4ch1walkcheck.py --write-messages "까닭" 으로 다시 만든다. 차례가 바뀐 구간에만',
-             '# 그 까닭이 reason 으로 남는다.', '']
+             '# 손으로 고치지 않는다. dq4ch1walkcheck.py --units --write-messages "까닭" 으로 다시 만든다. 차례가 바뀐 구간에만',
+             '# 그 까닭이 reason 으로 남고, check 는 그 도구만 쓰는 표지라 손으로 고치면 검사가 실패한다.', '']
     order = {s[0]: i for i, s in enumerate(SEGMENTS + CHAPTER2_END)}
     for (variant, seed, name), e in sorted(new.items(), key=lambda kv: (kv[0][0], kv[0][1], order.get(kv[0][2], 999),
                                                                           kv[0][2])):
         lines += ['[[segment]]', f'variant = "{variant}"', f'seed = {seed}', f'name = "{name}"',
                   'messages = [' + ', '.join(f'"{m}"' for m in e['messages']) + ']',
-                  'reason = ' + json.dumps(e['reason'], ensure_ascii=False), '']
+                  'reason = ' + json.dumps(e['reason'], ensure_ascii=False),
+                  f'check = "{entry_check(variant, seed, name, e["messages"], e["reason"])}"', '']
     Path(path).write_text('\n'.join(lines), encoding='utf-8')
 
 
@@ -645,6 +691,11 @@ def main():
     add_seed_args(ap)
     args = ap.parse_args()
     seeds = seeds_of(args)
+    if args.write_messages is not None:
+        if not args.write_messages.strip():
+            ap.error('--write-messages 에 까닭을 주세요(빈 글·공백뿐은 안 됨)')
+        if args.chapter2 or seeds != [0]:
+            ap.error('--write-messages 는 기본 변형(chapter1)·시드 0 기준만 고친다(--chapter2·--seed·--seeds 와 함께 쓰지 않음)')
     segments = SEGMENTS[:-2] + CHAPTER2_END if args.chapter2 else SEGMENTS
     mesence = Path(os.environ['MESENCE'])
     out = args.out.resolve()
@@ -704,9 +755,10 @@ def main():
     variant = 'chapter2' if args.chapter2 else 'chapter1'
     rows = ([(variant, 0, pro['name'], pro['messages'])] if pro and 'messages' in pro else [])
     rows += [(variant, sd, r['name'], r['messages']) for sd, rs in runs.items() for r in rs if 'messages' in r]
-    baseline = {} if args.write_messages else load_messages()
+    # 기준을 고치는 실행은 메시지를 견주지 않는다(메시지 밖 판정만으로 통과해야 고친다)
+    baseline = None if args.write_messages is not None else load_messages()
     for sd, r in ([(0, pro)] if pro else []) + [(sd, r) for sd, rs in runs.items() for r in rs]:
-        bad = message_problems(variant, sd, r, baseline)
+        bad = [] if baseline is None else message_problems(variant, sd, r, baseline)
         if bad:
             r['problems'] = r['problems'] + bad
             r['status'] = 'failed'
@@ -724,7 +776,7 @@ def main():
     if len(seeds) == 1:
         report.update(seed=seeds[0], rng=rng_for(seeds[0]), segments=([pro] if pro else []) + per_seed[0]['segments'])
     (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')
-    if args.write_messages:
+    if args.write_messages is not None:
         if not ok:
             raise SystemExit('통과하지 못한 구간이 있어 메시지 기준을 고치지 않음')
         write_messages(rows, args.write_messages)

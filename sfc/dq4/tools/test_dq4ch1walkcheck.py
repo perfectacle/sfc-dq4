@@ -206,6 +206,41 @@ class MessageBaselineTests(unittest.TestCase):
         self.assertEqual(wc.message_problems('chapter2', 0, ok, base), [])
         self.assertEqual(wc.message_problems('chapter1', 5, ok, base), [])
         self.assertEqual(wc.message_problems('chapter1', 0, {'name': 'ending'}, base), [])
+        # 기본 변형·시드는 기준이 비면 조용히 꺼지지 않고 실패한다
+        self.assertEqual(wc.message_problems('chapter1', 0, ok, {}), ['메시지 기준 없음(chapter1, 시드 0)'])
+        self.assertEqual(wc.message_problems('chapter1', 0, {'name': 'flare', 'messages': ['E65', 'truncated']}, base),
+                         ['메시지 기록이 400개를 넘어 잘림'])
+
+    def test_warp_messages_after_arrival(self):
+        warp = 'f00010 anywhere from map 36/00\nf00120 arrived map 37/02 cell 12,6\nf00300 end map 37/02\n'
+        self.assertEqual(wc.warp_messages(warp, 'E10@50\nE66@120\nE67@200\n'), ['E66', 'E67'])
+        self.assertEqual(wc.warp_messages('', 'E10@50\n'), ['E10'])
+        self.assertEqual(wc.warp_messages(warp, 'E66@130\ntruncated\n'), ['E66', 'truncated'])
+
+    def test_hand_edit_is_caught(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'm.toml'
+            wc.write_messages([('chapter1', 0, 'flare', ['E65', '129'])], '처음', path)
+            text = path.read_text(encoding='utf-8')
+            path.write_text(text.replace('"E65", "129"', '"E65"'), encoding='utf-8')
+            with self.assertRaises(ValueError):
+                wc.load_messages(path)
+            path.write_text(text.replace('reason = "처음"', 'reason = " "'), encoding='utf-8')
+            with self.assertRaises(ValueError):
+                wc.load_messages(path)
+            with self.assertRaises(ValueError):
+                wc.write_messages([('chapter1', 0, 'flare', ['E65'])], '  ', path)
+            with self.assertRaises(ValueError):
+                wc.write_messages([('chapter1', 0, 'flare', ['E65', 'truncated'])], '잘림', path)
+
+    def test_write_messages_cli_rejects(self):
+        for argv in (['--write-messages', ''], ['--write-messages', '   '], ['--write-messages', 'x', '--chapter2'],
+                     ['--write-messages', 'x', '--seed', '5'], ['--write-messages', 'x', '--seeds', '0,5']):
+            with mock.patch.object(wc.sys, 'argv', ['dq4ch1walkcheck.py', '--rom', 'r', '--out', 'o', *argv]), \
+                    mock.patch('sys.stderr'), self.assertRaises(SystemExit) as e:
+                wc.main()
+            self.assertEqual(e.exception.code, 2, argv)
 
     def test_write_keeps_reason_of_unchanged(self):
         import tempfile
@@ -223,8 +258,9 @@ class MessageBaselineTests(unittest.TestCase):
         names = {k[2] for k in base if k[:2] == ('chapter1', 0)}
         want = {s[0] for s in wc.SEGMENTS if s[1] != 'ending'}
         self.assertEqual(names, want)
+        # load_messages 가 항목마다 reason 비공백·check 표지를 확인한다(손으로 고친 기준이면 ValueError)
         for e in base.values():
-            self.assertTrue(e['reason'])
+            self.assertTrue(e['reason'].strip())
             self.assertEqual(e['messages'], wc.message_order(e['messages']))
 
 
