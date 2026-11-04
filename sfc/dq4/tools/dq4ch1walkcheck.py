@@ -396,23 +396,31 @@ def run(mesence, rom, script, dest, env, timeout, readset=False):
             p = mesen.run(mesence, rom, script, cwd=dest, env=full, stdout=log, stderr=subprocess.STDOUT,
                           timeout=timeout, check=False)
         except subprocess.TimeoutExpired:
-            return f'{timeout}초 안에 끝나지 않음'
-    return f'종료 코드 {p.returncode}' if p.returncode else None
+            # 캐시 없는 실행은 출력으로 판정해 왔다(시간 제한이 장면의 끝인 스크립트가 있을 수 있음)
+            return RunFailure(f'{timeout}초 안에 끝나지 않음')
+    return RunFailure(f'종료 코드 {p.returncode}') if p.returncode else None
+
+
+class RunFailure(str):
+    """실행이 끝까지 가지 못한 까닭. timed_out 이면 읽은 바이트 캐시로 돈 실행이 시간 제한에 걸렸다."""
+    timed_out = False
 
 
 def run_failure(info, timeout):
-    """dq4readset.run 의 결과에서 실행이 끝까지 가지 못한 까닭. 캐시에서 펼쳤거나 0 으로 끝났으면 None."""
+    """dq4readset.run 의 결과에서 실행이 끝까지 가지 못한 까닭(RunFailure). 캐시에서 펼쳤거나 0 으로 끝났으면 None."""
     import dq4readset
     if info.get('cached'):
         return None
     if info.get('timed_out'):
-        return f'{timeout}초 안에 끝나지 않음'
+        why = RunFailure(f'{timeout}초 안에 끝나지 않음')
+        why.timed_out = True
+        return why
     rc = info.get('returncode')
     if rc == dq4readset.LUA_WATCHDOG:
-        return f'종료 코드 {rc}: MesenCE 가 Lua 콜백을 시간 제한으로 끊음(머신이 바쁠 때)'
+        return RunFailure(f'종료 코드 {rc}: MesenCE 가 Lua 콜백을 시간 제한으로 끊음(머신이 바쁠 때 생길 수 있음)')
     if rc == dq4readset.LUA_ERROR:
-        return f'종료 코드 {rc}: 장면 Lua 오류 또는 읽은 집합 없음(stderr 의 [dq4readset] 줄)'
-    return f'종료 코드 {rc}' if rc else None
+        return RunFailure(f'종료 코드 {rc}: 장면 Lua 오류 또는 읽은 집합 없음(stderr 의 [dq4readset] 줄)')
+    return RunFailure(f'종료 코드 {rc}') if rc else None
 
 
 ITEMS = 0x7E2056     # 일행 레코드 0 의 물건 12칸(+16~+21)
@@ -523,7 +531,9 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
     for want in opt.get('items', []):
         if want not in items:
             problems.append(f'물건 {want:02X} 없음')
-    if problems and why:
+    # 시간 초과로 끊긴 실행은 출력이 남았어도 끝까지 간 것이 아니다. 다른 실패는 장면이 일부러 낸 종료일 수 있어
+    # 구간이 실패했을 때만 덧붙인다
+    if why and (problems or getattr(why, 'timed_out', False)):
         problems.append(f'MesenCE 실행: {why}')
     return {'name': name, 'status': 'failed' if problems else 'passed', 'problems': problems, 'maps': maps,
             'trace': digest(log), 'messages': messages, 'flags': [k for k, v in flags.items() if v],

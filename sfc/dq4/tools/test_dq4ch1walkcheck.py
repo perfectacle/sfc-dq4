@@ -180,9 +180,6 @@ class Ch1WalkCheckTests(unittest.TestCase):
         self.assertEqual(wc.frames('a:8;wait:50;3,4'), 300 + 58 + 400)
 
 
-if __name__ == '__main__':
-    unittest.main()
-
 
 class RunFailureTests(unittest.TestCase):
     def test_readset_failure_reasons(self):
@@ -190,13 +187,17 @@ class RunFailureTests(unittest.TestCase):
         import dq4readset
         self.assertIsNone(wc.run_failure({'cached': True, 'returncode': 1}, 60))
         self.assertIsNone(wc.run_failure({'cached': False, 'returncode': 0, 'timed_out': False}, 60))
-        self.assertIn('60초', wc.run_failure({'cached': False, 'returncode': None, 'timed_out': True}, 60))
+        timeout = wc.run_failure({'cached': False, 'returncode': None, 'timed_out': True}, 60)
+        self.assertIn('60초', timeout)
+        self.assertTrue(timeout.timed_out)
+        self.assertFalse(wc.run_failure({'cached': False, 'returncode': 3}, 60).timed_out)
         self.assertIn('시간 제한', wc.run_failure({'cached': False, 'returncode': dq4readset.LUA_WATCHDOG}, 60))
         self.assertIn('Lua 오류', wc.run_failure({'cached': False, 'returncode': dq4readset.LUA_ERROR}, 60))
         self.assertEqual(wc.run_failure({'cached': False, 'returncode': 3}, 60), '종료 코드 3')
 
-    def test_segment_names_the_run_failure_when_output_is_missing(self):
-        """출력이 없어 구간이 실패하면 MesenCE 실행 실패의 까닭을 문제에 덧붙인다. 출력이 있어 통과하면 덧붙이지 않는다."""
+    def test_segment_names_the_run_failure_when_the_segment_fails(self):
+        """구간이 실패하면 MesenCE 실행 실패의 까닭을 문제에 덧붙인다. 출력으로 통과한 구간에는 덧붙이지 않는다.
+        다만 읽은 바이트 캐시로 돈 실행이 시간 초과면 출력이 있어도 실패다."""
         seg = ('s', 'walk', '10,10', {'maxf': 400})
         with tempfile.TemporaryDirectory() as d:
             dest = Path(d) / 's'
@@ -209,3 +210,11 @@ class RunFailureTests(unittest.TestCase):
             with mock.patch.object(wc, 'run', return_value='종료 코드 1'):
                 r = wc.segment(Path('m'), Path('r.sfc'), Path('x.mss'), dest, seg, '')
             self.assertEqual(r['status'], 'passed', r['problems'])
+            with mock.patch.object(wc, 'run', return_value=wc.run_failure({'cached': False, 'timed_out': True}, 300)):
+                r = wc.segment(Path('m'), Path('r.sfc'), Path('x.mss'), dest, seg, '')
+            self.assertEqual(r['status'], 'failed')
+            self.assertEqual(r['problems'], ['MesenCE 실행: 300초 안에 끝나지 않음'])
+
+
+if __name__ == '__main__':
+    unittest.main()
