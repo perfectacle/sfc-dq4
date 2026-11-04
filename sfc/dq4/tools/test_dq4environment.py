@@ -292,7 +292,7 @@ class CounterTests(unittest.TestCase):
 
 
 class GateObjectTests(unittest.TestCase):
-    """FC 2×2 성문 블록(9C·9D·A2·A0) 하나가 DQ5 4×4 성문 물체 하나(왼쪽 위 칸 × 2, 잠금은 GATES)로 바뀐다."""
+    """FC 2×2 성문 블록(GATES 의 9C·9D·A2·A0) 하나가 DQ5 4×4 성문 물체 하나(왼쪽 위 칸 × 2, 잠금은 GATES)로 바뀐다."""
 
     class Source:
         def __init__(self, w, h, gates):
@@ -310,15 +310,17 @@ class GateObjectTests(unittest.TestCase):
 
     def test_each_2x2_gate_becomes_one_object(self):
         import dq4environmentrom as rom
-        source = self.Source(64, 32, [(14, 26, 0x9C), (7, 5, 0x9D), (46, 10, 0xA2)])
-        self.assertEqual(rom.objects(source), [[14, 10, rom.GATE_KIND, 1], [92, 20, rom.GATE_KIND, 2],
-                                               [28, 52, rom.GATE_KIND, 0]])
+        source = self.Source(64, 32, [(14, 26, 0x9C), (7, 5, 0x9D), (46, 10, 0xA2), (30, 2, 0xA0)])
+        self.assertEqual(rom.objects(source), [[60, 4, rom.GATE_KIND, 0], [14, 10, rom.GATE_KIND, 1],
+                                               [92, 20, rom.GATE_KIND, 2], [28, 52, rom.GATE_KIND, 0]])
+        self.assertEqual(set(rom.GATES), {0x9C, 0x9D, 0xA2, 0xA0})
 
 
 @unittest.skipUnless((ROOT / "rom" / "dq4.nes").is_file(), "local source ROM not present")
 class UnportedGateTests(unittest.TestCase):
     def test_unported_9c_gates_become_open_gates(self):
-        # 아직 옮기지 않은 FC 맵의 9C 성문 셋. 그 맵을 옮기면 GATES 가 잠금 0 성문 하나씩으로 바꾼다
+        # MAPS 밖 FC 맵에서 9C 를 가진 맵은 이 셋뿐이고, 각 맵에서 objects 는 잠금 0 성문 하나를 만든다. 셋 가운데
+        # 하나를 MAPS 에 넣으면 이 시험이 실패하므로, 그때는 dq4gatecheck 실측으로 옮긴다
         import sys
         sys.path.insert(0, str(ROOT / "fc" / "dq4" / "tools"))
         import dq4block
@@ -328,6 +330,14 @@ class UnportedGateTests(unittest.TestCase):
         prg = ines.prg((ROOT / "rom" / "dq4.nes").read_bytes())
         where = {name: (g, k) for g, k, _, name in all_maps(prg)}
         want = {"31-04": (14, 26), "33-01": (7, 5), "3C-00": (46, 10)}
+        with_9c = set()
+        for g, k, _, name in all_maps(prg):
+            if name in rom.MAPS:
+                continue
+            m = dq4block.Map(prg, g, k)
+            if any(m.blocks["prop"].get(m.cell(x, y) & 31) == 0x9C for y in range(m.h) for x in range(m.w)):
+                with_9c.add(name)
+        self.assertEqual(with_9c, set(want))
         for name, (x, y) in want.items():
             self.assertNotIn(name, rom.MAPS)
             source = dq4block.Map(prg, *where[name])
