@@ -62,6 +62,8 @@ WALK = ROOT / 'tools' / 'lua' / 'walk.lua'
 WALK_STATE = HERE / 'lua' / 'dq4walkstate.lua'
 WARP = DQ5_TOOLS / 'lua' / 'dq5warp.lua'
 WARP_MSG = HERE / 'lua' / 'dq4warpmsg.lua'
+# 구간마다 적는 메시지 번호 수의 상한(lua LIMIT). 넘으면 'truncated' 로 그 구간이 실패한다. 상한 분기를 실측할 때만 바꾼다
+MSG_LIMIT = int(os.environ.get('DQ4_WALK_MSG_LIMIT', '400'))
 NIGHT = '7E075E=F0;7E075F=00'
 DAY = '7E075E=50;7E075F=00'
 NO_ENCOUNTERS = '11E7C2=186B'
@@ -388,21 +390,48 @@ LUA_ENV = frozenset('''
 
 
 def run(mesence, rom, script, dest, env, timeout, readset=False):
-    """readset 이면 dq4readset 으로 돌려, 같은 출발 상태·입력에 읽은 롬 바이트가 같으면 캐시의 출력을 펼친다."""
+    """readset 이면 dq4readset 으로 돌려, 같은 출발 상태·입력에 읽은 롬 바이트가 같으면 캐시의 출력을 펼친다.
+    MesenCE 가 끝까지 가지 못했으면 그 까닭(글), 아니면 None 을 돌려준다. 판정은 부르는 쪽이 출력으로 하고, 이 글은
+    출력이 없을 때 까닭을 알리는 데 쓴다. 장면 Lua 가 emu.stop(n) 으로 일부러 0 이 아닌 값을 낼 수도 있다."""
     dest.mkdir(parents=True, exist_ok=True)
     full = {k: v for k, v in os.environ.items() if k not in LUA_ENV}
     full.update(env, SHOT_DIR=str(dest))
     if readset:
         import dq4readset
         accept = dq4readset.warp_finished if Path(script).resolve() in (WARP.resolve(), WARP_MSG.resolve()) else None
-        dq4readset.run(mesence, rom, script, dest, full, timeout=timeout, log='mesen.log', cwd=dest, accept=accept)
-        return
+        info = dq4readset.run(mesence, rom, script, dest, full, timeout=timeout, log='mesen.log', cwd=dest,
+                              accept=accept)
+        return run_failure(info, timeout)
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
         try:
-            mesen.run(mesence, rom, script, cwd=dest, env=full, stdout=log, stderr=subprocess.STDOUT,
-                      timeout=timeout, check=False)
+            p = mesen.run(mesence, rom, script, cwd=dest, env=full, stdout=log, stderr=subprocess.STDOUT,
+                          timeout=timeout, check=False)
         except subprocess.TimeoutExpired:
-            pass
+            # 캐시 없는 실행은 출력으로 판정해 왔다(시간 제한이 장면의 끝인 스크립트가 있을 수 있음)
+            return RunFailure(f'{timeout}초 안에 끝나지 않음')
+    return RunFailure(f'종료 코드 {p.returncode}') if p.returncode else None
+
+
+class RunFailure(str):
+    """실행이 끝까지 가지 못한 까닭. timed_out 이면 읽은 바이트 캐시로 돈 실행이 시간 제한에 걸렸다."""
+    timed_out = False
+
+
+def run_failure(info, timeout):
+    """dq4readset.run 의 결과에서 실행이 끝까지 가지 못한 까닭(RunFailure). 캐시에서 펼쳤거나 0 으로 끝났으면 None."""
+    import dq4readset
+    if info.get('cached'):
+        return None
+    if info.get('timed_out'):
+        why = RunFailure(f'{timeout}초 안에 끝나지 않음')
+        why.timed_out = True
+        return why
+    rc = info.get('returncode')
+    if rc == dq4readset.LUA_WATCHDOG:
+        return RunFailure(f'종료 코드 {rc}: MesenCE 가 Lua 콜백을 시간 제한으로 끊음(머신이 바쁠 때 생길 수 있음)')
+    if rc == dq4readset.LUA_ERROR:
+        return RunFailure(f'종료 코드 {rc}: 장면 Lua 오류 또는 읽은 집합 없음(stderr 의 [dq4readset] 줄)')
+    return RunFailure(f'종료 코드 {rc}') if rc else None
 
 
 ITEMS = 0x7E2056     # 일행 레코드 0 의 물건 12칸(+16~+21)
@@ -419,8 +448,8 @@ def ending(mesence, rom, state, dest, seed=0):
     end_box = box.entry_points(scenes)['end']
     acked = box.boot_points(scenes)['acked']
     calls = [end_box, RESET, acked, DRIVER_UPLOAD, DRIVER_HELLO, AFTER_SOUND]
-    run(mesence, rom, MSG, dest, {'STATE': str(state), 'PRE': ENDING_PRE, 'MAXF': '2400', 'SET': rng_for(seed),
-                                  'CALLS': ','.join(f'{a:06X}' for a in calls)}, 200)
+    why = run(mesence, rom, MSG, dest, {'STATE': str(state), 'PRE': ENDING_PRE, 'MAXF': '2400', 'SET': rng_for(seed),
+                                        'CALLS': ','.join(f'{a:06X}' for a in calls)}, 200)
     text = (dest / 'msg.txt').read_text(encoding='utf-8') if (dest / 'msg.txt').exists() else ''
     # 견주는 것은 지난 PC 와 그 프레임뿐이다. 리셋 뒤 X 는 소리 CPU 가 포트에 둔 값이라 앞서 걸은 길에 따라 다르다
     seen = [(int(f), int(pc, 16)) for f, pc in re.findall(r'^(\d+) (\w{6}) ', text, re.M)]
@@ -440,17 +469,21 @@ def ending(mesence, rom, state, dest, seed=0):
             problems.append('리셋 뒤 드라이버를 IPL 로 다시 올리려 함')
         if first(DRIVER_HELLO, reset) is None or first(AFTER_SOUND, reset) is None:
             problems.append('리셋 루틴이 소리 켜기에서 이어지지 않음')
+    if problems and why:
+        problems.append(f'MesenCE 실행: {why}')
     return {'name': 'ending', 'status': 'failed' if problems else 'passed', 'problems': problems,
             'trace': hashlib.sha1(repr(seen).encode()).hexdigest()[:12], 'frames': {'box': shown, 'reset': reset, 'after_sound': first(AFTER_SOUND, reset or 0) if reset else None}}
 
 
-def warp_messages(warp_text, msg_text):
-    """순간이동 구간에서 도착(warp.txt 의 arrived map) 뒤에 뜬 메시지 번호. 도착을 못 찾으면 모든 번호, 기록이 400 을 넘어
-    잘렸으면 끝에 'truncated'."""
-    found = re.search(r'^f(\d+) arrived map', warp_text, re.M)
+def warp_messages(msg_text):
+    """순간이동 구간에서 맵 번호가 목적지와 처음 같아진 프레임(warpmsg.txt 의 map@) 부터 뜬 메시지 번호. 그 줄이 없으면
+    모든 번호, 기록이 LIMIT 을 넘어 잘렸으면 끝에 'truncated'."""
+    found = re.search(r'^map@(\d+)$', msg_text, re.M)
     at = int(found[1]) if found else 0
     out = []
     for line in msg_text.splitlines():
+        if line.startswith('map@'):
+            continue
         if line == 'truncated':
             out.append(line)
         elif '@' in line:
@@ -470,11 +503,13 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
     start = ';'.join(v for v in (pins(opt, seed), extra) if v)
     if how == 'warp':
         # 도착해 조작이 풀린 첫 프레임에 난수를 다시 둔다. 어디서 떠났느냐에 따라 도착 프레임까지 굴린 수가 다르다
-        run(mesence, rom, WARP_MSG, dest, {'NEXT': str(WARP), 'STATE': str(state), 'TO': arg, 'SAVE': 'end.mss', 'SETTLE': '120',
-                                       'MAXF': '1500', 'WARPEXIT': f'{warp_exit(rom):X}', 'ANYWHERE': '1',
-                                       'ROMPATCH': patch, 'SET': start, 'LATESET': pins(opt, seed),
-                                       **({'POKE': poke} if poke else {}), **({'PARTY': party} if party else {})}, 300,
-            readset)
+        why = run(mesence, rom, WARP_MSG, dest, {'NEXT': str(WARP), 'LIMIT': str(MSG_LIMIT), 'STATE': str(state), 'TO': arg,
+                                                 'SAVE': 'end.mss',
+                                                 'SETTLE': '120', 'MAXF': '1500', 'WARPEXIT': f'{warp_exit(rom):X}',
+                                                 'ANYWHERE': '1', 'ROMPATCH': patch, 'SET': start,
+                                                 'LATESET': pins(opt, seed),
+                                                 **({'POKE': poke} if poke else {}), **({'PARTY': party} if party else {})},
+                  300, readset)
         log = dest / 'warp.txt'
         text = log.read_text(encoding='utf-8') if log.exists() else ''
         found = re.search(r'arrived map (\w\w/\w\w)', text)
@@ -482,7 +517,7 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
         wram = (dest / 'final.wram').read_bytes() if (dest / 'final.wram').exists() else bytes(0x20000)
         seen = {k: wram[a & 0xFFFF] for k, (a, _) in FLAGS.items()}
         items = list(wram[ITEMS & 0xFFFF:(ITEMS & 0xFFFF) + 12])
-        messages = warp_messages(text, (dest / 'warpmsg.txt').read_text(encoding='utf-8')
+        messages = warp_messages((dest / 'warpmsg.txt').read_text(encoding='utf-8')
                                  if (dest / 'warpmsg.txt').exists() else '')
         # 도착(arrived map) 뒤 settle·test 단계에서 MAXF 에 닿아도 「arrived map」 과 「timeout phase=」 가 함께 찍힌다
         import dq4readset
@@ -490,12 +525,13 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
     else:
         maxf = opt.get('maxf', frames(arg))
         # PRE: 앞 구간이 끝날 때 남은 A 가 연 명령 창을 닫는다. 창이 없을 때의 B 는 아무것도 열지 않는다
-        run(mesence, rom, WALK_STATE, dest, {'STATE': str(state), 'WALK': str(WALK), 'WAYPOINTS': arg,
-                                             'PRE': pc.CLOSE.replace(';', ','),
-                                             'SAVE': 'end.mss', 'MAXF': str(maxf),
-                                             'CHANGES': str(opt.get('changes', 99)), 'AFTER': str(opt.get('after', 120)),
-                                             'WATCH': watch_flags(), 'ROMPATCH': patch, 'SET': start,
-                                             **({'POKE': poke} if poke else {})}, maxf // 40 + 120, readset)
+        why = run(mesence, rom, WALK_STATE, dest, {'STATE': str(state), 'WALK': str(WALK), 'WAYPOINTS': arg,
+                                                   'LIMIT': str(MSG_LIMIT),
+                                                   'PRE': pc.CLOSE.replace(';', ','),
+                                                   'SAVE': 'end.mss', 'MAXF': str(maxf),
+                                                   'CHANGES': str(opt.get('changes', 99)), 'AFTER': str(opt.get('after', 120)),
+                                                   'WATCH': watch_flags(), 'ROMPATCH': patch, 'SET': start,
+                                                   **({'POKE': poke} if poke else {})}, maxf // 40 + 120, readset)
         log = dest / 'walk.txt'
         text = log.read_text(encoding='utf-8') if log.exists() else ''
         maps = re.findall(r'map \w\w/\w\w -> (\w\w/\w\w)', text)
@@ -528,6 +564,10 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
     for want in opt.get('items', []):
         if want not in items:
             problems.append(f'물건 {want:02X} 없음')
+    # 시간 초과로 끊긴 실행은 출력이 남았어도 끝까지 간 것이 아니다. 다른 실패는 장면이 일부러 낸 종료일 수 있어
+    # 구간이 실패했을 때만 덧붙인다
+    if why and (problems or getattr(why, 'timed_out', False)):
+        problems.append(f'MesenCE 실행: {why}')
     return {'name': name, 'status': 'failed' if problems else 'passed', 'problems': problems, 'maps': maps,
             'trace': digest(log), 'messages': messages, 'flags': [k for k, v in flags.items() if v],
             'items': ' '.join(f'{v:02X}' for v in items)}
@@ -535,10 +575,10 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
 
 def prologue_start(mesence, rom, out, readset=False):
     """전원부터 새 게임 첫 장면까지 걸어 서장 시작 세이브스테이트를 만든다."""
-    run(mesence, rom, pc.MKSTATE, out / 'start', PROLOGUE_START, 200, readset)
+    why = run(mesence, rom, pc.MKSTATE, out / 'start', PROLOGUE_START, 200, readset)
     state = out / 'start' / 'start.mss'
     if not state.exists():
-        raise SystemExit('세이브스테이트를 만들지 못함')
+        raise SystemExit(f'세이브스테이트를 만들지 못함{f"(MesenCE 실행: {why})" if why else ""}')
     return state
 
 
@@ -604,9 +644,9 @@ def entry_check(variant, seed, name, messages, reason):
     return hashlib.sha1(text.encode('utf-8')).hexdigest()[:12]
 
 
-def load_messages(path=MESSAGES):
-    """기준 파일 → {(변형, 시드, 구간): {'messages': [...], 'reason': 글}}. 파일이 없으면 빈 dict. 표지가 맞지 않거나 까닭이
-    비면 ValueError(손으로 고친 기준)."""
+def load_messages(path=MESSAGES, verify=True):
+    """기준 파일 → {(변형, 시드, 구간): {'messages': [...], 'reason': 글}}. 파일이 없으면 빈 dict. verify 면 표지가 맞지
+    않거나 까닭이 비면 ValueError(손으로 고친 기준). verify 가 아니면 그런 항목은 'stale' 을 붙여 돌려준다."""
     import tomllib
     if not Path(path).exists():
         return {}
@@ -614,11 +654,14 @@ def load_messages(path=MESSAGES):
     out = {}
     for e in doc.get('segment', []):
         key = (e['variant'], e['seed'], e['name'])
+        bad = None
         if not e.get('reason', '').strip():
-            raise ValueError(f'{Path(path).name} {key}: reason 이 비어 있음')
-        if e.get('check') != entry_check(*key, e['messages'], e['reason']):
-            raise ValueError(f'{Path(path).name} {key}: check 가 맞지 않음(손으로 고친 기준, --write-messages 로 다시 만들 것)')
-        out[key] = {'messages': list(e['messages']), 'reason': e['reason']}
+            bad = f'{Path(path).name} {key}: reason 이 비어 있음'
+        elif e.get('check') != entry_check(*key, e['messages'], e.get('reason', '')):
+            bad = f'{Path(path).name} {key}: check 가 맞지 않음(손으로 고친 기준, --write-messages 로 다시 만들 것)'
+        if bad and verify:
+            raise ValueError(bad)
+        out[key] = {'messages': list(e['messages']), 'reason': e.get('reason', ''), **({'stale': True} if bad else {})}
     return out
 
 
@@ -632,7 +675,7 @@ def message_problems(variant, seed, result, baseline):
     if 'messages' not in result:
         return []
     if 'truncated' in result['messages']:
-        return ['메시지 기록이 400개를 넘어 잘림']
+        return [f'메시지 기록이 {MSG_LIMIT}개를 넘어 잘림']
     if (variant, seed) != REQUIRED and not any(k[:2] == (variant, seed) for k in baseline):
         return []
     want = baseline.get((variant, seed, result['name']))
@@ -652,7 +695,8 @@ def write_messages(rows, reason, path=MESSAGES):
     앞 reason 을 둔다. rows 에 없는 기준은 그대로 둔다."""
     if not reason.strip():
         raise ValueError('까닭이 비어 있음')
-    old = load_messages(path)
+    # 손으로 고친 기준도 다시 만들 수 있게 표지를 보지 않고 읽는다. 표지가 맞지 않는 항목은 앞 항목이 없는 것으로 친다
+    old = {k: e for k, e in load_messages(path, verify=False).items() if not e.get('stale')}
     new = dict(old)
     for variant, seed, name, messages in rows:
         if 'truncated' in messages:
@@ -663,7 +707,8 @@ def write_messages(rows, reason, path=MESSAGES):
                                     'reason': prev['reason'] if prev and prev['messages'] == order else reason.strip()}
     lines = ['# 1장 걷기 검사(dq4ch1walkcheck.py)가 구간마다 견주는 메시지 번호(24:8BAF 가 받은 A)의 처음 나온 차례.',
              '# 손으로 고치지 않는다. dq4ch1walkcheck.py --units --write-messages "까닭" 으로 다시 만든다. 차례가 바뀐 구간에만',
-             '# 그 까닭이 reason 으로 남고, check 는 그 도구만 쓰는 표지라 손으로 고치면 검사가 실패한다.', '']
+             '# 그 까닭이 reason 으로 남는다. check 는 실수로 손댄 것을 알아채는 표지일 뿐 공개된 셈이라 고의 위조는 막지 않는다.',
+             '']
     order = {s[0]: i for i, s in enumerate(SEGMENTS + CHAPTER2_END)}
     for (variant, seed, name), e in sorted(new.items(), key=lambda kv: (kv[0][0], kv[0][1], order.get(kv[0][2], 999),
                                                                           kv[0][2])):
@@ -758,7 +803,11 @@ def main():
     # 기준을 고치는 실행은 메시지를 견주지 않는다(메시지 밖 판정만으로 통과해야 고친다)
     baseline = None if args.write_messages is not None else load_messages()
     for sd, r in ([(0, pro)] if pro else []) + [(sd, r) for sd, rs in runs.items() for r in rs]:
-        bad = [] if baseline is None else message_problems(variant, sd, r, baseline)
+        if baseline is not None:
+            bad = message_problems(variant, sd, r, baseline)
+        else:
+            # 기준을 고치는 실행도 잘린 기록은 실패로 친다(그 결과는 기준으로 쓸 수 없다)
+            bad = [f'메시지 기록이 {MSG_LIMIT}개를 넘어 잘림'] if 'truncated' in r.get('messages', []) else []
         if bad:
             r['problems'] = r['problems'] + bad
             r['status'] = 'failed'

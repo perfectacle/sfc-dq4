@@ -159,7 +159,7 @@ class Ch1WalkCheckTests(unittest.TestCase):
     def test_run_drops_shell_lua_env(self):
         seen = {}
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {'SEQ': 'y@1:2', 'HOLD': '9', 'KEEP': '1'}), \
-                mock.patch.object(wc.mesen, 'run', lambda *a, **kw: seen.update(kw['env'])):
+                mock.patch.object(wc.mesen, 'run', lambda *a, **kw: seen.update(kw['env']) or mock.Mock(returncode=0)):
             wc.run(Path('mesen'), Path('rom'), Path('x.lua'), Path(tmp), {'STATE': 's'}, 1)
         self.assertNotIn('SEQ', seen)
         self.assertNotIn('HOLD', seen)
@@ -212,10 +212,10 @@ class MessageBaselineTests(unittest.TestCase):
                          ['메시지 기록이 400개를 넘어 잘림'])
 
     def test_warp_messages_after_arrival(self):
-        warp = 'f00010 anywhere from map 36/00\nf00120 arrived map 37/02 cell 12,6\nf00300 end map 37/02\n'
-        self.assertEqual(wc.warp_messages(warp, 'E10@50\nE66@120\nE67@200\n'), ['E66', 'E67'])
-        self.assertEqual(wc.warp_messages('', 'E10@50\n'), ['E10'])
-        self.assertEqual(wc.warp_messages(warp, 'E66@130\ntruncated\n'), ['E66', 'truncated'])
+        # 맵 번호가 목적지와 처음 같아진 프레임(map@)부터 본다
+        self.assertEqual(wc.warp_messages('E10@50\nmap@120\nE66@120\nE67@200\n'), ['E66', 'E67'])
+        self.assertEqual(wc.warp_messages('E10@50\n'), ['E10'])
+        self.assertEqual(wc.warp_messages('map@100\nE66@130\ntruncated\n'), ['E66', 'truncated'])
 
     def test_hand_edit_is_caught(self):
         import tempfile
@@ -229,6 +229,10 @@ class MessageBaselineTests(unittest.TestCase):
             path.write_text(text.replace('reason = "처음"', 'reason = " "'), encoding='utf-8')
             with self.assertRaises(ValueError):
                 wc.load_messages(path)
+            # 손으로 고친 기준도 --write-messages 로 다시 만들 수 있다(고친 항목은 앞 까닭 없이 새 까닭)
+            path.write_text(text.replace('"E65", "129"', '"E65"'), encoding='utf-8')
+            wc.write_messages([('chapter1', 0, 'flare', ['E65', '129'])], '다시 만듦', path)
+            self.assertEqual(wc.load_messages(path)['chapter1', 0, 'flare'], {'messages': ['E65', '129'], 'reason': '다시 만듦'})
             with self.assertRaises(ValueError):
                 wc.write_messages([('chapter1', 0, 'flare', ['E65'])], '  ', path)
             with self.assertRaises(ValueError):
@@ -262,6 +266,42 @@ class MessageBaselineTests(unittest.TestCase):
         for e in base.values():
             self.assertTrue(e['reason'].strip())
             self.assertEqual(e['messages'], wc.message_order(e['messages']))
+
+
+
+class RunFailureTests(unittest.TestCase):
+    def test_readset_failure_reasons(self):
+        """읽은 바이트 캐시로 돌린 실행이 끝까지 가지 못한 까닭을 글로 돌려준다. 캐시에서 펼쳤거나 0 으로 끝났으면 None."""
+        import dq4readset
+        self.assertIsNone(wc.run_failure({'cached': True, 'returncode': 1}, 60))
+        self.assertIsNone(wc.run_failure({'cached': False, 'returncode': 0, 'timed_out': False}, 60))
+        timeout = wc.run_failure({'cached': False, 'returncode': None, 'timed_out': True}, 60)
+        self.assertIn('60초', timeout)
+        self.assertTrue(timeout.timed_out)
+        self.assertFalse(wc.run_failure({'cached': False, 'returncode': 3}, 60).timed_out)
+        self.assertIn('시간 제한', wc.run_failure({'cached': False, 'returncode': dq4readset.LUA_WATCHDOG}, 60))
+        self.assertIn('Lua 오류', wc.run_failure({'cached': False, 'returncode': dq4readset.LUA_ERROR}, 60))
+        self.assertEqual(wc.run_failure({'cached': False, 'returncode': 3}, 60), '종료 코드 3')
+
+    def test_segment_names_the_run_failure_when_the_segment_fails(self):
+        """구간이 실패하면 MesenCE 실행 실패의 까닭을 문제에 덧붙인다. 출력으로 통과한 구간에는 덧붙이지 않는다.
+        다만 읽은 바이트 캐시로 돈 실행이 시간 초과면 출력이 있어도 실패다."""
+        seg = ('s', 'walk', '10,10', {'maxf': 400})
+        with tempfile.TemporaryDirectory() as d:
+            dest = Path(d) / 's'
+            dest.mkdir()
+            with mock.patch.object(wc, 'run', return_value='300초 안에 끝나지 않음'):
+                r = wc.segment(Path('m'), Path('r.sfc'), Path('x.mss'), dest, seg, '')
+            self.assertEqual(r['status'], 'failed')
+            self.assertIn('MesenCE 실행: 300초 안에 끝나지 않음', r['problems'])
+            (dest / 'end.mss').write_bytes(b'x')
+            with mock.patch.object(wc, 'run', return_value='종료 코드 1'):
+                r = wc.segment(Path('m'), Path('r.sfc'), Path('x.mss'), dest, seg, '')
+            self.assertEqual(r['status'], 'passed', r['problems'])
+            with mock.patch.object(wc, 'run', return_value=wc.run_failure({'cached': False, 'timed_out': True}, 300)):
+                r = wc.segment(Path('m'), Path('r.sfc'), Path('x.mss'), dest, seg, '')
+            self.assertEqual(r['status'], 'failed')
+            self.assertEqual(r['problems'], ['MesenCE 실행: 300초 안에 끝나지 않음'])
 
 
 if __name__ == '__main__':
