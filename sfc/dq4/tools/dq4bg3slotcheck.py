@@ -1,7 +1,8 @@
 """BG3 타일맵 옮기기(dq4bg3slot.py)를 MesenCE 로 검사한다. 롬으로 만든 출발 상태(dq4freshstate)에서 실내 맵마다
 순간이동해 명령 창을 열고, 맵마다 다음이 모두 맞으면 통과다.
 
-  도착     dq5warp 가 도착을 적음. 게임이 도착하자마자 다른 맵으로 옮기면(33/01 → 33/00) 도착한 맵으로 판정
+  도착     dq5warp 가 요청한 맵에 도착을 적음. 게임이 도착하자마자 다른 맵으로 옮기는 맵(MOVES_ON, 33/01 → 33/00)은
+           옮겨 간 맵에 도착해야 하고, 그 맵으로 판정
   자리     끝에서 BG3SC 그림자 $0725 가 dq4bg3slot 의 자리(필드꼴 맵($BE bit7 = 0)은 FIELD, MAP_SLOTS, 나머지 실내
            맵은 INTERIOR)
   보임     $2109 에 든 자리(7E:1ABC ^ 1C)가 $0725 와 같음
@@ -51,6 +52,8 @@ START_MAP = {'ship': '17/00'}
 # 출발 맵으로 가기 전에 들르는 맵과 칸. 자리가 INTERIOR 가 아니라 돌아올 때 자리를 다시 골라야 하고, 「어디서나」 가
 # 발밑 트리거를 밟도록 아래 칸이 트여 있어야 한다.
 HOP = '01/01,13,8'
+# 도착하자마자 게임이 다른 맵으로 옮기는 맵 → 옮겨 간 맵. 그 밖에는 요청한 맵에 서야 한다
+MOVES_ON = {'33/01': '33/00'}
 ARRIVED = re.compile(r'arrived map (\S+) (field|cell)')
 
 
@@ -78,6 +81,8 @@ def judge(mp, arrival, records):
     if arrival is None:
         return ['도착 못 함']
     here, kind = arrival
+    if here != mp and MOVES_ON.get(mp) != here:
+        return [f'{mp} 대신 {here} 에 도착']
     if not records or records[-1]['map'] != here:
         return [f'끝 기록이 {here} 가 아님({records[-1]["map"] if records else None})']
     last = records[-1]
