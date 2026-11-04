@@ -1,6 +1,6 @@
-"""guards.toml 실행 검사의 paths 가 명령이 닿는 저장소 파일을 모두 덮는지 본다.
+"""guards.toml 실행 검사의 paths 가, 아래 길로 따라갈 수 있는 저장소 파일을 덮는지 본다.
 
-검사 명령(run)에 적힌 스크립트(.py·.lua·.asm)에서 시작해 닿는 파일을 따라간다.
+검사 명령(run)에 적힌 스크립트(.py·.lua·.asm)와 `unittest discover -s 폴더 -p 패턴` 이 고르는 시험 파일에서 시작한다.
 
   .py   import(함수 안 import 포함)하는 저장소 모듈. 찾는 곳은 그 파일의 폴더, sfc/dq4/tools, sfc/dq5/tools,
         fc/dq4/tools, tools 차례다. 그리고 값이 파일 이름 하나뿐인 글자 상수 가운데 .py·.lua·.asm 으로 끝나는 것
@@ -8,10 +8,16 @@
   .lua  require 와 글자 상수의 .lua(같은 폴더, tools/lua, sfc/dq4/tools/lua, sfc/dq5/tools/lua)
   .asm  incsrc
 
-docstring 과 빈칸이 든 글(도움말)은 보지 않는다. 변수·f-string 으로 만든 이름은 못 본다.
+docstring 과 빈칸이 든 글(도움말)은 보지 않는다.
 
-많은 검사가 함께 닿는 묶음은 guards.toml 의 [groups] 에 둔다(GROUP_ROOTS). 묶음은 그 뿌리에서 닿는 파일을 모두
-덮어야 한다.
+못 보는 길(이런 길로 닿는 파일은 paths 에 손으로 적는다):
+  - importlib·__import__ 로 불러오는 모듈
+  - 변수·f-string·이어 붙이기로 만든 파일 이름(하위 프로세스 인자를 조립하는 것 포함. dq4build 단계는 STAGES 의
+    글자 상수라 잡힌다), Lua 의 dofile·loadfile 에 계산한 경로를 주는 것
+  - 자료 파일(.toml·.json·그림 등)과 환경 변수가 가리키는 파일, 저장소 밖 툴킷 Lua(LIBDIR)
+
+많은 검사가 함께 닿는 묶음은 guards.toml 의 [groups] 에 둔다. 묶음마다 뿌리를 GROUP_ROOTS 에 적고(이름이 같아야
+함), 묶음은 그 뿌리에서 위 길로 닿는 파일을 덮어야 한다.
 
   uv run --locked python sfc/dq4/tools/dq4guardpaths.py            # 빠진 것을 검사·묶음마다 찍음
   uv run --locked python sfc/dq4/tools/dq4guardpaths.py --group ch1-build   # 그 묶음이 덮어야 할 파일
@@ -137,7 +143,18 @@ def closure(roots):
 
 
 def entries(run):
-    return [t for t in ENTRY.findall(run) if t in tracked()]
+    """명령의 진입 파일: 적힌 스크립트 경로, 그리고 `unittest discover -s 폴더 -p 패턴` 이 고르는 시험 파일."""
+    out = [t for t in ENTRY.findall(run) if t in tracked()]
+    for part in re.split(r'&&|\|\||[;|()]', run):
+        if 'discover' not in part.split():
+            continue
+        s = re.search(r'(?:-s|--start-directory)\s+(\S+)', part)
+        p = re.search(r'(?:-p|--pattern)\s+(\S+)', part)
+        folder = s[1].rstrip('/') if s else '.'
+        pattern = p[1] if p else 'test*.py'
+        out += sorted(f for f in tracked() if PurePosixPath(f).parent == PurePosixPath(folder)
+                      and PurePosixPath(f).match(pattern) and f not in out)
+    return out
 
 
 def covered(path, patterns):

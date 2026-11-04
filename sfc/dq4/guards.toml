@@ -1028,31 +1028,89 @@ groups = ["ch1-build", "ch1-walk"]
 [[check]]
 name = "dq4-environment-collision"
 why = "바꾼 맵의 셀 막힘·카운터 칸이 FC 블록 속성(dq4block.terrain)이 막는 칸과 같아야 한다. 롬이 없으면 건너뛰는 단위 테스트라 CI 가 대신 돌리지 못한다(#970). 건너뛰면 OK 줄이 달라 실패로 친다"
-paths = ["sfc/dq4/tools/dq4environmentrom.py", "sfc/dq4/tools/dq4environmentmap.py", "sfc/dq4/tools/test_dq4environment.py",
-         "fc/dq4/tools/dq4block.py", "fc/dq4/tools/dq4chest.py", "fc/dq4/tools/dq4map.py", "fc/dq4/tools/dq4field.py",
-         "fc/dq4/tools/dq4data.py", "fc/dq4/tools/dq4talk.py", "fc/dq4/tools/dq4text.py", "fc/dq4/tools/dq4bank.py"]
+paths = [
+  "sfc/dq4/tools/dq4environmentrom.py",
+  "sfc/dq4/tools/dq4environmentmap.py",
+  "sfc/dq4/tools/test_dq4environment.py",
+  "fc/dq4/tools/dq4block.py",
+  "fc/dq4/tools/dq4chest.py",
+  "fc/dq4/tools/dq4map.py",
+  "fc/dq4/tools/dq4field.py",
+  "fc/dq4/tools/dq4data.py",
+  "fc/dq4/tools/dq4talk.py",
+  "fc/dq4/tools/dq4text.py",
+  "fc/dq4/tools/dq4bank.py",
+  "sfc/dq4/tools/dq4environment.py",
+  "sfc/dq4/tools/dq4environmentromcheck.py",
+  "sfc/dq4/tools/dq4freshstate.py",
+  "sfc/dq4/tools/lua/dq4environmentdump.lua",
+  "sfc/dq4/tools/lua/dq4shipstate.lua",
+]
 run = "uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4environment.py -k CounterTests 2>&1 | tee work/environment-collision.log | tail -1 | grep -qx OK"
 needs = ["rom"]
+groups = ["ch1-walk"]
 
 [[check]]
 name = "dq4-unported-gates"
 why = "MAPS 밖 FC 맵에서 9C 성문을 가진 맵이 31-04·33-01·3C-00 셋뿐이고, 각 맵에서 생성기(dq4environmentrom.objects)가 잠금 0 성문(48) 하나를 만들어야 한다. FC 롬이 있어야 도는 단위 테스트라 CI 가 대신 돌리지 못한다. 건너뛰면 OK 줄이 달라 실패로 친다. 셋 가운데 하나를 MAPS 에 넣으면 실패하므로 그때 dq4gatecheck 실측으로 옮긴다"
-paths = ["sfc/dq4/tools/dq4environmentrom.py", "sfc/dq4/tools/dq4environmentmap.py", "sfc/dq4/tools/test_dq4environment.py",
-         "fc/dq4/tools/dq4block.py", "fc/dq4/tools/dq4chest.py", "fc/dq4/tools/dq4map.py", "fc/dq4/tools/dq4field.py",
-         "fc/dq4/tools/dq4data.py", "fc/dq4/tools/dq4talk.py", "fc/dq4/tools/dq4text.py", "fc/dq4/tools/dq4bank.py"]
+paths = [
+  "sfc/dq4/tools/dq4environmentrom.py",
+  "sfc/dq4/tools/dq4environmentmap.py",
+  "sfc/dq4/tools/test_dq4environment.py",
+  "fc/dq4/tools/dq4block.py",
+  "fc/dq4/tools/dq4chest.py",
+  "fc/dq4/tools/dq4map.py",
+  "fc/dq4/tools/dq4field.py",
+  "fc/dq4/tools/dq4data.py",
+  "fc/dq4/tools/dq4talk.py",
+  "fc/dq4/tools/dq4text.py",
+  "fc/dq4/tools/dq4bank.py",
+  "sfc/dq4/tools/dq4environment.py",
+  "sfc/dq4/tools/dq4environmentromcheck.py",
+  "sfc/dq4/tools/dq4freshstate.py",
+  "sfc/dq4/tools/lua/dq4environmentdump.lua",
+  "sfc/dq4/tools/lua/dq4shipstate.lua",
+]
 run = "uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4environment.py -k UnportedGateTests 2>&1 | tee work/unported-gates.log | tail -1 | grep -qx OK"
 needs = ["rom"]
+groups = ["ch1-walk"]
 
 [[check]]
 name = "dq4-map-people-rom-tests"
 why = "롬이 있어야 도는 단위 테스트 24개: 들어설 때 숨는 FC 인물(엔도르 투기장 관중석 등)을 옮기지 않고 그 맵을 이벤트가 찾지 않으며, 누운 인물마다 발치·머리맡 옆에 말을 걸 빈 칸이 있고 발치 훅이 FC 발치 칸만 더하고 1장 빌드도 그 훅을 얹으며, 가게 장면의 카운터 앞 칸이 FC 에서 걸어서 닿고 카운터 너머가 그 가게 주인이어야 한다. 발치 훅은 05:84FE 를 부르는 곳이 C 만 보고 05:8503 이 $00·$01·스택을 지킨다는 원래 롬 바이트에 기대며, 훅 자리는 원래 롬 빈 자리 안이고 05:FF00 가게 도우미 앞이어야 한다. 롬이 없어 건너뛰거나 테스트가 빠지면 ok 수가 모자라 실패한다"
-paths = ["sfc/dq4/tools/dq4npcport.py", "sfc/dq4/tools/dq4npccheck.py", "sfc/dq4/tools/test_dq4npcport.py",
-         "sfc/dq4/tools/dq4shopscene.py", "sfc/dq4/tools/test_dq4shopscene.py", "sfc/dq4/tools/dq4groupbuild.py",
-         "sfc/dq4/tools/dq4sleepertalk.py", "sfc/dq4/tools/test_dq4sleepertalk.py",
-         "sfc/dq4/tools/dq4ch1event.py", "sfc/dq4/tools/dq4ch2event.py", "sfc/dq4/tools/dq4chapter1.py",
-         "fc/dq4/tools/dq4npcblock.py", "fc/dq4/tools/dq4talk.py", "fc/dq4/tools/dq4map.py"]
+paths = [
+  "sfc/dq4/tools/dq4npcport.py",
+  "sfc/dq4/tools/dq4npccheck.py",
+  "sfc/dq4/tools/test_dq4npcport.py",
+  "sfc/dq4/tools/dq4shopscene.py",
+  "sfc/dq4/tools/test_dq4shopscene.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
+  "sfc/dq4/tools/dq4sleepertalk.py",
+  "sfc/dq4/tools/test_dq4sleepertalk.py",
+  "sfc/dq4/tools/dq4ch1event.py",
+  "sfc/dq4/tools/dq4ch2event.py",
+  "sfc/dq4/tools/dq4chapter1.py",
+  "fc/dq4/tools/dq4npcblock.py",
+  "fc/dq4/tools/dq4talk.py",
+  "fc/dq4/tools/dq4map.py",
+  "sfc/dq4/tools/dq4brkscan.py",
+  "sfc/dq4/tools/dq4compatcheck.py",
+  "sfc/dq4/tools/dq4cores.py",
+  "sfc/dq4/tools/dq4freshstate.py",
+  "sfc/dq4/tools/dq4libretro.py",
+  "sfc/dq4/tools/dq4savefixture.py",
+  "sfc/dq4/tools/lua/dq4holdwalk.lua",
+  "sfc/dq4/tools/lua/dq4openbus.lua",
+  "sfc/dq4/tools/lua/dq4shipstate.lua",
+  "sfc/dq5/tools/dq5npcrecordcheck.py",
+  "sfc/dq5/tools/dq5sram.py",
+  "sfc/dq5/tools/lua/dq5npcrecordcheck.lua",
+  "sfc/dq5/tools/lua/dq5progresscheck.lua",
+  "sfc/dq5/tools/lua/dq5textgrowcheck.lua",
+]
 run = "test $( (uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4npcport.py -k HiddenPeopleTest -k SleeperTalkTest -v; uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4shopscene.py -k ShopPlaceTest -v; uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4sleepertalk.py -v) 2>&1 | tee work/map-people-rom-tests.log | grep -c ' \\.\\.\\. ok$') -eq 24"
 needs = ["rom"]
+groups = ["ch1-walk"]
 
 [[check]]
 name = "dq4-npc-talk"
