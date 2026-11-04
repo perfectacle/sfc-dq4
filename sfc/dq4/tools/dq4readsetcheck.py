@@ -3,7 +3,7 @@
 가벼운 장면 두 개(전원부터 서장 첫 장면까지, 그 상태에서 버튼을 눌러 걷고 창을 여는 것)마다:
 
   결정성  같은 장면을 두 번 돌리면 출력(세이브스테이트는 롬 이름을 지운 해시)과 읽은 집합이 같다
-  밖      읽은 집합과 키에 든 머리 밖 바이트를 모두 뒤집은 롬(머리 체크섬 $7FDC~$7FDF 도 뒤집음)으로 새로 돌려도
+  밖      읽은 집합과 키에 든 로더 바이트(dq4readset.loader_ranges) 밖을 모두 뒤집은 롬(머리 보수·체크섬도 뒤집음)으로 새로 돌려도
           출력·읽은 집합이 같다
   적중    그 롬으로 캐시를 켜고 돌리면 돌리지 않고 맞으며, 펼친 출력이 새로 돌린 출력과 같다
   안      읽은 집합 안 바이트 하나를 바꾸면 캐시가 빗나간다
@@ -39,7 +39,6 @@ import dq4ch1walkcheck as walk  # noqa: E402
 import dq4mesen as mesen  # noqa: E402
 import dq4readset as rs  # noqa: E402
 
-KEYED_HEADER = [i for h in rs.HEADER for i in range(h.start, h.stop)]
 SYNTH_LUA = HERE / 'lua' / 'dq4readsetsynth.lua'
 ERR_LUA = HERE / 'lua' / 'dq4readseterr.lua'
 CB_LUA = HERE / 'lua' / 'dq4readsetcb.lua'
@@ -100,8 +99,8 @@ def check_scene(go, rom_path, name, script, env, out):
     keep = bytearray(len(data))
     for s, n in ranges:
         keep[s:s + n] = b'\1' * n
-    for i in KEYED_HEADER:
-        keep[i] = 1
+    for s, n in rs.loader_ranges(data):
+        keep[s:s + n] = b'\1' * n
     flipped = bytes(b ^ 0xFF if not k else b for b, k in zip(data, keep))
     rom_out = out / f'{name}-outside.sfc'
     rom_out.write_bytes(flipped)

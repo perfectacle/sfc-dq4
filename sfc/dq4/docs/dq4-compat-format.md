@@ -48,6 +48,8 @@ MesenCE 에서는 우연히 맞는 값이 읽혀 지나갔고, snes9x 에서는 
 
 코어 바이너리는 저장소에 두지 않습니다. bsnes 는 GPLv3, snes9x 는 비상업 라이선스라 재배포 의무가 따르고, 플랫폼마다 다르기 때문입니다. 대신 `dq4cores.py` 가 libretro 공식 저장소의 커밋을 고정해 받아 빌드합니다(처음 약 1분, macOS clang 21 에서 확인). 출력은 원래 체크아웃의 `work/cores/` 이고 워크트리끼리 함께 씁니다(잠금 파일로 동시 빌드를 막고, 바꿔 넣기로 반쯤 쓴 파일을 보이지 않게 함). 같은 머신에서 새 폴더에 다시 빌드하면 출력 SHA-256 이 같았습니다. `LIBRETRO_BSNES`·`LIBRETRO_SNES9X` 를 주면 그 파일을 씁니다.
 
+bsnes 에는 읽은 롬 바이트 비트맵 패치(`dq4cores-bsnes-romtrace.patch`)를 얹어 빌드합니다. 비트맵은 프런트엔드가 켜야만 쓰이고, 켜지 않으면 롬 읽기 자리에서 빈 포인터만 봅니다. 패치 해시가 코어 도장(`bsnes.json` 의 `patch`)에 들어 있어 패치가 바뀌면 다시 빌드합니다. [읽은 롬 바이트 캐시 「libretro bsnes」](dq4-readset-format.md#libretro-bsnes)
+
 | 코어 | 저장소 | 커밋 | 판 |
 | --- | --- | --- | --- |
 | bsnes | `libretro/bsnes` | `63ee22f7af8f…`(2026-09-04) | 115 |

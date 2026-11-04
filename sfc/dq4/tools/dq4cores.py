@@ -5,7 +5,7 @@
 DEP-01 처럼 나온 지 7일이 넘은 것만 고른다.
 
 출력은 원래 체크아웃의 work/cores/(워크트리끼리 함께 씀, DQ4_CORES 로 바꿈)에 <코어>_libretro.<확장자> 와
-<코어>.json(커밋·출력 SHA-256)을 둔다. 이미 같은 커밋으로 만든 것이 있으면 다시 빌드하지 않는다.
+<코어>.json(커밋·패치 해시·출력 SHA-256)을 둔다. 이미 만든 것의 커밋과 패치 해시가 지금 것과 같으면 다시 빌드하지 않는다.
 
   python sfc/dq4/tools/dq4cores.py            # 둘 다 받아 빌드(처음 약 1분)
   python sfc/dq4/tools/dq4cores.py --check    # 빌드 없이 상태만
@@ -30,6 +30,8 @@ CORES = {
         'commit': '63ee22f7af8f5d1ada295c2c98fd7bf261fa62a7',   # 2026-09-04, 「bsnes 115」
         'make': [],
         'output': 'bsnes_libretro',
+        # 읽은 롬 바이트 비트맵(retro_get_memory_data(ROM_TRACE)). 형식은 sfc/dq4/docs/dq4-readset-format.md 「libretro bsnes」
+        'patch': 'dq4cores-bsnes-romtrace.patch',
         # clang 21 은 nall/traits.hpp 의 표준 라이브러리 특수화를 오류로 본다(GCC·옛 clang 은 경고도 아님)
         'clang_cxx': '-Wno-error=invalid-specialization',
     },
@@ -38,6 +40,7 @@ CORES = {
         'commit': 'fae2fea08f74180759ef540ee94259213f503480',   # 2026-09-19, 「1.63 fae2fea」
         'make': ['-C', 'libretro'],
         'output': 'libretro/snes9x_libretro',
+        'patch': None,
         'clang_cxx': '',
     },
 }
@@ -76,6 +79,12 @@ def sha256(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def patch_sha(name):
+    """그 코어에 얹는 패치 파일의 SHA-256. 패치가 없으면 None. 패치가 바뀌면 다시 빌드한다."""
+    p = CORES[name]['patch']
+    return sha256(HERE / p) if p else None
+
+
 def is_clang():
     try:
         cxx = shlex.split(os.environ.get('CXX', 'c++'))
@@ -104,7 +113,8 @@ def _build(name, folder, jobs):
     spec = CORES[name]
     out = folder / f'{name}_libretro.{suffix()}'
     have = stamp(name, folder)
-    if have and have.get('commit') == spec['commit'] and out.exists() and have.get('sha256') == sha256(out):
+    if have and have.get('commit') == spec['commit'] and have.get('patch') == patch_sha(name) and out.exists() \
+            and have.get('sha256') == sha256(out):
         print(f'{name}: {spec["commit"][:12]} 이미 있음 {out}')
         return out
     src = folder / 'src' / f'{name}-{spec["commit"][:12]}-{os.getpid()}'
@@ -119,6 +129,8 @@ def _build(name, folder, jobs):
         head = subprocess.run(git + ['rev-parse', 'HEAD'], capture_output=True, text=True, check=True).stdout.strip()
         if head != spec['commit']:
             raise SystemExit(f'{name}: 받은 커밋 {head} 가 고정한 {spec["commit"]} 와 다름')
+        if spec['patch']:
+            subprocess.run(git + ['apply', '--whitespace=nowarn', str(HERE / spec['patch'])], check=True)
         cmd = ['make', f'-j{jobs}', *spec['make']]
         if spec['clang_cxx'] and is_clang():
             # 명령줄 CXXFLAGS 는 Makefile 의 플래그를 통째로 덮으므로 컴파일러에 붙인다
@@ -130,8 +142,8 @@ def _build(name, folder, jobs):
     finally:
         shutil.rmtree(src, ignore_errors=True)
     write_atomic(out, data)
-    info = {'commit': spec['commit'], 'repo': spec['repo'], 'sha256': hashlib.sha256(data).hexdigest(),
-            'platform': sys.platform}
+    info = {'commit': spec['commit'], 'repo': spec['repo'], 'patch': patch_sha(name),
+            'sha256': hashlib.sha256(data).hexdigest(), 'platform': sys.platform}
     write_atomic(folder / f'{name}.json', (json.dumps(info, indent=1) + '\n').encode())
     print(f'{name}: {out} sha256 {info["sha256"][:16]}…')
     return out
@@ -149,8 +161,8 @@ def main():
     for name in names:
         if args.check:
             have, path = stamp(name, folder), core_path(name, folder)
-            ok = bool(have and have.get('commit') == CORES[name]['commit'] and path.exists()
-                      and have.get('sha256') == sha256(path))
+            ok = bool(have and have.get('commit') == CORES[name]['commit'] and have.get('patch') == patch_sha(name)
+                      and path.exists() and have.get('sha256') == sha256(path))
             print(f'{name}: {"있음" if ok else "없음 또는 다른 커밋"} {path}')
             bad += not ok
         else:

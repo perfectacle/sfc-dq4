@@ -313,7 +313,7 @@ def read_sram(core):
     return core.save()[0][BSNES_SRAM_OFFSET:BSNES_SRAM_OFFSET + SIZE]
 
 
-def open_core(core_path, rom, sysdir, sram=None):
+def open_core(core_path, rom, sysdir, sram=None, trace=False):
     """코어를 열고 SRAM 을 넣는다. bsnes 는 켤 때 저장 폴더(sysdir)의 <롬 이름>.srm 을 읽으므로 열기 전에 파일로,
     snes9x 는 열린 뒤 retro_get_memory_data(0) 에 쓴다. 둘 다 넣은 SRAM 이 그대로 보이는지 맞춰 본다."""
     sysdir = Path(sysdir)
@@ -323,7 +323,7 @@ def open_core(core_path, rom, sysdir, sram=None):
         srm.write_bytes(sram)
     elif srm.exists():
         srm.unlink()
-    core = Core(str(core_path), str(rom), str(sysdir))
+    core = Core(str(core_path), str(rom), str(sysdir), trace=trace)
     if sram is not None:
         try:
             load_sram(core, sram)
