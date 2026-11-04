@@ -4,9 +4,10 @@
 --   「프레임 w03=수 wother=수 wport=수 pb=뱅크/… vars=주소:값,…」  사본 자리를 썼거나 VRAM 주소를 넣은 프레임: CPU 가 쓴 횟수(뱅크
 --                                                     03 코드 / 그 밖), WRAM 포트 $2180 으로 쓴 횟수(pb = 그때의 PC 뱅크,
 --                                                     DMA 면 DMA 를 건 코드의 뱅크), 프레임 끝의 변수
---   「프레임 unseen 수 첫주소」                        그 프레임에 CPU·포트 쓰기 콜백이 건드리지 않은 주소인데 사본
---                                                     바이트가 앞 프레임과 다른 것(DMA 처럼 콜백에 걸리지 않는 길).
---                                                     같은 프레임에 뱅크 03 이 쓴 사본이 있어도 그 밖의 주소는 센다
+--   「프레임 unseen 수 첫주소」                        프레임 끝의 사본 바이트가 기대와 다른 수. 기대는 그 프레임에
+--                                                     CPU·포트 쓰기 콜백이 마지막으로 쓴 값, 쓰지 않은 자리는 앞
+--                                                     프레임 값. DMA 처럼 콜백에 걸리지 않는 길로 바뀐 것을 센다.
+--                                                     CPU 가 쓴 뒤 같은 자리를 DMA 가 같은 값으로 덮으면 잡지 못한다
 --   「프레임 copy 바이트 16진」                         뱅크 03 이 쓴 프레임의 끝 사본
 --   「프레임 vmadd 주소@PC,…」                          창 글자 코드(뱅크 BANK)가 $2116 에 넣은 VRAM 워드 주소(처음 64개)
 --   「프레임 entry VRAM주소:Y:머리,…」                  PC 가 ENTRY 인 $2116 쓰기(대기열 항목 하나)의 주소, 항목 자리 Y,
@@ -38,9 +39,9 @@ local function snapshot()
   return table.concat(c)
 end
 
-emu.addMemoryCallback(function(addr)
+emu.addMemoryCallback(function(addr, value)
   if pcbank() == 0x03 then w03 = w03 + 1 else wother = wother + 1 end
-  seen[addr & 0xFFFF] = true
+  seen[addr & 0xFFFF] = value
 end, emu.callbackType.write, 0x7E0000 + lo_c, 0x7E0000 + hi_c)
 
 -- WRAM 포트: $2181~$2183 이 주소(17비트), $2180 쓰기마다 그 주소에 쓰고 하나 나아감
@@ -52,7 +53,7 @@ emu.addMemoryCallback(function(addr, value)
   else
     if wm >= lo_c and wm <= hi_c then
       wport = wport + 1
-      seen[wm] = true
+      seen[wm] = value
       pbanks[string.format('%02X', pcbank())] = true
     end
     wm = (wm + 1) & 0x1FFFF
@@ -91,10 +92,13 @@ emu.addEventCallback(function()
     put(string.format('%d w03=%d wother=%d wport=%d pb=%s vars=%s', f, w03, wother, wport, table.concat(pb, '/'),
       table.concat(t, ',')))
   end
-  if last and now ~= last then
+  do
     local n, first = 0, nil
     for i = 0, hi_c - lo_c do
-      if not seen[lo_c + i] and now:sub(2 * i + 1, 2 * i + 2) ~= last:sub(2 * i + 1, 2 * i + 2) then
+      local b = tonumber(now:sub(2 * i + 1, 2 * i + 2), 16)
+      local want = seen[lo_c + i]
+      if want == nil and last then want = tonumber(last:sub(2 * i + 1, 2 * i + 2), 16) end
+      if want ~= nil and b ~= want then
         n = n + 1
         first = first or lo_c + i
       end
