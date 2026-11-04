@@ -173,11 +173,14 @@ def rom_shape(rom):
 
 def state_hash(data):
     """세이브스테이트 해시. 머리에 든 롬 파일 이름(실행마다 다름)은 지우고 본다. 이름은 압축한 화면 그림 뒤에 오므로
-    그림 크기에 따라 자리가 달라진다. 그래서 파일 앞 일부가 아니라 전체에서 찾는다."""
+    그림 크기에 따라 자리가 달라진다. 그래서 파일 앞 일부가 아니라 전체에서 찾는다.
+
+    지우는 것은 길이 칸이 맞고 이름이 dq4mesen.unique_copy 꼴(이름-16진 12자리.sfc)인 첫 자리다. 압축 본문에 우연히
+    든 꼴은 그 둘을 다 맞추기 어렵다. 그래도 맞으면 그 자리를 지우게 되는데, 그러면 진짜 이름이 남아 해시가 실행마다
+    달라지므로 캐시가 빗나갈 뿐 틀린 결과로 맞지는 않는다. 이름이 고정된 상태(복사본이 아닌 롬)는 지울 것이 없다."""
     data = bytes(data)
-    # 길이 칸이 이름 길이와 맞지 않는 매치(압축 본문에 우연히 든 꼴)는 건너뛰고 한 바이트 뒤부터 다시 찾는다
     m = _NAME.search(data)
-    while m and m.group(1)[0] != len(m.group(2)):
+    while m and not (m.group(1)[0] == len(m.group(2)) and _COPY.fullmatch(m.group(2))):
         m = _NAME.search(data, m.start() + 1)
     if m:
         data = data[:m.start()] + b'<rom>' + data[m.end():]

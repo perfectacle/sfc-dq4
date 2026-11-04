@@ -137,6 +137,12 @@ class PureTests(unittest.TestCase):
         decoy = b'MSS\x01' + b'\x00' * 8 + b'\x05\x00\x00\x00ab.sfc' + b'\x00' * 8
         self.assertEqual(rs.state_hash(decoy + mss(b'probe-855474adcaf4.sfc')[4:]),
                          rs.state_hash(decoy + mss(b'probe-c3848acf38d4.sfc')[4:]))
+        # 길이 칸까지 맞는 가짜 꼴(복사본 이름 꼴은 아님)이 앞에 있어도 진짜 이름을 지운다
+        decoy = b'MSS\x01' + b'\x00' * 8 + b'\x06\x00\x00\x00ab.sfc' + b'\x00' * 8
+        self.assertEqual(rs.state_hash(decoy + mss(b'probe-855474adcaf4.sfc')[4:]),
+                         rs.state_hash(decoy + mss(b'probe-c3848acf38d4.sfc')[4:]))
+        self.assertNotEqual(rs.state_hash(decoy + mss(b'probe-855474adcaf4.sfc')[4:]),
+                            rs.state_hash(decoy.replace(b'ab.sfc', b'cd.sfc') + mss(b'probe-855474adcaf4.sfc')[4:]))
         # 같은 꼴이라도 길이 칸이 틀리면 이름으로 보지 않는다: 그 바이트가 다르면 해시도 다르다
         self.assertNotEqual(rs.state_hash(b'MSS\x01\x05\x00\x00\x00ab.sfc'),
                             rs.state_hash(b'MSS\x01\x05\x00\x00\x00cd.sfc'))
