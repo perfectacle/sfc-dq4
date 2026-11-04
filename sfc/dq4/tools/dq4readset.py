@@ -511,7 +511,7 @@ def _execute(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag
         print(f'[dq4readset] {dest}: 장면 Lua 오류(캐시에 넣지 않음): {why[:500]}', file=sys.stderr)
         if WATCHDOG in why:
             rc = LUA_WATCHDOG
-            print(f'[dq4readset] {dest}: MesenCE 가 Lua 콜백을 시간 제한으로 끊음(머신이 바쁠 때). 장면을 다시 돌릴 것',
+            print(f'[dq4readset] {dest}: MesenCE 가 Lua 콜백을 시간 제한으로 끊음(머신이 바쁠 때 생길 수 있음). 장면을 다시 돌릴 것',
                   file=sys.stderr)
         elif rc == 0:
             rc = LUA_ERROR

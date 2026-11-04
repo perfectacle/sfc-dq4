@@ -379,21 +379,48 @@ LUA_ENV = frozenset('''
 
 
 def run(mesence, rom, script, dest, env, timeout, readset=False):
-    """readset 이면 dq4readset 으로 돌려, 같은 출발 상태·입력에 읽은 롬 바이트가 같으면 캐시의 출력을 펼친다."""
+    """readset 이면 dq4readset 으로 돌려, 같은 출발 상태·입력에 읽은 롬 바이트가 같으면 캐시의 출력을 펼친다.
+    MesenCE 가 끝까지 가지 못했으면 그 까닭(글), 아니면 None 을 돌려준다. 판정은 부르는 쪽이 출력으로 하고, 이 글은
+    출력이 없을 때 까닭을 알리는 데 쓴다. 장면 Lua 가 emu.stop(n) 으로 일부러 0 이 아닌 값을 낼 수도 있다."""
     dest.mkdir(parents=True, exist_ok=True)
     full = {k: v for k, v in os.environ.items() if k not in LUA_ENV}
     full.update(env, SHOT_DIR=str(dest))
     if readset:
         import dq4readset
         accept = dq4readset.warp_finished if Path(script).resolve() == WARP.resolve() else None
-        dq4readset.run(mesence, rom, script, dest, full, timeout=timeout, log='mesen.log', cwd=dest, accept=accept)
-        return
+        info = dq4readset.run(mesence, rom, script, dest, full, timeout=timeout, log='mesen.log', cwd=dest,
+                              accept=accept)
+        return run_failure(info, timeout)
     with (dest / 'mesen.log').open('w', encoding='utf-8') as log:
         try:
-            mesen.run(mesence, rom, script, cwd=dest, env=full, stdout=log, stderr=subprocess.STDOUT,
-                      timeout=timeout, check=False)
+            p = mesen.run(mesence, rom, script, cwd=dest, env=full, stdout=log, stderr=subprocess.STDOUT,
+                          timeout=timeout, check=False)
         except subprocess.TimeoutExpired:
-            pass
+            # 캐시 없는 실행은 출력으로 판정해 왔다(시간 제한이 장면의 끝인 스크립트가 있을 수 있음)
+            return RunFailure(f'{timeout}초 안에 끝나지 않음')
+    return RunFailure(f'종료 코드 {p.returncode}') if p.returncode else None
+
+
+class RunFailure(str):
+    """실행이 끝까지 가지 못한 까닭. timed_out 이면 읽은 바이트 캐시로 돈 실행이 시간 제한에 걸렸다."""
+    timed_out = False
+
+
+def run_failure(info, timeout):
+    """dq4readset.run 의 결과에서 실행이 끝까지 가지 못한 까닭(RunFailure). 캐시에서 펼쳤거나 0 으로 끝났으면 None."""
+    import dq4readset
+    if info.get('cached'):
+        return None
+    if info.get('timed_out'):
+        why = RunFailure(f'{timeout}초 안에 끝나지 않음')
+        why.timed_out = True
+        return why
+    rc = info.get('returncode')
+    if rc == dq4readset.LUA_WATCHDOG:
+        return RunFailure(f'종료 코드 {rc}: MesenCE 가 Lua 콜백을 시간 제한으로 끊음(머신이 바쁠 때 생길 수 있음)')
+    if rc == dq4readset.LUA_ERROR:
+        return RunFailure(f'종료 코드 {rc}: 장면 Lua 오류 또는 읽은 집합 없음(stderr 의 [dq4readset] 줄)')
+    return RunFailure(f'종료 코드 {rc}') if rc else None
 
 
 ITEMS = 0x7E2056     # 일행 레코드 0 의 물건 12칸(+16~+21)
@@ -410,8 +437,8 @@ def ending(mesence, rom, state, dest, seed=0):
     end_box = box.entry_points(scenes)['end']
     acked = box.boot_points(scenes)['acked']
     calls = [end_box, RESET, acked, DRIVER_UPLOAD, DRIVER_HELLO, AFTER_SOUND]
-    run(mesence, rom, MSG, dest, {'STATE': str(state), 'PRE': ENDING_PRE, 'MAXF': '2400', 'SET': rng_for(seed),
-                                  'CALLS': ','.join(f'{a:06X}' for a in calls)}, 200)
+    why = run(mesence, rom, MSG, dest, {'STATE': str(state), 'PRE': ENDING_PRE, 'MAXF': '2400', 'SET': rng_for(seed),
+                                        'CALLS': ','.join(f'{a:06X}' for a in calls)}, 200)
     text = (dest / 'msg.txt').read_text(encoding='utf-8') if (dest / 'msg.txt').exists() else ''
     # 견주는 것은 지난 PC 와 그 프레임뿐이다. 리셋 뒤 X 는 소리 CPU 가 포트에 둔 값이라 앞서 걸은 길에 따라 다르다
     seen = [(int(f), int(pc, 16)) for f, pc in re.findall(r'^(\d+) (\w{6}) ', text, re.M)]
@@ -431,6 +458,8 @@ def ending(mesence, rom, state, dest, seed=0):
             problems.append('리셋 뒤 드라이버를 IPL 로 다시 올리려 함')
         if first(DRIVER_HELLO, reset) is None or first(AFTER_SOUND, reset) is None:
             problems.append('리셋 루틴이 소리 켜기에서 이어지지 않음')
+    if problems and why:
+        problems.append(f'MesenCE 실행: {why}')
     return {'name': 'ending', 'status': 'failed' if problems else 'passed', 'problems': problems,
             'trace': hashlib.sha1(repr(seen).encode()).hexdigest()[:12], 'frames': {'box': shown, 'reset': reset, 'after_sound': first(AFTER_SOUND, reset or 0) if reset else None}}
 
@@ -445,11 +474,11 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
     start = ';'.join(v for v in (pins(opt, seed), extra) if v)
     if how == 'warp':
         # 도착해 조작이 풀린 첫 프레임에 난수를 다시 둔다. 어디서 떠났느냐에 따라 도착 프레임까지 굴린 수가 다르다
-        run(mesence, rom, WARP, dest, {'STATE': str(state), 'TO': arg, 'SAVE': 'end.mss', 'SETTLE': '120',
-                                       'MAXF': '1500', 'WARPEXIT': f'{warp_exit(rom):X}', 'ANYWHERE': '1',
-                                       'ROMPATCH': patch, 'SET': start, 'LATESET': pins(opt, seed),
-                                       **({'POKE': poke} if poke else {}), **({'PARTY': party} if party else {})}, 300,
-            readset)
+        why = run(mesence, rom, WARP, dest, {'STATE': str(state), 'TO': arg, 'SAVE': 'end.mss', 'SETTLE': '120',
+                                             'MAXF': '1500', 'WARPEXIT': f'{warp_exit(rom):X}', 'ANYWHERE': '1',
+                                             'ROMPATCH': patch, 'SET': start, 'LATESET': pins(opt, seed),
+                                             **({'POKE': poke} if poke else {}), **({'PARTY': party} if party else {})}, 300,
+                  readset)
         log = dest / 'warp.txt'
         text = log.read_text(encoding='utf-8') if log.exists() else ''
         found = re.search(r'arrived map (\w\w/\w\w)', text)
@@ -464,12 +493,12 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
     else:
         maxf = opt.get('maxf', frames(arg))
         # PRE: 앞 구간이 끝날 때 남은 A 가 연 명령 창을 닫는다. 창이 없을 때의 B 는 아무것도 열지 않는다
-        run(mesence, rom, WALK_STATE, dest, {'STATE': str(state), 'WALK': str(WALK), 'WAYPOINTS': arg,
-                                             'PRE': pc.CLOSE.replace(';', ','),
-                                             'SAVE': 'end.mss', 'MAXF': str(maxf),
-                                             'CHANGES': str(opt.get('changes', 99)), 'AFTER': str(opt.get('after', 120)),
-                                             'WATCH': watch_flags(), 'ROMPATCH': patch, 'SET': start,
-                                             **({'POKE': poke} if poke else {})}, maxf // 40 + 120, readset)
+        why = run(mesence, rom, WALK_STATE, dest, {'STATE': str(state), 'WALK': str(WALK), 'WAYPOINTS': arg,
+                                                   'PRE': pc.CLOSE.replace(';', ','),
+                                                   'SAVE': 'end.mss', 'MAXF': str(maxf),
+                                                   'CHANGES': str(opt.get('changes', 99)), 'AFTER': str(opt.get('after', 120)),
+                                                   'WATCH': watch_flags(), 'ROMPATCH': patch, 'SET': start,
+                                                   **({'POKE': poke} if poke else {})}, maxf // 40 + 120, readset)
         log = dest / 'walk.txt'
         text = log.read_text(encoding='utf-8') if log.exists() else ''
         maps = re.findall(r'map \w\w/\w\w -> (\w\w/\w\w)', text)
@@ -502,6 +531,10 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
     for want in opt.get('items', []):
         if want not in items:
             problems.append(f'물건 {want:02X} 없음')
+    # 시간 초과로 끊긴 실행은 출력이 남았어도 끝까지 간 것이 아니다. 다른 실패는 장면이 일부러 낸 종료일 수 있어
+    # 구간이 실패했을 때만 덧붙인다
+    if why and (problems or getattr(why, 'timed_out', False)):
+        problems.append(f'MesenCE 실행: {why}')
     return {'name': name, 'status': 'failed' if problems else 'passed', 'problems': problems, 'maps': maps,
             'trace': digest(log), 'messages': messages, 'flags': [k for k, v in flags.items() if v],
             'items': ' '.join(f'{v:02X}' for v in items)}
@@ -509,10 +542,10 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
 
 def prologue_start(mesence, rom, out, readset=False):
     """전원부터 새 게임 첫 장면까지 걸어 서장 시작 세이브스테이트를 만든다."""
-    run(mesence, rom, pc.MKSTATE, out / 'start', PROLOGUE_START, 200, readset)
+    why = run(mesence, rom, pc.MKSTATE, out / 'start', PROLOGUE_START, 200, readset)
     state = out / 'start' / 'start.mss'
     if not state.exists():
-        raise SystemExit('세이브스테이트를 만들지 못함')
+        raise SystemExit(f'세이브스테이트를 만들지 못함{f"(MesenCE 실행: {why})" if why else ""}')
     return state
 
 

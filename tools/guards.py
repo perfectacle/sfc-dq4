@@ -8,6 +8,13 @@
     paths = ["sfc/dq4/tools/dq4prologue.py"]   # 이 파일을 바꾼 PR 은 이 검사를 돌린다(glob, ** 가능)
     run = "uv run --locked python ..."  # 돌리는 명령
     needs = ["rom", "MESENCE"]          # 돌리는 데 필요한 것. 대문자 이름은 환경 변수로 보고 --base 때 설정됐는지 알린다
+    groups = ["ch1-build"]              # (골라 씀) 같은 파일의 [groups] 에 이름 붙인 paths 묶음을 더한다
+
+    [groups]
+    ch1-build = ["sfc/dq4/tools/dq4build.py", ...]   # 여러 검사가 함께 쓰는 paths 묶음
+
+검사는 바뀐 파일이 paths(와 묶음)에 맞을 때, 또는 guards.toml 에서 그 검사의 run·needs 가 바뀌었을 때(새 검사 포함)
+걸린다.
 
 사용:
   python tools/guards.py                         목록 형식만 검사
@@ -44,6 +51,9 @@ ROOT = Path(__file__).resolve().parent.parent
 NAME = re.compile(r'^[a-z0-9]+(?:-[a-z0-9]+)*$')
 ENV = re.compile(r'^[A-Z][A-Z0-9_]*$')
 FIELDS = {'name': str, 'why': str, 'paths': list, 'run': str, 'needs': list}
+OPTIONAL = {'groups': list}
+# 이 값이 바뀌면 검사 결과가 바뀔 수 있다(why 는 설명, paths·groups 는 고르는 데만 씀)
+RESULT_FIELDS = ('run', 'needs')
 
 
 def git(*args):
@@ -68,8 +78,21 @@ def load(files, read=lambda f: (ROOT / f).read_text(encoding='utf-8')):
             problems.append(f'{toml}: TOML 오류 {e}')
             continue
         for key in data:
-            if key != 'check':
+            if key not in ('check', 'groups'):
                 problems.append(f'{toml}: 모르는 키 {key}')
+        groups = data.get('groups', {})
+        if not isinstance(groups, dict):
+            problems.append(f'{toml}: groups 는 [groups] 표여야 함')
+            groups = {}
+        for gname, pats in groups.items():
+            if not NAME.match(gname):
+                problems.append(f'{toml} groups.{gname}: 이름은 소문자·숫자·- 만')
+            if not isinstance(pats, list) or not pats:
+                problems.append(f'{toml} groups.{gname}: 비어 있지 않은 목록이어야 함')
+                continue
+            for pattern in pats:
+                if not isinstance(pattern, str) or not any(matches(f, pattern) for f in files):
+                    problems.append(f'{toml} groups.{gname}: {pattern!r} 에 맞는 추적 파일이 없음')
         items = data.get('check', [])
         if not isinstance(items, list):
             problems.append(f'{toml}: check 는 [[check]] 배열이어야 함')
@@ -83,18 +106,26 @@ def load(files, read=lambda f: (ROOT / f).read_text(encoding='utf-8')):
                 if not isinstance(item.get(key), kind):
                     problems.append(f'{where}: {key} 가 없거나 {kind.__name__} 가 아님')
             for key in item:
-                if key not in FIELDS:
+                if key not in FIELDS and key not in OPTIONAL:
                     problems.append(f'{where}: 모르는 키 {key}')
+            used = item.get('groups', [])
+            if not isinstance(used, list):
+                problems.append(f'{where}: groups 가 list 가 아님')
+                used = []
+            for g in used:
+                if g not in groups or not isinstance(groups.get(g), list):
+                    problems.append(f'{where}: 묶음 {g!r} 이 {toml} 의 [groups] 에 없음')
             if isinstance(item.get('name'), str) and not NAME.match(item['name']):
                 problems.append(f'{where}: 이름 {item["name"]!r} 은 소문자·숫자·- 만')
             if isinstance(item.get('paths'), list):
-                if not item['paths']:
+                if not item['paths'] and not used:
                     problems.append(f'{where}: paths 가 비어 있음')
                 for pattern in item['paths']:
                     if not isinstance(pattern, str) or not any(matches(f, pattern) for f in files):
                         problems.append(f'{where}: paths {pattern!r} 에 맞는 추적 파일이 없음')
             if all(isinstance(item.get(k), kind) for k, kind in FIELDS.items()):
-                checks.append({'file': toml, **item})
+                extra = [p for g in used if isinstance(groups.get(g), list) for p in groups[g] if isinstance(p, str)]
+                checks.append({'file': toml, **item, 'paths': [*item['paths'], *extra]})
     seen = {}
     for c in checks:
         name = c.get('name')
@@ -324,8 +355,37 @@ def run_all(hit, parallel, timeout, no_cache=False):
     return 0 if all(s == 'passed' for _, s, _ in done) else 1
 
 
-def triggered(checks, changed):
-    return [c for c in checks if any(matches(f, p) for f in changed for p in c.get('paths', []))]
+def triggered(checks, changed, edited=()):
+    """paths(묶음 포함)에 맞는 파일이 바뀌었거나 이름이 edited 에 든 검사."""
+    return [c for c in checks if c['name'] in edited or any(matches(f, p) for f in changed for p in c.get('paths', []))]
+
+
+def edited_checks(base_text, head_text):
+    """guards.toml 두 판에서 run·needs 가 다르거나 새로 생긴 검사 이름. 읽지 못하는 판은 빈 것으로 본다."""
+    def blocks(text):
+        try:
+            data = tomllib.loads(text) if text else {}
+        except tomllib.TOMLDecodeError:
+            return {}
+        items = data.get('check', [])
+        return {c['name']: tuple(repr(c.get(k)) for k in RESULT_FIELDS)
+                for c in (items if isinstance(items, list) else []) if isinstance(c, dict) and isinstance(c.get('name'), str)}
+    old, new = blocks(base_text), blocks(head_text)
+    return {name for name, v in new.items() if old.get(name) != v}
+
+
+def edited_in(base, head, changed):
+    """base…head 에서 바뀐 guards.toml 마다 run·needs 가 바뀐 검사(merge-base 의 판과 견줌)."""
+    mb = git('merge-base', base, head).strip()
+    names = set()
+    for f in changed:
+        if PurePosixPath(f).name != 'guards.toml':
+            continue
+        def show(rev):
+            r = subprocess.run(['git', 'show', f'{rev}:{f}'], cwd=ROOT, capture_output=True, text=True)
+            return r.stdout if r.returncode == 0 else ''
+        names |= edited_checks(show(mb), show(head))
+    return names
 
 
 # 「통과」 다음은 줄 끝·괄호·대시만(「통과하지 못함」「통과 못 함」을 통과로 읽지 않게)
@@ -360,7 +420,7 @@ def main():
     checks, problems = load(files)
     if args.base:
         changed = [f for f in git('diff', '--name-only', f'{args.base}...{args.head}').splitlines() if f]
-        hit = triggered(checks, changed)
+        hit = triggered(checks, changed, edited_in(args.base, args.head, changed))
         if hit:
             print('이 변경이 건드리는 실행 검사(돌리고 PR 본문에 결과 줄):')
             for c in hit:
