@@ -1,6 +1,6 @@
 # 1장 걷기 검사(dq4ch1walkcheck.py)가 구간마다 견주는 메시지 번호(24:8BAF 가 받은 A)의 처음 나온 차례.
 # 손으로 고치지 않는다. dq4ch1walkcheck.py --units --write-messages "까닭" 으로 다시 만든다. 차례가 바뀐 구간에만
-# 그 까닭이 reason 으로 남고, check 는 그 도구만 쓰는 표지라 손으로 고치면 검사가 실패한다.
+# 그 까닭이 reason 으로 남는다. check 는 실수로 손댄 것을 알아채는 표지일 뿐 공개된 셈이라 고의 위조는 막지 않는다.
 
 [[segment]]
 variant = "chapter1"

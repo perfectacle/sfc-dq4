@@ -2311,6 +2311,7 @@ ch1-walk = [
   "sfc/dq4/tools/dq4windowtext.py",
   "sfc/dq4/tools/dq4wrap.py",
   "sfc/dq4/tools/lua/dq4readset.lua",
+  "sfc/dq4/tools/lua/dq4warpmsg.lua",
   "sfc/dq4/tools/lua/dq4walkstate.lua",
   "sfc/dq5/tools/dq5anim.py",
   "sfc/dq5/tools/dq5battlebg.py",
