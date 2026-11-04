@@ -35,6 +35,23 @@ class CritCheck(unittest.TestCase):
         self.assertEqual(o[0x20C6B9 - c.SITE], 0x00)
         self.assertEqual(o[0x20C6B8 - c.SITE], 0xC9)
 
+    def test_sweep_reports_runs_without_record(self):
+        from unittest import mock
+        with mock.patch.object(c, 'prepare', return_value=(Path('s.mss'), None)), \
+                mock.patch.object(c, 'battle', return_value=''):
+            res = c.sweep(None, None, b'', None, Path('/nonexistent'))
+        self.assertEqual(res['status'], 'failed')
+        self.assertEqual(len(res['rows']), 32)
+        self.assertFalse(any(r['recorded'] for r in res['rows']))
+        self.assertIn('기록을 남기지 못한 실행', res['problems'][-1])
+
+    def test_sweep_and_cases_rejected(self):
+        from unittest import mock
+        argv = ['dq4critcheck.py', '--rom', 'x', '--out', 'y', '--sweep', '--cases', 'always']
+        with mock.patch.object(sys, 'argv', argv), mock.patch('sys.stderr'), self.assertRaises(SystemExit) as e:
+            c.main()
+        self.assertEqual(e.exception.code, 2)
+
     def test_cases(self):
         self.assertEqual([x[0] for x in c.CASES], ['always', 'never', 'flag100e', 'state1a', 'items'])
         self.assertEqual({x[4] for x in c.CASES}, {'crit', 'nocrit'})

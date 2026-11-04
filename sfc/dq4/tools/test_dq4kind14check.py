@@ -37,19 +37,31 @@ class Kind14Check(unittest.TestCase):
         self.assertEqual(got['rd'], 0x1234)
         self.assertEqual(set(got), set(k.NAMES))
 
-    def test_copy_range_from_tables(self):
+    # 원본 DQ5 의 표 값: 03:D9A0 의 14번째 워드, 03:D965 의 14번째 워드의 낮은 바이트(돌릴 타일 수)
+    DQ5_SLOT_WORD, DQ5_TILES = 0x3D14, 0x0B
+
+    def table_rom(self, word, tiles):
         rom = bytearray(0x200000)
         o = k.lorom(k.SLOT_TABLE) + k.KIND * 2
-        rom[o:o + 2] = b'\x14\x3D'
-        rom[k.lorom(k.COUNT_TABLE) + k.KIND * 2] = 11
-        self.assertEqual(k.copy_range(bytes(rom)), (0x3D14, 0x3E73))
+        rom[o:o + 2] = word.to_bytes(2, 'little')
+        rom[k.lorom(k.COUNT_TABLE) + k.KIND * 2] = tiles
+        return rom
+
+    def test_copy_range_from_tables(self):
+        rom = self.table_rom(self.DQ5_SLOT_WORD, self.DQ5_TILES)
+        self.assertEqual(k.copy_range(bytes(rom)), k.COPY)
+        self.assertEqual(k.COPY, (0x3D14, 0x3D14 + 0x0B * 32 - 1))
         rom[k.lorom(k.COUNT_TABLE) + k.KIND * 2] = 12
         self.assertNotEqual(k.copy_range(bytes(rom)), k.COPY)
 
     @unittest.skipUnless(DQ5.exists(), 'rom/dq5.sfc 없음')
     def test_copy_range_matches_dq5(self):
         # 사본 범위나 자리 표가 바뀌면 COPY·LAYOUT 의 판단을 다시 해야 한다
-        self.assertEqual(k.copy_range(DQ5.read_bytes()), k.COPY)
+        rom = DQ5.read_bytes()
+        o = k.lorom(k.SLOT_TABLE) + k.KIND * 2
+        self.assertEqual(rom[o] | rom[o + 1] << 8, self.DQ5_SLOT_WORD)
+        self.assertEqual(rom[k.lorom(k.COUNT_TABLE) + k.KIND * 2], self.DQ5_TILES)
+        self.assertEqual(k.copy_range(rom), k.COPY)
 
     def test_parse(self):
         text = '\n'.join([
@@ -107,6 +119,16 @@ class Kind14Check(unittest.TestCase):
     def test_end_frame(self):
         self.assertEqual(k.end_frame('f00010 arrived map 1E/00 cell\nf00647 end map 1E/00 cell 10,10 BE=80\n'), 647)
         self.assertIsNone(k.end_frame('f00010 arrived map 1E/00 cell\n'))
+        # MAXF 에 닿아 멈춘 장면도 「end map」 을 찍지만 끝 표지로 치지 않는다
+        timed = 'f00010 arrived map 1E/00 cell\nf02400 timeout phase=test\nf02400 end map 1E/00 cell 10,10 BE=80\n'
+        self.assertIsNone(k.end_frame(timed))
+        self.assertEqual(k.compare_runs(['1 x\n', '1 x\n'], [647, k.end_frame(timed)]), ['실행 1: 끝 표지 없음'])
+
+    def test_compare_runs_cannot_see_runs_cut_together(self):
+        # 두 실행이 같은 이른 프레임에서 함께 끊기면 비교는 통과한다. 이 경우는 실행마다의 도착·사본 판정이 잡는다
+        early = '1 x\n'
+        self.assertEqual(k.compare_runs([early, early], [10, 10]), [])
+        self.assertTrue(k.judge({'copies': [], 'unseen': [], 'frames': []}))
 
 
 if __name__ == '__main__':

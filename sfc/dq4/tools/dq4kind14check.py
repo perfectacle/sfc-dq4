@@ -31,6 +31,7 @@ sys.path[:0] = [str(HERE), str(ROOT / 'sfc' / 'dq5' / 'tools')]
 import dq4bg3slotcheck as bc  # noqa: E402
 import dq4freshstate  # noqa: E402
 import dq4mesen as mesen  # noqa: E402
+import dq4readset  # noqa: E402
 
 PROBE = HERE / 'lua' / 'dq4kind14probe.lua'
 # 종류 마스크(03:D806) bit14 가 켜진 맵(원본 DQ5 와 menu.sfc 가 같음)
@@ -132,14 +133,19 @@ END = re.compile(r'^f(\d+) end map ', re.M)
 
 
 def end_frame(warp_text):
-    """dq5warp 가 장면을 끝낸 프레임(warp.txt 의 「fNNNNN end map」). 끝 표지가 없으면 None."""
+    """dq5warp 가 장면을 끝낸 프레임(warp.txt 의 「fNNNNN end map」). 끝 표지가 없거나, MAXF 에 닿아 멈춘
+    장면(dq4readset.warp_timed_out: 그때도 「end map」 을 찍음)이면 None."""
+    if dq4readset.warp_timed_out(warp_text):
+        return None
     got = END.findall(warp_text)
     return int(got[-1]) if got else None
 
 
 def compare_runs(texts, ends):
     """같은 명령 실행들의 문제 목록. 실행마다 기록이 있고 끝 표지가 있어야 하며, 끝 프레임 차이는 1 이하여야 한다.
-    dq5warp 가 끝낸 뒤 emu.stop 이 듣기까지 한 프레임쯤 걸려, 기록은 가장 이른 끝 프레임까지 견준다."""
+    dq5warp 가 장면을 끝내는 프레임 자체가 실행마다 한 프레임쯤 다를 수 있어(까닭은 재지 않음), 기록은 가장 이른
+    끝 프레임까지 견준다. 두 실행이 같은 이른 프레임에서 함께 끊기면 이 비교로는 잡지 못한다. 그 경우는 실행마다 하는
+    도착·사본 판정(dq4bg3slotcheck.judge, judge)이 잡는다(--layout old 는 도착·사본 판정을 하지 않으므로 이 전제가 없다)."""
     bad = [f'실행 {k}: 기록 없음' for k, t in enumerate(texts) if not t.strip()]
     bad += [f'실행 {k}: 끝 표지 없음' for k, e in enumerate(ends) if e is None]
     if bad:

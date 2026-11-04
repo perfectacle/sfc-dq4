@@ -626,6 +626,21 @@ def critical_negative(rom_path, out, core='snes9x'):
     return problems, rows
 
 
+def judge_critical(res, blockers, sounded):
+    """battle-critical 의 결과에 회심 앞 조건과 회심 효과음 판정을 더한다. blockers 가 None 이면 조건을 기록하지 못한 것."""
+    if blockers is None:
+        res['problems'].insert(0, '회심 앞 조건을 기록하지 못함(DSP 를 읽은 뒤의 프레임 기록이 비어 있음)')
+        res['critical_conditions_recorded'] = False
+        blockers = []
+    else:
+        res['critical_conditions'] = blockers
+    if not sounded:
+        res['problems'].insert(0, '회심 미발생(회심 판정을 고정했는데도 회심 효과음이 울리지 않음)'
+                               + (f': {"; ".join(blockers)}' if blockers else ''))
+    elif blockers:
+        res['problems'].insert(0, f'회심이 고정한 난수 판정이 아닌 길로 났을 수 있음: {"; ".join(blockers)}')
+
+
 def finish(walker, scene, res, out):
     """대기열·울림을 판정하고 결과를 쓴다."""
     events = walker.events
@@ -681,18 +696,8 @@ def finish(walker, scene, res, out):
         if f is not None:
             res['problems'].append(f'대기열에 {fmt(bad)}(원래 번호)가 들어감(프레임 {f})')
     if scene.critical:
-        blockers = critical_conditions(walker, hits[0])
-        if blockers is None:
-            res['problems'].insert(0, '회심 앞 조건을 기록하지 못함(DSP 를 읽은 뒤의 프레임 기록이 비어 있음)')
-            res['critical_conditions_recorded'] = False
-            blockers = []
-        else:
-            res['critical_conditions'] = blockers
-        if not any(w.get('sounded') for w in res['want'] if w['want'] == fmt((SFX, 0x37, 0x0B))):
-            res['problems'].insert(0, '회심 미발생(회심 판정을 고정했는데도 회심 효과음이 울리지 않음)'
-                                   + (f': {"; ".join(blockers)}' if blockers else ''))
-        elif blockers:
-            res['problems'].insert(0, f'회심이 고정한 난수 판정이 아닌 길로 났을 수 있음: {"; ".join(blockers)}')
+        sounded = any(w.get('sounded') for w in res['want'] if w['want'] == fmt((SFX, 0x37, 0x0B)))
+        judge_critical(res, critical_conditions(walker, hits[0]), sounded)
     if walker.envx and not walker.dsp_seen:
         res['problems'].append(f'DSP 레지스터를 찾지 못함(DIR {DSP_DIR:02X} 이 직렬화 상태의 그 자리에 없음)')
     res['status'] = 'failed' if res['problems'] else 'passed'
