@@ -199,17 +199,20 @@ class RomCheckTest(unittest.TestCase):
 
     def test_critical_blockers_name_each_condition(self):
         table = bytes.fromhex('000A91023C64FF')
-        self.assertEqual(s.critical_blockers(0x40, 0xBF, bytes(7), table), [])
-        got = s.critical_blockers(0x80, 0x40, table, table)
-        self.assertEqual(len(got), 3)
+        self.assertEqual(s.critical_blockers(0x40, (0xBF,) * 8, bytes(7), table), [])
+        got = s.critical_blockers(0x80, (0x40, 0, 0x40, 0, 0, 0, 0, 0), table, table)
+        self.assertEqual(len(got), 4)
         self.assertIn('$100E', got[0])
-        self.assertIn('+7', got[1])
-        self.assertIn('26:8D33', got[2])
+        self.assertIn('칸 0 +7', got[1])
+        self.assertIn('칸 2 +7', got[2])
+        self.assertIn('26:8D33', got[3])
+        self.assertEqual(s.CRIT_SLOT7[:3], [0x0767, 0x0773, 0x077F])
 
     def test_critical_scene_traces_conditions(self):
         # battle-critical 만 회심 앞 조건을 프레임마다 적고, 공격 소리 프레임 값으로 판정한다
         class W:
-            crit_trace = [(10, 0x00, 0x00, bytes(7)), (20, 0x80, 0x00, bytes(7)), (30, 0x00, 0x40, bytes(7))]
+            crit_trace = [(10, 0x00, (0,) * 8, bytes(7)), (20, 0x80, (0,) * 8, bytes(7)),
+                          (30, 0x00, (0, 0x40) + (0,) * 6, bytes(7))]
         rom = bytearray(0x400000)
         o = s.lorom(s.CRIT_ITEM_TABLE)
         rom[o:o + 7] = bytes.fromhex('000A91023C64FF')
@@ -218,9 +221,9 @@ class RomCheckTest(unittest.TestCase):
             W.rom.write_bytes(bytes(rom))
             self.assertEqual(s.critical_conditions(W, 15), [])
             self.assertIn('$100E', s.critical_conditions(W, 25)[0])
-            self.assertIn('+7', s.critical_conditions(W, None)[0])
+            self.assertIn('칸 1 +7', s.critical_conditions(W, None)[0])
             W.crit_trace = []
-            self.assertEqual(s.critical_conditions(W, 15), ['회심 앞 조건을 기록하지 못함'])
+            self.assertIsNone(s.critical_conditions(W, 15))
 
     def test_critical_scene_uses_patch_not_seed(self):
         t = s.load_table(s.ARGS.read_text())

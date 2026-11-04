@@ -868,7 +868,7 @@ class RuleTests(unittest.TestCase):
         root = HERE.parents[2]
         bases = (HERE, root / 'sfc' / 'dq5' / 'tools', root / 'fc' / 'dq4' / 'tools')
         for name in ('dq4-heroblock', 'dq4-field-obj-math', 'dq4-battle-check', 'dq4-wrap-routine', 'dq4-ch1-save',
-                     'dq4-ff9a-nmi', 'dq4-battle-bigpic'):
+                     'dq4-ff9a-nmi', 'dq4-battle-bigpic', 'dq4-crit-conditions', 'dq4-sfx-scene'):
             entries = re.findall(r'((?:sfc|fc)/\S+?\.py)', checks[name]['run'])
             self.assertTrue(entries, name)
             if 'sfc/dq4/tools/dq4build.py' in entries:
