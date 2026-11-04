@@ -560,6 +560,13 @@ class RunTests(unittest.TestCase):
         self.assertTrue((dest / 'out.bin').is_file())
         self.assertTrue(self.go()[0]['cached'])
 
+    def test_store_off_writes_nothing(self):
+        with mock.patch.dict(os.environ, {'DQ4_READSET': 'off', 'DQ4_READSET_STORE': 'off'}):
+            info, _ = self.go()
+        self.assertFalse(info['cached'])
+        self.assertEqual(self.store.entries(info['key']), [])
+        self.assertFalse(self.go()[0]['cached'])
+
     def test_off_runs_everything(self):
         self.go()
         with mock.patch.dict(os.environ, {'DQ4_READSET': 'off'}):
@@ -964,7 +971,7 @@ class RuleTests(unittest.TestCase):
         drivers = {'dq4-libretro-readset-soundness': ['sfc/dq4/tools/dq4libretro.py', 'sfc/dq4/tools/dq4savefixture.py']}
         for name in ('dq4-heroblock', 'dq4-field-obj-math', 'dq4-battle-check', 'dq4-wrap-routine', 'dq4-ch1-save',
                      'dq4-ff9a-nmi', 'dq4-battle-bigpic', 'dq4-crit-conditions', 'dq4-sfx-scene',
-                     'dq4-kind14-copy', 'dq4-bg3-slot', 'dq4-libretro-readset-soundness'):
+                     'dq4-kind14-copy', 'dq4-bg3-slot', 'dq4-libretro-readset-soundness', 'dq4-compat-scenes'):
             entries = re.findall(r'((?:sfc|fc)/\S+?\.py)', checks[name]['run'])
             self.assertTrue(entries, name)
             if 'sfc/dq4/tools/dq4build.py' in entries:

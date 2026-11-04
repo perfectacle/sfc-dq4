@@ -9,17 +9,20 @@ lua/dq4openbus.lua 를 앞에 붙여 열린 버스·롬 거울 접근을 그 파
          window  dq4windowcheck(가게·교회·여관·대화·전투 창, 창 글자의 높은 뱅크 코드). --window-rom·--symbols·
                  --symbols-rom 을 주어야 돈다
   범위   high    뱅크 40~7D 아래 절반(dq4openbus.lua 기본). 판정은 dq4compatcheck.probe_problems 와 같다
-         io      뱅크 00~3F 의 열린 버스 구역 IO_RANGES. 우리 패치 코드(뱅크 40 이상, 또는 롬 장부의 단계가 쓴 자리)가
-                 접근하면 실패, 원래 DQ5 코드의 접근은 적기만 한다
+         io      뱅크 00~3F 의 열린 버스 구역 IO_RANGES. 우리 패치 코드(뱅크 40 이상, 또는 롬 장부의 단계가 쓴 자리)의
+                 접근, DQ5_ALLOWED(PC·접근 뱅크·주소 범위)밖의 원래 DQ5 접근, 해석하지 못한 줄은 실패
 
-콜백이 많으면 MesenCE 가 느려져 장면이 시간 제한에 걸리므로 범위마다 장면을 따로 돌린다. 장면 검사가 실패해도 실패다.
+콜백이 많으면 MesenCE 가 느려져 장면이 시간 제한에 걸리므로 범위마다 장면을 따로 돌린다. (장면, 범위) 는 기본으로 하나씩
+돈다(--parallel). 둘씩 띄우자 io 범위의 저장·대화 장면에서 MesenCE 가 종료 255 로 끝났다(하나씩은 통과). 장면 검사가 실패하거나(창 검사는 장면마다 끝까지 돌고 잰 프레임이 있어야 함) 기록이 없어도 실패다. 캐시는
+읽지도(DQ4_READSET=off) 쓰지도(DQ4_READSET_STORE=off) 않는다.
 
   MESENCE=… LIBDIR=… uv run --locked python sfc/dq4/tools/dq4compatscenes.py --rom work/ch1/dq4-ch1-full.sfc \\
-      --out 새폴더 [--scenes battle,save,window] [--ranges high,io] [--ledger work/ch1/ledger.json] \\
+      --out 새폴더 [--scenes battle,save,window] [--ranges high,io] [--parallel 2] [--ledger work/ch1/ledger.json] \\
       [--window-rom work/ch1/dq4-ch1.sfc --symbols work/wc/wn.sym --symbols-rom work/wc/menu.sfc]
 형식은 sfc/dq4/docs/dq4-compat-format.md 「장면 프로브」.
 """
 import argparse
+import concurrent.futures
 import json
 import os
 import re
@@ -40,13 +43,28 @@ SCENES = ('battle', 'save', 'window')
 LINE = re.compile(r'([RW]) pc=(\w\w):(\w{4}) bank=(\w\w)(?: at=(\w{4}))?')
 
 
+# 원래 DQ5 코드의 io 접근 가운데 허용하는 것: (PC, 접근 뱅크, 처음, 끝, 까닭). PC 는 MesenCE 읽기 콜백의 cpu.pc 라
+# 접근한 명령의 다음 주소다. 이 밖의 원래 DQ5 접근도 실패로 친다
+DQ5_ALLOWED = [
+    ('06:F536', 0x3D, 0x2000, 0x7FFF, '06:F534 LDA ($00),Y: 가게 목록 첫 바이트(키)'),
+    ('06:F53D', 0x3D, 0x2000, 0x7FFF, '06:F53B LDA ($00),Y: 가게 목록의 다음 바이트'),
+]
+
+
 def patched_ranges(ledger):
-    """롬 장부(dq4romledger)의 단계가 쓴 CPU 자리 [(뱅크, 처음, 끝)]."""
+    """롬 장부(dq4romledger)의 단계가 쓴 CPU 자리 [(뱅크, 처음, 끝)]. 뱅크를 넘는 범위(LoROM 은 뱅크마다 8000~FFFF)는
+    뱅크마다 나눈다."""
     out = []
     for stage in ledger.get('stages', []):
         for r in stage.get('ranges', []):
             a, b = r['cpu'].split('~')
-            out.append((int(a[:2], 16), int(a[3:], 16), int(b[3:], 16)))
+            b1, lo, b2, hi = int(a[:2], 16), int(a[3:], 16), int(b[:2], 16), int(b[3:], 16)
+            if b1 == b2:
+                out.append((b1, lo, hi))
+                continue
+            out.append((b1, lo, 0xFFFF))
+            out += [(bank, 0x8000, 0xFFFF) for bank in range(b1 + 1, b2)]
+            out.append((b2, 0x8000, hi))
     return out
 
 
@@ -55,18 +73,46 @@ def ours(bank, pc, patched):
     return bank >= 0x40 or any(b == bank and lo <= pc <= hi for b, lo, hi in patched)
 
 
+def dq5_allowed(pc, bank, at):
+    """원래 DQ5 코드의 그 접근이 DQ5_ALLOWED 안인가."""
+    return any(p == pc and b == bank and lo <= at <= hi for p, b, lo, hi, _ in DQ5_ALLOWED)
+
+
 def io_problems(lines, patched):
-    """io 범위 기록 → (문제, 원래 DQ5 코드의 접근). BRK 줄은 dq4compatcheck.probe_problems 로 본다."""
+    """io 범위 기록 → (문제, 허용한 원래 DQ5 코드의 접근). BRK 줄은 dq4compatcheck.probe_problems 로 본다. 우리 코드의
+    접근, DQ5_ALLOWED 밖의 원래 DQ5 접근, 해석하지 못한 줄은 문제다."""
     problems, dq5 = cc.probe_problems([x for x in lines if x.startswith('BRK')]), []
     for line in sorted(set(lines)):
+        if line.startswith('BRK'):
+            continue
         m = LINE.fullmatch(line)
-        if not m:
+        if not m or m[5] is None:
+            problems.append(f'해석하지 못한 기록 줄: {line}')
             continue
         bank, pc = int(m[2], 16), int(m[3], 16)
-        where = f'{m[4]}:{m[5] or "????"}'
-        what = f'{m[2]}:{m[3]} 이 {where} 를 {"읽음" if m[1] == "R" else "씀"}'
-        (problems if ours(bank, pc, patched) else dq5).append(what)
+        at = int(m[5], 16)
+        what = f'{m[2]}:{m[3]} 이 {m[4]}:{m[5]} 를 {"읽음" if m[1] == "R" else "씀"}'
+        if ours(bank, pc, patched):
+            problems.append(what)
+        elif dq5_allowed(f'{m[2]}:{m[3]}', int(m[4], 16), at):
+            dq5.append(what)
+        else:
+            problems.append(f'{what}(원래 DQ5 코드, DQ5_ALLOWED 밖)')
     return problems, dq5
+
+
+def window_reached(dest):
+    """창 검사가 장면마다 끝까지 돌았는가(dq4windowcheck 는 장면이 돌지 않아도 0 으로 끝날 수 있다). 문제 목록."""
+    info = dest / 'readset.json'
+    if not info.exists():
+        return ['창 검사 readset.json 없음']
+    bad = []
+    for name, i in json.loads(info.read_text()).items():
+        if i.get('timed_out') or i.get('returncode') not in (0, None):
+            bad.append(f'창 장면 {name}: 종료 {i.get("returncode")}, 시간 초과 {i.get("timed_out")}')
+        elif not list((dest / name).glob('v*.bin')):
+            bad.append(f'창 장면 {name}: 잰 프레임 없음')
+    return bad
 
 
 def commands(scene, rng, a, out):
@@ -93,7 +139,8 @@ def run_scene(scene, rng, a, out, patched):
             if subprocess.run(c, stdout=f, stderr=subprocess.STDOUT).returncode:
                 return {'scene': scene, 'ranges': rng, 'status': 'failed', 'problems': [f'출발 상태 실패: {c[1]}']}
         bus = out / f'openbus-{scene}-{rng}.txt'
-        env = dict(os.environ, DQ4_READSET='off', DQ4_OPENBUS_LOG=str(bus), DQ4_OPENBUS_RANGES=RANGES[rng])
+        env = dict(os.environ, DQ4_READSET='off', DQ4_READSET_STORE='off', DQ4_OPENBUS_LOG=str(bus),
+                   DQ4_OPENBUS_RANGES=RANGES[rng])
         t0 = time.time()
         rc = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, env=env).returncode
     lines = bus.read_text(encoding='utf-8').splitlines() if bus.exists() else []
@@ -103,10 +150,13 @@ def run_scene(scene, rng, a, out, patched):
         problems, dq5 = io_problems(lines, patched)
     if rc:
         problems.insert(0, f'장면 검사 실패(종료 {rc}, {log.name})')
+    if scene == 'window':
+        problems += window_reached(out / f'{scene}-{rng}')
     if not lines:
         problems.append('프로브 기록이 없음(프로브가 붙지 않았거나 장면이 돌지 않음)')
     return {'scene': scene, 'ranges': rng, 'status': 'failed' if problems else 'passed', 'problems': problems,
             'dq5_accesses': dq5, 'records': len(set(lines)),
+            'pcs': sorted({m[2] + ':' + m[3] for m in map(LINE.fullmatch, set(lines)) if m}),
             'high_bank_brk': sorted({x.split('op=')[1] for x in lines if x.startswith('BRK')}),
             'seconds': round(time.time() - t0)}
 
@@ -119,6 +169,8 @@ def main():
     ap.add_argument('--ranges', default=','.join(RANGES))
     ap.add_argument('--ledger', type=Path, help='롬 장부(기본: --rom 옆 ledger.json)')
     ap.add_argument('--jobs', type=int, default=3)
+    ap.add_argument('--parallel', type=int, default=1,
+                    help='함께 띄우는 (장면, 범위) 수. 2 로 띄우자 io 범위의 저장·대화 장면에서 MesenCE 가 종료 255 로 끝났다')
     ap.add_argument('--window-rom', type=Path)
     ap.add_argument('--symbols', type=Path)
     ap.add_argument('--symbols-rom', type=Path)
@@ -140,7 +192,18 @@ def main():
     if not ledger_path.exists():
         raise SystemExit(f'{ledger_path} 가 없음(dq4build.py 가 롬 옆에 둠)')
     patched = patched_ranges(json.loads(ledger_path.read_text()))
-    results = [run_scene(s, r, a, out, patched) for s in scenes for r in a.ranges.split(',')]
+    pairs = [(s, r) for s in scenes for r in a.ranges.split(',')]
+    if 'save' in scenes:
+        # 저장 장면의 출발 상태는 범위마다 같은 것을 쓰므로 먼저 한 번 만든다
+        pre, _ = commands('save', 'high', a, out)
+        with (out / 'save-walk.log').open('w') as f:
+            for c in pre:
+                if subprocess.run(c, stdout=f, stderr=subprocess.STDOUT).returncode:
+                    raise SystemExit('저장 장면 출발 상태(1장 걷기)를 만들지 못함')
+    # 장면 검사마다 MesenCE 를 여럿 띄우고 tools/headless_slots 가 전체 수를 묶어 자리는 넘치지 않지만, 콜백이 많은 io 범위는
+    # 함께 띄우면 MesenCE 가 끝까지 가지 못한 일이 있다(--parallel 도움말)
+    with concurrent.futures.ThreadPoolExecutor(a.parallel) as pool:
+        results = list(pool.map(lambda p: run_scene(*p, a, out, patched), pairs))
     ok = all(r['status'] == 'passed' for r in results)
     (out / 'results.json').write_text(json.dumps({'status': 'passed' if ok else 'failed', 'scenes': results},
                                                  ensure_ascii=False, indent=1) + '\n')

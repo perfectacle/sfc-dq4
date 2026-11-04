@@ -23,14 +23,48 @@ class CompatScenes(unittest.TestCase):
         self.assertFalse(cs.ours(0x01, 0xDCFC, patched))
         self.assertFalse(cs.ours(0x25, 0x8071, patched))
 
+    def test_cross_bank_ledger_range_is_split(self):
+        ledger = {'stages': [{'name': 'chapter1', 'ranges': [{'cpu': '3C:FFEA~3D:8000'}, {'cpu': '64:FD0A~66:8135'}]}]}
+        patched = cs.patched_ranges(ledger)
+        self.assertEqual(patched, [(0x3C, 0xFFEA, 0xFFFF), (0x3D, 0x8000, 0x8000), (0x64, 0xFD0A, 0xFFFF),
+                                   (0x65, 0x8000, 0xFFFF), (0x66, 0x8000, 0x8135)])
+        self.assertTrue(cs.ours(0x3C, 0xFFF0, patched))
+        self.assertTrue(cs.ours(0x3D, 0x8000, patched))
+        self.assertFalse(cs.ours(0x3D, 0x8001, patched))
+
     def test_io_problems(self):
         patched = cs.patched_ranges(LEDGER)
-        lines = ['R pc=01:FF62 bank=00 at=4380', 'W pc=25:8071 bank=00 at=6000', 'W pc=25:8071 bank=00 at=6000',
-                 'R pc=60:D843 bank=3F at=2184', 'BRK pc=5E:C00F op=09', 'BRK pc=5E:C010 op=16']
+        lines = ['R pc=01:FF62 bank=00 at=4380', 'R pc=06:F53D bank=3D at=6000', 'R pc=06:F53D bank=3D at=6000',
+                 'R pc=06:F536 bank=3D at=4380', 'W pc=25:8071 bank=00 at=6000', 'R pc=06:F53D bank=3C at=6000',
+                 'R pc=60:D843 bank=3F at=2184', 'BRK pc=5E:C00F op=09', 'BRK pc=5E:C010 op=16', 'R pc=01:FF62 bank=00',
+                 'junk']
         problems, dq5 = cs.io_problems(lines, patched)
-        self.assertEqual(problems, ['5E:C010 이 BRK 16 를 부름(dq4brkscan.ALLOWED 밖)', '01:FF62 이 00:4380 를 읽음',
-                                    '60:D843 이 3F:2184 를 읽음'])
-        self.assertEqual(dq5, ['25:8071 이 00:6000 를 씀'])
+        self.assertEqual(problems, ['5E:C010 이 BRK 16 를 부름(dq4brkscan.ALLOWED 밖)',
+                                    '해석하지 못한 기록 줄: R pc=01:FF62 bank=00', '01:FF62 이 00:4380 를 읽음',
+                                    '06:F53D 이 3C:6000 를 읽음(원래 DQ5 코드, DQ5_ALLOWED 밖)',
+                                    '60:D843 이 3F:2184 를 읽음',
+                                    '25:8071 이 00:6000 를 씀(원래 DQ5 코드, DQ5_ALLOWED 밖)', '해석하지 못한 기록 줄: junk'])
+        self.assertEqual(dq5, ['06:F536 이 3D:4380 를 읽음', '06:F53D 이 3D:6000 를 읽음'])
+
+    def test_high_unparsed_line_fails(self):
+        self.assertEqual(cs.cc.probe_problems(['R pc=25:8071 bank=70']), [])
+        self.assertEqual(cs.cc.probe_problems(['R pc=25:8071 bank=70 at=0000']),
+                         ['해석하지 못한 기록 줄: R pc=25:8071 bank=70 at=0000'])
+
+    def test_window_reached(self):
+        import json
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            self.assertEqual(cs.window_reached(d), ['창 검사 readset.json 없음'])
+            (d / 'readset.json').write_text(json.dumps({'a': {'returncode': 0, 'timed_out': False},
+                                                        'b': {'returncode': 1, 'timed_out': False},
+                                                        'c': {'returncode': 0, 'timed_out': False}}))
+            (d / 'a').mkdir()
+            (d / 'a' / 'v00100.bin').write_bytes(b'')
+            (d / 'c').mkdir()
+            got = cs.window_reached(d)
+        self.assertEqual(got, ['창 장면 b: 종료 1, 시간 초과 False', '창 장면 c: 잰 프레임 없음'])
 
     def test_io_ranges_skip_real_registers(self):
         # 진짜 레지스터(PPU 2100~2183, 조이패드 4016·4017, CPU 4200~421F, DMA 4300~437F)는 범위 밖이어야 한다
