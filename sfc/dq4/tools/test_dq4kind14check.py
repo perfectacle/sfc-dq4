@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dq4kind14check as k  # noqa: E402
 
 ASM = Path(__file__).resolve().parent / 'dq4windowname.asm'
+DQ5 = Path(__file__).resolve().parents[3] / 'rom' / 'dq5.sfc'
 ASM_NAME = {'defer': 'wq_defer', 'rd': 'wq_rd', 'count': 'wq_count', 'off': 'wq_off', 'left': 'wq_left',
             'head': 'wq_head', 'len': 'wq_len', 'stale': 'wt_stale', 'stale2': 'wt_stale2'}
 
@@ -36,9 +37,24 @@ class Kind14Check(unittest.TestCase):
         self.assertEqual(got['rd'], 0x1234)
         self.assertEqual(set(got), set(k.NAMES))
 
+    def test_copy_range_from_tables(self):
+        rom = bytearray(0x200000)
+        o = k.lorom(k.SLOT_TABLE) + k.KIND * 2
+        rom[o:o + 2] = b'\x14\x3D'
+        rom[k.lorom(k.COUNT_TABLE) + k.KIND * 2] = 11
+        self.assertEqual(k.copy_range(bytes(rom)), (0x3D14, 0x3E73))
+        rom[k.lorom(k.COUNT_TABLE) + k.KIND * 2] = 12
+        self.assertNotEqual(k.copy_range(bytes(rom)), k.COPY)
+
+    @unittest.skipUnless(DQ5.exists(), 'rom/dq5.sfc 없음')
+    def test_copy_range_matches_dq5(self):
+        # 사본 범위나 자리 표가 바뀌면 COPY·LAYOUT 의 판단을 다시 해야 한다
+        self.assertEqual(k.copy_range(DQ5.read_bytes()), k.COPY)
+
     def test_parse(self):
         text = '\n'.join([
-            '316 w03=352 wother=0 vars=3D62:FF,3D5C:FFFF',
+            '316 w03=352 wother=0 wport=0 pb= vars=3D62:FF,3D5C:FFFF',
+            '317 unseen',
             '316 copy ' + 'AB' * 352,
             '403 vmadd 002C@D843,002C@D8B7',
             '403 entry 002C:00B7:002C',
@@ -51,12 +67,29 @@ class Kind14Check(unittest.TestCase):
         self.assertEqual(rec['vmadd'], [(403, [(0x2C, 0xD843), (0x2C, 0xD8B7)])])
         self.assertEqual(rec['entries'], [(403, [(0x2C, 0xB7, 0x2C)])])
         self.assertEqual(rec['tmdiff'], [(480, 1155, 0x168)])
+        self.assertEqual(rec['unseen'], [317])
+        self.assertEqual(rec['frames'][0]['wport'], 0)
 
     def test_judge(self):
-        ok = {'copies': [(316, b'')], 'frames': [{'frame': 316, 'w03': 352, 'wother': 0, 'vars': {}}]}
+        ok = {'copies': [(316, b'')], 'unseen': [],
+              'frames': [{'frame': 316, 'w03': 352, 'wother': 0, 'wport': 0, 'vars': {}}]}
         self.assertEqual(k.judge(ok), [])
-        bad = {'copies': [], 'frames': [{'frame': 401, 'w03': 0, 'wother': 20, 'vars': {}}]}
-        self.assertEqual(len(k.judge(bad)), 2)
+        self.assertEqual(k.judge({'copies': [], 'unseen': [], 'frames': []}), ['뱅크 03 이 종류 14 사본을 쓰지 않음'])
+        # 사본 앞의 포트 쓰기(맵을 불러오며 지우는 DMA)는 덮이므로 괜찮다
+        early = {'copies': [(316, b'')], 'unseen': [300],
+                 'frames': [{'frame': 313, 'w03': 0, 'wother': 0, 'wport': 352, 'vars': {}}]}
+        self.assertEqual(k.judge(early), [])
+        bad = {'copies': [(316, b'')], 'unseen': [500],
+               'frames': [{'frame': 401, 'w03': 0, 'wother': 20, 'wport': 3, 'vars': {}}]}
+        got = k.judge(bad)
+        self.assertEqual(len(got), 3)
+        self.assertIn('$2180', got[1])
+        self.assertIn('500', got[2])
+
+    def test_same_runs_ignores_one_tail_frame(self):
+        a = '1 x\n2 y\n648 z\n'
+        self.assertTrue(k.same_runs([a, '1 x\n2 y\n']))
+        self.assertFalse(k.same_runs([a, '1 x\n2 q\n']))
 
 
 if __name__ == '__main__':
