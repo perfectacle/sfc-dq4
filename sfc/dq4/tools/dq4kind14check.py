@@ -143,8 +143,7 @@ def end_frame(warp_text):
 
 def compare_runs(texts, ends):
     """같은 명령 실행들의 문제 목록. 실행마다 기록이 있고 끝 표지가 있어야 하며, 끝 프레임 차이는 1 이하여야 한다.
-    dq5warp 가 장면을 끝내는 프레임이 실행마다 한 프레임 다를 수 있어(고치기 전 롬 0D/00 에서 647·648), 기록은
-    가장 이른 끝 프레임까지 견준다. 두 실행이 같은 이른 프레임에서 함께 끊기면 이 비교로는 잡지 못한다. 그 경우는 실행마다 하는
+    dq5warp 가 장면을 끝내는 프레임이 실행마다 한 프레임 다를 수 있어, 기록은 가장 이른 끝 프레임까지 견준다. 두 실행이 같은 이른 프레임에서 함께 끊기면 이 비교로는 잡지 못한다. 그 경우는 실행마다 하는
     도착·사본 판정(dq4bg3slotcheck.judge, judge_copy)이 잡는다(--layout old 는 도착·사본 판정을 하지 않으므로 이 전제가 없다)."""
     bad = [f'실행 {k}: 기록 없음' for k, t in enumerate(texts) if not t.strip()]
     bad += [f'실행 {k}: 끝 표지 없음' for k, e in enumerate(ends) if e is None]
