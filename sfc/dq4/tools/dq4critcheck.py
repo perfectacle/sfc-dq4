@@ -147,11 +147,17 @@ def sweep(mesence, rom, data, base, out, seed=0):
         for bit in range(8):
             text = battle(mesence, rom, data, state, out / 'sweep' / f'{addr:04X}b{bit}', 'never', '',
                           f'7E{addr:04X}={1 << bit:02X}', seed)
+            if not text.strip():
+                rows.append({'addr': f'{addr:04X}', 'bit': bit, 'recorded': False})
+                continue
             first = (parse(text) or [{}])[0]
-            rows.append({'addr': f'{addr:04X}', 'bit': bit, 'who': first.get('enter', {}).get('10F5'),
+            rows.append({'addr': f'{addr:04X}', 'bit': bit, 'recorded': True, 'who': first.get('enter', {}).get('10F5'),
                          'f41': first.get('f41'), 'result': first.get('result')})
-    lit = [(r['addr'], r['bit']) for r in rows if r['f41'] not in (None, '00')]
+    lit = [(r['addr'], r['bit']) for r in rows if r.get('f41') not in (None, '00')]
     problems = [] if lit == [('0767', 6)] else [f'필드 41 을 켠 비트 {lit}, 기대 0767 bit6 하나']
+    lost = [f"{r['addr']} bit{r['bit']}" for r in rows if not r['recorded']]
+    if lost:
+        problems.append(f'판정 기록을 남기지 못한 실행: {", ".join(lost)}')
     return {'status': 'failed' if problems else 'passed', 'problems': problems, 'rows': rows}
 
 
@@ -163,6 +169,8 @@ def main():
     ap.add_argument('--cases', help='쉼표로 고른 사례만')
     ap.add_argument('--sweep', action='store_true', help='사례 대신 전투 칸 0765~0768 의 32비트를 하나씩 켜 본다(sweep)')
     args = ap.parse_args()
+    if args.sweep and args.cases:
+        ap.error('--sweep 과 --cases 는 함께 줄 수 없음')
     mesence = Path(os.environ['MESENCE'])
     out = args.out.resolve()
     if out.exists() and any(out.iterdir()):

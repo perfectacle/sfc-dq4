@@ -682,10 +682,12 @@ def finish(walker, scene, res, out):
             res['problems'].append(f'대기열에 {fmt(bad)}(원래 번호)가 들어감(프레임 {f})')
     if scene.critical:
         blockers = critical_conditions(walker, hits[0])
-        res['critical_conditions'] = blockers
         if blockers is None:
             res['problems'].insert(0, '회심 앞 조건을 기록하지 못함(DSP 를 읽은 뒤의 프레임 기록이 비어 있음)')
+            res['critical_conditions_recorded'] = False
             blockers = []
+        else:
+            res['critical_conditions'] = blockers
         if not any(w.get('sounded') for w in res['want'] if w['want'] == fmt((SFX, 0x37, 0x0B))):
             res['problems'].insert(0, '회심 미발생(회심 판정을 고정했는데도 회심 효과음이 울리지 않음)'
                                    + (f': {"; ".join(blockers)}' if blockers else ''))
