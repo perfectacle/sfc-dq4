@@ -1,0 +1,110 @@
+"""롬 없이: FF9A(슬라임 레이스) NMI 검사의 받침 읽기와 판정."""
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import dq4ff9acheck as fc  # noqa: E402
+
+
+def rom_with(writes):
+    data = bytearray(0x400000)
+    for addr, raw in writes:
+        o = fc.lorom(addr)
+        data[o:o + len(raw)] = raw
+    return bytes(data)
+
+
+STUBS = [(0x00FF9A, bytes.fromhex('5C 90 D6 60')), (0x00FF9E, bytes.fromhex('22 6C D6 60')),
+         (0x60D690, bytes.fromhex('22 6C D6 60 22 AC C8 11 5C 8F 88 00'))]
+
+
+class EntryTest(unittest.TestCase):
+    def test_reads_the_stubs(self):
+        self.assertEqual(fc.entry_of(rom_with(STUBS)), (0x60D690, 0x60D66C, 0x60D66C))
+
+    def test_ff9a_calling_elsewhere_shows(self):
+        writes = STUBS[:2] + [(0x60D690, bytes.fromhex('22 8F D6 60'))]
+        self.assertEqual(fc.entry_of(rom_with(writes))[2], 0x60D68F)
+
+    def test_an_unpatched_rom_stops(self):
+        with self.assertRaises(SystemExit):
+            fc.entry_of(rom_with([(0x00FF9A, bytes.fromhex('22 AC C8 11 5C 8F 88 00'))]))
+
+
+class FactsTest(unittest.TestCase):
+    def test_callers_take_mirrors_and_jumps(self):
+        data = bytearray(0x40000)
+        data[fc.lorom(0x039000):fc.lorom(0x039000) + 4] = bytes.fromhex('22 EE A1 83')      # JSL to the $80 mirror
+        data[fc.lorom(0x039100):fc.lorom(0x039100) + 3] = bytes.fromhex('4C EE A1')         # JMP in the same bank
+        data[fc.lorom(0x049000):fc.lorom(0x049000) + 3] = bytes.fromhex('4C EE A1')         # JMP in another bank
+        got = fc.callers(bytes(data), 0x03A1EE)
+        self.assertEqual(got, {'JSL': ['03:9000'], 'JML': [], 'JSR': [], 'JMP': ['03:9100']})
+
+    def test_entry_bytes_run_up_to_ff9a(self):
+        data = bytearray(rom_with(STUBS))
+        data[fc.lorom(0x60D66C):fc.lorom(0x60D66C) + 4] = bytes.fromhex('20 6B 00 6B')    # a 6B operand inside
+        data[fc.lorom(0x60D690) - 1] = 0x6B                                                 # RTL just before WqNmiFF9A
+        got = fc.facts(bytes(data))['bytes']['WqNmiEntry'].split()
+        self.assertEqual(len(got), 0x60D690 - 0x60D66C)
+        data[fc.lorom(0x60D690) - 1] = 0x60
+        with self.assertRaises(SystemExit):
+            fc.facts(bytes(data))
+
+
+class JudgeTest(unittest.TestCase):
+    GOOD = [(0xFF9A, 0, True, False)] * fc.INJECT
+
+    def test_passes(self):
+        self.assertEqual(fc.judge({0xFF9A: (1923, 1923)}, self.GOOD, False), (True, []))
+
+    def test_fails_without_ff9a(self):
+        self.assertFalse(fc.judge({0xFF9E: (10, 10)}, [], False)[0])
+
+    def test_fails_when_an_nmi_skips_the_entry(self):
+        self.assertFalse(fc.judge({0xFF9A: (1923, 1922)}, self.GOOD, False)[0])
+
+    def test_fails_when_an_item_stays(self):
+        self.assertFalse(fc.judge({0xFF9A: (5, 5)}, [(0xFF9A, 1, False, False)] * fc.INJECT, False)[0])
+        self.assertFalse(fc.judge({0xFF9A: (5, 5)}, self.GOOD[:1], False)[0])
+
+    def test_fails_when_vram_already_matched_before(self):
+        # a tile that already held the picture cannot show the item went out
+        self.assertFalse(fc.judge({0xFF9A: (5, 5)}, [(0xFF9A, 0, True, True)] * fc.INJECT, False)[0])
+
+    def test_original_needs_only_the_task(self):
+        self.assertEqual(fc.judge({0xFF9A: (3, None)}, [], True), (True, []))
+
+    def test_parses_the_probe_files(self):
+        with tempfile.TemporaryDirectory() as d:
+            folder = Path(d)
+            (folder / 'nmi.txt').write_text('FF9E 846 entry 846\nFF9A 1923 entry 1923\n')
+            (folder / 'inject.txt').write_text('878 nmi 847 task FF9A count 0 vram same before differs\n'
+                                               '909 nmi 878 task FF9A count 1 vram differs before same\n')
+            nmi, inject = fc.parse(folder)
+        self.assertEqual(nmi, {0xFF9E: (846, 846), 0xFF9A: (1923, 1923)})
+        self.assertEqual(inject, [(0xFF9A, 0, True, False), (0xFF9A, 1, False, True)])
+
+    def test_break_entry_puts_an_rtl_at_the_entry(self):
+        data = bytearray(rom_with(STUBS))
+        offset, raw = fc.break_entry(0x60D66C).split('=')
+        data[int(offset, 16):int(offset, 16) + len(raw) // 2] = bytes.fromhex(raw)
+        self.assertEqual(data[fc.lorom(0x60D66C)], 0x6B)
+        self.assertEqual(sum(a != b for a, b in zip(data, rom_with(STUBS))), 1)
+
+    def test_same_runs_compares_both_files(self):
+        with tempfile.TemporaryDirectory() as d:
+            a, b = Path(d, 'a'), Path(d, 'b')
+            for f, inj in ((a, 'x'), (b, 'x')):
+                f.mkdir()
+                (f / 'nmi.txt').write_text('FF9A 1')
+                (f / 'inject.txt').write_text(inj)
+            self.assertTrue(fc.same_runs([a, b]))
+            (b / 'inject.txt').write_text('y')
+            self.assertFalse(fc.same_runs([a, b]))
+
+
+if __name__ == '__main__':
+    unittest.main()

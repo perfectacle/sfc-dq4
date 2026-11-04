@@ -362,3 +362,4 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [2026-11-03-07: 침대 발치 훅 다시 보기와 왕좌의 방 침대 병사](journal/2026-11-03-07-sleeper-hook-review.md)
 - [2026-11-03-08: 침대 검사의 출발 상태와 걸음 묶기 바로잡기](journal/2026-11-03-08-sleeper-check-tidy.md)
 - [2026-11-03-09: 들어설 때 숨는 FC 인물 열 명을 FC 에서 재 보기](journal/2026-11-03-09-hidden-people.md)
+- [2026-11-04-01: NMI 작업 FF9A 는 슬라임 레이스 화면](journal/2026-11-04-01-ff9a-slime-race.md)
