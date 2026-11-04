@@ -24,6 +24,8 @@ WRAM_OFFSET = 8836
 # WRAM 찾기의 표지를 잠깐 써 보는 자리(맨 끝 바이트, 바로 되돌림)
 SENTINEL_AT = 0x1FFFF
 BSNES_VERSION = '115'
+# 패치한 bsnes 가 읽은 롬 바이트 비트맵을 내주는 메모리 id(sfc/dq4/tools/dq4cores-bsnes-romtrace.patch)
+ROM_TRACE = 0x5244
 BTN = {'b': 0, 'y': 1, 'select': 2, 'start': 3, 'up': 4, 'down': 5, 'left': 6, 'right': 7,
        'a': 8, 'x': 9, 'l': 10, 'r': 11}
 
@@ -72,16 +74,22 @@ STATE = C.CFUNCTYPE(C.c_int16, C.c_uint, C.c_uint, C.c_uint, C.c_uint)
 
 
 class Core:
-    def __init__(self, dylib, rom, sysdir, options=None):
+    def __init__(self, dylib, rom, sysdir, options=None, trace=False):
+        """trace 면 게임을 불러온 바로 뒤(직렬화 등으로 코어가 한 명령이라도 돌기 전) 읽은 롬 바이트 비트맵을 켠다."""
         self.slot = headless_slots.acquire(f'libretro {os.path.basename(str(dylib))}')
+        self._trace = None
         try:
             self._open(dylib, rom, sysdir, options)
+            if trace and not self.trace_start():
+                raise RuntimeError(f'{dylib}: 읽은 롬 바이트 비트맵이 없음(dq4cores 의 romtrace 패치 없는 코어)')
         except BaseException:
             self.slot.release()
             raise
 
     def close(self):
-        """자리를 놓는다. 코어는 내리지 않으므로 이 뒤에는 run 을 부르지 않는다."""
+        """자리를 놓는다. 코어는 내리지 않으므로 이 뒤에는 run 을 부르지 않는다. 비트맵은 같은 프로세스에서 다음 Core 가
+        롬을 불러올 때 코어가 끈다(romtrace 패치)."""
+        self._trace = None
         self.slot.release()
 
     def _open(self, dylib, rom, sysdir, options):
@@ -302,6 +310,24 @@ class Core:
             # 받는 것을 실측함(7e1f005a → 7E:1F00 = 5A)
             self.lib.retro_cheat_set(i, True, code.lower().encode())
 
+    def trace_start(self):
+        """읽은 롬 바이트 비트맵을 비우고 켠다. 패치한 bsnes 만 된다(dq4cores 의 romtrace 패치). 안 되면 False.
+        켜기 전에 코어가 돈 몫(retro_serialize 도 코어를 동기 지점까지 돌린다)은 비트맵에 들지 않으므로, 결과를
+        캐시하려면 Core(trace=True) 로 연다."""
+        size = self.lib.retro_get_memory_size(ROM_TRACE)
+        if not size:
+            self._trace = None
+            return False
+        ptr = self.lib.retro_get_memory_data(ROM_TRACE)
+        C.memset(ptr, 0, size)
+        self._trace = (ptr, size)
+        return True
+
+    def trace_ranges(self):
+        """trace_start 뒤 버스로 읽은 롬 파일 오프셋의 [(시작, 길이)]. 명령 가져오기·DMA·HDMA 가 모두 든다."""
+        ptr, size = self._trace
+        return bit_ranges(bytes((C.c_ubyte * size).from_address(ptr)))
+
     def shot(self, path):
         Image.fromarray(self.frame).save(path)
 
@@ -321,6 +347,15 @@ class Core:
         buf = C.create_string_buffer(raw, len(raw))
         assert self.lib.retro_unserialize(buf, len(raw))
         self.n = n
+
+
+def bit_ranges(bitmap):
+    """바이트마다 낮은 비트부터 한 바이트씩 표시한 비트맵 → 켜진 오프셋의 [(시작, 길이)]."""
+    idx = np.flatnonzero(np.unpackbits(np.frombuffer(bitmap, np.uint8), bitorder='little'))
+    if not len(idx):
+        return []
+    cut = np.flatnonzero(np.diff(idx) != 1) + 1
+    return [(int(g[0]), int(g[-1] - g[0] + 1)) for g in np.split(idx, cut)]
 
 
 def data_segments(path):

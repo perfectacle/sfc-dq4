@@ -62,10 +62,17 @@ SKIP = (ENTRY, OUT, HDMA, ERR, OUT_TMP, ROM_COPY)
 DONE = 'OK'
 # 결과에 닿는 MesenCE 설정을 명령줄로 고정한다. 사용자 settings.json 의 값과 상관없이 같게 돈다
 FIXED_ARGS = ('--Snes.RamPowerOnState=AllZeros', '--Snes.EnableRandomPowerOnState=false')
-# 롬 머리(LoROM $7FB0~$7FFF)는 체크섬 네 바이트만 빼고 통째로 키에 넣는다. 전원·리셋 때의 리셋 벡터($7FFC) 읽기는 접근
-# 카운터에 잡히지 않고, 에뮬레이터가 매핑을 정할 때 읽는 칸도 잡히지 않는다. 체크섬은 빌드마다 바뀌는데 뒤집어도
-# 결과가 같았다(dq4readsetcheck 가 늘 뒤집어 본다)
-HEADER = (slice(0x7FB0, 0x7FDC), slice(0x7FE0, 0x8000))
+# 롬을 불러올 때 에뮬레이터는 매핑(LoROM·HiROM·Ex·카피어 머리)을 머리 후보의 점수로 고른다. 이 읽기는 접근 카운터에도
+# bsnes 비트맵에도 잡히지 않으므로 후보마다 그 바이트를 키에 넣는다(rom_shape). 후보의 시작 자리는 MesenCE
+# BaseCartridge::LoadRom 의 목록이고, bsnes heuristics::SuperFamicom 의 네 후보($7FB0·$FFB0·$407FB0·$40FFB0)는 그
+# 가운데 카피어 머리 없는 넷이다. 각 후보는 시작 + $7FB0 부터 $50 바이트(머리와 벡터)다
+HEADER_BASES = (0, 0x200, 0x8000, 0x8200, 0x400000, 0x400200, 0x408000, 0x408200)
+HEADER_AT, HEADER_LEN = 0x7FB0, 0x50
+# 머리 안 보수(2)·체크섬(2). 점수는 두 값이 아니라 「합이 $FFFF」·「둘 다 0 아님」 만 보므로 키에는 그 둘만 넣는다.
+# 체크섬은 빌드마다 바뀐다
+SUM_AT, SUM_LEN = 0x2C, 4
+# MesenCE 는 매핑을 고르기 전에 롬 앞 27바이트가 SPC 파일 머리인지 견준다(같으면 SPC 로 불러온다)
+SPC_MAGIC = b'SNES-SPC700 Sound File Data'
 CHECKSUM = range(0x7FDC, 0x7FE0)
 KEEP_ENTRIES = 8
 # emu.takeScreenshot 화면은 같은 실행을 되풀이해도 다를 수 있다(메모리·VRAM 덤프는 같은데 화면만 다름). 재검증은 이것을
@@ -120,16 +127,62 @@ def digest(rom, ranges):
     return h.hexdigest()
 
 
+def _candidates(rom):
+    """롬에 걸치는 머리 후보마다 (머리 시작, 끝, 리셋 벡터가 가리키는 첫 명령 자리 또는 None)."""
+    out = []
+    for base in HEADER_BASES:
+        start = base + HEADER_AT
+        if start >= len(rom):
+            continue
+        end = min(start + HEADER_LEN, len(rom))
+        op = None
+        if end - start == HEADER_LEN:
+            reset = rom[start + 0x4C] | rom[start + 0x4D] << 8
+            # 리셋 벡터가 $8000 아래면 MesenCE 는 그 후보를 버리고 bsnes 는 0점을 준다. 둘 다 첫 명령은 읽지 않는다.
+            # 아니면 base + (벡터 & $7FFF) 를 읽는다
+            if reset >= 0x8000 and base + (reset & 0x7FFF) < len(rom):
+                op = base + (reset & 0x7FFF)
+        out.append((start, end, op))
+    return out
+
+
+def loader_ranges(rom):
+    """에뮬레이터가 매핑을 고를 때 읽는 롬 구간 (시작, 길이). 보수·체크섬 칸은 빼고, 첫 명령 바이트는 넣는다."""
+    ranges = [(0, min(len(SPC_MAGIC), len(rom)))]
+    for start, end, op in _candidates(rom):
+        ranges += [(i, 1) for i in range(start, end) if not 0 <= i - start - SUM_AT < SUM_LEN]
+        if op is not None:
+            ranges.append((op, 1))
+    return merge(ranges)
+
+
 def rom_shape(rom):
-    """롬 크기와 체크섬을 뺀 머리."""
-    return f'{len(rom)}:' + ':'.join(bytes(rom[h]).hex() for h in HEADER)
+    """롬 크기, 롬 앞이 SPC 파일 머리인지, 머리 후보마다 보수·체크섬을 뺀 머리, 보수·체크섬의 두 조건, 첫 명령 바이트."""
+    parts = [str(len(rom)), f'spc{int(bytes(rom[:len(SPC_MAGIC)]) == SPC_MAGIC)}']
+    for start, end, op in _candidates(rom):
+        head = bytearray(rom[start:end])
+        cond = ''
+        if end - start == HEADER_LEN:
+            comp = head[SUM_AT] | head[SUM_AT + 1] << 8
+            csum = head[SUM_AT + 2] | head[SUM_AT + 3] << 8
+            cond = f'{int(comp + csum == 0xFFFF)}{int(comp != 0 and csum != 0)}'
+            head[SUM_AT:SUM_AT + SUM_LEN] = bytes(SUM_LEN)
+        parts.append(f'{start:x}={head.hex()}/{cond}/{"" if op is None else f"{rom[op]:02x}"}')
+    return ':'.join(parts)
 
 
 def state_hash(data):
-    """세이브스테이트 해시. 머리에 든 롬 파일 이름(실행마다 다름)은 지우고 본다."""
+    """세이브스테이트 해시. 머리에 든 롬 파일 이름(실행마다 다름)은 지우고 본다. 이름은 압축한 화면 그림 뒤에 오므로
+    그림 크기에 따라 자리가 달라진다. 그래서 파일 앞 일부가 아니라 전체에서 찾는다.
+
+    지우는 것은 길이 칸이 맞고 이름이 dq4mesen.unique_copy 꼴(이름-16진 12자리.sfc)인 첫 자리다. 압축 본문에 우연히
+    든 꼴은 그 둘을 다 맞추기 어렵다. 그래도 맞으면 그 자리를 지우게 되는데, 그러면 진짜 이름이 남아 해시가 실행마다
+    달라지므로 캐시가 빗나갈 뿐 틀린 결과로 맞지는 않는다. 이름이 고정된 상태(복사본이 아닌 롬)는 지울 것이 없다."""
     data = bytes(data)
-    m = _NAME.search(data, 0, 8192)
-    if m and m.group(1)[0] == len(m.group(2)):
+    m = _NAME.search(data)
+    while m and not (m.group(1)[0] == len(m.group(2)) and _COPY.fullmatch(m.group(2))):
+        m = _NAME.search(data, m.start() + 1)
+    if m:
         data = data[:m.start()] + b'<rom>' + data[m.end():]
     return hashlib.sha256(data).hexdigest()
 

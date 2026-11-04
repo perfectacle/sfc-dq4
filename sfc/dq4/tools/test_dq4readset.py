@@ -55,22 +55,101 @@ class PureTests(unittest.TestCase):
         self.assertIs(rs.find([a, b], rom), b)
         self.assertIsNone(rs.find([a], rom))
 
-    def test_rom_shape_keeps_header_but_checksum(self):
-        rom = bytearray(0x8000)
-        rom[0x7FD5] = 0x20
-        before = rs.rom_shape(rom)
-        rom[0x7FDC:0x7FE0] = b'\x12\x34\x56\x78'
-        self.assertEqual(rs.rom_shape(rom), before)
-        for at in (0x7FB0, 0x7FC0, 0x7FD7, 0x7FDB, 0x7FFC, 0x7FFF):
-            changed = bytearray(rom)
-            changed[at] ^= 1
-            self.assertNotEqual(rs.rom_shape(changed), before, hex(at))
+    def test_rom_shape_covers_every_mapping_candidate(self):
+        """롬 모양 키는 에뮬레이터가 매핑을 고를 때 읽는 바이트를 모두 덮는다: 머리 후보 $7FB0·$81B0·$FFB0·$101B0
+        (4MB 를 넘으면 $407FB0 쪽 넷도)마다 보수·체크섬을 뺀 $50 바이트, 두 조건, 리셋 벡터가 가리키는 첫 명령 바이트.
+        보수·체크섬 값만 바뀌고 두 조건이 같으면 키가 같다."""
+        def rom_with(size):
+            rom = bytearray(size)
+            for base in rs.HEADER_BASES:
+                at = base + rs.HEADER_AT
+                if at + rs.HEADER_LEN <= size:
+                    rom[at + 0x4C:at + 0x4E] = b'\x00\x80'   # 리셋 벡터 $8000 → 첫 명령 base + 0
+                    rom[at + rs.SUM_AT:at + rs.SUM_AT + 4] = b'\x34\x12\xcb\xed'   # 보수 + 체크섬 = $FFFF
+            return rom
+        for size in (0x400000, 0x600000):
+            rom = rom_with(size)
+            before = rs.rom_shape(rom)
+            starts = [b + rs.HEADER_AT for b in rs.HEADER_BASES if b + rs.HEADER_AT + rs.HEADER_LEN <= size]
+            self.assertEqual(len(starts), 4 if size == 0x400000 else 8)
+            ranges = rs.loader_ranges(rom)
+            covered = {i for s, n in ranges for i in range(s, s + n)}
+            for start in starts:
+                for off in range(rs.HEADER_LEN):
+                    at = start + off
+                    changed = bytearray(rom)
+                    changed[at] ^= 1
+                    if rs.SUM_AT <= off < rs.SUM_AT + rs.SUM_LEN:
+                        self.assertNotIn(at, covered)
+                        continue
+                    self.assertIn(at, covered, hex(at))
+                    self.assertNotEqual(rs.rom_shape(changed), before, hex(at))
+                op = start - rs.HEADER_AT
+                self.assertIn(op, covered)
+                changed = bytearray(rom)
+                changed[op] ^= 0x78
+                self.assertNotEqual(rs.rom_shape(changed), before, f'첫 명령 {op:x}')
+            # 보수·체크섬 값만 바꾸고 조건은 그대로: 같은 키
+            same = bytearray(rom)
+            same[0x7FDC:0x7FE0] = b'\xff\x00\x00\xff'
+            self.assertEqual(rs.rom_shape(same), before)
+            # 조건이 바뀜(합이 $FFFF 아님, 또는 한쪽이 0): 다른 키
+            for sums in (b'\x34\x12\xcb\xee', b'\xff\xff\x00\x00'):
+                changed = bytearray(rom)
+                changed[0xFFDC:0xFFE0] = sums
+                self.assertNotEqual(rs.rom_shape(changed), before, sums.hex())
+            # 뒤집기 시험처럼 네 바이트를 모두 뒤집어도 두 조건은 그대로다
+            flipped = bytearray(rom)
+            for i in range(0x7FDC, 0x7FE0):
+                flipped[i] ^= 0xFF
+            self.assertEqual(rs.rom_shape(flipped), before)
+        # 리셋 벡터가 $8000 아래면 그 후보의 첫 명령($1000 & $7FFF = $1000)은 읽지 않는다
+        rom = rom_with(0x400000)
+        rom[0x7FFC:0x7FFE] = b'\x00\x10'
+        self.assertNotIn(0x1000, {i for s, n in rs.loader_ranges(rom) for i in range(s, s + n)})
+        changed = bytearray(rom)
+        changed[0x1000] ^= 0x78
+        self.assertEqual(rs.rom_shape(changed), rs.rom_shape(rom))
+        # 같은 벡터의 위쪽($9000)이면 같은 자리를 읽는다
+        rom[0x7FFC:0x7FFE] = b'\x00\x90'
+        self.assertIn(0x1000, {i for s, n in rs.loader_ranges(rom) for i in range(s, s + n)})
+        changed = bytearray(rom)
+        changed[0x1000] ^= 0x78
+        self.assertNotEqual(rs.rom_shape(changed), rs.rom_shape(rom))
+        # MesenCE 가 견주는 SPC 파일 머리(롬 앞 27바이트)
+        self.assertIn((0, 27), [(s, min(n, 27)) for s, n in rs.loader_ranges(rom) if s == 0])
+        spc = bytearray(rom)
+        spc[:27] = rs.SPC_MAGIC
+        self.assertNotEqual(rs.rom_shape(spc), rs.rom_shape(rom))
+
+    def test_repo_lua_does_not_read_rom_hash(self):
+        """소스 모양 확인: 롬 모양 키는 롬 전체 해시를 넣지 않는다. 그 해시를 장면이 읽으면(MesenCE
+        emu.getRomInfo().fileSha1Hash) 결과가 키 밖의 롬 바이트에 닿으므로, 저장소 Lua 는 그것을 읽지 않는다."""
+        bad = [str(f) for f in rs.lua_files() if 'fileSha1Hash' in f.read_text(encoding='utf-8', errors='replace')]
+        self.assertEqual(bad, [])
 
     def test_state_hash_ignores_rom_file_name_only(self):
         a = mss(b'probe-855474adcaf4.sfc')
         b = mss(b'windowcheck-e302b892a00a.sfc')
         self.assertEqual(rs.state_hash(a), rs.state_hash(b))
         self.assertNotEqual(rs.state_hash(a), rs.state_hash(mss(b'probe-855474adcaf4.sfc', b'payloae')))
+        # 길이 칸이 맞지 않는 같은 꼴이 앞에 있어도 건너뛰고 진짜 이름을 지운다
+        decoy = b'MSS\x01' + b'\x00' * 8 + b'\x05\x00\x00\x00ab.sfc' + b'\x00' * 8
+        self.assertEqual(rs.state_hash(decoy + mss(b'probe-855474adcaf4.sfc')[4:]),
+                         rs.state_hash(decoy + mss(b'probe-c3848acf38d4.sfc')[4:]))
+        # 길이 칸까지 맞는 가짜 꼴(복사본 이름 꼴은 아님)이 앞에 있어도 진짜 이름을 지운다
+        decoy = b'MSS\x01' + b'\x00' * 8 + b'\x06\x00\x00\x00ab.sfc' + b'\x00' * 8
+        self.assertEqual(rs.state_hash(decoy + mss(b'probe-855474adcaf4.sfc')[4:]),
+                         rs.state_hash(decoy + mss(b'probe-c3848acf38d4.sfc')[4:]))
+        self.assertNotEqual(rs.state_hash(decoy + mss(b'probe-855474adcaf4.sfc')[4:]),
+                            rs.state_hash(decoy.replace(b'ab.sfc', b'cd.sfc') + mss(b'probe-855474adcaf4.sfc')[4:]))
+        # 같은 꼴이라도 길이 칸이 틀리면 이름으로 보지 않는다: 그 바이트가 다르면 해시도 다르다
+        self.assertNotEqual(rs.state_hash(b'MSS\x01\x05\x00\x00\x00ab.sfc'),
+                            rs.state_hash(b'MSS\x01\x05\x00\x00\x00cd.sfc'))
+        # 화면 그림이 커서 이름이 파일 8KB 뒤에 오는 상태
+        big = b'MSS\x01' + b'\x00' * 28 + bytes(range(256)) * 40
+        self.assertEqual(rs.state_hash(big + mss(b'probe-855474adcaf4.sfc')[4:]),
+                         rs.state_hash(big + mss(b'probe-c3848acf38d4.sfc')[4:]))
 
     def test_content_hash_ignores_copy_name_in_logs(self):
         a = rs.content_hash(b'load probe-0123456789ab.sfc ok', 'mesen.log')
@@ -316,6 +395,20 @@ class RunTests(unittest.TestCase):
         self.flip(0x45)        # 안
         self.assertFalse(self.go()[0]['cached'])
         self.assertEqual(self.fake.calls, 2)
+
+    def test_mapping_candidate_bytes_miss(self):
+        """읽은 집합 밖이라도 에뮬레이터가 매핑을 고를 때 읽는 후보 머리($FFB0 쪽)·첫 명령 바이트가 바뀌면 빗나간다."""
+        rom = bytearray(0x10000)
+        rom[0xFFFC:0xFFFE] = b'\x00\x90'     # $FFB0 후보의 리셋 벡터 → 첫 명령 $8000 + $1000
+        self.rom.write_bytes(rom)
+        self.go()
+        self.assertTrue(self.go()[0]['cached'])
+        self.flip(0x20)        # 읽은 집합 밖, 로더도 안 읽음
+        self.assertTrue(self.go()[0]['cached'])
+        for at in (0xFFD5, 0xFFDB, 0x9000):    # 후보 머리의 맵 모드, 그 밖 칸, 후보의 첫 명령
+            self.flip(at)
+            self.assertFalse(self.go()[0]['cached'], hex(at))
+            self.assertTrue(self.go()[0]['cached'], hex(at))
 
     def test_inputs_outside_rom_miss(self):
         self.go()
@@ -862,20 +955,23 @@ class RuleTests(unittest.TestCase):
 
     def test_walk_guards_watch_their_imports(self):
         """소스 모양 확인: 서장 끝 걷기·저장 검사의 실행 검사 paths 에, 명령이 부르는 진입 스크립트(빌드 스크립트 포함),
-        빌드 스크립트가 하위 프로세스로 부르는 빌드 단계 스크립트, 그 각각이 바로 import 하는 dq4·dq5 모듈이 모두 있다. 모듈 파일을 찾지 못하면(옮겼거나 이름이 바뀜) 실패한다."""
+        빌드 스크립트가 하위 프로세스로 부르는 빌드 단계 스크립트, 그 각각이 바로 import 하는 dq4·dq5 모듈이 모두 있다. 모듈 파일을 찾지 못하면(옮겼거나 이름이 바뀜) 실패한다.
+        libretro 건전성 검사는 장면을 dq4libretro·dq4savefixture 로 돌리므로 그 둘이 import 하는 모듈까지 본다."""
         import tomllib
         checks = {c['name']: c for c in tomllib.loads((HERE.parent / 'guards.toml').read_text(encoding='utf-8'))['check']}
         root = HERE.parents[2]
         bases = (HERE, root / 'sfc' / 'dq5' / 'tools', root / 'fc' / 'dq4' / 'tools')
+        drivers = {'dq4-libretro-readset-soundness': ['sfc/dq4/tools/dq4libretro.py', 'sfc/dq4/tools/dq4savefixture.py']}
         for name in ('dq4-heroblock', 'dq4-field-obj-math', 'dq4-battle-check', 'dq4-wrap-routine', 'dq4-ch1-save',
                      'dq4-ff9a-nmi', 'dq4-battle-bigpic', 'dq4-crit-conditions', 'dq4-sfx-scene',
-                     'dq4-kind14-copy', 'dq4-bg3-slot'):
+                     'dq4-kind14-copy', 'dq4-bg3-slot', 'dq4-libretro-readset-soundness'):
             entries = re.findall(r'((?:sfc|fc)/\S+?\.py)', checks[name]['run'])
             self.assertTrue(entries, name)
             if 'sfc/dq4/tools/dq4build.py' in entries:
                 # dq4build 는 빌드 단계를 import 가 아니라 하위 프로세스로 부른다(dq4build.STAGES, script() 가 지킨다)
                 import dq4build
                 entries += [f'sfc/dq4/tools/{x}' for x in dq4build.STAGES]
+            entries += drivers.get(name, [])
             want = set(entries)
             for entry in entries:
                 src = (root / entry).read_text(encoding='utf-8')
@@ -886,18 +982,32 @@ class RuleTests(unittest.TestCase):
             self.assertFalse(want - set(checks[name]['paths']), name)
 
     def test_build_stages_go_through_the_list(self):
-        """dq4build 가 단계 스크립트를 부르는 길은 script() 하나이고, STAGES 에 없는 이름은 거부한다."""
+        """dq4build 가 단계 스크립트를 부르는 길은 script() 하나이고, STAGES 에 없는 이름은 거부한다.
+        소스 모양 확인(빌드 파일의 글자 상수만 본다): '…py' 글자는 STAGES 의 원소이거나 step()·script() 의 첫 인자일 때만
+        쓴다(pool.submit(step, '…py') 포함). 변수·f-string·문자열 이어 붙이기로 만든 이름은 이 시험이 못 본다. 그런 길은 script() 의 거부가 막는다."""
         import dq4build
+        self.assertTrue(dq4build.STAGES)
+        for name in ('dq4menupatch.py', 'dq4chapter1.py', 'dq4soundset.py', 'dq4people.py'):
+            self.assertIn(name, dq4build.STAGES)
         self.assertEqual(dq4build.script('dq4menupatch.py'), HERE / 'dq4menupatch.py')
         with self.assertRaises(ValueError):
             dq4build.script('dq4new.py')
         for name in dq4build.STAGES:
             self.assertTrue((HERE / name).is_file(), name)
         tree = ast.parse((HERE / 'dq4build.py').read_text(encoding='utf-8'))
-        # 소스 모양 확인: HERE / '…py' 로 단계를 바로 부르는 곳이 없다
-        direct = [n for n in ast.walk(tree) if isinstance(n, ast.BinOp) and isinstance(n.right, ast.Constant)
-                  and isinstance(n.right.value, str) and n.right.value.endswith('.py')]
-        self.assertEqual(direct, [])
+        allowed = set()
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'STAGES' for t in n.targets):
+                allowed |= {id(e) for e in ast.walk(n.value)}
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in ('step', 'script') and n.args:
+                allowed.add(id(n.args[0]))
+            # pool.submit(step, '…py', …)
+            if isinstance(n, ast.Call) and len(n.args) > 1 and isinstance(n.args[0], ast.Name) and n.args[0].id == 'step':
+                allowed.add(id(n.args[1]))
+        doc = tree.body[0].value if tree.body and isinstance(tree.body[0], ast.Expr) else None
+        loose = [(n.lineno, n.value) for n in ast.walk(tree) if isinstance(n, ast.Constant) and n is not doc
+                 and isinstance(n.value, str) and n.value.endswith('.py') and id(n) not in allowed]
+        self.assertEqual(loose, [])
 
     def test_battle_rounds_bypass_cache(self):
         """소스 모양 확인: 전투 검사는 같은 상태에서 전투를 여러 번 돌려 결과가 같은지 보고 화면을 견준다. 그 전투 실행은 캐시를 거치지 않는다
