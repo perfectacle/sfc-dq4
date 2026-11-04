@@ -4,8 +4,10 @@
 --   ENTRY=60xxxx   WqNmiEntry 의 CPU 주소. 주면 작업마다 그 NMI 에서 WqNmiEntry 가 돈 횟수도 센다
 --   INJECT=N       작업 FF9A 인 NMI 동안 대기열(!wq_*)이 비어 있으면 BG3 칸 1F0(VRAM 워드 0F80)에 그림 한 칸을 넣는다.
 --                  N 번까지, 앞 항목을 확인한 뒤 30프레임 쉬고 다음. 넣은 뒤 첫 NMI 가 끝나 다음 NMI 입구에 닿았을 때
---                  항목 수가 0 이고 VRAM 이 넣은 그림과 같으면 「다음 NMI 에 나감」
+--                  항목 수가 0 이고 VRAM 이 넣기 전에는 그림과 달랐다가 넣은 그림과 같아졌으면 「다음 NMI 에 나감」
 --   SHOT=f1,f2     그 프레임의 화면
+--   SET="075B=00;…" 불러온 뒤 2~10프레임에 쓸 WRAM(7E 뱅크 하위 16비트 주소=값). 난수·시각을 고정한다
+--   ROMPATCH="11E7C2=186B;…"  첫 프레임에 PRG 롬(파일 오프셋=바이트들)을 메모리에서만 바꾼다. 조우 없애기, 변이 시험
 -- 끝(MAXF)에 nmi.txt·inject.txt 를 쓰고 멈춘다.
 package.path = os.getenv('LIBDIR') .. '/?.lua;' .. package.path
 local L = require('lib')
@@ -30,10 +32,26 @@ for tok in string.gmatch(os.getenv('PRE') or '', '[^,]+') do
   seq[#seq + 1] = {b, tonumber(f)}
 end
 
+local sets, patches = {}, {}
+for a, v in string.gmatch(os.getenv('SET') or '', '(%x+)=(%x+)') do sets[#sets + 1] = {0x7E0000 + tonumber(a, 16), tonumber(v, 16)} end
+for a, bytes in string.gmatch(os.getenv('ROMPATCH') or '', '(%x+)=(%x+)') do
+  for i = 1, #bytes - 1, 2 do patches[#patches + 1] = {tonumber(a, 16) + (i - 1) // 2, tonumber(bytes:sub(i, i + 1), 16)} end
+end
+
 local frame, si, left = 0, 1, nil
 local nmi, task = 0, nil
 local tasks, order, entries = {}, {}, {}
 local pending, injected, results, rest = nil, 0, {}, 0
+
+-- 넣을 때마다 다른 그림(k 번째)이라야 앞 항목이 남긴 그림과 견주어 「나감」 을 가린다
+local function pattern(k, i) return (PATTERN[i] + 0x13 * k) & 0xFF end
+
+local function vram_same(k)
+  for i = 1, #PATTERN do
+    if emu.read(VWORD * 2 + i - 1, vram) ~= pattern(k, i) then return false end
+  end
+  return true
+end
 
 local function rd16(a) return emu.read(a, m) | emu.read(a + 1, m) << 8 end
 
@@ -44,13 +62,9 @@ emu.addMemoryCallback(function()
   tasks[task] = tasks[task] + 1
   if pending then
     if pending.nmi == nmi - 2 then
-      local same = true
-      for i = 1, #PATTERN do
-        if emu.read(VWORD * 2 + i - 1, vram) ~= PATTERN[i] then same = false end
-      end
       local count = emu.read(WQ_COUNT, m)
-      results[#results + 1] = string.format('%d nmi %d task %04X count %d vram %s', pending.frame, pending.nmi, pending.task,
-        count, same and 'same' or 'differs')
+      results[#results + 1] = string.format('%d nmi %d task %04X count %d vram %s before %s', pending.frame, pending.nmi,
+        pending.task, count, vram_same(pending.k) and 'same' or 'differs', pending.before)
       pending, rest = nil, 30
     end
   end
@@ -64,7 +78,11 @@ end
 
 emu.addEventCallback(function()
   frame = frame + 1
+  if frame == 1 then
+    for _, p in ipairs(patches) do emu.write(p[1], p[2], emu.memType.snesPrgRom) end
+  end
   if frame >= 2 and frame <= 10 then
+    for _, w in ipairs(sets) do emu.write(w[1], w[2], m) end
     for s = 1, 0x1F do
       emu.write(0x7E36E0 + s, talk & 0xFF, m)
       emu.write(0x7E3700 + s, talk >> 8, m)
@@ -75,17 +93,20 @@ emu.addEventCallback(function()
   end
   if rest > 0 then rest = rest - 1 end
   if inject > injected and not pending and rest == 0 and task == 0xFF9A and emu.read(WQ_COUNT, m) == 0 then
+    -- 넣기 전에 VRAM 이 이미 그 그림이면 나갔는지 가릴 수 없다(before 를 같이 적는다)
+    local k = injected + 1
+    local before = vram_same(k) and 'same' or 'differs'
     -- 항목 [VRAM 워드 2][방식 0 = 두 평면][칸 수 1][16바이트]
     emu.write(WQ_BUF, VWORD & 0xFF, m)
     emu.write(WQ_BUF + 1, VWORD >> 8, m)
     emu.write(WQ_BUF + 2, 0x00, m)
     emu.write(WQ_BUF + 3, 0x01, m)
-    for i = 1, #PATTERN do emu.write(WQ_BUF + 3 + i, PATTERN[i], m) end
+    for i = 1, #PATTERN do emu.write(WQ_BUF + 3 + i, pattern(k, i), m) end
     emu.write(WQ_OFF, 4 + #PATTERN, m); emu.write(WQ_OFF + 1, 0, m)
     emu.write(WQ_RD, 0, m); emu.write(WQ_RD + 1, 0, m)
     emu.write(WQ_COUNT, 1, m)
     injected = injected + 1
-    pending = {frame = frame, nmi = nmi, task = task}
+    pending = {frame = frame, nmi = nmi, task = task, before = before, k = k}
   end
   L.release()
   if si <= #seq then

@@ -35,7 +35,7 @@ class EntryTest(unittest.TestCase):
 
 
 class JudgeTest(unittest.TestCase):
-    GOOD = [(0xFF9A, 0, True)] * fc.INJECT
+    GOOD = [(0xFF9A, 0, True, False)] * fc.INJECT
 
     def test_passes(self):
         self.assertEqual(fc.judge({0xFF9A: (1923, 1923)}, self.GOOD, False), (True, []))
@@ -47,7 +47,11 @@ class JudgeTest(unittest.TestCase):
         self.assertFalse(fc.judge({0xFF9A: (1923, 1922)}, self.GOOD, False)[0])
 
     def test_fails_when_an_item_stays(self):
-        self.assertFalse(fc.judge({0xFF9A: (5, 5)}, [(0xFF9A, 1, False)] * fc.INJECT, False)[0])
+        self.assertFalse(fc.judge({0xFF9A: (5, 5)}, [(0xFF9A, 1, False, False)] * fc.INJECT, False)[0])
+
+    def test_fails_when_vram_already_matched_before(self):
+        # a tile that already held the picture cannot show the item went out
+        self.assertFalse(fc.judge({0xFF9A: (5, 5)}, [(0xFF9A, 0, True, True)] * fc.INJECT, False)[0])
         self.assertFalse(fc.judge({0xFF9A: (5, 5)}, self.GOOD[:1], False)[0])
 
     def test_original_needs_only_the_task(self):
@@ -57,11 +61,25 @@ class JudgeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             folder = Path(d)
             (folder / 'nmi.txt').write_text('FF9E 846 entry 846\nFF9A 1923 entry 1923\n')
-            (folder / 'inject.txt').write_text('878 nmi 847 task FF9A count 0 vram same\n'
-                                               '909 nmi 878 task FF9A count 1 vram differs\n')
+            (folder / 'inject.txt').write_text('878 nmi 847 task FF9A count 0 vram same before differs\n'
+                                               '909 nmi 878 task FF9A count 1 vram differs before same\n')
             nmi, inject = fc.parse(folder)
         self.assertEqual(nmi, {0xFF9E: (846, 846), 0xFF9A: (1923, 1923)})
-        self.assertEqual(inject, [(0xFF9A, 0, True), (0xFF9A, 1, False)])
+        self.assertEqual(inject, [(0xFF9A, 0, True, False), (0xFF9A, 1, False, True)])
+
+    def test_break_entry_puts_an_rtl_at_the_entry(self):
+        self.assertEqual(fc.break_entry(0x60D66C), f'{fc.lorom(0x60D66C):X}=6B')
+
+    def test_same_runs_compares_both_files(self):
+        with tempfile.TemporaryDirectory() as d:
+            a, b = Path(d, 'a'), Path(d, 'b')
+            for f, inj in ((a, 'x'), (b, 'x')):
+                f.mkdir()
+                (f / 'nmi.txt').write_text('FF9A 1')
+                (f / 'inject.txt').write_text(inj)
+            self.assertTrue(fc.same_runs([a, b]))
+            (b / 'inject.txt').write_text('y')
+            self.assertFalse(fc.same_runs([a, b]))
 
 
 if __name__ == '__main__':
