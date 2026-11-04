@@ -41,6 +41,7 @@
 | `dq4readsetcheck.py --rom 롬 --out 폴더` | 읽은 롬 바이트 캐시의 건전성 검사(결정성, 읽은 집합 밖을 모두 뒤집어도 같은 출력, 안 한 바이트로 빗나감, HDMA 표 읽기). `guards.toml` 의 실행 검사. [읽은 롬 바이트 캐시](../docs/dq4-readset-format.md#건전성-검사) |
 | `dq4readsetprologuecheck.py --rom 롬 --out 폴더` | 읽은 롬 바이트 캐시를 켜고 서장 상태 캐시 없이 서장을 세 번(빈 캐시, 모두 적중, 적중 재검증) 만들어 시작 상태·서장 기록·끝 상태가 다 나오고 같은지 본다. `guards.toml` 의 실행 검사. [읽은 롬 바이트 캐시](../docs/dq4-readset-format.md) |
 | `dq4guardpaths.py [--group 이름]` | `guards.toml` 실행 검사의 `paths`·묶음이 명령의 스크립트에서 따라갈 수 있는 길(전이 import·Lua·asm·`dq4build` 단계)로 닿는 저장소 파일을 덮는지 보고 빠진 것을 찍는다(못 보는 길은 docstring). `--group` 은 그 묶음이 덮어야 할 파일. `test_dq4guardpaths` 가 늘 본다 |
+| `dq4screencheck.py --rom 롬 --out 폴더 [--write-screens 까닭]` | 타이틀·1장 시작 방·상태 창·방어구점 사기 목록(MesenCE)과 타이틀(bsnes·snes9x) 화면을 `sfc/dq4/screens.toml` 의 칸 해시 기준과 견주고, 다르면 차이 그림을 남긴다. `--write-screens` 는 지금 화면으로 기준을 고친다(까닭 필수). 도구는 `dq4screens.py`. [화면 기준 비교](../docs/dq4-screen-baseline-format.md) |
 | `dq4prologuecheck.py --rom 롬 --out 폴더` | 새 게임부터 서장 끝(1장 왕좌의 방)까지 한 번에 걷는 MesenCE 헤드리스 검사. `MESENCE`·`LIBDIR` 필요. [서장 검증](../docs/dq4-prologue-format.md#검증) |
 | `dq4msgcountcheck.py --rom 롬 --messages messages.json --states 1장걷기출력 --out 폴더` | 서장 걷기 길과 1장 왕 구간을 걸으며 메시지마다 받은 A(▼ 대기 + 닫기 대기)가 쪽 수를 넘지 않는지 봄(`lua/dq4msgcount.lua`). [메시지 끝](../docs/dq4-prologue-format.md#메시지-끝) |
 | `dq4talkdelay.py --rom 롬 --out 폴더` | 서장 걷기 길을 걸으며 메시지 진입·닫기 대기의 처음과 끝·서장 네이티브 루틴 진입을 프레임과 함께 적음(`lua/dq4talkdelay.lua`). 자동 대화가 뜨기까지의 시각을 잼. [자동 대화까지의 시각](../docs/dq4-prologue-format.md#자동-대화까지의-시각) |
