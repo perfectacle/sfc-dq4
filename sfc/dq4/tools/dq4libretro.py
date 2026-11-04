@@ -77,6 +77,7 @@ class Core:
     def __init__(self, dylib, rom, sysdir, options=None, trace=False):
         """trace 면 게임을 불러온 바로 뒤(직렬화 등으로 코어가 한 명령이라도 돌기 전) 읽은 롬 바이트 비트맵을 켠다."""
         self.slot = headless_slots.acquire(f'libretro {os.path.basename(str(dylib))}')
+        self._trace = None
         try:
             self._open(dylib, rom, sysdir, options)
             if trace and not self.trace_start():
@@ -86,7 +87,9 @@ class Core:
             raise
 
     def close(self):
-        """자리를 놓는다. 코어는 내리지 않으므로 이 뒤에는 run 을 부르지 않는다."""
+        """자리를 놓는다. 코어는 내리지 않으므로 이 뒤에는 run 을 부르지 않는다. 비트맵은 같은 프로세스에서 다음 Core 가
+        롬을 불러올 때 코어가 끈다(romtrace 패치)."""
+        self._trace = None
         self.slot.release()
 
     def _open(self, dylib, rom, sysdir, options):

@@ -866,18 +866,22 @@ class RuleTests(unittest.TestCase):
 
     def test_walk_guards_watch_their_imports(self):
         """소스 모양 확인: 서장 끝 걷기·저장 검사의 실행 검사 paths 에, 명령이 부르는 진입 스크립트(빌드 스크립트 포함),
-        빌드 스크립트가 하위 프로세스로 부르는 빌드 단계 스크립트, 그 각각이 바로 import 하는 dq4·dq5 모듈이 모두 있다. 모듈 파일을 찾지 못하면(옮겼거나 이름이 바뀜) 실패한다."""
+        빌드 스크립트가 하위 프로세스로 부르는 빌드 단계 스크립트, 그 각각이 바로 import 하는 dq4·dq5 모듈이 모두 있다. 모듈 파일을 찾지 못하면(옮겼거나 이름이 바뀜) 실패한다.
+        libretro 건전성 검사는 장면을 dq4libretro·dq4savefixture 로 돌리므로 그 둘이 import 하는 모듈까지 본다."""
         import tomllib
         checks = {c['name']: c for c in tomllib.loads((HERE.parent / 'guards.toml').read_text(encoding='utf-8'))['check']}
         root = HERE.parents[2]
         bases = (HERE, root / 'sfc' / 'dq5' / 'tools', root / 'fc' / 'dq4' / 'tools')
-        for name in ('dq4-heroblock', 'dq4-field-obj-math', 'dq4-battle-check', 'dq4-wrap-routine', 'dq4-ch1-save'):
+        drivers = {'dq4-libretro-readset-soundness': ['sfc/dq4/tools/dq4libretro.py', 'sfc/dq4/tools/dq4savefixture.py']}
+        for name in ('dq4-heroblock', 'dq4-field-obj-math', 'dq4-battle-check', 'dq4-wrap-routine', 'dq4-ch1-save',
+                     'dq4-libretro-readset-soundness'):
             entries = re.findall(r'((?:sfc|fc)/\S+?\.py)', checks[name]['run'])
             self.assertTrue(entries, name)
             if 'sfc/dq4/tools/dq4build.py' in entries:
                 # dq4build 는 빌드 단계를 import 가 아니라 하위 프로세스로 부른다(dq4build.STAGES, script() 가 지킨다)
                 import dq4build
                 entries += [f'sfc/dq4/tools/{x}' for x in dq4build.STAGES]
+            entries += drivers.get(name, [])
             want = set(entries)
             for entry in entries:
                 src = (root / entry).read_text(encoding='utf-8')

@@ -8,7 +8,11 @@
           bsnes 를 주면 그 코어와도 견준다
   밖      읽은 집합과 롬 머리($7FB0~$7FFF, 체크섬 빼고) 밖 바이트를 모두 뒤집은 롬(체크섬도 뒤집음)으로 돌려도
           화면·WRAM·읽은 집합이 같다
-  안      읽은 집합 안 바이트 하나를 바꾼 롬은 읽은 바이트 해시가 달라진다(캐시가 빗나감)
+  안      읽은 집합 안 바이트 하나를 바꾼 롬은 읽은 바이트 해시가 달라진다(캐시가 빗나감). 이 시험은 해시 쪽만 본다
+  다시 열기  한 프로세스에서 작은 롬을 추적 켜고 연 뒤 원래 롬을 추적 끄고 열어 전원 장면을 돌린다. 앞 비트맵에 더
+          써지지 않고(롬을 다시 잡으면 코어가 추적을 끈다), 화면·WRAM 이 따로 돌린 전원 장면과 같다
+
+롬 머리는 「밖」 에서 뒤집지 않는다. 머리는 dq4readset 의 롬 모양 키가 따로 맡는다.
 
 장면은 실행마다 따로 프로세스로 돌린다(한 프로세스의 Core 는 dylib 전역 상태를 나눠 쓴다). 저장 기록은 원래 롬으로 한 번
 만든 것을 모든 실행에 같이 넣는다.
@@ -29,6 +33,9 @@ sys.path.insert(0, str(HERE))
 import dq4readset as rs  # noqa: E402
 
 BOOT_FRAMES = 1500
+# 다시 열기의 앞 롬: 원래 롬의 앞부분만(비트맵이 원래 롬보다 작아야 넘쳐 쓰기를 잡는다)
+REOPEN_SMALL = 1 << 20
+REOPEN_FRAMES = 300
 WALK = ['right'] * 40 + [None] * 20 + ['down'] * 40 + [None] * 20 + ['a'] * 4 + [None] * 60 + ['b'] * 4 + [None] * 60
 
 
@@ -47,6 +54,26 @@ def run_scene(scene, core_path, rom, out, sram, goal, trace=True):
     import dq4libretro
     import dq4savefixture as fx
     out.mkdir(parents=True, exist_ok=True)
+    if scene == 'reopen':
+        import ctypes
+        small = out / 'small.sfc'
+        small.write_bytes(Path(rom).read_bytes()[:REOPEN_SMALL])
+        first = dq4libretro.Core(str(core_path), str(small), str(out / 'sys'), trace=True)
+        for n in range(REOPEN_FRAMES):
+            first.run(boot_input(n))
+        ptr, size = first._trace
+        before = ctypes.string_at(ptr, size)
+        first.close()
+        small.unlink()
+        core = dq4libretro.Core(str(core_path), str(rom), str(out / 'sys'), trace=False)
+        for n in range(BOOT_FRAMES):
+            core.run(boot_input(n))
+        after = ctypes.string_at(ptr, size)
+        result = {'frame': hashlib.sha256(core.frame.tobytes()).hexdigest(),
+                  'wram': hashlib.sha256(bytes(core.wram())).hexdigest(), 'ranges': [],
+                  'first_bits': sum(bin(x).count('1') for x in before), 'first_kept': before == after}
+        (out / 'result.json').write_text(json.dumps(result), encoding='utf-8')
+        return
     if scene == 'boot':
         core = dq4libretro.Core(str(core_path), str(rom), str(out / 'sys'), trace=trace)
         for n in range(BOOT_FRAMES):
@@ -93,6 +120,14 @@ def check(scene, core_path, rom_path, out, sram, goal, original=None):
                  trace=False)
         if any(a[k] != off[k] for k in ('frame', 'wram')):
             problems.append(f'{label}: 추적 켠 실행과 다름 ' + ','.join(k for k in ('frame', 'wram') if a[k] != off[k]))
+    if scene == 'boot':
+        r = go('reopen', core_path, rom_path, out / 'reopen', sram, goal)
+        if not r['first_bits']:
+            problems.append('다시 열기: 앞 롬의 비트맵이 비었음')
+        if not r['first_kept']:
+            problems.append('다시 열기: 추적을 끄고 연 코어가 앞 비트맵에 썼음')
+        if any(a[k] != r[k] for k in ('frame', 'wram')):
+            problems.append('다시 열기: 같은 프로세스에서 다시 연 코어의 화면·WRAM 이 다름')
     ranges = [tuple(r) for r in a['ranges']]
     if not ranges:
         return {'name': scene, 'status': 'failed', 'problems': ['읽은 집합이 비었음']}

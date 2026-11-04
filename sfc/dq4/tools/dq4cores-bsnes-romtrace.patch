@@ -1,19 +1,24 @@
 diff --git a/bsnes/sfc/cartridge/cartridge.cpp b/bsnes/sfc/cartridge/cartridge.cpp
-index b39ceb6..51bd296 100644
+index b39ceb6..6c48138 100644
 --- a/bsnes/sfc/cartridge/cartridge.cpp
 +++ b/bsnes/sfc/cartridge/cartridge.cpp
-@@ -2,6 +2,18 @@
+@@ -2,6 +2,23 @@
  
  namespace SuperFamicom {
  
-+//libretro memory id 0x5244: one bit per program ROM byte read through the bus, until the front end clears it
-+auto romTrace(unsigned* size) -> uint8* {
++//libretro memory id 0x5244: one bit per program ROM byte read through the bus.
++//only asking for the data turns tracing on; it stays on until the game's ROM is reallocated or freed
++auto romTraceSize() -> unsigned {
++  return (cartridge.rom.size() + 7) / 8;
++}
++
++auto romTraceStart() -> uint8* {
 +  static vector<uint8> bits;
-+  *size = (cartridge.rom.size() + 7) / 8;
-+  if(bits.size() != *size) {
-+    bits.resize(*size);
-+    for(auto& b : bits) b = 0;
-+  }
++  cartridge.rom.trace = nullptr;
++  unsigned size = romTraceSize();
++  if(!size) return nullptr;
++  if(bits.size() != size) bits.resize(size);
++  for(auto& b : bits) b = 0;
 +  cartridge.rom.trace = bits.data();
 +  return bits.data();
 +}
@@ -22,10 +27,24 @@ index b39ceb6..51bd296 100644
  #include "save.cpp"
  #include "serialization.cpp"
 diff --git a/bsnes/sfc/memory/readable.hpp b/bsnes/sfc/memory/readable.hpp
-index fcaf14b..7452631 100644
+index fcaf14b..8a4849f 100644
 --- a/bsnes/sfc/memory/readable.hpp
 +++ b/bsnes/sfc/memory/readable.hpp
-@@ -24,9 +24,13 @@ struct ReadableMemory : Memory {
+@@ -1,11 +1,13 @@
+ struct ReadableMemory : Memory {
+   inline auto reset() -> void override {
++    trace = nullptr;
+     delete[] self.data;
+     self.data = nullptr;
+     self.size = 0;
+   }
+ 
+   inline auto allocate(uint size, uint8 fill = 0xff) -> void override {
++    trace = nullptr;
+     if(self.size != size) {
+       delete[] self.data;
+       self.data = new uint8[self.size = size];
+@@ -24,9 +26,14 @@ struct ReadableMemory : Memory {
    }
  
    inline auto read(uint address, uint8 data = 0) -> uint8 override {
@@ -33,34 +52,32 @@ index fcaf14b..7452631 100644
      return self.data[address];
    }
  
-+  //set by the libretro front end (memory id 0x5244): one bit per byte read through the bus
++  //set by the libretro front end (memory id 0x5244): one bit per byte read through the bus.
++  //cleared whenever the memory is reallocated or freed, so a later game never writes into a bitmap sized for another
 +  uint8* trace = nullptr;
 +
    inline auto write(uint address, uint8 data) -> void override {
      if(Memory::GlobalWriteEnable) {
        self.data[address] = data;
 diff --git a/bsnes/target-libretro/libretro.cpp b/bsnes/target-libretro/libretro.cpp
-index 8010816..c148f60 100644
+index 8010816..95eee34 100644
 --- a/bsnes/target-libretro/libretro.cpp
 +++ b/bsnes/target-libretro/libretro.cpp
-@@ -785,12 +785,18 @@ RETRO_API unsigned retro_get_region()
+@@ -785,12 +785,15 @@ RETRO_API unsigned retro_get_region()
  
  // Currently, there is no safe/sensible way to use the memory interface without severe hackery.
  // Rely on higan to load and save SRAM until there is really compelling reason not to.
-+namespace SuperFamicom { auto romTrace(unsigned* size) -> uint8*; }
++namespace SuperFamicom { auto romTraceSize() -> unsigned; auto romTraceStart() -> uint8*; }
 +static const unsigned ROM_TRACE_ID = 0x5244;
 +
  RETRO_API void *retro_get_memory_data(unsigned id)
  {
 -	return nullptr;
-+	unsigned size = 0;
-+	return id == ROM_TRACE_ID ? SuperFamicom::romTrace(&size) : nullptr;
++	return id == ROM_TRACE_ID ? SuperFamicom::romTraceStart() : nullptr;
  }
  
  RETRO_API size_t retro_get_memory_size(unsigned id)
  {
 -	return 0;
-+	unsigned size = 0;
-+	if(id == ROM_TRACE_ID) SuperFamicom::romTrace(&size);
-+	return size;
++	return id == ROM_TRACE_ID ? SuperFamicom::romTraceSize() : 0;
  }

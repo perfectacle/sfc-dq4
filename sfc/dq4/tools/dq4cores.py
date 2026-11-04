@@ -30,7 +30,7 @@ CORES = {
         'commit': '63ee22f7af8f5d1ada295c2c98fd7bf261fa62a7',   # 2026-09-04, 「bsnes 115」
         'make': [],
         'output': 'bsnes_libretro',
-        # 읽은 롬 바이트 비트맵(retro_get_memory_data(ROM_TRACE)). 형식은 sfc/dq4/docs/dq4-readset-format.md 「libretro」
+        # 읽은 롬 바이트 비트맵(retro_get_memory_data(ROM_TRACE)). 형식은 sfc/dq4/docs/dq4-readset-format.md 「libretro bsnes」
         'patch': 'dq4cores-bsnes-romtrace.patch',
         # clang 21 은 nall/traits.hpp 의 표준 라이브러리 특수화를 오류로 본다(GCC·옛 clang 은 경고도 아님)
         'clang_cxx': '-Wno-error=invalid-specialization',
@@ -161,8 +161,8 @@ def main():
     for name in names:
         if args.check:
             have, path = stamp(name, folder), core_path(name, folder)
-            ok = bool(have and have.get('commit') == CORES[name]['commit'] and path.exists()
-                      and have.get('sha256') == sha256(path))
+            ok = bool(have and have.get('commit') == CORES[name]['commit'] and have.get('patch') == patch_sha(name)
+                      and path.exists() and have.get('sha256') == sha256(path))
             print(f'{name}: {"있음" if ok else "없음 또는 다른 커밋"} {path}')
             bad += not ok
         else:
