@@ -1,5 +1,6 @@
 """dq4sfxscene: 대응표 해석·기대값 계산·대기열 읽기·울림 판정·장면 목록이 대응표를 빠짐없이 맡는지(롬 없이)."""
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -195,6 +196,31 @@ class RomCheckTest(unittest.TestCase):
         rom[o + 2] = 0xEA
         with self.assertRaises(ValueError):
             s.critical_patch(bytes(rom))
+
+    def test_critical_blockers_name_each_condition(self):
+        table = bytes.fromhex('000A91023C64FF')
+        self.assertEqual(s.critical_blockers(0x40, 0xBF, bytes(7), table), [])
+        got = s.critical_blockers(0x80, 0x40, table, table)
+        self.assertEqual(len(got), 3)
+        self.assertIn('$100E', got[0])
+        self.assertIn('+7', got[1])
+        self.assertIn('26:8D33', got[2])
+
+    def test_critical_scene_traces_conditions(self):
+        # battle-critical 만 회심 앞 조건을 프레임마다 적고, 공격 소리 프레임 값으로 판정한다
+        class W:
+            crit_trace = [(10, 0x00, 0x00, bytes(7)), (20, 0x80, 0x00, bytes(7)), (30, 0x00, 0x40, bytes(7))]
+        rom = bytearray(0x400000)
+        o = s.lorom(s.CRIT_ITEM_TABLE)
+        rom[o:o + 7] = bytes.fromhex('000A91023C64FF')
+        with tempfile.TemporaryDirectory() as tmp:
+            W.rom = Path(tmp) / 'c.sfc'
+            W.rom.write_bytes(bytes(rom))
+            self.assertEqual(s.critical_conditions(W, 15), [])
+            self.assertIn('$100E', s.critical_conditions(W, 25)[0])
+            self.assertIn('+7', s.critical_conditions(W, None)[0])
+            W.crit_trace = []
+            self.assertEqual(s.critical_conditions(W, 15), ['회심 앞 조건을 기록하지 못함'])
 
     def test_critical_scene_uses_patch_not_seed(self):
         t = s.load_table(s.ARGS.read_text())
