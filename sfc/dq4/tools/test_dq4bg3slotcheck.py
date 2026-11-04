@@ -33,6 +33,11 @@ class JudgeTest(unittest.TestCase):
         records = [line("33/01", 0x3C), line("33/00", 0x3C)]
         self.assertEqual(check.judge("33/01", ("33/00", "cell"), records), [])
 
+    def test_arriving_elsewhere_fails(self):
+        self.assertEqual(check.judge("02/00", ("01/00", "cell"), [line("01/00", 0x7C)]), ["02/00 대신 01/00 에 도착"])
+        self.assertTrue(check.judge("33/01", ("01/00", "cell"), [line("01/00", 0x7C)]))
+        self.assertEqual(check.MOVES_ON, {"33/01": "33/00"})
+
     def test_unmoved_or_broken_slot_fails(self):
         # A ROM without the move keeps the menu's 1C, as the overture stage does.
         here = ("02/00", "cell")
