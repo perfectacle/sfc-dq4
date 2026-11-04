@@ -34,6 +34,22 @@ class EntryTest(unittest.TestCase):
             fc.entry_of(rom_with([(0x00FF9A, bytes.fromhex('22 AC C8 11 5C 8F 88 00'))]))
 
 
+class FactsTest(unittest.TestCase):
+    def test_callers_take_mirrors_and_jumps(self):
+        data = bytearray(0x40000)
+        data[fc.lorom(0x039000):fc.lorom(0x039000) + 4] = bytes.fromhex('22 EE A1 83')      # JSL to the $80 mirror
+        data[fc.lorom(0x039100):fc.lorom(0x039100) + 3] = bytes.fromhex('4C EE A1')         # JMP in the same bank
+        data[fc.lorom(0x049000):fc.lorom(0x049000) + 3] = bytes.fromhex('4C EE A1')         # JMP in another bank
+        got = fc.callers(bytes(data), 0x03A1EE)
+        self.assertEqual(got, {'JSL': ['03:9000'], 'JML': [], 'JSR': [], 'JMP': ['03:9100']})
+
+    def test_entry_bytes_run_up_to_ff9a(self):
+        data = bytearray(rom_with(STUBS))
+        data[fc.lorom(0x60D66C):fc.lorom(0x60D66C) + 4] = bytes.fromhex('20 6B 00 6B')    # a 6B operand inside
+        got = fc.facts(bytes(data))['bytes']['WqNmiEntry'].split()
+        self.assertEqual(len(got), 0x60D690 - 0x60D66C)
+
+
 class JudgeTest(unittest.TestCase):
     GOOD = [(0xFF9A, 0, True, False)] * fc.INJECT
 
@@ -48,11 +64,11 @@ class JudgeTest(unittest.TestCase):
 
     def test_fails_when_an_item_stays(self):
         self.assertFalse(fc.judge({0xFF9A: (5, 5)}, [(0xFF9A, 1, False, False)] * fc.INJECT, False)[0])
+        self.assertFalse(fc.judge({0xFF9A: (5, 5)}, self.GOOD[:1], False)[0])
 
     def test_fails_when_vram_already_matched_before(self):
         # a tile that already held the picture cannot show the item went out
         self.assertFalse(fc.judge({0xFF9A: (5, 5)}, [(0xFF9A, 0, True, True)] * fc.INJECT, False)[0])
-        self.assertFalse(fc.judge({0xFF9A: (5, 5)}, self.GOOD[:1], False)[0])
 
     def test_original_needs_only_the_task(self):
         self.assertEqual(fc.judge({0xFF9A: (3, None)}, [], True), (True, []))
@@ -68,7 +84,11 @@ class JudgeTest(unittest.TestCase):
         self.assertEqual(inject, [(0xFF9A, 0, True, False), (0xFF9A, 1, False, True)])
 
     def test_break_entry_puts_an_rtl_at_the_entry(self):
-        self.assertEqual(fc.break_entry(0x60D66C), f'{fc.lorom(0x60D66C):X}=6B')
+        data = bytearray(rom_with(STUBS))
+        offset, raw = fc.break_entry(0x60D66C).split('=')
+        data[int(offset, 16):int(offset, 16) + len(raw) // 2] = bytes.fromhex(raw)
+        self.assertEqual(data[fc.lorom(0x60D66C)], 0x6B)
+        self.assertEqual(sum(a != b for a, b in zip(data, rom_with(STUBS))), 1)
 
     def test_same_runs_compares_both_files(self):
         with tempfile.TemporaryDirectory() as d:

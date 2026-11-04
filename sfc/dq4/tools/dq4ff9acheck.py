@@ -94,39 +94,44 @@ def parse(folder):
     return nmi, inject
 
 
-# 부르는 곳을 훑을 대상: (이름, CPU 주소). JSL·JML 은 롬 전체, JSR 은 대상과 같은 뱅크만
+# 부르는 곳을 훑을 대상: (이름, CPU 주소)
 CALLEES = (('00:8800', 0x008800), ('03:A1EE', 0x03A1EE))
 # 받침·레이스 처리기 바이트를 견줄 자리: (이름, CPU 주소, 길이)
 RANGES = (('00:FF9A', 0x00FF9A, 4), ('00:FF9E', 0x00FF9E, 7), ('03:A1EE', 0x03A1EE, 0x69), ('06:F210', 0x06F210, 0x12))
 
 
 def callers(data, target):
-    """target 을 부르는 {'JSL': [...], 'JML': [...], 'JSR': [...]}(CPU 주소 'BB:AAAA'). 바이트 모양만 본다."""
+    """target 으로 곧바로 뛰는 명령 바이트: {'JSL'·'JML': 롬 전체(오퍼랜드 뱅크는 그 뱅크와 $80 거울), 'JSR'·'JMP': target 과 같은
+    뱅크}(CPU 주소 'BB:AAAA'). 바이트 모양만 보므로 간접 점프(JMP (abs)·JMP (abs,X)·JSR (abs,X)·JML [abs])와 표에 담긴
+    주소로 가는 길은 잡지 못한다."""
     lo, hi, bank = target & 0xFF, target >> 8 & 0xFF, target >> 16
+    kinds = (('JSL', [bytes((0x22, lo, hi, b)) for b in (bank, bank | 0x80)], None),
+             ('JML', [bytes((0x5C, lo, hi, b)) for b in (bank, bank | 0x80)], None),
+             ('JSR', [bytes((0x20, lo, hi))], bank), ('JMP', [bytes((0x4C, lo, hi))], bank))
     out = {}
-    for name, pattern, banks in (('JSL', bytes((0x22, lo, hi, bank)), None), ('JML', bytes((0x5C, lo, hi, bank)), None),
-                                 ('JSR', bytes((0x20, lo, hi)), {bank})):
-        hits, i = [], data.find(pattern)
-        while i >= 0:
-            b = i // 0x8000
-            if banks is None or b in banks:
-                hits.append(f'{b:02X}:{0x8000 + i % 0x8000:04X}')
-            i = data.find(pattern, i + 1)
-        out[name] = hits
+    for name, patterns, only in kinds:
+        hits = set()
+        for pattern in patterns:
+            i = data.find(pattern)
+            while i >= 0:
+                if only is None or i // 0x8000 == only:
+                    hits.add(f'{i // 0x8000:02X}:{0x8000 + i % 0x8000:04X}')
+                i = data.find(pattern, i + 1)
+        out[name] = sorted(hits)
     return out
 
 
 def facts(data):
-    """에뮬레이터 없이 롬에서 읽는 근거: 부르는 곳, 받침·처리기 바이트(16진), 패치 롬이면 WqNmiFF9A·WqNmiEntry 바이트."""
+    """에뮬레이터 없이 롬에서 읽는 근거: 부르는 곳, 받침·처리기 바이트(16진), 패치 롬이면 WqNmiFF9A·WqNmiEntry 바이트.
+    WqNmiEntry 는 바로 뒤가 WqNmiFF9A 인 asm 배치(dq4windowname.asm)대로 두 자리 사이를 통째로 읽는다."""
     out = {'callers': {name: callers(data, addr) for name, addr in CALLEES},
            'bytes': {name: data[lorom(a):lorom(a) + n].hex(' ') for name, a, n in RANGES}}
     ff9a = long_at(data, FF9A_SITE, 0x5C)
+    entry = long_at(data, FIELD_STUB, 0x22)
     if ff9a is not None:
         out['bytes']['WqNmiFF9A'] = data[lorom(ff9a):lorom(ff9a) + 12].hex(' ')
-        entry = long_at(data, FIELD_STUB, 0x22)
-        if entry is not None:
-            end = data.index(0x6B, lorom(entry))
-            out['bytes']['WqNmiEntry'] = data[lorom(entry):end + 1].hex(' ')
+    if ff9a is not None and entry is not None and 0 < ff9a - entry < 0x100:
+        out['bytes']['WqNmiEntry'] = data[lorom(entry):lorom(ff9a)].hex(' ')
     return out
 
 
