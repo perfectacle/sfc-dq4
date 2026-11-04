@@ -23,7 +23,7 @@ import re
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -65,6 +65,11 @@ SNES9X_DSP = 65701                    # snes9x 상태 SND: 블록 안의 DSP 레
 # 대신 이 장면은 회심 난수 굴림(00:953A 가 0~31 을 고루 돌려주는지)을 보지 않는다
 CRITICAL_SITE = 0x20C6B2
 CRITICAL_BYTES = bytes.fromhex('A920223A9500C900F002')
+# 회심 판정(20:C697) 앞에서 난수를 보지 않고 갈래를 정하는 조건(WRAM 오프셋). 형식 문서 「회심을 직접 일으키기」
+CRIT_FLAGS = 0x100E            # bit7: 회심 아님으로 빠짐(격투장 관전 전투)
+CRIT_SLOT7 = [0x0760 + 12 * i + 7 for i in range(8)]   # 일행 전투 칸 +7. bit6 = 필드 41 상태 1A: 그 칸이 치면 늘 회심
+CRIT_ITEMS = 0x2056            # 주인공 가진 물건 일곱 칸. 26:8D33 과 모두 같으면(26:8D0A) 누가 치든 늘 회심
+CRIT_ITEM_TABLE = 0x268D33
 
 
 def lorom(addr):
@@ -286,6 +291,21 @@ class Scene:
 
 # ---- 실행 -----------------------------------------------------------------------------------------------------------
 
+def critical_blockers(flags, slots7, items, table):
+    """회심 판정 앞 조건 가운데 켜진 것의 까닭. 판정을 1/1 로 고정한 검사는 셋이 모두 꺼져 있어야 고정한 난수
+    판정으로 회심이 났다고 말할 수 있다(bit7 은 회심을 막고, 나머지 둘은 난수 없이 회심을 낸다). slots7 은 일행 전투
+    칸 여덟의 +7(칸 순서). 필드 41 은 치는 쪽의 칸을 읽으므로, 누가 치든 걸리게 모든 칸을 본다."""
+    out = []
+    if flags & 0x80:
+        out.append(f'$100E = {flags:02X}: bit7(격투장 관전 전투)이 켜져 회심 판정 전에 회심 아님으로 빠짐')
+    for i, v in enumerate(slots7):
+        if v & 0x40:
+            out.append(f'일행 전투 칸 {i} +7 = {v:02X}: bit6(필드 41 상태 1A, 일행 パルプンテ 효과 10)이 켜져 그 칸이 치면 난수 없이 회심')
+    if bytes(items) == bytes(table):
+        out.append(f'주인공 가진 물건 일곱 칸 {bytes(items).hex()} 이 26:8D33 과 같아(26:8D0A) 난수 없이 회심')
+    return out
+
+
 def hook_patches(rom):
     """대기열 그림자 훅(검사 롬 사본만). 자리 바이트가 예상과 다르면 ValueError."""
     out = []
@@ -389,6 +409,7 @@ def make_walker():
             self.dsp_seen = False
             self.sources = {}
             self.dq5 = dq5_samples()
+            self.crit_trace = None
 
         def step(self, buttons=()):
             super().step(buttons)
@@ -404,6 +425,9 @@ def make_walker():
                 self.last = now
             else:
                 self.shadow_step(m)
+            if self.crit_trace is not None and self.watch:
+                self.crit_trace.append((self.c.n, m[CRIT_FLAGS], tuple(m[a] for a in CRIT_SLOT7),
+                                        bytes(m[CRIT_ITEMS:CRIT_ITEMS + 7])))
             if self.watch:
                 # 직렬화는 이어 하기·순간이동을 마친 뒤에만(bsnes 는 직렬화가 코어 동기 지점을 바꾼다)
                 got = spc_state(self.c)
@@ -470,6 +494,7 @@ def run_scene(core_name, rom_path, scene, out, dsp=True):
             walker.boot()
             cc.apply_sets(walker.c, wc.pins(wc.SEGMENTS[0][3]))
             walker.pokes = list(scene.pokes)
+            walker.crit_trace = [] if scene.critical else None
             walker.walk(scene.inputs, {'maxf': scene.maxf or wc.frames(scene.inputs)})
         return finish(walker, scene, res, out)
     slot = slot_for(rom_path, scene)
@@ -501,6 +526,7 @@ def run_scene(core_name, rom_path, scene, out, dsp=True):
             walker.c.poke([(0x7E0000 + NPC_TALK_LO + slot_no, n & 0xFF), (0x7E0000 + NPC_TALK_HI + slot_no, n >> 8)])
         walker.events, walker.watch = [], dsp
         walker.pokes = list(scene.pokes)
+        walker.crit_trace = [] if scene.critical else None
         walker.walk(scene.inputs, {'maxf': scene.maxf or wc.frames(scene.inputs)})
     return finish(walker, scene, res, out)
 
@@ -568,6 +594,38 @@ def assign_key_ons(events, wants, frames, envx, sources):
     return out
 
 
+def critical_conditions(walker, frame):
+    """첫 원하는 항목(공격 소리)이 대기열에 든 프레임의 회심 앞 조건. 공격 소리가 없으면 마지막 기록 프레임.
+    기록이 없으면 None(조건을 모름)."""
+    trace = walker.crit_trace or []
+    if not trace:
+        return None
+    at = [t for t in trace if frame is None or t[0] <= frame][-1:] or trace[:1]
+    table = walker.rom.read_bytes()[lorom(CRIT_ITEM_TABLE):lorom(CRIT_ITEM_TABLE) + 7]
+    return critical_blockers(*at[0][1:], table)
+
+
+# battle-critical 에 조건 하나를 더 묶으면 그 까닭을 대며 실패해야 한다: (이름, 더 묶을 WRAM, 실패 메시지에 있어야 할 글)
+CRITICAL_NEGATIVE = [
+    ('flag100e', [(0x7E100E, 0x80)], '$100E = 80'),
+    ('slot0', [(0x7E0767, 0x40)], '칸 0 +7 = 40'),
+    ('slot1', [(0x7E0773, 0x40)], '칸 1 +7 = 40'),
+]
+
+
+def critical_negative(rom_path, out, core='snes9x'):
+    """CRITICAL_NEGATIVE 마다 battle-critical 을 돌려, 실패하고 그 까닭이 메시지에 있는지. 문제 목록과 장면 결과."""
+    table = load_table(ARGS.read_text())
+    base = next(x for x in scenes(table) if x.critical)
+    problems, rows = [], []
+    for name, pokes, mark in CRITICAL_NEGATIVE:
+        r = run_scene(core, rom_path, replace(base, pokes=base.pokes + pokes), out / name)
+        rows.append({'case': name, 'status': r['status'], 'problems': r['problems']})
+        if r['status'] != 'failed' or not any(mark in p for p in r['problems']):
+            problems.append(f'{name}: {r["status"]}, 메시지에 「{mark}」 없음 {r["problems"][:2]}')
+    return problems, rows
+
+
 def finish(walker, scene, res, out):
     """대기열·울림을 판정하고 결과를 쓴다."""
     events = walker.events
@@ -622,8 +680,17 @@ def finish(walker, scene, res, out):
         f = match(events, bad)
         if f is not None:
             res['problems'].append(f'대기열에 {fmt(bad)}(원래 번호)가 들어감(프레임 {f})')
-    if scene.critical and not any(w.get('sounded') for w in res['want'] if w['want'] == fmt((SFX, 0x37, 0x0B))):
-        res['problems'].insert(0, '회심 미발생(회심 판정을 고정했는데도 회심 효과음이 울리지 않음)')
+    if scene.critical:
+        blockers = critical_conditions(walker, hits[0])
+        res['critical_conditions'] = blockers
+        if blockers is None:
+            res['problems'].insert(0, '회심 앞 조건을 기록하지 못함(DSP 를 읽은 뒤의 프레임 기록이 비어 있음)')
+            blockers = []
+        if not any(w.get('sounded') for w in res['want'] if w['want'] == fmt((SFX, 0x37, 0x0B))):
+            res['problems'].insert(0, '회심 미발생(회심 판정을 고정했는데도 회심 효과음이 울리지 않음)'
+                                   + (f': {"; ".join(blockers)}' if blockers else ''))
+        elif blockers:
+            res['problems'].insert(0, f'회심이 고정한 난수 판정이 아닌 길로 났을 수 있음: {"; ".join(blockers)}')
     if walker.envx and not walker.dsp_seen:
         res['problems'].append(f'DSP 레지스터를 찾지 못함(DIR {DSP_DIR:02X} 이 직렬화 상태의 그 자리에 없음)')
     res['status'] = 'failed' if res['problems'] else 'passed'
@@ -1074,9 +1141,20 @@ def main():
     ap.add_argument('--jobs', type=int, default=4)
     ap.add_argument('--no-dsp', action='store_true', help=argparse.SUPPRESS)
     ap.add_argument('--_one', action='store_true', help=argparse.SUPPRESS)
+    ap.add_argument('--critical-negative', action='store_true',
+                    help='battle-critical 에 회심 앞 조건을 하나씩 더 묶어(CRITICAL_NEGATIVE, snes9x) 까닭을 대며 실패하는지만 본다')
     args = ap.parse_args()
     if args._one:
         return run_one(args)
+    if args.critical_negative:
+        out = args.out.resolve()
+        if out.exists() and any(out.iterdir()):
+            raise SystemExit(f'{out} is not empty')
+        problems, rows = critical_negative(args.rom.resolve(), out)
+        for r in rows:
+            print(json.dumps(r, ensure_ascii=False))
+        print('통과' if not problems else '실패: ' + '; '.join(problems))
+        return 0 if not problems else 1
     out = args.out.resolve()
     if out.exists() and any(out.iterdir()):
         raise SystemExit(f'{out} is not empty')
