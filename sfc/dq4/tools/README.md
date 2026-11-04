@@ -62,6 +62,7 @@
 | `dq4namecursorcheck.py --rom 롬 --symbols 심볼 --out 새폴더` | MesenCE 실제 입력으로 빠른 방향 전환·겹침·반복·빈칸 경계와 Start 이동을 검사. `MESENCE` 실행 파일 필요. [재현](../docs/dq4-name-entry-format.md#재현) |
 | `dq4menucursorcheck.py --rom 1장롬 --out 새폴더` | 1장 롬을 전원부터 켜 게임 안 명령 창에서 두 방향 겹침·한쪽 떼기·반복이 한 칸씩 움직이는지 실제 입력으로 검사. `MESENCE` 필요. [방향 처리](../docs/dq4-name-entry-format.md#방향-처리) |
 | `dq4namegamecheck.py --rom 선실이남은롬 --out 새폴더` | 선실에서 주인공 이름을 넣고 메시지 첫 코드를 `1012` 로 바꿔, 한글·가나 이름이 맞는 글자 코드가 되는지 MesenCE 로 검사. `MESENCE` 필요. [게임 안 이름](../docs/dq4-name-entry-format.md#게임-안-이름) |
+| `dq4ff9acheck.py --rom 선실이남은롬 --out 새폴더 [--original]` | 선실의 파파스를 슬라임 레이스 시설(대화 번호 `00D`)로 바꿔 레이스 화면을 띄우고, NMI 작업 `FF9A` 마다 `WqNmiEntry` 가 돌고 그 동안 넣은 창 글자 대기열 항목이 다음 NMI 에 나가는지 MesenCE 로 봄(`lua/dq4ff9acheck.lua`). `--original` 은 원본 DQ5 롬으로 `FF9A` 작업이 도는 것만. [NMI 작업마다 걸기](../docs/dq4-window-text-format.md#nmi-작업마다-걸기2026-11-03) |
 | `dq4namesave.py show\|convert` | SRAM 주인공 이름의 부호(한글·예전 한글·가나)를 보고, 고른 칸의 예전 한글 이름을 표시 있는 부호로 바꿔 새 파일에 씀. [예전 저장](../docs/dq4-name-entry-format.md#예전-저장) |
 | `dq4namegame.py` | `dq4menupatch.py build` 가 부르는 게임 안 메시지 이름 모듈(`24:A7D5` → `24:9E11`) |
 | `dq4bg3tiles.py 장면=VRAM덤프 ...` | VRAM 덤프에서 BG3 타일맵이 가리키는 칸과 빈 칸을 셈. [게임 안 창 한글 조사](../docs/dq4-window-text-format.md) |
