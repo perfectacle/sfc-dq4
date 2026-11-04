@@ -79,6 +79,14 @@ class Kind14Check(unittest.TestCase):
         early = {'copies': [(316, b'')], 'unseen': [300],
                  'frames': [{'frame': 313, 'w03': 0, 'wother': 0, 'wport': 352, 'vars': {}}]}
         self.assertEqual(k.judge(early), [])
+        # 사본 프레임 자체의 포트 쓰기·뱅크 03 이 일부만 쓴 사본은 실패
+        same = {'copies': [(316, b'')], 'unseen': [],
+                'frames': [{'frame': 316, 'w03': 352, 'wother': 0, 'wport': 2, 'vars': {}}]}
+        self.assertIn('$2180', k.judge(same)[0])
+        part = {'copies': [(316, b'')], 'unseen': [],
+                'frames': [{'frame': 316, 'w03': 300, 'wother': 0, 'wport': 0, 'vars': {}}]}
+        self.assertEqual(k.judge(part), [])
+        self.assertIn('300바이트', k.judge(part, 352)[0])
         bad = {'copies': [(316, b'')], 'unseen': [500],
                'frames': [{'frame': 401, 'w03': 0, 'wother': 20, 'wport': 3, 'vars': {}}]}
         got = k.judge(bad)
@@ -86,10 +94,19 @@ class Kind14Check(unittest.TestCase):
         self.assertIn('$2180', got[1])
         self.assertIn('500', got[2])
 
-    def test_same_runs_ignores_one_tail_frame(self):
+    def test_compare_runs(self):
         a = '1 x\n2 y\n648 z\n'
-        self.assertTrue(k.same_runs([a, '1 x\n2 y\n']))
-        self.assertFalse(k.same_runs([a, '1 x\n2 q\n']))
+        self.assertEqual(k.compare_runs([a, '1 x\n2 y\n'], [647, 647]), [])
+        self.assertEqual(k.compare_runs([a, '1 x\n2 y\n648 z\n'], [647, 648]), [])
+        self.assertTrue(k.compare_runs([a, '1 x\n2 q\n'], [647, 647]))
+        # 빈 기록·끝 표지 없음·일찍 끊긴 실행은 실패
+        self.assertEqual(k.compare_runs([a, ''], [647, 647]), ['실행 1: 기록 없음'])
+        self.assertEqual(k.compare_runs([a, a], [647, None]), ['실행 1: 끝 표지 없음'])
+        self.assertTrue(k.compare_runs([a, '1 x\n'], [647, 300]))
+
+    def test_end_frame(self):
+        self.assertEqual(k.end_frame('f00010 arrived map 1E/00 cell\nf00647 end map 1E/00 cell 10,10 BE=80\n'), 647)
+        self.assertIsNone(k.end_frame('f00010 arrived map 1E/00 cell\n'))
 
 
 if __name__ == '__main__':

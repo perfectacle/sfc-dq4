@@ -2,11 +2,12 @@
 변수, 창 글자 코드가 고른 VRAM 주소를 MesenCE 로 잰다. 형식은 sfc/dq4/docs/dq4-window-text-format.md 「창 글자 변수 자리」.
 
 사본 자리는 롬에서 읽는다(copy_range): 시작은 종류별 자리 표 03:D9A0 의 14번째 워드, 길이는 03:D965 의 14번째
-바이트(돌릴 타일 수) × 32. 원본 DQ5 와 menu.sfc 는 7E:3D14~3E73 이다.
+워드의 낮은 바이트(돌릴 타일 수) × 32. 원본 DQ5 와 menu.sfc 는 7E:3D14~3E73 이다.
 
 장면은 dq4bg3slotcheck 와 같다(롬으로 만든 출발 상태, (10,10) 도착, 명령 창). lua/dq4kind14probe.lua 가
-lua/dq4bg3slotwarp.lua 를 감싸 프레임마다 적는다. 맵마다 같은 명령을 두 번 돌려 두 기록이 같아야 한다(둘 다 가진
-프레임까지, same_runs).
+lua/dq4bg3slotwarp.lua 를 감싸 프레임마다 적는다. 맵마다 같은 명령을 두 번 돌린다. 두 실행 모두 기록과 끝 표지
+(dq5warp 의 end map 줄)가 있고, 끝 프레임 차이가 1 이하이고, 가장 이른 끝 프레임까지 기록이 같아야 한다(compare_runs).
+판정은 두 실행 모두에 한다. 롬 표의 사본 범위가 COPY 와 다르면 실패한다.
 --layout 은 대기열 변수 배치를 고른다: old 는 변수가 사본 안(7E:3D5A~)에 있는 배치, new 는 7E:A976~ 배치(지금
 dq4windowname.asm). 판정은 new 에만 더한다: 열 맵 모두에서 dq4bg3slotcheck 의 판정(요청한 맵에 도착·자리·보임·창이
 버퍼와 같음)이 맞고, 뱅크 03 이 사본을 쓰고, 그 밖의 코드는 CPU 로 사본을 쓰지 않고, 사본을 쓴 뒤로는 WRAM
@@ -18,6 +19,7 @@ dq4windowname.asm). 판정은 new 에만 더한다: 열 맵 모두에서 dq4bg3s
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -101,35 +103,52 @@ def at_copy(layout, copy, rng=COPY):
     return got
 
 
-def judge(rec):
+def judge(rec, size=None):
     """new 배치에 더하는 판정: 뱅크 03 이 사본을 쓰고, 뱅크 03 밖 코드는 어느 때든 CPU 로 그 자리를 쓰지 않고,
-    사본을 쓴 뒤로는 WRAM 포트($2180)로도 쓰기 콜백에 걸리지 않는 길로도 그 자리가 바뀌지 않음. 사본을 쓰기 전의
-    포트 쓰기(맵을 불러오며 WRAM 을 지우는 DMA)는 사본이 덮으므로 판정하지 않는다."""
+    사본 프레임부터는 WRAM 포트($2180)로도 쓰기 콜백에 걸리지 않는 길로도 그 자리가 바뀌지 않음. size 를 주면 사본
+    프레임에 뱅크 03 이 쓴 수가 사본 길이와 같아야 한다. 사본 프레임 앞의 포트 쓰기(맵을 불러오는 길)는 사본이 덮으므로
+    판정하지 않는다."""
     bad = []
     if not rec['copies']:
         return ['뱅크 03 이 종류 14 사본을 쓰지 않음']
     start = rec['copies'][0][0]
+    if size is not None:
+        wrote = next((r['w03'] for r in rec['frames'] if r['frame'] == start), 0)
+        if wrote != size:
+            bad.append(f'사본 프레임 {start} 에 뱅크 03 이 {wrote}바이트를 씀, 사본 길이 {size}')
     other = [r['frame'] for r in rec['frames'] if r['wother']]
     if other:
         bad.append(f'뱅크 03 밖 코드가 사본 자리를 씀(프레임 {other[:4]})')
-    port = [r['frame'] for r in rec['frames'] if r['wport'] and r['frame'] > start]
+    port = [r['frame'] for r in rec['frames'] if r['wport'] and r['frame'] >= start]
     if port:
-        bad.append(f'사본을 쓴 뒤 WRAM 포트 $2180 으로 사본 자리를 씀(프레임 {port[:4]})')
-    unseen = [f for f in rec['unseen'] if f > start]
+        bad.append(f'사본 프레임부터 WRAM 포트 $2180 으로 사본 자리를 씀(프레임 {port[:4]})')
+    unseen = [f for f in rec['unseen'] if f >= start]
     if unseen:
-        bad.append(f'사본을 쓴 뒤 쓰기 콜백에 걸리지 않은 사본 변화(프레임 {unseen[:4]})')
+        bad.append(f'사본 프레임부터 쓰기 콜백에 걸리지 않은 사본 변화(프레임 {unseen[:4]})')
     return bad
 
 
-def same_runs(texts):
-    """두 기록이 둘 다 가진 프레임까지 같은지. dq5warp 가 끝낼 때 emu.stop 이 듣기까지 한 프레임쯤 차이가 나서,
-    마지막 프레임 번호가 작은 쪽까지만 견준다."""
-    def last(t):
-        nums = [int(x.split(None, 1)[0]) for x in t.splitlines() if x.strip()]
-        return max(nums, default=0)
-    end = min(last(t) for t in texts)
+END = re.compile(r'^f(\d+) end map ', re.M)
+
+
+def end_frame(warp_text):
+    """dq5warp 가 장면을 끝낸 프레임(warp.txt 의 「fNNNNN end map」). 끝 표지가 없으면 None."""
+    got = END.findall(warp_text)
+    return int(got[-1]) if got else None
+
+
+def compare_runs(texts, ends):
+    """같은 명령 실행들의 문제 목록. 실행마다 기록이 있고 끝 표지가 있어야 하며, 끝 프레임 차이는 1 이하여야 한다.
+    dq5warp 가 끝낸 뒤 emu.stop 이 듣기까지 한 프레임쯤 걸려, 기록은 가장 이른 끝 프레임까지 견준다."""
+    bad = [f'실행 {k}: 기록 없음' for k, t in enumerate(texts) if not t.strip()]
+    bad += [f'실행 {k}: 끝 표지 없음' for k, e in enumerate(ends) if e is None]
+    if bad:
+        return bad
+    if max(ends) - min(ends) > 1:
+        return [f'끝 프레임이 {ends} 로 1 넘게 다름']
+    end = min(ends)
     cut = [[x for x in t.splitlines() if x.strip() and int(x.split(None, 1)[0]) <= end] for t in texts]
-    return all(c == cut[0] for c in cut[1:])
+    return [] if all(c == cut[0] for c in cut[1:]) else [f'같은 명령 {len(texts)}번의 기록이 끝 프레임 {end} 까지 다름']
 
 
 def main():
@@ -192,13 +211,17 @@ def main():
                'vars_after_copy': next((named(a.layout, r['vars']) for r in rec['frames']
                                         if first and r['frame'] == first[0]), None),
                'copy': first[1].hex() if first else None}
-        bad = []
-        if not texts[0]:
-            bad.append('기록 없음')
-        elif not same_runs(texts):
-            bad.append(f'같은 명령 {ROUNDS}번의 기록이 다름')
+        ends = [end_frame((folders[mp, k] / 'warp.txt').read_text())
+                if (folders[mp, k] / 'warp.txt').exists() else None for k in range(ROUNDS)]
+        row['ends'] = ends
+        bad = compare_runs(texts, ends)
+        if rng != COPY:
+            bad.append(f'롬 표의 사본 범위 {rng[0]:04X}~{rng[1]:04X} 가 COPY {COPY[0]:04X}~{COPY[1]:04X} 와 다름')
         if a.layout == 'new':
-            bad += bc.judge(mp, arrival, records) + judge(rec)
+            for k in range(ROUNDS):
+                f = folders[mp, k]
+                got = bc.judge(mp, bc.arrival_of(f), bc.records_of(f)) + judge(parse(texts[k]), rng[1] - rng[0] + 1)
+                bad += [f'실행 {k}: {x}' for x in got]
         row['problems'] = bad
         ok &= not bad
         rows.append(row)

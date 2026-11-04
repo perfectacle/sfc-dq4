@@ -919,7 +919,7 @@ needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출�
 
 [[check]]
 name = "dq4-bg3-slot"
-why = "BG3 타일맵을 옮긴 menu.sfc 에서 실내 맵마다 $0725 가 dq4bg3slot 의 자리(3C·78·7C·48·4C)이고, $2109 의 자리가 같고, 버퍼가 멈춘 프레임의 타일맵이 게임 버퍼 7E:5000 과 같고, BG3 글자 칸·자리 밖 VRAM 이 overture.sfc 와 같아야 한다. 출발 상태가 선 17/00 은 01/01 을 거쳐 간다. 1E/00·20/06·32/00·03/01·03/02·04/00·0D/00·31/00·34/00·35/03 은 DQ5 움직이는 타일 종류 14 의 사본(7E:3D14~3E73)을 채우는 맵 열 모두다. 창 글자 변수가 사본 안에 있으면 열 맵 모두 BG1·BG2 VRAM 이 깨지고 셋은 BG3 타일맵도 깨진다(VRAM 판정이 잡음), 00/0A·04/0B 는 도착 뒤 전투 배경 그림 DMA 가 VBlank 끝에 닿는 맵이다"
+why = "BG3 타일맵을 옮긴 menu.sfc 에서 실내 맵마다 $0725 가 dq4bg3slot 의 자리(3C·78·7C·48·4C)이고, $2109 의 자리가 같고, 버퍼가 멈춘 프레임의 타일맵이 게임 버퍼 7E:5000 과 같고, BG3 글자 칸·자리 밖 VRAM 이 overture.sfc 와 같아야 한다. 출발 상태가 선 17/00 은 01/01 을 거쳐 간다. 요청한 맵에 서야 하고, 도착하자마자 게임이 옮기는 33/01 은 33/00 에 서야 하며 33/00 으로 판정한다(dq4bg3slotcheck.MOVES_ON). 1E/00·20/06·32/00·03/01·03/02·04/00·0D/00·31/00·34/00·35/03 은 DQ5 움직이는 타일 종류 14 의 사본(7E:3D14~3E73)을 채우는 맵 열 모두다. 창 글자 변수가 사본 안에 있으면 열 맵 모두 BG1·BG2 VRAM 이 깨지고 셋은 BG3 타일맵도 깨진다(VRAM 판정이 잡음), 00/0A·04/0B 는 도착 뒤 전투 배경 그림 DMA 가 VBlank 끝에 닿는 맵이다"
 paths = ["sfc/dq4/tools/dq4bg3slot.py", "sfc/dq4/tools/dq4bg3slotcheck.py", "sfc/dq4/tools/lua/dq4bg3slotwarp.lua",
          "sfc/dq4/tools/dq4menupatch.py", "sfc/dq4/tools/dq4windowname.py", "sfc/dq4/tools/dq4windowname.asm",
          "sfc/dq4/tools/dq4windowtext.py", "sfc/dq4/tools/dq4freshstate.py", "sfc/dq4/tools/lua/dq4shipstate.lua",
@@ -983,7 +983,7 @@ needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출�
 
 [[check]]
 name = "dq4-kind14-copy"
-why = "DQ5 움직이는 타일 종류 14 의 사본(롬의 자리 표 03:D9A0·타일 수 표 03:D965 로 읽은 7E:3D14~3E73, 맵에 들어갈 때 뱅크 03 이 채움)을 채우는 실내 맵 열(dq4kind14check.MAPS)에서 명령 창을 열 때, 사본을 쓰는 것은 뱅크 03 뿐이고 다른 코드는 CPU 쓰기로도 WRAM 포트($2180)로도 그 자리를 쓰지 않고 쓰기 콜백에 걸리지 않은 변화도 없어야 하며, dq4bg3slotcheck 의 판정(요청한 맵에 도착·자리·보임·타일맵이 버퍼와 같음)이 맞고, 같은 명령을 두 번 돌린 기록이 같아야 한다. 창 글자 변수나 그림 버퍼를 사본 자리에 두면 깨진다"
+why = "DQ5 움직이는 타일 종류 14 의 사본(롬의 자리 표 03:D9A0·타일 수 표 03:D965 로 읽은 7E:3D14~3E73, 맵에 들어갈 때 뱅크 03 이 채움)을 채우는 실내 맵 열(dq4kind14check.MAPS)에서 명령 창을 열 때, 뱅크 03 이 사본 프레임에 사본 길이만큼 쓰고, 다른 코드는 CPU 로 그 자리를 쓰지 않고, 사본 프레임부터는 WRAM 포트($2180)나 쓰기 콜백에 걸리지 않는 길로도 바뀌지 않아야 하며, 롬 표의 범위가 dq4kind14check.COPY 와 같아야 하고, dq4bg3slotcheck 의 판정(요청한 맵에 도착·자리·보임·타일맵이 버퍼와 같음)이 맞고, 같은 명령을 두 번 돌린 두 실행이 모두 끝 표지를 갖고 이를 지키며 기록이 같아야 한다. 창 글자 변수나 그림 버퍼를 사본 자리에 두면 깨진다"
 paths = ["sfc/dq4/tools/dq4kind14check.py", "sfc/dq4/tools/lua/dq4kind14probe.lua",
          "sfc/dq4/tools/dq4bg3slot.py", "sfc/dq4/tools/dq4bg3slotcheck.py", "sfc/dq4/tools/lua/dq4bg3slotwarp.lua",
          "sfc/dq4/tools/dq4menupatch.py", "sfc/dq4/tools/dq4windowname.py", "sfc/dq4/tools/dq4windowname.asm",
