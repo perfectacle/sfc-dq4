@@ -1,0 +1,39 @@
+# 배포 관문(tools/release_check.py)이 dq4 트랙에서 도는 시드 스윕. 실행 검사(guards.toml)는 시드 0 이나 정한 시드
+# 몇 개만 돈다. 여기 검사는 시드를 여럿 받아 시드마다 따로 돌고 모두 통과해야 통과한다.
+#   run   {rom} 은 관문이 빌드한 출하 롬, {out} 은 이 스윕의 출력 폴더, {seeds} 는 쉼표로 이은 시드
+#   seeds 시드 수(없으면 관문의 --seeds-n). 시드는 0 부터 차례로, 그리고 sfc/dq4/seeds.json 의 실패 시드
+
+[[sweep]]
+name = "dq4-walk-seeds"
+why = "1장 걷기 묶음: 난수에 따라 끝 맵·flag·물건이 갈리지 않는다"
+run = "uv run --locked python sfc/dq4/tools/dq4ch1walkcheck.py --rom {rom} --out {out} --units --seeds {seeds}"
+
+[[sweep]]
+name = "dq4-heroblock-seeds"
+why = "인물이 길을 막는 갈래: 사건 flag 에 닿고 겹치지 않는다"
+run = "uv run --locked python sfc/dq4/tools/dq4heroblockcheck.py --rom {rom} --out {out} --jobs 6 --seeds {seeds}"
+seeds = 8
+
+[[sweep]]
+name = "dq4-battle-seeds"
+why = "전투 갈래(선제·기습·도망 실패·회심): 멈춤 없이 맵·곡으로 돌아온다"
+run = "uv run --locked python sfc/dq4/tools/dq4battlescene.py --rom {rom} --out {out} --jobs 4 --seeds {seeds}"
+seeds = 32
+
+[[sweep]]
+name = "dq4-compat-walk-seeds"
+why = "코어 교차: bsnes·snes9x 에서 1장 걷기가 끝까지 간다"
+run = "uv run --locked python sfc/dq4/tools/dq4compatcheck.py walk --rom {rom} --out {out} --seeds {seeds}"
+seeds = 4
+
+[[sweep]]
+name = "dq4-shop-seeds"
+why = "순간이동 뒤 난수가 달라도 가게 거래의 금화·물건 변화가 같다"
+run = "uv run --locked python sfc/dq4/tools/dq4shopscene.py --rom {rom} --out {out} --jobs 4 --seeds {seeds}"
+seeds = 8
+
+[[sweep]]
+name = "dq4-town-seeds"
+why = "난수가 달라도 마을 낮밤 장면이 같다"
+run = "uv run --locked python sfc/dq4/tools/dq4townscene.py daynight --rom {rom} --out {out} --jobs 4 --seeds {seeds}"
+seeds = 8

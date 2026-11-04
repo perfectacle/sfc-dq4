@@ -326,9 +326,19 @@ def run_check(check, timeout, logs, no_cache=False):
 
 def run_all(hit, parallel, timeout, no_cache=False):
     """걸린 검사를 parallel 개씩 함께 돌리고 본문 결과 줄을 찍는다. 모두 통과하면 0."""
-    logs = ROOT / 'work' / 'guards'
+    done = run_many(hit, parallel, timeout, no_cache)
+    print('\nPR 본문 결과 줄:')
+    for c, status, detail in done:
+        mark, word = ('x', '통과') if status == 'passed' else (' ', '실패' if status == 'failed' else '돌리지 않음')
+        print(f'- [{mark}] {c["name"]}: {word} ({detail})')
+    return 0 if all(s == 'passed' for _, s, _ in done) else 1
+
+
+def run_many(hit, parallel, timeout, no_cache=False, logs=None):
+    """검사를 parallel 개씩 함께 돌린다. [(검사, 'passed'|'failed'|'skipped', 글)]."""
+    logs = logs or ROOT / 'work' / 'guards'
     logs.mkdir(parents=True, exist_ok=True)
-    print(f'검사 {len(hit)}개를 {parallel}개씩 돌림(로그 work/guards/)', flush=True)
+    print(f'검사 {len(hit)}개를 {parallel}개씩 돌림(로그 {logs})', flush=True)
 
     def one(c):
         status, detail = run_check(c, timeout, logs, no_cache)
@@ -348,11 +358,7 @@ def run_all(hit, parallel, timeout, no_cache=False):
         pool.shutdown(wait=False, cancel_futures=True)
         raise
     pool.shutdown()
-    print('\nPR 본문 결과 줄:')
-    for c, status, detail in done:
-        mark, word = ('x', '통과') if status == 'passed' else (' ', '실패' if status == 'failed' else '돌리지 않음')
-        print(f'- [{mark}] {c["name"]}: {word} ({detail})')
-    return 0 if all(s == 'passed' for _, s, _ in done) else 1
+    return done
 
 
 def triggered(checks, changed, edited=()):
