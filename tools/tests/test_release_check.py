@@ -84,10 +84,10 @@ class ReleaseCheckTest(unittest.TestCase):
 
     def test_load_counts_mesence_by_worktree(self):
         parent = Path('/w')
-        ps = '\n'.join(['/a/MesenCE.app/Contents/MacOS/Mesen --testrunner /w/sfc-dq4-x/work/a/c.sfc s.lua',
-                        '/a/MesenCE.app/Contents/MacOS/Mesen --testrunner /w/sfc-dq4-x/work/b/c.sfc s.lua',
-                        '/a/MesenCE.app/Contents/MacOS/Mesen --testrunner /w/sfc-dq4-release-check/work/c.sfc s.lua',
-                        '/usr/bin/python3 /w/sfc-dq4-x/tools/guards.py', '/a/MacOS/Mesen --testrunner /tmp/r.sfc'])
+        ps = '\n'.join(['/a/MesenCE.app/Contents/MacOS/Mesen -r /w/sfc-dq4-x/work/a/c.sfc s.lua',
+                        '/a/MesenCE.app/Contents/MacOS/Mesen -r /w/sfc-dq4-x/work/b/c.sfc s.lua',
+                        '/a/MesenCE.app/Contents/MacOS/Mesen -r /w/sfc-dq4-release-check/work/c.sfc s.lua',
+                        '/usr/bin/python3 /w/sfc-dq4-x/tools/guards.py', '/a/MacOS/Mesen -r /tmp/r.sfc'])
         self.assertEqual(rc.Load.count(ps, parent), {'sfc-dq4-x': 2, 'sfc-dq4-release-check': 1, '?': 1})
 
     def test_state_note(self):
