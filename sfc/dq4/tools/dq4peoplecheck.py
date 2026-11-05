@@ -86,8 +86,6 @@ def judge(rom, wram, vram):
             tiles = rec['tile_data']
         base = (cells[0] & 0x1FF) - want[0][0]
         cell_ok = sum(1 for c, (t, hf) in zip(cells, want) if (c & 0x1FF) == base + t and bool(c & 0x4000) == hf)
-        if cell_ok < 48 and slot not in party and slot != 0:
-            continue
         pal = S.set_obj_palette(r, s, table)
         pal_ok = sum(1 for c in cells if (c >> 9) & 7 == pal)
         vt = sum(1 for i, t in enumerate(tiles) if 0 <= base + i < 0x200 and
@@ -96,6 +94,11 @@ def judge(rom, wram, vram):
         out.append({'slot': slot, 'picture': g, 'set': s, 'base': base, 'tiles': f'{vt}/{len(tiles)}',
                     'cells': f'{cell_ok}/48', 'palette': f'{pal_ok}/48 ({pal})', 'ok': ok})
     return out
+
+
+def scene_ok(found, want, slots):
+    """맵이 맞고 판정한 슬롯이 하나 이상이며 모두 통과. 슬롯이 비면 덤프가 인물을 놓기 전이라 실패로 친다."""
+    return found == want and bool(slots) and all(s['ok'] for s in slots)
 
 
 def scene(mesence, rom, states, out, name, m):
@@ -125,7 +128,8 @@ def scene(mesence, rom, states, out, name, m):
     wram, vram = (dest / 'wram.bin').read_bytes(), (dest / 'vram.bin').read_bytes()
     found = f'{wram[0xBC]:02X}/{wram[0xBD]:02X}'
     slots = judge(rom.read_bytes(), wram, vram)
-    return {'scene': dest.name, 'map': found, 'ok': found == m and all(s['ok'] for s in slots), 'slots': slots}
+    return {'scene': dest.name, 'map': found, 'ok': scene_ok(found, m, slots), 'slots': slots,
+            **({} if slots else {'note': '판정할 슬롯 없음'})}
 
 
 def main():
