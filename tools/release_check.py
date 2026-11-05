@@ -9,8 +9,9 @@
   coverage  빌드 경로(dq4publish.inputs 의 .py) 커버리지. 로컬(단위 전부 + 빌드 캐시 끈 빌드 한 번, 하위 프로세스도
             잼) ≥ LOCAL_MIN, CI 와 같게(롬 링크 없는 임시 워크트리에서 롬·도구 환경 변수 없이 단위만) ≥ CI_MIN
 
-관문 모드(--rehearse 아님)에서는 서장 끝·시작 상태 캐시(DQ4_STATES_CACHE)를 이 실행 폴더의 빈 states/ 로 돌린다. 상태는 이
-실행에서 처음 한 번 만들어 그 실행 안에서만 다시 쓴다. 단계마다 같은 머신에서 돈 MesenCE 수(이 실행과 다른 워크트리)를
+관문 모드(--rehearse 아님)에서는 모든 단계가 같은 환경(gate_env)으로 돈다: 장면 캐시(DQ4_READSET=off), 빌드 단계
+캐시(DQ4_BUILD_CACHE=off), 서장 끝·시작 상태 캐시(DQ4_STATES_CACHE 를 이 실행 폴더의 빈 states/ 로, 처음 한 번 만들어 그
+실행 안에서만 다시 씀). guards.py 의 검사 결과 캐시도 쓰지 않는다. 단계마다 같은 머신에서 돈 MesenCE 수(이 실행과 다른 워크트리)를
 30초마다 세어 보고서에 적는다. 실패한 단계·검사는 다시 돌리지 않고 그대로 적는다.
 
 보고서는 work/release/<롬 SHA-1 앞 12자리>/report.json·report.md 다. 모든 단계가 통과해야 통과다. --rehearse 로 돈
@@ -135,8 +136,17 @@ def failed_seeds(sweep):
     return [int(e['seed']) for e in data.get(sweep['name'], [])]
 
 
-def env_for(rehearse):
-    return None if rehearse else dict(os.environ, DQ4_READSET='off')
+def gate_env(run_dir, base=None):
+    """관문 모드의 환경: 캐시를 모두 끈다(상태 캐시는 run_dir/states 에서 이 실행 동안만)."""
+    return dict(base if base is not None else os.environ, DQ4_READSET='off', DQ4_BUILD_CACHE='off',
+                DQ4_STATES_CACHE=str(run_dir / 'states'))
+
+
+def env_for(ctx, base=None):
+    """단계가 쓸 환경. 연습이면 base(없으면 지금 환경 그대로 = None)."""
+    if ctx['rehearse']:
+        return base
+    return gate_env(ctx['dir'], base)
 
 
 def state_note(text):
@@ -146,7 +156,7 @@ def state_note(text):
 
 def stage_build(ctx):
     out = ctx['dir'] / 'build'
-    code, secs = sh(BUILD.format(out=out.relative_to(ROOT)), ctx['logs'] / 'build.log', env_for(ctx['rehearse']))
+    code, secs = sh(BUILD.format(out=out.relative_to(ROOT)), ctx['logs'] / 'build.log', env_for(ctx))
     rom = out / ROM_NAME
     if code != 0 or not rom.exists():
         return {'status': 'failed', 'seconds': secs, 'detail': f'종료 코드 {code}, 로그 build.log'}
@@ -167,7 +177,7 @@ def stage_unit(ctx):
         if not (ROOT / d).is_dir():
             continue
         log = ctx['logs'] / f'unit-{d.replace("/", "-")}.log'
-        code, secs = sh(f"cd {d} && uv run --locked python -m unittest discover -p 'test_*.py'", log, env_for(ctx['rehearse']))
+        code, secs = sh(f"cd {d} && uv run --locked python -m unittest discover -p 'test_*.py'", log, env_for(ctx))
         ran, skipped = unit_counts(log.read_text(encoding='utf-8', errors='replace'))
         rows.append({'dir': d, 'status': 'passed' if code == 0 else 'failed', 'tests': ran, 'skipped': skipped,
                      'seconds': secs})
@@ -183,7 +193,7 @@ def stage_guards(ctx):
         return {'status': 'failed', 'seconds': 0, 'detail': '; '.join(problems[:5]), 'rows': []}
     t0 = time.time()
     done = guards.run_many(checks, ctx['parallel'], ctx['timeout'], no_cache=not ctx['rehearse'],
-                           logs=ctx['logs'] / 'guards')
+                           logs=ctx['logs'] / 'guards', env=env_for(ctx))
     rows = [{'name': c['name'], 'file': c['file'], 'status': s, 'detail': d} for c, s, d in done]
     ok = all(r['status'] == 'passed' for r in rows)
     return {'status': 'passed' if ok else 'failed', 'seconds': round(time.time() - t0), 'rows': rows,
@@ -200,7 +210,7 @@ def stage_sweep(ctx):
         cmd = s['run'].format(rom=ctx['rom'].relative_to(ROOT), out=out.relative_to(ROOT),
                               seeds=','.join(map(str, seeds)))
         log = ctx['logs'] / f'{s["name"]}.log'
-        code, secs = sh(cmd, log, env_for(ctx['rehearse']), ctx['timeout'] * 4)
+        code, secs = sh(cmd, log, env_for(ctx), ctx['timeout'] * 4)
         rows.append({'name': s['name'], 'file': s['file'], 'seeds': seeds, 'seconds': secs,
                      'status': 'passed' if code == 0 else 'failed',
                      'state_cache': state_note(log.read_text(encoding='utf-8', errors='replace')) if log.exists() else [],
@@ -238,8 +248,9 @@ def measure(root, logs, tag, env, build_out=None):
         if code != 0:
             failed.append(d)
     if build_out is not None:
+        # 빌드 단계 캐시가 맞으면 단계 스크립트가 돌지 않아 재지 못한다. 연습이어도 끈다
         code, _ = sh(f'cd {root} && uv run --locked coverage run --rcfile={rc} sfc/dq4/tools/dq4build.py --out {build_out}',
-                     logs / f'coverage-{tag}-build.log', dict(env or os.environ, DQ4_BUILD_CACHE='off'))
+                     logs / f'coverage-{tag}-build.log', dict(env if env is not None else os.environ, DQ4_BUILD_CACHE='off'))
         if code != 0:
             failed.append('build')
     cov = coverage.Coverage(data_file=str(data), config_file=str(rc))
@@ -253,12 +264,11 @@ def measure(root, logs, tag, env, build_out=None):
 def stage_coverage(ctx):
     t0 = time.time()
     logs = ctx['logs']
-    local, lfail = measure(ROOT, logs, 'local', None, ctx['dir'] / 'coverage-build')
+    local, lfail = measure(ROOT, logs, 'local', env_for(ctx), ctx['dir'] / 'coverage-build')
     tmp = ctx['dir'] / 'ci-tree'
     guards.git('worktree', 'add', '--detach', str(tmp), 'HEAD')
     try:
-        env = {k: v for k, v in os.environ.items() if k not in CI_UNSET}
-        ci, cfail = measure(tmp, logs, 'ci', env)
+        ci, cfail = measure(tmp, logs, 'ci', env_for(ctx, {k: v for k, v in os.environ.items() if k not in CI_UNSET}))
     finally:
         guards.git('worktree', 'remove', '--force', str(tmp))
     problems = [f'{n} 시험이 실패함(커버리지 실행)' for n in lfail + cfail]
@@ -274,9 +284,31 @@ RUN = {'build': stage_build, 'unit': stage_unit, 'guards': stage_guards, 'sweep'
        'coverage': stage_coverage}
 
 
+def run_stages(ctx, wanted):
+    """wanted 단계를 차례로 돌린다. 단계가 예외로 멈추면 그 단계를 failed 로 적고 다음 단계로 간다."""
+    stages = {}
+    for name in STAGES:
+        if name not in wanted:
+            continue
+        print(f'[release] {name}', flush=True)
+        t0 = time.time()
+        with Load(ROOT.name) as load:
+            try:
+                stages[name] = RUN[name](ctx)
+            except Exception as e:
+                # 단계 하나가 멈춰도 보고서는 남긴다
+                stages[name] = {'status': 'failed', 'seconds': round(time.time() - t0),
+                                'detail': f'단계가 멈춤: {type(e).__name__}: {e}'}
+        stages[name]['load'] = load.summary()
+        print(f'[release] {name}: {stages[name]["status"]} ({stages[name].get("detail", "")})', flush=True)
+    return stages
+
+
 def commit():
+    """(HEAD, 고친 것·추적 안 된 파일이 있는가). 무시하는 파일(work/ 등)은 보지 않는다. 추적 안 된 빌드 입력도 결과에
+    닿을 수 있어 센다."""
     head = guards.git('rev-parse', 'HEAD').strip()
-    dirty = bool(guards.git('status', '--porcelain', '--untracked-files=no').strip())
+    dirty = bool(guards.git('status', '--porcelain', '--untracked-files=normal').strip())
     return head, dirty
 
 
@@ -344,21 +376,10 @@ def main():
     head, dirty = commit()
     ctx = {'dir': tmp, 'logs': tmp / 'logs', 'rehearse': a.rehearse, 'seeds_n': a.seeds_n, 'parallel': a.parallel,
            'timeout': a.timeout}
-    if a.rehearse:
-        states = '공유 캐시(연습)'
-    else:
-        # 상태는 이 실행에서 처음 만든 것만 쓴다. 검사·스윕이 이 환경 변수를 물려받는다
-        os.environ['DQ4_STATES_CACHE'] = str(tmp / 'states')
-        states = '이 실행에서 새로 만듦(첫 생성 뒤 이 실행 안에서만 다시 씀)'
-    stages = {}
-    for name in STAGES:
-        if name not in wanted:
-            continue
-        print(f'[release] {name}', flush=True)
-        with Load(ROOT.name) as load:
-            stages[name] = RUN[name](ctx)
-        stages[name]['load'] = load.summary()
-        print(f'[release] {name}: {stages[name]["status"]} ({stages[name].get("detail", "")})', flush=True)
+    states = '공유 캐시(연습)' if a.rehearse else '이 실행에서 새로 만듦(첫 생성 뒤 이 실행 안에서만 다시 씀)'
+    stages = run_stages(ctx, wanted)
+    end_head, end_dirty = commit()
+    dirty = dirty or end_dirty or end_head != head
     report = {'verdict': verdict(stages, a.rehearse, wanted, dirty), 'commit': head, 'dirty': dirty,
               'rom_sha1': ctx.get('rom_sha1'), 'when': time.strftime('%Y-%m-%d %H:%M'), 'rehearse': a.rehearse,
               'states': states,

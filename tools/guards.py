@@ -25,8 +25,9 @@
                                                  걸린 검사마다 본문에 결과 줄이 있는지 봄(CI)
 
 --run 은 같은 입력(.md 를 뺀 추적 파일 내용, 명령, --rom 롬 SHA-1)으로 이미 통과한 검사를 건너뛴다.
-캐시는 원래 체크아웃의 work/cache/guards 에 있어 워크트리끼리 함께 쓴다. --no-cache 는 이 캐시와 검사 안의
-장면 캐시(DQ4_READSET=off, sfc/dq4/docs/dq4-readset-format.md)를 모두 끄고 전부 돌린다(배포 관문).
+캐시는 원래 체크아웃의 work/cache/guards 에 있어 워크트리끼리 함께 쓴다. --no-cache 는 이 캐시와 검사 안의 캐시를
+모두 끄고 전부 돌린다(NO_CACHE_ENV: 장면 캐시 DQ4_READSET=off, 빌드 단계 캐시 DQ4_BUILD_CACHE=off, 서장 끝·시작
+상태 캐시는 로그 폴더 아래 빈 states/ 에서 그 실행 동안만).
 
 결과 줄: `- [x] <이름>: 통과 (…)` 또는 `- [x] <이름>: 해당 없음 — <이유>`. 그 밖의 글(「통과하지 못함」 등)은 실패로 친다.
 """
@@ -277,8 +278,14 @@ def kill_group(proc):
         pass
 
 
-def run_check(check, timeout, logs, no_cache=False):
-    """검사 하나를 돌린다. (결과 'passed'|'failed'|'skipped', 본문 괄호 안 글)."""
+def no_cache_env(logs):
+    """캐시를 모두 끈 검사 환경. 상태 캐시는 logs/states(돌리기 전에 비움)에서 이 실행 동안만 쓴다."""
+    return dict(os.environ, DQ4_READSET='off', DQ4_BUILD_CACHE='off', DQ4_STATES_CACHE=str(Path(logs) / 'states'))
+
+
+def run_check(check, timeout, logs, no_cache=False, env=None):
+    """검사 하나를 돌린다. (결과 'passed'|'failed'|'skipped', 본문 괄호 안 글). env 를 주면 그 환경으로 돈다(배포 관문이
+    모든 단계에 같은 환경을 쓸 때)."""
     name, run = check['name'], check['run']
     if PLACEHOLDER.search(run):
         return 'skipped', '명령에 <…> 자리가 있어 직접 돌릴 것'
@@ -296,7 +303,7 @@ def run_check(check, timeout, logs, no_cache=False):
     shown = log.relative_to(ROOT) if log.is_relative_to(ROOT) else log
     t0 = time.time()
     with log.open('w', encoding='utf-8') as out:
-        env = dict(os.environ, DQ4_READSET='off') if no_cache else None
+        env = env or (no_cache_env(logs) if no_cache else None)
         proc = subprocess.Popen(['bash', '-c', run], cwd=ROOT, stdout=out, stderr=subprocess.STDOUT,
                                 start_new_session=True, env=env)
         RUNNING.add(proc)
@@ -334,14 +341,17 @@ def run_all(hit, parallel, timeout, no_cache=False):
     return 0 if all(s == 'passed' for _, s, _ in done) else 1
 
 
-def run_many(hit, parallel, timeout, no_cache=False, logs=None):
+def run_many(hit, parallel, timeout, no_cache=False, logs=None, env=None):
     """검사를 parallel 개씩 함께 돌린다. [(검사, 'passed'|'failed'|'skipped', 글)]."""
     logs = logs or ROOT / 'work' / 'guards'
     logs.mkdir(parents=True, exist_ok=True)
-    print(f'검사 {len(hit)}개를 {parallel}개씩 돌림(로그 {logs})', flush=True)
+    if no_cache and env is None:
+        shutil.rmtree(logs / 'states', ignore_errors=True)
+    shown = logs.relative_to(ROOT) if logs.is_relative_to(ROOT) else logs
+    print(f'검사 {len(hit)}개를 {parallel}개씩 돌림(로그 {shown})', flush=True)
 
     def one(c):
-        status, detail = run_check(c, timeout, logs, no_cache)
+        status, detail = run_check(c, timeout, logs, no_cache, env)
         print(f'  {c["name"]}: {status} ({detail})', flush=True)
         return c, status, detail
     # 롬을 스스로 빌드하는 검사는 다른 검사가 읽는 롬을 다시 쓸 수 있어 먼저 홀로 돌린다

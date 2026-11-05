@@ -29,7 +29,7 @@ class ReleaseCheckTest(unittest.TestCase):
 
     def test_coverage_thresholds(self):
         with tempfile.TemporaryDirectory() as d:
-            ctx = {'logs': Path(d), 'dir': Path(d)}
+            ctx = {'logs': Path(d), 'dir': Path(d), 'rehearse': False}
             with mock.patch.object(rc, 'measure', side_effect=[(91.0, []), (80.5, [])]), \
                     mock.patch.object(rc.guards, 'git', return_value=''):
                 self.assertEqual(rc.stage_coverage(ctx)['status'], 'passed')
@@ -70,7 +70,9 @@ class ReleaseCheckTest(unittest.TestCase):
         self.assertEqual(r['status'], 'passed')
         self.assertEqual(ran[0][0], 'echo work/release-test/build/r.sfc work/release-test/sweep/x 0,1')
         self.assertEqual(ran[1][0], 'echo 0,1,2,9')
-        self.assertEqual(ran[0][1]['DQ4_READSET'], 'off')
+        for k, v in (('DQ4_READSET', 'off'), ('DQ4_BUILD_CACHE', 'off'),
+                     ('DQ4_STATES_CACHE', str(rc.ROOT / 'work' / 'release-test' / 'states'))):
+            self.assertEqual(ran[0][1][k], v, k)
 
     def test_failed_seeds_file(self):
         with tempfile.TemporaryDirectory() as d:
@@ -81,6 +83,30 @@ class ReleaseCheckTest(unittest.TestCase):
                 self.assertEqual(rc.failed_seeds({'file': 'sfc/dq4/release.toml', 'name': 'x'}), [5])
                 self.assertEqual(rc.failed_seeds({'file': 'sfc/dq4/release.toml', 'name': 'z'}), [])
                 self.assertEqual(rc.failed_seeds({'file': 'sfc/dq5/release.toml', 'name': 'x'}), [])
+
+    def test_gate_env_turns_every_cache_off_and_rehearse_keeps_it(self):
+        ctx = {'dir': Path('/r/run-1'), 'rehearse': False}
+        env = rc.env_for(ctx, {'X': '1'})
+        self.assertEqual((env['DQ4_READSET'], env['DQ4_BUILD_CACHE'], env['DQ4_STATES_CACHE'], env['X']),
+                         ('off', 'off', '/r/run-1/states', '1'))
+        self.assertIsNone(rc.env_for({**ctx, 'rehearse': True}))
+        self.assertEqual(rc.env_for({**ctx, 'rehearse': True}, {'X': '1'}), {'X': '1'})
+
+    def test_stage_exception_is_recorded_not_raised(self):
+        def boom(ctx):
+            raise RuntimeError('worktree add 실패')
+        with mock.patch.dict(rc.RUN, {'build': boom, 'unit': lambda ctx: {'status': 'passed', 'seconds': 0}}), \
+                mock.patch.object(rc.Load, 'SAMPLE', 0.01):
+            got = rc.run_stages({}, ['build', 'unit'])
+        self.assertEqual(got['build']['status'], 'failed')
+        self.assertIn('worktree add 실패', got['build']['detail'])
+        self.assertEqual(got['unit']['status'], 'passed')
+
+    def test_dirty_counts_untracked_files(self):
+        with mock.patch.object(rc.guards, 'git', side_effect=lambda *a: 'abc\n' if a[0] == 'rev-parse' else '?? new.py\n'):
+            self.assertEqual(rc.commit(), ('abc', True))
+        with mock.patch.object(rc.guards, 'git', side_effect=lambda *a: 'abc\n' if a[0] == 'rev-parse' else ''):
+            self.assertEqual(rc.commit(), ('abc', False))
 
     def test_load_counts_mesence_by_worktree(self):
         parent = Path('/w')
