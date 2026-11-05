@@ -25,6 +25,7 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [docs/dq4-compat-format.md](docs/dq4-compat-format.md): 호환성 검사(높은 뱅크 BRK 목록의 정적 검사, MesenCE 열린 버스 프로브, libretro bsnes·snes9x 1장 걷기)
 - [docs/dq4-savefixture-format.md](docs/dq4-savefixture-format.md): 저장 기록으로 시작하는 검사(SRAM 칸 만들기, 이어 할 자리 `7E:2033`, 저장되지 않는 것, bsnes·snes9x 에 넣기)
 - [docs/dq4-readset-format.md](docs/dq4-readset-format.md): 헤드리스 장면 실행을 그 실행이 읽은 롬 바이트 단위로 캐시하기(읽은 집합 얻기, 키, 건전성 검사)
+- [docs/dq4-screen-baseline-format.md](docs/dq4-screen-baseline-format.md): 장면 화면을 칸 해시 기준과 견주기(화면 얻기, 가림·허용치, 차이 그림, 기준 갱신)
 - [docs/dq4-battle-scene-format.md](docs/dq4-battle-scene-format.md): 전투 장면 검사(저장 기록으로 전투 직전에서 시작, 주문·약초·도망·전멸·레벨업·보스, 창 번호 `7E:0A00` 으로 맞춘 입력, 시드별 선제·기습·회심·도망 실패 분포)
 - [docs/dq4-growth-format.md](docs/dq4-growth-format.md): 라이안 성장(DQ5 성장 레코드와 FC 곡선의 능력치 대응, 레벨별 값 표와 훅 세 개, 1레벨 기록, 손님 호이민의 레벨)
 - [docs/dq4-shopscene-format.md](docs/dq4-shopscene-format.md): 가게 장면 검사(이무르 가게 14장면, 창 번호 `$0A00` 으로 따라가는 입력 열, 금화·물건·장비 비트 판정)
@@ -368,3 +369,4 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [2026-11-04-04: 종류 14 맵 열 가운데 셋만 깨져 보인 까닭](journal/2026-11-04-04-kind14-ten-maps.md)
 - [2026-11-04-05: 옮기지 않은 9C 성문 셋과 4장 オーりン 갈래](journal/2026-11-04-05-gates-orin.md)
 - [2026-11-04-06: 1장 걷기 검사에 메시지 차례와 실제 계단 걷기를 더함](journal/2026-11-04-06-walk-messages.md)
+- [2026-11-05-01: 화면을 기준과 견주기](journal/2026-11-05-01-screen-baseline.md)
