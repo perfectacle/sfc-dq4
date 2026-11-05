@@ -492,7 +492,8 @@ class Walker:
 
 
 def probe_problems(lines):
-    """dq4openbus.lua 기록에서 문제를 고른다. 낮은 뱅크 코드의 SRAM(70~7D) 접근은 원래 DQ5 저장이라 괜찮다."""
+    """dq4openbus.lua 기록에서 문제를 고른다. 낮은 뱅크 코드의 SRAM(70~7D) 접근은 원래 DQ5 저장이라 괜찮다. 꼴이 맞지
+    않는 줄(범위를 준 실행의 주소 붙은 줄 포함)은 해석하지 못한 줄로 실패한다."""
     problems = []
     for line in lines:
         m = re.fullmatch(r'([RW]) pc=(\w\w):(\w{4}) bank=(\w\w)', line)
@@ -502,7 +503,11 @@ def probe_problems(lines):
                 problems.append(f'{m[2]}:{m[3]} 이 {m[4]}:0000~7FFF 를 {"읽음" if m[1] == "R" else "씀"}')
             continue
         m = re.fullmatch(r'BRK pc=(\w\w:\w{4}) op=(\w\w)', line)
-        if m and int(m[2], 16) not in dq4brkscan.ALLOWED:
+        if not m:
+            if line.strip():
+                problems.append(f'해석하지 못한 기록 줄: {line}')
+            continue
+        if int(m[2], 16) not in dq4brkscan.ALLOWED:
             problems.append(f'{m[1]} 이 BRK {m[2]} 를 부름(dq4brkscan.ALLOWED 밖)')
     return problems
 

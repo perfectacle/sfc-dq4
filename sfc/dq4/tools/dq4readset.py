@@ -299,6 +299,11 @@ def enabled():
     return os.environ.get('DQ4_READSET', '').strip().lower() not in ('off', '0', 'no')
 
 
+def storing():
+    """실행 결과를 캐시에 넣는가. DQ4_READSET_STORE=off 면 넣지 않는다(DQ4_READSET=off 는 읽기만 끈다)."""
+    return os.environ.get('DQ4_READSET_STORE', '').strip().lower() not in ('off', '0', 'no')
+
+
 def verify_rate():
     try:
         return float(os.environ.get('DQ4_READSET_VERIFY', '0.05'))
@@ -596,8 +601,9 @@ def _run(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag, ac
     info = {'cached': False, 'returncode': rc, 'timed_out': timed_out,
             'readset': sum(n for _, n in ranges) if ranges is not None else None, 'ranges': len(ranges or ()),
             'key': key}
-    # 0 이 아닌 종료(스크립트 오류·끝까지 못 감)나 읽은 집합이 없는 실행은 넣지 않는다
-    if timed_out or rc != 0 or ranges is None or (accept and not accept(dest)):
+    # 0 이 아닌 종료(스크립트 오류·끝까지 못 감)나 읽은 집합이 없는 실행은 넣지 않는다. DQ4_READSET_STORE=off 면 넣지
+    # 않는다(키에 들어가지 않는 것을 덧붙인 실행, 예: 열린 버스 프로브)
+    if not storing() or timed_out or rc != 0 or ranges is None or (accept and not accept(dest)):
         return info
     store.add(key, {'ranges': pack(ranges), 'digest': digest(rom, ranges), 'returncode': rc,
                     'when': time.strftime('%Y-%m-%d %H:%M')},

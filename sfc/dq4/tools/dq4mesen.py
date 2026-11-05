@@ -27,6 +27,20 @@ import headless_slots  # noqa: E402
 ARGS = ('--Snes.DisableFrameSkipping=true',)
 # Runner 의 기본 시간 상한(초)
 RUNNER_TIMEOUT = 900
+# DQ4_OPENBUS_LOG 가 있으면 띄우는 스크립트마다 lua/dq4openbus.lua 를 앞에 붙여 열린 버스·롬 거울 접근을 그 파일에 적는다
+# (dq4compatcheck.py scenes). 범위는 DQ4_OPENBUS_RANGES(dq4openbus.lua 의 OPENBUS_RANGES)
+OPENBUS = Path(__file__).resolve().parent / 'lua' / 'dq4openbus.lua'
+
+
+def with_openbus(script, kwargs):
+    """DQ4_OPENBUS_LOG 가 있으면 (dq4openbus.lua, 그 스크립트를 PROBE_TARGET 으로 둔 kwargs), 없으면 그대로."""
+    log = os.environ.get('DQ4_OPENBUS_LOG')
+    if not log:
+        return script, kwargs
+    env = dict(kwargs.get('env') or os.environ)
+    env.update(PROBE_TARGET=str(script), OPENBUS_LOG=log,
+               OPENBUS_RANGES=os.environ.get('DQ4_OPENBUS_RANGES', env.get('OPENBUS_RANGES', '')))
+    return OPENBUS, {**kwargs, 'env': env}
 
 
 def save_dirs(mesence=None):
@@ -82,6 +96,7 @@ class Runner:
         self.rom = unique_copy(rom, folder, tag)
         clear_saves(self.rom, mesence)
         self.slot = headless_slots.acquire(f'MesenCE {tag}')
+        script, kwargs = with_openbus(script, kwargs)
         try:
             self.proc = subprocess.Popen([str(mesence), '--testrunner', str(self.rom), str(script), *extra], **kwargs)
         except BaseException:
@@ -121,6 +136,7 @@ class Runner:
 def run(mesence, rom, script, folder=None, tag='probe', extra=ARGS, **kwargs):
     """subprocess.run 과 같이 띄운다. TimeoutExpired 는 그대로 올린다."""
     folder = Path(folder or kwargs.get('cwd') or Path(rom).parent)
+    script, kwargs = with_openbus(script, kwargs)
     copy = unique_copy(rom, folder, tag)
     clear_saves(copy, mesence)
     try:
