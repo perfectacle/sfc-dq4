@@ -46,6 +46,12 @@ class ReleaseCheckTest(unittest.TestCase):
         self.assertTrue(all(f.endswith('.py') and '/test_' not in f for f in files))
         self.assertIn(str(rc.ROOT / 'sfc/dq4/tools/dq4build.py'), files)
 
+    def test_publish_checks_the_same_stages(self):
+        """배포판(dq4publish.check_report)이 보는 단계가 관문 단계와 같아야 한다."""
+        rc.build_path_files()  # dq4publish 를 import 할 경로를 넣는다
+        import dq4publish
+        self.assertEqual(tuple(dq4publish.GATE_STAGES), rc.STAGES)
+
     def test_repo_sweeps_take_seeds(self):
         """저장소의 release.toml 스윕은 {rom}·{out}·{seeds} 를 모두 쓰고 이름이 겹치지 않는다."""
         got = rc.sweeps()

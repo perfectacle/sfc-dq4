@@ -61,8 +61,11 @@ class RemoteTests(unittest.TestCase):
 
 
 def passed_report(**over):
-    stages = {s: {'status': 'passed', 'seconds': 1} for s in publish.GATE_STAGES}
+    # 관문 단계 목록은 일부러 고정해 둔다: publish.GATE_STAGES 로 만들면 그 목록이 틀려도 시험이 통과한다
+    stages = {s: {'status': 'passed', 'seconds': 1} for s in ('build', 'unit', 'guards', 'sweep', 'coverage')}
+    stages['unit']['rows'] = [{'dir': 'tools/tests', 'status': 'passed'}]
     stages['guards']['rows'] = [{'name': 'g', 'status': 'passed'}]
+    stages['sweep']['rows'] = [{'name': 's', 'status': 'passed', 'seeds': [0]}]
     return {'verdict': 'passed', 'rehearse': False, 'dirty': False, 'commit': 'abc', 'rom_sha1': 'f' * 40,
             'when': 'now', 'stages': stages, **over}
 
@@ -103,6 +106,25 @@ class ReleaseTests(unittest.TestCase):
             publish.check_report(missing, 'abc', path)
         with self.assertRaisesRegex(SystemExit, '단계'):
             publish.check_report(passed_report(stages={}), 'abc', path)
+        empty_rows = passed_report()
+        empty_rows['stages']['unit']['rows'] = []
+        with self.assertRaisesRegex(SystemExit, 'unit'):
+            publish.check_report(empty_rows, 'abc', path)
+        no_rows = passed_report()
+        del no_rows['stages']['sweep']['rows']
+        with self.assertRaisesRegex(SystemExit, 'sweep'):
+            publish.check_report(no_rows, 'abc', path)
+        extra = passed_report()
+        extra['stages']['lint'] = {'status': 'failed', 'seconds': 0}
+        with self.assertRaisesRegex(SystemExit, '모르는 단계 lint'):
+            publish.check_report(extra, 'abc', path)
+        for stages in (['build'], 'passed'):
+            with self.assertRaisesRegex(SystemExit, '단계 표가 아님'):
+                publish.check_report(passed_report(stages=stages), 'abc', path)
+        not_dict = passed_report()
+        not_dict['stages']['build'] = 'passed'
+        with self.assertRaisesRegex(SystemExit, 'build'):
+            publish.check_report(not_dict, 'abc', path)
 
     def test_report_must_sit_in_its_rom_folder(self):
         for path in (self.report_path('e' * 40), self.root / 'elsewhere' / ('f' * 12) / 'report.json',

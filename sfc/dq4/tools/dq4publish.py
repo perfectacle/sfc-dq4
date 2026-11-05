@@ -39,7 +39,9 @@ IPS_NAME = 'dq4-ch1.ips'
 STAMP_KEY = '입력 해시'
 # tools/release_check.py 가 보고서를 두는 곳과 같아야 한다: work/release/<롬 SHA-1 앞 12자리>[-YYYYmmdd-HHMMSS]/
 REPORT_DIR = Path('work/release')
+# tools/release_check.py 의 STAGES 와 같아야 한다(tools/tests 의 시험이 본다)
 GATE_STAGES = ('build', 'unit', 'guards', 'sweep', 'coverage')
+ROW_STAGES = ('unit', 'guards', 'sweep')
 
 
 def inputs():
@@ -128,15 +130,26 @@ def build(assets, dq5, dq4, commit):
 
 
 def check_report(report, head, path):
-    """배포판을 만들어도 되는 보고서인가. 아니면 SystemExit. verdict 는 보지 않고 단계 결과로 판정을 다시 센다."""
+    """배포판을 만들어도 되는 보고서인가. 아니면 SystemExit. verdict 가 passed 여야 하고 단계 결과로도 다시 센다."""
     if report.get('rehearse'):
         raise SystemExit('보고서가 연습(--rehearse)이라 passed 가 아님: 배포 관문을 통과한 보고서로만 만든다')
     stages = report.get('stages') or {}
+    if not isinstance(stages, dict):
+        raise SystemExit(f'보고서의 stages 가 단계 표가 아님({type(stages).__name__}): 관문이 쓴 보고서로만 만든다')
     missing = [s for s in GATE_STAGES if s not in stages]
-    if missing:
-        raise SystemExit(f'보고서에 단계 {", ".join(missing)} 가 없어 passed 가 아님: 모든 단계를 돈 보고서로만 만든다')
-    bad = [s for s in GATE_STAGES if stages[s].get('status') != 'passed'
-           or any(r.get('status') != 'passed' for r in stages[s].get('rows') or [])]
+    extra = sorted(set(stages) - set(GATE_STAGES))
+    if missing or extra:
+        raise SystemExit(f'보고서의 단계가 관문 단계와 달라 passed 가 아님(빠짐 {", ".join(missing) or "-"}, '
+                         f'모르는 단계 {", ".join(extra) or "-"}): 모든 단계를 돈 보고서로만 만든다')
+    bad = []
+    for name in GATE_STAGES:
+        st = stages[name]
+        rows = st.get('rows') if isinstance(st, dict) else None
+        # 표가 있는 단계는 줄이 하나도 없으면 돌린 것이 없다는 뜻이라 통과로 치지 않는다
+        if (not isinstance(st, dict) or st.get('status') != 'passed'
+                or (name in ROW_STAGES and not rows)
+                or any(not isinstance(r, dict) or r.get('status') != 'passed' for r in rows or [])):
+            bad.append(name)
     if bad:
         raise SystemExit(f'보고서의 단계 {", ".join(bad)} 가 통과하지 않아 passed 가 아님')
     if report.get('verdict') != 'passed':

@@ -319,7 +319,7 @@ def commit():
 
 def verdict(stages, rehearse, wanted, dirty=False):
     """보고서 전체 판정: 고친 것 없는 커밋에서 모든 단계가 통과하고 연습(--rehearse)이 아닐 때만 passed. 캐시를 끄는
-    것은 단계가 쓰는 환경(env_for·gate_env)이 하고, 여기서는 rehearse 만 본다."""
+    것은 단계 환경이 하고, 여기서는 rehearse 만 본다."""
     if rehearse:
         return 'rehearsal'
     if set(wanted) != set(STAGES):
