@@ -1,6 +1,10 @@
+import contextlib
+import hashlib
+import io
 import json
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 import dq4chapter1 as ch
@@ -143,6 +147,274 @@ class GroupBuildTests(unittest.TestCase):
                 self.assertLessEqual(at + len(bytes.fromhex(w['hex'])), 0x350000)
                 self.assertNotEqual(at >> 16, talk >> 16)
 
+
+
+def patch_file(folder, name, writes):
+    path = Path(folder) / name
+    path.write_text(json.dumps({'format': 'dq5patch/1', 'name': name, 'writes': writes}), encoding='utf-8')
+    return path
+
+
+class ClearMirrorTests(unittest.TestCase):
+    def test_zeroes_mirror_bytes_and_empty_bytes_in_the_ranges_only(self):
+        original = bytes(range(1, 256)) * 3000
+        data = bytearray(len(original))
+        lo = 0x90000
+        data[lo], data[lo + 1], data[lo + 2] = original[lo - 0x80000], 0, original[lo + 2 - 0x80000]
+        data[lo + 10] = original[lo + 10 - 0x80000]
+        data[lo + 100] = original[lo + 100 - 0x80000]
+        out = ch.clear_mirror(bytes(data), original, [(lo, lo + 50)])
+        self.assertEqual(out[lo:lo + 3], bytes(3))
+        self.assertEqual(out[lo + 10], 0)
+        self.assertEqual(out[lo + 100], original[lo + 100 - 0x80000])
+        self.assertEqual(data[lo], original[lo - 0x80000])
+
+    def test_other_data_in_a_range_stops_the_build(self):
+        original = bytes(range(1, 256)) * 3000
+        data = bytearray(len(original))
+        data[0x90005] = original[0x90005 - 0x80000] ^ 0xFF
+        with self.assertRaisesRegex(SystemExit, '그룹 빌드 자리에 다른 자료'):
+            ch.clear_mirror(bytes(data), original, [(0x90000, 0x90010)])
+
+    def test_group_ranges_cover_group_banks_npc_bank_and_loose_record_areas(self):
+        ranges = ch.group_ranges()
+        for bank in (*ch.GROUP_BANKS, ch.NPC_BANK):
+            self.assertIn((bank * 0x8000, (bank + 1) * 0x8000), ranges)
+        # 3A 안의 레코드 자리는 뱅크 전체에 이미 들어 있어 다시 더하지 않는다
+        loose = [(lo, hi) for lo, hi in ch.RECORDS_AT if lo >> 16 not in ch.GROUP_BANKS]
+        self.assertEqual(len(ranges), len(ch.GROUP_BANKS) + 1 + len(loose))
+        self.assertIn((ch.lorom(0x309000), ch.lorom(0x309FFF) + 1), ranges)
+        self.assertEqual(len(ch.RECORDS_AT) - len(loose), 1)
+
+
+class ApplyWritesTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.original = bytes(range(1, 256)) * 8200
+        self.data = bytes(len(self.original))
+
+    def apply(self, writes, data=None):
+        path = patch_file(self.tmp.name, 'p.dq5patch.json', writes)
+        return ch.apply_writes(self.data if data is None else data, self.original, [path])
+
+    def test_writes_land_at_the_lorom_position(self):
+        out = self.apply([{'at': '30:8010', 'hex': 'AA BB'}])
+        self.assertEqual(out[0x180010:0x180012], b'\xaa\xbb')
+        self.assertEqual(sum(1 for a, b in zip(out, self.data) if a != b), 2)
+
+    def test_original_bytes_are_checked_when_given(self):
+        data = bytearray(self.data)
+        data[0x180000:0x180002] = b'\x01\x02'
+        out = self.apply([{'at': '30:8000', 'hex': '09 09', 'orig': '01 02'}], bytes(data))
+        self.assertEqual(out[0x180000:0x180002], b'\x09\x09')
+        with self.assertRaisesRegex(SystemExit, '원래 바이트가 아님 0000'):
+            self.apply([{'at': '30:8000', 'hex': '09 09', 'orig': '01 02'}])
+
+    def test_without_orig_only_empty_same_or_mirror_bytes_may_be_overwritten(self):
+        data = bytearray(self.data)
+        data[0x180000] = 0x77                                # 같은 값
+        data[0x180001] = self.original[0x180001 - 0x80000]  # 30~3F 의 거울
+        data[0x180002] = 0x55                                # 다른 자료
+        out = self.apply([{'at': '30:8000', 'hex': '77 AA'}], bytes(data))
+        self.assertEqual(out[0x180000:0x180002], b'\x77\xaa')
+        with self.assertRaisesRegex(SystemExit, '비어 있지 않은 자리 0x180002'):
+            self.apply([{'at': '30:8002', 'hex': '66'}], bytes(data))
+
+    def test_mirror_rule_does_not_apply_outside_banks_30_to_3f(self):
+        data = bytearray(self.data)
+        data[0x20000] = 0x55
+        with self.assertRaisesRegex(SystemExit, '비어 있지 않은 자리 0x20000'):
+            self.apply([{'at': '04:8000', 'hex': '66'}], bytes(data))
+
+
+class NpcBaseTests(unittest.TestCase):
+    def test_base_follows_the_environment_records_in_the_npc_bank(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            end = ch.NPC_BANK * 0x8000 + 0x1234
+            path = patch_file(tmp, 'env.dq5patch.json', [
+                {'at': f'0x{end - 4:X}', 'hex': '01 02 03 04'}, {'at': '30:8000', 'hex': '01'}])
+            # 뱅크 시작 + 0x1234 에서 끝나는 쓰기 뒤의 다음 0x100 경계(0x1300)
+            self.assertEqual(ch.npc_base(path), '35:9300')
+
+    def test_base_starts_at_the_bank_start_without_writes_there(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = patch_file(tmp, 'env.dq5patch.json', [{'at': '30:8000', 'hex': '01'}])
+            self.assertEqual(ch.npc_base(path), '35:8000')
+
+
+class ReturnPlacesTests(unittest.TestCase):
+    ROWS = [(0x05, 0x01), (0x06, 0x02), (0x36, 0x03)]
+
+    def rom(self, slots_now, slots_before, rows):
+        out = bytearray(0x400000)
+        original = bytearray(0x400000)
+        o = ch.lorom(ch.SLOT_TABLE)
+        out[o:o + ch.SLOT_COUNT], original[o:o + ch.SLOT_COUNT] = bytes(slots_now), bytes(slots_before)
+        o = ch.lorom(ch.START_TABLE)
+        for i, (group, number) in enumerate(rows):
+            out[o + 6 * i:o + 6 * i + 6] = bytes((group, number, 1, 1, 1, 0x80))
+        out[o + 6 * len(rows)] = 0xFF
+        return out, bytes(original)
+
+    def run_places(self, out, original, place):
+        import dq4groupbuild
+        prg = bytearray(0x1E * 0x4000 + 0x4000)
+        a = ch.FC_PLACES[1] - 0x8000 + ch.FC_PLACES[0] * 0x4000
+        prg[a:a + 4] = bytes((1, 2, 3, 4))
+        with unittest.mock.patch('kr_patch.fc.ines.prg', lambda raw: bytes(prg)), \
+                unittest.mock.patch.object(dq4groupbuild, 'placement', lambda prg: place), \
+                unittest.mock.patch.object(dq4groupbuild, 'cell', lambda x, y: (2 * x + 1, 2 * y + 1)):
+            return ch.return_places(out, original, b'dq4')
+
+    def test_a_new_group_takes_a_free_row_with_its_first_fc_return_place(self):
+        out, original = self.rom([0x36] * 11 + [0x37] * 11, [0x05] * 11 + [0x06] * 11, self.ROWS)
+        result = self.run_places(out, original, {(1, 2): (0x37, 9)})
+        o = ch.lorom(ch.START_TABLE)
+        # 칸 표에서 빠진 DQ5 그룹(05·06)의 첫 항목이 새 그룹 37 의 [맵 9][X 7][Y 9][층 1][80] 로
+        self.assertEqual(bytes(result[o:o + 6]), bytes((0x37, 9, 7, 9, 1, 0x80)))
+        self.assertEqual(bytes(result[o + 6:o + 12]), bytes((0x06, 2, 1, 1, 1, 0x80)))
+        self.assertEqual(bytes(result[o + 12:o + 18]), bytes((0x36, 3, 1, 1, 1, 0x80)))
+
+    def test_groups_already_in_the_table_or_without_a_place_are_left_alone(self):
+        out, original = self.rom([0x36] * 11 + [0x37] * 11, [0x05] * 11 + [0x06] * 11, self.ROWS)
+        before = bytes(out)
+        self.assertEqual(bytes(self.run_places(out, original, {(9, 9): (0x37, 9)})), before)
+
+    def test_no_free_row_stops_the_build(self):
+        out, original = self.rom([0x36] * 11 + [0x37] * 11, [0x05] * 11 + [0x06] * 11, [(0x36, 3)])
+        with self.assertRaisesRegex(SystemExit, '빈 항목이 모자람: 1 > 0'):
+            self.run_places(out, original, {(1, 2): (0x37, 9)})
+
+
+class MessageAssemblyTests(unittest.TestCase):
+    def test_ported_and_chapter_texts_are_merged_without_gaps(self):
+        import dq4npcport
+        ported = [{'id': dq4npcport.FIRST_MESSAGE, 'codes': [1, 2]},
+                  {'id': dq4npcport.FIRST_MESSAGE + 1, 'codes': [3]}]
+        found = ch.messages(ported, {})
+        self.assertTrue(set(ch.TEXTS) <= set(found))
+        self.assertIn(dq4npcport.FIRST_MESSAGE, found)
+        self.assertIn(dq4npcport.FIRST_MESSAGE + 1, found)
+
+    def test_a_person_is_given_the_korean_text_of_the_matching_fc_messages(self):
+        import dq4ch1talk
+        key = next(iter(dq4ch1talk.TEXTS))
+        report = {'36/00': [{'shows': list(key) + [None], 'message': '3C6'}],
+                  ch.THRONE: [{'shows': list(key), 'message': '3C7'}]}
+        found = ch.messages([], report)
+        strings = lambda parts: [p for p in parts if isinstance(p, str)]  # noqa: E731
+        self.assertEqual(strings(found[0x3C6]), strings(dq4ch1talk.TEXTS[key]))
+        self.assertNotEqual(strings(found.get(0x3C7, [])), strings(dq4ch1talk.TEXTS[key]))
+
+    def test_a_ported_message_on_a_chapter_number_is_refused(self):
+        clash = next(iter(ch.TEXTS))
+        with self.assertRaisesRegex(ValueError, '1장 메시지와 겹치는 번호'):
+            ch.messages([{'id': clash, 'codes': [1]}], {})
+
+    def test_messages_doc_lists_hex_numbers_in_order(self):
+        with unittest.mock.patch.object(ch, 'port', lambda dq5, dq4: (None, [], {})), \
+                unittest.mock.patch.object(ch, 'messages', lambda ported, report: {0x10: ['b'], 0x9: ['a']}):
+            self.assertEqual(ch.messages_doc('a', 'b'), {'format': 'dq4messages/1',
+                                                         'messages': {'009': ['a'], '010': ['b']}})
+
+    def test_talk_and_message_numbers_chain_chapter_after_chapter(self):
+        import dq4ch1event
+        import dq4npcport
+        self.assertEqual(ch.chapter2_talk() - ch.event_talk(), len(dq4ch1event.TALKS))
+        self.assertGreater(ch.event_talk(), dq4npcport.SCRIPT_TALK)
+        self.assertEqual(ch.chapter2_message(100) - 100, len(dq4ch1event.MESSAGES))
+
+    def test_message_flow_gathers_talks_scripts_events_and_pauses(self):
+        flow = ch.message_flow(3300)
+        self.assertEqual(sorted(flow), ['events', 'pauses', 'scripts', 'talks'])
+        self.assertEqual(len(flow['scripts']), len(ch.npc_scripts(3300)))
+        self.assertEqual(len(flow['events']), 3)
+        self.assertEqual(ch.npc_scripts(3300)[0]['address'], '05:A84F')
+
+
+class NpcDocPrologueTests(unittest.TestCase):
+    def test_prologue_adds_its_lists_overrides_and_scripts(self):
+        plain = ch.npc_doc({'overrides': []})
+        with_prologue = ch.npc_doc({'overrides': []}, prologue=True)
+        self.assertEqual([l['name'] for l in plain['new_lists']], ['after'])
+        self.assertEqual([l['name'] for l in with_prologue['new_lists']][0], 'after')
+        self.assertGreater(len(with_prologue['new_lists']), 1)
+        self.assertGreater(len(with_prologue['scripts']), len(plain['scripts']))
+        self.assertEqual(plain['overrides'][0]['list'], 'new:after')
+        self.assertEqual(with_prologue['overrides'][-1]['list'], 'new:after')
+        self.assertGreater(len(with_prologue['lists']), len(plain['lists']))
+        self.assertEqual(with_prologue['format'], 'dq5npcrelocate/1')
+
+    def test_scenes_drop_the_prologue_box_when_there_is_no_prologue(self):
+        import dq4chapterbox
+        self.assertIn(dq4chapterbox.PROLOGUE, ch.scenes(True))
+        self.assertNotIn(dq4chapterbox.PROLOGUE, ch.scenes(False))
+        self.assertEqual(len(ch.scenes(True)) - len(ch.scenes(False)), 1)
+
+
+class WrapperTests(unittest.TestCase):
+    def test_group_build_moves_the_places_to_the_integrated_rom(self):
+        import dq4groupbuild
+        seen = {}
+
+        def build(dq5, dq4, out):
+            seen.update(dq5=dq5, dq4=dq4, out=out, records=dq4groupbuild.RECORDS_AT, field=dq4groupbuild.FIELD_AT,
+                        npc=dq4groupbuild.NPC_AT, text=dq4groupbuild.TEXT_AT)
+            return {'ok': 1}
+        with unittest.mock.patch.multiple(dq4groupbuild, build=build, RECORDS_AT=(), FIELD_AT='', NPC_AT=(), TEXT_AT=()):
+            self.assertEqual(ch.group_build('a', 'b', 'c'), {'ok': 1})
+        self.assertEqual(seen, {'dq5': 'a', 'dq4': 'b', 'out': 'c', 'records': ch.RECORDS_AT, 'field': ch.FIELD_AT,
+                                'npc': ('--base', '33:8000', '--alt', '38:8000'), 'text': ('--at', '60:8000')})
+
+    def test_run_tool_echoes_stderr(self):
+        import dq4buildcache
+        calls = []
+        with unittest.mock.patch.object(dq4buildcache, 'run', lambda *a, **k: calls.append((a, k))):
+            ch.run_tool('tool.py', 'x', 'y')
+        self.assertEqual(calls, [(('tool.py', 'x', 'y'), {'echo_stderr': True})])
+
+    def test_port_delegates_to_the_npc_port(self):
+        import dq4npcport
+        with unittest.mock.patch.object(dq4npcport, 'port', lambda a, b: ('ported', a, b)):
+            self.assertEqual(ch.port('d5', 'd4'), ('ported', 'd5', 'd4'))
+
+
+class MainTests(unittest.TestCase):
+    def run_main(self, *argv):
+        out = io.StringIO()
+        with unittest.mock.patch('sys.argv', ['dq4chapter1.py', *argv]), contextlib.redirect_stdout(out):
+            ch.main()
+        return out.getvalue()
+
+    def test_messages_writes_the_json_and_counts_the_messages(self):
+        doc = {'format': 'dq4messages/1', 'messages': {'001': [1], '002': [2]}}
+        with tempfile.TemporaryDirectory() as tmp, unittest.mock.patch.object(ch, 'messages_doc', lambda a, b: doc):
+            target = Path(tmp) / 'sub' / 'm.json'
+            text = self.run_main('messages', '-o', str(target))
+            self.assertEqual(json.loads(target.read_text()), doc)
+        self.assertEqual(text.strip(), f'{target} 메시지 2개')
+
+    def test_build_writes_rom_and_ips_with_the_chosen_options(self):
+        calls = []
+
+        def fake_build(rom, dq5, dq4, work, prologue, chapter2):
+            calls.append((rom, Path(dq5).name, Path(dq4).name, work.is_dir(), prologue, chapter2))
+            return bytes(range(16))
+        with tempfile.TemporaryDirectory() as tmp, unittest.mock.patch.object(ch, 'build', fake_build):
+            tmp = Path(tmp)
+            (tmp / 'menu.sfc').write_bytes(bytes(16))
+            out = tmp / 'x' / 'ch1.sfc'
+            text = self.run_main('build', '--rom', str(tmp / 'menu.sfc'), '--out', str(out), '--no-prologue',
+                                 '--chapter2', '--keep', str(tmp / 'keep'))
+            self.assertEqual(out.read_bytes(), bytes(range(16)))
+            ips = out.with_suffix('.ips').read_bytes()
+            self.assertTrue((tmp / 'keep').is_dir())
+            self.run_main('build', '--rom', str(tmp / 'menu.sfc'), '--out', str(out))
+        self.assertEqual(calls[0], (bytes(16), 'dq5.sfc', 'dq4.nes', True, False, True))
+        self.assertEqual(calls[1][4:], (True, False))
+        self.assertTrue(ips.startswith(b'PATCH') and ips.endswith(b'EOF'))
+        self.assertEqual(text.strip(), f'{out} sha1={hashlib.sha1(bytes(range(16))).hexdigest()}')
 
 
 class Chapter1TalkTests(unittest.TestCase):

@@ -1,7 +1,11 @@
 """Without a ROM, the FC -> DQ5 cell rule and map layout; with rom/dq4.nes, the exit and area records of the new
 groups."""
 
+import contextlib
+import io
+import json
 import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -136,6 +140,279 @@ class BundleTest(unittest.TestCase):
         # Also when the FC group has no ported maps.
         with self.assertRaises(ValueError):
             build.layout({0x40: [{"fc": 0x13}], 0x41: [{"fc": 0x13}]}, self.FC_MAPS)
+
+
+class KoreanNamesTest(unittest.TestCase):
+    """한글 이름은 글자마다 두 바이트(85 43 = 「가」)라, 늘어난 바이트를 여분 칸 끝에서 잘라 표 길이를 지킨다."""
+    ORIGINAL = {2: [1, 2], 3: [7, 7, 7], 4: [8, 8, 8, 8], 5: [9]}
+
+    def names(self, korean, spare, table=0x0A):
+        with mock.patch("dq5namewrite.read_tables", lambda dq5: {table: self.ORIGINAL}):
+            return build.korean_names(b"dq5", table, korean, spare)
+
+    def test_name_bytes_are_the_display_codes_of_each_syllable(self):
+        got = self.names({2: "가"}, ())
+        self.assertEqual(got, {"table": 0x0A, "names": [{"id": 2, "bytes": [0x85, 0x43]}]})
+
+    def test_growth_is_cut_from_the_spare_slots_in_order(self):
+        # 슬롯 2: 2바이트 → 6바이트(+4). 여분 3 은 3바이트 중 2바이트만 자르고, 남은 2 는 여분 4 에서
+        got = self.names({2: "가가가"}, (3, 4))
+        names = {n["id"]: n["bytes"] for n in got["names"]}
+        self.assertEqual(names[2], [0x85, 0x43] * 3)
+        self.assertEqual(names[3], [7])
+        self.assertEqual(names[4], [8, 8])
+        self.assertEqual([n["id"] for n in got["names"]], [2, 3, 4])
+
+    def test_spare_that_cannot_hold_the_growth_is_an_error(self):
+        with self.assertRaisesRegex(ValueError, r"name table 0A: 2 bytes more than slots \[5\] hold"):
+            self.names({2: "가가"}, (5,))
+
+    def test_no_growth_leaves_the_spare_slots_alone(self):
+        got = self.names({2: "가"}, (3, 4))
+        self.assertEqual([n["id"] for n in got["names"]], [2])
+
+    def test_companion_and_person_names_use_their_own_tables(self):
+        seen = []
+        with mock.patch.object(build, "korean_names", lambda dq5, table, korean, spare: seen.append((table, korean, spare))):
+            build.companion_names(b"x")
+            build.person_names(b"x")
+        self.assertEqual(seen, [(build.COMPANION_TABLE, build.COMPANION_NAMES, build.COMPANION_SPARE),
+                                (build.PERSON_TABLE, build.PERSON_NAMES, build.PERSON_SPARE)])
+
+
+class FieldDoorsTest(unittest.TestCase):
+    LINKS = {0x40: [{"fc": 0x10, "field": [(5, 6), (6, 6)]}, {"fc": 0x11, "field": None}],
+             0x41: [{"fc": 0x12, "field": [(9, 9)], "stairs": {(9, 9): (1, 1)}}]}
+
+    def patches(self, entrances):
+        return (mock.patch.object(build, "LINKS", self.LINKS),
+                mock.patch.object(build.dq4field, "entrances", lambda prg: entrances),
+                mock.patch.object(build.dq4fieldport, "fc_field", lambda prg: ("grid", "props")),
+                mock.patch.object(build.dq4fieldport, "door", lambda props, cells: (list(cells), props)))
+
+    def test_every_listed_block_must_enter_that_fc_group(self):
+        entrances = [(0x10, 5, 6, 0), (0x10, 6, 6, 0), (0x12, 9, 9, 0)]
+        with contextlib.ExitStack() as stack:
+            for patcher in self.patches(entrances):
+                stack.enter_context(patcher)
+            found = build.doors(b"")
+        self.assertEqual(found, {0x10: ([(5, 6), (6, 6)], "props"), 0x12: ([(9, 9)], "props")})
+
+    def test_entrance_of_another_group_is_an_error(self):
+        entrances = [(0x10, 5, 6, 0), (0x11, 6, 6, 0), (0x12, 9, 9, 0)]
+        with contextlib.ExitStack() as stack:
+            for patcher in self.patches(entrances):
+                stack.enter_context(patcher)
+            with self.assertRaisesRegex(ValueError, r"FC field \(06,06\) is not an entrance of FC group 10"):
+                build.doors(b"")
+
+    def test_entrances_with_a_trailing_flag_are_not_field_entrances(self):
+        entrances = [(0x10, 5, 6, 0), (0x10, 6, 6, 1), (0x12, 9, 9, 0)]
+        with contextlib.ExitStack() as stack:
+            for patcher in self.patches(entrances):
+                stack.enter_context(patcher)
+            with self.assertRaises(ValueError):
+                build.doors(b"")
+
+    def test_entrance_doors_are_one_per_stair_entrance(self):
+        with contextlib.ExitStack() as stack:
+            for patcher in self.patches([]):
+                stack.enter_context(patcher)
+            self.assertEqual(build.entrance_doors(b""), {(0x12, 9, 9): ([(9, 9)], "props")})
+
+
+class HookRowsStairsTest(unittest.TestCase):
+    def test_stairs_part_enters_each_entrance_onto_its_stair_and_leaves_by_it(self):
+        links = {0x40: [{"fc": 0x10, "field": [(100, 50), (101, 50)], "arrival": (1, 2), "stairs": {(100, 50): (5, 6)}}]}
+        place = {(0x10, 0): (0x40, 0)}
+        entrances = {0x10: ([(100, 50), (101, 50)], (100, 53))}
+        each = {(0x10, 100, 50): ([(100, 50)], (200, 107))}
+        arrivals, leaving = build.hook_rows(links, place, entrances, each)
+        layer = build.LAYER
+        # 계단 입구는 계단 칸(5,6) → DQ5 칸 (10,13) 으로 들어가고, 나머지 입구는 도착 칸 (1,2) → (2,5)
+        self.assertEqual(arrivals, [(0x40, 100, 50, 0, 10, 13, layer, 0), (0x40, 101, 50, 0, 2, 5, layer, 0)])
+        self.assertEqual(leaving, [(0x40, 0, 0, 200, 107, 13, 13), (0x40, 0, 0x1F, 100, 53)])
+
+    def test_part_without_a_field_entrance_adds_nothing(self):
+        links = {0x40: [{"fc": 0x10, "field": None}]}
+        self.assertEqual(build.hook_rows(links, {(0x10, 0): (0x40, 0)}, {}), ([], []))
+
+
+class ExitOrderTest(unittest.TestCase):
+    def test_stairs_sort_by_row_then_column(self):
+        cells = [[0, 8, 0], [9, 0, 8]]
+        source = types.SimpleNamespace(w=3, h=2, cell=lambda x, y: cells[y][x])
+        props = {0: 0, 8: 0x08, 9: 0x09}
+        with mock.patch.object(build.dq4block, "Map", lambda prg, g, k: source), \
+                mock.patch.object(build, "block_prop", lambda src, block: props[block]):
+            self.assertEqual(build.exit_order(b"", 0x10, 0), [(1, 0), (0, 1), (2, 1)])
+
+
+class ExitRowsDestinationsTest(unittest.TestCase):
+    PLACE = {(0x10, 0): (0x40, 0), (0x10, 1): (0x40, 1), (0x20, 0): (0x41, 0)}
+    PARTS = [{"fc": 0x10, "field": None}]
+
+    def rows(self, stairs, parts=None):
+        order = {(0x10, 1): [(2, 2)], (0x20, 0): [(1, 1)], (0x10, 0): []}
+        return build.exit_rows(0x40, parts or self.PARTS, self.PLACE,
+                               {(0x10, 0): stairs, (0x10, 1): []}, lambda g, k: order[g, k])
+
+    def test_destination_that_is_not_a_stair_cell_becomes_a_position_exit(self):
+        out = self.rows([(1, 1, {"group": 0x20, "index": 0, "x": 9, "y": 8}),
+                         (2, 2, {"group": 0x10, "index": 1, "x": 7, "y": 7})])
+        self.assertEqual(out["40/00"], [
+            {"kind": "position", "destination_map": 0, "x": 18, "y": 17, "layer": build.LAYER, "group": 0x41},
+            {"kind": "position", "destination_map": 1, "x": 14, "y": 15, "layer": build.LAYER, "group": 0x40}])
+
+    def test_a_map_without_stairs_gets_the_placeholder_special_exit(self):
+        self.assertEqual(self.rows([])["40/01"], [{"kind": "special", "special": 0}])
+
+    def test_stair_to_a_map_that_is_not_ported_is_an_error(self):
+        with self.assertRaisesRegex(ValueError, "stair to an FC map not ported"):
+            self.rows([(1, 1, {"group": 0x30, "index": 0, "x": 1, "y": 1})])
+        with self.assertRaisesRegex(ValueError, "stair to an FC map not ported"):
+            self.rows([(1, 1, None)])
+
+
+class ExitRecordsTest(unittest.TestCase):
+    PLACE = {(0x10, 0): (0x40, 0), (0x10, 1): (0x40, 1)}
+
+    def run_records(self, links):
+        order = {(0x10, 0): [(1, 1), (3, 3)], (0x10, 1): [(2, 2)]}
+        with mock.patch.object(build, "LINKS", {0x40: [{"fc": 0x10, "field": None}]}), \
+                mock.patch.object(build, "placement", lambda prg: self.PLACE), \
+                mock.patch.object(build.dq4block, "exit_links", lambda prg, g, k, cache: links[k]), \
+                mock.patch.object(build, "exit_order", lambda prg, g, k: order[g, k]):
+            return build.exit_records(b"", 0x40)
+
+    def test_stairs_are_matched_to_their_links_in_exit_order(self):
+        links = {0: [{"x": 3, "y": 3, "prop": 0x09, "to": {"group": 0x10, "index": 1, "x": 2, "y": 2}},
+                     {"x": 1, "y": 1, "prop": 0x88, "to": {"group": 0x10, "index": 1, "x": 5, "y": 5}}],
+                 1: [{"x": 2, "y": 2, "prop": 0x08, "to": {"group": 0x10, "index": 0, "x": 1, "y": 1}}]}
+        out = self.run_records(links)
+        self.assertEqual(out["40/00"], [
+            {"kind": "position", "destination_map": 1, "x": 10, "y": 11, "layer": build.LAYER, "group": 0x40},
+            {"kind": "same-group", "destination_map": 1, "exit": 0}])
+        self.assertEqual(out["40/01"], [{"kind": "same-group", "destination_map": 0, "exit": 0}])
+
+    def test_exit_kinds_without_a_dq5_exit_are_an_error(self):
+        links = {0: [{"x": 1, "y": 1, "prop": 0x2A, "to": None}], 1: []}
+        with self.assertRaisesRegex(ValueError, r"10/00: FC exit kinds \['2A'\] have no DQ5 exit yet"):
+            self.run_records(links)
+
+
+class AreaRecordsTest(unittest.TestCase):
+    PLACE = {(0x10, 0): (0x40, 0), (0x10, 1): (0x40, 1)}
+
+    def test_neighbouring_cells_with_one_destination_share_a_rect(self):
+        # 아래로 걷는 출구(flag 2) 두 칸: 도착 칸도 이어져야 한 줄. 세 번째는 도착이 끊겨 따로
+        cells = {(0x10, 0): [(2, 3, 0x10, 1, 5, 6, 2), (3, 3, 0x10, 1, 6, 6, 2), (4, 3, 0x10, 1, 9, 6, 2)]}
+        out = build.area_rows(0x40, self.PLACE, cells)
+        rects = [(r["rect"], r["span_raw"], r["x"], r["y"]) for r in out["40/00"]]
+        self.assertEqual(rects, [([4, 6, 7, 7], 3, 10, 13), ([8, 6, 9, 7], 1, 18, 13)])
+
+    def test_up_exit_steps_onto_the_row_below_the_block_row(self):
+        out = build.area_rows(0x40, self.PLACE, {(0x10, 0): [(2, 3, 0x10, 1, 5, 6, 0)]})
+        self.assertEqual(out["40/00"][0]["rect"], [4, 7, 5, 8])
+
+    def test_sideways_exit_is_one_cell_on_the_entry_column(self):
+        out = build.area_rows(0x40, self.PLACE, {(0x10, 0): [(2, 3, 0x10, 1, 5, 6, 3)]})
+        row = out["40/00"][0]
+        self.assertEqual((row["rect"], row["span_raw"]), ([5, 7, 6, 8], 1))
+        out = build.area_rows(0x40, self.PLACE, {(0x10, 0): [(2, 3, 0x10, 1, 5, 6, 1)]})
+        self.assertEqual(out["40/00"][0]["rect"], [4, 7, 5, 8])
+
+    def test_sideways_exit_across_two_cells_is_an_error(self):
+        cells = {(0x10, 0): [(2, 3, 0x10, 1, 5, 6, 1), (3, 3, 0x10, 1, 6, 6, 1)]}
+        with self.assertRaisesRegex(ValueError, "sideways exit across 2 cells"):
+            build.area_rows(0x40, self.PLACE, cells)
+
+    def test_area_records_read_the_fc_exit_table_of_every_ported_map(self):
+        with mock.patch.object(build, "LINKS", {0x40: [{"fc": 0x10}]}), \
+                mock.patch.object(build, "placement", lambda prg: self.PLACE), \
+                mock.patch.object(build.dq4map, "exits", lambda prg, g, k: [(1, 1, 0x10, 1, 2, 2, 2)] if k == 0 else []):
+            out = build.area_records(b"", 0x40)
+        self.assertEqual(list(out), ["40/00"])
+        self.assertEqual(out["40/00"][0]["destination_map"], 1)
+
+
+class FallRecordsTest(unittest.TestCase):
+    PLACE = {(0x10, 0): (0x40, 0), (0x10, 5): (0x40, 2)}
+
+    def source(self, rows, props):
+        w, h = len(rows[0]), len(rows)
+        return types.SimpleNamespace(w=w, h=h, buf=[v for row in rows for v in row], blocks={"prop": props})
+
+    def run_falls(self, group, links, rows, props, falls, place=None):
+        source = self.source(rows, props)
+        with mock.patch.object(build, "LINKS", links), mock.patch.object(build, "placement", lambda prg: place or self.PLACE), \
+                mock.patch.object(build.dq4block, "Map", lambda prg, g, k: source), \
+                mock.patch.object(build.dq4block, "fall", lambda prg, g, k, x, y: falls[x, y]):
+            return build.fall_records(b"", group)
+
+    def test_a_run_of_falling_cells_with_one_destination_is_one_rect(self):
+        rows = [[1, 1, 0, 1], [0, 0, 2, 0]]
+        props = {0: 0, 1: 0x05, 2: 0x0B}
+        to = {"group": 0x10, "index": 5, "x": 3, "y": 4}
+        falls = {(0, 0): to, (1, 0): to, (3, 0): to, (2, 1): {"group": 0x30, "index": 0, "x": 1, "y": 1}}
+        out = self.run_falls(0x40, {0x40: [{"fc": 0x10}]}, rows, props, falls, place={**self.PLACE, (0x10, 0): (0x40, 0)})
+        # 그 맵(10/00)의 줄: 첫 두 칸이 한 줄, 한 칸 건너뛴 넷째 칸이 따로. 옮기지 않은 맵으로의 낙하는 뺀다
+        row = out["40/00"]
+        self.assertEqual([r["rect"] for r in row], [[0, 1, 3, 2], [6, 1, 7, 2]])
+        self.assertEqual({(r["destination_group"], r["destination_map"], r["x"], r["y"], r["span_raw"]) for r in row},
+                         {(0x40, 2, 6, 9, 1)})
+        self.assertEqual({(r["source_layer"], r["flags"], r["destination_layer"]) for r in row},
+                         {(build.LAYER, build.AREA_FLAGS, build.LAYER)})
+
+    def test_a_fall_to_the_field_is_kept_only_for_the_listed_fc_groups(self):
+        rows = [[1]]
+        props = {1: 0x05}
+        falls = {(0, 0): {"field": True}}
+        place = {(0x30, 0): (0x40, 0)}
+        out = self.run_falls(0x40, {0x40: [{"fc": 0x30}]}, rows, props, falls, place=place)
+        self.assertEqual(out["40/00"], [{"rect": [0, 1, 1, 2], "source_layer": build.LAYER, "flags": build.AREA_FLAGS,
+                                         **build.FIELD_EXIT}])
+        self.assertEqual(self.run_falls(0x40, {0x40: [{"fc": 0x10}]}, rows, props, falls,
+                                        place={(0x10, 0): (0x40, 0)}), {})
+
+    def test_cells_that_do_not_fall_leave_no_record(self):
+        out = self.run_falls(0x40, {0x40: [{"fc": 0x10}]}, [[0, 0]], {0: 0}, {})
+        self.assertEqual(out, {})
+
+
+class RecordFilesTest(unittest.TestCase):
+    def test_new_map_records_encode_each_environment_document(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = Path(tmp)
+            groups = {"town": (0x36, 1), "cave": (0x37, 0)}
+            for name in groups:
+                (env / f"{name}.dq5map.json").write_text(json.dumps({"name": name}), encoding="utf-8")
+            with mock.patch.object(build, "GROUPS", groups), \
+                    mock.patch("dq5mapwrite.encode", lambda doc: doc["name"].encode()):
+                self.assertEqual(build.new_map_records(env), {(0x36, 1): b"town", (0x37, 0): b"cave"})
+
+    def test_check_records_compare_the_bytes_the_map_pointer_leads_to(self):
+        rom = bytearray(0x400000)
+        rom[0x100:0x104] = b"town"
+        with mock.patch("dq5map.map_pointer", lambda built, g, n: 0x008100), mock.patch("dq5map.Rom", lambda raw: raw):
+            build.check_records(bytes(rom), {(0x36, 1): b"town"})
+            with self.assertRaisesRegex(ValueError, r"36/01: the map pointer 00:8100 does not lead to its record"):
+                build.check_records(bytes(rom), {(0x36, 1): b"tOwn"})
+
+    def test_main_prints_the_build_summary_as_json(self):
+        seen = {}
+
+        def fake_build(dq5, dq4, out, with_people=True):
+            seen.update(dq5=dq5, dq4=dq4, out=out, with_people=with_people)
+            return {"rom": "x"}
+        out = io.StringIO()
+        for argv, people in ((["--out", "w"], True), (["--out", "w", "--no-people"], False)):
+            with mock.patch.object(build, "build", fake_build), mock.patch("sys.argv", ["dq4groupbuild.py", *argv]), \
+                    contextlib.redirect_stdout(out):
+                build.main()
+            self.assertEqual(seen, {"dq5": Path("rom/dq5.sfc"), "dq4": Path("rom/dq4.nes"), "out": Path("w"),
+                                    "with_people": people})
+        self.assertEqual(out.getvalue().splitlines(), ['{"rom": "x"}', '{"rom": "x"}'])
 
 
 class RecordAreasTest(unittest.TestCase):
