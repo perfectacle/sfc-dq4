@@ -102,8 +102,9 @@ class ScriptEdgeTests(unittest.TestCase):
         put(self.prg, 0x9700, [0x17, 3, 0x30, 0x19, 3, 0x07, 0x18, 3, 0x80, 0x3F])
         tree, _ = t.Parser(self.prg).block(0x9700)
         self.assertEqual([s[0] for s in tree], ['flag&=', 'flag=', 'flag|='])
-        for stmt, want in zip(tree, (0x30, 0x07, 0xF0 | 0x80)):
-            st = t.State(ram(flags={3: 0xF0}))
+        # 문장마다 초기값에서 결과가 달라지고, &= 와 = 도 서로 구별되는 초기값
+        for stmt, want in zip(tree, (0x5A & 0x30, 0x07, 0x5A | 0x80)):
+            st = t.State(ram(flags={3: 0x5A}))
             t.run([stmt], st, [])
             self.assertEqual(st.ram[0x627B + 3], want)
 
@@ -307,9 +308,11 @@ class EventOpsTests(unittest.TestCase):
     def test_hide_needs_known_x(self):
         self.assertEqual(self.ops([0xA2, 0x02, 0x20, 0x5C, 0xBF, 0x60]), [('hide', 8)])
         self.assertEqual(self.ops([0x20, 0x5C, 0xBF, 0x60]), [])
-        self.assertEqual(self.ops([0xA2, 0x02, 0x20, 0x4E, 0xBF, 0x60]), [])      # 자리 두기 도우미는 따라가지 않는다
+        # 의도된 제한: 자리 두기 도우미(EVENT_HELPERS)는 따라가지 않는다
+        self.assertEqual(self.ops([0xA2, 0x02, 0x20, 0x4E, 0xBF, 0x60]), [])
 
     def test_subroutine_depth_stops_at_two_levels(self):
+        # 의도된 제한: event_ops 는 JSR 을 2단까지만 들어간다
         put(self.prg, 0xA100, [0x20, 0x10, 0xA1, 0x00, 0x34, 0x1B, 0x60], bank=0x1C)
         put(self.prg, 0xA110, [0x20, 0x20, 0xA1, 0x00, 0x35, 0x1B, 0x60], bank=0x1C)
         put(self.prg, 0xA120, [0x00, 0x36, 0x1B, 0x60], bank=0x1C)
@@ -374,6 +377,8 @@ class ShowEventsTests(unittest.TestCase):
         put(self.prg, 0xA100, [0x00, 0x05, 0xCB, 0x40, 0x00, 0x34, 0x1B, 0x60], bank=0x1C)
         # 5 번 이벤트는 표의 다른 칸과 겹치지 않게 칸 5 도 같은 루틴으로
         put(self.prg, 0xBF74 + 2 * 5, word(0xA000), bank=0x1C)
+        put(self.prg, 0xBF74 + 2 * 0x0A, word(0xA400), bank=0x1C)
+        put(self.prg, 0xA400, [0x00, 0x35, 0x1B, 0x60], bank=0x1C)
 
     def log(self, d, lines):
         Path(d, 'talk_1.bin').write_bytes(bytes(0x8000))
@@ -386,7 +391,7 @@ class ShowEventsTests(unittest.TestCase):
         self.assertEqual(lines[0], '00 1C:A000  전투 03  ← -')
         self.assertEqual(lines[1], '01 1C:A100  플래그 켬 $6280&40; 메시지 0134  ← -')
         self.assertEqual(lines[5], '05 1C:A000  전투 03  ← 012 013')
-        self.assertEqual(lines[0x0A], '0A 1C:0000  -  ← 15:9502')
+        self.assertEqual(lines[0x0A], '0A 1C:A400  메시지 0135  ← 15:9502')
 
     def test_log_matches_or_flags_battle_mismatch(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as e, tempfile.TemporaryDirectory() as f:

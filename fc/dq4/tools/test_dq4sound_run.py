@@ -380,7 +380,7 @@ class CheckNotesTests(unittest.TestCase):
 
 class FrameCounterPhaseTests(unittest.TestCase):
     def test_phase_is_middle_of_matching_range(self):
-        # 프레임 길이가 37282 면 단계 자리는 변하지 않는다: 14914 단계는 14914~22371
+        # 프레임 길이가 같으면 단계 자리는 변하지 않으므로, 일치 구간의 가운데를 돌려준다
         self.assertEqual(s.frame_counter_phase([14914, 14914, None], 37282), 14914 + 7458 // 2)
 
     def test_no_match_falls_back_to_first_logged_value(self):
@@ -576,7 +576,7 @@ class ScoreMismatchTests(unittest.TestCase):
         run.extra = run.extra[:len(run.events)]
         self.assertEqual(s.score_check(run, xml), ['pulse2: 음 1개 / MIDI 0개'])
         run.tick = 5000
-        # 악보는 마디 하나(96틱)뿐인데 틱이 5000 이라 파트마다 길이가 모자란다
+        # 악보는 마디 하나뿐인데 마디가 모자랄 만큼 긴 틱이라 파트마다 길이가 모자란다
         self.assertEqual(s.score_check(run, xml),
                          ['pulse1: 길이 96 < 4999', 'pulse2: 음 1개 / MIDI 0개', 'pulse2: 길이 96 < 4999',
                           'triangle: 길이 96 < 4999', 'noise: 길이 96 < 4999'])
