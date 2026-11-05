@@ -76,7 +76,7 @@ groups = ["ch1-walk"]
 
 [[check]]
 name = "dq4-compat-scenes"
-why = "1장 걷기가 지나지 않는 MesenCE 장면 검사(전투 dq4battlecheck, 저장·이어 하기·전멸 dq4ch1savecheck, 창 글자의 가게·교회·여관·대화·전투 창 dq4windowcheck)에 열린 버스 프로브를 붙여, 뱅크 40~7D 아래 절반(high)과 뱅크 00~3F 의 열린 버스 구역(io, dq4compatscenes.IO_RANGES)을 범위마다 따로 잰다. high 는 낮은 뱅크 코드의 SRAM 밖 접근과 dq4brkscan.ALLOWED 밖 BRK, io 는 우리 패치 코드(뱅크 40 이상 또는 롬 장부의 단계가 쓴 자리)의 접근이면 실패하고, 장면 검사가 실패하거나 프로브 기록이 없어도 실패한다. 원래 DQ5 코드의 io 접근은 적기만 한다. 프로브는 dq4mesen 이 DQ4_OPENBUS_LOG 를 보고 붙이고, 읽은 바이트 캐시는 끈다"
+why = "1장 걷기가 지나지 않는 MesenCE 장면 검사(전투 dq4battlecheck, 저장·이어 하기·전멸 dq4ch1savecheck, 창 글자의 가게·교회·여관·대화·전투 창 dq4windowcheck)에 열린 버스 프로브를 붙여, 뱅크 40~7D 아래 절반(high)과 뱅크 00~3F 의 열린 버스 구역(io, dq4compatscenes.IO_RANGES)을 범위마다 따로 잰다. high 는 낮은 뱅크 코드의 SRAM 밖 접근과 dq4brkscan.ALLOWED 밖 BRK, io 는 우리 패치 코드(뱅크 40 이상 또는 롬 장부의 단계가 쓴 자리)의 접근, 허용 목록 dq4compatscenes.DQ5_ALLOWED(PC·접근 뱅크·주소 범위) 밖의 원래 DQ5 코드 접근, 해석하지 못한 기록 줄이면 실패한다. 장면 검사가 실패하거나, 창 검사 장면이 덤프할 프레임을 다 덤프하지 못했거나, 프로브 기록이 없어도 실패한다. 프로브는 dq4mesen 이 DQ4_OPENBUS_LOG 를 보고 붙이고, 읽은 바이트 캐시는 끈다"
 groups = ["ch1-build", "ch1-walk"]
 paths = [
   "fc/dq4/tools/dq4sound.py",
@@ -175,6 +175,7 @@ paths = [
   "sfc/dq5/tools/dq5progresscheck.py",
   "sfc/dq5/tools/lua/dq5battle.lua",
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
+  "tools/mesence_settings.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && mkdir -p work/wc && DQ4_WINDOWNAME_SYMBOLS=$PWD/work/wc/wn.sym uv run --locked python sfc/dq4/tools/dq4menupatch.py build --rom work/ch1/overture.sfc --messages work/ch1/messages.json --out work/wc/menu.sfc && rm -rf work/compat-scenes && uv run --locked python sfc/dq4/tools/dq4compatscenes.py --rom work/ch1/dq4-ch1-full.sfc --out work/compat-scenes --window-rom work/ch1/dq4-ch1.sfc --symbols work/wc/wn.sym --symbols-rom work/wc/menu.sfc"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]

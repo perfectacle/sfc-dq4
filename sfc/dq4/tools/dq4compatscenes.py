@@ -46,7 +46,7 @@ LINE = re.compile(r'([RW]) pc=(\w\w):(\w{4}) bank=(\w\w)(?: at=(\w{4}))?')
 # 원래 DQ5 코드의 io 접근 가운데 허용하는 것: (PC, 접근 뱅크, 처음, 끝, 까닭). PC 는 MesenCE 읽기 콜백의 cpu.pc 라
 # 접근한 명령의 다음 주소다. 이 밖의 원래 DQ5 접근도 실패로 친다
 DQ5_ALLOWED = [
-    ('06:F536', 0x3D, 0x2000, 0x7FFF, '06:F534 LDA ($00),Y: 가게 목록 첫 바이트(키)'),
+    ('06:F536', 0x3D, 0x4380, 0x4380, '06:F534 LDA ($00),Y: 가게 목록 첫 바이트(키)'),
     ('06:F53D', 0x3D, 0x2000, 0x7FFF, '06:F53B LDA ($00),Y: 가게 목록의 다음 바이트'),
 ]
 
@@ -101,17 +101,32 @@ def io_problems(lines, patched):
     return problems, dq5
 
 
-def window_reached(dest):
-    """창 검사가 장면마다 끝까지 돌았는가(dq4windowcheck 는 장면이 돌지 않아도 0 으로 끝날 수 있다). 문제 목록."""
+def window_frames(every=True):
+    """dq4windowcheck 가 장면마다 덤프하는 프레임 수(--every 면 EVERY 구간을 더함)."""
+    import dq4windowcheck as wck
+    out = {}
+    for sc in wck.scenes('ship', 'party', 'shop', 'battle'):
+        frames = set(sc[5]) | (set(wck.EVERY.get(sc[0], ())) if every else set())
+        out[sc[0]] = len(frames)
+    return out
+
+
+def window_reached(dest, want=None):
+    """창 검사가 장면마다 끝까지 돌았는가(dq4windowcheck 는 장면이 돌지 않아도 0 으로 끝날 수 있다). 장면마다 MesenCE 가
+    0 으로 끝나고, 덤프한 프레임(v*.bin) 수가 그 장면이 덤프할 프레임 수(window_frames)와 같아야 한다. 문제 목록."""
     info = dest / 'readset.json'
     if not info.exists():
         return ['창 검사 readset.json 없음']
+    want = window_frames() if want is None else want
     bad = []
     for name, i in json.loads(info.read_text()).items():
+        got = len(list((dest / name).glob('v*.bin')))
         if i.get('timed_out') or i.get('returncode') not in (0, None):
             bad.append(f'창 장면 {name}: 종료 {i.get("returncode")}, 시간 초과 {i.get("timed_out")}')
-        elif not list((dest / name).glob('v*.bin')):
-            bad.append(f'창 장면 {name}: 잰 프레임 없음')
+        elif name not in want:
+            bad.append(f'창 장면 {name}: 덤프할 프레임 수를 모름')
+        elif got != want[name]:
+            bad.append(f'창 장면 {name}: 덤프한 프레임 {got}, 기대 {want[name]}')
     return bad
 
 
@@ -137,7 +152,8 @@ def run_scene(scene, rng, a, out, patched):
     with log.open('w') as f:
         for c in pre:
             if subprocess.run(c, stdout=f, stderr=subprocess.STDOUT).returncode:
-                return {'scene': scene, 'ranges': rng, 'status': 'failed', 'problems': [f'출발 상태 실패: {c[1]}']}
+                return {'scene': scene, 'ranges': rng, 'status': 'failed', 'problems': [f'출발 상태 실패: {c[1]}'],
+                        'dq5_accesses': [], 'records': 0, 'pcs': [], 'high_bank_brk': [], 'seconds': 0}
         bus = out / f'openbus-{scene}-{rng}.txt'
         env = dict(os.environ, DQ4_READSET='off', DQ4_READSET_STORE='off', DQ4_OPENBUS_LOG=str(bus),
                    DQ4_OPENBUS_RANGES=RANGES[rng])
@@ -216,7 +232,7 @@ def main():
     (out / 'results.json').write_text(json.dumps({'status': 'passed' if ok else 'failed', 'scenes': results},
                                                  ensure_ascii=False, indent=1) + '\n')
     for r in results:
-        print(json.dumps({k: v for k, v in r.items() if k != 'dq5_accesses'} | {'dq5_accesses': len(r['dq5_accesses'])},
+        print(json.dumps({k: v for k, v in r.items() if k != 'dq5_accesses'} | {'dq5_accesses': len(r.get('dq5_accesses', []))},
                          ensure_ascii=False))
     print('통과' if ok else '실패')
     return 0 if ok else 1

@@ -35,12 +35,13 @@ class CompatScenes(unittest.TestCase):
     def test_io_problems(self):
         patched = cs.patched_ranges(LEDGER)
         lines = ['R pc=01:FF62 bank=00 at=4380', 'R pc=06:F53D bank=3D at=6000', 'R pc=06:F53D bank=3D at=6000',
-                 'R pc=06:F536 bank=3D at=4380', 'W pc=25:8071 bank=00 at=6000', 'R pc=06:F53D bank=3C at=6000',
+                 'R pc=06:F536 bank=3D at=4380', 'R pc=06:F536 bank=3D at=4381', 'W pc=25:8071 bank=00 at=6000', 'R pc=06:F53D bank=3C at=6000',
                  'R pc=60:D843 bank=3F at=2184', 'BRK pc=5E:C00F op=09', 'BRK pc=5E:C010 op=16', 'R pc=01:FF62 bank=00',
                  'junk']
         problems, dq5 = cs.io_problems(lines, patched)
         self.assertEqual(problems, ['5E:C010 이 BRK 16 를 부름(dq4brkscan.ALLOWED 밖)',
                                     '해석하지 못한 기록 줄: R pc=01:FF62 bank=00', '01:FF62 이 00:4380 를 읽음',
+                                    '06:F536 이 3D:4381 를 읽음(원래 DQ5 코드, DQ5_ALLOWED 밖)',
                                     '06:F53D 이 3C:6000 를 읽음(원래 DQ5 코드, DQ5_ALLOWED 밖)',
                                     '60:D843 이 3F:2184 를 읽음',
                                     '25:8071 이 00:6000 를 씀(원래 DQ5 코드, DQ5_ALLOWED 밖)', '해석하지 못한 기록 줄: junk'])
@@ -56,15 +57,21 @@ class CompatScenes(unittest.TestCase):
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)
-            self.assertEqual(cs.window_reached(d), ['창 검사 readset.json 없음'])
-            (d / 'readset.json').write_text(json.dumps({'a': {'returncode': 0, 'timed_out': False},
-                                                        'b': {'returncode': 1, 'timed_out': False},
-                                                        'c': {'returncode': 0, 'timed_out': False}}))
-            (d / 'a').mkdir()
-            (d / 'a' / 'v00100.bin').write_bytes(b'')
-            (d / 'c').mkdir()
-            got = cs.window_reached(d)
-        self.assertEqual(got, ['창 장면 b: 종료 1, 시간 초과 False', '창 장면 c: 잰 프레임 없음'])
+            self.assertEqual(cs.window_reached(d, {}), ['창 검사 readset.json 없음'])
+            (d / 'readset.json').write_text(json.dumps({n: {'returncode': rc, 'timed_out': False}
+                                                        for n, rc in (('a', 0), ('b', 1), ('c', 0), ('d', 0))}))
+            for name, n in (('a', 2), ('c', 1), ('d', 1)):
+                (d / name).mkdir()
+                for k in range(n):
+                    (d / name / f'v{k:05d}.bin').write_bytes(b'')
+            got = cs.window_reached(d, {'a': 2, 'b': 2, 'c': 2})
+        self.assertEqual(got, ['창 장면 b: 종료 1, 시간 초과 False', '창 장면 c: 덤프한 프레임 1, 기대 2',
+                               '창 장면 d: 덤프할 프레임 수를 모름'])
+
+    def test_window_frames_match_scenes(self):
+        want = cs.window_frames()
+        self.assertEqual(want['talk08'], 48)
+        self.assertGreater(want['shopwho'], len(range(100, 1900, 30)))
 
     def test_io_ranges_skip_real_registers(self):
         # 진짜 레지스터(PPU 2100~2183, 조이패드 4016·4017, CPU 4200~421F, DMA 4300~437F)는 범위 밖이어야 한다
