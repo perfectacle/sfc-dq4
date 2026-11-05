@@ -24,6 +24,11 @@ def word(v):
 
 def run_cli(main, prg, *args):
     """합성 PRG 를 iNES 파일로 써서 main() 을 돌리고 출력 줄을 돌려준다."""
+    return run_cli_code(main, prg, *args)[0]
+
+
+def run_cli_code(main, prg, *args):
+    """run_cli 와 같되 (출력 줄, main() 이 돌려준 값) 을 돌려준다."""
     head = bytes([0x4E, 0x45, 0x53, 0x1A, 32, 0]) + bytes(10)
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, 'x.nes')
@@ -33,8 +38,8 @@ def run_cli(main, prg, *args):
         with mock.patch.object(sys, 'argv', ['x', path, *args]), contextlib.redirect_stdout(out), \
                 warnings.catch_warnings():
             warnings.simplefilter('ignore', ResourceWarning)   # main() 이 파일을 닫지 않고 읽는다
-            main()
-    return out.getvalue().splitlines()
+            ret = main()
+    return out.getvalue().splitlines(), ret
 
 
 def cli_prg():
