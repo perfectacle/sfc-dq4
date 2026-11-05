@@ -6,17 +6,18 @@ GUARD_READS_ROOT 아래에서 쓴 것을 GUARD_READS 에 탭으로 가른 줄로
   F <경로> <내용>               import 밖에서 읽으려고 연 파일, Python 밖 자식의 인자로 넘긴 파일(content_sig)
   D <경로> <SHA-1>              목록을 본 폴더(이름 정렬)
   E <경로> <상태>               os.stat 으로 본 것(크기, dir, 없으면 -). os.path.exists·isfile·getsize·Path.exists 가 쓴다
+  L <경로> <가리키는 곳>        위 경로들을 풀다 거쳐 간 심볼릭 링크(os.readlink). 링크를 바꿔 달면 다른 파일을 읽게 된다
   ?                             무엇을 읽었는지 모르는 일이 있었다. guards.py 는 이 기록을 캐시하지 않는다
 
 같은 경로가 다른 값으로 두 번 나오면(도는 중에 바뀜) guards.py 가 기록을 버린다. GUARD_READS_SKIP 의 폴더(검사가 돌기
 전에 비우는 출력 폴더) 아래는 적지 않는다. `?` 는 이 파일을 싣지 못하게 뜨는 자식(python -I·-E·-S, env, PYTHONPATH·
-GUARD_READS 를 바꾸거나 뺀 환경), Python 밖이면서 .py 를 인자로 받는 자식(grep 등), 셸처럼 가를 수 없는 인자, __pycache__ 밖 .pyc, 감시 도구 번호를
+GUARD_READS 를 바꾸거나 뺀 환경), Python 밖이면서 .py 를 인자로 받는 자식(grep 등), 영숫자·`_./=+:,@%-`·칸 밖 글자가 든 셸 명령(따옴표·`;|&<>`·`$`·
+글롭 등은 무엇을 읽을지 풀지 않는다), __pycache__ 밖 .pyc, 감시 도구 번호를
 얻지 못함에 적는다.
 """
 import hashlib
 import os
 import re
-import shlex
 import stat as _stat
 import sys
 import threading
@@ -29,6 +30,8 @@ _VENV = os.path.join(os.path.realpath(_ROOT), '.venv') if _ROOT else ''
 _BLIND = re.compile(r'(^|[\s/])python[0-9.]*(\s+-[A-Za-z]+)*\s+-[A-Za-z]*[IES][A-Za-z]*(\s|$)'
                     r'|(^|[\s/])env\s|PYTHONPATH|GUARD_READS|PYTHONPYCACHEPREFIX|PYTHONNOUSERSITE')
 _PYTHON = re.compile(r'(^|/)(python[0-9.]*|uv)$')
+_SHELL = re.compile(r'(^|/)(sh|bash|dash|zsh|ksh)$')
+_PLAIN = re.compile(r'[A-Za-z0-9_./=+:,@%\t -]*')
 _IMPORT = '<frozen importlib._bootstrap_external>'
 # guards.BIG_FILE 와 같아야 한다. 이보다 큰 파일은 내용 대신 크기·mtime_ns
 BIG_FILE = 64 << 20
@@ -97,17 +100,42 @@ def _blind_env(env):
     return reads != _OUT or _HERE not in paths.split(os.pathsep) or prefix != os.environ.get('PYTHONPYCACHEPREFIX')
 
 
-def _inside(path):
+def _excluded(path):
+    return not path.startswith(_ROOT + os.sep) or any(
+        path == d or path.startswith(d + os.sep) for d in [_HERE, _VENV, *_SKIP] if d)
+
+
+def _links(path):
+    """path 를 풀며 거쳐 가는 저장소 안 링크를 L 줄로 적는다."""
+    parts = path.split(os.sep)
+    for i in range(2, len(parts) + 1):
+        step = os.sep.join(parts[:i])
+        if step in _walked:
+            continue
+        _walked.add(step)
+        if os.path.islink(step):
+            at = os.path.join(os.path.realpath(os.path.dirname(step)), os.path.basename(step))
+            if not _excluded(at):
+                _emit('L', _rel(at), os.readlink(step))
+
+
+_walked = set()
+
+
+def _inside(path, cwd=None):
     try:
         path = os.fsdecode(path)
+        cwd = os.fsdecode(cwd) if cwd is not None else None
     except (TypeError, ValueError):
         return None
     # <frozen …>·<string> 같은 이름은 파일이 아니다
     if not path or path.startswith('<'):
         return None
+    path = os.path.abspath(os.path.join(cwd, path) if cwd else path)
+    _links(path)
     path = os.path.realpath(path)
     # .venv 는 uv.lock(키에 듦)이 정한다
-    if not path.startswith(_ROOT + os.sep) or any(path == d or path.startswith(d + os.sep) for d in [_HERE, _VENV, *_SKIP] if d):
+    if _excluded(path):
         return None
     return path
 
@@ -151,31 +179,27 @@ def _listed(path):
     _emit('D', _rel(full), hashlib.sha1(names.encode('utf-8', 'surrogateescape')).hexdigest())
 
 
-def _words(command):
-    """인자와, 셸 문자열(sh -c '…')이면 셸처럼 나눈 낱말까지. 따옴표가 겹치면 몇 겹 더 푼다.
-    다 풀지 못하면 ValueError."""
-    todo = [_text(w) for w in command] if isinstance(command, (list, tuple)) else [_text(command)]
-    words = []
-    for _ in range(4):
-        words += todo
-        todo = [part for w in todo if any(c in w for c in ' \t\n"\'\\') for part in shlex.split(w)]
-        if not todo:
-            return words
-    raise ValueError(command)
-
-
-def _spawned(command, env):
+def _spawned(command, env, cwd=None):
     text = _text(command)
-    try:
-        words = _words(command)
-    except ValueError:
-        # 무엇을 넘겼는지 가를 수 없다
-        _emit('?')
-        return
-    program = os.path.basename(words[0].split()[0]) if words and words[0].split() else ''
+    if isinstance(command, (list, tuple)):
+        words = [_text(w) for w in command]
+    else:
+        # os.system 의 셸 문자열
+        words = ['sh', '-c', text]
     if _BLIND.search(text) or _blind_env(env):
         _emit('?')
         return
+    if words and _SHELL.search(words[0]):
+        # 셸이 돌릴 명령은 칸으로만 가를 수 있는 꼴일 때만 낱말로 본다
+        rest = words[1:]
+        if not all(_PLAIN.fullmatch(w) for w in rest):
+            _emit('?')
+            return
+        words = [words[0]] + [part for w in rest for part in w.split()]
+        inner = [w for w in words[1:] if not w.startswith('-')]
+        program = os.path.basename(inner[0]) if inner else ''
+    else:
+        program = os.path.basename(words[0]) if words else ''
     if _PYTHON.search(program):
         return
     if '.py' in text:
@@ -184,7 +208,7 @@ def _spawned(command, env):
     # Python 밖 자식(에뮬레이터 등)이 인자로 받은 파일은 그 내용을 입력으로 본다
     for word in words[1:]:
         for part in word.split('='):
-            full = _inside(part) if part else None
+            full = _inside(part, cwd) if part else None
             if full and os.path.isfile(full):
                 _emit('F', _rel(full), content_sig(full))
             elif full and os.path.isdir(full):
@@ -202,7 +226,7 @@ def _hook(event, args):
         elif event in ('os.listdir', 'os.scandir'):
             _listed(args[0])
         elif event == 'subprocess.Popen':
-            _spawned(args[1], args[3])
+            _spawned(args[1], args[3], args[2])
         elif event == 'os.system':
             _spawned(args[0], None)
         elif event in ('os.exec', 'os.posix_spawn', 'os.spawn'):

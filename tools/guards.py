@@ -332,15 +332,15 @@ def read_trace(reads, script=None):
     값으로 두 번(도는 중에 바뀜), 읽지 못한 파일(-)이면 None."""
     if not reads.is_file():
         return None
-    out = {'files': {}, 'dirs': {}, 'stats': {}, 'code': {}}
+    out = {'files': {}, 'dirs': {}, 'stats': {}, 'links': {}, 'code': {}}
     starts = set()
     for line in reads.read_text(encoding='utf-8', errors='surrogateescape').splitlines():
         f = line.split('\t')
         kind = f[0]
         if kind == 'S' and len(f) == 2:
             starts.add(f[1])
-        elif kind in ('F', 'D', 'E') and len(f) == 3:
-            table = out[{'F': 'files', 'D': 'dirs', 'E': 'stats'}[kind]]
+        elif kind in ('F', 'D', 'E', 'L') and len(f) == 3:
+            table = out[{'F': 'files', 'D': 'dirs', 'E': 'stats', 'L': 'links'}[kind]]
             if (kind == 'F' and f[2] == '-') or table.setdefault(f[1], f[2]) != f[2]:
                 return None
         elif kind == 'C' and len(f) == 4:
@@ -374,6 +374,13 @@ def stat_state(path):
     return 'dir' if stat.S_ISDIR(st.st_mode) else str(st.st_size)
 
 
+def link_of(path):
+    try:
+        return os.readlink(path)
+    except OSError:
+        return '-'
+
+
 def listing_of(path):
     if not path.is_dir():
         return None
@@ -385,13 +392,15 @@ def code_prints(path):
 
 
 def entry_holds(entry, root):
-    """캐시 항목이 지금도 맞는가: 연 파일·본 폴더·stat 으로 본 것이 같고, 실행한 코드가 든 파일마다 원본이 같거나
+    """캐시 항목이 지금도 맞는가: 연 파일·본 폴더·stat 으로 본 것·거쳐 간 링크가 같고, 실행한 코드가 든 파일마다 원본이 같거나
     실행한 qualname 들의 지문 목록(차례 포함)이 같다."""
     if any(content_sig(root / p) != v for p, v in entry['files'].items()):
         return False
     if any(listing_of(root / p) != v for p, v in entry['dirs'].items()):
         return False
     if any(stat_state(root / p) != v for p, v in entry['stats'].items()):
+        return False
+    if any(link_of(root / p) != v for p, v in entry.get('links', {}).items()):
         return False
     for p, (src, quals) in entry['code'].items():
         if sha1_of(root / p) == src:
@@ -416,7 +425,7 @@ def trace_entry(trace, root):
                 return None
             kept[q] = prints[q]
         code[p] = [sha1_of(root / p), kept]
-    return {'files': trace['files'], 'dirs': trace['dirs'], 'stats': trace['stats'], 'code': code}
+    return {'files': trace['files'], 'dirs': trace['dirs'], 'stats': trace['stats'], 'links': trace['links'], 'code': code}
 
 
 def load_entries(path):

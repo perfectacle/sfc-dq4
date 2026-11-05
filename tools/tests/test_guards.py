@@ -543,8 +543,8 @@ class BuiltCacheTest(unittest.TestCase):
     def test_native_children_record_their_file_args(self):
         self.edit('data file.txt', 'a')
         self.edit('data.txt', 'a')
-        for call in ("['cat', 'data file.txt']", "'cat data.txt', shell=True", "['sh', '-c', 'cat \"data file.txt\"']",
-                     "'cat \"data file.txt\"', shell=True", "'cat data\\\\ file.txt', shell=True"):
+        for call in ("['cat', 'data file.txt']", "'cat data.txt', shell=True", "['sh', '-c', 'cat data.txt']",
+                     "['bash', '-lc', 'A=b cat data.txt']"):
             with self.subTest(call=call):
                 self.edit('check.py', f"import subprocess\nsubprocess.run({call}, check=True, capture_output=True)\n")
                 self.detail()
@@ -552,10 +552,26 @@ class BuiltCacheTest(unittest.TestCase):
                 name = 'data file.txt' if 'file' in call else 'data.txt'
                 self.assertTrue(any(r.startswith(f'F\t{name}\t') for r in reads), reads)
 
-    def test_unsplittable_shell_text_keeps_no_entry(self):
-        self.edit('check.py', "import subprocess\nsubprocess.run('true \"x', shell=True)\n")
+    def test_shell_text_it_cannot_resolve_keeps_no_entry(self):
+        self.edit('data.txt', 'a')
+        calls = ("subprocess.run('cat \"data.txt\"', shell=True)", "subprocess.run('cat data.txt;true', shell=True)",
+                 "subprocess.run('cat <data.txt', shell=True)", "subprocess.run('echo $(cat data.txt)', shell=True)",
+                 "subprocess.run('cat data.t*', shell=True)", "subprocess.run('true \"x', shell=True)",
+                 "os.system('python3 -c \"print(1)\"; cat data.txt')")
+        for n, call in enumerate(calls):
+            with self.subTest(call=call):
+                self.edit('check.py', f"import os, subprocess\n{call}\n")
+                self.detail()
+                self.edit('other.py', f'X = {100 + n}\n')
+                self.assertFalse(self.skipped())
+
+    def test_child_cwd_resolves_its_file_args(self):
+        (self.root / 'sub').mkdir()
+        self.edit('sub/data.txt', 'a')
+        self.edit('check.py', "import subprocess\nsubprocess.run(['cat', 'data.txt'], cwd='sub', check=True, capture_output=True)\n")
         self.detail()
-        self.edit('other.py', 'X = 8\n')
+        self.edit('sub/data.txt', 'b')
+        self.edit('other.py', 'X = 10\n')
         self.assertFalse(self.skipped())
 
     def test_symlink_lstat_and_stat_agree(self):
@@ -565,6 +581,17 @@ class BuiltCacheTest(unittest.TestCase):
         self.detail()
         self.edit('other.py', 'X = 9\n')
         self.assertTrue(self.skipped())
+
+    def test_retargeted_symlink_reruns(self):
+        self.edit('data.txt', 'abcd')
+        self.edit('more.txt', 'abcd')
+        (self.root / 'link.txt').symlink_to('data.txt')
+        self.edit('check.py', "open('link.txt').read()\n")
+        self.detail()
+        (self.root / 'link.txt').unlink()
+        (self.root / 'link.txt').symlink_to('more.txt')
+        self.edit('other.py', 'X = 11\n')
+        self.assertFalse(self.skipped())
 
     def test_failed_check_keeps_no_entry(self):
         self.edit('check.py', 'import sys; sys.exit(3)\n')
