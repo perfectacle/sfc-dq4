@@ -1,3 +1,4 @@
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -540,38 +541,69 @@ class BuiltCacheTest(unittest.TestCase):
         self.edit('data.txt', 'b')
         self.assertEqual(guards.run_check(self.check, 60, self.logs)[0], 'failed')
 
-    def test_native_children_record_their_file_args(self):
+    def test_mesence_children_record_their_file_and_env_args(self):
+        from unittest import mock
+        cat = os.path.realpath('/bin/cat')
+        (self.root / 'sub').mkdir()
         self.edit('data file.txt', 'a')
-        self.edit('data.txt', 'a')
-        for call in ("['cat', 'data file.txt']", "'cat data.txt', shell=True", "['sh', '-c', 'cat data.txt']",
-                     "['bash', '-lc', 'A=b cat data.txt']"):
-            with self.subTest(call=call):
-                self.edit('check.py', f"import subprocess\nsubprocess.run({call}, check=True, capture_output=True)\n")
-                self.detail()
-                reads = (self.logs / 'c.reads').read_text().splitlines()
-                name = 'data file.txt' if 'file' in call else 'data.txt'
-                self.assertTrue(any(r.startswith(f'F\t{name}\t') for r in reads), reads)
+        self.edit('sub/data.txt', 'a')
+        self.edit('state.txt', 'a')
+        calls = {"[cat, 'data file.txt']": 'data file.txt',
+                 "[cat, 'data.txt'], cwd='sub'": 'sub/data.txt',
+                 "[cat, '/dev/null'], env={**os.environ, 'STATE': 'state.txt'}": 'state.txt'}
+        with mock.patch.dict(os.environ, {'MESENCE': cat}):
+            for n, (call, name) in enumerate(calls.items()):
+                with self.subTest(call=call):
+                    self.edit('check.py', f"import os, subprocess\ncat = {cat!r}\n"
+                                          f"subprocess.run({call}, check=True, capture_output=True)\n")
+                    self.detail()
+                    reads = (self.logs / 'c.reads').read_text().splitlines()
+                    self.assertTrue(any(r.startswith(f'F\t{name}\t') for r in reads), reads)
+                    self.edit(name, f'b{n}')
+                    self.edit('other.py', f'X = {200 + n}\n')
+                    self.assertFalse(self.skipped())
 
-    def test_shell_text_it_cannot_resolve_keeps_no_entry(self):
+    def test_children_it_does_not_know_keep_no_entry(self):
+        py = sys.executable
         self.edit('data.txt', 'a')
-        calls = ("subprocess.run('cat \"data.txt\"', shell=True)", "subprocess.run('cat data.txt;true', shell=True)",
-                 "subprocess.run('cat <data.txt', shell=True)", "subprocess.run('echo $(cat data.txt)', shell=True)",
-                 "subprocess.run('cat data.t*', shell=True)", "subprocess.run('true \"x', shell=True)",
-                 "os.system('python3 -c \"print(1)\"; cat data.txt')")
+        calls = ("subprocess.run('cat data.txt', shell=True)", "subprocess.run(['sh', '-c', 'cat data.txt'])",
+                 "subprocess.run(['nice', 'cat', 'data.txt'])", "subprocess.run(['cat', 'data.txt'])",
+                 "subprocess.run(['x', '-c', 'cat data.txt'], executable='/bin/sh')",
+                 "subprocess.run(['sh'], input=b'cat data.txt')", "os.system('true')",
+                 f"subprocess.run([{py!r}, '-X', 'utf8', '-I', '-c', 'pass'])")
         for n, call in enumerate(calls):
             with self.subTest(call=call):
                 self.edit('check.py', f"import os, subprocess\n{call}\n")
                 self.detail()
+                self.assertIn('?', (self.logs / 'c.reads').read_text().split())
                 self.edit('other.py', f'X = {100 + n}\n')
                 self.assertFalse(self.skipped())
 
-    def test_child_cwd_resolves_its_file_args(self):
-        (self.root / 'sub').mkdir()
-        self.edit('sub/data.txt', 'a')
-        self.edit('check.py', "import subprocess\nsubprocess.run(['cat', 'data.txt'], cwd='sub', check=True, capture_output=True)\n")
+    def test_os_access_is_an_input(self):
+        self.edit('data.txt', 'a')
+        self.edit('check.py', "import os\nos.access('data.txt', os.R_OK)\n")
         self.detail()
-        self.edit('sub/data.txt', 'b')
-        self.edit('other.py', 'X = 10\n')
+        (self.root / 'data.txt').unlink()
+        self.edit('other.py', 'X = 12\n')
+        self.assertFalse(self.skipped())
+
+    def test_links_inside_link_targets_and_dotdot_rerun(self):
+        for d in ('real/b', 'other/b', 'deep/sub'):
+            (self.root / d).mkdir(parents=True)
+        self.edit('real/b/x.txt', 'a')
+        self.edit('other/b/x.txt', 'a')
+        self.edit('deep/x.txt', 'a')
+        self.edit('x.txt', 'decoy')
+        (self.root / 'sub').symlink_to('real')
+        (self.root / 'a').symlink_to('sub/b')
+        (self.root / 'link').symlink_to('deep/sub')
+        self.edit('check.py', "open('a/x.txt').read()\nopen('link/../x.txt').read()\n")
+        self.detail()
+        reads = (self.logs / 'c.reads').read_text().splitlines()
+        self.assertTrue(any(r.startswith('F\tdeep/x.txt\t') for r in reads), reads)
+        (self.root / 'sub').unlink()
+        (self.root / 'sub').symlink_to('other')
+        self.edit('other.py', 'X = 13\n')
         self.assertFalse(self.skipped())
 
     def test_symlink_lstat_and_stat_agree(self):

@@ -400,7 +400,7 @@ def entry_holds(entry, root):
         return False
     if any(stat_state(root / p) != v for p, v in entry['stats'].items()):
         return False
-    if any(link_of(root / p) != v for p, v in entry.get('links', {}).items()):
+    if 'links' not in entry or any(link_of(root / p) != v for p, v in entry['links'].items()):
         return False
     for p, (src, quals) in entry['code'].items():
         if sha1_of(root / p) == src:

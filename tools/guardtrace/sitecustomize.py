@@ -3,17 +3,17 @@ GUARD_READS_ROOT 아래에서 쓴 것을 GUARD_READS 에 탭으로 가른 줄로
 
   S <경로>                     이 파일을 실은 프로세스의 스크립트(sys.argv[0], 저장소 밖이면 -)
   C <경로> <qualname> <지문>   실행한 코드 객체(guardprint.fingerprint). 실행하지 않은 함수는 적지 않는다
-  F <경로> <내용>               import 밖에서 읽으려고 연 파일, Python 밖 자식의 인자로 넘긴 파일(content_sig)
+  F <경로> <내용>               import 밖에서 읽으려고 연 파일, MesenCE 에 인자·환경 변수로 넘긴 파일(content_sig)
   D <경로> <SHA-1>              목록을 본 폴더(이름 정렬)
-  E <경로> <상태>               os.stat 으로 본 것(크기, dir, 없으면 -). os.path.exists·isfile·getsize·Path.exists 가 쓴다
+  E <경로> <상태>               os.stat·os.access 로 본 것(크기, dir, 없으면 -). os.path.exists·isfile·getsize·Path.exists 가 쓴다
   L <경로> <가리키는 곳>        위 경로들을 풀다 거쳐 간 심볼릭 링크(os.readlink). 링크를 바꿔 달면 다른 파일을 읽게 된다
   ?                             무엇을 읽었는지 모르는 일이 있었다. guards.py 는 이 기록을 캐시하지 않는다
 
 같은 경로가 다른 값으로 두 번 나오면(도는 중에 바뀜) guards.py 가 기록을 버린다. GUARD_READS_SKIP 의 폴더(검사가 돌기
-전에 비우는 출력 폴더) 아래는 적지 않는다. `?` 는 이 파일을 싣지 못하게 뜨는 자식(python -I·-E·-S, env, PYTHONPATH·
-GUARD_READS 를 바꾸거나 뺀 환경), Python 밖이면서 .py 를 인자로 받는 자식(grep 등), 영숫자·`_./=+:,@%-`·칸 밖 글자가 든 셸 명령(따옴표·`;|&<>`·`$`·
-글롭 등은 무엇을 읽을지 풀지 않는다), __pycache__ 밖 .pyc, 감시 도구 번호를
-얻지 못함에 적는다.
+전에 비우는 출력 폴더) 아래는 적지 않는다. 경로는 커널처럼 한 단계씩 풀어(`..` 포함) 실제 파일로 적는다. 자식은
+아는 것만 받는다: 옵션이 -u·-B 뿐인 Python(자식 안에서 추적된다)과 $MESENCE(인자·환경 변수로 받은 저장소 안 파일을
+F 로). `?` 는 그 밖 자식(셸·os.system·git·asar 등), PYTHONPATH·GUARD_READS·PYTHONPYCACHEPREFIX 를 바꾸거나 뺀 환경,
+자식에게 넘긴 폴더, __pycache__ 밖 .pyc, 너무 깊은 링크, 감시 도구 번호를 얻지 못함에 적는다.
 """
 import hashlib
 import os
@@ -27,11 +27,9 @@ _ROOT = os.environ.get('GUARD_READS_ROOT')
 _SKIP = [os.path.realpath(p) for p in os.environ.get('GUARD_READS_SKIP', '').split(os.pathsep) if p]
 _HERE = os.path.dirname(os.path.realpath(__file__))
 _VENV = os.path.join(os.path.realpath(_ROOT), '.venv') if _ROOT else ''
-_BLIND = re.compile(r'(^|[\s/])python[0-9.]*(\s+-[A-Za-z]+)*\s+-[A-Za-z]*[IES][A-Za-z]*(\s|$)'
-                    r'|(^|[\s/])env\s|PYTHONPATH|GUARD_READS|PYTHONPYCACHEPREFIX|PYTHONNOUSERSITE')
-_PYTHON = re.compile(r'(^|/)(python[0-9.]*|uv)$')
-_SHELL = re.compile(r'(^|/)(sh|bash|dash|zsh|ksh)$')
-_PLAIN = re.compile(r'[A-Za-z0-9_./=+:,@%\t -]*')
+_PYTHON = re.compile(r'python[0-9.]*')
+# 이 옵션만 단 Python 자식은 추적기를 그대로 싣는다
+_PY_OK = {'-u', '-B'}
 _IMPORT = '<frozen importlib._bootstrap_external>'
 # guards.BIG_FILE 와 같아야 한다. 이보다 큰 파일은 내용 대신 크기·mtime_ns
 BIG_FILE = 64 << 20
@@ -105,21 +103,34 @@ def _excluded(path):
         path == d or path.startswith(d + os.sep) for d in [_HERE, _VENV, *_SKIP] if d)
 
 
-def _links(path):
-    """path 를 풀며 거쳐 가는 저장소 안 링크를 L 줄로 적는다."""
-    parts = path.split(os.sep)
-    for i in range(2, len(parts) + 1):
-        step = os.sep.join(parts[:i])
-        if step in _walked:
+def _resolve(path):
+    """커널처럼 앞에서부터 한 단계씩 풀어 실제 경로를 낸다(`..` 는 그때까지 푼 실제 폴더의 부모).
+    거쳐 간 저장소 안 링크마다 L 줄을 적는다. 링크가 너무 깊으면 None."""
+    todo = [c for c in path.split(os.sep) if c][::-1]
+    cur = os.sep
+    hops = 0
+    while todo:
+        c = todo.pop()
+        if c == '.':
             continue
-        _walked.add(step)
-        if os.path.islink(step):
-            at = os.path.join(os.path.realpath(os.path.dirname(step)), os.path.basename(step))
-            if not _excluded(at):
-                _emit('L', _rel(at), os.readlink(step))
-
-
-_walked = set()
+        if c == '..':
+            cur = os.path.dirname(cur)
+            continue
+        step = os.path.join(cur, c)
+        try:
+            target = os.readlink(step)
+        except OSError:
+            cur = step
+            continue
+        hops += 1
+        if hops > 40:
+            return None
+        if not _excluded(step):
+            _emit('L', _rel(step), target)
+        if target.startswith(os.sep):
+            cur = os.sep
+        todo += [t for t in target.split(os.sep) if t][::-1]
+    return cur
 
 
 def _inside(path, cwd=None):
@@ -131,13 +142,17 @@ def _inside(path, cwd=None):
     # <frozen …>·<string> 같은 이름은 파일이 아니다
     if not path or path.startswith('<'):
         return None
-    path = os.path.abspath(os.path.join(cwd, path) if cwd else path)
-    _links(path)
-    path = os.path.realpath(path)
-    # .venv 는 uv.lock(키에 듦)이 정한다
-    if _excluded(path):
+    if not path.startswith(os.sep):
+        # 상대 cwd 는 지금 폴더 기준이다
+        path = os.path.join(os.getcwd(), cwd or '', path)
+    full = _resolve(path)
+    if full is None:
+        _emit('?')
         return None
-    return path
+    # .venv 는 uv.lock(키에 듦)이 정한다
+    if _excluded(full):
+        return None
+    return full
 
 
 def _rel(full):
@@ -179,34 +194,45 @@ def _listed(path):
     _emit('D', _rel(full), hashlib.sha1(names.encode('utf-8', 'surrogateescape')).hexdigest())
 
 
-def _spawned(command, env, cwd=None):
-    text = _text(command)
-    if isinstance(command, (list, tuple)):
-        words = [_text(w) for w in command]
-    else:
-        # os.system 의 셸 문자열
-        words = ['sh', '-c', text]
-    if _BLIND.search(text) or _blind_env(env):
+def _python_ok(words):
+    """Python 자식이 추적기를 싣는 꼴(옵션이 _PY_OK 뿐)인가."""
+    for w in words[1:]:
+        if w in ('-c', '-m') or not w.startswith('-'):
+            return True
+        if w not in _PY_OK:
+            return False
+    return True
+
+
+def _mesence():
+    path = os.environ.get('MESENCE')
+    return os.path.realpath(path) if path else None
+
+
+def _spawned(program, command, env, cwd=None):
+    """자식은 아는 것만 받는다. Python 은 자식 안에서 추적되고, MesenCE 는 인자·환경 변수로 받은 파일을 입력으로
+    본다. 그 밖(셸·os.system·git·asar 등)은 무엇을 읽을지 모르므로 `?`."""
+    if not isinstance(command, (list, tuple)) or not command or _blind_env(env):
         _emit('?')
         return
-    if words and _SHELL.search(words[0]):
-        # 셸이 돌릴 명령은 칸으로만 가를 수 있는 꼴일 때만 낱말로 본다
-        rest = words[1:]
-        if not all(_PLAIN.fullmatch(w) for w in rest):
+    words = [_text(w) for w in command]
+    names = {os.path.basename(words[0])}
+    if program is not None:
+        names.add(os.path.basename(_text(program)))
+    if all(_PYTHON.fullmatch(n) for n in names):
+        if not _python_ok(words):
             _emit('?')
-            return
-        words = [words[0]] + [part for w in rest for part in w.split()]
-        inner = [w for w in words[1:] if not w.startswith('-')]
-        program = os.path.basename(inner[0]) if inner else ''
-    else:
-        program = os.path.basename(words[0]) if words else ''
-    if _PYTHON.search(program):
         return
-    if '.py' in text:
+    real = os.path.realpath(_text(program) if program is not None else words[0])
+    if real != _mesence():
         _emit('?')
         return
-    # Python 밖 자식(에뮬레이터 등)이 인자로 받은 파일은 그 내용을 입력으로 본다
-    for word in words[1:]:
+    env = os.environ if env is None else env
+    values = []
+    for v in env.values():
+        values += _text(v).split(os.pathsep)
+    # 인자·환경 변수로 받은 저장소 안 파일은 그 내용을 입력으로 본다
+    for word in words[1:] + values:
         for part in word.split('='):
             full = _inside(part, cwd) if part else None
             if full and os.path.isfile(full):
@@ -226,11 +252,15 @@ def _hook(event, args):
         elif event in ('os.listdir', 'os.scandir'):
             _listed(args[0])
         elif event == 'subprocess.Popen':
-            _spawned(args[1], args[3], args[2])
-        elif event == 'os.system':
-            _spawned(args[0], None)
-        elif event in ('os.exec', 'os.posix_spawn', 'os.spawn'):
-            _spawned(args[-2], args[-1])
+            _spawned(args[0], args[1], args[3], args[2])
+        elif event in ('os.system', 'os.fork', 'os.forkpty'):
+            # 셸 문자열은 풀지 않는다. fork 뒤 exec 는 os.exec 로 따로 잡힌다
+            if event == 'os.system':
+                _emit('?')
+        elif event in ('os.exec', 'os.posix_spawn'):
+            _spawned(args[0], args[1], args[2])
+        elif event == 'os.spawn':
+            _spawned(args[1], args[2], args[3])
         elif event == 'import' and isinstance(args[1], str) and not args[1].endswith(('.py', '.pyc')):
             # 확장 모듈(.so)은 open 감사 없이 실리고 실행한 코드를 볼 수 없어 내용째 입력으로 본다
             full = _inside(args[1])
@@ -282,6 +312,19 @@ def _wrap_stat(real):
     return stat
 
 
+def _wrap_access(real):
+    # os.access 는 감사 이벤트가 없다. 있음·크기를 stat 과 같은 E 줄로 적는다
+    def access(path, mode, *args, **kwargs):
+        if not args and not kwargs.get('dir_fd'):
+            try:
+                _stat_seen(path, _real_stat(path))
+            except OSError:
+                _stat_seen(path, None)
+        return real(path, mode, *args, **kwargs)
+    access.__wrapped__ = real
+    return access
+
+
 def _started(code, offset):
     # 추적기 자신의 realpath·stat 이 E 줄로 적히지 않게
     busy = getattr(_local, 'busy', False)
@@ -317,6 +360,7 @@ if _OUT and _ROOT:
     sys.addaudithook(_hook)
     _real_stat = os.stat
     os.stat = _wrap_stat(os.stat)
+    os.access = _wrap_access(os.access)
     os.lstat = _wrap_stat(os.lstat)
     for _tool in (3, 4, 2):
         try:
