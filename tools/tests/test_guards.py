@@ -315,3 +315,106 @@ class RunTest(unittest.TestCase):
                 self.assertEqual(guards.run_check({**gate, 'name': 'plain'}, 30, logs)[0], 'failed')
             finally:
                 guards.cache_dir = old
+
+
+class BuiltCacheTest(unittest.TestCase):
+    """입력 키가 빗나가도 빌드 결과와 검사 단계가 연 .py 가 같으면 검사 단계를 건너뛴다."""
+
+    def setUp(self):
+        import subprocess
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / 'repo'
+        self.root.mkdir()
+        self.files = {
+            'src.txt': 'A',
+            'build.py': "import sys; open(sys.argv[2] + '/out.txt', 'w').write(open('src.txt').read())\n",
+            'helper.py': 'VALUE = 1\n',
+            'check.py': "import helper, sys; sys.exit(0 if open(sys.argv[2]).read() else 1)\n",
+            'other.py': 'X = 1\n',
+        }
+        for name, text in self.files.items():
+            (self.root / name).write_text(text)
+        run = lambda *a: subprocess.run(a, cwd=self.root, check=True, capture_output=True)
+        run('git', 'init', '-q')
+        run('git', 'add', '.')
+        run('git', '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'x')
+        self.old = guards.ROOT, guards.cache_dir
+        guards.ROOT = self.root
+        guards.cache_dir = lambda: Path(self.tmp.name) / 'cache'
+        self.logs = Path(self.tmp.name) / 'logs'
+        self.logs.mkdir()
+        py = sys.executable
+        (self.root / 'work').mkdir()
+        self.check = {'name': 'c', 'needs': [],
+                      'run': f'mkdir -p work/b && {py} build.py --out work/b && {py} check.py --rom work/b/out.txt'}
+
+    def tearDown(self):
+        guards.ROOT, guards.cache_dir = self.old
+        self.tmp.cleanup()
+
+    def edit(self, name, text):
+        (self.root / name).write_text(text)
+
+    def detail(self, check=None):
+        status, detail = guards.run_check(check or self.check, 60, self.logs)
+        self.assertEqual(status, 'passed', detail)
+        return detail
+
+    def test_split_needs_a_build_stage_and_plain_and(self):
+        self.assertEqual(guards.split_built({'run': 'a --out work/x && b --rom work/x/r'}),
+                         ('a --out work/x ', ' b --rom work/x/r'))
+        for run in ('b --rom rom/r', 'a --out work/x && cd y && b', 'a --out work/x; b',
+                    'a --out work/x && b || c', 'a --out work/x && b | tee l', 'a --out work/x && python -m unittest'):
+            self.assertIsNone(guards.split_built({'run': run}), run)
+
+    def test_same_build_and_same_check_code_skips_the_check(self):
+        self.assertNotIn('캐시', self.detail())
+        reads = (self.logs / 'c.reads').read_text().split()
+        self.assertIn('check.py', reads)
+        self.assertIn('helper.py', reads)
+        self.assertNotIn('build.py', reads)
+        self.edit('other.py', 'X = 2\n')
+        self.assertIn('빌드 결과와 검사 코드가 같아', self.detail())
+        # 빌드 도구를 고쳐도 결과가 같으면 건너뛴다
+        self.edit('build.py', self.files['build.py'] + '# 같은 결과\n')
+        self.assertIn('빌드 결과와 검사 코드가 같아', self.detail())
+
+    def test_check_code_or_build_output_change_runs_the_check(self):
+        self.detail()
+        self.edit('helper.py', 'VALUE = 2\n')
+        self.assertNotIn('캐시', self.detail())
+        self.edit('src.txt', 'B')
+        self.assertNotIn('캐시', self.detail())
+        self.edit('src.txt', 'A')
+        self.edit('helper.py', 'VALUE = 1\n')
+        self.edit('other.py', 'X = 3\n')
+        self.assertIn('빌드 결과와 검사 코드가 같아', self.detail())
+
+    def test_non_python_input_change_runs_the_check(self):
+        self.detail()
+        self.edit('data.toml', 'a = 1\n')
+        import subprocess
+        subprocess.run(['git', 'add', 'data.toml'], cwd=self.root, check=True)
+        self.assertNotIn('캐시', self.detail())
+
+    def test_child_python_the_tracer_cannot_see_keeps_no_entry(self):
+        py = sys.executable
+        self.edit('check.py', f"import subprocess, sys; subprocess.run([{py!r}, '-I', '-c', 'pass'], check=True)\n")
+        self.detail()
+        self.assertIn('?', (self.logs / 'c.reads').read_text().split())
+        self.edit('other.py', 'X = 4\n')
+        self.assertNotIn('캐시', self.detail())
+
+    def test_failed_check_keeps_no_entry(self):
+        self.edit('check.py', 'import sys; sys.exit(3)\n')
+        self.assertEqual(guards.run_check(self.check, 60, self.logs)[0], 'failed')
+        self.edit('other.py', 'X = 5\n')
+        self.assertEqual(guards.run_check(self.check, 60, self.logs)[0], 'failed')
+
+    def test_no_cache_runs_everything(self):
+        self.detail()
+        self.edit('other.py', 'X = 6\n')
+        status, detail = guards.run_check(self.check, 60, self.logs, no_cache=True)
+        self.assertEqual(status, 'passed')
+        self.assertNotIn('캐시', detail)
