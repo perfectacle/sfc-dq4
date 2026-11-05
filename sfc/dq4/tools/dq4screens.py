@@ -1,7 +1,8 @@
 """장면 화면을 기준과 견준다. 형식은 sfc/dq4/docs/dq4-screen-baseline-format.md.
 
 화면은 8×8 칸으로 나눠 칸마다 해시(SHA-1 앞 4바이트)를 내고, 기준(sfc/dq4/screens.toml)에는 이 칸 해시만 둔다. 기준 그림은
-롬에서 나온 것이라 저장소에 두지 않는다(ROM-01). 칸 해시만으로 어느 머신에서나 같은 판정이 난다.
+롬에서 나온 것이라 저장소에 두지 않는다(ROM-01). 칸 해시만으로 어느 머신에서나 같은 판정이 난다. 칸 해시도 정보를 조금
+드러낸다(형식 문서 「기준」: 단색 칸은 색을 전수로 찾을 수 있고, 같은 해시가 되풀이되면 무늬 윤곽이 보인다).
 
   - 가림: 직사각형(x, y, 너비, 높이) 안 픽셀은 0 으로 지우고 해시를 낸다. 칸이 모두 가려지면 견주지 않는다
   - 허용치: 다른 칸이 tolerance 개 이하면 통과(기본 0)
@@ -9,7 +10,8 @@
     로컬 캐시(원래 체크아웃 work/cache/screens/<digest>.png)에 있으면 기준·지금·차이를 나란히 둔다
 
 기준은 장면 검사의 --write-screens "까닭" 으로만 쓴다(write_baselines). 칸이 바뀐 장면과 새 장면에만 그 까닭이 남고,
-항목마다 표지(check)를 둔다. 손으로 고치면 표지가 맞지 않아 검사가 실패한다.
+항목마다 표지(check)를 둔다. 표지는 공개된 방식의 SHA-1 이라 실수로 손댄 것을 잡을 뿐 위조는 막지 못한다. 손으로 고친
+기준은 검사에서는 멈추고, --write-screens 로는 다시 쓸 수 있다.
 """
 import base64
 import hashlib
@@ -24,11 +26,23 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 BASELINES = HERE.parent / 'screens.toml'
 TILE = 8
-# MesenCE 가 화면 버퍼를 만들 때 쓰는 사용자 설정(영상 필터·밝기·숨긴 층 등)을 명령줄로 고정한다. 기준은 이 값에서 만든다
+# MesenCE 사용자 설정 가운데 화면 버퍼(emu.getScreenBuffer)나 에뮬레이션에 닿을 수 있는 것을 명령줄로 UI 기본값에
+# 고정한다. 기준은 이 값에서 만든다. 명령줄 값은 settings.json 보다 앞선다. 이름이나 값이 틀리면 MesenCE 가 아무 말
+# 없이 무시하므로, 장면 검사가 바꿔 보아 화면이 달라지는지로 이름이 먹는지 본다(VERIFY_ARGS). 겹침 테두리·화면 비율·
+# 쌍선형 보간·화면 돌리기는 그리기 단계의 것이라 이 버퍼에 닿지 않는다(형식 문서 「화면을 얻는 법」)
 SCREEN_ARGS = ('--Video.VideoFilter=None', '--Video.Brightness=0', '--Video.Contrast=0', '--Video.Hue=0',
-               '--Video.Saturation=0', '--Video.ScanlineIntensity=0', '--Snes.HighResBlendMode=None',
+               '--Video.Saturation=0', '--Video.ScanlineIntensity=0',
+               '--Snes.ConfigOverrides.OverrideVideoFilter=false', '--Snes.Region=Auto',
+               '--Snes.ColorCorrection=None', '--Snes.HighResBlendMode=None', '--Snes.DeinterlaceMode=Weave',
                '--Snes.HideBgLayer1=false', '--Snes.HideBgLayer2=false', '--Snes.HideBgLayer3=false',
-               '--Snes.HideBgLayer4=false', '--Snes.HideSprites=false')
+               '--Snes.HideBgLayer4=false', '--Snes.HideSprites=false', '--Snes.ForceFixedResolution=false',
+               '--Snes.RemoveSpriteLimit=false', '--Snes.PpuExtraScanlinesBeforeNmi=0',
+               '--Snes.PpuExtraScanlinesAfterNmi=0', '--Snes.SpcClockSpeedAdjustment=40')
+# 타이틀 화면을 바꿔야 하는 값. 바뀌지 않으면 그 이름을 MesenCE 가 받지 않은 것이다(판이 바뀌어 이름이 달라짐 등)
+VERIFY_ARGS = ('--Video.VideoFilter=NtscBlargg', '--Video.Brightness=50', '--Video.Contrast=50', '--Video.Hue=50',
+               '--Video.Saturation=50', '--Snes.Region=Pal', '--Snes.HideBgLayer1=true', '--Snes.HideBgLayer2=true',
+               '--Snes.HideSprites=true', '--Snes.ForceFixedResolution=true', '--Snes.PpuExtraScanlinesBeforeNmi=100',
+               '--Snes.PpuExtraScanlinesAfterNmi=100')
 LUA = HERE / 'lua' / 'dq4screen.lua'
 FIELDS = ('scene', 'emulator', 'width', 'height', 'masks', 'tolerance', 'digest', 'tiles')
 
@@ -40,6 +54,16 @@ def read_rgb(path):
     if len(data) != 8 + w * h * 3:
         raise ValueError(f'{path}: 크기 {w}×{h} 와 길이 {len(data)} 가 맞지 않음')
     return np.frombuffer(data, np.uint8, offset=8).reshape(h, w, 3)
+
+
+def check_masks(masks, width, height):
+    """가림 직사각형이 화면 안에 있고 너비·높이가 1 이상인지. 아니면 ValueError."""
+    for r in masks:
+        if len(r) != 4:
+            raise ValueError(f'가림 {r}: [x, y, 너비, 높이] 넷이어야 함')
+        x, y, w, h = r
+        if w < 1 or h < 1 or x < 0 or y < 0 or x + w > width or y + h > height:
+            raise ValueError(f'가림 {r}: {width}×{height} 화면 밖이거나 비었음')
 
 
 def masked(img, masks):
@@ -87,6 +111,7 @@ def unpack_tiles(text):
 
 def entry(scene, emulator, img, masks=(), tolerance=0):
     masks = [list(map(int, r)) for r in masks]
+    check_masks(masks, img.shape[1], img.shape[0])
     return {'scene': scene, 'emulator': emulator, 'width': int(img.shape[1]), 'height': int(img.shape[0]),
             'masks': masks, 'tolerance': int(tolerance), 'digest': digest(img, masks),
             'tiles': pack_tiles(tile_hashes(img, masks))}
@@ -98,14 +123,18 @@ def entry_check(e, reason):
     return hashlib.sha1(text.encode('utf-8')).hexdigest()[:12]
 
 
-def load_baselines(path=BASELINES):
-    """{(장면, 에뮬레이터): 항목}. 파일이 없으면 빈 dict. 표지가 맞지 않거나 까닭이 비면 ValueError(손으로 고친 기준)."""
-    path = Path(path)
+def load_baselines(path=None, verify=True):
+    """{(장면, 에뮬레이터): 항목}. 파일이 없으면 빈 dict. verify 면 표지가 맞지 않거나 까닭이 빌 때 ValueError(손으로 고친
+    기준). 기준을 다시 쓰는 길은 verify=False 로 읽어 손으로 고친 기준도 덮어쓸 수 있게 한다."""
+    path = Path(path or BASELINES)
     if not path.exists():
         return {}
     out = {}
     for e in tomllib.loads(path.read_text(encoding='utf-8')).get('screen', []):
         key = (e.get('scene'), e.get('emulator'))
+        if not verify:
+            out[key] = e
+            continue
         if not str(e.get('reason', '')).strip():
             raise ValueError(f'{path.name} {key}: reason 이 비어 있음')
         if e.get('check') != entry_check(e, e['reason']):
@@ -185,24 +214,32 @@ def check_screen(img, scene, emulator, out, masks=(), tolerance=0, baselines=Non
     return r
 
 
-def write_baselines(rows, reason, path=BASELINES):
+def valid(e):
+    """기준 항목이 이 도구가 쓴 그대로인가(칸이 모두 있고 까닭이 있고 표지가 맞음)."""
+    return all(k in e for k in FIELDS) and str(e.get('reason', '')).strip() and \
+        e.get('check') == entry_check(e, e['reason'])
+
+
+def write_baselines(rows, reason, path=None):
     """rows [(장면, 에뮬레이터, 화면, 가림, 허용치)] 로 기준 파일을 고친다. 칸·가림·허용치가 바뀐 항목과 새 항목은 reason 을,
-    같은 항목은 앞 reason 을 둔다. rows 에 없는 기준은 그대로 둔다. 기준 그림은 로컬 캐시에만 둔다."""
+    같은 항목은 앞 reason 을 둔다. rows 에 없는 기준은 그대로 두되, 손으로 고친 것(표지가 맞지 않음)은 빼서 그 장면을
+    다시 써야 하게 한다. 기준 그림은 로컬 캐시에만 둔다."""
     if not reason.strip():
         raise ValueError('까닭이 비어 있음')
-    old = load_baselines(path)
-    new = dict(old)
+    path = Path(path or BASELINES)
+    old = load_baselines(path, verify=False)
+    new = {k: e for k, e in old.items() if valid(e)}
     for scene, emulator, img, masks, tolerance in rows:
         e = entry(scene, emulator, img, masks, tolerance)
-        prev = old.get((scene, emulator))
+        prev = new.get((scene, emulator))
         same = prev and all(prev[k] == e[k] for k in FIELDS)
         new[(scene, emulator)] = {**e, 'reason': prev['reason'] if same else reason.strip()}
         save_png(img, cache_dir() / f'{e["digest"]}.png')
     lines = ['# 장면 화면 기준(dq4screens.py). 칸(8×8)마다 해시만 둔다. 손으로 고치지 않는다. 장면 검사의 --write-screens "까닭"',
-             '# 으로 다시 만든다. 바뀐 항목에만 그 까닭이 reason 으로 남고, check 는 그 도구만 쓰는 표지라 손으로 고치면 검사가 실패한다.', '']
+             '# 으로 다시 만든다. 바뀐 항목에만 그 까닭이 reason 으로 남고, check 는 실수로 손댄 것을 잡는 표지다.', '']
     for key in sorted(new):
         e = new[key]
         lines += ['[[screen]]'] + [f'{k} = {json.dumps(e[k], ensure_ascii=False)}' for k in FIELDS]
         lines += ['reason = ' + json.dumps(e['reason'], ensure_ascii=False), f'check = "{entry_check(e, e["reason"])}"', '']
-    Path(path).write_text('\n'.join(lines), encoding='utf-8')
+    path.write_text('\n'.join(lines), encoding='utf-8')
     return new

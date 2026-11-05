@@ -1,4 +1,7 @@
+import contextlib
+import io
 import struct
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -38,6 +41,16 @@ class TileTests(unittest.TestCase):
             p.write_bytes(struct.pack('<II', 5, 4) + img.tobytes())
             with self.assertRaises(ValueError):
                 sc.read_rgb(p)
+
+
+class MaskTests(unittest.TestCase):
+    def test_masks_must_lie_inside_the_screen(self):
+        sc.check_masks([[0, 0, 32, 24], [8, 8, 1, 1]], 32, 24)
+        for bad in ([[0, 0, 33, 24]], [[-1, 0, 4, 4]], [[0, 0, 0, 4]], [[0, 20, 4, 5]], [[1, 2, 3]]):
+            with self.assertRaises(ValueError, msg=bad):
+                sc.check_masks(bad, 32, 24)
+        with self.assertRaises(ValueError):
+            sc.entry('s', 'mesence', picture(), [[30, 0, 8, 8]])
 
 
 class CompareTests(unittest.TestCase):
@@ -108,6 +121,19 @@ class BaselineTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'reason'):
             sc.load_baselines(self.path)
 
+    def test_write_recovers_a_hand_edited_file(self):
+        """손으로 고친 기준은 검사에서는 멈추지만, 다시 쓰면 고친 항목을 빼고 새로 쓴다(--write-screens 로 되돌릴 수 있음)."""
+        a, b = picture(seed=4), picture(seed=5)
+        sc.write_baselines([('a', 'mesence', a, (), 0), ('b', 'mesence', b, (), 0)], '처음', self.path)
+        text = self.path.read_text(encoding='utf-8')
+        self.path.write_text(text.replace('reason = "처음"', 'reason = "손"'), encoding='utf-8')
+        with self.assertRaises(ValueError):
+            sc.load_baselines(self.path)
+        got = sc.write_baselines([('a', 'mesence', a, (), 0)], '되돌림', self.path)
+        self.assertEqual(set(got), {('a', 'mesence')})       # 손댄 b 는 빠져 다시 써야 한다
+        self.assertEqual(got[('a', 'mesence')]['reason'], '되돌림')
+        self.assertEqual(set(sc.load_baselines(self.path)), {('a', 'mesence')})
+
     def test_check_screen_writes_diff_with_cached_baseline(self):
         a = picture(seed=3)
         sc.write_baselines([('a', 'mesence', a, (), 0)], '처음', self.path)
@@ -120,6 +146,47 @@ class BaselineTests(unittest.TestCase):
             self.assertEqual(im.size, (32 * 3, 24))
         r = sc.check_screen(a, 'missing', 'mesence', self.dir / 'out', baselines={})
         self.assertIn('기준 없음', r['problems'][0])
+
+
+class CheckScriptTests(unittest.TestCase):
+    def test_unknown_scene_is_an_error(self):
+        import dq4screencheck as c
+        with self.assertRaisesRegex(ValueError, '모르는 장면'):
+            c.scenes_for({'titel'}, False)
+        m, lib = c.scenes_for({'title'}, False)
+        self.assertEqual(([s[0] for s in m], [s[0] for s in lib]), (['title'], ['title']))
+
+    def test_main_writes_over_a_hand_edited_file_and_needs_every_scene(self):
+        """--write-screens 는 손으로 고친 기준 파일이 있어도 다시 쓴다. 장면이 모자라게 찍히면 통과가 아니다."""
+        import dq4screencheck as c
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            base = d / 'screens.toml'
+            base.write_text('[[screen]]\nscene = "title"\nemulator = "mesence"\nreason = "손"\ncheck = "x"\n',
+                            encoding='utf-8')
+            rom = d / 'r.sfc'
+            rom.write_bytes(b'rom')
+            shots = {}
+
+            def screen(name):
+                return shots.setdefault(name, picture(seed=len(shots) + 10))
+            argv = ['dq4screencheck.py', '--rom', str(rom), '--out', str(d / 'out')]
+            with mock.patch.object(sc, 'BASELINES', base), mock.patch.object(sc, 'cache_dir', return_value=d / 'cache'), \
+                    mock.patch.dict('os.environ', {'MESENCE': '/x/Mesen'}), \
+                    mock.patch.object(c, 'make_states', return_value={'start': d / 's', 'shop': d / 'h'}), \
+                    mock.patch.object(c, 'mesen_screen', side_effect=lambda m, r, dest, *a: screen(dest.name)), \
+                    mock.patch.object(c, 'libretro_screen', side_effect=lambda core, r, dest, f: screen(dest.name)), \
+                    mock.patch.object(c, 'verify_args', return_value=[]), contextlib.redirect_stdout(io.StringIO()):
+                with mock.patch.object(sys, 'argv', argv + ['--write-screens', '다시 씀']):
+                    self.assertEqual(c.main(), 0)
+                self.assertEqual(len(sc.load_baselines(base)), 6)
+                with mock.patch.object(sys, 'argv', argv):
+                    self.assertEqual(c.main(), 0)
+                with mock.patch.object(sys, 'argv', argv), mock.patch.object(c, 'verify_args', return_value=['--x=1']):
+                    self.assertEqual(c.main(), 1)
+                with mock.patch.object(sys, 'argv', argv), mock.patch.object(c, 'LIBRETRO_SCENES', ()), \
+                        mock.patch.object(c, 'scenes_for', return_value=([], [])):
+                    self.assertEqual(c.main(), 1)
 
 
 if __name__ == '__main__':
