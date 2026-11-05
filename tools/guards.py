@@ -25,8 +25,8 @@
                                                  걸린 검사마다 본문에 결과 줄이 있는지 봄(CI)
 
 --run 은 같은 입력(.md 를 뺀 추적 파일 내용, 명령, --rom 롬 SHA-1)으로 이미 통과한 검사를 건너뛴다.
-입력이 달라도 롬을 빌드하는 검사는 빌드 단계를 먼저 돌려, 만든 파일과 .py 밖 입력이 같고 검사 단계가 지난번에 연 .py 가
-모두 같으면 검사 단계를 건너뛴다(run_check, tools/guardtrace).
+입력이 달라도 롬을 빌드하는 검사는 빌드 단계를 먼저 돌려, 만든 파일과 .py 밖 입력이 같고 검사 단계가 지난번에 실행한
+함수의 코드·연 파일이 모두 같으면 검사 단계를 건너뛴다(run_check, tools/guardtrace).
 캐시는 원래 체크아웃의 work/cache/guards 에 있어 워크트리끼리 함께 쓴다. --no-cache 는 이 캐시와 검사 안의 캐시를
 모두 끄고 전부 돌린다(no_cache_env(logs): 장면 캐시 DQ4_READSET=off, 빌드 단계 캐시 DQ4_BUILD_CACHE=off, 서장 끝·시작
 상태 캐시는 로그 폴더 아래 빈 states/ 에서 그 실행 동안만).
@@ -192,7 +192,7 @@ def stat_key(path):
 def hash_path(h, path):
     """파일은 내용(BIG_FILE 보다 크면 크기·mtime_ns), 폴더는 그 안 파일들의 (상대 경로, 크기, mtime_ns).
     폴더를 내용째 읽지 않는 것은 needs 의 자원 저장소(수 GB)처럼 큰 폴더도 키를 곧 만들게 하려는 것이다.
-    파일을 내용은 그대로 두고 mtime 만 되돌리면 옛 결과로 건너뛸 수 있다. 없으면 표시만."""
+    파일을 내용은 그대로 두고 mtime 만 되돌리면 옛 결과로 건너뛸 수 있다. 폴더 안 cache/ 아래는 뺀다. 없으면 표시만."""
     path = Path(path)
     if path.is_file():
         if path.stat().st_size > BIG_FILE:
@@ -201,7 +201,11 @@ def hash_path(h, path):
             h.update(hashlib.sha1(path.read_bytes()).digest())
     elif path.is_dir():
         for f in sorted(p for p in path.rglob('*') if p.is_file()):
-            h.update(str(f.relative_to(path)).encode() + b'\0' + stat_key(f))
+            rel = f.relative_to(path)
+            # 폴더 안 cache/ 는 다른 입력에서 만든 것이고, 빌드가 같은 내용으로 다시 써 mtime 만 바뀐다
+            if 'cache' in rel.parts[:-1]:
+                continue
+            h.update(str(rel).encode() + b'\0' + stat_key(f))
     else:
         h.update(b'-')
 
@@ -264,12 +268,15 @@ def input_key(check, root=ROOT, environ=os.environ, built=False):
             h.update(b'mesence-settings:' + digest.encode())
     hash_path(h, root / 'rom')
     made = made_paths(run) + out_dirs(run)
-    for tok in sorted(set(re.findall(r'(?<![\w/])(work/\S+|rom/\S+)', run))):
+    for tok in sorted(set(re.findall(r'(?<![\w/])(?:\$PWD/)?(work/\S+|rom/\S+)', run))):
         if not any(under(tok, d) for d in made):
             h.update(tok.encode())
             hash_path(h, root / tok)
     if built:
-        h.update(TRACER.read_bytes())
+        for f in sorted(TRACER.glob('*.py')):
+            h.update(f.name.encode() + b'\0' + f.read_bytes())
+        # 새 .py 가 import 경로에서 다른 모듈을 가릴 수 있어 추적 .py 이름 목록은 넣는다(내용은 항목이 본다)
+        h.update('\0'.join(sorted(x for x in tracked() if x.endswith('.py'))).encode())
         for d in made_paths(run):
             h.update(b'made:' + d.encode())
             hash_content(h, root / d)
@@ -287,51 +294,134 @@ def hash_content(h, path):
         hash_path(h, f)
 
 
-TRACER = Path(__file__).resolve().parent / 'guardtrace' / 'sitecustomize.py'
-# 앞 단계와 검사 단계를 따로 돌릴 수 없는 명령: 앞 단계의 cd·export·source 가 검사 단계에 남아야 한다
-SHELL_STATE = re.compile(r'(^|&&|;|\|\|)\s*(cd|export|source|\.|set|unset|alias|pushd|popd)\s')
+TRACER = Path(__file__).resolve().parent / 'guardtrace'
+sys.path.insert(0, str(TRACER))
+from guardprint import module_prints  # noqa: E402
+# 검사 단계 명령의 꼴: 환경 변수 대입 뒤 uv run 의 python. 그 밖의 프로그램은 .py 를 몰래 읽을 수 있다
+CHECK_STAGE = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_]*=\S*\s+)*uv run --(locked|frozen) python\s')
+# 빌드 단계가 검사 단계에 남기는 셸 상태
+SHELL_STATE = re.compile(r'(^|&&)\s*(cd|export|source|\.|set|unset|alias|pushd|popd|shopt|umask)\s')
 
 
 def split_built(check):
     """빌드 결과 캐시를 쓸 수 있으면 (앞 단계들, 검사 단계) 명령, 아니면 None. 앞 단계가 무언가를 --out 으로 만들고,
-    단위 테스트를 부르지 않으며, 셸 상태를 바꾸지 않고, && 말고 다른 연결(; || |)이 없어야 한다."""
+    단위 테스트를 부르지 않으며, 셸 상태를 바꾸지 않고, && 말고 다른 연결(; || | & 줄바꿈)이 없고, 검사 단계가
+    CHECK_STAGE 꼴이어야 한다."""
     run = check['run']
-    if not builds(run) or runs_tests(run) or SHELL_STATE.search(run) or re.search(r';|\|\||(?<!\|)\|(?!\|)', run):
+    if not builds(run) or runs_tests(run) or SHELL_STATE.search(run) or re.search(r'[;\n`]|\$\(|\|\||(?<![&|])[&|](?![&|])', run):
         return None
     stages = run.split('&&')
+    if not CHECK_STAGE.match(stages[-1]):
+        return None
     return '&&'.join(stages[:-1]), stages[-1]
 
 
-def read_files(reads):
-    """검사 단계가 적은 읽은 .py 목록. `?`(무엇을 읽었는지 모르는 자식) 가 있거나 기록이 없으면 None."""
+def read_trace(reads):
+    """검사 단계 기록을 {'files': {경로: SHA-1}, 'dirs': {경로: SHA-1}, 'code': {경로: {qualname: 지문}}} 로.
+    `?`, 기록 없음, 같은 것이 다른 값으로 두 번(도는 중에 바뀜), 읽지 못한 파일(-)이면 None."""
     if not reads.is_file():
         return None
-    lines = set(reads.read_text(encoding='utf-8', errors='replace').split())
-    return None if '?' in lines or not lines else sorted(lines)
+    out = {'files': {}, 'dirs': {}, 'code': {}}
+    lines = reads.read_text(encoding='utf-8', errors='surrogateescape').splitlines()
+    if not lines:
+        return None
+    for line in lines:
+        f = line.split('\t')
+        if f == ['?'] or len(f) not in (3, 4):
+            return None
+        if f[0] in ('F', 'D') and len(f) == 3:
+            table, key, value = out['files' if f[0] == 'F' else 'dirs'], f[1], f[2]
+            if value == '-':
+                return None
+        elif f[0] == 'C' and len(f) == 4:
+            table, key, value = out['code'].setdefault(f[1], {}), f[2], f[3]
+        else:
+            return None
+        if table.setdefault(key, value) != value:
+            if f[0] != 'C':
+                return None
+            # 같은 qualname 의 다른 코드(조건부 정의·genexpr 여럿)는 save_built 가 파일 안 목록 전체로 본다
+            table[key] = None
+    return out
 
 
-def file_sums(paths, root):
-    return {p: hashlib.sha1((root / p).read_bytes()).hexdigest() if (root / p).is_file() else None for p in paths}
+def sha1_of(path):
+    return hashlib.sha1(path.read_bytes()).hexdigest() if path.is_file() else None
+
+
+def listing_of(path):
+    if not path.is_dir():
+        return None
+    return hashlib.sha1('\0'.join(sorted(os.listdir(path))).encode('utf-8', 'surrogateescape')).hexdigest()
+
+
+def code_prints(path):
+    return module_prints(path.read_bytes(), str(path)) if path.is_file() else None
+
+
+def entry_holds(entry, root):
+    """캐시 항목이 지금도 맞는가: 연 파일·본 폴더가 같고, 실행한 코드가 든 파일마다 원본이 같거나 그 qualname 들의
+    지문 목록이 같다."""
+    if any(sha1_of(root / p) != v for p, v in entry['files'].items()):
+        return False
+    if any(listing_of(root / p) != v for p, v in entry['dirs'].items()):
+        return False
+    for p, (src, quals) in entry['code'].items():
+        if sha1_of(root / p) == src:
+            continue
+        prints = code_prints(root / p)
+        if prints is None or any(prints.get(q) != v for q, v in quals.items()):
+            return False
+    return True
+
+
+def trace_entry(trace, root):
+    """read_trace 결과를 캐시 항목으로. 실행한 qualname 마다 지금 파일의 같은 이름 지문 목록을 담는데, 실행한 지문이 그
+    목록에 없으면(도는 중에 고침) None."""
+    code = {}
+    for p, quals in trace['code'].items():
+        prints = code_prints(root / p)
+        if prints is None:
+            return None
+        kept = {}
+        for q, fp in quals.items():
+            if q not in prints or (fp is not None and fp not in prints[q]):
+                return None
+            kept[q] = prints[q]
+        code[p] = [sha1_of(root / p), kept]
+    return {'files': trace['files'], 'dirs': trace['dirs'], 'code': code}
+
+
+def load_entries(path):
+    try:
+        return json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return []
+
+
+def write_atomic(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f'.{path.name}.{os.getpid()}.{time.monotonic_ns()}')
+    tmp.write_text(text, encoding='utf-8')
+    os.replace(tmp, path)
 
 
 def built_hit(name, key, root):
-    """같은 빌드 결과 키로 통과한 기록 가운데 검사 단계가 읽은 .py 가 지금과 모두 같은 것."""
-    entry = cache_dir() / 'built' / f'{name}-{key[:24]}.json'
-    if not entry.is_file():
-        return None
-    for old in json.loads(entry.read_text(encoding='utf-8')):
-        if file_sums(old['py'], root) == old['py']:
-            return old
+    """같은 빌드 결과 키로 통과한 기록 가운데 지금도 맞는 것(entry_holds)."""
+    for old in load_entries(cache_dir() / 'built' / f'{name}-{key[:24]}.json'):
+        try:
+            if entry_holds(old['trace'], root):
+                return old
+        except (KeyError, TypeError, ValueError):
+            continue
     return None
 
 
-def save_built(name, key, detail, sums):
-    entry = cache_dir() / 'built' / f'{name}-{key[:24]}.json'
-    entry.parent.mkdir(parents=True, exist_ok=True)
-    olds = json.loads(entry.read_text(encoding='utf-8')) if entry.is_file() else []
-    olds = [o for o in olds if o['py'] != sums][-7:]
-    olds.append({'when': time.strftime('%Y-%m-%d %H:%M'), 'detail': detail, 'py': sums})
-    entry.write_text(json.dumps(olds, ensure_ascii=False), encoding='utf-8')
+def save_built(name, key, detail, trace):
+    path = cache_dir() / 'built' / f'{name}-{key[:24]}.json'
+    olds = [o for o in load_entries(path) if o.get('trace') != trace][-7:]
+    olds.append({'when': time.strftime('%Y-%m-%d %H:%M'), 'detail': detail, 'trace': trace})
+    write_atomic(path, json.dumps(olds, ensure_ascii=False))
 
 
 def cache_dir():
@@ -375,9 +465,10 @@ def run_check(check, timeout, logs, no_cache=False, env=None):
     """검사 하나를 돌린다. (결과 'passed'|'failed'|'skipped', 본문 괄호 안 글). env 를 주면 그 환경으로 돈다(배포 관문이
     모든 단계에 같은 환경을 쓸 때).
 
-    입력 키가 빗나가도 롬을 빌드하는 검사(split_built)는 빌드 단계만 먼저 돌리고, 만든 파일·추적 .py 밖 입력이 같고
-    검사 단계가 지난번에 연 .py 가 모두 같은 통과 기록이 있으면 검사 단계를 건너뛴다. 검사 단계는 tools/guardtrace 를
-    PYTHONPATH 앞에 두고 돌려 연 .py 를 적는다. 분석 도구만 바꿔 롬이 그대로인 PR 이 실행 검사를 다시 돌지 않게 한다."""
+    입력 키가 빗나가도 롬을 빌드하는 검사(split_built)는 빌드 단계만 먼저 돌린다. 만든 파일·.py 밖 입력이 같고, 지난
+    통과 때 검사 단계가 실행한 함수의 코드와 연 파일·본 폴더가 모두 같으면(entry_holds) 검사 단계를 건너뛴다. 검사
+    단계는 tools/guardtrace 를 PYTHONPATH 앞에 두고 돌려 그것들을 적는다. 롬이 그대로이고 검사가 실행하지 않는
+    함수만 고친 PR 이 실행 검사를 다시 돌지 않게 한다."""
     name, run = check['name'], check['run']
     if PLACEHOLDER.search(run):
         return 'skipped', '명령에 <…> 자리가 있어 직접 돌릴 것'
@@ -389,8 +480,6 @@ def run_check(check, timeout, logs, no_cache=False, env=None):
     if hit and hit.is_file() and not no_cache:
         old = json.loads(hit.read_text(encoding='utf-8'))
         return 'passed', f'캐시: 같은 입력으로 {old["when"]} 통과, {old["detail"]}'
-    for d in out_dirs(run):
-        shutil.rmtree(ROOT / d, ignore_errors=True)
     log = logs / f'{name}.log'
     shown = log.relative_to(ROOT) if log.is_relative_to(ROOT) else log
     log.write_text('', encoding='utf-8')
@@ -410,9 +499,14 @@ def run_check(check, timeout, logs, no_cache=False, env=None):
             return 'passed', f'캐시: 빌드 결과와 검사 코드가 같아 {old["when"]} 통과, {old["detail"]}'
         reads = logs / f'{name}.reads'
         reads.unlink(missing_ok=True)
+    # 검사 출력 폴더는 검사 단계를 돌릴 때만 비운다(건너뛰면 지난 출력이 남는다)
+    for d in out_dirs(run):
+        shutil.rmtree(ROOT / d, ignore_errors=True)
+    if parts:
         base = env or os.environ
         env = dict(base, GUARD_READS=str(reads), GUARD_READS_ROOT=str(ROOT),
-                   PYTHONPATH=os.pathsep.join(x for x in (str(TRACER.parent), base.get('PYTHONPATH')) if x))
+                   GUARD_READS_SKIP=os.pathsep.join(str(ROOT / d) for d in out_dirs(run)),
+                   PYTHONPATH=os.pathsep.join(x for x in (str(TRACER), base.get('PYTHONPATH')) if x))
     code = spawn(parts[1] if parts else run, log, timeout - (time.time() - t0), env)
     if code is None:
         return 'failed', f'{timeout}초 안에 끝나지 않음, 로그 {shown}'
@@ -425,13 +519,12 @@ def run_check(check, timeout, logs, no_cache=False, env=None):
                            if rom and (ROOT / rom).is_file() else '')
     # 도는 동안 입력이 바뀌었으면 그 결과는 어느 입력의 것인지 모르므로 캐시하지 않는다
     if key is not None and input_key(check, ROOT) == key:
-        hit.parent.mkdir(parents=True, exist_ok=True)
-        hit.write_text(json.dumps({'when': time.strftime('%Y-%m-%d %H:%M'), 'detail': detail}, ensure_ascii=False),
-                       encoding='utf-8')
-        files = read_files(reads) if reads else None
+        write_atomic(hit, json.dumps({'when': time.strftime('%Y-%m-%d %H:%M'), 'detail': detail}, ensure_ascii=False))
+        trace = read_trace(reads) if reads else None
+        entry = trace and trace_entry(trace, ROOT)
         # 검사 단계가 빌드 결과를 고쳐 썼으면 키가 달라져 남기지 않는다
-        if built and files is not None and input_key(check, ROOT, built=True) == built:
-            save_built(name, built, detail, file_sums(files, ROOT))
+        if built and entry and input_key(check, ROOT, built=True) == built:
+            save_built(name, built, detail, entry)
     return 'passed', detail
 
 
