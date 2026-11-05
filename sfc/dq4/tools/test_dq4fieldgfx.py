@@ -220,6 +220,7 @@ class GenerateSyntheticTest(unittest.TestCase):
             _, _, _, blocks = gfx.generate(b"rom")
         painted = [b["lower"] for b in blocks if b["lower"] != list(gfx.SEA_TILES)]
         self.assertTrue(painted)
+        # 블록마다 같은 그림이라 블록끼리도 같은 4분면은 같은 타일을 쓴다
         for lower in painted:
             self.assertEqual(lower[0], lower[1])
             self.assertEqual(len({lower[0], lower[2], lower[3]}), 3)

@@ -221,6 +221,12 @@ class CompactTests(unittest.TestCase):
 
     def test_rest_after_note_is_not_split_by_call(self):
         # 음 뒤가 쉼이면 15E5 가 KOF 를 걸지 않는다. 그 사이에 F8·F9 가 끼면 KOF 가 생기므로 묶지 않아야 한다.
+        # 같은 길이 음 뒤 쉼 짝도 그대로 본다
+        short = []
+        for i in range(8):
+            short += [f'  note {0x40 + i:02X} len 06', '  note 30 len 0C', '  rest len 0C', f'  pan {i * 8:02X}']
+        self.check(body(short))
+        # 묶을 만큼 큰 구절이라야 호출이 음과 쉼 사이에 낄 수 있다
         phrase = ['  rest len 0C', '  volume2 80', '  pan 10', '  instrument 03', '  gate_preset FE', '  note 30 len 0C']
         voice = []
         for i in range(8):
