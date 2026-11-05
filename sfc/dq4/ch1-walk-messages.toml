@@ -1,0 +1,227 @@
+# 1장 걷기 검사(dq4ch1walkcheck.py)가 구간마다 견주는 메시지 번호(24:8BAF 가 받은 A)의 처음 나온 차례.
+# 손으로 고치지 않는다. dq4ch1walkcheck.py --units --write-messages "까닭" 으로 다시 만든다. 차례가 바뀐 구간에만
+# 그 까닭이 reason 으로 남는다. check 는 실수로 손댄 것을 알아채는 표지일 뿐 공개된 셈이라 고의 위조는 막지 않는다.
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "prologue"
+messages = ["CA8", "CA9", "CAA", "CAB", "CAD", "129", "186", "CAE", "CAF", "CB0", "CB1", "CB2", "CB3", "CB4", "CB5", "CB7", "CB8", "CB9", "CBA", "CBB", "CBC", "CBD", "C80", "C81", "C82"]
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "9663d6d1b4d8"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "throne_out"
+messages = []
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "f8c40d30eb1e"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "imuru_night"
+messages = []
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "2dc514f83c6a"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "night_child"
+messages = ["E61"]
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "471cf383b521"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "castle_day"
+messages = []
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "d41d0e98b825"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "flare"
+messages = ["E65", "129"]
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "a8238b07c29a"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "jail_gate"
+messages = []
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "8b7bf487c749"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "jail"
+messages = []
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "d8324ef89aae"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "reunion"
+messages = ["E66", "E67", "129"]
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "bae41c44733b"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "well"
+messages = []
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "e82ec5b58461"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "hoimin_side"
+messages = []
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "129cd6c7bffc"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "hoimin"
+messages = ["E6B", "E6C", "129"]
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "4a282065d411"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "well_hole"
+messages = []
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "e6d3233ec1c8"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "shoes_chest"
+messages = []
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "e188103d9277"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "shoes"
+messages = ["131", "12E", "132"]
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "e35d91768649"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "castle_town"
+messages = []
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "79360d49c3ca"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "field"
+messages = []
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "3c228be8c0be"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "fly"
+messages = ["1C6"]
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "1c2fe002a11a"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "kidnap"
+messages = ["129", "E6E"]
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "04072946e305"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "tower_top"
+messages = []
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "c0be38b95488"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "boss"
+messages = ["E81", "E6F", "E70", "129", "E71"]
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "5ab850cfe647"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "tower_soldier"
+messages = []
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "fc1f7e6095c1"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "soldier"
+messages = ["E72"]
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "b16e11578a30"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "imuru_gate"
+messages = []
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "c96a3b061ffc"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "imuru"
+messages = ["E73"]
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "51cd1046143b"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "homecoming"
+messages = ["129"]
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "134253d7c5d1"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "castle"
+messages = []
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "990bb6f41a1b"
+
+[[segment]]
+variant = "chapter1"
+seed = 0
+name = "king"
+messages = ["E75", "E79", "E90", "E7A", "E7B", "E7C", "E7E", "E7F", "E7D", "E76"]
+reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
+check = "a9173b64ebfe"
