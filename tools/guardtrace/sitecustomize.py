@@ -10,12 +10,13 @@ GUARD_READS_ROOT 아래에서 쓴 것을 GUARD_READS 에 탭으로 가른 줄로
 
 같은 경로가 다른 값으로 두 번 나오면(도는 중에 바뀜) guards.py 가 기록을 버린다. GUARD_READS_SKIP 의 폴더(검사가 돌기
 전에 비우는 출력 폴더) 아래는 적지 않는다. `?` 는 이 파일을 싣지 못하게 뜨는 자식(python -I·-E·-S, env, PYTHONPATH·
-GUARD_READS 를 바꾸거나 뺀 환경), Python 밖이면서 .py 를 인자로 받는 자식(grep 등), __pycache__ 밖 .pyc, 감시 도구 번호를
+GUARD_READS 를 바꾸거나 뺀 환경), Python 밖이면서 .py 를 인자로 받는 자식(grep 등), 셸처럼 가를 수 없는 인자, __pycache__ 밖 .pyc, 감시 도구 번호를
 얻지 못함에 적는다.
 """
 import hashlib
 import os
 import re
+import shlex
 import stat as _stat
 import sys
 import threading
@@ -150,10 +151,27 @@ def _listed(path):
     _emit('D', _rel(full), hashlib.sha1(names.encode('utf-8', 'surrogateescape')).hexdigest())
 
 
+def _words(command):
+    """인자와, 셸 문자열(sh -c '…')이면 셸처럼 나눈 낱말까지. 따옴표가 겹치면 몇 겹 더 푼다.
+    다 풀지 못하면 ValueError."""
+    todo = [_text(w) for w in command] if isinstance(command, (list, tuple)) else [_text(command)]
+    words = []
+    for _ in range(4):
+        words += todo
+        todo = [part for w in todo if any(c in w for c in ' \t\n"\'\\') for part in shlex.split(w)]
+        if not todo:
+            return words
+    raise ValueError(command)
+
+
 def _spawned(command, env):
     text = _text(command)
-    # 목록 인자는 칸 든 경로를 지키려 그대로, 셸 문자열(sh -c '…')은 나눠서 둘 다 본다
-    words = ([_text(w) for w in command] if isinstance(command, (list, tuple)) else []) + text.split()
+    try:
+        words = _words(command)
+    except ValueError:
+        # 무엇을 넘겼는지 가를 수 없다
+        _emit('?')
+        return
     program = os.path.basename(words[0].split()[0]) if words and words[0].split() else ''
     if _BLIND.search(text) or _blind_env(env):
         _emit('?')
@@ -211,6 +229,12 @@ def _stat_seen(path, result):
     try:
         full = _inside(path)
         if full is not None:
+            # 경로를 realpath 로 적으므로 링크를 lstat 한 결과 대신 가리키는 것의 상태를 적는다(stat 과 같은 값)
+            if result is not None and _stat.S_ISLNK(result.st_mode):
+                try:
+                    result = _real_stat(path)
+                except OSError:
+                    result = None
             state = '-' if result is None else 'dir' if _stat.S_ISDIR(result.st_mode) else str(result.st_size)
             _emit('E', _rel(full), state)
     except Exception:
@@ -267,6 +291,7 @@ if _OUT and _ROOT:
     _emit('S', _rel(script) if script else '-')
     _local.busy = False
     sys.addaudithook(_hook)
+    _real_stat = os.stat
     os.stat = _wrap_stat(os.stat)
     os.lstat = _wrap_stat(os.lstat)
     for _tool in (3, 4, 2):
