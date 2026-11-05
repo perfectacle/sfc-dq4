@@ -6,7 +6,8 @@
   unit      CI 와 같은 폴더마다 단위 테스트 전부(롬이 있으므로 롬 게이트 시험도 돈다)
   guards    모든 guards.toml 의 실행 검사 전부. 검사 결과 캐시와 장면 캐시를 쓰지 않는다(--rehearse 면 씀)
   sweep     트랙의 release.toml 시드 스윕(시드 0 부터 N 개와 seeds.json 의 실패 시드)
-  coverage  빌드 경로 커버리지(아직 측정 수단이 없어 늘 실패, 형식 문서 「남은 것」)
+  coverage  빌드 경로(dq4publish.inputs 의 .py) 커버리지. 로컬(단위 전부 + 빌드 캐시 끈 빌드 한 번, 하위 프로세스도
+            잼) ≥ LOCAL_MIN, CI 와 같게(롬 링크 없는 임시 워크트리에서 롬·도구 환경 변수 없이 단위만) ≥ CI_MIN
 
 보고서는 work/release/<롬 SHA-1 앞 12자리>/report.json·report.md 다. 모든 단계가 통과해야 통과다. --rehearse 로 돈
 보고서는 캐시를 써 배포 근거가 되지 않으므로 통과로 적지 않는다.
@@ -35,6 +36,10 @@ UNIT_DIRS = ('sfc/dq4/tools', 'sfc/dq5/tools/tests', 'tools/tests', 'fc/dq4/tool
 BUILD = 'uv run --locked python sfc/dq4/tools/dq4build.py --out {out}'
 ROM_NAME = 'dq4-ch1-full.sfc'
 SEEDS_N = 16
+LOCAL_MIN, CI_MIN = 90.0, 80.0
+# CI 에 없는 것: 롬(워크트리의 rom 링크)과 도구·에셋을 가리키는 환경 변수
+CI_UNSET = ('ASAR', 'DQ4_ASSETS', 'DQ4_GALMURI', 'MESENCE', 'LIBDIR', 'LIBRETRO_BSNES', 'LIBRETRO_SNES9X', 'DQ4_CORES',
+            'DQ4_SOUND_BASE')
 
 
 def sh(cmd, log, env=None, timeout=None):
@@ -150,8 +155,63 @@ def stage_sweep(ctx):
             'detail': f'{sum(r["status"] == "passed" for r in rows)}/{len(rows)} 통과'}
 
 
+def build_path_files(root=ROOT):
+    """빌드 경로 파일: dq4publish.inputs()(dq4build.py 에서 닿는 도구 폴더 파일) 가운데 시험이 아닌 .py."""
+    sys.path.insert(0, str(ROOT / 'sfc' / 'dq4' / 'tools'))
+    import dq4publish
+    return sorted(str(root / f) for f in dq4publish.inputs() if f.suffix == '.py' and not f.name.startswith('test_'))
+
+
+def coverage_rc(path, data):
+    path.write_text(f'[run]\nparallel = true\npatch = subprocess\ndata_file = {data}\n', encoding='utf-8')
+
+
+def measure(root, logs, tag, env, build_out=None):
+    """root 에서 단위 테스트 전부(와 build_out 이 있으면 빌드 한 번)를 coverage 로 돌려 (퍼센트, 단계 실패 목록)."""
+    import coverage
+    data = logs / f'coverage-{tag}' / '.coverage'
+    data.parent.mkdir(parents=True, exist_ok=True)
+    rc = logs / f'coverage-{tag}.ini'
+    coverage_rc(rc, data)
+    failed = []
+    for d in UNIT_DIRS:
+        if not (root / d).is_dir():
+            continue
+        code, _ = sh(f"cd {root / d} && uv run --locked coverage run --rcfile={rc} -m unittest discover -p 'test_*.py'",
+                     logs / f'coverage-{tag}-{d.replace("/", "-")}.log', env)
+        if code != 0:
+            failed.append(d)
+    if build_out is not None:
+        code, _ = sh(f'cd {root} && uv run --locked coverage run --rcfile={rc} sfc/dq4/tools/dq4build.py --out {build_out}',
+                     logs / f'coverage-{tag}-build.log', dict(env or os.environ, DQ4_BUILD_CACHE='off'))
+        if code != 0:
+            failed.append('build')
+    cov = coverage.Coverage(data_file=str(data), config_file=str(rc))
+    cov.combine(strict=False)
+    cov.save()
+    with open(logs / f'coverage-{tag}-report.txt', 'w', encoding='utf-8') as out:
+        percent = cov.report(include=build_path_files(root), file=out, ignore_errors=True)
+    return round(percent, 1), failed
+
+
 def stage_coverage(ctx):
-    return {'status': 'failed', 'seconds': 0, 'detail': '빌드 경로 커버리지 측정 수단이 아직 없음'}
+    t0 = time.time()
+    logs = ctx['logs']
+    local, lfail = measure(ROOT, logs, 'local', None, ctx['dir'] / 'coverage-build')
+    tmp = ctx['dir'] / 'ci-tree'
+    guards.git('worktree', 'add', '--detach', str(tmp), 'HEAD')
+    try:
+        env = {k: v for k, v in os.environ.items() if k not in CI_UNSET}
+        ci, cfail = measure(tmp, logs, 'ci', env)
+    finally:
+        guards.git('worktree', 'remove', '--force', str(tmp))
+    problems = [f'{n} 시험이 실패함(커버리지 실행)' for n in lfail + cfail]
+    if local < LOCAL_MIN:
+        problems.append(f'로컬 {local}% < {LOCAL_MIN}%')
+    if ci < CI_MIN:
+        problems.append(f'CI 와 같게 {ci}% < {CI_MIN}%')
+    return {'status': 'failed' if problems else 'passed', 'seconds': round(time.time() - t0), 'local': local, 'ci': ci,
+            'detail': f'로컬 {local}%, CI 와 같게 {ci}%' + (f' — {"; ".join(problems)}' if problems else '')}
 
 
 RUN = {'build': stage_build, 'unit': stage_unit, 'guards': stage_guards, 'sweep': stage_sweep,

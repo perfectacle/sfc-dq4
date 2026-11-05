@@ -27,8 +27,24 @@ class ReleaseCheckTest(unittest.TestCase):
         self.assertEqual(rc.verdict({**ok, 'coverage': {'status': 'failed'}}, False, rc.STAGES), 'failed')
         self.assertEqual(rc.verdict(ok, False, rc.STAGES, dirty=True), 'dirty')
 
-    def test_coverage_stage_fails_until_measured(self):
-        self.assertEqual(rc.stage_coverage({})['status'], 'failed')
+    def test_coverage_thresholds(self):
+        with tempfile.TemporaryDirectory() as d:
+            ctx = {'logs': Path(d), 'dir': Path(d)}
+            with mock.patch.object(rc, 'measure', side_effect=[(91.0, []), (80.5, [])]), \
+                    mock.patch.object(rc.guards, 'git', return_value=''):
+                self.assertEqual(rc.stage_coverage(ctx)['status'], 'passed')
+            with mock.patch.object(rc, 'measure', side_effect=[(89.9, []), (85.0, ['tools/tests'])]), \
+                    mock.patch.object(rc.guards, 'git', return_value=''):
+                r = rc.stage_coverage(ctx)
+            self.assertEqual(r['status'], 'failed')
+            self.assertIn('로컬 89.9%', r['detail'])
+            self.assertIn('tools/tests 시험이 실패함', r['detail'])
+
+    def test_build_path_files_are_python_sources(self):
+        files = rc.build_path_files()
+        self.assertTrue(files)
+        self.assertTrue(all(f.endswith('.py') and '/test_' not in f for f in files))
+        self.assertIn(str(rc.ROOT / 'sfc/dq4/tools/dq4build.py'), files)
 
     def test_repo_sweeps_take_seeds(self):
         """저장소의 release.toml 스윕은 {rom}·{out}·{seeds} 를 모두 쓰고 이름이 겹치지 않는다."""

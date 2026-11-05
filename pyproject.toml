@@ -18,3 +18,9 @@ dependencies = [
 package = false
 # 공급망 쿨다운: 나온 지 7일 넘은 릴리스만 받는다(git 태그로 고정한 툴킷은 해당 없음).
 exclude-newer = "7 days"
+
+[dependency-groups]
+dev = [
+  # tools/release_check.py 가 빌드 경로 커버리지를 잰다(하위 프로세스까지 재는 patch = subprocess 는 7.10 부터).
+  "coverage>=7.17.0",
+]
