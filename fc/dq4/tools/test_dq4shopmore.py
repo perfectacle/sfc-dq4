@@ -38,9 +38,14 @@ def shop_world():
     put(prg, s.TABLE_BANK, s.INN_TABLE, [0x02, 0x00, 6, 0x03, 0x01, 12, 0xFF])
     put(prg, s.CODE_BANK, s.EXTRA_16, [0x00, 0x01, 0x00])
     put(prg, d.ITEM_BANK, d.ITEM_PRICE, [5, 12])
-    put(prg, *dq4map.GROUPS, word(0xA000) + word(0xA003) + word(0xA004) + [0xFF, 0xFF])
-    put(prg, 0x17, 0xA004, [0x10, 0x00, 0x90, 0xFF])
+    put(prg, *dq4map.GROUPS, word(0xA000) + word(0xA003) + word(0xA004) + word(0xA008) + [0xFF, 0xFF])
+    put(prg, 0x17, 0xA004, [0x10, 0x00, 0x90, 0xFF, 0x10, 0x00, 0x90, 0xFF])
     put(prg, dq4map.NPC_BANK, 0x8004, word(0x9100))
+    put(prg, dq4map.NPC_BANK, 0x8006, word(0x9200))
+    put(prg, dq4map.NPC_BANK, 0x9200, [0x1F, 0, 0, 0, 0x20, 3, 4, 1, 0x2A, 1, 0x2A, 0])     # 낮·밤 모습이 같은 인물
+    put(prg, *dq4map.EVENT_LISTS, word(0x9800))
+    put(prg, 0x1C, 0x9800, [0x00, 0x00, 0x01, 0x05, 0x00, 0xA0, 0x02, 0x00, 0x02, 0x06, 0x00, 0xA1, 0xFF])
+    put(prg, 0x1C, 0xA100, [0x10, 0, 0, 0, 0x13, 1, 2, 1, 0x2A, 0])                       # 진행 플래그로 바뀌는 목록
     npc = lambda tid, x, y: [0x10, 0, 0, 0, tid, x, y, 1, 0x2A]
     put(prg, dq4map.NPC_BANK, 0x9100, npc(0x13, 5, 6) + npc(6, 8, 9) + npc(5, 10, 11) + npc(0x14, 12, 13) + [0])
     put(prg, dq4talk.BANK, 0x9300, [0x12, 0x01, 0x3F])
@@ -113,7 +118,8 @@ class PrintTests(ShopGlobalsTestCase):
             '인물 (05,06) 대화 번호 013 스크립트 [낮] → 무기',
             '인물 (08,09) 대화 번호 006 직접 [낮] → 여관',
             '인물 (0A,0B) 대화 번호 005 직접 [낮] → 교회',
-            '인물 (0C,0D) 대화 번호 014 호출 15:ADB7 [인물 자리 (0C,0D) & 낮] → 무기'])
+            '인물 (0C,0D) 대화 번호 014 호출 15:ADB7 [인물 자리 (0C,0D) & 낮] → 무기',
+            '인물 (01,02) 대화 번호 013 스크립트 [목록 플래그 06&02 & 낮] → 무기'])
 
     def test_show_compares_shop_window_ram(self):
         ram = bytearray(0x800)
@@ -154,7 +160,8 @@ class PrintTests(ShopGlobalsTestCase):
             '02/00 (08,09) 대화 006 직접 [낮] → 여관: 1인 6G / 들어갈 때 X=10 Y=20 [낮]',
             '02/00 (0A,0B) 대화 005 직접 [낮] → 교회: 저장·おつげ·되살리기·해독·저주',
             '02/00 (0C,0D) 대화 014 호출 15:ADB7 [인물 자리 (0C,0D) & 낮] → 무기: ア イ',
-            '가게 인물 5곳'])
+            '02/00 (01,02) 대화 013 스크립트 [목록 플래그 06&02 & 낮] → 무기: ア イ / 들어갈 때 숨김 [낮]',
+            '가게 인물 6곳'])
 
 
 class HiddenTests(ShopGlobalsTestCase):
@@ -195,6 +202,7 @@ class HiddenTests(ShopGlobalsTestCase):
         self.assertEqual(s.person_text(self.prg, 2, 0, 0, [[(night, False)]]), '인물 0(낮 (05,06) 대화 013)')
         self.assertEqual(s.person_text(self.prg, 0, 0, 0, [[]]), '인물 0(낮 (05,06) 대화 011, 밤 (07,08) 대화 012)')
         self.assertEqual(s.person_text(self.prg, 2, 0, 7, [[(night, False)]]), '인물 7(보통 목록에 없음)')
+        self.assertEqual(s.person_text(self.prg, 3, 0, 0, [[]]), '인물 0((03,04) 대화 020)')      # 낮·밤이 같으면 한 번만
 
     def test_compare_hidden_day_with_moves(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -262,6 +270,15 @@ class TextTests(unittest.TestCase):
                                        [(('bit', '$6280', 2), False)]]),
                          '[$6280&01 켜짐 & 1장] 또는 [$6280&02 꺼짐]')
 
+    def test_sym_name_prefers_known_symbols(self):
+        self.assertEqual([s.sym_name(a) for a in (0x44, 0x615A, 0x62ED, 0x6280, 0x30)],
+                         ['주인공 X', '장', '시간', '$6280', '$30'])
+
+    def test_nz_sets_zero_and_negative_for_numbers_and_symbols(self):
+        self.assertEqual(s.nz({'C': 1}, 0), {'C': 1, 'Z': True, 'N': False})
+        self.assertEqual(s.nz({}, 0x80), {'Z': False, 'N': True})
+        self.assertEqual(s.nz({}, '장'), {'Z': (('장', '=', 0), ('장', '≠', 0)), 'N': (('장', 'bit7', 0), ('장', '!bit7', 0))})
+
     def test_value_text(self):
         self.assertEqual((s.value_text(5), s.value_text('$7006&FC')), ('05', '$7006&FC'))
 
@@ -325,6 +342,23 @@ class RuleTests(ShopGlobalsTestCase):
         put(self.prg, dq4talk.BANK, 0x9000, [0x07, 0x1B, 0x71, 0x01, 0x18, 0x05, 0x01, 0x3F])
         rules = s.order_rules(self.prg)
         self.assertEqual(rules[('$6280', 1)], {('$62EC', 1), ('$6280', 2)})
+
+
+class EntryTests(unittest.TestCase):
+    def test_entries_from_brk_calls_and_script_calls(self):
+        prg = rules_world()
+        put(prg, 0x10, 0xA000, [0x00, 0x03, 0x68])               # 뱅크 16 함수 3 을 부르는 일반 BRK
+        put(prg, 0x16, 0x8006, word(0x9800))
+        put(prg, dq4talk.BANK, 0x9000, [0x07, 0x1B, 0x05, 0x02, 0x00, 0x00, 0xA0, 0x3F])   # 비트 02 가 켜졌을 때 15:A000 부름
+        self.assertEqual(s.code_entries(prg), [
+            (0x15, 0xA000, frozenset({(5, 2)})), (0x16, 0x9800, frozenset()), (0x1C, 0, frozenset()),
+            (0x1D, 0, frozenset()), (0x1D, 0xB123, frozenset())])
+
+    def test_script_call_entry_carries_its_guard_into_order_rules(self):
+        prg = rules_world()
+        put(prg, dq4talk.BANK, 0x9000, [0x07, 0x1B, 0x05, 0x02, 0x00, 0x00, 0xA0, 0x3F])
+        put(prg, s.CODE_BANK, 0xA000, [0x00, 0x72, 0xCB, 0x01, 0x60])
+        self.assertEqual(s.order_rules(prg)[('$62ED', 1)], {('$6280', 2)})
 
 
 class BrkSizeTests(unittest.TestCase):
