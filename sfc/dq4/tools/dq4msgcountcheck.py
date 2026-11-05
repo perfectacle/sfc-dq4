@@ -51,6 +51,25 @@ def judge(seen, page_of):
     return [(m, a, page_of[m]) for m, a in seen if m in page_of and a > page_of[m]]
 
 
+def verdict(walk_rc, prologue, king, page_of):
+    """서장·왕 기록을 판정한 결과. 왕 구간 걷기가 실패하면 남은 기록이 있어도 실패다(끝까지 걷지 않은 기록이라)."""
+    report = {'status': 'passed', 'scenes': {}}
+    if walk_rc:
+        report['status'] = 'failed'
+        report['walk'] = f'왕 구간 걷기 종료 {walk_rc}'
+    for scene, path in (('prologue', prologue), ('king', king)):
+        if not path or not path.exists():
+            report['status'] = 'failed'
+            report['scenes'][scene] = '기록 없음'
+            continue
+        seen = counts(path.read_text())
+        bad = judge(seen, page_of)
+        report['scenes'][scene] = {'messages': len(seen), 'over': [f'{m:03X} A{a} > {p}쪽' for m, a, p in bad]}
+        if bad or not seen:
+            report['status'] = 'failed'
+    return report
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--rom', required=True, type=Path)
@@ -80,19 +99,8 @@ def main():
     walk.WALK_STATE = PROBE
     sys.argv = ['dq4ch1walkcheck', '--rom', str(rom), '--out', str(out / 'king'), '--from', 'king', '--until', 'king',
                 '--states', str(args.states.resolve())]
-    walk.main()
-    report = {'status': 'passed', 'scenes': {}}
-    for scene, path in (('prologue', out / 'prologue' / 'msgcount.txt'),
-                        ('king', next((out / 'king').rglob('msgcount.txt'), None))):
-        if not path or not path.exists():
-            report['status'] = 'failed'
-            report['scenes'][scene] = '기록 없음'
-            continue
-        seen = counts(path.read_text())
-        bad = judge(seen, page_of)
-        report['scenes'][scene] = {'messages': len(seen), 'over': [f'{m:03X} A{a} > {p}쪽' for m, a, p in bad]}
-        if bad or not seen:
-            report['status'] = 'failed'
+    report = verdict(walk.main(), out / 'prologue' / 'msgcount.txt', next((out / 'king').rglob('msgcount.txt'), None),
+                     page_of)
     (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')
     print(json.dumps(report, ensure_ascii=False))
     return 0 if report['status'] == 'passed' else 1
