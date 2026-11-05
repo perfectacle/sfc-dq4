@@ -175,6 +175,8 @@ def stage_unit(ctx):
     rows, secs_all = [], 0
     for d in UNIT_DIRS:
         if not (ROOT / d).is_dir():
+            # CI 가 도는 폴더가 없어졌으면 그 시험이 빠진 것이라 통과로 치지 않는다
+            rows.append({'dir': d, 'status': 'failed', 'tests': 0, 'skipped': 0, 'seconds': 0, 'detail': '폴더 없음'})
             continue
         log = ctx['logs'] / f'unit-{d.replace("/", "-")}.log'
         code, secs = sh(f"cd {d} && uv run --locked python -m unittest discover -p 'test_*.py'", log, env_for(ctx))
@@ -182,9 +184,10 @@ def stage_unit(ctx):
         rows.append({'dir': d, 'status': 'passed' if code == 0 else 'failed', 'tests': ran, 'skipped': skipped,
                      'seconds': secs})
         secs_all += secs
-    ok = rows and all(r['status'] == 'passed' for r in rows)
+    ok = bool(rows) and all(r['status'] == 'passed' for r in rows)
+    missing = [r['dir'] for r in rows if r.get('detail') == '폴더 없음']
     return {'status': 'passed' if ok else 'failed', 'seconds': secs_all, 'rows': rows,
-            'detail': f'{sum(r["tests"] for r in rows)}개, 건너뜀 {sum(r["skipped"] for r in rows)}개'}
+            'detail': (f'폴더 없음 {", ".join(missing)}; ' if missing else '') + f'{sum(r["tests"] for r in rows)}개, 건너뜀 {sum(r["skipped"] for r in rows)}개'}
 
 
 def stage_guards(ctx):
@@ -195,7 +198,8 @@ def stage_guards(ctx):
     done = guards.run_many(checks, ctx['parallel'], ctx['timeout'], no_cache=not ctx['rehearse'],
                            logs=ctx['logs'] / 'guards', env=env_for(ctx))
     rows = [{'name': c['name'], 'file': c['file'], 'status': s, 'detail': d} for c, s, d in done]
-    ok = all(r['status'] == 'passed' for r in rows)
+    # 검사가 하나도 없으면 목록을 못 읽은 것이지 통과가 아니다
+    ok = bool(rows) and all(r['status'] == 'passed' for r in rows)
     return {'status': 'passed' if ok else 'failed', 'seconds': round(time.time() - t0), 'rows': rows,
             'detail': f'{sum(r["status"] == "passed" for r in rows)}/{len(rows)} 통과'}
 
@@ -216,7 +220,7 @@ def stage_sweep(ctx):
                      'state_cache': state_note(log.read_text(encoding='utf-8', errors='replace')) if log.exists() else [],
                      'detail': '시간 제한' if code is None else f'종료 코드 {code}'})
         secs_all += secs
-    ok = all(r['status'] == 'passed' for r in rows)
+    ok = bool(rows) and all(r['status'] == 'passed' for r in rows)
     return {'status': 'passed' if ok else 'failed', 'seconds': secs_all, 'rows': rows,
             'detail': f'{sum(r["status"] == "passed" for r in rows)}/{len(rows)} 통과'}
 
@@ -242,6 +246,7 @@ def measure(root, logs, tag, env, build_out=None):
     failed = []
     for d in UNIT_DIRS:
         if not (root / d).is_dir():
+            failed.append(f'{d}(폴더 없음)')
             continue
         code, _ = sh(f"cd {root / d} && uv run --locked coverage run --rcfile={rc} -m unittest discover -p 'test_*.py'",
                      logs / f'coverage-{tag}-{d.replace("/", "-")}.log', env)
@@ -313,7 +318,8 @@ def commit():
 
 
 def verdict(stages, rehearse, wanted, dirty=False):
-    """보고서 전체 판정: 고친 것 없는 커밋에서 모든 단계를 캐시 없이 돌려 모두 통과했을 때만 passed."""
+    """보고서 전체 판정: 고친 것 없는 커밋에서 모든 단계가 통과하고 연습(--rehearse)이 아닐 때만 passed. 캐시를 끄는
+    것은 단계가 쓰는 환경(env_for·gate_env)이 하고, 여기서는 rehearse 만 본다."""
     if rehearse:
         return 'rehearsal'
     if set(wanted) != set(STAGES):
@@ -346,8 +352,11 @@ def markdown(report):
             lines += [f'| {r["name"]} | {words.get(r["status"], r["status"])} | {r["detail"]} |' for r in rows]
         else:
             lines += ['| 스윕 | 결과 | 시드 | 시간 | 상태 캐시 |', '| --- | --- | --- | --- | --- |']
-            lines += [f'| {r["name"]} | {words[r["status"]]} | {len(r["seeds"])}개({r["seeds"][0]}~) | {r["seconds"]}초 | '
-                      f'{",".join(r.get("state_cache") or []) or "-"} |' for r in rows]
+            for r in rows:
+                seeds = r.get('seeds') or []
+                first = f'({seeds[0]}~)' if seeds else ''
+                lines.append(f'| {r["name"]} | {words.get(r["status"], r["status"])} | {len(seeds)}개{first} | '
+                             f'{r["seconds"]}초 | {",".join(r.get("state_cache") or []) or "-"} |')
     lines += ['', f'- 상태 캐시: {report.get("states", "-")}']
     load = {n: st['load'] for n, st in report['stages'].items() if st.get('load')}
     if load:
@@ -356,6 +365,17 @@ def markdown(report):
         lines += [f'| {n} | {v["others_max"]} | {v["others_avg"]} | '
                   f'{", ".join(f"{k} {c}" for k, c in sorted(v["peak_by_tree"].items())) or "-"} |' for n, v in load.items()]
     return '\n'.join(lines) + '\n'
+
+
+def write_report(dest, report):
+    """report.json 을 먼저 쓰고 report.md 를 쓴다. 표를 만들다 멈춰도 판정 줄은 report.md 에 남긴다."""
+    (dest / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
+    try:
+        md = markdown(report)
+    except (KeyError, IndexError, TypeError, AttributeError, ValueError) as e:
+        md = (f'# 배포 관문 보고서\n\n- 판정: **{report.get("verdict")}**\n'
+              f'- 표를 만들지 못함: {type(e).__name__}: {e}(report.json 을 본다)\n')
+    (dest / 'report.md').write_text(md, encoding='utf-8')
 
 
 def main():
@@ -384,12 +404,12 @@ def main():
               'rom_sha1': ctx.get('rom_sha1'), 'when': time.strftime('%Y-%m-%d %H:%M'), 'rehearse': a.rehearse,
               'states': states,
               'stages': stages}
+    # 이 폴더 이름 규칙을 바꾸면 dq4publish.check_report 도 함께 바꾼다(배포판은 이 자리의 보고서만 받는다)
     dest = root / (ctx['rom_sha1'][:12] if ctx.get('rom_sha1') else f'nobuild-{head[:12]}')
     if dest.exists():
         dest = dest.with_name(f'{dest.name}-{time.strftime("%Y%m%d-%H%M%S")}')
     tmp.rename(dest)
-    (dest / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
-    (dest / 'report.md').write_text(markdown(report), encoding='utf-8')
+    write_report(dest, report)
     print(f'[release] 판정 {report["verdict"]}, 보고서 {dest.relative_to(ROOT)}/report.md', flush=True)
     return 0 if report['verdict'] == 'passed' else 1
 

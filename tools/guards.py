@@ -26,7 +26,7 @@
 
 --run 은 같은 입력(.md 를 뺀 추적 파일 내용, 명령, --rom 롬 SHA-1)으로 이미 통과한 검사를 건너뛴다.
 캐시는 원래 체크아웃의 work/cache/guards 에 있어 워크트리끼리 함께 쓴다. --no-cache 는 이 캐시와 검사 안의 캐시를
-모두 끄고 전부 돌린다(NO_CACHE_ENV: 장면 캐시 DQ4_READSET=off, 빌드 단계 캐시 DQ4_BUILD_CACHE=off, 서장 끝·시작
+모두 끄고 전부 돌린다(no_cache_env(): 장면 캐시 DQ4_READSET=off, 빌드 단계 캐시 DQ4_BUILD_CACHE=off, 서장 끝·시작
 상태 캐시는 로그 폴더 아래 빈 states/ 에서 그 실행 동안만).
 
 결과 줄: `- [x] <이름>: 통과 (…)` 또는 `- [x] <이름>: 해당 없음 — <이유>`. 그 밖의 글(「통과하지 못함」 등)은 실패로 친다.

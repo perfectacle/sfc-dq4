@@ -2,7 +2,9 @@
 
 개발판(build)은 sfc/dq4/ips/ 에, 사람에게 내보내는 배포판(release)은 sfc/dq4/release/ 에 둔다. 배포판은 배포 관문
 (tools/release_check.py)이 passed 로 판정한 보고서가 있어야만 만들고, 그 보고서의 커밋이 지금 HEAD 이고 다시 빌드한 롬의
-SHA-1 이 보고서의 롬 SHA-1 과 같아야 한다.
+SHA-1 이 보고서의 롬 SHA-1 과 같아야 한다. 판정은 보고서의 verdict 를 믿지 않고 단계 결과로 다시 센다. 이 검사는
+실수(연습·실패·다른 롬의 보고서를 고름)를 막는 것이지 위조를 막지는 못한다: 보고서는 로컬 파일이라 단계 결과까지 고쳐
+쓰면 통과한다.
 
 SOURCE.txt 에 만든 sfc-dq4 커밋과 입력 해시를 적는다. 입력 해시는 dq4build.py 에서 닿는 도구 폴더 파일과
 uv.lock 의 해시라 롬 없이 셀 수 있다. check 는 그 해시를 지금 소스로 다시 세어, 다르면 IPS 가 뒤처졌다고 알린다.
@@ -21,6 +23,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -34,6 +37,9 @@ IPS_DIR = Path('sfc/dq4/ips')
 RELEASE_DIR = Path('sfc/dq4/release')
 IPS_NAME = 'dq4-ch1.ips'
 STAMP_KEY = '입력 해시'
+# tools/release_check.py 가 보고서를 두는 곳과 같아야 한다: work/release/<롬 SHA-1 앞 12자리>[-YYYYmmdd-HHMMSS]/
+REPORT_DIR = Path('work/release')
+GATE_STAGES = ('build', 'unit', 'guards', 'sweep', 'coverage')
 
 
 def inputs():
@@ -121,23 +127,37 @@ def build(assets, dq5, dq4, commit):
               f'{STAMP_KEY}: {stamp()}\n', commit, f'sfc/dq4: 1장 IPS (sfc-dq4 {head[:8]})')
 
 
-def check_report(report, head):
-    """배포판을 만들어도 되는 보고서인가. 아니면 SystemExit."""
-    if report.get('verdict') != 'passed' or report.get('rehearse'):
-        raise SystemExit(f'보고서 판정이 passed 가 아님({report.get("verdict")}): 배포 관문을 통과한 보고서로만 만든다')
+def check_report(report, head, path):
+    """배포판을 만들어도 되는 보고서인가. 아니면 SystemExit. verdict 는 보지 않고 단계 결과로 판정을 다시 센다."""
+    if report.get('rehearse'):
+        raise SystemExit('보고서가 연습(--rehearse)이라 passed 가 아님: 배포 관문을 통과한 보고서로만 만든다')
+    stages = report.get('stages') or {}
+    missing = [s for s in GATE_STAGES if s not in stages]
+    if missing:
+        raise SystemExit(f'보고서에 단계 {", ".join(missing)} 가 없어 passed 가 아님: 모든 단계를 돈 보고서로만 만든다')
+    bad = [s for s in GATE_STAGES if stages[s].get('status') != 'passed'
+           or any(r.get('status') != 'passed' for r in stages[s].get('rows') or [])]
+    if bad:
+        raise SystemExit(f'보고서의 단계 {", ".join(bad)} 가 통과하지 않아 passed 가 아님')
+    if report.get('verdict') != 'passed':
+        raise SystemExit(f'보고서 판정이 passed 가 아님({report.get("verdict")})')
     if report.get('dirty'):
         raise SystemExit('보고서가 고친 것이 있는 트리에서 나왔다')
     if report.get('commit') != head:
         raise SystemExit(f'보고서 커밋 {str(report.get("commit"))[:8]} 이 지금 HEAD {head[:8]} 와 다르다')
-    if not report.get('rom_sha1'):
+    sha = report.get('rom_sha1') or ''
+    if not re.fullmatch(r'[0-9a-f]{40}', sha):
         raise SystemExit('보고서에 롬 SHA-1 이 없다')
+    folder = Path(path).resolve().parent
+    if folder.parent != (ROOT / REPORT_DIR).resolve() or not re.fullmatch(rf'{sha[:12]}(-\d{{8}}-\d{{6}})?', folder.name):
+        raise SystemExit(f'보고서가 {REPORT_DIR}/{sha[:12]}/ 에 있지 않다: 관문이 그 롬으로 쓴 보고서로만 만든다')
 
 
 def release(assets, dq5, dq4, report_path, commit):
     import dq4build
     report = json.loads(Path(report_path).read_text(encoding='utf-8'))
     head = merged_commit()
-    check_report(report, head)
+    check_report(report, head, report_path)
     if commit:
         remote(assets, 'pull', '-q', '--ff-only')
     rom = dq4build.build(ROOT / 'work' / 'publish-release', dq5, dq4, assets=assets)

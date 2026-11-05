@@ -136,6 +136,52 @@ class ReleaseCheckTest(unittest.TestCase):
         self.assertIn('상태 캐시: 새로 만듦', md)
         self.assertIn('| unit | 3 | 1.5 | sfc-dq4-x 3 |', md)
 
+    def test_no_checks_or_sweeps_is_not_passed(self):
+        ctx = {'dir': rc.ROOT / 'work' / 'release-test', 'logs': Path('/nonexistent'), 'rehearse': False,
+               'seeds_n': 2, 'timeout': 10, 'parallel': 1, 'rom': rc.ROOT / 'work' / 'release-test' / 'r.sfc'}
+        with mock.patch.object(rc.guards, 'load', return_value=([], [])), \
+                mock.patch.object(rc.guards, 'tracked', return_value=[]), \
+                mock.patch.object(rc.guards, 'run_many', return_value=[]):
+            self.assertEqual(rc.stage_guards(ctx)['status'], 'failed')
+        with mock.patch.object(rc, 'sweeps', return_value=[]):
+            self.assertEqual(rc.stage_sweep(ctx)['status'], 'failed')
+
+    def test_missing_unit_dir_fails(self):
+        def ok(cmd, log, env):
+            log.write_text('Ran 2 tests')
+            return 0, 1
+        with tempfile.TemporaryDirectory() as d:
+            ctx = {'dir': Path(d), 'logs': Path(d), 'rehearse': True}
+            with mock.patch.object(rc, 'UNIT_DIRS', ('tools/tests', 'no/such/dir')), \
+                    mock.patch.object(rc, 'sh', side_effect=ok):
+                r = rc.stage_unit(ctx)
+        self.assertEqual(r['status'], 'failed')
+        self.assertEqual([(x['dir'], x['status']) for x in r['rows']],
+                         [('tools/tests', 'passed'), ('no/such/dir', 'failed')])
+        self.assertIn('no/such/dir', r['detail'])
+
+    def test_coverage_measure_counts_missing_dir_as_failed(self):
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(rc, 'UNIT_DIRS', ('no/such/dir',)), \
+                mock.patch.object(rc, 'build_path_files', return_value=[]), \
+                mock.patch('coverage.Coverage') as cov:
+            cov.return_value.report.return_value = 100.0
+            _, failed = rc.measure(Path(d), Path(d), 't', None)
+        self.assertEqual(failed, ['no/such/dir(폴더 없음)'])
+
+    def test_markdown_with_empty_seeds_and_report_survives_a_bad_table(self):
+        report = {'verdict': 'failed', 'commit': 'abc', 'dirty': False, 'rom_sha1': None, 'when': 'now',
+                  'stages': {'sweep': {'status': 'failed', 'seconds': 0, 'detail': '',
+                                       'rows': [{'name': 'x', 'status': 'failed', 'seeds': [], 'seconds': 0}]}}}
+        self.assertIn('| x | 실패 | 0개 | 0초 | - |', rc.markdown(report))
+        with tempfile.TemporaryDirectory() as d:
+            broken = {'verdict': 'failed', 'stages': {'unit': {'status': 'passed'}}}
+            rc.write_report(Path(d), broken)
+            self.assertEqual(json.loads((Path(d) / 'report.json').read_text(encoding='utf-8'))['verdict'], 'failed')
+            md = (Path(d) / 'report.md').read_text(encoding='utf-8')
+        self.assertIn('판정: **failed**', md)
+        self.assertIn('표를 만들지 못함', md)
+
 
 if __name__ == '__main__':
     unittest.main()

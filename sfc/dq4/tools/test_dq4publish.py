@@ -1,5 +1,7 @@
 import contextlib
+import hashlib
 import io
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -58,40 +60,78 @@ class RemoteTests(unittest.TestCase):
         self.assertNotIn('secret-token', kwargs['env']['GIT_CONFIG_VALUE_0'])
 
 
-if __name__ == '__main__':
-    unittest.main()
+def passed_report(**over):
+    stages = {s: {'status': 'passed', 'seconds': 1} for s in publish.GATE_STAGES}
+    stages['guards']['rows'] = [{'name': 'g', 'status': 'passed'}]
+    return {'verdict': 'passed', 'rehearse': False, 'dirty': False, 'commit': 'abc', 'rom_sha1': 'f' * 40,
+            'when': 'now', 'stages': stages, **over}
 
 
 class ReleaseTests(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.enterContext(mock.patch.object(publish, 'ROOT', self.root))
+
+    def report_path(self, sha, suffix=''):
+        return self.root / publish.REPORT_DIR / f'{sha[:12]}{suffix}' / 'report.json'
+
     def test_release_needs_a_passed_report_of_this_commit(self):
         """배포판은 passed·고친 것 없음·지금 HEAD·롬 SHA-1 이 있는 보고서로만 만든다."""
-        import dq4publish as pub
-        ok = {'verdict': 'passed', 'rehearse': False, 'dirty': False, 'commit': 'abc', 'rom_sha1': 'f' * 40}
-        pub.check_report(ok, 'abc')
+        path = self.report_path('f' * 40)
+        publish.check_report(passed_report(), 'abc', path)
+        publish.check_report(passed_report(), 'abc', self.report_path('f' * 40, '-20261105-130445'))
         for bad, why in (({'verdict': 'failed'}, 'passed'), ({'verdict': 'rehearsal'}, 'passed'),
                          ({'rehearse': True}, 'passed'), ({'dirty': True}, '고친 것'), ({'commit': 'def'}, 'HEAD'),
                          ({'rom_sha1': None}, '롬 SHA-1')):
             with self.assertRaisesRegex(SystemExit, why):
-                pub.check_report({**ok, **bad}, 'abc')
+                publish.check_report(passed_report(**bad), 'abc', path)
+
+    def test_verdict_is_recounted_from_stages(self):
+        """verdict 만 passed 로 고친 보고서는 단계 결과로 다시 세어 거부한다(실수 막기용, 위조 방지는 아님)."""
+        path = self.report_path('f' * 40)
+        failed = passed_report()
+        failed['stages']['sweep']['status'] = 'failed'
+        with self.assertRaisesRegex(SystemExit, 'sweep'):
+            publish.check_report(failed, 'abc', path)
+        row_failed = passed_report()
+        row_failed['stages']['guards']['rows'][0]['status'] = 'failed'
+        with self.assertRaisesRegex(SystemExit, 'guards'):
+            publish.check_report(row_failed, 'abc', path)
+        missing = passed_report()
+        del missing['stages']['coverage']
+        with self.assertRaisesRegex(SystemExit, 'coverage'):
+            publish.check_report(missing, 'abc', path)
+        with self.assertRaisesRegex(SystemExit, '단계'):
+            publish.check_report(passed_report(stages={}), 'abc', path)
+
+    def test_report_must_sit_in_its_rom_folder(self):
+        for path in (self.report_path('e' * 40), self.root / 'elsewhere' / ('f' * 12) / 'report.json',
+                     self.report_path('f' * 40, '-x'), self.root / 'report.json'):
+            with self.assertRaisesRegex(SystemExit, '있지 않다'):
+                publish.check_report(passed_report(), 'abc', path)
 
     def test_release_rejects_a_different_rom(self):
-        import dq4publish as pub
-        with tempfile.TemporaryDirectory() as d:
-            d = Path(d)
-            (d / 'dq5.sfc').write_bytes(bytes(64))
-            rom = d / 'out.sfc'
-            rom.write_bytes(bytes(32) + b'\x01' * 32)
-            report = d / 'report.json'
-            sha = __import__('hashlib').sha1(rom.read_bytes()).hexdigest()
-            report.write_text(__import__('json').dumps(
-                {'verdict': 'passed', 'dirty': False, 'commit': 'abc', 'rom_sha1': '0' * 40, 'when': 'now'}))
-            fake_build = mock.Mock(build=mock.Mock(return_value=rom))
-            with mock.patch.object(pub, 'merged_commit', return_value='abc'), \
-                    mock.patch.dict('sys.modules', {'dq4build': fake_build}):
-                with self.assertRaisesRegex(SystemExit, '보고서의'):
-                    pub.release(d / 'assets', d / 'dq5.sfc', d / 'dq4.nes', report, False)
-                report.write_text(report.read_text().replace('0' * 40, sha))
-                pub.release(d / 'assets', d / 'dq5.sfc', d / 'dq4.nes', report, False)
-            self.assertTrue((d / 'assets' / pub.RELEASE_DIR / pub.IPS_NAME).exists())
-            self.assertIn(sha, (d / 'assets' / pub.RELEASE_DIR / 'RELEASE.txt').read_text(encoding='utf-8'))
-            self.assertFalse((d / 'assets' / pub.IPS_DIR).exists())
+        d = self.root
+        (d / 'dq5.sfc').write_bytes(bytes(64))
+        rom = d / 'out.sfc'
+        rom.write_bytes(bytes(32) + b'\x01' * 32)
+        sha = hashlib.sha1(rom.read_bytes()).hexdigest()
+        fake_build = mock.Mock(build=mock.Mock(return_value=rom))
+        with mock.patch.object(publish, 'merged_commit', return_value='abc'), \
+                mock.patch.dict('sys.modules', {'dq4build': fake_build}):
+            other = self.report_path('0' * 40)
+            other.parent.mkdir(parents=True)
+            other.write_text(json.dumps(passed_report(rom_sha1='0' * 40)))
+            with self.assertRaisesRegex(SystemExit, '보고서의'):
+                publish.release(d / 'assets', d / 'dq5.sfc', d / 'dq4.nes', other, False)
+            report = self.report_path(sha)
+            report.parent.mkdir(parents=True)
+            report.write_text(json.dumps(passed_report(rom_sha1=sha)))
+            publish.release(d / 'assets', d / 'dq5.sfc', d / 'dq4.nes', report, False)
+        self.assertTrue((d / 'assets' / publish.RELEASE_DIR / publish.IPS_NAME).exists())
+        self.assertIn(sha, (d / 'assets' / publish.RELEASE_DIR / 'RELEASE.txt').read_text(encoding='utf-8'))
+        self.assertFalse((d / 'assets' / publish.IPS_DIR).exists())
+
+
+if __name__ == '__main__':
+    unittest.main()
