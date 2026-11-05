@@ -25,6 +25,8 @@
                                                  걸린 검사마다 본문에 결과 줄이 있는지 봄(CI)
 
 --run 은 같은 입력(.md 를 뺀 추적 파일 내용, 명령, --rom 롬 SHA-1)으로 이미 통과한 검사를 건너뛴다.
+입력이 달라도 롬을 빌드하는 검사는 빌드 단계를 먼저 돌려, 만든 파일과 .py 밖 입력이 같고 검사 단계가 지난번에 실행한
+함수의 코드·연 파일이 모두 같으면 검사 단계를 건너뛴다(run_check, tools/guardtrace).
 캐시는 원래 체크아웃의 work/cache/guards 에 있어 워크트리끼리 함께 쓴다. --no-cache 는 이 캐시와 검사 안의 캐시를
 모두 끄고 전부 돌린다(no_cache_env(logs): 장면 캐시 DQ4_READSET=off, 빌드 단계 캐시 DQ4_BUILD_CACHE=off, 서장 끝·시작
 상태 캐시는 로그 폴더 아래 빈 states/ 에서 그 실행 동안만).
@@ -38,9 +40,11 @@ import json
 import os
 import shutil
 import signal
+import stat
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import tomllib
 from pathlib import Path, PurePosixPath
@@ -190,7 +194,7 @@ def stat_key(path):
 def hash_path(h, path):
     """파일은 내용(BIG_FILE 보다 크면 크기·mtime_ns), 폴더는 그 안 파일들의 (상대 경로, 크기, mtime_ns).
     폴더를 내용째 읽지 않는 것은 needs 의 자원 저장소(수 GB)처럼 큰 폴더도 키를 곧 만들게 하려는 것이다.
-    파일을 내용은 그대로 두고 mtime 만 되돌리면 옛 결과로 건너뛸 수 있다. 없으면 표시만."""
+    파일을 내용은 그대로 두고 mtime 만 되돌리면 옛 결과로 건너뛸 수 있다. 폴더 안 cache/ 아래는 내용으로 본다. 없으면 표시만."""
     path = Path(path)
     if path.is_file():
         if path.stat().st_size > BIG_FILE:
@@ -199,7 +203,12 @@ def hash_path(h, path):
             h.update(hashlib.sha1(path.read_bytes()).digest())
     elif path.is_dir():
         for f in sorted(p for p in path.rglob('*') if p.is_file()):
-            h.update(str(f.relative_to(path)).encode() + b'\0' + stat_key(f))
+            rel = f.relative_to(path)
+            # 폴더 안 cache/ 는 빌드가 같은 내용으로 다시 써 mtime 만 바뀌므로 내용으로 본다
+            if 'cache' in rel.parts[:-1] and f.stat().st_size <= BIG_FILE:
+                h.update(str(rel).encode() + b'\0' + hashlib.sha1(f.read_bytes()).digest())
+                continue
+            h.update(str(rel).encode() + b'\0' + stat_key(f))
     else:
         h.update(b'-')
 
@@ -231,17 +240,23 @@ def is_input(path, run):
     return not (NOT_INPUT.search(path) or TEST_FILE.search(path))
 
 
-def input_key(check, root=ROOT, environ=os.environ):
+def input_key(check, root=ROOT, environ=os.environ, built=False):
     """같은 입력이면 같은 키. 추적 파일 가운데 결과에 닿는 것(is_input), 명령, needs 환경 변수가 가리키는 파일·폴더
     (hash_path), MESENCE 가 있으면 MesenCE 사용자 설정 파일, rom/ 원본, 명령이 읽는 파일(앞 단계가 만드는 것 빼고).
-    MESENCE 가 있는데 설정 파일을 찾지 못하면 None: 결과에 닿는 입력을 모르므로 캐시를 읽지도 쓰지도 않는다."""
+    MESENCE 가 있는데 설정 파일을 찾지 못하면 None: 결과에 닿는 입력을 모르므로 캐시를 읽지도 쓰지도 않는다.
+
+    built 면 빌드 단계를 돌린 뒤의 키(built_hit): 추적 .py 는 빼고(검사 단계가 연 .py 는 캐시 항목이 따로 본다),
+    앞 단계가 만든 파일을 내용째 넣는다."""
     h = hashlib.sha256()
     run = check['run']
     h.update(run.encode())
+
+    def counts(path):
+        return is_input(path, run) and not (built and path.endswith('.py'))
     for line in git('ls-files', '-s').splitlines():
-        if is_input(line.split('\t', 1)[-1], run):
+        if counts(line.split('\t', 1)[-1]):
             h.update(line.encode())
-    for f in sorted(x for x in git('diff', '--name-only', 'HEAD').splitlines() if x and is_input(x, run)):
+    for f in sorted(x for x in git('diff', '--name-only', 'HEAD').splitlines() if x and counts(x)):
         h.update(f.encode())
         hash_path(h, root / f)
     for n in env_names(check.get('needs', [])):
@@ -256,11 +271,193 @@ def input_key(check, root=ROOT, environ=os.environ):
             h.update(b'mesence-settings:' + digest.encode())
     hash_path(h, root / 'rom')
     made = made_paths(run) + out_dirs(run)
-    for tok in sorted(set(re.findall(r'(?<![\w/])(work/\S+|rom/\S+)', run))):
+    for tok in sorted(set(re.findall(r'(?<![\w/])(?:\$PWD/)?(work/\S+|rom/\S+)', run))):
         if not any(under(tok, d) for d in made):
             h.update(tok.encode())
             hash_path(h, root / tok)
+    if built:
+        for f in sorted(TRACER.glob('*.py')):
+            h.update(f.name.encode() + b'\0' + f.read_bytes())
+        # 새 .py 가 import 경로에서 다른 모듈을 가릴 수 있어 추적 .py 이름 목록은 넣는다(내용은 항목이 본다)
+        h.update('\0'.join(sorted(x for x in tracked() if x.endswith('.py'))).encode())
+        for d in made_paths(run):
+            h.update(b'made:' + d.encode())
+            hash_content(h, root / d)
     return h.hexdigest()
+
+
+def hash_content(h, path):
+    """파일은 내용, 폴더는 그 안 파일들의 (상대 경로, 내용). BIG_FILE 보다 큰 파일은 크기·mtime_ns 라 다시 만들면 빗나간다."""
+    path = Path(path)
+    files = [path] if path.is_file() else sorted(p for p in path.rglob('*') if p.is_file()) if path.is_dir() else []
+    if not files:
+        h.update(b'-')
+    for f in files:
+        h.update(str(f.relative_to(path) if f != path else '').encode() + b'\0')
+        hash_path(h, f)
+
+
+TRACER = Path(__file__).resolve().parent / 'guardtrace'
+sys.path.insert(0, str(TRACER))
+from guardprint import module_prints  # noqa: E402
+# 검사 단계 명령의 꼴: 환경 변수 대입 뒤 uv run 의 python 과 스크립트(인터프리터 플래그 없이). 그 밖의 프로그램은
+# .py 를 몰래 읽을 수 있고, -I·-E·-S 는 PYTHONPATH 의 추적기를 싣지 않는다
+CHECK_STAGE = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_]*=\S*\s+)*uv run --(locked|frozen) python\s+(?P<script>[^\s-]\S*\.py)(\s|$)')
+# 빌드 단계가 검사 단계에 남기는 셸 상태
+SHELL_STATE = re.compile(r'(^|&&)\s*(cd|export|source|\.|set|unset|alias|pushd|popd|shopt|umask)\s')
+
+
+def split_built(check):
+    """빌드 결과 캐시를 쓸 수 있으면 (앞 단계들, 검사 단계) 명령, 아니면 None. 앞 단계가 무언가를 --out 으로 만들고,
+    단위 테스트를 부르지 않으며, 셸 상태를 바꾸지 않고, && 말고 다른 연결(; || | & 줄바꿈)·따옴표·$( ) 가 없고,
+    검사 단계가 CHECK_STAGE 꼴이어야 한다."""
+    run = check['run']
+    if not builds(run) or runs_tests(run) or SHELL_STATE.search(run) or re.search(r'[;\n`"\'\\]|\$\(|\|\||(?<![&|])[&|](?![&|])', run):
+        return None
+    stages = run.split('&&')
+    if not CHECK_STAGE.match(stages[-1]):
+        return None
+    return '&&'.join(stages[:-1]), stages[-1]
+
+
+def shadowed():
+    """추적기를 가릴 수 있는 추적 sitecustomize.py(스크립트 폴더가 PYTHONPATH 보다 앞이다)가 있는가."""
+    return any(PurePosixPath(f).name in ('sitecustomize.py', 'usercustomize.py') and not under(f, 'tools/guardtrace')
+               for f in tracked())
+
+
+def read_trace(reads, script=None):
+    """검사 단계 기록을 {'files', 'dirs', 'stats': {경로: 값}, 'code': {경로: {qualname: [실행한 지문…]}}} 로.
+    `?`, 기록 없음, 검사 단계 스크립트(script)의 S 줄이 없음(맨 위 Python 이 추적기를 싣지 않음), 같은 경로가 다른
+    값으로 두 번(도는 중에 바뀜), 읽지 못한 파일(-)이면 None."""
+    if not reads.is_file():
+        return None
+    out = {'files': {}, 'dirs': {}, 'stats': {}, 'links': {}, 'code': {}}
+    starts = set()
+    for line in reads.read_text(encoding='utf-8', errors='surrogateescape').splitlines():
+        f = line.split('\t')
+        kind = f[0]
+        if kind == 'S' and len(f) == 2:
+            starts.add(f[1])
+        elif kind in ('F', 'D', 'E', 'L') and len(f) == 3:
+            table = out[{'F': 'files', 'D': 'dirs', 'E': 'stats', 'L': 'links'}[kind]]
+            if (kind == 'F' and f[2] == '-') or table.setdefault(f[1], f[2]) != f[2]:
+                return None
+        elif kind == 'C' and len(f) == 4:
+            fps = out['code'].setdefault(f[1], {}).setdefault(f[2], [])
+            if f[3] not in fps:
+                fps.append(f[3])
+        else:
+            return None
+    if script is not None and script not in starts:
+        return None
+    return out
+
+
+def sha1_of(path):
+    return hashlib.sha1(path.read_bytes()).hexdigest() if path.is_file() else None
+
+
+def content_sig(path):
+    """추적기(sitecustomize.content_sig)와 같은 표지."""
+    if not path.is_file():
+        return None
+    st = path.stat()
+    return f'big:{st.st_size}:{st.st_mtime_ns}' if st.st_size > BIG_FILE else sha1_of(path)
+
+
+def stat_state(path):
+    try:
+        st = os.stat(path)
+    except OSError:
+        return '-'
+    return 'dir' if stat.S_ISDIR(st.st_mode) else str(st.st_size)
+
+
+def link_of(path):
+    try:
+        return os.readlink(path)
+    except OSError:
+        return '-'
+
+
+def listing_of(path):
+    if not path.is_dir():
+        return None
+    return hashlib.sha1('\0'.join(sorted(os.listdir(path))).encode('utf-8', 'surrogateescape')).hexdigest()
+
+
+def code_prints(path):
+    return module_prints(path.read_bytes(), str(path)) if path.is_file() else None
+
+
+def entry_holds(entry, root):
+    """캐시 항목이 지금도 맞는가: 연 파일·본 폴더·stat 으로 본 것·거쳐 간 링크가 같고, 실행한 코드가 든 파일마다 원본이 같거나
+    실행한 qualname 들의 지문 목록(차례 포함)이 같다."""
+    if any(content_sig(root / p) != v for p, v in entry['files'].items()):
+        return False
+    if any(listing_of(root / p) != v for p, v in entry['dirs'].items()):
+        return False
+    if any(stat_state(root / p) != v for p, v in entry['stats'].items()):
+        return False
+    if 'links' not in entry or any(link_of(root / p) != v for p, v in entry['links'].items()):
+        return False
+    for p, (src, quals) in entry['code'].items():
+        if sha1_of(root / p) == src:
+            continue
+        prints = code_prints(root / p)
+        if prints is None or any(prints.get(q) != v for q, v in quals.items()):
+            return False
+    return True
+
+
+def trace_entry(trace, root):
+    """read_trace 결과를 캐시 항목으로. 실행한 qualname 마다 지금 파일의 같은 이름 지문 목록을 담는데, 실행한 지문이
+    하나라도 그 목록에 없으면(도는 중에 고침) None."""
+    code = {}
+    for p, quals in trace['code'].items():
+        prints = code_prints(root / p)
+        if prints is None:
+            return None
+        kept = {}
+        for q, fps in quals.items():
+            if q not in prints or any(fp not in prints[q] for fp in fps):
+                return None
+            kept[q] = prints[q]
+        code[p] = [sha1_of(root / p), kept]
+    return {'files': trace['files'], 'dirs': trace['dirs'], 'stats': trace['stats'], 'links': trace['links'], 'code': code}
+
+
+def load_entries(path):
+    try:
+        return json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return []
+
+
+def write_atomic(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f'.{path.name}.{os.getpid()}.{time.monotonic_ns()}')
+    tmp.write_text(text, encoding='utf-8')
+    os.replace(tmp, path)
+
+
+def built_hit(name, key, root):
+    """같은 빌드 결과 키로 통과한 기록 가운데 지금도 맞는 것(entry_holds)."""
+    for old in load_entries(cache_dir() / 'built' / f'{name}-{key[:24]}.json'):
+        try:
+            if entry_holds(old['trace'], root):
+                return old
+        except (KeyError, TypeError, ValueError):
+            continue
+    return None
+
+
+def save_built(name, key, detail, trace):
+    path = cache_dir() / 'built' / f'{name}-{key[:24]}.json'
+    olds = [o for o in load_entries(path) if o.get('trace') != trace][-7:]
+    olds.append({'when': time.strftime('%Y-%m-%d %H:%M'), 'detail': detail, 'trace': trace})
+    write_atomic(path, json.dumps(olds, ensure_ascii=False))
 
 
 def cache_dir():
@@ -283,52 +480,103 @@ def no_cache_env(logs):
     return dict(os.environ, DQ4_READSET='off', DQ4_BUILD_CACHE='off', DQ4_STATES_CACHE=str(Path(logs) / 'states'))
 
 
+def spawn(command, log, timeout, env):
+    """bash 로 명령 하나를 돌려 로그에 덧붙인다. 종료 코드, 시간을 넘기면 None."""
+    with log.open('a', encoding='utf-8') as out:
+        proc = subprocess.Popen(['bash', '-c', command], cwd=ROOT, stdout=out, stderr=subprocess.STDOUT,
+                                start_new_session=True, env=env)
+        RUNNING.add(proc)
+        try:
+            return proc.wait(timeout=max(1, timeout))
+        except subprocess.TimeoutExpired:
+            return None
+        finally:
+            # 명령이 남긴 백그라운드 자식까지 그룹째 정리
+            kill_group(proc)
+            proc.wait()
+            RUNNING.discard(proc)
+
+
 def run_check(check, timeout, logs, no_cache=False, env=None):
     """검사 하나를 돌린다. (결과 'passed'|'failed'|'skipped', 본문 괄호 안 글). env 를 주면 그 환경으로 돈다(배포 관문이
-    모든 단계에 같은 환경을 쓸 때)."""
+    모든 단계에 같은 환경을 쓸 때).
+
+    입력 키가 빗나가도 롬을 빌드하는 검사(split_built)는 빌드 단계만 먼저 돌린다. 만든 파일·.py 밖 입력이 같고, 지난
+    통과 때 검사 단계가 실행한 함수의 코드와 연 파일·본 폴더가 모두 같으면(entry_holds) 검사 단계를 건너뛴다. 검사
+    단계는 tools/guardtrace 를 PYTHONPATH 앞에 두고 돌려 그것들을 적는다. 롬이 그대로이고 검사가 실행하지 않는
+    함수만 고친 PR 이 실행 검사를 다시 돌지 않게 한다."""
     name, run = check['name'], check['run']
     if PLACEHOLDER.search(run):
         return 'skipped', '명령에 <…> 자리가 있어 직접 돌릴 것'
     unset = unset_env(check.get('needs', []))
     if unset:
         return 'skipped', f'설정 안 된 환경 변수 {", ".join(unset)}'
-    key = input_key(check)
+    key = input_key(check, ROOT)
     hit = cache_dir() / f'{name}-{key[:24]}.json' if key else None
     if hit and hit.is_file() and not no_cache:
         old = json.loads(hit.read_text(encoding='utf-8'))
         return 'passed', f'캐시: 같은 입력으로 {old["when"]} 통과, {old["detail"]}'
-    for d in out_dirs(run):
-        shutil.rmtree(ROOT / d, ignore_errors=True)
-    log = logs / f'{name}.log'
-    shown = log.relative_to(ROOT) if log.is_relative_to(ROOT) else log
-    t0 = time.time()
-    with log.open('w', encoding='utf-8') as out:
-        env = env or (no_cache_env(logs) if no_cache else None)
-        proc = subprocess.Popen(['bash', '-c', run], cwd=ROOT, stdout=out, stderr=subprocess.STDOUT,
-                                start_new_session=True, env=env)
-        RUNNING.add(proc)
-        try:
-            code = proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
+    # 같은 크기로 같은 초 안에 고친 원본은 옛 .pyc 를 그대로 쓰므로, 단계마다 빈 곳에서 새로 컴파일한다
+    pycaches = []
+
+    def fresh(e):
+        pycaches.append(Path(tempfile.mkdtemp(prefix=f'guard-{name}-pyc-')))
+        return dict(e, PYTHONPYCACHEPREFIX=str(pycaches[-1]))
+    try:
+        log = logs / f'{name}.log'
+        shown = log.relative_to(ROOT) if log.is_relative_to(ROOT) else log
+        log.write_text('', encoding='utf-8')
+        env = dict(env or (no_cache_env(logs) if no_cache else os.environ))
+        t0 = time.time()
+        parts = None if no_cache or key is None or shadowed() else split_built(check)
+        built = reads = None
+        if parts:
+            code = spawn(parts[0], log, timeout, fresh(env))
+            if code is None:
+                return 'failed', f'{timeout}초 안에 끝나지 않음, 로그 {shown}'
+            if code:
+                return 'failed', f'종료 코드 {code}, 로그 {shown}'
+            built = input_key(check, ROOT, built=True)
+            old = built and built_hit(name, built, ROOT)
+            if old:
+                return 'passed', f'캐시: 빌드 결과와 검사 코드가 같아 {old["when"]} 통과, {old["detail"]}'
+            reads = logs / f'{name}.reads'
+            reads.unlink(missing_ok=True)
+            Path(f'{reads}.broken').unlink(missing_ok=True)
+        # 검사 출력 폴더는 검사 단계를 돌릴 때만 비운다(건너뛰면 지난 출력이 남는다)
+        for d in out_dirs(run):
+            # 빌드 단계가 만든 폴더면(앞 단계 --out) 지우지 않는다
+            if not any(under(d, m) or under(m, d) for m in made_paths(run)):
+                shutil.rmtree(ROOT / d, ignore_errors=True)
+        if parts:
+            base = env
+            env = dict(base, GUARD_READS=str(reads), GUARD_READS_ROOT=str(ROOT),
+                       GUARD_READS_SKIP=os.pathsep.join(str(ROOT / d) for d in out_dirs(run)
+                                                        if not any(under(d, m) or under(m, d) for m in made_paths(run))),
+                       PYTHONPATH=os.pathsep.join(x for x in (str(TRACER), base.get('PYTHONPATH')) if x))
+        code = spawn(parts[1] if parts else run, log, timeout - (time.time() - t0), fresh(env))
+        if code is None:
             return 'failed', f'{timeout}초 안에 끝나지 않음, 로그 {shown}'
-        finally:
-            # 명령이 남긴 백그라운드 자식까지 그룹째 정리
-            kill_group(proc)
-            proc.wait()
-            RUNNING.discard(proc)
-    secs = round(time.time() - t0)
-    if code:
-        return 'failed', f'종료 코드 {code}, 로그 {shown}'
-    m = re.search(r'--rom\s+(\S+)', run.split('&&')[-1])
-    rom = m[1] if m else None
-    detail = f'{secs}초' + (f', 롬 SHA-1 {hashlib.sha1((ROOT / rom).read_bytes()).hexdigest()[:8]}'
-                           if rom and (ROOT / rom).is_file() else '')
-    # 도는 동안 입력이 바뀌었으면 그 결과는 어느 입력의 것인지 모르므로 캐시하지 않는다
-    if key is not None and input_key(check) == key:
-        hit.parent.mkdir(parents=True, exist_ok=True)
-        hit.write_text(json.dumps({'when': time.strftime('%Y-%m-%d %H:%M'), 'detail': detail}, ensure_ascii=False),
-                       encoding='utf-8')
-    return 'passed', detail
+        secs = round(time.time() - t0)
+        if code:
+            return 'failed', f'종료 코드 {code}, 로그 {shown}'
+        m = re.search(r'--rom\s+(\S+)', run.split('&&')[-1])
+        rom = m[1] if m else None
+        detail = f'{secs}초' + (f', 롬 SHA-1 {hashlib.sha1((ROOT / rom).read_bytes()).hexdigest()[:8]}'
+                               if rom and (ROOT / rom).is_file() else '')
+        # 도는 동안 입력이 바뀌었으면 그 결과는 어느 입력의 것인지 모르므로 캐시하지 않는다
+        if key is not None and input_key(check, ROOT) == key:
+            write_atomic(hit, json.dumps({'when': time.strftime('%Y-%m-%d %H:%M'), 'detail': detail}, ensure_ascii=False))
+            trace = (read_trace(reads, CHECK_STAGE.match(parts[1])['script'])
+                     if reads and not Path(f'{reads}.broken').exists() else None)
+            entry = trace and trace_entry(trace, ROOT)
+            # 검사 단계가 빌드 결과를 고쳐 썼으면 키가 달라져 남기지 않는다
+            if built and entry and input_key(check, ROOT, built=True) == built:
+                save_built(name, built, detail, entry)
+        return 'passed', detail
+    finally:
+        for d in pycaches:
+            shutil.rmtree(d, ignore_errors=True)
 
 
 def run_all(hit, parallel, timeout, no_cache=False):
