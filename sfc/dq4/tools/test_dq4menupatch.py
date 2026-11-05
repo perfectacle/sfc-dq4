@@ -1,5 +1,11 @@
+import contextlib
+import hashlib
+import io
+import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
+import tempfile
 import unittest
 from unittest import mock
 
@@ -283,6 +289,274 @@ class MenuBuildTests(unittest.TestCase):
         rom, _, _ = menu_rom(spare=0x16)
         with self.assertRaisesRegex(ValueError, '창 5E: 옮길 자리가 없음'):
             self.build(rom)
+
+
+BDF = """STARTFONT 2.1
+FONT test
+CHARS 3
+
+STARTCHAR hangul
+ENCODING 54620
+SWIDTH 500 0
+DWIDTH 9 0
+BBX 8 8 0 -1
+BITMAP
+80
+40
+20
+10
+08
+04
+02
+01
+ENDCHAR
+STARTCHAR small
+ENCODING 65
+DWIDTH 5 0
+BBX 4 2 1 3
+BITMAP
+F0
+90
+ENDCHAR
+ENDFONT
+"""
+
+
+class FontTests(unittest.TestCase):
+    def font(self, file, text=BDF, sha=None):
+        sha = sha or hashlib.sha256(text.encode('latin-1', 'replace')).hexdigest()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        (Path(tmp.name) / file).write_text(text, encoding='latin-1')
+        galmuri = {**mp.GALMURI, 'galmuri9': (file, sha)}
+        stack = contextlib.ExitStack()
+        self.addCleanup(stack.close)
+        stack.enter_context(mock.patch.dict(os.environ, {'DQ4_GALMURI': tmp.name}))
+        stack.enter_context(mock.patch.object(mp, 'GALMURI', galmuri))
+        return mp.Font('galmuri9')
+
+    def test_missing_folder_variable_stops(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(SystemExit, 'DQ4_GALMURI'):
+                mp.Font('galmuri9')
+
+    def test_file_with_another_hash_is_refused(self):
+        with self.assertRaisesRegex(SystemExit, 'Galmuri v2.40.4'):
+            self.font('Galmuri9.bdf', sha='0' * 64)
+
+    def test_blank_lines_are_skipped_and_codes_become_characters(self):
+        font = self.font('Galmuri9.bdf')
+        self.assertEqual(sorted(font.glyphs), ['A', '한'])
+        self.assertEqual(font.glyphs['A']['rows'], [[1, 1, 1, 1], [1, 0, 0, 1]])
+        self.assertEqual(font.glyphs['한']['adv'], 9)
+
+    def test_hangul_top_row_sits_on_band_row_one(self):
+        font = self.font('Galmuri9.bdf')
+        self.assertEqual(font.top, 7)
+        adv, pts = font.char('한')
+        self.assertEqual(adv, 9)
+        self.assertEqual(pts, [(i, 1 + i) for i in range(8)])
+
+    def test_other_glyphs_are_placed_by_their_bounding_box(self):
+        # A: 높이 2, 아래 오프셋 3 → 윗줄 y = 7 - (3 + 2 - 1 - 0) = 3, 가로는 x 오프셋 1 부터
+        adv, pts = self.font('Galmuri9.bdf').char('A')
+        self.assertEqual(adv, 5)
+        self.assertEqual(pts, [(1, 3), (2, 3), (3, 3), (4, 3), (1, 4), (4, 4)])
+
+
+class RenderTests(unittest.TestCase):
+    def test_columns_are_eight_dots_wide_with_one_dot_of_margin(self):
+        cols = mp.render(FakeFont(), 'ab')
+        # 점은 글자마다 (1, 1) → 띠 x 2 와 10. 진행 폭 1 + 16 = 17 → 3열
+        self.assertEqual(len(cols), 3)
+        self.assertEqual(cols[0][1][2], 1)
+        self.assertEqual(cols[1][1][2], 1)
+        self.assertEqual(sum(v for col in cols for row in col for v in row), 2)
+        self.assertEqual([len(col) for col in cols], [mp.BAND] * 3)
+
+    def test_tight_width_ends_at_the_last_dot(self):
+        self.assertEqual(len(mp.render(FakeFont(), 'ab', tight=True)), 2)
+        self.assertEqual(len(mp.render(FakeFont(), 'a', tight=True)), 1)
+
+    def test_dot_outside_the_band_is_an_error(self):
+        class Low:
+            def char(self, ch):
+                return 8, [(0, mp.BAND)]
+        with self.assertRaisesRegex(ValueError, '띠 밖'):
+            mp.render(Low(), 'a')
+
+
+class AtlasTests(unittest.TestCase):
+    def test_same_text_is_drawn_once_and_columns_follow_the_reserved_ones(self):
+        atlas = mp.Atlas(FakeFont())
+        self.assertEqual(atlas.run('ab'), (3, mp.Atlas.FIRST))
+        self.assertEqual(atlas.run('ab'), (3, mp.Atlas.FIRST))
+        self.assertEqual(atlas.run('c'), (2, mp.Atlas.FIRST + 3))
+        self.assertEqual(len(atlas.cols), mp.Atlas.FIRST + 5)
+
+    def test_other_font_is_cached_apart_and_drawn_tight(self):
+        atlas = mp.Atlas(FakeFont())
+        other = SimpleNamespace(name='other', char=FakeFont().char)
+        self.assertEqual(atlas.run('ab', other), (2, mp.Atlas.FIRST))
+        self.assertEqual(atlas.run('ab'), (3, mp.Atlas.FIRST + 2))
+
+    def test_columns_past_the_name_area_are_refused(self):
+        atlas = mp.Atlas(FakeFont())
+        with self.assertRaisesRegex(ValueError, '넘음'):
+            atlas.run('가' * 210)
+
+    def test_tiles_hold_upper_then_lower_halves(self):
+        atlas = mp.Atlas(FakeFont())
+        atlas.run('a')
+        tiles = atlas.tiles()
+        self.assertEqual(len(tiles), 2 * mp.COLUMNS * 16)
+        # 점은 글자 줄 1행 x 2 → 열 2 의 첫 평면 1행 = 0x20, 둘째 평면은 FF
+        first = mp.Atlas.FIRST * 16
+        self.assertEqual(tiles[first + 2:first + 4], bytes((0x20, 0xFF)))
+        self.assertEqual(tiles[mp.COLUMNS * 16 + first:mp.COLUMNS * 16 + first + 2], bytes((0x00, 0xFF)))
+        self.assertEqual(tiles[:16], bytes(16))
+
+
+class RecordErrorTests(unittest.TestCase):
+    def test_item_record_too_wide_is_an_error(self):
+        atlas = FakeAtlas({'가': 0x3F})
+        with self.assertRaisesRegex(ValueError, '너비'):
+            mp.item_record(atlas, bytes((0x5A, 0x5A, 0x4E, 0xA3, 0x5A, 0x5A)), [['가']])
+
+    def test_item_record_without_height_left_is_an_error(self):
+        atlas = FakeAtlas({'가': 2})
+        with self.assertRaises(ValueError):
+            mp.item_record(atlas, bytes((0x5A, 0x5A, 0x4E, 0xAF, 0x5A, 0x5A)), [['가']])
+
+    def test_speed_text_longer_than_its_line_is_an_error(self):
+        q, fast, slow = mp.SPEED_TEXT
+        old = bytes((2, 2, 0x14, 6, 0, 3)) + bytes((0xFE, 3, 0xFF))
+        with self.assertRaisesRegex(ValueError, '표시 속도'):
+            mp.speed_record(FakeAtlas({q: 4, fast: 9, slow: 9}), old)
+        with self.assertRaisesRegex(ValueError, '표시 속도'):
+            mp.speed_record(FakeAtlas({q: 0x20, fast: 3, slow: 3}), old)
+
+    def test_place_needs_a_slack_big_enough(self):
+        data = bytearray(0x100000)
+        with self.assertRaisesRegex(ValueError, '빈자리가 모자람'):
+            mp.place(data, [[0x040000, 0x040002]], b'abc')
+        slack = [[0x040010, 0x040020]]
+        self.assertEqual(mp.place(data, slack, b'abc'), 0x040010)
+        self.assertEqual(slack, [[0x040013, 0x040020]])
+        self.assertEqual(bytes(data[mp.lorom(0x040010):mp.lorom(0x040010) + 3]), b'abc')
+
+    def test_put_checks_the_original_bytes(self):
+        data = bytearray(0x10000)
+        with self.assertRaisesRegex(ValueError, '원래 바이트'):
+            mp.put(data, 0x040000, b'x', b'y')
+
+    def test_grown_record_missing_from_the_window_table_is_an_error(self):
+        # 표 첫 칸이 표 바로 뒤를 가리키면 칸 수가 10 으로 읽혀, 5E 를 가리키는 칸을 찾지 못한다
+        rom, _, _ = menu_rom()
+        mp.put(rom, TABLE, (0xEB48 + 20).to_bytes(2, 'little'))
+        with self.assertRaisesRegex(ValueError, '창 5E: 창 표에서 레코드를 찾지 못함'):
+            build_menu(rom)
+
+    def test_shared_windows_must_fit_before_the_menu_flag(self):
+        rom, _, _ = menu_rom()
+        with mock.patch.object(mp, 'MENU_FLAG', mp.SHARED_WRAM + 4):
+            with self.assertRaisesRegex(ValueError, '공용 창'):
+                build_menu(rom)
+
+
+class SheetTests(unittest.TestCase):
+    def test_sheet_draws_one_white_dot_per_column_dot_at_triple_scale(self):
+        from PIL import Image
+        atlas = mp.Atlas(FakeFont())
+        atlas.run('a')
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / 'sheet.png'
+            mp.sheet(atlas, out)
+            image = Image.open(out).convert('RGB')
+        self.assertEqual(image.size, (len(atlas.cols) * 8 * 3, mp.BAND * 3))
+        x = (mp.Atlas.FIRST * 8 + 2) * 3 + 1
+        self.assertEqual(image.getpixel((x, 3 + 1)), (255, 255, 255))
+        self.assertEqual(image.getpixel((1, 1)), (40, 40, 40))
+        whites = [(px, py) for px in range(image.width) for py in range(image.height) if image.getpixel((px, py)) == (255, 255, 255)]
+        self.assertEqual(len(whites), 9)
+
+
+class LoadMessagesTests(unittest.TestCase):
+    def load(self, doc):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'messages.json'
+            path.write_text(json.dumps(doc), encoding='utf-8')
+            return mp.load_messages(path)
+
+    def test_numbers_are_hex_keys_and_parts_pass_through(self):
+        from dq4menumsg import CHARS
+        text = CHARS[0] + ' ' + CHARS[1]
+        self.assertEqual(self.load({'format': 'dq4messages/1', 'messages': {'1F': [text, 3], '0A': [' ']}}),
+                         {0x1F: [text, 3], 0x0A: [' ']})
+
+    def test_other_format_is_refused(self):
+        with self.assertRaisesRegex(SystemExit, 'dq4messages/1'):
+            self.load({'format': 'x', 'messages': {}})
+
+    def test_characters_outside_the_font_are_refused(self):
+        with self.assertRaisesRegex(SystemExit, '넣을 수 없는 부분'):
+            self.load({'format': 'dq4messages/1', 'messages': {'01': ['\u0001']}})
+        with self.assertRaisesRegex(SystemExit, '넣을 수 없는 부분'):
+            self.load({'format': 'dq4messages/1', 'messages': {'01': [1.5]}})
+
+
+class MainTests(unittest.TestCase):
+    def run_main(self, *argv):
+        buf = io.StringIO()
+        with mock.patch('sys.argv', ['dq4menupatch.py', *argv]), mock.patch.object(mp, 'Font', lambda name: FakeFont()), \
+                contextlib.redirect_stdout(buf):
+            mp.main()
+        return buf.getvalue()
+
+    def test_sheet_draws_every_window_text(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / 'sheet.png'
+            self.run_main('sheet', '--out', str(out))
+            width = Image.open(out).width
+        # 문구마다 글자 수 + 1 열(FakeFont): 아무 문구도 안 그렸다면 예약 열 둘뿐이다
+        self.assertGreater(width, mp.Atlas.FIRST * 8 * 3 * 10)
+
+    def test_build_writes_rom_and_ips_and_lists_records(self):
+        rom = bytes(16)
+        built = bytearray(rom)
+        built[3] = 9
+        atlas = SimpleNamespace(cols=[1, 2, 3], messages=['메시지 줄'])
+        records = {0x5E: (0x040100, b'\x01', b'\x02\x03')}
+        seen = {}
+
+        def fake_build(data, font, jamo, messages=None):
+            seen.update(data=data, messages=messages)
+            return bytes(built), atlas, records
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / 'in.sfc').write_bytes(rom)
+            (tmp / 'messages.json').write_text(json.dumps({'format': 'dq4messages/1', 'messages': {'01': [' ']}}))
+            out = tmp / 'sub' / 'out.sfc'
+            with mock.patch.object(mp, 'base_problem', lambda data: None), mock.patch.object(mp, 'build', fake_build):
+                text = self.run_main('build', '--rom', str(tmp / 'in.sfc'), '--out', str(out),
+                                     '--messages', str(tmp / 'messages.json'))
+            self.assertEqual(out.read_bytes(), bytes(built))
+            ips = out.with_suffix('.ips').read_bytes()
+        self.assertTrue(ips.startswith(b'PATCH') and ips.endswith(b'EOF'))
+        self.assertEqual(seen["data"], rom)
+        self.assertEqual(seen["messages"], {1: [' ']})
+        lines = text.splitlines()
+        self.assertEqual(lines[0], f'{out} sha1={hashlib.sha1(built).hexdigest()} 열=3 바뀐 구간=1')
+        self.assertEqual(lines[1], '메시지 줄')
+        self.assertEqual(lines[2], '창 5E 040100 1→2 02 03')
+
+    def test_unfit_base_rom_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / 'in.sfc').write_bytes(bytes(16))
+            with self.assertRaisesRegex(SystemExit, '4MB 가 아님'):
+                self.run_main('build', '--rom', str(Path(tmp) / 'in.sfc'), '--out', str(Path(tmp) / 'o.sfc'))
 
 
 class BaseProblemTests(unittest.TestCase):

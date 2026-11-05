@@ -1,4 +1,6 @@
+import contextlib
 import hashlib
+import io
 import json
 from pathlib import Path
 import sys
@@ -135,6 +137,26 @@ class TrackNotesTests(unittest.TestCase):
         self.assertEqual(ov.track_notes(self.SEQ, 1, flag=1), [(0, 0x21, 0x04, 0x33), (4, 0x21, 0x04, 0x33)])
         self.assertEqual([t for t, *_ in ov.track_notes(self.SEQ, 1, flag=1)],
                          [t for t, n, _, _ in play(self.SEQ, 100, 1)[1] if isinstance(n, int)])
+
+
+class TrackNotesLoopTests(unittest.TestCase):
+    SEQ = assemble([
+        'tempo 78', 'track L0',
+        'L0:', '  note 30 len 04',
+        'LA:', '  note 31 len 02', '  loop2 -> LA',
+        'LB:', '  note 32 len 02', '  loop2b -> LB',
+        'LC:', '  note 33 len 02', '  loop 03 -> LC',
+        '  rest len 02', '  jump -> LD', '  note 3F len 02',
+        'LD:', '  note 34 len 02', '  end',
+    ])
+
+    def test_counted_loops_repeat_and_jumps_skip_and_rests_have_no_note(self):
+        got = ov.track_notes(self.SEQ, 0)
+        self.assertEqual([(t, n, d) for t, n, d, _ in got],
+                         [(0, 0x30, 4), (4, 0x31, 2), (6, 0x31, 2), (8, 0x32, 2), (10, 0x32, 2),
+                          (12, 0x33, 2), (14, 0x33, 2), (16, 0x33, 2), (18, None, 2), (20, 0x34, 2)])
+        self.assertEqual([t for t, n, _, _ in got if n is not None],
+                         [t for t, n, _, _ in play(self.SEQ, 100)[0] if isinstance(n, int)])
 
 
 class FactorTests(unittest.TestCase):
@@ -283,6 +305,247 @@ class BuildTests(unittest.TestCase):
         with self.subTest('sha'), mock.patch.object(ov, 'SOURCE_SHA1', '0' * 40), \
                 self.assertRaisesRegex(ValueError, 'SHA-1'):
             ov.build('fc.nes', self.rom_path, self.title_path, self.root / 'x.sfc')
+
+
+def ev(ch, tick, length, op='note', midi=60, gate=0, vol=15):
+    return {'ch': ch, 'tick': tick, 'len': length, 'op': op, 'midi': midi, 'gate': gate, 'ch_vol': vol}
+
+
+def synthetic_score():
+    """틱 1~4085 을 빈틈없이 덮는 가짜 FC 악보. 펄스1 은 팡파르(96틱 음 둘과 짧은 음), 행진, 끝 화음 둘."""
+    timeline = [
+        ev('pulse1', 1, 96, midi=67), ev('pulse1', 97, 96, midi=60),
+        *[ev('pulse1', start, 95, midi=62) for start in (193, 288, 383, 478, 573)], ev('pulse1', 668, 83, midi=65),
+        ev('pulse1', 751, 3264, midi=64), ev('pulse1', 4015, 40, midi=60), ev('pulse1', 4055, 30, midi=67),
+        ev('pulse2', 1, 50, midi=60, gate=20, vol=10), ev('pulse2', 51, 50, op='tie', gate=10, vol=10),
+        ev('pulse2', 101, 3984, midi=55),
+        ev('triangle', 1, 100, op='rest', midi=None), ev('triangle', 101, 3984, midi=48, gate=0),
+    ]
+    return {'timeline': timeline + [ev('pulse1', 4085, 5, op='end')], 'end_tick': 4085, 'tempo': 120,
+            'tempo_changes': []}
+
+
+class PartsTests(unittest.TestCase):
+    def setUp(self):
+        self.parts = ov.parts(synthetic_score())
+
+    def test_ties_join_the_previous_note_and_keep_a_gate_inside_the_whole_length(self):
+        # 펄스2: 음 1~50(게이트 20) + 붙임 51~100(게이트 10) → 길이 100, 소리 틱 50 + 10
+        first = self.parts['pulse2'][0]
+        self.assertEqual(first, (1, 100, 60, 60, 10 / 15))
+        self.assertEqual(len(self.parts['pulse2']), 3)
+
+    def test_note_without_a_gate_sounds_to_the_end(self):
+        self.assertEqual(self.parts['pulse1'][0], (1, 96, 67, None, 1.0))
+
+    def test_triangle_gate_is_a_level_not_a_length(self):
+        # 게이트 0 → 음량 15/15, 15 이하는 gate/15
+        self.assertEqual(self.parts['triangle'][1], (101, 3984, 48, None, 1.0))
+        score = synthetic_score()
+        score['timeline'][-2] = ev('triangle', 101, 3984, midi=48, gate=9)
+        self.assertEqual(ov.parts(score)['triangle'][1][4], 9 / 15)
+
+    def test_rest_events_have_no_pitch(self):
+        self.assertEqual(self.parts['triangle'][0], (1, 100, None, None, 0.0 + self.parts['triangle'][0][4]))
+        self.assertIsNone(self.parts['triangle'][0][2])
+
+    def test_last_rest_runs_to_the_end_tick_plus_the_ring_time(self):
+        for evs in self.parts.values():
+            start, length, midi, gate, level = evs[-1]
+            self.assertEqual((midi, gate, level), (None, None, 0))
+            self.assertEqual(start + length, 4085 + ov.RING_TICKS)
+
+    def test_a_gap_between_notes_is_an_error(self):
+        score = synthetic_score()
+        score['timeline'].insert(0, ev('pulse1', 1000, 5))
+        score['timeline'].insert(0, ev('pulse1', 1001, 5))
+        with self.assertRaisesRegex(ValueError, 'pulse1: gap at tick'):
+            ov.parts(score)
+
+
+class MelodicTests(unittest.TestCase):
+    def lines(self, evs, labels=None):
+        w = ov.Writer()
+        ov.melodic(w, evs, lambda level: round(0x80 * level), labels)
+        return w.lines
+
+    def test_notes_rests_gate_and_the_ring_release_on_the_last_note(self):
+        evs = [(1, 10, 60, None, 1.0), (11, 5, None, None, 0), (16, 6, 62, 3, 0.5)]
+        self.assertEqual(self.lines(evs), [
+            '  volume2 80', '  gate_preset FE', '  note 25 len 14', '  rest len 0A',
+            '  volume2 40', f'  release {ov.RING_RELEASE:02X}', '  gate_preset 80', '  note 27 len 0C'])
+
+    def test_a_label_restarts_the_running_state(self):
+        evs = [(1, 10, 60, None, 1.0), (11, 10, 60, None, 1.0), (21, 10, 62, None, 1.0)]
+        self.assertEqual(self.lines(evs, {11: 'LBL'}), [
+            '  volume2 80', '  gate_preset FE', '  note 25 len 14',
+            'LBL:', '  volume2 80', '  gate_preset FE', '  note 25 len 14',
+            f'  release {ov.RING_RELEASE:02X}', '  note 27'])
+
+    def test_song_tick_doubles_the_length_from_zero(self):
+        self.assertEqual([ov.song_tick(t) for t in (0, 1, 2, 751)], [0, 0, 2, 1500])
+
+
+class PercussionTests(unittest.TestCase):
+    P = {'pulse1': [(1, 100, 67, None, 1.0), (4015, 40, 60, None, 1.0), (4055, 30, 67, None, 1.0)],
+         'pulse2': [(1, 4084, 60, None, 1.0)], 'triangle': [(1, 4084, 48, None, 1.0)]}
+
+    def setUp(self):
+        self.hits, self.end, self.rolls = ov.percussion(self.P, [(10, 5, 0xA0), (20, 5, 0)])
+
+    def test_snare_hits_keep_their_volume_or_default(self):
+        snares = [h for h in self.hits if h[1] == ov.SNARE]
+        self.assertEqual(snares, [(10, ov.SNARE, 5, 0xA0), (20, ov.SNARE, 5, 0x80)])
+
+    def test_fanfare_long_note_starts_with_a_timpani_hit_and_a_roll(self):
+        timpani = ov.TIMPANI_NOTE['G']
+        self.assertIn((0, ov.TIMPANI, timpani, 0xC0), self.hits)
+        # 롤: FC 틱 7 에서 88 까지 3틱 간격 28타. 첫 타만 세기(50)를 갖고 나머지는 None, 미끄럼은 틱 12 에서 162 동안
+        roll = [h for h in self.hits if h[1] == ov.TIMPANI and 12 <= h[0] <= 174]
+        self.assertEqual(len(roll), 28)
+        self.assertEqual(roll[0], (12, ov.TIMPANI, timpani, 0x50))
+        self.assertTrue(all(h[3] is None for h in roll[1:]))
+        self.assertEqual(self.rolls[12], (0xA0, 162))
+
+    def test_tail_chords_hit_the_timpani_and_the_last_chord_rolls(self):
+        c, g = ov.TIMPANI_NOTE['C'], ov.TIMPANI_NOTE['G']
+        self.assertIn((8028, ov.TIMPANI, c, 0xB0), self.hits)
+        self.assertIn((8108, ov.TIMPANI, g, 0xB0), self.hits)
+        final = [h for h in self.hits if h[0] > 8108]
+        self.assertEqual(len(final), 7)
+        self.assertEqual(final[0], (8114, ov.TIMPANI, c, 0x70))
+
+    def test_end_is_the_latest_part_end_and_hits_are_sorted(self):
+        self.assertEqual(self.end, 2 * (4085 - 1))
+        keys = [h[0] for h in self.hits]
+        self.assertEqual(keys, sorted(keys))
+        self.assertEqual(len(self.hits), 2 + 1 + 28 + 2 + 7)
+
+
+class PercTrackTests(unittest.TestCase):
+    def test_instrument_volume_roll_and_tempo_lines_in_order(self):
+        hits = [(0, ov.TIMPANI, 0x27, 0xC0), (12, ov.TIMPANI, 0x27, 0x50), (24, ov.SNARE, 5, 0x80)]
+        w = ov.Writer()
+        with mock.patch.object(ov, 'NDS_TEMPO', [(1, 100), (25, 50)]):
+            ov.perc_track(w, hits, 48, {12: (0xA0, 12)})
+        self.assertEqual(w.lines, [
+            '  tempo 64', '  instrument 02', '  release 14', '  volume2 C0', '  gate_preset FE', '  note 27 len 0C',
+            '  volume2 50', '  volume2_slide A0 0C', '  note 27',
+            '  instrument 05', '  release 14', '  volume2 80', '  note 05 len 18', '  tempo 32'])
+
+    def test_silence_between_hits_is_a_rest(self):
+        w = ov.Writer()
+        with mock.patch.object(ov, 'NDS_TEMPO', [(1, 100)]):
+            ov.perc_track(w, [(10, ov.SNARE, 5, 0x80)], 14, {})
+        self.assertEqual(w.lines[:3], ['  tempo 64', '  rest len 0A', '  instrument 05'])
+        self.assertEqual(w.lines[-1], '  note 05 len 04')
+
+
+class ArrangeTests(unittest.TestCase):
+    ORIGINAL = ['tempo 78', 'track L0', 'L0:', '  note 30 len 10', '  end']
+
+    def setUp(self):
+        self.score = synthetic_score()
+        self.lines = ov.arrange(self.score, [], self.ORIGINAL)
+        self.seq = assemble(self.lines)
+
+    def test_every_track_starts_with_the_flag_branch_into_the_overture(self):
+        self.assertEqual(self.lines[:8], ['tempo 78'] + [f'track LS{i}' for i in range(7)])
+        self.assertEqual(self.lines[8:12], ['LS0:', '  if_flag 01 -> LT0', '  jump -> L0', 'LS1:'])
+        self.assertEqual(self.lines[12:14], ['  if_flag 01 -> LT1', '  end'])
+
+    def test_flag_zero_keeps_the_original_song(self):
+        events = play(self.seq, 200, 0)
+        self.assertEqual([n for _, n, _, _ in events[0] if isinstance(n, int)][:1], [0x30])
+        self.assertEqual([e for e in events[1:] if e], [])
+
+    def test_overture_plays_the_fc_notes_on_seven_tracks(self):
+        report = ov.check_sequence(self.seq, self.score)
+        notes = report['notes']['flag_01']
+        # 펄스1 11음, 펄스2 2음(붙임은 합쳐짐)·2음, 현 선율은 행진부터 3음, 삼각파 1음 x2,
+        # 타악은 한 틱에 하나: 팡파르 첫 타 8 + 96틱 음 둘의 굴림 26 x 2 + 끝 화음 둘 + 마지막 화음 굴림 7
+        self.assertEqual(notes[:6], [11, 2, 2, 3, 1, 1])
+        self.assertEqual(notes[6], 8 + 26 + 26 + 2 + 7)
+        self.assertEqual(report['tracks'], 7)
+        self.assertEqual(report['tempo'], 0x78)
+        self.assertEqual(report['cycle_ticks'], ov.song_tick(4085 + ov.RING_TICKS))
+        self.assertEqual(report['bytes'], len(self.seq))
+
+    def test_flag_zero_notes_are_the_original_ones(self):
+        report = ov.check_sequence(self.seq, self.score)
+        self.assertEqual(report['notes']['flag_00'], [1, 0, 0, 0, 0, 0, 0])
+
+
+class ReferenceTests(unittest.TestCase):
+    def test_original_listing_renumbers_instruments_to_the_new_sample_order(self):
+        seq = assemble(['tempo 78', 'track L0', 'L0:', '  instrument 00', '  note 30 len 10', '  instrument 05', '  end'])
+        with mock.patch('dq5spc.sequences', lambda rom: {ov.SONG: (0, 0, 0)}), mock.patch('dq5spc.body', lambda rom, a, n: seq):
+            lines = ov.original_listing(None)
+        # 원래 악기 0 은 샘플 0A, 5 는 13 → 새 순서에서 6번과 5번
+        self.assertEqual([ln for ln in lines if 'instrument' in ln], ['  instrument 06', '  instrument 05'])
+        self.assertEqual(lines[0], 'tempo 78')
+
+    def test_reference_snare_is_shifted_into_this_songs_ticks_and_cut_to_the_march(self):
+        notes = [(1500, 0x10, 8, 0x90), (1000, 0x11, 8, 0x80), (8000, 0x12, 8, None), (2000, None, 8, 0x80)]
+        with mock.patch('dq5spc.sequences', lambda rom: {ov.REF_SONG: (0, 0, 0)}), \
+                mock.patch('dq5spc.body', lambda rom, a, n: b''), mock.patch.object(ov, 'track_notes', lambda seq, index: notes):
+            self.assertEqual(ov.reference_snare(None), [(1512, 0x10, 0x90)])
+
+    def test_cycle_covers_the_ring_time(self):
+        self.assertEqual(ov.cycle_ticks({'end_tick': 100}), 2 * (100 + ov.RING_TICKS - 1))
+
+
+class RenderAndMainTests(unittest.TestCase):
+    def test_render_packs_the_run_and_asks_for_the_wav(self):
+        calls = {}
+        fake = types.SimpleNamespace(
+            pack=lambda ram, dsp, regs, title, **kw: calls.update(pack=(ram, dsp, regs, title, kw)) or b'spc-bytes',
+            regs=lambda path: ('regs', path.name),
+            render=lambda spc, wav, seconds, fade: calls.update(render=(Path(spc).name, Path(wav).name, seconds, fade)))
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(sys.modules, {'dq5spcfile': fake}):
+            run = Path(tmp)
+            (run / 'spc.bin').write_bytes(b'ram')
+            (run / 'dsp.bin').write_bytes(b'dsp')
+            spc = ov.render(run, seconds=30)
+            self.assertEqual(spc, run / 'overture.spc')
+            self.assertEqual(spc.read_bytes(), b'spc-bytes')
+        self.assertEqual(calls['pack'][:3], (b'ram', b'dsp', ('regs', 'regs.txt')))
+        self.assertEqual(calls['pack'][4]['seconds'], 30)
+        self.assertEqual(calls['render'], ('overture.spc', 'overture.wav', 30, 2))
+
+    def run_main(self, *argv):
+        out = io.StringIO()
+        with mock.patch('sys.argv', ['dq4overture.py', *argv]), contextlib.redirect_stdout(out):
+            ov.main()
+        return out.getvalue()
+
+    def test_text_prints_the_arranged_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rom = Path(tmp) / 'dq5.sfc'
+            rom.write_bytes(b'x')
+            with mock.patch.object(ov, 'fc_score', lambda nes: {'s': nes}), mock.patch.object(ov, 'Rom', lambda raw: raw), \
+                    mock.patch.object(ov, 'reference_snare', lambda r: ['snare']), \
+                    mock.patch.object(ov, 'original_listing', lambda r: ['orig']), \
+                    mock.patch.object(ov, 'arrange', lambda score, snare, orig: [str(score), *snare, *orig]):
+                text = self.run_main('text', '--nes', 'a.nes', '--rom', str(rom))
+        self.assertEqual(text.splitlines(), ["{'s': 'a.nes'}", 'snare', 'orig'])
+
+    def test_render_and_tempo_map_print_their_results(self):
+        with mock.patch.object(ov, 'render', lambda run: f'{run}/overture.spc'):
+            self.assertEqual(self.run_main('render', 'work/run').strip(), 'work/run/overture.spc')
+        with mock.patch.object(ov, 'tempo_map', lambda nes, fs: {'nes': nes, 'fs': fs}):
+            self.assertEqual(json.loads(self.run_main('tempo-map', '--nes', 'n', '--fs', 'f')), {'nes': 'n', 'fs': 'f'})
+
+    def test_build_prints_the_hash_and_sequence_report(self):
+        seen = {}
+
+        def fake_build(nes, rom, title, out):
+            seen.update(nes=nes, rom=rom, title=title, out=out)
+            return {'rom_sha1': 'abc', 'sequence': {'bytes': 7}, 'extra': 1}
+        with mock.patch.object(ov, 'build', fake_build):
+            text = self.run_main('build', '--nes', 'n', '--rom', 'r', '--title', 't', '--out', 'o')
+        self.assertEqual(json.loads(text), {'rom_sha1': 'abc', 'sequence': {'bytes': 7}})
+        self.assertEqual(seen, {'nes': 'n', 'rom': 'r', 'title': 't', 'out': 'o'})
 
 
 class TempoMapTests(unittest.TestCase):

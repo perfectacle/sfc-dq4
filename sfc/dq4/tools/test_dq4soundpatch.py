@@ -1,7 +1,11 @@
 """곡 삽입의 경계, 기존 재배치 보존과 IPL 길이를 검사한다."""
+import contextlib
 from functools import cache
+import io
+import json
 import os
 from pathlib import Path
+import tempfile
 import unittest
 from unittest import mock
 
@@ -303,6 +307,291 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(out[at:at + 4], bytes.fromhex('00 16 3F 00'))
         with self.assertRaises(ValueError):
             patch.install(bytes(base), {2: self.item}, effect_calls={0x2589C5: (0x34, 0x3F)})
+
+
+class ReplacementChecksTests(unittest.TestCase):
+    def test_sample_ids_must_be_distinct_table_indices(self):
+        for samples in ((0x03, 0x03), (0xC8,)):
+            with self.subTest(samples=samples), self.assertRaisesRegex(ValueError, 'distinct DQ5 sample-table indices'):
+                patch.validate_replacement(patch.Replacement(melody(), samples))
+
+    def test_a_command_running_past_the_end_is_refused(self):
+        # 인자가 필요한 악기 명령 F0 이 마지막 바이트
+        seq = bytes([120, 1, 4, 0, 0xF0])
+        with self.assertRaisesRegex(ValueError, 'truncated sequence command'):
+            patch.validate_replacement(patch.Replacement(seq, (0x03,)))
+        # 길이가 필요한 음 50 은 길이 바이트를 읽다 실패한다
+        with self.assertRaisesRegex(ValueError, 'invalid sequence command'):
+            patch.validate_replacement(patch.Replacement(bytes([120, 1, 4, 0, 0x50]), (0x03,)))
+
+    def test_a_track_pointing_before_the_track_data_is_refused(self):
+        seq = bytes([120, 1, 0, 0, 0xFF])
+        with self.assertRaisesRegex(ValueError, 'sequence target outside track data'):
+            patch.validate_replacement(patch.Replacement(seq, (0x03,)))
+
+
+class SongSetTableTests(unittest.TestCase):
+    def tail(self, base, extra):
+        """표 뒤(IPL 끝 표시 자리)에 extra 를 끼운 사본."""
+        data = bytearray(base)
+        end = lorom(patch.SONG_SETS) + sum(map(len, patch.read_sets(base)))
+        data[end:end + len(extra) + 4] = extra + patch.IPL_END
+        return bytes(data)
+
+    def test_extra_records_and_code_blocks_after_the_original_ones(self):
+        base = synthetic_base()
+        original = patch.read_sets(base)
+        # 곡 47 의 레코드 하나, 그 뒤 SPC FF00 으로 올라가는 블록(마지막 바이트 FF)은 건너뛴다
+        extra = bytes([1, 1, 0x05]) + bytes([2, 0, 0x00, 0xFF, 9, 9])
+        got = patch.read_sets(self.tail(base, extra))
+        self.assertEqual(got[:len(original)], original)
+        self.assertEqual(got[len(original):], [bytes([1, 1, 0x05])])
+
+    def test_a_table_without_the_end_marker_is_refused(self):
+        base = bytearray(synthetic_base())
+        end = lorom(patch.SONG_SETS) + sum(map(len, patch.read_sets(bytes(base))))
+        base[end:end + 4] = bytes([0, 0, 0, 0xFF])
+        with self.assertRaisesRegex(ValueError, 'no IPL end marker'):
+            patch.read_sets(bytes(base))
+
+    def test_record_count_byte_switches_to_a_counted_table(self):
+        base = bytearray(synthetic_base()) + bytes(0x200000)
+        records = patch.read_sets(bytes(base))
+        base[lorom(patch.RECORD_COUNT)] = 3
+        self.assertEqual(patch.read_sets(bytes(base)), records[:3])
+
+    def test_a_sample_beyond_the_original_ones_needs_its_resource(self):
+        with self.assertRaisesRegex(ValueError, 'sample 30: no resource supplied'):
+            patch.sample_size(synthetic_base(), 0x30)
+        self.assertEqual(patch.sample_size(synthetic_base(), 0x03), 0x200)
+
+    def test_resident_list_must_be_loaded_by_the_original_instruction(self):
+        data = bytearray(synthetic_base())
+        data[lorom(patch.RESIDENT_SAMPLE_LOAD)] = 0x00
+        with self.assertRaisesRegex(ValueError, 'unexpected resident sample list load'):
+            patch.resident_samples(bytes(data))
+
+    def test_chain_hook_decides_whether_a_song_is_split(self):
+        data = bytearray(synthetic_base()) + bytes(0x200000)
+        self.assertIsNone(patch.chained_song(bytes(data), 5))
+        hook = bytes([0x20]) + (patch.CHAIN_STEP & 0xFFFF).to_bytes(2, 'little')
+        data[lorom(0x2BC1C1):lorom(0x2BC1C1) + 3] = hook
+        data[lorom(patch.CHAIN_PAIRS) + 5] = 0x4C
+        self.assertEqual(patch.chained_song(bytes(data), 5), 0x4C)
+        self.assertIsNone(patch.chained_song(bytes(data), 6))
+
+
+class SampleBudgetTests(unittest.TestCase):
+    def test_budget_subtracts_resident_pinned_sequence_and_margin(self):
+        base = synthetic_base()
+        self.assertEqual(sum(map(len, patch.read_sets(base))), 365)
+        capacity = patch.SPC_END - 0x2A5D
+        got = patch.sample_budget(base, 2, 1000, resident={1: 100}, pinned={5: 50, 2: 7})
+        # 곡 자신의 늘 두는 시퀀스(2)는 빼지 않는다
+        self.assertEqual(got, capacity - 100 - 50 - 1000 - patch.SPC_MARGIN)
+
+    def test_defaults_read_the_resident_samples_and_pinned_sequences_of_the_base(self):
+        base = synthetic_base()
+        resident = sum(patch.sample_size(base, i) for i in patch.resident_samples(base))
+        pinned = sum(len(patch.sequence_bytes(base, i)) for i in patch.pinned_sequences(base) if i != 2)
+        self.assertEqual(patch.sample_budget(base, 2, 0),
+                         patch.SPC_END - 0x2A5D - resident - pinned - patch.SPC_MARGIN)
+
+    def test_a_longer_song_set_table_pushes_the_sample_area_back(self):
+        base = synthetic_base()
+        plain = patch.sample_budget(base, 2, 0)
+        # 표 365바이트 → 28EC + 365 = 2A59 는 힙 시작 2A5D 보다 앞이라 4바이트까지는 그대로, 100바이트면 96 줄어든다
+        self.assertEqual(patch.sample_budget(base, 2, 0, extra_table=4), plain)
+        self.assertEqual(patch.sample_budget(base, 2, 0, extra_table=100), plain - 96)
+
+
+class PreviewHookTests(unittest.TestCase):
+    def title_build(self):
+        data = bytearray(synthetic_base()) + bytes(0x200000)
+        data[lorom(0x30801C):lorom(0x30801C) + 6] = bytes.fromhex('22 00 FF 70 EA EA')
+        data[lorom(0x30FF05)] = 0x10
+        data[lorom(0x00A709):lorom(0x00A709) + 6] = bytes.fromhex('22 20 FF 70 EA EA')
+        return bytes(data)
+
+    def test_preview_replaces_the_title_and_menu_song(self):
+        out = patch.preview_rom(self.title_build(), 0x12)
+        self.assertEqual(out[lorom(0x30FF05)], 0x12)
+        title = out[lorom(patch.CODE + 0x100):lorom(patch.CODE + 0x100) + 11]
+        self.assertEqual(title, bytes.fromhex('08 E2 20 A9 12 22 9A FE 24 28 6B'))
+        self.assertEqual(out[lorom(0x30801C):lorom(0x30801C) + 6], bytes.fromhex('22 00 81 71 EA EA'))
+        self.assertEqual(out[lorom(0x00A709):lorom(0x00A709) + 6], bytes.fromhex('22 40 81 71 EA EA'))
+        menu = out[lorom(patch.CODE + 0x140):lorom(patch.CODE + 0x140) + 8]
+        self.assertEqual(menu, bytes.fromhex('8D 00 21 08 E2 20 A9 12'))
+        checksum = int.from_bytes(out[0x7FDE:0x7FE0], 'little')
+        self.assertEqual(checksum ^ int.from_bytes(out[0x7FDC:0x7FDE], 'little'), 0xFFFF)
+
+    def test_a_base_without_the_accepted_title_hook_is_refused(self):
+        with self.assertRaisesRegex(ValueError, 'accepted overture title build'):
+            patch.preview_rom(synthetic_base(), 0x12)
+
+    def test_install_refuses_a_preview_of_a_song_it_does_not_replace(self):
+        with self.assertRaisesRegex(ValueError, 'preview song must be one of the replacements'):
+            patch.install(self.title_build(), {2: patch.Replacement(melody(), (0x03,))}, preview=0x05)
+
+    def test_install_with_a_preview_hooks_the_title(self):
+        out, report = patch.install(self.title_build(), {2: patch.Replacement(melody(), (0x03,))}, preview=2)
+        self.assertEqual(report['preview'], 2)
+        self.assertEqual(out[lorom(0x30FF05)], 2)
+
+
+class ResidentListTests(unittest.TestCase):
+    def test_the_resident_list_moves_and_the_load_instruction_follows(self):
+        data = bytearray(synthetic_base()) + bytes(0x200000)
+        patch.write_resident_samples(data, [0x03, 0x05])
+        self.assertEqual(patch.resident_samples(bytes(data)), [0x03, 0x05])
+        self.assertEqual(bytes(data[lorom(patch.RESIDENT_SAMPLE_LOAD):lorom(patch.RESIDENT_SAMPLE_LOAD) + 4]),
+                         bytes([0xBF]) + patch.RESIDENT_SAMPLE_LIST.to_bytes(3, 'little'))
+
+    def test_duplicates_bad_ids_and_a_full_slot_table_are_refused(self):
+        for ids in ([3, 3], [0xC8], list(range(patch.SAMPLE_SLOTS))):
+            with self.subTest(ids=ids), self.assertRaisesRegex(ValueError, 'resident samples must be distinct'):
+                patch.write_resident_samples(bytearray(synthetic_base()) + bytes(0x200000), ids)
+
+
+class CodeGeneratorGuardTests(unittest.TestCase):
+    def test_effect_remap_branches_select_scripts_00_to_20(self):
+        for remap in ({(0x33, 0x21): (0x34, 0)}, {(0x33, 0): (0x34, 0x21)}):
+            with self.subTest(remap=remap), self.assertRaisesRegex(ValueError, 'effect branches select scripts 00..20'):
+                patch.effect_remap_code(remap)
+
+    def test_item_sound_effect_range_and_caller_bank(self):
+        for effect in ((0x31, 0), (0x47, 0), (0x40, 0x21)):
+            with self.subTest(effect=effect), self.assertRaisesRegex(ValueError, 'item sound: effect 32..46, branch 00..20'):
+                patch.item_sound_code(effect)
+        with self.assertRaisesRegex(ValueError, 'callers JSR within bank 12'):
+            patch.item_sound_code((0x40, 0), callers=(0x13EFF4,))
+
+    def test_weapon_sounds_need_songs(self):
+        with self.assertRaisesRegex(ValueError, 'weapon sounds need songs'):
+            patch.weapon_sound_code(None, ())
+
+    def test_ordinary_install_options_must_go_together(self):
+        base, item = synthetic_base(), {0x02: patch.Replacement(melody(), (0x03,))}
+        with self.assertRaisesRegex(ValueError, 'early_song and map_fades'):
+            patch.install(base, item, early_song=True, map_fades=True)
+        with self.assertRaisesRegex(ValueError, 'release_failed needs load_pump'):
+            patch.install(base, item, release_failed=True)
+        with self.assertRaisesRegex(ValueError, 'keep_samples needs load_pump'):
+            patch.install(base, item, keep_samples=True)
+
+
+class InstallGuardTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.base = synthetic_base()
+        cls.item = {0x02: patch.Replacement(melody(), (0x03,))}
+
+    def test_base_size_and_replacements_are_checked(self):
+        with self.assertRaisesRegex(ValueError, 'headerless 1.5MB, 2MB or 4MB'):
+            patch.install(self.base[:0x100000], self.item)
+        with self.assertRaisesRegex(ValueError, 'at least one replacement'):
+            patch.install(self.base, {})
+
+    def test_pinned_songs_must_be_replaced_and_already_resident(self):
+        with self.assertRaisesRegex(ValueError, 'pinned songs must be replaced songs'):
+            patch.install(self.base, self.item, pinned=(0x05,))
+        with self.assertRaisesRegex(ValueError, 'pinned songs must be replaced songs'):
+            patch.install(self.base, self.item, pinned=(0x02,))
+
+    def test_record_overrides_are_only_for_unreplaced_songs_within_their_length(self):
+        for overrides in ({0x02: (0, 0x03)}, {0x05: (3, 0x03)}):
+            with self.subTest(overrides=overrides), self.assertRaisesRegex(ValueError, 'record override'):
+                patch.install(self.base, self.item, set_records=overrides)
+
+    def test_chains_must_be_replaced_songs(self):
+        with self.assertRaisesRegex(ValueError, 'chained songs must be replaced songs'):
+            patch.install(self.base, self.item, chains={0x05: melody()})
+
+    def test_custom_samples_use_free_ids_and_carry_their_size(self):
+        with self.assertRaisesRegex(ValueError, 'free IDs 26..C7'):
+            patch.install(self.base, self.item, sample_resources={0x10: bytes(20)})
+        with self.assertRaisesRegex(ValueError, '2-byte size header'):
+            patch.install(self.base, self.item, sample_resources={0x30: bytes(20)})
+
+    def test_resident_waves_must_replace_a_resident_sample_no_larger_than_before(self):
+        with self.assertRaisesRegex(ValueError, 'resident wave 03 must be a resident sample'):
+            patch.install(self.base, self.item, resident_waves={0x03: bytes(20)})
+        resident = patch.resident_samples(self.base)[0]
+        with self.assertRaisesRegex(ValueError, 'is larger than the original'):
+            patch.install(self.base, self.item, resident_waves={resident: bytes(0x300)})
+
+    def test_a_base_that_already_has_the_relocation_hook_must_keep_its_routine(self):
+        data = bytearray(self.base)
+        data[lorom(0x2BC3AB):lorom(0x2BC3AB) + 5] = bytes.fromhex('22 10 80 70 60')
+        with self.assertRaisesRegex(ValueError, 'unknown relocation routine'):
+            patch.install(bytes(data), self.item)
+        data[lorom(0x2BC3AB):lorom(0x2BC3AB) + 5] = bytes(5)
+        with self.assertRaisesRegex(ValueError, 'unsupported sequence relocation hook'):
+            patch.install(bytes(data), self.item)
+
+    def test_new_song_numbers_cannot_be_added_twice(self):
+        out, _ = patch.install(self.base, {patch.NEW_SONG_FIRST: patch.Replacement(melody(), (0x03,))})
+        with self.assertRaises(ValueError):
+            patch.install(out, {patch.NEW_SONG_FIRST: patch.Replacement(melody(), (0x03,))})
+
+
+class MainTests(unittest.TestCase):
+    def test_main_converts_scores_installs_them_and_writes_rom_ips_and_report(self):
+        from kr_patch import ips
+        score = {'ticks_per_quarter': 48, 'tempo': 120, 'tempo_changes': [], 'end_tick': 96,
+                 'timeline': [{'op': 'note', 'tick': t, 'gate': 20, 'note': 60, 'velocity': 100, 'ch': 'track0', 'program': 0}
+                              for t in (0, 48)]}
+        out = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / 'base.sfc').write_bytes(synthetic_base())
+            (tmp / 'score.json').write_text(json.dumps(score))
+            target = tmp / 'out' / 'rom.sfc'
+            argv = ['dq4soundpatch.py', '--base', str(tmp / 'base.sfc'), '--replace', f'02={tmp / "score.json"}',
+                    '--out', str(target), '--map-fades']
+            with mock.patch('sys.argv', argv), contextlib.redirect_stdout(out):
+                patch.main()
+            rom = target.read_bytes()
+            self.assertEqual(ips.apply(synthetic_base(), target.with_suffix('.ips').read_bytes()), rom)
+            report = json.loads(target.with_suffix('.json').read_text())
+        self.assertEqual(sorted(report['conversions']), ['02'])
+        self.assertTrue(report['map_fades'])
+        self.assertEqual(patch.read_sets(rom)[2][2:], bytes([0x0A]))
+        printed = json.loads(out.getvalue())
+        self.assertNotIn('conversions', printed)
+        self.assertEqual(printed['rom_sha1'], report['rom_sha1'])
+
+    def test_bank_directory_supplies_the_program_map_and_sample_resources(self):
+        score = {'ticks_per_quarter': 48, 'tempo': 120, 'tempo_changes': [], 'end_tick': 48,
+                 'timeline': [{'op': 'note', 'tick': 0, 'gate': 20, 'note': 60, 'velocity': 100, 'ch': 'track0', 'program': 0}]}
+        resource = (30).to_bytes(2, 'little') + bytes(30)
+        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()):
+            tmp = Path(tmp)
+            (tmp / 'bank').mkdir()
+            (tmp / 'bank' / 'program-map.json').write_text(json.dumps({'0': 0x30}))
+            (tmp / 'bank' / '30.bin').write_bytes(resource)
+            (tmp / 'base.sfc').write_bytes(synthetic_base())
+            (tmp / 'score.json').write_text(json.dumps(score))
+            argv = ['dq4soundpatch.py', '--base', str(tmp / 'base.sfc'), '--replace', f'02={tmp / "score.json"}',
+                    '--out', str(tmp / 'rom.sfc'), '--bank', str(tmp / 'bank')]
+            with mock.patch('sys.argv', argv):
+                patch.main()
+            rom = (tmp / 'rom.sfc').read_bytes()
+        self.assertEqual(patch.read_sets(rom)[2][2:], bytes([0x30]))
+        self.assertEqual(patch.sample_size(rom, 0x30), 30)
+
+    def test_the_same_slot_twice_is_refused(self):
+        argv = ['dq4soundpatch.py', '--base', 'b', '--replace', '02=a.json', '--replace', '02=b.json', '--out', 'o']
+        with tempfile.TemporaryDirectory() as tmp:
+            score = Path(tmp) / 's.json'
+            score.write_text(json.dumps({'ticks_per_quarter': 48, 'tempo': 120, 'tempo_changes': [], 'end_tick': 48,
+                                         'timeline': [{'op': 'note', 'tick': 0, 'gate': 20, 'note': 60, 'velocity': 100,
+                                                       'ch': 'track0', 'program': 0}]}))
+            argv = ['dq4soundpatch.py', '--base', 'b', '--replace', f'02={score}', '--replace', f'02={score}', '--out', 'o']
+            with mock.patch('sys.argv', argv), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as raised:
+                    patch.main()
+        self.assertEqual(raised.exception.code, 2)
 
 
 @unittest.skipUnless(ROM.exists(), 'user-supplied DQ5 ROM required')

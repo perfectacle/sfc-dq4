@@ -1,12 +1,18 @@
 """Message allocation; with rom/dq4.nes, the FC text -> DQ5 codes rule; with both ROMs, the ported people and
 messages."""
 
+import contextlib
+import io
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import dq4ch1event  # noqa: E402
 import dq4npcport as port  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -52,6 +58,295 @@ class AllocationTest(unittest.TestCase):
             port.talk_doc([{"id": port.FIRST_MESSAGE, "codes": [port.END]}, {"id": port.FIRST_MESSAGE + 2, "codes": [port.END]}])
         with self.assertRaises(ValueError):
             port.talk_doc([{"id": 0xC7F, "codes": [port.END]}])
+
+
+CODE = port.CODE_OF
+
+
+class PiecesTest(unittest.TestCase):
+    def test_controls_are_names_and_characters_are_tagged(self):
+        self.assertEqual(port._pieces("あ{LINE}い{NAME:0}"),
+                         [("char", "あ"), "LINE", ("char", "い"), "NAME:0"])
+
+    def test_speaker_mark_and_its_line_break_are_skipped(self):
+        marked = [("char", "＊"), ("char", "「"), "LINE", ("char", "あ")]
+        self.assertEqual(port._skip_speaker(marked, 0), 3)
+        self.assertEqual(port._skip_speaker(marked[:3], 0), 3)
+        self.assertEqual(port._skip_speaker([("char", "＊"), ("char", "あ")], 0), 0)
+        self.assertEqual(port._skip_speaker(marked, 3), 3)
+
+    def test_code_falls_back_to_nfkc_and_fullwidth_digits(self):
+        self.assertEqual(port._code(0, "あ"), CODE["あ"])
+        self.assertEqual(port._code(0, "1"), CODE["１"])
+        self.assertEqual(port._code(0, "Ａ"), CODE["A"] if "A" in CODE else port._code(0, "Ａ"))
+
+    def test_character_without_a_dq5_code_is_an_error(self):
+        with self.assertRaisesRegex(ValueError, "FC message 0007: no DQ5 character for"):
+            port._code(7, "\U0001F600")
+
+    def test_nothing_placeholder_has_a_code_per_character_and_the_end(self):
+        codes = port.nothing_codes()
+        self.assertEqual(codes[-1], port.END)
+        self.assertEqual(len(codes), len(port.NOTHING) + 1)
+
+
+class Dq5CodesTest(unittest.TestCase):
+    def codes(self, *texts):
+        with mock.patch.object(port.dq4text, "message_bytes", lambda rom, m: m), \
+                mock.patch.object(port.dq4text, "symbolize", lambda m: texts[m]):
+            return port.dq5_codes(None, range(len(texts)))
+
+    def test_line_breaks_and_the_end_mark(self):
+        self.assertEqual(self.codes("あ{LINE}い{END}"), [CODE["あ"], port.LINE, CODE["い"], port.END])
+
+    def test_messages_join_with_one_page_between(self):
+        self.assertEqual(self.codes("あ{END}", "い{END}"), [CODE["あ"], port.PAGE, CODE["い"], port.END])
+
+    def test_speaker_marks_and_noindent_are_dropped_at_the_start_of_a_message_and_a_page(self):
+        self.assertEqual(self.codes("{NOINDENT}＊「あ{WAIT}＊「{LINE}い{END}"),
+                         [CODE["あ"], port.PAGE, CODE["い"], port.END])
+
+    def test_a_page_is_neither_doubled_nor_left_at_the_end(self):
+        self.assertEqual(self.codes("あ{WAIT}{WAIT}い{END}"), [CODE["あ"], port.PAGE, CODE["い"], port.END])
+        self.assertEqual(self.codes("あ{WAIT}{END}"), [CODE["あ"], port.END])
+
+    def test_pause_and_hero_name_have_their_own_codes(self):
+        self.assertEqual(self.codes("あ{PAUSE}{NAME:0}い{END}"),
+                         [CODE["あ"], port.PAUSE, port.HERO, CODE["い"], port.END])
+
+    def test_dakuten_mark_joins_the_next_kana(self):
+        self.assertEqual(self.codes("{3D}か{END}"), [CODE["が"], port.END])
+        with self.assertRaisesRegex(ValueError, "dakuten mark without a character"):
+            self.codes("{3D}{END}")
+
+    def test_sound_controls_drop_and_a_stop_may_only_end_the_message(self):
+        self.assertEqual(self.codes("{SOUND:01}あ{STOP}{END}"), [CODE["あ"], port.END])
+        with self.assertRaisesRegex(ValueError, r"\{STOP\} before more text"):
+            self.codes("{STOP}あ{END}")
+
+    def test_unknown_control_is_an_error(self):
+        with self.assertRaisesRegex(ValueError, r"FC message 0000: no DQ5 code for \{FOO\}"):
+            self.codes("{FOO}")
+
+
+def block_source(w, h, cells):
+    from types import SimpleNamespace
+    return SimpleNamespace(w=w, h=h, t=0x10, cell=lambda x, y: cells[y][x])
+
+
+class FcStateAndBedsTest(unittest.TestCase):
+    def test_state_holds_the_chapter_and_time_of_day(self):
+        night = port.fc_state(True, {0x6300: 5}, 2)
+        self.assertEqual((night.ram[0x615A], night.ram[0x62ED], night.ram[0x6300]), (1, port.NIGHT, 5))
+        day = port.fc_state(False)
+        self.assertEqual((day.ram[0x615A], day.ram[0x62ED]), (0, 0))
+
+    def test_a_bed_is_a_left_half_beside_a_right_half(self):
+        source = block_source(3, 2, [[1, 2, 0], [0, 1, 2]])
+        art = {1: ("bed_left", ""), 2: ("bed_right", "")}
+        with mock.patch.object(port.dq4block, "Map", lambda prg, g, n: source), \
+                mock.patch.object(port, "edit_cells", lambda src, g, n: None), \
+                mock.patch.object(port, "sheet_art", lambda prg, t: art):
+            self.assertEqual(port.bed_cells(b"", 0x10, 1), {(0, 0), (1, 1)})
+
+    def test_edit_cells_runs_before_the_art_is_read(self):
+        order = []
+        source = block_source(2, 1, [[0, 0]])
+        with mock.patch.object(port.dq4block, "Map", lambda prg, g, n: source), \
+                mock.patch.object(port, "edit_cells", lambda src, g, n: order.append(("edit", g, n))), \
+                mock.patch.object(port, "sheet_art", lambda prg, t: order.append("art") or {}):
+            self.assertEqual(port.bed_cells(b"", 0x11, 2), set())
+        self.assertEqual(order, [("edit", 0x11, 2), "art"])
+
+
+class FcPeopleTest(unittest.TestCase):
+    NIGHT_REC = bytes([0x00, 0, 0x32, 1, 0, 0, 0, 3])
+    HIDDEN = bytes([0x00, 0, 0x00, 0, 9, 9, 9, 9])
+
+    def people(self, night, flags=None):
+        seen = {}
+
+        def npc_list(prg, group, number, night, ram=None):
+            seen["ram"] = ram
+            return [self.NIGHT_REC, self.HIDDEN]
+        patches = (mock.patch.object(port.dq4talk, "npc_list", npc_list),
+                   mock.patch.object(port.dq4talk, "pos", lambda rec, night: (4, 5)),
+                   mock.patch.object(port.dq4talk, "talk_id", lambda rec, night: 77),
+                   mock.patch.object(port.dq4talk, "sprite", lambda rec, night: 0x94),
+                   mock.patch.object(port.dq4talk, "predict", lambda prg, talk, state: [talk, None]),
+                   mock.patch.object(port.dq4npcblock, "hidden_on_entry", lambda rec, night: rec == self.HIDDEN),
+                   mock.patch.object(port, "chapter", lambda group: 2))
+        with contextlib.ExitStack() as stack:
+            for patcher in patches:
+                stack.enter_context(patcher)
+            return port.fc_people(b"", 0x10, 1, night, flags), seen
+
+    def test_day_record_reads_step_from_the_high_nibble_and_facing_from_byte_three(self):
+        people, seen = self.people(False)
+        self.assertEqual(people, [{"x": 4, "y": 5, "facing": "right", "interval": 3, "picture": 0x14, "talk": 77,
+                                   "shows": [77, None]}])
+        self.assertIsNone(seen["ram"])
+
+    def test_night_record_reads_step_from_the_low_nibble_and_facing_from_byte_seven(self):
+        people, _ = self.people(True)
+        self.assertEqual((people[0]["facing"], people[0]["interval"]), ("left", 2))
+
+    def test_event_flags_pick_the_list_for_that_state(self):
+        _, seen = self.people(False, {0x6283: 0x80})
+        self.assertEqual(seen["ram"][0x6283], 0x80)
+        self.assertEqual(seen["ram"][0x615A], 1)
+
+    def test_hidden_people_are_listed_by_dq5_map_and_time(self):
+        groups = {"a": (0x36, 1), "b": (0x36, 0), "c": (0x37, 0)}
+        recs = {False: [self.HIDDEN, self.NIGHT_REC], True: [self.NIGHT_REC, self.HIDDEN]}
+        with mock.patch.object(port, "GROUPS", groups), \
+                mock.patch.object(port, "fc_map", lambda prg, g, n: (g + 0x10, n)), \
+                mock.patch.object(port, "has_people", lambda fc_group: fc_group != 0x47), \
+                mock.patch.object(port.dq4talk, "npc_list", lambda prg, g, n, night: recs[night]), \
+                mock.patch.object(port.dq4talk, "talk_id", lambda rec, night: 9 if night else 8), \
+                mock.patch.object(port.dq4talk, "pos", lambda rec, night: (1, 2)), \
+                mock.patch.object(port.dq4npcblock, "hidden_on_entry", lambda rec, night: rec == self.HIDDEN):
+            found = port.hidden_people(b"")
+        self.assertEqual(found, [("36/00", False, 8, 1, 2), ("36/00", True, 9, 1, 2),
+                                 ("36/01", False, 8, 1, 2), ("36/01", True, 9, 1, 2)])
+
+
+class PortWithMocksTest(unittest.TestCase):
+    A = {"x": 3, "y": 4, "facing": "down", "interval": 2, "picture": 0x14, "talk": 1, "shows": [100, None]}
+    B = {"x": 5, "y": 6, "facing": "up", "interval": 0, "picture": 0x11, "talk": 2, "shows": [200]}
+    FAR = {"x": 70, "y": 1, "facing": "up", "interval": 0, "picture": 0x11, "talk": 3, "shows": [300]}
+    SELLER = {"x": 8, "y": 8, "facing": "left", "interval": 3, "picture": 0x17, "talk": 4, "shows": [400]}
+    SLEEPER = {"x": 10, "y": 10, "facing": "down", "interval": 3, "picture": 0x12, "talk": 5, "shows": [500]}
+    MERCHANT = {"x": 12, "y": 12, "facing": "down", "interval": 0, "picture": 0x17, "talk": 6,
+                "shows": [600, port.dq4talk.SERVICE + 1]}
+    GROUPS = {"town": (0x36, 1)}
+
+    def run_port(self, people, goods=True, shops=None, with_people=True, alt=(), groups=None, picture_table=None):
+        by_time = people if isinstance(people, dict) else {False: people, True: people[:1]}
+        calls = {}
+
+        def fc_people(prg, group, number, night, flags=None):
+            calls.setdefault("flags", []).append(flags)
+            return by_time[night]
+        with tempfile.TemporaryDirectory() as tmp, contextlib.ExitStack() as stack:
+            dq5, dq4 = Path(tmp) / "dq5.sfc", Path(tmp) / "dq4.nes"
+            dq5.write_bytes(b"5")
+            dq4.write_bytes(b"4")
+            stack.enter_context(mock.patch.object(port, "GROUPS", groups or self.GROUPS))
+            stack.enter_context(mock.patch.object(port.dq4shopport.dq5item, "Rom", lambda raw: raw))
+            stack.enter_context(mock.patch.object(port.dq4shopport, "dq5_items", lambda rom: {"items": 1}))
+            stack.enter_context(mock.patch.object(port.ines, "prg", lambda raw: raw))
+            stack.enter_context(mock.patch.object(port.dq4text, "Rom", lambda raw: raw))
+            stack.enter_context(mock.patch.object(port, "first_talk", lambda: 0x900))
+            stack.enter_context(mock.patch.object(port, "fc_map", lambda prg, g, n: (0x10 + g, n)))
+            stack.enter_context(mock.patch.object(port, "has_people", lambda fc_group, with_people=True: with_people))
+            stack.enter_context(mock.patch.object(port, "merchants", lambda prg, g, n, items: shops or {}))
+            stack.enter_context(mock.patch.object(port, "bed_cells", lambda prg, g, n: {(10, 10)}))
+            stack.enter_context(mock.patch.object(port, "fc_people", fc_people))
+            stack.enter_context(mock.patch.object(port.dq4shopport, "has_goods", lambda *a: goods))
+            stack.enter_context(mock.patch.object(port, "dq5_codes", lambda rom, shows: [sum(shows)]))
+            stack.enter_context(mock.patch.object(dq4ch1event, "ALT_STATES", alt))
+            if picture_table is not None:
+                stack.enter_context(mock.patch.object(port, "PICTURES", picture_table))
+            lists, messages, report = port.port(dq5, dq4, with_people)
+        return lists, messages, report, calls
+
+    def test_each_person_becomes_an_entry_of_its_time_with_the_matching_template(self):
+        lists, messages, report, _ = self.run_port([self.A, self.B, self.FAR])
+        (listing,) = lists
+        self.assertEqual(listing["map"], "36/01")
+        day = [e for e in listing["entries"] if e["time"] == "day"]
+        night = [e for e in listing["entries"] if e["time"] == "night"]
+        self.assertEqual([e["from"] for e in day], [port.WALK, port.STAND])
+        self.assertEqual(day[0]["fields"], {"x": 6, "y": 9, "facing": "down", "talk": 0x900, "gfx": port.PICTURES[0x14],
+                                            "layer": 0, "interval": 2})
+        self.assertEqual(day[1]["fields"]["talk"], 0x901)
+        self.assertEqual(day[1]["fields"]["gfx"], port.PICTURES[0x11])
+        self.assertEqual(len(night), 1)
+
+    def test_same_lines_share_one_message_numbered_in_order_of_first_use(self):
+        _, messages, report, _ = self.run_port([self.A, self.B, self.FAR])
+        f = port.FIRST_MESSAGE
+        self.assertEqual(messages, [{"id": f, "codes": [100]}, {"id": f + 1, "codes": [200]}])
+        self.assertEqual([m["id"] for m in messages], [f, f + 1])
+        day_a, night_a = [p for p in report["36/01"] if p["talk"] == 1]
+        self.assertEqual((day_a["night"], night_a["night"]), (False, True))
+        self.assertEqual(day_a["message"], night_a["message"])
+        self.assertEqual(day_a["message"], f"{f:03X}")
+
+    def test_far_off_people_are_left_out(self):
+        _, _, report, _ = self.run_port([self.A, self.FAR])
+        self.assertNotIn(3, [p["talk"] for p in report["36/01"]])
+
+    def test_a_seller_takes_the_service_talk_and_stands_still(self):
+        lists, messages, report, _ = self.run_port([self.SELLER], shops={(8, 8, False): 5, (8, 8, True): 5})
+        entry = lists[0]["entries"][0]
+        self.assertEqual((entry["from"], entry["fields"]["talk"], entry["fields"]["interval"]), (port.STAND, 5, 0))
+        self.assertEqual(messages, [])
+        self.assertEqual((report["36/01"][0]["service"], report["36/01"][0]["message"]), (5, None))
+
+    def test_a_person_with_a_service_line_and_goods_uses_the_service_talk(self):
+        lists, _, report, _ = self.run_port([self.MERCHANT], goods=True)
+        self.assertEqual(lists[0]["entries"][0]["fields"]["talk"], port.dq4shopport.SERVICE[1])
+
+    def test_a_seller_without_goods_keeps_the_lines_before_the_service(self):
+        _, messages, report, _ = self.run_port([self.MERCHANT], goods=False)
+        self.assertEqual(messages, [{"id": port.FIRST_MESSAGE, "codes": [600]}])
+        self.assertIsNone(report["36/01"][0]["service"])
+
+    def test_a_person_with_no_lines_says_the_placeholder(self):
+        silent = {**self.B, "shows": [None]}
+        _, messages, _, _ = self.run_port([silent])
+        self.assertEqual(messages, [{"id": port.FIRST_MESSAGE, "codes": port.nothing_codes()}])
+
+    def test_a_person_on_a_bed_lies_half_a_block_right_and_one_cell_up(self):
+        lists, _, _, _ = self.run_port([self.SLEEPER])
+        entry = lists[0]["entries"][0]
+        self.assertEqual(entry["from"], port.LIE)
+        self.assertEqual(entry["fields"]["x"], 21)
+        self.assertEqual(entry["fields"]["y"], 20)
+        self.assertEqual((entry["fields"]["facing"], entry["fields"]["interval"]), ("right", 0))
+
+    def test_beds_only_count_in_the_prologue_and_chapter_one_groups(self):
+        lists, _, _, _ = self.run_port([self.SLEEPER], groups={"far": (0x40, 1)})
+        entry = lists[0]["entries"][0]
+        self.assertEqual((entry["from"], entry["fields"]["x"], entry["fields"]["y"]), (port.WALK, 20, 21))
+
+    def test_a_picture_without_a_dq5_counterpart_is_an_error(self):
+        with self.assertRaisesRegex(ValueError, "FC picture 12 has no DQ5 picture"):
+            self.run_port([self.SLEEPER], picture_table={0x14: 0x29})
+
+    def test_nds_looks_override_the_picture_by_map_and_first_line(self):
+        person = {**self.B, "shows": [1932]}
+        lists, _, _, _ = self.run_port([person], groups={"36/00": (0x36, 0)})
+        self.assertEqual(lists[0]["entries"][0]["fields"]["gfx"], 0x9C)
+
+    def test_without_people_no_entry_is_made(self):
+        lists, messages, report, _ = self.run_port([self.A], with_people=False)
+        self.assertEqual((lists[0]["entries"], messages, report["36/01"]), ([], [], []))
+
+    def test_later_state_lists_are_named_and_reported_with_their_flags(self):
+        alt = (("late", {0x6283: 0x80}, ("36/00",)),)
+        lists, _, report, calls = self.run_port([self.A], alt=alt)
+        self.assertEqual([l.get("map") or l.get("name") for l in lists], ["36/01", "late-3600"])
+        self.assertIn("late-3600", report)
+        self.assertIn({0x6283: 0x80}, calls["flags"])
+
+
+class MainTest(unittest.TestCase):
+    def test_main_writes_lists_messages_and_report_and_prints_counts(self):
+        out = io.StringIO()
+        result = ([{"map": "36/00", "entries": []}], [{"id": 1, "codes": [2]}], {"36/00": [{"a": 1}, {"a": 2}]})
+        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(out), \
+                mock.patch.object(port, "port", lambda dq5, dq4: result), \
+                mock.patch("sys.argv", ["dq4npcport.py", "--out", str(Path(tmp) / "a" / "b")]):
+            port.main()
+            folder = Path(tmp) / "a" / "b"
+            self.assertEqual(json.loads((folder / "npc-lists.json").read_text()), result[0])
+            self.assertEqual(json.loads((folder / "messages.json").read_text()),
+                             {"format": "dq5text/1", "messages": result[1]})
+            self.assertEqual(json.loads((folder / "report.json").read_text()), result[2])
+        self.assertEqual(json.loads(out.getvalue()), {"36/00": 2, "messages": 1})
 
 
 class PlantedPeopleTest(unittest.TestCase):
