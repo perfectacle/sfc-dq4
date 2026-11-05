@@ -10,7 +10,8 @@ libretro(bsnes·snes9x, 화면은 코어가 넘긴 프레임. 코어 옵션은 d
   title       전원을 켜고 TITLE_FRAME 프레임째의 타이틀
 MesenCE 설정 확인(settings): dq4screens.VERIFY_ARGS 를 하나씩 더해 타이틀을 다시 찍어, 화면이 기준과 달라지는지 본다.
 달라지지 않으면 그 설정 이름을 MesenCE 가 받지 않은 것이라(틀린 이름·값은 아무 말 없이 무시됨) SCREEN_ARGS 도 먹지
-않았을 수 있다. 장면마다 넘긴 명령줄은 <출력>/<장면>-mesence/args.txt 에 남긴다.
+않았을 수 있다. SCREEN_ARGS 가운데 VERIFY_ARGS 에 없는 것은 타이틀에 닿지 않아 이름을 확인하지 못한다. 넘긴 명령줄은
+장면마다 <출력>/<장면>-mesence/args.txt, 설정 확인은 <출력>/settings-NN/args.txt 에 남긴다.
 
 장면은 전원(RamPowerOnState=AllZeros)이나 같은 롬으로 만든 출발 상태에서 정한 입력만 넣으므로 난수·시각·조우가 늘 같다.
 화면이 다르면 다른 칸을 빨갛게 그린 차이 그림을 out 에 남긴다.
@@ -155,7 +156,10 @@ def main():
         for core in ('bsnes', 'snes9x'):
             shots.append((scene, core, libretro_screen(core, rom, out / f'{scene}-{core}', frame), masks, tol))
     if a.write_screens is not None:
-        sc.write_baselines([(s, e, img, m, t) for s, e, img, m, t in shots], a.write_screens)
+        before = set(sc.load_baselines(verify=False))
+        kept = sc.write_baselines([(s, e, img, m, t) for s, e, img, m, t in shots], a.write_screens)
+        for scene, emulator in sorted(before - set(kept)):
+            print(f'[screens] 기준 {scene}-{emulator} 를 뺌(손으로 고친 항목, 그 장면을 다시 쓸 것)', file=sys.stderr)
     baselines = sc.load_baselines()
     results = []
     for scene, emulator, img, masks, tol in shots:
