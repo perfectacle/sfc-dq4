@@ -2189,7 +2189,7 @@ groups = ["ch1-build", "ch1-walk"]
 
 [[check]]
 name = "dq4-screen-baseline"
-why = "장면 화면이 기준과 달라지지 않게: 타이틀·1장 시작 방·상태 창·이무르 방어구점 사기 목록(MesenCE, emu.getScreenBuffer 와 영상 설정 고정)과 타이틀(bsnes·snes9x)의 8×8 칸 해시가 sfc/dq4/screens.toml 과 모두 같다. MesenCE 설정 이름이 먹는지(VERIFY_ARGS 로 화면이 바뀜)도 본다. 기준은 --write-screens 까닭으로만 고친다. 표지는 실수로 손댄 것만 잡는다(공개된 SHA-1)"
+why = "장면 화면이 기준과 달라지지 않게: 타이틀·1장 시작 방·상태 창·이무르 방어구점 사기 목록(MesenCE, emu.getScreenBuffer 와 영상 설정 고정)과 타이틀(bsnes·snes9x)의 8×8 칸 해시가 sfc/dq4/screens.toml 과 모두 같다. VERIFY_ARGS 12개는 그 설정을 바꾸면 타이틀이 바뀌는지로 이름이 먹는지 본다(SCREEN_ARGS 의 나머지 9개는 타이틀에 닿지 않아 이름을 확인하지 못함). 기준은 --write-screens 까닭으로만 고친다. 표지는 실수로 손댄 것만 잡는다(공개된 SHA-1)"
 paths = [
   "sfc/dq4/screens.toml",
   "sfc/dq4/tools/dq4screencheck.py",

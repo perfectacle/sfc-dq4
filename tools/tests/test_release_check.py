@@ -82,9 +82,24 @@ class ReleaseCheckTest(unittest.TestCase):
                 self.assertEqual(rc.failed_seeds({'file': 'sfc/dq4/release.toml', 'name': 'z'}), [])
                 self.assertEqual(rc.failed_seeds({'file': 'sfc/dq5/release.toml', 'name': 'x'}), [])
 
+    def test_load_counts_mesence_by_worktree(self):
+        parent = Path('/w')
+        ps = '\n'.join(['/a/MesenCE.app/Contents/MacOS/Mesen --testrunner /w/sfc-dq4-x/work/a/c.sfc s.lua',
+                        '/a/MesenCE.app/Contents/MacOS/Mesen --testrunner /w/sfc-dq4-x/work/b/c.sfc s.lua',
+                        '/a/MesenCE.app/Contents/MacOS/Mesen --testrunner /w/sfc-dq4-release-check/work/c.sfc s.lua',
+                        '/usr/bin/python3 /w/sfc-dq4-x/tools/guards.py', '/a/MacOS/Mesen --testrunner /tmp/r.sfc'])
+        self.assertEqual(rc.Load.count(ps, parent), {'sfc-dq4-x': 2, 'sfc-dq4-release-check': 1, '?': 1})
+
+    def test_state_note(self):
+        self.assertEqual(rc.state_note('{"state_cache": "hit"} {"state_cache": "miss"} {"state_cache": "hit"}'),
+                         ['hit', 'miss'])
+
     def test_markdown_lists_stages(self):
         report = {'verdict': 'failed', 'commit': 'abc', 'dirty': False, 'rom_sha1': 'f' * 40, 'when': 'now',
+                  'states': '새로 만듦',
                   'stages': {'unit': {'status': 'passed', 'seconds': 3, 'detail': '2개',
+                                      'load': {'samples': 2, 'others_max': 3, 'others_avg': 1.5,
+                                               'peak_by_tree': {'sfc-dq4-x': 3}},
                                       'rows': [{'dir': 'tools/tests', 'status': 'passed', 'tests': 2, 'skipped': 0,
                                                 'seconds': 3}]},
                              'coverage': {'status': 'failed', 'seconds': 0, 'detail': '없음'}}}
@@ -92,6 +107,8 @@ class ReleaseCheckTest(unittest.TestCase):
         self.assertIn('판정: **실패**', md)
         self.assertIn('| coverage | 실패 | 0초 | 없음 |', md)
         self.assertIn('`tools/tests`', md)
+        self.assertIn('상태 캐시: 새로 만듦', md)
+        self.assertIn('| unit | 3 | 1.5 | sfc-dq4-x 3 |', md)
 
 
 if __name__ == '__main__':

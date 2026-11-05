@@ -9,6 +9,10 @@
   coverage  빌드 경로(dq4publish.inputs 의 .py) 커버리지. 로컬(단위 전부 + 빌드 캐시 끈 빌드 한 번, 하위 프로세스도
             잼) ≥ LOCAL_MIN, CI 와 같게(롬 링크 없는 임시 워크트리에서 롬·도구 환경 변수 없이 단위만) ≥ CI_MIN
 
+관문 모드(--rehearse 아님)에서는 서장 끝·시작 상태 캐시(DQ4_STATES_CACHE)를 이 실행 폴더의 빈 states/ 로 돌린다. 상태는 이
+실행에서 처음 한 번 만들어 그 실행 안에서만 다시 쓴다. 단계마다 같은 머신에서 돈 MesenCE 수(이 실행과 다른 워크트리)를
+30초마다 세어 보고서에 적는다. 실패한 단계·검사는 다시 돌리지 않고 그대로 적는다.
+
 보고서는 work/release/<롬 SHA-1 앞 12자리>/report.json·report.md 다. 모든 단계가 통과해야 통과다. --rehearse 로 돈
 보고서는 캐시를 써 배포 근거가 되지 않으므로 통과로 적지 않는다.
 
@@ -23,6 +27,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import threading
 import time
 import tomllib
 
@@ -40,6 +45,50 @@ LOCAL_MIN, CI_MIN = 90.0, 80.0
 # CI 에 없는 것: 롬(워크트리의 rom 링크)과 도구·에셋을 가리키는 환경 변수
 CI_UNSET = ('ASAR', 'DQ4_ASSETS', 'DQ4_GALMURI', 'MESENCE', 'LIBDIR', 'LIBRETRO_BSNES', 'LIBRETRO_SNES9X', 'DQ4_CORES',
             'DQ4_SOUND_BASE')
+
+
+class Load:
+    """MesenCE 프로세스를 SAMPLE 초마다 세어, 워크트리(명령줄의 롬 경로가 든 저장소 형제 폴더)마다 최대 수를 모은다."""
+    SAMPLE = 30
+
+    def __init__(self, ours):
+        self.ours, self.samples, self.peak, self.others = ours, 0, {}, []
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    @staticmethod
+    def count(ps_text, parent):
+        """ps 출력 → {워크트리 이름: MesenCE 수}."""
+        out = {}
+        for line in ps_text.splitlines():
+            if '/MacOS/Mesen' not in line and not re.search(r'(^|/)Mesen(\.exe)?\s', line):
+                continue
+            m = re.search(re.escape(str(parent)) + r'/([^/\s]+)/', line)
+            name = m.group(1) if m else '?'
+            out[name] = out.get(name, 0) + 1
+        return out
+
+    def _run(self):
+        while not self._stop.wait(self.SAMPLE):
+            text = subprocess.run(['ps', '-axo', 'command='], capture_output=True, text=True).stdout
+            got = self.count(text, ROOT.parent)
+            self.samples += 1
+            for k, v in got.items():
+                self.peak[k] = max(self.peak.get(k, 0), v)
+            self.others.append(sum(v for k, v in got.items() if k != self.ours))
+
+    def __enter__(self):
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._stop.set()
+        self._thread.join()
+
+    def summary(self):
+        o = self.others
+        return {'samples': self.samples, 'others_max': max(o, default=0),
+                'others_avg': round(sum(o) / len(o), 1) if o else 0, 'peak_by_tree': self.peak}
 
 
 def sh(cmd, log, env=None, timeout=None):
@@ -88,6 +137,11 @@ def failed_seeds(sweep):
 
 def env_for(rehearse):
     return None if rehearse else dict(os.environ, DQ4_READSET='off')
+
+
+def state_note(text):
+    """검사 출력의 서장 끝 상태 캐시 표시("state_cache": "hit"|"miss"...)들."""
+    return sorted(set(re.findall(r'"state_cache":\s*"([a-z]+)"', text)))
 
 
 def stage_build(ctx):
@@ -145,9 +199,11 @@ def stage_sweep(ctx):
         out = ctx['dir'] / 'sweep' / s['name']
         cmd = s['run'].format(rom=ctx['rom'].relative_to(ROOT), out=out.relative_to(ROOT),
                               seeds=','.join(map(str, seeds)))
-        code, secs = sh(cmd, ctx['logs'] / f'{s["name"]}.log', env_for(ctx['rehearse']), ctx['timeout'] * 4)
+        log = ctx['logs'] / f'{s["name"]}.log'
+        code, secs = sh(cmd, log, env_for(ctx['rehearse']), ctx['timeout'] * 4)
         rows.append({'name': s['name'], 'file': s['file'], 'seeds': seeds, 'seconds': secs,
                      'status': 'passed' if code == 0 else 'failed',
+                     'state_cache': state_note(log.read_text(encoding='utf-8', errors='replace')) if log.exists() else [],
                      'detail': '시간 제한' if code is None else f'종료 코드 {code}'})
         secs_all += secs
     ok = all(r['status'] == 'passed' for r in rows)
@@ -257,9 +313,16 @@ def markdown(report):
             lines += ['| 검사 | 결과 | 내용 |', '| --- | --- | --- |']
             lines += [f'| {r["name"]} | {words.get(r["status"], r["status"])} | {r["detail"]} |' for r in rows]
         else:
-            lines += ['| 스윕 | 결과 | 시드 | 시간 |', '| --- | --- | --- | --- |']
-            lines += [f'| {r["name"]} | {words[r["status"]]} | {len(r["seeds"])}개({r["seeds"][0]}~) | {r["seconds"]}초 |'
-                      for r in rows]
+            lines += ['| 스윕 | 결과 | 시드 | 시간 | 상태 캐시 |', '| --- | --- | --- | --- | --- |']
+            lines += [f'| {r["name"]} | {words[r["status"]]} | {len(r["seeds"])}개({r["seeds"][0]}~) | {r["seconds"]}초 | '
+                      f'{",".join(r.get("state_cache") or []) or "-"} |' for r in rows]
+    lines += ['', f'- 상태 캐시: {report.get("states", "-")}']
+    load = {n: st['load'] for n, st in report['stages'].items() if st.get('load')}
+    if load:
+        lines += ['', '## 같은 머신의 MesenCE(30초마다 셈)', '', '| 단계 | 다른 워크트리 최대 | 평균 | 워크트리마다 최대 |',
+                  '| --- | --- | --- | --- |']
+        lines += [f'| {n} | {v["others_max"]} | {v["others_avg"]} | '
+                  f'{", ".join(f"{k} {c}" for k, c in sorted(v["peak_by_tree"].items())) or "-"} |' for n, v in load.items()]
     return '\n'.join(lines) + '\n'
 
 
@@ -281,15 +344,24 @@ def main():
     head, dirty = commit()
     ctx = {'dir': tmp, 'logs': tmp / 'logs', 'rehearse': a.rehearse, 'seeds_n': a.seeds_n, 'parallel': a.parallel,
            'timeout': a.timeout}
+    if a.rehearse:
+        states = '공유 캐시(연습)'
+    else:
+        # 상태는 이 실행에서 처음 만든 것만 쓴다. 검사·스윕이 이 환경 변수를 물려받는다
+        os.environ['DQ4_STATES_CACHE'] = str(tmp / 'states')
+        states = '이 실행에서 새로 만듦(첫 생성 뒤 이 실행 안에서만 다시 씀)'
     stages = {}
     for name in STAGES:
         if name not in wanted:
             continue
         print(f'[release] {name}', flush=True)
-        stages[name] = RUN[name](ctx)
+        with Load(ROOT.name) as load:
+            stages[name] = RUN[name](ctx)
+        stages[name]['load'] = load.summary()
         print(f'[release] {name}: {stages[name]["status"]} ({stages[name].get("detail", "")})', flush=True)
     report = {'verdict': verdict(stages, a.rehearse, wanted, dirty), 'commit': head, 'dirty': dirty,
               'rom_sha1': ctx.get('rom_sha1'), 'when': time.strftime('%Y-%m-%d %H:%M'), 'rehearse': a.rehearse,
+              'states': states,
               'stages': stages}
     dest = root / (ctx['rom_sha1'][:12] if ctx.get('rom_sha1') else f'nobuild-{head[:12]}')
     if dest.exists():
