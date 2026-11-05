@@ -143,14 +143,23 @@ class PrintTests(ShopGlobalsTestCase):
         ram[s.KIND_RAM], ram[s.COUNT_RAM] = 1, 2
         ram[s.SHOP_RAM:s.SHOP_RAM + 2] = bytes([0, 1])
         sram = bytearray(0x2000)
+        sram[s.FLAGS_16 - 0x6000] = sram[s.FLAGS_16 - 0x6000 + 1] = 1
         with tempfile.TemporaryDirectory() as tmp:
             rpath, spath = os.path.join(tmp, 'end.ram'), os.path.join(tmp, 'end.sram')
             with open(rpath, 'wb') as f:
                 f.write(bytes(ram))
             with open(spath, 'wb') as f:
                 f.write(bytes(sram))
-            out, _ = run_cli_code(s.main, prg, '2', '0', '--compare', rpath, spath)
-        self.assertTrue(out[-1].endswith('— 표 같음'))
+            on, _ = run_cli_code(s.main, prg, '16', '0', '--compare', rpath, spath)
+            ram[s.COUNT_RAM] = 3
+            ram[s.SHOP_RAM:s.SHOP_RAM + 3] = bytes([1, 0, 1])
+            with open(rpath, 'wb') as f:
+                f.write(bytes(ram))
+            added, _ = run_cli_code(s.main, prg, '16', '0', '--compare', rpath, spath)
+            plain, _ = run_cli_code(s.main, prg, '16', '0', '--compare', rpath)
+        self.assertTrue(on[-1].endswith('— 표 다름: [1, 0, 1]'))
+        self.assertTrue(added[-1].endswith('— 표 같음'))
+        self.assertTrue(plain[-1].endswith('— 표 다름: [1]'))
 
     def test_people_lines_with_hide_notes(self):
         out, _ = run_cli_code(s.main, self.prg, 'people')
@@ -175,7 +184,16 @@ class HiddenTests(ShopGlobalsTestCase):
         self.assertEqual(got, [
             (2, 0, 0x8000, [(0, '숨김', [[(night, False)]]), (1, 'X=10 Y=20', [[(night, False)]])]),
             (0, 0, s.CHAPTER_HIDE, [(0, '숨김', [[(('num', '장', '=', 1), False)]])])])
-        self.assertEqual(s.hidden(self.prg, story=False), got)
+
+    def test_story_filter_drops_impossible_chapter_combination(self):
+        prg = shop_world()
+        put(prg, s.HIDE_BANK, 0x8100, [0x2C, 0x82, 0x62, 0x30, 0x07, 0x50, 0x05, 0xA2, 0x01] + jsr(s.HIDE_SLOT) + [0x60])
+        put(prg, s.HIDE_BANK, s.HIDE_PTRS, word(0x8100))
+        story, raw = s.hidden(prg), s.hidden(prg, story=False)
+        self.assertEqual(story[0][3], [(1, '숨김', [])])
+        self.assertEqual([(i, what) for i, what, _ in raw[0][3]], [(1, '숨김')])
+        self.assertNotEqual(raw[0][3][0][2], [])
+        self.assertEqual(story[1:], raw[1:])
 
     def test_show_hidden_text(self):
         out, _ = run_cli_code(s.main, self.prg, 'hidden')

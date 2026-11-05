@@ -2,6 +2,7 @@
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 import dq4data as d
 import dq4event as e
@@ -218,14 +219,18 @@ class MeaningTests(unittest.TestCase):
         prg = event_world()
         self.assertNotIn((0x70, 0x20), dq4flags.CONFIRMED)
         self.assertNotIn((0x70, 0x20), e.KNOWN)
-        out, ret = run_cli_code(e.main, prg, 'flags', '--meaning')
+        with mock.patch.dict(dq4flags.CONFIRMED, {(0x05, 0x01): '시험 확인 뜻'}), \
+                mock.patch.dict(e.KNOWN, {(0x05, 0x02): '시험 알려진 뜻'}):
+            out, ret = run_cli_code(e.main, prg, 'flags', '--meaning')
         self.assertEqual(ret, 0)
         self.assertEqual(out[0], '번호 비트 주소     쓰기 검사  뜻')
         guess = next(l for l in out if l.startswith('70   20'))
         self.assertEqual(guess, '70   20   $62EB    1    0  [추정] 쓰는 곳 BRK 10:$9008 맵 03/01 う 「12。」')
         confirmed = next(l for l in out if l.startswith('05   01'))
-        self.assertTrue(confirmed.endswith('[확인] ' + dq4flags.CONFIRMED[(0x05, 0x01)]))
+        self.assertTrue(confirmed.endswith('[확인] 시험 확인 뜻'))
         self.assertIn('05   01   $6280    1    1  ', confirmed)
+        known = next(l for l in out if l.startswith('05   02'))
+        self.assertTrue(known.endswith('[확인] 시험 알려진 뜻'))
 
     def test_place_names_follow_town_records(self):
         self.assertEqual(e.place_names(event_world()), {3: 'う'})
