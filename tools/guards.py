@@ -507,18 +507,22 @@ def run_check(check, timeout, logs, no_cache=False, env=None):
     if hit and hit.is_file() and not no_cache:
         old = json.loads(hit.read_text(encoding='utf-8'))
         return 'passed', f'캐시: 같은 입력으로 {old["when"]} 통과, {old["detail"]}'
-    # 같은 크기로 같은 초 안에 고친 원본은 옛 .pyc 를 그대로 쓰므로, 모든 단계를 빈 곳에서 새로 컴파일한다
-    pycache = Path(tempfile.mkdtemp(prefix=f'guard-{name}-pyc-'))
+    # 같은 크기로 같은 초 안에 고친 원본은 옛 .pyc 를 그대로 쓰므로, 단계마다 빈 곳에서 새로 컴파일한다
+    pycaches = []
+
+    def fresh(e):
+        pycaches.append(Path(tempfile.mkdtemp(prefix=f'guard-{name}-pyc-')))
+        return dict(e, PYTHONPYCACHEPREFIX=str(pycaches[-1]))
     try:
         log = logs / f'{name}.log'
         shown = log.relative_to(ROOT) if log.is_relative_to(ROOT) else log
         log.write_text('', encoding='utf-8')
-        env = dict(env or (no_cache_env(logs) if no_cache else os.environ), PYTHONPYCACHEPREFIX=str(pycache))
+        env = dict(env or (no_cache_env(logs) if no_cache else os.environ))
         t0 = time.time()
         parts = None if no_cache or key is None or shadowed() else split_built(check)
         built = reads = None
         if parts:
-            code = spawn(parts[0], log, timeout, env)
+            code = spawn(parts[0], log, timeout, fresh(env))
             if code is None:
                 return 'failed', f'{timeout}초 안에 끝나지 않음, 로그 {shown}'
             if code:
@@ -541,7 +545,7 @@ def run_check(check, timeout, logs, no_cache=False, env=None):
                        GUARD_READS_SKIP=os.pathsep.join(str(ROOT / d) for d in out_dirs(run)
                                                         if not any(under(d, m) or under(m, d) for m in made_paths(run))),
                        PYTHONPATH=os.pathsep.join(x for x in (str(TRACER), base.get('PYTHONPATH')) if x))
-        code = spawn(parts[1] if parts else run, log, timeout - (time.time() - t0), env)
+        code = spawn(parts[1] if parts else run, log, timeout - (time.time() - t0), fresh(env))
         if code is None:
             return 'failed', f'{timeout}초 안에 끝나지 않음, 로그 {shown}'
         secs = round(time.time() - t0)
@@ -562,7 +566,8 @@ def run_check(check, timeout, logs, no_cache=False, env=None):
                 save_built(name, built, detail, entry)
         return 'passed', detail
     finally:
-        shutil.rmtree(pycache, ignore_errors=True)
+        for d in pycaches:
+            shutil.rmtree(d, ignore_errors=True)
 
 
 def run_all(hit, parallel, timeout, no_cache=False):

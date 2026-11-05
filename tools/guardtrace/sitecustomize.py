@@ -138,9 +138,6 @@ def _opened(args):
         if full.endswith('.pyc') and os.path.basename(os.path.dirname(full)) != '__pycache__' and not (
                 prefix and full.startswith(os.path.realpath(prefix) + os.sep)):
             _emit('?')
-        elif not full.endswith(('.py', '.pyc')):
-            # 확장 모듈(.so) 같은 것은 실행한 코드를 볼 수 없어 내용째 입력으로 본다
-            _emit('F', _rel(full), content_sig(full))
         return
     _emit('F', _rel(full), content_sig(full))
 
@@ -155,8 +152,8 @@ def _listed(path):
 
 def _spawned(command, env):
     text = _text(command)
-    # 목록으로 받은 인자는 칸이 든 경로를 지키려 그대로 쓴다
-    words = [_text(w) for w in command] if isinstance(command, (list, tuple)) else text.split()
+    # 목록 인자는 칸 든 경로를 지키려 그대로, 셸 문자열(sh -c '…')은 나눠서 둘 다 본다
+    words = ([_text(w) for w in command] if isinstance(command, (list, tuple)) else []) + text.split()
     program = os.path.basename(words[0].split()[0]) if words and words[0].split() else ''
     if _BLIND.search(text) or _blind_env(env):
         _emit('?')
@@ -192,6 +189,11 @@ def _hook(event, args):
             _spawned(args[0], None)
         elif event in ('os.exec', 'os.posix_spawn', 'os.spawn'):
             _spawned(args[-2], args[-1])
+        elif event == 'import' and isinstance(args[1], str) and not args[1].endswith(('.py', '.pyc')):
+            # 확장 모듈(.so)은 open 감사 없이 실리고 실행한 코드를 볼 수 없어 내용째 입력으로 본다
+            full = _inside(args[1])
+            if full is not None:
+                _emit('F', _rel(full), content_sig(full))
         elif event in ('sqlite3.connect', 'ctypes.dlopen'):
             # C 쪽에서 파일을 읽어 open 감사에 걸리지 않는다
             _emit('?')

@@ -445,9 +445,11 @@ class BuiltCacheTest(unittest.TestCase):
 
     def test_children_the_tracer_cannot_see_keep_no_entry(self):
         py = sys.executable
-        for child in ([py, '-I', '-c', 'pass'], ['env', py, '-c', 'pass'], ['grep', '-q', 'x', 'helper.py']):
+        bare = "{k: v for k, v in __import__('os').environ.items() if k != 'PYTHONPYCACHEPREFIX'}"
+        for child in (repr([py, '-I', '-c', 'pass']), repr(['env', py, '-c', 'pass']),
+                      repr(['grep', '-q', 'x', 'helper.py']), f"{[py, '-c', 'pass']!r}, env={bare}"):
             with self.subTest(child=child):
-                self.edit('check.py', f"import subprocess\nsubprocess.run({child!r})\n")
+                self.edit('check.py', f"import subprocess\nsubprocess.run({child})\n")
                 self.detail()
                 self.assertIn('?', (self.logs / 'c.reads').read_text().split())
                 self.assertFalse(self.skipped())
@@ -537,6 +539,17 @@ class BuiltCacheTest(unittest.TestCase):
         self.assertTrue(self.skipped())
         self.edit('data.txt', 'b')
         self.assertEqual(guards.run_check(self.check, 60, self.logs)[0], 'failed')
+
+    def test_native_children_record_their_file_args(self):
+        self.edit('data file.txt', 'a')
+        self.edit('data.txt', 'a')
+        for call in ("['cat', 'data file.txt']", "'cat data.txt', shell=True"):
+            with self.subTest(call=call):
+                self.edit('check.py', f"import subprocess\nsubprocess.run({call}, check=True, capture_output=True)\n")
+                self.detail()
+                reads = (self.logs / 'c.reads').read_text().splitlines()
+                name = 'data file.txt' if 'file' in call else 'data.txt'
+                self.assertTrue(any(r.startswith(f'F\t{name}\t') for r in reads), reads)
 
     def test_failed_check_keeps_no_entry(self):
         self.edit('check.py', 'import sys; sys.exit(3)\n')
