@@ -350,7 +350,7 @@ class BuiltCacheTest(unittest.TestCase):
         guards.cache_dir = lambda: Path(self.tmp.name) / 'cache'
         # 시험은 uv 없이 지금 Python 으로 검사 단계를 돌린다
         py = sys.executable
-        guards.CHECK_STAGE = __import__('re').compile(r'^\s*' + __import__('re').escape(py) + r'\s')
+        guards.CHECK_STAGE = __import__('re').compile(r'^\s*' + __import__('re').escape(py) + r'\s+(?P<script>[^\s-]\S*\.py)(\s|$)')
         self.logs = Path(self.tmp.name) / 'logs'
         self.logs.mkdir()
         (self.root / 'work').mkdir()
@@ -376,11 +376,13 @@ class BuiltCacheTest(unittest.TestCase):
         guards.CHECK_STAGE = self.old[2]
         self.assertEqual(guards.split_built({'run': 'a --out work/x && X=$PWD/y uv run --locked python b.py --rom r'}),
                          ('a --out work/x ', ' X=$PWD/y uv run --locked python b.py --rom r'))
+        self.assertEqual(guards.CHECK_STAGE.match(' uv run --locked python b.py --rom r')['script'], 'b.py')
         for run in ('uv run --locked python b.py --rom rom/r', 'a --out work/x && cd y && uv run --locked python b',
                     'a --out work/x; uv run --locked python b', 'a --out work/x && uv run --locked python b || c',
                     'a --out work/x && uv run --locked python b | tee l', 'a --out work/x & uv run --locked python b',
                     'a --out work/x\nexport A=1 && uv run --locked python b', 'a --out work/x && grep x b.py',
-                    'a --out work/x && uv run --locked python $(echo b)', 'a --out work/x && python -m unittest'):
+                    'a --out work/x && uv run --locked python $(echo b)', 'a --out work/x && python -m unittest',
+                    'a --out work/x && uv run --locked python -I b.py', 'a --out "work/x y" && uv run --locked python b.py'):
             self.assertIsNone(guards.split_built({'run': run}), run)
 
     def test_unexecuted_function_or_unrelated_file_change_skips_the_check(self):
@@ -459,6 +461,44 @@ class BuiltCacheTest(unittest.TestCase):
         self.assertNotIn('work/o', (self.logs / 'c.reads').read_text())
         self.edit('other.py', 'X = 11\n')
         self.assertIn('빌드 결과와 검사 코드가 같아', self.detail(check))
+
+    def test_swapping_same_name_bodies_runs_the_check(self):
+        self.edit('helper.py', "OPS = {'add': lambda a: a + 1, 'mul': lambda a: a * 2}\n\n\ndef used():\n"
+                               "    return OPS['add'](0)\n")
+        self.detail()
+        self.edit('helper.py', "OPS = {'add': lambda a: a * 2, 'mul': lambda a: a + 1}\n\n\ndef used():\n"
+                               "    return OPS['add'](0)\n")
+        status, _ = guards.run_check(self.check, 60, self.logs)
+        self.assertEqual(status, 'failed')
+
+    def test_existence_checks_are_inputs(self):
+        self.edit('check.py', self.CHECK.replace('assert helper.used() == 1',
+                                                 "assert not __import__('os').path.exists('flag.txt')"))
+        self.detail()
+        self.edit('other.py', 'X = 12\n')
+        self.assertTrue(self.skipped())
+        self.edit('flag.txt', '')
+        self.assertEqual(guards.run_check(self.check, 60, self.logs)[0], 'failed')
+
+    def test_reads_from_other_threads_are_all_kept(self):
+        for i in range(200):
+            self.edit(f'd{i}.txt', str(i))
+        (self.root / 'big.bin').write_bytes(b'x' * (8 << 20))
+        self.edit('check.py', "import sys, threading\nfrom pathlib import Path\n"
+                              "t = threading.Thread(target=lambda: [Path(f'd{i}.txt').read_text() for i in range(200)])\n"
+                              "t.start()\nfor _ in range(5):\n    Path('big.bin').read_bytes()\nt.join()\n")
+        self.detail()
+        reads = (self.logs / 'c.reads').read_text().splitlines()
+        self.assertEqual(sum(1 for r in reads if r.startswith('F\td')), 200)
+
+    def test_top_level_python_without_the_tracer_keeps_no_entry(self):
+        py = sys.executable
+        self.edit('check.py', 'import sys\nsys.exit(0)\n')
+        check = {**self.check, 'run': self.check['run'].replace(f'{py} check.py', f'{py} -I check.py')}
+        guards.CHECK_STAGE = __import__('re').compile(r'^\s*\S+(\s+-I)?\s+(?P<script>[^\s-]\S*\.py)(\s|$)')
+        self.detail(check)
+        self.edit('other.py', 'X = 13\n')
+        self.assertNotIn('캐시', self.detail(check))
 
     def test_failed_check_keeps_no_entry(self):
         self.edit('check.py', 'import sys; sys.exit(3)\n')

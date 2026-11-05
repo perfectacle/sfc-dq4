@@ -36,15 +36,18 @@ def fingerprint(code):
 
 
 def module_prints(source, filename):
-    """원본을 컴파일해 {qualname: 같은 이름 코드들의 지문 정렬 목록}. 컴파일하지 못하면 None."""
+    """원본을 컴파일해 {qualname: 같은 이름 코드들의 지문 목록(원본에 나오는 차례)}. 컴파일하지 못하면 None.
+    차례를 지키는 것은 같은 이름(<lambda>·같은 이름 안쪽 함수)끼리 몸을 맞바꾸면 달라져야 하기 때문이다."""
     try:
         top = compile(source, filename, 'exec', dont_inherit=True)
     except (SyntaxError, ValueError):
         return None
     prints = {}
-    todo = [top]
-    while todo:
-        code = todo.pop()
+
+    def walk(code):
         prints.setdefault(code.co_qualname, []).append(fingerprint(code))
-        todo.extend(c for c in code.co_consts if isinstance(c, types.CodeType))
-    return {q: sorted(v) for q, v in prints.items()}
+        for c in code.co_consts:
+            if isinstance(c, types.CodeType):
+                walk(c)
+    walk(top)
+    return prints

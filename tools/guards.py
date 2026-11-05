@@ -40,6 +40,7 @@ import json
 import os
 import shutil
 import signal
+import stat
 import re
 import subprocess
 import sys
@@ -192,7 +193,7 @@ def stat_key(path):
 def hash_path(h, path):
     """파일은 내용(BIG_FILE 보다 크면 크기·mtime_ns), 폴더는 그 안 파일들의 (상대 경로, 크기, mtime_ns).
     폴더를 내용째 읽지 않는 것은 needs 의 자원 저장소(수 GB)처럼 큰 폴더도 키를 곧 만들게 하려는 것이다.
-    파일을 내용은 그대로 두고 mtime 만 되돌리면 옛 결과로 건너뛸 수 있다. 폴더 안 cache/ 아래는 뺀다. 없으면 표시만."""
+    파일을 내용은 그대로 두고 mtime 만 되돌리면 옛 결과로 건너뛸 수 있다. 폴더 안 cache/ 아래는 내용으로 본다. 없으면 표시만."""
     path = Path(path)
     if path.is_file():
         if path.stat().st_size > BIG_FILE:
@@ -202,8 +203,9 @@ def hash_path(h, path):
     elif path.is_dir():
         for f in sorted(p for p in path.rglob('*') if p.is_file()):
             rel = f.relative_to(path)
-            # 폴더 안 cache/ 는 다른 입력에서 만든 것이고, 빌드가 같은 내용으로 다시 써 mtime 만 바뀐다
-            if 'cache' in rel.parts[:-1]:
+            # 폴더 안 cache/ 는 빌드가 같은 내용으로 다시 써 mtime 만 바뀌므로 내용으로 본다
+            if 'cache' in rel.parts[:-1] and f.stat().st_size <= BIG_FILE:
+                h.update(str(rel).encode() + b'\0' + hashlib.sha1(f.read_bytes()).digest())
                 continue
             h.update(str(rel).encode() + b'\0' + stat_key(f))
     else:
@@ -297,18 +299,19 @@ def hash_content(h, path):
 TRACER = Path(__file__).resolve().parent / 'guardtrace'
 sys.path.insert(0, str(TRACER))
 from guardprint import module_prints  # noqa: E402
-# 검사 단계 명령의 꼴: 환경 변수 대입 뒤 uv run 의 python. 그 밖의 프로그램은 .py 를 몰래 읽을 수 있다
-CHECK_STAGE = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_]*=\S*\s+)*uv run --(locked|frozen) python\s')
+# 검사 단계 명령의 꼴: 환경 변수 대입 뒤 uv run 의 python 과 스크립트(인터프리터 플래그 없이). 그 밖의 프로그램은
+# .py 를 몰래 읽을 수 있고, -I·-E·-S 는 PYTHONPATH 의 추적기를 싣지 않는다
+CHECK_STAGE = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_]*=\S*\s+)*uv run --(locked|frozen) python\s+(?P<script>[^\s-]\S*\.py)(\s|$)')
 # 빌드 단계가 검사 단계에 남기는 셸 상태
 SHELL_STATE = re.compile(r'(^|&&)\s*(cd|export|source|\.|set|unset|alias|pushd|popd|shopt|umask)\s')
 
 
 def split_built(check):
     """빌드 결과 캐시를 쓸 수 있으면 (앞 단계들, 검사 단계) 명령, 아니면 None. 앞 단계가 무언가를 --out 으로 만들고,
-    단위 테스트를 부르지 않으며, 셸 상태를 바꾸지 않고, && 말고 다른 연결(; || | & 줄바꿈)이 없고, 검사 단계가
-    CHECK_STAGE 꼴이어야 한다."""
+    단위 테스트를 부르지 않으며, 셸 상태를 바꾸지 않고, && 말고 다른 연결(; || | & 줄바꿈)·따옴표·$( ) 가 없고,
+    검사 단계가 CHECK_STAGE 꼴이어야 한다."""
     run = check['run']
-    if not builds(run) or runs_tests(run) or SHELL_STATE.search(run) or re.search(r'[;\n`]|\$\(|\|\||(?<![&|])[&|](?![&|])', run):
+    if not builds(run) or runs_tests(run) or SHELL_STATE.search(run) or re.search(r'[;\n`"\'\\]|\$\(|\|\||(?<![&|])[&|](?![&|])', run):
         return None
     stages = run.split('&&')
     if not CHECK_STAGE.match(stages[-1]):
@@ -316,37 +319,58 @@ def split_built(check):
     return '&&'.join(stages[:-1]), stages[-1]
 
 
-def read_trace(reads):
-    """검사 단계 기록을 {'files': {경로: SHA-1}, 'dirs': {경로: SHA-1}, 'code': {경로: {qualname: 지문}}} 로.
-    `?`, 기록 없음, 같은 것이 다른 값으로 두 번(도는 중에 바뀜), 읽지 못한 파일(-)이면 None."""
+def shadowed():
+    """추적기를 가릴 수 있는 추적 sitecustomize.py(스크립트 폴더가 PYTHONPATH 보다 앞이다)가 있는가."""
+    return any(PurePosixPath(f).name in ('sitecustomize.py', 'usercustomize.py') and not under(f, 'tools/guardtrace')
+               for f in tracked())
+
+
+def read_trace(reads, script=None):
+    """검사 단계 기록을 {'files', 'dirs', 'stats': {경로: 값}, 'code': {경로: {qualname: [실행한 지문…]}}} 로.
+    `?`, 기록 없음, 검사 단계 스크립트(script)의 S 줄이 없음(맨 위 Python 이 추적기를 싣지 않음), 같은 경로가 다른
+    값으로 두 번(도는 중에 바뀜), 읽지 못한 파일(-)이면 None."""
     if not reads.is_file():
         return None
-    out = {'files': {}, 'dirs': {}, 'code': {}}
-    lines = reads.read_text(encoding='utf-8', errors='surrogateescape').splitlines()
-    if not lines:
-        return None
-    for line in lines:
+    out = {'files': {}, 'dirs': {}, 'stats': {}, 'code': {}}
+    starts = set()
+    for line in reads.read_text(encoding='utf-8', errors='surrogateescape').splitlines():
         f = line.split('\t')
-        if f == ['?'] or len(f) not in (3, 4):
-            return None
-        if f[0] in ('F', 'D') and len(f) == 3:
-            table, key, value = out['files' if f[0] == 'F' else 'dirs'], f[1], f[2]
-            if value == '-':
+        kind = f[0]
+        if kind == 'S' and len(f) == 2:
+            starts.add(f[1])
+        elif kind in ('F', 'D', 'E') and len(f) == 3:
+            table = out[{'F': 'files', 'D': 'dirs', 'E': 'stats'}[kind]]
+            if (kind == 'F' and f[2] == '-') or table.setdefault(f[1], f[2]) != f[2]:
                 return None
-        elif f[0] == 'C' and len(f) == 4:
-            table, key, value = out['code'].setdefault(f[1], {}), f[2], f[3]
+        elif kind == 'C' and len(f) == 4:
+            fps = out['code'].setdefault(f[1], {}).setdefault(f[2], [])
+            if f[3] not in fps:
+                fps.append(f[3])
         else:
             return None
-        if table.setdefault(key, value) != value:
-            if f[0] != 'C':
-                return None
-            # 같은 qualname 의 다른 코드(조건부 정의·genexpr 여럿)는 save_built 가 파일 안 목록 전체로 본다
-            table[key] = None
+    if script is not None and script not in starts:
+        return None
     return out
 
 
 def sha1_of(path):
     return hashlib.sha1(path.read_bytes()).hexdigest() if path.is_file() else None
+
+
+def content_sig(path):
+    """추적기(sitecustomize.content_sig)와 같은 표지."""
+    if not path.is_file():
+        return None
+    st = path.stat()
+    return f'big:{st.st_size}:{st.st_mtime_ns}' if st.st_size > BIG_FILE else sha1_of(path)
+
+
+def stat_state(path):
+    try:
+        st = os.stat(path)
+    except OSError:
+        return '-'
+    return 'dir' if stat.S_ISDIR(st.st_mode) else str(st.st_size)
 
 
 def listing_of(path):
@@ -360,11 +384,13 @@ def code_prints(path):
 
 
 def entry_holds(entry, root):
-    """캐시 항목이 지금도 맞는가: 연 파일·본 폴더가 같고, 실행한 코드가 든 파일마다 원본이 같거나 그 qualname 들의
-    지문 목록이 같다."""
-    if any(sha1_of(root / p) != v for p, v in entry['files'].items()):
+    """캐시 항목이 지금도 맞는가: 연 파일·본 폴더·stat 으로 본 것이 같고, 실행한 코드가 든 파일마다 원본이 같거나
+    실행한 qualname 들의 지문 목록(차례 포함)이 같다."""
+    if any(content_sig(root / p) != v for p, v in entry['files'].items()):
         return False
     if any(listing_of(root / p) != v for p, v in entry['dirs'].items()):
+        return False
+    if any(stat_state(root / p) != v for p, v in entry['stats'].items()):
         return False
     for p, (src, quals) in entry['code'].items():
         if sha1_of(root / p) == src:
@@ -376,20 +402,20 @@ def entry_holds(entry, root):
 
 
 def trace_entry(trace, root):
-    """read_trace 결과를 캐시 항목으로. 실행한 qualname 마다 지금 파일의 같은 이름 지문 목록을 담는데, 실행한 지문이 그
-    목록에 없으면(도는 중에 고침) None."""
+    """read_trace 결과를 캐시 항목으로. 실행한 qualname 마다 지금 파일의 같은 이름 지문 목록을 담는데, 실행한 지문이
+    하나라도 그 목록에 없으면(도는 중에 고침) None."""
     code = {}
     for p, quals in trace['code'].items():
         prints = code_prints(root / p)
         if prints is None:
             return None
         kept = {}
-        for q, fp in quals.items():
-            if q not in prints or (fp is not None and fp not in prints[q]):
+        for q, fps in quals.items():
+            if q not in prints or any(fp not in prints[q] for fp in fps):
                 return None
             kept[q] = prints[q]
         code[p] = [sha1_of(root / p), kept]
-    return {'files': trace['files'], 'dirs': trace['dirs'], 'code': code}
+    return {'files': trace['files'], 'dirs': trace['dirs'], 'stats': trace['stats'], 'code': code}
 
 
 def load_entries(path):
@@ -485,7 +511,7 @@ def run_check(check, timeout, logs, no_cache=False, env=None):
     log.write_text('', encoding='utf-8')
     env = env or (no_cache_env(logs) if no_cache else None)
     t0 = time.time()
-    parts = None if no_cache or key is None else split_built(check)
+    parts = None if no_cache or key is None or shadowed() else split_built(check)
     built = reads = None
     if parts:
         code = spawn(parts[0], log, timeout, env)
@@ -501,11 +527,14 @@ def run_check(check, timeout, logs, no_cache=False, env=None):
         reads.unlink(missing_ok=True)
     # 검사 출력 폴더는 검사 단계를 돌릴 때만 비운다(건너뛰면 지난 출력이 남는다)
     for d in out_dirs(run):
-        shutil.rmtree(ROOT / d, ignore_errors=True)
+        # 빌드 단계가 만든 폴더면(앞 단계 --out) 지우지 않는다
+        if not any(under(d, m) or under(m, d) for m in made_paths(run)):
+            shutil.rmtree(ROOT / d, ignore_errors=True)
     if parts:
         base = env or os.environ
         env = dict(base, GUARD_READS=str(reads), GUARD_READS_ROOT=str(ROOT),
-                   GUARD_READS_SKIP=os.pathsep.join(str(ROOT / d) for d in out_dirs(run)),
+                   GUARD_READS_SKIP=os.pathsep.join(str(ROOT / d) for d in out_dirs(run)
+                                                    if not any(under(d, m) or under(m, d) for m in made_paths(run))),
                    PYTHONPATH=os.pathsep.join(x for x in (str(TRACER), base.get('PYTHONPATH')) if x))
     code = spawn(parts[1] if parts else run, log, timeout - (time.time() - t0), env)
     if code is None:
@@ -520,7 +549,7 @@ def run_check(check, timeout, logs, no_cache=False, env=None):
     # 도는 동안 입력이 바뀌었으면 그 결과는 어느 입력의 것인지 모르므로 캐시하지 않는다
     if key is not None and input_key(check, ROOT) == key:
         write_atomic(hit, json.dumps({'when': time.strftime('%Y-%m-%d %H:%M'), 'detail': detail}, ensure_ascii=False))
-        trace = read_trace(reads) if reads else None
+        trace = read_trace(reads, CHECK_STAGE.match(parts[1])['script']) if reads else None
         entry = trace and trace_entry(trace, ROOT)
         # 검사 단계가 빌드 결과를 고쳐 썼으면 키가 달라져 남기지 않는다
         if built and entry and input_key(check, ROOT, built=True) == built:
