@@ -44,6 +44,7 @@ import stat
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import tomllib
 from pathlib import Path, PurePosixPath
@@ -525,6 +526,9 @@ def run_check(check, timeout, logs, no_cache=False, env=None):
             return 'passed', f'캐시: 빌드 결과와 검사 코드가 같아 {old["when"]} 통과, {old["detail"]}'
         reads = logs / f'{name}.reads'
         reads.unlink(missing_ok=True)
+        Path(f'{reads}.broken').unlink(missing_ok=True)
+        # 같은 크기로 같은 초 안에 고친 원본은 옛 .pyc 를 그대로 쓰므로, 검사 단계는 빈 곳에서 새로 컴파일한다
+        pycache = Path(tempfile.mkdtemp(prefix=f'guard-{name}-pyc-'))
     # 검사 출력 폴더는 검사 단계를 돌릴 때만 비운다(건너뛰면 지난 출력이 남는다)
     for d in out_dirs(run):
         # 빌드 단계가 만든 폴더면(앞 단계 --out) 지우지 않는다
@@ -532,11 +536,15 @@ def run_check(check, timeout, logs, no_cache=False, env=None):
             shutil.rmtree(ROOT / d, ignore_errors=True)
     if parts:
         base = env or os.environ
-        env = dict(base, GUARD_READS=str(reads), GUARD_READS_ROOT=str(ROOT),
+        env = dict(base, GUARD_READS=str(reads), GUARD_READS_ROOT=str(ROOT), PYTHONPYCACHEPREFIX=str(pycache),
                    GUARD_READS_SKIP=os.pathsep.join(str(ROOT / d) for d in out_dirs(run)
                                                     if not any(under(d, m) or under(m, d) for m in made_paths(run))),
                    PYTHONPATH=os.pathsep.join(x for x in (str(TRACER), base.get('PYTHONPATH')) if x))
-    code = spawn(parts[1] if parts else run, log, timeout - (time.time() - t0), env)
+    try:
+        code = spawn(parts[1] if parts else run, log, timeout - (time.time() - t0), env)
+    finally:
+        if parts:
+            shutil.rmtree(pycache, ignore_errors=True)
     if code is None:
         return 'failed', f'{timeout}초 안에 끝나지 않음, 로그 {shown}'
     secs = round(time.time() - t0)
@@ -549,7 +557,8 @@ def run_check(check, timeout, logs, no_cache=False, env=None):
     # 도는 동안 입력이 바뀌었으면 그 결과는 어느 입력의 것인지 모르므로 캐시하지 않는다
     if key is not None and input_key(check, ROOT) == key:
         write_atomic(hit, json.dumps({'when': time.strftime('%Y-%m-%d %H:%M'), 'detail': detail}, ensure_ascii=False))
-        trace = read_trace(reads, CHECK_STAGE.match(parts[1])['script']) if reads else None
+        trace = (read_trace(reads, CHECK_STAGE.match(parts[1])['script'])
+                 if reads and not Path(f'{reads}.broken').exists() else None)
         entry = trace and trace_entry(trace, ROOT)
         # 검사 단계가 빌드 결과를 고쳐 썼으면 키가 달라져 남기지 않는다
         if built and entry and input_key(check, ROOT, built=True) == built:

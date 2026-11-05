@@ -16,6 +16,7 @@ GUARD_READS 를 바꾸거나 뺀 환경), Python 밖이면서 .py 를 인자로 
 import hashlib
 import os
 import re
+import stat as _stat
 import sys
 import threading
 
@@ -23,11 +24,11 @@ _OUT = os.environ.get('GUARD_READS')
 _ROOT = os.environ.get('GUARD_READS_ROOT')
 _SKIP = [os.path.realpath(p) for p in os.environ.get('GUARD_READS_SKIP', '').split(os.pathsep) if p]
 _HERE = os.path.dirname(os.path.realpath(__file__))
+_VENV = os.path.join(os.path.realpath(_ROOT), '.venv') if _ROOT else ''
 _BLIND = re.compile(r'(^|[\s/])python[0-9.]*(\s+-[A-Za-z]+)*\s+-[A-Za-z]*[IES][A-Za-z]*(\s|$)'
                     r'|(^|[\s/])env\s|PYTHONPATH|GUARD_READS|PYTHONPYCACHEPREFIX|PYTHONNOUSERSITE')
 _PYTHON = re.compile(r'(^|/)(python[0-9.]*|uv)$')
 _IMPORT = '<frozen importlib._bootstrap_external>'
-_WRITE = os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_TRUNC
 # guards.BIG_FILE 와 같아야 한다. 이보다 큰 파일은 내용 대신 크기·mtime_ns
 BIG_FILE = 64 << 20
 
@@ -63,6 +64,17 @@ def _emit(*fields):
             os.close(fd)
 
 
+def _fail():
+    """기록을 버리게 한다. 적지도 못하면 기록이 빠진 채 남지 않게 표지 파일을 둔다."""
+    try:
+        _emit('?')
+    except Exception:
+        try:
+            _real_open(_OUT + '.broken', os.O_WRONLY | os.O_CREAT, 0o644)
+        except Exception:
+            pass
+
+
 def _text(value):
     if isinstance(value, (list, tuple)):
         return ' '.join(_text(v) for v in value)
@@ -92,7 +104,8 @@ def _inside(path):
     if not path or path.startswith('<'):
         return None
     path = os.path.realpath(path)
-    if not path.startswith(_ROOT + os.sep) or any(path == d or path.startswith(d + os.sep) for d in [_HERE, *_SKIP]):
+    # .venv 는 uv.lock(키에 듦)이 정한다
+    if not path.startswith(_ROOT + os.sep) or any(path == d or path.startswith(d + os.sep) for d in [_HERE, _VENV, *_SKIP] if d):
         return None
     return path
 
@@ -105,10 +118,11 @@ def _opened(args):
     path, mode, flags = args
     if isinstance(path, int):
         return
+    # 쓰기만 하는 것은 빼고, 읽기·쓰기를 함께 하는 것(r+·w+·O_RDWR)은 읽기로 본다
     if isinstance(mode, str):
-        if any(c in mode for c in 'wax+'):
+        if any(c in mode for c in 'wax') and '+' not in mode:
             return
-    elif flags & _WRITE:
+    elif flags & os.O_ACCMODE == os.O_WRONLY:
         return
     full = _inside(path)
     if full is None:
@@ -119,7 +133,9 @@ def _opened(args):
     except ValueError:
         caller = None
     if caller == _IMPORT:
-        if full.endswith('.pyc') and os.path.basename(os.path.dirname(full)) != '__pycache__':
+        prefix = sys.pycache_prefix
+        if full.endswith('.pyc') and os.path.basename(os.path.dirname(full)) != '__pycache__' and not (
+                prefix and full.startswith(os.path.realpath(prefix) + os.sep)):
             _emit('?')
         return
     _emit('F', _rel(full), content_sig(full))
@@ -151,6 +167,9 @@ def _spawned(command, env):
             full = _inside(part) if part else None
             if full and os.path.isfile(full):
                 _emit('F', _rel(full), content_sig(full))
+            elif full and os.path.isdir(full):
+                # 폴더를 받은 자식은 그 안 무엇을 읽을지 모른다
+                _emit('?')
 
 
 def _hook(event, args):
@@ -168,9 +187,12 @@ def _hook(event, args):
             _spawned(args[0], None)
         elif event in ('os.exec', 'os.posix_spawn', 'os.spawn'):
             _spawned(args[-2], args[-1])
+        elif event in ('sqlite3.connect', 'ctypes.dlopen'):
+            # C 쪽에서 파일을 읽어 open 감사에 걸리지 않는다
+            _emit('?')
     except Exception:
         # 훅이 예외를 내면 그 open 이 실패한다. 무엇을 놓쳤는지 모르므로 기록을 버리게 한다
-        _emit('?')
+        _fail()
     finally:
         _local.busy = False
 
@@ -182,9 +204,10 @@ def _stat_seen(path, result):
     try:
         full = _inside(path)
         if full is not None:
-            import stat as st
-            state = '-' if result is None else 'dir' if st.S_ISDIR(result.st_mode) else str(result.st_size)
+            state = '-' if result is None else 'dir' if _stat.S_ISDIR(result.st_mode) else str(result.st_size)
             _emit('E', _rel(full), state)
+    except Exception:
+        _fail()
     finally:
         _local.busy = False
 
@@ -212,6 +235,8 @@ def _started(code, offset):
         full = _inside(code.co_filename)
         if full is not None:
             _emit('C', _rel(full), code.co_qualname, fingerprint(code))
+    except Exception:
+        _fail()
     finally:
         _local.busy = busy
     return sys.monitoring.DISABLE
@@ -222,6 +247,12 @@ if _OUT and _ROOT:
     _ROOT = os.path.realpath(_ROOT)
     _real_open = os.open
     _lock = threading.Lock()
+
+    def _new_lock():
+        global _lock
+        _lock = threading.Lock()
+    # fork 때 다른 스레드가 잡고 있던 잠금을 자식이 물려받으면 첫 기록에서 멈춘다
+    os.register_at_fork(after_in_child=_new_lock)
     _local = threading.local()
     _seen = set()
     _local.busy = True

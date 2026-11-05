@@ -500,6 +500,20 @@ class BuiltCacheTest(unittest.TestCase):
         self.edit('other.py', 'X = 13\n')
         self.assertNotIn('캐시', self.detail(check))
 
+    def test_read_write_handles_and_folder_args_are_inputs(self):
+        self.edit('data.txt', 'a')
+        self.edit('check.py', "import sys\nwith open('data.txt', 'r+') as f:\n    sys.exit(0 if f.read() == 'a' else 1)\n")
+        self.detail()
+        self.edit('other.py', 'X = 14\n')
+        self.assertTrue(self.skipped())
+        self.edit('data.txt', 'b')
+        self.assertEqual(guards.run_check(self.check, 60, self.logs)[0], 'failed')
+        import os
+        os.mkdir(self.root / 'd')
+        self.edit('check.py', "import subprocess\nsubprocess.run(['ls', 'd'], check=True)\n")
+        self.detail()
+        self.assertIn('?', (self.logs / 'c.reads').read_text().split())
+
     def test_failed_check_keeps_no_entry(self):
         self.edit('check.py', 'import sys; sys.exit(3)\n')
         self.assertEqual(guards.run_check(self.check, 60, self.logs)[0], 'failed')
