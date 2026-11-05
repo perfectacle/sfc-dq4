@@ -356,7 +356,7 @@ class ApplyTests(unittest.TestCase):
     def test_changed_original_bytes_are_refused(self):
         rom = bytearray(self.rom())
         rom[box.lorom(box.HOOK_AT)] ^= 0xFF
-        with self.assertRaisesRegex(SystemExit, 'a9 17 8d 33 07|원래 바이트가 아님'):
+        with self.assertRaisesRegex(SystemExit, '원래 바이트가 아님'):
             box.apply(bytes(rom), synthetic_nes(), DotFont())
 
     def test_occupied_code_area_is_refused(self):

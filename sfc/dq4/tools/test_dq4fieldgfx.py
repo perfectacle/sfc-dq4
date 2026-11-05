@@ -213,10 +213,17 @@ class GenerateSyntheticTest(unittest.TestCase):
 
     def test_identical_quarters_share_a_tile(self):
         flat = {**synthetic_original(), "tile_attributes": [7] * gfx.TILES}
-        with mock.patch("dq5fieldgfxwrite.original", lambda r: flat):
+        ink = (200, 40, 40)
+        # 위 두 4분면은 같은 투명, 좌하는 전부 색, 우하는 한 칸 걸러 색
+        image = [[None if y < 8 else ink if x < 8 or x % 2 == 0 else None for x in range(16)] for y in range(16)]
+        with mock.patch("dq5fieldgfxwrite.original", lambda r: flat), mock.patch.object(gfx, "art", lambda name: image):
             _, _, _, blocks = gfx.generate(b"rom")
-        used = [t for b in blocks for t in b["lower"] + b["upper"] if t and t not in gfx.SEA_TILES]
-        self.assertLess(len(set(used)), len(used))
+        painted = [b["lower"] for b in blocks if b["lower"] != list(gfx.SEA_TILES)]
+        self.assertTrue(painted)
+        for lower in painted:
+            self.assertEqual(lower[0], lower[1])
+            self.assertEqual(len({lower[0], lower[2], lower[3]}), 3)
+            self.assertEqual(lower, painted[0])
 
     def test_running_out_of_slots_is_an_error(self):
         with mock.patch.object(gfx, "free_slots", lambda r, tiles: [1, 2]):

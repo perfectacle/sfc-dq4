@@ -760,8 +760,9 @@ class SyntheticBuildTest(unittest.TestCase):
         def fail(name, args):
             if name == "dq4environmentrom.py":
                 # 원래 롬 덤프 넷(이때 pool 에 낸 것은 이 넷뿐)이 먼저 실패해 끝난 뒤에 앞 단계가 실패한다
-                if not CountingPool.last.finished.wait(timeout=5):
-                    raise AssertionError("the four dumps did not end")
+                pool = CountingPool.last
+                if not pool.finished.wait(timeout=5):
+                    raise AssertionError(f"only {pool.ended} of {pool.expect} dump calls ended within 5s")
                 return True
             return "dump" in args
 
