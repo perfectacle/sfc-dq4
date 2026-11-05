@@ -240,7 +240,9 @@ class MessageBaselineTests(unittest.TestCase):
 
     def test_write_messages_cli_rejects(self):
         for argv in (['--write-messages', ''], ['--write-messages', '   '], ['--write-messages', 'x', '--chapter2'],
-                     ['--write-messages', 'x', '--seed', '5'], ['--write-messages', 'x', '--seeds', '0,5']):
+                     ['--write-messages', 'x', '--seed', '5'], ['--write-messages', 'x', '--seeds', '0,5'],
+                     ['--write-messages', 'x', '--units', '--only', 'castle_day'], ['--write-messages', 'x', '--until', 'jail'],
+                     ['--write-messages', 'x', '--from', 'jail'], ['--write-messages', 'x', '--msg-limit', '1']):
             with mock.patch.object(wc.sys, 'argv', ['dq4ch1walkcheck.py', '--rom', 'r', '--out', 'o', *argv]), \
                     mock.patch('sys.stderr'), self.assertRaises(SystemExit) as e:
                 wc.main()
@@ -256,6 +258,19 @@ class MessageBaselineTests(unittest.TestCase):
             got = wc.load_messages(path)
         self.assertEqual(got['chapter1', 0, 'flare'], {'messages': ['E65', '129'], 'reason': '처음'})
         self.assertEqual(got['chapter1', 0, 'jail'], {'messages': ['E66'], 'reason': '감옥 대사'})
+
+    def test_msg_limit_is_a_constant_in_the_prologue_key(self):
+        self.assertEqual(wc.MSG_LIMIT, 400)
+        before = wc.prologue_inputs()
+        try:
+            wc.set_msg_limit(1)
+            self.assertNotEqual(wc.prologue_inputs(), before)
+        finally:
+            wc.set_msg_limit(400)
+        self.assertEqual(wc.prologue_inputs(), before)
+        with mock.patch.dict(os.environ, {'DQ4_WALK_MSG_LIMIT': '1'}):
+            import importlib
+            self.assertEqual(importlib.reload(wc).MSG_LIMIT, 400)
 
     def test_baseline_file_covers_segments(self):
         base = wc.load_messages()

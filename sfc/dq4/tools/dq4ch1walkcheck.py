@@ -62,8 +62,9 @@ WALK = ROOT / 'tools' / 'lua' / 'walk.lua'
 WALK_STATE = HERE / 'lua' / 'dq4walkstate.lua'
 WARP = DQ5_TOOLS / 'lua' / 'dq5warp.lua'
 WARP_MSG = HERE / 'lua' / 'dq4warpmsg.lua'
-# 구간마다 적는 메시지 번호 수의 상한(lua LIMIT). 넘으면 'truncated' 로 그 구간이 실패한다. 상한 분기를 실측할 때만 바꾼다
-MSG_LIMIT = int(os.environ.get('DQ4_WALK_MSG_LIMIT', '400'))
+# 구간마다 적는 메시지 번호 수의 상한(lua LIMIT). 넘으면 'truncated' 로 그 구간이 실패한다. 상한 분기를 실측할 때만
+# --msg-limit 로 바꾸고, 그때는 서장 캐시를 쓰지 않는다(서장 결과의 메시지도 이 값에 따라 달라짐)
+MSG_LIMIT = 400
 NIGHT = '7E075E=F0;7E075F=00'
 DAY = '7E075E=50;7E075F=00'
 NO_ENCOUNTERS = '11E7C2=186B'
@@ -180,7 +181,7 @@ PROLOGUE_START = {'SAVEAT': str(pc.START_AT), 'STATE': 'start.mss', 'MAXF': str(
 
 def prologue_inputs():
     """서장 끝 상태를 정하는 입력 상수: 전원부터의 입력, 서장 구간(길·맵·끝 조건), 그 구간에 두는 난수·시각과 롬 패치."""
-    return repr((sorted(PROLOGUE_START.items()), SEGMENTS[0], pins(SEGMENTS[0][3], 0), NO_ENCOUNTERS))
+    return repr((sorted(PROLOGUE_START.items()), SEGMENTS[0], pins(SEGMENTS[0][3], 0), NO_ENCOUNTERS, MSG_LIMIT))
 
 
 def prologue_files():
@@ -475,6 +476,12 @@ def ending(mesence, rom, state, dest, seed=0):
             'trace': hashlib.sha1(repr(seen).encode()).hexdigest()[:12], 'frames': {'box': shown, 'reset': reset, 'after_sound': first(AFTER_SOUND, reset or 0) if reset else None}}
 
 
+def set_msg_limit(n):
+    """메시지 상한을 바꾼다(--msg-limit). 서장 캐시 키(prologue_inputs)에도 들어간다."""
+    global MSG_LIMIT
+    MSG_LIMIT = n
+
+
 def warp_messages(msg_text):
     """순간이동 구간에서 맵 번호가 목적지와 처음 같아진 프레임(warpmsg.txt 의 map@) 부터 뜬 메시지 번호. 그 줄이 없으면
     모든 번호, 기록이 LIMIT 을 넘어 잘렸으면 끝에 'truncated'."""
@@ -590,6 +597,7 @@ def walk_unit(mesence, rom, data, out, segments, unit, base, seed=0, readset=Fal
     if how == 'warp' and arg.split(',')[0] == segments[0][3]['map']:
         # dq5warp.lua 는 같은 맵 안의 순간이동이면 목적지 칸에 꼭 맞게 서야 도착으로 본다. 이웃 맵을 거친다
         hop = HOPS[arg.split(',')[0]]
+        # 들르는 순간이동은 검사할 구간이 아니라 결과를 묶음 결과에 넣지 않는다(메시지도 견주지 않음)
         r = segment(mesence, rom, state, out / f'{name}-hop', (f'{name}-hop', 'warp', hop, {'map': hop[:5]}),
                     NO_ENCOUNTERS, extra, party, seed, readset)
         if r['status'] != 'passed':
@@ -731,6 +739,8 @@ def main():
     ap.add_argument('--jobs', type=int, default=6, help='--units 에서 함께 띄울 MesenCE 수')
     ap.add_argument('--base', type=Path, help='--units: 서장 끝 세이브스테이트(같은 롬으로 만든 것). 주면 서장을 건너뜀')
     ap.add_argument('--only', help='--units: 이 구간으로 시작하는 묶음만(쉼표로 여럿)')
+    ap.add_argument('--msg-limit', type=int, default=MSG_LIMIT,
+                    help='구간마다 적는 메시지 수의 상한(잘림 분기 실측용). 기본과 다르면 서장 캐시를 쓰지 않는다')
     ap.add_argument('--write-messages', metavar='까닭',
                     help=f'모든 구간이 메시지 밖으로 통과하면 그 메시지 차례로 기준({MESSAGES.name})을 고친다')
     add_seed_args(ap)
@@ -741,6 +751,11 @@ def main():
             ap.error('--write-messages 에 까닭을 주세요(빈 글·공백뿐은 안 됨)')
         if args.chapter2 or seeds != [0]:
             ap.error('--write-messages 는 기본 변형(chapter1)·시드 0 기준만 고친다(--chapter2·--seed·--seeds 와 함께 쓰지 않음)')
+        if args.only or args.start or args.until or args.base or args.msg_limit != MSG_LIMIT:
+            ap.error('--write-messages 는 전 구간을 기본 상한으로 걸을 때만 쓴다(--only·--from·--until·--base·--msg-limit 와 함께 쓰지 않음)')
+    if args.msg_limit != MSG_LIMIT:
+        set_msg_limit(args.msg_limit)
+        args.no_state_cache = True
     segments = SEGMENTS[:-2] + CHAPTER2_END if args.chapter2 else SEGMENTS
     mesence = Path(os.environ['MESENCE'])
     out = args.out.resolve()
