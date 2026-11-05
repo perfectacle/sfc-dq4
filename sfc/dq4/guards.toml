@@ -2206,6 +2206,72 @@ groups = ["ch1-build", "ch1-walk"]
 
 # 여러 검사가 함께 닿는 paths 묶음. 묶음은 그 뿌리 스크립트에서 닿는 파일을 모두 덮어야 한다(dq4guardpaths.GROUP_ROOTS,
 # test_dq4guardpaths). 빠진 것은 `uv run --locked python sfc/dq4/tools/dq4guardpaths.py` 가 찍는다
+[[check]]
+name = "dq4-menu-cursor"
+why = "게임 안 명령 창에서 두 방향을 겹쳐 누르거나(위 다음 왼쪽, 함께 누르기, 한 프레임씩 등) 길게 눌러도 커서가 한 칸씩만 움직여야 한다(MesenCE 실제 패드 입력, 1장 롬을 전원부터 켜 명령 창 「작전」 에서 사례 10개). 원래 롬은 「위, 2프레임 뒤 왼쪽」 에서 세 칸을 움직인다. 방향 처리 훅이 겹친 입력을 다시 받으면 깨진다"
+groups = ["ch1-build"]
+paths = [
+  "sfc/dq4/tools/dq4menucursorcheck.py",
+  "sfc/dq4/tools/dq4mesen.py",
+  "sfc/dq4/tools/lua/dq4menucursorcheck.lua",
+  "sfc/dq4/tools/lua/dq4openbus.lua",
+  "tools/mesence_settings.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/fresh-menucursor && uv run --locked python sfc/dq4/tools/dq4menucursorcheck.py --rom work/ch1/dq4-ch1.sfc --out work/fresh-menucursor"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+
+[[check]]
+name = "dq4-name-cursor"
+why = "이름 입력 자모판에서 실제 패드 입력으로 방향 전환·길게 눌러 반복·빈 칸 건너뛰기·Start 커서가 모델과 같아야 한다(사례 52개, menu 단계 빌드의 이름 입력 기호 DQ4_NAMEENTRY_SYMBOLS 로 커서 자리를 읽음). 자모판 이웃 표나 방향 반복 처리가 바뀌면 깨진다"
+groups = ["ch1-build"]
+paths = [
+  "sfc/dq4/tools/dq4namecursorcheck.py",
+  "sfc/dq4/tools/dq4mesen.py",
+  "sfc/dq4/tools/lua/dq4namecursorcheck.lua",
+  "sfc/dq4/tools/lua/dq4openbus.lua",
+  "tools/mesence_settings.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && mkdir -p work/fresh-namecursor-rom && DQ4_NAMEENTRY_SYMBOLS=$PWD/work/fresh-namecursor-rom/name-entry.sym uv run --locked python sfc/dq4/tools/dq4menupatch.py build --rom work/ch1/overture.sfc --messages work/ch1/messages.json --out work/fresh-namecursor-rom/menu.sfc && rm -rf work/fresh-namecursor && uv run --locked python sfc/dq4/tools/dq4namecursorcheck.py --rom work/fresh-namecursor-rom/menu.sfc --symbols work/fresh-namecursor-rom/name-entry.sym --out work/fresh-namecursor"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+
+[[check]]
+name = "dq4-msg-count"
+why = "메시지마다 눌러야 하는 A(▼ 대기와 저절로 넘어가지 않는 닫기 대기의 수)가 그 메시지의 쪽 수(쪽 나눔 1002 의 수 + 1, 글 없는 대기 메시지는 1)를 넘지 않아야 한다. 서장 걷기 길과 1장 걷기 검사의 왕 구간(칭찬·레벨업 줄·작별)을 걷는다. 출발 상태는 같은 명령 안의 1장 걷기(--units). 메시지 끝 코드나 레벨업 줄 잇기가 같은 쪽에서 A 를 두 번 받게 바뀌면 깨진다"
+groups = ["ch1-build", "ch1-walk"]
+paths = [
+  "sfc/dq4/tools/dq4msgcountcheck.py",
+  "sfc/dq4/tools/lua/dq4msgcount.lua",
+  "tools/mesence_settings.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/msgcount-walk work/fresh-msgcount && uv run --locked python sfc/dq4/tools/dq4ch1walkcheck.py --rom work/ch1/dq4-ch1.sfc --out work/msgcount-walk --units && uv run --locked python sfc/dq4/tools/dq4msgcountcheck.py --rom work/ch1/dq4-ch1.sfc --messages work/ch1/messages.json --states work/msgcount-walk --out work/fresh-msgcount"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+
+[[check]]
+name = "dq4-people-sets"
+why = "인물 그림을 얹은 1장 출하 롬(dq4-ch1-full)에서 서장·1장 맵 22개를 낮(일행 하나)·밤·호이민 세 장면으로 워프해, 슬롯마다 롬의 인물 훅이 고른 세트의 타일이 VRAM 에, 칸 목록이 레코드대로, 칸 팔레트 비트가 세트 팔레트대로 실려야 한다(66장면). 출발 상태는 같은 명령 안의 1장 걷기(--units). 인물 훅·세트 표·맵 그룹 팔레트가 어긋나면 깨진다. 훅이 없는 dq4-ch1.sfc(인물 단계 전)로 돌리면 훅 흉내가 멈춘다"
+groups = ["ch1-build", "ch1-walk"]
+paths = [
+  "sfc/dq4/tools/dq4peoplecheck.py",
+  "sfc/dq4/tools/lua/dq4peopledump.lua",
+  "tools/mesence_settings.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/people-walk work/fresh-people && uv run --locked python sfc/dq4/tools/dq4ch1walkcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/people-walk --units && uv run --locked python sfc/dq4/tools/dq4peoplecheck.py --rom work/ch1/dq4-ch1-full.sfc --states work/people-walk --out work/fresh-people"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+
+[[check]]
+name = "dq4-name-entry"
+why = "이름 입력 화면에서 실제 A·B·Y 입력으로 자모 조합·삭제·Y 완료가 모델과 같고, 완료한 이름이 새 게임 기록에 직렬화되며 메뉴 표시가 풀리고, 이름 칸 VRAM 이 기대와 같아야 한다(사례 15개, 커서 자리만 WRAM 에 둠). 조합 오토마타·완료 처리·이름 칸 그리기가 바뀌면 깨진다"
+groups = ["ch1-build"]
+paths = [
+  "sfc/dq4/tools/dq4nameentrycheck.py",
+  "tools/mesence_settings.py",
+  "sfc/dq4/tools/dq4mesen.py",
+  "sfc/dq4/tools/lua/dq4nameentrycheck.lua",
+  "sfc/dq4/tools/lua/dq4openbus.lua",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && mkdir -p work/fresh-nameentry-rom && DQ4_NAMEENTRY_SYMBOLS=$PWD/work/fresh-nameentry-rom/name-entry.sym uv run --locked python sfc/dq4/tools/dq4menupatch.py build --rom work/ch1/overture.sfc --messages work/ch1/messages.json --out work/fresh-nameentry-rom/menu.sfc && rm -rf work/fresh-nameentry && uv run --locked python sfc/dq4/tools/dq4nameentrycheck.py --rom work/fresh-nameentry-rom/menu.sfc --symbols work/fresh-nameentry-rom/name-entry.sym --out work/fresh-nameentry"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
+
 [groups]
 ch1-build = [
   "fc/dq4/tools/dq4apu.py",
