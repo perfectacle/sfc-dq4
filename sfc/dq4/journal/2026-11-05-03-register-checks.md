@@ -44,11 +44,13 @@ paths 는 묶음 `ch1-build`(·`ch1-walk`) 와 `dq4guardpaths.py` 가 찍은 빠
 | 도구 | 하는 일 | 판정 | 의견 |
 | --- | --- | --- | --- |
 | `dq4environmentprobe.py` | 환경 그래픽을 따로 된 SFC 뷰어로 띄워 MesenCE 출력과 견줌 | 없음 | 그래픽 인코딩 확인 도구. 맵 엔진 삽입은 보지 않음 |
-| `dq4prologuecheck.py` | 새 게임부터 서장 끝까지 한 번에 걷기 | 있음 | 같은 길(`ROUTE`)을 1장 걷기 검사의 서장 구간이 걸어, 여러 가드가 그 모듈을 씀. 따로 등록할지는 판단 필요 |
+| `dq4prologuecheck.py` | 새 게임부터 서장 끝까지 한 번에 걷기 | 있음 | 같은 길(`ROUTE`)을 1장 걷기 검사의 서장 구간이 걸어, 여러 가드가 그 모듈을 씀. 등록하지 않음(중복) |
 | `dq4talkdelay.py` | 서장 자동 대화까지의 시각을 재는 프로브 | 있음(일부) | 측정 도구 |
 | `dq4freshstate.py`·`dq4mesen.py` | 출발 상태 만들기·MesenCE 띄우기 | — | 다른 검사가 쓰는 공용 모듈 |
 | `dq4spritecheck.py` | 평평함 지표 | 없음 | 롬 검사가 아님(위) |
 
+결정: `dq4prologuecheck.py` 는 1장 걷기 검사의 서장 구간과 같은 길을 걸어 따로 등록하지 않는다.
+
 ## 남은 것
 
-- `dq4prologuecheck.py`·`dq4talkdelay.py` 를 따로 등록할지.
+- `dq4talkdelay.py` 를 따로 등록할지.
