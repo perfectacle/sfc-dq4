@@ -24,3 +24,12 @@ class MapTests(unittest.TestCase):
     def test_start_maps_have_a_hop(self):
         self.assertNotIn(C.HOP, C.STATE_MAP.values())
         self.assertIn(C.HOP, C.MAPS)
+
+
+class SceneOkTests(unittest.TestCase):
+    def test_needs_the_map_and_at_least_one_passing_slot(self):
+        good, bad = {'ok': True}, {'ok': False}
+        self.assertTrue(C.scene_ok('36/00', '36/00', [good]))
+        self.assertFalse(C.scene_ok('36/00', '36/00', []))
+        self.assertFalse(C.scene_ok('36/00', '36/00', [good, bad]))
+        self.assertFalse(C.scene_ok('37/00', '36/00', [good]))

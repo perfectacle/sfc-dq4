@@ -2204,8 +2204,6 @@ run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "코어(dq4cores 가 빌드, 또는 LIBRETRO_BSNES·LIBRETRO_SNES9X)"]
 groups = ["ch1-build", "ch1-walk"]
 
-# 여러 검사가 함께 닿는 paths 묶음. 묶음은 그 뿌리 스크립트에서 닿는 파일을 모두 덮어야 한다(dq4guardpaths.GROUP_ROOTS,
-# test_dq4guardpaths). 빠진 것은 `uv run --locked python sfc/dq4/tools/dq4guardpaths.py` 가 찍는다
 [[check]]
 name = "dq4-menu-cursor"
 why = "게임 안 명령 창에서 두 방향을 겹쳐 누르거나(위 다음 왼쪽, 함께 누르기, 한 프레임씩 등) 길게 눌러도 커서가 한 칸씩만 움직여야 한다(MesenCE 실제 패드 입력, 1장 롬을 전원부터 켜 명령 창 「작전」 에서 사례 10개). 원래 롬은 「위, 2프레임 뒤 왼쪽」 에서 세 칸을 움직인다. 방향 처리 훅이 겹친 입력을 다시 받으면 깨진다"
@@ -2218,7 +2216,7 @@ paths = [
   "tools/mesence_settings.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/fresh-menucursor && uv run --locked python sfc/dq4/tools/dq4menucursorcheck.py --rom work/ch1/dq4-ch1.sfc --out work/fresh-menucursor"
-needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
 
 [[check]]
 name = "dq4-name-cursor"
@@ -2232,7 +2230,7 @@ paths = [
   "tools/mesence_settings.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && mkdir -p work/fresh-namecursor-rom && DQ4_NAMEENTRY_SYMBOLS=$PWD/work/fresh-namecursor-rom/name-entry.sym uv run --locked python sfc/dq4/tools/dq4menupatch.py build --rom work/ch1/overture.sfc --messages work/ch1/messages.json --out work/fresh-namecursor-rom/menu.sfc && rm -rf work/fresh-namecursor && uv run --locked python sfc/dq4/tools/dq4namecursorcheck.py --rom work/fresh-namecursor-rom/menu.sfc --symbols work/fresh-namecursor-rom/name-entry.sym --out work/fresh-namecursor"
-needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
 
 [[check]]
 name = "dq4-msg-count"
@@ -2272,6 +2270,8 @@ paths = [
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && mkdir -p work/fresh-nameentry-rom && DQ4_NAMEENTRY_SYMBOLS=$PWD/work/fresh-nameentry-rom/name-entry.sym uv run --locked python sfc/dq4/tools/dq4menupatch.py build --rom work/ch1/overture.sfc --messages work/ch1/messages.json --out work/fresh-nameentry-rom/menu.sfc && rm -rf work/fresh-nameentry && uv run --locked python sfc/dq4/tools/dq4nameentrycheck.py --rom work/fresh-nameentry-rom/menu.sfc --symbols work/fresh-nameentry-rom/name-entry.sym --out work/fresh-nameentry"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
 
+# 여러 검사가 함께 닿는 paths 묶음. 묶음은 그 뿌리 스크립트에서 닿는 파일을 모두 덮어야 한다(dq4guardpaths.GROUP_ROOTS,
+# test_dq4guardpaths). 빠진 것은 `uv run --locked python sfc/dq4/tools/dq4guardpaths.py` 가 찍는다
 [groups]
 ch1-build = [
   "fc/dq4/tools/dq4apu.py",

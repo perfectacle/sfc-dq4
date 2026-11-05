@@ -35,6 +35,8 @@
 - `dq4-msg-count`: 같은 명령 안에서 1장 걷기 `--units` 로 출발 상태를 만든다.
 - `dq4-people-sets`: 같은 명령 안에서 1장 걷기 `--units` 로 출발 상태를 만든다.
 
+등록하며 두 검사의 판정을 조였다. `dq4msgcountcheck.py` 는 왕 구간 걷기가 실패하면 남은 기록이 있어도 실패로 친다(전에는 걷기 결과를 버렸다). `dq4peoplecheck.py` 는 일행 밖 인물 슬롯의 칸이 어긋나도, 판정할 슬롯이 하나도 없어도 실패로 친다. 조인 판정으로도 출하 롬 66장면이 모두 통과했다.
+
 paths 는 묶음 `ch1-build`(·`ch1-walk`) 와 `dq4guardpaths.py` 가 찍은 빠진 파일(각 검사의 lua, `dq4mesen`, `dq4openbus.lua`)로 채웠고, `tools/mesence_settings.py` 를 넣었다. 빠짐은 0 이다.
 
 ## 4. 그 밖의 미등록 실행 도구
