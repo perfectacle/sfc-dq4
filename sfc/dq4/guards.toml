@@ -2074,6 +2074,23 @@ run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
 groups = ["ch1-build", "ch1-walk"]
 
+[[check]]
+name = "dq4-screen-baseline"
+why = "장면 화면이 기준과 달라지지 않게: 타이틀·1장 시작 방·상태 창·이무르 방어구점 사기 목록(MesenCE, emu.getScreenBuffer 와 영상 설정 고정)과 타이틀(bsnes·snes9x)의 8×8 칸 해시가 sfc/dq4/screens.toml 과 모두 같다. MesenCE 설정 이름이 먹는지(VERIFY_ARGS 로 화면이 바뀜)도 본다. 기준은 --write-screens 까닭으로만 고친다. 표지는 실수로 손댄 것만 잡는다(공개된 SHA-1)"
+paths = [
+  "sfc/dq4/screens.toml",
+  "sfc/dq4/tools/dq4screencheck.py",
+  "sfc/dq4/tools/dq4screens.py",
+  "sfc/dq4/tools/lua/dq4screen.lua",
+  "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
+  "sfc/dq4/tools/dq4cores.py",
+  "sfc/dq4/tools/dq4libretro.py",
+  "tools/mesence_settings.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/screens && uv run --locked python sfc/dq4/tools/dq4screencheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/screens"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "코어(dq4cores 가 빌드, 또는 LIBRETRO_BSNES·LIBRETRO_SNES9X)"]
+groups = ["ch1-build", "ch1-walk"]
+
 # 여러 검사가 함께 닿는 paths 묶음. 묶음은 그 뿌리 스크립트에서 닿는 파일을 모두 덮어야 한다(dq4guardpaths.GROUP_ROOTS,
 # test_dq4guardpaths). 빠진 것은 `uv run --locked python sfc/dq4/tools/dq4guardpaths.py` 가 찍는다
 [groups]
