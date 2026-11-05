@@ -208,7 +208,7 @@ class CompareLayoutTests(unittest.TestCase):
         self.assertEqual(res, (0, 1))
         self.assertIn('w4 / nametable x4 y2 w5 h3 다름', out[0])
         self.assertEqual(len(out), 2)
-        self.assertTrue(out[1].endswith('열기 2 창 11 틀을 못 찾음') or '못 찾음' in out[1])
+        self.assertEqual(out[1], f'{self.d}: 열기 2 창 11 틀을 못 찾음')
 
 
 class DumpCompareTests(unittest.TestCase):
@@ -300,8 +300,8 @@ class ExportTests(unittest.TestCase):
         self.assertEqual(r4['cursor'], 0x40)
         ops = [b['op'] for b in r4['body']]
         self.assertEqual(ops, ['item', 'cond', 'condtable', 'item', 'newline', 'side', 'list', 'mode'])
-        self.assertEqual(r4['body'][1], {'op': 'cond', 'arg': 1, 'table': 2, 'meaning': t.ROUTINE_MEANING[(2, 1)]}
-                         if (2, 1) in t.ROUTINE_MEANING else {'op': 'cond', 'arg': 1, 'table': 2})
+        self.assertEqual(r4['body'][1], {'op': 'cond', 'arg': 1, 'table': 2})
+        self.assertNotIn('meaning', r4['body'][1])
         self.assertEqual(r4['body'][5], {'op': 'side', 'arg': '05', 'meaning': '곁 창 05 을 함께 엶'})
 
     def test_write_export_files(self):
@@ -495,6 +495,7 @@ class MainTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertTrue(Path(target, 'dq4-window-layouts.json').exists())
         code, out, _ = self.run_main('export', cwd=self.tmp.name)
+        self.assertEqual(code, 0)
         self.assertTrue(Path(self.tmp.name, 'work', 'text', 'dq4-names.tsv').exists())
 
 

@@ -115,7 +115,7 @@ class MapStateTests(unittest.TestCase):
         m = b.Map(self.prg, field=0)
         self.assertEqual((m.t, m.buf, m.g), (0, None, None))
         self.assertEqual((m.w, m.h), (253, 2))
-        self.assertEqual(m.cell(3, 1), 0)              # 줄 1 은 높이 안이라도 좌표 −3 이 음수면 0
+        self.assertEqual(m.cell(3, 1), 0)              # y−3 이 음수라 8비트로 돌면 높이를 넘어 0
         f3 = object.__new__(b.Map)
         f3.buf, f3.f = None, 3
         f3.field, f3.w, f3.h = [[0, 1], [1, 2]], 2, 2
@@ -479,7 +479,7 @@ class CompareTests(unittest.TestCase):
             self.assertEqual(out[0], '맵 종류 01: 블록 표 0 다름, CHR 타일 11개 중 0 다름(애니메이션 0개 뺌)')
             self.assertEqual(out[1], 'BG 팔레트 같음')
             self.assertEqual(out[2], '$7800(그늘 바꾸기 뒤) 8 바이트 중 0 다름, 바뀐 칸 0')
-            self.assertTrue(out[3].endswith('다름, attribute 240 칸 중 0 다름') or '0 다름' in out[3])
+            self.assertEqual(out[3], '화면 nametable 960 타일 중 0 다름, attribute 240 칸 중 0 다름')
 
     def test_wrong_tile_property_palette_and_screen_are_reported(self):
         prg = world_prg()
