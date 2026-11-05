@@ -75,6 +75,112 @@ needs = ["rom", "MESENCE", "LIBDIR"]
 groups = ["ch1-walk"]
 
 [[check]]
+name = "dq4-compat-scenes"
+why = "1장 걷기가 지나지 않는 MesenCE 장면 검사(전투 dq4battlecheck, 저장·이어 하기·전멸 dq4ch1savecheck, 창 글자의 가게·교회·여관·대화·전투 창 dq4windowcheck)에 열린 버스 프로브를 붙여, 뱅크 40~7D 아래 절반(high)과 뱅크 00~3F 의 열린 버스 구역(io, dq4compatscenes.IO_RANGES)을 범위마다 따로 잰다. high 는 낮은 뱅크 코드의 SRAM 밖 접근과 dq4brkscan.ALLOWED 밖 BRK, io 는 우리 패치 코드(뱅크 40 이상 또는 롬 장부의 단계가 쓴 자리)의 접근, 허용 목록 dq4compatscenes.DQ5_ALLOWED(PC·접근 뱅크·주소 범위) 밖의 원래 DQ5 코드 접근, 해석하지 못한 기록 줄이면 실패한다. 장면 검사가 실패하거나, 창 검사 장면이 덤프할 프레임을 다 덤프하지 못했거나, 프로브 기록이 없어도 실패한다. 프로브는 dq4mesen 이 DQ4_OPENBUS_LOG 를 보고 붙이고, 읽은 바이트 캐시는 끈다"
+groups = ["ch1-build", "ch1-walk"]
+paths = [
+  "fc/dq4/tools/dq4sound.py",
+  "sfc/dq4/tools/*.asm",
+  "sfc/dq4/tools/dq4balance.py",
+  "sfc/dq4/tools/dq4battlecheck.py",
+  "sfc/dq4/tools/dq4battlemsg.asm",
+  "sfc/dq4/tools/dq4battlemsg.py",
+  "sfc/dq4/tools/dq4bg3slot.py",
+  "sfc/dq4/tools/dq4build.py",
+  "sfc/dq4/tools/dq4buildcache.py",
+  "sfc/dq4/tools/dq4ch1event.py",
+  "sfc/dq4/tools/dq4ch1savecheck.py",
+  "sfc/dq4/tools/dq4ch1talk.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/dq4ch2event.py",
+  "sfc/dq4/tools/dq4ch2talk.py",
+  "sfc/dq4/tools/dq4chapter1.py",
+  "sfc/dq4/tools/dq4chapterbox.py",
+  "sfc/dq4/tools/dq4compatcheck.py",
+  "sfc/dq4/tools/dq4compatscenes.py",
+  "sfc/dq4/tools/dq4dungeonencountercheck.py",
+  "sfc/dq4/tools/dq4environmentrom.py",
+  "sfc/dq4/tools/dq4fieldencounter.py",
+  "sfc/dq4/tools/dq4fieldgfx.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
+  "sfc/dq4/tools/dq4groupcheck.py",
+  "sfc/dq4/tools/dq4growth.py",
+  "sfc/dq4/tools/dq4josa.py",
+  "sfc/dq4/tools/dq4menumsg.py",
+  "sfc/dq4/tools/dq4menupatch.py",
+  "sfc/dq4/tools/dq4mesen.py",
+  "sfc/dq4/tools/dq4msgnames.py",
+  "sfc/dq4/tools/dq4msgwait.py",
+  "sfc/dq4/tools/dq4nameentry.py",
+  "sfc/dq4/tools/dq4namegame.py",
+  "sfc/dq4/tools/dq4npcport.py",
+  "sfc/dq4/tools/dq4overture.py",
+  "sfc/dq4/tools/dq4people.py",
+  "sfc/dq4/tools/dq4pins.py",
+  "sfc/dq4/tools/dq4prologue.py",
+  "sfc/dq4/tools/dq4prologuecheck.py",
+  "sfc/dq4/tools/dq4readset.py",
+  "sfc/dq4/tools/dq4romassets.py",
+  "sfc/dq4/tools/dq4romledger.py",
+  "sfc/dq4/tools/dq4signs.py",
+  "sfc/dq4/tools/dq4soundbank.py",
+  "sfc/dq4/tools/dq4soundcheck.py",
+  "sfc/dq4/tools/dq4soundpatch.py",
+  "sfc/dq4/tools/dq4soundport.py",
+  "sfc/dq4/tools/dq4soundset.py",
+  "sfc/dq4/tools/dq4soundsfx.py",
+  "sfc/dq4/tools/dq4sparfx.py",
+  "sfc/dq4/tools/dq4sysmsg.py",
+  "sfc/dq4/tools/dq4titleanimation.py",
+  "sfc/dq4/tools/dq4titleassets.py",
+  "sfc/dq4/tools/dq4titlelayerpatch.py",
+  "sfc/dq4/tools/dq4titlelayers.py",
+  "sfc/dq4/tools/dq4titlepatch.py",
+  "sfc/dq4/tools/dq4wellresetcheck.py",
+  "sfc/dq4/tools/dq4wellswitch.py",
+  "sfc/dq4/tools/dq4windowcheck.py",
+  "sfc/dq4/tools/dq4windowname.asm",
+  "sfc/dq4/tools/dq4windowname.py",
+  "sfc/dq4/tools/dq4windowtext.py",
+  "sfc/dq4/tools/dq4wrap.py",
+  "sfc/dq4/tools/lua/dq4battle.lua",
+  "sfc/dq4/tools/lua/dq4openbus.lua",
+  "sfc/dq4/tools/lua/dq4readset.lua",
+  "sfc/dq4/tools/lua/dq4walkstate.lua",
+  "sfc/dq4/tools/test_dq4compatscenes.py",
+  "sfc/dq5/tools/dq5build.py",
+  "sfc/dq5/tools/dq5exitcheck.py",
+  "sfc/dq5/tools/dq5gfx.py",
+  "sfc/dq5/tools/dq5map.py",
+  "sfc/dq5/tools/dq5namewrite.py",
+  "sfc/dq5/tools/dq5newmap.py",
+  "sfc/dq5/tools/dq5npcrecord.py",
+  "sfc/dq5/tools/dq5objpalette.py",
+  "sfc/dq5/tools/dq5song.py",
+  "sfc/dq5/tools/dq5spc.py",
+  "sfc/dq5/tools/dq5spcfile.py",
+  "sfc/dq5/tools/dq5sprite.py",
+  "sfc/dq5/tools/dq5spritewrite.py",
+  "sfc/dq5/tools/dq5sram.py",
+  "sfc/dq5/tools/lua/dq5cdldump.lua",
+  "sfc/dq5/tools/lua/dq5msg.lua",
+  "sfc/dq5/tools/lua/dq5warp.lua",
+  "sfc/dq5/tools/lua/dq5warptrace.lua",
+  "tools/lua/walk.lua",
+  "sfc/dq4/tools/dq4brkscan.py",
+  "sfc/dq4/tools/dq4cores.py",
+  "sfc/dq4/tools/dq4freshstate.py",
+  "sfc/dq4/tools/dq4libretro.py",
+  "sfc/dq4/tools/lua/dq4shipstate.lua",
+  "sfc/dq5/tools/dq5progresscheck.py",
+  "sfc/dq5/tools/lua/dq5battle.lua",
+  "sfc/dq5/tools/lua/dq5progresscheck.lua",
+  "tools/mesence_settings.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && mkdir -p work/wc && DQ4_WINDOWNAME_SYMBOLS=$PWD/work/wc/wn.sym uv run --locked python sfc/dq4/tools/dq4menupatch.py build --rom work/ch1/overture.sfc --messages work/ch1/messages.json --out work/wc/menu.sfc && rm -rf work/compat-scenes && uv run --locked python sfc/dq4/tools/dq4compatscenes.py --rom work/ch1/dq4-ch1-full.sfc --out work/compat-scenes --window-rom work/ch1/dq4-ch1.sfc --symbols work/wc/wn.sym --symbols-rom work/wc/menu.sfc"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+
+[[check]]
 name = "dq4-compat-walk"
 why = "MesenCE 에서만 우연히 도는 코드를 잡는다: libretro bsnes·snes9x 에서 서장부터 1장 끝 리셋까지 이어 걷기(#904 의 snes9x 멈춤)"
 paths = [
@@ -1421,7 +1527,7 @@ groups = ["ch1-build", "ch1-walk"]
 
 [[check]]
 name = "dq4-ch1-save"
-why = "1장 출하 롬(dq4-ch1-full)에서 교회 저장 → 리셋 → 이어 하기, 우물 아래 전멸 → 교회 귀환이 끝까지 가야 한다(서장 끝·이무르 밤·호이민·보스·보고 다섯 자리). 교회 순간이동은 「arrived map」 이 36/00 이고 MAXF 에 닿지 않아야(timeout phase 없음) 도착으로 본다. 출발 상태는 같은 명령 안의 1장 걷기(--units, 전 구간)로 만든다"
+why = "1장 출하 롬(dq4-ch1-full)에서 교회 저장 → 리셋 → 이어 하기, 우물 아래 전멸 → 교회 귀환이 끝까지 가야 한다(서장 끝·이무르 밤·호이민·보스·보고 다섯 자리). 교회 순간이동은 「arrived map」 이 36/00 이고 MAXF 에 닿지 않아야(timeout phase 없음) 도착으로 본다. 출발 상태는 같은 명령 안의 1장 걷기(--units, 전 구간)로 만든다. 그 걷기는 구간마다(순간이동은 도착 뒤) 뜬 메시지 번호의 처음 나온 차례가 기준 sfc/dq4/ch1-walk-messages.toml 과 같아야 하고(기준이 없거나 손으로 고쳐 check 표지가 맞지 않거나 기록이 400개를 넘어 잘려도 실패)(대사가 빠지거나 바뀌거나 늘면 실패, 기준은 --write-messages 「까닭」 으로만 고침), 이무르 감옥(37/00 → 37/02)과 이무르(37/01 → 37/00)는 순간이동 대신 실제 계단으로 걸어 들어가 끝 맵이 맞아야 한다"
 paths = [
   "sfc/dq4/tools/dq4ch1savecheck.py",
   "sfc/dq4/tools/dq4ch1walkcheck.py",
@@ -1495,6 +1601,13 @@ paths = [
   "sfc/dq5/tools/dq5sprite.py",
   "sfc/dq5/tools/dq5spritewrite.py",
   "tools/mesence_settings.py",
+  "sfc/dq4/ch1-walk-messages.toml",
+  "sfc/dq4/tools/dq4battlemsg.asm",
+  "sfc/dq4/tools/dq4titlelayers.asm",
+  "sfc/dq4/tools/dq4windowname.asm",
+  "sfc/dq4/tools/test_dq4ch1walkcheck.py",
+  "tools/lua/mkstate.lua",
+  "sfc/dq4/tools/lua/dq4warpmsg.lua",
   "sfc/dq4/tools/dq4freshstate.py",
   "sfc/dq4/tools/lua/dq4shipstate.lua",
   "sfc/dq5/tools/dq5progresscheck.py",
@@ -2074,6 +2187,23 @@ run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
 groups = ["ch1-build", "ch1-walk"]
 
+[[check]]
+name = "dq4-screen-baseline"
+why = "장면 화면이 기준과 달라지지 않게: 타이틀·1장 시작 방·상태 창·이무르 방어구점 사기 목록(MesenCE, emu.getScreenBuffer 와 영상 설정 고정)과 타이틀(bsnes·snes9x)의 8×8 칸 해시가 sfc/dq4/screens.toml 과 모두 같다. MesenCE 설정 이름이 먹는지(VERIFY_ARGS 로 화면이 바뀜)도 본다. 기준은 --write-screens 까닭으로만 고친다. 표지는 실수로 손댄 것만 잡는다(공개된 SHA-1)"
+paths = [
+  "sfc/dq4/screens.toml",
+  "sfc/dq4/tools/dq4screencheck.py",
+  "sfc/dq4/tools/dq4screens.py",
+  "sfc/dq4/tools/lua/dq4screen.lua",
+  "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
+  "sfc/dq4/tools/dq4cores.py",
+  "sfc/dq4/tools/dq4libretro.py",
+  "tools/mesence_settings.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/screens && uv run --locked python sfc/dq4/tools/dq4screencheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/screens"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "코어(dq4cores 가 빌드, 또는 LIBRETRO_BSNES·LIBRETRO_SNES9X)"]
+groups = ["ch1-build", "ch1-walk"]
+
 # 여러 검사가 함께 닿는 paths 묶음. 묶음은 그 뿌리 스크립트에서 닿는 파일을 모두 덮어야 한다(dq4guardpaths.GROUP_ROOTS,
 # test_dq4guardpaths). 빠진 것은 `uv run --locked python sfc/dq4/tools/dq4guardpaths.py` 가 찍는다
 [groups]
@@ -2304,6 +2434,8 @@ ch1-walk = [
   "sfc/dq4/tools/dq4windowtext.py",
   "sfc/dq4/tools/dq4wrap.py",
   "sfc/dq4/tools/lua/dq4readset.lua",
+  "sfc/dq4/tools/lua/dq4openbus.lua",
+  "sfc/dq4/tools/lua/dq4warpmsg.lua",
   "sfc/dq4/tools/lua/dq4walkstate.lua",
   "sfc/dq5/tools/dq5anim.py",
   "sfc/dq5/tools/dq5battlebg.py",

@@ -52,6 +52,12 @@ class Ch1WalkCheckTests(unittest.TestCase):
         names = [[wc.SEGMENTS[i][0] for i in u] for u in wc.units(wc.SEGMENTS)]
         self.assertIn(['castle_town', 'field', 'fly', 'kidnap'], names)
         self.assertIn(['castle', 'king', 'ending'], names)
+        # 실제 계단으로 걸어 들어가는 구간: 순간이동은 계단 옆까지, 영역 이동은 걷는 구간이 한다
+        self.assertIn(['jail_gate', 'jail', 'reunion'], names)
+        self.assertIn(['imuru_gate', 'imuru', 'homecoming'], names)
+        seg = {x[0]: x for x in wc.SEGMENTS}
+        self.assertEqual((seg['jail'][1], seg['jail'][3]['map']), ('walk', '37/02'))
+        self.assertEqual((seg['imuru'][1], seg['imuru'][3]['map']), ('walk', '37/00'))
 
     def test_setup_carries_flags_and_effects(self):
         names = [s[0] for s in wc.SEGMENTS]
@@ -178,6 +184,103 @@ class Ch1WalkCheckTests(unittest.TestCase):
 
     def test_frames_cover_presses(self):
         self.assertEqual(wc.frames('a:8;wait:50;3,4'), 300 + 58 + 400)
+
+
+class MessageBaselineTests(unittest.TestCase):
+    def test_order_keeps_first_appearance(self):
+        self.assertEqual(wc.message_order(['E79', 'E90', 'E7A', 'E90', 'E79', '129']), ['E79', 'E90', 'E7A', '129'])
+
+    def test_problems(self):
+        base = {('chapter1', 0, 'flare'): {'messages': ['E65', '129'], 'reason': 'x'}}
+        ok = {'name': 'flare', 'messages': ['E65', '129', '129']}
+        self.assertEqual(wc.message_problems('chapter1', 0, ok, base), [])
+        lost = wc.message_problems('chapter1', 0, {'name': 'flare', 'messages': ['129']}, base)
+        self.assertIn('빠짐 E65', lost[0])
+        swap = wc.message_problems('chapter1', 0, {'name': 'flare', 'messages': ['129', 'E65']}, base)
+        self.assertIn('기준 E65 129, 실제 129 E65', swap[0])
+        self.assertIn('더함 E66', wc.message_problems('chapter1', 0, {'name': 'flare', 'messages': ['E65', 'E66', '129']},
+                                                       base)[0])
+        self.assertEqual(wc.message_problems('chapter1', 0, {'name': 'jail', 'messages': []}, base),
+                         ['메시지 기준 없음(chapter1, 시드 0)'])
+        # 기준이 없는 변형·시드와 메시지를 모으지 않는 구간(ending)은 보지 않는다
+        self.assertEqual(wc.message_problems('chapter2', 0, ok, base), [])
+        self.assertEqual(wc.message_problems('chapter1', 5, ok, base), [])
+        self.assertEqual(wc.message_problems('chapter1', 0, {'name': 'ending'}, base), [])
+        # 기본 변형·시드는 기준이 비면 조용히 꺼지지 않고 실패한다
+        self.assertEqual(wc.message_problems('chapter1', 0, ok, {}), ['메시지 기준 없음(chapter1, 시드 0)'])
+        self.assertEqual(wc.message_problems('chapter1', 0, {'name': 'flare', 'messages': ['E65', 'truncated']}, base),
+                         ['메시지 기록이 400개를 넘어 잘림'])
+
+    def test_warp_messages_after_arrival(self):
+        # 맵 번호가 목적지와 처음 같아진 프레임(map@)부터 본다
+        self.assertEqual(wc.warp_messages('E10@50\nmap@120\nE66@120\nE67@200\n'), ['E66', 'E67'])
+        self.assertEqual(wc.warp_messages('E10@50\n'), ['E10'])
+        self.assertEqual(wc.warp_messages('map@100\nE66@130\ntruncated\n'), ['E66', 'truncated'])
+
+    def test_hand_edit_is_caught(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'm.toml'
+            wc.write_messages([('chapter1', 0, 'flare', ['E65', '129'])], '처음', path)
+            text = path.read_text(encoding='utf-8')
+            path.write_text(text.replace('"E65", "129"', '"E65"'), encoding='utf-8')
+            with self.assertRaises(ValueError):
+                wc.load_messages(path)
+            path.write_text(text.replace('reason = "처음"', 'reason = " "'), encoding='utf-8')
+            with self.assertRaises(ValueError):
+                wc.load_messages(path)
+            # 손으로 고친 기준도 --write-messages 로 다시 만들 수 있다(고친 항목은 앞 까닭 없이 새 까닭)
+            path.write_text(text.replace('"E65", "129"', '"E65"'), encoding='utf-8')
+            wc.write_messages([('chapter1', 0, 'flare', ['E65', '129'])], '다시 만듦', path)
+            self.assertEqual(wc.load_messages(path)['chapter1', 0, 'flare'], {'messages': ['E65', '129'], 'reason': '다시 만듦'})
+            with self.assertRaises(ValueError):
+                wc.write_messages([('chapter1', 0, 'flare', ['E65'])], '  ', path)
+            with self.assertRaises(ValueError):
+                wc.write_messages([('chapter1', 0, 'flare', ['E65', 'truncated'])], '잘림', path)
+
+    def test_write_messages_cli_rejects(self):
+        for argv in (['--write-messages', ''], ['--write-messages', '   '], ['--write-messages', 'x', '--chapter2'],
+                     ['--write-messages', 'x', '--seed', '5'], ['--write-messages', 'x', '--seeds', '0,5'],
+                     ['--write-messages', 'x', '--units', '--only', 'castle_day'], ['--write-messages', 'x', '--until', 'jail'],
+                     ['--write-messages', 'x', '--from', 'jail'], ['--write-messages', 'x', '--msg-limit', '1']):
+            with mock.patch.object(wc.sys, 'argv', ['dq4ch1walkcheck.py', '--rom', 'r', '--out', 'o', *argv]), \
+                    mock.patch('sys.stderr'), self.assertRaises(SystemExit) as e:
+                wc.main()
+            self.assertEqual(e.exception.code, 2, argv)
+
+    def test_write_keeps_reason_of_unchanged(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'm.toml'
+            wc.write_messages([('chapter1', 0, 'flare', ['E65', '129']), ('chapter1', 0, 'jail', [])], '처음', path)
+            wc.write_messages([('chapter1', 0, 'flare', ['E65', '129', '129']), ('chapter1', 0, 'jail', ['E66'])],
+                              '감옥 대사', path)
+            got = wc.load_messages(path)
+        self.assertEqual(got['chapter1', 0, 'flare'], {'messages': ['E65', '129'], 'reason': '처음'})
+        self.assertEqual(got['chapter1', 0, 'jail'], {'messages': ['E66'], 'reason': '감옥 대사'})
+
+    def test_msg_limit_is_a_constant_in_the_prologue_key(self):
+        self.assertEqual(wc.MSG_LIMIT, 400)
+        before = wc.prologue_inputs()
+        try:
+            wc.set_msg_limit(1)
+            self.assertNotEqual(wc.prologue_inputs(), before)
+        finally:
+            wc.set_msg_limit(400)
+        self.assertEqual(wc.prologue_inputs(), before)
+        with mock.patch.dict(os.environ, {'DQ4_WALK_MSG_LIMIT': '1'}):
+            import importlib
+            self.assertEqual(importlib.reload(wc).MSG_LIMIT, 400)
+
+    def test_baseline_file_covers_segments(self):
+        base = wc.load_messages()
+        names = {k[2] for k in base if k[:2] == ('chapter1', 0)}
+        want = {s[0] for s in wc.SEGMENTS if s[1] != 'ending'}
+        self.assertEqual(names, want)
+        # load_messages 가 항목마다 reason 비공백·check 표지를 확인한다(손으로 고친 기준이면 ValueError)
+        for e in base.values():
+            self.assertTrue(e['reason'].strip())
+            self.assertEqual(e['messages'], wc.message_order(e['messages']))
 
 
 

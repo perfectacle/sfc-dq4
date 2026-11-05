@@ -27,6 +27,9 @@
   시작한다. 묶음 앞 구간들이 켰을 깃발·호이민·물건을 SET·PARTY 로 직접 두므로 묶음끼리 기다리지 않고 함께 돈다.
   --base 는 서장 끝 세이브스테이트를 주어 서장을 건너뛴다(같은 롬으로 만든 것만), --only 는 그 묶음만 돈다.
   여러 시드면 시드마다 --out 아래 seed-N/ 에 구간 폴더를 둔다.
+구간마다 걷는 동안 뜬 메시지 번호(24:8BAF)의 처음 나온 차례를 기준 파일 sfc/dq4/ch1-walk-messages.toml 과 견준다.
+대사가 빠지거나 바뀌거나 늘면 그 구간이 실패한다. 기준은 --write-messages "까닭" 으로 다시 만든다(바뀐 구간에 까닭이
+남는다). 기준에 없는 변형(--chapter2)·시드는 견주지 않는다.
 형식은 sfc/dq4/docs/dq4-chapter1-format.md 「검증」.
 """
 import argparse
@@ -58,6 +61,10 @@ from dq4pins import RNG  # noqa: E402
 WALK = ROOT / 'tools' / 'lua' / 'walk.lua'
 WALK_STATE = HERE / 'lua' / 'dq4walkstate.lua'
 WARP = DQ5_TOOLS / 'lua' / 'dq5warp.lua'
+WARP_MSG = HERE / 'lua' / 'dq4warpmsg.lua'
+# 구간마다 적는 메시지 번호 수의 상한(lua LIMIT). 넘으면 'truncated' 로 그 구간이 실패한다. 상한 분기를 실측할 때만
+# --msg-limit 로 바꾸고, 그때는 서장 캐시를 쓰지 않는다(서장 결과의 메시지도 이 값에 따라 달라짐)
+MSG_LIMIT = 400
 NIGHT = '7E075E=F0;7E075F=00'
 DAY = '7E075E=50;7E075F=00'
 NO_ENCOUNTERS = '11E7C2=186B'
@@ -174,7 +181,7 @@ PROLOGUE_START = {'SAVEAT': str(pc.START_AT), 'STATE': 'start.mss', 'MAXF': str(
 
 def prologue_inputs():
     """서장 끝 상태를 정하는 입력 상수: 전원부터의 입력, 서장 구간(길·맵·끝 조건), 그 구간에 두는 난수·시각과 롬 패치."""
-    return repr((sorted(PROLOGUE_START.items()), SEGMENTS[0], pins(SEGMENTS[0][3], 0), NO_ENCOUNTERS))
+    return repr((sorted(PROLOGUE_START.items()), SEGMENTS[0], pins(SEGMENTS[0][3], 0), NO_ENCOUNTERS, MSG_LIMIT))
 
 
 def prologue_files():
@@ -317,7 +324,9 @@ SEGMENTS = [
     ('night_child', 'walk', talk('up') + ';6,31', {'poke': NIGHT + ';' + HOLD_CHILD, 'want': ['NIGHT_TOLD']}),
     ('castle_day', 'warp', '36/00,16,72', {'poke': DAY, 'map': '36/00'}),
     ('flare', 'walk', talk('up'), {'poke': DAY, 'want': ['FLARE']}),
-    ('jail', 'warp', '37/02,12,6', {'map': '37/02'}),
+    # 이무르 감옥(37/02)은 이무르(37/00)의 계단으로 걸어 들어간다(출구 표를 지나는지 본다)
+    ('jail_gate', 'warp', '37/00,42,5', {'map': '37/00'}),
+    ('jail', 'walk', 'up:32;wait:400', {'changes': 1, 'after': 120, 'map': '37/02'}),
     ('reunion', 'walk', 'wait:300;' + taps(30, 60) + ';' + pc.CLOSE, {'want': ['REUNITED']}),
     ('well', 'warp', '3B/00,46,5', {'map': '3B/00'}),
     ('hoimin_side', 'warp', '3B/03,6,28', {'map': '3B/03'}),
@@ -337,8 +346,11 @@ SEGMENTS = [
      {'boss': True, 'poke': HERO_HP, 'want': ['BOSS_WON', 'KIDS_FOLLOW']}),
     ('tower_soldier', 'warp', '39/01,36,50', {'map': '39/01'}),
     ('soldier', 'walk', talk('up', 6) + ';wait:300', {'want': ['SOLDIER']}),
-    ('imuru', 'warp', '37/00,28,49', {'poke': DAY, 'map': '37/00'}),
-    ('homecoming', 'walk', '28,45;' + taps(6) + ';' + pc.CLOSE, {'poke': DAY, 'off': ['KIDS_FOLLOW']}),
+    # 이무르(37/00)는 이무르 지하(37/01)의 계단으로 걸어 올라온다(출구 표를 지나는지 본다)
+    ('imuru_gate', 'warp', '37/01,12,55', {'poke': DAY, 'map': '37/01'}),
+    ('imuru', 'walk', 'up:32;wait:400', {'poke': DAY, 'changes': 1, 'after': 300, 'map': '37/00'}),
+    # 계단으로 들어서면 아이들 귀가 대사(E73)가 바로 뜬다. 남은 대사를 넘기고 아이들이 떨어졌는지 본다
+    ('homecoming', 'walk', taps(6) + ';' + pc.CLOSE, {'poke': DAY, 'off': ['KIDS_FOLLOW']}),
     ('castle', 'warp', '36/01,30,66', {'map': '36/01'}),
     # 병사가 갈라서고 왕 앞까지 저절로 걸어가 칭찬·선물·레벨업 줄·작별 뒤 성 앞에 들어선다.
     # 레벨업 줄 수는 보스 전투로 오른 레벨에 따라 달라지므로 A 는 넉넉히 두고 맵이 바뀌면 끝낸다
@@ -372,7 +384,7 @@ def frames(waypoints):
 # 검사가 띄우는 Lua(mkstate·walk·dq4walkstate·dq5warp·dq5msg 와 툴킷 LIBDIR 의 boot·lib·seq 등)가 읽는 환경 변수.
 # 셸에 남은 값이 섞이면 같은 롬·같은 코드라도 다르게 돌아 서장 캐시가 틀린 상태를 나눠 주므로, 넘기는 값만 쓴다
 LUA_ENV = frozenset('''
-    ACCESS ADULT AFTER ANYWHERE BATTLE BG3FONT CALLS CHANGES COVER DUMP EVERY FIELD GROUP HOLD LATESET LOG MAXF
+    ACCESS ADULT AFTER ANYWHERE BATTLE BG3FONT CALLS CHANGES COVER DUMP EVERY FIELD GROUP HOLD LATESET LIMIT LOG MAXF NEXT
     OAMDUMP OUT PARTY PERIOD POKE PRE ROMPATCH SAVE SAVEAT SCRIPT SEQ SET SETTLE SHOTS SHOT_DIR SRM STATE TAIL TAP
     TAPUNTIL TEST TO VMADD VRAMDUMP WAGON WALK WARPEXIT WATCH WATCH_FMT WATCH_WRAM WAYPOINTS WRAMWATCH WRAMWATCHBY
     WRAMWATCHREAD WW WWFROM WWRANGE'''.split())
@@ -387,7 +399,7 @@ def run(mesence, rom, script, dest, env, timeout, readset=False):
     full.update(env, SHOT_DIR=str(dest))
     if readset:
         import dq4readset
-        accept = dq4readset.warp_finished if Path(script).resolve() == WARP.resolve() else None
+        accept = dq4readset.warp_finished if Path(script).resolve() in (WARP.resolve(), WARP_MSG.resolve()) else None
         info = dq4readset.run(mesence, rom, script, dest, full, timeout=timeout, log='mesen.log', cwd=dest,
                               accept=accept)
         return run_failure(info, timeout)
@@ -464,6 +476,30 @@ def ending(mesence, rom, state, dest, seed=0):
             'trace': hashlib.sha1(repr(seen).encode()).hexdigest()[:12], 'frames': {'box': shown, 'reset': reset, 'after_sound': first(AFTER_SOUND, reset or 0) if reset else None}}
 
 
+def set_msg_limit(n):
+    """메시지 상한을 바꾼다(--msg-limit). 서장 캐시 키(prologue_inputs)에도 들어간다."""
+    global MSG_LIMIT
+    MSG_LIMIT = n
+
+
+def warp_messages(msg_text):
+    """순간이동 구간에서 맵 번호가 목적지와 처음 같아진 프레임(warpmsg.txt 의 map@) 부터 뜬 메시지 번호. 그 줄이 없으면
+    모든 번호, 기록이 LIMIT 을 넘어 잘렸으면 끝에 'truncated'."""
+    found = re.search(r'^map@(\d+)$', msg_text, re.M)
+    at = int(found[1]) if found else 0
+    out = []
+    for line in msg_text.splitlines():
+        if line.startswith('map@'):
+            continue
+        if line == 'truncated':
+            out.append(line)
+        elif '@' in line:
+            num, frame = line.split('@')
+            if int(frame) >= at:
+                out.append(num)
+    return out
+
+
 def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, readset=False):
     """한 구간을 걷는다. extra 는 시작에 더 둘 SET(묶음 첫 구간의 깃발·물건), party 는 dq5warp.lua PARTY.
     readset 은 run 과 같다."""
@@ -474,11 +510,13 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
     start = ';'.join(v for v in (pins(opt, seed), extra) if v)
     if how == 'warp':
         # 도착해 조작이 풀린 첫 프레임에 난수를 다시 둔다. 어디서 떠났느냐에 따라 도착 프레임까지 굴린 수가 다르다
-        why = run(mesence, rom, WARP, dest, {'STATE': str(state), 'TO': arg, 'SAVE': 'end.mss', 'SETTLE': '120',
-                                             'MAXF': '1500', 'WARPEXIT': f'{warp_exit(rom):X}', 'ANYWHERE': '1',
-                                             'ROMPATCH': patch, 'SET': start, 'LATESET': pins(opt, seed),
-                                             **({'POKE': poke} if poke else {}), **({'PARTY': party} if party else {})}, 300,
-                  readset)
+        why = run(mesence, rom, WARP_MSG, dest, {'NEXT': str(WARP), 'LIMIT': str(MSG_LIMIT), 'STATE': str(state), 'TO': arg,
+                                                 'SAVE': 'end.mss',
+                                                 'SETTLE': '120', 'MAXF': '1500', 'WARPEXIT': f'{warp_exit(rom):X}',
+                                                 'ANYWHERE': '1', 'ROMPATCH': patch, 'SET': start,
+                                                 'LATESET': pins(opt, seed),
+                                                 **({'POKE': poke} if poke else {}), **({'PARTY': party} if party else {})},
+                  300, readset)
         log = dest / 'warp.txt'
         text = log.read_text(encoding='utf-8') if log.exists() else ''
         found = re.search(r'arrived map (\w\w/\w\w)', text)
@@ -486,7 +524,8 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
         wram = (dest / 'final.wram').read_bytes() if (dest / 'final.wram').exists() else bytes(0x20000)
         seen = {k: wram[a & 0xFFFF] for k, (a, _) in FLAGS.items()}
         items = list(wram[ITEMS & 0xFFFF:(ITEMS & 0xFFFF) + 12])
-        messages = []
+        messages = warp_messages((dest / 'warpmsg.txt').read_text(encoding='utf-8')
+                                 if (dest / 'warpmsg.txt').exists() else '')
         # 도착(arrived map) 뒤 settle·test 단계에서 MAXF 에 닿아도 「arrived map」 과 「timeout phase=」 가 함께 찍힌다
         import dq4readset
         timed_out = dq4readset.warp_timed_out(text)
@@ -494,6 +533,7 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
         maxf = opt.get('maxf', frames(arg))
         # PRE: 앞 구간이 끝날 때 남은 A 가 연 명령 창을 닫는다. 창이 없을 때의 B 는 아무것도 열지 않는다
         why = run(mesence, rom, WALK_STATE, dest, {'STATE': str(state), 'WALK': str(WALK), 'WAYPOINTS': arg,
+                                                   'LIMIT': str(MSG_LIMIT),
                                                    'PRE': pc.CLOSE.replace(';', ','),
                                                    'SAVE': 'end.mss', 'MAXF': str(maxf),
                                                    'CHANGES': str(opt.get('changes', 99)), 'AFTER': str(opt.get('after', 120)),
@@ -557,6 +597,7 @@ def walk_unit(mesence, rom, data, out, segments, unit, base, seed=0, readset=Fal
     if how == 'warp' and arg.split(',')[0] == segments[0][3]['map']:
         # dq5warp.lua 는 같은 맵 안의 순간이동이면 목적지 칸에 꼭 맞게 서야 도착으로 본다. 이웃 맵을 거친다
         hop = HOPS[arg.split(',')[0]]
+        # 들르는 순간이동은 검사할 구간이 아니라 결과를 묶음 결과에 넣지 않는다(메시지도 견주지 않음)
         r = segment(mesence, rom, state, out / f'{name}-hop', (f'{name}-hop', 'warp', hop, {'map': hop[:5]}),
                     NO_ENCOUNTERS, extra, party, seed, readset)
         if r['status'] != 'passed':
@@ -590,6 +631,102 @@ def prologue(mesence, rom, data, out, segments, cache=None, readset=False):
     return state, r
 
 
+# 구간마다 견주는 메시지 번호 기준(처음 나온 차례). 같은 대사를 몇 번 넘기느냐(A 연타 수·되풀이 대화)에 따라 번호가
+# 몇 번 되풀이되는지는 바뀌므로, 처음 나온 차례만 견준다
+MESSAGES = HERE.parent / 'ch1-walk-messages.toml'
+
+
+def message_order(messages):
+    """메시지 번호 목록 → 처음 나온 차례(같은 번호는 한 번)."""
+    seen, out = set(), []
+    for m in messages:
+        if m not in seen:
+            seen.add(m)
+            out.append(m)
+    return out
+
+
+def entry_check(variant, seed, name, messages, reason):
+    """기준 한 항목의 표지. write_messages 만 쓰므로, 메시지나 까닭을 손으로 고치면 맞지 않는다."""
+    text = '|'.join([variant, str(seed), name, ' '.join(messages), reason])
+    return hashlib.sha1(text.encode('utf-8')).hexdigest()[:12]
+
+
+def load_messages(path=MESSAGES, verify=True):
+    """기준 파일 → {(변형, 시드, 구간): {'messages': [...], 'reason': 글}}. 파일이 없으면 빈 dict. verify 면 표지가 맞지
+    않거나 까닭이 비면 ValueError(손으로 고친 기준). verify 가 아니면 그런 항목은 'stale' 을 붙여 돌려준다."""
+    import tomllib
+    if not Path(path).exists():
+        return {}
+    doc = tomllib.loads(Path(path).read_text(encoding='utf-8'))
+    out = {}
+    for e in doc.get('segment', []):
+        key = (e['variant'], e['seed'], e['name'])
+        bad = None
+        if not e.get('reason', '').strip():
+            bad = f'{Path(path).name} {key}: reason 이 비어 있음'
+        elif e.get('check') != entry_check(*key, e['messages'], e.get('reason', '')):
+            bad = f'{Path(path).name} {key}: check 가 맞지 않음(손으로 고친 기준, --write-messages 로 다시 만들 것)'
+        if bad and verify:
+            raise ValueError(bad)
+        out[key] = {'messages': list(e['messages']), 'reason': e.get('reason', ''), **({'stale': True} if bad else {})}
+    return out
+
+
+# 기준이 반드시 있어야 하는 변형·시드(기본 걷기와 가드가 도는 것)
+REQUIRED = ('chapter1', 0)
+
+
+def message_problems(variant, seed, result, baseline):
+    """한 구간 결과의 메시지 차례가 기준과 다른 까닭(빈 목록이면 같음). REQUIRED 밖의 변형·시드는 그 기준이 하나도
+    없으면 보지 않는다."""
+    if 'messages' not in result:
+        return []
+    if 'truncated' in result['messages']:
+        return [f'메시지 기록이 {MSG_LIMIT}개를 넘어 잘림']
+    if (variant, seed) != REQUIRED and not any(k[:2] == (variant, seed) for k in baseline):
+        return []
+    want = baseline.get((variant, seed, result['name']))
+    if want is None:
+        return [f'메시지 기준 없음({variant}, 시드 {seed})']
+    got = message_order(result['messages'])
+    if got == want['messages']:
+        return []
+    lost = [m for m in want['messages'] if m not in got]
+    new = [m for m in got if m not in want['messages']]
+    return [f'메시지 차례가 기준과 다름: 기준 {" ".join(want["messages"]) or "없음"}, 실제 {" ".join(got) or "없음"}'
+            + (f' (빠짐 {" ".join(lost)})' if lost else '') + (f' (더함 {" ".join(new)})' if new else '')]
+
+
+def write_messages(rows, reason, path=MESSAGES):
+    """rows [(변형, 시드, 구간, 메시지 목록)] 로 기준 파일을 고친다. 차례가 바뀐 구간과 새 구간은 reason 을, 같은 구간은
+    앞 reason 을 둔다. rows 에 없는 기준은 그대로 둔다."""
+    if not reason.strip():
+        raise ValueError('까닭이 비어 있음')
+    # 손으로 고친 기준도 다시 만들 수 있게 표지를 보지 않고 읽는다. 표지가 맞지 않는 항목은 앞 항목이 없는 것으로 친다
+    old = {k: e for k, e in load_messages(path, verify=False).items() if not e.get('stale')}
+    new = dict(old)
+    for variant, seed, name, messages in rows:
+        if 'truncated' in messages:
+            raise ValueError(f'{name}: 메시지 기록이 잘려 기준으로 쓸 수 없음')
+        order = message_order(messages)
+        prev = old.get((variant, seed, name))
+        new[variant, seed, name] = {'messages': order,
+                                    'reason': prev['reason'] if prev and prev['messages'] == order else reason.strip()}
+    lines = ['# 1장 걷기 검사(dq4ch1walkcheck.py)가 구간마다 견주는 메시지 번호(24:8BAF 가 받은 A)의 처음 나온 차례.',
+             '# 손으로 고치지 않는다. dq4ch1walkcheck.py --units --write-messages "까닭" 으로 다시 만든다. 차례가 바뀐 구간에만',
+             '# 그 까닭이 reason 으로 남는다. check 는 실수로 손댄 것을 알아채는 표지일 뿐 공개된 셈이라 고의 위조는 막지 않는다.',
+             '']
+    order = {s[0]: i for i, s in enumerate(SEGMENTS + CHAPTER2_END)}
+    for (variant, seed, name), e in sorted(new.items(), key=lambda kv: (kv[0][0], kv[0][1], order.get(kv[0][2], 999),
+                                                                          kv[0][2])):
+        lines += ['[[segment]]', f'variant = "{variant}"', f'seed = {seed}', f'name = "{name}"',
+                  'messages = [' + ', '.join(f'"{m}"' for m in e['messages']) + ']',
+                  'reason = ' + json.dumps(e['reason'], ensure_ascii=False),
+                  f'check = "{entry_check(variant, seed, name, e["messages"], e["reason"])}"', '']
+    Path(path).write_text('\n'.join(lines), encoding='utf-8')
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--rom', required=True, type=Path)
@@ -602,9 +739,23 @@ def main():
     ap.add_argument('--jobs', type=int, default=6, help='--units 에서 함께 띄울 MesenCE 수')
     ap.add_argument('--base', type=Path, help='--units: 서장 끝 세이브스테이트(같은 롬으로 만든 것). 주면 서장을 건너뜀')
     ap.add_argument('--only', help='--units: 이 구간으로 시작하는 묶음만(쉼표로 여럿)')
+    ap.add_argument('--msg-limit', type=int, default=MSG_LIMIT,
+                    help='구간마다 적는 메시지 수의 상한(잘림 분기 실측용). 기본과 다르면 서장 캐시를 쓰지 않는다')
+    ap.add_argument('--write-messages', metavar='까닭',
+                    help=f'모든 구간이 메시지 밖으로 통과하면 그 메시지 차례로 기준({MESSAGES.name})을 고친다')
     add_seed_args(ap)
     args = ap.parse_args()
     seeds = seeds_of(args)
+    if args.write_messages is not None:
+        if not args.write_messages.strip():
+            ap.error('--write-messages 에 까닭을 주세요(빈 글·공백뿐은 안 됨)')
+        if args.chapter2 or seeds != [0]:
+            ap.error('--write-messages 는 기본 변형(chapter1)·시드 0 기준만 고친다(--chapter2·--seed·--seeds 와 함께 쓰지 않음)')
+        if args.only or args.start or args.until or args.base or args.msg_limit != MSG_LIMIT:
+            ap.error('--write-messages 는 전 구간을 기본 상한으로 걸을 때만 쓴다(--only·--from·--until·--base·--msg-limit 와 함께 쓰지 않음)')
+    if args.msg_limit != MSG_LIMIT:
+        set_msg_limit(args.msg_limit)
+        args.no_state_cache = True
     segments = SEGMENTS[:-2] + CHAPTER2_END if args.chapter2 else SEGMENTS
     mesence = Path(os.environ['MESENCE'])
     out = args.out.resolve()
@@ -661,6 +812,22 @@ def main():
                         break
                     state = dest / seg[0] / 'end.mss'
         expected = max(0, last + 1 - first)
+    variant = 'chapter2' if args.chapter2 else 'chapter1'
+    rows = ([(variant, 0, pro['name'], pro['messages'])] if pro and 'messages' in pro else [])
+    rows += [(variant, sd, r['name'], r['messages']) for sd, rs in runs.items() for r in rs if 'messages' in r]
+    # 기준을 고치는 실행은 메시지를 견주지 않는다(메시지 밖 판정만으로 통과해야 고친다)
+    baseline = None if args.write_messages is not None else load_messages()
+    for sd, r in ([(0, pro)] if pro else []) + [(sd, r) for sd, rs in runs.items() for r in rs]:
+        if baseline is not None:
+            bad = message_problems(variant, sd, r, baseline)
+        else:
+            # 기준을 고치는 실행도 잘린 기록은 실패로 친다(그 결과는 기준으로 쓸 수 없다)
+            bad = [f'메시지 기록이 {MSG_LIMIT}개를 넘어 잘림'] if 'truncated' in r.get('messages', []) else []
+        if bad:
+            r['problems'] = r['problems'] + bad
+            r['status'] = 'failed'
+            print(json.dumps({'seed': sd, 'name': r['name'], 'status': 'failed', 'problems': bad}, ensure_ascii=False),
+                  flush=True)
     pro_ok = pro is None or pro['status'] == 'passed'
     per_seed = [{'seed': s, 'rng': rng_for(s),
                  'status': 'passed' if pro_ok and len(rs) == expected and all(r['status'] == 'passed' for r in rs)
@@ -673,6 +840,11 @@ def main():
     if len(seeds) == 1:
         report.update(seed=seeds[0], rng=rng_for(seeds[0]), segments=([pro] if pro else []) + per_seed[0]['segments'])
     (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')
+    if args.write_messages is not None:
+        if not ok:
+            raise SystemExit('통과하지 못한 구간이 있어 메시지 기준을 고치지 않음')
+        write_messages(rows, args.write_messages)
+        print(f'{MESSAGES} 를 고침({len(rows)}구간)')
     print(json.dumps({'status': report['status'], 'seconds': report['seconds'], 'state_cache': report['state_cache'],
                       'seeds': {r['seed']: r['status'] for r in per_seed}}, ensure_ascii=False))
     return 0 if ok else 1
