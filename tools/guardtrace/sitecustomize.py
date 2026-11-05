@@ -88,11 +88,12 @@ def _blind_env(env):
     try:
         reads = env.get('GUARD_READS') or env.get(b'GUARD_READS')
         paths = env.get('PYTHONPATH') or env.get(b'PYTHONPATH') or ''
+        prefix = env.get('PYTHONPYCACHEPREFIX') or env.get(b'PYTHONPYCACHEPREFIX')
     except AttributeError:
         return True
-    reads = reads.decode() if isinstance(reads, bytes) else reads
-    paths = paths.decode() if isinstance(paths, bytes) else paths
-    return reads != _OUT or _HERE not in paths.split(os.pathsep)
+    reads, paths, prefix = (v.decode() if isinstance(v, bytes) else v for v in (reads, paths, prefix))
+    # 빈 pycache 를 잃은 자식은 옛 .pyc 를 쓸 수 있다
+    return reads != _OUT or _HERE not in paths.split(os.pathsep) or prefix != os.environ.get('PYTHONPYCACHEPREFIX')
 
 
 def _inside(path):
@@ -137,6 +138,9 @@ def _opened(args):
         if full.endswith('.pyc') and os.path.basename(os.path.dirname(full)) != '__pycache__' and not (
                 prefix and full.startswith(os.path.realpath(prefix) + os.sep)):
             _emit('?')
+        elif not full.endswith(('.py', '.pyc')):
+            # 확장 모듈(.so) 같은 것은 실행한 코드를 볼 수 없어 내용째 입력으로 본다
+            _emit('F', _rel(full), content_sig(full))
         return
     _emit('F', _rel(full), content_sig(full))
 
@@ -151,8 +155,9 @@ def _listed(path):
 
 def _spawned(command, env):
     text = _text(command)
-    words = text.split()
-    program = os.path.basename(words[0]) if words else ''
+    # 목록으로 받은 인자는 칸이 든 경로를 지키려 그대로 쓴다
+    words = [_text(w) for w in command] if isinstance(command, (list, tuple)) else text.split()
+    program = os.path.basename(words[0].split()[0]) if words and words[0].split() else ''
     if _BLIND.search(text) or _blind_env(env):
         _emit('?')
         return

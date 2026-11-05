@@ -514,6 +514,30 @@ class BuiltCacheTest(unittest.TestCase):
         self.detail()
         self.assertIn('?', (self.logs / 'c.reads').read_text().split())
 
+    def test_stale_pyc_of_a_same_size_same_mtime_edit_is_not_used(self):
+        import os
+        import py_compile
+        self.edit('helper.py', 'X = 2\n')
+        py_compile.compile(str(self.root / 'helper.py'))
+        st = (self.root / 'helper.py').stat()
+        self.edit('helper.py', 'X = 1\n')
+        os.utime(self.root / 'helper.py', ns=(st.st_atime_ns, st.st_mtime_ns))
+        self.edit('check.py', 'import helper, sys\nsys.exit(0 if helper.X == 1 else 1)\n')
+        py = sys.executable
+        for check in (self.check, {'name': 'plain', 'needs': [], 'run': f'{py} check.py'}):
+            with self.subTest(run=check['run']):
+                self.assertEqual(guards.run_check(check, 60, self.logs)[0], 'passed')
+
+    def test_os_open_read_write_is_an_input(self):
+        self.edit('data.txt', 'a')
+        self.edit('check.py', "import os, sys\nfd = os.open('data.txt', os.O_RDWR)\n"
+                              "sys.exit(0 if os.read(fd, 1) == b'a' else 1)\n")
+        self.detail()
+        self.edit('other.py', 'X = 15\n')
+        self.assertTrue(self.skipped())
+        self.edit('data.txt', 'b')
+        self.assertEqual(guards.run_check(self.check, 60, self.logs)[0], 'failed')
+
     def test_failed_check_keeps_no_entry(self):
         self.edit('check.py', 'import sys; sys.exit(3)\n')
         self.assertEqual(guards.run_check(self.check, 60, self.logs)[0], 'failed')
