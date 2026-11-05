@@ -251,7 +251,8 @@ class State:
 
 
 def run(tree, state, out, flags=None):
-    """나무를 state 로 실행해 나오는 메시지 번호를 out 에. 풀 수 없는 조건을 만나면 False."""
+    """나무를 state 로 실행해 나오는 메시지 번호를 out 에. 끝까지 가면 True, 3F 면 'end', 가게 등 서비스로 넘어가면
+    'service', 풀 수 없는 조건을 만나면 False."""
     for s in tree:
         k = s[0]
         if k == 'msg':
@@ -272,15 +273,17 @@ def run(tree, state, out, flags=None):
             body = then if v != neg else other
             if body:
                 r = run(body, state, out)
-                if r is not True:
-                    return r if r is False else True   # 갈래 안 3F 는 그 조건만 빠져나온다(15:$9BC1)
+                # 갈래 안 3F 는 그 조건만 빠져나와 바깥 문장을 잇는다: 갈래는 15:$9A5D 의 JSR $9BA8 안에서 돌고
+                # 15:$9BC1 의 PLA PLA RTS 가 그 복귀만 버려 15:$9BCE 로 돌아간다
+                if r is False or r == 'service':
+                    return r
         elif k in ('flag|=', 'flag&=', 'flag=') and state is not None:
             f, v = s[1]
             ram = state.ram
             ram[0x627B + f] = ram[0x627B + f] | v if k == 'flag|=' else ram[0x627B + f] & v if k == 'flag&=' else v
         elif k == 'service':
             out.append(SERVICE | s[1][0])
-            return 'end'                # 15:$9CBF 로 가면 스크립트로 돌아오지 않는다
+            return 'service'            # 15:$9CBF 로 가면 스크립트로 돌아오지 않는다
         elif k == 'unknown':
             out.append(None)
             return False
