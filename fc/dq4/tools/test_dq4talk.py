@@ -97,6 +97,22 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(out, [0x510, 0x511, t.SERVICE | 3])
         self.assertEqual(st.ram[0x627B + 2], 0x40)
 
+    def test_end_inside_a_branch_leaves_only_that_branch(self):
+        # 블록 첫 문장 3F 와 06 없는 한 문장 갈래의 3F 는 'end' 문장, 문장 뒤 3F 는 블록 끝(15:$9C2E)
+        for branch, want in (([0x06, 0x3F], [0x531]), ([0x3F], [0x531]), ([0x06, 0x45, 0x30, 0x3F], [0x530, 0x531])):
+            put(self.prg, 0x9200, [0x07, 0x14] + branch + [0x45, 0x31, 0x3F])
+            tree, _ = t.Parser(self.prg).block(0x9200)
+            out = []
+            self.assertTrue(t.run(tree, t.State(ram(day=True)), out))
+            self.assertEqual(out, want)
+
+    def test_service_inside_a_branch_never_returns_to_the_script(self):
+        put(self.prg, 0x9200, [0x07, 0x14, 0x12, 0x03, 0x45, 0x31, 0x3F])
+        tree, _ = t.Parser(self.prg).block(0x9200)
+        out = []
+        self.assertEqual(t.run(tree, t.State(ram(day=True)), out), 'service')
+        self.assertEqual(out, [t.SERVICE | 3])
+
     def test_unknown_condition_stops(self):
         p = t.Parser(self.prg)
         kind, _, tree, _ = t.classify(self.prg, 0x011, p)
