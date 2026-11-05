@@ -560,6 +560,24 @@ class RunTests(unittest.TestCase):
         self.assertTrue((dest / 'out.bin').is_file())
         self.assertTrue(self.go()[0]['cached'])
 
+    def test_store_off_alone_still_reads(self):
+        """DQ4_READSET_STORE=off 만이면 새 결과는 넣지 않지만 캐시는 읽는다(맞으면 펼침)."""
+        with mock.patch.dict(os.environ, {'DQ4_READSET_STORE': 'off'}):
+            info, _ = self.go()
+        self.assertFalse(info['cached'])
+        self.assertEqual(self.store.entries(info['key']), [])
+        self.assertFalse(self.go()[0]['cached'])          # 보통 실행이 넣는다
+        with mock.patch.dict(os.environ, {'DQ4_READSET_STORE': 'off'}):
+            self.assertTrue(self.go()[0]['cached'])
+        self.assertEqual(len(self.store.entries(info['key'])), 1)
+
+    def test_store_off_writes_nothing(self):
+        with mock.patch.dict(os.environ, {'DQ4_READSET': 'off', 'DQ4_READSET_STORE': 'off'}):
+            info, _ = self.go()
+        self.assertFalse(info['cached'])
+        self.assertEqual(self.store.entries(info['key']), [])
+        self.assertFalse(self.go()[0]['cached'])
+
     def test_off_runs_everything(self):
         self.go()
         with mock.patch.dict(os.environ, {'DQ4_READSET': 'off'}):
