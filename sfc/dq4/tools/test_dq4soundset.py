@@ -323,5 +323,107 @@ class BuildTests(unittest.TestCase):
                 self.build(**options)
 
 
+class MainTests(unittest.TestCase):
+    """build 와 같은 합성 롬·합성 NDS 곡에 명령줄 옵션을 모두 풀어 넘겨 돌린다."""
+
+    @classmethod
+    def setUpClass(cls):
+        BuildTests.setUpClass.__func__(cls)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.directory.cleanup()
+
+    def run_main(self, tmp, *extra):
+        base = tmp / 'base.sfc'
+        base.write_bytes(synthetic_base())
+        argv = ['dq4soundset.py', '--base', str(base), '--assets', str(self.root), '--song', '06=0E', '--song', '02=05',
+                '--out', str(tmp / 'out' / 'set.sfc'), '--cache-dir', str(self.root / 'cache'), *extra]
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch('sys.argv', argv), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            soundset.main()
+        return base.read_bytes(), json.loads(out.getvalue()), err.getvalue()
+
+    def test_writes_rom_ips_and_report_and_prints_a_summary(self):
+        from kr_patch import ips
+        # 미리듣기 롬은 서곡 타이틀 빌드가 있어야 만들어지므로 슬롯만 확인한다
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(patch, 'preview_rom',
+                                                                      lambda rom, slot: b'pv' + bytes([slot])):
+            tmp = Path(tmp)
+            base, summary, err = self.run_main(tmp, '--map-fades', '--preview-dir', str(tmp / 'pv'), '--level-db', '06=2',
+                                               '--gain-db', '06=1.5', '--gain-all', '0.5', '--track-db', '06=track1:-3',
+                                               '--drop-track', '06=track9', '--treble-db', '06=3',
+                                               '--sample-rate', '06=a:6000', '--keep-regions', '06=1')
+            rom = (tmp / 'out' / 'set.sfc').read_bytes()
+            self.assertEqual(ips.apply(base, (tmp / 'out' / 'set.ips').read_bytes()), rom)
+            report = json.loads((tmp / 'out' / 'set.json').read_text())
+            previews = sorted(path.name for path in (tmp / 'pv').iterdir())
+            previewed = {name: (tmp / 'pv' / name).read_bytes() for name in previews}
+        self.assertEqual(previewed, {'pv02.sfc': b'pv\x02', 'pv06.sfc': b'pv\x06'})
+        self.assertEqual(sorted(report['songs']), ['02', '06'])
+        self.assertEqual(sorted(summary['songs']), ['02', '06'])
+        self.assertEqual(summary['songs']['06']['budget'], report['songs']['06']['sample_budget'])
+        self.assertEqual(summary['songs']['06']['sequence'], report['songs']['06']['conversion']['sequence_bytes'])
+        self.assertNotIn('send_first', summary['songs']['06'])
+        self.assertEqual(summary['heap_start'], report['install']['heap_start'])
+        self.assertEqual(summary['unreplaced_over_budget'], [])
+        self.assertIn('06 <- NDS 0E', err)
+
+    def test_stream_and_budget_options_reach_the_build(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, summary, _ = self.run_main(Path(tmp), '--stream', '06=7000', '--budget', '06=6000', '--fast-receive')
+        self.assertEqual(summary['songs']['06']['budget'], 6000)
+        self.assertIn('send_first', summary['songs']['06'])
+        self.assertNotIn('send_first', summary['songs']['02'])
+
+    def test_malformed_pair_is_an_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(ValueError):
+                self.run_main(Path(tmp), '--budget', 'nonsense')
+
+
+class ScorePathAndProvisionalMapTests(unittest.TestCase):
+    def test_score_path_needs_exactly_one_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            songs = Path(tmp) / 'nds/dq4/sound/songs'
+            songs.mkdir(parents=True)
+            (songs / '0E-a.json').write_text('{}')
+            self.assertEqual(soundset.score_path(tmp, '0e').name, '0E-a.json')
+            with self.assertRaisesRegex(ValueError, 'expected one score JSON, found 0'):
+                soundset.score_path(tmp, '0F')
+            (songs / '0E-b.json').write_text('{}')
+            with self.assertRaisesRegex(ValueError, 'found 2'):
+                soundset.score_path(tmp, '0E')
+
+    def score(self):
+        region = {'type': 'PCM', 'base': 60, 'attack': 127, 'decay': 127, 'sustain': 127, 'release': 100, 'lo': 0, 'hi': 127}
+        timeline = [{'op': 'note', 'tick': t, 'gate': 20, 'note': 60, 'velocity': 100, 'ch': f'track{p}', 'program': p,
+                     'uid': i} for i, (t, p) in enumerate([(0, 1), (48, 2), (96, 3)])]
+        return {'ticks_per_quarter': 48, 'tempo': 120, 'tempo_changes': [], 'timeline': timeline, 'end_tick': 144,
+                'instruments': {str(p): {'type': 'PCM', 'regions': [region | {'sample': f'{name}.wav'}]}
+                                for p, name in ((1, 'a'), (2, 'b'), (3, 'a'))}}
+
+    def test_each_distinct_sample_gets_its_own_placeholder_number(self):
+        mapping, count = soundset.provisional_map(self.score())
+        # 프로그램 1 과 3 은 같은 파일·기준음·ADSR 이라 같은 번호를 나눠 쓴다
+        self.assertEqual(count, 2)
+        self.assertEqual(mapping[1][0]['sample'], mapping[3][0]['sample'])
+        self.assertNotEqual(mapping[1][0]['sample'], mapping[2][0]['sample'])
+        self.assertEqual(sorted({entry[0]['sample'] for entry in mapping.values()}), [0x26, 0x27])
+        self.assertEqual((mapping[1][0]['lo'], mapping[1][0]['hi']), (0, 127))
+        self.assertNotIn('header', mapping[1][0])
+
+    def test_envelope_modes_carry_the_nds_envelope_into_the_entries(self):
+        full, _ = soundset.provisional_map(self.score(), envelope=True)
+        entry = full[1][0]
+        self.assertEqual({k: entry[k] for k in ('attack', 'decay', 'sustain', 'release')},
+                         {'attack': 127, 'decay': 127, 'sustain': 127, 'release': 100})
+        self.assertEqual(len(entry['header']), 2)
+        self.assertNotIn('release_only', entry)
+        release, _ = soundset.provisional_map(self.score(), envelope=soundset.bank.RELEASE_ONLY)
+        self.assertTrue(release[1][0]['release_only'])
+        self.assertEqual(release[1][0]['release'], 100)
+
+
 if __name__ == '__main__':
     unittest.main()
