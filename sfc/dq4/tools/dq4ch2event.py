@@ -175,6 +175,9 @@ def _transfer(record_at, name_at, event_at):
     body += bytes((0xA9, *MORNING.to_bytes(2, 'little'), 0x8F)) + _al(TIME_AT)
     body += bytes((0xA9, *(GOLD & 0xFFFF).to_bytes(2, 'little'), 0x8F)) + _al(GOLD_AT)
     body += bytes((0xE2, 0x20, 0xA9, GOLD >> 16, 0x8F)) + _al(GOLD_AT + 2)
+    # 전멸·이어 하기 자리를 FC 2장 시작 귀환 자리(サラン 교회)로. 1장에 저장한 칸이 남으면 2장에서 1장 마을로 돌아간다
+    import dq4fieldtravel
+    body += dq4fieldtravel.chapter_slot_code()
     # 일행 수·걷는 수와 사본 1, 순서 0, 마차 없음
     for a in (0x7E201D, 0x7E201E, 0x7E201F):
         body += bytes((0xA9, 0x01, 0x8F)) + _al(a)
