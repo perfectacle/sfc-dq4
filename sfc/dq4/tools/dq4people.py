@@ -147,7 +147,7 @@ MAP_GROUP = 0x7E00BC
 DQ4_GROUPS = frozenset(range(0x36, 0x46))            # dq4groupbuild 가 만드는 DQ4 맵 그룹
 # 원래 자리에 들어가지 않는 타일 자료를 나눠 담는 곳(뱅크 3F 이하여야 레코드가 가리킴). 곡 롬의 0 끝 줄 안. 3F 는 앞쪽을
 # 인물 목록(dq4chapter1.NPC_BANK, 인라인 스크립트 포함)이 쓰므로 그 끝과 겹치지 않게 띄운다
-# 3C:F040~ 는 그룹 빌드(3A~3F)가 채운 뒤 남는 끝자리. 37·36:9E00~ 는 맵 레코드 자리(dq4chapter1.RECORDS_AT)라 쓰지 않는다.
+# 3C:F040~ 는 그룹 빌드(3A~3F)가 채운 뒤 남는 끝자리. 36·37 은 대화 스크립트·대체 목록(dq4chapter1.TALK_BANK·NPC_ALT)이라 쓰지 않는다.
 # 39 도 레코드 자리의 마지막이지만 레코드는 앞(8000)부터 차므로 끝 4KB 만 쓴다. 레코드가 거기까지 자라면 tile_areas 가
 # 쓰인 끝 뒤로 미루고, 자리가 모자라면 멈춘다
 # 3D:FA80~FD90 은 맵 팔레트 표(MAP_PALETTES_AT) 뒤의 남는 자리. 표가 자라 겹치면 apply_writes 가 멈춘다
