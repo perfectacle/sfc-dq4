@@ -81,8 +81,9 @@ class SegmentTableTests(unittest.TestCase):
 
 class ChapterTwoCaseTests(unittest.TestCase):
     def test_npc_warp_lands_on_the_talk_cell(self):
-        # dq5warp 는 TO 한 셀 아래에 내린다. FC (22,8) 의 셀은 (44,17)
-        self.assertEqual(npc.warp_to('3D/01', 22, 8), '3D/01,44,16')
+        # 2장 롬의 dq5warp 는 TO 한 셀 아래에 내린다. FC (22,8) 의 셀은 (44,17). 그룹 빌드 롬은 TO 그대로라 올리지 않는다
+        self.assertEqual(npc.warp_to('3D/01', 22, 8, 1), '3D/01,44,16')
+        self.assertEqual(npc.warp_to('3D/01', 22, 8), '3D/01,44,17')
         self.assertEqual(set(npc.CHAPTER2_GROUPS), {'3D', '45'})
 
     def test_heroblock_chapter2_cases_are_well_formed(self):

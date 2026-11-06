@@ -196,12 +196,13 @@ def talk_side(source, x, y, occupied):
     return None
 
 
-def warp_to(m, x, y):
-    """dq5warp.lua TO for standing on FC cell (x, y). Its exit lands the hero one cell below TO (measured: every arrival
-    was TO + (0, 1)), so TO is the cell above. Given the cell itself, a hero talking down stood on the person's top half
-    and got 「その方向には誰もいない」, and one on the bottom FC row of a town stepped off the map onto the field."""
+def warp_to(m, x, y, lift=0):
+    """dq5warp.lua TO for standing on FC cell (x, y). On the --chapter2 ROM its exit lands the hero one cell below TO
+    (measured: every arrival was TO + (0, 1)), so lift=1 gives the cell above: given the cell itself, a hero talking
+    down stood on the person's top half and got 「その方向には誰もいない」, and one on the bottom FC row of a town
+    stepped off the map onto the field. The dq4groupbuild ROM lands on TO itself (lift=1 there fails 263 scenes)."""
     dx, dy = cell(x, y)
-    return f"{m},{dx},{dy - 1}"
+    return f"{m},{dx},{dy - lift}"
 
 
 def talk_cell(person):
@@ -249,8 +250,9 @@ def main():
     ap.add_argument("--chapter2", action="store_true",
                     help="the ROM is the --chapter2 build: check the chapter-2 groups with the chapter-2 flag on")
     args = ap.parse_args()
-    sets = None
+    sets, lift = None, 0
     if args.chapter2:
+        lift = 1
         import dq4ch2event
         args.chapter1 = True
         index, mask = dq4ch2event.CHAPTER2
@@ -326,7 +328,7 @@ def main():
                              p["night"], None))
                 continue
             sx, sy, d = side
-            to = warp_to(m, sx, sy)
+            to = warp_to(m, sx, sy, lift)
             service = p.get("service")
             if service in SHOPS:
                 jobs.append(("shop", f"shop-{m.replace('/', '')}-{i}", m, to, d, p["night"],
@@ -348,7 +350,7 @@ def main():
                     else:
                         fx, fy, fd = foot
                         jobs.append(("talk", f"talk-{m.replace('/', '')}-{i}-foot", m,
-                                     warp_to(m, fx, fy), fd, p["night"], want))
+                                     warp_to(m, fx, fy, lift), fd, p["night"], want))
 
     def scene(kind, name, to, test, night):
         if kind in ("unreachable", "closed", "staged"):
