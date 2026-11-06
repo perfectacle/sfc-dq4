@@ -152,6 +152,17 @@ class ReleaseCheckTest(unittest.TestCase):
         with mock.patch.object(rc, 'sweeps', return_value=[]):
             self.assertEqual(rc.stage_sweep(ctx)['status'], 'failed')
 
+    def test_guards_stage_runs_every_check_whatever_its_tier_or_groups(self):
+        """배포 관문은 PR 에서 빠지는 검사(tier = "release", 묶음으로만 걸리는 것)까지 모든 실행 검사를 돌린다."""
+        checks, problems = rc.guards.load(rc.guards.tracked())
+        self.assertEqual(problems, [])
+        self.assertTrue(any(c.get('tier') == 'release' for c in checks))
+        ctx = {'logs': Path('/nonexistent'), 'rehearse': False, 'timeout': 10, 'parallel': 1}
+        with mock.patch.object(rc.guards, 'run_many', return_value=[]) as run, \
+                mock.patch.object(rc, 'env_for', return_value={}):
+            rc.stage_guards(ctx)
+        self.assertEqual([c['name'] for c in run.call_args[0][0]], [c['name'] for c in checks])
+
     def test_missing_unit_dir_fails(self):
         def ok(cmd, log, env):
             log.write_text('Ran 2 tests')

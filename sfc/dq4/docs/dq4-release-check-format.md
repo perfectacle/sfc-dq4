@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | `build` | `dq4build.py` 로 출하 롬을 `work/release/run-*/build/` 에 빌드 | 롬이 나옴. 그 SHA-1 이 보고서 폴더 이름 |
 | `unit` | CI test 잡과 같은 폴더(`sfc/dq4/tools`, `sfc/dq5/tools/tests`, `tools/tests`, `fc/dq4/tools`, `nds/dq4/tools`)마다 `unittest discover` | 모두 0 으로 끝남. 롬이 있으므로 롬 게이트 시험도 돈다 |
-| `guards` | 모든 트랙 `guards.toml` 의 실행 검사 전부(`guards.run_many`) | 모두 통과 |
+| `guards` | 모든 트랙 `guards.toml` 의 실행 검사 전부(`guards.run_many`). PR 에서 빠지는 `tier = "release"` 검사와 묶음으로만 걸리는 검사도 여기서 돈다 | 모두 통과 |
 | `sweep` | 트랙마다 `release.toml` 의 시드 스윕 | 모두 0 으로 끝남 |
 | `coverage` | 빌드 경로(`dq4publish.inputs()` 의 시험 아닌 `.py`) 커버리지를 둘로 잰다. 로컬: 단위 전부와 빌드 캐시 끈 빌드 한 번(`patch = subprocess` 로 단계 스크립트까지). CI 와 같게: 롬 링크 없는 임시 워크트리에서 롬·도구 환경 변수(`CI_UNSET`) 없이 단위만 | 로컬 ≥ 90%, CI 와 같게 ≥ 80% |
 

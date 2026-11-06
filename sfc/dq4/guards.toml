@@ -1,5 +1,10 @@
 # 롬·에뮬레이터가 있어야 도는 dq4 회귀 가드. 형식은 tools/guards.py, 규칙은 guards 스킬(GUARD-01~03)
 
+# 검사 결과 캐시 키는 그 검사의 paths·묶음에 맞는 파일만 본다. test_dq4guardpaths 가 paths·묶음이 명령에서 닿는
+# 코드를 덮는다고 보장하기 때문이다
+[cache]
+key = "paths"
+
 [[check]]
 name = "dq4-window-check"
 why = "창 글자 깨짐·비침(#911 가게 동료 창 2프레임 깨짐 shopflip, #916·#918·#922 가게 목록·동료 창·사기 확인 shopwho)과, 넘친 목록 이름이 창보다 늦게 올라와 목록 줄이 비는 프레임·「누가」 창이 닫히며 메시지 창에 이름이 비치는 프레임(--every 로 talk02-full·shopwho·partyitems 와 battle11·party21 구간을 매 프레임 잼)이 다시 생기지 않게"
@@ -69,6 +74,7 @@ paths = [
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4cores.py",
   "sfc/dq4/tools/dq4libretro.py",
+  "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
 ]
 run = "rm -rf work/compat-probe && uv run --locked python sfc/dq4/tools/dq4compatcheck.py probe --rom work/ch1/dq4-ch1-full.sfc --out work/compat-probe"
 needs = ["rom", "MESENCE", "LIBDIR"]
@@ -76,6 +82,7 @@ groups = ["ch1-walk"]
 
 [[check]]
 name = "dq4-compat-scenes"
+tier = "release"
 why = "1장 걷기가 지나지 않는 MesenCE 장면 검사(전투 dq4battlecheck, 저장·이어 하기·전멸 dq4ch1savecheck, 창 글자의 가게·교회·여관·대화·전투 창 dq4windowcheck)에 열린 버스 프로브를 붙여, 뱅크 40~7D 아래 절반(high)과 뱅크 00~3F 의 열린 버스 구역(io, dq4compatscenes.IO_RANGES)을 범위마다 따로 잰다. high 는 낮은 뱅크 코드의 SRAM 밖 접근과 dq4brkscan.ALLOWED 밖 BRK, io 는 우리 패치 코드(뱅크 40 이상 또는 롬 장부의 단계가 쓴 자리)의 접근, 허용 목록 dq4compatscenes.DQ5_ALLOWED(PC·접근 뱅크·주소 범위) 밖의 원래 DQ5 코드 접근, 해석하지 못한 기록 줄이면 실패한다. 장면 검사가 실패하거나, 창 검사 장면이 덤프할 프레임을 다 덤프하지 못했거나, 프로브 기록이 없어도 실패한다. 프로브는 dq4mesen 이 DQ4_OPENBUS_LOG 를 보고 붙이고, 읽은 바이트 캐시는 끈다"
 groups = ["ch1-build", "ch1-walk"]
 paths = [
@@ -178,6 +185,7 @@ paths = [
   "sfc/dq5/tools/lua/dq5battle.lua",
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
   "tools/mesence_settings.py",
+  "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && mkdir -p work/wc && DQ4_WINDOWNAME_SYMBOLS=$PWD/work/wc/wn.sym uv run --locked python sfc/dq4/tools/dq4menupatch.py build --rom work/ch1/overture.sfc --messages work/ch1/messages.json --out work/wc/menu.sfc && rm -rf work/compat-scenes && uv run --locked python sfc/dq4/tools/dq4compatscenes.py --rom work/ch1/dq4-ch1-full.sfc --out work/compat-scenes --window-rom work/ch1/dq4-ch1.sfc --symbols work/wc/wn.sym --symbols-rom work/wc/menu.sfc"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -200,6 +208,7 @@ paths = [
   "sfc/dq4/tools/dq4prologuecheck.py",
   "sfc/dq4/tools/dq4brkscan.py",
   "sfc/dq4/tools/lua/dq4openbus.lua",
+  "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/compat-walk && uv run --locked python sfc/dq4/tools/dq4compatcheck.py walk --rom work/ch1/dq4-ch1-full.sfc --out work/compat-walk"
 needs = ["rom", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X)"]
@@ -298,6 +307,7 @@ paths = [
   "sfc/dq5/tools/dq5sram.py",
   "sfc/dq4/tools/dq4brkscan.py",
   "sfc/dq4/tools/lua/dq4openbus.lua",
+  "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/savefixture && uv run --locked python sfc/dq4/tools/dq4savefixture.py check --rom work/ch1/dq4-ch1-full.sfc --out work/savefixture"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
@@ -467,6 +477,7 @@ paths = [
   "sfc/dq5/tools/w65816.py",
   "tools/headless_slots.py",
   "sfc/dq4/tools/lua/dq4openbus.lua",
+  "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/shopscene && uv run --locked python sfc/dq4/tools/dq4shopscene.py --rom work/ch1/dq4-ch1-full.sfc --out work/shopscene --jobs 4"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
@@ -511,6 +522,7 @@ paths = [
   "fc/dq4/tools/dq4shop.py",
   "sfc/dq4/tools/dq4brkscan.py",
   "sfc/dq4/tools/lua/dq4openbus.lua",
+  "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/townscene && uv run --locked python sfc/dq4/tools/dq4townscene.py check --rom work/ch1/dq4-ch1-full.sfc --out work/townscene --jobs 4 && rm -rf work/townnight && uv run --locked python sfc/dq4/tools/dq4townscene.py daynight --rom work/ch1/dq4-ch1-full.sfc --out work/townnight --jobs 4"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states), 원본 rom/dq5.sfc(시각 색 기준)"]
@@ -599,6 +611,7 @@ groups = ["ch1-build", "ch1-walk"]
 
 [[check]]
 name = "dq4-battle-scene"
+tier = "release"
 why = "전투 한 판의 결과(금화·경험치·레벨업·약초·ホイミ·도망·몬스터 도망·전멸 뒤 교회·보스)와 전투 뒤 맵 곡·조작 복귀를 bsnes·snes9x 에서 본다. 라이안이 1 → 20 레벨에서 FC ライアン 실측 값(능력치·다음 경험치, MP 0, 주문 없음)이 되고, 2장 flag 에서는 아리나가 FC アリーナ 곡선을 따르고 손님 호이민은 레벨이 오르지 않는지도(DQ5 주인공 곡선·호이민 성장으로 되돌아가지 않게). 보스·레벨업 뒤 7,313프레임 멈춤(7a34c641)·레벨업 뒤 멈춤(2c9ec7f4)·새 게임 첫 기록으로 이어 하면 곡이 없던 일(nosong) 같은 일이 다시 생기지 않게. paths 는 검사 모듈의 import 닫힘과 빌드가 쓰는 asm·사운드"
 paths = [
   "fc/dq4/tools/dq4bank.py",
@@ -721,6 +734,7 @@ paths = [
   "sfc/dq5/tools/w65816.py",
   "tools/headless_slots.py",
   "sfc/dq4/tools/lua/dq4openbus.lua",
+  "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4battlescene.py --rom work/ch1/dq4-ch1-full.sfc --out work/battlescene --seeds 0,1,2 --jobs 4"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
@@ -811,6 +825,7 @@ paths = [
   "sfc/dq4/tools/dq4windowcheck.py",
   "sfc/dq4/tools/lua/dq4openbus.lua",
   "sfc/dq5/tools/dq5sram.py",
+  "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/sfxscene && uv run --locked python sfc/dq4/tools/dq4sfxscene.py --rom work/ch1/dq4-ch1-full.sfc --out work/sfxscene --jobs 4"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
@@ -846,6 +861,7 @@ paths = [
   "sfc/dq4/tools/lua/dq4battle.lua",
   "sfc/dq4/tools/lua/dq4nameentrycheck.lua",
   "sfc/dq4/tools/lua/dq4openbus.lua",
+  "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/titlescene && uv run --locked python sfc/dq4/tools/dq4titlescene.py --rom work/ch1/dq4-ch1-full.sfc --out work/titlescene"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
@@ -1235,6 +1251,7 @@ paths = [
   "sfc/dq5/tools/lua/dq5npcrecordcheck.lua",
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
   "sfc/dq5/tools/lua/dq5textgrowcheck.lua",
+  "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
 ]
 run = "test $( (uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4npcport.py -k HiddenPeopleTest -k SleeperTalkTest -v; uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4shopscene.py -k ShopPlaceTest -v; uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4sleepertalk.py -v) 2>&1 | tee work/map-people-rom-tests.log | grep -c ' \\.\\.\\. ok$') -eq 24"
 needs = ["rom"]
@@ -1242,6 +1259,7 @@ groups = ["ch1-walk"]
 
 [[check]]
 name = "dq4-npc-talk"
+tier = "release"
 why = "그룹 롬의 모든 인물 표·말 걸기·가게 장면이 빌드가 쓴 값과 같아야 한다. 누운 인물은 머리맡 블록 옆과 FC 처럼 발치 블록 옆(-foot 장면, dq4sleepertalk 훅) 양쪽에서 말이 걸려야 한다"
 paths = [
   "sfc/dq4/tools/dq4npccheck.py",
@@ -1266,6 +1284,7 @@ groups = ["ch1-walk"]
 
 [[check]]
 name = "dq4-group-links"
+tier = "release"
 why = "그룹 롬의 FC 계단·출구·필드 입구가 연결된 맵·칸으로 가야 한다. 들어설 때 숨는 FC 인물을 옮기면 걸어 다니다 계단을 막는다(엔도르 투기장 40/07 계단)"
 paths = [
   "sfc/dq4/tools/dq4groupcheck.py",
@@ -1289,6 +1308,7 @@ groups = ["ch1-walk"]
 
 [[check]]
 name = "dq4-environment-rom"
+tier = "release"
 why = "바꾼 맵을 그룹 롬에서 다시 그린 그림이 오프라인 그림과 픽셀까지 같아야 한다(물체·통행·출구·물 슬롯, 성문을 연 채 지나가기, 원래 맵 셀 버퍼). 분수는 물과 같은 번호의 그림으로 함께 바뀌므로 기대 그림도 두 그림을 함께 바꾼다"
 paths = [
   "sfc/dq4/tools/dq4environmentromcheck.py",
@@ -1727,6 +1747,7 @@ groups = ["ch1-build", "ch1-walk"]
 
 [[check]]
 name = "dq4-battle-bigpic"
+tier = "release"
 why = "전투 큰 그림 길($0DF3 ≠ 0, 00:895D)에는 WqNmiEntry 를 걸지 않아 그동안 창 글자 대기열 항목이 기다린다. 공격·주문·회복·잠·레벨업 연출을 지나는 1장 전투 셋에서 큰 그림 길이 이어지는 길이와, 그 길에 넣은 항목이 나가기까지의 NMI 수가 상한(dq4bigpiccheck.LIMIT) 이하여야 하고, 넣은 항목은 넣기 전 VRAM 이 그 그림과 달랐다가 나간 뒤 같아야 하며, 같은 입력이면 기록 전체가 같아야 한다. LIMIT 는 실측 최댓값이라 여유가 없어, 대기열과 무관한 전투 경로 변화(연출·무리·입력)로도 넘을 수 있다. 넘으면 기준을 올리기 전에 어느 연출이 길어졌는지 본다. 큰 그림 요청을 잇달아 내는 연출이 늘거나 대기열 게이트가 그 길을 놓치면 깨진다"
 paths = [
   "fc/dq4/tools/dq4apu.py",
@@ -2067,6 +2088,7 @@ paths = [
   "sfc/dq4/tools/dq4brkscan.py",
   "sfc/dq4/tools/lua/dq4openbus.lua",
   "sfc/dq5/tools/dq5sram.py",
+  "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/fresh-crit && uv run --locked python sfc/dq4/tools/dq4critcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/fresh-crit && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/fresh-critneg && uv run --locked python sfc/dq4/tools/dq4sfxscene.py --rom work/ch1/dq4-ch1-full.sfc --out work/fresh-critneg --critical-negative"
 needs = ["rom", "MESENCE", "LIBDIR", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X)", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -2380,6 +2402,7 @@ ch1-build = [
   "sfc/dq4/tools/dq4signs.py",
   "sfc/dq4/tools/dq4sleepertalk.py",
   "sfc/dq4/tools/dq4songwait.py",
+  "sfc/dq4/tools/dq4sound-game.args",
   "sfc/dq4/tools/dq4soundbank.py",
   "sfc/dq4/tools/dq4soundcheck.py",
   "sfc/dq4/tools/dq4soundcompact.py",
@@ -2484,6 +2507,7 @@ ch1-walk = [
   "fc/dq4/tools/dq4shop.py",
   "fc/dq4/tools/dq4talk.py",
   "fc/dq4/tools/dq4text.py",
+  "sfc/dq4/ch1-walk-messages.toml",
   "sfc/dq4/tools/dq4balance.py",
   "sfc/dq4/tools/dq4battlemsg.asm",
   "sfc/dq4/tools/dq4battlemsg.py",
@@ -2541,10 +2565,10 @@ ch1-walk = [
   "sfc/dq4/tools/dq4windowname.py",
   "sfc/dq4/tools/dq4windowtext.py",
   "sfc/dq4/tools/dq4wrap.py",
-  "sfc/dq4/tools/lua/dq4readset.lua",
   "sfc/dq4/tools/lua/dq4openbus.lua",
-  "sfc/dq4/tools/lua/dq4warpmsg.lua",
+  "sfc/dq4/tools/lua/dq4readset.lua",
   "sfc/dq4/tools/lua/dq4walkstate.lua",
+  "sfc/dq4/tools/lua/dq4warpmsg.lua",
   "sfc/dq5/tools/dq5anim.py",
   "sfc/dq5/tools/dq5battlebg.py",
   "sfc/dq5/tools/dq5battletext.py",

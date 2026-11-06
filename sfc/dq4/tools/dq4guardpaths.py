@@ -5,6 +5,8 @@
   .py   import(함수 안 import 포함)하는 저장소 모듈. 찾는 곳은 그 파일의 폴더, sfc/dq4/tools, sfc/dq5/tools,
         fc/dq4/tools, tools 차례다. 그리고 값이 파일 이름 하나뿐인 글자 상수 가운데 .py·.lua·.asm 으로 끝나는 것
         (하위 프로세스로 부르는 스크립트, 띄우는 Lua, asar 에 넣는 asm. dq4build.STAGES 도 여기서 잡힌다)
+        값이 파일 이름 하나뿐인 글자 상수 가운데 .toml·.json·.args·.patch·.tsv 로 끝나는 자료 파일(저장소 경로 그대로, 아니면
+        그 파일의 폴더, 그 위 폴더, 위 도구 폴더 차례로 찾는다)
   .lua  require 와 글자 상수의 .lua(같은 폴더, tools/lua, sfc/dq4/tools/lua, sfc/dq5/tools/lua)
   .asm  incsrc
 
@@ -14,7 +16,10 @@ docstring 과 빈칸이 든 글(도움말)은 보지 않는다.
   - importlib·__import__ 로 불러오는 모듈
   - 변수·f-string·이어 붙이기로 만든 파일 이름(하위 프로세스 인자를 조립하는 것 포함. dq4build 단계는 STAGES 의
     글자 상수라 잡힌다), Lua 의 dofile·loadfile 에 계산한 경로를 주는 것
-  - 자료 파일(.toml·.json·그림 등)과 환경 변수가 가리키는 파일, 저장소 밖 툴킷 Lua(LIBDIR)
+  - 계산한 이름으로 여는 자료 파일(폴더째 읽는 그림 등)과 환경 변수가 가리키는 파일, 저장소 밖 툴킷 Lua(LIBDIR)
+
+sfc/dq4/guards.toml 은 [cache] key = "paths" 라 검사 결과 캐시 키가 그 검사의 paths·묶음에 맞는 코드만 본다(자료
+파일은 어느 검사의 paths 에도 낱낱이 적히지 않았으면 모든 키에 든다. tools/guards.py key_scope). 이 시험이 그 근거다.
 
 많은 검사가 함께 닿는 묶음은 guards.toml 의 [groups] 에 둔다. 묶음마다 뿌리를 GROUP_ROOTS 에 적고(이름이 같아야
 함), 묶음은 그 뿌리에서 위 길로 닿는 파일을 덮어야 한다.
@@ -41,6 +46,8 @@ GROUP_ROOTS = {
     'ch1-walk': ('sfc/dq4/tools/dq4ch1walkcheck.py',),
 }
 FILE_NAME = re.compile(r'[\w./-]+\.(?:py|lua|asm)')
+# 코드가 글자 상수로 이름을 적어 읽는 자료 파일
+DATA_NAME = re.compile(r'[\w./-]+\.(?:toml|json|args|patch|tsv)')
 ENTRY = re.compile(r'((?:sfc|fc|tools)/[\w./-]+\.(?:py|lua|asm))')
 
 
@@ -89,6 +96,12 @@ def py_refs(path):
                 r = resolve(name, here, (f'{here}/lua', *LUA_DIRS))
             else:
                 r = resolve(name, here, TOOL_DIRS)
+            if r:
+                out.add(r)
+        elif isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docs \
+                and DATA_NAME.fullmatch(n.value):
+            r = n.value if n.value in tracked() else resolve(
+                PurePosixPath(n.value).name, here, (str(PurePosixPath(here).parent), *TOOL_DIRS))
             if r:
                 out.add(r)
     return out

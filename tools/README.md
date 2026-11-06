@@ -72,7 +72,7 @@ STATE=$PWD/work/state/ship.mss PRE="b:4,wait:40" WAYPOINTS="3,11;3,24;7,24;7,22"
 | 스크립트 | 하는 일 |
 | --- | --- |
 | `listing.py rom cover.txt [시작 끝]` | `cover.lua` 결과로, 실제 실행된 명령만 실행 당시 M·X 폭으로 디스어셈블 |
-| `guards.py [--base REF [--pr-body FILE] [--run [--no-cache]]]` | 트랙별 `guards.toml`(롬이 있어야 도는 회귀 가드) 형식 검사, 바뀐 파일로 걸리는 검사와 명령 찍기, PR 본문 결과 줄 확인(CI `required-checks` 잡과 같음). `--no-cache` 는 검사 캐시와 dq4 장면 캐시([읽은 롬 바이트 캐시](../sfc/dq4/docs/dq4-readset-format.md))를 모두 끄고 전부 돈다(배포 관문). [guards 스킬](../.agents/skills/guards/SKILL.md) |
+| `guards.py [--base REF [--pr-body FILE] [--run [--no-cache]] [--full]]` | 트랙별 `guards.toml`(롬이 있어야 도는 회귀 가드) 형식 검사, 바뀐 파일로 걸리는 검사와 명령 찍기, PR 본문 결과 줄 확인(CI `required-checks` 잡과 같음). PR 에서는 검사 자신의 `paths` 에 바로 맞는 것만 걸리고, 묶음으로만 맞는 것과 `tier = "release"` 는 「배포 관문에서」 로 따로 찍는다. `--full`(본문의 `가드: 전체`)이면 그것까지 건다. `[cache] key = "paths"` 인 트랙은 검사 결과 캐시 키에 그 검사의 `paths`·묶음에 맞는 파일만 넣는다. `--no-cache` 는 검사 캐시와 dq4 장면 캐시([읽은 롬 바이트 캐시](../sfc/dq4/docs/dq4-readset-format.md))를 모두 끄고 전부 돈다(배포 관문). [guards 스킬](../.agents/skills/guards/SKILL.md) |
 | `mesence_settings.py` | MesenCE 사용자 설정 파일(`settings.json`)의 자리와 해시. 읽은 롬 바이트 캐시와 `guards.py` 검사 캐시가 같은 것을 키에 넣는다(콜백 시간 제한처럼 명령줄로 고정하지 않은 설정도 결과에 닿는다) |
 | `release_check.py [--rehearse] [--stages 단계,…] [--seeds-n N]` | 배포 관문: 출하 롬 빌드, 단위 테스트 전부, 실행 검사 전부(캐시 없이), 트랙 `release.toml` 시드 스윕, 커버리지를 돌려 `work/release/<롬 SHA-1>/report.json`·`report.md` 를 낸다. 사람이 부를 때만 돈다. [배포 관문](../sfc/dq4/docs/dq4-release-check-format.md) |
 | `check_docs.py` | 일지 이름·제목·순번 중복, README 일지 목록, 상대 링크, 개인 경로, 충돌 표시 검사(CI `docs` 잡과 같음) |

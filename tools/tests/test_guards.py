@@ -51,8 +51,10 @@ class GuardsTest(unittest.TestCase):
             '\n[groups]\nevents = ["sfc/dq4/tools/dq4ch1event.py"]\n'
         checks, problems = load(text)
         self.assertEqual(problems, [])
-        self.assertEqual(len(guards.triggered(checks, ['sfc/dq4/tools/dq4ch1event.py'])), 1)
-        self.assertEqual(guards.triggered(checks, ['sfc/dq4/tools/dq4ch2event.py']), [])
+        self.assertEqual(len(guards.triggered(checks, ['sfc/dq4/tools/dq4ch1event.py'], full=True)), 1)
+        self.assertEqual(guards.triggered(checks, ['sfc/dq4/tools/dq4ch2event.py'], full=True), [])
+        # PR 에서는 묶음으로만 맞는 검사가 걸리지 않는다(배포 관문이 돌린다)
+        self.assertEqual(guards.triggered(checks, ['sfc/dq4/tools/dq4ch1event.py']), [])
         _, problems = load(text.replace('groups = ["events"]', 'groups = ["nope"]'))
         self.assertTrue(any('nope' in p for p in problems), problems)
         _, problems = load(text.replace('events = ["sfc/dq4/tools/dq4ch1event.py"]', 'events = ["gone.py"]'))
@@ -74,6 +76,43 @@ class GuardsTest(unittest.TestCase):
         self.assertEqual(guards.edited_checks('', GOOD), {'dq4-walk'})
         checks, _ = load(base)
         self.assertEqual([c['name'] for c in guards.triggered(checks, ['README.md'], {'dq4-other'})], ['dq4-other'])
+
+    def test_pr_picks_own_paths_and_pr_tier_full_picks_all(self):
+        """PR(기본)은 검사 자신의 paths 에 바로 맞거나 run·needs 가 바뀐 pr 등급 검사만, full(`가드: 전체`)은 묶음으로
+        맞는 것과 release 등급까지 고른다."""
+        text = (GOOD
+                + GOOD.replace('dq4-walk', 'dq4-heavy').replace('needs = ["rom"]', 'needs = ["rom"]\ntier = "release"')
+                + GOOD.replace('dq4-walk', 'dq4-grouped').replace('paths = ["sfc/dq4/tools/dq4ch*event.py"]',
+                                                                   'paths = []\ngroups = ["events"]')
+                + '\n[groups]\nevents = ["sfc/dq4/tools/dq4ch1event.py"]\n')
+        checks, problems = load(text)
+        self.assertEqual(problems, [])
+
+        def names(changed, edited=(), full=False):
+            return [c['name'] for c in guards.triggered(checks, changed, edited, full)]
+        changed = ['sfc/dq4/tools/dq4ch1event.py']
+        self.assertEqual(names(changed), ['dq4-walk'])
+        self.assertEqual(names(changed, full=True), ['dq4-walk', 'dq4-heavy', 'dq4-grouped'])
+        self.assertEqual(names(['README.md'], {'dq4-heavy', 'dq4-grouped'}), ['dq4-grouped'])
+        self.assertEqual(names(['README.md'], {'dq4-heavy'}, full=True), ['dq4-heavy'])
+        _, problems = load(GOOD.replace('needs = ["rom"]', 'needs = ["rom"]\ntier = "nightly"'))
+        self.assertTrue(any('tier' in p for p in problems), problems)
+
+    def test_full_line_in_pr_body(self):
+        for body in ('가드: 전체', '설명\n  가드 : 전체  \n- [x] a: 통과'):
+            self.assertTrue(guards.FULL_LINE.search(body), body)
+        for body in ('가드: 전체가 아님', '- 가드: 전체', '가드 전체', '`가드: 전체` 를 쓰지 않음'):
+            self.assertFalse(guards.FULL_LINE.search(body), body)
+
+    def test_cache_table(self):
+        checks, problems = load('[cache]\nkey = "paths"\n' + GOOD)
+        self.assertEqual(problems, [])
+        self.assertEqual(checks[0]['key_claimed'], [])
+        checks, problems = load(GOOD)
+        self.assertNotIn('key_claimed', checks[0])
+        for bad in ('[cache]\nkey = "some"\n', '[cache]\nkey = "paths"\nother = 1\n', 'cache = 1\n'):
+            _, problems = load(bad + GOOD)
+            self.assertTrue(any('[cache]' in p for p in problems), bad)
 
     def test_unset_env_only_checks_env_names(self):
         needs = ['rom', 'MESENCE', 'LIBDIR', 'dq4cores.py 로 빌드한 코어']
@@ -177,6 +216,51 @@ class RunTest(unittest.TestCase):
         for f in ('sfc/dq4/tools/test_dq4x.py', 'sfc/dq4/guards.toml', 'sfc/dq4/journal/x.png'):
             self.assertNotEqual(key(dict(base, **{f: 'zz'}), tests), kt, f)
         self.assertEqual(key(dict(base, **{'README.md': 'zz'}), tests), kt)
+
+    def test_paths_key_sees_only_the_checks_paths_and_unclaimed_data(self):
+        """[cache] key = "paths": paths 밖 코드나 다른 검사가 낱낱이 적은 자료 파일만 바뀌면 같은 키, 자기 paths·묶음
+        안 파일, 아무도 적지 않은 자료 파일, 의존성 파일이 바뀌면 다른 키. [cache] 가 없는 트랙은 무엇이 바뀌어도 다른 키."""
+        from unittest import mock
+        text = ('[cache]\nkey = "paths"\n' + GOOD.replace('"sfc/dq4/tools/dq4ch*event.py"',
+                                                            '"sfc/dq4/tools/dq4ch*event.py", "sfc/dq4/tools/**/*.json"')
+                + '\ngroups = ["walk"]\n'
+                + GOOD.replace('dq4-walk', 'dq4-screen').replace('"sfc/dq4/tools/dq4ch*event.py"',
+                                                                 '"sfc/dq4/screens.toml", "sfc/dq4/tools/dq4screen.py"')
+                + '\n[groups]\nwalk = ["sfc/dq4/tools/dq4walk.lua"]\n')
+        files = {'sfc/dq4/guards.toml': 'g', 'sfc/dq4/tools/dq4ch1event.py': 'a', 'sfc/dq4/tools/dq4walk.lua': 'b',
+                 'sfc/dq4/tools/dq4screen.py': 'c', 'sfc/dq4/screens.toml': 'd', 'sfc/dq4/tools/art/x.json': 'e',
+                 'sfc/dq4/tools/other.asm': 'f', 'uv.lock': 'h'}
+        checks, problems = guards.load(list(files), read=lambda f: text)
+        self.assertEqual(problems, [])
+        walk = next(c for c in checks if c['name'] == 'dq4-walk')
+
+        def key(check, changes):
+            listing = ''.join(f'100644 {sha} 0\t{f}\n' for f, sha in dict(files, **changes).items())
+            with mock.patch.object(guards, 'git', lambda *a: listing if a[0] == 'ls-files' else ''):
+                return guards.input_key(check, Path('/nonexistent'), {})
+        k = key(walk, {})
+        for f in ('sfc/dq4/tools/dq4screen.py', 'sfc/dq4/screens.toml', 'sfc/dq4/tools/other.asm'):
+            self.assertEqual(key(walk, {f: 'zz'}), k, f)
+        # paths 의 glob 에만 맞는 자료 파일(**/*.json)은 낱낱이 적은 주인이 없어 다른 검사의 키에도 든다
+        screen = next(c for c in checks if c['name'] == 'dq4-screen')
+        for f in ('sfc/dq4/tools/dq4ch1event.py', 'sfc/dq4/tools/dq4walk.lua', 'sfc/dq4/tools/art/x.json', 'uv.lock'):
+            self.assertNotEqual(key(walk, {f: 'zz'}), k, f)
+        self.assertNotEqual(key(screen, {'sfc/dq4/tools/art/x.json': 'zz'}), key(screen, {}))
+        self.assertNotEqual(key(screen, {'sfc/dq4/screens.toml': 'zz'}), key(screen, {}))
+        everything = dict(walk)
+        del everything['key_claimed']
+        k = key(everything, {})
+        for f in ('sfc/dq4/tools/dq4screen.py', 'sfc/dq4/screens.toml', 'sfc/dq4/tools/other.asm'):
+            self.assertNotEqual(key(everything, {f: 'zz'}), k, f)
+
+    def test_glob_regex_matches_like_full_match(self):
+        pats = ('sfc/dq4/tools/**', 'fc/dq4/tools/*.py', '**/x.py', 'sfc/dq4/tools/dq4ch?event.py', 'a/[bc].lua')
+        paths = ('sfc/dq4/tools/a/b.py', 'sfc/dq4/tools', 'fc/dq4/tools/a.py', 'fc/dq4/tools/sub/a.py', 'x.py',
+                 'q/x.py', 'sfc/dq4/tools/dq4ch1event.py', 'a/b.lua', 'a/d.lua', 'sfc/dq4/.hidden/a')
+        for p in paths:
+            for q in pats:
+                self.assertEqual(bool(guards.glob_regex((q,)).match(p)), guards.matches(p, q), (p, q))
+        self.assertIsNone(guards.glob_regex(()).match('x'))
 
     def test_key_follows_mesence_settings(self):
         """MESENCE 를 쓰는 검사는 MesenCE 사용자 설정 파일이 바뀌면(콜백 시간 제한 등) 옛 통과를 쓰지 않는다. 설정 파일을
