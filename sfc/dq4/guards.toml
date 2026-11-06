@@ -50,6 +50,7 @@ groups = ["ch1-build", "ch1-walk"]
 name = "dq4-openbus-probe"
 why = "뱅크 40 이상 코드가 BRK 로 DB 를 바꿔 WRAM 대신 열린 버스·롬 거울을 읽으면 에뮬레이터·카트마다 다르게 돈다(snes9x 서장 멈춤, #904). MesenCE 1장 걷기 전체 통과도 본다"
 paths = [
+  "sfc/dq4/tools/dq4environmentnight.py",
   "sfc/dq4/tools/dq4*event.py",
   "sfc/dq4/tools/dq4prologue.py",
   "sfc/dq4/tools/dq4chapter*.py",
@@ -195,6 +196,7 @@ needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출�
 name = "dq4-compat-walk"
 why = "MesenCE 에서만 우연히 도는 코드를 잡는다: libretro bsnes·snes9x 에서 서장부터 1장 끝 리셋까지 이어 걷기(#904 의 snes9x 멈춤)"
 paths = [
+  "sfc/dq4/tools/dq4environmentnight.py",
   "sfc/dq4/tools/dq4*event.py",
   "sfc/dq4/tools/dq4prologue.py",
   "sfc/dq4/tools/dq4chapter*.py",
@@ -1122,6 +1124,7 @@ groups = ["ch1-build", "ch1-walk"]
 name = "dq4-groups-scenes"
 why = "그룹 롬(groups.sfc)의 상자·필드·필드 조우·ルーラ 장면이 그 롬으로 만든 배 선실 출발 상태(dq4freshstate)에서 통과해야 한다"
 paths = [
+  "sfc/dq4/tools/dq4environmentnight.py",
   "sfc/dq4/tools/dq4freshstate.py",
   "sfc/dq4/tools/lua/dq4shipstate.lua",
   "sfc/dq4/tools/dq4groupbuild.py",
@@ -1236,6 +1239,7 @@ groups = ["ch1-build", "ch1-walk"]
 name = "dq4-environment-collision"
 why = "바꾼 맵의 셀 막힘·카운터 칸이 FC 블록 속성(dq4block.terrain)이 막는 칸과 같아야 한다. 롬이 없으면 건너뛰는 단위 테스트라 CI 가 대신 돌리지 못한다(#970). 건너뛰면 OK 줄이 달라 실패로 친다"
 paths = [
+  "sfc/dq4/tools/dq4environmentnight.py",
   "sfc/dq4/tools/dq4environmentrom.py",
   "sfc/dq4/tools/dq4environmentmap.py",
   "sfc/dq4/tools/test_dq4environment.py",
@@ -1262,6 +1266,7 @@ groups = ["ch1-walk"]
 name = "dq4-unported-gates"
 why = "MAPS 밖 FC 맵에서 9C 성문을 가진 맵이 31-04·33-01·3C-00 셋뿐이고, 각 맵에서 생성기(dq4environmentrom.objects)가 잠금 0 성문(48) 하나를 만들어야 한다. FC 롬이 있어야 도는 단위 테스트라 CI 가 대신 돌리지 못한다. 건너뛰면 OK 줄이 달라 실패로 친다. 셋 가운데 하나를 MAPS 에 넣으면 실패하므로 그때 dq4gatecheck 실측으로 옮긴다"
 paths = [
+  "sfc/dq4/tools/dq4environmentnight.py",
   "sfc/dq4/tools/dq4environmentrom.py",
   "sfc/dq4/tools/dq4environmentmap.py",
   "sfc/dq4/tools/test_dq4environment.py",
@@ -1288,6 +1293,7 @@ groups = ["ch1-walk"]
 name = "dq4-map-people-rom-tests"
 why = "롬이 있어야 도는 단위 테스트 24개: 들어설 때 숨는 FC 인물(엔도르 투기장 관중석 등)을 옮기지 않고 그 맵을 이벤트가 찾지 않으며, 누운 인물마다 발치·머리맡 옆에 말을 걸 빈 칸이 있고 발치 훅이 FC 발치 칸만 더하고 1장 빌드도 그 훅을 얹으며, 가게 장면의 카운터 앞 칸이 FC 에서 걸어서 닿고 카운터 너머가 그 가게 주인이어야 한다. 발치 훅은 05:84FE 를 부르는 곳이 C 만 보고 05:8503 이 $00·$01·스택을 지킨다는 원래 롬 바이트에 기대며, 훅 자리는 원래 롬 빈 자리 안이고 05:FF00 가게 도우미 앞이어야 한다. 롬이 없어 건너뛰거나 테스트가 빠지면 ok 수가 모자라 실패한다"
 paths = [
+  "sfc/dq4/tools/dq4environmentnight.py",
   "sfc/dq4/tools/dq4npcport.py",
   "sfc/dq4/tools/dq4npccheck.py",
   "sfc/dq4/tools/test_dq4npcport.py",
@@ -1330,6 +1336,7 @@ name = "dq4-npc-talk"
 tier = "release"
 why = "그룹 롬의 모든 인물 표·말 걸기·가게 장면이 빌드가 쓴 값과 같아야 한다. 누운 인물은 머리맡 블록 옆과 FC 처럼 발치 블록 옆(-foot 장면, dq4sleepertalk 훅) 양쪽에서 말이 걸려야 한다"
 paths = [
+  "sfc/dq4/tools/dq4environmentnight.py",
   "sfc/dq4/tools/dq4npccheck.py",
   "sfc/dq4/tools/dq4npcport.py",
   "sfc/dq4/tools/dq4groupbuild.py",
@@ -1356,6 +1363,7 @@ name = "dq4-group-links"
 tier = "release"
 why = "그룹 롬의 FC 계단·출구·필드 입구가 연결된 맵·칸으로 가야 한다. 들어설 때 숨는 FC 인물을 옮기면 걸어 다니다 계단을 막는다(엔도르 투기장 40/07 계단)"
 paths = [
+  "sfc/dq4/tools/dq4environmentnight.py",
   "sfc/dq4/tools/dq4groupcheck.py",
   "sfc/dq4/tools/dq4groupbuild.py",
   "sfc/dq4/tools/dq4npcport.py",
@@ -1381,6 +1389,7 @@ name = "dq4-environment-rom"
 tier = "release"
 why = "바꾼 맵을 그룹 롬에서 다시 그린 그림이 오프라인 그림과 픽셀까지 같아야 한다(물체·통행·출구·물 슬롯, 성문을 연 채 지나가기, 원래 맵 셀 버퍼). 분수는 물과 같은 번호의 그림으로 함께 바뀌므로 기대 그림도 두 그림을 함께 바꾼다"
 paths = [
+  "sfc/dq4/tools/dq4environmentnight.py",
   "sfc/dq4/tools/dq4environmentromcheck.py",
   "sfc/dq4/tools/dq4environmentrom.py",
   "sfc/dq4/tools/dq4environmentmap.py",
@@ -1405,6 +1414,7 @@ groups = ["ch1-walk"]
 name = "dq4-gate-doors"
 why = "FC 2×2 문 9C·9D(너머 칸으로 여는 문)와 A2(열쇠 성문)는 성문 물체 48 로 바뀌어, 잠금 0 은 어느 쪽에서든 걸어 들어가면 열리고 지나가며, 잠금 1·2 는 그 단계 열쇠가 있을 때만 열려야 한다. 변환이 벽으로 두던 문이다"
 paths = [
+  "sfc/dq4/tools/dq4environmentnight.py",
   "sfc/dq4/tools/dq4gatecheck.py",
   "sfc/dq4/tools/dq4environmentrom.py",
   "sfc/dq4/tools/dq4door.py",
@@ -2447,6 +2457,7 @@ ch1-build = [
   "sfc/dq4/tools/dq4dungeonrate.py",
   "sfc/dq4/tools/dq4entrancehook.py",
   "sfc/dq4/tools/dq4environmentart.py",
+  "sfc/dq4/tools/dq4environmentnight.py",
   "sfc/dq4/tools/dq4environmentmap.py",
   "sfc/dq4/tools/dq4environmentrom.py",
   "sfc/dq4/tools/dq4fieldencounter.py",
@@ -2570,6 +2581,7 @@ ch1-build = [
   "tools/headless_slots.py",
 ]
 ch1-walk = [
+  "sfc/dq4/tools/dq4environmentnight.py",
   "fc/dq4/tools/dq4bank.py",
   "fc/dq4/tools/dq4block.py",
   "fc/dq4/tools/dq4chest.py",
@@ -2712,6 +2724,7 @@ ch1-walk = [
 name = "dq4-environment-night"
 why = "바꾼 맵은 팔레트 훅이 맵마다 정한 한 벌을 덮어써 밤에도 낮 색이었다(텐페 제단 장면). 훅이 DQ5 밤 판정 21:8000 을 보고, FC 가 밤에 어둡게 하는 맵만 밤 팔레트를, 나머지는 밤에도 낮 팔레트를 올려야 한다"
 paths = [
+  "sfc/dq4/tools/lua/dq4shipstate.lua",
   "sfc/dq4/tools/dq4environmentnightcheck.py",
   "sfc/dq4/tools/dq4environmentnight.py",
   "sfc/dq4/tools/dq4environmentrom.py",
@@ -2725,3 +2738,4 @@ paths = [
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/guard-night-rom --chapter2 && rm -rf work/guard-night && uv run --locked python sfc/dq4/tools/dq4environmentnightcheck.py --rom work/guard-night-rom/dq4-ch1-full.sfc --out work/guard-night"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
+groups = ["ch1-build", "ch1-walk"]
