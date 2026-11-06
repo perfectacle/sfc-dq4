@@ -22,7 +22,6 @@
 결과: OUT/results.json(장면·코어·시드마다 판정과 요약), OUT/<장면>-<코어>/seed-N/*.png.
 """
 import argparse
-import concurrent.futures
 import hashlib
 import json
 import math
@@ -39,6 +38,7 @@ sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 import dq4balance  # noqa: E402
 import dq4ch1event as ev  # noqa: E402
 import dq4ch1walkcheck as wc  # noqa: E402
+import dq4shards  # noqa: E402
 import dq4compatcheck as cc  # noqa: E402
 import dq4cores  # noqa: E402
 import dq4savefixture as fx  # noqa: E402
@@ -976,6 +976,16 @@ def unit(core_name, rom_path, scene_name, seeds, out, repeat=1):
     return report
 
 
+def merge_units(shards):
+    """시드 하나씩 돈 unit.json 들(시드 순서)을 장면·코어 하나의 unit 으로 합친다. 장면 정보는 결과를 남긴 첫 조각에서,
+    결과는 조각 순서대로 잇는다. 조각이 끝난 순서와 상관없이 같은 값이 나온다."""
+    meta = next((u for u in shards if 'expect' in u), shards[0])
+    merged = {k: v for k, v in meta.items() if k not in ('results', 'seconds')}
+    merged['seconds'] = round(sum(u.get('seconds', 0) for u in shards), 1)
+    merged['results'] = [r for u in shards for r in u['results']]
+    return merged
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('mode', nargs='?', default='check', choices=('check', '_unit'))
@@ -984,7 +994,7 @@ def main():
     ap.add_argument('--scenes', help='쉼표로 고른 장면만')
     ap.add_argument('--scene', help=argparse.SUPPRESS)
     ap.add_argument('--core', choices=('all', *cc.CORES), default='all')
-    ap.add_argument('--jobs', type=int, default=4)
+    ap.add_argument('--jobs', type=int, default=dq4shards.jobs(), help='함께 띄우는 일 수(기본 HEADLESS_SLOTS, dq4shards.jobs)')
     ap.add_argument('--repeat', type=int, default=2, help='시드마다 같은 상태에서 몇 번 돌려 요약을 견줄지')
     wc.add_seed_args(ap)
     args = ap.parse_args()
@@ -1007,27 +1017,26 @@ def main():
     t0 = time.time()
     # 밑판을 먼저 한 번 만들어 프로세스들이 함께 만들지 않게
     fx.SaveSlot.new_game(rom)
-    seed_arg = ','.join(map(str, seeds))
 
     def one(work):
-        scene, core = work
-        dest = out / f'{scene}-{core}'
+        scene, core, seed = work
+        dest = out / f'{scene}-{core}-{seed}'
         dest.mkdir(parents=True)
         with (dest / 'log.txt').open('w') as log:
             proc = subprocess.Popen([sys.executable, __file__, '_unit', '--core', core, '--scene', scene, '--rom', str(rom),
-                                     '--out', str(dest), '--seeds', seed_arg, '--repeat', str(args.repeat)],
+                                     '--out', str(dest), '--seeds', str(seed), '--repeat', str(args.repeat)],
                                     stdout=log, stderr=subprocess.STDOUT)
-            done = cc.wait_child(proc, dest, 120 + 60 * len(seeds) * args.repeat)
+            done = cc.wait_child(proc, dest, 120 + 60 * args.repeat)
         f = dest / 'unit.json'
         if done and f.exists():
             return json.loads(f.read_text())
-        return {'core': core, 'scene': scene, 'results': [{'seed': s, 'status': 'failed',
-                                                            'problems': ['프로세스가 결과를 남기지 않음(시간 초과·오류, log.txt)']}
-                                                           for s in seeds]}
+        return {'core': core, 'scene': scene, 'results': [{'seed': seed, 'status': 'failed',
+                                                            'problems': ['프로세스가 결과를 남기지 않음(시간 초과·오류, log.txt)']}]}
 
-    work = [(s, c) for s in names for c in cores]
-    with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
-        units = list(pool.map(one, work))
+    # 시드마다 따로 띄워(시드끼리는 출발 상태만 같다) 가장 긴 장면도 코어 자리 여럿에 나눠 돈다. 판정은 합친 뒤 장면·코어마다
+    work = [(s, c, seed) for s in names for c in cores for seed in seeds]
+    shards = dict(zip(work, dq4shards.pmap(one, work, args.jobs)))
+    units = [merge_units([shards[s, c, seed] for seed in seeds]) for s in names for c in cores]
     rows = []
     for u in units:
         for r in u['results']:

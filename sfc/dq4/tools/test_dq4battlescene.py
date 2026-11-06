@@ -243,3 +243,26 @@ class DistributionTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class MergeUnitsTests(unittest.TestCase):
+    def shard(self, seed, **extra):
+        return {'core': 'bsnes 115', 'scene': 'growth', 'map_song': 1, 'continue_song': 2, 'expect': {'lv': 3},
+                'seconds': 1.5, 'results': [{'seed': seed, 'status': 'passed'}], **extra}
+
+    def test_results_follow_seed_order(self):
+        got = bs.merge_units([self.shard(0), self.shard(1), self.shard(2)])
+        self.assertEqual([r['seed'] for r in got['results']], [0, 1, 2])
+        self.assertEqual(got['seconds'], 4.5)
+        self.assertEqual({k: got[k] for k in ('core', 'scene', 'map_song', 'continue_song', 'expect')},
+                         {'core': 'bsnes 115', 'scene': 'growth', 'map_song': 1, 'continue_song': 2, 'expect': {'lv': 3}})
+
+    def test_failed_shard_keeps_its_seed_and_scene_info_comes_from_a_finished_one(self):
+        failed = {'core': 'bsnes', 'scene': 'growth', 'results': [{'seed': 0, 'status': 'failed', 'problems': ['x']}]}
+        got = bs.merge_units([failed, self.shard(1)])
+        self.assertEqual([(r['seed'], r['status']) for r in got['results']], [(0, 'failed'), (1, 'passed')])
+        self.assertEqual(got['expect'], {'lv': 3})
+        self.assertEqual(got['core'], 'bsnes 115')
+        only_failed = bs.merge_units([failed])
+        self.assertEqual(only_failed['core'], 'bsnes')
+        self.assertNotIn('expect', only_failed)

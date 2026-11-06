@@ -215,12 +215,14 @@ STAGED = {(0x0E, 0, 0x15, 0x0D), (0x0E, 0, 0x16, 0x0D), (0x0E, 0, 0x17, 0x0D), (
 
 
 def main():
+    # 이 파일의 다른 함수를 가져다 쓰는 검사들이 병렬 장치까지 끌어오지 않게 main 에서만 가져온다
+    import dq4shards
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--build", required=True, type=Path, help="dq4groupbuild.py --out folder")
     ap.add_argument("--dq4", default="rom/dq4.nes", type=Path)
     dq4freshstate.add_argument(ap)
     ap.add_argument("--out", required=True, type=Path)
-    ap.add_argument("--jobs", type=int, default=4)
+    ap.add_argument("--jobs", type=int, default=dq4shards.jobs(), help="함께 띄우는 일 수(기본 HEADLESS_SLOTS, dq4shards.jobs)")
     ap.add_argument("--rom", type=Path, help="ROM to check (default BUILD/groups.sfc)")
     ap.add_argument("--maps", nargs="+", help="only these maps (GG/MM)")
     ap.add_argument("--no-tables", action="store_true", help="leave out the person table scenes")

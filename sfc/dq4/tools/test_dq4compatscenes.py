@@ -52,6 +52,36 @@ class CompatScenes(unittest.TestCase):
         self.assertEqual(cs.cc.probe_problems(['R pc=25:8071 bank=70 at=0000']),
                          ['해석하지 못한 기록 줄: R pc=25:8071 bank=70 at=0000'])
 
+    def test_run_pairs_order_and_save_waits_for_walk(self):
+        import threading
+        walk_done, seen = threading.Event(), []
+        pairs = [(s, r) for s in cs.SCENES for r in cs.RANGES]
+
+        def walk():
+            # 저장 아닌 장면은 걷기를 기다리지 않고 돈다
+            for _ in range(500):
+                if len(seen) == 4:
+                    break
+                threading.Event().wait(0.01)
+            walk_done.set()
+            return True
+
+        def run(pair):
+            if pair[0] == 'save':
+                self.assertTrue(walk_done.is_set())
+            seen.append(pair)
+            return {'scene': pair[0], 'ranges': pair[1], 'status': 'passed'}
+
+        got = cs.run_pairs(pairs, run, walk, len(pairs))
+        self.assertEqual([(r['scene'], r['ranges']) for r in got], pairs)
+        self.assertEqual(sorted(seen[:4]), sorted(p for p in pairs if p[0] != 'save'))
+
+    def test_run_pairs_failed_walk_fails_only_save(self):
+        got = cs.run_pairs([('battle', 'high'), ('save', 'high'), ('save', 'io')],
+                           lambda p: {'scene': p[0], 'ranges': p[1], 'status': 'passed'}, lambda: False, 3)
+        self.assertEqual([r['status'] for r in got], ['passed', 'failed', 'failed'])
+        self.assertIn('1장 걷기', got[1]['problems'][0])
+
     def test_window_reached(self):
         import json
         import tempfile
