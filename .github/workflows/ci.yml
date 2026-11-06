@@ -59,26 +59,24 @@ jobs:
       - run: git ls-files -z '*.py' | xargs -0 uv run --frozen python -m compileall -q
 
   # Tests that need rom/ skip themselves; the rest run here. One job per track so a
-  # failure points at its owner (the suites take about 30 s each, so finer shards
-  # would spend more on runner setup than they save).
+  # failure points at its owner. dq4 and dq5 take about two minutes each, so they
+  # run as two shards balanced by tools/unitshard-times.json (tools/unitshard.py);
+  # the other suites are short enough that a shard would cost more in runner setup.
   test:
-    name: test (${{ matrix.track }})
+    name: test (${{ matrix.track }}${{ matrix.n > 1 && format(' {0}/{1}', matrix.k, matrix.n) || '' }})
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         include:
-          - track: dq4
-            dir: sfc/dq4/tools
-          - track: dq5
-            dir: sfc/dq5/tools/tests
-          - track: common
-            dir: tools/tests
-          - track: fc-dq4
-            dir: fc/dq4/tools
-          - track: nds
-            dir: nds/dq4/tools
+          - {track: dq4, dir: sfc/dq4/tools, k: 1, n: 2}
+          - {track: dq4, dir: sfc/dq4/tools, k: 2, n: 2}
+          - {track: dq5, dir: sfc/dq5/tools/tests, k: 1, n: 2}
+          - {track: dq5, dir: sfc/dq5/tools/tests, k: 2, n: 2}
+          - {track: common, dir: tools/tests, k: 1, n: 1}
+          - {track: fc-dq4, dir: fc/dq4/tools, k: 1, n: 1}
+          - {track: nds, dir: nds/dq4/tools, k: 1, n: 1}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -91,8 +89,16 @@ jobs:
 
       - run: uv sync --locked
 
-      - run: uv run --frozen python -m unittest discover -p 'test_*.py'
+      - name: Run the shard's test files
         working-directory: ${{ matrix.dir }}
+        env:
+          DIR: ${{ matrix.dir }}
+          K: ${{ matrix.k }}
+          N: ${{ matrix.n }}
+        run: |
+          read -ra mods <<< "$(uv run --frozen python "$GITHUB_WORKSPACE/tools/unitshard.py" "$DIR" "$K" "$N")"
+          if [ "${#mods[@]}" -eq 0 ]; then echo "no test files in shard $K/$N of $DIR"; exit 1; fi
+          uv run --frozen python -m unittest "${mods[@]}"
 
   actionlint:
     runs-on: ubuntu-26.04-arm
@@ -123,7 +129,8 @@ jobs:
   # Run-time guards need the ROM, so CI only checks that a PR touching a guard's
   # own paths reports its result in the body (tools/guards.py, GUARD-02). Guards
   # matched only through [groups] and tier = "release" guards are left to the
-  # release gate unless the body has a `가드: 전체` line.
+  # release gate. A changed file matching a track's [full] paths asks for every
+  # guard of that track; a `가드: 전체` body line asks for every guard.
   required-checks:
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 5

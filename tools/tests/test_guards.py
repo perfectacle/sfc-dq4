@@ -51,8 +51,8 @@ class GuardsTest(unittest.TestCase):
             '\n[groups]\nevents = ["sfc/dq4/tools/dq4ch1event.py"]\n'
         checks, problems = load(text)
         self.assertEqual(problems, [])
-        self.assertEqual(len(guards.triggered(checks, ['sfc/dq4/tools/dq4ch1event.py'], full=True)), 1)
-        self.assertEqual(guards.triggered(checks, ['sfc/dq4/tools/dq4ch2event.py'], full=True), [])
+        self.assertEqual(len(guards.pending(checks, ['sfc/dq4/tools/dq4ch1event.py'])), 1)
+        self.assertEqual(guards.pending(checks, ['sfc/dq4/tools/dq4ch2event.py']), [])
         # PR 에서는 묶음으로만 맞는 검사가 걸리지 않는다(배포 관문이 돌린다)
         self.assertEqual(guards.triggered(checks, ['sfc/dq4/tools/dq4ch1event.py']), [])
         _, problems = load(text.replace('groups = ["events"]', 'groups = ["nope"]'))
@@ -78,8 +78,8 @@ class GuardsTest(unittest.TestCase):
         self.assertEqual([c['name'] for c in guards.triggered(checks, ['README.md'], {'dq4-other'})], ['dq4-other'])
 
     def test_pr_picks_own_paths_and_pr_tier_full_picks_all(self):
-        """PR(기본)은 검사 자신의 paths 에 바로 맞거나 run·needs 가 바뀐 pr 등급 검사만, full(`가드: 전체`)은 묶음으로
-        맞는 것과 release 등급까지 고른다."""
+        """PR(기본)은 검사 자신의 paths 에 바로 맞거나 run·needs 가 바뀐 pr 등급 검사만 고른다. 묶음으로 맞는 것과
+        release 등급은 배포 관문 몫(pending)이다. full(`가드: 전체`)은 모든 검사를 고른다."""
         text = (GOOD
                 + GOOD.replace('dq4-walk', 'dq4-heavy').replace('needs = ["rom"]', 'needs = ["rom"]\ntier = "release"')
                 + GOOD.replace('dq4-walk', 'dq4-grouped').replace('paths = ["sfc/dq4/tools/dq4ch*event.py"]',
@@ -92,11 +92,48 @@ class GuardsTest(unittest.TestCase):
             return [c['name'] for c in guards.triggered(checks, changed, edited, full)]
         changed = ['sfc/dq4/tools/dq4ch1event.py']
         self.assertEqual(names(changed), ['dq4-walk'])
-        self.assertEqual(names(changed, full=True), ['dq4-walk', 'dq4-heavy', 'dq4-grouped'])
+        self.assertEqual([c['name'] for c in guards.pending(checks, changed)], ['dq4-walk', 'dq4-heavy', 'dq4-grouped'])
         self.assertEqual(names(['README.md'], {'dq4-heavy', 'dq4-grouped'}), ['dq4-grouped'])
-        self.assertEqual(names(['README.md'], {'dq4-heavy'}, full=True), ['dq4-heavy'])
+        self.assertEqual(names(['README.md'], full=True), ['dq4-walk', 'dq4-heavy', 'dq4-grouped'])
         _, problems = load(GOOD.replace('needs = ["rom"]', 'needs = ["rom"]\ntier = "nightly"'))
         self.assertTrue(any('tier' in p for p in problems), problems)
+
+    def test_full_paths_turn_on_full_mode_for_their_track(self):
+        """바뀐 파일이 트랙의 [full] paths 에 맞으면 그 트랙 검사가 paths·등급과 상관없이 모두 걸린다. 다른 트랙은 그대로다."""
+        text = ('[full]\npaths = ["sfc/dq4/tools/dq4build.py"]\n'
+                + GOOD.replace('dq4-walk', 'dq4-heavy').replace('needs = ["rom"]', 'needs = ["rom"]\ntier = "release"')
+                + GOOD.replace('dq4-walk', 'dq4-grouped').replace('paths = ["sfc/dq4/tools/dq4ch*event.py"]',
+                                                                   'paths = []\ngroups = ["build"]')
+                + '\n[groups]\nbuild = ["sfc/dq4/tools/dq4build.py"]\n')
+        other = GOOD.replace('dq4-walk', 'dq5-grouped').replace('paths = ["sfc/dq4/tools/dq4ch*event.py"]',
+                                                                 'paths = []\ngroups = ["build"]') + \
+            '\n[groups]\nbuild = ["sfc/dq4/tools/dq4build.py"]\n'
+        files = FILES + ['sfc/dq4/tools/dq4build.py', 'sfc/dq5/guards.toml']
+        checks, problems = guards.load(files, read=lambda f: other if f.startswith('sfc/dq5') else text)
+        self.assertEqual(problems, [])
+        changed = ['sfc/dq4/tools/dq4build.py']
+        self.assertEqual(guards.full_files(checks, changed), changed)
+        self.assertEqual([c['name'] for c in guards.triggered(checks, changed)], ['dq4-heavy', 'dq4-grouped'])
+        self.assertEqual(guards.full_files(checks, ['sfc/dq4/tools/dq4ch1event.py']), [])
+        self.assertEqual([c['name'] for c in guards.triggered(checks, ['sfc/dq4/tools/dq4ch1event.py'])], [])
+        self.assertEqual([c['name'] for c in guards.triggered(checks, ['sfc/dq4/tools/dq4ch1event.py'], full=True)],
+                         ['dq4-heavy', 'dq4-grouped', 'dq5-grouped'])
+        for bad in ('[full]\npaths = ["gone.py"]\n', '[full]\nfiles = []\n', 'full = 1\n'):
+            _, problems = load(bad + GOOD)
+            self.assertTrue(any('full' in p for p in problems), bad)
+
+    def test_build_batches_keep_builders_that_share_outputs_apart(self):
+        """다른 것을 만드는 빌드 검사끼리만 함께 돈다. 한쪽이 만드는 것을 다른 쪽이 읽거나 만들면 명단 차례대로 따로 돈다."""
+        def b(name, run):
+            return {'name': name, 'run': run}
+        ch1 = b('a', 'x.py --out work/ch1 && y.py --rom work/ch1/r.sfc --out work/fa')
+        ch1b = b('b', 'x.py --out work/ch1 && z.py --rom work/ch1/r.sfc --out work/fb')
+        groups = b('c', 'g.py --out work/groups && z.py --rom work/groups/g.sfc --out work/fc')
+        reader = b('d', 'g.py --out work/groups2 && z.py --rom work/ch1/r.sfc --old work/groups2/x --out work/fd')
+        batches = [[c['name'] for c in batch] for batch in guards.build_batches([ch1, groups, ch1b, reader])]
+        self.assertEqual(batches, [['a', 'c'], ['b'], ['d']])
+        self.assertFalse(guards.build_conflict(ch1, groups))
+        self.assertTrue(guards.build_conflict(ch1, reader))
 
     def test_full_line_in_pr_body(self):
         for body in ('가드: 전체', '설명\n  가드 : 전체  \n- [x] a: 통과'):
