@@ -15,6 +15,10 @@
 --rom checks another ROM built with the same people (the chapter-1 ROM with dq4chapter1.py build --keep DIR,
 --build DIR/groups and --texts its dq4chapter1.py messages JSON); --maps limits the maps, and --no-tables leaves
 out the table scenes, whose list addresses are the plain build's.
+
+--chapter2 checks the chapter-2 groups (CHAPTER2_GROUPS) of a dq4build.py --chapter2 ROM with the chapter-2 flag on
+(as after the end of chapter 1): the people of those maps answer as dq4ch1event and dq4ch2event say, and --maps
+defaults to every map of those groups. Build the people folder with dq4chapter1.py build --chapter2 --keep DIR.
 """
 
 import argparse
@@ -192,6 +196,14 @@ def talk_side(source, x, y, occupied):
     return None
 
 
+def warp_to(m, x, y):
+    """dq5warp.lua TO for standing on FC cell (x, y). Its exit lands the hero one cell below TO (measured: every arrival
+    was TO + (0, 1)), so TO is the cell above. Given the cell itself, a hero talking down stood on the person's top half
+    and got 「その方向には誰もいない」, and one on the bottom FC row of a town stepped off the map onto the field."""
+    dx, dy = cell(x, y)
+    return f"{m},{dx},{dy - 1}"
+
+
 def talk_cell(person):
     """FC cell the hero faces to talk to a person. dq4npcport lays a sleeper half a block right and up (DQ5 cell
     (2x+1, 2y) instead of cell(x, y) = (2x, 2y+1)), so beside the bed's right block (the head) DQ5 answers as it does
@@ -214,6 +226,10 @@ STAGED = {(0x0E, 0, 0x15, 0x0D), (0x0E, 0, 0x16, 0x0D), (0x0E, 0, 0x17, 0x0D), (
           (0x2E, 0, 0x17, 0x01), (0x2E, 0, 0x17, 0x02)}
 
 
+# 2장 시작 상태로 옮긴 FC 그룹(dq4groupbuild.LINKS 의 "chapter": 2)이 든 DQ5 그룹
+CHAPTER2_GROUPS = tuple(f"{g:02X}" for g, parts in LINKS.items() if any(p.get("chapter") == 2 for p in parts))
+
+
 def main():
     # 이 파일의 다른 함수를 가져다 쓰는 검사들이 병렬 장치까지 끌어오지 않게 main 에서만 가져온다
     import dq4shards
@@ -230,7 +246,15 @@ def main():
                     "dq4messages/1 (dq4chapter1.py messages, for the chapter-1 ROM)")
     ap.add_argument("--chapter1", action="store_true",
                     help="the ROM is the chapter-1 build: people its events change answer as dq4ch1event says")
+    ap.add_argument("--chapter2", action="store_true",
+                    help="the ROM is the --chapter2 build: check the chapter-2 groups with the chapter-2 flag on")
     args = ap.parse_args()
+    sets = None
+    if args.chapter2:
+        import dq4ch2event
+        args.chapter1 = True
+        index, mask = dq4ch2event.CHAPTER2
+        sets = f"{0x2190 + index:04X}|{mask:02X}"
     mesence = Path(os.environ["MESENCE"])
     out = args.out.resolve()
     if out.exists() and any(out.iterdir()):
@@ -271,6 +295,8 @@ def main():
             continue
         if args.maps and m not in args.maps:
             continue
+        if args.chapter2 and not args.maps and m[:2] not in CHAPTER2_GROUPS:
+            continue
         group, number = int(m[:2], 16), int(m[3:], 16)
         fc = fc_map(prg, group, number)
         source = dq4block.Map(prg, *fc)
@@ -300,7 +326,7 @@ def main():
                              p["night"], None))
                 continue
             sx, sy, d = side
-            to = f"{m},{','.join(map(str, cell(sx, sy)))}"
+            to = warp_to(m, sx, sy)
             service = p.get("service")
             if service in SHOPS:
                 jobs.append(("shop", f"shop-{m.replace('/', '')}-{i}", m, to, d, p["night"],
@@ -322,18 +348,18 @@ def main():
                     else:
                         fx, fy, fd = foot
                         jobs.append(("talk", f"talk-{m.replace('/', '')}-{i}-foot", m,
-                                     f"{m},{','.join(map(str, cell(fx, fy)))}", fd, p["night"], want))
+                                     warp_to(m, fx, fy), fd, p["night"], want))
 
     def scene(kind, name, to, test, night):
         if kind in ("unreachable", "closed", "staged"):
             return None, None, None
         if kind == "table":
-            return run(mesence, rom_path, state, out, name, libdir, to, test, night) + (None,)
+            return run(mesence, rom_path, state, out, name, libdir, to, test, night, sets=sets) + (None,)
         shop = kind == "shop"
         for n, talk in enumerate(TALKS):
             wram, messages = run(mesence, rom_path, state, out, f"{name}-{n}", libdir, to,
                                  talk.format(dir=test) + (BUY if shop else STAY if kind == "inn" else ""), night, shop,
-                                 None if shop else ret)
+                                 None if shop else ret, sets=sets)
             if messages and (shop or messages[0]):
                 return wram, messages, n
         return wram, messages, None

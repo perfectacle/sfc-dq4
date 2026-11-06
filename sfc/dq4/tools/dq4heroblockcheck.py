@@ -12,6 +12,8 @@
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4heroblockcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/heroblock
   (--only 사례이름,… 은 그 사례만, --base 는 1단계 출발 상태를 다시 쓴다)
+  --chapter2 는 2장 사건 사례(CHAPTER2_CASES)만 돈다. 롬은 dq4build.py --chapter2 의 것이고, 1단계 출발 상태는 성 마을
+  대신 2장 걷기 검사의 2장 출발 상태(dq4ch2walkcheck.head, 2장 왕좌의 방, 주인공 기록이 아리나)다.
   --seed N·--seeds 0,5,9 는 2·3단계 난수(dq4ch1walkcheck.rng_for)를 고른다. 1단계 출발 상태는 늘 시드 0 이고 롬
   SHA-1 별로 work/cache/states/prologue 에 두어 다시 만들지 않는다(--no-state-cache 로 끔). 여러 시드면 seed-N/ 아래에 사례 폴더.
 """
@@ -143,6 +145,50 @@ def cases():
     return out
 
 
+def ch2_flags(*pairs):
+    return flags(*pairs)
+
+
+# 2장 왕의 방(3D/02): 벽 앞 셀 (26,10)에서 오른쪽을 보면 묻는다. 셋과 이야기한 뒤(READY)라 낮에도 수리공이 없다.
+# 벽 앞 셀은 왼쪽 통로에서 오거나 위·아래 칸에서 들어선다. -no 는 아니요 → 비켰다 돌아와 다시 묻는지
+WALL_ASK = 'right:8;wait:60;a:8;wait:60;a:8;wait:60'
+WALL_YES = WALL_ASK + ';a:8;wait:60;a:8;wait:60;a:8;wait:400'
+WALL = [('wall-left', '22,10;26,10'), ('wall-above', '22,10;24,10;24,8;26,8;26,10'),
+        ('wall-below', '22,10;24,10;24,12;26,12;26,10')]
+# 걷어찬 뒤 필드 산트하임 앞 (78,149): 어느 쪽으로 걸어도 네 걸음째에 합류한다(필드 걸음 훅)
+JOIN = [('join-down', 'down:120'), ('join-left', 'left:120'), ('join-right', 'right:120')]
+# 텐페 신부(3D/03 (24,49)): 촌장에게 들은 뒤 예 → 바구니 이벤트로 제단 두 칸 아래 (44,31). 그 칸은 사방이 막혀
+# (조작은 돌아와 명령 창이 열림) 끝 걸음(free) 대신 옮겨진 셀만 본다. 보스 전투가 붙으면 이긴 뒤의 걸음을 본다
+PRIEST = [('priest-below', '24,51', 'up'), ('priest-left', '22,51;22,49', 'right'),
+          ('priest-right', '26,51;26,49', 'left')]
+
+
+def chapter2_cases():
+    """2장 사건 사례. 출발 상태는 2장 왕좌의 방(dq4ch2walkcheck.head)."""
+    import dq4ch2event as ch2
+    out = {}
+    ready = ch2_flags(ch2.TALKED_GATE, ch2.TALKED_BREY, ch2.TALKED_KIRYL, ch2.READY)
+    taps, close = wc.taps, pc.CLOSE
+    for name, at in WALL:
+        out[name] = {'warp': f'{ch2.BEDROOM},22,9', 'set': ready, 'walk': f'{at};{WALL_YES}', 'free': '78,151',
+                     'want': [('KICKED', ch2.KICKED)], 'maxf': 3000}
+    # 아니요(아래 → A)면 그 칸을 떠났다 돌아올 때까지 다시 묻지 않는다
+    out['wall-no'] = {'warp': f'{ch2.BEDROOM},22,9', 'set': ready,
+                      'walk': f'22,10;26,10;{WALL_ASK};down:8;wait:30;a:8;wait:120;{close};24,10;26,10;{WALL_YES}',
+                      'free': '78,151', 'want': [('KICKED', ch2.KICKED)], 'maxf': 4500}
+    for name, step in JOIN:
+        out[name] = {'warp': f'{ch2.BEDROOM},22,9', 'set': ready,
+                     'walk': f'22,10;26,10;{WALL_YES};{step};wait:200;{taps(8)};{close}',
+                     'want': [('JOINED', ch2.JOINED)], 'maxf': 4500}
+    heard = ch2_flags(ch2.TEMPE_HEARD)
+    px, py = ch2.PRIEST
+    for name, at, face in PRIEST:
+        out[name] = {'warp': f'{ch2.TEMPE},{px},{py + 1}', 'set': heard,
+                     'walk': f'{at};{wc.talk(face, 14)};wait:600;{taps(10)};{close}',
+                     'want': [('TEMPE_ALTAR', ch2.TEMPE_ALTAR)], 'hero_at': ch2.ALTAR_CELL, 'maxf': 5000}
+    return out
+
+
 def overlaps(text):
     """track.txt(lua/dq4heroblock.lua 의 TRACK)에서 두 인물이 겹쳐 보인 프레임 수와 처음 몇 프레임.
     인물은 16×16 점(2×2 셀)을 차지하므로 X·Y 점 차가 둘 다 16 보다 작으면 겹친다. 그리지 않는 슬롯은 빼고 일행과 인물
@@ -216,6 +262,12 @@ def run_case(mesence, rom, base, out, name, case, exit_at, seed=0):
     shown = [v.split('@')[0] for v in shown[1].split(',') if v] if shown else []
     if case.get('repeat') and (not shown or shown.count(shown[0]) < case['repeat']):
         problems.append(f"첫 메시지가 {case['repeat']}번 뜨지 않음: {shown}")
+    if case.get('hero_at'):
+        # 끝 걸음(free) 앞 마지막 누르기의 자리: 사건이 주인공을 옮겨 둔 셀
+        pressed = re.findall(r'press \S+ at (\d+),(\d+)', text)
+        got = tuple(map(int, pressed[-1])) if pressed else None
+        if got != tuple(case['hero_at']):
+            problems.append(f"사건 뒤 주인공 셀 {got}, 기대 {tuple(case['hero_at'])}")
     if case.get('free') and f"reached {case['free']}" not in text:
         problems.append(f"끝에 {case['free']} 로 걷지 못함(조작이 돌아오지 않음)")
     snap = {}
@@ -275,7 +327,8 @@ def main():
     ap.add_argument('--out', required=True, type=Path)
     ap.add_argument('--jobs', type=int, default=6)
     ap.add_argument('--only', help='이 사례만(쉼표로 여럿, 앞부분이 같으면 모두: supper)')
-    ap.add_argument('--base', type=Path, help='같은 롬으로 만든 출발 상태(hub/end.mss)')
+    ap.add_argument('--base', type=Path, help='같은 롬으로 만든 출발 상태(hub/end.mss, --chapter2 면 opening/end.mss)')
+    ap.add_argument('--chapter2', action='store_true', help='2장 사건 사례만(dq4build.py --chapter2 롬)')
     wc.add_seed_args(ap)
     args = ap.parse_args()
     seeds = wc.seeds_of(args)
@@ -290,9 +343,15 @@ def main():
     cache = None if args.no_state_cache else wc.StateCache(rom.read_bytes())
     if args.base:
         base, cached = args.base.resolve(), None
+    elif args.chapter2:
+        import dq4ch2walkcheck
+        base, head = dq4ch2walkcheck.head(mesence, rom, rom.read_bytes(), out, cache)
+        if base is None:
+            raise SystemExit(f'2장 출발 상태를 만들지 못함: {[r["problems"] for r in head if r["status"] != "passed"]}')
+        cached = bool(head and head[0].get('cached'))
     else:
         base, cached = make_base(mesence, rom, out, cache)
-    todo = cases()
+    todo = chapter2_cases() if args.chapter2 else cases()
     if args.only:
         keys = args.only.split(',')
         todo = {k: v for k, v in todo.items() if any(k == p or k.startswith(p + '-') for p in keys)}
