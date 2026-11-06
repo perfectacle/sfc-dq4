@@ -44,14 +44,14 @@ DATA_ENTRIES = {'blank2', 'end_event', 'talk_event', 'ev_back', 'ev_out', 'ev_st
 CODE_ENTRIES = {'hero_picture'}
 
 
-def entries_of(name, base, blob, at):
-    """(진입점 목록, 문제). PHP 로 시작하거나 CODE_ENTRIES 면 코드, DATA_ENTRIES 면 자료."""
+def entries_of(name, base, blob, at, data=(), code=()):
+    """(진입점 목록, 문제). PHP 로 시작하거나 CODE_ENTRIES·code 면 코드, DATA_ENTRIES·data 면 자료."""
     entries, problems = [], []
     for label, a in at.items():
         inside = 0 <= a - base < len(blob)
-        if label in DATA_ENTRIES:
+        if label in DATA_ENTRIES or label in data:
             continue
-        if inside and (blob[a - base] == 0x08 or label in CODE_ENTRIES):
+        if inside and (blob[a - base] == 0x08 or label in CODE_ENTRIES or label in code):
             entries.append(a)
         elif inside:
             problems.append(f'{name}.{label} {a:06X}: PHP 로 시작하지 않음(코드면 CODE_ENTRIES, 자료면 DATA_ENTRIES 에)')
@@ -71,6 +71,16 @@ def blobs():
         if problems:
             raise ValueError('; '.join(problems))
         out.append((name, mod.CODE_AT, blob, entries))
+    # 2장 사건 모듈: 자료인 이름은 모듈의 DATA_ENTRIES, PHP 로 시작하지 않는 코드는 CODE_ENTRIES 에 둔다
+    for ctx in dq4ch2event.contexts():
+        if hasattr(ctx.module, 'native'):
+            blob, at = ctx.module.native(ctx)
+            name = f'ch2.{ctx.key}'
+            entries, problems = entries_of(name, ctx.code_at, blob, at, getattr(ctx.module, 'DATA_ENTRIES', ()),
+                                           getattr(ctx.module, 'CODE_ENTRIES', ()))
+            if problems:
+                raise ValueError('; '.join(problems))
+            out.append((name, ctx.code_at, blob, entries))
     scenes = box.GAME_SCENES
     lay = box.Layout(box.CODE_AT, scenes, b'', [bytes(box.BOX_W * box.BOX_H * 2)] * len(scenes), box.palettes())
     out.append(('chapterbox', box.CODE_AT, lay.blob,

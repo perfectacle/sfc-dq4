@@ -323,7 +323,7 @@ def first_talk():
     import dq4ch1event
     import dq4ch2event
     import dq4prologue
-    return SCRIPT_TALK + len(dq4prologue.talk_doc()["scripts"]) + len(dq4ch1event.TALKS) + len(dq4ch2event.TALKS)
+    return SCRIPT_TALK + len(dq4prologue.talk_doc()["scripts"]) + len(dq4ch1event.TALKS) + len(dq4ch2event.talk_names())
 
 
 def allocate(texts, key, codes):
@@ -348,10 +348,10 @@ def talk_doc(messages):
     doc["scripts"] += [{"talk": f"{events[name]:03X}", "body": body}
                        for name, body in zip(dq4ch1event.TALKS, dq4ch1event.talk_scripts(FIRST_MESSAGE + len(ids)))]
     import dq4ch2event
-    ch2 = dq4ch2event.talk_numbers(SCRIPT_TALK + len(doc["scripts"]))
+    ch2 = SCRIPT_TALK + len(doc["scripts"])
     ch2_first = FIRST_MESSAGE + len(ids) + len(dq4ch1event.MESSAGES)
-    doc["scripts"] += [{"talk": f"{ch2[name]:03X}", "body": body}
-                       for name, body in zip(dq4ch2event.TALKS, dq4ch2event.talk_scripts(ch2_first))]
+    doc["scripts"] += [{"talk": f"{ch2 + k:03X}", "body": body}
+                       for k, body in enumerate(dq4ch2event.talk_scripts(ch2_first))]
     doc["scripts"] += [{"talk": f"{first + k:03X}", "body": [{"op": "msg", "id": f"{m:03X}"}]}
                        for k, m in enumerate(ids)]
     return doc

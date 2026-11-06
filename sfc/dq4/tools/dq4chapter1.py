@@ -443,7 +443,8 @@ def message_flow(first_message):
              dq4ch2event.talk_scripts(chapter2_message(first_message)))
     _, at = dq4prologue.native()
     events = [dq4prologue.end_event(at), dq4ch2event.join_event(chapter2_message(first_message), dq4ch2event.native()[1]),
-              dq4ch2event.altar_event(chapter2_message(first_message))]
+              dq4ch2event.altar_event(chapter2_message(first_message))] + \
+        dq4ch2event.event_tokens(chapter2_message(first_message))
     return {"talks": talks, "scripts": [s["commands"] for s in scripts], "events": events,
             "pauses": dq4ch1event.pauses(first_message)}
 
@@ -491,8 +492,9 @@ def clear_mirror(data, original, ranges):
 
 
 def group_ranges():
-    """clear_mirror 할 파일 위치 범위: 뱅크 3A~3F 전체, 인물 기본 목록 뱅크, 3A 밖의 새 맵 레코드 자리."""
-    ranges = [(b * 0x8000, (b + 1) * 0x8000) for b in (*GROUP_BANKS, NPC_BANK)]
+    """clear_mirror 할 파일 위치 범위: 뱅크 3A~3F 전체, 인물 기본 목록·대화 스크립트·둘째 대체 목록 뱅크, 3A 밖의 새 맵
+    레코드 자리. 첫 대체 목록 뱅크 38 은 지우지 않는다(목록 뒤에 거울 바이트가 남아도 apply_writes 가 빈 자리로 봄)."""
+    ranges = [(b * 0x8000, (b + 1) * 0x8000) for b in (*GROUP_BANKS, NPC_BANK, TALK_BANK, NPC_ALT_BANKS[1])]
     ranges += [(lorom(lo), lorom(hi - 1) + 1) for lo, hi in RECORDS_AT if lo >> 16 not in GROUP_BANKS]
     return ranges
 
@@ -572,9 +574,13 @@ def run_tool(tool, *args):
 
 # 인물 목록은 30~3F 의 두 뱅크에 둬야 한다(데이터 뱅크를 목록 뱅크로 두고 낮은 WRAM 을 읽음). 타이틀 그림 자료는 42~47 에
 # 있어 30 의 타이틀 코드 말고는 31~39 가 비고(원본 21~29 의 거울), 3A~3C 와 34:C000~ 는 그룹 연결(34 는 필드 지도, 아래
-# FIELD_AT), 3D~3F 는 환경 맵이 쓴다. 기본 목록은 통째로 빈 35 에, 대체 목록은 38 에 둔다. 나머지 빈 뱅크는 새 맵
-# 레코드(RECORDS_AT)가 쓴다.
-NPC_BANK, NPC_ALT = 0x35, '38:8000'
+# FIELD_AT), 3D~3F 는 환경 맵이 쓴다. 기본 목록은 통째로 빈 35 에, 대체 목록은 38 에서 시작해 넘치면 37 로 이어 둔다
+# (dq5npcrelocate 의 여러 뱅크 나누기). 나머지 빈 뱅크는 대화 스크립트(TALK_BANK)와 새 맵 레코드(RECORDS_AT)가 쓴다.
+NPC_BANK, NPC_ALT = 0x35, '38:8000,37:8000'
+NPC_ALT_BANKS = (0x38, 0x37)
+# 덧붙인 대화 스크립트(dq5talkwrite --extra-at). 30~3F 의 한 뱅크여야 한다(실행기가 그 뱅크를 데이터 뱅크로 둠)
+TALK_BANK = 0x36
+TALK_AT = ('--extra-at', f'{TALK_BANK:02X}:8000', '--hook-at', '06:FE10')
 
 
 def npc_base(env_patch):
@@ -601,10 +607,10 @@ GROUP_PATCHES = ('env/dq4-environment.dq5patch.json', 'doors.dq5patch.json', 'ou
 # 타이틀 코드·서곡 사이 빈 곳(메뉴 롬에서 0 이거나 원본 20 의 거울 그대로인 곳), 그다음 통째로 빈 31~33·34 앞쪽·36·37·39
 # 로 간다. 30:8000~8FFF 는 타이틀 코드(메뉴 준비
 # 포함) 몫이라 뺐다. 필드 지도(덩어리 둘 약 12KB, 필드 로더의 DB 때문에 30~3F)가 34:C000 에 있고, 35 는 인물 기본
-# 목록(NPC_BANK), 38 은 대체 목록(NPC_ALT)이 쓴다. 비어 있지 않으면 apply_writes 가 멈춘다.
+# 목록(NPC_BANK), 36 은 대화 스크립트(TALK_BANK), 37·38 은 대체 목록(NPC_ALT)이 쓴다. 비어 있지 않으면 apply_writes 가
+# 멈춘다.
 RECORDS_AT = ((0x3A8000, 0x3B0000), (0x309000, 0x30A000), (0x30A900, 0x30E000), (0x318000, 0x320000),
-              (0x328000, 0x330000), (0x338000, 0x340000), (0x348000, 0x34C000), (0x368000, 0x370000),
-              (0x378000, 0x380000), (0x398000, 0x3A0000))
+              (0x328000, 0x330000), (0x338000, 0x340000), (0x348000, 0x34C000), (0x398000, 0x3A0000))
 # 그룹 빌드는 늘린 뱅크가 0 인 원래 롬에서 패치를 만들고, dq5newmap 은 바탕과 같은 앞뒤 바이트(0)를 쓰지 않는다.
 # 메뉴 롬의 30~3F 는 원본 20~2F 의 거울이라, 그대로 얹으면 표 끝의 0000 같은 바이트 자리에 거울 값이 남는다.
 # 그래서 그룹 빌드가 쓰는 뱅크 3A~3F 와 레코드 자리의 거울 바이트를 먼저 0 으로 둔다.
@@ -622,6 +628,7 @@ def group_build(dq5, dq4, out):
     # 32:C400~·36:9E00~ 레코드와 겹치지 않아야 한다.
     dq4groupbuild.NPC_AT = ('--base', '33:8000', '--alt', '38:8000')
     dq4groupbuild.TEXT_AT = ('--at', '60:8000')
+    dq4groupbuild.TALK_AT = TALK_AT
     return dq4groupbuild.build(dq5, dq4, out)
 
 
@@ -662,13 +669,20 @@ def build(rom, dq5, dq4, work, prologue=True, chapter2=False):
     import dq4ch1event
     from kr_patch.fc import ines
     work.mkdir(parents=True, exist_ok=True)
-    (work / 'boss.json').write_text(json.dumps(dq4ch1event.encounter_doc()))
+    import dq4ch2event
+    boss = dq4ch1event.encounter_doc()
+    if dq4ch2event.encounter_groups():
+        boss["event_groups"] += dq4ch2event.encounter_groups()
+    (work / 'boss.json').write_text(json.dumps(boss))
     (work / 'learn.json').write_text(json.dumps(dq4ch1event.learn_doc()))
     import dq4growth
     (work / 'growth.dq5patch.json').write_text(json.dumps(
         {"format": "dq5patch/1", "name": "dq4-growth", "writes": dq4growth.writes(original, dq4)}, ensure_ascii=False))
-    (work / 'boss-monsters.json').write_text(json.dumps(dq4ch1event.monster_doc(ines.prg(dq4.read_bytes())),
-                                                        ensure_ascii=False))
+    monsters = dq4ch1event.monster_doc(ines.prg(dq4.read_bytes()))
+    more = dq4ch2event.monster_entries(ines.prg(dq4.read_bytes()))
+    if more:
+        monsters["monsters"] += more
+    (work / 'boss-monsters.json').write_text(json.dumps(monsters, ensure_ascii=False))
     # 원래 롬만 읽는 도구는 그룹 빌드와 함께 돌린다
     with ThreadPoolExecutor() as pool:
         side = [pool.submit(run_tool, DQ5_TOOLS / 'dq5npcrecord.py', dq5, 'dump', '-o', work / 'npc-records.json'),

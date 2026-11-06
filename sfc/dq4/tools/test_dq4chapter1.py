@@ -125,15 +125,17 @@ class GroupBuildTests(unittest.TestCase):
     def test_group_build_at_integrated_places_does_not_overlap(self):
         # dq5build inside dq4groupbuild.build refuses overlapping writes (new-map records, field map, prologue room).
         import dq4groupbuild
-        saved = dq4groupbuild.RECORDS_AT, dq4groupbuild.FIELD_AT, dq4groupbuild.NPC_AT, dq4groupbuild.TEXT_AT
+        saved = (dq4groupbuild.RECORDS_AT, dq4groupbuild.FIELD_AT, dq4groupbuild.NPC_AT, dq4groupbuild.TEXT_AT,
+                 dq4groupbuild.TALK_AT)
         try:
             with tempfile.TemporaryDirectory() as out:
                 summary = ch.group_build(ROOT / 'rom' / 'dq5.sfc', ROOT / 'rom' / 'dq4.nes', Path(out))
                 writes = json.loads((Path(out) / 'field.dq5patch.json').read_text(encoding='utf-8'))['writes']
         finally:
-            dq4groupbuild.RECORDS_AT, dq4groupbuild.FIELD_AT, dq4groupbuild.NPC_AT, dq4groupbuild.TEXT_AT = saved
+            (dq4groupbuild.RECORDS_AT, dq4groupbuild.FIELD_AT, dq4groupbuild.NPC_AT, dq4groupbuild.TEXT_AT,
+             dq4groupbuild.TALK_AT) = saved
         self.assertTrue(summary['rom'])
-        talk = int(dq4groupbuild.TALK_AT[1].replace(':', ''), 16)
+        talk = int(ch.TALK_AT[1].replace(':', ''), 16)
         import dq4fieldport
         planes = int(dq4fieldport.GFX_AT['planes'][:2], 16)
         for w in writes:
@@ -178,13 +180,20 @@ class ClearMirrorTests(unittest.TestCase):
 
     def test_group_ranges_cover_group_banks_npc_bank_and_loose_record_areas(self):
         ranges = ch.group_ranges()
-        for bank in (*ch.GROUP_BANKS, ch.NPC_BANK):
+        for bank in (*ch.GROUP_BANKS, ch.NPC_BANK, ch.TALK_BANK, 0x37):
             self.assertIn((bank * 0x8000, (bank + 1) * 0x8000), ranges)
         # 3A 안의 레코드 자리는 뱅크 전체에 이미 들어 있어 다시 더하지 않는다
         loose = [(lo, hi) for lo, hi in ch.RECORDS_AT if lo >> 16 not in ch.GROUP_BANKS]
-        self.assertEqual(len(ranges), len(ch.GROUP_BANKS) + 1 + len(loose))
+        self.assertEqual(len(ranges), len(ch.GROUP_BANKS) + 3 + len(loose))
         self.assertIn((ch.lorom(0x309000), ch.lorom(0x309FFF) + 1), ranges)
         self.assertEqual(len(ch.RECORDS_AT) - len(loose), 1)
+
+    def test_talk_and_second_alt_bank_are_not_record_areas(self):
+        # 덧붙인 대화 스크립트와 넘친 대체 목록이 쓰는 뱅크에 새 맵 레코드가 들어오면 서로 덮는다
+        banks = {b for lo, hi in ch.RECORDS_AT for b in range(lo >> 16, ((hi - 1) >> 16) + 1)}
+        self.assertNotIn(ch.TALK_BANK, banks)
+        self.assertFalse(banks & set(ch.NPC_ALT_BANKS))
+        self.assertEqual(ch.NPC_ALT, ','.join(f'{b:02X}:8000' for b in ch.NPC_ALT_BANKS))
 
 
 class ApplyWritesTests(unittest.TestCase):
@@ -360,12 +369,14 @@ class WrapperTests(unittest.TestCase):
 
         def build(dq5, dq4, out):
             seen.update(dq5=dq5, dq4=dq4, out=out, records=dq4groupbuild.RECORDS_AT, field=dq4groupbuild.FIELD_AT,
-                        npc=dq4groupbuild.NPC_AT, text=dq4groupbuild.TEXT_AT)
+                        npc=dq4groupbuild.NPC_AT, text=dq4groupbuild.TEXT_AT, talk=dq4groupbuild.TALK_AT)
             return {'ok': 1}
-        with unittest.mock.patch.multiple(dq4groupbuild, build=build, RECORDS_AT=(), FIELD_AT='', NPC_AT=(), TEXT_AT=()):
+        with unittest.mock.patch.multiple(dq4groupbuild, build=build, RECORDS_AT=(), FIELD_AT='', NPC_AT=(), TEXT_AT=(),
+                                          TALK_AT=()):
             self.assertEqual(ch.group_build('a', 'b', 'c'), {'ok': 1})
         self.assertEqual(seen, {'dq5': 'a', 'dq4': 'b', 'out': 'c', 'records': ch.RECORDS_AT, 'field': ch.FIELD_AT,
-                                'npc': ('--base', '33:8000', '--alt', '38:8000'), 'text': ('--at', '60:8000')})
+                                'npc': ('--base', '33:8000', '--alt', '38:8000'), 'text': ('--at', '60:8000'),
+                                'talk': ('--extra-at', '36:8000', '--hook-at', '06:FE10')})
 
     def test_run_tool_echoes_stderr(self):
         import dq4buildcache

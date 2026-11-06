@@ -12,6 +12,11 @@ sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
 import dq4chapter1 as ch1  # noqa: E402
 from dq4chapterbox import DB0, ENTER, LEAVE  # noqa: E402
+import dq4ch2battle  # noqa: E402
+from dq4ch2slots import SLOTS  # noqa: E402
+
+# 2장 사건 모듈(dq4ch2slots.SLOTS 의 module). 세션마다 한 줄씩 더한다. 차례가 메시지·대화 번호 차례다
+EVENTS = ()
 
 # 깃발(7E:2190 + 첫 값). DQ5 가 켜기만 하고 비트로 보지 않는 자리(sfc/dq5/docs/dq5-flags.md)
 CHAPTER2 = (0x78, 0x10)        # 7E:2208 bit4  2장 진행 중(1장 끝에서 켬). 주인공 그림을 아리나 대역으로
@@ -426,15 +431,119 @@ def message_ids(first):
 
 
 def texts(first):
-    return {first + k: parts for k, parts in enumerate(MESSAGES.values())}
+    out = {first + k: parts for k, parts in enumerate(MESSAGES.values())}
+    for ctx in contexts(first):
+        out.update({ctx.msg[name]: parts for name, parts in getattr(ctx.module, 'MESSAGES', {}).items()})
+    return out
 
 
 TALKS = ('wall', 'gate', 'gate2', 'brey', 'kiryl', 'king', 'gate_back', 'chief', 'priest')
 
 
 def talk_numbers(first_talk):
-    """{이름: 대화 번호}. first_talk 는 1장 사건 대화 다음 번호."""
+    """{이름: 대화 번호}. first_talk 는 1장 사건 대화 다음 번호. 사건 모듈의 대화는 그 뒤(talk_names)."""
     return {name: first_talk + k for k, name in enumerate(TALKS)}
+
+
+def talk_names():
+    """이 모듈과 사건 모듈의 대화 이름을 번호 차례로. 사건 모듈의 것은 「세션 키.이름」."""
+    return list(TALKS) + [f'{key}.{name}' for key, mod in modules() for name in getattr(mod, 'TALKS', ())]
+
+
+# 사건 모듈. 모듈이 내놓을 수 있는 것(모두 고를 수 있음)은 형식 문서 「사건 등록과 자원 예약」의 표다
+def modules():
+    """[(세션 키, 모듈)] EVENTS 차례."""
+    import importlib
+    out = []
+    for name in EVENTS:
+        key = next((k for k, s in SLOTS.items() if s.module == name), None)
+        if key is None:
+            raise SystemExit(f'{name}: dq4ch2slots.SLOTS 에 없는 사건 모듈')
+        out.append((key, importlib.import_module(name)))
+    return out
+
+
+class Context:
+    """사건 모듈이 받는 것. msg·talk 는 {이름: 번호}(모르는 자리에서는 None), at 은 그 모듈 네이티브의 {이름: 주소},
+    base 는 이 모듈 네이티브의 {이름: 주소}, original 은 원래 롬(없으면 None: 주소만 셀 때)."""
+
+    def __init__(self, key, module, message=None, talk=None, original=None):
+        self.key, self.module, self.slot, self.original = key, module, SLOTS[key], original
+        self.code_at = self.slot.code[0]
+        self.msg = None if message is None else {n: message + k for k, n in enumerate(getattr(module, 'MESSAGES', {}))}
+        self.talk = None if talk is None else {n: talk + k for k, n in enumerate(getattr(module, 'TALKS', ()))}
+        self.base = native()[1]
+        self._at = None
+
+    @property
+    def at(self):
+        """모듈 네이티브의 주소. 롬 없이 센다(주소가 롬에 따라 바뀌면 안 됨)."""
+        if self._at is None:
+            self._at = {}
+            if hasattr(self.module, 'native'):
+                saved, self.original = self.original, None
+                self._at = self.module.native(self)[1]
+                self.original = saved
+        return self._at
+
+
+def _first_talk():
+    """이 모듈 첫 대화 번호: 서장 스크립트·1장 사건 대화 뒤(dq4npcport.talk_doc 차례)."""
+    import dq4ch1event
+    import dq4npcport
+    import dq4prologue
+    return dq4npcport.SCRIPT_TALK + len(dq4prologue.talk_doc()["scripts"]) + len(dq4ch1event.TALKS)
+
+
+def contexts(first_message=None, first_talk=None, original=None):
+    """[Context] EVENTS 차례. 메시지는 이 모듈 MESSAGES 뒤, 대화는 TALKS 뒤에 모듈마다 이어 붙인다."""
+    mods = modules()
+    if not mods:
+        return []
+    message = None if first_message is None else first_message + len(MESSAGES)
+    talk = (_first_talk() if first_talk is None else first_talk) + len(TALKS)
+    out = []
+    for key, mod in mods:
+        out.append(Context(key, mod, message, talk, original))
+        message = None if message is None else message + len(getattr(mod, 'MESSAGES', {}))
+        talk += len(getattr(mod, 'TALKS', ()))
+    return out
+
+
+def event_tokens(first_message):
+    """사건 모듈의 이벤트 스크립트 토큰 목록들(dq4msgwait 가 메시지 끝 코드를 고를 때 봄)."""
+    return [t for ctx in contexts(first_message) if hasattr(ctx.module, 'events') for t in ctx.module.events(ctx)]
+
+
+def battle_stubs():
+    """{입구 칸: 무리}: 사건 모듈 BATTLES 가운데 대화 스크립트에서 부르는 것(stub)."""
+    out = {}
+    for _, mod in modules():
+        for b in getattr(mod, 'BATTLES', ()):
+            if b.get('stub') is not None:
+                if b['stub'] in out:
+                    raise SystemExit(f'전투 입구 칸 {b["stub"]} 을 두 번 씀')
+                out[b['stub']] = b['group']
+    return out
+
+
+def encounter_groups():
+    """dq5encounter/1 의 event_groups 에 더할 사건 전투 무리."""
+    return [dq4ch2battle.group_doc(b['group'], b['members'], b.get('flags', dq4ch2battle.BOSS_FLAGS))
+            for _, mod in modules() for b in getattr(mod, 'BATTLES', ())]
+
+
+def monster_entries(prg):
+    """dq5tables/1 의 monsters 에 더할 몬스터: 모듈의 monster_doc(prg), 없으면 MONSTERS {DQ5: FC} 를 FC 레코드로."""
+    import dq4ch1event
+    out = []
+    for _, mod in modules():
+        if hasattr(mod, 'monster_doc'):
+            out += mod.monster_doc(prg)
+        else:
+            out += [{"id": f"{dq5:02X}", **dq4ch1event.fc_monster(prg, fc)}
+                    for dq5, fc in getattr(mod, 'MONSTERS', {}).items()]
+    return out
 
 
 # FC 대화 번호: 2장 대화 스크립트로 바꾼 인물
@@ -445,9 +554,13 @@ def start_messages(first_message):
     """{(map, FC talk, night or None for both): first message} of the people this module gives chapter-2 talks
     (dq4npccheck --chapter1). The king's talk is the day one; at night he sleeps in the bedroom."""
     m = message_ids(first_message)
-    return {(CASTLE, FC_GATE, None): m['gate'], (CASTLE, FC_GATE2, None): m['gate2'],
-            (BREY_AT[0], FC_BREY, None): m['brey'], (KIRYL_AT[0], FC_KIRYL, None): m['kiryl'],
-            (THRONE, FC_KING, False): m['king_ask'], (TEMPE, FC_CHIEF, None): m['chief_ask']}
+    out = {(CASTLE, FC_GATE, None): m['gate'], (CASTLE, FC_GATE2, None): m['gate2'],
+           (BREY_AT[0], FC_BREY, None): m['brey'], (KIRYL_AT[0], FC_KIRYL, None): m['kiryl'],
+           (THRONE, FC_KING, False): m['king_ask'], (TEMPE, FC_CHIEF, None): m['chief_ask']}
+    for ctx in contexts(first_message):
+        if hasattr(ctx.module, 'start_messages'):
+            out.update(ctx.module.start_messages(ctx))
+    return out
 
 
 def _flag_on(flag):
@@ -467,7 +580,19 @@ def _talked(flag):
 
 
 def talk_scripts(first_message):
-    """dq5talk/1 의 scripts 에 TALKS 차례로 더할 본문. 벽: 예면 걷어참 깃발. 어느 쪽이든 대답 깃발을 켠다."""
+    """dq5talk/1 의 scripts 에 talk_names 차례로 더할 본문. 사건 모듈의 것은 TALKS 의 것 뒤."""
+    out = _talk_scripts(first_message)
+    for ctx in contexts(first_message):
+        if getattr(ctx.module, 'TALKS', ()):
+            bodies = ctx.module.talk_scripts(ctx)
+            if len(bodies) != len(ctx.module.TALKS):
+                raise SystemExit(f'{ctx.key}: TALKS {len(ctx.module.TALKS)}개에 대화 본문 {len(bodies)}개')
+            out += bodies
+    return out
+
+
+def _talk_scripts(first_message):
+    """벽: 예면 걷어참 깃발. 어느 쪽이든 대답 깃발을 켠다."""
     m = message_ids(first_message)
     msg = lambda k: {"op": "msg", "id": f"{m[k]:03X}"}  # noqa: E731
     return [
@@ -527,7 +652,7 @@ def scripts(first_message, native_points):
         {"address": PRIEST_SCRIPT, "commands": [
             _cmd('09', 0x80 | TEMPE_GONE[0], TEMPE_GONE[1]), _cmd('10', *TEMPE_ALTAR),
             _cmd('37', *_al(tail_native(first_message)[1]['altar_go'])), _cmd('16')]},
-    ]
+    ] + [s for ctx in contexts(first_message) if hasattr(ctx.module, 'scripts') for s in ctx.module.scripts(ctx)]
 
 
 def _invisible(src, talk):
@@ -602,7 +727,23 @@ def npc_lists(ported, first_talk):
            {"name": "ch2_kicked", "entries": clear + _invisible(OPENER_SRC, t['wall'])},
            {"name": "ch2_ready", "entries": clear + _invisible(ASKER_SRC, t['wall'])},
            {"name": "ch2_tempe_altar", "entries": altar}]
-    return ported, new, over
+    more_new, more_over = module_lists(lists, first_talk)
+    return ported, new + more_new, over + more_over
+
+
+def module_lists(lists, first_talk):
+    """사건 모듈의 (새 목록, 조건). 모듈은 lists({맵: 목록})를 고쳐(대화 바꾸기) 새 목록·조건을 더한다. 새 목록 이름은
+    dq4ch2slots 의 앞머리로 시작해야 한다."""
+    new, over = [], []
+    for ctx in contexts(first_talk=first_talk):
+        if hasattr(ctx.module, 'npc_lists'):
+            more_new, more_over = ctx.module.npc_lists(lists, ctx)
+            for lst in more_new:
+                if not lst["name"].startswith(ctx.slot.lists):
+                    raise SystemExit(f'{ctx.key}: 대체 목록 이름 {lst["name"]} 이 {ctx.slot.lists} 로 시작하지 않음')
+            new += more_new
+            over += more_over
+    return new, over
 
 
 def apply(data, original, first_message):
@@ -618,8 +759,24 @@ def apply(data, original, first_message):
         raise SystemExit('2장 네이티브가 뱅크를 넘음')
     d[o:o + len(code)] = code
     _, at = native()
-    for addr, orig, new in ((HERO_PICTURE_AT, HERO_PICTURE_ORIG, bytes((0x22, *_al(at['hero_picture']), 0x60))),
-                            (STEP_HOOK_AT, STEP_HOOK_ORIG, bytes((0x22, *_al(tail['step']))))):
+    hooks = [(HERO_PICTURE_AT, HERO_PICTURE_ORIG, bytes((0x22, *_al(at['hero_picture']), 0x60))),
+             (STEP_HOOK_AT, STEP_HOOK_ORIG, bytes((0x22, *_al(tail['step']))))]
+    places = dq4ch2battle.writes(battle_stubs())
+    for ctx in contexts(first_message, original=original):
+        if hasattr(ctx.module, 'native'):
+            more, _ = ctx.module.native(ctx)
+            start, end = ctx.slot.code
+            if start + len(more) > end:
+                raise SystemExit(f'{ctx.key}: 사건 코드 {len(more)}바이트가 예약 {start:06X}~{end - 1:06X} 를 넘음')
+            places.append((start, more))
+        if hasattr(ctx.module, 'hooks'):
+            hooks += ctx.module.hooks(ctx)
+    for addr, code in places:
+        o = ch1.lorom(addr)
+        if any(d[o:o + len(code)]):
+            raise SystemExit(f'{addr:06X}: 비어 있지 않은 자리')
+        d[o:o + len(code)] = code
+    for addr, orig, new in hooks:
         o = ch1.lorom(addr)
         if bytes(d[o:o + len(orig)]) != orig:
             raise SystemExit(f'{addr:06X}: 원래 바이트가 아님 {d[o:o + len(orig)].hex()}')
