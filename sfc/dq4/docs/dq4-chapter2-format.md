@@ -416,7 +416,7 @@ flag 바이트는 바이트째 그 세션 몫입니다(비트 여덟을 마음�
 
 ### 걷기 검사에 구간 붙이기
 
-1. **flag**: 사건 모듈의 flag 를 `dq4ch2walkcheck.FLAGS` 에 한 줄로 더합니다(`'NAME': flag(모듈.FLAG)`, 값은 `(7E:2190 + 첫 값, 마스크)`).
+1. **flag**: 사건 모듈([사건 등록과 자원 예약](#사건-등록과-자원-예약)으로 `dq4ch2event.EVENTS` 에 끼운 `dq4ch2<이름>.py`)이 쓰는 flag 를 `dq4ch2walkcheck.FLAGS` 에 이름 붙여 한 줄로 더합니다(`'NAME': flag(모듈.FLAG)`, 값은 `(7E:2190 + 첫 값, 마스크)`). flag 는 모듈의 `FLAGS` 에도 있어야 예약 바이트 안인지 시험이 봅니다.
 2. **구간**: `dq4ch2walkcheck.SEGMENTS` 에 사건 하나를 「순간이동 구간 하나 + 걷기 구간 여럿」 으로 더합니다. 순간이동 구간마다 새 묶음이고, 묶음끼리는 함께 돕니다. 묶음 첫 구간에는 그 앞 모든 구간의 `want` 가 켜지고 `off` 가 꺼진 채로 놓이므로, 사건 차례대로 더하면 앞 사건을 걷지 않고도 그 상태에서 시작합니다.
 3. **선택**: 꼴은 `dq4ch1walkcheck.SEGMENTS` 와 같습니다.
 
@@ -432,7 +432,7 @@ flag 바이트는 바이트째 그 세션 몫입니다(비트 여덟을 마음�
 4. **순간이동 자리**: `dq5warp.lua` 는 `TO` 의 한 셀 아래에 내립니다(도착이 늘 `TO + (0,1)`). 인물 아래 칸에서 위로 말 걸려면 인물 셀 `(x, y)` 에 대해 `TO = (x, y + 1)`(도착 `y + 2`)입니다. 같은 맵 `3D/01` 로 순간이동하는 묶음은 `HOPS` 의 이웃 맵을 거칩니다.
 5. **걸어 다니는 인물**: 말 상대가 걸어 다니면 난수에 따라 비켜 서서 시드마다 결과가 갈립니다. 구간의 `poke` 로 그 인물 슬롯의 걸음 간격 `7E:3300 + 슬롯` 을 `00` 으로 묶습니다(낮 목록 n 번째 인물 = 슬롯 `08 + n`). 브라이(`HOLD_BREY = 7E3308=00`)를 묶지 않았을 때 시드 5·9 에서 「その方向には誰もいない」(`129`)가 났습니다.
 6. **기록에 남는 것**: 사건이 flag 말고 일행·물건 같은 기록을 바꾸면 `dq4ch2walkcheck.effects` 에 `구간 이름 → {'set': …}` 을 더합니다. 두 사람 합류(`join`)는 `dq4ch2event.recruit_records` 로 일행 기록 1·2, 일행 수 3, 순서 0 1 2 를 둡니다(상태 창 「아리나·크리프트·브라이」 H 16·18·16 확인). `dq5warp.lua` `PARTY` 는 몬스터 동료 기록만 만들어 사람 동료에 쓰지 않습니다.
-7. **전투**: 걸음 전투는 조우 판정을 덮어 없앱니다. 보스·이벤트 전투 구간은 지금 틀에 없습니다. 처음 붙이는 사건은 1장 검사의 `boss`(몬스터 HP 1·수비 0, 주인공 HP 묶기)처럼 그 편성만 약하게 하는 롬 패치 선택을 `dq4ch2walkcheck.walk_unit` 과 `dq4compatcheck.Walker.segments` 에 함께 더합니다. 지는 경우는 별도 구간으로 둡니다.
+7. **전투**: 걸음 전투는 조우 판정을 덮어 없앱니다. 보스·이벤트 전투 구간은 지금 틀에 없습니다. 사건 전투는 [사건 전투](#사건-전투)의 공용 루틴으로 걸리고 이겼는지는 `7E:2208` bit7 에 남으므로, 구간의 `want` 로는 모듈이 그 비트를 보고 켠 사건 flag 를 봅니다. 처음 붙이는 사건은 1장 검사의 `boss`(몬스터 HP 1·수비 0, 주인공 HP 묶기)처럼 모듈 `BATTLES` 의 그 무리만 약하게 하는 롬 패치 선택을 `dq4ch2walkcheck.walk_unit` 과 `dq4compatcheck.Walker.segments` 에 함께 더합니다. 지는 경우는 별도 구간으로 둡니다.
 8. **돌리기**: `--only 구간` 으로 그 묶음만, `--seeds 0,5,9,13,21` 로 여러 시드를 돌려 모두 통과하는지 봅니다. 가드는 `--repeat 2` 입니다.
 
 ```sh
@@ -443,7 +443,7 @@ MESENCE=… LIBDIR=… uv run --locked python sfc/dq4/tools/dq4ch2walkcheck.py -
 
 ### 다른 세 검사에 붙이기
 
-- **npccheck**: 사건이 말을 바꾼 인물은 장 시작 상태의 첫 메시지를 `dq4ch2event.start_messages` 가 돌려주는 표(`(맵, FC 대화 번호, 밤 또는 None) → 메시지 번호`)에 더합니다. 검사는 2장 flag 만 켜고 다른 사건 flag 는 두지 않으므로, flag 로 바뀐 대체 목록(`later_states`)의 인물은 보지 않습니다. 그 인물은 걷기 검사 구간에서 말을 걸어 봅니다. 인물 폴더는 `dq4chapter1.py build --chapter2 --keep 폴더` 로 만들고, 그 롬은 `dq4build.py --chapter2` 의 `dq4-ch1.sfc` 와 SHA-1 이 같았습니다.
+- **npccheck**: 사건이 말을 바꾼 인물은 사건 모듈에 `start_messages(ctx)` 를 두어 장 시작 상태의 첫 메시지 표(`(맵, FC 대화 번호, 밤 또는 None) → 메시지 번호`, 번호는 `ctx.msg`)를 돌려줍니다. `dq4ch2event.start_messages` 가 등록 차례로 모듈의 표를 합치므로 `dq4ch2event.py` 는 고치지 않습니다. 검사는 2장 flag 만 켜고 다른 사건 flag 는 두지 않으므로, flag 로 바뀐 대체 목록(`later_states`)의 인물은 보지 않습니다. 그 인물은 걷기 검사 구간에서 말을 걸어 봅니다. 인물 폴더는 `dq4chapter1.py build --chapter2 --keep 폴더` 로 만들고, 그 롬은 `dq4build.py --chapter2` 의 `dq4-ch1.sfc` 와 SHA-1 이 같았습니다.
 - **heroblock**: 주인공을 걷게 하거나 칸·방향으로 거는 사건이면 `dq4heroblockcheck.chapter2_cases` 에 그 사건을 걸 수 있는 칸마다 사례를 둡니다(`warp`·`set`(flag)·`walk`·`want`, 끝에 다시 걸을 칸 `free`, 사건이 옮겨 둔 셀 `hero_at`). 출발 상태는 2장 출발 상태입니다.
 - **호환성**: `dq4ch2walkcheck.SEGMENTS` 를 그대로 걸으므로 따로 붙일 것이 없습니다. 새 선택을 걷기 검사에 더하면 `dq4compatcheck.Walker.check`·`segments` 에도 같은 판정을 더합니다(`cell` 은 더함).
 
