@@ -3,7 +3,7 @@
 
 장면(SCENES): 보통 공격(회심 셈)·중간 수비, 도망·도망칠 수 없는 무리·몬스터 도망, 약초, 호이민의 ホイミ, 레벨업 한 번·두 번,
 전멸, 탑 위 보스(보스 패치 없이), 맵 곡 건너뛰기 비트를 켠 기록으로 이어 하기(nosong), 라이안 성장 곡선(FC ライアン 과
-견줌, growth).
+견줌, growth), 2장 일행 셋의 성장·배운 주문(party2)과 크리프트 ホイミ·브라이 ヒャド(party2spell).
 - 걸음 전투는 조우 루틴 23:E7C2 를 cheat 로 「무리를 7E:1001~ 에 쓰고 구역 레벨 $100F·무리 플래그 $1000 을 둔 뒤
   carry 를 켜 돌아옴」으로 덮어 탑 39/01 (20,16)에서 아래로 한 걸음 내디뎌 붙인다. 전투가 걸리면 cheat 를 풀어
   롬의 「조우 없음」(dq4ch1walkcheck.NO_ENCOUNTERS)으로 돌아간다.
@@ -73,6 +73,8 @@ SPELLS = 0x23                     # 일행 기록 +23~+25: 배운 주문 비트
 GOLD = 0x7E2019
 HERB = 0xA1                       # DQ5 やくそう
 HOIMI = 0x27                      # 행동 ホイミ(やくそう 도 이 처리 루틴, dq5-data-format 「물건」)
+HYADO = 0x0A                      # 행동 ヒャド
+CAST_WINDOW = 120                 # 주문을 건 사람의 MP 가 준 뒤 그 효과(몬스터 HP 가 줆)를 찾는 프레임
 FC_HOIMI = 0x29                   # FC 행동 ID ホイミ(fc/dq4/docs/dq4-data-format.md 「HP 회복」)
 GROWTH_TO = 20                    # growth 장면이 오르는 끝 레벨
 NO_ITEM = 0xFF
@@ -93,8 +95,15 @@ TURNS = {
     'attack': ((20, 'a'), (50, 'a'), (80, 'a')),
     'defend': ((20, 'a'), (50, 'down'), (80, 'a')),
     'flee': ((20, 'down'), (50, 'a')),
+    # 일행이 둘 이상이면 첫 창이 싸우기·작전·도망 세 줄이다(아래 한 번은 작전)
+    'flee3': ((20, 'down'), (50, 'down'), (80, 'a')),
     # 도구 → 셋째 물건(물건 창은 두 칸씩, 앞 둘은 밑판의 ぬののふく·ひのきのぼう라 아래 한 번) → 대상 주인공
     'herb': ((20, 'a'), (50, 'down'), (75, 'down'), (100, 'a'), (140, 'down'), (170, 'a'), (210, 'a')),
+    # 2장 셋(작전 めいれいさせろ 라 동료도 명령을 받음). 동료 창은 공격·주문·방어·도구 네 줄
+    'attack3': ((20, 'a'), (50, 'a'), (80, 'a'), (110, 'a'), (140, 'a'), (170, 'a'), (200, 'a')),
+    # 아리나 방어, 크리프트 주문 → 첫 주문(ホイミ) → 우리 편 첫째(주인공), 브라이 주문 → 첫 주문(ヒャド) → 몬스터 무리
+    'spell3': ((20, 'a'), (50, 'down'), (80, 'a'), (110, 'down'), (140, 'a'), (170, 'a'), (200, 'a'),
+               (230, 'down'), (260, 'a'), (290, 'a'), (320, 'a')),
 }
 
 
@@ -118,7 +127,7 @@ def flee_tries(scene, turns, switched):
     then = scene.get('then', (None, None))[0]
     if scene['turn'] == 'flee':
         return turns if switched is None else switched - 1
-    if then == 'flee' and switched is not None:
+    if then in ('flee', 'flee3') and switched is not None:
         return turns - switched + 1
     return 0
 
@@ -367,8 +376,8 @@ def judge_levelup(s, expect):
     down = [k for k, (a, b) in enumerate(zip(was['stats'], hero['stats'])) if b < a]
     if down:
         problems.append(f"능력치가 줆: {was['stats']} → {hero['stats']}")
-    # 손님 호이민은 FC 처럼 레벨이 없다
-    if s['after'].get('party_levels', [])[1:] != s['before'].get('party_levels', [])[1:]:
+    # 손님 호이민은 FC 처럼 레벨이 없다. 2장 동료(members 를 기대하는 장면)는 오른다
+    if 'members' not in expect and s['after'].get('party_levels', [])[1:] != s['before'].get('party_levels', [])[1:]:
         problems.append(f"동료 레벨이 바뀜: {s['before'].get('party_levels')} → {s['after'].get('party_levels')}")
     return problems
 
@@ -384,6 +393,56 @@ def judge_growth(s, expect):
     # FC ライアン·アリーナ 는 주문을 배우지 않는다(dq4ch1event.learn_doc)
     if s['after']['hero'].get('spells'):
         problems.append(f"배운 주문 비트 {s['after']['hero']['spells']:06X}")
+    return problems
+
+
+def judge_party(s, expect):
+    """party2: 주인공(아리나)은 growth 판정, 동료(크리프트·브라이)도 레벨·능력치·다음 경험치가 FC 롬 실측과 같고
+    배운 주문 비트가 FC 습득 레벨을 옮긴 DQ5 표대로인지."""
+    problems = judge_growth(s, expect)
+    if s.get('end') is None:
+        return problems
+    names = ('최대HP', '최대MP', 'ちから', 'すばやさ', 'かしこさ', 'うんのよさ', 'みのまもり')
+    for k, (want, got) in enumerate(zip(expect['members'], s['after'].get('members', [])), 1):
+        stats, nxt, spells = want
+        if got['level'] != expect['level']:
+            problems.append(f"동료 {k} 레벨 {got['level']}, 기대 {expect['level']}")
+        for name, a, b in zip(names, got['stats'], stats):
+            if a != b:
+                problems.append(f'동료 {k} {name} {a}, FC {b}')
+        if got['next'] != nxt:
+            problems.append(f"동료 {k} 다음 레벨 경험치 {got['next']}, FC {nxt}")
+        if got['spells'] != spells:
+            problems.append(f"동료 {k} 배운 주문 비트 {got['spells']:06X}, 기대 {spells:06X}")
+    if len(s['after'].get('members', [])) != len(expect['members']):
+        problems.append(f"동료 {len(s['after'].get('members', []))}명, 기대 {len(expect['members'])}명")
+    return problems
+
+
+def judge_party_spells(s, expect):
+    """party2spell: 크리프트가 ホイミ(MP 가 그 값만큼 줆, 주인공 HP 가 원작 범위만큼 오름)를, 브라이가 ヒャド(MP 가 그
+    값만큼 줆, CAST_WINDOW 안에 몬스터 HP 가 원작 범위만큼 줆)를 쓴다."""
+    problems = judge_common(s, expect)
+    if s.get('start') is None:
+        return problems
+    casts = s.get('casts', [])
+    kiryl = [c for c in casts if c['member'] == 1 and c['drop'] == expect['hoimi_cost']]
+    if not kiryl:
+        problems.append(f"크리프트 MP 가 ホイミ 값({expect['hoimi_cost']})만큼 준 적 없음: {casts}")
+    heals = s.get('heals', [])
+    if not heals:
+        problems.append('주인공 HP 회복이 없음')
+    else:
+        lo, hi = heal_expect(heals[0]['from'], expect['max_hp'], *expect['amount'])
+        if not lo <= heals[0]['to'] <= hi:
+            problems.append(f"회복 {heals[0]['from']} → {heals[0]['to']}, 기대 {lo}~{hi}")
+    lo, hi = expect['hyado']
+    brey = [c for c in casts if c['member'] == 2 and c['drop'] == expect['hyado_cost']]
+    hit = [c for c in brey if any(c['f'] <= f <= c['f'] + CAST_WINDOW and lo <= d <= hi for f, d in s.get('mon_drops', []))]
+    if not brey:
+        problems.append(f"브라이 MP 가 ヒャド 값({expect['hyado_cost']})만큼 준 적 없음: {casts}")
+    elif not hit:
+        problems.append(f"브라이 ヒャド 뒤 {CAST_WINDOW} 프레임 안에 {lo}~{hi} 피해가 없음: {s.get('mon_drops')}")
     return problems
 
 
@@ -435,7 +494,7 @@ def judge_nosong(s, expect):
 JUDGES = {'attack': judge_attack, 'armor': judge_attack, 'flee': judge_flee, 'noflee': judge_noflee,
           'herb': judge_heal, 'spell': judge_heal, 'levelup': judge_levelup, 'levelup2': judge_levelup,
           'lose': judge_lose, 'boss': judge_boss, 'monflee': judge_monflee, 'nosong': judge_nosong,
-          'growth': judge_growth, 'growth2': judge_growth}
+          'growth': judge_growth, 'growth2': judge_growth, 'party2': judge_party, 'party2spell': judge_party_spells}
 
 
 def distribution(summaries):
@@ -550,6 +609,16 @@ SCENES = {
     'growth2': {'what': f'2장 flag 로 레벨 1 → {GROWTH_TO}(FC アリーナ 곡선과 견줌)', 'group': [(0x00, 1)],
                 'monsters': {0x00: {'hp': 1, 'defense': 0, 'attack': 0}}, 'growth': (1, GROWTH_TO - 1), 'turn': 'attack',
                 'limit': 20000, 'finish_limit': 20000, 'chapter': 1},
+    # 2장 일행 셋(롬의 합류 기록 그대로 1레벨)을 한 전투에 20 까지. 셋 다 FC 롬 실측(dq4growth.MEASURED)과 견준다.
+    # 레벨업 글이 셋 몫이라 맵 곡이 돌아오기 전까지는 A 를 8 프레임마다 눌러 넘긴다(돌아온 뒤에도 빠르면 맵 명령 창을
+    # 넘겨 버려 끝을 못 봄)
+    'party2': {'what': f'2장 일행 셋이 레벨 1 → {GROWTH_TO}(FC 실측과 견줌, 배운 주문 포함)', 'group': [(0x00, 1)],
+               'monsters': {0x00: {'hp': 1, 'defense': 0, 'attack': 0}}, 'growth': (1, GROWTH_TO - 1), 'turn': 'attack3',
+               'limit': 45000, 'finish_limit': 45000, 'chapter': 1, 'party': 'ch2', 'mash': 8},
+    # 몬스터는 맞지 않는다(수비 255·공격 0). 주인공 HP 를 낮춰 두고 크리프트 ホイミ·브라이 ヒャド 를 명령한 뒤 도망
+    'party2spell': {'what': '2장 일행: 크리프트 ホイミ·브라이 ヒャド(1레벨 합류 기록의 주문)', 'group': [(0x00, 1)],
+                    'monsters': {0x00: {'hp': 2000, 'defense': 255, 'attack': 0}}, 'chapter': 1, 'party': 'ch2',
+                    'hero': {'max_hp': 100, 'hp': 30}, 'turn': 'spell3', 'then': ('flee3', 1)},
 }
 # 알려진 문제를 재는 장면이라 기본 묶음(가드)에 넣지 않는다: --scenes 로 고른다
 KNOWN_ISSUES = ()
@@ -573,6 +642,9 @@ def scene_slot(rom_path, rom, scene):
     chapter = scene.get('chapter', 0)
     if chapter:
         slot.flag('CHAPTER2')
+    if scene.get('party') == 'ch2':
+        for a, v in chapter2_party(rom):
+            slot.poke(a, v)
     hero = dict(scene.get('hero', {}))
     kind = slot.block[0x40]
     level = scene['growth'][0] if 'growth' in scene else hero.pop('level', None)
@@ -590,6 +662,13 @@ def scene_slot(rom_path, rom, scene):
             exp = dq4growth.exp_at(rom, kind, level + scene['growth'][1], chapter) - 1
         slot._put(HERO + EXP, exp, 3)
         slot._put(HERO + NEXT, dq4growth.exp_at(rom, kind, level + 1, chapter), 3)
+    if 'growth' in scene and scene.get('party') == 'ch2':
+        # 동료는 합류 기록(1레벨) 그대로 두고 경험치만 끝 레벨 바로 아래로
+        for k in range(1, slot._get(0x7E201D)):
+            mate = HERO + k * RECORD
+            kind = slot._get(mate)
+            slot._put(mate + EXP, dq4growth.exp_at(rom, kind, sum(scene['growth']), chapter) - 1, 3)
+            slot._put(mate + NEXT, dq4growth.exp_at(rom, kind, 2, chapter), 3)
     if 'growth' in scene and scene.get('party') == 'hoimin':
         # 경험치를 동료의 다음 문턱 바로 아래로 두어, 레벨을 막지 않으면 이 전투에서 오르게 한다
         mate = HERO + RECORD
@@ -603,6 +682,49 @@ def scene_slot(rom_path, rom, scene):
     if 'items' in scene:
         slot.set_hero(items=scene['items'])
     return slot
+
+
+def chapter2_party(rom):
+    """2장 일행 셋의 기록: 롬의 아리나 1레벨 기록과 합류 기록(dq4ch2event.native 의 record·recruits)을 일행 칸 0~2 에.
+    [(주소, 값)]."""
+    import dq4ch2event as ev2
+    import dq4growth
+    _, at = ev2.native()
+    hero = rom[dq4growth.lorom(at['record']):][:RECORD]
+    n = len(ev2.RECRUITS)
+    mates = rom[dq4growth.lorom(at['recruits']):][:RECORD * n]
+    out = [(HERO + j, b) for j, b in enumerate(hero + mates)]
+    out += [(0x7E201D, 1 + n), (0x7E201E, 1 + n), (0x7E201F, 1 + n)]
+    return out + [(0x7E2020 + k, k) for k in range(1 + n)] + [(0x7E2028 + k, k) for k in range(1 + n)]
+
+
+def original_spell(n, root=ROOT):
+    """DQ5 원작 롬의 주문 n: ((바탕, 폭), MP)."""
+    import dq5spell
+    from dq5map import Rom
+    r = Rom((root / 'rom' / 'dq5.sfc').read_bytes())
+    _, lda, _, _ = dq5spell.handler(r, n)
+    return tuple(dq5spell.amount(r, lda)), dq5spell.cost(r, n)[0]
+
+
+def party_expect(rom, level, root=ROOT):
+    """party2 동료의 기대값: [(능력치, 다음 레벨 경험치, 배운 주문 비트)]. 능력치·경험치는 FC 롬 실측
+    (dq4growth.MEASURED), 주문은 dq4party 표로 그 레벨까지 배우는 칸."""
+    import dq4ch2event as ev2
+    import dq4growth
+    import dq4party
+    prg, r = dq4party._fc(root / 'rom' / 'dq4.nes'), dq4party._dq5(root / 'rom' / 'dq5.sfc')
+    out = []
+    for rec in ev2.RECRUITS:
+        who = dq4party.RECRUITS[rec['person']]
+        stats, nxt = dq4growth.MEASURED[who][level]
+        p = dq4party.plan(prg, r, who)
+        bits = p['start']
+        for e in p['learn']:
+            if e['level'] <= level:
+                bits |= sum(1 << k for k in e['field_slots']) | sum(1 << 8 + k for k in e['battle_slots'])
+        out.append((stats, nxt, bits))
+    return out
 
 
 def original_hoimi(root=ROOT):
@@ -628,6 +750,8 @@ def growth_expect(scene_name, level, root=ROOT):
     import dq4growth
     if SCENES[scene_name].get('chapter'):
         stats, exp = dq4growth.tables(root / 'rom' / 'dq4.nes', dq4growth.FC_ALENA)
+        if SCENES[scene_name].get('party') == 'ch2':
+            assert (stats[level], exp[level + 1]) == tuple(dq4growth.ALENA_MEASURED[level]), '아리나 표와 FC 실측이 다름'
         return stats[level], exp[level + 1]
     return dq4growth.RYAN_MEASURED[level]
 
@@ -642,8 +766,15 @@ def expectations(rom, scene_name, slot):
     exp['exp'] = dq4balance.reward(sum(vals[n]['exp'] * c for n, c in group))
     if 'growth' in scene:
         exp['level'] = sum(scene['growth'])
-    if scene_name in ('growth', 'growth2'):
+    if scene_name in ('growth', 'growth2', 'party2'):
         exp['curve'] = growth_expect(scene_name, exp['level'])
+    if scene_name == 'party2':
+        exp['members'] = party_expect(rom, exp['level'])
+    if scene_name == 'party2spell':
+        exp['amount'], exp['hoimi_cost'] = original_hoimi()
+        exp['max_hp'] = slot.hero(MAX_HP, 2)
+        (base, width), exp['hyado_cost'] = original_spell(HYADO)
+        exp['hyado'] = (base, base + width - 1)
     if 'finish_limit' in scene:
         exp['finish_limit'] = scene['finish_limit']
     if scene_name in ('herb', 'spell'):
@@ -741,7 +872,10 @@ class Run:
                 'exp': rd(HERO + EXP, 3), 'next': rd(HERO + NEXT, 3),
                 'stats': [rd(HERO + f, n) for f, n in GROWTH_FIELDS], 'spells': rd(HERO + SPELLS, 3)}
         party = [rd(HERO + k * RECORD + LEVEL) for k in range(max(1, min(rd(0x7E201D), 4)))]
-        return {'party_levels': party, 'f': self.c.n, 'map': '%02X/%02X' % (rd(0x7E00BC), rd(0x7E00BD)), 'cell': [rd(0x7E3020), rd(0x7E3080)],
+        members = [{'level': rd(m + LEVEL), 'next': rd(m + NEXT, 3), 'stats': [rd(m + f, n) for f, n in GROWTH_FIELDS],
+                    'spells': rd(m + SPELLS, 3), 'hp': rd(m + HP, 2), 'mp': rd(m + MP, 2)}
+                   for m in (HERO + k * RECORD for k in range(1, len(party)))]
+        return {'party_levels': party, 'members': members, 'f': self.c.n, 'map': '%02X/%02X' % (rd(0x7E00BC), rd(0x7E00BD)), 'cell': [rd(0x7E3020), rd(0x7E3080)],
                 'song': rd(SONG), 'gold': rd(GOLD, 3), 'exp': hero['exp'], 'hero': hero,
                 'items': [rd(HERO + ITEMS + k) for k in range(12)],
                 'flags': sorted(k for k, (a, m) in wc.FLAGS.items() if rd(a) & m)}
@@ -782,7 +916,7 @@ class Run:
         w.apply()
         sentinel = bytes(ev.BOSS_MONSTERS) if boss else group_sentinel(scene['group'])
         s = {'seed': seed, 'map_song': self.map_song, 'continue_song': self.continue_song, 'start': None, 'end': None, 'turns': 0, 'hits': [],
-             'heals': [], 'songs': []}
+             'heals': [], 'songs': [], 'casts': [], 'mon_drops': []}
         before = self.snapshot()
         t0 = c.n
         # 전투 붙이기
@@ -854,8 +988,13 @@ class Run:
                 if hp < old and len(party) == 1:
                     s['hits'].append({'f': c.n - s['start'], 'drop': old - hp, 'attack': attack, 'defense': defense[k],
                                       'kind': classify_hit(old - hp, attack, defense[k], killed=hp == 0)})
+                if hp < old:
+                    s['mon_drops'].append((c.n - s['start'], old - hp))
                 hp_mon[k] = hp
             now = self.party()
+            for k in range(1, min(len(now), len(party))):
+                if now[k][1] < party[k][1]:
+                    s['casts'].append({'f': c.n - s['start'], 'member': k, 'drop': party[k][1] - now[k][1]})
             if now[0][0] > party[0][0] and not s['heals']:
                 drop = party[1][1] - now[1][1] if len(now) > 1 else None
                 s['heals'].append({'f': c.n - s['start'], 'from': party[0][0], 'to': now[0][0], 'caster_mp_drop': drop})
@@ -877,7 +1016,8 @@ class Run:
                 s['song_back'] = c.n - finished
             if turn_at is not None and c.n < policy_until:
                 buttons = self.press_for(policy, turn_at)
-            elif window not in INPUT_WINDOWS and (c.n - s['start']) % MASH < 4:
+            elif window not in INPUT_WINDOWS and (c.n - s['start']) % (
+                    MASH if cur == before['song'] else scene.get('mash', MASH)) < 4:
                 # 메시지 넘기기. 맵으로 돌아오면 이 A 가 명령 창(FIELD_WINDOW)을 연다
                 buttons = {'a'}
             if lose:

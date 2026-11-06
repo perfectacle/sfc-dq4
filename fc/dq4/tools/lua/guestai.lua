@@ -9,12 +9,14 @@
 --   PRG="..."      첫 프레임에 메모리상 PRG ROM 오프셋=바이트들
 --   HOOK="10:B497" 뱅크:주소. 닿을 때마다 $96(전투원)·$0B(행동 ID)·A·X·Y 를 적는다
 --   MAXF=3000      이 프레임에 guestai.txt 를 쓰고 멈춘다
+--   A_EVERY=32 A_HOLD=8  전투가 시작되고 300 프레임 뒤부터 A_EVERY 프레임마다 A_HOLD 프레임 A 를 누른다
 -- 결과: SHOT_DIR/guestai.txt, end.{ram,sram,...,png}
 package.path = os.getenv("LIBDIR") .. "/?.lua;" .. package.path
 local L = require("lib")
 L.loadState(os.getenv("STATE"))
 local mem = L.mem
 local maxf = tonumber(os.getenv("MAXF") or "3000")
+local aEvery, aHold = tonumber(os.getenv("A_EVERY") or "32"), tonumber(os.getenv("A_HOLD") or "8")
 local mons = {}
 for id, cnt in string.gmatch(os.getenv("MON") or "00:1", "(%x+):(%x+)") do
   mons[#mons + 1] = {tonumber(id, 16), tonumber(cnt, 16)}
@@ -70,7 +72,7 @@ emu.addEventCallback(function()
   if not hit then
     L.press((n // 12) % 2 == 0 and {up = true} or {down = true})
   elseif n > hit + 300 then
-    L.press((n // 8) % 4 == 0 and {a = true} or {})
+    L.press(n % aEvery < aHold and {a = true} or {})
   else
     L.release()
   end
