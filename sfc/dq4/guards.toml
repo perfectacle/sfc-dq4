@@ -983,7 +983,7 @@ groups = ["ch1-build", "ch1-walk"]
 
 [[check]]
 name = "dq4-door-open"
-why = "서장·1장 맵(그룹 36~3C)의 문마다 옆 칸에서 밀면 잠금 0 은 열리고, 잠긴 문은 열쇠 없이 닫힌 채 밀 때마다 메시지가 한 번, 도둑의 열쇠로는 아래에서 열려야 한다(dq4door). 출발 상태는 그 롬의 서장 끝(dq4freshstate)"
+why = "서장·1장 맵(그룹 36~3C)의 문마다 옆 칸에서 밀면 잠금 0 은 열리고, 잠긴 문은 열쇠 없이 닫힌 채 밀 때마다 메시지가 한 번, 그 단계 열쇠 물건(잠금 1 도적의 열쇠 B7, 잠금 2 마법의 열쇠 B8)으로는 아래(옆문은 왼쪽)에서 열려야 한다(dq4door). 출발 상태는 그 롬의 서장 끝(dq4freshstate)"
 paths = [
   "sfc/dq4/tools/dq4environmentrom.py",
   "sfc/dq4/tools/dq4door.py",
@@ -1007,6 +1007,58 @@ paths = [
   "sfc/dq4/tools/dq4shards.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/doorcheck && uv run --locked python sfc/dq4/tools/dq4doorcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/doorcheck"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk"]
+
+[[check]]
+name = "dq4-door-open-ch2"
+why = "2장 롬에서 2장에 닿는 그룹(3D 산트하임·텐페·프레놀, 40 엔돌, 45 사란·바자·서쪽 탑·남쪽 동굴)의 문도 같은 규칙이어야 한다. DQ5 의 잠금 1 판정(01:DCFC)은 カギの技法 flag 2199.1 만 보아, FC 의 도적의 열쇠(B7)를 가져도 걸어 들어가거나 「문」 으로는 산트하임 성 (16,3)·사란 (8,53) 등의 잠금 1 문이 열리지 않았다. 잠금 2 문은 도적의 열쇠로 열리면 안 된다"
+paths = [
+  "sfc/dq4/tools/dq4environmentrom.py",
+  "sfc/dq4/tools/dq4door.py",
+  "sfc/dq4/tools/dq4doorcheck.py",
+  "sfc/dq4/tools/dq4freshstate.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/dq4pins.py",
+  "sfc/dq4/tools/dq4groupcheck.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
+  "fc/dq4/tools/dq4block.py",
+  "sfc/dq4/tools/lua/dq4doorwalk.lua",
+  "sfc/dq5/tools/lua/dq5warp.lua",
+  "sfc/dq4/tools/dq4readset.py",
+  "sfc/dq4/tools/lua/dq4readset.lua",
+  "tools/mesence_settings.py",
+  "sfc/dq4/tools/lua/dq4shipstate.lua",
+  "sfc/dq5/tools/dq5progresscheck.py",
+  "sfc/dq5/tools/lua/dq5battle.lua",
+  "sfc/dq5/tools/lua/dq5progresscheck.lua",
+  "sfc/dq5/tools/lua/dq5warptrace.lua",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && rm -rf work/doorcheck2 && uv run --locked python sfc/dq4/tools/dq4doorcheck.py --rom work/ch2/dq4-ch1-full.sfc --groups 3D,40,45 --out work/doorcheck2"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk"]
+
+[[check]]
+name = "dq4-story-items"
+why = "2장 사건 물건(황금의 팔찌 C6·지저귐의 꿀 BE 는 빌린 DQ5 자리, 도적의 열쇠는 DQ5 B7)을 どうぐ 에서 쓰면 자기 처리기(사건 물건 11:8BE4 「여기서는 아무 일도 일어나지 않았다」, 도적의 열쇠 11:8E43 열쇠 쓰기)가 돌아야 한다. 빌린 자리의 물건 표·처리기를 잘못 베끼면(B7 에 마법의 열쇠 처리기를 베껴 잠금 2 를 여는 일) 다른 길로 간다"
+paths = [
+  "sfc/dq4/tools/dq4itemport.py",
+  "sfc/dq4/tools/dq4storyitemcheck.py",
+  "sfc/dq4/tools/lua/dq4itemuse.lua",
+  "sfc/dq4/tools/dq4shopport.py",
+  "sfc/dq4/tools/dq4doorcheck.py",
+  "sfc/dq4/tools/dq4freshstate.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
+  "sfc/dq4/tools/dq4groupcheck.py",
+  "sfc/dq4/tools/lua/dq4doorwalk.lua",
+  "sfc/dq4/tools/lua/dq4shipstate.lua",
+  "sfc/dq5/tools/lua/dq5warp.lua",
+  "sfc/dq5/tools/dq5progresscheck.py",
+  "sfc/dq5/tools/lua/dq5battle.lua",
+  "sfc/dq5/tools/lua/dq5progresscheck.lua",
+  "sfc/dq5/tools/lua/dq5warptrace.lua",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && rm -rf work/storyitem && uv run --locked python sfc/dq4/tools/dq4storyitemcheck.py --rom work/ch2/dq4-ch1-full.sfc --out work/storyitem"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 groups = ["ch1-build", "ch1-walk"]
 

@@ -4,7 +4,7 @@ People who open a shop in FC (fc/dq4/tools/dq4shop.merchants, on the base person
 number of the same service (06:DBD2: 01 weapon, 02 item, 03 armor, 04 deposit, 05 church, 06 inn; SERVICE). Every FC group
 with a shop list or an inn gets its own key (dq4shopkey: 06:DC37 and 06:F576 read it in place of $BC).
 Weapon, item and armor lists go to the DQ5 shop lists (dq5progress/1 `shops`) under that key, with FC items
-matched to DQ5 items by name (an FC item DQ5 lacks may take a borrowed DQ5 slot, dq4itemport.BORROWED); every item a
+matched to DQ5 items by name (an FC item DQ5 lacks may take a borrowed DQ5 slot, dq4itemport.fc_name); every item a
 list sells gets its FC price (dq4itemport.writes). The inn price table 04:FD6D has no end mark and no room, so it is copied with
 the new keys added and the two operands that point at it (06:F567 bank, 06:F56D address) are changed.
 
@@ -68,7 +68,7 @@ def dq5_items(rom):
     """Folded name -> DQ5 item, with the borrowed slots under their FC names."""
     out = {}
     for i in range(216):
-        name = _fold(dq4itemport.BORROWED.get(i) or dq5item.item_name(rom, i))
+        name = _fold(dq4itemport.fc_name(rom, i))
         if name in out:
             raise ValueError(f"DQ5 items {out[name]:02X} and {i:02X} share the name {name}")
         out[name] = i
@@ -232,7 +232,7 @@ def port(dq5_path, dq4_path, inn_at, key_at, with_people=True):
         *dq4shopkey.writes(key_at, rows),
         *dq4itemport.writes(rom, prg, prices),
     ]
-    report["prices"] = {f"{i:02X} {dq4itemport.BORROWED.get(i) or dq5item.item_name(rom, i)}": p
+    report["prices"] = {f"{i:02X} {dq4itemport.fc_name(rom, i)}": p
                         for i, p in sorted(prices.items())}
     return services, shops, writes, report
 

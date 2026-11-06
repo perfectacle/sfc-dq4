@@ -1,4 +1,5 @@
-"""Walk into every door of the prologue and chapter 1 maps (groups 36-3C) in MesenCE and expect dq4door's opening.
+"""Walk into every door of the prologue and chapter 1 maps (groups 36-3C, or --groups) in MesenCE and expect dq4door's
+opening.
 
 For each FC door block (fx, fy) (dq4environmentrom.objects: entry (2fx, 2fy-1)) and each walkable FC neighbour, the
 hero warps (dq5warp.lua) onto the cell it stands on there (dq4groupbuild.cell: the FC block's bottom-left cell) and
@@ -10,11 +11,13 @@ and below and above half a block to the right (+half). Half a block up beside a 
 stopped at all (the object blocks only its bottom row; the ROM before dq4door does the same), so that is not walked.
 
 A door of lock 0 must open (a bit of 7E:21C2-21C5 set). A locked door must stay shut without a key, and open from
-below with the thieves' key level (2199.1, as 01:DCFC reads it). Without the key its message (01:D8FC) shows once per
-push: pushing on through closing it (A held with the direction) shows it no more, stepping back and pushing again
-shows it again.
+below (a side door: from the left) with the FC key of its level in the hero's first item slot (KEYS: とうぞくのカギ B7 for lock 1, dq4door KEY;
+まほうのカギ B8 for lock 2). A lock-2 door must stay shut with とうぞくのカギ and show 188 once. Without the key its
+message (01:D8FC) shows once per push: pushing on through closing it (A held with the direction) shows it no more,
+stepping back and pushing again shows it again.
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4doorcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/doorcheck
+  (chapter 2: --rom work/ch2/dq4-ch1-full.sfc --groups 3D,40,45, the ROM of dq4build.py --chapter2)
 
 The start state is the ROM's own end of the prologue (dq4freshstate); --state takes only one dq4freshstate stamped
 with the same ROM.
@@ -46,6 +49,8 @@ WARP = DQ5_TOOLS / "lua" / "dq5warp.lua"
 WALK = TOOLS / "lua" / "dq4doorwalk.lua"
 GROUPS = range(0x36, 0x3D)
 KEY = "2199|02"
+# dq4doorwalk SET: the FC key of each lock level in the hero's first item slot (party record 7E:2040 + 16).
+KEYS = {1: "2056=B7", 2: "2056=B8"}
 HOLD = 100
 # (name, FC neighbour of the door block, hero cell from the door entry (ex, ey), direction into the door)
 APPROACHES = (
@@ -58,10 +63,10 @@ APPROACHES = (
 )
 
 
-def cases(prg):
+def cases(prg, groups=GROUPS):
     out = []
     for (fg, fn), (g, n) in sorted(placement(prg).items(), key=lambda kv: kv[1]):
-        if g not in GROUPS:
+        if g not in groups:
             continue
         source = dq4block.Map(prg, fg, fn)
         for ex, ey, kind, lock in objects(source):
@@ -74,8 +79,11 @@ def cases(prg):
                 base = {"map": f"{g:02X}/{n:02X}", "door": [ex, ey], "lock": lock, "from": name,
                         "cell": [ex + hx, ey + hy], "press": press}
                 out.append({**base, "key": False, "open": lock == 0, "shown": 0 if lock == 0 else 1})
-                if lock and name == "below":
-                    out.append({**base, "key": True, "open": True, "shown": 0})
+                # A side door (in a wall between rooms) has no walkable block below: try its key from the left.
+                if lock and name in ("below", "left"):
+                    out.append({**base, "key": lock, "open": True, "shown": 0})
+                    if lock == 2:
+                        out.append({**base, "key": 1, "open": False, "shown": 1})
                     back = {"up": "down", "down": "up", "left": "right", "right": "left"}[press]
                     out.append({**base, "from": "below-again", "key": False, "open": False, "shown": 2,
                                 "input": f"{press}:60,{press}+a:8,{press}:60,{back}:12,{press}:60"})
@@ -98,7 +106,8 @@ def warp(mesence, rom, state, dest, map_, x, y):
 
 
 def one(mesence, rom, state, out, k, case, hop):
-    dest = out / f"{k:02d}-{case['map'].replace('/', '')}-{case['from']}{'-key' if case['key'] else ''}"
+    key = f"-key{case['key']}" if case["key"] else ""
+    dest = out / f"{k:02d}-{case['map'].replace('/', '')}-{case['from']}{key}"
     x, y = case["cell"]
     start = warp(mesence, rom, state, dest / "warp", case["map"], x, y)
     if start is None and hop:
@@ -110,7 +119,7 @@ def one(mesence, rom, state, out, k, case, hop):
     p = case["press"]
     press = case.get("input") or (f"{p}:60,{p}+a:8,{p}:{HOLD}" if case["shown"] else f"{p}:{HOLD}")
     run(mesence, rom, WALK, dest, {"STATE": str(start), "INPUT": f"wait:20,{press}",
-                                   "SET": KEY if case["key"] else ""})
+                                   "SET": KEYS.get(case["key"], "")})
     text = (dest / "door.txt").read_text() if (dest / "door.txt").exists() else ""
     rows = dict(line.split(" ", 1) for line in text.splitlines())
     if not {"start", "end", "seen", "shown"} <= rows.keys():
@@ -126,6 +135,15 @@ def one(mesence, rom, state, out, k, case, hop):
     return result
 
 
+def parse_groups(text):
+    """"36-3C" or "3D,40,45" -> the DQ5 group numbers."""
+    out = set()
+    for part in text.split(","):
+        lo, _, hi = part.partition("-")
+        out |= set(range(int(lo, 16), int(hi or lo, 16) + 1))
+    return out
+
+
 def verdict(results):
     """사례가 하나도 없으면(문을 못 찾았거나 맵 배치가 바뀜) 통과로 치지 않는다."""
     return "passed" if results and all(r["ok"] for r in results) else "failed"
@@ -138,13 +156,14 @@ def main():
     ap.add_argument("--dq4", type=Path, default=Path("rom/dq4.nes"))
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--jobs", type=int, default=2)
+    ap.add_argument("--groups", default="36-3C", help="DQ5 groups: 36-3C or 3D,40,45")
     args = ap.parse_args()
     prg = ines.prg(args.dq4.read_bytes())
     mesence = os.environ["MESENCE"]
     args.out = args.out.resolve()
     args.out.mkdir(parents=True, exist_ok=True)
     state = dq4freshstate.resolve(args.state, mesence, args.rom, args.out / "fresh")
-    todo = cases(prg)
+    todo = cases(prg, parse_groups(args.groups))
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
         hops = {c["map"]: next((h for h in todo if h["map"] != c["map"]), None) for c in todo}
         results = list(pool.map(lambda kc: one(mesence, args.rom.resolve(), state, args.out, *kc,
@@ -153,7 +172,7 @@ def main():
     (args.out / "results.json").write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n")
     for r in results:
         print(f"{'ok  ' if r['ok'] else 'FAIL'} {r['map']} {r['door']} 잠금{r['lock']} {r['from']}"
-              f"{' 열쇠' if r['key'] else ''}: {r.get('start')} -> {r.get('end')} 열림={r.get('opened')} "
+              f"{' 열쇠' + str(r['key']) if r['key'] else ''}: {r.get('start')} -> {r.get('end')} 열림={r.get('opened')} "
               f"메시지={r.get('shown_got')} "
               f"{r.get('problem', '')}")
     print(report["status"])

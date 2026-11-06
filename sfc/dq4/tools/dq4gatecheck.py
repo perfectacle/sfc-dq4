@@ -13,8 +13,9 @@ next to it when that block is walkable.
 
 A door of lock 0 must open (a bit of 7E:21C2-21C5 set) and let the hero walk on past its far edge (or onto another
 map). A locked door must stay shut and keep the hero on its side without a key, and with one key level too few;
-with the key of its level it must open and let the hero past. Key levels as 01:DCFC reads them: 2199.1 (カギの技法,
-FC とうぞくのカギ) for lock 1, まほうのカギ (B8) in the hero's first item slot for lock 2.
+with the key of its level it must open and let the hero past. Key levels as 01:DCFC reads them, with the key item in
+the hero's first item slot: とうぞくのカギ (B7, dq4door KEY) for lock 1, まほうのカギ (B8) for lock 2. A lock-1 door
+must open with DQ5's own level-1 key too, the flag 2199.1 (カギの技法).
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4gatecheck.py --rom work/dq4-groups/groups.sfc --out work/gatecheck
 """
@@ -44,7 +45,7 @@ from kr_patch.fc import ines  # noqa: E402
 HOLD = 140
 # WRAM writes (dq4doorwalk SET) that give the party each key level of 01:DCFC. 7E:2056 is the hero's first item
 # slot (party record 7E:2040 + 16).
-KEYS = {0: "", 1: "2199|02", 2: "2056=B8"}
+KEYS = {0: "", 1: "2056=B7", 2: "2056=B8", "flag": "2199|02"}
 
 
 def cases(prg):
@@ -71,6 +72,8 @@ def cases(prg):
                         "lock": lock, "from": side, "cell": list(cell), "press": press}
                 for level in sorted({0, lock - 1, lock} - {-1}):
                     out.append({**base, "key": level, "open": level >= lock})
+                if lock == 1:
+                    out.append({**base, "key": "flag", "open": True})
     return out
 
 
