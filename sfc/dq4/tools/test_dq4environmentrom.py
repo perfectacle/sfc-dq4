@@ -233,7 +233,9 @@ class BuildTests(unittest.TestCase):
                 yield 0, 0, name, source, None, {b: (img, None) for b, img in prepared.items()}, None
         art = {WATER: (env.WATER_FRAMES[0], None), FOUNTAIN: (env.FOUNTAIN_FRAMES[0], None)}
         with patch.object(env.ines, 'prg', return_value=b''), patch.object(env, 'create_assets', return_value=cls.assets), \
-                patch.object(env, 'prepare_maps', fake), patch.object(env, 'sheet_art', return_value=art):
+                patch.object(env, 'prepare_maps', fake), patch.object(env, 'sheet_art', return_value=art), \
+                patch.object(env, 'night_maps', return_value={next(iter(env.MAPS))}), \
+                patch.object(env.dq4environmentnight, 'night_flat', lambda flat: [0] * len(flat)):
             return env.build(cls.dq5, cls.root / 'dq4.nes', out)
 
     def spans(self):

@@ -2707,3 +2707,21 @@ ch1-walk = [
   "tools/lua/walk.lua",
   "tools/mesence_settings.py",
 ]
+
+[[check]]
+name = "dq4-environment-night"
+why = "바꾼 맵은 팔레트 훅이 맵마다 정한 한 벌을 덮어써 밤에도 낮 색이었다(텐페 제단 장면). 훅이 DQ5 밤 판정 21:8000 을 보고, FC 가 밤에 어둡게 하는 맵만 밤 팔레트를, 나머지는 밤에도 낮 팔레트를 올려야 한다"
+paths = [
+  "sfc/dq4/tools/dq4environmentnightcheck.py",
+  "sfc/dq4/tools/dq4environmentnight.py",
+  "sfc/dq4/tools/dq4environmentrom.py",
+  "sfc/dq4/tools/dq4environmentart.py",
+  "sfc/dq4/tools/dq4environmentmap.py",
+  "sfc/dq4/tools/dq4environmentromcheck.py",
+  "sfc/dq4/tools/dq4freshstate.py",
+  "sfc/dq4/tools/lua/dq4environmentdump.lua",
+  "sfc/dq5/tools/lua/dq5warp.lua",
+  "fc/dq4/tools/dq4block.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/guard-night-rom --chapter2 && rm -rf work/guard-night && uv run --locked python sfc/dq4/tools/dq4environmentnightcheck.py --rom work/guard-night-rom/dq4-ch1-full.sfc --out work/guard-night"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
