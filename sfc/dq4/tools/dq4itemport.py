@@ -30,8 +30,11 @@ POWER = 0x23B4B9
 SCALES = (1, 10, 100, 1000)
 ITEM_NAMES = 5
 WEAPON = 0
-# DQ5 item -> FC item name. たけのやり: a spear like てつのやり, a name of the same length, and no FC item by that name.
-BORROWED = {0x01: "てつのやり"}
+# DQ5 item -> FC item name, each on a DQ5 slot of the same kind and name length that no FC item is named after and no
+# ported shop or chest uses. たけのやり: a spear like てつのやり. エンドール's shops: オリハルコンのキバ (a monster-only
+# fang) for せいぎのそろばん, てつのむねあて for てつのまえかけ, メタルキングよろい (the same defence, 95) for
+# はぐれメタルよろい.
+BORROWED = {0x01: "てつのやり", 0x34: "せいぎのそろばん", 0x4E: "てつのまえかけ", 0x61: "はぐれメタルよろい"}
 # DQ5 key item -> FC story item. ゴールドオーブ (C6) has おうごんのうでわ's name length (10 bytes with the dakuten
 # marks); あくまのおもちゃ (BE) is an empty DQ5 record of さえずりのみつ's length (8 bytes).
 EVENT_ITEMS = {0xC6: "おうごんのうでわ", 0xBE: "さえずりのみつ"}
@@ -99,12 +102,12 @@ def price_writes(rom, item, price, name):
 
 
 def borrowed_writes(rom, prg, item, fc_name):
-    """Name, power and FC price of fc_name on DQ5 item `item`."""
+    """Name, power (attack or defence) and FC price of fc_name on DQ5 item `item` of the same kind."""
     import dq4data
     import dq5text
     fc = next((i, p, price) for i, n, p, price, _ in dq4data.items(prg) if n == fc_name)
-    if dq4data.item_kind(prg, fc[0]) != WEAPON or rom.u8(SLOT + item) & 7 != WEAPON:
-        raise ValueError(f"{fc_name}: only weapons borrow a DQ5 weapon slot")
+    if dq4data.item_kind(prg, fc[0]) != rom.u8(SLOT + item) & 7:
+        raise ValueError(f"{fc_name}: FC kind {dq4data.item_kind(prg, fc[0])} on a DQ5 slot of kind {rom.u8(SLOT + item) & 7}")
     at = name_at(rom, item)
     old = dq5text.string(rom, ITEM_NAMES, item)
     new = encode_name(rom, fc_name)
@@ -112,7 +115,7 @@ def borrowed_writes(rom, prg, item, fc_name):
         raise ValueError(f"{fc_name}: {len(new)} name bytes in place of {len(old)}")
     return [{"at": _cpu(at + 1), "hex": new.hex(" ").upper(), "orig": old.hex(" ").upper(),
              "note": f"물건 {item:02X} 이름 {fc_name}"},
-            _byte(rom, POWER + item, fc[1], f"{fc_name} 공격력"),
+            _byte(rom, POWER + item, fc[1], f"{fc_name} 공격력·수비력"),
             *price_writes(rom, item, fc[2], fc_name)]
 
 

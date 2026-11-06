@@ -210,7 +210,7 @@ class ShopPlaceTest(unittest.TestCase):
         import dq4block
         import dq4npcport
         from dq4environmentmap import block_prop
-        from dq4environmentrom import COUNTER_PROPS
+        from dq4environmentrom import COUNTER_PROPS, STAIRS
         from dq4groupbuild import LINKS, fc_map
         from kr_patch.fc import ines
         prg = ines.prg((ROOT / 'rom' / 'dq4.nes').read_bytes())
@@ -220,12 +220,21 @@ class ShopPlaceTest(unittest.TestCase):
         for name, (warp, (x, y), kind, direction) in ss.SHOPS.items():
             m = warp.split(',')[0]
             group, number = (int(v, 16) for v in m.split('/'))
-            source = dq4block.Map(prg, *fc_map(prg, group, number))
+            fg, fn = fc_map(prg, group, number)
+            source = dq4block.Map(prg, fg, fn)
 
             def walkable(bx, by):
-                return 0 <= bx < source.w and 0 <= by < source.h and not block_prop(source, source.cell(bx, by) & 31) & 0x80
-            start = next(link['arrival'] for link in LINKS[group] if not link.get('map'))
-            seen, todo = {start}, [start]
+                # 문(FC 94·95·96, 2×2 9C·9D·A2, 성문 A0)은 열고 지나간다(사란 무기점은 문 너머)
+                if not (0 <= bx < source.w and 0 <= by < source.h):
+                    return False
+                prop = block_prop(source, source.cell(bx, by) & 31)
+                return not prop & 0x80 or prop in (0x94, 0x95, 0x96, 0x9C, 0x9D, 0xA0, 0xA2)
+            # 한 그룹에 FC 그룹이 여럿이면(2장 45: 사란·바자·탑·동굴) 그 맵의 FC 그룹으로 들어오는 필드 도착
+            start = next(link['arrival'] for link in LINKS[group] if link['fc'] == fg and link.get('map', 0) == fn)
+            # 계단으로 올라오는 칸에서도 걷는다(사란 무기점은 2층에서 계단으로 내려오는 동쪽 방)
+            stairs = {(bx, by) for bx in range(source.w) for by in range(source.h)
+                      if block_prop(source, source.cell(bx, by) & 31) in STAIRS}
+            seen, todo = {start} | stairs, [start, *stairs]
             while todo:
                 bx, by = todo.pop()
                 for dx, dy in step.values():

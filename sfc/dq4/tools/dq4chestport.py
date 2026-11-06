@@ -68,12 +68,6 @@ def _reward(names, items, content, gold=True):
     return items[_fold(name)]
 
 
-# Groups whose chests wait: DQ5 numbers ordinary chests across the table and keeps their open bits from 7E:2210, so
-# with chapters 1-4 placed, chapter 2's group 45 would push chest numbers onto the open bits the two-cells-ahead table
-# uses from 7E:2228 (dq5chestplace refuses). They come with freeing the chest counts of DQ5 maps this hack never uses.
-NO_CHESTS = {0x45}
-
-
 def port(dq5_path, dq4_path):
     """(dq5chestplace/1 document, report rows)."""
     prg = ines.prg(Path(dq4_path).read_bytes())
@@ -82,8 +76,6 @@ def port(dq5_path, dq4_path):
     target = placement(prg)
     maps, report = {}, []
     for (g, k), (group, number) in sorted(target.items(), key=lambda kv: kv[1]):
-        if group in NO_CHESTS:
-            continue
         for _, x, y, content, desc in dq4chest.chests(prg, g, k):
             if content in SPECIAL:
                 reward = SPECIAL[content]

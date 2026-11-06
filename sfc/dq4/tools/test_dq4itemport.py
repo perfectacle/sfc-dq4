@@ -26,7 +26,8 @@ class PriceTest(unittest.TestCase):
             dq4itemport.encode_price(1234)
 
     def test_korean_name(self):
-        self.assertEqual(dq4itemport.korean_names(), {0x01: "철 창", 0xC6: "황금의 팔찌", 0xBE: "지저귐의 꿀"})
+        self.assertEqual(dq4itemport.korean_names(), {0x01: "철 창", 0x34: "정의의 주판", 0x4E: "철의 앞치마",
+                                                      0x61: "외톨이 메탈 갑옷", 0xC6: "황금의 팔찌", 0xBE: "지저귐의 꿀"})
 
 
 @unittest.skipUnless(DQ4.is_file() and DQ5.is_file(), "local source ROMs not present")
@@ -48,6 +49,10 @@ class RomTest(unittest.TestCase):
         self.assertEqual(dq5chest.item_name(patched, 0x01), "てつのやり")
         self.assertEqual(dq5item.price(patched, 0x01), 880)
         self.assertEqual(dq5item.field(patched, 5, 0x01), 28)
+        # 엔돌 가게의 DQ5 에 없는 물건 셋
+        self.assertEqual([dq5chest.item_name(patched, i) for i in (0x34, 0x4E, 0x61)],
+                         ["せいぎのそろばん", "てつのまえかけ", "はぐれメタルよろい"])
+        self.assertEqual([dq5item.field(patched, 5, i) for i in (0x34, 0x4E, 0x61)], [35, 32, 95])
 
     def _patched(self):
         import dq5item
