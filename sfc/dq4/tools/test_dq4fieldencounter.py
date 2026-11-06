@@ -422,5 +422,49 @@ class RomTest(unittest.TestCase):
         self.assertEqual(new[0x0C], 0)
 
 
+
+class MonsterFieldsTest(unittest.TestCase):
+    def test_ten_bit_fields_and_drop(self):
+        r = bytearray(22)
+        r[0:2] = (0x46, 0x05)                    # 경험치 1350
+        r[4], r[15] = 0x10, 0x01                 # HP 272
+        r[5], r[16] = 0xFF, 0x01                 # 공격 511
+        r[6], r[17] = 0xFF, 0x03                 # 수비 1023
+        r[7], r[18] = 0x05, 0x02                 # 금화 517
+        r[8], r[20] = 0x53, 0x04
+        fields, drop, rate = enc.fc_monster_fields(bytes(r))
+        self.assertEqual((fields["경험치"], fields["HP"], fields["공격"], fields["수비"], fields["금화"]),
+                         (1350, 272, 511, 1023, 517))
+        self.assertEqual((drop, rate), (0x53, 4))
+        r[8] = 0xFF
+        self.assertIsNone(enc.fc_monster_fields(bytes(r))[1])
+
+
+@unittest.skipUnless(DQ4.exists() and DQ5.exists(), "rom/dq4.nes and rom/dq5.sfc")
+class MonsterFitRomTest(unittest.TestCase):
+    """2장 무대 몬스터가 DQ5 몬스터 표의 비트 수에 들어가고, 드롭 물건은 셋만 DQ5 에 같은 이름이 없다."""
+
+    @classmethod
+    def setUpClass(cls):
+        from kr_patch.fc import ines
+        cls.prg = ines.prg(DQ4.read_bytes())
+        cls.dq5 = DQ5.read_bytes()
+
+    def test_every_fc_monster_fits_but_metal_defence(self):
+        fit = enc.monster_fit(self.prg, self.dq5)
+        self.assertEqual(len(fit), 195)
+        self.assertEqual([i for i, m in fit.items() if m["over"]], [])
+        self.assertEqual(sorted(i for i, m in fit.items() if m["fields"]["수비"] > enc.DQ5_DEFENCE_MAX),
+                         [0x5C, 0x75, 0xA8])
+
+    def test_chapter2_drops(self):
+        ids = enc.zone_monsters(self.prg, (0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x4C, 0x4D, 0x4E, 0x4F))
+        fit = enc.monster_fit(self.prg, self.dq5, set(ids))
+        self.assertEqual(len(fit), 33)
+        missing = sorted({m["drop"] for m in fit.values() if m["drop"] and m["dq5_drop"] is None})
+        self.assertEqual(missing, ["きんのかみかざり", "てつのつめ", "はねぼうし"])
+        self.assertEqual((fit[0x01]["drop"], fit[0x01]["dq5_drop"]), ("やくそう", 0xA1))
+
+
 if __name__ == "__main__":
     unittest.main()

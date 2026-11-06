@@ -646,12 +646,16 @@ def return_places(out, original, dq4):
         if (fc_group, fc_number) in place:
             group, number = place[fc_group, fc_number]
             first.setdefault(group, (number, *dq4groupbuild.cell(x, y)))
-    need = sorted(g for g in now - have if g in first)
+    need = [bytes((g, *first[g], 1, 0x80)) for g in sorted(now - have) if g in first]
+    # 한 그룹에 교회가 여럿인 칸(dq4fieldtravel.EXTRA)은 맵까지 같은 항목을 따로 둔다. 훅이 칸으로 이 항목을 찾는다.
+    import dq4fieldtravel
+    for row in dq4fieldtravel.restart_rows(dq4fieldtravel.extras(prg, dq4groupbuild.LINKS, place)):
+        if all(row[:2] != r[:2] for r in need) and all(out[r:r + 2] != row[:2] for r in rows):
+            need.append(row)
     if len(need) > len(free):
         raise SystemExit(f'다시 시작 자리 표에 빈 항목이 모자람: {len(need)} > {len(free)}')
-    for g, r in zip(need, free):
-        number, x, y = first[g]
-        out[r:r + 6] = bytes((g, number, x, y, 1, 0x80))
+    for row, r in zip(need, free):
+        out[r:r + 6] = row
     return out
 
 

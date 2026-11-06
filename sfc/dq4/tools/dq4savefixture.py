@@ -79,6 +79,17 @@ NIGHT_TIME = 0x0190            # 25:8278 이 밤 칸에 두는 시각(낮은 005
 # ルーラ 칸의 이름(dq4fieldtravel.FC_GROUPS 차례로 포팅한 그룹). 이름 없는 칸은 번호로 준다
 PLACES = {'batland': 0x36, '바트랜드': 0x36, 'imuru': 0x37, '이무르': 0x37, 'prologue': 0x3C, '서장': 0x3C,
           'santeem': 0x3D, '산트하임': 0x3D}
+# 그룹을 다른 곳과 나눠 쓰는 칸(dq4fieldtravel.EXTRA)은 그룹으로 칸을 찾을 수 없어 칸 번호로 준다
+_SLOT_NAMES = {0x0E: ('tempe', '텐페'), 0x0F: ('frenol', '프레놀'), 0x13: ('saran', '사란')}
+
+
+def _slot_places():
+    import dq4fieldtravel
+    first = len(dq4fieldtravel.FC_GROUPS)
+    return {name: first + k for k, (fc, *_) in enumerate(dq4fieldtravel.EXTRA) for name in _SLOT_NAMES.get(fc, ())}
+
+
+SLOT_PLACES = _slot_places()
 
 
 def lorom(addr):
@@ -95,14 +106,18 @@ def wram_index(addr):
 
 def place_rows(rom):
     """{ルーラ 칸: (그룹, (BC, BD, X, Y, 층, 198E) 또는 None)}. 칸의 그룹을 자리 표에서 찾은 첫 항목. 표에 없는 그룹의
-    칸으로 이어 하면 필드에 선다(1장 롬 칸 11·16 실측) — 전멸 뒤(01:899F)와 달리 항목 0 으로 가지 않는다."""
+    칸으로 이어 하면 필드에 선다(1장 롬 칸 11·16 실측) — 전멸 뒤(01:899F)와 달리 항목 0 으로 가지 않는다.
+    ルーラ 칸 훅(dq4fieldtravel.hook_code)이 든 롬이면 훅 표의 칸은 그룹·맵이 같은 항목이다."""
     table = SLOT_TABLE if rom[0x8001] else SLOT_TABLE_ALT
     groups = rom[lorom(table):lorom(table) + SLOT_COUNT]
     rows, t = [], lorom(PLACE_TABLE)
     while rom[t] != 0xFF:
         rows.append(tuple(rom[t:t + PLACE_ROW]))
         t += PLACE_ROW
-    return {k: (g, next((r for r in rows if r[0] == g), None)) for k, g in enumerate(groups)}
+    import dq4fieldtravel
+    own = dq4fieldtravel.rom_restarts(rom)
+    return {k: (g, next((r for r in rows if (r[0], r[1]) == own[k]) if k in own else
+                        (r for r in rows if r[0] == g), None)) for k, g in enumerate(groups)}
 
 
 def place_slot(rom, place):
@@ -111,6 +126,8 @@ def place_slot(rom, place):
         return place
     if re.fullmatch(r'\d+', place):
         return int(place)
+    if place in SLOT_PLACES:
+        return SLOT_PLACES[place]
     group = PLACES[place]
     return next(k for k, (g, _) in place_rows(rom).items() if g == group)
 

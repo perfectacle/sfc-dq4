@@ -39,11 +39,14 @@ from kr_patch.fc import ines  # noqa: E402
 
 # Scene -> (FC field, FC zone-map cell (column, row) to stand in). The first two have DQ5 namesakes (スライム,
 # バブルスライム), 0E is a zone-map row past grid 0's seven, 09 and 08 have base rates 20 and 28 (the others 16),
-# the last two are fields 1 and 3.
+# w1-34 and w2-36 are fields 1 and 3.
 ZONES = {"castle-04": (0, (0x0A, 0x02)), "imuru-05": (0, (0x09, 0x01)), "south-0E": (0, (0x03, 0x0C)),
          "west-09": (0, (0x05, 0x02)), "west-08": (0, (0x03, 0x03)),
-         "w1-34": (1, (0x01, 0x02)), "w2-36": (3, (0x02, 0x02))}
-RATE_SCENES = ("castle-04", "imuru-05", "west-09", "west-08")
+         "w1-34": (1, (0x01, 0x02)), "w2-36": (3, (0x02, 0x02)),
+         # 2장 무대: サントハイム·サラン 07, 사막의 바자·탑 0B, 사막 0A, エンドール 0C(기본 24)
+         "santeem-07": (0, (0x02, 0x04)), "bazaar-0B": (0, (0x03, 0x04)), "desert-0A": (0, (0x04, 0x04)),
+         "endor-0C": (0, (0x06, 0x05))}
+RATE_SCENES = ("castle-04", "imuru-05", "west-09", "west-08", "santeem-07", "endor-0C")
 # Frames waited before the walk: each starts the random numbers elsewhere, for another fight.
 DELAYS = (0, 7, 13)
 RATES = "11EA44=FFFFFFFFFFFFFFFF"

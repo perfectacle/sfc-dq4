@@ -6,7 +6,9 @@ dq5warp.lua FIELD).
            lands on the destination's landing cell
   chimera  キメラのつばさ (item A4 in the hero's first slot) with 7E:2193 (the last town entered, 01:8EBD) set to
            the destination's group: the same landing cell
-  visit    walk into the destination from its leaving cell: its visited flag and 7E:2193 are set (01:8EB2)
+  visit    walk into the destination from its leaving cell: its visited flag and 7E:2193 are set (01:8EB2). An
+           extra slot (dq4fieldtravel.EXTRA) sets its own bit and 7E:2193 = 80 | slot; サラン and the other parts
+           of its DQ5 group (the tower, the cave) set nothing
   list     the ルーラ window with the four flags set; its screen is <out>/list/end.png
   ship     ルーラ as above while the party owns the ship (7E:21A5 bit1): the ship moves to the destination's ship
            cell (dq4fieldtravel, from the FC record's ship block)
@@ -32,7 +34,8 @@ for path in (TOOLS, FC_TOOLS):
 import dq4freshstate  # noqa: E402
 import dq4fieldport  # noqa: E402
 import dq4fieldtravel  # noqa: E402
-from dq4groupbuild import LINKS, doors  # noqa: E402
+from dq4groupbuild import LINKS, doors, placement  # noqa: E402
+from dq4fieldtravel import FC_GROUPS  # noqa: E402
 from dq4groupcheck import field_scene  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
 
@@ -94,6 +97,10 @@ def main():
     _, props = dq4fieldport.fc_field(prg)
     found = doors(prg)
     dests = dq4fieldtravel.destinations(prg, LINKS, found)
+    extra = dq4fieldtravel.extras(prg, LINKS, placement(prg))
+    listed = dests + [e for e in extra if e["listed"]]
+    blocked = [p["fc"] for g in {e["group"] for e in extra} for p in LINKS[g]
+               if p["fc"] not in FC_GROUPS and p["fc"] not in {e["fc"] for e in extra} and p["field"]]
 
     def leave(d):
         return found[d["fc"]][1]
@@ -107,20 +114,40 @@ def main():
 
     def run_chimera(d):
         start = leave(next(e for e in dests if e is not d))
+        town = d["group"] if d["slot"] < len(FC_GROUPS) else dq4fieldtravel.SLOT_MARK | d["slot"]
         got = field_scene(mesence, rom, state, out, f"chimera-{d['slot']}", *start, CHIMERA,
-                          SET=f"2056={CHIMERA_ITEM:02X};{LAST_TOWN:04X}={d['group']:02X}", MAXF="3000")
+                          SET=f"2056={CHIMERA_ITEM:02X};{LAST_TOWN:04X}={town:02X}", MAXF="3000")
         return f"chimera-{d['slot']}", {"from": list(start), "got": got, "want": {"field": list(d["land"])},
                                         "ok": got == {"field": list(d["land"])}}
 
     def run_visit(d):
         name = f"visit-{d['slot']}"
-        got = field_scene(mesence, rom, state, out, name, *leave(d), "up:40,wait:200",
+        group, bit, town = d["group"], 1 << d["slot"], d["group"]
+        if d["slot"] >= len(FC_GROUPS):
+            bit, town = (bit, dq4fieldtravel.SLOT_MARK | d["slot"]) if d["listed"] else (0, 0)
+        got = field_scene(mesence, rom, state, out, name, *leave(d), f"{inward(d['fc'])}:40,wait:200",
                           SET=f"{flags([])};{LAST_TOWN:04X}=00", MAXF="3000")
         ram = (out / name / "final.wram").read_bytes()
         bits = int.from_bytes(ram[VISITED:VISITED + 3], "little")
         return name, {"got": got, "visited": f"{bits:06X}", "last_town": f"{ram[LAST_TOWN]:02X}",
-                      "ok": got.get("map", "").startswith(f"{d['group']:02X}/") and bits == 1 << d["slot"]
-                      and ram[LAST_TOWN] == d["group"]}
+                      "ok": got.get("map", "").startswith(f"{group:02X}/") and bits == bit and ram[LAST_TOWN] == town}
+
+    def run_blocked(fc):
+        """The tower or the cave of an extra slot's DQ5 group: entering sets no visited bit and leaves 7E:2193."""
+        name = f"visit-{fc:02X}"
+        group = next(g for g, parts in LINKS.items() for p in parts if p["fc"] == fc)
+        got = field_scene(mesence, rom, state, out, name, *found[fc][1], f"{inward(fc)}:40,wait:200",
+                          SET=f"{flags([])};{LAST_TOWN:04X}=00", MAXF="3000")
+        ram = (out / name / "final.wram").read_bytes()
+        bits = int.from_bytes(ram[VISITED:VISITED + 3], "little")
+        return name, {"got": got, "visited": f"{bits:06X}", "last_town": f"{ram[LAST_TOWN]:02X}",
+                      "ok": got.get("map", "").startswith(f"{group:02X}/") and bits == 0 and ram[LAST_TOWN] == 0}
+
+    def inward(fc):
+        """Direction from the leaving cell onto the nearest entrance cell."""
+        cells, (lx, ly) = found[fc]
+        ex, ey = min(cells, key=lambda c: abs(c[0] - lx) + abs(c[1] - ly))
+        return STEPS[((ex > lx) - (ex < lx), (ey > ly) - (ey < ly))] if (ex - lx) * (ey - ly) == 0 else "up"
 
     def run_ship(d):
         name = f"ship-{d['slot']}"
@@ -149,15 +176,17 @@ def main():
 
     def run_list():
         got = field_scene(mesence, rom, state, out, "list", *leave(dests[0]), TO_LIST + ",wait:10",
-                          SET=f"{SPELLS};{flags([d['slot'] for d in dests])}", MAXF="3000")
+                          SET=f"{SPELLS};{flags([d['slot'] for d in listed])}", MAXF="3000")
         return "list", {"got": got, "ok": got == {"field": list(leave(dests[0]))}}
 
-    jobs = [(f, (d,)) for d in dests for f in (run_ruler, run_chimera, run_visit)] + [(run_list, ())]
-    jobs += [(f, (d,)) for d in dests if d["ship"] for f in (run_ship, run_sail)]
+    jobs = [(f, (d,)) for d in listed for f in (run_ruler, run_chimera, run_visit)] + [(run_list, ())]
+    jobs += [(run_visit, (d,)) for d in extra if not d["listed"]] + [(run_blocked, (fc,)) for fc in blocked]
+    jobs += [(f, (d,)) for d in listed if d["ship"] for f in (run_ship, run_sail)]
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
         results = dict(f.result() for f in [pool.submit(f, *a) for f, a in jobs])
     ok = all(r["ok"] for r in results.values())
-    report = {"status": "passed" if ok else "failed", "destinations": dests, "scenes": dict(sorted(results.items()))}
+    report = {"status": "passed" if ok else "failed", "destinations": dests + extra,
+              "scenes": dict(sorted(results.items()))}
     (out / "results.json").write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n")
     print(json.dumps(report, ensure_ascii=False))
     return 0 if ok else 1

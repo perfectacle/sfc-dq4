@@ -74,7 +74,8 @@ SONG_STARTING = 0xFF
 # port's slowest was 102. The bound keeps about a third over that.
 SONG_START_FRAMES = 150
 EXITS = {"23E9B0": "single", "23EA40": "mixed", "23E98F": "fixed"}
-# Scene -> (how it comes in, walk): ("field", DQ5 group) walks in from the group's first field entrance, ("to", warp
+# Scene -> (how it comes in, walk): ("field", DQ5 group[, FC group]) walks in from the field entrance of the group's
+# first part (or of that FC group's part), ("to", warp
 # TO) warps there, ("stair", warp TO, input) warps beside an FC stair (dq4groupcheck stair_scenes) and takes it.
 # The walk keeps off the stair beside the warp. Further items: "on" sets the well's switch before the warp, "calm"
 # warps with no step fights (CALM) to walk the switch cells without a fight stopping the walk, "step" warps with
@@ -104,6 +105,12 @@ SCENES = {
     # (10,9) region 0 to (10,10) region 2.
     "3B-03-region": (("to", "3B/03,12,24"), "down:96,up:96,down:96", "step", "on"),
     "39-01-region": (("to", "39/01,20,16"), "down:96,up:96,down:96", "step"),
+    # Chapter 2: the tower of the honey (FC 2E) and the cave south of フレノール (FC 39) in group 45.
+    # The cave's arrival is its stair to the field: walking up and down takes it out and back in, so walk sideways and
+    # end with steps inside, as 3A-00-field.
+    "45-tower-field": (("field", 0x45, 0x2E), SIDEWAYS),
+    "45-cave-field": (("field", 0x45, 0x39), SIDEWAYS + ",wait:90,left:16"),
+    "45-09": (("to", "45/09,42,57"), SIDEWAYS), "45-0D": (("to", "45/0D,70,23"), SIDEWAYS),
 }
 
 
@@ -212,7 +219,7 @@ def main():
                                        region_maps, region_chances[mode])
         chance = {"steps": 0, "blocks": 0, "regions": 0, "bad": []}
         if how[0] == "field":
-            link = LINKS[how[1]][0]
+            link = next(p for p in LINKS[how[1]] if len(how) < 3 or p["fc"] == how[2])
             blocks = dq4fieldport.entrance_blocks(props, [link["field"][0]])
             (sx, sy), d = next(dq4groupcheck.enter_starts(props, blocks))
             got = dq4groupcheck.scene(mesence, rom, state, out, name, FIELD=f"{sx},{sy}",

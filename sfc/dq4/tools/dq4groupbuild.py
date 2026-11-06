@@ -809,6 +809,7 @@ def _build(pool, dq5, dq4, out, with_people):
     found = doors(prg)
     import dq4fieldtravel
     destinations = dq4fieldtravel.destinations(prg, LINKS, found)
+    extra_slots = dq4fieldtravel.extras(prg, LINKS, place)
     entrance_tables["aux"] += dq4fieldtravel.landing_rows(
         [{"group": group, "x": x, "y": y} for group, parts in LINKS.items()
          for part in parts if part["field"] for x, y in found[part["fc"]][0]], destinations)
@@ -819,8 +820,11 @@ def _build(pool, dq5, dq4, out, with_people):
         "format": "dq5patch/1", "name": "dq4-entrance-hook",
         "writes": dq4entrancehook.writes(ENTRANCE_HOOK_AT, arrivals, leaving)}))
     manifests.append(_save(out / "travel.dq5patch.json", {
-        "format": "dq5patch/1", "name": "dq4-travel", "writes": dq4fieldtravel.writes(dq5.read_bytes(), destinations)}))
-    checks.append(step("dq5namewrite.py", "names", dq4fieldtravel.names_doc(dq5.read_bytes(), destinations), dq5))
+        "format": "dq5patch/1", "name": "dq4-travel",
+        "writes": dq4fieldtravel.writes(dq5.read_bytes(), destinations + extra_slots)
+        + dq4fieldtravel.hook_writes(extra_slots, dq4fieldtravel.map_rows(LINKS, place, extra_slots))}))
+    checks.append(step("dq5namewrite.py", "names",
+                       dq4fieldtravel.names_doc(dq5.read_bytes(), destinations + extra_slots), dq5))
     # A doc of its own: one doc writes one span from its first to its last changed byte, which would cover the item
     # names other patches write between tables 0A and 0B.
     checks.append(step("dq5namewrite.py", "companion-names",
