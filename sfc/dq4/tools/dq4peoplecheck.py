@@ -6,6 +6,9 @@
   day     castle_day 끝(낮, 일행은 주인공 하나)
   night   castle_day 끝에서 7E:075E 를 F0 으로 붙들어 밤 인물로(imuru_night 끝은 빠른 상태 창이 열려 있어 워프가 막힘)
   hoimin  shoes_chest 끝(호이민이 일행에 있음. 맵에 들어간 뒤 일행 그림을 다시 싣는 03:D1C3 이 돈다)
+  event   castle_day 끝에서 2장 사건 인물(dq4people.EVENT_PEOPLE)이 나올 그룹의 맵으로. 사건이 아직 인물을 놓지 않으므로
+          그 맵 인물 목록의 앞 엔트리 그림을 사건 그림으로 바꾼 시험 롬(--out 아래 event.sfc)을 쓴다. 사건 그림마다 판정을
+          지난 슬롯이 하나 이상이어야 한다
 
 인물 슬롯(7E:3220)마다 세트는 덤프한 WRAM($BC 맵 그룹, 7E:2190 flag)을 넣고 롬의 인물 훅(dq4people.HOOK_AT)을
 65816 해석기로 그대로 돌려 얻는다. 그 세트 레코드로 칸 목록(7E:8060-)의 타일·좌우 반전이 레코드와 같은지, 칸의
@@ -29,6 +32,7 @@ sys.path[:0] = [str(HERE), str(DQ5_TOOLS)]
 import dq4ch1walkcheck as walk  # noqa: E402
 import dq4mesen  # noqa: E402
 import dq4people  # noqa: E402
+import dq5npcrecord  # noqa: E402
 import dq5sprite as S  # noqa: E402
 from dq5exitcheck import warp_exit  # noqa: E402
 from dq5map import Rom  # noqa: E402
@@ -42,11 +46,38 @@ MAPS = {
     '39/04': (10, 37), '39/05': (16, 31), '3A/00': (6, 7), '3B/00': (30, 99), '3B/02': (6, 5), '3B/03': (10, 81),
     '3B/05': (10, 5), '3B/06': (54, 5), '3C/00': (20, 45), '3C/01': (2, 2),
 }
-SCENES = {'day': ('castle_day', walk.DAY), 'night': ('castle_day', walk.NIGHT), 'hoimin': ('shoes_chest', '')}
+SCENES = {'day': ('castle_day', walk.DAY), 'night': ('castle_day', walk.NIGHT), 'hoimin': ('shoes_chest', ''),
+          'event': ('castle_day', walk.DAY)}
+# 사건 인물이 나올 그룹마다 들어설 맵과 칸(필드에서 들어설 때의 칸 dq4groupbuild.LINKS 의 arrival 은 맵 가장자리라 그대로
+# 워프하면 바로 필드로 나가므로 몇 칸 안쪽). 한 맵에 큰 세트를 다 넣으면 OBJ VRAM(512타일)을 넘어 그룹 3D 는 두 맵에 나눈다
+EVENT_MAPS = {'3D/03': (20, 89), '3D/04': (44, 7), '40/00': (46, 59), '45/09': (42, 57)}
 # 시작 상태가 선 맵. 같은 맵으로의 워프는 dq5warp.lua 가 도착을 알아보지 못하므로 HOP 을 거친다
 STATE_MAP = {'castle_day': '36/00', 'shoes_chest': '3B/03'}
 HOP = '37/02'
 PARTY_SLOTS = 3                                     # 7E:3220 슬롯 0~2 가 일행(00:E3BD)
+
+
+def event_rom(data):
+    """(시험 롬, {맵: [사건 그림]}). 사건 그림을 그 그룹의 EVENT_MAPS 맵에 차례로 나눠, 맵마다 인물 목록의 앞
+    엔트리(낮에 나오는 것)에 하나씩 넣는다. 낮·밤 두 벌 엔트리는 두 벌 모두 바꾼다."""
+    rom = Rom(data)
+    out = bytearray(data)
+    by_map = {m: [] for m in EVENT_MAPS}
+    for k, (_, pic, _, group, _) in enumerate(dq4people.EVENT_PEOPLE):
+        maps = [m for m in EVENT_MAPS if int(m[:2], 16) == group]
+        by_map[maps[sum(1 for e in dq4people.EVENT_PEOPLE[:k] if e[3] == group) % len(maps)]].append(pic)
+    entries = dq5npcrecord.dump(rom)['entries']
+    for m, pictures in by_map.items():
+        rows = [e for e in entries if e['name'] == m and e['time'] in ('day', 'both')]
+        if len(rows) < len(pictures):
+            raise SystemExit(f'{m}: 사건 그림 {len(pictures)}개를 넣을 낮 엔트리가 {len(rows)}개뿐')
+        for e, pic in zip(rows, pictures):
+            at = dq5npcrecord.lorom(int(e['address'].replace(':', ''), 16))
+            size = dq5npcrecord.entry_size(rom, int(e['address'].replace(':', ''), 16))
+            where = dq5npcrecord.offsets(bytes(data[at:at + size]))
+            for part in (('day', 'night') if e['time'] == 'both' else ('day',)):
+                out[at + where[part]['gfx']] = pic
+    return bytes(out), by_map
 
 
 def hook_set(rom, wram, picture):
@@ -108,7 +139,7 @@ def scene(mesence, rom, states, out, name, m):
     state = (states / seg / 'end.mss').resolve()
 
     def warp(to, where, save):
-        x, y = MAPS[to]
+        x, y = {**MAPS, **EVENT_MAPS}[to]
         env = {'STATE': str(state), 'TO': f'{to},{x},{y}', 'SAVE': save, 'SETTLE': '120', 'MAXF': '1500',
                'WARPEXIT': f'{warp_exit(rom):X}', 'ANYWHERE': '1', **({'POKE': poke} if poke else {})}
         walk.run(mesence, rom, walk.WARP, where, env, 300)
@@ -145,9 +176,21 @@ def main():
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
     rom = args.rom.resolve()
-    jobs = [(n, m) for n in args.scenes for m in args.maps]
+    jobs = [(rom, n, m) for n in args.scenes if n != 'event' for m in args.maps]
+    wanted = {}
+    if 'event' in args.scenes:
+        data, wanted = event_rom(rom.read_bytes())
+        test = out / 'event.sfc'
+        test.write_bytes(data)
+        jobs += [(test, 'event', m) for m in EVENT_MAPS]
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
-        results = list(pool.map(lambda j: scene(mesence, rom, args.states, out, *j), jobs))
+        results = list(pool.map(lambda j: scene(mesence, j[0], args.states, out, *j[1:]), jobs))
+    for r in results:
+        if r['scene'].startswith('event-') and r['ok']:
+            m = r['map']
+            missing = [g for g in wanted[m] if not any(s['picture'] == g and s['ok'] for s in r['slots'])]
+            if missing:
+                r['ok'], r['note'] = False, '판정을 지난 슬롯이 없는 사건 그림 ' + ' '.join(f'{g:02X}' for g in missing)
     for r in results:
         bad = [s for s in r.get('slots', []) if not s['ok']]
         print(f"{r['scene']:14s} {'ok' if r['ok'] else 'FAIL'} {r.get('map', '')} {r.get('note', '')}"

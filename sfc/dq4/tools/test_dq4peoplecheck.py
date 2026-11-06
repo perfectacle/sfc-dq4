@@ -33,3 +33,9 @@ class SceneOkTests(unittest.TestCase):
         self.assertFalse(C.scene_ok('36/00', '36/00', []))
         self.assertFalse(C.scene_ok('36/00', '36/00', [good, bad]))
         self.assertFalse(C.scene_ok('37/00', '36/00', [good]))
+
+
+class EventMapTests(unittest.TestCase):
+    def test_every_event_group_has_a_map(self):
+        groups = {group for _, _, _, group, _ in C.dq4people.EVENT_PEOPLE}
+        self.assertEqual({int(m[:2], 16) for m in C.EVENT_MAPS}, groups)
