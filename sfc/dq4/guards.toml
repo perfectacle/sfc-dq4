@@ -2681,6 +2681,7 @@ ch1-walk = [
   "sfc/dq4/tools/dq4ch2event.py",
   "sfc/dq4/tools/dq4ch2slots.py",
   "sfc/dq4/tools/dq4ch2talk.py",
+  "sfc/dq4/tools/dq4ch2walkcheck.py",
   "sfc/dq4/tools/dq4chapter1.py",
   "sfc/dq4/tools/dq4chapterbox.py",
   "sfc/dq4/tools/dq4chestport.py",
