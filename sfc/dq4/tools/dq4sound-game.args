@@ -812,3 +812,9 @@
 --song-call
 06FC60=23:2E
 --wait-guard
+--song-pick
+01=30@night
+--song-pick
+06=31@night
+--song-pick
+02=05@7E2208&10

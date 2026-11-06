@@ -85,10 +85,15 @@ LINKS = {
     # of 14/00. The prologue places its own people: the FC people of 14/00 belong to chapter 5's start.
     0x3C: [{"fc": 0x14, "arrival": (0x0C, 0x18), "attrs": "19/02", "music": 0x06, "field": [(0x91, 0x31)], "out": "down:64",
             "people": False}],
-    # Chapter 2: サントハイム castle, テンペ and フレノール. フレノール's FC arrival is on the map's top row.
-    0x3D: [{"fc": 0x01, "arrival": (0x0F, 0x1B), "attrs": "03/00", "field": [(0x27, 0x49)], "out": "down:64", "chapter": 2},
-           {"fc": 0x0E, "arrival": (0x0A, 0x2C), "attrs": "03/00", "field": [(0x47, 0x39)], "out": "down:64", "chapter": 2},
-           {"fc": 0x0F, "arrival": (0x16, 0x00), "attrs": "03/00", "field": [(0x60, 0x28)], "out": "up:64", "chapter": 2}],
+    # Chapter 2: サントハイム castle, テンペ and フレノール. フレノール's FC arrival is on the map's top row. 03/00's song
+    # byte 0A is 呪われし塔 in the sound port: the castle (FC map branch 0) takes the castle song 01 and the two
+    # villages (branch 1) the town song 06.
+    0x3D: [{"fc": 0x01, "arrival": (0x0F, 0x1B), "attrs": "03/00", "music": 0x01, "field": [(0x27, 0x49)], "out": "down:64",
+            "chapter": 2},
+           {"fc": 0x0E, "arrival": (0x0A, 0x2C), "attrs": "03/00", "music": 0x06, "field": [(0x47, 0x39)], "out": "down:64",
+            "chapter": 2},
+           {"fc": 0x0F, "arrival": (0x16, 0x00), "attrs": "03/00", "music": 0x06, "field": [(0x60, 0x28)], "out": "up:64",
+            "chapter": 2}],
     # Chapter 3: レイクナバ and the cave where its iron safe lies (きたのどうくつ, arrival on its stair to the field),
     # ボンモール, and エンドール. Each town leads a DQ5 group, so each takes a ルーラ slot (dq4fieldtravel). Their
     # people and sellers are those of chapter 3's start ($615A = 2).
@@ -117,8 +122,8 @@ LINKS = {
     # The travel-door shrine by エンドール (1E) waits: its travel door (FC exit kind 0A) has no DQ5 exit yet.
     0x45: [{"fc": 0x13, "arrival": (0x0C, 0x19), "attrs": "03/00", "music": 0x06, "field": [(0x22, 0x49)],
             "out": "down:64", "chapter": 2},
-           {"fc": 0x0C, "arrival": (0x1F, 0x0B), "attrs": "03/00", "field": [(0x3F, 0x4A)], "out": "right:64",
-            "chapter": 2},
+           {"fc": 0x0C, "arrival": (0x1F, 0x0B), "attrs": "03/00", "music": 0x06, "field": [(0x3F, 0x4A)],
+            "out": "right:64", "chapter": 2},
            {"fc": 0x2E, "arrival": (0x15, 0x1F), "map": 3, "attrs": "33/00", "music": 0x0A, "dungeon": True,
             "field": [(0x24, 0x57)], "out": "down:64", "chapter": 2},
            {"fc": 0x39, "arrival": (0x23, 0x08), "map": 1, "attrs": "21/02", "music": 0x09, "dungeon": True,

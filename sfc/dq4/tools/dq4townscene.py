@@ -361,21 +361,57 @@ def scene_inn(core, rom, out, seed, kind, dq4):
         slot.gold = price * 2 - 1
     with Town(core, rom, out, slot, INN_WARP, seed) as t:
         t.c.poke([(INN_TOTAL, 0), (INN_TOTAL + 1, 0)])
+        song_before = wait_map_song(t, INN_SONG_BY)
         before = snapshot(t.c)
         # 위로 한 걸음 걸어 카운터 앞에 서고, 그 자리에서 다시 위를 보고 말한다
         t.p.press('up', 6, 30)
         answers = [1 if kind == 'refuse' else 0]
         talk = t.talk(answers)
+        song_after = wait_map_song(t, INN_SONG_BY)
         after = snapshot(t.c)
         t.c.shot(out / 'end.png')
         total = t.c.rd(INN_TOTAL, 2)
     problems = [] if talk['ended'] else ['대화가 끝나지 않음']
     problems += judge_choices(talk['choices'], [0] + answers)
     problems += judge_inn(before, after, total, price, kind in ('stay', 'night'), kind == 'night')
-    return {'problems': problems, 'price': price, 'total': total, 'before': before, 'after': after, **talk}
+    problems += judge_inn_song(song_before, song_after, kind == 'night', picks_songs(rom))
+    return {'problems': problems, 'price': price, 'total': total, 'before': before, 'after': after,
+            'song_before': f'{song_before:02X}', 'song_after': f'{song_after:02X}', **talk}
 
 
 SONG_REPLY, SONG_NOW = 0x7E08D2, 0x7E1D8B
+# 이무르의 맵 곡(마을 06)과 밤 곡(31, 곡 묶음 인자 --song-pick 06=31@night). 곡 고르기는 00:CEAB 를 JSL 로 바꾼 롬에만 있다
+INN_TOWN_SONG, INN_NIGHT_SONG, INN_SONG = 0x06, 0x31, 0x1D
+SONG_PICK_SITE = 0x00CEAB
+# 묵은 뒤 아침 맵 곡이 울릴 때까지 기다리는 프레임(여관 징글이 끝난 뒤 맵 곡 루틴이 다시 요청한다)
+INN_SONG_BY = 600
+
+
+def wait_map_song(t, limit):
+    """지금 곡이 맵 곡(00·FF·여관 징글이 아닌 곡)이 될 때까지 limit 프레임까지 돌리고 그 곡을 돌려준다."""
+    for _ in range(limit):
+        if t.c.rd(SONG_NOW) not in (*fx.NO_SONG, INN_SONG):
+            break
+        t.w.step(set())
+    return t.c.rd(SONG_NOW)
+
+
+def picks_songs(rom):
+    """롬에 곡 고르기(밤 곡)가 들어 있는지: 00:CEAB 가 JSL 인지."""
+    from dq5map import lorom
+    return Path(rom).read_bytes()[lorom(SONG_PICK_SITE)] == 0x22
+
+
+def judge_inn_song(before, after, night, picked):
+    """이무르 여관 곡 판정. 밤이고 곡 고르기가 든 롬이면 묵기 전에 밤 곡. 밤에 묵었으면 묵은 뒤 아침 마을 곡, 아니면 그대로."""
+    problems = []
+    want_before = INN_NIGHT_SONG if night and picked else INN_TOWN_SONG
+    if before != want_before:
+        problems.append(f'묵기 전 곡 {before:02X}(기대 {want_before:02X})')
+    want_after = INN_TOWN_SONG if night else want_before
+    if after != want_after:
+        problems.append(f'묵은 뒤 곡 {after:02X}(기대 {want_after:02X})')
+    return problems
 
 
 def scene_church(core, rom, out, seed, kind):

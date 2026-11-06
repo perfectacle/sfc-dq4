@@ -1585,6 +1585,36 @@ needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출�
 groups = ["ch1-build", "ch1-walk"]
 
 [[check]]
+name = "dq4-map-song"
+why = "맵·필드에 들어선 뒤의 곡이 FC 맵 갈래대로(산트하임 성 01, 2장 마을 06 — 빌린 03/00 의 곡 바이트 0A 는 포팅에서 呪われし塔 라 텐페·프레놀·바자가 탑 곡이었음), 밤이면 성 30·마을 31(탑·동굴은 그대로), 2장 flag 가 켜진 필드는 05 おてんば姫の行進(1장 필드 02 는 그대로)이어야 한다. 곡 고르기(dq4soundpatch.song_pick_code)는 같은 곡 판정 00:CEAB 에 건다. 00:CE9A 에 걸었던 판은 CE75·CE86 이 그 가운데 CE9D 로 뛰어 이벤트 곡(7E:21DF bit7)이 FF(울리지 않음)였다"
+paths = [
+  "sfc/dq4/tools/dq4mapsongcheck.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
+  "sfc/dq4/tools/dq4groupcheck.py",
+  "sfc/dq4/tools/dq4soundpatch.py",
+  "sfc/dq4/tools/dq4soundset.py",
+  "sfc/dq4/tools/dq4sound-game.args",
+  "sfc/dq4/tools/dq4ch2event.py",
+  "sfc/dq4/tools/dq4chapterbox.py",
+  "sfc/dq4/tools/dq4fieldport.py",
+  "sfc/dq4/tools/dq4freshstate.py",
+  "sfc/dq4/tools/dq4build.py",
+  "sfc/dq4/tools/dq4chapter1.py",
+  "sfc/dq4/tools/dq4readset.py",
+  "sfc/dq4/tools/lua/dq4readset.lua",
+  "sfc/dq4/tools/lua/dq4shipstate.lua",
+  "sfc/dq5/tools/lua/dq5warp.lua",
+  "sfc/dq5/tools/lua/dq5warptrace.lua",
+  "sfc/dq5/tools/lua/dq5battle.lua",
+  "sfc/dq5/tools/lua/dq5progresscheck.lua",
+  "sfc/dq5/tools/dq5progresscheck.py",
+  "tools/mesence_settings.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/mapsong && uv run --locked python sfc/dq4/tools/dq4mapsongcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/mapsong --jobs 4"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk"]
+
+[[check]]
 name = "dq4-bg3-slot"
 why = "BG3 타일맵을 옮긴 menu.sfc 에서 실내 맵마다 $0725 가 dq4bg3slot 의 자리(3C·78·7C·48·4C)이고, $2109 의 자리가 같고, 버퍼가 멈춘 프레임의 타일맵이 게임 버퍼 7E:5000 과 같고, BG3 글자 칸·자리 밖 VRAM 이 overture.sfc 와 같아야 한다. 출발 상태가 선 17/00 은 01/01 을 거쳐 간다. 요청한 맵에 서야 하고, 도착하자마자 게임이 옮기는 33/01 은 33/00 에 서야 하며 33/00 으로 판정한다(dq4bg3slotcheck.MOVES_ON). 1E/00·20/06·32/00·03/01·03/02·04/00·0D/00·31/00·34/00·35/03 은 DQ5 움직이는 타일 종류 14 의 사본(7E:3D14~3E73)을 채우는 맵 열 모두다. 창 글자 변수가 사본 안에 있으면 열 맵 모두 BG1·BG2 VRAM 이 깨지고 셋은 BG3 타일맵도 깨진다(VRAM 판정이 잡음), 00/0A·04/0B 는 도착 뒤 전투 배경 그림 DMA 가 VBlank 끝에 닿는 맵이다"
 paths = [

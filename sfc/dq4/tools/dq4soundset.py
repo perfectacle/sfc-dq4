@@ -188,7 +188,7 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
           effect_gain_db=None, spare_effects=None, spare_carriers=None, spare_keep=None,
           spare_rate=8000, weapon_sounds=None, weapon_songs=(), effect_calls=None, spare_substitutes=None, silent_songs=(),
           resident_pcm=None, reserve=(), effect_remaps=None, item_sound=None, inn_jingle=False, song_calls=None,
-          wait_guard=False):
+          wait_guard=False, song_picks=None):
     """stream 은 {곡 자리: 곡 앞 샘플 바이트 상한}. 그 곡은 샘플 일부를 곡이 울리는 동안 보낸다(transfer_plan).
 
     stream_ticks 는 {곡 자리: 틱}. 곡 앞 바이트 상한을 곡이 처음 그 틱 안에 쓰는 샘플의 합으로 정하고, 도착 어림보다
@@ -621,7 +621,7 @@ def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_
                              effect_calls=effect_calls, release_pending=release_pending,
                              tick_scan=tick_scan, effect_remaps=effect_remaps,
                              item_sound=item_sound, inn_jingle=inn_jingle, song_calls=song_calls,
-                             wait_guard=wait_guard)
+                             wait_guard=wait_guard, song_picks=song_picks)
 
     rom, install_report = install()
     # 넣은 롬의 실제 자리로 덧붙일 샘플을 다시 고른다. 앞부분은 처음 고른 바이트(상한)를 받는 길이로 나눴으므로 그 안에서만
@@ -754,6 +754,8 @@ def main():
                     help='change LDA #OLD at ADDR (a site that waits for the song to end) to LDA #NEW')
     ap.add_argument('--wait-guard', action='store_true',
                     help='24:FF0F returns at once for a looping song instead of waiting forever')
+    ap.add_argument('--song-pick', action='append', default=[], metavar='A=B@night|A=B@7EXXXX&MASK',
+                    help='play song B instead of song A at night or while a WRAM flag bit is on (dq4soundpatch.song_pick_code)')
     ap.add_argument('--inn-jingle', action='store_true',
                     help='start the inn jingle as the screen darkens instead of after the morning map reload')
     ap.add_argument('--sfx-pcm-rate', type=int, default=8000, help='upper sample rate of --sfx-pcm samples')
@@ -839,6 +841,7 @@ def main():
                         song_calls={int(k, 16): tuple(int(y, 16) for y in v.split(':'))
                                     for k, v in (x.split('=') for x in args.song_call)},
                         wait_guard=args.wait_guard,
+                        song_picks=[patch.parse_song_pick(x) for x in args.song_pick],
                         effect_remaps={(int(k.split('-')[0], 16), int(k.split('-')[1], 16)):
                                        (int(v.split('-')[0], 16), int(v.split('-')[1], 16))
                                        for k, v in (x.split('=') for x in args.sfx_remap)},
