@@ -30,6 +30,14 @@ class GuardPathsTest(unittest.TestCase):
             self.assertIn(f, walk)
         self.assertIn('tools/headless_slots.py', gp.closure(['sfc/dq4/tools/dq4libretroreadsetcheck.py']))
 
+    def test_data_files_named_by_literals_are_followed(self):
+        """글자 상수로 이름을 적어 읽는 자료 파일(빌드가 넘기는 dq4sound-game.args, 걷기 검사의 HERE.parent 아래
+        ch1-walk-messages.toml)도 닿는 것으로 본다. 검사 결과 캐시 키([cache] key = "paths")가 paths 밖 자료 파일을
+        빼므로, 이런 파일이 paths 에 빠지면 바뀌어도 옛 결과로 건너뛴다."""
+        self.assertIn('sfc/dq4/tools/dq4sound-game.args', gp.closure(gp.GROUP_ROOTS['ch1-build']))
+        self.assertIn('sfc/dq4/ch1-walk-messages.toml', gp.closure(gp.GROUP_ROOTS['ch1-walk']))
+        self.assertIsNone(gp.DATA_NAME.fullmatch('guards.toml 의 paths'))
+
     def test_docstrings_and_help_text_are_not_followed(self):
         """docstring 과 빈칸이 든 글에 나오는 스크립트 이름은 닿는 것으로 보지 않는다."""
         self.assertIsNone(gp.FILE_NAME.fullmatch('dq4ch1walkcheck.py prologue/end.mss'))

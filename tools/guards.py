@@ -9,22 +9,32 @@
     run = "uv run --locked python ..."  # 돌리는 명령
     needs = ["rom", "MESENCE"]          # 돌리는 데 필요한 것. 대문자 이름은 환경 변수로 보고 --base 때 설정됐는지 알린다
     groups = ["ch1-build"]              # (골라 씀) 같은 파일의 [groups] 에 이름 붙인 paths 묶음을 더한다
+    tier = "release"                    # (골라 씀) "pr"(기본) 또는 "release": 무거워 배포 관문에서만 돌리는 검사
 
     [groups]
     ch1-build = ["sfc/dq4/tools/dq4build.py", ...]   # 여러 검사가 함께 쓰는 paths 묶음
 
-검사는 바뀐 파일이 paths(와 묶음)에 맞을 때, 또는 guards.toml 에서 그 검사의 run·needs 가 바뀌었을 때(새 검사 포함)
-걸린다.
+    [cache]
+    key = "paths"                       # (골라 씀) 검사 결과 캐시 키에 넣을 추적 파일. "all"(기본) 또는 "paths"
+
+PR 에서는 바뀐 파일이 그 검사의 paths 에 바로 맞을 때, 또는 guards.toml 에서 그 검사의 run·needs 가 바뀌었을 때(새 검사
+포함) 걸린다. 묶음으로만 맞는 검사와 tier = "release" 인 검사는 빠지고 배포 관문(tools/release_check.py)이 돌린다.
+PR 본문에 `가드: 전체` 줄이 있거나 --full 을 주면 묶음으로 맞는 것과 release 등급까지 모두 걸린다(빌드 순서·롬 배치·
+공용 훅·에뮬레이터 교체처럼 큰 변경).
 
 사용:
   python tools/guards.py                         목록 형식만 검사
   python tools/guards.py --base origin/main      바뀐 파일로 걸리는 검사와 명령을 찍음(PR 올리기 전)
   python tools/guards.py --base origin/main --run
                                                  걸린 검사를 포그라운드로 함께 돌리고 본문 결과 줄을 찍음
+  python tools/guards.py --base origin/main --run --full
+                                                 묶음으로 맞는 것·release 등급까지 돌림(본문에 `가드: 전체`)
   python tools/guards.py --base SHA --pr-body FILE
                                                  걸린 검사마다 본문에 결과 줄이 있는지 봄(CI)
 
---run 은 같은 입력(.md 를 뺀 추적 파일 내용, 명령, --rom 롬 SHA-1)으로 이미 통과한 검사를 건너뛴다.
+--run 은 같은 입력(.md 를 뺀 추적 파일 내용, 명령, --rom 롬 SHA-1)으로 이미 통과한 검사를 건너뛴다. [cache] key = "paths"
+인 트랙은 추적 파일 가운데 그 검사의 paths·묶음에 맞는 것, 그 트랙의 어느 검사도 paths 에 적지 않은 자료 파일
+(.py·.lua·.asm 밖), 의존성 파일만 본다(key_scope).
 입력이 달라도 롬을 빌드하는 검사는 빌드 단계를 먼저 돌려, 만든 파일과 .py 밖 입력이 같고 검사 단계가 지난번에 실행한
 함수의 코드·연 파일이 모두 같으면 검사 단계를 건너뛴다(run_check, tools/guardtrace).
 캐시는 원래 체크아웃의 work/cache/guards 에 있어 워크트리끼리 함께 쓴다. --no-cache 는 이 캐시와 검사 안의 캐시를
@@ -35,6 +45,8 @@
 """
 import argparse
 import concurrent.futures
+import functools
+import glob
 import hashlib
 import json
 import os
@@ -56,7 +68,9 @@ ROOT = Path(__file__).resolve().parent.parent
 NAME = re.compile(r'^[a-z0-9]+(?:-[a-z0-9]+)*$')
 ENV = re.compile(r'^[A-Z][A-Z0-9_]*$')
 FIELDS = {'name': str, 'why': str, 'paths': list, 'run': str, 'needs': list}
-OPTIONAL = {'groups': list}
+OPTIONAL = {'groups': list, 'tier': str}
+TIERS = ('pr', 'release')
+CACHE_KEYS = ('all', 'paths')
 # 이 값이 바뀌면 검사 결과가 바뀔 수 있다(why 는 설명, paths·groups 는 고르는 데만 씀)
 RESULT_FIELDS = ('run', 'needs')
 
@@ -83,8 +97,13 @@ def load(files, read=lambda f: (ROOT / f).read_text(encoding='utf-8')):
             problems.append(f'{toml}: TOML 오류 {e}')
             continue
         for key in data:
-            if key not in ('check', 'groups'):
+            if key not in ('check', 'groups', 'cache'):
                 problems.append(f'{toml}: 모르는 키 {key}')
+        cache = data.get('cache', {})
+        if not isinstance(cache, dict) or set(cache) - {'key'} or cache.get('key', 'all') not in CACHE_KEYS:
+            problems.append(f'{toml}: [cache] 는 key = {" 또는 ".join(map(repr, CACHE_KEYS))} 만')
+            cache = {}
+        mine = []
         groups = data.get('groups', {})
         if not isinstance(groups, dict):
             problems.append(f'{toml}: groups 는 [groups] 표여야 함')
@@ -120,6 +139,8 @@ def load(files, read=lambda f: (ROOT / f).read_text(encoding='utf-8')):
             for g in used:
                 if g not in groups or not isinstance(groups.get(g), list):
                     problems.append(f'{where}: 묶음 {g!r} 이 {toml} 의 [groups] 에 없음')
+            if item.get('tier', 'pr') not in TIERS:
+                problems.append(f'{where}: tier 는 {" 또는 ".join(map(repr, TIERS))}')
             if isinstance(item.get('name'), str) and not NAME.match(item['name']):
                 problems.append(f'{where}: 이름 {item["name"]!r} 은 소문자·숫자·- 만')
             if isinstance(item.get('paths'), list):
@@ -130,7 +151,13 @@ def load(files, read=lambda f: (ROOT / f).read_text(encoding='utf-8')):
                         problems.append(f'{where}: paths {pattern!r} 에 맞는 추적 파일이 없음')
             if all(isinstance(item.get(k), kind) for k, kind in FIELDS.items()):
                 extra = [p for g in used if isinstance(groups.get(g), list) for p in groups[g] if isinstance(p, str)]
-                checks.append({'file': toml, **item, 'paths': [*item['paths'], *extra]})
+                mine.append({'file': toml, **item, 'own_paths': item['paths'], 'paths': [*item['paths'], *extra]})
+        if cache.get('key') == 'paths':
+            # 자료 파일의 주인은 낱낱이 적은 경로로만 친다(sfc/dq4/tools/** 같은 glob 은 읽는다는 뜻이 아니다)
+            claimed = sorted({p for c in mine for p in c['paths'] if not glob.has_magic(p)})
+            for c in mine:
+                c['key_claimed'] = claimed
+        checks += mine
     seen = {}
     for c in checks:
         name = c.get('name')
@@ -240,10 +267,38 @@ def is_input(path, run):
     return not (NOT_INPUT.search(path) or TEST_FILE.search(path))
 
 
+# 어느 검사의 키에도 늘 넣는 추적 파일: 모든 검사가 도는 Python 과 의존성
+ALWAYS_KEY = frozenset({'uv.lock', 'pyproject.toml', '.python-version'})
+# dq4guardpaths 처럼 트랙 시험이 paths 가 덮는지 보는 종류(import·Lua·asm 으로 닿는 코드)
+CODE_FILE = re.compile(r'\.(py|lua|asm)$')
+
+
+@functools.lru_cache(maxsize=None)
+def glob_regex(patterns):
+    """paths glob 묶음(tuple)을 하나의 정규식으로. matches(PurePosixPath.full_match)와 같은 뜻이고 훨씬 빠르다."""
+    return re.compile('|'.join(glob.translate(p, recursive=True, include_hidden=True) for p in patterns) or r'(?!)')
+
+
+def key_scope(check):
+    """검사 결과 캐시 키에 넣을 추적 파일을 고르는 함수. [cache] key = "paths" 인 트랙(key_claimed 가 있음)은 그 검사의
+    paths·묶음에 맞는 것, 트랙의 어느 검사도 paths 에 낱낱이 적지 않은 자료 파일(.py·.lua·.asm 밖), ALWAYS_KEY.
+    코드와 글자 상수로 이름을 적어 읽는 자료 파일은 트랙 시험(dq4guardpaths)이 paths 가 덮는다고 보장한다. 계산한
+    이름으로 여는 자료 파일은 시험이 못 보므로, 주인이 적히지 않은 것은 누가 읽을지 몰라 모두의 키에 둔다.
+    그 밖의 트랙은 모두."""
+    claimed = check.get('key_claimed')
+    if claimed is None:
+        return lambda path: True
+    own, anyone = glob_regex(tuple(check['paths'])), frozenset(claimed)
+    return lambda path: (path in ALWAYS_KEY or bool(own.match(path))
+                         or not (CODE_FILE.search(path) or path in anyone))
+
+
 def input_key(check, root=ROOT, environ=os.environ, built=False):
     """같은 입력이면 같은 키. 추적 파일 가운데 결과에 닿는 것(is_input), 명령, needs 환경 변수가 가리키는 파일·폴더
     (hash_path), MESENCE 가 있으면 MesenCE 사용자 설정 파일, rom/ 원본, 명령이 읽는 파일(앞 단계가 만드는 것 빼고).
     MESENCE 가 있는데 설정 파일을 찾지 못하면 None: 결과에 닿는 입력을 모르므로 캐시를 읽지도 쓰지도 않는다.
+
+    추적 파일은 key_scope 가 고른 것만 본다.
 
     built 면 빌드 단계를 돌린 뒤의 키(built_hit): 추적 .py 는 빼고(검사 단계가 연 .py 는 캐시 항목이 따로 본다),
     앞 단계가 만든 파일을 내용째 넣는다."""
@@ -251,8 +306,10 @@ def input_key(check, root=ROOT, environ=os.environ, built=False):
     run = check['run']
     h.update(run.encode())
 
+    scope = key_scope(check)
+
     def counts(path):
-        return is_input(path, run) and not (built and path.endswith('.py'))
+        return is_input(path, run) and scope(path) and not (built and path.endswith('.py'))
     for line in git('ls-files', '-s').splitlines():
         if counts(line.split('\t', 1)[-1]):
             h.update(line.encode())
@@ -619,9 +676,17 @@ def run_many(hit, parallel, timeout, no_cache=False, logs=None, env=None):
     return done
 
 
-def triggered(checks, changed, edited=()):
-    """paths(묶음 포함)에 맞는 파일이 바뀌었거나 이름이 edited 에 든 검사."""
-    return [c for c in checks if c['name'] in edited or any(matches(f, p) for f in changed for p in c.get('paths', []))]
+def triggered(checks, changed, edited=(), full=False):
+    """바뀐 파일이 paths 에 맞거나 이름이 edited 에 든 검사. full 이 아니면(PR) 묶음은 빼고 검사 자신의 paths 만 보고,
+    tier = "release" 인 검사도 뺀다. full 이면 묶음까지 보고 등급을 가리지 않는다."""
+    def hits(c):
+        pats = c.get('paths', []) if full else c.get('own_paths', c.get('paths', []))
+        return c['name'] in edited or any(matches(f, p) for f in changed for p in pats)
+    return [c for c in checks if (full or c.get('tier', 'pr') != 'release') and hits(c)]
+
+
+# PR 본문에서 묶음·release 등급까지 모두 돌렸다고 밝히는 줄
+FULL_LINE = re.compile(r'^[ \t]*가드[ \t]*:[ \t]*전체[ \t]*$', re.M)
 
 
 def edited_checks(base_text, head_text):
@@ -679,12 +744,19 @@ def main():
     ap.add_argument('--parallel', type=int, default=2, help='--run 에서 함께 돌릴 검사 수(검사마다 안에서 다시 병렬)')
     ap.add_argument('--timeout', type=int, default=1800, help='--run 에서 검사 하나의 시간 제한(초)')
     ap.add_argument('--no-cache', action='store_true', help='--run 에서 검사 캐시·장면 캐시를 모두 끄고 전부 돌린다(배포 관문)')
+    ap.add_argument('--full', action='store_true',
+                    help='묶음으로 맞는 검사와 release 등급까지 고른다(PR 본문의 `가드: 전체` 와 같음)')
     args = ap.parse_args()
     files = tracked()
     checks, problems = load(files)
     if args.base:
         changed = [f for f in git('diff', '--name-only', f'{args.base}...{args.head}').splitlines() if f]
-        hit = triggered(checks, changed, edited_in(args.base, args.head, changed))
+        edited = edited_in(args.base, args.head, changed)
+        body = args.pr_body.read_text(encoding='utf-8') if args.pr_body else ''
+        full = args.full or bool(FULL_LINE.search(body))
+        hit = triggered(checks, changed, edited, full)
+        if full:
+            print('전체 모드: 묶음으로 맞는 검사와 release 등급까지 고름')
         if hit:
             print('이 변경이 건드리는 실행 검사(돌리고 PR 본문에 결과 줄):')
             for c in hit:
@@ -697,8 +769,14 @@ def main():
                 print(f'    본문 줄: - [x] {c["name"]}: 통과 …')
         else:
             print('걸리는 실행 검사 없음')
+        later = [c for c in triggered(checks, changed, edited, full=True) if c not in hit]
+        if later:
+            print('배포 관문에서(이 PR 에서는 돌리지 않음. 큰 변경이면 본문에 `가드: 전체` 를 쓰고 --full 로 돌릴 것):')
+            for c in later:
+                why = 'release 등급' if c.get('tier', 'pr') == 'release' else '묶음으로만 맞음'
+                print(f'- {c["name"]} ({why})')
         if args.pr_body:
-            problems += body_problems(hit, args.pr_body.read_text(encoding='utf-8'))
+            problems += body_problems(hit, body)
         if args.run and hit and not problems:
             return run_all(hit, args.parallel, args.timeout, args.no_cache)
     elif args.pr_body or args.run:

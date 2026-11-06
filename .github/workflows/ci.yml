@@ -121,7 +121,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
   # Run-time guards need the ROM, so CI only checks that a PR touching a guard's
-  # paths reports its result in the body (tools/guards.py, GUARD-02).
+  # own paths reports its result in the body (tools/guards.py, GUARD-02). Guards
+  # matched only through [groups] and tier = "release" guards are left to the
+  # release gate unless the body has a `가드: 전체` line.
   required-checks:
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 5
