@@ -148,6 +148,18 @@ def _stone_floor():
     return _finish(c, "회청색 판석")
 
 
+def _moss_floor():
+    """The west tower's floor: FC lays green slabs there, drawn as the grey slab in the darker greens of bank 1."""
+    c = _Canvas(1)
+    c.rows(tuple(row.translate(str.maketrans("3456", "2345")) for row in (
+        "5555553555555553", "5666553566666653", "5655553555555653", "5555553555555553",
+        "5555553555555553", "5555553555555553", "4444443444444443", "3333333333333333",
+        "5553555555553555", "5653566666653566", "5553555555653555", "5553555555553555",
+        "5553555555553555", "5553555555553555", "4443444444443444", "3333333333333333",
+    )))
+    return _finish(c, "이끼 낀 판석")
+
+
 def _cobble():
     """DQ5 town roads are a basket weave of tan bricks, not loose stones."""
     c = _Canvas(4, fill=7)
@@ -1776,6 +1788,7 @@ def create_assets():
         "stone_wall_left": _stone_wall("left"),
         "stone_wall_right": _stone_wall("right"),
         "stone_floor": _stone_floor(),
+        "moss_floor": _moss_floor(),
         "cobble": _cobble(),
         "grass": _grass(),
         "dirt": _dirt(),
