@@ -70,7 +70,7 @@ class FindTest(unittest.TestCase):
         # 잠금 1 은 2199.1(カギの技法)만 보던 것을 とうぞくのカギ(B7)를 가져도 열리게 한다
         self.assertEqual(w["01:DD23"]["orig"], "00 0B 02 09 F0 02 E6 01")
         self.assertEqual(w["01:DD23"]["hex"], "22 00 F8 57 EA EA EA EA")
-        self.assertEqual(w["57:F800"]["hex"], "00 0B 02 09 D0 08 00 90 90 B7 A5 46 30 02 E6 01 6B")
+        self.assertEqual(w["57:F800"]["hex"], "E2 20 00 0B 02 09 D0 08 00 90 90 B7 A5 46 30 02 E6 01 6B")
 
     def test_without_auto(self):
         saved = door.AUTO_OPEN

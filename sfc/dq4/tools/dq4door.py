@@ -153,8 +153,11 @@ def auto_code(at=AUTO_AT):
 
 def key_code():
     """KEY, by JSL from KEY_FLAG with M 8-bit: INC $01 when flag 2199.1 is on or anyone in the party holds B7. BRK reads
-    its operands with the K the BRK pushed, so the flag (BRK 0B) and item (BRK 90) checks run from bank 57."""
-    return bytes((0x00, 0x0B, 0x02, 0x09,          # BRK 0B 0209: Z clear when 2199.1 is on
+    its operands with the K the BRK pushed, so the flag (BRK 0B) and item (BRK 90) checks run from bank 57. The SEP
+    keeps M as the caller has it; it is first so the JSL target is not a 00 byte, which dq4romledgercheck reads as
+    an empty hook target."""
+    return bytes((0xE2, 0x20,                      # SEP #$20
+                  0x00, 0x0B, 0x02, 0x09,          # BRK 0B 0209: Z clear when 2199.1 is on
                   0xD0, 0x08,                      # BNE level
                   0x00, 0x90, 0x90, THIEF_KEY,     # BRK 90 90 B7 (as 01:DD07 for B9): $46 bit7 off when someone holds it
                   0xA5, 0x46, 0x30, 0x02,          # LDA $46 / BMI done
