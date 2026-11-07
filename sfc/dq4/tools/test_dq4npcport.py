@@ -36,7 +36,7 @@ class AllocationTest(unittest.TestCase):
         prologue = dq4prologue.talk_doc()["scripts"]
         import dq4ch2event
         ch1 = len(dq4ch1event.TALKS)
-        events = ch1 + len(dq4ch2event.TALKS)
+        events = ch1 + len(dq4ch2event.talk_scripts(port.FIRST_MESSAGE))   # 등록한 사건 모듈(EVENTS)의 대화까지
         f = port.FIRST_MESSAGE
         messages = [{"id": f + k, "codes": [port.END]} for k in range(3)]
         scripts = port.talk_doc(messages)["scripts"]

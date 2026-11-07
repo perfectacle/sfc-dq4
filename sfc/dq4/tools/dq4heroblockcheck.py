@@ -157,8 +157,10 @@ WALL = [('wall-left', '22,10;26,10'), ('wall-above', '22,10;24,10;24,8;26,8;26,1
         ('wall-below', '22,10;24,10;24,12;26,12;26,10')]
 # 걷어찬 뒤 필드 산트하임 앞 (78,149): 어느 쪽으로 걸어도 네 걸음째에 합류한다(필드 걸음 훅)
 JOIN = [('join-down', 'down:120'), ('join-left', 'left:120'), ('join-right', 'right:120')]
-# 텐페 신부(3D/03 (24,49)): 촌장에게 들은 뒤 예 → 바구니 이벤트로 제단 두 칸 아래 (44,31). 그 칸은 사방이 막혀
-# (조작은 돌아와 명령 창이 열림) 끝 걸음(free) 대신 옮겨진 셀만 본다. 보스 전투가 붙으면 이긴 뒤의 걸음을 본다
+# 텐페 신부(3D/03 (24,49)): 촌장에게 들은 뒤 예 → 바구니 이벤트로 제단 두 칸 아래에 닿아 보스 전투(dq4ch2tempe,
+# 몬스터를 약하게 덮고 HP 를 채워 이김) → 아침의 같은 자리. 끝에 마을 쪽으로 걸어 내려간다
+# 보스 전투 동안 아리나 혼자 버티게 HP 를 999 로(일행 기록 0 의 지금 HP)
+HERO_FULL = '2042=E7;2043=03'
 PRIEST = [('priest-below', '24,51', 'up'), ('priest-left', '22,51;22,49', 'right'),
           ('priest-right', '26,51;26,49', 'left')]
 
@@ -180,12 +182,15 @@ def chapter2_cases():
         out[name] = {'warp': f'{ch2.BEDROOM},22,9', 'set': ready,
                      'walk': f'22,10;26,10;{WALL_YES};{step};wait:200;{taps(8)};{close}',
                      'want': [('JOINED', ch2.JOINED)], 'maxf': 4500}
+    import dq4ch2tempe as tempe
     heard = ch2_flags(ch2.TEMPE_HEARD)
     px, py = ch2.PRIEST
+    mx, my = tempe.MORNING_CELL
     for name, at, face in PRIEST:
-        out[name] = {'warp': f'{ch2.TEMPE},{px},{py + 1}', 'set': heard,
-                     'walk': f'{at};{wc.talk(face, 14)};wait:600;{taps(10)};{close}',
-                     'want': [('TEMPE_ALTAR', ch2.TEMPE_ALTAR)], 'hero_at': ch2.ALTAR_CELL, 'maxf': 5000}
+        out[name] = {'warp': f'{ch2.TEMPE},{px},{py + 1}', 'set': ';'.join((heard, HERO_FULL)),
+                     'walk': f'{at};{wc.talk(face, 14)};wait:600;{taps(10)};{taps(110, 40)};wait:600;{taps(6)};{close}',
+                     'free': f'{mx},{my + 6}', 'battle': 'win', 'want': [('TEMPE_WON', tempe.WON)],
+                     'not': [('TEMPE_ALTAR', ch2.TEMPE_ALTAR)], 'hero_at': tempe.MORNING_CELL, 'maxf': 12000}
     return out
 
 
@@ -211,6 +216,14 @@ def overlaps(text):
     return frames, first
 
 
+def rompatch(rom, case):
+    """걸음 동안의 ROMPATCH: 조우를 끄고, 사건 전투가 있으면 그 몬스터를 덮는다(dq4ch2walkcheck.battle_patch)."""
+    if 'battle' not in case:
+        return wc.NO_ENCOUNTERS
+    import dq4ch2walkcheck as cw
+    return wc.NO_ENCOUNTERS + ';' + cw.battle_patch(Path(rom).read_bytes(), case['battle'])
+
+
 def run_case(mesence, rom, base, out, name, case, exit_at, seed=0):
     dest = out / name
     rng = wc.rng_for(seed)
@@ -234,7 +247,7 @@ def run_case(mesence, rom, base, out, name, case, exit_at, seed=0):
                                           case.get('want', []) + case.get('not', []))) if v)
     env = {'STATE': str(state), 'WALK': str(wc.WALK), 'WALK_STATE': str(wc.WALK_STATE), 'WAYPOINTS': walk,
            'MAXF': str(case.get('maxf', wc.frames(walk))), 'CHANGES': str(case.get('changes', 99)), 'AFTER': '30',
-           'WATCH': watch, 'ROMPATCH': wc.NO_ENCOUNTERS, 'SET': rng}
+           'WATCH': watch, 'ROMPATCH': rompatch(rom, case), 'SET': rng}
     if 'snap' in case:
         env.update(SNAPMSG=f"{case['snap'][0]:X}", SNAPWATCH=case['watch'])
     env['TRACK'] = ','.join(f'{n:02X}' for n in TRACK)

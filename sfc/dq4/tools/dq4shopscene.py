@@ -72,12 +72,21 @@ SHOPS.update({
     'frenor-item': ('3D/04,42,44', (42, 45), 0, 'left'),     # 프레놀 FC 0F/00 (19,22)
     'endor-weapon': ('40/00,24,34', (24, 34), 2, 'up'),      # 엔돌 FC 04/00 (12,15), 낮
     'endor-armor': ('40/00,50,54', (50, 55), 1, 'right'),    # 엔돌 (27,27), 낮
+    # 텐페 FC 0E/00 (4,26): 괴물을 이긴 뒤(dq4ch2tempe.WON)의 목록에만 서는 도구점, 낮
+    'tempe-item': ('3D/03,8,56', (8, 56), 0, 'up'),
 })
 X, Y = 0x7E3020, 0x7E3080
 FACE = (8, 24)         # 카운터 쪽을 누르는 프레임(돌아서려면 6프레임 넘게, 한 걸음보다 짧게), 걸음이 끝나기를 기다리는 프레임
 BASE_ITEMS = (0x42, 0x00)   # 새 게임 밑판: 천 옷·노송나무 막대, 둘 다 장비(비트 0003)
 HERB, ANTIDOTE, CHAIN_MAIL, WOOD_HAT = 0xA1, 0xA2, 0x4D, 0x87
 STEEL_SWORD, LEATHER_SHIELD, MOON_HERB = 0x0C, 0x75, 0xA7
+# 텐페의 괴물을 이긴 flag(dq4ch2tempe.WON). 그 뒤의 목록에만 도구점 판매자가 선다(dq4shopport.EVENT_LISTS)
+def _tempe_won():
+    import dq4ch2tempe
+    return f'{0x2190 + dq4ch2tempe.WON[0]:04X}|{dq4ch2tempe.WON[1]:02X}'
+
+
+TEMPE_WON = _tempe_won()
 # 엔돌 가게의 DQ5 에 없는 물건이 빌린 자리(dq4itemport.BORROWED)
 ABACUS, APRON = 0x34, 0x4E
 
@@ -224,6 +233,10 @@ SCENES = [
           BUY + (pick(ITEM, APRON), to('a', W_YESNO), to('a', 0x00), to('a', W_YESNO), to('a', W_SHOP)),
           gold=3500, items=BASE_ITEMS + (APRON,), equip=0x0003,
           windows=(W_COMMAND, W_SHOP, W_PARTNER, W_YESNO, W_YESNO, W_SHOP)),
+    Scene('tempe-item', '괴물을 이긴 뒤의 텐페 도구점에서 약초(8G)', 'tempe-item', (('gold', '5000'), ('poke', TEMPE_WON)),
+          BUY + (pick(ITEM, HERB), to('a', W_QTY), to('a', W_YESNO), to('a', W_SHOP)),
+          gold=4992, items=BASE_ITEMS + (HERB,), equip=0x0003, wram={QTY_MAX: 0},
+          windows=(W_COMMAND, W_SHOP, W_PARTNER, W_QTY, W_YESNO, W_SHOP)),
     Scene('armor-cannot-equip', '$0F21 = 3 을 남긴 채 장비할 수 없는 체인 메일 사기: 한 벌만(350G)', 'armor',
           (('gold', '1000'),),
           BUY + (poke(QTY, 3), pick(ITEM, CHAIN_MAIL), see(QTY, 3), to('a', W_YESNO), to('a', 0x00), to('a', W_YESNO),
