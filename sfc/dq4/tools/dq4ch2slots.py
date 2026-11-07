@@ -50,7 +50,7 @@ SLOTS = {
     'E5': Slot('빈 산트하임·2장 끝·마을 사람 진행별 대사', 'dq4ch2ending', (0x5FE800, 0x5FF800), flags=(0x6C,),
                scripts=(('10:8414', (2, 3, 7, 8, 9, 10, 11, 12, 13, 14)), ('10:CB92', tuple(range(9)))),
                lists='ch2_ending_', message_bytes=8192, talk_bytes=8192, list_bytes=8192),
-    'P': Slot('동료 대화(はなす)', 'dq4ch2party', (0x5C8000, 0x5CC000), flags=(0x6D, 0x6E), byte_flags=(0x6E,),
+    'P': Slot('동료 대화(はなす)', 'dq4ch2partytalk', (0x5C8000, 0x5CC000), flags=(0x6D, 0x6E), byte_flags=(0x6E,),
               scripts=(('10:DA05', tuple(range(8))),), lists='ch2_party_',
               message_bytes=4096, talk_bytes=1024, list_bytes=0,
               notes=('대사 몫이 모자라면 메시지 덩어리 셋째 자리를 예약표 PR 로 먼저 잡는다',)),

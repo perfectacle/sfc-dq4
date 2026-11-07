@@ -69,6 +69,10 @@ class NativeTest(unittest.TestCase):
         data[o:o + len(ev.HERO_PICTURE_ORIG)] = ev.HERO_PICTURE_ORIG
         s = ev.ch1.lorom(ev.STEP_HOOK_AT)
         data[s:s + 4] = ev.STEP_HOOK_ORIG
+        # 사건 모듈이 DQ5 코드에 거는 훅(동료 대화의 「はなす」 갈래)도 원래 바이트가 있어야 덮는다
+        import dq4ch2partytalk as talk
+        t = ev.ch1.lorom(talk.HOOK_AT)
+        data[t:t + len(talk.HOOK_ORIG)] = talk.HOOK_ORIG
         original = bytearray(0x400000)
         out = ev.apply(bytes(data), bytes(original), 0xE00)
         _, at = ev.native()
