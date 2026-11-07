@@ -93,6 +93,10 @@ class ModuleTest(unittest.TestCase):
         x0, y0, x1, y1 = fr.CRY_RECT
         for x, y in (fr.INN_BREY, fr.INN_KIRYL):
             self.assertTrue(x0 <= x <= x1 and y0 <= y + 1 <= y1)
+        # 망토 둘·가짜 공주는 FC 에서 서 있어 dq4npccheck 가 말을 건다. 사각형 안이라 비명이 먼저(셀로 고름)
+        for x, y in (fr.INN_CLOAK_A, fr.INN_CLOAK_B, fr.INN_PRINCESS):
+            self.assertTrue(x0 <= x <= x1 and y0 <= y + 1 <= y1)
+            self.assertEqual(fr.start_messages(ctx)[(fr.INN, (x, y), None)], ctx.msg['cry'])
         gone = ev.absent()
         self.assertIn((fr.TOWN, *fr.TRIO[0], False), gone)
         self.assertIn((fr.TOWN, *fr.NIGHT_MEI, True), gone)

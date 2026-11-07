@@ -213,19 +213,19 @@ def talk_cell(person):
     return (x + 1) // 2, y // 2
 
 
-# FC people placed where nobody can reach them: (FC group, FC map, x, y). テンペ's three stand on wall blocks, cut off
+# FC people placed where nobody can reach them: (FC group, FC map, x, y). テンペ's four stand on wall blocks, cut off
 # from the town; フレノール's two night people stand below the map (its height is 1B). レイクナバ 16/00 (30x30) has
 # people right of and below the map; エンドール's colosseum stands 04/07 three on the top wall row and one on floor
 # walled in on all four sides.
-STAGED = {(0x0E, 0, 0x15, 0x0D), (0x0E, 0, 0x16, 0x0D), (0x0E, 0, 0x17, 0x0D), (0x0F, 0, 0x00, 0x22),
+STAGED = {(0x0E, 0, 0x15, 0x0D), (0x0E, 0, 0x16, 0x0D), (0x0E, 0, 0x17, 0x0D), (0x0E, 0, 0x18, 0x0D), (0x0F, 0, 0x00, 0x22),
           (0x0F, 0, 0x00, 0x23), (0x16, 0, 0x24, 0x00), (0x16, 0, 0x00, 0x25),
           (0x04, 7, 0x01, 0x00), (0x04, 7, 0x02, 0x00), (0x04, 7, 0x03, 0x00), (0x04, 7, 0x19, 0x04),
           # 4장: モンバーバラ 밤 15/03(높이 30)과 キングレオ 00/02(높이 27)는 맵 아래에, ハバリア 11/00 은 네 쪽이
           # 막힌 칸에, 11/03 은 왼쪽 아래 벽에 선다.
           (0x15, 3, 0x18, 0x21), (0x00, 2, 0x1B, 0x1B), (0x11, 0, 0x10, 0x09), (0x11, 3, 0x00, 0x24),
-          # 2장: 西の塔 꼭대기 2E/00 의 둘은 바닥 오른쪽 벽 칸에, 엔돌 쪽 사당 1F/00(너비 15)의 밤 하나는 맵 오른쪽
+          # 2장: 西の塔 꼭대기 2E/00 의 셋은 바닥 오른쪽 벽 칸에, 엔돌 쪽 사당 1F/00(너비 15)의 밤 하나는 맵 오른쪽
           # 밖에 선다.
-          (0x2E, 0, 0x17, 0x01), (0x2E, 0, 0x17, 0x02), (0x1F, 0, 0x16, 0x00)}
+          (0x2E, 0, 0x17, 0x00), (0x2E, 0, 0x17, 0x01), (0x2E, 0, 0x17, 0x02), (0x1F, 0, 0x16, 0x00)}
 
 
 # 2장 시작 상태로 옮긴 FC 그룹(dq4groupbuild.LINKS 의 "chapter": 2)이 든 DQ5 그룹
@@ -340,7 +340,9 @@ def main():
                 jobs.append(("inn" if service == INN else "talk", f"talk-{m.replace('/', '')}-{i}", m, to, d,
                              p["night"], (first, inns.get(m) if service == INN else None)))
             else:
-                message = events.get((m, p["talk"], p["night"]), events.get((m, p["talk"], None)))
+                at = (p["dq5"]["x"], p["dq5"]["y"])
+                message = events.get((m, at, p["night"]), events.get((m, at, None), events.get(
+                    (m, p["talk"], p["night"]), events.get((m, p["talk"], None)))))
                 want = (int(p["message"], 16) if message is None else message, None)
                 jobs.append(("talk", f"talk-{m.replace('/', '')}-{i}", m, to, d, p["night"], want))
                 if (tx, ty) != (p["x"], p["y"]):
