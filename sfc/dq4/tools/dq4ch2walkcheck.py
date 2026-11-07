@@ -53,7 +53,13 @@ FLAGS = {
     'TEMPE_HEARD': flag(ch2.TEMPE_HEARD),
     'TEMPE_GONE': flag(ch2.TEMPE_GONE),
     'TEMPE_ALTAR': flag(ch2.TEMPE_ALTAR),
+    # flag 가 아니라 바이트 전체(마스크 FF)를 본다: 1장에 맡긴 やくそう 개수와 맡긴 금화(1000G 단위) 아래 바이트
+    'BANK_HERB': (ch2.BANK_ITEMS_AT + 0xA1, 0xFF),
+    'BANK_GOLD': (ch2.BANK_GOLD_AT, 0xFF),
 }
+
+# 1장 왕 보고 앞에 맡긴 것: やくそう 3 개와 금화 2000. FC 장 초기화처럼 2장 첫머리에는 둘 다 0 이어야 한다
+CH1_BANK = f'{(ch2.BANK_ITEMS_AT + 0xA1) & 0xFFFF:04X}=03;{ch2.BANK_GOLD_AT & 0xFFFF:04X}=02'
 
 def join_set(data):
     """두 사람 합류(dq4ch2event._join)가 기록에 남기는 것: 일행 기록 1·2, 일행 수 3, 순서 0 1 2. 다음 레벨 경험치는
@@ -88,7 +94,8 @@ SEGMENTS = [
     # 제목 상자·서두 서술·부르는 소리·왕의 말을 넘기면 첫머리 flag 가 꺼지고 조작이 풀린다. A 를 더 누르면 왕에게
     # 다시 말을 걸어 물음이 되풀이되므로(12번째 A 에서 실측) 넘길 만큼만 누른다
     ('opening', 'walk', 'wait:200;' + taps(10, 90) + ';wait:300;' + CLOSE,
-     {'maxf': 4000, 'map': ch2.THRONE, 'want': ['CHAPTER2'], 'off': ['OPENING']}),
+     {'maxf': 4000, 'map': ch2.THRONE, 'want': ['CHAPTER2'], 'off': ['OPENING', 'BANK_HERB', 'BANK_GOLD'],
+      'items': [ch2.SILK_ROBE]}),
 ]
 HEAD = 3
 
@@ -139,8 +146,18 @@ def setup(first, segments=None, data=None):
 def head_key(mesence):
     """2장 출발 상태를 정하는 것: 서장 캐시 키(1장 검사·사건 코드·Lua·에뮬레이터)에 머리를 걷는 코드와 머리 구간·그
     시작 flag 를 더한다. 이 파일 전체를 넣지 않는 것은 사건 구간이 붙을 때마다 머리를 다시 걷지 않게 하려는 것이다."""
-    return wc.code_key(mesence, inspect.getsource(head), repr(SEGMENTS[:HEAD]),
+    return wc.code_key(mesence, inspect.getsource(head), repr(SEGMENTS[:HEAD]), CH1_BANK,
                        repr(wc.setup(wc.SEGMENTS, KING_INDEX)))
+
+
+def head_effects():
+    """머리 묶음 첫 구간에 둘 기록: 1장 검사의 것에 1장에 맡긴 것(CH1_BANK)을 더한다. setup 은 첫 구간 앞 구간의
+    효과만 모으므로 왕 보고 바로 앞 구간에 붙인다."""
+    effects = dict(wc.EFFECTS)
+    before = wc.SEGMENTS[KING_INDEX - 1][0]
+    effects[before] = {**effects.get(before, {}),
+                       'set': ';'.join(v for v in (effects.get(before, {}).get('set'), CH1_BANK) if v)}
+    return effects
 
 
 def head(mesence, rom, data, out, cache=None):
@@ -156,7 +173,7 @@ def head(mesence, rom, data, out, cache=None):
     # 1장 구간 표의 왕 보고 앞까지에 머리를 이어, 1장 묶음 걷기와 같은 flag·동료·같은 맵 들르기로 시작한다
     chain = wc.SEGMENTS[:KING_INDEX] + SEGMENTS[:HEAD]
     results = wc.walk_unit(mesence, rom, data, out, chain, list(range(KING_INDEX, KING_INDEX + HEAD)), base,
-                           flags=FLAGS)
+                           flags=FLAGS, effects=head_effects())
     if len(results) != HEAD or any(r['status'] != 'passed' for r in results):
         return None, results
     if cache:
