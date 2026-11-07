@@ -6,7 +6,8 @@
 NMI 가 잇달아 이어진 길이가 곧 대기열이 늦어지는 NMI 수의 상한이다.
 
 장면마다 dq4battlecheck 와 같이 서장 끝 상태에서 자리를 잡고(1장 걷기 검사의 깃발·동료) 조우 루틴을 정한 무리로 덮어
-걸음 전투를 붙인다. 몬스터 능력치는 고치지 않아(주문을 쓰도록) 주인공 HP 만 묶고 A 를 눌러 싸운다. lua/dq4bigpic.lua 가
+걸음 전투를 붙인다. 몬스터 능력치는 고치지 않아(주문을 쓰도록) 주인공 HP 만 묶고 A 를 눌러 싸우다가, FINISH_AT 프레임부터 몬스터 HP 를 1 로
+묶어 전투를 끝낸다. lua/dq4bigpic.lua 가
 NMI 마다 작업·$0DF3·대기열 항목 수와 전투 메시지 번호를 남기고 lua/dq4battle.lua 를 그대로 돌린다. 같은 상태·난수로
 REPEAT 번 돌려 기록이 같아야 한다.
 
@@ -41,6 +42,11 @@ BATTLE_TASK = 0x8952
 LIMIT = 8
 REPEAT = 2
 INJECT = 40
+# 이 프레임부터 몬스터 HP 를 1 로 묶어(lua/dq4bigpic.lua FINISH_AT) 전투를 몇 턴 안에 끝낸다. 회복 주문을 쓰는 무리와의
+# 전투 길이는 난수 걸음이라, 전투와 상관없는 롬 변화로 난수 소비가 바뀌기만 해도 MAXF 를 넘을 수 있다(같은 롬이면 늘 같음).
+# FINISH_AT 은 넣은 항목이 다 나간 뒤로 넉넉히, MAXF 는 묶은 뒤 남은 몬스터를 다 쓰러뜨릴 만큼 그 뒤로 둔다
+FINISH_AT = 10000
+MAXF = 20000
 # 무리: まほうつかい(12, メラ)·ホイミスライム(1E, ホイミ)·スカルサーペント(0B)·おばけキノコ(30)·バブルスライム(09).
 # 탑 장면은 호이민이 일행에 든 뒤라 호이민의 ホイミ 도 나온다
 SCENES = {
@@ -114,8 +120,8 @@ def run_scene(mesence, rom, data, base, out, name, scene, seed, jobs=REPEAT):
     texts, found, nmis_seen, msgs_seen, ended = [], None, 0, 0, []
     env = {'NEXT': str(bc.BATTLE), 'STATE': str(state), 'ROMPATCH': bc.force_patch(scene['group']),
            'AFTERPATCH': wc.NO_ENCOUNTERS, 'SET': f'{wc.rng_for(seed)};{wc.DAY_SET}', 'POKE': wc.HERO_HP,
-           'STEP': scene['step'], 'KEYS': 'a', 'MOVE': 'up', 'MAXF': '20000', 'KANATABLE': bc.kana_range(),
-           'INJECT': str(INJECT)}
+           'STEP': scene['step'], 'KEYS': 'a', 'MOVE': 'up', 'MAXF': str(MAXF), 'KANATABLE': bc.kana_range(),
+           'INJECT': str(INJECT), 'FINISH_AT': str(FINISH_AT)}
     run_dirs = [dest / f'run{i + 1}' for i in range(REPEAT)]
     # 같은 입력을 되풀이하는 실행끼리는 서로 기다릴 것이 없으므로 함께 띄우고, 판정은 실행 번호 순서로 한다
     dq4shards.pmap(lambda d: wc.run(mesence, rom, PROBE, d, env, 1500), run_dirs, jobs)

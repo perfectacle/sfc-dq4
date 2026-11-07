@@ -8,6 +8,8 @@
 --                   그 그림과 같은지 적는다. 뒤 NMI 입구에서 항목 수가 0 이 되면 그때 VRAM 이 그 그림과 같은지 보고
 --                   「프레임 inj 넣은NMI 나간NMI before same|differs after same|differs」 를 남긴다(나간 NMI 는 항목 수가 0 이 된
 --                   입구의 바로 앞 NMI)
+--   FINISH_AT=F     이 프레임부터 매 프레임, 있는 몬스터 칸(7E:07C0 + 칸×16, +A bit7)의 HP(+2)가 1 보다 크면 1 로 둔다.
+--                   회복 주문을 쓰는 무리와의 전투는 난수에 따라 끝없이 길어질 수 있어, 그 뒤 몇 턴 안에 끝나게 한다
 local wq = tonumber(os.getenv('WQCOUNT') or '7EA97E', 16)
 local inject = tonumber(os.getenv('INJECT') or '0')
 local WQ_OFF, WQ_RD, WQ_BUF = wq + 2, wq - 6, 0x7E3EB0
@@ -60,8 +62,18 @@ emu.addMemoryCallback(function()
   log[#log + 1] = string.format('%d msg %03X', f, emu.getState()['cpu.a'] & 0xFFFF)
 end, emu.callbackType.exec, 0x248C39, 0x248C39)
 
+local finish_at = tonumber(os.getenv('FINISH_AT') or '0')
+
 emu.addEventCallback(function()
   f = f + 1
+  if finish_at > 0 and f >= finish_at then
+    for slot = 0, 15 do
+      local a = 0x7E07C0 + slot * 16
+      if emu.read(a + 0x0A, m) & 0x80 ~= 0 and (emu.read(a + 2, m) | emu.read(a + 3, m) << 8) > 1 then
+        emu.write(a + 2, 1, m); emu.write(a + 3, 0, m)
+      end
+    end
+  end
   if f % flush == 0 then
     local h = io.open(out, 'w')
     h:write(table.concat(log, '\n') .. '\n')

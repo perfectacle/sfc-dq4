@@ -52,5 +52,15 @@ class JudgeTest(unittest.TestCase):
         self.assertTrue(bp.judge(self.found(1), [(0, 1, False, True)])[2])
 
 
+class FinishTest(unittest.TestCase):
+    def test_battle_is_made_to_end_before_the_frame_cap(self):
+        """회복하는 무리와의 전투는 난수에 따라 MAXF 를 넘으므로, 그 전에 몬스터 HP 를 1 로 묶는 프레임을 Lua 에 넘긴다.
+        묶은 뒤 셋까지 쓰러뜨릴 여유(실측 4천여 프레임)를 MAXF 앞에 둔다."""
+        self.assertLessEqual(bp.FINISH_AT + 6000, bp.MAXF)
+        lua = bp.PROBE.read_text(encoding='utf-8')
+        self.assertIn("os.getenv('FINISH_AT')", lua)
+        self.assertIn('0x7E07C0', lua)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -2529,6 +2529,19 @@ paths = [
   "sfc/dq4/tools/dq4cores.py",
   "sfc/dq4/tools/dq4libretro.py",
   "tools/mesence_settings.py",
+  # 이 장면들의 픽셀을 만드는 그림 입력. 묶음(groups)으로만 닿는 파일은 PR 에서 이 검사를 걸지 않으므로 여기 직접 적는다.
+  # 장면 밖 그림(필드 타일, 밤 색)과 창 글자 훅 asm 은 넣지 않는다(늘 걸리지 않게)
+  "sfc/dq4/tools/dq4environmentart.py",
+  "sfc/dq4/tools/dq4environmentmap.py",
+  "sfc/dq4/tools/dq4environmentrom.py",
+  "sfc/dq4/tools/dq4people.py",
+  "sfc/dq4/tools/dq4windowtext.py",
+  "sfc/dq4/tools/dq4titleanimation.py",
+  "sfc/dq4/tools/dq4titleassets.py",
+  "sfc/dq4/tools/dq4titlelayers.py",
+  "sfc/dq4/tools/dq4titlelayers.asm",
+  "sfc/dq4/tools/dq4titlelayerpatch.py",
+  "sfc/dq4/tools/dq4art/**",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/screens && uv run --locked python sfc/dq4/tools/dq4screencheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/screens"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "코어(dq4cores 가 빌드, 또는 LIBRETRO_BSNES·LIBRETRO_SNES9X)"]
