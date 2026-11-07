@@ -471,6 +471,7 @@ class BuildFlowTests(unittest.TestCase):
         import dq4growth
         import dq4josa
         import dq4menupatch
+        import dq4party
         import dq4msgnames
         import dq4prologue
         import dq4signs
@@ -516,6 +517,8 @@ class BuildFlowTests(unittest.TestCase):
                                         monster_doc=lambda prg: {'format': 'test-monsters', 'prg': len(prg)}), \
                     mock.patch.object(dq4ch2event, 'apply', step('ch2event')), \
                     mock.patch.object(dq4growth, 'writes', lambda dq5, dq4: []), \
+                    mock.patch.multiple(dq4party, learn_doc=lambda dq5, dq4: {'format': 'dq5learn/1', 'characters': []},
+                                        equip_writes=lambda dq5, dq4: [], apply_recruits=step('party')), \
                     mock.patch.object(dq4josa, 'apply', step('josa')), \
                     mock.patch.object(dq4msgnames, 'apply', step('msgnames')), \
                     mock.patch.object(dq4signs, 'apply', step('signs')), \
@@ -546,7 +549,7 @@ class BuildFlowTests(unittest.TestCase):
             'companion-names.dq5patch.json', 'person-names.dq5patch.json', 'zones.dq5patch.json',
             'grids.dq5patch.json', 'rates.dq5patch.json', 'sleeper-talk.dq5patch.json', 'chests.dq5patch.json',
             'newmap-1.dq5patch.json', 'npc.dq5patch.json', 'boss.dq5patch.json', 'boss-monsters.dq5patch.json',
-            'learn.dq5patch.json', 'growth.dq5patch.json'])
+            'learn.dq5patch.json', 'growth.dq5patch.json', 'party.dq5patch.json'])
         self.assertEqual(self.applied[0].parent.name, 'env')
         # 그룹 빌드 롬과 견줄 때는 그룹 빌드가 낸 패치만 넘긴다(인물·보스 패치는 그룹 빌드 롬에 없다)
         self.assertEqual([p.name for p in self.verify.call_args.args[2]], names[:names.index('newmap-1.dq5patch.json') + 1])
@@ -603,7 +606,7 @@ class BuildFlowTests(unittest.TestCase):
         checksum = int.from_bytes(out[0x7FDE:0x7FE0], 'little')
         self.assertEqual(checksum ^ int.from_bytes(out[0x7FDC:0x7FDE], 'little'), 0xFFFF)
         self.assertEqual(checksum, sum(out) & 0xFFFF)
-        self.assertEqual(order[:6], ['chapterbox', 'ch1event', 'ch2event', 'josa', 'msgnames', 'signs'])
+        self.assertEqual(order[:7], ['chapterbox', 'ch1event', 'ch2event', 'party', 'josa', 'msgnames', 'signs'])
         # 그룹 빌드 롬과 견주는 것은 체크섬까지 끝낸 롬이다
         self.assertEqual(self.verify.call_args.args[:2], (bytes(out), b'groups'))
 

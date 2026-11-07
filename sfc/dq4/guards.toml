@@ -153,6 +153,7 @@ paths = [
   "sfc/dq4/tools/dq4namegame.py",
   "sfc/dq4/tools/dq4npcport.py",
   "sfc/dq4/tools/dq4overture.py",
+  "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/dq4people.py",
   "sfc/dq4/tools/dq4pins.py",
   "sfc/dq4/tools/dq4prologue.py",
@@ -250,6 +251,7 @@ name = "dq4-heroblock"
 why = "주인공이 선 칸 때문에 사건이 멈추거나(서장 저녁 의자 칸·탑 병사 왼쪽) 주인공 걸음이 엇나가는(저녁 왼쪽, 왕의 귀환 위쪽 방) 일, 1C·이벤트 걸음으로 인물이 주인공·동료와 겹쳐 보이는 일(저녁 의자 칸·신시아 오른쪽·탑 병사 왼쪽·왕의 귀환 옆 칸)이 다시 생기지 않게"
 paths = [
   "sfc/dq4/tools/dq4growth.py",
+  "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/dq4prologue.py",
   "sfc/dq4/tools/dq4ch1event.py",
   "sfc/dq4/tools/dq4ch2battle.py",
@@ -397,6 +399,7 @@ name = "dq4-savefixture"
 why = "저장 기록으로 시작하는 장면 검사의 출발점: 고친 칸(금화·주인공·동료·flag·자리·밤)이 이어 하기로 그대로 불러와지고, 체크섬이 틀린 칸은 지워지고, 같은 입력이 같은 WRAM 을 내고, 이어 한 뒤 순간이동이 되는지, 맵 곡 건너뛰기 비트(7E:21A5 bit6)가 켜진 기록으로 이어 해도 곧 맵 곡이 울리는지(bsnes·snes9x). 재개 자리 표·칸 표·이어 하기 훅을 바꾸면 깨진다"
 paths = [
   "sfc/dq4/tools/dq4growth.py",
+  "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/dq4savefixture.py",
   "sfc/dq4/tools/dq4chapter1.py",
   "sfc/dq4/tools/dq4chapterbox.py",
@@ -436,6 +439,7 @@ groups = ["ch1-build"]
 name = "dq4-field-obj-math"
 why = "필드에서 장 주인공(OBJ 팔레트 5~7)이 BG 와 반씩 섞여 반투명하게 보이는 일: DQ5 필드 맵 불러오기(2B:82E5)의 OBJ 반 더하기($2131 = 50)를 dq4people.hook_patch 가 끈다"
 paths = [
+  "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/dq4people.py",
   "sfc/dq4/tools/dq4fieldmathcheck.py",
   "sfc/dq4/tools/lua/dq4fieldmath.lua",
@@ -520,6 +524,7 @@ name = "dq4-shop-scene"
 why = "이무르 가게의 사기 1개·여러 개·개수 창 최대·금화 모자람·가방 가득·사기 취소·팔기 1개·여러 개·장비한 물건(알림 ▼, 장비 비트)·팔기 취소($0F2C 되돌리기)·목록 B·사고 바로 장비·장비 못 하는 장비($0F21 남은 값)와 2장 가게(사란 무기·방어구, 바자 도구, 프레놀 도구, 엔돌의 빌린 물건 둘) 장면에서 금화·물건·장비 비트·가게 임시값이 기대대로인지(bsnes·snes9x, 같은 입력 두 번). 가게 훅·메시지·창·가게 표를 바꾸면 깨진다"
 paths = [
   "sfc/dq4/tools/dq4growth.py",
+  "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/dq4shopscene.py",
   "sfc/dq4/tools/dq4windowname.asm",
   "sfc/dq4/tools/dq4windowname.py",
@@ -594,6 +599,7 @@ name = "dq4-town-scene"
 why = "여관(묵기 값 = FC 1인 값 × 일행 수, HP·MP 가득, 밤 → 아침, 금화 모자람·거절은 그대로)·교회(되살리기·해독·저주 풀기 값과 상태, 계시의 남은 경험치, 기도 저장이 칸 1·2·3 에 그 순간 WRAM 그대로·체크섬)·타이틀(복사·지우기·빈 SRAM·체크섬 틀린 칸)과 낮밤 경계(필드 색, 마을 낮·밤 인물)가 bsnes·snes9x 에서 다시 깨지지 않게. 교회 치료 뒤 대화는 끝까지 가야 한다(곡 1E 자리에 되풀이하는 NDS 곡이 들어 25:FD00 이 곡 끝을 기다리다 멈췄음). 필드에서는 환경 훅 wrap 이 필드 루틴 02:AB33 을 물 루틴으로 바꾸지 않아 필드 색이 시각 표대로 바뀌어야 하고, 필드 세 장면(dusk·dawn·cross)은 KNOWN 없이 통과해야 한다"
 paths = [
   "sfc/dq4/tools/dq4growth.py",
+  "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/dq4townscene.py",
   "sfc/dq4/tools/dq4savefixture.py",
   "sfc/dq4/tools/dq4shopport.py",
@@ -638,6 +644,7 @@ groups = ["ch1-build", "ch1-walk"]
 name = "dq4-battle-check"
 why = "걸음 전투가 걸리고 이겨 맵으로 돌아오는지와, 전투 상태 창 오른쪽 위 모서리·테두리가 이름 다섯째 칸에 덮이지 않는지(창 17·26·27 너비 6 그대로라 맨 오른쪽 사람의 이름 다섯째 칸이 테두리 열을 덮던 것), 필드 전투 글의 몬스터 이름이 꼬리(Ａ~Ｈ·たち)나 빌려 쓴 DQ5 몬스터 때문에 가나로 찍히지 않는지(names_one·names_two·name-table), 필드 전투 화면 위·아래 띠의 필드 타일이 전투 전과 같은지(새 필드 타일을 512 이상에 두면 전투 배경 그림이 VRAM 워드 4000~ 을 덮어 풀밭·숲이 줄무늬가 되던 것)"
 paths = [
+  "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/dq4windowname.py",
   "sfc/dq4/tools/dq4windowname.asm",
   "sfc/dq4/tools/dq4battlemsg.py",
@@ -718,7 +725,7 @@ groups = ["ch1-build", "ch1-walk"]
 [[check]]
 name = "dq4-battle-scene"
 tier = "release"
-why = "전투 한 판의 결과(금화·경험치·레벨업·약초·ホイミ·도망·몬스터 도망·전멸 뒤 교회·보스)와 전투 뒤 맵 곡·조작 복귀를 bsnes·snes9x 에서 본다. 라이안이 1 → 20 레벨에서 FC ライアン 실측 값(능력치·다음 경험치, MP 0, 주문 없음)이 되고, 2장 flag 에서는 아리나가 FC アリーナ 곡선을 따르고 손님 호이민은 레벨이 오르지 않는지도(DQ5 주인공 곡선·호이민 성장으로 되돌아가지 않게). 보스·레벨업 뒤 7,313프레임 멈춤(7a34c641)·레벨업 뒤 멈춤(2c9ec7f4)·새 게임 첫 기록으로 이어 하면 곡이 없던 일(nosong) 같은 일이 다시 생기지 않게. paths 는 검사 모듈의 import 닫힘과 빌드가 쓰는 asm·사운드"
+why = "전투 한 판의 결과(금화·경험치·레벨업·약초·ホイミ·도망·몬스터 도망·전멸 뒤 교회·보스)와 전투 뒤 맵 곡·조작 복귀를 bsnes·snes9x 에서 본다. 라이안이 1 → 20 레벨에서 FC ライアン 실측 값(능력치·다음 경험치, MP 0, 주문 없음)이 되고, 2장 flag 에서는 아리나가 FC アリーナ 곡선을 따르고 손님 호이민은 레벨이 오르지 않는지도(DQ5 주인공 곡선·호이민 성장으로 되돌아가지 않게). 2장 일행 셋이 1 → 20 에서 FC 롬 실측 값·습득 표대로 주문을 배우고(party2), 크리프트 ホイミ·브라이 ヒャド 가 명령대로 나가는지(party2spell: 주문 칸 1 만 배우면 행동이 FF 로 「멍하니 있다」 가 되던 일). 보스·레벨업 뒤 7,313프레임 멈춤(7a34c641)·레벨업 뒤 멈춤(2c9ec7f4)·새 게임 첫 기록으로 이어 하면 곡이 없던 일(nosong) 같은 일이 다시 생기지 않게. paths 는 검사 모듈의 import 닫힘과 빌드가 쓰는 asm·사운드"
 paths = [
   "fc/dq4/tools/dq4bank.py",
   "fc/dq4/tools/dq4block.py",
@@ -745,6 +752,7 @@ paths = [
   "sfc/dq4/tools/dq4ch1event.py",
   "sfc/dq4/tools/dq4ch1talk.py",
   "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/dq4pins.py",
   "sfc/dq4/tools/dq4ch2battle.py",
   "sfc/dq4/tools/dq4ch2event.py",
@@ -851,6 +859,7 @@ groups = ["ch1-build", "ch1-walk"]
 name = "dq4-sfx-scene"
 why = "손으로 적은 효과음 결정 표의 동작마다(문·계단·상자·항아리·메뉴·대화·여관·교회·전투 공격·무기 27가지·주문·맞음·빗나감·회심·보스·スカラ·도망·레벨 업·서장 수련·개구리) 소리 대기열에 기대한 (명령, 효과음, 갈래)가 들어가고, 항목마다 울림 하나가 짝지어지고, 울린 소리의 바탕(원본 DQ5 샘플·NDS·잡음)이 결정과 같은지(bsnes·snes9x, 배포 롬 장면 둘 포함). 대응표와 결정 표의 어긋남, --sfx-call 자리·무기 표 롬 바이트, 「부를 수 없음」 까닭도 본다. 회심은 검사 롬 사본의 판정 난수 범위를 1 로 고정해 일으키므로 회심 난수 굴림(00:953A 의 0~31)은 다루지 않는다. 판정 앞 조건 셋($100E bit7, 일행 전투 칸 여덟의 +7 bit6, 26:8D0A 가진 물건)은 공격 소리 프레임에 모두 꺼져 있어야 하고, 켜져 있으면 그 까닭을 대며, 기록이 비면 따로 실패한다"
 paths = [
+  "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/dq4sound-game.args",
   "sfc/dq4/tools/dq4sound*.py",
   "sfc/dq4/tools/dq4sparfx.py",
@@ -948,6 +957,7 @@ paths = [
   "sfc/dq4/tools/dq4namegame.py",
   "sfc/dq4/tools/dq4menupatch.py",
   "sfc/dq4/tools/dq4menumsg.py",
+  "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/dq4title*.py",
   "sfc/dq4/tools/dq4title*.asm",
   "sfc/dq4/tools/dq4overture.py",
@@ -979,6 +989,7 @@ name = "dq4-wrap-routine"
 why = "환경 훅 wrap 이 $BE bit7(실내)로 바꾼 맵을 가려 매 프레임 루틴 7E:1AA6 을 두는 것이 다시 깨지지 않게. 필드로 나갈 때(01:9FD6)는 필드 루틴 02:AB33(시각 색)이 남고(남은 $BC/$BD 로 물 루틴이 덮어 필드가 늘 낮 색이었음), 필드에서 걸어 들어갈 때와 바꾼 맵마다 필드 입구로 들어갈 때(01:8F84)·맵을 그 자리에서 다시 풀 때(01:98FC)는 bit7 이 켜진 채 돌아 물·분수·뚜껑 루틴이 들어가야 한다. 문턱을 좁히거나 옮기면 깨진다(단위 테스트 test_wrap_keeps_the_field_routine 은 바이트만 본다)"
 paths = [
   "sfc/dq4/tools/dq4environmentrom.py",
+  "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/dq4wrapcheck.py",
   "sfc/dq4/tools/lua/dq4wraplog.lua",
   "sfc/dq4/tools/dq4readset.py",
@@ -1175,6 +1186,7 @@ why = "원작 FC 인물 그림과 다른 갈래의 그림이 실리는 일(1장 
 paths = [
   "sfc/dq4/tools/dq4growth.py",
   "sfc/dq4/tools/dq4npcport.py",
+  "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/dq4people.py",
   "sfc/dq4/tools/dq4ch1event.py",
   "sfc/dq4/tools/dq4ch2battle.py",
@@ -1578,6 +1590,7 @@ why = "BG3 타일맵을 옮긴 menu.sfc 에서 실내 맵마다 $0725 가 dq4bg3
 paths = [
   "sfc/dq4/tools/dq4bg3slot.py",
   "sfc/dq4/tools/dq4bg3slotcheck.py",
+  "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/lua/dq4bg3slotwarp.lua",
   "sfc/dq4/tools/dq4menupatch.py",
   "sfc/dq4/tools/dq4windowname.py",
@@ -1654,6 +1667,7 @@ name = "dq4-kind14-copy"
 why = "DQ5 움직이는 타일 종류 14 의 사본(롬의 자리 표 03:D9A0·타일 수 표 03:D965 로 읽은 7E:3D14~3E73, 맵에 들어갈 때 뱅크 03 이 채움)을 채우는 실내 맵 열(dq4kind14check.MAPS)에서 명령 창을 열 때, 뱅크 03 이 사본 프레임에 사본 길이만큼 쓰고, 다른 코드는 CPU 로 그 자리를 쓰지 않고, 사본 프레임부터는 WRAM 포트($2180)나 쓰기 콜백에 걸리지 않는 길로도 바뀌지 않아야 하며, 롬 표의 범위가 dq4kind14check.COPY 와 같아야 하고, dq4bg3slotcheck 의 판정(요청한 맵에 도착·자리·보임·타일맵이 버퍼와 같음)이 맞고, 같은 명령을 두 번 돌린 두 실행이 모두 끝 표지를 갖고 이를 지키며 기록이 같아야 한다. 창 글자 변수나 그림 버퍼를 사본 자리에 두면 깨진다"
 paths = [
   "sfc/dq4/tools/dq4kind14check.py",
+  "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/lua/dq4kind14probe.lua",
   "sfc/dq4/tools/dq4bg3slot.py",
   "sfc/dq4/tools/dq4bg3slotcheck.py",
@@ -1765,6 +1779,7 @@ paths = [
   "sfc/dq4/tools/dq4ch1walkcheck.py",
   "sfc/dq4/tools/dq4dungeonencountercheck.py",
   "sfc/dq4/tools/dq4groupcheck.py",
+  "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/dq4readset.py",
   "sfc/dq4/tools/lua/dq4readset.lua",
   "sfc/dq4/tools/dq4wellresetcheck.py",
@@ -1887,6 +1902,7 @@ paths = [
   "sfc/dq4/tools/dq4namegame.py",
   "sfc/dq4/tools/dq4npcport.py",
   "sfc/dq4/tools/dq4overture.py",
+  "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/dq4people.py",
   "sfc/dq4/tools/dq4pins.py",
   "sfc/dq4/tools/dq4prologue.py",
@@ -1998,6 +2014,7 @@ paths = [
   "sfc/dq4/tools/dq4npcport.py",
   "sfc/dq4/tools/dq4outside.py",
   "sfc/dq4/tools/dq4overture.py",
+  "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/dq4people.py",
   "sfc/dq4/tools/dq4pins.py",
   "sfc/dq4/tools/dq4pixels.py",
@@ -2168,6 +2185,7 @@ paths = [
   "sfc/dq4/tools/dq4npcport.py",
   "sfc/dq4/tools/dq4outside.py",
   "sfc/dq4/tools/dq4overture.py",
+  "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/dq4people.py",
   "sfc/dq4/tools/dq4pins.py",
   "sfc/dq4/tools/dq4pixels.py",
@@ -2290,6 +2308,7 @@ paths = [
   "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
   "sfc/dq4/tools/dq4libretro.py",
   "sfc/dq4/tools/dq4libretroreadsetcheck.py",
+  "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/dq4savefixture.py",
   "sfc/dq4/tools/dq4readset.py",
   "tools/headless_slots.py",
@@ -2388,6 +2407,7 @@ paths = [
   "sfc/dq4/tools/dq4namegame.py",
   "sfc/dq4/tools/dq4npcport.py",
   "sfc/dq4/tools/dq4overture.py",
+  "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/dq4people.py",
   "sfc/dq4/tools/dq4pins.py",
   "sfc/dq4/tools/dq4prologue.py",
@@ -2581,6 +2601,7 @@ ch1-build = [
   "sfc/dq4/tools/dq4npcport.py",
   "sfc/dq4/tools/dq4outside.py",
   "sfc/dq4/tools/dq4overture.py",
+  "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/dq4people.py",
   "sfc/dq4/tools/dq4pixels.py",
   "sfc/dq4/tools/dq4prologue.py",
@@ -2739,6 +2760,7 @@ ch1-walk = [
   "sfc/dq4/tools/dq4namegame.py",
   "sfc/dq4/tools/dq4npcport.py",
   "sfc/dq4/tools/dq4outside.py",
+  "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/dq4pins.py",
   "sfc/dq4/tools/dq4prologue.py",
   "sfc/dq4/tools/dq4prologuecheck.py",

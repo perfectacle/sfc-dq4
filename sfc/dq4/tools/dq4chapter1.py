@@ -674,10 +674,13 @@ def build(rom, dq5, dq4, work, prologue=True, chapter2=False):
     if dq4ch2event.encounter_groups():
         boss["event_groups"] += dq4ch2event.encounter_groups()
     (work / 'boss.json').write_text(json.dumps(boss))
-    (work / 'learn.json').write_text(json.dumps(dq4ch1event.learn_doc()))
+    import dq4party
+    (work / 'learn.json').write_text(json.dumps(dq4party.learn_doc(dq5, dq4)))
     import dq4growth
     (work / 'growth.dq5patch.json').write_text(json.dumps(
         {"format": "dq5patch/1", "name": "dq4-growth", "writes": dq4growth.writes(original, dq4)}, ensure_ascii=False))
+    (work / 'party.dq5patch.json').write_text(json.dumps(
+        {"format": "dq5patch/1", "name": "dq4-party", "writes": dq4party.equip_writes(dq5, dq4)}, ensure_ascii=False))
     monsters = dq4ch1event.monster_doc(ines.prg(dq4.read_bytes()))
     more = dq4ch2event.monster_entries(ines.prg(dq4.read_bytes()))
     if more:
@@ -704,7 +707,7 @@ def build(rom, dq5, dq4, work, prologue=True, chapter2=False):
              '--allow-growth', *new_maps, '-o', work / 'npc.dq5patch.json')
     patches = [work / 'groups' / p for p in (*GROUP_PATCHES, *summary['record_patches'])] + [
         work / 'npc.dq5patch.json', work / 'boss.dq5patch.json', work / 'boss-monsters.dq5patch.json',
-        work / 'learn.dq5patch.json', work / 'growth.dq5patch.json']
+        work / 'learn.dq5patch.json', work / 'growth.dq5patch.json', work / 'party.dq5patch.json']
     out = bytearray(apply_writes(clear_mirror(rom, original, group_ranges()), original, patches))
     import dq4menupatch
     out = bytearray(dq4chapterbox.apply(out, dq4.read_bytes(), dq4menupatch.Font('galmuri11'), scenes(prologue)))
@@ -713,6 +716,7 @@ def build(rom, dq5, dq4, work, prologue=True, chapter2=False):
     import dq4npcport
     out = bytearray(dq4ch2event.apply(out, original,
                                       chapter2_message(dq4npcport.FIRST_MESSAGE + len(ported_messages))))
+    out = bytearray(dq4party.apply_recruits(out, dq5, dq4))
     import dq4josa
     out = bytearray(dq4josa.apply(out))
     import dq4msgnames

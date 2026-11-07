@@ -1,20 +1,22 @@
-"""1장 라이안·2장 아리나의 성장을 FC 곡선으로. 형식은 sfc/dq4/docs/dq4-growth-format.md.
+"""1장 라이안·2장 아리나·크리프트·브라이의 성장을 FC 곡선으로. 형식은 sfc/dq4/docs/dq4-growth-format.md.
 
-DQ5 는 일행 기록 +0(종류)으로 성장 레코드를 고르고(23:EDCD, 사람 0 = 23:9E41), 능력치 값은 23:F12D, 경험치는
-23:EDF6 이 그 레코드에서 셈한다. 1장 라이안은 사람 0 이다. FC 곡선(fc/dq4/docs/dq4-data-format.md 「성장 곡선」)은
-능력치마다 꺾이는 레벨이 따로이고 경험치를 레벨마다 정수로 버리며 곱해, 꺾이는 레벨을 모두가 나눠 쓰는 DQ5 레코드로는
-같은 값을 낼 수 없다. 그래서 레벨 0~100 의 값 표를 두고 세 곳에 훅을 건다(레코드가 사람 0 일 때만 표, 아니면 원래 길).
-2장 아리나도 사람 0 기록이라 표를 장마다 두고 2장 flag(CHAPTERS)로 고른다.
+DQ5 는 일행 기록 +0(종류)으로 성장 레코드를 고르고(23:EDCD, 사람 n = 23:9E41 + n × 50), 능력치 값은 23:F12D, 경험치는
+23:EDF6 이 그 레코드에서 셈한다. FC 곡선(fc/dq4/docs/dq4-data-format.md 「성장 곡선」)은 능력치마다 꺾이는 레벨이
+따로이고 경험치를 레벨마다 정수로 버리며 곱해, 꺾이는 레벨을 모두가 나눠 쓰는 DQ5 레코드로는 같은 값을 낼 수 없다.
+그래서 사람마다 레벨 0~100 의 값 표를 두고 세 곳에 훅을 건다(TABLES 의 레코드일 때만 표, 아니면 원래 길).
+라이안과 아리나는 둘 다 사람 0 기록이라 2장 flag 로 가르고, 크리프트·브라이는 빌린 사람 칸(09 ヘンリー·05 サンチョ)의
+레코드로 가른다.
 
   23:F12D  능력치 값(A 레벨, X 능력치 0~6, Y 레코드) → $00. 표 STATS 에서 읽고 23:F1B9(PLX PLY RTS)로
   23:EDF6  경험치(X = 0: A 레벨 → $00·$02, X ≠ 0: $00·$02 경험치 → A 그 경험치로 닿는 레벨). 표 EXP 에서
   23:EC76  오르는 양을 1 로 줄이는 문턱. DQ5 는 지금 값 ≥ 값(L) × 1.5 이면 난수 0·1, FC 는 지금 값 ≥ 곡선(새 레벨)
-           + 새 레벨/2 + 10 이면 rand(2)(12:$9DB3). 사람 0 은 FC 문턱을 쓴다. DQ5 문턱이면 かしこさ 처럼 곡선이 1 인
-           구간에서 지금 값 1 ≥ 1 + 0 이라 늘 난수로 가 곡선을 벗어난다
+           + 새 레벨/2 + 10 이면 rand(2)(12:$9DB3). 표를 쓰는 사람은 FC 문턱을 쓴다. DQ5 문턱이면 かしこさ 처럼 곡선이
+           1 인 구간에서 지금 값 1 ≥ 1 + 0 이라 늘 난수로 가 곡선을 벗어난다
 
-능력치 대응(dq5growth.STATS 차례): 최대 HP ← FC 곡선 6(dq4data.curve 가 たいりょく 곡선을 이미 두 배로 줌, 999 까지), 최대 MP ← 0(FC 는 0~4번만
-MP 가 오름), ちから·すばやさ·かしこさ·うんのよさ ← 같은 이름, みのまもり ← たいりょく(1장 레벨업 메시지·2장 기록과 같은
-자리). 능력치는 255 까지. 1레벨 기록(23:C014 칸 0)도 FC 장 시작 값으로 둔다: 최대 HP 는 곡선이 아니라 12:$A296 표.
+능력치 대응(dq5growth.STATS 차례): 최대 HP ← FC 곡선 6(dq4data.curve 가 たいりょく 곡선을 이미 두 배로 줌, 999 까지),
+최대 MP ← FC 곡선 7(FC 는 0~4번만 MP 가 오르므로 라이안·아리나는 0), ちから·すばやさ·かしこさ·うんのよさ ← 같은 이름,
+みのまもり ← たいりょく(1장 레벨업 메시지·2장 기록과 같은 자리). 능력치는 255 까지. 1레벨 기록(23:C014 칸 0)도 FC 장
+시작 값으로 둔다: 최대 HP 는 곡선이 아니라 12:$A296 표.
 """
 import sys
 from pathlib import Path
@@ -26,15 +28,18 @@ if str(TOOLS) not in sys.path:
 
 from dq4environmentrom import _Asm  # noqa: E402
 
-FC_RYAN, FC_ALENA = 6, 7         # FC 인물 번호 ライアン·アリーナ(dq4data.PARTY)
-# 장마다 ((flag 주소, 마스크), FC 인물). 둘째 장은 그 flag 가 켜졌을 때. 2장 아리나도 사람 0 기록이라 표로 가른다
-CHAPTERS = ((None, FC_RYAN), ((0x7E2208, 0x10), FC_ALENA))   # dq4ch2event.CHAPTER2(7E:2208 bit4)
-HERO_GROWTH = 0x9E41            # 사람 0 성장 레코드(23:EDCD 의 Y)
+FC_KIRYL, FC_BREY, FC_RYAN, FC_ALENA = 1, 4, 6, 7   # FC 인물 번호 クリフト·ブライ·ライアン·アリーナ(dq4data.PARTY)
+PEOPLE, RECORD = 0x9E41, 0x50   # 사람 n 의 성장 레코드 = PEOPLE + n × RECORD(23:EDCD 가 Y 에 둠)
+HERO_GROWTH = PEOPLE            # 사람 0
+CHAPTER2 = (0x7E2208, 0x10)     # dq4ch2event.CHAPTER2(7E:2208 bit4)
+# 표 차례: (DQ5 사람 번호, 그 표를 고르는 flag, FC 인물). 첫째(라이안)는 사람 0 의 기본 표라 flag 를 보지 않는다.
+# 크리프트·브라이는 dq4ch2event.RECRUITS 가 빌린 사람 칸(09 ヘンリー·05 サンチョ)이다. 이 해킹에는 그 두 사람이 없다
+TABLES = ((0, None, FC_RYAN), (0, CHAPTER2, FC_ALENA), (9, None, FC_KIRYL), (5, None, FC_BREY))
 LEVELS = 101                    # 표 줄: 레벨 0~100. 23:EB50 이 레벨 99 에서 100 의 값도 셈한다
 STAT_COUNT = 7
 STAT_CAP, HP_CAP, EXP_CAP = 255, 999, 9999999
-# 57:8000 던전 걸음(dq4dungeonrate)과 57:F000 보상(dq4balance) 사이의 빈 자리
-GROWTH_AT, SPACE_END = 0x57E000, 0x57F000
+# 57:8000 던전 걸음(dq4dungeonrate)과 57:F000 보상(dq4balance) 사이의 빈 자리. 표 넷(7,272바이트)과 코드가 들어간다
+GROWTH_AT, SPACE_END = 0x57D000, 0x57F000
 
 STAT_AT, STAT_ORIG, STAT_GO, STAT_DONE = 0x23F12D, bytes.fromhex('5a da 85 0f'), 0x23F131, 0x23F1B9
 EXP_AT, EXP_ORIG, EXP_GO = 0x23EDF6, bytes.fromhex('85 09 8e bb 09'), 0x23EDFB
@@ -50,6 +55,18 @@ KIND, LEVEL, NOW, NEXT = 0x09A5, 0x09A6, 0x0997, 0x09A7
 # 표(27)에서 시작해 곡선(26)보다 1 크다
 RYAN_MEASURED = {1: ([27, 0, 7, 4, 1, 2, 13], 12), 6: ([51, 0, 22, 9, 2, 7, 25], 426),
                  10: ([83, 0, 34, 13, 6, 11, 41], 2398), 20: ([183, 0, 84, 23, 16, 21, 91], 42289)}
+# 2장 셋도 같은 방법(fc/dq4/tools/dq4levelup.py, FC 2장 시작 세이브스테이트의 1레벨 기록). 최대 HP 는 장 시작 표에서
+# 시작해, ブライ 는 곡선(14)보다 2 큰 16 에서 오른다. 나머지는 모두 곡선 값과 같았다
+ALENA_MEASURED = {1: ([16, 0, 12, 7, 4, 1, 8], 16), 5: ([36, 0, 20, 15, 6, 9, 18], 312),
+                  10: ([66, 0, 36, 25, 11, 24, 33], 2798), 15: ([108, 0, 56, 45, 16, 49, 54], 14536),
+                  20: ([158, 0, 86, 73, 21, 74, 79], 42526)}
+KIRYL_MEASURED = {1: ([18, 7, 3, 5, 7, 2, 9], 18), 5: ([32, 23, 11, 10, 15, 11, 16], 339),
+                  10: ([52, 43, 21, 20, 25, 26, 26], 3028), 15: ([82, 63, 31, 30, 35, 41, 41], 15728),
+                  20: ([112, 83, 40, 45, 45, 56, 56], 46014)}
+BREY_MEASURED = {1: ([16, 10, 3, 5, 8, 2, 7], 19), 5: ([26, 30, 3, 13, 16, 12, 12], 361),
+                 10: ([46, 65, 8, 23, 30, 27, 22], 3215), 15: ([76, 90, 13, 38, 50, 48, 37], 16687),
+                 20: ([106, 115, 18, 53, 70, 73, 52], 48818)}
+MEASURED = {FC_RYAN: RYAN_MEASURED, FC_ALENA: ALENA_MEASURED, FC_KIRYL: KIRYL_MEASURED, FC_BREY: BREY_MEASURED}
 
 PERSON_TABLE = 0x23C014         # 새 게임의 일행 기록 틀(42바이트, 칸 0 이 주인공)
 FIRST_FIELDS = ((0x02, 2, 'hp'), (0x0E, 2, 'hp'), (0x04, 2, 'mp'), (0x10, 2, 'mp'), (0x06, 1, 'agi'),
@@ -93,8 +110,22 @@ def tables(dq4=DQ4, who=FC_RYAN):
 
 
 def chapter_tables(dq4=DQ4):
-    """CHAPTERS 차례로 (능력치 표, 경험치 표)."""
-    return [tables(dq4, who) for _, who in CHAPTERS]
+    """TABLES 차례로 (능력치 표, 경험치 표)."""
+    return [tables(dq4, who) for _, _, who in TABLES]
+
+
+def record_of(person):
+    """사람 번호의 성장 레코드 주소(23:EDCD 가 Y 에 두는 값)."""
+    return PEOPLE + person * RECORD
+
+
+def table_index(kind, chapter=0):
+    """일행 기록 +0(종류)과 장(0 = 1장)으로 TABLES 의 번호. 표를 쓰지 않는 종류면 None."""
+    flagged = [k for k, (p, f, _) in enumerate(TABLES) if p == kind and f is not None]
+    plain = [k for k, (p, f, _) in enumerate(TABLES) if p == kind and f is None]
+    if chapter and flagged:
+        return flagged[0]
+    return plain[0] if plain else None
 
 
 def first_record(dq4=DQ4, who=FC_RYAN):
@@ -107,26 +138,44 @@ def first_record(dq4=DQ4, who=FC_RYAN):
 
 
 def table_size():
-    """한 장의 표(능력치 + 경험치) 바이트 수. 둘째 장의 표는 첫째 표 + 이 값."""
+    """한 사람 표(능력치 + 경험치) 바이트 수. TABLES 의 k 번째 표는 첫째 표 + k × 이 값."""
     return LEVELS * STAT_COUNT * 2 + LEVELS * 4
 
 
-def code(chapters, at=GROWTH_AT):
-    """훅 세 개와 장마다의 표(CHAPTERS 차례). (바이트, 이름표). 이름표 stats·exp 는 첫째 장의 표."""
-    if len(chapters) != len(CHAPTERS):
-        raise ValueError(f'표는 {len(CHAPTERS)}장')
+def code(sets, at=GROWTH_AT):
+    """훅 세 개와 사람마다의 표(TABLES 차례). (바이트, 이름표). 이름표 stats·exp 는 첫째 표."""
+    if len(sets) != len(TABLES):
+        raise ValueError(f'표는 {len(TABLES)}개')
     a = _Asm(at)
     top = (LEVELS - 1).to_bytes(2, 'little')
-    flag, mask = CHAPTERS[1][0]
+    people = list(dict.fromkeys(p for p, _, _ in TABLES))
+
+    def known(go):
+        # Y 가 표를 쓰는 사람의 레코드면 go 로, 아니면 그대로 다음 명령(원래 길로 가는 JML)
+        for p in people:
+            a.b(0xC0, *record_of(p).to_bytes(2, 'little')).rel(0xF0, go)
 
     def pick(name):
-        # M·X 16. 2장 flag 가 켜져 있으면 X(표 안 자리)를 둘째 장 표로 민다. A 는 덮는다
-        a.b(0xAF, *flag.to_bytes(3, 'little'), 0x29, mask, 0x00).rel(0xF0, name)
-        a.b(0x8A, 0x18, 0x69, *table_size().to_bytes(2, 'little'), 0xAA)
+        # M·X 16, X = 표 안 자리, Y = 레코드. 첫째 표가 아니면 X 에 그 표까지의 거리를 더한다. A 는 덮는다.
+        # 같은 사람에 flag 로 고르는 표를 먼저 본다(사람 0 은 2장 flag 면 아리나, 아니면 라이안)
+        order = sorted(range(1, len(TABLES)), key=lambda k: TABLES[k][1] is None)
+        a.label(f'{name}_start')
+        for k in order:
+            p, flag, _ = TABLES[k]
+            skip = f'{name}_not{k}'
+            a.b(0xC0, *record_of(p).to_bytes(2, 'little')).rel(0xD0, skip)
+            if flag is not None:
+                a.b(0xAF, *flag[0].to_bytes(3, 'little'), 0x29, flag[1], 0x00).rel(0xF0, skip)
+            a.b(0xA9, *(k * table_size()).to_bytes(2, 'little')).rel(0x80, f'{name}_add')
+            a.label(skip)
+        a.rel(0x80, name)
+        # X += A: 스택에 둔 A 를 더한다($00·$02 는 경험치 → 레벨 갈래의 입력이라 쓰지 않는다)
+        a.label(f'{name}_add').b(0x48, 0x8A, 0x18, 0x63, 0x01, 0xAA, 0x68)
         a.label(name)
 
     # 능력치(M 8, X 16, DB 23). 원래 앞 네 바이트(PHY PHX STA $0F)를 먼저 한다
-    a.label('stat').b(0x5A, 0xDA, 0x85, 0x0F, 0xC0, *HERO_GROWTH.to_bytes(2, 'little')).rel(0xF0, 'stat_hero')
+    a.label('stat').b(0x5A, 0xDA, 0x85, 0x0F)
+    known('stat_hero')
     a.b(0x5C, *STAT_GO.to_bytes(3, 'little'))
     a.label('stat_hero').b(0xC2, 0x20, 0x29, 0xFF, 0x00, 0xC9, LEVELS, 0x00).rel(0x90, 'stat_row')
     a.b(0xA9, *top)
@@ -137,7 +186,8 @@ def code(chapters, at=GROWTH_AT):
     a.long(0xBF, 'stats').b(0x85, 0x00, 0xE2, 0x20, 0x5C, *STAT_DONE.to_bytes(3, 'little'))
 
     # 경험치(M 16, X 16). 원래 앞 다섯 바이트(STA $09, STX $09BB)를 먼저 한다
-    a.label('exp_hook').b(0x85, 0x09, 0x8E, 0xBB, 0x09, 0xC0, *HERO_GROWTH.to_bytes(2, 'little')).rel(0xF0, 'exp_hero')
+    a.label('exp_hook').b(0x85, 0x09, 0x8E, 0xBB, 0x09)
+    known('exp_hero')
     a.b(0x5C, *EXP_GO.to_bytes(3, 'little'))
     a.label('exp_hero').b(0xE0, 0x00, 0x00).rel(0xD0, 'reach')
     a.b(0x29, 0xFF, 0x00, 0xC9, LEVELS, 0x00).rel(0x90, 'exp_row').b(0xA9, *top)
@@ -154,14 +204,18 @@ def code(chapters, at=GROWTH_AT):
     a.label('reach_next').b(0xE8, 0xE8, 0xE8, 0xE8, 0xC8, 0xC0, LEVELS - 1, 0x00).rel(0x90, 'reach_loop')
     a.label('reach_done').b(0x88, 0x98, 0x5C, *REACH_RTS.to_bytes(3, 'little'))
 
-    # 문턱(JSL, M 8 로 들어와 M 16 으로 RTL: 원래 자리의 REP #$20 을 대신함. Y = 능력치 × 2, DB 23)
-    a.label('gain').b(0xC2, 0x20, 0xAD, *KIND.to_bytes(2, 'little'), 0x29, 0xFF, 0x00).rel(0xD0, 'gain_dq5')
-    a.b(0xAD, *LEVEL.to_bytes(2, 'little'), 0x29, 0xFF, 0x00, 0x1A, 0x4A, 0x18, 0x69, 10, 0x00, 0x18)
+    # 문턱(JSL, M 8 로 들어와 M 16 으로 RTL: 원래 자리의 REP #$20 을 대신함. Y = 능력치 × 2, DB 23).
+    # 표를 쓰는 사람(종류 = 사람 번호)이면 FC 문턱
+    a.label('gain').b(0xC2, 0x20, 0xAD, *KIND.to_bytes(2, 'little'), 0x29, 0xFF, 0x00)
+    for p in people:
+        a.b(0xC9, p, 0x00).rel(0xF0, 'gain_fc')
+    a.rel(0x80, 'gain_dq5')
+    a.label('gain_fc').b(0xAD, *LEVEL.to_bytes(2, 'little'), 0x29, 0xFF, 0x00, 0x1A, 0x4A, 0x18, 0x69, 10, 0x00, 0x18)
     a.b(0x79, *NEXT.to_bytes(2, 'little'), 0x99, *NOW.to_bytes(2, 'little'), 0x6B)
     a.label('gain_dq5').b(0xB9, *NOW.to_bytes(2, 'little'), 0x4A, 0x18, 0x79, *NOW.to_bytes(2, 'little'))
     a.b(0x99, *NOW.to_bytes(2, 'little'), 0x6B)
 
-    for k, (stats, exp) in enumerate(chapters):
+    for k, (stats, exp) in enumerate(sets):
         a.label('stats' if k == 0 else f'stats{k}').b(*b''.join(v.to_bytes(2, 'little') for row in stats for v in row))
         a.label('exp' if k == 0 else f'exp{k}').b(*b''.join(v.to_bytes(4, 'little') for v in exp))
     return a.assemble()
@@ -200,7 +254,7 @@ def writes(dq5, dq4=DQ4, at=GROWTH_AT):
         rec[off:off + n] = first[k].to_bytes(n, 'little')
     # 빈 자리여야 한다: 0 을 orig 로 주어 다른 쓰기와 겹치면 빌드가 멈추게
     return [{'at': _cpu(at), 'hex': _hex(data), 'orig': _hex(bytes(len(data))),
-             'note': '라이안·아리나 성장: FC 곡선 표와 훅'}, *calls(labels),
+             'note': '라이안·아리나·크리프트·브라이 성장: FC 곡선 표와 훅'}, *calls(labels),
             {'at': _cpu(PERSON_TABLE), 'hex': _hex(rec), 'orig': _hex(orig), 'note': '라이안 1레벨 기록을 FC 장 시작 값으로'}]
 
 
@@ -213,29 +267,31 @@ def hooked(rom):
     o = lorom(stat)
     if rom[o:o + 4] != STAT_ORIG:
         return None
-    _, labels = code([([[0] * STAT_COUNT] * LEVELS, [0] * LEVELS)] * len(CHAPTERS), stat)
+    _, labels = code([([[0] * STAT_COUNT] * LEVELS, [0] * LEVELS)] * len(TABLES), stat)
     return labels['stats'], labels['exp']
 
 
 def stats_at(rom, kind, level, chapter=0):
-    """롬이 레벨 level 에 주는 능력치 값(dq5growth.STATS 차례). 사람 0 이고 훅이 걸렸으면 표, 아니면 DQ5 레코드."""
+    """롬이 레벨 level 에 주는 능력치 값(dq5growth.STATS 차례). 표를 쓰는 종류이고 훅이 걸렸으면 표, 아니면 DQ5 레코드."""
     import dq5growth
     from dq5map import Rom
-    at = hooked(rom) if kind == 0 else None
+    k = table_index(kind, chapter)
+    at = hooked(rom) if k is not None else None
     if at is None:
         r = Rom(rom)
         return dq5growth.stats_at(r, dq5growth.record_address(kind), level)
-    o = lorom(at[0]) + chapter * table_size() + level * STAT_COUNT * 2
+    o = lorom(at[0]) + k * table_size() + level * STAT_COUNT * 2
     return [int.from_bytes(rom[o + 2 * k:o + 2 * k + 2], 'little') for k in range(STAT_COUNT)]
 
 
 def exp_at(rom, kind, level, chapter=0):
     import dq5growth
     from dq5map import Rom
-    at = hooked(rom) if kind == 0 else None
+    k = table_index(kind, chapter)
+    at = hooked(rom) if k is not None else None
     if at is None:
         return dq5growth.exp_at(Rom(rom), dq5growth.record_address(kind), level)
-    o = lorom(at[1]) + chapter * table_size() + min(level, LEVELS - 1) * 4
+    o = lorom(at[1]) + k * table_size() + min(level, LEVELS - 1) * 4
     return int.from_bytes(rom[o:o + 4], 'little')
 
 
