@@ -335,6 +335,30 @@ class MapEditTests(unittest.TestCase):
         self.assertEqual(em.map_palette("x", 0x0A), "normal")
 
 
+class Chapter2LookTests(unittest.TestCase):
+    """2장 맵의 시트 그림 고르기. 하나로 뭉뚱그린 벽·바닥은 원작과 달라 보였다."""
+
+    def test_arena_crowd_is_spectators_not_statues(self):
+        for block in (0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x1F):
+            self.assertTrue(em.EXAMPLES[(0x2D, block)][0].startswith("audience_"), f"2D/{block:02X}")
+            self.assertEqual(em.BACKGROUNDS[(0x2D, block)], "grass")
+
+    def test_south_cave_has_brick_walls_barrels_and_rubble(self):
+        self.assertEqual(em.SHEET_STYLES[0x17][0], "brick_paving")
+        self.assertEqual(em.EXAMPLES[(0x17, 0x04)][0], "barrel")
+        self.assertEqual(em.EXAMPLES[(0x17, 0x08)][0], "barrel")
+        self.assertEqual(em.EXAMPLES[(0x17, 0x1C)][0], "cave_rock_brown")
+        self.assertEqual(em.EXAMPLES[(0x17, 0x1D)][0], "rock_pile")
+
+    def test_west_tower_floor_is_green_slab_in_dark_greens(self):
+        from dq4environmentart import create_assets
+        self.assertEqual(em.SHEET_STYLES[0x25][1], "moss_floor")
+        floor = create_assets()["moss_floor"]
+        used = {v for v in floor.tobytes()}
+        # 은행 1 의 2~5번(054600·007200·0ba100·3fb800): 풀밭 7번(2dff39) 같은 형광 초록은 쓰지 않는다.
+        self.assertEqual(used, {16 + c for c in (2, 3, 4, 5)})
+
+
 class MapListTests(unittest.TestCase):
     def test_extra_fc_maps_follow_the_named_ones_when_their_sheet_is_listed(self):
         found = [(None, SimpleNamespace(buf=b"x", t=0x10, g=0x30, k=2)),

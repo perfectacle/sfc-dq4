@@ -23,6 +23,8 @@ for path in (TOOLS, DQ5_TOOLS):
 
 from dq4environmentart import create_assets, palette_variant  # noqa: E402
 from dq4environmentmap import block_prop, map_palette, prepare_maps, sheet_art  # noqa: E402
+import dq4block  # noqa: E402
+import dq4environmentnight  # noqa: E402
 import dq4outside  # noqa: E402
 from dq5mapwrite import Rom, encode, lorom, pointer_addr  # noqa: E402
 
@@ -85,6 +87,10 @@ CHR_BANK = 0x40
 GFX_BANK = 0x41
 NIBBLES_AT = 0x8000
 PALETTE_AT = 0x8400
+# Night palettes follow the day ones; the bank is free from there to WATER_AT. The per-map night table sits at
+# NIGHTS_AT in the same bank: the library bank 3D has no room left before the person palette routine at 3D:EA00.
+NIGHTS_AT = 0xE000
+NIGHT_PALETTES_END = NIGHTS_AT
 BLOCK_BANK = 0x3D
 BLOCKS_AT = 0x8000
 POINTERS_AT = 0x8C00
@@ -500,10 +506,11 @@ _ENTER = (0x08, 0xC2, 0x30, 0x48, 0xDA, 0x5A)
 _LEAVE = (0xC2, 0x30, 0x7A, 0xFA, 0x68, 0x28)
 
 
-def engine_code(block_count, water_ids, palettes, entries, waters, lids):
+def engine_code(block_count, water_ids, palettes, entries, waters, lids, nights=None):
     """Routines in BLOCK_BANK (LIB_AT) and the bank-01 stubs that call them.
 
     palettes: per target, the bank-GFX address of its 224-byte BG palette.
+    nights: per target, the bank-GFX address of its night palette, or 0 to keep the day one at night.
     entries: per target, its 01:D2FC-format object entries (placed after the library; see DOOR_TABLES).
     waters: per target, 0 without water, 1 with water, 2 with water and the fountain.
     lids: per target, whether its map routine reloads the opened-chest tiles (new-group maps).
@@ -555,9 +562,12 @@ def engine_code(block_count, water_ids, palettes, entries, waters, lids):
         0xA0, BLOCK_TABLE & 0xFF, BLOCK_TABLE >> 8 & 0xFF, 0x54, 0x7E, BLOCK_BANK)
     lib.label("load_done").b(*_LEAVE, 0x6B)
 
-    # pal (after 01:996A): copy the target's BG lines 1-7.
+    # pal (after 01:996A): copy the target's BG lines 1-7, the night ones when 21:8000 (DQ5's own night test,
+    # $075E >= 00F0, which 10:DE43 uses for the sets) sets carry and the target has them.
     lib.label("pal").b(*_ENTER).long(0x22, "find").rel(0x90, "pal_done")
-    lib.long(0xBF, "palettes").b(0xAA, 0xA9, 0xDF, 0x00, 0xA0, PALETTE_LINE1 & 0xFF, PALETTE_LINE1 >> 8,
+    lib.b(0x22, 0x00, 0x80, 0x21).rel(0x90, "pal_day").b(0xBF, NIGHTS_AT & 0xFF, NIGHTS_AT >> 8, GFX_BANK).rel(0xD0, "pal_copy")
+    lib.label("pal_day").long(0xBF, "palettes")
+    lib.label("pal_copy").b(0xAA, 0xA9, 0xDF, 0x00, 0xA0, PALETTE_LINE1 & 0xFF, PALETTE_LINE1 >> 8,
                                  0x54, 0x7E, GFX_BANK)
     lib.label("pal_done").b(*_LEAVE, 0x6B)
 
@@ -639,7 +649,19 @@ def engine_code(block_count, water_ids, palettes, entries, waters, lids):
         (0x01F42D, bytes((0xA2, 0x09, 0x00)), bytes((0x20,)) + (stub_labels["s_obj"] & 0xFFFF).to_bytes(2, "little")),
     ] + [(at, bytes((0x22, 0xD0, 0xF7, 0x15)), bytes((0x22,)) + lib_labels["wrap"].to_bytes(3, "little"))
          for at in ROUTINE_CALLS]
-    return lib_code, stub_code, sites
+    night_table = b"".join(a.to_bytes(2, "little") for a in nights or [0] * len(palettes))
+    return lib_code, stub_code, sites, night_table
+
+
+def fc_night(prg, source):
+    """Whether FC gives this map another palette at night ($62ED >= 78, with 0E:$BBB1's place exceptions)."""
+    return (dq4block.palette(prg, source.t, source.g, source.k, 0)
+            != dq4block.palette(prg, source.t, source.g, source.k, 0x80))
+
+
+def night_maps(prg, maps):
+    """Names of the replaced maps that turn to night colours: those FC darkens at night."""
+    return {name for name, (source, _) in maps.items() if fc_night(prg, source)}
 
 
 def door_tables(dq5):
@@ -737,13 +759,19 @@ def build(dq5_path, dq4_path, out):
         raise ValueError("original first block has our block size; dirty-table check would not work")
     variants = sorted({map_palette(name, source.t) for name, (source, _) in maps.items()})
     palette_at = {kind: PALETTE_AT + 0x100 * i for i, kind in enumerate(variants)}
+    nights = night_maps(prg, maps)
+    night_kinds = sorted({map_palette(name, maps[name][0].t) for name in nights})
+    night_at = {kind: PALETTE_AT + 0x100 * (len(variants) + i) for i, kind in enumerate(night_kinds)}
+    if PALETTE_AT + 0x100 * (len(variants) + len(night_kinds)) > NIGHT_PALETTES_END:
+        raise ValueError("night palettes overflow into the water frames")
     found = {name: objects(source) for name, (source, _) in maps.items()}
-    lib_code, stub_code, sites = engine_code(
+    lib_code, stub_code, sites, night_table = engine_code(
         len(block_words), water_ids,
         [palette_at[map_palette(name, maps[name][0].t)] for name in MAPS],
         [object_entries(found[name]) for name in MAPS],
         [(water_block(*maps[name]) is not None) + (fountain_block(*maps[name]) is not None) for name in MAPS],
-        [name in GROUPS for name in MAPS])
+        [name in GROUPS for name in MAPS],
+        [night_at[map_palette(name, maps[name][0].t)] if name in nights else 0 for name in MAPS])
 
     (out / "chr.bin").write_bytes(b"".join(chr_data))
     (out / "blocks.bin").write_bytes(blocks)
@@ -756,6 +784,7 @@ def build(dq5_path, dq4_path, out):
         {"at": _cpu(WATER_AT), "hex": _hex(water_frames(assets, chr_data, water_ids)), "note": "물 그림 3장"},
         {"at": _cpu(LID_AT), "hex": _hex(lid_tiles(assets)), "note": "열린 상자 타일 9E·9F(6번 줄)"},
         {"at": _cpu(FOUNTAIN_AT), "hex": _hex(fountain_frames(assets, chr_data)), "note": "분수 그림 3장"},
+        {"at": _cpu(GFX_BANK << 16 | NIGHTS_AT), "hex": _hex(night_table), "note": "바꾼 맵마다 밤 팔레트 주소(0 은 낮 그대로)"},
         {"at": _cpu(LIB_AT), "hex": _hex(lib_code), "note": "바꾼 맵 표와 불러오기·팔레트·물체·물 루틴, 맵 위 물체 항목"},
         {"at": _cpu(DOOR_BANK << 16 | DOOR_TABLES[0]), "hex": _hex(door_tables(dq5)),
          "note": "문 루틴이 DB 로 읽는 뱅크 01 표의 복사"},
@@ -764,6 +793,10 @@ def build(dq5_path, dq4_path, out):
         flat = palette_variant(kind)
         data = b"".join(_bgr555(flat[i * 3:i * 3 + 3]).to_bytes(2, "little") for i in range(16, 128))
         writes.append({"at": _cpu(GFX_BANK << 16 | at), "hex": _hex(data), "note": f"BG 팔레트 1~7번 줄({kind})"})
+    for kind, at in night_at.items():
+        flat = dq4environmentnight.night_flat(palette_variant(kind))
+        data = b"".join(_bgr555(flat[i * 3:i * 3 + 3]).to_bytes(2, "little") for i in range(16, 128))
+        writes.append({"at": _cpu(GFX_BANK << 16 | at), "hex": _hex(data), "note": f"BG 팔레트 1~7번 줄({kind}, 밤)"})
     for at, orig, new in sites:
         writes.append({"at": _cpu(at), "hex": _hex(new), "orig": _hex(orig), "note": "환경 맵 훅"})
     rom = Rom(dq5)
@@ -771,7 +804,7 @@ def build(dq5_path, dq4_path, out):
     report = {"chr": len(chr_data), "blocks": len(block_words), "water_chr": list(water_ids),
               "bank01_bytes": len(stub_code), "library_bytes": len(lib_code),
               "door_bank_free": DOOR_TABLES[0] - (LIB_AT & 0xFFFF) - len(lib_code), "objects": found, "maps": {},
-              "group_maps": {}}
+              "group_maps": {}, "night_maps": sorted(nights)}
     for name, (source, local) in maps.items():
         target = MAPS[name]
         doc = map_document(name, source, local, target)

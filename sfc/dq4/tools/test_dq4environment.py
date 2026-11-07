@@ -83,7 +83,7 @@ class DoorBankTests(unittest.TestCase):
     def code(self, entries):
         import dq4environmentrom as rom
         n = len(rom.MAPS)
-        return rom.engine_code(10, (0, 1, 2, 3), [rom.PALETTE_AT] * n, entries, [False] * n, [False] * n)
+        return rom.engine_code(10, (0, 1, 2, 3), [rom.PALETTE_AT] * n, entries, [False] * n, [False] * n)[:3]
 
     def entries(self, objects_per_map):
         import dq4environmentrom as rom
@@ -386,7 +386,7 @@ class WaterRoutineTests(unittest.TestCase):
         import dq4environmentrom as rom
         n = len(rom.MAPS)
         waters = [2, 1] + [0] * (n - 2)
-        lib, _, _ = rom.engine_code(10, (0, 1, 2, 3), [rom.PALETTE_AT] * n, [[]] * n, waters, [False] * n)
+        lib, _, _, _ = rom.engine_code(10, (0, 1, 2, 3), [rom.PALETTE_AT] * n, [[]] * n, waters, [False] * n)
         return rom, lib
 
     def test_flag_compare_is_a_16_bit_immediate(self):

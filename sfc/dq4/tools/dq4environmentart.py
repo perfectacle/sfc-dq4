@@ -15,11 +15,11 @@ def _rgb(value):
 _BANKS = (
     ("18202a",) * 16,
     ("18202a", "102900", "054600", "007200", "0ba100", "3fb800", "20e30e", "2dff39", "9cff8c", "292121", "947321", "f7f7d6", "f7f7d6", "ff5a9c", "ffffef", "ffd629"),
-    ("18202a", "292121", "40342f", "5a4a41", "7b6b62", "9d8e84", "beb4a5", "d8d2bf", "efefd6", "101010", "57072e", "b3177f", "292121", "6d2921", "b5604f", "f7c69c"),
-    ("18202a", "101010", "474740", "636860", "7c8078", "9c9c92", "c5c5b4", "efefd6", "57072e", "b3177f", "de4fa9", "102900", "292121", "634200", "c69429", "f7f7d6"),
-    ("18202a", "292121", "3e2805", "5a3b00", "7f5e13", "a98124", "cda23c", "e2cd7a", "f7f7d6", "101010", "7c8078", "efefd6", "102900", "b3177f", "57072e", "de4fa9"),
+    ("18202a", "292121", "40342f", "5a4a41", "7b6b62", "9d8e84", "beb4a5", "d8d2bf", "efefd6", "101010", "5a2a22", "c66a52", "292121", "6d2921", "b5604f", "f7c69c"),
+    ("18202a", "101010", "474740", "636860", "7c8078", "9c9c92", "c5c5b4", "efefd6", "5a2a22", "c66a52", "e08c6e", "102900", "292121", "634200", "c69429", "f7f7d6"),
+    ("18202a", "292121", "3e2805", "5a3b00", "7f5e13", "a98124", "cda23c", "e2cd7a", "f7f7d6", "101010", "7c8078", "efefd6", "102900", "c66a52", "5a2a22", "e08c6e"),
     ("18202a", "000000", "292121", "52524a", "461b15", "64231b", "4a4200", "846b00", "81362e", "9f4d45", "c16953", "df906d", "f7c69c", "947321", "f7f7d6", "efefd6"),
-    ("18202a", "000000", "292121", "52524a", "57072e", "850054", "634a00", "c69429", "b3177f", "ffde00", "de4fa9", "ffa5de", "947321", "f7f7d6", "efefd6", "00298c"),
+    ("18202a", "000000", "292121", "52524a", "5a2a22", "8a3e30", "634a00", "c69429", "c66a52", "ffde00", "e08c6e", "f6bba2", "947321", "f7f7d6", "efefd6", "00298c"),
     ("18202a", "00104a", "002581", "0024d9", "0042ff", "0073ff", "1aa2ff", "9ce7ff", "102900", "054600", "0ba100", "2dff39", "9cff8c", "102900", "25ac00", "9cff8c"),
 )
 # DQ5 maps keep object colours at fixed slots: line 6 = 1·2·3·6·7·9 (doors), line 5 = 1·2·3·6·7
@@ -148,6 +148,18 @@ def _stone_floor():
     return _finish(c, "회청색 판석")
 
 
+def _moss_floor():
+    """The west tower's floor: FC lays green slabs there, drawn as the grey slab in the darker greens of bank 1."""
+    c = _Canvas(1)
+    c.rows(tuple(row.translate(str.maketrans("3456", "2345")) for row in (
+        "5555553555555553", "5666553566666653", "5655553555555653", "5555553555555553",
+        "5555553555555553", "5555553555555553", "4444443444444443", "3333333333333333",
+        "5553555555553555", "5653566666653566", "5553555555653555", "5553555555553555",
+        "5553555555553555", "5553555555553555", "4443444444443444", "3333333333333333",
+    )))
+    return _finish(c, "이끼 낀 판석")
+
+
 def _cobble():
     """DQ5 town roads are a basket weave of tan bricks, not loose stones."""
     c = _Canvas(4, fill=7)
@@ -205,16 +217,29 @@ def _stones(c, seed, count, stone, gap, shade, light=None):
                 c.point((x, y), stone)
 
 
+def _slab(c):
+    """One 16x16 slab: light top and left edges, a dark right and bottom seam, and a faint dotted cross between
+    its quarters. Rows of staggered slabs or scattered stones read as a wall or ore; this reads as a floor."""
+    for y in range(16):
+        for x in range(16):
+            if x == 15 or y == 15 or (x == 8 and y % 2 == 0) or (y == 8 and x % 2 == 0):
+                c.point((x, y), 3)
+            elif x == 0 or y == 0:
+                c.point((x, y), 5)
+            else:
+                c.point((x, y), 4)
+
+
 def _carpet():
     c = _Canvas(6)
-    _stones(c, 21, 6, 4, 2, 1)
-    return _finish(c, "자주색 카펫", "interior")
+    _slab(c)
+    return _finish(c, "산호색 바닥", "interior")
 
 
 def _red_paving():
     c = _Canvas(6)
-    _stones(c, 8, 7, 4, 2, 1, 5)
-    return _finish(c, "붉은 돌 포장", "castle")
+    _slab(c)
+    return _finish(c, "산호색 판석", "castle")
 
 
 def _wood_floor():
@@ -970,7 +995,7 @@ def _iron_door():
 
 def _red_paving_cracked():
     c = _Canvas(6)
-    _stones(c, 8, 7, 4, 2, 1, 5)
+    _slab(c)
     for points in (((2, 3), (4, 6), (3, 9), (6, 13)), ((10, 1), (12, 4), (11, 6), (14, 8)), ((7, 9), (9, 11))):
         c.line(points, 1)
     return _finish(c, "갈라진 붉은 돌 포장")
@@ -1350,8 +1375,9 @@ def _castle_town_assets():
     return assets
 
 
-# Red paving colours as found in bank 3, so paving and grey quay stone can share an 8x8 tile.
-_PAVING_IN_GREY = {1: 12, 2: 8, 4: 9, 5: 10}
+# Red paving colours as found in bank 3, so paving and grey quay stone can share an 8x8 tile. Bank 3 has no
+# copy of the slab seam (3), so on a quay the seam takes the darkest paving colour.
+_PAVING_IN_GREY = {1: 12, 2: 8, 3: 8, 4: 9, 5: 10}
 # Quay colours by depth from the paved top: cream cap, then steps of face, face and dark riser.
 _QUAY_STEPS = (7, 6, 2, 5, 5, 2, 5, 4, 1, 4, 4, 1, 4, 3, 1, 3, 3, 1)
 
@@ -1762,6 +1788,7 @@ def create_assets():
         "stone_wall_left": _stone_wall("left"),
         "stone_wall_right": _stone_wall("right"),
         "stone_floor": _stone_floor(),
+        "moss_floor": _moss_floor(),
         "cobble": _cobble(),
         "grass": _grass(),
         "dirt": _dirt(),
