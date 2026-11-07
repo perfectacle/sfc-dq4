@@ -77,6 +77,7 @@ GROUPS = {
     # Chapter 2's サラン, desert bazaar, 西の塔 and the cave south of フレノール.
     **{f"13-{k:02X}": (0x45, k) for k in range(4)}, "saran-04": (0x45, 4), "0C-00": (0x45, 5),
     **{f"2E-{k:02X}": (0x45, 6 + k) for k in range(6)}, **{f"39-{k:02X}": (0x45, 12 + k) for k in range(2)},
+    "1E-00": (0x45, 14), "1F-00": (0x45, 15),
     **{f"06-{k:02X}": (0x46, k) for k in range(4)}, "20-00": (0x46, 0x04),
     "42-01": (0x47, 0x00),
 }
@@ -156,7 +157,8 @@ GATES = {GATE: 0, 0xA2: 2, 0x9C: 0, 0x9D: 1}
 # +4 of the block's bottom-right cell, and 2A:F6B8 numbers exits by those cells in cell-buffer order.
 # Borrowed TARGETS slots keep plain stairs: an exit cell there would fire the DQ5 map's own exit list.
 # 리프트(0F, 1E:$89C8 의 짝 칸)도 밟으면 짝 칸으로 옮기는 출구로 넣는다. FC 처럼 아래에서 올라오는 연출은 없다.
-STAIRS = {0x08, 0x09, 0x0F}
+# 旅の扉(0A, 1B:$A10F)도 짝 칸(다른 사당의 旅の扉)으로 옮기는 출구다. FC 의 소용돌이 연출은 없다.
+STAIRS = {0x08, 0x09, 0x0A, 0x0F}
 STAIR_ATTR = 0x05
 # FC chests (block kind 04) and the FC search cells of 1E:$BC7A (タンス AB, つぼ AA) become the DQ5 cells
 # 12:E4C9 searches. A block's attribute lands in +7 when its last row is on the upper layer (block +1 bit4-7 =

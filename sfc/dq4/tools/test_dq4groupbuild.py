@@ -24,6 +24,18 @@ class CellTest(unittest.TestCase):
         self.assertEqual(build.cell(0, 0), (0, 1))
 
 
+class TalkPlaceTest(unittest.TestCase):
+    def test_talk_scripts_sit_apart_from_records_and_the_inn_table(self):
+        """The talk scripts once had 0x800 bytes before the inn table at 3C:F000 and overflowed it."""
+        bank, lo = build.TALK_AT[build.TALK_AT.index("--extra-at") + 1].split(":")
+        at = int(bank, 16) << 16 | int(lo, 16)
+        self.assertTrue(0x30 <= at >> 16 <= 0x3F)
+        for start, end in build.RECORDS_AT:
+            self.assertFalse(start <= at < end, hex(start))
+            self.assertFalse(at >> 16 == start >> 16 and at < start)
+        self.assertNotEqual(at >> 16, build.INN_AT >> 16)
+
+
 class DungeonAttrsTest(unittest.TestCase):
     def test_dungeon_zones_and_song(self):
         dq5 = ROM.parent / "dq5.sfc"
@@ -552,7 +564,7 @@ def fc_maps_of(links, per_group=5):
     maps = {}
     for parts in links.values():
         first, *rest = parts
-        own = list(range(per_group - len(rest)))
+        own = list(range(max(1, per_group - len(rest))))
         if first.get("map", 0) not in own:
             own[-1] = first["map"]
         maps[first["fc"]] = own

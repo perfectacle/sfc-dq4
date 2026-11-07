@@ -192,6 +192,7 @@ def chapter2_cases():
                      'free': f'{mx},{my + 6}', 'battle': 'win', 'want': [('TEMPE_WON', tempe.WON)],
                      'not': [('TEMPE_ALTAR', ch2.TEMPE_ALTAR)], 'hero_at': tempe.MORNING_CELL, 'maxf': 12000}
     out.update(frenol_cases())
+    out.update(king_cases(ch2))
     return out
 
 
@@ -213,6 +214,26 @@ def frenol_cases():
                      'late': wc.NIGHT_SET, 'walk': f'{at};wait:120;{first}{taps(30, 50)};wait:300;{close}',
                      'want': [('FRENOL_RESCUED', fr.RESCUED)], 'hero_at': fr.MORNING_CELL, 'maxf': 6000,
                      'distinct': 8 if first else 7}
+    return out
+
+
+def king_cases(ch2):
+    """왕의 병(dq4ch2king): 칸으로 거는 장면을 들어서는 쪽마다. 걸린 뒤 다시 걸을 수 있어야 한다(free)."""
+    import dq4ch2king as king
+    taps, close = wc.taps, pc.CLOSE
+    out = {}
+    # 바자: 오른쪽에서 X 09 줄을 지나 왼쪽으로
+    out['bazaar-left'] = {'warp': f'{king.BAZAAR_MAP},26,22', 'set': '', 'walk': f'16,23;wait:60;{taps(3)};{close}',
+                          'free': '24,23', 'want': [('KING_BAZAAR', king.BAZAAR)], 'maxf': 2500}
+    # 왕좌의 방 계단 위 줄은 출발 상태가 그 맵이라 순간이동할 수 없어(같은 맵) 걷기 검사의 throne 구간이 본다
+    heard = ch2_flags(king.BAZAAR, king.HEARD)
+    # 탑 꼭대기: 계단 옆과 오른쪽에서 위로 줄 0C 에 든다. 꿀은 오른쪽에서 엘프가 섰던 칸에
+    for name, warp, at in (('elves-up', '14,28', '14,25'), ('elves-right', '24,28', '24,25')):
+        out[name] = {'warp': f'{king.TOWER_TOP},{warp}', 'set': heard, 'walk': f'{at};wait:60;{taps(6, 60)};wait:200',
+                     'free': '22,23', 'want': [('KING_SEEN', king.SEEN)], 'maxf': 3000}
+    out['honey-left'] = {'warp': f'{king.TOWER_TOP},24,18', 'set': ch2_flags(king.BAZAAR, king.HEARD, king.SEEN),
+                         'walk': f'18,19;wait:60;{taps(3, 60)};{close}', 'free': '24,21',
+                         'want': [('KING_GOT', king.GOT)], 'maxf': 2500}
     return out
 
 

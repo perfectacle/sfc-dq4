@@ -119,7 +119,8 @@ LINKS = {
             "chapter": 4}],
     # Chapter 2's other places in one group: サラン, the desert bazaar, the tower of the honey (西の塔) and the
     # bracelet cave south of フレノール. The tower and the cave borrow the attributes of chapter 1's tower and cave.
-    # The travel-door shrine by エンドール (1E) waits: its travel door (FC exit kind 0A) has no DQ5 exit yet.
+    # The two travel-door shrines (1E on this side, 1F by エンドール) join them: their travel doors (FC exit kind 0A)
+    # are exit blocks paired like stairs. FC plays 不思議のほこら (FC song 08, DQ5 slot 18) in map branch 3.
     0x45: [{"fc": 0x13, "arrival": (0x0C, 0x19), "attrs": "03/00", "music": 0x06, "field": [(0x22, 0x49)],
             "out": "down:64", "chapter": 2},
            {"fc": 0x0C, "arrival": (0x1F, 0x0B), "attrs": "03/00", "music": 0x06, "field": [(0x3F, 0x4A)],
@@ -127,7 +128,11 @@ LINKS = {
            {"fc": 0x2E, "arrival": (0x15, 0x1F), "map": 3, "attrs": "33/00", "music": 0x0A, "dungeon": True,
             "field": [(0x24, 0x57)], "out": "down:64", "chapter": 2},
            {"fc": 0x39, "arrival": (0x23, 0x08), "map": 1, "attrs": "21/02", "music": 0x09, "dungeon": True,
-            "field": [(0x58, 0x3C)], "out": "down:32,wait:60,up:32", "chapter": 2}],
+            "field": [(0x58, 0x3C)], "out": "down:32,wait:60,up:32", "chapter": 2},
+           {"fc": 0x1E, "arrival": (0x05, 0x0A), "attrs": "03/00", "music": 0x18, "field": [(0x57, 0x4D)],
+            "out": "down:64", "chapter": 2},
+           {"fc": 0x1F, "arrival": (0x07, 0x0D), "attrs": "03/00", "music": 0x18, "field": [(0x57, 0x52)],
+            "out": "down:64", "chapter": 2}],
     # 5장 시작 지역: ブランカ 와 きこりのいえ(20). 인물과 판매자는 5장 시작 상태($615A = 4)의 것. 여우가 홀리는
     # 마을(18)은 자고 나면 사라지는 이벤트와 장소별 값(はがねのつるぎ 10G)이 있어 뺀다.
     0x46: [{"fc": 0x06, "arrival": (0x10, 0x1D), "attrs": "03/00", "field": [(0x99, 0x45)], "out": "down:64",
@@ -148,9 +153,9 @@ NEWMAP_AT = ("--entrance-table-at", "3C:9000", "--door-bank", "3B", "--attr-tabl
 # New-map records, [start, end) areas in banks 30-3F: the map loader reads a record with DB set to its bank and
 # reads low WRAM meanwhile. One dq5newmap call puts all its records in one bank, so the records that do not fit the
 # first area go to the next areas in later calls (record_areas, records_pass).
-# 3F 는 환경 맵 레코드가 3E 에서 끝나 비어 있고, 30 은 이 빌드에서 아무도 쓰지 않는다(1장 빌드는 이 표를
-# dq4chapter1.RECORDS_AT 로 바꾼다).
-RECORDS_AT = ((0x348000, 0x350000), (0x318000, 0x320000), (0x3F8000, 0x400000), (0x308000, 0x310000))
+# 3F 는 환경 맵 레코드가 3E 에서 끝나 비어 있고, 30 은 이 빌드에서 아무도 쓰지 않아 앞쪽은 레코드, 30:C000~ 은 대화
+# 스크립트(TALK_AT)가 쓴다(1장 빌드는 두 표를 dq4chapter1 의 것으로 바꾼다).
+RECORDS_AT = ((0x348000, 0x350000), (0x318000, 0x320000), (0x3F8000, 0x400000), (0x308000, 0x30C000))
 # The record a new map points at until a later call gives it its own: any original map.
 RECORD_PLACEHOLDER = "03/00"
 EXIT_AT = ("--exits-at", "2A:D812", "--records-at", "3C:A000")
@@ -158,8 +163,9 @@ ENTRANCES_AT = ("--entrances-at", "3C:8000")
 # dq5textwrite writes the whole walking text again, so it takes banks of its own.
 TEXT_AT = ("--at", "35:8000")
 # Talk scripts 900- (the prologue's and the ported people's, dq4npcport.talk_doc). Bank 30-3F: the hook reads
-# them with DB set to their bank. Not 3A: the chapter-1 build fills it with new-map records.
-TALK_AT = ("--extra-at", "3C:E800", "--hook-at", "06:FE10")
+# them with DB set to their bank. Not 3A: the chapter-1 build fills it with new-map records. Not 3C: the 0x800 bytes
+# before the inn table (3C:F000) overflowed once chapter 2's people talked (0xC4F bytes with the travel-door shrines).
+TALK_AT = ("--extra-at", "30:C000", "--hook-at", "06:FE10")
 SHOP_AT = ("--shop-at", "3C:E000")
 INN_AT = 0x3CF000
 # The entrance hook's tables grow with every group; past chapters 2-4 they reached the shop-key routine at

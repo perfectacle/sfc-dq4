@@ -194,11 +194,12 @@ class PortTest(unittest.TestCase):
         # 3D holds three FC groups: テンペ (inn, church) and フレノール (item shop) get keys of their own.
         # エンドール (40) sells armour on 40/00 and 40/09 and has inns on 40/00 and 40/0E: two keys, split at 40/09.
         # レイクナバ's 16/01 seller has only うまのふん, which DQ5 lacks, so 3E keeps one key.
+        # The エンドール-side shrine 45/0F (FC 1F) has an inn: a key of its own before 西の塔.
         self.assertEqual(self.report["keys"], {"36/00-03": "60", "37/00-02": "61", "3D/03-03": "62", "3D/04-05": "63",
                                                "3E/00-02": "64", "3F/00-01": "65", "40/00-08": "66", "40/09-0E": "67",
                                                "41/00-03": "68", "42/00-01": "69", "43/00-05": "6A",
-                                               "45/05-05": "6B", "45/00-02": "6C", "45/03-04": "6D", "45/06-0B": "6E",
-                                               "46/00-03": "6F"})
+                                               "45/05-05": "6B", "45/00-02": "6C", "45/03-04": "6D", "45/0F-0F": "6E",
+                                               "45/06-0B": "6F", "46/00-03": "70"})
         weapons = next(s for s in self.shops if s["key"] == 0x60 and s["kind"] == 2)
         self.assertEqual(weapons["items"], [0x02, 0x06, 0x1C, 0x07])  # いばらのむち = DQ5 いばらのムチ
         # てつのやり sells in DQ5 slot 01 (dq4itemport.BORROWED), after くさりがま as in FC.
@@ -217,14 +218,14 @@ class PortTest(unittest.TestCase):
     def test_inn_table_and_operands(self):
         table, bank, addr, _, shop_site, inn_site = self.writes[:6]
         data = bytes.fromhex(table["hex"].replace(" ", ""))
-        self.assertEqual(len(data), (shopport.INN_ENTRIES + 13) * 2)
+        self.assertEqual(len(data), (shopport.INN_ENTRIES + 14) * 2)
         # フレノール(키 63)은 처음 상태에 여관이 없고 사건 목록(목록 플래그 00&40)의 여관 주인만 있다
-        self.assertEqual(data[-26:], bytes((0x60, 4, 0x61, 6, 0x62, 3, 0x63, 4, 0x65, 10, 0x66, 6, 0x67, 8, 0x68, 3,
-                                            0x6A, 6, 0x6B, 6, 0x6C, 2, 0x6E, 6, 0x6F, 3)))
+        self.assertEqual(data[-28:], bytes((0x60, 4, 0x61, 6, 0x62, 3, 0x63, 4, 0x65, 10, 0x66, 6, 0x67, 8, 0x68, 3,
+                                            0x6A, 6, 0x6B, 6, 0x6C, 2, 0x6E, 8, 0x6F, 6, 0x70, 3)))
         self.assertEqual(self.report["inns"], {"36/00": 4, "37/00": 6, "3D/03": 3, "3D/04": 4, "3F/01": 10, "40/00": 6,
                                                "40/0E": 8,
                                                "41/00": 3, "43/00": 6,
-                                               "45/00": 2, "45/05": 6, "45/0A": 6, "46/00": 3})
+                                               "45/00": 2, "45/05": 6, "45/0A": 6, "45/0F": 8, "46/00": 3})
         self.assertEqual((shop_site["at"], inn_site["at"]), ("06:DC37", "06:F576"))
         self.assertEqual((bank["hex"], addr["hex"]), ("3C", "00 F0"))
 

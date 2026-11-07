@@ -161,9 +161,10 @@ class GameArgsTests(unittest.TestCase):
 class Chapter2MapSongTests(unittest.TestCase):
     def test_chapter2_towns_and_castle_take_fc_branch_songs(self):
         # FC 맵 곡은 맵 갈래로 고른다: 갈래 0(성) → 王宮のメヌエット(자리 01), 갈래 1(마을) → 街でのひととき(자리 06),
-        # 갈래 4(탑) → 呪われし塔(0A), 갈래 5(동굴) → 恐怖の洞窟(09)
+        # 갈래 3(사당) → 不思議のほこら(18), 갈래 4(탑) → 呪われし塔(0A), 갈래 5(동굴) → 恐怖の洞窟(09)
         songs = {part['fc']: part.get('music') for group in (0x3D, 0x45) for part in dq4groupbuild.LINKS[group]}
-        self.assertEqual(songs, {0x01: 0x01, 0x0E: 0x06, 0x0F: 0x06, 0x13: 0x06, 0x0C: 0x06, 0x2E: 0x0A, 0x39: 0x09})
+        self.assertEqual(songs, {0x01: 0x01, 0x0E: 0x06, 0x0F: 0x06, 0x13: 0x06, 0x0C: 0x06, 0x2E: 0x0A, 0x39: 0x09,
+                                 0x1E: 0x18, 0x1F: 0x18})
 
 
 if __name__ == '__main__':

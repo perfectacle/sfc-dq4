@@ -34,6 +34,7 @@ import dq4ch1walkcheck as wc  # noqa: E402
 import dq4ch2event as ch2  # noqa: E402
 import dq4ch2tempe as tempe  # noqa: E402
 import dq4ch2frenol as frenol  # noqa: E402
+import dq4ch2king as king  # noqa: E402
 
 talk, taps = wc.talk, wc.taps
 CLOSE = wc.pc.CLOSE
@@ -62,6 +63,11 @@ FLAGS = {
     # 묘지 장면 동안만 켜는 flag 다섯(끝에 모두 꺼짐)
     'FRENOL_SCENE': (0x7E2190 + frenol.IDX, frenol.SCENE_BITS),
     'BRACELET_CHEST': (0x7E0000 | frenol.CHEST_OPEN[0], frenol.CHEST_OPEN[1]),
+    'KING_BAZAAR': flag(king.BAZAAR),
+    'KING_HEARD': flag(king.HEARD),
+    'KING_SEEN': flag(king.SEEN),
+    'KING_GOT': flag(king.GOT),
+    'KING_CURED': flag(king.CURED),
     # flag 가 아니라 바이트 전체(마스크 FF)를 본다: 1장에 맡긴 やくそう 개수와 맡긴 금화(1000G 단위) 아래 바이트
     'BANK_HERB': (ch2.BANK_ITEMS_AT + 0xA1, 0xFF),
     'BANK_GOLD': (ch2.BANK_GOLD_AT, 0xFF),
@@ -85,11 +91,16 @@ def join_set(data):
 def effects(data):
     """구간이 flag 말고 기록(7E:2000~2A9F)에 남기는 것(구간 이름 → SET(set)·dq5warp.lua PARTY(party)). 묶음 첫
     구간에 둔다. 롬의 기록 틀을 읽는 것이 있어 롬 바이트를 받는다."""
-    return {'join': {'set': join_set(data)}, 'chest': {'set': BRACELET_SET}}
+    return {'join': {'set': join_set(data)}, 'chest': {'set': BRACELET_SET}, 'honey': {'set': HONEY_SET}}
+
 
 
 # 남쪽 동굴의 상자를 연 기록: 주인공(비단 로브 하나를 가짐)의 둘째 칸에 황금의 팔찌, 상자 열림 비트
 BRACELET_SET = f'{(wc.ITEMS & 0xFFFF) + 1:04X}={frenol.BRACELET:02X};{frenol.CHEST_OPEN[0]:04X}|{frenol.CHEST_OPEN[1]:02X}'
+
+# 탑 꼭대기에서 찾은 지저귐의 꿀. 묶음마다 따로 시작하므로 크리프트(일행 기록 1, 물건 둘)의 셋째 칸에 둔다. 주인공의
+# 칸은 앞 사건의 물건과 겹친다
+HONEY_SET = f'{(ch2.JOIN_RECORDS_AT & 0xFFFF) + 0x16 + 2:04X}={king.HONEY:02X}'
 
 # 같은 맵 안으로 순간이동하는 묶음이 먼저 들르는 곳(2장 출발 상태는 왕좌의 방 3D/01)
 HOPS = {ch2.THRONE: f'{ch2.CASTLE},28,45'}
@@ -193,6 +204,30 @@ SEGMENTS += [
     ('grave_side', 'warp', f'{frenol.TOWN},6,19', {'map': frenol.TOWN, 'poke': wc.NIGHT}),
     ('grave', 'walk', '6,23;wait:120;' + taps(30, 50) + ';wait:300;' + CLOSE,
      {'want': ['FRENOL_RESCUED'], 'off': ['FRENOL_SCENE'], 'items': [frenol.THIEF_KEY], 'map': frenol.TOWN}),
+]
+
+# 왕의 병(dq4ch2king): 바자 병사 → 왕좌의 방 병사 → 사당이 막힘 → 탑 꼭대기의 엘프와 꿀 → 왕 회복 → 사당의 여행의 문
+SEGMENTS += [
+    ('bazaar_side', 'warp', f'{king.BAZAAR_MAP},{king.BAZAAR_SOLDIER[0]},{king.BAZAAR_SOLDIER[1] + 1}',
+     {'map': king.BAZAAR_MAP}),
+    ('bazaar', 'walk', talk('up'), {'want': ['KING_BAZAAR']}),
+    # 계단 아래 칸에서 위로 걸어 계단 위 줄에 들면 병사가 알린다
+    ('throne_side', 'warp', f'{ch2.THRONE},24,36', {'map': ch2.THRONE}),
+    ('throne', 'walk', '24,34;wait:120;' + taps(4, 60) + ';' + CLOSE, {'want': ['KING_HEARD']}),
+    # 왕이 낫기 전에는 사당 병사가 위 방으로 가는 틈에 서 있어 여행의 문에 닿지 못한다
+    ('closed_side', 'warp', f'{king.SHRINE},10,20', {'map': king.SHRINE}),
+    ('closed', 'walk', '10,15;8,15;8,11;wait:60;' + taps(4, 60) + ';' + CLOSE,
+     {'map': king.SHRINE, 'maxf': 1500, 'cell': (8, 15)}),
+    # 탑 꼭대기: 계단 옆에서 위로 걸어 줄 0C 에 들면 엘프가 달아나고, 엘프가 섰던 칸을 밟으면 꿀을 찾는다
+    ('tower_side', 'warp', f'{king.TOWER_TOP},14,28', {'map': king.TOWER_TOP}),
+    ('tower', 'walk', '14,25;wait:60;' + taps(6, 60) + ';wait:200', {'want': ['KING_SEEN']}),
+    ('honey', 'walk', '16,18;wait:60;' + taps(3, 60) + ';' + CLOSE, {'want': ['KING_GOT']}),
+    # 꿀을 가진 채 왕에게 말을 걸면 먹이고 왕이 낫는다
+    ('cure_side', 'warp', f'{ch2.THRONE},{ch2.START_CELL[0]},{ch2.START_CELL[1] - 1}', {'map': ch2.THRONE}),
+    ('cure', 'walk', talk('up', 20), {'want': ['KING_CURED']}),
+    # 병사가 비켜선 사당: 위 방의 여행의 문으로 엔돌 쪽 사당에 닿는다
+    ('shrine_side', 'warp', f'{king.SHRINE},10,20', {'map': king.SHRINE}),
+    ('shrine', 'walk', '10,15;8,15;8,11;10,11;10,7', {'map': king.SHRINE_FAR, 'changes': 1}),
 ]
 
 

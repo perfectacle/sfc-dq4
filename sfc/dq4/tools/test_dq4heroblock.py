@@ -18,6 +18,7 @@ sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 import dq4ch1event as ev  # noqa: E402
 import dq4ch2event as ch2  # noqa: E402
 import dq4ch2frenol as fr  # noqa: E402
+import dq4ch2king as king  # noqa: E402
 import dq4chapter1 as ch  # noqa: E402
 import dq4prologue as pro  # noqa: E402
 
@@ -178,6 +179,8 @@ PASS_NO_DEVICE = {
        for (_, script) in ev.HOME_KID_SRCS},
     **{script: '왕의 귀환 병사: 주인공이 줄(셀 50~53)에서 기다리는 동안 셀 48 위로만 걸음(king 사례 겹침 0)'
        for (_, script), (_, path, _) in ev._distinct(zip(ev.SOLDIER_SRCS, ev.THRONE_SOLDIERS)) if path},
+    **{king.SCRIPTS[king.USE[name]]: '탑 꼭대기 엘프: 주인공이 줄 0C(셀 Y 26) 아래에서 들어설 때 걸리고, 엘프는 그보다 위 '
+       '셀 Y 17·19 에서 위로만 걸음(elves-up·elves-right 사례 겹침 0)' for name in ('elf_a', 'elf_b')},
 }
 
 
