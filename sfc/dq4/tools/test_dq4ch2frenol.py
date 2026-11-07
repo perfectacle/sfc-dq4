@@ -88,7 +88,11 @@ class ModuleTest(unittest.TestCase):
 
     def test_start_messages_and_absent(self):
         ctx = context()
-        self.assertEqual(fr.start_messages(ctx)[(fr.INN, fr.FC_INN_BREY, None)], ctx.msg['brey_scene'])
+        self.assertEqual(fr.start_messages(ctx)[(fr.INN, fr.FC_INN_BREY, None)], ctx.msg['cry'])
+        # 그 둘은 비명 사각형 안에 선다(옮긴 인물 셀 y = 주인공 셀 y - 1)
+        x0, y0, x1, y1 = fr.CRY_RECT
+        for x, y in (fr.INN_BREY, fr.INN_KIRYL):
+            self.assertTrue(x0 <= x <= x1 and y0 <= y + 1 <= y1)
         gone = ev.absent()
         self.assertIn((fr.TOWN, *fr.TRIO[0], False), gone)
         self.assertIn((fr.TOWN, *fr.NIGHT_MEI, True), gone)

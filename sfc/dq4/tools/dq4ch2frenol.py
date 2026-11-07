@@ -425,7 +425,8 @@ def absent(ctx):
 
 
 def start_messages(ctx):
-    return {(INN, FC_INN_BREY, None): ctx.msg['brey_scene'], (INN, FC_INN_KIRYL, None): ctx.msg['kiryl_scene']}
+    """처음 상태의 가짜 브라이·크리프트는 비명 사각형(CRY_RECT) 안에 서 있어, 다가가면 말을 걸기 전에 비명이 먼저 뜬다."""
+    return {(INN, FC_INN_BREY, None): ctx.msg['cry'], (INN, FC_INN_KIRYL, None): ctx.msg['cry']}
 
 
 def npc_lists(lists, ctx):
