@@ -16,7 +16,7 @@ import dq4ch2battle  # noqa: E402
 from dq4ch2slots import SLOTS  # noqa: E402
 
 # 2장 사건 모듈(dq4ch2slots.SLOTS 의 module). 세션마다 한 줄씩 더한다. 차례가 메시지·대화 번호 차례다
-EVENTS = ('dq4ch2tempe', 'dq4ch2frenol', 'dq4ch2king', 'dq4ch2endor', 'dq4ch2partytalk')
+EVENTS = ('dq4ch2tempe', 'dq4ch2frenol', 'dq4ch2king', 'dq4ch2endor', 'dq4ch2ending', 'dq4ch2partytalk')
 
 # 깃발(7E:2190 + 첫 값). DQ5 가 켜기만 하고 비트로 보지 않는 자리(sfc/dq5/docs/dq5-flags.md)
 CHAPTER2 = (0x78, 0x10)        # 7E:2208 bit4  2장 진행 중(1장 끝에서 켬). 주인공 그림을 아리나 대역으로
@@ -478,8 +478,9 @@ class Context:
     """사건 모듈이 받는 것. msg·talk 는 {이름: 번호}(모르는 자리에서는 None), at 은 그 모듈 네이티브의 {이름: 주소},
     base 는 이 모듈 네이티브의 {이름: 주소}, original 은 원래 롬(없으면 None: 주소만 셀 때)."""
 
-    def __init__(self, key, module, message=None, talk=None, original=None):
+    def __init__(self, key, module, message=None, talk=None, original=None, points=None):
         self.key, self.module, self.slot, self.original = key, module, SLOTS[key], original
+        self.points = points       # dq4chapterbox.entry_points(장 상자·밝히기 주소). 인물 스크립트를 짤 때만 있음
         self.code_at = self.slot.code[0]
         self.msg = None if message is None else {n: message + k for k, n in enumerate(getattr(module, 'MESSAGES', {}))}
         self.talk = None if talk is None else {n: talk + k for k, n in enumerate(getattr(module, 'TALKS', ()))}
@@ -506,7 +507,7 @@ def _first_talk():
     return dq4npcport.SCRIPT_TALK + len(dq4prologue.talk_doc()["scripts"]) + len(dq4ch1event.TALKS)
 
 
-def contexts(first_message=None, first_talk=None, original=None):
+def contexts(first_message=None, first_talk=None, original=None, points=None):
     """[Context] EVENTS 차례. 메시지는 이 모듈 MESSAGES 뒤, 대화는 TALKS 뒤에 모듈마다 이어 붙인다."""
     mods = modules()
     if not mods:
@@ -515,7 +516,7 @@ def contexts(first_message=None, first_talk=None, original=None):
     talk = (_first_talk() if first_talk is None else first_talk) + len(TALKS)
     out = []
     for key, mod in mods:
-        out.append(Context(key, mod, message, talk, original))
+        out.append(Context(key, mod, message, talk, original, points))
         message = None if message is None else message + len(getattr(mod, 'MESSAGES', {}))
         talk += len(getattr(mod, 'TALKS', ()))
     return out
@@ -584,6 +585,19 @@ def start_messages(first_message):
     for ctx in contexts(first_message):
         if hasattr(ctx.module, 'start_messages'):
             out.update(ctx.module.start_messages(ctx))
+    return out
+
+
+def state_messages(first_message):
+    """{상태 이름: (SET, {(맵, FC 칸, 밤): 첫 메시지})}: 사건 모듈의 state_messages(ctx). dq4npccheck --states 가 그
+    flag 를 더 켜고 표의 인물에게만 말을 건다."""
+    out = {}
+    for ctx in contexts(first_message):
+        if hasattr(ctx.module, 'state_messages'):
+            for name, v in ctx.module.state_messages(ctx).items():
+                if name in out:
+                    raise SystemExit(f'{ctx.key}: 상태 이름 {name} 을 두 번 씀')
+                out[name] = v
     return out
 
 
@@ -681,7 +695,8 @@ def scripts(first_message, native_points):
         {"address": PRIEST_SCRIPT, "commands": [
             _cmd('09', 0x80 | TEMPE_GONE[0], TEMPE_GONE[1]), _cmd('10', *TEMPE_ALTAR),
             _cmd('37', *_al(tail_native(first_message)[1]['altar_go'])), _cmd('16')]},
-    ] + [s for ctx in contexts(first_message) if hasattr(ctx.module, 'scripts') for s in ctx.module.scripts(ctx)]
+    ] + [s for ctx in contexts(first_message, points=native_points) if hasattr(ctx.module, 'scripts')
+         for s in ctx.module.scripts(ctx)]
 
 
 def _invisible(src, talk):
@@ -757,7 +772,9 @@ def npc_lists(ported, first_talk):
            {"name": "ch2_ready", "entries": clear + _invisible(ASKER_SRC, t['wall'])},
            {"name": "ch2_tempe_altar", "entries": altar}]
     more_new, more_over = module_lists(lists, first_talk)
-    return ported, new + more_new, over + more_over
+    # 대체 표는 앞 줄부터 맞는 첫 줄을 쓴다. 모듈이 first 를 단 줄은 이 모듈의 합류 뒤 목록 따위보다 앞에 둔다
+    first = [{k: v for k, v in o.items() if k != 'first'} for o in more_over if o.get('first')]
+    return ported, new + more_new, first + over + [o for o in more_over if not o.get('first')]
 
 
 def module_lists(lists, first_talk):
@@ -765,6 +782,8 @@ def module_lists(lists, first_talk):
     dq4ch2slots 의 앞머리로 시작해야 한다."""
     new, over = [], []
     for ctx in contexts(first_talk=first_talk):
+        # 앞 모듈이 만든 새 목록({이름: 목록}). 뒤 모듈이 그 목록을 바탕으로 나중 상태의 목록을 만들 때 쓴다
+        ctx.made = {lst["name"]: lst for lst in new}
         if hasattr(ctx.module, 'npc_lists'):
             more_new, more_over = ctx.module.npc_lists(lists, ctx)
             for lst in more_new:

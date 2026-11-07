@@ -26,7 +26,11 @@ class SegmentTableTests(unittest.TestCase):
         names = [s[0] for s in cw.SEGMENTS]
         self.assertEqual(len(names), len(set(names)))
         for name, how, arg, opt in cw.SEGMENTS:
-            self.assertIn(how, ('warp', 'walk'), name)
+            self.assertIn(how, ('warp', 'walk', 'ending'), name)
+            if how == 'ending':
+                import dq4chapterbox
+                self.assertIn(arg, [sc.name for sc in dq4chapterbox.GAME_SCENES if sc.subtitle], name)
+                continue
             for k in (*opt.get('want', ()), *opt.get('off', ())):
                 self.assertIn(k, cw.FLAGS, name)
             if how == 'walk':
@@ -64,7 +68,9 @@ class SegmentTableTests(unittest.TestCase):
         self.assertEqual([i for u in groups for i in u], list(range(cw.HEAD, len(cw.SEGMENTS))))
         for u in groups:
             self.assertEqual(cw.SEGMENTS[u[0]][1], 'warp', cw.SEGMENTS[u[0]][0])
-            self.assertTrue(all(cw.SEGMENTS[i][1] == 'walk' for i in u[1:]))
+            # 끝 상자(ending)는 리셋으로 끝나 세이브스테이트가 없으므로 묶음 맨 끝에만 온다
+            self.assertTrue(all(cw.SEGMENTS[i][1] == 'walk' for i in u[1:-1]))
+            self.assertIn(cw.SEGMENTS[u[-1]][1], ('walk', 'ending') if len(u) > 1 else ('warp',))
 
     def test_unit_start_sets_flags_of_earlier_segments(self):
         names = [s[0] for s in cw.SEGMENTS]

@@ -448,11 +448,11 @@ def watch_flags(flags=None):
     return ';'.join(f'{k}=7E{a & 0xFFFF:04X}:1' for k, (a, _) in flags.items()) + f';ITEMS0={ITEMS:X}:6;ITEMS1={ITEMS + 6:X}:6;BE=7E00BE:1'
 
 
-def ending(mesence, rom, state, dest, seed=0):
-    """끝 상자에서 버튼을 눌러 리셋한 뒤의 호출 차례를 본다."""
+def ending(mesence, rom, state, dest, seed=0, scene='end'):
+    """끝 상자(dq4chapterbox 장면 이름 scene)에서 버튼을 눌러 리셋한 뒤의 호출 차례를 본다."""
     import dq4chapter1
     scenes = dq4chapter1.scenes(True)
-    end_box = box.entry_points(scenes)['end']
+    end_box = box.entry_points(scenes)[scene]
     acked = box.boot_points(scenes)['acked']
     calls = [end_box, RESET, acked, DRIVER_UPLOAD, DRIVER_HELLO, AFTER_SOUND]
     why = run(mesence, rom, MSG, dest, {'STATE': str(state), 'PRE': ENDING_PRE, 'MAXF': '2400', 'SET': rng_for(seed),
@@ -512,7 +512,8 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
     flags_ = FLAGS if flags is None else flags
     name, how, arg, opt = seg
     if how == 'ending':
-        return ending(mesence, rom, state, dest, seed)
+        # 인자는 끝 상자 장면 이름(없으면 1장에서 끝내는 판의 end)
+        return {**ending(mesence, rom, state, dest, seed, arg or 'end'), 'name': name}
     poke = opt.get('poke', '')
     start = ';'.join(v for v in (pins(opt, seed), extra) if v)
     if how == 'warp':
