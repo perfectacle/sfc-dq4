@@ -552,7 +552,7 @@ def fc_maps_of(links, per_group=5):
     maps = {}
     for parts in links.values():
         first, *rest = parts
-        own = list(range(per_group - len(rest)))
+        own = list(range(max(1, per_group - len(rest))))
         if first.get("map", 0) not in own:
             own[-1] = first["map"]
         maps[first["fc"]] = own
