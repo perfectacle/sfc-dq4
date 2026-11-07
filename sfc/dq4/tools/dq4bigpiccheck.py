@@ -20,7 +20,6 @@ after), REPEAT 번 돌린 기록(nmi.txt) 전체가 같음. 게임이 큰 그림
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4bigpiccheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/bigpic
 """
 import argparse
-import concurrent.futures
 import hashlib
 import json
 import os
@@ -33,6 +32,7 @@ sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
 import dq4battlecheck as bc  # noqa: E402
 import dq4ch1walkcheck as wc  # noqa: E402
+import dq4shards  # noqa: E402
 
 PROBE = HERE / 'lua' / 'dq4bigpic.lua'
 BATTLE_TASK = 0x8952
@@ -100,7 +100,7 @@ def judge(found, injects):
     return longest, max(waits, default=0), problems
 
 
-def run_scene(mesence, rom, data, base, out, name, scene, seed):
+def run_scene(mesence, rom, data, base, out, name, scene, seed, jobs=REPEAT):
     dest = out / name
     state = base
     names = [s[0] for s in wc.SEGMENTS]
@@ -112,13 +112,14 @@ def run_scene(mesence, rom, data, base, out, name, scene, seed):
             return {'name': name, 'status': 'failed', 'problems': [f'자리 잡기 {seg[0]}: {r["problems"]}']}
         state = dest / seg[0] / 'end.mss'
     texts, found, nmis_seen, msgs_seen, ended = [], None, 0, 0, []
-    for i in range(REPEAT):
-        run_dir = dest / f'run{i + 1}'
-        wc.run(mesence, rom, PROBE, run_dir, {
-            'NEXT': str(bc.BATTLE), 'STATE': str(state), 'ROMPATCH': bc.force_patch(scene['group']),
-            'AFTERPATCH': wc.NO_ENCOUNTERS, 'SET': f'{wc.rng_for(seed)};{wc.DAY_SET}', 'POKE': wc.HERO_HP,
-            'STEP': scene['step'], 'KEYS': 'a', 'MOVE': 'up', 'MAXF': '20000', 'KANATABLE': bc.kana_range(),
-            'INJECT': str(INJECT)}, 1500)
+    env = {'NEXT': str(bc.BATTLE), 'STATE': str(state), 'ROMPATCH': bc.force_patch(scene['group']),
+           'AFTERPATCH': wc.NO_ENCOUNTERS, 'SET': f'{wc.rng_for(seed)};{wc.DAY_SET}', 'POKE': wc.HERO_HP,
+           'STEP': scene['step'], 'KEYS': 'a', 'MOVE': 'up', 'MAXF': '20000', 'KANATABLE': bc.kana_range(),
+           'INJECT': str(INJECT)}
+    run_dirs = [dest / f'run{i + 1}' for i in range(REPEAT)]
+    # 같은 입력을 되풀이하는 실행끼리는 서로 기다릴 것이 없으므로 함께 띄우고, 판정은 실행 번호 순서로 한다
+    dq4shards.pmap(lambda d: wc.run(mesence, rom, PROBE, d, env, 1500), run_dirs, jobs)
+    for run_dir in run_dirs:
         text = (run_dir / 'nmi.txt').read_text() if (run_dir / 'nmi.txt').exists() else ''
         texts.append(text)
         ended.append((run_dir / 'battle.txt').exists()
@@ -149,7 +150,7 @@ def main():
     ap.add_argument('--base', type=Path, help='서장 끝 세이브스테이트(같은 롬). 없으면 만든다(캐시)')
     ap.add_argument('--scenes', help='쉼표로 고른 장면만')
     ap.add_argument('--seed', type=int, default=0)
-    ap.add_argument('--jobs', type=int, default=1)
+    ap.add_argument('--jobs', type=int, default=dq4shards.jobs(), help='함께 띄우는 일 수(기본 HEADLESS_SLOTS, dq4shards.jobs)')
     args = ap.parse_args()
     mesence = Path(os.environ['MESENCE'])
     out = args.out.resolve()
@@ -168,8 +169,7 @@ def main():
         if pro['status'] != 'passed':
             raise SystemExit(f'서장 실패: {pro["problems"]}')
     names = args.scenes.split(',') if args.scenes else list(SCENES)
-    with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
-        results = list(pool.map(lambda n: run_scene(mesence, rom, data, base, out, n, SCENES[n], args.seed), names))
+    results = dq4shards.pmap(lambda n: run_scene(mesence, rom, data, base, out, n, SCENES[n], args.seed), names, args.jobs)
     ok = all(r['status'] == 'passed' for r in results)
     report = {'status': 'passed' if ok else 'failed', 'limit': LIMIT, 'rom': str(args.rom), 'scenes': results}
     (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')

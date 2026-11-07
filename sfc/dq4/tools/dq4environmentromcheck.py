@@ -235,12 +235,15 @@ def _control_cell(dq5, target=CONTROL):
 
 
 def main():
+    # 이 파일의 다른 함수를 가져다 쓰는 검사들이 병렬 장치까지 끌어오지 않게 main 에서만 가져온다
+    import dq4shards
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--rom", required=True, type=Path, help="DQ5 ROM built with dq4-environment.dq5patch.json")
     ap.add_argument("--orig", default="rom/dq5.sfc", type=Path)
     ap.add_argument("--dq4", default="rom/dq4.nes", type=Path)
     dq4freshstate.add_argument(ap)
     ap.add_argument("--out", required=True, type=Path)
+    ap.add_argument("--jobs", type=int, default=dq4shards.jobs(), help="함께 띄우는 일 수(기본 HEADLESS_SLOTS, dq4shards.jobs)")
     args = ap.parse_args()
     mesence = os.environ["MESENCE"]
     out = args.out.resolve()
@@ -264,21 +267,42 @@ def main():
     fountains = fountain_frames(assets, chr_data)
     results = {"maps": {}}
     # 대조용 원본 롬과 검사 롬은 빌드가 달라 한 세이브스테이트를 나눠 쓰지 못한다
-    start = {"rom": dq4freshstate.resolve(args.state, mesence, args.rom, out / "start-rom"),
-             "orig": dq4freshstate.make(mesence, args.orig, out / "start-orig")}
-    states = {}
-    for name, (group, number) in MAPS.items():
+    start = dict(zip(("rom", "orig"), dq4shards.pmap(lambda f: f(), (
+        lambda: dq4freshstate.resolve(args.state, mesence, args.rom, out / "start-rom"),
+        lambda: dq4freshstate.make(mesence, args.orig, out / "start-orig")), args.jobs)))
+    rom = args.rom.resolve()
+
+    def visit(name):
+        """MesenCE 로 맵 하나에 들어가 덤프한다(판정은 main 이 맵 순서대로)."""
+        group, number = MAPS[name]
         x, y = _arrival(sources[name])
         to = f"{group:02X}/{number:02X},{x},{y}"
-        states[name], moved = warp(mesence, args.rom.resolve(), start["rom"], to, out / name, name, True)
+        state, moved = warp(mesence, rom, start["rom"], to, out / name, name, True)
         # TEST 는 처음과 끝 칸만 견주므로 네 방향을 오가다 제자리로 돌아오면 moved=no 다. 직각 두 방향씩 다시 누르면 상쇄되지 않는다.
         for n, test in enumerate(("left:40,up:40", "right:40,down:40")):
             if not moved:
-                _, moved = warp(mesence, args.rom.resolve(), start["rom"], to, out / name / f"test{n}", name,
-                                True, TEST=test)
-        wram, vram, cgram = dump(mesence, args.rom.resolve(), states[name], out / name / "dump")
-        later = [dump(mesence, args.rom.resolve(), states[name], out / name / f"dump{n}", 10 + n * WATER_PERIOD)
-                 for n in (1, 2)]
+                _, moved = warp(mesence, rom, start["rom"], to, out / name / f"test{n}", name, True, TEST=test)
+        dumps = [(state, out / name / "dump", 10)] + [(state, out / name / f"dump{n}", 10 + n * WATER_PERIOD) for n in (1, 2)]
+        return state, moved, [dump(mesence, rom, *d) for d in dumps]
+
+    def untouched(target):
+        group, number = target
+        name = f"orig-{group:02X}{number:02X}"
+        fx, fy = _control_cell(args.orig.read_bytes(), (group, number))
+        to = f"{group:02X}/{number:02X},{fx},{fy}"
+        dumps = []
+        for label, rom_path in (("orig", args.orig), ("rom", args.rom)):
+            saved, _ = warp(mesence, rom_path.resolve(), start[label], to, out / f"{name}-{label}", name)
+            dumps.append(dump(mesence, rom_path.resolve(), saved, out / f"{name}-{label}" / "dump")[0])
+        return name, dumps
+
+    # 맵마다·손대지 않은 맵마다 출발 상태만 같이 쓰고 서로 기다릴 것이 없으므로 함께 띄운다
+    names = list(MAPS)
+    visited = dict(zip(names, dq4shards.pmap(visit, names, args.jobs)))
+    states = {}
+    for name, (group, number) in MAPS.items():
+        x, y = _arrival(sources[name])
+        states[name], moved, ((wram, vram, cgram), *later) = visited[name]
         has_water = water_block(*built[name]) is not None
         cycle = water_cycle([(wram, vram)] + [(w, v) for w, v, _ in later], water_ids, frames) if has_water else [0]
         has_fountain = fountain_block(*built[name]) is not None
@@ -312,10 +336,16 @@ def main():
     cx, cy = _control_cell(args.orig.read_bytes())
     to = f"{CONTROL[0]:02X}/{CONTROL[1]:02X},{cx},{cy}"
     first = next(iter(MAPS))
-    base, _ = warp(mesence, args.orig.resolve(), start["orig"], to, out / "control-orig", "control")
-    after, _ = warp(mesence, args.rom.resolve(), states[first], to, out / "control-after", "control")
-    w0, _, _ = dump(mesence, args.orig.resolve(), base, out / "control-orig" / "dump")
-    w1, _, _ = dump(mesence, args.rom.resolve(), after, out / "control-after" / "dump")
+
+    def control(side):
+        rom_path, state = (args.orig, start["orig"]) if side == "orig" else (args.rom, states[first])
+        saved, _ = warp(mesence, rom_path.resolve(), state, to, out / f"control-{side}", "control")
+        return dump(mesence, rom_path.resolve(), saved, out / f"control-{side}" / "dump")[0]
+
+    # 대조 맵 두 쪽과 손대지 않은 맵들은 서로 기다릴 것이 없다
+    jobs = [("control", side) for side in ("orig", "after")] + [("untouched", t) for t in UNTOUCHED]
+    done = dq4shards.pmap(lambda j: control(j[1]) if j[0] == "control" else untouched(j[1]), jobs, args.jobs)
+    w0, w1 = done[:2]
     width, height = w0[0xBF], w0[0xC0]
     results["control"] = {
         "map": to, "left_from": first,
@@ -323,14 +353,7 @@ def main():
         "block_table_equal": w0[0xB000:0xC000] == w1[0xB000:0xC000],
         "chr_bank_equal": w0[0x1823:0x1827] == w1[0x1823:0x1827],
     }
-    for group, number in UNTOUCHED:
-        name = f"orig-{group:02X}{number:02X}"
-        fx, fy = _control_cell(args.orig.read_bytes(), (group, number))
-        to = f"{group:02X}/{number:02X},{fx},{fy}"
-        dumps = []
-        for label, rom in (("orig", args.orig), ("rom", args.rom)):
-            saved, _ = warp(mesence, rom.resolve(), start[label], to, out / f"{name}-{label}", name)
-            dumps.append(dump(mesence, rom.resolve(), saved, out / f"{name}-{label}" / "dump")[0])
+    for name, dumps in done[2:]:
         width, height = dumps[0][0xBF], dumps[0][0xC0]
         results["control"][f"{name}_cell_buffer_equal"] = (
             _static_cells(dumps[0], width, height) == _static_cells(dumps[1], width, height))

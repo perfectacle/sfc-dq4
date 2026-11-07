@@ -167,12 +167,14 @@ def stair_scenes(prg, groups):
 
 
 def main():
+    # 이 파일의 다른 함수를 가져다 쓰는 검사들이 병렬 장치까지 끌어오지 않게 main 에서만 가져온다
+    import dq4shards
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--rom", required=True, type=Path)
     ap.add_argument("--dq4", default="rom/dq4.nes", type=Path)
     dq4freshstate.add_argument(ap)
     ap.add_argument("--out", required=True, type=Path)
-    ap.add_argument("--jobs", type=int, default=4)
+    ap.add_argument("--jobs", type=int, default=dq4shards.jobs(), help="함께 띄우는 일 수(기본 HEADLESS_SLOTS, dq4shards.jobs)")
     ap.add_argument("--groups", type=lambda v: {int(g, 16) for g in v.split(",")}, default=set(LINKS),
                     help="DQ5 groups to walk (hex, comma-separated); all by default")
     ap.add_argument("--set", default="", help="WRAM writes before every warp (dq5warp.lua SET), e.g. 2199|01 "
