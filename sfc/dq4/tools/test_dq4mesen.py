@@ -109,6 +109,25 @@ class MesenTests(unittest.TestCase):
         self.assertEqual(list(work.iterdir()), [])
         mesen.headless_slots.acquire('test', timeout=0, log=None).release()
 
+    def test_every_path_hands_mesence_a_timeout(self):
+        """MesenCE 는 --timeout 이 없으면 약 100초에 종료 255 로 끝나므로, 세 길 모두 Python timeout 보다 조금 긴
+        --timeout 을 넘긴다. timeout 이 없으면 RUNNER_TIMEOUT 기준, 인자에 이미 있으면 덧붙이지 않는다."""
+        argv = self.dir / 'argv.txt'
+        fake = self.dir / 'Argv'
+        fake.write_text(f'#!{sys.executable}\nimport sys\nopen({str(argv)!r}, "a").write(" ".join(sys.argv[1:]) + "\\n")\n')
+        fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+        env = dict(os.environ)
+        work = self.dir / 'work'
+        mesen.run(fake, self.rom, 'probe.lua', folder=work, env=env, timeout=30)
+        mesen.Runner(fake, self.rom, 'probe.lua', work, timeout=200, env=env).wait()
+        mesen.Runner(fake, self.rom, 'probe.lua', work, env=env).wait()
+        mesen.testrunner(fake, str(self.rom), 'probe.lua', env=env)
+        mesen.testrunner(fake, str(self.rom), 'probe.lua', '--timeout=5', env=env, timeout=30)
+        got = [[a for a in line.split() if a.startswith('--timeout=')] for line in argv.read_text().splitlines()]
+        margin, default = mesen.TIMEOUT_MARGIN, mesen.RUNNER_TIMEOUT
+        self.assertEqual(got, [[f'--timeout={30 + margin}'], [f'--timeout={200 + margin}'],
+                               [f'--timeout={default + margin}'], [f'--timeout={default + margin}'], ['--timeout=5']])
+
     def test_clear_saves_only_touches_that_name(self):
         (self.saves / 'a.srm').write_bytes(b'')
         (self.saves / 'b.srm').write_bytes(b'')

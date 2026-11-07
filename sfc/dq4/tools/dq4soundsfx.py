@@ -10,6 +10,7 @@ NDS PSG 잡음 악기만 쓰는 효과음은 DSP 잡음(E3)으로 옮기므로 �
 waves({NDS 샘플 파일: 늘 두는 샘플 번호})로 늘 두는 DQ5 효과음 파형 자리(20~22)에 넣은 한 주기 파형으로 울린다.
 """
 import json
+import os
 import re
 from pathlib import Path
 import sys
@@ -362,11 +363,19 @@ def prerendered(assets, ident, cache_dir=None):
     folder = Path(cache_dir) / 'prerendered' if cache_dir else Path(tempfile.mkdtemp())
     folder.mkdir(parents=True, exist_ok=True)
     out = folder / f'{ident.upper()}.wav'
-    with wave.open(str(out), 'wb') as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(rate)
-        w.writeframes(np.clip(np.round(pcm), -32768, 32767).astype('<i2').tobytes())
+    # cache_dir 은 워크트리·동시 빌드끼리 같이 쓰므로 그 자리에 바로 쓰면 다른 빌드가 쓰다 만 파일을 읽는다(EOFError).
+    # 같은 폴더의 임시 파일에 다 쓴 뒤 os.replace 로 바꿔 넣는다
+    fd, temp = tempfile.mkstemp(dir=folder, prefix=f'.{out.name}.', suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'wb') as f, wave.open(f, 'wb') as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(rate)
+            w.writeframes(np.clip(np.round(pcm), -32768, 32767).astype('<i2').tobytes())
+        os.replace(temp, out)
+    except BaseException:
+        Path(temp).unlink(missing_ok=True)
+        raise
     return out
 
 
