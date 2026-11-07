@@ -135,6 +135,16 @@ class GuardsTest(unittest.TestCase):
         self.assertFalse(guards.build_conflict(ch1, groups))
         self.assertTrue(guards.build_conflict(ch1, reader))
 
+    def test_only_picks_named_checks_and_flags_unknown(self):
+        """--only 는 걸린 것과 상관없이 이름으로 고르고, 모르는 이름은 문제로 낸다."""
+        checks, _ = load(GOOD + GOOD.replace('dq4-walk', 'dq4-talk'))
+        picked, problems = guards.pick(checks, 'dq4-talk,dq4-walk')
+        self.assertEqual([c['name'] for c in picked], ['dq4-talk', 'dq4-walk'])
+        self.assertEqual(problems, [])
+        picked, problems = guards.pick(checks, 'dq4-talk,dq4-gone')
+        self.assertEqual([c['name'] for c in picked], ['dq4-talk'])
+        self.assertEqual(problems, ['--only: 모르는 검사 dq4-gone'])
+
     def test_full_line_in_pr_body(self):
         for body in ('가드: 전체', '설명\n  가드 : 전체  \n- [x] a: 통과'):
             self.assertTrue(guards.FULL_LINE.search(body), body)

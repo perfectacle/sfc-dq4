@@ -27,9 +27,6 @@ paths = [
   # 공용 걷기 드라이버와 세이브스테이트 만들기
   "tools/lua/walk.lua",
   "tools/lua/mkstate.lua",
-  # 검사를 고르고 캐시하는 도구
-  "tools/guards.py",
-  "tools/guardtrace/**",
   # Python·의존성(툴킷 포함) 고정
   "uv.lock",
   "pyproject.toml",

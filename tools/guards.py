@@ -30,6 +30,8 @@ PR 에서는 바뀐 파일이 그 검사의 paths 에 바로 맞을 때, 또는 
   python tools/guards.py --base origin/main      바뀐 파일로 걸리는 검사와 명령을 찍음(PR 올리기 전)
   python tools/guards.py --base origin/main --run
                                                  걸린 검사를 포그라운드로 함께 돌리고 본문 결과 줄을 찍음
+  python tools/guards.py --base origin/main --run --only 이름,이름
+                                                 걸린 검사 대신 고른 검사만 돌림(guards.py 를 바꾼 PR 의 대표 셋)
   python tools/guards.py --base origin/main --run --full
                                                  [full] 에 걸리지 않아도 전체 모드로 돌림(본문에 `가드: 전체`)
   python tools/guards.py --base SHA --pr-body FILE
@@ -793,6 +795,13 @@ def body_problems(checks, body):
     return problems
 
 
+def pick(checks, names):
+    """이름으로 고른 검사(--only). 모르는 이름은 문제로."""
+    want = [n for n in names.split(',') if n]
+    by = {c['name']: c for c in checks}
+    return [by[n] for n in want if n in by], [f'--only: 모르는 검사 {n}' for n in want if n not in by]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--base', help='이 커밋과 HEAD 사이에 바뀐 파일로 걸리는 검사를 고른다')
@@ -805,6 +814,8 @@ def main():
     ap.add_argument('--no-cache', action='store_true', help='--run 에서 검사 캐시·장면 캐시를 모두 끄고 전부 돌린다(배포 관문)')
     ap.add_argument('--full', action='store_true',
                     help='[full] 에 걸리지 않아도 전체 모드로 고른다(PR 본문의 `가드: 전체` 와 같음)')
+    ap.add_argument('--only', metavar='이름,…',
+                    help='--run 에서 걸린 검사 대신 이 검사들만 돌린다(tools/guards.py 를 바꾼 PR 의 대표 가드 셋)')
     args = ap.parse_args()
     files = tracked()
     checks, problems = load(files)
@@ -839,11 +850,15 @@ def main():
                 print(f'- {c["name"]} ({why})')
         if args.pr_body:
             problems += body_problems(hit, body)
+        if args.only:
+            hit, bad = pick(checks, args.only)
+            problems += bad
+            print('--only 로 돌릴 검사: ' + ', '.join(c['name'] for c in hit))
         if args.run and hit and not problems:
             parallel = args.parallel or headless_slots.limit() or os.cpu_count() or 2
             return run_all(hit, parallel, args.timeout, args.no_cache)
-    elif args.pr_body or args.run:
-        ap.error('--pr-body·--run 은 --base 와 함께')
+    elif args.pr_body or args.run or args.only:
+        ap.error('--pr-body·--run·--only 는 --base 와 함께')
     for p in problems:
         print(f'오류: {p}')
     print(f'가드 {len(checks)}개, 문제 {len(problems)}개')
