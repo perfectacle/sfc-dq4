@@ -153,9 +153,9 @@ NEWMAP_AT = ("--entrance-table-at", "3C:9000", "--door-bank", "3B", "--attr-tabl
 # New-map records, [start, end) areas in banks 30-3F: the map loader reads a record with DB set to its bank and
 # reads low WRAM meanwhile. One dq5newmap call puts all its records in one bank, so the records that do not fit the
 # first area go to the next areas in later calls (record_areas, records_pass).
-# 3F 는 환경 맵 레코드가 3E 에서 끝나 비어 있고, 30 은 이 빌드에서 아무도 쓰지 않는다(1장 빌드는 이 표를
-# dq4chapter1.RECORDS_AT 로 바꾼다).
-RECORDS_AT = ((0x348000, 0x350000), (0x318000, 0x320000), (0x3F8000, 0x400000), (0x308000, 0x310000))
+# 3F 는 환경 맵 레코드가 3E 에서 끝나 비어 있고, 30 은 이 빌드에서 아무도 쓰지 않아 앞쪽은 레코드, 30:C000~ 은 대화
+# 스크립트(TALK_AT)가 쓴다(1장 빌드는 두 표를 dq4chapter1 의 것으로 바꾼다).
+RECORDS_AT = ((0x348000, 0x350000), (0x318000, 0x320000), (0x3F8000, 0x400000), (0x308000, 0x30C000))
 # The record a new map points at until a later call gives it its own: any original map.
 RECORD_PLACEHOLDER = "03/00"
 EXIT_AT = ("--exits-at", "2A:D812", "--records-at", "3C:A000")
@@ -163,8 +163,9 @@ ENTRANCES_AT = ("--entrances-at", "3C:8000")
 # dq5textwrite writes the whole walking text again, so it takes banks of its own.
 TEXT_AT = ("--at", "35:8000")
 # Talk scripts 900- (the prologue's and the ported people's, dq4npcport.talk_doc). Bank 30-3F: the hook reads
-# them with DB set to their bank. Not 3A: the chapter-1 build fills it with new-map records.
-TALK_AT = ("--extra-at", "3C:E800", "--hook-at", "06:FE10")
+# them with DB set to their bank. Not 3A: the chapter-1 build fills it with new-map records. Not 3C: the 0x800 bytes
+# before the inn table (3C:F000) overflowed once chapter 2's people talked (0xC4F bytes with the travel-door shrines).
+TALK_AT = ("--extra-at", "30:C000", "--hook-at", "06:FE10")
 SHOP_AT = ("--shop-at", "3C:E000")
 INN_AT = 0x3CF000
 # The entrance hook's tables grow with every group; past chapters 2-4 they reached the shop-key routine at
