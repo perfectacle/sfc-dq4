@@ -2736,6 +2736,7 @@ paths = [
   "sfc/dq5/tools/lua/dq5warp.lua",
   "fc/dq4/tools/dq4block.py",
   "tools/mesence_settings.py",
+  "sfc/dq4/tools/dq4shards.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/guard-night-rom --chapter2 && rm -rf work/guard-night && uv run --locked python sfc/dq4/tools/dq4environmentnightcheck.py --rom work/guard-night-rom/dq4-ch1-full.sfc --out work/guard-night"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
