@@ -4,7 +4,7 @@ People who open a shop in FC (fc/dq4/tools/dq4shop.merchants, on the base person
 number of the same service (06:DBD2: 01 weapon, 02 item, 03 armor, 04 deposit, 05 church, 06 inn; SERVICE). Every FC group
 with a shop list or an inn gets its own key (dq4shopkey: 06:DC37 and 06:F576 read it in place of $BC).
 Weapon, item and armor lists go to the DQ5 shop lists (dq5progress/1 `shops`) under that key, with FC items
-matched to DQ5 items by name (an FC item DQ5 lacks may take a borrowed DQ5 slot, dq4itemport.BORROWED); every item a
+matched to DQ5 items by name (an FC item DQ5 lacks may take a borrowed DQ5 slot, dq4itemport.fc_name); every item a
 list sells gets its FC price (dq4itemport.writes). The inn price table 04:FD6D has no end mark and no room, so it is copied with
 the new keys added and the two operands that point at it (06:F567 bank, 06:F56D address) are changed.
 
@@ -57,6 +57,11 @@ INN_BANK_OPERAND = 0x06F568
 INN_ADDR_OPERAND = 0x06F56E
 # dq5progresswrite takes 1-6 items: the 7th row is under the comparison window (dq5-build-format 「성장·조우·상점」).
 MAX_ITEMS = 6
+# Sellers who come only with a chapter's event (dq4shop.npc_lists 「목록 플래그 n&m」): FC map -> the person list that
+# brings them. The event that switches the map to that list puts the seller; here its shop list goes under the map's
+# key so that the seller's talk number (event_sellers) opens it. テンペ's shop opens once the monster is beaten
+# ($627F bit7, dq4flags), フレノール's weapon shop once おうごんのうでわ is handed over ($627B bit6).
+EVENT_LISTS = {(0x0E, 0x00): "목록 플래그 04&80", (0x0F, 0x00): "목록 플래그 00&40"}
 
 
 def _fold(name):
@@ -68,7 +73,7 @@ def dq5_items(rom):
     """Folded name -> DQ5 item, with the borrowed slots under their FC names."""
     out = {}
     for i in range(216):
-        name = _fold(dq4itemport.BORROWED.get(i) or dq5item.item_name(rom, i))
+        name = _fold(dq4itemport.fc_name(rom, i))
         if name in out:
             raise ValueError(f"DQ5 items {out[name]:02X} and {i:02X} share the name {name}")
         out[name] = i
@@ -134,6 +139,24 @@ def merchants(prg, fc_group, number, items=None):
     return out
 
 
+def event_merchants(prg, fc_group, number, items):
+    """{(x, y, night): FC list kind} of the sellers EVENT_LISTS brings to an FC map, only those of a shop list kind."""
+    tag = EVENT_LISTS.get((fc_group, number))
+    out = {}
+    if tag is None:
+        return out
+    for x, y, _, kind, cond, _ in dq4shop.merchants(prg, fc_group, number):
+        if tag not in cond or kind not in LIST_KIND or not has_goods(prg, kind, fc_group, number, items):
+            continue
+        rest = [c for c in cond if c != tag]
+        unknown = [c for c in rest if not any(c.startswith(k) for k in SELLER_CONDITIONS)]
+        if unknown:
+            raise ValueError(f"{fc_group:02X}/{number:02X} ({x:02X},{y:02X}): event seller condition {unknown}")
+        for night in [n for n, t in ((False, "낮"), (True, "밤")) if t in rest] or [False, True]:
+            out[x, y, night] = kind
+    return out
+
+
 def _cpu(addr):
     return f"{addr >> 16:02X}:{addr & 0xFFFF:04X}"
 
@@ -177,19 +200,32 @@ def port(dq5_path, dq4_path, inn_at, key_at, with_people=True):
     progress = json.loads(_dump_progress(dq5_path))
     counts = {k: sum(1 for s in progress["shops"] if s["kind"] == k) for k in range(4)}
     services, shops, inns, prices = {}, [], {}, {}
-    report = {"shops": [], "missing_items": [], "inns": {}, "keys": {}, "prices": {}}
+    report = {"shops": [], "missing_items": [], "inns": {}, "keys": {}, "prices": {}, "event_sellers": {}}
     maps = sorted(GROUPS.values())
     for group, number in maps:
         fc_group, fc_number = fc_map(prg, group, number)
         services[f"{group:02X}/{number:02X}"] = (merchants(prg, fc_group, fc_number, items)
                                                  if has_people(fc_group, with_people) else {})
-    rows = keys(placement(prg), {(group, number): set(services[f"{group:02X}/{number:02X}"].values()) & {*LIST_KIND, INN}
+    events = {}
+    for group, number in maps:
+        fc_group, fc_number = fc_map(prg, group, number)
+        if has_people(fc_group, with_people):
+            found = event_merchants(prg, fc_group, fc_number, items)
+            if found:
+                events[f"{group:02X}/{number:02X}"] = found
+    rows = keys(placement(prg), {(group, number): (set(services[f"{group:02X}/{number:02X}"].values()) & {*LIST_KIND, INN})
+                                 | set(events.get(f"{group:02X}/{number:02X}", {}).values())
                                  for group, number in maps})
     for group, number in maps:
         fc_group, fc_number = fc_map(prg, group, number)
         found = services[f"{group:02X}/{number:02X}"]
         key = next((k for g, first, last, k in rows if g == group and first <= number <= last), None)
-        for kind in sorted(set(found.values())):
+        event_kinds = set(events.get(f"{group:02X}/{number:02X}", {}).values())
+        for kind in sorted(set(found.values()) | event_kinds):
+            # A kind only the event list sells joins the key; one a base seller sells already has its list (FC
+            # sellers of one map share the map's list of a kind, dq4shop.lookup, as フレノール's item shop in both).
+            if kind not in found.values() and any(s["key"] == key and s["kind"] == LIST_KIND[kind] for s in shops):
+                continue
             if kind in LIST_KIND:
                 if any(s["key"] == key and s["kind"] == LIST_KIND[kind] for s in shops):
                     raise ValueError(f"{group:02X}/{number:02X}: two {dq4shop.KINDS[kind]} lists under key {key:02X}")
@@ -221,6 +257,8 @@ def port(dq5_path, dq4_path, inn_at, key_at, with_people=True):
                 inns[key] = price
                 report["inns"][f"{group:02X}/{number:02X}"] = price
     report["keys"] = {f"{g:02X}/{first:02X}-{last:02X}": f"{k:02X}" for g, first, last, k in rows}
+    report["event_sellers"] = {m: {f"{x},{y},{'night' if n else 'day'}": SERVICE[k] for (x, y, n), k in e.items()}
+                               for m, e in events.items()}
     original = bytes(rom.u8(INN_TABLE + i) for i in range(INN_ENTRIES * 2))
     # New entries keep bit7 off: after sleeping the party lines up behind the hero ($0F36 -> $198E).
     table = original + b"".join(bytes((k, p)) for k, p in sorted(inns.items()))
@@ -232,7 +270,7 @@ def port(dq5_path, dq4_path, inn_at, key_at, with_people=True):
         *dq4shopkey.writes(key_at, rows),
         *dq4itemport.writes(rom, prg, prices),
     ]
-    report["prices"] = {f"{i:02X} {dq4itemport.BORROWED.get(i) or dq5item.item_name(rom, i)}": p
+    report["prices"] = {f"{i:02X} {dq4itemport.fc_name(rom, i)}": p
                         for i, p in sorted(prices.items())}
     return services, shops, writes, report
 

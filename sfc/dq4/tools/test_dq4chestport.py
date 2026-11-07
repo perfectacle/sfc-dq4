@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+ROOT = Path(__file__).resolve().parents[3]
+
 import dq4chestport as chestport
 from dq4environmentrom import TARGETS
 from dq4shopport import _fold
@@ -74,7 +76,7 @@ class BaseTablesTests(unittest.TestCase):
 class PortTests(unittest.TestCase):
     CHESTS = {
         (1, 2): [(0, 3, 4, 1, "herb"), (0, 5, 6, 0xFF, "empty"), (0, 7, 8, 0xE3, "lamp"), (0, 9, 10, 0x82, "gold")],
-        (3, 4): [(0, 1, 1, 1, "skipped group")],
+        (3, 4): [(0, 1, 1, 1, "group 45")],
     }
     PLACEMENT = {(1, 2): (0x40, 0x01), (3, 4): (0x45, 0x02), (5, 6): (0x40, 0x03)}
     SPECIAL_CODE = 0x77
@@ -103,13 +105,11 @@ class PortTests(unittest.TestCase):
             {"x": 7, "y": 9, "reward": 0x01},
             {"x": 11, "y": 13, "reward": chestport.EMPTY},
             {"x": 15, "y": 17, "reward": 0x44},
-            {"x": 19, "y": 21, "reward": 0x100 + 2 * 40}]}])
-        self.assertEqual([r["fc"] for r in report], ["01/02 (3,4)", "01/02 (5,6)", "01/02 (7,8)", "01/02 (9,10)"])
-        self.assertEqual({r["map"] for r in report}, {"40/01"})
-
-    def test_waiting_group_gets_no_chests(self):
-        doc, _ = self.run_port()
-        self.assertNotIn("45/02", [m["map"] for m in doc["maps"]])
+            {"x": 19, "y": 21, "reward": 0x100 + 2 * 40}]},
+            {"map": "45/02", "chests": [{"x": 3, "y": 3, "reward": 0x01}]}])
+        self.assertEqual([r["fc"] for r in report],
+                         ["01/02 (3,4)", "01/02 (5,6)", "01/02 (7,8)", "01/02 (9,10)", "03/04 (1,1)"])
+        self.assertEqual({r["map"] for r in report}, {"40/01", "45/02"})
 
     def test_special_chest_without_reward_is_an_error(self):
         chests = {(1, 2): [(0, 3, 4, self.SPECIAL_CODE, "mimic")]}
@@ -135,6 +135,17 @@ class PortTests(unittest.TestCase):
         pots = [{"group": 1, "index": 2, "x": 0, "y": 0, "item": 0x83}]
         with self.assertRaises(ValueError):
             self.run_port(chests={}, pots=pots)
+
+
+@unittest.skipUnless((ROOT / "rom" / "dq4.nes").is_file() and (ROOT / "rom" / "dq5.sfc").is_file(),
+                     "local source ROMs not present")
+class Chapter2ChestTests(unittest.TestCase):
+    def test_group_45_chests(self):
+        """그룹 45(사란·서쪽 탑·남쪽 동굴)의 상자 8개가 들어가고, 남쪽 동굴의 황금의 팔찌는 빌린 자리 C6 이다."""
+        _, report = chestport.port(str(ROOT / "rom" / "dq5.sfc"), str(ROOT / "rom" / "dq4.nes"))
+        chests = [r for r in report if r["map"].startswith("45/") and r["kind"] == "chest"]
+        self.assertEqual(len(chests), 8)
+        self.assertEqual([r["reward"] for r in chests if r["fc_item"] == "おうごんのうでわ"], [0xC6])
 
 
 class MainTests(unittest.TestCase):

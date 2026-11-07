@@ -62,10 +62,24 @@ QUIET = 400            # 팔기에서 물건을 고른 뒤 누르지 않고 기�
 # 방어구점은 한 칸 올라선다. 더 누르면 방어구점은 카운터 바로 아래 (34,10)까지 올라서므로(그림이 두 셀 위까지 닿아
 # 카운터에 겹치지만 FC·DQ5 와 같은 바닥 칸) 한 번만
 SHOPS = {'item': ('37/00,22,46', (22, 47), 0, 'left'), 'armor': ('37/00,34,8', (34, 11), 1, 'up')}
+# 2장에 닿는 가게(dq4shopport 가 2장 상태로 옮긴 판매자). 다른 맵으로 가는 순간이동은 목표 한 칸 아래에 정확히
+# 세우므로 앞 블록 아랫줄의 한 칸 위를 목표로 둔다. 앞 블록은 FC 판매자 블록에서 카운터 한 블록 너머의 걸을 수 있는
+# 블록 (fx, fy) 이고, 서는 칸은 (2fx, 2fy+1). 카운터가 위에 있으면 위를 누를 때 한 칸 올라서 (2fx, 2fy) 에 선다
+SHOPS.update({
+    'saran-weapon': ('45/00,68,8', (68, 9), 2, 'right'),     # 사란 FC 13/00 (36,4)
+    'saran-armor': ('45/00,34,46', (34, 46), 1, 'up'),       # 사란 (17,21), 낮
+    'bazaar-item': ('45/05,12,12', (12, 12), 0, 'up'),       # 사막의 바자 FC 0C/00 (6,4), 낮
+    'frenor-item': ('3D/04,42,44', (42, 45), 0, 'left'),     # 프레놀 FC 0F/00 (19,22)
+    'endor-weapon': ('40/00,24,34', (24, 34), 2, 'up'),      # 엔돌 FC 04/00 (12,15), 낮
+    'endor-armor': ('40/00,50,54', (50, 55), 1, 'right'),    # 엔돌 (27,27), 낮
+})
 X, Y = 0x7E3020, 0x7E3080
 FACE = (8, 24)         # 카운터 쪽을 누르는 프레임(돌아서려면 6프레임 넘게, 한 걸음보다 짧게), 걸음이 끝나기를 기다리는 프레임
 BASE_ITEMS = (0x42, 0x00)   # 새 게임 밑판: 천 옷·노송나무 막대, 둘 다 장비(비트 0003)
 HERB, ANTIDOTE, CHAIN_MAIL, WOOD_HAT = 0xA1, 0xA2, 0x4D, 0x87
+STEEL_SWORD, LEATHER_SHIELD, MOON_HERB = 0x0C, 0x75, 0xA7
+# 엔돌 가게의 DQ5 에 없는 물건이 빌린 자리(dq4itemport.BORROWED)
+ABACUS, APRON = 0x34, 0x4E
 
 
 @dataclass
@@ -183,6 +197,32 @@ SCENES = [
     Scene('armor-equip', '나무 모자를 사고 바로 장비(120G)', 'armor', (('gold', '1000'),),
           BUY + (pick(ITEM, WOOD_HAT), to('a', W_YESNO), to('a', 0x00), to('a', W_YESNO), to('a', W_SHOP)),
           gold=880, items=BASE_ITEMS + (WOOD_HAT,), equip=0x0007,
+          windows=(W_COMMAND, W_SHOP, W_PARTNER, W_YESNO, W_YESNO, W_SHOP)),
+    # 2장 가게: 가게마다 한 가지를 사서 목록에 FC 품목이 있고 FC 값으로 살 수 있는지 본다(장비는 바로 장비함)
+    Scene('saran-weapon', '사란 무기점에서 강철 검(2000G)', 'saran-weapon', (('gold', '5000'),),
+          BUY + (pick(ITEM, STEEL_SWORD), to('a', W_YESNO), to('a', 0x00), to('a', W_YESNO), to('a', W_SHOP)),
+          # 산 칼을 장비하면 칸 1 로 들어가고 노송나무 막대가 뒤로 밀린다(천 옷·강철 검 장비)
+          gold=3000, items=(0x42, STEEL_SWORD, 0x00), equip=0x0003,
+          windows=(W_COMMAND, W_SHOP, W_PARTNER, W_YESNO, W_YESNO, W_SHOP)),
+    Scene('saran-armor', '사란 방어구점에서 가죽 방패(90G)', 'saran-armor', (('gold', '5000'),),
+          BUY + (pick(ITEM, LEATHER_SHIELD), to('a', W_YESNO), to('a', 0x00), to('a', W_YESNO), to('a', W_SHOP)),
+          gold=4910, items=BASE_ITEMS + (LEATHER_SHIELD,), equip=0x0007,
+          windows=(W_COMMAND, W_SHOP, W_PARTNER, W_YESNO, W_YESNO, W_SHOP)),
+    Scene('bazaar-item', '사막의 바자 도구점에서 약초(8G)', 'bazaar-item', (('gold', '5000'),),
+          BUY + (pick(ITEM, HERB), to('a', W_QTY), to('a', W_YESNO), to('a', W_SHOP)),
+          gold=4992, items=BASE_ITEMS + (HERB,), equip=0x0003, wram={QTY_MAX: 0},
+          windows=(W_COMMAND, W_SHOP, W_PARTNER, W_QTY, W_YESNO, W_SHOP)),
+    Scene('frenor-item', '프레놀 도구점에서 만월초(30G)', 'frenor-item', (('gold', '5000'),),
+          BUY + (pick(ITEM, MOON_HERB), to('a', W_QTY), to('a', W_YESNO), to('a', W_SHOP)),
+          gold=4970, items=BASE_ITEMS + (MOON_HERB,), equip=0x0003, wram={QTY_MAX: 0},
+          windows=(W_COMMAND, W_SHOP, W_PARTNER, W_QTY, W_YESNO, W_SHOP)),
+    Scene('endor-weapon', '엔돌 무기점에서 정의의 주판(빌린 자리, 1600G)', 'endor-weapon', (('gold', '5000'),),
+          BUY + (pick(ITEM, ABACUS), to('a', W_YESNO), to('a', 0x00), to('a', W_YESNO), to('a', W_SHOP)),
+          gold=3400, items=BASE_ITEMS + (ABACUS,), equip=0x0003,
+          windows=(W_COMMAND, W_SHOP, W_PARTNER, W_YESNO, W_YESNO, W_SHOP)),
+    Scene('endor-armor', '엔돌 방어구점에서 철의 앞치마(빌린 자리, 1500G)', 'endor-armor', (('gold', '5000'),),
+          BUY + (pick(ITEM, APRON), to('a', W_YESNO), to('a', 0x00), to('a', W_YESNO), to('a', W_SHOP)),
+          gold=3500, items=BASE_ITEMS + (APRON,), equip=0x0003,
           windows=(W_COMMAND, W_SHOP, W_PARTNER, W_YESNO, W_YESNO, W_SHOP)),
     Scene('armor-cannot-equip', '$0F21 = 3 을 남긴 채 장비할 수 없는 체인 메일 사기: 한 벌만(350G)', 'armor',
           (('gold', '1000'),),

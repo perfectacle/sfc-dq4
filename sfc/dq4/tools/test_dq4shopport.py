@@ -226,6 +226,29 @@ class PortTest(unittest.TestCase):
         self.assertEqual((shop_site["at"], inn_site["at"]), ("06:DC37", "06:F576"))
         self.assertEqual((bank["hex"], addr["hex"]), ("3C", "00 F0"))
 
+@unittest.skipUnless(DQ4.is_file() and DQ5.is_file(), "local source ROMs not present")
+class Chapter2ShopTest(unittest.TestCase):
+    """2장에 닿는 가게(텐페·프레놀 3D, 엔돌 40, 사란·바자 45): 목록에 없는 FC 물건이 없고, 사건 뒤에만 나오는 판매자의
+    목록이 맵 키 아래에 있다."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.services, cls.shops, _, cls.report = shopport.port(str(DQ5), str(DQ4), 0x3CF000, 0x3CFE00)
+
+    def test_no_missing_items(self):
+        self.assertEqual([m for m in self.report["missing_items"] if m[:2] in ("3D", "40", "45")], [])
+
+    def test_event_sellers(self):
+        # 텐페 괴물을 이긴 뒤의 도구점(FC (4,26), 낮)과 팔찌를 넘긴 뒤 프레놀 무기점((28,11), 낮)
+        self.assertEqual(self.report["event_sellers"]["3D/03"], {"4,26,day": 2})
+        self.assertEqual(self.report["event_sellers"]["3D/04"]["28,11,day"], 1)
+        keys = {k: int(v, 16) for k, v in self.report["keys"].items()}
+        tempe = [s for s in self.shops if s["key"] == keys["3D/03-03"] and s["kind"] == 0]
+        frenor = [s for s in self.shops if s["key"] == keys["3D/04-05"] and s["kind"] == 2]
+        self.assertEqual([s["items"] for s in tempe], [[0xA1, 0xA2, 0xA4, 0x1C, 0x21, 0x48]])
+        self.assertEqual([s["items"] for s in frenor], [[0x06, 0x1C, 0x21, 0x07, 0x01]])
+
+
 
 if __name__ == "__main__":
     unittest.main()

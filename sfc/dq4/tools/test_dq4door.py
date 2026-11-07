@@ -67,18 +67,26 @@ class FindTest(unittest.TestCase):
         self.assertEqual(w["00:81B7"]["orig"], "20 B4 83 9C 5A 19")
         self.assertEqual(w["00:81B7"]["hex"], "22 00 FF 01 EA EA")
         self.assertEqual(w["00:880E"], {"at": "00:880E", "hex": "6B", "orig": "6B", "note": w["00:880E"]["note"]})
+        # 잠금 1 은 2199.1(カギの技法)만 보던 것을 とうぞくのカギ(B7)를 가져도 열리게 한다
+        self.assertEqual(w["01:DD23"]["orig"], "00 0B 02 09 F0 02 E6 01")
+        self.assertEqual(w["01:DD23"]["hex"], "22 00 F8 57 EA EA EA EA")
+        self.assertEqual(w["57:F800"]["hex"], "E2 20 00 0B 02 09 D0 08 00 90 90 B7 A5 46 30 02 E6 01 6B")
 
     def test_without_auto(self):
         saved = door.AUTO_OPEN
         try:
             door.AUTO_OPEN = False
-            self.assertEqual({x["at"] for x in door.writes()}, {"57:F400", "01:DA4D"})
+            self.assertEqual({x["at"] for x in door.writes()}, {"57:F400", "01:DA4D", "57:F800", "01:DD23"})
         finally:
             door.AUTO_OPEN = saved
 
 
 
 class VerdictTest(unittest.TestCase):
+    def test_groups(self):
+        self.assertEqual(dq4doorcheck.parse_groups("36-3C"), set(range(0x36, 0x3D)))
+        self.assertEqual(dq4doorcheck.parse_groups("3D,40,45"), {0x3D, 0x40, 0x45})
+
     def test_no_cases_fails(self):
         self.assertEqual(dq4doorcheck.verdict([]), "failed")
 

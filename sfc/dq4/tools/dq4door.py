@@ -26,6 +26,10 @@ shows the door command's message (01:D8FC) once per push, as NDS shows 「トビ
 the hero: $1958, the directions already bumped that 00:83B4 keeps for its sound, says whether this push showed it.
 Doors of lock kind 4 and up (special story doors, whose lock code prints messages itself) stay shut without a message.
 When it opened nothing and showed nothing, AUTO goes on with 00:83B4 (the bump sound) as before.
+
+KEY: DQ5's lock check 01:DCFC gives key level 1 only for the カギの技法 flag 2199.1; FC DQ4's level 1 is the item
+とうぞくのカギ (B7 in DQ5 too, whose どうぐ use 11:8E43 already opens lock-1 doors). KEY replaces the flag test at
+01:DD23 with a call that also gives level 1 to a party holding B7, so とびら and walking into the door open it.
 """
 
 import sys
@@ -48,6 +52,11 @@ BLOCKED, BLOCKED_ORIG = 0x0081B7, bytes((0x20, 0xB4, 0x83, 0x9C, 0x5A, 0x19))   
 BUMP = 0x0083B4
 # The RTL of a bank-00 routine (00:880C PLB PLP RTL), for calling the RTS routine BUMP from bank 01.
 RTL00 = 0x00880E
+# 01:DD23 BRK 0B 02 09 / BEQ +2 / INC $01: key level 1 with flag 2199.1. M/X 8-bit there.
+KEY_FLAG, KEY_FLAG_ORIG = 0x01DD23, bytes((0x00, 0x0B, 0x02, 0x09, 0xF0, 0x02, 0xE6, 0x01))
+# Between FIND and dq4outside's routine (57:FC00).
+KEY_AT, KEY_END = 0x57F800, 0x57FC00
+THIEF_KEY = 0xB7
 TWO_BY_THREE = (0xBB, 0xBC, 0xBD, 0xBE, 0xC3, 0xC5, 0xC6, 0xCD)   # 01:DA73-DA8F
 CELL_UPPER = 0x25F9F4         # A=1, X/Y cell: A = cell +7; keeps X and Y
 WRAM = 0x7E0000
@@ -142,8 +151,23 @@ def auto_code(at=AUTO_AT):
     return asm.assemble()
 
 
+def key_code():
+    """KEY, by JSL from KEY_FLAG with M 8-bit: INC $01 when flag 2199.1 is on or anyone in the party holds B7. BRK reads
+    its operands with the K the BRK pushed, so the flag (BRK 0B) and item (BRK 90) checks run from bank 57. The SEP
+    keeps M as the caller has it; it is first so the JSL target is not a 00 byte, which dq4romledgercheck reads as
+    an empty hook target."""
+    return bytes((0xE2, 0x20,                      # SEP #$20
+                  0x00, 0x0B, 0x02, 0x09,          # BRK 0B 0209: Z clear when 2199.1 is on
+                  0xD0, 0x08,                      # BNE level
+                  0x00, 0x90, 0x90, THIEF_KEY,     # BRK 90 90 B7 (as 01:DD07 for B9): $46 bit7 off when someone holds it
+                  0xA5, 0x46, 0x30, 0x02,          # LDA $46 / BMI done
+                  0xE6, 0x01,                      # level: INC $01
+                  0x6B))                           # done: RTL
+
+
 def writes():
-    """dq5patch/1 writes: FIND in bank 57 and the JSL at DA4D; with AUTO_OPEN, AUTO in bank 01 and its call."""
+    """dq5patch/1 writes: FIND in bank 57 and the JSL at DA4D, KEY and its call at DD23; with AUTO_OPEN, AUTO in bank 01
+    and its call."""
     find, flabels = find_code()
     if FIND_AT >> 16 != (FIND_AT + len(find) - 1) >> 16:
         raise ValueError("door finder crosses a bank")
@@ -151,7 +175,12 @@ def writes():
         {"at": _cpu(FIND_AT), "hex": _hex(find), "note": "2×3 문 찾기(반 칸 걸침·옆·위에서)"},
         {"at": _cpu(DA4D), "hex": _hex(bytes((0x22, *flabels["find"].to_bytes(3, "little"), 0x60))),
          "orig": _hex(DA4D_ORIG), "note": "01:DA4D 를 넓은 문 찾기로"},
+        {"at": _cpu(KEY_AT), "hex": _hex(key_code()), "note": "열쇠 단계 1: 2199.1 이나 とうぞくのカギ"},
+        {"at": _cpu(KEY_FLAG), "hex": _hex(bytes((0x22, *KEY_AT.to_bytes(3, "little"), 0xEA, 0xEA, 0xEA, 0xEA))),
+         "orig": _hex(KEY_FLAG_ORIG), "note": "01:DCFC 의 열쇠 단계 1 검사를 KEY 로"},
     ]
+    if KEY_AT + len(key_code()) > KEY_END or KEY_AT < FIND_AT + len(find):
+        raise ValueError("KEY overlaps the door finder or dq4outside")
     if AUTO_OPEN:
         auto, alabels = auto_code()
         if AUTO_AT + len(auto) > AUTO_END:
