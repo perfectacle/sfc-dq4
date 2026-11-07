@@ -107,7 +107,9 @@ class ChapterTwoCaseTests(unittest.TestCase):
         for name, case in cases.items():
             for tok in case['walk'].split(';'):
                 self.assertRegex(tok, TOKEN, name)
-            self.assertRegex(case['warp'], r'^3D/0[2-5],\d+,\d+$', name)
+            self.assertRegex(case['warp'], r'^[0-9A-F]{2}/[0-9A-F]{2},\d+,\d+$', name)
+            # 출발 상태가 왕좌의 방이라 같은 맵으로는 순간이동하지 못한다
+            self.assertNotEqual(case['warp'].split(',')[0], '3D/01', name)
             self.assertTrue(case['want'], name)
         self.assertNotIn(set(cases), set(hb.cases()))
 

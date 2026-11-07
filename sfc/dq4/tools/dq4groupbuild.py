@@ -119,7 +119,8 @@ LINKS = {
             "chapter": 4}],
     # Chapter 2's other places in one group: サラン, the desert bazaar, the tower of the honey (西の塔) and the
     # bracelet cave south of フレノール. The tower and the cave borrow the attributes of chapter 1's tower and cave.
-    # The travel-door shrine by エンドール (1E) waits: its travel door (FC exit kind 0A) has no DQ5 exit yet.
+    # The two travel-door shrines (1E on this side, 1F by エンドール) join them: their travel doors (FC exit kind 0A)
+    # are exit blocks paired like stairs. FC plays 不思議のほこら (FC song 08, DQ5 slot 18) in map branch 3.
     0x45: [{"fc": 0x13, "arrival": (0x0C, 0x19), "attrs": "03/00", "music": 0x06, "field": [(0x22, 0x49)],
             "out": "down:64", "chapter": 2},
            {"fc": 0x0C, "arrival": (0x1F, 0x0B), "attrs": "03/00", "music": 0x06, "field": [(0x3F, 0x4A)],
@@ -127,7 +128,11 @@ LINKS = {
            {"fc": 0x2E, "arrival": (0x15, 0x1F), "map": 3, "attrs": "33/00", "music": 0x0A, "dungeon": True,
             "field": [(0x24, 0x57)], "out": "down:64", "chapter": 2},
            {"fc": 0x39, "arrival": (0x23, 0x08), "map": 1, "attrs": "21/02", "music": 0x09, "dungeon": True,
-            "field": [(0x58, 0x3C)], "out": "down:32,wait:60,up:32", "chapter": 2}],
+            "field": [(0x58, 0x3C)], "out": "down:32,wait:60,up:32", "chapter": 2},
+           {"fc": 0x1E, "arrival": (0x05, 0x0A), "attrs": "03/00", "music": 0x18, "field": [(0x57, 0x4D)],
+            "out": "down:64", "chapter": 2},
+           {"fc": 0x1F, "arrival": (0x07, 0x0D), "attrs": "03/00", "music": 0x18, "field": [(0x57, 0x52)],
+            "out": "down:64", "chapter": 2}],
     # 5장 시작 지역: ブランカ 와 きこりのいえ(20). 인물과 판매자는 5장 시작 상태($615A = 4)의 것. 여우가 홀리는
     # 마을(18)은 자고 나면 사라지는 이벤트와 장소별 값(はがねのつるぎ 10G)이 있어 뺀다.
     0x46: [{"fc": 0x06, "arrival": (0x10, 0x1D), "attrs": "03/00", "field": [(0x99, 0x45)], "out": "down:64",
