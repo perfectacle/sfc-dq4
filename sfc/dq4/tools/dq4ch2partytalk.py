@@ -1,7 +1,7 @@
 """2장 동료 대화(はなす): 앞에 아무도 없을 때 「はなす」를 고르면 조건이 맞는 동료의 대사를 띄운다(NDS 리메이크의 동료 대화).
 
 DQ5 의 「はなす」는 앞에 말 상대가 없으면 05:D5B9 에서 대화 창을 열고 메시지 129「その方向には誰もいない。」를 띄운다.
-그 메시지를 띄우는 자리(05:D5BC)를 이 모듈의 네이티브로 돌려, 지금 맵의 대사 목록에서 조건이 맞는 줄을 하나 고른다. 맞는
+창 열기와 메시지(05:D5B9~D5BE)를 뱅크 05 받침으로 돌려, 받침이 창을 연 뒤 이 모듈의 네이티브가 지금 맵의 대사 목록에서 조건이 맞는 줄을 하나 고른다. 맞는
 줄이 없으면 원래처럼 129 를 띄운다. 형식은 sfc/dq4/docs/dq4-chapter2-format.md 「동료 대화」.
 
 대사 줄은 LINES 에 Line 하나씩 더한다(맵·말하는 인물·대사 이름·우선순위·시간·조건). 대사 본문은 MESSAGES 에 같은 이름으로.
@@ -21,10 +21,14 @@ import dq4ch2tempe as tempe  # noqa: E402
 from dq4chapter1 import speak  # noqa: E402
 from dq4environmentrom import _Asm  # noqa: E402
 
-# 「はなす」의 앞에 아무도 없는 갈래(05:D5AE 의 12:FD9B 가 캐리를 내린 뒤): BRK 95 00(대화 창) / BRK 98 29(메시지 129) /
-# BRK 09 0A / A 를 기다림 / RTS. 창 열기는 높은 뱅크에서 부르면 안 되는 BRK 라 그대로 두고, 그 뒤 두 BRK 를 JSL 로 바꾼다
-HOOK_AT = 0x05D5BC
-HOOK_ORIG = bytes.fromhex('009829' '00090a')
+# 「はなす」의 앞에 아무도 없는 갈래(05:D5AE 의 12:FD9B 가 캐리를 내린 뒤): 05:D5B9 BRK 95 00(대화 창) / BRK 98 29(메시지
+# 129) / 05:D5BF BRK 09 0A / A 를 기다림 / RTS. D5BF 이하는 05:D817(ならびかえ)도 JSR 로 부르므로 건드리지 않고, 앞 두 BRK
+# (6바이트)만 뱅크 05 의 받침으로 가는 JSR 로 바꾼다. BRK 처리기는 DB 를 BRK 가 놓인 뱅크로 두므로, 창 열기 BRK 는 낮은
+# WRAM 거울이 있는 뱅크 05 의 받침에 둔다(뱅크 5C 에서는 낮은 WRAM 대신 롬을 읽음)
+HOOK_AT = 0x05D5B9
+HOOK_ORIG = bytes.fromhex('009500' '009829')
+STUB_AT = 0x05FEE8             # 원래 롬의 빈 자리. 받침: BRK 95 00 / JSL talk / RTS
+STUB_LEN = 8
 NOBODY = 0x129
 # 마지막으로 고른 줄(지금 맵 목록의 차례 + 1). 같은 우선순위의 맞는 줄이 여럿이면 다음 「はなす」에 그다음 줄을 고른다
 LAST = (0x6E, 0xFF)            # 7E:21FE(바이트 값)
@@ -32,7 +36,6 @@ FLAGS = ()
 
 MESSAGE_AT = 0x248157          # 보행 메시지(A = 번호). BRK 97+n 처리기가 부르는 것과 같음
 NIGHT_TEST = 0x218000          # 캐리 = 밤(7E:075E >= F0)
-WAIT_BRK = bytes((0x00, 0x09, 0x0A))   # 원래 갈래의 10프레임 기다림
 
 # 말하는 인물: 일행 기록 +0 의 인물 번호(아리나는 주인공 기록 틀 0, 두 사람은 dq4ch2event.RECRUITS)
 ALENA, KIRYL, BREY = 0x00, ch2.RECRUITS[0]['person'], ch2.RECRUITS[1]['person']
@@ -136,7 +139,7 @@ def lists(msg, lines=None):
 
 
 def _code(origin):
-    """M 8·X 16 으로 부른다(05:D5BC). A·X·Y·D·P 를 지키고, 고른 메시지를 띄운 뒤 원래처럼 10프레임 기다린다.
+    """받침(STUB_AT)이 대화 창을 연 뒤 JSL 로 부른다. A·X·Y·D·P 를 지키고 고른 메시지를 띄운다(기다림은 05:D5BF).
     자료(maps 와 줄)는 long,X 로 읽어 DB 를 바꾸지 않는다."""
     T = origin & 0xFF0000
     a = _Asm(origin)
@@ -176,7 +179,7 @@ def _code(origin):
     lt(0xBF, 4).b(0xA8, 0xFA, 0xFA, 0xFA, 0x98).rel(0x80, 'show')
     a.label('none').b(0xC2, 0x30, 0xFA, 0xFA, 0xFA)
     a.label('nobody').b(0xC2, 0x30, 0xA9, NOBODY & 0xFF, NOBODY >> 8)
-    a.label('show').b(0x22, *MESSAGE_AT.to_bytes(3, 'little')).b(*WAIT_BRK)
+    a.label('show').b(0x22, *MESSAGE_AT.to_bytes(3, 'little'))
     a.b(0xC2, 0x30, 0x2B, 0x7A, 0xFA, 0x68, 0x28, 0x6B)
 
     # next: X 를 다음 줄로(X += 길이)
@@ -255,7 +258,10 @@ def native(ctx):
 
 
 def hooks(ctx):
-    return [(HOOK_AT, HOOK_ORIG, bytes((0x22, *ctx.at['talk'].to_bytes(3, 'little'), 0xEA, 0xEA)))]
+    stub = bytes((0x00, 0x95, 0x00, 0x22, *ctx.at['talk'].to_bytes(3, 'little'), 0x60))
+    assert len(stub) == STUB_LEN
+    return [(STUB_AT, bytes(STUB_LEN), stub),
+            (HOOK_AT, HOOK_ORIG, bytes((0x20, STUB_AT & 0xFF, STUB_AT >> 8 & 0xFF, 0xEA, 0xEA, 0xEA)))]
 
 
 def table(data, at):
