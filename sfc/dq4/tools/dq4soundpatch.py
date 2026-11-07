@@ -550,15 +550,91 @@ VEHICLE_SONG = CODE + 0x800
 VEHICLE_SONG_SITE = 0x01C213
 
 
-def vehicle_song_code():
+def vehicle_song_code(pick=None):
     """01:C213 의 JSL 24:FE91(1A) / LDA $194B / JSL 24:FE9A(01) 대신 불린다(8비트 A). 지금 곡($1D8B)이 맵 곡($194B)이면
-    둘 다 건너뛰어 울리던 곡을 잇고, 다르면 원래대로 보낸다."""
+    둘 다 건너뛰어 울리던 곡을 잇고, 다르면 원래대로 보낸다. pick 은 곡 고르기 루틴(song_pick_code)의 자리로, 주면 맵 곡을
+    그것으로 고른 곡과 견준다(고른 곡이 울리는 동안 지금 곡은 $194B 와 늘 다르다)."""
     h = bytes.fromhex
+    if pick is None:
+        same = h('48 AD 8B 1D CD 4B 19')                       # PHA / LDA $1D8B / CMP $194B
+    else:
+        same = h('48 AD 4B 19 22') + pick.to_bytes(3, 'little') + h('CD 8B 1D')  # PHA / LDA $194B / JSL 고르기 / CMP $1D8B
     return _asm([
-        h('48 AD 8B 1D CD 4B 19'), ('b', 0xF0, 'same'),       # PHA / LDA $1D8B / CMP $194B
+        same, ('b', 0xF0, 'same'),
         h('68 22 91 FE 24 AD 4B 19 22 9A FE 24 6B'),          # PLA / JSL 1A / LDA $194B / JSL 01 / RTL
         ('label', 'same'), h('68 6B'),                         # PLA / RTL
     ])
+
+
+# 곡 고르기: 맵 곡 바이트 하나(23:FD6A 맵 머리 +5)로는 밤 곡(NDS 맵 정보 표의 밤 곡)도, 장마다 다른 필드 곡(FC 19:$8116)도
+# 낼 수 없다. 곡을 정하는 길목에서 「곡 a 를 조건이 맞으면 곡 b 로」 표를 앞에서부터 보고 처음 맞는 줄로 바꾼다.
+# 맵 곡 루틴의 같은 곡 판정(00:CEAB 의 CMP $1D8B)과, 곡 번호를 인자로 받는 명령 입구 넷에서 부른다.
+# 맵 곡 루틴의 LDA $194B / AND #$7F(00:CE9A) 는 바꾸지 않는다: 이벤트 곡(CE75 BMI)·융단(CE86 BRA)이 그 가운데 CE9D 로 뛴다.
+# 입구에서도 고르는 까닭: 팡파르·레벨 업 뒤 $194B 를 24:FE9A 로 다시 트는 자리가 있고, 맵 곡을 줄이는 04·멈추는 02·
+# 키우는 03 은 인자가 지금 곡일 때만 움직여서, 고르지 않은 곡을 주면 고른 곡이 그대로 울린다. 02·03·04 는 인자가 이미
+# 지금 곡이면 고르지 않는다(낮 곡이 울리는 동안 밤이 되어도 그 곡을 줄이고 멈출 수 있게).
+SONG_PICK = CODE + 0x1200
+SONG_PICK_END = CODE + 0x1400
+SONG_PICK_SITE = 0x00CEAB              # CMP $001D8B(같은 곡 판정, 8비트 A). 뒤 BEQ 가 RTL 뒤의 플래그를 그대로 쓴다
+SONG_PICK_ORIGINAL = bytes.fromhex('CF 8B 1D 00')
+SONG_ARG_ENTRIES = {0x24FE9A: 0x01, 0x24FEA3: 0x03, 0x24FEBE: 0x02, 0x24FEC7: 0x04}
+SONG_QUEUE = 0x24FF83
+NIGHT_TEST = 0x218000                  # $075E >= 00F0 이면 C = 1(필드 팔레트 01:843D 도 이것으로 밤을 고름), A·P 를 지킴
+NIGHT_TEST_ORIGINAL = bytes.fromhex('08 C2 20 48 AF 5E 07 00 C9 F0 00 68 B0 03 28 18 6B 28 38 6B')
+
+
+def parse_song_pick(text):
+    """'01=30@night' 또는 '02=05@7E2208&10' → (곡 a, 곡 b, ('night',) | ('flag', 주소, 마스크))."""
+    pair, _, cond = text.partition('@')
+    a, b = (int(v, 16) for v in pair.split('='))
+    if cond == 'night':
+        how = ('night',)
+    else:
+        addr, mask = cond.split('&')
+        how = ('flag', int(addr, 16), int(mask, 16))
+        if how[1] >> 16 != 0x7E or not 0 < how[2] <= 0xFF:
+            raise ValueError(f'{text}: flag must be a 7E:xxxx byte and a nonzero mask')
+    if not (0 < a < SONG_LIMIT and 0 < b < SONG_LIMIT) or a == b:
+        raise ValueError(f'{text}: songs must be two different song numbers')
+    return a, b, how
+
+
+def song_pick_code(picks, base=SONG_PICK):
+    """(코드, 고르기 루틴 자리, 같은 곡 판정 받침 자리, {입구: 받침 자리}). 고르기 루틴은 JSL 로 부르고 8비트 A 의 곡을 바꾼다.
+    A 의 높은 바이트·X·Y·P 는 지킨다. flag 는 긴 주소로 읽어 DB 와 상관없다. 고른 곡이 다른 줄의 곡 a 이면 부르는 곳
+    (맵 곡 루틴과 입구)마다 두 번 고르게 되어 결과가 갈리므로 거부한다."""
+    if not picks:
+        raise ValueError('song picks need at least one row')
+    froms = {a for a, _, _ in picks}
+    if any(b in froms for _, b, _ in picks):
+        raise ValueError('a picked song must not be picked again')
+    h = bytes.fromhex
+    items = [h('08 E2 20')]                                           # PHP / SEP #$20
+    for i, (a, b, how) in enumerate(picks):
+        items += [h(f'C9 {a:02X}'), ('b', 0xD0, f'next{i}')]          # CMP #a / BNE
+        if how[0] == 'night':
+            items += [h('22') + NIGHT_TEST.to_bytes(3, 'little'), ('b', 0x90, f'next{i}')]  # JSL 밤 판정 / BCC
+        else:
+            _, addr, mask = how
+            items += [h('48 AF') + addr.to_bytes(3, 'little') + h(f'29 {mask:02X}'), ('b', 0xF0, f'fail{i}'),
+                      h('68')]                                         # PHA / LDA long / AND / BEQ / PLA
+        items += [h(f'A9 {b:02X}'), ('b', 0x80, 'done')]               # LDA #b / BRA
+        if how[0] == 'flag':
+            items += [('label', f'fail{i}'), h('68'), ('b', 0x80, f'next{i}')]
+        items.append(('label', f'next{i}'))
+    items += [('label', 'done'), h('28 6B')]                          # PLP / RTL
+    code = bytearray(_asm(items))
+    map_stub = base + len(code)
+    code += h('22') + base.to_bytes(3, 'little') + h('CF 8B 1D 7E 6B')  # JSL 고르기 / CMP $7E1D8B / RTL
+    stubs = {}
+    for site, command in SONG_ARG_ENTRIES.items():
+        stubs[site] = base + len(code)
+        keep = b'' if command == 0x01 else h('CF 8B 1D 7E F0 04')    # 지금 곡이면 JSL 고르기를 건너뜀
+        code += (h('08 E2 20') + keep + h('22') + base.to_bytes(3, 'little') + h(f'48 A9 {command:02X} 5C')
+                 + SONG_QUEUE.to_bytes(3, 'little'))                  # 원래 입구와 같은 스택으로 24:FF83
+    if base + len(code) > SONG_PICK_END:
+        raise ValueError('song pick code overflows its area')
+    return bytes(code), base, map_stub, stubs
 
 
 
@@ -1045,7 +1121,7 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
             resident=None, set_records=None, fast_receive=False, chains=None, chain_late=(), hold=False, early_song=False, load_pump=False,
             vehicle_song=False, keep_samples=False, release_failed=False, unpin=(), resident_waves=None, weapon_sounds=None,
             effect_calls=None, release_pending=False, tick_scan=False, effect_remaps=None,
-            item_sound=None, inn_jingle=False, song_calls=None, wait_guard=False):
+            item_sound=None, inn_jingle=False, song_calls=None, wait_guard=False, song_picks=None):
     """pinned 는 늘 두는 시퀀스 목록에 남길 바꾸는 곡(나머지 바꾸는 곡은 목록에서 뺌). resident 는 새 늘 두는 샘플 목록
     전체(주지 않으면 그대로). set_records 는 바꾸지 않는 곡의 곡 묶음 레코드 {곡: (k, 샘플…)}.
     fast_receive 는 SPC 자료 받기를 묶음 여러 개 이어 받게 바꾼다(fast_receive_code). chains 는 {곡: 본체 시퀀스} 로,
@@ -1069,6 +1145,7 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
     wait_guard 는 24:FF0F 가 되풀이하는 곡을 기다리지 않게 한다(wait_guard_code, 표는 마지막 롬 시퀀스로 셈).
     release_pending 은 곡 뒤 샘플이 오기 전에 끝난 곡의 샘플을 SPC 기다림 목록에서 지운다(pending_release_code).
     tick_scan 은 곡 자리 틱마다 트랙을 차례 수만큼 다시 훑던 고리를 한 번 훑기로 바꾼다(tick_scan_code).
+    song_picks 는 [(곡 a, 곡 b, 조건)] 으로, 맵 곡 루틴과 곡 인자 명령 입구에서 조건이 맞으면 a 를 b 로 바꾼다(song_pick_code).
     """
     if len(base) not in (0x180000, 0x200000, 0x400000):
         raise ValueError('base must be a headerless 1.5MB, 2MB or 4MB DQ5 build')
@@ -1350,8 +1427,19 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
         write(WEAPON_SEQ_TABLE, seq_table, empty=True)
         write(WEAPON_BRANCH_TABLE, branch_table, empty=True)
         write(WEAPON_SOUND_SITE, bytes([0x5C]) + WEAPON_SOUND.to_bytes(3, 'little') + bytes([0xEA]), WEAPON_SOUND_ORIGINAL)
+    pick = None
+    if song_picks:
+        if data[lorom(NIGHT_TEST):lorom(NIGHT_TEST) + len(NIGHT_TEST_ORIGINAL)] != NIGHT_TEST_ORIGINAL:
+            raise ValueError(f'{NIGHT_TEST:06X}: not the night test')
+        code, pick, map_stub, stubs = song_pick_code(song_picks)
+        write(SONG_PICK, code, empty=True)
+        write(SONG_PICK_SITE, bytes([0x22]) + map_stub.to_bytes(3, 'little'), SONG_PICK_ORIGINAL)
+        for site, command in SONG_ARG_ENTRIES.items():
+            if data[lorom(site) + 4:lorom(site) + 9] != bytes.fromhex(f'A9 {command:02X} 4C 83 FF'):
+                raise ValueError(f'{site:06X}: not the sound command {command:02X} entry')
+            write(site, bytes([0x5C]) + stubs[site].to_bytes(3, 'little'), bytes.fromhex('08 E2 20 48'))
     if vehicle_song:
-        write(VEHICLE_SONG, vehicle_song_code(), empty=True)
+        write(VEHICLE_SONG, vehicle_song_code(pick), empty=True)
         write(VEHICLE_SONG_SITE, bytes([0x22]) + VEHICLE_SONG.to_bytes(3, 'little') + bytes([0xEA] * 7),
               bytes.fromhex('22 91 FE 24 AD 4B 19 22 9A FE 24'))
     if map_fades:
@@ -1385,6 +1473,8 @@ def install(base, replacements, *, sample_resources=None, map_fades=False, previ
                     'effect_calls': {f'{a:06X}': f'{o:02X} -> {n:02X}' for a, (o, n) in sorted((effect_calls or {}).items())},
                     'song_calls': {f'{a:06X}': f'{o:02X} -> {n:02X}' for a, (o, n) in sorted((song_calls or {}).items())},
                     'wait_guard': bool(wait_guard),
+                    'song_picks': [f'{a:02X}={b:02X}@' + ('night' if how[0] == 'night' else f'{how[1]:06X}&{how[2]:02X}')
+                                   for a, b, how in (song_picks or ())],
                     'pinned_sequences': [f'{x:02X}' for x in pinned_sequences(result)],
                     'resident_samples': [f'{x:02X}' for x in resident_samples(result)],
                     'map_fades': map_fades, 'preview': preview, 'fast_receive': fast_receive, 'hold': hold, 'early_song': early_song, 'load_pump': load_pump,
