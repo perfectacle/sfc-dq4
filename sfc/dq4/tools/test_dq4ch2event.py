@@ -87,6 +87,60 @@ class NativeTest(unittest.TestCase):
         self.assertEqual(e[4:12], bytes((0x90, g, n, *ev.START_CELL, 0x01, 0x80, 0xFF)))
 
 
+class TransferTest(unittest.TestCase):
+    """1장 → 2장 넘김이 FC 장 초기화(15:$B39C)처럼 맡긴 물건과 맡긴 금화를 비운다."""
+
+    def body(self):
+        _, at = ev.native()
+        return ev._transfer(at['record'], at['name'], at['event'])
+
+    def test_clears_whole_bank_and_nothing_after_it(self):
+        # DQ5 맡긴 물건은 번호 00~DF 를 훑고(21:A6DA·A6E0·A6E6), 2332 부터는 전투 글자 사본이 쓰는 맡긴 동료 칸
+        self.assertEqual(ev.BANK_ITEMS_AT, 0x7E2250)
+        self.assertEqual(ev.BANK_ITEMS_AT + ev.BANK_ITEMS, 0x7E2250 + 0xDF + 1)
+        self.assertLessEqual(ev.BANK_ITEMS_AT + ev.BANK_ITEMS, 0x7E2332)
+
+    def test_clear_runs_with_16_bit_a(self):
+        code = self.body()
+        items = bytes.fromhex('A9 0000 8F 5022 7E') + bytes.fromhex('A2 5022 A0 5122 A9 DE00 54 7E 7E')
+        gold = bytes.fromhex('A9 0000 8F 3A20 7E')
+        for want in (items, gold):
+            at = code.find(want)
+            self.assertGreater(at, 0, want.hex())
+            before = code[:at]
+            self.assertIn(bytes.fromhex('C230'), before)
+            self.assertNotIn(bytes.fromhex('E220'), before[before.rfind(bytes.fromhex('C230')):])
+
+    def test_clear_leaves_the_bank_empty(self):
+        wram = bytearray(range(256)) * 0x200
+        code = self.body()
+        at = code.find(bytes.fromhex('A9 0000 8F'))
+        a = 0
+        i = at
+        # 넘김 코드의 이 줄들만 흉내 낸다: LDA #imm16, STA long(16비트), LDX/LDY/LDA #imm16, MVN
+        while i < at + 26:
+            op = code[i]
+            if op == 0xA9:
+                a = int.from_bytes(code[i + 1:i + 3], 'little'); i += 3
+            elif op == 0x8F:
+                o = int.from_bytes(code[i + 1:i + 3], 'little'); wram[o:o + 2] = a.to_bytes(2, 'little'); i += 4
+            elif op == 0xA2:
+                x = int.from_bytes(code[i + 1:i + 3], 'little'); i += 3
+            elif op == 0xA0:
+                y = int.from_bytes(code[i + 1:i + 3], 'little'); i += 3
+            elif op == 0x54:
+                for k in range(a + 1):
+                    wram[y + k] = wram[x + k]
+                i += 3
+            else:
+                self.fail(f'{op:02X}')
+        self.assertEqual(bytes(wram[0x2250:0x2330]), bytes(0xE0))
+        self.assertEqual(bytes(wram[0x203A:0x203C]), bytes(2))
+        self.assertEqual(wram[0x2330], 0x30)
+        self.assertEqual(wram[0x2039], 0x39)
+        self.assertEqual(wram[0x203C], 0x3C)
+
+
 class ListTest(unittest.TestCase):
     def test_only_the_king_becomes_the_opening_npc(self):
         king = {"from": {"list": "05:8857", "index": 6}, "time": "day",

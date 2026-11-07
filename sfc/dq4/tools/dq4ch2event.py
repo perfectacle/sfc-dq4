@@ -88,6 +88,11 @@ HERO_PICTURE_ORIG = bytes.fromhex('000b4000d003a92e60000b202ed003a93a60a92d60')
 PARTY_AT = 0x7E2040            # 일행 기록 0(42바이트)
 NAME_AT = 0x7E2001             # 주인공 이름 8바이트(음절마다 2바이트, 01 로 끝남)
 GOLD_AT = 0x7E2019
+# FC 장 초기화(15:$B39C)는 가방 $61DB~ 와 맡긴 돈 $625B 를 비운다. FC 는 맡긴 물건도 가방에 넣으므로 이 롬에서 그 자리는
+# DQ5 맡긴 물건(7E:2250 + 물건 번호, 개수 한 바이트, 번호 00~DF)과 맡긴 금화(7E:203A, 16비트)다
+BANK_ITEMS_AT = 0x7E2250
+BANK_ITEMS = 0xE0
+BANK_GOLD_AT = 0x7E203A
 # 1장 주인공(라이안) 기록과 이름 입력값을 맡겨 두는 곳: 사람 동료 칸(7E:294A, 32바이트 × 5)의 칸 2~4. 이 해킹은 칸을
 # 쓰는 장면(ルイーダ·결혼식·석상)이 없다. 칸 첫 바이트 bit7 이 찬 칸 표시라 칸마다 +1 부터 둔다(기록은 31 + 11 바이트로 나눔)
 SLOT_SIZE = 0x20
@@ -164,14 +169,17 @@ def _flag_or(flag):
 
 
 def _transfer(record_at, name_at, event_at):
-    """1장 끝에서 부른다: 라이안 기록·이름을 맡기고, 일행을 아리나 하나로, 금화 100, 아침으로 두고, 2장 깃발을 켠 뒤
-    3D/01 로 옮기는 이벤트를 건다."""
+    """1장 끝에서 부른다: 라이안 기록·이름을 맡기고, 일행을 아리나 하나로, 맡긴 물건·금화를 비우고, 금화 100, 아침으로
+    두고, 2장 깃발을 켠 뒤 3D/01 로 옮기는 이벤트를 건다."""
     import dq4prologue
     body = bytearray(bytes((0xC2, 0x30)))
     head = SLOT_SIZE - 1
     body += (_mvn(PARTY_AT, RYAN_RECORD_AT[0], head) + _mvn(PARTY_AT + head, RYAN_RECORD_AT[1], 42 - head) +
              _mvn(NAME_AT, RYAN_NAME_AT, 8))
     body += _mvn(record_at, PARTY_AT, 42) + _mvn(name_at, NAME_AT, 8)
+    # 첫 두 칸을 0 으로 두고 한 칸 뒤로 베껴 나가면 MVN 이 0 을 끝까지 민다
+    body += bytes((0xA9, 0x00, 0x00, 0x8F)) + _al(BANK_ITEMS_AT) + _mvn(BANK_ITEMS_AT, BANK_ITEMS_AT + 1, BANK_ITEMS - 1)
+    body += bytes((0xA9, 0x00, 0x00, 0x8F)) + _al(BANK_GOLD_AT)
     body += bytes((0xA9, *MORNING.to_bytes(2, 'little'), 0x8F)) + _al(TIME_AT)
     body += bytes((0xA9, *(GOLD & 0xFFFF).to_bytes(2, 'little'), 0x8F)) + _al(GOLD_AT)
     body += bytes((0xE2, 0x20, 0xA9, GOLD >> 16, 0x8F)) + _al(GOLD_AT + 2)

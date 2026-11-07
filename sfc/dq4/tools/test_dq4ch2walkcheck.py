@@ -44,6 +44,21 @@ class SegmentTableTests(unittest.TestCase):
         self.assertEqual((name, opt['map']), ('opening', ch2.THRONE))
         self.assertIn('OPENING', opt['off'])
 
+    def test_head_deposits_in_chapter1_and_opening_expects_it_cleared(self):
+        chain = wc.SEGMENTS[:cw.KING_INDEX] + cw.SEGMENTS[:cw.HEAD]
+        sets, _ = wc.setup(chain, cw.KING_INDEX, cw.FLAGS, cw.head_effects())
+        for part in cw.CH1_BANK.split(';'):
+            self.assertIn(part, sets.split(';'))
+        # 1장 검사의 효과(そらとぶくつ 등)도 그대로 남는다
+        for v in wc.EFFECTS.values():
+            for part in v.get('set', '').split(';'):
+                self.assertIn(part, sets.split(';'))
+        opt = cw.SEGMENTS[cw.HEAD - 1][3]
+        self.assertIn('BANK_HERB', opt['off'])
+        self.assertIn('BANK_GOLD', opt['off'])
+        self.assertEqual(cw.FLAGS['BANK_HERB'], (ch2.BANK_ITEMS_AT + 0xA1, 0xFF))
+        self.assertEqual(opt['items'], [ch2.SILK_ROBE])
+
     def test_units_split_at_warps_after_the_head(self):
         groups = cw.units()
         self.assertEqual([i for u in groups for i in u], list(range(cw.HEAD, len(cw.SEGMENTS))))
