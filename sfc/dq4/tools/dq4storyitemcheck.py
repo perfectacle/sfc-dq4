@@ -33,8 +33,10 @@ USE = TOOLS / "lua" / "dq4itemuse.lua"
 PLACE = ("3D/00", 30, 40)
 NOTHING, KEY_USE = 0x118BE4, 0x118E43
 HANDLER = {**{item: NOTHING for item in dq4itemport.EVENT_ITEMS}, dq4itemport.THIEF_KEY: KEY_USE}
-# Command window → どうぐ (right of つよさ), the only item, つかう.
-INPUT = "wait:30,a:6,wait:60,down:6,wait:25,right:6,wait:25,a:6,wait:90,a:6,wait:60,a:6,wait:200,a:6,wait:150"
+# Command window → どうぐ (right of つよさ), the only item, つかう. The field reads the pad once every 8 frames, so one
+# press of fixed length opens the command window only for some frame phases of the warp's arrival (a phase shift left
+# the window shut and every handler at 0). "open" pulses A until the window number changes.
+INPUT = "wait:30,open:240,wait:60,down:6,wait:25,right:6,wait:25,a:6,wait:90,a:6,wait:60,a:6,wait:200,a:6,wait:150"
 
 
 def items_set(item):
