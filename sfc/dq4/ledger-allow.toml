@@ -158,6 +158,12 @@ why = "필드 팻말 표(1E:F4BF, 5항목과 FFFF 끝)를 FC 필드 팻말로(dq
 
 [[original]]
 stage = "chapter1"
+at = "23:95E0~23:9629"
+data = true
+why = "몬스터 표(23:8000, 25바이트씩)의 E0·E1(2장 텐페 보스, dq4ch2tempe.MONSTERS)과 E2(1장 보스, dq4ch1event.BOSS_MONSTERS) 칸을 FC 능력치로(dq5tables). 세 칸이 붙어 한 덩어리로 잡힘"
+
+[[original]]
+stage = "chapter1"
 at = "23:96F3~23:9E40"
 why = "조우 구역 표(23:96F3) 안 레코드를 FC 구역으로(dq5progresswrite zones, dq4fieldencounter)"
 

@@ -132,7 +132,9 @@ class FcRomTest(unittest.TestCase):
         doc = {m['id']: m for m in tempe.monster_doc(self.prg)}
         self.assertEqual(set(doc), {f'{tempe.CHAMELEON:02X}', f'{tempe.STATUE:02X}'})
         cham = doc[f'{tempe.CHAMELEON:02X}']
-        self.assertIn('27', [cham[f'행동{k}'] for k in range(1, 7)])
+        self.assertIn('5B', [cham[f'행동{k}'] for k in range(1, 7)])
+        # 몬스터 ホイミ 는 DQ5 몬스터 표의 5B(ホイミスライム). 일행 주문 번호 27 을 쓰는 몬스터는 DQ5 에 없다
+        self.assertNotIn('27', [cham[f'행동{k}'] for k in range(1, 7)])
         self.assertEqual({doc[f'{tempe.STATUE:02X}'][f'행동{k}'] for k in range(1, 7)}, {'73'})
 
     def test_altar_cell_is_on_the_altar_and_the_old_one_in_the_trees(self):
@@ -154,6 +156,15 @@ class FcRomTest(unittest.TestCase):
 
 @unittest.skipUnless((ROOT / 'rom' / 'dq5.sfc').is_file(), 'local source ROM not present')
 class WalkPatchTest(unittest.TestCase):
+    def test_mapped_fc_actions_are_monster_actions_in_dq5(self):
+        # 몬스터 행동 표에 옮긴 값은 DQ5 몬스터가 실제로 쓰는 행동이어야 한다(일행 주문 번호 27 을 넣으면 전투가 멈췄다)
+        import dq4ch1event
+        import dq4ch1walkcheck as wc
+        data = (ROOT / 'rom' / 'dq5.sfc').read_bytes()
+        used = {f'{b:02X}' for n in range(236) for b in data[wc.MONSTERS + n * 25 + 17:wc.MONSTERS + n * 25 + 23]}
+        for k, v in {**dq4ch1event.FC_ACTIONS, **tempe.FC_ACTIONS}.items():
+            self.assertIn(v, used, f'FC 행동 {k:02X}')
+
     def test_battle_patch_targets_the_module_monsters(self):
         import dq4ch1walkcheck as wc
         import dq4ch2walkcheck as cw

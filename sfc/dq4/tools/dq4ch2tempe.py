@@ -30,8 +30,9 @@ FC_CHAMELEON, FC_STATUE = 0x12, 0x18           # FC カメレオンマン·あ�
 BATTLES = ({"group": GROUP, "members": ((CHAMELEON, 1), (STATUE, 2))},)
 MONSTERS = {CHAMELEON: FC_CHAMELEON, STATUE: FC_STATUE}
 MONSTER_NAMES = {CHAMELEON: '카멜레온 맨', STATUE: '날뛰는 석상'}
-# 1장 보스의 표(dq4ch1event.FC_ACTIONS)에 없는 FC 행동 번호: 22 는 ホイミ(FC 주문 29), 35 는 공격의 하나(FC 46)
-FC_ACTIONS = {0x22: '27', 0x35: '73'}
+# 1장 보스의 표(dq4ch1event.FC_ACTIONS)에 없는 FC 행동 번호: 22 는 ホイミ(FC 주문 29), 35 는 공격의 하나(FC 46).
+# 몬스터 행동의 ホイミ 는 5B(DQ5 ホイミスライム 의 행동). 27 은 일행 주문 번호라 몬스터가 쓰면 회복 메시지 뒤 멈췄다
+FC_ACTIONS = {0x22: '5B', 0x35: '73'}
 
 # 앞 절반이 바구니 이벤트 끝에 두는 옮기기(ch2.ALTAR_CELL). 그 자리를 이 모듈의 이벤트로 뛰는 C3 으로 덮는다
 _TG, _TN = (int(v, 16) for v in ch2.TEMPE.split('/'))
