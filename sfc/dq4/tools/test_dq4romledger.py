@@ -269,6 +269,19 @@ class InvariantTest(unittest.TestCase):
         self.assertEqual(len(bad), 2)
         self.assertIn('0 바이트', bad[0])
         self.assertIn('롬 밖', bad[1])
+        # 그림 타일처럼 data = true 로 밝힌 자료 자리는 22·5C 로 시작해도 훅으로 보지 않는다
+        spot = f'at = "{L.cpu(0x200)}~{L.cpu(0x203)}"\ndata = true\nwhy = "x"'
+        allow = C.load_allow(f'[[original]]\nstage = "a"\n{spot}', ['a'])
+        summary, bad = C.inv_hooks(data, dq5, stages, allow)
+        self.assertEqual(summary, '훅 2개')
+        self.assertEqual(len(bad), 1)
+        self.assertIn('롬 밖', bad[0])
+        other = C.load_allow(f'[[original]]\nstage = "b"\n{spot}', ['a', 'b'])
+        self.assertEqual(C.inv_hooks(data, dq5, stages, other)[0], '훅 3개')   # 다른 단계의 자료 자리는 안 됨
+        with self.assertRaises(C.AllowError):
+            C.load_allow(f'[[original]]\nstage = "a"\n{spot.replace("true", "1")}', ['a'])
+        with self.assertRaises(C.AllowError):
+            C.load_allow(f'[[cross]]\nstage = "a"\n{spot}', ['a'])
 
     def test_shops(self):
         data = bytearray(0x38000)

@@ -76,8 +76,11 @@ DEGRADE = (
 
 class Person:
     def __init__(self, pictures, group, sheet, role, anim='legs', main=False, palette=None, new_set=None, spare=None,
-                 allow=None, outline=False, flag=None, leader=False):
+                 allow=None, outline=False, flag=None, leader=False, seen=None):
         self.pictures, self.group, self.sheet, self.role = pictures, group, sheet, role
+        # seen: 사건이 놓는 인물처럼 롬의 인물 목록에 없는 그림이 나올 맵 그룹들. 그 그룹의 줄 색에만 넣는다
+        # (목록에서 찾지 못한 그림은 모든 그룹으로 세어 다른 그룹의 색을 흐린다)
+        self.seen = frozenset(seen) if seen is not None else None
         self.anim, self.main, self.palette, self.new_set, self.spare = anim, main, palette, new_set, spare
         # flag = (7E:2190 바이트, 마스크): 그 깃발이 켜져 있을 때만 전용 팔레트 줄을 이 인물의 색으로 덮는다
         self.outline, self.flag = outline, flag
@@ -85,6 +88,26 @@ class Person:
         self.leader = leader
         # 타일이 모자랄 때 낮춰도 되는 단계(이름). 주요 인물은 기본으로 낮추지 않고 큰 세트로 옮긴다
         self.allow = allow if allow is not None else (() if main else tuple(n for n, _ in DEGRADE))
+
+
+# 2장 사건이 놓는 인물(이름, 그림 번호, NDS 시트, 나오는 맵 그룹, 걸음). 그림 번호는 DQ4 인물 목록·PEOPLE·엔진이 쓰지 않고
+# 말 걸기에서 건너뛰지 않는(05:862F) 그림이라, 그 그림의 세트를 그 자리에서 바꾸고 훅 줄을 두지 않는다. 사건 모듈은
+# 이 번호를 인물 목록 엔트리의 그림으로 쓴다. 시트는 같은 장면의 NDS 오브젝트 모습 번호와 화자 이름(대회 상대는 그
+# 오브젝트가 부르는 전투 번호)으로 골랐다
+EVENT_PEOPLE = (
+    ('검은 망토', 0x16, 'h041', 0x3D, 'legs'),      # 프레놀 mdout 黒マント男
+    ('무희 메이', 0x77, 'h026', 0x3D, 'legs'),      # 프레놀 mdout 踊り子（にせアリーナ）
+    ('가짜 크리프트', 0x02, 'h023', 0x3D, 'legs'),  # 프레놀 여관 mdy1f2 神官男（にせクリフト）
+    ('카멜레온 맨', 0x10, 'h155', 0x3D, 'frames'),  # 텐페 제단 mcout2 전투 9E 의 가운데
+    ('날뛰는 석상', 0x31, 'h178', 0x3D, 'frames'),  # 같은 장면의 양옆 둘
+    ('엘프', 0x37, 'h043', 0x45, 'legs'),           # 서쪽 탑 tbf5 エルフ
+    ('미스터 한', 0x60, 'h032', 0x40, 'legs'),      # 엔돌 투기장 cccf2 전투 9F (FC 특수 전투 07)
+    ('라고스', 0x89, 'h019', 0x40, 'legs'),         # 전투 A0 (FC 08)
+    ('비비안', 0x1C, 'h085', 0x40, 'legs'),         # 전투 A1 (FC 09)
+    ('사이몬', 0x1D, 'h191', 0x40, 'legs'),         # 전투 A2 (FC 0A)
+    ('베로린맨', 0x34, 'h187', 0x40, 'frames'),     # 전투 A3 (FC 0B)
+)
+EVENT_PICTURES = {role: pic for role, pic, *_ in EVENT_PEOPLE}
 
 
 # NDS 시트는 같은 맵의 NDS 스크립트 오브젝트 모습 번호(+04)와 그 대사의 화자 이름으로 골랐다
@@ -139,6 +162,8 @@ PEOPLE = (
     Person((0x45,), None, 'h071', '호빗'),
     Person((0x1A,), None, 'h009', '초록 모자 상인', spare=0x70),
     Person((0x26,), None, 'h048', '말', anim='frames', spare=0x5E),
+    *(Person((pic,), None, sheet, role, anim=anim, spare=pic, seen=(group,))
+      for role, pic, sheet, group, anim in EVENT_PEOPLE),
 )
 SHARED_LINES = (0, 1, 2, 4)
 HOOK_SITES = ('1F:CF45', '03:D202')
@@ -496,7 +521,8 @@ def hook_entries(rom):
         if p.flag is not None and p.leader:
             out += [(g, None, p.flag, target(p, rom)[0]) for g in LEADER_PICTURES]
     for p in sorted(PEOPLE, key=lambda p: p.group is None):
-        if p.new_set is not None or p.spare is not None:
+        # 그림 번호가 곧 빌린 그림이면 원래 표가 이미 바꾼 세트를 가리킨다
+        if (p.new_set is not None or p.spare is not None) and p.pictures != (p.spare,):
             out += [(g, p.group, None, target(p, rom)[0]) for g in p.pictures]
     return out
 
@@ -598,6 +624,9 @@ def where(people, used):
     목록에서 찾지 못한 그림(이벤트로만 바꾸는 그림 등)은 모든 그룹으로 본다."""
     out = {}
     for p in people:
+        if p.seen is not None:
+            out[p] = set(p.seen)
+            continue
         if p.group is not None:
             # 빌린 그림 번호는 훅을 거치지 않고 바꿔 쓴 세트를 그대로 싣는다(다른 그룹에서 그 시트를 쓰려는 인물)
             out[p] = {p.group} | (used.get(p.spare, set()) if p.spare is not None else set())
@@ -764,7 +793,8 @@ def build(base, dq5, assets, out, work):
 
 def report(rows):
     for p, s, layout, limit, n, steps, line, _ in rows:
-        where = f'그룹 {p.group:02X}' if p.group is not None else '어디나'
+        where = (f'그룹 {p.group:02X}' if p.group is not None else
+                 '사건 ' + ','.join(f'{g:02X}' for g in sorted(p.seen)) if p.seen is not None else '어디나')
         pics = ','.join(f'{g:02X}' for g in p.pictures)
         print(f'{p.role:8s} 그림 {pics:5s} {where:6s} {p.sheet} 세트 {s:02X} {layout:7s} 타일 {n:2d}/{limit:2d}'
               f' 팔레트 {line} {" · ".join(steps)}')

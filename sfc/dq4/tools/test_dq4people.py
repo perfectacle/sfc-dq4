@@ -474,7 +474,8 @@ class HookEntryTests(unittest.TestCase):
         loose = [e for e in entries[2:] if e[1] is None]
         self.assertIn((0x50, P.PROLOGUE, None, 0x40 + frog), grouped)
         self.assertEqual(entries[2:], grouped + loose)
-        wanted = sum(len(p.pictures) for p in P.PEOPLE if p.new_set is not None or p.spare is not None)
+        wanted = sum(len(p.pictures) for p in P.PEOPLE
+                     if (p.new_set is not None or p.spare is not None) and p.pictures != (p.spare,))
         self.assertEqual(len(entries), 2 + wanted)
 
     def test_hook_patch_refuses_a_site_that_is_not_the_table_read(self):
@@ -826,3 +827,32 @@ class BuildFlowTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class EventPeopleTests(unittest.TestCase):
+    # 05:862F(말 걸 대상을 찾을 때 건너뛰는 그림)와 1E:DC67(말을 걸 수 없는 물체로 만드는 그림)
+    SKIPPED = {*range(0x46, 0x50), 0x63, *range(0x78, 0x82), 0x83, 0x84, 0x99, 0x12, 0x24, 0x35, 0x98,
+               *range(0xA2, 0x100)}
+
+    def test_event_pictures_are_their_own_spare_and_unique(self):
+        pictures = [pic for _, pic, *_ in P.EVENT_PEOPLE]
+        self.assertEqual(len(set(pictures)), len(pictures))
+        self.assertEqual(set(P.EVENT_PICTURES.values()), set(pictures))
+        events = [p for p in P.PEOPLE if p.seen is not None]
+        self.assertEqual(len(events), len(pictures))
+        for p in events:
+            self.assertEqual(p.pictures, (p.spare,), p.role)
+
+    def test_event_pictures_are_not_used_by_other_people_or_skipped_when_talking(self):
+        others = set()
+        for p in P.PEOPLE:
+            if p.seen is None:
+                others |= set(p.pictures) | ({p.spare} if p.spare is not None else set())
+        for role, pic, *_ in P.EVENT_PEOPLE:
+            self.assertNotIn(pic, others, role)
+            self.assertNotIn(pic, self.SKIPPED, role)
+
+    def test_where_takes_the_event_groups_only(self):
+        elf = P.Person((0x37,), None, 'x', 'elf', spare=0x37, seen=(0x45,))
+        self.assertEqual(P.where([elf], {})[elf], {0x45})
+        self.assertEqual(P.where([elf], {0x37: {0x36}})[elf], {0x45})
