@@ -272,6 +272,21 @@ class SpareSequenceTests(unittest.TestCase):
         out, resources = self.spare({0x40: {1: '104!'}}, waves={'104!': 0x21})
         self.assertEqual((out[0x40][1], resources), ([0x21], {}))
 
+    def test_prerendered_replaces_the_cache_file_instead_of_rewriting_it(self):
+        """cache_dir 은 동시 빌드끼리 같이 쓴다. 제자리에 다시 쓰면 다른 빌드가 쓰다 만 WAV 를 읽어 EOFError 로 죽었다.
+        다 쓴 새 파일로 바꿔 넣어야(inode 가 바뀜) 하고, 임시 파일이 남지 않아야 한다."""
+        with wave.open(str(self.root / 'nds/dq4/sound/sfx/104-test.wav'), 'wb') as w:
+            w.setnchannels(2)
+            w.setsampwidth(2)
+            w.setframerate(16000)
+            w.writeframes(np.full(2000, 4000, '<i2').tobytes())
+        out = sfx.prerendered(self.root, '104', self.root / 'cache')
+        before, inode = out.read_bytes(), out.stat().st_ino
+        again = sfx.prerendered(self.root, '104', self.root / 'cache')
+        self.assertEqual((again, again.read_bytes()), (out, before))
+        self.assertNotEqual(out.stat().st_ino, inode)
+        self.assertEqual([p.name for p in out.parent.iterdir()], ['104.wav'])
+
     def test_branch_must_select_a_script(self):
         with self.assertRaisesRegex(ValueError, 'branch 21'):
             self.spare({0x40: {0x21: '101'}})
