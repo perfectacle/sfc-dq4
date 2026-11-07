@@ -297,6 +297,10 @@ def _bed_tokens(ctx):
     return [bytes((0x90, g, n, *BED_CELL, 0x01, 0x80)) + bytes((0xC2,)) * 4, ('msg', bed), b'\xff']
 
 
+# dq4brkscan: native() 이름 가운데 이벤트 스크립트 자료
+DATA_ENTRIES = ('bed_event',)
+
+
 def native(ctx):
     out = bytearray()
     at = {}
