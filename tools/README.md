@@ -96,7 +96,7 @@ FC 원작 분석 도구는 [fc/dq4/tools/README.md](../fc/dq4/tools/README.md), 
 - 프로세스마다 `HEADLESS_SLOTS` 가 다르면, 지금 자리를 쥐었거나 기다리는 프로세스들의 값 중 가장 작은 값을 모두가 따릅니다. 그 값을 쓰는 프로세스가 다 끝나면 다시 자기 값을 씁니다.
 - 빈 자리가 없으면 `[headless_slots] <이름>: 자리 N개 모두 사용 중, 기다림` 을 찍고 기다리다가, 잡으면 `자리 i 잡음, X초 기다림` 을 찍습니다. 기다린 시간은 `subprocess` 의 시간 제한과 `guards.py --timeout` 에 듭니다(`dq4compatcheck.py` 의 묶음·코어 프로세스 시간 제한은 자리를 잡은 뒤부터 잽니다).
 - 자리를 잡는 곳은 MesenCE 를 띄우는 공통 러너와 `sfc/dq4/tools/dq4libretro.py` 의 `Core`(코어 하나당 하나)입니다. 공통 러너는 MesenCE 하나당 자리 하나를 잡습니다.
-  - dq4: `sfc/dq4/tools/dq4mesen.py` 의 `run`·`Runner`(롬을 실행마다 다른 이름으로 복사하고 배터리 기록을 지움. `Runner` 는 자리를 잡은 뒤 `timeout`(기본 900초)을 넘기면 끕니다)와 `testrunner`(받은 인자 그대로 `subprocess.run`). `fc/dq4/tools/dq4story.py` 도 `testrunner` 를 씁니다.
+  - dq4: `sfc/dq4/tools/dq4mesen.py` 의 `run`·`Runner`(롬을 실행마다 다른 이름으로 복사하고 배터리 기록을 지움. `Runner` 는 자리를 잡은 뒤 `timeout`(기본 900초)을 넘기면 끕니다)와 `testrunner`(받은 인자 그대로 `subprocess.run`). `fc/dq4/tools/dq4story.py` 도 `testrunner` 를 씁니다. MesenCE `--testrunner` 는 `--timeout=초` 가 없으면 벽시계 약 100초 뒤 기록 없이 종료 코드 255 로 끝나므로, 세 길 모두 Python `timeout`(없으면 900초)에 60초를 더한 `--timeout` 을 붙입니다(인자에 이미 있으면 그대로).
   - dq5: `sfc/dq5/tools/dq5mesen.py` 의 `testrunner`(`subprocess.run` 꼴)·`testrunner_popen`(`subprocess.Popen` 꼴, 프로세스가 끝나는 즉시 자리를 놓고 `timeout` 을 주면 넘길 때 끕니다).
   - `testrunner` 들은 `headless_slots.run`·`headless_slots.popen` 을 부릅니다. `timeout` 은 자리를 잡은 뒤부터 잽니다.
 - MesenCE 를 직접 띄우는 코드는 위 두 러너 파일에만 둡니다. 셸 스크립트는 `uv run --locked python sfc/dq4/tools/dq4mesen.py 인자…` 로 띄웁니다(`MESENCE` 의 실행 파일에 `--testrunner` 와 인자를 붙이고, 그 종료 코드로 끝납니다).

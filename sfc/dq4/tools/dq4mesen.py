@@ -6,6 +6,11 @@ MesenCE 는 배터리 기록을 세이브 폴더에 「롬 파일 이름.srm」 
 
 띄우기 전에 tools/headless_slots.py 의 자리를 하나 잡고, MesenCE 가 끝나면 놓는다(HEADLESS_SLOTS).
 
+MesenCE --testrunner 는 --timeout=초 를 주지 않으면 벽시계로 약 100초 뒤 아무 기록 없이 종료 코드 255 로 스스로
+끝난다. 부하가 높으면 평소 100초 안에 끝나는 장면도 이를 넘겨 운으로 실패하므로, 세 길 모두 MesenCE 에
+--timeout 을 붙여 끝을 Python 쪽 timeout(없으면 RUNNER_TIMEOUT)에 맡긴다(timeout_args). 인자에 --timeout= 이
+이미 있으면 그것을 따른다.
+
   run(mesence, rom, script, cwd=dest, env=env, stdout=log, timeout=600)
 
 롬을 복사하지 않고 받은 인자 그대로 띄우려면 testrunner 를 쓴다. 셸 스크립트는
@@ -13,6 +18,7 @@ MesenCE 는 배터리 기록을 세이브 폴더에 「롬 파일 이름.srm」 
 붙여 띄우고, 그 종료 코드로 끝난다). MesenCE --testrunner 를 subprocess 로
 부르는 코드는 이 파일과 sfc/dq5/tools/dq5mesen.py 에만 둔다(tools/tests/test_testrunner_callers.py 가 본다).
 """
+import math
 import os
 from pathlib import Path
 import shutil
@@ -25,8 +31,10 @@ sys.path.append(str(Path(__file__).resolve().parents[3] / 'tools'))
 import headless_slots  # noqa: E402
 
 ARGS = ('--Snes.DisableFrameSkipping=true',)
-# Runner 의 기본 시간 상한(초)
+# Runner 의 기본 시간 상한(초). timeout 없이 부른 run·testrunner 에서는 MesenCE 의 --timeout 이 된다
 RUNNER_TIMEOUT = 900
+# Python 쪽 timeout 이 먼저 끊어(Runner.timed_out·TimeoutExpired) 시간 초과로 알리게, MesenCE 의 제한은 이만큼 뒤에 둔다
+TIMEOUT_MARGIN = 60
 # DQ4_OPENBUS_LOG 가 있으면 띄우는 스크립트마다 lua/dq4openbus.lua 를 앞에 붙여 열린 버스·롬 거울 접근을 그 파일에 적는다
 # (dq4compatcheck.py scenes). 범위는 DQ4_OPENBUS_RANGES(dq4openbus.lua 의 OPENBUS_RANGES)
 OPENBUS = Path(__file__).resolve().parent / 'lua' / 'dq4openbus.lua'
@@ -41,6 +49,13 @@ def with_openbus(script, kwargs):
     env.update(PROBE_TARGET=str(script), OPENBUS_LOG=log,
                OPENBUS_RANGES=os.environ.get('DQ4_OPENBUS_RANGES', env.get('OPENBUS_RANGES', '')))
     return OPENBUS, {**kwargs, 'env': env}
+
+
+def timeout_args(args, timeout):
+    """MesenCE 에 덧붙일 --timeout 인자. args 에 이미 있으면 없음."""
+    if any(str(a).startswith('--timeout=') for a in args):
+        return []
+    return [f'--timeout={math.ceil(RUNNER_TIMEOUT if timeout is None else timeout) + TIMEOUT_MARGIN}']
 
 
 def save_dirs(mesence=None):
@@ -98,7 +113,8 @@ class Runner:
         self.slot = headless_slots.acquire(f'MesenCE {tag}')
         script, kwargs = with_openbus(script, kwargs)
         try:
-            self.proc = subprocess.Popen([str(mesence), '--testrunner', str(self.rom), str(script), *extra], **kwargs)
+            self.proc = subprocess.Popen([str(mesence), '--testrunner', str(self.rom), str(script), *extra,
+                                          *timeout_args(extra, timeout)], **kwargs)
         except BaseException:
             self.slot.release()
             raise
@@ -141,7 +157,8 @@ def run(mesence, rom, script, folder=None, tag='probe', extra=ARGS, **kwargs):
     clear_saves(copy, mesence)
     try:
         with headless_slots.slot(f'MesenCE {tag}'):
-            return subprocess.run([str(mesence), '--testrunner', str(copy), str(script), *extra], **kwargs)
+            return subprocess.run([str(mesence), '--testrunner', str(copy), str(script), *extra,
+                                   *timeout_args(extra, kwargs.get('timeout'))], **kwargs)
     finally:
         clear_saves(copy, mesence)
         copy.unlink(missing_ok=True)
@@ -150,7 +167,8 @@ def run(mesence, rom, script, folder=None, tag='probe', extra=ARGS, **kwargs):
 def testrunner(mesence, *args, tag=None, **kwargs):
     """[mesence, '--testrunner', *args] 를 자리를 쥔 채 subprocess.run 으로 띄운다. 롬은 복사하지 않는다."""
     name = f'MesenCE {tag or Path(sys.argv[0]).stem}'
-    return headless_slots.run([mesence, '--testrunner', *args], name, **kwargs)
+    return headless_slots.run([mesence, '--testrunner', *args, *timeout_args(args, kwargs.get('timeout'))], name,
+                              **kwargs)
 
 
 if __name__ == '__main__':
