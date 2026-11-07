@@ -233,7 +233,7 @@ FC 그룹 넷(サラン `13`, 사막의 바자 `0C`, 西の塔 `2E`, 남쪽 동�
 | `priest_side` → `priest`(`battle: win`, 주인공 HP 묶기) | `WON`, 앞 절반 flag 꺼짐, `3D/03` (24,7) |
 | `leave_altar` → `chief_won` | 제단에서 촌장 위 (24,67) 까지 걷고 아래로 말 걸기, `WON` 그대로 |
 
-heroblock 신부 사례 셋은 바구니 → 전투(이김) → 아침의 (24,7) 에 선 뒤 아래로 걸을 수 있는지 봅니다. 가게 장면 `tempe-item`(`dq4shopscene`)은 `WON` 을 켜고 이긴 뒤의 도구점에서 약초를 삽니다.
+곡 검사 `dq4mapsongcheck` 의 `tempe-basket` 은 바구니 뒤 제단의 보스 곡 `18` 을 봅니다. heroblock 신부 사례 셋은 바구니 → 전투(이김) → 아침의 (24,7) 에 선 뒤 아래로 걸을 수 있는지 봅니다. 가게 장면 `tempe-item`(`dq4shopscene`)은 `WON` 을 켜고 이긴 뒤의 도구점에서 약초를 삽니다.
 
 ### 남은 것(텐페 뒤 절반)
 
