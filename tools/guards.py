@@ -17,18 +17,23 @@
     [cache]
     key = "paths"                       # (골라 씀) 검사 결과 캐시 키에 넣을 추적 파일. "all"(기본) 또는 "paths"
 
+    [full]
+    paths = ["sfc/dq4/tools/dq4build.py", ...]   # (골라 씀) 바뀌면 이 트랙의 검사를 전체 모드로 고르는 파일
+
 PR 에서는 바뀐 파일이 그 검사의 paths 에 바로 맞을 때, 또는 guards.toml 에서 그 검사의 run·needs 가 바뀌었을 때(새 검사
 포함) 걸린다. 묶음으로만 맞는 검사와 tier = "release" 인 검사는 빠지고 배포 관문(tools/release_check.py)이 돌린다.
-PR 본문에 `가드: 전체` 줄이 있거나 --full 을 주면 묶음으로 맞는 것과 release 등급까지 모두 걸린다(빌드 순서·롬 배치·
-공용 훅·에뮬레이터 교체처럼 큰 변경).
+바뀐 파일이 트랙의 [full] paths 에 맞으면 그 트랙은 전체 모드라 그 트랙의 검사가 등급과 상관없이 모두 걸린다(CI 와
+로컬이 같은 판정). PR 본문의 `가드: 전체` 줄이나 --full 은 모든 트랙을 전체 모드로 넓히기만 하고 좁히지는 못한다.
 
 사용:
   python tools/guards.py                         목록 형식만 검사
   python tools/guards.py --base origin/main      바뀐 파일로 걸리는 검사와 명령을 찍음(PR 올리기 전)
   python tools/guards.py --base origin/main --run
                                                  걸린 검사를 포그라운드로 함께 돌리고 본문 결과 줄을 찍음
+  python tools/guards.py --base origin/main --run --only 이름,이름
+                                                 걸린 검사 대신 고른 검사만 돌림(guards.py 를 바꾼 PR 의 대표 셋)
   python tools/guards.py --base origin/main --run --full
-                                                 묶음으로 맞는 것·release 등급까지 돌림(본문에 `가드: 전체`)
+                                                 [full] 에 걸리지 않아도 전체 모드로 돌림(본문에 `가드: 전체`)
   python tools/guards.py --base SHA --pr-body FILE
                                                  걸린 검사마다 본문에 결과 줄이 있는지 봄(CI)
 
@@ -63,6 +68,7 @@ from pathlib import Path, PurePosixPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mesence_settings import settings_digest  # noqa: E402
+import headless_slots  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 NAME = re.compile(r'^[a-z0-9]+(?:-[a-z0-9]+)*$')
@@ -97,8 +103,16 @@ def load(files, read=lambda f: (ROOT / f).read_text(encoding='utf-8')):
             problems.append(f'{toml}: TOML 오류 {e}')
             continue
         for key in data:
-            if key not in ('check', 'groups', 'cache'):
+            if key not in ('check', 'groups', 'cache', 'full'):
                 problems.append(f'{toml}: 모르는 키 {key}')
+        full = data.get('full', {})
+        if not isinstance(full, dict) or set(full) - {'paths'} or not isinstance(full.get('paths', []), list):
+            problems.append(f'{toml}: [full] 는 paths = [glob, …] 만')
+            full = {}
+        full_paths = [p for p in full.get('paths', []) if isinstance(p, str)]
+        for pattern in full.get('paths', []):
+            if not isinstance(pattern, str) or not any(matches(f, pattern) for f in files):
+                problems.append(f'{toml} full.paths: {pattern!r} 에 맞는 추적 파일이 없음')
         cache = data.get('cache', {})
         if not isinstance(cache, dict) or set(cache) - {'key'} or cache.get('key', 'all') not in CACHE_KEYS:
             problems.append(f'{toml}: [cache] 는 key = {" 또는 ".join(map(repr, CACHE_KEYS))} 만')
@@ -157,6 +171,8 @@ def load(files, read=lambda f: (ROOT / f).read_text(encoding='utf-8')):
             claimed = sorted({p for c in mine for p in c['paths'] if not glob.has_magic(p)})
             for c in mine:
                 c['key_claimed'] = claimed
+        for c in mine:
+            c['full_paths'] = full_paths
         checks += mine
     seen = {}
     for c in checks:
@@ -646,6 +662,32 @@ def run_all(hit, parallel, timeout, no_cache=False):
     return 0 if all(s == 'passed' for _, s, _ in done) else 1
 
 
+def work_paths(run):
+    """명령에 나오는 work/… 경로(읽든 쓰든)."""
+    return set(re.findall(r'(?<![\w/])(?:\$PWD/)?(work/[^\s;&|]+)', run))
+
+
+def build_conflict(a, b):
+    """두 빌드 검사가 함께 돌면 안 되는가: 한쪽이 만드는 것(made_paths)을 다른 쪽 명령이 읽거나 쓰거나 만든다."""
+    def touches(x, y):
+        return any(under(t, m) or under(m, t) for m in made_paths(x['run']) for t in work_paths(y['run']))
+    return touches(a, b) or touches(b, a)
+
+
+def build_batches(builders):
+    """빌드 검사를 차례대로, 서로 부딪치지 않는 것끼리 묶는다. 앞 묶음이 다 끝나야 다음 묶음이 돈다. 부딪치는 검사는 이전 것이
+    든 묶음보다 뒤에 둬 명단 차례를 지킨다."""
+    batches = []
+    for c in builders:
+        after = max((i for i, b in enumerate(batches) if any(build_conflict(c, x) for x in b)), default=-1)
+        for b in batches[after + 1:]:
+            b.append(c)
+            break
+        else:
+            batches.append([c])
+    return batches
+
+
 def run_many(hit, parallel, timeout, no_cache=False, logs=None, env=None):
     """검사를 parallel 개씩 함께 돌린다. [(검사, 'passed'|'failed'|'skipped', 글)]."""
     logs = logs or ROOT / 'work' / 'guards'
@@ -659,11 +701,14 @@ def run_many(hit, parallel, timeout, no_cache=False, logs=None, env=None):
         status, detail = run_check(c, timeout, logs, no_cache, env)
         print(f'  {c["name"]}: {status} ({detail})', flush=True)
         return c, status, detail
-    # 롬을 스스로 빌드하는 검사는 다른 검사가 읽는 롬을 다시 쓸 수 있어 먼저 홀로 돌린다
+    # 롬을 스스로 빌드하는 검사는 다른 검사가 읽는 롬을 다시 쓸 수 있어 다른 검사보다 먼저 돌린다. 빌드 검사끼리는
+    # 서로 만드는 것을 건드리지 않는 것만 함께 돈다(build_batches)
     builders = [c for c in hit if builds(c['run'])]
     pool = concurrent.futures.ThreadPoolExecutor(max(1, parallel))
     try:
-        done = [one(c) for c in builders]
+        done = []
+        for batch in build_batches(builders):
+            done += [f.result() for f in [pool.submit(one, c) for c in batch]]
         futures = [pool.submit(one, c) for c in hit if c not in builders]
         done += [f.result() for f in futures]
     except BaseException:
@@ -676,16 +721,31 @@ def run_many(hit, parallel, timeout, no_cache=False, logs=None, env=None):
     return done
 
 
+def full_files(checks, changed):
+    """바뀐 파일 가운데 어느 트랙의 [full] paths 에 맞는 것."""
+    pats = {p for c in checks for p in c.get('full_paths', ())}
+    return [f for f in changed if any(matches(f, p) for p in pats)]
+
+
 def triggered(checks, changed, edited=(), full=False):
-    """바뀐 파일이 paths 에 맞거나 이름이 edited 에 든 검사. full 이 아니면(PR) 묶음은 빼고 검사 자신의 paths 만 보고,
-    tier = "release" 인 검사도 뺀다. full 이면 묶음까지 보고 등급을 가리지 않는다."""
+    """걸린 검사. 전체 모드인 검사는 모두 걸린다: full 이거나 바뀐 파일이 그 트랙의 [full] paths 에 맞을 때. 그 밖에는
+    바뀐 파일이 검사 자신의 paths(묶음 빼고)에 맞거나 이름이 edited 에 든 pr 등급 검사."""
+    def whole(c):
+        return full or any(matches(f, p) for f in changed for p in c.get('full_paths', ()))
+
     def hits(c):
-        pats = c.get('paths', []) if full else c.get('own_paths', c.get('paths', []))
-        return c['name'] in edited or any(matches(f, p) for f in changed for p in pats)
-    return [c for c in checks if (full or c.get('tier', 'pr') != 'release') and hits(c)]
+        pats = c.get('own_paths', c.get('paths', []))
+        return c.get('tier', 'pr') != 'release' and (
+            c['name'] in edited or any(matches(f, p) for f in changed for p in pats))
+    return [c for c in checks if whole(c) or hits(c)]
 
 
-# PR 본문에서 묶음·release 등급까지 모두 돌렸다고 밝히는 줄
+def pending(checks, changed, edited=()):
+    """PR 에서 걸리지 않았지만 배포 관문이 지킬 검사: 묶음까지 보면 바뀐 파일에 맞거나 이름이 edited 에 든 것."""
+    return [c for c in checks if c['name'] in edited or any(matches(f, p) for f in changed for p in c.get('paths', []))]
+
+
+# PR 본문에서 [full] 판정과 상관없이 전체 모드로 넓히는 줄
 FULL_LINE = re.compile(r'^[ \t]*가드[ \t]*:[ \t]*전체[ \t]*$', re.M)
 
 
@@ -735,17 +795,27 @@ def body_problems(checks, body):
     return problems
 
 
+def pick(checks, names):
+    """이름으로 고른 검사(--only). 모르는 이름은 문제로."""
+    want = [n for n in names.split(',') if n]
+    by = {c['name']: c for c in checks}
+    return [by[n] for n in want if n in by], [f'--only: 모르는 검사 {n}' for n in want if n not in by]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--base', help='이 커밋과 HEAD 사이에 바뀐 파일로 걸리는 검사를 고른다')
     ap.add_argument('--head', default='HEAD', help='바뀐 파일을 볼 끝 커밋(CI 는 PR 의 head SHA: 머지 커밋이면 그 뒤 main 변경까지 걸림)')
     ap.add_argument('--pr-body', type=Path, help='PR 본문 파일. 걸린 검사의 결과 줄을 확인한다')
     ap.add_argument('--run', action='store_true', help='걸린 검사를 돌린다(--base 와 함께)')
-    ap.add_argument('--parallel', type=int, default=2, help='--run 에서 함께 돌릴 검사 수(검사마다 안에서 다시 병렬)')
+    ap.add_argument('--parallel', type=int, default=None,
+                    help='--run 에서 함께 돌릴 검사 수(기본 HEADLESS_SLOTS 의 자리 수. 검사마다 안에서 다시 병렬)')
     ap.add_argument('--timeout', type=int, default=1800, help='--run 에서 검사 하나의 시간 제한(초)')
     ap.add_argument('--no-cache', action='store_true', help='--run 에서 검사 캐시·장면 캐시를 모두 끄고 전부 돌린다(배포 관문)')
     ap.add_argument('--full', action='store_true',
-                    help='묶음으로 맞는 검사와 release 등급까지 고른다(PR 본문의 `가드: 전체` 와 같음)')
+                    help='[full] 에 걸리지 않아도 전체 모드로 고른다(PR 본문의 `가드: 전체` 와 같음)')
+    ap.add_argument('--only', metavar='이름,…',
+                    help='--run 에서 걸린 검사 대신 이 검사들만 돌린다(tools/guards.py 를 바꾼 PR 의 대표 가드 셋)')
     args = ap.parse_args()
     files = tracked()
     checks, problems = load(files)
@@ -755,8 +825,11 @@ def main():
         body = args.pr_body.read_text(encoding='utf-8') if args.pr_body else ''
         full = args.full or bool(FULL_LINE.search(body))
         hit = triggered(checks, changed, edited, full)
+        auto = full_files(checks, changed)
+        if auto:
+            print(f'전체 모드: {", ".join(auto)}')
         if full:
-            print('전체 모드: 묶음으로 맞는 검사와 release 등급까지 고름')
+            print('전체 모드: ' + ('--full' if args.full else '본문의 `가드: 전체`'))
         if hit:
             print('이 변경이 건드리는 실행 검사(돌리고 PR 본문에 결과 줄):')
             for c in hit:
@@ -769,18 +842,23 @@ def main():
                 print(f'    본문 줄: - [x] {c["name"]}: 통과 …')
         else:
             print('걸리는 실행 검사 없음')
-        later = [c for c in triggered(checks, changed, edited, full=True) if c not in hit]
+        later = [c for c in pending(checks, changed, edited) if c not in hit]
         if later:
-            print('배포 관문에서(이 PR 에서는 돌리지 않음. 큰 변경이면 본문에 `가드: 전체` 를 쓰고 --full 로 돌릴 것):')
+            print('배포 관문에서(이 PR 에서는 돌리지 않음. 더 넓게 돌리려면 본문에 `가드: 전체` 를 쓰고 --full 로):')
             for c in later:
                 why = 'release 등급' if c.get('tier', 'pr') == 'release' else '묶음으로만 맞음'
                 print(f'- {c["name"]} ({why})')
         if args.pr_body:
             problems += body_problems(hit, body)
+        if args.only:
+            hit, bad = pick(checks, args.only)
+            problems += bad
+            print('--only 로 돌릴 검사: ' + ', '.join(c['name'] for c in hit))
         if args.run and hit and not problems:
-            return run_all(hit, args.parallel, args.timeout, args.no_cache)
-    elif args.pr_body or args.run:
-        ap.error('--pr-body·--run 은 --base 와 함께')
+            parallel = args.parallel or headless_slots.limit() or os.cpu_count() or 2
+            return run_all(hit, parallel, args.timeout, args.no_cache)
+    elif args.pr_body or args.run or args.only:
+        ap.error('--pr-body·--run·--only 는 --base 와 함께')
     for p in problems:
         print(f'오류: {p}')
     print(f'가드 {len(checks)}개, 문제 {len(problems)}개')

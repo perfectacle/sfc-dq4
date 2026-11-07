@@ -5,6 +5,34 @@
 [cache]
 key = "paths"
 
+# 바뀌면 거의 모든 장면이 달라지거나 검사 결과를 믿을 근거가 흔들리는 파일. 여기 맞는 파일을 바꾼 PR 은 전체 모드라
+# 이 파일의 검사가 모두 돈다. 자주 바뀌는 파일(dq4chapter1.py, NMI 훅이 든 dq4windowname.asm)은
+# 넣지 않는다: 넣으면 PR 마다 전체가 되고, 그 파일들은 검사 paths 가 바로 잡는다
+[full]
+paths = [
+  # 빌드 단계의 차례와 단계 캐시
+  "sfc/dq4/tools/dq4build.py",
+  "sfc/dq4/tools/dq4buildcache.py",
+  # 모든 맵 들어가기가 지나는 훅
+  "sfc/dq4/tools/dq4entrancehook.py",
+  # 에뮬레이터를 띄우는 길과 코어, 그 설정
+  "sfc/dq4/tools/dq4mesen.py",
+  "sfc/dq4/tools/dq4libretro.py",
+  "sfc/dq4/tools/dq4cores.py",
+  "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
+  "tools/mesence_settings.py",
+  # 장면을 건너뛰는 읽은 롬 바이트 캐시
+  "sfc/dq4/tools/dq4readset.py",
+  "sfc/dq4/tools/lua/dq4readset.lua",
+  # 공용 걷기 드라이버와 세이브스테이트 만들기
+  "tools/lua/walk.lua",
+  "tools/lua/mkstate.lua",
+  # Python·의존성(툴킷 포함) 고정
+  "uv.lock",
+  "pyproject.toml",
+  ".python-version",
+]
+
 [[check]]
 name = "dq4-window-check"
 why = "창 글자 깨짐·비침(#911 가게 동료 창 2프레임 깨짐 shopflip, #916·#918·#922 가게 목록·동료 창·사기 확인 shopwho)과, 넘친 목록 이름이 창보다 늦게 올라와 목록 줄이 비는 프레임·「누가」 창이 닫히며 메시지 창에 이름이 비치는 프레임(--every 로 talk02-full·shopwho·partyitems 와 battle11·party21 구간을 매 프레임 잼)이 다시 생기지 않게"
