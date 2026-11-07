@@ -20,6 +20,7 @@ from w65816 import Cpu  # noqa: E402
 DQ4 = ROOT / 'rom' / 'dq4.nes'
 DQ5 = ROOT / 'rom' / 'dq5.sfc'
 SEEN_GROUP = 0x0F00            # 전투 흉내가 받은 무리를 적어 두는 WRAM 자리(시험용)
+SEEN_SONG = 0x0F01             # 곡 끝 기다리기 흉내가 받은 곡
 
 
 def context(message=0x1000, talk=0x0B00):
@@ -39,8 +40,12 @@ class Machine:
         start = slots.SLOTS['E4'].code[0]
         rom[lorom(start):lorom(start) + len(code)] = code
         rtl = b'\x6B'
-        for r in (en.BATTLE_SONG, en.BATTLE_PREP, en.BATTLE_PREP2, en.BATTLE_AFTER, dq4ch1event.PARTY_OBJECTS):
+        for r in (en.BATTLE_SONG, en.BATTLE_PREP, en.BATTLE_PREP2, en.BATTLE_AFTER, dq4ch1event.PARTY_OBJECTS,
+                  en.SONG_STOP, en.SONG_PLAY, en.SONG_FLUSH):
             rom[lorom(r)] = rtl[0]
+        # 곡 끝 기다리기: 기다린 곡을 적어 둔다
+        wait = bytes((0x8F, *SEEN_SONG.to_bytes(2, 'little'), 0x7E, 0x6B))
+        rom[lorom(en.SONG_WAIT):lorom(en.SONG_WAIT) + len(wait)] = wait
         # 전투: 받은 무리를 적고 결과를 A 로
         run = bytes((0x8F, *SEEN_GROUP.to_bytes(2, 'little'), 0x7E, 0xA9, battle_result, 0x6B))
         rom[lorom(en.BATTLE_RUN):lorom(en.BATTLE_RUN) + len(run)] = run
@@ -161,6 +166,7 @@ class PartyTest(unittest.TestCase):
             # LOST 는 지우고 CHAMPION 은 그대로, 위 니블에 순서 첫 둘
             self.assertEqual(m.flag(), en.IN[1] | en.CHAMPION[1] | (order[0] | order[1] << 2) << en.ORDER_SHIFT)
             m.call('champion')
+            self.assertEqual(m.ram[SEEN_SONG], en.CHAMPION_SONG)
             self.assertEqual(m.order(), (order, order), order)
             self.assertEqual(m.counts(), (3, 3, 3), order)
             self.assertEqual(m.flag(), en.CHAMPION[1], order)

@@ -82,8 +82,8 @@ OPPONENTS = (
 )
 GROUP0 = OPPONENTS[0][0]
 assert [g for g, *_ in OPPONENTS] == list(range(GROUP0, GROUP0 + ROUNDS))
-# 무리 플래그(dq4ch2battle.BOSS_FLAGS 와 같은 꼴). 투기장 곡은 곡 훅 세션이 이 값을 바꾼다
-BATTLE_FLAGS = dq4ch2battle.BOSS_FLAGS
+# 무리 플래그: 도망칠 수 없고 곡은 보통 전투 17(FC·NDS 모두 투기장 전투에 따로 곡을 주지 않음)
+BATTLE_FLAGS = dq4ch2battle.NO_FLEE
 BATTLES = tuple({"group": g, "members": ((m, 1),), "flags": BATTLE_FLAGS} for g, m, _, _ in OPPONENTS)
 MONSTERS = {m: fc for _, m, fc, _ in OPPONENTS}
 MONSTER_NAMES = {m: ko for _, m, _, ko in OPPONENTS}
@@ -248,9 +248,27 @@ def _herb():
     return a.bytes() + LEAVE
 
 
+# 우승을 알린 왕의 말(FC 0385) 뒤 곡. NDS 투기장 관중석 스크립트(cccf2)가 같은 자리에서 곡을 멈추고 ME 46
+# ファンファーレ大 를 튼 뒤 맵 곡으로 돌아온다. FC 는 곡이 없다. 끝나는 곡이어야 한다(dq4songwait.PORT_SONGS)
+CHAMPION_SONG = 0x29
+
+
+SONG_STOP, SONG_PLAY, SONG_FLUSH, SONG_WAIT = 0x24FE91, 0x24FE9A, 0x24FE44, 0x24FF0F
+
+
+def _fanfare(song):
+    """DQ5 25:FD00 처럼 1A·곡 틀기·대기열 비우기 뒤 24:FF0F 로 끝을 기다리고, 맵 곡($194B)을 24:FE9A 로 다시 튼다.
+    25:FD00 끝의 00:CE61 대신 24:FE9A 인 까닭은 dq4ch1event._fanfare. DB 는 ENTER 가 둔 00."""
+    jsl = lambda a: bytes((0x22,)) + _al(a)  # noqa: E731
+    return (bytes((0x08, 0xE2, 0x20)) + jsl(SONG_STOP) +                      # PHP / SEP #$20 / JSL 24:FE91(1A)
+            bytes((0xA9, song)) + jsl(SONG_PLAY) + jsl(SONG_FLUSH) +            # LDA #곡 / JSL 24:FE9A / JSL 24:FE44
+            bytes((0xA9, song)) + jsl(SONG_WAIT) +                              # LDA #곡 / JSL 24:FF0F
+            bytes((0xAD, 0x4B, 0x19, 0x29, 0x7F)) + jsl(SONG_PLAY) + b'\x28')   # LDA $194B / AND #$7F / JSL 24:FE9A / PLP
+
+
 def _champion():
-    """우승 뒤(인물 스크립트 37): 일행을 되돌린다."""
-    a = Asm()(ENTER)
+    """우승 뒤(인물 스크립트 37): 팡파르 뒤 일행을 되돌린다."""
+    a = Asm()(ENTER, _fanfare(CHAMPION_SONG))
     _restore(a)
     return a.bytes() + LEAVE
 

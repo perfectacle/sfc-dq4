@@ -71,7 +71,10 @@ class EventTest(unittest.TestCase):
         self.assertEqual(set(tempe.MONSTERS), set(slot.monsters))
         self.assertEqual(set(tempe.MONSTER_NAMES), set(tempe.MONSTERS))
         self.assertEqual(ev.battle_stubs(), {})
-        self.assertIn(battle.group_doc(0x31, ((tempe.CHAMELEON, 1), (tempe.STATUE, 2))), ev.encounter_groups())
+        # 곡 등급 1 立ちはだかる難敵(NDS 조우 레코드 158 의 곡 31)
+        self.assertIn(battle.group_doc(0x31, ((tempe.CHAMELEON, 1), (tempe.STATUE, 2)), battle.MIDBOSS_FLAGS),
+                      ev.encounter_groups())
+        self.assertEqual(battle.MIDBOSS_FLAGS & 3, 1)
 
     def test_names_reach_the_window_table(self):
         import dq4windowtext

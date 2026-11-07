@@ -212,7 +212,9 @@ class GameArgs(unittest.TestCase):
         songs, calls, words = args()
         waited = {calls.get(lda, song) for song, lda in W.DQ5_SITES.values()
                   if song is not None and song < 0x32} | set(W.PORT_SONGS)
-        self.assertIn(0x1E, waited)
+        # 1E 는 되풀이하는 コロシアム楽屋(엔돌 대기실 맵 곡). 원본이 1E 를 기다리던 교회 등 여덟 자리는 25 教会治療 로
+        self.assertNotIn(0x1E, waited)
+        self.assertIn(0x25, waited)
         for slot in sorted(waited):
             nds = songs.get(f'{slot:02X}')
             if nds is None:

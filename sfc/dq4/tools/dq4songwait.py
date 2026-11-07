@@ -60,7 +60,7 @@ DQ5_SITES = {
     0x25FF26: (0x1D, 0x25FF24), 0x25FF88: (0x1D, 0x25FF86), 0x2980F8: (0x1E, 0x2980F6),
 }
 # 포팅 코드가 기다리는 곡: 여관 징글(dq4soundpatch.INN_SONG), 레벨 업(dq4ch1event.LEVEL_SONG), 합류(JOIN_SONG)
-PORT_SONGS = {0x1D: '여관 징글', 0x21: '1장 필드 레벨 업', 0x26: '1장 합류 팡파르'}
+PORT_SONGS = {0x1D: '여관 징글', 0x21: '1장 필드 레벨 업', 0x26: '1장 합류 팡파르', 0x29: '2장 엔돌 우승 팡파르'}
 
 
 def offset(addr):

@@ -23,6 +23,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+import dq4ch2endor  # noqa: E402
 import dq4ch2event  # noqa: E402
 import dq4fieldport  # noqa: E402
 import dq4freshstate  # noqa: E402
@@ -39,7 +40,8 @@ WAIT = 300
 CASTLE, VILLAGE, FIELD, TOWER, CAVE = 0x01, 0x06, 0x02, 0x0A, 0x09
 NIGHT_CASTLE, NIGHT_VILLAGE, FIELD_CH2 = 0x30, 0x31, 0x05
 EVENT_SONG = 0x23                    # インテルメッツォ
-BOSS = 0x18                          # 보스 전투(무리 등급 2, dq4-sound-port-format)
+BATTLE, MIDBOSS = 0x17, 0x16         # 무리 등급 0·1 의 전투 곡(26:8F96, dq4ch2battle.NO_FLEE)
+ENDOR_CASINO, ENDOR_STAND, ENDOR_ROOM = 0x07, 0x22, 0x1E
 
 # 텐페: 대신 감 flag 를 켜고 들어가면 신부의 스크립트가 제단 flag 를 켜고 바구니 이벤트(서술 뒤 시각을 00F8 로 두고
 # 맵 이동)를 건다(dq4ch2event). A 를 눌러 서술을 넘기면 제단 위에서 곧 보스 전투(dq4ch2tempe)라 300프레임 뒤에는
@@ -48,7 +50,30 @@ TEMPE_GONE = "{:04X}|{:02X}".format(CHAPTER_FLAGS + dq4ch2event.TEMPE_GONE[0],
                                     dq4ch2event.CHAPTER2[1] | dq4ch2event.TEMPE_HEARD[1] | dq4ch2event.TEMPE_GONE[1])
 BASKET_TEST = ",".join(["a:8,wait:40"] * 16)
 
-# 장면 이름 → (TO 셀 또는 "field", SET, 밤인지, 기대한 곡[, 입력])
+# 엔돌 투기장: 대회 중(IN, 일행 하나)으로 링 아래 길 (28,27)에 내려 위로 링에 들면 링 인물이 이긴 수 번째 상대와
+# 싸운다(dq4ch2endor). 우승 장면은 다섯째와 싸우는 판(이긴 수 4)에서 그 몬스터를 약하게 덮고(dq4ch2walkcheck.battle_patch
+# weak) A 로 넘긴다. 이 입력에서 팡파르는 A 31~39번째 사이에 울기 시작해 55번째 뒤까지 울리고 75번째 앞에 끝나
+# 관중석 곡으로 돌아왔다(실측). 45번째 뒤는 팡파르 가운데, 80번째 뒤는 돌아온 뒤다
+ENDOR_RING = f"{dq4ch2endor.ARENA},28,26"
+
+
+def endor_in(stage):
+    joined = "{:04X}|{:02X}".format(CHAPTER_FLAGS + dq4ch2event.JOINED[0], dq4ch2event.JOINED[1])
+    counts = ";".join(f"{c & 0xFFFF:04X}=01" for c in dq4ch2endor.COUNTS)
+    return (f"{CH2};{joined};{dq4ch2endor.FLAG_AT & 0xFFFF:04X}={dq4ch2endor.IN[1]:02X};"
+            f"{dq4ch2endor.STAGE_AT & 0xFFFF:04X}={stage:02X};{counts}")
+
+
+ENDOR_FIGHT_TEST = "up:40,wait:30," + ",".join(["a:8,wait:40"] * 6)
+FANFARE_TAPS, AFTER_TAPS = 45, 80
+ENDOR_WEAK = "weak:{:02X}".format(dq4ch2endor.OPPONENTS[-1][1])
+
+
+def endor_final_test(taps):
+    return "up:40,wait:30," + ",".join(["a:8,wait:40"] * taps)
+
+
+# 장면 이름 → (TO 셀 또는 "field", SET, 밤인지, 기대한 곡[, 입력[, battle_patch 종류]])
 SCENES = {
     "castle-day": ("3D/00,28,49", CH2, False, CASTLE),
     "castle-night": ("3D/00,28,49", CH2, True, NIGHT_CASTLE),
@@ -58,12 +83,23 @@ SCENES = {
     "frenol-night": ("3D/04,44,5", CH2, True, NIGHT_VILLAGE),
     "saran-day": ("45/00,24,47", CH2, False, VILLAGE),
     "saran-night": ("45/00,24,47", CH2, True, NIGHT_VILLAGE),
-    "tempe-basket": ("3D/03,42,77", TEMPE_GONE, False, BOSS, BASKET_TEST),
+    "tempe-basket": ("3D/03,42,77", TEMPE_GONE, False, MIDBOSS, BASKET_TEST),
     # 이벤트 곡(7E:21DF bit7, 00:CE75 가 맵 곡 루틴 가운데 CE9D 로 뜀)은 맵 곡 대신 그 곡이고 고르지 않는다
     "event-song-night": ("3D/03,42,77", f"{CH2};21DF=A3", True, EVENT_SONG),
     "bazaar-day": ("45/05,62,23", CH2, False, VILLAGE),
     "tower-night": ("45/09,42,59", CH2, True, TOWER),
     "cave-night": ("45/0D,70,17", CH2, True, CAVE),
+    "endor-day": ("40/00,52,23", CH2, False, CASTLE),
+    "endor-night": ("40/00,52,23", CH2, True, NIGHT_CASTLE),
+    "endor-casino": ("40/01,20,20", CH2, False, ENDOR_CASINO),
+    "endor-stand": (ENDOR_RING, CH2, False, ENDOR_STAND),
+    "endor-stand-night": (ENDOR_RING, CH2, True, ENDOR_STAND),
+    "endor-room": (f"{dq4ch2endor.BEDROOM},{dq4ch2endor.BED_CELL[0]},{dq4ch2endor.BED_CELL[1]}", CH2, False, ENDOR_ROOM),
+    "endor-fight": (ENDOR_RING, endor_in(0), False, BATTLE, ENDOR_FIGHT_TEST),
+    "endor-fanfare": (ENDOR_RING, endor_in(dq4ch2endor.ROUNDS - 1), False, dq4ch2endor.CHAMPION_SONG,
+                      endor_final_test(FANFARE_TAPS), ENDOR_WEAK),
+    "endor-champion": (ENDOR_RING, endor_in(dq4ch2endor.ROUNDS - 1), False, ENDOR_STAND,
+                       endor_final_test(AFTER_TAPS), ENDOR_WEAK),
     "bataland-day": ("36/00,10,45", "", False, CASTLE),
     "bataland-night": ("36/00,10,45", "", True, NIGHT_CASTLE),
     "imuru-night": ("37/00,50,9", "", True, NIGHT_VILLAGE),
@@ -83,9 +119,14 @@ def field_start(prg):
 
 
 def run_scene(mesence, rom, state, out, name, start):
-    where, sets, night, want, *test = SCENES[name]
-    test = f"{test[0] + ',' if test else ''}wait:{WAIT}"
+    where, sets, night, want, *rest = SCENES[name]
+    test, battle = (rest + [None, None])[:2]
+    test = f"{test + ',' if test else ''}wait:{WAIT}"
     extra = {**({"SET": sets} if sets else {}), **({"POKE": NIGHT} if night else {})}
+    if battle:
+        import dq4ch2walkcheck
+        extra["ROMPATCH"] = dq4ch2walkcheck.battle_patch(rom.read_bytes(), battle)
+        extra["MAXF"] = 6000
     if where == "field":
         got = dq4groupcheck.field_scene(mesence, rom, state, out, name, *start, test, **extra)
     else:

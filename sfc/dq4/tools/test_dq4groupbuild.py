@@ -61,6 +61,15 @@ class SyntheticTablesTest(unittest.TestCase):
             self.assertEqual(build.map_attrs(Path("dq5.sfc"), link)["bytes"][:3], [0xFF] * 3)
             self.assertEqual(build.map_attrs(Path("dq5.sfc"), {"attrs": "21/02", "music": 0x0A})["bytes"],
                              [1, 2, 3, 4, 5, 0x0A])
+            per_map = {"attrs": "21/02", "music": 0x01, "map_music": {0x07: 0x22}}
+            self.assertEqual(build.map_attrs(Path("dq5.sfc"), per_map, fc_map=0x07)["bytes"][5], 0x22)
+            self.assertEqual(build.map_attrs(Path("dq5.sfc"), per_map, fc_map=0x00)["bytes"][5], 0x01)
+
+    def test_endor_arena_songs(self):
+        # エンドール: FC 그룹 04 는 성 곡, 카지노 04/01·관중석 04/07·투기장 건물 04/0E 만 FC 곡 04·1B·15 의 자리
+        endor, = build.LINKS[0x40]
+        self.assertEqual(endor["music"], 0x01)
+        self.assertEqual(endor["map_music"], {0x01: 0x07, 0x07: 0x22, 0x0E: 0x1E})
 
     def test_dungeon_zones_skip_maps_without_a_zone(self):
         dungeons = {part["fc"] for parts in build.LINKS.values() for part in parts if part.get("dungeon")}
@@ -639,7 +648,7 @@ class SyntheticBuildTest(unittest.TestCase):
         patches = [
             mock.patch.multiple(build, GROUPS=groups, _run=self.tools, all_maps=lambda prg: maps, _Pool=CountingPool,
                                 dungeon_zones=lambda prg: {},
-                                map_attrs=lambda dq5, part, zone: {"copy": part["attrs"], "fc": part["fc"]},
+                                map_attrs=lambda dq5, part, zone, fc_map: {"copy": part["attrs"], "fc": part["fc"]},
                                 new_map_records=lambda env: dict(self.records),
                                 exit_records=lambda prg, g: {f"{g:02X}/00": ["new"]},
                                 area_records=lambda prg, g: {f"{g:02X}/01": ["area"], f"{g:02X}/02": ["area2"]},
