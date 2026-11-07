@@ -278,7 +278,7 @@ def main():
     prg = ines.prg(args.dq4.read_bytes())
     state = dq4freshstate.resolve(args.state, mesence, rom_path, out / "start")
 
-    events = {}
+    events, gone = {}, set()
     if args.chapter1:
         import dq4ch1event
         import dq4npcport
@@ -287,6 +287,7 @@ def main():
         events = dq4ch1event.start_messages(first)
         import dq4ch2event
         events.update(dq4ch2event.start_messages(first + len(dq4ch1event.MESSAGES)))
+        gone = dq4ch2event.absent()
 
     jobs, later = [], []
     for m, persons in people.items():
@@ -309,7 +310,7 @@ def main():
             jobs.append(("table", f"table-{m.replace('/', '')}-{'night' if night else 'day'}", m,
                          f"{m},{','.join(map(str, cell(*start)))}", "wait:60", night, None))
         for i, p in enumerate(persons):
-            if p["interval"]:
+            if p["interval"] or (m, p["dq5"]["x"], p["dq5"]["y"], p["night"]) in gone:
                 continue
             # People of the other time are not there. A walking person's start cell is the last resort: the hero
             # warps onto it before that person walks off.

@@ -191,6 +191,28 @@ def chapter2_cases():
                      'walk': f'{at};{wc.talk(face, 14)};wait:600;{taps(10)};{taps(110, 40)};wait:600;{taps(6)};{close}',
                      'free': f'{mx},{my + 6}', 'battle': 'win', 'want': [('TEMPE_WON', tempe.WON)],
                      'not': [('TEMPE_ALTAR', ch2.TEMPE_ALTAR)], 'hero_at': tempe.MORNING_CELL, 'maxf': 12000}
+    out.update(frenol_cases())
+    return out
+
+
+# 프레놀(dq4ch2frenol). 여관 2층은 계단 앞 (1E,08)에서 방 줄로 올라간다(셀 60 줄은 Y 05 에서 쓰러진 가짜 크리프트가
+# 막아 58 줄로). 밤의 묘지 (03,0B)는 위(3 열)나 왼쪽 (02,0B)에서만 들어선다. -no 는 처음 요구에 아니요
+FRENOL_INN = '60,16;wait:60;a:8;wait:50;{close};60,14;58,14;58,12;wait:60;{taps};wait:400;{close}'
+FRENOL_GRAVE = [('frenol-grave-above', '6,23', ''), ('frenol-grave-left', '4,23;6,23', ''),
+                ('frenol-grave-no', '6,23', 'wait:300;down:8;wait:40;a:8;wait:120;')]
+
+
+def frenol_cases():
+    import dq4ch2frenol as fr
+    taps, close = wc.taps, pc.CLOSE
+    out = {'frenol-inn': {'warp': f'{fr.INN},60,17', 'set': '', 'walk': FRENOL_INN.format(close=close, taps=taps(6)),
+                          'want': [('FRENOL_KIDNAPPED', fr.KIDNAPPED)], 'free': '58,14', 'maxf': 3000}}
+    night = f'{wc.NIGHT_SET};{(wc.ITEMS & 0xFFFF) + 1:04X}={fr.BRACELET:02X}'
+    for name, at, first in FRENOL_GRAVE:
+        out[name] = {'warp': f'{fr.TOWN},4,19', 'set': ';'.join((ch2_flags(fr.KIDNAPPED, fr.LEFT), night)),
+                     'late': wc.NIGHT_SET, 'walk': f'{at};wait:120;{first}{taps(30, 50)};wait:300;{close}',
+                     'want': [('FRENOL_RESCUED', fr.RESCUED)], 'hero_at': fr.MORNING_CELL, 'maxf': 6000,
+                     'distinct': 8 if first else 7}
     return out
 
 
@@ -275,6 +297,9 @@ def run_case(mesence, rom, base, out, name, case, exit_at, seed=0):
     shown = [v.split('@')[0] for v in shown[1].split(',') if v] if shown else []
     if case.get('repeat') and (not shown or shown.count(shown[0]) < case['repeat']):
         problems.append(f"첫 메시지가 {case['repeat']}번 뜨지 않음: {shown}")
+    # 사건이 띄운 서로 다른 메시지 수(끝에 남은 A 가 부른 「그 쪽에는 아무도 없다」 129 는 빼고). 갈래를 탔는지 본다
+    if case.get('distinct') and len(set(shown) - {'129'}) != case['distinct']:
+        problems.append(f"메시지 {len(set(shown) - {'129'})}가지, 기대 {case['distinct']}: {shown}")
     if case.get('hero_at'):
         # 끝 걸음(free) 앞 마지막 누르기의 자리: 사건이 주인공을 옮겨 둔 셀
         pressed = re.findall(r'press \S+ at (\d+),(\d+)', text)
