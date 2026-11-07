@@ -140,13 +140,19 @@ def merchants(prg, fc_group, number, items=None):
 
 
 def event_merchants(prg, fc_group, number, items):
-    """{(x, y, night): FC list kind} of the sellers EVENT_LISTS brings to an FC map, only those of a shop list kind."""
+    """{(x, y, night): FC list kind} of the sellers EVENT_LISTS brings to an FC map: those of a shop list kind, and an
+    inn when the map has none at the start."""
     tag = EVENT_LISTS.get((fc_group, number))
     out = {}
     if tag is None:
         return out
-    for x, y, _, kind, cond, _ in dq4shop.merchants(prg, fc_group, number):
-        if tag not in cond or kind not in LIST_KIND or not has_goods(prg, kind, fc_group, number, items):
+    sellers = dq4shop.merchants(prg, fc_group, number)
+    # フレノール 은 처음 상태에 여관이 없다(주인이 공주가 묵는다며 거절). 사건 목록의 여관 주인이 그 맵 키의 여관 값을 쓴다
+    base_inn = any(kind == INN and not cond for _, _, _, kind, cond, _ in sellers)
+    for x, y, _, kind, cond, _ in sellers:
+        if tag not in cond or (kind == INN and base_inn):
+            continue
+        if kind != INN and (kind not in LIST_KIND or not has_goods(prg, kind, fc_group, number, items)):
             continue
         rest = [c for c in cond if c != tag]
         unknown = [c for c in rest if not any(c.startswith(k) for k in SELLER_CONDITIONS)]
@@ -224,7 +230,8 @@ def port(dq5_path, dq4_path, inn_at, key_at, with_people=True):
         for kind in sorted(set(found.values()) | event_kinds):
             # A kind only the event list sells joins the key; one a base seller sells already has its list (FC
             # sellers of one map share the map's list of a kind, dq4shop.lookup, as フレノール's item shop in both).
-            if kind not in found.values() and any(s["key"] == key and s["kind"] == LIST_KIND[kind] for s in shops):
+            if kind not in found.values() and kind in LIST_KIND and \
+                    any(s["key"] == key and s["kind"] == LIST_KIND[kind] for s in shops):
                 continue
             if kind in LIST_KIND:
                 if any(s["key"] == key and s["kind"] == LIST_KIND[kind] for s in shops):

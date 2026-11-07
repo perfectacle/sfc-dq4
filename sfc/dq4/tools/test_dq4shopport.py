@@ -217,10 +217,12 @@ class PortTest(unittest.TestCase):
     def test_inn_table_and_operands(self):
         table, bank, addr, _, shop_site, inn_site = self.writes[:6]
         data = bytes.fromhex(table["hex"].replace(" ", ""))
-        self.assertEqual(len(data), (shopport.INN_ENTRIES + 12) * 2)
-        self.assertEqual(data[-24:], bytes((0x60, 4, 0x61, 6, 0x62, 3, 0x65, 10, 0x66, 6, 0x67, 8, 0x68, 3, 0x6A, 6,
-                                            0x6B, 6, 0x6C, 2, 0x6E, 6, 0x6F, 3)))
-        self.assertEqual(self.report["inns"], {"36/00": 4, "37/00": 6, "3D/03": 3, "3F/01": 10, "40/00": 6, "40/0E": 8,
+        self.assertEqual(len(data), (shopport.INN_ENTRIES + 13) * 2)
+        # フレノール(키 63)은 처음 상태에 여관이 없고 사건 목록(목록 플래그 00&40)의 여관 주인만 있다
+        self.assertEqual(data[-26:], bytes((0x60, 4, 0x61, 6, 0x62, 3, 0x63, 4, 0x65, 10, 0x66, 6, 0x67, 8, 0x68, 3,
+                                            0x6A, 6, 0x6B, 6, 0x6C, 2, 0x6E, 6, 0x6F, 3)))
+        self.assertEqual(self.report["inns"], {"36/00": 4, "37/00": 6, "3D/03": 3, "3D/04": 4, "3F/01": 10, "40/00": 6,
+                                               "40/0E": 8,
                                                "41/00": 3, "43/00": 6,
                                                "45/00": 2, "45/05": 6, "45/0A": 6, "46/00": 3})
         self.assertEqual((shop_site["at"], inn_site["at"]), ("06:DC37", "06:F576"))
@@ -242,6 +244,7 @@ class Chapter2ShopTest(unittest.TestCase):
         # 텐페 괴물을 이긴 뒤의 도구점(FC (4,26), 낮)과 팔찌를 넘긴 뒤 프레놀 무기점((28,11), 낮)
         self.assertEqual(self.report["event_sellers"]["3D/03"], {"4,26,day": 2})
         self.assertEqual(self.report["event_sellers"]["3D/04"]["28,11,day"], 1)
+        self.assertEqual(self.report["event_sellers"]["3D/04"]["17,12,night"], shopport.INN)
         keys = {k: int(v, 16) for k, v in self.report["keys"].items()}
         tempe = [s for s in self.shops if s["key"] == keys["3D/03-03"] and s["kind"] == 0]
         frenor = [s for s in self.shops if s["key"] == keys["3D/04-05"] and s["kind"] == 2]

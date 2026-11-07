@@ -33,6 +33,7 @@ sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 import dq4ch1walkcheck as wc  # noqa: E402
 import dq4ch2event as ch2  # noqa: E402
 import dq4ch2tempe as tempe  # noqa: E402
+import dq4ch2frenol as frenol  # noqa: E402
 
 talk, taps = wc.talk, wc.taps
 CLOSE = wc.pc.CLOSE
@@ -55,6 +56,12 @@ FLAGS = {
     'TEMPE_GONE': flag(ch2.TEMPE_GONE),
     'TEMPE_ALTAR': flag(ch2.TEMPE_ALTAR),
     'TEMPE_WON': flag(tempe.WON),
+    'FRENOL_KIDNAPPED': flag(frenol.KIDNAPPED),
+    'FRENOL_LEFT': flag(frenol.LEFT),
+    'FRENOL_RESCUED': flag(frenol.RESCUED),
+    # 묘지 장면 동안만 켜는 flag 다섯(끝에 모두 꺼짐)
+    'FRENOL_SCENE': (0x7E2190 + frenol.IDX, frenol.SCENE_BITS),
+    'BRACELET_CHEST': (0x7E0000 | frenol.CHEST_OPEN[0], frenol.CHEST_OPEN[1]),
     # flag 가 아니라 바이트 전체(마스크 FF)를 본다: 1장에 맡긴 やくそう 개수와 맡긴 금화(1000G 단위) 아래 바이트
     'BANK_HERB': (ch2.BANK_ITEMS_AT + 0xA1, 0xFF),
     'BANK_GOLD': (ch2.BANK_GOLD_AT, 0xFF),
@@ -78,7 +85,11 @@ def join_set(data):
 def effects(data):
     """구간이 flag 말고 기록(7E:2000~2A9F)에 남기는 것(구간 이름 → SET(set)·dq5warp.lua PARTY(party)). 묶음 첫
     구간에 둔다. 롬의 기록 틀을 읽는 것이 있어 롬 바이트를 받는다."""
-    return {'join': {'set': join_set(data)}}
+    return {'join': {'set': join_set(data)}, 'chest': {'set': BRACELET_SET}}
+
+
+# 남쪽 동굴의 상자를 연 기록: 주인공(비단 로브 하나를 가짐)의 둘째 칸에 황금의 팔찌, 상자 열림 비트
+BRACELET_SET = f'{(wc.ITEMS & 0xFFFF) + 1:04X}={frenol.BRACELET:02X};{frenol.CHEST_OPEN[0]:04X}|{frenol.CHEST_OPEN[1]:02X}'
 
 # 같은 맵 안으로 순간이동하는 묶음이 먼저 들르는 곳(2장 출발 상태는 왕좌의 방 3D/01)
 HOPS = {ch2.THRONE: f'{ch2.CASTLE},28,45'}
@@ -126,6 +137,11 @@ def battle_patch(data, kind):
     return ';'.join(out)
 
 
+# 명령 창 → 「조사하기」(dq4chestcheck.SEARCH 를 walk.lua 꼴로)
+CHEST_SEARCH = ('a:8;wait:60;down:6;wait:25;down:6;wait:25;down:6;wait:25;right:6;wait:25;a:8;wait:200;'
+                'a:4;wait:150;a:4;wait:150;b:4;wait:220')
+
+
 # 2장 사건 구간. 순간이동(warp) 구간마다 새 묶음이고, 묶음 첫 구간에는 앞 구간들의 want·off·effects 가 놓인다.
 # 선택은 dq4ch1walkcheck.SEGMENTS 의 것에 더해 cell(끝에 주인공이 선 셀 (x, y))
 SEGMENTS += [
@@ -159,6 +175,24 @@ SEGMENTS += [
       'map': ch2.TEMPE, 'cell': tempe.MORNING_CELL}),
     ('leave_altar', 'walk', LEAVE_ALTAR, {'map': ch2.TEMPE, 'cell': tempe.CHIEF_TALK_CELL}),
     ('chief_won', 'walk', talk('down', 6), {'want': ['TEMPE_WON'], 'map': ch2.TEMPE}),
+    # 프레놀 가짜 공주(dq4ch2frenol): 여관 2층 방 아래 (1E,08)에서 위로 올라가면 비명 → 「멈춰라!」 → 셋이 계단으로
+    ('inn_side', 'warp', f'{frenol.INN},60,17', {'map': frenol.INN}),
+    ('kidnap', 'walk', '60,16;wait:60;' + taps(1) + ';' + CLOSE + ';60,14;58,14;58,12;wait:60;' + taps(6) + ';wait:400;' + CLOSE,
+     {'want': ['FRENOL_KIDNAPPED'], 'map': frenol.INN}),
+    # 마을에서는 셋이 서쪽 길로 빠져나간다. 서쪽 어귀 위 (05,06)에서 기다린다
+    ('kidnap_town_side', 'warp', f'{frenol.TOWN},10,13', {'map': frenol.TOWN}),
+    ('kidnap_town', 'walk', 'wait:1200', {'want': ['FRENOL_LEFT'], 'map': frenol.TOWN}),
+    # 납치 뒤에는 여관 주인이 「아이고, 아이고……」 뒤 여관을 연다(FC 대화 033 의 15:BF30). 카운터 아래 (11,0E)에서
+    ('inn_open_side', 'warp', f'{frenol.TOWN},34,28', {'map': frenol.TOWN}),
+    ('inn_open', 'walk', talk('up', 2), {'map': frenol.TOWN}),
+    # 남쪽 동굴: 상자 아래 칸에서 위를 보고 「조사하기」
+    ('cave_side', 'warp', f'{frenol.CAVE},20,71', {'map': frenol.CAVE}),
+    ('chest', 'walk', 'up:8;wait:30;' + CHEST_SEARCH + ';' + CLOSE,
+     {'want': ['BRACELET_CHEST'], 'items': [frenol.BRACELET], 'map': frenol.CAVE}),
+    # 밤의 묘지: 서쪽 어귀에서 내려와 (03,0B)에 서면 망토가 요구 → 예 → 메이 → 도적의 열쇠 → 아침의 같은 칸
+    ('grave_side', 'warp', f'{frenol.TOWN},6,19', {'map': frenol.TOWN, 'poke': wc.NIGHT}),
+    ('grave', 'walk', '6,23;wait:120;' + taps(30, 50) + ';wait:300;' + CLOSE,
+     {'want': ['FRENOL_RESCUED'], 'off': ['FRENOL_SCENE'], 'items': [frenol.THIEF_KEY], 'map': frenol.TOWN}),
 ]
 
 
