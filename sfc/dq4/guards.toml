@@ -309,6 +309,7 @@ name = "dq4-ch2-npc"
 why = "2장 그룹(3D·45) 인물을 2장 flag 를 켠 채 말 걸어 첫 메시지·가게 품목·인물 표를 본다. 순간이동은 TO 한 셀 아래에 내려, 위에서 말 거는 장면과 맨 아래 줄 인물 장면 23개가 「그 방향에는 아무도 없다」·필드로 나감으로 실패했었다"
 paths = [
   "sfc/dq4/tools/dq4npccheck.py",
+  "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4ch2*.py",
   "sfc/dq4/tools/dq4ch1event.py",
   "sfc/dq4/tools/dq4npcport.py",
@@ -353,6 +354,7 @@ paths = [
   "sfc/dq4/tools/dq4ch2*.py",
   "sfc/dq4/tools/dq4libretro.py",
   "sfc/dq4/tools/dq4cores.py",
+  "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
   "sfc/dq4/tools/dq4ch1walkcheck.py",
   "sfc/dq4/tools/dq4pins.py",
   "sfc/dq4/tools/dq4prologuecheck.py",
