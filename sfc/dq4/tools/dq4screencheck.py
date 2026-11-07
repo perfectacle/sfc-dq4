@@ -5,7 +5,7 @@ MesenCE(헤드리스, 화면은 emu.getScreenBuffer):
   title       전원을 켜고 TITLE_FRAME 프레임째의 타이틀
   start-room  1장 시작 방(서장 시작 상태 start.mss 에서 열린 명령 창을 닫은 뒤)
   status      같은 자리에서 명령 → 상태 → 상태 보기 창
-  shop-list   이무르 방어구점 카운터 앞(서장 끝 상태에서 순간이동)에서 사기 목록 창
+  shop-list   이무르 방어구점 카운터 앞(서장 끝 상태에서 순간이동, 마을 사람 걸음은 묶음)에서 사기 목록 창
 libretro(bsnes·snes9x, 화면은 코어가 넘긴 프레임. 코어 옵션은 dq4cores 가 고정한 커밋의 기본값):
   title       전원을 켜고 TITLE_FRAME 프레임째의 타이틀
 MesenCE 설정 확인(settings): dq4screens.VERIFY_ARGS 를 하나씩 더해 타이틀을 다시 찍어, 화면이 기준과 달라지는지 본다.
@@ -41,6 +41,10 @@ STATUS = CLOSE + ',a:8,wait:40,down:6,wait:20,a:8,wait:60,down:6,wait:15,down:6,
 # 카운터 앞에서 위를 보고 말을 걸어 방어구점 주인 말을 넘기고 「사기」 를 고른다
 SHOP = 'wait:30,up:6,wait:30,a:4,wait:30,a:4,wait:90,a:4,wait:60,a:4,wait:60,a:4,wait:80'
 SHOP_STATE = ('shop', '37/00,34,8', '05')
+# 출발 상태를 만드는 순간이동 동안 인물 슬롯의 걸음 간격(7E:3300 + 슬롯)을 0 으로 묶어, 이무르 마을 사람이 목록 첫
+# 자리에 선 채 남게 한다. 떠돌게 두면 입력·롬의 상관없는 변경(가게 주인 대화까지의 프레임, 옮긴 인물의 걸음 간격)마다
+# 다른 칸에 서서 기준을 세 번 고쳤다. 상태에 0 이 남으므로 장면 동안에도 걷지 않는다
+SHOP_HOLD = ';'.join(f'7E{0x3300 + slot:04X}=00' for slot in range(0x08, 0x20))
 # (장면, 출발 상태 이름(None 이면 전원), 입력, 찍을 프레임, 가림, 허용 칸 수)
 MESEN_SCENES = (
     ('title', None, '', TITLE_FRAME, (), 0),
@@ -64,7 +68,8 @@ def make_states(mesence, rom, out, need):
         if r['status'] != 'passed':
             raise SystemExit(f'서장 끝 상태를 만들지 못함: {r["problems"]}')
         name, to, party = SHOP_STATE
-        r = walk.segment(mesence, rom, base, out / 'states' / name, (name, 'warp', to, {'map': to[:5]}),
+        r = walk.segment(mesence, rom, base, out / 'states' / name,
+                         (name, 'warp', to, {'map': to[:5], 'poke': SHOP_HOLD}),
                          walk.NO_ENCOUNTERS, '', party, readset=True)
         if r['status'] != 'passed':
             raise SystemExit(f'출발 상태 {name}({to})를 만들지 못함: {r["problems"]}')

@@ -189,5 +189,13 @@ class CheckScriptTests(unittest.TestCase):
                     self.assertEqual(c.main(), 1)
 
 
+
+class ShopHoldTests(unittest.TestCase):
+    def test_shop_state_holds_every_person_slot(self):
+        """가게 출발 상태의 순간이동은 인물 슬롯 08~1F 의 걸음 간격을 모두 0 으로 묶는다(떠도는 마을 사람이 화면을 흔듦)."""
+        import dq4screencheck as c
+        held = dict(p.split('=') for p in c.SHOP_HOLD.split(';'))
+        self.assertEqual(held, {f'7E{0x3300 + s:04X}': '00' for s in range(0x08, 0x20)})
+
 if __name__ == '__main__':
     unittest.main()
