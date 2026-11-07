@@ -611,10 +611,11 @@ SCENES = {
                 'limit': 20000, 'finish_limit': 20000, 'chapter': 1},
     # 2장 일행 셋(롬의 합류 기록 그대로 1레벨)을 한 전투에 20 까지. 셋 다 FC 롬 실측(dq4growth.MEASURED)과 견준다.
     # 레벨업 글이 셋 몫이라 맵 곡이 돌아오기 전까지는 A 를 8 프레임마다 눌러 넘긴다(돌아온 뒤에도 빠르면 맵 명령 창을
-    # 넘겨 버려 끝을 못 봄)
+    # 넘겨 버려 끝을 못 봄). 한 번에 3만 4천 프레임 남짓이라 bsnes 로는 한 번에 130초쯤 걸려 프로세스 시간을 늘린다
     'party2': {'what': f'2장 일행 셋이 레벨 1 → {GROWTH_TO}(FC 실측과 견줌, 배운 주문 포함)', 'group': [(0x00, 1)],
                'monsters': {0x00: {'hp': 1, 'defense': 0, 'attack': 0}}, 'growth': (1, GROWTH_TO - 1), 'turn': 'attack3',
-               'limit': 45000, 'finish_limit': 45000, 'chapter': 1, 'party': 'ch2', 'mash': 8},
+               'limit': 45000, 'finish_limit': 45000, 'chapter': 1, 'party': 'ch2', 'mash': 8,
+               'seconds': 200},
     # 몬스터는 맞지 않는다(수비 255·공격 0). 주인공 HP 를 낮춰 두고 크리프트 ホイミ·브라이 ヒャド 를 명령한 뒤 도망
     'party2spell': {'what': '2장 일행: 크리프트 ホイミ·브라이 ヒャド(1레벨 합류 기록의 주문)', 'group': [(0x00, 1)],
                     'monsters': {0x00: {'hp': 2000, 'defense': 255, 'attack': 0}}, 'chapter': 1, 'party': 'ch2',
@@ -1166,7 +1167,7 @@ def main():
             proc = subprocess.Popen([sys.executable, __file__, '_unit', '--core', core, '--scene', scene, '--rom', str(rom),
                                      '--out', str(dest), '--seeds', str(seed), '--repeat', str(args.repeat)],
                                     stdout=log, stderr=subprocess.STDOUT)
-            done = cc.wait_child(proc, dest, 120 + 60 * args.repeat)
+            done = cc.wait_child(proc, dest, 120 + SCENES[scene].get('seconds', 60) * args.repeat)
         f = dest / 'unit.json'
         if done and f.exists():
             return json.loads(f.read_text())
