@@ -4,8 +4,8 @@
 FC 가 세워 두는 인물(블록이 걷지 않음, dq4npcblock.walk_interval = 0)은 레코드의 명령 간격이 1 이어도 서 있다. 옮긴
 인물이 그 간격을 그대로 DQ5 이동 간격으로 받으면 몇 프레임마다 한 칸씩 쉬지 않고 돌아다녔다. 그래서
 
-  서는 인물  FC 왕좌의 방(01/01) 낮 목록에서 걷지 않는 인물마다 DQ5 칸(dq4npcport.cell)에 그 인물이 있고, 이동
-             간격(7E:3300 위 니블)이 0 이고, FRAMES 동안 한 번도 칸이 바뀌지 않는다.
+  서는 인물  FC 왕좌의 방(01/01) 낮 목록에서 걷지 않는 인물마다 DQ5 칸(dq4npcport.cell)에 그 인물이 있고, FRAMES
+             동안 한 번도 칸이 바뀌지 않는다.
   걷는 인물  나머지 보이는 인물(슬롯 08~)의 이동 간격이 dq4npcport.WALK_FASTEST~WALK_SLOWEST 이고, 칸이 바뀐 수가
              MAX_MOVES 이하다(DQ5 마을 19/00(오라클베리)·18/00 의 간격 15 마을 사람은 1800프레임에 칸 7~27번).
 
@@ -80,8 +80,7 @@ def judge(text, standers):
             problems.append(f'FC 가 세워 두는 인물이 칸 {xy} 에 없음')
             continue
         standing.add(s)
-        if people[s][3] >> 4:
-            problems.append(f'슬롯 {s:02X} 칸 {xy}: 서 있을 인물의 이동 간격 {people[s][3] >> 4}')
+        # 간격은 보지 않는다: 사건 스크립트를 빌린 인물(왕 병의 왕좌의 방 병사)은 스크립트가 돌게 간격 1 로 선다
         if moves.get(s):
             problems.append(f'슬롯 {s:02X} 칸 {xy}: 서 있을 인물이 {len(moves[s])}번 움직임(처음 {moves[s][0]}프레임)')
     walkers = {}
