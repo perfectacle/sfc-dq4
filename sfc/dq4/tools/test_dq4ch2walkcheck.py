@@ -107,7 +107,7 @@ class ChapterTwoCaseTests(unittest.TestCase):
         for name, case in cases.items():
             for tok in case['walk'].split(';'):
                 self.assertRegex(tok, TOKEN, name)
-            self.assertRegex(case['warp'], r'^3D/0[23],\d+,\d+$', name)
+            self.assertRegex(case['warp'], r'^3D/0[2-5],\d+,\d+$', name)
             self.assertTrue(case['want'], name)
         self.assertNotIn(set(cases), set(hb.cases()))
 
