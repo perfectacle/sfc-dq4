@@ -297,6 +297,17 @@ def place_records(prg, g, k, flags=None):
     return records_at(prg, EVENT_LISTS[0], a)[0] if a is not None else npc_records(prg, g, k)
 
 
+def place_list(prg, g, k, flags=None):
+    """place_records 가 읽는 목록의 (뱅크, 첫 레코드 주소). 블록의 점프 대상이 뱅크 주소라 블록을 따라갈 때 쓴다."""
+    a = pick_list(prg, g, k, flags) if flags else None
+    if a is not None:
+        return EVENT_LISTS[0], a
+    a = rd(prg, NPC_BANK, 0x8000 + 2 * g) | rd(prg, NPC_BANK, 0x8001 + 2 * g) << 8
+    for _ in range(k):
+        a = records_at(prg, NPC_BANK, a)[1]
+    return NPC_BANK, a
+
+
 def ram_flags(ram):
     return lambda i: ram[FLAGS + i]
 

@@ -175,6 +175,8 @@ class FcPeopleTest(unittest.TestCase):
                    mock.patch.object(port.dq4talk, "sprite", lambda rec, night: 0x94),
                    mock.patch.object(port.dq4talk, "predict", lambda prg, talk, state: [talk, None]),
                    mock.patch.object(port.dq4npcblock, "hidden_on_entry", lambda rec, night: rec == self.HIDDEN),
+                   mock.patch.object(port, "fc_blocks", lambda prg, g, n, night, ram: [(5, 0x8000), (5, 0x8000)]),
+                   mock.patch.object(port.dq4npcblock, "walk_interval", lambda prg, bank, body, step: step),
                    mock.patch.object(port, "chapter", lambda group: 2))
         with contextlib.ExitStack() as stack:
             for patcher in patches:
@@ -259,7 +261,7 @@ class PortWithMocksTest(unittest.TestCase):
         night = [e for e in listing["entries"] if e["time"] == "night"]
         self.assertEqual([e["from"] for e in day], [port.WALK, port.STAND])
         self.assertEqual(day[0]["fields"], {"x": 6, "y": 9, "facing": "down", "talk": 0x900, "gfx": port.PICTURES[0x14],
-                                            "layer": 0, "interval": 2})
+                                            "layer": 0, "interval": port.WALK_FASTEST})
         self.assertEqual(day[1]["fields"]["talk"], 0x901)
         self.assertEqual(day[1]["fields"]["gfx"], port.PICTURES[0x11])
         self.assertEqual(len(night), 1)
@@ -351,7 +353,8 @@ class MainTest(unittest.TestCase):
 
 class PlantedPeopleTest(unittest.TestCase):
     def test_night_facing_from_picture_byte(self):
-        # Made-up list 02/00 in bank 05: two day-and-night records (head 8 or 7 bytes, then two empty blocks).
+        # Made-up list 02/00 in bank 05: two day-and-night records (head 8 or 7 bytes, then two one-byte blocks
+        # 2B: wander, so the record's step interval is the walking one).
         # F 1E has bit0 off, so at night the facing is byte 7 (03 = left), not byte 3 (02 = down); F 1F has bit0
         # on and keeps byte 3 (01 = right). Talk 01 is a service, so no script is read.
         sys.path.insert(0, str(ROOT / "fc" / "dq4" / "tools"))
@@ -359,13 +362,27 @@ class PlantedPeopleTest(unittest.TestCase):
         prg = bytearray(0x80000)
         bank = dq4map.NPC_BANK * 0x4000
         prg[bank + 4:bank + 6] = (0x8100).to_bytes(2, "little")
-        records = bytes.fromhex("1E 00 35 02 01 12 34 03 00 00" "1F 00 47 01 01 13 35 00 00" "00")
+        records = bytes.fromhex("1E 00 35 02 01 12 34 03 01 2B 01 2B" "1F 00 47 01 01 13 35 01 2B 01 2B" "00")
         prg[bank + 0x100:bank + 0x100 + len(records)] = records
         people = port.fc_people(bytes(prg), 0x02, 0, True)
         self.assertEqual([(p["x"], p["y"], p["facing"], p["interval"]) for p in people],
                          [(0x12, 0x34, "left", 5), (0x13, 0x35, "right", 7)])
         day = port.fc_people(bytes(prg), 0x02, 0, False)
         self.assertEqual([(p["facing"], p["interval"]) for p in day], [("down", 3), ("right", 4)])
+
+    def test_a_person_whose_block_never_walks_stands(self):
+        # Day-only records with interval 1: an event wait then a message and 2A (stand), and an empty block.
+        # FC keeps them in place; ported they used to wander at DQ5 interval 1, a step every few frames.
+        sys.path.insert(0, str(ROOT / "fc" / "dq4" / "tools"))
+        import dq4map
+        prg = bytearray(0x80000)
+        bank = dq4map.NPC_BANK * 0x4000
+        prg[bank + 4:bank + 6] = (0x8100).to_bytes(2, "little")
+        records = bytes.fromhex("10 00 10 02 01 12 34 06 8A 22 26 06 03 2A" "10 00 10 02 01 13 34 00"
+                                "10 00 40 02 01 14 34 01 2B" "00")
+        prg[bank + 0x100:bank + 0x100 + len(records)] = records
+        people = port.fc_people(bytes(prg), 0x02, 0, False)
+        self.assertEqual([p["interval"] for p in people], [0, 0, 4])
 
 
 @unittest.skipUnless(DQ4.is_file(), "local source ROM not present")
@@ -545,6 +562,32 @@ class SleeperTalkTest(unittest.TestCase):
                                 gained.add((fx, fy, d, after))
                 self.assertEqual(gained, want, (m, night))
         self.assertGreater(sleepers, 0)
+
+
+class Dq5IntervalTest(unittest.TestCase):
+    def test_walkers_keep_to_dq5_townsfolk_intervals(self):
+        self.assertEqual([port.dq5_interval(n) for n in (0, 1, 2, 4, 5, 8, 15)], [0, 8, 8, 8, 10, 15, 15])
+
+
+@unittest.skipUnless(DQ4.is_file(), "local source ROM not present")
+class SantheimThroneRoomTest(unittest.TestCase):
+    """FC 01/01(2장 3D/01): 병사 둘(레코드 01·04)은 이벤트를 기다리며 서 있고 레코드 간격만 1 이다."""
+
+    def test_fc_walking_intervals(self):
+        prg = port.ines.prg(DQ4.read_bytes())
+        day = port.fc_people(prg, 0x01, 0x01, False)
+        self.assertEqual([((p["x"], p["y"]), p["interval"]) for p in day],
+                         [((13, 13), 4), ((10, 16), 0), ((20, 4), 2), ((12, 10), 8), ((9, 7), 0), ((22, 9), 0)])
+        night = port.fc_people(prg, 0x01, 0x01, True)
+        self.assertEqual([p["interval"] for p in night], [4, 0, 2, 8])
+
+    def test_no_ported_person_walks_faster_than_dq5_townsfolk(self):
+        prg = port.ines.prg(DQ4.read_bytes())
+        for g, n in ((0x01, 0x00), (0x01, 0x01), (0x02, 0x00), (0x02, 0x01)):
+            for night in (False, True):
+                for p in port.fc_people(prg, g, n, night):
+                    self.assertIn(port.dq5_interval(p["interval"]),
+                                  {0, *range(port.WALK_FASTEST, port.WALK_SLOWEST + 1)}, (g, n, night, p))
 
 
 if __name__ == "__main__":

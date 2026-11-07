@@ -136,3 +136,42 @@ class HiddenOnEntryTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class WalkIntervalTests(unittest.TestCase):
+    """walk_interval: 맵에 들어선 인물이 걷는지와 그때의 명령 간격(dq4npcport 가 서기·걷기를 고름)."""
+
+    def interval(self, body, interval=3, more=()):
+        prg = bytearray(PRG_SIZE)
+        put(prg, nb.NPC_BANK, 0x8100, body)
+        for addr, data in more:
+            put(prg, nb.NPC_BANK, addr, data)
+        return nb.walk_interval(bytes(prg), nb.NPC_BANK, 0x8100, interval)
+
+    def test_wanderer_keeps_the_record_interval(self):
+        self.assertEqual(self.interval([0x2B]), 3)
+        self.assertEqual(self.interval([0x2D, 0x22]), 3)
+
+    def test_interval_command_before_the_first_step(self):
+        # 산트하임 왕좌의 방 FC 01/01 레코드 02: 13(간격 2) 82 05 02 81 16 ...
+        self.assertEqual(self.interval([0x13, 0x82, 0x05, 0x02, 0x81, 0x16, 0x82, 0x05, 0x02, 0x81, 0x83, 0xF6], 4), 2)
+        self.assertEqual(self.interval([0x11, 0x2B]), 1)
+
+    def test_standing_turning_and_message_blocks_do_not_walk(self):
+        self.assertEqual(self.interval([0x2A]), 0)
+        self.assertEqual(self.interval([0x05, 0x01, 0x06, 0x01, 0x83, 0xFC]), 0)
+        self.assertEqual(self.interval([0x26, 0x4F, 0x03, 0x2A]), 0)
+
+    def test_steps_after_an_event_wait_are_the_event_scene(self):
+        # 왕좌의 방 병사(FC 01/01 레코드 01·04, 레코드 간격 1): 이벤트를 기다리다 메시지를 띄우고 선다
+        self.assertEqual(self.interval([0x8A, 0x42, 0x26, 0x4F, 0x03, 0x2A], 1), 0)
+        self.assertEqual(self.interval([0x8A, 0x21, 0x24, 0x10, 0x1A, 0x03], 1), 0)
+        self.assertEqual(self.interval([0x2E, 0x0A, 0x1E, 0x2A, 0x2B]), 0)
+
+    def test_jump_to_another_block_follows_it(self):
+        self.assertEqual(self.interval([0x84] + word(0x8200), 5, [(0x8200, [0x14, 0x2B])]), 3)
+        self.assertEqual(self.interval([0x84] + word(0x8200), 5, [(0x8200, [0x2A])]), 0)
+
+    def test_record_interval_zero_or_no_block_stands(self):
+        self.assertEqual(self.interval([0x2B], 0), 0)
+        self.assertEqual(nb.walk_interval(bytes(PRG_SIZE), nb.NPC_BANK, None, 4), 0)

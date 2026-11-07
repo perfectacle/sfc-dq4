@@ -32,6 +32,7 @@ from dq5hangul import MESSAGES  # noqa: E402
 from dq4environmentrom import GROUPS  # noqa: E402
 from dq4environmentmap import edit_cells, sheet_art  # noqa: E402
 import dq4block  # noqa: E402
+import dq4map  # noqa: E402
 import dq4npcblock  # noqa: E402
 from dq4groupbuild import cell, chapter, fc_map, has_people  # noqa: E402
 import dq4shopport  # noqa: E402
@@ -57,6 +58,8 @@ NDS_LOOKS = {
 # A person FC puts on a bed lies in it: a one-time entry with 기타 bit7 (lying, drawn rotated 8 px lower) and bit4
 # (does not turn when spoken to, which would swap the head to the foot of the bed), no script.
 LIE = {"list": "10:A4E9", "index": 14}
+# DQ5 이동 간격 range for ported walkers (dq5_interval). sfc/dq4/guards: dq4npcwalkcheck measures the steps
+WALK_FASTEST, WALK_SLOWEST = 8, 15
 LIE_GROUPS = range(0x36, 0x3D)    # 서장·1장 그룹. 2장 이후는 그 장을 옮길 때 화면으로 보고 넓힌다
 # FC picture (dq4talk.sprite without the 80 bit) -> DQ5 picture of a townsperson of the same role, chosen by
 # eye from the two sprite sheets (dq4fcsprite.py field, dq5sprite.py).
@@ -200,18 +203,45 @@ def hidden_people(prg):
     return out
 
 
+def fc_blocks(prg, fc_group, number, night, ram=None):
+    """(뱅크, 블록 본문 주소 또는 None) per record of dq4talk.npc_list, in the same order."""
+    bank, start = dq4map.place_list(prg, fc_group, number, dq4map.ram_flags(ram) if ram is not None else None)
+    bit = 0x08 if night else 0x10
+    out = []
+    for _, f, blocks in dq4npcblock.records(prg, bank, start)[0]:
+        if f & bit:
+            body, ln = blocks[1 if night and f & 0x10 else 0]
+            out.append((bank, body if ln else None))
+    return out
+
+
+def dq5_interval(fc_step):
+    """DQ5 이동 간격 for a person FC walks every fc_step turns (0 stands). FC takes a turn every 16 frames
+    (fc/dq4/docs/dq4-script-format.md), the DQ5 wander script 19 steps far less often per unit: DQ5 interval 1 walks
+    without a break. Doubling FC and keeping to DQ5's own wanderers (8 and 15, the most common) gives one step in
+    about 2 s, as DQ5 townsfolk walk."""
+    return min(WALK_SLOWEST, max(WALK_FASTEST, 2 * fc_step)) if fc_step else 0
+
+
 def fc_people(prg, fc_group, number, night, flags=None):
     """FC person records of a map at that time: FC cell, facing, step interval, picture, messages. With flags
-    the list is the one FC picks for those event flags (dq4map.place_records)."""
+    the list is the one FC picks for those event flags (dq4map.place_records). The interval is the FC command
+    interval at the block's first step (dq4npcblock.walk_interval): 0 for a person FC never walks, whatever the
+    record's interval (a soldier whose block waits for an event and stands keeps interval 1 in the record)."""
     state = fc_state(night, flags, chapter(fc_group))
+    ram = state.ram if flags else None
+    recs = dq4talk.npc_list(prg, fc_group, number, night, ram=ram)
+    blocks = fc_blocks(prg, fc_group, number, night, ram)
+    if len(blocks) != len(recs):
+        raise ValueError(f"{fc_group:02X}/{number:02X}: {len(recs)} records but {len(blocks)} blocks")
     out = []
-    for rec in dq4talk.npc_list(prg, fc_group, number, night, ram=state.ram if flags else None):
+    for rec, (bank, body) in zip(recs, blocks):
         if dq4npcblock.hidden_on_entry(rec, night):
             # FC hides it before it is ever drawn. Ported, it would be seen, and a wanderer could stand on a stair.
             # An event that shows it again has to bring it back with its own list (test_dq4npcport HiddenPeopleTest).
             continue
         x, y = dq4talk.pos(rec, night)
-        step = rec[2] & 0x0F if night else rec[2] >> 4
+        step = dq4npcblock.walk_interval(prg, bank, body, rec[2] & 0x0F if night else rec[2] >> 4)
         # Facing comes from the picture's byte: byte 3, or byte 7 at night when F bit0 is off (1C:$99B3).
         facing = rec[7] if night and not rec[0] & 1 else rec[3]
         out.append({"x": x, "y": y, "facing": FACING[facing & 3], "interval": step,
@@ -402,7 +432,7 @@ def port(dq5_path, dq4_path, with_people=True):
                 gfx = NDS_LOOKS.get((dq5_map, p["shows"][0] if p["shows"] else None), PICTURES[p["picture"]])
                 x, y = cell(p["x"], p["y"])
                 fields = {"x": x, "y": y, "facing": p["facing"], "talk": talk,
-                          "gfx": gfx, "layer": 0, "interval": p["interval"]}
+                          "gfx": gfx, "layer": 0, "interval": dq5_interval(p["interval"])}
                 template = WALK if p["interval"] else STAND
                 if (p["x"], p["y"]) in beds and service is None:
                     # Lying on the bed's row, half a block right so the head rests on the pillow and the foot of
