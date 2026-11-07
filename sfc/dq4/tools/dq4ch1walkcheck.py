@@ -252,20 +252,23 @@ def units(segments):
     return out
 
 
-def setup(segments, first):
-    """first 번째 구간 앞까지 걸었다면 켜져 있을 깃발·물건(SET 문자열)과 동료(PARTY)."""
+def setup(segments, first, flags=None, effects=None):
+    """first 번째 구간 앞까지 걸었다면 켜져 있을 깃발·물건(SET 문자열)과 동료(PARTY). flags·effects 는 다른 장의
+    걷기 검사가 자기 표를 줄 때 쓴다(기본은 이 검사의 FLAGS·EFFECTS)."""
+    flags = FLAGS if flags is None else flags
+    effects = EFFECTS if effects is None else effects
     on = set()
     sets, party = [], []
     for name, _, _, opt in segments[:first]:
         on |= set(opt.get('want', ()))
         on -= set(opt.get('off', ()))
-        effect = EFFECTS.get(name, {})
+        effect = effects.get(name, {})
         if 'set' in effect:
             sets.append(effect['set'])
         if 'party' in effect:
             party.append(effect['party'])
-    flags = [f'{FLAGS[k][0] & 0xFFFF:04X}|{FLAGS[k][1]:02X}' for k in FLAGS if k in on]
-    return ';'.join(flags + sets), ','.join(party)
+    bits = [f'{flags[k][0] & 0xFFFF:04X}|{flags[k][1]:02X}' for k in flags if k in on]
+    return ';'.join(bits + sets), ','.join(party)
 
 
 def trace_text(name, text):
@@ -438,8 +441,9 @@ def run_failure(info, timeout):
 ITEMS = 0x7E2056     # 일행 레코드 0 의 물건 12칸(+16~+21)
 
 
-def watch_flags():
-    return ';'.join(f'{k}=7E{a & 0xFFFF:04X}:1' for k, (a, _) in FLAGS.items()) + f';ITEMS0={ITEMS:X}:6;ITEMS1={ITEMS + 6:X}:6;BE=7E00BE:1'
+def watch_flags(flags=None):
+    flags = FLAGS if flags is None else flags
+    return ';'.join(f'{k}=7E{a & 0xFFFF:04X}:1' for k, (a, _) in flags.items()) + f';ITEMS0={ITEMS:X}:6;ITEMS1={ITEMS + 6:X}:6;BE=7E00BE:1'
 
 
 def ending(mesence, rom, state, dest, seed=0):
@@ -500,9 +504,10 @@ def warp_messages(msg_text):
     return out
 
 
-def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, readset=False):
+def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, readset=False, flags=None):
     """한 구간을 걷는다. extra 는 시작에 더 둘 SET(묶음 첫 구간의 깃발·물건), party 는 dq5warp.lua PARTY.
-    readset 은 run 과 같다."""
+    readset 은 run 과 같다. flags 는 setup 과 같다."""
+    flags_ = FLAGS if flags is None else flags
     name, how, arg, opt = seg
     if how == 'ending':
         return ending(mesence, rom, state, dest, seed)
@@ -522,7 +527,7 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
         found = re.search(r'arrived map (\w\w/\w\w)', text)
         maps = [found[1]] if found else []
         wram = (dest / 'final.wram').read_bytes() if (dest / 'final.wram').exists() else bytes(0x20000)
-        seen = {k: wram[a & 0xFFFF] for k, (a, _) in FLAGS.items()}
+        seen = {k: wram[a & 0xFFFF] for k, (a, _) in flags_.items()}
         items = list(wram[ITEMS & 0xFFFF:(ITEMS & 0xFFFF) + 12])
         messages = warp_messages((dest / 'warpmsg.txt').read_text(encoding='utf-8')
                                  if (dest / 'warpmsg.txt').exists() else '')
@@ -537,7 +542,7 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
                                                    'PRE': pc.CLOSE.replace(';', ','),
                                                    'SAVE': 'end.mss', 'MAXF': str(maxf),
                                                    'CHANGES': str(opt.get('changes', 99)), 'AFTER': str(opt.get('after', 120)),
-                                                   'WATCH': watch_flags(), 'ROMPATCH': patch, 'SET': start,
+                                                   'WATCH': watch_flags(flags_), 'ROMPATCH': patch, 'SET': start,
                                                    **({'POKE': poke} if poke else {})}, maxf // 40 + 120, readset)
         log = dest / 'walk.txt'
         text = log.read_text(encoding='utf-8') if log.exists() else ''
@@ -551,7 +556,7 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
         if end:
             maps = maps or [end[1]]
         timed_out = False
-    flags = {k: bool(seen.get(k, 0) & m) for k, (_, m) in FLAGS.items()}
+    flags = {k: bool(seen.get(k, 0) & m) for k, (_, m) in flags_.items()}
     end_map = maps[-1] if maps else None
     problems = []
     if not (dest / 'end.mss').exists():
@@ -589,17 +594,19 @@ def prologue_start(mesence, rom, out, readset=False):
     return state
 
 
-def walk_unit(mesence, rom, data, out, segments, unit, base, seed=0, readset=False):
-    """한 묶음을 base 에서 시작해 차례로 걷는다. 첫 구간에 앞 구간들의 깃발·물건·동료를 둔다."""
-    extra, party = setup(segments, unit[0])
+def walk_unit(mesence, rom, data, out, segments, unit, base, seed=0, readset=False, flags=None, effects=None,
+              hops=None):
+    """한 묶음을 base 에서 시작해 차례로 걷는다. 첫 구간에 앞 구간들의 깃발·물건·동료를 둔다. base 는
+    segments[0] 이 끝난 상태다. flags·effects 는 setup 과 같고, hops 는 그 맵에 같은 맵 순간이동할 때 들를 곳."""
+    extra, party = setup(segments, unit[0], flags, effects)
     state, results = base, []
     name, how, arg, _ = segments[unit[0]]
     if how == 'warp' and arg.split(',')[0] == segments[0][3]['map']:
         # dq5warp.lua 는 같은 맵 안의 순간이동이면 목적지 칸에 꼭 맞게 서야 도착으로 본다. 이웃 맵을 거친다
-        hop = HOPS[arg.split(',')[0]]
+        hop = (HOPS if hops is None else hops)[arg.split(',')[0]]
         # 들르는 순간이동은 검사할 구간이 아니라 결과를 묶음 결과에 넣지 않는다(메시지도 견주지 않음)
         r = segment(mesence, rom, state, out / f'{name}-hop', (f'{name}-hop', 'warp', hop, {'map': hop[:5]}),
-                    NO_ENCOUNTERS, extra, party, seed, readset)
+                    NO_ENCOUNTERS, extra, party, seed, readset, flags)
         if r['status'] != 'passed':
             return [r]
         state, extra, party = out / f'{name}-hop' / 'end.mss', '', ''
@@ -607,7 +614,7 @@ def walk_unit(mesence, rom, data, out, segments, unit, base, seed=0, readset=Fal
         seg = segments[i]
         patch = NO_ENCOUNTERS + (';' + boss_patch(data) if seg[3].get('boss') else '')
         r = segment(mesence, rom, state, out / seg[0], seg, patch, *((extra, party) if k == 0 else ('', '')), seed,
-                    readset)
+                    readset, flags)
         results.append(r)
         if r['status'] != 'passed':
             break
