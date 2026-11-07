@@ -269,6 +269,9 @@ class InvariantTest(unittest.TestCase):
         self.assertEqual(len(bad), 2)
         self.assertIn('0 바이트', bad[0])
         self.assertIn('롬 밖', bad[1])
+        # 롬 머리의 체크섬 보수가 5C 로 시작해도 훅이 아니다(00:FFDC 가 JML 40:A3BF 로 읽혀 실패했다)
+        head = bytearray(data); head[0x7FDC:0x7FE0] = bytes((0x5C, 0xA3, 0x80, 0x02))
+        self.assertEqual(C.inv_hooks(head, dq5, stages + [stage('h', [(0x7FDC, 0x7FE0)])])[0], '훅 3개')
         # 그림 타일처럼 data = true 로 밝힌 자료 자리는 22·5C 로 시작해도 훅으로 보지 않는다
         spot = f'at = "{L.cpu(0x200)}~{L.cpu(0x203)}"\ndata = true\nwhy = "x"'
         allow = C.load_allow(f'[[original]]\nstage = "a"\n{spot}', ['a'])
