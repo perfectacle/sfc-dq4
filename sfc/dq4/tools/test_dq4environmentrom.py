@@ -97,8 +97,11 @@ class MapDocumentTests(unittest.TestCase):
         for cx in (4, 5):
             for cy in (2, 3):
                 self.assertTrue(second[cx, cy] & env.COUNTER_PASS)
-        # 위가 벽인 문은 문 칸만 인물을 앞에 그린다(옆문에 선 주인공이 위 벽에 가려지지 않게). 맨 아래 줄 상자는 그리지 않는다
-        self.assertEqual({c for c, v in second.items() if v & env.FRONT_PASS}, {(x, y) for y in (2, 3) for x in (2, 3)})
+        # 위가 벽인 문(옆문)도 문 칸과 문 위 두 줄(01:FC1E 가 열 때 위층으로 채우는 칸, 좌우 한 칸씩 더)에서 인물을 앞에
+        # 그린다. 위 줄이 벽이라고 빼면 문이 열린 뒤 그 줄 위층 복사가 옆으로 지나가는 인물의 머리를 가렸다(3D/01 (34,15)).
+        # 맨 아래 줄 상자는 그리지 않는다
+        self.assertEqual({c for c, v in second.items() if v & env.FRONT_PASS},
+                         {(x, y) for y in (2, 3) for x in (2, 3)} | {(x, y) for y in (0, 1) for x in range(1, 5)})
         self.assertFalse(doc['passes'][2]['entries'])
 
     def test_front_cells_around_open_doors_and_below_chests(self):
@@ -126,6 +129,37 @@ class MapDocumentTests(unittest.TestCase):
     def test_chest_without_floor_is_rejected(self):
         with self.assertRaisesRegex(ValueError, 'no floor'):
             self.document(GROUP_NAME, [[WALL, WALL, WALL], [WALL, CHEST, WALL], [WALL, WALL, WALL]])
+
+
+ROM = Path(__file__).resolve().parents[3] / 'rom' / 'dq4.nes'
+
+
+@unittest.skipUnless(ROM.is_file(), 'local source ROM not present')
+class DoorLintelTests(unittest.TestCase):
+    def test_every_group_door_draws_people_in_front_over_its_lintel(self):
+        """새 그룹 맵의 모든 2×3 문에서, 열 때 01:FC1E 가 위층으로 채우는 문 위 두 줄(좌우 한 칸씩 더)과 문 칸이
+        인물을 앞에 그린다. FC 는 어느 블록도 인물을 가리지 않으므로 하나라도 빠지면 그 자리에서 머리가 숨는다."""
+        from kr_patch.fc import ines
+        from dq4environmentart import create_assets as assets_of
+        prg = ines.prg(ROM.read_bytes())
+        doors = missing = 0
+        for _, _, name, source, _, _, _ in env.prepare_maps(prg, assets_of(), env.GROUPS):
+            local = {b: 0 for b in range(32)}
+            doc = env.map_document(name, source, local, env.MAPS[name])
+            front = {c for c, v in cells(doc['passes'][1]['entries']).items() if v & env.FRONT_PASS}
+            width = source.w * 2
+            for y in range(1, source.h):
+                for x in range(source.w):
+                    if env._prop(source, x, y) not in env.DOORS:
+                        continue
+                    doors += 1
+                    want = {(cx, cy) for cy in (y * 2 - 2, y * 2 - 1) for cx in range(x * 2 - 1, x * 2 + 3)
+                            if 0 <= cx < width} | {(cx, cy) for cy in (y * 2, y * 2 + 1) for cx in (x * 2, x * 2 + 1)}
+                    lost = want - front
+                    missing += len(lost)
+                    self.assertFalse(lost, f'{name} door ({x},{y}): no front cells {sorted(lost)}')
+        self.assertGreater(doors, 50)
+        self.assertEqual(missing, 0)
 
 
 def tile_image(values):

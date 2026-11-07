@@ -264,12 +264,13 @@ def data_spans(allow, stage):
 def inv_hooks(rom, dq5, stages, allow=None):
     """원래 롬 자리에 새로 쓴 JSL(22)·JML(5C): 쓴 덩어리의 첫 바이트(또는 첫 바이트가 원래와 같아 한 바이트 앞)가 그
     명령이고 피연산자 셋이 모두 그 단계가 쓴 바이트이면 훅으로 본다. 대상이 롬 안의 8000~FFFF 이고, 0 이 아닌 바이트라야 한다.
-    허용 목록이 data = true 로 밝힌 자료 자리 안의 덩어리는 보지 않는다: 압축 타일 줄기는 아무 바이트나 22·5C 로 시작할 수 있다."""
+    허용 목록이 data = true 로 밝힌 자료 자리 안의 덩어리는 보지 않는다: 압축 타일 줄기는 아무 바이트나 22·5C 로 시작할 수 있다.
+    롬 머리(HEADER)에서 시작하는 덩어리도 보지 않는다: 체크섬 보수 낮은 바이트가 22·5C 이면 00:FFDC 가 훅처럼 읽힌다."""
     bad, count = [], 0
     for st in stages:
         skip = data_spans(allow, st['name']) if allow else []
         for s, e in written(st):
-            if s >= len(dq5) or any(lo <= s and e <= hi for lo, hi in skip):
+            if s >= len(dq5) or any(lo <= s and e <= hi for lo, hi in skip) or s in HEADER or s - 1 in HEADER:
                 continue
             for at in (s, s - 1):
                 if at < 0:
