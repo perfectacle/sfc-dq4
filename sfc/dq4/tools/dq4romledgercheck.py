@@ -57,11 +57,13 @@ def load_allow(text, stages):
         for n, item in enumerate(items, 1):
             where = f'[[{kind}]] {n}번째'
             keys = set(KINDS[kind]) | {'at', 'why'}
-            extra = {'max', 'reuse'} if kind == 'overlap' else {'max'}
+            extra = {'max', 'reuse'} if kind == 'overlap' else {'max', 'data'} if kind == 'original' else {'max'}
             if not keys <= set(item) <= keys | extra:
                 raise AllowError(f'{where}: 키는 {sorted(keys)}(와 {"·".join(sorted(extra))}) 여야 함(받은 것 {sorted(item)})')
             if 'reuse' in item and not isinstance(item['reuse'], bool):
                 raise AllowError(f'{where}: reuse 는 true·false')
+            if 'data' in item and not isinstance(item['data'], bool):
+                raise AllowError(f'{where}: data 는 true·false')
             if 'max' in item and (not isinstance(item['max'], int) or item['max'] <= 0):
                 raise AllowError(f'{where}: max 는 양의 정수(바이트)')
             if not isinstance(item['why'], str) or not item['why'].strip():
@@ -254,13 +256,20 @@ def inv_vectors(rom, dq5):
     return ', '.join(seen), bad
 
 
-def inv_hooks(rom, dq5, stages):
+def data_spans(allow, stage):
+    """허용 목록 [[original]] 가운데 data = true 인 그 단계 항목의 [시작, 끝) 목록(그림 타일처럼 코드가 아닌 자료)."""
+    return [item['span'] for item in allow['original'] if item.get('data') and item['stage'] in ('*', stage)]
+
+
+def inv_hooks(rom, dq5, stages, allow=None):
     """원래 롬 자리에 새로 쓴 JSL(22)·JML(5C): 쓴 덩어리의 첫 바이트(또는 첫 바이트가 원래와 같아 한 바이트 앞)가 그
-    명령이고 피연산자 셋이 모두 그 단계가 쓴 바이트이면 훅으로 본다. 대상이 롬 안의 8000~FFFF 이고, 0 이 아닌 바이트라야 한다."""
+    명령이고 피연산자 셋이 모두 그 단계가 쓴 바이트이면 훅으로 본다. 대상이 롬 안의 8000~FFFF 이고, 0 이 아닌 바이트라야 한다.
+    허용 목록이 data = true 로 밝힌 자료 자리 안의 덩어리는 보지 않는다: 압축 타일 줄기는 아무 바이트나 22·5C 로 시작할 수 있다."""
     bad, count = [], 0
     for st in stages:
+        skip = data_spans(allow, st['name']) if allow else []
         for s, e in written(st):
-            if s >= len(dq5):
+            if s >= len(dq5) or any(lo <= s and e <= hi for lo, hi in skip):
                 continue
             for at in (s, s - 1):
                 if at < 0:
@@ -467,7 +476,7 @@ def run(ledger, rom, dq5, allow_text, allow_missing=False):
     summary, bad = inv_song_wait(rom, dq5, stages)
     report['invariants']['song_wait'] = {'summary': summary, 'problems': bad}
     fails += [f'song_wait: {p}' for p in bad]
-    summary, bad = inv_hooks(rom, dq5, stages)
+    summary, bad = inv_hooks(rom, dq5, stages, allow)
     report['invariants']['hooks'] = {'summary': summary, 'problems': bad}
     fails += [f'hooks: {p}' for p in bad]
     fails += over_max(allow)

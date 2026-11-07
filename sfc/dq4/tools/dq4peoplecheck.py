@@ -57,9 +57,16 @@ HOP = '37/02'
 PARTY_SLOTS = 3                                     # 7E:3220 슬롯 0~2 가 일행(00:E3BD)
 
 
+# 사건 그림을 놓을 칸: 워프 칸에서의 (가로, 세로) 차이. 화면(16×14칸) 안이고 나무·지붕 밑(OBJ 우선순위 0)이 아닌 칸.
+# 프레놀 3D/04 는 워프 칸 양옆이 나무라 위쪽 길에 둔다
+EVENT_SPOTS = ((-4, -2), (-2, -2), (2, -2), (4, -2), (0, -3))
+EVENT_SPOTS_AT = {'3D/04': ((0, -2), (0, -4))}
+
+
 def event_rom(data):
     """(시험 롬, {맵: [사건 그림]}). 사건 그림을 그 그룹의 EVENT_MAPS 맵에 차례로 나눠, 맵마다 인물 목록의 앞
-    엔트리(낮에 나오는 것)에 하나씩 넣는다. 낮·밤 두 벌 엔트리는 두 벌 모두 바꾼다."""
+    엔트리(낮에 나오는 것)에 하나씩 넣고 그 엔트리를 워프 칸 둘레(EVENT_SPOTS)로 옮긴다. 원래 칸은 화면 밖일 수 있어
+    VRAM 에 실려도 그려지지 않는다. 낮·밤 두 벌 엔트리는 두 벌 모두 바꾼다."""
     rom = Rom(data)
     out = bytearray(data)
     by_map = {m: [] for m in EVENT_MAPS}
@@ -71,12 +78,20 @@ def event_rom(data):
         rows = [e for e in entries if e['name'] == m and e['time'] in ('day', 'both')]
         if len(rows) < len(pictures):
             raise SystemExit(f'{m}: 사건 그림 {len(pictures)}개를 넣을 낮 엔트리가 {len(rows)}개뿐')
-        for e, pic in zip(rows, pictures):
+        spots = EVENT_SPOTS_AT.get(m, EVENT_SPOTS)
+        if len(pictures) > len(spots):
+            raise SystemExit(f'{m}: 사건 그림 {len(pictures)}개를 놓을 칸이 {len(spots)}개뿐')
+        wx, wy = EVENT_MAPS[m]
+        for e, pic, (dx, dy) in zip(rows, pictures, spots):
             at = dq5npcrecord.lorom(int(e['address'].replace(':', ''), 16))
             size = dq5npcrecord.entry_size(rom, int(e['address'].replace(':', ''), 16))
             where = dq5npcrecord.offsets(bytes(data[at:at + size]))
             for part in (('day', 'night') if e['time'] == 'both' else ('day',)):
-                out[at + where[part]['gfx']] = pic
+                w = where[part]
+                out[at + w['gfx']] = pic
+                # x·y 의 bit7 은 방향. y 는 misc bit7 만큼 위로 읽힌다(dq5npcrecord.decode)
+                out[at + w['x']] = out[at + w['x']] & 0x80 | (wx + dx) & 0x7F
+                out[at + w['y']] = out[at + w['y']] & 0x80 | (wy + dy + (out[at + w['misc']] >> 7)) & 0x7F
     return bytes(out), by_map
 
 
@@ -127,6 +142,20 @@ def judge(rom, wram, vram):
     return out
 
 
+def shown(oam, base, count):
+    """OAM 128개 가운데 타일이 [base, base + count) 이고 화면(세로 224줄, 가로 -16~255) 안에 놓이고 우선순위가 2 이상인
+    것의 수. 맵은 나무·지붕 밑 칸의 인물을 우선순위 0 으로 두어 BG 뒤로 가리므로, 그것은 보이지 않는 것으로 센다."""
+    n = 0
+    for i in range(128):
+        x, y, tile, attr = oam[i * 4:i * 4 + 4]
+        x |= (oam[512 + i // 4] >> (i % 4 * 2) & 1) << 8
+        if x >= 256:
+            x -= 512
+        if base <= (tile | (attr & 1) << 8) < base + count and y < 224 and -16 < x < 256 and attr >> 4 & 3 >= 2:
+            n += 1
+    return n
+
+
 def scene_ok(found, want, slots):
     """맵이 맞고 판정한 슬롯이 하나 이상이며 모두 통과. 슬롯이 비면 덤프가 인물을 놓기 전이라 실패로 친다."""
     return found == want and bool(slots) and all(s['ok'] for s in slots)
@@ -159,6 +188,10 @@ def scene(mesence, rom, states, out, name, m):
     wram, vram = (dest / 'wram.bin').read_bytes(), (dest / 'vram.bin').read_bytes()
     found = f'{wram[0xBC]:02X}/{wram[0xBD]:02X}'
     slots = judge(rom.read_bytes(), wram, vram)
+    oam = (dest / 'oam.bin').read_bytes()
+    for sl in slots:
+        if 'base' in sl:
+            sl['shown'] = shown(oam, sl['base'], int(sl['tiles'].split('/')[1]))
     return {'scene': dest.name, 'map': found, 'ok': scene_ok(found, m, slots), 'slots': slots,
             **({} if slots else {'note': '판정할 슬롯 없음'})}
 
@@ -189,8 +222,11 @@ def main():
         if r['scene'].startswith('event-') and r['ok']:
             m = r['map']
             missing = [g for g in wanted[m] if not any(s['picture'] == g and s['ok'] for s in r['slots'])]
+            hidden = [g for g in wanted[m] if not any(s['picture'] == g and s['ok'] and s.get('shown') for s in r['slots'])]
             if missing:
                 r['ok'], r['note'] = False, '판정을 지난 슬롯이 없는 사건 그림 ' + ' '.join(f'{g:02X}' for g in missing)
+            elif hidden:
+                r['ok'], r['note'] = False, '화면 OAM 에 없는 사건 그림 ' + ' '.join(f'{g:02X}' for g in hidden)
     for r in results:
         bad = [s for s in r.get('slots', []) if not s['ok']]
         print(f"{r['scene']:14s} {'ok' if r['ok'] else 'FAIL'} {r.get('map', '')} {r.get('note', '')}"
