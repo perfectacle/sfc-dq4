@@ -1045,6 +1045,7 @@ why = "2장 사건 물건(황금의 팔찌 C6·지저귐의 꿀 BE 는 빌린 DQ
 paths = [
   "sfc/dq4/tools/dq4itemport.py",
   "sfc/dq4/tools/dq4storyitemcheck.py",
+  "tools/mesence_settings.py",
   "sfc/dq4/tools/lua/dq4itemuse.lua",
   "sfc/dq4/tools/dq4shopport.py",
   "sfc/dq4/tools/dq4doorcheck.py",
