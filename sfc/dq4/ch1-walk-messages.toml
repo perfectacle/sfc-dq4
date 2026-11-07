@@ -30,9 +30,9 @@ check = "2dc514f83c6a"
 variant = "chapter1"
 seed = 0
 name = "night_child"
-messages = ["E61"]
-reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
-check = "471cf383b521"
+messages = ["E65"]
+reason = "여행의 문 사당 45/0E·0F 의 인물 대사(FC 07E0·07EB·0633·0540·0541)가 그룹 메시지에 들어 1장 사건 메시지 번호가 4 씩 밀림"
+check = "2446a892c4bc"
 
 [[segment]]
 variant = "chapter1"
@@ -46,9 +46,9 @@ check = "d41d0e98b825"
 variant = "chapter1"
 seed = 0
 name = "flare"
-messages = ["E65", "129"]
-reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
-check = "a8238b07c29a"
+messages = ["E69", "129"]
+reason = "여행의 문 사당 45/0E·0F 의 인물 대사(FC 07E0·07EB·0633·0540·0541)가 그룹 메시지에 들어 1장 사건 메시지 번호가 4 씩 밀림"
+check = "5487d7517379"
 
 [[segment]]
 variant = "chapter1"
@@ -70,9 +70,9 @@ check = "d8324ef89aae"
 variant = "chapter1"
 seed = 0
 name = "reunion"
-messages = ["E66", "E67", "129"]
-reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
-check = "bae41c44733b"
+messages = ["E6A", "E6B", "129"]
+reason = "여행의 문 사당 45/0E·0F 의 인물 대사(FC 07E0·07EB·0633·0540·0541)가 그룹 메시지에 들어 1장 사건 메시지 번호가 4 씩 밀림"
+check = "6bc8fcc1e835"
 
 [[segment]]
 variant = "chapter1"
@@ -94,9 +94,9 @@ check = "129cd6c7bffc"
 variant = "chapter1"
 seed = 0
 name = "hoimin"
-messages = ["E6B", "E6C", "129"]
-reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
-check = "4a282065d411"
+messages = ["E6F", "E70", "129"]
+reason = "여행의 문 사당 45/0E·0F 의 인물 대사(FC 07E0·07EB·0633·0540·0541)가 그룹 메시지에 들어 1장 사건 메시지 번호가 4 씩 밀림"
+check = "737601f079c8"
 
 [[segment]]
 variant = "chapter1"
@@ -150,9 +150,9 @@ check = "1c2fe002a11a"
 variant = "chapter1"
 seed = 0
 name = "kidnap"
-messages = ["129", "E6E"]
-reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
-check = "04072946e305"
+messages = ["129", "E72"]
+reason = "여행의 문 사당 45/0E·0F 의 인물 대사(FC 07E0·07EB·0633·0540·0541)가 그룹 메시지에 들어 1장 사건 메시지 번호가 4 씩 밀림"
+check = "2b520b1bf95d"
 
 [[segment]]
 variant = "chapter1"
@@ -166,9 +166,9 @@ check = "c0be38b95488"
 variant = "chapter1"
 seed = 0
 name = "boss"
-messages = ["E81", "E6F", "E70", "129", "E71"]
-reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
-check = "5ab850cfe647"
+messages = ["E85", "E73", "E74", "129", "E75"]
+reason = "여행의 문 사당 45/0E·0F 의 인물 대사(FC 07E0·07EB·0633·0540·0541)가 그룹 메시지에 들어 1장 사건 메시지 번호가 4 씩 밀림"
+check = "b1c7008b3b6e"
 
 [[segment]]
 variant = "chapter1"
@@ -182,9 +182,9 @@ check = "fc1f7e6095c1"
 variant = "chapter1"
 seed = 0
 name = "soldier"
-messages = ["E72"]
-reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
-check = "b16e11578a30"
+messages = ["E76"]
+reason = "여행의 문 사당 45/0E·0F 의 인물 대사(FC 07E0·07EB·0633·0540·0541)가 그룹 메시지에 들어 1장 사건 메시지 번호가 4 씩 밀림"
+check = "bb6624f231be"
 
 [[segment]]
 variant = "chapter1"
@@ -198,9 +198,9 @@ check = "c96a3b061ffc"
 variant = "chapter1"
 seed = 0
 name = "imuru"
-messages = ["E73"]
-reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
-check = "51cd1046143b"
+messages = ["E77"]
+reason = "여행의 문 사당 45/0E·0F 의 인물 대사(FC 07E0·07EB·0633·0540·0541)가 그룹 메시지에 들어 1장 사건 메시지 번호가 4 씩 밀림"
+check = "a03d688515d9"
 
 [[segment]]
 variant = "chapter1"
@@ -222,6 +222,6 @@ check = "990bb6f41a1b"
 variant = "chapter1"
 seed = 0
 name = "king"
-messages = ["E75", "E79", "E90", "E7A", "E7B", "E7C", "E7E", "E7F", "E7D", "E76"]
-reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
-check = "a9173b64ebfe"
+messages = ["E79", "E7D", "E94", "E7E", "E7F", "E80", "E82", "E83", "E81", "E7A"]
+reason = "여행의 문 사당 45/0E·0F 의 인물 대사(FC 07E0·07EB·0633·0540·0541)가 그룹 메시지에 들어 1장 사건 메시지 번호가 4 씩 밀림"
+check = "590faf89b9c8"
