@@ -16,7 +16,7 @@ import dq4ch2battle  # noqa: E402
 from dq4ch2slots import SLOTS  # noqa: E402
 
 # 2장 사건 모듈(dq4ch2slots.SLOTS 의 module). 세션마다 한 줄씩 더한다. 차례가 메시지·대화 번호 차례다
-EVENTS = ('dq4ch2tempe', 'dq4ch2frenol', 'dq4ch2king')
+EVENTS = ('dq4ch2tempe', 'dq4ch2frenol', 'dq4ch2king', 'dq4ch2endor')
 
 # 깃발(7E:2190 + 첫 값). DQ5 가 켜기만 하고 비트로 보지 않는 자리(sfc/dq5/docs/dq5-flags.md)
 CHAPTER2 = (0x78, 0x10)        # 7E:2208 bit4  2장 진행 중(1장 끝에서 켬). 주인공 그림을 아리나 대역으로
@@ -538,6 +538,19 @@ def battle_stubs():
     return out
 
 
+def call_stubs():
+    """{입구 칸: (네이티브 주소, 앞 바이트)}: 사건 모듈 CALLS({칸: 네이티브 이름 또는 (이름, 앞 바이트)})의 입구. 대화
+    스크립트가 dq4ch2battle.talk_call(칸) 으로 그 모듈의 네이티브를 부른다."""
+    out = {}
+    for ctx in contexts():
+        for k, v in getattr(ctx.module, 'CALLS', {}).items():
+            name, pre = (v, b'') if isinstance(v, str) else v
+            if k in out:
+                raise SystemExit(f'전투 입구 칸 {k} 을 두 번 씀')
+            out[k] = (ctx.at[name], pre)
+    return out
+
+
 def encounter_groups():
     """dq5encounter/1 의 event_groups 에 더할 사건 전투 무리."""
     return [dq4ch2battle.group_doc(b['group'], b['members'], b.get('flags', dq4ch2battle.BOSS_FLAGS))
@@ -777,7 +790,7 @@ def apply(data, original, first_message):
     _, at = native()
     hooks = [(HERO_PICTURE_AT, HERO_PICTURE_ORIG, bytes((0x22, *_al(at['hero_picture']), 0x60))),
              (STEP_HOOK_AT, STEP_HOOK_ORIG, bytes((0x22, *_al(tail['step']))))]
-    places = dq4ch2battle.writes(battle_stubs())
+    places = dq4ch2battle.writes(battle_stubs(), call_stubs())
     for ctx in contexts(first_message, original=original):
         if hasattr(ctx.module, 'native'):
             more, _ = ctx.module.native(ctx)
