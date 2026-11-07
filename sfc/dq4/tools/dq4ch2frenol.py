@@ -351,7 +351,9 @@ def _at(e):
 
 
 def _scripted(e, name, gfx, talk=None):
-    f = {**e["fields"], "gfx": gfx, "interval": max(1, e["fields"].get("interval", 1))}
+    # 스크립트는 이동 간격마다 한 명령씩 돌아(0 이면 돌지 않음) 간격이 연출 빠르기다. 옮긴 마을 사람의 간격(8~15)을
+    # 물려받으면 셋이 마을을 빠져나가는 데 1200프레임을 넘겼다
+    f = {**e["fields"], "gfx": gfx, "interval": 1}
     if talk is not None:
         f["talk"] = talk
     return {**e, "from": _src(name), "fields": f}
@@ -366,7 +368,7 @@ def _person(name, x, y, gfx, talk, time, facing='down'):
 # 대화). 대화가 정수면 그 대화 번호 그대로(01 무기점·02 도구점·05 교회·06 여관, dq4shopport 의 사건 판매자), 'dog' 는
 # 옮긴 강아지의 대화. test_dq4ch2frenol 이 FC 롬의 목록과 견준다
 AFTER = (
-    (TOWN, 'day', (0x03, 0x18), 'left', 1, 0x1B, 0x05),
+    (TOWN, 'day', (0x03, 0x18), 'left', 0, 0x1B, 0x05),
     (TOWN, 'day', (0x11, 0x0C), 'down', 0, 0x17, 0x06),
     (TOWN, 'day', (0x11, 0x04), 'right', 0, 0x14, 'man_after'),
     (TOWN, 'day', (0x1A, 0x14), 'right', 2, 0x15, 'boy_after'),
@@ -406,7 +408,7 @@ def after_entries(m, talk, dog):
         cx, cy = port.cell(x, y)
         out.append({"from": port.WALK if interval else port.STAND, "time": time,
                     "fields": {"x": cx, "y": cy, "facing": facing, "talk": number, "gfx": gfx, "layer": 0,
-                               "interval": 0 if isinstance(who, int) else interval}})
+                               "interval": 0 if isinstance(who, int) else port.dq5_interval(interval)}})
     return out
 
 
@@ -425,8 +427,10 @@ def absent(ctx):
 
 
 def start_messages(ctx):
-    """처음 상태의 가짜 브라이·크리프트는 비명 사각형(CRY_RECT) 안에 서 있어, 다가가면 말을 걸기 전에 비명이 먼저 뜬다."""
-    return {(INN, FC_INN_BREY, None): ctx.msg['cry'], (INN, FC_INN_KIRYL, None): ctx.msg['cry']}
+    """처음 상태의 가짜 브라이·크리프트와 망토 둘·가짜 공주는 비명 사각형(CRY_RECT) 안에 서 있어, 다가가면 말을 걸기
+    전에 비명이 먼저 뜬다. 망토의 FC 대화 번호는 사각형 밖 인물과 같아 DQ5 셀로 가린다."""
+    return {(INN, FC_INN_BREY, None): ctx.msg['cry'], (INN, FC_INN_KIRYL, None): ctx.msg['cry'],
+            **{(INN, at, None): ctx.msg['cry'] for at in (INN_CLOAK_A, INN_CLOAK_B, INN_PRINCESS)}}
 
 
 def npc_lists(lists, ctx):

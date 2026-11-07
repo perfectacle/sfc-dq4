@@ -111,6 +111,39 @@ def hidden_on_entry(rec, night=False):
     return False
 
 
+# 인물 자신이 한 칸 걷는 명령. 22 는 일행을 움직이고, 25 는 걷지 않고 옮긴다
+WALKS = {0x02, 0x03, 0x04, 0x0D, 0x2B, 0x2D, 0x87}
+# 조건이 맞을 때까지 같은 명령에 머무는 것(이벤트 88~8A, 일행 자리 2E). 그 뒤의 걸음은 사건이 거는 연출이다
+WAITS = {0x2E, 0x88, 0x89, 0x8A}
+
+
+def walk_interval(prg, bank, body, interval, limit=256):
+    """블록 본문 주소 body 에서 갈 수 있는 길을 따라 처음 만나는 걷는 명령(WALKS)에서의 명령 간격.
+    간격은 레코드의 interval(1F:$D62E, 0 이면 블록이 돌지 않음)에서 시작해 명령 11·12~20 이 바꾼다.
+    조건을 기다리는 명령(WAITS) 너머는 보지 않는다: 맵에 들어섰을 때 그 인물은 서서 기다린다.
+    걷지 않는 블록(메시지·돌기·서 있기만, 이벤트를 기다리기만)이나 interval 0 이면 0."""
+    if not interval or body is None:
+        return 0
+    seen, todo = set(), [(body, None, interval)]
+    while todo and len(seen) < limit:
+        p, saved, step = todo.pop(0)
+        if (p, saved, step) in seen:
+            continue
+        seen.add((p, saved, step))
+        c = rd(prg, bank, p)
+        if c in WALKS:
+            return step
+        if c == 0x11:
+            step = 1
+        elif 0x12 <= c <= 0x20:
+            step = c - 0x11
+        if c in STAY or c in WAITS or (0x31 <= c < 0x80) or (c not in CMDS and c < 0x80) or c >= 0x8B:
+            continue
+        nxt, saved2 = successors(prg, bank, p, saved)
+        todo.extend((q, saved2, step) for q in nxt if q is not None)
+    return 0
+
+
 PATTERN_PTR = (0x1C, 0x8014)          # 1F:$DAB9: 워드 둘 = 패턴 본문 시작($804E), 패턴마다 길이 바이트 표($802C)
 PAD_DIRS = ((0x10, '위'), (0x20, '아래'), (0x40, '왼쪽'), (0x80, '오른쪽'))
 

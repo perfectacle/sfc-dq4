@@ -220,7 +220,7 @@ def after_entries(talk):
         cx, cy = port.cell(x, y)
         out.append({"from": port.WALK if interval else port.STAND, "time": time,
                     "fields": {"x": cx, "y": cy, "facing": facing, "talk": who if shop else talk[who], "gfx": gfx,
-                               "layer": 0, "interval": 0 if shop else interval}})
+                               "layer": 0, "interval": 0 if shop else port.dq5_interval(interval)}})
     return out
 
 

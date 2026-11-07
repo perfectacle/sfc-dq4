@@ -385,6 +385,22 @@ needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출�
 groups = ["ch1-build", "ch1-walk"]
 
 [[check]]
+name = "dq4-npc-walk"
+why = "FC 가 세워 두는 인물(블록이 이벤트를 기다리거나 서 있기만, 레코드 간격은 1)을 걷는 인물로 옮겨 DQ5 간격 1 로 몇 프레임마다 한 칸씩 쉬지 않고 돌아다녔다(왕좌의 방 병사 1800프레임에 153번). 2장 출발 상태 3D/01 에서 그 인물이 서 있고, 걷는 인물은 DQ5 마을 사람 간격(8~15)으로 천천히 걷는지 시드 0·5·9 를 두 번씩 본다"
+paths = [
+  "sfc/dq4/tools/dq4npcwalkcheck.py",
+  "sfc/dq4/tools/lua/dq4npcwalk.lua",
+  "sfc/dq4/tools/dq4npcport.py",
+  "fc/dq4/tools/dq4npcblock.py",
+  "fc/dq4/tools/dq4map.py",
+  "sfc/dq4/tools/dq4ch2walkcheck.py",
+  "tools/mesence_settings.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && rm -rf work/npcwalk && uv run --locked python sfc/dq4/tools/dq4npcwalkcheck.py --rom work/ch2/dq4-ch1-full.sfc --out work/npcwalk --seeds 0,5,9"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝·2장 출발 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk"]
+
+[[check]]
 name = "dq4-ch2-heroblock"
 why = "2장 사건이 주인공이 선 칸에 따라 멈추거나 엇나가지 않게: 벽 앞 셀에 왼쪽·위·아래에서 들어서기, 벽 앞 물음에 아니요 뒤 다시 묻기, 필드 네 걸음 합류(아래·왼쪽·오른쪽), 텐페 신부에게 세 쪽에서 말 걸어 제단 앞 셀로"
 paths = [

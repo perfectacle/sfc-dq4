@@ -340,7 +340,9 @@ def npc_lists(lists, ctx):
     _edit(lists[SARAN]["entries"], MARONI, talk=t['maroni'])
     top = lists[TOWER_TOP]["entries"]
     for name, where in zip(('elf_a', 'elf_b'), ELVES):
-        _edit(top, where, src=name, gfx=ELF_PICTURE)
+        # 스크립트는 이동 간격마다 한 명령씩 돈다. 연출은 FC 레코드 간격 4 로 맞췄다: 옮긴 걷는 간격(8)을 물려받으면
+        # 연출이 늦게 끝나 heroblock 의 끝 걸음 앞에 조작이 돌아오지 않았다
+        _edit(top, where, src=name, gfx=ELF_PICTURE, interval=4)
     top += [{"from": _src('honey'), "time": time,
              "fields": {"x": 0, "y": 1, "facing": "down", "talk": t['shrine_pass'], "gfx": 0x01, "layer": 0,
                         "interval": 1}} for time in ('day', 'night')]

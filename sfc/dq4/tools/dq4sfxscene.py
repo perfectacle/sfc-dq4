@@ -941,6 +941,9 @@ def decision_problems(table):
 
 
 TOWER = '39/01,20,16'                 # 탑 39/01: FC 던전 조우 구역(dq4battlecheck 의 tower 장면과 같은 자리)
+# 탑 39/01 의 돌아다니는 인물(슬롯 08) 걸음 간격을 0 으로 묶는다. 순간이동에서 둔 난수를 조우까지 그 인물의 걸음이
+# 굴려, 옮긴 인물의 간격만 바뀌어도 슬라임의 선제공격이 나 たたかう 입력이 어긋났다(snes9x 무기 장면)
+TOWER_HOLD = [(0x7E3308, 0x00)]
 FIGHT = 'down:8;wait:200;'            # 한 걸음 내디뎌 강제 조우
 SLIME, BOSS = 0x00, 0xE2              # 슬라임, 탑 위 보스(dq4ch1event.BOSS_MONSTERS 첫째)
 WEAPON = 0x7E0DA7                     # 공격하는 사람의 무기(28:8055 가 읽음). 프레임마다 묶어 무기를 고른다
@@ -1051,18 +1054,18 @@ def scenes(table):
         Scene('battle-win', '걸음 전투: 공격 시작(37-01)·무기(00)·적이 맞음(37-04)·승리(곡 1F)·레벨 업(곡 21)',
               [attack, (*sfx(weapon_sound(table, 0x00, battle_song)), 'not-dq5'), enemy_hit, (SONG, 0x1F, None), (SONG, 0x21, None)],
               covers=['sfx 37-01', 'sfx 37-04'], sets=['flag=CHAPTER1', NEXT_EXP], warp=TOWER, battle=[(SLIME, 1)],
-              pokes=HERO_HP + [(WEAPON, 0x00)], patches=weak(SLIME), inputs=FIGHT + taps(30)),
+              pokes=HERO_HP + TOWER_HOLD + [(WEAPON, 0x00)], patches=weak(SLIME), inputs=FIGHT + taps(30)),
         # 첫 주고받기만: 뒤 차례의 회피(37-0D)는 프레임마다 난수가 달라 DSP 를 읽는 실행과 한 프레임 차로 갈렸다
         Scene('battle-trade', '주고받기: 적의 공격 시작(37-02)·우리 편이 맞음(37-03)',
               [attack, enemy_hit, d('enemy-attack'), d('pc-hit')],
-              covers=['sfx 37-02', 'sfx 37-03'], warp=TOWER, battle=[(SLIME, 1)], pokes=HERO_HP,
+              covers=['sfx 37-02', 'sfx 37-03'], warp=TOWER, battle=[(SLIME, 1)], pokes=HERO_HP + TOWER_HOLD,
               patches=strong(SLIME) + fierce(SLIME), inputs=FIGHT + taps(10)),
         Scene('battle-miss', '공격력 0 인 적이 때림: 빗나감(37-0D)', [d('enemy-attack'), d('miss')],
-              covers=['sfx 37-0D'], warp=TOWER, battle=[(SLIME, 1)], pokes=HERO_HP, seed=MISS_SEED,
+              covers=['sfx 37-0D'], warp=TOWER, battle=[(SLIME, 1)], pokes=HERO_HP + TOWER_HOLD, seed=MISS_SEED,
               patches=strong(SLIME) + harmless(SLIME), inputs=FIGHT + taps(MISS_TAPS)),
         Scene('battle-scara', '적의 スカラ: 돌려 부르기 46-04 → 45-04', [d('scara')],
               covers=['remap 46-04', 'pcm 45-04'], forbid=[sfx((0x46, 0x04))], warp=TOWER, battle=[(SLIME, 1)],
-              pokes=HERO_HP, patches=strong(SLIME) + actions(SLIME, SCARA), inputs=FIGHT + taps(20)),
+              pokes=HERO_HP + TOWER_HOLD, patches=strong(SLIME) + actions(SLIME, SCARA), inputs=FIGHT + taps(20)),
         Scene('battle-boss', '탑 위 보스 전투(사건 전투, 전투 곡이 무기 표 곡이 아님): 발톱 무기의 종류 소리(28:816E 종류 4 → '
               'DQ5 37-08)와 보스가 맞음(돌려 부르기 37-14 → 45-03)',
               [d('claw-kind'), d('boss-hit')],
@@ -1070,9 +1073,9 @@ def scenes(table):
               sets=['flag=CHAPTER1'] + boss_setup(), warp='39/04,46,40', pokes=HERO_HP + [(WEAPON, CLAW)],
               patches=boss_patches(), inputs=boss_inputs()),
         Scene('battle-critical', '회심의 일격(DQ5 37-0B)', [attack, d('critical')], warp=TOWER, battle=[(SLIME, 1)],
-              pokes=HERO_HP, critical=True, patches=strong(SLIME), inputs=FIGHT + taps(15)),
+              pokes=HERO_HP + TOWER_HOLD, critical=True, patches=strong(SLIME), inputs=FIGHT + taps(15)),
         Scene('battle-flee', '도망(DQ5 37-00)', [d('flee')], warp=TOWER, battle=[(SLIME, 1)],
-              pokes=HERO_HP, patches=strong(SLIME), inputs=FIGHT + 'down:8;wait:30;' + taps(8)),
+              pokes=HERO_HP + TOWER_HOLD, patches=strong(SLIME), inputs=FIGHT + 'down:8;wait:30;' + taps(8)),
         Scene('training', '전원부터 새 게임: 이름 칸이 찬 뒤 A(33-02), 서장 칼 여섯 합(40-01·40-02·37-03)',
               [d('reject')] + [d(SPAR_KEYS[se]) for se, _, _ in pro.SPAR],
               covers=['sfx 33-02', 'pcm 40-01', 'pcm 40-02'], place='power'),
@@ -1081,12 +1084,12 @@ def scenes(table):
         Scene('battle-heal', '호이민이 ホイミ: 주문 외움(37-0E)·ホイミ 효과(DQ5 36-00)',
               [d('spell'), d('hoimi')], covers=['sfx 37-0E'],
               sets=['flag=CHAPTER1', 'effect=hoimin', 'flag=HOIMIN'], warp=TOWER, battle=[(SLIME, 1)],
-              pokes=[(0x7E2042, 0x02), (0x7E2043, 0x00)], patches=strong(SLIME) + harmless(SLIME), inputs=FIGHT + taps(30)),
+              pokes=[(0x7E2042, 0x02), (0x7E2043, 0x00)] + TOWER_HOLD, patches=strong(SLIME) + harmless(SLIME), inputs=FIGHT + taps(30)),
     ]
     for w, se in sorted(table.weapons.items()):
         out.append(Scene(f'weapon-{w:02X}', f'たたかう: 무기 {w:02X} 소리(전투 곡 {battle_song:02X})',
                          [attack, (*sfx(weapon_sound(table, w, battle_song)), 'not-dq5')], covers=[f'weapon {w:02X}', f'pcm {name(se)}'],
-                         warp=TOWER, battle=[(SLIME, 1)], pokes=HERO_HP + [(WEAPON, w)], patches=weak(SLIME),
+                         warp=TOWER, battle=[(SLIME, 1)], pokes=HERO_HP + TOWER_HOLD + [(WEAPON, w)], patches=weak(SLIME),
                          inputs=FIGHT + taps(4)))
     return out
 
