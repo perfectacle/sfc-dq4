@@ -247,7 +247,12 @@ class ShopPlaceTest(unittest.TestCase):
             counter = (front[0] + dx, front[1] + dy)
             self.assertIn(block_prop(source, source.cell(*counter) & 31), COUNTER_PROPS, name)
             keeper = (counter[0] + dx, counter[1] + dy)
-            self.assertIn(keeper, {(p['x'], p['y']) for p in report[m] if p['service'] == service[kind]}, name)
+            keepers = {(p['x'], p['y']) for p in report[m] if p['service'] == service[kind]}
+            # 사건 뒤에만 서는 판매자(텐페: 괴물을 이긴 뒤의 목록 dq4ch2tempe.AFTER, 대화 번호 = 시설 번호)
+            import dq4ch2tempe
+            if m == dq4ch2tempe.ch2.TEMPE:
+                keepers |= {cell for _, cell, _, _, _, who in dq4ch2tempe.AFTER if who == service[kind]}
+            self.assertIn(keeper, keepers, name)
 
 
 if __name__ == '__main__':

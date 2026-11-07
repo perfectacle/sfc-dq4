@@ -39,9 +39,11 @@ WAIT = 300
 CASTLE, VILLAGE, FIELD, TOWER, CAVE = 0x01, 0x06, 0x02, 0x0A, 0x09
 NIGHT_CASTLE, NIGHT_VILLAGE, FIELD_CH2 = 0x30, 0x31, 0x05
 EVENT_SONG = 0x23                    # インテルメッツォ
+BOSS = 0x18                          # 보스 전투(무리 등급 2, dq4-sound-port-format)
 
 # 텐페: 대신 감 flag 를 켜고 들어가면 신부의 스크립트가 제단 flag 를 켜고 바구니 이벤트(서술 뒤 시각을 00F8 로 두고
-# 맵 이동)를 건다(dq4ch2event). A 를 눌러 서술을 넘기고, 도착한 밤의 텐페에서 곡을 본다
+# 맵 이동)를 건다(dq4ch2event). A 를 눌러 서술을 넘기면 제단 위에서 곧 보스 전투(dq4ch2tempe)라 300프레임 뒤에는
+# 보스 곡이 울린다
 TEMPE_GONE = "{:04X}|{:02X}".format(CHAPTER_FLAGS + dq4ch2event.TEMPE_GONE[0],
                                     dq4ch2event.CHAPTER2[1] | dq4ch2event.TEMPE_HEARD[1] | dq4ch2event.TEMPE_GONE[1])
 BASKET_TEST = ",".join(["a:8,wait:40"] * 16)
@@ -56,7 +58,7 @@ SCENES = {
     "frenol-night": ("3D/04,44,5", CH2, True, NIGHT_VILLAGE),
     "saran-day": ("45/00,24,47", CH2, False, VILLAGE),
     "saran-night": ("45/00,24,47", CH2, True, NIGHT_VILLAGE),
-    "tempe-basket": ("3D/03,42,77", TEMPE_GONE, False, NIGHT_VILLAGE, BASKET_TEST),
+    "tempe-basket": ("3D/03,42,77", TEMPE_GONE, False, BOSS, BASKET_TEST),
     # 이벤트 곡(7E:21DF bit7, 00:CE75 가 맵 곡 루틴 가운데 CE9D 로 뜀)은 맵 곡 대신 그 곡이고 고르지 않는다
     "event-song-night": ("3D/03,42,77", f"{CH2};21DF=A3", True, EVENT_SONG),
     "bazaar-day": ("45/05,62,23", CH2, False, VILLAGE),

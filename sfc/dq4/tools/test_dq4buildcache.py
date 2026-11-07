@@ -160,6 +160,20 @@ class BuildCacheTests(unittest.TestCase):
             self.call(src, self.root / 'out.txt')
         self.assertEqual(self.count(), 2)
 
+    def test_module_named_by_a_bare_string_is_followed(self):
+        # dq4ch2event.EVENTS 는 사건 모듈을 확장자 없는 이름으로 받아 importlib 로 들인다. 그 모듈을 고쳐도 다시 돌아야 한다
+        tool = cache.HERE / 'dq4ch2event.py'
+        self.assertIn(cache.HERE / 'dq4ch2slots.py', cache.sources(tool))
+        with mock.patch.object(cache, 'TOOL_DIRS', (self.root,)):
+            cache._resolve.cache_clear()
+            cache._refs.cache_clear()
+            (self.root / 'dq4ch2fake.py').write_text('X = 1\n')
+            reg = self.root / 'dq4reg.py'
+            reg.write_text("EVENTS = ('dq4ch2fake',)\n")
+            self.assertIn(self.root / 'dq4ch2fake.py', cache.sources(reg))
+        cache._resolve.cache_clear()
+        cache._refs.cache_clear()
+
     def test_failure_raises_with_stderr(self):
         bad = self.root / 'bad.py'
         bad.write_text('import sys\nsys.exit("boom")\n')

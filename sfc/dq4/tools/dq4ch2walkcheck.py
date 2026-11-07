@@ -32,6 +32,7 @@ sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
 import dq4ch1walkcheck as wc  # noqa: E402
 import dq4ch2event as ch2  # noqa: E402
+import dq4ch2tempe as tempe  # noqa: E402
 
 talk, taps = wc.talk, wc.taps
 CLOSE = wc.pc.CLOSE
@@ -53,6 +54,7 @@ FLAGS = {
     'TEMPE_HEARD': flag(ch2.TEMPE_HEARD),
     'TEMPE_GONE': flag(ch2.TEMPE_GONE),
     'TEMPE_ALTAR': flag(ch2.TEMPE_ALTAR),
+    'TEMPE_WON': flag(tempe.WON),
     # flag 가 아니라 바이트 전체(마스크 FF)를 본다: 1장에 맡긴 やくそう 개수와 맡긴 금화(1000G 단위) 아래 바이트
     'BANK_HERB': (ch2.BANK_ITEMS_AT + 0xA1, 0xFF),
     'BANK_GOLD': (ch2.BANK_GOLD_AT, 0xFF),
@@ -99,6 +101,31 @@ SEGMENTS = [
 ]
 HEAD = 3
 
+# 신부에게 대신 간다 → 바구니 서술. 제단 앞에 닿으면 곧 보스 전투(dq4ch2tempe)다
+BASKET = talk('up', 14) + ';wait:600;' + taps(10)
+# 지면 FC 2장 시작 귀환 자리(サラン 교회 45/02, dq4fieldtravel 의 2장 칸)에서 다시 시작한다
+WIPE_MAP, WIPE_CELL = '45/02', (8, 19)
+# 아침의 제단 위에서 곧장 아래로(교회를 지나) 촌장 위 칸까지 걸어 내려온다
+LEAVE_ALTAR = f'{tempe.CHIEF_TALK_CELL[0]},{tempe.CHIEF_TALK_CELL[1]}'
+
+
+def battle_patch(data, kind):
+    """사건 전투 몬스터(dq4ch2event 모듈의 BATTLES)를 덮는 ROMPATCH. win 은 HP 1·수비 0(1장 boss_patch 와 같음),
+    lose 는 HP 1000·공격 511·민첩 255(일행이 먼저 쓰러짐)."""
+    out = []
+    for n in sorted({m for _, mod in ch2.modules() for b in getattr(mod, 'BATTLES', ()) for m, _ in b['members']}):
+        base = wc.MONSTERS + n * 25
+        if kind == 'win':
+            out += [f'{base + 2:X}=00', f'{base + 3:X}=01', f'{base + 8:X}={data[base + 8] & ~0x40 & 0xFF:02X}',
+                    f'{base + 10:X}={data[base + 10] & ~0x07 & 0xFF:02X}']
+        elif kind == 'lose':
+            out += [f'{base:X}=FF', f'{base + 1:X}=FF', f'{base + 3:X}=E8', f'{base + 8:X}={data[base + 8] | 0x80:02X}',
+                    f'{base + 10:X}={data[base + 10] & ~0x07 | 0x03:02X}']
+        else:
+            raise ValueError(f'전투 선택 {kind}: win 또는 lose')
+    return ';'.join(out)
+
+
 # 2장 사건 구간. 순간이동(warp) 구간마다 새 묶음이고, 묶음 첫 구간에는 앞 구간들의 want·off·effects 가 놓인다.
 # 선택은 dq4ch1walkcheck.SEGMENTS 의 것에 더해 cell(끝에 주인공이 선 셀 (x, y))
 SEGMENTS += [
@@ -118,9 +145,20 @@ SEGMENTS += [
     # 텐페 제물 사건 앞 절반: 촌장의 부탁 → 신부에게 대신 간다 → 바구니로 제단 앞(밤)
     ('chief_side', 'warp', f'{ch2.TEMPE},{ch2.CHIEF[0]},{ch2.CHIEF[1] + 1}', {'map': ch2.TEMPE}),
     ('chief', 'walk', talk('up', 10), {'want': ['TEMPE_HEARD']}),
+    # 텐페 뒤 절반: 바구니로 제단 앞에 닿으면 보스 전투(dq4ch2tempe). 지면 기록한 교회(サラン)로 가고 앞 절반 flag 가
+    # 꺼져 촌장에게 다시 듣는다. 이기면 서술 뒤 아침의 제단 앞, 괴물이 사라진 뒤의 마을
+    ('lose_side', 'warp', f'{ch2.TEMPE},{ch2.PRIEST[0]},{ch2.PRIEST[1] + 1}', {'map': ch2.TEMPE}),
+    ('lose', 'walk', BASKET + ';' + taps(40, 40) + ';wait:300;' + CLOSE,
+     {'battle': 'lose', 'off': ['TEMPE_HEARD', 'TEMPE_GONE', 'TEMPE_ALTAR', 'TEMPE_WON'], 'map': WIPE_MAP,
+      'cell': WIPE_CELL}),
+    ('rechief_side', 'warp', f'{ch2.TEMPE},{ch2.CHIEF[0]},{ch2.CHIEF[1] + 1}', {'map': ch2.TEMPE}),
+    ('rechief', 'walk', talk('up', 10), {'want': ['TEMPE_HEARD']}),
     ('priest_side', 'warp', f'{ch2.TEMPE},{ch2.PRIEST[0]},{ch2.PRIEST[1] + 1}', {'map': ch2.TEMPE}),
-    ('priest', 'walk', talk('up', 14) + ';wait:600;' + taps(10) + ';' + CLOSE,
-     {'want': ['TEMPE_GONE', 'TEMPE_ALTAR'], 'map': ch2.TEMPE, 'cell': ch2.ALTAR_CELL}),
+    ('priest', 'walk', BASKET + ';' + taps(110, 40) + ';wait:600;' + taps(6) + ';' + CLOSE,
+     {'battle': 'win', 'poke': wc.HERO_HP, 'want': ['TEMPE_WON'], 'off': ['TEMPE_HEARD', 'TEMPE_GONE', 'TEMPE_ALTAR'],
+      'map': ch2.TEMPE, 'cell': tempe.MORNING_CELL}),
+    ('leave_altar', 'walk', LEAVE_ALTAR, {'map': ch2.TEMPE, 'cell': tempe.CHIEF_TALK_CELL}),
+    ('chief_won', 'walk', talk('down', 6), {'want': ['TEMPE_WON'], 'map': ch2.TEMPE}),
 ]
 
 
@@ -196,7 +234,8 @@ def walk_unit(mesence, rom, data, out, unit, base, seed=0, segments=None):
         state, extra, party = out / f'{name}-hop' / 'end.mss', '', ''
     for k, i in enumerate(unit):
         seg = segments[i]
-        r = wc.segment(mesence, rom, state, out / seg[0], seg, wc.NO_ENCOUNTERS,
+        patch = wc.NO_ENCOUNTERS + (';' + battle_patch(data, seg[3]['battle']) if 'battle' in seg[3] else '')
+        r = wc.segment(mesence, rom, state, out / seg[0], seg, patch,
                        *((extra, party) if k == 0 else ('', '')), seed, flags=FLAGS)
         cell_problem = end_cell_problem(out / seg[0], seg)
         if cell_problem:

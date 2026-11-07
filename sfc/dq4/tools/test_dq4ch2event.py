@@ -179,7 +179,8 @@ class ListTest(unittest.TestCase):
         self.assertEqual((tempe[1]["from"], tempe[1]["fields"]["talk"]), (ev.PRIEST_SRC, t["priest"]))
         self.assertEqual((altar[1]["from"], altar[1]["fields"]["talk"]), (person(ev.PRIEST)["from"], t["priest"]))
         self.assertEqual(altar[2], tempe[2])
-        names = [o["list"] for o in over if o["map"] == ev.TEMPE]
+        # 등록한 사건 모듈(EVENTS)의 텐페 목록은 제 앞머리로 뒤에 붙는다
+        names = [o["list"] for o in over if o["map"] == ev.TEMPE and not o["list"].startswith("new:ch2_tempe2_")]
         self.assertEqual(names, ["new:ch2_tempe_altar"])
 
     def test_opening_script_calls_box_then_reveal(self):

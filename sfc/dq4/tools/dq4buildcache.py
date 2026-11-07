@@ -55,7 +55,9 @@ def _resolve_dir(name):
 
 @functools.cache
 def _refs(path):
-    """path 가 import 하거나 이름으로 부르는 도구 폴더 파일. 함수 안의 import 와 'dq5build.py' 같은 이름 문자열도 든다."""
+    """path 가 import 하거나 이름으로 부르는 도구 폴더 파일. 함수 안의 import 와 'dq5build.py' 같은 이름 문자열도 든다.
+    확장자 없는 'dq4ch2tempe' 같은 문자열도 그 이름의 .py 가 있으면 든다: importlib 로 이름을 받아 들이는 모듈
+    (dq4ch2event.EVENTS 따위)을 고쳐도 키가 바뀌어야 한다."""
     if path.suffix != '.py':
         return ()
     refs, dirs = [], []
@@ -68,6 +70,7 @@ def _refs(path):
             refs.append(node.value)
         elif isinstance(node, ast.Constant) and isinstance(node.value, str) and DIR_NAME.fullmatch(node.value):
             dirs.append(node.value)
+            refs.append(node.value + '.py')
     return (tuple(p for p in map(_resolve, dict.fromkeys(refs)) if p)
             + tuple(p for p in map(_resolve_dir, dict.fromkeys(dirs)) if p))
 

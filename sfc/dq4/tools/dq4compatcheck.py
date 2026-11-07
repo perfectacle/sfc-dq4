@@ -198,6 +198,7 @@ class Walker:
             data[int(off, 16):int(off, 16) + len(hexs) // 2] = bytes.fromhex(hexs)
         self.rom = out / 'c.sfc'
         self.rom.write_bytes(bytes(data))
+        self.data = bytes(data)
         self.warp_exit = warp_exit(self.rom)
         self.c = Core(str(core_path), str(self.rom), str(out))
         # 부모는 이 표지가 생긴 때부터 시간 제한을 잰다
@@ -410,7 +411,13 @@ class Walker:
                 else:
                     # dq4walkstate.lua 는 상태를 불러온 바로 뒤에 SET 을 둔다
                     apply_sets(self.c, start)
+                    # 2장 사건 전투 구간만 그 몬스터를 덮는다(걷기 검사의 battle 선택과 같음)
+                    if 'battle' in opt:
+                        self.rom_cheats = {'battle': [x for tok in cw.battle_patch(self.data, opt['battle']).split(';')
+                                                      for x in rom_codes(int(tok.split('=')[0], 16),
+                                                                         bytes.fromhex(tok.split('=')[1]))]}
                     maps = self.walk(arg, opt)
+                    self.rom_cheats.pop('battle', None)
                 r = self.check(name, opt, maps, how)
             self.c.shot(self.out / f'{i:02d}-{name}.png')
             results.append({**r, 'index': i})

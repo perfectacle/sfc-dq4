@@ -16,7 +16,7 @@ import dq4ch2battle  # noqa: E402
 from dq4ch2slots import SLOTS  # noqa: E402
 
 # 2장 사건 모듈(dq4ch2slots.SLOTS 의 module). 세션마다 한 줄씩 더한다. 차례가 메시지·대화 번호 차례다
-EVENTS = ()
+EVENTS = ('dq4ch2tempe',)
 
 # 깃발(7E:2190 + 첫 값). DQ5 가 켜기만 하고 비트로 보지 않는 자리(sfc/dq5/docs/dq5-flags.md)
 CHAPTER2 = (0x78, 0x10)        # 7E:2208 bit4  2장 진행 중(1장 끝에서 켬). 주인공 그림을 아리나 대역으로
