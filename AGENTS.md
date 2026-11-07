@@ -24,7 +24,9 @@
 - **다른 팬 해킹의 데이터를 쓰지 않는다** — 아이디어만 참고하고 그래픽은 직접 그린다. NDS DQ4 한글패치는 참고 허락을 받았다. [ORIG-01](.agents/skills/analysis/SKILL.md#orig-01--남의-데이터-금지)
 - **가설은 실측으로 확인한 뒤에 사실로 적는다** — 확인 못 한 것은 「남은 것」으로 남긴다. [VERIFY-01](.agents/skills/analysis/SKILL.md#verify-01--실측으로-확인)
 - **문서에 개인 경로를 쓰지 않는다** — 환경 변수와 저장소 상대 경로만. [DOC-01](.agents/skills/journal/SKILL.md#doc-01--개인-경로-금지)
-- **일지 순번은 트랙마다 PR 직전 `origin/main` 기준으로 매긴다** — 같은 트랙의 세션끼리 번호가 겹치지 않게. 다른 트랙과는 겹쳐도 된다. [JOURNAL-01](.agents/skills/journal/SKILL.md#journal-01--일지-이름과-순번)
+- **일지는 마일스톤(장 하나, 큰 기능 묶음)마다 한 번 쓰고, 순번은 트랙마다 일지 PR 직전 `origin/main` 기준으로 매긴다** — PR 하나에서는 일지 대신 커밋 메시지·PR 본문에 근거를 남긴다. 같은 트랙의 세션끼리 번호가 겹치지 않게. 다른 트랙과는 겹쳐도 된다. [JOURNAL-01](.agents/skills/journal/SKILL.md#journal-01--일지-이름과-순번)
+- **형식 문서는 인터페이스와 새 형식만 짧게** — 실측 과정·전후 표는 PR 본문으로. [DOC-02](.agents/skills/journal/SKILL.md#doc-02--형식-문서는-인터페이스만)
+- **PR 은 기능 단위로 묶는다** — 같은 사건·기능의 도구·데이터·검사·문서와 작은 고침은 PR 하나. 다른 세션이 기다리는 공용 장치만 먼저 따로 올려도 된다. [TRACK-03](.agents/skills/tracks/SKILL.md#track-03--작업-방식)
 - **작업마다 최신 `origin/main` 에서 워크트리를 파고, 머지가 끝나면 지운다** — [GIT-02](.agents/skills/git-workflow/SKILL.md#git-02--작업마다-워크트리)
 - **모든 변경은 브랜치 → PR, `ci-ok` 를 통과시킨다** — [GIT-01](.agents/skills/git-workflow/SKILL.md#git-01--브랜치와-pr), [CI-01](.agents/skills/ci/SKILL.md#ci-01--ci-ok)
 - **고친 것에는 가드를 남기고, 걸린 실행 검사는 돌려 PR 본문에 적는다** — 다른 세션이 모르고 되돌리지 않게. [GUARD-01](.agents/skills/guards/SKILL.md#guard-01--고친-것에는-가드를-남긴다), [GUARD-02](.agents/skills/guards/SKILL.md#guard-02--걸린-실행-검사는-돌리고-결과를-적는다)
@@ -38,7 +40,8 @@
 | ----------------------------------------------------------------- | ---------------------------------------------------- |
 | 세션을 시작한다(트랙 정하기, 남은 항목 고르기)                    | [tracks](.agents/skills/tracks/SKILL.md)             |
 | 롬을 분석한다(MesenCE 프로브, 자동 보행, 리스팅, 디코더 작성)     | [analysis](.agents/skills/analysis/SKILL.md)         |
-| 해킹 일지·형식 문서·그림을 쓴다                                   | [journal](.agents/skills/journal/SKILL.md)           |
+| 마일스톤 해킹 일지·형식 문서·그림을 쓴다                          | [journal](.agents/skills/journal/SKILL.md)           |
+| PR 크기, 동시 세션 수, 하위 에이전트 모델 나누기를 정한다         | [tracks](.agents/skills/tracks/SKILL.md#track-03--작업-방식) |
 | 포팅용 스프라이트를 그리거나 고친다(DQ5 실측 규격, 원작과 견주기)  | [sprites](.agents/skills/sprites/SKILL.md)           |
 | 워크트리·브랜치·커밋·PR 을 만들거나 정리한다                      | [git-workflow](.agents/skills/git-workflow/SKILL.md) |
 | 워크플로를 바꾸거나 CI 실패를 고친다                              | [ci](.agents/skills/ci/SKILL.md)                     |
