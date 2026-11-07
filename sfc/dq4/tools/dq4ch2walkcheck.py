@@ -32,6 +32,7 @@ sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
 import dq4ch1walkcheck as wc  # noqa: E402
 import dq4ch2event as ch2  # noqa: E402
+import dq4ch2endor as endor  # noqa: E402
 import dq4ch2tempe as tempe  # noqa: E402
 import dq4ch2frenol as frenol  # noqa: E402
 import dq4ch2king as king  # noqa: E402
@@ -57,6 +58,17 @@ FLAGS = {
     'TEMPE_GONE': flag(ch2.TEMPE_GONE),
     'TEMPE_ALTAR': flag(ch2.TEMPE_ALTAR),
     'TEMPE_WON': flag(tempe.WON),
+    'ENDOR_IN': flag(endor.IN),
+    'ENDOR_LOST': flag(endor.LOST),
+    'ENDOR_CHAMPION': flag(endor.CHAMPION),
+    'ENDOR_MESSENGER': flag(endor.MESSENGER),
+    # 선택 bytes 로 값을 견주는 칸(want·off 에 넣지 않는다: 뒤 묶음 첫머리에 OR 로 놓이므로). 대회에서 이긴 수, 일행 수,
+    # 일행 순서 셋, 아리나의 장비 비트·물건 첫 두 칸
+    'ENDOR_STAGE': flag(endor.STAGE),
+    'PARTY_COUNT': (endor.COUNTS[0], 0xFF),
+    **{f'ORDER{k}': (endor.ORDERS[0] + k, 0xFF) for k in range(3)},
+    'ALENA_EQUIP': (endor.ALENA_EQUIP, 0xFF),
+    **{f'ALENA_ITEM{k}': (endor.ALENA_ITEMS + k, 0xFF) for k in range(2)},
     'FRENOL_KIDNAPPED': flag(frenol.KIDNAPPED),
     'FRENOL_LEFT': flag(frenol.LEFT),
     'FRENOL_RESCUED': flag(frenol.RESCUED),
@@ -133,18 +145,25 @@ LEAVE_ALTAR = f'{tempe.CHIEF_TALK_CELL[0]},{tempe.CHIEF_TALK_CELL[1]}'
 
 def battle_patch(data, kind):
     """사건 전투 몬스터(dq4ch2event 모듈의 BATTLES)를 덮는 ROMPATCH. win 은 HP 1·수비 0(1장 boss_patch 와 같음),
-    lose 는 HP 1000·공격 511·민첩 255(일행이 먼저 쓰러짐)."""
+    weak 는 win 에 공격 0·MP 0·행동 여섯 모두 たたかう(일행이 다치지 않음), lose 는 HP 1000·공격 511·민첩 255(일행이 먼저
+    쓰러짐). 「weak:5A+lose:4C」 처럼 + 로 잇고 : 뒤에 몬스터(16진, 쉼표)를 주면 그 몬스터만 덮는다."""
+    every = sorted({m for _, mod in ch2.modules() for b in getattr(mod, 'BATTLES', ()) for m, _ in b['members']})
     out = []
-    for n in sorted({m for _, mod in ch2.modules() for b in getattr(mod, 'BATTLES', ()) for m, _ in b['members']}):
-        base = wc.MONSTERS + n * 25
-        if kind == 'win':
-            out += [f'{base + 2:X}=00', f'{base + 3:X}=01', f'{base + 8:X}={data[base + 8] & ~0x40 & 0xFF:02X}',
-                    f'{base + 10:X}={data[base + 10] & ~0x07 & 0xFF:02X}']
-        elif kind == 'lose':
-            out += [f'{base:X}=FF', f'{base + 1:X}=FF', f'{base + 3:X}=E8', f'{base + 8:X}={data[base + 8] | 0x80:02X}',
-                    f'{base + 10:X}={data[base + 10] & ~0x07 | 0x03:02X}']
-        else:
-            raise ValueError(f'전투 선택 {kind}: win 또는 lose')
+    for piece in kind.split('+'):
+        how, _, only = piece.partition(':')
+        for n in [int(m, 16) for m in only.split(',')] if only else every:
+            base = wc.MONSTERS + n * 25
+            if how in ('win', 'weak'):
+                out += [f'{base + 2:X}=00', f'{base + 3:X}=01',
+                        f'{base + 8:X}={data[base + 8] & ~(0xC0 if how == "weak" else 0x40) & 0xFF:02X}',
+                        f'{base + 10:X}={data[base + 10] & ~0x07 & 0xFF:02X}']
+                if how == 'weak':
+                    out += [f'{base + 1:X}=00', f'{base + 4:X}=00', *(f'{base + k:X}=73' for k in range(17, 23))]
+            elif how == 'lose':
+                out += [f'{base:X}=FF', f'{base + 1:X}=FF', f'{base + 3:X}=E8', f'{base + 8:X}={data[base + 8] | 0x80:02X}',
+                        f'{base + 10:X}={data[base + 10] & ~0x07 | 0x03:02X}']
+            else:
+                raise ValueError(f'전투 선택 {kind}: win·weak·lose')
     return ';'.join(out)
 
 
@@ -231,6 +250,68 @@ SEGMENTS += [
 ]
 
 
+# 엔돌 무술 대회(dq4ch2endor). 일행 순서를 0 1 2 가 아닌 브라이·아리나·크리프트로 두고 들어가, 빼고 되돌린 뒤에도 그
+# 순서인지 본다. 대회 중 상태(IN·이긴 수·일행 하나)로 링에 서면 링 인물이 그 판부터 잇는다
+ENDOR_ORDER = (2, 0, 1)
+ENDOR_ORDER_POKE = ';'.join(f'7E{a + k & 0xFFFF:04X}={v:02X}' for a in endor.ORDERS for k, v in enumerate(ENDOR_ORDER))
+ENDOR_RING = f'{endor.ARENA},28,26'        # 링 아래 길 (28,27)에 내린다. 위로 걸어 (28,25)에서 링에 든다
+ENDOR_IN_RING = '28,24;wait:60;'
+ENDOR_BACK = {'PARTY_COUNT': 3, **{f'ORDER{k}': v for k, v in enumerate(ENDOR_ORDER)}}
+ENDOR_FLAGS_OFF = ['ENDOR_IN', 'ENDOR_LOST']
+
+
+def endor_in(stage):
+    """대회 중 상태: IN 과 맡긴 순서 첫 둘, 이긴 수, 일행 하나(아리나)."""
+    keep = (ENDOR_ORDER[0] | ENDOR_ORDER[1] << 2) << endor.ORDER_SHIFT | endor.IN[1]
+    return (f'7E{endor.FLAG_AT & 0xFFFF:04X}={keep:02X};7E{endor.STAGE_AT & 0xFFFF:04X}={stage:02X};' +
+            ';'.join(f'7E{c & 0xFFFF:04X}=01' for c in endor.COUNTS) + ';' +
+            ';'.join(f'7E{a & 0xFFFF:04X}=00' for a in endor.ORDERS))
+
+
+def endor_monster(k):
+    return f'{endor.OPPONENTS[k][1]:02X}'
+
+
+# 약초 둘과 셋째 칸의 장비한 비단 로브. 둘 다 쓰면 로브가 첫 칸으로 당겨지고 장비 비트도 따라온다
+ENDOR_HERBS = (f'7E{endor.ALENA_ITEMS & 0xFFFF:04X}={endor.HERB:02X};7E{endor.ALENA_ITEMS + 1 & 0xFFFF:04X}={endor.HERB:02X};'
+               f'7E{endor.ALENA_ITEMS + 2 & 0xFFFF:04X}={ch2.SILK_ROBE:02X};7E{endor.ALENA_ITEMS + 3 & 0xFFFF:04X}=FF;'
+               f'7E{endor.ALENA_EQUIP & 0xFFFF:04X}=04;7E{endor.ALENA_EQUIP + 1 & 0xFFFF:04X}=00')
+
+SEGMENTS += [
+    # ① 출전·③ 짐: 링에 들어서면 응원·규칙 뒤 첫 상대. 지면 대기실 침대 옆에서 깨어나고 일행이 그 순서로 돌아온다
+    ('endor_lose_side', 'warp', ENDOR_RING, {'map': endor.ARENA, 'poke': ENDOR_ORDER_POKE}),
+    ('endor_lose', 'walk', ENDOR_IN_RING + taps(30, 60) + ';wait:300;' + CLOSE,
+     {'battle': f'lose:{endor_monster(0)}', 'map': endor.BEDROOM, 'cell': endor.BED_CELL,
+      'off': ENDOR_FLAGS_OFF + ['ENDOR_CHAMPION'], 'bytes': {'ENDOR_STAGE': 0, **ENDOR_BACK}, 'maxf': 4000}),
+    # ② 상대마다 따로: 이긴 수 k 인 대회 중 상태로 링에 서서 k 번째 상대를 이기고, 다음 상대에게 져 침대로. 첫 상대는
+    # 약초 둘을 쥐고 이긴 뒤 둘 다 쓴다(047D → 047E → 047F)
+    *[seg for k in range(endor.ROUNDS - 1) for seg in (
+        (f'endor_bout{k}_side', 'warp', ENDOR_RING,
+         {'map': endor.ARENA, 'poke': endor_in(k) + (';' + ENDOR_HERBS if k == 0 else '')}),
+        (f'endor_bout{k}', 'walk', ENDOR_IN_RING + taps(50, 60) + ';wait:300;' + CLOSE,
+         {'battle': f'weak:{endor_monster(k)}+lose:{endor_monster(k + 1)}', 'map': endor.BEDROOM,
+          'cell': endor.BED_CELL, 'off': ENDOR_FLAGS_OFF + ['ENDOR_CHAMPION'], 'maxf': 5500,
+          'bytes': {'ENDOR_STAGE': k + 1, **ENDOR_BACK,
+                    **({'ALENA_ITEM0': ch2.SILK_ROBE, 'ALENA_ITEM1': 0xFF, 'ALENA_EQUIP': 0x01} if k == 0 else {})}}))],
+    # 대회 중 판 사이마다 방향 키를 눌러도 링 인물의 대화가 끊기지 않고 넷째·다섯째를 잇달아 이겨 우승, 일행이
+    # 돌아온다(일행 하나인 채 대회 밖으로 나가는 길이 없음). 아래·위는 전투 명령 창에서 「도망」 을 골라 오른쪽을 쓴다
+    ('endor_held_side', 'warp', ENDOR_RING, {'map': endor.ARENA, 'poke': endor_in(endor.ROUNDS - 2)}),
+    ('endor_held', 'walk', ENDOR_IN_RING + taps(6, 60) + ';' + ';'.join(['a:8;wait:40;right:24;wait:20'] * 90) + ';wait:300;' + CLOSE,
+     {'battle': f'weak:{endor_monster(endor.ROUNDS - 2)},{endor_monster(endor.ROUNDS - 1)}', 'map': endor.ARENA,
+      'want': ['ENDOR_CHAMPION'], 'off': ENDOR_FLAGS_OFF, 'bytes': {'ENDOR_STAGE': endor.ROUNDS, **ENDOR_BACK},
+      'maxf': 12000}),
+    # 다섯째 상대를 이기면 결승 상대 데스피사로가 없어 우승, 브라이·크리프트와 일행이 돌아온다
+    ('endor_final_side', 'warp', ENDOR_RING, {'map': endor.ARENA, 'poke': endor_in(endor.ROUNDS - 1)}),
+    ('endor_final', 'walk', ENDOR_IN_RING + taps(40, 60) + ';wait:300;' + CLOSE,
+     {'battle': f'weak:{endor_monster(endor.ROUNDS - 1)}', 'map': endor.ARENA, 'want': ['ENDOR_CHAMPION'],
+      'off': ENDOR_FLAGS_OFF, 'bytes': {'ENDOR_STAGE': endor.ROUNDS, **ENDOR_BACK}, 'maxf': 4000}),
+    # ④ 우승 뒤 엔돌 성 앞: 해자 다리 아래에서 성 쪽으로 오르면 산트하임에서 온 사자가 말한다
+    ('endor_messenger_side', 'warp', f'{endor.TOWN},46,28', {'map': endor.TOWN}),
+    ('endor_messenger', 'walk', '46,23;wait:60;' + taps(4) + ';wait:200;' + CLOSE,
+     {'map': endor.TOWN, 'want': ['ENDOR_MESSENGER']}),
+]
+
+
 def units(segments=None):
     """머리 뒤 구간을 묶음으로 나눈다: 순간이동 구간마다 새 묶음."""
     segments = SEGMENTS if segments is None else segments
@@ -306,9 +387,9 @@ def walk_unit(mesence, rom, data, out, unit, base, seed=0, segments=None):
         patch = wc.NO_ENCOUNTERS + (';' + battle_patch(data, seg[3]['battle']) if 'battle' in seg[3] else '')
         r = wc.segment(mesence, rom, state, out / seg[0], seg, patch,
                        *((extra, party) if k == 0 else ('', '')), seed, flags=FLAGS)
-        cell_problem = end_cell_problem(out / seg[0], seg)
-        if cell_problem:
-            r = {**r, 'status': 'failed', 'problems': r['problems'] + [cell_problem]}
+        more = [p for p in (end_cell_problem(out / seg[0], seg), *end_byte_problems(out / seg[0], seg)) if p]
+        if more:
+            r = {**r, 'status': 'failed', 'problems': r['problems'] + more}
         results.append(r)
         if r['status'] != 'passed':
             break
@@ -325,6 +406,17 @@ def end_cell_problem(dest, seg):
     found = re.search(r'end map \w\w/\w\w x=(\d+) y=(\d+)', log.read_text(encoding='utf-8')) if log.exists() else None
     got = (int(found[1]), int(found[2])) if found else None
     return None if got == tuple(opt['cell']) else f"끝 셀 {got}, 기대 {tuple(opt['cell'])}"
+
+
+def end_byte_problems(dest, seg):
+    """선택 bytes({FLAGS 이름: 값})가 있는 걷기 구간에서 끝 값이 다른 칸들. walk.lua 는 FLAGS 의 바이트를 이름=값으로 찍는다."""
+    name, how, _, opt = seg
+    if 'bytes' not in opt or how != 'walk':
+        return []
+    log = dest / 'walk.txt'
+    seen = dict(re.findall(r'^(\w+)=([0-9A-F]+)$', log.read_text(encoding='utf-8'), re.M)) if log.exists() else {}
+    return [f'{k} = {seen.get(k)}, 기대 {v:02X}' for k, v in opt['bytes'].items()
+            if k not in seen or int(seen[k], 16) & 0xFF != v]
 
 
 def compare_runs(first, second):

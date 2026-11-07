@@ -172,9 +172,12 @@ class WalkPatchTest(unittest.TestCase):
         import dq4ch1walkcheck as wc
         import dq4ch2walkcheck as cw
         data = (ROOT / 'rom' / 'dq5.sfc').read_bytes()
+        # 선택에 몬스터를 적지 않으면 등록한 사건 모듈 모두의 사건 전투 몬스터를 덮는다
+        every = {m for _, mod in cw.ch2.modules() for b in getattr(mod, 'BATTLES', ()) for m, _ in b['members']}
+        self.assertTrue(set(tempe.MONSTERS) <= every)
         for kind in ('win', 'lose'):
             offs = {int(t.split('=')[0], 16) for t in cw.battle_patch(data, kind).split(';')}
-            self.assertEqual({(o - wc.MONSTERS) // 25 for o in offs}, set(tempe.MONSTERS), kind)
+            self.assertEqual({(o - wc.MONSTERS) // 25 for o in offs}, every, kind)
         with self.assertRaises(ValueError):
             cw.battle_patch(data, 'draw')
 

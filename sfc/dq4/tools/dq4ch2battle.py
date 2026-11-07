@@ -78,10 +78,24 @@ def group_doc(group, members, flags=BOSS_FLAGS):
     return {"index": group, "flags": flags, "members": [{"monster": m, "count": n} for m, n in members]}
 
 
-def writes(stubs):
-    """[(주소, 바이트)]: 공용 루틴과 입구들. stubs: {칸: 무리}."""
+def call_stub(target, prefix=b''):
+    """대화 스크립트가 사건 모듈의 네이티브를 부르는 입구: prefix(이 뱅크에서 돌아야 할 BRK 따위) / JSL target / RTS.
+    대화의 call 은 뱅크 06 안 주소만 받고, BRK 는 부른 뱅크를 데이터 뱅크로 두므로 낮은 WRAM 거울이 없는 뱅크(40~)의
+    사건 코드에서는 BRK 를 쓸 수 없다."""
+    code = bytes(prefix) + b'\x22' + _al(target) + b'\x60'
+    if len(code) > STUB_SIZE:
+        raise ValueError(f'{target:06X}: 입구 {len(code)}바이트가 칸 {STUB_SIZE}바이트를 넘음')
+    return code
+
+
+def writes(stubs, calls=None):
+    """[(주소, 바이트)]: 공용 루틴과 입구들. stubs: {칸: 무리}, calls: {칸: (네이티브 주소, 앞 바이트)}."""
+    calls = calls or {}
+    if set(stubs) & set(calls):
+        raise ValueError(f'전투 입구 칸 {sorted(set(stubs) & set(calls))} 을 두 번 씀')
     out = [(COMMON_AT, common())]
-    out += [(stub_at(k), stub(g)) for k, g in sorted(stubs.items())]
+    out += sorted([(stub_at(k), stub(g)) for k, g in stubs.items()] +
+                  [(stub_at(k), call_stub(a, pre)) for k, (a, pre) in calls.items()])
     for at, code in out:
         if at + len(code) > (STUBS_AT if at == COMMON_AT else END):
             raise ValueError(f'{at:06X}: 전투 진입 코드가 자리를 넘음')

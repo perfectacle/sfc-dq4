@@ -364,6 +364,9 @@ class Walker:
         here = (self.rd(0x7E3020), self.rd(0x7E3080))
         if 'cell' in opt and how == 'walk' and here != tuple(opt['cell']):
             problems.append(f"끝 셀 {here}, 기대 {tuple(opt['cell'])}")
+        if how == 'walk':
+            problems += [f'{k} = {self.rd(self.flags[k][0]):02X}, 기대 {v:02X}' for k, v in opt.get('bytes', {}).items()
+                         if self.rd(self.flags[k][0]) != v]
         return {'name': name, 'status': 'failed' if problems else 'passed', 'problems': problems, 'maps': maps,
                 'flags': [k for k, v in flags.items() if v], 'frame': self.c.n}
 
