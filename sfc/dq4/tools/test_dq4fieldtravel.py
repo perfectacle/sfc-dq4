@@ -87,6 +87,143 @@ class OrderTest(unittest.TestCase):
         self.assertEqual(travel.ship_cell(props, (0x10, 0x10), (0x40, 0x40)), (0x20, 0x21))
 
 
+EXTRA = [{"slot": 12, "group": 0x3D, "listed": True, "maps": (3, 3), "land": (142, 116), "restart": (3, (24, 51))},
+         {"slot": 13, "group": 0x3D, "listed": True, "maps": (4, 5), "land": (192, 82), "restart": (4, (14, 47))},
+         {"slot": 14, "group": 0x45, "listed": True, "maps": (5, 5), "land": (128, 148), "restart": None},
+         {"slot": 15, "group": 0x45, "listed": False, "maps": (0, 4), "land": None, "restart": (2, (8, 19))}]
+MAPS = [(0x3D, 3, 3, 12, 1), (0x3D, 4, 5, 13, 1), (0x45, 0, 4, 15, 0), (0x45, 5, 5, 14, 1), (0x45, 6, 11, 0xFF, 0)]
+# 다시 시작 자리 표: 산트하임(3D/00)이 텐페(3D/03) 앞이라, 그룹만 보면 산트하임에 선다.
+STARTS = bytes((0x3D, 0, 54, 21, 1, 0x80, 0x3D, 3, 24, 51, 1, 0x80, 0x45, 2, 8, 19, 1, 0x80, 0xFF))
+RET = 0xFFFFFE
+
+
+class HookTest(unittest.TestCase):
+    """The ルーラ slot hooks on the w65816 interpreter over a blank ROM: each run stops at a JML target of the hook
+    or at the RTL to the caller."""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "dq5" / "tools"))
+        rom = bytearray(0x200000)
+        for w in travel.hook_writes(EXTRA, MAPS, at=0x3CF000):
+            bank, addr = w["at"].split(":")
+            o = travel.lorom(int(bank, 16) << 16 | int(addr, 16))
+            data = bytes.fromhex(w["hex"])
+            rom[o:o + len(data)] = data
+        o = travel.lorom(travel.START_TABLE)
+        rom[o:o + len(STARTS)] = STARTS
+        o = travel.lorom(travel.RULER_LIST)
+        rom[o:o + 22] = bytes(range(0x80, 0x80 + 22))
+        cls.rom = bytes(rom)
+        cls.labels = travel.hook_code(0x3CF000, EXTRA, MAPS)[1]
+
+    def run_hook(self, entry, a=0, x=0, p=0x30, **wram):
+        """Run from `entry` as if called by JSL; stop at a JML target of the hooks or at the return."""
+        from w65816 import Cpu
+        ram = bytearray(0x20000)
+        for name, value in wram.items():
+            at = int(name[1:], 16)
+            size = 2 if name in ("_B6", "_B8") else 1
+            ram[at:at + size] = value.to_bytes(size, "little")
+        cpu = Cpu(self.rom, ram)
+        cpu.a, cpu.x, cpu.p = a, x, p
+        cpu.push(0xFF)
+        cpu.push16(0xFFFD)
+        cpu.pbr, cpu.pc = entry >> 16, entry & 0xFFFF
+        stops = {travel.LAND_BACK, travel.LAND_DONE, travel.IN_LIST, travel.SLOT_OF, travel.SAVE_BACK,
+                 travel.SAVE_DONE, travel.WIPE_BACK, travel.WIPE_DONE, travel.CONTINUE_BACK, travel.CONTINUE_DONE, RET}
+        while (cpu.pbr << 16 | cpu.pc) not in stops:
+            if cpu.steps > 5000:
+                raise AssertionError(f"no stop by {cpu.pbr:02X}:{cpu.pc:04X}")
+            cpu.step()
+        return cpu.pbr << 16 | cpu.pc, cpu
+
+    def test_land_takes_the_slot_cell(self):
+        at, cpu = self.run_hook(travel.LAND_SITE, a=12)
+        self.assertEqual(at, travel.LAND_DONE)
+        self.assertEqual((cpu.r16(0x0B50), cpu.r16(0x0B52), cpu.wram[0x0B54]), (142, 116, 0x3D))
+        self.assertEqual((cpu.r16(0x00), cpu.r16(0x02)), (142, 116))
+        at, cpu = self.run_hook(travel.LAND_SITE, a=1)
+        self.assertEqual((at, cpu.x & 0xFF), (travel.LAND_BACK, 1))
+
+    def test_visit_sets_the_slot_of_the_map(self):
+        # $BD 의 위 3비트는 맵 번호가 아니다(2A:F397 AND #$1F).
+        at, cpu = self.run_hook(self.labels["visit"], _BC=0x3D, _BD=0x23)
+        self.assertEqual((at, cpu.p & 1), (RET, 0))
+        self.assertEqual((bytes(cpu.wram[0x2030:0x2033]), cpu.wram[0x2193]), (bytes((0, 0x10, 0)), 0x8C))
+        for group, number in ((0x45, 2), (0x45, 7)):
+            at, cpu = self.run_hook(self.labels["visit"], _BC=group, _BD=number, _2193=0x36)
+            self.assertEqual((at, cpu.p & 1), (RET, 0))
+            self.assertEqual((bytes(cpu.wram[0x2030:0x2033]), cpu.wram[0x2193]), (bytes(3), 0x36))
+        at, cpu = self.run_hook(self.labels["visit"], _BC=0x3D, _BD=0)
+        self.assertEqual((at, cpu.a & 0xFF), (travel.IN_LIST, 0x3D))
+
+    def test_chimera_takes_a_marked_town(self):
+        at, cpu = self.run_hook(self.labels["chimera"], a=0x8D)
+        self.assertEqual((at, cpu.x & 0xFF), (RET, 13))
+        at, cpu = self.run_hook(self.labels["chimera"], a=0x3D)
+        self.assertEqual((at, cpu.a & 0xFF, cpu.x & 0xFF), (travel.SLOT_OF, 0x3D, 0))
+
+    def test_ship_finds_the_slot_by_its_landing(self):
+        at, cpu = self.run_hook(self.labels["ship"], a=0x3D, _B6=192, _B8=82)
+        self.assertEqual((at, cpu.x & 0xFF, cpu.a & 0xFF), (RET, 13, 0x3D))
+        at, cpu = self.run_hook(self.labels["ship"], a=0x3D, _B6=78, _B8=148)
+        self.assertEqual((at, cpu.x & 0xFF, cpu.a & 0xFF), (travel.SLOT_OF, 0, 0x3D))
+
+    def test_save_keeps_the_slot_of_the_map(self):
+        for group, number, slot in ((0x3D, 3, 12), (0x45, 2, 15)):
+            at, cpu = self.run_hook(travel.SAVE_SITE, _BC=group, _BD=number)
+            self.assertEqual((at, cpu.x & 0xFF, cpu.a & 0xFF), (travel.SAVE_DONE, slot, group))
+        for group, number in ((0x45, 7), (0x3D, 0), (0x36, 0)):
+            at, cpu = self.run_hook(travel.SAVE_SITE, _BC=group, _BD=number)
+            self.assertEqual((at, cpu.x & 0xFF, cpu.a & 0xFF), (travel.SAVE_BACK, 0, group))
+
+    def test_restart_rows_of_the_slots(self):
+        for site, done in ((travel.WIPE_SITE, travel.WIPE_DONE), (travel.CONTINUE_SITE, travel.CONTINUE_DONE)):
+            # 전멸 쪽은 저장한 칸 바이트에 밤 비트(bit7)가 붙은 채로 온다.
+            at, cpu = self.run_hook(site, a=0x8C if site == travel.WIPE_SITE else 0x0C)
+            self.assertEqual((at, cpu.x & 0xFF), (done, 6))
+            at, cpu = self.run_hook(site, a=15)
+            self.assertEqual((at, cpu.x & 0xFF), (done, 12))
+        at, cpu = self.run_hook(travel.CONTINUE_SITE, a=12)
+        self.assertEqual(cpu.a & 0xFF, 0x3D)
+        at, cpu = self.run_hook(travel.WIPE_SITE, a=14)
+        self.assertEqual((at, cpu.x & 0xFF, cpu.a & 0xFF), (travel.WIPE_BACK, 14, 0x80 + 14))
+        at, cpu = self.run_hook(travel.CONTINUE_SITE, a=2)
+        self.assertEqual((at, cpu.x & 0xFF), (travel.CONTINUE_BACK, 2))
+
+    def test_restart_takes_the_saved_slot(self):
+        # 마지막에 들어간 그룹(A)이 아니라 저장한 칸. 아직 저장하지 않은 16 은 FC 1장 시작 교회(バトランド)의 칸
+        for saved, want in ((0x8C, 0x8C), (0x0F, 0x0F), (0x16, travel.slot_of_fc(travel.FIRST_CHURCH_FC)),
+                            (0x96, travel.slot_of_fc(travel.FIRST_CHURCH_FC))):
+            at, cpu = self.run_hook(self.labels["restart_slot"], a=0x37, _2033=saved)
+            self.assertEqual((at, cpu.a & 0xFF), (RET, want))
+
+    def test_chapter_slot_is_saran(self):
+        self.assertEqual(travel.slot_of_fc(0x02), 2)
+        self.assertEqual(travel.slot_of_fc(0x13), 15)
+        self.assertEqual(travel.chapter_slot_code(), bytes((0xA9, 15, 0x8F, 0x33, 0x20, 0x7E)))
+        with self.assertRaises(ValueError):
+            travel.slot_of_fc(0x2E)
+
+    def test_rom_restarts_reads_the_hook_table(self):
+        self.assertEqual(travel.rom_restarts(self.rom, at=0x3CF000), {12: (0x3D, 3), 13: (0x3D, 4), 15: (0x45, 2)})
+        self.assertEqual(travel.rom_restarts(bytes(0x200000)), {})
+
+    def test_restart_rows(self):
+        self.assertEqual(travel.restart_rows(EXTRA), [bytes((0x3D, 3, 24, 51, 1, 0x80)), bytes((0x3D, 4, 14, 47, 1, 0x80)),
+                                                      bytes((0x45, 2, 8, 19, 1, 0x80))])
+
+    def test_map_rows_block_the_other_parts(self):
+        links = {0x3D: [{"fc": 0x01}, {"fc": 0x0E}], 0x45: [{"fc": 0x13}, {"fc": 0x2E}]}
+        place = {(0x01, 0): (0x3D, 0), (0x01, 1): (0x3D, 1), (0x0E, 0): (0x3D, 2), (0x13, 0): (0x45, 0),
+                 (0x2E, 0): (0x45, 1), (0x2E, 1): (0x45, 2)}
+        extra = [{"fc": 0x0E, "group": 0x3D, "slot": 12, "maps": (2, 2), "listed": True},
+                 {"fc": 0x13, "group": 0x45, "slot": 15, "maps": (0, 0), "listed": False}]
+        self.assertEqual(travel.map_rows(links, place, extra),
+                         [(0x3D, 2, 2, 12, 1), (0x45, 0, 0, 15, 0), (0x45, 1, 2, 0xFF, 0)])
+
+
 @unittest.skipUnless(DQ4.exists() and DQ5.exists(), "rom/dq4.nes and rom/dq5.sfc")
 class RomTest(unittest.TestCase):
     def test_destinations_land_below_an_entrance(self):

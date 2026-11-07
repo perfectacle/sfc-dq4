@@ -23,7 +23,7 @@
 | `7E:2033` bit0-6 | ルーラ 칸 번호(0~21) |
 | `7E:2033` bit7 | 밤. `25:8278` 이 시각 `7E:075E` 를 밤이면 `0190`, 아니면 `0050` 으로 둠 |
 | `25:85D5`[칸] | 칸의 그룹(`01:8001` 이 0 이면 `25:85EB`) |
-| `25:8621` | 6바이트 항목 `[BC][BD][X][Y][층][198E]`, `FF` 로 끝남. 칸의 그룹과 같은 첫 항목에 섬 |
+| `25:8621` | 6바이트 항목 `[BC][BD][X][Y][층][198E]`, `FF` 로 끝남. 칸의 그룹과 같은 첫 항목에 섬. 그룹을 나눠 쓰는 칸(12 テンペ·13 フレノール·15 サラン)은 훅 표의 그룹·맵이 같은 항목([그룹을 나눠 쓰는 칸](dq4-field-format.md#그룹을-나눠-쓰는-칸)). `place_rows` 는 롬의 훅 표(`dq4fieldtravel.rom_restarts`)로 같게 고름 |
 
 1장 롬에서 표로 고른 자리와 이어 한 뒤 선 자리(snes9x, 맵에 선 프레임)는 같았습니다.
 
@@ -82,7 +82,7 @@ uv run --locked python sfc/dq4/tools/dq4savefixture.py make --rom work/ch1/dq4-c
 uv run --locked python sfc/dq4/tools/dq4savefixture.py check --rom work/ch1/dq4-ch1-full.sfc --out work/savefixture
 ```
 
-`--set` 의 값은 `gold=`, `level=`, `hp=`, `max_hp=`, `mp=`, `max_mp=`, `items=CD,01`(16진), `party=05`, `flag=HOIMIN,KIDNAPPED`(앞에 `-` 면 끔), `effect=hoimin`, `place=`(이름 `batland`·`imuru`·`prologue`·`santeem` 또는 한글, 또는 칸 번호), `night=1`, `poke=2058=CD;2223|08`(`dq5warp.lua` SET 꼴, `=`·`|`·`&`)입니다.
+`--set` 의 값은 `gold=`, `level=`, `hp=`, `max_hp=`, `mp=`, `max_mp=`, `items=CD,01`(16진), `party=05`, `flag=HOIMIN,KIDNAPPED`(앞에 `-` 면 끔), `effect=hoimin`, `place=`(이름 `batland`·`imuru`·`prologue`·`santeem`·`tempe`·`frenol`·`saran` 또는 한글, 또는 칸 번호), `night=1`, `poke=2058=CD;2223|08`(`dq5warp.lua` SET 꼴, `=`·`|`·`&`)입니다.
 
 검사에서 쓸 때는 라이브러리로 부릅니다.
 
@@ -141,6 +141,10 @@ core.poke(dq4compatcheck.sets(dq4ch1walkcheck.pins({})))   # 난수·시각을 �
 문 검사 둘도 이 길을 탑니다. `dq4doorcheck` 는 서장 끝에서, `dq4doorstandcheck` 는 `dq4heroblockcheck` 의 성 마을 `36/00` 출발 상태에서 시작합니다. 서장 끝·배 선실이 아닌 출발 상태는 `resolve` 의 `build` 로 만들고, 만든 뒤 같은 곁 파일을 적습니다. 그래서 두 검사 모두 `--state` 에는 같은 롬으로 SHA-1 을 적은 상태만 받습니다.
 
 우물 검사의 전멸 장면은 1장 롬에서 돕니다. 서장 끝 상태의 다시 시작 자리는 `$195E` = `36`(맵 `36/01`, 헤드리스로 잼)이라 선실의 `02` 와 다릅니다. `wipe-02` 는 `02` 를 직접 두고, `wipe-own` 은 서장 끝의 값을 그대로 둡니다.
+
+## 2장 기록으로 이어 하기
+
+`dq4fieldsavecheck.py` 의 `continue-*` 가 새 게임 밑판에 2장 flag(`7E:2208` bit4)와 크리프트·브라이 사람 기록(`+0` = `09`·`05`, 일행 수 3)을 두고 칸 1·12·13·15 로 이어 합니다. snes9x·bsnes 모두 각 칸의 교회(`3D/00` (54,21)·`3D/03` (24,51)·`3D/04` (14,47)·`45/02` (8,19))에 422~440프레임에 섰고, flag 와 일행 기록 셋·일행 수가 기록과 같았습니다. `save-tempe-*` 는 텐페 교회로 이어 한 뒤 `7E:2033` 을 `07` 로 바꾸고 신부에게 기록해 `7E:2033` 과 SRAM 기록 칸이 모두 `0C` 가 되는 것을 봅니다. 주인공 그림 훅(`05:D9A1`)은 저장되는 flag 를 그때그때 읽으므로 기록에 따로 남길 것이 없습니다(코드 읽기, 이어 한 화면의 그림은 보지 않음).
 
 ## 남은 것
 

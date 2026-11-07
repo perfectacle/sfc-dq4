@@ -266,14 +266,16 @@ class ReturnPlacesTests(unittest.TestCase):
         out[o + 6 * len(rows)] = 0xFF
         return out, bytes(original)
 
-    def run_places(self, out, original, place):
+    def run_places(self, out, original, place, extra=()):
+        import dq4fieldtravel
         import dq4groupbuild
         prg = bytearray(0x1E * 0x4000 + 0x4000)
         a = ch.FC_PLACES[1] - 0x8000 + ch.FC_PLACES[0] * 0x4000
         prg[a:a + 4] = bytes((1, 2, 3, 4))
         with unittest.mock.patch('kr_patch.fc.ines.prg', lambda raw: bytes(prg)), \
                 unittest.mock.patch.object(dq4groupbuild, 'placement', lambda prg: place), \
-                unittest.mock.patch.object(dq4groupbuild, 'cell', lambda x, y: (2 * x + 1, 2 * y + 1)):
+                unittest.mock.patch.object(dq4groupbuild, 'cell', lambda x, y: (2 * x + 1, 2 * y + 1)), \
+                unittest.mock.patch.object(dq4fieldtravel, 'extras', lambda prg, links, place: list(extra)):
             return ch.return_places(out, original, b'dq4')
 
     def test_a_new_group_takes_a_free_row_with_its_first_fc_return_place(self):
@@ -289,6 +291,18 @@ class ReturnPlacesTests(unittest.TestCase):
         out, original = self.rom([0x36] * 11 + [0x37] * 11, [0x05] * 11 + [0x06] * 11, self.ROWS)
         before = bytes(out)
         self.assertEqual(bytes(self.run_places(out, original, {(9, 9): (0x37, 9)})), before)
+
+    def test_an_extra_slot_church_takes_its_own_row_after_the_group_rows(self):
+        # 그룹 37 의 첫 항목과 같은 그룹의 둘째 교회(맵 4)는 따로 줄을 받고, 이미 있는 줄은 다시 넣지 않는다
+        rows = [(0x05, 0x01), (0x06, 0x02), (0x36, 0x03)]
+        out, original = self.rom([0x36] * 11 + [0x37] * 11, [0x05] * 11 + [0x06] * 11, rows)
+        extra = [{'group': 0x37, 'restart': (4, (24, 51))}, {'group': 0x36, 'restart': (3, (1, 1))},
+                 {'group': 0x37, 'restart': None}]
+        result = self.run_places(out, original, {(1, 2): (0x37, 9)}, extra)
+        o = ch.lorom(ch.START_TABLE)
+        self.assertEqual(bytes(result[o:o + 6]), bytes((0x37, 9, 7, 9, 1, 0x80)))
+        self.assertEqual(bytes(result[o + 6:o + 12]), bytes((0x37, 4, 24, 51, 1, 0x80)))
+        self.assertEqual(bytes(result[o + 12:o + 18]), bytes((0x36, 3, 1, 1, 1, 0x80)))
 
     def test_no_free_row_stops_the_build(self):
         out, original = self.rom([0x36] * 11 + [0x37] * 11, [0x05] * 11 + [0x06] * 11, [(0x36, 3)])

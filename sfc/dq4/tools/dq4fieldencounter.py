@@ -396,6 +396,57 @@ def docs(prg, dq5, enc, dungeon=()):
             {"format": "dq5encounter/1", "field_grids": grids(prg, assign), "fixed_groups": groups}, report)
 
 
+# DQ5 몬스터 표(23:8000, dq5tables MONSTER_FIELDS)의 비트 수. FC 레코드(18:$8046)는 HP·공격·수비·금화가 10비트다.
+DQ5_BITS = {"HP": 11, "MP": 8, "민첩": 8, "공격": 9, "수비": 9, "경험치": 16, "금화": 10}
+# DQ5 수비 1FF 는 게임이 7FF 로 읽는다(21:A2B5). FC 수비 1023(메탈 셋)은 그 값으로 받는다.
+DQ5_DEFENCE_MAX = 0x1FF
+# 드롭 확률 등급: FC 바이트 20 bit2-0(0 반드시, 1~6 은 12:$9286 의 20 10 08 04 02 01 /256, 7 은 1/4096)과 DQ5
+# 27:8218 의 1/N(1, 8, 16, 32, 64, 128, 256, 4096)이 등급마다 같다.
+FC_DROP_NONE = 0x7F
+
+
+def fc_monster_fields(record):
+    """FC 몬스터 레코드 22바이트 → DQ5 표의 이름으로 된 값과 FC 드롭(물건 번호 또는 None, 등급)."""
+    ten = lambda lo, hi: record[lo] | (record[hi] & 3) << 8  # noqa: E731
+    drop = record[8] & 0x7F
+    return ({"HP": ten(4, 15), "MP": record[3], "민첩": record[2], "공격": ten(5, 16), "수비": ten(6, 17),
+             "경험치": record[0] | record[1] << 8, "금화": ten(7, 18)},
+            None if drop == FC_DROP_NONE else drop, record[20] & 7)
+
+
+def monster_fit(prg, dq5, ids=None):
+    """FC 몬스터를 DQ5 몬스터 자리에 옮길 때 걸리는 것: {FC ID: {name, fields, over, drop, drop_rate, dq5_drop}}.
+    over 는 DQ5 비트 수를 넘는 필드(수비 1023 은 DQ5 1FF 로 받으므로 뺌), dq5_drop 은 이름이 같은 DQ5 물건 번호
+    (없으면 None). ids 가 없으면 모든 몬스터."""
+    import dq4data
+    import dq4text
+    from dq5chest import item_name
+    from dq5map import Rom
+    rom = Rom(dq5)
+    names = {}
+    for k in range(0xD8):
+        names.setdefault(item_name(rom, k), k)
+    kana = str.maketrans("りべぺへぼ", "リベペヘボ")
+    items = dq4data.name_list(prg, "item")
+    out = {}
+    for i, name, _, _, record in dq4data.monsters(prg):
+        if ids is not None and i not in ids:
+            continue
+        fields, drop, rate = fc_monster_fields(record)
+        over = [k for k, v in fields.items() if v >= 1 << DQ5_BITS[k] and not (k == "수비" and v == 0x3FF)]
+        drop_name = None if drop is None else dq4text.text(items[drop + 1])
+        dq5_drop = None if drop is None else names.get(drop_name, names.get(drop_name.translate(kana)))
+        out[i] = {"name": name, "fields": fields, "over": over, "drop": drop_name, "drop_rate": rate,
+                  "dq5_drop": dq5_drop}
+    return out
+
+
+def zone_monsters(prg, zones):
+    """FC 구역(필드·던전 번호) 레코드 칸에 나오는 몬스터 ID."""
+    enc = _fc(prg)
+    return sorted({m for z in zones for m in enc.zone(prg, z)["slots"] if m not in (0, 0xFF)})
+
+
 def main():
     from kr_patch.fc import ines
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
