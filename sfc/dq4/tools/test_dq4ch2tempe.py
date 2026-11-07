@@ -24,7 +24,10 @@ class EventTest(unittest.TestCase):
         # 바구니 서술 다음 번호가 이긴 뒤 서술이다(메시지는 등록 차례로 이어 붙음)
         self.assertEqual(ctx.msg['won'], base['basket'] + 1)
         self.assertEqual(list(ctx.msg), list(tempe.MESSAGES))
-        self.assertEqual(len(ev.talk_scripts(0x1000)), len(ev.TALKS) + len(tempe.TALKS))
+        # 대화 본문은 등록한 모듈 모두의 것(텐페 뒤에 다른 사건 모듈이 붙음)
+        self.assertEqual(len(ev.talk_scripts(0x1000)),
+                         len(ev.TALKS) + sum(len(getattr(m, 'TALKS', ())) for _, m in ev.modules()))
+        self.assertEqual(ev.EVENTS[0], 'dq4ch2tempe')
 
     def test_fight_turns_the_event_off_around_the_battle(self):
         code = tempe._fight()
