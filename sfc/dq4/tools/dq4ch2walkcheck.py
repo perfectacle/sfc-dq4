@@ -282,7 +282,7 @@ SEGMENTS += [
     ('endor_lose_side', 'warp', ENDOR_RING, {'map': endor.ARENA, 'poke': ENDOR_ORDER_POKE}),
     ('endor_lose', 'walk', ENDOR_IN_RING + taps(30, 60) + ';wait:300;' + CLOSE,
      {'battle': f'lose:{endor_monster(0)}', 'map': endor.BEDROOM, 'cell': endor.BED_CELL,
-      'off': ENDOR_FLAGS_OFF + ['ENDOR_CHAMPION'], 'bytes': {'ENDOR_STAGE': 0, **ENDOR_BACK}, 'maxf': 4000}),
+      'off': ENDOR_FLAGS_OFF + ['ENDOR_CHAMPION'], 'bytes': {'ENDOR_STAGE': 0, **ENDOR_BACK}, 'maxf': 5500}),
     # ② 상대마다 따로: 이긴 수 k 인 대회 중 상태로 링에 서서 k 번째 상대를 이기고, 다음 상대에게 져 침대로. 첫 상대는
     # 약초 둘을 쥐고 이긴 뒤 둘 다 쓴다(047D → 047E → 047F)
     *[seg for k in range(endor.ROUNDS - 1) for seg in (
@@ -290,7 +290,7 @@ SEGMENTS += [
          {'map': endor.ARENA, 'poke': endor_in(k) + (';' + ENDOR_HERBS if k == 0 else '')}),
         (f'endor_bout{k}', 'walk', ENDOR_IN_RING + taps(50, 60) + ';wait:300;' + CLOSE,
          {'battle': f'weak:{endor_monster(k)}+lose:{endor_monster(k + 1)}', 'map': endor.BEDROOM,
-          'cell': endor.BED_CELL, 'off': ENDOR_FLAGS_OFF + ['ENDOR_CHAMPION'], 'maxf': 5500,
+          'cell': endor.BED_CELL, 'off': ENDOR_FLAGS_OFF + ['ENDOR_CHAMPION'], 'maxf': 7000,
           'bytes': {'ENDOR_STAGE': k + 1, **ENDOR_BACK,
                     **({'ALENA_ITEM0': ch2.SILK_ROBE, 'ALENA_ITEM1': 0xFF, 'ALENA_EQUIP': 0x01} if k == 0 else {})}}))],
     # 대회 중 판 사이마다 방향 키를 눌러도 링 인물의 대화가 끊기지 않고 넷째·다섯째를 잇달아 이겨 우승, 일행이
@@ -304,7 +304,7 @@ SEGMENTS += [
     ('endor_final_side', 'warp', ENDOR_RING, {'map': endor.ARENA, 'poke': endor_in(endor.ROUNDS - 1)}),
     ('endor_final', 'walk', ENDOR_IN_RING + taps(40, 60) + ';wait:300;' + CLOSE,
      {'battle': f'weak:{endor_monster(endor.ROUNDS - 1)}', 'map': endor.ARENA, 'want': ['ENDOR_CHAMPION'],
-      'off': ENDOR_FLAGS_OFF, 'bytes': {'ENDOR_STAGE': endor.ROUNDS, **ENDOR_BACK}, 'maxf': 4000}),
+      'off': ENDOR_FLAGS_OFF, 'bytes': {'ENDOR_STAGE': endor.ROUNDS, **ENDOR_BACK}, 'maxf': 5500}),
     # ④ 우승 뒤 엔돌 성 앞: 해자 다리 아래에서 성 쪽으로 오르면 산트하임에서 온 사자가 말한다
     ('endor_messenger_side', 'warp', f'{endor.TOWN},46,28', {'map': endor.TOWN}),
     ('endor_messenger', 'walk', '46,23;wait:60;' + taps(4) + ';wait:200;' + CLOSE,

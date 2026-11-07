@@ -184,6 +184,11 @@ why = "이름 표 자리(23:C242~D6A0) 안 이름을 FC 이름으로(dq5namewrit
 
 [[original]]
 stage = "chapter1"
+at = "23:D9C7~23:DA55"
+why = "이벤트 전투 무리 표(23:D757 + 무리×13)의 무리 30~3A 를 2장 사건 전투로(dq4ch2event.encounter_groups, 예약표의 무리 31~3A). 원래 DQ5 는 30~3F 를 즉값으로 부르지 않는다(dq5-data-format.md)"
+
+[[original]]
+stage = "chapter1"
 at = "23:F1E0~23:F54D"
 why = "필드 지형 조우율(23:F1E0)과 구역 격자(23:F1FC~)를 FC 로(dq5encounterwrite grids, dq4fieldencounter)"
 
