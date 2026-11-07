@@ -1589,6 +1589,7 @@ name = "dq4-map-song"
 why = "맵·필드에 들어선 뒤의 곡이 FC 맵 갈래대로(산트하임 성 01, 2장 마을 06 — 빌린 03/00 의 곡 바이트 0A 는 포팅에서 呪われし塔 라 텐페·프레놀·바자가 탑 곡이었음), 밤이면 성 30·마을 31(탑·동굴은 그대로), 2장 flag 가 켜진 필드는 05 おてんば姫の行進(1장 필드 02 는 그대로)이어야 한다. 곡 고르기(dq4soundpatch.song_pick_code)는 같은 곡 판정 00:CEAB 에 건다. 00:CE9A 에 걸었던 판은 CE75·CE86 이 그 가운데 CE9D 로 뛰어 이벤트 곡(7E:21DF bit7)이 FF(울리지 않음)였다"
 paths = [
   "sfc/dq4/tools/dq4mapsongcheck.py",
+  "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4groupbuild.py",
   "sfc/dq4/tools/dq4groupcheck.py",
   "sfc/dq4/tools/dq4soundpatch.py",
