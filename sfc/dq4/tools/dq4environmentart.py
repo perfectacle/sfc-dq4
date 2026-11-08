@@ -20,7 +20,7 @@ _BANKS = (
     ("18202a", "292121", "3e2805", "5a3b00", "7f5e13", "a98124", "cda23c", "e2cd7a", "f7f7d6", "101010", "7c8078", "efefd6", "102900", "c66a52", "5a2a22", "e08c6e"),
     ("18202a", "000000", "292121", "52524a", "461b15", "64231b", "4a4200", "846b00", "81362e", "9f4d45", "c16953", "df906d", "f7c69c", "947321", "f7f7d6", "efefd6"),
     ("18202a", "000000", "292121", "52524a", "5a2a22", "8a3e30", "634a00", "c69429", "c66a52", "ffde00", "e08c6e", "f6bba2", "947321", "f7f7d6", "efefd6", "00298c"),
-    ("18202a", "00104a", "002581", "0024d9", "0042ff", "0073ff", "1aa2ff", "9ce7ff", "102900", "054600", "0ba100", "2dff39", "9cff8c", "102900", "25ac00", "9cff8c"),
+    ("18202a", "00104a", "002581", "0024d9", "0042ff", "0073ff", "1aa2ff", "9ce7ff", "102900", "054600", "0ba100", "2dff39", "9cff8c", "7b3129", "a5524a", "521810"),
 )
 # DQ5 maps keep object colours at fixed slots: line 6 = 1·2·3·6·7·9 (doors), line 5 = 1·2·3·6·7
 # (gates), shared by the common door tiles. Drawing code keeps its old colour numbers for these
@@ -1017,6 +1017,22 @@ def _brick_paving():
     return _finish(c, "붉은 벽돌 바닥", "town")
 
 
+def _crimson_carpet():
+    """왕좌의 방 같은 FC 짜임 무늬 바닥(03/1E 그림): DQ5 그란바니아 성 바닥처럼 구조 없는 진홍 카펫에 잔점만.
+    벽돌·판석 무늬는 사용자 검토에서 고르지 않았다. 색은 DQ5 바닥 원색 7b3129·a5524a·521810 이고, 어느 그림도 쓰지
+    않던 7번 줄 13~15번에 둔다(5번 줄 빨강을 쓰면 원색이 아니고, 3번 줄 빈 칸은 가구 바탕 맞추기가 쓴다)."""
+    c = _Canvas(7, fill=13)
+    rng = random.Random(5)
+    for y in range(16):
+        for x in range(16):
+            v = rng.random()
+            if v < 0.19:
+                c.point((x, y), 14)
+            elif v < 0.29:
+                c.point((x, y), 15)
+    return _finish(c, "진홍 카펫", "castle")
+
+
 def _cloth_table():
     c = _Canvas(4, fill=7)
     c.line((0, 0, 15, 0), 5)
@@ -1353,7 +1369,7 @@ def _pew():
 
 def _castle_town_assets():
     assets = {
-        "iron_door": _iron_door(), "red_paving_cracked": _red_paving_cracked(), "brick_paving": _brick_paving(),
+        "iron_door": _iron_door(), "red_paving_cracked": _red_paving_cracked(), "brick_paving": _brick_paving(), "crimson_carpet": _crimson_carpet(),
         "cloth_table": _cloth_table(), "potted_plant": _potted_plant(), "throne": _throne(),
         "bookshelf": _bookshelf(), "sky": _sky(), "sky_deep": _sky(True), "stump": _stump(), "log_pile": _log_pile(),
         "crops": _crops(), "signboard": _signboard(), "grave": _grave(), "stone_ledge": _stone_ledge(),

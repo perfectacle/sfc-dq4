@@ -105,7 +105,7 @@ EXAMPLES = {
     (0x03, 0x19): ("bookshelf", "책장"),
     (0x03, 0x1A): ("sky", "하늘・떨어지는 칸"),
     (0x03, 0x1B): ("gold_door16", "문(まほうのカギ)"),
-    (0x03, 0x1E): ("brick_paving", "벽돌 바닥"),
+    (0x03, 0x1E): ("crimson_carpet", "진홍 카펫 바닥(FC 짜임 무늬)"),
     (0x04, 0x06): ("cabin_slats_left", "통나무집 창살 왼쪽"),
     (0x04, 0x07): ("cabin_slats", "통나무집 창살"),
     (0x04, 0x08): ("cabin_planks_right", "통나무집 벽 오른쪽 기둥"),
@@ -369,6 +369,9 @@ WATER_BLUES = {0x01, 0x11, 0x21}
 # Line 7 holds the blues in colours 1-7 and, after them, the greens only the shore art uses; a shaped block over
 # water, sky or cloud takes its outline and moved colours from the blues, or its edges turn green.
 SHAPE_SPAN = {7: 8}
+# Colours 13-15 of row 7 belong to the crimson carpet alone; a fixture background moved into row 7 must not
+# turn red.
+FILL_SPAN = {7: 13}
 
 
 def map_palette(name, sheet):
@@ -578,7 +581,7 @@ def _tile(assets, name, palette, map_type, block=None, background_name=None):
                         continue
                     value = background.getpixel((x + dx, y + dy))
                     if bank is not None and value >> 4 != bank:
-                        value = _nearest(palette, value, bank)
+                        value = _nearest(palette, value, bank, FILL_SPAN.get(bank, 16))
                         remapped += 1
                     result.putpixel((x + dx, y + dy), value)
     return result, {
