@@ -23,6 +23,7 @@ sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
 import dq4chapter1 as ch1  # noqa: E402
 from dq4chapterbox import ENTER, LEAVE  # noqa: E402
+from dq4npcport import STAND  # noqa: E402
 import dq4ch2battle  # noqa: E402
 import dq4ch2event as ch2  # noqa: E402
 
@@ -59,6 +60,10 @@ BED_CELL = cell(0x03, 0x09)
 MESSENGER_CELL = cell(0x1A, 0x0A)
 MESSENGER_ROW = (0x10 * 2, 0x0A * 2 - 1, 0x22 * 2, 0x0B * 2 + 1)
 MESSENGER_PIC = 0x06           # 산트하임 병사(dq4people 「2장 사건 인물 그림 표」)
+# 링 위 상대(FC 04/07 대회 중 목록의 링 위 두 칸 가운데 왼쪽 (0E,0A)). 주인공이 링에 드는 (0E,0C) 바로 위에서 아래를 본다.
+# 투기장 목록 맨 앞이라 물체 슬롯 08(그림 7E:3220 + 슬롯)
+OPPONENT_CELL = cell(0x0E, 0x0A)
+OPPONENT_PIC_AT = 0x7E3220 + 0x08
 
 # 일행 기록(7E:2040 + 42 × n)과 순서 표. 2장 일행은 아리나(기록 0)·크리프트·브라이
 PARTY_AT = ch2.PARTY_AT
@@ -81,6 +86,8 @@ OPPONENTS = (
     (0x35, 0x68, 0xB2, '사이몬'),
     (0x36, 0x72, 0xBA, '베로린맨'),
 )
+# 링에 서는 상대의 그림(dq4people 「2장 사건 인물 그림 표」), OPPONENTS 차례
+OPPONENT_PICS = (0x60, 0x89, 0x1C, 0x1D, 0x34)
 GROUP0 = OPPONENTS[0][0]
 assert [g for g, *_ in OPPONENTS] == list(range(GROUP0, GROUP0 + ROUNDS))
 # 무리 플래그: 도망칠 수 없고 곡은 보통 전투 17(FC·NDS 모두 투기장 전투에 따로 곡을 주지 않음)
@@ -100,6 +107,7 @@ SCRIPT_LIST = '10:9A2F'
 SCRIPTS = {'ring': (2, '10:9A44'), 'messenger': (3, '10:9A5A')}
 
 ARENA_LIST, TOWN_SEEN, TOWN_MESSENGER = 'ch2_endor_arena', 'ch2_endor_town_seen', 'ch2_endor_town_messenger'
+ARENA_DONE = 'ch2_endor_arena_done'
 
 # 21:805A 등과 같은 이 해킹의 루틴
 BATTLE_SONG, BATTLE_PREP, BATTLE_PREP2 = 0x268F43, 0x04D9CE, 0x0384D1   # 01:868B 가 전투 앞에 부르는 셋
@@ -219,6 +227,12 @@ def _fight():
     for r in (BATTLE_SONG, BATTLE_PREP, BATTLE_PREP2):
         a(0x22, _al(r))
     a(0x68, 0x22, _al(BATTLE_RUN), 0xC9, LOSE).br(BEQ, 'lost')
+    # 이기면 링 위 상대를 다음 상대 그림으로. 전투 뒤 맵 화면을 되살리는 01:8A87 이 슬롯마다 그림(3220)으로 OBJ 타일을
+    # 다시 올리므로 BATTLE_AFTER 앞에 바꾼다(맵 위에서 바로 올리면 화면이 켜져 있어 VRAM 에 써지지 않음)
+    a(lda(STAGE_AT), 0x1A)
+    for k in range(1, ROUNDS):
+        a(0xC9, k).br(BNE, f'pic{k}')(0xA9, OPPONENT_PICS[k]).br(BRA, 'pic').label(f'pic{k}')
+    a.br(BRA, 'after').label('pic')(sta(OPPONENT_PIC_AT)).label('after')
     a(0x22, _al(BATTLE_AFTER), 0xE2, 0x30)
     a(lda(won), 0x09, 0x80, sta(won), lda(STAGE_AT), 0x1A, sta(STAGE_AT)).brl('end')
     a.label('lost')(0xA9, 0x00, 0x22, _al(BATTLE_AFTER), 0xE2, 0x30)
@@ -539,7 +553,12 @@ def npc_lists(lists, ctx):
     messenger = {"from": _src('messenger'), "time": "day",
                  "fields": {"x": MESSENGER_CELL[0], "y": MESSENGER_CELL[1], "facing": "down", "talk": t['messenger'],
                             "gfx": MESSENGER_PIC, "layer": 0, "interval": 1}}
-    new = [{"name": ARENA_LIST, "entries": list(lists[ARENA]["entries"]) + [ring]},
+    # 대회 앞·대회 중에는 첫 상대가 링에 서 있고, 판을 이기면 _fight 가 그림을 다음 상대로 바꾼다. 우승 뒤에는 없음
+    opponent = {"from": STAND, "time": "day",
+                "fields": {"x": OPPONENT_CELL[0], "y": OPPONENT_CELL[1], "facing": "down", "talk": t['ring'],
+                           "gfx": OPPONENT_PICS[0], "layer": 0, "interval": 0}}
+    new = [{"name": ARENA_LIST, "entries": [opponent] + list(lists[ARENA]["entries"]) + [ring]},
+           {"name": ARENA_DONE, "entries": list(lists[ARENA]["entries"]) + [ring]},
            {"name": TOWN_SEEN, "entries": list(lists[TOWN]["entries"])},
            # 사자는 목록 맨 앞(물체 슬롯 08): 뒤에 두면 마을 사람 그림 뒤에 실려 타일이 OBJ VRAM 끝을 넘었다(실측)
            {"name": TOWN_MESSENGER, "entries": [messenger] + list(lists[TOWN]["entries"])}]
@@ -547,7 +566,8 @@ def npc_lists(lists, ctx):
     def on(m, flag, name):
         return {"map": m, "flag": flag[0], "when": "on", "mask": flag[1], "list": f"new:{name}"}
     # 대체 표는 앞 줄부터 맞는 첫 줄을 쓴다: 나중 상태를 먼저
-    over = [on(TOWN, MESSENGER, TOWN_SEEN), on(TOWN, CHAMPION, TOWN_MESSENGER), on(ARENA, ch2.CHAPTER2, ARENA_LIST)]
+    over = [on(TOWN, MESSENGER, TOWN_SEEN), on(TOWN, CHAMPION, TOWN_MESSENGER), on(ARENA, CHAMPION, ARENA_DONE),
+            on(ARENA, ch2.CHAPTER2, ARENA_LIST)]
     by_map = {}
     for (m, time, fc), name in TOWNSFOLK.items():
         by_map.setdefault(m, {})[(time, cell(*fc))] = name

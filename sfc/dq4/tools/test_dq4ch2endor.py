@@ -144,6 +144,11 @@ class ModuleTest(unittest.TestCase):
         # 엔돌은 3장도 쓰므로 2장 flag(또는 2장에서만 켜지는 우승·사자 flag)가 켜졌을 때만 바꾼다
         for o in over:
             self.assertIn((o['flag'], o['mask']), (ev.CHAPTER2, en.CHAMPION, en.MESSENGER))
+        arena = {n['name']: n['entries'] for n in new}
+        self.assertEqual(arena[en.ARENA_LIST][0]['fields']['gfx'], en.OPPONENT_PICS[0])
+        self.assertEqual(len(arena[en.ARENA_DONE]), len(arena[en.ARENA_LIST]) - 1)
+        self.assertEqual([o['list'] for o in over if o['map'] == en.ARENA],
+                         [f'new:{en.ARENA_DONE}', f'new:{en.ARENA_LIST}'])     # 우승 뒤에는 링 위 상대가 없음
         town = [o['list'] for o in over if o['map'] == en.TOWN]
         self.assertEqual(town, [f'new:{en.TOWN_SEEN}', f'new:{en.TOWN_MESSENGER}'])
 
@@ -195,6 +200,22 @@ class PartyTest(unittest.TestCase):
             self.assertEqual(m.counts(), (1, 1, 1))
             self.assertTrue(m.flag() & en.IN[1])
             self.assertFalse(m.flag() & en.LOST[1])
+
+    def test_won_bout_puts_the_next_opponent_on_the_ring(self):
+        # 이긴 판의 다음 상대 그림을 링 위 상대(물체 슬롯 08)에 쓴다. 마지막 판과 진 판은 그대로
+        for stage in range(en.ROUNDS):
+            m = Machine(battle_result=0x00)
+            m.call('leave')
+            m.ram[w(en.STAGE_AT)] = stage
+            m.ram[w(en.OPPONENT_PIC_AT)] = 0xEE
+            m.call('fight')
+            want = en.OPPONENT_PICS[stage + 1] if stage + 1 < en.ROUNDS else 0xEE
+            self.assertEqual(m.ram[w(en.OPPONENT_PIC_AT)], want, stage)
+        m = Machine(battle_result=en.LOSE)
+        m.call('leave')
+        m.ram[w(en.OPPONENT_PIC_AT)] = 0xEE
+        m.call('fight')
+        self.assertEqual(m.ram[w(en.OPPONENT_PIC_AT)], 0xEE)
 
     def test_stage_past_the_last_fights_the_last(self):
         m = Machine()

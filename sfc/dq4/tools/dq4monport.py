@@ -116,14 +116,12 @@ PICTURES_AT, RECORDS_AT = '48:8000', '4B:8000'
 
 
 def reachable(zone_report, event_groups):
-    """dq5monlimits 조합 「나온 곳」 → 이 롬에서 나올 수 있는지. DQ5 구역·이벤트 무리 가운데 FC 조우가 쓰는 것(그룹 빌드의
-    zone-report.json 의 zone, 배의 SEA_AREAS)과 이 해킹의 사건 무리만. 나머지 DQ5 구역·무리는 닿지 않는데, 새 번호의 원래
-    DQ5 몬스터나 그림을 같이 쓰는 DQ5 몬스터가 거기 남아 있어 세면 덜 놓인다고 거부된다."""
+    """(구역 번호 집합, 이벤트 무리 「나온 곳」 집합): 이 롬에서 나올 수 있는 DQ5 구역(그룹 빌드 zone-report.json 의
+    zone 과 배의 SEA_AREAS)과 이 해킹의 사건 무리. 나머지 DQ5 구역·무리는 닿지 않는데, 새 번호의 원래 DQ5 몬스터나 그림을
+    같이 쓰는 DQ5 몬스터가 거기 남아 있어 세면 덜 놓인다고 거부된다."""
     import dq4fieldencounter
     areas = {v['zone'] for v in json.loads(zone_report.read_text()).values()} | set(dq4fieldencounter.SEA_AREAS)
-    areas = {f'구역 {a:02X} ' for a in areas}
-    groups = {f'이벤트 무리 {g:02X}' for g in event_groups}
-    return lambda where: where in groups or any(where.startswith(a) for a in areas)
+    return areas, {f'이벤트 무리 {g:02X}' for g in event_groups}
 
 
 def build(dq5, rom, work, zone_report, event_groups):
@@ -133,14 +131,24 @@ def build(dq5, rom, work, zone_report, event_groups):
     import dq5monwrite
     from dq5map import Rom
     work.mkdir(parents=True, exist_ok=True)
-    keep = reachable(zone_report, event_groups)
-    counted = dq5monlimits.compositions
+    areas, groups = reachable(zone_report, event_groups)
+    counted, area = dq5monlimits.compositions, dq5monlimits.area
 
-    def scoped(r, areas=None):
-        found, skipped = counted(r, areas)
-        return {k: w for k, w in found.items() if keep(w)}, skipped
+    def scoped_area(r, n, *rest):
+        # 닿지 않는 구역은 칸 가중치를 0 으로 읽게 해 세지 않는다. 「나온 곳」 으로 거르면 같은 조합이 닿지 않는 구역에서
+        # 먼저 나왔을 때(첫 곳만 남음) 사건 무리의 것까지 빠진다
+        ar = area(r, n, *rest)
+        return ar if n in areas else {**ar, 'weights': [0] * len(ar['weights'])}
+
+    def scoped(r, n_areas=None):
+        dq5monlimits.area = scoped_area
+        try:
+            found, skipped = counted(r, n_areas)
+        finally:
+            dq5monlimits.area = area
+        return {k: w for k, w in found.items() if w.startswith('구역 ') or w in groups}, skipped
     # 이 롬의 조우에 아직 나오지 않는 몬스터(뒷 장 구역에만 나옴)는 한도를 셀 수 없어 그 장을 옮길 때 넣는다
-    appear = {m for groups in scoped(Rom(bytes(rom)))[0] for m, _, _ in groups}
+    appear = {m for found in scoped(Rom(bytes(rom)))[0] for m, _, _ in found}
     source = doc(Rom(dq5.read_bytes()), work / 'pictures', appear)
     later = sorted(m for m in [*PORT.values(), *EVENT.values()] if m not in appear)
     if later:

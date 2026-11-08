@@ -2772,6 +2772,25 @@ paths = [
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && mkdir -p work/fresh-nameentry-rom && DQ4_NAMEENTRY_SYMBOLS=$PWD/work/fresh-nameentry-rom/name-entry.sym uv run --locked python sfc/dq4/tools/dq4menupatch.py build --rom work/ch1/overture.sfc --messages work/ch1/messages.json --out work/fresh-nameentry-rom/menu.sfc && rm -rf work/fresh-nameentry && uv run --locked python sfc/dq4/tools/dq4nameentrycheck.py --rom work/fresh-nameentry-rom/menu.sfc --symbols work/fresh-nameentry-rom/name-entry.sym --out work/fresh-nameentry"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
 
+[[check]]
+name = "dq4-ch2-monster-art"
+why = "2장 전투 몬스터 NDS 그림(dq4monport 의 PORT·EVENT 번호)이 빌드 롬에서 dq4monport.doc 의 기대 PNG·색과 픽셀·색까지 같은지(정적), 그리고 snes9x 전투 화면(한 마리 무리와 빌드 롬 무리 조합의 2~3종 무리)의 OAM·VRAM·CGRAM 이 같은 그림·팔레트 색인지. 조우에 아직 없어 빌드가 뺀 번호는 원래 DQ5 그림 그대로인지 보고, 기대와도 원래와도 다르면 실패. 대회 상대·사건 몬스터도 무리로 강제해 본다"
+paths = [
+  "sfc/dq4/tools/dq4monport.py",
+  "sfc/dq4/tools/dq4monart.py",
+  "sfc/dq4/tools/dq4monartcheck.py",
+  "sfc/dq4/tools/test_dq4monartcheck.py",
+  "sfc/dq4/tools/dq4battlescene.py",
+  "sfc/dq4/tools/dq4cores.py",
+  "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
+  "sfc/dq5/tools/dq5mongfx.py",
+  "sfc/dq5/tools/dq5monwrite.py",
+  "sfc/dq5/tools/dq5monlimits.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4monartcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/monartcheck"
+needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build"]
+
 # 여러 검사가 함께 닿는 paths 묶음. 묶음은 그 뿌리 스크립트에서 닿는 파일을 모두 덮어야 한다(dq4guardpaths.GROUP_ROOTS,
 # test_dq4guardpaths). 빠진 것은 `uv run --locked python sfc/dq4/tools/dq4guardpaths.py` 가 찍는다
 [groups]
@@ -2832,6 +2851,8 @@ ch1-build = [
   "sfc/dq4/tools/dq4josa.py",
   "sfc/dq4/tools/dq4menumsg.py",
   "sfc/dq4/tools/dq4menupatch.py",
+  "sfc/dq4/tools/dq4monart.py",
+  "sfc/dq4/tools/dq4monport.py",
   "sfc/dq4/tools/dq4msgnames.py",
   "sfc/dq4/tools/dq4msgwait.py",
   "sfc/dq4/tools/dq4nameentry.asm",
@@ -2909,6 +2930,7 @@ ch1-build = [
   "sfc/dq5/tools/dq5mesen.py",
   "sfc/dq5/tools/dq5mongfx.py",
   "sfc/dq5/tools/dq5monlimits.py",
+  "sfc/dq5/tools/dq5monwrite.py",
   "sfc/dq5/tools/dq5monster.py",
   "sfc/dq5/tools/dq5namewrite.py",
   "sfc/dq5/tools/dq5newmap.py",
@@ -2996,6 +3018,8 @@ ch1-walk = [
   "sfc/dq4/tools/dq4josa.py",
   "sfc/dq4/tools/dq4menumsg.py",
   "sfc/dq4/tools/dq4menupatch.py",
+  "sfc/dq4/tools/dq4monart.py",
+  "sfc/dq4/tools/dq4monport.py",
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/dq4msgnames.py",
   "sfc/dq4/tools/dq4msgwait.py",
@@ -3058,6 +3082,7 @@ ch1-walk = [
   "sfc/dq5/tools/dq5mesen.py",
   "sfc/dq5/tools/dq5mongfx.py",
   "sfc/dq5/tools/dq5monlimits.py",
+  "sfc/dq5/tools/dq5monwrite.py",
   "sfc/dq5/tools/dq5monster.py",
   "sfc/dq5/tools/dq5namewrite.py",
   "sfc/dq5/tools/dq5newmap.py",
