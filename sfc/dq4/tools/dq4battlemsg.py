@@ -327,7 +327,7 @@ def name_entries(d):
     import dq4windowtext as wt
     import dq5namewrite as nw
     raw = nw.read_tables(bytes(d))
-    numbered = wt.numbered_names()
+    numbered = wt.numbered_names(window=False)
     known = set(ne.GLYPHS)
     entries, seen = [], set()
     for t in NAME_TABLES:

@@ -176,10 +176,15 @@ def records_patch(original, path):
     return path
 
 
-def korean_names():
-    """사건 몬스터가 아닌 번호 → NDS 한글 이름(adopt.tsv 몬스터 표). 사건 몬스터의 이름은 그 모듈의 MONSTER_NAMES."""
+# 창 몬스터 목록(이름 아홉 열, dq4windowtext.KINDS 4)에 띄어쓰기를 빼도 들지 않는 이름. 전투 글은 원래 이름을 쓴다
+SHORT = {0x02: '장난두더지', 0x40: '드래곤나비'}
+
+
+def korean_names(window=False):
+    """필드 번호 → NDS 한글 이름(adopt.tsv 몬스터 표). window 면 SHORT 로 줄인 이름. 사건 몬스터의 이름은 그 모듈의
+    MONSTER_NAMES."""
     names = dq4monart.korean_names()
-    return {m: names[nds_of(fc)][1] for fc, m in PORT.items()}
+    return {m: SHORT.get(fc) if window and fc in SHORT else names[nds_of(fc)][1] for fc, m in PORT.items()}
 
 
 def main(argv=None):

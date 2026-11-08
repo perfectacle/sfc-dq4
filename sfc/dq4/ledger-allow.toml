@@ -396,3 +396,22 @@ stage = "chapter1"
 at = "3C:FFEA~3D:8000"
 max = 32
 why = "뱅크 3C 끝을 0 으로 비운 22바이트(지운 자리로 보기에 짧음)와 3D:8000 첫 자료가 이어진 것. 코드도 한 덩어리 자료도 아님"
+
+[[original]]
+stage = "chapter1"
+at = "25:8000~27:FFFF"
+data = true
+max = 16384
+why = "2장 전투 몬스터 NDS 그림(dq4monport, dq4-sprite-format.md 「2장 전투 몬스터 그림」): dq5monwrite 가 원래 자리에 들어가는 그림을 머리·조각·타일째 제자리에 다시 쓴다(들어가지 않는 것은 48:8000 으로 옮김). 바꾸는 그림은 계속 쓰이는 몬스터가 쓰지 않는 것만이고, 41종 합이 14.5KB 라 16KB 로 막음"
+
+[[original]]
+stage = "chapter1"
+at = "23:84FB~23:8545"
+data = true
+why = "몬스터 표(23:8000, 25바이트씩)의 33·34·35 칸: 2장 FC 몬스터마다 따로 준 번호(dq4monport.PORT)에 지금 대역 레코드를 옮김"
+
+[[original]]
+stage = "chapter1"
+at = "23:8947~23:8990"
+data = true
+why = "몬스터 표의 5F·60·61 칸: dq4monport.PORT 의 새 번호에 대역 레코드를 옮김"
