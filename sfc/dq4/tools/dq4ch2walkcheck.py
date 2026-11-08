@@ -145,8 +145,8 @@ LEAVE_ALTAR = f'{tempe.CHIEF_TALK_CELL[0]},{tempe.CHIEF_TALK_CELL[1]}'
 
 def battle_patch(data, kind):
     """사건 전투 몬스터(dq4ch2event 모듈의 BATTLES)를 덮는 ROMPATCH. win 은 HP 1·수비 0(1장 boss_patch 와 같음),
-    weak 는 win 에 공격 0·MP 0·행동 여섯 모두 たたかう(일행이 다치지 않음), lose 는 HP 1000·공격 511·민첩 255(일행이 먼저
-    쓰러짐). 「weak:5A+lose:4C」 처럼 + 로 잇고 : 뒤에 몬스터(16진, 쉼표)를 주면 그 몬스터만 덮는다."""
+    weak 는 win 에 공격 0·MP 0·행동 여섯 모두 たたかう(일행이 다치지 않음), lose 는 HP 1000·공격 511·민첩 255·행동 모두
+    たたかう(일행이 먼저 쓰러짐). 「weak:5A+lose:4C」 처럼 + 로 잇고 : 뒤에 몬스터(16진, 쉼표)를 주면 그 몬스터만 덮는다."""
     every = sorted({m for _, mod in ch2.modules() for b in getattr(mod, 'BATTLES', ()) for m, _ in b['members']})
     out = []
     for piece in kind.split('+'):
@@ -162,6 +162,8 @@ def battle_patch(data, kind):
             elif how == 'lose':
                 out += [f'{base:X}=FF', f'{base + 1:X}=FF', f'{base + 3:X}=E8', f'{base + 8:X}={data[base + 8] | 0x80:02X}',
                         f'{base + 10:X}={data[base + 10] & ~0x07 | 0x03:02X}']
+                # 행동도 모두 たたかう: 주문·ようすをみる 를 고르면 진 판이 구간 프레임 안에 끝나지 않았다(bsnes, 비비안 8E)
+                out += [f'{base + k:X}=73' for k in range(17, 23)]
             else:
                 raise ValueError(f'전투 선택 {kind}: win·weak·lose')
     return ';'.join(out)

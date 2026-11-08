@@ -34,7 +34,7 @@ class Slot:
 # 고정 주소로도 쓰여 뺀다. 그 앞 21C2~21EE 에 남은 비트는 배 X·Y(21DB~21DE)의 16비트 쓰기 따위에 휩쓸려 쓰지 않는다
 SLOTS = {
     'E1': Slot('텐페 뒤 절반', 'dq4ch2tempe', (0x5FA000, 0x5FB000), flags=(0x60,),
-               groups=(0x31,), monsters=(0xE0, 0xE1), battles=(0,),
+               groups=(0x31,), monsters=(0xA3, 0x53), battles=(0,),
                scripts=(('05:9C2B', tuple(range(14))),), lists='ch2_tempe2_',
                message_bytes=2048, talk_bytes=1024, list_bytes=2048),
     'E2': Slot('프레놀 가짜 공주·남쪽 동굴', 'dq4ch2frenol', (0x5FB000, 0x5FC000), flags=(0x61,),
@@ -44,7 +44,7 @@ SLOTS = {
                scripts=(('10:98AE', tuple(range(17))),), lists='ch2_king_',
                message_bytes=4096, talk_bytes=2048, list_bytes=4096),
     'E4': Slot('엔돌 무술 대회', 'dq4ch2endor', (0x5FD000, 0x5FE800), flags=(0x64, 0x67), byte_flags=(0x67,),
-               groups=(0x32, 0x33, 0x34, 0x35, 0x36), monsters=(0x40, 0x4C, 0x5A, 0x58, 0x7D, 0x84), battles=(1, 2, 3),
+               groups=(0x32, 0x33, 0x34, 0x35, 0x36), monsters=(0xAA, 0xA4, 0x8E, 0x68, 0x72), battles=(1, 2, 3),
                scripts=(('10:A732', tuple(range(11))), ('10:9A2F', tuple(range(2, 12)))), lists='ch2_endor_',
                message_bytes=4096, talk_bytes=2048, list_bytes=8192),
     'E5': Slot('빈 산트하임·2장 끝·마을 사람 진행별 대사', 'dq4ch2ending', (0x5FE800, 0x5FF800), flags=(0x6C,),

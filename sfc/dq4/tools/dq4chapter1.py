@@ -712,7 +712,13 @@ def build(rom, dq5, dq4, work, prologue=True, chapter2=False):
     patches = [work / 'groups' / p for p in (*GROUP_PATCHES, *summary['record_patches'])] + [
         work / 'npc.dq5patch.json', work / 'boss.dq5patch.json', work / 'boss-monsters.dq5patch.json',
         work / 'learn.dq5patch.json', work / 'growth.dq5patch.json', work / 'party.dq5patch.json']
+    import dq4monport
+    patches.append(dq4monport.records_patch(original, work / 'monster-records.dq5patch.json'))
     out = bytearray(apply_writes(clear_mirror(rom, original, group_ranges()), original, patches))
+    # NDS 몬스터 그림: 무리 조합 검사가 이 롬의 무리·사건 무리로 세도록 다른 패치를 얹은 뒤에 만든다
+    events = [dq4ch1event.BOSS_GROUP, *(g['index'] for g in dq4ch2event.encounter_groups())]
+    out = bytearray(apply_writes(out, original, [dq4monport.build(dq5, out, work / 'monport',
+                                                                  work / 'groups' / 'zone-report.json', events)]))
     import dq4menupatch
     out = bytearray(dq4chapterbox.apply(out, dq4.read_bytes(), dq4menupatch.Font('galmuri11'), scenes(prologue)))
     out = bytearray(dq4ch1event.apply(out))

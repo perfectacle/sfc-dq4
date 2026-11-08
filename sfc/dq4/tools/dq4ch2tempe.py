@@ -25,7 +25,8 @@ WON = (0x60, 0x01)             # 7E:21F0 bit0  제단의 괴물을 이김(FC $62
 FLAGS = (WON,)
 GROUP = 0x31
 # 덮어쓸 DQ5 몬스터 자리. 그림은 DQ5 것(대역): E1 은 보랏빛 옷의 사람 꼴, E0 은 돌 석상 꼴이라 그렇게 짝지었다
-CHAMELEON, STATUE = 0xE1, 0xE0
+# 번호는 NDS 그림을 담을 수 있는 원래 그림을 가진 것(dq4monport.EVENT)
+CHAMELEON, STATUE = 0x53, 0xA3
 FC_CHAMELEON, FC_STATUE = 0x12, 0x18           # FC カメレオンマン·あばれこまいぬ(FC 전투 02 = 석상·카멜레온 맨·석상)
 BATTLES = ({"group": GROUP, "members": ((CHAMELEON, 1), (STATUE, 2)), "flags": dq4ch2battle.MIDBOSS_FLAGS},)
 MONSTERS = {CHAMELEON: FC_CHAMELEON, STATUE: FC_STATUE}
