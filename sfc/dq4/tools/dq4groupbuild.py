@@ -54,7 +54,8 @@ from kr_patch.fc import ines  # noqa: E402
 # cells) and its FC map ("map", 0 when absent), the borrowed DQ5 map whose attributes (encounters, battle
 # background, music) its maps take, its FC field-0 entrance blocks (dq4field.py entrances; the DQ5 world is FC
 # field 0 block for block, dq4fieldport.py), and the inputs that take the party from the arrival to the field.
-# "music" replaces the song byte of the copied attributes (attribute +5): FC plays one song for the whole group
+# "music" replaces the song byte of the copied attributes (attribute +5), and "map_music" {FC map: song} for single
+# maps of the group: FC plays one song for the whole group
 # (19:$803B, map branch $07BA), and 02 バトランド plays FC song 03, 王宮のメヌエット, which the sound port puts
 # in DQ5 song slot 01. A "dungeon" part's maps take the zones of the FC dungeon list in place of the borrowed
 # ones (map_attrs, dungeon_zones) and its DQ5 group counts steps for encounters (INDOOR_ENCOUNTERS). The DQ5
@@ -103,7 +104,11 @@ LINKS = {
             "out": "down:32,wait:60,up:32", "chapter": 3}],
     0x3F: [{"fc": 0x05, "arrival": (0x11, 0x1F), "map": 1, "attrs": "03/00", "field": [(0x74, 0x46)], "out": "down:64",
             "chapter": 3}],
-    0x40: [{"fc": 0x04, "arrival": (0x17, 0x20), "attrs": "03/00", "field": [(0x67, 0x65)], "out": "down:64",
+    # エンドール is FC map branch 0 (castle song 01) but for its casino 04/01 (FC song 04 楽しいカジノ, slot 07), the
+    # arena stand 04/07 (1B コロシアムスタンド, slot 22) and the arena building 04/0E (15 コロシアム楽屋, slot 1E).
+    # FC plays the castle song in the casino in chapter 3 until $6287 bit7; this byte cannot tell chapters apart.
+    0x40: [{"fc": 0x04, "arrival": (0x17, 0x20), "attrs": "03/00", "music": 0x01,
+            "map_music": {0x01: 0x07, 0x07: 0x22, 0x0E: 0x1E}, "field": [(0x67, 0x65)], "out": "down:64",
             "chapter": 3}],
     # 4장: モンバーバラ, コーミズ 와 그 서쪽 동굴(にしのどうくつ, 도착은 필드로 나가는 계단 위), ハバリア, キングレオ 성.
     # 인물과 판매자는 4장 시작 상태($615A = 3)의 것.
@@ -624,18 +629,20 @@ def _save(path, doc):
     return path
 
 
-def map_attrs(dq5, link, zone=None):
+def map_attrs(dq5, link, zone=None, fc_map=None):
     """dq5newmap attrs: a copy of the borrowed map's attributes, with the song byte replaced when "music" is set
-    and, for a "dungeon" part, the zones of all three $1948 values set to the DQ5 zone `zone` (None: FF, none)."""
-    if "music" not in link and not link.get("dungeon"):
+    (or "map_music" names FC map `fc_map`) and, for a "dungeon" part, the zones of all three $1948 values set to the
+    DQ5 zone `zone` (None: FF, none)."""
+    music = link.get("map_music", {}).get(fc_map, link.get("music"))
+    if music is None and not link.get("dungeon"):
         return {"copy": link["attrs"]}
     import dq5newmap
     from dq5map import Rom
     attrs, _ = dq5newmap.entries(Rom(dq5.read_bytes()), "attr")
     group, number = (int(v, 16) for v in link["attrs"].split("/"))
     row = list(attrs[group][number])
-    if "music" in link:
-        row[5] = link["music"]
+    if music is not None:
+        row[5] = music
     if link.get("dungeon"):
         row[0:3] = [0xFF if zone is None else zone] * 3
     return {"bytes": row}
@@ -754,7 +761,7 @@ def _build(pool, dq5, dq4, out, with_people):
         fc_group, fc_number = fc_map(prg, int(m[:2], 16), int(m[3:], 16))
         record = {"source": f"env/{names[m]}.dq5map.json"} if area[m] == 0 else {"copy": RECORD_PLACEHOLDER}
         zone = dq5_zone.get(fc_zones.get((fc_group, fc_number)))
-        newmap["maps"].append({"map": m, "record": record, "attrs": map_attrs(dq5, part_of[fc_group], zone)})
+        newmap["maps"].append({"map": m, "record": record, "attrs": map_attrs(dq5, part_of[fc_group], zone, fc_number)})
     manifests = [env / "dq4-environment.dq5patch.json", door_patch, outside_patch]
 
     def step(tool, name, doc, base, *args):
