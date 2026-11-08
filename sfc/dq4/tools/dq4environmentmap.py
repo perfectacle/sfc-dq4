@@ -369,6 +369,9 @@ WATER_BLUES = {0x01, 0x11, 0x21}
 # Line 7 holds the blues in colours 1-7 and, after them, the greens only the shore art uses; a shaped block over
 # water, sky or cloud takes its outline and moved colours from the blues, or its edges turn green.
 SHAPE_SPAN = {7: 8}
+# Colours 13-15 of row 7 belong to the crimson carpet alone; a fixture background moved into row 7 must not
+# turn red.
+FILL_SPAN = {7: 13}
 
 
 def map_palette(name, sheet):
@@ -578,7 +581,7 @@ def _tile(assets, name, palette, map_type, block=None, background_name=None):
                         continue
                     value = background.getpixel((x + dx, y + dy))
                     if bank is not None and value >> 4 != bank:
-                        value = _nearest(palette, value, bank)
+                        value = _nearest(palette, value, bank, FILL_SPAN.get(bank, 16))
                         remapped += 1
                     result.putpixel((x + dx, y + dy), value)
     return result, {
