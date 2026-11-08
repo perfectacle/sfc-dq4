@@ -239,11 +239,12 @@ def _retalk(entries, where, time, talk):
 
 
 def _person(time, fc, facing, interval, picture, talk):
+    """FC 칸·FC 걷기 간격으로 새 인물(걷는 인물의 DQ5 간격은 dq4npcport.dq5_interval)."""
     import dq4npcport as port
     x, y = cell(*fc)
     return {"from": port.WALK if interval else port.STAND, "time": time,
             "fields": {"x": x, "y": y, "facing": facing, "talk": talk, "gfx": port.PICTURES[picture], "layer": 0,
-                       "interval": interval}}
+                       "interval": port.dq5_interval(interval) if interval else 0}}
 
 
 def castle_won_entries(ported, talk):
