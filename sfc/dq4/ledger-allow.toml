@@ -412,6 +412,12 @@ why = "몬스터 표(23:8000, 25바이트씩)의 33·34·35 칸: 2장 FC 몬스�
 
 [[original]]
 stage = "chapter1"
-at = "23:8947~23:8990"
+at = "23:8947~23:8978"
 data = true
-why = "몬스터 표의 5F·60·61 칸: dq4monport.PORT 의 새 번호에 대역 레코드를 옮김"
+why = "몬스터 표의 5F·60 칸: dq4monport.PORT 의 새 번호에 대역 레코드를 옮김"
+
+[[original]]
+stage = "chapter1"
+at = "23:8064~23:80AD"
+data = true
+why = "몬스터 표의 04·05·06 칸: dq4monport.PORT 의 새 번호에 대역 레코드를 옮김"
