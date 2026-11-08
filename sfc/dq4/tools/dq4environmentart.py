@@ -1017,6 +1017,23 @@ def _brick_paving():
     return _finish(c, "붉은 벽돌 바닥", "town")
 
 
+def _crimson_carpet():
+    """왕좌의 방 같은 FC 짜임 무늬 바닥(03/1E 그림): DQ5 그란바니아 성 바닥처럼 구조 없는 진홍 카펫에 잔점만.
+    벽돌·판석 무늬는 사용자 검토에서 고르지 않았다."""
+    c = _Canvas(5, fill=4)
+    rng = random.Random(5)
+    for y in range(16):
+        for x in range(16):
+            v = rng.random()
+            if v < 0.16:
+                c.point((x, y), 5)
+            elif v < 0.26:
+                c.point((x, y), 2)
+            elif v < 0.29:
+                c.point((x, y), 7)
+    return _finish(c, "진홍 카펫", "castle")
+
+
 def _cloth_table():
     c = _Canvas(4, fill=7)
     c.line((0, 0, 15, 0), 5)
@@ -1353,7 +1370,7 @@ def _pew():
 
 def _castle_town_assets():
     assets = {
-        "iron_door": _iron_door(), "red_paving_cracked": _red_paving_cracked(), "brick_paving": _brick_paving(),
+        "iron_door": _iron_door(), "red_paving_cracked": _red_paving_cracked(), "brick_paving": _brick_paving(), "crimson_carpet": _crimson_carpet(),
         "cloth_table": _cloth_table(), "potted_plant": _potted_plant(), "throne": _throne(),
         "bookshelf": _bookshelf(), "sky": _sky(), "sky_deep": _sky(True), "stump": _stump(), "log_pile": _log_pile(),
         "crops": _crops(), "signboard": _signboard(), "grave": _grave(), "stone_ledge": _stone_ledge(),

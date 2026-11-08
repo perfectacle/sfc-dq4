@@ -105,7 +105,7 @@ EXAMPLES = {
     (0x03, 0x19): ("bookshelf", "책장"),
     (0x03, 0x1A): ("sky", "하늘・떨어지는 칸"),
     (0x03, 0x1B): ("gold_door16", "문(まほうのカギ)"),
-    (0x03, 0x1E): ("brick_paving", "벽돌 바닥"),
+    (0x03, 0x1E): ("crimson_carpet", "진홍 카펫 바닥(FC 짜임 무늬)"),
     (0x04, 0x06): ("cabin_slats_left", "통나무집 창살 왼쪽"),
     (0x04, 0x07): ("cabin_slats", "통나무집 창살"),
     (0x04, 0x08): ("cabin_planks_right", "통나무집 벽 오른쪽 기둥"),
