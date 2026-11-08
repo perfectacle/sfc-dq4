@@ -56,16 +56,28 @@ class PartyTalkTest(unittest.TestCase):
         ids = check.expected(bytes(data))
         self.assertEqual(ids, ctx.msg)
 
-    def test_hook_turns_the_nobody_branch_into_a_call(self):
+    def test_hook_goes_through_a_bank_05_stub(self):
         ctx = _ctx()
-        [(addr, orig, new)] = pt.hooks(ctx)
-        self.assertEqual((addr, orig), (0x05D5BC, bytes.fromhex('009829' '00090a')))
+        [(stub_at, stub_orig, stub), (addr, orig, new)] = pt.hooks(ctx)
+        self.assertEqual((addr, orig), (0x05D5B9, bytes.fromhex('009500' '009829')))
+        self.assertEqual(new, bytes((0x20, 0xE8, 0xFE, 0xEA, 0xEA, 0xEA)))
+        # 05:D5BF(기다림)는 05:D817 도 JSR 로 부르므로 훅이 닿지 않아야 한다
+        self.assertLessEqual(addr + len(new), 0x05D5BF)
         talk = ctx.at['talk']
-        self.assertEqual(new, bytes((0x22, talk & 0xFF, talk >> 8 & 0xFF, talk >> 16, 0xEA, 0xEA)))
+        self.assertEqual((stub_at, stub_orig), (0x05FEE8, bytes(8)))
+        self.assertEqual(stub, bytes((0x00, 0x95, 0x00, 0x22, talk & 0xFF, talk >> 8 & 0xFF, talk >> 16, 0x60)))
         rom = ROOT / 'rom' / 'dq5.sfc'
         if rom.exists():
-            o = pt.ch1.lorom(addr)
-            self.assertEqual(rom.read_bytes()[o:o + len(orig)], orig)
+            data = rom.read_bytes()
+            for at, want in ((addr, orig), (stub_at, stub_orig)):
+                o = pt.ch1.lorom(at)
+                self.assertEqual(data[o:o + len(want)], want)
+
+    def test_no_brk_in_the_high_bank_code(self):
+        # BRK 처리기는 DB 를 BRK 가 놓인 뱅크로 둔다. 뱅크 5C 에는 낮은 WRAM 거울이 없다
+        blob, _ = pt.native(_ctx())
+        self.assertNotIn(bytes((0x00, 0x09, 0x0A)), blob)
+        self.assertNotIn(bytes((0x00, 0x95, 0x00)), blob)
 
     def test_check_cases_name_real_messages(self):
         for name, *_, want in check.CASES:
