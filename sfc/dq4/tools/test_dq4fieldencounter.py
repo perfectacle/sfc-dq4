@@ -226,7 +226,7 @@ class FixedGroupTests(PatchedFC):
 
     def test_members_take_placeholder_monster_and_matching_count_code(self):
         out = enc.fixed_groups(PRG, dq5_tables(), {0x20: 0})
-        self.assertEqual(out, [{"index": 0, "members": [{"monster": 0x00, "count_code": 0},
+        self.assertEqual(out, [{"index": 0, "members": [{"monster": enc.MONSTERS[0x00], "count_code": 0},
                                                         {"monster": 0x09, "count_code": 1}]}])
 
     def test_formation_with_too_many_groups_is_an_error(self):
@@ -245,9 +245,9 @@ class RecordTests(PatchedFC):
         rec, dropped = enc.record(PRG, dq5_tables(), 0x01)
         by_index = {s["index"]: s for s in rec["slots"]}
         # 가중치 최대 8 → 7. 8→7, 4→round(3.5)=4, 2→round(1.75)=2, 1→round(0.875)=1
-        self.assertEqual(by_index[0], {"index": 0, "weight": 7, "count_code": enc.GROUP_COUNT, "monster": 0x00})
+        self.assertEqual(by_index[0], {"index": 0, "weight": 7, "count_code": enc.GROUP_COUNT, "monster": enc.MONSTERS[0x00]})
         self.assertEqual(by_index[1], {"index": 1, "weight": 4, "count_code": enc.GROUP_COUNT, "monster": 0x09})
-        self.assertEqual(by_index[5], {"index": 5, "weight": 2, "count_code": 2, "monster": 0x0B})
+        self.assertEqual(by_index[5], {"index": 5, "weight": 2, "count_code": 2, "monster": enc.MONSTERS[0x0C]})
         self.assertEqual(by_index[6], {"index": 6, "weight": 1, "count_code": 0, "monster": 0x00})
         self.assertEqual(len(rec["slots"]), 10)
         self.assertEqual((rec["level"], rec["rate_index"]), (9, 5))
@@ -278,13 +278,13 @@ class DocsTests(PatchedFC):
         self.assertEqual(indexes, [5, 6, 7, 8, 9, 10, 11, 81, 82, 83, 84])
         self.assertEqual(grid["format"], "dq5encounter/1")
         self.assertEqual(len(grid["field_grids"]), 5)
-        self.assertEqual(grid["fixed_groups"], [{"index": 0, "members": [{"monster": 0, "count_code": 0},
+        self.assertEqual(grid["fixed_groups"], [{"index": 0, "members": [{"monster": enc.MONSTERS[0x00], "count_code": 0},
                                                                          {"monster": 9, "count_code": 1}]}])
         self.assertEqual(sorted(report), ["00", "03", "04", "34", "35", "36", "50"])
         self.assertEqual((report["03"]["kind"], report["03"]["zone"]), ("field", 6))
         self.assertEqual((report["50"]["kind"], report["50"]["zone"]), ("dungeon", 11))
         self.assertEqual(report["50"]["fixed"], {"weight": 2, "group": 0})
-        self.assertEqual(report["50"]["monsters"], [0, 9, 11])
+        self.assertEqual(report["50"]["monsters"], sorted({0, 9, enc.MONSTERS[0x00], enc.MONSTERS[0x0C]} - {0x0B}))
         self.assertEqual(report["03"]["dropped_slots"], [12])
 
 
@@ -408,7 +408,7 @@ class RomTest(unittest.TestCase):
         rec = next(r for r in self.progress["encounters"] if r["index"] == self.report["04"]["zone"])
         self.assertEqual(rec["level"], 1)
         self.assertEqual(rec["rate_index"], 0)
-        self.assertIn(0x00, self.report["04"]["monsters"])
+        self.assertIn(enc.MONSTERS[0x00], self.report["04"]["monsters"])
         self.assertIn(0x09, self.report["04"]["monsters"])
         grid0 = self.grids["field_grids"][0]["rows"]
         self.assertEqual(grid0[2][10], self.report["04"]["zone"])

@@ -43,14 +43,17 @@ EXTRA_NAMES = {6: {'みんながんばれ': '모두 힘내자', 'じゅもんせ
                    'モンスターつかい': '몬스터 조련사', 'グランバニアおう': '그란바니아 왕', 'ようせいびと': '요정',
                    'グランバニアへいし': '그란바니아 병사', 'めしつかい': '하인', 'ゆうしゃのちちおや': '용사의 아버지',
                    'でんせつのゆうしゃ': '전설의 용사', 'おとこ': '남자', 'おんな': '여자'}}
-# 이름 표 번호로 덮는 이름: 1장 보스로 빌린 DQ5 몬스터 번호(dq4ch1event.BOSS_MONSTERS)·2장 사건 모듈이 덮어쓰는 DQ5
+# 이름 표 번호로 덮는 이름: 1장 보스로 빌린 DQ5 몬스터 번호(dq4ch1event.BOSS_MONSTERS)·FC 몬스터마다 따로 준 번호
+# (dq4monport.PORT)·2장 사건 모듈이 덮어쓰는 DQ5
 # 몬스터(dq4ch2event.EVENTS 모듈의 MONSTER_NAMES)와 FC 물건에 빌려준 DQ5 물건 번호(dq4itemport.BORROWED). 이 표를 만드는
 # 롬에는 아직 DQ5 이름이 있다
 def numbered_names():
     import dq4ch1event
     import dq4ch2event
     import dq4itemport
+    import dq4monport
     monsters = {n: ko for n, (_, ko) in dq4ch1event.BOSS_MONSTERS.items()}
+    monsters.update(dq4monport.korean_names())
     monsters.update({n: ko for _, mod in dq4ch2event.modules() for n, ko in getattr(mod, 'MONSTER_NAMES', {}).items()})
     return {4: monsters, 5: dq4itemport.korean_names()}
 

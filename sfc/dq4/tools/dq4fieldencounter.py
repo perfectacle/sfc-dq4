@@ -109,6 +109,11 @@ MONSTERS = {
     0xA8: 0xA2,  # メタルキング
     0xA9: 0x94,  # ~ ライバーンロード -> スライムベホマズン
 }
+# 2장 몬스터는 NDS 그림을 넣으려고 FC 몬스터마다 따로 DQ5 번호를 준다(dq4monport.PORT, 레코드는 PLACEHOLDERS 의 대역 것을
+# 옮겨 능력치는 같음). PLACEHOLDERS 는 위 대역 표 그대로
+PLACEHOLDERS = dict(MONSTERS)
+import dq4monport  # noqa: E402
+MONSTERS.update(dq4monport.PORT)
 # FC slots: 0-4 a group plus more groups (DQ5 slots 0-4, several species), 6-10 one group of a count code (DQ5
 # slots 5-9, codes 0-7 of the same meaning but 4 and 5: FC 1-3 and 2-4, DQ5 2-3 and 3-4), 5 and 11 one monster (a
 # free DQ5 slot of 5-9 with code 0), 12-13 FC formations (in a dungeon zone, slot 12 is DQ5 slot 10's fixed group,

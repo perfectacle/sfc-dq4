@@ -490,6 +490,7 @@ class BuildFlowTests(unittest.TestCase):
         import dq4party
         import dq4msgnames
         import dq4prologue
+        import dq4monport
         import dq4signs
         calls, order = [], []
 
@@ -510,7 +511,11 @@ class BuildFlowTests(unittest.TestCase):
             return apply
 
         def apply_writes(data, original, paths):
-            self.applied = [Path(p) for p in paths]
+            # 몬스터 그림 패치는 다른 패치를 얹은 롬으로 만들어 따로 얹는다
+            if [Path(p).name for p in paths] == ['monport.dq5patch.json']:
+                self.monport = True
+            else:
+                self.applied = [Path(p) for p in paths]
             return data
 
         if rom is None:
@@ -521,6 +526,16 @@ class BuildFlowTests(unittest.TestCase):
             dq4.write_bytes(b'NES\x1a\x01\x00' + bytes(10) + bytes(0x4000))
             self.verify = mock.Mock()
             self.npc_doc = mock.Mock(return_value={'format': 'dq5npcrelocate/1'})
+            def empty_patch(path, name):
+                path.write_text(json.dumps({'format': 'dq5patch/1', 'name': name, 'writes': []}))
+                return path
+
+            def monport_build(dq5, rom, folder, zone_report, events):
+                return empty_patch(work / 'monport.dq5patch.json', 'monport')
+
+            def monport_records(original, path):
+                return empty_patch(path, 'monster-records')
+
             with mock.patch.multiple(ch, run_tool=run_tool, group_build=group_build,
                                      port=lambda a, b: (['ported'], ['m1', 'm2'], {'report': 1}),
                                      npc_doc=self.npc_doc, npc_base=lambda p: '35:8100',
@@ -538,7 +553,8 @@ class BuildFlowTests(unittest.TestCase):
                     mock.patch.object(dq4josa, 'apply', step('josa')), \
                     mock.patch.object(dq4msgnames, 'apply', step('msgnames')), \
                     mock.patch.object(dq4signs, 'apply', step('signs')), \
-                    mock.patch.object(dq4prologue, 'apply', step('prologue')):
+                    mock.patch.object(dq4prologue, 'apply', step('prologue')), \
+                    mock.patch.multiple(dq4monport, build=monport_build, records_patch=monport_records):
                 out = ch.build(rom, dq5, dq4, work, prologue=prologue)
             self.files = {p.name: json.loads(p.read_text()) for p in work.glob('*.json')}
         return out, calls, order
@@ -565,7 +581,7 @@ class BuildFlowTests(unittest.TestCase):
             'companion-names.dq5patch.json', 'person-names.dq5patch.json', 'zones.dq5patch.json',
             'grids.dq5patch.json', 'rates.dq5patch.json', 'sleeper-talk.dq5patch.json', 'chests.dq5patch.json',
             'newmap-1.dq5patch.json', 'npc.dq5patch.json', 'boss.dq5patch.json', 'boss-monsters.dq5patch.json',
-            'learn.dq5patch.json', 'growth.dq5patch.json', 'party.dq5patch.json'])
+            'learn.dq5patch.json', 'growth.dq5patch.json', 'party.dq5patch.json', 'monster-records.dq5patch.json'])
         self.assertEqual(self.applied[0].parent.name, 'env')
         # 그룹 빌드 롬과 견줄 때는 그룹 빌드가 낸 패치만 넘긴다(인물·보스 패치는 그룹 빌드 롬에 없다)
         self.assertEqual([p.name for p in self.verify.call_args.args[2]], names[:names.index('newmap-1.dq5patch.json') + 1])
