@@ -329,7 +329,9 @@ SEGMENTS = [
     ('flare', 'walk', talk('up'), {'poke': DAY, 'want': ['FLARE']}),
     # 이무르 감옥(37/02)은 이무르(37/00)의 계단으로 걸어 들어간다(출구 표를 지나는지 본다)
     ('jail_gate', 'warp', '37/00,42,5', {'map': '37/00'}),
-    ('jail', 'walk', 'up:32;wait:400', {'changes': 1, 'after': 120, 'map': '37/02'}),
+    # 순간이동은 발밑 트리거를 아래로 걸어 밟으므로, 맵이 바뀔 때까지 누른 아래가 남아 도착 칸 한 칸 아래((42,6))에 설
+    # 때가 있다. 코어와 롬의 프레임 차이로 갈려 bsnes 에서 up:32 가 계단에 닿지 못했다. 먼저 도착 칸으로 선다
+    ('jail', 'walk', '42,5;up:32;wait:400', {'changes': 1, 'after': 120, 'map': '37/02'}),
     ('reunion', 'walk', 'wait:300;' + taps(30, 60) + ';' + pc.CLOSE, {'want': ['REUNITED']}),
     ('well', 'warp', '3B/00,46,5', {'map': '3B/00'}),
     ('hoimin_side', 'warp', '3B/03,6,28', {'map': '3B/03'}),
