@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 import dq4monartcheck as mc
+import dq4monport
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -100,10 +101,12 @@ class StaticRomTests(unittest.TestCase):
             self.assertLessEqual(len(colors), 15)
             self.assertLessEqual(max(max(row) for row in grid), len(colors), f'{m:02X}')
 
-    def test_original_rom_has_nothing_ported(self):
+    def test_original_rom_fails_every_number_not_listed_later(self):
+        # 원래 DQ5 그림 그대로인 번호는 LATER 에 적힌 것만 「아직」, 나머지는 빠진 것으로 실패
         rows, problems = mc.static_check(self.dq5, self.dq5, self.want, self.shared)
-        self.assertEqual({r['status'] for r in rows.values()}, {'later'})
-        self.assertEqual(problems, ['들어간 번호가 하나도 없음'])
+        later = {k for k, r in rows.items() if r['status'] == 'later'}
+        self.assertEqual(later, {f'{m:02X}' for m in dq4monport.LATER})
+        self.assertEqual(len(problems), len(rows) - len(later) + 1)
 
     def test_changed_color_that_is_not_expected_fails(self):
         # 기대 그림이 아닌데 원래와도 다른 번호(반쯤 들어간 그림)는 「아직」 으로 넘기지 않는다

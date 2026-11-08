@@ -92,7 +92,7 @@ def static_check(dq5, rom, want, shared):
                'pixels_differ': grid_diff(grid, exp_grid), 'colors': colors == exp_colors}
         if row['pixels_differ'] == 0 and row['colors']:
             row['status'] = 'ported'
-        elif (grid, colors) == picture(dq5, m):
+        elif (grid, colors) == picture(dq5, m) and m in dq4monport.LATER:
             row['status'] = 'later'
         else:
             row['status'] = 'wrong'

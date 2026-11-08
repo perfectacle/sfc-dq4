@@ -38,6 +38,9 @@ PORT = {
 # 사건 전투의 FC 몬스터 → DQ5 번호. 능력치·이름은 사건 모듈(dq4ch2tempe·dq4ch2endor)이 쓰고 dq4ch2slots 가 예약한다.
 # 필드의 あばれこまいぬ(PORT 18)와 텐페 석상은 번호가 달라(예약 번호는 필드에 나오지 않음) 같은 그림을 두 자리에 둔다
 EVENT = {0x12: 0x53, 0x18: 0xA3, 0xAF: 0xAA, 0xB0: 0xA4, 0xB1: 0x8E, 0xB2: 0x68, 0xBA: 0x72}
+# 1·2장 조우·사건 무리에 아직 나오지 않아 빌드가 그림을 넣지 않는 번호(dq4monport.build 의 appear). 그 장을 옮기면
+# 여기서 빼고, dq4monartcheck 는 이 밖의 번호가 원래 DQ5 그림이면 실패로 본다
+LATER = {0x0C}     # メタルスライム(FC 5C)
 GRID = 8
 RECORD, RECORD_SIZE = 0x238000, 25      # DQ5 몬스터 표(dq5tables monsters)
 
