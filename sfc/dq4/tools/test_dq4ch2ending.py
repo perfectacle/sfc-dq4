@@ -65,11 +65,27 @@ class ScriptTest(unittest.TestCase):
         ender = next(s for s in en.scripts(ctx) if s['address'] == en.SCRIPTS['ender'][1])['commands']
         ops = [c['op'] for c in ender]
         self.assertEqual(ops, ['28', '52', '3F', '37', '21', '37', '16'])
-        darken = dq4ch1event.native()[1]['darken']
-        self.assertEqual(ender[3]['args'], [darken & 0xFF, darken >> 8 & 0xFF, darken >> 16])
+        call = ctx.at['darken_song']
+        self.assertEqual(ender[3]['args'], [call & 0xFF, call >> 8 & 0xFF, call >> 16])
         self.assertEqual(ender[4]['args'], [ctx.msg['end'] & 0xFF, ctx.msg['end'] >> 8])
         end = POINTS[en.END_SCENE]
         self.assertEqual(ender[5]['args'], [end & 0xFF, end >> 8 & 0xFF, end >> 16])
+
+    def test_ender_call_darkens_then_plays_the_ending_song(self):
+        # 서술 동안 엔딩 곡 13(エンディング第二章): 1장 끝의 검게 하기를 부른 뒤 곡을 튼다
+        ctx = context()
+        code, at = en.native(ctx)
+        self.assertEqual(at['darken_song'], ctx.code_at)
+        start, end = slots.SLOTS['E5'].code
+        self.assertLessEqual(start + len(code), end)
+        darken = dq4ch1event.native()[1]['darken']
+        jsl = bytes((0x22, darken & 0xFF, darken >> 8 & 0xFF, darken >> 16))
+        song = bytes((0x22, 0x91, 0xFE, 0x24, 0xA9, 0x13, 0x22, 0x9A, 0xFE, 0x24))   # 1A 로 멈춘 뒤 01 13
+        self.assertEqual(en.ENDING_SONG, 0x13)
+        self.assertIn(jsl, code)
+        self.assertIn(song, code)
+        self.assertLess(code.index(jsl), code.index(song))
+        self.assertEqual(code[-1], 0x6B)
 
     def test_voices_say_their_line_and_turn_on_their_flag(self):
         ctx = context()
