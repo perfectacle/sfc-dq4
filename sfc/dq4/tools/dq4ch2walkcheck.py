@@ -122,6 +122,7 @@ HONEY_SET = f'{(ch2.JOIN_RECORDS_AT & 0xFFFF) + 0x16 + 2:04X}={king.HONEY:02X}'
 # 왕좌의 방에서 성 앞마당으로 내려가는 계단(셀 (22,35), dq4groupcheck 의 stair-3D01-1)의 오른쪽 칸에서 왼쪽으로
 ENDING_STAIRS = '24,35;left:32'
 SARAN = '45/00'
+SARAN_OUT, GATE_IN = 'down:60;68,149', '78,149;78,147'
 # 같은 맵 안으로 순간이동하는 묶음이 먼저 들르는 곳(2장 출발 상태는 왕좌의 방 3D/01)
 HOPS = {ch2.THRONE: f'{ch2.CASTLE},28,45'}
 
@@ -342,11 +343,15 @@ SEGMENTS += [
     # 두 사람의 말을 본 뒤 성을 나갔다가 필드에서 성문으로 들어와도 끝난다. 이웃 사란(FC 13/00, 필드 입구 (22,49))의
     # 도착 칸에서 아래로 나가 필드 (68,149), 오른쪽으로 걸어 성 입구 블록 (27,49) 아래에서 위로 든다
     ('gate_end_side', 'warp', f'{SARAN},24,50', {'map': SARAN}),
-    ('gate_out', 'walk', 'down:60;68,149', {'field': True, 'cell': (68, 149), 'poke': wc.DAY}),
-    # 엔딩 곡은 들어선 뒤 약 260프레임에 지금 곡이 된다(곡 자료를 올리는 동안)
-    ('gate_in', 'walk', '78,149;78,147', {'map': ch2.CASTLE, 'changes': 1, 'after': 400, 'poke': wc.DAY,
-                                          'bytes': {'SONG': ending.ENDING_SONG}}),
+    ('gate_out', 'walk', SARAN_OUT, {'field': True, 'cell': (68, 149), 'poke': wc.DAY}),
+    ('gate_in', 'walk', GATE_IN, {'map': ch2.CASTLE, 'changes': 1, 'after': 60, 'poke': wc.DAY}),
     ('gate_end', 'ending', ending.END_SCENE, {}),
+    # 엔딩 곡은 들어선 뒤 약 260프레임에 지금 곡이 된다(곡 자료를 올리는 동안). 장 끝 구간과 묶음을 나누는 것은 그만큼
+    # 늦게 남긴 상태로 끝 상자를 넘기면 서술을 넘기는 A 가 남아 리셋 뒤 타이틀에서 눌리기 때문이다(bsnes 에서 소리 없음)
+    ('song_side', 'warp', f'{SARAN},24,50', {'map': SARAN}),
+    ('song_out', 'walk', SARAN_OUT, {'field': True, 'poke': wc.DAY}),
+    ('song_in', 'walk', GATE_IN, {'map': ch2.CASTLE, 'changes': 1, 'after': 400, 'poke': wc.DAY,
+                                  'bytes': {'SONG': ending.ENDING_SONG}}),
 ]
 
 
