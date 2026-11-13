@@ -1,7 +1,10 @@
+from pathlib import Path
 import unittest
 from types import SimpleNamespace
 
 import dq4outside as o
+
+ROM = Path(__file__).resolve().parents[3] / 'rom' / 'dq4.nes'
 
 
 def fc_map(w, h, buf, outside):
@@ -24,6 +27,67 @@ class CellTests(unittest.TestCase):
         self.assertEqual(o.way((0x36, 0), m), o.OUTSIDE_WAY)
         self.assertEqual(o.way((0x3C, 1), m), o.OUTSIDE_WAY)
         self.assertEqual(o.way((0x3D, 0), m), 0)
+
+
+class ReachTests(unittest.TestCase):
+    def test_walls_split_zones_and_doors_join_them(self):
+        # a ring of zone-1 walls (0x23) round zone-0 floor (0x01) and zone-1 floor (0x21); prop 80 = wall, 94 = door
+        props = {0x01: 0x00, 0x03: 0x80, 0x04: 0x94}
+        w = 0x23
+        m = SimpleNamespace(w=5, h=3, buf=[w, w, w, w, w, w, 0x01, w, 0x21, w, w, w, w, w, w], blocks={'prop': props})
+        self.assertEqual(o.reachable_zones(m, {(3, 1)}), {1})
+        m.buf[7] = 0x24
+        self.assertEqual(o.reachable_zones(m, {(3, 1)}), {0, 1})
+
+    def test_reaching_the_edge_reaches_zone0(self):
+        # off the edge is the zone-0 outside block, and 3A/03 wraps its corridor into zone-0 cells there
+        props = {0x01: 0x00, 0x03: 0x80}
+        m = SimpleNamespace(w=3, h=1, buf=[0x23, 0x21, 0x21], blocks={'prop': props})
+        self.assertEqual(o.reachable_zones(m, {(1, 0)}), {0, 1})
+
+    def test_only_fc_maps_hide_zone0(self):
+        m = fc_map(1, 1, [0x01], 0x01)
+        self.assertFalse(o.zone0_hidden(m))
+        self.assertEqual(o.hidden_cells(m), set())
+
+
+@unittest.skipUnless(ROM.is_file(), 'local source ROM not present')
+class RomZoneTests(unittest.TestCase):
+    """FC draws zone 0 and the map outside black while the party stands in another zone (0F:$D4E6). The prologue
+    cellar 14/01 has zone-0 floor only in the corners beside its stair walls, which no one reaches, so FC never shows
+    its outside block there; filling the outside with it painted the whole screen around the cellar with floor."""
+
+    @classmethod
+    def setUpClass(cls):
+        from kr_patch.fc import ines
+        cls.prg = ines.prg(ROM.read_bytes())
+
+    def map(self, g, k):
+        return o.dq4block.Map(self.prg, g, k)
+
+    def test_cellar_outside_stays_black(self):
+        cellar = self.map(0x14, 0x01)
+        self.assertEqual(o.cell(cellar), (0, 0))
+        self.assertTrue(o.zone0_hidden(cellar))
+        self.assertEqual(o.way((0x3C, 0x01), cellar), 0)
+        self.assertEqual(len(o.hidden_cells(cellar)), 18)
+
+    def test_reached_zone0_keeps_the_outside_block(self):
+        # 3A/03: ホイミン stands in zone 0, reached round the map edge
+        for g, k, target in ((0x14, 0x00, (0x3C, 0x00)), (0x02, 0x00, (0x36, 0x00)), (0x12, 0x00, (0x37, 0x00)),
+                             (0x3A, 0x03, (0x3B, 0x03))):
+            with self.subTest(map=f'{g:02X}/{k:02X}'):
+                m = self.map(g, k)
+                self.assertFalse(o.zone0_hidden(m))
+                self.assertEqual(o.way(target, m), o.OUTSIDE_WAY)
+
+    def test_ported_maps_with_hidden_zone0(self):
+        import dq4environmentmap as em
+        import dq4environmentrom as er
+        fc = {name: (g, k) for g, k, _, name in em.all_maps(self.prg)}
+        hidden = sorted(f'{er.GROUPS[name][0]:02X}/{er.GROUPS[name][1]:02X}' for name in er.GROUPS
+                        if o.hidden_cells(self.map(*fc[name])))
+        self.assertEqual(hidden, ['3C/01', '40/01', '40/05', '42/02', '42/03', '42/04', '43/04', '44/04'])
 
 
 class PatchTests(unittest.TestCase):

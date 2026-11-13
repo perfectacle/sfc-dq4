@@ -177,6 +177,9 @@ FRONT = 0x40
 CHEST_HEAD = FRONT, UPPER, 0x04
 FURNITURE = {0xAB: (0, 0x00, 0x13), 0xAA: (FRONT, UPPER, 0x27)}
 OPENINGS = DOORS | set(GATES)
+# Key in a map's {FC block: new block} for its never-reached zone-0 cells (dq4outside.hidden_cells). FC blocks are
+# 5 bits, and FC itself draws other zones with its blocks 20/21, so 21 cannot clash.
+HIDDEN = 0x21
 DOOR_KIND = 0x3B
 GATE_KIND = 0x48
 OBJECT_TABLE = 0x01D2FC
@@ -256,10 +259,27 @@ def build_graphics(prg, assets):
                 block_words.append(key[0])
                 block_heads.append(key[1])
             local[fc_block] = block_ids[key]
+        if name in GROUPS and dq4outside.hidden_cells(source):
+            key = (_blank_block(chr_ids, chr_data, chr_banks), (0, 0, 0))
+            if key not in block_ids:
+                block_ids[key] = len(block_words)
+                block_words.append(key[0])
+                block_heads.append(key[1])
+            local[HIDDEN] = block_ids[key]
         maps[name] = (source, local)
     if len(chr_data) > 1024:
         raise ValueError(f"{len(chr_data)} CHR do not fit one bank")
     return chr_data, chr_banks, block_words, block_heads, maps, palette
+
+
+def _blank_block(chr_ids, chr_data, chr_banks):
+    """CHR words of a 2x2 block of colour 0, which shows the black backdrop like the DQ5 way-0 outside."""
+    key = (bytes(64), 1)
+    if key not in chr_ids:
+        chr_ids[key] = len(chr_data)
+        chr_data.append(_planar(key[0]))
+        chr_banks.append(key[1])
+    return (chr_ids[key],) * 4
 
 
 def block_head(name, source, fc_block):
@@ -360,7 +380,11 @@ def map_document(name, source, local, target):
     """FC layout as DQ5 commands; blocked FC cells become wall cells via attribute pass 1, counters get +1 bit7
     via attribute pass 2."""
     width, height = source.w * 2, source.h * 2
+    hidden = dq4outside.hidden_cells(source) if HIDDEN in local else set()
+
     def block_at(x, y):
+        if (x, y) in hidden:
+            return local[HIDDEN]
         return local[door_floor(source, x, y) if _prop(source, x, y) in OPENINGS else source.cell(x, y) & 31]
 
     def blocked(x, y):
