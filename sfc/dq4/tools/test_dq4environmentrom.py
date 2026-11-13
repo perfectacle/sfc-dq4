@@ -71,6 +71,16 @@ class MapDocumentTests(unittest.TestCase):
         source = Source(rows or self.ROWS)
         return source, env.map_document(name, source, dict(self.LOCAL), env.MAPS[name])
 
+    def test_hidden_zone0_cells_take_the_blank_block(self):
+        source = Source(self.ROWS)
+        local = {**self.LOCAL, env.HIDDEN: 99}
+        with patch.object(env.dq4outside, 'hidden_cells', return_value={(0, 1), (3, 2)}):
+            doc = env.map_document(GROUP_NAME, source, local, env.MAPS[GROUP_NAME])
+        drawn = draw(doc)
+        self.assertEqual(drawn[0, 1], [99])
+        self.assertEqual(drawn[3, 2], [99])
+        self.assertEqual(drawn[1, 2], [self.LOCAL[FLOOR]])
+
     def test_every_cell_is_drawn_once_with_floor_under_doors_and_chests(self):
         source, doc = self.document()
         self.assertEqual((doc['width'], doc['height']), (8, 6))

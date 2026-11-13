@@ -1496,6 +1496,20 @@ needs = ["rom"]
 groups = ["ch1-walk"]
 
 [[check]]
+name = "dq4-map-outside-zones"
+why = "FC 는 파티가 선 구역 밖의 칸과 맵 밖(구역 0 바깥 블록)을 검게 그린다. 구역 0 에 아무도 못 서는 맵(서장 지하 14/01 등)에 맵 밖을 바깥 블록으로 채우면 지하 둘레 화면 전체가 산호 판석 바닥이 되었다. 그런 맵은 맵 밖을 검정(방법 0)으로, 구역 0 칸을 빈 블록으로 둔다. 구역 0 을 가리는 맵 목록(3C/01·40/01·40/05·42/02~04·43/04·44/04)과, 맵 가장자리로 구역 0 에 닿는 3A/03(ホイミン)·마을은 바깥 블록을 그대로 쓰는지 본다. FC 롬이 있어야 도는 단위 테스트라 CI 가 대신 돌리지 못한다. 건너뛰면 OK 줄이 달라 실패로 친다"
+paths = [
+  "sfc/dq4/tools/dq4outside.py",
+  "sfc/dq4/tools/test_dq4outside.py",
+  "sfc/dq4/tools/dq4environmentrom.py",
+  "sfc/dq4/tools/dq4environmentmap.py",
+  "fc/dq4/tools/dq4block.py",
+]
+run = "uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4outside.py -k RomZoneTests 2>&1 | tee work/map-outside-zones.log | tail -1 | grep -qx OK"
+needs = ["rom"]
+groups = ["ch1-walk"]
+
+[[check]]
 name = "dq4-unported-gates"
 why = "MAPS 밖 FC 맵에서 9C 성문을 가진 맵이 31-04·33-01·3C-00 셋뿐이고, 각 맵에서 생성기(dq4environmentrom.objects)가 잠금 0 성문(48) 하나를 만들어야 한다. FC 롬이 있어야 도는 단위 테스트라 CI 가 대신 돌리지 못한다. 건너뛰면 OK 줄이 달라 실패로 친다. 셋 가운데 하나를 MAPS 에 넣으면 실패하므로 그때 dq4gatecheck 실측으로 옮긴다"
 paths = [

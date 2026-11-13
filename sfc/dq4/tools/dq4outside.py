@@ -10,14 +10,27 @@ cell from the common tail 00:BAC3, with the in-map cell in $00/$01; FC map edges
 OUTSIDE_WAY, which no DQ5 map uses, now leads through the bank-00 stub STUB_AT to ROUTINE_AT: it looks the current
 map ($BC, $BD) up in its table and puts in $00/$01 a fixed in-map block cell holding the outside block, plus the
 low bit of the outside cell ($90, $92), so the 2x2 cells of that block repeat. The stub then jumps to 00:BAC3, as
-00:BA74 does. The in-map block is one in FC zone 0: FC draws the outside block in zone 0 (0F:$D4E6), so from inside
-a house (another zone) it is darkened, which the DQ5 zone drawing of that cell does too. A map whose outside block
-appears only in other zones or not at all keeps way 0 (black).
+00:BA74 does. The in-map block is one in FC zone 0: FC draws the outside block in zone 0 (0F:$D4E6), so while the
+party stands in another zone it is drawn black. The port does not draw FC zones, so a map whose party can never
+stand in zone 0 (zone0_hidden: the prologue cellar 14/01) would show the outside block where
+FC is always black; it keeps way 0, as does a map whose outside block appears only in other zones or not at all.
+dq4environmentrom draws the zone-0 cells of such a map (hidden_cells) with a blank block for the same reason.
 
 FC maps with header $0550 bit7 (3C/00, the prologue village) mix $0520 with $0582 in a pattern (0F:$D44C); here they
 get $0520 alone.
 """
 
+import functools
+from pathlib import Path
+import sys
+
+FC_TOOLS = Path(__file__).resolve().parents[3] / "fc" / "dq4" / "tools"
+if str(FC_TOOLS) not in sys.path:
+    sys.path.insert(0, str(FC_TOOLS))
+
+import dq4block  # noqa: E402
+
+FALL_KIND = 0x0B       # FC block property: a cell the party falls through (dq4block.fall)
 # Chapter 1 and the prologue (dq4environmentrom.GROUPS 36-3C).
 GROUPS = range(0x36, 0x3D)
 OUTSIDE_WAY = 5
@@ -40,9 +53,71 @@ def cell(source):
     return None
 
 
+@functools.cache
+def arrivals(prg):
+    """{(group, number): {(x, y)}}: FC cells the party lands on from another map's exit or fall (dq4block)."""
+    out, cache = {}, {}
+    for g, k, *_ in dq4block.map_list(prg):
+        m = cache.get((g, k)) or cache.setdefault((g, k), dq4block.Map(prg, g, k))
+        for e in dq4block.exit_links(prg, g, k, cache):
+            to = e["to"]
+            if to and "index" in to and not to.get("invalid"):
+                out.setdefault((to["group"], to["index"]), set()).add((to.get("x", 0), to.get("y", 0)))
+        for i, v in enumerate(m.buf):
+            if m.blocks["prop"].get(v & 31, 0) & 0x7F == FALL_KIND:
+                to = dq4block.fall(prg, g, k, i % m.w, i // m.w)
+                if "index" in to:
+                    out.setdefault((to["group"], to["index"]), set()).add((to["x"], to["y"]))
+    return out
+
+
+def reachable_zones(source, seeds):
+    """FC zones (top 3 bits) of the cells the party reaches walking from `seeds`, plus zone 0 once it reaches the map
+    edge. Doors and gates count as open."""
+    from dq4environmentrom import OPENINGS
+    def walkable(x, y):
+        prop = source.blocks["prop"].get(source.buf[y * source.w + x] & 31, 0)
+        return not prop & 0x80 or prop in OPENINGS
+    seen, todo = set(), [s for s in seeds if 0 <= s[0] < source.w and 0 <= s[1] < source.h]
+    while todo:
+        x, y = todo.pop()
+        if (x, y) in seen:
+            continue
+        seen.add((x, y))
+        todo += [(nx, ny) for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1))
+                 if 0 <= nx < source.w and 0 <= ny < source.h and walkable(nx, ny)]
+    zones = {source.buf[y * source.w + x] >> 5 for x, y in seen}
+    # Off the edge lies the outside block, in zone 0; the well tower 3A/03 also wraps its corridors round the edge
+    # into zone-0 cells (ホイミン stands in one).
+    if any(x in (0, source.w - 1) or y in (0, source.h - 1) for x, y in seen):
+        zones.add(0)
+    return zones
+
+
+def zone0_hidden(source):
+    """True if the party never stands in FC zone 0 of `source` (dq4block.Map), so FC always draws zone 0 and the
+    outside black. Seeds are the map's exit cells and the cells other maps' exits and falls land on. A map with no
+    seed (entered from the field or by events only) counts as reaching zone 0, as does a source that is not an FC
+    map (dq4block.Map)."""
+    if not isinstance(source, dq4block.Map):
+        return False
+    seeds = {(x, y) for x, y, _ in dq4block.exit_cells(source.prg, source)}
+    seeds |= arrivals(source.prg).get((source.g, source.k), set())
+    return bool(seeds) and 0 not in reachable_zones(source, seeds)
+
+
+def hidden_cells(source):
+    """FC cells (x, y) of zone 0 when zone0_hidden(source): FC always draws them black (block 20/21)."""
+    if not zone0_hidden(source):
+        return set()
+    return {(i % source.w, i // source.w) for i, v in enumerate(source.buf) if not v >> 5}
+
+
 def way(target, source):
     """Map header +3 for DQ5 map `target` (group, number) made from `source`."""
-    return OUTSIDE_WAY if target[0] in GROUPS and cell(source) is not None else 0
+    if target[0] not in GROUPS or cell(source) is None:
+        return 0
+    return 0 if zone0_hidden(source) else OUTSIDE_WAY
 
 
 def routine(table):
