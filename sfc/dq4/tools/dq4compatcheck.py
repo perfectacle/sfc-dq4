@@ -402,7 +402,7 @@ class Walker:
             name, how, arg, opt = self.segs[i]
             self.pokes = [(int(a, 16), int(v, 16)) for a, v in re.findall(r'(\w+)=(\w+)', opt.get('poke', ''))]
             if how == 'ending':
-                r = self.ending()
+                r = {**self.ending(), 'name': name}
             else:
                 # 걷기 검사와 같이 구간을 시작할 때 난수·시각(묶음 첫 구간이면 앞 구간들의 깃발·물건도)을 둔다
                 first, mates = (extra, party) if k == 0 else ('', '')

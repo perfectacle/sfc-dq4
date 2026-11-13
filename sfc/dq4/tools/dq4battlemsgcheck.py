@@ -27,6 +27,7 @@ import dq4readset  # noqa: E402
 import dq4battlemsg  # noqa: E402
 import dq4battletexts  # noqa: E402
 import dq4npccheck as nc  # noqa: E402
+from dq4pins import RNG  # noqa: E402
 
 SWAP_LUA = HERE / 'lua' / 'dq4battlemsgswap.lua'
 WARP_LUA = HERE.parents[1] / 'dq5' / 'tools' / 'lua' / 'dq5warp.lua'
@@ -49,6 +50,9 @@ def run(mesence, libdir, rom, state, out, ids, field=False):
     env = {k: v for k, v in os.environ.items() if k not in ('POKE', 'ROMPATCH', 'BATTLE', 'FIELD')}
     env.update(LIBDIR=str(libdir), STATE=str(state), SHOT_DIR=str(out), DRIVER=str(WARP_LUA),
                WARPEXIT=f'{nc.warp_exit(rom):X}', DP86OK=nc.dp86_allowed(rom), TO=BOSS_CELL, SET=HERO,
+               # 보스 앞에 내린 첫 프레임에 난수를 묶는다. 묶지 않으면 롬마다 서장 끝 상태까지의 프레임이 달라 전투 흐름이
+               # 바뀌고, 같은 번호가 전투가 끝나 가는 검은 화면 자리에 끼워져 멈춘 것으로 보였다
+               LATESET=RNG,
                SETTLE='120', TEST=TAPS, MAXF=str(MAXF), SWAP=','.join(f'{n:03X}' for n in ids),
                POOLCODES=','.join(f'{c:02X}' for c in dq4battlemsg.CODES),
                LATECODES=','.join(f'{c:02X}' for c in dq4battlemsg.CODES[dq4battlemsg.POOL.index(dq4battlemsg.POOL_C[0]):]))

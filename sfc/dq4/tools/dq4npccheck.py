@@ -250,6 +250,8 @@ def main():
                     help="the ROM is the chapter-1 build: people its events change answer as dq4ch1event says")
     ap.add_argument("--chapter2", action="store_true",
                     help="the ROM is the --chapter2 build: check the chapter-2 groups with the chapter-2 flag on")
+    ap.add_argument("--states", help="with --chapter2: later states (dq4ch2event.state_messages names, comma-separated). "
+                    "Each sets its flags too and talks only to the people its table lists")
     args = ap.parse_args()
     sets, lift = None, 0
     if args.chapter2:
@@ -289,6 +291,17 @@ def main():
         import dq4ch2event
         events.update(dq4ch2event.start_messages(first + len(dq4ch1event.MESSAGES)))
         gone = dq4ch2event.absent()
+    states = {}
+    if args.states:
+        if not args.chapter2:
+            raise SystemExit("--states needs --chapter2")
+        table = dq4ch2event.state_messages(first + len(dq4ch1event.MESSAGES))
+        unknown = [n for n in args.states.split(",") if n not in table]
+        if unknown:
+            raise SystemExit(f"no such state: {', '.join(unknown)} (have {', '.join(table)})")
+        states = {n: table[n] for n in args.states.split(",")}
+        args.no_tables = True
+    job_sets = {}
 
     jobs, later = [], []
     for m, persons in people.items():
@@ -299,7 +312,9 @@ def main():
             continue
         if args.maps and m not in args.maps:
             continue
-        if args.chapter2 and not args.maps and m[:2] not in CHAPTER2_GROUPS:
+        if states and not any(k[0] == m for _, table in states.values() for k in table):
+            continue
+        if args.chapter2 and not args.maps and not states and m[:2] not in CHAPTER2_GROUPS:
             continue
         group, number = int(m[:2], 16), int(m[3:], 16)
         fc = fc_map(prg, group, number)
@@ -331,6 +346,14 @@ def main():
                 continue
             sx, sy, d = side
             to = warp_to(m, sx, sy, lift)
+            if states:
+                for label, (more, table) in states.items():
+                    message = table.get((m, (p["x"], p["y"]), p["night"]))
+                    if message is not None:
+                        name = f"{label}-talk-{m.replace('/', '')}-{i}"
+                        jobs.append(("talk", name, m, to, d, p["night"], (message, None)))
+                        job_sets[name] = ";".join(v for v in (sets, more) if v)
+                continue
             service = p.get("service")
             if service in SHOPS:
                 jobs.append(("shop", f"shop-{m.replace('/', '')}-{i}", m, to, d, p["night"],
@@ -365,7 +388,7 @@ def main():
         for n, talk in enumerate(TALKS):
             wram, messages = run(mesence, rom_path, state, out, f"{name}-{n}", libdir, to,
                                  talk.format(dir=test) + (BUY if shop else STAY if kind == "inn" else ""), night, shop,
-                                 None if shop else ret, sets=sets)
+                                 None if shop else ret, sets=job_sets.get(name, sets))
             if messages and (shop or messages[0]):
                 return wram, messages, n
         return wram, messages, None

@@ -36,6 +36,7 @@ import dq4ch2endor as endor  # noqa: E402
 import dq4ch2tempe as tempe  # noqa: E402
 import dq4ch2frenol as frenol  # noqa: E402
 import dq4ch2king as king  # noqa: E402
+import dq4ch2ending as ending  # noqa: E402
 
 talk, taps = wc.talk, wc.taps
 CLOSE = wc.pc.CLOSE
@@ -80,6 +81,8 @@ FLAGS = {
     'KING_SEEN': flag(king.SEEN),
     'KING_GOT': flag(king.GOT),
     'KING_CURED': flag(king.CURED),
+    'SEEN_BREY': flag(ending.SEEN_BREY),
+    'SEEN_KIRYL': flag(ending.SEEN_KIRYL),
     # flag 가 아니라 바이트 전체(마스크 FF)를 본다: 1장에 맡긴 やくそう 개수와 맡긴 금화(1000G 단위) 아래 바이트
     'BANK_HERB': (ch2.BANK_ITEMS_AT + 0xA1, 0xFF),
     'BANK_GOLD': (ch2.BANK_GOLD_AT, 0xFF),
@@ -114,6 +117,8 @@ BRACELET_SET = f'{(wc.ITEMS & 0xFFFF) + 1:04X}={frenol.BRACELET:02X};{frenol.CHE
 # 칸은 앞 사건의 물건과 겹친다
 HONEY_SET = f'{(ch2.JOIN_RECORDS_AT & 0xFFFF) + 0x16 + 2:04X}={king.HONEY:02X}'
 
+# 왕좌의 방에서 성 앞마당으로 내려가는 계단(셀 (22,35), dq4groupcheck 의 stair-3D01-1)의 오른쪽 칸에서 왼쪽으로
+ENDING_STAIRS = '24,35;left:32'
 # 같은 맵 안으로 순간이동하는 묶음이 먼저 들르는 곳(2장 출발 상태는 왕좌의 방 3D/01)
 HOPS = {ch2.THRONE: f'{ch2.CASTLE},28,45'}
 
@@ -311,6 +316,18 @@ SEGMENTS += [
     ('endor_messenger_side', 'warp', f'{endor.TOWN},46,28', {'map': endor.TOWN}),
     ('endor_messenger', 'walk', '46,23;wait:60;' + taps(4) + ';wait:200;' + CLOSE,
      {'map': endor.TOWN, 'want': ['ENDOR_MESSENGER']}),
+]
+
+# 빈 산트하임 성과 2장 끝(dq4ch2ending). 우승 flag 가 켜진 앞 구간 뒤라 성이 비어 있다. 왕좌의 방·왕의 방에 들어서면
+# 브라이·크리프트가 말한다. 본 flag 가 켜진 채 성 앞마당에 들어서면 장 끝이라, 앞마당을 들르는(HOPS) 왕좌의 방 묶음을
+# 먼저 두고 그 묶음에서 계단으로 내려가 장 끝 서술 → 「다음에 계속」 상자 → 리셋까지 본다
+SEGMENTS += [
+    ('empty_throne_side', 'warp', f'{ch2.THRONE},24,36', {'map': ch2.THRONE}),
+    ('empty_brey', 'walk', 'wait:60;' + taps(1, 60) + ';' + CLOSE, {'want': ['SEEN_BREY'], 'map': ch2.THRONE}),
+    ('empty_leave', 'walk', ENDING_STAIRS, {'map': ch2.CASTLE, 'changes': 1, 'after': 60}),
+    ('empty_end', 'ending', ending.END_SCENE, {}),
+    ('empty_bedroom_side', 'warp', f'{ch2.BEDROOM},22,9', {'map': ch2.BEDROOM}),
+    ('empty_kiryl', 'walk', 'wait:60;' + taps(2, 60) + ';' + CLOSE, {'want': ['SEEN_KIRYL'], 'map': ch2.BEDROOM}),
 ]
 
 

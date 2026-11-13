@@ -46,9 +46,11 @@ PROLOGUE = Scene('box0', (0x3C, 0x01), (0x7E219E, 0x08), '서장')
 CHAPTER2 = Scene('box2', (0x3D, 0x01), None, '제2장  말괄량이 공주의 모험', since=(0x7E2208, 0x40))
 # 1장에서 끝내는 배포판: 1장 끝 서술 뒤 2장 제목과 「다음에 계속」 을 띄우고 타이틀로 돌아간다
 ENDING = Scene('end', None, None, CHAPTER2.title, subtitle='― 다음에 계속 ―')
+# 2장 끝(빈 산트하임 성 앞마당, dq4ch2ending): 3장 제목과 「다음에 계속」. 3장 이름은 nds/dq4/tables/adopt.tsv(사용자 결정)
+ENDING2 = Scene('end2', None, None, '제3장  무기상인 톨네코', subtitle=ENDING.subtitle)
 # 게임에 넣는 장면 차례. 상자·밝히기 네이티브 주소가 이 목록으로 정해지므로, 주소를 부르는 스크립트(서장·1장)와
 # 빌드가 같은 목록을 써야 한다
-GAME_SCENES = (PROLOGUE, CHAPTER1, CHAPTER2, ENDING)
+GAME_SCENES = (PROLOGUE, CHAPTER1, CHAPTER2, ENDING, ENDING2)
 SUB_GAP = 1                                 # 상자와 부제 띠 사이 행
 
 # FC 팔레트(MesenCE 색): 0 검정, 1 금색(테두리)·흰색(글자), 2 파랑, 3 흰색
