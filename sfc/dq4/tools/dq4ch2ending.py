@@ -38,6 +38,9 @@ EMPTY = endor.CHAMPION         # 우승(FC $6284&40): 산트하임 성이 빈다
 
 CASTLE, THRONE, BEDROOM = ch2.CASTLE, ch2.THRONE, ch2.BEDROOM
 END_SCENE = 'end2'             # dq4chapterbox.ENDING2 의 이름
+# 장 끝 서술 동안 울리는 곡: 곡 자리 13 エンディング第二章(FC 곡 08). 밤낮으로 고르는 곡 번호가 아니라 그대로 간다
+ENDING_SONG = 0x13
+SONG_STOP, SONG_PLAY = 0x24FE91, 0x24FE9A
 
 # 빌린 인물 스크립트(DQ5 01/00 대체 목록 10:8414, dq4ch2slots E5). (칸, 스크립트 길이 바이트 주소, 원래 스크립트 길이).
 # 고친 스크립트는 원래 길이 안에 들어가야 한다(dq5npcrelocate 가 인물 레코드 크기를 지킴). 칸 2·3·7·11~14 와
@@ -194,12 +197,25 @@ def _cmd(op, *args, **kw):
     return {"op": op, "args": list(args), **kw}
 
 
-def scripts(ctx):
+def native(ctx):
+    """끝내는 인물이 부르는 것: 1장 끝과 같이 맵 곡을 줄이고 검게 한 뒤 엔딩 곡을 튼다. 빌린 스크립트 칸이 17바이트라
+    검게 하기와 곡 틀기를 명령 37 하나로 묶는다."""
     import dq4ch1event
+    from dq4chapterbox import ENTER, LEAVE
+    darken = dq4ch1event.native()[1]['darken']
+    # 줄이기(04)만 두면 아직 올리는 중이던 성 곡이 뒤늦게 울다가 엔딩 곡에 끊겨, 엔돌 우승 팡파르처럼 1A 로 먼저 멈춘다
+    code = (ENTER + bytes((0x22, *_al(darken))) +                          # JSL darken
+            bytes((0xE2, 0x20, 0x22, *_al(SONG_STOP))) +                     # SEP #$20 / JSL 24:FE91(1A)
+            bytes((0xA9, ENDING_SONG, 0x22, *_al(SONG_PLAY))) +              # LDA #곡 / JSL 24:FE9A
+            LEAVE)
+    return code, {'darken_song': ctx.code_at}
+
+
+def scripts(ctx):
     lo, hi = (lambda v: v & 0xFF), (lambda v: v >> 8)
     msg = lambda k: _cmd('21', lo(ctx.msg[k]), hi(ctx.msg[k])) if ctx.msg else _cmd('21', 0, 0)  # noqa: E731
     end_box = (ctx.points or {}).get(END_SCENE, 0)
-    darken = dq4ch1event.native()[1]['darken']
+    darken = ctx.at['darken_song']
 
     def voice(name, flag):
         # FC 블록처럼 맵에 들어설 때마다 말한다(26 메시지 뒤 27 로 flag)
@@ -207,7 +223,7 @@ def scripts(ctx):
     out = {
         'brey': voice('brey', SEEN_BREY),
         'kiryl': voice('kiryl', SEEN_KIRYL),
-        # 1장에서 끝내는 판과 같은 끊기: 검은 화면 → 서술 → 「다음에 계속」 상자, 버튼을 누르면 타이틀(돌아오지 않음)
+        # 1장에서 끝내는 판과 같은 끊기: 검은 화면·엔딩 곡 → 서술 → 「다음에 계속」 상자, 버튼을 누르면 타이틀(돌아오지 않음)
         'ender': [_cmd('28'), _cmd('52'), _cmd('3F'), _cmd('37', *_al(darken)), msg('end'),
                   _cmd('37', *_al(end_box)), _cmd('16')],
     }

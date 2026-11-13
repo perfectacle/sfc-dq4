@@ -83,6 +83,8 @@ FLAGS = {
     'KING_CURED': flag(king.CURED),
     'SEEN_BREY': flag(ending.SEEN_BREY),
     'SEEN_KIRYL': flag(ending.SEEN_KIRYL),
+    # 지금 울리는 곡 자리(선택 bytes 로만 본다)
+    'SONG': (0x7E1D8B, 0xFF),
     # flag 가 아니라 바이트 전체(마스크 FF)를 본다: 1장에 맡긴 やくそう 개수와 맡긴 금화(1000G 단위) 아래 바이트
     'BANK_HERB': (ch2.BANK_ITEMS_AT + 0xA1, 0xFF),
     'BANK_GOLD': (ch2.BANK_GOLD_AT, 0xFF),
@@ -119,6 +121,7 @@ HONEY_SET = f'{(ch2.JOIN_RECORDS_AT & 0xFFFF) + 0x16 + 2:04X}={king.HONEY:02X}'
 
 # 왕좌의 방에서 성 앞마당으로 내려가는 계단(셀 (22,35), dq4groupcheck 의 stair-3D01-1)의 오른쪽 칸에서 왼쪽으로
 ENDING_STAIRS = '24,35;left:32'
+SARAN = '45/00'
 # 같은 맵 안으로 순간이동하는 묶음이 먼저 들르는 곳(2장 출발 상태는 왕좌의 방 3D/01)
 HOPS = {ch2.THRONE: f'{ch2.CASTLE},28,45'}
 
@@ -232,6 +235,12 @@ SEGMENTS += [
      {'want': ['FRENOL_RESCUED'], 'off': ['FRENOL_SCENE'], 'items': [frenol.THIEF_KEY], 'map': frenol.TOWN}),
 ]
 
+# 엔돌 쪽 사당 문 (6,7)에서 아래 입구로 나가 필드 (174,167), 필드를 걸어 엔돌 입구 블록 (67,65)로 든다. 사당은 FC
+# 1F/00 의 문 쪽 반(왼쪽 기둥 열)을 따라 내려가고, 필드 길은 FC 필드 블록 속성에서 막히지 않은 칸을 이은 것이다
+SHRINE_FAR_OUT = '4,7;4,13;0,13;0,29;14,29;down:60;174,167'
+ENDOR_ROAD = ('176,167;176,169;178,169;178,171;180,171;180,173;182,173;182,175;184,175;184,177;186,177;'
+              '186,179;188,179;188,181;190,181;190,183;196,183;196,197;198,197;198,199;206,199;206,203')
+
 # 왕의 병(dq4ch2king): 바자 병사 → 왕좌의 방 병사 → 사당이 막힘 → 탑 꼭대기의 엘프와 꿀 → 왕 회복 → 사당의 여행의 문
 SEGMENTS += [
     ('bazaar_side', 'warp', f'{king.BAZAAR_MAP},{king.BAZAAR_SOLDIER[0]},{king.BAZAAR_SOLDIER[1] + 1}',
@@ -254,6 +263,8 @@ SEGMENTS += [
     # 병사가 비켜선 사당: 위 방의 여행의 문으로 엔돌 쪽 사당에 닿는다
     ('shrine_side', 'warp', f'{king.SHRINE},10,20', {'map': king.SHRINE}),
     ('shrine', 'walk', '10,15;8,15;8,11;10,11;10,7', {'map': king.SHRINE_FAR, 'changes': 1}),
+    ('shrine_out', 'walk', SHRINE_FAR_OUT, {'field': True, 'cell': (174, 167), 'poke': wc.DAY}),
+    ('endor_road', 'walk', ENDOR_ROAD, {'map': endor.TOWN, 'changes': 1, 'after': 60, 'poke': wc.DAY, 'maxf': 4000}),
 ]
 
 
@@ -328,6 +339,14 @@ SEGMENTS += [
     ('empty_end', 'ending', ending.END_SCENE, {}),
     ('empty_bedroom_side', 'warp', f'{ch2.BEDROOM},22,9', {'map': ch2.BEDROOM}),
     ('empty_kiryl', 'walk', 'wait:60;' + taps(2, 60) + ';' + CLOSE, {'want': ['SEEN_KIRYL'], 'map': ch2.BEDROOM}),
+    # 두 사람의 말을 본 뒤 성을 나갔다가 필드에서 성문으로 들어와도 끝난다. 이웃 사란(FC 13/00, 필드 입구 (22,49))의
+    # 도착 칸에서 아래로 나가 필드 (68,149), 오른쪽으로 걸어 성 입구 블록 (27,49) 아래에서 위로 든다
+    ('gate_end_side', 'warp', f'{SARAN},24,50', {'map': SARAN}),
+    ('gate_out', 'walk', 'down:60;68,149', {'field': True, 'cell': (68, 149), 'poke': wc.DAY}),
+    # 엔딩 곡은 들어선 뒤 약 260프레임에 지금 곡이 된다(곡 자료를 올리는 동안)
+    ('gate_in', 'walk', '78,149;78,147', {'map': ch2.CASTLE, 'changes': 1, 'after': 400, 'poke': wc.DAY,
+                                          'bytes': {'SONG': ending.ENDING_SONG}}),
+    ('gate_end', 'ending', ending.END_SCENE, {}),
 ]
 
 
