@@ -364,6 +364,93 @@ class FrontTests(unittest.TestCase):
         self.assertFalse(front & walls)
 
 
+@unittest.skipUnless((ROOT / "rom" / "dq4.nes").is_file(), "local source ROM not present")
+class LayeredTests(unittest.TestCase):
+    """Stairs and pillars show the floor they stand on: transparent art on the upper layer over a floor block."""
+
+    @classmethod
+    def setUpClass(cls):
+        import sys
+        sys.path.insert(0, str(ROOT / "fc" / "dq4" / "tools"))
+        from kr_patch.fc import ines
+        from dq4environmentart import create_assets
+        cls.prg = ines.prg((ROOT / "rom" / "dq4.nes").read_bytes())
+        cls.assets = create_assets()
+
+    def test_layered_cells_take_a_floor_around_them(self):
+        from dq4environmentmap import LAYERED, _plain_floor, layer_floors, prepare_maps, sheet_art
+        cells = 0
+        for _, _, name, source, _, prepared, _ in prepare_maps(self.prg, self.assets):
+            mapping = sheet_art(self.prg, source.t)
+            floors = layer_floors(source, mapping, prepared)
+            want = {(x, y) for y in range(source.h) for x in range(source.w)
+                    if mapping[source.cell(x, y) & 31][0] in LAYERED}
+            self.assertEqual(set(floors), want, name)
+            for (x, y), floor in floors.items():
+                self.assertTrue(_plain_floor(source, mapping, prepared, floor), (name, x, y))
+                around = {source.cell(nx, ny) & 31 for ny in range(max(0, y - 1), min(source.h, y + 2))
+                          for nx in range(max(0, x - 1), min(source.w, x + 2)) if (nx, ny) != (x, y)}
+                around = {b for b in around if _plain_floor(source, mapping, prepared, b)}
+                if around:
+                    self.assertIn(floor, around, (name, x, y))
+            cells += len(floors)
+        self.assertGreater(cells, 600)
+
+    def test_transparent_pixels_show_the_floor(self):
+        # サントハイム 왕좌의 방(FC 01/01, SFC 3D/01): 진홍 카펫 위 기둥 넷, 아래·위 계단 하나씩.
+        from dq4environmentmap import layer_floors, prepare_maps, render_maps, sheet_art
+        image = render_maps(ROOT / "rom" / "dq4.nes", self.assets, ["01-01"])["01-01"][0]
+        _, _, _, source, _, prepared, _ = next(prepare_maps(self.prg, self.assets, ["01-01"]))
+        floors = layer_floors(source, sheet_art(self.prg, source.t), prepared)
+        self.assertEqual(sorted(sheet_art(self.prg, source.t)[source.cell(x, y) & 31][0] for x, y in floors),
+                         ["pillar"] * 4 + ["pillar_top"] * 4 + ["stairs_down", "stairs_up"])
+        for (x, y), floor in floors.items():
+            art, under = prepared[source.cell(x, y) & 31][0], prepared[floor][0]
+            for py in range(16):
+                for px in range(16):
+                    want = art.getpixel((px, py)) or under.getpixel((px, py))
+                    self.assertEqual(image.getpixel((x * 16 + px, y * 16 + py)), want, (x, y, px, py))
+
+    def test_rom_blocks_put_the_art_over_the_floor(self):
+        import dq4environmentrom as rom
+        from dq4environmentmap import LAYERED, sheet_art
+        _, _, words, heads, maps, _ = rom.build_graphics(self.prg, self.assets)
+        exits = 0
+        for name, (source, local) in maps.items():
+            mapping = sheet_art(self.prg, source.t)
+            layered = {(x, y) for y in range(source.h) for x in range(source.w)
+                       if mapping[source.cell(x, y) & 31][0] in LAYERED}
+            for x, y in layered:
+                block = local[source.cell(x, y) & 31]
+                under = local[rom.UNDER, x, y]
+                self.assertEqual(heads[block], rom.LAYER_HEAD, (name, x, y))
+                stair = name in rom.GROUPS and rom._prop(source, x, y) in rom.STAIRS
+                self.assertEqual(heads[under][2], rom.STAIR_ATTR if stair else heads[under][2], (name, x, y))
+                self.assertFalse(heads[under][1] & rom.UPPER, (name, x, y))
+                exits += stair
+            doc = rom.map_document(name, source, local, rom.MAPS[name])
+            order, current = {}, None
+            for command in doc["commands"]:
+                if command[0] == "block":
+                    current = command[1]
+                elif command[0] in ("put", "fill"):
+                    x0, y0 = command[1] // 2, command[2] // 2
+                    x1, y1 = (command[3] // 2, command[4] // 2) if command[0] == "fill" else (x0, y0)
+                    for cy in range(y0, y1 + 1):
+                        for cx in range(x0, x1 + 1):
+                            order.setdefault((cx, cy), []).append(current)
+            for x, y in layered:
+                self.assertEqual(order[x, y], [local[rom.UNDER, x, y], local[source.cell(x, y) & 31]], (name, x, y))
+            front = {(cx + k, cy) for cx, cy, n, value, _ in doc["passes"][1]["entries"] for k in range(n)
+                     if value & rom.FRONT_PASS}
+            for x, y in layered:
+                for cy in (y * 2 + 2, y * 2 + 3):
+                    for cx in (x * 2, x * 2 + 1):
+                        if cy // 2 < source.h and not rom._prop(source, cx // 2, cy // 2) & 0x80:
+                            self.assertIn((cx, cy), front, (name, x, y))
+        self.assertGreater(exits, 100)
+
+
 class UpperLayerHeadTest(unittest.TestCase):
     def test_upper_layer_blocks_draw_people_in_front(self):
         # 2B:B815 gives the head row of a person standing right below an upper-layer block OAM priority 2 (under

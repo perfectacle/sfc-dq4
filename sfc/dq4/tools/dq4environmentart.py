@@ -339,7 +339,8 @@ def _bridge():
 
 
 def _stairs(down=False):
-    c = _Canvas(3, fill=1 if down else 3)
+    # The background stays transparent: stairs go on the upper layer over the floor around them.
+    c = _Canvas(3)
     for n in range(5):
         y = 1 + n * 3
         left = n // 2 if down else 0

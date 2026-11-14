@@ -22,7 +22,7 @@ for path in (TOOLS, DQ5_TOOLS):
         sys.path.insert(0, str(path))
 
 from dq4environmentart import create_assets, palette_variant  # noqa: E402
-from dq4environmentmap import block_prop, map_palette, prepare_maps, sheet_art  # noqa: E402
+from dq4environmentmap import block_prop, layer_floors, map_palette, prepare_maps, sheet_art  # noqa: E402
 import dq4block  # noqa: E402
 import dq4environmentnight  # noqa: E402
 import dq4outside  # noqa: E402
@@ -176,6 +176,12 @@ CHEST_KIND = 0x04
 UPPER = 0x20
 FRONT = 0x40
 CHEST_HEAD = FRONT, UPPER, 0x04
+# Stairs and pillars (dq4environmentmap.LAYERED) are all upper layer over a floor block, like a chest. FRONT draws a
+# person on a stair in front of it, as DQ5 stairs do (cell +1 bit4-5). A stair's exit mark goes on the floor block
+# under it: the upper rows' attribute lands in +7, and 2A:F6B8 counts exits by +4.
+LAYER_HEAD = FRONT, UPPER, 0x00
+# Key in a map's {FC block: new block} for the block under the layered cell (x, y): ("under", x, y).
+UNDER = "under"
 FURNITURE = {0xAB: (0, 0x00, 0x13), 0xAA: (FRONT, UPPER, 0x27), 0xA8: (FRONT, UPPER, 0x97)}
 OPENINGS = DOORS | set(GATES)
 # Key in a map's {FC block: new block} for its never-reached zone-0 cells (dq4outside.hidden_cells). FC blocks are
@@ -241,6 +247,7 @@ def build_graphics(prg, assets):
                     chr_banks.append(key[1])
     for group, number, name, source, counts, prepared, palette in prepare_maps(prg, assets, MAPS):
         local = {}
+        layered = {b for b, (_, info) in prepared.items() if info.get("layered")}
         for fc_block, (image, _) in prepared.items():
             words = []
             for ty in (0, 8):
@@ -254,12 +261,12 @@ def build_graphics(prg, assets):
                         chr_data.append(_planar(pixels))
                         chr_banks.append(bank)
                     words.append(chr_ids[key])
-            key = tuple(words), block_head(name, source, fc_block)
-            if key not in block_ids:
-                block_ids[key] = len(block_words)
-                block_words.append(key[0])
-                block_heads.append(key[1])
-            local[fc_block] = block_ids[key]
+            head = LAYER_HEAD if fc_block in layered else block_head(name, source, fc_block)
+            local[fc_block] = _block_id((tuple(words), head), block_ids, block_words, block_heads)
+        for (x, y), floor in (layer_floors(source, sheet_art(prg, source.t), prepared) if layered else {}).items():
+            exit_ = name in GROUPS and _prop(source, x, y) in STAIRS
+            head = (0, 0, STAIR_ATTR) if exit_ else block_heads[local[floor]]
+            local[UNDER, x, y] = _block_id((tuple(block_words[local[floor]]), head), block_ids, block_words, block_heads)
         if name in GROUPS and dq4outside.hidden_cells(source):
             key = (_blank_block(chr_ids, chr_data, chr_banks), (0, 0, 0))
             if key not in block_ids:
@@ -271,6 +278,14 @@ def build_graphics(prg, assets):
     if len(chr_data) > 1024:
         raise ValueError(f"{len(chr_data)} CHR do not fit one bank")
     return chr_data, chr_banks, block_words, block_heads, maps, palette
+
+
+def _block_id(key, block_ids, block_words, block_heads):
+    if key not in block_ids:
+        block_ids[key] = len(block_words)
+        block_words.append(key[0])
+        block_heads.append(key[1])
+    return block_ids[key]
 
 
 def _blank_block(chr_ids, chr_data, chr_banks):
@@ -392,15 +407,17 @@ def map_document(name, source, local, target):
         prop = _prop(source, x, y)
         return WALL if prop & 0x80 and prop not in OPENINGS | COUNTER_PROPS else None
 
+    layered = {(x, y): local[UNDER, x, y] for y in range(source.h) for x in range(source.w)
+               if (UNDER, x, y) in local and (x, y) not in hidden}
     front = set()
     for x, y in ((x, y) for y in range(1, source.h) for x in range(source.w) if _prop(source, x, y) in DOORS):
         front |= {(cx, cy) for cy in (y * 2 - 2, y * 2 - 1) for cx in range(x * 2 - 1, x * 2 + 3) if 0 <= cx < width}
         front |= {(cx, cy) for cy in (y * 2, y * 2 + 1) for cx in (x * 2, x * 2 + 1)}
-    # The party walks in half blocks, so it can stand half a block below a pot or chest, and those upper-layer
+    # The party walks in half blocks, so it can stand half a block below a pot, chest or stair, and those upper-layer
     # blocks then cover all but its feet (14/01 pots). The two rows below them draw a person in front.
     for x, y in ((x, y) for y in range(source.h - 1) for x in range(source.w)
-                 if name in GROUPS and (_prop(source, x, y) & 0x7F == CHEST_KIND or
-                                        FURNITURE.get(_prop(source, x, y), (0, 0))[1] == UPPER)):
+                 if (x, y) in layered or name in GROUPS and (_prop(source, x, y) & 0x7F == CHEST_KIND or
+                                                            FURNITURE.get(_prop(source, x, y), (0, 0))[1] == UPPER)):
         front |= {(cx, cy) for cy in (y * 2 + 2, y * 2 + 3) for cx in range(x * 2 - 1, x * 2 + 2)
                   if 0 <= cx < width and not _prop(source, cx // 2, cy // 2) & 0x80}
 
@@ -412,8 +429,8 @@ def map_document(name, source, local, target):
     # pixels show the lower layer, and the chest, placed last, keeps its cell +1 flags.
     chests = {(x, y) for y in range(source.h) for x in range(source.w)
               if name in GROUPS and _prop(source, x, y) & 0x7F == CHEST_KIND}
-    under = {(x, y): local[chest_floor(source, x, y)] for x, y in chests}
-    chest_blocks = {block_at(x, y) for x, y in chests}
+    under = {(x, y): local[chest_floor(source, x, y)] for x, y in chests} | layered
+    chest_blocks = {block_at(x, y) for x, y in chests | set(layered)}
 
     def covers(x, y, block):
         return block_at(x, y) == block or under.get((x, y)) == block

@@ -189,7 +189,7 @@ class GraphicsTests(unittest.TestCase):
     def run_graphics(self, maps):
         def fake(prg, assets, names):
             for name, (source, prepared) in maps.items():
-                yield 0, 0, name, source, None, {b: (img, None) for b, img in prepared.items()}, 'palette'
+                yield 0, 0, name, source, None, {b: (img, {}) for b, img in prepared.items()}, 'palette'
         with patch.object(env, 'prepare_maps', fake):
             return env.build_graphics(b'', self.assets)
 
@@ -274,7 +274,7 @@ class BuildTests(unittest.TestCase):
     def build(cls, maps, out):
         def fake(prg, assets, names):
             for name, (source, prepared) in maps.items():
-                yield 0, 0, name, source, None, {b: (img, None) for b, img in prepared.items()}, None
+                yield 0, 0, name, source, None, {b: (img, {}) for b, img in prepared.items()}, None
         art = {WATER: (env.WATER_FRAMES[0], None), FOUNTAIN: (env.FOUNTAIN_FRAMES[0], None)}
         with patch.object(env.ines, 'prg', return_value=b''), patch.object(env, 'create_assets', return_value=cls.assets), \
                 patch.object(env, 'prepare_maps', fake), patch.object(env, 'sheet_art', return_value=art), \
