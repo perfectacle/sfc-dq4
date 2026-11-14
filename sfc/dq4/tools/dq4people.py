@@ -63,6 +63,7 @@ LOAD_SLACK = 9                                   # 맵 그룹의 줄 색 수가 
 SKIN_NEAR = 9                                    # 이 Lab 거리 안이면 같은 살색으로 본다
 INK_WEIGHT = 30                                  # 눈 몇 칸뿐인 INK 가 공용 줄에서 갈색에 합쳐지지 않게 무겁게 센다
 ACCENT_SHARE = 0.06                               # 주요·상징 인물의 색마다 그 인물 옷 색 무게의 이 몫을 바닥으로 준다
+TOWN_WEIGHT = 4                                   # 맵 그룹마다 서 있는 상인은 조금 무겁게 센다. 1 이면 초록 셋이 한 칸에 합쳐져 윗옷·바지·모자가 한 덩어리가 된다
 KEY_WEIGHT = 16                                  # 주요·상징 인물은 줄 색을 정할 때 이만큼 무겁게 센다. 마을 사람과 한 줄을 써도 제 색이 남는다
 SLIME = 'h180'                                   # 사람이 아니지만 눈을 찍는 시트
 STEP_TOP = 16                                    # 걸음 두 장은 이 줄부터만 다르다(DQ5 실측, 머리 타일을 함께 쓴다)
@@ -93,7 +94,8 @@ DEGRADE = (
 
 class Person:
     def __init__(self, pictures, group, sheet, role, anim='legs', main=False, palette=None, new_set=None, spare=None,
-                 allow=None, outline=False, flag=None, leader=False, seen=None, face=False, weight=None, glasses=False, brows=False, copy=None, touch=None, whites=()):
+                 allow=None, outline=False, flag=None, leader=False, seen=None, face=False, weight=None, glasses=False, brows=False, copy=None, touch=None, whites=(),
+                 line=None):
         self.pictures, self.group, self.sheet, self.role = pictures, group, sheet, role
         # seen: 사건이 놓는 인물처럼 롬의 인물 목록에 없는 그림이 나올 맵 그룹들. 그 그룹의 줄 색에만 넣는다
         # (목록에서 찾지 못한 그림은 모든 그룹으로 세어 다른 그룹의 색을 흐린다)
@@ -104,6 +106,9 @@ class Person:
         # touch: {방향: [(x, y, 무엇)]}. 줄인 16x24 그림의 칸 하나를 손본다. 무엇은 'ink'(눈 색), 'white', 또는 색을
         # 베낄 칸 (x, y). 눈 자리·모자 무늬처럼 규칙으로는 원작 인상이 안 나오는 몇 칸에만 쓴다
         self.touch = touch or {}
+        # line: 공용 줄을 이 번호로 못박는다. 세트 팔레트 표를 거치지 않고 그려지는 인물은 엔진이 쓰는 줄과 다른
+        # 줄에 넣으면 색이 깨진다
+        self.line = line
         self.whites = whites                           # 흰자를 규칙 대신 touch 로 직접 찍는 방향들(눈 자리를 옮긴 얼굴)
         self.copy = copy                               # (베낄 쪽, 받을 쪽): 한쪽 옆모습만 잘 나오는 인물은 그쪽을 뒤집어 쓴다
         self.brows = brows                             # 눈 위의 눈썹을 지우지 않고 갈색으로 둔다(눈썹이 인상인 인물)
@@ -158,8 +163,11 @@ PEOPLE = (
     Person((0x0E,), PROLOGUE, 'h143', '신시아', main=True, spare=0x2D),
     # 개구리는 서장에만 나오고 그림 50 은 다른 그룹에서 슬라임이라, 개구리는 쓰지 않는 그림 93 의 세트를 빌린다
     Person((0x50,), PROLOGUE, 'h174', '개구리', anim='frames', main=True, outline=True, spare=0x93),  # 풀·나뭇잎과 같은 초록이라
-    Person((0x08,), PROLOGUE, 'h019', '검사', main=True, spare=0x90),
-    Person((0x17,), PROLOGUE, 'h003', '어머니', spare=0x39),
+    # 지하 수련의 검사는 스크립트가 붙은 엔트리(dq4prologue.MASTER_SRC)라 세트 팔레트 표와 상관없이 OBJ 팔레트 0 으로
+    # 그려진다(수련 장면의 OAM 실측)
+    Person((0x08,), PROLOGUE, 'h019', '검사', main=True, spare=0x90, line=0),
+    # 줄 1: 색 거리만 재면 신시아가 쓰는 빌린 줄에 들어, 윗옷 노랑이 신시아의 색에 밀려 살색으로 실린다
+    Person((0x17,), PROLOGUE, 'h003', '어머니', spare=0x39, line=1),
     Person((0x09,), PROLOGUE, 'h002', '아버지', spare=0x8D),
     Person((0x1F,), PROLOGUE, 'h039', '장로', main=True, spare=0x9C, brows=True, copy=('left', 'right')),
     Person((0x06,), None, 'h015', '병사', weight=KEY_WEIGHT),
@@ -197,8 +205,9 @@ PEOPLE = (
     Person((0x07,), None, 'h011', '거친 남자'),
     Person((0x82,), None, 'h029', '하녀', spare=0x5D),
     Person((0x0C,), None, 'h031', '시인', spare=0x92),
-    Person((0x40,), None, 'h009', '상인'),
-    Person((0x50,), None, 'h180', '슬라임', anim='frames', weight=KEY_WEIGHT),
+    Person((0x40,), None, 'h009', '상인', weight=TOWN_WEIGHT),
+    # 줄 0: 상인을 무겁게 센 배정에서 다른 줄에 두면 몸의 파랑이 보라로 실린다(줄마다 넣어 본 결과)
+    Person((0x50,), None, 'h180', '슬라임', anim='frames', weight=KEY_WEIGHT, line=0),
     # FC 그림 25 의 고양이(「にゃーん」). NDS 이무르 may1f2 의 ネコ 가 모습 2F(h047). DQ5 에 고양이 그림이 없어 쓰지 않는
     # 그림 24 의 세트에 싣는다
     Person((0x24,), None, 'h047', '고양이', anim='frames'),
@@ -224,7 +233,7 @@ PEOPLE = (
     Person((0x0E,), None, 'h035', '공주', main=True),
     Person((0x3D,), None, 'h013', '죄수', spare=0x9E),
     Person((0x45,), None, 'h071', '호빗'),
-    Person((0x1A,), None, 'h009', '초록 모자 상인', spare=0x70),
+    Person((0x1A,), None, 'h009', '초록 모자 상인', spare=0x70, weight=TOWN_WEIGHT),
     Person((0x26,), None, 'h048', '말', anim='frames', spare=0x5E),
     *(Person((pic,), None, sheet, role, anim=anim, spare=pic, seen=(group,), face=role in FACE_KEPT,
              weight=KEY_WEIGHT if role in KEY_EVENT else None)
@@ -807,10 +816,12 @@ def lines(people, hists, where=None):
             was, merged = own(groups[n]), own(groups[n] + h)
             room = 15 - len(COMMON)
             return cost(merged, reduce(merged, room)) - cost(was, reduce(was, room))
-        if where:
+        mine = {c for c in hists[p] if c not in COMMON}
+        if p.line is not None:
+            best = p.line
+        elif where:
             # 같은 맵에 함께 서는 인물끼리 한 줄에 몰리지 않게, 그 인물이 나오는 맵 그룹마다 줄에 모인 색 수가
             # 가장 적은 줄을 고른다(같으면 색 거리가 덜 느는 줄)
-            mine = {c for c in hists[p] if c not in COMMON}
             load = {n: max((len(seen[(g, n)] | mine) for g in where[p]), default=0) for n in open_lines(p)}
             low = min(load.values())
             near = [n for n in load if load[n] <= low + LOAD_SLACK]
@@ -821,12 +832,12 @@ def lines(people, hists, where=None):
                 least = min(crowd.values())
                 near = [n for n in load if crowd[n] == least]
             best = min(near, key=growth)
-            for g in where[p]:
-                seen[(g, best)] |= mine
-                if p.weight > 1:
-                    heavy[(g, best)] |= mine
         else:
             best = min(SHARED_LINES, key=growth)
+        for g in (where[p] if where else ()):
+            seen[(g, best)] |= mine
+            if p.weight > 1:
+                heavy[(g, best)] |= mine
         groups[best] += h
         assign[p] = best
     return assign, {n: reduce(g) for n, g in groups.items() if g}

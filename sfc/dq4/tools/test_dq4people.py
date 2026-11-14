@@ -1057,6 +1057,17 @@ class LineTests(unittest.TestCase):
         assign, _ = P.lines([light, heavy, main], hists, {p: {self.ELSEWHERE} for p in hists})
         self.assertEqual(list(assign), [main, heavy, light])
 
+    def test_a_pinned_person_keeps_its_line_and_still_counts_as_heavy_there(self):
+        pinned, other = self.person(1, main=True, line=2), self.person(2, main=True)
+        hists = {pinned: shades(30, 3), other: shades(200, 3)}
+        assign, _ = P.lines([pinned, other], hists, {p: {self.ELSEWHERE} for p in hists})
+        self.assertEqual(assign[pinned], 2)
+        self.assertNotEqual(assign[other], 2)
+
+    def test_the_swordsman_is_pinned_to_line_zero(self):
+        # 지하 수련의 검사는 스크립트 엔트리라 세트 팔레트 표와 상관없이 OBJ 팔레트 0 으로 그려진다
+        self.assertEqual(next(p for p in P.PEOPLE if p.role == '검사').line, 0)
+
 
 class WeightTests(unittest.TestCase):
     def test_main_people_weigh_the_key_weight_and_the_rest_one(self):

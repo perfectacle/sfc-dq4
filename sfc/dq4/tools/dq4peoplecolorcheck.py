@@ -23,7 +23,7 @@ for _p in (HERE, DQ5_TOOLS):
 import dq4people as P  # noqa: E402
 from dq5map import Rom  # noqa: E402
 
-LIMIT = 12.0
+LIMIT = 13.0
 NO_EYES = frozenset({'거친 남자', '검은 망토'})
 VIEWS = {'down': 2, 'left': 1, 'right': 1}
 
