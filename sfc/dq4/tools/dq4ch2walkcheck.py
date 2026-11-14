@@ -70,6 +70,8 @@ FLAGS = {
     **{f'ORDER{k}': (endor.ORDERS[0] + k, 0xFF) for k in range(3)},
     'ALENA_EQUIP': (endor.ALENA_EQUIP, 0xFF),
     **{f'ALENA_ITEM{k}': (endor.ALENA_ITEMS + k, 0xFF) for k in range(2)},
+    # 크리프트의 셋째 칸(HONEY_SET 이 꿀을 두는 곳). 왕에게 먹이면 비어야 한다
+    'KIRYL_ITEM2': (ch2.JOIN_RECORDS_AT + 0x16 + 2, 0xFF),
     'FRENOL_KIDNAPPED': flag(frenol.KIDNAPPED),
     'FRENOL_LEFT': flag(frenol.LEFT),
     'FRENOL_RESCUED': flag(frenol.RESCUED),
@@ -258,9 +260,9 @@ SEGMENTS += [
     ('tower_side', 'warp', f'{king.TOWER_TOP},14,28', {'map': king.TOWER_TOP}),
     ('tower', 'walk', '14,25;wait:60;' + taps(6, 60) + ';wait:200', {'want': ['KING_SEEN']}),
     ('honey', 'walk', '16,18;wait:60;' + taps(3, 60) + ';' + CLOSE, {'want': ['KING_GOT']}),
-    # 꿀을 가진 채 왕에게 말을 걸면 먹이고 왕이 낫는다
+    # 꿀을 가진 채 왕에게 말을 걸면 먹이고 왕이 낫는다. 먹인 꿀은 크리프트의 칸에서 빠진다
     ('cure_side', 'warp', f'{ch2.THRONE},{ch2.START_CELL[0]},{ch2.START_CELL[1] - 1}', {'map': ch2.THRONE}),
-    ('cure', 'walk', talk('up', 20), {'want': ['KING_CURED']}),
+    ('cure', 'walk', talk('up', 20), {'want': ['KING_CURED'], 'bytes': {'KIRYL_ITEM2': 0xFF}}),
     # 병사가 비켜선 사당: 위 방의 여행의 문으로 엔돌 쪽 사당에 닿는다
     ('shrine_side', 'warp', f'{king.SHRINE},10,20', {'map': king.SHRINE}),
     ('shrine', 'walk', '10,15;8,15;8,11;10,11;10,7', {'map': king.SHRINE_FAR, 'changes': 1}),

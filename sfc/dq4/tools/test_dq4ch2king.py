@@ -9,9 +9,12 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools'), str(ROOT / 'fc' / 'dq4' / 'tools')]
 
+import dq4ch2battle  # noqa: E402
 import dq4ch2event as ev  # noqa: E402
 import dq4ch2king as king  # noqa: E402
 import dq4ch2slots as slots  # noqa: E402
+from dq4chapter1 import lorom  # noqa: E402
+from w65816 import Cpu  # noqa: E402
 
 DQ4 = ROOT / 'rom' / 'dq4.nes'
 DQ5 = ROOT / 'rom' / 'dq5.sfc'
@@ -19,6 +22,60 @@ DQ5 = ROOT / 'rom' / 'dq5.sfc'
 
 def context(message=0x1000, talk=0x0B00):
     return next(c for c in ev.contexts(message, talk) if c.module is king)
+
+
+class HoneyRunTest(unittest.TestCase):
+    """give_honey 로 넣은 꿀을 eat_honey(대화 입구 4)가 FC 처럼 가진 칸을 당기며 없앤다."""
+
+    def setUp(self):
+        code, self.at = king.native(context())
+        rom = bytearray(0x400000)
+        start = slots.SLOTS['E3'].code[0]
+        rom[lorom(start):lorom(start) + len(code)] = code
+        self.cpu = Cpu(bytes(rom), bytearray(0x20000))
+        self.ram = self.cpu.wram
+        self.ram[0x201D] = 3
+        for r in range(3):
+            self.items(r, [])
+
+    def items(self, r, got=None, equip=None):
+        at = king.PARTY_ITEMS + king.RECORD * r
+        if got is not None:
+            self.ram[at:at + king.SLOTS_PER] = bytes(got + [king.EMPTY] * (king.SLOTS_PER - len(got)))
+        if equip is not None:
+            self.ram[at - 2:at] = equip.to_bytes(2, 'little')
+        return ([i for i in self.ram[at:at + king.SLOTS_PER] if i != king.EMPTY],
+                int.from_bytes(self.ram[at - 2:at], 'little'))
+
+    def test_eaten_honey_leaves_the_slot_and_pulls_the_rest_up(self):
+        robe, claw = ev.SILK_ROBE, 0x10
+        self.items(1, [robe, king.HONEY, claw], 0b101)
+        self.cpu.jsl(self.at['eat_honey'])
+        self.assertEqual(self.items(1), ([robe, claw], 0b011))
+
+    def test_give_then_eat_round_trips_for_every_holder(self):
+        full = [0x01] * king.SLOTS_PER
+        for holder in range(3):
+            for r in range(3):
+                self.items(r, full if r < holder else [0x02], 0)
+            self.cpu.jsl(self.at['give_honey'])
+            self.assertEqual(self.items(holder)[0], [0x02, king.HONEY])
+            self.cpu.jsl(self.at['eat_honey'])
+            self.assertEqual([self.items(r)[0] for r in range(3)], [full if r < holder else [0x02] for r in range(3)])
+
+    def test_bag_honey_when_nobody_has_one(self):
+        bag = king.BAG + king.HONEY
+        self.ram[bag] = 2
+        self.cpu.jsl(self.at['eat_honey'])
+        self.assertEqual(self.ram[bag], 1)
+        self.ram[bag] = 0
+        self.cpu.jsl(self.at['eat_honey'])
+        self.assertEqual(self.ram[bag], 0)
+
+    def test_king_talk_calls_the_entry(self):
+        self.assertEqual(king.CALLS, {4: 'eat_honey'})
+        self.assertIn(4, slots.SLOTS['E3'].battles)
+        self.assertIn(repr(dq4ch2battle.talk_call(4)), repr(king.talk_scripts(context())))
 
 
 class ModuleTest(unittest.TestCase):
@@ -91,8 +148,8 @@ class ModuleTest(unittest.TestCase):
         heard = top['else'][0]
         has = heard['then'][0]
         self.assertEqual(has['cond'], {"code": "11", "item": king.HONEY})
-        self.assertEqual(has['then'], [msg('honey_use'), {"op": "flag-on", "index": king.CURED[0],
-                                                          "mask": king.CURED[1]}, msg('king_cure')])
+        cured = {"op": "flag-on", "index": king.CURED[0], "mask": king.CURED[1]}
+        self.assertEqual(has['then'], [msg('honey_use'), dq4ch2battle.talk_call(4), cured, msg('king_cure')])
         # 바자 병사는 말을 걸어도 BAZAAR 를 켠다
         self.assertIn({"op": "flag-on", "index": king.BAZAAR[0], "mask": king.BAZAAR[1]}, body['bazaar_soldier'][0]['else'])
 

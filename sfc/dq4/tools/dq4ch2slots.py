@@ -41,7 +41,7 @@ SLOTS = {
                scripts=(('05:CD73', tuple(range(11))),), lists='ch2_frenol_',
                message_bytes=3072, talk_bytes=1536, list_bytes=3072),
     'E3': Slot('바자·왕 병·서쪽 탑·왕 회복·여행의 문 사당', 'dq4ch2king', (0x5FC000, 0x5FD000), flags=(0x62, 0x63),
-               scripts=(('10:98AE', tuple(range(17))),), lists='ch2_king_',
+               battles=(4,), scripts=(('10:98AE', tuple(range(17))),), lists='ch2_king_',
                message_bytes=4096, talk_bytes=2048, list_bytes=4096),
     'E4': Slot('엔돌 무술 대회', 'dq4ch2endor', (0x5FD000, 0x5FE800), flags=(0x64, 0x67), byte_flags=(0x67,),
                groups=(0x32, 0x33, 0x34, 0x35, 0x36), monsters=(0xAA, 0xA4, 0x8E, 0x68, 0x72), battles=(1, 2, 3),
@@ -64,7 +64,7 @@ SPARE = {
     'flag_bits': ((0x78, 0x08), (0x78, 0x20)),          # 2208 bit3·bit5
     'groups': (0x37, 0x38, 0x39, 0x3A),
     'monsters': (0xC5, 0xB6, 0x9D, 0xA5, 0xE3, 0x3D),
-    'battles': (4,),
+    'battles': (),
     'code': ((0x5FF800, 0x600000), (0x5CC000, 0x5D0000)),
 }
 # 2장 첫머리·성·텐페 앞 절반(dq4ch2event)이 이미 쓰는 것. 새 모듈은 쓰지 않는다
