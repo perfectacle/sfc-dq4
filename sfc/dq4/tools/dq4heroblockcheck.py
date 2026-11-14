@@ -19,6 +19,7 @@
 """
 import argparse
 import concurrent.futures
+import functools
 import json
 import os
 import re
@@ -40,6 +41,16 @@ from dq5exitcheck import warp_exit  # noqa: E402
 
 DRIVER = HERE / 'lua' / 'dq4heroblock.lua'
 HUB = '36/00,16,72'
+
+
+@functools.cache
+def stray_talk(rom):
+    """앞에 아무도 없을 때 「はなす」가 띄울 수 있는 메시지 번호(16진 글): 129 와 롬의 2장 동료 대화 표의 대사 전부."""
+    import dq4ch2event
+    import dq4ch2partytalk
+    ctx = next(c for c in dq4ch2event.contexts() if c.module is dq4ch2partytalk)
+    table = dq4ch2partytalk.table(Path(rom).read_bytes(), ctx.at['maps'])
+    return {'129'} | {f'{row[3]:03X}' for rows in table.values() for row in rows}
 
 
 def flags(*pairs):
@@ -318,9 +329,11 @@ def run_case(mesence, rom, base, out, name, case, exit_at, seed=0):
     shown = [v.split('@')[0] for v in shown[1].split(',') if v] if shown else []
     if case.get('repeat') and (not shown or shown.count(shown[0]) < case['repeat']):
         problems.append(f"첫 메시지가 {case['repeat']}번 뜨지 않음: {shown}")
-    # 사건이 띄운 서로 다른 메시지 수(끝에 남은 A 가 부른 「그 쪽에는 아무도 없다」 129 는 빼고). 갈래를 탔는지 본다
-    if case.get('distinct') and len(set(shown) - {'129'}) != case['distinct']:
-        problems.append(f"메시지 {len(set(shown) - {'129'})}가지, 기대 {case['distinct']}: {shown}")
+    # 사건이 띄운 서로 다른 메시지 수. 끝에 남은 A 가 부른 「はなす」 의 「그 쪽에는 아무도 없다」 129 와, 그 자리에
+    # 맞는 2장 동료 대화 대사는 뺀다. 갈래를 탔는지 본다
+    events = set(shown) - stray_talk(str(rom))
+    if case.get('distinct') and len(events) != case['distinct']:
+        problems.append(f"메시지 {len(events)}가지, 기대 {case['distinct']}: {shown}")
     if case.get('hero_at'):
         # 끝 걸음(free) 앞 마지막 누르기의 자리: 사건이 주인공을 옮겨 둔 셀
         pressed = re.findall(r'press \S+ at (\d+),(\d+)', text)
