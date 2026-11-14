@@ -155,6 +155,20 @@ class BundleTest(unittest.TestCase):
         _, leaving = build.hook_rows(links, place, {0x30: ([(272, 46)], (270, 47))})
         self.assertEqual(leaving, [(0x39, 0, 2, 0x88 * 2, 0x19 * 2), (0x39, 0, 0x1F, 270, 47)])
 
+    def test_leave_rows_come_before_the_part_row(self):
+        # 텐페: 위 가장자리로 나가면(주인공 칸 줄 FF) 입구 위 블록에, 그 밖은 입구 아래 칸에 선다
+        links = {0x3D: [{"fc": 0x01, "field": [(0x27, 0x49)], "arrival": (1, 1)},
+                        {"fc": 0x0E, "field": [(0x47, 0x39)], "arrival": (1, 1),
+                         "leave_rows": [{"rows": (0xFF, 0xFF), "block": (0x47, 0x38)}]}]}
+        place = {(0x01, 0): (0x3D, 0), (0x01, 1): (0x3D, 1), (0x0E, 0): (0x3D, 2)}
+        doors = {0x01: ([(78, 147)], (78, 149)), 0x0E: ([(142, 115)], (142, 117))}
+        _, leaving = build.hook_rows(links, place, doors)
+        self.assertEqual(leaving, [(0x3D, 0, 1, 78, 149), (0x3D, 2, 2, 142, 113, 0xFF, 0xFF), (0x3D, 2, 2, 142, 117)])
+
+    def test_tempe_leaves_north_by_the_top_edge(self):
+        (part,) = [p for p in build.LINKS[0x3D] if p["fc"] == 0x0E]
+        self.assertEqual(part["leave_rows"], [{"rows": (0xFF, 0xFF), "block": (0x47, 0x38)}])
+
     def test_fc_group_in_two_dq5_groups(self):
         with self.assertRaises(ValueError):
             build.layout({0x40: [{"fc": 0x10}], 0x41: [{"fc": 0x10}]}, self.FC_MAPS)
