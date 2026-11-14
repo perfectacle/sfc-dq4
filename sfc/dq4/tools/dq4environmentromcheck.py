@@ -121,6 +121,8 @@ def redraw(wram, vram, cgram, known):
 def _char_base(vram, words, known):
     """BG character base: the 8 KiB step at which the most used slots hold one of our CHR."""
     slots = {w & 0x3FF for w in words}
+    # A blank tile matches any cleared VRAM: with it counted, an empty 8 KiB step can outscore the real base.
+    known = known - {bytes(32)}
     best = max(range(0, 0x10000, 0x2000),
                key=lambda base: sum(bytes(vram[base + n * 32:base + n * 32 + 32]) in known for n in slots))
     return best

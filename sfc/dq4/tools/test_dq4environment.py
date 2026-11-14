@@ -535,3 +535,13 @@ class RomCheckExpectationTests(unittest.TestCase):
             shown = check.shown_assets(assets, frame)
             self.assertIs(shown[WATER_FRAMES[0]], assets[WATER_FRAMES[frame]])
             self.assertIs(shown[FOUNTAIN_FRAMES[0]], assets[FOUNTAIN_FRAMES[frame]])
+
+    def test_char_base_ignores_cleared_vram(self):
+        # 3D/01: the real BG tiles sat at 4000 with a water slot mid-animation, while 8000 was cleared VRAM. Counting
+        # the blank tile there picked 8000 and redrew the map black.
+        import dq4environmentromcheck as check
+        tile = bytes(range(1, 33))
+        vram = bytearray(0x10000)
+        for slot in (1, 2):
+            vram[0x4000 + slot * 32:0x4000 + slot * 32 + 32] = tile
+        self.assertEqual(check._char_base(vram, [1, 2, 3], {tile, bytes(32)}), 0x4000)
