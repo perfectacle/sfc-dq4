@@ -59,8 +59,8 @@ NDS_LOOKS = {
 # 않는 DQ5 29/00 의 스크립트 인물들이고, 스크립트는 turn_scripts 가 FC 블록대로 덮는다. 되풀이 꼴 하나에 칸 하나
 TURN_SRCS = tuple(({"list": "05:CB65", "index": i}, at)
                   for i, at in ((0, "05:CB6C"), (2, "05:CBA5"), (5, "05:CBE8"), (6, "05:CC11")))
-# 인물 스크립트의 37 은 그 차례를 끝낸다(dq4-chapter1-format 「인물 서기·걷기」). 05:F196 LDA #0 / RTL 의 RTL 만 불러 쉼으로 쓴다
-TURN_REST = (0x98, 0xF1, 0x05)
+# 쉼 한 차례는 지금 방향을 다시 두는 2F 다. 2F 는 이동 간격의 한 차례를 끝내지만 38 같은 명령은 끝내지 않고 이어 가
+# 쉼이 되지 않았고, 37 은 들어가며 한 프레임을 기다려(00:9506) 게임 전체가 늦어졌다(실측)
 TURN_FACE = (0x80, 0x10, 0x40, 0x20)     # FC 방향 0~3(위·오른쪽·아래·왼쪽) → 인물 명령 2F 의 7E:31E0
 # A person FC puts on a bed lies in it: a one-time entry with 기타 bit7 (lying, drawn rotated 8 px lower) and bit4
 # (does not turn when spoken to, which would swap the head to the foot of the bed), no script.
@@ -268,15 +268,14 @@ def turn_loop(prg, bank, body, facing):
 
 
 def turn_commands(loop):
-    """turn_loop 를 인물 스크립트 명령으로: 방향은 2F, 쉼 한 차례마다 37(RTL 만). 02 n … 01 로 되풀이하면 그 두 명령도
-    차례를 써서 방향마다 두 차례씩 늦었다(실측)."""
-    rest = {"op": "37", "args": list(TURN_REST)}
+    """turn_loop 를 인물 스크립트 명령으로: 차례마다 2F 하나(방향을 바꾸거나 지금 방향을 다시 둠). 되풀이는 마지막 방향에서
+    다시 시작하므로 앞쪽 쉼도 그 방향이다."""
+    d = [n for kind, n in loop if kind == 'face'][-1]
     out = []
     for kind, n in loop:
         if kind == 'face':
-            out.append({"op": "2F", "args": [TURN_FACE[n]]})
-        else:
-            out += [dict(rest) for _ in range(n)]
+            d = n
+        out += [{"op": "2F", "args": [TURN_FACE[d]]} for _ in range(1 if kind == 'face' else n)]
     out[0] = {**out[0], "label": "top"}
     return out + [{"op": "03", "args": [], "target": "top"}]
 

@@ -607,9 +607,8 @@ class TurnLoopTest(unittest.TestCase):
                                 ('rest', 4), ('face', 3)])
         import dq5npcwrite
         code = dq5npcwrite.encode({'format': dq5npcwrite.FORMAT, 'commands': port.turn_commands(loop)})
-        rest = bytes((0x37, *port.TURN_REST))
-        body = (rest * 6 + bytes((0x2F, 0x10)) + rest * 2 + bytes((0x2F, 0x20)) + rest * 8 + bytes((0x2F, 0x10)) +
-                rest * 4 + bytes((0x2F, 0x20)))
+        right, left = bytes((0x2F, 0x10)), bytes((0x2F, 0x20))
+        body = left * 6 + right * 3 + left * 9 + right * 5 + left
         self.assertEqual(code, body + bytes((0x03, 0x100 - len(body) - 1)))
 
     def test_turning_by_one_counts_from_the_record_facing(self):
@@ -649,8 +648,6 @@ class TurnPortTest(unittest.TestCase):
             e, _ = entries[src["index"]]
             self.assertEqual(dq5npc.script_address(rom, e), int(at.replace(":", ""), 16))
         self.assertNotIn(port.TURN_SRCS[0][0]["list"], dq4ch2slots.script_lists())
-        rtl = (port.TURN_REST[2] & 0x7F) * 0x8000 + (port.TURN_REST[1] << 8 | port.TURN_REST[0]) - 0x8000
-        self.assertEqual(DQ5.read_bytes()[rtl], 0x6B)
         # 다른 사건 모듈이 같은 목록을 빌리지 않는다
         for path in Path(__file__).resolve().parent.glob("dq4*.py"):
             if path.name != "dq4npcport.py":
