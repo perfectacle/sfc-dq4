@@ -348,8 +348,8 @@ SEGMENTS += [
     ('gate_out', 'walk', SARAN_OUT, {'field': True, 'cell': (68, 149), 'poke': wc.DAY}),
     ('gate_in', 'walk', GATE_IN, {'map': ch2.CASTLE, 'changes': 1, 'after': 60, 'poke': wc.DAY}),
     ('gate_end', 'ending', ending.END_SCENE, {}),
-    # 엔딩 곡은 들어선 뒤 약 260프레임에 지금 곡이 된다(곡 자료를 올리는 동안). 장 끝 구간과 묶음을 나누는 것은 그만큼
-    # 늦게 남긴 상태로 끝 상자를 넘기면 서술을 넘기는 A 가 남아 리셋 뒤 타이틀에서 눌리기 때문이다(bsnes 에서 소리 없음)
+    # 엔딩 곡은 들어선 뒤 약 190프레임에 지금 곡이 되고 서술이 바로 뒤따른다(곡 자료를 올리는 동안 검은 화면).
+    # 장 끝 구간과 묶음을 나누는 것은 그만큼 늦게 남긴 상태로 끝 상자를 넘기면 서술을 넘기는 A 가 남아 리셋 뒤 타이틀에서 눌리기 때문이다(bsnes 에서 소리 없음)
     ('song_side', 'warp', f'{SARAN},24,50', {'map': SARAN}),
     ('song_out', 'walk', SARAN_OUT, {'field': True, 'poke': wc.DAY}),
     ('song_in', 'walk', GATE_IN, {'map': ch2.CASTLE, 'changes': 1, 'after': 400, 'poke': wc.DAY,

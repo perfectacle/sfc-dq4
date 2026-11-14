@@ -71,8 +71,9 @@ class ScriptTest(unittest.TestCase):
         end = POINTS[en.END_SCENE]
         self.assertEqual(ender[5]['args'], [end & 0xFF, end >> 8 & 0xFF, end >> 16])
 
-    def test_ender_call_darkens_then_plays_the_ending_song(self):
-        # 서술 동안 엔딩 곡 13(エンディング第二章): 1장 끝의 검게 하기를 부른 뒤 곡을 튼다
+    def test_ender_call_plays_the_ending_song_darkens_and_waits_for_it(self):
+        # 서술과 함께 엔딩 곡 13(エンディング第二章): 곡을 먼저 보내고 1장 끝의 검게 하기를 부른 뒤, 지금 곡이 13 이 될
+        # 때까지(상한 SONG_WAIT_MAX) 기다린다. 곡을 보내는 데 약 120프레임이라 기다리지 않으면 서술이 곡보다 먼저 뜬다
         ctx = context()
         code, at = en.native(ctx)
         self.assertEqual(at['darken_song'], ctx.code_at)
@@ -84,7 +85,10 @@ class ScriptTest(unittest.TestCase):
         self.assertEqual(en.ENDING_SONG, 0x13)
         self.assertIn(jsl, code)
         self.assertIn(song, code)
-        self.assertLess(code.index(jsl), code.index(song))
+        self.assertLess(code.index(song), code.index(jsl))
+        wait = bytes((0xAD, 0x8B, 0x1D, 0xC9, 0x13, 0xF0, 0x03, 0xCA))          # LDA $1D8B / CMP #13 / BEQ / DEX
+        self.assertLess(code.index(jsl), code.index(wait))
+        self.assertIn(bytes((0xA2, *en.SONG_WAIT_MAX.to_bytes(2, 'little'))), code)
         self.assertEqual(code[-1], 0x6B)
 
     def test_voices_say_their_line_and_turn_on_their_flag(self):

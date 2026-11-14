@@ -200,16 +200,27 @@ def _cmd(op, *args, **kw):
     return {"op": op, "args": list(args), **kw}
 
 
+# 엔딩 곡이 시작되기를 기다리는 상한(프레임). 곡 자료를 SPC 로 보내는 데 약 120프레임 걸린다
+SONG_WAIT_MAX = 300
+
+
 def native(ctx):
-    """끝내는 인물이 부르는 것: 1장 끝과 같이 맵 곡을 줄이고 검게 한 뒤 엔딩 곡을 튼다. 빌린 스크립트 칸이 17바이트라
-    검게 하기와 곡 틀기를 명령 37 하나로 묶는다."""
+    """끝내는 인물이 부르는 것: 엔딩 곡을 틀고, 1장 끝과 같이 맵 곡을 줄이고 검게 한 뒤, 엔딩 곡이 시작되기를 기다린다.
+    빌린 스크립트 칸이 17바이트라 셋을 명령 37 하나로 묶는다."""
     import dq4ch1event
-    from dq4chapterbox import ENTER, LEAVE
+    from dq4chapterbox import ENTER, LEAVE, wait
     darken = dq4ch1event.native()[1]['darken']
-    # 줄이기(04)만 두면 아직 올리는 중이던 성 곡이 뒤늦게 울다가 엔딩 곡에 끊겨, 엔돌 우승 팡파르처럼 1A 로 먼저 멈춘다
-    code = (ENTER + bytes((0x22, *_al(darken))) +                          # JSL darken
-            bytes((0xE2, 0x20, 0x22, *_al(SONG_STOP))) +                     # SEP #$20 / JSL 24:FE91(1A)
+    # 곡 자료를 보내는 동안 서술이 먼저 뜨지 않게, 곡을 먼저 보내고 검게 하는 동안에도 보내며 곡이 시작될 때까지
+    # 검은 화면으로 둔다(dq4chapterbox.reveal_code 와 같은 기다림). 줄이기(04)만 두면 아직 올리는 중이던 성 곡이
+    # 뒤늦게 울다가 엔딩 곡에 끊겨, 엔돌 우승 팡파르처럼 1A 로 먼저 멈춘다. darken 의 04 는 인자가 맵 곡이라 엔딩 곡을
+    # 줄이지 않는다
+    loop = (bytes((0xDA,)) + wait(1) + bytes((0xFA,                           # PHX / BRK 09 01 / PLX
+            0xAD, 0x8B, 0x1D, 0xC9, ENDING_SONG, 0xF0, 0x03, 0xCA)))          # LDA $1D8B / CMP #곡 / BEQ 끝 / DEX
+    code = (ENTER + bytes((0x22, *_al(SONG_STOP))) +                         # JSL 24:FE91(1A)
             bytes((0xA9, ENDING_SONG, 0x22, *_al(SONG_PLAY))) +              # LDA #곡 / JSL 24:FE9A
+            bytes((0x22, *_al(darken), 0xE2, 0x20, 0xC2, 0x10)) +              # JSL darken / SEP #$20 / REP #$10
+            bytes((0xA2, *SONG_WAIT_MAX.to_bytes(2, 'little'))) + loop +       # LDX #상한
+            bytes((0xD0, -(len(loop) + 2) & 0xFF)) +                         # BNE 고리
             LEAVE)
     return code, {'darken_song': ctx.code_at}
 
