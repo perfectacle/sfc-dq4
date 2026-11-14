@@ -119,6 +119,9 @@ class ListTest(unittest.TestCase):
                                             *{m for m, _, _ in en.WON_TALK})}
         for (m, time, fc), _ in en.WON_TALK.items():
             out[m]["entries"].append(person(m, time, fc))
+        # 2장 엔돌 마을의 밤 사람: 우승 뒤에는 구석 (2F,00) 만 남는다
+        for fc in ((0x0D, 0x1A), (0x2B, 0x0C), *en.TOWN_WON_NIGHT):
+            out[endor.TOWN]["entries"].append(person(endor.TOWN, 'night', fc))
         for m, fc, time, _ in (en.MINISTER_NIGHT, en.MAID, en.GUARD_NIGHT, en.KING_NIGHT):
             out[m]["entries"].append(person(m, time, fc))
         for time, fc, _, _, _, who in en.CASTLE_WON:
@@ -153,6 +156,10 @@ class ListTest(unittest.TestCase):
         self.assertIs(msg[0], self.MESSENGER)
         talks = {(e['fields']['x'], e['fields']['y']): e['fields']['talk'] for e in msg[1:]}
         self.assertEqual(talks[en.cell(0x0B, 0x1B)], ctx.talk['barmaid'])
+        # 엔돌 마을의 밤은 FC 처럼 구석 한 사람만 남는다(두 목록 모두)
+        for name in (endor.TOWN_MESSENGER, endor.TOWN_SEEN):
+            nights = [(e['fields']['x'], e['fields']['y']) for e in ctx.made[name]['entries'] if e['time'] == 'night']
+            self.assertEqual(nights, [en.cell(*fc) for fc in en.TOWN_WON_NIGHT])
         # 엔돌 성 1층은 FC 목록으로: 우승 뒤에 없는 사람은 빠지고 새로 선 병사가 들어온다
         hall = by_name[f'ch2_ending_{en.ENDOR_CASTLE.replace("/", "")}']
         self.assertEqual(len(hall), len(en.CASTLE_WON))
@@ -217,6 +224,17 @@ class FcTest(unittest.TestCase):
             got = [self.shows(r, night, self.WON) for r in self.records((0x04, int(m[3:], 16)), night, self.WON)
                    if dq4talk.pos(r, night) == fc]
             self.assertEqual(got, [en.FC_SHOWS[name]], (m, time, fc))
+
+    def test_endor_town_night_after_winning_is_the_fc_list(self):
+        import dq4talk
+        got = tuple(dq4talk.pos(r, True) for r in self.records((0x04, 0x00), True, self.WON))
+        self.assertEqual(got, en.TOWN_WON_NIGHT)
+        # 남는 사람은 2장 목록의 같은 칸 사람과 같은 말이라 옮긴 사람을 그대로 둔다
+        ch2 = {k: v for k, v in self.WON.items() if k != 0x6284}
+        for fc in en.TOWN_WON_NIGHT:
+            before = [r for r in self.records((0x04, 0x00), True, ch2) if dq4talk.pos(r, True) == fc]
+            after = [r for r in self.records((0x04, 0x00), True, self.WON) if dq4talk.pos(r, True) == fc]
+            self.assertEqual([self.shows(r, True, ch2) for r in before], [self.shows(r, True, self.WON) for r in after])
 
     def test_endor_castle_list_after_winning_is_the_fc_list(self):
         import dq4npcport

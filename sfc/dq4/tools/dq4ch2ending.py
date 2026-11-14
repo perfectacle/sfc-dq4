@@ -89,6 +89,9 @@ WON_TALK = {
     ('40/0B', 'day', (0x03, 0x01)): 'merchant',
     ('40/0B', 'night', (0x03, 0x01)): 'merchant',
 }
+# 우승 뒤 엔돌 마을(FC 04/00)의 밤에 남는 FC 칸. FC 목록 1C:$8872 는 밤에 맵 오른쪽 위 구석 (2F,00) 의 한 사람만
+# 둔다(대화 53E, 2장 목록의 같은 칸 사람과 같은 말). test_dq4ch2ending 이 FC 롬과 견준다
+TOWN_WON_NIGHT = ((0x2F, 0x00),)
 # 엔돌 성 1층(FC 04/02)은 우승 뒤 목록이 바뀐다(FC 1C:$877D, 3장 시작과 같은 목록): (낮/밤, FC 칸, 방향, 간격, FC 그림,
 # 대화 이름). 대화 이름이 None 이면 같은 시간대·칸의 옮긴 인물을 그대로 쓴다. 맵 밖 줄에 세워 둔 둘((1A,7F)·(1B,7F))은
 # 옮긴 목록처럼 뺀다
@@ -314,9 +317,11 @@ def npc_lists(lists, ctx):
     over = [on(CASTLE, SEEN_BREY, ENDER), on(CASTLE, SEEN_KIRYL, ENDER), on(CASTLE, EMPTY, EMPTY_CASTLE),
             on(THRONE, EMPTY, EMPTY_THRONE), on(BEDROOM, EMPTY, EMPTY_BEDROOM)]
     # 엔돌 마을: 우승·사자 뒤 목록(dq4ch2endor)의 항목을 바꾼다. 그 밖의 맵은 2장 목록을 바탕으로 우승 목록을 새로
+    keep = {cell(*fc) for fc in TOWN_WON_NIGHT}
     for name in (endor.TOWN_MESSENGER, endor.TOWN_SEEN):
         lst = ctx.made[name]
-        lst["entries"] = _won_entries(lst["entries"], endor.TOWN, t)
+        lst["entries"] = [e for e in _won_entries(lst["entries"], endor.TOWN, t)
+                          if e["time"] != "night" or _at(e) in keep]
     for m in sorted({m for m, _, _ in WON_TALK} - {endor.TOWN}):
         base = ctx.made.get(f'ch2_endor_{m.replace("/", "")}', lists[m])
         name = f'ch2_ending_{m.replace("/", "")}'
