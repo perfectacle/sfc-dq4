@@ -851,7 +851,7 @@ groups = ["ch1-build", "ch1-walk"]
 [[check]]
 name = "dq4-battle-scene"
 tier = "release"
-why = "전투 한 판의 결과(금화·경험치·레벨업·약초·ホイミ·도망·몬스터 도망·전멸 뒤 교회·보스)와 전투 뒤 맵 곡·조작 복귀를 bsnes·snes9x 에서 본다. 라이안이 1 → 20 레벨에서 FC ライアン 실측 값(능력치·다음 경험치, MP 0, 주문 없음)이 되고, 2장 flag 에서는 아리나가 FC アリーナ 곡선을 따르고 손님 호이민은 레벨이 오르지 않는지도(DQ5 주인공 곡선·호이민 성장으로 되돌아가지 않게). 2장 일행 셋이 1 → 20 에서 FC 롬 실측 값·습득 표대로 주문을 배우고(party2), 크리프트 ホイミ·브라이 ヒャド 가 명령대로 나가는지(party2spell: 주문 칸 1 만 배우면 행동이 FF 로 「멍하니 있다」 가 되던 일). 보스·레벨업 뒤 7,313프레임 멈춤(7a34c641)·레벨업 뒤 멈춤(2c9ec7f4)·새 게임 첫 기록으로 이어 하면 곡이 없던 일(nosong) 같은 일이 다시 생기지 않게. paths 는 검사 모듈의 import 닫힘과 빌드가 쓰는 asm·사운드"
+why = "전투 한 판의 결과(금화·경험치·레벨업·약초·ホイミ·도망·몬스터 도망·전멸 뒤 교회·보스)와 전투 뒤 맵 곡·조작 복귀를 bsnes·snes9x 에서 본다. 라이안이 1 → 20 레벨에서 FC ライアン 실측 값(능력치·다음 경험치, MP 0, 주문 없음)이 되고, 2장 flag 에서는 아리나가 FC アリーナ 곡선을 따르고 손님 호이민은 레벨이 오르지 않는지도(DQ5 주인공 곡선·호이민 성장으로 되돌아가지 않게). 2장 일행 셋이 1 → 20 에서 FC 롬 실측 값·습득 표대로 주문을 배우고(party2), 크리프트 ホイミ·브라이 ヒャド 가 명령대로 나가는지(party2spell: 주문 칸 1 만 배우면 행동이 FF 로 「멍하니 있다」 가 되던 일), 브라이 ピオリム·ヒャダイン(party2piorimu·party2hyadain, PR 에서는 dq4-party-spells 가 돌림). 보스·레벨업 뒤 7,313프레임 멈춤(7a34c641)·레벨업 뒤 멈춤(2c9ec7f4)·새 게임 첫 기록으로 이어 하면 곡이 없던 일(nosong) 같은 일이 다시 생기지 않게. paths 는 검사 모듈의 import 닫힘과 빌드가 쓰는 asm·사운드"
 paths = [
   "fc/dq4/tools/dq4bank.py",
   "fc/dq4/tools/dq4block.py",
@@ -987,6 +987,34 @@ paths = [
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4battlescene.py --rom work/ch1/dq4-ch1-full.sfc --out work/battlescene --seeds 0,1,2"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk"]
+
+[[check]]
+name = "dq4-party-spells"
+why = "2장 일행이 DQ5 에 없는 FC 주문을 쓴다: 브라이 ピオリム(DQ5 1D 칸을 빌림)이 일행 셋의 전투 すばやさ 를 기록 すばやさ 만큼 올리고(메시지 BRK 를 뱅크 57 에서 부르면 전투가 멈추던 일), ヒャダイン(38 칸)이 몬스터 모두에게 FC 양(60~80)을 주고(bsnes·snes9x, party2piorimu·party2hyadain), 크리프트 필드 ベホマラー(원래 제자리에서 돌던 11:8022)가 셋 모두를 75~95 회복하고 MP 18 을 쓰는지(dq4fieldspellcheck). paths 는 검사 모듈의 import 닫힘과 빌드가 쓰는 asm·사운드"
+paths = [
+  "sfc/dq4/tools/dq4party.py",
+  "sfc/dq4/tools/dq4fieldspellcheck.py",
+  "sfc/dq4/tools/dq4battlescene.py",
+  "sfc/dq4/tools/dq4brkscan.py",
+  "sfc/dq4/tools/dq4compatcheck.py",
+  "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
+  "sfc/dq4/tools/dq4cores.py",
+  "sfc/dq4/tools/dq4libretro.py",
+  "sfc/dq4/tools/dq4savefixture.py",
+  "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq5/tools/dq5sram.py",
+  "sfc/dq4/tools/dq4freshstate.py",
+  "sfc/dq4/tools/dq4groupcheck.py",
+  "sfc/dq4/tools/lua/dq4shipstate.lua",
+  "sfc/dq5/tools/dq5progresscheck.py",
+  "sfc/dq5/tools/lua/dq5battle.lua",
+  "sfc/dq5/tools/lua/dq5progresscheck.lua",
+  "sfc/dq5/tools/lua/dq5warptrace.lua",
+  "tools/mesence_settings.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4battlescene.py --rom work/ch1/dq4-ch1-full.sfc --out work/partyspells --seeds 0,1,2 --scenes party2piorimu,party2hyadain && rm -rf work/fieldspell && uv run --locked python sfc/dq4/tools/dq4fieldspellcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/fieldspell"
+needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "MESENCE", "LIBDIR", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
 groups = ["ch1-build", "ch1-walk"]
 
 [[check]]
@@ -1394,7 +1422,7 @@ groups = ["ch1-build", "ch1-walk"]
 
 [[check]]
 name = "dq4-groups-scenes"
-why = "그룹 롬(groups.sfc)의 상자·필드·필드 조우·ルーラ 장면이 그 롬으로 만든 배 선실 출발 상태(dq4freshstate)에서 통과해야 한다"
+why = "그룹 롬(groups.sfc)의 상자·필드·필드 조우·ルーラ 장면이 그 롬으로 만든 배 선실 출발 상태(dq4freshstate)에서 통과해야 한다. 2장 キメラのつばさ 목록·ルーラ 목록 FC 차례(dq4fieldtravelcheck kimera2·ruler2)"
 paths = [
   "sfc/dq4/tools/dq4environmentnight.py",
   "sfc/dq4/tools/dq4freshstate.py",

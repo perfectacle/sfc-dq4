@@ -131,7 +131,8 @@ class HookTest(unittest.TestCase):
         cpu.push16(0xFFFD)
         cpu.pbr, cpu.pc = entry >> 16, entry & 0xFFFF
         stops = {travel.LAND_BACK, travel.LAND_DONE, travel.IN_LIST, travel.SLOT_OF, travel.SAVE_BACK,
-                 travel.SAVE_DONE, travel.WIPE_BACK, travel.WIPE_DONE, travel.CONTINUE_BACK, travel.CONTINUE_DONE, RET}
+                 travel.SAVE_DONE, travel.WIPE_BACK, travel.WIPE_DONE, travel.CONTINUE_BACK, travel.CONTINUE_DONE,
+                 travel.ORDER_DONE, RET}
         while (cpu.pbr << 16 | cpu.pc) not in stops:
             if cpu.steps > 5000:
                 raise AssertionError(f"no stop by {cpu.pbr:02X}:{cpu.pc:04X}")
@@ -202,9 +203,66 @@ class HookTest(unittest.TestCase):
     def test_chapter_slot_is_saran(self):
         self.assertEqual(travel.slot_of_fc(0x02), 2)
         self.assertEqual(travel.slot_of_fc(0x13), 15)
-        self.assertEqual(travel.chapter_slot_code(), bytes((0xA9, 15, 0x8F, 0x33, 0x20, 0x7E)))
+        # サラン 칸을 7E:2033 에, 다녀온 비트는 FC 2장 시작처럼 サントハイム(칸 1) 하나, 7E:2193 = 80 | 1
+        self.assertEqual(travel.chapter_slot_code(), bytes((0xA9, 15, 0x8F, 0x33, 0x20, 0x7E,
+                                                            0xA9, 0x02, 0x8F, 0x30, 0x20, 0x7E,
+                                                            0xA9, 0x00, 0x8F, 0x31, 0x20, 0x7E,
+                                                            0xA9, 0x00, 0x8F, 0x32, 0x20, 0x7E,
+                                                            0xA9, 0x81, 0x8F, 0x93, 0x21, 0x7E)))
         with self.assertRaises(ValueError):
             travel.slot_of_fc(0x2E)
+
+    def test_order_follows_the_fc_list(self):
+        # FC 1~4장 목록은 비트 차례(バトランド イムル サントハイム テンペ フレノール バザー … エンドール …)
+        self.assertEqual(travel.order_slots()[:6], [2, 7, 1, 12, 13, 14])
+        self.assertEqual(sorted(travel.order_slots()), list(range(travel.ORDER_SLOTS)))
+        # 2장에서 サントハイム(1)·エンドール(3)·テンペ(12)·바자(14)를 다녀옴: 목록은 サントハイム テンペ 바자 エンドール
+        bits = (1 << 1) | (1 << 3) | (1 << 12) | (1 << 14)
+        got = []
+        for k in range(5):
+            at, cpu = self.run_hook(self.labels["order"], _42=k, _2030=bits & 0xFF, _2031=bits >> 8, _2032=0)
+            self.assertEqual(at, travel.ORDER_DONE)
+            got.append(cpu.x & 0xFF)
+        self.assertEqual(got, [1, 12, 14, 3, 0xFF])
+
+    def run_stub(self, entry, stops, **wram):
+        """Run the bank-11 キメラのつばさ piece from `entry` as if 11:8CA3 called it with JSR (M8 X8)."""
+        from w65816 import Cpu
+        ram = bytearray(0x20000)
+        for name, value in wram.items():
+            ram[int(name[1:], 16)] = value
+        cpu = Cpu(self.rom, ram)
+        cpu.a, cpu.x, cpu.p = 0, 0, 0x30
+        cpu.push16(0x8CA5)
+        sp = cpu.s
+        cpu.pbr, cpu.pc = entry >> 16, entry & 0xFFFF
+        while (cpu.pbr << 16 | cpu.pc) not in stops:
+            if cpu.steps > 5000:
+                raise AssertionError(f"no stop by {cpu.pbr:02X}:{cpu.pc:04X}")
+            cpu.step()
+        return cpu.pbr << 16 | cpu.pc, cpu, sp
+
+    def test_kimera_lists_in_chapter2_only(self):
+        import dq4growth
+        flag, bit = dq4growth.CHAPTER2
+        _, stub = travel.kimera_stub(self.labels["kimera"])
+        stops = {stub["plain"], stub["list"]}
+        # 1장(flag 꺼짐)과, 2장이어도 다녀온 칸이 없으면 목록 없이 원래 BRK 95 00
+        for wram in ({"_2030": 2}, {f"_{flag & 0xFFFF:04X}": bit}):
+            at, cpu, sp = self.run_stub(travel.KIMERA_STUB, stops, **wram)
+            self.assertEqual((at, cpu.s), (stub["plain"], sp))
+        at, _, _ = self.run_stub(travel.KIMERA_STUB, stops, **{f"_{flag & 0xFFFF:04X}": bit, "_2032": 0x40})
+        self.assertEqual(at, stub["list"])
+
+    def test_kimera_pick_and_cancel(self):
+        _, stub = travel.kimera_stub(self.labels["kimera"])
+        stops = {stub["plain"], travel.KIMERA_CANCEL}
+        # 고름: 목록이 돌려준 칸 12 → 7E:2193 = 8C, 원래 BRK 95 00 뒤 8CA6 의 메시지로 돌아감
+        at, cpu, sp = self.run_stub(stub["pick"], stops, _46=12)
+        self.assertEqual((at, cpu.wram[0x2193], cpu.s), (stub["plain"], 0x8C, sp))
+        # 그만둠(E8 bit7): 이 토막의 돌아갈 자리를 버리고 처리기 끝(물건을 줄이지 않음), 7E:2193 그대로
+        at, cpu, sp = self.run_stub(stub["list"] + 3, stops, _E8=0x80, _2193=0x37)
+        self.assertEqual((at, cpu.wram[0x2193], cpu.s), (travel.KIMERA_CANCEL, 0x37, sp + 2))
 
     def test_rom_restarts_reads_the_hook_table(self):
         self.assertEqual(travel.rom_restarts(self.rom, at=0x3CF000), {12: (0x3D, 3), 13: (0x3D, 4), 15: (0x45, 2)})
@@ -248,6 +306,18 @@ class RomTest(unittest.TestCase):
         self.assertEqual(travel.name_bytes(dq5, "バトランド"), bytes([0x84, 91, 85, 104, 111, 0x84, 85]))
         with self.assertRaises(ValueError):
             travel.name_bytes(dq5, "漢")
+
+    def test_kimera_piece_takes_the_lamp_handler(self):
+        # 목록 토막이 덮는 やみのランプ 처리기 바이트와 그 물건의 처리기 칸이 원래 롬 그대로이고, 그 자리를 부르는 곳이
+        # 처리기 칸 하나뿐(11:8C51 은 ラナルータ 도 부르므로 토막이 그 앞에서 끝남)
+        dq5 = DQ5.read_bytes()
+        o = travel.lorom(travel.KIMERA_STUB)
+        self.assertEqual(dq5[o:o + 57], bytes.fromhex(travel.LAMP_CODE))
+        self.assertEqual(travel.KIMERA_STUB_END - travel.KIMERA_STUB, 57)
+        o = travel.lorom(travel.LAMP_HANDLER)
+        self.assertEqual(dq5[o:o + 2], bytes.fromhex(travel.LAMP_ORIG))
+        o = travel.lorom(travel.KIMERA_SITE)
+        self.assertEqual(dq5[o:o + 6], bytes.fromhex("00 95 00 00 98 AE"))
 
 
 if __name__ == "__main__":

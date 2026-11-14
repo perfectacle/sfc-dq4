@@ -549,7 +549,7 @@ class BuildFlowTests(unittest.TestCase):
                     mock.patch.multiple(dq4ch2event, apply=step('ch2event'), monster_entries=lambda prg: []), \
                     mock.patch.object(dq4growth, 'writes', lambda dq5, dq4: []), \
                     mock.patch.multiple(dq4party, learn_doc=lambda dq5, dq4: {'format': 'dq5learn/1', 'characters': []},
-                                        equip_writes=lambda dq5, dq4: [], apply_recruits=step('party')), \
+                                        writes=lambda dq5, dq4: [], apply_recruits=step('party')), \
                     mock.patch.object(dq4josa, 'apply', step('josa')), \
                     mock.patch.object(dq4msgnames, 'apply', step('msgnames')), \
                     mock.patch.object(dq4signs, 'apply', step('signs')), \
