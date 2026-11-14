@@ -419,6 +419,21 @@ class SkyArtTests(unittest.TestCase):
         self.assertEqual(set(assets["sky_deep"].tobytes()), {7 * 16 + 4, 7 * 16 + 5})
 
 
+class RedFloorTests(unittest.TestCase):
+    def test_red_floors_are_scattered_stones_in_dq5_carpet_colours(self):
+        # The user compared the prologue cellar and chose these over the coral 16x16 slabs (NDS castle floor).
+        from dq4environmentart import create_assets
+        assets = create_assets()
+        for name in ("red_paving", "carpet", "red_paving_cracked"):
+            with self.subTest(name):
+                image = assets[name].convert("RGB")
+                bright = {image.getpixel((x, y)) for y in range(16) for x in range(16)} - {(0x29, 0x21, 0x21)}
+                # DQ5 carpet magentas (57072e … ffa5de) keep blue well above green; the coral slabs did not
+                self.assertTrue(bright and all(b > g + 30 for _, g, b in bright), bright)
+                # no slab seam: the bottom row is not a single colour
+                self.assertGreater(len({image.getpixel((x, 15)) for x in range(16)}), 1)
+
+
 class RomCheckExpectationTests(unittest.TestCase):
     def test_expected_render_moves_the_fountain_with_the_water(self):
         # The water routine sends the fountain's frame n together with water frame n, so the offline render the

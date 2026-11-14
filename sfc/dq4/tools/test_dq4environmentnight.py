@@ -49,8 +49,8 @@ class ColourRuleTests(unittest.TestCase):
         self.assertTrue(190 <= hue <= 215, hue)
 
     def test_floor_keeps_its_hue(self):
-        day_hue, _, day_value = hsv("c66a52")
-        hue, _, value = at_night("c66a52")
+        day_hue, _, day_value = hsv("b3177f")
+        hue, _, value = at_night("b3177f")
         self.assertAlmostEqual(hue, day_hue, delta=4)
         self.assertLess(value, day_value)
         self.assertGreater(value, day_value * 0.5)
