@@ -558,13 +558,14 @@ def encounter_groups():
             for _, mod in modules() for b in getattr(mod, 'BATTLES', ())]
 
 
-def monster_entries(prg):
-    """dq5tables/1 의 monsters 에 더할 몬스터: 모듈의 monster_doc(prg), 없으면 MONSTERS {DQ5: FC} 를 FC 레코드로."""
+def monster_entries(prg, dq5=None):
+    """dq5tables/1 의 monsters 에 더할 몬스터: 모듈의 monster_doc(prg, dq5), 없으면 MONSTERS {DQ5: FC} 를 FC 레코드로.
+    dq5 는 원래 DQ5 롬 바이트(몬스터 주문 MP 를 맞출 때)."""
     import dq4ch1event
     out = []
     for _, mod in modules():
         if hasattr(mod, 'monster_doc'):
-            out += mod.monster_doc(prg)
+            out += mod.monster_doc(prg, dq5)
         else:
             out += [{"id": f"{dq5:02X}", **dq4ch1event.fc_monster(prg, fc)}
                     for dq5, fc in getattr(mod, 'MONSTERS', {}).items()]

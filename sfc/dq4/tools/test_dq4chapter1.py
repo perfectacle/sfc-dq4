@@ -533,7 +533,7 @@ class BuildFlowTests(unittest.TestCase):
             def monport_build(dq5, rom, folder, zone_report, events):
                 return empty_patch(work / 'monport.dq5patch.json', 'monport')
 
-            def monport_records(original, path):
+            def monport_records(original, prg, path):
                 return empty_patch(path, 'monster-records')
 
             with mock.patch.multiple(ch, run_tool=run_tool, group_build=group_build,
@@ -546,7 +546,7 @@ class BuildFlowTests(unittest.TestCase):
                     mock.patch.object(dq4menupatch, 'Font', lambda name: name), \
                     mock.patch.multiple(dq4ch1event, apply=step('ch1event'),
                                         monster_doc=lambda prg: {'format': 'test-monsters', 'prg': len(prg)}), \
-                    mock.patch.multiple(dq4ch2event, apply=step('ch2event'), monster_entries=lambda prg: []), \
+                    mock.patch.multiple(dq4ch2event, apply=step('ch2event'), monster_entries=lambda prg, dq5=None: []), \
                     mock.patch.object(dq4growth, 'writes', lambda dq5, dq4: []), \
                     mock.patch.multiple(dq4party, learn_doc=lambda dq5, dq4: {'format': 'dq5learn/1', 'characters': []},
                                         equip_writes=lambda dq5, dq4: [], apply_recruits=step('party')), \

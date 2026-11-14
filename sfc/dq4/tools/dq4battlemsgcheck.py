@@ -96,21 +96,30 @@ def main():
     out.mkdir(parents=True)
     state = dq4freshstate.resolve(args.state, args.mesence, rom, out / 'start')
     todo = [int(x, 16) for x in args.ids.split(',')] if args.ids else sorted(set(dq4battletexts.SOURCE) - set(SKIP))
-    shown, stalled, rounds = [], [], 0
-    while todo and rounds < 20:
-        batches = [todo[i:i + batch] for i in range(0, len(todo), batch)]
+    shown, stalled, again, rounds = [], [], [], 0
+    while (todo or again) and rounds < 20:
+        # 다시 보는 번호는 첫 메시지 자리에 두고, 끝까지 찍혔는지 알 수 있게 이미 찍힌 번호 하나를 뒤에 붙인다
+        filler = shown[0] if shown else None
+        retry = [[n, filler] for n in again if filler is not None]
+        stalled += [n for n in again if filler is None]
+        batches = retry + [todo[i:i + batch] for i in range(0, len(todo), batch)]
         with ThreadPoolExecutor(args.jobs) as ex:
             results = list(ex.map(lambda kb: run(Path(args.mesence), Path(os.environ['LIBDIR']), rom, state,
                                                  out / f'r{rounds:02d}-{kb[0]:02d}', kb[1], args.field),
                                   enumerate(batches)))
-        todo = []
-        for ids, swaps in zip(batches, results):
+        todo, again = [], []
+        for k, (ids, swaps) in enumerate(zip(batches, results)):
             done = [n for _, n in swaps]
+            if k < len(retry):
+                (shown if len(done) == len(ids) else stalled).append(ids[0])
+                continue
             shown += done[:-1]
             if len(done) < len(ids):
-                # 마지막으로 바꿔 넣은 번호 뒤로 메시지가 더 오지 않았다
+                # 마지막으로 바꿔 넣은 번호 뒤로 메시지가 더 오지 않았다. 바꿔 끼운 자리가 전투가 끝나 가는 검은 화면이면
+                # 번호 탓이 아니어도 멈추므로(롬과 무관한 바이트만 바뀌어도 그 자리가 옮겨 다님), 다음 차례에 첫 메시지
+                # 자리에서 한 번 더 보고 거기서도 멈출 때만 멈춤으로 본다
                 if done:
-                    stalled.append(done[-1])
+                    again.append(done[-1])
                 todo += ids[len(done):]
             elif done:
                 shown.append(done[-1])

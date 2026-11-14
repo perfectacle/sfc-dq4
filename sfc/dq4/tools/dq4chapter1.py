@@ -686,7 +686,7 @@ def build(rom, dq5, dq4, work, prologue=True, chapter2=False):
     (work / 'party.dq5patch.json').write_text(json.dumps(
         {"format": "dq5patch/1", "name": "dq4-party", "writes": dq4party.equip_writes(dq5, dq4)}, ensure_ascii=False))
     monsters = dq4ch1event.monster_doc(ines.prg(dq4.read_bytes()))
-    more = dq4ch2event.monster_entries(ines.prg(dq4.read_bytes()))
+    more = dq4ch2event.monster_entries(ines.prg(dq4.read_bytes()), original)
     if more:
         monsters["monsters"] += more
     (work / 'boss-monsters.json').write_text(json.dumps(monsters, ensure_ascii=False))
@@ -713,7 +713,8 @@ def build(rom, dq5, dq4, work, prologue=True, chapter2=False):
         work / 'npc.dq5patch.json', work / 'boss.dq5patch.json', work / 'boss-monsters.dq5patch.json',
         work / 'learn.dq5patch.json', work / 'growth.dq5patch.json', work / 'party.dq5patch.json']
     import dq4monport
-    patches.append(dq4monport.records_patch(original, work / 'monster-records.dq5patch.json'))
+    patches.append(dq4monport.records_patch(original, ines.prg(dq4.read_bytes()),
+                                                work / 'monster-records.dq5patch.json'))
     out = bytearray(apply_writes(clear_mirror(rom, original, group_ranges()), original, patches))
     # NDS 몬스터 그림: 무리 조합 검사가 이 롬의 무리·사건 무리로 세도록 다른 패치를 얹은 뒤에 만든다
     events = [dq4ch1event.BOSS_GROUP, *(g['index'] for g in dq4ch2event.encounter_groups())]
