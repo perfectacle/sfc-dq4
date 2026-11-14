@@ -1064,6 +1064,11 @@ class LineTests(unittest.TestCase):
         self.assertEqual(assign[pinned], 2)
         self.assertNotEqual(assign[other], 2)
 
+    def test_a_pin_on_a_line_the_person_cannot_use_stops_the_build(self):
+        pinned = self.person(1, line=7)
+        with self.assertRaisesRegex(SystemExit, '쓸 수 없는 줄'):
+            P.lines([pinned], {pinned: shades(30, 3)}, {pinned: {self.ELSEWHERE}})
+
     def test_the_swordsman_is_pinned_to_line_zero(self):
         # 지하 수련의 검사는 스크립트 엔트리라 세트 팔레트 표와 상관없이 OBJ 팔레트 0 으로 그려진다
         self.assertEqual(next(p for p in P.PEOPLE if p.role == '검사').line, 0)

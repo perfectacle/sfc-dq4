@@ -677,6 +677,8 @@ def rgb_frames(person, assets, outlined=True):
                 c.putpixel((x, y), color + (255,))
     if person.copy:
         src, dst = person.copy
+        if dst in person.touch:
+            raise SystemExit(f'{person.role}: {dst} 는 {src} 의 반전으로 덮이므로 touch 를 둘 수 없음')
         out[dst] = [c.transpose(Image.Transpose.FLIP_LEFT_RIGHT) for c in out[src]]
     return out
 
@@ -818,6 +820,8 @@ def lines(people, hists, where=None):
             return cost(merged, reduce(merged, room)) - cost(was, reduce(was, room))
         mine = {c for c in hists[p] if c not in COMMON}
         if p.line is not None:
+            if where and p.line not in open_lines(p):
+                raise SystemExit(f'{p.role}: 못박은 줄 {p.line} 은 이 인물이 나오는 맵 그룹에서 쓸 수 없는 줄')
             best = p.line
         elif where:
             # 같은 맵에 함께 서는 인물끼리 한 줄에 몰리지 않게, 그 인물이 나오는 맵 그룹마다 줄에 모인 색 수가

@@ -4,6 +4,7 @@
 인물(NO_EYES)은 뺀다.
 색: 무겁게 세는 인물(주요·상징 인물)이 나오는 맵 그룹 가운데 가장 나쁜 곳에서, 옷·머리 색이 NDS 색에서 벗어난
 거리(Lab, 점 수 가중 평균)가 LIMIT 아래인지. 줄 배정을 바꾸다 이 인물들의 색이 마을 사람 색에 밀리면 넘는다.
+전용 줄을 쓰는 일행(용사·라이언·호이민·아리나·크리프트·브라이)은 줄을 나눠 쓰지 않으므로 재지 않는다.
 
   python sfc/dq4/tools/dq4peoplecolorcheck.py --base work/ch1/dq4-ch1-sound.sfc --assets "$DQ4_ASSETS" [--json OUT]
 """
@@ -51,7 +52,7 @@ def eye_problems(person, cells):
 
 def drift(cells, row, slots):
     """옷·머리 색(COMMON 밖)이 롬 색에서 벗어난 Lab 거리의 점 수 가중 평균."""
-    count = Counter(q[:3] for pair in cells.values() for q in pair[0].get_flattened_data() if q[3] and q[:3] not in P.COMMON)
+    count = Counter(q[:3] for pair in cells.values() for f in pair for q in f.get_flattened_data() if q[3] and q[:3] not in P.COMMON)
     total = sum(count.values())
     return sum(w * math.dist(P.lab(c), P.lab(row[slots[c]])) for c, w in count.items()) / total if total else 0.0
 
