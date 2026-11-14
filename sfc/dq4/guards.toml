@@ -2834,7 +2834,7 @@ groups = ["ch1-build", "ch1-walk"]
 
 [[check]]
 name = "dq4-ch2-monster-actions"
-why = "2장 전투 몬스터(dq4monport 의 PORT·EVENT 번호)가 빌드 롬 레코드의 행동마다 그 행동을 실제로 쓰고(7E:10F5 몬스터·7E:10F7 행동) 다음 차례나 전투 끝까지 가는지. FC 주문을 일행 주문 번호로 옮기면 몬스터가 쓸 때 전투가 멈추고, DQ5 MP 가 모자라거나 조건 표에 걸리면 행동을 쓰지 않는다. snes9x 헤드리스, 난수 고정, 한 마리 무리에 행동 여섯 칸을 한 행동으로"
+why = "2장 전투 몬스터(dq4monport 의 PORT·EVENT 번호)가 빌드 롬 레코드의 행동마다 그 행동을 실제로 쓰고(7E:10F5 몬스터·7E:10F7 행동) 다음 차례나 전투 끝까지 가는지. FC 주문을 일행 주문 번호로 옮기면 몬스터가 쓸 때 전투가 멈추고, 조건 표에 걸리면 행동을 쓰지 않는다. MP 를 쓰는 주문은 FC 횟수(레코드 MP // FC 주문 MP)만큼 외우고 외울 때마다 몬스터 칸 MP 가 FC 주문 MP 만큼 주는지. snes9x 헤드리스, 난수 고정, 한 마리 무리에 행동 여섯 칸을 한 행동으로"
 paths = [
   "sfc/dq4/tools/dq4monport.py",
   "sfc/dq4/tools/dq4monactcheck.py",

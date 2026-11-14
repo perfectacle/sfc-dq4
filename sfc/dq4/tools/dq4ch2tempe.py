@@ -125,11 +125,11 @@ def events(ctx):
     return [_tokens(ctx, ctx.at)]
 
 
-def monster_doc(prg, dq5=None):
+def monster_doc(prg):
     """dq5tables/1 몬스터 칸: 필드 몬스터와 같은 FC 능력치·행동(dq4monport.fc_entry, 행동 번호 표는 이 모듈의 FC_ACTIONS 를
-    포함). 사건 전투라 드롭은 없다(FF). dq5(원래 DQ5 롬 바이트)를 주면 MP 를 DQ5 주문 MP 에 맞춘다."""
+    포함). 사건 전투라 드롭은 없다(FF)."""
     import dq4monport
-    return [{"id": f"{m:02X}", **dq4monport.fc_entry(prg, fc, dq5=dq5)} for m, fc in MONSTERS.items()]
+    return [{"id": f"{m:02X}", **dq4monport.fc_entry(prg, fc)} for m, fc in MONSTERS.items()]
 
 
 # 서술과 마을 사람의 말. FC 메시지 번호(NDS 대사가 있으면 그 번호)

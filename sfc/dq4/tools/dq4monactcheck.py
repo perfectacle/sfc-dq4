@@ -6,9 +6,16 @@ FC 주문을 일행 주문 번호로 옮기면 몬스터가 쓸 때 전투가 �
 저장 기록으로 이어 해 탑 39/01 에 서고 조우 루틴 23:E7C2 를 덮는다. 시드는 dq4ch1walkcheck.rng_for(0), 주인공은 레벨 20·
 HP 999 로 매 차례 방어하고(회복 행동 HEALS 는 첫 차례에 몬스터 HP 를 HURT 로 줄임), 몬스터는 HP 만 2000 으로(능력치·MP 는 롬 그대로) 둔다.
 판정: 행동하는 쪽 7E:10F5 가 몬스터(bit7)이고 행동 7E:10F7 이 그 행동인 프레임이 나온 뒤(쓴 것), 다음 차례 창·맵 명령 창
-(도망 등으로 끝남)·그 행동의 둘째 사용(주인공이 잠들어 차례 창이 오지 않을 때) 가운데 하나가 PROGRESS 프레임 안에 와야
+(도망 등으로 끝남)·그 행동의 다음 사용(주인공이 잠들어 차례 창이 오지 않을 때) 가운데 하나가 PROGRESS 프레임 안에 와야
 한다. 쓰지 않은 채 USE_LIMIT 를 넘기면 「안 씀」 으로 실패, 쓴 뒤 멈추면 「멈춤」 으로 실패다. 몬스터가 행동을 거르는
 조건(MP, 필드 68 의 조건 표)에 걸려 쓰지 못하는 행동은 ALLOWED_UNUSED 에 까닭과 함께 둔다.
+
+MP 를 쓰는 주문은 FC 에서 외우던 횟수, 곧 레코드 MP // FC 주문 MP(dq4monport.spell_entries, FC 롬에서 읽음)만큼
+외워야 한다(casts, CAST_LIMIT 까지). 쓸 때마다 몬스터 칸 MP(7E:07C0 + 4)를 다음 진행 때와 견줘, MP 가 FC 주문 MP
+이상이면 꼭 그만큼 줄어야(외움) 하고, 모자라면 줄지 않아야(「그러나 MP가 모자라다!」) 한다. 아니면 「MP 틀림」.
+외운 횟수가 모자란 채 차례 창이 SHORT_TURNS 번 이어서 지나가면 「덜 씀」 이다. 다 외운 뒤에는 차례 창 AFTER_TURNS 번
+동안 더 외우지 않는지 본다. 몬스터 AI 는 이미 잠든 주인공에게 ラリホー 를, アストロン 중에 アストロン 을 다시 고르지
+않으므로 차례 창마다 그 상태를 지운다(RESET).
 
   python sfc/dq4/tools/dq4cores.py
   python sfc/dq4/tools/dq4monactcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/monactcheck
@@ -21,7 +28,7 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
+sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools'), str(HERE.parents[2] / 'fc' / 'dq4' / 'tools')]
 
 import dq4monport  # noqa: E402
 
@@ -32,13 +39,35 @@ ACTOR, ACTION = 0x7E10F5, 0x7E10F7
 MONSTER_ACTOR = 0x80
 ACTIONS_AT = 17                   # 레코드 +17~+22: 행동 여섯(dq5tables.MONSTER_FIELDS)
 USE_LIMIT = 6000                  # 전투가 걸린 뒤 그 행동을 쓰기까지
-PROGRESS = 3000                   # 쓴 뒤 다음 차례 창·끝·둘째 사용까지
+PROGRESS = 3000                   # 쓴 뒤 다음 차례 창·끝·다음 사용까지
+MP_AT, SLOT_MP = 4, 0x7E07C4      # 레코드 +4 MP(dq5tables.MONSTER_FIELDS), 첫 몬스터 칸의 남은 MP
+CAST_LIMIT = 8                    # 이만큼 외우면 그만 봄
+INFINITE_MP = 0xFF                # 레코드 MP FF 는 외워도 줄지 않음(ホイミスライム, FC 도 FF)
+AFTER_TURNS = 2
+SHORT_TURNS = 3
+# 차례 창마다 지우는 상태 (행동들, [(주소, 지울 비트)]): 주인공 잠(전투 칸 +5 bit7, 카운터 +8 bit4-5), 몬스터 アストロン
+# (몬스터 칸 +A bit2, 카운터 +F bit6-7). dq5-data-format 「행동할 차례」·「턴이 끝날 때」
+RESET = (({0x4B, 0x4C}, [(0x7E0765, 0x80), (0x7E0768, 0x30)]),
+         ({0x59}, [(0x7E07CA, 0x04), (0x7E07CF, 0xC0)]))
 # 몬스터는 HP 가 최대(레코드)의 1/4 아래인 편이 없으면 회복 주문을 고르지 않으므로(21:BB42 조건 0E), 이 행동은 첫 차례 창에서
 # 슬롯 HP(7E:07C0 + 16k + 2)를 HURT 로 둔다
 HEALS = range(0x5A, 0x62)         # ホイミ ~ ベホマズン(몬스터용)
 HURT = 100
 # 쓰지 못해도 되는 (DQ5 번호, 행동): 까닭
 ALLOWED_UNUSED = {}
+
+
+def spell_costs(prg):
+    """{DQ5 몬스터용 주문 번호: FC 주문 MP}. prg 는 FC 롬 PRG."""
+    return {int(e['id'], 16): e['MP'] for e in dq4monport.spell_entries(prg)}
+
+
+def casts(rom, m, cost):
+    """레코드 MP 로 주문 MP cost 를 외울 수 있는 횟수. MP 를 쓰지 않는 행동(cost 가 None·0)과 MP 가 INFINITE_MP 인
+    몬스터는 None."""
+    import dq4ch1walkcheck as wc
+    mp = rom[wc.MONSTERS + m * 25 + MP_AT]
+    return None if not cost or mp == INFINITE_MP else mp // cost
 
 
 def plan(rom):
@@ -54,14 +83,36 @@ def plan(rom):
     return out
 
 
-def judge(events):
-    """events: [(전투 프레임, 종류)], 종류는 'use'·'turn'·'field'. (결과 'ok'·'unused'·'stuck', 처음 쓴 프레임)."""
-    uses = [f for f, k in events if k == 'use']
+def spent(events, cost):
+    """쓸 때마다 (그때 MP, 다음 진행 때 MP). events 는 judge 와 같음."""
+    out = []
+    for i, (_, k, mp) in enumerate(events):
+        if k == 'use' and i + 1 < len(events):
+            out.append((mp, events[i + 1][2]))
+    return out
+
+
+def judge(events, expect=None, cost=None):
+    """events: [(전투 프레임, 종류, 몬스터 MP)], 종류는 'use'·'turn'·'field'. expect 는 외워야 할 횟수(casts, None 이면
+    세지 않음), cost 는 주문 MP. (결과 'ok'·'unused'·'stuck'·'mp'·'short'·'extra', 처음 쓴 프레임)."""
+    uses = [f for f, k, _ in events if k == 'use']
     if not uses:
         return 'unused', None
     first = uses[0]
-    after = [f for f, _ in events if f > first]
-    return ('ok' if after and after[0] - first <= PROGRESS else 'stuck'), first
+    for u in uses if expect is not None else uses[:1]:
+        after = [f for f, _, _ in events if f > u]
+        if not after or after[0] - u > PROGRESS:
+            return 'stuck', first
+    if expect is None:
+        return 'ok', first
+    pairs = spent(events, cost)
+    if any(after != (before - cost if before >= cost else before) for before, after in pairs):
+        return 'mp', first
+    done = sum(before >= cost for before, _ in pairs)
+    want = min(expect, CAST_LIMIT)
+    if done != want:
+        return ('short' if done < want else 'extra'), first
+    return 'ok', first
 
 
 class Battles:
@@ -82,8 +133,9 @@ class Battles:
         import dq4savefixture as fx
         fx.close(self.run.c)
 
-    def battle(self, m, action, probe=False):
-        """한 판: {'result', 'used', 'frames', 'log'(probe 면 (프레임, 10F5, 10F6, 10F7) 바뀜)}."""
+    def battle(self, m, action, probe=False, expect=None, cost=None):
+        """한 판: {'result', 'used', 'spent', 'frames', 'log'(probe 면 (프레임, 10F5, 10F6, 10F7) 바뀜)}.
+        expect·cost 는 judge 와 같음. None 이면 처음 쓴 뒤 다음 진행까지만 본다."""
         import dq4ch1walkcheck as wc
         import dq4compatcheck as cc
         B, c, w = self.B, self.run.c, self.run.w
@@ -109,6 +161,8 @@ class Battles:
         policy = B.TURNS['defend']
         acting, seen_window, buttons = False, False, set()
         used_at = None
+        want = None if expect is None else min(expect, CAST_LIMIT)
+        reset = next((r for acts, r in RESET if action in acts), [])
         while True:
             f = c.n - start
             if used_at is None and f >= USE_LIMIT or used_at is not None and f - used_at > PROGRESS:
@@ -119,48 +173,67 @@ class Battles:
             if probe and (not log or log[-1][1:] != (actor, c.rd(ACTOR + 1), act)):
                 log.append((f, actor, c.rd(ACTOR + 1), act))
             now = bool(actor & MONSTER_ACTOR) and act == action
+            mp = c.rd(SLOT_MP)
             if now and not acting:
-                events.append((f, 'use'))
+                events.append((f, 'use', mp))
                 if used_at is None:
                     used_at = f
             acting = now
             window = c.rd(B.WINDOW)
             seen_window = seen_window or window not in (0x00, 0xFF, B.FIELD_WINDOW)
             if last_window == 0xFF and window == B.TURN_WINDOW:
-                if action in HEALS and not any(k == 'turn' for _, k in events):
+                if action in HEALS and (expect is not None or not any(k == 'turn' for _, k, _ in events)):
                     c.poke([(B.MONSTER_SLOTS + 2, HURT & 0xFF), (B.MONSTER_SLOTS + 3, HURT >> 8)])
-                events.append((f, 'turn'))
+                c.poke([(a, c.rd(a) & ~bits) for a, bits in reset])
+                events.append((f, 'turn', mp))
                 turn_at = c.n
                 policy_until = c.n + max(x for x, _ in policy) + 30
             last_window = window
             if window == B.FIELD_WINDOW and seen_window:
-                events.append((f, 'field'))
+                events.append((f, 'field', mp))
                 break
             if turn_at is not None and c.n < policy_until:
                 buttons = self.run.press_for(policy, turn_at)
             elif window not in B.INPUT_WINDOWS and f % B.MASH < 4:
                 buttons = {'a'}
-            if used_at is not None and any(k != 'use' and x > used_at for x, k in events) or \
-                    used_at is not None and sum(k == 'use' for _, k in events) > 1:
+            if used_at is None:
+                continue
+            last = max(x for x, k, _ in events if k == 'use')
+            since = [k for x, k, _ in events if x > last]
+            if want is None:
+                if since or sum(k == 'use' for _, k, _ in events) > 1:
+                    break
+                continue
+            cast_at = [x for (x, k, _), (before, _) in zip([e for e in events if e[1] == 'use'], spent(events, cost))
+                       if before >= cost]
+            if len(cast_at) >= want:
+                after = [k for x, k, _ in events if x > cast_at[want - 1]]
+                if want < expect and after or after.count('turn') >= AFTER_TURNS:
+                    break
+            elif since.count('turn') >= SHORT_TURNS:
                 break
         end = c.n - start
-        result, used = judge(events)
+        result, used = judge(events, expect, cost)
         if result != 'ok':
             c.shot(self.out / f'{m:02X}-{action:02X}.png')
-        return {'result': result, 'used': used, 'frames': end, 'events': events[:12],
+        return {'result': result, 'used': used, 'spent': None if cost is None else spent(events, cost), 'frames': end,
+                'events': events[:40],
                 **({'log': log[:200]} if probe else {})}
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--rom', type=Path, required=True, help='빌드 롬(dq4-ch1-full.sfc)')
+    ap.add_argument('--fc', type=Path, default=HERE.parents[2] / 'rom' / 'dq4.nes', help='FC 롬(주문 MP)')
     ap.add_argument('--out', type=Path, required=True)
     ap.add_argument('--only', help='번호:행동[,…] 만(16진)')
     ap.add_argument('--probe', action='store_true', help='10F5~10F7 바뀜을 결과에 남김')
     a = ap.parse_args(argv)
     t0 = time.time()
     a.out.mkdir(parents=True, exist_ok=True)
+    from kr_patch.fc import ines
     rom = a.rom.read_bytes()
+    costs = spell_costs(ines.prg(a.fc.read_bytes()))
     rows = plan(rom)
     if a.only:
         want = {tuple(int(x, 16) for x in p.split(':')) for p in a.only.split(',')}
@@ -170,16 +243,23 @@ def main(argv=None):
     try:
         for m, action in rows:
             key = f'{m:02X}:{action:02X}'
-            r = run.battle(m, action, a.probe)
+            cost = costs.get(action)
+            expect = casts(rom, m, cost)
+            r = run.battle(m, action, a.probe, expect, cost)
+            r['expect'], r['cost'] = expect, cost
             results[key] = r
-            print(f'{key} {r["result"]:6s} 씀 {r["used"]} 끝 {r["frames"]}', flush=True)
+            done = None if cost is None else sum(b >= cost for b, _ in r['spent'])
+            count = '' if expect is None else f' 외움 {done}/{min(expect, CAST_LIMIT)}번(MP {cost})'
+            print(f'{key} {r["result"]:6s} 씀 {r["used"]}{count} 끝 {r["frames"]}', flush=True)
             if r['result'] == 'ok':
                 continue
             why = ALLOWED_UNUSED.get((m, action))
             if r['result'] == 'unused' and why:
                 r['allowed'] = why
                 continue
-            problems.append(f'{key}: {"안 씀" if r["result"] == "unused" else "멈춤"} ({r["frames"]}프레임)')
+            why = {'unused': '안 씀', 'stuck': '멈춤', 'mp': f'MP 틀림 {r["spent"]}', 'short': f'덜 씀 {done}번',
+                   'extra': f'더 씀 {done}번'}[r['result']]
+            problems.append(f'{key}: {why} ({r["frames"]}프레임)')
     finally:
         run.close()
     report = {'rom': a.rom.name, 'battles': results, 'problems': problems, 'seconds': round(time.time() - t0, 1)}

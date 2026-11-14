@@ -122,28 +122,30 @@ def fc_actions():
     return out
 
 
-def spell_mp(prg, dq5, record, mp, actions):
-    """FC MP 로 외울 수 있는 횟수를 DQ5 에서도 외우게 하는 MP. DQ5 몬스터용 주문은 FC 보다 MP 가 많은 것이 있어(ヒャド 2 → 3,
-    マヌーサ 4 → 5) FC 값 그대로면 FC 에서 한 번은 외우던 몬스터가 한 번도 못 외운다. 주문마다 FC 횟수 × DQ5 MP 의 최댓값과
-    FC MP 가운데 큰 것(255 까지). dq5 는 원래 DQ5 롬 바이트."""
+# DQ5 몬스터용 주문 번호(26:8765 의 39~65). 일행이 외우는 주문(dq4party.dq5_spells)은 01~38 이고 전투 도구의 효과 행동도
+# 01~38 과 MP 를 쓰지 않는 3F(らいじんのヤリ)뿐이라, 이 칸의 MP 를 바꿔도 일행 주문 MP 는 그대로다
+MONSTER_SPELLS = range(0x39, 0x66)
+
+
+def spell_entries(prg):
+    """dq5tables/1 의 spells: FC 몬스터 주문이 옮겨 가는 DQ5 몬스터용 주문(fc_actions 가운데 39~65)의 전투 MP 를 FC 값으로.
+    FC 주문 둘이 MP 가 다른데 같은 DQ5 번호로 가면 ValueError."""
     import dq4data
-    import dq5spell
-    from dq5map import Rom
-    rom = Rom(dq5)
-    need = mp
-    for n in {b & 0x7F for b in record[9:15]}:
-        if n >= dq4data.MON_ACT[2]:
+    out = {}
+    for n, a in sorted(fc_actions().items()):
+        d = int(a, 16)
+        if n >= dq4data.MON_ACT[2] or d not in MONSTER_SPELLS:
             continue
-        fc_cost = dq4data.spell_mp(prg, dq4data.monster_action(prg, n))[0]
-        if fc_cost:
-            need = max(need, mp // fc_cost * dq5spell.cost(rom, int(actions[n], 16))[0])
-    return min(need, 0xFF)
+        mp = dq4data.spell_mp(prg, dq4data.monster_action(prg, n))[0]
+        if out.setdefault(d, mp) != mp:
+            raise ValueError(f'DQ5 주문 {d:02X} 에 FC MP {out[d]} 와 {mp} 가 옴')
+    return [{'id': f'{d:02X}', 'MP': mp} for d, mp in sorted(out.items())]
 
 
-def fc_entry(prg, fc, drop_item=None, dq5=None):
+def fc_entry(prg, fc, drop_item=None):
     """FC 몬스터의 dq5tables/1 칸(id 없음): dq4ch1event.fc_monster 의 능력치·행동, FC 드롭(드롭률은 FC 등급 그대로,
     물건은 drop_item(FC 물건 번호) → DQ5 번호, 없거나 None 이면 FF). 수비는 DQ5 상한 1FF 로 자른다(메탈 셋의 1023).
-    dq5(원래 DQ5 롬 바이트)를 주면 MP 를 spell_mp 로."""
+    MP 는 FC 그대로이고, 주문 한 번의 MP 는 spell_entries 가 FC 값으로 맞춘다."""
     import dq4ch1event
     import dq4data
     import dq4fieldencounter
@@ -154,8 +156,6 @@ def fc_entry(prg, fc, drop_item=None, dq5=None):
     item = None if drop is None or drop_item is None else drop_item(drop)
     e['수비'] = min(e['수비'], dq4fieldencounter.DQ5_DEFENCE_MAX)
     e['드롭'], e['드롭률'] = ('FF', 0) if item is None else (f'{item:02X}', rate)
-    if dq5 is not None:
-        e['MP'] = spell_mp(prg, dq5, record, e['MP'], actions)
     return e
 
 
@@ -190,7 +190,7 @@ def record_writes(original, dq5_of, prg):
     out = []
     for fc, m in PORT.items():
         b = bytearray(original[lorom(RECORD + dq5_of[fc] * RECORD_SIZE):][:RECORD_SIZE])
-        for k, v in fc_entry(prg, fc, drop_item, original).items():
+        for k, v in fc_entry(prg, fc, drop_item).items():
             kind, pieces = table.fields[k]
             dq5tables.put(b, pieces, dq5tables.parse(kind, v))
         at = RECORD + m * RECORD_SIZE
