@@ -2,8 +2,8 @@
 NDS 그림을 dq5monwrite 문서(dq5monster/1)로 쓴다. 형식 문서 sfc/dq4/docs/dq4-sprite-format.md 「2장 전투 몬스터 그림」.
 
 필드 조우의 대역(dq4fieldencounter.MONSTERS)은 여러 FC 몬스터가 DQ5 몬스터 하나를 같이 써서, 그림을 바꾸려면 번호를
-나눠야 한다. 새 번호(PORT)에는 지금 대역의 레코드 25바이트를 그대로 옮겨(능력치·행동은 지금과 같음) 이름과 그림만 바꾼다.
-사건 몬스터(텐페 보스·대회 상대)는 사건 모듈이 그 번호에 FC 능력치와 이름을 쓴다.
+나눠야 한다. 새 번호(PORT)에는 지금 대역의 레코드 25바이트를 바탕으로(내성·행동 거르기 등 FC 에 짝이 없는 칸) FC 능력치·
+행동·드롭을 덮어 쓴다(record_writes). 사건 몬스터(텐페 보스·대회 상대)는 사건 모듈이 그 번호에 FC 능력치와 이름을 쓴다.
 
   python sfc/dq4/tools/dq4monport.py doc rom/dq5.sfc -o work/monport     # 그림 PNG 와 dq5monster/1 문서
 """
@@ -98,19 +98,107 @@ def doc(rom, out_dir, only=None):
     return out_dir / 'monsters.json'
 
 
-def record_writes(original, dq5_of):
-    """사건 몬스터가 아닌 것의 새 번호에 지금 대역의 레코드 25바이트를 옮기는 dq5patch/1 쓰기. dq5_of 는 FC → 대역 DQ5
-    번호(dq4fieldencounter.PLACEHOLDERS)."""
+# FC 몬스터 행동 번호(레코드 바이트 9~14 bit6-0, fc/dq4/docs/dq4-data-format.md 「몬스터 행동 번호」) → DQ5 몬스터 행동
+# (26:8765 번호). 주문은 일행 주문(01~38)이 아니라 몬스터용 주문(39~65)이어야 한다: 일행 번호를 몬스터가 쓰면 전투가
+# 멈춘다. 사건 모듈의 표(dq4ch1event·dq4ch2tempe·dq4ch2endor .FC_ACTIONS)에 없는 것만 둔다.
+# 47 にげだす 는 DQ5 슬라임의 98(필드 68 이 0 이 아니면 주인공 레벨이 구역 레벨 + 4 를 넘을 때만 고름). 48·4B なかまをよぶ
+# 는 DQ5 의 부르기(AE~B5)가 정해진 DQ5 몬스터(dq5monlimits.SUMMONED)를 불러 그 그림이 들어오므로, 메시지만 나오는 66 으로
+FC_ACTIONS = {0x0A: '45', 0x10: '4B', 0x11: '4C', 0x12: '4D', 0x13: '4E', 0x17: '54', 0x19: '59', 0x1A: '52',
+              0x25: '5B', 0x33: '74', 0x36: '77', 0x38: '8B', 0x43: '96', 0x45: 'A3', 0x47: '98', 0x48: '66',
+              0x49: '71', 0x4B: '66', 0x5D: 'AA'}
+
+
+def fc_actions():
+    """FC 몬스터 행동 번호 → DQ5 몬스터 행동(16진 문자열). 사건 모듈의 표와 FC_ACTIONS 를 합친 것."""
+    import dq4ch1event
+    import dq4ch2endor
+    import dq4ch2tempe
+    tables = (dq4ch1event.FC_ACTIONS, dq4ch2tempe.FC_ACTIONS, dq4ch2endor.FC_ACTIONS, FC_ACTIONS)
+    out = {}
+    for t in tables:
+        for k, v in t.items():
+            if out.setdefault(k, v) != v:
+                raise ValueError(f'FC 행동 {k:02X} 가 {out[k]} 와 {v} 로 갈림')
+    return out
+
+
+def spell_mp(prg, dq5, record, mp, actions):
+    """FC MP 로 외울 수 있는 횟수를 DQ5 에서도 외우게 하는 MP. DQ5 몬스터용 주문은 FC 보다 MP 가 많은 것이 있어(ヒャド 2 → 3,
+    マヌーサ 4 → 5) FC 값 그대로면 FC 에서 한 번은 외우던 몬스터가 한 번도 못 외운다. 주문마다 FC 횟수 × DQ5 MP 의 최댓값과
+    FC MP 가운데 큰 것(255 까지). dq5 는 원래 DQ5 롬 바이트."""
+    import dq4data
+    import dq5spell
+    from dq5map import Rom
+    rom = Rom(dq5)
+    need = mp
+    for n in {b & 0x7F for b in record[9:15]}:
+        if n >= dq4data.MON_ACT[2]:
+            continue
+        fc_cost = dq4data.spell_mp(prg, dq4data.monster_action(prg, n))[0]
+        if fc_cost:
+            need = max(need, mp // fc_cost * dq5spell.cost(rom, int(actions[n], 16))[0])
+    return min(need, 0xFF)
+
+
+def fc_entry(prg, fc, drop_item=None, dq5=None):
+    """FC 몬스터의 dq5tables/1 칸(id 없음): dq4ch1event.fc_monster 의 능력치·행동, FC 드롭(드롭률은 FC 등급 그대로,
+    물건은 drop_item(FC 물건 번호) → DQ5 번호, 없거나 None 이면 FF). 수비는 DQ5 상한 1FF 로 자른다(메탈 셋의 1023).
+    dq5(원래 DQ5 롬 바이트)를 주면 MP 를 spell_mp 로."""
+    import dq4ch1event
+    import dq4data
+    import dq4fieldencounter
+    actions = fc_actions()
+    e = dq4ch1event.fc_monster(prg, fc, actions)
+    record = next(r for i, _, _, _, r in dq4data.monsters(prg) if i == fc)
+    _, drop, rate = dq4fieldencounter.fc_monster_fields(record)
+    item = None if drop is None or drop_item is None else drop_item(drop)
+    e['수비'] = min(e['수비'], dq4fieldencounter.DQ5_DEFENCE_MAX)
+    e['드롭'], e['드롭률'] = ('FF', 0) if item is None else (f'{item:02X}', rate)
+    if dq5 is not None:
+        e['MP'] = spell_mp(prg, dq5, record, e['MP'], actions)
+    return e
+
+
+def drop_items(prg, dq5):
+    """FC 물건 번호 → 이 해킹의 DQ5 물건 번호(이름이 같은 DQ5 물건, 없으면 dq4itemport.BORROWED 의 빌린 자리), 없으면 None."""
+    import dq4data
+    import dq4itemport
+    import dq4text
+    from dq5chest import item_name
+    from dq5map import Rom
+    rom = Rom(dq5)
+    names = {}
+    for k in range(dq4itemport.ITEM_COUNT):
+        names.setdefault(item_name(rom, k), k)
+    names.update({v: k for k, v in dq4itemport.BORROWED.items()})
+    kana = str.maketrans('りべぺへぼ', 'リベペヘボ')
+    items = dq4data.name_list(prg, 'item')
+
+    def of(drop):
+        name = dq4text.text(items[drop + 1])
+        return names.get(name, names.get(name.translate(kana)))
+    return of
+
+
+def record_writes(original, dq5_of, prg):
+    """필드 번호(PORT)마다 지금 대역(dq5_of: FC → 대역 DQ5 번호, dq4fieldencounter.PLACEHOLDERS)의 레코드 25바이트에
+    FC 능력치·행동·드롭(fc_entry)을 덮은 dq5patch/1 쓰기."""
+    import dq5tables
     from dq5map import lorom
+    table = dq5tables.TABLES['monsters']
+    drop_item = drop_items(prg, original)
     out = []
     for fc, m in PORT.items():
-        if dq5_of[fc] == m:
-            continue
-        src = original[lorom(RECORD + dq5_of[fc] * RECORD_SIZE):][:RECORD_SIZE]
+        b = bytearray(original[lorom(RECORD + dq5_of[fc] * RECORD_SIZE):][:RECORD_SIZE])
+        for k, v in fc_entry(prg, fc, drop_item, original).items():
+            kind, pieces = table.fields[k]
+            dq5tables.put(b, pieces, dq5tables.parse(kind, v))
         at = RECORD + m * RECORD_SIZE
-        out.append({'at': f'{at >> 16:02X}:{at & 0xFFFF:04X}', 'hex': src.hex(' '),
-                    'orig': original[lorom(at):lorom(at) + RECORD_SIZE].hex(' '),
-                    'note': f'FC {fc:02X} 몬스터 레코드(대역 {dq5_of[fc]:02X} 의 것)'})
+        orig = original[lorom(at):lorom(at) + RECORD_SIZE]
+        if bytes(b) == orig:
+            continue
+        out.append({'at': f'{at >> 16:02X}:{at & 0xFFFF:04X}', 'hex': b.hex(' '), 'orig': orig.hex(' '),
+                    'note': f'FC {fc:02X} 몬스터 레코드(대역 {dq5_of[fc]:02X} 바탕에 FC 능력치·행동)'})
     return out
 
 
@@ -169,11 +257,12 @@ def build(dq5, rom, work, zone_report, event_groups):
     return out
 
 
-def records_patch(original, path):
-    """record_writes 를 dq5patch/1 파일로."""
+def records_patch(original, prg, path):
+    """record_writes 를 dq5patch/1 파일로. prg 는 FC 롬 PRG."""
     import dq4fieldencounter
     path.write_text(json.dumps({'format': 'dq5patch/1', 'name': 'dq4-monster-records',
-                                'writes': record_writes(original, dq4fieldencounter.PLACEHOLDERS)}, ensure_ascii=False))
+                                'writes': record_writes(original, dq4fieldencounter.PLACEHOLDERS, prg)},
+                               ensure_ascii=False))
     return path
 
 

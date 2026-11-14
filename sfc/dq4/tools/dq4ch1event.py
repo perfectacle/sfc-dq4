@@ -366,14 +366,14 @@ FANFARE_AT = 0x06FF40                       # 합류 팡파르. 같은 뱅크 06
 JOIN_SONG = 0x26                            # 곡 자리 26 = NDS 「仲間が加わった」(dq4-sound-port-format)
 
 
-def fc_monster(prg, fc_id):
-    """FC 몬스터 레코드(18:$8046 + 22 × ID)에서 DQ5 몬스터 표(dq5tables)의 필드."""
+def fc_monster(prg, fc_id, actions=FC_ACTIONS):
+    """FC 몬스터 레코드(18:$8046 + 22 × ID)에서 DQ5 몬스터 표(dq5tables)의 필드. actions 는 FC 행동 번호 → DQ5 행동."""
     import dq4data
     r = next(rec for i, _, _, _, rec in dq4data.monsters(prg) if i == fc_id)
     ten = lambda lo, hi: r[lo] | (r[hi] & 3) << 8  # noqa: E731
     return {"HP": ten(4, 15), "MP": r[3], "민첩": r[2], "공격": ten(5, 16), "수비": ten(6, 17),
             "경험치": r[0] | r[1] << 8, "금화": ten(7, 18), "행동수": 0, "재생": 0, "동료확률": 0, "드롭": "FF",
-            **{f"행동{k + 1}": FC_ACTIONS[r[9 + k] & 0x7F] for k in range(6)}}
+            **{f"행동{k + 1}": actions[r[9 + k] & 0x7F] for k in range(6)}}
 
 
 def monster_doc(prg):
