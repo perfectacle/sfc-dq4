@@ -71,8 +71,9 @@ class ScriptTest(unittest.TestCase):
         end = POINTS[en.END_SCENE]
         self.assertEqual(ender[5]['args'], [end & 0xFF, end >> 8 & 0xFF, end >> 16])
 
-    def test_ender_call_darkens_then_plays_the_ending_song(self):
-        # 서술 동안 엔딩 곡 13(エンディング第二章): 1장 끝의 검게 하기를 부른 뒤 곡을 튼다
+    def test_ender_call_plays_the_ending_song_darkens_and_waits_for_it(self):
+        # 서술과 함께 엔딩 곡 13(エンディング第二章): 곡을 먼저 보내고 1장 끝의 검게 하기를 부른 뒤, 지금 곡이 13 이 될
+        # 때까지(상한 SONG_WAIT_MAX) 기다린다. 곡을 보내는 데 약 120프레임이라 기다리지 않으면 서술이 곡보다 먼저 뜬다
         ctx = context()
         code, at = en.native(ctx)
         self.assertEqual(at['darken_song'], ctx.code_at)
@@ -84,7 +85,10 @@ class ScriptTest(unittest.TestCase):
         self.assertEqual(en.ENDING_SONG, 0x13)
         self.assertIn(jsl, code)
         self.assertIn(song, code)
-        self.assertLess(code.index(jsl), code.index(song))
+        self.assertLess(code.index(song), code.index(jsl))
+        wait = bytes((0xAD, 0x8B, 0x1D, 0xC9, 0x13, 0xF0, 0x03, 0xCA))          # LDA $1D8B / CMP #13 / BEQ / DEX
+        self.assertLess(code.index(jsl), code.index(wait))
+        self.assertIn(bytes((0xA2, *en.SONG_WAIT_MAX.to_bytes(2, 'little'))), code)
         self.assertEqual(code[-1], 0x6B)
 
     def test_voices_say_their_line_and_turn_on_their_flag(self):
@@ -119,6 +123,9 @@ class ListTest(unittest.TestCase):
                                             *{m for m, _, _ in en.WON_TALK})}
         for (m, time, fc), _ in en.WON_TALK.items():
             out[m]["entries"].append(person(m, time, fc))
+        # 2장 엔돌 마을의 밤 사람: 우승 뒤에는 구석 (2F,00) 만 남는다
+        for fc in ((0x0D, 0x1A), (0x2B, 0x0C), *en.TOWN_WON_NIGHT):
+            out[endor.TOWN]["entries"].append(person(endor.TOWN, 'night', fc))
         for m, fc, time, _ in (en.MINISTER_NIGHT, en.MAID, en.GUARD_NIGHT, en.KING_NIGHT):
             out[m]["entries"].append(person(m, time, fc))
         for time, fc, _, _, _, who in en.CASTLE_WON:
@@ -153,6 +160,10 @@ class ListTest(unittest.TestCase):
         self.assertIs(msg[0], self.MESSENGER)
         talks = {(e['fields']['x'], e['fields']['y']): e['fields']['talk'] for e in msg[1:]}
         self.assertEqual(talks[en.cell(0x0B, 0x1B)], ctx.talk['barmaid'])
+        # 엔돌 마을의 밤은 FC 처럼 구석 한 사람만 남는다(두 목록 모두)
+        for name in (endor.TOWN_MESSENGER, endor.TOWN_SEEN):
+            nights = [(e['fields']['x'], e['fields']['y']) for e in ctx.made[name]['entries'] if e['time'] == 'night']
+            self.assertEqual(nights, [en.cell(*fc) for fc in en.TOWN_WON_NIGHT])
         # 엔돌 성 1층은 FC 목록으로: 우승 뒤에 없는 사람은 빠지고 새로 선 병사가 들어온다
         hall = by_name[f'ch2_ending_{en.ENDOR_CASTLE.replace("/", "")}']
         self.assertEqual(len(hall), len(en.CASTLE_WON))
@@ -217,6 +228,17 @@ class FcTest(unittest.TestCase):
             got = [self.shows(r, night, self.WON) for r in self.records((0x04, int(m[3:], 16)), night, self.WON)
                    if dq4talk.pos(r, night) == fc]
             self.assertEqual(got, [en.FC_SHOWS[name]], (m, time, fc))
+
+    def test_endor_town_night_after_winning_is_the_fc_list(self):
+        import dq4talk
+        got = tuple(dq4talk.pos(r, True) for r in self.records((0x04, 0x00), True, self.WON))
+        self.assertEqual(got, en.TOWN_WON_NIGHT)
+        # 남는 사람은 2장 목록의 같은 칸 사람과 같은 말이라 옮긴 사람을 그대로 둔다
+        ch2 = {k: v for k, v in self.WON.items() if k != 0x6284}
+        for fc in en.TOWN_WON_NIGHT:
+            before = [r for r in self.records((0x04, 0x00), True, ch2) if dq4talk.pos(r, True) == fc]
+            after = [r for r in self.records((0x04, 0x00), True, self.WON) if dq4talk.pos(r, True) == fc]
+            self.assertEqual([self.shows(r, True, ch2) for r in before], [self.shows(r, True, self.WON) for r in after])
 
     def test_endor_castle_list_after_winning_is_the_fc_list(self):
         import dq4npcport

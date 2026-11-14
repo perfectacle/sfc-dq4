@@ -170,12 +170,13 @@ STAIR_ATTR = 0x05
 # block +0 bit6 (cell +1 bit4, as DQ5 chest block 384) draws the party in front of the upper layer, without which
 # a hero standing on a chest disappears under it. つぼ needs it too, as DQ5's two A7 blocks have it: 2B:B815 reads
 # the pot cell for a person's head row when the person stands right below the pot, and without the bit gives that
-# row OAM priority 2, under the upper-layer pot.
+# row OAM priority 2, under the upper-layer pot. FC signs (A8) get DQ5's indoor sign attribute 97, which 12:EB53
+# reads from +7 only, so they are upper-layer blocks like the pots (dq4signs).
 CHEST_KIND = 0x04
 UPPER = 0x20
 FRONT = 0x40
 CHEST_HEAD = FRONT, UPPER, 0x04
-FURNITURE = {0xAB: (0, 0x00, 0x13), 0xAA: (FRONT, UPPER, 0x27)}
+FURNITURE = {0xAB: (0, 0x00, 0x13), 0xAA: (FRONT, UPPER, 0x27), 0xA8: (FRONT, UPPER, 0x97)}
 OPENINGS = DOORS | set(GATES)
 # Key in a map's {FC block: new block} for its never-reached zone-0 cells (dq4outside.hidden_cells). FC blocks are
 # 5 bits, and FC itself draws other zones with its blocks 20/21, so 21 cannot clash.

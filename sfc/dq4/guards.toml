@@ -1338,7 +1338,7 @@ groups = ["ch1-build"]
 
 [[check]]
 name = "dq4-field-signs"
-why = "필드 팻말에 はなす·しらべる 하면 FC 처럼 팻말 글(아래를 보면 뒷면)이 떠야 한다. DQ5 팻말 표 1E:F4BF 가 DQ5 좌표 그대로라 「그 방향에는 아무도 없다」 가 떴다"
+why = "필드 팻말과 옮긴 맵의 실내 팻말(3E·40·42·45 그룹 7개)에 はなす·しらべる 하면 FC 처럼 팻말 글(아래를 보면 뒷면)이 떠야 한다. DQ5 팻말 표 1E:F4BF 가 DQ5 좌표 그대로라 「그 방향에는 아무도 없다」 가 떴다. 실내 팻말은 블록 위층 속성 97(dq4environmentrom.FURNITURE)과 실내 팻말 표 1E:F12F 가 함께 있어야 읽히고, 고치기 전에는 129·12B 12C 였다"
 paths = [
   "sfc/dq4/tools/dq4signs.py",
   "sfc/dq4/tools/dq4signcheck.py",
@@ -1360,8 +1360,8 @@ paths = [
   "sfc/dq5/tools/lua/dq5warptrace.lua",
   "sfc/dq4/tools/dq4shards.py",
 ]
-run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/signcheck && uv run --locked python sfc/dq4/tools/dq4signcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/signcheck"
-needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI"]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && rm -rf work/signcheck && uv run --locked python sfc/dq4/tools/dq4signcheck.py --rom work/ch2/dq4-ch1-full.sfc --out work/signcheck --jobs 4"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
 groups = ["ch1-build", "ch1-walk"]
 
 [[check]]

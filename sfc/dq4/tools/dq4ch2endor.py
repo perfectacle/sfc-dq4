@@ -243,20 +243,27 @@ def _fight():
     return a.bytes() + LEAVE
 
 
-def _herb():
-    """대화 입구 3: 아리나 물건 칸의 첫 약초를 빼고(뒤 칸을 당기고 장비 비트도 한 칸씩 내림) HP 를 HERB_HEAL 만큼."""
-    a = Asm()(ENTER, 0xE2, 0x30, 0xA2, 0x00)
-    a.label('find')(0xBF, _al(ALENA_ITEMS), 0xC9, HERB).br(BEQ, 'found')
-    a(0xE8, 0xE0, ITEM_SLOTS).br(BCC, 'find').brl('end')
-    a.label('found')(0xDA)                                                  # PHX: 칸 k
-    a.label('shift')(0xE0, ITEM_SLOTS - 1).br(BCS, 'last')
-    a(0xBF, _al(ALENA_ITEMS + 1), 0x9F, _al(ALENA_ITEMS), 0xE8).br(BRA, 'shift')
-    a.label('last')(0xA9, 0xFF, sta(ALENA_ITEMS + ITEM_SLOTS - 1), 0xFA)   # PLX
+def take_item(a, items, equip, item, miss, p=''):
+    """물건 칸(items, 12칸)의 첫 item 을 빼고 뒤 칸을 당기며 장비 비트(equip, 16비트)도 한 칸씩 내린다. M·X 8 에서
+    들어와, 찾으면 M 16·X 8 로 이어지고 없으면 miss 로 간다(M·X 8). p 는 이름표 앞머리(한 묶음에 여러 번 쓸 때)."""
+    a(0xA2, 0x00)
+    a.label(p + 'find')(0xBF, _al(items), 0xC9, item).br(BEQ, p + 'found')
+    a(0xE8, 0xE0, ITEM_SLOTS).br(BCC, p + 'find').brl(miss)
+    a.label(p + 'found')(0xDA)                                              # PHX: 칸 k
+    a.label(p + 'shift')(0xE0, ITEM_SLOTS - 1).br(BCS, p + 'last')
+    a(0xBF, _al(items + 1), 0x9F, _al(items), 0xE8).br(BRA, p + 'shift')
+    a.label(p + 'last')(0xA9, 0xFF, sta(items + ITEM_SLOTS - 1), 0xFA)     # PLX
     # 장비 비트: 칸 k 아래는 그대로, 위는 한 칸 내림. low = (1 << k) - 1, 새 = (m & low) | ((m >> 1) & ~low)
-    a(0xC2, 0x20, 0xA9, 0x00, 0x00, 0xE0, 0x00).br(BEQ, 'low')
-    a.label('ones')(0x38, 0x2A, 0xCA).br(BNE, 'ones')
-    a.label('low')(0x48, lda(ALENA_EQUIP), 0x23, 0x01, 0x48)               # PHA low / AND $01,S / PHA
-    a(lda(ALENA_EQUIP), 0x4A, 0x03, 0x03, 0x43, 0x03, 0x03, 0x01, sta(ALENA_EQUIP), 0x68, 0x68)
+    a(0xC2, 0x20, 0xA9, 0x00, 0x00, 0xE0, 0x00).br(BEQ, p + 'low')
+    a.label(p + 'ones')(0x38, 0x2A, 0xCA).br(BNE, p + 'ones')
+    a.label(p + 'low')(0x48, lda(equip), 0x23, 0x01, 0x48)                 # PHA low / AND $01,S / PHA
+    a(lda(equip), 0x4A, 0x03, 0x03, 0x43, 0x03, 0x03, 0x01, sta(equip), 0x68, 0x68)
+    return a
+
+
+def _herb():
+    """대화 입구 3: 아리나 물건 칸의 첫 약초를 빼고(take_item) HP 를 HERB_HEAL 만큼."""
+    a = take_item(Asm()(ENTER, 0xE2, 0x30), ALENA_ITEMS, ALENA_EQUIP, HERB, 'end')
     a(lda(ALENA_HP), 0x18, 0x69, HERB_HEAL, 0x00, 0xCF, _al(ALENA_MAX_HP)).br(BCC, 'heal')
     a(lda(ALENA_MAX_HP))
     a.label('heal')(sta(ALENA_HP), 0xE2, 0x20).label('end')

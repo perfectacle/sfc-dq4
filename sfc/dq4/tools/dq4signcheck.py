@@ -1,10 +1,11 @@
-"""Read every FC field signpost in the game (MesenCE headless).
+"""Read every FC field and map (indoor) signpost in the game (MesenCE headless).
 
 For each field sign of dq4signs: warp from the start state built from the ROM under test (dq4freshstate; dq5warp.lua
 FIELD) onto a walkable FC block beside it, turn to it with the pad and choose はなす or しらべる (dq5chestcheck.lua logs
 every message 24:8BAF shows). From below, left or right the game must show 136 「(name) read the sign」 and then the
 sign's own message; from above (facing down) 137 and 138, the back of the sign, as FC 031B. Before the fix はなす
-showed 129 「nobody there」.
+showed 129 「nobody there」. Map signs (dq4signs.map_signs) are read the same way after a dq5warp.lua TO warp onto
+each walkable neighbour block; before the fix both commands found nothing there (129, 12B 12C).
 
   MESENCE=... LIBDIR=$(uv run krpatch sfc lua) \\
     python sfc/dq4/tools/dq4signcheck.py --rom work/ch1/dq4-ch1.sfc --out work/signcheck
@@ -64,11 +65,36 @@ def jobs(prg):
     return out
 
 
+def map_jobs(prg):
+    """실내 팻말: [(이름, (맵, DQ5 칸), 돌 버튼, 명령, 기대 메시지)]. 걸을 수 있는 이웃 FC 블록마다. 순간이동 칸은
+    12:EB53 이 보는 주인공 칸(dq5warp TO 의 칸)으로, FC 블록 (x, y) 의 아래 이웃은 (2x, 2y+2)."""
+    out = []
+    order = dict(zip(dq4signs.MAP_ORDER, dq4signs.MAP_SLOTS))
+    for g, m, x, y, msg, source in dq4signs.map_sign_sources(prg):
+        for (dx, dy), (side, button) in SIDES.items():
+            nx, ny = x + dx, y + dy
+            if not (0 <= nx < source.w and 0 <= ny < source.h):
+                continue
+            if source.blocks["prop"].get(source.cell(nx, ny) & 31, 0x80) & 0x80:
+                continue
+            want = list(BACK) if side == "above" else [*READ, order[msg]]
+            for command in COMMANDS:
+                name = f"{g:02X}{m:02X}-{x:02X}{y:02X}-{side}-{command}"
+                out.append((name, (f"{g:02X}/{m:02X}", (2 * nx, 2 * ny)), button, command, want))
+    return out
+
+
 def run_job(mesence, rom, state, out, name, at, button, command, want):
-    where = scene(mesence, rom, state, out, name, FIELD=f"{at[0]},{at[1]}",
-                  ROMPATCH=dq4fieldport.warp_patch(rom.read_bytes(), *at), SAVE="scene.mss", TEST="wait:10")
+    if isinstance(at[0], str):
+        where = scene(mesence, rom, state, out, name, TO=f"{at[0]},{at[1][0]},{at[1][1]}", SAVE="scene.mss",
+                      TEST="wait:10")
+        ok = where.get("map") == at[0]
+    else:
+        where = scene(mesence, rom, state, out, name, FIELD=f"{at[0]},{at[1]}",
+                      ROMPATCH=dq4fieldport.warp_patch(rom.read_bytes(), *at), SAVE="scene.mss", TEST="wait:10")
+        ok = where.get("field") == list(at)
     saved = out / name / "scene.mss"
-    if where.get("field") != list(at) or not saved.is_file():
+    if not ok or not saved.is_file():
         return {"passed": False, "error": f"warp ended at {where}"}
     dest = out / name / command
     dest.mkdir()
@@ -89,6 +115,7 @@ def main():
     dq4freshstate.add_argument(ap)
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--jobs", type=int, default=2)
+    ap.add_argument("--maps-only", action="store_true", help="실내(맵 쪽) 팻말만")
     args = ap.parse_args()
     mesence = Path(os.environ["MESENCE"])
     out = args.out.resolve()
@@ -97,7 +124,8 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     rom = args.rom.resolve()
     state = dq4freshstate.resolve(args.state, mesence, rom, out / "start")
-    todo = jobs(ines.prg(args.dq4.read_bytes()))
+    prg = ines.prg(args.dq4.read_bytes())
+    todo = ([] if args.maps_only else jobs(prg)) + map_jobs(prg)
     with ThreadPoolExecutor(args.jobs) as pool:
         results = dict(zip((j[0] for j in todo), pool.map(lambda j: run_job(mesence, rom, state, out, *j), todo)))
     failed = {k: v for k, v in results.items() if not v["passed"]}

@@ -12,8 +12,8 @@ FC 차례(fc/dq4/docs/dq4-story-format.md, 대화는 dq4talk.py 로 읽음):
      엔돌 쪽 사당(45/0F, FC 1F/00)으로 가는 여행의 문에 닿는다.
 
 DQ5 의 しらべる·どうぐ 는 인물 대화를 부르지 않아 다음처럼 옮긴다: 탑의 꿀은 엘프가 섰던 칸을 밟으면 찾고(보이지
-않는 인물), 왕에게 꿀을 먹이는 것은 꿀을 가진 채 왕에게 말을 걸면 한다(대화 조건 11). 꿀은 FC 처럼 없애지 않고
-남는다. 형식은 sfc/dq4/docs/dq4-chapter2-format.md 「왕 병과 지저귐의 꿀」·「여행의 문 사당」.
+않는 인물), 왕에게 꿀을 먹이는 것은 꿀을 가진 채 왕에게 말을 걸면 한다(대화 조건 11). 먹인 꿀은 FC 처럼
+가진 칸을 당기며 없앤다(대화 입구 4). 형식은 sfc/dq4/docs/dq4-chapter2-format.md 「왕 병과 지저귐의 꿀」·「여행의 문 사당」.
 """
 from pathlib import Path
 import sys
@@ -23,6 +23,7 @@ sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
 import dq4chapter1 as ch1  # noqa: E402
 from dq4chapterbox import ENTER, LEAVE  # noqa: E402
+import dq4ch2battle  # noqa: E402
 import dq4ch2event as ch2  # noqa: E402
 
 say, narrate, speak = ch1.say, ch1.narrate, ch1.speak
@@ -87,6 +88,9 @@ USE = {'bazaar_soldier': 0, 'throne_soldier': 1, 'elf_a': 2, 'elf_b': 3, 'honey'
 
 SHRINE_OPEN = 'ch2_king_shrine'
 
+# 대화 스크립트가 부르는 입구(dq4ch2battle 칸 4): 왕에게 먹인 꿀을 없앤다
+CALLS = {4: 'eat_honey'}
+
 
 def _al(a):
     return bytes((a & 0xFF, a >> 8 & 0xFF, a >> 16))
@@ -137,6 +141,21 @@ def _give(item):
     ]) + LEAVE
 
 
+def _take(item):
+    """대화 입구 4: 일행 기록 앞부터 처음 가진 item 을 빼고(dq4ch2endor.take_item, FC 처럼 뒤 칸을 당기며 장비 비트를
+    맞춤), 아무도 갖지 않았으면 맡긴 물건에서 하나 뺀다. _give 가 넣는 차례와 같다."""
+    import dq4ch2endor as en
+    a = en.Asm()(ENTER, 0xE2, 0x30)
+    for r in range(1 + len(ch2.RECRUITS)):
+        a(en.lda(0x7E201D), 0xC9, r + 1).br(en.BCS, f'r{r}').brl('bag').label(f'r{r}')
+        base = 0x7E0000 | (PARTY_ITEMS + RECORD * r)
+        en.take_item(a, base, base - 2, item, f'n{r}', p=f'{r}')
+        a(0xE2, 0x20).brl('end').label(f'n{r}')
+    a.label('bag')(en.lda(0x7E0000 | BAG + item)).br(en.BEQ, 'end')(0x3A, en.sta(0x7E0000 | BAG + item))
+    a.label('end')
+    return a.bytes() + LEAVE
+
+
 def _outside(rect):
     """인물 명령 05: 주인공이 사각형 밖이면 A = 0(dq4prologue._inside 의 두 끝을 바꿈)."""
     import dq4prologue
@@ -157,6 +176,7 @@ def native(ctx):
     put('elf_rect', dq4prologue._inside(*ELF_RECT))
     put('honey_rect', dq4prologue._inside(*HONEY_RECT))
     put('give_honey', _give(HONEY))
+    put('eat_honey', _take(HONEY))
     return bytes(out), at
 
 
@@ -248,7 +268,8 @@ def talk_scripts(ctx):
         # 꿀을 가진 채 말을 걸면 먹인다(FC 는 왕 앞 (09,08)에서 どうぐ). 걷어찬 뒤 처음 돌아왔을 때는 FC 07A3
         'king': [_if(_flag(CURED), msg('king_after'),
                      [_if(_flag(HEARD),
-                          [_if({"code": "11", "item": HONEY}, [msg('honey_use'), _flag_on(CURED), msg('king_cure')],
+                          [_if({"code": "11", "item": HONEY}, [msg('honey_use'), dq4ch2battle.talk_call(4), _flag_on(CURED),
+                                                                msg('king_cure')],
                                msg('king_silent'))],
                           [_if(_flag(ch2.KICKED), msg('king_back'), ask)])])],
         'minister': [_if(_flag(CURED), msg('minister_cured'),
