@@ -2847,6 +2847,7 @@ paths = [
   "sfc/dq4/tools/dq4battlescene.py",
   "sfc/dq4/tools/dq4cores.py",
   "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
+  "sfc/dq4/tools/dq4brkscan.py",
   "sfc/dq4/tools/dq4compatcheck.py",
   "sfc/dq4/tools/dq4libretro.py",
   "sfc/dq4/tools/dq4savefixture.py",
