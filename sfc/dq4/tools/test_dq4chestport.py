@@ -36,6 +36,12 @@ class RewardTests(unittest.TestCase):
         self.assertEqual(chestport._reward(NAMES, ITEMS, 2), 0x20)
         self.assertEqual(chestport._reward(NAMES, ITEMS, 4), 0x01)
 
+    def test_borrowed_slot_item_is_not_substituted(self):
+        # サントハイム 의 タンス 의 はねぼうし 는 빌린 자리(dq4itemport.BORROWED)로, きのぼうし 로 바꾸지 않는다
+        import dq4itemport
+        self.assertNotIn("はねぼうし", chestport.SUBSTITUTE)
+        self.assertIn("はねぼうし", dq4itemport.BORROWED.values())
+
     def test_item_waiting_for_its_event_is_empty(self):
         self.assertEqual(chestport._reward(NAMES, ITEMS, 3), chestport.EMPTY)
 

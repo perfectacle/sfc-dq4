@@ -27,7 +27,8 @@ class PriceTest(unittest.TestCase):
 
     def test_korean_name(self):
         self.assertEqual(dq4itemport.korean_names(), {0x01: "철 창", 0x34: "정의의 주판", 0x4E: "철의 앞치마",
-                                                      0x61: "외톨이 메탈 갑옷", 0xC6: "황금의 팔찌", 0xBE: "지저귐의 꿀"})
+                                                      0x61: "외톨이 메탈 갑옷", 0x89: "금 머리장식", 0x8C: "깃털 모자",
+                                                      0xC6: "황금의 팔찌", 0xBE: "지저귐의 꿀"})
 
 
 @unittest.skipUnless(DQ4.is_file() and DQ5.is_file(), "local source ROMs not present")

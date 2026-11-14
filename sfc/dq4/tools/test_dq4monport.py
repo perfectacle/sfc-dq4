@@ -71,14 +71,37 @@ class RecordTests(unittest.TestCase):
         self.assertEqual(e['동료확률'], 0)
         placeholder = dq5tables.decode(dq5tables.TABLES['monsters'], None, self.dq5,
                                        dq4fieldencounter.PLACEHOLDERS[0x0D])
-        self.assertEqual(e['내성'], placeholder['내성'])
+        # FC 내성 ギラ1 メラ3 バギ1 マヌーサ2 ラリホー3 ザキ2 ニフラム1 マホトラ2 マホトーン1 을 DQ5 종류 50~5E 에, 5F~61 은 대역 것
+        self.assertEqual(e['내성'][:15], '310010232102100')
+        self.assertEqual(e['내성'][15:], placeholder['내성'][15:])
+        self.assertNotEqual(e['내성'], placeholder['내성'])
         self.assertEqual(e['f68'], placeholder['f68'])
+
+    def test_second_slime_gets_its_own_number_and_fc_values(self):
+        # FC 04 スライム(엔돌 쪽 구역 10~12)는 DQ5 슬라임 00 대역이 아니라 제 번호에 FC 값
+        self.assertNotIn(dq4monport.PORT[0x04], (0x00, dq4monport.PORT[0x00]))
+        e = self.entry(dq4monport.PORT[0x04])
+        self.assertEqual((e['HP'], e['MP'], e['공격'], e['수비'], e['민첩'], e['경험치'], e['금화']),
+                         (40, 0, 0, 30, 15, 3, 1))
+        # なかまをよぶ·がったい 는 메시지만 나오는 ようすをみる
+        self.assertEqual([e[f'행동{k}'] for k in range(1, 7)], ['66'] * 6)
+        self.assertEqual(e['내성'][:15], '111121100200000')
 
     def test_drops_follow_fc(self):
         slime = self.entry(dq4monport.PORT[0x00])
         self.assertEqual((slime['드롭'], slime['드롭률']), ('A1', 5))      # やくそう 2/256
-        # とさかへび 의 FC 드롭(DQ5 에 같은 이름이 없는 물건)은 떨어뜨리지 않는다
-        self.assertEqual(self.entry(dq4monport.PORT[0x20])['드롭'], 'FF')
+        # とさかへび 의 はねぼうし 는 빌린 자리(dq4itemport.BORROWED) 8C
+        self.assertEqual(self.entry(dq4monport.PORT[0x20])['드롭'], '8C')
+
+    def test_drop_items_dq5_lacks_have_slots(self):
+        of = dq4monport.drop_items(self.prg, self.dq5)
+        # FC てつのつめ·きんのかみかざり·はねぼうし: 가타카나로 같은 DQ5 てつのツメ, 빌린 자리 둘
+        self.assertEqual((of(0x03), of(0x4D), of(0x4A)), (0x2F, 0x89, 0x8C))
+
+    def test_event_entry_takes_fc_resists(self):
+        e = dq4monport.fc_entry(self.prg, 0xB1)
+        self.assertEqual(len(e['내성']), 18)
+        self.assertEqual(e['내성'][15:], '000')
 
     def test_metal_defence_is_capped(self):
         self.assertEqual(self.entry(dq4monport.PORT[0x5C])['수비'], 0x1FF)
