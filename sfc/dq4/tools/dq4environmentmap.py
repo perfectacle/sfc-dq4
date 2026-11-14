@@ -592,6 +592,62 @@ def _tile(assets, name, palette, map_type, block=None, background_name=None):
     }
 
 
+# Stairs and pillars keep a transparent background and go on the DQ5 upper layer over a floor block, so they
+# show the floor they stand on (layer_floor). Composited into one block they would carry one fixed floor, and an
+# 8x8 holds one palette bank, so the grey stone bank could not show the crimson carpet, grass or wood beside them.
+LAYERED = {"stairs_up", "stairs_down", "pillar", "pillar_top"}
+
+
+def _layered_tile(assets, name, palette):
+    tile = assets[name]
+    if tile.getpalette() != palette or tile.info.get("transparency") != 0:
+        raise ValueError(f"{name}: a layered block needs the shared palette and transparent index zero")
+    for y in (0, 8):
+        for x in (0, 8):
+            if len({v >> 4 for v in tile.crop((x, y, x + 8, y + 8)).tobytes() if v}) > 1:
+                raise ValueError(f"{name}: incompatible SFC palette banks at {x},{y}")
+    return tile.copy(), {"background": None, "layered": True, "transparent_pixels_filled": 0,
+                         "background_palette_remapped_pixels": 0, "foreground_pixels_remapped": 0}
+
+
+def _plain_floor(source, mapping, prepared, block):
+    """A walkable block drawn whole, with no transparent fixture or traced shape over it."""
+    asset = mapping[block][0]
+    info = prepared[block][1]
+    return (not block_prop(source, block) & 0x80 and asset not in LAYERED and ":" not in asset
+            and info["background"] is None and not info.get("layered"))
+
+
+def layer_floor(source, mapping, prepared, x, y):
+    """FC block drawn under the layered block at (x, y): the plain floor most common among the eight cells around
+    it (ties to the nearest, then below, then left), else the nearest within three cells, else the map's most
+    common plain floor."""
+    near = Counter()
+    first = {}
+    for radius in (1, 2, 3):
+        for ny in range(max(0, y - radius), min(source.h, y + radius + 1)):
+            for nx in range(max(0, x - radius), min(source.w, x + radius + 1)):
+                block = source.cell(nx, ny) & 31
+                if (nx, ny) == (x, y) or not _plain_floor(source, mapping, prepared, block):
+                    continue
+                near[block] += 1
+                key = (abs(nx - x) + abs(ny - y), ny < y, nx > x)
+                first[block] = min(first.get(block, key), key)
+        if near:
+            return min(near, key=lambda b: (-near[b], first[b], b))
+    floors = Counter(c & 31 for c in source.buf if _plain_floor(source, mapping, prepared, c & 31))
+    if not floors:
+        raise ValueError(f"({x},{y}): no plain floor in the map for a layered block")
+    return floors.most_common(1)[0][0]
+
+
+def layer_floors(source, mapping, prepared):
+    """{(x, y): FC floor block} for every layered cell of the map."""
+    return {(x, y): layer_floor(source, mapping, prepared, x, y)
+            for y in range(source.h) for x in range(source.w)
+            if prepared[source.cell(x, y) & 31][1].get("layered")}
+
+
 # Blocks without an FC definition (the black filler 0E/1E) have no property; treat them as walls.
 UNDEFINED = 0x80
 
@@ -634,7 +690,8 @@ def prepare_maps(prg, assets, names=None):
         if unsupported:
             raise ValueError(f"{name}: unsupported source blocks {unsupported}")
         prepared = {block: _shape_tile(prg, assets, mapping[block][0], palette, source.t, block)
-                    if ":" in mapping[block][0] else _tile(assets, mapping[block][0], palette, source.t, block)
+                    if ":" in mapping[block][0] else _layered_tile(assets, mapping[block][0], palette)
+                    if mapping[block][0] in LAYERED else _tile(assets, mapping[block][0], palette, source.t, block)
                     for block in counts}
         yield group, number, name, source, counts, prepared, palette
 
@@ -648,10 +705,16 @@ def render_maps(rom_path, assets, names=None):
         mapping = sheet_art(prg, source.t)
         preview = Image.new("P", (source.w * 16, source.h * 16))
         preview.putpalette(palette_variant(map_palette(name, source.t)))
+        floors = layer_floors(source, mapping, prepared)
         for y in range(source.h):
             for x in range(source.w):
                 block = source.cell(x, y) & 31
-                preview.paste(prepared[block][0], (x * 16, y * 16))
+                if (x, y) in floors:
+                    art = prepared[block][0]
+                    preview.paste(prepared[floors[x, y]][0], (x * 16, y * 16))
+                    preview.paste(art, (x * 16, y * 16), art.point(lambda v: 255 if v else 0, "L"))
+                else:
+                    preview.paste(prepared[block][0], (x * 16, y * 16))
         records = []
         for block, count in sorted(counts.items()):
             prop = block_prop(source, block)

@@ -339,14 +339,32 @@ def _bridge():
 
 
 def _stairs(down=False):
-    c = _Canvas(3, fill=1 if down else 3)
+    """Down: steps sinking into a black pit, opaque so its dark corners stay. Up: DQ5's interior up stair
+    (グランバニア, ラインハット; FC 0A/19 too), three slabs rising right on a transparent background so the
+    floor around shows, with a shadow cast to the lower right."""
+    if not down:
+        c = _Canvas(3)
+        for x0, top in ((1, 9), (5, 6), (9, 3)):
+            c.rect((x0, top, x0 + 4, 13), 1)
+            c.line((x0 + 1, top + 1, x0 + 3, top + 1), 7)
+            c.line((x0 + 1, top + 2, x0 + 3, top + 2), 6)
+            for y in range(top + 3, 13):
+                for dx, color in ((1, 6), (2, 5), (3, 4)):
+                    c.point((x0 + dx, y), color)
+            c.line((x0 + 1, 12, x0 + 3, 12), 3)
+        c.line((2, 14, 14, 14), 1)
+        c.line((14, 4, 14, 14), 1)
+        for x in range(3, 15, 2):
+            c.point((x, 15), 1)
+        return _finish(c, "올라가는 계단")
+    c = _Canvas(3, fill=1)
     for n in range(5):
         y = 1 + n * 3
-        left = n // 2 if down else 0
-        c.line((left, y, 15 - left, y), 6 if not down or n < 3 else 4)
-        c.line((left, y + 1, 15 - left, y + 1), 4 if not down or n < 3 else 3)
+        left = n // 2
+        c.line((left, y, 15 - left, y), 6 if n < 3 else 4)
+        c.line((left, y + 1, 15 - left, y + 1), 4 if n < 3 else 3)
         c.line((left, y + 2, 15 - left, y + 2), 2)
-    return _finish(c, "내려가는 계단" if down else "올라가는 계단")
+    return _finish(c, "내려가는 계단")
 
 
 def _door(opened=False):
@@ -1296,7 +1314,22 @@ def _pillar(top=False):
         "................", ".23333333333332.", "2566666666666652", "2455555555555542",
         ".23444444444432.", "...2366666532...") + (shaft,) * 10) if top else ((shaft,) * 11 + (
         "...2566666532...", "..255555555532..", ".24444444444442.", ".22222222222222.", "................"))
-    return _pattern(3, rows, "기둥 머리" if top else "기둥")
+    c = _Canvas(3)
+    c.rows(rows)
+    # Shadow cast to the lower right, beside the shaft and under the base; it stays on the upper layer so
+    # the pillar keeps its depth over any floor.
+    for y in range(6, 16) if top else range(11):
+        c.point((12, y), 1)
+        if y % 2:
+            c.point((13, y), 1)
+    if top:
+        c.line((13, 5, 14, 5), 1)
+    else:
+        c.point((14, 12), 1)
+        c.line((14, 13, 15, 13), 1)
+        c.point((15, 14), 1)
+        c.line((2, 15, 15, 15), 1)
+    return _finish(c, "기둥 머리" if top else "기둥")
 
 
 def _dais():
