@@ -62,6 +62,23 @@ CHAPTER2_CHURCH_FC = 0x13
 # 7E:2193 is the last town entered, read only by キメラのつばさ (11:8CBB). An extra slot's town stores 80 | slot there,
 # as no group number has bit7.
 LAST_TOWN, VISITED, SLOT_MARK = 0x7E2193, 0x7E2030, 0x80
+# FC 1~4장 「どこへ」 목록은 다녀온 비트 차례(10:$95EB 의 FC 그룹 차례)로 뜬다. 21:9E2C(BRK 88 4D, 목록 순번 → 칸)를
+# 이 차례로 바꾸는 훅을 건다(order_slots). 목록 창 이름(04:B88A)과 고른 칸이 같은 길을 지나 함께 바뀐다.
+# 그룹 0A 는 이 롬에 칸이 없다. 5장 목록(10:$95FA)은 차례가 달라 아직 다루지 않는다.
+FC_LIST_ORDER = (0x02, 0x12, 0x01, 0x0E, 0x0F, 0x0C, 0x16, 0x05, 0x04, 0x15, 0x17, 0x00, 0x11, 0x0A)
+ORDER_SITE, ORDER_ORIG, ORDER_DONE, ORDER_SLOTS = 0x219E2C, "AF 01 80 01", 0x219E4C, 0x18
+# 장 시작 때 FC 는 다녀온 비트를 12:$9179[5 × 장] 으로 덮는다. 2장은 サントハイム 하나(04 = 비트 2 = 그룹 01)
+CHAPTER2_VISITED_FC = (0x01,)
+# キメラのつばさ(11:8CA3 BRK 95 00 / BRK 98 AE 「ほうりなげた」 → 88E5 물건 줄이기 → 8CB2 날기). 2장이면 그 앞에서 ルーラ
+# 목록 창(BRK 95 4D)을 띄워 고른 칸을 7E:2193 = 80 | 칸 으로 두고, 그만두면 물건을 줄이지 않고 처리기 끝(11:8A36)으로.
+# 창 BRK(95)는 뱅크 11 밖에서 부르면 창이 뜨지 않고 멈추었으므로(5B 에서 BRK 95 00 만 부른 롬, 98 은 됨), 창을 여는
+# 토막은 뱅크 11 의 やみのランプ 처리기 자리(11:8C18~8C50, 이 롬에 나오지 않는 DQ5 물건)에 둔다. 그 물건은 「아무 일도
+# 없음」 처리기(11:8BBD)로 돌린다. 2장인지는 뱅크 밖 kimera 가 C 로 돌려준다
+KIMERA_SITE, KIMERA_ORIG, KIMERA_CANCEL = 0x118CA3, "00 95 00", 0x118A36
+KIMERA_STUB, KIMERA_STUB_END = 0x118C18, 0x118C51
+LAMP_HANDLER, LAMP_ORIG, NOTHING_HANDLER = 0x118F81, "18 8C", 0x8BBD
+LAMP_CODE = ("00 95 00 AD 21 0F 85 F5 00 98 BE AD 49 19 D0 13 22 00 80 21 B0 0D 22 D3 F8 1F C9 00 D0 05 20 51 8C 90 07 "
+             "00 97 13 00 98 8E 60 00 0E 00 95 FF C2 20 20 A1 82 68 68 82 91 FC")
 # FC return places (1E:$A76D, 22 records of FC group, FC map, x, y, end byte): the church each saved game goes back to.
 FC_RETURNS, FC_RETURN_COUNT = (0x1E, 0xA76D), 22
 
@@ -165,8 +182,25 @@ def slot_of_fc(fc):
 
 def chapter_slot_code():
     """M8 code that puts chapter 2's FC return place (CHAPTER2_CHURCH_FC) in 7E:2033 by day: where a wipe-out goes back
-    to, and continuing, until the party saves."""
-    return bytes((0xA9, slot_of_fc(CHAPTER2_CHURCH_FC), 0x8F, *PLACE_SAVED.to_bytes(3, "little")))
+    to, and continuing, until the party saves. Then the visited bits 7E:2030~2032 become FC chapter 2's
+    (CHAPTER2_VISITED_FC) as FC's chapter start overwrites them, and 7E:2193 its first town's slot."""
+    out = bytes((0xA9, slot_of_fc(CHAPTER2_CHURCH_FC), 0x8F, *PLACE_SAVED.to_bytes(3, "little")))
+    bits = sum(1 << slot_of_fc(fc) for fc in CHAPTER2_VISITED_FC)
+    for k in range(3):
+        out += bytes((0xA9, bits >> 8 * k & 0xFF, 0x8F, *(VISITED + k).to_bytes(3, "little")))
+    return out + bytes((0xA9, SLOT_MARK | slot_of_fc(CHAPTER2_VISITED_FC[0]), 0x8F, *LAST_TOWN.to_bytes(3, "little")))
+
+
+def order_slots():
+    """ルーラ 칸 0~23 을 FC 목록 차례(FC_LIST_ORDER, 칸이 있는 것만) 뒤에 나머지 칸 차례로. 모든 칸이 한 번씩 들어
+    목록 수(BRK 88 4C)와 순번 → 칸이 어긋나지 않는다."""
+    order = []
+    for fc in FC_LIST_ORDER:
+        try:
+            order.append(slot_of_fc(fc))
+        except ValueError:
+            pass
+    return order + [s for s in range(ORDER_SLOTS) if s not in order]
 
 
 def fc_returns(prg):
@@ -334,11 +368,47 @@ def hook_code(at, extra, maps):
     asm.b(0xBF, *START_TABLE.to_bytes(3, "little"), *jml(CONTINUE_DONE))
     asm.label("k_engine").b(0xAF, 0x01, 0x80, 0x01, *jml(CONTINUE_BACK))
 
+    # order (M8 X8, 21:9E2C): $42 = 목록 순번 → X = 그 순번의 다녀온 칸(order 표 차례), 없으면 FF. 21:9E4C 가 X 를 $46 에
+    asm.label("order").b(0x64, 0x4D, 0xA2, 0x00)
+    asm.label("o_loop").long(0xBF, "order_tab").b(0xC9, 0xFF).rel(0xF0, "o_none")
+    asm.b(0xDA, 0x48, 0x4A, 0x4A, 0x4A, 0xAA, 0x68, 0x29, 0x07, 0xA8, 0xBF, *VISITED.to_bytes(3, "little"))
+    asm.label("o_bit").b(0x88).rel(0x30, "o_test").b(0x4A).rel(0x80, "o_bit")
+    asm.label("o_test").b(0x4A, 0xFA).rel(0x90, "o_next")
+    asm.b(0xA5, 0x4D, 0xE6, 0x4D, 0xC5, 0x42).rel(0xF0, "o_hit")
+    asm.label("o_next").b(0xE8).rel(0x80, "o_loop")
+    asm.label("o_hit").long(0xBF, "order_tab").b(0xAA, *jml(ORDER_DONE))
+    asm.label("o_none").b(0xA2, 0xFF, *jml(ORDER_DONE))
+
+    # kimera (M8, KIMERA_STUB 의 JSL): 2장이고 다녀온 칸이 있으면 C = 1
+    import dq4growth
+    flag, bit = dq4growth.CHAPTER2
+    asm.label("kimera").b(0xAF, *flag.to_bytes(3, "little"), 0x29, bit).rel(0xF0, "k_no")
+    asm.b(0xAF, *VISITED.to_bytes(3, "little"), 0x0F, *(VISITED + 1).to_bytes(3, "little"),
+          0x0F, *(VISITED + 2).to_bytes(3, "little")).rel(0xF0, "k_no").b(0x38, 0x6B)
+    asm.label("k_no").b(0x18, 0x6B)
+
     lands = b"".join(bytes((e["slot"], e["group"])) + e["land"][0].to_bytes(2, "little") + e["land"][1].to_bytes(2, "little")
                      for e in extra if e["land"])
     rows = b"".join(bytes(r) for r in maps)
-    asm.label("maps").b(*rows, 0xFF).label("lands").b(*lands, 0xFF)
+    asm.label("maps").b(*rows, 0xFF).label("lands").b(*lands, 0xFF).label("order_tab").b(*order_slots(), 0xFF)
     return asm.assemble()
+
+
+def kimera_stub(check):
+    """(bytes, labels) of the bank-11 piece at KIMERA_STUB that 11:8CA3 calls with JSR in place of BRK 95 00 (M8 X8):
+    `check` (the kimera hook) → list window, 7E:2193 = 80 | picked slot; then BRK 95 00 and back to the message.
+    B in the window drops this return and ends the item handler like 11:8A36 without using the item."""
+    import dq4environmentrom
+    asm = dq4environmentrom._Asm(KIMERA_STUB)
+    asm.b(0x22, *check.to_bytes(3, "little")).rel(0x90, "plain")
+    asm.label("list").b(0x00, 0x95, 0x4D, 0xA5, 0xE8).rel(0x30, "cancel")
+    asm.b(0x85, 0x42, 0x00, 0x88, 0x4D).label("pick").b(0xA5, 0x46, 0x09, SLOT_MARK, 0x8F, *LAST_TOWN.to_bytes(3, "little"))
+    asm.label("plain").b(0x00, 0x95, 0x00, 0x60)
+    asm.label("cancel").b(0x68, 0x68, 0x4C, *(KIMERA_CANCEL & 0xFFFF).to_bytes(2, "little"))
+    data, labels = asm.assemble()
+    if KIMERA_STUB + len(data) > KIMERA_STUB_END:
+        raise ValueError("キメラのつばさ 목록 토막이 やみのランプ 처리기 자리를 넘음")
+    return data, labels
 
 
 def rom_restarts(rom, at=HOOK_AT):
@@ -355,10 +425,11 @@ def rom_restarts(rom, at=HOOK_AT):
 
 
 def hook_writes(extra, maps, at=HOOK_AT):
-    """dq5patch/1 writes: the routines and the eight site patches."""
+    """dq5patch/1 writes: the routines and the site patches."""
     data, labels = hook_code(at, extra, maps)
     if at >> 16 != (at + len(data) - 1) >> 16:
         raise ValueError("ルーラ slot hook crosses a bank")
+    stub, _ = kimera_stub(labels["kimera"])
 
     def site(addr, orig, opcode, label, note):
         size = len(bytes.fromhex(orig))
@@ -373,7 +444,14 @@ def hook_writes(extra, maps, at=HOOK_AT):
             site(SAVE_SITE, SAVE_ORIG, 0x5C, "save", "저장할 때 이어 할 칸"),
             site(WIPE_SITE, WIPE_ORIG, 0x5C, "wipe", "전멸 뒤 다시 시작 자리"),
             site(CONTINUE_SITE, CONTINUE_ORIG, 0x5C, "continue", "이어 할 때 다시 시작 자리"),
-            site(RESTART_SITE, RESTART_ORIG, 0x22, "restart_slot", "전멸 뒤 저장한 칸으로")]
+            site(RESTART_SITE, RESTART_ORIG, 0x22, "restart_slot", "전멸 뒤 저장한 칸으로"),
+            site(ORDER_SITE, ORDER_ORIG, 0x5C, "order", "ルーラ 목록을 FC 차례로"),
+            {"at": cpu(KIMERA_STUB), "hex": stub.hex(" ").upper(),
+             "orig": " ".join(LAMP_CODE.split()[:len(stub)]), "note": "2장 キメラのつばさ 목록 창(やみのランプ 처리기 자리)"},
+            {"at": cpu(KIMERA_SITE), "hex": f"20 {KIMERA_STUB & 0xFF:02X} {KIMERA_STUB >> 8 & 0xFF:02X}",
+             "orig": KIMERA_ORIG, "note": "キメラのつばさ: 창 BRK 앞에 2장 목록"},
+            {"at": cpu(LAMP_HANDLER), "hex": f"{NOTHING_HANDLER & 0xFF:02X} {NOTHING_HANDLER >> 8:02X}",
+             "orig": LAMP_ORIG, "note": "やみのランプ 처리기를 「아무 일도 없음」으로(자리를 목록 토막이 씀)"}]
 
 
 def writes(dq5, dests):

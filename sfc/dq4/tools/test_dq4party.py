@@ -137,22 +137,25 @@ class RomTest(unittest.TestCase):
         # 배우는 레벨 차례(FC 창 차례는 スカラ·ホイミ·マヌーサ·ベホイミ…)
         self.assertEqual(battle, ['ホイミ', 'スカラ', 'マヌーサ', 'マホトーン', 'スクルト', 'ベホイミ', 'ザキ', 'ザオラル',
                                   'ザラキ', 'ベホマ', 'ベホマラー', 'ザオリク'])
-        self.assertEqual(field, ['ホイミ', 'キアリー', 'ベホイミ', 'ザオラル', 'ベホマ', 'ザオリク'])
+        self.assertEqual(field, ['ホイミ', 'キアリー', 'ベホイミ', 'ザオラル', 'ベホマ', 'ベホマラー', 'ザオリク'])
         self.assertEqual(p['start'].to_bytes(3, 'little'), bytes((0x01, 0x01, 0x00)))   # ホイミ(필드 0·전투 0)
         self.assertEqual([e['level'] for e in p['learn']], [4, 7, 8, 12, 15, 16, 19, 21, 25, 27, 31, 34])
-        self.assertEqual(p['dropped'], [('field', 'ベホマラー', 'DQ5 필드에서 쓰지 못함')])
+        self.assertEqual(p['dropped'], [])
 
     def test_brey(self):
         p, battle, field = self.lists(dq4growth.FC_BREY)
-        self.assertEqual(battle, ['ヒャド', 'ルカニ', 'マホカンタ', 'ルーラ', 'ヒャダルコ', 'バイキルト', 'ルカナン', 'マホトラ',
-                                  'メダパニ', 'マヒャド'])
+        self.assertEqual(battle, ['ヒャド', 'ルカニ', 'マホカンタ', 'ルーラ', 'ヒャダルコ', 'ピオリム', 'バイキルト', 'ルカナン',
+                                  'マホトラ', 'ヒャダイン', 'メダパニ', 'マヒャド'])
         self.assertEqual(field, ['リレミト', 'ルーラ', 'ラナルータ', 'インパス'])
         self.assertEqual(p['start'].to_bytes(3, 'little'), bytes((0x00, 0x01, 0x00)))   # ヒャド(전투 0)
-        self.assertEqual([e['level'] for e in p['learn']], [3, 8, 9, 11, 18, 19, 22, 24, 26, 31, 32])
-        self.assertEqual([d[1] for d in p['dropped']], ['ヒャダイン', 'ピオリム'])
+        # FC ピオリム 14·ヒャダイン 27 은 지혜로 늦어지는 주문(bit7)이라 한 레벨 뒤
+        self.assertEqual([e['level'] for e in p['learn']], [3, 8, 9, 11, 15, 18, 19, 22, 24, 26, 28, 31, 32])
+        self.assertEqual(p['dropped'], [])
+        self.assertEqual(p['battle'][5], party.PIORIMU)
+        self.assertEqual(p['battle'][9], party.HYADAIN)
 
     def test_learned_matches_the_fc_measurement(self):
-        """FC 롬에서 그 레벨까지 올려 잰 배운 주문과, DQ5 표로 그 레벨까지 배우는 주문이 같다(DQ5 에 없어 뺀 것 밖)."""
+        """FC 롬에서 그 레벨까지 올려 잰 배운 주문과, DQ5 표로 그 레벨까지 배우는 주문이 같다(브라이 15레벨의 ピオリム 포함)."""
         import dq4data
         import dq4text
         spell = [party._kata(dq4text.text(n)) for n in dq4data.name_list(self.prg, 'spell')]
@@ -182,8 +185,70 @@ class RomTest(unittest.TestCase):
         import dq5learnwrite as lw
         from dq5map import Rom
         doc = party.learn_doc()
-        self.assertEqual([c['index'] for c in doc['characters']], [0, 9, 5])
+        self.assertEqual([(c['kind'], c['index']) for c in doc['characters']],
+                         [('person', 0), ('person', 9), ('person', 5), ('monster', party.SPARE_MONSTER)])
+        # 필드 ベホマラー 는 dq5learnwrite 가 받지 않아 자리 표시 주문으로 넘긴다
+        self.assertIn(party.FIELD_PLACEHOLDER, doc['characters'][1]['field'])
+        self.assertNotIn(party.BEHOMARA, doc['characters'][1]['field'])
         lw.patch(Rom(party.DQ5.read_bytes()), doc)
+
+    def test_spare_monster_is_not_hoimin(self):
+        """비우는 몬스터 습득 표는 호이민(ホイミスライム, 회복 주문만 배우는 표)이 아니다."""
+        import dq5learnwrite as lw
+        from dq5map import Rom
+        dump = lw.dump(Rom(party.DQ5.read_bytes()))
+        mons = {c['index']: c for c in dump['characters'] if c['kind'] == 'monster'}
+        hoimin = [i for i, c in mons.items() if c['battle'] and set(c['battle']) <= set(range(0x27, 0x30))]
+        self.assertEqual(hoimin, [5])
+        self.assertTrue(mons[party.SPARE_MONSTER]['learn'])
+
+    def test_borrowed_spells(self):
+        """빌린 칸은 주인공 쪽 주문(몬스터 쪽 39~ 아님)이고 FC 주문 목록에 없는 DQ5 주문이며, 쓰기가 원래 롬 위에 맞다."""
+        import dq4data
+        import dq4text
+        fc = {party._kata(dq4text.text(n)) for n in dq4data.name_list(self.prg, 'spell')}
+        original = party._names(self.rom, party.SPELL_NAMES, party.SPELL_LAST + 1)
+        for n, (name, fc_spell, src) in party.BORROWED_SPELLS.items():
+            self.assertLess(n, 0x39)
+            self.assertNotIn(party._kata(original[n]), fc)
+            self.assertIn(name, fc)
+        self.assertEqual(party.korean_names(), {0x38: '햐다인', 0x1D: '피오림'})
+        writes = party.spell_writes()
+        by = {w['at']: w for w in writes}
+        self.assertEqual(by['26:879D']['hex'], 'E8')   # ヒャダイン MP 8·적 전체
+        self.assertEqual(by['26:8782']['hex'], '63')   # ピオリム MP 3·우리 편 전체
+        self.assertEqual(by['27:80A9']['hex'], '3C 15')
+        self.assertEqual(by['20:F6BF']['orig'], '20 A1 A0')
+        self.assertEqual(by['11:802A']['orig'], '22 80')   # 원래 제자리에서 도는 8022
+
+
+class SpellCodeTest(unittest.TestCase):
+    def test_bank20_fits(self):
+        far = party.spell_code()[1]
+        data, labels = party.bank20_code(far)
+        self.assertLessEqual(party.BANK20_AT + len(data), 0x210000)
+        # 처리 루틴 표·실행 루틴은 뱅크 20 의 16비트 주소라 스텁이 뱅크 20 에 있어야 한다
+        self.assertTrue(all(v >> 16 == 0x20 for v in labels.values()))
+        # 적용 스텁: ピオリム(1D)이 아니면 원래 JSR $A0A1 뒤 20:F6C2 로
+        a = labels['apply'] - party.BANK20_AT
+        self.assertEqual(data[a:a + 5], bytes.fromhex('ad f7 10 c9 1d'))
+        b = labels['apply_dq5'] - party.BANK20_AT
+        self.assertEqual(data[b:b + 6], bytes.fromhex('20 a1 a0 4c c2 f6'))
+
+    def test_messages_are_called_from_bank_20(self):
+        """메시지 BRK(A4·16)는 뱅크 57 에서 부르면 전투가 멈춘다: 뱅크 57 코드에 BRK A4 가 없다."""
+        far = party.spell_code()[1]
+        _, labels = party.bank20_code(far)
+        data, _ = party.spell_code(bank20=labels)
+        self.assertNotIn(bytes.fromhex('00 a4'), data)
+        self.assertLessEqual(party.SPELL_AT + len(data), dq4growth.GROWTH_AT)
+
+    def test_field_code_fits(self):
+        data, labels = party.field_code(18)
+        self.assertLessEqual(party.FIELD_AT + len(data), 0x120000)
+        self.assertEqual(data[:2], bytes((0xA9, 18)))
+        base, width = party.FC_BEHOMARA
+        self.assertIn(bytes((0xA9, width, 0x22, 0x3A, 0x95, 0x00, 0x18, 0x69, base)), data)
 
 
 if __name__ == '__main__':

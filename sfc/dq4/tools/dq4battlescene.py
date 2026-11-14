@@ -3,7 +3,8 @@
 
 장면(SCENES): 보통 공격(회심 셈)·중간 수비, 도망·도망칠 수 없는 무리·몬스터 도망, 약초, 호이민의 ホイミ, 레벨업 한 번·두 번,
 전멸, 탑 위 보스(보스 패치 없이), 맵 곡 건너뛰기 비트를 켠 기록으로 이어 하기(nosong), 라이안 성장 곡선(FC ライアン 과
-견줌, growth), 2장 일행 셋의 성장·배운 주문(party2)과 크리프트 ホイミ·브라이 ヒャド(party2spell).
+견줌, growth), 2장 일행 셋의 성장·배운 주문(party2)과 크리프트 ホイミ·브라이 ヒャド(party2spell), 브라이가 DQ5 빈 칸을
+빌린 ピオリム·ヒャダイン(party2piorimu·party2hyadain).
 - 걸음 전투는 조우 루틴 23:E7C2 를 cheat 로 「무리를 7E:1001~ 에 쓰고 구역 레벨 $100F·무리 플래그 $1000 을 둔 뒤
   carry 를 켜 돌아옴」으로 덮어 탑 39/01 (20,16)에서 아래로 한 걸음 내디뎌 붙인다. 전투가 걸리면 cheat 를 풀어
   롬의 「조우 없음」(dq4ch1walkcheck.NO_ENCOUNTERS)으로 돌아간다.
@@ -75,6 +76,9 @@ HERB = 0xA1                       # DQ5 やくそう
 HOIMI = 0x27                      # 행동 ホイミ(やくそう 도 이 처리 루틴, dq5-data-format 「물건」)
 HYADO = 0x0A                      # 행동 ヒャド
 CAST_WINDOW = 120                 # 주문을 건 사람의 MP 가 준 뒤 그 효과(몬스터 HP 가 줆)를 찾는 프레임
+# ピオリム·ヒャダイン 은 맞는 사람·몬스터마다 메시지가 떠, 셋째의 すばやさ 는 MP 가 준 뒤 128프레임, 둘째 몬스터의 피해는
+# 250프레임에 들어옴(snes9x)
+EFFECT_WINDOW = 400
 FC_HOIMI = 0x29                   # FC 행동 ID ホイミ(fc/dq4/docs/dq4-data-format.md 「HP 회복」)
 GROWTH_TO = 20                    # growth 장면이 오르는 끝 레벨
 NO_ITEM = 0xFF
@@ -104,7 +108,16 @@ TURNS = {
     # 아리나 방어, 크리프트 주문 → 첫 주문(ホイミ) → 우리 편 첫째(주인공), 브라이 주문 → 첫 주문(ヒャド) → 몬스터 무리
     'spell3': ((20, 'a'), (50, 'down'), (80, 'a'), (110, 'down'), (140, 'a'), (170, 'a'), (200, 'a'),
                (230, 'down'), (260, 'a'), (290, 'a'), (320, 'a')),
+    # 아리나·크리프트 방어, 브라이 주문 → 전투 주문 창(한 쪽 세 줄 두 칸)에서 칸 BREY_SLOTS[이름] → 대상 창이 없는 범위라
+    # 그대로. 첫 쪽 오른쪽 아래(칸 5)에서 오른쪽을 누르면 둘째 쪽(칸 6~9 만 배움)의 칸 9 에 섰다
+    'piorimu3': ((20, 'a'), (50, 'down'), (80, 'a'), (110, 'down'), (140, 'down'), (170, 'a'), (200, 'down'), (230, 'a'),
+                 (260, 'down'), (290, 'down'), (320, 'right'), (350, 'a')),
+    'hyadain3': ((20, 'a'), (50, 'down'), (80, 'a'), (110, 'down'), (140, 'down'), (170, 'a'), (200, 'down'), (230, 'a'),
+                 (260, 'down'), (290, 'down'), (320, 'right'), (350, 'right'), (380, 'a')),
 }
+# 위 두 차례 입력이 고르는 브라이 전투 목록 칸(dq4party.plan 의 차례, expectations 가 확인)
+BREY_SLOTS = {'ピオリム': 5, 'ヒャダイン': 9}
+BREY_MP = 99
 
 
 def monster_patch(rom, n, hp=None, attack=None, defense=None, actions=ATTACK_ONLY):
@@ -446,6 +459,30 @@ def judge_party_spells(s, expect):
     return problems
 
 
+def judge_brey_spell(s, expect):
+    """party2piorimu·party2hyadain: 브라이 MP 가 그 주문 값만큼 줄고, ピオリム 이면 EFFECT_WINDOW 안에 일행 셋의 전투
+    すばやさ 가 기록 すばやさ 만큼(255 에서 멈춤) 오르고, ヒャダイン 이면 그 안에 FC 범위의 피해가 몬스터 모두에게."""
+    problems = judge_common(s, expect)
+    if s.get('start') is None:
+        return problems
+    casts = [c for c in s.get('casts', []) if c['member'] == 2 and c['drop'] == expect['cost']]
+    if not casts:
+        return problems + [f"브라이 MP 가 {expect['spell']} 값({expect['cost']})만큼 준 적 없음: {s.get('casts')}"]
+    f0 = casts[0]['f']
+    if expect['spell'] == 'ピオリム':
+        first = s['speeds'][0][1]
+        later = [v for f, v in s['speeds'] if f0 <= f <= f0 + EFFECT_WINDOW]
+        want = [min(a + b, 255) for a, b in zip(first, expect['base_speeds'])]
+        if not later or later[-1] != want:
+            problems.append(f"ピオリム 뒤 전투 すばやさ {later[-1] if later else first}, 기대 {want}(처음 {first})")
+    else:
+        lo, hi = expect['damage']
+        drops = [d for f, d in s.get('mon_drops', []) if f0 <= f <= f0 + EFFECT_WINDOW]
+        if len(drops) != expect['monsters'] or not all(lo <= d <= hi for d in drops):
+            problems.append(f"ヒャダイン 뒤 피해 {drops}, 기대 {expect['monsters']}마리 모두 {lo}~{hi}")
+    return problems
+
+
 def judge_lose(s, expect):
     problems = judge_common(s, expect)
     if s.get('end') is None:
@@ -494,7 +531,8 @@ def judge_nosong(s, expect):
 JUDGES = {'attack': judge_attack, 'armor': judge_attack, 'flee': judge_flee, 'noflee': judge_noflee,
           'herb': judge_heal, 'spell': judge_heal, 'levelup': judge_levelup, 'levelup2': judge_levelup,
           'lose': judge_lose, 'boss': judge_boss, 'monflee': judge_monflee, 'nosong': judge_nosong,
-          'growth': judge_growth, 'growth2': judge_growth, 'party2': judge_party, 'party2spell': judge_party_spells}
+          'growth': judge_growth, 'growth2': judge_growth, 'party2': judge_party, 'party2spell': judge_party_spells,
+          'party2piorimu': judge_brey_spell, 'party2hyadain': judge_brey_spell}
 
 
 def distribution(summaries):
@@ -620,6 +658,13 @@ SCENES = {
     'party2spell': {'what': '2장 일행: 크리프트 ホイミ·브라이 ヒャド(1레벨 합류 기록의 주문)', 'group': [(0x00, 1)],
                     'monsters': {0x00: {'hp': 2000, 'defense': 255, 'attack': 0}}, 'chapter': 1, 'party': 'ch2',
                     'hero': {'max_hp': 100, 'hp': 30}, 'turn': 'spell3', 'then': ('flee3', 1)},
+    # 브라이가 칸 0~9 를 배운 기록(BREY_MP). 무리 셋이 모두 맞는지 보려고 둘로 둔다
+    'party2piorimu': {'what': '2장 일행: 브라이 ピオリム(DQ5 1D 칸)으로 일행 전투 すばやさ', 'group': [(0x00, 1)],
+                      'monsters': {0x00: {'hp': 2000, 'defense': 255, 'attack': 0}}, 'chapter': 1, 'party': 'ch2',
+                      'brey': 10, 'turn': 'piorimu3', 'then': ('flee3', 1)},
+    'party2hyadain': {'what': '2장 일행: 브라이 ヒャダイン(DQ5 38 칸)으로 몬스터 모두', 'group': [(0x00, 2)],
+                      'monsters': {0x00: {'hp': 2000, 'defense': 255, 'attack': 0}}, 'chapter': 1, 'party': 'ch2',
+                      'brey': 10, 'turn': 'hyadain3', 'then': ('flee3', 1)},
 }
 # 알려진 문제를 재는 장면이라 기본 묶음(가드)에 넣지 않는다: --scenes 로 고른다
 KNOWN_ISSUES = ()
@@ -646,6 +691,12 @@ def scene_slot(rom_path, rom, scene):
     if scene.get('party') == 'ch2':
         for a, v in chapter2_party(rom):
             slot.poke(a, v)
+    if scene.get('brey'):
+        # 브라이(일행 칸 2) 전투 칸 0~n-1 을 배우고 MP 를 넉넉히. 필드 칸은 그대로
+        mate = HERO + 2 * RECORD
+        slot._put(mate + SPELLS, slot._get(mate + SPELLS, 3) & 0xFF | ((1 << scene['brey']) - 1) << 8, 3)
+        slot._put(mate + MP, BREY_MP, 2)
+        slot._put(mate + MAX_MP, BREY_MP, 2)
     hero = dict(scene.get('hero', {}))
     kind = slot.block[0x40]
     level = scene['growth'][0] if 'growth' in scene else hero.pop('level', None)
@@ -771,6 +822,21 @@ def expectations(rom, scene_name, slot):
         exp['curve'] = growth_expect(scene_name, exp['level'])
     if scene_name == 'party2':
         exp['members'] = party_expect(rom, exp['level'])
+    if scene_name in ('party2piorimu', 'party2hyadain'):
+        import dq4ch2event as ev2
+        import dq4data
+        import dq4party
+        spell = 'ピオリム' if scene_name == 'party2piorimu' else 'ヒャダイン'
+        n = next(k for k, v in dq4party.BORROWED_SPELLS.items() if v[0] == spell)
+        prg, r = dq4party._fc(ROOT / 'rom' / 'dq4.nes'), dq4party._dq5(ROOT / 'rom' / 'dq5.sfc')
+        battle = dq4party.plan(prg, r, dq4party.RECRUITS[ev2.RECRUITS[1]['person']])['battle']
+        if battle.index(n) != BREY_SLOTS[spell] or ev2.RECRUITS[1]['person'] != 0x05:
+            raise ValueError(f'브라이 전투 목록 칸 {battle.index(n)}, 차례 입력은 {BREY_SLOTS[spell]}')
+        exp['spell'], exp['cost'] = spell, dq4data.spell_mp(prg, dq4party.BORROWED_SPELLS[n][1])[0]
+        exp['base_speeds'] = [slot._get(HERO + k * RECORD + AGI) for k in range(3)]
+        base, width = dq4party.FC_HYADAIN
+        exp['damage'] = (base, base + width - 1)
+        exp['monsters'] = sum(c for _, c in scene['group'])
     if scene_name == 'party2spell':
         exp['amount'], exp['hoimi_cost'] = original_hoimi()
         exp['max_hp'] = slot.hero(MAX_HP, 2)
@@ -917,7 +983,7 @@ class Run:
         w.apply()
         sentinel = bytes(ev.BOSS_MONSTERS) if boss else group_sentinel(scene['group'])
         s = {'seed': seed, 'map_song': self.map_song, 'continue_song': self.continue_song, 'start': None, 'end': None, 'turns': 0, 'hits': [],
-             'heals': [], 'songs': [], 'casts': [], 'mon_drops': []}
+             'heals': [], 'songs': [], 'casts': [], 'mon_drops': [], 'speeds': []}
         before = self.snapshot()
         t0 = c.n
         # 전투 붙이기
@@ -1003,6 +1069,9 @@ class Run:
             elif len(now) > 1 and s['heals'] and s['heals'][-1].get('caster_mp_drop') == 0 and now[1][1] < party[1][1]:
                 s['heals'][-1]['caster_mp_drop'] = party[1][1] - now[1][1]
             party = now
+            speeds = [c.rd(PARTY_SLOTS + k * PARTY_SLOT + 4) for k in range(len(now))]
+            if seen_window and (not s['speeds'] or s['speeds'][-1][1] != speeds):
+                s['speeds'].append((c.n - s['start'], speeds))
             if 'slot_flags' not in s and seen_window:
                 s['slot_flags'] = [c.rd(MONSTER_SLOTS + k * MONSTER_SLOT + 0xA) for k in range(4)]
             # 살아 있는(+A bit6) 몬스터가 없거나(빈 목록 포함) 일행 HP 가 모두 0. 전투 창이 뜨기 전에는 보지 않는다

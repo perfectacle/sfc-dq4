@@ -382,7 +382,7 @@ LIBDIR=$LIBDIR SHOT_DIR=... STATE=work/sn/warp/st.mss POKE=... PRE="wait:30,a:8,
 
 ### 한글 표
 
-`sfc/dq4/tools/dq4windowtext.py` 가 롬의 이름 표(`21:955D`, `BRK 88 2B`)를 **일본어 이름**으로 `nds/dq4/tables/adopt.tsv` 의 DS 일본어와 잇습니다(가타카나·히라가나, 빈칸 차이는 무시). 번호로 잇지 않는 것은 DQ4 데이터를 옮겨 번호가 바뀌어도 그대로 쓰기 위해서입니다. 맞지 않는 DQ5 고유 이름은 표에 넣지 않아 가나로 찍힙니다. DS 가 FC 이름을 바꾼 줄(근거 칸 「FC:いばらのむち」 등)은 FC 이름으로도 찾습니다. 롬의 이름이 FC 이름과 같기 때문입니다(いばらのムチ → 가시 채찍, モーニングスター → 모닝스타, ブーメラン → 부메랑). FC 물건에 빌려준 DQ5 물건 자리(`dq4itemport.BORROWED`, [가게](dq4-environment-format.md#물건-값과-빌린-자리))는 번호로 덮습니다.
+`sfc/dq4/tools/dq4windowtext.py` 가 롬의 이름 표(`21:955D`, `BRK 88 2B`)를 **일본어 이름**으로 `nds/dq4/tables/adopt.tsv` 의 DS 일본어와 잇습니다(가타카나·히라가나, 빈칸 차이는 무시). 번호로 잇지 않는 것은 DQ4 데이터를 옮겨 번호가 바뀌어도 그대로 쓰기 위해서입니다. 맞지 않는 DQ5 고유 이름은 표에 넣지 않아 가나로 찍힙니다. DS 가 FC 이름을 바꾼 줄(근거 칸 「FC:いばらのむち」 등)은 FC 이름으로도 찾습니다. 롬의 이름이 FC 이름과 같기 때문입니다(いばらのムチ → 가시 채찍, モーニングスター → 모닝스타, ブーメラン → 부메랑). FC 물건에 빌려준 DQ5 물건 자리(`dq4itemport.BORROWED`, [가게](dq4-environment-format.md#물건-값과-빌린-자리))는 번호로 덮습니다. FC 주문에 빌려준 DQ5 주문 칸(`dq4party.BORROWED_SPELLS`, 1D 피오림·38 햐다인)도 번호로 덮습니다.
 
 | 이름 표 | 이름 수 | 맞은 수 |
 | --- | --- | --- |

@@ -684,7 +684,7 @@ def build(rom, dq5, dq4, work, prologue=True, chapter2=False):
     (work / 'growth.dq5patch.json').write_text(json.dumps(
         {"format": "dq5patch/1", "name": "dq4-growth", "writes": dq4growth.writes(original, dq4)}, ensure_ascii=False))
     (work / 'party.dq5patch.json').write_text(json.dumps(
-        {"format": "dq5patch/1", "name": "dq4-party", "writes": dq4party.equip_writes(dq5, dq4)}, ensure_ascii=False))
+        {"format": "dq5patch/1", "name": "dq4-party", "writes": dq4party.writes(dq5, dq4)}, ensure_ascii=False))
     monsters = dq4ch1event.monster_doc(ines.prg(dq4.read_bytes()))
     more = dq4ch2event.monster_entries(ines.prg(dq4.read_bytes()))
     if more:

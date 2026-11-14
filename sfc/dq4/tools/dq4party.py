@@ -29,6 +29,22 @@ DQ5, DQ4 = ROOT / 'rom' / 'dq5.sfc', ROOT / 'rom' / 'dq4.nes'
 RECRUITS = {0x09: dq4growth.FC_KIRYL, 0x05: dq4growth.FC_BREY}
 SPELL_NAMES, ITEM_NAMES = 3, 5   # dq5text 이름 표 번호
 SPELL_LAST = 0x38                # 주인공 쪽 주문 01~38(dq5-data-format 「주문과 행동」)
+# DQ5 주인공 쪽 주문 가운데 FC 에 없는 두 칸(マホキテ·シャナク)을 FC 주문에 빌려준다. 몬스터 쪽(39~65)은 몬스터가 같은
+# 번호를 쓰면 전투가 멈추므로 빌리지 않는다. 이 해킹에서 두 칸을 쓰던 것은 ダークシールド(1D)뿐이고 그 물건은 나오지 않는다
+# 번호: (FC 이름, FC 주문 번호(dq4data.spell_mp 의 i), 표 값을 베낄 DQ5 주문)
+BORROWED_SPELLS = {0x38: ('ヒャダイン', 0x0B, 0x0C), 0x1D: ('ピオリム', 0x23, 0x22)}
+HYADAIN, PIORIMU = 0x38, 0x1D
+HYADAIN_AMOUNT = 0x1C            # 27:8071 의 쓰지 않는 양 칸(바탕 0, 폭 0)
+FC_HYADAIN = (60, 21)            # FC 일행 ヒャダイン 바탕·폭(13:$B74D 칸 0B), 값 = 바탕 + 0~폭-1
+ICE = 0x53                       # 내성 종류(ヒャド 계열)
+BEHOMARA = 0x2A
+# dq5learnwrite 는 필드 목록에 2A 를 받지 않는다(원래 롬에서 필드 처리기가 제자리에서 돔). 그 자리에 크리프트가 배우지
+# 않는 필드 주문을 두고 패치를 얹은 뒤 apply_recruits 가 2A 로 바꾼다
+FIELD_PLACEHOLDER = 0x36         # トラマナ
+# 습득 표(23:B819~BD52)는 브라이의 두 주문을 더하면 4바이트 넘친다. DQ4 의 몬스터 동료는 호이민뿐이고 그 기록은 레벨이
+# 오르지 않으므로(dq4ch1event.companion_record) DQ5 몬스터 동료 표 하나(41, 8항목)를 비워 자리를 만든다. 호이민(ホイミスライム)은
+# 표 5 다
+SPARE_MONSTER = 41
 RECORD_SPELLS = 0x23             # 일행 기록의 배운 주문 비트 3바이트. 필드 칸 n = bit n, 전투 칸 n = bit 8 + n
 # FC 와 DQ5 가 같은 물건을 다르게 적은 것
 ITEM_ALIASES = {'いかづちのつえ': 'いかずちのつえ'}
@@ -69,8 +85,24 @@ def _names(rom, table, count):
 
 
 def dq5_spells(rom):
-    """{가타카나 이름: DQ5 주문 번호}(주인공 쪽 01~38)."""
-    return {_kata(n): i for i, n in enumerate(_names(rom, SPELL_NAMES, SPELL_LAST + 1)) if i}
+    """{가타카나 이름: DQ5 주문 번호}(주인공 쪽 01~38, BORROWED_SPELLS 칸은 빌려준 FC 이름)."""
+    names = _names(rom, SPELL_NAMES, SPELL_LAST + 1)
+    for n, (fc_name, _, _) in BORROWED_SPELLS.items():
+        names[n] = fc_name
+    return {_kata(n): i for i, n in enumerate(names) if i}
+
+
+def field_spells():
+    """필드 목록에 둘 수 있는 DQ5 주문: dq5learnwrite 가 받는 것과 이 모듈이 처리기를 단 ベホマラー."""
+    import dq5learnwrite
+    return set(dq5learnwrite.FIELD_SPELLS) | {BEHOMARA}
+
+
+def korean_names():
+    """{주문 번호: 한글 이름}: 빌려준 칸(롬의 이름 표에는 아직 DQ5 이름이 있어 번호로 덮는다)."""
+    import dq4windowtext
+    adopted = dq4windowtext.adopted(dq4windowtext.KINDS[SPELL_NAMES][0])
+    return {n: adopted[dq4windowtext.kana_key(name)] for n, (name, _, _) in BORROWED_SPELLS.items()}
 
 
 def learn_level(b):
@@ -84,7 +116,6 @@ def plan(prg, rom, who):
     'start': 1레벨 배운 주문 비트(24비트), 'dropped': [(목록, FC 이름, 까닭)], 'fc': {DQ5 목록 자리: FC 주문 번호}}."""
     import dq4data
     import dq4text
-    import dq5learnwrite
     names = [_kata(dq4text.text(n)) for n in dq4data.name_list(prg, 'spell')]
     ids = dq5_spells(rom)
     fc_battle, fc_field = dq4data.spell_menus(prg, who)
@@ -96,7 +127,7 @@ def plan(prg, rom, who):
             name = names[sp + 1]
             if name not in ids:
                 out['dropped'].append((kind, name, 'DQ5 에 없는 주문'))
-            elif kind == 'field' and ids[name] not in dq5learnwrite.FIELD_SPELLS:
+            elif kind == 'field' and ids[name] not in field_spells():
                 out['dropped'].append((kind, name, 'DQ5 필드에서 쓰지 못함'))
             else:
                 out[kind].append(ids[name])
@@ -150,9 +181,33 @@ def learn_doc(dq5=DQ5, dq4=DQ4):
     doc = dq4ch1event.learn_doc()
     for person, who in RECRUITS.items():
         p = plan(prg, rom, who)
+        if FIELD_PLACEHOLDER in p['field']:
+            raise ValueError(f'사람 {person:02X} 필드 목록에 자리 표시 주문 {FIELD_PLACEHOLDER:02X} 가 이미 있음')
+        field = [FIELD_PLACEHOLDER if n == BEHOMARA else n for n in p['field']]
         doc['characters'].append({'kind': 'person', 'index': person, 'learn': p['learn'],
-                                  'field': p['field'], 'battle': p['battle']})
+                                  'field': field, 'battle': p['battle']})
+    doc['characters'].append({'kind': 'monster', 'index': SPARE_MONSTER, 'learn': []})
     return doc
+
+
+FIELD_LISTS = 0x23BD53           # [사람*2] → 뱅크 23 의 [개수][주문 …](21:9C92)
+
+
+def apply_field_lists(data, dq5=DQ5, dq4=DQ4):
+    """dq5learnwrite 패치를 얹은 롬에서 learn_doc 이 둔 자리 표시 주문을 ベホマラー 로. 목록마다 자리 표시가 plan 의
+    ベホマラー 수만큼이어야 한다."""
+    d = bytearray(data)
+    prg, rom = _fc(dq4), _dq5(dq5)
+    for person, who in RECRUITS.items():
+        want = plan(prg, rom, who)['field']
+        o = dq4growth.lorom(FIELD_LISTS + person * 2)
+        at = dq4growth.lorom(0x230000 | d[o] | d[o + 1] << 8)
+        n = d[at]
+        got = list(d[at + 1:at + 1 + n])
+        if [FIELD_PLACEHOLDER if s == BEHOMARA else s for s in want] != got:
+            raise SystemExit(f'사람 {person:02X} 필드 목록이 예상과 다름: {bytes(got).hex(" ")}')
+        d[at + 1:at + 1 + n] = bytes(want)
+    return bytes(d)
 
 
 def start_spells(dq5=DQ5, dq4=DQ4):
@@ -173,7 +228,7 @@ def apply_recruits(data, dq5=DQ5, dq4=DQ4):
         if d[o] != r['person'] or any(d[o + RECORD_SPELLS:o + RECORD_SPELLS + 3]):
             raise SystemExit(f"{r['name']} 합류 기록이 예상과 다름: {bytes(d[o:o + 42]).hex(' ')}")
         d[o + RECORD_SPELLS:o + RECORD_SPELLS + 3] = spells[r['person']]
-    return bytes(d)
+    return apply_field_lists(bytes(d), dq5, dq4)
 
 
 def equip_table(prg, rom):
@@ -223,6 +278,170 @@ def equip_writes(dq5=DQ5, dq4=DQ4, at=EQUIP_AT):
     return [{'at': cpu(at), 'hex': hexs(data), 'orig': hexs(bytes(len(data))), 'note': '2장 일행 장비: FC 장비 비트 표와 훅'},
             {'at': cpu(EQUIP_HOOK), 'hex': hexs(call), 'orig': hexs(EQUIP_ORIG), 'note': '장비 판정(21:A557)을 2장 일행 훅으로'}]
 
+
+
+SPELL_AT = 0x57CF40              # 장비 표 뒤 빈 자리, 성장 표(dq4growth.GROWTH_AT) 앞
+BANK20_AT = 0x20FFD9             # 뱅크 20 끝 빈 자리(39바이트). 처리·적용 루틴은 뱅크 20 의 JSR 표라 여기서 넘긴다
+FIELD_AT = 0x11FFA0              # 뱅크 11 끝 빈 자리(96바이트). 필드 주문 표(11:8024)도 뱅크 안 JSR
+# 행동 번호로 색인하는 표(dq5spellgrow.WIDE·MENU_MP·FX 와 같은 자리)
+FLAGS, EXECUTOR, EXECUTOR_ALT, HANDLER = 0x268765, 0x268865, 0x268565, 0x20B7F9
+MENU_MP, FX_PARTY, FX_MONSTER = 0x219BB4, 0x268BE0, 0x268C75
+AMOUNTS, AI_ACTIONS = 0x278071, 0x21BC86   # 양 [바탕][폭], 작전 AI 행동 레코드 5바이트
+# 스카라·스쿠르토의 적용(20:F6BF: $10EC 를 수비력 필드 15 에 더하고 메시지 08E). 첫 JSR $A0A1 을 뱅크 20 스텁으로
+# 돌려 행동이 ピオリム 이면 같은 꼴로 전투 すばやさ(필드 1A, FF 에서 멈춤)에 더하고 메시지 0F4 를 띄운다
+APPLY_HOOK, APPLY_ORIG, APPLY_NEXT = 0x20F6BF, bytes.fromhex('20 a1 a0'), 0x20F6C2
+TAIL_WAIT, TAIL_RTS = 0x20F6E1, 0x20F6E4    # 20:F6BF 끝의 JSR $9DD6 / RTS 와 RTS
+B307 = 0x20B307                  # 주문 피해(LDX #내성 / LDA #양 번호 뒤)
+FIELD_TABLE = 0x118024           # 필드 주문 처리기 [(주문 - 27)*2], 2A 는 제자리에서 도는 8022
+FIELD_HANG = 0x8022
+# 필드 처리기가 쓰는 뱅크 11 루틴(キアリク 11:86C7·ホイミ 11:84FA 와 같은 차례)
+MP_CHECK, MP_TAKE, CAST, NO_MP, HEALED = 0x87DF, 0x87F4, 0x87C1, 0x856E, 0x8557
+PARTY_LAST = 0x04D97B            # JSL: 일행 수 - 1
+RAND = 0x00953A                  # JSL: 0 ~ A-1
+FC_BEHOMARA = (75, 21)           # FC ベホマラー 양(13:$B7E3, ベホイミ 와 같은 칸)
+
+
+def _cpu(x):
+    return f'{x >> 16:02X}:{x & 0xFFFF:04X}'
+
+
+def _hex(b):
+    return bytes(b).hex(' ').upper()
+
+
+def spell_code(at=SPELL_AT, bank20=None):
+    """ピオリム 의 처리 루틴(양 = min(기록 すばやさ, 255 - 전투 すばやさ))·적용 루틴과 ヒャダイン 처리 루틴. 뱅크 20 에서
+    JML 로 들어와 뱅크 20 으로 JML 해 돌아간다. 메시지 BRK(A4·16)는 부른 뱅크를 데이터 뱅크로 두고 돌아 뱅크 57 에서
+    부르면 전투가 멈췄다(필드 BRK 89 는 됨). 그래서 메시지는 뱅크 20 의 bank20['message'] 에서 띄운다."""
+    bank20 = bank20 or {'message': TAIL_WAIT}
+    a = _Asm(at)
+    long = lambda op, x: a.b(op, *x.to_bytes(3, 'little'))  # noqa: E731
+    a.label('handler').b(0xE2, 0x30, 0xAD, 0xF6, 0x10).rel(0x30, 'h_done')
+    a.b(0x29, 0x0F, 0x85, 0x42)
+    a.b(0x00, 0x89, 0x80, 0x19, 0xA5, 0x46, 0x85, 0x71)       # 전투 すばやさ → $71
+    a.b(0x00, 0x89, 0x80, 0x17)                               # 기록 すばやさ → $46
+    a.b(0xA9, 0xFF, 0x38, 0xE5, 0x71, 0xC5, 0x46).rel(0x90, 'h_store').b(0xA5, 0x46)
+    a.label('h_store').b(0x8D, 0xEC, 0x10, 0x9C, 0xED, 0x10)
+    a.label('h_done')
+    long(0x5C, TAIL_RTS)
+    # 20:A0A1·A08D 와 같게 $43 과 $F6 에 양, 그다음 20:F6C5 와 같은 꼴
+    a.label('apply').b(0xC2, 0x30, 0x64, 0x44, 0xAD, 0xEC, 0x10, 0x85, 0x43, 0x64, 0xF7, 0x85, 0xF6, 0xE2, 0x30)
+    a.b(0xAD, 0xF6, 0x10, 0x85, 0xF5).rel(0x30, 'a_out').b(0x85, 0x42)
+    a.b(0x00, 0x89, 0x80, 0x1A)
+    long(0x5C, bank20['message'])
+    a.label('a_out')
+    long(0x5C, TAIL_RTS)
+    a.label('hyadain').b(0xE2, 0x30, 0xA2, ICE, 0xA9, HYADAIN_AMOUNT)   # ヒャダルコ(20:B13F)와 같은 꼴
+    long(0x5C, B307)
+    return a.assemble()
+
+
+def bank20_code(far, at=BANK20_AT):
+    """적용 훅 스텁, ピオリム·ヒャダイン 처리 루틴 스텁, ピオリム 메시지(0F4, 20:F6DA 의 BRK 둘과 같은 꼴)."""
+    a = _Asm(at)
+    long = lambda op, x: a.b(op, *x.to_bytes(3, 'little'))  # noqa: E731
+    a.label('apply').b(0xAD, 0xF7, 0x10, 0xC9, PIORIMU).rel(0xD0, 'apply_dq5')
+    long(0x5C, far['apply'])
+    a.label('apply_dq5').b(0x20, *APPLY_ORIG[1:], 0x4C, *(APPLY_NEXT & 0xFFFF).to_bytes(2, 'little'))
+    a.label('piorimu')
+    long(0x5C, far['handler'])
+    a.label('hyadain')
+    long(0x5C, far['hyadain'])
+    a.label('message').b(0x00, 0xA4, 0xF4, 0x00, 0x16, 0x46, 0x04, 0x4C, *(TAIL_WAIT & 0xFFFF).to_bytes(2, 'little'))
+    data, labels = a.assemble()
+    if at + len(data) > 0x210000:
+        raise ValueError('뱅크 20 스텁이 뱅크 끝을 넘음')
+    return data, labels
+
+
+def field_code(mp, at=FIELD_AT):
+    """필드 ベホマラー: キアリク(11:86C7)처럼 일행을 돌며 죽지 않은 사람(필드 3E bit7 꺼짐)의 HP 를 FC 양만큼 올리고
+    ホイミ 의 메시지(11:8557)를 띄운다."""
+    base, width = FC_BEHOMARA
+    a = _Asm(at)
+    w = lambda op, x: a.b(op, x & 0xFF, x >> 8 & 0xFF)  # noqa: E731
+    a.label('behomara').b(0xA9, mp)
+    w(0x20, MP_CHECK)
+    a.rel(0x90, 'ok')
+    w(0x4C, NO_MP)
+    a.label('ok').b(0x22, *PARTY_LAST.to_bytes(3, 'little'), 0x8D, 0x52, 0x0B)
+    w(0x20, CAST)
+    a.b(0xA9, mp)
+    w(0x20, MP_TAKE)
+    a.b(0x9C, 0x50, 0x0B)
+    a.label('loop').b(0xAD, 0x50, 0x0B, 0x85, 0xF5, 0x85, 0x42, 0x64, 0x43, 0x00, 0x89, 0x80, 0x3E, 0x24, 0x46)
+    a.rel(0x30, 'next')
+    a.b(0xA9, width, 0x22, *RAND.to_bytes(3, 'little'), 0x18, 0x69, base, 0x85, 0x43, 0x64, 0x44)
+    a.b(0xAD, 0x50, 0x0B, 0x85, 0x42, 0x00, 0x89, 0x80, 0x01)   # HP 필드 01 에 더함
+    a.b(0x00, 0x97, 0x13)
+    w(0x20, HEALED)
+    a.label('next').b(0xEE, 0x50, 0x0B, 0xCE, 0x52, 0x0B).rel(0x10, 'loop')
+    a.b(0x00, 0x0E, 0x00, 0x95, 0xFF, 0x60)
+    data, labels = a.assemble()
+    if at + len(data) > 0x120000:
+        raise ValueError('필드 ベホマラー 가 뱅크 11 끝을 넘음')
+    return data, labels
+
+
+def spell_writes(dq5=DQ5, dq4=DQ4):
+    """dq5patch/1 쓰기: 빌린 주문 칸 둘(ヒャダイン·ピオリム)과 필드 ベホマラー."""
+    import dq4data
+    rom, prg = _dq5(dq5), _fc(dq4)
+    raw = rom.d
+    far_labels = spell_code()[1]
+    stub, stub_labels = bank20_code(far_labels)
+    far, far_labels2 = spell_code(bank20=stub_labels)
+    if far_labels2 != far_labels:
+        raise ValueError('주문 코드 자리가 두 번 셈에서 다름')
+    if SPELL_AT < EQUIP_AT + len(equip_code(equip_table(prg, rom))[0]) or SPELL_AT + len(far) > dq4growth.GROWTH_AT:
+        raise ValueError('주문 코드 자리가 장비 표나 성장 표와 겹침')
+    out = []
+
+    def put(addr, new, note):
+        o = dq4growth.lorom(addr)
+        old = raw[o:o + len(new)] if o < len(raw) else bytes(len(new))   # 늘린 뱅크(57)는 빈 자리
+        out.append({'at': _cpu(addr), 'hex': _hex(new), 'orig': _hex(old), 'note': note})
+
+    def word(table, n):
+        o = dq4growth.lorom(table + 2 * n)
+        return raw[o:o + 2]
+
+    def byte(table, n):
+        return bytes((raw[dq4growth.lorom(table + n)],))
+
+    put(SPELL_AT, far, 'ピオリム 처리·적용 루틴')
+    put(BANK20_AT, stub, 'ピオリム·ヒャダイン 뱅크 20 스텁')
+    put(APPLY_HOOK, bytes((0x4C, *(stub_labels['apply'] & 0xFFFF).to_bytes(2, 'little'))), '20:F6BF 적용을 스텁으로')
+    handler = {HYADAIN: stub_labels['hyadain'], PIORIMU: stub_labels['piorimu']}
+    for n, (name, fc, src) in sorted(BORROWED_SPELLS.items()):
+        mp, rng, enemy = dq4data.spell_mp(prg, fc)
+        put(FLAGS + n, bytes((mp | rng << 5 | enemy << 7,)), f'{name} MP·범위(FC)')
+        put(EXECUTOR + 2 * n, word(EXECUTOR, src), f'{name} 실행 루틴({src:02X} 와 같음)')
+        put(EXECUTOR_ALT + 2 * n, word(EXECUTOR_ALT, src), f'{name} 둘째 실행 루틴')
+        put(HANDLER + 2 * n, (handler[n] & 0xFFFF).to_bytes(2, 'little'), f'{name} 처리 루틴')
+        put(MENU_MP + n, bytes((mp,)), f'{name} 주문 창 MP')
+        put(FX_PARTY + n, byte(FX_PARTY, src), f'{name} 연출(우리 편)')
+        put(FX_MONSTER + n, byte(FX_MONSTER, src), f'{name} 연출(몬스터)')
+    base, width = FC_HYADAIN
+    put(AMOUNTS + 2 * HYADAIN_AMOUNT, bytes((base, width)), 'ヒャダイン 양(FC 일행 값)')
+    # 작전 AI: ヒャダイン 은 マヒャド 레코드에 값(양 가운데)·MP·범위 전체를, ピオリム 은 고르지 않는 레코드(11 00 30)
+    mp = dq4data.spell_mp(prg, BORROWED_SPELLS[HYADAIN][1])[0]
+    o = dq4growth.lorom(AI_ACTIONS + 5 * BORROWED_SPELLS[HYADAIN][2])
+    rec = bytearray(raw[o:o + 5])
+    rec[1], rec[3], rec[4] = base + (width - 1) // 2, mp, 0x40 | ICE - 0x50
+    put(AI_ACTIONS + 5 * HYADAIN, bytes(rec), 'ヒャダイン 작전 AI')
+    put(AI_ACTIONS + 5 * PIORIMU, bytes((0x11, 0x00, 0x30, dq4data.spell_mp(prg, BORROWED_SPELLS[PIORIMU][1])[0], 0xFF)),
+        'ピオリム 작전 AI(고르지 않음)')
+    field_mp = dq4data.spell_mp(prg, 0x2C)[0]
+    fdata, flabels = field_code(field_mp)
+    put(FIELD_AT, fdata, '필드 ベホマラー')
+    put(FIELD_TABLE + 2 * (BEHOMARA - 0x27), (flabels['behomara'] & 0xFFFF).to_bytes(2, 'little'), '필드 주문 표 2A')
+    return out
+
+
+def writes(dq5=DQ5, dq4=DQ4):
+    """dq5patch/1 쓰기 전부: 장비 훅·표, 빌린 주문 칸, 필드 ベホマラー."""
+    return equip_writes(dq5, dq4) + spell_writes(dq5, dq4)
 
 def main():
     import argparse
