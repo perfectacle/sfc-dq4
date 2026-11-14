@@ -52,8 +52,8 @@ SLOTS = {
                lists='ch2_ending_', message_bytes=8192, talk_bytes=8192, list_bytes=8192),
     'P': Slot('동료 대화(はなす)', 'dq4ch2partytalk', (0x5C8000, 0x5CC000), flags=(0x6D, 0x6E), byte_flags=(0x6E,),
               scripts=(('10:DA05', tuple(range(8))),), lists='ch2_party_',
-              message_bytes=4096, talk_bytes=1024, list_bytes=0,
-              notes=('대사 몫이 모자라면 메시지 덩어리 셋째 자리를 예약표 PR 로 먼저 잡는다',)),
+              message_bytes=24576, talk_bytes=1024, list_bytes=0,
+              notes=('NDS 동료 대화 대사가 둘째 자리를 넘어 메시지 덩어리 셋째 자리 71:A000~ 를 함께 쓴다',)),
 }
 
 # 모든 사건이 함께 쓰는 것(dq4ch2battle): 마지막으로 건 사건 전투를 이겼는지. 전투마다 다시 쓴다
