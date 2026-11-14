@@ -364,6 +364,26 @@ needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출�
 groups = ["ch1-build", "ch1-walk"]
 
 [[check]]
+name = "dq4-signs"
+why = "필드 팻말 5개와 옮긴 맵의 실내 팻말 7개(3E·40·42·45 그룹)를 이웃 블록마다 「はなす」·「しらべる」 로 읽어, 아래·옆에서는 136 뒤 그 팻말 글, 위에서는 뒷면 137·138 인지 본다. 실내 팻말은 블록 위층 속성 97(dq4environmentrom.FURNITURE)과 실내 팻말 표 1E:F12F 가 함께 있어야 읽히고, 고치기 전에는 「그 방향에는 아무도 없다」(129)·12B 12C 였다"
+paths = [
+  "sfc/dq4/tools/dq4signs.py",
+  "sfc/dq4/tools/dq4signcheck.py",
+  "sfc/dq4/tools/dq4freshstate.py",
+  "sfc/dq4/tools/dq4groupcheck.py",
+  "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/lua/dq4shipstate.lua",
+  "sfc/dq5/tools/dq5progresscheck.py",
+  "sfc/dq5/tools/lua/dq5battle.lua",
+  "sfc/dq5/tools/lua/dq5chestcheck.lua",
+  "sfc/dq5/tools/lua/dq5progresscheck.lua",
+  "sfc/dq5/tools/lua/dq5warptrace.lua",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && rm -rf work/signcheck && uv run --locked python sfc/dq4/tools/dq4signcheck.py --rom work/ch2/dq4-ch1-full.sfc --out work/signcheck --jobs 4"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(dq4freshstate 캐시)"]
+groups = ["ch1-build", "ch1-walk"]
+
+[[check]]
 name = "dq4-ch2-npc"
 why = "2장 그룹(3D·45) 인물을 2장 flag 를 켠 채 말 걸어 첫 메시지·가게 품목·인물 표를 보고, 사건 뒤 상태(왕이 아픔·나음·우승, --states)의 flag 를 더 켜 말이 바뀐 인물을 본다. 순간이동은 TO 한 셀 아래에 내려, 위에서 말 거는 장면과 맨 아래 줄 인물 장면 23개가 「그 방향에는 아무도 없다」·필드로 나감으로 실패했었다"
 paths = [

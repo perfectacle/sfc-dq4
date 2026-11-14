@@ -369,8 +369,9 @@ class UpperLayerHeadTest(unittest.TestCase):
         # 2B:B815 gives the head row of a person standing right below an upper-layer block OAM priority 2 (under
         # the block) unless the block has +0 bit6, as DQ5's chest and two pot blocks do.
         import dq4environmentrom as rom
+        # 상자·つぼ·팻말(실내 팻말 속성 97 은 위층 +7 에만 읽힘, dq4signs)
         heads = [rom.CHEST_HEAD] + [h for h in rom.FURNITURE.values() if h[1] & rom.UPPER]
-        self.assertEqual(len(heads), 2)
+        self.assertEqual(len(heads), 3)
         for head in heads:
             self.assertTrue(head[0] & rom.FRONT, head)
 
