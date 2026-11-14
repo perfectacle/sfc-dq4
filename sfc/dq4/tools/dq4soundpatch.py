@@ -535,6 +535,7 @@ LOAD_EXIT_CLI = CODE + 0x7C0       # 00:CD5B(출구 뒤 NMI 끄는 루틴 CD48 �
 LOAD_NMI_ON = CODE + 0x7A0         # 00:9676 STA $4200(NMI 켬) 대신: 걸려 있는 IRQ 를 지움
 LOAD_GATE = 0x2BB741               # C169(SPC 명령 보내기) 첫머리 대신: NMI 가 꺼져 있으면 곡 틀기(01)를 미룬다
 LOAD_POLL = 0x2BB7D0               # C298 의 응답 판정. NMI 선점 범위(00:8004 발판)에 든다
+LOAD_IDLE_SITE = 0x2BBED2          # 소리 일 대기 루프(BECE: PHP / JSR BED5 / PLP / BRA BECE)의 PLP / BRA
 LOAD_STUB = 0x008000               # IRQ 벡터 받침(JML LOAD_IRQ)과 NMI 선점 범위 발판. 원래 0 이고 부르는 곳 없음
 LOAD_FRAME_ENTER = 0x0085E5        # 원래 코드 JSR 969A / RTL: 코루틴으로 넘어갔다가 양보하면 돌아옴
 LOAD_LINES = 8                     # IRQ 사이 줄 수. 줄마다 걸면 코루틴 전환이 끝나기 전에 다음 IRQ 가 와 늘 취소됐고, 3줄이면 처리기가 CPU 를 절반 먹어 검은 화면이 75프레임 늘었다.
@@ -962,19 +963,19 @@ def load_pump_code(lines=LOAD_LINES):
     poll[pea:pea + 2] = ((LOAD_POLL & 0xFFFF) + cont).to_bytes(2, 'little')
     poll_cont = (LOAD_POLL & 0xFFFF) + cont
     # 곡 틀기는 자료를 다 올린 뒤 다시 보내는 01 이다. 불러오는 동안 보내면 화면이 밝아지기 전에 곡이 울렸다.
-    yield_frame = h('08 C2 30 8B 0B 48 DA 5A A9 00 00 5B E2 20 48 AB 5C EC 88 00')
-    gate_items = [
-        ('label', 'top'), h('BD 95 1D 29 3F 00 C9 01 00'), ('b', 0xD0, 'done'),
-        h('A5 19 29 80 00'), ('b', 0xF0, 'done'),
-        h('4B F4 00 00') + yield_frame,
-        ('label', 'cont'), ('b', 0x80, 'top'),
-        ('label', 'done'), h('4C 2F C3'),
-    ]
-    gate = bytearray(_asm(gate_items))
-    gate_cont_off = len(gate) - 5  # cont: BRA top(2) 뒤 done: JMP C32F(3)
-    gate_cont = (LOAD_GATE & 0xFFFF) + gate_cont_off
-    pea = gate.index(h('4B F4 00 00')) + 2
-    gate[pea:pea + 2] = gate_cont.to_bytes(2, 'little')
+    # 양보(인터럽트 틀을 쌓고 NMI 의 코루틴 저장 00:88EC 로)는 응답 판정의 것을 같이 쓴다(PHK / PEA 돌아올 곳 / JMP).
+    frame = (LOAD_POLL + pea + 2) & 0xFFFF
+    gate_cont = (LOAD_GATE & 0xFFFF) + 25
+    idle_loop = (LOAD_GATE & 0xFFFF) + 44
+    gate = (h('BD 95 1D 29 3F 00 C9 01 00 D0 10 A5 19 29 80 00 F0 09 4B F4') + gate_cont.to_bytes(2, 'little')
+            + h('4C') + frame.to_bytes(2, 'little') + h('80 E5 4C 2F C3'))
+    # 대기 루프(BECE)의 PLP / BRA 대신. IRQ 처리기가 넘겨 준 코루틴(예: 양보하지 않는 응답 기다림 2B:C373 에 서 있던 것)이
+    # 대기열을 다 비우고 여기 닿으면, NMI 가 꺼져 있고 IRQ 안이라(I = 1) 아무도 선점하지 못해 맵 불러오기가 멈춘다.
+    # NMI 가 꺼져 있으면($19 bit7) 한 번 양보한다. BED5 가 REP #$30 으로 시작하므로 루프의 M 은 바꿔도 된다.
+    gate += (h('28 E2 20 A5 19 10 07 4B F4') + idle_loop.to_bytes(2, 'little') + h('4C') + frame.to_bytes(2, 'little')
+             + h('4C CE BE'))
+    assert len(gate) == 47 and gate[25] == 0x80 and gate[44] == 0x4C
+    idle_entry = (LOAD_GATE & 0xFFFF) + 30
     irq = _asm_far([
         h('C2 30 8B 0B 48 DA 5A A9 00 00 5B E2 20 48 AB AD 11 42'),
         # 다음 IRQ 를 지금 줄 + LOAD_LINES 에(262줄에서 돌아감)
@@ -1038,6 +1039,7 @@ def load_pump_code(lines=LOAD_LINES):
         LOAD_POLL: (bytes(poll), None),
         LOAD_GATE: (bytes(gate), None),
         0x2BC169: (h('20') + (LOAD_GATE & 0xFFFF).to_bytes(2, 'little'), h('20 2F C3')),
+        LOAD_IDLE_SITE: (h('4C') + idle_entry.to_bytes(2, 'little'), h('28 80 F9')),
         LOAD_IRQ: (irq, None),
         LOAD_NMI_OFF: (nmi_off, None),
         LOAD_NMI_ON: (nmi_on, None),

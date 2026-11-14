@@ -656,6 +656,53 @@ class EngineCodeTests(unittest.TestCase):
         poll = patch.load_pump_code()[patch.LOAD_POLL][0]
         self.assertLess(patch.LOAD_POLL + len(poll), 0x2BB805)  # NMI 선점 범위 안
 
+    def _coroutine(self, start, nmi_off, entry=0xFF):
+        """load_pump 코드만 얹은 빈 롬에서 start(뱅크 2B)부터 돌려, NMI 의 코루틴 저장(00:88EC)에 닿으면 쌓인 돌아올
+        곳(24비트)을, 600 명령 안에 닿지 않으면 None 을 준다. BED5(대기열 처리)는 바로 돌아오는 것으로 둔다."""
+        from w65816 import Cpu
+
+        class Yielded(Exception):
+            pass
+
+        rom = bytearray(0x400000)
+        rom[lorom(0x2BBECE):lorom(0x2BBECE) + 7] = bytes.fromhex('08 20 D5 BE 28 80 F9')
+        rom[lorom(0x2BBED5)] = 0x60
+        for at, (payload, _) in patch.load_pump_code().items():
+            rom[lorom(at):lorom(at) + len(payload)] = payload
+        cpu = Cpu(bytes(rom), bytearray(0x20000))
+        cpu.wram[0x19] = 0x80 if nmi_off else 0x00
+        cpu.wram[0x1D95] = entry
+        cpu.s, top = 0x09A0, 0x09A0
+
+        def saved(c):
+            raise Yielded(cpu.wram[top] << 16 | cpu.wram[top - 1] << 8 | cpu.wram[top - 2])
+        cpu.hooks[0x0088EC] = saved
+        cpu.pbr, cpu.pc, cpu.p = start >> 16, start & 0xFFFF, 0x04
+        try:
+            for _ in range(600):
+                cpu.step()
+        except Yielded as e:
+            return e.args[0]
+        return None
+
+    def test_idle_loop_yields_while_nmi_is_off(self):
+        # IRQ 처리기(load_pump)가 넘겨 준 코루틴은 I = 1 이라, NMI 가 꺼져 있으면 대기 루프에서 아무도 선점하지 못한다.
+        # 대기 루프가 스스로 양보하지 않으면 맵 불러오기가 영영 멈춘다
+        back = self._coroutine(0x2BBECE, nmi_off=True)
+        self.assertIsNotNone(back)
+        self.assertTrue(0x2BB741 <= back < 0x2BB805)        # 양보한 자리도 NMI·IRQ 의 코루틴 범위 안
+        self.assertIsNone(self._coroutine(back, nmi_off=False))   # 돌아와 NMI 가 켜져 있으면 원래처럼 돈다
+        self.assertIsNone(self._coroutine(0x2BBECE, nmi_off=False))
+
+    def test_gate_still_yields_the_song_start(self):
+        # 곡 틀기 문은 응답 판정의 양보 코드를 같이 쓴다. 돌아올 곳은 IRQ 처리기가 보는 문 자리 그대로
+        code = patch.load_pump_code()
+        gate, irq = code[patch.LOAD_GATE][0], code[patch.LOAD_IRQ][0]
+        back = self._coroutine(patch.LOAD_GATE, nmi_off=True, entry=0x01)
+        self.assertEqual(gate[back - patch.LOAD_GATE], 0x80)                        # BRA top
+        self.assertIn(bytes.fromhex('C2 20 AD DE 08 C9') + (back & 0xFFFF).to_bytes(2, 'little'), irq)
+        self.assertIsNone(self._coroutine(patch.LOAD_GATE, nmi_off=False, entry=0x01))
+
     def test_chain_steps_fit_before_the_poll(self):
         self.assertLessEqual(patch.CHAIN_STEP + len(patch.chain_step_code()), patch.CHAIN_LATE_STEP)
         self.assertLessEqual(patch.CHAIN_LATE_STEP + len(patch.chain_late_step_code()), patch.LOAD_POLL)
