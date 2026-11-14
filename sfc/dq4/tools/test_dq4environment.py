@@ -396,6 +396,21 @@ class LayeredTests(unittest.TestCase):
             cells += len(floors)
         self.assertGreater(cells, 600)
 
+    def test_art_keeps_its_shadows(self):
+        # Only the floor pattern goes transparent. The down stair keeps its black pit with dark corners, the
+        # up stair is DQ5's side-view slabs with a shadow, and pillars cast a shadow to the lower right.
+        black = 3 * 16 + 1
+        down, up = self.assets["stairs_down"], self.assets["stairs_up"]
+        self.assertNotIn(0, down.tobytes())
+        for corner in ((0, 0), (15, 0), (0, 15), (15, 15)):
+            self.assertEqual(down.getpixel(corner), black, corner)
+        self.assertGreater(up.tobytes().count(0), 64)
+        self.assertEqual([up.getpixel((14, y)) for y in range(4, 15)], [black] * 11)
+        self.assertEqual({up.getpixel((x, top + 1)) for x, top in ((2, 9), (6, 6), (10, 3))}, {3 * 16 + 7})
+        for name, column in (("pillar", range(11)), ("pillar_top", range(6, 16))):
+            self.assertEqual({self.assets[name].getpixel((12, y)) for y in column}, {black}, name)
+        self.assertEqual({self.assets["pillar"].getpixel((x, 15)) for x in range(2, 16)}, {black})
+
     def test_transparent_pixels_show_the_floor(self):
         # サントハイム 왕좌의 방(FC 01/01, SFC 3D/01): 진홍 카펫 위 기둥 넷, 아래·위 계단 하나씩.
         from dq4environmentmap import layer_floors, prepare_maps, render_maps, sheet_art
