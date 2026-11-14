@@ -377,7 +377,9 @@ def fc_monster(prg, fc_id, actions=FC_ACTIONS):
 
 
 def monster_doc(prg):
-    return {"format": "dq5tables/1", "monsters": [{"id": f"{dq5:02X}", **fc_monster(prg, fc)}
+    """보스 몬스터 칸: 2장 사건 몬스터와 같은 dq4monport.fc_entry(FC 내성, 드롭 없음 FF)."""
+    import dq4monport
+    return {"format": "dq5tables/1", "monsters": [{"id": f"{dq5:02X}", **dq4monport.fc_entry(prg, fc)}
                                                   for dq5, (fc, _) in BOSS_MONSTERS.items()]}
 
 
