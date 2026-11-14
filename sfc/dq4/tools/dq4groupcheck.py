@@ -35,7 +35,7 @@ import dq4fieldport  # noqa: E402
 import dq4talk  # noqa: E402
 from dq4environmentmap import block_prop  # noqa: E402
 from dq4environmentrom import GATE_KIND, objects  # noqa: E402
-from dq4groupbuild import LINKS, cell, doors, entrance_doors, exit_order, fc_numbers, placement, tag  # noqa: E402
+from dq4groupbuild import LINKS, cell, chapter, doors, entrance_doors, exit_order, fc_numbers, placement, tag  # noqa: E402
 from dq5exitcheck import dp86_allowed, warp_exit  # noqa: E402
 from dq5progresscheck import environment  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
@@ -119,11 +119,59 @@ def same_place(got, want):
         [v // 2 for v in got["cell"]] == [v // 2 for v in want["cell"]]
 
 
+def story_hidden_patch(prg, rom_data, group, number, fc_group, fc_number):
+    """dq5warp.lua ROMPATCH moving off the map (X 7E) the people FC's place routine (1C:$A010, dq4shop hidden) hides
+    at the chapter's start. The group ROM ports them where FC keeps them until a story flag shows them; the chapter
+    build that has the event gives them a list of their own (イムル jail 12/02: フレア stands on the stair (06,03)
+    until event 30, dq4ch1event)."""
+    import dq4npcport
+    import dq4shop
+    import dq5npc
+    from dq5map import Rom, lorom
+    routine = next((p for g, k, p in dq4shop.hide_routines(prg) if (g, k) == (fc_group, fc_number)), None)
+    if routine is None:
+        return ""
+    probe = bytearray(rom_data)
+    rom, patch = Rom(probe), {}
+    entries = dq5npc.map_entries(rom, group, number)
+
+    def x_of(a, night):
+        f = dq5npc.parse(rom, a, night)
+        return f and (dq5npc.decode(f)["x"], dq5npc.decode(f)["y"])
+
+    for night in (False, True):
+        hidden, _ = dq4shop.predict_hidden(prg, routine, dq4npcport.fc_state(night, None, chapter(fc_group)).ram)
+        recs = dq4shop.slot_people(prg, fc_group, fc_number, night)
+        for i in sorted(i for i in hidden if i < len(recs)):
+            want = cell(*dq4talk.pos(recs[i], night))
+            found = [a for a, _ in entries if x_of(a, night) == want]
+            if not found:
+                continue        # left out by the port (dq4npcport: hidden on entry, off the map, a sleeper)
+            if len(found) > 1:
+                raise ValueError(f"{group:02X}/{number:02X} {'night' if night else 'day'}: FC person {i} at {want} "
+                                 f"has {len(found)} entries")
+            a, n = found[0], dict(entries)[found[0]]
+            # X of this time is the entry byte that moves the parsed X (a two-time entry holds one per time).
+            for k in range(n):
+                o = lorom(a + k)
+                probe[o] ^= 0x01
+                moved = x_of(a, night) != want
+                probe[o] ^= 0x01
+                if moved:
+                    patch[o] = probe[o] & 0x80 | 0x7E
+                    break
+            else:
+                raise ValueError(f"{group:02X}/{number:02X}: no X byte in the entry at {a:06X}")
+    return ";".join(f"{o:X}={v:02X}" for o, v in sorted(patch.items()))
+
+
 def walkable(source, x, y):
     return 0 <= x < source.w and 0 <= y < source.h and not block_prop(source, source.cell(x, y) & 31) & 0x80
 
 
-def stair_scenes(prg, groups):
+def stair_scenes(prg, groups, rom_data=None):
+    """(name, [(TO, TEST, ROMPATCH)] or None, want or why skipped) per FC stair. With rom_data each start carries
+    story_hidden_patch for its map."""
     place = placement(prg)
     found = doors(prg)
     each = entrance_doors(prg)
@@ -134,12 +182,13 @@ def stair_scenes(prg, groups):
             number = place[fc_group, fc_number][1]
             order = exit_order(prg, fc_group, fc_number)
             source = dq4block.Map(prg, fc_group, fc_number)
+            patch = story_hidden_patch(prg, rom_data, group, number, fc_group, fc_number) if rom_data else ""
             to = {(e["x"], e["y"]): e["to"] for e in dq4block.exit_links(prg, fc_group, fc_number, cache)}
             for i, (x, y) in enumerate(order):
                 # Every walkable neighbour, then later starts: a wandering person can stand on the stair or in
                 # the way (FC starts some walking people on a stair).
                 starts = [(f"{group:02X}/{number:02X},{','.join(map(str, cell(x - dx, y - dy)))}",
-                           f"wait:{late},{d}:{PRESS},wait:400" if late else f"{d}:{PRESS},wait:400")
+                           f"wait:{late},{d}:{PRESS},wait:400" if late else f"{d}:{PRESS},wait:400", patch)
                           for late in range(0, 1200, 120) for (dx, dy), d in DIRS.items()
                           if walkable(source, x - dx, y - dy) and (x - dx, y - dy) not in order]
                 if not starts and (fc_group, fc_number, x, y) in EVENT_STAIRS:
@@ -190,10 +239,10 @@ def main():
     state = dq4freshstate.resolve(args.state, mesence, rom, out / "start")
     prg = ines.prg(args.dq4.read_bytes())
 
-    stairs = list(stair_scenes(prg, args.groups))
+    stairs = list(stair_scenes(prg, args.groups, rom.read_bytes()))
     skipped = {name: why for name, starts, why in stairs if starts is None}
-    jobs = [(name, [{"TO": to, "TEST": test} for to, test in starts], want) for name, starts, want in stairs
-            if starts is not None]
+    jobs = [(name, [{"TO": to, "TEST": test, **({"ROMPATCH": patch} if patch else {})} for to, test, patch in starts],
+             want) for name, starts, want in stairs if starts is not None]
     found = doors(prg)
     _, props = dq4fieldport.fc_field(prg)
     for group, link in ((g, part) for g, parts in LINKS.items() if g in args.groups for part in parts):
