@@ -35,6 +35,7 @@ PORT = {
     0x0D: 0x15, 0x0E: 0x44, 0x11: 0x0D, 0x14: 0x05, 0x18: 0x58, 0x1A: 0x06, 0x1C: 0x87, 0x1D: 0x33, 0x1F: 0x5C,
     0x20: 0x60, 0x24: 0x3B, 0x25: 0x5F, 0x26: 0x04, 0x28: 0x48, 0x2A: 0x8F, 0x2C: 0xA6, 0x2E: 0x41, 0x33: 0x76,
     0x36: 0x77, 0x38: 0x56, 0x3E: 0xAE, 0x40: 0x34, 0x46: 0x9E, 0x48: 0x83, 0x4D: 0x6C, 0x5C: 0x0C,
+    0x04: 0x50,
 }
 # 사건 전투의 FC 몬스터 → DQ5 번호. 능력치·이름은 사건 모듈(dq4ch2tempe·dq4ch2endor)이 쓰고 dq4ch2slots 가 예약한다.
 # 필드의 あばれこまいぬ(PORT 18)와 텐페 석상은 번호가 달라(예약 번호는 필드에 나오지 않음) 같은 그림을 두 자리에 둔다
@@ -102,10 +103,15 @@ def doc(rom, out_dir, only=None):
 # (26:8765 번호). 주문은 일행 주문(01~38)이 아니라 몬스터용 주문(39~65)이어야 한다: 일행 번호를 몬스터가 쓰면 전투가
 # 멈춘다. 사건 모듈의 표(dq4ch1event·dq4ch2tempe·dq4ch2endor .FC_ACTIONS)에 없는 것만 둔다.
 # 47 にげだす 는 DQ5 슬라임의 98(필드 68 이 0 이 아니면 주인공 레벨이 구역 레벨 + 4 를 넘을 때만 고름). 48·4B なかまをよぶ
-# 는 DQ5 의 부르기(AE~B5)가 정해진 DQ5 몬스터(dq5monlimits.SUMMONED)를 불러 그 그림이 들어오므로, 메시지만 나오는 66 으로
+# 는 DQ5 의 부르기(AE~B5)가 정해진 DQ5 몬스터(dq5monlimits.SUMMONED)를 불러 그 그림이 들어오므로, 메시지만 나오는 66 으로.
+# 55(행동 ID 66, 11:$A292 가 무리를 몬스터 30 キングスライム 으로 바꿈: 코드 읽기)도 부르기를 옮기지 않아 무리가 모이지 않으므로 66
 FC_ACTIONS = {0x0A: '45', 0x10: '4B', 0x11: '4C', 0x12: '4D', 0x13: '4E', 0x17: '54', 0x19: '59', 0x1A: '52',
               0x25: '5B', 0x33: '74', 0x36: '77', 0x38: '8B', 0x43: '96', 0x45: 'A3', 0x47: '98', 0x48: '66',
-              0x49: '71', 0x4B: '66', 0x5D: 'AA'}
+              0x49: '71', 0x4B: '66', 0x5D: 'AA', 0x55: '66'}
+# FC 내성 칸 0~E(fc dq4data.RESIST_NAMES 차례: イオ ギラ メラ デイン バギ ヒャド マヌーサ ラリホー ザキ ニフラム マホトラ
+# マホトーン メダパニ ルカニ メガンテ) → DQ5 내성 종류(50~61, dq5-data-format 「동료가 되는 몬스터」 앞 내성 표). DQ5 에만 있는
+# 5F(쓰는 곳 없음)·60 どくのいき·61 なめまわし 등은 FC 에 짝이 없어 바탕 값을 둔다
+FC_RESISTS = (0x52, 0x51, 0x50, 0x55, 0x54, 0x53, 0x58, 0x57, 0x56, 0x59, 0x5B, 0x5C, 0x5D, 0x5A, 0x5E)
 
 
 def fc_actions():
@@ -142,10 +148,20 @@ def spell_entries(prg):
     return [{'id': f'{d:02X}', 'MP': mp} for d, mp in sorted(out.items())]
 
 
-def fc_entry(prg, fc, drop_item=None):
-    """FC 몬스터의 dq5tables/1 칸(id 없음): dq4ch1event.fc_monster 의 능력치·행동, FC 드롭(드롭률은 FC 등급 그대로,
-    물건은 drop_item(FC 물건 번호) → DQ5 번호, 없거나 None 이면 FF). 수비는 DQ5 상한 1FF 로 자른다(메탈 셋의 1023).
-    MP 는 FC 그대로이고, 주문 한 번의 MP 는 spell_entries 가 FC 값으로 맞춘다."""
+def fc_resists(prg, record, base='0' * 18):
+    """FC 레코드의 내성 15칸을 DQ5 내성 18칸 문자열(dq5tables 「내성」)로. FC 에 짝이 없는 칸은 base 의 것.
+    값 0~3 은 그대로 옮긴다(FC 성공률 FF·D8·66·00, DQ5 피해 배율 255·205·84·0 으로 단계가 같음)."""
+    import dq4data
+    out = list(base)
+    for kind, v in zip(FC_RESISTS, dq4data.resists(prg, record)):
+        out[kind - 0x50] = str(v)
+    return ''.join(out)
+
+
+def fc_entry(prg, fc, drop_item=None, resist_base='0' * 18):
+    """FC 몬스터의 dq5tables/1 칸(id 없음): dq4ch1event.fc_monster 의 능력치·행동, FC 내성(fc_resists, DQ5 에만 있는 칸은
+    resist_base), FC 드롭(드롭률은 FC 등급 그대로, 물건은 drop_item(FC 물건 번호) → DQ5 번호, 없거나 None 이면 FF).
+    수비는 DQ5 상한 1FF 로 자른다(메탈 셋의 1023). MP 는 FC 그대로이고, 주문 한 번의 MP 는 spell_entries 가 FC 값으로 맞춘다."""
     import dq4ch1event
     import dq4data
     import dq4fieldencounter
@@ -155,34 +171,29 @@ def fc_entry(prg, fc, drop_item=None):
     _, drop, rate = dq4fieldencounter.fc_monster_fields(record)
     item = None if drop is None or drop_item is None else drop_item(drop)
     e['수비'] = min(e['수비'], dq4fieldencounter.DQ5_DEFENCE_MAX)
+    e['내성'] = fc_resists(prg, record, resist_base)
     e['드롭'], e['드롭률'] = ('FF', 0) if item is None else (f'{item:02X}', rate)
     return e
 
 
 def drop_items(prg, dq5):
-    """FC 물건 번호 → 이 해킹의 DQ5 물건 번호(이름이 같은 DQ5 물건, 없으면 dq4itemport.BORROWED 의 빌린 자리), 없으면 None."""
+    """FC 물건 번호 → 이 해킹의 DQ5 물건 번호, 없으면 None. 가게·상자와 같이 찾는다(dq4shopport.dq5_items: 히라가나를
+    가타카나로 접은 이름이 같은 DQ5 물건, 빌린 자리 dq4itemport.BORROWED 는 FC 이름으로)."""
     import dq4data
-    import dq4itemport
+    import dq4shopport
     import dq4text
-    from dq5chest import item_name
     from dq5map import Rom
-    rom = Rom(dq5)
-    names = {}
-    for k in range(dq4itemport.ITEM_COUNT):
-        names.setdefault(item_name(rom, k), k)
-    names.update({v: k for k, v in dq4itemport.BORROWED.items()})
-    kana = str.maketrans('りべぺへぼ', 'リベペヘボ')
+    names = dq4shopport.dq5_items(Rom(dq5))
     items = dq4data.name_list(prg, 'item')
 
     def of(drop):
-        name = dq4text.text(items[drop + 1])
-        return names.get(name, names.get(name.translate(kana)))
+        return names.get(dq4shopport._fold(dq4text.text(items[drop + 1])))
     return of
 
 
 def record_writes(original, dq5_of, prg):
     """필드 번호(PORT)마다 지금 대역(dq5_of: FC → 대역 DQ5 번호, dq4fieldencounter.PLACEHOLDERS)의 레코드 25바이트에
-    FC 능력치·행동·드롭(fc_entry)을 덮은 dq5patch/1 쓰기."""
+    FC 능력치·행동·내성·드롭(fc_entry)을 덮은 dq5patch/1 쓰기. DQ5 에만 있는 내성 칸은 대역 것."""
     import dq5tables
     from dq5map import lorom
     table = dq5tables.TABLES['monsters']
@@ -190,7 +201,12 @@ def record_writes(original, dq5_of, prg):
     out = []
     for fc, m in PORT.items():
         b = bytearray(original[lorom(RECORD + dq5_of[fc] * RECORD_SIZE):][:RECORD_SIZE])
-        for k, v in fc_entry(prg, fc, drop_item).items():
+        base = ''.join(str(dq5tables.get(b, [dq5tables.resist_piece(i)])) for i in range(dq5tables.RESISTS))
+        for k, v in fc_entry(prg, fc, drop_item, base).items():
+            if k == '내성':
+                for i, c in enumerate(v):
+                    dq5tables.put(b, [dq5tables.resist_piece(i)], int(c))
+                continue
             kind, pieces = table.fields[k]
             dq5tables.put(b, pieces, dq5tables.parse(kind, v))
         at = RECORD + m * RECORD_SIZE

@@ -33,8 +33,10 @@ WEAPON = 0
 # DQ5 item -> FC item name, each on a DQ5 slot of the same kind and name length that no FC item is named after and no
 # ported shop or chest uses. たけのやり: a spear like てつのやり. エンドール's shops: オリハルコンのキバ (a monster-only
 # fang) for せいぎのそろばん, てつのむねあて for てつのまえかけ, メタルキングよろい (the same defence, 95) for
-# はぐれメタルよろい.
-BORROWED = {0x01: "てつのやり", 0x34: "せいぎのそろばん", 0x4E: "てつのまえかけ", 0x61: "はぐれメタルよろい"}
+# はぐれメタルよろい. Chapter 2's monster drops: けがわのフード (the nearest defence, 11 for 12) for きんのかみかざり,
+# シルクハット for はねぼうし.
+BORROWED = {0x01: "てつのやり", 0x34: "せいぎのそろばん", 0x4E: "てつのまえかけ", 0x61: "はぐれメタルよろい",
+            0x89: "きんのかみかざり", 0x8C: "はねぼうし"}
 # DQ5 key item -> FC story item. ゴールドオーブ (C6) has おうごんのうでわ's name length (10 bytes with the dakuten
 # marks); あくまのおもちゃ (BE) is an empty DQ5 record of さえずりのみつ's length (8 bytes).
 EVENT_ITEMS = {0xC6: "おうごんのうでわ", 0xBE: "さえずりのみつ"}

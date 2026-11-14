@@ -248,7 +248,7 @@ class RecordTests(PatchedFC):
         self.assertEqual(by_index[0], {"index": 0, "weight": 7, "count_code": enc.GROUP_COUNT, "monster": enc.MONSTERS[0x00]})
         self.assertEqual(by_index[1], {"index": 1, "weight": 4, "count_code": enc.GROUP_COUNT, "monster": 0x09})
         self.assertEqual(by_index[5], {"index": 5, "weight": 2, "count_code": 2, "monster": enc.MONSTERS[0x0C]})
-        self.assertEqual(by_index[6], {"index": 6, "weight": 1, "count_code": 0, "monster": 0x00})
+        self.assertEqual(by_index[6], {"index": 6, "weight": 1, "count_code": 0, "monster": enc.MONSTERS[0x04]})
         self.assertEqual(len(rec["slots"]), 10)
         self.assertEqual((rec["level"], rec["rate_index"]), (9, 5))
         self.assertEqual(rec["species_weights"], [3, 1, 0])
@@ -284,7 +284,7 @@ class DocsTests(PatchedFC):
         self.assertEqual((report["03"]["kind"], report["03"]["zone"]), ("field", 6))
         self.assertEqual((report["50"]["kind"], report["50"]["zone"]), ("dungeon", 11))
         self.assertEqual(report["50"]["fixed"], {"weight": 2, "group": 0})
-        self.assertEqual(report["50"]["monsters"], sorted({0, 9, enc.MONSTERS[0x00], enc.MONSTERS[0x0C]} - {0x0B}))
+        self.assertEqual(report["50"]["monsters"], sorted({enc.MONSTERS[0x04], 9, enc.MONSTERS[0x00], enc.MONSTERS[0x0C]} - {0x0B}))
         self.assertEqual(report["03"]["dropped_slots"], [12])
 
 
