@@ -55,12 +55,11 @@ class RecordTests(unittest.TestCase):
         for fc, a in dq4monport.fc_actions().items():
             self.assertIn(int(a, 16), used, f'FC {fc:02X} → {a}')
 
-    def test_spell_mp_keeps_fc_cast_count(self):
-        # べビーマジシャン: FC MP 2, ヒャド FC 2 → DQ5 몬스터 ヒャド(42) 3. FC 대로면 한 번도 못 외운다
-        self.assertEqual(self.entry(dq4monport.PORT[0x1D])['MP'], 3)
-        self.assertEqual(dq4monport.fc_entry(self.prg, 0x1D)['MP'], 2)
-        # メラゴースト: メラ 는 FC·DQ5 모두 2 라 그대로
+    def test_monster_mp_is_fc(self):
+        # べビーマジシャン: FC MP 2. 주문 MP 를 FC 값(ヒャド 2)으로 두므로 MP 를 올리지 않는다
+        self.assertEqual(self.entry(dq4monport.PORT[0x1D])['MP'], 2)
         self.assertEqual(self.entry(dq4monport.PORT[0x0D])['MP'], 2)
+
 
     def test_mera_ghost_gets_fc_values_over_placeholder(self):
         import dq4fieldencounter
@@ -83,6 +82,68 @@ class RecordTests(unittest.TestCase):
 
     def test_metal_defence_is_capped(self):
         self.assertEqual(self.entry(dq4monport.PORT[0x5C])['수비'], 0x1FF)
+
+
+@unittest.skipUnless(DQ4.exists() and DQ5.exists(), 'rom/dq4.nes and rom/dq5.sfc')
+class SpellMpTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import dq5tables
+        from dq5map import lorom
+        from kr_patch.fc import ines
+        cls.prg = ines.prg(DQ4.read_bytes())
+        cls.dq5 = DQ5.read_bytes()
+        cls.entries = dq4monport.spell_entries(cls.prg)
+        cls.writes = dq5tables.writes_for([{'format': dq5tables.FORMAT, 'spells': cls.entries}], cls.dq5)
+        cls.patched = bytearray(cls.dq5)
+        for off, new, _, _ in cls.writes:
+            cls.patched[off] = new
+        cls.lorom = staticmethod(lorom)
+
+    def mp(self, data, n):
+        import dq5spell
+        from dq5map import Rom
+        return dq5spell.cost(Rom(bytes(data)), n)[0]
+
+    def test_changed_spells_get_fc_mp(self):
+        # ヒャド 3 → 2, ラリホーマ 5 → 3, マヌーサ 5 → 4. 나머지 1·2장 몬스터 주문은 FC·DQ5 가 같다
+        self.assertEqual({(n, self.mp(self.dq5, n), self.mp(self.patched, n))
+                          for n in range(0x39, 0x66) if self.mp(self.dq5, n) != self.mp(self.patched, n)},
+                         {(0x42, 3, 2), (0x4C, 5, 3), (0x4E, 5, 4)})
+
+    def test_party_spell_mp_unchanged(self):
+        import dq5tables
+        battle = {self.lorom(0x268765 + n) for n in dq4monport.MONSTER_SPELLS}
+        menu = {self.lorom(dq5tables.MENU_MP + n) for n in dq4monport.MONSTER_SPELLS}
+        self.assertTrue(self.writes)
+        for off, *_ in self.writes:
+            self.assertIn(off, battle | menu, f'{off:X}: 몬스터용 주문 밖을 씀')
+        for n in range(1, 0x39):
+            self.assertEqual(self.mp(self.patched, n), self.mp(self.dq5, n), f'일행 주문 {n:02X}')
+            self.assertEqual(self.patched[self.lorom(dq5tables.MENU_MP + n)], self.dq5[self.lorom(dq5tables.MENU_MP + n)])
+
+    def test_every_monster_casts_as_often_as_in_fc(self):
+        import dq4ch1event
+        import dq4data
+        actions = dq4monport.fc_actions()
+        fcs = {*dq4monport.PORT, *dq4monport.EVENT, *(fc for fc, _ in dq4ch1event.BOSS_MONSTERS.values())}
+        for i, _, _, _, r in dq4data.monsters(self.prg):
+            if i not in fcs:
+                continue
+            for n in {b & 0x7F for b in r[9:15]}:
+                if n >= dq4data.MON_ACT[2]:
+                    continue
+                fc_cost = dq4data.spell_mp(self.prg, dq4data.monster_action(self.prg, n))[0]
+                cost = self.mp(self.patched, int(actions[n], 16))
+                self.assertEqual(cost, fc_cost, f'FC {i:02X} 행동 {n:02X}')
+                self.assertGreaterEqual(r[3] // cost, 1, f'FC {i:02X} 행동 {n:02X}: MP {r[3]} 로 한 번도 못 외움')
+
+    def test_conflicting_fc_mp_is_refused(self):
+        from unittest import mock
+        # FC ヒャド 2 와 ラリホーマ 3
+        with mock.patch.object(dq4monport, 'fc_actions', return_value={0x07: '42', 0x11: '42'}):
+            with self.assertRaises(ValueError):
+                dq4monport.spell_entries(self.prg)
 
 
 if __name__ == '__main__':

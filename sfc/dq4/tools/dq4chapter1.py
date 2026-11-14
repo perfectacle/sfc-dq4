@@ -686,9 +686,11 @@ def build(rom, dq5, dq4, work, prologue=True, chapter2=False):
     (work / 'party.dq5patch.json').write_text(json.dumps(
         {"format": "dq5patch/1", "name": "dq4-party", "writes": dq4party.equip_writes(dq5, dq4)}, ensure_ascii=False))
     monsters = dq4ch1event.monster_doc(ines.prg(dq4.read_bytes()))
-    more = dq4ch2event.monster_entries(ines.prg(dq4.read_bytes()), original)
+    more = dq4ch2event.monster_entries(ines.prg(dq4.read_bytes()))
     if more:
         monsters["monsters"] += more
+    import dq4monport
+    monsters["spells"] = dq4monport.spell_entries(ines.prg(dq4.read_bytes()))
     (work / 'boss-monsters.json').write_text(json.dumps(monsters, ensure_ascii=False))
     # 원래 롬만 읽는 도구는 그룹 빌드와 함께 돌린다
     with ThreadPoolExecutor() as pool:

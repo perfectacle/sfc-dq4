@@ -546,7 +546,7 @@ class BuildFlowTests(unittest.TestCase):
                     mock.patch.object(dq4menupatch, 'Font', lambda name: name), \
                     mock.patch.multiple(dq4ch1event, apply=step('ch1event'),
                                         monster_doc=lambda prg: {'format': 'test-monsters', 'prg': len(prg)}), \
-                    mock.patch.multiple(dq4ch2event, apply=step('ch2event'), monster_entries=lambda prg, dq5=None: []), \
+                    mock.patch.multiple(dq4ch2event, apply=step('ch2event'), monster_entries=lambda prg: []), \
                     mock.patch.object(dq4growth, 'writes', lambda dq5, dq4: []), \
                     mock.patch.multiple(dq4party, learn_doc=lambda dq5, dq4: {'format': 'dq5learn/1', 'characters': []},
                                         equip_writes=lambda dq5, dq4: [], apply_recruits=step('party')), \
@@ -554,7 +554,8 @@ class BuildFlowTests(unittest.TestCase):
                     mock.patch.object(dq4msgnames, 'apply', step('msgnames')), \
                     mock.patch.object(dq4signs, 'apply', step('signs')), \
                     mock.patch.object(dq4prologue, 'apply', step('prologue')), \
-                    mock.patch.multiple(dq4monport, build=monport_build, records_patch=monport_records):
+                    mock.patch.multiple(dq4monport, build=monport_build, records_patch=monport_records,
+                                        spell_entries=lambda prg: [{'id': '42', 'MP': len(prg) // 0x2000}]):
                 out = ch.build(rom, dq5, dq4, work, prologue=prologue)
             self.files = {p.name: json.loads(p.read_text()) for p in work.glob('*.json')}
         return out, calls, order
@@ -595,8 +596,8 @@ class BuildFlowTests(unittest.TestCase):
             self.assertTrue(0 <= g['index'] <= 0xFF and g['members'])
             self.assertTrue(all(m['count'] >= 1 for m in g['members']))
         self.assertEqual(learn['format'], 'dq5learn/1')
-        # 몬스터 문서는 iNES 머리를 뗀 PRG(16KB 한 뱅크) 를 읽는다
-        self.assertEqual(monsters, {'format': 'test-monsters', 'prg': 0x4000})
+        # 몬스터 문서는 iNES 머리를 뗀 PRG(16KB 한 뱅크) 를 읽고, 몬스터 주문 MP(spell_entries)도 같은 문서로 dq5tables 에 간다
+        self.assertEqual(monsters, {'format': 'test-monsters', 'prg': 0x4000, 'spells': [{'id': '42', 'MP': 2}]})
         self.assertEqual(npc, {'format': 'dq5npcrelocate/1'})
         self.assertEqual(self.npc_doc.call_args.args, ({'records': 1}, ['ported'], False, {'report': 1}, ['m1', 'm2'],
                                                       False))
