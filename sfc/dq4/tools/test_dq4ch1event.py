@@ -485,6 +485,13 @@ class BossMonsterTest(unittest.TestCase):
         self.assertEqual(ev.BOSS_MEMBERS, ((0xE2, 1), (0x52, 1)))
 
 
+class BossSongTest(unittest.TestCase):
+    def test_tower_boss_plays_the_song_of_grade_one(self):
+        # 26:8F96 = 17 16 18: 등급 1 이 곡 16. NDS 탑 보스(ピサロのてさき)도 16 자리의 곡이다
+        self.assertEqual(ev.BOSS_FLAGS, 0x41)
+        self.assertEqual(ev.encounter_doc()["event_groups"][0]["flags"], 0x41)
+
+
 @unittest.skipUnless(DQ5.is_file(), "local source ROM not present")
 class LearnTest(unittest.TestCase):
     def test_hero_learns_nothing_and_others_keep_theirs(self):

@@ -785,7 +785,7 @@ def _build(pool, dq5, dq4, out, with_people):
     _save(out / "npc-report.json", people)
     pending.append(pool.submit(
         _run, DQ5_TOOLS / "dq5npcrelocate.py", dq5, "patch",
-        _save(out / "npc.json", {"format": "dq5npcrelocate/1", "scripts": [],
+        _save(out / "npc.json", {"format": "dq5npcrelocate/1", "scripts": dq4npcport.turn_scripts(people),
                                  "lists": [lst for lst in lists if "map" in lst]}),
         "-o", out / "npc.dq5patch.json", "--report", out / "npc-layout.json", *NPC_AT, *new_map_args))
     manifests.append(out / "npc.dq5patch.json")

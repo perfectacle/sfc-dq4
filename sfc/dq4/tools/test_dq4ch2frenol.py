@@ -74,6 +74,37 @@ class ModuleTest(unittest.TestCase):
             code = dq5npcwrite.encode({'format': dq5npcwrite.FORMAT, 'commands': s['commands']})
             self.assertLessEqual(len(code), 255)
 
+    def test_dancer_takes_over_after_the_reveal(self):
+        ctx = context()
+        made = {s['address']: s['commands'] for s in fr.scripts(ctx)}
+        mei, dancer = made[fr.SCRIPTS[fr.USE['mei']]], made[fr.SCRIPTS[fr.USE['dancer']]]
+        ops = lambda cmds: [c['op'] for c in cmds]  # noqa: E731
+        # 공주 그림은 정체를 밝힌 말 뒤 사라지고, 무희가 같은 칸에 나타나 나머지를 한다
+        reveal = ops(mei).index('2F')
+        self.assertEqual(ops(mei)[reveal:reveal + 7], ['2F', '21', '51', '4F', '10', '52', '16'])
+        self.assertEqual(mei[reveal + 4]['args'], list(fr.CALLED))
+        self.assertNotIn('30', ops(mei))
+        self.assertEqual(dancer[dancer.index(next(c for c in dancer if c['op'] == '09'))]['args'],
+                         [0x80 | fr.CALLED[0], fr.CALLED[1]])
+        appear = next(c for c in dancer if c['op'] == '50')
+        self.assertEqual(appear['args'], list(fr.MEI_PATH[-1]))
+        self.assertLess(ops(dancer).index('50'), ops(dancer).index('53'))
+        self.assertEqual(sum(1 for c in mei + dancer if c['op'] == '37' and c['args'] == list(fr._al(ctx.at['swap']))),
+                         1)
+        self.assertIn({'op': '37', 'args': list(fr._al(ctx.at['end']))}, dancer)
+
+    def test_key_jingle_shows_the_line_then_waits_for_the_song(self):
+        ctx = context()
+        dancer = next(s['commands'] for s in fr.scripts(ctx) if s['address'] == fr.SCRIPTS[fr.USE['dancer']])
+        got = ctx.msg['got']
+        i = dancer.index({'op': '30', 'args': [got & 0xFF, got >> 8]})
+        self.assertEqual(dancer[i + 1], {'op': '37', 'args': list(fr._al(ctx.at['jingle']))})
+        self.assertEqual(dancer[i + 2]['op'], '34')
+        code = fr._jingle()
+        self.assertIn(bytes((0xA9, fr.ITEM_SONG, 0x22, 0x0F, 0xFF, 0x24)), code)   # LDA #2F / JSL 24:FF0F
+        import dq4songwait
+        self.assertIn(fr.ITEM_SONG, dq4songwait.PORT_SONGS)
+
     def test_talks(self):
         ctx = context()
         bodies = fr.talk_scripts(ctx)
@@ -200,7 +231,7 @@ class ListsTest(unittest.TestCase):
         self.assertTrue(all(e['time'] == 'night' for e in scene))
         self.assertEqual(sorted(e['from']['index'] for e in scene),
                          sorted([fr.USE['mei'], fr.USE['cloaks'], fr.USE['cloaks'], fr.USE['kiryl'], fr.USE['brey'],
-                                 fr.USE['deal']]))
+                                 fr.USE['deal'], fr.USE['dancer']]))
         self.assertTrue(all(e['fields']['interval'] for e in scene))
         after = new[fr.TOWN_AFTER]
         self.assertEqual(len(after), sum(1 for a in fr.AFTER if a[0] == fr.TOWN))

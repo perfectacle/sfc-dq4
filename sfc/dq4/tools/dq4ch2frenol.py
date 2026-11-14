@@ -52,6 +52,10 @@ def cell(x, y):
 
 # 그림(dq4people.EVENT_PICTURES·「2장 사건 인물 그림 표」)
 CLOAK_PIC, PRINCESS_PIC, BREY_PIC, KIRYL_PIC = 0x16, 0x0E, 0x09, 0x02
+DANCER_PIC = 0x77     # 정체를 밝힌 뒤의 메이(NDS 踊り子). 그림을 맵 위에서 바꿀 수 없어 다른 인물이 그 자리에 나타난다
+# 도적의 열쇠를 받을 때의 징글: DQ5 가 물건을 받을 때 트는 곡 자리(22)를 포팅이 돌린 NDS アイテム発見
+# (dq4-sound-port-format 「되풀이하는 곡이 든 자리 고치기」). 끝을 기다리므로 dq4songwait.PORT_SONGS 에 있다
+ITEM_SONG = 0x2F
 
 # 여관 2층(FC 0F/01 기본 목록). 사건 인물은 블록이 숨기기 전까지 그 자리에 서 있다
 INN_DUMMY = cell(0x10, 0x17)       # 레코드 00: 1D 이벤트 0F 만 돌리는 자리 인물(FC 는 대화 008). 옮기면 걸어 다녀 뺀다
@@ -96,7 +100,7 @@ SCRIPT_LIST = '05:CD73'
 SCRIPTS = ('05:CD7A', '05:CD96', '05:CDA7', '05:CDEB', '05:CE0D', '05:CE1E', '05:CE49', '05:CE5A', '05:CEA1',
            '05:CEEF', '05:CF22')
 USE = {'inn_cloak_a': 0, 'inn_cloak_b': 1, 'inn_princess': 2, 'trio': 3, 'deal': 4, 'cloaks': 5, 'mei': 6,
-       'brey': 7, 'kiryl': 8}
+       'brey': 7, 'kiryl': 8, 'dancer': 9}
 
 TOWN_KID, TOWN_LEFT, TOWN_AFTER = 'ch2_frenol_town_kid', 'ch2_frenol_town_left', 'ch2_frenol_town_after'
 INN_KID, INN_AFTER = 'ch2_frenol_inn_kid', 'ch2_frenol_inn_after'
@@ -170,6 +174,12 @@ def _swap():
     ]) + LEAVE
 
 
+def _jingle():
+    """물건을 받는 징글을 틀고 끝을 기다린 뒤 맵 곡으로(dq4ch2endor._fanfare)."""
+    from dq4ch2endor import _fanfare
+    return ENTER + _fanfare(ITEM_SONG) + LEAVE
+
+
 def _end_before():
     """M 8·DB 0: RESCUED 를 켜고 장면 flag 를 끄고, 필드 시간을 아침으로."""
     a = 0x7E2190 + IDX
@@ -202,6 +212,7 @@ def native(ctx):
     put('grave', dq4prologue._inside(*GRAVE_RECT))
     put('gate', _gate())
     put('swap', _swap())
+    put('jingle', _jingle())
     put('end_event', _event_bytes(_end_tokens(ctx)))
     put('end', ch2._event_call(at['end_event'], _end_before()))
     return bytes(out), at
@@ -310,6 +321,7 @@ def scripts(ctx):
     gate = at['gate']
     lo, hi = lambda v: v & 0xFF, lambda v: v >> 8
     msg = lambda k: _cmd('21', lo(ctx.msg[k]), hi(ctx.msg[k]))  # noqa: E731
+    show = lambda k: _cmd('30', lo(ctx.msg[k]), hi(ctx.msg[k]))  # noqa: E731
     call = lambda a: _cmd('37', *_al(a))  # noqa: E731
     flag_on = lambda f: _cmd('10', *f)  # noqa: E731
     out = {
@@ -328,9 +340,14 @@ def scripts(ctx):
             _cmd('09', 0x80 | ch2.ANSWERED[0], ch2.ANSWERED[1]), _cmd('11', ch2.ANSWERED[0], ~ch2.ANSWERED[1] & 0xFF),
             _cmd('06', *GIVEN, target='given'), _cmd('03', target='ask'), _cmd('16', label='given')]),
         'cloaks': _gated(gate, [_wait_on(GIVEN), _cmd('51'), _cmd('52')]),
+        # 공주 그림의 메이는 정체를 밝히면 깜박이며 사라지고, 같은 칸에 무희 그림의 메이(dancer)가 깜박이며 나타나 잇는다
         'mei': _gated(gate, [_wait_on(GIVEN), _cmd('1C')] + _walk(*MEI_PATH) + [
-            _cmd('2F', FACE_LEFT), msg('mei'), flag_on(CALLED), _wait_on(ARRIVED), msg('mei_key'), call(at['swap']),
-            msg('got'), msg('bye'), flag_on(BYE), _cmd('51'), _cmd('52'), _cmd('40'), call(at['end'])]),
+            _cmd('2F', FACE_LEFT), msg('mei'), _cmd('51'), _cmd('4F'), flag_on(CALLED), _cmd('52'), _cmd('16')]),
+        'dancer': [_cmd('28'), _cmd('52')] + _gated(gate, [
+            _wait_on(CALLED), _cmd('50', *MEI_PATH[-1]), _cmd('2F', FACE_LEFT), _cmd('53'), _cmd('4F'),
+            _wait_on(ARRIVED), msg('mei_key'), call(at['swap']),
+            show('got'), call(at['jingle']), _cmd('34'), msg('bye'), flag_on(BYE), _cmd('51'), _cmd('52'), _cmd('40'),
+            call(at['end'])]),
         # 마중 온 둘은 FC 처럼 맵 아래 줄(맵 밖)에 세워 두었다가 서쪽 어귀로 옮겨 걸어 들어온다(FC 레코드 17·18 의 25)
         'brey': _gated(gate, [_wait_on(CALLED), _cmd('02', 4), _cmd('15'), _cmd('01'),
                         _cmd('2B', *PICKUP_FROM), _cmd('1C')] + _walk(BREY_STAND) + [
@@ -478,12 +495,15 @@ def npc_lists(lists, ctx):
     scene = []
     for time in ('night',):
         scene += [_person('mei', *NIGHT_MEI, PRINCESS_PIC, nobody, time, 'left'),
+                  _person('dancer', *NIGHT_MEI, DANCER_PIC, nobody, time, 'left'),
                   _person('cloaks', *NIGHT_CLOAK, CLOAK_PIC, nobody, time, 'left'),
                   _person('cloaks', *NIGHT_CLOAK2, CLOAK_PIC, nobody, time, 'left'),
                   _person('kiryl', *NIGHT_PARKED[0], KIRYL_PIC, nobody, time, 'right'),
                   _person('brey', *NIGHT_PARKED[1], BREY_PIC, nobody, time, 'right'),
+                  # 묻는 인물은 처음부터 숨으므로 망토와 같은 그림으로 세트를 나눠 써 OBJ 타일을 잡지 않는다. 무희 세트를
+                  # 더하자 그림 01 세트 몫까지 $1995 가 203(512타일 넘음)이었다
                   {"from": _src('deal'), "time": time, "fields": {"x": 0, "y": 1, "facing": "down",
-                                                                  "talk": t['deal'], "gfx": 0x01, "layer": 0,
+                                                                  "talk": t['deal'], "gfx": CLOAK_PIC, "layer": 0,
                                                                   "interval": 1}}]
     inn_kid = hobbit + [
         {"from": hobbit[0]["from"], "time": time,
