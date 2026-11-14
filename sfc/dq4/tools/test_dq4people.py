@@ -143,16 +143,6 @@ def body(color=(200, 30, 30, 255)):
 
 
 class SheetTests(unittest.TestCase):
-    def test_steps_change_only_the_legs(self):
-        for name in ('down', 'left', 'right', 'up'):
-            cells = [body(), body()]
-            P.step(cells, name, 17)
-            a, b = (list(c.get_flattened_data()) for c in cells)
-            top = (P.BOTTOM - 5) * 16
-            self.assertEqual(a[:top], b[:top], name)
-            self.assertNotEqual(a[top:], b[top:], name)
-            self.assertFalse(any(p[3] for p in a[P.BOTTOM * 16:]), name)
-
     def test_overlap_sheet_keeps_head_and_bodies(self):
         cells = {name: [body(), body((30, 200, 30, 255))] for name, _ in P.ROWS8}
         pal = [(60, 90, 120), (200, 30, 30), (30, 200, 30)]
@@ -207,6 +197,46 @@ class SheetTests(unittest.TestCase):
         out = P.where([elder, scholar], {0x9C: {0x36}, 0x1F: {0x3C, 0x45}})
         self.assertEqual(out[elder], {0x3C, 0x36})
         self.assertEqual(out[scholar], {0x45})
+
+    def test_shade_edge_darkens_a_light_rim_with_a_deeper_shade_of_the_same_hue(self):
+        light, deep, other = (230, 120, 120, 255), (150, 60, 60, 255), (40, 60, 160, 255)
+        c = Image.new('RGBA', (16, 24))
+        for y in range(8, 20):
+            for x in range(4, 12):
+                c.putpixel((x, y), light)
+        c.putpixel((7, 12), deep)
+        c.putpixel((8, 12), other)
+        P.shade_edge(c)
+        self.assertEqual(c.getpixel((4, 12)), deep)                  # 옆 가장자리
+        self.assertEqual(c.getpixel((7, 8)), deep)                   # 윗 가장자리
+        self.assertEqual(c.getpixel((6, 14)), light)                 # 안쪽
+        self.assertEqual(c.getpixel((7, 19)), light)                 # 발 아랫줄은 땅에 붙는다
+        self.assertEqual(c.getpixel((3, 12))[3], 0)
+
+    def test_shade_edge_leaves_dark_rims_thin_lines_and_cells_beside_an_eye(self):
+        light, deep, dark = (230, 120, 120, 255), (150, 60, 60, 255), (70, 30, 30, 255)
+        c = Image.new('RGBA', (16, 24))
+        for y in range(8, 20):
+            for x in range(4, 12):
+                c.putpixel((x, y), dark if x == 11 else light)
+        c.putpixel((7, 12), deep)
+        for y in range(2, 8):
+            c.putpixel((6, y), light)                                # 한 칸 굵기의 창
+        c.putpixel((5, 12), P.INK + (255,))
+        P.shade_edge(c)
+        self.assertEqual(c.getpixel((11, 12)), dark)
+        self.assertEqual(c.getpixel((6, 4)), light)
+        self.assertEqual(c.getpixel((4, 12)), light)
+        self.assertEqual(c.getpixel((4, 14)), deep)
+
+    def test_shade_edge_keeps_a_rim_without_a_deeper_shade_in_the_picture(self):
+        light = (230, 120, 120, 255)
+        c = Image.new('RGBA', (16, 24))
+        for y in range(8, 20):
+            for x in range(4, 12):
+                c.putpixel((x, y), (40, 60, 160, 255) if (x, y) == (7, 12) else light)
+        P.shade_edge(c)
+        self.assertEqual(c.getpixel((4, 12)), light)
 
     def test_pack_backtracks_when_largest_first_fragments(self):
         bins = P.pack([('a', 6), ('b', 5), ('c', 5)], [10, 6])
@@ -328,15 +358,28 @@ class EyeTests(unittest.TestCase):
         self.assertEqual(list(s.get_flattened_data()), before)
 
 
-def nds_sheet(path, blobs=2, height=256):
-    """행마다 폭 8·높이 24 의 덩어리를 blobs 개. 덩어리 색의 R 은 (행 번호 + 1) * 20 + 덩어리 번호."""
+def nds_sheet(path, blobs=2, height=256, top=4, bottom=28):
+    """행마다 폭 8·높이 24(top~bottom) 의 덩어리를 blobs 개. 덩어리 색의 R 은 (행 번호 + 1) * 20 + 덩어리 번호."""
     sheet = Image.new('RGBA', (128, height))
     for row in range(height // 32):
         for k in range(blobs):
-            for y in range(row * 32 + 4, row * 32 + 28):
+            for y in range(row * 32 + top, row * 32 + bottom):
                 for x in range(4 + 16 * k, 12 + 16 * k):
                     sheet.putpixel((x, y), ((row + 1) * 20 + k, 100, 100, 255))
     sheet.save(path)
+
+
+def face_sheet(path):
+    """8줄 시트의 줄마다 face_frame 얼굴 하나. 옆모습 줄은 눈이 하나다."""
+    sheet = Image.new('RGBA', (128, 256))
+    sides = {row for name, row in P.ROWS8 if name in ('left', 'right')}
+    for row in range(8):
+        sheet.paste(face_frame(eyes=((8, 10),)) if row in sides else face_frame(), (0, row * 32))
+    sheet.save(path)
+
+
+def cells_of(image, color):
+    return {(x, y) for y in range(image.height) for x in range(image.width) if image.getpixel((x, y)) == color}
 
 
 class FramesTests(unittest.TestCase):
@@ -360,20 +403,115 @@ class FramesTests(unittest.TestCase):
             walk = P.frames(path, 'frames')
         self.assertEqual(list(walk['left'][0].get_flattened_data()), list(walk['left'][1].get_flattened_data()))
 
-    def test_rgb_frames_shrink_to_22_rows_and_stand_on_row_21(self):
-        person = P.Person((1,), None, 'h900', 'x')
+    def rgb(self, sheet=nds_sheet, **kw):
+        person = P.Person((1,), None, 'h900', 'x', **kw)
         with tempfile.TemporaryDirectory() as d:
             assets = Path(d)
             (assets / P.FIELD).mkdir(parents=True)
-            nds_sheet(assets / P.FIELD / 'h900.png')
-            out = P.rgb_frames(person, assets)
+            sheet(assets / P.FIELD / 'h900.png')
+            return P.rgb_frames(person, assets)
+
+    def test_people_keep_the_nds_scale_and_stand_on_the_last_row(self):
+        out = self.rgb()
         self.assertEqual(sorted(out), ['down', 'left', 'right', 'up'])
         for cells in out.values():
             for cell in cells:
                 self.assertEqual(cell.size, (16, 24))
-        # 8x24 → 6x19: 가로 5~10, 위는 22 - 19 = 3행
-        upper = out['left'][0].crop((0, 0, 16, 15)).getbbox()
-        self.assertEqual(upper, (5, 3, 11, 15))
+                # 8x24 → 6x19: 가로 5~10, 발이 맨 아랫줄(23행)
+                self.assertEqual(cell.getbbox(), (5, 5, 11, 24))
+
+    def test_people_taller_than_the_box_shrink_to_all_24_rows(self):
+        def sheet(path):
+            im = Image.new('RGBA', (128, 256))
+            for row in range(8):
+                im.paste((100, 100, 100, 255), (4, row * 32, 20, row * 32 + 32))
+            im.save(path)
+        for cells in self.rgb(sheet).values():
+            # 16x32 → 12x24(배율 0.75). NDS 배율 그대로면 13x25 라 머리 한 줄이 잘린다
+            self.assertEqual(cells[0].getbbox(), (2, 0, 14, 24))
+
+    def test_people_get_a_shaded_rim(self):
+        light, deep = (230, 120, 120, 255), (150, 60, 60, 255)
+
+        def sheet(path):
+            im = Image.new('RGBA', (128, 256))
+            for row in range(8):
+                im.paste(light, (4, row * 32 + 4, 12, row * 32 + 28))
+                im.paste(deep, (7, row * 32 + 12, 9, row * 32 + 20))
+            im.save(path)
+        person = P.Person((1,), None, 'h900', 'x')
+        with tempfile.TemporaryDirectory() as d:
+            assets = Path(d)
+            (assets / P.FIELD).mkdir(parents=True)
+            sheet(assets / P.FIELD / 'h900.png')
+            shaded, plain = P.rgb_frames(person, assets), P.rgb_frames(person, assets, outlined=False)
+        for name in shaded:
+            for cell in shaded[name]:
+                self.assertEqual(cell.getpixel((5, 12)), deep, name)
+                self.assertEqual(cell.getpixel((6, 8)), light, name)
+            self.assertEqual(plain[name][0].getpixel((5, 12)), light, name)
+
+    def test_walking_pictures_still_stand_on_row_21(self):
+        out = self.rgb(anim='frames')
+        # 8x24 → 6x19: 위는 22 - 19 = 3행
+        self.assertEqual(out['left'][0].getbbox(), (5, P.BOTTOM - 19, 11, P.BOTTOM))
+        self.assertEqual(out['left'][1].getbbox(), (5, P.BOTTOM - 19, 11, P.BOTTOM))
+
+    def test_second_step_takes_the_third_nds_frame_from_step_top_down(self):
+        out = self.rgb(lambda path: nds_sheet(path, blobs=3))
+        for name, row in P.ROWS8:
+            first, second = out[name]
+            red = (row + 1) * 20
+            self.assertEqual({p[0] for p in first.get_flattened_data() if p[3]}, {red}, name)
+            # 머리·몸통 타일을 두 장이 함께 쓰려면 16행 위가 같아야 한다
+            upper, lower = second.crop((0, 0, 16, 16)), second.crop((0, 16, 16, 24))
+            self.assertEqual(list(upper.get_flattened_data()), list(first.crop((0, 0, 16, 16)).get_flattened_data()), name)
+            self.assertEqual({p[0] for p in lower.get_flattened_data() if p[3]}, {red + 2}, name)
+
+    def test_people_with_one_nds_frame_repeat_it(self):
+        out = self.rgb()
+        self.assertEqual(list(out['down'][0].get_flattened_data()), list(out['down'][1].get_flattened_data()))
+
+    def test_touch_sets_ink_white_or_a_copied_cell_on_both_steps(self):
+        out = self.rgb(touch={'down': [(6, 10, 'ink'), (7, 10, 'white'), (0, 0, (8, 12))]})
+        for cell in out['down']:
+            self.assertEqual(cell.getpixel((6, 10)), P.INK + (255,))
+            self.assertEqual(cell.getpixel((7, 10)), P.WHITE + (255,))
+            self.assertEqual(cell.getpixel((0, 0)), (100, 100, 100, 255))
+        for name in ('left', 'right', 'up'):
+            self.assertEqual(out[name][0].getpixel((0, 0))[3], 0, name)
+            self.assertNotIn(P.INK + (255,), list(out[name][0].get_flattened_data()), name)
+
+    def test_copy_makes_one_side_the_mirror_of_the_other(self):
+        out = self.rgb(copy=('left', 'right'), touch={'left': [(5, 10, 'ink')]})
+        for left, right in zip(out['left'], out['right']):
+            self.assertEqual(left.getpixel((5, 10)), P.INK + (255,))
+            self.assertEqual(list(right.get_flattened_data()),
+                             list(left.transpose(Image.Transpose.FLIP_LEFT_RIGHT).get_flattened_data()))
+        plain = self.rgb()
+        self.assertNotEqual(list(plain['right'][0].get_flattened_data()),
+                            list(plain['left'][0].transpose(Image.Transpose.FLIP_LEFT_RIGHT).get_flattened_data()))
+
+    def test_people_get_ink_eyes_with_whites_outside_in_front_and_behind_on_the_side(self):
+        out = self.rgb(face_sheet)
+        ink, white = P.INK + (255,), P.WHITE + (255,)
+        for name, beside in (('down', (-1, 1)), ('left', (1,)), ('right', (-1,))):
+            cell = out[name][0]
+            eyes = sorted({x for x, y in cells_of(cell, ink)})
+            rows = sorted({y for x, y in cells_of(cell, ink)})
+            self.assertEqual(len(eyes), len(beside), name)
+            self.assertEqual(len(rows), 2, name)
+            self.assertEqual(cells_of(cell, white), {(x + d, y) for x, d in zip(eyes, beside) for y in rows}, name)
+        self.assertEqual(cells_of(out['up'][0], ink), set())
+
+    def test_whites_option_leaves_the_sclera_of_those_views_to_touch(self):
+        white = P.WHITE + (255,)
+        for face in (False, True):
+            out = self.rgb(face_sheet, whites=('down',), face=face)
+            self.assertEqual(cells_of(out['down'][0], white), set(), face)
+            self.assertEqual(len(cells_of(out['down'][0], P.INK + (255,))), 4, face)
+            self.assertEqual(len(cells_of(out['left'][0], white)), 2, face)
+            self.assertEqual(len(cells_of(self.rgb(face_sheet, face=face)['down'][0], white)), 4, face)
 
     def test_shrink_leaves_transparent_cells_empty(self):
         f = Image.new('RGBA', (28, 28))
@@ -391,8 +529,9 @@ class FramesTests(unittest.TestCase):
         self.assertEqual(shrunk.size, (round(30 * P.SCALE), round(40 * P.SCALE)))
         self.assertEqual(shrunk.getpixel((0, 0)), (9, 9, 9, 255))
 
-    def test_outline_option_darkens_the_silhouette_edge(self):
-        person = P.Person((1,), None, 'h901', 'x', outline=True)
+    def test_outline_option_darkens_the_silhouette_edge_of_walking_pictures(self):
+        # outline 은 사람이 아닌 그림(걸음 두 장을 NDS 그대로 쓰는 것)에만 듣는다. 사람은 shade_edge 가 맡는다
+        person = P.Person((1,), None, 'h901', 'x', anim='frames', outline=True)
         with tempfile.TemporaryDirectory() as d:
             assets = Path(d)
             (assets / P.FIELD).mkdir(parents=True)
@@ -407,6 +546,18 @@ class FramesTests(unittest.TestCase):
         self.assertEqual(cell.getpixel((5, 10))[:3], (20, 20, 20))
         self.assertEqual(cell.getpixel((7, 3))[:3], (20, 20, 20))
         self.assertEqual(cell.getpixel((7, 10))[:3], (200, 200, 200))
+
+    def test_outline_option_does_nothing_for_people(self):
+        def sheet(path):
+            im = Image.new('RGBA', (128, 256))
+            for row in range(8):
+                for y in range(row * 32 + 4, row * 32 + 28):
+                    for x in range(4, 12):
+                        im.putpixel((x, y), (200, 200, 200, 255))
+            im.save(path)
+        plain, outlined = self.rgb(sheet), self.rgb(sheet, outline=True)
+        for name in plain:
+            self.assertEqual(list(outlined[name][0].get_flattened_data()), list(plain[name][0].get_flattened_data()), name)
 
 
 class SideStepTests(unittest.TestCase):
@@ -594,6 +745,16 @@ class TileAreaTests(unittest.TestCase):
             P.pack([('a', 6)], [5])
         self.assertEqual(P.pack([], [5]), [[]])
 
+    def test_pack_stops_at_once_when_the_total_is_larger_than_the_room(self):
+        # 되돌아가기에 들어가면 모든 배치를 다 해 본 뒤에야 끝난다. 합을 먼저 보고 그 두 수를 알린다
+        items = [(f's{k}', 3) for k in range(40)]
+        with self.assertRaisesRegex(SystemExit, '^타일 자료 자리가 모자람: 120 > 119$'):
+            P.pack(items, [60, 59])
+
+    def test_pack_reports_the_items_when_the_total_fits_but_no_layout_does(self):
+        with self.assertRaisesRegex(SystemExit, "타일 자료 자리가 모자람: 세트·바이트 .*'a', 6"):
+            P.pack([('a', 6), ('b', 6)], [11, 1])
+
 
 class SplitPatchTests(unittest.TestCase):
     AREAS = (('3E:D700', 100), ('3F:EB80', 100))
@@ -633,6 +794,307 @@ class SplitPatchTests(unittest.TestCase):
         self.assertEqual([r['set'] for r in out[0]['part']['sets']], ['10'])
 
 
+def strip(*boxes):
+    """2x2 상자를 옆으로 이은 그림. 상자마다 색 넷(왼쪽 위, 오른쪽 위, 왼쪽 아래, 오른쪽 아래), None 은 빈 칸."""
+    f = Image.new('RGBA', (2 * len(boxes), 2))
+    for k, box in enumerate(boxes):
+        for n, c in enumerate(box):
+            if c is not None:
+                f.putpixel((2 * k + n % 2, n // 2), c + (255,))
+    return f
+
+
+class ResampleTests(unittest.TestCase):
+    A, B, MEAN = (240, 200, 200), (200, 240, 200), (230, 210, 200)      # MEAN 은 A 셋 + B 하나의 평균
+    BLACK = (8, 8, 8)
+
+    def half(self, *boxes):
+        out, xs, ys = P.resample(strip(*boxes), 0.5)
+        return [out.getpixel((x, 0)) for x in range(out.width)], xs, ys
+
+    def test_a_cell_takes_the_colour_that_fills_most_of_its_box_not_the_mean(self):
+        cells, xs, ys = self.half([self.A, self.A, self.B, self.A], [self.MEAN] * 4)
+        self.assertEqual(cells, [self.A + (255,), self.MEAN + (255,)])
+        self.assertEqual((xs, ys), ([1, 3], [1]))
+
+    def test_a_cell_without_a_majority_takes_the_colour_nearest_the_mean(self):
+        mid = (220, 220, 200)
+        cells, _, _ = self.half([self.A, self.A, self.B, self.B], [mid] * 4)
+        self.assertEqual(cells[0], mid + (255,))
+
+    def test_dark_dots_win_from_a_third_of_the_box(self):
+        grey = (124, 104, 104)                                          # 검정 둘 + A 둘의 평균
+        cells, _, _ = self.half([self.BLACK, self.A, self.A, self.A], [self.BLACK, self.BLACK, self.A, self.A], [grey] * 4)
+        self.assertEqual(cells[0], self.A + (255,))                     # 4분의 1 은 모자라다
+        self.assertEqual(cells[1], self.BLACK + (255,))
+
+    def test_a_light_pattern_on_a_dark_ground_keeps_the_light_colour(self):
+        ground, light, between = (60, 60, 90), (250, 250, 250), (150, 150, 170)
+        self.assertLess(P.lab(ground)[0], 45)
+        self.assertGreaterEqual(P.lab(between)[0], 50)
+        cells, _, _ = self.half([ground, ground, ground, light], [between] * 4)
+        self.assertEqual(cells[0], between + (255,))
+
+    def test_cells_less_than_half_covered_stay_empty(self):
+        cells, _, _ = self.half([self.A, None, None, None], [self.A, self.A, self.A, None])
+        self.assertEqual(cells[0][3], 0)
+        self.assertEqual(cells[1], self.A + (255,))
+
+
+def skin_cell(left=0, right=16):
+    c = Image.new('RGBA', (16, 24))
+    for y in range(4, 20):
+        for x in range(left, right):
+            c.putpixel((x, y), FACE)
+    return c
+
+
+FACE = P.SKIN[1] + (255,)
+INK, EYE_WHITE = P.INK + (255,), P.WHITE + (255,)
+GRID = (list(range(16)), list(range(24)))
+
+
+class DotEyeTests(unittest.TestCase):
+    def test_front_eyes_are_one_by_two_ink_dots_with_whites_on_the_outside(self):
+        s = skin_cell()
+        P.dot_eyes([(5, 8), (10, 8)], s, *GRID)
+        self.assertEqual(cells_of(s, INK), {(5, 8), (5, 9), (10, 8), (10, 9)})
+        self.assertEqual(cells_of(s, EYE_WHITE), {(4, 8), (4, 9), (11, 8), (11, 9)})
+
+    def test_side_eye_gets_its_white_behind_the_pupil(self):
+        for facing, behind in ((-1, 6), (1, 4)):
+            s = skin_cell()
+            P.dot_eyes([(5, 8)], s, *GRID, facing=facing)
+            self.assertEqual(cells_of(s, INK), {(5, 8), (5, 9)})
+            self.assertEqual(cells_of(s, EYE_WHITE), {(behind, 8), (behind, 9)}, facing)
+
+    def test_eyes_take_the_nearest_shrunk_column_and_row(self):
+        s = skin_cell()
+        P.dot_eyes([(11, 17)], s, [2 * k + 1 for k in range(16)], [2 * k for k in range(24)], facing=1)
+        self.assertEqual(cells_of(s, INK), {(5, 8), (5, 9)})
+
+    def test_no_white_is_drawn_without_sclera_or_outside_the_body(self):
+        s = skin_cell()
+        P.dot_eyes([(5, 8), (10, 8)], s, *GRID, sclera=False)
+        self.assertEqual(cells_of(s, EYE_WHITE), set())
+        s = skin_cell(left=5)
+        P.dot_eyes([(5, 8), (10, 8)], s, *GRID)
+        self.assertEqual(cells_of(s, EYE_WHITE), {(11, 8), (11, 9)})
+        self.assertEqual(s.getpixel((4, 8))[3], 0)
+
+    def test_nds_whites_beside_the_pupil_go_unless_the_person_wears_glasses(self):
+        for glasses, left in ((False, FACE), (True, EYE_WHITE)):
+            s = skin_cell()
+            for y in (8, 9):
+                s.putpixel((6, y), EYE_WHITE)
+            P.dot_eyes([(5, 8), (10, 8)], s, *GRID, glasses, sclera=False)
+            self.assertEqual(s.getpixel((6, 8)), left, glasses)
+
+    def test_only_a_near_black_cell_above_the_eye_is_cleared(self):
+        black, brown = (10, 10, 10, 255), (120, 70, 40, 255)
+        self.assertLess(P.lab(black[:3])[0], 28)
+        self.assertTrue(28 <= P.lab(brown[:3])[0] < 45)
+        s = skin_cell()
+        s.putpixel((5, 7), black)
+        s.putpixel((10, 7), brown)
+        P.dot_eyes([(5, 8), (10, 8)], s, *GRID)
+        self.assertEqual(s.getpixel((5, 7)), FACE)
+        self.assertEqual(s.getpixel((10, 7)), brown)
+
+    def test_eyes_that_land_side_by_side_are_spread_by_the_face_width(self):
+        for left, right, want in ((3, 13, {6, 9}), (5, 10, {6, 8})):
+            s = skin_cell(left, right)
+            P.dot_eyes([(6, 8), (7, 8)], s, *GRID, sclera=False)
+            self.assertEqual({x for x, _ in cells_of(s, INK)}, want, (left, right))
+            self.assertEqual({y for _, y in cells_of(s, INK)}, {8, 9})
+
+
+class EyeSpotTests(unittest.TestCase):
+    def single_dots(self):
+        f = face_frame()
+        for x in (8, 13):
+            f.putpixel((x, 11), SKIN)
+            for d in (-1, 1):
+                f.putpixel((x + d, 11), SKIN)
+        return f
+
+    def test_spots_are_the_top_dot_of_each_pupil(self):
+        self.assertEqual(P.eye_spots(face_frame(), False), [(8, 10), (13, 10)])
+        self.assertEqual(P.eye_spots(face_frame(eyes=((8, 10),)), True), [(8, 10)])
+
+    def test_one_dot_pupils_beside_a_white_are_found_too(self):
+        f = self.single_dots()
+        self.assertEqual(P.find_eyes(f), [])
+        self.assertEqual(P.eye_spots(f, False), [(8, 10), (13, 10)])
+        self.assertEqual(P.eye_spots(f, True), [(8, 10)])
+
+    def test_a_dark_dot_without_white_or_face_below_is_not_an_eye(self):
+        self.assertEqual(P.eye_spots(face_frame(whites=[]), False), [])
+        f = self.single_dots()
+        for x in (8, 13):
+            for y in (11, 12, 13):
+                f.putpixel((x, y), (40, 60, 160, 255))
+        self.assertEqual(P.eye_spots(f, False), [])
+        self.assertEqual(P.eye_spots(f, False, skin=False), [(8, 10), (13, 10)])
+
+    def test_side_eye_is_looked_for_near_the_front_eye_level_only(self):
+        f = face_frame(eyes=((8, 10),))
+        self.assertEqual(P.eye_spots(f, True, level=f.height - 10), [(8, 10)])
+        self.assertEqual(P.eye_spots(f, True, level=f.height - 12), [(8, 10)])
+        self.assertEqual(P.eye_spots(f, True, level=f.height - 13), [])
+        self.assertEqual(P.eye_spots(self.single_dots(), True, level=5), [])
+
+
+class SharedColourTests(unittest.TestCase):
+    def test_common_skin_gathers_near_skin_and_near_white_colours(self):
+        near_skin, near_white, cloth = (224, 176, 143), (250, 250, 250), (40, 60, 160)
+        for c, tone in ((near_skin, P.SKIN[1]), (near_white, P.WHITE)):
+            self.assertLessEqual(P.math.dist(P.lab(c), P.lab(tone)), P.SKIN_NEAR)
+        a = Image.new('RGBA', (5, 1))
+        for x, c in enumerate((near_skin, near_white, cloth, P.INK)):
+            a.putpixel((x, 0), c + (255,))
+        b = Image.new('RGBA', (1, 1), P.SKIN[2] + (255,))
+        P.common_skin({'down': [a, b]})
+        self.assertEqual([a.getpixel((x, 0)) for x in range(5)],
+                         [P.SKIN[1] + (255,), P.WHITE + (255,), cloth + (255,), P.INK + (255,), (0, 0, 0, 0)])
+        self.assertEqual(b.getpixel((0, 0)), P.SKIN[2] + (255,))
+
+    def test_people_share_the_skin_tones_but_walking_pictures_keep_their_own(self):
+        def sheet(path):
+            im = Image.new('RGBA', (128, 256))
+            for row in range(8):
+                for y in range(row * 32 + 4, row * 32 + 28):
+                    for x in range(4, 12):
+                        im.putpixel((x, y), (224, 176, 143, 255))
+            im.save(path)
+        with tempfile.TemporaryDirectory() as d:
+            assets = Path(d)
+            (assets / P.FIELD).mkdir(parents=True)
+            sheet(assets / P.FIELD / 'h900.png')
+            person = P.rgb_frames(P.Person((1,), None, 'h900', 'x'), assets)
+            beast = P.rgb_frames(P.Person((1,), None, 'h900', 'x', anim='frames'), assets)
+        self.assertEqual(set(P.histogram(person)), {P.SKIN[1]})
+        self.assertEqual(set(P.histogram(beast)), {(224, 176, 143)})
+
+    def test_histogram_weighs_ink_and_the_shared_tones(self):
+        c = Image.new('RGBA', (4, 1))
+        for x, colour in enumerate((P.INK, P.SKIN[0], P.WHITE, (40, 60, 160))):
+            c.putpixel((x, 0), colour + (255,))
+        self.assertEqual(P.histogram({'down': [c]}), Counter({P.INK: P.INK_WEIGHT, P.SKIN[0]: P.SKIN_WEIGHT,
+                                                               P.WHITE: P.SKIN_WEIGHT, (40, 60, 160): 1}))
+
+    def test_accented_lifts_small_own_colours_to_a_share_of_the_clothes(self):
+        coat, ribbon, hem = (40, 60, 160), (200, 30, 30), (30, 160, 60)
+        hist = Counter({coat: 900, ribbon: 2, hem: 98, P.SKIN[1]: 5, P.INK: 3, P.WHITE: 1})
+        out = P.accented(hist)
+        floor = 1000 * P.ACCENT_SHARE
+        self.assertEqual(out[ribbon], floor)
+        self.assertEqual((out[coat], out[hem]), (900, 98))
+        for c in (P.SKIN[1], P.INK, P.WHITE):
+            self.assertEqual(out[c], hist[c])
+        self.assertGreater(floor, 2)
+        self.assertLess(floor, 98)
+
+
+def shades(red, n):
+    return Counter({(red, 16 * k, 0): 10 for k in range(n)})
+
+
+class LineTests(unittest.TestCase):
+    ELSEWHERE = 0x40
+
+    def person(self, n, **kw):
+        return P.Person((n,), None, 's', f'p{n}', **kw)
+
+    def test_line_three_is_shared(self):
+        self.assertIn(3, P.SHARED_LINES)
+        self.assertEqual(len(set(P.SHARED_LINES)), len(P.SHARED_LINES))
+        for lent in P.LENT_LINES.values():
+            self.assertFalse(set(lent) & set(P.SHARED_LINES))
+
+    def test_people_seen_only_where_a_party_line_is_free_may_take_it(self):
+        self.assertNotIn(self.ELSEWHERE, P.LENT_LINES)
+        lent = P.LENT_LINES[P.PROLOGUE]
+        crowd = [self.person(k) for k in range(len(P.SHARED_LINES))]
+        home, both = self.person(0x20), self.person(0x21)
+        hists = {p: shades(40 * k, 12) for k, p in enumerate(crowd)}
+        hists[home], hists[both] = shades(250, 2), shades(251, 2)
+        where = {p: {P.PROLOGUE, self.ELSEWHERE} for p in crowd}
+        where[home], where[both] = {P.PROLOGUE}, {P.PROLOGUE, self.ELSEWHERE}
+        assign, _ = P.lines([*crowd, home, both], hists, where)
+        self.assertEqual(sorted(assign[p] for p in crowd), sorted(P.SHARED_LINES))
+        self.assertEqual(assign[home], lent[0])
+        self.assertIn(assign[both], P.SHARED_LINES)
+
+    def test_two_heavy_people_in_one_group_go_to_different_lines(self):
+        for weight, apart in ((P.KEY_WEIGHT, True), (1, False)):
+            a, b = self.person(1, weight=weight), self.person(2, weight=weight)
+            hists = {a: shades(200, 3), b: shades(30, 3)}
+            assign, _ = P.lines([a, b], hists, {a: {self.ELSEWHERE}, b: {self.ELSEWHERE}})
+            self.assertEqual(assign[a] != assign[b], apart, weight)
+
+    def test_heavy_people_in_different_groups_may_share_a_line(self):
+        a, b = self.person(1, weight=P.KEY_WEIGHT), self.person(2, weight=P.KEY_WEIGHT)
+        hists = {a: shades(200, 3), b: shades(30, 3)}
+        assign, _ = P.lines([a, b], hists, {a: {self.ELSEWHERE}, b: {self.ELSEWHERE + 1}})
+        self.assertEqual(assign[a], assign[b])
+
+    def test_a_heavy_person_takes_the_line_where_the_fewest_heavy_colours_meet(self):
+        first, second, third = (self.person(k, weight=P.KEY_WEIGHT) for k in (1, 2, 3))
+        light = [self.person(0x10 + k) for k in range(len(P.SHARED_LINES))]
+        hists = {first: shades(200, 6), second: shades(30, 5), third: shades(120, 2)}
+        hists.update({p: shades(60 + k, 1) for k, p in enumerate(light)})
+        g = self.ELSEWHERE
+        where = {p: {g} for p in hists}
+        with unittest.mock.patch.object(P, 'SHARED_LINES', P.SHARED_LINES[:2]):
+            assign, _ = P.lines([*light, third, second, first], hists, where)
+        self.assertNotEqual(assign[first], assign[second])
+        self.assertEqual(assign[third], assign[second])
+
+    def test_heavy_people_are_placed_before_the_rest(self):
+        light, heavy, main = self.person(1), self.person(2, weight=P.KEY_WEIGHT), self.person(3, main=True)
+        hists = {light: shades(200, 12), heavy: shades(30, 2), main: shades(120, 3)}
+        assign, _ = P.lines([light, heavy, main], hists, {p: {self.ELSEWHERE} for p in hists})
+        self.assertEqual(list(assign), [main, heavy, light])
+
+    def test_a_pinned_person_keeps_its_line_and_still_counts_as_heavy_there(self):
+        pinned, other = self.person(1, main=True, line=2), self.person(2, main=True)
+        hists = {pinned: shades(30, 3), other: shades(200, 3)}
+        assign, _ = P.lines([pinned, other], hists, {p: {self.ELSEWHERE} for p in hists})
+        self.assertEqual(assign[pinned], 2)
+        self.assertNotEqual(assign[other], 2)
+
+    def test_a_pin_on_a_line_the_person_cannot_use_stops_the_build(self):
+        pinned = self.person(1, line=7)
+        with self.assertRaisesRegex(SystemExit, '쓸 수 없는 줄'):
+            P.lines([pinned], {pinned: shades(30, 3)}, {pinned: {self.ELSEWHERE}})
+
+    def test_the_swordsman_is_pinned_to_line_zero(self):
+        # 지하 수련의 검사는 스크립트 엔트리라 세트 팔레트 표와 상관없이 OBJ 팔레트 0 으로 그려진다
+        self.assertEqual(next(p for p in P.PEOPLE if p.role == '검사').line, 0)
+
+
+class WeightTests(unittest.TestCase):
+    def test_main_people_weigh_the_key_weight_and_the_rest_one(self):
+        self.assertGreater(P.KEY_WEIGHT, 1)
+        self.assertEqual(P.Person((1,), None, 's', 'x', main=True).weight, P.KEY_WEIGHT)
+        self.assertEqual(P.Person((1,), None, 's', 'x').weight, 1)
+        self.assertEqual(P.Person((1,), None, 's', 'x', main=True, weight=3).weight, 3)
+        for p in P.PEOPLE:
+            if p.main:
+                self.assertEqual(p.weight, P.KEY_WEIGHT, p.role)
+
+    def test_key_event_people_and_the_emblem_townsfolk_weigh_the_key_weight(self):
+        by_role = {p.role: p for p in P.PEOPLE if p.seen is not None}
+        self.assertLessEqual({'엘프', '검은 망토', '카멜레온 맨', '비비안'}, P.KEY_EVENT)
+        self.assertLessEqual(P.KEY_EVENT, set(by_role))
+        for role, p in by_role.items():
+            self.assertEqual(p.weight, P.KEY_WEIGHT if role in P.KEY_EVENT else 1, role)
+        for role in ('병사', '위병', '슬라임'):
+            self.assertEqual([p.weight for p in P.PEOPLE if p.role == role], [P.KEY_WEIGHT], role)
+        self.assertEqual([p.weight for p in P.PEOPLE if p.role == '남자'], [1])
+
+
 def synthetic_person(name, sheet, **kw):
     return P.Person((0x10 + len(name),), None, sheet, name, **kw)
 
@@ -650,11 +1112,11 @@ class PrepareTests(unittest.TestCase):
         self.people = (synthetic_person('aa', 'h900', main=True), synthetic_person('bbb', 'h901'),
                        synthetic_person('cccc', 'h902', palette=7))
 
-    def prepare(self, limit, sets=(0x41, 0x42, 0x43)):
+    def prepare(self, limit, sets=(0x41, 0x42, 0x43), **kw):
         table = dict(zip(self.people, sets))
         with unittest.mock.patch.object(P, 'PEOPLE', self.people), \
                 unittest.mock.patch.object(P, 'target', lambda person, rom: (table[person], 'simple', limit)):
-            return P.prepare(None, self.assets, self.work)
+            return P.prepare(None, self.assets, self.work, **kw)
 
     def test_each_person_gets_a_sheet_a_line_and_colours(self):
         rows, board = self.prepare(limit=99)
@@ -675,6 +1137,21 @@ class PrepareTests(unittest.TestCase):
         self.assertEqual(main[5], [])
         self.assertEqual(other[5], [name for name, _ in P.DEGRADE])
         self.assertGreater(other[4], 0)
+
+    def test_squeeze_mirrors_the_sides_of_everyone_but_main_people(self):
+        mirror = P.DEGRADE[0][0]
+        # 주요 인물은 반전을 허락받았어도(타일 한도를 넘을 때만 쓴다) 자리를 아끼려고 반전하지 않는다
+        self.people += (synthetic_person('ddddd', 'h900', main=True, allow=(mirror,)),)
+        sets = (0x41, 0x42, 0x43, 0x44)
+        self.assertEqual([r[5] for r in self.prepare(limit=99, sets=sets)[0]], [[], [], [], []])
+        rows, _ = self.prepare(limit=99, sets=sets, squeeze=True)
+        self.assertEqual([r[5] for r in rows], [[], [mirror], [mirror], []])
+        names = [name for name, _ in P.ROWS8]
+        for (_, s, *_), mirrored in zip(rows, (False, True, True, False)):
+            with Image.open(self.work / f'{s:02X}.png') as sheet:
+                side = {name: sheet.crop((0, 24 * names.index(name), 16, 24 * names.index(name) + 24)) for name in names}
+            flipped = side['right'].transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+            self.assertEqual(list(side['left'].get_flattened_data()) == list(flipped.get_flattened_data()), mirrored, f'{s:02X}')
 
     def test_two_people_on_one_set_stop_the_build(self):
         with self.assertRaisesRegex(SystemExit, '두 인물이 같은 세트를 바꿈'):
@@ -782,6 +1259,22 @@ class BuildFlowTests(unittest.TestCase):
                 calls['sprite'] = json.loads((work / 'sprite.json').read_text())
                 calls['out'] = out.read_bytes()
         return calls
+
+    def test_build_tries_again_with_squeeze_only_when_the_tile_room_runs_out(self):
+        calls = []
+
+        def assemble(base, dq5, assets, out, work, squeeze):
+            calls.append(squeeze)
+            if not squeeze:
+                raise SystemExit('타일 자료 자리가 모자람: 2 > 1')
+            return 'rows'
+        with unittest.mock.patch.object(P, 'assemble', assemble):
+            self.assertEqual(P.build(None, None, None, None, None), 'rows')
+        self.assertEqual(calls, [False, True])
+        with unittest.mock.patch.object(P, 'assemble', side_effect=SystemExit('타일 한도를 넘음: a 49>48')) as other:
+            with self.assertRaisesRegex(SystemExit, '타일 한도'):
+                P.build(None, None, None, None, None)
+        self.assertEqual(other.call_count, 1)
 
     def test_tile_limit_stops_the_build(self):
         with self.assertRaisesRegex(SystemExit, 'a 49>48'):

@@ -57,15 +57,8 @@ why = "원래 자리에 들어가지 않는 세트 타일(dq4people.TILE_AREAS �
 earlier = "chapter1"
 later = "people"
 reuse = true
-at = "3D:EA00~3D:FA7F"
-why = "세트 팔레트 표(dq4people.PALETTES_AT)와 맵 팔레트 줄 루틴·표(MAP_PALETTES_AT 3D:EB60)"
-
-[[overlap]]
-earlier = "chapter1"
-later = "people"
-reuse = true
-at = "3D:FA80~3D:FD8F"
-why = "세트 타일(dq4people.TILE_AREAS 의 3D:FA80~FD90, 맵 팔레트 표 뒤)"
+at = "3D:EA00~3D:FD8F"
+why = "세트 팔레트 표(dq4people.PALETTES_AT)와 맵 팔레트 줄 루틴·표(MAP_PALETTES_AT 3D:EB60). 공용 줄이 다섯에 빌린 일행 줄까지 실어 표가 3D:FA80 을 넘는다"
 
 [[overlap]]
 earlier = "chapter1"
@@ -386,8 +379,81 @@ why = "세트 9F 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 
 
 [[original]]
 stage = "people"
+at = "0C:AEC2~0C:B172"
+data = true
+why = "세트 12 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0C:C7AA~0C:CB21"
+data = true
+why = "세트 1E 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0C:FD97~0C:FFFF"
+data = true
+why = "세트 2F 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0D:8000~0D:810D"
+data = true
+why = "세트 2F 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0D:C2A3~0D:C5E1"
+data = true
+why = "세트 4E 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0D:C782~0D:CAF4"
+data = true
+why = "세트 51 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0D:FE61~0D:FFFF"
+data = true
+why = "세트 66 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0E:8000~0E:827C"
+data = true
+why = "세트 66 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0E:C8F4~0E:CC6A"
+data = true
+why = "세트 8C 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0E:CC6B~0E:CFB4"
+data = true
+why = "세트 8D 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0E:D93B~0E:DD92"
+data = true
+why = "세트 92 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0E:F26A~0E:F581"
+data = true
+why = "세트 9A 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
 at = "1F:D71D~1F:FE97"
-why = "세트 레코드(52바이트)·세트 포인터를 바꾼 세트로(dq4people)"
+data = true
+why = "세트 레코드(52바이트)·세트 포인터를 바꾼 세트로(dq4people). 레코드는 자료다. 타일 수 22 뒤에 타일 자료 주소 셋이 오면 JSL 처럼 보인다(1F:EEE2)"
 
 # --- 뱅크 경계를 넘는 쓰기 덩어리(자료만. 코드는 PC 가 뱅크를 넘지 않으므로 넣지 않는다)
 
