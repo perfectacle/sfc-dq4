@@ -4,7 +4,8 @@ DQ5 의 「はなす」는 앞에 말 상대가 없으면 05:D5B9 에서 대화 
 창 열기와 메시지(05:D5B9~D5BE)를 뱅크 05 받침으로 돌려, 받침이 창을 연 뒤 이 모듈의 네이티브가 지금 맵의 대사 목록에서 조건이 맞는 줄을 하나 고른다. 맞는
 줄이 없으면 원래처럼 129 를 띄운다. 형식은 sfc/dq4/docs/dq4-chapter2-format.md 「동료 대화」.
 
-대사 줄은 LINES 에 Line 하나씩 더한다(맵·말하는 인물·대사 이름·우선순위·시간·조건). 대사 본문은 MESSAGES 에 같은 이름으로.
+대사 줄은 NDS 2장 동료 대화 표에서 옮긴 dq4ch2partytalk.tsv(dq4ch2partytalknds.py 가 만듦)와 한글 대사
+dq4ch2partytalk-text.tsv 를 읽어 LINES·MESSAGES 로 만든다.
 """
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +16,7 @@ sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
 import dq4chapter1 as ch1  # noqa: E402
 import dq4ch2event as ch2  # noqa: E402
+import dq4ch2endor as endor  # noqa: E402
 import dq4ch2frenol as frenol  # noqa: E402
 import dq4ch2king as king  # noqa: E402
 import dq4ch2tempe as tempe  # noqa: E402
@@ -61,6 +63,7 @@ class Line:
     lead: int = None           # 선두 인물
     with_: tuple = ()          # 걷는 줄에 있어야 하는 인물
     without: tuple = ()        # 걷는 줄에 없어야 하는 인물
+    nds: int = None            # 옮겨 온 NDS 2장 동료 대화 레코드 번호
 
     def conditions(self):
         return ([(ON, i, m) for i, m in self.on] + [(OFF, i, m) for i, m in self.off] +
@@ -76,33 +79,62 @@ def _pair(*parts):
     return out + [ch1.END]
 
 
-# 장치를 보이는 표본 대사. 옮길 범위와 NDS 대사는 다음 단계에서 정한다
-MESSAGES = {
-    'tempe_won_kiryl': speak('크리프트', '마을 사람들의/웃는 얼굴을 보니/저도 마음이/놓입니다.'),
-    'tempe_won_brey': speak('브라이', '허허허. 공주님의/솜씨가 이 정도일/줄은 이 늙은이도/미처 몰랐습니다.'),
-    'tempe_day_kiryl': speak('크리프트', '이 마을에는 어딘가/어두운 기운이/감도는군요.'),
-    'tempe_night_brey': speak('브라이', '제물을 바치라니/고약한 괴물이로군요./공주님, 부디/조심하십시오.'),
-    'castle_joined': _pair(speak('크리프트', '임금님께 들키면/큰일입니다./어서 성을/나가시지요.'),
-                           speak('브라이', '허허, 이제 와서/말려도 소용없지요.')),
-    'frenol_kidnapped_kiryl': speak('크리프트', '공주님을 사칭하다니/괘씸한 일이지만/붙잡혀 간 사람은/구해야지요.'),
-    'frenol_rescued_brey': speak('브라이', '가짜라고는 하나/공주님을 닮은/아가씨가 무사해서/다행입니다.'),
-    'king_cured_kiryl': speak('크리프트', '임금님의 목소리가/돌아와서 정말/다행입니다.'),
-    'king_cured_brey': speak('브라이', '이제 성 걱정은/덜었으니 공주님/마음껏 세상을/돌아보시지요.'),
-    'field_kiryl': speak('크리프트', '공주님, 너무 앞서/달려가지 마십시오.'),
+# 줄 표(LINES_TSV)의 이름. 조건 이름은 NDS 이야기 flag 를 옮긴 SFC flag(dq4ch2partytalknds.STORY)
+SPEAKERS = {'ALENA': (ALENA, '아리나'), 'KIRYL': (KIRYL, '크리프트'), 'BREY': (BREY, '브라이')}
+CONDITIONS = {
+    'CHAPTER2': ch2.CHAPTER2, 'JOINED': ch2.JOINED, 'TEMPE_HEARD': ch2.TEMPE_HEARD, 'WON': tempe.WON,
+    'KIDNAPPED': frenol.KIDNAPPED,
+    'BRACELET': (frenol.CHEST_OPEN[0] - 0x2190, frenol.CHEST_OPEN[1]),     # 남쪽 동굴 황금의 팔찌 상자가 열림
+    'RESCUED': frenol.RESCUED, 'BAZAAR': king.BAZAAR, 'HEARD': king.HEARD, 'GOT': king.GOT, 'CURED': king.CURED,
+    'CHAMPION': endor.CHAMPION, 'MESSENGER': endor.MESSENGER,
 }
+# 2장 진행 단계(앞 단계 flag 를 모두 켠 채 하나씩 더함). 범위 표와 실행 검사가 쓴다
+STAGES = []
+for _name, _flag in (('합류', 'JOINED'), ('텐페 부탁', 'TEMPE_HEARD'), ('텐페 이김', 'WON'), ('납치', 'KIDNAPPED'),
+                     ('팔찌', 'BRACELET'), ('구함', 'RESCUED'), ('왕 병', 'BAZAAR'), ('들음', 'HEARD'),
+                     ('꿀', 'GOT'), ('나음', 'CURED'), ('우승', 'CHAMPION'), ('사자', 'MESSENGER')):
+    STAGES.append((_name, (STAGES[-1][1] if STAGES else frozenset({'CHAPTER2'})) | {_flag}))
+LINES_TSV = HERE / 'dq4ch2partytalk.tsv'           # dq4ch2partytalknds.py lines 가 NDS 표에서 만든 줄
+TEXT_TSV = HERE / 'dq4ch2partytalk-text.tsv'       # NDS 메시지 번호마다의 한글 대사(NDS 한글 팬패치를 참고해 옮김)
 
-LINES = (
-    Line(ch2.CASTLE, KIRYL, 'castle_joined', priority=5, on=(ch2.JOINED,), with_=(BREY,)),
-    Line(ch2.TEMPE, KIRYL, 'tempe_won_kiryl', priority=3, on=(tempe.WON,)),
-    Line(ch2.TEMPE, BREY, 'tempe_won_brey', priority=3, on=(tempe.WON,)),
-    Line(ch2.TEMPE, KIRYL, 'tempe_day_kiryl', priority=5, time='day', off=(tempe.WON,)),
-    Line(ch2.TEMPE, BREY, 'tempe_night_brey', priority=5, time='night', off=(tempe.WON,)),
-    Line(frenol.TOWN, BREY, 'frenol_rescued_brey', priority=3, on=(frenol.RESCUED,)),
-    Line(frenol.TOWN, KIRYL, 'frenol_kidnapped_kiryl', priority=5, on=(frenol.KIDNAPPED,)),
-    Line(ch2.THRONE, KIRYL, 'king_cured_kiryl', priority=3, on=(king.CURED,)),
-    Line(ch2.THRONE, BREY, 'king_cured_brey', priority=3, on=(king.CURED,)),
-    Line(FIELD, KIRYL, 'field_kiryl', priority=9, lead=ALENA),
-)
+
+def _rows(path):
+    head, *rows = path.read_text(encoding='utf-8').splitlines()
+    keys = head.split('\t')
+    return [dict(zip(keys, r.split('\t'))) for r in rows if r]
+
+
+def _names(cell):
+    return tuple(v for v in cell.split(',') if v)
+
+
+def _message(ids, texts):
+    """NDS 메시지 여럿을 한 메시지로: 같은 사람이 이어 말하면 쪽마다, 사람이 바뀌면 그 사람 이름으로 이어 붙인다."""
+    runs = []
+    for m in ids:
+        name, text = texts[m]
+        if runs and runs[-1][0] == name:
+            runs[-1][1].append(text)
+        else:
+            runs.append((name, [text]))
+    return _pair(*(speak(name, *pages) for name, pages in runs))
+
+
+def _load():
+    texts = {int(r['message']): (r['speaker'], r['text']) for r in _rows(TEXT_TSV)}
+    messages, lines = {}, []
+    for r in _rows(LINES_TSV):
+        ids = tuple(int(m) for m in r['messages'].split(','))
+        name = 'n' + '_'.join(map(str, ids))
+        if name not in messages:
+            messages[name] = _message(ids, texts)
+        lines.append(Line(r['map'], SPEAKERS[r['speaker']][0], name, priority=int(r['priority']), time=r['time'],
+                          on=tuple(CONDITIONS[f] for f in _names(r['on'])), off=tuple(CONDITIONS[f] for f in _names(r['off'])),
+                          with_=tuple(SPEAKERS[p][0] for p in _names(r['with'])), nds=int(r['nds'])))
+    return messages, tuple(lines)
+
+
+MESSAGES, LINES = _load()
 
 DATA_ENTRIES = ('maps',)
 
