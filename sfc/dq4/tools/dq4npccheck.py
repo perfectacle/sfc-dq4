@@ -228,6 +228,14 @@ STAGED = {(0x0E, 0, 0x15, 0x0D), (0x0E, 0, 0x16, 0x0D), (0x0E, 0, 0x17, 0x0D), (
           (0x2E, 0, 0x17, 0x00), (0x2E, 0, 0x17, 0x01), (0x2E, 0, 0x17, 0x02), (0x1F, 0, 0x16, 0x00)}
 
 
+def staged(source, fc, person):
+    """True if FC parks the person where nobody can reach it: a STAGED cell, or (for one that stands on its own FC
+    cell) off the map or on a blocked block. FC keeps such a person for an event to move (its block waits, so
+    dq4npcport stands it), mostly at 00/00 in the corner wall or past the map edge."""
+    x, y = person["x"], person["y"]
+    return (*fc, x, y) in STAGED or (talk_cell(person) == (x, y) and not walkable(source, x, y))
+
+
 # 2장 시작 상태로 옮긴 FC 그룹(dq4groupbuild.LINKS 의 "chapter": 2)이 든 DQ5 그룹
 CHAPTER2_GROUPS = tuple(f"{g:02X}" for g, parts in LINKS.items() if any(p.get("chapter") == 2 for p in parts))
 
@@ -334,7 +342,7 @@ def main():
             tx, ty = talk_cell(p)
             side = talk_side(source, tx, ty, {(q["x"], q["y"]) for q in now}) or \
                 talk_side(source, tx, ty, {(q["x"], q["y"]) for q in now if not q["interval"]})
-            if side is None and (*fc, p["x"], p["y"]) in STAGED:
+            if side is None and staged(source, fc, p):
                 jobs.append(("staged", f"talk-{m.replace('/', '')}-{i}", m, None, None, p["night"], None))
                 continue
             if side is None:

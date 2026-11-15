@@ -486,6 +486,39 @@ class HiddenPeopleTest(unittest.TestCase):
 
 
 @unittest.skipUnless(DQ4.is_file() and DQ5.is_file(), "local source ROMs not present")
+class StandingTalkTest(unittest.TestCase):
+    """dq4npccheck talks to every standing person from a free walkable FC cell beside it. One FC parks for an
+    event (off the map or in the 00/00 corner wall, its block waiting) stands once ported, and counts as staged:
+    such people walked before their block was read, and the release check then found no cell beside 20 of them."""
+
+    def test_every_standing_person_has_a_side_or_is_staged(self):
+        import dq4block
+        import dq4npccheck
+        from dq4groupbuild import fc_map
+        from kr_patch.fc import ines
+        prg = ines.prg(DQ4.read_bytes())
+        _, _, report = port.port(str(DQ5), str(DQ4))
+        stuck, parked = [], 0
+        for m, people in report.items():
+            if "/" not in m:
+                continue
+            fc = fc_map(prg, *(int(v, 16) for v in m.split("/")))
+            source = dq4block.Map(prg, *fc)
+            for i, p in enumerate(people):
+                if p["interval"]:
+                    continue
+                now = {(q["x"], q["y"]) for q in people if q["night"] == p["night"]}
+                if dq4npccheck.talk_side(source, *dq4npccheck.talk_cell(p), now) is not None:
+                    continue
+                if dq4npccheck.staged(source, fc, p):
+                    parked += 1
+                else:
+                    stuck.append((m, i, p["x"], p["y"]))
+        self.assertEqual(stuck, [])
+        self.assertGreater(parked, 0)
+
+
+@unittest.skipUnless(DQ4.is_file() and DQ5.is_file(), "local source ROMs not present")
 class SleeperTalkTest(unittest.TestCase):
     """A sleeper lies half a block right and up of its FC cell. DQ5 answers beside the bed's right block (the head)
     and, with dq4sleepertalk, beside the left block (the foot) where FC talks to it. Every sleeper must have a free
