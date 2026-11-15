@@ -189,6 +189,17 @@ class ReleaseCheckTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, '없음'):
                 rc.load_ci(d)
 
+    def test_load_ci_merges_guard_parts(self):
+        def row(k, status='passed'):
+            return {'name': 'p', 'file': 'g', 'status': status, 'detail': f'{k}0초', 'part': [k, 2]}
+        with tempfile.TemporaryDirectory() as d:
+            self._ci(d, [([1, 2], [row(1)], []), ([2, 2], [row(2)], [])])
+            ci = rc.load_ci(d)
+            self.assertEqual([(r['name'], r['status']) for r in ci['rows']], [('p', 'passed')])
+        with tempfile.TemporaryDirectory() as d:
+            self._ci(d, [([1, 2], [row(1)], []), ([2, 2], [row(2, 'failed')], [])])
+            self.assertFalse(rc.ci_summary(rc.load_ci(d))[1])
+
     def test_load_ci_marks_cached_runs_and_skips_pass_records(self):
         """캐시를 쓴 조각(release-gate rehearse)이 하나라도 있으면 cached. 조각이 함께 올리는 통과 기록(results/)은 결과로 읽지 않는다."""
         row = {'name': 'a', 'file': 'g', 'status': 'passed', 'detail': '9초'}

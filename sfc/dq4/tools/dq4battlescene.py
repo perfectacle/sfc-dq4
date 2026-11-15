@@ -19,8 +19,9 @@
 
   python sfc/dq4/tools/dq4cores.py
   python sfc/dq4/tools/dq4battlescene.py --rom work/ch1/dq4-ch1-full.sfc --out work/battlescene [--seeds 0,1,2]
-      [--scenes attack,flee] [--core snes9x|bsnes|all] [--jobs 4]
-결과: OUT/results.json(장면·코어·시드마다 판정과 요약), OUT/<장면>-<코어>/seed-N/*.png.
+      [--scenes attack,flee] [--core snes9x|bsnes|all] [--jobs 4] [--part k/n]
+  --part k/n(기본 DQ4_GUARD_PART): 장면·코어 묶음을 n 몫으로 나눠 k 번째만 돈다. 시드는 한 몫에 모두 둔다.
+결과: OUT/results.json(장면·코어·시드마다 판정과 요약, part), OUT/<장면>-<코어>/seed-N/*.png.
 """
 import argparse
 import hashlib
@@ -1196,6 +1197,23 @@ def merge_units(shards):
     return merged
 
 
+def work_units(names, cores):
+    """[(장면, 코어)]: 몫으로 나누는 단위. 시드는 단위 안에 둔다: 분포 검사(distribution_problems)가 장면·코어마다 모든
+    시드를 합쳐 표본을 세므로, 시드를 몫으로 흩으면 표본이 줄어 구간 검사를 건너뛴다."""
+    return [(s, c) for s in names for c in cores]
+
+
+def part_units(names, cores, part):
+    """part(k, n) 몫의 (장면, 코어). 무게는 장면 프로세스 시간 어림(SCENES 의 seconds, 기본 60)."""
+    return dq4shards.part_of(work_units(names, cores), part, key=lambda u: f'{u[0]}/{u[1]}',
+                             weight=lambda u: SCENES[u[0]].get('seconds', 60))
+
+
+def seed_work(units, seeds):
+    """[(장면, 코어, 시드)]: 프로세스 하나씩 띄우는 일."""
+    return [(s, c, seed) for s, c in units for seed in seeds]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('mode', nargs='?', default='check', choices=('check', '_unit'))
@@ -1207,8 +1225,10 @@ def main():
     ap.add_argument('--jobs', type=int, default=dq4shards.jobs(), help='함께 띄우는 일 수(기본 HEADLESS_SLOTS, dq4shards.jobs)')
     ap.add_argument('--repeat', type=int, default=2, help='시드마다 같은 상태에서 몇 번 돌려 요약을 견줄지')
     wc.add_seed_args(ap)
+    dq4shards.add_part_arg(ap)
     args = ap.parse_args()
     seeds = wc.seeds_of(args)
+    part = f'{args.part[0]}/{args.part[1]}' if args.part else None
     rom = args.rom.resolve()
     out = args.out.resolve()
     if args.mode == '_unit':
@@ -1244,9 +1264,10 @@ def main():
                                                             'problems': ['프로세스가 결과를 남기지 않음(시간 초과·오류, log.txt)']}]}
 
     # 시드마다 따로 띄워(시드끼리는 출발 상태만 같다) 가장 긴 장면도 코어 자리 여럿에 나눠 돈다. 판정은 합친 뒤 장면·코어마다
-    work = [(s, c, seed) for s in names for c in cores for seed in seeds]
+    mine = part_units(names, cores, args.part)
+    work = seed_work(mine, seeds)
     shards = dict(zip(work, dq4shards.pmap(one, work, args.jobs)))
-    units = [merge_units([shards[s, c, seed] for seed in seeds]) for s in names for c in cores]
+    units = [merge_units([shards[s, c, seed] for seed in seeds]) for s, c in mine]
     rows = []
     for u in units:
         for r in u['results']:
@@ -1276,14 +1297,15 @@ def main():
                 print(f"  {name}: {got} / {fc}{'' if got == fc else '  다름'}")
     ok = all(r['status'] == 'passed' for r in rows)
     report = {'status': 'passed' if ok else 'failed', 'rom_sha1': hashlib.sha1(rom.read_bytes()).hexdigest(),
-              'seeds': seeds, 'seconds': round(time.time() - t0, 1), 'rows': rows, 'distribution': dist,
+              'seeds': seeds, 'part': part, 'seconds': round(time.time() - t0, 1), 'rows': rows, 'distribution': dist,
               'distribution_skipped': list(dict.fromkeys(skipped)),
               'growth': {k: [{'level': lv, 'rows': t} for lv, t in v] for k, v in growth.items()}, 'units': units}
     (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')
     for r in rows:
         print(json.dumps({k: r[k] for k in ('scene', 'core', 'seed', 'status', 'problems', 'battle_frames', 'turns')},
                          ensure_ascii=False))
-    print(json.dumps({'status': report['status'], 'rom_sha1': report['rom_sha1'], 'seconds': report['seconds']}))
+    print(json.dumps({'status': report['status'], 'part': part, 'units': len(units), 'rom_sha1': report['rom_sha1'],
+                      'seconds': report['seconds']}))
     return 0 if ok else 1
 
 

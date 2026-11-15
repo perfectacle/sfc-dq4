@@ -266,3 +266,32 @@ class MergeUnitsTests(unittest.TestCase):
         only_failed = bs.merge_units([failed])
         self.assertEqual(only_failed['core'], 'bsnes')
         self.assertNotIn('expect', only_failed)
+
+
+class PartTests(unittest.TestCase):
+    NAMES = list(bs.DEFAULT_SCENES)
+    CORES = list(bs.cc.CORES)
+
+    def test_parts_cover_every_scene_and_core_once(self):
+        full = bs.work_units(self.NAMES, self.CORES)
+        self.assertEqual(len(full), len(self.NAMES) * len(self.CORES))
+        for n in (1, 2, 3, 5):
+            parts = [bs.part_units(self.NAMES, self.CORES, (k, n)) for k in range(1, n + 1)]
+            got = [u for p in parts for u in p]
+            self.assertEqual(sorted(got), sorted(full), n)
+            self.assertEqual(len(got), len(set(got)), n)
+            self.assertEqual(parts, [bs.part_units(self.NAMES, self.CORES, (k, n)) for k in range(1, n + 1)])
+        self.assertEqual(bs.part_units(self.NAMES, self.CORES, None), full)
+
+    def test_a_part_keeps_every_seed_of_its_scene_so_distribution_samples_stay_whole(self):
+        seeds = [0, 1, 2]
+        full = bs.seed_work(bs.work_units(self.NAMES, self.CORES), seeds)
+        got = []
+        for k in range(1, 4):
+            mine = bs.part_units(self.NAMES, self.CORES, (k, 3))
+            work = bs.seed_work(mine, seeds)
+            for s, c in mine:
+                self.assertEqual([w[2] for w in work if w[:2] == (s, c)], seeds, (s, c))
+            self.assertEqual({w[:2] for w in work}, set(mine))
+            got += work
+        self.assertEqual(sorted(got), sorted(full))

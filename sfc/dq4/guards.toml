@@ -236,6 +236,7 @@ paths = [
   "sfc/dq4/tools/dq4shards.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && mkdir -p work/wc && DQ4_WINDOWNAME_SYMBOLS=$PWD/work/wc/wn.sym uv run --locked python sfc/dq4/tools/dq4menupatch.py build --rom work/ch1/overture.sfc --messages work/ch1/messages.json --out work/wc/menu.sfc && rm -rf work/compat-scenes && uv run --locked python sfc/dq4/tools/dq4compatscenes.py --rom work/ch1/dq4-ch1-full.sfc --out work/compat-scenes --window-rom work/ch1/dq4-ch1.sfc --symbols work/wc/wn.sym --symbols-rom work/wc/menu.sfc"
+parts = 5
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 
 [[check]]
@@ -402,6 +403,7 @@ paths = [
   "tools/mesence_settings.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && rm -rf work/ch2talk && uv run --locked python sfc/dq4/tools/dq4ch2partytalkcheck.py --rom work/ch2/dq4-ch1-full.sfc --out work/ch2talk"
+parts = 4
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝·2장 출발 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 groups = ["ch1-build", "ch1-walk"]
 
@@ -1029,6 +1031,7 @@ paths = [
   "sfc/dq4/tools/dq4shards.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4battlescene.py --rom work/ch1/dq4-ch1-full.sfc --out work/battlescene --seeds 0,1,2"
+parts = 3
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
 groups = ["ch1-build", "ch1-walk"]
 
@@ -1777,6 +1780,7 @@ paths = [
   "sfc/dq4/tools/dq4shards.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/guard-npc-talk && uv run --locked python sfc/dq4/tools/dq4npccheck.py --build work/dq4-groups --out work/guard-npc-talk"
+parts = 3
 needs = ["rom", "MESENCE", "LIBDIR", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 groups = ["ch1-walk"]
 
@@ -1803,6 +1807,7 @@ paths = [
   "sfc/dq4/tools/dq4shards.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/guard-group-links && uv run --locked python sfc/dq4/tools/dq4groupcheck.py --rom work/dq4-groups/groups.sfc --out work/guard-group-links"
+parts = 3
 needs = ["rom", "MESENCE", "LIBDIR", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 groups = ["ch1-walk"]
 

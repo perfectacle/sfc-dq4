@@ -329,3 +329,40 @@ class PeopleTableTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class PartTest(unittest.TestCase):
+    CASES = [{'token': f'3D/00:{i}', 'map': '3D/00', 'cell': (i, 1), 'night': i % 2 == 1} for i in range(9)]
+
+    def test_parts_cover_every_spot_and_case_once(self):
+        full = check.work_units(check.SPOTS, self.CASES, [0, 1])
+        self.assertEqual(len(full), 2 * (len(check.SPOTS) + len(self.CASES)))
+        keys = [check.unit_key(u) for u in full]
+        self.assertEqual(len(keys), len(set(keys)))
+        for n in (1, 2, 3, 4):
+            parts = [check.part_units(full, (k, n)) for k in range(1, n + 1)]
+            got = [check.unit_key(u) for p in parts for u in p]
+            self.assertEqual(sorted(got), sorted(keys), n)
+            self.assertEqual(len(got), len(set(got)), n)
+        self.assertEqual(check.part_units(full, None), full)
+
+    def test_part_keeps_the_unsplit_index_so_result_keys_match(self):
+        full = check.work_units(check.SPOTS, self.CASES, [0])
+        for k in range(1, 4):
+            for kind, seed, i, item in check.part_units(full, (k, 3)):
+                self.assertIs((check.SPOTS if kind == 'spot' else self.CASES)[i], item)
+
+    def test_summary_counts_only_the_part(self):
+        talk = {'name': 'talk', 'status': 'passed', 'problems': [], 'shown': {'00d': ['012'], '00n': [f'{pt.NOBODY:03X}']}}
+        bad = {'name': 'talk', 'status': 'failed', 'problems': ['x'], 'shown': {}}
+        results = {'0:3D/00': [{'name': 'warp', 'status': 'passed'}, talk],
+                   '0:3D/01': [{'name': 'warp', 'status': 'passed'}, bad]}
+        people = {'0:004': {'name': 'p', 'status': 'passed', 'problems': [], 'talked_lines': 1}}
+        report, failed = check.summarize(results, people, [], '2/3')
+        self.assertEqual(report['part'], '2/3')
+        self.assertEqual((report['spots'], report['talks'], report['people']), (2, 2 * len(check.steps()), 1))
+        self.assertEqual(report['lines_shown'], 1)
+        self.assertEqual(list(failed), ['0:3D/01'])
+        self.assertEqual(report['status'], 'failed')
+        stuck = {'0:3D/00': [{'name': 'warp', 'status': 'passed'}]}
+        self.assertIn('0:3D/00', check.summarize(stuck, {}, [])[1])

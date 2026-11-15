@@ -350,6 +350,7 @@ def main():
     ap.add_argument('--symbols-rom', type=Path, required=True, help='그 심볼을 남긴 dq4menupatch.py build 의 롬')
     ap.add_argument('--out', type=Path, required=True)
     ap.add_argument('--only', help='이 글자가 이름에 든 장면만')
+    ap.add_argument('--scenes', help='이 이름의 장면만(쉼표로, 이름이 꼭 같아야 함. dq4compatscenes 의 하위 조각)')
     ap.add_argument('--jobs', type=int, default=8)
     ap.add_argument('--every', action='store_true', help='EVERY 장면을 매 프레임 잰다')
     a = ap.parse_args()
@@ -368,6 +369,12 @@ def main():
         ['uv', 'run', '--locked', 'krpatch', 'sfc', 'lua'], text=True).strip()
     st = make_states(mesence, a.rom.resolve(), rom, out / 'states')
     todo = [s for s in scenes(st['shop'], st['shop'], st['shop'], st['battle']) if not a.only or a.only in s[0]]
+    if a.scenes:
+        want = a.scenes.split(',')
+        unknown = sorted(set(want) - {s[0] for s in todo})
+        if unknown:
+            raise SystemExit(f'--scenes: 모르는 장면 {unknown}')
+        todo = [s for s in todo if s[0] in want]
     if a.every:
         todo = [s[:5] + (sorted(set(s[5]) | set(EVERY[s[0]])),) if s[0] in EVERY else s for s in todo]
     with ThreadPoolExecutor(a.jobs) as pool:

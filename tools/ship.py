@@ -941,7 +941,7 @@ class Ship:
                     rows += json.loads(f.read_text(encoding='utf-8')).get('rows', [])
                 except (OSError, ValueError):
                     continue
-        return rows
+        return guards.merge_parts(rows)
 
     # 9
     def cleanup(self):

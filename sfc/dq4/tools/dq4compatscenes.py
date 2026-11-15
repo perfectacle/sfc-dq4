@@ -18,7 +18,8 @@ lua/dq4openbus.lua 를 앞에 붙여 열린 버스·롬 거울 접근을 그 파
 
   MESENCE=… LIBDIR=… uv run --locked python sfc/dq4/tools/dq4compatscenes.py --rom work/ch1/dq4-ch1-full.sfc \\
       --out 새폴더 [--scenes battle,save,window] [--ranges high,io] [--parallel 6] [--jobs N] [--ledger work/ch1/ledger.json] \\
-      [--window-rom work/ch1/dq4-ch1.sfc --symbols work/wc/wn.sym --symbols-rom work/wc/menu.sfc]
+      [--window-rom work/ch1/dq4-ch1.sfc --symbols work/wc/wn.sym --symbols-rom work/wc/menu.sfc] [--part k/n]
+--part 는 (장면, 범위) 와 창 장면은 그 안의 창 검사 장면 하나하나를 단위로 n 몫에 나눠 k 번째만 돈다(work_units).
 형식은 sfc/dq4/docs/dq4-compat-format.md 「장면 프로브」.
 """
 import argparse
@@ -112,15 +113,16 @@ def window_frames(every=True):
     return out
 
 
-def window_reached(dest, want=None):
+def window_reached(dest, want=None, names=None):
     """창 검사가 장면마다 끝까지 돌았는가(dq4windowcheck 는 장면이 돌지 않아도 0 으로 끝날 수 있다). 장면마다 MesenCE 가
     0 으로 끝나고, 덤프한 프레임(v*.bin) 수가 그 장면이 덤프할 프레임 수(window_frames)와 같아야 한다. 문제 목록."""
     info = dest / 'readset.json'
     if not info.exists():
         return ['창 검사 readset.json 없음']
     want = window_frames() if want is None else want
-    bad = []
-    for name, i in json.loads(info.read_text()).items():
+    ran = json.loads(info.read_text())
+    bad = [f'창 장면 {n}: 돌지 않음' for n in (names or want) if n not in ran]
+    for name, i in ran.items():
         got = len(list((dest / name).glob('v*.bin')))
         if i.get('timed_out') or i.get('returncode') not in (0, None):
             bad.append(f'창 장면 {name}: 종료 {i.get("returncode")}, 시간 초과 {i.get("timed_out")}')
@@ -131,7 +133,41 @@ def window_reached(dest, want=None):
     return bad
 
 
-def commands(scene, rng, a, out):
+# 단위 무게: 리눅스 4코어 러너에서 (장면, 범위) 를 모두 함께 돌렸을 때의 초. 창 장면은 범위의 초를 창 검사 장면마다
+# 덤프하는 프레임 수로 나눠 준다. 몫을 고르게 나누는 데만 쓴다
+PAIR_SECONDS = {('battle', 'high'): 406, ('battle', 'io'): 484, ('save', 'high'): 600, ('save', 'io'): 646,
+                ('window', 'high'): 1050, ('window', 'io'): 1484}
+
+
+def work_units(scenes, ranges, frames=None):
+    """[(장면, 범위, 창 장면 또는 None, 무게)]. 창 장면은 창 검사 장면마다 한 단위(서로 출발 상태만 같이 쓴다), 그 밖은
+    (장면, 범위) 하나가 한 단위다."""
+    frames = window_frames() if frames is None and 'window' in scenes else frames
+    out = []
+    for s in scenes:
+        for r in ranges:
+            secs = PAIR_SECONDS.get((s, r), 500)
+            if s != 'window':
+                out.append((s, r, None, secs))
+                continue
+            total = sum(frames.values())
+            out += [(s, r, name, secs * n / total) for name, n in frames.items()]
+    return out
+
+
+def part_pairs(units, part):
+    """그 몫의 [(장면, 범위, 창 장면 이름 목록 또는 None)]. (장면, 범위) 차례는 나누기 전 그대로."""
+    mine = dq4shards.part_of(units, part, key=lambda u: f'{u[0]}-{u[1]}' + (f'-{u[2]}' if u[2] else ''),
+                             weight=lambda u: u[3])
+    pairs = {}
+    for s, r, name, _ in mine:
+        pairs.setdefault((s, r), [] if name else None)
+        if name:
+            pairs[(s, r)].append(name)
+    return [(s, r, names) for (s, r), names in pairs.items()]
+
+
+def commands(scene, rng, a, out, names=None):
     """(장면, 범위) 를 도는 명령 목록. 앞 명령들은 프로브 없이(출발 상태 만들기), 마지막 명령에 프로브를 붙인다."""
     py = [sys.executable]
     dest = out / f'{scene}-{rng}'
@@ -144,11 +180,12 @@ def commands(scene, rng, a, out):
                                               '--units', '--jobs', str(a.jobs)]]
         return pre, py + [str(HERE / 'dq4ch1savecheck.py'), '--rom', str(a.rom), '--states', str(walk), '--out', str(dest)]
     return [], py + [str(HERE / 'dq4windowcheck.py'), '--rom', str(a.window_rom), '--symbols', str(a.symbols),
-                     '--symbols-rom', str(a.symbols_rom), '--out', str(dest), '--jobs', str(a.jobs), '--every']
+                     '--symbols-rom', str(a.symbols_rom), '--out', str(dest), '--jobs', str(a.jobs), '--every'] + (
+                         ['--scenes', ','.join(names)] if names else [])
 
 
-def run_scene(scene, rng, a, out, patched):
-    pre, cmd = commands(scene, rng, a, out)
+def run_scene(scene, rng, a, out, patched, names=None):
+    pre, cmd = commands(scene, rng, a, out, names)
     log = out / f'{scene}-{rng}.log'
     with log.open('w') as f:
         for c in pre:
@@ -168,14 +205,14 @@ def run_scene(scene, rng, a, out, patched):
     if rc:
         problems.insert(0, f'장면 검사 실패(종료 {rc}, {log.name})')
     if scene == 'window':
-        problems += window_reached(out / f'{scene}-{rng}')
+        problems += window_reached(out / f'{scene}-{rng}', names=names)
     if not lines:
         problems.append('프로브 기록이 없음(프로브가 붙지 않았거나 장면이 돌지 않음)')
     return {'scene': scene, 'ranges': rng, 'status': 'failed' if problems else 'passed', 'problems': problems,
             'dq5_accesses': dq5, 'records': len(set(lines)),
             'pcs': sorted({m[2] + ':' + m[3] for m in map(LINE.fullmatch, set(lines)) if m}),
             'high_bank_brk': sorted({x.split('op=')[1] for x in lines if x.startswith('BRK')}),
-            'seconds': round(time.time() - t0)}
+            'seconds': round(time.time() - t0)} | ({'window_scenes': names} if names else {})
 
 
 def run_pairs(pairs, run, save_walk, parallel):
@@ -208,6 +245,7 @@ def main():
     ap.add_argument('--window-rom', type=Path)
     ap.add_argument('--symbols', type=Path)
     ap.add_argument('--symbols-rom', type=Path)
+    dq4shards.add_part_arg(ap)
     a = ap.parse_args()
     if not os.environ.get('MESENCE'):
         ap.error('MESENCE 에 MesenCE 실행 파일을 주세요')
@@ -226,10 +264,10 @@ def main():
     if not ledger_path.exists():
         raise SystemExit(f'{ledger_path} 가 없음(dq4build.py 가 롬 옆에 둠)')
     patched = patched_ranges(json.loads(ledger_path.read_text()))
-    pairs = [(s, r) for s in scenes for r in a.ranges.split(',')]
+    pairs = part_pairs(work_units(scenes, a.ranges.split(',')), a.part)
     # 장면 검사는 서장 끝 상태를 캐시에서 받는다. 캐시가 비어 있으면 프로브를 붙인 채 서장을 걷게 되는데, 그때 MesenCE 가
     # 출력 없이 끝난 일이 있었다(서장은 dq4-openbus-probe 가 본다). 그래서 롬마다 서장 끝 상태를 프로브 없이 먼저 만든다
-    roms = {a.rom} | ({a.window_rom} if 'window' in scenes else set())
+    roms = {a.window_rom if s == 'window' else a.rom for s, _, _ in pairs}
 
     def warm(k, rom):
         with (out / f'warm-{k}.log').open('w') as f:
@@ -247,11 +285,12 @@ def main():
         with (out / 'save-walk.log').open('w') as f:
             return all(subprocess.run(c, stdout=f, stderr=subprocess.STDOUT).returncode == 0 for c in pre)
 
-    results = run_pairs(pairs, lambda p: run_scene(*p, a, out, patched), save_walk if 'save' in scenes else None,
-                        a.parallel)
+    results = run_pairs(pairs, lambda p: run_scene(p[0], p[1], a, out, patched, p[2]),
+                        save_walk if any(s == 'save' for s, _, _ in pairs) else None, a.parallel)
     ok = all(r['status'] == 'passed' for r in results)
-    (out / 'results.json').write_text(json.dumps({'status': 'passed' if ok else 'failed', 'scenes': results},
-                                                 ensure_ascii=False, indent=1) + '\n')
+    part = f'{a.part[0]}/{a.part[1]}' if a.part else None
+    (out / 'results.json').write_text(json.dumps({'status': 'passed' if ok else 'failed', 'part': part,
+                                                  'scenes': results}, ensure_ascii=False, indent=1) + '\n')
     for r in results:
         print(json.dumps({k: v for k, v in r.items() if k != 'dq5_accesses'} | {'dq5_accesses': len(r.get('dq5_accesses', []))},
                          ensure_ascii=False))
