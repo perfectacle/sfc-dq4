@@ -33,6 +33,12 @@ class FindTest(unittest.TestCase):
         self.assertTrue(found((41, 40), "up", (42, 37)))   # half a block left
         self.assertFalse(found((44, 40), "up", (42, 37)))
 
+    def test_from_above(self):
+        # LINTEL blocks the door's middle row, so a hero coming down stops on the entry row: mark two rows down.
+        self.assertTrue(found((42, 37), "down", (42, 37)))
+        self.assertTrue(found((43, 37), "down", (42, 37)))
+        self.assertFalse(found((42, 36), "down", (42, 37)))
+
     def test_side(self):
         # Beside a door in a side wall, on its bottom row (FC block row fy: 2fy+1 = entry y + 2).
         self.assertTrue(found((40, 39), "right", (42, 37)))
@@ -71,12 +77,18 @@ class FindTest(unittest.TestCase):
         self.assertEqual(w["01:DD23"]["orig"], "00 0B 02 09 F0 02 E6 01")
         self.assertEqual(w["01:DD23"]["hex"], "22 00 F8 57 EA EA EA EA")
         self.assertEqual(w["57:F800"]["hex"], "E2 20 00 0B 02 09 D0 08 00 90 90 B7 A5 46 30 02 E6 01 6B")
+        # 닫힌 2×3 문의 가운데 줄(FC 문 블록 윗셀 줄)도 우리 문(DB = 문 표 뱅크)이면 막는다. DQ5 문은 그대로 10
+        self.assertEqual(w["01:F658"]["orig"], "20 3A F8")
+        self.assertEqual(w["01:F658"]["hex"], "20 A0 FF")
+        self.assertEqual(w["01:FFA0"]["hex"], f"8B 68 C9 {dq4environmentrom.DOOR_BANK:02X} D0 04 A9 90 80 02 A9 10 4C 44 F8")
+        auto, _ = door.auto_code()
+        self.assertLessEqual(door.AUTO_AT + len(auto), door.LINTEL_AT)
 
     def test_without_auto(self):
         saved = door.AUTO_OPEN
         try:
             door.AUTO_OPEN = False
-            self.assertEqual({x["at"] for x in door.writes()}, {"57:F400", "01:DA4D", "57:F800", "01:DD23"})
+            self.assertEqual({x["at"] for x in door.writes()}, {"57:F400", "01:DA4D", "57:F800", "01:DD23", "01:FFA0", "01:F658"})
         finally:
             door.AUTO_OPEN = saved
 

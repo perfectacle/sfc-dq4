@@ -10,7 +10,8 @@ left or right of a door (X = door X - 1 or + 1) misses the mark and gets 「そ�
 FIND replaces DA4D (JSL from 01:DA4D) and looks at the cells a hero touching the door could face:
 
   up     row Y-1, columns X+1, X+2, X
-  down   row Y+1, columns X+1, X+2, X
+  down   row Y+1, columns X+1, X+2, X, then row Y+2 the same (LINTEL stops a hero coming down one row above the
+         mark, on the door's top row)
   left   column X-1, rows Y, Y+1 (a door between rooms side by side: the hero walks along the door's bottom row,
          the only row of the object that blocks)
   right  column X+3, rows Y, Y+1
@@ -27,6 +28,13 @@ the hero: $1958, the directions already bumped that 00:83B4 keeps for its sound,
 Doors of lock kind 4 and up (special story doors, whose lock code prints messages itself) stay shut without a message.
 When it opened nothing and showed nothing, AUTO goes on with 00:83B4 (the bump sound) as before.
 
+LINTEL: DQ5's 2x3 drawer 01:F635 blocks only the last row of a closed door (+1 bit7, 01:F677) and gives the two
+rows above +1 bit4 (01:F83A). Our doors stand on the FC door block's two cell rows (the object's lower two rows), and
+the hero walks in cells, so half a block up it walked through the closed door on the block's top row without opening
+it, where FC stops at the door. LINTEL replaces the middle row's JSR $F83A (01:F658) and ORs 90 there too when DB is
+DOOR_BANK: the object hook sets DB to that bank for our entries only, so DQ5's own doors keep their rows. Opening
+(01:E01B) clears bit7 of all three rows with 01:F878, and an open door is drawn by 01:F8AB without F635.
+
 KEY: DQ5's lock check 01:DCFC gives key level 1 only for the カギの技法 flag 2199.1; FC DQ4's level 1 is the item
 とうぞくのカギ (B7 in DQ5 too, whose どうぐ use 11:8E43 already opens lock-1 doors). KEY replaces the flag test at
 01:DD23 with a call that also gives level 1 to a party holding B7, so とびら and walking into the door open it.
@@ -39,20 +47,26 @@ TOOLS = Path(__file__).resolve().parent
 if str(TOOLS) not in sys.path:
     sys.path.insert(0, str(TOOLS))
 
-from dq4environmentrom import _Asm  # noqa: E402
+from dq4environmentrom import DOOR_BANK, _Asm  # noqa: E402
 
 AUTO_OPEN = True
 
 # FIND goes after dq4balance's reward hook in bank 57; AUTO in bank 01's empty tail from FED0 (it calls bank-01
 # routines by JSR), above the stubs dq4environmentrom keeps below its HOOK_END.
 FIND_AT = 0x57F400
-AUTO_AT, AUTO_END = 0x01FF00, 0x020000
+AUTO_AT, AUTO_END = 0x01FF00, 0x01FFA0
 DA4D, DA4D_ORIG = 0x01DA4D, bytes((0x20, 0x2D, 0xF0, 0x10, 0x04))       # JSR $F02D / BPL $DA56, M/X 8-bit
 BLOCKED, BLOCKED_ORIG = 0x0081B7, bytes((0x20, 0xB4, 0x83, 0x9C, 0x5A, 0x19))   # JSR $83B4 / STZ $195A
 BUMP = 0x0083B4
 # The RTL of a bank-00 routine (00:880C PLB PLP RTL), for calling the RTS routine BUMP from bank 01.
 RTL00 = 0x00880E
 # 01:DD23 BRK 0B 02 09 / BEQ +2 / INC $01: key level 1 with flag 2199.1. M/X 8-bit there.
+# 01:F658 JSR $F83A: +1 |= 10 on the middle row of a 2x3 object (M/X 8-bit, A free; F844 ORs A into +1).
+LINTEL_CALL, LINTEL_CALL_ORIG = 0x01F658, bytes((0x20, 0x3A, 0xF8))
+ROW_OR = 0x01F844
+# Right after AUTO: bank 3B holds a copy of bank 01 (the door tables), and the build reads a zero run of 32+ bytes
+# there as free space; code at the very end of the bank would split the run before 3C:8000 into a bank-crossing write.
+LINTEL_AT = 0x01FFA0
 KEY_FLAG, KEY_FLAG_ORIG = 0x01DD23, bytes((0x00, 0x0B, 0x02, 0x09, 0xF0, 0x02, 0xE6, 0x01))
 # Between FIND and dq4outside's routine (57:FC00).
 KEY_AT, KEY_END = 0x57F800, 0x57FC00
@@ -63,7 +77,7 @@ WRAM = 0x7E0000
 
 OFFSETS = {
     "up": [(1, -1), (2, -1), (0, -1)],
-    "down": [(1, 1), (2, 1), (0, 1)],
+    "down": [(1, 1), (2, 1), (0, 1), (1, 2), (2, 2), (0, 2)],
     "left": [(-1, 0), (-1, 1)],
     "right": [(3, 0), (3, 1)],
 }
@@ -165,6 +179,17 @@ def key_code():
                   0x6B))                           # done: RTL
 
 
+def lintel_code():
+    """LINTEL, by JSR from LINTEL_CALL: A = 90 for our doors (DB = DOOR_BANK), 10 as before for DQ5's, then F844."""
+    return bytes((0x8B, 0x68,                      # PHB / PLA
+                  0xC9, DOOR_BANK,                 # CMP #DOOR_BANK
+                  0xD0, 0x04,                      # BNE plain
+                  0xA9, 0x90,                      # LDA #$90
+                  0x80, 0x02,                      # BRA row
+                  0xA9, 0x10,                      # plain: LDA #$10
+                  0x4C, ROW_OR & 0xFF, ROW_OR >> 8 & 0xFF))   # row: JMP $F844
+
+
 def writes():
     """dq5patch/1 writes: FIND in bank 57 and the JSL at DA4D, KEY and its call at DD23; with AUTO_OPEN, AUTO in bank 01
     and its call."""
@@ -179,6 +204,13 @@ def writes():
         {"at": _cpu(KEY_FLAG), "hex": _hex(bytes((0x22, *KEY_AT.to_bytes(3, "little"), 0xEA, 0xEA, 0xEA, 0xEA))),
          "orig": _hex(KEY_FLAG_ORIG), "note": "01:DCFC 의 열쇠 단계 1 검사를 KEY 로"},
     ]
+    out += [
+        {"at": _cpu(LINTEL_AT), "hex": _hex(lintel_code()), "note": "닫힌 2×3 문 가운데 줄도 막기(우리 문만)"},
+        {"at": _cpu(LINTEL_CALL), "hex": _hex(bytes((0x20, LINTEL_AT & 0xFF, LINTEL_AT >> 8 & 0xFF))),
+         "orig": _hex(LINTEL_CALL_ORIG), "note": "01:F635 가운데 줄 표시를 LINTEL 로"},
+    ]
+    if LINTEL_AT + len(lintel_code()) > 0x020000:
+        raise ValueError("LINTEL overflows bank 01")
     if KEY_AT + len(key_code()) > KEY_END or KEY_AT < FIND_AT + len(find):
         raise ValueError("KEY overlaps the door finder or dq4outside")
     if AUTO_OPEN:

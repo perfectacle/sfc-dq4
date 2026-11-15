@@ -7,8 +7,10 @@ holds the direction into the door (lua/dq4doorwalk.lua):
 
   below  (2fx, 2fy+3) up      above  (2fx, 2fy-1) down     left  (2fx-2, 2fy+1) right     right  (2fx+2, 2fy+1) left
 
-and below and above half a block to the right (+half). Half a block up beside a door in a side wall the hero is not
-stopped at all (the object blocks only its bottom row; the ROM before dq4door does the same), so that is not walked.
+and below and above half a block to the right (+half), and beside a side door half a block up (left-half
+(2fx-2, 2fy) right, right-half (2fx+2, 2fy) left), on the door block's top cell row. dq4door LINTEL blocks that row
+while the door is shut; before it the hero walked through the closed door there. A door that stays shut must also
+leave the hero on its own side (end cell short of the door).
 
 A door of lock 0 must open (a bit of 7E:21C2-21C5 set). A locked door must stay shut without a key, and open from
 below (a side door: from the left) with the FC key of its level in the hero's first item slot (KEYS: とうぞくのカギ B7 for lock 1, dq4door KEY;
@@ -60,6 +62,8 @@ APPROACHES = (
     ("above+half", (0, -1), (1, 0), "down"),
     ("left", (-1, 0), (-2, 2), "right"),
     ("right", (1, 0), (2, 2), "left"),
+    ("left-half", (-1, 0), (-2, 1), "right"),
+    ("right-half", (1, 0), (2, 1), "left"),
 )
 
 
@@ -128,8 +132,13 @@ def one(mesence, rom, state, out, k, case, hop):
     end = rows["end"].split()[0]
     opened = int(rows["seen"], 16) & ~int(flags0, 16) != 0
     shown = int(rows["shown"])
+    ex = case["door"][0]
+    end_x = int(end.split(",")[0])
+    crossed = end_x >= ex if case["press"] == "right" else end_x <= ex if case["press"] == "left" else False
     result = {**case, "start": begin, "end": end, "opened": opened, "shown_got": shown,
-              "ok": opened == case["open"] and shown == case["shown"]}
+              "ok": opened == case["open"] and shown == case["shown"] and (opened or not crossed)}
+    if crossed and not opened:
+        result["problem"] = "닫힌 문을 지나감"
     if begin != f"{x},{y}":
         result.update(ok=False, problem=f"시작 칸이 {begin}")
     return result
