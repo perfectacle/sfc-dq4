@@ -24,7 +24,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-gate
+  group: release-gate-${{ inputs.ref }}
   cancel-in-progress: false
 
 jobs:
