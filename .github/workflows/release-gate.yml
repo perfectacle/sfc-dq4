@@ -11,7 +11,7 @@ on:
       shards:
         description: Number of guard shards (1-64)
         type: number
-        default: 24
+        default: 16
       ref:
         description: Branch, tag or commit to check
         type: string
