@@ -106,8 +106,8 @@ uv run --locked python tools/ship.py --title "feat(dq4): …" --body work/pr-bod
 | `preflight` | 작업 워크트리 안인지(원래 체크아웃 거부), main 이 아닌지, rebase 중이 아닌지, 추적 파일에 커밋 안 된 변경이 없는지 |
 | `rebase` | `git fetch` 후 `origin/main` 으로 rebase. 충돌이면 rebase 를 그대로 두고 충돌 파일을 찍고 멈춥니다(풀고 `git add`, `git rebase --continue` 뒤 다시). `--auto-lists` 면 `README.md`·`todo.md` 의 충돌 블록이 목록·표·빈 줄뿐일 때만 main 쪽 줄 뒤에 이쪽 줄을 붙여 풉니다. 끝나면 바뀐 파일에 충돌 표시가 남았는지 봅니다 |
 | `journal` | 이 브랜치가 더한 일지가 `origin/main` 의 같은 날짜·번호와 겹치거나 번호가 `NN` 이면, 그 날짜의 가장 큰 번호 + 1 로 파일 이름·제목·목록 줄(과 그 이름을 가리키는 `.md` 링크)을 고치고 새 커밋을 만듭니다. 번호 묶음은 `check_docs.py` 의 `SHARED_NUMBERS` 를 따릅니다(`sfc/dq4`·`fc/dq4` 는 하나) |
-| `checks` | `check_docs.py`, 바뀐 `.py` compileall, 바뀐 `.lua` `luac -p`, 바뀐 파일에 닿는 단위 테스트. 테스트 폴더는 CI `test` 잡 matrix 에서 읽고, 모듈 이름이 글에 낱말로 나오면(import, `이름.py` 를 띄우는 subprocess) 닿는다고 보고 전이로 따라갑니다. `.py` 밖 파일은 이름이 글에 나오는 모듈에 닿습니다. `uv.lock`·`pyproject.toml`·`.python-version` 이 바뀌면 모든 폴더를 돕니다 |
-| `guards` | 걸린 실행 검사(`guards.py --base origin/main` 과 같은 판정, 본문 `가드: 전체`·`가드: 더함` 포함)를 CI 몫과 로컬 몫(`needs` 에 `guard-shards.yml` 의 `LOCAL_NEEDS` 이름이 든 것)으로 나눕니다. CI 몫은 PR 의 CI `pr-guards` 잡이 돌리고 여기서는 돌리지 않습니다. 로컬 몫만 `guards.py --base origin/main --run --only …` 로 돌립니다. 돌기 전 1분 부하가 `HEADLESS_SLOTS`×2 를 넘으면 `--load-wait`(기본 1800초)까지 기다립니다. 통과한 결과 줄은 `work/ship/guards.json` 에 HEAD 와 함께 남깁니다. 다시 돌 때는 그 HEAD 뒤로 바뀐 파일이 걸린 가드의 `paths`·묶음·`[full]` 에 맞거나 `guards.toml` 의 `run`·`needs` 가 바뀐 가드, 앞 결과가 없거나 통과가 아닌 가드만 `--only` 로 돌리고 나머지는 앞 결과를 씁니다(`.md`·목록만 바뀐 rebase 는 다시 안 돎). 실패하면 실패 가드와 로그 경로를 찍고 멈춥니다 |
+| `checks` | `check_docs.py`, 바뀐 `.py` compileall, 바뀐 `.lua` `luac -p`, 바뀐 파일에 닿는 단위 테스트. 테스트 폴더는 CI `test` 잡 matrix 에서 읽고, 모듈 이름이 글에 낱말로 나오면(import, `이름.py` 를 띄우는 subprocess) 닿는다고 보고 전이로 따라갑니다. `.py` 밖 파일은 이름이 글에 나오는 모듈에 닿습니다. `uv.lock`·`pyproject.toml`·`.python-version` 이 바뀌면 모든 폴더를 돕니다. 폴더마다 프로세스 하나로 함께 돌립니다. 실행 검사(에뮬레이터)는 여기서 돌지 않습니다 |
+| `guards` | 걸린 실행 검사(`guards.py --base origin/main` 과 같은 판정, 본문 `가드: 전체`·`가드: 더함` 포함)를 CI 몫과 로컬 몫(`needs` 에 `guard-shards.yml` 의 `LOCAL_NEEDS` 이름이 든 것)으로 나눕니다. CI 몫은 PR 의 CI `pr-guards` 잡이 돌리고 여기서는 돌리지 않습니다. 로컬 몫만 `guards.py --base origin/main --run --only …` 로 돌립니다(지금은 로컬 몫이 0개라 기본으로는 에뮬레이터를 띄우지 않습니다). 돌기 전 1분 부하가 `HEADLESS_SLOTS`×2 를 넘으면 `--load-wait`(기본 1800초)까지 기다립니다. 통과한 결과 줄은 `work/ship/guards.json` 에 HEAD 와 함께 남깁니다. 다시 돌 때는 그 HEAD 뒤로 바뀐 파일이 걸린 가드의 `paths`·묶음·`[full]` 에 맞거나 `guards.toml` 의 `run`·`needs` 가 바뀐 가드, 앞 결과가 없거나 통과가 아닌 가드만 `--only` 로 돌리고 나머지는 앞 결과를 씁니다(`.md`·목록만 바뀐 rebase 는 다시 안 돎). 실패하면 실패 가드와 로그 경로를 찍고 멈춥니다 |
 | `body` | 본문 파일의 「## 가드」 절을 로컬 몫 결과 줄과 CI 몫 목록 한 줄(`- CI 가 돌림(…): 이름, …`)로 바꾸거나(없으면 끝에 넣고) 🤖 줄을 맨 끝에 하나 둔 뒤 `guards.py --pr-body --local-only` 가 문제 0개인지 봅니다. 옛 절의 `가드: 전체`·`가드: 더함` 줄은 남깁니다 |
 | `push` | 원격에 같은 이름 브랜치가 없으면 올리고, 있으면 그 커밋이 이 브랜치의 조상이거나 reflog 에 있었고 그 브랜치의 PR 이 없거나 열려 있을 때만 `--force-with-lease` 로 덮습니다. 그 밖(이미 머지·닫힌 PR 의 브랜치, 모르는 커밋)은 브랜치를 `<브랜치>-2` 처럼 비어 있는 새 이름으로 바꿔 올립니다. main 에는 올리지 않습니다 |
 | `pr` | 열린 PR 이 없으면 `gh pr create --draft --base main`(`--title` 필요), 있으면 draft 로 돌리고(`gh pr ready --undo`) 본문이 다를 때만 고칩니다. 본문만 고치고 새 커밋이 없으면 마지막 CI 실행의 `required-checks` 잡만 다시 돌립니다(CI 는 본문 고침으로 다시 돌지 않고, 그 잡이 API 로 본문을 새로 읽음). auto-merge 는 아직 걸지 않습니다 |
@@ -128,7 +128,7 @@ uv run --locked python tools/ship.py --title "feat(dq4): …" --body work/pr-bod
 
 ## HEADLESS_SLOTS: 헤드리스 에뮬레이터 자리
 
-여러 세션이 한 머신에서 검사를 병렬로 돌리면 에뮬레이터 프로세스가 코어 수보다 많아져 모두 느려집니다. 그래서 헤드리스 에뮬레이터 프로세스 하나가 뜨기 전에 머신 전체에서 함께 쓰는 자리(slot)를 하나 잡고, 끝나면 놓습니다.
+로컬에서 에뮬레이터를 띄우는 것(분석 프로브, 수동 디버그, `ship.py --local-guards`)에만 걸립니다. PR 가드는 CI 조각이 `HEADLESS_SLOTS=4` 로 돌립니다. 여러 세션이 한 머신에서 검사를 병렬로 돌리면 에뮬레이터 프로세스가 코어 수보다 많아져 모두 느려집니다. 그래서 헤드리스 에뮬레이터 프로세스 하나가 뜨기 전에 머신 전체에서 함께 쓰는 자리(slot)를 하나 잡고, 끝나면 놓습니다.
 
 - 자리는 원래 체크아웃의 `work/cache/slots/` 에 있는 잠금 파일입니다. 워크트리에서 돌려도 같은 곳을 씁니다. 자리를 쥔 프로세스가 죽으면 잠금이 저절로 풀리므로 파일을 지울 필요가 없습니다.
 - 자리 수는 `HEADLESS_SLOTS` 로 정합니다. 기본은 CPU 수의 절반(최소 1)이고, `0` 이나 `off` 면 제한하지 않습니다.

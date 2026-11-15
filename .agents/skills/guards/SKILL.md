@@ -5,7 +5,7 @@ description: 버그를 고치거나 동작을 개선했을 때, PR 을 올리기
 
 # 회귀 가드
 
-이 스킬이 GUARD-01, GUARD-02, GUARD-03 의 정본이다. 도구는 `tools/guards.py`, CI 잡은 `guard-plan`·`pr-guards`·`pr-guards-result`·`required-checks` 다. **실행 검사는 CI 가 돈다. 로컬은 단위 테스트만**(CI 에 아직 없는 로컬 몫과 디버그 밖).
+이 스킬이 GUARD-01, GUARD-02, GUARD-03 의 정본이다. 도구는 `tools/guards.py`, CI 잡은 `guard-plan`·`pr-guards`·`pr-guards-result`·`required-checks` 다. **실행 검사는 CI 가 돈다. 로컬은 `check_docs`·compileall·바꾼 모듈의 단위 테스트만**(ship 의 checks 단계). 로컬 에뮬레이터 실행은 수동 디버그와 분석 프로브용이다.
 
 여러 세션이 같은 저장소를 고친다. 한 세션이 고친 것을 다른 세션이 모르고 되돌리지 않게, 고친 사람이 그 자리에 가드를 남긴다. 가드는 두 가지다.
 
@@ -37,8 +37,9 @@ description: 버그를 고치거나 동작을 개선했을 때, PR 을 올리기
    - 자동 판정보다 넓게 돌리고 싶을 때만 본문에 `가드: 전체` 줄을 쓴다. 모든 트랙의 실행 검사가 걸린다. 몇 개만 더하려면 `가드: 더함 이름, 이름`. 두 줄 모두 넓히기만 하며, `[full]` 이 켠 전체 모드를 끄지 못한다.
    - CI 가드가 실패하면 ship 이 `SHIP: stopped watch …` 에 실패 가드 이름과 로그 링크를 찍는다. 원인을 고쳐 push 하면(ship 을 다시) 바뀐 입력의 가드만 다시 돈다(통과 기록 캐시). 고칠 것 없이 다시 볼 때만 `ship.py --rerun 이름` — 마지막 CI 실행의 실패한 잡만 다시 돈다.
    - 포크 PR 은 시크릿이 없어 `pr-guards` 가 돌지 않는다. 관리자가 로컬에서 돌려 본문에 모든 걸린 검사의 결과 줄을 쓴다(`required-checks` 가 본다).
+   - 지금은 `LOCAL_NEEDS`(`macos`)를 needs 에 단 검사가 없어 로컬 몫이 0개다. MesenCE 검사도 리눅스 러너에서 돈다. 새 검사에 그 이름을 달면 다시 로컬 몫이 생긴다.
    - **로컬 몫과 디버그만 로컬에서**, `origin/main` 을 합친 뒤 한 번, **`--run` 으로 포그라운드에서 돌린다**: `uv run --locked python tools/guards.py --base origin/main --run --only <로컬 몫>`(ship 이 대신 함. 모두 로컬로 보려면 ship `--local-guards`). 롬을 빌드하는 검사를 먼저 돌리고(서로 만드는 것을 건드리지 않는 빌드 검사끼리만 함께), 나머지는 `--parallel`(기본 `HEADLESS_SLOTS` 의 자리 수)개씩 함께 돌리고, 검사마다 `--timeout`(기본 1800초)을 넘기면 끈다. 끝나면 본문 결과 줄을 찍는다. 검사를 백그라운드로 띄우고 완료 알림을 기다리지 않는다 — 알림을 놓치면 세션이 멈춘다. 에이전트 도구의 명령 시간 제한이 짧으면 그 제한을 늘려 포그라운드로 둔다.
-   - 에뮬레이터 프로세스는 머신 전체에서 `HEADLESS_SLOTS`(기본 CPU 수의 절반)개만 함께 돈다. 다른 세션이 자리를 다 쓰면 검사가 `[headless_slots] … 기다림` 을 찍고 기다리며, 기다린 시간도 `--timeout` 에 든다. [tools/README](../../../tools/README.md#headless_slots-헤드리스-에뮬레이터-자리)
+   - (로컬 실행) 에뮬레이터 프로세스는 머신 전체에서 `HEADLESS_SLOTS`(기본 CPU 수의 절반)개만 함께 돈다. 다른 세션이 자리를 다 쓰면 검사가 `[headless_slots] … 기다림` 을 찍고 기다리며, 기다린 시간도 `--timeout` 에 든다. [tools/README](../../../tools/README.md#headless_slots-헤드리스-에뮬레이터-자리)
    - 같은 입력(결과에 닿는 추적 파일 내용 — `.md`·`guards.toml`·`.agents/`·`.github/`·`.claude/`·`journal/`·단위 테스트는 뺀다. 다만 명령이 단위 테스트를 부르면(unittest·pytest, `test_*.py`·`tests/` 파일을 바로 돌림) `.md` 만 뺀다. `guards.toml` 맨 위에 `[cache]` `key = "paths"` 를 둔 트랙은 그 가운데 그 검사의 `paths`·묶음에 맞는 것, 트랙의 어느 검사도 `paths` 에 낱낱이 적지 않은 자료 파일(`.py`·`.lua`·`.asm` 밖), `uv.lock`·`pyproject.toml`·`.python-version` 만 본다. 그래서 화면 기준(`screens.toml`)처럼 한 검사만 적은 파일을 고치면 그 검사만 다시 돈다. paths 가 닿는 파일을 덮는다는 트랙 시험(dq4 는 `test_dq4guardpaths`)이 있어야 켠다 —, 명령, `needs` 에 나오는 환경 변수가 가리키는 파일 내용(64MB 넘는 파일은 크기·mtime)과 폴더 안 파일 목록(상대 경로·크기·mtime. 폴더 안 `cache/` 아래는 빌드가 같은 내용으로 다시 써 mtime 만 바뀌므로 내용으로 본다), `needs` 에 `MESENCE` 가 있으면 MesenCE 사용자 설정 파일(`tools/mesence_settings.py`. 못 찾으면 그 검사는 캐시를 쓰지 않음), `rom/` 원본, 명령이 읽는 `work/`·`rom/` 파일)으로 이미 통과한 검사는 캐시(원래 체크아웃 `work/cache/guards/`)로 건너뛴다. 실패는 캐시하지 않는다.
    - 입력이 달라도 롬을 빌드하는 검사(명령이 `&&` 로만 이어지고, 마지막 앞 단계가 `--out` 으로 무언가를 만들며, 셸 상태를 바꾸지 않고, 마지막 단계가 `uv run --locked python …` 인 것)는 빌드 단계를 먼저 돌린다. 만든 파일의 내용, `.py` 밖 입력, 추적 `.py` 이름 목록이 같고, 지난 통과 때 검사 단계가 **실행한 함수**의 코드(줄 번호 뺀 바이트코드 지문)와 데이터로 연 파일·목록을 본 폴더·`os.stat` 으로 본 있음과 크기, 에뮬레이터 같은 Python 밖 자식에게 인자로 넘긴 파일, 그 경로들이 거쳐 간 심볼릭 링크가 모두 같으면 검사 단계를 건너뛴다. 기록은 `tools/guardtrace/sitecustomize.py` 가 `sys.monitoring`·audit hook 으로 남긴다. 결과 줄은 「캐시: 빌드 결과와 검사 코드가 같아 …」. 롬이 그대로이고 검사가 부르지 않는 함수만 고친 PR 은 빌드만 돌고 끝난다. 검사 단계가 아는 자식(옵션이 `-u`·`-B` 뿐인 Python, 인자·환경 변수로 받은 파일을 입력으로 보는 `$MESENCE`) 밖의 것(셸·`os.system`·git·asar 등, `PYTHONPATH` 를 바꾼 환경)을 띄우거나 검사 단계 스크립트가 추적기를 싣지 않았으면 이 기록을 남기지 않는다.
    - 검사 안에서도 장면마다 캐시하는 것이 있다(dq4 [읽은 롬 바이트 캐시](../../../sfc/dq4/docs/dq4-readset-format.md): 롬이 바뀌어도 장면이 읽은 바이트가 같으면 다시 돌리지 않음). 배포 관문처럼 캐시 없이 전부 돌릴 때는 `--run --no-cache`.

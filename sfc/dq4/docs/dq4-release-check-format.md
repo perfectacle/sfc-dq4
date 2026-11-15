@@ -102,7 +102,7 @@ uv run --locked python sfc/dq4/tools/dq4publish.py release --report work/release
 
 ## CI 에서 돌리기
 
-실행 검사는 GitHub 러너(ubuntu-26.04-arm)에서 나눠 돈다. needs 에 `macos` 가 든 검사만 로컬 몫이다. 배포 관문은 사람이 `gh workflow run release-gate.yml [-f shards=N] [-f ref=REF] [-f rehearse=true]` 로 부를 때만 돈다. PR 은 `ci.yml` 의 `pr-guards` 잡이 같은 조각 워크플로를 `mode: pr` 로 부른다.
+실행 검사는 GitHub 러너(ubuntu-26.04-arm)에서 나눠 돈다. needs 에 `macos` 가 든 검사만 로컬 몫이다(지금은 0개). 배포 관문은 사람이 `gh workflow run release-gate.yml [-f shards=N] [-f ref=REF] [-f rehearse=true]` 로 부를 때만 돈다. PR 은 `ci.yml` 의 `pr-guards` 잡이 같은 조각 워크플로를 `mode: pr` 로 부른다.
 
 | 파일 | 하는 일 |
 | --- | --- |

@@ -7,6 +7,8 @@ description: 롬을 분석할 때. MesenCE 프로브·자동 보행 실험, 커�
 
 이 스킬이 ROM-01, ORIG-01, VERIFY-01, EMU-01, COMPAT-01 의 정본이다. 도구 하나하나의 사용법은 [tools/README.md](../../../tools/README.md) 가 정본이고, 여기에는 절차와 판단 기준만 둔다.
 
+분석 프로브·자동 보행 실험은 로컬 MesenCE 로 돌린다. PR 에 거는 실행 검사(가드)는 CI 가 돌리므로, 분석 결과를 가드로 굳힌 뒤에는 로컬에서 그 가드를 돌려 본문에 적지 않는다([guards](../guards/SKILL.md)).
+
 ## 준비
 
 워크트리마다 아래가 있어야 한다. `$MAIN` 은 저장소 원래 체크아웃이다([git-workflow 절차 1](../git-workflow/SKILL.md#절차) 이 링크를 만든다).

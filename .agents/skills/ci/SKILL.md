@@ -13,7 +13,7 @@ description: GitHub Actions 워크플로를 바꾸거나 CI 가 실패했을 때
 
 1. **실패한 잡과 로그를 본다** — `gh run view <run-id> --log-failed`.
    완료: 실패 원인을 한 문장으로 말할 수 있다.
-2. **로컬에서 재현한다** — `uv sync --locked && uv run --locked python tools/check_docs.py && git ls-files -z '*.py' | xargs -0 uv run --locked python -m compileall -q`. Lua 를 고쳤으면 `git ls-files -z '*.lua' | xargs -0 -n1 luac -p`. 테스트가 실패했으면 그 트랙 폴더(`sfc/dq4/tools`, `sfc/dq5/tools/tests`)에서 `uv run --locked python -m unittest discover -p 'test_*.py'`. 롬이 있는 체크아웃에서는 CI 가 skip 하는 테스트까지 돌므로, CI 에서만 실패하면 롬 링크 없는 워크트리에서 재현한다.
+2. **로컬에서 재현한다** — `uv sync --locked && uv run --locked python tools/check_docs.py && git ls-files -z '*.py' | xargs -0 uv run --locked python -m compileall -q`. Lua 를 고쳤으면 `git ls-files -z '*.lua' | xargs -0 -n1 luac -p`. 테스트가 실패했으면 그 트랙 폴더(`sfc/dq4/tools`, `sfc/dq5/tools/tests`)에서 `uv run --locked python -m unittest discover -p 'test_*.py'`. 롬이 있는 체크아웃에서는 CI 가 skip 하는 테스트까지 돌므로, CI 에서만 실패하면 롬 링크 없는 워크트리에서 재현한다. 실행 검사(가드)는 로컬에서 재현하지 않고 CI 실패 잡을 다시 돌린다(`ship.py --rerun 이름`). 로컬 에뮬레이터 실행은 원인을 찾는 수동 디버그일 때만 쓴다.
    완료: 재현되거나, 로컬에서는 통과한다.
 3. **원인을 고치고 같은 PR 에 push 한다**(CI-02). 일지 순번 중복이면 [journal 절차 5](../journal/SKILL.md#절차--한-항목을-끝냈을-때)로 번호를 다시 매긴다.
    완료: 새 커밋의 `ci-ok` 가 초록.

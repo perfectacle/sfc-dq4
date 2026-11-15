@@ -115,7 +115,8 @@ def tracked():
 
 
 def matches(path, pattern):
-    return PurePosixPath(path).full_match(pattern)
+    """PurePosixPath(path).full_match(pattern) 와 같다. 검사 목록을 읽을 때 패턴×추적 파일을 수십만 번 부르므로 정규식으로."""
+    return bool(glob_regex((pattern,)).match(path))
 
 
 def load(files, read=lambda f: (ROOT / f).read_text(encoding='utf-8')):
@@ -325,7 +326,7 @@ CODE_FILE = re.compile(r'\.(py|lua|asm)$')
 
 @functools.lru_cache(maxsize=None)
 def glob_regex(patterns):
-    """paths glob 묶음(tuple)을 하나의 정규식으로. matches(PurePosixPath.full_match)와 같은 뜻이고 훨씬 빠르다."""
+    """paths glob 묶음(tuple)을 하나의 정규식으로. PurePosixPath.full_match 와 같은 뜻이고 훨씬 빠르다."""
     return re.compile('|'.join(glob.translate(p, recursive=True, include_hidden=True) for p in patterns) or r'(?!)')
 
 
