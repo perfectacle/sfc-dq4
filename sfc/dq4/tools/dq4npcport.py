@@ -55,6 +55,13 @@ NDS_LOOKS = {
     # 사란의 역사 학자(FC 그림 29, NDS mbw1f1 学者 h033, 대사 95566)
     ("45/04", 1807): 0x1F,
 }
+# FC 가 제자리에서 방향만 바꾸게 하는 인물(블록이 방향 23·돌기 05·06 과 쉼만 되풀이, turn_loop)의 틀. 이 해킹에서 가지
+# 않는 DQ5 29/00 의 스크립트 인물들이고, 스크립트는 turn_scripts 가 FC 블록대로 덮는다. 되풀이 꼴 하나에 칸 하나
+TURN_SRCS = tuple(({"list": "05:CB65", "index": i}, at)
+                  for i, at in ((0, "05:CB6C"), (2, "05:CBA5"), (5, "05:CBE8"), (6, "05:CC11")))
+# 쉼 한 차례는 지금 방향을 다시 두는 2F 다. 2F 는 이동 간격의 한 차례를 끝내지만 38 같은 명령은 끝내지 않고 이어 가
+# 쉼이 되지 않았고, 37 은 들어가며 한 프레임을 기다려(00:9506) 게임 전체가 늦어졌다(실측)
+TURN_FACE = (0x80, 0x10, 0x40, 0x20)     # FC 방향 0~3(위·오른쪽·아래·왼쪽) → 인물 명령 2F 의 7E:31E0
 # A person FC puts on a bed lies in it: a one-time entry with 기타 bit7 (lying, drawn rotated 8 px lower) and bit4
 # (does not turn when spoken to, which would swap the head to the foot of the bed), no script.
 LIE = {"list": "10:A4E9", "index": 14}
@@ -223,6 +230,66 @@ def dq5_interval(fc_step):
     return min(WALK_SLOWEST, max(WALK_FASTEST, 2 * fc_step)) if fc_step else 0
 
 
+def turn_loop(prg, bank, body, facing):
+    """FC 블록이 처음부터 쉼(00·01, 82 n 01 81)과 방향(23 d, 05 +1, 06 −1)만 하고 83 으로 처음에 돌아가며, 한 바퀴 안의
+    방향이 둘 이상이면 [('rest', 차례 수) | ('face', 0~3)], 아니면 None. facing 은 레코드의 처음 방향이고 05·06 은 거기서
+    센다. 05·06 이 있으면 처음 방향으로 돌아올 때까지(4바퀴 안) 펼친다."""
+    if body is None:
+        return None
+    out, d, relative = [], facing, False
+    for _ in range(4):
+        p = body
+        for _ in range(64):
+            c, arg = dq4npcblock.rd(prg, bank, p), dq4npcblock.rd(prg, bank, p + 1)
+            if c in (0x00, 0x01):
+                out.append(('rest', 1))
+                p += 1
+            elif c == 0x82 and dq4npcblock.rd(prg, bank, p + 2) in (0x00, 0x01) \
+                    and dq4npcblock.rd(prg, bank, p + 3) == 0x81:
+                out.append(('rest', arg))
+                p += 4
+            elif c in (0x05, 0x06, 0x23):
+                d = arg & 3 if c == 0x23 else (d + (1 if c == 0x05 else -1)) & 3
+                relative |= c != 0x23
+                out.append(('face', d))
+                p += 2 if c == 0x23 else 1
+            elif c == 0x83 and (p + (arg - 0x100 if arg & 0x80 else arg)) & 0xFFFF == body:
+                break
+            else:
+                return None
+        else:
+            return None
+        if not relative or d == facing:
+            break
+    else:
+        return None
+    turned = {k for kind, k in out if kind == 'face'}
+    return out if len(turned) > 1 and any(kind == 'rest' for kind, _ in out) else None
+
+
+def turn_commands(loop):
+    """turn_loop 를 인물 스크립트 명령으로: 차례마다 2F 하나(방향을 바꾸거나 지금 방향을 다시 둠). 되풀이는 마지막 방향에서
+    다시 시작하므로 앞쪽 쉼도 그 방향이다."""
+    d = [n for kind, n in loop if kind == 'face'][-1]
+    out = []
+    for kind, n in loop:
+        if kind == 'face':
+            d = n
+        out += [{"op": "2F", "args": [TURN_FACE[d]]} for _ in range(1 if kind == 'face' else n)]
+    out[0] = {**out[0], "label": "top"}
+    return out + [{"op": "03", "args": [], "target": "top"}]
+
+
+def turn_scripts(report):
+    """port 의 보고에서 제자리 도는 인물의 틀 스크립트(dq5npcrelocate scripts 항목)."""
+    made = {}
+    for people in report.values():
+        for p in people:
+            if p.get("turn_src") is not None:
+                made.setdefault(p["turn_src"], p["turn"])
+    return [{"address": TURN_SRCS[k][1], "commands": turn_commands(loop)} for k, loop in sorted(made.items())]
+
+
 def fc_people(prg, fc_group, number, night, flags=None):
     """FC person records of a map at that time: FC cell, facing, step interval, picture, messages. With flags
     the list is the one FC picks for those event flags (dq4map.place_records). The interval is the FC command
@@ -244,7 +311,9 @@ def fc_people(prg, fc_group, number, night, flags=None):
         step = dq4npcblock.walk_interval(prg, bank, body, rec[2] & 0x0F if night else rec[2] >> 4)
         # Facing comes from the picture's byte: byte 3, or byte 7 at night when F bit0 is off (1C:$99B3).
         facing = rec[7] if night and not rec[0] & 1 else rec[3]
+        turn = turn_loop(prg, bank, body, facing & 3) if not step else None
         out.append({"x": x, "y": y, "facing": FACING[facing & 3], "interval": step,
+                    **({"turn": turn, "turn_step": rec[2] & 0x0F if night else rec[2] >> 4} if turn else {}),
                     "picture": dq4talk.sprite(rec, night) & 0x7F, "talk": dq4talk.talk_id(rec, night),
                     "shows": dq4talk.predict(prg, dq4talk.talk_id(rec, night), state)})
     return out
@@ -398,6 +467,7 @@ def port(dq5_path, dq4_path, with_people=True):
     first = first_talk()
     texts = {}
     lists, report = [], {}
+    turns = {}
 
     def people_of(name, fc_group, fc_number, flags=None):
         entries, people = [], []
@@ -434,15 +504,23 @@ def port(dq5_path, dq4_path, with_people=True):
                 fields = {"x": x, "y": y, "facing": p["facing"], "talk": talk,
                           "gfx": gfx, "layer": 0, "interval": dq5_interval(p["interval"])}
                 template = WALK if p["interval"] else STAND
+                turn_src = None
+                if p.get("turn") and p.get("turn_step") and service is None:
+                    # FC 는 16프레임에 한 차례, DQ5 스크립트는 이동 간격 × 8프레임에 한 차례
+                    turn_src = turns.setdefault(tuple(p["turn"]), len(turns))
+                    if turn_src >= len(TURN_SRCS):
+                        raise ValueError(f"{name}: 제자리 도는 꼴이 {len(TURN_SRCS)}가지를 넘음(TURN_SRCS 를 늘릴 것)")
+                    template = TURN_SRCS[turn_src][0]
+                    fields["interval"] = min(15, 2 * p["turn_step"])
                 if (p["x"], p["y"]) in beds and service is None:
                     # Lying on the bed's row, half a block right so the head rests on the pillow and the foot of
                     # the bed shows. The lying picture is the standing one turned clockwise: facing down turns the
                     # front view so the eyes stand one above the other and the face reads as turned to the wall;
                     # facing right (as most DQ5 sleepers) turns the side view to a face up from the pillow.
                     fields.update(x=x + 1, y=y - 1, facing="right", interval=0)
-                    template = LIE
+                    template, turn_src = LIE, None
                 entries.append({"from": template, "time": "night" if night else "day", "fields": fields})
-                people.append({**p, "night": night, "service": service,
+                people.append({**p, "night": night, "service": service, "turn_src": turn_src,
                                "message": None if message is None else f"{message:03X}", "dq5": fields})
         return entries, people
 

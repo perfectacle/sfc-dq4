@@ -360,7 +360,7 @@ BOSS_MEMBERS = tuple((dq5, 1) for dq5 in BOSS_MONSTERS)
 # FC 행동 번호(dq4-data-format 「몬스터 행동 번호」) → DQ5 행동: 00 メラ, 03 ギラ, 32 공격, 3C 불 숨결(4D),
 # 58 「かおいろが かわった」(69, 메시지만) → ようすをみる, 30 みをまもっている(41)
 FC_ACTIONS = {0x00: '39', 0x03: '3C', 0x32: '73', 0x3C: '8E', 0x58: '66', 0x30: '71'}
-BOSS_FLAGS = 0x40 | 0x02                    # 도망칠 수 없음, 보스 곡
+BOSS_FLAGS = 0x40 | 0x01                    # 도망칠 수 없음, 보스 곡 16(NDS 탑 보스와 같은 立ちはだかる難敵)
 BATTLE_AT = 0x06FF00                        # 대화 스크립트의 네이티브는 뱅크 06 안(06:FE10~ 의 덧붙인 대화 훅 뒤)
 FANFARE_AT = 0x06FF40                       # 합류 팡파르. 같은 뱅크 06 의 BATTLE_AT 뒤
 JOIN_SONG = 0x26                            # 곡 자리 26 = NDS 「仲間が加わった」(dq4-sound-port-format)

@@ -590,5 +590,69 @@ class SantheimThroneRoomTest(unittest.TestCase):
                                   {0, *range(port.WALK_FASTEST, port.WALK_SLOWEST + 1)}, (g, n, night, p))
 
 
+class TurnLoopTest(unittest.TestCase):
+    """FC 가 제자리에서 방향만 바꾸게 하는 인물은 DQ5 에서도 같은 차례로 돈다(서 있기만 하던 것)."""
+
+    @staticmethod
+    def prg(body):
+        out = bytearray(0x4000 * 8)
+        out[5 * 0x4000:5 * 0x4000 + len(body)] = body
+        return bytes(out)
+
+    def test_rests_and_faces_that_loop_back_turn(self):
+        # FC 12/00 낮 (05,02)의 블록(05:A12D): 6 쉬고 오른쪽, 2 쉬고 왼쪽, 8 쉬고 오른쪽, 4 쉬고 왼쪽
+        block = bytes.fromhex("82060181 2381 82020181 2383 82080181 2381 82040181 2383 83e8".replace(" ", ""))
+        loop = port.turn_loop(self.prg(block), 5, 0x8000, 3)
+        self.assertEqual(loop, [('rest', 6), ('face', 1), ('rest', 2), ('face', 3), ('rest', 8), ('face', 1),
+                                ('rest', 4), ('face', 3)])
+        import dq5npcwrite
+        code = dq5npcwrite.encode({'format': dq5npcwrite.FORMAT, 'commands': port.turn_commands(loop)})
+        right, left = bytes((0x2F, 0x10)), bytes((0x2F, 0x20))
+        body = left * 6 + right * 3 + left * 9 + right * 5 + left
+        self.assertEqual(code, body + bytes((0x03, 0x100 - len(body) - 1)))
+
+    def test_turning_by_one_counts_from_the_record_facing(self):
+        block = bytes((0x01, 0x05, 0x01, 0x06, 0x83, 0xFC))
+        self.assertEqual(port.turn_loop(self.prg(block), 5, 0x8000, 2),
+                         [('rest', 1), ('face', 3), ('rest', 1), ('face', 2)])
+
+    def test_one_facing_a_walk_or_no_rest_is_not_a_turner(self):
+        for block in (bytes.fromhex("238301" "83fd"),            # 늘 같은 방향(12/00 의 나머지)
+                      bytes((0x01, 0x05, 0x03, 0x83, 0xFC)),     # 걷기가 섞임
+                      bytes((0x23, 0x81, 0x23, 0x83, 0x83, 0xFC))):  # 쉬지 않음(한 차례에 끝없이 돎)
+            self.assertIsNone(port.turn_loop(self.prg(block), 5, 0x8000, 0), block.hex())
+
+
+@unittest.skipUnless(DQ4.is_file() and DQ5.is_file(), "local source ROMs not present")
+class TurnPortTest(unittest.TestCase):
+    def test_the_turner_of_imuru_gets_a_turn_script(self):
+        _, _, report = port.port(str(DQ5), str(DQ4))
+        turners = [(m, p["x"], p["y"], p["night"], p["dq5"]["interval"]) for m, people in report.items()
+                   for p in people if p.get("turn_src") is not None]
+        # 1·2장 맵에서 FC 블록이 제자리에서 도는 인물은 이무르 낮 (05,02) 하나(보스 뒤 목록에도 같은 인물)
+        self.assertEqual(turners, [("37/00", 5, 2, False, 6), (dq4ch1event.alt_name("after_boss", "37/00"), 5, 2,
+                                                                  False, 4)])
+        scripts = port.turn_scripts(report)
+        self.assertEqual([s["address"] for s in scripts], [port.TURN_SRCS[0][1]])
+
+    def test_turn_templates_are_unused_scripted_people_of_dq5(self):
+        import dq4ch2slots
+        sys.path.insert(0, str(ROOT / "sfc" / "dq5" / "tools"))
+        import dq5npc
+        from dq5map import Rom
+        rom = Rom(DQ5.read_bytes())
+        lst = int(port.TURN_SRCS[0][0]["list"].replace(":", ""), 16)
+        entries = dq5npc.list_entries(rom, lst)
+        for src, at in port.TURN_SRCS:
+            self.assertEqual(src["list"], port.TURN_SRCS[0][0]["list"])
+            e, _ = entries[src["index"]]
+            self.assertEqual(dq5npc.script_address(rom, e), int(at.replace(":", ""), 16))
+        self.assertNotIn(port.TURN_SRCS[0][0]["list"], dq4ch2slots.script_lists())
+        # 다른 사건 모듈이 같은 목록을 빌리지 않는다
+        for path in Path(__file__).resolve().parent.glob("dq4*.py"):
+            if path.name != "dq4npcport.py":
+                self.assertNotIn(port.TURN_SRCS[0][0]["list"], path.read_text(encoding="utf-8"), path.name)
+
+
 if __name__ == "__main__":
     unittest.main()

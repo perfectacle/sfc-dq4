@@ -29,7 +29,7 @@ END = 0x06FFB0
 BATTLE = 0x01868B
 WON_AT = 0x7E2190 + BATTLE_WON[0]
 # 이벤트 무리 플래그: bit6 도망칠 수 없음, bit0-1 전투 곡 등급(26:8F96 = 17 16 18: 0 보통 전투 栄光への戦い・生か死か,
-# 1 立ちはだかる難敵, 2 邪悪なるもの). BOSS_FLAGS 는 1장 보스(dq4ch1event.BOSS_FLAGS)와 같음. NDS 는 2장 고정 전투 가운데
+# 1 立ちはだかる難敵, 2 邪悪なるもの). 1장 탑 보스(dq4ch1event.BOSS_FLAGS)는 등급 1 이다. NDS 는 2장 고정 전투 가운데
 # 텐페(조우 레코드 158)만 곡 31 立ちはだかる難敵 이고 투기장은 보통 전투 곡이다(nds/dq4/docs/sound-format.md 「전투 곡」)
 NO_FLEE = 0x40
 BOSS_FLAGS = NO_FLEE | 0x02

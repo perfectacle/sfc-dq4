@@ -326,6 +326,7 @@ def npc_doc(records, ported=(), prologue=False, report=None, ported_messages=(),
         import dq4ch1event
         import dq4npcport
         ported, more_new, more_overrides = dq4ch1event.npc_lists(ported, report, event_talk())
+        scripts += dq4npcport.turn_scripts(report)
         # 보스를 이긴 뒤의 왕좌의 방: 보고 전에는 병사들이 줄을 서고 왕이 말을 거는 목록(FC 1C:$8184), 보고 뒤에는
         # 왕이 대신 옆 (10,13)에 내려와 있는 목록
         king_report = entry(STATIC, *KING_DOWN, KING, 'down', dq4ch1event.talk_numbers(event_talk())['king'])
