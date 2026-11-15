@@ -63,7 +63,8 @@ description: 버그를 고치거나 동작을 개선했을 때, PR 을 올리기
 PR 이 어떤 실행 검사의 `paths` 에 바로 맞는 파일을 바꾸거나 `guards.toml` 에서 그 검사의 `run`·`needs` 를 바꾸면(새 검사 포함), 그 검사가 돌아 통과해야 머지한다. CI 몫은 CI `pr-guards` 잡이 돌리고 `pr-guards-result` 가 `ci-ok` 에 판정을 넘긴다. 로컬 몫(`needs` 에 `guard-shards.yml` `LOCAL_NEEDS` 의 이름이 든 것)과 포크 PR 의 모든 걸린 검사는 돌린 세션이 본문에 `- [x] <이름>: 통과 …` 줄을 쓴다. 묶음(`groups`)으로만 맞는 검사와 `tier = "release"` 검사는 PR 에서 빠지고 배포 관문(`tools/release_check.py`)이 캐시 없이 모두 돌린다. 바뀐 파일이 트랙의 `[full]` `paths` 에 맞으면(절차 3) 전체 모드라 그 트랙의 실행 검사를 모두 돌려 결과 줄을 쓴다. 본문의 `가드: 전체` 줄은 그보다 넓힐 때만 쓴다. 로컬 몫이 그 변경과 상관없으면 `- [x] <이름>: 해당 없음 — <이유>` 로 쓴다. CI `required-checks` 는 줄이 요구되는 검사의 줄이 없거나, 체크되지 않았거나, `실패` 가 들었거나, 이유 없는 「해당 없음」 이면 실패한다.
 
 - 이유: 에뮬레이터 검사를 로컬에서 돌리면 세션마다 수십 분이 들고 머신 부하로 서로 막았다. CI 는 같은 판정으로 바뀐 것만, 캐시를 써서 조각마다 함께 돌리고 결과가 실행 기록으로 남는다. 로컬 몫은 CI 에 그 도구가 없어서만 남은 것이고, `LOCAL_NEEDS` 가 비면 저절로 CI 로 간다.
-- 시크릿: `pr-guards` 는 같은 저장소 브랜치 PR 에서만 롬 묶음 시크릿을 받고, 같은 커밋의 워크플로 보호 테스트(`test_release_gate_workflow`·`test_pr_guards_workflow`)가 `guard-plan` 에서 먼저 통과해야 돈다. `pull_request_target` 은 쓰지 않는다. 워크플로·`tools/ci_*` 를 고친 PR 은 `guard-plan` 이 알림을 남기니 리뷰에서 그 파일을 본다.
+- 캐시: PR 실행이 저장한 캐시는 그 PR 만 읽는다. 그래서 머지 뒤 main push 실행이 바뀐 범위의 같은 가드를 다시 돌려 main 에 캐시를 데우고, 다음 PR 은 그 캐시(빌드 단계·장면·통과 기록)를 읽는다.
+- 시크릿: `pr-guards` 는 같은 저장소 브랜치 PR 과 main push 에서만 롬 묶음 시크릿을 받고, 같은 커밋의 워크플로 보호 테스트(`test_release_gate_workflow`·`test_pr_guards_workflow`)가 `guard-plan` 에서 먼저 통과해야 돈다. `pull_request_target` 은 쓰지 않는다. 워크플로·`tools/ci_*` 를 고친 PR 은 `guard-plan` 이 알림을 남기니 리뷰에서 그 파일을 본다.
 - PR 에서 줄이는 이유: 빌드 파일 하나만 바꿔도 묶음으로 검사 40개 넘게 걸려 45분이 넘게 들었다. 그 변경이 직접 닿는 검사만 PR 에서 돌리고, 나머지는 배포 전에 한 번 크게 돌린다.
 - 결과는 `통과`(뒤에는 괄호·대시나 줄 끝만, 예: `통과 (bsnes 27/27)`) 또는 `해당 없음 — <이유>` 둘뿐이다. 「통과하지 못함」 같은 글은 실패로 친다.
 - 본문을 고쳐도 CI 는 다시 돌지 않는다(`edited` 를 받지 않음 — 받으면 CI 가드가 처음부터 다시 돈다). `required-checks` 와 `guard-plan` 은 본문을 API 로 읽으므로, 새 커밋 없이 본문을 고쳤으면 `required-checks` 잡만 다시 돌린다(ship 이 함). `가드: 전체`·`가드: 더함` 줄을 더한 것은 다음 push 의 CI 부터 반영된다.

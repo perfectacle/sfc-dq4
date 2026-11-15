@@ -1,4 +1,4 @@
-"""ci.yml 의 PR 가드 잡이 롬 묶음 시크릿을 같은 저장소 브랜치의 PR 에만 넘기는 꼴인지 지킨다.
+"""ci.yml 의 PR 가드 잡이 롬 묶음 시크릿을 같은 저장소 브랜치의 PR 과 main push(머지 뒤 캐시 데우기)에만 넘기는 꼴인지 지킨다.
 
 pr-guards 잡은 guard-shards.yml 을 부르며 CI_ROM_TOKEN·CI_ROM_AGE_KEY 를 넘긴다. 포크 PR 의 코드가 시크릿과 함께 돌면
 안 되고(pull_request 는 포크에 시크릿을 주지 않지만, 조건이 빠지면 같은 저장소 판정도 사라진다), pull_request_target 처럼
@@ -19,6 +19,9 @@ import guards  # noqa: E402
 CI = WORKFLOWS / 'ci.yml'
 SAME_REPO = 'github.event.pull_request.head.repo.full_name == github.repository'
 SECRETS = ('CI_ROM_TOKEN', 'CI_ROM_AGE_KEY')
+MAIN_PUSH = "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+PR_GUARDS_IF = (f"needs.guard-plan.outputs.guards != '' && (github.event_name == 'pull_request' && {SAME_REPO}"
+                f" || {MAIN_PUSH})")
 
 
 def job_texts(text):
@@ -60,12 +63,8 @@ class PrGuardsWorkflowTest(unittest.TestCase):
 
     def test_pr_guards_runs_only_for_same_repo_prs(self):
         job = self.jobs['pr-guards']
-        cond = job_key(job, 'if')
-        self.assertIsNotNone(cond)
-        self.assertIn("github.event_name == 'pull_request'", cond)
-        self.assertIn(SAME_REPO, cond)
-        self.assertNotRegex(cond, r'\|\|', '조건을 「또는」 으로 넓히지 않는다')
-        self.assertIn("needs.guard-plan.outputs.guards != ''", cond)
+        # 같은 저장소 브랜치 PR 또는 main 에 push(머지 뒤 캐시 데우기)뿐. 조건을 넓히려면 이 글자를 고쳐야 한다
+        self.assertEqual(job_key(job, 'if'), PR_GUARDS_IF)
         self.assertEqual(job_key(job, 'needs'), 'guard-plan')
         self.assertRegex(job, r'uses:\s*\./\.github/workflows/guard-shards\.yml')
         self.assertRegex(job, r'\n      mode: pr\n')
@@ -82,7 +81,7 @@ class PrGuardsWorkflowTest(unittest.TestCase):
         self.assertEqual(len(tests), 1)
         self.assertEqual(len(plan), 1)
         self.assertLess(tests[0], plan[0])
-        self.assertEqual(job_key(self.jobs['guard-plan'], 'if'), "github.event_name == 'pull_request'")
+        self.assertEqual(job_key(self.jobs['guard-plan'], 'if'), f"github.event_name == 'pull_request' || {MAIN_PUSH}")
         # 권한은 읽기만
         self.assertNotRegex(self.text, r':\s*write\b')
 
@@ -97,6 +96,7 @@ class PrGuardsWorkflowTest(unittest.TestCase):
         self.assertIn('pr-guards', job_key(verdict, 'needs'))
         script = run_texts(self.steps['pr-guards-result'][0])
         self.assertIn('"$RESULT" = success', script)
+        self.assertIn('[ "$EVENT" = pull_request ] && [ "$SAME_REPO" != true ]', script)
         self.assertRegex(script, r'exit 1\s*$')
         self.assertEqual(with_value(self.steps['pr-guards-result'][0], 'SAME_REPO'), f'${{{{ {SAME_REPO} }}}}')
 

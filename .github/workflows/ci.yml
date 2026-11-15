@@ -127,12 +127,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-  # Picks the run-time guards this PR touches (tools/guards.py --base: own paths, [full], `가드: 전체`,
-  # `가드: 더함`) and splits them into the CI share and the local share (LOCAL_NEEDS in guard-shards.yml).
-  # No secrets in this job. The guard job below decrypts the ROM bundle, so it waits for the workflow
-  # protection tests of the same commit: a workflow edit that would leak the bundle fails here first.
+  # Picks the run-time guards this PR (or push to main) touches (tools/guards.py --base: own paths, [full],
+  # `가드: 전체`, `가드: 더함`) and splits them into the CI share and the local share (LOCAL_NEEDS in
+  # guard-shards.yml). No secrets in this job. The guard job below decrypts the ROM bundle, so it waits for
+  # the workflow protection tests of the same commit: a workflow edit that would leak the bundle fails here.
+  # On main the same guards run again after a merge: caches saved by a PR run are visible only to that PR,
+  # so main's run is what warms the build, scene and pass caches for the next PRs.
   guard-plan:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 10
     permissions:
@@ -164,24 +166,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          gh api "repos/$REPO/pulls/$PR" --jq .body > "$RUNNER_TEMP/pr-body.md"
+          if [ -n "$PR" ]; then gh api "repos/$REPO/pulls/$PR" --jq .body > "$RUNNER_TEMP/pr-body.md"; else : > "$RUNNER_TEMP/pr-body.md"; fi
           if [ -n "$(git diff --name-only "$BASE...$HEAD_SHA" -- .github tools/ci_gate_setup.sh tools/ci_cache.py tools/ci_artifact_check.py)" ]; then
             echo "::notice::이 PR 은 워크플로·CI 비밀 처리 파일을 바꾼다: 보호 테스트를 통과해 가드 잡이 돈다(리뷰에서 그 파일을 볼 것)"
           fi
           uv run --frozen python tools/guards.py --base "$BASE" --head "$HEAD_SHA" --pr-body "$RUNNER_TEMP/pr-body.md" \
             --plan "$GITHUB_OUTPUT"
 
-  # Same-repository branches only: a fork's code must never run with the ROM bundle secrets, so fork PRs
-  # skip this job and fall back to body result lines (required-checks), checked by a maintainer.
+  # Same-repository branches and main only: a fork's code must never run with the ROM bundle secrets, so
+  # fork PRs skip this job and fall back to body result lines (required-checks), checked by a maintainer.
   pr-guards:
     needs: guard-plan
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.guard-plan.outputs.guards != ''
+    if: needs.guard-plan.outputs.guards != '' && (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push' && github.ref == 'refs/heads/main')
     uses: ./.github/workflows/guard-shards.yml # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
     with:
-      ref: ${{ github.event.pull_request.head.sha }}
+      ref: ${{ github.event.pull_request.head.sha || github.sha }}
       mode: pr
       guards: ${{ needs.guard-plan.outputs.guards }}
       shards: ${{ fromJSON(needs.guard-plan.outputs.shards) }}
@@ -190,7 +192,7 @@ jobs:
       CI_ROM_TOKEN: ${{ secrets.CI_ROM_TOKEN }}
       CI_ROM_AGE_KEY: ${{ secrets.CI_ROM_AGE_KEY }}
 
-  # One verdict for the guard job, which may be skipped for good reasons (no guards, not a PR, a fork).
+  # One verdict for the guard job, which may be skipped for good reasons (no guards, a manual run, a fork).
   pr-guards-result:
     if: always()
     needs: [guard-plan, pr-guards]
@@ -206,11 +208,11 @@ jobs:
           RESULT: ${{ needs.pr-guards.result }}
           SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
-          if [ "$EVENT" != pull_request ]; then echo "PR 이 아님: 실행 가드는 배포 관문 몫"; exit 0; fi
+          if [ "$EVENT" != pull_request ] && [ "$EVENT" != push ]; then echo "손으로 부른 실행: 실행 가드는 배포 관문 몫"; exit 0; fi
           if [ "$PLAN" != success ]; then echo "::error::guard-plan 이 $PLAN"; exit 1; fi
           if [ -n "$LOCAL" ]; then echo "::notice::로컬 몫(본문 결과 줄로 판정): $LOCAL"; fi
           if [ -z "$GUARDS" ]; then echo "CI 가 돌릴 실행 가드 없음"; exit 0; fi
-          if [ "$SAME_REPO" != true ]; then
+          if [ "$EVENT" = pull_request ] && [ "$SAME_REPO" != true ]; then
             echo "::warning::포크 PR 은 관리자가 확인: CI 가드($GUARDS)를 돌리지 않았다. 본문 결과 줄(required-checks)로 판정"
             exit 0
           fi
