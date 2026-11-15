@@ -95,8 +95,11 @@ DEGRADE = (
 class Person:
     def __init__(self, pictures, group, sheet, role, anim='legs', main=False, palette=None, new_set=None, spare=None,
                  allow=None, outline=False, flag=None, leader=False, seen=None, face=False, weight=None, glasses=False, brows=False, copy=None, touch=None, whites=(),
-                 line=None):
+                 line=None, wave=0):
         self.pictures, self.group, self.sheet, self.role = pictures, group, sheet, role
+        # wave: 줄·칸을 정하는 차례. 앞 차례 인물의 줄과 색 칸을 못박은 뒤에 배치한다(뒤에 더한 인물이 이미 정한
+        # 인물의 색을 흔들지 않게)
+        self.wave = wave
         # seen: 사건이 놓는 인물처럼 롬의 인물 목록에 없는 그림이 나올 맵 그룹들. 그 그룹의 줄 색에만 넣는다
         # (목록에서 찾지 못한 그림은 모든 그룹으로 세어 다른 그룹의 색을 흐린다)
         self.seen = frozenset(seen) if seen is not None else None
@@ -234,6 +237,22 @@ PEOPLE = (
     Person((0x45,), None, 'h071', '호빗'),
     Person((0x1A,), None, 'h009', '초록 모자 상인', spare=0x70, weight=TOWN_WEIGHT),
     Person((0x26,), None, 'h048', '말', anim='frames', spare=0x5E),
+    # 3·4장 그룹(3E~44)과 5장 첫 지역(46·47)의 인물. 그림 21 은 FC 그림 3B(몬바바라의 파논), 36 은 FC 4D(토르네코),
+    # 6E 는 FC 46(킹 레오 성 왕좌의 발자크)
+    Person((0x0A,), None, 'h027', '바니걸', wave=1),
+    # 옆모습에서 세워 든 검: NDS 는 흰 날 두 칸 폭인데 줄이면 날이 빠지고 윤곽만 남아 검은 막대가 된다. 윤곽
+    # 안쪽 한 줄을 흰 날로 둔다
+    Person((0x0D,), None, 'h020', '여전사', wave=1,
+           touch={'left': [(1, y, 'white') for y in range(5, 13)], 'right': [(13, y, 'white') for y in range(4, 12)] + [(13, 12, (1, 10))]}),   # 날 아래 칸은 코등이(방패의 노랑)
+    # 무희·파논은 가볍게 세면 빨간 옷이 마을 사람의 갈색 칸에 합쳐진다(색 거리 18.6·23.3). 줄 3: 줄마다 넣어
+    # 본 결과 둘 다 가장 덜 벗어나고, 같은 맵의 앞 차례 인물도 덜 민다
+    Person((0x28,), None, 'h026', '무희', wave=1, weight=KEY_WEIGHT, line=3),
+    Person((0x21,), None, 'h134', '파논', wave=1, weight=KEY_WEIGHT, line=3),
+    Person((0x36,), None, 'h118', '토르네코', main=True, wave=1),
+    # 46타일인데 세트 38 은 32타일이고 그만큼 큰 빈 세트가 없다. 왕좌에 서 있기만 하므로 걸음을 줄여 맞춘다
+    # 줄 0: 줄 4 가 몸의 보라에 가장 가깝지만 같은 성의 대신·노인 색을 민다(줄마다 넣어 본 결과)
+    Person((0x6E,), None, 'h156', '발자크', anim='frames', main=True, wave=1, line=0,
+           allow=tuple(n for n, _ in DEGRADE)),
     *(Person((pic,), None, sheet, role, anim=anim, spare=pic, seen=(group,), face=role in FACE_KEPT,
              weight=KEY_WEIGHT if role in KEY_EVENT else None)
       for role, pic, sheet, group, anim in EVENT_PEOPLE),
@@ -249,16 +268,20 @@ LENT_LINES = {PROLOGUE: (5, 6), **{g: (7,) for g in range(0x36, 0x3C)}}
 HOOK_SITES = ('1F:CF45', '03:D202')
 LOAD_SET = bytes.fromhex('bf d0 86 25')                  # LDA $2586D0,X
 MAP_GROUP = 0x7E00BC
-DQ4_GROUPS = frozenset(range(0x36, 0x46))            # dq4groupbuild 가 만드는 DQ4 맵 그룹
+DQ4_GROUPS = frozenset(range(0x36, 0x48))            # dq4groupbuild 가 만드는 DQ4 맵 그룹
+FIRST_GROUPS = frozenset(range(0x36, 0x46))          # 첫 차례 인물(서장·1·2장)의 줄과 칸을 정한 때의 그룹
 # 원래 자리에 들어가지 않는 타일 자료를 나눠 담는 곳(뱅크 3F 이하여야 레코드가 가리킴). 곡 롬의 0 끝 줄 안. 3F 는 앞쪽을
 # 인물 목록(dq4chapter1.NPC_BANK, 인라인 스크립트 포함)이 쓰므로 그 끝과 겹치지 않게 띄운다
 # 3C:F040~ 는 그룹 빌드(3A~3F)가 채운 뒤 남는 끝자리. 36·37 은 대화 스크립트·대체 목록(dq4chapter1.TALK_BANK·NPC_ALT)이라 쓰지 않는다.
 # 39 도 레코드 자리의 마지막이지만 레코드는 앞(8000)부터 차므로 끝 4KB 만 쓴다. 레코드가 거기까지 자라면 tile_areas 가
 # 쓰인 끝 뒤로 미루고, 자리가 모자라면 멈춘다
+# 3D:EB60~ 은 세트 팔레트 표 뒤부터 그 뱅크의 다음 자료(3D:FD97) 앞까지
 TILE_AREAS = (('3E:D700', 0xFC00 - 0xD700), ('3F:EB80', 0x10000 - 0xEB80), ('3C:F040', 0xFE00 - 0xF040),
-              ('39:F000', 0x10000 - 0xF000))
+              ('39:F000', 0x10000 - 0xF000), ('3D:EB60', 0xFD80 - 0xEB60))
 PALETTES_AT, HOOK_AT = '3D:EA00', '3E:FC00'
-MAP_PALETTES_AT = '3D:EB60'                       # 맵 팔레트 줄 루틴·표를 옮길 곳(세트 팔레트 표 뒤 빈 자리)
+# 맵 팔레트 줄 루틴·표를 옮길 곳. 항목이 맵 그룹 × 줄만큼 늘어 3D 의 빈 자리(4.5KB)를 넘으므로 레코드 자리의
+# 마지막 뱅크 뒤쪽에 둔다(타일 자리 39:F000 앞까지 12KB)
+MAP_PALETTES_AT = '39:C000'
 
 
 def cpu(text):
@@ -797,8 +820,10 @@ def cost(hist, pal):
     return sum(w * min(math.dist(lab(c), q) for q in lp) for c, w in hist.items())
 
 
-def lines(people, hists, where=None):
-    """공용 줄 배정: 주요 인물부터 넣을 때 늘어나는 색 거리 합이 가장 작은 줄로."""
+def lines(people, hists, where=None, fixed=None):
+    """공용 줄 배정: 주요 인물부터 넣을 때 늘어나는 색 거리 합이 가장 작은 줄로. fixed {인물: 줄} 의 인물은 그 줄에
+    먼저 넣는다."""
+    fixed = fixed or {}
     groups = defaultdict(Counter)
     seen = defaultdict(set)
 
@@ -806,7 +831,8 @@ def lines(people, hists, where=None):
         lent = [set(LENT_LINES.get(g, ())) for g in where[p]] if where else []
         return SHARED_LINES + tuple(sorted(set.intersection(*lent))) if lent else SHARED_LINES
     heavy = defaultdict(set)
-    order = sorted((p for p in people if p.palette is None), key=lambda p: (p.weight <= 1, -len(hists[p])))
+    order = sorted((p for p in people if p.palette is None),
+                   key=lambda p: (p not in fixed, p.weight <= 1, -len(hists[p])))
     assign = {}
     for p in order:
         h = Counter({c: w * p.weight for c, w in hists[p].items()})
@@ -821,7 +847,9 @@ def lines(people, hists, where=None):
             room = 15 - len(COMMON)
             return cost(merged, reduce(merged, room)) - cost(was, reduce(was, room))
         mine = {c for c in hists[p] if c not in COMMON}
-        if p.line is not None:
+        if p in fixed:
+            best = fixed[p]
+        elif p.line is not None:
             if where and p.line not in open_lines(p):
                 raise SystemExit(f'{p.role}: 못박은 줄 {p.line} 은 이 인물이 나오는 맵 그룹에서 쓸 수 없는 줄')
             best = p.line
@@ -857,27 +885,34 @@ def place(people, hists, where):
     하므로 인물마다 하나로 둔다. 「그룹마다 칸 색 = 그 그룹에서 그 칸에 모인 색의 가중 평균」과 「인물 색마다 그
     인물이 나오는 그룹들의 칸 색과의 거리 합이 가장 작은 칸」을 번갈아 고친다(공용 줄 색에서 시작).
     끝에는 칸 색을 그 칸에 모인 NDS 원래 색 가운데 평균에 가장 가까운 것으로 둔다.
+    차례(wave)가 여럿이면 앞 차례부터 배치하고, 정한 줄과 칸은 뒤 차례에서 그대로 둔다. 첫 차례는 FIRST_GROUPS
+    안에서만 재어, 뒤에 더한 그룹과 인물이 없던 때와 같은 배치가 된다.
     반환: ({인물: (줄, {색: 칸})}, {(그룹, 줄): 15색})."""
-    assign, shared = lines(people, hists, where)
     who = [p for p in people if p.palette is None]
-    keys = {(g, assign[p]) for p in who for g in where[p]}
-    centers = {key: [lab(c) for c in shared[key[1]]] for key in keys}
-    mapping = {}
-    for _ in range(ROUNDS):
-        for p in who:
-            rows = [centers[(g, assign[p])] for g in where[p]]
-            mapping[p] = {c: min(range(len(rows[0])), key=lambda k: sum(math.dist(lab(c), r[k]) for r in rows))
-                          for c in hists[p]}
-        acc = {}
-        for p in who:
-            for c, w in hists[p].items():
-                for g in where[p]:
-                    acc.setdefault((g, assign[p], mapping[p][c]), Counter())[c] += w * p.weight
-        for (g, line, k), cs in acc.items():
-            total = sum(cs.values())
-            centers[(g, line)][k] = tuple(sum(lab(c)[i] * w for c, w in cs.items()) / total for i in range(3))
+    assign, mapping, shared, acc, centers = {}, {}, {}, {}, {}
+    for wave in sorted({p.wave for p in who}):
+        now = [p for p in who if p.wave <= wave]
+        at = {p: (where[p] & FIRST_GROUPS or where[p]) if wave == 0 else where[p] for p in now}
+        assign, pal = lines(now, hists, at, fixed=assign)
+        shared = {**pal, **shared}
+        keys = {(g, assign[p]) for p in now for g in at[p]}
+        centers = {key: [lab(c) for c in shared[key[1]]] for key in keys}
+        fresh = [p for p in now if p not in mapping]
+        for _ in range(ROUNDS):
+            for p in fresh:
+                rows = [centers[(g, assign[p])] for g in at[p]]
+                mapping[p] = {c: min(range(len(rows[0])), key=lambda k: sum(math.dist(lab(c), r[k]) for r in rows))
+                              for c in hists[p]}
+            acc = {}
+            for p in now:
+                for c, w in hists[p].items():
+                    for g in at[p]:
+                        acc.setdefault((g, assign[p], mapping[p][c]), Counter())[c] += w * p.weight
+            for (g, line, k), cs in acc.items():
+                total = sum(cs.values())
+                centers[(g, line)][k] = tuple(sum(lab(c)[i] * w for c, w in cs.items()) / total for i in range(3))
     board = {}
-    for g, line in keys:
+    for g, line in centers:
         row = []
         for k, center in enumerate(centers[(g, line)]):
             cs = acc.get((g, line, k))
