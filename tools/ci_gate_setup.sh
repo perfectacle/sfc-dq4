@@ -25,6 +25,9 @@ GALMURI_SHA256=c8b3d9861a62ae73c8b1178091401cd79994812437ef386413f6dd54856e60e7
 # 러너가 ARM64 라 그 판을 쓴다. 설정은 tools/ci-mesence-settings.json 을 실행 파일 옆에 두는 포터블 모드
 MESENCE_URL_ARM64=https://github.com/nesdev-org/MesenCE/releases/download/2.2.1/Mesen_2.2.1_Linux_ARM64.zip
 MESENCE_SHA256_ARM64=5030702ba13d043bf926ee3cc6c6a5d3567e08345e9c50b2df4d4d08b90ead30
+# Go 1.26.10(1.26 계열 마지막 판 1.26.11 의 하나 앞, 7일 쿨다운). sfc/dq4/tools/native 의 도구를 만들 때만 받는다
+GO_URL_ARM64=https://go.dev/dl/go1.26.10.linux-arm64.tar.gz
+GO_SHA256_ARM64=3f4227ce7b206a513e794f1393adb473a07b46e94d18bd15d1c684bbb7319797
 
 : "${RUNNER_TEMP:?RUNNER_TEMP 가 없음(GitHub Actions 러너에서 부른다)}"
 TOOLS="$RUNNER_TEMP/gate-tools"
@@ -104,12 +107,28 @@ tools() {
     "$RUNNER_TEMP/no-rom.sfc" "$RUNNER_TEMP/mesence-warm.lua" --timeout=30 >/dev/null 2>&1 || true
   [ -s "$TOOLS/mesence/MesenCore.so" ] || { echo "::error::MesenCE 가 MesenCore.so 를 풀지 않음"; exit 1; }
 
+  # sfc/dq4/tools/native 의 Go 도구. actions/cache 가 지금 소스의 바이너리를 되살렸으면 Go 를 받지도 않는다
+  if DQ4_NATIVE="$TOOLS/native" uv run --frozen python sfc/dq4/tools/dq4native.py path | grep -q ': 파이썬$'; then
+    [ "$(uname -m)" = aarch64 ] || { echo "::error::Go 는 리눅스 ARM64 판만 고정함"; exit 1; }
+    local gz="$TOOLS/dl-go/go.tar.gz"
+    mkdir -p "$TOOLS/dl-go"
+    if ! echo "$GO_SHA256_ARM64  $gz" | sha256sum -c --quiet - 2>/dev/null; then
+      curl -fsSL -o "$gz" "$GO_URL_ARM64"
+      echo "$GO_SHA256_ARM64  $gz" | sha256sum -c --quiet -
+    fi
+    rm -rf "$RUNNER_TEMP/go" && mkdir -p "$RUNNER_TEMP/go"
+    tar -xzf "$gz" -C "$RUNNER_TEMP/go" --strip-components=1
+    PATH="$RUNNER_TEMP/go/bin:$PATH" DQ4_NATIVE="$TOOLS/native" uv run --frozen python sfc/dq4/tools/dq4native.py build
+  fi
+  DQ4_NATIVE="$TOOLS/native" uv run --frozen python sfc/dq4/tools/dq4native.py path
+
   {
     echo "ASAR=$TOOLS/asar/bin/asar"
     echo "DQ4_GALMURI=$TOOLS/galmuri"
     echo "DQ4_CORES=$TOOLS/cores"
     echo "MESENCE=$TOOLS/mesence/Mesen"
     echo "LIBDIR=$(uv run --frozen krpatch sfc lua)"
+    echo "DQ4_NATIVE=$TOOLS/native"
   } >>"$GITHUB_ENV"
 }
 
@@ -117,6 +136,7 @@ pins() {
   {
     echo "asar=$ASAR_COMMIT"
     echo "galmuri=$GALMURI_SHA256"
+    echo "go=$GO_SHA256_ARM64"
   } >>"${GITHUB_OUTPUT:?GITHUB_OUTPUT 가 없음}"
 }
 

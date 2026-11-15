@@ -4,19 +4,24 @@
 (dq4soundport)을 고쳐도 묶기 결과는 그대로 다시 쓰고, 묶기·인코딩을 고치면 옛 결과를 쓰지 않는다.
 """
 
+import atexit
+from array import array
 import functools
 import gzip
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
+import threading
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path.insert(0, str(ROOT / 'sfc/dq5/tools'))
 
 from dq5song import _encode_line  # noqa: E402
+import dq4native  # noqa: E402
 
 COMPACT_HASH = hashlib.sha256(Path(__file__).read_bytes() + (ROOT / 'sfc/dq5/tools/dq5song.py').read_bytes()).hexdigest()
 
@@ -254,8 +259,63 @@ class _Program:
         return out
 
 
+class _Native:
+    """Go 도구 dq4repeats(sfc/dq4/tools/native/dq4repeats)를 한 번 띄워 두고 요청마다 쓴다."""
+
+    def __init__(self, path):
+        self.proc = subprocess.Popen([str(path)], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        self.lock = threading.Lock()
+        atexit.register(self.close)
+
+    def repeats(self, arr, max_tokens):
+        data = array('i', [len(arr), max_tokens, *arr])
+        if sys.byteorder != 'little':
+            data.byteswap()
+        with self.lock:
+            self.proc.stdin.write(data.tobytes())
+            self.proc.stdin.flush()
+            count = self._ints(1)[0]
+            out = []
+            for _ in range(count):
+                length, k = self._ints(2)
+                out.append((length, self._ints(k).tolist()))
+        return out
+
+    def _ints(self, k):
+        raw = self.proc.stdout.read(4 * k)
+        if len(raw) != 4 * k:
+            raise RuntimeError('dq4repeats 가 답하지 않음')
+        got = array('i', raw)
+        if sys.byteorder != 'little':
+            got.byteswap()
+        return got
+
+    def close(self):
+        if self.proc.poll() is None:
+            try:
+                self.proc.stdin.write(array('i', [-1, 0]).tobytes())
+                self.proc.stdin.close()
+            except OSError:
+                pass
+            self.proc.wait()
+
+
+@functools.cache
+def _native():
+    path = dq4native.binary('dq4repeats')
+    return _Native(path) if path else None
+
+
 def _repeats(arr, max_tokens):
-    """arr 에서 두 번 이상 나오는 토막(음수는 서로 다른 벽)을 (길이, [시작 자리]) 로. 접미사 배열의 LCP 구간."""
+    """arr 에서 두 번 이상 나오는 토막(음수는 서로 다른 벽)을 (길이, [시작 자리]) 로. 접미사 배열의 LCP 구간.
+    Go 도구를 만들어 두었으면 그것이, 없으면 _repeats_py 가 같은 차례로 낸다."""
+    native = _native()
+    if native is not None:
+        return native.repeats(arr, max_tokens)
+    return _repeats_py(arr, max_tokens)
+
+
+def _repeats_py(arr, max_tokens):
     n = len(arr)
     order = sorted(range(n), key=lambda i: arr[i:i + max_tokens])
     lcp = [0] * n
