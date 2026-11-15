@@ -1047,7 +1047,7 @@ class PrPlanTest(unittest.TestCase):
                                capture_output=True, text=True, cwd=guards.ROOT)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertIn(f'guards={ci["name"]}\n', out.read_text(encoding='utf-8'))
-            # CI 몫은 본문 줄을 요구하지 않고(--local-only), 다 요구하면(포크) 줄이 없어 실패
+            # CI 몫은 본문 줄을 요구하지 않고(--local-only), 다 요구하면 줄이 없어 실패
             r = subprocess.run([sys.executable, tool, '--base', 'HEAD', '--pr-body', str(body), '--local-only'],
                                capture_output=True, text=True, cwd=guards.ROOT)
             self.assertEqual(r.returncode, 0, r.stdout)
