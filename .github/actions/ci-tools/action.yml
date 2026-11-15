@@ -1,6 +1,6 @@
 name: CI tools
 description: >-
-  asar, Galmuri and the libretro cores for the guard runners (tools/ci_gate_setup.sh tools),
+  asar, Galmuri, the libretro cores and the native (Go) tools for the guard runners (tools/ci_gate_setup.sh tools),
   each in its own plain actions/cache keyed by its pinned version, so one bump rebuilds only
   that tool. Each cache is saved right after the setup step, before anything else in the job
   can fail. These hold no ROM data. Run from the repository root after uv sync.
@@ -34,6 +34,21 @@ runs:
         path: ${{ runner.temp }}/gate-tools/cores
         key: gate-cores-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('sfc/dq4/tools/dq4cores.py', 'sfc/dq4/tools/dq4cores-bsnes-romtrace.patch') }}
 
+    - name: Restore the native tools
+      id: native
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/gate-tools/native
+        key: gate-native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('sfc/dq4/tools/native/**', 'sfc/dq4/tools/dq4native.py') }}
+
+    - name: Restore the Go download
+      id: go
+      if: steps.native.outputs.cache-hit != 'true'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/gate-tools/dl-go
+        key: gate-go-${{ steps.pins.outputs.go }}
+
     - name: Build asar, fetch Galmuri, build libretro cores
       shell: bash
       run: tools/ci_gate_setup.sh tools
@@ -51,6 +66,20 @@ runs:
       with:
         path: ${{ runner.temp }}/gate-tools/dl
         key: ${{ steps.galmuri.outputs.cache-primary-key }}
+
+    - name: Save the native tools
+      if: steps.native.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/gate-tools/native
+        key: ${{ steps.native.outputs.cache-primary-key }}
+
+    - name: Save the Go download
+      if: steps.native.outputs.cache-hit != 'true' && steps.go.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/gate-tools/dl-go
+        key: ${{ steps.go.outputs.cache-primary-key }}
 
     - name: Save the libretro cores
       if: steps.cores.outputs.cache-hit != 'true'
