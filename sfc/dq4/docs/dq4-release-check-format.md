@@ -100,6 +100,24 @@ uv run --locked python sfc/dq4/tools/dq4publish.py release --report work/release
 
 로컬 커버리지는 `dq4build.py` 가 하위 프로세스로 부르는 단계 스크립트까지 잰다(coverage 설정 `patch = subprocess`). 실측 보고서(`coverage-local-report.txt`)에서 단계 스크립트가 모두 잡혔다. `dq4titlelayers` 92%, `dq4titlelayerpatch` 95%, `dq4overture` 96%, `dq4chapter1` 97%, `dq4menupatch` 91%, `dq4soundset` 94%, `dq4sparfx` 83%, `dq4people` 97% 다. 롬 없이(CI 와 같게) 재면 `dq4chapter1` 61%, `dq4people` 64% 다.
 
+## CI 에서 돌리기
+
+MesenCE 가 필요 없는 실행 검사는 GitHub 러너에서 나눠 돈다. 사람이 `gh workflow run release-gate.yml [-f shards=N] [-f ref=REF]` 로 부를 때만 돈다.
+
+| 파일 | 하는 일 |
+| --- | --- |
+| `.github/workflows/release-gate.yml` | `workflow_dispatch` 만. 롬 시크릿을 이름을 대어 `guard-shards.yml` 에 넘긴다(`mode: release`) |
+| `.github/workflows/guard-shards.yml` | `workflow_call` 만. 입력 `ref`·`mode`(`release` 모든 검사, `pr` 은 `guards` 목록만)·`guards`·`shards`. `build`(롬 풀기·출하 롬 빌드·조각 목록) → `shard` 행렬(`guards.py --all --run --no-cache --shard k/N --exclude-needs MESENCE,LIBDIR --json`) → `report`(`release_check.py --ci-summary`, 실행 요약에 표) |
+| `.github/actions/ci-roms` | composite action. 프라이빗 에셋 저장소 릴리스 `ci-roms-v1` 의 age 암호화 묶음(`dq5.sfc dq6.sfc dq4.nes dq4-rev0.nes dq4ds.nds dq4ds-kr.nds dq4ds-kr.ml1 dq4ds-kr.sav`)을 `rom/` 에 풀고 롬 SHA-256 목록을 `$RUNNER_TEMP/rom-hashes.txt` 에 |
+| `tools/ci_gate_setup.sh tools` | asar·Galmuri·libretro 코어를 `$RUNNER_TEMP/gate-tools` 에 두고 `ASAR`·`DQ4_GALMURI`·`DQ4_CORES` 를 잡 환경에 |
+| `tools/ci_artifact_check.py DIR --hashes FILE` | 올리기 바로 앞. 롬·세이브·패치 확장자(`.sfc .smc .nes .nds .ml1 .sav .mss .ips .srm .state`), 심볼릭 링크, 롬 해시와 같은 내용, 8MB 넘는 파일이 있으면 1. 실패하면 올리지 않는다 |
+
+- 시크릿: `CI_ROM_TOKEN`(에셋 저장소 읽기), `CI_ROM_AGE_KEY`(age 개인 키). 키 줄은 `::add-mask::` 로 가린다.
+- artifact 는 조각 결과 JSON 과 검사 로그뿐이다. `actions/cache` 는 asar·코어 빌드(`$RUNNER_TEMP/gate-tools`)만 담는다.
+- 조각은 `tools/guardshard-times.json`(검사마다 지난 시간)으로 고르게 나눈다. `guards.py --record-times 보고서…` 로 고쳐 쓴다.
+- 로컬에서 마무리: 조각 artifact 를 받은 폴더로 `release_check.py --ci-report DIR` 를 돌리면 guards 단계는 CI 결과(같은 커밋, 조각이 모두 있어야 함)를 쓰고 로컬 몫만 돈다.
+- `tools/tests/test_release_gate_workflow.py` 가 지킨다: 관문은 `workflow_dispatch` 만(`pull_request`·`pull_request_target`·`schedule` 금지), 조각 워크플로는 `workflow_call` 만이고 부르는 곳은 관문뿐, 올리기 앞 검사 단계, 캐시 경로, 시크릿을 찍는 줄 없음.
+
 ## 남은 것
 
 - 커버리지가 기준에 못 미친다(로컬 77.1%, CI 와 같게 69.7%). 기준은 그대로 두고 빌드 경로 시험을 늘려 맞춘다. 그때까지 관문은 「커버리지 미달」 로 실패한다.
