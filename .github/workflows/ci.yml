@@ -176,8 +176,8 @@ jobs:
           uv run --frozen python tools/guards.py --base "$BASE" --head "$HEAD_SHA" --pr-body "$RUNNER_TEMP/pr-body.md" \
             --plan "$GITHUB_OUTPUT"
 
-  # Same-repository branches and main only: a fork's code must never run with the ROM bundle secrets, so
-  # fork PRs skip this job and fall back to body result lines (required-checks), checked by a maintainer.
+  # Same-repository branches and main only: a fork's code must never run with the ROM bundle secrets:
+  # fork PRs skip this job and ci-ok rejects them (this repository takes no fork PRs).
   pr-guards:
     needs: guard-plan
     if: needs.guard-plan.outputs.guards != '' && (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push' && github.ref == 'refs/heads/main')
@@ -192,7 +192,7 @@ jobs:
       CI_ROM_TOKEN: ${{ secrets.CI_ROM_TOKEN }}
       CI_ROM_AGE_KEY: ${{ secrets.CI_ROM_AGE_KEY }}
 
-  # One verdict for the guard job, which may be skipped for good reasons (no guards, a manual run, a fork).
+  # One verdict for the guard job, which may be skipped for good reasons (no guards, a manual run).
   pr-guards-result:
     if: always()
     needs: [guard-plan, pr-guards]
@@ -209,20 +209,16 @@ jobs:
           SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
           if [ "$EVENT" != pull_request ] && [ "$EVENT" != push ]; then echo "손으로 부른 실행: 실행 가드는 배포 관문 몫"; exit 0; fi
+          if [ "$EVENT" = pull_request ] && [ "$SAME_REPO" != true ]; then echo "::error::이 저장소는 포크 PR 을 받지 않는다"; exit 1; fi
           if [ "$PLAN" != success ]; then echo "::error::guard-plan 이 $PLAN"; exit 1; fi
           if [ -n "$LOCAL" ]; then echo "::notice::로컬 몫(본문 결과 줄로 판정): $LOCAL"; fi
           if [ -z "$GUARDS" ]; then echo "CI 가 돌릴 실행 가드 없음"; exit 0; fi
-          if [ "$EVENT" = pull_request ] && [ "$SAME_REPO" != true ]; then
-            echo "::warning::포크 PR 은 관리자가 확인: CI 가드($GUARDS)를 돌리지 않았다. 본문 결과 줄(required-checks)로 판정"
-            exit 0
-          fi
           if [ "$RESULT" = success ]; then echo "CI 가드 통과: $GUARDS"; exit 0; fi
           echo "::error::CI 가드 잡이 $RESULT: $GUARDS"
           exit 1
 
   # guards.toml format, and body result lines for the guards CI does not run: the local share (needs in
-  # LOCAL_NEEDS) for same-repository PRs, every triggered guard for fork PRs (GUARD-02). The body comes
-  # from the API so a rerun of this job alone sees an edited body.
+  # LOCAL_NEEDS, GUARD-02). The body comes from the API so a rerun of this job alone sees an edited body.
   required-checks:
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 5
@@ -249,24 +245,28 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
           if [ -n "$BASE" ]; then
             gh api "repos/$REPO/pulls/$PR" --jq .body > "$RUNNER_TEMP/pr-body.md"
-            scope=()
-            if [ "$SAME_REPO" = true ]; then scope=(--local-only); fi
-            uv run --frozen python tools/guards.py --base "$BASE" --head "$HEAD_SHA" --pr-body "$RUNNER_TEMP/pr-body.md" "${scope[@]}"
+            uv run --frozen python tools/guards.py --base "$BASE" --head "$HEAD_SHA" --pr-body "$RUNNER_TEMP/pr-body.md" --local-only
           else
             uv run --frozen python tools/guards.py
           fi
 
-  # The one required status check on main: passes only when every job above passed.
+  # The one required status check on main: passes only when every job above passed, and never for a
+  # fork PR (GitHub cannot turn forking off on a user-owned public repository, so merging is what we block).
   ci-ok:
     if: always()
     needs: [docs, syntax, test, actionlint, zizmor, required-checks, pr-guards-result]
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 2
     steps:
+      - name: Reject fork PRs
+        env:
+          EVENT: ${{ github.event_name }}
+          SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          if [ "$EVENT" = pull_request ] && [ "$SAME_REPO" != true ]; then echo "::error::이 저장소는 포크 PR 을 받지 않는다"; exit 1; fi
       - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
         run: exit 1
       - run: echo ok

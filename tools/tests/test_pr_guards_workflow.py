@@ -2,10 +2,13 @@
 
 pr-guards 잡은 guard-shards.yml 을 부르며 CI_ROM_TOKEN·CI_ROM_AGE_KEY 를 넘긴다. 포크 PR 의 코드가 시크릿과 함께 돌면
 안 되고(pull_request 는 포크에 시크릿을 주지 않지만, 조건이 빠지면 같은 저장소 판정도 사라진다), pull_request_target 처럼
-base 의 권한으로 PR 코드를 돌리는 트리거도 안 된다. 시크릿을 쓰는 잡은 같은 커밋의 보호 테스트(이 파일과
+base 의 권한으로 PR 코드를 돌리는 트리거도 안 된다. 이 저장소는 포크 PR 을 받지 않는다: 사용자 소유 퍼블릭 저장소는
+포크 자체를 끌 수 없어서, 포크에서 온 PR 은 ci-ok 가 실패해 머지되지 못하게 한다. 시크릿을 쓰는 잡은 같은 커밋의 보호 테스트(이 파일과
 test_release_gate_workflow)가 먼저 통과해야 돈다 — 워크플로를 고치다 키를 찍는 실수를 시크릿 앞에서 잡는다.
 """
+import os
 import re
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -96,14 +99,36 @@ class PrGuardsWorkflowTest(unittest.TestCase):
         self.assertIn('pr-guards', job_key(verdict, 'needs'))
         script = run_texts(self.steps['pr-guards-result'][0])
         self.assertIn('"$RESULT" = success', script)
-        self.assertIn('[ "$EVENT" = pull_request ] && [ "$SAME_REPO" != true ]', script)
+        self.assertNotIn('관리자가 확인', script)
         self.assertRegex(script, r'exit 1\s*$')
         self.assertEqual(with_value(self.steps['pr-guards-result'][0], 'SAME_REPO'), f'${{{{ {SAME_REPO} }}}}')
 
-    def test_required_checks_asks_forks_for_every_line(self):
-        script = run_texts(self.steps['required-checks'][-1])
-        self.assertIn('scope=(--local-only)', script)
-        self.assertIn('[ "$SAME_REPO" = true ]', script)
+    def run_step(self, step, **env):
+        r = subprocess.run(['bash', '-c', run_texts(step)], env={**os.environ, **env},
+                           capture_output=True, text=True, timeout=10)
+        return r.returncode, r.stdout + r.stderr
+
+    def test_ci_ok_rejects_fork_prs(self):
+        first = self.steps['ci-ok'][0]
+        self.assertNotRegex(first, r'^\s+if:', 'ci-ok 의 포크 거부 단계는 조건 없이 늘 돈다')
+        self.assertEqual(with_value(first, 'SAME_REPO'), f'${{{{ {SAME_REPO} }}}}')
+        self.assertEqual(with_value(first, 'EVENT'), '${{ github.event_name }}')
+        code, out = self.run_step(first, EVENT='pull_request', SAME_REPO='false')
+        self.assertEqual(code, 1)
+        self.assertIn('이 저장소는 포크 PR 을 받지 않는다', out)
+        for event, same in (('pull_request', 'true'), ('push', 'false'), ('workflow_dispatch', 'false')):
+            self.assertEqual(self.run_step(first, EVENT=event, SAME_REPO=same)[0], 0, (event, same))
+
+    def test_verdict_rejects_fork_prs_before_any_pass(self):
+        code, out = self.run_step(self.steps['pr-guards-result'][0], EVENT='pull_request', SAME_REPO='false',
+                                  PLAN='success', GUARDS='', LOCAL='', RESULT='skipped')
+        self.assertEqual(code, 1)
+        self.assertIn('이 저장소는 포크 PR 을 받지 않는다', out)
+
+    def test_required_checks_asks_only_local_lines(self):
+        step = self.steps['required-checks'][-1]
+        self.assertIn('--local-only', run_texts(step))
+        self.assertNotIn('SAME_REPO', step)
 
     def test_local_needs_has_one_source(self):
         """로컬 몫 이름은 guard-shards.yml 의 LOCAL_NEEDS 하나에서만 읽는다(ci.yml 에 따로 두지 않음)."""
