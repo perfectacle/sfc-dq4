@@ -238,7 +238,7 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
 
     def test_release_gate_caches_only_when_rehearsing(self):
         gate = GATE.read_text(encoding='utf-8')
-        self.assertIn('cache: ${{ fromJSON(inputs.rehearse) }}', gate)
+        self.assertIn('cache: ${{ inputs.rehearse }}', gate)
         self.assertRegex(gate, r'rehearse:\n\s+description:[^\n]*\n\s+type: boolean\n\s+default: false')
         self.assertRegex(self.text, r'cache:\n\s+description:[^\n]*(\n\s+[^\n]+)*?\n\s+type: boolean\n\s+default: false')
 
