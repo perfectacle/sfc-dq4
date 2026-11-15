@@ -120,7 +120,7 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
         self.jobs = jobs(self.text)
 
     def test_parser_sees_the_jobs(self):
-        self.assertEqual(set(self.jobs), {'build', 'shard', 'report'})
+        self.assertEqual(set(self.jobs), {'build', 'rom', 'shard', 'report'})
         self.assertTrue(all(self.jobs.values()))
 
     def test_gate_is_manual_only(self):
@@ -285,12 +285,30 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
         for s in runs:
             self.assertIn('--exclude-needs "$LOCAL_NEEDS"', run_texts(s))
         self.assertRegex(self.text, r'LOCAL_NEEDS:\s*MESENCE,LIBDIR')
-        build = ''.join(self.jobs['build'])
+        build = ''.join(self.jobs['rom'])
         self.assertIn("DQ4_BUILD_CACHE: ${{ inputs.cache && format('{0}/work/cache', github.workspace) || 'off' }}", build)
-        for s in self.jobs['build'] + self.jobs['shard']:
+        for s in self.jobs['rom'] + self.jobs['shard']:
             if 'ship-cache' in s or 'guard-state' in s or 'guard-results-' in s:
                 cond = with_value(s, 'if') or ''
                 self.assertIn('inputs.cache', cond, s)
+
+    def test_ship_roms_are_built_once_for_every_guard_variant(self):
+        """가드가 부르는 dq4build.py 의 인자 조합(--out 빼고)은 모두 rom 잡 행렬에 있고, 조각은 빌드하지 않고
+        DQ4_PREBUILT 로 그 롬을 쓴다(guards.with_prebuilt)."""
+        rom = ''.join(self.jobs['rom'])
+        args = set(re.findall(r'^\s+args:\s*(.*)$', top_block(self.text, 'jobs') and '\n'.join(top_block(self.text, 'jobs')), re.M))
+        args = {a.strip().strip("'") for a in args}
+        used = set()
+        for toml in list(ROOT.glob('*/*/guards.toml')) + [ROOT / 'sfc' / 'dq4' / 'release.toml']:
+            for m in re.finditer(r'dq4build\.py --out \S+((?: --[\w-]+)*)', toml.read_text(encoding='utf-8')):
+                used.add(m[1].strip())
+        self.assertTrue(used)
+        self.assertLessEqual(used, args)
+        self.assertIn('tools/ci_cache.py ship-build', rom)
+        shard = ''.join(self.jobs['shard'])
+        self.assertNotIn('dq4build.py', shard)
+        self.assertNotIn('ship-build', shard)
+        self.assertIn('DQ4_PREBUILT=', shard)
 
     def test_banned_suffixes_cover_rom_and_save_kinds(self):
         for ext in ('.sfc', '.smc', '.nes', '.nds', '.ml1', '.sav', '.mss', '.ips'):

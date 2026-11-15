@@ -377,6 +377,13 @@ class RunTest(unittest.TestCase):
                     self.assertIn('tools/mesence_settings.py', c['paths'], f'{toml}: {c["name"]}')
         self.assertGreater(found, 0)
 
+    def test_prebuilt_swaps_only_the_ship_build(self):
+        run = 'uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && uv run python sfc/dq4/tools/dq4buildx.py'
+        self.assertEqual(guards.with_prebuilt(run, {}), run)
+        self.assertEqual(guards.with_prebuilt(run, {'DQ4_PREBUILT': 'a'}),
+                         'uv run --locked python tools/ci_cache.py prebuilt --out work/ch2 --chapter2 && '
+                         'uv run python sfc/dq4/tools/dq4buildx.py')
+
     def test_written_paths_are_not_inputs(self):
         run = ('uv run python a.py --report work/lc/report.json && uv run python -m unittest x 2>&1 '
                '| tee work/door.log | tail -1 > work/last.txt && b --json $PWD/work/r.json --rom work/ch1/x.sfc')

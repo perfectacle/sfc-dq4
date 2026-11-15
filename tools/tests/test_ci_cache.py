@@ -106,6 +106,35 @@ class CiCacheTest(unittest.TestCase):
         self.quiet(ci_cache.pack, 'chunk', dst, 'pre', max_mb=1)
         self.assertEqual(outputs(self.out)['save'], 'true')
 
+    def test_prebuilt_copies_a_matching_build_or_builds(self):
+        import json
+        pre = self.tmp / 'pre-ch2'
+        (pre / 'title').mkdir(parents=True)
+        (pre / 'dq4-ch1-full.sfc').write_bytes(b'rom')
+        (pre / 'title' / 'x').write_bytes(b'1')
+        (pre / ci_cache.MANIFEST).write_text(json.dumps({'commit': 'c', 'args': ['--chapter2'], 'rom': 'dq4-ch1-full.sfc',
+                                                         'roms': {'dq5.sfc': 'h'}}))
+        os.environ['DQ4_PREBUILT'] = str(self.tmp / 'none') + os.pathsep + str(pre)
+        out = self.tmp / 'work' / 'ch2'
+        out.mkdir(parents=True)
+        (out / 'stale').write_bytes(b's')
+        with mock.patch.object(ci_cache, 'head_commit', return_value='c'), \
+                mock.patch.object(ci_cache, 'rom_digests', return_value={'dq5.sfc': 'h'}), \
+                mock.patch.object(ci_cache.subprocess, 'run') as run:
+            log = self.quiet(ci_cache.prebuilt, out, ['--chapter2'])
+            self.assertFalse(run.called)
+            self.assertEqual(sorted(p.name for p in out.iterdir()), ['dq4-ch1-full.sfc', 'title'])
+            self.assertIn('dq4-ch1-full.sfc sha1=', log)
+            run.return_value.returncode = 0
+            self.quiet(ci_cache.prebuilt, out, [])                      # 인자가 다름
+            self.assertIn('dq4build.py', str(run.call_args[0][0][1]))
+        with mock.patch.object(ci_cache, 'head_commit', return_value='other'), \
+                mock.patch.object(ci_cache, 'rom_digests', return_value={'dq5.sfc': 'h'}), \
+                mock.patch.object(ci_cache.subprocess, 'run') as run:
+            run.return_value.returncode = 0
+            self.quiet(ci_cache.prebuilt, out, ['--chapter2'])           # 커밋이 다름
+            self.assertTrue(run.called)
+
     def test_unpack_without_a_restored_tar(self):
         self.quiet(ci_cache.unpack, 'none', self.tmp / 'd', '')
         self.assertFalse((self.tmp / 'd').exists())

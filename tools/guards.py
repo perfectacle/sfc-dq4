@@ -578,8 +578,20 @@ def no_cache_env(logs):
     return dict(os.environ, DQ4_READSET='off', DQ4_BUILD_CACHE='off', DQ4_STATES_CACHE=str(Path(logs) / 'states'))
 
 
+DQ4BUILD = re.compile(r'\bpython (sfc/dq4/tools/dq4build\.py)(?=\s)')
+
+
+def with_prebuilt(command, env):
+    """env 에 DQ4_PREBUILT(CI 가 빌드 잡에서 한 번 만든 출하 롬 폴더들)가 있으면 dq4build.py 호출을
+    tools/ci_cache.py prebuilt 로 바꾼다. 같은 커밋·인자·롬의 빌드가 있으면 복사하고, 없으면 그대로 빌드한다."""
+    if not env.get('DQ4_PREBUILT'):
+        return command
+    return DQ4BUILD.sub('python tools/ci_cache.py prebuilt', command)
+
+
 def spawn(command, log, timeout, env):
     """bash 로 명령 하나를 돌려 로그에 덧붙인다. 종료 코드, 시간을 넘기면 None."""
+    command = with_prebuilt(command, env)
     with log.open('a', encoding='utf-8') as out:
         proc = subprocess.Popen(['bash', '-c', command], cwd=ROOT, stdout=out, stderr=subprocess.STDOUT,
                                 start_new_session=True, env=env)
