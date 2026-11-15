@@ -37,6 +37,7 @@ import shutil
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 
@@ -567,14 +568,16 @@ class Ship:
             self.say('check_docs·compileall 통과, 돌릴 단위 테스트: ' +
                      ('; '.join(f'{d} {len(m)}개' for d, m in picked.items()) or '없음'))
             return
-        n = 0
-        for d, mods in picked.items():
-            r = self.py('-m', 'unittest', '-q', *mods, cwd=self.root / d)
+        # 폴더마다 프로세스 하나라 서로 기다리지 않는다(의존성 고정이 바뀌면 모든 폴더를 돈다)
+        with ThreadPoolExecutor(max_workers=max(1, len(picked))) as pool:
+            runs = {d: pool.submit(self.py, '-m', 'unittest', '-q', *mods, cwd=self.root / d) for d, mods in picked.items()}
+        for d, run in runs.items():
+            r = run.result()
             if r.returncode:
                 for x in (r.stdout + r.stderr).strip().splitlines()[-30:]:
                     self.out(f'  {x}')
                 raise Stop('checks', f'단위 테스트 실패 ({d})')
-            n += len(mods)
+        n = sum(map(len, picked.values()))
         self.say(f'check_docs·compileall 통과, 단위 테스트 {n}개 파일 통과'
                  + (f' ({", ".join(picked)})' if picked else ''))
 

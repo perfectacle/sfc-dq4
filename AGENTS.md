@@ -29,7 +29,7 @@
 - **PR 은 기능 단위로 묶는다** — 같은 사건·기능의 도구·데이터·검사·문서와 작은 고침은 PR 하나. 다른 세션이 기다리는 공용 장치만 먼저 따로 올려도 된다. [TRACK-03](.agents/skills/tracks/SKILL.md#track-03--작업-방식)
 - **작업마다 최신 `origin/main` 에서 워크트리를 파고, 머지가 끝나면 지운다** — [GIT-02](.agents/skills/git-workflow/SKILL.md#git-02--작업마다-워크트리)
 - **모든 변경은 브랜치 → PR, `ci-ok` 를 통과시킨다** — [GIT-01](.agents/skills/git-workflow/SKILL.md#git-01--브랜치와-pr), [CI-01](.agents/skills/ci/SKILL.md#ci-01--ci-ok)
-- **고친 것에는 가드를 남기고, 걸린 실행 검사는 돌려 PR 본문에 적는다** — 다른 세션이 모르고 되돌리지 않게. [GUARD-01](.agents/skills/guards/SKILL.md#guard-01--고친-것에는-가드를-남긴다), [GUARD-02](.agents/skills/guards/SKILL.md#guard-02--걸린-실행-검사는-돌리고-결과를-적는다)
+- **고친 것에는 가드를 남기고, 걸린 실행 검사는 CI 가 돌려 PR 본문에 결과 줄을 남긴다** — 다른 세션이 모르고 되돌리지 않게. 로컬은 `check_docs`·compileall·바꾼 모듈의 단위 테스트만 돌린다(`tools/ship.py` 가 함). 로컬 에뮬레이터 실행은 분석 프로브와 수동 디버그용이다. [GUARD-01](.agents/skills/guards/SKILL.md#guard-01--고친-것에는-가드를-남긴다), [GUARD-02](.agents/skills/guards/SKILL.md#guard-02--걸린-실행-검사는-돌리고-결과를-적는다)
 - **검사가 실패하면 기준을 낮추지 말고 원인을 고친다** — [CI-02](.agents/skills/ci/SKILL.md#ci-02--실패는-원인을-고친다)
 
 전체 목록: [불변식 카탈로그](.agents/invariants/INVARIANTS.md)

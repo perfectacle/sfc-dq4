@@ -3,7 +3,7 @@ import re
 import sys
 import unittest
 from unittest import mock
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import guards  # noqa: E402
@@ -308,7 +308,9 @@ class RunTest(unittest.TestCase):
                  'q/x.py', 'sfc/dq4/tools/dq4ch1event.py', 'a/b.lua', 'a/d.lua', 'sfc/dq4/.hidden/a')
         for p in paths:
             for q in pats:
-                self.assertEqual(bool(guards.glob_regex((q,)).match(p)), guards.matches(p, q), (p, q))
+                want = PurePosixPath(p).full_match(q)
+                self.assertEqual(bool(guards.glob_regex((q,)).match(p)), want, (p, q))
+                self.assertEqual(guards.matches(p, q), want, (p, q))
         self.assertIsNone(guards.glob_regex(()).match('x'))
 
     def test_key_follows_mesence_settings(self):
