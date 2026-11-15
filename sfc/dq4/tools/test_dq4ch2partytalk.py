@@ -75,16 +75,17 @@ class PartyTalkTest(unittest.TestCase):
 
     def test_without_npc_lists_the_talked_lines_are_left_out(self):
         # 주소만 셀 때(롬 없이)는 대화 번호를 모르므로 talked 줄을 쓰지 않는다. 롬에 쓸 때 모르면 멈춘다
+        # 같은 프로세스의 다른 테스트가 빌드 경로(npc_lists)로 _TALKS 를 채웠을 수 있어 비우고 본다
         ctx = _ctx()
-        blob, at = pt.native(ctx)
-        data = bytearray(0x400000)
-        o = pt.ch1.lorom(ctx.code_at)
-        data[o:o + len(blob)] = blob
-        n = sum(len(r) for r in pt.table(bytes(data), at['maps']).values())
-        self.assertEqual(n, sum(1 for ln in pt.LINES if not ln.talked))
         saved, pt._TALKS = pt._TALKS, None
-        ctx.original = b''
         try:
+            blob, at = pt.native(ctx)
+            data = bytearray(0x400000)
+            o = pt.ch1.lorom(ctx.code_at)
+            data[o:o + len(blob)] = blob
+            n = sum(len(r) for r in pt.table(bytes(data), at['maps']).values())
+            self.assertEqual(n, sum(1 for ln in pt.LINES if not ln.talked))
+            ctx.original = b''
             with self.assertRaises(SystemExit):
                 pt.native(ctx)
         finally:
