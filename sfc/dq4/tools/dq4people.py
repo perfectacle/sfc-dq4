@@ -253,6 +253,19 @@ PEOPLE = (
     # 줄 0: 줄 4 가 몸의 보라에 가장 가깝지만 같은 성의 대신·노인 색을 민다(줄마다 넣어 본 결과)
     Person((0x6E,), None, 'h156', '발자크', anim='frames', main=True, wave=1, line=0,
            allow=tuple(n for n, _ in DEGRADE)),
+    # 이름 있는 인물(dq4npcport.NDS_LOOKS 가 맵과 대사로 고른 그림). 쓰지 않는 그림 번호의 세트에 싣는다
+    # 네네·포포로·마냐는 가볍게 세면 옷 색이 마을 사람 칸에 합쳐진다(색 거리 22.6·15.7·21.7). 줄은 줄마다 넣어 본
+    # 결과 서로와 앞 차례 인물을 가장 덜 미는 조합이다
+    Person((0x22,), None, 'h139', '네네', wave=1, weight=KEY_WEIGHT, line=2),
+    Person((0x95,), None, 'h140', '포포로', wave=1, weight=KEY_WEIGHT, line=2),
+    # 앞모습의 눈이 흰자 한 칸씩만 남고 눈동자가 빠진다(NDS 는 흰자 안에 한 칸 눈동자). 흰자 자리에 눈을 두 칸
+    # 높이로 찍고 흰자를 바깥 옆으로 옮긴다
+    Person((0x8B,), None, 'h142', '좌장', wave=1, whites=('down',),
+           touch={'down': [(6, 8, 'ink'), (6, 9, 'ink'), (9, 8, 'ink'), (9, 9, 'ink'),
+                           (5, 8, 'white'), (5, 9, 'white'), (10, 8, 'white'), (10, 9, 'white')]}),
+    Person((0x66,), None, 'h074', '린다', wave=1),
+    # 이마 보석의 초록이 줄이면 두 눈 사이에도 한 칸 남는다. 살색으로 둔다
+    Person((0x69,), None, 'h124', '마냐', wave=1, weight=KEY_WEIGHT, line=4, touch={'down': [(7, 6, (8, 6))]}),
     *(Person((pic,), None, sheet, role, anim=anim, spare=pic, seen=(group,), face=role in FACE_KEPT,
              weight=KEY_WEIGHT if role in KEY_EVENT else None)
       for role, pic, sheet, group, anim in EVENT_PEOPLE),
