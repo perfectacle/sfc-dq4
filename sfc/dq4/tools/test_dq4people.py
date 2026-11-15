@@ -741,6 +741,17 @@ class UsageTests(unittest.TestCase):
             self.assertEqual(P.chapter_groups(9), [])
 
 
+class RecolorTests(unittest.TestCase):
+    def test_recolor_moves_a_colour_before_the_touches(self):
+        # 치마의 빨강이 노랑으로 옮겨지고 원래 색은 남지 않는다
+        maya = next(p for p in P.PEOPLE if p.role == '마냐')
+        self.assertEqual(maya.recolor[(132, 24, 0)], (247, 206, 24))
+        self.assertTrue(set(maya.recolor.values()).isdisjoint(maya.recolor))
+
+    def test_people_without_recolor_keep_an_empty_map(self):
+        self.assertEqual(P.Person((0x10,), None, 'x', 'a').recolor, {})
+
+
 class GroupTests(unittest.TestCase):
     def test_every_group_of_the_group_build_takes_its_own_lines(self):
         # 빠진 그룹은 맵 팔레트 줄을 받지 못해 앞 맵 그룹의 색으로 그려진다
