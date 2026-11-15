@@ -3,9 +3,10 @@ name: ci
 on:
   push:
     branches: [main]
+  # No `edited`: a body edit would rerun the guard shards. Jobs that read the body fetch it from the API,
+  # so after a body edit tools/ship.py reruns only required-checks.
   pull_request:
-    # edited: fixing a guard result line in the PR body reruns required-checks
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 permissions:
@@ -17,7 +18,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # No ROM in CI: every job checks only what needs none.
+  # Only pr-guards (through guard-shards.yml) gets the ROM bundle; every other job checks what needs none.
   docs:
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 10
@@ -126,14 +127,106 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-  # Run-time guards need the ROM, so CI only checks that a PR touching a guard's
-  # own paths reports its result in the body (tools/guards.py, GUARD-02). Guards
-  # matched only through [groups] and tier = "release" guards are left to the
-  # release gate. A changed file matching a track's [full] paths asks for every
-  # guard of that track; a `가드: 전체` body line asks for every guard.
+  # Picks the run-time guards this PR touches (tools/guards.py --base: own paths, [full], `가드: 전체`,
+  # `가드: 더함`) and splits them into the CI share and the local share (LOCAL_NEEDS in guard-shards.yml).
+  # No secrets in this job. The guard job below decrypts the ROM bundle, so it waits for the workflow
+  # protection tests of the same commit: a workflow edit that would leak the bundle fails here first.
+  guard-plan:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      guards: ${{ steps.plan.outputs.guards }}
+      local: ${{ steps.plan.outputs.local }}
+      shards: ${{ steps.plan.outputs.shards }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: 0.13.1
+          enable-cache: true
+
+      - run: uv sync --locked
+
+      - name: Check the workflows keep the ROM secrets in
+        run: uv run --frozen python -m unittest tools/tests/test_release_gate_workflow.py tools/tests/test_pr_guards_workflow.py
+
+      - name: Plan the guards
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          gh api "repos/$REPO/pulls/$PR" --jq .body > "$RUNNER_TEMP/pr-body.md"
+          if [ -n "$(git diff --name-only "$BASE...$HEAD_SHA" -- .github tools/ci_gate_setup.sh tools/ci_cache.py tools/ci_artifact_check.py)" ]; then
+            echo "::notice::이 PR 은 워크플로·CI 비밀 처리 파일을 바꾼다: 보호 테스트를 통과해 가드 잡이 돈다(리뷰에서 그 파일을 볼 것)"
+          fi
+          uv run --frozen python tools/guards.py --base "$BASE" --head "$HEAD_SHA" --pr-body "$RUNNER_TEMP/pr-body.md" \
+            --plan "$GITHUB_OUTPUT"
+
+  # Same-repository branches only: a fork's code must never run with the ROM bundle secrets, so fork PRs
+  # skip this job and fall back to body result lines (required-checks), checked by a maintainer.
+  pr-guards:
+    needs: guard-plan
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.guard-plan.outputs.guards != ''
+    uses: ./.github/workflows/guard-shards.yml # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+    with:
+      ref: ${{ github.event.pull_request.head.sha }}
+      mode: pr
+      guards: ${{ needs.guard-plan.outputs.guards }}
+      shards: ${{ fromJSON(needs.guard-plan.outputs.shards) }}
+      cache: true
+    secrets:
+      CI_ROM_TOKEN: ${{ secrets.CI_ROM_TOKEN }}
+      CI_ROM_AGE_KEY: ${{ secrets.CI_ROM_AGE_KEY }}
+
+  # One verdict for the guard job, which may be skipped for good reasons (no guards, not a PR, a fork).
+  pr-guards-result:
+    if: always()
+    needs: [guard-plan, pr-guards]
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 2
+    steps:
+      - name: Judge the CI guards
+        env:
+          EVENT: ${{ github.event_name }}
+          PLAN: ${{ needs.guard-plan.result }}
+          GUARDS: ${{ needs.guard-plan.outputs.guards }}
+          LOCAL: ${{ needs.guard-plan.outputs.local }}
+          RESULT: ${{ needs.pr-guards.result }}
+          SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          if [ "$EVENT" != pull_request ]; then echo "PR 이 아님: 실행 가드는 배포 관문 몫"; exit 0; fi
+          if [ "$PLAN" != success ]; then echo "::error::guard-plan 이 $PLAN"; exit 1; fi
+          if [ -n "$LOCAL" ]; then echo "::notice::로컬 몫(본문 결과 줄로 판정): $LOCAL"; fi
+          if [ -z "$GUARDS" ]; then echo "CI 가 돌릴 실행 가드 없음"; exit 0; fi
+          if [ "$SAME_REPO" != true ]; then
+            echo "::warning::포크 PR 은 관리자가 확인: CI 가드($GUARDS)를 돌리지 않았다. 본문 결과 줄(required-checks)로 판정"
+            exit 0
+          fi
+          if [ "$RESULT" = success ]; then echo "CI 가드 통과: $GUARDS"; exit 0; fi
+          echo "::error::CI 가드 잡이 $RESULT: $GUARDS"
+          exit 1
+
+  # guards.toml format, and body result lines for the guards CI does not run: the local share (needs in
+  # LOCAL_NEEDS) for same-repository PRs, every triggered guard for fork PRs (GUARD-02). The body comes
+  # from the API so a rerun of this job alone sees an edited body.
   required-checks:
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -149,13 +242,18 @@ jobs:
 
       - name: Check guard lists and the PR's guard results
         env:
-          PR_BODY: ${{ github.event.pull_request.body }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
           if [ -n "$BASE" ]; then
-            printf '%s' "$PR_BODY" > "$RUNNER_TEMP/pr-body.md"
-            uv run --frozen python tools/guards.py --base "$BASE" --head "$HEAD_SHA" --pr-body "$RUNNER_TEMP/pr-body.md"
+            gh api "repos/$REPO/pulls/$PR" --jq .body > "$RUNNER_TEMP/pr-body.md"
+            scope=()
+            if [ "$SAME_REPO" = true ]; then scope=(--local-only); fi
+            uv run --frozen python tools/guards.py --base "$BASE" --head "$HEAD_SHA" --pr-body "$RUNNER_TEMP/pr-body.md" "${scope[@]}"
           else
             uv run --frozen python tools/guards.py
           fi
@@ -163,7 +261,7 @@ jobs:
   # The one required status check on main: passes only when every job above passed.
   ci-ok:
     if: always()
-    needs: [docs, syntax, test, actionlint, zizmor, required-checks]
+    needs: [docs, syntax, test, actionlint, zizmor, required-checks, pr-guards-result]
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 2
     steps:

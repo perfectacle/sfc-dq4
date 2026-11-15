@@ -15,7 +15,7 @@ def run(cwd, *a):
 
 
 def args(body, **kw):
-    a = dict(title='t', body=Path(body), dry_run=False, watch=True, skip_guards=False, rerun=None, only=None,
+    a = dict(title='t', body=Path(body), dry_run=False, watch=True, skip_guards=False, rerun=None, only=None, local_guards=False,
              full=False, auto_lists=False, load_wait=0, watch_timeout=100)
     a.update(kw)
     return types.SimpleNamespace(**a)
@@ -285,7 +285,7 @@ class GuardsPickTest(unittest.TestCase):
         r = Repo()
         self.addCleanup(r.tmp.cleanup)
         r.start({'a.txt': 'a\n'})
-        s, _ = r.ship(skip_guards=True)
+        s, _ = r.ship(skip_guards=True, local_guards=True)
         s.hit = lambda full: self.HIT
         with self.assertRaises(ship.Stop) as e:
             s.guards()
@@ -298,13 +298,70 @@ class GuardsPickTest(unittest.TestCase):
         r = Repo()
         self.addCleanup(r.tmp.cleanup)
         r.start({'a.txt': 'a\n'})
-        s, out = r.ship()
+        s, out = r.ship(local_guards=True)
         s.hit = lambda full: self.HIT
         s.save_state(s.head(), self.STORED)
         r.commit(r.wt, {'README.md': 'x\n'})
         s.guards()
         self.assertEqual(s.lines, self.STORED)
         self.assertIn('앞 결과', out[-1])
+
+
+class CiShareTest(unittest.TestCase):
+    HIT = [{'name': 'dq4-a', 'paths': ['a.py'], 'needs': ['rom', 'MESENCE']},
+           {'name': 'dq4-b', 'paths': ['b.py'], 'needs': ['rom']}]
+    WORKFLOW = {'.github/workflows/guard-shards.yml': 'env:\n  LOCAL_NEEDS: MESENCE,LIBDIR\n'}
+
+    def setUp(self):
+        self.r = Repo()
+        self.addCleanup(self.r.tmp.cleanup)
+        self.r.start(dict(self.WORKFLOW, **{'a.txt': 'a\n'}))
+
+    def test_only_local_share_runs_here(self):
+        s, out = self.r.ship()
+        s.hit = lambda full: self.HIT
+        s.save_state(s.head(), {'dq4-a': '- [x] dq4-a: 통과 (1초)'})
+        s.guards()
+        self.assertEqual(s.ci, ['dq4-b'])
+        self.assertEqual(list(s.lines), ['dq4-a'])
+        self.assertTrue(any('CI 몫 1개' in x for x in out))
+        lines = s.section_lines()
+        self.assertEqual(lines[0], '- [x] dq4-a: 통과 (1초)')
+        self.assertEqual(lines[1], ship.CI_PENDING + 'dq4-b')
+        # 결과 줄이 아니라 required-checks(--local-only)가 CI 몫을 요구하지 않는다
+        self.assertIsNone(ship.RESULT.match(lines[1]))
+
+    def test_local_guards_runs_everything_here(self):
+        s, _ = self.r.ship(local_guards=True, skip_guards=True)
+        s.hit = lambda full: self.HIT
+        with self.assertRaises(ship.Stop) as e:
+            s.guards()
+        self.assertIn('dq4-a', e.exception.reason)
+        self.assertIn('dq4-b', e.exception.reason)
+
+    def test_skip_guards_ok_when_all_ci(self):
+        s, _ = self.r.ship(skip_guards=True)
+        s.hit = lambda full: self.HIT[1:]
+        s.guards()
+        self.assertEqual((s.ci, s.lines), (['dq4-b'], {}))
+
+    def test_result_lines(self):
+        rows = [{'name': 'dq4-b', 'status': 'passed', 'detail': '캐시: 같은 입력으로 통과 (12초)'}]
+        lines = ship.ci_result_lines(rows, ['dq4-b', 'dq4-c'], 'https://x/runs/9')
+        self.assertEqual(lines['dq4-b'], '- [x] dq4-b: 통과 (CI 캐시: 같은 입력으로 통과 (12초), https://x/runs/9)')
+        self.assertTrue(ship.passed(lines['dq4-c']))
+
+    def test_failed_guards_from_log(self):
+        log = 'shard 1\tRun\t  dq4-x: failed (종료 코드 1, 로그 work/guards/dq4-x.log)\n  dq4-y: passed (3초)\n'
+        self.assertEqual(ship.ci_failed_guards(log), ['dq4-x'])
+
+    def test_add_extra(self):
+        self.assertEqual(ship.add_extra('본문\n', ['dq4-a']), '본문\n\n가드: 더함 dq4-a\n')
+        body = '본문\n\n## 가드\n\n- x\n'
+        self.assertIn('## 가드\n\n가드: 더함 dq4-a, dq4-b\n', ship.add_extra(body, ['dq4-a', 'dq4-b']))
+        self.assertEqual(ship.add_extra('가드: 더함 dq4-a\n', ['dq4-a']), '가드: 더함 dq4-a\n')
+        # 넓히는 줄은 가드 절을 다시 써도 남는다
+        self.assertIn('가드: 더함 dq4-a', ship.build_body('## 가드\n\n가드: 더함 dq4-a\n- old\n', ['- [x] n: 통과']))
 
 
 class TestsForTest(unittest.TestCase):
@@ -364,6 +421,52 @@ class WatchTest(unittest.TestCase):
         self.assertIn('test (common)', e.exception.reason)
         self.assertIn(['run', 'view', '--job', '42', '--log-failed'], gh.calls)
         self.assertIn('    AssertionError: 틀림', out)
+
+    def test_guard_shard_failure_names_the_guard(self):
+        bad = {'name': 'pr-guards / shard 2', 'status': 'COMPLETED', 'conclusion': 'FAILURE',
+               'detailsUrl': 'https://github.com/o/r/actions/runs/7/job/43'}
+        gh = fake_gh({'pr view': self.view(statusCheckRollup=[bad]),
+                      'run view': '  dq4-x: failed (종료 코드 1)\n'})
+        s, _ = self.r.ship(gh=gh)
+        s.pr = 5
+        with self.assertRaises(ship.Stop) as e:
+            s.watch()
+        self.assertIn('--rerun dq4-x', e.exception.reason)
+        self.assertIn('runs/7/job/43', e.exception.reason)
+
+    def test_green_draft_gets_ci_lines_then_ready(self):
+        checks = [{'name': 'pr-guards / shard 1', 'status': 'COMPLETED', 'conclusion': 'SUCCESS',
+                   'startedAt': '2026-11-16T01:00:00Z', 'completedAt': '2026-11-16T01:04:10Z',
+                   'detailsUrl': 'https://github.com/o/r/actions/runs/7/job/43'},
+                  {'name': 'ci-ok', 'status': 'COMPLETED', 'conclusion': 'SUCCESS'}]
+        gh = fake_gh({'pr view': [self.view(isDraft=True, statusCheckRollup=checks), self.view(state='MERGED')],
+                      'run download': (1, ''), 'pr edit': '', 'pr ready': '', 'pr merge': ''})
+        s, out = self.r.ship(gh=gh)
+        s.pr, s.ci = 5, ['dq4-b']
+        s.lines = {'dq4-a': '- [x] dq4-a: 통과 (1초)'}
+        s.watch()
+        body = self.r.body.read_text(encoding='utf-8')
+        self.assertIn('- [x] dq4-a: 통과 (1초)', body)
+        self.assertIn('- [x] dq4-b: 통과 (CI pr-guards 잡 초록, https://github.com/o/r/actions/runs/7)', body)
+        self.assertNotIn(ship.CI_PENDING, body)
+        self.assertIn(['pr', 'ready', '5'], gh.calls)
+        self.assertIn(['pr', 'merge', '5', '--auto', '--merge'], gh.calls)
+        self.assertEqual(s.ci_secs, 250)
+        self.assertTrue(any('CI 가드 4분 10초' in x for x in out))
+
+    def test_new_pr_is_draft(self):
+        gh = fake_gh({'pr list': '[]', 'pr create': 'https://github.com/o/r/pull/9\n'})
+        s, out = self.r.ship(gh=gh)
+        s.open_pr()
+        create = next(c for c in gh.calls if c[:2] == ['pr', 'create'])
+        self.assertIn('--draft', create)
+        self.assertFalse(any(c[:2] == ['pr', 'merge'] for c in gh.calls))
+
+    def test_existing_ready_pr_goes_back_to_draft(self):
+        gh = fake_gh({'pr list': [[{'number': 9, 'body': '본문\n', 'isDraft': False}]], 'pr ready': ''})
+        s, _ = self.r.ship(gh=gh)
+        s.open_pr()
+        self.assertIn(['pr', 'ready', '9', '--undo'], gh.calls)
 
     def test_conflict_reruns_cycle_then_merged(self):
         gh = fake_gh({'pr view': [self.view(mergeable='CONFLICTING'), self.view(state='MERGED')]})

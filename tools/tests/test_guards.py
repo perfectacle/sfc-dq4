@@ -907,3 +907,63 @@ class ShardTest(unittest.TestCase):
         bad = subprocess.run([sys.executable, str(guards.ROOT / 'tools' / 'guards.py'), '--shard', '1/2'],
                              capture_output=True, text=True)
         self.assertNotEqual(bad.returncode, 0)
+
+
+class PrPlanTest(unittest.TestCase):
+    """CI guard-plan 잡: 걸린 검사를 CI 몫·로컬 몫으로 나누고 조각 수를 정한다."""
+
+    def test_extra_names(self):
+        body = '요약\n가드: 더함 dq4-a, dq4-b\n  가드: 더함 dq4-b dq4-c\n가드: 전체\n'
+        self.assertEqual(guards.extra_names(body), ['dq4-a', 'dq4-b', 'dq4-c'])
+        self.assertEqual(guards.extra_names('가드: 더함\n'), [])
+
+    def test_local_needs_from_workflow(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / 'w.yml'
+            f.write_text('env:\n  # x\n  LOCAL_NEEDS: MESENCE,LIBDIR\n\njobs:\n', encoding='utf-8')
+            self.assertEqual(guards.ci_local_needs(f), ['MESENCE', 'LIBDIR'])
+            f.write_text('env:\n  LOCAL_NEEDS: \n', encoding='utf-8')
+            self.assertEqual(guards.ci_local_needs(f), [])
+            self.assertEqual(guards.ci_local_needs(Path(d) / 'none.yml'), [])
+        self.assertTrue(guards.ci_local_needs())
+
+    def test_pr_shards(self):
+        cs = [{'name': f'g{i}'} for i in range(5)]
+        w = {f'g{i}': 300.0 for i in range(5)}
+        self.assertEqual(guards.pr_shards(cs, w, per=480), 4)
+        self.assertEqual(guards.pr_shards(cs[:1], w, per=480), 1)
+        self.assertEqual(guards.pr_shards(cs, {f'g{i}': 5000.0 for i in range(5)}, per=480, most=3), 3)
+        self.assertEqual(guards.pr_shards([], w), 0)
+
+    def test_plan_output_and_local_only_body(self):
+        import subprocess
+        import tempfile
+        tool = str(guards.ROOT / 'tools' / 'guards.py')
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / 'out'
+            r = subprocess.run([sys.executable, tool, '--base', 'HEAD', '--plan', str(out)], capture_output=True,
+                               text=True, cwd=guards.ROOT)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertEqual(out.read_text(encoding='utf-8'), 'guards=\nlocal=\nshards=0\n')
+            ci = next(c for c in guards.load(guards.tracked())[0] if not set(c.get('needs', [])) & set(guards.ci_local_needs()))
+            body = Path(d) / 'body.md'
+            body.write_text(f'가드: 더함 {ci["name"]}\n', encoding='utf-8')
+            out.unlink()
+            r = subprocess.run([sys.executable, tool, '--base', 'HEAD', '--pr-body', str(body), '--plan', str(out)],
+                               capture_output=True, text=True, cwd=guards.ROOT)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn(f'guards={ci["name"]}\n', out.read_text(encoding='utf-8'))
+            # CI 몫은 본문 줄을 요구하지 않고(--local-only), 다 요구하면(포크) 줄이 없어 실패
+            r = subprocess.run([sys.executable, tool, '--base', 'HEAD', '--pr-body', str(body), '--local-only'],
+                               capture_output=True, text=True, cwd=guards.ROOT)
+            self.assertEqual(r.returncode, 0, r.stdout)
+            r = subprocess.run([sys.executable, tool, '--base', 'HEAD', '--pr-body', str(body)],
+                               capture_output=True, text=True, cwd=guards.ROOT)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn('결과 줄이 없음', r.stdout)
+            body.write_text('가드: 더함 없는-검사\n', encoding='utf-8')
+            r = subprocess.run([sys.executable, tool, '--base', 'HEAD', '--pr-body', str(body), '--local-only'],
+                               capture_output=True, text=True, cwd=guards.ROOT)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn('`가드: 더함`: 모르는 검사', r.stdout)

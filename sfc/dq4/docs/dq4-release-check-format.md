@@ -102,11 +102,12 @@ uv run --locked python sfc/dq4/tools/dq4publish.py release --report work/release
 
 ## CI 에서 돌리기
 
-MesenCE 가 필요 없는 실행 검사는 GitHub 러너에서 나눠 돈다. 사람이 `gh workflow run release-gate.yml [-f shards=N] [-f ref=REF] [-f rehearse=true]` 로 부를 때만 돈다.
+MesenCE 가 필요 없는 실행 검사는 GitHub 러너에서 나눠 돈다. 배포 관문은 사람이 `gh workflow run release-gate.yml [-f shards=N] [-f ref=REF] [-f rehearse=true]` 로 부를 때만 돈다. PR 은 `ci.yml` 의 `pr-guards` 잡이 같은 조각 워크플로를 `mode: pr` 로 부른다.
 
 | 파일 | 하는 일 |
 | --- | --- |
 | `.github/workflows/release-gate.yml` | `workflow_dispatch` 만. 롬 시크릿을 이름을 대어 `guard-shards.yml` 에 넘긴다(`mode: release`, `cache` 는 입력 `rehearse`, 기본 false) |
+| `.github/workflows/ci.yml` 의 `guard-plan`·`pr-guards`·`pr-guards-result` | PR 만. `guard-plan`(시크릿 없음)이 보호 테스트(`test_release_gate_workflow`·`test_pr_guards_workflow`)를 먼저 돌리고 `guards.py --base B --head H --pr-body 본문 --plan $GITHUB_OUTPUT` 로 걸린 검사를 CI 몫 `guards`·로컬 몫 `local`(`LOCAL_NEEDS`)·조각 수 `shards`(지난 시간 합 / 480초 올림, 1~16)로 나눈다. `pr-guards` 는 같은 저장소 브랜치 PR 이고 CI 몫이 있을 때만 `guard-shards.yml` 을 `mode: pr`·`cache: true`·PR head SHA 로 부른다. `pr-guards-result` 가 판정을 하나로 모아 `ci-ok` 에 넘긴다(가드 없음·PR 아님·포크는 통과, 포크는 경고와 함께 본문 결과 줄로 판정) |
 | `.github/workflows/guard-shards.yml` | `workflow_call` 만. 입력 `ref`·`mode`(`release` 모든 검사, `pr` 은 `guards` 목록만)·`guards`·`shards`·`cache`(기본 false). `build`(롬 풀기·출하 롬 빌드 한 번·조각 목록) → `shard` 행렬(빌드 잡의 출하 롬을 받아 `guards.py --all --run [--no-cache] --shard k/N --exclude-needs MESENCE,LIBDIR --json`) → `report`(`release_check.py --ci-summary`, 실행 요약에 표, 통과 기록 캐시 저장) |
 | `.github/actions/ci-roms` | composite action. 프라이빗 에셋 저장소 릴리스 `ci-roms-v1` 의 age 암호화 묶음(`dq5.sfc dq6.sfc dq4.nes dq4-rev0.nes dq4ds.nds dq4ds-kr.nds dq4ds-kr.ml1 dq4ds-kr.sav`)을 `rom/` 에 풀고 롬 SHA-256 목록을 `$RUNNER_TEMP/rom-hashes.txt` 에 |
 | `.github/actions/ci-tools` | `tools/ci_gate_setup.sh tools` 를 부르고 asar·Galmuri zip·libretro 코어를 저마다 평문 캐시에(키: asar 커밋, zip SHA-256, `dq4cores.py`·bsnes 패치 해시). 셋업 바로 뒤에 저장해 잡이 뒤에서 실패해도 남는다 |
@@ -127,7 +128,7 @@ MesenCE 가 필요 없는 실행 검사는 GitHub 러너에서 나눠 돈다. �
 | --- | --- | --- | --- |
 | asar·Galmuri zip·libretro 코어 | 평문(`$RUNNER_TEMP/gate-tools/…`) | 고정 판 | 늘 |
 | 사운드 변환(`assets/sfc/dq4/cache/sound`) | enc-cache `ship-sound` | 내용 해시 | 늘(로컬 관문도 에셋 저장소의 이 캐시를 쓴다) |
-| 출하 롬 | enc-cache `ship-rom-<run_id>-<attempt>` | 이 실행만 | 늘. 빌드 잡이 한 번 빌드하고 조각은 받아 쓴다 |
+| 출하 롬 | enc-cache `ship-rom-<run_id>` | 이 실행만 | 늘. 빌드 잡이 한 번 빌드하고 조각은 받아 쓴다(「실패한 잡만 다시」 로 다시 도는 조각도 같은 키) |
 | 출하 롬 빌드 단계(`dq4buildcache` 칸) | ship-cache, 단계마다 하나 | 내용 해시 | `cache` 일 때만 |
 | 조각의 장면·상태·검사 빌드 칸(`work/cache` 의 `readset`·`states`·`calls`) | enc-cache `guard-state-<mode>-<k>of<N>`, 1500MB 넘으면 저장 안 함 | 내용 해시 | `cache` 일 때만 |
 | 검사 통과 기록(`work/cache/guards`) | 평문 `guard-results-<run_id>-<attempt>`, report 잡이 조각들 것을 합쳐 저장 | 실행 | 저장은 늘, 쓰기는 `cache` 일 때만 |
@@ -136,7 +137,7 @@ MesenCE 가 필요 없는 실행 검사는 GitHub 러너에서 나눠 돈다. �
 - `rehearse=true` 는 모든 캐시를 쓴다. 조각 결과 JSON 에 `"cached": true` 가 붙고 요약 판정은 「연습 통과」, `release_check.py --ci-report` 는 `--rehearse` 와 함께가 아니면 받지 않는다.
 - 조각은 `tools/guardshard-times.json`(검사마다 지난 시간)으로 고르게 나눈다. `guards.py --record-times 보고서…` 로 고쳐 쓴다.
 - 로컬에서 마무리: 조각 artifact 를 받은 폴더로 `release_check.py --ci-report DIR` 를 돌리면 guards 단계는 CI 결과(같은 커밋, 조각이 모두 있어야 함)를 쓰고 로컬 몫만 돈다.
-- `tools/tests/test_release_gate_workflow.py` 가 지킨다: 관문은 `workflow_dispatch` 만(`pull_request`·`pull_request_target`·`schedule` 금지), 조각 워크플로는 `workflow_call` 만이고 부르는 곳은 관문뿐, 올리기 앞 검사 단계, 평문 캐시 경로(도구·통과 기록만), 롬 파생 폴더는 enc-cache·ship-cache 로만, ship-cache 단계 목록 = `SHIP_LABELS`, 관문은 `rehearse` 일 때만 캐시, 시크릿을 찍는 줄 없음.
+- `tools/tests/test_release_gate_workflow.py` 가 지킨다: 관문은 `workflow_dispatch` 만(`pull_request`·`pull_request_target`·`schedule` 금지), 조각 워크플로는 `workflow_call` 만이고 부르는 곳은 관문과 `ci.yml` 뿐, 올리기 앞 검사 단계, 평문 캐시 경로(도구·통과 기록만), 롬 파생 폴더는 enc-cache·ship-cache 로만, ship-cache 단계 목록 = `SHIP_LABELS`, 관문은 `rehearse` 일 때만 캐시, 시크릿을 찍는 줄 없음. `tools/tests/test_pr_guards_workflow.py` 는 `ci.yml` 쪽을 지킨다: `pull_request_target`·`workflow_run`·`issue_comment`·`secrets: inherit` 없음, 시크릿을 쓰는 잡은 `pr-guards` 하나이고 조건에 `pull_request`·같은 저장소(`head.repo.full_name == github.repository`)·CI 몫 있음이 「그리고」 로만, `mode: pr`·`cache: true`, `guard-plan` 이 보호 테스트를 계획보다 먼저, `ci-ok` 가 `pr-guards-result`·`required-checks` 를 기다림, `LOCAL_NEEDS` 정본은 `guard-shards.yml` 하나.
 
 ## 남은 것
 

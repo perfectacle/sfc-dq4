@@ -133,11 +133,11 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
         self.assertEqual(triggers(self.text), {'workflow_call'})
 
     def test_only_known_callers_pass_rom_secrets(self):
-        """guard-shards.yml 을 부르는 워크플로는 release-gate.yml 뿐이고, 시크릿은 이름을 대어 넘긴다(inherit 금지).
-        PR 에서 부르는 워크플로를 더할 때는 이 테스트에 같은 저장소 브랜치 조건 검사를 함께 더한다."""
+        """guard-shards.yml 을 부르는 워크플로는 release-gate.yml(손으로만)과 ci.yml(pr-guards 잡, 같은 저장소 브랜치 PR
+        만 — test_pr_guards_workflow 가 조건을 지킨다)뿐이고, 시크릿은 이름을 대어 넘긴다(inherit 금지)."""
         callers = sorted(p.name for p in WORKFLOWS.glob('*.y*ml') if 'guard-shards.yml' in p.read_text(encoding='utf-8')
                          and p != WORKFLOW)
-        self.assertEqual(callers, ['release-gate.yml'])
+        self.assertEqual(callers, ['ci.yml', 'release-gate.yml'])
         gate = GATE.read_text(encoding='utf-8')
         self.assertNotRegex(gate, r'secrets:\s*inherit')
         self.assertRegex(gate, r'uses:\s*\./\.github/workflows/guard-shards\.yml')
