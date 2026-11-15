@@ -14,6 +14,7 @@ import dq4ch2battle as battle  # noqa: E402
 import dq4ch2event as ev  # noqa: E402
 import dq4ch2slots as slots  # noqa: E402
 import dq4chapter1 as ch1  # noqa: E402
+import dq4monport  # noqa: E402
 
 
 class BattleTest(unittest.TestCase):
@@ -116,7 +117,7 @@ class RegistryTest(unittest.TestCase):
     def test_battles_and_monsters(self):
         self.assertEqual(ev.battle_stubs(), {0: 0x31})
         self.assertEqual(ev.encounter_groups(), [battle.group_doc(0x31, ((0xE0, 1),))])
-        with mock.patch.object(dq4ch1event, 'fc_monster', return_value={'HP': 1}):
+        with mock.patch.object(dq4monport, 'fc_entry', return_value={'HP': 1}):
             self.assertEqual(ev.monster_entries(b''), [{"id": "E0", "HP": 1}])
 
     def test_npc_lists_take_the_prefix(self):

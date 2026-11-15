@@ -482,6 +482,9 @@ class BossMonsterTest(unittest.TestCase):
         self.assertEqual((tesaki["id"], tesaki["HP"], tesaki["공격"], tesaki["수비"], tesaki["경험치"]), ("E2", 250, 52, 36, 73))
         self.assertEqual([tesaki[f"행동{k}"] for k in range(1, 7)], ["39", "73", "8E", "3C", "73", "8E"])
         self.assertEqual((medama["id"], medama["HP"], medama["경험치"]), ("52", 42, 27))
+        # FC 내성 15칸(dq4monport.fc_resists), DQ5 에만 있는 5F~61 은 0. DQ5 ザイル·ゴンズ 의 내성이 남으면 안 됨
+        self.assertEqual((tesaki["내성"], medama["내성"]), ("111111333333333000", "010200011203300000"))
+        self.assertEqual((tesaki["드롭"], medama["드롭"]), ("FF", "FF"))
         self.assertEqual(ev.BOSS_MEMBERS, ((0xE2, 1), (0x52, 1)))
 
 
