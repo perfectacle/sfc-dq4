@@ -40,8 +40,8 @@ PR 에서는 바뀐 파일이 그 검사의 paths 에 바로 맞을 때, 또는 
                                                  guards=·local=·shards= 줄을 OUT 에 더함(CI guard-plan 잡, $GITHUB_OUTPUT)
   python tools/guards.py --base SHA --pr-body FILE [--local-only]
                                                  걸린 검사마다 본문에 결과 줄이 있는지 봄(CI). --local-only 면 로컬 몫만
-  python tools/guards.py --all --run --no-cache --shard 3/16 --exclude-needs MESENCE,LIBDIR --json OUT.json
-                                                 등급·묶음과 상관없이 모든 검사 가운데 needs 에 MESENCE·LIBDIR 가 없는 것을
+  python tools/guards.py --all --run --no-cache --shard 3/16 --exclude-needs macos --json OUT.json
+                                                 등급·묶음과 상관없이 모든 검사 가운데 needs 에 macos 가 없는 것을
                                                  16 조각으로 나눠 셋째 조각만 돌리고 결과를 OUT.json 에(CI 배포 관문 잡)
   python tools/guards.py --record-times FILE…    보고서(release_check report.json 또는 --json 결과)의 검사 시간으로
                                                  guardshard-times.json 을 고쳐 씀
@@ -972,7 +972,7 @@ def main():
     ap.add_argument('--all', action='store_true', help='--base 없이 등급·묶음과 상관없이 모든 검사를 고른다(배포 관문)')
     ap.add_argument('--shard', metavar='k/n', help='--all 로 고른 검사를 시간이 고르게 n 조각으로 나눠 k 번째만')
     ap.add_argument('--exclude-needs', metavar='이름,…', default='',
-                    help='--all 에서 needs 에 이 이름이 든 검사를 빼 「로컬 몫」 으로 찍는다(CI 에 없는 MESENCE 등)')
+                    help='--all 에서 needs 에 이 이름이 든 검사를 빼 「로컬 몫」 으로 찍는다(리눅스 CI 에서 결과가 다른 검사의 macos 등)')
     ap.add_argument('--json', type=Path, help='--all --run 결과(커밋·조각·결과·로컬 몫)를 이 파일에')
     ap.add_argument('--plan', type=Path, metavar='OUT',
                     help='--base 에서 걸린 검사를 CI 몫·로컬 몫으로 나눠 guards=·local=·shards= 줄을 OUT 에 더한다')

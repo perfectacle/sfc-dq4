@@ -24,7 +24,7 @@
 
 --ci-report 의 DIR 은 배포 관문 워크플로(release-gate.yml → guard-shards.yml)의 조각 결과(guards.py --all --json)를 받은 폴더다. 조각이 모두
 있고 그 커밋이 지금 HEAD 여야 한다. CI 가 통과·실패로 판정한 검사는 그 결과를 그대로 쓰고(실패를 로컬에서 다시 돌려
-덮지 않는다), CI 가 뺀 로컬 몫(MesenCE 가 필요한 것)과 CI 에서 돌리지 않음(skipped)인 검사만 로컬에서 돌린다.
+덮지 않는다), CI 가 뺀 로컬 몫(needs 에 guard-shards.yml 의 LOCAL_NEEDS 가 든 것)과 CI 에서 돌리지 않음(skipped)인 검사만 로컬에서 돌린다.
 """
 import argparse
 import hashlib
@@ -239,7 +239,7 @@ def ci_summary(ci):
     lines += [f'| {r["name"]} | {words.get(r["status"], r["status"])} | {r["detail"]} |'
               for r in sorted(ci['rows'], key=lambda r: (r['status'] == 'passed', r['name']))]
     if ci['local']:
-        lines += ['', '## 로컬 몫', '', 'CI 에 없는 MesenCE 가 필요해 `release_check.py --ci-report` 가 로컬에서 돌린다.', '',
+        lines += ['', '## 로컬 몫', '', '리눅스 CI 에서 돌리지 않아 `release_check.py --ci-report` 가 로컬에서 돌린다.', '',
                   ', '.join(ci['local'])]
     return '\n'.join(lines) + '\n', ok
 

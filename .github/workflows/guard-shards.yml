@@ -369,6 +369,9 @@ jobs:
           if [ -f "work/ci-gate/shard-$K.json" ]; then cp "work/ci-gate/shard-$K.json" work/ci-upload/; fi
           if [ -d work/guards ]; then find work/guards -maxdepth 1 -type f -name '*.log' -exec cp {} work/ci-upload/logs/ \;; fi
           if [ -d work/cache/guards ]; then mkdir -p work/ci-upload/results && cp -R work/cache/guards/. work/ci-upload/results/; fi
+          # Scene logs the guards write under their own work folders, for diagnosing failures
+          find work -path work/ci-upload -prune -o -path work/guards -prune -o -type f -name '*.log' -size -2M -print |
+            while read -r f; do mkdir -p "work/ci-upload/scenes/$(dirname "$f")" && cp "$f" "work/ci-upload/scenes/$f"; done
 
       - name: Check the upload for ROM data
         id: leakcheck

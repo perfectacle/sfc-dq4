@@ -11,6 +11,10 @@ MesenCE --testrunner 는 --timeout=초 를 주지 않으면 벽시계로 약 100
 --timeout 을 붙여 끝을 Python 쪽 timeout(없으면 RUNNER_TIMEOUT)에 맡긴다(timeout_args). 인자에 --timeout= 이
 이미 있으면 그것을 따른다.
 
+리눅스는 환경 변수 한 줄을 128KiB 까지만 넘긴다(넘으면 띄우기부터 E2BIG). run·Runner 는 그보다 긴 값을 임시 파일로
+옮기고 lua/dq4bigenv.lua 를 앞에 붙여 스크립트의 os.getenv 가 그 내용을 그대로 받게 한다(with_bigenv). 인자를 그대로
+넘기는 testrunner 는 하지 않는다.
+
   run(mesence, rom, script, cwd=dest, env=env, stdout=log, timeout=600)
 
 롬을 복사하지 않고 받은 인자 그대로 띄우려면 testrunner 를 쓴다. 셸 스크립트는
@@ -24,6 +28,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import uuid
 
@@ -38,6 +43,9 @@ TIMEOUT_MARGIN = 60
 # DQ4_OPENBUS_LOG 가 있으면 띄우는 스크립트마다 lua/dq4openbus.lua 를 앞에 붙여 열린 버스·롬 거울 접근을 그 파일에 적는다
 # (dq4compatcheck.py scenes). 범위는 DQ4_OPENBUS_RANGES(dq4openbus.lua 의 OPENBUS_RANGES)
 OPENBUS = Path(__file__).resolve().parent / 'lua' / 'dq4openbus.lua'
+BIGENV = Path(__file__).resolve().parent / 'lua' / 'dq4bigenv.lua'
+# 리눅스 MAX_ARG_STRLEN(131072, 「이름=값」 과 끝 NUL 포함)보다 넉넉히 아래
+ENV_LIMIT = 120_000
 
 
 def with_openbus(script, kwargs):
@@ -49,6 +57,29 @@ def with_openbus(script, kwargs):
     env.update(PROBE_TARGET=str(script), OPENBUS_LOG=log,
                OPENBUS_RANGES=os.environ.get('DQ4_OPENBUS_RANGES', env.get('OPENBUS_RANGES', '')))
     return OPENBUS, {**kwargs, 'env': env}
+
+
+def with_bigenv(script, kwargs):
+    """(스크립트, kwargs, 지울 임시 파일). env 에 ENV_LIMIT 보다 긴 값이 있으면 그 값을 임시 파일로 옮기고
+    dq4bigenv.lua 가 원래 스크립트를 이어 돌게 한다. 없으면 그대로."""
+    env = kwargs.get('env')
+    big = [k for k, v in (env or {}).items() if len(k) + len(str(v)) + 2 > ENV_LIMIT]
+    if not big:
+        return script, kwargs, []
+    env, files = dict(env), []
+    for name in big:
+        fd, path = tempfile.mkstemp(prefix=f'dq4bigenv-{name}-', suffix='.txt')
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            f.write(str(env.pop(name)))
+        env[f'{name}__FILE'] = path
+        files.append(Path(path))
+    env.update(BIGENV=','.join(big), BIGENV_TARGET=str(script))
+    return BIGENV, {**kwargs, 'env': env}, files
+
+
+def _unlink(files):
+    for f in files:
+        f.unlink(missing_ok=True)
 
 
 def timeout_args(args, timeout):
@@ -112,11 +143,13 @@ class Runner:
         clear_saves(self.rom, mesence)
         self.slot = headless_slots.acquire(f'MesenCE {tag}')
         script, kwargs = with_openbus(script, kwargs)
+        script, kwargs, self.bigenv = with_bigenv(script, kwargs)
         try:
             self.proc = subprocess.Popen([str(mesence), '--testrunner', str(self.rom), str(script), *extra,
                                           *timeout_args(extra, timeout)], **kwargs)
         except BaseException:
             self.slot.release()
+            _unlink(self.bigenv)
             raise
         # 호출하는 쪽이 여러 Runner 를 띄운 뒤 앞엣것부터 wait() 하므로, wait() 까지 자리를 쥐고 있으면
         # 자리보다 많이 띄울 때 서로 막힌다. 프로세스가 끝나는 즉시 놓는다.
@@ -147,12 +180,14 @@ class Runner:
         self.slot.release()
         clear_saves(self.rom, self.mesence)
         self.rom.unlink(missing_ok=True)
+        _unlink(self.bigenv)
 
 
 def run(mesence, rom, script, folder=None, tag='probe', extra=ARGS, **kwargs):
     """subprocess.run 과 같이 띄운다. TimeoutExpired 는 그대로 올린다."""
     folder = Path(folder or kwargs.get('cwd') or Path(rom).parent)
     script, kwargs = with_openbus(script, kwargs)
+    script, kwargs, bigenv = with_bigenv(script, kwargs)
     copy = unique_copy(rom, folder, tag)
     clear_saves(copy, mesence)
     try:
@@ -162,6 +197,7 @@ def run(mesence, rom, script, folder=None, tag='probe', extra=ARGS, **kwargs):
     finally:
         clear_saves(copy, mesence)
         copy.unlink(missing_ok=True)
+        _unlink(bigenv)
 
 
 def testrunner(mesence, *args, tag=None, **kwargs):

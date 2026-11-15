@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
+import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import threading
@@ -133,6 +135,72 @@ class MesenTests(unittest.TestCase):
         (self.saves / 'b.srm').write_bytes(b'')
         self.assertEqual(mesen.clear_saves(self.dir / 'a.sfc'), [self.saves / 'a.srm'])
         self.assertTrue((self.saves / 'b.srm').exists())
+
+
+# 받은 스크립트, DUMP 가 환경에 그대로 왔는지, BIGENV 와 DUMP__FILE 내용 길이를 적는 가짜
+FAKE_ENV = '''#!{python}
+import os, sys
+from pathlib import Path
+f = os.environ.get('DUMP__FILE')
+with open(os.environ['FAKE_LOG'], 'a') as log:
+    log.write(f"{{Path(sys.argv[3]).name}} {{'DUMP' in os.environ}} {{os.environ.get('BIGENV', '-')}} "
+              f"{{len(Path(f).read_text()) if f else 0}} {{os.environ.get('BIGENV_TARGET', '-')}}\\n")
+'''
+
+
+@unittest.skipIf(sys.platform == 'win32', 'shebang 가짜 실행 파일')
+class BigEnvTests(unittest.TestCase):
+    """리눅스 MAX_ARG_STRLEN(128KiB)을 넘는 환경 변수(dq4windowcheck --every 의 DUMP)는 파일로 넘어가 dq4bigenv.lua 가
+    되살린다. 넘지 않는 값은 그대로 환경으로 간다."""
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp())
+        self.fake = self.dir / 'Mesen'
+        self.fake.write_text(FAKE_ENV.format(python=sys.executable))
+        self.fake.chmod(self.fake.stat().st_mode | stat.S_IEXEC)
+        self.log = self.dir / 'log.txt'
+        self.rom = self.dir / 'c.sfc'
+        self.rom.write_bytes(b'rom')
+        self.env = mock.patch.dict(os.environ, MESENCE_SAVES=str(self.dir), FAKE_LOG=str(self.log), HEADLESS_SLOTS='1')
+        self.env.start()
+        self.slots = mock.patch.object(mesen.headless_slots, 'slots_dir', lambda: self.dir / 'slots')
+        self.slots.start()
+
+    def tearDown(self):
+        self.slots.stop()
+        self.env.stop()
+
+    def test_long_value_goes_through_a_file_and_is_removed(self):
+        big = '1:7E0000:60,' * 20000
+        env = dict(os.environ, DUMP=big)
+        tmp = self.dir / 'tmp'
+        tmp.mkdir()
+        with mock.patch.object(tempfile, 'tempdir', str(tmp)):
+            mesen.run(self.fake, self.rom, 'probe.lua', folder=self.dir / 'w', env=env, check=True)
+            mesen.Runner(self.fake, self.rom, 'probe.lua', self.dir / 'w', env=env).wait()
+        for line in self.log.read_text().splitlines():
+            script, inline, names, size, target = line.split()
+            self.assertEqual((script, inline, names, int(size), target), ('dq4bigenv.lua', 'False', 'DUMP', len(big),
+                                                                           'probe.lua'))
+        self.assertEqual(len(self.log.read_text().splitlines()), 2)
+        self.assertEqual(list(tmp.iterdir()), [])
+
+    def test_short_value_stays_in_the_environment(self):
+        mesen.run(self.fake, self.rom, 'probe.lua', folder=self.dir / 'w', env=dict(os.environ, DUMP='1:7E0000:60'),
+                  check=True)
+        self.assertEqual(self.log.read_text().split()[:3], ['probe.lua', 'True', '-'])
+
+    @unittest.skipUnless(shutil.which('lua5.4') or shutil.which('lua'), 'lua 없음')
+    def test_lua_wrapper_restores_getenv(self):
+        target = self.dir / 'target.lua'
+        target.write_text('io.write(#os.getenv("DUMP"), " ", os.getenv("OTHER"))')
+        data = self.dir / 'dump.txt'
+        data.write_text('x' * 200000)
+        out = subprocess.run([shutil.which('lua5.4') or shutil.which('lua'), str(mesen.BIGENV)], capture_output=True,
+                             text=True, check=True,
+                             env=dict(os.environ, BIGENV='DUMP', DUMP__FILE=str(data), BIGENV_TARGET=str(target),
+                                      OTHER='kept'))
+        self.assertEqual(out.stdout, '200000 kept')
 
 
 if __name__ == '__main__':
