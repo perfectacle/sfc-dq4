@@ -43,8 +43,8 @@ permissions:
   contents: read
 
 env:
-  # Guards that need MesenCE (macOS app) stay on the local machine for now.
-  LOCAL_NEEDS: MESENCE,LIBDIR
+  # Guards whose needs name this stay on the local machine (results that differ on Linux).
+  LOCAL_NEEDS: macos
 
 jobs:
   build:
@@ -123,7 +123,7 @@ jobs:
           persist-credentials: false
 
       - name: Install cmake
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake libsdl2-2.0-0
 
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
@@ -228,7 +228,7 @@ jobs:
           persist-credentials: false
 
       - name: Install cmake
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake libsdl2-2.0-0
 
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
@@ -318,6 +318,7 @@ jobs:
         if: inputs.cache
         env:
           DQ4_ASSETS: ${{ github.workspace }}/assets
+          HEADLESS_SLOTS: '4'
           DQ4_READSET_MAX_GB: '2'
           K: ${{ matrix.k }}
           N: ${{ inputs.shards }}
@@ -326,13 +327,14 @@ jobs:
           mkdir -p work/ci-gate
           only=()
           if [ -n "$GUARDS" ]; then only=(--only "$GUARDS"); fi
-          uv run --frozen python tools/guards.py --all "${only[@]}" --run --parallel 2 \
+          uv run --frozen python tools/guards.py --all "${only[@]}" --run --parallel 2 --timeout 3600 \
             --shard "$K/$N" --exclude-needs "$LOCAL_NEEDS" --json "work/ci-gate/shard-$K.json"
 
       - name: Run the shard's guards without caches
         if: ${{ !inputs.cache }}
         env:
           DQ4_ASSETS: ${{ github.workspace }}/assets
+          HEADLESS_SLOTS: '4'
           K: ${{ matrix.k }}
           N: ${{ inputs.shards }}
           GUARDS: ${{ inputs.guards }}
@@ -340,7 +342,9 @@ jobs:
           mkdir -p work/ci-gate
           only=()
           if [ -n "$GUARDS" ]; then only=(--only "$GUARDS"); fi
-          uv run --frozen python tools/guards.py --all "${only[@]}" --run --no-cache --parallel 2 \
+          # A 4-core runner is slower than the dev machine the 1800 s default fits
+          # (dq4-compat-scenes took longer than that with every scene passing).
+          uv run --frozen python tools/guards.py --all "${only[@]}" --run --no-cache --parallel 2 --timeout 3600 \
             --shard "$K/$N" --exclude-needs "$LOCAL_NEEDS" --json "work/ci-gate/shard-$K.json"
 
       - name: Drop build stage entries this job did not use
@@ -368,6 +372,9 @@ jobs:
           if [ -f "work/ci-gate/shard-$K.json" ]; then cp "work/ci-gate/shard-$K.json" work/ci-upload/; fi
           if [ -d work/guards ]; then find work/guards -maxdepth 1 -type f -name '*.log' -exec cp {} work/ci-upload/logs/ \;; fi
           if [ -d work/cache/guards ]; then mkdir -p work/ci-upload/results && cp -R work/cache/guards/. work/ci-upload/results/; fi
+          # Scene logs the guards write under their own work folders, for diagnosing failures
+          find work -path work/ci-upload -prune -o -path work/guards -prune -o -type f -name '*.log' -size -2M -print |
+            while read -r f; do mkdir -p "work/ci-upload/scenes/$(dirname "$f")" && cp "$f" "work/ci-upload/scenes/$f"; done
 
       - name: Check the upload for ROM data
         id: leakcheck

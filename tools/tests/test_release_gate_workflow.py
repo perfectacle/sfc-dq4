@@ -284,7 +284,7 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
         self.assertEqual(with_value(cached[0], 'if'), 'inputs.cache')
         for s in runs:
             self.assertIn('--exclude-needs "$LOCAL_NEEDS"', run_texts(s))
-        self.assertRegex(self.text, r'LOCAL_NEEDS:\s*MESENCE,LIBDIR')
+        self.assertRegex(self.text, r'LOCAL_NEEDS:\s*macos\n')
         build = ''.join(self.jobs['rom'])
         self.assertIn("DQ4_BUILD_CACHE: ${{ inputs.cache && format('{0}/work/cache', github.workspace) || 'off' }}", build)
         for s in self.jobs['rom'] + self.jobs['shard']:
@@ -309,6 +309,15 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
         self.assertNotIn('dq4build.py', shard)
         self.assertNotIn('ship-build', shard)
         self.assertIn('DQ4_PREBUILT=', shard)
+
+    def test_mesence_unpacks_its_libraries_before_guards(self):
+        """리눅스 MesenCE 는 처음 뜰 때 MesenCore.so 를 실행 파일 옆에 푼다. 처음 뜨는 것이 여럿 함께면 서로 덮어써
+        Bus error 로 죽어(dq4-npc-walk 시드 기록이 빔), 셋업이 MESENCE 를 잡 환경에 넘기기 전에 한 번 띄워 둔다."""
+        text = SETUP.read_text(encoding='utf-8')
+        unzip = text.index('unzip -q -o "$mzip" -d "$TOOLS/mesence"')
+        warm = text.index('sfc/dq4/tools/dq4mesen.py', unzip)
+        check = text.index('MesenCore.so" ]', warm)
+        self.assertLess(check, text.index('echo "MESENCE=', check))
 
     def test_banned_suffixes_cover_rom_and_save_kinds(self):
         for ext in ('.sfc', '.smc', '.nes', '.nds', '.ml1', '.sav', '.mss', '.ips'):

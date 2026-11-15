@@ -3,9 +3,9 @@
 #
 #   tools/ci_gate_setup.sh roms    암호화한 롬 묶음을 받아 rom/ 에 풀고, 롬 SHA-256 목록을 $RUNNER_TEMP/rom-hashes.txt 에
 #                                  (CI_ROM_TOKEN: 에셋 저장소 읽기 토큰, CI_ROM_AGE_KEY: age 개인 키)
-#   tools/ci_gate_setup.sh tools   asar·Galmuri·libretro 코어를 $RUNNER_TEMP/gate-tools 에 두고 ASAR·DQ4_GALMURI·DQ4_CORES 를
-#                                  $GITHUB_ENV 에(actions/cache 가 되살린 asar·코어는 다시 빌드하지 않고, 받아 둔 Galmuri zip 은
-#                                  해시가 맞으면 다시 받지 않는다)
+#   tools/ci_gate_setup.sh tools   asar·Galmuri·libretro 코어·MesenCE 를 $RUNNER_TEMP/gate-tools 에 두고 ASAR·DQ4_GALMURI·
+#                                  DQ4_CORES·MESENCE·LIBDIR 를 $GITHUB_ENV 에(actions/cache 가 되살린 asar·코어는 다시 빌드하지
+#                                  않고, 받아 둔 Galmuri zip 은 해시가 맞으면 다시 받지 않는다)
 #   tools/ci_gate_setup.sh pins    도구 캐시 키에 쓸 고정 판(asar 커밋, Galmuri zip SHA-256)을 $GITHUB_OUTPUT 에
 #
 # 시크릿은 환경 변수로만 받는다. 이 스크립트는 그 값을 찍지 않으며 set -x 를 켜지 않는다.
@@ -21,6 +21,10 @@ ASAR_COMMIT=6a6dbdaed8cb773e583052ce4f66375bd896c3a1
 # 2026-07-12 의 v2.40.4. 빌드가 읽는 .bdf 는 로컬 DQ4_GALMURI 의 것과 SHA-256 이 같다
 GALMURI_URL=https://github.com/quiple/galmuri/releases/download/v2.40.4/Galmuri-v2.40.4.zip
 GALMURI_SHA256=c8b3d9861a62ae73c8b1178091401cd79994812437ef386413f6dd54856e60e7
+# 2026-06-05 의 MesenCE 2.2.1 공식 리눅스 판. 로컬 맥 판(같은 릴리스의 macOS ARM64)과 같은 소스다.
+# 러너가 ARM64 라 그 판을 쓴다. 설정은 tools/ci-mesence-settings.json 을 실행 파일 옆에 두는 포터블 모드
+MESENCE_URL_ARM64=https://github.com/nesdev-org/MesenCE/releases/download/2.2.1/Mesen_2.2.1_Linux_ARM64.zip
+MESENCE_SHA256_ARM64=5030702ba13d043bf926ee3cc6c6a5d3567e08345e9c50b2df4d4d08b90ead30
 
 : "${RUNNER_TEMP:?RUNNER_TEMP 가 없음(GitHub Actions 러너에서 부른다)}"
 TOOLS="$RUNNER_TEMP/gate-tools"
@@ -83,10 +87,29 @@ tools() {
 
   DQ4_CORES="$TOOLS/cores" uv run --frozen python sfc/dq4/tools/dq4cores.py
 
+  [ "$(uname -m)" = aarch64 ] || { echo "::error::MesenCE 는 리눅스 ARM64 판만 고정함"; exit 1; }
+  # 캐시하지 않는다(38MB 를 잡마다 받는 데 몇 초). 포터블 폴더에 Saves·Debugger 가 쌓여 풀린 폴더도 잡마다 새로
+  local mzip="$RUNNER_TEMP/mesence.zip"
+  curl -fsSL -o "$mzip" "$MESENCE_URL_ARM64"
+  echo "$MESENCE_SHA256_ARM64  $mzip" | sha256sum -c --quiet -
+  rm -rf "$TOOLS/mesence" && mkdir -p "$TOOLS/mesence"
+  unzip -q -o "$mzip" -d "$TOOLS/mesence"
+  rm -f "$mzip"
+  chmod +x "$TOOLS/mesence/Mesen"
+  cp tools/ci-mesence-settings.json "$TOOLS/mesence/settings.json"
+  # 리눅스 단일 파일판은 처음 뜰 때 MesenCore.so 등을 실행 파일 옆에 푼다. 처음 뜨는 것 여럿이 함께 풀면 서로 덮어써
+  # Bus error(종료 135)로 죽으므로, 가드가 띄우기 전에 롬 없이 한 번 띄워 풀어 둔다(롬이 없어 종료 코드는 0 이 아니다)
+  echo 'emu.stop(0)' >"$RUNNER_TEMP/mesence-warm.lua"
+  MESENCE="$TOOLS/mesence/Mesen" HEADLESS_SLOTS=off timeout 120 uv run --frozen python sfc/dq4/tools/dq4mesen.py \
+    "$RUNNER_TEMP/no-rom.sfc" "$RUNNER_TEMP/mesence-warm.lua" --timeout=30 >/dev/null 2>&1 || true
+  [ -s "$TOOLS/mesence/MesenCore.so" ] || { echo "::error::MesenCE 가 MesenCore.so 를 풀지 않음"; exit 1; }
+
   {
     echo "ASAR=$TOOLS/asar/bin/asar"
     echo "DQ4_GALMURI=$TOOLS/galmuri"
     echo "DQ4_CORES=$TOOLS/cores"
+    echo "MESENCE=$TOOLS/mesence/Mesen"
+    echo "LIBDIR=$(uv run --frozen krpatch sfc lua)"
   } >>"$GITHUB_ENV"
 }
 

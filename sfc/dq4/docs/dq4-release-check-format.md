@@ -102,16 +102,16 @@ uv run --locked python sfc/dq4/tools/dq4publish.py release --report work/release
 
 ## CI 에서 돌리기
 
-MesenCE 가 필요 없는 실행 검사는 GitHub 러너에서 나눠 돈다. 배포 관문은 사람이 `gh workflow run release-gate.yml [-f shards=N] [-f ref=REF] [-f rehearse=true]` 로 부를 때만 돈다. PR 은 `ci.yml` 의 `pr-guards` 잡이 같은 조각 워크플로를 `mode: pr` 로 부른다.
+실행 검사는 GitHub 러너(ubuntu-26.04-arm)에서 나눠 돈다. needs 에 `macos` 가 든 검사만 로컬 몫이다. 배포 관문은 사람이 `gh workflow run release-gate.yml [-f shards=N] [-f ref=REF] [-f rehearse=true]` 로 부를 때만 돈다. PR 은 `ci.yml` 의 `pr-guards` 잡이 같은 조각 워크플로를 `mode: pr` 로 부른다.
 
 | 파일 | 하는 일 |
 | --- | --- |
 | `.github/workflows/release-gate.yml` | `workflow_dispatch` 만. 롬 시크릿을 이름을 대어 `guard-shards.yml` 에 넘긴다(`mode: release`, `cache` 는 입력 `rehearse`, 기본 false) |
 | `.github/workflows/ci.yml` 의 `guard-plan`·`pr-guards`·`pr-guards-result` | PR 과 main push. `guard-plan`(시크릿 없음)이 보호 테스트(`test_release_gate_workflow`·`test_pr_guards_workflow`)를 먼저 돌리고 `guards.py --base B --head H --pr-body 본문 --plan $GITHUB_OUTPUT` 로 걸린 검사를 CI 몫 `guards`·로컬 몫 `local`(`LOCAL_NEEDS`)·조각 수 `shards`(지난 시간 합 / 480초 올림, 1~16)로 나눈다. `pr-guards` 는 CI 몫이 있고 같은 저장소 브랜치 PR 이거나 main push 일 때만 `guard-shards.yml` 을 `mode: pr`·`cache: true`·head SHA 로 부른다. PR 실행이 저장한 캐시는 그 PR 만 읽으므로, 머지 뒤 main push 실행이 같은 가드를 다시 돌려 다음 PR 들이 읽을 빌드·장면·통과 기록 캐시를 main 에 데운다(push 는 `before…sha` 로 고름). `pr-guards-result` 가 판정을 하나로 모아 `ci-ok` 에 넘긴다(가드 없음·PR 아님·포크는 통과, 포크는 경고와 함께 본문 결과 줄로 판정) |
-| `.github/workflows/guard-shards.yml` | `workflow_call` 만. 입력 `ref`·`mode`(`release` 모든 검사, `pr` 은 `guards` 목록만)·`guards`·`shards`·`cache`(기본 false). `build`(커밋·조각 목록) → `rom` 행렬(`ch1`·`ch2 --chapter2` 출하 롬을 함께 한 번씩 빌드) → `shard` 행렬(두 롬을 받아 `work/ch1`·`work/ch2` 에 두고 `DQ4_PREBUILT` 를 켜 `guards.py --all --run [--no-cache] --shard k/N --exclude-needs MESENCE,LIBDIR --json`) → `report`(`release_check.py --ci-summary`, 실행 요약에 표, 통과 기록 캐시 저장) |
+| `.github/workflows/guard-shards.yml` | `workflow_call` 만. 입력 `ref`·`mode`(`release` 모든 검사, `pr` 은 `guards` 목록만)·`guards`·`shards`·`cache`(기본 false). `build`(커밋·조각 목록) → `rom` 행렬(`ch1`·`ch2 --chapter2` 출하 롬을 함께 한 번씩 빌드) → `shard` 행렬(두 롬을 받아 `work/ch1`·`work/ch2` 에 두고 `DQ4_PREBUILT` 를 켜 `guards.py --all --run [--no-cache] --shard k/N --exclude-needs macos --json`) → `report`(`release_check.py --ci-summary`, 실행 요약에 표, 통과 기록 캐시 저장) |
 | `.github/actions/ci-roms` | composite action. 프라이빗 에셋 저장소 릴리스 `ci-roms-v1` 의 age 암호화 묶음(`dq5.sfc dq6.sfc dq4.nes dq4-rev0.nes dq4ds.nds dq4ds-kr.nds dq4ds-kr.ml1 dq4ds-kr.sav`)을 `rom/` 에 풀고 롬 SHA-256 목록을 `$RUNNER_TEMP/rom-hashes.txt` 에 |
 | `.github/actions/ci-tools` | `tools/ci_gate_setup.sh tools` 를 부르고 asar·Galmuri zip·libretro 코어를 저마다 평문 캐시에(키: asar 커밋, zip SHA-256, `dq4cores.py`·bsnes 패치 해시). 셋업 바로 뒤에 저장해 잡이 뒤에서 실패해도 남는다 |
-| `tools/ci_gate_setup.sh tools`·`pins` | asar·Galmuri·libretro 코어를 `$RUNNER_TEMP/gate-tools` 에 두고 `ASAR`·`DQ4_GALMURI`·`DQ4_CORES` 를 잡 환경에. `pins` 는 캐시 키에 쓸 고정 판을 `$GITHUB_OUTPUT` 에 |
+| `tools/ci_gate_setup.sh tools`·`pins` | asar·Galmuri·libretro 코어·MesenCE 를 `$RUNNER_TEMP/gate-tools` 에 두고 `ASAR`·`DQ4_GALMURI`·`DQ4_CORES`·`MESENCE`·`LIBDIR` 를 잡 환경에. MesenCE 는 공식 2.2.1 리눅스 ARM64 판(SHA-256 고정, 로컬 맥 판과 같은 릴리스)을 포터블 모드로 풀고 설정은 `tools/ci-mesence-settings.json`(apt `libsdl2-2.0-0`, 화면 없이 `--testrunner`). `pins` 는 캐시 키에 쓸 고정 판을 `$GITHUB_OUTPUT` 에 |
 | `.github/actions/enc-cache` | 롬에서 나온 바이트를 담는 폴더의 캐시. 입력 `op`(`restore`·`save`)·`name`·`prefix`·`dir`·`age_key`·`exclude`·`max_mb`. 폴더를 tar+zstd 로 묶어 `CI_ROM_AGE_KEY` 의 공개 키로 암호화한 파일 하나만 캐시에 둔다. 키는 `<prefix>-<내용 해시>`, 되살리기는 그 접두어의 가장 새 키. 이 잡에서 되살린 키와 내용이 같으면 저장하지 않는다 |
 | `.github/actions/ship-cache` | 출하 롬 빌드 단계마다 enc-cache 하나(`tools/ci_cache.py` 의 `SHIP_LABELS`: `titlelayers chapter1-messages titlelayerpatch overture-build menupatch-build chapter1-build other`). 한 단계가 바뀌어도 나머지 묶음은 맞는다 |
 | `tools/ci_cache.py` | `unpack`·`pack`(enc-cache 의 몸통), `prune --dir D --since FILE`(이 잡에서 쓰지 않은 빌드 단계 칸 지우기), `ship-build --out DIR --chunks DIR [인자]`(`dq4build.py` 를 돌리고 단계 시간 `[stage]` 을 찍고, 쓴 `dq4buildcache` 칸을 단계별로 복사, `DIR/.prebuilt.json`(커밋·인자·롬 SHA-256)을 남김), `prebuilt --out DIR [인자]`(`DQ4_PREBUILT` 폴더 가운데 같은 커밋·인자·롬의 빌드를 복사, 없으면 `dq4build.py`) |
@@ -121,7 +121,8 @@ MesenCE 가 필요 없는 실행 검사는 GitHub 러너에서 나눠 돈다. �
 - 빌드가 읽는 에셋은 에셋 저장소에 커밋돼 있어야 한다. 로컬 체크아웃에만 있는 파일은 CI 롬을 로컬 롬과 다르게 만든다.
 - 리눅스 bsnes 는 WRAM 을 `/proc/self/maps` 의 코어 매핑에서 찾는다(`dq4libretro.linux_segments`). 못 찾으면 직렬화로 읽고 써서 타이밍이 바뀌어 걷기·장면이 bsnes 만 어긋난다.
 - 시크릿: `CI_ROM_TOKEN`(에셋 저장소 읽기), `CI_ROM_AGE_KEY`(age 개인 키). 키 줄은 `::add-mask::` 로 가린다.
-- artifact 는 조각 결과 JSON, 검사 로그, 검사 통과 기록(`work/cache/guards`, 입력 키와 시간)뿐이다.
+- 조각 잡은 `HEADLESS_SLOTS=4`(러너 코어 수), 검사 하나의 시간 제한 3600초. 로컬 MesenCE 설정을 바꾸면 `tools/ci-mesence-settings.json` 도 같게 맞춘다(개인 경로·창 위치는 뺀다).
+- artifact 는 조각 결과 JSON, 검사 로그, 장면 로그(`scenes/`, work 아래 2MB 미만 `*.log`), 검사 통과 기록(`work/cache/guards`, 입력 키와 시간)뿐이다.
 
 ### CI 캐시
 
