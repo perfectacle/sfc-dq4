@@ -44,6 +44,37 @@ def driver(game):
     return d
 
 
+class WalkGame:
+    """방향을 누르기 시작한 뒤 한 걸음(한 칸) 위로 가는 가짜 필드. 카운터 칸(top)보다 위로는 못 간다."""
+
+    def __init__(self, y, top):
+        self.n, self.y, self.top, self.prev = 0, y, top, False
+
+    def step(self, buttons):
+        self.n += 1
+        down = 'up' in buttons
+        if down and not self.prev and self.y > self.top:
+            self.y -= 1
+        self.prev = down
+
+    def rd(self, addr):
+        return {ss.X: 34, ss.Y: self.y}.get(addr, 0)
+
+
+class FaceTest(unittest.TestCase):
+    def test_reaches_the_counter_cell_from_one_cell_further(self):
+        # 같은 맵 순간이동이 한 칸 더 아래(34,13)에 세운 snes9x 방어구점: 두 번 눌러 (34,11)
+        for start in (12, 13):
+            game = WalkGame(start, 11)
+            ss.Driver(game.step, game.rd, lambda: game.n).face('up', 34, 11)
+            self.assertEqual(game.y, 11)
+
+    def test_too_far_fails(self):
+        game = WalkGame(15, 11)
+        with self.assertRaisesRegex(ss.Fail, '카운터 앞'):
+            ss.Driver(game.step, game.rd, lambda: game.n).face('up', 34, 11)
+
+
 class ToTest(unittest.TestCase):
     def test_releases_on_the_frame_the_target_appears(self):
         game = FakeGame([0xFF, 0x00, 0x33, 0x39])

@@ -771,19 +771,22 @@ def npc_lists(ported, first_talk):
            {"name": "ch2_kicked", "entries": clear + _invisible(OPENER_SRC, t['wall'])},
            {"name": "ch2_ready", "entries": clear + _invisible(ASKER_SRC, t['wall'])},
            {"name": "ch2_tempe_altar", "entries": altar}]
-    more_new, more_over = module_lists(lists, first_talk)
+    more_new, more_over = module_lists(lists, first_talk, new, over)
     # 대체 표는 앞 줄부터 맞는 첫 줄을 쓴다. 모듈이 first 를 단 줄은 이 모듈의 합류 뒤 목록 따위보다 앞에 둔다
     first = [{k: v for k, v in o.items() if k != 'first'} for o in more_over if o.get('first')]
     return ported, new + more_new, first + over + [o for o in more_over if not o.get('first')]
 
 
-def module_lists(lists, first_talk):
+def module_lists(lists, first_talk, own_new=(), own_over=()):
     """사건 모듈의 (새 목록, 조건). 모듈은 lists({맵: 목록})를 고쳐(대화 바꾸기) 새 목록·조건을 더한다. 새 목록 이름은
-    dq4ch2slots 의 앞머리로 시작해야 한다."""
+    dq4ch2slots 의 앞머리로 시작해야 한다. own_new·own_over 는 이 모듈(dq4ch2event)의 새 목록·조건."""
     new, over = [], []
     for ctx in contexts(first_talk=first_talk):
         # 앞 모듈이 만든 새 목록({이름: 목록}). 뒤 모듈이 그 목록을 바탕으로 나중 상태의 목록을 만들 때 쓴다
         ctx.made = {lst["name"]: lst for lst in new}
+        # 이 모듈 것까지 더한 새 목록과 지금까지의 조건(어느 맵을 어느 목록이 덮는지)
+        ctx.made_all = {lst["name"]: lst for lst in (*own_new, *new)}
+        ctx.overrides = [*own_over, *over]
         if hasattr(ctx.module, 'npc_lists'):
             more_new, more_over = ctx.module.npc_lists(lists, ctx)
             for lst in more_new:

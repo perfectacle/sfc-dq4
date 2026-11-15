@@ -3,8 +3,14 @@
 2장 출발 상태(dq4ch2walkcheck.head)에서 동료 대화 줄이 있는 맵마다 한 번 순간이동해 말 상대가 없는 쪽을 보고 서고,
 2장 진행 단계(dq4ch2partytalk.STAGES)마다 낮·밤으로 flag·시각을 WRAM 에 써 가며 명령 창 「はなす」를 고른다
 (lua/dq4partytalk.lua). 단계마다 보행 메시지(24:8BAF)가 받은 번호가 하나이고, 롬의 동료 대화 표를 조건 평가 루틴과 같은
-규칙으로 따라 고른 줄의 메시지(맞는 줄이 없으면 원래의 129)여야 한다. 단계마다 「마지막으로 고른 줄」을 0 으로 두므로
-같은 우선순위의 맞는 줄 가운데 표의 첫 줄이 나온다. 메시지가 없거나 둘 이상이면 멈췄거나 창이 닫히지 않은 것이다.
+규칙으로 따라 고른 줄의 메시지(맞는 줄이 없으면 원래의 129)여야 한다. 단계마다 「마지막으로 고른 줄」과 「마지막으로 말을
+건 인물」(pt.TALKED_TO)을 0 으로 두므로 같은 우선순위의 맞는 줄 가운데 표의 첫 줄이 나온다. 메시지가 없거나 둘 이상이면
+멈췄거나 창이 닫히지 않은 것이다.
+
+「말 건 뒤」 사례(people): 짝 표(dq4ch2partytalk-people.tsv)의 확인된 인물마다, 그 인물 옆 FC 칸에 순간이동해 말을 걸고
+(대화 시작 훅이 pt.TALKED_TO 에 적음) 돌아서서 「はなす」를 고른다. 말 상대 슬롯의 칸이 짝 표의 칸이고, 그 값이 그 슬롯
+대화 번호의 번호 표 차례 + 1 이고, 동료 대사가 그 값으로 고른 줄이어야 한다. 단계는 그 값으로 「말 건 인물」 줄이 뽑히는
+첫 단계(그런 단계가 없으면 그 값만 봄). 맵은 사건 목록이 아닌 2장 시작 목록이 실리게 합류 flag 없이 들어간다.
 
   MESENCE=... LIBDIR=$(uv run krpatch sfc lua) \\
     uv run --locked python sfc/dq4/tools/dq4ch2partytalkcheck.py --rom work/ch2/dq4-ch1-full.sfc --out work/ch2talk
@@ -44,11 +50,13 @@ SPOTS = [
     ('40/00', '40/00,46,28', 'down', ''),
     ('40/01', '40/01,24,13', 'down', ''),
     ('40/02', '40/02,26,41', 'left', ''),
+    ('40/05', '40/05,20,6', 'down', ''),
     ('40/06', '40/06,26,39', 'down', ''),
     ('40/07', '40/07,28,26', 'down', ''),
     ('40/0C', '40/0C,22,17', 'down', ''),
     ('40/0E', '40/0E,22,35', 'down', ''),
     ('45/00', '45/00,26,9', 'down', ''),
+    ('45/02', '45/02,10,18', 'down', ''),
     ('45/05', '45/05,22,30', 'down', ''),
     ('45/06', '45/06,14,28', 'down', ''),
     ('45/07', '45/07,34,11', 'down', ''),
@@ -86,32 +94,50 @@ def steps():
             for k, (_, flags) in enumerate(pt.STAGES) for night in (False, True)]
 
 
-def expected(rows, flags, night):
+def expected(rows, flags, night, talked=0, sets=None):
     """롬 표 한 맵의 줄(pt.table 꼴)에서 조건 평가 루틴이 고를 메시지(없으면 129). 일행은 셋 다 살아 있고 선두는 아리나다.
-    「마지막으로 고른 줄」이 0 이므로 가장 작은 우선순위의 맞는 줄 가운데 첫 줄이다."""
+    「마지막으로 고른 줄」이 0 이므로 가장 작은 우선순위의 맞는 줄 가운데 첫 줄이다. talked 는 pt.TALKED_TO 의 값, sets 는
+    {번호 묶음 주소: [차례 + 1]}(TALKED 조건)."""
+    return expected_row(rows, flags, night, talked, sets)[0]
+
+
+def expected_row(rows, flags, night, talked=0, sets=None):
+    """(메시지, 고른 줄 또는 None)."""
     values = {a: v for a, (v, _) in stage_bytes(flags).items()}
     party, lead = {pt.ALENA, pt.KIRYL, pt.BREY}, pt.ALENA
 
     def holds(kind, a, b):
         byte = values.get(0x2190 + a, 0)
         return {pt.ON: lambda: byte & b != 0, pt.OFF: lambda: byte & b == 0, pt.EQUAL: lambda: byte == b,
-                pt.LEAD: lambda: a == lead, pt.WITH: lambda: a in party, pt.WITHOUT: lambda: a not in party}[kind]()
-    for prio, speaker, when, msg, conds in rows:
+                pt.LEAD: lambda: a == lead, pt.WITH: lambda: a in party, pt.WITHOUT: lambda: a not in party,
+                pt.TALKED: lambda: talked != 0 and talked in (sets or {}).get(a | b << 8, ())}[kind]()
+    for row in rows:
+        prio, speaker, when, msg, conds = row
         if speaker in party and when in (0, 2 if night else 1) and all(holds(*c) for c in conds):
-            return msg
-    return pt.NOBODY
+            return msg, row
+    return pt.NOBODY, None
 
 
-def step_env(flags, night):
+def step_env(flags, night, reset_talked=True):
     writes = [f'{a:04X}={v:02X}/{k:02X}' for a, (v, k) in sorted(stage_bytes(flags).items())]
     t = NIGHT if night else DAY
     writes += [f'075E={t & 0xFF:02X}', f'075F={t >> 8:02X}', f'{0x2190 + pt.LAST[0]:04X}=00']
+    if reset_talked:
+        writes.append(f'{0x2190 + pt.TALKED_TO[0]:04X}=00')
     return ','.join(writes)
 
 
 def table_of(data):
     ctx = next(c for c in ch2.contexts() if c.module is pt)
     return pt.table(data, ctx.at['maps'])
+
+
+def talk_sets(data):
+    """(번호 표 [대화 번호], {번호 묶음 주소: [차례 + 1]}): 롬의 동료 대화 표에서."""
+    at = next(c for c in ch2.contexts() if c.module is pt).at
+    sets = {c[1] | c[2] << 8: pt.talk_set(data, at['maps'], c[1] | c[2] << 8)
+            for rows in pt.table(data, at['maps']).values() for row in rows for c in row[4] if c[0] == pt.TALKED}
+    return pt.talk_ids(data, at), sets
 
 
 def run_spot(mesence, rom, data, base, out, spot, seed, shots=False):
@@ -157,6 +183,136 @@ def run_spot(mesence, rom, data, base, out, spot, seed, shots=False):
     return results
 
 
+AWAY = {'up': (0, -1), 'down': (0, 1), 'left': (-1, 0), 'right': (1, 0)}
+PERSON_TALK = ','.join(['a:8', 'wait:60', 'a:8', 'wait:200'] + ['b:8', 'wait:70'] * 8)
+
+
+def token_ids(data):
+    """{「NDS 맵:인물 번호」: {차례 + 1}}: 롬의 번호 묶음을 줄 표의 talked 묶음과 짝지어(묶음은 talked 묶음의 정렬 차례로
+    놓임) 사람 하나짜리 묶음에서 읽는다. 짝이 맞지 않으면(빈 묶음이 빠짐) 사람이 든 모든 묶음의 합."""
+    _ids, sets = talk_sets(data)
+    groups = sorted({ln.talked for ln in pt.LINES if ln.talked})
+    addrs = sorted(sets)
+    out = {}
+    if len(addrs) == len(groups):
+        for g, a in zip(groups, addrs):
+            if len(g) == 1:
+                out.setdefault(g[0], set()).update(sets[a])
+        for g, a in zip(groups, addrs):
+            for t in g:
+                if t not in out:
+                    out[t] = set(sets[a])
+    return out
+
+
+def people_cases(dq5, dq4):
+    """([사례], [(토큰, 행, 빠진 까닭)]). 사례: {'token', 'map', 'cell', 'night', 'to', 'face', 'away'}."""
+    import dq4block
+    import dq4npccheck as nc
+    import dq4npcport
+    from dq4groupbuild import fc_map
+    from kr_patch.fc import ines
+    prg = ines.prg(Path(dq4).read_bytes())
+    _lists, _messages, report = dq4npcport.port(str(dq5), str(dq4))
+    cases, skipped = [], []
+    used = {k for ln in pt.LINES for k in ln.talked}
+    for (mp, who), rows in sorted(pt.PEOPLE.items()):
+        token = f'{mp}:{who}'
+        if token not in used:
+            continue                    # 줄에 쓰이지 않은 인물은 번호 표에 없다
+        for r in rows:
+            if r['status'] != pt.SURE:
+                continue
+            m, night = r['map'], r['time'] == 'night'
+            g, n = (int(v, 16) for v in m.split('/'))
+            source = dq4block.Map(prg, *fc_map(prg, g, n))
+            occupied = {(p['x'], p['y']) for p in report[m] if p['night'] == night}
+            fx, fy = nc.talk_cell({'dq5': {'x': r['cell'][0], 'y': r['cell'][1]}})
+            side = nc.talk_side(source, fx, fy, occupied)
+            if side is None:
+                skipped.append((token, r, '말을 걸 빈 칸이 없음'))
+                continue
+            sx, sy, face = side
+            # 돌아설 쪽: 앞 세 칸에 인물이 없는 쪽. 막힌 쪽이면 제자리에서 돌기만 한다
+            ways = [k for k, (dx, dy) in AWAY.items() if k != face
+                    and not any((sx + dx * i, sy + dy * i) in occupied for i in (1, 2, 3))]
+            if not ways:
+                skipped.append((token, r, '돌아설 쪽에 인물이 있음'))
+                continue
+            away = min(ways, key=lambda k: nc.walkable(source, sx + AWAY[k][0], sy + AWAY[k][1]))
+            cases.append({'token': token, 'map': m, 'cell': r['cell'], 'night': night,
+                          'to': nc.warp_to(m, sx, sy, 1), 'face': face, 'away': away})
+    return cases, skipped
+
+
+def run_person(mesence, rom, data, base, out, case, seed):
+    """말을 건 뒤 「はなす」 사례 하나. 결과 dict."""
+    mp, night = case['map'], case['night']
+    t = NIGHT if night else DAY
+    clock = f'7E075E={t & 0xFF:02X};7E075F={t >> 8:02X}'
+    name = f"{case['token']} {mp} {case['cell'][0]},{case['cell'][1]} {'night' if night else 'day'}"
+    state, extra = base, cw.join_set(data)
+    if mp == ch2.THRONE:
+        # 2장 출발 상태가 왕좌의 방이라 같은 맵 순간이동은 도착을 알아채지 못한다. 한 번 다른 맵을 거친다(run_spot 과 같음)
+        hop = cw.HOPS[ch2.THRONE]
+        r = wc.segment(mesence, rom, state, out / 'hop', ('hop', 'warp', hop, {'map': hop[:5], 'poke': HOLD}),
+                       wc.NO_ENCOUNTERS, extra, '', seed, flags=cw.FLAGS)
+        if r['status'] != 'passed':
+            return {'name': name, 'status': 'failed', 'problems': [f"hop: {r.get('problems') or r['status']}"]}
+        state, extra = out / 'hop' / 'end.mss', ''
+    r = wc.segment(mesence, rom, state, out / 'warp', ('warp', 'warp', case['to'], {'map': mp, 'poke': HOLD + ';' + clock}),
+                   wc.NO_ENCOUNTERS, extra, '', seed, flags=cw.FLAGS)
+    if r['status'] != 'passed':
+        return {'name': name, 'status': 'failed', 'problems': [f"warp: {r.get('problems') or r['status']}"]}
+    wram = (out / 'warp' / 'final.wram').read_bytes()
+    if not any((wram[0x3020 + s] & 0x7F, wram[0x3080 + s] & 0x7F) == tuple(case['cell']) and wram[0x3220 + s]
+               for s in range(0x08, 0x20)):
+        # 짝 표는 FC 시작 상태의 인물이다. 사건 모듈이 2장 시작 목록에서 뺀 인물(프레놀 3D/04 (40,27) 등)은 없다
+        return {'name': name, 'status': 'passed', 'absent': True, 'problems': []}
+    rows = table_of(data).get(pt._key(mp), [])
+    ids, sets = talk_sets(data)
+    mine = token_ids(data).get(case['token'], set())
+    stages = [(k, flags) for k, (_, flags) in enumerate(pt.STAGES)
+              if any(expected_row(rows, flags, night, i, sets)[1] is not None and
+                     any(c[0] == pt.TALKED for c in expected_row(rows, flags, night, i, sets)[1][4]) for i in mine)]
+    reset = f'{0x2190 + pt.TALKED_TO[0]:04X}=00,{0x2190 + pt.LAST[0]:04X}=00'
+    plan = [f'person|{reset}|{PERSON_TALK}', f"turn||{case['away']}:8,wait:40"]
+    plan += [f'{k:02d}|{step_env(flags, night, reset_talked=False)}' for k, flags in stages]
+    env = {'STATE': str(out / 'warp' / 'end.mss'), 'PRE': f"{case['face']}:8,wait:30", 'TALK': _talk_input(),
+           'ROMPATCH': wc.NO_ENCOUNTERS, 'POKE': HOLD + ';' + clock, 'STEPS': ';'.join(plan)}
+    dest = out / 'talk'
+    why = wc.run(mesence, rom, LUA, dest, env, 900)
+    log = dest / 'talk.txt'
+    got, peek = {}, {}
+    if log.exists():
+        for line in log.read_text(encoding='utf-8').splitlines():
+            if line.startswith('peek '):
+                _, step, *pairs = line.split()
+                peek[step] = {k: int(v, 16) for k, v in (p.split('=') for p in pairs)}
+                continue
+            step, _, shown = line.partition(' ')
+            got[step] = [v for v in shown.split(',') if v]
+    problems = [str(why)] if why and not log.exists() else []
+    seen = peek.get('person', {})
+    slot_cell = (seen.get('3020', 0) & 0x7F, seen.get('3080', 0) & 0x7F)
+    talk = seen.get('36E0', 0) | seen.get('3700', 0) << 8
+    want_id = ids.index(talk) + 1 if talk in ids else 0
+    if slot_cell != tuple(case['cell']):
+        problems.append(f'말 상대 칸 {slot_cell}, 짝 표 {tuple(case["cell"])}')
+    if not want_id or seen.get('21FD') != want_id:
+        problems.append(f'대화 번호 {talk:03X} → 21FD {seen.get("21FD")}, 기대 {want_id}')
+    elif want_id not in mine:
+        problems.append(f'21FD {want_id} 가 {case["token"]} 의 번호 묶음 {sorted(mine)} 에 없음')
+    picked = 0
+    for k, flags in stages:
+        msg, row = expected_row(rows, flags, night, seen.get('21FD', 0), sets)
+        if got.get(f'{k:02d}') != [f'{msg:03X}']:
+            problems.append(f'{k:02d}: 메시지 {got.get(f"{k:02d}")}, 기대 [{msg:03X}]')
+        picked += row is not None and any(c[0] == pt.TALKED for c in row[4])
+    return {'name': name, 'status': 'failed' if problems else 'passed', 'problems': problems,
+            'talked_lines': picked, 'stages': len(stages)}
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--rom', required=True, type=Path, help='dq4build.py --chapter2 의 롬')
@@ -165,6 +321,9 @@ def main():
     ap.add_argument('--base', type=Path, help='같은 롬으로 만든 2장 출발 상태. 주면 머리를 건너뜀')
     ap.add_argument('--only', help='이 맵만(쉼표로 여럿, 필드는 field)')
     ap.add_argument('--shots', action='store_true', help='단계마다 대사 첫 쪽 화면을 talk/<단계>.png 로 남김')
+    ap.add_argument('--no-people', action='store_true', help='「말 건 뒤」 사례를 건너뜀')
+    ap.add_argument('--dq5', type=Path, default=HERE.parents[2] / 'rom' / 'dq5.sfc')
+    ap.add_argument('--dq4', type=Path, default=HERE.parents[2] / 'rom' / 'dq4.nes')
     wc.add_seed_args(ap)
     args = ap.parse_args()
     seeds = wc.seeds_of(args)
@@ -184,6 +343,9 @@ def main():
         if unknown:
             raise SystemExit(f'없는 맵: {", ".join(sorted(unknown))}')
         spots = [s for s in SPOTS if s[0] in wanted]
+    cases, skipped = ([], []) if args.no_people else people_cases(args.dq5, args.dq4)
+    if args.only:
+        cases = [c for c in cases if c['map'] in wanted]
     if args.base:
         base, head = args.base.resolve(), []
     else:
@@ -196,15 +358,27 @@ def main():
         jobs = {(s, p[0]): pool.submit(run_spot, mesence, rom, data, base,
                                        wc.seed_dir(out, s, seeds) / p[0].replace('/', ''), p, s, args.shots)
                 for s in seeds for p in spots}
+        people = {(s, k): pool.submit(run_person, mesence, rom, data, base,
+                                      wc.seed_dir(out, s, seeds) / 'people' / f'{k:03d}', c, s)
+                  for s in seeds for k, c in enumerate(cases)}
         results = {f'{s}:{n}': j.result() for (s, n), j in jobs.items()}
+        person_results = {f'{s}:{k:03d}': j.result() for (s, k), j in people.items()}
     failed = {k: [r for r in rs if r['status'] != 'passed'] for k, rs in results.items()
               if any(r['status'] != 'passed' for r in rs) or rs[-1].get('name') != 'talk'}
+    failed.update({f'people {k}': [r] for k, r in person_results.items() if r['status'] != 'passed'})
     shown = sum(1 for rs in results.values() if rs[-1].get('name') == 'talk'
                 for ids in rs[-1]['shown'].values() if ids and ids != [f'{pt.NOBODY:03X}'])
     report = {'status': 'failed' if failed else 'passed', 'seconds': round(time.monotonic() - began),
-              'spots': len(results), 'talks': len(results) * len(steps()), 'lines_shown': shown, 'cases': results}
+              'spots': len(results), 'talks': len(results) * len(steps()), 'lines_shown': shown,
+              'people': len(person_results),
+              'people_talked_lines': sum(1 for r in person_results.values() if r.get('talked_lines')),
+              'people_absent': sorted(r['name'] for r in person_results.values() if r.get('absent')),
+              'people_skipped': [f'{t} {r["map"]} {r["cell"]} {r["time"]}: {why}' for t, r, why in skipped],
+              'cases': results, 'people_cases': person_results}
     (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
-    print(json.dumps({k: report[k] for k in ('status', 'seconds', 'spots', 'talks', 'lines_shown')} | {'failed': failed},
+    print(json.dumps({k: report[k] for k in ('status', 'seconds', 'spots', 'talks', 'lines_shown', 'people',
+                                             'people_talked_lines', 'people_absent', 'people_skipped')}
+                     | {'failed': failed},
                      ensure_ascii=False))
     return 1 if failed else 0
 

@@ -73,8 +73,15 @@ class NativeTest(unittest.TestCase):
         import dq4ch2partytalk as talk
         t = ev.ch1.lorom(talk.HOOK_AT)
         data[t:t + len(talk.HOOK_ORIG)] = talk.HOOK_ORIG
+        t = ev.ch1.lorom(talk.TALK_HOOK_AT)
+        data[t:t + len(talk.TALK_HOOK_ORIG)] = talk.TALK_HOOK_ORIG
         original = bytearray(0x400000)
-        out = ev.apply(bytes(data), bytes(original), 0xE00)
+        # 동료 대화는 빌드의 인물 목록(npc_lists)이 모은 대화 번호가 있어야 롬에 쓴다
+        saved, talk._TALKS = talk._TALKS, {}
+        try:
+            out = ev.apply(bytes(data), bytes(original), 0xE00)
+        finally:
+            talk._TALKS = saved
         _, at = ev.native()
         a = at['hero_picture']
         self.assertEqual(out[o:o + 5], bytes((0x22, a & 0xFF, a >> 8 & 0xFF, a >> 16, 0x60)))

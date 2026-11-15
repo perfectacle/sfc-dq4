@@ -42,24 +42,102 @@ class PartyTalkTest(unittest.TestCase):
         tempe = rows[(0x3D, 0x03)]
         self.assertEqual([r[1] for r in tempe], sorted(r[1] for r in tempe))
 
+    def _talks(self):
+        """줄 표의 talked 묶음마다 겹치지 않는 가짜 대화 번호(빌드의 npc_lists 대신)."""
+        tokens = sorted({k for ln in pt.LINES for k in ln.talked})
+        return {k: frozenset({0x900 + i}) for i, k in enumerate(tokens)}
+
     def test_native_table_reads_back(self):
         ctx = _ctx()
-        blob, at = pt.native(ctx)
+        saved, pt._TALKS = pt._TALKS, self._talks()
+        try:
+            blob, at = pt.native(ctx)
+        finally:
+            pt._TALKS = saved
         self.assertLessEqual(ctx.code_at + len(blob), SLOTS['P'].code[1])
         self.assertEqual(at, ctx.at)
         data = bytearray(0x400000)
         o = pt.ch1.lorom(ctx.code_at)
         data[o:o + len(blob)] = blob
         table = pt.table(bytes(data), at['maps'])
-        rows = pt.lists(ctx.msg)
+        ids, groups = pt.talk_tables(self._talks())
+        self.assertEqual(pt.talk_ids(bytes(data), at), ids)
+        rows = pt.lists(ctx.msg, sets={g: 0 for g in groups})
+        for recs in table.values():
+            for row in recs:
+                for kind, lo, hi in row[4]:
+                    if kind == pt.TALKED:
+                        self.assertIn(pt.talk_set(bytes(data), at['maps'], lo | hi << 8), list(groups.values()))
         self.assertEqual(set(table), set(rows))
         for key, recs in rows.items():
             self.assertEqual([r[4] | r[5] << 8 for r in recs], [row[3] for row in table[key]])
         self.assertEqual(set(ctx.msg.values()), {row[3] for recs in table.values() for row in recs})
 
+    def test_without_npc_lists_the_talked_lines_are_left_out(self):
+        # 주소만 셀 때(롬 없이)는 대화 번호를 모르므로 talked 줄을 쓰지 않는다. 롬에 쓸 때 모르면 멈춘다
+        # 같은 프로세스의 다른 테스트가 빌드 경로(npc_lists)로 _TALKS 를 채웠을 수 있어 비우고 본다
+        ctx = _ctx()
+        saved, pt._TALKS = pt._TALKS, None
+        try:
+            blob, at = pt.native(ctx)
+            data = bytearray(0x400000)
+            o = pt.ch1.lorom(ctx.code_at)
+            data[o:o + len(blob)] = blob
+            n = sum(len(r) for r in pt.table(bytes(data), at['maps']).values())
+            self.assertEqual(n, sum(1 for ln in pt.LINES if not ln.talked))
+            ctx.original = b''
+            with self.assertRaises(SystemExit):
+                pt.native(ctx)
+        finally:
+            pt._TALKS, ctx.original = saved, None
+
+    def test_record_with_talked_condition(self):
+        line = pt.Line('3D/04', pt.ALENA, 'x', priority=2, talked=('mdout:0336',))
+        self.assertEqual(pt.record(line, 0x0EF7, 0xA123),
+                         bytes((10, 2, pt.ALENA, 0, 0xF7, 0x0E, 1, pt.TALKED, 0x23, 0xA1)))
+
+    def test_talk_numbers_by_cell_and_time(self):
+        row = {'status': pt.SURE, 'map': '3D/04', 'cell': (54, 41), 'time': 'day'}
+        saved, pt.PEOPLE = pt.PEOPLE, {('mdout', '0336'): [row]}
+        try:
+            e = lambda x, y, t, time='day': {'time': time, 'fields': {'x': x, 'y': y, 'talk': t}}  # noqa: E731
+            base = {'3D/04': {'entries': [e(54, 41, 0x9DD), e(54, 41, 0x9F0, 'night'), e(40, 27, 0x9DB),
+                                          e(54, 41, 0x006)]}}
+            later = {'ch2_frenol_x': {'entries': [e(54, 41, 0xA01)]}, 'ch2_other': {'entries': [e(54, 41, 0xA02)]}}
+            over = [{'map': '3D/04', 'list': 'new:ch2_frenol_x'}, {'map': '3D/05', 'list': 'new:ch2_other'}]
+            got = pt.talk_numbers(base, later, over)
+        finally:
+            pt.PEOPLE = saved
+        # 밤 인물·다른 칸·다른 맵 목록·가게 번호(SCRIPT_TALK 아래)는 들지 않는다
+        self.assertEqual(got, {'mdout:0336': frozenset({0x9DD, 0xA01})})
+
+    def test_talk_tables_skip_empty_sets_and_cap(self):
+        tokens = sorted({k for ln in pt.LINES for k in ln.talked})
+        ids, groups = pt.talk_tables({tokens[0]: frozenset({0x950, 0x951})})
+        self.assertEqual(ids, [0x950, 0x951])
+        self.assertTrue(groups)
+        self.assertTrue(all(v == [1, 2] for v in groups.values()))
+        with self.assertRaises(SystemExit):
+            pt.talk_tables({tokens[0]: frozenset(range(0x900, 0x900 + pt.MAX_IDS + 1))})
+
+    def test_talked_hook_keeps_the_two_instructions(self):
+        ctx = _ctx()
+        blob, at = pt.native(ctx)
+        start = at['talked'] - ctx.code_at
+        self.assertEqual(blob[start], 0x08)            # PHP
+        self.assertEqual(blob[start + pt.IDS_OPERAND], 0xBF)
+        end = blob.index(bytes((0x28,)) + pt.TALK_HOOK_ORIG + bytes((0x6B,)), start)
+        self.assertLess(end - start, 80)
+        # 7E:21FD 에 쓴다(예약된 P 바이트)
+        self.assertIn(bytes((0x8F, 0x90 + pt.TALKED_TO[0], 0x21, 0x7E)), blob[start:end])
+        self.assertIn(pt.TALKED_TO[0], SLOTS['P'].byte_flags)
+
     def test_hook_goes_through_a_bank_05_stub(self):
         ctx = _ctx()
-        [(stub_at, stub_orig, stub), (addr, orig, new)] = pt.hooks(ctx)
+        [(stub_at, stub_orig, stub), (addr, orig, new), (talk_at, talk_orig, talk_new)] = pt.hooks(ctx)
+        self.assertEqual((talk_at, talk_orig), (pt.TALK_HOOK_AT, pt.TALK_HOOK_ORIG))
+        talked = ctx.at['talked']
+        self.assertEqual(talk_new, bytes((0x22, talked & 0xFF, talked >> 8 & 0xFF, talked >> 16, 0xEA, 0xEA, 0xEA)))
         self.assertEqual((addr, orig), (0x05D5B9, bytes.fromhex('009500' '009829')))
         self.assertEqual(new, bytes((0x20, 0xE8, 0xFE, 0xEA, 0xEA, 0xEA)))
         # 05:D5BF(기다림)는 05:D817 도 JSR 로 부르므로 훅이 닿지 않아야 한다
@@ -70,7 +148,7 @@ class PartyTalkTest(unittest.TestCase):
         rom = ROOT / 'rom' / 'dq5.sfc'
         if rom.exists():
             data = rom.read_bytes()
-            for at, want in ((addr, orig), (stub_at, stub_orig)):
+            for at, want in ((addr, orig), (stub_at, stub_orig), (talk_at, talk_orig)):
                 o = pt.ch1.lorom(at)
                 self.assertEqual(data[o:o + len(want)], want)
 
@@ -191,11 +269,62 @@ class NdsRangeTest(unittest.TestCase):
     def test_people_and_events_are_dropped(self):
         self.assertIn('마을 사람', nds.convert(self._rec(place=(3, 0xFF)), self.MSGS)[1])
         self.assertIn('사건', nds.convert(self._rec(v0=2064), self.MSGS)[1])
+
+    PEOPLE = {('mcout1', '0281'): [{'status': nds.SURE}], ('mcout1', '0282'): [{'status': nds.UNSURE}]}
+    OBJECTS = {('mcout1', 2): {'0281'}, ('mcout1', 3): {'0282'}}
+
+    def test_talked_person_is_object_plus_one_and_must_be_paired(self):
+        # 직전 대화 값 v 는 오브젝트 v + 1. 짝이 확인된 인물만 조건이 된다
+        line, why = nds.convert(self._rec(place=(1, 2)), self.MSGS, self.PEOPLE, self.OBJECTS)
+        self.assertIsNone(why)
+        self.assertEqual(line['talked'], ['mcout1:0281'])
+        line, why = nds.convert(self._rec(place=(2, 0xFF)), self.MSGS, self.PEOPLE, self.OBJECTS)
+        self.assertIsNone(line)
+        self.assertIn('짝 미확인', why)
+
+    def test_recent_event_is_its_speakers_talk(self):
+        heard = {2064: {('mcout1', 2)}}
+        line, why = nds.convert(self._rec(v0=2064), self.MSGS, self.PEOPLE, self.OBJECTS, heard)
+        self.assertEqual(line['talked'], ['mcout1:0281'])
+        self.assertIn('사건', nds.convert(self._rec(v0=2065), self.MSGS, self.PEOPLE, self.OBJECTS, heard)[1])
+
+    def test_unknown_story_flag_is_dropped(self):
+        line, why = nds.convert(self._rec(story=(95, 101), codes=(1, 0, 0), vals=(96, 0, 0)), self.MSGS)
+        self.assertIsNone(line)
+        self.assertIn('짝이 없는', why)
         self.assertIn('임시', nds.convert(self._rec(codes=(3, 0, 0), vals=(5, 0, 0)), self.MSGS)[1])
 
     def test_co_speaker_must_walk(self):
         line, _ = nds.convert(self._rec(count=14202), self.MSGS)
         self.assertEqual((line['speakers'], line['with']), (['KIRYL', 'BREY'], ['BREY']))
+
+
+class PeopleTableTest(unittest.TestCase):
+    """짝 표(dq4ch2partytalk-people.tsv)와 줄 표가 서로 맞는지."""
+
+    def test_every_talked_token_is_a_sure_pair_in_its_line_map(self):
+        for ln in pt.LINES:
+            for token in ln.talked:
+                mp, who = token.split(':')
+                rows = [r for r in pt.PEOPLE[mp, who] if r['status'] == pt.SURE]
+                self.assertTrue(rows, token)
+                self.assertTrue(all(r['map'] == ln.map for r in rows), (token, ln.nds))
+
+    def test_sure_rows_have_a_cell_and_time(self):
+        for (mp, who), rows in pt.PEOPLE.items():
+            for r in rows:
+                if r['status'] == pt.SURE:
+                    self.assertEqual(len(r['cell']), 2, (mp, who))
+                    self.assertIn(r['time'], ('day', 'night'), (mp, who))
+                    self.assertIn(r['map'], {s[0] for s in check.SPOTS}, (mp, who))
+
+    def test_sure_word_is_shared(self):
+        self.assertEqual(pt.SURE, nds.SURE)
+
+    def test_kana_similarity(self):
+        self.assertEqual(nds.kana('@a0190  老人@b＊「もし　姫さまが　旅に出た@c2@'), 'もしさまがにた')
+        self.assertEqual(nds.similarity('ここはさんとはいむ', 'ここはさんとはいむのおしろ'), 1.0)
+        self.assertEqual(nds.similarity('すやすや', 'わんわん'), 0.0)
 
 
 if __name__ == '__main__':

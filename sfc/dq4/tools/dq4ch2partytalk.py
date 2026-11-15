@@ -6,6 +6,10 @@ DQ5 의 「はなす」는 앞에 말 상대가 없으면 05:D5B9 에서 대화 
 
 대사 줄은 NDS 2장 동료 대화 표에서 옮긴 dq4ch2partytalk.tsv(dq4ch2partytalknds.py 가 만듦)와 한글 대사
 dq4ch2partytalk-text.tsv 를 읽어 LINES·MESSAGES 로 만든다.
+
+「방금 말을 건 마을 사람」 조건: 대화 시작(06:AF6A)에 건 훅이 말을 건 인물의 대화 번호를 이 모듈의 번호 표에서 찾아
+그 차례 + 1(없으면 0)을 7E:21FD 에 적는다. 줄의 조건은 그 값이 들어 있어야 하는 번호 묶음이다. 어느 인물이 어느 대화
+번호인지는 빌드가 인물 목록을 만들 때(npc_lists) 짝 표 dq4ch2partytalk-people.tsv 의 맵·칸·낮밤으로 모은다.
 """
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,7 +38,16 @@ STUB_LEN = 8
 NOBODY = 0x129
 # 마지막으로 고른 줄(지금 맵 목록의 차례 + 1). 같은 우선순위의 맞는 줄이 여럿이면 다음 「はなす」에 그다음 줄을 고른다
 LAST = (0x6E, 0xFF)            # 7E:21FE(바이트 값)
+# 마지막으로 말을 건 인물: 번호 표(native 의 ids)의 차례 + 1, 표에 없는 인물이면 0. 맵을 옮겨도 그대로다(같은 대화
+# 번호는 같은 대사라 다른 맵에서 맞아도 그 대사를 들은 뒤다)
+TALKED_TO = (0x6D, 0xFF)       # 7E:21FD(바이트 값)
 FLAGS = ()
+# 대화 시작 06:AF62 의 LDX $0F1E(말 상대 슬롯) / LDA $7E36E0,X(대화 번호 아래). 06:AF20(스크립트가 거는 대화)은
+# 이 길을 지나지 않는다
+TALK_HOOK_AT = 0x06AF6A
+TALK_HOOK_ORIG = bytes.fromhex('ae1e0f' 'bfe0367e')
+MAX_IDS = 0xFE
+IDS_OPERAND = 28                # talked 루틴 첫 바이트에서 번호 표를 읽는 LDA long,X 까지
 
 MESSAGE_AT = 0x248157          # 보행 메시지(A = 번호). BRK 97+n 처리기가 부르는 것과 같음
 NIGHT_TEST = 0x218000          # 캐리 = 밤(7E:075E >= F0)
@@ -45,7 +58,7 @@ FIELD = 'field'                # 필드(7E:00BE bit7 꺼짐). 필드에서도 7E
 FIELD_KEY = (0xFE, 0xFE)
 TIMES = {'any': 0, 'day': 1, 'night': 2}
 # 조건 종류(3바이트: 종류, 값 1, 값 2)
-ON, OFF, EQUAL, LEAD, WITH, WITHOUT = 1, 2, 3, 4, 5, 6
+ON, OFF, EQUAL, LEAD, WITH, WITHOUT, TALKED = 1, 2, 3, 4, 5, 6, 7
 
 
 @dataclass(frozen=True)
@@ -63,12 +76,15 @@ class Line:
     lead: int = None           # 선두 인물
     with_: tuple = ()          # 걷는 줄에 있어야 하는 인물
     without: tuple = ()        # 걷는 줄에 없어야 하는 인물
+    talked: tuple = ()         # 방금 말을 건 인물(짝 표의 「NDS 맵:인물 번호」 가운데 하나)
     nds: int = None            # 옮겨 온 NDS 2장 동료 대화 레코드 번호
 
-    def conditions(self):
+    def conditions(self, talk_set=0):
+        """talk_set: talked 의 번호 묶음 주소(뱅크 안 16비트)."""
         return ([(ON, i, m) for i, m in self.on] + [(OFF, i, m) for i, m in self.off] +
                 [(EQUAL, i, v) for i, v in self.equal] + ([(LEAD, self.lead, 0)] if self.lead is not None else []) +
-                [(WITH, p, 0) for p in self.with_] + [(WITHOUT, p, 0) for p in self.without])
+                [(WITH, p, 0) for p in self.with_] + [(WITHOUT, p, 0) for p in self.without] +
+                ([(TALKED, talk_set & 0xFF, talk_set >> 8)] if self.talked else []))
 
 
 def _pair(*parts):
@@ -130,13 +146,78 @@ def _load():
             messages[name] = _message(ids, texts)
         lines.append(Line(r['map'], SPEAKERS[r['speaker']][0], name, priority=int(r['priority']), time=r['time'],
                           on=tuple(CONDITIONS[f] for f in _names(r['on'])), off=tuple(CONDITIONS[f] for f in _names(r['off'])),
-                          with_=tuple(SPEAKERS[p][0] for p in _names(r['with'])), nds=int(r['nds'])))
+                          with_=tuple(SPEAKERS[p][0] for p in _names(r['with'])),
+                          talked=_names(r.get('talked', '')), nds=int(r['nds'])))
     return messages, tuple(lines)
 
 
 MESSAGES, LINES = _load()
+PEOPLE_TSV = HERE / 'dq4ch2partytalk-people.tsv'  # dq4ch2partytalknds.py people 가 만든 NDS 인물 ↔ SFC 인물 짝
+SURE = '확인'
+
+
+def _people():
+    """{(NDS 맵, 인물 번호): [행]}(dq4ch2partytalknds.read_people 과 같은 꼴, cell 은 (x, y))."""
+    out = {}
+    for row in _rows(PEOPLE_TSV):
+        row['cell'] = tuple(int(v) for v in row['cell'].split(',')) if row['cell'] else ()
+        out.setdefault((row['nds_map'], row['person']), []).append(row)
+    return out
+
+
+PEOPLE = _people()
 
 DATA_ENTRIES = ('maps',)
+CODE_ENTRIES = ()
+_TALKS = None                  # {「NDS 맵:인물 번호」: 대화 번호 frozenset}. npc_lists 가 채운다
+
+
+def _cell(e):
+    return e["fields"]["x"], e["fields"]["y"]
+
+
+def talk_numbers(lists, made, overrides):
+    """{「NDS 맵:인물 번호」: frozenset(대화 번호)}: 짝 표의 확인된 짝(맵, 칸, 낮밤)에 선 인물의 대화 번호를 그 맵의
+    기본 목록(lists)과 그 맵을 덮는 대체 목록(overrides 의 new:이름 → made)에서 모두 모은다. 사건이 칸을 옮긴 인물은
+    모이지 않는다(조건이 덜 맞을 뿐 틀리게 맞지는 않음). 가게·교회 같은 DQ5 기본 대화 번호(SCRIPT_TALK 아래)는 어느 맵의
+    가게 주인이나 같은 번호라 뺀다."""
+    from dq4npcport import SCRIPT_TALK
+    by_map = {}
+    for o in overrides:
+        name = o["list"][4:] if o["list"].startswith("new:") else None
+        if name in made:
+            by_map.setdefault(o["map"], []).append(made[name])
+    out = {}
+    for (mp, who), rows in PEOPLE.items():
+        talks = set()
+        for r in rows:
+            if r['status'] != SURE:
+                continue
+            for lst in ([lists[r['map']]] if r['map'] in lists else []) + by_map.get(r['map'], []):
+                talks |= {e["fields"]["talk"] for e in lst["entries"]
+                          if _cell(e) == r['cell'] and e["time"] == r['time'] and e["fields"]["talk"] >= SCRIPT_TALK}
+        out[f'{mp}:{who}'] = frozenset(talks)
+    return out
+
+
+def npc_lists(lists, ctx):
+    """인물 목록은 바꾸지 않는다. 짝 표의 인물마다 대화 번호를 모아 native 가 쓰게 둔다(같은 빌드 안에서 먼저 불림)."""
+    global _TALKS
+    _TALKS = talk_numbers(lists, getattr(ctx, 'made_all', ctx.made), getattr(ctx, 'overrides', ()))
+    return [], []
+
+
+def talk_tables(talks=None):
+    """(번호 표 [대화 번호], {talked 묶음: [차례 + 1]}). 대화 번호가 하나도 모이지 않은 묶음은 넣지 않는다(그 줄은
+    롬에 쓰지 않음). talks 가 None 이면 묶음이 없다(주소만 셀 때)."""
+    talks = {} if talks is None else talks
+    groups = sorted({ln.talked for ln in LINES if ln.talked})
+    ids = sorted({t for g in groups for k in g for t in talks.get(k, ())})
+    if len(ids) > MAX_IDS:
+        raise SystemExit(f'동료 대화: 말 건 인물 대화 번호가 {len(ids)}개(최대 {MAX_IDS})')
+    index = {t: k + 1 for k, t in enumerate(ids)}
+    sets = {g: sorted({index[t] for k in g for t in talks.get(k, ())}) for g in groups}
+    return ids, {g: v for g, v in sets.items() if v}
 
 
 def _key(mp):
@@ -146,9 +227,9 @@ def _key(mp):
     return int(g, 16), int(m, 16)
 
 
-def record(line, msg):
+def record(line, msg, talk_set=0):
     """줄 하나의 바이트: 길이, 우선순위, 말하는 인물, 시간, 메시지(2), 조건 수, 조건(3바이트씩)."""
-    conds = line.conditions()
+    conds = line.conditions(talk_set)
     body = bytes((line.priority, line.speaker, TIMES[line.time], msg & 0xFF, msg >> 8 & 0xFF, len(conds)))
     body += b''.join(bytes(c) for c in conds)
     if len(body) + 1 > 0xFF:
@@ -156,14 +237,18 @@ def record(line, msg):
     return bytes((len(body) + 1,)) + body
 
 
-def lists(msg, lines=None):
-    """{(맵 바이트 둘): [줄 바이트]}. 줄은 우선순위 차례(같으면 LINES 차례). msg 는 {이름: 번호}(None 이면 0)."""
+def lists(msg, lines=None, sets=None):
+    """{(맵 바이트 둘): [줄 바이트]}. 줄은 우선순위 차례(같으면 LINES 차례). msg 는 {이름: 번호}(None 이면 0),
+    sets 는 {talked 묶음: 번호 묶음 주소}(None 이면 0). sets 를 주면 그 안에 없는 talked 묶음의 줄은 뺀다."""
     lines = LINES if lines is None else lines
     out = {}
     for line in sorted(lines, key=lambda ln: ln.priority):
+        if sets is not None and line.talked and line.talked not in sets:
+            continue
         if line.message not in MESSAGES:
             raise ValueError(f'{line.message}: MESSAGES 에 없는 대사')
-        out.setdefault(_key(line.map), []).append(record(line, msg[line.message] if msg else 0))
+        out.setdefault(_key(line.map), []).append(
+            record(line, msg[line.message] if msg else 0, (sets or {}).get(line.talked, 0)))
     for key, rows in out.items():
         if len(rows) > 0xFE:
             raise ValueError(f'{key}: 한 맵의 줄이 254개를 넘음')
@@ -235,6 +320,7 @@ def _code(origin):
     for kind, name in ((ON, 'c_on'), (OFF, 'c_off'), (EQUAL, 'c_eq'), (LEAD, 'c_lead'), (WITH, 'c_with'),
                        (WITHOUT, 'c_without')):
         a.b(0xC9, kind).rel(0xF0, name)
+    a.b(0xC9, TALKED).rel(0xD0, 'no').word(0x4C, 'c_talked')
     a.label('no').b(0x18, 0x60)
     a.label('yes').b(0x38, 0x60)
     a.label('c_on').word(0x20, 'fbyte')
@@ -250,6 +336,15 @@ def _code(origin):
     lt(0xBF, 1).word(0x20, 'in_line').b(0x60)
     a.label('c_without')
     lt(0xBF, 1).word(0x20, 'in_line').rel(0xB0, 'no').rel(0x80, 'yes')
+    # c_talked: 7E:21FD 가 X 의 조건이 가리키는 번호 묶음(수, 차례 + 1 …)에 있으면 캐리. X·Y 를 지킨다
+    a.label('c_talked').b(0xDA, 0x5A, 0xAF, 0x90 + TALKED_TO[0], 0x21, 0x7E).rel(0xF0, 't_none').b(0x48, 0xC2, 0x20)
+    lt(0xBF, 1).b(0xAA, 0xE2, 0x20)
+    lt(0xBF).b(0xC2, 0x20, 0x29, 0xFF, 0x00, 0xA8, 0xE2, 0x20).rel(0xF0, 't_no')
+    a.label('t_loop').b(0xE8)
+    lt(0xBF).b(0xC3, 0x01).rel(0xF0, 't_yes').b(0x88).rel(0xD0, 't_loop')
+    a.label('t_no').b(0x68)
+    a.label('t_none').b(0x7A, 0xFA, 0x18, 0x60)
+    a.label('t_yes').b(0x68, 0x7A, 0xFA, 0x38, 0x60)
     # fbyte: A = 7E:2190 + (X 의 값 1)
     a.label('fbyte').b(0xDA)
     lt(0xBF, 1).b(0xC2, 0x20, 0x29, 0xFF, 0x00, 0xAA, 0xE2, 0x20, 0xBF, 0x90, 0x21, 0x7E, 0xFA, 0x60)
@@ -264,36 +359,60 @@ def _code(origin):
     # rec: X = 걷는 줄 차례 → X = 그 사람 일행 기록의 거리(번호 × 42), A = 인물 번호
     a.label('rec').b(0xBF, 0x20, 0x20, 0x7E, 0xC2, 0x20, 0x29, 0xFF, 0x00, 0x0A, 0x48, 0x0A, 0x0A, 0x48, 0x0A, 0x0A,
                      0x18, 0x63, 0x01, 0x63, 0x03, 0xAA, 0x68, 0x68, 0xE2, 0x20, 0xBF, 0x40, 0x20, 0x7E, 0x60)
+
+    # talked: 대화 시작(TALK_HOOK_AT)의 JSL. M·X 8비트, DB 06. 말 상대 슬롯의 대화 번호를 번호 표(ids, FFFF 로 끝)에서
+    # 찾아 차례 + 1(없으면 0)을 7E:21FD 에 두고, 덮은 두 명령(LDX $0F1E / LDA $7E36E0,X)을 그대로 하고 돌아간다
+    a.label('talked').b(0x08, 0xC2, 0x30, 0xAF, 0x1E, 0x0F, 0x7E, 0x29, 0xFF, 0x00, 0xAA, 0xE2, 0x20,
+                        0xBF, 0x00, 0x37, 0x7E, 0xEB, 0xBF, 0xE0, 0x36, 0x7E, 0xC2, 0x20, 0x48, 0xA2, 0x00, 0x00)
+    a.label('i_loop').long(0xBF, 'ids').b(0xC9, 0xFF, 0xFF).rel(0xF0, 'i_none')
+    a.b(0xC3, 0x01).rel(0xF0, 'i_found').b(0xE8, 0xE8).rel(0x80, 'i_loop')
+    a.label('i_found').b(0x8A, 0x4A, 0x1A).rel(0x80, 'i_store')
+    a.label('i_none').b(0xA9, 0x00, 0x00)
+    a.label('i_store').b(0xE2, 0x20, 0x8F, 0x90 + TALKED_TO[0], 0x21, 0x7E, 0xC2, 0x20, 0x68, 0x28,
+                         0xAE, 0x1E, 0x0F, 0xBF, 0xE0, 0x36, 0x7E, 0x6B)
     return a
 
 
 def native(ctx):
-    """(바이트, {이름: 주소}). 코드 뒤에 맵 표(맵 바이트 둘, 목록 주소; FF FF 로 끝)와 맵마다의 줄(길이 0 으로 끝)."""
+    """(바이트, {이름: 주소}). 코드 뒤에 맵 표(맵 바이트 둘, 목록 주소; FF FF 로 끝), 맵마다의 줄(길이 0 으로 끝),
+    번호 묶음(수, 차례 + 1 …), 번호 표(대화 번호 2바이트씩, FFFF 로 끝)."""
+    if _TALKS is None and ctx.original is not None:
+        raise SystemExit('동료 대화: 인물 목록(npc_lists)을 만들기 전에 롬에 쓰려 함')
+    ids, groups = talk_tables(_TALKS)
     a = _code(ctx.code_at)
-    code, labels = a.assemble({'maps': 0})
-    rows = lists(ctx.msg)
+    code, labels = a.assemble({'maps': 0, 'ids': 0})
     maps_at = ctx.code_at + len(code)
+    rows = lists(ctx.msg, sets={g: 0 for g in groups})
+    at = maps_at + 4 * len(rows) + 2 + sum(len(b''.join(r)) + 1 for r in rows.values())
+    sets, blob = {}, bytearray()
+    for g in sorted(groups):
+        sets[g] = (at + len(blob)) & 0xFFFF
+        blob += bytes((len(groups[g]), *groups[g]))
+    ids_at = at + len(blob)
+    tail = bytes(blob) + b''.join(t.to_bytes(2, 'little') for t in ids) + b'\xff\xff'
+    rows = lists(ctx.msg, sets=sets)
     at = maps_at + 4 * len(rows) + 2
     head, body = bytearray(), bytearray()
     for key, recs in rows.items():
         head += bytes(key) + (at & 0xFFFF).to_bytes(2, 'little')
-        blob = b''.join(recs) + b'\x00'
-        body += blob
-        at += len(blob)
+        part = b''.join(recs) + b'\x00'
+        body += part
+        at += len(part)
     head += b'\xff\xff'
-    code, labels = a.assemble({'maps': maps_at})
-    labels['maps'] = maps_at
-    out = code + bytes(head) + bytes(body)
+    code, labels = a.assemble({'maps': maps_at, 'ids': ids_at})
+    out = code + bytes(head) + bytes(body) + tail
     if (ctx.code_at & 0xFFFF) + len(out) > 0x10000:
         raise SystemExit('동료 대화 코드가 뱅크를 넘음')
-    return out, {'talk': labels['talk'], 'maps': maps_at}
+    return out, {'talk': labels['talk'], 'talked': labels['talked'], 'maps': maps_at}
 
 
 def hooks(ctx):
     stub = bytes((0x00, 0x95, 0x00, 0x22, *ctx.at['talk'].to_bytes(3, 'little'), 0x60))
     assert len(stub) == STUB_LEN
+    talked = ctx.at['talked']
     return [(STUB_AT, bytes(STUB_LEN), stub),
-            (HOOK_AT, HOOK_ORIG, bytes((0x20, STUB_AT & 0xFF, STUB_AT >> 8 & 0xFF, 0xEA, 0xEA, 0xEA)))]
+            (HOOK_AT, HOOK_ORIG, bytes((0x20, STUB_AT & 0xFF, STUB_AT >> 8 & 0xFF, 0xEA, 0xEA, 0xEA))),
+            (TALK_HOOK_AT, TALK_HOOK_ORIG, bytes((0x22, *talked.to_bytes(3, 'little'), 0xEA, 0xEA, 0xEA)))]
 
 
 def table(data, at):
@@ -311,4 +430,22 @@ def table(data, at):
             p += n
         out[key] = rows
         o += 4
+    return out
+
+
+def talk_set(data, at, addr):
+    """롬의 번호 묶음(TALKED 조건의 값 둘이 가리킴)을 읽는다(검사용): [차례 + 1]."""
+    o = ch1.lorom((at & 0xFF0000) | addr)
+    return list(data[o + 1:o + 1 + data[o]])
+
+
+def talk_ids(data, at):
+    """롬의 번호 표(검사용): [대화 번호]. 대화 시작 훅 루틴이 LDA long,X 로 읽는 주소에서."""
+    o = ch1.lorom(at['talked']) + IDS_OPERAND
+    if data[o] != 0xBF:
+        raise ValueError(f'{at["talked"]:06X}: 번호 표를 읽는 명령이 아님')
+    p, out = ch1.lorom(int.from_bytes(data[o + 1:o + 4], 'little')), []
+    while data[p:p + 2] != b'\xff\xff':
+        out.append(int.from_bytes(data[p:p + 2], 'little'))
+        p += 2
     return out

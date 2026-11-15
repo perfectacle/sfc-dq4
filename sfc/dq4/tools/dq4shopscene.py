@@ -77,6 +77,7 @@ SHOPS.update({
 })
 X, Y = 0x7E3020, 0x7E3080
 FACE = (8, 24)         # 카운터 쪽을 누르는 프레임(돌아서려면 6프레임 넘게, 한 걸음보다 짧게), 걸음이 끝나기를 기다리는 프레임
+FACE_TRIES = 2         # 카운터 쪽을 짧게 누르는 최대 횟수
 BASE_ITEMS = (0x42, 0x00)   # 새 게임 밑판: 천 옷·노송나무 막대, 둘 다 장비(비트 0003)
 HERB, ANTIDOTE, CHAIN_MAIL, WOOD_HAT = 0xA1, 0xA2, 0x4D, 0x87
 STEEL_SWORD, LEATHER_SHIELD, MOON_HERB = 0x0C, 0x75, 0xA7
@@ -271,12 +272,15 @@ class Driver:
                 self.shot(len(self.path), v)
 
     def face(self, direction, x, y):
-        """direction 을 한 번 짧게 눌러(한 걸음보다 짧게) 카운터를 보게 하고 (x, y) 에 섰는지 본다."""
-        for _ in range(FACE[0]):
-            self.step({direction})
-        self.idle(FACE[1])
-        if (self.rd(X), self.rd(Y)) != (x, y):
-            raise Fail(f'카운터 앞 ({x},{y}) 이 아니라 ({self.rd(X)},{self.rd(Y)}) 에 섬')
+        """direction 을 짧게 눌러(한 걸음보다 짧게) 카운터를 보게 하고 (x, y) 에 섰는지 본다. 같은 맵 순간이동은 도착
+        프레임에 따라 한 칸 더 떨어진 곳에 세우기도 해(snes9x 방어구점 (34,13)) 목표 칸에 닿을 때까지 FACE_TRIES 번 누른다."""
+        for _ in range(FACE_TRIES):
+            for _ in range(FACE[0]):
+                self.step({direction})
+            self.idle(FACE[1])
+            if (self.rd(X), self.rd(Y)) == (x, y):
+                return
+        raise Fail(f'카운터 앞 ({x},{y}) 이 아니라 ({self.rd(X)},{self.rd(Y)}) 에 섬')
 
     def idle(self, n):
         for _ in range(n):
