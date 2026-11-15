@@ -95,11 +95,14 @@ DEGRADE = (
 class Person:
     def __init__(self, pictures, group, sheet, role, anim='legs', main=False, palette=None, new_set=None, spare=None,
                  allow=None, outline=False, flag=None, leader=False, seen=None, face=False, weight=None, glasses=False, brows=False, copy=None, touch=None, whites=(),
-                 line=None, wave=0):
+                 line=None, wave=0, recolor=None):
         self.pictures, self.group, self.sheet, self.role = pictures, group, sheet, role
         # wave: 줄·칸을 정하는 차례. 앞 차례 인물의 줄과 색 칸을 못박은 뒤에 배치한다(뒤에 더한 인물이 이미 정한
         # 인물의 색을 흔들지 않게)
         self.wave = wave
+        # recolor: {줄인 그림의 색: 바꿀 색}. 공용 줄에서 살색 칸에 합쳐져 버리는 옷 색을 그 인물이 이미 쓰는 다른
+        # 색으로 옮긴다(NDS 색을 따르지 않는 대신 옷이 몸과 갈린다)
+        self.recolor = recolor or {}
         # seen: 사건이 놓는 인물처럼 롬의 인물 목록에 없는 그림이 나올 맵 그룹들. 그 그룹의 줄 색에만 넣는다
         # (목록에서 찾지 못한 그림은 모든 그룹으로 세어 다른 그룹의 색을 흐린다)
         self.seen = frozenset(seen) if seen is not None else None
@@ -263,9 +266,29 @@ PEOPLE = (
     Person((0x8B,), None, 'h142', '좌장', wave=1, whites=('down',),
            touch={'down': [(6, 8, 'ink'), (6, 9, 'ink'), (9, 8, 'ink'), (9, 9, 'ink'),
                            (5, 8, 'white'), (5, 9, 'white'), (10, 8, 'white'), (10, 9, 'white')]}),
-    Person((0x66,), None, 'h074', '린다', wave=1),
-    # 이마 보석의 초록이 줄이면 두 눈 사이에도 한 칸 남는다. 살색으로 둔다
-    Person((0x69,), None, 'h124', '마냐', wave=1, weight=KEY_WEIGHT, line=4, touch={'down': [(7, 6, (8, 6))]}),
+    # 얼굴이 다섯 칸이라 규칙은 눈 사이를 한 칸만 띄우고, 오른쪽 눈 옆의 머리 그늘이 셋째 눈동자처럼 보인다.
+    # 오른쪽 눈을 한 칸 밖으로 옮겨 그늘 자리에 흰자를 둔다. NDS 는 눈 바로 아래가 볼이고 볼이 눈과 같은
+    # 폭(여섯 칸)인데, 줄이면 눈 아래 줄에 눈의 어두운 칸이 남고 왼쪽 볼 한 칸이 머리 그늘이 되어 왼쪽 흰자가
+    # 얼굴 밖으로 나온다. 눈 아래 줄과 왼쪽 볼 한 줄을 살색으로 채우고, 턱 줄은 양쪽을 한 칸씩 좁힌다(볼 두 줄을
+    # 모두 여섯 칸으로 두면 얼굴이 네모나게 부푼다)
+    Person((0x66,), None, 'h074', '린다', wave=1, whites=('down',),
+           touch={'down': [(7, 6, (6, 6)), (7, 7, (6, 7)), (8, 6, 'ink'), (8, 7, 'ink'), (9, 6, 'white'), (9, 7, 'white'),
+                           (4, 6, 'white'), (4, 7, 'white'), (4, 9, (5, 9)), (9, 10, (10, 10)),
+                           *((x, 8, (x, 9)) for x in range(4, 10))]}),
+    # 앞모습: NDS 는 흰자 바깥에 살색 한 칸씩이 있는데, 줄이면 흰자 바로 옆이 머리카락이 되어 눈 사이가 멀어
+    # 보인다. 눈 줄만 여덟 칸으로 넓히고 볼은 여섯 칸, 턱은 네 칸으로 좁혀 내려간다(모두 여덟 칸이면 얼굴이
+    # 둥글게 부푼다). 옆머리는 그 바깥에 둔다. 이마 보석의 초록이 두 눈 사이에 남는 한 칸은 살색으로 둔다.
+    # 치마의 빨강·주황은 공용 줄에서 살색 칸에 합쳐져 옷이 몸과 갈리지 않는다. 그 줄에 실리는 노랑으로 옮긴다
+    # (머리의 보라로 옮기면 머리와 치마가 한 덩어리가 된다). 머리의 가장 밝은 분홍은 흰색 칸에 합쳐져 머리에 흰
+    # 점으로 흩어지므로 가운데 보라로 둔다
+    Person((0x69,), None, 'h124', '마냐', wave=1, weight=KEY_WEIGHT, line=4,
+           recolor={(132, 24, 0): (247, 206, 24), (214, 90, 8): (247, 206, 24), (247, 156, 16): (247, 206, 24),
+                    (247, 173, 222): (198, 115, 198)},
+           touch={'down': [(7, 6, (8, 6)),
+                           (4, 6, (8, 6)), (4, 7, (8, 6)), (11, 6, (8, 6)), (11, 7, (8, 6)),
+                           (4, 8, (5, 10)), (5, 8, (8, 6)), (10, 8, (8, 6)), (11, 8, (5, 10)),
+                           (4, 9, (3, 9)), (11, 9, (12, 9)),
+                           *((1, y, (2, 9)) for y in (7, 8, 9)), *((14, y, (13, 9)) for y in (7, 8, 9))]}),
     *(Person((pic,), None, sheet, role, anim=anim, spare=pic, seen=(group,), face=role in FACE_KEPT,
              weight=KEY_WEIGHT if role in KEY_EVENT else None)
       for role, pic, sheet, group, anim in EVENT_PEOPLE),
@@ -708,6 +731,10 @@ def rgb_frames(person, assets, outlined=True):
         out[name] = cells
     if legs:
         common_skin(out)
+    if person.recolor:
+        for cells in out.values():
+            for c in cells:
+                c.putdata([(*person.recolor.get(px[:3], px[:3]), px[3]) for px in c.getdata()])
     for name, edits in person.touch.items():
         for c in out[name]:
             for x, y, what in edits:
