@@ -89,10 +89,14 @@ LINKS = {
     # Chapter 2: サントハイム castle, テンペ and フレノール. フレノール's FC arrival is on the map's top row. 03/00's song
     # byte 0A is 呪われし塔 in the sound port: the castle (FC map branch 0) takes the castle song 01 and the two
     # villages (branch 1) the town song 06.
+    # テンペ's block is the only field link between the castle's side and フレノール's. FC leaves onto the entrance
+    # block itself (08:$B06A) and walks on either way; the port leaves onto one neighbour (below), and a DQ5 town
+    # block cannot be walked across (its bottom cells enter). "leave_rows" leaves by the town's top edge (the road
+    # north past the altar) onto the block above instead: stepping off the top row, the hero cell row is FF.
     0x3D: [{"fc": 0x01, "arrival": (0x0F, 0x1B), "attrs": "03/00", "music": 0x01, "field": [(0x27, 0x49)], "out": "down:64",
             "chapter": 2},
            {"fc": 0x0E, "arrival": (0x0A, 0x2C), "attrs": "03/00", "music": 0x06, "field": [(0x47, 0x39)], "out": "down:64",
-            "chapter": 2},
+            "leave_rows": [{"rows": (0xFF, 0xFF), "block": (0x47, 0x38)}], "chapter": 2},
            {"fc": 0x0F, "arrival": (0x16, 0x00), "attrs": "03/00", "music": 0x06, "field": [(0x60, 0x28)], "out": "up:64",
             "chapter": 2}],
     # Chapter 3: レイクナバ and the cave where its iron safe lies (きたのどうくつ, arrival on its stair to the field),
@@ -342,8 +346,9 @@ def entrance_doors(prg):
 def hook_rows(links, place, entrances, each=None):
     """dq4entrancehook (arrivals, leaving) of every FC group with a field entrance: each of its entrance cells
     (entrances[FC group] = (cells, leave cell), as doors) leads to its arrival, and its maps leave onto the leave
-    cell. A DQ5 group of one FC group leaves from any map. A part with "stairs" ({FC field entrance: FC stair})
-    enters each entrance onto its stair and leaves each stair by its entrance (each = entrance_doors); other
+    cell. A DQ5 group of one FC group leaves from any map. A part with "leave_rows" ([{rows: (min, max), block}])
+    leaves its arrival map from those hero cell rows onto the stand cell of that FC block. A part with "stairs"
+    ({FC field entrance: FC stair}) enters each entrance onto its stair and leaves each stair by its entrance (each = entrance_doors); other
     hero rows of its maps leave onto the leave cell."""
     arrivals, leaving = [], []
     for group, parts in links.items():
@@ -368,6 +373,9 @@ def hook_rows(links, place, entrances, each=None):
                 # 2A:F425 takes the first row that matches, so the fall row goes first
                 (k0, k1), (fx, fy) = FALL_FIELD[part["fc"]]
                 leaving.append((group, place[part["fc"], k0][1], place[part["fc"], k1][1], fx * 2, fy * 2))
+            for rows in part.get("leave_rows", ()):
+                # 2A:F425 takes the first row that matches, so the row-limited rows go first
+                leaving.append((group, number, number, *dq4fieldport.stand(*rows["block"]), *rows["rows"]))
             leaving.append((group, first, last, lx, ly))
     return arrivals, leaving
 
