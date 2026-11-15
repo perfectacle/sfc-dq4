@@ -3120,6 +3120,7 @@ ch1-build = [
   "sfc/dq4/tools/dq4nameentry.asm",
   "sfc/dq4/tools/dq4nameentry.py",
   "sfc/dq4/tools/dq4namegame.py",
+  "sfc/dq4/tools/dq4native.py",
   "sfc/dq4/tools/dq4npcport.py",
   "sfc/dq4/tools/dq4outside.py",
   "sfc/dq4/tools/dq4overture.py",
