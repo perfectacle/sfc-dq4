@@ -318,6 +318,7 @@ jobs:
         if: inputs.cache
         env:
           DQ4_ASSETS: ${{ github.workspace }}/assets
+          HEADLESS_SLOTS: '4'
           DQ4_READSET_MAX_GB: '2'
           K: ${{ matrix.k }}
           N: ${{ inputs.shards }}
@@ -326,7 +327,7 @@ jobs:
           mkdir -p work/ci-gate
           only=()
           if [ -n "$GUARDS" ]; then only=(--only "$GUARDS"); fi
-          uv run --frozen python tools/guards.py --all "${only[@]}" --run --parallel 2 \
+          uv run --frozen python tools/guards.py --all "${only[@]}" --run --parallel 2 --timeout 3600 \
             --shard "$K/$N" --exclude-needs "$LOCAL_NEEDS" --json "work/ci-gate/shard-$K.json"
 
       - name: Run the shard's guards without caches

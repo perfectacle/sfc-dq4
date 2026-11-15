@@ -88,14 +88,13 @@ tools() {
   DQ4_CORES="$TOOLS/cores" uv run --frozen python sfc/dq4/tools/dq4cores.py
 
   [ "$(uname -m)" = aarch64 ] || { echo "::error::MesenCE 는 리눅스 ARM64 판만 고정함"; exit 1; }
-  local mzip="$TOOLS/dl/mesence.zip"
-  if ! echo "$MESENCE_SHA256_ARM64  $mzip" | sha256sum -c --quiet - 2>/dev/null; then
-    curl -fsSL -o "$mzip" "$MESENCE_URL_ARM64"
-    echo "$MESENCE_SHA256_ARM64  $mzip" | sha256sum -c --quiet -
-  fi
-  # 풀린 폴더는 잡마다 새로 만든다. 포터블 폴더에 Saves·Debugger 가 쌓인다
+  # 캐시하지 않는다(38MB 를 잡마다 받는 데 몇 초). 포터블 폴더에 Saves·Debugger 가 쌓여 풀린 폴더도 잡마다 새로
+  local mzip="$RUNNER_TEMP/mesence.zip"
+  curl -fsSL -o "$mzip" "$MESENCE_URL_ARM64"
+  echo "$MESENCE_SHA256_ARM64  $mzip" | sha256sum -c --quiet -
   rm -rf "$TOOLS/mesence" && mkdir -p "$TOOLS/mesence"
   unzip -q -o "$mzip" -d "$TOOLS/mesence"
+  rm -f "$mzip"
   chmod +x "$TOOLS/mesence/Mesen"
   cp tools/ci-mesence-settings.json "$TOOLS/mesence/settings.json"
 
