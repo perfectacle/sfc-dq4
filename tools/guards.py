@@ -24,6 +24,7 @@ PR 에서는 바뀐 파일이 그 검사의 paths 에 바로 맞을 때, 또는 
 포함) 걸린다. 묶음으로만 맞는 검사와 tier = "release" 인 검사는 빠지고 배포 관문(tools/release_check.py)이 돌린다.
 바뀐 파일이 트랙의 [full] paths 에 맞으면 그 트랙은 전체 모드라 그 트랙의 검사가 등급과 상관없이 모두 걸린다(CI 와
 로컬이 같은 판정). PR 본문의 `가드: 전체` 줄이나 --full 은 모든 트랙을 전체 모드로 넓히기만 하고 좁히지는 못한다.
+본문의 `가드: 더함 이름, 이름` 줄은 그 검사들을 걸린 목록에 더한다(guards.py 를 바꾼 PR 의 대표 셋을 CI 에서 돌릴 때).
 
 사용:
   python tools/guards.py                         목록 형식만 검사
@@ -34,8 +35,11 @@ PR 에서는 바뀐 파일이 그 검사의 paths 에 바로 맞을 때, 또는 
                                                  걸린 검사 대신 고른 검사만 돌림(guards.py 를 바꾼 PR 의 대표 셋)
   python tools/guards.py --base origin/main --run --full
                                                  [full] 에 걸리지 않아도 전체 모드로 돌림(본문에 `가드: 전체`)
-  python tools/guards.py --base SHA --pr-body FILE
-                                                 걸린 검사마다 본문에 결과 줄이 있는지 봄(CI)
+  python tools/guards.py --base SHA --head SHA --plan OUT
+                                                 걸린 검사를 CI 몫과 로컬 몫(guard-shards.yml 의 LOCAL_NEEDS)으로 나눠
+                                                 guards=·local=·shards= 줄을 OUT 에 더함(CI guard-plan 잡, $GITHUB_OUTPUT)
+  python tools/guards.py --base SHA --pr-body FILE [--local-only]
+                                                 걸린 검사마다 본문에 결과 줄이 있는지 봄(CI). --local-only 면 로컬 몫만
   python tools/guards.py --all --run --no-cache --shard 3/16 --exclude-needs MESENCE,LIBDIR --json OUT.json
                                                  등급·묶음과 상관없이 모든 검사 가운데 needs 에 MESENCE·LIBDIR 가 없는 것을
                                                  16 조각으로 나눠 셋째 조각만 돌리고 결과를 OUT.json 에(CI 배포 관문 잡)
@@ -88,6 +92,11 @@ TIERS = ('pr', 'release')
 CACHE_KEYS = ('all', 'paths')
 # 이 값이 바뀌면 검사 결과가 바뀔 수 있다(why 는 설명, paths·groups 는 고르는 데만 씀)
 RESULT_FIELDS = ('run', 'needs')
+# CI 조각이 로컬 몫으로 빼는 needs 이름의 정본(env LOCAL_NEEDS). PR 계획·본문 검사·ship.py 가 이것을 읽는다
+SHARDS_WORKFLOW = ROOT / '.github' / 'workflows' / 'guard-shards.yml'
+# PR 가드 잡의 조각 수: 조각 하나에 이만큼(초)씩, 많아야 이만큼 조각
+PR_SHARD_SECONDS = 480
+PR_SHARDS_MAX = 16
 
 
 def git(*args):
@@ -855,6 +864,30 @@ def pending(checks, changed, edited=()):
 
 # PR 본문에서 [full] 판정과 상관없이 전체 모드로 넓히는 줄
 FULL_LINE = re.compile(r'^[ \t]*가드[ \t]*:[ \t]*전체[ \t]*$', re.M)
+# PR 본문에서 걸린 목록에 검사를 더하는 줄
+EXTRA_LINE = re.compile(r'^[ \t]*가드[ \t]*:[ \t]*더함[ \t]+(\S.*?)[ \t]*$', re.M)
+
+
+def extra_names(body):
+    """본문의 `가드: 더함 a, b` 줄들의 이름(차례 유지, 중복 뺌)."""
+    return list(dict.fromkeys(n for m in EXTRA_LINE.finditer(body or '') for n in re.split(r'[\s,]+', m[1]) if n))
+
+
+def ci_local_needs(path=SHARDS_WORKFLOW):
+    """CI 조각이 로컬 몫으로 빼는 needs 이름들(guard-shards.yml 맨 위 env 의 LOCAL_NEEDS). 못 읽으면 빈 것."""
+    try:
+        m = re.search(r'^  LOCAL_NEEDS:\s*(\S*)\s*$', Path(path).read_text(encoding='utf-8'), re.M)
+    except OSError:
+        return []
+    return [n for n in (m[1] if m else '').split(',') if n]
+
+
+def pr_shards(checks, weights, per=PR_SHARD_SECONDS, most=PR_SHARDS_MAX):
+    """PR 가드 잡의 조각 수: 무게 합을 per 초씩 나눈 올림, 1 ~ min(검사 수, most)."""
+    if not checks:
+        return 0
+    total = sum(weights.get(c['name'], 1.0) for c in checks)
+    return max(1, min(len(checks), most, -(-int(total) // per)))
 
 
 def edited_checks(base_text, head_text):
@@ -929,6 +962,10 @@ def main():
     ap.add_argument('--exclude-needs', metavar='이름,…', default='',
                     help='--all 에서 needs 에 이 이름이 든 검사를 빼 「로컬 몫」 으로 찍는다(CI 에 없는 MESENCE 등)')
     ap.add_argument('--json', type=Path, help='--all --run 결과(커밋·조각·결과·로컬 몫)를 이 파일에')
+    ap.add_argument('--plan', type=Path, metavar='OUT',
+                    help='--base 에서 걸린 검사를 CI 몫·로컬 몫으로 나눠 guards=·local=·shards= 줄을 OUT 에 더한다')
+    ap.add_argument('--local-only', action='store_true',
+                    help='--pr-body 에서 로컬 몫(LOCAL_NEEDS)만 결과 줄을 요구한다(CI 몫은 CI 가드 잡이 판정)')
     ap.add_argument('--record-times', type=Path, nargs='+', metavar='보고서',
                     help='보고서의 검사 시간으로 guardshard-times.json 을 고쳐 쓴다')
     args = ap.parse_args()
@@ -937,6 +974,8 @@ def main():
         return 0
     if not args.all and (args.shard or args.exclude_needs or args.json):
         ap.error('--shard·--exclude-needs·--json 은 --all 과 함께')
+    if not args.base and (args.plan or args.local_only):
+        ap.error('--plan·--local-only 는 --base 와 함께')
     files = tracked()
     checks, problems = load(files)
     if args.all:
@@ -966,6 +1005,9 @@ def main():
         body = args.pr_body.read_text(encoding='utf-8') if args.pr_body else ''
         full = args.full or bool(FULL_LINE.search(body))
         hit = triggered(checks, changed, edited, full)
+        extra, bad = pick(checks, ','.join(extra_names(body)))
+        problems += [p.replace('--only', '`가드: 더함`') for p in bad]
+        hit += [c for c in extra if c not in hit]
         auto = full_files(checks, changed)
         if auto:
             print(f'전체 모드: {", ".join(auto)}')
@@ -989,8 +1031,17 @@ def main():
             for c in later:
                 why = 'release 등급' if c.get('tier', 'pr') == 'release' else '묶음으로만 맞음'
                 print(f'- {c["name"]} ({why})')
-        if args.pr_body:
-            problems += body_problems(hit, body)
+        ci, local = split_local(hit, ci_local_needs())
+        if args.plan:
+            n = pr_shards(ci, shard_weights(ci))
+            with args.plan.open('a', encoding='utf-8') as f:
+                f.write(f'guards={",".join(c["name"] for c in ci)}\nlocal={",".join(c["name"] for c in local)}\n'
+                        f'shards={n}\n')
+            print(f'CI 몫 {len(ci)}개(조각 {n}), 로컬 몫 {len(local)}개'
+                  + (f': {", ".join(c["name"] for c in local)}' if local else ''))
+        # --plan 과 함께 준 본문은 넓히는 줄(`가드: 전체`·`가드: 더함`)만 읽는다
+        if args.pr_body and not args.plan:
+            problems += body_problems(local if args.local_only else hit, body)
         if args.only:
             hit, bad = pick(checks, args.only)
             problems += bad

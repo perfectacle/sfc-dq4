@@ -78,7 +78,7 @@ STATE=$PWD/work/state/ship.mss PRE="b:4,wait:40" WAYPOINTS="3,11;3,24;7,24;7,22"
 | `ci_cache.py unpack\|pack\|prune\|ship-build` | CI 캐시: 롬 파생 폴더를 age 로 암호화해 캐시에 두고 되살림, 출하 롬 빌드 단계별 묶음. GitHub 러너에서만 [CI 캐시](../sfc/dq4/docs/dq4-release-check-format.md#ci-캐시) |
 | `mesence_settings.py` | MesenCE 사용자 설정 파일(`settings.json`)의 자리와 해시. 읽은 롬 바이트 캐시와 `guards.py` 검사 캐시가 같은 것을 키에 넣는다(콜백 시간 제한처럼 명령줄로 고정하지 않은 설정도 결과에 닿는다) |
 | `release_check.py [--rehearse] [--stages 단계,…] [--seeds-n N] [--ci-report DIR]` | 배포 관문: 출하 롬 빌드, 단위 테스트 전부, 실행 검사 전부(캐시 없이), 트랙 `release.toml` 시드 스윕, 커버리지를 돌려 `work/release/<롬 SHA-1>/report.json`·`report.md` 를 낸다. 사람이 부를 때만 돈다. `--ci-report` 는 CI 조각 결과를 받아 로컬 몫만 돈다. [배포 관문](../sfc/dq4/docs/dq4-release-check-format.md) |
-| `ship.py --title 제목 --body 본문파일 [--dry-run] [--no-watch] …` | 워크트리 안에서 PR 마무리 한 줄: rebase → 일지 순번 → 로컬 검사 → 실행 검사 → 본문 가드 절 → push → PR·auto-merge → 머지까지 지켜보기 → 정리. 아래 [ship.py](#shippy-pr-마무리-한-줄) |
+| `ship.py --title 제목 --body 본문파일 [--dry-run] [--no-watch] …` | 워크트리 안에서 PR 마무리 한 줄: rebase → 일지 순번 → 로컬 검사 → 실행 검사 나누기(CI 몫·로컬 몫) → 본문 가드 절 → push → draft PR → CI 초록이면 CI 결과 줄·ready·auto-merge → 정리. 아래 [ship.py](#shippy-pr-마무리-한-줄) |
 | `check_docs.py` | 일지 이름·제목·순번 중복, README 일지 목록, 상대 링크, 개인 경로, 충돌 표시 검사(CI `docs` 잡과 같음) |
 | `unitshard.py 폴더 k n` | 폴더의 단위 테스트 파일을 `unitshard-times.json` 의 시간으로 고르게 n 조각으로 나눠 k 번째 조각의 모듈 이름을 찍는다(CI `test` 잡 조각). `--record 폴더` 는 파일마다 돌려 시간을 고친다 |
 | `headless_slots.py` | 머신 전체의 헤드리스 에뮬레이터 프로세스 수 제한. 아래 [HEADLESS_SLOTS](#headless_slots-헤드리스-에뮬레이터-자리) |
@@ -107,20 +107,21 @@ uv run --locked python tools/ship.py --title "feat(dq4): …" --body work/pr-bod
 | `rebase` | `git fetch` 후 `origin/main` 으로 rebase. 충돌이면 rebase 를 그대로 두고 충돌 파일을 찍고 멈춥니다(풀고 `git add`, `git rebase --continue` 뒤 다시). `--auto-lists` 면 `README.md`·`todo.md` 의 충돌 블록이 목록·표·빈 줄뿐일 때만 main 쪽 줄 뒤에 이쪽 줄을 붙여 풉니다. 끝나면 바뀐 파일에 충돌 표시가 남았는지 봅니다 |
 | `journal` | 이 브랜치가 더한 일지가 `origin/main` 의 같은 날짜·번호와 겹치거나 번호가 `NN` 이면, 그 날짜의 가장 큰 번호 + 1 로 파일 이름·제목·목록 줄(과 그 이름을 가리키는 `.md` 링크)을 고치고 새 커밋을 만듭니다. 번호 묶음은 `check_docs.py` 의 `SHARED_NUMBERS` 를 따릅니다(`sfc/dq4`·`fc/dq4` 는 하나) |
 | `checks` | `check_docs.py`, 바뀐 `.py` compileall, 바뀐 `.lua` `luac -p`, 바뀐 파일에 닿는 단위 테스트. 테스트 폴더는 CI `test` 잡 matrix 에서 읽고, 모듈 이름이 글에 낱말로 나오면(import, `이름.py` 를 띄우는 subprocess) 닿는다고 보고 전이로 따라갑니다. `.py` 밖 파일은 이름이 글에 나오는 모듈에 닿습니다. `uv.lock`·`pyproject.toml`·`.python-version` 이 바뀌면 모든 폴더를 돕니다 |
-| `guards` | `guards.py --base origin/main --run`(본문에 `가드: 전체` 가 있거나 `--full` 이면 `--full`). 돌기 전 1분 부하가 `HEADLESS_SLOTS`×2 를 넘으면 `--load-wait`(기본 1800초)까지 기다립니다. 통과한 결과 줄은 `work/ship/guards.json` 에 HEAD 와 함께 남깁니다. 다시 돌 때는 그 HEAD 뒤로 바뀐 파일이 걸린 가드의 `paths`·묶음·`[full]` 에 맞거나 `guards.toml` 의 `run`·`needs` 가 바뀐 가드, 앞 결과가 없거나 통과가 아닌 가드만 `--only` 로 돌리고 나머지는 앞 결과를 씁니다(`.md`·목록만 바뀐 rebase 는 다시 안 돎). 실패하면 실패 가드와 로그 경로를 찍고 멈춥니다 |
-| `body` | 본문 파일의 「## 가드」 절을 결과 줄로 바꾸거나(없으면 끝에 넣고) 🤖 줄을 맨 끝에 하나 둔 뒤 `guards.py --pr-body` 가 문제 0개인지 봅니다. 옛 절의 `가드: 전체` 줄은 남깁니다 |
+| `guards` | 걸린 실행 검사(`guards.py --base origin/main` 과 같은 판정, 본문 `가드: 전체`·`가드: 더함` 포함)를 CI 몫과 로컬 몫(`needs` 에 `guard-shards.yml` 의 `LOCAL_NEEDS` 이름이 든 것)으로 나눕니다. CI 몫은 PR 의 CI `pr-guards` 잡이 돌리고 여기서는 돌리지 않습니다. 로컬 몫만 `guards.py --base origin/main --run --only …` 로 돌립니다. 돌기 전 1분 부하가 `HEADLESS_SLOTS`×2 를 넘으면 `--load-wait`(기본 1800초)까지 기다립니다. 통과한 결과 줄은 `work/ship/guards.json` 에 HEAD 와 함께 남깁니다. 다시 돌 때는 그 HEAD 뒤로 바뀐 파일이 걸린 가드의 `paths`·묶음·`[full]` 에 맞거나 `guards.toml` 의 `run`·`needs` 가 바뀐 가드, 앞 결과가 없거나 통과가 아닌 가드만 `--only` 로 돌리고 나머지는 앞 결과를 씁니다(`.md`·목록만 바뀐 rebase 는 다시 안 돎). 실패하면 실패 가드와 로그 경로를 찍고 멈춥니다 |
+| `body` | 본문 파일의 「## 가드」 절을 로컬 몫 결과 줄과 CI 몫 목록 한 줄(`- CI 가 돌림(…): 이름, …`)로 바꾸거나(없으면 끝에 넣고) 🤖 줄을 맨 끝에 하나 둔 뒤 `guards.py --pr-body --local-only` 가 문제 0개인지 봅니다. 옛 절의 `가드: 전체`·`가드: 더함` 줄은 남깁니다 |
 | `push` | 원격에 같은 이름 브랜치가 없으면 올리고, 있으면 그 커밋이 이 브랜치의 조상이거나 reflog 에 있었고 그 브랜치의 PR 이 없거나 열려 있을 때만 `--force-with-lease` 로 덮습니다. 그 밖(이미 머지·닫힌 PR 의 브랜치, 모르는 커밋)은 브랜치를 `<브랜치>-2` 처럼 비어 있는 새 이름으로 바꿔 올립니다. main 에는 올리지 않습니다 |
-| `pr` | 열린 PR 이 없으면 `gh pr create --base main`(`--title` 필요), 있으면 본문이 다를 때만 고칩니다(본문을 고치면 CI 가 다시 돕니다). 그 뒤 `gh pr merge --auto --merge` |
-| `watch` | 30초마다 PR 을 봅니다. `CONFLICTING` 이면 `rebase` 부터 다시, 검사가 실패하면 실패 잡 로그 끝 25줄을 찍고 멈춥니다. auto-merge 를 못 켰으면 모든 검사가 초록이고 `CLEAN` 일 때 직접 머지합니다. `--watch-timeout`(기본 5400초)을 넘기면 멈춥니다 |
+| `pr` | 열린 PR 이 없으면 `gh pr create --draft --base main`(`--title` 필요), 있으면 draft 로 돌리고(`gh pr ready --undo`) 본문이 다를 때만 고칩니다. 본문만 고치고 새 커밋이 없으면 마지막 CI 실행의 `required-checks` 잡만 다시 돌립니다(CI 는 본문 고침으로 다시 돌지 않고, 그 잡이 API 로 본문을 새로 읽음). auto-merge 는 아직 걸지 않습니다 |
+| `watch` | 30초마다 PR 을 봅니다. `CONFLICTING` 이면 `rebase` 부터 다시. 검사가 실패하면 실패 잡 로그 끝 25줄을 찍고, CI 가드 잡(`pr-guards / …`)이면 로그에서 실패한 가드 이름을 골라 `--rerun 이름` 과 로그 링크를 이유에 넣어 멈춥니다. `ci-ok` 가 초록이면 조각 결과(artifact `guard-shard-pr-*`)로 본문 「## 가드」 절의 CI 몫을 `- [x] 이름: 통과 (CI …, 실행 링크)` 줄로 바꾸고 `gh pr ready` → `gh pr merge --auto --merge`. auto-merge 를 못 켰으면 모든 검사가 초록이고 `CLEAN` 일 때 직접 머지합니다. `--watch-timeout`(기본 5400초)을 넘기면 멈춥니다 |
 | `cleanup` | 원래 체크아웃에서 워크트리 제거(커밋 안 된 변경·추적 안 되는 파일이 있으면 지우지 않고 멈춤, `--force` 는 쓰지 않음), 로컬·원격 브랜치 삭제, `worktree prune`, 원래 체크아웃이 main 이고 변경이 없으면 `pull --ff-only` |
 
 | 옵션 | 하는 일 |
 | --- | --- |
 | `--dry-run` | 아무것도 바꾸지 않고 단계마다 할 일만 찍습니다(rebase 는 `git merge-tree` 로 충돌만 미리 봄, 단위 테스트·실행 검사는 고르기만) |
-| `--no-watch` | PR 을 열고 auto-merge 를 건 데서 끝냅니다 |
-| `--rerun 이름,…` | 그 가드를 다시 돌려 앞 결과와 합칩니다 |
-| `--only 이름,…` | 걸린 가드 대신 이 가드만 돌립니다(`guards.py` 를 바꾼 PR 의 대표 셋, [guards 스킬](../.agents/skills/guards/SKILL.md)) |
-| `--skip-guards` | 실행 검사를 건너뜁니다. 걸린 실행 검사가 0개일 때만 받습니다 |
+| `--no-watch` | draft PR 을 연 데서 끝냅니다(CI 초록 뒤 ready·머지는 하지 않음) |
+| `--rerun 이름,…` | 로컬 몫이면 그 가드를 다시 돌려 앞 결과와 합칩니다. CI 몫이면 이 PR head 의 마지막 CI 실행에서 실패한 잡만 다시 돌립니다(`gh run rerun --failed`. 같은 조각의 통과한 가드는 통과 기록 캐시로 건너뜀) |
+| `--only 이름,…` | 본문에 `가드: 더함 이름, …` 줄을 넣어 CI 가 그 가드를 더 돌리게 합니다(`guards.py` 를 바꾼 PR 의 대표 셋, [guards 스킬](../.agents/skills/guards/SKILL.md)). `--local-guards` 와 함께면 걸린 가드 대신 이 가드만 로컬에서 돌립니다 |
+| `--local-guards` | 디버그용. CI 몫까지 모두 로컬 에뮬레이터로 돌리고 본문에 결과 줄을 씁니다(CI 가드 잡은 그대로 돕니다) |
+| `--skip-guards` | 로컬 몫 실행 검사를 건너뜁니다. 로컬 몫이 0개일 때만 받습니다 |
 | `--auto-lists` | 위 `rebase` 의 목록 줄 충돌 풀기 |
 
 `GH_TOKEN` 이 환경에 없으면 `gh auth token -u perfectacle` 로 받아 `gh` 와 `git push` 에 명령마다 넘깁니다(전역 계정은 바꾸지 않습니다). 시험은 `tools/tests/test_ship.py`(임시 저장소의 진짜 git, 가짜 `gh`).

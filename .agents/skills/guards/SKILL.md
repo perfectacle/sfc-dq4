@@ -5,14 +5,14 @@ description: 버그를 고치거나 동작을 개선했을 때, PR 을 올리기
 
 # 회귀 가드
 
-이 스킬이 GUARD-01, GUARD-02, GUARD-03 의 정본이다. 도구는 `tools/guards.py`, CI 잡은 `required-checks` 다.
+이 스킬이 GUARD-01, GUARD-02, GUARD-03 의 정본이다. 도구는 `tools/guards.py`, CI 잡은 `guard-plan`·`pr-guards`·`pr-guards-result`·`required-checks` 다. **실행 검사는 CI 가 돈다. 로컬은 단위 테스트만**(CI 에 아직 없는 로컬 몫과 디버그 밖).
 
 여러 세션이 같은 저장소를 고친다. 한 세션이 고친 것을 다른 세션이 모르고 되돌리지 않게, 고친 사람이 그 자리에 가드를 남긴다. 가드는 두 가지다.
 
 | 가드 | 언제 | 누가 돌리나 |
 | --- | --- | --- |
 | 단위 테스트(`test_*.py`) | 롬 없이 확인할 수 있을 때(생성 코드의 바이트, 표, 파서) | CI `test` 잡이 PR 마다 |
-| 실행 검사(`<트랙폴더>/guards.toml` 에 등록) | 롬·에뮬레이터가 있어야 할 때(걷기 검사, 프로브) | PR 을 올리는 세션이 돌리고 본문에 결과 줄. CI `required-checks` 가 줄이 있는지 본다 |
+| 실행 검사(`<트랙폴더>/guards.toml` 에 등록) | 롬·에뮬레이터가 있어야 할 때(걷기 검사, 프로브) | CI `pr-guards` 잡이 PR 마다 바뀐 파일로 걸린 것만(같은 저장소 브랜치). `needs` 에 `guard-shards.yml` 의 `LOCAL_NEEDS` 이름이 든 「로컬 몫」 만 PR 을 올리는 세션이 돌리고 본문에 결과 줄 |
 
 ## 절차 — 고치거나 개선했을 때
 
@@ -31,11 +31,12 @@ description: 버그를 고치거나 동작을 개선했을 때, PR 을 올리기
    여러 검사가 함께 닿는 파일 묶음(롬 빌드, 걷기 드라이버 등)은 같은 파일의 `[groups]` 에 이름을 붙여 두고 검사에 `groups = ["ch1-build"]` 로 더한다. PR 에서 검사가 걸리는 때는 [GUARD-02](#guard-02--걸린-실행-검사는-돌리고-결과를-적는다) 에 있다. 묶음은 PR 에서 검사를 걸지 않고 배포 관문과 전체 모드에서만 쓰므로, 검사가 직접 지키는 파일(검사 스크립트, 그 검사만 쓰는 asm·Lua·자료 파일)은 묶음에 있어도 `paths` 에 적는다. dq4 트랙은 `test_dq4guardpaths` 가 모든 실행 검사의 `paths`·묶음이, 명령의 스크립트(와 `unittest discover` 가 고르는 시험 파일)에서 전이 import·띄우는 Lua·asar 에 넣는 asm·`dq4build` 단계·글자 상수로 이름을 적은 자료 파일(`.toml`·`.json`·`.args`·`.patch`·`.tsv`)로 닿는 저장소 파일을 덮는지 본다. importlib, 변수로 만든 파일 이름, 폴더째 읽는 그림처럼 그 시험이 못 보는 길로 닿는 파일은 손으로 적는다(`dq4guardpaths.py` docstring). 빠진 것은 `uv run --locked python sfc/dq4/tools/dq4guardpaths.py` 가 찍는다.
    한 번 도는 데 4분(median 240초)을 넘는 무거운 검사에는 `tier = "release"` 를 단다. PR 에서는 빠지고 배포 관문이 돌린다.
    완료: `uv run --locked python tools/guards.py` 가 문제 0개.
-3. **PR 전에 걸리는 검사를 돌린다** — `uv run --locked python tools/guards.py --base origin/main` 이 이 변경이 건드리는 실행 검사와 명령, 필요한 것(`needs`)을 찍고, 지금 셸에 설정 안 된 환경 변수가 있으면 `⚠` 로 알린다. 모두 돌리고 PR 본문에 검사마다 한 줄을 쓴다. 묶음으로만 맞는 검사와 `tier = "release"` 검사는 「배포 관문에서」 로 따로 찍히며 돌리지 않는다.
-   - **전체 모드는 바뀐 파일로 정해진다.** 트랙 `guards.toml` 의 `[full]` `paths` 에 맞는 파일을 바꾸면 그 트랙은 전체 모드다. 그 트랙의 실행 검사가 `paths`·등급과 상관없이 모두 걸리고, 목록 맨 위에 「전체 모드: <걸린 파일>」 이 찍힌다. CI `required-checks` 와 로컬 `--base` 는 같은 판정을 쓰므로 따로 고를 것이 없다. `[full]` 에는 바뀌면 거의 모든 장면이 달라지는 파일만 둔다. 빌드 단계의 차례, 모든 맵 들어가기가 지나는 훅, 에뮬레이터·코어와 그 설정, 장면 캐시, 공용 걷기 드라이버, 의존성 고정이 그렇다. 자주 바뀌는 파일을 넣으면 PR 마다 전체가 되므로 넣지 않는다(dq4 는 `sfc/dq4/guards.toml` 의 주석). 검사를 고르고 캐시하는 도구(`tools/guards.py`·`tools/guardtrace/`)는 롬을 바꾸지 않고 `tools/tests` 가 지키므로 `[full]` 에 두지 않는다. 대신 그 도구를 바꾼 PR 은 대표 가드 셋(롬을 빌드하는 검사 하나 + 짧은 장면 검사 둘)을 `--run --only 이름,…` 으로 돌려 실제 실행 경로가 도는 것을 보고 본문에 적는다.
-   - 자동 판정보다 넓게 돌리고 싶을 때만 본문에 `가드: 전체` 줄을 쓰고 `--full` 로 돌린다. 모든 트랙의 실행 검사가 걸린다(`uv run --locked python tools/guards.py --base origin/main --run --full`). 이 줄은 넓히기만 하며, `[full]` 이 켠 전체 모드를 끄지 못한다.
-   - **`origin/main` 을 합친 뒤(rebase·롬 다시 빌드 뒤) 한 번만 돌린다.** 합치기 전에 돌린 결과는 main 의 변경이 롬에 들어오면 다시 돌려야 하므로 시간만 든다.
-   - **`--run` 으로 포그라운드에서 돌린다**: `uv run --locked python tools/guards.py --base origin/main --run`. 롬을 빌드하는 검사를 먼저 돌리고(서로 만드는 것을 건드리지 않는 빌드 검사끼리만 함께), 나머지는 `--parallel`(기본 `HEADLESS_SLOTS` 의 자리 수)개씩 함께 돌리고, 검사마다 `--timeout`(기본 1800초)을 넘기면 끈다. 끝나면 본문 결과 줄을 찍는다. 검사를 백그라운드로 띄우고 완료 알림을 기다리지 않는다 — 알림을 놓치면 세션이 멈춘다. 에이전트 도구의 명령 시간 제한이 짧으면 그 제한을 늘려 포그라운드로 둔다.
+3. **걸리는 검사는 CI 가 돌린다** — `uv run --locked python tools/guards.py --base origin/main` 이 이 변경이 건드리는 실행 검사와 명령, 필요한 것(`needs`)을 찍는다. PR 을 열면 CI `guard-plan` 잡이 같은 판정(`--plan`)으로 CI 몫과 로컬 몫을 나누고, `pr-guards` 잡이 CI 몫을 조각으로 나눠 롬 묶음과 캐시를 써서 돌린다. `tools/ship.py` 가 PR 을 draft 로 열고, `ci-ok` 가 초록이면 본문 「## 가드」 절에 CI 결과 줄을 채우고 ready·auto-merge 한다. 사람이 「통과」 를 손으로 적지 않는다. 로컬 몫(지금은 MesenCE 가 필요한 검사)만 ship 이 로컬에서 돌려 결과 줄을 쓴다(아래 `--run`). 묶음으로만 맞는 검사와 `tier = "release"` 검사는 「배포 관문에서」 로 따로 찍히며 PR 에서 돌지 않는다.
+   - **전체 모드는 바뀐 파일로 정해진다.** 트랙 `guards.toml` 의 `[full]` `paths` 에 맞는 파일을 바꾸면 그 트랙은 전체 모드다. 그 트랙의 실행 검사가 `paths`·등급과 상관없이 모두 걸리고, 목록 맨 위에 「전체 모드: <걸린 파일>」 이 찍힌다. CI `guard-plan` 과 로컬 `--base` 는 같은 판정을 쓰므로 따로 고를 것이 없다. `[full]` 에는 바뀌면 거의 모든 장면이 달라지는 파일만 둔다. 빌드 단계의 차례, 모든 맵 들어가기가 지나는 훅, 에뮬레이터·코어와 그 설정, 장면 캐시, 공용 걷기 드라이버, 의존성 고정이 그렇다. 자주 바뀌는 파일을 넣으면 PR 마다 전체가 되므로 넣지 않는다(dq4 는 `sfc/dq4/guards.toml` 의 주석). 검사를 고르고 캐시하는 도구(`tools/guards.py`·`tools/guardtrace/`)는 롬을 바꾸지 않고 `tools/tests` 가 지키므로 `[full]` 에 두지 않는다. 대신 그 도구를 바꾼 PR 은 대표 가드 셋(롬을 빌드하는 검사 하나 + 짧은 장면 검사 둘)을 본문 `가드: 더함 이름, …` 줄(ship `--only 이름,…` 이 넣음)로 CI 에서 돌려 실제 실행 경로가 도는 것을 본다.
+   - 자동 판정보다 넓게 돌리고 싶을 때만 본문에 `가드: 전체` 줄을 쓴다. 모든 트랙의 실행 검사가 걸린다. 몇 개만 더하려면 `가드: 더함 이름, 이름`. 두 줄 모두 넓히기만 하며, `[full]` 이 켠 전체 모드를 끄지 못한다.
+   - CI 가드가 실패하면 ship 이 `SHIP: stopped watch …` 에 실패 가드 이름과 로그 링크를 찍는다. 원인을 고쳐 push 하면(ship 을 다시) 바뀐 입력의 가드만 다시 돈다(통과 기록 캐시). 고칠 것 없이 다시 볼 때만 `ship.py --rerun 이름` — 마지막 CI 실행의 실패한 잡만 다시 돈다.
+   - 포크 PR 은 시크릿이 없어 `pr-guards` 가 돌지 않는다. 관리자가 로컬에서 돌려 본문에 모든 걸린 검사의 결과 줄을 쓴다(`required-checks` 가 본다).
+   - **로컬 몫과 디버그만 로컬에서**, `origin/main` 을 합친 뒤 한 번, **`--run` 으로 포그라운드에서 돌린다**: `uv run --locked python tools/guards.py --base origin/main --run --only <로컬 몫>`(ship 이 대신 함. 모두 로컬로 보려면 ship `--local-guards`). 롬을 빌드하는 검사를 먼저 돌리고(서로 만드는 것을 건드리지 않는 빌드 검사끼리만 함께), 나머지는 `--parallel`(기본 `HEADLESS_SLOTS` 의 자리 수)개씩 함께 돌리고, 검사마다 `--timeout`(기본 1800초)을 넘기면 끈다. 끝나면 본문 결과 줄을 찍는다. 검사를 백그라운드로 띄우고 완료 알림을 기다리지 않는다 — 알림을 놓치면 세션이 멈춘다. 에이전트 도구의 명령 시간 제한이 짧으면 그 제한을 늘려 포그라운드로 둔다.
    - 에뮬레이터 프로세스는 머신 전체에서 `HEADLESS_SLOTS`(기본 CPU 수의 절반)개만 함께 돈다. 다른 세션이 자리를 다 쓰면 검사가 `[headless_slots] … 기다림` 을 찍고 기다리며, 기다린 시간도 `--timeout` 에 든다. [tools/README](../../../tools/README.md#headless_slots-헤드리스-에뮬레이터-자리)
    - 같은 입력(결과에 닿는 추적 파일 내용 — `.md`·`guards.toml`·`.agents/`·`.github/`·`.claude/`·`journal/`·단위 테스트는 뺀다. 다만 명령이 단위 테스트를 부르면(unittest·pytest, `test_*.py`·`tests/` 파일을 바로 돌림) `.md` 만 뺀다. `guards.toml` 맨 위에 `[cache]` `key = "paths"` 를 둔 트랙은 그 가운데 그 검사의 `paths`·묶음에 맞는 것, 트랙의 어느 검사도 `paths` 에 낱낱이 적지 않은 자료 파일(`.py`·`.lua`·`.asm` 밖), `uv.lock`·`pyproject.toml`·`.python-version` 만 본다. 그래서 화면 기준(`screens.toml`)처럼 한 검사만 적은 파일을 고치면 그 검사만 다시 돈다. paths 가 닿는 파일을 덮는다는 트랙 시험(dq4 는 `test_dq4guardpaths`)이 있어야 켠다 —, 명령, `needs` 에 나오는 환경 변수가 가리키는 파일 내용(64MB 넘는 파일은 크기·mtime)과 폴더 안 파일 목록(상대 경로·크기·mtime. 폴더 안 `cache/` 아래는 빌드가 같은 내용으로 다시 써 mtime 만 바뀌므로 내용으로 본다), `needs` 에 `MESENCE` 가 있으면 MesenCE 사용자 설정 파일(`tools/mesence_settings.py`. 못 찾으면 그 검사는 캐시를 쓰지 않음), `rom/` 원본, 명령이 읽는 `work/`·`rom/` 파일)으로 이미 통과한 검사는 캐시(원래 체크아웃 `work/cache/guards/`)로 건너뛴다. 실패는 캐시하지 않는다.
    - 입력이 달라도 롬을 빌드하는 검사(명령이 `&&` 로만 이어지고, 마지막 앞 단계가 `--out` 으로 무언가를 만들며, 셸 상태를 바꾸지 않고, 마지막 단계가 `uv run --locked python …` 인 것)는 빌드 단계를 먼저 돌린다. 만든 파일의 내용, `.py` 밖 입력, 추적 `.py` 이름 목록이 같고, 지난 통과 때 검사 단계가 **실행한 함수**의 코드(줄 번호 뺀 바이트코드 지문)와 데이터로 연 파일·목록을 본 폴더·`os.stat` 으로 본 있음과 크기, 에뮬레이터 같은 Python 밖 자식에게 인자로 넘긴 파일, 그 경로들이 거쳐 간 심볼릭 링크가 모두 같으면 검사 단계를 건너뛴다. 기록은 `tools/guardtrace/sitecustomize.py` 가 `sys.monitoring`·audit hook 으로 남긴다. 결과 줄은 「캐시: 빌드 결과와 검사 코드가 같아 …」. 롬이 그대로이고 검사가 부르지 않는 함수만 고친 PR 은 빌드만 돌고 끝난다. 검사 단계가 아는 자식(옵션이 `-u`·`-B` 뿐인 Python, 인자·환경 변수로 받은 파일을 입력으로 보는 `$MESENCE`) 밖의 것(셸·`os.system`·git·asar 등, `PYTHONPATH` 를 바꾼 환경)을 띄우거나 검사 단계 스크립트가 추적기를 싣지 않았으면 이 기록을 남기지 않는다.
@@ -43,10 +44,10 @@ description: 버그를 고치거나 동작을 개선했을 때, PR 을 올리기
    - `needs` 에는 검사가 읽는 환경 변수 이름을 그대로 적는다(설명문 안에 써도 캐시 키에 들어간다). 그래야 에뮬레이터·어셈블러를 바꾼 뒤 옛 결과로 건너뛰지 않는다.
    - 명령에 `<…>` 자리가 있는 검사(세이브스테이트를 고르는 검사 등)는 `--run` 이 돌리지 않으니 직접 돌린다.
    ```text
-   - [x] dq4-compat-walk: 통과 (bsnes 27/27, snes9x 27/27, 롬 SHA-1 …)
-   - [x] dq4-ch1-walk: 해당 없음 — 주석만 고침
+   - [x] dq4-door-open: 통과 (412초)                       ← 로컬 몫, ship 이 씀
+   - [x] dq4-title-scene: 통과 (CI 99초, https://github.com/…/actions/runs/…)   ← CI 몫, ci-ok 초록 뒤 ship 이 씀
    ```
-   완료: 같은 명령에 `--pr-body <본문 파일>` 을 더해 문제 0개.
+   완료: `ci-ok` 초록(그 안의 `pr-guards-result` 가 CI 몫, `required-checks` 가 로컬 몫 결과 줄 — `guards.py --base origin/main --pr-body <본문> --local-only` 문제 0개).
 
 ## 규칙
 
@@ -59,12 +60,14 @@ description: 버그를 고치거나 동작을 개선했을 때, PR 을 올리기
 
 ### GUARD-02 — 걸린 실행 검사는 돌리고 결과를 적는다
 
-PR 이 어떤 실행 검사의 `paths` 에 바로 맞는 파일을 바꾸거나 `guards.toml` 에서 그 검사의 `run`·`needs` 를 바꾸면(새 검사 포함), 그 검사를 돌리고 본문에 `- [x] <이름>: 통과 …` 줄을 쓴다. 묶음(`groups`)으로만 맞는 검사와 `tier = "release"` 검사는 PR 에서 빠지고 배포 관문(`tools/release_check.py`)이 캐시 없이 모두 돌린다. 바뀐 파일이 트랙의 `[full]` `paths` 에 맞으면(절차 3) 전체 모드라 그 트랙의 실행 검사를 모두 돌려 결과 줄을 쓴다. 본문의 `가드: 전체` 줄은 그보다 넓힐 때만 쓴다. 검사가 그 변경과 상관없으면 `- [x] <이름>: 해당 없음 — <이유>` 로 쓴다. CI `required-checks` 는 줄이 없거나, 체크되지 않았거나, `실패` 가 들었거나, 이유 없는 「해당 없음」 이면 실패한다.
+PR 이 어떤 실행 검사의 `paths` 에 바로 맞는 파일을 바꾸거나 `guards.toml` 에서 그 검사의 `run`·`needs` 를 바꾸면(새 검사 포함), 그 검사가 돌아 통과해야 머지한다. CI 몫은 CI `pr-guards` 잡이 돌리고 `pr-guards-result` 가 `ci-ok` 에 판정을 넘긴다. 로컬 몫(`needs` 에 `guard-shards.yml` `LOCAL_NEEDS` 의 이름이 든 것)과 포크 PR 의 모든 걸린 검사는 돌린 세션이 본문에 `- [x] <이름>: 통과 …` 줄을 쓴다. 묶음(`groups`)으로만 맞는 검사와 `tier = "release"` 검사는 PR 에서 빠지고 배포 관문(`tools/release_check.py`)이 캐시 없이 모두 돌린다. 바뀐 파일이 트랙의 `[full]` `paths` 에 맞으면(절차 3) 전체 모드라 그 트랙의 실행 검사를 모두 돌려 결과 줄을 쓴다. 본문의 `가드: 전체` 줄은 그보다 넓힐 때만 쓴다. 로컬 몫이 그 변경과 상관없으면 `- [x] <이름>: 해당 없음 — <이유>` 로 쓴다. CI `required-checks` 는 줄이 요구되는 검사의 줄이 없거나, 체크되지 않았거나, `실패` 가 들었거나, 이유 없는 「해당 없음」 이면 실패한다.
 
-- 이유: CI 에는 롬이 없어 실행 검사를 대신 돌릴 수 없다. 돌렸다는 기록을 남겨야 리뷰어와 다음 세션이 믿을 수 있다.
+- 이유: 에뮬레이터 검사를 로컬에서 돌리면 세션마다 수십 분이 들고 머신 부하로 서로 막았다. CI 는 같은 판정으로 바뀐 것만, 캐시를 써서 조각마다 함께 돌리고 결과가 실행 기록으로 남는다. 로컬 몫은 CI 에 그 도구가 없어서만 남은 것이고, `LOCAL_NEEDS` 가 비면 저절로 CI 로 간다.
+- 캐시: PR 실행이 저장한 캐시는 그 PR 만 읽는다. 그래서 머지 뒤 main push 실행이 바뀐 범위의 같은 가드를 다시 돌려 main 에 캐시를 데우고, 다음 PR 은 그 캐시(빌드 단계·장면·통과 기록)를 읽는다.
+- 시크릿: `pr-guards` 는 같은 저장소 브랜치 PR 과 main push 에서만 롬 묶음 시크릿을 받고, 같은 커밋의 워크플로 보호 테스트(`test_release_gate_workflow`·`test_pr_guards_workflow`)가 `guard-plan` 에서 먼저 통과해야 돈다. `pull_request_target` 은 쓰지 않는다. 워크플로·`tools/ci_*` 를 고친 PR 은 `guard-plan` 이 알림을 남기니 리뷰에서 그 파일을 본다.
 - PR 에서 줄이는 이유: 빌드 파일 하나만 바꿔도 묶음으로 검사 40개 넘게 걸려 45분이 넘게 들었다. 그 변경이 직접 닿는 검사만 PR 에서 돌리고, 나머지는 배포 전에 한 번 크게 돌린다.
 - 결과는 `통과`(뒤에는 괄호·대시나 줄 끝만, 예: `통과 (bsnes 27/27)`) 또는 `해당 없음 — <이유>` 둘뿐이다. 「통과하지 못함」 같은 글은 실패로 친다.
-- 본문을 고치면 CI 가 다시 돈다(`pull_request` 의 `edited`). 같은 PR 의 앞선 실행은 취소되어 전체가 한 번 더 돌므로, 결과 줄은 PR 을 열 때 함께 쓴다.
+- 본문을 고쳐도 CI 는 다시 돌지 않는다(`edited` 를 받지 않음 — 받으면 CI 가드가 처음부터 다시 돈다). `required-checks` 와 `guard-plan` 은 본문을 API 로 읽으므로, 새 커밋 없이 본문을 고쳤으면 `required-checks` 잡만 다시 돌린다(ship 이 함). `가드: 전체`·`가드: 더함` 줄을 더한 것은 다음 push 의 CI 부터 반영된다.
 - 바뀐 파일은 PR 의 base 와 head 커밋 사이로 고른다. PR 이 열린 뒤 main 에 들어온 남의 변경은 걸리지 않는다.
 
 ### GUARD-03 — 가드를 느슨하게 하지 않는다

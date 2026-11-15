@@ -2,8 +2,8 @@ name: guard-shards
 
 # Run-time guards split over runners, for callers only (workflow_call). It decrypts the
 # ROM bundle with the secrets the caller passes, so every caller must keep secrets away
-# from forks: release-gate.yml is manual only, and a pull_request caller must run only
-# for branches of this repository. tools/tests/test_release_gate_workflow.py guards both
+# from forks: release-gate.yml is manual only, and ci.yml's pr-guards job runs only for
+# pull requests from branches of this repository. tools/tests/test_release_gate_workflow.py guards both
 # files. Artifacts carry only verdict JSON, guard result records and logs, checked by
 # tools/ci_artifact_check.py right before upload. Caches holding ROM-derived bytes go only
 # through the encrypted composite actions enc-cache and ship-cache.
@@ -148,13 +148,14 @@ jobs:
           dir: assets/sfc/dq4/cache/sound
           age_key: ${{ secrets.CI_ROM_AGE_KEY }}
 
-      # Built once per run; the shards take this copy (key bound to this run) instead of rebuilding.
+      # Built once per run; the shards take this copy (key bound to this run) instead of rebuilding. The key
+      # leaves out run_attempt: "re-run failed jobs" reruns only the shards, which must still find it.
       - name: Hand the ship ROM to the shards
         uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
         with:
           op: save
           name: ship-rom
-          prefix: ship-rom-${{ github.run_id }}-${{ github.run_attempt }}
+          prefix: ship-rom-${{ github.run_id }}
           dir: work/ch1
           age_key: ${{ secrets.CI_ROM_AGE_KEY }}
 
@@ -226,7 +227,7 @@ jobs:
         with:
           op: restore
           name: ship-rom
-          prefix: ship-rom-${{ github.run_id }}-${{ github.run_attempt }}
+          prefix: ship-rom-${{ github.run_id }}
           dir: work/ch1
           age_key: ${{ secrets.CI_ROM_AGE_KEY }}
 

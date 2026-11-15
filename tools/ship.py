@@ -12,16 +12,21 @@
   2 journal  이 브랜치가 더한 일지가 origin/main 의 같은 날짜·트랙 번호와 겹치거나 NN 이면 다음 빈 번호로 이름·제목·
              목록 줄을 고쳐 새 커밋을 만든다.
   3 checks   check_docs, 바뀐 .py compileall·.lua luac, 바뀐 파일에 닿는 단위 테스트(tests_for).
-  4 guards   guards.py --base origin/main --run. 부하가 HEADLESS_SLOTS×2 를 넘으면 기다린다. 결과는 work/ship/ 에 남겨
-             --rerun 과 충돌 뒤 다시 돌 때 합친다.
-  5 body     본문 파일의 「## 가드」 절을 결과 줄로 넣거나 바꾸고 🤖 줄을 붙인 뒤 --pr-body 검사.
+  4 guards   걸린 실행 검사를 CI 몫과 로컬 몫(needs 에 guard-shards.yml 의 LOCAL_NEEDS 가 든 것)으로 나눈다. CI 몫은
+             PR 의 CI pr-guards 잡이 돌린다. 로컬 몫만 guards.py --base origin/main --run --only 로 여기서 돌린다
+             (부하가 HEADLESS_SLOTS×2 를 넘으면 기다림). 결과는 work/ship/ 에 남겨 --rerun 과 충돌 뒤 다시 돌 때 합친다.
+  5 body     본문 파일의 「## 가드」 절을 로컬 몫 결과 줄·CI 몫 목록으로 넣거나 바꾸고 🤖 줄을 붙인 뒤
+             --pr-body --local-only 검사.
   6 push     원격에 같은 이름이 있으면 이 작업 것일 때만 --force-with-lease, 아니면 <브랜치>-2 같은 새 이름.
-  7 pr       없으면 만들고 있으면 본문을 고친 뒤 gh pr merge --auto --merge.
-  8 watch    30초마다 본다. 충돌이면 1 부터 다시, CI 실패면 실패 잡 로그 끝을 찍고 멈춘다.
+  7 pr       없으면 draft 로 만들고, 있으면 본문을 고친 뒤 draft 로 돌린다(CI 가 초록이 될 때까지 머지되지 않게).
+  8 watch    30초마다 본다. 충돌이면 1 부터 다시. CI 실패면 실패 잡 로그 끝과 실패한 가드 이름을 찍고 멈춘다.
+             ci-ok 가 초록이면 본문 「## 가드」 절의 CI 몫을 CI 결과 줄로 바꾸고 ready → gh pr merge --auto --merge.
   9 cleanup  머지되면 워크트리·로컬·원격 브랜치를 지우고 원래 체크아웃을 pull --ff-only.
 
-옵션: --dry-run(아무것도 바꾸지 않고 계획만), --no-watch(7 까지), --skip-guards(걸린 실행 검사가 0개일 때만),
---rerun 이름,…(그 가드만 다시 돌려 앞 결과와 합침), --only 이름,…(guards.py --only 로 넘김), --auto-lists.
+옵션: --dry-run(아무것도 바꾸지 않고 계획만), --no-watch(7 까지), --skip-guards(로컬 몫이 0개일 때만),
+--rerun 이름,…(로컬 몫은 그 가드만 다시 돌려 앞 결과와 합치고, CI 몫이면 그 PR 의 마지막 CI 실행에서 실패한 잡만 다시),
+--only 이름,…(본문에 `가드: 더함` 줄로 넣어 CI 가 그 가드를 더 돌림. --local-guards 면 guards.py --only),
+--local-guards(디버그용: CI 몫까지 모두 로컬에서 돌리고 결과 줄을 씀), --auto-lists.
 GH_TOKEN 이 없으면 `gh auth token -u perfectacle` 을 명령마다 넘긴다(전역 계정은 바꾸지 않는다).
 """
 import argparse
@@ -32,6 +37,7 @@ import shutil
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -51,6 +57,10 @@ RESULT = re.compile(r'^- \[([x ])\] ([a-z0-9-]+): (.*)$')
 GLOBAL_INPUTS = {'uv.lock', 'pyproject.toml', '.python-version'}
 FAILED_CHECK = {'FAILURE', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE', 'ERROR'}
 POLL = 30
+# ci.yml 의 CI 가드 잡. 부른 워크플로의 잡은 체크 이름이 「pr-guards / …」
+CI_JOB = 'pr-guards'
+CI_PENDING = '- CI 가 돌림(pr-guards 잡, 초록이 되면 ship.py 가 결과 줄로 바꿈): '
+CI_STATUS = re.compile(r'([a-z0-9]+(?:-[a-z0-9]+)+): failed \(')
 
 
 class Stop(Exception):
@@ -181,29 +191,72 @@ def sort_journal_lists(text):
 
 
 def guard_section(lines, full_lines=()):
+    """`## 가드` 절. full_lines 는 넓히는 줄(`가드: 전체`·`가드: 더함`)."""
     body = list(full_lines) + ([''] if full_lines else []) + (list(lines) or ['걸리는 실행 검사 없음.'])
     return ['## 가드', '', *body]
 
 
 def build_body(body, lines):
-    """본문의 「## 가드」 절을 결과 줄로 바꾸거나(없으면 끝에 넣고), 🤖 줄을 맨 끝에 하나 둔다. 옛 절의 `가드: 전체`
-    줄은 남긴다(넓힌 판정을 지우면 CI 가 좁게 본다)."""
+    """본문의 「## 가드」 절을 결과 줄로 바꾸거나(없으면 끝에 넣고), 🤖 줄을 맨 끝에 하나 둔다. 옛 절의 넓히는 줄
+    (`가드: 전체`·`가드: 더함`)은 남긴다(넓힌 판정을 지우면 CI 가 좁게 본다)."""
     rest = [x for x in body.rstrip('\n').split('\n') if not x.startswith('🤖 Generated with')]
     start = next((i for i, x in enumerate(rest) if re.match(r'^## 가드\s*$', x)), None)
     if start is None:
         while rest and not rest[-1].strip():
             rest.pop()
-        full = [x for x in rest if guards.FULL_LINE.match(x)]
-        rest = [x for x in rest if not guards.FULL_LINE.match(x)]
+        full = [x for x in rest if widens(x)]
+        rest = [x for x in rest if not widens(x)]
         rest += [''] + guard_section(lines, full)
     else:
         end = next((i for i in range(start + 1, len(rest)) if rest[i].startswith('## ')), len(rest))
-        full = [x for x in rest[start:end] if guards.FULL_LINE.match(x)]
+        full = [x for x in rest[start:end] if widens(x)]
         new = guard_section(lines, full) + ([''] if end < len(rest) else [])
         rest = rest[:start] + new + rest[end:]
         while rest and not rest[-1].strip():
             rest.pop()
     return '\n'.join(rest + ['', ROBOT]) + '\n'
+
+
+def widens(line):
+    return bool(guards.FULL_LINE.match(line) or guards.EXTRA_LINE.match(line))
+
+
+def add_extra(body, names):
+    """본문에 `가드: 더함 …` 줄이 names 를 모두 담게 한다(없는 이름만 새 줄로, 「## 가드」 절이 있으면 그 맨 위에)."""
+    missing = [n for n in names if n not in guards.extra_names(body)]
+    if not missing:
+        return body
+    line = f'가드: 더함 {", ".join(missing)}'
+    lines = body.rstrip('\n').split('\n')
+    at = next((i + 1 for i, x in enumerate(lines) if re.match(r'^## 가드\s*$', x)), None)
+    if at is None:
+        return body.rstrip('\n') + f'\n\n{line}\n'
+    return '\n'.join(lines[:at] + ['', line] + lines[at:]) + '\n'
+
+
+def ci_failed_guards(log):
+    """CI 조각 로그(gh run view --log-failed)에서 실패한 가드 이름."""
+    return list(dict.fromkeys(m[1] for m in CI_STATUS.finditer(log or '')))
+
+
+def ci_result_lines(rows, names, url):
+    """조각 JSON 의 rows 에서 CI 몫 가드마다 본문 결과 줄. ci-ok 가 초록일 때만 부르므로 행이 없는 가드도 통과다."""
+    by = {r['name']: r for r in rows}
+    out = {}
+    for n in names:
+        r = by.get(n)
+        detail = f'CI {r["detail"]}' if r and r.get('status') == 'passed' else 'CI pr-guards 잡 초록'
+        out[n] = f'- [x] {n}: 통과 ({detail}, {url})' if url else f'- [x] {n}: 통과 ({detail})'
+    return out
+
+
+def iso_secs(a, b):
+    """GitHub ISO 시각 두 개 사이 초."""
+    try:
+        f = lambda s: datetime.fromisoformat(s.replace('Z', '+00:00'))  # noqa: E731
+        return (f(b) - f(a)).total_seconds()
+    except (AttributeError, ValueError):
+        return None
 
 
 def remote_decision(known_local, prs):
@@ -325,6 +378,8 @@ class Ship:
         self.branch = None
         self.pr = None
         self.lines = {}
+        self.ci = []
+        self.ci_secs = None
         self.auto = False
         self.token = None
         self.step = 'preflight'
@@ -531,7 +586,24 @@ class Ship:
             raise Stop('guards', f'guards.toml 문제: {problems[0]}')
         changed = self.changed()
         edited = self.edited(BASE, 'HEAD', changed, merge_base=True)
-        return guards.triggered(checks, changed, edited, full)
+        hit = guards.triggered(checks, changed, edited, full)
+        extra, bad = guards.pick(checks, ','.join(self.extra()))
+        if bad:
+            raise Stop('guards', bad[0])
+        return hit + [c for c in extra if c not in hit]
+
+    def extra(self):
+        """CI 가 더 돌릴 가드: 본문의 `가드: 더함` 줄과 --only(--local-guards 가 아닐 때)."""
+        names = guards.extra_names(self.args.body.read_text(encoding='utf-8'))
+        if self.args.only and not self.args.local_guards:
+            names += [n for n in self.args.only.split(',') if n and n not in names]
+        return names
+
+    def split(self, hit):
+        """(CI 몫, 로컬 몫). --local-guards 면 모두 로컬."""
+        if self.args.local_guards:
+            return [], hit
+        return guards.split_local(hit, guards.ci_local_needs(self.root / '.github' / 'workflows' / 'guard-shards.yml'))
 
     def edited(self, base, head, changed, merge_base=False):
         mb = self.git('merge-base', base, head).strip() if merge_base else base
@@ -561,12 +633,15 @@ class Ship:
     def guards(self):
         self.step = 'guards'
         full = self.full()
-        hit = self.hit(full)
+        ci, hit = self.split(self.hit(full))
+        self.ci = [c['name'] for c in ci]
+        if self.ci:
+            self.say(f'CI 몫 {len(self.ci)}개(PR 의 CI pr-guards 잡이 돌림): {", ".join(self.ci)}')
         names = [c['name'] for c in hit]
         if self.args.skip_guards:
             if hit:
-                raise Stop('guards', f'--skip-guards 는 걸린 실행 검사가 0개일 때만(걸림: {", ".join(names)})')
-            self.say('걸린 실행 검사 없음, 건너뜀')
+                raise Stop('guards', f'--skip-guards 는 로컬 몫이 0개일 때만(로컬 몫: {", ".join(names)})')
+            self.say('로컬 몫 없음, 건너뜀')
             self.lines = {}
             return
         state = self.load_state()
@@ -583,11 +658,11 @@ class Ship:
         else:
             todo = guards_to_run(hit, stored, touched, edited)
         if self.args.rerun:
-            todo = list(dict.fromkeys(todo + [n for n in self.args.rerun.split(',') if n]))
-        if self.args.only:
+            todo = list(dict.fromkeys(todo + [n for n in self.args.rerun.split(',') if n in names]))
+        if self.args.only and self.args.local_guards:
             todo = [n for n in self.args.only.split(',') if n]
         if not hit and not todo:
-            self.say('걸린 실행 검사 없음')
+            self.say('로컬 몫 없음' if self.ci else '걸린 실행 검사 없음')
             self.lines = {}
             self.save_state(head, {})
             return
@@ -607,7 +682,7 @@ class Ship:
             cmd += ['--only', ','.join(todo)]
         log = self.root / 'work' / 'ship' / 'guards.log'
         log.parent.mkdir(parents=True, exist_ok=True)
-        self.say(f'{len(todo)}개 돌림: {", ".join(todo)} (로그 {log.relative_to(self.root)})')
+        self.say(f'로컬 {len(todo)}개 돌림: {", ".join(todo)} (로그 {log.relative_to(self.root)})')
         text = []
         with log.open('w', encoding='utf-8') as f:
             proc = subprocess.Popen([sys.executable, '-u', *cmd], cwd=self.root, stdout=subprocess.PIPE,
@@ -632,13 +707,24 @@ class Ship:
                 self.out(f'  실패: {v or n + " (결과 줄 없음)"}')
             raise Stop('guards', f'실패 {",".join(bad)} — 고친 뒤 다시, 또는 --rerun {",".join(bad)}')
         self.lines = {n: merged[n] for n in names}
-        self.say(f'{len(names)}개 통과')
+        self.say(f'로컬 {len(names)}개 통과')
 
     # 5
+    def section_lines(self, ci_lines=None):
+        """「## 가드」 절 줄: 로컬 몫 결과 줄, 그리고 CI 몫(결과 줄 또는 돌릴 목록 한 줄)."""
+        lines = list(self.lines.values())
+        if ci_lines:
+            lines += [ci_lines[n] for n in self.ci]
+        elif self.ci:
+            lines.append(CI_PENDING + ', '.join(self.ci))
+        return lines
+
     def body(self):
         self.step = 'body'
         text = self.args.body.read_text(encoding='utf-8')
-        new = build_body(text, list(self.lines.values()))
+        if self.args.only and not self.args.local_guards:
+            text = add_extra(text, [n for n in self.args.only.split(',') if n])
+        new = build_body(text, self.section_lines())
         if self.args.dry_run:
             sec = new.split('## 가드', 1)[1].split('\n## ', 1)[0].replace(ROBOT, '').strip()
             self.say('가드 절: ' + ' / '.join(sec.splitlines()))
@@ -646,7 +732,7 @@ class Ship:
         if new != text:
             self.args.body.write_text(new, encoding='utf-8')
         r = self.py('tools/guards.py', '--base', BASE, '--pr-body', str(self.args.body.resolve()),
-                    *(['--full'] if self.args.full else []))
+                    *(['--full'] if self.args.full else []), *([] if self.args.local_guards else ['--local-only']))
         if r.returncode:
             for x in [y for y in r.stdout.splitlines() if y.startswith('오류:')][:10]:
                 self.out(f'  {x}')
@@ -680,6 +766,7 @@ class Ship:
             self.git('branch', '-m', target)
             self.say(f'원격 {self.branch} 는 이 작업 것이 아님: 브랜치를 {target} 로 바꿈')
             self.branch = target
+        self.pushed = remote != self.head()
         lease = [f'--force-with-lease=refs/heads/{target}:{remote}'] if plan == 'force' else []
         self.git('push', '-q', *lease, '-u', 'origin', f'HEAD:refs/heads/{target}', env=self.gh_env())
         self.say(f'{target} ' + ('덮어 올림(--force-with-lease)' if plan == 'force' else '올림'))
@@ -688,32 +775,68 @@ class Ship:
     def open_pr(self):
         self.step = 'pr'
         prs = json.loads(self.gh(['pr', 'list', '--head', self.branch, '--state', 'open',
-                                  '--json', 'number,body']).stdout or '[]')
+                                  '--json', 'number,body,isDraft']).stdout or '[]')
         body = self.args.body.read_text(encoding='utf-8')
         if self.args.dry_run:
             self.say(f'#{prs[0]["number"]} 본문 고침' if prs else 'PR 새로 만듦')
             return
         if prs:
             self.pr = prs[0]['number']
-            # 본문을 고치면 CI 가 처음부터 다시 돌므로(GUARD-02) 같으면 건드리지 않는다
+            # 머지는 CI 가 초록이 된 뒤 watch 가 ready 와 함께 건다
+            if not prs[0].get('isDraft'):
+                self.gh(['pr', 'ready', str(self.pr), '--undo'], check=False)
+                self.say(f'#{self.pr} draft 로 돌림(CI 초록 뒤 다시 ready)')
             if prs[0].get('body', '').strip() != body.strip():
                 self.gh(['pr', 'edit', str(self.pr), '--body-file', str(self.args.body)])
                 self.say(f'#{self.pr} 본문 고침')
+                if not getattr(self, 'pushed', True):
+                    self.rerun_job('required-checks')
             else:
                 self.say(f'#{self.pr} 본문 그대로')
         else:
             if not self.args.title:
                 raise Stop('pr', 'PR 을 새로 만들려면 --title')
-            r = self.gh(['pr', 'create', '--base', 'main', '--head', self.branch, '--title', self.args.title,
+            r = self.gh(['pr', 'create', '--draft', '--base', 'main', '--head', self.branch, '--title', self.args.title,
                          '--body-file', str(self.args.body)])
             m = re.search(r'/pull/(\d+)', r.stdout)
             if not m:
                 raise Stop('pr', f'PR 번호를 못 읽음: {r.stdout.strip()[-200:]}')
             self.pr = int(m[1])
-            self.say(f'#{self.pr} 만듦')
-        r = self.gh(['pr', 'merge', str(self.pr), '--auto', '--merge'], check=False)
-        self.auto = r.returncode == 0
-        self.say('auto-merge 켬' if self.auto else 'auto-merge 못 켬: ci-ok 초록이면 직접 머지')
+            self.say(f'#{self.pr} draft 로 만듦(CI 초록이면 ready·auto-merge)')
+        self.auto = False
+
+    def ci_run(self):
+        """이 PR head 의 마지막 ci 워크플로 실행 {databaseId, status, conclusion} 또는 None."""
+        r = self.gh(['run', 'list', '--branch', self.branch, '--workflow', 'ci.yml', '--limit', '10',
+                     '--json', 'databaseId,headSha,status,conclusion'], check=False)
+        head = self.head()
+        runs = [x for x in json.loads(r.stdout or '[]') if x.get('headSha') == head] if r.returncode == 0 else []
+        return runs[0] if runs else None
+
+    def rerun_job(self, name):
+        """마지막 CI 실행의 잡 하나(와 그 뒤 잡)만 다시. 본문만 고쳐 새 커밋이 없을 때 required-checks 를 다시 읽힌다."""
+        run = self.ci_run()
+        if not run or run.get('status') != 'completed':
+            self.say(f'{name} 다시 돌릴 끝난 CI 실행이 없음(돌고 있는 실행이 새 본문을 읽음)')
+            return
+        r = self.gh(['run', 'view', str(run['databaseId']), '--json', 'jobs'], check=False)
+        jobs = json.loads(r.stdout or '{}').get('jobs', []) if r.returncode == 0 else []
+        job = next((j for j in jobs if j.get('name') == name), None)
+        if job:
+            self.gh(['run', 'rerun', '--job', str(job['databaseId'])], check=False)
+            self.say(f'CI {name} 잡만 다시(본문을 새로 읽음)')
+
+    def rerun_ci(self):
+        """--rerun 에 CI 몫 가드가 있으면 마지막 CI 실행에서 실패한 잡만 다시(통과 기록이 있는 가드는 캐시로 건너뜀)."""
+        names = [n for n in (self.args.rerun or '').split(',') if n in self.ci]
+        if not names:
+            return
+        run = self.ci_run()
+        if not run or run.get('status') != 'completed' or run.get('conclusion') == 'success':
+            self.say(f'CI 몫 {",".join(names)}: 다시 돌릴 실패한 실행 없음(새 커밋의 실행이 돌거나 이미 초록)')
+            return
+        self.gh(['run', 'rerun', str(run['databaseId']), '--failed'])
+        self.say(f'CI 실행 {run["databaseId"]} 의 실패한 잡만 다시({",".join(names)})')
 
     def cycle(self):
         self.rebase()
@@ -731,7 +854,7 @@ class Ship:
         last = None
         while True:
             v = json.loads(self.gh(['pr', 'view', str(self.pr), '--json',
-                                    'state,mergeable,mergeStateStatus,statusCheckRollup']).stdout)
+                                    'state,mergeable,mergeStateStatus,statusCheckRollup,isDraft']).stdout)
             if v['state'] == 'MERGED':
                 self.say('MERGED')
                 return
@@ -745,17 +868,13 @@ class Ship:
             checks = v.get('statusCheckRollup') or []
             bad = [c for c in checks if c.get('conclusion') in FAILED_CHECK]
             if bad:
-                for c in bad:
-                    self.out(f'  실패: {c.get("name")} {c.get("detailsUrl", "")}')
-                    job = check_job(c.get('detailsUrl'))
-                    if job:
-                        r = self.gh(['run', 'view', '--job', job, '--log-failed'], check=False)
-                        for x in r.stdout.strip().splitlines()[-25:]:
-                            self.out(f'    {x}')
-                raise Stop('watch', f'CI 실패 {",".join(c.get("name", "?") for c in bad)}')
+                self.fail(bad)
             done = sum(1 for c in checks if c.get('status') == 'COMPLETED')
             ok = checks and all(c.get('conclusion') in ('SUCCESS', 'SKIPPED', 'NEUTRAL') for c in checks)
-            if ok and not self.auto and v.get('mergeStateStatus') == 'CLEAN':
+            green = any(c.get('name') == 'ci-ok' and c.get('conclusion') == 'SUCCESS' for c in checks)
+            if green and v.get('isDraft'):
+                self.finish(checks)
+            elif ok and not self.auto and v.get('mergeStateStatus') == 'CLEAN':
                 self.gh(['pr', 'merge', str(self.pr), '--merge'])
                 self.auto = True
             now = f'검사 {done}/{len(checks)} 끝, {v.get("mergeStateStatus")}'
@@ -765,6 +884,64 @@ class Ship:
             if self.clock() > deadline:
                 raise Stop('watch', f'{fmt_secs(self.args.watch_timeout)} 넘게 머지 안 됨(#{self.pr})')
             self.sleep(POLL)
+
+    def fail(self, bad):
+        """CI 실패: 잡마다 로그 끝, CI 가드 잡이면 실패한 가드 이름과 다시 돌리는 법."""
+        names, urls = [], []
+        for c in bad:
+            self.out(f'  실패: {c.get("name")} {c.get("detailsUrl", "")}')
+            job = check_job(c.get('detailsUrl'))
+            if not job:
+                continue
+            r = self.gh(['run', 'view', '--job', job, '--log-failed'], check=False)
+            for x in r.stdout.strip().splitlines()[-25:]:
+                self.out(f'    {x}')
+            if (c.get('name') or '').startswith(CI_JOB + ' /'):
+                names += [n for n in ci_failed_guards(r.stdout) if n not in names]
+                urls.append(c.get('detailsUrl', ''))
+        hint = ''
+        if names:
+            hint = f' — 실패 가드 {",".join(names)}: 고쳐 push 하거나 --rerun {",".join(names)} (로그 {urls[0]})'
+        elif urls:
+            hint = f' — CI 가드 잡 실패(로그 {urls[0]})'
+        raise Stop('watch', f'CI 실패 {",".join(c.get("name", "?") for c in bad)}{hint}')
+
+    def finish(self, checks):
+        """ci-ok 초록: 본문의 CI 몫 줄을 CI 결과 줄로 바꾸고 ready, auto-merge."""
+        runs = [c for c in checks if (c.get('name') or '').startswith(CI_JOB + ' /')]
+        if runs:
+            starts = [c['startedAt'] for c in runs if c.get('startedAt')]
+            ends = [c['completedAt'] for c in runs if c.get('completedAt')]
+            if starts and ends:
+                self.ci_secs = iso_secs(min(starts), max(ends))
+        if self.ci:
+            run = next((m[1] for c in runs if (m := re.search(r'/actions/runs/(\d+)', c.get('detailsUrl') or ''))), None)
+            url = next((c.get('detailsUrl') for c in runs if c.get('detailsUrl')), '')
+            url = re.sub(r'/job/\d+.*$', '', url)
+            rows = self.ci_rows(run) if run else []
+            lines = ci_result_lines(rows, self.ci, url)
+            text = build_body(self.args.body.read_text(encoding='utf-8'), self.section_lines(lines))
+            self.args.body.write_text(text, encoding='utf-8')
+            self.gh(['pr', 'edit', str(self.pr), '--body-file', str(self.args.body)])
+            self.say(f'본문 가드 절에 CI 결과 {len(lines)}줄' + (f' (CI 가드 {fmt_secs(self.ci_secs)})' if self.ci_secs else ''))
+        self.gh(['pr', 'ready', str(self.pr)])
+        r = self.gh(['pr', 'merge', str(self.pr), '--auto', '--merge'], check=False)
+        self.auto = r.returncode == 0
+        self.say('ready, auto-merge 켬' if self.auto else 'ready, auto-merge 못 켬: CLEAN 이면 직접 머지')
+
+    def ci_rows(self, run):
+        """CI 실행의 조각 결과(guard-shard-pr-* artifact 의 shard-*.json rows). 못 받으면 빈 것."""
+        d = self.root / 'work' / 'ship' / 'ci' / str(run)
+        shutil.rmtree(d, ignore_errors=True)
+        r = self.gh(['run', 'download', str(run), '--pattern', 'guard-shard-pr-*', '--dir', str(d)], check=False)
+        rows = []
+        if r.returncode == 0:
+            for f in sorted(d.glob('*/shard-*.json')):
+                try:
+                    rows += json.loads(f.read_text(encoding='utf-8')).get('rows', [])
+                except (OSError, ValueError):
+                    continue
+        return rows
 
     # 9
     def cleanup(self):
@@ -789,7 +966,9 @@ class Ship:
     def summary(self):
         lines = list(self.lines.values())
         cached = sum('캐시:' in x for x in lines)
-        g = f'가드 {len(lines)}개 통과' + (f'(캐시 {cached})' if cached else '') if lines else '가드 없음'
+        g = f'로컬 가드 {len(lines)}개 통과' + (f'(캐시 {cached})' if cached else '') if lines else '로컬 가드 없음'
+        if self.ci:
+            g += f' · CI 가드 {len(self.ci)}개' + (f' {fmt_secs(self.ci_secs)}' if self.ci_secs else '')
         self.out(f'요약: PR #{self.pr} · {g} · {fmt_secs(self.clock() - self.t0)}')
 
     def run(self):
@@ -804,6 +983,7 @@ class Ship:
                 self.summary()
                 self.out(f'SHIP: open #{self.pr}')
                 return 0
+            self.rerun_ci()
             self.watch()
             self.cleanup()
             self.summary()
@@ -820,9 +1000,14 @@ def parse(argv=None):
     ap.add_argument('--body', type=Path, required=True, help='PR 본문 파일(「## 가드」 절과 🤖 줄을 고쳐 씀)')
     ap.add_argument('--dry-run', action='store_true', help='아무것도 바꾸지 않고 단계마다 할 일만 찍음')
     ap.add_argument('--watch', action=argparse.BooleanOptionalAction, default=True, help='머지까지 지켜보고 정리(기본 켬)')
-    ap.add_argument('--skip-guards', action='store_true', help='실행 검사를 건너뜀(걸린 검사가 0개일 때만)')
-    ap.add_argument('--rerun', metavar='이름,…', help='이 가드만 다시 돌려 앞 결과와 합침')
-    ap.add_argument('--only', metavar='이름,…', help='guards.py --only 로 넘김(guards.py 를 바꾼 PR 의 대표 셋)')
+    ap.add_argument('--skip-guards', action='store_true', help='로컬 몫 실행 검사를 건너뜀(로컬 몫이 0개일 때만)')
+    ap.add_argument('--rerun', metavar='이름,…',
+                    help='로컬 몫은 이 가드만 다시 돌려 앞 결과와 합침, CI 몫이면 마지막 CI 실행의 실패한 잡만 다시')
+    ap.add_argument('--only', metavar='이름,…',
+                    help='본문 `가드: 더함` 줄로 CI 가 이 가드를 더 돌림(guards.py 를 바꾼 PR 의 대표 셋). '
+                         '--local-guards 면 guards.py --only')
+    ap.add_argument('--local-guards', action='store_true',
+                    help='디버그용: CI 몫까지 모두 로컬 에뮬레이터로 돌리고 본문에 결과 줄(CI 가드 잡은 그대로 돈다)')
     ap.add_argument('--full', action='store_true', help='guards.py --full(본문 `가드: 전체` 와 같음)')
     ap.add_argument('--auto-lists', action='store_true', help='README·todo 목록 줄 충돌은 양쪽 줄을 다 살려 품')
     ap.add_argument('--load-wait', type=int, default=1800, help='가드 전에 부하가 내리기를 기다릴 최대 초')
