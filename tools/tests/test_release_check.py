@@ -189,6 +189,25 @@ class ReleaseCheckTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, '없음'):
                 rc.load_ci(d)
 
+    def test_load_ci_marks_cached_runs_and_skips_pass_records(self):
+        """캐시를 쓴 조각(release-gate rehearse)이 하나라도 있으면 cached. 조각이 함께 올리는 통과 기록(results/)은 결과로 읽지 않는다."""
+        row = {'name': 'a', 'file': 'g', 'status': 'passed', 'detail': '9초'}
+        with tempfile.TemporaryDirectory() as d:
+            self._ci(d, [([1, 1], [row], [])])
+            self.assertFalse(rc.load_ci(d)['cached'])
+            res = Path(d) / 'release-gate-shard-0' / 'results'
+            (res / 'built').mkdir(parents=True)
+            (res / 'a-0123.json').write_text(json.dumps({'when': '2026-11-16 01:00', 'detail': '9초'}))
+            (res / 'built' / 'a-0123.json').write_text(json.dumps([{'when': 'x', 'detail': 'y', 'trace': {}}]))
+            self.assertEqual([r['name'] for r in rc.load_ci(d)['rows']], ['a'])
+            f = Path(d) / 'release-gate-shard-0' / 'shard-0.json'
+            f.write_text(json.dumps(dict(json.loads(f.read_text()), cached=True)))
+            ci = rc.load_ci(d)
+        self.assertTrue(ci['cached'])
+        text, ok = rc.ci_summary(ci)
+        self.assertTrue(ok)
+        self.assertIn('연습 통과', text)
+
     def test_ci_summary_fails_on_skipped(self):
         ci = {'commit': 'c', 'shards': 1, 'local': ['m'],
               'rows': [{'name': 'a', 'status': 'passed', 'detail': '1초'}]}

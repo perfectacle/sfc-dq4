@@ -1,0 +1,164 @@
+name: Ship ROM build cache
+description: >-
+  One encrypted cache (enc-cache) per ship ROM build stage, so a change to one stage keeps
+  the others hitting. restore puts every stage's dq4buildcache entries into calls; save
+  stores the entries that tools/ci_cache.py ship-build copied into chunks/<stage>. The
+  stage names are tools/ci_cache.py SHIP_LABELS (test_release_gate_workflow checks both).
+  Format: sfc/dq4/docs/dq4-release-check-format.md
+
+inputs:
+  op:
+    description: restore or save
+    required: true
+  age_key:
+    description: age private key (secret CI_ROM_AGE_KEY)
+    required: true
+  calls:
+    description: dq4buildcache folder to restore into (DQ4_BUILD_CACHE/calls)
+    required: true
+  chunks:
+    description: Folder ship-build copied the stage entries into (op save)
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Restore stage titlelayers
+      if: inputs.op == 'restore'
+      uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+      with:
+        op: restore
+        name: ship-titlelayers
+        prefix: ship-titlelayers
+        dir: ${{ inputs.calls }}
+        age_key: ${{ inputs.age_key }}
+
+    - name: Restore stage chapter1-messages
+      if: inputs.op == 'restore'
+      uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+      with:
+        op: restore
+        name: ship-chapter1-messages
+        prefix: ship-chapter1-messages
+        dir: ${{ inputs.calls }}
+        age_key: ${{ inputs.age_key }}
+
+    - name: Restore stage titlelayerpatch
+      if: inputs.op == 'restore'
+      uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+      with:
+        op: restore
+        name: ship-titlelayerpatch
+        prefix: ship-titlelayerpatch
+        dir: ${{ inputs.calls }}
+        age_key: ${{ inputs.age_key }}
+
+    - name: Restore stage overture-build
+      if: inputs.op == 'restore'
+      uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+      with:
+        op: restore
+        name: ship-overture-build
+        prefix: ship-overture-build
+        dir: ${{ inputs.calls }}
+        age_key: ${{ inputs.age_key }}
+
+    - name: Restore stage menupatch-build
+      if: inputs.op == 'restore'
+      uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+      with:
+        op: restore
+        name: ship-menupatch-build
+        prefix: ship-menupatch-build
+        dir: ${{ inputs.calls }}
+        age_key: ${{ inputs.age_key }}
+
+    - name: Restore stage chapter1-build
+      if: inputs.op == 'restore'
+      uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+      with:
+        op: restore
+        name: ship-chapter1-build
+        prefix: ship-chapter1-build
+        dir: ${{ inputs.calls }}
+        age_key: ${{ inputs.age_key }}
+
+    - name: Restore stage other
+      if: inputs.op == 'restore'
+      uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+      with:
+        op: restore
+        name: ship-other
+        prefix: ship-other
+        dir: ${{ inputs.calls }}
+        age_key: ${{ inputs.age_key }}
+
+    - name: Save stage titlelayers
+      if: inputs.op == 'save'
+      uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+      with:
+        op: save
+        name: ship-titlelayers
+        prefix: ship-titlelayers
+        dir: ${{ inputs.chunks }}/titlelayers
+        age_key: ${{ inputs.age_key }}
+
+    - name: Save stage chapter1-messages
+      if: inputs.op == 'save'
+      uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+      with:
+        op: save
+        name: ship-chapter1-messages
+        prefix: ship-chapter1-messages
+        dir: ${{ inputs.chunks }}/chapter1-messages
+        age_key: ${{ inputs.age_key }}
+
+    - name: Save stage titlelayerpatch
+      if: inputs.op == 'save'
+      uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+      with:
+        op: save
+        name: ship-titlelayerpatch
+        prefix: ship-titlelayerpatch
+        dir: ${{ inputs.chunks }}/titlelayerpatch
+        age_key: ${{ inputs.age_key }}
+
+    - name: Save stage overture-build
+      if: inputs.op == 'save'
+      uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+      with:
+        op: save
+        name: ship-overture-build
+        prefix: ship-overture-build
+        dir: ${{ inputs.chunks }}/overture-build
+        age_key: ${{ inputs.age_key }}
+
+    - name: Save stage menupatch-build
+      if: inputs.op == 'save'
+      uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+      with:
+        op: save
+        name: ship-menupatch-build
+        prefix: ship-menupatch-build
+        dir: ${{ inputs.chunks }}/menupatch-build
+        age_key: ${{ inputs.age_key }}
+
+    - name: Save stage chapter1-build
+      if: inputs.op == 'save'
+      uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+      with:
+        op: save
+        name: ship-chapter1-build
+        prefix: ship-chapter1-build
+        dir: ${{ inputs.chunks }}/chapter1-build
+        age_key: ${{ inputs.age_key }}
+
+    - name: Save stage other
+      if: inputs.op == 'save'
+      uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+      with:
+        op: save
+        name: ship-other
+        prefix: ship-other
+        dir: ${{ inputs.chunks }}/other
+        age_key: ${{ inputs.age_key }}

@@ -743,9 +743,9 @@ def record_times(reports, path=SHARD_TIMES):
     return n
 
 
-def result_json(done, local, shard=None):
-    """--json 결과: 커밋, 조각, 돈 검사의 결과, 로컬 몫(뺀 검사)."""
-    return {'commit': git('rev-parse', 'HEAD').strip(), 'shard': list(shard) if shard else None,
+def result_json(done, local, shard=None, cached=False):
+    """--json 결과: 커밋, 조각, 캐시를 썼는가, 돈 검사의 결과, 로컬 몫(뺀 검사)."""
+    return {'commit': git('rev-parse', 'HEAD').strip(), 'shard': list(shard) if shard else None, 'cached': cached,
             'rows': [{'name': c['name'], 'file': c['file'], 'status': s, 'detail': d} for c, s, d in done],
             'local': [{'name': c['name'], 'file': c['file'], 'needs': c.get('needs', [])} for c in local]}
 
@@ -754,7 +754,8 @@ def run_all(hit, parallel, timeout, no_cache=False, out=None, local=(), shard=No
     """걸린 검사를 parallel 개씩 함께 돌리고 본문 결과 줄을 찍는다. out 이 있으면 결과를 JSON 으로. 모두 통과하면 0."""
     done = run_many(hit, parallel, timeout, no_cache)
     if out:
-        write_atomic(Path(out), json.dumps(result_json(done, local, shard), ensure_ascii=False, indent=1) + '\n')
+        write_atomic(Path(out), json.dumps(result_json(done, local, shard, not no_cache), ensure_ascii=False, indent=1)
+                     + '\n')
     print('\nPR 본문 결과 줄:')
     for c, status, detail in done:
         mark, word = ('x', '통과') if status == 'passed' else (' ', '실패' if status == 'failed' else '돌리지 않음')

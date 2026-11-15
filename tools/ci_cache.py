@@ -1,0 +1,229 @@
+"""CI 캐시의 암호화 묶음과 출하 롬 빌드 단계 조각. GitHub 러너에서 composite action(.github/actions/enc-cache·
+ship-cache)이 부른다. 형식: sfc/dq4/docs/dq4-release-check-format.md 「CI 캐시」.
+
+퍼블릭 저장소라 포크 PR 워크플로도 기본 브랜치의 actions/cache 를 읽는다. 그래서 롬에서 나온 바이트(빌드 단계 결과·
+사운드 변환·세이브스테이트·읽은 롬 바이트)는 폴더를 tar+zstd 로 묶어 CI_ROM_AGE_KEY 의 공개 키로 age 암호화한 파일 하나로만
+캐시에 넣고, 되살릴 때 같은 키로 푼다. 묶음 키는 「접두어-내용 해시」 라 내용이 같으면 다시 저장하지 않는다.
+
+  python tools/ci_cache.py unpack --name N --dir D --matched KEY
+                                                           $RUNNER_TEMP/enc-cache/N.age 가 있으면 D 에 풀고 되살린 키를 적어 둠
+  python tools/ci_cache.py pack --name N --dir D --prefix P [--max-mb M] [--exclude 이름,…]
+                                                           D 를 묶어 암호화하고 save=true·key=P-<해시> 를 GITHUB_OUTPUT 에.
+                                                           키가 이 잡에서 N 으로 되살린 키와 같거나 D 가 비었으면 save=false
+  python tools/ci_cache.py prune --dir D --since FILE      D 바로 아래에서 FILE 보다 오래된 칸을 지움
+  python tools/ci_cache.py ship-build --out work/ch1 --chunks DIR [dq4build 인자…]
+                                                           dq4build.py 를 돌리고, 쓴 빌드 단계 캐시 칸을 단계 이름별로
+                                                           DIR/<단계>/<칸> 에 복사(단계 하나가 바뀌어도 나머지 묶음은 그대로)
+"""
+import argparse
+import hashlib
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
+
+ROOT = Path(__file__).resolve().parents[1]
+DQ4_TOOLS = ROOT / 'sfc' / 'dq4' / 'tools'
+# 출하 롬 빌드가 dq4buildcache 로 부르는 단계. .github/actions/ship-cache 가 이 이름마다 묶음 하나를 둔다
+# (test_release_gate_workflow 가 맞춰 봄). 목록에 없는 새 단계는 'other' 묶음에 든다
+SHIP_LABELS = ('titlelayers', 'chapter1-messages', 'titlelayerpatch', 'overture-build', 'menupatch-build',
+               'chapter1-build', 'other')
+KEY_LINE = re.compile(r'^AGE-SECRET-KEY-\S+$', re.M)
+
+
+def store():
+    temp = os.environ.get('RUNNER_TEMP')
+    if not temp:
+        raise SystemExit('RUNNER_TEMP 가 없음(GitHub Actions 러너에서 부른다)')
+    path = Path(temp) / 'enc-cache'
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def key_file():
+    """CI_ROM_AGE_KEY 를 0600 임시 파일로. 부른 쪽이 지운다. 값은 찍지 않고 가린다."""
+    text = os.environ.get('CI_ROM_AGE_KEY', '')
+    lines = KEY_LINE.findall(text)
+    if not lines:
+        raise SystemExit('::error::CI_ROM_AGE_KEY 에 age 개인 키 줄(AGE-SECRET-KEY-…)이 없음')
+    for line in lines:
+        print(f'::add-mask::{line}', flush=True)
+    fd, path = tempfile.mkstemp(prefix='age-', dir=store())
+    with os.fdopen(fd, 'w') as f:
+        f.write(text.strip() + '\n')
+    return Path(path)
+
+
+def files_of(folder, exclude=()):
+    """폴더 안 파일. exclude 는 빼는 맨 위 이름."""
+    folder = Path(folder)
+    if not folder.is_dir():
+        return []
+    return sorted(p for p in folder.rglob('*') if p.is_file() and p.relative_to(folder).parts[0] not in exclude)
+
+
+def content_hash(folder, exclude=()):
+    """폴더 안 파일의 상대 경로·내용 해시. 없거나 비었으면 None."""
+    folder = Path(folder)
+    files = files_of(folder, exclude)
+    if not files:
+        return None
+    h = hashlib.sha256()
+    for f in files:
+        with f.open('rb') as fh:
+            h.update(str(f.relative_to(folder)).encode() + b'\0' + hashlib.file_digest(fh, 'sha256').digest())
+    return h.hexdigest()[:40]
+
+
+def folder_bytes(folder, exclude=()):
+    return sum(p.stat().st_size for p in files_of(folder, exclude))
+
+
+def output(**kv):
+    target = os.environ.get('GITHUB_OUTPUT')
+    lines = ''.join(f'{k}={v}\n' for k, v in kv.items())
+    if target:
+        with open(target, 'a', encoding='utf-8') as f:
+            f.write(lines)
+    print(lines, end='')
+
+
+def pipe(cmd):
+    subprocess.run(['bash', '-o', 'pipefail', '-c', cmd], check=True)
+
+
+def unpack(name, folder, matched=''):
+    blob = store() / f'{name}.age'
+    (store() / f'{name}.matched').write_text(matched if blob.is_file() else '', encoding='utf-8')
+    if not blob.is_file():
+        print(f'{name}: 캐시 없음')
+        return
+    key = key_file()
+    try:
+        Path(folder).mkdir(parents=True, exist_ok=True)
+        pipe(f'age -d -i "{key}" "{blob}" | zstd -dc | tar -x --no-same-owner -C "{folder}" -f -')
+    finally:
+        key.unlink(missing_ok=True)
+        blob.unlink(missing_ok=True)
+    print(f'{name}: {folder} 에 풂({folder_bytes(folder) >> 20}MB)')
+
+
+def pack(name, folder, prefix, max_mb=0, exclude=()):
+    mark = store() / f'{name}.matched'
+    matched = mark.read_text(encoding='utf-8') if mark.is_file() else ''
+    digest = content_hash(folder, exclude)
+    if digest is None:
+        print(f'{name}: {folder} 가 비어 저장하지 않음')
+        return output(save='false', key='')
+    key = f'{prefix}-{digest}'
+    if key == matched:
+        print(f'{name}: 되살린 묶음과 내용이 같아 저장하지 않음')
+        return output(save='false', key=key)
+    size = folder_bytes(folder, exclude)
+    if max_mb and size > max_mb << 20:
+        print(f'::warning::{name}: {size >> 20}MB 가 한도 {max_mb}MB 를 넘어 저장하지 않음')
+        return output(save='false', key=key)
+    key_path = key_file()
+    blob = store() / f'{name}.age'
+    try:
+        recipient = subprocess.run(['age-keygen', '-y', str(key_path)], capture_output=True, text=True,
+                                   check=True).stdout.strip()
+    finally:
+        key_path.unlink(missing_ok=True)
+    skip = ''.join(f' --exclude="./{x}"' for x in exclude)
+    pipe(f'tar -C "{folder}"{skip} -cf - . | zstd -T0 -3 -q -c | age -r "{recipient}" -o "{blob}"')
+    print(f'{name}: {size >> 20}MB → 암호화 {blob.stat().st_size >> 20}MB, 키 {key}')
+    output(save='true', key=key)
+
+
+def prune(folder, since):
+    """folder 바로 아래 칸 가운데 since 파일보다 오래된 것(이 잡에서 쓰지 않은 것)을 지운다. 묶음이 실행마다 쌓이지 않게.
+    dq4buildcache 는 칸을 쓸 때 mtime 을 새로 하고, tar 로 되살린 칸은 저장 때의 mtime 을 지닌다."""
+    limit = Path(since).stat().st_mtime
+    gone = 0
+    for entry in Path(folder).iterdir() if Path(folder).is_dir() else []:
+        if entry.stat().st_mtime < limit:
+            shutil.rmtree(entry) if entry.is_dir() else entry.unlink()
+            gone += 1
+    print(f'{folder}: 이 잡에서 쓰지 않은 칸 {gone}개 지움')
+
+
+def label(tool, args):
+    stem = Path(tool).stem.removeprefix('dq4')
+    sub = args[0] if args and not args[0].startswith('-') else ''
+    name = f'{stem}-{sub}' if sub else stem
+    return name if name in SHIP_LABELS else 'other'
+
+
+def ship_build(out, chunks, extra):
+    """dq4build.main 을 이 프로세스에서 돌리며 dq4buildcache.run 이 쓴 칸을 적어 두었다가 단계별로 복사한다."""
+    sys.path.insert(0, str(DQ4_TOOLS))
+    import dq4buildcache
+    import dq4build
+    used, lock = [], threading.Lock()
+    original = dq4buildcache.run
+
+    def run(tool, *args, **kw):
+        result = original(tool, *args, **kw)
+        if dq4buildcache.cache_dir() is not None:
+            key, _ = dq4buildcache._key(Path(tool).resolve(), [str(a) for a in args])
+            if key:
+                with lock:
+                    used.append((label(tool, [str(a) for a in args]), key))
+        return result
+    dq4buildcache.run = run
+    sys.argv = ['dq4build.py', '--out', str(out), *extra]
+    try:
+        dq4build.main()
+    finally:
+        dq4buildcache.run = original
+    cache = dq4buildcache.cache_dir()
+    if cache is None:
+        return
+    shutil.rmtree(chunks, ignore_errors=True)
+    for name, key in used:
+        if (cache / key).is_dir():
+            shutil.copytree(cache / key, Path(chunks) / name / key, dirs_exist_ok=True)
+    print('빌드 단계 칸: ' + ', '.join(f'{n}={k[:12]}' for n, k in used))
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest='cmd', required=True)
+    p = sub.add_parser('unpack')
+    p.add_argument('--name', required=True)
+    p.add_argument('--dir', required=True)
+    p.add_argument('--matched', default='')
+    p = sub.add_parser('pack')
+    p.add_argument('--name', required=True)
+    p.add_argument('--dir', required=True)
+    p.add_argument('--prefix', required=True)
+    p.add_argument('--max-mb', type=int, default=0)
+    p.add_argument('--exclude', default='', help='묶지 않을 맨 위 이름(쉼표)')
+    p = sub.add_parser('prune')
+    p.add_argument('--dir', required=True)
+    p.add_argument('--since', required=True)
+    p = sub.add_parser('ship-build')
+    p.add_argument('--out', required=True)
+    p.add_argument('--chunks', required=True)
+    a, extra = ap.parse_known_args()
+    if a.cmd != 'ship-build' and extra:
+        ap.error(f'모르는 인자 {extra}')
+    if not re.fullmatch(r'[\w.-]+', getattr(a, 'name', 'x')):
+        ap.error('--name 은 글자·숫자·.-_ 만')
+    if a.cmd == 'unpack':
+        unpack(a.name, a.dir, a.matched)
+    elif a.cmd == 'pack':
+        pack(a.name, a.dir, a.prefix, a.max_mb, tuple(x for x in a.exclude.split(',') if x))
+    elif a.cmd == 'prune':
+        prune(a.dir, a.since)
+    else:
+        ship_build(a.out, a.chunks, extra)
+
+
+if __name__ == '__main__':
+    main()

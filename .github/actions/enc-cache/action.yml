@@ -1,0 +1,80 @@
+name: Encrypted cache
+description: >-
+  actions/cache for folders that hold ROM-derived bytes. The folder is stored only as one
+  age-encrypted tar (public key of CI_ROM_AGE_KEY), because fork pull requests can read the
+  base branch caches of this public repository. Keys are "<prefix>-<content hash>", so an
+  unchanged folder (same key as the one restored in this job) is not saved again and restore takes the newest key with the prefix.
+  Run from the repository root after age and zstd are installed (ci-roms does that).
+  Format: sfc/dq4/docs/dq4-release-check-format.md
+
+inputs:
+  op:
+    description: restore or save
+    required: true
+  name:
+    description: File name of the encrypted tar under $RUNNER_TEMP/enc-cache (letters, digits, .-_)
+    required: true
+  prefix:
+    description: Cache key prefix
+    required: true
+  dir:
+    description: Folder to restore into or save
+    required: true
+  age_key:
+    description: age private key (secret CI_ROM_AGE_KEY)
+    required: true
+  max_mb:
+    description: Do not save a folder larger than this many MB (op save, 0 = no limit)
+    default: '0'
+  exclude:
+    description: Comma-separated top-level names in dir to leave out (op save)
+    default: ''
+
+outputs:
+  matched:
+    description: Key the restore matched (empty on a miss)
+    value: ${{ steps.restore.outputs.cache-matched-key }}
+
+runs:
+  using: composite
+  steps:
+    - name: Restore the encrypted tar
+      id: restore
+      if: inputs.op == 'restore'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/enc-cache/${{ inputs.name }}.age
+        key: ${{ inputs.prefix }}-restore
+        restore-keys: ${{ inputs.prefix }}-
+
+    - name: Decrypt into the folder
+      if: inputs.op == 'restore'
+      shell: bash
+      env:
+        CI_ROM_AGE_KEY: ${{ inputs.age_key }}
+        NAME: ${{ inputs.name }}
+        DIR: ${{ inputs.dir }}
+        MATCHED: ${{ steps.restore.outputs.cache-matched-key }}
+      run: uv run --frozen python tools/ci_cache.py unpack --name "$NAME" --dir "$DIR" --matched "$MATCHED"
+
+    - name: Encrypt the folder
+      id: pack
+      if: inputs.op == 'save'
+      shell: bash
+      env:
+        CI_ROM_AGE_KEY: ${{ inputs.age_key }}
+        NAME: ${{ inputs.name }}
+        DIR: ${{ inputs.dir }}
+        PREFIX: ${{ inputs.prefix }}
+        MAX_MB: ${{ inputs.max_mb }}
+        EXCLUDE: ${{ inputs.exclude }}
+      run: |
+        uv run --frozen python tools/ci_cache.py pack --name "$NAME" --dir "$DIR" --prefix "$PREFIX" --max-mb "$MAX_MB" \
+          --exclude "$EXCLUDE"
+
+    - name: Save the encrypted tar
+      if: inputs.op == 'save' && steps.pack.outputs.save == 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/enc-cache/${{ inputs.name }}.age
+        key: ${{ steps.pack.outputs.key }}

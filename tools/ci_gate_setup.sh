@@ -4,7 +4,9 @@
 #   tools/ci_gate_setup.sh roms    암호화한 롬 묶음을 받아 rom/ 에 풀고, 롬 SHA-256 목록을 $RUNNER_TEMP/rom-hashes.txt 에
 #                                  (CI_ROM_TOKEN: 에셋 저장소 읽기 토큰, CI_ROM_AGE_KEY: age 개인 키)
 #   tools/ci_gate_setup.sh tools   asar·Galmuri·libretro 코어를 $RUNNER_TEMP/gate-tools 에 두고 ASAR·DQ4_GALMURI·DQ4_CORES 를
-#                                  $GITHUB_ENV 에(코어는 actions/cache 가 그 폴더를 되살렸으면 다시 빌드하지 않는다)
+#                                  $GITHUB_ENV 에(actions/cache 가 되살린 asar·코어는 다시 빌드하지 않고, 받아 둔 Galmuri zip 은
+#                                  해시가 맞으면 다시 받지 않는다)
+#   tools/ci_gate_setup.sh pins    도구 캐시 키에 쓸 고정 판(asar 커밋, Galmuri zip SHA-256)을 $GITHUB_OUTPUT 에
 #
 # 시크릿은 환경 변수로만 받는다. 이 스크립트는 그 값을 찍지 않으며 set -x 를 켜지 않는다.
 set -euo pipefail
@@ -70,12 +72,14 @@ tools() {
   fi
   "$TOOLS/asar/bin/asar" --version | head -1
 
-  local zip="$RUNNER_TEMP/galmuri.zip"
-  curl -fsSL -o "$zip" "$GALMURI_URL"
-  echo "$GALMURI_SHA256  $zip" | sha256sum -c --quiet -
+  local zip="$TOOLS/dl/galmuri.zip"
+  mkdir -p "$TOOLS/dl"
+  if ! echo "$GALMURI_SHA256  $zip" | sha256sum -c --quiet - 2>/dev/null; then
+    curl -fsSL -o "$zip" "$GALMURI_URL"
+    echo "$GALMURI_SHA256  $zip" | sha256sum -c --quiet -
+  fi
   rm -rf "$TOOLS/galmuri" && mkdir -p "$TOOLS/galmuri"
   unzip -q -j -o "$zip" '*.bdf' -d "$TOOLS/galmuri"
-  rm -f "$zip"
 
   DQ4_CORES="$TOOLS/cores" uv run --frozen python sfc/dq4/tools/dq4cores.py
 
@@ -86,8 +90,16 @@ tools() {
   } >>"$GITHUB_ENV"
 }
 
+pins() {
+  {
+    echo "asar=$ASAR_COMMIT"
+    echo "galmuri=$GALMURI_SHA256"
+  } >>"${GITHUB_OUTPUT:?GITHUB_OUTPUT 가 없음}"
+}
+
 case "${1:-}" in
   roms) roms ;;
   tools) tools ;;
-  *) echo "사용: $0 roms|tools" >&2; exit 2 ;;
+  pins) pins ;;
+  *) echo "사용: $0 roms|tools|pins" >&2; exit 2 ;;
 esac

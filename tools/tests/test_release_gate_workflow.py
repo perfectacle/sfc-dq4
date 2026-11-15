@@ -12,11 +12,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'tools'))
 import ci_artifact_check  # noqa: E402
+import ci_cache  # noqa: E402
 
 WORKFLOWS = ROOT / '.github' / 'workflows'
 GATE = WORKFLOWS / 'release-gate.yml'
 WORKFLOW = WORKFLOWS / 'guard-shards.yml'
-ACTION = ROOT / '.github' / 'actions' / 'ci-roms' / 'action.yml'
+ACTIONS = ROOT / '.github' / 'actions'
+ACTION = ACTIONS / 'ci-roms' / 'action.yml'
+ENC_CACHE = ACTIONS / 'enc-cache' / 'action.yml'
+SHIP_CACHE = ACTIONS / 'ship-cache' / 'action.yml'
+TOOLS_ACTION = ACTIONS / 'ci-tools' / 'action.yml'
+ALL_ACTIONS = (ACTION, ENC_CACHE, SHIP_CACHE, TOOLS_ACTION)
+# 평문 actions/cache 에 넣어도 되는 자리: 롬과 무관한 도구 빌드와 검사 통과 기록(입력 키·시간)
+PLAIN_CACHE_PATHS = ('${{ runner.temp }}/gate-tools/', 'work/cache/guards')
 SETUP = ROOT / 'tools' / 'ci_gate_setup.sh'
 SECRET_VARS = ('CI_ROM_AGE_KEY', 'CI_ROM_TOKEN', 'GH_TOKEN')
 BAD_TRIGGERS = ('pull_request', 'pull_request_target', 'schedule', 'push', 'workflow_run', 'issue_comment')
@@ -55,6 +63,30 @@ def jobs(text):
         else:
             step = None
     return out
+
+
+def action_steps(text):
+    """composite action 의 단계 글(단계는 4칸 `- `)."""
+    out = []
+    for line in top_block(text, 'runs'):
+        if re.match(r'^    - ', line):
+            out.append(line + '\n')
+        elif out and (line.startswith('      ') or not line.strip()):
+            out[-1] += line + '\n'
+    return out
+
+
+def cache_paths(step):
+    """actions/cache 단계의 path 들."""
+    block = re.search(r'path:\s*\|\n((?:\s{10,}.+\n)+)', step)
+    if block:
+        return [x.strip() for x in block[1].splitlines()]
+    return [re.search(r'path:\s*(.+)$', step, re.M)[1].strip()]
+
+
+def with_value(step, key):
+    m = re.search(rf'^\s+{key}:\s*(.+)$', step, re.M)
+    return m[1].strip() if m else None
 
 
 def triggers(text):
@@ -117,7 +149,7 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
             self.assertNotRegex(text, r':\s*write\b')
 
     def test_actions_pinned_to_commits(self):
-        for f in (WORKFLOW, GATE, ACTION):
+        for f in (WORKFLOW, GATE, *ALL_ACTIONS):
             for m in re.finditer(r'uses:\s*(\S+)', f.read_text(encoding='utf-8')):
                 if m[1].startswith('./.github/'):
                     continue
@@ -152,15 +184,61 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
                 self.assertNotRegex(path, r'(^|/)rom(/|$)')
         self.assertGreater(uploads, 0)
 
-    def test_cache_never_holds_roms_or_builds(self):
-        for steps in self.jobs.values():
-            for step in steps:
-                if 'actions/cache@' not in step:
-                    continue
-                paths = re.search(r'path:\s*\|\n((?:\s{12}.+\n)+)', step)
-                for p in ([x.strip() for x in paths[1].splitlines()] if paths else [re.search(r'path:\s*(\S+)', step)[1]]):
-                    self.assertTrue(p.startswith('${{ runner.temp }}/gate-tools/'), p)
-                    self.assertNotRegex(p, r'(^|/)(rom|work|build)(/|$)|\.(sfc|smc|nes|nds|mss)$', p)
+    def test_plain_cache_holds_no_rom_data(self):
+        """평문 actions/cache 는 도구 빌드(gate-tools)와 검사 통과 기록만. 롬에서 나온 것은 enc-cache 로만."""
+        steps = [s for st in self.jobs.values() for s in st]
+        for f in (SHIP_CACHE, TOOLS_ACTION, ACTION):
+            steps += action_steps(f.read_text(encoding='utf-8'))
+        seen = 0
+        for step in steps:
+            if not re.search(r'uses:\s*actions/cache(/restore|/save)?@', step):
+                continue
+            seen += 1
+            for p in cache_paths(step):
+                self.assertTrue(p.startswith(PLAIN_CACHE_PATHS), p)
+                self.assertNotRegex(p, r'(^|/)(rom|build|ch1|assets|calls|readset|states)(/|$)|\.(sfc|smc|nes|nds|mss)$', p)
+        self.assertGreater(seen, 0)
+
+    def test_enc_cache_stores_only_the_encrypted_tar(self):
+        steps = action_steps(ENC_CACHE.read_text(encoding='utf-8'))
+        caches = [s for s in steps if re.search(r'uses:\s*actions/cache/(restore|save)@', s)]
+        self.assertEqual(len(caches), 2)
+        for s in caches:
+            self.assertEqual(cache_paths(s), ['${{ runner.temp }}/enc-cache/${{ inputs.name }}.age'])
+        save = next(s for s in caches if 'actions/cache/save@' in s)
+        self.assertIn("steps.pack.outputs.save == 'true'", with_value(save, 'if'))
+        pack = next(s for s in steps if re.search(r'^\s+id:\s*pack\b', s, re.M))
+        self.assertIn('tools/ci_cache.py pack', pack)
+        self.assertIn("age -r", Path(ci_cache.__file__).read_text(encoding='utf-8'))
+
+    def test_rom_derived_folders_go_only_through_enc_cache(self):
+        """롬 파생 폴더(work/·assets/·rom/)를 캐시하는 단계는 enc-cache·ship-cache 뿐이다."""
+        steps = [s for st in self.jobs.values() for s in st] + action_steps(SHIP_CACHE.read_text(encoding='utf-8'))
+        dirs = 0
+        for step in steps:
+            d = with_value(step, 'dir') or with_value(step, 'calls')
+            if not d or 'uses:' not in step:
+                continue
+            dirs += 1
+            self.assertRegex(step, r'uses:\s*\./\.github/actions/(enc-cache|ship-cache)\b', step)
+            self.assertIn(with_value(step, 'age_key'), ('${{ secrets.CI_ROM_AGE_KEY }}', '${{ inputs.age_key }}'))
+        self.assertGreater(dirs, 0)
+        self.assertNotRegex(self.text, r'uses:\s*actions/cache@')
+
+    def test_ship_cache_has_one_chunk_per_stage(self):
+        steps = action_steps(SHIP_CACHE.read_text(encoding='utf-8'))
+        for op in ('restore', 'save'):
+            names = [with_value(s, 'name') for s in steps if with_value(s, 'op') == op]
+            self.assertEqual(names, [f'ship-{x}' for x in ci_cache.SHIP_LABELS], op)
+            prefixes = [with_value(s, 'prefix') for s in steps if with_value(s, 'op') == op]
+            # 한 접두어가 다른 접두어로 시작하면 restore-keys 가 남의 묶음을 잡는다
+            self.assertFalse([a for a in prefixes for b in prefixes if a != b and (b + '-').startswith(a + '-')])
+
+    def test_release_gate_caches_only_when_rehearsing(self):
+        gate = GATE.read_text(encoding='utf-8')
+        self.assertIn('cache: ${{ fromJSON(inputs.rehearse) }}', gate)
+        self.assertRegex(gate, r'rehearse:\n\s+description:[^\n]*\n\s+type: boolean\n\s+default: false')
+        self.assertRegex(self.text, r'cache:\n\s+description:[^\n]*(\n\s+[^\n]+)*?\n\s+type: boolean\n\s+default: false')
 
     def test_secrets_only_through_env_or_with(self):
         for name, steps in self.jobs.items():
@@ -171,16 +249,17 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
                     self.assertFalse(prints_secret(line), f'{name}: 시크릿을 찍음: {line.strip()}')
 
     def test_setup_script_and_action_never_print_secrets(self):
-        for f in (SETUP, ACTION):
+        for f in (SETUP, *ALL_ACTIONS, ROOT / 'tools' / 'ci_cache.py'):
             text = f.read_text(encoding='utf-8')
             self.assertNotRegex(text, r'(?m)^\s*set\s+-[a-z]*x')
             for line in text.splitlines():
                 self.assertFalse(prints_secret(line), f'{f.name}: {line.strip()}')
-        action = ACTION.read_text(encoding='utf-8')
-        self.assertNotRegex(action, r'run:[^\n]*\$\{\{\s*inputs\.', 'action: 입력을 run 에 바로 끼움')
-        for block in re.split(r'\n    - ', action):
-            if 'run:' in block:
-                self.assertNotIn('${{ inputs.', block.split('run:', 1)[1], 'action: 입력을 run 안에서 바로 씀')
+        for f in ALL_ACTIONS:
+            action = f.read_text(encoding='utf-8')
+            self.assertNotRegex(action, r'run:[^\n]*\$\{\{\s*(inputs|steps)\.', f'{f.parent.name}: 입력을 run 에 바로 끼움')
+            for block in re.split(r'\n    - ', action):
+                if 'run:' in block:
+                    self.assertNotIn('${{ inputs.', block.split('run:', 1)[1], f'{f.parent.name}: 입력을 run 안에서 바로 씀')
 
     def test_setup_script_masks_the_key(self):
         self.assertIn('::add-mask::', SETUP.read_text(encoding='utf-8'))
@@ -193,10 +272,23 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
         self.assertFalse(prints_secret('echo "::error::secret CI_ROM_TOKEN is not set"'))
 
     def test_guards_run_without_cache_and_local_needs_are_excluded(self):
-        shard = ''.join(run_texts(s) for s in self.jobs['shard'])
-        self.assertRegex(shard, r'guards\.py --all ("\$\{only\[@\]\}" )?--run --no-cache')
-        self.assertIn('--exclude-needs "$LOCAL_NEEDS"', shard)
+        """캐시 없는 실행이 기본(inputs.cache 가 false)이고, 캐시를 쓰는 실행 단계는 inputs.cache 일 때만."""
+        runs = [s for s in self.jobs['shard'] if 'tools/guards.py --all' in run_texts(s)]
+        plain = [s for s in runs if '--no-cache' in run_texts(s)]
+        cached = [s for s in runs if '--no-cache' not in run_texts(s)]
+        self.assertEqual((len(plain), len(cached)), (1, 1))
+        self.assertRegex(run_texts(plain[0]), r'guards\.py --all ("\$\{only\[@\]\}" )?--run --no-cache')
+        self.assertEqual(with_value(plain[0], 'if'), '${{ !inputs.cache }}')
+        self.assertEqual(with_value(cached[0], 'if'), 'inputs.cache')
+        for s in runs:
+            self.assertIn('--exclude-needs "$LOCAL_NEEDS"', run_texts(s))
         self.assertRegex(self.text, r'LOCAL_NEEDS:\s*MESENCE,LIBDIR')
+        build = ''.join(self.jobs['build'])
+        self.assertIn("DQ4_BUILD_CACHE: ${{ inputs.cache && format('{0}/work/cache', github.workspace) || 'off' }}", build)
+        for s in self.jobs['build'] + self.jobs['shard']:
+            if 'ship-cache' in s or 'guard-state' in s or 'guard-results-' in s:
+                cond = with_value(s, 'if') or ''
+                self.assertIn('inputs.cache', cond, s)
 
     def test_banned_suffixes_cover_rom_and_save_kinds(self):
         for ext in ('.sfc', '.smc', '.nes', '.nds', '.ml1', '.sav', '.mss', '.ips'):

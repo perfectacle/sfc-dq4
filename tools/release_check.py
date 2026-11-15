@@ -222,16 +222,20 @@ def load_ci(folder):
     if twice:
         raise ValueError(f'두 조각에서 돈 검사: {twice}')
     local = sorted({x['name'] for p in parts for x in p['local']})
-    return {'commit': commits.pop(), 'shards': n, 'rows': rows, 'local': local}
+    # 표시가 없는 옛 조각 결과는 캐시를 쓰지 않던 때의 것이다
+    cached = any(p.get('cached', False) for p in parts)
+    return {'commit': commits.pop(), 'shards': n, 'rows': rows, 'local': local, 'cached': cached}
 
 
 def ci_summary(ci):
-    """(Markdown, CI 결과가 모두 통과인가). 돌리지 않음(skipped)도 CI 환경이 모자란 것이라 통과로 치지 않는다."""
+    """(Markdown, CI 결과가 모두 통과인가). 돌리지 않음(skipped)도 CI 환경이 모자란 것이라 통과로 치지 않는다. 캐시를
+    쓴 실행(연습)은 모두 통과여도 판정을 연습으로 적는다."""
     words = {'passed': '통과', 'failed': '실패', 'skipped': '돌리지 않음'}
     ok = bool(ci['rows']) and all(r['status'] == 'passed' for r in ci['rows'])
+    word = ('연습 통과(캐시 씀, 배포 근거 아님)' if ci.get('cached') else '통과') if ok else '실패'
     lines = ['# 배포 관문 CI 결과', '', f'- 커밋: `{ci["commit"]}`', f'- 조각 {ci["shards"]}개, 검사 {len(ci["rows"])}개'
              f'({sum(r["status"] == "passed" for r in ci["rows"])}개 통과), 로컬 몫 {len(ci["local"])}개',
-             f'- 판정: **{"통과" if ok else "실패"}**', '', '| 검사 | 결과 | 내용 |', '| --- | --- | --- |']
+             f'- 판정: **{word}**', '', '| 검사 | 결과 | 내용 |', '| --- | --- | --- |']
     lines += [f'| {r["name"]} | {words.get(r["status"], r["status"])} | {r["detail"]} |'
               for r in sorted(ci['rows'], key=lambda r: (r['status'] == 'passed', r['name']))]
     if ci['local']:
@@ -471,6 +475,8 @@ def main():
             ap.error(f'--ci-report: {type(e).__name__}: {e}')
         if ci['commit'] != head:
             ap.error(f'--ci-report: CI 커밋 {ci["commit"][:12]} 이 HEAD {head[:12]} 와 다름')
+        if ci['cached'] and not a.rehearse:
+            ap.error('--ci-report: 캐시를 쓴 CI 실행(release-gate rehearse)이라 배포 근거가 아님. --rehearse 와 함께만 받는다')
     root = ROOT / 'work' / 'release'
     tmp = root / f'run-{os.getpid()}'
     (tmp / 'logs').mkdir(parents=True, exist_ok=True)

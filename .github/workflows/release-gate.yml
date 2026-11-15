@@ -15,6 +15,10 @@ on:
         description: Branch, tag or commit to check
         type: string
         default: main
+      rehearse:
+        description: Use the build, scene and state caches and earlier passes (fast; a rehearsal, not release evidence)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -29,6 +33,7 @@ jobs:
     with:
       ref: ${{ inputs.ref }}
       mode: release
+      cache: ${{ fromJSON(inputs.rehearse) }}
       shards: ${{ inputs.shards }}
     secrets:
       CI_ROM_TOKEN: ${{ secrets.CI_ROM_TOKEN }}
