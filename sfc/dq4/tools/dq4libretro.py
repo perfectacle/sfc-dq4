@@ -358,10 +358,34 @@ def bit_ranges(bitmap):
     return [(int(g[0]), int(g[-1] - g[0] + 1)) for g in np.split(idx, cut)]
 
 
+def linux_segments(path, maps='/proc/self/maps'):
+    """리눅스에서 불러온 path 의 쓰기 가능한 매핑 [(주소, 크기)]. .bss 는 파일 이름 없는 매핑으로 바로 뒤에 붙으므로
+    path 의 매핑에 맞닿은 이름 없는 rw 매핑도 넣는다."""
+    want = os.path.realpath(path)
+    out, end = [], None
+    try:
+        lines = Path(maps).read_text().splitlines()
+    except OSError:
+        return []
+    for line in lines:
+        parts = line.split(maxsplit=5)
+        if len(parts) < 5:
+            continue
+        lo, hi = (int(x, 16) for x in parts[0].split('-'))
+        name = parts[5].strip() if len(parts) > 5 else ''
+        mine = name and os.path.realpath(name) == want
+        if parts[1].startswith('rw') and (mine or (not name and end == lo)):
+            out.append((lo, hi - lo))
+        end = hi if mine or (not name and end == lo) else None
+    return out
+
+
 def data_segments(path):
-    """불러온 이미지 path 의 쓰기 가능한 데이터 세그먼트 [(주소, 크기)]. macOS(Mach-O)만, 그 밖은 빈 목록."""
+    """불러온 이미지 path 의 쓰기 가능한 데이터 세그먼트 [(주소, 크기)]. macOS(Mach-O)·리눅스, 그 밖은 빈 목록."""
     import os
     import sys
+    if sys.platform.startswith('linux'):
+        return linux_segments(path)
     if sys.platform != 'darwin':
         return []
     dyld = C.CDLL(None)

@@ -117,6 +117,8 @@ MesenCE 가 필요 없는 실행 검사는 GitHub 러너에서 나눠 돈다. �
 | `tools/ci_cache.py` | `unpack`·`pack`(enc-cache 의 몸통), `prune --dir D --since FILE`(이 잡에서 쓰지 않은 빌드 단계 칸 지우기), `ship-build --out work/ch1 --chunks DIR`(`dq4build.py` 를 돌리고 쓴 `dq4buildcache` 칸을 단계별로 복사) |
 | `tools/ci_artifact_check.py DIR --hashes FILE` | 올리기 바로 앞. 롬·세이브·패치 확장자(`.sfc .smc .nes .nds .ml1 .sav .mss .ips .srm .state`), 심볼릭 링크, 롬 해시와 같은 내용, 8MB 넘는 파일이 있으면 1. 실패하면 올리지 않는다 |
 
+- 빌드가 읽는 에셋은 에셋 저장소에 커밋돼 있어야 한다. 로컬 체크아웃에만 있는 파일은 CI 롬을 로컬 롬과 다르게 만든다.
+- 리눅스 bsnes 는 WRAM 을 `/proc/self/maps` 의 코어 매핑에서 찾는다(`dq4libretro.linux_segments`). 못 찾으면 직렬화로 읽고 써서 타이밍이 바뀌어 걷기·장면이 bsnes 만 어긋난다.
 - 시크릿: `CI_ROM_TOKEN`(에셋 저장소 읽기), `CI_ROM_AGE_KEY`(age 개인 키). 키 줄은 `::add-mask::` 로 가린다.
 - artifact 는 조각 결과 JSON, 검사 로그, 검사 통과 기록(`work/cache/guards`, 입력 키와 시간)뿐이다.
 
