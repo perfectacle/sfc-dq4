@@ -97,6 +97,12 @@ tools() {
   rm -f "$mzip"
   chmod +x "$TOOLS/mesence/Mesen"
   cp tools/ci-mesence-settings.json "$TOOLS/mesence/settings.json"
+  # 리눅스 단일 파일판은 처음 뜰 때 MesenCore.so 등을 실행 파일 옆에 푼다. 처음 뜨는 것 여럿이 함께 풀면 서로 덮어써
+  # Bus error(종료 135)로 죽으므로, 가드가 띄우기 전에 롬 없이 한 번 띄워 풀어 둔다(롬이 없어 종료 코드는 0 이 아니다)
+  echo 'emu.stop(0)' >"$RUNNER_TEMP/mesence-warm.lua"
+  MESENCE="$TOOLS/mesence/Mesen" HEADLESS_SLOTS=off timeout 120 uv run --frozen python sfc/dq4/tools/dq4mesen.py \
+    "$RUNNER_TEMP/no-rom.sfc" "$RUNNER_TEMP/mesence-warm.lua" --timeout=30 >/dev/null 2>&1 || true
+  [ -s "$TOOLS/mesence/MesenCore.so" ] || { echo "::error::MesenCE 가 MesenCore.so 를 풀지 않음"; exit 1; }
 
   {
     echo "ASAR=$TOOLS/asar/bin/asar"
