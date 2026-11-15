@@ -163,6 +163,61 @@ class ReleaseCheckTest(unittest.TestCase):
             rc.stage_guards(ctx)
         self.assertEqual([c['name'] for c in run.call_args[0][0]], [c['name'] for c in checks])
 
+    def _ci(self, d, parts, commit='c' * 40):
+        for i, (shard, rows, local) in enumerate(parts):
+            sub = Path(d) / f'release-gate-shard-{i}'
+            sub.mkdir()
+            (sub / f'shard-{i}.json').write_text(json.dumps({'commit': commit, 'shard': shard, 'rows': rows,
+                                                             'local': [{'name': n, 'file': 'g', 'needs': []} for n in local]}))
+            (sub / 'logs').mkdir()
+
+    def test_load_ci_needs_every_shard_of_one_commit(self):
+        row = {'name': 'a', 'file': 'g', 'status': 'passed', 'detail': '9초'}
+        with tempfile.TemporaryDirectory() as d:
+            self._ci(d, [([1, 2], [row], ['m']), ([2, 2], [], ['m'])])
+            ci = rc.load_ci(d)
+            self.assertEqual((ci['shards'], ci['local'], [r['name'] for r in ci['rows']]), (2, ['m'], ['a']))
+        with tempfile.TemporaryDirectory() as d:
+            self._ci(d, [([1, 3], [row], []), ([3, 3], [], [])])
+            with self.assertRaisesRegex(ValueError, '받은 것'):
+                rc.load_ci(d)
+        with tempfile.TemporaryDirectory() as d:
+            self._ci(d, [([1, 2], [row], []), ([2, 2], [row], [])])
+            with self.assertRaisesRegex(ValueError, '두 조각'):
+                rc.load_ci(d)
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaisesRegex(ValueError, '없음'):
+                rc.load_ci(d)
+
+    def test_ci_summary_fails_on_skipped(self):
+        ci = {'commit': 'c', 'shards': 1, 'local': ['m'],
+              'rows': [{'name': 'a', 'status': 'passed', 'detail': '1초'}]}
+        text, ok = rc.ci_summary(ci)
+        self.assertTrue(ok)
+        self.assertIn('로컬 몫', text)
+        ci['rows'].append({'name': 'b', 'status': 'skipped', 'detail': '설정 안 된 환경 변수 ASAR'})
+        self.assertFalse(rc.ci_summary(ci)[1])
+        self.assertFalse(rc.ci_summary(dict(ci, rows=[]))[1])
+
+    def test_guards_stage_keeps_ci_verdicts_and_runs_the_rest_locally(self):
+        """CI 가 통과·실패로 판정한 검사는 다시 돌리지 않고(실패를 덮지 않음), 로컬 몫과 CI 에서 돌리지 않은 것만 돈다."""
+        checks, _ = rc.guards.load(rc.guards.tracked())
+        a, b, c = checks[0], checks[1], checks[2]
+        ci = {'commit': 'x', 'shards': 1, 'local': [c['name']],
+              'rows': [{'name': a['name'], 'file': a['file'], 'status': 'failed', 'detail': '종료 코드 1'},
+                       {'name': b['name'], 'file': b['file'], 'status': 'skipped', 'detail': '설정 안 된 환경 변수'}]}
+        ctx = {'logs': Path('/nonexistent'), 'rehearse': False, 'timeout': 10, 'parallel': 1, 'ci': ci}
+        with mock.patch.object(rc.guards, 'run_many', side_effect=lambda hit, *a, **k: [(x, 'passed', '1초') for x in hit]) as run, \
+                mock.patch.object(rc, 'env_for', return_value={}):
+            st = rc.stage_guards(ctx)
+        ran = [x['name'] for x in run.call_args[0][0]]
+        self.assertNotIn(a['name'], ran)
+        self.assertIn(b['name'], ran)
+        self.assertIn(c['name'], ran)
+        self.assertEqual(st['status'], 'failed')
+        self.assertEqual(next(r for r in st['rows'] if r['name'] == a['name'])['detail'], 'CI: 종료 코드 1')
+        self.assertEqual(len(st['rows']), len(checks))
+
     def test_missing_unit_dir_fails(self):
         def ok(cmd, log, env):
             log.write_text('Ran 2 tests')

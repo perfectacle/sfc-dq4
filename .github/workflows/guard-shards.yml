@@ -1,0 +1,240 @@
+name: guard-shards
+
+# Run-time guards split over runners, for callers only (workflow_call). It decrypts the
+# ROM bundle with the secrets the caller passes, so every caller must keep secrets away
+# from forks: release-gate.yml is manual only, and a pull_request caller must run only
+# for branches of this repository. tools/tests/test_release_gate_workflow.py guards both
+# files. Artifacts carry only verdict JSON and logs, checked by tools/ci_artifact_check.py
+# right before upload. Format: sfc/dq4/docs/dq4-release-check-format.md
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit to check
+        type: string
+        required: true
+      mode:
+        description: release (every guard) or pr (only the listed guards)
+        type: string
+        required: true
+      guards:
+        description: Comma-separated guard names (mode pr only)
+        type: string
+        default: ''
+      shards:
+        description: Number of guard shards (1-64)
+        type: number
+        default: 8
+    secrets:
+      CI_ROM_TOKEN:
+        required: true
+      CI_ROM_AGE_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  # Guards that need MesenCE (macOS app) stay on the local machine for now.
+  LOCAL_NEEDS: MESENCE,LIBDIR
+
+jobs:
+  build:
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 60
+    outputs:
+      sha: ${{ steps.plan.outputs.sha }}
+      shards: ${{ steps.plan.outputs.shards }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Plan shards
+        id: plan
+        env:
+          SHARDS: ${{ inputs.shards }}
+          MODE: ${{ inputs.mode }}
+          GUARDS: ${{ inputs.guards }}
+        run: |
+          case "$SHARDS" in ''|*[!0-9]*) echo "::error::shards must be a number"; exit 1 ;; esac
+          if [ "$SHARDS" -lt 1 ] || [ "$SHARDS" -gt 64 ]; then echo "::error::shards must be 1-64"; exit 1; fi
+          case "$MODE" in
+            release) [ -z "$GUARDS" ] || { echo "::error::mode release runs every guard; guards must be empty"; exit 1; } ;;
+            pr) [ -n "$GUARDS" ] || { echo "::error::mode pr needs a guard list"; exit 1; } ;;
+            *) echo "::error::mode must be release or pr"; exit 1 ;;
+          esac
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "shards=$(seq -s, 1 "$SHARDS" | sed 's/^/[/; s/$/]/')" >> "$GITHUB_OUTPUT"
+
+      - name: Install cmake
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: 0.13.1
+          enable-cache: true
+
+      - run: uv sync --locked
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: perfectacle/sfc-dq4-assets
+          token: ${{ secrets.CI_ROM_TOKEN }}
+          path: assets
+          persist-credentials: false
+
+      - name: Restore tool builds
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/gate-tools/asar
+            ${{ runner.temp }}/gate-tools/cores
+          key: gate-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/ci_gate_setup.sh', 'sfc/dq4/tools/dq4cores.py', 'sfc/dq4/tools/dq4cores-bsnes-romtrace.patch') }}
+
+      - name: Build asar, fetch Galmuri, build libretro cores
+        run: tools/ci_gate_setup.sh tools
+
+      - uses: ./.github/actions/ci-roms # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+        with:
+          token: ${{ secrets.CI_ROM_TOKEN }}
+          age_key: ${{ secrets.CI_ROM_AGE_KEY }}
+
+      - name: Build the ship ROM
+        env:
+          DQ4_ASSETS: ${{ github.workspace }}/assets
+          DQ4_READSET: 'off'
+          DQ4_BUILD_CACHE: 'off'
+        run: uv run --frozen python sfc/dq4/tools/dq4build.py --out work/release-build
+
+      - name: List the shards
+        env:
+          SHARDS: ${{ inputs.shards }}
+          GUARDS: ${{ inputs.guards }}
+        run: |
+          only=()
+          if [ -n "$GUARDS" ]; then only=(--only "$GUARDS"); fi
+          for k in $(seq 1 "$SHARDS"); do
+            uv run --frozen python tools/guards.py --all "${only[@]}" --shard "$k/$SHARDS" --exclude-needs "$LOCAL_NEEDS"
+          done
+
+  shard:
+    name: shard ${{ matrix.k }}
+    needs: build
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        k: ${{ fromJSON(needs.build.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.build.outputs.sha }}
+          persist-credentials: false
+
+      - name: Install cmake
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: 0.13.1
+          enable-cache: true
+
+      - run: uv sync --locked
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: perfectacle/sfc-dq4-assets
+          token: ${{ secrets.CI_ROM_TOKEN }}
+          path: assets
+          persist-credentials: false
+
+      - name: Restore tool builds
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/gate-tools/asar
+            ${{ runner.temp }}/gate-tools/cores
+          key: gate-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/ci_gate_setup.sh', 'sfc/dq4/tools/dq4cores.py', 'sfc/dq4/tools/dq4cores-bsnes-romtrace.patch') }}
+
+      - name: Build asar, fetch Galmuri, build libretro cores
+        run: tools/ci_gate_setup.sh tools
+
+      - uses: ./.github/actions/ci-roms # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+        with:
+          token: ${{ secrets.CI_ROM_TOKEN }}
+          age_key: ${{ secrets.CI_ROM_AGE_KEY }}
+
+      # Some guards read work/ch1 without building it (the local checkout keeps one).
+      - name: Build the ship ROM
+        env:
+          DQ4_ASSETS: ${{ github.workspace }}/assets
+          DQ4_READSET: 'off'
+          DQ4_BUILD_CACHE: 'off'
+        run: uv run --frozen python sfc/dq4/tools/dq4build.py --out work/ch1
+
+      - name: Run the shard's guards without caches
+        env:
+          DQ4_ASSETS: ${{ github.workspace }}/assets
+          K: ${{ matrix.k }}
+          N: ${{ inputs.shards }}
+          GUARDS: ${{ inputs.guards }}
+        run: |
+          mkdir -p work/ci-gate
+          only=()
+          if [ -n "$GUARDS" ]; then only=(--only "$GUARDS"); fi
+          uv run --frozen python tools/guards.py --all "${only[@]}" --run --no-cache --parallel 2 \
+            --shard "$K/$N" --exclude-needs "$LOCAL_NEEDS" --json "work/ci-gate/shard-$K.json"
+
+      # Only the verdict JSON and the guard logs leave the runner.
+      - name: Collect results
+        if: always()
+        env:
+          K: ${{ matrix.k }}
+        run: |
+          rm -rf work/ci-upload && mkdir -p work/ci-upload/logs
+          if [ -f "work/ci-gate/shard-$K.json" ]; then cp "work/ci-gate/shard-$K.json" work/ci-upload/; fi
+          if [ -d work/guards ]; then find work/guards -maxdepth 1 -type f -name '*.log' -exec cp {} work/ci-upload/logs/ \;; fi
+
+      - name: Check the upload for ROM data
+        id: leakcheck
+        if: always()
+        run: uv run --frozen python tools/ci_artifact_check.py work/ci-upload --hashes "$RUNNER_TEMP/rom-hashes.txt"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() && steps.leakcheck.outcome == 'success' }}
+        with:
+          name: guard-shard-${{ inputs.mode }}-${{ matrix.k }}
+          path: work/ci-upload
+          if-no-files-found: error
+          retention-days: 14
+
+  report:
+    needs: [build, shard]
+    if: ${{ always() && needs.build.result == 'success' }}
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.build.outputs.sha }}
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: 0.13.1
+          enable-cache: true
+
+      - run: uv sync --locked
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: guard-shard-${{ inputs.mode }}-*
+          path: work/ci-report
+
+      - name: Summarize the shards
+        run: |
+          set -o pipefail
+          uv run --frozen python tools/release_check.py --ci-summary work/ci-report | tee -a "$GITHUB_STEP_SUMMARY"

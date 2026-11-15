@@ -812,3 +812,83 @@ class HashDirTest(unittest.TestCase):
             self.assertEqual(key(), k)
             os.utime(root / 'sfx' / 'a.wav', ns=(1, 1))
             self.assertNotEqual(key(), k)
+
+
+class ShardTest(unittest.TestCase):
+    CHECKS = [{'name': n, 'file': 'g.toml', 'needs': needs} for n, needs in
+              [('a', ['rom']), ('b', ['rom', 'MESENCE']), ('c', []), ('d', ['rom']), ('e', ['LIBDIR']), ('f', [])]]
+
+    def test_parse_shard(self):
+        self.assertEqual(guards.parse_shard('3/16'), (3, 16))
+        for bad in ('0/2', '3/2', '1', 'a/b', ''):
+            with self.assertRaises(ValueError):
+                guards.parse_shard(bad)
+
+    def test_shards_cover_every_check_once_in_list_order(self):
+        weights = {'a': 100, 'c': 5, 'd': 60, 'f': 40}
+        for n in (1, 2, 3, 7):
+            parts = [guards.shard_part(self.CHECKS, k, n, weights) for k in range(1, n + 1)]
+            names = [c['name'] for p in parts for c in p]
+            self.assertEqual(sorted(names), sorted(c['name'] for c in self.CHECKS))
+            for p in parts:
+                self.assertEqual(p, [c for c in self.CHECKS if c in p])
+
+    def test_shards_balance_by_weight(self):
+        weights = {'a': 100, 'b': 1, 'c': 1, 'd': 60, 'e': 1, 'f': 40}
+        loads = [sum(weights[c['name']] for c in guards.shard_part(self.CHECKS, k, 2, weights)) for k in (1, 2)]
+        self.assertLessEqual(max(loads) - min(loads), 1)
+        self.assertEqual(guards.shard_part(self.CHECKS, 1, 2, weights), guards.shard_part(self.CHECKS, 1, 2, weights))
+
+    def test_weights_fall_back_to_cache_then_mean(self):
+        w = guards.shard_weights(self.CHECKS, times={'a': 10.0}, cached={'b': 30.0, 'a': 99.0})
+        self.assertEqual((w['a'], w['b']), (10.0, 30.0))
+        self.assertEqual(w['c'], 20.0)
+        self.assertEqual(set(guards.shard_weights(self.CHECKS, times={}, cached={}).values()), {1.0})
+
+    def test_cached_seconds_reads_latest_pass(self):
+        import json
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d)
+            (p / 'dq4-x-aaa.json').write_text(json.dumps({'when': 'w', 'detail': '120초, 롬 SHA-1 ab'}))
+            (p / 'dq4-x-bbb.json').write_text(json.dumps({'when': 'w', 'detail': '90초'}))
+            os.utime(p / 'dq4-x-aaa.json', (1, 1))
+            (p / 'dq4-y-ccc.json').write_text('not json')
+            self.assertEqual(guards.cached_seconds(p), {'dq4-x': 90.0})
+
+    def test_split_local_by_needs(self):
+        run, local = guards.split_local(self.CHECKS, ['MESENCE', 'LIBDIR'])
+        self.assertEqual([c['name'] for c in local], ['b', 'e'])
+        self.assertEqual([c['name'] for c in run], ['a', 'c', 'd', 'f'])
+
+    def test_record_times_from_report_and_shard_json(self):
+        import json
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d)
+            times = p / 'times.json'
+            times.write_text(json.dumps({'old': 5}))
+            (p / 'report.json').write_text(json.dumps({'stages': {'guards': {'rows': [
+                {'name': 'a', 'status': 'passed', 'detail': '120초, 롬'},
+                {'name': 'b', 'status': 'failed', 'detail': '30초'},
+                {'name': 'c', 'status': 'passed', 'detail': '캐시: 같은 입력으로 … 통과, 10초'}]}}}))
+            (p / 'shard.json').write_text(json.dumps({'rows': [{'name': 'd', 'status': 'passed', 'detail': '7초'}]}))
+            self.assertEqual(guards.record_times([p / 'report.json', p / 'shard.json'], times), 2)
+            self.assertEqual(json.loads(times.read_text()), {'a': 120.0, 'd': 7.0, 'old': 5})
+
+    def test_repo_times_name_real_checks(self):
+        checks, _ = guards.load(guards.tracked())
+        names = {c['name'] for c in checks}
+        self.assertTrue(set(guards.load_shard_times()) <= names, set(guards.load_shard_times()) - names)
+
+    def test_cli_lists_a_shard_and_the_local_share(self):
+        import subprocess
+        out = subprocess.run([sys.executable, str(guards.ROOT / 'tools' / 'guards.py'), '--all', '--shard', '1/2',
+                              '--exclude-needs', 'MESENCE,LIBDIR'], capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertIn('(조각 1/2)', out.stdout)
+        self.assertIn('로컬 몫', out.stdout)
+        bad = subprocess.run([sys.executable, str(guards.ROOT / 'tools' / 'guards.py'), '--shard', '1/2'],
+                             capture_output=True, text=True)
+        self.assertNotEqual(bad.returncode, 0)

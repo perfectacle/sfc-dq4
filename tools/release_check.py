@@ -19,6 +19,12 @@
 
   uv run --locked python tools/release_check.py                 # 전부(몇 시간)
   uv run --locked python tools/release_check.py --rehearse --stages build,unit
+  uv run --locked python tools/release_check.py --ci-report DIR  # guards 는 CI 결과를 받고 로컬 몫만 돌림
+  uv run --locked python tools/release_check.py --ci-summary DIR # CI report 잡: 조각 결과 요약(Markdown), 실패면 1
+
+--ci-report 의 DIR 은 배포 관문 워크플로(release-gate.yml → guard-shards.yml)의 조각 결과(guards.py --all --json)를 받은 폴더다. 조각이 모두
+있고 그 커밋이 지금 HEAD 여야 한다. CI 가 통과·실패로 판정한 검사는 그 결과를 그대로 쓰고(실패를 로컬에서 다시 돌려
+덮지 않는다), CI 가 뺀 로컬 몫(MesenCE 가 필요한 것)과 CI 에서 돌리지 않음(skipped)인 검사만 로컬에서 돌린다.
 """
 import argparse
 import hashlib
@@ -190,18 +196,68 @@ def stage_unit(ctx):
             'detail': (f'폴더 없음 {", ".join(missing)}; ' if missing else '') + f'{sum(r["tests"] for r in rows)}개, 건너뜀 {sum(r["skipped"] for r in rows)}개'}
 
 
+def load_ci(folder):
+    """CI 조각 결과(guards.py --all --json)를 모은다. {'commit', 'shards', 'rows', 'local'(이름 목록)}. 결과가 없거나,
+    조각이 빠졌거나, 커밋이 서로 다르거나, 한 검사가 두 조각에 있으면 ValueError."""
+    parts = []
+    for f in sorted(Path(folder).rglob('*.json')):
+        data = json.loads(f.read_text(encoding='utf-8'))
+        if isinstance(data, dict) and {'commit', 'shard', 'rows', 'local'} <= set(data):
+            parts.append(data)
+    if not parts:
+        raise ValueError(f'{folder}: CI 조각 결과가 없음')
+    commits = {p['commit'] for p in parts}
+    if len(commits) != 1:
+        raise ValueError(f'조각마다 커밋이 다름: {sorted(commits)}')
+    sizes = {p['shard'][1] if p['shard'] else 1 for p in parts}
+    if len(sizes) != 1:
+        raise ValueError(f'조각 수가 서로 다름: {sorted(sizes)}')
+    n = sizes.pop()
+    got = sorted(p['shard'][0] if p['shard'] else 1 for p in parts)
+    if got != list(range(1, n + 1)):
+        raise ValueError(f'조각 {n}개 가운데 받은 것 {got}')
+    rows = [r for p in parts for r in p['rows']]
+    names = [r['name'] for r in rows]
+    twice = sorted({x for x in names if names.count(x) > 1})
+    if twice:
+        raise ValueError(f'두 조각에서 돈 검사: {twice}')
+    local = sorted({x['name'] for p in parts for x in p['local']})
+    return {'commit': commits.pop(), 'shards': n, 'rows': rows, 'local': local}
+
+
+def ci_summary(ci):
+    """(Markdown, CI 결과가 모두 통과인가). 돌리지 않음(skipped)도 CI 환경이 모자란 것이라 통과로 치지 않는다."""
+    words = {'passed': '통과', 'failed': '실패', 'skipped': '돌리지 않음'}
+    ok = bool(ci['rows']) and all(r['status'] == 'passed' for r in ci['rows'])
+    lines = ['# 배포 관문 CI 결과', '', f'- 커밋: `{ci["commit"]}`', f'- 조각 {ci["shards"]}개, 검사 {len(ci["rows"])}개'
+             f'({sum(r["status"] == "passed" for r in ci["rows"])}개 통과), 로컬 몫 {len(ci["local"])}개',
+             f'- 판정: **{"통과" if ok else "실패"}**', '', '| 검사 | 결과 | 내용 |', '| --- | --- | --- |']
+    lines += [f'| {r["name"]} | {words.get(r["status"], r["status"])} | {r["detail"]} |'
+              for r in sorted(ci['rows'], key=lambda r: (r['status'] == 'passed', r['name']))]
+    if ci['local']:
+        lines += ['', '## 로컬 몫', '', 'CI 에 없는 MesenCE 가 필요해 `release_check.py --ci-report` 가 로컬에서 돌린다.', '',
+                  ', '.join(ci['local'])]
+    return '\n'.join(lines) + '\n', ok
+
+
 def stage_guards(ctx):
     checks, problems = guards.load(guards.tracked())
     if problems:
         return {'status': 'failed', 'seconds': 0, 'detail': '; '.join(problems[:5]), 'rows': []}
     t0 = time.time()
-    done = guards.run_many(checks, ctx['parallel'], ctx['timeout'], no_cache=not ctx['rehearse'],
-                           logs=ctx['logs'] / 'guards', env=env_for(ctx))
-    rows = [{'name': c['name'], 'file': c['file'], 'status': s, 'detail': d} for c, s, d in done]
+    ci = ctx.get('ci')
+    # CI 가 판정한 검사는 그 결과를 쓴다. 로컬 몫과 CI 에서 돌리지 않은 것만 여기서 돈다
+    judged = {r['name']: r for r in ci['rows'] if r['status'] in ('passed', 'failed')} if ci else {}
+    done = guards.run_many([c for c in checks if c['name'] not in judged], ctx['parallel'], ctx['timeout'],
+                           no_cache=not ctx['rehearse'], logs=ctx['logs'] / 'guards', env=env_for(ctx))
+    rows = [{'name': c['name'], 'file': c['file'], 'status': judged[c['name']]['status'],
+             'detail': f'CI: {judged[c["name"]]["detail"]}'} for c in checks if c['name'] in judged]
+    rows += [{'name': c['name'], 'file': c['file'], 'status': s, 'detail': d} for c, s, d in done]
     # 검사가 하나도 없으면 목록을 못 읽은 것이지 통과가 아니다
     ok = bool(rows) and all(r['status'] == 'passed' for r in rows)
     return {'status': 'passed' if ok else 'failed', 'seconds': round(time.time() - t0), 'rows': rows,
-            'detail': f'{sum(r["status"] == "passed" for r in rows)}/{len(rows)} 통과'}
+            'detail': f'{sum(r["status"] == "passed" for r in rows)}/{len(rows)} 통과'
+                      + (f'(CI {len(judged)}개, 로컬 {len(done)}개)' if ci else '')}
 
 
 def stage_sweep(ctx):
@@ -336,7 +392,11 @@ def markdown(report):
              f'- 판정: **{words.get(report["verdict"], report["verdict"])}**',
              f'- 커밋: `{report["commit"]}`' + (' (추적 파일에 고친 것이 있음)' if report['dirty'] else ''),
              f'- 롬 SHA-1: `{report.get("rom_sha1") or "-"}`',
-             f'- 시각: {report["when"]}', '', '| 단계 | 결과 | 시간 | 내용 |', '| --- | --- | --- | --- |']
+             f'- 시각: {report["when"]}']
+    if report.get('ci'):
+        ci = report['ci']
+        lines.append(f'- CI: 조각 {ci["shards"]}개에서 검사 {ci["ran"]}개, 로컬 몫 {ci["local"]}개')
+    lines += ['', '| 단계 | 결과 | 시간 | 내용 |', '| --- | --- | --- | --- |']
     for name, st in report['stages'].items():
         lines.append(f'| {name} | {words.get(st["status"], st["status"])} | {st["seconds"]}초 | {st.get("detail", "")} |')
     for name in ('unit', 'guards', 'sweep'):
@@ -385,17 +445,37 @@ def main():
     ap.add_argument('--seeds-n', type=int, default=SEEDS_N, help='release.toml 에 seeds 가 없는 스윕의 시드 수')
     ap.add_argument('--parallel', type=int, default=2)
     ap.add_argument('--timeout', type=int, default=1800, help='실행 검사 하나의 시간 제한(초). 스윕은 이것의 네 배')
+    ap.add_argument('--ci-report', type=Path, metavar='DIR',
+                    help='배포 관문 워크플로의 조각 결과 폴더. guards 단계는 CI 결과를 쓰고 로컬 몫만 돌린다')
+    ap.add_argument('--ci-summary', type=Path, metavar='DIR',
+                    help='조각 결과를 요약해 Markdown 으로 찍고 끝낸다(CI report 잡). 모두 통과가 아니면 1')
     a = ap.parse_args()
+    if a.ci_summary:
+        try:
+            text, ok = ci_summary(load_ci(a.ci_summary))
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            print(f'# 배포 관문 CI 결과\n\n- 조각 결과를 읽지 못함: {type(e).__name__}: {e}')
+            return 1
+        print(text, end='')
+        return 0 if ok else 1
     wanted = [s for s in a.stages.split(',') if s]
     bad = [s for s in wanted if s not in STAGES]
     if bad:
         ap.error(f'모르는 단계 {bad}')
+    head, dirty = commit()
+    ci = None
+    if a.ci_report:
+        try:
+            ci = load_ci(a.ci_report)
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            ap.error(f'--ci-report: {type(e).__name__}: {e}')
+        if ci['commit'] != head:
+            ap.error(f'--ci-report: CI 커밋 {ci["commit"][:12]} 이 HEAD {head[:12]} 와 다름')
     root = ROOT / 'work' / 'release'
     tmp = root / f'run-{os.getpid()}'
     (tmp / 'logs').mkdir(parents=True, exist_ok=True)
-    head, dirty = commit()
     ctx = {'dir': tmp, 'logs': tmp / 'logs', 'rehearse': a.rehearse, 'seeds_n': a.seeds_n, 'parallel': a.parallel,
-           'timeout': a.timeout}
+           'timeout': a.timeout, 'ci': ci}
     states = '공유 캐시(연습)' if a.rehearse else '이 실행에서 새로 만듦(첫 생성 뒤 이 실행 안에서만 다시 씀)'
     stages = run_stages(ctx, wanted)
     end_head, end_dirty = commit()
@@ -403,6 +483,7 @@ def main():
     report = {'verdict': verdict(stages, a.rehearse, wanted, dirty), 'commit': head, 'dirty': dirty,
               'rom_sha1': ctx.get('rom_sha1'), 'when': time.strftime('%Y-%m-%d %H:%M'), 'rehearse': a.rehearse,
               'states': states,
+              'ci': {'shards': ci['shards'], 'ran': len(ci['rows']), 'local': len(ci['local'])} if ci else None,
               'stages': stages}
     # 이 폴더 이름 규칙을 바꾸면 dq4publish.check_report 도 함께 바꾼다(배포판은 이 자리의 보고서만 받는다)
     dest = root / (ctx['rom_sha1'][:12] if ctx.get('rom_sha1') else f'nobuild-{head[:12]}')

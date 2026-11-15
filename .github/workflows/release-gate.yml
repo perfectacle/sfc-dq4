@@ -1,0 +1,35 @@
+name: release-gate
+
+# Every run-time guard (except the MesenCE ones, left to the local release gate) on CI
+# runners. Manual only: it passes the ROM bundle secrets to guard-shards.yml, so it must
+# never run for pull requests or on a schedule (tools/tests/test_release_gate_workflow.py
+# keeps it that way). Format: sfc/dq4/docs/dq4-release-check-format.md
+on:
+  workflow_dispatch:
+    inputs:
+      shards:
+        description: Number of guard shards (1-64)
+        type: number
+        default: 8
+      ref:
+        description: Branch, tag or commit to check
+        type: string
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-gate
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    uses: ./.github/workflows/guard-shards.yml # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+    with:
+      ref: ${{ inputs.ref }}
+      mode: release
+      shards: ${{ inputs.shards }}
+    secrets:
+      CI_ROM_TOKEN: ${{ secrets.CI_ROM_TOKEN }}
+      CI_ROM_AGE_KEY: ${{ secrets.CI_ROM_AGE_KEY }}

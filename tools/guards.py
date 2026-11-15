@@ -36,6 +36,15 @@ PR 에서는 바뀐 파일이 그 검사의 paths 에 바로 맞을 때, 또는 
                                                  [full] 에 걸리지 않아도 전체 모드로 돌림(본문에 `가드: 전체`)
   python tools/guards.py --base SHA --pr-body FILE
                                                  걸린 검사마다 본문에 결과 줄이 있는지 봄(CI)
+  python tools/guards.py --all --run --no-cache --shard 3/16 --exclude-needs MESENCE,LIBDIR --json OUT.json
+                                                 등급·묶음과 상관없이 모든 검사 가운데 needs 에 MESENCE·LIBDIR 가 없는 것을
+                                                 16 조각으로 나눠 셋째 조각만 돌리고 결과를 OUT.json 에(CI 배포 관문 잡)
+  python tools/guards.py --record-times FILE…    보고서(release_check report.json 또는 --json 결과)의 검사 시간으로
+                                                 guardshard-times.json 을 고쳐 씀
+
+--shard 는 검사마다 지난 실행 시간(guardshard-times.json, 없으면 이 체크아웃의 검사 결과 캐시, 둘 다 없으면 아는 시간의
+평균)으로 긴 것부터 가장 가벼운 조각에 넣는다. 같은 목록·같은 시간 파일이면 어느 머신에서든 같은 조각이 나온다.
+--exclude-needs 로 뺀 검사는 「로컬 몫」 으로 찍고 --json 에 남긴다(배포 관문이 로컬에서 돌린다).
 
 --run 은 같은 입력(.md 를 뺀 추적 파일 내용, 명령, --rom 롬 SHA-1)으로 이미 통과한 검사를 건너뛴다. [cache] key = "paths"
 인 트랙은 추적 파일 가운데 그 검사의 paths·묶음에 맞는 것, 그 트랙의 어느 검사도 paths 에 적지 않은 자료 파일
@@ -652,9 +661,100 @@ def run_check(check, timeout, logs, no_cache=False, env=None):
             shutil.rmtree(d, ignore_errors=True)
 
 
-def run_all(hit, parallel, timeout, no_cache=False):
-    """걸린 검사를 parallel 개씩 함께 돌리고 본문 결과 줄을 찍는다. 모두 통과하면 0."""
+SHARD_TIMES = Path(__file__).resolve().parent / 'guardshard-times.json'
+SECONDS = re.compile(r'^(\d+)초')
+
+
+def parse_shard(text):
+    """'k/n' → (k, n). 1 ≤ k ≤ n."""
+    m = re.fullmatch(r'(\d+)/(\d+)', text or '')
+    if not m or not 1 <= int(m[1]) <= int(m[2]):
+        raise ValueError(f'--shard 는 k/n(1 ≤ k ≤ n): {text!r}')
+    return int(m[1]), int(m[2])
+
+
+def load_shard_times(path=SHARD_TIMES):
+    try:
+        data = json.loads(Path(path).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}
+    return {k: float(v) for k, v in data.items() if isinstance(v, (int, float))} if isinstance(data, dict) else {}
+
+
+def cached_seconds(folder=None):
+    """검사 결과 캐시(work/cache/guards)에 남은 통과 시간 {이름: 초}. 같은 이름이 여럿이면 가장 늦게 쓴 것."""
+    try:
+        folder = Path(folder) if folder else cache_dir()
+    except subprocess.CalledProcessError:
+        return {}
+    out = {}
+    for f in sorted(folder.glob('*.json'), key=lambda p: p.stat().st_mtime) if folder.is_dir() else []:
+        try:
+            m = SECONDS.match(json.loads(f.read_text(encoding='utf-8')).get('detail', ''))
+        except (OSError, ValueError, AttributeError):
+            continue
+        name = f.stem.rsplit('-', 1)[0]
+        if m and NAME.match(name):
+            out[name] = float(m[1])
+    return out
+
+
+def shard_weights(checks, times=None, cached=None):
+    """검사마다 무게(초). 시간 파일 → 이 체크아웃의 캐시 → 아는 시간의 평균(아무것도 모르면 모두 1)."""
+    times = load_shard_times() if times is None else times
+    cached = cached_seconds() if cached is None else cached
+    known = {c['name']: times.get(c['name'], cached.get(c['name'])) for c in checks}
+    seen = [v for v in known.values() if v is not None]
+    default = sum(seen) / len(seen) if seen else 1.0
+    return {n: (v if v is not None else default) for n, v in known.items()}
+
+
+def shard_part(checks, k, n, weights):
+    """checks 를 무게가 고르게 n 조각으로 나눠 k 번째(1부터) 조각을 원래 차례대로. 긴 것부터 가장 가벼운 조각에
+    넣고 같은 무게는 이름 차례라, 같은 입력이면 같은 결과다. 조각을 모두 모으면 checks 와 같다."""
+    loads, owner = [0.0] * n, {}
+    for c in sorted(checks, key=lambda c: (-weights.get(c['name'], 1.0), c['name'])):
+        i = loads.index(min(loads))
+        owner[c['name']] = i
+        loads[i] += weights.get(c['name'], 1.0)
+    return [c for c in checks if owner[c['name']] == k - 1]
+
+
+def split_local(checks, names):
+    """(돌릴 검사, 로컬 몫). needs 에 names 가운데 하나라도 든 검사가 로컬 몫이다."""
+    names = set(names)
+    local = [c for c in checks if names & set(c.get('needs', []))]
+    return [c for c in checks if c not in local], local
+
+
+def record_times(reports, path=SHARD_TIMES):
+    """보고서들의 통과한 검사 시간으로 시간 파일을 고쳐 쓴다. 고친 이름 수."""
+    times = load_shard_times(path)
+    n = 0
+    for report in reports:
+        data = json.loads(Path(report).read_text(encoding='utf-8'))
+        rows = data.get('stages', {}).get('guards', {}).get('rows') if 'stages' in data else data.get('rows')
+        for r in rows or []:
+            m = SECONDS.match(r.get('detail', ''))
+            if r.get('status') == 'passed' and m and not r['detail'].startswith('캐시'):
+                times[r['name']] = float(m[1])
+                n += 1
+    write_atomic(Path(path), json.dumps(dict(sorted(times.items())), indent=1, ensure_ascii=False) + '\n')
+    return n
+
+
+def result_json(done, local, shard=None):
+    """--json 결과: 커밋, 조각, 돈 검사의 결과, 로컬 몫(뺀 검사)."""
+    return {'commit': git('rev-parse', 'HEAD').strip(), 'shard': list(shard) if shard else None,
+            'rows': [{'name': c['name'], 'file': c['file'], 'status': s, 'detail': d} for c, s, d in done],
+            'local': [{'name': c['name'], 'file': c['file'], 'needs': c.get('needs', [])} for c in local]}
+
+
+def run_all(hit, parallel, timeout, no_cache=False, out=None, local=(), shard=None):
+    """걸린 검사를 parallel 개씩 함께 돌리고 본문 결과 줄을 찍는다. out 이 있으면 결과를 JSON 으로. 모두 통과하면 0."""
     done = run_many(hit, parallel, timeout, no_cache)
+    if out:
+        write_atomic(Path(out), json.dumps(result_json(done, local, shard), ensure_ascii=False, indent=1) + '\n')
     print('\nPR 본문 결과 줄:')
     for c, status, detail in done:
         mark, word = ('x', '통과') if status == 'passed' else (' ', '실패' if status == 'failed' else '돌리지 않음')
@@ -816,10 +916,43 @@ def main():
                     help='[full] 에 걸리지 않아도 전체 모드로 고른다(PR 본문의 `가드: 전체` 와 같음)')
     ap.add_argument('--only', metavar='이름,…',
                     help='--run 에서 걸린 검사 대신 이 검사들만 돌린다(tools/guards.py 를 바꾼 PR 의 대표 가드 셋)')
+    ap.add_argument('--all', action='store_true', help='--base 없이 등급·묶음과 상관없이 모든 검사를 고른다(배포 관문)')
+    ap.add_argument('--shard', metavar='k/n', help='--all 로 고른 검사를 시간이 고르게 n 조각으로 나눠 k 번째만')
+    ap.add_argument('--exclude-needs', metavar='이름,…', default='',
+                    help='--all 에서 needs 에 이 이름이 든 검사를 빼 「로컬 몫」 으로 찍는다(CI 에 없는 MESENCE 등)')
+    ap.add_argument('--json', type=Path, help='--all --run 결과(커밋·조각·결과·로컬 몫)를 이 파일에')
+    ap.add_argument('--record-times', type=Path, nargs='+', metavar='보고서',
+                    help='보고서의 검사 시간으로 guardshard-times.json 을 고쳐 쓴다')
     args = ap.parse_args()
+    if args.record_times:
+        print(f'시간 {record_times(args.record_times)}개를 {SHARD_TIMES.name} 에 적음')
+        return 0
+    if not args.all and (args.shard or args.exclude_needs or args.json):
+        ap.error('--shard·--exclude-needs·--json 은 --all 과 함께')
     files = tracked()
     checks, problems = load(files)
-    if args.base:
+    if args.all:
+        if args.base or args.pr_body:
+            ap.error('--all 은 --base·--pr-body 와 함께 쓰지 않는다')
+        try:
+            shard = parse_shard(args.shard) if args.shard else None
+        except ValueError as e:
+            ap.error(str(e))
+        hit = checks
+        if args.only:
+            hit, bad = pick(checks, args.only)
+            problems += bad
+        hit, local = split_local(hit, [n for n in args.exclude_needs.split(',') if n])
+        if shard:
+            hit = shard_part(hit, *shard, shard_weights(hit))
+        print(f'고른 검사 {len(hit)}개' + (f'(조각 {shard[0]}/{shard[1]})' if shard else '') + ': '
+              + (', '.join(c['name'] for c in hit) or '없음'))
+        if local:
+            print(f'로컬 몫 {len(local)}개(needs 에 {args.exclude_needs}): ' + ', '.join(c['name'] for c in local))
+        if args.run and not problems:
+            parallel = args.parallel or headless_slots.limit() or os.cpu_count() or 2
+            return run_all(hit, parallel, args.timeout, args.no_cache, args.json, local, shard)
+    elif args.base:
         changed = [f for f in git('diff', '--name-only', f'{args.base}...{args.head}').splitlines() if f]
         edited = edited_in(args.base, args.head, changed)
         body = args.pr_body.read_text(encoding='utf-8') if args.pr_body else ''

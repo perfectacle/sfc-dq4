@@ -1,0 +1,39 @@
+name: CI ROMs
+description: >-
+  Download the age-encrypted ROM bundle from the private asset repository's release,
+  unpack it into rom/ and write the ROM SHA-256 list to $RUNNER_TEMP/rom-hashes.txt
+  (tools/ci_artifact_check.py compares uploads against it). Run from the repository root.
+
+inputs:
+  token:
+    description: Read token for perfectacle/sfc-dq4-assets (secret CI_ROM_TOKEN)
+    required: true
+  age_key:
+    description: age private key for the bundle (secret CI_ROM_AGE_KEY)
+    required: true
+
+outputs:
+  hashes:
+    description: Path of the ROM SHA-256 list
+    value: ${{ steps.unpack.outputs.hashes }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install age and zstd
+      shell: bash
+      run: |
+        if ! command -v age >/dev/null || ! command -v zstd >/dev/null; then
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends age zstd
+        fi
+
+    # Secrets reach the script only through env; the script masks the key line before use.
+    - name: Fetch and decrypt the ROM bundle
+      id: unpack
+      shell: bash
+      env:
+        CI_ROM_TOKEN: ${{ inputs.token }}
+        CI_ROM_AGE_KEY: ${{ inputs.age_key }}
+      run: |
+        tools/ci_gate_setup.sh roms
+        echo "hashes=$RUNNER_TEMP/rom-hashes.txt" >> "$GITHUB_OUTPUT"
