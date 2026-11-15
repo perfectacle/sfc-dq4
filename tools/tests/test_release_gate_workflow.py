@@ -1,6 +1,6 @@
 """배포 관문 워크플로가 시크릿·롬을 내보내지 않는 꼴인지 지킨다.
 
-release-gate.yml(손으로만)이 롬 묶음 시크릿을 guard-shards.yml(workflow_call 전용)에 넘기고, 그 안에서 composite
+release-gate.yml(손으로만)과 cache-warm.yml(예약·손으로, main 만)이 롬 묶음 시크릿을 guard-shards.yml(workflow_call 전용)에 넘기고, 그 안에서 composite
 action ci-roms 가 묶음을 푼다. PR·예약 실행에서 돌거나, 롬이 artifact·캐시로 새거나, 시크릿이 로그에 찍히면 안 된다.
 의존성에 YAML 파서가 없어 들여쓰기로 읽는다(이 저장소 워크플로의 꼴: 잡은 2칸, 단계는 6칸 `- `).
 """
@@ -16,6 +16,7 @@ import ci_cache  # noqa: E402
 
 WORKFLOWS = ROOT / '.github' / 'workflows'
 GATE = WORKFLOWS / 'release-gate.yml'
+WARM = WORKFLOWS / 'cache-warm.yml'
 WORKFLOW = WORKFLOWS / 'guard-shards.yml'
 ACTIONS = ROOT / '.github' / 'actions'
 ACTION = ACTIONS / 'ci-roms' / 'action.yml'
@@ -133,11 +134,12 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
         self.assertEqual(triggers(self.text), {'workflow_call'})
 
     def test_only_known_callers_pass_rom_secrets(self):
-        """guard-shards.yml 을 부르는 워크플로는 release-gate.yml(손으로만)과 ci.yml(pr-guards 잡, 같은 저장소 브랜치 PR
-        만 — test_pr_guards_workflow 가 조건을 지킨다)뿐이고, 시크릿은 이름을 대어 넘긴다(inherit 금지)."""
+        """guard-shards.yml 을 부르는 워크플로는 release-gate.yml(손으로만), cache-warm.yml(CacheWarmWorkflowTest)과
+        ci.yml(pr-guards 잡, 같은 저장소 브랜치 PR 만 — test_pr_guards_workflow 가 조건을 지킨다)뿐이고, 시크릿은 이름을 대어
+        넘긴다(inherit 금지)."""
         callers = sorted(p.name for p in WORKFLOWS.glob('*.y*ml') if 'guard-shards.yml' in p.read_text(encoding='utf-8')
                          and p != WORKFLOW)
-        self.assertEqual(callers, ['ci.yml', 'release-gate.yml'])
+        self.assertEqual(callers, ['cache-warm.yml', 'ci.yml', 'release-gate.yml'])
         gate = GATE.read_text(encoding='utf-8')
         self.assertNotRegex(gate, r'secrets:\s*inherit')
         self.assertRegex(gate, r'uses:\s*\./\.github/workflows/guard-shards\.yml')
@@ -146,12 +148,12 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
         self.assertIn('shards: ${{ fromJSON(inputs.shards) }}', gate)
 
     def test_permissions_read_only(self):
-        for text in (self.text, GATE.read_text(encoding='utf-8')):
+        for text in (self.text, GATE.read_text(encoding='utf-8'), WARM.read_text(encoding='utf-8')):
             self.assertEqual([x.strip() for x in top_block(text, 'permissions') if x.strip()], ['contents: read'])
             self.assertNotRegex(text, r':\s*write\b')
 
     def test_actions_pinned_to_commits(self):
-        for f in (WORKFLOW, GATE, *ALL_ACTIONS):
+        for f in (WORKFLOW, GATE, WARM, *ALL_ACTIONS):
             for m in re.finditer(r'uses:\s*(\S+)', f.read_text(encoding='utf-8')):
                 if m[1].startswith('./.github/'):
                     continue
@@ -322,6 +324,53 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
     def test_banned_suffixes_cover_rom_and_save_kinds(self):
         for ext in ('.sfc', '.smc', '.nes', '.nds', '.ml1', '.sav', '.mss', '.ips'):
             self.assertIn(ext, ci_artifact_check.BANNED)
+
+
+class CacheWarmWorkflowTest(unittest.TestCase):
+    """cache-warm.yml 은 예약·손으로만 돌고 main 에서만 시크릿과 함께 조각 워크플로를 부른다. 판정은 연습(cache 켬)이고,
+    스스로는 올리는 것이 없으며(조각 워크플로 안의 올리기는 위 검사가 지킨다), 평문 캐시에는 데운 커밋 표시만 둔다."""
+
+    def setUp(self):
+        self.text = WARM.read_text(encoding='utf-8')
+        self.steps = jobs(self.text)
+
+    def test_schedule_and_manual_only(self):
+        self.assertEqual(triggers(self.text), {'schedule', 'workflow_dispatch'})
+        on = '\n'.join(top_block(self.text, 'on'))
+        for bad in ('pull_request', 'pull_request_target', 'push', 'workflow_run', 'issue_comment'):
+            self.assertNotRegex(on, rf'\b{bad}\b')
+        self.assertRegex(on, r"cron: '(\d+) \d+ \* \* \*'")
+        self.assertNotRegex(on, r"cron: '0 ", '정각은 예약 실행이 몰려 밀린다')
+
+    def test_secrets_by_name_only_to_the_shards(self):
+        self.assertNotRegex(self.text, r'secrets:\s*inherit')
+        self.assertEqual(sorted(re.findall(r'secrets\.(\w+)', self.text)), ['CI_ROM_AGE_KEY', 'CI_ROM_TOKEN'])
+        warm = re.search(r'^  warm:\n((?:    .*\n|\n)+)', self.text, re.M)[1]
+        self.assertRegex(warm, r'uses:\s*\./\.github/workflows/guard-shards\.yml')
+        self.assertRegex(warm, r'\n      mode: release\n')
+        self.assertRegex(warm, r'\n      cache: true\n')
+        self.assertIn("if: needs.plan.outputs.warm == 'true'", warm)
+        shards = int(re.search(r'\n      shards: (\d+)\n', warm)[1])
+        self.assertLessEqual(shards, 16, '무료 계정 동시 잡 20개 안')
+        for steps in self.steps.values():
+            for s in steps:
+                self.assertNotIn('secrets.', s)
+
+    def test_warms_only_main(self):
+        decide = run_texts(next(s for s in self.steps['plan'] if 'id: decide' in s))
+        self.assertIn('[ "$REF" != refs/heads/main ]', decide)
+        self.assertIn('warm=false', decide)
+
+    def test_shares_the_gate_group_on_main(self):
+        self.assertIn('group: release-gate-${{ inputs.ref }}', GATE.read_text(encoding='utf-8'))
+        self.assertRegex('\n'.join(top_block(self.text, 'concurrency')), r'group: release-gate-main\n\s+cancel-in-progress: false')
+
+    def test_no_uploads_and_plain_cache_holds_only_the_marker(self):
+        self.assertNotIn('upload-artifact', self.text)
+        caches = [s for st in self.steps.values() for s in st if re.search(r'uses:\s*actions/cache(/restore|/save)?@', s)]
+        self.assertEqual(len(caches), 2)
+        for s in caches:
+            self.assertEqual(cache_paths(s), ['work/cache-warm'])
 
 
 if __name__ == '__main__':
