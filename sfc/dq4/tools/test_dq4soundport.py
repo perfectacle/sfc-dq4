@@ -175,6 +175,23 @@ def flat(seq, ticks=100000):
     return port.execution_trace(seq, ticks, peek=True)
 
 
+class SameTraceTests(unittest.TestCase):
+    def test_cache_keeps_only_equal_pairs(self):
+        lines = body(['  note 30 len 0C', '  note 31', '  note 32', '  note 33'] * 5)
+        plain, packed = assemble(lines), assemble(port.compact(lines))
+        other = assemble(body(['  note 30 len 0C', '  note 31', '  note 32'] * 5))
+        with tempfile.TemporaryDirectory() as d:
+            self.assertTrue(port.same_trace(plain, packed, 2000, d))
+            self.assertEqual(len(list((Path(d) / 'trace').rglob('*'))), 2)      # 폴더 하나, 표시 하나
+            with mock.patch.object(port, 'execution_trace', side_effect=AssertionError('다시 돌림')):
+                self.assertTrue(port.same_trace(plain, packed, 2000, d))
+            self.assertFalse(port.same_trace(plain, other, 2000, d))
+            self.assertFalse(port.same_trace(plain, other, 2000, d))
+            self.assertTrue(port.same_trace(plain, packed, 2001, d))             # 틱이 다르면 새로 잼
+            self.assertEqual(len([f for f in (Path(d) / 'trace').rglob('*') if f.is_file()]), 2)
+        self.assertTrue(port.same_trace(plain, packed, 2000))
+
+
 class CompactTests(unittest.TestCase):
     def check(self, lines):
         plain = assemble(lines)

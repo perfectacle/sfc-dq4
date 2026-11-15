@@ -367,6 +367,29 @@ def execution_trace(seq, ticks, peek=False, chain=None):
     return tracks
 
 
+# 검산 결과 캐시 키에 넣는 코드: execution_trace 와 그것이 부르는 dq5song(step·header)
+TRACE_HASH = hashlib.sha256(Path(__file__).read_bytes() + (ROOT / 'sfc/dq5/tools/dq5song.py').read_bytes()).hexdigest()
+
+
+def same_trace(raw, out, ticks, cache_dir=None):
+    """raw 와 out 의 execution_trace(peek=True) 가 같은가. cache_dir 를 주면 같았던 짝을 (코드·바이트·틱) 키의 빈
+    파일로 남겨 다음에는 다시 돌리지 않는다. 달랐던 짝은 남기지 않는다(곧 빌드가 멈추므로)."""
+    if cache_dir is None:
+        return execution_trace(raw, ticks, peek=True) == execution_trace(out, ticks, peek=True)
+    h = hashlib.sha256(TRACE_HASH.encode())
+    for part in (bytes(raw), bytes(out), str(ticks).encode()):
+        h.update(hashlib.sha256(part).digest())
+    key = h.hexdigest()
+    path = Path(cache_dir) / 'trace' / key[:2] / key
+    if path.is_file():
+        return True
+    if execution_trace(raw, ticks, peek=True) != execution_trace(out, ticks, peek=True):
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch()
+    return True
+
+
 def _peeks_rest(seq, pc):
     """15E5~1627: A0~B5·F2·F3 는 1바이트, EC·F6·EB 는 2바이트 건너뛰고 처음 만난 바이트가 00·50 인가."""
     while pc < len(seq):
@@ -652,7 +675,7 @@ def convert(score, *, voices=7, program_map=None, tempo_tolerance=0.012, level_t
         raw = assemble(part)
         part = compact(part, cache_dir)
         out = assemble(part)
-        if execution_trace(raw, end * 2 + 49, peek=True) != execution_trace(out, end * 2 + 49, peek=True):
+        if not same_trace(raw, out, end * 2 + 49, cache_dir):
             raise ValueError('sequence compression changed timed commands or KOF look-ahead')
         if len(out) >= 65536:
             raise ValueError(f'sequence exceeds 16-bit offsets: {len(out)}')
