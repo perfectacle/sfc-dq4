@@ -215,8 +215,11 @@ def people_cases(dq5, dq4):
     prg = ines.prg(Path(dq4).read_bytes())
     _lists, _messages, report = dq4npcport.port(str(dq5), str(dq4))
     cases, skipped = [], []
+    used = {k for ln in pt.LINES for k in ln.talked}
     for (mp, who), rows in sorted(pt.PEOPLE.items()):
         token = f'{mp}:{who}'
+        if token not in used:
+            continue                    # 줄에 쓰이지 않은 인물은 번호 표에 없다
         for r in rows:
             if r['status'] != pt.SURE:
                 continue
@@ -247,9 +250,18 @@ def run_person(mesence, rom, data, base, out, case, seed):
     mp, night = case['map'], case['night']
     t = NIGHT if night else DAY
     clock = f'7E075E={t & 0xFF:02X};7E075F={t >> 8:02X}'
-    r = wc.segment(mesence, rom, base, out / 'warp', ('warp', 'warp', case['to'], {'map': mp, 'poke': HOLD + ';' + clock}),
-                   wc.NO_ENCOUNTERS, cw.join_set(data), '', seed, flags=cw.FLAGS)
     name = f"{case['token']} {mp} {case['cell'][0]},{case['cell'][1]} {'night' if night else 'day'}"
+    state, extra = base, cw.join_set(data)
+    if mp == ch2.THRONE:
+        # 2장 출발 상태가 왕좌의 방이라 같은 맵 순간이동은 도착을 알아채지 못한다. 한 번 다른 맵을 거친다(run_spot 과 같음)
+        hop = cw.HOPS[ch2.THRONE]
+        r = wc.segment(mesence, rom, state, out / 'hop', ('hop', 'warp', hop, {'map': hop[:5], 'poke': HOLD}),
+                       wc.NO_ENCOUNTERS, extra, '', seed, flags=cw.FLAGS)
+        if r['status'] != 'passed':
+            return {'name': name, 'status': 'failed', 'problems': [f"hop: {r.get('problems') or r['status']}"]}
+        state, extra = out / 'hop' / 'end.mss', ''
+    r = wc.segment(mesence, rom, state, out / 'warp', ('warp', 'warp', case['to'], {'map': mp, 'poke': HOLD + ';' + clock}),
+                   wc.NO_ENCOUNTERS, extra, '', seed, flags=cw.FLAGS)
     if r['status'] != 'passed':
         return {'name': name, 'status': 'failed', 'problems': [f"warp: {r.get('problems') or r['status']}"]}
     wram = (out / 'warp' / 'final.wram').read_bytes()
