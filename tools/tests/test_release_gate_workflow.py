@@ -284,7 +284,7 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
         self.assertEqual(with_value(cached[0], 'if'), 'inputs.cache')
         for s in runs:
             self.assertIn('--exclude-needs "$LOCAL_NEEDS"', run_texts(s))
-        self.assertRegex(self.text, r'LOCAL_NEEDS:\s*MESENCE,LIBDIR')
+        self.assertRegex(self.text, r'LOCAL_NEEDS:\s*macos\n')
         build = ''.join(self.jobs['rom'])
         self.assertIn("DQ4_BUILD_CACHE: ${{ inputs.cache && format('{0}/work/cache', github.workspace) || 'off' }}", build)
         for s in self.jobs['rom'] + self.jobs['shard']:

@@ -1,9 +1,10 @@
 name: release-gate
 
-# Every run-time guard (except the MesenCE ones, left to the local release gate) on CI
-# runners. Manual only: it passes the ROM bundle secrets to guard-shards.yml, so it must
-# never run for pull requests or on a schedule (tools/tests/test_release_gate_workflow.py
-# keeps it that way). Format: sfc/dq4/docs/dq4-release-check-format.md
+# Every run-time guard on CI runners (guards whose needs name LOCAL_NEEDS of
+# guard-shards.yml stay with the local release gate). Manual only: it passes the ROM
+# bundle secrets to guard-shards.yml, so it must never run for pull requests or on a
+# schedule (tools/tests/test_release_gate_workflow.py keeps it that way).
+# Format: sfc/dq4/docs/dq4-release-check-format.md
 on:
   workflow_dispatch:
     inputs:

@@ -43,8 +43,8 @@ permissions:
   contents: read
 
 env:
-  # Guards that need MesenCE (macOS app) stay on the local machine for now.
-  LOCAL_NEEDS: MESENCE,LIBDIR
+  # Guards whose needs name this stay on the local machine (results that differ on Linux).
+  LOCAL_NEEDS: macos
 
 jobs:
   build:
@@ -123,7 +123,7 @@ jobs:
           persist-credentials: false
 
       - name: Install cmake
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake libsdl2-2.0-0
 
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
@@ -228,7 +228,7 @@ jobs:
           persist-credentials: false
 
       - name: Install cmake
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake libsdl2-2.0-0
 
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
@@ -333,6 +333,7 @@ jobs:
         if: ${{ !inputs.cache }}
         env:
           DQ4_ASSETS: ${{ github.workspace }}/assets
+          HEADLESS_SLOTS: '4'
           K: ${{ matrix.k }}
           N: ${{ inputs.shards }}
           GUARDS: ${{ inputs.guards }}
