@@ -165,9 +165,16 @@ jobs:
         run: |
           only=()
           if [ -n "$GUARDS" ]; then only=(--only "$GUARDS"); fi
+          pids=()
           for k in $(seq 1 "$SHARDS"); do
-            uv run --frozen python tools/guards.py --all "${only[@]}" --shard "$k/$SHARDS" --exclude-needs "$LOCAL_NEEDS"
+            uv run --frozen python tools/guards.py --all "${only[@]}" --shard "$k/$SHARDS" --exclude-needs "$LOCAL_NEEDS" \
+              >"$RUNNER_TEMP/shard-list-$k.txt" 2>&1 &
+            pids+=("$!")
           done
+          ok=0
+          for pid in "${pids[@]}"; do wait "$pid" || ok=1; done
+          for k in $(seq 1 "$SHARDS"); do cat "$RUNNER_TEMP/shard-list-$k.txt"; done
+          exit "$ok"
 
   shard:
     name: shard ${{ matrix.k }}
