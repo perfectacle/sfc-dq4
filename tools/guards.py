@@ -842,15 +842,16 @@ def split_local(checks, names):
 def record_times(reports, path=SHARD_TIMES):
     """보고서들의 통과한 검사 시간으로 시간 파일을 고쳐 쓴다. 고친 이름 수."""
     times = load_shard_times(path)
-    n = 0
+    n, rows = 0, []
     for report in reports:
         data = json.loads(Path(report).read_text(encoding='utf-8'))
-        rows = data.get('stages', {}).get('guards', {}).get('rows') if 'stages' in data else data.get('rows')
-        for r in rows or []:
-            m = SECONDS.match(r.get('detail', ''))
-            if r.get('status') == 'passed' and m and not r['detail'].startswith('캐시'):
-                times[r['name']] = float(m[1])
-                n += 1
+        rows += (data.get('stages', {}).get('guards', {}).get('rows') if 'stages' in data else data.get('rows')) or []
+    # 하위 조각 행은 조각 결과 파일 여럿에 흩어져 있어 모두 모은 뒤 합친다(검사 하나의 시간 = 하위 조각 합)
+    for r in merge_parts(rows):
+        m = SECONDS.match(r.get('detail', ''))
+        if r.get('status') == 'passed' and m and not r['detail'].startswith('캐시'):
+            times[r['name']] = float(m[1])
+            n += 1
     write_atomic(Path(path), json.dumps(dict(sorted(times.items())), indent=1, ensure_ascii=False) + '\n')
     return n
 

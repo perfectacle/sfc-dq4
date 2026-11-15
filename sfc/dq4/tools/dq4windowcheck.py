@@ -29,6 +29,7 @@
 
   MESENCE=... LIBDIR=... uv run --locked python sfc/dq4/tools/dq4windowcheck.py --rom work/ch1/dq4-ch1.sfc \\
       --symbols wn.sym --symbols-rom 메뉴롬 --out 새폴더
+  --part k/n 은 장면을 n 몫으로 나눠 k 번째만(기본 DQ4_GUARD_PART, CI 가드 하위 조각)
   (wn.sym·메뉴롬은 dq4menupatch.py build 를 DQ4_WINDOWNAME_SYMBOLS 와 함께 돌려 만든다. 창 코드 뱅크가 같은지 본다)
 """
 import argparse
@@ -353,6 +354,8 @@ def main():
     ap.add_argument('--scenes', help='이 이름의 장면만(쉼표로, 이름이 꼭 같아야 함. dq4compatscenes 의 하위 조각)')
     ap.add_argument('--jobs', type=int, default=8)
     ap.add_argument('--every', action='store_true', help='EVERY 장면을 매 프레임 잰다')
+    import dq4shards
+    dq4shards.add_part_arg(ap)
     a = ap.parse_args()
     mesence = os.environ.get('MESENCE')
     if not mesence:
@@ -377,6 +380,8 @@ def main():
         todo = [s for s in todo if s[0] in want]
     if a.every:
         todo = [s[:5] + (sorted(set(s[5]) | set(EVERY[s[0]])),) if s[0] in EVERY else s for s in todo]
+    # 장면마다 출발 상태만 같이 쓰고 따로 돈다. 무게는 덤프하는 프레임 수
+    todo = dq4shards.part_of(todo, a.part, key=lambda s: s[0], weight=lambda s: len(s[5]))
     with ThreadPoolExecutor(a.jobs) as pool:
         infos = list(pool.map(lambda s: run(mesence, libdir, a.rom, rom, out / s[0], s), todo))
     (out / 'readset.json').write_text(json.dumps({s[0]: i for s, i in zip(todo, infos)}, indent=1), encoding='utf-8')

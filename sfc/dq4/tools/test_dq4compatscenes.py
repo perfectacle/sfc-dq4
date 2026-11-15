@@ -162,6 +162,28 @@ class CompatScenes(unittest.TestCase):
             self.assertEqual(cs.window_reached(d, {'a': 1, 'b': 1}, names=['a']), [])
             self.assertEqual(cs.window_reached(d, {'a': 1, 'b': 1}), ['창 장면 b: 돌지 않음'])
 
+    def test_partial_window_needs_probe_file_not_records(self):
+        import tempfile
+        a = SimpleNamespace(rom=Path('/r/full.sfc'), jobs=1, window_rom=Path('/r/ch1.sfc'), symbols=Path('/w/wn.sym'),
+                            symbols_rom=Path('/w/menu.sfc'))
+        for attach, names, want in ((True, ['talk01'], None), (False, ['talk01'], '프로브 기록 파일이 없음'),
+                                    (True, None, '프로브 기록이 없음')):
+            with tempfile.TemporaryDirectory() as tmp:
+                out = Path(tmp)
+
+                def fake(cmd, **kw):
+                    if attach:
+                        (out / 'openbus-window-io.txt').write_text('')
+                    return SimpleNamespace(returncode=0)
+                with mock.patch.object(cs.subprocess, 'run', side_effect=fake), \
+                        mock.patch.object(cs, 'window_reached', return_value=[]):
+                    got = cs.run_scene('window', 'io', a, out, [], names)
+            problems = ' '.join(got['problems'])
+            if want:
+                self.assertIn(want, problems)
+            else:
+                self.assertEqual(got['status'], 'passed', problems)
+
     def test_mesen_wraps_script_only_with_log(self):
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop('DQ4_OPENBUS_LOG', None)
