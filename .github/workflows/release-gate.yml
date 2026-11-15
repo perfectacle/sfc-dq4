@@ -15,12 +15,16 @@ on:
         description: Branch, tag or commit to check
         type: string
         default: main
+      rehearse:
+        description: Use the build, scene and state caches and earlier passes (fast; a rehearsal, not release evidence)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-gate
+  group: release-gate-${{ inputs.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -29,7 +33,8 @@ jobs:
     with:
       ref: ${{ inputs.ref }}
       mode: release
-      shards: ${{ inputs.shards }}
+      cache: ${{ inputs.rehearse }}
+      shards: ${{ fromJSON(inputs.shards) }}
     secrets:
       CI_ROM_TOKEN: ${{ secrets.CI_ROM_TOKEN }}
       CI_ROM_AGE_KEY: ${{ secrets.CI_ROM_AGE_KEY }}

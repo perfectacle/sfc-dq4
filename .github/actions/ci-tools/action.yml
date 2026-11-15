@@ -1,0 +1,60 @@
+name: CI tools
+description: >-
+  asar, Galmuri and the libretro cores for the guard runners (tools/ci_gate_setup.sh tools),
+  each in its own plain actions/cache keyed by its pinned version, so one bump rebuilds only
+  that tool. Each cache is saved right after the setup step, before anything else in the job
+  can fail. These hold no ROM data. Run from the repository root after uv sync.
+
+runs:
+  using: composite
+  steps:
+    - name: Read the tool pins
+      id: pins
+      shell: bash
+      run: tools/ci_gate_setup.sh pins
+
+    - name: Restore asar
+      id: asar
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/gate-tools/asar
+        key: gate-asar-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.asar }}
+
+    - name: Restore the Galmuri download
+      id: galmuri
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/gate-tools/dl
+        key: gate-galmuri-${{ steps.pins.outputs.galmuri }}
+
+    - name: Restore the libretro cores
+      id: cores
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/gate-tools/cores
+        key: gate-cores-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('sfc/dq4/tools/dq4cores.py', 'sfc/dq4/tools/dq4cores-bsnes-romtrace.patch') }}
+
+    - name: Build asar, fetch Galmuri, build libretro cores
+      shell: bash
+      run: tools/ci_gate_setup.sh tools
+
+    - name: Save asar
+      if: steps.asar.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/gate-tools/asar
+        key: ${{ steps.asar.outputs.cache-primary-key }}
+
+    - name: Save the Galmuri download
+      if: steps.galmuri.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/gate-tools/dl
+        key: ${{ steps.galmuri.outputs.cache-primary-key }}
+
+    - name: Save the libretro cores
+      if: steps.cores.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/gate-tools/cores
+        key: ${{ steps.cores.outputs.cache-primary-key }}

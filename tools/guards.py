@@ -205,6 +205,11 @@ def made_paths(run):
     return [m for st in run.split('&&')[:-1] for m in re.findall(r'--out\s+(\S+)', st)]
 
 
+def written_paths(run):
+    """명령이 결과로 쓰는 파일(tee·>·>>·--report·--json 뒤). 입력 키에 넣으면 도는 사이 생기거나 바뀌어 통과를 남기지 못한다."""
+    return re.findall(r'(?:\btee(?:\s+-a)?|>>?|--report|--json)\s+(?:\$PWD/)?(work/[^\s;&|)]+)', run)
+
+
 def under(path, base):
     p, b = PurePosixPath(path).parts, PurePosixPath(base).parts
     return p[:len(b)] == b
@@ -254,7 +259,9 @@ def hash_path(h, path):
         else:
             h.update(hashlib.sha1(path.read_bytes()).digest())
     elif path.is_dir():
-        for f in sorted(p for p in path.rglob('*') if p.is_file()):
+        # 자원 저장소 같은 체크아웃의 .git 은 내용이 작업 트리 파일과 겹치고, git 명령이 index 를 고쳐 쓰거나 새로 받을
+        # 때마다 시각이 바뀐다
+        for f in sorted(p for p in path.rglob('*') if p.is_file() and '.git' not in p.relative_to(path).parts):
             rel = f.relative_to(path)
             # 폴더 안 cache/ 는 빌드가 같은 내용으로 다시 써 mtime 만 바뀌므로 내용으로 본다
             if 'cache' in rel.parts[:-1] and f.stat().st_size <= BIG_FILE:
@@ -352,7 +359,7 @@ def input_key(check, root=ROOT, environ=os.environ, built=False):
                 return None
             h.update(b'mesence-settings:' + digest.encode())
     hash_path(h, root / 'rom')
-    made = made_paths(run) + out_dirs(run)
+    made = made_paths(run) + out_dirs(run) + written_paths(run)
     for tok in sorted(set(re.findall(r'(?<![\w/])(?:\$PWD/)?(work/\S+|rom/\S+)', run))):
         if not any(under(tok, d) for d in made):
             h.update(tok.encode())
@@ -743,9 +750,9 @@ def record_times(reports, path=SHARD_TIMES):
     return n
 
 
-def result_json(done, local, shard=None):
-    """--json 결과: 커밋, 조각, 돈 검사의 결과, 로컬 몫(뺀 검사)."""
-    return {'commit': git('rev-parse', 'HEAD').strip(), 'shard': list(shard) if shard else None,
+def result_json(done, local, shard=None, cached=False):
+    """--json 결과: 커밋, 조각, 캐시를 썼는가, 돈 검사의 결과, 로컬 몫(뺀 검사)."""
+    return {'commit': git('rev-parse', 'HEAD').strip(), 'shard': list(shard) if shard else None, 'cached': cached,
             'rows': [{'name': c['name'], 'file': c['file'], 'status': s, 'detail': d} for c, s, d in done],
             'local': [{'name': c['name'], 'file': c['file'], 'needs': c.get('needs', [])} for c in local]}
 
@@ -754,7 +761,8 @@ def run_all(hit, parallel, timeout, no_cache=False, out=None, local=(), shard=No
     """걸린 검사를 parallel 개씩 함께 돌리고 본문 결과 줄을 찍는다. out 이 있으면 결과를 JSON 으로. 모두 통과하면 0."""
     done = run_many(hit, parallel, timeout, no_cache)
     if out:
-        write_atomic(Path(out), json.dumps(result_json(done, local, shard), ensure_ascii=False, indent=1) + '\n')
+        write_atomic(Path(out), json.dumps(result_json(done, local, shard, not no_cache), ensure_ascii=False, indent=1)
+                     + '\n')
     print('\nPR 본문 결과 줄:')
     for c, status, detail in done:
         mark, word = ('x', '통과') if status == 'passed' else (' ', '실패' if status == 'failed' else '돌리지 않음')

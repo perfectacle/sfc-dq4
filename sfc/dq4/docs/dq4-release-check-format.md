@@ -102,21 +102,41 @@ uv run --locked python sfc/dq4/tools/dq4publish.py release --report work/release
 
 ## CI 에서 돌리기
 
-MesenCE 가 필요 없는 실행 검사는 GitHub 러너에서 나눠 돈다. 사람이 `gh workflow run release-gate.yml [-f shards=N] [-f ref=REF]` 로 부를 때만 돈다.
+MesenCE 가 필요 없는 실행 검사는 GitHub 러너에서 나눠 돈다. 사람이 `gh workflow run release-gate.yml [-f shards=N] [-f ref=REF] [-f rehearse=true]` 로 부를 때만 돈다.
 
 | 파일 | 하는 일 |
 | --- | --- |
-| `.github/workflows/release-gate.yml` | `workflow_dispatch` 만. 롬 시크릿을 이름을 대어 `guard-shards.yml` 에 넘긴다(`mode: release`) |
-| `.github/workflows/guard-shards.yml` | `workflow_call` 만. 입력 `ref`·`mode`(`release` 모든 검사, `pr` 은 `guards` 목록만)·`guards`·`shards`. `build`(롬 풀기·출하 롬 빌드·조각 목록) → `shard` 행렬(`guards.py --all --run --no-cache --shard k/N --exclude-needs MESENCE,LIBDIR --json`) → `report`(`release_check.py --ci-summary`, 실행 요약에 표) |
+| `.github/workflows/release-gate.yml` | `workflow_dispatch` 만. 롬 시크릿을 이름을 대어 `guard-shards.yml` 에 넘긴다(`mode: release`, `cache` 는 입력 `rehearse`, 기본 false) |
+| `.github/workflows/guard-shards.yml` | `workflow_call` 만. 입력 `ref`·`mode`(`release` 모든 검사, `pr` 은 `guards` 목록만)·`guards`·`shards`·`cache`(기본 false). `build`(롬 풀기·출하 롬 빌드 한 번·조각 목록) → `shard` 행렬(빌드 잡의 출하 롬을 받아 `guards.py --all --run [--no-cache] --shard k/N --exclude-needs MESENCE,LIBDIR --json`) → `report`(`release_check.py --ci-summary`, 실행 요약에 표, 통과 기록 캐시 저장) |
 | `.github/actions/ci-roms` | composite action. 프라이빗 에셋 저장소 릴리스 `ci-roms-v1` 의 age 암호화 묶음(`dq5.sfc dq6.sfc dq4.nes dq4-rev0.nes dq4ds.nds dq4ds-kr.nds dq4ds-kr.ml1 dq4ds-kr.sav`)을 `rom/` 에 풀고 롬 SHA-256 목록을 `$RUNNER_TEMP/rom-hashes.txt` 에 |
-| `tools/ci_gate_setup.sh tools` | asar·Galmuri·libretro 코어를 `$RUNNER_TEMP/gate-tools` 에 두고 `ASAR`·`DQ4_GALMURI`·`DQ4_CORES` 를 잡 환경에 |
+| `.github/actions/ci-tools` | `tools/ci_gate_setup.sh tools` 를 부르고 asar·Galmuri zip·libretro 코어를 저마다 평문 캐시에(키: asar 커밋, zip SHA-256, `dq4cores.py`·bsnes 패치 해시). 셋업 바로 뒤에 저장해 잡이 뒤에서 실패해도 남는다 |
+| `tools/ci_gate_setup.sh tools`·`pins` | asar·Galmuri·libretro 코어를 `$RUNNER_TEMP/gate-tools` 에 두고 `ASAR`·`DQ4_GALMURI`·`DQ4_CORES` 를 잡 환경에. `pins` 는 캐시 키에 쓸 고정 판을 `$GITHUB_OUTPUT` 에 |
+| `.github/actions/enc-cache` | 롬에서 나온 바이트를 담는 폴더의 캐시. 입력 `op`(`restore`·`save`)·`name`·`prefix`·`dir`·`age_key`·`exclude`·`max_mb`. 폴더를 tar+zstd 로 묶어 `CI_ROM_AGE_KEY` 의 공개 키로 암호화한 파일 하나만 캐시에 둔다. 키는 `<prefix>-<내용 해시>`, 되살리기는 그 접두어의 가장 새 키. 이 잡에서 되살린 키와 내용이 같으면 저장하지 않는다 |
+| `.github/actions/ship-cache` | 출하 롬 빌드 단계마다 enc-cache 하나(`tools/ci_cache.py` 의 `SHIP_LABELS`: `titlelayers chapter1-messages titlelayerpatch overture-build menupatch-build chapter1-build other`). 한 단계가 바뀌어도 나머지 묶음은 맞는다 |
+| `tools/ci_cache.py` | `unpack`·`pack`(enc-cache 의 몸통), `prune --dir D --since FILE`(이 잡에서 쓰지 않은 빌드 단계 칸 지우기), `ship-build --out work/ch1 --chunks DIR`(`dq4build.py` 를 돌리고 쓴 `dq4buildcache` 칸을 단계별로 복사) |
 | `tools/ci_artifact_check.py DIR --hashes FILE` | 올리기 바로 앞. 롬·세이브·패치 확장자(`.sfc .smc .nes .nds .ml1 .sav .mss .ips .srm .state`), 심볼릭 링크, 롬 해시와 같은 내용, 8MB 넘는 파일이 있으면 1. 실패하면 올리지 않는다 |
 
 - 시크릿: `CI_ROM_TOKEN`(에셋 저장소 읽기), `CI_ROM_AGE_KEY`(age 개인 키). 키 줄은 `::add-mask::` 로 가린다.
-- artifact 는 조각 결과 JSON 과 검사 로그뿐이다. `actions/cache` 는 asar·코어 빌드(`$RUNNER_TEMP/gate-tools`)만 담는다.
+- artifact 는 조각 결과 JSON, 검사 로그, 검사 통과 기록(`work/cache/guards`, 입력 키와 시간)뿐이다.
+
+### CI 캐시
+
+퍼블릭 저장소라 포크 PR 워크플로도 기본 브랜치 캐시를 읽는다. 롬과 무관한 것만 평문 `actions/cache` 에 두고, 롬에서 나온 바이트는 enc-cache 로만 둔다.
+
+| 캐시 | 담는 곳 | 키 | 언제 |
+| --- | --- | --- | --- |
+| asar·Galmuri zip·libretro 코어 | 평문(`$RUNNER_TEMP/gate-tools/…`) | 고정 판 | 늘 |
+| 사운드 변환(`assets/sfc/dq4/cache/sound`) | enc-cache `ship-sound` | 내용 해시 | 늘(로컬 관문도 에셋 저장소의 이 캐시를 쓴다) |
+| 출하 롬 | enc-cache `ship-rom-<run_id>-<attempt>` | 이 실행만 | 늘. 빌드 잡이 한 번 빌드하고 조각은 받아 쓴다 |
+| 출하 롬 빌드 단계(`dq4buildcache` 칸) | ship-cache, 단계마다 하나 | 내용 해시 | `cache` 일 때만 |
+| 조각의 장면·상태·검사 빌드 칸(`work/cache` 의 `readset`·`states`·`calls`) | enc-cache `guard-state-<mode>-<k>of<N>`, 1500MB 넘으면 저장 안 함 | 내용 해시 | `cache` 일 때만 |
+| 검사 통과 기록(`work/cache/guards`) | 평문 `guard-results-<run_id>-<attempt>`, report 잡이 조각들 것을 합쳐 저장 | 실행 | 저장은 늘, 쓰기는 `cache` 일 때만 |
+
+- 관문(`cache` false)은 위 「캐시를 쓰지 않는다」 를 지킨다: 빌드 단계·장면·상태 캐시와 통과 기록을 쓰지 않는다. 같은 실행 안에서 출하 롬을 한 번만 빌드해 나눠 쓰는 것은 상태 캐시를 그 실행 안에서만 다시 쓰는 것과 같은 규칙이다.
+- `rehearse=true` 는 모든 캐시를 쓴다. 조각 결과 JSON 에 `"cached": true` 가 붙고 요약 판정은 「연습 통과」, `release_check.py --ci-report` 는 `--rehearse` 와 함께가 아니면 받지 않는다.
 - 조각은 `tools/guardshard-times.json`(검사마다 지난 시간)으로 고르게 나눈다. `guards.py --record-times 보고서…` 로 고쳐 쓴다.
 - 로컬에서 마무리: 조각 artifact 를 받은 폴더로 `release_check.py --ci-report DIR` 를 돌리면 guards 단계는 CI 결과(같은 커밋, 조각이 모두 있어야 함)를 쓰고 로컬 몫만 돈다.
-- `tools/tests/test_release_gate_workflow.py` 가 지킨다: 관문은 `workflow_dispatch` 만(`pull_request`·`pull_request_target`·`schedule` 금지), 조각 워크플로는 `workflow_call` 만이고 부르는 곳은 관문뿐, 올리기 앞 검사 단계, 캐시 경로, 시크릿을 찍는 줄 없음.
+- `tools/tests/test_release_gate_workflow.py` 가 지킨다: 관문은 `workflow_dispatch` 만(`pull_request`·`pull_request_target`·`schedule` 금지), 조각 워크플로는 `workflow_call` 만이고 부르는 곳은 관문뿐, 올리기 앞 검사 단계, 평문 캐시 경로(도구·통과 기록만), 롬 파생 폴더는 enc-cache·ship-cache 로만, ship-cache 단계 목록 = `SHIP_LABELS`, 관문은 `rehearse` 일 때만 캐시, 시크릿을 찍는 줄 없음.
 
 ## 남은 것
 
