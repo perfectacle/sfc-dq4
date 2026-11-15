@@ -873,7 +873,7 @@ _SIGN_TO_WALL_BANK = {1: 1, 2: 13, 3: 13, 4: 14, 5: 14, 6: 15, 7: 15, 8: 8, 9: 9
 
 def _on_wall_bank(image):
     out = image.copy()
-    out.putdata([2 * 16 + _SIGN_TO_WALL_BANK[v & 15] if v >> 4 == 4 else v for v in image.getdata()])
+    out.putdata([2 * 16 + _SIGN_TO_WALL_BANK[v & 15] if v >> 4 == 4 else v for v in image.get_flattened_data()])
     return out
 
 

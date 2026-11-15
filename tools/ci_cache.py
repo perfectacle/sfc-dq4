@@ -13,10 +13,14 @@ ship-cache)이 부른다. 형식: sfc/dq4/docs/dq4-release-check-format.md 「CI
   python tools/ci_cache.py prune --dir D --since FILE      D 바로 아래에서 FILE 보다 오래된 칸을 지움
   python tools/ci_cache.py ship-build --out work/ch1 --chunks DIR [dq4build 인자…]
                                                            dq4build.py 를 돌리고, 쓴 빌드 단계 캐시 칸을 단계 이름별로
-                                                           DIR/<단계>/<칸> 에 복사(단계 하나가 바뀌어도 나머지 묶음은 그대로)
+                                                           DIR/<단계>/<칸> 에 복사(단계 하나가 바뀌어도 나머지 묶음은 그대로),
+                                                           단계 시간([stage])을 찍고 미리 만든 빌드 표시를 남김
+  python tools/ci_cache.py prebuilt --out DIR [dq4build 인자…]
+                                                           DQ4_PREBUILT 의 같은 빌드를 복사, 없으면 dq4build.py
 """
 import argparse
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -25,6 +29,8 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
+import types
 
 ROOT = Path(__file__).resolve().parents[1]
 DQ4_TOOLS = ROOT / 'sfc' / 'dq4' / 'tools'
@@ -159,8 +165,30 @@ def label(tool, args):
     return name if name in SHIP_LABELS else 'other'
 
 
+FINAL_ROMS = ('dq4-ch1-full.sfc', 'dq4-ch1-sound.sfc', 'dq4-ch1.sfc')
+MANIFEST = '.prebuilt.json'
+# 빌드가 읽는 롬. 미리 만든 빌드는 이 롬들이 같을 때만 쓴다
+BUILD_ROMS = ('dq5.sfc', 'dq4.nes')
+
+
+def head_commit():
+    return subprocess.run(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], capture_output=True, text=True,
+                          check=True).stdout.strip()
+
+
+def rom_digests():
+    out = {}
+    for name in BUILD_ROMS:
+        f = ROOT / 'rom' / name
+        if f.is_file():
+            with f.open('rb') as fh:
+                out[name] = hashlib.file_digest(fh, 'sha256').hexdigest()
+    return out
+
+
 def ship_build(out, chunks, extra):
-    """dq4build.main 을 이 프로세스에서 돌리며 dq4buildcache.run 이 쓴 칸을 적어 두었다가 단계별로 복사한다."""
+    """dq4build.main 을 이 프로세스에서 돌리며 단계마다 걸린 시간을 찍고, dq4buildcache.run 이 쓴 칸을 단계별로
+    복사하고, 미리 만든 빌드 표시(out/.prebuilt.json: 커밋·인자·롬 해시)를 남긴다."""
     sys.path.insert(0, str(DQ4_TOOLS))
     import dq4buildcache
     import dq4build
@@ -168,19 +196,40 @@ def ship_build(out, chunks, extra):
     original = dq4buildcache.run
 
     def run(tool, *args, **kw):
-        result = original(tool, *args, **kw)
+        strs = [str(a) for a in args]
+        name = label(tool, strs)
+        key = None
         if dq4buildcache.cache_dir() is not None:
-            key, _ = dq4buildcache._key(Path(tool).resolve(), [str(a) for a in args])
-            if key:
-                with lock:
-                    used.append((label(tool, [str(a) for a in args]), key))
+            key, _ = dq4buildcache._key(Path(tool).resolve(), strs)
+        hit = bool(key) and (dq4buildcache.cache_dir() / key).is_dir()
+        t0 = time.monotonic()
+        result = original(tool, *args, **kw)
+        print(f'[stage] {Path(tool).stem} {strs[0] if strs and not strs[0].startswith("-") else ""} '
+              f'{time.monotonic() - t0:.1f}s {"hit" if hit else "miss"}', flush=True)
+        if key:
+            with lock:
+                used.append((name, key))
         return result
+
+    def timed(cmd, *args, **kw):
+        t0 = time.monotonic()
+        try:
+            return subprocess.run(cmd, *args, **kw)
+        finally:
+            print(f'[stage] {Path(str(cmd[1])).stem} {time.monotonic() - t0:.1f}s', flush=True)
     dq4buildcache.run = run
+    dq4build.subprocess = types.SimpleNamespace(run=timed, DEVNULL=subprocess.DEVNULL)
     sys.argv = ['dq4build.py', '--out', str(out), *extra]
+    t0 = time.monotonic()
     try:
         dq4build.main()
     finally:
         dq4buildcache.run = original
+        dq4build.subprocess = subprocess
+    print(f'[stage] total {time.monotonic() - t0:.1f}s', flush=True)
+    rom = next(n for n in FINAL_ROMS if (Path(out) / n).is_file())
+    (Path(out) / MANIFEST).write_text(json.dumps({'commit': head_commit(), 'args': list(extra), 'rom': rom,
+                                                  'roms': rom_digests()}), encoding='utf-8')
     cache = dq4buildcache.cache_dir()
     if cache is None:
         return
@@ -189,6 +238,29 @@ def ship_build(out, chunks, extra):
         if (cache / key).is_dir():
             shutil.copytree(cache / key, Path(chunks) / name / key, dirs_exist_ok=True)
     print('빌드 단계 칸: ' + ', '.join(f'{n}={k[:12]}' for n, k in used))
+
+
+def prebuilt(out, extra):
+    """dq4build.py --out OUT [인자] 대신. DQ4_PREBUILT(폴더 목록, os.pathsep) 가운데 같은 커밋·인자·롬으로 ship-build 가
+    만든 폴더가 있으면 OUT 에 복사하고 dq4build 와 같은 끝 줄을 찍는다. 없으면 dq4build.py 를 그대로 돌린다."""
+    want = {'commit': head_commit(), 'args': list(extra), 'roms': rom_digests()}
+    for d in filter(None, os.environ.get('DQ4_PREBUILT', '').split(os.pathsep)):
+        try:
+            got = json.loads((Path(d) / MANIFEST).read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            continue
+        if {k: got.get(k) for k in want} != want:
+            continue
+        out = Path(out)
+        if out.resolve() != Path(d).resolve():
+            shutil.rmtree(out, ignore_errors=True)
+            shutil.copytree(d, out, ignore=shutil.ignore_patterns(MANIFEST))
+        rom = out / got['rom']
+        print(f'[prebuilt] {d} → {out}', file=sys.stderr)
+        print(f'{rom} sha1={hashlib.sha1(rom.read_bytes()).hexdigest()}')
+        return 0
+    print('[prebuilt] 맞는 미리 만든 빌드가 없어 dq4build.py 를 돌림', file=sys.stderr)
+    return subprocess.run([sys.executable, str(DQ4_TOOLS / 'dq4build.py'), '--out', str(out), *extra]).returncode
 
 
 def main():
@@ -210,8 +282,10 @@ def main():
     p = sub.add_parser('ship-build')
     p.add_argument('--out', required=True)
     p.add_argument('--chunks', required=True)
+    p = sub.add_parser('prebuilt')
+    p.add_argument('--out', required=True)
     a, extra = ap.parse_known_args()
-    if a.cmd != 'ship-build' and extra:
+    if a.cmd not in ('ship-build', 'prebuilt') and extra:
         ap.error(f'모르는 인자 {extra}')
     if not re.fullmatch(r'[\w.-]+', getattr(a, 'name', 'x')):
         ap.error('--name 은 글자·숫자·.-_ 만')
@@ -221,6 +295,8 @@ def main():
         pack(a.name, a.dir, a.prefix, a.max_mb, tuple(x for x in a.exclude.split(',') if x))
     elif a.cmd == 'prune':
         prune(a.dir, a.since)
+    elif a.cmd == 'prebuilt':
+        sys.exit(prebuilt(a.out, extra))
     else:
         ship_build(a.out, a.chunks, extra)
 

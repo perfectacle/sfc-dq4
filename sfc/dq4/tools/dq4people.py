@@ -734,7 +734,7 @@ def rgb_frames(person, assets, outlined=True):
     if person.recolor:
         for cells in out.values():
             for c in cells:
-                c.putdata([(*person.recolor.get(px[:3], px[:3]), px[3]) for px in c.getdata()])
+                c.putdata([(*person.recolor.get(px[:3], px[:3]), px[3]) for px in c.get_flattened_data()])
     for name, edits in person.touch.items():
         for c in out[name]:
             for x, y, what in edits:

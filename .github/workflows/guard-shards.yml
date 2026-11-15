@@ -76,6 +76,52 @@ jobs:
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "shards=$(seq -s, 1 "$SHARDS" | sed 's/^/[/; s/$/]/')" >> "$GITHUB_OUTPUT"
 
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: 0.13.1
+          enable-cache: true
+
+      - run: uv sync --locked
+
+      - name: List the shards
+        env:
+          SHARDS: ${{ inputs.shards }}
+          GUARDS: ${{ inputs.guards }}
+        run: |
+          only=()
+          if [ -n "$GUARDS" ]; then only=(--only "$GUARDS"); fi
+          pids=()
+          for k in $(seq 1 "$SHARDS"); do
+            uv run --frozen python tools/guards.py --all "${only[@]}" --shard "$k/$SHARDS" --exclude-needs "$LOCAL_NEEDS" \
+              >"$RUNNER_TEMP/shard-list-$k.txt" 2>&1 &
+            pids+=("$!")
+          done
+          ok=0
+          for pid in "${pids[@]}"; do wait "$pid" || ok=1; done
+          for k in $(seq 1 "$SHARDS"); do cat "$RUNNER_TEMP/shard-list-$k.txt"; done
+          exit "$ok"
+
+  # The ship ROMs the guards build (dq4build.py --out work/ch1 and --out work/ch2 --chapter2),
+  # each built once in parallel; shards copy them in place of every guard's own build.
+  rom:
+    name: ship ROM ${{ matrix.variant }}
+    needs: build
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: ch1
+            args: ''
+          - variant: ch2
+            args: --chapter2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.build.outputs.sha }}
+          persist-credentials: false
+
       - name: Install cmake
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake
 
@@ -111,7 +157,7 @@ jobs:
         with:
           op: restore
           name: sound
-          prefix: ship-sound
+          prefix: ship-sound-${{ matrix.variant }}
           dir: assets/sfc/dq4/cache/sound
           age_key: ${{ secrets.CI_ROM_AGE_KEY }}
 
@@ -120,6 +166,7 @@ jobs:
         uses: ./.github/actions/ship-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
         with:
           op: restore
+          variant: ${{ matrix.variant }}
           calls: work/cache/calls
           age_key: ${{ secrets.CI_ROM_AGE_KEY }}
 
@@ -128,13 +175,19 @@ jobs:
           DQ4_ASSETS: ${{ github.workspace }}/assets
           DQ4_READSET: 'off'
           DQ4_BUILD_CACHE: ${{ inputs.cache && format('{0}/work/cache', github.workspace) || 'off' }}
-        run: uv run --frozen python tools/ci_cache.py ship-build --out work/ch1 --chunks "$RUNNER_TEMP/ship-chunks"
+          VARIANT: ${{ matrix.variant }}
+          ARGS: ${{ matrix.args }}
+        run: |
+          args=()
+          if [ -n "$ARGS" ]; then args=("$ARGS"); fi
+          uv run --frozen python tools/ci_cache.py ship-build --out "work/$VARIANT" --chunks "$RUNNER_TEMP/ship-chunks" "${args[@]}"
 
       - name: Save the ship ROM stage caches
         if: inputs.cache
         uses: ./.github/actions/ship-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
         with:
           op: save
+          variant: ${{ matrix.variant }}
           calls: work/cache/calls
           chunks: ${{ runner.temp }}/ship-chunks
           age_key: ${{ secrets.CI_ROM_AGE_KEY }}
@@ -144,7 +197,7 @@ jobs:
         with:
           op: save
           name: sound
-          prefix: ship-sound
+          prefix: ship-sound-${{ matrix.variant }}
           dir: assets/sfc/dq4/cache/sound
           age_key: ${{ secrets.CI_ROM_AGE_KEY }}
 
@@ -154,32 +207,14 @@ jobs:
         uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
         with:
           op: save
-          name: ship-rom
-          prefix: ship-rom-${{ github.run_id }}
-          dir: work/ch1
+          name: ship-rom-${{ matrix.variant }}
+          prefix: ship-rom-${{ matrix.variant }}-${{ github.run_id }}
+          dir: work/${{ matrix.variant }}
           age_key: ${{ secrets.CI_ROM_AGE_KEY }}
-
-      - name: List the shards
-        env:
-          SHARDS: ${{ inputs.shards }}
-          GUARDS: ${{ inputs.guards }}
-        run: |
-          only=()
-          if [ -n "$GUARDS" ]; then only=(--only "$GUARDS"); fi
-          pids=()
-          for k in $(seq 1 "$SHARDS"); do
-            uv run --frozen python tools/guards.py --all "${only[@]}" --shard "$k/$SHARDS" --exclude-needs "$LOCAL_NEEDS" \
-              >"$RUNNER_TEMP/shard-list-$k.txt" 2>&1 &
-            pids+=("$!")
-          done
-          ok=0
-          for pid in "${pids[@]}"; do wait "$pid" || ok=1; done
-          for k in $(seq 1 "$SHARDS"); do cat "$RUNNER_TEMP/shard-list-$k.txt"; done
-          exit "$ok"
 
   shard:
     name: shard ${{ matrix.k }}
-    needs: build
+    needs: [build, rom]
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 120
     strategy:
@@ -220,26 +255,40 @@ jobs:
           token: ${{ secrets.CI_ROM_TOKEN }}
           age_key: ${{ secrets.CI_ROM_AGE_KEY }}
 
-      # Some guards read work/ch1 without building it (the local checkout keeps one).
-      - name: Restore the ship ROM built for this run
-        id: shiprom
+      - name: Restore the ch1 ship ROM built for this run
         uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
         with:
           op: restore
-          name: ship-rom
-          prefix: ship-rom-${{ github.run_id }}
-          dir: work/ch1
+          name: ship-rom-ch1
+          prefix: ship-rom-ch1-${{ github.run_id }}
+          dir: work/ci-prebuilt/ch1
           age_key: ${{ secrets.CI_ROM_AGE_KEY }}
 
-      - name: Check the ship ROM
-        run: test -s work/ch1/dq4-ch1-full.sfc || { echo "::error::build job's ship ROM was not restored"; exit 1; }
+      - name: Restore the ch2 ship ROM built for this run
+        uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+        with:
+          op: restore
+          name: ship-rom-ch2
+          prefix: ship-rom-ch2-${{ github.run_id }}
+          dir: work/ci-prebuilt/ch2
+          age_key: ${{ secrets.CI_ROM_AGE_KEY }}
+
+      # Some guards read work/ch1 or work/ch2 without building it (the local checkout keeps them);
+      # the others' dq4build.py calls become copies of these (DQ4_PREBUILT, guards.with_prebuilt).
+      - name: Put the ship ROMs in place
+        run: |
+          for v in ch1 ch2; do
+            test -s "work/ci-prebuilt/$v/.prebuilt.json" || { echo "::error::rom job's $v build was not restored"; exit 1; }
+            rm -rf "work/$v" && cp -R "work/ci-prebuilt/$v" "work/$v"
+          done
+          echo "DQ4_PREBUILT=$PWD/work/ci-prebuilt/ch1:$PWD/work/ci-prebuilt/ch2" >> "$GITHUB_ENV"
 
       - name: Restore the sound conversion cache
         uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
         with:
           op: restore
           name: sound
-          prefix: ship-sound
+          prefix: ship-sound-ch2
           dir: assets/sfc/dq4/cache/sound
           age_key: ${{ secrets.CI_ROM_AGE_KEY }}
 
@@ -254,14 +303,6 @@ jobs:
           name: guard-state
           prefix: guard-state-${{ inputs.mode }}-${{ matrix.k }}of${{ inputs.shards }}
           dir: work/cache
-          age_key: ${{ secrets.CI_ROM_AGE_KEY }}
-
-      - name: Restore the ship ROM stage caches
-        if: inputs.cache
-        uses: ./.github/actions/ship-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
-        with:
-          op: restore
-          calls: work/cache/calls
           age_key: ${{ secrets.CI_ROM_AGE_KEY }}
 
       # Pass records (input key, time) only, no ROM data, so a plain cache. The report job saves them.
@@ -318,17 +359,6 @@ jobs:
           max_mb: '1500'
           age_key: ${{ secrets.CI_ROM_AGE_KEY }}
 
-      - name: Save the sound conversion cache
-        if: ${{ !cancelled() }}
-        uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
-        with:
-          op: save
-          name: sound
-          prefix: ship-sound
-          dir: assets/sfc/dq4/cache/sound
-          age_key: ${{ secrets.CI_ROM_AGE_KEY }}
-
-      # Only the verdict JSON and the guard logs leave the runner.
       - name: Collect results
         if: always()
         env:
@@ -397,7 +427,7 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: work/cache/guards
-          key: guard-results-${{ github.run_id }}-${{ github.run_attempt }}
+          key: guard-results-${{ github.run_id }}
 
       - name: Summarize the shards
         run: |
